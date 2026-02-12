@@ -4,6 +4,7 @@
 const nextConfig = {
   output: 'standalone',
   reactStrictMode: false,
+  serverExternalPackages: ['better-sqlite3'],
 
   // Uncoment to add domain whitelist
   images: {

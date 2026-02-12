@@ -1,8 +1,11 @@
 # ---- 第 1 阶段：安装依赖 ----
 FROM node:20-alpine AS deps
 
-# 启用 corepack 并激活 pnpm（Node20 默认提供 corepack）
-RUN corepack enable && corepack prepare pnpm@latest --activate
+# better-sqlite3 等原生 addon 在 arm64/musl 上无预编译二进制，需 node-gyp 编译
+RUN apk add --no-cache python3 make g++
+
+# 启用 corepack 并激活 pnpm（版本与 package.json packageManager 字段一致）
+RUN corepack enable && corepack prepare pnpm@10.14.0 --activate
 
 WORKDIR /app
 
@@ -14,7 +17,7 @@ RUN pnpm install --frozen-lockfile
 
 # ---- 第 2 阶段：构建项目 ----
 FROM node:20-alpine AS builder
-RUN corepack enable && corepack prepare pnpm@latest --activate
+RUN corepack enable && corepack prepare pnpm@10.14.0 --activate
 WORKDIR /app
 
 # 复制依赖

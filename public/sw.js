@@ -355,11 +355,11 @@ define(['./workbox-e9849328'], function (e) {
           revision: '7e7d96b1e6991756',
         },
         {
-          url: '/_next/static/hzGJJAq9oF5G7fa5upPg-/_buildManifest.js',
+          url: '/_next/static/fTCcbfp54BwIpq33P7WPH/_buildManifest.js',
           revision: '18ab151e2fb5b7653af26eaf785ffed2',
         },
         {
-          url: '/_next/static/hzGJJAq9oF5G7fa5upPg-/_ssgManifest.js',
+          url: '/_next/static/fTCcbfp54BwIpq33P7WPH/_ssgManifest.js',
           revision: 'b6652df95db52feb4daf4eca35380933',
         },
         {
