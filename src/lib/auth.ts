@@ -41,6 +41,26 @@ export function getAuthInfoFromBrowserCookie(): AuthMetaPayload | null {
   }
 
   try {
+    const parseCookieJson = <T>(value: string): T | null => {
+      try {
+        return JSON.parse(value) as T;
+      } catch (_) {
+        // continue fallback decoding
+      }
+
+      try {
+        return JSON.parse(decodeURIComponent(value)) as T;
+      } catch (_) {
+        // continue fallback decoding
+      }
+
+      try {
+        return JSON.parse(decodeURIComponent(decodeURIComponent(value))) as T;
+      } catch (_) {
+        return null;
+      }
+    };
+
     // 解析 document.cookie
     const cookies = document.cookie.split(';').reduce(
       (acc, cookie) => {
@@ -62,9 +82,10 @@ export function getAuthInfoFromBrowserCookie(): AuthMetaPayload | null {
 
     const authMetaCookie = cookies['auth_meta'];
     if (authMetaCookie) {
-      const decodedMeta = decodeURIComponent(authMetaCookie);
-      const authMeta = JSON.parse(decodedMeta) as AuthMetaPayload;
-      return authMeta;
+      const authMeta = parseCookieJson<AuthMetaPayload>(authMetaCookie);
+      if (authMeta) {
+        return authMeta;
+      }
     }
 
     const authCookie = cookies['auth'];
@@ -72,15 +93,11 @@ export function getAuthInfoFromBrowserCookie(): AuthMetaPayload | null {
       return null;
     }
 
-    // 处理可能的双重编码
-    let decoded = decodeURIComponent(authCookie);
-
-    // 如果解码后仍然包含 %，说明是双重编码，需要再次解码
-    if (decoded.includes('%')) {
-      decoded = decodeURIComponent(decoded);
+    const authData = parseCookieJson<AuthCookiePayload>(authCookie);
+    if (!authData) {
+      return null;
     }
 
-    const authData = JSON.parse(decoded) as AuthCookiePayload;
     return {
       username: authData.username,
       role: authData.role,
