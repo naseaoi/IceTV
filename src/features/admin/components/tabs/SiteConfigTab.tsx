@@ -175,364 +175,352 @@ const SiteConfigComponent = ({
 
   return (
     <div className='space-y-6'>
-      {/* 站点名称 */}
-      <div>
-        <label className='block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2'>
-          站点名称
-        </label>
-        <input
-          type='text'
-          value={siteSettings.SiteName}
-          onChange={(e) =>
-            setSiteSettings((prev) => ({ ...prev, SiteName: e.target.value }))
-          }
-          className='w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:ring-2 focus:ring-green-500 focus:border-transparent'
-        />
-      </div>
-
-      {/* 站点公告 */}
-      <div>
-        <label className='block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2'>
-          站点公告
-        </label>
-        <textarea
-          value={siteSettings.Announcement}
-          onChange={(e) =>
-            setSiteSettings((prev) => ({
-              ...prev,
-              Announcement: e.target.value,
-            }))
-          }
-          rows={3}
-          className='w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:ring-2 focus:ring-green-500 focus:border-transparent'
-        />
-      </div>
-
-      {/* 豆瓣数据源设置 */}
-      <div className='space-y-3'>
+      <div className='grid grid-cols-1 md:grid-cols-2 gap-6'>
+        {/* 站点名称 */}
         <div>
           <label className='block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2'>
-            豆瓣数据代理
+            站点名称
           </label>
-          <div className='relative' data-dropdown='douban-datasource'>
-            {/* 自定义下拉选择框 */}
-            <button
-              type='button'
-              onClick={() => setIsDoubanDropdownOpen(!isDoubanDropdownOpen)}
-              className='w-full px-3 py-2.5 pr-10 border border-gray-300 dark:border-gray-600 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-green-500 focus:border-green-500 transition-all duration-200 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 shadow-sm hover:border-gray-400 dark:hover:border-gray-500 text-left'
-            >
-              {
-                doubanDataSourceOptions.find(
-                  (option) => option.value === siteSettings.DoubanProxyType,
-                )?.label
-              }
-            </button>
+          <input
+            type='text'
+            value={siteSettings.SiteName}
+            onChange={(e) =>
+              setSiteSettings((prev) => ({ ...prev, SiteName: e.target.value }))
+            }
+            className='w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:ring-2 focus:ring-green-500 focus:border-transparent'
+          />
+        </div>
 
-            {/* 下拉箭头 */}
-            <div className='absolute inset-y-0 right-0 flex items-center pr-3 pointer-events-none'>
-              <ChevronDown
-                className={`w-4 h-4 text-gray-400 dark:text-gray-500 transition-transform duration-200 ${
-                  isDoubanDropdownOpen ? 'rotate-180' : ''
-                }`}
-              />
+        {/* 站点公告 */}
+        <div>
+          <label className='block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2'>
+            站点公告
+          </label>
+          <textarea
+            value={siteSettings.Announcement}
+            onChange={(e) =>
+              setSiteSettings((prev) => ({
+                ...prev,
+                Announcement: e.target.value,
+              }))
+            }
+            rows={1}
+            className='w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:ring-2 focus:ring-green-500 focus:border-transparent'
+          />
+        </div>
+
+        {/* 豆瓣数据源设置 */}
+        <div className='space-y-3'>
+          <div>
+            <label className='block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2'>
+              豆瓣数据代理
+            </label>
+            <div className='relative' data-dropdown='douban-datasource'>
+              <button
+                type='button'
+                onClick={() => setIsDoubanDropdownOpen(!isDoubanDropdownOpen)}
+                className='w-full px-3 py-2.5 pr-10 border border-gray-300 dark:border-gray-600 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-green-500 focus:border-green-500 transition-all duration-200 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 shadow-sm hover:border-gray-400 dark:hover:border-gray-500 text-left'
+              >
+                {
+                  doubanDataSourceOptions.find(
+                    (option) => option.value === siteSettings.DoubanProxyType,
+                  )?.label
+                }
+              </button>
+              <div className='absolute inset-y-0 right-0 flex items-center pr-3 pointer-events-none'>
+                <ChevronDown
+                  className={`w-4 h-4 text-gray-400 dark:text-gray-500 transition-transform duration-200 ${
+                    isDoubanDropdownOpen ? 'rotate-180' : ''
+                  }`}
+                />
+              </div>
+              {isDoubanDropdownOpen && (
+                <div className='absolute z-50 w-full mt-1 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-lg shadow-lg max-h-60 overflow-auto'>
+                  {doubanDataSourceOptions.map((option) => (
+                    <button
+                      key={option.value}
+                      type='button'
+                      onClick={() => {
+                        handleDoubanDataSourceChange(option.value);
+                        setIsDoubanDropdownOpen(false);
+                      }}
+                      className={`w-full px-3 py-2.5 text-left text-sm transition-colors duration-150 flex items-center justify-between hover:bg-gray-100 dark:hover:bg-gray-700 ${
+                        siteSettings.DoubanProxyType === option.value
+                          ? 'bg-green-50 dark:bg-green-900/20 text-green-600 dark:text-green-400'
+                          : 'text-gray-900 dark:text-gray-100'
+                      }`}
+                    >
+                      <span className='truncate'>{option.label}</span>
+                      {siteSettings.DoubanProxyType === option.value && (
+                        <Check className='w-4 h-4 text-green-600 dark:text-green-400 flex-shrink-0 ml-2' />
+                      )}
+                    </button>
+                  ))}
+                </div>
+              )}
             </div>
+            <p className='mt-1 text-xs text-gray-500 dark:text-gray-400'>
+              选择获取豆瓣数据的方式
+            </p>
 
-            {/* 下拉选项列表 */}
-            {isDoubanDropdownOpen && (
-              <div className='absolute z-50 w-full mt-1 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-lg shadow-lg max-h-60 overflow-auto'>
-                {doubanDataSourceOptions.map((option) => (
-                  <button
-                    key={option.value}
-                    type='button'
-                    onClick={() => {
-                      handleDoubanDataSourceChange(option.value);
-                      setIsDoubanDropdownOpen(false);
-                    }}
-                    className={`w-full px-3 py-2.5 text-left text-sm transition-colors duration-150 flex items-center justify-between hover:bg-gray-100 dark:hover:bg-gray-700 ${
-                      siteSettings.DoubanProxyType === option.value
-                        ? 'bg-green-50 dark:bg-green-900/20 text-green-600 dark:text-green-400'
-                        : 'text-gray-900 dark:text-gray-100'
-                    }`}
-                  >
-                    <span className='truncate'>{option.label}</span>
-                    {siteSettings.DoubanProxyType === option.value && (
-                      <Check className='w-4 h-4 text-green-600 dark:text-green-400 flex-shrink-0 ml-2' />
-                    )}
-                  </button>
-                ))}
+            {getThanksInfo(siteSettings.DoubanProxyType) && (
+              <div className='mt-3'>
+                <button
+                  type='button'
+                  onClick={() =>
+                    window.open(
+                      getThanksInfo(siteSettings.DoubanProxyType)!.url,
+                      '_blank',
+                    )
+                  }
+                  className='flex items-center justify-center gap-1.5 w-full px-3 text-xs text-gray-500 dark:text-gray-400 cursor-pointer'
+                >
+                  <span className='font-medium'>
+                    {getThanksInfo(siteSettings.DoubanProxyType)!.text}
+                  </span>
+                  <ExternalLink className='w-3.5 opacity-70' />
+                </button>
               </div>
             )}
           </div>
-          <p className='mt-1 text-xs text-gray-500 dark:text-gray-400'>
-            选择获取豆瓣数据的方式
-          </p>
 
-          {/* 感谢信息 */}
-          {getThanksInfo(siteSettings.DoubanProxyType) && (
-            <div className='mt-3'>
-              <button
-                type='button'
-                onClick={() =>
-                  window.open(
-                    getThanksInfo(siteSettings.DoubanProxyType)!.url,
-                    '_blank',
-                  )
+          {siteSettings.DoubanProxyType === 'custom' && (
+            <div>
+              <label className='block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2'>
+                豆瓣代理地址
+              </label>
+              <input
+                type='text'
+                placeholder='例如: https://proxy.example.com/fetch?url='
+                value={siteSettings.DoubanProxy}
+                onChange={(e) =>
+                  setSiteSettings((prev) => ({
+                    ...prev,
+                    DoubanProxy: e.target.value,
+                  }))
                 }
-                className='flex items-center justify-center gap-1.5 w-full px-3 text-xs text-gray-500 dark:text-gray-400 cursor-pointer'
-              >
-                <span className='font-medium'>
-                  {getThanksInfo(siteSettings.DoubanProxyType)!.text}
-                </span>
-                <ExternalLink className='w-3.5 opacity-70' />
-              </button>
+                className='w-full px-3 py-2.5 border border-gray-300 dark:border-gray-600 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-green-500 focus:border-green-500 transition-all duration-200 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 placeholder-gray-500 dark:placeholder-gray-400 shadow-sm hover:border-gray-400 dark:hover:border-gray-500'
+              />
+              <p className='mt-1 text-xs text-gray-500 dark:text-gray-400'>
+                自定义代理服务器地址
+              </p>
             </div>
           )}
         </div>
 
-        {/* 豆瓣代理地址设置 - 仅在选择自定义代理时显示 */}
-        {siteSettings.DoubanProxyType === 'custom' && (
+        {/* 豆瓣图片代理设置 */}
+        <div className='space-y-3'>
           <div>
             <label className='block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2'>
-              豆瓣代理地址
+              豆瓣图片代理
             </label>
-            <input
-              type='text'
-              placeholder='例如: https://proxy.example.com/fetch?url='
-              value={siteSettings.DoubanProxy}
-              onChange={(e) =>
-                setSiteSettings((prev) => ({
-                  ...prev,
-                  DoubanProxy: e.target.value,
-                }))
-              }
-              className='w-full px-3 py-2.5 border border-gray-300 dark:border-gray-600 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-green-500 focus:border-green-500 transition-all duration-200 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 placeholder-gray-500 dark:placeholder-gray-400 shadow-sm hover:border-gray-400 dark:hover:border-gray-500'
-            />
+            <div className='relative' data-dropdown='douban-image-proxy'>
+              <button
+                type='button'
+                onClick={() =>
+                  setIsDoubanImageProxyDropdownOpen(
+                    !isDoubanImageProxyDropdownOpen,
+                  )
+                }
+                className='w-full px-3 py-2.5 pr-10 border border-gray-300 dark:border-gray-600 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-green-500 focus:border-green-500 transition-all duration-200 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 shadow-sm hover:border-gray-400 dark:hover:border-gray-500 text-left'
+              >
+                {
+                  doubanImageProxyTypeOptions.find(
+                    (option) =>
+                      option.value === siteSettings.DoubanImageProxyType,
+                  )?.label
+                }
+              </button>
+              <div className='absolute inset-y-0 right-0 flex items-center pr-3 pointer-events-none'>
+                <ChevronDown
+                  className={`w-4 h-4 text-gray-400 dark:text-gray-500 transition-transform duration-200 ${
+                    isDoubanImageProxyDropdownOpen ? 'rotate-180' : ''
+                  }`}
+                />
+              </div>
+              {isDoubanImageProxyDropdownOpen && (
+                <div className='absolute z-50 w-full mt-1 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-lg shadow-lg max-h-60 overflow-auto'>
+                  {doubanImageProxyTypeOptions.map((option) => (
+                    <button
+                      key={option.value}
+                      type='button'
+                      onClick={() => {
+                        handleDoubanImageProxyChange(option.value);
+                        setIsDoubanImageProxyDropdownOpen(false);
+                      }}
+                      className={`w-full px-3 py-2.5 text-left text-sm transition-colors duration-150 flex items-center justify-between hover:bg-gray-100 dark:hover:bg-gray-700 ${
+                        siteSettings.DoubanImageProxyType === option.value
+                          ? 'bg-green-50 dark:bg-green-900/20 text-green-600 dark:text-green-400'
+                          : 'text-gray-900 dark:text-gray-100'
+                      }`}
+                    >
+                      <span className='truncate'>{option.label}</span>
+                      {siteSettings.DoubanImageProxyType === option.value && (
+                        <Check className='w-4 h-4 text-green-600 dark:text-green-400 flex-shrink-0 ml-2' />
+                      )}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
             <p className='mt-1 text-xs text-gray-500 dark:text-gray-400'>
-              自定义代理服务器地址
+              选择获取豆瓣图片的方式
             </p>
-          </div>
-        )}
-      </div>
 
-      {/* 豆瓣图片代理设置 */}
-      <div className='space-y-3'>
+            {getThanksInfo(siteSettings.DoubanImageProxyType) && (
+              <div className='mt-3'>
+                <button
+                  type='button'
+                  onClick={() =>
+                    window.open(
+                      getThanksInfo(siteSettings.DoubanImageProxyType)!.url,
+                      '_blank',
+                    )
+                  }
+                  className='flex items-center justify-center gap-1.5 w-full px-3 text-xs text-gray-500 dark:text-gray-400 cursor-pointer'
+                >
+                  <span className='font-medium'>
+                    {getThanksInfo(siteSettings.DoubanImageProxyType)!.text}
+                  </span>
+                  <ExternalLink className='w-3.5 opacity-70' />
+                </button>
+              </div>
+            )}
+          </div>
+
+          {siteSettings.DoubanImageProxyType === 'custom' && (
+            <div>
+              <label className='block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2'>
+                豆瓣图片代理地址
+              </label>
+              <input
+                type='text'
+                placeholder='例如: https://proxy.example.com/fetch?url='
+                value={siteSettings.DoubanImageProxy}
+                onChange={(e) =>
+                  setSiteSettings((prev) => ({
+                    ...prev,
+                    DoubanImageProxy: e.target.value,
+                  }))
+                }
+                className='w-full px-3 py-2.5 border border-gray-300 dark:border-gray-600 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-green-500 focus:border-green-500 transition-all duration-200 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 placeholder-gray-500 dark:placeholder-gray-400 shadow-sm hover:border-gray-400 dark:hover:border-gray-500'
+              />
+              <p className='mt-1 text-xs text-gray-500 dark:text-gray-400'>
+                自定义图片代理服务器地址
+              </p>
+            </div>
+          )}
+        </div>
+
+        {/* 搜索接口可拉取最大页数 */}
         <div>
           <label className='block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2'>
-            豆瓣图片代理
+            搜索接口可拉取最大页数
           </label>
-          <div className='relative' data-dropdown='douban-image-proxy'>
-            {/* 自定义下拉选择框 */}
+          <input
+            type='number'
+            min={1}
+            value={siteSettings.SearchDownstreamMaxPage}
+            onChange={(e) =>
+              setSiteSettings((prev) => ({
+                ...prev,
+                SearchDownstreamMaxPage: Number(e.target.value),
+              }))
+            }
+            className='w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:ring-2 focus:ring-green-500 focus:border-transparent'
+          />
+        </div>
+
+        {/* 站点接口缓存时间 */}
+        <div>
+          <label className='block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2'>
+            站点接口缓存时间（秒）
+          </label>
+          <input
+            type='number'
+            min={1}
+            value={siteSettings.SiteInterfaceCacheTime}
+            onChange={(e) =>
+              setSiteSettings((prev) => ({
+                ...prev,
+                SiteInterfaceCacheTime: Number(e.target.value),
+              }))
+            }
+            className='w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:ring-2 focus:ring-green-500 focus:border-transparent'
+          />
+        </div>
+      </div>
+
+      <div className='grid grid-cols-1 md:grid-cols-2 gap-6'>
+        <div>
+          <div className='flex items-center justify-between'>
+            <label className='block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2'>
+              NSFW模式
+            </label>
             <button
               type='button'
               onClick={() =>
-                setIsDoubanImageProxyDropdownOpen(
-                  !isDoubanImageProxyDropdownOpen,
-                )
-              }
-              className='w-full px-3 py-2.5 pr-10 border border-gray-300 dark:border-gray-600 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-green-500 focus:border-green-500 transition-all duration-200 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 shadow-sm hover:border-gray-400 dark:hover:border-gray-500 text-left'
-            >
-              {
-                doubanImageProxyTypeOptions.find(
-                  (option) =>
-                    option.value === siteSettings.DoubanImageProxyType,
-                )?.label
-              }
-            </button>
-
-            {/* 下拉箭头 */}
-            <div className='absolute inset-y-0 right-0 flex items-center pr-3 pointer-events-none'>
-              <ChevronDown
-                className={`w-4 h-4 text-gray-400 dark:text-gray-500 transition-transform duration-200 ${
-                  isDoubanImageProxyDropdownOpen ? 'rotate-180' : ''
-                }`}
-              />
-            </div>
-
-            {/* 下拉选项列表 */}
-            {isDoubanImageProxyDropdownOpen && (
-              <div className='absolute z-50 w-full mt-1 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-lg shadow-lg max-h-60 overflow-auto'>
-                {doubanImageProxyTypeOptions.map((option) => (
-                  <button
-                    key={option.value}
-                    type='button'
-                    onClick={() => {
-                      handleDoubanImageProxyChange(option.value);
-                      setIsDoubanImageProxyDropdownOpen(false);
-                    }}
-                    className={`w-full px-3 py-2.5 text-left text-sm transition-colors duration-150 flex items-center justify-between hover:bg-gray-100 dark:hover:bg-gray-700 ${
-                      siteSettings.DoubanImageProxyType === option.value
-                        ? 'bg-green-50 dark:bg-green-900/20 text-green-600 dark:text-green-400'
-                        : 'text-gray-900 dark:text-gray-100'
-                    }`}
-                  >
-                    <span className='truncate'>{option.label}</span>
-                    {siteSettings.DoubanImageProxyType === option.value && (
-                      <Check className='w-4 h-4 text-green-600 dark:text-green-400 flex-shrink-0 ml-2' />
-                    )}
-                  </button>
-                ))}
-              </div>
-            )}
-          </div>
-          <p className='mt-1 text-xs text-gray-500 dark:text-gray-400'>
-            选择获取豆瓣图片的方式
-          </p>
-
-          {/* 感谢信息 */}
-          {getThanksInfo(siteSettings.DoubanImageProxyType) && (
-            <div className='mt-3'>
-              <button
-                type='button'
-                onClick={() =>
-                  window.open(
-                    getThanksInfo(siteSettings.DoubanImageProxyType)!.url,
-                    '_blank',
-                  )
-                }
-                className='flex items-center justify-center gap-1.5 w-full px-3 text-xs text-gray-500 dark:text-gray-400 cursor-pointer'
-              >
-                <span className='font-medium'>
-                  {getThanksInfo(siteSettings.DoubanImageProxyType)!.text}
-                </span>
-                <ExternalLink className='w-3.5 opacity-70' />
-              </button>
-            </div>
-          )}
-        </div>
-
-        {/* 豆瓣代理地址设置 - 仅在选择自定义代理时显示 */}
-        {siteSettings.DoubanImageProxyType === 'custom' && (
-          <div>
-            <label className='block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2'>
-              豆瓣图片代理地址
-            </label>
-            <input
-              type='text'
-              placeholder='例如: https://proxy.example.com/fetch?url='
-              value={siteSettings.DoubanImageProxy}
-              onChange={(e) =>
                 setSiteSettings((prev) => ({
                   ...prev,
-                  DoubanImageProxy: e.target.value,
+                  DisableYellowFilter: !prev.DisableYellowFilter,
                 }))
               }
-              className='w-full px-3 py-2.5 border border-gray-300 dark:border-gray-600 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-green-500 focus:border-green-500 transition-all duration-200 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 placeholder-gray-500 dark:placeholder-gray-400 shadow-sm hover:border-gray-400 dark:hover:border-gray-500'
-            />
-            <p className='mt-1 text-xs text-gray-500 dark:text-gray-400'>
-              自定义图片代理服务器地址
-            </p>
-          </div>
-        )}
-      </div>
-
-      {/* 搜索接口可拉取最大页数 */}
-      <div>
-        <label className='block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2'>
-          搜索接口可拉取最大页数
-        </label>
-        <input
-          type='number'
-          min={1}
-          value={siteSettings.SearchDownstreamMaxPage}
-          onChange={(e) =>
-            setSiteSettings((prev) => ({
-              ...prev,
-              SearchDownstreamMaxPage: Number(e.target.value),
-            }))
-          }
-          className='w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:ring-2 focus:ring-green-500 focus:border-transparent'
-        />
-      </div>
-
-      {/* 站点接口缓存时间 */}
-      <div>
-        <label className='block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2'>
-          站点接口缓存时间（秒）
-        </label>
-        <input
-          type='number'
-          min={1}
-          value={siteSettings.SiteInterfaceCacheTime}
-          onChange={(e) =>
-            setSiteSettings((prev) => ({
-              ...prev,
-              SiteInterfaceCacheTime: Number(e.target.value),
-            }))
-          }
-          className='w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:ring-2 focus:ring-green-500 focus:border-transparent'
-        />
-      </div>
-
-      {/* 禁用黄色过滤器 */}
-      <div>
-        <div className='flex items-center justify-between'>
-          <label className='block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2'>
-            禁用黄色过滤器
-          </label>
-          <button
-            type='button'
-            onClick={() =>
-              setSiteSettings((prev) => ({
-                ...prev,
-                DisableYellowFilter: !prev.DisableYellowFilter,
-              }))
-            }
-            className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-green-500 focus:ring-offset-2 ${
-              siteSettings.DisableYellowFilter
-                ? buttonStyles.toggleOn
-                : buttonStyles.toggleOff
-            }`}
-          >
-            <span
-              className={`inline-block h-4 w-4 transform rounded-full ${
-                buttonStyles.toggleThumb
-              } transition-transform ${
+              className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-green-500 focus:ring-offset-2 ${
                 siteSettings.DisableYellowFilter
-                  ? buttonStyles.toggleThumbOn
-                  : buttonStyles.toggleThumbOff
+                  ? buttonStyles.toggleOn
+                  : buttonStyles.toggleOff
               }`}
-            />
-          </button>
+            >
+              <span
+                className={`inline-block h-4 w-4 transform rounded-full ${
+                  buttonStyles.toggleThumb
+                } transition-transform ${
+                  siteSettings.DisableYellowFilter
+                    ? buttonStyles.toggleThumbOn
+                    : buttonStyles.toggleThumbOff
+                }`}
+              />
+            </button>
+          </div>
+          <p className='mt-1 text-xs text-gray-500 dark:text-gray-400'>
+            开启后，允许NSFW内容。
+          </p>
         </div>
-        <p className='mt-1 text-xs text-gray-500 dark:text-gray-400'>
-          禁用黄色内容的过滤功能，允许显示所有内容。
-        </p>
-      </div>
 
-      {/* 流式搜索 */}
-      <div>
-        <div className='flex items-center justify-between'>
-          <label className='block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2'>
-            启用流式搜索
-          </label>
-          <button
-            type='button'
-            onClick={() =>
-              setSiteSettings((prev) => ({
-                ...prev,
-                FluidSearch: !prev.FluidSearch,
-              }))
-            }
-            className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-green-500 focus:ring-offset-2 ${
-              siteSettings.FluidSearch
-                ? buttonStyles.toggleOn
-                : buttonStyles.toggleOff
-            }`}
-          >
-            <span
-              className={`inline-block h-4 w-4 transform rounded-full ${
-                buttonStyles.toggleThumb
-              } transition-transform ${
+        <div>
+          <div className='flex items-center justify-between'>
+            <label className='block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2'>
+              启用流式搜索
+            </label>
+            <button
+              type='button'
+              onClick={() =>
+                setSiteSettings((prev) => ({
+                  ...prev,
+                  FluidSearch: !prev.FluidSearch,
+                }))
+              }
+              className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-green-500 focus:ring-offset-2 ${
                 siteSettings.FluidSearch
-                  ? buttonStyles.toggleThumbOn
-                  : buttonStyles.toggleThumbOff
+                  ? buttonStyles.toggleOn
+                  : buttonStyles.toggleOff
               }`}
-            />
-          </button>
+            >
+              <span
+                className={`inline-block h-4 w-4 transform rounded-full ${
+                  buttonStyles.toggleThumb
+                } transition-transform ${
+                  siteSettings.FluidSearch
+                    ? buttonStyles.toggleThumbOn
+                    : buttonStyles.toggleThumbOff
+                }`}
+              />
+            </button>
+          </div>
+          <p className='mt-1 text-xs text-gray-500 dark:text-gray-400'>
+            启用后搜索结果将实时流式返回，提升用户体验。
+          </p>
         </div>
-        <p className='mt-1 text-xs text-gray-500 dark:text-gray-400'>
-          启用后搜索结果将实时流式返回，提升用户体验。
-        </p>
       </div>
 
       {/* 操作按钮 */}

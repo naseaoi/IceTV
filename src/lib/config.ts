@@ -225,6 +225,7 @@ async function getInitConfig(
     },
     UserConfig: {
       Users: [],
+      OpenRegister: false,
     },
     SourceConfig: [],
     CustomCategories: [],
@@ -329,6 +330,9 @@ export function configSelfCheck(adminConfig: AdminConfig): AdminConfig {
     !Array.isArray(adminConfig.UserConfig.Users)
   ) {
     adminConfig.UserConfig.Users = [];
+  }
+  if (typeof adminConfig.UserConfig.OpenRegister !== 'boolean') {
+    adminConfig.UserConfig.OpenRegister = false;
   }
   if (!adminConfig.SourceConfig || !Array.isArray(adminConfig.SourceConfig)) {
     adminConfig.SourceConfig = [];

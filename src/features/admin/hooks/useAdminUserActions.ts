@@ -13,7 +13,8 @@ type UserAction =
   | 'setAdmin'
   | 'cancelAdmin'
   | 'changePassword'
-  | 'deleteUser';
+  | 'deleteUser'
+  | 'setOpenRegister';
 
 interface UseAdminUserActionsOptions {
   refreshConfig: () => Promise<void>;
@@ -91,14 +92,16 @@ export function useAdminUserActions(options: UseAdminUserActionsOptions) {
   const userAction = useCallback(
     async (
       action: UserAction,
-      targetUsername: string,
+      targetUsername?: string,
       targetPassword?: string,
       userGroup?: string,
+      openRegister?: boolean,
     ) => {
       await runUserMutation({
-        targetUsername,
+        ...(targetUsername ? { targetUsername } : {}),
         ...(targetPassword ? { targetPassword } : {}),
         ...(userGroup ? { userGroup } : {}),
+        ...(typeof openRegister === 'boolean' ? { openRegister } : {}),
         action,
       });
     },

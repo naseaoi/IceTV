@@ -25,6 +25,7 @@ export interface AdminConfig {
       enabledApis?: string[];
       tags?: string[];
     }[];
+    OpenRegister?: boolean;
     Tags?: {
       name: string;
       enabledApis: string[];

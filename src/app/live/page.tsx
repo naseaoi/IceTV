@@ -4,7 +4,15 @@
 
 import Artplayer from 'artplayer';
 import Hls from 'hls.js';
-import { Heart, Radio, Tv } from 'lucide-react';
+import {
+  AlertTriangle,
+  CheckCircle2,
+  Heart,
+  Loader2,
+  Radio,
+  RefreshCw,
+  Tv,
+} from 'lucide-react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { Suspense, useEffect, useRef, useState } from 'react';
 
@@ -18,6 +26,7 @@ import {
 import { parseCustomTimeFormat } from '@/lib/time';
 
 import EpgScrollableRow from '@/components/EpgScrollableRow';
+import LoadingStatePanel from '@/components/LoadingStatePanel';
 import PageLayout from '@/components/PageLayout';
 
 // 扩展 HTMLVideoElement 类型以支持 hls 属性
@@ -297,7 +306,7 @@ function LivePageClient() {
       }
 
       setLoadingStage('ready');
-      setLoadingMessage('✨ 准备就绪...');
+      setLoadingMessage('准备就绪...');
 
       setTimeout(() => {
         setLoading(false);
@@ -1127,82 +1136,53 @@ function LivePageClient() {
     };
   }, []);
 
+  const loadingStageOrder = ['loading', 'fetching', 'ready'];
+  const loadingStageIndex = loadingStageOrder.indexOf(loadingStage);
+  const loadingProgress =
+    ((loadingStageIndex + 1) / loadingStageOrder.length) * 100;
+
   if (loading) {
     return (
       <PageLayout activePath='/live'>
         <div className='flex items-center justify-center min-h-screen bg-transparent'>
-          <div className='text-center max-w-md mx-auto px-6'>
-            {/* 动画直播图标 */}
-            <div className='relative mb-8'>
-              <div className='relative mx-auto w-24 h-24 bg-gradient-to-r from-green-500 to-emerald-600 rounded-2xl shadow-2xl flex items-center justify-center transform hover:scale-105 transition-transform duration-300'>
-                <div className='text-white text-4xl'>📺</div>
-                {/* 旋转光环 */}
-                <div className='absolute -inset-2 bg-gradient-to-r from-green-500 to-emerald-600 rounded-2xl opacity-20 animate-spin'></div>
-              </div>
-
-              {/* 浮动粒子效果 */}
-              <div className='absolute top-0 left-0 w-full h-full pointer-events-none'>
-                <div className='absolute top-2 left-2 w-2 h-2 bg-green-400 rounded-full animate-bounce'></div>
-                <div
-                  className='absolute top-4 right-4 w-1.5 h-1.5 bg-emerald-400 rounded-full animate-bounce'
-                  style={{ animationDelay: '0.5s' }}
-                ></div>
-                <div
-                  className='absolute bottom-3 left-6 w-1 h-1 bg-lime-400 rounded-full animate-bounce'
-                  style={{ animationDelay: '1s' }}
-                ></div>
-              </div>
-            </div>
-
-            {/* 进度指示器 */}
-            <div className='mb-6 w-80 mx-auto'>
-              <div className='flex justify-center space-x-2 mb-4'>
-                <div
-                  className={`w-3 h-3 rounded-full transition-all duration-500 ${
-                    loadingStage === 'loading'
-                      ? 'bg-green-500 scale-125'
-                      : 'bg-green-500'
-                  }`}
-                ></div>
-                <div
-                  className={`w-3 h-3 rounded-full transition-all duration-500 ${
-                    loadingStage === 'fetching'
-                      ? 'bg-green-500 scale-125'
-                      : 'bg-green-500'
-                  }`}
-                ></div>
-                <div
-                  className={`w-3 h-3 rounded-full transition-all duration-500 ${
-                    loadingStage === 'ready'
-                      ? 'bg-green-500 scale-125'
-                      : 'bg-gray-300'
-                  }`}
-                ></div>
-              </div>
-
-              {/* 进度条 */}
-              <div className='w-full bg-gray-200 dark:bg-gray-700 rounded-full h-2 overflow-hidden'>
-                <div
-                  className='h-full bg-gradient-to-r from-green-500 to-emerald-600 rounded-full transition-all duration-1000 ease-out'
-                  style={{
-                    width:
-                      loadingStage === 'loading'
-                        ? '33%'
-                        : loadingStage === 'fetching'
-                          ? '66%'
-                          : '100%',
-                  }}
-                ></div>
-              </div>
-            </div>
-
-            {/* 加载消息 */}
-            <div className='space-y-2'>
-              <p className='text-xl font-semibold text-gray-800 dark:text-gray-200 animate-pulse'>
-                {loadingMessage}
-              </p>
-            </div>
-          </div>
+          <LoadingStatePanel
+            icon={
+              loadingStage === 'ready' ? (
+                <CheckCircle2 className='w-10 h-10' />
+              ) : (
+                <Tv className='w-10 h-10' />
+              )
+            }
+            tone='blue'
+            title='正在准备直播'
+            message={loadingMessage}
+            description='正在同步直播源、频道列表与节目单信息。'
+            progress={loadingProgress}
+            steps={[
+              {
+                label: '源配置',
+                status:
+                  loadingStage === 'loading'
+                    ? 'active'
+                    : loadingStageIndex > 0
+                      ? 'done'
+                      : 'pending',
+              },
+              {
+                label: '频道拉取',
+                status:
+                  loadingStage === 'fetching'
+                    ? 'active'
+                    : loadingStageIndex > 1
+                      ? 'done'
+                      : 'pending',
+              },
+              {
+                label: '完成',
+                status: loadingStage === 'ready' ? 'active' : 'pending',
+              },
+            ]}
+          />
         </div>
       </PageLayout>
     );
@@ -1212,41 +1192,21 @@ function LivePageClient() {
     return (
       <PageLayout activePath='/live'>
         <div className='flex items-center justify-center min-h-screen bg-transparent'>
-          <div className='text-center max-w-md mx-auto px-6'>
-            {/* 错误图标 */}
-            <div className='relative mb-8'>
-              <div className='relative mx-auto w-24 h-24 bg-gradient-to-r from-red-500 to-orange-500 rounded-2xl shadow-2xl flex items-center justify-center transform hover:scale-105 transition-transform duration-300'>
-                <div className='text-white text-4xl'>😵</div>
-                {/* 脉冲效果 */}
-                <div className='absolute -inset-2 bg-gradient-to-r from-red-500 to-orange-500 rounded-2xl opacity-20 animate-pulse'></div>
-              </div>
-            </div>
-
-            {/* 错误信息 */}
-            <div className='space-y-4 mb-8'>
-              <h2 className='text-2xl font-bold text-gray-800 dark:text-gray-200'>
-                哎呀，出现了一些问题
-              </h2>
-              <div className='bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg p-4'>
-                <p className='text-red-600 dark:text-red-400 font-medium'>
-                  {error}
-                </p>
-              </div>
-              <p className='text-sm text-gray-500 dark:text-gray-400'>
-                请检查网络连接或尝试刷新页面
-              </p>
-            </div>
-
-            {/* 操作按钮 */}
-            <div className='space-y-3'>
-              <button
-                onClick={() => window.location.reload()}
-                className='w-full px-6 py-3 bg-gradient-to-r from-blue-500 to-cyan-600 text-white rounded-xl font-medium hover:from-blue-600 hover:to-cyan-700 transform hover:scale-105 transition-all duration-200 shadow-lg hover:shadow-xl'
-              >
-                🔄 重新尝试
-              </button>
-            </div>
-          </div>
+          <LoadingStatePanel
+            icon={<AlertTriangle className='w-10 h-10' />}
+            tone='red'
+            title='哎呀，出现了一些问题'
+            message={error}
+            description='请检查网络连接或稍后重试。'
+          >
+            <button
+              onClick={() => window.location.reload()}
+              className='w-full px-6 py-3 bg-gradient-to-r from-blue-500 to-cyan-600 text-white rounded-xl font-medium hover:from-blue-600 hover:to-cyan-700 transform hover:scale-105 transition-all duration-200 shadow-lg hover:shadow-xl flex items-center justify-center gap-2'
+            >
+              <RefreshCw className='w-4 h-4' />
+              重新尝试
+            </button>
+          </LoadingStatePanel>
         </div>
       </PageLayout>
     );
@@ -1336,50 +1296,31 @@ function LivePageClient() {
                 {/* 不支持的直播类型提示 */}
                 {unsupportedType && (
                   <div className='absolute inset-0 bg-black/90 backdrop-blur-sm rounded-xl overflow-hidden shadow-lg border border-white/0 dark:border-white/30 flex items-center justify-center z-[600] transition-all duration-300'>
-                    <div className='text-center max-w-md mx-auto px-6'>
-                      <div className='relative mb-8'>
-                        <div className='relative mx-auto w-24 h-24 bg-gradient-to-r from-orange-500 to-red-600 rounded-2xl shadow-2xl flex items-center justify-center transform hover:scale-105 transition-transform duration-300'>
-                          <div className='text-white text-4xl'>⚠️</div>
-                          <div className='absolute -inset-2 bg-gradient-to-r from-orange-500 to-red-600 rounded-2xl opacity-20 animate-pulse'></div>
-                        </div>
-                      </div>
-                      <div className='space-y-4'>
-                        <h3 className='text-xl font-semibold text-white'>
-                          暂不支持的直播流类型
-                        </h3>
-                        <div className='bg-orange-500/20 border border-orange-500/30 rounded-lg p-4'>
-                          <p className='text-orange-300 font-medium'>
-                            当前频道直播流类型：
-                            <span className='text-white font-bold'>
-                              {unsupportedType.toUpperCase()}
-                            </span>
-                          </p>
-                          <p className='text-sm text-orange-200 mt-2'>
-                            目前仅支持 M3U8 格式的直播流
-                          </p>
-                        </div>
-                        <p className='text-sm text-gray-300'>请尝试其他频道</p>
-                      </div>
-                    </div>
+                    <LoadingStatePanel
+                      compact
+                      icon={<AlertTriangle className='w-9 h-9' />}
+                      tone='amber'
+                      title='暂不支持的直播流类型'
+                      message={unsupportedType.toUpperCase()}
+                      description='目前仅支持 M3U8 格式，请尝试其他频道。'
+                    />
                   </div>
                 )}
 
                 {/* 视频加载蒙层 */}
                 {isVideoLoading && (
                   <div className='absolute inset-0 bg-black/85 backdrop-blur-sm rounded-xl overflow-hidden shadow-lg border border-white/0 dark:border-white/30 flex items-center justify-center z-[500] transition-all duration-300'>
-                    <div className='text-center max-w-md mx-auto px-6'>
-                      <div className='relative mb-8'>
-                        <div className='relative mx-auto w-24 h-24 bg-gradient-to-r from-green-500 to-emerald-600 rounded-2xl shadow-2xl flex items-center justify-center transform hover:scale-105 transition-transform duration-300'>
-                          <div className='text-white text-4xl'>📺</div>
-                          <div className='absolute -inset-2 bg-gradient-to-r from-green-500 to-emerald-600 rounded-2xl opacity-20 animate-spin'></div>
-                        </div>
+                    <LoadingStatePanel
+                      compact
+                      icon={<Tv className='w-9 h-9' />}
+                      tone='blue'
+                      title='IPTV 加载中...'
+                      description='正在拉取频道流并初始化播放器缓冲。'
+                    >
+                      <div className='flex items-center justify-center text-sky-300'>
+                        <Loader2 className='w-5 h-5 animate-spin' />
                       </div>
-                      <div className='space-y-2'>
-                        <p className='text-xl font-semibold text-white animate-pulse'>
-                          🔄 IPTV 加载中...
-                        </p>
-                      </div>
-                    </div>
+                    </LoadingStatePanel>
                   </div>
                 )}
               </div>

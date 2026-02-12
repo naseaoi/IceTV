@@ -21,6 +21,7 @@ const ACTIONS = [
   'userGroup',
   'updateUserGroups',
   'batchUpdateUserGroups',
+  'setOpenRegister',
 ] as const;
 
 export async function POST(request: NextRequest) {
@@ -58,7 +59,9 @@ export async function POST(request: NextRequest) {
     // 用户组操作和批量操作不需要targetUsername
     if (
       !targetUsername &&
-      !['userGroup', 'batchUpdateUserGroups'].includes(action)
+      !['userGroup', 'batchUpdateUserGroups', 'setOpenRegister'].includes(
+        action,
+      )
     ) {
       return NextResponse.json({ error: '缺少目标用户名' }, { status: 400 });
     }
@@ -70,6 +73,7 @@ export async function POST(request: NextRequest) {
       action !== 'userGroup' &&
       action !== 'updateUserGroups' &&
       action !== 'batchUpdateUserGroups' &&
+      action !== 'setOpenRegister' &&
       username === targetUsername
     ) {
       return NextResponse.json(
@@ -91,7 +95,9 @@ export async function POST(request: NextRequest) {
     let isTargetAdmin = false;
 
     if (
-      !['userGroup', 'batchUpdateUserGroups'].includes(action) &&
+      !['userGroup', 'batchUpdateUserGroups', 'setOpenRegister'].includes(
+        action,
+      ) &&
       targetUsername
     ) {
       targetEntry = adminConfig.UserConfig.Users.find(
@@ -487,6 +493,17 @@ export async function POST(request: NextRequest) {
           }
         }
 
+        break;
+      }
+      case 'setOpenRegister': {
+        const { openRegister } = body as { openRegister?: boolean };
+        if (typeof openRegister !== 'boolean') {
+          return NextResponse.json(
+            { error: '开放注册参数错误' },
+            { status: 400 },
+          );
+        }
+        adminConfig.UserConfig.OpenRegister = openRegister;
         break;
       }
       default:

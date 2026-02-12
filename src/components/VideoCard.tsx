@@ -3,7 +3,6 @@
 import {
   ExternalLink,
   Heart,
-  ImageOff,
   Link,
   PlayCircleIcon,
   Radio,
@@ -34,6 +33,7 @@ import { useLongPress } from '@/hooks/useLongPress';
 
 import { ImagePlaceholder } from '@/components/ImagePlaceholder';
 import MobileActionSheet from '@/components/MobileActionSheet';
+import NoImageCover from '@/components/NoImageCover';
 
 export interface VideoCardProps {
   id?: string;
@@ -93,6 +93,12 @@ const VideoCard = forwardRef<VideoCardHandle, VideoCardProps>(
     const [isLoading, setIsLoading] = useState(false);
     const [hasImageError, setHasImageError] = useState(false);
     const [showMobileActions, setShowMobileActions] = useState(false);
+    const [actionSheetAnchorRect, setActionSheetAnchorRect] = useState<{
+      top: number;
+      left: number;
+      width: number;
+      height: number;
+    } | null>(null);
     const [searchFavorited, setSearchFavorited] = useState<boolean | null>(
       null,
     ); // 搜索结果的收藏状态
@@ -358,6 +364,7 @@ const VideoCard = forwardRef<VideoCardHandle, VideoCardProps>(
       if (!showMobileActions) {
         // 防止重复触发
         // 立即显示菜单，避免等待数据加载导致动画卡顿
+        setActionSheetAnchorRect(null);
         setShowMobileActions(true);
 
         // 异步检查收藏状态，不阻塞菜单显示
@@ -601,6 +608,13 @@ const VideoCard = forwardRef<VideoCardHandle, VideoCardProps>(
             e.stopPropagation();
 
             // 右键弹出操作菜单
+            const rect = e.currentTarget.getBoundingClientRect();
+            setActionSheetAnchorRect({
+              top: rect.top,
+              left: rect.left,
+              width: rect.width,
+              height: rect.height,
+            });
             setShowMobileActions(true);
 
             // 异步检查收藏状态，不阻塞菜单显示
@@ -692,12 +706,13 @@ const VideoCard = forwardRef<VideoCardHandle, VideoCardProps>(
             )}
 
             {shouldShowPosterFallback && (
-              <div className='absolute inset-0 flex flex-col items-center justify-center gap-2 bg-zinc-100 text-zinc-500 dark:bg-zinc-900 dark:text-zinc-400'>
-                <ImageOff size={34} strokeWidth={1.5} />
-                <span className='text-[11px] sm:text-xs font-medium'>
-                  无封面
-                </span>
-              </div>
+              <NoImageCover
+                label='无封面'
+                iconSize={34}
+                iconStrokeWidth={1.5}
+                className='gap-2 bg-zinc-100 text-zinc-500 dark:bg-zinc-900 dark:text-zinc-400'
+                labelClassName='text-[11px] sm:text-xs'
+              />
             )}
 
             {/* 悬浮遮罩 */}
@@ -1232,7 +1247,9 @@ const VideoCard = forwardRef<VideoCardHandle, VideoCardProps>(
         {/* 操作菜单 - 支持右键和长按触发 */}
         <MobileActionSheet
           isOpen={showMobileActions}
-          onClose={() => setShowMobileActions(false)}
+          onClose={() => {
+            setShowMobileActions(false);
+          }}
           title={actualTitle}
           poster={processedPoster}
           actions={mobileActions}
@@ -1246,6 +1263,7 @@ const VideoCard = forwardRef<VideoCardHandle, VideoCardProps>(
           currentEpisode={currentEpisode}
           totalEpisodes={actualEpisodes}
           origin={origin}
+          anchorRect={actionSheetAnchorRect}
         />
       </>
     );

@@ -221,6 +221,24 @@ const UserConfig = ({ config, role, refreshConfig }: UserConfigProps) => {
     );
   };
 
+  const handleToggleOpenRegister = async () => {
+    await withLoading('setOpenRegister', async () => {
+      try {
+        await userAction(
+          'setOpenRegister',
+          undefined,
+          undefined,
+          undefined,
+          !(config?.UserConfig?.OpenRegister ?? false),
+        );
+        showSuccess('开放注册设置已更新', showAlert);
+      } catch (err) {
+        showError(err instanceof Error ? err.message : '更新失败', showAlert);
+        throw err;
+      }
+    });
+  };
+
   const handleSetAdmin = async (uname: string) => {
     await withLoading(`setAdmin_${uname}`, () =>
       handleUserAction('setAdmin', uname),
@@ -409,13 +427,21 @@ const UserConfig = ({ config, role, refreshConfig }: UserConfigProps) => {
       | 'setAdmin'
       | 'cancelAdmin'
       | 'changePassword'
-      | 'deleteUser',
+      | 'deleteUser'
+      | 'setOpenRegister',
     targetUsername: string,
     targetPassword?: string,
     userGroup?: string,
+    openRegister?: boolean,
   ) => {
     try {
-      await userAction(action, targetUsername, targetPassword, userGroup);
+      await userAction(
+        action,
+        targetUsername,
+        targetPassword,
+        userGroup,
+        openRegister,
+      );
     } catch {
       // 错误处理已在 useAdminUserActions 中处理
     }
@@ -445,17 +471,53 @@ const UserConfig = ({ config, role, refreshConfig }: UserConfigProps) => {
 
   return (
     <div className='space-y-6'>
-      {/* 用户统计 */}
-      <div>
-        <h4 className='text-sm font-medium text-gray-700 dark:text-gray-300 mb-3'>
-          用户统计
-        </h4>
-        <div className='p-4 bg-green-50 dark:bg-green-900/20 rounded-lg border border-green-200 dark:border-green-800'>
-          <div className='text-2xl font-bold text-green-800 dark:text-green-300'>
-            {config.UserConfig.Users.length}
+      <div className='grid grid-cols-1 lg:grid-cols-2 gap-4 mb-1'>
+        <div>
+          <h4 className='text-sm font-medium text-gray-700 dark:text-gray-300 mb-3'>
+            用户统计
+          </h4>
+          <div className='p-4 bg-green-50 dark:bg-green-900/20 rounded-lg border border-green-200 dark:border-green-800 min-h-[96px]'>
+            <div className='text-2xl font-bold text-green-800 dark:text-green-300'>
+              {config.UserConfig.Users.length}
+            </div>
+            <div className='text-sm text-green-600 dark:text-green-400'>
+              总用户数
+            </div>
           </div>
-          <div className='text-sm text-green-600 dark:text-green-400'>
-            总用户数
+        </div>
+        <div>
+          <h4 className='text-sm font-medium text-gray-700 dark:text-gray-300 mb-3'>
+            注册设置
+          </h4>
+          <div className='p-4 bg-gray-50 dark:bg-gray-900 rounded-lg border border-gray-200 dark:border-gray-700 flex items-center justify-between gap-4 min-h-[96px]'>
+            <div>
+              <p className='text-sm font-medium text-gray-900 dark:text-gray-100'>
+                开放注册
+              </p>
+              <p className='text-xs text-gray-500 dark:text-gray-400 mt-1'>
+                开启后，未注册用户可通过注册接口自行创建账号。
+              </p>
+            </div>
+            <button
+              type='button'
+              onClick={handleToggleOpenRegister}
+              disabled={isLoading('setOpenRegister')}
+              className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
+                config.UserConfig.OpenRegister
+                  ? 'bg-green-500'
+                  : 'bg-gray-300 dark:bg-gray-600'
+              } ${isLoading('setOpenRegister') ? 'opacity-50 cursor-not-allowed' : ''}`}
+              aria-label='切换开放注册'
+              aria-pressed={!!config.UserConfig.OpenRegister}
+            >
+              <span
+                className={`inline-block h-5 w-5 transform rounded-full bg-white transition-transform ${
+                  config.UserConfig.OpenRegister
+                    ? 'translate-x-5'
+                    : 'translate-x-0.5'
+                }`}
+              />
+            </button>
           </div>
         </div>
       </div>
