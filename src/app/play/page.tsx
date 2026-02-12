@@ -455,24 +455,21 @@ function PlayPageClient() {
     }
   };
 
-  // 清理播放器资源的统一函数
+  // 清理播放器资源的统一函数（延迟到下一帧执行，避免阻塞导航）
   const cleanupPlayer = () => {
-    if (artPlayerRef.current) {
-      try {
-        // 销毁 HLS 实例
-        if (artPlayerRef.current.video && artPlayerRef.current.video.hls) {
-          artPlayerRef.current.video.hls.destroy();
+    const player = artPlayerRef.current;
+    artPlayerRef.current = null;
+    if (player) {
+      requestAnimationFrame(() => {
+        try {
+          if (player.video && player.video.hls) {
+            player.video.hls.destroy();
+          }
+          player.destroy();
+        } catch (err) {
+          console.warn('清理播放器资源时出错:', err);
         }
-
-        // 销毁 ArtPlayer 实例
-        artPlayerRef.current.destroy();
-        artPlayerRef.current = null;
-
-        console.log('播放器资源已清理');
-      } catch (err) {
-        console.warn('清理播放器资源时出错:', err);
-        artPlayerRef.current = null;
-      }
+      });
     }
   };
 
@@ -1851,6 +1848,7 @@ function PlayPageClient() {
       <PlayLoadingView
         loadingStage={loadingStage}
         loadingMessage={loadingMessage}
+        onBack={() => router.back()}
       />
     );
   }

@@ -1,8 +1,8 @@
 'use client';
 
 import { useCallback, useMemo, useState } from 'react';
-import { createPortal } from 'react-dom';
 
+import AdminDialog from '@/features/admin/components/AdminDialog';
 import AlertModal from '@/features/admin/components/AlertModal';
 import ConfirmModal from '@/features/admin/components/ConfirmModal';
 import { buttonStyles } from '@/features/admin/lib/buttonStyles';
@@ -18,6 +18,7 @@ import {
   canOperateUser,
   getSelectableUsers,
 } from '@/features/admin/lib/permissions';
+import { useModalState } from '@/hooks/useModalState';
 import { getAuthInfoFromBrowserCookie } from '@/lib/auth';
 
 interface UserConfigProps {
@@ -41,8 +42,9 @@ const UserConfig = ({ config, role, refreshConfig }: UserConfigProps) => {
   });
   const [showAddUserForm, setShowAddUserForm] = useState(false);
   const [showChangePasswordForm, setShowChangePasswordForm] = useState(false);
-  const [showAddUserGroupForm, setShowAddUserGroupForm] = useState(false);
-  const [showEditUserGroupForm, setShowEditUserGroupForm] = useState(false);
+  const [showAddUserGroupForm, setShowAddUserGroupForm] = useModalState(false);
+  const [showEditUserGroupForm, setShowEditUserGroupForm] =
+    useModalState(false);
   const [newUser, setNewUser] = useState({
     username: '',
     password: '',
@@ -60,7 +62,8 @@ const UserConfig = ({ config, role, refreshConfig }: UserConfigProps) => {
     name: string;
     enabledApis: string[];
   } | null>(null);
-  const [showConfigureApisModal, setShowConfigureApisModal] = useState(false);
+  const [showConfigureApisModal, setShowConfigureApisModal] =
+    useModalState(false);
   const [selectedUser, setSelectedUser] = useState<{
     username: string;
     role: 'user' | 'admin' | 'owner';
@@ -69,7 +72,7 @@ const UserConfig = ({ config, role, refreshConfig }: UserConfigProps) => {
   } | null>(null);
   const [selectedApis, setSelectedApis] = useState<string[]>([]);
   const [showConfigureUserGroupModal, setShowConfigureUserGroupModal] =
-    useState(false);
+    useModalState(false);
   const [selectedUserForGroup, setSelectedUserForGroup] = useState<{
     username: string;
     role: 'user' | 'admin' | 'owner';
@@ -77,10 +80,11 @@ const UserConfig = ({ config, role, refreshConfig }: UserConfigProps) => {
   } | null>(null);
   const [selectedUserGroups, setSelectedUserGroups] = useState<string[]>([]);
   const [selectedUsers, setSelectedUsers] = useState<Set<string>>(new Set());
-  const [showBatchUserGroupModal, setShowBatchUserGroupModal] = useState(false);
+  const [showBatchUserGroupModal, setShowBatchUserGroupModal] =
+    useModalState(false);
   const [selectedUserGroup, setSelectedUserGroup] = useState<string>('');
   const [showDeleteUserGroupModal, setShowDeleteUserGroupModal] =
-    useState(false);
+    useModalState(false);
   const [deletingUserGroup, setDeletingUserGroup] = useState<{
     name: string;
     affectedUsers: Array<{
@@ -88,7 +92,7 @@ const UserConfig = ({ config, role, refreshConfig }: UserConfigProps) => {
       role: 'user' | 'admin' | 'owner';
     }>;
   } | null>(null);
-  const [showDeleteUserModal, setShowDeleteUserModal] = useState(false);
+  const [showDeleteUserModal, setShowDeleteUserModal] = useModalState(false);
   const [deletingUser, setDeletingUser] = useState<string | null>(null);
 
   // 当前登录用户名
@@ -333,6 +337,33 @@ const UserConfig = ({ config, role, refreshConfig }: UserConfigProps) => {
     );
   };
 
+  const closeConfigureApisModal = () => {
+    setShowConfigureApisModal(false);
+    setSelectedUser(null);
+    setSelectedApis([]);
+  };
+
+  const closeAddUserGroupModal = () => {
+    setShowAddUserGroupForm(false);
+    setNewUserGroup({ name: '', enabledApis: [] });
+  };
+
+  const closeEditUserGroupModal = () => {
+    setShowEditUserGroupForm(false);
+    setEditingUserGroup(null);
+  };
+
+  const closeConfigureUserGroupModal = () => {
+    setShowConfigureUserGroupModal(false);
+    setSelectedUserForGroup(null);
+    setSelectedUserGroups([]);
+  };
+
+  const closeBatchUserGroupModal = () => {
+    setShowBatchUserGroupModal(false);
+    setSelectedUserGroup('');
+  };
+
   // 处理用户选择
   const handleSelectUser = useCallback((username: string, checked: boolean) => {
     setSelectedUsers((prev) => {
@@ -372,8 +403,7 @@ const UserConfig = ({ config, role, refreshConfig }: UserConfigProps) => {
 
         const userCount = selectedUsers.size;
         setSelectedUsers(new Set());
-        setShowBatchUserGroupModal(false);
-        setSelectedUserGroup('');
+        closeBatchUserGroupModal();
         showSuccess(
           `已为 ${userCount} 个用户设置用户组: ${userGroup}`,
           showAlert,
@@ -408,9 +438,7 @@ const UserConfig = ({ config, role, refreshConfig }: UserConfigProps) => {
 
         // 成功后刷新配置
         await refreshConfig();
-        setShowConfigureApisModal(false);
-        setSelectedUser(null);
-        setSelectedApis([]);
+        closeConfigureApisModal();
       } catch (err) {
         showError(err instanceof Error ? err.message : '操作失败', showAlert);
         throw err;
@@ -1084,666 +1112,469 @@ const UserConfig = ({ config, role, refreshConfig }: UserConfigProps) => {
       </div>
 
       {/* 配置用户采集源权限弹窗 */}
-      {showConfigureApisModal &&
-        selectedUser &&
-        createPortal(
-          <div
-            className='fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center p-4'
-            onClick={() => {
-              setShowConfigureApisModal(false);
-              setSelectedUser(null);
-              setSelectedApis([]);
-            }}
-          >
-            <div
-              className='bg-white dark:bg-gray-800 rounded-lg shadow-xl max-w-4xl w-full max-h-[80vh] overflow-y-auto'
-              onClick={(e) => e.stopPropagation()}
-            >
-              <div className='p-6'>
-                <div className='flex items-center justify-between mb-6'>
-                  <h3 className='text-xl font-semibold text-gray-900 dark:text-gray-100'>
-                    配置用户采集源权限 - {selectedUser.username}
-                  </h3>
-                  <button
-                    onClick={() => {
-                      setShowConfigureApisModal(false);
-                      setSelectedUser(null);
-                      setSelectedApis([]);
-                    }}
-                    className='text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 transition-colors'
-                  >
-                    <svg
-                      className='w-6 h-6'
-                      fill='none'
-                      stroke='currentColor'
-                      viewBox='0 0 24 24'
-                    >
-                      <path
-                        strokeLinecap='round'
-                        strokeLinejoin='round'
-                        strokeWidth={2}
-                        d='M6 18L18 6M6 6l12 12'
-                      />
-                    </svg>
-                  </button>
-                </div>
-
-                <div className='mb-6'>
-                  <div className='bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg p-4'>
-                    <div className='flex items-center space-x-2 mb-2'>
-                      <svg
-                        className='w-5 h-5 text-blue-600 dark:text-blue-400'
-                        fill='none'
-                        stroke='currentColor'
-                        viewBox='0 0 24 24'
-                      >
-                        <path
-                          strokeLinecap='round'
-                          strokeLinejoin='round'
-                          strokeWidth={2}
-                          d='M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z'
-                        />
-                      </svg>
-                      <span className='text-sm font-medium text-blue-800 dark:text-blue-300'>
-                        配置说明
-                      </span>
-                    </div>
-                    <p className='text-sm text-blue-700 dark:text-blue-400 mt-1'>
-                      提示：全不选为无限制，选中的采集源将限制用户只能访问这些源
-                    </p>
-                  </div>
-                </div>
-
-                {/* 采集源选择 - 多列布局 */}
-                <div className='mb-6'>
-                  <h4 className='text-sm font-medium text-gray-700 dark:text-gray-300 mb-4'>
-                    选择可用的采集源：
-                  </h4>
-                  <div className='grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4'>
-                    {config?.SourceConfig?.map((source) => (
-                      <label
-                        key={source.key}
-                        className='flex items-center space-x-3 p-3 border border-gray-200 dark:border-gray-700 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-800 cursor-pointer transition-colors'
-                      >
-                        <input
-                          type='checkbox'
-                          checked={selectedApis.includes(source.key)}
-                          onChange={(e) => {
-                            if (e.target.checked) {
-                              setSelectedApis([...selectedApis, source.key]);
-                            } else {
-                              setSelectedApis(
-                                selectedApis.filter(
-                                  (api) => api !== source.key,
-                                ),
-                              );
-                            }
-                          }}
-                          className='rounded border-gray-300 text-blue-600 focus:ring-blue-500 dark:border-gray-600 dark:bg-gray-700'
-                        />
-                        <div className='flex-1 min-w-0'>
-                          <div className='text-sm font-medium text-gray-900 dark:text-gray-100 truncate'>
-                            {source.name}
-                          </div>
-                          {source.api && (
-                            <div className='text-xs text-gray-500 dark:text-gray-400 truncate'>
-                              {extractDomain(source.api)}
-                            </div>
-                          )}
-                        </div>
-                      </label>
-                    ))}
-                  </div>
-                </div>
-
-                {/* 快速操作按钮 */}
-                <div className='flex flex-wrap items-center justify-between mb-6 p-4 bg-gray-50 dark:bg-gray-900 rounded-lg'>
-                  <div className='flex space-x-2'>
-                    <button
-                      onClick={() => setSelectedApis([])}
-                      className={buttonStyles.quickAction}
-                    >
-                      全不选（无限制）
-                    </button>
-                    <button
-                      onClick={() => {
-                        const allApis =
-                          config?.SourceConfig?.filter(
-                            (source) => !source.disabled,
-                          ).map((s) => s.key) || [];
-                        setSelectedApis(allApis);
-                      }}
-                      className={buttonStyles.quickAction}
-                    >
-                      全选
-                    </button>
-                  </div>
-                  <div className='text-sm text-gray-600 dark:text-gray-400'>
-                    已选择：
-                    <span className='font-medium text-blue-600 dark:text-blue-400'>
-                      {selectedApis.length > 0
-                        ? `${selectedApis.length} 个源`
-                        : '无限制'}
-                    </span>
-                  </div>
-                </div>
-
-                {/* 操作按钮 */}
-                <div className='flex justify-end space-x-3'>
-                  <button
-                    onClick={() => {
-                      setShowConfigureApisModal(false);
-                      setSelectedUser(null);
-                      setSelectedApis([]);
-                    }}
-                    className={`px-6 py-2.5 text-sm font-medium ${buttonStyles.secondary}`}
-                  >
-                    取消
-                  </button>
-                  <button
-                    onClick={handleSaveUserApis}
-                    disabled={isLoading(
-                      `saveUserApis_${selectedUser?.username}`,
-                    )}
-                    className={`px-6 py-2.5 text-sm font-medium ${
-                      isLoading(`saveUserApis_${selectedUser?.username}`)
-                        ? buttonStyles.disabled
-                        : buttonStyles.primary
-                    }`}
-                  >
-                    {isLoading(`saveUserApis_${selectedUser?.username}`)
-                      ? '配置中...'
-                      : '确认配置'}
-                  </button>
-                </div>
+      {selectedUser && (
+        <AdminDialog
+          isOpen={showConfigureApisModal}
+          title={`配置用户采集源权限 - ${selectedUser.username}`}
+          onClose={closeConfigureApisModal}
+          panelClassName='max-w-4xl max-h-[80vh] overflow-y-auto'
+        >
+          <div className='mb-6'>
+            <div className='rounded-lg border border-blue-200 bg-blue-50 p-4 dark:border-blue-800 dark:bg-blue-900/20'>
+              <div className='mb-2 flex items-center space-x-2'>
+                <svg
+                  className='h-5 w-5 text-blue-600 dark:text-blue-400'
+                  fill='none'
+                  stroke='currentColor'
+                  viewBox='0 0 24 24'
+                >
+                  <path
+                    strokeLinecap='round'
+                    strokeLinejoin='round'
+                    strokeWidth={2}
+                    d='M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z'
+                  />
+                </svg>
+                <span className='text-sm font-medium text-blue-800 dark:text-blue-300'>
+                  配置说明
+                </span>
               </div>
+              <p className='mt-1 text-sm text-blue-700 dark:text-blue-400'>
+                提示：全不选为无限制，选中的采集源将限制用户只能访问这些源
+              </p>
             </div>
-          </div>,
-          document.body,
-        )}
+          </div>
+
+          <div className='mb-6'>
+            <h4 className='mb-4 text-sm font-medium text-gray-700 dark:text-gray-300'>
+              选择可用的采集源：
+            </h4>
+            <div className='grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3'>
+              {config?.SourceConfig?.map((source) => (
+                <label
+                  key={source.key}
+                  className='flex cursor-pointer items-center space-x-3 rounded-lg border border-gray-200 p-3 transition-colors hover:bg-gray-50 dark:border-gray-700 dark:hover:bg-gray-800'
+                >
+                  <input
+                    type='checkbox'
+                    checked={selectedApis.includes(source.key)}
+                    onChange={(e) => {
+                      if (e.target.checked) {
+                        setSelectedApis([...selectedApis, source.key]);
+                      } else {
+                        setSelectedApis(
+                          selectedApis.filter((api) => api !== source.key),
+                        );
+                      }
+                    }}
+                    className='rounded border-gray-300 text-blue-600 focus:ring-blue-500 dark:border-gray-600 dark:bg-gray-700'
+                  />
+                  <div className='min-w-0 flex-1'>
+                    <div className='truncate text-sm font-medium text-gray-900 dark:text-gray-100'>
+                      {source.name}
+                    </div>
+                    {source.api && (
+                      <div className='truncate text-xs text-gray-500 dark:text-gray-400'>
+                        {extractDomain(source.api)}
+                      </div>
+                    )}
+                  </div>
+                </label>
+              ))}
+            </div>
+          </div>
+
+          <div className='mb-6 flex flex-wrap items-center justify-between rounded-lg bg-gray-50 p-4 dark:bg-gray-900'>
+            <div className='flex space-x-2'>
+              <button
+                onClick={() => setSelectedApis([])}
+                className={buttonStyles.quickAction}
+              >
+                全不选（无限制）
+              </button>
+              <button
+                onClick={() => {
+                  const allApis =
+                    config?.SourceConfig?.filter(
+                      (source) => !source.disabled,
+                    ).map((s) => s.key) || [];
+                  setSelectedApis(allApis);
+                }}
+                className={buttonStyles.quickAction}
+              >
+                全选
+              </button>
+            </div>
+            <div className='text-sm text-gray-600 dark:text-gray-400'>
+              已选择：
+              <span className='font-medium text-blue-600 dark:text-blue-400'>
+                {selectedApis.length > 0
+                  ? `${selectedApis.length} 个源`
+                  : '无限制'}
+              </span>
+            </div>
+          </div>
+
+          <div className='flex justify-end space-x-3'>
+            <button
+              onClick={closeConfigureApisModal}
+              className={`px-6 py-2.5 text-sm font-medium ${buttonStyles.secondary}`}
+            >
+              取消
+            </button>
+            <button
+              onClick={handleSaveUserApis}
+              disabled={isLoading(`saveUserApis_${selectedUser?.username}`)}
+              className={`px-6 py-2.5 text-sm font-medium ${
+                isLoading(`saveUserApis_${selectedUser?.username}`)
+                  ? buttonStyles.disabled
+                  : buttonStyles.primary
+              }`}
+            >
+              {isLoading(`saveUserApis_${selectedUser?.username}`)
+                ? '配置中...'
+                : '确认配置'}
+            </button>
+          </div>
+        </AdminDialog>
+      )}
 
       {/* 添加用户组弹窗 */}
-      {showAddUserGroupForm &&
-        createPortal(
-          <div
-            className='fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center p-4'
-            onClick={() => {
-              setShowAddUserGroupForm(false);
-              setNewUserGroup({ name: '', enabledApis: [] });
-            }}
-          >
-            <div
-              className='bg-white dark:bg-gray-800 rounded-lg shadow-xl max-w-4xl w-full max-h-[80vh] overflow-y-auto'
-              onClick={(e) => e.stopPropagation()}
-            >
-              <div className='p-6'>
-                <div className='flex items-center justify-between mb-6'>
-                  <h3 className='text-xl font-semibold text-gray-900 dark:text-gray-100'>
-                    添加新用户组
-                  </h3>
-                  <button
-                    onClick={() => {
-                      setShowAddUserGroupForm(false);
-                      setNewUserGroup({ name: '', enabledApis: [] });
-                    }}
-                    className='text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 transition-colors'
-                  >
-                    <svg
-                      className='w-6 h-6'
-                      fill='none'
-                      stroke='currentColor'
-                      viewBox='0 0 24 24'
-                    >
-                      <path
-                        strokeLinecap='round'
-                        strokeLinejoin='round'
-                        strokeWidth={2}
-                        d='M6 18L18 6M6 6l12 12'
-                      />
-                    </svg>
-                  </button>
-                </div>
+      <AdminDialog
+        isOpen={showAddUserGroupForm}
+        title='添加新用户组'
+        onClose={closeAddUserGroupModal}
+        panelClassName='max-w-4xl max-h-[80vh] overflow-y-auto'
+      >
+        <div className='space-y-6'>
+          {/* 用户组名称 */}
+          <div>
+            <label className='block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2'>
+              用户组名称
+            </label>
+            <input
+              type='text'
+              placeholder='请输入用户组名称'
+              value={newUserGroup.name}
+              onChange={(e) =>
+                setNewUserGroup((prev) => ({
+                  ...prev,
+                  name: e.target.value,
+                }))
+              }
+              className='w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:ring-2 focus:ring-blue-500 focus:border-transparent'
+            />
+          </div>
 
-                <div className='space-y-6'>
-                  {/* 用户组名称 */}
-                  <div>
-                    <label className='block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2'>
-                      用户组名称
-                    </label>
-                    <input
-                      type='text'
-                      placeholder='请输入用户组名称'
-                      value={newUserGroup.name}
-                      onChange={(e) =>
+          {/* 可用视频源 */}
+          <div>
+            <label className='block text-sm font-medium text-gray-700 dark:text-gray-300 mb-4'>
+              可用视频源
+            </label>
+            <div className='grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3'>
+              {config?.SourceConfig?.map((source) => (
+                <label
+                  key={source.key}
+                  className='flex items-center space-x-3 p-3 border border-gray-200 dark:border-gray-700 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-800 cursor-pointer transition-colors'
+                >
+                  <input
+                    type='checkbox'
+                    checked={newUserGroup.enabledApis.includes(source.key)}
+                    onChange={(e) => {
+                      if (e.target.checked) {
                         setNewUserGroup((prev) => ({
                           ...prev,
-                          name: e.target.value,
-                        }))
+                          enabledApis: [...prev.enabledApis, source.key],
+                        }));
+                      } else {
+                        setNewUserGroup((prev) => ({
+                          ...prev,
+                          enabledApis: prev.enabledApis.filter(
+                            (api) => api !== source.key,
+                          ),
+                        }));
                       }
-                      className='w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:ring-2 focus:ring-blue-500 focus:border-transparent'
-                    />
+                    }}
+                    className='rounded border-gray-300 text-blue-600 focus:ring-blue-500 dark:border-gray-600 dark:bg-gray-700'
+                  />
+                  <div className='flex-1 min-w-0'>
+                    <div className='text-sm font-medium text-gray-900 dark:text-gray-100 truncate'>
+                      {source.name}
+                    </div>
+                    {source.api && (
+                      <div className='text-xs text-gray-500 dark:text-gray-400 truncate'>
+                        {extractDomain(source.api)}
+                      </div>
+                    )}
                   </div>
+                </label>
+              ))}
+            </div>
 
-                  {/* 可用视频源 */}
-                  <div>
-                    <label className='block text-sm font-medium text-gray-700 dark:text-gray-300 mb-4'>
-                      可用视频源
-                    </label>
-                    <div className='grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3'>
-                      {config?.SourceConfig?.map((source) => (
-                        <label
-                          key={source.key}
-                          className='flex items-center space-x-3 p-3 border border-gray-200 dark:border-gray-700 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-800 cursor-pointer transition-colors'
-                        >
-                          <input
-                            type='checkbox'
-                            checked={newUserGroup.enabledApis.includes(
-                              source.key,
-                            )}
-                            onChange={(e) => {
-                              if (e.target.checked) {
-                                setNewUserGroup((prev) => ({
+            {/* 快速操作按钮 */}
+            <div className='mt-4 flex space-x-2'>
+              <button
+                onClick={() =>
+                  setNewUserGroup((prev) => ({
+                    ...prev,
+                    enabledApis: [],
+                  }))
+                }
+                className={buttonStyles.quickAction}
+              >
+                全不选（无限制）
+              </button>
+              <button
+                onClick={() => {
+                  const allApis =
+                    config?.SourceConfig?.filter(
+                      (source) => !source.disabled,
+                    ).map((s) => s.key) || [];
+                  setNewUserGroup((prev) => ({
+                    ...prev,
+                    enabledApis: allApis,
+                  }));
+                }}
+                className={buttonStyles.quickAction}
+              >
+                全选
+              </button>
+            </div>
+          </div>
+
+          {/* 操作按钮 */}
+          <div className='flex justify-end space-x-3 border-t border-gray-200 pt-4 dark:border-gray-700'>
+            <button
+              onClick={closeAddUserGroupModal}
+              className={`px-6 py-2.5 text-sm font-medium ${buttonStyles.secondary}`}
+            >
+              取消
+            </button>
+            <button
+              onClick={handleAddUserGroup}
+              disabled={
+                !newUserGroup.name.trim() || isLoading('userGroup_add_new')
+              }
+              className={`px-6 py-2.5 text-sm font-medium ${
+                !newUserGroup.name.trim() || isLoading('userGroup_add_new')
+                  ? buttonStyles.disabled
+                  : buttonStyles.primary
+              }`}
+            >
+              {isLoading('userGroup_add_new') ? '添加中...' : '添加用户组'}
+            </button>
+          </div>
+        </div>
+      </AdminDialog>
+
+      {/* 编辑用户组弹窗 */}
+      {editingUserGroup && (
+        <AdminDialog
+          isOpen={showEditUserGroupForm}
+          title={`编辑用户组 - ${editingUserGroup.name}`}
+          onClose={closeEditUserGroupModal}
+          panelClassName='max-w-4xl max-h-[80vh] overflow-y-auto'
+        >
+          <div className='space-y-6'>
+            {/* 可用视频源 */}
+            <div>
+              <label className='block text-sm font-medium text-gray-700 dark:text-gray-300 mb-4'>
+                可用视频源
+              </label>
+              <div className='grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3'>
+                {config?.SourceConfig?.map((source) => (
+                  <label
+                    key={source.key}
+                    className='flex items-center space-x-3 p-3 border border-gray-200 dark:border-gray-700 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-800 cursor-pointer transition-colors'
+                  >
+                    <input
+                      type='checkbox'
+                      checked={editingUserGroup.enabledApis.includes(
+                        source.key,
+                      )}
+                      onChange={(e) => {
+                        if (e.target.checked) {
+                          setEditingUserGroup((prev) =>
+                            prev
+                              ? {
                                   ...prev,
                                   enabledApis: [
                                     ...prev.enabledApis,
                                     source.key,
                                   ],
-                                }));
-                              } else {
-                                setNewUserGroup((prev) => ({
+                                }
+                              : null,
+                          );
+                        } else {
+                          setEditingUserGroup((prev) =>
+                            prev
+                              ? {
                                   ...prev,
                                   enabledApis: prev.enabledApis.filter(
                                     (api) => api !== source.key,
                                   ),
-                                }));
-                              }
-                            }}
-                            className='rounded border-gray-300 text-blue-600 focus:ring-blue-500 dark:border-gray-600 dark:bg-gray-700'
-                          />
-                          <div className='flex-1 min-w-0'>
-                            <div className='text-sm font-medium text-gray-900 dark:text-gray-100 truncate'>
-                              {source.name}
-                            </div>
-                            {source.api && (
-                              <div className='text-xs text-gray-500 dark:text-gray-400 truncate'>
-                                {extractDomain(source.api)}
-                              </div>
-                            )}
-                          </div>
-                        </label>
-                      ))}
-                    </div>
-
-                    {/* 快速操作按钮 */}
-                    <div className='mt-4 flex space-x-2'>
-                      <button
-                        onClick={() =>
-                          setNewUserGroup((prev) => ({
-                            ...prev,
-                            enabledApis: [],
-                          }))
-                        }
-                        className={buttonStyles.quickAction}
-                      >
-                        全不选（无限制）
-                      </button>
-                      <button
-                        onClick={() => {
-                          const allApis =
-                            config?.SourceConfig?.filter(
-                              (source) => !source.disabled,
-                            ).map((s) => s.key) || [];
-                          setNewUserGroup((prev) => ({
-                            ...prev,
-                            enabledApis: allApis,
-                          }));
-                        }}
-                        className={buttonStyles.quickAction}
-                      >
-                        全选
-                      </button>
-                    </div>
-                  </div>
-
-                  {/* 操作按钮 */}
-                  <div className='flex justify-end space-x-3 pt-4 border-t border-gray-200 dark:border-gray-700'>
-                    <button
-                      onClick={() => {
-                        setShowAddUserGroupForm(false);
-                        setNewUserGroup({ name: '', enabledApis: [] });
-                      }}
-                      className={`px-6 py-2.5 text-sm font-medium ${buttonStyles.secondary}`}
-                    >
-                      取消
-                    </button>
-                    <button
-                      onClick={handleAddUserGroup}
-                      disabled={
-                        !newUserGroup.name.trim() ||
-                        isLoading('userGroup_add_new')
-                      }
-                      className={`px-6 py-2.5 text-sm font-medium ${
-                        !newUserGroup.name.trim() ||
-                        isLoading('userGroup_add_new')
-                          ? buttonStyles.disabled
-                          : buttonStyles.primary
-                      }`}
-                    >
-                      {isLoading('userGroup_add_new')
-                        ? '添加中...'
-                        : '添加用户组'}
-                    </button>
-                  </div>
-                </div>
-              </div>
-            </div>
-          </div>,
-          document.body,
-        )}
-
-      {/* 编辑用户组弹窗 */}
-      {showEditUserGroupForm &&
-        editingUserGroup &&
-        createPortal(
-          <div
-            className='fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center p-4'
-            onClick={() => {
-              setShowEditUserGroupForm(false);
-              setEditingUserGroup(null);
-            }}
-          >
-            <div
-              className='bg-white dark:bg-gray-800 rounded-lg shadow-xl max-w-4xl w-full max-h-[80vh] overflow-y-auto'
-              onClick={(e) => e.stopPropagation()}
-            >
-              <div className='p-6'>
-                <div className='flex items-center justify-between mb-6'>
-                  <h3 className='text-xl font-semibold text-gray-900 dark:text-gray-100'>
-                    编辑用户组 - {editingUserGroup.name}
-                  </h3>
-                  <button
-                    onClick={() => {
-                      setShowEditUserGroupForm(false);
-                      setEditingUserGroup(null);
-                    }}
-                    className='text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 transition-colors'
-                  >
-                    <svg
-                      className='w-6 h-6'
-                      fill='none'
-                      stroke='currentColor'
-                      viewBox='0 0 24 24'
-                    >
-                      <path
-                        strokeLinecap='round'
-                        strokeLinejoin='round'
-                        strokeWidth={2}
-                        d='M6 18L18 6M6 6l12 12'
-                      />
-                    </svg>
-                  </button>
-                </div>
-
-                <div className='space-y-6'>
-                  {/* 可用视频源 */}
-                  <div>
-                    <label className='block text-sm font-medium text-gray-700 dark:text-gray-300 mb-4'>
-                      可用视频源
-                    </label>
-                    <div className='grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3'>
-                      {config?.SourceConfig?.map((source) => (
-                        <label
-                          key={source.key}
-                          className='flex items-center space-x-3 p-3 border border-gray-200 dark:border-gray-700 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-800 cursor-pointer transition-colors'
-                        >
-                          <input
-                            type='checkbox'
-                            checked={editingUserGroup.enabledApis.includes(
-                              source.key,
-                            )}
-                            onChange={(e) => {
-                              if (e.target.checked) {
-                                setEditingUserGroup((prev) =>
-                                  prev
-                                    ? {
-                                        ...prev,
-                                        enabledApis: [
-                                          ...prev.enabledApis,
-                                          source.key,
-                                        ],
-                                      }
-                                    : null,
-                                );
-                              } else {
-                                setEditingUserGroup((prev) =>
-                                  prev
-                                    ? {
-                                        ...prev,
-                                        enabledApis: prev.enabledApis.filter(
-                                          (api) => api !== source.key,
-                                        ),
-                                      }
-                                    : null,
-                                );
-                              }
-                            }}
-                            className='rounded border-gray-300 text-purple-600 focus:ring-purple-500 dark:border-gray-600 dark:bg-gray-700'
-                          />
-                          <div className='flex-1 min-w-0'>
-                            <div className='text-sm font-medium text-gray-900 dark:text-gray-100 truncate'>
-                              {source.name}
-                            </div>
-                            {source.api && (
-                              <div className='text-xs text-gray-500 dark:text-gray-400 truncate'>
-                                {extractDomain(source.api)}
-                              </div>
-                            )}
-                          </div>
-                        </label>
-                      ))}
-                    </div>
-
-                    {/* 快速操作按钮 */}
-                    <div className='mt-4 flex space-x-2'>
-                      <button
-                        onClick={() =>
-                          setEditingUserGroup((prev) =>
-                            prev ? { ...prev, enabledApis: [] } : null,
-                          )
-                        }
-                        className={buttonStyles.quickAction}
-                      >
-                        全不选（无限制）
-                      </button>
-                      <button
-                        onClick={() => {
-                          const allApis =
-                            config?.SourceConfig?.filter(
-                              (source) => !source.disabled,
-                            ).map((s) => s.key) || [];
-                          setEditingUserGroup((prev) =>
-                            prev ? { ...prev, enabledApis: allApis } : null,
+                                }
+                              : null,
                           );
-                        }}
-                        className={buttonStyles.quickAction}
-                      >
-                        全选
-                      </button>
-                    </div>
-                  </div>
-
-                  {/* 操作按钮 */}
-                  <div className='flex justify-end space-x-3 pt-4 border-t border-gray-200 dark:border-gray-700'>
-                    <button
-                      onClick={() => {
-                        setShowEditUserGroupForm(false);
-                        setEditingUserGroup(null);
+                        }
                       }}
-                      className={`px-6 py-2.5 text-sm font-medium ${buttonStyles.secondary}`}
-                    >
-                      取消
-                    </button>
-                    <button
-                      onClick={handleEditUserGroup}
-                      disabled={isLoading(
-                        `userGroup_edit_${editingUserGroup?.name}`,
+                      className='rounded border-gray-300 text-purple-600 focus:ring-purple-500 dark:border-gray-600 dark:bg-gray-700'
+                    />
+                    <div className='flex-1 min-w-0'>
+                      <div className='text-sm font-medium text-gray-900 dark:text-gray-100 truncate'>
+                        {source.name}
+                      </div>
+                      {source.api && (
+                        <div className='text-xs text-gray-500 dark:text-gray-400 truncate'>
+                          {extractDomain(source.api)}
+                        </div>
                       )}
-                      className={`px-6 py-2.5 text-sm font-medium ${
-                        isLoading(`userGroup_edit_${editingUserGroup?.name}`)
-                          ? buttonStyles.disabled
-                          : buttonStyles.primary
-                      }`}
-                    >
-                      {isLoading(`userGroup_edit_${editingUserGroup?.name}`)
-                        ? '保存中...'
-                        : '保存修改'}
-                    </button>
-                  </div>
-                </div>
+                    </div>
+                  </label>
+                ))}
+              </div>
+
+              {/* 快速操作按钮 */}
+              <div className='mt-4 flex space-x-2'>
+                <button
+                  onClick={() =>
+                    setEditingUserGroup((prev) =>
+                      prev ? { ...prev, enabledApis: [] } : null,
+                    )
+                  }
+                  className={buttonStyles.quickAction}
+                >
+                  全不选（无限制）
+                </button>
+                <button
+                  onClick={() => {
+                    const allApis =
+                      config?.SourceConfig?.filter(
+                        (source) => !source.disabled,
+                      ).map((s) => s.key) || [];
+                    setEditingUserGroup((prev) =>
+                      prev ? { ...prev, enabledApis: allApis } : null,
+                    );
+                  }}
+                  className={buttonStyles.quickAction}
+                >
+                  全选
+                </button>
               </div>
             </div>
-          </div>,
-          document.body,
-        )}
+
+            {/* 操作按钮 */}
+            <div className='flex justify-end space-x-3 border-t border-gray-200 pt-4 dark:border-gray-700'>
+              <button
+                onClick={closeEditUserGroupModal}
+                className={`px-6 py-2.5 text-sm font-medium ${buttonStyles.secondary}`}
+              >
+                取消
+              </button>
+              <button
+                onClick={handleEditUserGroup}
+                disabled={isLoading(`userGroup_edit_${editingUserGroup?.name}`)}
+                className={`px-6 py-2.5 text-sm font-medium ${
+                  isLoading(`userGroup_edit_${editingUserGroup?.name}`)
+                    ? buttonStyles.disabled
+                    : buttonStyles.primary
+                }`}
+              >
+                {isLoading(`userGroup_edit_${editingUserGroup?.name}`)
+                  ? '保存中...'
+                  : '保存修改'}
+              </button>
+            </div>
+          </div>
+        </AdminDialog>
+      )}
 
       {/* 配置用户组弹窗 */}
-      {showConfigureUserGroupModal &&
-        selectedUserForGroup &&
-        createPortal(
-          <div
-            className='fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center p-4'
-            onClick={() => {
-              setShowConfigureUserGroupModal(false);
-              setSelectedUserForGroup(null);
-              setSelectedUserGroups([]);
-            }}
-          >
-            <div
-              className='bg-white dark:bg-gray-800 rounded-lg shadow-xl max-w-4xl w-full max-h-[80vh] overflow-y-auto'
-              onClick={(e) => e.stopPropagation()}
-            >
-              <div className='p-6'>
-                <div className='flex items-center justify-between mb-6'>
-                  <h3 className='text-xl font-semibold text-gray-900 dark:text-gray-100'>
-                    配置用户组 - {selectedUserForGroup.username}
-                  </h3>
-                  <button
-                    onClick={() => {
-                      setShowConfigureUserGroupModal(false);
-                      setSelectedUserForGroup(null);
-                      setSelectedUserGroups([]);
-                    }}
-                    className='text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 transition-colors'
-                  >
-                    <svg
-                      className='w-6 h-6'
-                      fill='none'
-                      stroke='currentColor'
-                      viewBox='0 0 24 24'
-                    >
-                      <path
-                        strokeLinecap='round'
-                        strokeLinejoin='round'
-                        strokeWidth={2}
-                        d='M6 18L18 6M6 6l12 12'
-                      />
-                    </svg>
-                  </button>
-                </div>
-
-                <div className='mb-6'>
-                  <div className='bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg p-4'>
-                    <div className='flex items-center space-x-2 mb-2'>
-                      <svg
-                        className='w-5 h-5 text-blue-600 dark:text-blue-400'
-                        fill='none'
-                        stroke='currentColor'
-                        viewBox='0 0 24 24'
-                      >
-                        <path
-                          strokeLinecap='round'
-                          strokeLinejoin='round'
-                          strokeWidth={2}
-                          d='M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z'
-                        />
-                      </svg>
-                      <span className='text-sm font-medium text-blue-800 dark:text-blue-300'>
-                        配置说明
-                      </span>
-                    </div>
-                    <p className='text-sm text-blue-700 dark:text-blue-400 mt-1'>
-                      提示：选择"无用户组"为无限制，选择特定用户组将限制用户只能访问该用户组允许的采集源
-                    </p>
-                  </div>
-                </div>
-
-                {/* 用户组选择 - 下拉选择器 */}
-                <div className='mb-6'>
-                  <label className='block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2'>
-                    选择用户组：
-                  </label>
-                  <select
-                    value={
-                      selectedUserGroups.length > 0 ? selectedUserGroups[0] : ''
-                    }
-                    onChange={(e) => {
-                      const value = e.target.value;
-                      setSelectedUserGroups(value ? [value] : []);
-                    }}
-                    className='w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-colors'
-                  >
-                    <option value=''>无用户组（无限制）</option>
-                    {userGroups.map((group) => (
-                      <option key={group.name} value={group.name}>
-                        {group.name}{' '}
-                        {group.enabledApis && group.enabledApis.length > 0
-                          ? `(${group.enabledApis.length} 个源)`
-                          : ''}
-                      </option>
-                    ))}
-                  </select>
-                  <p className='mt-2 text-xs text-gray-500 dark:text-gray-400'>
-                    选择"无用户组"为无限制，选择特定用户组将限制用户只能访问该用户组允许的采集源
-                  </p>
-                </div>
-
-                {/* 操作按钮 */}
-                <div className='flex justify-end space-x-3'>
-                  <button
-                    onClick={() => {
-                      setShowConfigureUserGroupModal(false);
-                      setSelectedUserForGroup(null);
-                      setSelectedUserGroups([]);
-                    }}
-                    className={`px-6 py-2.5 text-sm font-medium ${buttonStyles.secondary}`}
-                  >
-                    取消
-                  </button>
-                  <button
-                    onClick={handleSaveUserGroups}
-                    disabled={isLoading(
-                      `saveUserGroups_${selectedUserForGroup?.username}`,
-                    )}
-                    className={`px-6 py-2.5 text-sm font-medium ${
-                      isLoading(
-                        `saveUserGroups_${selectedUserForGroup?.username}`,
-                      )
-                        ? buttonStyles.disabled
-                        : buttonStyles.primary
-                    }`}
-                  >
-                    {isLoading(
-                      `saveUserGroups_${selectedUserForGroup?.username}`,
-                    )
-                      ? '配置中...'
-                      : '确认配置'}
-                  </button>
-                </div>
+      {selectedUserForGroup && (
+        <AdminDialog
+          isOpen={showConfigureUserGroupModal}
+          title={`配置用户组 - ${selectedUserForGroup.username}`}
+          onClose={closeConfigureUserGroupModal}
+          panelClassName='max-w-4xl max-h-[80vh] overflow-y-auto'
+        >
+          <div className='mb-6'>
+            <div className='rounded-lg border border-blue-200 bg-blue-50 p-4 dark:border-blue-800 dark:bg-blue-900/20'>
+              <div className='mb-2 flex items-center space-x-2'>
+                <svg
+                  className='h-5 w-5 text-blue-600 dark:text-blue-400'
+                  fill='none'
+                  stroke='currentColor'
+                  viewBox='0 0 24 24'
+                >
+                  <path
+                    strokeLinecap='round'
+                    strokeLinejoin='round'
+                    strokeWidth={2}
+                    d='M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z'
+                  />
+                </svg>
+                <span className='text-sm font-medium text-blue-800 dark:text-blue-300'>
+                  配置说明
+                </span>
               </div>
+              <p className='mt-1 text-sm text-blue-700 dark:text-blue-400'>
+                提示：选择"无用户组"为无限制，选择特定用户组将限制用户只能访问该用户组允许的采集源
+              </p>
             </div>
-          </div>,
-          document.body,
-        )}
+          </div>
+
+          <div className='mb-6'>
+            <label className='mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300'>
+              选择用户组：
+            </label>
+            <select
+              value={selectedUserGroups.length > 0 ? selectedUserGroups[0] : ''}
+              onChange={(e) => {
+                const value = e.target.value;
+                setSelectedUserGroups(value ? [value] : []);
+              }}
+              className='w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-gray-900 transition-colors focus:border-transparent focus:ring-2 focus:ring-blue-500 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100'
+            >
+              <option value=''>无用户组（无限制）</option>
+              {userGroups.map((group) => (
+                <option key={group.name} value={group.name}>
+                  {group.name}{' '}
+                  {group.enabledApis && group.enabledApis.length > 0
+                    ? `(${group.enabledApis.length} 个源)`
+                    : ''}
+                </option>
+              ))}
+            </select>
+            <p className='mt-2 text-xs text-gray-500 dark:text-gray-400'>
+              选择"无用户组"为无限制，选择特定用户组将限制用户只能访问该用户组允许的采集源
+            </p>
+          </div>
+
+          <div className='flex justify-end space-x-3'>
+            <button
+              onClick={closeConfigureUserGroupModal}
+              className={`px-6 py-2.5 text-sm font-medium ${buttonStyles.secondary}`}
+            >
+              取消
+            </button>
+            <button
+              onClick={handleSaveUserGroups}
+              disabled={isLoading(
+                `saveUserGroups_${selectedUserForGroup?.username}`,
+              )}
+              className={`px-6 py-2.5 text-sm font-medium ${
+                isLoading(`saveUserGroups_${selectedUserForGroup?.username}`)
+                  ? buttonStyles.disabled
+                  : buttonStyles.primary
+              }`}
+            >
+              {isLoading(`saveUserGroups_${selectedUserForGroup?.username}`)
+                ? '配置中...'
+                : '确认配置'}
+            </button>
+          </div>
+        </AdminDialog>
+      )}
 
       {/* 删除用户组确认弹窗 */}
       <ConfirmModal
@@ -1898,126 +1729,83 @@ const UserConfig = ({ config, role, refreshConfig }: UserConfigProps) => {
       </ConfirmModal>
 
       {/* 批量设置用户组弹窗 */}
-      {showBatchUserGroupModal &&
-        createPortal(
-          <div
-            className='fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center p-4'
-            onClick={() => {
-              setShowBatchUserGroupModal(false);
-              setSelectedUserGroup('');
-            }}
-          >
-            <div
-              className='bg-white dark:bg-gray-800 rounded-lg shadow-xl max-w-2xl w-full'
-              onClick={(e) => e.stopPropagation()}
-            >
-              <div className='p-6'>
-                <div className='flex items-center justify-between mb-6'>
-                  <h3 className='text-xl font-semibold text-gray-900 dark:text-gray-100'>
-                    批量设置用户组
-                  </h3>
-                  <button
-                    onClick={() => {
-                      setShowBatchUserGroupModal(false);
-                      setSelectedUserGroup('');
-                    }}
-                    className='text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 transition-colors'
-                  >
-                    <svg
-                      className='w-6 h-6'
-                      fill='none'
-                      stroke='currentColor'
-                      viewBox='0 0 24 24'
-                    >
-                      <path
-                        strokeLinecap='round'
-                        strokeLinejoin='round'
-                        strokeWidth={2}
-                        d='M6 18L18 6M6 6l12 12'
-                      />
-                    </svg>
-                  </button>
-                </div>
-
-                <div className='mb-6'>
-                  <div className='bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg p-4 mb-4'>
-                    <div className='flex items-center space-x-2 mb-2'>
-                      <svg
-                        className='w-5 h-5 text-blue-600 dark:text-blue-400'
-                        fill='none'
-                        stroke='currentColor'
-                        viewBox='0 0 24 24'
-                      >
-                        <path
-                          strokeLinecap='round'
-                          strokeLinejoin='round'
-                          strokeWidth={2}
-                          d='M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z'
-                        />
-                      </svg>
-                      <span className='text-sm font-medium text-blue-800 dark:text-blue-300'>
-                        批量操作说明
-                      </span>
-                    </div>
-                    <p className='text-sm text-blue-700 dark:text-blue-400'>
-                      将为选中的 <strong>{selectedUsers.size} 个用户</strong>{' '}
-                      设置用户组，选择"无用户组"为无限制
-                    </p>
-                  </div>
-
-                  <div>
-                    <label className='block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2'>
-                      选择用户组：
-                    </label>
-                    <select
-                      onChange={(e) => setSelectedUserGroup(e.target.value)}
-                      className='w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-colors'
-                      value={selectedUserGroup}
-                    >
-                      <option value=''>无用户组（无限制）</option>
-                      {userGroups.map((group) => (
-                        <option key={group.name} value={group.name}>
-                          {group.name}{' '}
-                          {group.enabledApis && group.enabledApis.length > 0
-                            ? `(${group.enabledApis.length} 个源)`
-                            : ''}
-                        </option>
-                      ))}
-                    </select>
-                    <p className='mt-2 text-xs text-gray-500 dark:text-gray-400'>
-                      选择"无用户组"为无限制，选择特定用户组将限制用户只能访问该用户组允许的采集源
-                    </p>
-                  </div>
-                </div>
-
-                {/* 操作按钮 */}
-                <div className='flex justify-end space-x-3'>
-                  <button
-                    onClick={() => {
-                      setShowBatchUserGroupModal(false);
-                      setSelectedUserGroup('');
-                    }}
-                    className={`px-6 py-2.5 text-sm font-medium ${buttonStyles.secondary}`}
-                  >
-                    取消
-                  </button>
-                  <button
-                    onClick={() => handleBatchSetUserGroup(selectedUserGroup)}
-                    disabled={isLoading('batchSetUserGroup')}
-                    className={`px-6 py-2.5 text-sm font-medium ${
-                      isLoading('batchSetUserGroup')
-                        ? buttonStyles.disabled
-                        : buttonStyles.primary
-                    }`}
-                  >
-                    {isLoading('batchSetUserGroup') ? '设置中...' : '确认设置'}
-                  </button>
-                </div>
-              </div>
+      <AdminDialog
+        isOpen={showBatchUserGroupModal}
+        title='批量设置用户组'
+        onClose={closeBatchUserGroupModal}
+        panelClassName='max-w-2xl'
+      >
+        <div className='mb-6'>
+          <div className='mb-4 rounded-lg border border-blue-200 bg-blue-50 p-4 dark:border-blue-800 dark:bg-blue-900/20'>
+            <div className='mb-2 flex items-center space-x-2'>
+              <svg
+                className='h-5 w-5 text-blue-600 dark:text-blue-400'
+                fill='none'
+                stroke='currentColor'
+                viewBox='0 0 24 24'
+              >
+                <path
+                  strokeLinecap='round'
+                  strokeLinejoin='round'
+                  strokeWidth={2}
+                  d='M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z'
+                />
+              </svg>
+              <span className='text-sm font-medium text-blue-800 dark:text-blue-300'>
+                批量操作说明
+              </span>
             </div>
-          </div>,
-          document.body,
-        )}
+            <p className='text-sm text-blue-700 dark:text-blue-400'>
+              将为选中的 <strong>{selectedUsers.size} 个用户</strong>{' '}
+              设置用户组，选择"无用户组"为无限制
+            </p>
+          </div>
+
+          <div>
+            <label className='mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300'>
+              选择用户组：
+            </label>
+            <select
+              onChange={(e) => setSelectedUserGroup(e.target.value)}
+              className='w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-gray-900 transition-colors focus:border-transparent focus:ring-2 focus:ring-blue-500 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100'
+              value={selectedUserGroup}
+            >
+              <option value=''>无用户组（无限制）</option>
+              {userGroups.map((group) => (
+                <option key={group.name} value={group.name}>
+                  {group.name}{' '}
+                  {group.enabledApis && group.enabledApis.length > 0
+                    ? `(${group.enabledApis.length} 个源)`
+                    : ''}
+                </option>
+              ))}
+            </select>
+            <p className='mt-2 text-xs text-gray-500 dark:text-gray-400'>
+              选择"无用户组"为无限制，选择特定用户组将限制用户只能访问该用户组允许的采集源
+            </p>
+          </div>
+        </div>
+
+        <div className='flex justify-end space-x-3'>
+          <button
+            onClick={closeBatchUserGroupModal}
+            className={`px-6 py-2.5 text-sm font-medium ${buttonStyles.secondary}`}
+          >
+            取消
+          </button>
+          <button
+            onClick={() => handleBatchSetUserGroup(selectedUserGroup)}
+            disabled={isLoading('batchSetUserGroup')}
+            className={`px-6 py-2.5 text-sm font-medium ${
+              isLoading('batchSetUserGroup')
+                ? buttonStyles.disabled
+                : buttonStyles.primary
+            }`}
+          >
+            {isLoading('batchSetUserGroup') ? '设置中...' : '确认设置'}
+          </button>
+        </div>
+      </AdminDialog>
 
       {/* 通用弹窗组件 */}
       <AlertModal

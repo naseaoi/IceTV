@@ -5,6 +5,7 @@ import {
   Clapperboard,
   RefreshCw,
   Search,
+  X,
   Zap,
 } from 'lucide-react';
 import { ReactNode } from 'react';
@@ -17,6 +18,7 @@ type LoadingStage = 'searching' | 'preferring' | 'fetching' | 'ready';
 interface PlayLoadingViewProps {
   loadingStage: LoadingStage;
   loadingMessage: string;
+  onBack: () => void;
 }
 
 interface PlayErrorViewProps {
@@ -42,6 +44,7 @@ function getLoadingStageIcon(loadingStage: LoadingStage): ReactNode {
 export function PlayLoadingView({
   loadingStage,
   loadingMessage,
+  onBack,
 }: PlayLoadingViewProps) {
   const loadingStageOrder: LoadingStage[] = [
     'searching',
@@ -55,47 +58,57 @@ export function PlayLoadingView({
 
   return (
     <PageLayout activePath='/play'>
-      <div className='flex items-center justify-center min-h-screen bg-transparent'>
-        <LoadingStatePanel
-          icon={getLoadingStageIcon(loadingStage)}
-          tone='emerald'
-          title='正在加载'
-          message={loadingMessage}
-          progress={loadingProgress}
-          steps={[
-            {
-              label: '搜索',
-              status:
-                loadingStage === 'searching'
-                  ? 'active'
-                  : loadingStageIndex > 0
-                    ? 'done'
-                    : 'pending',
-            },
-            {
-              label: '优选',
-              status:
-                loadingStage === 'preferring'
-                  ? 'active'
-                  : loadingStageIndex > 1
-                    ? 'done'
-                    : 'pending',
-            },
-            {
-              label: '详情',
-              status:
-                loadingStage === 'fetching'
-                  ? 'active'
-                  : loadingStageIndex > 2
-                    ? 'done'
-                    : 'pending',
-            },
-            {
-              label: '完成',
-              status: loadingStage === 'ready' ? 'active' : 'pending',
-            },
-          ]}
-        />
+      <div className='fixed inset-0 z-40 flex items-center justify-center bg-white dark:bg-gray-950 overflow-hidden'>
+        <div className='flex flex-col items-center gap-4'>
+          <LoadingStatePanel
+            icon={getLoadingStageIcon(loadingStage)}
+            tone='emerald'
+            title='正在加载'
+            message={loadingMessage}
+            progress={loadingProgress}
+            steps={[
+              {
+                label: '搜索',
+                status:
+                  loadingStage === 'searching'
+                    ? 'active'
+                    : loadingStageIndex > 0
+                      ? 'done'
+                      : 'pending',
+              },
+              {
+                label: '优选',
+                status:
+                  loadingStage === 'preferring'
+                    ? 'active'
+                    : loadingStageIndex > 1
+                      ? 'done'
+                      : 'pending',
+              },
+              {
+                label: '详情',
+                status:
+                  loadingStage === 'fetching'
+                    ? 'active'
+                    : loadingStageIndex > 2
+                      ? 'done'
+                      : 'pending',
+              },
+              {
+                label: '完成',
+                status: loadingStage === 'ready' ? 'active' : 'pending',
+              },
+            ]}
+          />
+          <button
+            onClick={onBack}
+            aria-label='取消加载'
+            title='取消加载'
+            className='inline-flex items-center justify-center w-9 h-9 rounded-full bg-gray-100 hover:bg-gray-200 text-gray-700 dark:bg-gray-800 dark:hover:bg-gray-700 dark:text-gray-200 transition-colors'
+          >
+            <X className='w-5 h-5' />
+          </button>
+        </div>
       </div>
     </PageLayout>
   );

@@ -3,6 +3,8 @@
 
 import { useEffect, useState } from 'react';
 
+import { History } from 'lucide-react';
+
 import type { PlayRecord } from '@/lib/db.client';
 import {
   clearAllPlayRecords,
@@ -12,6 +14,7 @@ import {
 
 import ScrollableRow from '@/components/ScrollableRow';
 import VideoCard from '@/components/VideoCard';
+import ConfirmModal from '@/components/modals/ConfirmModal';
 
 interface ContinueWatchingProps {
   className?: string;
@@ -22,6 +25,7 @@ export default function ContinueWatching({ className }: ContinueWatchingProps) {
     (PlayRecord & { key: string })[]
   >([]);
   const [loading, setLoading] = useState(true);
+  const [showClearConfirm, setShowClearConfirm] = useState(false);
 
   // 处理播放记录数据更新的函数
   const updatePlayRecords = (allRecords: Record<string, PlayRecord>) => {
@@ -33,7 +37,7 @@ export default function ContinueWatching({ className }: ContinueWatchingProps) {
 
     // 按 save_time 降序排序（最新的在前面）
     const sortedRecords = recordsArray.sort(
-      (a, b) => b.save_time - a.save_time
+      (a, b) => b.save_time - a.save_time,
     );
 
     setPlayRecords(sortedRecords);
@@ -62,7 +66,7 @@ export default function ContinueWatching({ className }: ContinueWatchingProps) {
       'playRecordsUpdated',
       (newRecords: Record<string, PlayRecord>) => {
         updatePlayRecords(newRecords);
-      }
+      },
     );
 
     return unsubscribe;
@@ -86,69 +90,84 @@ export default function ContinueWatching({ className }: ContinueWatchingProps) {
   };
 
   return (
-    <section className={`mb-8 ${className || ''}`}>
-      <div className='mb-4 flex items-center justify-between'>
-        <h2 className='text-xl font-bold text-gray-800 dark:text-gray-200'>
-          继续观看
-        </h2>
-        {!loading && playRecords.length > 0 && (
-          <button
-            className='text-sm text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200'
-            onClick={async () => {
-              await clearAllPlayRecords();
-              setPlayRecords([]);
-            }}
-          >
-            清空
-          </button>
-        )}
-      </div>
-      <ScrollableRow>
-        {loading
-          ? // 加载状态显示灰色占位数据
-            Array.from({ length: 6 }).map((_, index) => (
-              <div
-                key={index}
-                className='min-w-[96px] w-24 sm:min-w-[180px] sm:w-44'
-              >
-                <div className='relative aspect-[2/3] w-full overflow-hidden rounded-lg bg-gray-200 animate-pulse dark:bg-gray-800'>
-                  <div className='absolute inset-0 bg-gray-300 dark:bg-gray-700'></div>
-                </div>
-                <div className='mt-2 h-4 bg-gray-200 rounded animate-pulse dark:bg-gray-800'></div>
-                <div className='mt-1 h-3 bg-gray-200 rounded animate-pulse dark:bg-gray-800'></div>
-              </div>
-            ))
-          : // 显示真实数据
-            playRecords.map((record) => {
-              const { source, id } = parseKey(record.key);
-              return (
+    <>
+      <section className={`mb-8 ${className || ''}`}>
+        <div className='mb-4 flex items-center justify-between'>
+          <h2 className='flex items-center gap-2 text-xl font-bold text-gray-800 dark:text-gray-200'>
+            <History className='w-5 h-5 text-orange-500' />
+            继续观看
+          </h2>
+          {!loading && playRecords.length > 0 && (
+            <button
+              className='text-sm text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200'
+              onClick={() => setShowClearConfirm(true)}
+            >
+              清空
+            </button>
+          )}
+        </div>
+        <ScrollableRow>
+          {loading
+            ? // 加载状态显示灰色占位数据
+              Array.from({ length: 6 }).map((_, index) => (
                 <div
-                  key={record.key}
+                  key={index}
                   className='min-w-[96px] w-24 sm:min-w-[180px] sm:w-44'
                 >
-                  <VideoCard
-                    id={id}
-                    title={record.title}
-                    poster={record.cover}
-                    year={record.year}
-                    source={source}
-                    source_name={record.source_name}
-                    progress={getProgress(record)}
-                    episodes={record.total_episodes}
-                    currentEpisode={record.index}
-                    query={record.search_title}
-                    from='playrecord'
-                    onDelete={() =>
-                      setPlayRecords((prev) =>
-                        prev.filter((r) => r.key !== record.key)
-                      )
-                    }
-                    type={record.total_episodes > 1 ? 'tv' : ''}
-                  />
+                  <div className='relative aspect-[2/3] w-full overflow-hidden rounded-lg bg-gray-200 animate-pulse dark:bg-gray-800'>
+                    <div className='absolute inset-0 bg-gray-300 dark:bg-gray-700'></div>
+                  </div>
+                  <div className='mt-2 h-4 bg-gray-200 rounded animate-pulse dark:bg-gray-800'></div>
+                  <div className='mt-1 h-3 bg-gray-200 rounded animate-pulse dark:bg-gray-800'></div>
                 </div>
-              );
-            })}
-      </ScrollableRow>
-    </section>
+              ))
+            : // 显示真实数据
+              playRecords.map((record) => {
+                const { source, id } = parseKey(record.key);
+                return (
+                  <div
+                    key={record.key}
+                    className='min-w-[96px] w-24 sm:min-w-[180px] sm:w-44'
+                  >
+                    <VideoCard
+                      id={id}
+                      title={record.title}
+                      poster={record.cover}
+                      year={record.year}
+                      source={source}
+                      source_name={record.source_name}
+                      progress={getProgress(record)}
+                      episodes={record.total_episodes}
+                      currentEpisode={record.index}
+                      query={record.search_title}
+                      from='playrecord'
+                      onDelete={() =>
+                        setPlayRecords((prev) =>
+                          prev.filter((r) => r.key !== record.key),
+                        )
+                      }
+                      type={record.total_episodes > 1 ? 'tv' : ''}
+                    />
+                  </div>
+                );
+              })}
+        </ScrollableRow>
+      </section>
+
+      <ConfirmModal
+        isOpen={showClearConfirm}
+        title='确认清空继续观看记录？'
+        message='该操作会删除所有继续观看记录，删除后无法恢复。'
+        danger
+        cancelText='再想想'
+        confirmText='确认清空'
+        onCancel={() => setShowClearConfirm(false)}
+        onConfirm={async () => {
+          await clearAllPlayRecords();
+          setPlayRecords([]);
+          setShowClearConfirm(false);
+        }}
+      />
+    </>
   );
 }

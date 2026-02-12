@@ -1,152 +1,14 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 'use client';
 
-import {
-  AlertCircle,
-  AlertTriangle,
-  CheckCircle,
-  Download,
-  FileCheck,
-  Lock,
-  Upload,
-} from 'lucide-react';
-import { useEffect, useRef, useState } from 'react';
-import { createPortal } from 'react-dom';
+import { AlertTriangle, Download, FileCheck, Lock, Upload } from 'lucide-react';
+import { useRef, useState } from 'react';
+
+import AlertModal from '@/features/admin/components/AlertModal';
 
 interface DataMigrationProps {
   onRefreshConfig?: () => Promise<void>;
 }
-
-interface AlertModalProps {
-  isOpen: boolean;
-  onClose: () => void;
-  type: 'success' | 'error' | 'warning';
-  title: string;
-  message?: string;
-  html?: string;
-  confirmText?: string;
-  onConfirm?: () => void;
-  showConfirm?: boolean;
-  timer?: number;
-}
-
-const AlertModal = ({
-  isOpen,
-  onClose,
-  type,
-  title,
-  message,
-  html,
-  confirmText = '确定',
-  onConfirm,
-  showConfirm = false,
-  timer,
-}: AlertModalProps) => {
-  const [isVisible, setIsVisible] = useState(false);
-
-  // 控制动画状态
-  useEffect(() => {
-    if (isOpen) {
-      setIsVisible(true);
-      if (timer) {
-        setTimeout(() => {
-          onClose();
-        }, timer);
-      }
-    } else {
-      setIsVisible(false);
-    }
-  }, [isOpen, timer, onClose]);
-
-  if (!isOpen) return null;
-
-  const getIcon = () => {
-    switch (type) {
-      case 'success':
-        return <CheckCircle className='w-12 h-12 text-green-500' />;
-      case 'error':
-        return <AlertCircle className='w-12 h-12 text-red-500' />;
-      case 'warning':
-        return <AlertTriangle className='w-12 h-12 text-yellow-500' />;
-      default:
-        return null;
-    }
-  };
-
-  const getBgColor = () => {
-    switch (type) {
-      case 'success':
-        return 'bg-green-50 dark:bg-green-900/20 border-green-200 dark:border-green-800';
-      case 'error':
-        return 'bg-red-50 dark:bg-red-900/20 border-red-200 dark:border-red-800';
-      case 'warning':
-        return 'bg-yellow-50 dark:bg-yellow-900/20 border-yellow-200 dark:border-yellow-800';
-      default:
-        return 'bg-blue-50 dark:bg-blue-900/20 border-blue-200 dark:border-blue-800';
-    }
-  };
-
-  return createPortal(
-    <div
-      className={`fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center p-4 transition-opacity duration-200 ${isVisible ? 'opacity-100' : 'opacity-0'}`}
-      onClick={onClose}
-    >
-      <div
-        className={`bg-white dark:bg-gray-800 rounded-lg shadow-xl max-w-md w-full border ${getBgColor()} transition-all duration-200 ${isVisible ? 'scale-100' : 'scale-95'}`}
-        onClick={(e) => e.stopPropagation()}
-      >
-        <div className='p-6 text-center'>
-          <div className='flex justify-center mb-4'>{getIcon()}</div>
-
-          <h3 className='text-lg font-semibold text-gray-900 dark:text-gray-100 mb-2'>
-            {title}
-          </h3>
-
-          {message && (
-            <p className='text-gray-600 dark:text-gray-400 mb-4'>{message}</p>
-          )}
-
-          {html && (
-            <div
-              className='text-left text-gray-600 dark:text-gray-400 mb-4'
-              dangerouslySetInnerHTML={{ __html: html }}
-            />
-          )}
-
-          <div className='flex justify-center space-x-3'>
-            {showConfirm && onConfirm ? (
-              <>
-                <button
-                  onClick={onClose}
-                  className='px-4 py-2 text-sm font-medium text-gray-700 dark:text-gray-300 bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 rounded-lg transition-colors'
-                >
-                  取消
-                </button>
-                <button
-                  onClick={() => {
-                    onConfirm();
-                    onClose();
-                  }}
-                  className='px-4 py-2 text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 rounded-lg transition-colors'
-                >
-                  {confirmText}
-                </button>
-              </>
-            ) : (
-              <button
-                onClick={onClose}
-                className='px-4 py-2 text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 rounded-lg transition-colors'
-              >
-                确定
-              </button>
-            )}
-          </div>
-        </div>
-      </div>
-    </div>,
-    document.body,
-  );
-};
 
 const DataMigration = ({ onRefreshConfig }: DataMigrationProps) => {
   const [exportPassword, setExportPassword] = useState('');
@@ -520,7 +382,7 @@ const DataMigration = ({ onRefreshConfig }: DataMigrationProps) => {
         html={alertModal.html}
         confirmText={alertModal.confirmText}
         onConfirm={alertModal.onConfirm}
-        showConfirm={alertModal.showConfirm}
+        showConfirm={alertModal.showConfirm ?? true}
         timer={alertModal.timer}
       />
     </>

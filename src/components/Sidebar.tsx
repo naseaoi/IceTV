@@ -127,7 +127,10 @@ const Sidebar = ({ onToggle, activePath = '/' }: SidebarProps) => {
   }, [isCollapsed, onToggle]);
 
   useEffect(() => {
+    router.prefetch('/');
     router.prefetch('/search');
+    router.prefetch('/douban?type=movie');
+    router.prefetch('/live');
   }, [router]);
 
   const contextValue = {

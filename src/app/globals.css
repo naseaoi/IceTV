@@ -103,17 +103,27 @@ html:not(.dark) body {
   display: none; /* Chrome, Safari, Opera */
 }
 
-/* View Transitions API 动画 */
+/* View Transitions API 动画 —— 允许动画期间交互 */
+::view-transition {
+  pointer-events: none;
+}
+
 ::view-transition-old(root) {
   animation: none;
   mix-blend-mode: normal;
   z-index: 1;
+  pointer-events: none;
 }
 
 ::view-transition-new(root) {
   animation: none;
   mix-blend-mode: normal;
   z-index: 2;
+  pointer-events: none;
+}
+
+::view-transition-group(root) {
+  pointer-events: none;
 }
 
 /* 强制播放器内部的 video 元素高度为 100%，并保持内容完整显示 */

@@ -84,8 +84,8 @@ export function ThemeToggle() {
             ],
           },
           {
-            duration: 780,
-            easing: 'cubic-bezier(0.22, 1, 0.36, 1)',
+            duration: 380,
+            easing: 'cubic-bezier(0.33, 1, 0.68, 1)',
             pseudoElement: '::view-transition-new(root)',
           },
         );

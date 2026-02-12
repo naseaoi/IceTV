@@ -11,10 +11,12 @@ interface PageLayoutProps {
 }
 
 const PageLayout = ({ children, activePath = '/' }: PageLayoutProps) => {
+  const showBack = ['/play', '/live'].includes(activePath);
+
   return (
     <div className='w-full min-h-screen'>
       {/* 移动端头部 */}
-      <MobileHeader showBackButton={['/play', '/live'].includes(activePath)} />
+      <MobileHeader showBackButton={showBack} />
 
       {/* 主要布局容器 */}
       <div className='flex md:grid md:grid-cols-[auto_1fr] w-full min-h-screen md:min-h-auto'>
@@ -24,18 +26,15 @@ const PageLayout = ({ children, activePath = '/' }: PageLayoutProps) => {
         </div>
 
         {/* 主内容区域 */}
-        <div className='relative min-w-0 flex-1 transition-all duration-300'>
-          {/* 桌面端左上角返回按钮 */}
-          {['/play', '/live'].includes(activePath) && (
-            <div className='absolute top-3 left-1 z-20 hidden md:flex'>
-              <BackButton />
+        <div className='min-w-0 flex-1 transition-all duration-300'>
+          {/* 桌面端顶部工具栏 */}
+          <div className='hidden md:flex items-center justify-end px-4 sm:px-10 py-2 gap-1'>
+            <div className='flex items-center w-full max-w-[95%] mx-auto gap-1'>
+              {showBack && <BackButton />}
+              <div className='flex-1' />
+              <ThemeToggle />
+              <UserMenu />
             </div>
-          )}
-
-          {/* 桌面端顶部按钮 */}
-          <div className='absolute top-2 right-4 z-20 hidden md:flex items-center gap-2'>
-            <ThemeToggle />
-            <UserMenu />
           </div>
 
           {/* 主内容 */}

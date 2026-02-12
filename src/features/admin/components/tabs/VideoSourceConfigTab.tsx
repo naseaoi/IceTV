@@ -22,9 +22,10 @@ import {
 import { CSS } from '@dnd-kit/utilities';
 import { GripVertical } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { createPortal } from 'react-dom';
 
+import AdminDialog from '@/features/admin/components/AdminDialog';
 import AlertModal from '@/features/admin/components/AlertModal';
+import ConfirmModal from '@/features/admin/components/ConfirmModal';
 import { useAlertModal } from '@/features/admin/hooks/useAlertModal';
 import { useAdminSourceActions } from '@/features/admin/hooks/useAdminSourceActions';
 import { useLoadingState } from '@/features/admin/hooks/useLoadingState';
@@ -32,6 +33,7 @@ import { buttonStyles } from '@/features/admin/lib/buttonStyles';
 import { showError } from '@/features/admin/lib/notifications';
 import { DataSource } from '@/features/admin/types';
 import { AdminConfig } from '@/features/admin/types/api';
+import { useModalState } from '@/hooks/useModalState';
 
 const VideoSourceConfig = ({
   config,
@@ -95,7 +97,8 @@ const VideoSourceConfig = ({
   };
 
   // 有效性检测相关状态
-  const [showValidationModal, setShowValidationModal] = useState(false);
+  const [showValidationModal, setShowValidationModal, openValidationModal] =
+    useModalState(false);
   const [searchKeyword, setSearchKeyword] = useState('');
   const [isValidating, setIsValidating] = useState(false);
   const [validationResults, setValidationResults] = useState<
@@ -654,7 +657,7 @@ const VideoSourceConfig = ({
           )}
           <div className='flex items-center gap-2 order-1 sm:order-2'>
             <button
-              onClick={() => setShowValidationModal(true)}
+              onClick={openValidationModal}
               disabled={isValidating}
               className={`px-3 py-1 text-sm rounded-lg transition-colors flex items-center space-x-1 ${
                 isValidating ? buttonStyles.disabled : buttonStyles.primary
@@ -824,57 +827,45 @@ const VideoSourceConfig = ({
       )}
 
       {/* 有效性检测弹窗 */}
-      {showValidationModal &&
-        createPortal(
-          <div
-            className='fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50'
-            onClick={() => setShowValidationModal(false)}
-          >
-            <div
-              className='bg-white dark:bg-gray-800 rounded-lg p-6 w-full max-w-md mx-4'
-              onClick={(e) => e.stopPropagation()}
+      <AdminDialog
+        isOpen={showValidationModal}
+        title='视频源有效性检测'
+        onClose={() => setShowValidationModal(false)}
+        panelClassName='max-w-md'
+      >
+        <p className='mb-4 text-sm text-gray-600 dark:text-gray-400'>
+          请输入检测用的搜索关键词
+        </p>
+        <div className='space-y-4'>
+          <input
+            type='text'
+            placeholder='请输入搜索关键词'
+            value={searchKeyword}
+            onChange={(e) => setSearchKeyword(e.target.value)}
+            className='w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-gray-900 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100'
+            onKeyPress={(e) => e.key === 'Enter' && handleValidateSources()}
+          />
+          <div className='flex justify-end space-x-3'>
+            <button
+              onClick={() => setShowValidationModal(false)}
+              className='px-4 py-2 text-gray-600 transition-colors hover:text-gray-800 dark:text-gray-400 dark:hover:text-gray-200'
             >
-              <h3 className='text-lg font-medium text-gray-900 dark:text-gray-100 mb-4'>
-                视频源有效性检测
-              </h3>
-              <p className='text-sm text-gray-600 dark:text-gray-400 mb-4'>
-                请输入检测用的搜索关键词
-              </p>
-              <div className='space-y-4'>
-                <input
-                  type='text'
-                  placeholder='请输入搜索关键词'
-                  value={searchKeyword}
-                  onChange={(e) => setSearchKeyword(e.target.value)}
-                  className='w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100'
-                  onKeyPress={(e) =>
-                    e.key === 'Enter' && handleValidateSources()
-                  }
-                />
-                <div className='flex justify-end space-x-3'>
-                  <button
-                    onClick={() => setShowValidationModal(false)}
-                    className='px-4 py-2 text-gray-600 dark:text-gray-400 hover:text-gray-800 dark:hover:text-gray-200 transition-colors'
-                  >
-                    取消
-                  </button>
-                  <button
-                    onClick={handleValidateSources}
-                    disabled={!searchKeyword.trim()}
-                    className={`px-4 py-2 ${
-                      !searchKeyword.trim()
-                        ? buttonStyles.disabled
-                        : buttonStyles.primary
-                    }`}
-                  >
-                    开始检测
-                  </button>
-                </div>
-              </div>
-            </div>
-          </div>,
-          document.body,
-        )}
+              取消
+            </button>
+            <button
+              onClick={handleValidateSources}
+              disabled={!searchKeyword.trim()}
+              className={`px-4 py-2 ${
+                !searchKeyword.trim()
+                  ? buttonStyles.disabled
+                  : buttonStyles.primary
+              }`}
+            >
+              开始检测
+            </button>
+          </div>
+        </div>
+      </AdminDialog>
 
       {/* 通用弹窗组件 */}
       <AlertModal
@@ -888,82 +879,37 @@ const VideoSourceConfig = ({
       />
 
       {/* 批量操作确认弹窗 */}
-      {confirmModal.isOpen &&
-        createPortal(
-          <div
-            className='fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center p-4'
-            onClick={confirmModal.onCancel}
-          >
-            <div
-              className='bg-white dark:bg-gray-800 rounded-lg shadow-xl max-w-md w-full'
-              onClick={(e) => e.stopPropagation()}
-            >
-              <div className='p-6'>
-                <div className='flex items-center justify-between mb-4'>
-                  <h3 className='text-lg font-semibold text-gray-900 dark:text-gray-100'>
-                    {confirmModal.title}
-                  </h3>
-                  <button
-                    onClick={confirmModal.onCancel}
-                    className='text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 transition-colors'
-                  >
-                    <svg
-                      className='w-5 h-5'
-                      fill='none'
-                      stroke='currentColor'
-                      viewBox='0 0 24 24'
-                    >
-                      <path
-                        strokeLinecap='round'
-                        strokeLinejoin='round'
-                        strokeWidth={2}
-                        d='M6 18L18 6M6 6l12 12'
-                      />
-                    </svg>
-                  </button>
-                </div>
-
-                <div className='mb-6'>
-                  <p className='text-sm text-gray-600 dark:text-gray-400'>
-                    {confirmModal.message}
-                  </p>
-                </div>
-
-                {/* 操作按钮 */}
-                <div className='flex justify-end space-x-3'>
-                  <button
-                    onClick={confirmModal.onCancel}
-                    className={`px-4 py-2 text-sm font-medium ${buttonStyles.secondary}`}
-                  >
-                    取消
-                  </button>
-                  <button
-                    onClick={confirmModal.onConfirm}
-                    disabled={
-                      isLoading('batchSource_batch_enable') ||
-                      isLoading('batchSource_batch_disable') ||
-                      isLoading('batchSource_batch_delete')
-                    }
-                    className={`px-4 py-2 text-sm font-medium ${
-                      isLoading('batchSource_batch_enable') ||
-                      isLoading('batchSource_batch_disable') ||
-                      isLoading('batchSource_batch_delete')
-                        ? buttonStyles.disabled
-                        : buttonStyles.primary
-                    }`}
-                  >
-                    {isLoading('batchSource_batch_enable') ||
-                    isLoading('batchSource_batch_disable') ||
-                    isLoading('batchSource_batch_delete')
-                      ? '操作中...'
-                      : '确认'}
-                  </button>
-                </div>
-              </div>
-            </div>
-          </div>,
-          document.body,
-        )}
+      <ConfirmModal
+        isOpen={confirmModal.isOpen}
+        title={confirmModal.title}
+        onClose={confirmModal.onCancel}
+        onConfirm={confirmModal.onConfirm}
+        confirmText={
+          isLoading('batchSource_batch_enable') ||
+          isLoading('batchSource_batch_disable') ||
+          isLoading('batchSource_batch_delete')
+            ? '操作中...'
+            : '确认'
+        }
+        confirmDisabled={
+          isLoading('batchSource_batch_enable') ||
+          isLoading('batchSource_batch_disable') ||
+          isLoading('batchSource_batch_delete')
+        }
+        cancelClassName={`px-4 py-2 text-sm font-medium ${buttonStyles.secondary}`}
+        confirmClassName={`px-4 py-2 text-sm font-medium ${
+          isLoading('batchSource_batch_enable') ||
+          isLoading('batchSource_batch_disable') ||
+          isLoading('batchSource_batch_delete')
+            ? buttonStyles.disabled
+            : buttonStyles.primary
+        }`}
+        containerClassName='max-w-md'
+      >
+        <p className='text-sm text-gray-600 dark:text-gray-400'>
+          {confirmModal.message}
+        </p>
+      </ConfirmModal>
     </div>
   );
 };
