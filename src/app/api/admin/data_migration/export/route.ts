@@ -4,9 +4,10 @@ import { NextRequest, NextResponse } from 'next/server';
 import { promisify } from 'util';
 import { gzip } from 'zlib';
 
-import { getAuthInfoFromCookie } from '@/lib/auth';
+import { isGuardFailure, requireOwner } from '@/lib/api-auth';
 import { SimpleCrypto } from '@/lib/crypto';
 import { db } from '@/lib/db';
+import { getOwnerPassword, getOwnerUsername } from '@/lib/env.server';
 import { CURRENT_VERSION } from '@/lib/version';
 
 export const runtime = 'nodejs';
@@ -15,25 +16,22 @@ const gzipAsync = promisify(gzip);
 
 export async function POST(req: NextRequest) {
   try {
+    const ownerUsername = getOwnerUsername();
+    const ownerPassword = getOwnerPassword();
     // 检查存储类型
     const storageType = process.env.NEXT_PUBLIC_STORAGE_TYPE || 'localstorage';
     if (storageType === 'localstorage') {
       return NextResponse.json(
         { error: '不支持本地存储进行数据迁移' },
-        { status: 400 }
+        { status: 400 },
       );
     }
 
-    // 验证身份和权限
-    const authInfo = getAuthInfoFromCookie(req);
-    if (!authInfo || !authInfo.username) {
-      return NextResponse.json({ error: '未登录' }, { status: 401 });
-    }
-
-    // 检查用户权限（只有站长可以导出数据）
-    if (authInfo.username !== process.env.USERNAME) {
-      return NextResponse.json({ error: '权限不足，只有站长可以导出数据' }, { status: 401 });
-    }
+    const guardResult = await requireOwner(req, {
+      unauthorizedMessage: '未登录',
+      forbiddenMessage: '权限不足，只有站长可以导出数据',
+    });
+    if (isGuardFailure(guardResult)) return guardResult.response;
 
     const config = await db.getAdminConfig();
     if (!config) {
@@ -54,14 +52,14 @@ export async function POST(req: NextRequest) {
         // 管理员配置
         adminConfig: config,
         // 所有用户数据
-        userData: {} as { [username: string]: any }
-      }
+        userData: {} as { [username: string]: any },
+      },
     };
 
     // 获取所有用户
     let allUsers = await db.getAllUsers();
     // 添加站长用户
-    allUsers.push(process.env.USERNAME);
+    allUsers.push(ownerUsername);
     allUsers = Array.from(new Set(allUsers));
 
     // 为每个用户收集数据
@@ -76,14 +74,14 @@ export async function POST(req: NextRequest) {
         // 跳过片头片尾配置
         skipConfigs: await db.getAllSkipConfigs(username),
         // 用户密码（通过验证空密码来检查用户是否存在，然后获取密码）
-        password: await getUserPassword(username)
+        password: await getUserPassword(username),
       };
 
       exportData.data.userData[username] = userData;
     }
 
     // 覆盖站长密码
-    exportData.data.userData[process.env.USERNAME].password = process.env.PASSWORD;
+    exportData.data.userData[ownerUsername].password = ownerPassword;
 
     // 将数据转换为JSON字符串
     const jsonData = JSON.stringify(exportData);
@@ -92,12 +90,21 @@ export async function POST(req: NextRequest) {
     const compressedData = await gzipAsync(jsonData);
 
     // 使用提供的密码加密压缩后的数据
-    const encryptedData = SimpleCrypto.encrypt(compressedData.toString('base64'), password);
+    const encryptedData = SimpleCrypto.encrypt(
+      compressedData.toString('base64'),
+      password,
+    );
 
     // 生成文件名
     const now = new Date();
-    const timestamp = `${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, '0')}${String(now.getDate()).padStart(2, '0')}-${String(now.getHours()).padStart(2, '0')}${String(now.getMinutes()).padStart(2, '0')}${String(now.getSeconds()).padStart(2, '0')}`;
-    const filename = `moontv-backup-${timestamp}.dat`;
+    const timestamp = `${now.getFullYear()}${String(
+      now.getMonth() + 1,
+    ).padStart(2, '0')}${String(now.getDate()).padStart(2, '0')}-${String(
+      now.getHours(),
+    ).padStart(2, '0')}${String(now.getMinutes()).padStart(2, '0')}${String(
+      now.getSeconds(),
+    ).padStart(2, '0')}`;
+    const filename = `icetv-backup-${timestamp}.dat`;
 
     // 返回加密的数据作为文件下载
     return new NextResponse(encryptedData, {
@@ -108,12 +115,11 @@ export async function POST(req: NextRequest) {
         'Content-Length': encryptedData.length.toString(),
       },
     });
-
   } catch (error) {
     console.error('数据导出失败:', error);
     return NextResponse.json(
       { error: error instanceof Error ? error.message : '导出失败' },
-      { status: 500 }
+      { status: 500 },
     );
   }
 }

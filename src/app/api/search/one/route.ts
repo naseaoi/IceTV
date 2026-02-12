@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 
-import { getAuthInfoFromCookie } from '@/lib/auth';
+import { isGuardFailure, requireActiveUser } from '@/lib/api-auth';
 import { getAvailableApiSites, getCacheTime, getConfig } from '@/lib/config';
 import { searchFromApi } from '@/lib/downstream';
 import { yellowWords } from '@/lib/yellow';
@@ -9,10 +9,8 @@ export const runtime = 'nodejs';
 
 // OrionTV 兼容接口
 export async function GET(request: NextRequest) {
-  const authInfo = getAuthInfoFromCookie(request);
-  if (!authInfo || !authInfo.username) {
-    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-  }
+  const guardResult = await requireActiveUser(request);
+  if (isGuardFailure(guardResult)) return guardResult.response;
 
   const { searchParams } = new URL(request.url);
   const query = searchParams.get('q');
@@ -29,12 +27,12 @@ export async function GET(request: NextRequest) {
           'Vercel-CDN-Cache-Control': `public, s-maxage=${cacheTime}`,
           'Netlify-Vary': 'query',
         },
-      }
+      },
     );
   }
 
   const config = await getConfig();
-  const apiSites = await getAvailableApiSites(authInfo.username);
+  const apiSites = await getAvailableApiSites(guardResult.username);
 
   try {
     // 根据 resourceId 查找对应的 API 站点
@@ -45,7 +43,7 @@ export async function GET(request: NextRequest) {
           error: `未找到指定的视频源: ${resourceId}`,
           result: null,
         },
-        { status: 404 }
+        { status: 404 },
       );
     }
 
@@ -65,7 +63,7 @@ export async function GET(request: NextRequest) {
           error: '未找到结果',
           result: null,
         },
-        { status: 404 }
+        { status: 404 },
       );
     } else {
       return NextResponse.json(
@@ -77,7 +75,7 @@ export async function GET(request: NextRequest) {
             'Vercel-CDN-Cache-Control': `public, s-maxage=${cacheTime}`,
             'Netlify-Vary': 'query',
           },
-        }
+        },
       );
     }
   } catch (error) {
@@ -86,7 +84,7 @@ export async function GET(request: NextRequest) {
         error: '搜索失败',
         result: null,
       },
-      { status: 500 }
+      { status: 500 },
     );
   }
 }

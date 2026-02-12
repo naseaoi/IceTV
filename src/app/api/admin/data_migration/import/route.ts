@@ -4,7 +4,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { promisify } from 'util';
 import { gunzip } from 'zlib';
 
-import { getAuthInfoFromCookie } from '@/lib/auth';
+import { isGuardFailure, requireOwner } from '@/lib/api-auth';
 import { configSelfCheck, setCachedConfig } from '@/lib/config';
 import { SimpleCrypto } from '@/lib/crypto';
 import { db } from '@/lib/db';
@@ -20,20 +20,15 @@ export async function POST(req: NextRequest) {
     if (storageType === 'localstorage') {
       return NextResponse.json(
         { error: '不支持本地存储进行数据迁移' },
-        { status: 400 }
+        { status: 400 },
       );
     }
 
-    // 验证身份和权限
-    const authInfo = getAuthInfoFromCookie(req);
-    if (!authInfo || !authInfo.username) {
-      return NextResponse.json({ error: '未登录' }, { status: 401 });
-    }
-
-    // 检查用户权限（只有站长可以导入数据）
-    if (authInfo.username !== process.env.USERNAME) {
-      return NextResponse.json({ error: '权限不足，只有站长可以导入数据' }, { status: 401 });
-    }
+    const guardResult = await requireOwner(req, {
+      unauthorizedMessage: '未登录',
+      forbiddenMessage: '权限不足，只有站长可以导入数据',
+    });
+    if (isGuardFailure(guardResult)) return guardResult.response;
 
     // 解析表单数据
     const formData = await req.formData();
@@ -56,7 +51,10 @@ export async function POST(req: NextRequest) {
     try {
       decryptedData = SimpleCrypto.decrypt(encryptedData, password);
     } catch (error) {
-      return NextResponse.json({ error: '解密失败，请检查密码是否正确' }, { status: 400 });
+      return NextResponse.json(
+        { error: '解密失败，请检查密码是否正确' },
+        { status: 400 },
+      );
     }
 
     // 解压缩数据
@@ -73,7 +71,11 @@ export async function POST(req: NextRequest) {
     }
 
     // 验证数据格式
-    if (!importData.data || !importData.data.adminConfig || !importData.data.userData) {
+    if (
+      !importData.data ||
+      !importData.data.adminConfig ||
+      !importData.data.userData
+    ) {
       return NextResponse.json({ error: '备份文件格式无效' }, { status: 400 });
     }
 
@@ -111,7 +113,8 @@ export async function POST(req: NextRequest) {
 
       // 导入搜索历史
       if (user.searchHistory && Array.isArray(user.searchHistory)) {
-        for (const keyword of user.searchHistory.reverse()) { // 反转以保持顺序
+        for (const keyword of user.searchHistory.reverse()) {
+          // 反转以保持顺序
           await db.addSearchHistory(username, keyword);
         }
       }
@@ -131,14 +134,16 @@ export async function POST(req: NextRequest) {
       message: '数据导入成功',
       importedUsers: Object.keys(userData).length,
       timestamp: importData.timestamp,
-      serverVersion: typeof importData.serverVersion === 'string' ? importData.serverVersion : '未知版本'
+      serverVersion:
+        typeof importData.serverVersion === 'string'
+          ? importData.serverVersion
+          : '未知版本',
     });
-
   } catch (error) {
     console.error('数据导入失败:', error);
     return NextResponse.json(
       { error: error instanceof Error ? error.message : '导入失败' },
-      { status: 500 }
+      { status: 500 },
     );
   }
 }

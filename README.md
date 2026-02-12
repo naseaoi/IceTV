@@ -1,10 +1,10 @@
-# MoonTV
+# IceTV
 
 <div align="center">
-  <img src="public/logo.png" alt="MoonTV Logo" width="120">
+  <img src="public/logo.png" alt="IceTV Logo" width="120">
 </div>
 
-> 🎬 **MoonTV** 是一个开箱即用的、跨平台的影视聚合播放器。它基于 **Next.js 14** + **Tailwind&nbsp;CSS** + **TypeScript** 构建，支持多资源搜索、在线播放、收藏同步、播放记录、云端存储，让你可以随时随地畅享海量免费影视内容。
+> 🎬 **IceTV** 是一个开箱即用的、跨平台的影视聚合播放器。它基于 **Next.js 16** + **Tailwind&nbsp;CSS** + **TypeScript** 构建，支持多资源搜索、在线播放、收藏同步、播放记录、云端存储，让你可以随时随地畅享海量免费影视内容。
 
 <div align="center">
 
@@ -23,7 +23,7 @@
 - 🔍 **多源聚合搜索**：一次搜索立刻返回全源结果。
 - 📄 **丰富详情页**：支持剧集列表、演员、年份、简介等完整信息展示。
 - ▶️ **流畅在线播放**：集成 HLS.js & ArtPlayer。
-- ❤️ **收藏 + 继续观看**：支持 Kvrocks/Redis/Upstash 存储，多端同步进度。
+- ❤️ **收藏 + 继续观看**：支持本机文件/Kvrocks/Redis/Upstash 存储，多端同步进度。
 - 📱 **PWA**：离线缓存、安装到桌面/主屏，移动端原生体验。
 - 🌗 **响应式布局**：桌面侧边栏 + 移动底部导航，自适应各种屏幕尺寸。
 - 👿 **智能去广告**：自动跳过视频中的切片广告（实验性）。
@@ -37,14 +37,14 @@
   <img src="public/screenshot3.png" alt="项目截图" style="max-width:600px">
 </details>
 
-### 请不要在 B站、小红书、微信公众号、抖音、今日头条或其他中国大陆社交平台发布视频或文章宣传本项目，不授权任何“科技周刊/月刊”类项目或站点收录本项目。
+### 请不要在 B 站、小红书、微信公众号、抖音、今日头条或其他中国大陆社交平台发布视频或文章宣传本项目，不授权任何“科技周刊/月刊”类项目或站点收录本项目。
 
 ## 🗺 目录
 
 - [技术栈](#技术栈)
+- [Admin 维护约定](#admin-维护约定)
 - [部署](#部署)
-  - [一键部署](#zeabur-一键部署)
-  - [Docker 部署](#Kvrocks-存储推荐)
+  - [Docker 部署](#服务器本地文件存储单机部署推荐)
 - [配置文件](#配置文件)
 - [订阅](#订阅)
 - [自动更新](#自动更新)
@@ -60,208 +60,62 @@
 
 | 分类      | 主要依赖                                                                                              |
 | --------- | ----------------------------------------------------------------------------------------------------- |
-| 前端框架  | [Next.js 14](https://nextjs.org/) · App Router                                                        |
+| 前端框架  | [Next.js 16](https://nextjs.org/) · App Router                                                        |
 | UI & 样式 | [Tailwind&nbsp;CSS 3](https://tailwindcss.com/)                                                       |
-| 语言      | TypeScript 4                                                                                          |
+| 语言      | TypeScript 5                                                                                          |
 | 播放器    | [ArtPlayer](https://github.com/zhw2590582/ArtPlayer) · [HLS.js](https://github.com/video-dev/hls.js/) |
 | 代码质量  | ESLint · Prettier · Jest                                                                              |
-| 部署      | Docker                                                                    |
+| 部署      | Docker                                                                                                |
+
+## Admin 维护约定
+
+- `src/app/admin/page.tsx` 仅负责页面装配、折叠状态、路由级可见性与重置配置入口。
+- 管理后台业务实现统一放在 `src/features/admin`：
+  - `components/tabs/*`：各配置 tab 视图与交互
+  - `hooks/*`：admin 行为 hooks（页面动作、用户动作、源动作）
+  - `lib/*`：请求/权限/通知/样式
+  - `types/*`：admin 专属类型
+- `src/lib/admin.types.ts` 保留兼容导出；新代码优先从 `src/features/admin/types/api.ts` 导入类型。
+- 管理后台新增功能时，优先复用 `useAdminPageActions`、`useAdminUserActions`、`useAdminSourceActions`，避免在 tab 内重复写请求模板。
+- 最小回归建议：
+  - `src/app/admin/page.test.tsx`
+  - `src/features/admin/hooks/__tests__/useAdminPageActions.test.tsx`
+  - `src/features/admin/hooks/__tests__/useAdminUserActions.test.tsx`
+  - `src/features/admin/hooks/__tests__/useAdminSourceActions.test.tsx`
 
 ## 部署
 
 本项目**仅支持 Docker 或其他基于 Docker 的平台** 部署。
 
-### zeabur 一键部署
+### 服务器本地文件存储（单机部署推荐）
 
-点击下方按钮即可一键部署，自动配置 LunaTV + Kvrocks 数据库：
-
-[![Deploy on Zeabur](https://zeabur.com/button.svg)](https://zeabur.com/templates/8MPTQU/deploy)
-
-**优势**：
-- ✅ 无需配置，一键启动（自动部署完整环境）
-- ✅ 自动 HTTPS 和全球 CDN 加速
-- ✅ 持久化存储，数据永不丢失
-- ✅ 免费额度足够个人使用
-
-**⚠️ 重要提示**：部署完成后，需要在 Zeabur 中为 LunaTV 服务设置访问域名（Domain）才能在浏览器中访问。详见下方 [设置访问域名](#5-设置访问域名必须) 步骤。
-
-### Kvrocks 存储（推荐）
+适用于单台服务器 Docker 部署，不依赖第三方数据库。数据会写入容器挂载卷中的 JSON 文件。
 
 ```yml
 services:
-  moontv-core:
-    image: ghcr.io/moontechlab/lunatv:latest
-    container_name: moontv-core
+  icetv-core:
+    image: ghcr.io/moontechlab/icetv:latest
+    container_name: icetv-core
     restart: on-failure
     ports:
       - '3000:3000'
     environment:
-      - USERNAME=admin
-      - PASSWORD=admin_password
-      - NEXT_PUBLIC_STORAGE_TYPE=kvrocks
-      - KVROCKS_URL=redis://moontv-kvrocks:6666
-    networks:
-      - moontv-network
-    depends_on:
-      - moontv-kvrocks
-  moontv-kvrocks:
-    image: apache/kvrocks
-    container_name: moontv-kvrocks
-    restart: unless-stopped
+      - ICETV_USERNAME=admin
+      - ICETV_PASSWORD=admin_password
+      - NEXT_PUBLIC_STORAGE_TYPE=localdb
+      - LOCAL_DB_PATH=/data/icetv-data.json
     volumes:
-      - kvrocks-data:/var/lib/kvrocks
-    networks:
-      - moontv-network
-networks:
-  moontv-network:
-    driver: bridge
+      - icetv-data:/data
+
 volumes:
-  kvrocks-data:
+  icetv-data:
 ```
 
-### Redis 存储（有一定的丢数据风险）
+说明：
 
-```yml
-services:
-  moontv-core:
-    image: ghcr.io/moontechlab/lunatv:latest
-    container_name: moontv-core
-    restart: on-failure
-    ports:
-      - '3000:3000'
-    environment:
-      - USERNAME=admin
-      - PASSWORD=admin_password
-      - NEXT_PUBLIC_STORAGE_TYPE=redis
-      - REDIS_URL=redis://moontv-redis:6379
-    networks:
-      - moontv-network
-    depends_on:
-      - moontv-redis
-  moontv-redis:
-    image: redis:alpine
-    container_name: moontv-redis
-    restart: unless-stopped
-    networks:
-      - moontv-network
-    # 请开启持久化，否则升级/重启后数据丢失
-    volumes:
-      - ./data:/data
-networks:
-  moontv-network:
-    driver: bridge
-```
-
-### Upstash 存储
-
-1. 在 [upstash](https://upstash.com/) 注册账号并新建一个 Redis 实例，名称任意。
-2. 复制新数据库的 **HTTPS ENDPOINT 和 TOKEN**
-3. 使用如下 docker compose
-```yml
-services:
-  moontv-core:
-    image: ghcr.io/moontechlab/lunatv:latest
-    container_name: moontv-core
-    restart: on-failure
-    ports:
-      - '3000:3000'
-    environment:
-      - USERNAME=admin
-      - PASSWORD=admin_password
-      - NEXT_PUBLIC_STORAGE_TYPE=upstash
-      - UPSTASH_URL=上面 https 开头的 HTTPS ENDPOINT
-      - UPSTASH_TOKEN=上面的 TOKEN
-```
-
-### ☁️ Zeabur 部署（推荐）
-
-Thanks to @SzeMeng76
-
-Zeabur 是一站式云端部署平台，使用预构建的 Docker 镜像可以快速部署，无需等待构建。
-
-**部署步骤：**
-
-1. **添加 KVRocks 服务**（先添加数据库）
-   - 点击 "Add Service" > "Docker Images"
-   - 输入镜像名称：`apache/kvrocks`
-   - 配置端口：`6666` (TCP)
-   - **记住服务名称**（通常是 `apachekvrocks`）
-   - **配置持久化卷（重要）**：
-     * 在服务设置中找到 "Volumes" 部分
-     * 点击 "Add Volume" 添加新卷
-     * Volume ID: `kvrocks-data`（可自定义，仅支持字母、数字、连字符）
-     * Path: `/var/lib/kvrocks/db`
-     * 保存配置
-
-   > 💡 **重要提示**：持久化卷路径必须设置为 `/var/lib/kvrocks/db`（KVRocks 数据目录），这样配置文件保留在容器内，数据库文件持久化，重启后数据不会丢失！
-
-2. **添加 LunaTV 服务**
-   - 点击 "Add Service" > "Docker Images"
-   - 输入镜像名称：`ghcr.io/moontechlab/lunatv:latest`
-   - 配置端口：`3000` (HTTP)
-
-3. **配置环境变量**
-
-   在 LunaTV 服务的环境变量中添加：
-
-   ```env
-   # 必填：管理员账号
-   USERNAME=admin
-   PASSWORD=your_secure_password
-
-   # 必填：存储配置
-   NEXT_PUBLIC_STORAGE_TYPE=kvrocks
-   KVROCKS_URL=redis://apachekvrocks:6666
-
-   # 可选：站点配置
-   SITE_BASE=https://your-domain.zeabur.app
-   NEXT_PUBLIC_SITE_NAME=LunaTV Enhanced
-   ANNOUNCEMENT=欢迎使用 LunaTV Enhanced Edition
-
-   # 可选：豆瓣代理配置（推荐）
-   NEXT_PUBLIC_DOUBAN_PROXY_TYPE=cmliussss-cdn-tencent
-   NEXT_PUBLIC_DOUBAN_IMAGE_PROXY_TYPE=cmliussss-cdn-tencent
-   ```
-
-   **注意**：
-   - 使用服务名称作为主机名：`redis://apachekvrocks:6666`
-   - 如果服务名称不同，请替换为实际名称
-   - 两个服务必须在同一个 Project 中
-
-4. **部署完成**
-   - Zeabur 会自动拉取镜像并启动服务
-   - 等待服务就绪后，需要手动设置访问域名（见下一步）
-
-#### 5. 设置访问域名（必须）
-
-   - 在 LunaTV 服务页面，点击 "Networking" 或 "网络" 标签
-   - 点击 "Generate Domain" 生成 Zeabur 提供的免费域名（如 `xxx.zeabur.app`）
-   - 或者绑定自定义域名：
-     * 点击 "Add Domain" 添加你的域名
-     * 按照提示配置 DNS CNAME 记录指向 Zeabur 提供的目标地址
-   - 设置完域名后即可通过域名访问 LunaTV
-
-6. **绑定自定义域名（可选）**
-   - 在服务设置中点击 "Domains"
-   - 添加你的自定义域名
-   - 配置 DNS CNAME 记录指向 Zeabur 提供的域名
-
-#### 🔄 更新 Docker 镜像
-
-当 Docker 镜像有新版本发布时，Zeabur 不会自动更新。需要手动触发更新。
-
-**更新步骤：**
-
-1. **进入服务页面**
-   - 点击需要更新的服务（LunaTV 或 KVRocks）
-
-2. **重启服务**
-   - 点击 **"服务状态"** 页面，再点击 **"重启当前版本"** 按钮
-   - Zeabur 会自动拉取最新的 `latest` 镜像并重新部署
-
-> 💡 **提示**：
-> - 使用 `latest` 标签时，Restart 会自动拉取最新镜像
-> - 生产环境推荐使用固定版本标签（如 `v5.5.6`）避免意外更新
+- `localdb` 是服务端本地文件存储模式，不是浏览器 `localstorage`。
+- 升级镜像前请保留 `icetv-data` 卷，避免数据丢失。
+- 建议定期备份 `icetv-data` 卷。
 
 ## 配置文件
 
@@ -308,11 +162,11 @@ custom_category 支持的自定义分类已知如下：
 
 也可输入如 "哈利波特" 效果等同于豆瓣搜索
 
-MoonTV 支持标准的苹果 CMS V10 API 格式。
+IceTV 支持标准的苹果 CMS V10 API 格式。
 
 ## 订阅
 
-将完整的配置文件 base58 编码后提供 http 服务即为订阅链接，可在 MoonTV 后台/Helios 中使用。
+将完整的配置文件 base58 编码后提供 http 服务即为订阅链接，可在 IceTV 后台/Helios 中使用。
 
 ## 自动更新
 
@@ -322,27 +176,30 @@ dockge/komodo 等 docker compose UI 也有自动更新功能
 
 ## 环境变量
 
-| 变量                                | 说明                                         | 可选值                           | 默认值                                                                                                                     |
-| ----------------------------------- | -------------------------------------------- | -------------------------------- | -------------------------------------------------------------------------------------------------------------------------- |
-| USERNAME                            | 站长账号           | 任意字符串                       | 无默认，必填字段                                                                                                                     |
-| PASSWORD                            | 站长密码           | 任意字符串                       | 无默认，必填字段                                                                                                                     |
-| SITE_BASE                           | 站点 url              |       形如 https://example.com                  | 空                                                                                                                     |
-| NEXT_PUBLIC_SITE_NAME               | 站点名称                                     | 任意字符串                       | MoonTV                                                                                                                     |
-| ANNOUNCEMENT                        | 站点公告                                     | 任意字符串                       | 本网站仅提供影视信息搜索服务，所有内容均来自第三方网站。本站不存储任何视频资源，不对任何内容的准确性、合法性、完整性负责。 |
-| NEXT_PUBLIC_STORAGE_TYPE            | 播放记录/收藏的存储方式                      | redis、kvrocks、upstash | 无默认，必填字段                                                                                                               |
-| KVROCKS_URL                           | kvrocks 连接 url                               | 连接 url                         | 空                                                                                                                         |
-| REDIS_URL                           | redis 连接 url                               | 连接 url                         | 空                                                                                                                         |
-| UPSTASH_URL                         | upstash redis 连接 url                       | 连接 url                         | 空                                                                                                                         |
-| UPSTASH_TOKEN                       | upstash redis 连接 token                     | 连接 token                       | 空                                                                                                                         |
-| NEXT_PUBLIC_SEARCH_MAX_PAGE         | 搜索接口可拉取的最大页数                     | 1-50                             | 5                                                                                                                          |
-| NEXT_PUBLIC_DOUBAN_PROXY_TYPE       | 豆瓣数据源请求方式                           | 见下方                           | direct                                                                                                                     |
-| NEXT_PUBLIC_DOUBAN_PROXY            | 自定义豆瓣数据代理 URL                       | url prefix                       | (空)                                                                                                                       |
-| NEXT_PUBLIC_DOUBAN_IMAGE_PROXY_TYPE | 豆瓣图片代理类型                             | 见下方                           | direct                                                                                                                     |
-| NEXT_PUBLIC_DOUBAN_IMAGE_PROXY      | 自定义豆瓣图片代理 URL                       | url prefix                       | (空)                                                                                                                       |
-| NEXT_PUBLIC_DISABLE_YELLOW_FILTER   | 关闭色情内容过滤                             | true/false                       | false                                                                                                                      |
-| NEXT_PUBLIC_FLUID_SEARCH | 是否开启搜索接口流式输出 | true/ false | true |
+| 变量                                | 说明                                | 可选值                   | 默认值                                                                                                                     |
+| ----------------------------------- | ----------------------------------- | ------------------------ | -------------------------------------------------------------------------------------------------------------------------- |
+| ICETV_USERNAME                      | 站长账号（推荐，避免 Win 环境冲突） | 任意字符串               | 无默认，必填字段                                                                                                           |
+| ICETV_PASSWORD                      | 站长密码（推荐，避免 Win 环境冲突） | 任意字符串               | 无默认，必填字段                                                                                                           |
+| MOONTV_USERNAME                     | 站长账号（兼容旧变量）              | 任意字符串               | 无默认，必填字段                                                                                                           |
+| MOONTV_PASSWORD                     | 站长密码（兼容旧变量）              | 任意字符串               | 无默认，必填字段                                                                                                           |
+| USERNAME                            | 站长账号（兼容旧变量）              | 任意字符串               | 无默认，必填字段                                                                                                           |
+| PASSWORD                            | 站长密码（兼容旧变量）              | 任意字符串               | 无默认，必填字段                                                                                                           |
+| SITE_BASE                           | 站点 url                            | 形如 https://example.com | 空                                                                                                                         |
+| NEXT_PUBLIC_SITE_NAME               | 站点名称                            | 任意字符串               | IceTV                                                                                                                      |
+| ANNOUNCEMENT                        | 站点公告                            | 任意字符串               | 本网站仅提供影视信息搜索服务，所有内容均来自第三方网站。本站不存储任何视频资源，不对任何内容的准确性、合法性、完整性负责。 |
+| NEXT_PUBLIC_STORAGE_TYPE            | 播放记录/收藏的存储方式             | localdb                  | 无默认，必填字段                                                                                                           |
+| LOCAL_DB_PATH                       | 本地文件存储路径（`localdb` 模式）  | 绝对路径                 | `/data/icetv-data.json`（Docker）                                                                                          |
+| NEXT_PUBLIC_SEARCH_MAX_PAGE         | 搜索接口可拉取的最大页数            | 1-50                     | 5                                                                                                                          |
+| NEXT_PUBLIC_DOUBAN_PROXY_TYPE       | 豆瓣数据源请求方式                  | 见下方                   | direct                                                                                                                     |
+| NEXT_PUBLIC_DOUBAN_PROXY            | 自定义豆瓣数据代理 URL              | url prefix               | (空)                                                                                                                       |
+| NEXT_PUBLIC_DOUBAN_IMAGE_PROXY_TYPE | 豆瓣图片代理类型                    | 见下方                   | direct                                                                                                                     |
+| NEXT_PUBLIC_DOUBAN_IMAGE_PROXY      | 自定义豆瓣图片代理 URL              | url prefix               | (空)                                                                                                                       |
+| NEXT_PUBLIC_DISABLE_YELLOW_FILTER   | 关闭色情内容过滤                    | true/false               | false                                                                                                                      |
+| NEXT_PUBLIC_FLUID_SEARCH            | 是否开启搜索接口流式输出            | true/ false              | true                                                                                                                       |
 
 NEXT_PUBLIC_DOUBAN_PROXY_TYPE 选项解释：
+
+- 账号密码变量优先级：`ICETV_USERNAME/ICETV_PASSWORD` > `MOONTV_USERNAME/MOONTV_PASSWORD` > `USERNAME/PASSWORD`。Windows 本地开发建议优先使用 `ICETV_*`，避免系统内置 `USERNAME` 变量干扰登录与站长识别。
 
 - direct: 由服务器直接请求豆瓣源站
 - cors-proxy-zwei: 浏览器向 cors proxy 请求豆瓣数据，该 cors proxy 由 [Zwei](https://github.com/bestzwei) 搭建
@@ -391,7 +248,7 @@ v100.0.0 以上版本可配合 [Selene](https://github.com/MoonTechLab/Selene) �
 
 ## License
 
-[MIT](LICENSE) © 2025 MoonTV & Contributors
+[MIT](LICENSE) © 2025 IceTV & Contributors
 
 ## 致谢
 
@@ -405,4 +262,4 @@ v100.0.0 以上版本可配合 [Selene](https://github.com/MoonTechLab/Selene) �
 
 ## Star History
 
-[![Star History Chart](https://api.star-history.com/svg?repos=MoonTechLab/LunaTV&type=Date)](https://www.star-history.com/#MoonTechLab/LunaTV&Date)
+[![Star History Chart](https://api.star-history.com/svg?repos=MoonTechLab/IceTV&type=Date)](https://www.star-history.com/#MoonTechLab/IceTV&Date)

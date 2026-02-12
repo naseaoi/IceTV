@@ -2,7 +2,7 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 
-import { getAuthInfoFromCookie } from '@/lib/auth';
+import { isGuardFailure, requireAdmin } from '@/lib/api-auth';
 import { getConfig } from '@/lib/config';
 import { db } from '@/lib/db';
 
@@ -15,18 +15,15 @@ export async function POST(request: NextRequest) {
       {
         error: '不支持本地存储进行管理员配置',
       },
-      { status: 400 }
+      { status: 400 },
     );
   }
 
   try {
-    const body = await request.json();
+    const guardResult = await requireAdmin(request);
+    if (isGuardFailure(guardResult)) return guardResult.response;
 
-    const authInfo = getAuthInfoFromCookie(request);
-    if (!authInfo || !authInfo.username) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-    }
-    const username = authInfo.username;
+    const body = await request.json();
 
     const {
       SiteName,
@@ -70,17 +67,6 @@ export async function POST(request: NextRequest) {
 
     const adminConfig = await getConfig();
 
-    // 权限校验
-    if (username !== process.env.USERNAME) {
-      // 管理员
-      const user = adminConfig.UserConfig.Users.find(
-        (u) => u.username === username
-      );
-      if (!user || user.role !== 'admin' || user.banned) {
-        return NextResponse.json({ error: '权限不足' }, { status: 401 });
-      }
-    }
-
     // 更新缓存中的站点设置
     adminConfig.SiteConfig = {
       SiteName,
@@ -104,7 +90,7 @@ export async function POST(request: NextRequest) {
         headers: {
           'Cache-Control': 'no-store', // 不缓存结果
         },
-      }
+      },
     );
   } catch (error) {
     console.error('更新站点配置失败:', error);
@@ -113,7 +99,7 @@ export async function POST(request: NextRequest) {
         error: '更新站点配置失败',
         details: (error as Error).message,
       },
-      { status: 500 }
+      { status: 500 },
     );
   }
 }

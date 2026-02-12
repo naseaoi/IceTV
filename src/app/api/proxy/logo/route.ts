@@ -9,7 +9,10 @@ export const runtime = 'nodejs';
 export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
   const imageUrl = searchParams.get('url');
-  const source = searchParams.get('moontv-source');
+  const source =
+    searchParams.get('icetv-source') ||
+    searchParams.get('moontv-source') ||
+    searchParams.get('source');
 
   if (!imageUrl) {
     return NextResponse.json({ error: 'Missing image URL' }, { status: 400 });
@@ -33,7 +36,7 @@ export async function GET(request: Request) {
     if (!imageResponse.ok) {
       return NextResponse.json(
         { error: imageResponse.statusText },
-        { status: imageResponse.status }
+        { status: imageResponse.status },
       );
     }
 
@@ -42,7 +45,7 @@ export async function GET(request: Request) {
     if (!imageResponse.body) {
       return NextResponse.json(
         { error: 'Image response has no body' },
-        { status: 500 }
+        { status: 500 },
       );
     }
 
@@ -63,7 +66,7 @@ export async function GET(request: Request) {
   } catch (error) {
     return NextResponse.json(
       { error: 'Error fetching image' },
-      { status: 500 }
+      { status: 500 },
     );
   }
 }

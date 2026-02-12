@@ -2,7 +2,7 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 
-import { getAuthInfoFromCookie } from '@/lib/auth';
+import { isGuardFailure, requireActiveUser } from '@/lib/api-auth';
 import { db } from '@/lib/db';
 
 export const runtime = 'nodejs';
@@ -16,7 +16,7 @@ export async function POST(request: NextRequest) {
       {
         error: '不支持本地存储模式修改密码',
       },
-      { status: 400 }
+      { status: 400 },
     );
   }
 
@@ -24,24 +24,21 @@ export async function POST(request: NextRequest) {
     const body = await request.json();
     const { newPassword } = body;
 
-    // 获取认证信息
-    const authInfo = getAuthInfoFromCookie(request);
-    if (!authInfo || !authInfo.username) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-    }
+    const guardResult = await requireActiveUser(request);
+    if (isGuardFailure(guardResult)) return guardResult.response;
 
     // 验证新密码
     if (!newPassword || typeof newPassword !== 'string') {
       return NextResponse.json({ error: '新密码不得为空' }, { status: 400 });
     }
 
-    const username = authInfo.username;
+    const username = guardResult.username;
 
-    // 不允许站长修改密码（站长用户名等于 process.env.USERNAME）
-    if (username === process.env.USERNAME) {
+    // 不允许站长修改密码
+    if (guardResult.isOwner) {
       return NextResponse.json(
         { error: '站长不能通过此接口修改密码' },
-        { status: 403 }
+        { status: 403 },
       );
     }
 
@@ -56,7 +53,7 @@ export async function POST(request: NextRequest) {
         error: '修改密码失败',
         details: (error as Error).message,
       },
-      { status: 500 }
+      { status: 500 },
     );
   }
 }

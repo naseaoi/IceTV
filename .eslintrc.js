@@ -77,6 +77,14 @@ module.exports = {
     ],
     //#endregion  //*======== Import Sort ===========
   },
+  overrides: [
+    {
+      files: ['src/features/admin/**/*.{ts,tsx}'],
+      rules: {
+        '@typescript-eslint/no-explicit-any': 'error',
+      },
+    },
+  ],
   globals: {
     React: true,
     JSX: true,

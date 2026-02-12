@@ -2,8 +2,8 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 
-import { AdminConfigResult } from '@/lib/admin.types';
-import { getAuthInfoFromCookie } from '@/lib/auth';
+import { AdminConfigResult } from '@/features/admin/types/api';
+import { isGuardFailure, requireAdmin } from '@/lib/api-auth';
 import { getConfig } from '@/lib/config';
 
 export const runtime = 'nodejs';
@@ -15,35 +15,21 @@ export async function GET(request: NextRequest) {
       {
         error: '不支持本地存储进行管理员配置',
       },
-      { status: 400 }
+      { status: 400 },
     );
   }
 
-  const authInfo = getAuthInfoFromCookie(request);
-  if (!authInfo || !authInfo.username) {
-    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-  }
-  const username = authInfo.username;
-
   try {
+    const guardResult = await requireAdmin(request, {
+      forbiddenMessage: '你是管理员吗你就访问？',
+    });
+    if (isGuardFailure(guardResult)) return guardResult.response;
+
     const config = await getConfig();
     const result: AdminConfigResult = {
-      Role: 'owner',
+      Role: guardResult.isOwner ? 'owner' : 'admin',
       Config: config,
     };
-    if (username === process.env.USERNAME) {
-      result.Role = 'owner';
-    } else {
-      const user = config.UserConfig.Users.find((u) => u.username === username);
-      if (user && user.role === 'admin' && !user.banned) {
-        result.Role = 'admin';
-      } else {
-        return NextResponse.json(
-          { error: '你是管理员吗你就访问？' },
-          { status: 401 }
-        );
-      }
-    }
 
     return NextResponse.json(result, {
       headers: {
@@ -57,7 +43,7 @@ export async function GET(request: NextRequest) {
         error: '获取管理员配置失败',
         details: (error as Error).message,
       },
-      { status: 500 }
+      { status: 500 },
     );
   }
 }

@@ -1,19 +1,17 @@
 /* eslint-disable no-console */
 
 import { NextRequest, NextResponse } from 'next/server';
-import { getAuthInfoFromCookie } from '@/lib/auth';
+import { isGuardFailure, requireActiveUser } from '@/lib/api-auth';
 import { getAvailableApiSites } from '@/lib/config';
 
 export const runtime = 'nodejs';
 
 // OrionTV 兼容接口
 export async function GET(request: NextRequest) {
-  const authInfo = getAuthInfoFromCookie(request);
-  if (!authInfo || !authInfo.username) {
-    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-  }
+  const guardResult = await requireActiveUser(request);
+  if (isGuardFailure(guardResult)) return guardResult.response;
   try {
-    const apiSites = await getAvailableApiSites(authInfo.username);
+    const apiSites = await getAvailableApiSites(guardResult.username);
 
     return NextResponse.json(apiSites);
   } catch (error) {
