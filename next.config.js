@@ -2,8 +2,9 @@
 const path = require('path');
 
 const { extractLatestVersion } = require('./src/lib/changelog-utils');
+const packageJson = require('./package.json');
 
-let appVersion = '0.3.7';
+let appVersion = packageJson.version || '0.0.0';
 
 try {
   const fs = require('fs');

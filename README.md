@@ -64,7 +64,6 @@
 | 语言      | TypeScript 5                                                                                          |
 | 播放器    | [ArtPlayer](https://github.com/zhw2590582/ArtPlayer) · [HLS.js](https://github.com/video-dev/hls.js/) |
 | 代码质量  | ESLint · Prettier · Jest                                                                              |
-| 部署      | Docker                                                                                                |
 
 ## 部署
 
@@ -78,9 +77,7 @@
 - [Admin 模块维护指南](docs/admin-maintenance.md)
 - [API 鉴权维护指南](docs/api-auth-guide.md)
 
-### 服务器本地 SQLite 存储（单机部署推荐）
-
-适用于单台服务器 Docker 部署，不依赖第三方数据库。数据会写入容器挂载卷中的 SQLite 文件。
+### 服务器本地 SQLite 存储
 
 ```yml
 services:
@@ -103,14 +100,10 @@ volumes:
 
 说明：
 
-- `localdb` 是服务端本地 SQLite 存储模式，不是浏览器 `localstorage`。
-- 旧版本 JSON 数据文件会在首次启动时自动迁移到 SQLite。
 - 升级镜像前请保留 `icetv-data` 卷，避免数据丢失。
 - 建议定期备份 `icetv-data` 卷。
 
 ### Vercel + MySQL 云数据库
-
-适用于 Vercel 部署。服务端会在首次请求时自动初始化 MySQL 表结构。
 
 Vercel 项目中至少配置以下环境变量：
 
@@ -124,7 +117,6 @@ DATABASE_URL=mysql://user:password@host:3306/dbname?ssl-mode=REQUIRED
 说明：
 
 - `DATABASE_URL` 为标准 MySQL 连接串。
-- 如果你已有旧环境变量名，也可继续使用 `MYSQL_URL` 或 `MySQL`。
 - 如云数据库要求自定义证书，可额外配置 `MYSQL_SSL_CA`。
 - 如证书链校验需要放宽，可配置 `MYSQL_SSL_REJECT_UNAUTHORIZED=false`。
 - 未显式设置 `NEXT_PUBLIC_STORAGE_TYPE` 时，只要检测到 MySQL 连接串，服务端会自动切换到 `mysql`。
@@ -180,8 +172,6 @@ IceTV 支持标准的苹果 CMS V10 API 格式。
 将完整的配置文件 base58 编码后提供 http 服务即为订阅链接，可在 IceTV 后台/Helios 中使用。
 
 ## 环境变量
-
-以下仅保留部署启动必需或无法在管理后台修改的变量。可在管理后台修改的站点参数（如站点名、公告、豆瓣代理、搜索页数等）不再列出。
 
 | 变量                          | 说明                                   | 可选值                | 默认值                              |
 | ----------------------------- | -------------------------------------- | --------------------- | ----------------------------------- |
