@@ -116,9 +116,10 @@ export function resolveRequestedProbeEpisodeUrl(
     return null;
   }
 
-  const safeEpisodeIndex = Number.isInteger(episodeIndex)
-    ? Math.max(0, episodeIndex)
-    : 0;
+  const safeEpisodeIndex =
+    typeof episodeIndex === 'number' && Number.isInteger(episodeIndex)
+      ? Math.max(0, episodeIndex)
+      : 0;
 
   if (safeEpisodeIndex >= source.episodes.length) {
     return null;
