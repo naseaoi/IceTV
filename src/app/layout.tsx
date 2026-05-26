@@ -5,6 +5,7 @@ import { Inter } from 'next/font/google';
 import './globals.css';
 
 import { getConfig } from '@/lib/config';
+import { getStorageType } from '@/lib/storage-type';
 
 import { GlobalErrorIndicator } from '../components/GlobalErrorIndicator';
 import { CardInteractionProvider } from '../components/CardInteractionProvider';
@@ -27,7 +28,7 @@ const inter = Inter({
   ],
 });
 
-const storageType = 'localdb';
+const storageType = getStorageType();
 const shouldUseDynamicConfig = true;
 
 // 动态生成 metadata，支持配置更新后的标题变化

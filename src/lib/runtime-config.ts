@@ -19,7 +19,8 @@ export interface RuntimeConfig {
 }
 
 export const DEFAULT_RUNTIME_CONFIG: RuntimeConfig = {
-  STORAGE_TYPE: 'localdb',
+  STORAGE_TYPE:
+    process.env.NEXT_PUBLIC_STORAGE_TYPE === 'mysql' ? 'mysql' : 'localdb',
   OPEN_REGISTER: false,
   UPDATE_REPOS: 'naseaoi/IceTV',
   UPDATE_BRANCH: 'main',

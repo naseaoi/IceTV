@@ -68,7 +68,10 @@
 
 ## 部署
 
-本项目**仅支持 Docker 或其他基于 Docker 的平台**部署。
+本项目支持两种部署方式：
+
+- Docker + 本地 SQLite
+- Vercel + MySQL 云数据库
 
 维护相关文档：
 
@@ -104,6 +107,27 @@ volumes:
 - 旧版本 JSON 数据文件会在首次启动时自动迁移到 SQLite。
 - 升级镜像前请保留 `icetv-data` 卷，避免数据丢失。
 - 建议定期备份 `icetv-data` 卷。
+
+### Vercel + MySQL 云数据库
+
+适用于 Vercel 部署。服务端会在首次请求时自动初始化 MySQL 表结构。
+
+Vercel 项目中至少配置以下环境变量：
+
+```bash
+ICETV_USERNAME=admin
+ICETV_PASSWORD=your_strong_password
+NEXT_PUBLIC_STORAGE_TYPE=mysql
+DATABASE_URL=mysql://user:password@host:3306/dbname?ssl-mode=REQUIRED
+```
+
+说明：
+
+- `DATABASE_URL` 为标准 MySQL 连接串。
+- 如果你已有旧环境变量名，也可继续使用 `MYSQL_URL` 或 `MySQL`。
+- 如云数据库要求自定义证书，可额外配置 `MYSQL_SSL_CA`。
+- 如证书链校验需要放宽，可配置 `MYSQL_SSL_REJECT_UNAUTHORIZED=false`。
+- 未显式设置 `NEXT_PUBLIC_STORAGE_TYPE` 时，只要检测到 MySQL 连接串，服务端会自动切换到 `mysql`。
 
 ## 配置文件
 
@@ -159,15 +183,21 @@ IceTV 支持标准的苹果 CMS V10 API 格式。
 
 以下仅保留部署启动必需或无法在管理后台修改的变量。可在管理后台修改的站点参数（如站点名、公告、豆瓣代理、搜索页数等）不再列出。
 
-| 变量                      | 说明                                   | 可选值                | 默认值                              |
-| ------------------------- | -------------------------------------- | --------------------- | ----------------------------------- |
-| ICETV_USERNAME            | 站长账号                               | 任意字符串            | 无默认，必填字段                    |
-| ICETV_PASSWORD            | 站长密码                               | 任意字符串            | 无默认，必填字段                    |
-| NEXT_PUBLIC_STORAGE_TYPE  | 播放记录/收藏的存储方式                | localdb               | `localdb`（可省略）                 |
-| LOCAL_DB_PATH             | 本地 SQLite 文件路径（`localdb` 模式） | 绝对路径              | `/data/icetv-data.sqlite`（Docker） |
-| AUTH_SESSION_TTL_HOURS    | 登录态有效期（小时）                   | 正整数                | 默认长期有效，仅主动登出才失效      |
-| NEXT_PUBLIC_UPDATE_REPOS  | 版本检查仓库列表（逗号分隔）           | owner/repo,owner/repo | naseaoi/IceTV                       |
-| NEXT_PUBLIC_UPDATE_BRANCH | 版本检查分支                           | 分支名                | main                                |
+| 变量                          | 说明                                   | 可选值                | 默认值                              |
+| ----------------------------- | -------------------------------------- | --------------------- | ----------------------------------- |
+| ICETV_USERNAME                | 站长账号                               | 任意字符串            | 无默认，必填字段                    |
+| ICETV_PASSWORD                | 站长密码                               | 任意字符串            | 无默认，必填字段                    |
+| NEXT_PUBLIC_STORAGE_TYPE      | 播放记录/收藏的存储方式                | `localdb`、`mysql`    | 自动识别，默认 `localdb`            |
+| DATABASE_URL                  | MySQL 连接串                           | `mysql://...`         | 无默认                              |
+| MYSQL_URL                     | MySQL 连接串别名                       | `mysql://...`         | 无默认                              |
+| MySQL                         | MySQL 连接串兼容别名                   | `mysql://...`         | 无默认                              |
+| LOCAL_DB_PATH                 | 本地 SQLite 文件路径（`localdb` 模式） | 绝对路径              | `/data/icetv-data.sqlite`（Docker） |
+| MYSQL_SSL_CA                  | MySQL CA 证书内容                      | PEM 文本              | 无默认                              |
+| MYSQL_SSL_REJECT_UNAUTHORIZED | MySQL SSL 证书校验开关                 | `true`、`false`       | `true`                              |
+| MYSQL_CONNECTION_LIMIT        | MySQL 连接池大小                       | 正整数                | `5`                                 |
+| AUTH_SESSION_TTL_HOURS        | 登录态有效期（小时）                   | 正整数                | 默认长期有效，仅主动登出才失效      |
+| NEXT_PUBLIC_UPDATE_REPOS      | 版本检查仓库列表（逗号分隔）           | owner/repo,owner/repo | naseaoi/IceTV                       |
+| NEXT_PUBLIC_UPDATE_BRANCH     | 版本检查分支                           | 分支名                | main                                |
 
 - 版本检查由后端接口 `/api/version/latest` 统一获取，前端不再直接请求 GitHub Raw。若仓库改名，更新 `NEXT_PUBLIC_UPDATE_REPOS` 并重启服务即可生效。
 - `AUTH_SESSION_TTL_HOURS` 仅在你想启用“定时过期”时才需要设置；未设置、为空或小于等于 `0` 时，登录态会保持长期有效。

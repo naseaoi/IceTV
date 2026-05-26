@@ -42,7 +42,7 @@ const nextConfig = {
         ? { exclude: ['error', 'warn'] }
         : false,
   },
-  serverExternalPackages: ['better-sqlite3'],
+  serverExternalPackages: ['better-sqlite3', 'mysql2'],
   // 客户端 Router Cache：页面段在内存中保留 5 分钟，
   // 与首页 ISR revalidate=300 对齐，首页 → 搜索页 → 首页可复用组件树，
   // 避免 HomeClient 重挂载导致的状态、滚动位置丢失。

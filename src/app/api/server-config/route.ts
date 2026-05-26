@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 
 import { getConfig } from '@/lib/config';
+import { getStorageType } from '@/lib/storage-type';
 import { CURRENT_VERSION } from '@/lib/version';
 
 export const runtime = 'nodejs';
@@ -10,7 +11,7 @@ export async function GET(_request: NextRequest) {
   const result = {
     SiteName: config.SiteConfig.SiteName,
     SiteIcon: config.SiteConfig.SiteIcon || '',
-    StorageType: 'localdb',
+    StorageType: getStorageType(),
     Version: CURRENT_VERSION,
     OpenRegister: !!config.UserConfig.OpenRegister,
     UpdateRepos: process.env.NEXT_PUBLIC_UPDATE_REPOS || 'naseaoi/IceTV',
