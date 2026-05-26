@@ -1,9 +1,9 @@
 {
   "name": "icetv",
-  "version": "0.3.7",
+  "version": "0.3.8",
   "private": true,
   "scripts": {
-    "dev": "pnpm gen:manifest && next dev --webpack -H 0.0.0.0",
+    "dev": "pnpm gen:changelog && pnpm gen:manifest && next dev --webpack -H 0.0.0.0",
     "build": "pnpm gen:changelog && pnpm gen:manifest && next build --webpack",
     "start": "next start",
     "lint": "next lint",
@@ -16,6 +16,8 @@
     "format:check": "prettier -c .",
     "gen:manifest": "node scripts/generate-manifest.js",
     "gen:changelog": "node scripts/convert-changelog.js",
+    "validate:changelog": "node scripts/convert-changelog.js",
+    "release:prepare": "node scripts/prepare-release.js",
     "postbuild": "echo 'Build completed - sitemap generation disabled'",
     "prepare": "husky install"
   },

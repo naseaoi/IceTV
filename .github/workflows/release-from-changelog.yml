@@ -1,0 +1,98 @@
+name: Sync GitHub Release
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main, master]
+    paths:
+      - CHANGELOG
+      - CHANGELOG.md
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout source code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Prepare release metadata
+        id: prepare
+        run: node scripts/prepare-release.js
+
+      - name: Fetch tags
+        run: git fetch --tags --force
+
+      - name: Check tag state
+        id: tag_state
+        env:
+          RELEASE_TAG: ${{ steps.prepare.outputs.tag }}
+        run: |
+          if git rev-parse "$RELEASE_TAG" >/dev/null 2>&1; then
+            tag_commit="$(git rev-list -n 1 "$RELEASE_TAG")"
+            head_commit="$(git rev-parse HEAD)"
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+            echo "tag_commit=$tag_commit" >> "$GITHUB_OUTPUT"
+            echo "head_commit=$head_commit" >> "$GITHUB_OUTPUT"
+            if [ "$tag_commit" = "$head_commit" ]; then
+              echo "same_commit=true" >> "$GITHUB_OUTPUT"
+            else
+              echo "same_commit=false" >> "$GITHUB_OUTPUT"
+            fi
+          else
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+            echo "same_commit=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Stop on released version drift
+        if: steps.tag_state.outputs.exists == 'true' && steps.tag_state.outputs.same_commit != 'true'
+        run: |
+          echo "CHANGELOG 顶部版本 ${{ steps.prepare.outputs.tag }} 已在提交 ${{ steps.tag_state.outputs.tag_commit }} 发布。"
+          echo "当前提交为 ${{ steps.tag_state.outputs.head_commit }}。请递增 CHANGELOG 顶部版本后再继续发布。"
+          exit 1
+
+      - name: Create GitHub Release
+        if: steps.tag_state.outputs.exists != 'true'
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_TAG: ${{ steps.prepare.outputs.tag }}
+          RELEASE_TITLE: ${{ steps.prepare.outputs.title }}
+          RELEASE_NOTES_FILE: ${{ steps.prepare.outputs.notes_file }}
+        run: |
+          gh release create "$RELEASE_TAG" \
+            --target "$GITHUB_SHA" \
+            --title "$RELEASE_TITLE" \
+            --notes-file "$RELEASE_NOTES_FILE"
+
+      - name: Update GitHub Release
+        if: steps.tag_state.outputs.exists == 'true' && steps.tag_state.outputs.same_commit == 'true'
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_TAG: ${{ steps.prepare.outputs.tag }}
+          RELEASE_TITLE: ${{ steps.prepare.outputs.title }}
+          RELEASE_NOTES_FILE: ${{ steps.prepare.outputs.notes_file }}
+        run: |
+          if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
+            gh release edit "$RELEASE_TAG" \
+              --title "$RELEASE_TITLE" \
+              --notes-file "$RELEASE_NOTES_FILE"
+          else
+            gh release create "$RELEASE_TAG" \
+              --verify-tag \
+              --title "$RELEASE_TITLE" \
+              --notes-file "$RELEASE_NOTES_FILE"
+          fi

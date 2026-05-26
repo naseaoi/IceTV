@@ -53,6 +53,8 @@ export function buildChangelogUrls(): string[] {
   const branch = getUpdateBranch();
 
   return getUpdateRepos().flatMap((repo) => [
+    `https://raw.githubusercontent.com/${repo}/${branch}/public/changelog.json`,
+    `https://raw.githubusercontent.com/${repo}/${branch}/changelog.json`,
     `https://raw.githubusercontent.com/${repo}/${branch}/CHANGELOG`,
     `https://raw.githubusercontent.com/${repo}/${branch}/CHANGELOG.md`,
   ]);

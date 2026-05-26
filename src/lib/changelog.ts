@@ -1,5 +1,4 @@
-// 此文件由 scripts/convert-changelog.js 自动生成
-// 请勿手动编辑
+import rawChangelogManifest from '~/changelog.json';
 
 export interface ChangelogEntry {
   version: string;
@@ -9,303 +8,76 @@ export interface ChangelogEntry {
   fixed: string[];
 }
 
-export const changelog: ChangelogEntry[] = [
-  {
-    version: '0.3.6',
-    date: '2026-04-27',
-    added: [
-      // 无新增内容
-    ],
-    changed: [
-      // 无变更内容
-    ],
-    fixed: [
-      '修复播放器切集后“切换中”遮罩残留，导致新一集已起播仍无法操作的问题',
-      '修复打开新视频时误沿用上一条播放链路进度并跳到接近片尾的问题',
-    ],
-  },
-  {
-    version: '0.3.5',
-    date: '2026-04-26',
-    added: [
-      // 无新增内容
-    ],
-    changed: [
-      // 无变更内容
-    ],
-    fixed: [
-      '修复继续观看进入播放页时被旧 checkpoint 覆盖为错误进度的问题',
-      '修复继续观看恢复集数越界时导致播放地址失效的问题',
-    ],
-  },
-  {
-    version: '0.3.4',
-    date: '2026-04-21',
-    added: ['新增播放恢复安全窗口与安全续播工具'],
-    changed: [
-      '优化播放页历史进度恢复链路，区分历史恢复与强制恢复',
-      '增强去广告识别：新增 EXTINF 40ms 粗粒度步进指纹',
-      '统一播放页“下一集”、连播与选集面板的切集链路',
-    ],
-    fixed: [
-      '修复异步读取播放记录晚到时可能把正在播放的视频跳回旧进度的问题',
-      '修复切换去广告开关或恢复检查点后续播状态不一致的问题',
-      '修复部分源站中插广告未被识别和剔除的问题',
-      '修复切换下一集后自动换源仍沿用上一集播放进度的问题',
-      '修复切集触发换源后上一集继续观看记录被提前清除的问题',
-      '修复继续观看自动换源后恢复到错误进度的问题',
-      '修复播放页返回时进度偶发丢失的问题',
-    ],
-  },
-  {
-    version: '0.3.3',
-    date: '2026-04-18',
-    added: ['新增源站失败冷却与会话级代理回退记忆'],
-    changed: [
-      '优化浏览器直连播放链路，失败时自动切服务端重试',
-      '优化测速策略，浏览器测速失败后自动回退服务端并放宽失败判定',
-      '优化 giri 多版本解析，版本列表不全时补抓播放页恢复完整选集',
-      '优化签名 m3u8 缓存与开发环境跨源访问设置',
-    ],
-    fixed: [
-      '修复 variant playlist 未透传 `allowCORS` 导致路由不一致',
-      '修复源站 CORS 能力被 m3u8 响应头误判的问题',
-      '修复部分 giri 版本 tab 嵌套时识别不全的问题',
-    ],
-  },
-  {
-    version: '0.3.2',
-    date: '2026-04-17',
-    added: ['新增通用 SWR 服务端缓存、源站 CORS 能力记录与播放预热工具'],
-    changed: [
-      '优化详情、豆瓣推荐、搜索结果与 m3u8 代理缓存，增加请求合并和软过期后台刷新',
-      '优化播放链路预热，卡片悬停预取详情与播放器资源，播放前预连接源站并预取下一集',
-      '优化 HLS 起播与缓冲策略，按网络和设备能力选择更合适的码率与缓冲参数',
-      '优化图片与 Service Worker 缓存策略，提升封面、接口和点播分片复用效率',
-    ],
-    fixed: [
-      '修复代理分片将普通点播误判为直播导致缓存策略异常的问题',
-      '修复部分支持 CORS 的源站仍重复走服务端分片代理的问题',
-    ],
-  },
-  {
-    version: '0.3.1',
-    date: '2026-04-15',
-    added: [
-      // 无新增内容
-    ],
-    changed: [
-      '优化首页与收藏页切换动效、卡片布局和进度展示',
-      '优化继续观看与首页骨架屏，按缓存数量渲染减少跳动',
-      '开发环境自动注销残留 Service Worker，避免缓存干扰调试',
-    ],
-    fixed: [
-      '修复播放页加载态高度和首页内容区布局异常',
-      '修复收藏页取消收藏缺少二次确认的问题',
-    ],
-  },
-  {
-    version: '0.3.0',
-    date: '2026-04-15',
-    added: [
-      // 无新增内容
-    ],
-    changed: [
-      '升级 React 18 至 React 19，修复 RefObject 类型适配',
-      '迁移 PWA 方案从 next-pwa 至 @serwist/next，保留原有缓存策略',
-      '优化封面预加载距离，从 320px 扩大至 600px 减少滚动白屏',
-      '优化搜索结果页渐进渲染，大量结果分批上屏',
-      '优化首页跳过 ISR 数据有效时的重复客户端请求',
-      '优化豆瓣数据请求增加去重缓存，2 分钟内相同参数复用结果',
-      '优化 VideoCard 菜单数据改为按需构建，减少列表页挂载开销',
-      '优化 Inter 字体限定常用 weight 范围减小加载体积',
-    ],
-    fixed: [
-      // 无修复内容
-    ],
-  },
-  {
-    version: '0.2.9',
-    date: '2026-04-15',
-    added: [
-      // 无新增内容
-    ],
-    changed: ['优化封面图片加载策略，引入并发调度、内存缓存与跨实例同步'],
-    fixed: [
-      '修复瀑布流加载新卡片时全局抖动',
-      '修复侧栏图标刷新时左右抖动',
-      '修复首页骨架屏与加载后页面尺寸不一致',
-      '修复换源页面出现重复giri源站的问题',
-    ],
-  },
-  {
-    version: '0.2.8',
-    date: '2026-04-14',
-    added: [
-      // 无新增内容
-    ],
-    changed: ['将播放页超时判定从 30 秒调整为 15 秒'],
-    fixed: [
-      '修复继续观看进入播放页时加载遮罩过早消失的问题',
-      '修复加载中返回导致继续观看记录被提前清除的问题',
-    ],
-  },
-  {
-    version: '0.2.7',
-    date: '2026-04-13',
-    added: [
-      // 无新增内容
-    ],
-    changed: [
-      // 无变更内容
-    ],
-    fixed: [
-      '修复切源超时后再次切源不生效',
-      '修复播放页首屏闪页和加载态跳动',
-      '修复移动端超时面板溢出，并移除超时按钮',
-    ],
-  },
-  {
-    version: '0.2.6',
-    date: '2026-04-12',
-    added: [
-      // 无新增内容
-    ],
-    changed: [
-      '优化播放器首帧加载、切集连播和源站测速链路',
-      '优化直播切台复用与点播分片缓存策略',
-    ],
-    fixed: [
-      '修复直播媒体错误后无法自动恢复的问题',
-      '修复播放器切换时监听器和 HLS 实例残留问题',
-    ],
-  },
-  {
-    version: '0.2.5',
-    date: '2026-04-07',
-    added: [
-      // 无新增内容
-    ],
-    changed: [
-      '优化 giri 多版本播放体验，改为在选集页内切换版本并精简选集分页展示',
-      '优化点播播放器与代理链路，提升切源和缓冲恢复的稳定性',
-    ],
-    fixed: [
-      '修复 giri 多版本混合导致的重复集数、错集和版本名异常问题',
-      '修复播放中切换源站时“切换中”遮罩重复闪现的问题',
-    ],
-  },
-  {
-    version: '0.2.4',
-    date: '2026-04-07',
-    added: [
-      // 无新增内容
-    ],
-    changed: [
-      '优化播放记录保存链路，细化错误提示并增加重试、去重和保活处理',
-      '优化播放页换源流程，点击其他源站时立即停止当前视频并续播到原时间点',
-    ],
-    fixed: [
-      '修复播放中偶发提示数据库操作失败或保存进度失败的问题',
-      '修复视频转圈时切换源站会被当前源阻塞的问题',
-    ],
-  },
-  {
-    version: '0.2.3',
-    date: '2026-03-06',
-    added: ['后台新增直播开关入口'],
-    changed: ['优化首屏和列表页的加载速度'],
-    fixed: ['修复源站加载和检测逻辑'],
-  },
-  {
-    version: '0.2.2',
-    date: '2026-02-27',
-    added: [
-      // 无新增内容
-    ],
-    changed: ['优化搜索和换源面板的体验', '全面优化封面处理逻辑'],
-    fixed: ['修复换源面板的测速错误问题'],
-  },
-  {
-    version: '0.2.1',
-    date: '2026-02-26',
-    added: [
-      // 无新增内容
-    ],
-    changed: ['播放器前端样式优化', '去广告逻辑优化'],
-    fixed: [
-      // 无修复内容
-    ],
-  },
-  {
-    version: '0.2.0',
-    date: '2026-02-26',
-    added: [
-      // 无新增内容
-    ],
-    changed: ['大幅优化前端样式'],
-    fixed: [
-      // 无修复内容
-    ],
-  },
-  {
-    version: '0.1.1',
-    date: '2026-02-24',
-    added: [
-      // 无新增内容
-    ],
-    changed: [
-      // 无变更内容
-    ],
-    fixed: ['修复去广告失效问题', '修复版本日志不显示问题'],
-  },
-  {
-    version: '0.1.0',
-    date: '2026-02-23',
-    added: [
-      // 无新增内容
-    ],
-    changed: ['优化部分动画，比如加载动画和交互动画等', '优化源站列表排序逻辑'],
-    fixed: [
-      // 无修复内容
-    ],
-  },
-  {
-    version: '0.0.3',
-    date: '2025-10-27',
-    added: [
-      // 无新增内容
-    ],
-    changed: [
-      // 无变更内容
-    ],
-    fixed: ['修复 webkit 下播放器控件的展示 bug'],
-  },
-  {
-    version: '0.0.2',
-    date: '2025-10-23',
-    added: [
-      // 无新增内容
-    ],
-    changed: [
-      // 无变更内容
-    ],
-    fixed: ['修复 /api/search/resources 接口越权问题'],
-  },
-  {
-    version: '0.0.1',
-    date: '2025-09-25',
-    added: [
-      // 无新增内容
-    ],
-    changed: [
-      // 无变更内容
-    ],
-    fixed: [
-      '修复错误的环境变量 ADMIN_USERNAME',
-      '修复 bangumi 数据中没有图片导致首页崩溃问题',
-    ],
-  },
-];
+export interface ChangelogManifest {
+  latestVersion: string;
+  generatedAt: number;
+  entries: ChangelogEntry[];
+}
+
+function normalizeTextList(value: unknown): string[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  return value
+    .map((item) => (typeof item === 'string' ? item.trim() : ''))
+    .filter(Boolean);
+}
+
+export function normalizeChangelogEntry(value: unknown): ChangelogEntry | null {
+  if (!value || typeof value !== 'object') {
+    return null;
+  }
+
+  const entry = value as Record<string, unknown>;
+  const version = typeof entry.version === 'string' ? entry.version.trim() : '';
+  const date = typeof entry.date === 'string' ? entry.date.trim() : '';
+
+  if (!version || !date) {
+    return null;
+  }
+
+  return {
+    version,
+    date,
+    added: normalizeTextList(entry.added),
+    changed: normalizeTextList(entry.changed),
+    fixed: normalizeTextList(entry.fixed),
+  };
+}
+
+export function normalizeChangelogManifest(value: unknown): ChangelogManifest {
+  if (!value || typeof value !== 'object') {
+    return {
+      latestVersion: '',
+      generatedAt: 0,
+      entries: [],
+    };
+  }
+
+  const source = value as Record<string, unknown>;
+  const entries = Array.isArray(source.entries)
+    ? source.entries
+        .map((entry) => normalizeChangelogEntry(entry))
+        .filter((entry): entry is ChangelogEntry => entry !== null)
+    : [];
+  const latestVersion =
+    typeof source.latestVersion === 'string' ? source.latestVersion.trim() : '';
+  const generatedAt =
+    typeof source.generatedAt === 'number' &&
+    Number.isFinite(source.generatedAt)
+      ? source.generatedAt
+      : 0;
+
+  return {
+    latestVersion: latestVersion || entries[0]?.version || '',
+    generatedAt,
+    entries,
+  };
+}
+
+export const changelogData = normalizeChangelogManifest(rawChangelogManifest);
+
+export const changelog = changelogData.entries;
 
 export default changelog;

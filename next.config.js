@@ -1,15 +1,12 @@
 /** @type {import('next').NextConfig} */
-const fs = require('fs');
 const path = require('path');
+
+const { extractLatestVersion } = require('./src/lib/changelog-utils');
 
 let appVersion = '0.3.7';
 
-function extractLatestVersionFromChangelog(content) {
-  const match = content.match(/^## \[([\d.]+)\] - \d{4}-\d{2}-\d{2}/m);
-  return match?.[1]?.trim() || null;
-}
-
 try {
+  const fs = require('fs');
   const changelogPaths = [
     path.join(__dirname, 'CHANGELOG'),
     path.join(__dirname, 'CHANGELOG.md'),
@@ -21,7 +18,7 @@ try {
     }
 
     const content = fs.readFileSync(changelogPath, 'utf8');
-    const latestVersion = extractLatestVersionFromChangelog(content);
+    const latestVersion = extractLatestVersion(content);
     if (latestVersion) {
       appVersion = latestVersion;
       break;
