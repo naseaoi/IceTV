@@ -12,6 +12,7 @@ import { collapseSourcesForDisplay } from '@/lib/source-bundle';
 import { normalizeTitleForSourceMatch } from '@/lib/source_match';
 import { SearchResult } from '@/lib/types';
 
+import { resolveSourceProbeEpisodeIndex } from '@/features/play/lib/sourceProbePolicy';
 import {
   getOrProbe,
   getSnapshot,
@@ -31,11 +32,13 @@ interface SourcesTabProps {
   isActive?: boolean;
   currentSource?: string;
   currentId?: string;
+  currentEpisodeIndex?: number;
   videoTitle?: string;
   /** 搜索关键词（来自聚合搜索的原始关键词），用于"搜索更多源站"时扩大搜索范围 */
   searchKeyword?: string;
   onSourceChange?: (source: string, id: string, title: string) => void;
   precomputedVideoInfo?: Map<string, VideoInfo>;
+  activeDetail?: SearchResult | null;
   /** 测速前补全 detail 后，通知父组件更新 availableSources 中对应条目 */
   onSourceDetailFetched?: (updated: SearchResult) => void;
   /** 搜索到新源后，通知父组件追加到 availableSources */
@@ -49,10 +52,12 @@ export const SourcesTab: React.FC<SourcesTabProps> = ({
   isActive = false,
   currentSource,
   currentId,
+  currentEpisodeIndex = 0,
   videoTitle,
   searchKeyword,
   onSourceChange,
   precomputedVideoInfo,
+  activeDetail = null,
   onSourceDetailFetched,
   onAddSources,
 }) => {
@@ -118,13 +123,18 @@ export const SourcesTab: React.FC<SourcesTabProps> = ({
           batch.map((source) =>
             getOrProbe(source, {
               force: options?.force,
+              episodeIndex: resolveSourceProbeEpisodeIndex({
+                activeDetail,
+                currentEpisodeIndex,
+                targetSource: source,
+              }),
               onDetailFetched: onSourceDetailFetched,
             }),
           ),
         );
       }
     },
-    [onSourceDetailFetched],
+    [activeDetail, currentEpisodeIndex, onSourceDetailFetched],
   );
 
   // 排序判定：真实的 probe/player 成功结果才参与
@@ -543,6 +553,11 @@ export const SourcesTab: React.FC<SourcesTabProps> = ({
                         invalidateProbe(sourceKey);
                         void getOrProbe(source, {
                           force: true,
+                          episodeIndex: resolveSourceProbeEpisodeIndex({
+                            activeDetail,
+                            currentEpisodeIndex,
+                            targetSource: source,
+                          }),
                           onDetailFetched: onSourceDetailFetched,
                         });
                       }}

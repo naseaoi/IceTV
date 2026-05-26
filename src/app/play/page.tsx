@@ -40,6 +40,8 @@ import {
 import { usePlayerKeyboard } from '@/hooks/usePlayerKeyboard';
 import { resolveEpisodeTargetIndex } from '@/features/play/lib/episodeMapping';
 import {
+  SourceSwitchEpisodeAnchor,
+  resolveSourceSwitchEpisodeAnchor,
   resolveSourceSwitchCurrentPlayTime,
   resolveSourceSwitchResumeState,
 } from '@/features/play/lib/episodeResumePolicy';
@@ -191,6 +193,9 @@ function PlayPageClient() {
   );
   const sourceChangeRequestIdRef = useRef(0);
   const pendingSourceSwitchCleanupRef = useRef<SourceSwitchCleanupTask | null>(
+    null,
+  );
+  const sourceSwitchEpisodeAnchorRef = useRef<SourceSwitchEpisodeAnchor | null>(
     null,
   );
   // 15s 加载超时后已尝试过的源（格式 `${source}-${id}`）；
@@ -507,6 +512,7 @@ function PlayPageClient() {
       }
 
       doSaveCurrentProgress();
+      sourceSwitchEpisodeAnchorRef.current = null;
       clearTargetEpisodeProgressRef.current = true;
       stableCurrentTimeRef.current = 0;
       resumeTimeRef.current = 0;
@@ -708,9 +714,15 @@ function PlayPageClient() {
 
       // 使用 ref 获取最新集数索引，避免闭包捕获到过期的 state 值
       const latestEpisodeIndex = currentEpisodeIndexRef.current;
+      const episodeAnchor = resolveSourceSwitchEpisodeAnchor({
+        currentAnchor: sourceSwitchEpisodeAnchorRef.current,
+        activeDetail: previousDetail,
+        activeEpisodeIndex: latestEpisodeIndex,
+      });
+      sourceSwitchEpisodeAnchorRef.current = episodeAnchor;
       const resolvedEpisodeTarget = resolveEpisodeTargetIndex(
-        previousDetail,
-        latestEpisodeIndex,
+        episodeAnchor.detail,
+        episodeAnchor.episodeIndex,
         newDetail,
       );
       let targetIndex = resolvedEpisodeTarget.index;
@@ -964,6 +976,7 @@ function PlayPageClient() {
       autoFallbackInProgressRef.current = false;
       failedSourcesRef.current = new Set();
       clearSourceFailure(`${activeSource}-${activeId}`);
+      sourceSwitchEpisodeAnchorRef.current = null;
       clearTargetEpisodeProgressRef.current = false;
 
       void finalizePendingSourceSwitchCleanup(activeSource, activeId);

@@ -1,7 +1,24 @@
+import type { SearchResult } from '@/lib/types';
+
 import {
+  resolveSourceSwitchEpisodeAnchor,
   resolveSourceSwitchCurrentPlayTime,
   resolveSourceSwitchResumeState,
 } from '@/features/play/lib/episodeResumePolicy';
+
+function createSearchResult(partial: Partial<SearchResult>): SearchResult {
+  return {
+    id: '1',
+    title: 'test',
+    poster: '',
+    episodes: [],
+    episodes_titles: [],
+    source: 'source-a',
+    source_name: 'Source A',
+    year: '2026',
+    ...partial,
+  };
+}
 
 describe('episodeResumePolicy', () => {
   it('自动换源时优先采用播放器里的稳定进度', () => {
@@ -42,6 +59,34 @@ describe('episodeResumePolicy', () => {
         stableCurrentTime: 0,
       }),
     ).toBe(0);
+  });
+
+  it('连续换源时会保留第一次换源的目标集锚点', () => {
+    const sourceA = createSearchResult({
+      source: 'source-a',
+      episodes_titles: ['01', '02', '03', '04', '05', '06'],
+    });
+    const sourceB = createSearchResult({
+      source: 'source-b',
+      episodes_titles: ['第1集'],
+    });
+
+    const anchor = resolveSourceSwitchEpisodeAnchor({
+      currentAnchor: null,
+      activeDetail: sourceA,
+      activeEpisodeIndex: 5,
+    });
+
+    expect(
+      resolveSourceSwitchEpisodeAnchor({
+        currentAnchor: anchor,
+        activeDetail: sourceB,
+        activeEpisodeIndex: 0,
+      }),
+    ).toEqual({
+      detail: sourceA,
+      episodeIndex: 5,
+    });
   });
 
   it('切集后的自动换源不会继承上一集进度', () => {

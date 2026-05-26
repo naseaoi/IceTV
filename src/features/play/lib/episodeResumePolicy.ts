@@ -1,8 +1,15 @@
+import type { SearchResult } from '@/lib/types';
+
 import type { ResumeMode } from '@/features/play/lib/resumePlayback';
 
 export interface SourceSwitchResumeState {
   resumeTime: number;
   resumeMode: ResumeMode;
+}
+
+export interface SourceSwitchEpisodeAnchor {
+  detail: SearchResult | null;
+  episodeIndex: number;
 }
 
 interface ResolveSourceSwitchResumeStateOptions {
@@ -15,6 +22,12 @@ interface ResolveSourceSwitchCurrentPlayTimeOptions {
   playerCurrentTime: number;
   pendingResumeTime: number | null;
   stableCurrentTime: number;
+}
+
+interface ResolveSourceSwitchEpisodeAnchorOptions {
+  currentAnchor: SourceSwitchEpisodeAnchor | null;
+  activeDetail: SearchResult | null;
+  activeEpisodeIndex: number;
 }
 
 /**
@@ -36,6 +49,21 @@ export function resolveSourceSwitchCurrentPlayTime({
   }
 
   return stableCurrentTime > 1 ? stableCurrentTime : 0;
+}
+
+export function resolveSourceSwitchEpisodeAnchor({
+  currentAnchor,
+  activeDetail,
+  activeEpisodeIndex,
+}: ResolveSourceSwitchEpisodeAnchorOptions): SourceSwitchEpisodeAnchor {
+  if (currentAnchor) {
+    return currentAnchor;
+  }
+
+  return {
+    detail: activeDetail,
+    episodeIndex: Math.max(0, Math.floor(activeEpisodeIndex)),
+  };
 }
 
 /**

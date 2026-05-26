@@ -160,10 +160,12 @@ const EpisodeSelector: React.FC<EpisodeSelectorProps> = ({
           isActive={activeTab === 'sources'}
           currentSource={currentSource}
           currentId={currentId}
+          currentEpisodeIndex={Math.max(0, value - 1)}
           videoTitle={videoTitle}
           searchKeyword={searchKeyword}
           onSourceChange={onSourceChange}
           precomputedVideoInfo={precomputedVideoInfo}
+          activeDetail={detail}
           onSourceDetailFetched={onSourceDetailFetched}
           onAddSources={onAddSources}
         />

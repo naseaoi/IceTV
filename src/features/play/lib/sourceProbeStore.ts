@@ -104,6 +104,27 @@ interface ProbeOptions {
   force?: boolean;
   /** 当 episodes 为空时补全 detail 的回调 */
   onDetailFetched?: (updated: SearchResult) => void;
+  /** 当前逻辑集映射到目标源后的待测速集索引；null 表示当前集不可测 */
+  episodeIndex?: number | null;
+}
+
+export function resolveRequestedProbeEpisodeUrl(
+  source: SearchResult,
+  episodeIndex: number | null | undefined,
+): string | null {
+  if (episodeIndex === null) {
+    return null;
+  }
+
+  const safeEpisodeIndex = Number.isInteger(episodeIndex)
+    ? Math.max(0, episodeIndex)
+    : 0;
+
+  if (safeEpisodeIndex >= source.episodes.length) {
+    return null;
+  }
+
+  return source.episodes[safeEpisodeIndex] || null;
 }
 
 export async function getOrProbe(
@@ -186,8 +207,15 @@ async function runProbe(
   try {
     const proxyModes = await getProxyModes();
     const useProxy = shouldUseServerProxy(resolved.source, proxyModes);
+    const probeEpisodeUrl = resolveRequestedProbeEpisodeUrl(
+      resolved,
+      options.episodeIndex,
+    );
+    if (!probeEpisodeUrl) {
+      throw new Error('Requested episode is unavailable for probe');
+    }
     const info = await getVideoResolutionFromM3u8(
-      resolved.episodes[0],
+      probeEpisodeUrl,
       useProxy,
       resolved.source,
     );
