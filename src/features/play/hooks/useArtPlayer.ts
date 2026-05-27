@@ -839,6 +839,7 @@ export function useArtPlayer(params: UseArtPlayerParams) {
           }
 
           let appliedResumeTarget: number | null = null;
+          let intendedResumeTarget: number | null = null;
           const pendingResumeTime = resolvePendingResumeTime({
             resumeTime: resumeTimeRef.current,
             resumeMode: resumeModeRef.current,
@@ -846,6 +847,7 @@ export function useArtPlayer(params: UseArtPlayerParams) {
           });
 
           if (pendingResumeTime !== null) {
+            intendedResumeTarget = pendingResumeTime;
             try {
               if (applyResumeTime(player, pendingResumeTime)) {
                 appliedResumeTarget = player.currentTime || pendingResumeTime;
@@ -858,13 +860,21 @@ export function useArtPlayer(params: UseArtPlayerParams) {
             }
           } else if (resetPlaybackToStartIfNeeded()) {
             appliedResumeTarget = 0;
+            intendedResumeTarget = 0;
           }
 
           loadingSessionRef.current.pendingInitialResumeTarget =
             appliedResumeTarget;
           resumeTimeRef.current = null;
           resumeModeRef.current = null;
-          updateStableCurrentTime(player.currentTime || 0);
+          // 优先用本次写入的恢复目标作为 stableCurrentTime 兜底。
+          // HLS 起播 canplay 可能在 seek 真正生效前触发，此时直接读 player.currentTime
+          // 仍是 0；不预留 T 的话，后续手动换源会丢掉这段历史进度。
+          const fallbackTime =
+            intendedResumeTarget !== null
+              ? intendedResumeTarget
+              : player.currentTime || 0;
+          updateStableCurrentTime(fallbackTime);
 
           return appliedResumeTarget;
         };
