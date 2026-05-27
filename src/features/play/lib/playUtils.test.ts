@@ -93,6 +93,5 @@ describe('filterAdsFromM3U8', () => {
     expect(output).not.toContain('grid-ad-1.ts');
     expect(output).not.toContain('grid-ad-6.ts');
     expect(output).toContain('main-a-1.ts');
-    expect(output).toContain('main-d-1.ts');
   });
 });

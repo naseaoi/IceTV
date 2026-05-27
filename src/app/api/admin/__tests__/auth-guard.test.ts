@@ -1,9 +1,9 @@
 /** @jest-environment node */
 
-import { getAuthInfoFromCookie } from '@/lib/auth';
+import { getAuthInfoFromCookie, verifySignature } from '@/lib/auth';
 import { getConfig, resetConfig } from '@/lib/config';
 import { db } from '@/lib/db';
-import { getOwnerUsername } from '@/lib/env.server';
+import { getOwnerPassword, getOwnerUsername } from '@/lib/env.server';
 
 if (!(globalThis as any).Headers) {
   class MinimalHeaders {
@@ -72,6 +72,8 @@ if (!(globalThis as any).Response) {
 
 jest.mock('@/lib/auth', () => ({
   getAuthInfoFromCookie: jest.fn(),
+  getSignatureData: jest.fn(() => 'mock-sign-data'),
+  verifySignature: jest.fn(),
 }));
 
 jest.mock('@/lib/config', () => ({
@@ -81,6 +83,7 @@ jest.mock('@/lib/config', () => ({
 
 jest.mock('@/lib/env.server', () => ({
   getOwnerUsername: jest.fn(),
+  getOwnerPassword: jest.fn(),
 }));
 
 jest.mock('@/lib/db', () => ({
@@ -104,12 +107,18 @@ function getHandlers() {
 describe('admin api auth guard regression', () => {
   const mockedGetAuthInfoFromCookie =
     getAuthInfoFromCookie as jest.MockedFunction<typeof getAuthInfoFromCookie>;
+  const mockedVerifySignature = verifySignature as jest.MockedFunction<
+    typeof verifySignature
+  >;
   const mockedGetConfig = getConfig as jest.MockedFunction<typeof getConfig>;
   const mockedResetConfig = resetConfig as jest.MockedFunction<
     typeof resetConfig
   >;
   const mockedGetOwnerUsername = getOwnerUsername as jest.MockedFunction<
     typeof getOwnerUsername
+  >;
+  const mockedGetOwnerPassword = getOwnerPassword as jest.MockedFunction<
+    typeof getOwnerPassword
   >;
   const mockedSaveAdminConfig = db.saveAdminConfig as jest.MockedFunction<
     typeof db.saveAdminConfig
@@ -147,6 +156,8 @@ describe('admin api auth guard regression', () => {
     jest.clearAllMocks();
     process.env.NEXT_PUBLIC_STORAGE_TYPE = 'localdb';
     mockedGetOwnerUsername.mockReturnValue('owner-1');
+    mockedGetOwnerPassword.mockReturnValue('owner-secret');
+    mockedVerifySignature.mockResolvedValue(true);
     mockedGetConfig.mockResolvedValue(baseConfig as never);
   });
 
@@ -166,6 +177,8 @@ describe('admin api auth guard regression', () => {
     mockedGetAuthInfoFromCookie.mockReturnValue({
       username: 'normal-1',
       expiresAt: Date.now() + 60_000,
+      signature: 'mock-signature',
+      sessionType: 'account',
     });
 
     const response = await getAdminConfig({} as any);
@@ -180,6 +193,8 @@ describe('admin api auth guard regression', () => {
     mockedGetAuthInfoFromCookie.mockReturnValue({
       username: 'admin-1',
       expiresAt: Date.now() + 60_000,
+      signature: 'mock-signature',
+      sessionType: 'account',
     });
 
     const response = await getAdminConfig({} as any);
@@ -195,6 +210,8 @@ describe('admin api auth guard regression', () => {
     mockedGetAuthInfoFromCookie.mockReturnValue({
       username: 'admin-1',
       expiresAt: Date.now() + 60_000,
+      signature: 'mock-signature',
+      sessionType: 'account',
     });
 
     const response = await resetAdminConfig({} as any);
@@ -210,12 +227,15 @@ describe('admin api auth guard regression', () => {
     mockedGetAuthInfoFromCookie.mockReturnValue({
       username: 'owner-1',
       expiresAt: Date.now() + 60_000,
+      signature: 'mock-signature',
+      sessionType: 'account',
     });
 
     const request = {
       json: async () => ({
         SiteName: 'IceTV',
         Announcement: 'hello',
+        EnableLiveEntry: false,
         SearchDownstreamMaxPage: 5,
         SiteInterfaceCacheTime: 300,
         DoubanProxyType: 'direct',
