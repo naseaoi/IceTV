@@ -1,7 +1,7 @@
 import { AlertTriangle, Cat, Clover, Film, Play, Tv } from 'lucide-react';
 import { RefObject, useEffect, useMemo, useRef, useState } from 'react';
 
-import EpisodeSelector from '@/components/EpisodeSelector';
+import EpisodeSelector from '@/features/play/components/EpisodeSelector';
 import LoadingStatePanel from '@/components/LoadingStatePanel';
 import PageLayout from '@/components/PageLayout';
 import { BackButton } from '@/components/BackButton';

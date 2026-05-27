@@ -9,7 +9,7 @@ import React, {
 
 import { isSourceCoolingDown } from '@/lib/failed-source-cooldown';
 import { collapseSourcesForDisplay } from '@/lib/source-bundle';
-import { normalizeTitleForSourceMatch } from '@/lib/source_match';
+import { normalizeTitleForSourceMatch } from '@/lib/source-match';
 import { SearchResult } from '@/lib/types';
 
 import { resolveSourceProbeEpisodeIndex } from '@/features/play/lib/sourceProbePolicy';

@@ -5,7 +5,7 @@ export interface ManagedUser {
   role: 'user' | 'admin' | 'owner';
 }
 
-interface PermissionContext {
+export interface PermissionContext {
   role: AdminRole;
   currentUsername: string | null;
 }

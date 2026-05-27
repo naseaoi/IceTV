@@ -5,8 +5,8 @@ import { useSearchParams } from 'next/navigation';
 import { Suspense, useEffect, useState } from 'react';
 
 import { CURRENT_VERSION } from '@/lib/version';
-import { checkForUpdates, UpdateStatus } from '@/lib/version_check';
-import { getPrimaryRepoUrl } from '@/lib/update_source';
+import { checkForUpdates, UpdateStatus } from '@/lib/version-check';
+import { getPrimaryRepoUrl } from '@/lib/update-source';
 import { getClientAuthRuntimeConfig } from '@/lib/runtime-config';
 
 import { useSite } from '@/components/SiteProvider';

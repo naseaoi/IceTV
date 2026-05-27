@@ -1,4 +1,4 @@
-import HomeClient from '@/components/home/HomeClient';
+import HomeClient from '@/features/home/components/HomeClient';
 import { getHomeInitialData } from '@/lib/home.server';
 
 /** 首页推荐数据 6 小时 ISR 缓存：豆瓣热门榜按日更新，短 TTL 无收益 */

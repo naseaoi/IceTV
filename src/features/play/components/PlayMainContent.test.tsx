@@ -15,7 +15,7 @@ jest.mock('@/components/BackButton', () => ({
   BackButton: () => <button type='button'>返回</button>,
 }));
 
-jest.mock('@/components/EpisodeSelector', () => ({
+jest.mock('@/features/play/components/EpisodeSelector', () => ({
   __esModule: true,
   default: () => <div>EpisodeSelector</div>,
 }));

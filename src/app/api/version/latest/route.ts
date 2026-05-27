@@ -8,7 +8,7 @@ import {
   buildChangelogUrls,
   getUpdateBranch,
   getUpdateRepos,
-} from '@/lib/update_source';
+} from '@/lib/update-source';
 import { parseChangelog } from '@/lib/changelog-utils';
 
 export const runtime = 'nodejs';

@@ -1,4 +1,4 @@
-import { filterSourcesForPlayback, SearchType } from '@/lib/source_match';
+import { filterSourcesForPlayback, SearchType } from '@/lib/source-match';
 import { SearchResult } from '@/lib/types';
 
 /** 聚合用标题归一化：去除空格、标点、统一大小写 */

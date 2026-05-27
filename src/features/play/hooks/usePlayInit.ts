@@ -1,6 +1,6 @@
 import { Dispatch, MutableRefObject, SetStateAction, useEffect } from 'react';
 
-import { filterSourcesForPlayback } from '@/lib/source_match';
+import { filterSourcesForPlayback } from '@/lib/source-match';
 import { mergeSourceBundle } from '@/lib/source-bundle';
 import { SearchResult } from '@/lib/types';
 import { getVideoResolutionFromM3u8 } from '@/lib/hls-utils';

@@ -18,7 +18,7 @@ jest.mock('@/features/admin/components/AlertModal', () => ({
   default: () => null,
 }));
 
-jest.mock('@/features/admin/components/ConfirmModal', () => ({
+jest.mock('@/components/modals/ConfirmModal', () => ({
   __esModule: true,
   default: ({
     isOpen,

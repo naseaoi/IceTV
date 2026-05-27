@@ -2,7 +2,8 @@ import Database from 'better-sqlite3';
 import { existsSync, mkdirSync, readFileSync } from 'fs';
 import path from 'path';
 
-import { AdminConfig } from './admin.types';
+import { AdminConfig } from '@/features/admin/types/api';
+
 import { hashPassword, verifyPassword } from './password';
 import { Favorite, IStorage, PlayRecord, SkipConfig } from './types';
 

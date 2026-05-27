@@ -1,4 +1,5 @@
-import { AdminConfig } from './admin.types';
+import { AdminConfig } from '@/features/admin/types/api';
+
 import { getStorageType } from './storage-type';
 import { Favorite, IStorage, PlayRecord, SkipConfig } from './types';
 
@@ -6,11 +7,11 @@ async function createStorage(): Promise<IStorage> {
   const storageType = getStorageType();
 
   if (storageType === 'mysql') {
-    const { MySqlStorage } = await import('./mysql-storage.js');
+    const { MySqlStorage } = await import('./mysql.db.js');
     return new MySqlStorage();
   }
 
-  const { LocalSqliteStorage } = await import('./sqlite-storage.js');
+  const { LocalSqliteStorage } = await import('./sqlite.db.js');
   return new LocalSqliteStorage();
 }
 

@@ -25,7 +25,7 @@ import {
   triggerGlobalError,
   createCacheFirstReader,
   createOptimisticWriter,
-} from './db.client.helpers';
+} from './db.client.internal';
 
 // ---- 类型 ----
 export interface PlayRecord {

@@ -14,9 +14,9 @@ import { useEffect, useMemo, useState } from 'react';
 import { createPortal } from 'react-dom';
 
 import { changelog, ChangelogEntry } from '@/lib/changelog';
-import { getPrimaryRepoUrl } from '@/lib/update_source';
+import { getPrimaryRepoUrl } from '@/lib/update-source';
 import { CURRENT_VERSION } from '@/lib/version';
-import { compareVersions, UpdateStatus } from '@/lib/version_check';
+import { compareVersions, UpdateStatus } from '@/lib/version-check';
 
 interface VersionPanelProps {
   isOpen: boolean;

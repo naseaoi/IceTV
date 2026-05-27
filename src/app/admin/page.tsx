@@ -16,9 +16,9 @@ import { Suspense, useEffect, useState } from 'react';
 
 import DataMigration from '@/components/DataMigration';
 import PageLayout from '@/components/PageLayout';
+import ConfirmModal from '@/components/modals/ConfirmModal';
 import AlertModal from '@/features/admin/components/AlertModal';
 import CollapsibleTab from '@/features/admin/components/CollapsibleTab';
-import ConfirmModal from '@/features/admin/components/ConfirmModal';
 import { buttonStyles } from '@/features/admin/lib/buttonStyles';
 import { showError } from '@/features/admin/lib/notifications';
 import { isOwner } from '@/features/admin/lib/permissions';

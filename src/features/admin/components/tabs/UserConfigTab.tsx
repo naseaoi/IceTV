@@ -2,23 +2,24 @@
 
 import { useCallback, useMemo, useState } from 'react';
 
-import AdminDialog from '@/features/admin/components/AdminDialog';
-import AdminSelect from '@/features/admin/components/AdminSelect';
 import AlertModal from '@/features/admin/components/AlertModal';
-import ConfirmModal from '@/features/admin/components/ConfirmModal';
-import { buttonStyles } from '@/features/admin/lib/buttonStyles';
-import { useAlertModal } from '@/features/admin/hooks/useAlertModal';
+import { AddUserForm } from '@/features/admin/components/tabs/user-config/AddUserForm';
+import { BatchUserGroupDialog } from '@/features/admin/components/tabs/user-config/BatchUserGroupDialog';
+import { ChangePasswordForm } from '@/features/admin/components/tabs/user-config/ChangePasswordForm';
+import { ConfigureUserApisDialog } from '@/features/admin/components/tabs/user-config/ConfigureUserApisDialog';
+import { ConfigureUserGroupDialog } from '@/features/admin/components/tabs/user-config/ConfigureUserGroupDialog';
+import { DeleteUserConfirm } from '@/features/admin/components/tabs/user-config/DeleteUserConfirm';
+import { DeleteUserGroupConfirm } from '@/features/admin/components/tabs/user-config/DeleteUserGroupConfirm';
+import { UserGroupFormDialog } from '@/features/admin/components/tabs/user-config/UserGroupFormDialog';
+import { UserGroupTable } from '@/features/admin/components/tabs/user-config/UserGroupTable';
+import { UserTable } from '@/features/admin/components/tabs/user-config/UserTable';
 import { useAdminUserActions } from '@/features/admin/hooks/useAdminUserActions';
+import { useAlertModal } from '@/features/admin/hooks/useAlertModal';
 import { useLoadingState } from '@/features/admin/hooks/useLoadingState';
+import { buttonStyles } from '@/features/admin/lib/buttonStyles';
 import { showError, showSuccess } from '@/features/admin/lib/notifications';
+import { getSelectableUsers } from '@/features/admin/lib/permissions';
 import { AdminConfig } from '@/features/admin/types/api';
-import {
-  canChangeUserPassword,
-  canConfigureUser,
-  canDeleteManagedUser,
-  canOperateUser,
-  getSelectableUsers,
-} from '@/features/admin/lib/permissions';
 import { useModalState } from '@/hooks/useModalState';
 import { getAuthInfoFromBrowserCookie } from '@/lib/auth';
 
@@ -49,7 +50,7 @@ const UserConfig = ({ config, role, refreshConfig }: UserConfigProps) => {
   const [newUser, setNewUser] = useState({
     username: '',
     password: '',
-    userGroup: '', // 新增用户组字段
+    userGroup: '',
   });
   const [changePasswordUser, setChangePasswordUser] = useState({
     username: '',
@@ -96,26 +97,27 @@ const UserConfig = ({ config, role, refreshConfig }: UserConfigProps) => {
   const [showDeleteUserModal, setShowDeleteUserModal] = useModalState(false);
   const [deletingUser, setDeletingUser] = useState<string | null>(null);
 
-  // 当前登录用户名
   const currentUsername = getAuthInfoFromBrowserCookie()?.username || null;
   const permissionContext = useMemo(
     () => ({ role, currentUsername }),
     [role, currentUsername],
   );
 
-  // 使用 useMemo 计算全选状态，避免每次渲染都重新计算
-  const selectAllUsers = useMemo(() => {
-    const selectableUserCount = getSelectableUsers(
-      config?.UserConfig?.Users || [],
-      permissionContext,
-    ).length;
-    return selectedUsers.size === selectableUserCount && selectedUsers.size > 0;
-  }, [selectedUsers.size, config?.UserConfig?.Users, permissionContext]);
+  const selectableUsersCount = useMemo(
+    () =>
+      getSelectableUsers(config?.UserConfig?.Users || [], permissionContext)
+        .length,
+    [config?.UserConfig?.Users, permissionContext],
+  );
 
-  // 获取用户组列表
+  const selectAllUsers = useMemo(() => {
+    return (
+      selectedUsers.size === selectableUsersCount && selectedUsers.size > 0
+    );
+  }, [selectedUsers.size, selectableUsersCount]);
+
   const userGroups = config?.UserConfig?.Tags || [];
 
-  // 处理用户组相关操作
   const handleUserGroupAction = async (
     action: 'add' | 'edit' | 'delete',
     groupName: string,
@@ -163,7 +165,6 @@ const UserConfig = ({ config, role, refreshConfig }: UserConfigProps) => {
   };
 
   const handleDeleteUserGroup = (groupName: string) => {
-    // 计算会受影响的用户数量
     const affectedUsers =
       config?.UserConfig?.Users?.filter(
         (user) => user.tags && user.tags.includes(groupName),
@@ -186,34 +187,64 @@ const UserConfig = ({ config, role, refreshConfig }: UserConfigProps) => {
       await handleUserGroupAction('delete', deletingUserGroup.name);
       setShowDeleteUserGroupModal(false);
       setDeletingUserGroup(null);
-    } catch (err) {
-      // 错误处理已在 handleUserGroupAction 中处理
+    } catch {
+      // handled in handleUserGroupAction
     }
   };
 
   const handleStartEditUserGroup = (group: {
     name: string;
-    enabledApis: string[];
+    enabledApis?: string[];
   }) => {
-    setEditingUserGroup({ ...group });
+    setEditingUserGroup({
+      name: group.name,
+      enabledApis: group.enabledApis || [],
+    });
     setShowEditUserGroupForm(true);
     setShowAddUserGroupForm(false);
   };
 
-  // 为用户分配用户组
   const handleAssignUserGroup = async (
     username: string,
-    userGroups: string[],
+    nextUserGroups: string[],
   ) => {
     return withLoading(`assignUserGroup_${username}`, async () => {
       try {
-        await assignUserGroups(username, userGroups);
+        await assignUserGroups(username, nextUserGroups);
         showSuccess('用户组分配成功', showAlert);
       } catch (err) {
         showError(err instanceof Error ? err.message : '操作失败', showAlert);
         throw err;
       }
     });
+  };
+
+  const handleUserAction = async (
+    action:
+      | 'add'
+      | 'ban'
+      | 'unban'
+      | 'setAdmin'
+      | 'cancelAdmin'
+      | 'changePassword'
+      | 'deleteUser'
+      | 'setOpenRegister',
+    targetUsername: string,
+    targetPassword?: string,
+    userGroup?: string,
+    openRegister?: boolean,
+  ) => {
+    try {
+      await userAction(
+        action,
+        targetUsername,
+        targetPassword,
+        userGroup,
+        openRegister,
+      );
+    } catch {
+      // handled in useAdminUserActions
+    }
   };
 
   const handleBanUser = async (uname: string) => {
@@ -289,7 +320,7 @@ const UserConfig = ({ config, role, refreshConfig }: UserConfigProps) => {
   const handleShowChangePasswordForm = (username: string) => {
     setChangePasswordUser({ username, password: '' });
     setShowChangePasswordForm(true);
-    setShowAddUserForm(false); // 关闭添加用户表单
+    setShowAddUserForm(false);
   };
 
   const handleDeleteUser = (username: string) => {
@@ -331,8 +362,8 @@ const UserConfig = ({ config, role, refreshConfig }: UserConfigProps) => {
           setShowConfigureUserGroupModal(false);
           setSelectedUserForGroup(null);
           setSelectedUserGroups([]);
-        } catch (err) {
-          // 错误处理已在 handleAssignUserGroup 中处理
+        } catch {
+          // handled in handleAssignUserGroup
         }
       },
     );
@@ -365,23 +396,21 @@ const UserConfig = ({ config, role, refreshConfig }: UserConfigProps) => {
     setSelectedUserGroup('');
   };
 
-  // 处理用户选择
   const handleSelectUser = useCallback((username: string, checked: boolean) => {
     setSelectedUsers((prev) => {
-      const newSelectedUsers = new Set(prev);
+      const next = new Set(prev);
       if (checked) {
-        newSelectedUsers.add(username);
+        next.add(username);
       } else {
-        newSelectedUsers.delete(username);
+        next.delete(username);
       }
-      return newSelectedUsers;
+      return next;
     });
   }, []);
 
   const handleSelectAllUsers = useCallback(
     (checked: boolean) => {
       if (checked) {
-        // 只选择自己有权限操作的用户
         const selectableUsernames = getSelectableUsers(
           config?.UserConfig?.Users || [],
           permissionContext,
@@ -394,14 +423,12 @@ const UserConfig = ({ config, role, refreshConfig }: UserConfigProps) => {
     [config?.UserConfig?.Users, permissionContext],
   );
 
-  // 批量设置用户组
   const handleBatchSetUserGroup = async (userGroup: string) => {
     if (selectedUsers.size === 0) return;
 
     await withLoading('batchSetUserGroup', async () => {
       try {
         await batchUpdateUserGroups(Array.from(selectedUsers), userGroup);
-
         const userCount = selectedUsers.size;
         setSelectedUsers(new Set());
         closeBatchUserGroupModal();
@@ -409,8 +436,6 @@ const UserConfig = ({ config, role, refreshConfig }: UserConfigProps) => {
           `已为 ${userCount} 个用户设置用户组: ${userGroup}`,
           showAlert,
         );
-
-        // 刷新配置
         await refreshConfig();
       } catch (err) {
         showError('批量设置用户组失败', showAlert);
@@ -419,25 +444,12 @@ const UserConfig = ({ config, role, refreshConfig }: UserConfigProps) => {
     });
   };
 
-  // 提取URL域名的辅助函数
-  const extractDomain = (url: string): string => {
-    try {
-      const urlObj = new URL(url);
-      return urlObj.hostname;
-    } catch {
-      // 如果URL格式不正确，返回原字符串
-      return url;
-    }
-  };
-
   const handleSaveUserApis = async () => {
     if (!selectedUser) return;
 
     await withLoading(`saveUserApis_${selectedUser.username}`, async () => {
       try {
         await updateUserApis(selectedUser.username, selectedApis);
-
-        // 成功后刷新配置
         await refreshConfig();
         closeConfigureApisModal();
       } catch (err) {
@@ -445,35 +457,6 @@ const UserConfig = ({ config, role, refreshConfig }: UserConfigProps) => {
         throw err;
       }
     });
-  };
-
-  // 通用请求函数
-  const handleUserAction = async (
-    action:
-      | 'add'
-      | 'ban'
-      | 'unban'
-      | 'setAdmin'
-      | 'cancelAdmin'
-      | 'changePassword'
-      | 'deleteUser'
-      | 'setOpenRegister',
-    targetUsername: string,
-    targetPassword?: string,
-    userGroup?: string,
-    openRegister?: boolean,
-  ) => {
-    try {
-      await userAction(
-        action,
-        targetUsername,
-        targetPassword,
-        userGroup,
-        openRegister,
-      );
-    } catch {
-      // 错误处理已在 useAdminUserActions 中处理
-    }
   };
 
   const handleConfirmDeleteUser = async () => {
@@ -484,8 +467,8 @@ const UserConfig = ({ config, role, refreshConfig }: UserConfigProps) => {
         await handleUserAction('deleteUser', deletingUser);
         setShowDeleteUserModal(false);
         setDeletingUser(null);
-      } catch (err) {
-        // 错误处理已在 handleUserAction 中处理
+      } catch {
+        // handled in handleUserAction
       }
     });
   };
@@ -551,7 +534,6 @@ const UserConfig = ({ config, role, refreshConfig }: UserConfigProps) => {
         </div>
       </div>
 
-      {/* 用户组管理 */}
       <div>
         <div className='mb-3 flex items-center justify-between'>
           <h4 className='text-sm font-medium text-gray-700 dark:text-gray-300'>
@@ -575,84 +557,22 @@ const UserConfig = ({ config, role, refreshConfig }: UserConfigProps) => {
           </button>
         </div>
 
-        {/* 用户组列表 */}
-        <div className='relative max-h-[20rem] overflow-x-auto overflow-y-auto rounded-lg border border-gray-200 dark:border-gray-700'>
-          <table className='min-w-full divide-y divide-gray-200 dark:divide-gray-700'>
-            <thead className='sticky top-0 z-10 bg-gray-50 dark:bg-gray-900'>
-              <tr>
-                <th className='px-6 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400'>
-                  用户组名称
-                </th>
-                <th className='px-6 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400'>
-                  可用视频源
-                </th>
-                <th className='px-6 py-3 text-right text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400'>
-                  操作
-                </th>
-              </tr>
-            </thead>
-            <tbody className='divide-y divide-gray-200 dark:divide-gray-700'>
-              {userGroups.map((group) => (
-                <tr
-                  key={group.name}
-                  className='transition-colors hover:bg-gray-50 dark:hover:bg-gray-800'
-                >
-                  <td className='whitespace-nowrap px-6 py-4 text-sm font-medium text-gray-900 dark:text-gray-100'>
-                    {group.name}
-                  </td>
-                  <td className='whitespace-nowrap px-6 py-4'>
-                    <div className='flex items-center space-x-2'>
-                      <span className='text-sm text-gray-900 dark:text-gray-100'>
-                        {group.enabledApis && group.enabledApis.length > 0
-                          ? `${group.enabledApis.length} 个源`
-                          : '无限制'}
-                      </span>
-                    </div>
-                  </td>
-                  <td className='space-x-2 whitespace-nowrap px-6 py-4 text-right text-sm font-medium'>
-                    <button
-                      onClick={() => handleStartEditUserGroup(group)}
-                      disabled={isLoading(`userGroup_edit_${group.name}`)}
-                      className={`${buttonStyles.roundedPrimary} ${
-                        isLoading(`userGroup_edit_${group.name}`)
-                          ? 'cursor-not-allowed opacity-50'
-                          : ''
-                      }`}
-                    >
-                      编辑
-                    </button>
-                    <button
-                      onClick={() => handleDeleteUserGroup(group.name)}
-                      className={buttonStyles.roundedDanger}
-                    >
-                      删除
-                    </button>
-                  </td>
-                </tr>
-              ))}
-              {userGroups.length === 0 && (
-                <tr>
-                  <td
-                    colSpan={3}
-                    className='px-6 py-8 text-center text-sm text-gray-500 dark:text-gray-400'
-                  >
-                    暂无用户组，请添加用户组来管理用户权限
-                  </td>
-                </tr>
-              )}
-            </tbody>
-          </table>
-        </div>
+        <UserGroupTable
+          userGroups={userGroups}
+          isEditLoading={(groupName) =>
+            isLoading(`userGroup_edit_${groupName}`)
+          }
+          onEdit={handleStartEditUserGroup}
+          onDelete={handleDeleteUserGroup}
+        />
       </div>
 
-      {/* 用户列表 */}
       <div>
         <div className='mb-3 flex items-center justify-between'>
           <h4 className='text-sm font-medium text-gray-700 dark:text-gray-300'>
             用户列表
           </h4>
           <div className='flex items-center space-x-2'>
-            {/* 批量操作按钮 */}
             {selectedUsers.size > 0 && (
               <>
                 <div className='flex items-center space-x-3'>
@@ -686,1130 +606,149 @@ const UserConfig = ({ config, role, refreshConfig }: UserConfigProps) => {
           </div>
         </div>
 
-        {/* 添加用户表单 */}
         {showAddUserForm && (
-          <div className='mb-4 rounded-lg border border-gray-200 bg-gray-50 p-4 dark:border-gray-700 dark:bg-gray-900'>
-            <div className='space-y-4'>
-              <div className='grid grid-cols-1 gap-4 sm:grid-cols-2'>
-                <input
-                  type='text'
-                  placeholder='用户名'
-                  value={newUser.username}
-                  onChange={(e) =>
-                    setNewUser((prev) => ({
-                      ...prev,
-                      username: e.target.value,
-                    }))
-                  }
-                  className='rounded-lg border border-gray-300 bg-white px-3 py-2 text-gray-900 focus:border-transparent focus:ring-2 focus:ring-green-500 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100'
-                />
-                <input
-                  type='password'
-                  placeholder='密码'
-                  value={newUser.password}
-                  onChange={(e) =>
-                    setNewUser((prev) => ({
-                      ...prev,
-                      password: e.target.value,
-                    }))
-                  }
-                  className='rounded-lg border border-gray-300 bg-white px-3 py-2 text-gray-900 focus:border-transparent focus:ring-2 focus:ring-green-500 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100'
-                />
-              </div>
-              <div>
-                <label className='mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300'>
-                  用户组（可选）
-                </label>
-                <AdminSelect
-                  value={newUser.userGroup}
-                  onChange={(value) =>
-                    setNewUser((prev) => ({
-                      ...prev,
-                      userGroup: value,
-                    }))
-                  }
-                  options={[
-                    { label: '无用户组（无限制）', value: '' },
-                    ...userGroups.map((group) => ({
-                      label: `${group.name} (${
-                        group.enabledApis && group.enabledApis.length > 0
-                          ? `${group.enabledApis.length} 个源`
-                          : '无限制'
-                      })`,
-                      value: group.name,
-                    })),
-                  ]}
-                  placeholder='无用户组（无限制）'
-                />
-              </div>
-              <div className='flex justify-end'>
-                <button
-                  onClick={handleAddUser}
-                  disabled={
-                    !newUser.username ||
-                    !newUser.password ||
-                    isLoading('addUser')
-                  }
-                  className={
-                    !newUser.username ||
-                    !newUser.password ||
-                    isLoading('addUser')
-                      ? buttonStyles.disabled
-                      : buttonStyles.success
-                  }
-                >
-                  {isLoading('addUser') ? '添加中...' : '添加'}
-                </button>
-              </div>
-            </div>
-          </div>
+          <AddUserForm
+            value={newUser}
+            onChange={setNewUser}
+            userGroups={userGroups}
+            onSubmit={handleAddUser}
+            isSubmitting={isLoading('addUser')}
+          />
         )}
 
-        {/* 修改密码表单 */}
         {showChangePasswordForm && (
-          <div className='mb-4 rounded-lg border border-blue-200 bg-blue-50 p-4 dark:border-blue-700 dark:bg-blue-900/20'>
-            <h5 className='mb-3 text-sm font-medium text-blue-800 dark:text-blue-300'>
-              修改用户密码
-            </h5>
-            <div className='flex flex-col gap-4 sm:flex-row sm:gap-3'>
-              <input
-                type='text'
-                placeholder='用户名'
-                value={changePasswordUser.username}
-                disabled
-                className='flex-1 cursor-not-allowed rounded-lg border border-gray-300 bg-gray-100 px-3 py-2 text-gray-900 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-100'
-              />
-              <input
-                type='password'
-                placeholder='新密码'
-                value={changePasswordUser.password}
-                onChange={(e) =>
-                  setChangePasswordUser((prev) => ({
-                    ...prev,
-                    password: e.target.value,
-                  }))
-                }
-                className='flex-1 rounded-lg border border-gray-300 bg-white px-3 py-2 text-gray-900 focus:border-transparent focus:ring-2 focus:ring-blue-500 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100'
-              />
-              <button
-                onClick={handleChangePassword}
-                disabled={
-                  !changePasswordUser.password ||
-                  isLoading(`changePassword_${changePasswordUser.username}`)
-                }
-                className={`w-full sm:w-auto ${
-                  !changePasswordUser.password ||
-                  isLoading(`changePassword_${changePasswordUser.username}`)
-                    ? buttonStyles.disabled
-                    : buttonStyles.primary
-                }`}
-              >
-                {isLoading(`changePassword_${changePasswordUser.username}`)
-                  ? '修改中...'
-                  : '修改密码'}
-              </button>
-              <button
-                onClick={() => {
-                  setShowChangePasswordForm(false);
-                  setChangePasswordUser({ username: '', password: '' });
-                }}
-                className={`w-full sm:w-auto ${buttonStyles.secondary}`}
-              >
-                取消
-              </button>
-            </div>
-          </div>
+          <ChangePasswordForm
+            username={changePasswordUser.username}
+            password={changePasswordUser.password}
+            onPasswordChange={(next) =>
+              setChangePasswordUser((prev) => ({ ...prev, password: next }))
+            }
+            onSubmit={handleChangePassword}
+            onCancel={() => {
+              setShowChangePasswordForm(false);
+              setChangePasswordUser({ username: '', password: '' });
+            }}
+            isSubmitting={isLoading(
+              `changePassword_${changePasswordUser.username}`,
+            )}
+          />
         )}
 
-        {/* 用户列表 */}
-        <div
-          className='relative max-h-[28rem] overflow-x-auto overflow-y-auto rounded-lg border border-gray-200 dark:border-gray-700'
-          data-table='user-list'
-        >
-          <table className='min-w-full divide-y divide-gray-200 dark:divide-gray-700'>
-            <thead className='sticky top-0 z-10 bg-gray-50 dark:bg-gray-900'>
-              <tr>
-                <th className='w-4' />
-                <th className='w-10 px-1 py-3 text-center'>
-                  {(() => {
-                    // 检查是否有权限操作任何用户
-                    const hasAnyPermission =
-                      getSelectableUsers(
-                        config?.UserConfig?.Users || [],
-                        permissionContext,
-                      ).length > 0;
-
-                    return hasAnyPermission ? (
-                      <input
-                        type='checkbox'
-                        checked={selectAllUsers}
-                        onChange={(e) => handleSelectAllUsers(e.target.checked)}
-                        className='h-4 w-4 rounded border-gray-300 bg-gray-100 text-blue-600 accent-blue-600 checked:border-blue-600 checked:bg-blue-600 focus:ring-2 focus:ring-blue-500 dark:border-gray-600 dark:bg-gray-700 dark:accent-blue-500 dark:ring-offset-gray-800 dark:checked:border-blue-500 dark:checked:bg-blue-500 dark:focus:ring-blue-600'
-                      />
-                    ) : (
-                      <div className='h-4 w-4' />
-                    );
-                  })()}
-                </th>
-                <th
-                  scope='col'
-                  className='px-6 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400'
-                >
-                  用户名
-                </th>
-                <th
-                  scope='col'
-                  className='px-6 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400'
-                >
-                  角色
-                </th>
-                <th
-                  scope='col'
-                  className='px-6 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400'
-                >
-                  状态
-                </th>
-                <th
-                  scope='col'
-                  className='px-6 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400'
-                >
-                  用户组
-                </th>
-                <th
-                  scope='col'
-                  className='px-6 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400'
-                >
-                  采集源权限
-                </th>
-                <th
-                  scope='col'
-                  className='px-6 py-3 text-right text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400'
-                >
-                  操作
-                </th>
-              </tr>
-            </thead>
-            {/* 按规则排序用户：自己 -> 站长(若非自己) -> 管理员 -> 其他 */}
-            {(() => {
-              const sortedUsers = [...config.UserConfig.Users].sort((a, b) => {
-                type UserInfo = (typeof config.UserConfig.Users)[number];
-                const priority = (u: UserInfo) => {
-                  if (u.username === currentUsername) return 0;
-                  if (u.role === 'owner') return 1;
-                  if (u.role === 'admin') return 2;
-                  return 3;
-                };
-                return priority(a) - priority(b);
-              });
-              return (
-                <tbody className='divide-y divide-gray-200 dark:divide-gray-700'>
-                  {sortedUsers.map((user) => {
-                    const canConfigure = canConfigureUser(
-                      user,
-                      permissionContext,
-                    );
-                    const canChangePassword = canChangeUserPassword(
-                      user,
-                      permissionContext,
-                    );
-                    const canDeleteUser = canDeleteManagedUser(
-                      user,
-                      permissionContext,
-                    );
-                    const canOperate = canOperateUser(user, permissionContext);
-                    return (
-                      <tr
-                        key={user.username}
-                        className='transition-colors hover:bg-gray-50 dark:hover:bg-gray-800'
-                      >
-                        <td className='w-4' />
-                        <td className='w-10 px-1 py-3 text-center'>
-                          {canConfigure ? (
-                            <input
-                              type='checkbox'
-                              checked={selectedUsers.has(user.username)}
-                              onChange={(e) =>
-                                handleSelectUser(
-                                  user.username,
-                                  e.target.checked,
-                                )
-                              }
-                              className='h-4 w-4 rounded border-gray-300 bg-gray-100 text-blue-600 accent-blue-600 checked:border-blue-600 checked:bg-blue-600 focus:ring-2 focus:ring-blue-500 dark:border-gray-600 dark:bg-gray-700 dark:accent-blue-500 dark:ring-offset-gray-800 dark:checked:border-blue-500 dark:checked:bg-blue-500 dark:focus:ring-blue-600'
-                            />
-                          ) : (
-                            <div className='h-4 w-4' />
-                          )}
-                        </td>
-                        <td className='whitespace-nowrap px-6 py-4 text-sm font-medium text-gray-900 dark:text-gray-100'>
-                          {user.username}
-                        </td>
-                        <td className='whitespace-nowrap px-6 py-4'>
-                          <span
-                            className={`rounded-full px-2 py-1 text-xs ${
-                              user.role === 'owner'
-                                ? 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900/20 dark:text-yellow-300'
-                                : user.role === 'admin'
-                                  ? 'bg-purple-100 text-purple-800 dark:bg-purple-900/20 dark:text-purple-300'
-                                  : 'bg-gray-100 text-gray-700 dark:bg-gray-700 dark:text-gray-300'
-                            }`}
-                          >
-                            {user.role === 'owner'
-                              ? '站长'
-                              : user.role === 'admin'
-                                ? '管理员'
-                                : '普通用户'}
-                          </span>
-                        </td>
-                        <td className='whitespace-nowrap px-6 py-4'>
-                          <span
-                            className={`rounded-full px-2 py-1 text-xs ${
-                              !user.banned
-                                ? 'bg-green-100 text-green-800 dark:bg-green-900/20 dark:text-green-300'
-                                : 'bg-red-100 text-red-800 dark:bg-red-900/20 dark:text-red-300'
-                            }`}
-                          >
-                            {!user.banned ? '正常' : '已封禁'}
-                          </span>
-                        </td>
-                        <td className='whitespace-nowrap px-6 py-4'>
-                          <div className='flex items-center space-x-2'>
-                            <span className='text-sm text-gray-900 dark:text-gray-100'>
-                              {user.tags && user.tags.length > 0
-                                ? user.tags.join(', ')
-                                : '无用户组'}
-                            </span>
-                            {/* 配置用户组按钮 */}
-                            {canConfigure && (
-                              <button
-                                onClick={() => handleConfigureUserGroup(user)}
-                                className={buttonStyles.roundedPrimary}
-                              >
-                                配置
-                              </button>
-                            )}
-                          </div>
-                        </td>
-                        <td className='whitespace-nowrap px-6 py-4'>
-                          <div className='flex items-center space-x-2'>
-                            <span className='text-sm text-gray-900 dark:text-gray-100'>
-                              {user.enabledApis && user.enabledApis.length > 0
-                                ? `${user.enabledApis.length} 个源`
-                                : '无限制'}
-                            </span>
-                            {/* 配置采集源权限按钮 */}
-                            {canConfigure && (
-                              <button
-                                onClick={() => handleConfigureUserApis(user)}
-                                className={buttonStyles.roundedPrimary}
-                              >
-                                配置
-                              </button>
-                            )}
-                          </div>
-                        </td>
-                        <td className='space-x-2 whitespace-nowrap px-6 py-4 text-right text-sm font-medium'>
-                          {/* 修改密码按钮 */}
-                          {canChangePassword && (
-                            <button
-                              onClick={() =>
-                                handleShowChangePasswordForm(user.username)
-                              }
-                              className={buttonStyles.roundedPrimary}
-                            >
-                              修改密码
-                            </button>
-                          )}
-                          {canOperate && (
-                            <>
-                              {/* 其他操作按钮 */}
-                              {user.role === 'user' && (
-                                <button
-                                  onClick={() => handleSetAdmin(user.username)}
-                                  disabled={isLoading(
-                                    `setAdmin_${user.username}`,
-                                  )}
-                                  className={`${buttonStyles.roundedPurple} ${
-                                    isLoading(`setAdmin_${user.username}`)
-                                      ? 'cursor-not-allowed opacity-50'
-                                      : ''
-                                  }`}
-                                >
-                                  设为管理
-                                </button>
-                              )}
-                              {user.role === 'admin' && (
-                                <button
-                                  onClick={() =>
-                                    handleRemoveAdmin(user.username)
-                                  }
-                                  disabled={isLoading(
-                                    `removeAdmin_${user.username}`,
-                                  )}
-                                  className={`${
-                                    buttonStyles.roundedSecondary
-                                  } ${
-                                    isLoading(`removeAdmin_${user.username}`)
-                                      ? 'cursor-not-allowed opacity-50'
-                                      : ''
-                                  }`}
-                                >
-                                  取消管理
-                                </button>
-                              )}
-                              {user.role !== 'owner' &&
-                                (!user.banned ? (
-                                  <button
-                                    onClick={() => handleBanUser(user.username)}
-                                    disabled={isLoading(
-                                      `banUser_${user.username}`,
-                                    )}
-                                    className={`${buttonStyles.roundedDanger} ${
-                                      isLoading(`banUser_${user.username}`)
-                                        ? 'cursor-not-allowed opacity-50'
-                                        : ''
-                                    }`}
-                                  >
-                                    封禁
-                                  </button>
-                                ) : (
-                                  <button
-                                    onClick={() =>
-                                      handleUnbanUser(user.username)
-                                    }
-                                    disabled={isLoading(
-                                      `unbanUser_${user.username}`,
-                                    )}
-                                    className={`${
-                                      buttonStyles.roundedSuccess
-                                    } ${
-                                      isLoading(`unbanUser_${user.username}`)
-                                        ? 'cursor-not-allowed opacity-50'
-                                        : ''
-                                    }`}
-                                  >
-                                    解封
-                                  </button>
-                                ))}
-                            </>
-                          )}
-                          {/* 删除用户按钮 - 放在最后，使用更明显的红色样式 */}
-                          {canDeleteUser && (
-                            <button
-                              onClick={() => handleDeleteUser(user.username)}
-                              className={buttonStyles.roundedDanger}
-                            >
-                              删除用户
-                            </button>
-                          )}
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              );
-            })()}
-          </table>
-        </div>
+        <UserTable
+          users={config.UserConfig.Users}
+          currentUsername={currentUsername}
+          permissionContext={permissionContext}
+          selectableUsersCount={selectableUsersCount}
+          selectedUsers={selectedUsers}
+          selectAllUsers={selectAllUsers}
+          isLoading={isLoading}
+          onSelectAllUsers={handleSelectAllUsers}
+          onSelectUser={handleSelectUser}
+          onConfigureUserGroup={handleConfigureUserGroup}
+          onConfigureUserApis={handleConfigureUserApis}
+          onShowChangePassword={handleShowChangePasswordForm}
+          onSetAdmin={handleSetAdmin}
+          onRemoveAdmin={handleRemoveAdmin}
+          onBanUser={handleBanUser}
+          onUnbanUser={handleUnbanUser}
+          onDeleteUser={handleDeleteUser}
+        />
       </div>
 
-      {/* 配置用户采集源权限弹窗 */}
       {selectedUser && (
-        <AdminDialog
+        <ConfigureUserApisDialog
           isOpen={showConfigureApisModal}
-          title={`配置用户采集源权限 - ${selectedUser.username}`}
+          username={selectedUser.username}
+          sources={config.SourceConfig || []}
+          selectedApis={selectedApis}
+          onSelectedApisChange={setSelectedApis}
           onClose={closeConfigureApisModal}
-          panelClassName='max-w-4xl max-h-[80vh] overflow-y-auto'
-        >
-          <div className='mb-6'>
-            <div className='rounded-lg border border-blue-200 bg-blue-50 p-4 dark:border-blue-800 dark:bg-blue-900/20'>
-              <div className='mb-2 flex items-center space-x-2'>
-                <svg
-                  className='h-5 w-5 text-blue-600 dark:text-blue-400'
-                  fill='none'
-                  stroke='currentColor'
-                  viewBox='0 0 24 24'
-                >
-                  <path
-                    strokeLinecap='round'
-                    strokeLinejoin='round'
-                    strokeWidth={2}
-                    d='M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z'
-                  />
-                </svg>
-                <span className='text-sm font-medium text-blue-800 dark:text-blue-300'>
-                  配置说明
-                </span>
-              </div>
-              <p className='mt-1 text-sm text-blue-700 dark:text-blue-400'>
-                提示：全不选为无限制，选中的采集源将限制用户只能访问这些源
-              </p>
-            </div>
-          </div>
-
-          <div className='mb-6'>
-            <h4 className='mb-4 text-sm font-medium text-gray-700 dark:text-gray-300'>
-              选择可用的采集源：
-            </h4>
-            <div className='grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3'>
-              {config?.SourceConfig?.map((source) => (
-                <label
-                  key={source.key}
-                  className='flex cursor-pointer items-center space-x-3 rounded-lg border border-gray-200 p-3 transition-colors hover:bg-gray-50 dark:border-gray-700 dark:hover:bg-gray-800'
-                >
-                  <input
-                    type='checkbox'
-                    checked={selectedApis.includes(source.key)}
-                    onChange={(e) => {
-                      if (e.target.checked) {
-                        setSelectedApis([...selectedApis, source.key]);
-                      } else {
-                        setSelectedApis(
-                          selectedApis.filter((api) => api !== source.key),
-                        );
-                      }
-                    }}
-                    className='rounded border-gray-300 text-blue-600 accent-blue-600 checked:border-blue-600 checked:bg-blue-600 focus:ring-blue-500 dark:border-gray-600 dark:bg-gray-700 dark:accent-blue-500 dark:checked:border-blue-500 dark:checked:bg-blue-500'
-                  />
-                  <div className='min-w-0 flex-1'>
-                    <div className='truncate text-sm font-medium text-gray-900 dark:text-gray-100'>
-                      {source.name}
-                    </div>
-                    {source.api && (
-                      <div className='truncate text-xs text-gray-500 dark:text-gray-400'>
-                        {extractDomain(source.api)}
-                      </div>
-                    )}
-                  </div>
-                </label>
-              ))}
-            </div>
-          </div>
-
-          <div className='mb-6 flex flex-wrap items-center justify-between rounded-lg bg-gray-50 p-4 dark:bg-gray-900'>
-            <div className='flex space-x-2'>
-              <button
-                onClick={() => setSelectedApis([])}
-                className={buttonStyles.quickAction}
-              >
-                全不选（无限制）
-              </button>
-              <button
-                onClick={() => {
-                  const allApis =
-                    config?.SourceConfig?.filter(
-                      (source) => !source.disabled,
-                    ).map((s) => s.key) || [];
-                  setSelectedApis(allApis);
-                }}
-                className={buttonStyles.quickAction}
-              >
-                全选
-              </button>
-            </div>
-            <div className='text-sm text-gray-600 dark:text-gray-400'>
-              已选择：
-              <span className='font-medium text-blue-600 dark:text-blue-400'>
-                {selectedApis.length > 0
-                  ? `${selectedApis.length} 个源`
-                  : '无限制'}
-              </span>
-            </div>
-          </div>
-
-          <div className='flex justify-end space-x-3'>
-            <button
-              onClick={closeConfigureApisModal}
-              className={`px-6 py-2.5 text-sm font-medium ${buttonStyles.secondary}`}
-            >
-              取消
-            </button>
-            <button
-              onClick={handleSaveUserApis}
-              disabled={isLoading(`saveUserApis_${selectedUser?.username}`)}
-              className={`px-6 py-2.5 text-sm font-medium ${
-                isLoading(`saveUserApis_${selectedUser?.username}`)
-                  ? buttonStyles.disabled
-                  : buttonStyles.primary
-              }`}
-            >
-              {isLoading(`saveUserApis_${selectedUser?.username}`)
-                ? '配置中...'
-                : '确认配置'}
-            </button>
-          </div>
-        </AdminDialog>
+          onSave={handleSaveUserApis}
+          isSaving={isLoading(`saveUserApis_${selectedUser.username}`)}
+        />
       )}
 
-      {/* 添加用户组弹窗 */}
-      <AdminDialog
+      <UserGroupFormDialog
+        mode='add'
         isOpen={showAddUserGroupForm}
-        title='添加新用户组'
+        value={newUserGroup}
+        onChange={setNewUserGroup}
+        sources={config.SourceConfig || []}
         onClose={closeAddUserGroupModal}
-        panelClassName='max-w-4xl max-h-[80vh] overflow-y-auto'
-      >
-        <div className='space-y-6'>
-          {/* 用户组名称 */}
-          <div>
-            <label className='mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300'>
-              用户组名称
-            </label>
-            <input
-              type='text'
-              placeholder='请输入用户组名称'
-              value={newUserGroup.name}
-              onChange={(e) =>
-                setNewUserGroup((prev) => ({
-                  ...prev,
-                  name: e.target.value,
-                }))
-              }
-              className='w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-gray-900 focus:border-transparent focus:ring-2 focus:ring-blue-500 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100'
-            />
-          </div>
+        onSubmit={handleAddUserGroup}
+        isSubmitting={isLoading('userGroup_add_new')}
+      />
 
-          {/* 可用视频源 */}
-          <div>
-            <label className='mb-4 block text-sm font-medium text-gray-700 dark:text-gray-300'>
-              可用视频源
-            </label>
-            <div className='grid grid-cols-1 gap-3 md:grid-cols-2 lg:grid-cols-3'>
-              {config?.SourceConfig?.map((source) => (
-                <label
-                  key={source.key}
-                  className='flex cursor-pointer items-center space-x-3 rounded-lg border border-gray-200 p-3 transition-colors hover:bg-gray-50 dark:border-gray-700 dark:hover:bg-gray-800'
-                >
-                  <input
-                    type='checkbox'
-                    checked={newUserGroup.enabledApis.includes(source.key)}
-                    onChange={(e) => {
-                      if (e.target.checked) {
-                        setNewUserGroup((prev) => ({
-                          ...prev,
-                          enabledApis: [...prev.enabledApis, source.key],
-                        }));
-                      } else {
-                        setNewUserGroup((prev) => ({
-                          ...prev,
-                          enabledApis: prev.enabledApis.filter(
-                            (api) => api !== source.key,
-                          ),
-                        }));
-                      }
-                    }}
-                    className='rounded border-gray-300 text-blue-600 accent-blue-600 checked:border-blue-600 checked:bg-blue-600 focus:ring-blue-500 dark:border-gray-600 dark:bg-gray-700 dark:accent-blue-500 dark:checked:border-blue-500 dark:checked:bg-blue-500'
-                  />
-                  <div className='min-w-0 flex-1'>
-                    <div className='truncate text-sm font-medium text-gray-900 dark:text-gray-100'>
-                      {source.name}
-                    </div>
-                    {source.api && (
-                      <div className='truncate text-xs text-gray-500 dark:text-gray-400'>
-                        {extractDomain(source.api)}
-                      </div>
-                    )}
-                  </div>
-                </label>
-              ))}
-            </div>
-
-            {/* 快速操作按钮 */}
-            <div className='mt-4 flex space-x-2'>
-              <button
-                onClick={() =>
-                  setNewUserGroup((prev) => ({
-                    ...prev,
-                    enabledApis: [],
-                  }))
-                }
-                className={buttonStyles.quickAction}
-              >
-                全不选（无限制）
-              </button>
-              <button
-                onClick={() => {
-                  const allApis =
-                    config?.SourceConfig?.filter(
-                      (source) => !source.disabled,
-                    ).map((s) => s.key) || [];
-                  setNewUserGroup((prev) => ({
-                    ...prev,
-                    enabledApis: allApis,
-                  }));
-                }}
-                className={buttonStyles.quickAction}
-              >
-                全选
-              </button>
-            </div>
-          </div>
-
-          {/* 操作按钮 */}
-          <div className='flex justify-end space-x-3 border-t border-gray-200 pt-4 dark:border-gray-700'>
-            <button
-              onClick={closeAddUserGroupModal}
-              className={`px-6 py-2.5 text-sm font-medium ${buttonStyles.secondary}`}
-            >
-              取消
-            </button>
-            <button
-              onClick={handleAddUserGroup}
-              disabled={
-                !newUserGroup.name.trim() || isLoading('userGroup_add_new')
-              }
-              className={`px-6 py-2.5 text-sm font-medium ${
-                !newUserGroup.name.trim() || isLoading('userGroup_add_new')
-                  ? buttonStyles.disabled
-                  : buttonStyles.primary
-              }`}
-            >
-              {isLoading('userGroup_add_new') ? '添加中...' : '添加用户组'}
-            </button>
-          </div>
-        </div>
-      </AdminDialog>
-
-      {/* 编辑用户组弹窗 */}
       {editingUserGroup && (
-        <AdminDialog
+        <UserGroupFormDialog
+          mode='edit'
           isOpen={showEditUserGroupForm}
-          title={`编辑用户组 - ${editingUserGroup.name}`}
+          value={editingUserGroup}
+          onChange={(next) =>
+            setEditingUserGroup({
+              name: editingUserGroup.name,
+              enabledApis: next.enabledApis,
+            })
+          }
+          sources={config.SourceConfig || []}
           onClose={closeEditUserGroupModal}
-          panelClassName='max-w-4xl max-h-[80vh] overflow-y-auto'
-        >
-          <div className='space-y-6'>
-            {/* 可用视频源 */}
-            <div>
-              <label className='mb-4 block text-sm font-medium text-gray-700 dark:text-gray-300'>
-                可用视频源
-              </label>
-              <div className='grid grid-cols-1 gap-3 md:grid-cols-2 lg:grid-cols-3'>
-                {config?.SourceConfig?.map((source) => (
-                  <label
-                    key={source.key}
-                    className='flex cursor-pointer items-center space-x-3 rounded-lg border border-gray-200 p-3 transition-colors hover:bg-gray-50 dark:border-gray-700 dark:hover:bg-gray-800'
-                  >
-                    <input
-                      type='checkbox'
-                      checked={editingUserGroup.enabledApis.includes(
-                        source.key,
-                      )}
-                      onChange={(e) => {
-                        if (e.target.checked) {
-                          setEditingUserGroup((prev) =>
-                            prev
-                              ? {
-                                  ...prev,
-                                  enabledApis: [
-                                    ...prev.enabledApis,
-                                    source.key,
-                                  ],
-                                }
-                              : null,
-                          );
-                        } else {
-                          setEditingUserGroup((prev) =>
-                            prev
-                              ? {
-                                  ...prev,
-                                  enabledApis: prev.enabledApis.filter(
-                                    (api) => api !== source.key,
-                                  ),
-                                }
-                              : null,
-                          );
-                        }
-                      }}
-                      className='rounded border-gray-300 text-purple-600 accent-purple-600 checked:border-purple-600 checked:bg-purple-600 focus:ring-purple-500 dark:border-gray-600 dark:bg-gray-700 dark:accent-purple-500 dark:checked:border-purple-500 dark:checked:bg-purple-500'
-                    />
-                    <div className='min-w-0 flex-1'>
-                      <div className='truncate text-sm font-medium text-gray-900 dark:text-gray-100'>
-                        {source.name}
-                      </div>
-                      {source.api && (
-                        <div className='truncate text-xs text-gray-500 dark:text-gray-400'>
-                          {extractDomain(source.api)}
-                        </div>
-                      )}
-                    </div>
-                  </label>
-                ))}
-              </div>
-
-              {/* 快速操作按钮 */}
-              <div className='mt-4 flex space-x-2'>
-                <button
-                  onClick={() =>
-                    setEditingUserGroup((prev) =>
-                      prev ? { ...prev, enabledApis: [] } : null,
-                    )
-                  }
-                  className={buttonStyles.quickAction}
-                >
-                  全不选（无限制）
-                </button>
-                <button
-                  onClick={() => {
-                    const allApis =
-                      config?.SourceConfig?.filter(
-                        (source) => !source.disabled,
-                      ).map((s) => s.key) || [];
-                    setEditingUserGroup((prev) =>
-                      prev ? { ...prev, enabledApis: allApis } : null,
-                    );
-                  }}
-                  className={buttonStyles.quickAction}
-                >
-                  全选
-                </button>
-              </div>
-            </div>
-
-            {/* 操作按钮 */}
-            <div className='flex justify-end space-x-3 border-t border-gray-200 pt-4 dark:border-gray-700'>
-              <button
-                onClick={closeEditUserGroupModal}
-                className={`px-6 py-2.5 text-sm font-medium ${buttonStyles.secondary}`}
-              >
-                取消
-              </button>
-              <button
-                onClick={handleEditUserGroup}
-                disabled={isLoading(`userGroup_edit_${editingUserGroup?.name}`)}
-                className={`px-6 py-2.5 text-sm font-medium ${
-                  isLoading(`userGroup_edit_${editingUserGroup?.name}`)
-                    ? buttonStyles.disabled
-                    : buttonStyles.primary
-                }`}
-              >
-                {isLoading(`userGroup_edit_${editingUserGroup?.name}`)
-                  ? '保存中...'
-                  : '保存修改'}
-              </button>
-            </div>
-          </div>
-        </AdminDialog>
+          onSubmit={handleEditUserGroup}
+          isSubmitting={isLoading(`userGroup_edit_${editingUserGroup.name}`)}
+        />
       )}
 
-      {/* 配置用户组弹窗 */}
       {selectedUserForGroup && (
-        <AdminDialog
+        <ConfigureUserGroupDialog
           isOpen={showConfigureUserGroupModal}
-          title={`配置用户组 - ${selectedUserForGroup.username}`}
+          username={selectedUserForGroup.username}
+          selectedGroup={
+            selectedUserGroups.length > 0 ? selectedUserGroups[0] : ''
+          }
+          userGroups={userGroups}
+          onSelectedGroupChange={(next) =>
+            setSelectedUserGroups(next ? [next] : [])
+          }
           onClose={closeConfigureUserGroupModal}
-          panelClassName='max-w-4xl max-h-[80vh] overflow-y-auto'
-        >
-          <div className='mb-6'>
-            <div className='rounded-lg border border-blue-200 bg-blue-50 p-4 dark:border-blue-800 dark:bg-blue-900/20'>
-              <div className='mb-2 flex items-center space-x-2'>
-                <svg
-                  className='h-5 w-5 text-blue-600 dark:text-blue-400'
-                  fill='none'
-                  stroke='currentColor'
-                  viewBox='0 0 24 24'
-                >
-                  <path
-                    strokeLinecap='round'
-                    strokeLinejoin='round'
-                    strokeWidth={2}
-                    d='M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z'
-                  />
-                </svg>
-                <span className='text-sm font-medium text-blue-800 dark:text-blue-300'>
-                  配置说明
-                </span>
-              </div>
-              <p className='mt-1 text-sm text-blue-700 dark:text-blue-400'>
-                提示：选择"无用户组"为无限制，选择特定用户组将限制用户只能访问该用户组允许的采集源
-              </p>
-            </div>
-          </div>
-
-          <div className='mb-6'>
-            <label className='mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300'>
-              选择用户组：
-            </label>
-            <AdminSelect
-              value={selectedUserGroups.length > 0 ? selectedUserGroups[0] : ''}
-              onChange={(value) => {
-                setSelectedUserGroups(value ? [value] : []);
-              }}
-              options={[
-                { label: '无用户组（无限制）', value: '' },
-                ...userGroups.map((group) => ({
-                  label: `${group.name}${
-                    group.enabledApis && group.enabledApis.length > 0
-                      ? ` (${group.enabledApis.length} 个源)`
-                      : ''
-                  }`,
-                  value: group.name,
-                })),
-              ]}
-              placeholder='无用户组（无限制）'
-            />
-            <p className='mt-2 text-xs text-gray-500 dark:text-gray-400'>
-              选择"无用户组"为无限制，选择特定用户组将限制用户只能访问该用户组允许的采集源
-            </p>
-          </div>
-
-          <div className='flex justify-end space-x-3'>
-            <button
-              onClick={closeConfigureUserGroupModal}
-              className={`px-6 py-2.5 text-sm font-medium ${buttonStyles.secondary}`}
-            >
-              取消
-            </button>
-            <button
-              onClick={handleSaveUserGroups}
-              disabled={isLoading(
-                `saveUserGroups_${selectedUserForGroup?.username}`,
-              )}
-              className={`px-6 py-2.5 text-sm font-medium ${
-                isLoading(`saveUserGroups_${selectedUserForGroup?.username}`)
-                  ? buttonStyles.disabled
-                  : buttonStyles.primary
-              }`}
-            >
-              {isLoading(`saveUserGroups_${selectedUserForGroup?.username}`)
-                ? '配置中...'
-                : '确认配置'}
-            </button>
-          </div>
-        </AdminDialog>
+          onSave={handleSaveUserGroups}
+          isSaving={isLoading(
+            `saveUserGroups_${selectedUserForGroup.username}`,
+          )}
+        />
       )}
 
-      {/* 删除用户组确认弹窗 */}
-      <ConfirmModal
+      <DeleteUserGroupConfirm
         isOpen={showDeleteUserGroupModal && !!deletingUserGroup}
-        title='确认删除用户组'
-        onClose={() => {
+        groupName={deletingUserGroup?.name || ''}
+        affectedUsers={deletingUserGroup?.affectedUsers || []}
+        onCancel={() => {
           setShowDeleteUserGroupModal(false);
           setDeletingUserGroup(null);
         }}
         onConfirm={handleConfirmDeleteUserGroup}
-        confirmDisabled={isLoading(
-          `userGroup_delete_${deletingUserGroup?.name}`,
-        )}
-        confirmText={
-          isLoading(`userGroup_delete_${deletingUserGroup?.name}`)
-            ? '删除中...'
-            : '确认删除'
-        }
-        confirmClassName={`px-6 py-2.5 text-sm font-medium ${
-          isLoading(`userGroup_delete_${deletingUserGroup?.name}`)
-            ? buttonStyles.disabled
-            : buttonStyles.danger
-        }`}
-        cancelClassName={`px-6 py-2.5 text-sm font-medium ${buttonStyles.secondary}`}
-      >
-        {deletingUserGroup && (
-          <>
-            <div className='mb-4 rounded-lg border border-red-200 bg-red-50 p-4 dark:border-red-800 dark:bg-red-900/20'>
-              <div className='mb-2 flex items-center space-x-2'>
-                <svg
-                  className='h-5 w-5 text-red-600 dark:text-red-400'
-                  fill='none'
-                  stroke='currentColor'
-                  viewBox='0 0 24 24'
-                >
-                  <path
-                    strokeLinecap='round'
-                    strokeLinejoin='round'
-                    strokeWidth={2}
-                    d='M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4c-.77-.833-1.964-.833-2.732 0L3.732 16.5c-.77.833.192 2.5 1.732 2.5z'
-                  />
-                </svg>
-                <span className='text-sm font-medium text-red-800 dark:text-red-300'>
-                  危险操作警告
-                </span>
-              </div>
-              <p className='text-sm text-red-700 dark:text-red-400'>
-                删除用户组 <strong>{deletingUserGroup.name}</strong>{' '}
-                将影响所有使用该组的用户，此操作不可恢复！
-              </p>
-            </div>
+        isDeleting={isLoading(`userGroup_delete_${deletingUserGroup?.name}`)}
+      />
 
-            {deletingUserGroup.affectedUsers.length > 0 ? (
-              <div className='rounded-lg border border-yellow-200 bg-yellow-50 p-4 dark:border-yellow-800 dark:bg-yellow-900/20'>
-                <div className='mb-2 flex items-center space-x-2'>
-                  <svg
-                    className='h-5 w-5 text-yellow-600 dark:text-yellow-400'
-                    fill='none'
-                    stroke='currentColor'
-                    viewBox='0 0 24 24'
-                  >
-                    <path
-                      strokeLinecap='round'
-                      strokeLinejoin='round'
-                      strokeWidth={2}
-                      d='M12 9v2m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z'
-                    />
-                  </svg>
-                  <span className='text-sm font-medium text-yellow-800 dark:text-yellow-300'>
-                    ⚠️ 将影响 {deletingUserGroup.affectedUsers.length} 个用户：
-                  </span>
-                </div>
-                <div className='space-y-1'>
-                  {deletingUserGroup.affectedUsers.map((user, index) => (
-                    <div
-                      key={index}
-                      className='text-sm text-yellow-700 dark:text-yellow-300'
-                    >
-                      • {user.username} ({user.role})
-                    </div>
-                  ))}
-                </div>
-                <p className='mt-2 text-xs text-yellow-600 dark:text-yellow-400'>
-                  这些用户的用户组将被自动移除
-                </p>
-              </div>
-            ) : (
-              <div className='rounded-lg border border-green-200 bg-green-50 p-4 dark:border-green-800 dark:bg-green-900/20'>
-                <div className='flex items-center space-x-2'>
-                  <svg
-                    className='h-5 w-5 text-green-600 dark:text-green-400'
-                    fill='none'
-                    stroke='currentColor'
-                    viewBox='0 0 24 24'
-                  >
-                    <path
-                      strokeLinecap='round'
-                      strokeLinejoin='round'
-                      strokeWidth={2}
-                      d='M5 13l4 4L19 7'
-                    />
-                  </svg>
-                  <span className='text-sm font-medium text-green-800 dark:text-green-300'>
-                    ✅ 当前没有用户使用此用户组
-                  </span>
-                </div>
-              </div>
-            )}
-          </>
-        )}
-      </ConfirmModal>
-
-      {/* 删除用户确认弹窗 */}
-      <ConfirmModal
+      <DeleteUserConfirm
         isOpen={showDeleteUserModal && !!deletingUser}
-        title='确认删除用户'
-        onClose={() => {
+        username={deletingUser || ''}
+        onCancel={() => {
           setShowDeleteUserModal(false);
           setDeletingUser(null);
         }}
         onConfirm={handleConfirmDeleteUser}
-        confirmText='确认删除'
-        confirmClassName={`px-6 py-2.5 text-sm font-medium ${buttonStyles.danger}`}
-        cancelClassName={`px-6 py-2.5 text-sm font-medium ${buttonStyles.secondary}`}
-      >
-        {deletingUser && (
-          <div className='mb-4 rounded-lg border border-red-200 bg-red-50 p-4 dark:border-red-800 dark:bg-red-900/20'>
-            <div className='mb-2 flex items-center space-x-2'>
-              <svg
-                className='h-5 w-5 text-red-600 dark:text-red-400'
-                fill='none'
-                stroke='currentColor'
-                viewBox='0 0 24 24'
-              >
-                <path
-                  strokeLinecap='round'
-                  strokeLinejoin='round'
-                  strokeWidth={2}
-                  d='M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4c-.77-.833-1.964-.833-2.732 0L3.732 16.5c-.77.833.192 2.5 1.732 2.5z'
-                />
-              </svg>
-              <span className='text-sm font-medium text-red-800 dark:text-red-300'>
-                危险操作警告
-              </span>
-            </div>
-            <p className='text-sm text-red-700 dark:text-red-400'>
-              删除用户 <strong>{deletingUser}</strong>{' '}
-              将同时删除其搜索历史、播放记录和收藏夹，此操作不可恢复！
-            </p>
-          </div>
-        )}
-      </ConfirmModal>
+      />
 
-      {/* 批量设置用户组弹窗 */}
-      <AdminDialog
+      <BatchUserGroupDialog
         isOpen={showBatchUserGroupModal}
-        title='批量设置用户组'
+        selectedUserCount={selectedUsers.size}
+        selectedGroup={selectedUserGroup}
+        userGroups={userGroups}
+        onSelectedGroupChange={setSelectedUserGroup}
         onClose={closeBatchUserGroupModal}
-        panelClassName='max-w-2xl'
-      >
-        <div className='mb-6'>
-          <div className='mb-4 rounded-lg border border-blue-200 bg-blue-50 p-4 dark:border-blue-800 dark:bg-blue-900/20'>
-            <div className='mb-2 flex items-center space-x-2'>
-              <svg
-                className='h-5 w-5 text-blue-600 dark:text-blue-400'
-                fill='none'
-                stroke='currentColor'
-                viewBox='0 0 24 24'
-              >
-                <path
-                  strokeLinecap='round'
-                  strokeLinejoin='round'
-                  strokeWidth={2}
-                  d='M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z'
-                />
-              </svg>
-              <span className='text-sm font-medium text-blue-800 dark:text-blue-300'>
-                批量操作说明
-              </span>
-            </div>
-            <p className='text-sm text-blue-700 dark:text-blue-400'>
-              将为选中的 <strong>{selectedUsers.size} 个用户</strong>{' '}
-              设置用户组，选择"无用户组"为无限制
-            </p>
-          </div>
+        onConfirm={() => handleBatchSetUserGroup(selectedUserGroup)}
+        isSaving={isLoading('batchSetUserGroup')}
+      />
 
-          <div>
-            <label className='mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300'>
-              选择用户组：
-            </label>
-            <AdminSelect
-              value={selectedUserGroup}
-              onChange={(value) => setSelectedUserGroup(value)}
-              options={[
-                { label: '无用户组（无限制）', value: '' },
-                ...userGroups.map((group) => ({
-                  label: `${group.name}${
-                    group.enabledApis && group.enabledApis.length > 0
-                      ? ` (${group.enabledApis.length} 个源)`
-                      : ''
-                  }`,
-                  value: group.name,
-                })),
-              ]}
-              placeholder='无用户组（无限制）'
-            />
-            <p className='mt-2 text-xs text-gray-500 dark:text-gray-400'>
-              选择"无用户组"为无限制，选择特定用户组将限制用户只能访问该用户组允许的采集源
-            </p>
-          </div>
-        </div>
-
-        <div className='flex justify-end space-x-3'>
-          <button
-            onClick={closeBatchUserGroupModal}
-            className={`px-6 py-2.5 text-sm font-medium ${buttonStyles.secondary}`}
-          >
-            取消
-          </button>
-          <button
-            onClick={() => handleBatchSetUserGroup(selectedUserGroup)}
-            disabled={isLoading('batchSetUserGroup')}
-            className={`px-6 py-2.5 text-sm font-medium ${
-              isLoading('batchSetUserGroup')
-                ? buttonStyles.disabled
-                : buttonStyles.primary
-            }`}
-          >
-            {isLoading('batchSetUserGroup') ? '设置中...' : '确认设置'}
-          </button>
-        </div>
-      </AdminDialog>
-
-      {/* 通用弹窗组件 */}
       <AlertModal
         isOpen={alertModal.isOpen}
         onClose={hideAlert}

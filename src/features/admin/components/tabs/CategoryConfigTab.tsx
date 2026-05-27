@@ -35,7 +35,7 @@ import {
 } from '@/features/admin/lib/buttonStyles';
 import { showError } from '@/features/admin/lib/notifications';
 import { AdminConfig } from '@/features/admin/types/api';
-import { CustomCategory } from '@/features/admin/types';
+import { CustomCategory } from '@/features/admin/types/internal';
 
 const CategoryConfig = ({
   config,

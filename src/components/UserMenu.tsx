@@ -37,7 +37,7 @@ import {
 } from '@/lib/local-settings';
 import { getClientAuthRuntimeConfig } from '@/lib/runtime-config';
 import { CURRENT_VERSION } from '@/lib/version';
-import { checkForUpdates, UpdateStatus } from '@/lib/version_check';
+import { checkForUpdates, UpdateStatus } from '@/lib/version-check';
 
 import { VersionPanel } from './VersionPanel';
 

@@ -16,179 +16,25 @@ import {
 import {
   arrayMove,
   SortableContext,
-  useSortable,
   verticalListSortingStrategy,
 } from '@dnd-kit/sortable';
-import { CSS } from '@dnd-kit/utilities';
-import { GripVertical } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 
-import AdminDialog from '@/features/admin/components/AdminDialog';
+import ConfirmModal from '@/components/modals/ConfirmModal';
 import AlertModal from '@/features/admin/components/AlertModal';
-import ConfirmModal from '@/features/admin/components/ConfirmModal';
-import { useAlertModal } from '@/features/admin/hooks/useAlertModal';
+import { SortableSourceRow } from '@/features/admin/components/tabs/video-source/SortableSourceRow';
+import { SourceValidationModal } from '@/features/admin/components/tabs/video-source/SourceValidationModal';
+import { VideoSourceAddForm } from '@/features/admin/components/tabs/video-source/VideoSourceAddForm';
 import { useAdminSourceActions } from '@/features/admin/hooks/useAdminSourceActions';
+import { useAlertModal } from '@/features/admin/hooks/useAlertModal';
 import { useLoadingState } from '@/features/admin/hooks/useLoadingState';
-import {
-  buttonStyles,
-  inputStyles,
-  statusBadgeStyles,
-} from '@/features/admin/lib/buttonStyles';
+import { useSourceBatchOperation } from '@/features/admin/hooks/useSourceBatchOperation';
+import { useSourceValidation } from '@/features/admin/hooks/useSourceValidation';
+import { buttonStyles } from '@/features/admin/lib/buttonStyles';
 import { showError } from '@/features/admin/lib/notifications';
-import { DataSource } from '@/features/admin/types';
 import { AdminConfig } from '@/features/admin/types/api';
+import { DataSource } from '@/features/admin/types/internal';
 import { useModalState } from '@/hooks/useModalState';
-
-type SourceValidationStatus = {
-  text: string;
-  className: string;
-  icon: string;
-  message: string;
-};
-
-interface SortableSourceRowProps {
-  source: DataSource;
-  isSelected: boolean;
-  validationStatus: SourceValidationStatus | null;
-  isProxyModeLoading: boolean;
-  isToggleLoading: boolean;
-  isDeleteLoading: boolean;
-  onSelectSource: (key: string, checked: boolean) => void;
-  onToggleProxyMode: (key: string) => void;
-  onToggleEnable: (key: string) => void;
-  onDelete: (key: string) => void;
-}
-
-function SortableSourceRow({
-  source,
-  isSelected,
-  validationStatus,
-  isProxyModeLoading,
-  isToggleLoading,
-  isDeleteLoading,
-  onSelectSource,
-  onToggleProxyMode,
-  onToggleEnable,
-  onDelete,
-}: SortableSourceRowProps) {
-  const { attributes, listeners, setNodeRef, transform, transition } =
-    useSortable({ id: source.key });
-
-  const style = {
-    transform: CSS.Transform.toString(transform),
-    transition,
-  } as React.CSSProperties;
-
-  return (
-    <tr
-      ref={setNodeRef}
-      style={style}
-      className='select-none transition-colors hover:bg-gray-50 dark:hover:bg-gray-800'
-    >
-      <td
-        className='cursor-grab px-2 py-4 text-gray-400'
-        style={{ touchAction: 'none' }}
-        {...attributes}
-        {...listeners}
-      >
-        <GripVertical size={16} />
-      </td>
-      <td className='px-2 py-4 text-center'>
-        <input
-          type='checkbox'
-          checked={isSelected}
-          onChange={(e) => onSelectSource(source.key, e.target.checked)}
-          className='h-4 w-4 rounded border-gray-300 bg-gray-100 text-blue-600 accent-blue-600 checked:border-blue-600 checked:bg-blue-600 focus:ring-2 focus:ring-blue-500 dark:border-gray-600 dark:bg-gray-700 dark:accent-blue-500 dark:ring-offset-gray-800 dark:checked:border-blue-500 dark:checked:bg-blue-500 dark:focus:ring-blue-600'
-        />
-      </td>
-      <td className='whitespace-nowrap px-6 py-4 text-sm text-gray-900 dark:text-gray-100'>
-        {source.name}
-      </td>
-      <td className='whitespace-nowrap px-6 py-4 text-sm text-gray-900 dark:text-gray-100'>
-        {source.key}
-      </td>
-      <td
-        className='max-w-[12rem] truncate whitespace-nowrap px-6 py-4 text-sm text-gray-900 dark:text-gray-100'
-        title={source.api}
-      >
-        {source.api}
-      </td>
-      <td
-        className='max-w-[8rem] truncate whitespace-nowrap px-6 py-4 text-sm text-gray-900 dark:text-gray-100'
-        title={source.detail || '-'}
-      >
-        {source.detail || '-'}
-      </td>
-      <td className='max-w-[1rem] whitespace-nowrap px-6 py-4'>
-        <span
-          className={`rounded-full px-2 py-1 text-xs ${
-            !source.disabled
-              ? statusBadgeStyles.enabled
-              : statusBadgeStyles.disabled
-          }`}
-        >
-          {!source.disabled ? '启用中' : '已禁用'}
-        </span>
-      </td>
-      <td className='whitespace-nowrap px-6 py-4'>
-        <button
-          onClick={() => onToggleProxyMode(source.key)}
-          disabled={isProxyModeLoading}
-          className={`rounded-full px-2 py-1 text-xs transition-colors ${
-            source.proxyMode === 'server'
-              ? 'bg-blue-100 text-blue-800 hover:bg-blue-200 dark:bg-blue-900/20 dark:text-blue-300 dark:hover:bg-blue-900/40'
-              : 'bg-gray-100 text-gray-600 hover:bg-gray-200 dark:bg-gray-900/20 dark:text-gray-400 dark:hover:bg-gray-800/40'
-          } ${isProxyModeLoading ? 'cursor-not-allowed opacity-50' : 'cursor-pointer'}`}
-          title={
-            source.proxyMode === 'server'
-              ? '播放和测速流量走服务端代理'
-              : '播放和测速流量走浏览器直连'
-          }
-        >
-          {source.proxyMode === 'server' ? '服务端' : '浏览器'}
-        </button>
-      </td>
-      <td className='max-w-[1rem] whitespace-nowrap px-6 py-4'>
-        {validationStatus ? (
-          <span
-            className={`rounded-full px-2 py-1 text-xs ${validationStatus.className}`}
-            title={validationStatus.message}
-          >
-            {validationStatus.icon} {validationStatus.text}
-          </span>
-        ) : (
-          <span className='rounded-full bg-gray-100 px-2 py-1 text-xs text-gray-600 dark:bg-gray-900/20 dark:text-gray-400'>
-            未检测
-          </span>
-        )}
-      </td>
-      <td className='space-x-2 whitespace-nowrap px-6 py-4 text-right text-sm font-medium'>
-        <button
-          onClick={() => onToggleEnable(source.key)}
-          disabled={isToggleLoading}
-          className={`inline-flex items-center rounded-full px-3 py-1.5 text-xs font-medium ${
-            !source.disabled
-              ? buttonStyles.roundedDanger
-              : buttonStyles.roundedSuccess
-          } transition-colors ${isToggleLoading ? 'cursor-not-allowed opacity-50' : ''}`}
-        >
-          {!source.disabled ? '禁用' : '启用'}
-        </button>
-        {source.from !== 'config' && (
-          <button
-            onClick={() => onDelete(source.key)}
-            disabled={isDeleteLoading}
-            className={`${buttonStyles.roundedSecondary} ${
-              isDeleteLoading ? 'cursor-not-allowed opacity-50' : ''
-            }`}
-          >
-            删除
-          </button>
-        )}
-      </td>
-    </tr>
-  );
-}
 
 const VideoSourceConfig = ({
   config,
@@ -216,93 +62,49 @@ const VideoSourceConfig = ({
     from: 'config',
   });
 
-  // 批量操作相关状态
   const [selectedSources, setSelectedSources] = useState<Set<string>>(
     new Set(),
   );
 
-  // 使用 useMemo 计算全选状态，避免每次渲染都重新计算
   const selectAll = useMemo(() => {
     return selectedSources.size === sources.length && selectedSources.size > 0;
   }, [selectedSources.size, sources.length]);
 
-  // 确认弹窗状态
-  const [confirmModal, setConfirmModal] = useState<{
-    isOpen: boolean;
-    title: string;
-    message: string;
-    onConfirm: () => void;
-    onCancel: () => void;
-  }>({
-    isOpen: false,
-    title: '',
-    message: '',
-    onConfirm: () => void 0,
-    onCancel: () => void 0,
-  });
-
-  const closeConfirmModal = () => {
-    setConfirmModal({
-      isOpen: false,
-      title: '',
-      message: '',
-      onConfirm: () => void 0,
-      onCancel: () => void 0,
-    });
-  };
-
-  // 有效性检测相关状态
   const [showValidationModal, setShowValidationModal, openValidationModal] =
     useModalState(false);
   const [searchKeyword, setSearchKeyword] = useState('');
-  const [isValidating, setIsValidating] = useState(false);
-  const [validationResults, setValidationResults] = useState<
-    Array<{
-      key: string;
-      name: string;
-      status: 'valid' | 'no_results' | 'invalid' | 'validating';
-      message: string;
-      resultCount: number;
-    }>
-  >([]);
 
-  // dnd-kit 传感器
   const sensors = useSensors(
     useSensor(PointerSensor, {
       activationConstraint: {
-        distance: 5, // 轻微位移即可触发
+        distance: 5,
       },
     }),
     useSensor(TouchSensor, {
       activationConstraint: {
-        delay: 150, // 长按 150ms 后触发，避免与滚动冲突
+        delay: 150,
         tolerance: 5,
       },
     }),
   );
 
-  // 初始化 / 同步后端配置
   useEffect(() => {
     if (!config?.SourceConfig) return;
     const remote = config.SourceConfig;
 
     setSources((prev) => {
-      // 首次加载或本地列表为空：直接使用后端顺序
       if (prev.length === 0) {
         setOrderChanged(false);
         return remote;
       }
 
-      // 已有本地数据：保持本地排序，仅同步属性更新和新增/删除
       const remoteMap = new Map(remote.map((s) => [s.key, s]));
       const remoteKeys = new Set(remote.map((s) => s.key));
 
-      // 保留本地顺序中仍存在于后端的项，并更新属性
       const merged = prev
         .filter((s) => remoteKeys.has(s.key))
         .map((s) => remoteMap.get(s.key)!);
 
-      // 追加后端新增但本地还没有的项
       const localKeys = new Set(prev.map((s) => s.key));
       remote.forEach((s) => {
         if (!localKeys.has(s.key)) merged.push(s);
@@ -311,19 +113,20 @@ const VideoSourceConfig = ({
       return merged;
     });
 
-    // 重置选择状态
     setSelectedSources(new Set());
   }, [config]);
 
-  // 通用 API 请求
-  const callSourceApi = async (body: Record<string, unknown>) => {
-    try {
-      await runAction({ ...body });
-    } catch (err) {
-      showError(err instanceof Error ? err.message : '操作失败', showAlert);
-      throw err; // 向上抛出方便调用处判断
-    }
-  };
+  const callSourceApi = useCallback(
+    async (body: Record<string, unknown>) => {
+      try {
+        await runAction({ ...body });
+      } catch (err) {
+        showError(err instanceof Error ? err.message : '操作失败', showAlert);
+        throw err;
+      }
+    },
+    [runAction, showAlert],
+  );
 
   const handleToggleEnable = (key: string) => {
     const target = sources.find((s) => s.key === key);
@@ -391,183 +194,16 @@ const VideoSourceConfig = ({
       .catch(() => void 0);
   };
 
-  // 有效性检测函数
-  const handleValidateSources = async () => {
-    if (!searchKeyword.trim()) {
-      showAlert({
-        type: 'warning',
-        title: '请输入搜索关键词',
-        message: '搜索关键词不能为空',
-      });
-      return;
-    }
+  const { isValidating, startValidation, getValidationStatus } =
+    useSourceValidation({ sources, showAlert });
 
+  const handleStartValidation = async () => {
+    setShowValidationModal(false);
     await withLoading('validateSources', async () => {
-      setIsValidating(true);
-      setValidationResults([]); // 清空之前的结果
-      setShowValidationModal(false); // 立即关闭弹窗
-
-      // 初始化所有视频源为检测中状态
-      const initialResults = sources.map((source) => ({
-        key: source.key,
-        name: source.name,
-        status: 'validating' as const,
-        message: '检测中...',
-        resultCount: 0,
-      }));
-      setValidationResults(initialResults);
-
-      try {
-        // 使用EventSource接收流式数据
-        const eventSource = new EventSource(
-          `/api/admin/source/validate?q=${encodeURIComponent(
-            searchKeyword.trim(),
-          )}`,
-        );
-
-        eventSource.onmessage = (event) => {
-          try {
-            const data = JSON.parse(event.data);
-
-            switch (data.type) {
-              case 'start':
-                break;
-
-              case 'source_result':
-              case 'source_error':
-                // 更新验证结果
-                setValidationResults((prev) => {
-                  const existing = prev.find((r) => r.key === data.source);
-                  if (existing) {
-                    return prev.map((r) =>
-                      r.key === data.source
-                        ? {
-                            key: data.source,
-                            name:
-                              sources.find((s) => s.key === data.source)
-                                ?.name || data.source,
-                            status: data.status,
-                            message:
-                              data.status === 'valid'
-                                ? '搜索正常'
-                                : data.status === 'no_results'
-                                  ? '无法搜索到结果'
-                                  : '连接失败',
-                            resultCount: data.status === 'valid' ? 1 : 0,
-                          }
-                        : r,
-                    );
-                  } else {
-                    return [
-                      ...prev,
-                      {
-                        key: data.source,
-                        name:
-                          sources.find((s) => s.key === data.source)?.name ||
-                          data.source,
-                        status: data.status,
-                        message:
-                          data.status === 'valid'
-                            ? '搜索正常'
-                            : data.status === 'no_results'
-                              ? '无法搜索到结果'
-                              : '连接失败',
-                        resultCount: data.status === 'valid' ? 1 : 0,
-                      },
-                    ];
-                  }
-                });
-                break;
-
-              case 'complete':
-                eventSource.close();
-                setIsValidating(false);
-                break;
-            }
-          } catch {
-            eventSource.close();
-            setIsValidating(false);
-          }
-        };
-
-        eventSource.onerror = () => {
-          eventSource.close();
-          setIsValidating(false);
-          showAlert({
-            type: 'error',
-            title: '验证失败',
-            message: '连接错误，请重试',
-          });
-        };
-
-        // 设置超时，防止长时间等待
-        setTimeout(() => {
-          if (eventSource.readyState === EventSource.OPEN) {
-            eventSource.close();
-            setIsValidating(false);
-            showAlert({
-              type: 'warning',
-              title: '验证超时',
-              message: '检测超时，请重试',
-            });
-          }
-        }, 60000); // 60秒超时
-      } catch (error) {
-        setIsValidating(false);
-        showAlert({
-          type: 'error',
-          title: '验证失败',
-          message: error instanceof Error ? error.message : '未知错误',
-        });
-        throw error;
-      }
+      await startValidation(searchKeyword);
     });
   };
 
-  // 获取有效性状态显示
-  const getValidationStatus = (sourceKey: string) => {
-    const result = validationResults.find((r) => r.key === sourceKey);
-    if (!result) return null;
-
-    switch (result.status) {
-      case 'validating':
-        return {
-          text: '检测中',
-          className:
-            'bg-blue-100 dark:bg-blue-900/20 text-blue-800 dark:text-blue-300',
-          icon: '⟳',
-          message: result.message,
-        };
-      case 'valid':
-        return {
-          text: '有效',
-          className:
-            'bg-green-100 dark:bg-green-900/20 text-green-800 dark:text-green-300',
-          icon: '✓',
-          message: result.message,
-        };
-      case 'no_results':
-        return {
-          text: '无法搜索',
-          className:
-            'bg-yellow-100 dark:bg-yellow-900/20 text-yellow-800 dark:text-yellow-300',
-          icon: '⚠',
-          message: result.message,
-        };
-      case 'invalid':
-        return {
-          text: '无效',
-          className:
-            'bg-red-100 dark:bg-red-900/20 text-red-800 dark:text-red-300',
-          icon: '✗',
-          message: result.message,
-        };
-      default:
-        return null;
-    }
-  };
-
-  // 全选/取消全选
   const handleSelectAll = useCallback(
     (checked: boolean) => {
       if (checked) {
@@ -580,7 +216,6 @@ const VideoSourceConfig = ({
     [sources],
   );
 
-  // 单个选择
   const handleSelectSource = useCallback((key: string, checked: boolean) => {
     setSelectedSources((prev) => {
       const newSelected = new Set(prev);
@@ -593,70 +228,15 @@ const VideoSourceConfig = ({
     });
   }, []);
 
-  // 批量操作
-  const handleBatchOperation = async (
-    action: 'batch_enable' | 'batch_disable' | 'batch_delete',
-  ) => {
-    if (selectedSources.size === 0) {
-      showAlert({
-        type: 'warning',
-        title: '请先选择要操作的视频源',
-        message: '请选择至少一个视频源',
-      });
-      return;
-    }
+  const clearSelection = useCallback(() => setSelectedSources(new Set()), []);
 
-    const keys = Array.from(selectedSources);
-    let confirmMessage = '';
-    let actionName = '';
-
-    switch (action) {
-      case 'batch_enable':
-        confirmMessage = `确定要启用选中的 ${keys.length} 个视频源吗？`;
-        actionName = '批量启用';
-        break;
-      case 'batch_disable':
-        confirmMessage = `确定要禁用选中的 ${keys.length} 个视频源吗？`;
-        actionName = '批量禁用';
-        break;
-      case 'batch_delete':
-        confirmMessage = `确定要删除选中的 ${keys.length} 个视频源吗？此操作不可恢复！`;
-        actionName = '批量删除';
-        break;
-    }
-
-    // 显示确认弹窗
-    setConfirmModal({
-      isOpen: true,
-      title: '确认操作',
-      message: confirmMessage,
-      onConfirm: async () => {
-        try {
-          await withLoading(`batchSource_${action}`, () =>
-            callSourceApi({ action, keys }),
-          );
-          showAlert({
-            type: 'success',
-            title: `${actionName}成功`,
-            message: `${actionName}了 ${keys.length} 个视频源`,
-            timer: 2000,
-          });
-          // 重置选择状态
-          setSelectedSources(new Set());
-        } catch (err) {
-          showAlert({
-            type: 'error',
-            title: `${actionName}失败`,
-            message: err instanceof Error ? err.message : '操作失败',
-          });
-        }
-        closeConfirmModal();
-      },
-      onCancel: () => {
-        closeConfirmModal();
-      },
-    });
-  };
+  const { confirmModal, requestBatchOperation } = useSourceBatchOperation({
+    selectedSources,
+    onClearSelection: clearSelection,
+    callSourceApi,
+    withLoading,
+    showAlert,
+  });
 
   if (!config) {
     return (
@@ -666,15 +246,18 @@ const VideoSourceConfig = ({
     );
   }
 
+  const isAnyBatchLoading =
+    isLoading('batchSource_batch_enable') ||
+    isLoading('batchSource_batch_disable') ||
+    isLoading('batchSource_batch_delete');
+
   return (
     <div className='space-y-6'>
-      {/* 添加视频源表单 */}
       <div className='flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between'>
         <h4 className='text-sm font-medium text-gray-700 dark:text-gray-300'>
           视频源列表
         </h4>
         <div className='flex flex-col gap-3 sm:flex-row sm:items-center sm:gap-2'>
-          {/* 批量操作按钮 - 移动端显示在下一行，PC端显示在左侧 */}
           <div
             className={`${selectedSources.size > 0 ? '' : 'invisible'} contents`}
           >
@@ -686,7 +269,7 @@ const VideoSourceConfig = ({
                 </span>
               </span>
               <button
-                onClick={() => handleBatchOperation('batch_enable')}
+                onClick={() => requestBatchOperation('batch_enable')}
                 disabled={isLoading('batchSource_batch_enable')}
                 className={`px-3 py-1 text-sm ${
                   isLoading('batchSource_batch_enable')
@@ -699,7 +282,7 @@ const VideoSourceConfig = ({
                   : '批量启用'}
               </button>
               <button
-                onClick={() => handleBatchOperation('batch_disable')}
+                onClick={() => requestBatchOperation('batch_disable')}
                 disabled={isLoading('batchSource_batch_disable')}
                 className={`px-3 py-1 text-sm ${
                   isLoading('batchSource_batch_disable')
@@ -712,7 +295,7 @@ const VideoSourceConfig = ({
                   : '批量禁用'}
               </button>
               <button
-                onClick={() => handleBatchOperation('batch_delete')}
+                onClick={() => requestBatchOperation('batch_delete')}
                 disabled={isLoading('batchSource_batch_delete')}
                 className={`px-3 py-1 text-sm ${
                   isLoading('batchSource_batch_delete')
@@ -757,70 +340,14 @@ const VideoSourceConfig = ({
       </div>
 
       {showAddForm && (
-        <div className='space-y-4 rounded-lg border border-gray-200 bg-gray-50 p-4 dark:border-gray-700 dark:bg-gray-900'>
-          <div className='grid grid-cols-1 gap-4 sm:grid-cols-2'>
-            <input
-              type='text'
-              placeholder='名称'
-              value={newSource.name}
-              onChange={(e) =>
-                setNewSource((prev) => ({ ...prev, name: e.target.value }))
-              }
-              className={inputStyles.base}
-            />
-            <input
-              type='text'
-              placeholder='Key'
-              value={newSource.key}
-              onChange={(e) =>
-                setNewSource((prev) => ({ ...prev, key: e.target.value }))
-              }
-              className={inputStyles.base}
-            />
-            <input
-              type='text'
-              placeholder='API 地址'
-              value={newSource.api}
-              onChange={(e) =>
-                setNewSource((prev) => ({ ...prev, api: e.target.value }))
-              }
-              className={inputStyles.base}
-            />
-            <input
-              type='text'
-              placeholder='Detail 地址（选填）'
-              value={newSource.detail}
-              onChange={(e) =>
-                setNewSource((prev) => ({ ...prev, detail: e.target.value }))
-              }
-              className={inputStyles.base}
-            />
-          </div>
-          <div className='flex justify-end'>
-            <button
-              onClick={handleAddSource}
-              disabled={
-                !newSource.name ||
-                !newSource.key ||
-                !newSource.api ||
-                isLoading('addSource')
-              }
-              className={`w-full px-4 py-2 sm:w-auto ${
-                !newSource.name ||
-                !newSource.key ||
-                !newSource.api ||
-                isLoading('addSource')
-                  ? buttonStyles.disabled
-                  : buttonStyles.success
-              }`}
-            >
-              {isLoading('addSource') ? '添加中...' : '添加'}
-            </button>
-          </div>
-        </div>
+        <VideoSourceAddForm
+          newSource={newSource}
+          onChange={setNewSource}
+          onSubmit={handleAddSource}
+          isSubmitting={isLoading('addSource')}
+        />
       )}
 
-      {/* 视频源表格 */}
       <div
         className='relative max-h-[28rem] overflow-x-auto overflow-y-auto rounded-lg border border-gray-200 dark:border-gray-700'
         data-table='source-list'
@@ -896,7 +423,6 @@ const VideoSourceConfig = ({
         </DndContext>
       </div>
 
-      {/* 保存排序按钮 */}
       {orderChanged && (
         <div className='flex justify-end'>
           <button
@@ -913,48 +439,14 @@ const VideoSourceConfig = ({
         </div>
       )}
 
-      {/* 有效性检测弹窗 */}
-      <AdminDialog
+      <SourceValidationModal
         isOpen={showValidationModal}
-        title='视频源有效性检测'
+        searchKeyword={searchKeyword}
+        onSearchKeywordChange={setSearchKeyword}
         onClose={() => setShowValidationModal(false)}
-        panelClassName='max-w-md'
-      >
-        <p className='mb-4 text-sm text-gray-600 dark:text-gray-400'>
-          请输入检测用的搜索关键词
-        </p>
-        <div className='space-y-4'>
-          <input
-            type='text'
-            placeholder='请输入搜索关键词'
-            value={searchKeyword}
-            onChange={(e) => setSearchKeyword(e.target.value)}
-            className={`w-full ${inputStyles.base}`}
-            onKeyPress={(e) => e.key === 'Enter' && handleValidateSources()}
-          />
-          <div className='flex justify-end space-x-3'>
-            <button
-              onClick={() => setShowValidationModal(false)}
-              className='px-4 py-2 text-gray-600 transition-colors hover:text-gray-800 dark:text-gray-400 dark:hover:text-gray-200'
-            >
-              取消
-            </button>
-            <button
-              onClick={handleValidateSources}
-              disabled={!searchKeyword.trim()}
-              className={`px-4 py-2 ${
-                !searchKeyword.trim()
-                  ? buttonStyles.disabled
-                  : buttonStyles.primary
-              }`}
-            >
-              开始检测
-            </button>
-          </div>
-        </div>
-      </AdminDialog>
+        onStart={handleStartValidation}
+      />
 
-      {/* 通用弹窗组件 */}
       <AlertModal
         isOpen={alertModal.isOpen}
         onClose={hideAlert}
@@ -965,31 +457,16 @@ const VideoSourceConfig = ({
         showConfirm={alertModal.showConfirm}
       />
 
-      {/* 批量操作确认弹窗 */}
       <ConfirmModal
         isOpen={confirmModal.isOpen}
         title={confirmModal.title}
         onClose={confirmModal.onCancel}
         onConfirm={confirmModal.onConfirm}
-        confirmText={
-          isLoading('batchSource_batch_enable') ||
-          isLoading('batchSource_batch_disable') ||
-          isLoading('batchSource_batch_delete')
-            ? '操作中...'
-            : '确认'
-        }
-        confirmDisabled={
-          isLoading('batchSource_batch_enable') ||
-          isLoading('batchSource_batch_disable') ||
-          isLoading('batchSource_batch_delete')
-        }
+        confirmText={isAnyBatchLoading ? '操作中...' : '确认'}
+        confirmDisabled={isAnyBatchLoading}
         cancelClassName={`px-4 py-2 text-sm font-medium ${buttonStyles.secondary}`}
         confirmClassName={`px-4 py-2 text-sm font-medium ${
-          isLoading('batchSource_batch_enable') ||
-          isLoading('batchSource_batch_disable') ||
-          isLoading('batchSource_batch_delete')
-            ? buttonStyles.disabled
-            : buttonStyles.primary
+          isAnyBatchLoading ? buttonStyles.disabled : buttonStyles.primary
         }`}
         containerClassName='max-w-md'
       >

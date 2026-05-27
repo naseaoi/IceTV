@@ -11,7 +11,7 @@ import { adminPost } from '@/features/admin/lib/api';
 import { buttonStyles } from '@/features/admin/lib/buttonStyles';
 import { showError, showSuccess } from '@/features/admin/lib/notifications';
 import { AdminConfig } from '@/features/admin/types/api';
-import { SiteConfig } from '@/features/admin/types';
+import { SiteConfig } from '@/features/admin/types/internal';
 import {
   doubanDataSourceOptions,
   doubanImageProxyTypeOptions,

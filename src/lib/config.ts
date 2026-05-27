@@ -1,7 +1,7 @@
 import { db } from '@/lib/db';
 import { getOwnerUsername } from '@/lib/env.server';
 
-import { AdminConfig } from './admin.types';
+import { AdminConfig } from '@/features/admin/types/api';
 
 export interface ApiSite {
   key: string;

@@ -1,7 +1,8 @@
 import mysql from 'mysql2/promise';
 import type { PoolConnection, RowDataPacket } from 'mysql2/promise';
 
-import { AdminConfig } from './admin.types';
+import { AdminConfig } from '@/features/admin/types/api';
+
 import { hashPassword, verifyPassword } from './password';
 import { getMySqlConnectionUrl } from './storage-type';
 import { Favorite, IStorage, PlayRecord, SkipConfig } from './types';

@@ -1,4 +1,4 @@
-import { AdminConfig } from './admin.types';
+import { AdminConfig } from '@/features/admin/types/api';
 
 // 播放记录数据结构
 export interface PlayRecord {

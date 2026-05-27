@@ -74,6 +74,7 @@
 
 维护相关文档：
 
+- [Feature 分层规范](docs/feature-layering.md)
 - [Admin 模块维护指南](docs/admin-maintenance.md)
 - [API 鉴权维护指南](docs/api-auth-guide.md)
 

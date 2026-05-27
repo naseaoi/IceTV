@@ -19,8 +19,7 @@ src/features/admin/
 
 ## 类型导入
 
-- `src/lib/admin.types.ts` 保留兼容导出。
-- 新代码优先从 `src/features/admin/types/api.ts` 导入类型。
+- 类型统一从 `src/features/admin/types/api.ts` 导入。
 - `src/features/admin/types.ts` 为 admin 内部共享类型。
 
 ## Hook 复用
