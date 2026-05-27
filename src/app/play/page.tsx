@@ -672,7 +672,6 @@ function PlayPageClient() {
       setVideoLoadingAttempt((prev) => prev + 1);
       setRealtimeLoadSpeed('测速中...');
       setError(null);
-      setVideoUrl('');
 
       if (artPlayerRef.current) {
         try {
@@ -681,7 +680,6 @@ function PlayPageClient() {
           console.warn('换源时暂停当前视频失败:', err);
         }
       }
-      cleanupPlayer();
 
       let newDetail = targetSource;
 
@@ -719,7 +717,6 @@ function PlayPageClient() {
         activeDetail: previousDetail,
         activeEpisodeIndex: latestEpisodeIndex,
       });
-      sourceSwitchEpisodeAnchorRef.current = episodeAnchor;
       const resolvedEpisodeTarget = resolveEpisodeTargetIndex(
         episodeAnchor.detail,
         episodeAnchor.episodeIndex,
@@ -736,6 +733,34 @@ function PlayPageClient() {
         targetIndex = 0;
         preserveProgress = false;
       }
+
+      // 手动换源时目标源对不齐当前集（标题数字缺失/缺集/拆季）就拒绝切换，保留当前播放状态。
+      if (
+        !isAutoFallback &&
+        !preserveProgress &&
+        !clearTargetEpisodeProgress &&
+        episodeAnchor.episodeIndex > 0
+      ) {
+        const targetEpisodeNumber = episodeAnchor.episodeIndex + 1;
+        const notice = `该源没有第 ${targetEpisodeNumber} 集，已保留当前播放`;
+        const player = artPlayerRef.current;
+        if (player) {
+          try {
+            player.notice.show = notice;
+          } catch (err) {
+            console.warn('显示换源拒绝提示失败:', err);
+          }
+        } else {
+          setSourceSearchError(notice);
+        }
+        setIsVideoLoading(false);
+        setRealtimeLoadSpeed('');
+        return;
+      }
+
+      sourceSwitchEpisodeAnchorRef.current = episodeAnchor;
+      setVideoUrl('');
+      cleanupPlayer();
 
       const nextResumeState = resolveSourceSwitchResumeState({
         currentPlayTime,

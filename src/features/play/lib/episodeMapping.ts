@@ -55,17 +55,18 @@ export function resolveEpisodeTargetIndex(
     : 0;
   const fallbackIndex =
     safeCurrentIndex < targetEpisodes.length ? safeCurrentIndex : 0;
-  const fallbackPreserveProgress = safeCurrentIndex < targetEpisodes.length;
 
-  // 先按源站给出的集标题提取逻辑集数，避免不同源的数组下标不一致时跳错集。
+  const currentTitles = currentDetail?.episodes_titles || [];
+  const targetTitles = targetDetail?.episodes_titles || [];
+  const currentHasTitles = currentTitles.length > 0;
+  const targetHasTitles = targetTitles.length > 0;
+
   const currentEpisodeLabel =
-    currentDetail?.episodes_titles?.[safeCurrentIndex] ||
-    `${safeCurrentIndex + 1}`;
+    currentTitles[safeCurrentIndex] || `${safeCurrentIndex + 1}`;
   const currentEpisodeNumber =
     extractEpisodeNumberFromTitle(currentEpisodeLabel);
 
   if (currentEpisodeNumber !== null) {
-    const targetTitles = targetDetail?.episodes_titles || [];
     const matchedIndex = targetTitles.findIndex((title, index) => {
       const candidate = title || `${index + 1}`;
       return extractEpisodeNumberFromTitle(candidate) === currentEpisodeNumber;
@@ -75,20 +76,23 @@ export function resolveEpisodeTargetIndex(
       return { index: matchedIndex, preserveProgress: true };
     }
 
-    if (
-      Number.isInteger(currentEpisodeNumber) &&
-      currentEpisodeNumber >= 1 &&
-      currentEpisodeNumber <= targetEpisodes.length
-    ) {
-      return {
-        index: currentEpisodeNumber - 1,
-        preserveProgress: true,
-      };
+    // 目标源提供了标题但没出现该集号，多半是缺集/删减/拆季，禁止按下标硬塞。
+    if (targetHasTitles) {
+      return { index: fallbackIndex, preserveProgress: false };
     }
   }
 
+  // 两边都没有可信的集标题时，只在总集数相等的前提下按下标兜底，
+  // 任一边集数不同就视为无法对齐当前集。
+  const currentEpisodesLength = currentDetail?.episodes?.length ?? 0;
+  const canTrustIndexFallback =
+    !currentHasTitles &&
+    !targetHasTitles &&
+    currentEpisodesLength === targetEpisodes.length &&
+    safeCurrentIndex < targetEpisodes.length;
+
   return {
     index: fallbackIndex,
-    preserveProgress: fallbackPreserveProgress,
+    preserveProgress: canTrustIndexFallback,
   };
 }
