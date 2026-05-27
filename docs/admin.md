@@ -29,4 +29,4 @@
 ## 测试
 
 - [src/app/admin/page.test.tsx](../src/app/admin/page.test.tsx)
-- [src/features/admin/hooks/**tests**/](../src/features/admin/hooks/__tests__/)
+- [`src/features/admin/hooks/__tests__/`](../src/features/admin/hooks/__tests__/)

@@ -61,7 +61,7 @@ grep -rl "requireActiveUser\|requireAdmin\|requireOwner" src/app/api
 
 每个权限接口至少覆盖：未登录 → 401、权限不足 → 403、具备权限 → 200。
 
-回归位置：[src/app/api/admin/**tests**/auth-guard.test.ts](../src/app/api/admin/__tests__/auth-guard.test.ts)
+回归位置：[`src/app/api/admin/__tests__/auth-guard.test.ts`](../src/app/api/admin/__tests__/auth-guard.test.ts)
 
 ## 环境变量
 
