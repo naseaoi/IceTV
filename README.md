@@ -72,11 +72,11 @@
 - Docker + 本地 SQLite
 - Vercel + MySQL 云数据库
 
-维护相关文档：
+开发文档：
 
-- [Feature 分层规范](docs/feature-layering.md)
-- [Admin 模块维护指南](docs/admin-maintenance.md)
-- [API 鉴权维护指南](docs/api-auth-guide.md)
+- [架构与分层规范](docs/architecture.md) — 目录结构、命名约定、新增 feature 模板
+- [Admin 模块](docs/admin.md) — 可复用 hooks、tab 子组件目录、测试入口
+- [API 鉴权](docs/api-auth.md) — Guard 模块、新增 API 模板、状态码约定
 
 ### 服务器本地 SQLite 存储
 
