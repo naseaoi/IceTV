@@ -89,6 +89,47 @@ describe('episodeResumePolicy', () => {
     });
   });
 
+  it('旧 anchor 集数落后于当前 latest 时被 latest 矫正', () => {
+    const sourceA = createSearchResult({
+      source: 'source-a',
+      episodes_titles: ['01', '02'],
+    });
+    const staleAnchor = {
+      detail: sourceA,
+      episodeIndex: 0,
+    };
+
+    expect(
+      resolveSourceSwitchEpisodeAnchor({
+        currentAnchor: staleAnchor,
+        activeDetail: sourceA,
+        activeEpisodeIndex: 13,
+      }),
+    ).toEqual({
+      detail: sourceA,
+      episodeIndex: 13,
+    });
+  });
+
+  it('旧 anchor.detail 为 null 时用 activeDetail 兜底', () => {
+    const sourceA = createSearchResult({ source: 'source-a' });
+    const staleAnchor = {
+      detail: null,
+      episodeIndex: 10,
+    };
+
+    expect(
+      resolveSourceSwitchEpisodeAnchor({
+        currentAnchor: staleAnchor,
+        activeDetail: sourceA,
+        activeEpisodeIndex: 5,
+      }),
+    ).toEqual({
+      detail: sourceA,
+      episodeIndex: 10,
+    });
+  });
+
   it('切集后的自动换源不会继承上一集进度', () => {
     expect(
       resolveSourceSwitchResumeState({

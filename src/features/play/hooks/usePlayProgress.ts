@@ -608,6 +608,7 @@ export function usePlayProgress({
           // 显式恢复到其它集时，同样先阻断旧播放器残留进度回写。
           clearTargetEpisodeProgressRef.current = true;
           stableCurrentTimeRef.current = 0;
+          currentEpisodeIndexRef.current = episodeIndex;
           setCurrentEpisodeIndex(episodeIndex);
         }
 

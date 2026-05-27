@@ -287,6 +287,7 @@ function PlayPageClient() {
     availableSources,
     precomputedVideoInfo,
     autoSwitchSourceOnTimeout,
+    currentEpisodeIndex,
     artPlayerRef,
     currentSourceRef,
     currentIdRef,

@@ -56,13 +56,18 @@ export function resolveSourceSwitchEpisodeAnchor({
   activeDetail,
   activeEpisodeIndex,
 }: ResolveSourceSwitchEpisodeAnchorOptions): SourceSwitchEpisodeAnchor {
+  const safeActiveIndex = Math.max(0, Math.floor(activeEpisodeIndex));
+
   if (currentAnchor) {
-    return currentAnchor;
+    return {
+      detail: currentAnchor.detail || activeDetail,
+      episodeIndex: Math.max(currentAnchor.episodeIndex, safeActiveIndex),
+    };
   }
 
   return {
     detail: activeDetail,
-    episodeIndex: Math.max(0, Math.floor(activeEpisodeIndex)),
+    episodeIndex: safeActiveIndex,
   };
 }
 

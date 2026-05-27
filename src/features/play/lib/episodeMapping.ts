@@ -40,6 +40,24 @@ export function extractEpisodeNumberFromTitle(title: string): number | null {
   return Number.isFinite(episodeNumber) ? episodeNumber : null;
 }
 
+function titlesLookLikeEpisodeNumbering(titles: string[]): boolean {
+  if (titles.length < 2) {
+    return false;
+  }
+  const numbers = new Set<number>();
+  let validCount = 0;
+  for (let i = 0; i < titles.length; i += 1) {
+    const title = titles[i] || '';
+    const n = extractEpisodeNumberFromTitle(title);
+    if (n !== null) {
+      validCount += 1;
+      numbers.add(n);
+    }
+  }
+  const threshold = Math.max(2, Math.floor(titles.length / 2));
+  return validCount >= threshold && numbers.size >= threshold;
+}
+
 export function resolveEpisodeTargetIndex(
   currentDetail: SearchResult | null,
   currentIndex: number,
@@ -58,15 +76,13 @@ export function resolveEpisodeTargetIndex(
 
   const currentTitles = currentDetail?.episodes_titles || [];
   const targetTitles = targetDetail?.episodes_titles || [];
-  const currentHasTitles = currentTitles.length > 0;
-  const targetHasTitles = targetTitles.length > 0;
 
   const currentEpisodeLabel =
     currentTitles[safeCurrentIndex] || `${safeCurrentIndex + 1}`;
   const currentEpisodeNumber =
     extractEpisodeNumberFromTitle(currentEpisodeLabel);
 
-  if (currentEpisodeNumber !== null) {
+  if (currentEpisodeNumber !== null && targetTitles.length > 0) {
     const matchedIndex = targetTitles.findIndex((title, index) => {
       const candidate = title || `${index + 1}`;
       return extractEpisodeNumberFromTitle(candidate) === currentEpisodeNumber;
@@ -76,23 +92,13 @@ export function resolveEpisodeTargetIndex(
       return { index: matchedIndex, preserveProgress: true };
     }
 
-    // 目标源提供了标题但没出现该集号，多半是缺集/删减/拆季，禁止按下标硬塞。
-    if (targetHasTitles) {
+    if (titlesLookLikeEpisodeNumbering(targetTitles)) {
       return { index: fallbackIndex, preserveProgress: false };
     }
   }
 
-  // 两边都没有可信的集标题时，只在总集数相等的前提下按下标兜底，
-  // 任一边集数不同就视为无法对齐当前集。
-  const currentEpisodesLength = currentDetail?.episodes?.length ?? 0;
-  const canTrustIndexFallback =
-    !currentHasTitles &&
-    !targetHasTitles &&
-    currentEpisodesLength === targetEpisodes.length &&
-    safeCurrentIndex < targetEpisodes.length;
-
-  return {
-    index: fallbackIndex,
-    preserveProgress: canTrustIndexFallback,
-  };
+  if (safeCurrentIndex < targetEpisodes.length) {
+    return { index: safeCurrentIndex, preserveProgress: true };
+  }
+  return { index: 0, preserveProgress: false };
 }

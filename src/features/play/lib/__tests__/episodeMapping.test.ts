@@ -152,6 +152,45 @@ describe('episodeMapping', () => {
     });
   });
 
+  it('目标源标题是剧情名而非集号时，按下标兜底允许换源', () => {
+    const currentDetail = createSearchResult({
+      episodes: Array.from({ length: 130 }, (_, i) => `a${i + 1}`),
+      episodes_titles: Array.from({ length: 130 }, (_, i) => `第${i + 1}集`),
+    });
+    const targetDetail = createSearchResult({
+      source: 'source-b',
+      source_name: 'Source B',
+      episodes: Array.from({ length: 110 }, (_, i) => `b${i + 1}`),
+      episodes_titles: Array.from(
+        { length: 110 },
+        (_, i) => `剧情名-${String.fromCharCode(0x4e00 + i)}`,
+      ),
+    });
+
+    expect(resolveEpisodeTargetIndex(currentDetail, 89, targetDetail)).toEqual({
+      index: 89,
+      preserveProgress: true,
+    });
+  });
+
+  it('源A有规范集号、源B 无 episodes_titles 时，按下标兜底允许换源', () => {
+    const currentDetail = createSearchResult({
+      episodes: Array.from({ length: 130 }, (_, i) => `a${i + 1}`),
+      episodes_titles: Array.from({ length: 130 }, (_, i) => `第${i + 1}集`),
+    });
+    const targetDetail = createSearchResult({
+      source: 'source-b',
+      source_name: 'Source B',
+      episodes: Array.from({ length: 110 }, (_, i) => `b${i + 1}`),
+      episodes_titles: [],
+    });
+
+    expect(resolveEpisodeTargetIndex(currentDetail, 89, targetDetail)).toEqual({
+      index: 89,
+      preserveProgress: true,
+    });
+  });
+
   it('两边都没有 episodes_titles 且总集数相等时，按下标兜底视为可继承', () => {
     const currentDetail = createSearchResult({
       episodes: ['a1', 'a2', 'a3', 'a4'],
@@ -170,7 +209,7 @@ describe('episodeMapping', () => {
     });
   });
 
-  it('两边都没有 episodes_titles 且总集数不同时，视为无法对齐当前集', () => {
+  it('两边都没有 episodes_titles 且下标在目标源范围内时，按下标兜底允许尝试', () => {
     const currentDetail = createSearchResult({
       episodes: ['a1', 'a2', 'a3', 'a4'],
       episodes_titles: [],
@@ -184,6 +223,24 @@ describe('episodeMapping', () => {
 
     expect(resolveEpisodeTargetIndex(currentDetail, 2, targetDetail)).toEqual({
       index: 2,
+      preserveProgress: true,
+    });
+  });
+
+  it('下标超出目标源范围时拒绝继承', () => {
+    const currentDetail = createSearchResult({
+      episodes: ['a1', 'a2', 'a3', 'a4'],
+      episodes_titles: [],
+    });
+    const targetDetail = createSearchResult({
+      source: 'source-b',
+      source_name: 'Source B',
+      episodes: ['b1', 'b2'],
+      episodes_titles: [],
+    });
+
+    expect(resolveEpisodeTargetIndex(currentDetail, 3, targetDetail)).toEqual({
+      index: 0,
       preserveProgress: false,
     });
   });

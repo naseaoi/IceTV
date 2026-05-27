@@ -6,6 +6,8 @@ import {
   type RefObject,
   type SetStateAction,
   useCallback,
+  useEffect,
+  useRef,
 } from 'react';
 
 import {
@@ -56,6 +58,7 @@ interface UseSourceSwitchOptions {
   availableSources: SearchResult[];
   precomputedVideoInfo: Map<string, VideoQualityInfo>;
   autoSwitchSourceOnTimeout: boolean;
+  currentEpisodeIndex: number;
 
   artPlayerRef: RefObject<Artplayer | null>;
   currentSourceRef: RefObject<string>;
@@ -98,6 +101,7 @@ export function useSourceSwitch(options: UseSourceSwitchOptions) {
     availableSources,
     precomputedVideoInfo,
     autoSwitchSourceOnTimeout,
+    currentEpisodeIndex,
     artPlayerRef,
     currentSourceRef,
     currentIdRef,
@@ -131,6 +135,8 @@ export function useSourceSwitch(options: UseSourceSwitchOptions) {
     setSourceSearchError,
     cleanupPlayer,
   } = options;
+
+  const handleLoadingTimeoutRef = useRef<(() => void) | null>(null);
 
   const handleSourceChange = useCallback(
     async (
@@ -216,7 +222,10 @@ export function useSourceSwitch(options: UseSourceSwitchOptions) {
           return;
         }
 
-        const latestEpisodeIndex = currentEpisodeIndexRef.current;
+        const latestEpisodeIndex = Math.max(
+          currentEpisodeIndex,
+          currentEpisodeIndexRef.current,
+        );
         const episodeAnchor = resolveSourceSwitchEpisodeAnchor({
           currentAnchor: sourceSwitchEpisodeAnchorRef.current,
           activeDetail: previousDetail,
@@ -239,11 +248,21 @@ export function useSourceSwitch(options: UseSourceSwitchOptions) {
         }
 
         if (
-          !isAutoFallback &&
           !preserveProgress &&
           !clearTargetEpisodeProgress &&
           episodeAnchor.episodeIndex > 0
         ) {
+          const targetKey = `${newSource}-${newId}`;
+          failedSourcesRef.current.add(targetKey);
+
+          if (isAutoFallback) {
+            markSourceFailed(targetKey);
+            setIsVideoLoading(false);
+            setRealtimeLoadSpeed('');
+            handleLoadingTimeoutRef.current?.();
+            return;
+          }
+
           const targetEpisodeNumber = episodeAnchor.episodeIndex + 1;
           const notice = `该源没有第 ${targetEpisodeNumber} 集，已保留当前播放`;
           const player = artPlayerRef.current;
@@ -281,12 +300,6 @@ export function useSourceSwitch(options: UseSourceSwitchOptions) {
         resumeTimeRef.current = nextResumeState.resumeTime;
         resumeModeRef.current = nextResumeState.resumeMode;
 
-        const newUrl = new URL(window.location.href);
-        newUrl.searchParams.set('source', newDetail.source);
-        newUrl.searchParams.set('id', newDetail.id);
-        newUrl.searchParams.set('year', newDetail.year);
-        window.history.replaceState({}, '', newUrl.toString());
-
         setVideoTitle(newDetail.title || newTitle);
         setVideoYear(newDetail.year);
         setVideoCover(newDetail.poster);
@@ -323,6 +336,7 @@ export function useSourceSwitch(options: UseSourceSwitchOptions) {
     },
     [
       availableSources,
+      currentEpisodeIndex,
       artPlayerRef,
       currentSourceRef,
       currentIdRef,
@@ -366,7 +380,10 @@ export function useSourceSwitch(options: UseSourceSwitchOptions) {
     const curSource = currentSourceRef.current;
     const curId = currentIdRef.current;
     const curDetail = detailRef.current;
-    const curEpisodeIndex = currentEpisodeIndexRef.current;
+    const curEpisodeIndex = Math.max(
+      currentEpisodeIndex,
+      currentEpisodeIndexRef.current,
+    );
     if (!curSource || !curId) return;
 
     const curKey = `${curSource}-${curId}`;
@@ -415,6 +432,7 @@ export function useSourceSwitch(options: UseSourceSwitchOptions) {
     autoSwitchSourceOnTimeout,
     availableSources,
     precomputedVideoInfo,
+    currentEpisodeIndex,
     currentSourceRef,
     currentIdRef,
     detailRef,
@@ -424,6 +442,10 @@ export function useSourceSwitch(options: UseSourceSwitchOptions) {
     autoFallbackInProgressRef,
     handleSourceChange,
   ]);
+
+  useEffect(() => {
+    handleLoadingTimeoutRef.current = handleLoadingTimeout;
+  }, [handleLoadingTimeout]);
 
   const finalizePendingSourceSwitchCleanup = useCallback(
     async (activeSource: string, activeId: string) => {
