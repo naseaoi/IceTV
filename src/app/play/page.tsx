@@ -871,16 +871,24 @@ function PlayPageClient() {
     // 同步写入 sessionStorage，SourcesTab 排序时据此降权
     markSourceFailed(curKey);
 
+    // 用首次记录的原始集数锚点作为筛选参照，避免连续自动降级时参照系
+    // 跟随当前源漂移、与 handleSourceChange 里真正算映射时用的视角脱节。
+    const anchor = sourceSwitchEpisodeAnchorRef.current;
+    const referenceDetail = anchor?.detail || curDetail;
+    const referenceEpisodeIndex = anchor
+      ? anchor.episodeIndex
+      : curEpisodeIndex;
+
     const candidates = availableSources.filter((s) => {
       const key = `${s.source}-${s.id}`;
       if (key === curKey) return false;
       if (failedSourcesRef.current.has(key)) return false;
       // 自动换源的目标应始终保持在当前逻辑集数；
       // 目标源若连当前集都映射不到，就不要浪费一次 15s 超时窗口去试第 1 集。
-      if (curDetail && curEpisodeIndex > 0) {
+      if (referenceDetail && referenceEpisodeIndex > 0) {
         const resolved = resolveEpisodeTargetIndex(
-          curDetail,
-          curEpisodeIndex,
+          referenceDetail,
+          referenceEpisodeIndex,
           s,
         );
         if (!resolved.preserveProgress) {
