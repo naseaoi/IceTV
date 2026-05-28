@@ -323,7 +323,11 @@ export async function getConfig(): Promise<AdminConfig> {
   }
 
   if (shouldPersist) {
-    await db.saveAdminConfig(cachedConfig);
+    try {
+      await db.saveAdminConfig(cachedConfig);
+    } catch (e) {
+      console.error('保存管理员配置失败:', e);
+    }
   }
 
   return cachedConfig;
