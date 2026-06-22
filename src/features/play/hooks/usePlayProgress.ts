@@ -195,6 +195,59 @@ interface ResolvePlaybackRestoreCandidateOptions {
   episodeCount: number;
 }
 
+function normalizeRestoreIdentityText(value?: string | null): string {
+  return (value || '').replace(/\s+/g, '').trim().toLowerCase();
+}
+
+function normalizeRestoreIdentityYear(value?: string | null): string {
+  const year = (value || '').trim();
+  return year && year !== 'unknown' ? year : '';
+}
+
+export function isPlayRecordCompatibleWithDetail(
+  record: PlayRecord | undefined,
+  detail: SearchResult | null,
+): record is PlayRecord {
+  if (!record) {
+    return false;
+  }
+
+  if (!detail) {
+    return true;
+  }
+
+  const recordTitle = normalizeRestoreIdentityText(record.title);
+  const detailTitle = normalizeRestoreIdentityText(detail.title);
+  if (recordTitle && detailTitle && recordTitle !== detailTitle) {
+    return false;
+  }
+
+  const recordYear = normalizeRestoreIdentityYear(record.year);
+  const detailYear = normalizeRestoreIdentityYear(detail.year);
+  if (recordYear && detailYear && recordYear !== detailYear) {
+    return false;
+  }
+
+  return true;
+}
+
+export function isPlaybackCheckpointCompatibleWithDetail(
+  checkpoint: PlayCheckpoint | null,
+  detail: SearchResult | null,
+): checkpoint is PlayCheckpoint {
+  if (!checkpoint) {
+    return false;
+  }
+
+  if (!detail) {
+    return true;
+  }
+
+  const checkpointTitle = normalizeRestoreIdentityText(checkpoint.title);
+  const detailTitle = normalizeRestoreIdentityText(detail.title);
+  return !checkpointTitle || !detailTitle || checkpointTitle === detailTitle;
+}
+
 /**
  * 同一条播放链路里，继续观看记录与检查点同时存在时，优先采用更新时间更晚的那一份。
  * 这样首页看到的最新进度不会再被旧 checkpoint 反向覆盖。
@@ -626,6 +679,7 @@ export function usePlayProgress({
         return;
       }
 
+      const activeDetail = detailRef.current;
       const checkpoint = readMatchingPlaybackCheckpoint(
         currentSourceRef,
         currentIdRef,
@@ -638,9 +692,20 @@ export function usePlayProgress({
         }
 
         const key = generateStorageKey(currentSource, currentId);
-        const record = allRecords[key];
-        const restoreCandidate = resolvePlaybackRestoreCandidate({
+        const record = isPlayRecordCompatibleWithDetail(
+          allRecords[key],
+          activeDetail,
+        )
+          ? allRecords[key]
+          : undefined;
+        const compatibleCheckpoint = isPlaybackCheckpointCompatibleWithDetail(
           checkpoint,
+          activeDetail,
+        )
+          ? checkpoint
+          : null;
+        const restoreCandidate = resolvePlaybackRestoreCandidate({
+          checkpoint: compatibleCheckpoint,
           record,
           episodeCount: detailRef.current?.episodes.length || 0,
         });

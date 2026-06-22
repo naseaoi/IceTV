@@ -1,7 +1,16 @@
 {
-  "latestVersion": "0.3.10",
-  "generatedAt": 1779898685811,
+  "latestVersion": "0.3.11",
+  "generatedAt": 1782139306731,
   "entries": [
+    {
+      "version": "0.3.11",
+      "date": "2026-06-22",
+      "added": [],
+      "changed": [],
+      "fixed": [
+        "修复搜索页打开未看过的新视频时复用旧 source/id 历史进度，导致第一集跳到片尾附近的问题"
+      ]
+    },
     {
       "version": "0.3.10",
       "date": "2026-05-28",

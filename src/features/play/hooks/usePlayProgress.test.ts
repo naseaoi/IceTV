@@ -2,6 +2,8 @@ import {
   resolveNextStablePlaybackTime,
   resolveProtectedPlaybackTime,
   resolvePlaybackRestoreCandidate,
+  isPlayRecordCompatibleWithDetail,
+  isPlaybackCheckpointCompatibleWithDetail,
   saveCurrentPlayProgress,
   savePlaybackCheckpoint,
   shouldApplyHistoryRestore,
@@ -22,6 +24,16 @@ describe('usePlayProgress helpers', () => {
   const mockedSavePlayRecord = savePlayRecord as jest.MockedFunction<
     typeof savePlayRecord
   >;
+  const detail = {
+    id: 'id-a',
+    title: '番剧A',
+    poster: '',
+    episodes: Array.from({ length: 12 }, (_, index) => `${index + 1}`),
+    episodes_titles: [],
+    source: 'source-a',
+    source_name: '源A',
+    year: '2024',
+  };
 
   beforeEach(() => {
     jest.clearAllMocks();
@@ -211,6 +223,60 @@ describe('usePlayProgress helpers', () => {
       resumeTime: 180,
       resumeMode: 'history',
     });
+  });
+
+  it('source/id 相同但标题不同时不使用历史记录', () => {
+    expect(
+      isPlayRecordCompatibleWithDetail(
+        {
+          title: '番剧B',
+          source_name: '源A',
+          year: '2024',
+          cover: '',
+          index: 1,
+          total_episodes: 12,
+          play_time: 1320,
+          total_time: 1500,
+          save_time: 2000,
+        },
+        detail,
+      ),
+    ).toBe(false);
+  });
+
+  it('source/id 相同但年份不同时不使用历史记录', () => {
+    expect(
+      isPlayRecordCompatibleWithDetail(
+        {
+          title: '番剧A',
+          source_name: '源A',
+          year: '2023',
+          cover: '',
+          index: 1,
+          total_episodes: 12,
+          play_time: 1320,
+          total_time: 1500,
+          save_time: 2000,
+        },
+        detail,
+      ),
+    ).toBe(false);
+  });
+
+  it('source/id 相同但 checkpoint 标题不同时不使用检查点', () => {
+    expect(
+      isPlaybackCheckpointCompatibleWithDetail(
+        {
+          source: 'source-a',
+          id: 'id-a',
+          episodeIndex: 0,
+          currentTime: 1320,
+          title: '番剧B',
+          saveTime: 2000,
+        },
+        detail,
+      ),
+    ).toBe(false);
   });
 
   it('保存进度时会优先使用播放器时间，否则回退到最近稳定进度', () => {
