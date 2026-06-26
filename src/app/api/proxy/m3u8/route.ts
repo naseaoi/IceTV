@@ -35,6 +35,11 @@ type M3U8CacheEntry = {
   finalUrl: string;
 };
 
+type M3U8LoadResult = M3U8CacheEntry & {
+  status: number;
+  statusText: string;
+};
+
 const m3u8Cache = createSwrCache<M3U8CacheEntry>({
   name: 'proxy-m3u8',
   freshMs: 60_000,
@@ -57,6 +62,7 @@ function isSignedM3U8Url(rawUrl: string): boolean {
 
 // 软过期后台刷新：同 URL 并发刷新请求合并，避免雷群
 const m3u8RefreshInflight = new Map<string, Promise<void>>();
+const m3u8LoadInflight = new Map<string, Promise<M3U8LoadResult>>();
 
 function refreshM3U8Cache(
   url: string,
@@ -115,6 +121,92 @@ function refreshM3U8Cache(
   })();
 
   m3u8RefreshInflight.set(url, task);
+  return task;
+}
+
+function getM3U8LoadInflightKey(
+  url: string,
+  ua: string,
+  source: string | null,
+  isLive: boolean,
+  skipCache: boolean,
+) {
+  return [
+    url,
+    ua,
+    source || '',
+    isLive ? 'live' : 'vod',
+    skipCache ? 'signed' : 'cacheable',
+  ].join('\0');
+}
+
+async function fetchM3U8Data(
+  url: string,
+  ua: string,
+  source: string | null,
+  isLive: boolean,
+  skipCache: boolean,
+): Promise<M3U8LoadResult> {
+  const response = await fetchWithUrlGuard(url, {
+    cache: 'no-cache',
+    redirect: 'follow',
+    credentials: 'same-origin',
+    headers: {
+      'User-Agent': ua,
+    },
+  });
+
+  if (!response.ok) {
+    throw new Error('Failed to fetch m3u8');
+  }
+
+  const contentType =
+    response.headers.get('Content-Type') || 'application/vnd.apple.mpegurl';
+  const finalUrl = response.url;
+  let content = await readTextLimited(response, MAX_M3U8_BYTES);
+
+  if (!isLive && shouldRunAdDetection(source)) {
+    try {
+      content = await stripAdSegmentsByPhysicalSignal(content, finalUrl, ua);
+    } catch {}
+  }
+
+  if (
+    !skipCache &&
+    (content.includes('#EXT-X-ENDLIST') ||
+      content.includes('#EXT-X-STREAM-INF'))
+  ) {
+    m3u8Cache.set(url, {
+      content,
+      contentType,
+      finalUrl,
+    });
+  }
+
+  return {
+    content,
+    contentType,
+    finalUrl,
+    status: response.status,
+    statusText: response.statusText,
+  };
+}
+
+function loadM3U8Data(
+  url: string,
+  ua: string,
+  source: string | null,
+  isLive: boolean,
+  skipCache: boolean,
+): Promise<M3U8LoadResult> {
+  const key = getM3U8LoadInflightKey(url, ua, source, isLive, skipCache);
+  const existing = m3u8LoadInflight.get(key);
+  if (existing) return existing;
+
+  const task = fetchM3U8Data(url, ua, source, isLive, skipCache).finally(() => {
+    m3u8LoadInflight.delete(key);
+  });
+  m3u8LoadInflight.set(key, task);
   return task;
 }
 
@@ -180,92 +272,24 @@ export async function GET(request: NextRequest) {
       return new Response(modifiedContent, { status: 200, headers });
     }
 
-    const response = await fetchWithUrlGuard(validation.url, {
-      cache: 'no-cache',
-      redirect: 'follow',
-      credentials: 'same-origin',
-      headers: {
-        'User-Agent': ua,
-      },
-    });
-
-    if (!response.ok) {
-      return NextResponse.json(
-        { error: 'Failed to fetch m3u8' },
-        { status: 500 },
-      );
-    }
-
-    const contentType = response.headers.get('Content-Type') || '';
-    if (
-      contentType.toLowerCase().includes('mpegurl') ||
-      contentType.toLowerCase().includes('octet-stream')
-    ) {
-      const finalUrl = response.url;
-      let m3u8Content = await readTextLimited(response, MAX_M3U8_BYTES);
-      const baseUrl = getBaseUrl(finalUrl);
-
-      // 特定源站广告段剔除（基于时长众数 + 段均码率双信号）。
-      // 直播不走此路径；识别失败则降级为原始内容。
-      if (!isLive && shouldRunAdDetection(source)) {
-        try {
-          m3u8Content = await stripAdSegmentsByPhysicalSignal(
-            m3u8Content,
-            finalUrl,
-            ua,
-          );
-        } catch {
-          /* 识别失败不影响主流程 */
-        }
-      }
-
-      // VOD / Master playlist 写入缓存（直播清单不缓存；带签名 token 的短时效 URL 也跳过）
-      if (
-        !skipCache &&
-        (m3u8Content.includes('#EXT-X-ENDLIST') ||
-          m3u8Content.includes('#EXT-X-STREAM-INF'))
-      ) {
-        m3u8Cache.set(validation.url, {
-          content: m3u8Content,
-          contentType,
-          finalUrl,
-        });
-      }
-
-      const modifiedContent = await rewriteM3U8Content(
-        m3u8Content,
-        baseUrl,
-        request,
-        allowCORS,
-        source,
-        isLive,
-      );
-
-      const headers = new Headers();
-      headers.set('Content-Type', contentType);
-      headers.set('Access-Control-Allow-Origin', '*');
-      headers.set('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
-      headers.set(
-        'Access-Control-Allow-Headers',
-        'Content-Type, Range, Origin, Accept',
-      );
-      headers.set('Cache-Control', 'no-cache');
-      headers.set(
-        'Access-Control-Expose-Headers',
-        'Content-Length, Content-Range',
-      );
-      return new Response(modifiedContent, {
-        status: response.status,
-        statusText: response.statusText,
-        headers,
-      });
-    }
-
-    const headers = new Headers();
-    headers.set(
-      'Content-Type',
-      response.headers.get('Content-Type') || 'application/vnd.apple.mpegurl',
+    const loaded = await loadM3U8Data(
+      validation.url,
+      ua,
+      source,
+      isLive,
+      skipCache,
     );
+    const baseUrl = getBaseUrl(loaded.finalUrl);
+    const modifiedContent = await rewriteM3U8Content(
+      loaded.content,
+      baseUrl,
+      request,
+      allowCORS,
+      source,
+      isLive,
+    );
+    const headers = new Headers();
+    headers.set('Content-Type', loaded.contentType);
     headers.set('Access-Control-Allow-Origin', '*');
     headers.set('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
     headers.set(
@@ -278,9 +302,9 @@ export async function GET(request: NextRequest) {
       'Content-Length, Content-Range',
     );
 
-    return new Response(response.body, {
-      status: response.status,
-      statusText: response.statusText,
+    return new Response(modifiedContent, {
+      status: loaded.status,
+      statusText: loaded.statusText,
       headers,
     });
   } catch (error) {

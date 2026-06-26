@@ -1062,7 +1062,7 @@ const VideoCard = forwardRef<VideoCardHandle, VideoCardProps>(
                             onContextMenu={preventContextMenu}
                           >
                             <div
-                              className='min-w-[100px] max-w-[140px] overflow-hidden rounded-lg border border-white/10 bg-gray-800/90 p-1.5 text-xs text-white shadow-xl backdrop-blur-sm sm:min-w-[120px] sm:max-w-[200px] sm:p-2 sm:text-xs'
+                              className='w-[7em] overflow-hidden rounded-lg border border-white/10 bg-gray-800/90 p-1.5 text-xs text-white shadow-xl backdrop-blur-sm sm:w-[7.5em] sm:p-2 sm:text-xs'
                               style={noSelectStyle}
                               onContextMenu={preventContextMenu}
                             >
@@ -1071,11 +1071,11 @@ const VideoCard = forwardRef<VideoCardHandle, VideoCardProps>(
                                 {displaySources.map((sourceName, index) => (
                                   <div
                                     key={index}
-                                    className='flex items-center gap-1 sm:gap-1.5'
+                                    className='flex min-w-0 items-center gap-1 sm:gap-1.5'
                                   >
                                     <div className='h-0.5 w-0.5 flex-shrink-0 rounded-full bg-blue-400 sm:h-1 sm:w-1'></div>
                                     <span
-                                      className='truncate text-[10px] leading-tight sm:text-xs'
+                                      className='block w-[4em] shrink-0 truncate text-[10px] leading-tight sm:text-xs'
                                       title={sourceName}
                                     >
                                       {sourceName}

@@ -1,4 +1,19 @@
+import { cookies } from 'next/headers';
+
 import PageLayout from '@/components/PageLayout';
+
+const MAX_CONTINUE_WATCHING_SKELETON_COUNT = 8;
+
+async function getContinueWatchingSkeletonCount() {
+  const cookieStore = await cookies();
+  const rawCount = Number(cookieStore.get('cw_count')?.value || 0);
+
+  if (!Number.isFinite(rawCount) || rawCount <= 0) {
+    return 0;
+  }
+
+  return Math.min(Math.floor(rawCount), MAX_CONTINUE_WATCHING_SKELETON_COUNT);
+}
 
 function CapsuleSwitchSkeleton() {
   return (
@@ -58,7 +73,9 @@ function SkeletonSectionHeader() {
   );
 }
 
-export default function HomeLoading() {
+export default async function HomeLoading() {
+  const continueWatchingCount = await getContinueWatchingSkeletonCount();
+
   return (
     <PageLayout>
       <div className='overflow-visible px-2 pb-2 pt-4 sm:px-10 sm:pt-8'>
@@ -68,6 +85,13 @@ export default function HomeLoading() {
         </div>
 
         <div className='mx-auto max-w-[95%]'>
+          {continueWatchingCount > 0 && (
+            <section className='mb-4'>
+              <SkeletonSectionHeader />
+              <SkeletonRow count={continueWatchingCount} withSubtitle />
+            </section>
+          )}
+
           {/* 推荐区域骨架 */}
           <section className='mb-4'>
             <SkeletonSectionHeader />
