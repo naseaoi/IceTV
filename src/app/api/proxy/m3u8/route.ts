@@ -7,7 +7,11 @@ import {
 import { getBaseUrl, resolveUrl } from '@/lib/live';
 import { createSwrCache } from '@/lib/server-cache';
 import { isSourceCorsCapable } from '@/lib/source-capability';
-import { validateProxyUrl } from '@/lib/url-guard';
+import {
+  fetchWithUrlGuard,
+  UrlValidationError,
+  validateProxyUrlForRequest,
+} from '@/lib/url-guard';
 
 import { getProxySourceKey, resolveProxyUserAgent } from '../utils';
 
@@ -58,7 +62,7 @@ function refreshM3U8Cache(
 
   const task = (async () => {
     try {
-      const response = await fetch(url, {
+      const response = await fetchWithUrlGuard(url, {
         cache: 'no-cache',
         redirect: 'follow',
         credentials: 'same-origin',
@@ -118,7 +122,7 @@ export async function GET(request: Request) {
     return NextResponse.json({ error: 'Missing url' }, { status: 400 });
   }
 
-  const validation = validateProxyUrl(url);
+  const validation = await validateProxyUrlForRequest(url);
   if (!validation.ok) {
     return NextResponse.json({ error: validation.reason }, { status: 403 });
   }
@@ -161,7 +165,7 @@ export async function GET(request: Request) {
       return new Response(modifiedContent, { status: 200, headers });
     }
 
-    const response = await fetch(validation.url, {
+    const response = await fetchWithUrlGuard(validation.url, {
       cache: 'no-cache',
       redirect: 'follow',
       credentials: 'same-origin',
@@ -265,6 +269,10 @@ export async function GET(request: Request) {
       headers,
     });
   } catch (error) {
+    if (error instanceof UrlValidationError) {
+      return NextResponse.json({ error: error.reason }, { status: 403 });
+    }
+
     return NextResponse.json(
       { error: 'Failed to fetch m3u8' },
       { status: 500 },

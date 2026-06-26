@@ -1,6 +1,10 @@
 import { NextResponse } from 'next/server';
 
-import { validateProxyUrl } from '@/lib/url-guard';
+import {
+  fetchWithUrlGuard,
+  UrlValidationError,
+  validateProxyUrlForRequest,
+} from '@/lib/url-guard';
 
 export const runtime = 'nodejs';
 
@@ -12,13 +16,13 @@ async function proxyImage(request: Request, method: 'GET' | 'HEAD') {
     return NextResponse.json({ error: 'Missing image URL' }, { status: 400 });
   }
 
-  const validation = validateProxyUrl(imageUrl);
+  const validation = await validateProxyUrlForRequest(imageUrl);
   if (!validation.ok) {
     return NextResponse.json({ error: validation.reason }, { status: 403 });
   }
 
   try {
-    const imageResponse = await fetch(validation.url, {
+    const imageResponse = await fetchWithUrlGuard(validation.url, {
       method,
       headers: {
         Accept:
@@ -85,6 +89,10 @@ async function proxyImage(request: Request, method: 'GET' | 'HEAD') {
       headers,
     });
   } catch (error) {
+    if (error instanceof UrlValidationError) {
+      return NextResponse.json({ error: error.reason }, { status: 403 });
+    }
+
     return NextResponse.json(
       { error: 'Error fetching image' },
       { status: 500 },

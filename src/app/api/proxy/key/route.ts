@@ -1,7 +1,11 @@
 import { NextResponse } from 'next/server';
 
 import { markSourceCors, responseAllowsCors } from '@/lib/source-capability';
-import { validateProxyUrl } from '@/lib/url-guard';
+import {
+  fetchWithUrlGuard,
+  UrlValidationError,
+  validateProxyUrlForRequest,
+} from '@/lib/url-guard';
 
 import { getProxySourceKey, resolveProxyUserAgent } from '../utils';
 
@@ -15,7 +19,7 @@ export async function GET(request: Request) {
     return NextResponse.json({ error: 'Missing url' }, { status: 400 });
   }
 
-  const validation = validateProxyUrl(url);
+  const validation = await validateProxyUrlForRequest(url);
   if (!validation.ok) {
     return NextResponse.json({ error: validation.reason }, { status: 403 });
   }
@@ -23,7 +27,7 @@ export async function GET(request: Request) {
   const ua = await resolveProxyUserAgent(source);
 
   try {
-    const response = await fetch(validation.url, {
+    const response = await fetchWithUrlGuard(validation.url, {
       headers: {
         'User-Agent': ua,
       },
@@ -51,6 +55,10 @@ export async function GET(request: Request) {
       },
     });
   } catch (error) {
+    if (error instanceof UrlValidationError) {
+      return NextResponse.json({ error: error.reason }, { status: 403 });
+    }
+
     return NextResponse.json({ error: 'Failed to fetch key' }, { status: 500 });
   }
 }

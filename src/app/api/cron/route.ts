@@ -8,11 +8,16 @@ import { getOwnerUsername } from '@/lib/env.server';
 import { fetchVideoDetail } from '@/lib/fetchVideoDetail';
 import { refreshLiveChannels } from '@/lib/live';
 import { SearchResult } from '@/lib/types';
+import { fetchWithUrlGuard } from '@/lib/url-guard';
 
 export const runtime = 'nodejs';
 
-export async function GET(_request: NextRequest) {
+export async function GET(request: NextRequest) {
   try {
+    if (!isCronAuthorized(request)) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    }
+
     console.log('Cron job triggered:', new Date().toISOString());
 
     // fire-and-forget：避免 cron 任务超时，后台异步执行
@@ -36,6 +41,35 @@ export async function GET(_request: NextRequest) {
       { status: 500 },
     );
   }
+}
+
+function isCronAuthorized(request: NextRequest): boolean {
+  const secret =
+    process.env.CRON_SECRET ||
+    process.env.ICETV_CRON_SECRET ||
+    process.env.VERCEL_CRON_SECRET ||
+    '';
+
+  if (!secret) {
+    return false;
+  }
+
+  const authorization = request.headers.get('authorization') || '';
+  const token = authorization.startsWith('Bearer ')
+    ? authorization.slice('Bearer '.length)
+    : '';
+
+  return safeEqual(token, secret);
+}
+
+function safeEqual(a: string, b: string): boolean {
+  const bufA = Buffer.from(a, 'utf8');
+  const bufB = Buffer.from(b, 'utf8');
+  if (bufA.length !== bufB.length) {
+    crypto.timingSafeEqual(bufA, Buffer.alloc(bufA.length));
+    return false;
+  }
+  return crypto.timingSafeEqual(bufA, bufB);
 }
 
 async function cronJob() {
@@ -79,7 +113,7 @@ async function refreshConfig() {
     config.ConfigSubscribtion.AutoUpdate
   ) {
     try {
-      const response = await fetch(config.ConfigSubscribtion.URL);
+      const response = await fetchWithUrlGuard(config.ConfigSubscribtion.URL);
 
       if (!response.ok) {
         throw new Error(`请求失败: ${response.status} ${response.statusText}`);

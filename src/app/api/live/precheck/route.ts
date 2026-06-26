@@ -1,6 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server';
 
 import { getConfig } from '@/lib/config';
+import {
+  fetchWithUrlGuard,
+  UrlValidationError,
+  validateProxyUrlForRequest,
+} from '@/lib/url-guard';
 
 export const runtime = 'nodejs';
 
@@ -15,6 +20,12 @@ export async function GET(request: NextRequest) {
   if (!url) {
     return NextResponse.json({ error: 'Missing url' }, { status: 400 });
   }
+
+  const validation = await validateProxyUrlForRequest(url);
+  if (!validation.ok) {
+    return NextResponse.json({ error: validation.reason }, { status: 403 });
+  }
+
   const config = await getConfig();
   const liveSource = config.LiveConfig?.find((s: any) => s.key === source);
   if (!liveSource) {
@@ -23,9 +34,7 @@ export async function GET(request: NextRequest) {
   const ua = liveSource.ua || 'AptvPlayer/1.4.10';
 
   try {
-    const decodedUrl = decodeURIComponent(url);
-
-    const response = await fetch(decodedUrl, {
+    const response = await fetchWithUrlGuard(validation.url, {
       cache: 'no-cache',
       redirect: 'follow',
       credentials: 'same-origin',
@@ -53,6 +62,10 @@ export async function GET(request: NextRequest) {
     }
     return NextResponse.json({ success: true, type: 'm3u8' }, { status: 200 });
   } catch (error) {
+    if (error instanceof UrlValidationError) {
+      return NextResponse.json({ error: error.reason }, { status: 403 });
+    }
+
     return NextResponse.json(
       { error: 'Failed to fetch', message: error },
       { status: 500 },

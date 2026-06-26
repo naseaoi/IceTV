@@ -1,7 +1,11 @@
 import { NextResponse } from 'next/server';
 
 import { getConfig } from '@/lib/config';
-import { validateProxyUrl } from '@/lib/url-guard';
+import {
+  fetchWithUrlGuard,
+  UrlValidationError,
+  validateProxyUrlForRequest,
+} from '@/lib/url-guard';
 
 export const runtime = 'nodejs';
 
@@ -17,7 +21,7 @@ export async function GET(request: Request) {
     return NextResponse.json({ error: 'Missing image URL' }, { status: 400 });
   }
 
-  const validation = validateProxyUrl(imageUrl);
+  const validation = await validateProxyUrlForRequest(imageUrl);
   if (!validation.ok) {
     return NextResponse.json({ error: validation.reason }, { status: 403 });
   }
@@ -27,7 +31,7 @@ export async function GET(request: Request) {
   const ua = liveSource?.ua || 'AptvPlayer/1.4.10';
 
   try {
-    const imageResponse = await fetch(validation.url, {
+    const imageResponse = await fetchWithUrlGuard(validation.url, {
       cache: 'no-cache',
       redirect: 'follow',
       credentials: 'same-origin',
@@ -67,6 +71,10 @@ export async function GET(request: Request) {
       headers,
     });
   } catch (error) {
+    if (error instanceof UrlValidationError) {
+      return NextResponse.json({ error: error.reason }, { status: 403 });
+    }
+
     return NextResponse.json(
       { error: 'Error fetching image' },
       { status: 500 },

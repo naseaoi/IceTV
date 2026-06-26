@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 
 import { isGuardFailure, requireOwner } from '@/lib/api-auth';
+import { fetchWithUrlGuard, UrlValidationError } from '@/lib/url-guard';
 
 export const runtime = 'nodejs';
 
@@ -18,7 +19,7 @@ export async function POST(request: NextRequest) {
     }
 
     // 直接 fetch URL 获取配置内容
-    const response = await fetch(url);
+    const response = await fetchWithUrlGuard(url);
 
     if (!response.ok) {
       return NextResponse.json(
@@ -46,6 +47,10 @@ export async function POST(request: NextRequest) {
       message: '配置拉取成功',
     });
   } catch (error) {
+    if (error instanceof UrlValidationError) {
+      return NextResponse.json({ error: error.reason }, { status: 403 });
+    }
+
     console.error('拉取配置失败:', error);
     return NextResponse.json({ error: '拉取配置失败' }, { status: 500 });
   }

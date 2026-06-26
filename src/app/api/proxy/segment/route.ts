@@ -1,7 +1,11 @@
 import { NextResponse } from 'next/server';
 
 import { markSourceCors, responseAllowsCors } from '@/lib/source-capability';
-import { validateProxyUrl } from '@/lib/url-guard';
+import {
+  fetchWithUrlGuard,
+  UrlValidationError,
+  validateProxyUrlForRequest,
+} from '@/lib/url-guard';
 
 import { getProxySourceKey, resolveProxyUserAgent } from '../utils';
 
@@ -19,7 +23,7 @@ export async function GET(request: Request) {
     return NextResponse.json({ error: 'Missing url' }, { status: 400 });
   }
 
-  const validation = validateProxyUrl(url);
+  const validation = await validateProxyUrlForRequest(url);
   if (!validation.ok) {
     return NextResponse.json({ error: validation.reason }, { status: 403 });
   }
@@ -35,7 +39,7 @@ export async function GET(request: Request) {
       headers.Range = range;
     }
 
-    const response = await fetch(validation.url, { headers });
+    const response = await fetchWithUrlGuard(validation.url, { headers });
     if (!response.ok) {
       return NextResponse.json(
         { error: 'Failed to fetch segment' },
@@ -93,6 +97,10 @@ export async function GET(request: Request) {
       headers: responseHeaders,
     });
   } catch (error) {
+    if (error instanceof UrlValidationError) {
+      return NextResponse.json({ error: error.reason }, { status: 403 });
+    }
+
     return NextResponse.json(
       { error: 'Failed to fetch segment' },
       { status: 500 },
