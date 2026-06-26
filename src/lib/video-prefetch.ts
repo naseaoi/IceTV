@@ -1,21 +1,16 @@
-/**
- * 视频卡片 hover 预热工具
- *
- * 目的：用户在列表中悬停卡片时，提前加载进入播放页所需的资源：
- * - 视频详情 API（命中 SW json-api-cache，进入播放页秒开）
- * - 播放器模块 artplayer / hls.js（动态 import 预热）
- *
- * 去重：相同 source+id 只触发一次 detail 预取；播放器模块懒加载本身幂等。
- * 静默：所有失败都吞掉，不影响用户操作。
- */
-
 import { preloadPlayerModules } from '@/lib/player-runtime';
 
-// 已触发过 detail 预取的 key 集合（进程内）
 const prefetchedDetails = new Set<string>();
 const PREFETCH_DETAIL_MAX = 200;
+const PREFETCH_DETAIL_CONCURRENCY = 3;
+const PREFETCH_DETAIL_QUEUE_MAX = 20;
 
-// 超出上限时清理最早的一半，防内存无限膨胀
+let activeDetailPrefetches = 0;
+const detailPrefetchQueue: Array<{
+  key: string;
+  run: () => Promise<void>;
+}> = [];
+
 function trimIfNeeded() {
   if (prefetchedDetails.size <= PREFETCH_DETAIL_MAX) return;
   const iter = prefetchedDetails.values();
@@ -27,9 +22,22 @@ function trimIfNeeded() {
   }
 }
 
-/**
- * 预取视频详情（仅非聚合、非直播、拥有 source+id 的卡片触发）
- */
+function drainDetailPrefetchQueue() {
+  while (
+    activeDetailPrefetches < PREFETCH_DETAIL_CONCURRENCY &&
+    detailPrefetchQueue.length > 0
+  ) {
+    const task = detailPrefetchQueue.shift();
+    if (!task) return;
+
+    activeDetailPrefetches += 1;
+    task.run().finally(() => {
+      activeDetailPrefetches -= 1;
+      drainDetailPrefetchQueue();
+    });
+  }
+}
+
 export function prefetchVideoDetail(
   source: string | undefined,
   id: string | undefined,
@@ -37,22 +45,31 @@ export function prefetchVideoDetail(
   if (!source || !id) return;
   const key = `${source}::${id}`;
   if (prefetchedDetails.has(key)) return;
+
   prefetchedDetails.add(key);
   trimIfNeeded();
 
-  // fire-and-forget；任何失败都不影响 UI
-  fetch(
-    `/api/detail?source=${encodeURIComponent(source)}&id=${encodeURIComponent(id)}`,
-    { credentials: 'same-origin' },
-  ).catch(() => {
-    // 失败时移除标记，允许下次再试
-    prefetchedDetails.delete(key);
+  if (detailPrefetchQueue.length >= PREFETCH_DETAIL_QUEUE_MAX) {
+    const dropped = detailPrefetchQueue.shift();
+    if (dropped) {
+      prefetchedDetails.delete(dropped.key);
+    }
+  }
+
+  detailPrefetchQueue.push({
+    key,
+    run: async () => {
+      await fetch(
+        `/api/detail?source=${encodeURIComponent(source)}&id=${encodeURIComponent(id)}`,
+        { credentials: 'same-origin' },
+      ).catch(() => {
+        prefetchedDetails.delete(key);
+      });
+    },
   });
+  drainDetailPrefetchQueue();
 }
 
-/**
- * 卡片 hover / focus 时调用：同时预取 detail 和预热播放器模块。
- */
 export function warmupForPlayback(
   source: string | undefined,
   id: string | undefined,

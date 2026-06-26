@@ -30,83 +30,75 @@ export function cleanEpgData(programs: EpgProgram[]): EpgProgram[] {
     today.getMonth(),
     today.getDate() + 1,
   );
+  const todayStartMs = todayStart.getTime();
+  const todayEndMs = todayEnd.getTime();
 
   // 过滤今日节目
-  const todayPrograms = programs.filter((program) => {
+  const timedPrograms = programs.map((program) => {
     const programStart = parseCustomTimeFormat(program.start);
     const programEnd = parseCustomTimeFormat(program.end);
-    const programStartDate = new Date(
-      programStart.getFullYear(),
-      programStart.getMonth(),
-      programStart.getDate(),
-    );
-    const programEndDate = new Date(
-      programEnd.getFullYear(),
-      programEnd.getMonth(),
-      programEnd.getDate(),
-    );
+
+    return {
+      program,
+      startMs: programStart.getTime(),
+      endMs: programEnd.getTime(),
+      startDateMs: new Date(
+        programStart.getFullYear(),
+        programStart.getMonth(),
+        programStart.getDate(),
+      ).getTime(),
+      endDateMs: new Date(
+        programEnd.getFullYear(),
+        programEnd.getMonth(),
+        programEnd.getDate(),
+      ).getTime(),
+    };
+  });
+
+  const todayPrograms = timedPrograms.filter((program) => {
     return (
-      (programStartDate >= todayStart && programStartDate < todayEnd) ||
-      (programEndDate >= todayStart && programEndDate < todayEnd) ||
-      (programStartDate < todayStart && programEndDate >= todayEnd)
+      (program.startDateMs >= todayStartMs &&
+        program.startDateMs < todayEndMs) ||
+      (program.endDateMs >= todayStartMs && program.endDateMs < todayEndMs) ||
+      (program.startDateMs < todayStartMs && program.endDateMs >= todayEndMs)
     );
   });
 
   // 按开始时间排序
-  const sortedPrograms = [...todayPrograms].sort((a, b) => {
-    return (
-      parseCustomTimeFormat(a.start).getTime() -
-      parseCustomTimeFormat(b.start).getTime()
-    );
-  });
+  const sortedPrograms = [...todayPrograms].sort(
+    (a, b) => a.startMs - b.startMs,
+  );
 
-  const cleanedPrograms: EpgProgram[] = [];
+  const cleanedPrograms: typeof sortedPrograms = [];
 
   for (let i = 0; i < sortedPrograms.length; i++) {
     const currentProgram = sortedPrograms[i];
-    const currentStart = parseCustomTimeFormat(currentProgram.start);
-    const currentEnd = parseCustomTimeFormat(currentProgram.end);
-
-    let hasOverlap = false;
-
-    for (const existingProgram of cleanedPrograms) {
-      const existingStart = parseCustomTimeFormat(existingProgram.start);
-      const existingEnd = parseCustomTimeFormat(existingProgram.end);
-      if (
-        (currentStart >= existingStart && currentStart < existingEnd) ||
-        (currentEnd > existingStart && currentEnd <= existingEnd) ||
-        (currentStart <= existingStart && currentEnd >= existingEnd)
-      ) {
-        hasOverlap = true;
-        break;
-      }
+    const existingProgram = cleanedPrograms[cleanedPrograms.length - 1];
+    if (!existingProgram) {
+      cleanedPrograms.push(currentProgram);
+      continue;
     }
+
+    const hasOverlap =
+      (currentProgram.startMs >= existingProgram.startMs &&
+        currentProgram.startMs < existingProgram.endMs) ||
+      (currentProgram.endMs > existingProgram.startMs &&
+        currentProgram.endMs <= existingProgram.endMs) ||
+      (currentProgram.startMs <= existingProgram.startMs &&
+        currentProgram.endMs >= existingProgram.endMs);
 
     if (!hasOverlap) {
       cleanedPrograms.push(currentProgram);
     } else {
-      for (let j = 0; j < cleanedPrograms.length; j++) {
-        const existingProgram = cleanedPrograms[j];
-        const existingStart = parseCustomTimeFormat(existingProgram.start);
-        const existingEnd = parseCustomTimeFormat(existingProgram.end);
-        if (
-          (currentStart >= existingStart && currentStart < existingEnd) ||
-          (currentEnd > existingStart && currentEnd <= existingEnd) ||
-          (currentStart <= existingStart && currentEnd >= existingEnd)
-        ) {
-          const currentDuration = currentEnd.getTime() - currentStart.getTime();
-          const existingDuration =
-            existingEnd.getTime() - existingStart.getTime();
-          if (currentDuration < existingDuration) {
-            cleanedPrograms[j] = currentProgram;
-          }
-          break;
-        }
+      const currentDuration = currentProgram.endMs - currentProgram.startMs;
+      const existingDuration = existingProgram.endMs - existingProgram.startMs;
+      if (currentDuration < existingDuration) {
+        cleanedPrograms[cleanedPrograms.length - 1] = currentProgram;
       }
     }
   }
 
-  return cleanedPrograms;
+  return cleanedPrograms.map((program) => program.program);
 }
 
 // ----- Hook 参数接口 -----
@@ -205,6 +197,7 @@ export function useLiveSources({
 
   const [epgData, setEpgData] = useState<EpgData | null>(null);
   const [isEpgLoading, setIsEpgLoading] = useState(false);
+  const epgRequestIdRef = useRef(0);
 
   // ----- 滚动到频道 -----
   const scrollToChannel = (channel: LiveChannel) => {
@@ -414,6 +407,45 @@ export function useLiveSources({
   };
 
   // ----- 切换频道 -----
+  const loadChannelEpg = async (
+    channel: LiveChannel,
+    source: LiveSource | null,
+  ) => {
+    const requestId = epgRequestIdRef.current + 1;
+    epgRequestIdRef.current = requestId;
+
+    if (!channel.tvgId || !source) {
+      setEpgData(null);
+      setIsEpgLoading(false);
+      return;
+    }
+
+    try {
+      setIsEpgLoading(true);
+      const response = await fetch(
+        `/api/live/epg?source=${source.key}&tvgId=${channel.tvgId}`,
+      );
+      if (!response.ok || epgRequestIdRef.current !== requestId) return;
+
+      const result = await response.json();
+      if (epgRequestIdRef.current !== requestId) return;
+      if (result.success) {
+        setEpgData({
+          ...result.data,
+          programs: cleanEpgData(result.data.programs),
+        });
+      }
+    } catch (error) {
+      if (epgRequestIdRef.current === requestId) {
+        console.error('鑾峰彇鑺傜洰鍗曚俊鎭け璐?', error);
+      }
+    } finally {
+      if (epgRequestIdRef.current === requestId) {
+        setIsEpgLoading(false);
+      }
+    }
+  };
+
   const handleChannelChange = async (channel: LiveChannel) => {
     if (isSwitchingSource) return;
 
@@ -423,32 +455,7 @@ export function useLiveSources({
     setVideoUrl(channel.url);
 
     setTimeout(() => scrollToChannel(channel), 100);
-
-    // 获取节目单信息
-    if (channel.tvgId && currentSource) {
-      try {
-        setIsEpgLoading(true);
-        const response = await fetch(
-          `/api/live/epg?source=${currentSource.key}&tvgId=${channel.tvgId}`,
-        );
-        if (response.ok) {
-          const result = await response.json();
-          if (result.success) {
-            setEpgData({
-              ...result.data,
-              programs: cleanEpgData(result.data.programs),
-            });
-          }
-        }
-      } catch (error) {
-        console.error('获取节目单信息失败:', error);
-      } finally {
-        setIsEpgLoading(false);
-      }
-    } else {
-      setEpgData(null);
-      setIsEpgLoading(false);
-    }
+    void loadChannelEpg(channel, currentSource);
   };
 
   // ----- 切换分组 -----

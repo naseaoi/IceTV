@@ -17,18 +17,72 @@ import {
   runManagedVideoCleanup,
 } from '@/lib/player-runtime';
 import {
-  ensureVideoSource,
-  createHlsConfig,
   createArtPlayerConfig,
+  createHlsConfig,
   configureArtplayerStatics,
+  ensureVideoSource,
   handleHlsFatalError,
 } from '@/lib/player-utils';
 
-// ----- 播放器工具函数 -----
+const LIVE_PRECHECK_CACHE_TTL_MS = 5 * 60 * 1000;
+const livePrecheckCache = new Map<
+  string,
+  { type: string; expiresAt: number }
+>();
 
-/** 清理播放器资源 */
+function getLivePrecheckCacheKey(sourceKey: string, url: string): string {
+  return `${sourceKey}::${url}`;
+}
+
+function isLikelyM3U8(url: string): boolean {
+  try {
+    return new URL(url).pathname.toLowerCase().endsWith('.m3u8');
+  } catch {
+    return /\.m3u8(?:$|[?#])/i.test(url);
+  }
+}
+
+function setLivePrecheckCache(sourceKey: string, url: string, type: string) {
+  livePrecheckCache.set(getLivePrecheckCacheKey(sourceKey, url), {
+    type,
+    expiresAt: Date.now() + LIVE_PRECHECK_CACHE_TTL_MS,
+  });
+}
+
+async function resolveLiveStreamType(
+  videoUrl: string,
+  sourceKey: string,
+): Promise<string> {
+  const cacheKey = getLivePrecheckCacheKey(sourceKey, videoUrl);
+  const cached = livePrecheckCache.get(cacheKey);
+  if (cached && cached.expiresAt > Date.now()) {
+    return cached.type;
+  }
+  if (cached) {
+    livePrecheckCache.delete(cacheKey);
+  }
+
+  if (isLikelyM3U8(videoUrl)) {
+    setLivePrecheckCache(sourceKey, videoUrl, 'm3u8');
+    return 'm3u8';
+  }
+
+  const precheckUrl = `/api/live/precheck?url=${encodeURIComponent(videoUrl)}&icetv-source=${sourceKey}`;
+  const precheckResponse = await fetch(precheckUrl);
+  if (!precheckResponse.ok) {
+    console.error('Live precheck failed:', precheckResponse.statusText);
+    return 'm3u8';
+  }
+
+  const precheckResult = await precheckResponse.json();
+  const type = precheckResult.success ? precheckResult.type : 'm3u8';
+  setLivePrecheckCache(sourceKey, videoUrl, type);
+  return type;
+}
+
 function cleanupPlayer(artPlayerRef: MutableRefObject<ArtplayerType | null>) {
   if (!artPlayerRef.current) return;
+
   try {
     const video = artPlayerRef.current.video;
     if (video) {
@@ -44,7 +98,7 @@ function cleanupPlayer(artPlayerRef: MutableRefObject<ArtplayerType | null>) {
         video.flv.destroy();
         video.flv = null;
       } catch (flvError) {
-        console.warn('FLV实例销毁时出错:', flvError);
+        console.warn('FLV cleanup failed:', flvError);
         video.flv = null;
       }
     }
@@ -63,12 +117,11 @@ function cleanupPlayer(artPlayerRef: MutableRefObject<ArtplayerType | null>) {
     artPlayerRef.current.destroy();
     artPlayerRef.current = null;
   } catch (err) {
-    console.warn('清理播放器资源时出错:', err);
+    console.warn('Live player cleanup failed:', err);
     artPlayerRef.current = null;
   }
 }
 
-// ----- Hook 参数接口 -----
 interface UseLivePlayerParams {
   videoUrl: string;
   currentChannel: LiveChannel | null;
@@ -93,14 +146,12 @@ export function useLivePlayer({
   const artPlayerRef = useRef<ArtplayerType | null>(null);
   const loadedUrlRef = useRef('');
 
-  /** 外部可调用的清理方法 */
   const doCleanup = () => {
     setUnsupportedType(null);
     loadedUrlRef.current = '';
     cleanupPlayer(artPlayerRef);
   };
 
-  // ----- 播放器初始化 Effect -----
   useEffect(() => {
     let cancelled = false;
 
@@ -114,20 +165,12 @@ export function useLivePlayer({
 
         if (cancelled || !artRef.current) return;
 
-        // precheck type
-        let type = 'm3u8';
-        const precheckUrl = `/api/live/precheck?url=${encodeURIComponent(videoUrl)}&icetv-source=${currentSourceRef.current?.key || ''}`;
-        const precheckResponse = await fetch(precheckUrl);
-        if (!precheckResponse.ok) {
-          console.error('预检查失败:', precheckResponse.statusText);
-          return;
-        }
-        const precheckResult = await precheckResponse.json();
-        if (precheckResult.success) {
-          type = precheckResult.type;
-        }
+        const sourceKey = currentSourceRef.current?.key || '';
+        const type = await resolveLiveStreamType(videoUrl, sourceKey);
 
-        const targetUrl = `/api/proxy/m3u8?url=${encodeURIComponent(videoUrl)}&icetv-source=${currentSourceRef.current?.key || ''}&icetv-live=1`;
+        if (cancelled || !artRef.current) return;
+
+        const targetUrl = `/api/proxy/m3u8?url=${encodeURIComponent(videoUrl)}&icetv-source=${sourceKey}&icetv-live=1`;
 
         if (type !== 'm3u8') {
           loadedUrlRef.current = '';
@@ -158,10 +201,7 @@ export function useLivePlayer({
 
               try {
                 const nextUrl = new URL(currentUrl, window.location.origin);
-                nextUrl.searchParams.set(
-                  'icetv-source',
-                  currentSourceRef.current?.key || '',
-                );
+                nextUrl.searchParams.set('icetv-source', sourceKey);
                 if (
                   isLiveDirectConnect &&
                   (context.type === 'manifest' || context.type === 'level')
@@ -171,7 +211,7 @@ export function useLivePlayer({
                 context.url = nextUrl.toString();
               } catch {
                 const separator = currentUrl.includes('?') ? '&' : '?';
-                let nextUrl = `${currentUrl}${separator}icetv-source=${encodeURIComponent(currentSourceRef.current?.key || '')}`;
+                let nextUrl = `${currentUrl}${separator}icetv-source=${encodeURIComponent(sourceKey)}`;
                 if (
                   isLiveDirectConnect &&
                   (context.type === 'manifest' || context.type === 'level')
@@ -229,12 +269,11 @@ export function useLivePlayer({
             isLive: true,
             moreVideoAttr: { preload: 'metadata' },
           }),
-          type: type,
+          type,
           customType,
         });
         loadedUrlRef.current = targetUrl;
 
-        // Artplayer 运行时支持这些事件名，但 TS 类型定义未包含
         const ap = artPlayerRef.current as unknown as {
           on(event: string, callback: (...args: unknown[]) => void): void;
           video: HTMLVideoElement;
@@ -256,7 +295,7 @@ export function useLivePlayer({
           setIsVideoLoading(true);
         });
         ap.on('error', (err: unknown) => {
-          console.error('播放器错误:', err);
+          console.error('Live player error:', err);
         });
 
         if (artPlayerRef.current?.video) {
@@ -266,7 +305,7 @@ export function useLivePlayer({
           );
         }
       } catch (err) {
-        console.error('创建播放器失败:', err);
+        console.error('Live player init failed:', err);
       }
     };
     preload();
@@ -276,7 +315,6 @@ export function useLivePlayer({
     };
   }, [videoUrl, currentChannel, loading]);
 
-  // ----- 组件卸载清理 -----
   useEffect(() => {
     return () => {
       loadedUrlRef.current = '';
@@ -284,7 +322,6 @@ export function useLivePlayer({
     };
   }, []);
 
-  // ----- 页面卸载清理 -----
   useEffect(() => {
     const handleBeforeUnload = () => {
       loadedUrlRef.current = '';

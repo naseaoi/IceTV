@@ -7,7 +7,8 @@ import {
   validateProxyUrlForRequest,
 } from '@/lib/url-guard';
 import {
-  readArrayBufferLimited,
+  assertContentLength,
+  createLimitedReadableStream,
   ResponseSizeLimitError,
 } from '@/lib/proxy-response-limits';
 
@@ -99,15 +100,15 @@ async function proxyImage(request: NextRequest, method: 'GET' | 'HEAD') {
       });
     }
 
-    const imageData = await readArrayBufferLimited(
-      imageResponse,
-      MAX_IMAGE_BYTES,
-    );
+    assertContentLength(imageResponse.headers, MAX_IMAGE_BYTES);
 
-    return new Response(imageData, {
-      status: 200,
-      headers,
-    });
+    return new Response(
+      createLimitedReadableStream(imageResponse.body, MAX_IMAGE_BYTES),
+      {
+        status: 200,
+        headers,
+      },
+    );
   } catch (error) {
     if (error instanceof UrlValidationError) {
       return NextResponse.json({ error: error.reason }, { status: 403 });

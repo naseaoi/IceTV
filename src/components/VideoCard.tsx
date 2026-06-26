@@ -15,6 +15,7 @@ import React, {
   useEffect,
   useImperativeHandle,
   useMemo,
+  useRef,
   useState,
 } from 'react';
 
@@ -42,6 +43,23 @@ const noSelectStyle = {
   userSelect: 'none',
   WebkitTouchCallout: 'none',
 } as React.CSSProperties;
+
+const PREFETCH_INTENT_DELAY_MS = 180;
+
+function canUseHoverPrefetch(): boolean {
+  if (typeof window === 'undefined') return false;
+  if (!window.matchMedia('(hover: hover) and (pointer: fine)').matches) {
+    return false;
+  }
+
+  const connection = (
+    navigator as Navigator & {
+      connection?: { saveData?: boolean; effectiveType?: string };
+    }
+  ).connection;
+  if (connection?.saveData) return false;
+  return !['slow-2g', '2g'].includes(connection?.effectiveType || '');
+}
 
 /** 阻止默认右键菜单 */
 const preventContextMenu = (e: React.MouseEvent) => {
@@ -183,6 +201,7 @@ const VideoCard = forwardRef<VideoCardHandle, VideoCardProps>(
   ) {
     const router = useRouter();
     const interactionId = useId();
+    const prefetchTimerRef = useRef<number | null>(null);
     const {
       showActionSheet,
       hideActionSheet,
@@ -442,8 +461,24 @@ const VideoCard = forwardRef<VideoCardHandle, VideoCardProps>(
       if (origin === 'live') return;
       if (from === 'douban') return;
       if (isAggregate) return;
-      warmupForPlayback(actualSource, actualId);
+      if (!canUseHoverPrefetch()) return;
+
+      if (prefetchTimerRef.current) {
+        window.clearTimeout(prefetchTimerRef.current);
+      }
+      prefetchTimerRef.current = window.setTimeout(() => {
+        prefetchTimerRef.current = null;
+        warmupForPlayback(actualSource, actualId);
+      }, PREFETCH_INTENT_DELAY_MS);
     }, [actualId, actualSource, from, isAggregate, origin]);
+
+    const cancelPrefetch = useCallback(() => {
+      if (!prefetchTimerRef.current) return;
+      window.clearTimeout(prefetchTimerRef.current);
+      prefetchTimerRef.current = null;
+    }, []);
+
+    useEffect(() => cancelPrefetch, [cancelPrefetch]);
 
     // 新标签页播放处理函数
     const handlePlayInNewTab = useCallback(() => {
@@ -767,7 +802,9 @@ const VideoCard = forwardRef<VideoCardHandle, VideoCardProps>(
           className='group relative w-full cursor-pointer rounded-lg bg-transparent transition-[transform,opacity] duration-300 ease-in-out hover:z-[500] hover:scale-[1.05] active:scale-[0.97] active:opacity-80'
           onClick={handleClick}
           onMouseEnter={handlePrefetch}
+          onMouseLeave={cancelPrefetch}
           onFocus={handlePrefetch}
+          onBlur={cancelPrefetch}
           {...longPressProps}
           style={
             {

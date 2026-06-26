@@ -1,11 +1,14 @@
 import { NextRequest, NextResponse } from 'next/server';
 
 import { isGuardFailure, requireActiveUser } from '@/lib/api-auth';
+import { runWithConcurrency, withTimeout } from '@/lib/concurrency';
 import { getAvailableApiSites, getConfig } from '@/lib/config';
 import { searchFromApi } from '@/lib/downstream';
 import { yellowWords } from '@/lib/yellow';
 
 export const runtime = 'nodejs';
+
+const SEARCH_SOURCE_CONCURRENCY = 6;
 
 export async function GET(request: NextRequest) {
   const guardResult = await requireActiveUser(request);
@@ -71,18 +74,14 @@ export async function GET(request: NextRequest) {
       const allResults: any[] = [];
 
       // 为每个源创建搜索 Promise
-      const searchPromises = apiSites.map(async (site) => {
+      const searchTasks = apiSites.map((site) => async () => {
         try {
           // 添加超时控制
-          const searchPromise = Promise.race([
+          const searchPromise = withTimeout(
             searchFromApi(site, query),
-            new Promise((_, reject) =>
-              setTimeout(
-                () => reject(new Error(`${site.name} timeout`)),
-                20000,
-              ),
-            ),
-          ]);
+            20000,
+            `${site.name} timeout`,
+          );
 
           const results = (await searchPromise) as any[];
 
@@ -164,7 +163,11 @@ export async function GET(request: NextRequest) {
       });
 
       // 等待所有搜索完成
-      await Promise.allSettled(searchPromises);
+      await runWithConcurrency(
+        searchTasks,
+        SEARCH_SOURCE_CONCURRENCY,
+        () => !streamClosed,
+      );
     },
 
     cancel() {
