@@ -16,6 +16,7 @@ export type AuthMetaPayload = {
 };
 
 const SESSION_HOUR_MS = 60 * 60 * 1000;
+const DEFAULT_SESSION_TTL_HOURS = 24 * 30;
 const PERMANENT_SESSION_EXPIRES_AT = Date.parse('2099-12-31T23:59:59.999Z');
 
 // 从cookie获取认证信息 (服务端使用)
@@ -118,11 +119,15 @@ export function getSessionExpiresAt(now: number = Date.now()): number {
   const ttlHoursRaw = process.env.AUTH_SESSION_TTL_HOURS;
 
   if (!ttlHoursRaw || ttlHoursRaw.trim() === '') {
-    return PERMANENT_SESSION_EXPIRES_AT;
+    return now + DEFAULT_SESSION_TTL_HOURS * SESSION_HOUR_MS;
   }
 
   const ttlHours = Number(ttlHoursRaw);
-  if (!Number.isFinite(ttlHours) || ttlHours <= 0) {
+  if (!Number.isFinite(ttlHours)) {
+    return now + DEFAULT_SESSION_TTL_HOURS * SESSION_HOUR_MS;
+  }
+
+  if (ttlHours <= 0) {
     return PERMANENT_SESSION_EXPIRES_AT;
   }
 

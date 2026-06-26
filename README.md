@@ -186,12 +186,12 @@ IceTV 支持标准的苹果 CMS V10 API 格式。
 | MYSQL_SSL_CA                  | MySQL CA 证书内容                      | PEM 文本              | 无默认                              |
 | MYSQL_SSL_REJECT_UNAUTHORIZED | MySQL SSL 证书校验开关                 | `true`、`false`       | `true`                              |
 | MYSQL_CONNECTION_LIMIT        | MySQL 连接池大小                       | 正整数                | `5`                                 |
-| AUTH_SESSION_TTL_HOURS        | 登录态有效期（小时）                   | 正整数                | 默认长期有效，仅主动登出才失效      |
+| AUTH_SESSION_TTL_HOURS        | 登录态有效期（小时）                   | 正整数或 `0`          | `720`                               |
 | NEXT_PUBLIC_UPDATE_REPOS      | 版本检查仓库列表（逗号分隔）           | owner/repo,owner/repo | naseaoi/IceTV                       |
 | NEXT_PUBLIC_UPDATE_BRANCH     | 版本检查分支                           | 分支名                | main                                |
 
 - 版本检查由后端接口 `/api/version/latest` 统一获取，前端不再直接请求 GitHub Raw。若仓库改名，更新 `NEXT_PUBLIC_UPDATE_REPOS` 并重启服务即可生效。
-- `AUTH_SESSION_TTL_HOURS` 仅在你想启用“定时过期”时才需要设置；未设置、为空或小于等于 `0` 时，登录态会保持长期有效。
+- `AUTH_SESSION_TTL_HOURS` 未设置或为空时使用 `720` 小时；设置为 `0` 或负数时登录态长期有效。
 
 ## 客户端
 
