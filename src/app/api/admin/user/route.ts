@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 
 import { isGuardFailure, requireAdmin } from '@/lib/api-auth';
-import { getConfig } from '@/lib/config';
+import { getConfig, saveConfig } from '@/lib/config';
 import { db } from '@/lib/db';
 
 export const runtime = 'nodejs';
@@ -499,7 +499,7 @@ export async function POST(request: NextRequest) {
     }
 
     // 将更新后的配置写入数据库
-    await db.saveAdminConfig(adminConfig);
+    await saveConfig(adminConfig);
 
     return NextResponse.json(
       { ok: true },

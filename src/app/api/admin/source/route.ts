@@ -1,8 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 
 import { isGuardFailure, requireAdmin } from '@/lib/api-auth';
-import { getConfig } from '@/lib/config';
-import { db } from '@/lib/db';
+import { getConfig, saveConfig } from '@/lib/config';
 
 export const runtime = 'nodejs';
 
@@ -250,7 +249,7 @@ export async function POST(request: NextRequest) {
     }
 
     // 持久化到存储
-    await db.saveAdminConfig(adminConfig);
+    await saveConfig(adminConfig);
 
     return NextResponse.json(
       { ok: true },

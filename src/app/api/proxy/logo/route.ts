@@ -1,15 +1,22 @@
-import { NextResponse } from 'next/server';
+import { NextRequest, NextResponse } from 'next/server';
 
 import { getConfig } from '@/lib/config';
+import { authorizeProxyRequest } from '@/lib/proxy-auth';
 import {
   fetchWithUrlGuard,
   UrlValidationError,
   validateProxyUrlForRequest,
 } from '@/lib/url-guard';
+import {
+  readArrayBufferLimited,
+  ResponseSizeLimitError,
+} from '@/lib/proxy-response-limits';
 
 export const runtime = 'nodejs';
 
-export async function GET(request: Request) {
+const MAX_LOGO_BYTES = 10 * 1024 * 1024;
+
+export async function GET(request: NextRequest) {
   const { searchParams } = new URL(request.url);
   const imageUrl = searchParams.get('url');
   const source =
@@ -24,6 +31,15 @@ export async function GET(request: Request) {
   const validation = await validateProxyUrlForRequest(imageUrl);
   if (!validation.ok) {
     return NextResponse.json({ error: validation.reason }, { status: 403 });
+  }
+
+  const authFailure = await authorizeProxyRequest(
+    request,
+    'logo',
+    validation.url,
+  );
+  if (authFailure) {
+    return authFailure;
   }
 
   const config = await getConfig();
@@ -48,11 +64,10 @@ export async function GET(request: Request) {
     }
 
     const contentType = imageResponse.headers.get('content-type');
-
-    if (!imageResponse.body) {
+    if (!contentType?.toLowerCase().startsWith('image/')) {
       return NextResponse.json(
-        { error: 'Image response has no body' },
-        { status: 500 },
+        { error: 'Invalid image response' },
+        { status: 415 },
       );
     }
 
@@ -65,14 +80,21 @@ export async function GET(request: Request) {
     // 设置缓存头
     headers.set('Cache-Control', 'public, max-age=86400, s-maxage=86400'); // 缓存一天
 
-    // 直接返回图片流
-    return new Response(imageResponse.body, {
+    const imageData = await readArrayBufferLimited(
+      imageResponse,
+      MAX_LOGO_BYTES,
+    );
+
+    return new Response(imageData, {
       status: 200,
       headers,
     });
   } catch (error) {
     if (error instanceof UrlValidationError) {
       return NextResponse.json({ error: error.reason }, { status: 403 });
+    }
+    if (error instanceof ResponseSizeLimitError) {
+      return NextResponse.json({ error: error.message }, { status: 413 });
     }
 
     return NextResponse.json(

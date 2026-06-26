@@ -7,6 +7,7 @@ import {
 } from '@/lib/auth';
 import { getConfig } from '@/lib/config';
 import { getOwnerPassword, getOwnerUsername } from '@/lib/env.server';
+import { NO_STORE_HEADERS } from '@/lib/http-cache';
 
 export const runtime = 'nodejs';
 
@@ -32,7 +33,7 @@ function sessionResponse(
       reason,
       username: username || null,
     },
-    { status: 200 },
+    { status: 200, headers: NO_STORE_HEADERS },
   );
 }
 
@@ -93,7 +94,7 @@ export async function GET(request: NextRequest) {
         reason: 'server_error',
         username: null,
       },
-      { status: 500 },
+      { status: 500, headers: NO_STORE_HEADERS },
     );
   }
 }

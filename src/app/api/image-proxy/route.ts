@@ -1,14 +1,21 @@
-import { NextResponse } from 'next/server';
+import { NextRequest, NextResponse } from 'next/server';
 
+import { authorizeProxyRequest } from '@/lib/proxy-auth';
 import {
   fetchWithUrlGuard,
   UrlValidationError,
   validateProxyUrlForRequest,
 } from '@/lib/url-guard';
+import {
+  readArrayBufferLimited,
+  ResponseSizeLimitError,
+} from '@/lib/proxy-response-limits';
 
 export const runtime = 'nodejs';
 
-async function proxyImage(request: Request, method: 'GET' | 'HEAD') {
+const MAX_IMAGE_BYTES = 10 * 1024 * 1024;
+
+async function proxyImage(request: NextRequest, method: 'GET' | 'HEAD') {
   const { searchParams } = new URL(request.url);
   const imageUrl = searchParams.get('url');
 
@@ -19,6 +26,15 @@ async function proxyImage(request: Request, method: 'GET' | 'HEAD') {
   const validation = await validateProxyUrlForRequest(imageUrl);
   if (!validation.ok) {
     return NextResponse.json({ error: validation.reason }, { status: 403 });
+  }
+
+  const authFailure = await authorizeProxyRequest(
+    request,
+    'image',
+    validation.url,
+  );
+  if (authFailure) {
+    return authFailure;
   }
 
   try {
@@ -43,6 +59,13 @@ async function proxyImage(request: Request, method: 'GET' | 'HEAD') {
     // 创建响应头
     const headers = new Headers();
     const contentType = imageResponse.headers.get('content-type');
+    if (!contentType?.toLowerCase().startsWith('image/')) {
+      return NextResponse.json(
+        { error: 'Invalid image response' },
+        { status: 415 },
+      );
+    }
+
     if (contentType) {
       headers.set('Content-Type', contentType);
     }
@@ -76,21 +99,21 @@ async function proxyImage(request: Request, method: 'GET' | 'HEAD') {
       });
     }
 
-    if (!imageResponse.body) {
-      return NextResponse.json(
-        { error: 'Image response has no body' },
-        { status: 500 },
-      );
-    }
+    const imageData = await readArrayBufferLimited(
+      imageResponse,
+      MAX_IMAGE_BYTES,
+    );
 
-    // 直接返回图片流
-    return new Response(imageResponse.body, {
+    return new Response(imageData, {
       status: 200,
       headers,
     });
   } catch (error) {
     if (error instanceof UrlValidationError) {
       return NextResponse.json({ error: error.reason }, { status: 403 });
+    }
+    if (error instanceof ResponseSizeLimitError) {
+      return NextResponse.json({ error: error.message }, { status: 413 });
     }
 
     return NextResponse.json(
@@ -101,10 +124,10 @@ async function proxyImage(request: Request, method: 'GET' | 'HEAD') {
 }
 
 // OrionTV 兼容接口
-export async function GET(request: Request) {
+export async function GET(request: NextRequest) {
   return proxyImage(request, 'GET');
 }
 
-export async function HEAD(request: Request) {
+export async function HEAD(request: NextRequest) {
   return proxyImage(request, 'HEAD');
 }

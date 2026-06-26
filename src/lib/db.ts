@@ -1,7 +1,13 @@
 import { AdminConfig } from '@/features/admin/types/api';
 
 import { getStorageType } from './storage-type';
-import { Favorite, IStorage, PlayRecord, SkipConfig } from './types';
+import {
+  Favorite,
+  IStorage,
+  PlayRecord,
+  SkipConfig,
+  StorageImportData,
+} from './types';
 
 async function createStorage(): Promise<IStorage> {
   const storageType = getStorageType();
@@ -233,6 +239,11 @@ export class DbManager {
   async clearAllData(): Promise<void> {
     const storage = await this.getStorage();
     await storage.clearAllData();
+  }
+
+  async replaceAllData(data: StorageImportData): Promise<void> {
+    const storage = await this.getStorage();
+    await storage.replaceAllData(data);
   }
 }
 

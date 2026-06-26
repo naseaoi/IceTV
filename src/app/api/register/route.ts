@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 
-import { getConfig } from '@/lib/config';
+import { getConfig, saveConfig } from '@/lib/config';
 import { db } from '@/lib/db';
 import { getOwnerUsername } from '@/lib/env.server';
 
@@ -49,7 +49,7 @@ export async function POST(request: NextRequest) {
         role: 'user',
         banned: false,
       });
-      await db.saveAdminConfig(config);
+      await saveConfig(config);
     }
 
     return NextResponse.json({ ok: true });

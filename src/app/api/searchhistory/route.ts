@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 
 import { isGuardFailure, requireActiveUser } from '@/lib/api-auth';
 import { db } from '@/lib/db';
+import { NO_STORE_HEADERS } from '@/lib/http-cache';
 
 export const runtime = 'nodejs';
 
@@ -18,7 +19,10 @@ export async function GET(request: NextRequest) {
     if (isGuardFailure(guardResult)) return guardResult.response;
 
     const history = await db.getSearchHistory(guardResult.username);
-    return NextResponse.json(history, { status: 200 });
+    return NextResponse.json(history, {
+      status: 200,
+      headers: NO_STORE_HEADERS,
+    });
   } catch (err) {
     console.error('获取搜索历史失败', err);
     return NextResponse.json(

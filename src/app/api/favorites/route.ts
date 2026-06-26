@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 
 import { isGuardFailure, requireActiveUser } from '@/lib/api-auth';
 import { db } from '@/lib/db';
+import { NO_STORE_HEADERS } from '@/lib/http-cache';
 import { Favorite } from '@/lib/types';
 import { parseStorageKey } from '@/lib/utils';
 
@@ -36,12 +37,18 @@ export async function GET(request: NextRequest) {
         parsed.source,
         parsed.id,
       );
-      return NextResponse.json(fav, { status: 200 });
+      return NextResponse.json(fav, {
+        status: 200,
+        headers: NO_STORE_HEADERS,
+      });
     }
 
     // 查询全部收藏
     const favorites = await db.getAllFavorites(guardResult.username);
-    return NextResponse.json(favorites, { status: 200 });
+    return NextResponse.json(favorites, {
+      status: 200,
+      headers: NO_STORE_HEADERS,
+    });
   } catch (err) {
     console.error('获取收藏失败', err);
     return NextResponse.json(

@@ -5,7 +5,13 @@ import path from 'path';
 import { AdminConfig } from '@/features/admin/types/api';
 
 import { hashPassword, verifyPassword } from './password';
-import { Favorite, IStorage, PlayRecord, SkipConfig } from './types';
+import {
+  Favorite,
+  IStorage,
+  PlayRecord,
+  SkipConfig,
+  StorageImportData,
+} from './types';
 
 const SEARCH_HISTORY_LIMIT = 20;
 
@@ -678,5 +684,46 @@ export class LocalSqliteStorage implements IStorage {
 
     clear();
     console.log(`SQLite 数据库已清空: ${this.dbPath}`);
+  }
+
+  async replaceAllData(data: StorageImportData): Promise<void> {
+    const replace = this.db.transaction((snapshot: StorageImportData) => {
+      this.db.exec(`
+        DELETE FROM users;
+        DELETE FROM play_records;
+        DELETE FROM favorites;
+        DELETE FROM search_history;
+        DELETE FROM skip_configs;
+        DELETE FROM admin_config;
+      `);
+
+      this.stmts.setAdminConfig.run(JSON.stringify(snapshot.adminConfig));
+
+      for (const [userName, passwordHash] of Object.entries(snapshot.users)) {
+        this.stmts.registerUser.run(userName, passwordHash);
+      }
+
+      for (const [userName, userData] of Object.entries(snapshot.userData)) {
+        for (const [key, record] of Object.entries(userData.playRecords)) {
+          this.stmts.setPlayRecord.run(userName, key, JSON.stringify(record));
+        }
+
+        for (const [key, favorite] of Object.entries(userData.favorites)) {
+          this.stmts.setFavorite.run(userName, key, JSON.stringify(favorite));
+        }
+
+        userData.searchHistory
+          .slice(0, SEARCH_HISTORY_LIMIT)
+          .forEach((keyword, index) => {
+            this.stmts.insertSearchHistory.run(userName, keyword, index);
+          });
+
+        for (const [key, config] of Object.entries(userData.skipConfigs)) {
+          this.stmts.setSkipConfig.run(userName, key, JSON.stringify(config));
+        }
+      }
+    });
+
+    replace(data);
   }
 }

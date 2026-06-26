@@ -8,6 +8,8 @@ import {
 } from 'serwist';
 import type { PrecacheEntry, SerwistGlobalConfig } from 'serwist';
 
+import { excludeDefaultApiRuntimeCache } from './lib/sw-cache-rules';
+
 declare global {
   interface WorkerGlobalScope extends SerwistGlobalConfig {
     __SW_MANIFEST: (PrecacheEntry | string)[] | undefined;
@@ -16,6 +18,8 @@ declare global {
 
 declare const self: ServiceWorkerGlobalScope;
 
+const defaultRuntimeCache = excludeDefaultApiRuntimeCache(defaultCache);
+
 const serwist = new Serwist({
   precacheEntries: self.__SW_MANIFEST,
   skipWaiting: true,
@@ -23,7 +27,7 @@ const serwist = new Serwist({
   navigationPreload: true,
   runtimeCaching: [
     // Serwist 提供的 Next.js 默认缓存策略（静态资源、页面路由等）
-    ...defaultCache,
+    ...defaultRuntimeCache,
     // next/image 缓存（视频墙一次可铺满，放宽条目上限）
     {
       matcher: ({ url }) =>

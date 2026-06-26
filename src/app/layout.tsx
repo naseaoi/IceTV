@@ -5,6 +5,7 @@ import { Inter } from 'next/font/google';
 import './globals.css';
 
 import { getConfig } from '@/lib/config';
+import { serializeForInlineScript } from '@/lib/script-serialization';
 import { getStorageType } from '@/lib/storage-type';
 
 import { GlobalErrorIndicator } from '../components/GlobalErrorIndicator';
@@ -120,6 +121,7 @@ export default async function RootLayout({
     CUSTOM_CATEGORIES: customCategories,
     FLUID_SEARCH: fluidSearch,
   };
+  const serializedRuntimeConfig = serializeForInlineScript(runtimeConfig);
 
   return (
     <html lang='zh-CN' suppressHydrationWarning>
@@ -147,7 +149,7 @@ export default async function RootLayout({
         {/* 将配置序列化后直接写入脚本，浏览器端可通过 window.RUNTIME_CONFIG 获取 */}
         <script
           dangerouslySetInnerHTML={{
-            __html: `window.RUNTIME_CONFIG = ${JSON.stringify(runtimeConfig)};`,
+            __html: `window.RUNTIME_CONFIG = ${serializedRuntimeConfig};`,
           }}
         />
       </head>

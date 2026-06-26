@@ -1,8 +1,7 @@
 /** @jest-environment node */
 
 import { getAuthInfoFromCookie, verifySignature } from '@/lib/auth';
-import { getConfig, resetConfig } from '@/lib/config';
-import { db } from '@/lib/db';
+import { getConfig, resetConfig, saveConfig } from '@/lib/config';
 import { getOwnerPassword, getOwnerUsername } from '@/lib/env.server';
 
 if (!(globalThis as any).Headers) {
@@ -79,17 +78,12 @@ jest.mock('@/lib/auth', () => ({
 jest.mock('@/lib/config', () => ({
   getConfig: jest.fn(),
   resetConfig: jest.fn(),
+  saveConfig: jest.fn(),
 }));
 
 jest.mock('@/lib/env.server', () => ({
   getOwnerUsername: jest.fn(),
   getOwnerPassword: jest.fn(),
-}));
-
-jest.mock('@/lib/db', () => ({
-  db: {
-    saveAdminConfig: jest.fn(),
-  },
 }));
 
 function getHandlers() {
@@ -114,14 +108,12 @@ describe('admin api auth guard regression', () => {
   const mockedResetConfig = resetConfig as jest.MockedFunction<
     typeof resetConfig
   >;
+  const mockedSaveConfig = saveConfig as jest.MockedFunction<typeof saveConfig>;
   const mockedGetOwnerUsername = getOwnerUsername as jest.MockedFunction<
     typeof getOwnerUsername
   >;
   const mockedGetOwnerPassword = getOwnerPassword as jest.MockedFunction<
     typeof getOwnerPassword
-  >;
-  const mockedSaveAdminConfig = db.saveAdminConfig as jest.MockedFunction<
-    typeof db.saveAdminConfig
   >;
 
   const baseConfig = {
@@ -252,6 +244,6 @@ describe('admin api auth guard regression', () => {
 
     expect(response.status).toBe(200);
     expect(payload).toEqual({ ok: true });
-    expect(mockedSaveAdminConfig).toHaveBeenCalledTimes(1);
+    expect(mockedSaveConfig).toHaveBeenCalledTimes(1);
   });
 });

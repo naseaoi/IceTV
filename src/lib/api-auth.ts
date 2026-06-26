@@ -145,6 +145,16 @@ export async function requireActiveUser(
   };
 }
 
+export async function getOptionalActiveUser(
+  request: NextRequest,
+): Promise<ActiveUserInfo | null> {
+  const guardResult = await requireActiveUser(request, {
+    unauthorizedMessage: 'Unauthorized',
+    includeUserStateCode: false,
+  });
+  return isGuardFailure(guardResult) ? null : guardResult;
+}
+
 export async function requireAdmin(
   request: NextRequest,
   options: RequireAdminOptions = {},

@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 
 import { isGuardFailure, requireActiveUser } from '@/lib/api-auth';
 import { db } from '@/lib/db';
+import { NO_STORE_HEADERS } from '@/lib/http-cache';
 import { SkipConfig } from '@/lib/types';
 import { parseStorageKey } from '@/lib/utils';
 
@@ -21,11 +22,11 @@ export async function GET(request: NextRequest) {
     if (source && id) {
       // 获取单个配置
       const config = await db.getSkipConfig(guardResult.username, source, id);
-      return NextResponse.json(config);
+      return NextResponse.json(config, { headers: NO_STORE_HEADERS });
     } else {
       // 获取所有配置
       const configs = await db.getAllSkipConfigs(guardResult.username);
-      return NextResponse.json(configs);
+      return NextResponse.json(configs, { headers: NO_STORE_HEADERS });
     }
   } catch (error) {
     console.error('获取跳过片头片尾配置失败:', error);

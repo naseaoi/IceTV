@@ -1,7 +1,7 @@
 import * as crypto from 'crypto';
 import { NextRequest, NextResponse } from 'next/server';
 
-import { getConfig, refineConfig } from '@/lib/config';
+import { getConfig, refineConfig, saveConfig } from '@/lib/config';
 import { db } from '@/lib/db';
 import { parseStorageKey } from '@/lib/utils';
 import { getOwnerUsername } from '@/lib/env.server';
@@ -101,7 +101,7 @@ async function refreshAllLiveChannels() {
   await Promise.all(refreshPromises);
 
   // 保存配置
-  await db.saveAdminConfig(config);
+  await saveConfig(config);
 }
 
 async function refreshConfig() {
@@ -140,7 +140,7 @@ async function refreshConfig() {
       config.ConfigFile = decodedContent;
       config.ConfigSubscribtion.LastCheck = new Date().toISOString();
       config = refineConfig(config);
-      await db.saveAdminConfig(config);
+      await saveConfig(config);
     } catch (e) {
       console.error('刷新配置失败:', e);
     }

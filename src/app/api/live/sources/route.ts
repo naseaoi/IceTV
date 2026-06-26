@@ -1,11 +1,13 @@
 import { NextRequest, NextResponse } from 'next/server';
 
+import { getOptionalActiveUser } from '@/lib/api-auth';
 import { getConfig } from '@/lib/config';
 
 export const runtime = 'nodejs';
 
-export async function GET(_request: NextRequest) {
+export async function GET(request: NextRequest) {
   try {
+    const activeUser = await getOptionalActiveUser(request);
     const config = await getConfig();
 
     if (!config) {
@@ -19,7 +21,15 @@ export async function GET(_request: NextRequest) {
 
     return NextResponse.json({
       success: true,
-      data: liveSources,
+      data: activeUser
+        ? liveSources
+        : liveSources.map((source) => ({
+            key: source.key,
+            name: source.name,
+            from: source.from,
+            channelNumber: source.channelNumber || 0,
+            disabled: !!source.disabled,
+          })),
     });
   } catch (error) {
     console.error('获取直播源失败:', error);

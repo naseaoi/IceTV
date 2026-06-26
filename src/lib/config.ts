@@ -297,7 +297,7 @@ async function getInitConfig(
 export async function getConfig(): Promise<AdminConfig> {
   // 直接使用内存缓存
   if (cachedConfig) {
-    return cachedConfig;
+    return cloneConfig(cachedConfig);
   }
 
   // 读 db
@@ -330,7 +330,7 @@ export async function getConfig(): Promise<AdminConfig> {
     }
   }
 
-  return cachedConfig;
+  return cloneConfig(cachedConfig);
 }
 
 export function configSelfCheck(adminConfig: AdminConfig): AdminConfig {
@@ -471,10 +471,17 @@ export async function resetConfig() {
     originConfig.ConfigFile,
     originConfig.ConfigSubscribtion,
   );
-  cachedConfig = adminConfig;
   await db.saveAdminConfig(adminConfig);
+  cachedConfig = cloneConfig(adminConfig);
 
   return;
+}
+
+export async function saveConfig(config: AdminConfig): Promise<AdminConfig> {
+  const nextConfig = configSelfCheck(cloneConfig(config));
+  await db.saveAdminConfig(nextConfig);
+  cachedConfig = cloneConfig(nextConfig);
+  return cloneConfig(cachedConfig);
 }
 
 export async function getCacheTime(): Promise<number> {
@@ -539,5 +546,9 @@ export async function getAvailableApiSites(user?: string): Promise<ApiSite[]> {
 }
 
 export async function setCachedConfig(config: AdminConfig) {
-  cachedConfig = config;
+  cachedConfig = configSelfCheck(cloneConfig(config));
+}
+
+function cloneConfig(config: AdminConfig): AdminConfig {
+  return JSON.parse(JSON.stringify(config)) as AdminConfig;
 }

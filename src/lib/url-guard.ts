@@ -8,6 +8,7 @@ const BLOCKED_HOSTNAMES = new Set([
 ]);
 
 const MAX_REDIRECTS = 5;
+const DEFAULT_FETCH_TIMEOUT_MS = 15_000;
 
 export type UrlValidationResult =
   | { ok: true; url: string }
@@ -72,6 +73,7 @@ export async function fetchWithUrlGuard(
 ): Promise<Response> {
   let currentUrl = raw;
   const requestedRedirect = init.redirect;
+  const timeoutMs = getFetchTimeoutMs();
 
   for (let redirectCount = 0; redirectCount <= MAX_REDIRECTS; redirectCount++) {
     const validation = await validateProxyUrlForRequest(currentUrl);
@@ -79,10 +81,18 @@ export async function fetchWithUrlGuard(
       throw new UrlValidationError(validation.reason);
     }
 
-    const response = await fetch(validation.url, {
-      ...init,
-      redirect: 'manual',
-    });
+    const controller = new AbortController();
+    const timeout = windowLikeSetTimeout(() => controller.abort(), timeoutMs);
+    let response: Response;
+    try {
+      response = await fetch(validation.url, {
+        ...init,
+        redirect: 'manual',
+        signal: init.signal || controller.signal,
+      });
+    } finally {
+      windowLikeClearTimeout(timeout);
+    }
 
     if (!isRedirectResponse(response.status)) {
       return response;
@@ -105,6 +115,27 @@ export async function fetchWithUrlGuard(
   }
 
   throw new UrlValidationError('Too many redirects');
+}
+
+function getFetchTimeoutMs(): number {
+  const configured = Number.parseInt(
+    process.env.PROXY_FETCH_TIMEOUT_MS || '',
+    10,
+  );
+  return Number.isFinite(configured) && configured > 0
+    ? configured
+    : DEFAULT_FETCH_TIMEOUT_MS;
+}
+
+function windowLikeSetTimeout(
+  callback: () => void,
+  timeoutMs: number,
+): ReturnType<typeof setTimeout> {
+  return setTimeout(callback, timeoutMs);
+}
+
+function windowLikeClearTimeout(timeout: ReturnType<typeof setTimeout>): void {
+  clearTimeout(timeout);
 }
 
 function normalizeHostname(hostname: string): string {

@@ -1,5 +1,11 @@
-import { NextResponse } from 'next/server';
+import { NextRequest, NextResponse } from 'next/server';
 
+import { authorizeProxyRequest } from '@/lib/proxy-auth';
+import {
+  assertContentLength,
+  createLimitedReadableStream,
+  ResponseSizeLimitError,
+} from '@/lib/proxy-response-limits';
 import { markSourceCors, responseAllowsCors } from '@/lib/source-capability';
 import {
   fetchWithUrlGuard,
@@ -11,7 +17,9 @@ import { getProxySourceKey, resolveProxyUserAgent } from '../utils';
 
 export const runtime = 'nodejs';
 
-export async function GET(request: Request) {
+const MAX_SEGMENT_BYTES = 256 * 1024 * 1024;
+
+export async function GET(request: NextRequest) {
   const { searchParams } = new URL(request.url);
   const url = searchParams.get('url');
   const source = getProxySourceKey(searchParams);
@@ -26,6 +34,15 @@ export async function GET(request: Request) {
   const validation = await validateProxyUrlForRequest(url);
   if (!validation.ok) {
     return NextResponse.json({ error: validation.reason }, { status: 403 });
+  }
+
+  const authFailure = await authorizeProxyRequest(
+    request,
+    'segment',
+    validation.url,
+  );
+  if (authFailure) {
+    return authFailure;
   }
 
   const ua = await resolveProxyUserAgent(source);
@@ -46,6 +63,7 @@ export async function GET(request: Request) {
         { status: response.status },
       );
     }
+    assertContentLength(response.headers, MAX_SEGMENT_BYTES);
 
     // 只用真实 segment 响应学习跨域能力，避免被 m3u8 响应头误导。
     if (source) {
@@ -91,14 +109,20 @@ export async function GET(request: Request) {
       responseHeaders.set('Content-Range', contentRange);
     }
 
-    return new Response(response.body, {
-      status: response.status,
-      statusText: response.statusText,
-      headers: responseHeaders,
-    });
+    return new Response(
+      createLimitedReadableStream(response.body, MAX_SEGMENT_BYTES),
+      {
+        status: response.status,
+        statusText: response.statusText,
+        headers: responseHeaders,
+      },
+    );
   } catch (error) {
     if (error instanceof UrlValidationError) {
       return NextResponse.json({ error: error.reason }, { status: 403 });
+    }
+    if (error instanceof ResponseSizeLimitError) {
+      return NextResponse.json({ error: error.message }, { status: 413 });
     }
 
     return NextResponse.json(

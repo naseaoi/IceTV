@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 
+import { isGuardFailure, requireActiveUser } from '@/lib/api-auth';
 import { getConfig } from '@/lib/config';
 import {
   fetchWithUrlGuard,
@@ -10,6 +11,9 @@ import {
 export const runtime = 'nodejs';
 
 export async function GET(request: NextRequest) {
+  const guardResult = await requireActiveUser(request);
+  if (isGuardFailure(guardResult)) return guardResult.response;
+
   const { searchParams } = new URL(request.url);
   const url = searchParams.get('url');
   const source =

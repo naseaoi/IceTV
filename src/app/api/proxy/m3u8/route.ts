@@ -1,10 +1,15 @@
-import { NextResponse } from 'next/server';
+import { NextRequest, NextResponse } from 'next/server';
 
 import {
   shouldRunAdDetection,
   stripAdSegmentsByPhysicalSignal,
 } from '@/lib/ad-segment-detector';
 import { getBaseUrl, resolveUrl } from '@/lib/live';
+import {
+  readTextLimited,
+  ResponseSizeLimitError,
+} from '@/lib/proxy-response-limits';
+import { appendProxySignature, authorizeProxyRequest } from '@/lib/proxy-auth';
 import { createSwrCache } from '@/lib/server-cache';
 import { isSourceCorsCapable } from '@/lib/source-capability';
 import {
@@ -42,6 +47,7 @@ const m3u8Cache = createSwrCache<M3U8CacheEntry>({
 // 只匹配 query 中的明显签名字段；保守一点漏判好过误判。
 const SIGNED_URL_PARAM_RE =
   /[?&](sign|signature|auth_key|auth|token|expires?|expire|hmac|x-amz-signature|security_token|oss_expires|wssecret|wstime|ccode|ksign)=/i;
+const MAX_M3U8_BYTES = 2 * 1024 * 1024;
 
 function isSignedM3U8Url(rawUrl: string): boolean {
   if (!rawUrl) return false;
@@ -76,7 +82,7 @@ function refreshM3U8Cache(
       ) {
         return;
       }
-      let content = await response.text();
+      let content = await readTextLimited(response, MAX_M3U8_BYTES);
       // 仅对 VOD/Master 更新缓存
       if (
         !content.includes('#EXT-X-ENDLIST') &&
@@ -112,7 +118,7 @@ function refreshM3U8Cache(
   return task;
 }
 
-export async function GET(request: Request) {
+export async function GET(request: NextRequest) {
   const { searchParams } = new URL(request.url);
   const url = searchParams.get('url');
   const allowCORS = searchParams.get('allowCORS') === 'true';
@@ -125,6 +131,15 @@ export async function GET(request: Request) {
   const validation = await validateProxyUrlForRequest(url);
   if (!validation.ok) {
     return NextResponse.json({ error: validation.reason }, { status: 403 });
+  }
+
+  const authFailure = await authorizeProxyRequest(
+    request,
+    'm3u8',
+    validation.url,
+  );
+  if (authFailure) {
+    return authFailure;
   }
 
   const ua = await resolveProxyUserAgent(source);
@@ -140,7 +155,7 @@ export async function GET(request: Request) {
         void refreshM3U8Cache(validation.url, ua, source);
       }
       const baseUrl = getBaseUrl(value.finalUrl);
-      const modifiedContent = rewriteM3U8Content(
+      const modifiedContent = await rewriteM3U8Content(
         value.content,
         baseUrl,
         request,
@@ -187,7 +202,7 @@ export async function GET(request: Request) {
       contentType.toLowerCase().includes('octet-stream')
     ) {
       const finalUrl = response.url;
-      let m3u8Content = await response.text();
+      let m3u8Content = await readTextLimited(response, MAX_M3U8_BYTES);
       const baseUrl = getBaseUrl(finalUrl);
 
       // 特定源站广告段剔除（基于时长众数 + 段均码率双信号）。
@@ -217,7 +232,7 @@ export async function GET(request: Request) {
         });
       }
 
-      const modifiedContent = rewriteM3U8Content(
+      const modifiedContent = await rewriteM3U8Content(
         m3u8Content,
         baseUrl,
         request,
@@ -272,6 +287,9 @@ export async function GET(request: Request) {
     if (error instanceof UrlValidationError) {
       return NextResponse.json({ error: error.reason }, { status: 403 });
     }
+    if (error instanceof ResponseSizeLimitError) {
+      return NextResponse.json({ error: error.message }, { status: 413 });
+    }
 
     return NextResponse.json(
       { error: 'Failed to fetch m3u8' },
@@ -280,14 +298,14 @@ export async function GET(request: Request) {
   }
 }
 
-function rewriteM3U8Content(
+async function rewriteM3U8Content(
   content: string,
   baseUrl: string,
-  req: Request,
+  req: NextRequest,
   allowCORS: boolean,
   source: string | null,
   isLive: boolean,
-) {
+): Promise<string> {
   const referer = req.headers.get('referer');
   let protocol = 'http';
   if (referer) {
@@ -313,7 +331,7 @@ function rewriteM3U8Content(
   const lines = content.split('\n');
   const rewrittenLines: string[] = [];
 
-  const buildProxyPath = (
+  const buildProxyPath = async (
     path: 'segment' | 'm3u8' | 'key',
     targetUrl: string,
     extra: Record<string, string> = {},
@@ -328,6 +346,7 @@ function rewriteM3U8Content(
     if (isLive) {
       params.set('icetv-live', '1');
     }
+    await appendProxySignature(params, path, targetUrl);
     return `${proxyBase}/${path}?${params.toString()}`;
   };
 
@@ -338,13 +357,13 @@ function rewriteM3U8Content(
       const resolvedUrl = resolveUrl(baseUrl, line);
       const proxyUrl = effectiveAllowCors
         ? resolvedUrl
-        : buildProxyPath('segment', resolvedUrl);
+        : await buildProxyPath('segment', resolvedUrl);
       rewrittenLines.push(proxyUrl);
       continue;
     }
 
     if (line.startsWith('#EXT-X-MAP:')) {
-      line = rewriteMapUri(
+      line = await rewriteMapUri(
         line,
         baseUrl,
         proxyBase,
@@ -355,7 +374,7 @@ function rewriteM3U8Content(
     }
 
     if (line.startsWith('#EXT-X-KEY:')) {
-      line = rewriteKeyUri(
+      line = await rewriteKeyUri(
         line,
         baseUrl,
         proxyBase,
@@ -372,7 +391,7 @@ function rewriteM3U8Content(
         const nextLine = lines[i].trim();
         if (nextLine && !nextLine.startsWith('#')) {
           const resolvedUrl = resolveUrl(baseUrl, nextLine);
-          const proxyUrl = buildProxyPath(
+          const proxyUrl = await buildProxyPath(
             'm3u8',
             resolvedUrl,
             allowCORS ? { allowCORS: 'true' } : {},
@@ -391,14 +410,14 @@ function rewriteM3U8Content(
   return rewrittenLines.join('\n');
 }
 
-function rewriteMapUri(
+async function rewriteMapUri(
   line: string,
   baseUrl: string,
   proxyBase: string,
   source: string | null,
   allowDirect: boolean,
   isLive: boolean,
-) {
+): Promise<string> {
   const uriMatch = line.match(/URI="([^"]+)"/);
   if (uriMatch) {
     const originalUri = uriMatch[1];
@@ -413,20 +432,21 @@ function rewriteMapUri(
     if (isLive) {
       params.set('icetv-live', '1');
     }
+    await appendProxySignature(params, 'segment', resolvedUrl);
     const proxyUrl = `${proxyBase}/segment?${params.toString()}`;
     return line.replace(uriMatch[0], `URI="${proxyUrl}"`);
   }
   return line;
 }
 
-function rewriteKeyUri(
+async function rewriteKeyUri(
   line: string,
   baseUrl: string,
   proxyBase: string,
   source: string | null,
   allowDirect: boolean,
   isLive: boolean,
-) {
+): Promise<string> {
   const uriMatch = line.match(/URI="([^"]+)"/);
   if (uriMatch) {
     const originalUri = uriMatch[1];
@@ -441,6 +461,7 @@ function rewriteKeyUri(
     if (isLive) {
       params.set('icetv-live', '1');
     }
+    await appendProxySignature(params, 'key', resolvedUrl);
     const proxyUrl = `${proxyBase}/key?${params.toString()}`;
     return line.replace(uriMatch[0], `URI="${proxyUrl}"`);
   }

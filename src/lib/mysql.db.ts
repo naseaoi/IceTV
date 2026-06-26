@@ -5,7 +5,13 @@ import { AdminConfig } from '@/features/admin/types/api';
 
 import { hashPassword, verifyPassword } from './password';
 import { getMySqlConnectionUrl } from './storage-type';
-import { Favorite, IStorage, PlayRecord, SkipConfig } from './types';
+import {
+  Favorite,
+  IStorage,
+  PlayRecord,
+  SkipConfig,
+  StorageImportData,
+} from './types';
 
 const SEARCH_HISTORY_LIMIT = 20;
 
@@ -492,6 +498,64 @@ export class MySqlStorage implements IStorage {
       await connection.execute('DELETE FROM search_history');
       await connection.execute('DELETE FROM skip_configs');
       await connection.execute('DELETE FROM admin_config');
+    });
+  }
+
+  async replaceAllData(data: StorageImportData): Promise<void> {
+    await this.withTransaction(async (connection) => {
+      await connection.execute('DELETE FROM users');
+      await connection.execute('DELETE FROM play_records');
+      await connection.execute('DELETE FROM favorites');
+      await connection.execute('DELETE FROM search_history');
+      await connection.execute('DELETE FROM skip_configs');
+      await connection.execute('DELETE FROM admin_config');
+
+      await connection.execute(
+        'INSERT INTO admin_config (id, config_json) VALUES (1, ?)',
+        [JSON.stringify(data.adminConfig)],
+      );
+
+      for (const [userName, passwordHash] of Object.entries(data.users)) {
+        await connection.execute(
+          'INSERT INTO users (username, password) VALUES (?, ?)',
+          [userName, passwordHash],
+        );
+      }
+
+      for (const [userName, userData] of Object.entries(data.userData)) {
+        for (const [key, record] of Object.entries(userData.playRecords)) {
+          await connection.execute(
+            'INSERT INTO play_records (username, record_key, record_json) VALUES (?, ?, ?)',
+            [userName, key, JSON.stringify(record)],
+          );
+        }
+
+        for (const [key, favorite] of Object.entries(userData.favorites)) {
+          await connection.execute(
+            'INSERT INTO favorites (username, favorite_key, favorite_json) VALUES (?, ?, ?)',
+            [userName, key, JSON.stringify(favorite)],
+          );
+        }
+
+        const searchHistory = userData.searchHistory.slice(
+          0,
+          SEARCH_HISTORY_LIMIT,
+        );
+        for (let index = 0; index < searchHistory.length; index++) {
+          const keyword = searchHistory[index];
+          await connection.execute(
+            'INSERT INTO search_history (username, keyword, sort_index) VALUES (?, ?, ?)',
+            [userName, keyword, index],
+          );
+        }
+
+        for (const [key, config] of Object.entries(userData.skipConfigs)) {
+          await connection.execute(
+            'INSERT INTO skip_configs (username, config_key, config_json) VALUES (?, ?, ?)',
+            [userName, key, JSON.stringify(config)],
+          );
+        }
+      }
     });
   }
 }

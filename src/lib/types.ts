@@ -26,6 +26,19 @@ export interface Favorite {
   origin?: 'vod' | 'live';
 }
 
+export interface StorageUserImportData {
+  playRecords: { [key: string]: PlayRecord };
+  favorites: { [key: string]: Favorite };
+  searchHistory: string[];
+  skipConfigs: { [key: string]: SkipConfig };
+}
+
+export interface StorageImportData {
+  adminConfig: AdminConfig;
+  users: { [username: string]: string };
+  userData: { [username: string]: StorageUserImportData };
+}
+
 // 存储接口
 export interface IStorage {
   // 播放记录相关
@@ -83,6 +96,7 @@ export interface IStorage {
 
   // 数据清理相关
   clearAllData(): Promise<void>;
+  replaceAllData(data: StorageImportData): Promise<void>;
 }
 
 // 搜索结果数据结构
