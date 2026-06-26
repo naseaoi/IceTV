@@ -4,7 +4,9 @@
   "private": true,
   "scripts": {
     "dev": "pnpm gen:changelog && pnpm gen:manifest && next dev --webpack -H 0.0.0.0",
+    "dev:turbo": "pnpm gen:changelog && pnpm gen:manifest && next dev --turbopack -H 0.0.0.0",
     "build": "pnpm gen:changelog && pnpm gen:manifest && next build --webpack",
+    "build:turbo": "pnpm gen:changelog && pnpm gen:manifest && next build --turbopack",
     "start": "next start",
     "lint": "eslint src",
     "lint:fix": "eslint src --fix && pnpm format",

@@ -14,3 +14,19 @@ export function excludeDefaultApiRuntimeCache<T extends RuntimeCacheEntry>(
     return handler.cacheName !== 'apis';
   });
 }
+
+export function shouldHandleVodSegmentCache(input: {
+  sameOrigin: boolean;
+  method: string;
+  pathname: string;
+  liveFlag: string | null;
+  hasRangeHeader: boolean;
+}): boolean {
+  return (
+    input.sameOrigin &&
+    input.method === 'GET' &&
+    input.pathname === '/api/proxy/segment' &&
+    input.liveFlag !== '1' &&
+    !input.hasRangeHeader
+  );
+}

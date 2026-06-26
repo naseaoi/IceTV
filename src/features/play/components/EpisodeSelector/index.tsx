@@ -1,11 +1,31 @@
 import React, { useEffect, useMemo, useState } from 'react';
+import dynamic from 'next/dynamic';
 
 import { getSourceBundle } from '@/lib/source-bundle';
 import { SearchResult } from '@/lib/types';
 
-import { EpisodesTab } from './EpisodesTab';
-import { InfoTab } from './InfoTab';
-import { SourcesTab } from './SourcesTab';
+function EpisodeTabLoading() {
+  return (
+    <div className='flex min-h-0 flex-1 items-center justify-center p-6 text-sm text-gray-500 dark:text-gray-400'>
+      加载中...
+    </div>
+  );
+}
+
+const EpisodesTab = dynamic(
+  () => import('./EpisodesTab.js').then((mod) => mod.EpisodesTab),
+  { loading: EpisodeTabLoading },
+);
+const InfoTab = dynamic(
+  () => import('./InfoTab.js').then((mod) => mod.InfoTab),
+  {
+    loading: EpisodeTabLoading,
+  },
+);
+const SourcesTab = dynamic(
+  () => import('./SourcesTab.js').then((mod) => mod.SourcesTab),
+  { loading: EpisodeTabLoading },
+);
 
 interface VideoInfo {
   quality: string;
@@ -153,22 +173,24 @@ const EpisodeSelector: React.FC<EpisodeSelectorProps> = ({
           activeTab === 'sources' ? 'flex min-h-0 flex-1 flex-col' : 'hidden'
         }
       >
-        <SourcesTab
-          availableSources={availableSources}
-          sourceSearchLoading={sourceSearchLoading}
-          sourceSearchError={sourceSearchError}
-          isActive={activeTab === 'sources'}
-          currentSource={currentSource}
-          currentId={currentId}
-          currentEpisodeIndex={Math.max(0, value - 1)}
-          videoTitle={videoTitle}
-          searchKeyword={searchKeyword}
-          onSourceChange={onSourceChange}
-          precomputedVideoInfo={precomputedVideoInfo}
-          activeDetail={detail}
-          onSourceDetailFetched={onSourceDetailFetched}
-          onAddSources={onAddSources}
-        />
+        {activeTab === 'sources' && (
+          <SourcesTab
+            availableSources={availableSources}
+            sourceSearchLoading={sourceSearchLoading}
+            sourceSearchError={sourceSearchError}
+            isActive={true}
+            currentSource={currentSource}
+            currentId={currentId}
+            currentEpisodeIndex={Math.max(0, value - 1)}
+            videoTitle={videoTitle}
+            searchKeyword={searchKeyword}
+            onSourceChange={onSourceChange}
+            precomputedVideoInfo={precomputedVideoInfo}
+            activeDetail={detail}
+            onSourceDetailFetched={onSourceDetailFetched}
+            onAddSources={onAddSources}
+          />
+        )}
       </div>
     </div>
   );

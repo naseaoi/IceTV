@@ -8,7 +8,10 @@ import {
 } from 'serwist';
 import type { PrecacheEntry, SerwistGlobalConfig } from 'serwist';
 
-import { excludeDefaultApiRuntimeCache } from './lib/sw-cache-rules';
+import {
+  excludeDefaultApiRuntimeCache,
+  shouldHandleVodSegmentCache,
+} from './lib/sw-cache-rules';
 
 declare global {
   interface WorkerGlobalScope extends SerwistGlobalConfig {
@@ -19,6 +22,96 @@ declare global {
 declare const self: ServiceWorkerGlobalScope;
 
 const defaultRuntimeCache = excludeDefaultApiRuntimeCache(defaultCache);
+const VOD_SEGMENT_CACHE_NAME = 'vod-segment-cache';
+const VOD_SEGMENT_MAX_ENTRIES = 128;
+const VOD_SEGMENT_MAX_AGE_SECONDS = 3 * 24 * 60 * 60;
+const VOD_SEGMENT_MAX_TOTAL_BYTES = 384 * 1024 * 1024;
+const VOD_SEGMENT_MAX_SINGLE_BYTES = 32 * 1024 * 1024;
+const VOD_SEGMENT_MIN_FREE_BYTES = 256 * 1024 * 1024;
+const VOD_SEGMENT_STORAGE_PRESSURE_RATIO = 0.8;
+
+function readContentLength(response: Response | undefined): number | null {
+  if (!response) {
+    return null;
+  }
+
+  const value = Number.parseInt(
+    response.headers.get('content-length') || '',
+    10,
+  );
+  return Number.isFinite(value) && value > 0 ? value : null;
+}
+
+async function hasStoragePressure(incomingBytes: number): Promise<boolean> {
+  if (!navigator.storage?.estimate) {
+    return false;
+  }
+
+  const estimate = await navigator.storage.estimate();
+  const quota = estimate.quota || 0;
+  const usage = estimate.usage || 0;
+  if (!quota) {
+    return false;
+  }
+
+  return (
+    usage + incomingBytes > quota * VOD_SEGMENT_STORAGE_PRESSURE_RATIO ||
+    quota - usage < VOD_SEGMENT_MIN_FREE_BYTES
+  );
+}
+
+async function trimVodSegmentCache(incomingBytes: number) {
+  const cache = await caches.open(VOD_SEGMENT_CACHE_NAME);
+  const requests = await cache.keys();
+  let totalBytes = 0;
+  const entries: { request: Request; bytes: number }[] = [];
+
+  for (const request of requests) {
+    const response = await cache.match(request);
+    const bytes = readContentLength(response);
+    if (bytes === null) {
+      await cache.delete(request);
+      continue;
+    }
+    totalBytes += bytes;
+    entries.push({ request, bytes });
+  }
+
+  while (
+    totalBytes + incomingBytes > VOD_SEGMENT_MAX_TOTAL_BYTES &&
+    entries.length > 0
+  ) {
+    const entry = entries.shift()!;
+    await cache.delete(entry.request);
+    totalBytes -= entry.bytes;
+  }
+}
+
+const vodSegmentStoragePlugin = {
+  async cacheWillUpdate({
+    request,
+    response,
+  }: {
+    request: Request;
+    response: Response | null;
+  }) {
+    if (!response || response.status !== 200 || request.headers.has('range')) {
+      return null;
+    }
+
+    const incomingBytes = readContentLength(response);
+    if (
+      incomingBytes === null ||
+      incomingBytes > VOD_SEGMENT_MAX_SINGLE_BYTES ||
+      (await hasStoragePressure(incomingBytes))
+    ) {
+      return null;
+    }
+
+    await trimVodSegmentCache(incomingBytes);
+    return response;
+  },
+};
 
 const serwist = new Serwist({
   precacheEntries: self.__SW_MANIFEST,
@@ -101,17 +194,21 @@ const serwist = new Serwist({
     // - 分片文件较大，maxEntries 保守限定 512，按 LRU 淘汰；7 天过期
     {
       matcher: ({ url, request, sameOrigin }) =>
-        sameOrigin &&
-        request.method === 'GET' &&
-        url.pathname === '/api/proxy/segment' &&
-        url.searchParams.get('icetv-live') !== '1',
+        shouldHandleVodSegmentCache({
+          sameOrigin,
+          method: request.method,
+          pathname: url.pathname,
+          liveFlag: url.searchParams.get('icetv-live'),
+          hasRangeHeader: request.headers.has('range'),
+        }),
       handler: new CacheFirst({
-        cacheName: 'vod-segment-cache',
+        cacheName: VOD_SEGMENT_CACHE_NAME,
         plugins: [
-          new CacheableResponsePlugin({ statuses: [200, 206] }),
+          vodSegmentStoragePlugin,
+          new CacheableResponsePlugin({ statuses: [200] }),
           new ExpirationPlugin({
-            maxEntries: 512,
-            maxAgeSeconds: 7 * 24 * 60 * 60,
+            maxEntries: VOD_SEGMENT_MAX_ENTRIES,
+            maxAgeSeconds: VOD_SEGMENT_MAX_AGE_SECONDS,
           }),
         ],
       }),

@@ -1,7 +1,5 @@
 'use client';
 
-'use client';
-
 import {
   Database,
   FileText,
@@ -12,9 +10,9 @@ import {
   Users,
   Video,
 } from 'lucide-react';
+import dynamic from 'next/dynamic';
 import { Suspense, useEffect, useState } from 'react';
 
-import DataMigration from '@/components/DataMigration';
 import PageLayout from '@/components/PageLayout';
 import ConfirmModal from '@/components/modals/ConfirmModal';
 import AlertModal from '@/features/admin/components/AlertModal';
@@ -22,16 +20,69 @@ import CollapsibleTab from '@/features/admin/components/CollapsibleTab';
 import { buttonStyles } from '@/features/admin/lib/buttonStyles';
 import { showError } from '@/features/admin/lib/notifications';
 import { isOwner } from '@/features/admin/lib/permissions';
-import CategoryConfig from '@/features/admin/components/tabs/CategoryConfigTab';
-import ConfigFileComponent from '@/features/admin/components/tabs/ConfigFileTab';
-import LiveSourceConfig from '@/features/admin/components/tabs/LiveSourceConfigTab';
-import SiteConfigComponent from '@/features/admin/components/tabs/SiteConfigTab';
-import UserConfig from '@/features/admin/components/tabs/UserConfigTab';
-import VideoSourceConfig from '@/features/admin/components/tabs/VideoSourceConfigTab';
 import { useAlertModal } from '@/features/admin/hooks/useAlertModal';
 import { useAdminPageActions } from '@/features/admin/hooks/useAdminPageActions';
 import { useLoadingState } from '@/features/admin/hooks/useLoadingState';
 import { AdminConfig } from '@/features/admin/types/api';
+
+function AdminTabLoading() {
+  return (
+    <div className='flex min-h-32 items-center justify-center text-sm text-gray-500 dark:text-gray-400'>
+      <Loader2 className='mr-2 h-4 w-4 animate-spin text-green-500' />
+      加载中...
+    </div>
+  );
+}
+
+const DataMigration = dynamic(
+  () => import('../../components/DataMigration.js').then((mod) => mod.default),
+  {
+    loading: AdminTabLoading,
+  },
+);
+const CategoryConfig = dynamic(
+  () =>
+    import('../../features/admin/components/tabs/CategoryConfigTab.js').then(
+      (mod) => mod.default,
+    ),
+  { loading: AdminTabLoading },
+);
+const ConfigFileComponent = dynamic(
+  () =>
+    import('../../features/admin/components/tabs/ConfigFileTab.js').then(
+      (mod) => mod.default,
+    ),
+  { loading: AdminTabLoading },
+);
+const LiveSourceConfig = dynamic(
+  () =>
+    import('../../features/admin/components/tabs/LiveSourceConfigTab.js').then(
+      (mod) => mod.default,
+    ),
+  { loading: AdminTabLoading },
+);
+const SiteConfigComponent = dynamic(
+  () =>
+    import('../../features/admin/components/tabs/SiteConfigTab.js').then(
+      (mod) => mod.default,
+    ),
+  { loading: AdminTabLoading },
+);
+const UserConfig = dynamic(
+  () =>
+    import('../../features/admin/components/tabs/UserConfigTab.js').then(
+      (mod) => mod.default,
+    ),
+  { loading: AdminTabLoading },
+);
+const VideoSourceConfig = dynamic(
+  () =>
+    import('../../features/admin/components/tabs/VideoSourceConfigTab.js').then(
+      (mod) => mod.default,
+    ),
+  { loading: AdminTabLoading },
+);
+
 function AdminPageClient() {
   const { alertModal, showAlert, hideAlert } = useAlertModal();
   const { isLoading, withLoading } = useLoadingState();

@@ -329,59 +329,65 @@ async function rewriteM3U8Content(
   const effectiveAllowCors = allowCORS || corsCapable;
 
   const lines = content.split('\n');
-  const rewrittenLines: string[] = [];
+  const rewrittenLines: Array<string | Promise<string>> = [];
+  const proxyUrlCache = new Map<string, Promise<string>>();
 
   const buildProxyPath = async (
     path: 'segment' | 'm3u8' | 'key',
     targetUrl: string,
     extra: Record<string, string> = {},
   ) => {
-    const params = new URLSearchParams({
-      url: targetUrl,
-      ...extra,
-    });
-    if (source) {
-      params.set('icetv-source', source);
+    const extraKey = new URLSearchParams(extra).toString();
+    const cacheKey = `${path}\0${targetUrl}\0${extraKey}`;
+    const cached = proxyUrlCache.get(cacheKey);
+    if (cached) {
+      return cached;
     }
-    if (isLive) {
-      params.set('icetv-live', '1');
-    }
-    await appendProxySignature(params, path, targetUrl);
-    return `${proxyBase}/${path}?${params.toString()}`;
+
+    const task = (async () => {
+      const params = new URLSearchParams({
+        url: targetUrl,
+        ...extra,
+      });
+      if (source) {
+        params.set('icetv-source', source);
+      }
+      if (isLive) {
+        params.set('icetv-live', '1');
+      }
+      await appendProxySignature(params, path, targetUrl);
+      return `${proxyBase}/${path}?${params.toString()}`;
+    })();
+
+    proxyUrlCache.set(cacheKey, task);
+    return task;
   };
 
   for (let i = 0; i < lines.length; i++) {
-    let line = lines[i].trim();
+    const line = lines[i].trim();
 
     if (line && !line.startsWith('#')) {
       const resolvedUrl = resolveUrl(baseUrl, line);
-      const proxyUrl = effectiveAllowCors
-        ? resolvedUrl
-        : await buildProxyPath('segment', resolvedUrl);
-      rewrittenLines.push(proxyUrl);
+      rewrittenLines.push(
+        effectiveAllowCors
+          ? resolvedUrl
+          : buildProxyPath('segment', resolvedUrl),
+      );
       continue;
     }
 
     if (line.startsWith('#EXT-X-MAP:')) {
-      line = await rewriteMapUri(
-        line,
-        baseUrl,
-        proxyBase,
-        source,
-        effectiveAllowCors,
-        isLive,
+      rewrittenLines.push(
+        rewriteMapUri(line, baseUrl, effectiveAllowCors, buildProxyPath),
       );
+      continue;
     }
 
     if (line.startsWith('#EXT-X-KEY:')) {
-      line = await rewriteKeyUri(
-        line,
-        baseUrl,
-        proxyBase,
-        source,
-        effectiveAllowCors,
-        isLive,
+      rewrittenLines.push(
+        rewriteKeyUri(line, baseUrl, effectiveAllowCors, buildProxyPath),
       );
+      continue;
     }
 
     if (line.startsWith('#EXT-X-STREAM-INF:')) {
@@ -391,12 +397,13 @@ async function rewriteM3U8Content(
         const nextLine = lines[i].trim();
         if (nextLine && !nextLine.startsWith('#')) {
           const resolvedUrl = resolveUrl(baseUrl, nextLine);
-          const proxyUrl = await buildProxyPath(
-            'm3u8',
-            resolvedUrl,
-            allowCORS ? { allowCORS: 'true' } : {},
+          rewrittenLines.push(
+            buildProxyPath(
+              'm3u8',
+              resolvedUrl,
+              allowCORS ? { allowCORS: 'true' } : {},
+            ),
           );
-          rewrittenLines.push(proxyUrl);
         } else {
           rewrittenLines.push(nextLine);
         }
@@ -407,17 +414,22 @@ async function rewriteM3U8Content(
     rewrittenLines.push(line);
   }
 
-  return rewrittenLines.join('\n');
+  const resolvedLines = await Promise.all(rewrittenLines);
+  return resolvedLines.join('\n');
 }
 
-async function rewriteMapUri(
+type ProxyPathBuilder = (
+  path: 'segment' | 'm3u8' | 'key',
+  targetUrl: string,
+  extra?: Record<string, string>,
+) => Promise<string>;
+
+function rewriteMapUri(
   line: string,
   baseUrl: string,
-  proxyBase: string,
-  source: string | null,
   allowDirect: boolean,
-  isLive: boolean,
-): Promise<string> {
+  buildProxyPath: ProxyPathBuilder,
+): string | Promise<string> {
   const uriMatch = line.match(/URI="([^"]+)"/);
   if (uriMatch) {
     const originalUri = uriMatch[1];
@@ -425,28 +437,19 @@ async function rewriteMapUri(
     if (allowDirect) {
       return line.replace(uriMatch[0], `URI="${resolvedUrl}"`);
     }
-    const params = new URLSearchParams({ url: resolvedUrl });
-    if (source) {
-      params.set('icetv-source', source);
-    }
-    if (isLive) {
-      params.set('icetv-live', '1');
-    }
-    await appendProxySignature(params, 'segment', resolvedUrl);
-    const proxyUrl = `${proxyBase}/segment?${params.toString()}`;
-    return line.replace(uriMatch[0], `URI="${proxyUrl}"`);
+    return buildProxyPath('segment', resolvedUrl).then((proxyUrl) =>
+      line.replace(uriMatch[0], `URI="${proxyUrl}"`),
+    );
   }
   return line;
 }
 
-async function rewriteKeyUri(
+function rewriteKeyUri(
   line: string,
   baseUrl: string,
-  proxyBase: string,
-  source: string | null,
   allowDirect: boolean,
-  isLive: boolean,
-): Promise<string> {
+  buildProxyPath: ProxyPathBuilder,
+): string | Promise<string> {
   const uriMatch = line.match(/URI="([^"]+)"/);
   if (uriMatch) {
     const originalUri = uriMatch[1];
@@ -454,16 +457,9 @@ async function rewriteKeyUri(
     if (allowDirect) {
       return line.replace(uriMatch[0], `URI="${resolvedUrl}"`);
     }
-    const params = new URLSearchParams({ url: resolvedUrl });
-    if (source) {
-      params.set('icetv-source', source);
-    }
-    if (isLive) {
-      params.set('icetv-live', '1');
-    }
-    await appendProxySignature(params, 'key', resolvedUrl);
-    const proxyUrl = `${proxyBase}/key?${params.toString()}`;
-    return line.replace(uriMatch[0], `URI="${proxyUrl}"`);
+    return buildProxyPath('key', resolvedUrl).then((proxyUrl) =>
+      line.replace(uriMatch[0], `URI="${proxyUrl}"`),
+    );
   }
   return line;
 }
