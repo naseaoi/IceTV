@@ -1,5 +1,4 @@
 import eslintConfigNext from 'eslint-config-next';
-import tsPlugin from '@typescript-eslint/eslint-plugin';
 import simpleImportSortPlugin from 'eslint-plugin-simple-import-sort';
 import unusedImportsPlugin from 'eslint-plugin-unused-imports';
 
@@ -29,7 +28,6 @@ export default [
       },
     },
     plugins: {
-      '@typescript-eslint': tsPlugin,
       'simple-import-sort': simpleImportSortPlugin,
       'unused-imports': unusedImportsPlugin,
     },
