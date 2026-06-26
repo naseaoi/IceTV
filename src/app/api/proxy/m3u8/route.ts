@@ -214,6 +214,7 @@ export async function GET(request: NextRequest) {
   const { searchParams } = new URL(request.url);
   const url = searchParams.get('url');
   const allowCORS = searchParams.get('allowCORS') === 'true';
+  const forceServer = searchParams.get('forceServer') === 'true';
   const source = getProxySourceKey(searchParams);
   const isLive = searchParams.get('icetv-live') === '1';
   if (!url) {
@@ -252,6 +253,7 @@ export async function GET(request: NextRequest) {
         baseUrl,
         request,
         allowCORS,
+        forceServer,
         source,
         isLive,
       );
@@ -285,6 +287,7 @@ export async function GET(request: NextRequest) {
       baseUrl,
       request,
       allowCORS,
+      forceServer,
       source,
       isLive,
     );
@@ -327,6 +330,7 @@ async function rewriteM3U8Content(
   baseUrl: string,
   req: NextRequest,
   allowCORS: boolean,
+  forceServer: boolean,
   source: string | null,
   isLive: boolean,
 ): Promise<string> {
@@ -350,7 +354,7 @@ async function rewriteM3U8Content(
   // 直播场景跳过此优化：直播通常依赖服务端注入特定 UA / 处理鉴权，直连易失败。
   const corsCapable =
     !isLive && source ? isSourceCorsCapable(source) === true : false;
-  const effectiveAllowCors = allowCORS || corsCapable;
+  const effectiveAllowCors = !forceServer && (allowCORS || corsCapable);
 
   const lines = content.split('\n');
   const rewrittenLines: Array<string | Promise<string>> = [];

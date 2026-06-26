@@ -269,6 +269,8 @@ function buildProxyUrl(
   });
   if (!useProxy) {
     params.set('allowCORS', 'true');
+  } else {
+    params.set('forceServer', 'true');
   }
   if (sourceKey) {
     params.set('icetv-source', sourceKey);

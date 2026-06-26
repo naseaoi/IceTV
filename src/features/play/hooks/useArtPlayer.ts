@@ -209,7 +209,7 @@ export function useArtPlayer(params: UseArtPlayerParams) {
             : url;
         const buildProxyUrl = (rawUrl: string) => {
           const base = preUseProxy
-            ? `/api/proxy/m3u8?url=${encodeURIComponent(rawUrl)}`
+            ? `/api/proxy/m3u8?url=${encodeURIComponent(rawUrl)}&forceServer=true`
             : `/api/proxy/m3u8?url=${encodeURIComponent(rawUrl)}&allowCORS=true`;
           return appendSource(base);
         };
@@ -339,7 +339,7 @@ export function useArtPlayer(params: UseArtPlayerParams) {
                 useServerProxy: boolean,
               ) => {
                 const baseTargetUrl = useServerProxy
-                  ? `/api/proxy/m3u8?url=${encodeURIComponent(rawUrl)}`
+                  ? `/api/proxy/m3u8?url=${encodeURIComponent(rawUrl)}&forceServer=true`
                   : `/api/proxy/m3u8?url=${encodeURIComponent(rawUrl)}&allowCORS=true`;
                 return sourceKey
                   ? `${baseTargetUrl}&icetv-source=${encodeURIComponent(sourceKey)}`
