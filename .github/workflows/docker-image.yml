@@ -9,10 +9,8 @@ on:
         default: ''
         type: string
   push:
-    branches: [main, master]
-    paths:
-      - CHANGELOG
-      - CHANGELOG.md
+    tags:
+      - 'v*'
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
