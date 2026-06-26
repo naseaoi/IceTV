@@ -59,7 +59,8 @@ export default async function RootLayout({
     DOUBAN_PROXY_TYPE: process.env.NEXT_PUBLIC_DOUBAN_PROXY_TYPE || 'direct',
     DOUBAN_PROXY: process.env.NEXT_PUBLIC_DOUBAN_PROXY || '',
     DOUBAN_IMAGE_PROXY_TYPE:
-      process.env.NEXT_PUBLIC_DOUBAN_IMAGE_PROXY_TYPE || 'direct',
+      process.env.NEXT_PUBLIC_DOUBAN_IMAGE_PROXY_TYPE ||
+      'cmliussss-cdn-tencent',
     DOUBAN_IMAGE_PROXY: process.env.NEXT_PUBLIC_DOUBAN_IMAGE_PROXY || '',
     DISABLE_YELLOW_FILTER:
       process.env.NEXT_PUBLIC_DISABLE_YELLOW_FILTER === 'true',

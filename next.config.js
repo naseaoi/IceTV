@@ -32,7 +32,7 @@ try {
 const nextConfig = {
   output: 'standalone',
   reactStrictMode: false,
-  // dev server 允许的访问来源，避免 Next.js 未来版本在跨源访问 /_next/* 时拦截 HMR/静态资源
+  // dev server 允许的访问来源
   allowedDevOrigins: ['127.0.0.1', 'localhost'],
   compiler: {
     removeConsole:
@@ -43,7 +43,7 @@ const nextConfig = {
   serverExternalPackages: ['better-sqlite3', 'mysql2'],
   // 客户端 Router Cache：页面段在内存中保留 5 分钟，
   // 与首页 ISR revalidate=300 对齐，首页 → 搜索页 → 首页可复用组件树，
-  // 避免 HomeClient 重挂载导致的状态、滚动位置丢失。
+  // 首页返回时复用组件树、状态和滚动位置。
   experimental: {
     staleTimes: {
       dynamic: 300,
@@ -66,11 +66,15 @@ const nextConfig = {
     remotePatterns: [
       {
         protocol: 'https',
-        hostname: '**',
+        hostname: 'img.doubanio.cmliussss.net',
       },
       {
-        protocol: 'http',
-        hostname: '**',
+        protocol: 'https',
+        hostname: 'img.doubanio.cmliussss.com',
+      },
+      {
+        protocol: 'https',
+        hostname: 'lain.bgm.tv',
       },
     ],
   },

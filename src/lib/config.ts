@@ -1,5 +1,3 @@
-import { revalidateTag, unstable_cache } from 'next/cache';
-
 import { db } from '@/lib/db';
 import { getOwnerUsername } from '@/lib/env.server';
 
@@ -56,6 +54,23 @@ export const API_CONFIG = {
 
 let cachedConfig: AdminConfig;
 const PUBLIC_CONFIG_CACHE_TAG = 'public-config';
+
+type NextCacheApi = {
+  revalidateTag?: (tag: string) => void;
+  unstable_cache?: <T extends () => Promise<unknown>>(
+    callback: T,
+    keyParts: string[],
+    options: { revalidate: number; tags: string[] },
+  ) => T;
+};
+
+function loadNextCacheApi(): NextCacheApi | null {
+  try {
+    return require('next/cache') as NextCacheApi;
+  } catch {
+    return null;
+  }
+}
 
 // 从配置文件补充管理员配置
 export function refineConfig(adminConfig: AdminConfig): AdminConfig {
@@ -217,7 +232,8 @@ async function getInitConfig(
       DoubanProxyType: process.env.NEXT_PUBLIC_DOUBAN_PROXY_TYPE || 'direct',
       DoubanProxy: process.env.NEXT_PUBLIC_DOUBAN_PROXY || '',
       DoubanImageProxyType:
-        process.env.NEXT_PUBLIC_DOUBAN_IMAGE_PROXY_TYPE || 'direct',
+        process.env.NEXT_PUBLIC_DOUBAN_IMAGE_PROXY_TYPE ||
+        'cmliussss-cdn-tencent',
       DoubanImageProxy: process.env.NEXT_PUBLIC_DOUBAN_IMAGE_PROXY || '',
       DisableYellowFilter:
         process.env.NEXT_PUBLIC_DISABLE_YELLOW_FILTER === 'true',
@@ -336,7 +352,7 @@ export async function getConfig(): Promise<AdminConfig> {
 }
 
 export function configSelfCheck(adminConfig: AdminConfig): AdminConfig {
-  // 确保必要的属性存在和初始化
+  // 初始化必要属性
   if (!adminConfig.UserConfig) {
     adminConfig.UserConfig = { Users: [] };
   }
@@ -375,7 +391,8 @@ export function configSelfCheck(adminConfig: AdminConfig): AdminConfig {
       DoubanProxyType: process.env.NEXT_PUBLIC_DOUBAN_PROXY_TYPE || 'direct',
       DoubanProxy: process.env.NEXT_PUBLIC_DOUBAN_PROXY || '',
       DoubanImageProxyType:
-        process.env.NEXT_PUBLIC_DOUBAN_IMAGE_PROXY_TYPE || 'direct',
+        process.env.NEXT_PUBLIC_DOUBAN_IMAGE_PROXY_TYPE ||
+        'cmliussss-cdn-tencent',
       DoubanImageProxy: process.env.NEXT_PUBLIC_DOUBAN_IMAGE_PROXY || '',
       DisableYellowFilter:
         process.env.NEXT_PUBLIC_DISABLE_YELLOW_FILTER === 'true',
@@ -495,6 +512,10 @@ export function getCacheTime(config?: AdminConfig): number | Promise<number> {
     return config.SiteConfig.SiteInterfaceCacheTime || 7200;
   }
 
+  if (cachedConfig) {
+    return cachedConfig.SiteConfig.SiteInterfaceCacheTime || 7200;
+  }
+
   return getConfig().then(
     (currentConfig) => currentConfig.SiteConfig.SiteInterfaceCacheTime || 7200,
   );
@@ -575,33 +596,43 @@ function cloneConfig(config: AdminConfig): AdminConfig {
   return JSON.parse(JSON.stringify(config)) as AdminConfig;
 }
 
-export const getPublicConfig = unstable_cache(
-  async () => {
-    const config = await getConfig();
+async function readPublicConfig() {
+  const config = await getConfig();
 
-    return {
-      SiteName: config.SiteConfig.SiteName,
-      SiteIcon: config.SiteConfig.SiteIcon || '',
-      Announcement: config.SiteConfig.Announcement,
-      OpenRegister: !!config.UserConfig.OpenRegister,
-      DisableYellowFilter: config.SiteConfig.DisableYellowFilter,
-      EnableLiveEntry: config.SiteConfig.EnableLiveEntry,
-      CustomCategories: config.CustomCategories.filter(
-        (category) => !category.disabled,
-      ).map((category) => ({
-        name: category.name || '',
-        type: category.type,
-        query: category.query,
-      })),
-      FluidSearch: config.SiteConfig.FluidSearch,
-    };
-  },
-  [PUBLIC_CONFIG_CACHE_TAG],
-  { revalidate: 60, tags: [PUBLIC_CONFIG_CACHE_TAG] },
-);
+  return {
+    SiteName: config.SiteConfig.SiteName,
+    SiteIcon: config.SiteConfig.SiteIcon || '',
+    Announcement: config.SiteConfig.Announcement,
+    OpenRegister: !!config.UserConfig.OpenRegister,
+    DisableYellowFilter: config.SiteConfig.DisableYellowFilter,
+    EnableLiveEntry: config.SiteConfig.EnableLiveEntry,
+    CustomCategories: config.CustomCategories.filter(
+      (category) => !category.disabled,
+    ).map((category) => ({
+      name: category.name || '',
+      type: category.type,
+      query: category.query,
+    })),
+    FluidSearch: config.SiteConfig.FluidSearch,
+  };
+}
+
+const nextCacheApi = loadNextCacheApi();
+
+export const getPublicConfig: typeof readPublicConfig =
+  nextCacheApi?.unstable_cache
+    ? (nextCacheApi.unstable_cache(
+        readPublicConfig,
+        [PUBLIC_CONFIG_CACHE_TAG],
+        {
+          revalidate: 60,
+          tags: [PUBLIC_CONFIG_CACHE_TAG],
+        },
+      ) as typeof readPublicConfig)
+    : readPublicConfig;
 
 function invalidatePublicConfigCache() {
   try {
-    revalidateTag(PUBLIC_CONFIG_CACHE_TAG);
+    nextCacheApi?.revalidateTag?.(PUBLIC_CONFIG_CACHE_TAG);
   } catch {}
 }

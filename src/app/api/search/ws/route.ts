@@ -27,7 +27,8 @@ export async function GET(request: NextRequest) {
   }
 
   const config = await getConfig();
-  const apiSites = await getAvailableApiSites(guardResult.username);
+  const apiSites = await getAvailableApiSites(guardResult.username, config);
+  const maxSearchPages = config.SiteConfig.SearchDownstreamMaxPage;
 
   // 共享状态
   let streamClosed = false;
@@ -78,7 +79,7 @@ export async function GET(request: NextRequest) {
         try {
           // 添加超时控制
           const searchPromise = withTimeout(
-            searchFromApi(site, query),
+            searchFromApi(site, query, { maxSearchPages }),
             20000,
             `${site.name} timeout`,
           );

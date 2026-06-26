@@ -10,20 +10,20 @@ export type DoubanImageProxyType =
 
 /**
  * 获取豆瓣图片代理配置。
- * 优先级：用户手动设置(localStorage) > 管理后台(RUNTIME_CONFIG) > 默认(direct)
+ * 优先级：用户手动设置(localStorage) > 管理后台(RUNTIME_CONFIG) > 默认 CDN
  */
 export function getDoubanImageProxyConfig(): {
   proxyType: DoubanImageProxyType;
   proxyUrl: string;
 } {
   if (typeof window === 'undefined') {
-    // SSR 端无法读取客户端配置，返回 direct（配合 CoverImage unoptimized 使用）
-    return { proxyType: 'direct', proxyUrl: '' };
+    // SSR 端返回默认 CDN 配置
+    return { proxyType: 'cmliussss-cdn-tencent', proxyUrl: '' };
   }
   const doubanImageProxyType =
     localStorage.getItem('doubanImageProxyType') ||
     window.RUNTIME_CONFIG?.DOUBAN_IMAGE_PROXY_TYPE ||
-    'direct';
+    'cmliussss-cdn-tencent';
   const doubanImageProxy =
     localStorage.getItem('doubanImageProxyUrl') ||
     window.RUNTIME_CONFIG?.DOUBAN_IMAGE_PROXY ||

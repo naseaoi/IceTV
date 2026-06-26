@@ -1,7 +1,7 @@
 # IceTV
 
 <div align="center">
-  <img src="public/logo.png" alt="IceTV Logo" width="120">
+  <img src="public/logo.webp" alt="IceTV Logo" width="120">
 </div>
 
 > IceTV 是一个开箱即用的、跨平台的影视聚合播放器。基于 Next.js 16 + Tailwind CSS + TypeScript 构建，支持多资源搜索、在线播放、收藏同步、播放记录、云端存储，随时随地畅享海量免费影视内容。
@@ -24,9 +24,9 @@
 
 <details>
   <summary>项目截图</summary>
-  <img src="public/screenshot1.png" alt="项目截图" style="max-width:600px">
-  <img src="public/screenshot2.png" alt="项目截图" style="max-width:600px">
-  <img src="public/screenshot3.png" alt="项目截图" style="max-width:600px">
+  <img src="public/screenshot1.webp" alt="项目截图" style="max-width:600px">
+  <img src="public/screenshot2.webp" alt="项目截图" style="max-width:600px">
+  <img src="public/screenshot3.webp" alt="项目截图" style="max-width:600px">
 </details>
 
 ---

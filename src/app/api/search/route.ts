@@ -33,13 +33,15 @@ export async function GET(request: NextRequest) {
   }
 
   const config = await getConfig();
-  const apiSites = await getAvailableApiSites(guardResult.username);
+  const cacheTime = getCacheTime(config);
+  const apiSites = await getAvailableApiSites(guardResult.username, config);
+  const maxSearchPages = config.SiteConfig.SearchDownstreamMaxPage;
 
   // 添加超时控制和错误处理，避免慢接口拖累整体响应
   const searchTasks = apiSites.map(
     (site) => async () =>
       withTimeout(
-        searchFromApi(site, query),
+        searchFromApi(site, query, { maxSearchPages }),
         20000,
         `${site.name} timeout`,
       ).catch((err) => {
@@ -63,8 +65,6 @@ export async function GET(request: NextRequest) {
         return !yellowWords.some((word: string) => typeName.includes(word));
       });
     }
-    const cacheTime = await getCacheTime();
-
     if (flattenedResults.length === 0) {
       // no cache if empty
       return NextResponse.json({ results: [] }, { status: 200 });

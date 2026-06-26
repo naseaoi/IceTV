@@ -32,7 +32,9 @@ export async function GET(request: NextRequest) {
   }
 
   const config = await getConfig();
-  const apiSites = await getAvailableApiSites(guardResult.username);
+  const cacheTime = getCacheTime(config);
+  const apiSites = await getAvailableApiSites(guardResult.username, config);
+  const maxSearchPages = config.SiteConfig.SearchDownstreamMaxPage;
 
   try {
     // 根据 resourceId 查找对应的 API 站点
@@ -47,7 +49,7 @@ export async function GET(request: NextRequest) {
       );
     }
 
-    const results = await searchFromApi(targetSite, query);
+    const results = await searchFromApi(targetSite, query, { maxSearchPages });
     let result = results.filter((r) => r.title === query);
     if (!config.SiteConfig.DisableYellowFilter) {
       result = result.filter((item) => {
@@ -55,8 +57,6 @@ export async function GET(request: NextRequest) {
         return !yellowWords.some((word: string) => typeName.includes(word));
       });
     }
-    const cacheTime = await getCacheTime();
-
     if (result.length === 0) {
       return NextResponse.json(
         {

@@ -21,7 +21,7 @@ export const DEFAULT_RUNTIME_CONFIG: RuntimeConfig = {
   UPDATE_BRANCH: 'main',
   DOUBAN_PROXY_TYPE: 'direct',
   DOUBAN_PROXY: '',
-  DOUBAN_IMAGE_PROXY_TYPE: 'direct',
+  DOUBAN_IMAGE_PROXY_TYPE: 'cmliussss-cdn-tencent',
   DOUBAN_IMAGE_PROXY: '',
   DISABLE_YELLOW_FILTER: false,
   ENABLE_LIVE_ENTRY: false,

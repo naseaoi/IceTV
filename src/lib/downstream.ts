@@ -598,6 +598,7 @@ async function fetchAndCacheSearchPage(
 export async function searchFromApi(
   apiSite: ApiSite,
   query: string,
+  options: { maxSearchPages?: number } = {},
 ): Promise<SearchResult[]> {
   if (isGirigiriSource(apiSite)) {
     return searchFromGirigiri(apiSite, query);
@@ -619,8 +620,9 @@ export async function searchFromApi(
     const results = firstPageResult.results;
     const pageCountFromFirst = firstPageResult.pageCount;
 
-    const config = await getConfig();
-    const MAX_SEARCH_PAGES: number = config.SiteConfig.SearchDownstreamMaxPage;
+    const MAX_SEARCH_PAGES =
+      options.maxSearchPages ??
+      (await getConfig()).SiteConfig.SearchDownstreamMaxPage;
 
     // 获取总页数
     const pageCount = pageCountFromFirst || 1;

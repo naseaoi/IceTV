@@ -33,6 +33,11 @@ const PLACEHOLDER_COLORS = [
   '#818cf8',
   '#22c55e',
 ];
+const NEXT_IMAGE_OPTIMIZED_HOSTS = new Set([
+  'img.doubanio.cmliussss.net',
+  'img.doubanio.cmliussss.com',
+  'lain.bgm.tv',
+]);
 
 /** 全局事件总线：某个实例加载成功后通知同 src 的其他实例 */
 const imageLoadEmitter = new EventTarget();
@@ -62,7 +67,7 @@ function isImageCached(url: string): boolean {
     return false;
   }
 
-  // 命中时刷新访问顺序，避免热图被一次性淘汰。
+  // 命中时刷新访问顺序，保留热图。
   const cachedAt = loadedImageCache.get(url) ?? Date.now();
   loadedImageCache.delete(url);
   loadedImageCache.set(url, cachedAt);
@@ -113,6 +118,22 @@ function buildBlurDataURL(color: string): string {
   return `data:image/svg+xml;charset=UTF-8,${encodeURIComponent(svg)}`;
 }
 
+function canUseNextImageOptimization(url: string): boolean {
+  if (!url || url.startsWith('/') || url.startsWith('data:')) {
+    return false;
+  }
+
+  try {
+    const parsed = new URL(url);
+    return (
+      parsed.protocol === 'https:' &&
+      NEXT_IMAGE_OPTIMIZED_HOSTS.has(parsed.hostname)
+    );
+  } catch {
+    return false;
+  }
+}
+
 /** 最大重试次数（首次加载不算，失败后最多再试 MAX_RETRIES 次） */
 const MAX_RETRIES = 2;
 /** 每次重试间隔 ms */
@@ -131,6 +152,7 @@ interface CoverImageProps {
   priority?: boolean;
   /** 传给 Next.js Image 的 sizes，默认 '(max-width: 640px) 96px, 180px' */
   sizes?: string;
+  quality?: number;
   /** object-fit 模式，默认 'cover' */
   fit?: 'cover' | 'contain';
   /** 骨架屏宽高比 class，默认 'aspect-[2/3]' */
@@ -153,6 +175,7 @@ const CoverImage: React.FC<CoverImageProps> = memo(function CoverImage({
   alt,
   priority = false,
   sizes = '(max-width: 640px) 96px, 180px',
+  quality = 72,
   fit = 'cover',
   placeholderColor,
   enableRetry = true,
@@ -171,10 +194,7 @@ const CoverImage: React.FC<CoverImageProps> = memo(function CoverImage({
 
   const needsUnoptimized = useMemo(() => {
     if (!processed) return false;
-    if (processed.startsWith('/')) return true;
-    if (processed.includes('doubanio.com') && !processed.includes('cmliussss'))
-      return true;
-    return false;
+    return !canUseNextImageOptimization(processed);
   }, [processed]);
 
   const displaySrc = useMemo(
@@ -187,7 +207,7 @@ const CoverImage: React.FC<CoverImageProps> = memo(function CoverImage({
 
   const cached = !isEmpty && isImageCached(src);
   // 可见性门控：只有进入/接近可视区域才允许 acquire slot。
-  // 首屏 priority 图片直接放行，避免还在等待 IO 回调。
+  // 首屏 priority 图片直接放行。
   const [isNearViewport, setIsNearViewport] = useState(cached || priority);
   const [loaded, setLoaded] = useState(cached);
   const [hasError, setHasError] = useState(false);
@@ -230,7 +250,7 @@ const CoverImage: React.FC<CoverImageProps> = memo(function CoverImage({
   }, [priority, src]);
 
   // 可见性检测：进入视口附近一小段距离时就开始预加载
-  // 避免首页横向滚动行中大量不可见卡片同时排队
+  // 首页横向滚动行控制不可见卡片排队
   useEffect(() => {
     if (isEmpty || isNearViewport || priority) return;
     const el = containerRef.current;
@@ -250,7 +270,7 @@ const CoverImage: React.FC<CoverImageProps> = memo(function CoverImage({
   }, [isEmpty, isNearViewport, priority]);
 
   // 请求并发 slot（可见 & 未缓存 & 未出错 & 尚未获得 slot 时排队）
-  // 注意：不把 slotGranted 放在依赖中，避免获得 slot 后 cleanup 提前释放
+  // 注意：不把 slotGranted 放在依赖中。
   const needsSlot = !isEmpty && isNearViewport && !slotGranted && !hasError;
   const needsSlotRef = useRef(needsSlot);
   needsSlotRef.current = needsSlot;
@@ -307,7 +327,7 @@ const CoverImage: React.FC<CoverImageProps> = memo(function CoverImage({
       releaseSlotRef.current = null;
       return;
     }
-    // 重试期间保持加载态（显示转圈动画），避免闪现损坏图标
+    // 重试期间保持加载态
     // 不释放 slot——重试仍在使用同一个 slot
     setLoaded(false);
     retryCountRef.current += 1;
@@ -340,6 +360,7 @@ const CoverImage: React.FC<CoverImageProps> = memo(function CoverImage({
           alt={alt}
           fill
           sizes={sizes}
+          quality={quality}
           preload={priority}
           unoptimized={needsUnoptimized}
           placeholder='blur'
