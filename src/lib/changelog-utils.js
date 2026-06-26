@@ -178,7 +178,6 @@ function buildChangelogManifest(content) {
   const parsed = validateChangelog(content);
   return {
     latestVersion: parsed.latestVersion || '',
-    generatedAt: Date.now(),
     entries: parsed.entries,
     errors: parsed.errors,
   };

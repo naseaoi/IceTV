@@ -2,6 +2,7 @@
 
 const fs = require('fs');
 const path = require('path');
+const prettier = require('prettier');
 
 const { buildChangelogManifest } = require('../src/lib/changelog-utils');
 
@@ -24,7 +25,16 @@ function updatePackageJsonVersion(version) {
   console.log(`📦 已同步 package.json 版本: ${version}`);
 }
 
-function main() {
+async function formatJsonFileContent(outputPath, data) {
+  const prettierConfig = (await prettier.resolveConfig(outputPath)) || {};
+
+  return await prettier.format(`${JSON.stringify(data, null, 2)}\n`, {
+    ...prettierConfig,
+    filepath: outputPath,
+  });
+}
+
+async function main() {
   try {
     const changelogPath = path.join(process.cwd(), 'CHANGELOG');
     const outputPath = path.join(process.cwd(), 'public/changelog.json');
@@ -52,17 +62,11 @@ function main() {
     console.log(`🔢 最新版本: ${latestVersion}`);
 
     console.log('正在生成 changelog.json...');
-    const jsonContent = `${JSON.stringify(
-      {
-        latestVersion: changelogData.latestVersion,
-        generatedAt: changelogData.generatedAt,
-        entries: changelogData.entries,
-      },
-      null,
-      2,
-    )}\n`;
+    const jsonContent = await formatJsonFileContent(outputPath, {
+      latestVersion: changelogData.latestVersion,
+      entries: changelogData.entries,
+    });
 
-    // 确保输出目录存在
     const outputDir = path.dirname(outputPath);
     if (!fs.existsSync(outputDir)) {
       fs.mkdirSync(outputDir, { recursive: true });
@@ -87,5 +91,5 @@ function main() {
 }
 
 if (require.main === module) {
-  main();
+  void main();
 }
