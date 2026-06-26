@@ -1,23 +1,37 @@
-/**
- * 通用的豆瓣数据获取函数
- * @param url 请求的URL
- * @returns Promise<T> 返回指定类型的数据
- */
-export async function fetchDoubanData<T>(url: string): Promise<T> {
-  // 添加超时控制
-  const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), 10000); // 10秒超时
+type DoubanFetchInit = RequestInit & {
+  next?: {
+    revalidate?: number;
+  };
+};
 
-  // 设置请求选项，包括信号和头部
+export async function fetchDoubanData<T>(
+  url: string,
+  init: DoubanFetchInit = {},
+): Promise<T> {
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 10000);
+  const headers = new Headers(init.headers);
+
+  if (!headers.has('User-Agent')) {
+    headers.set(
+      'User-Agent',
+      'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36',
+    );
+  }
+  if (!headers.has('Referer')) {
+    headers.set('Referer', 'https://movie.douban.com/');
+  }
+  if (!headers.has('Accept')) {
+    headers.set('Accept', 'application/json, text/plain, */*');
+  }
+  if (!headers.has('Origin')) {
+    headers.set('Origin', 'https://movie.douban.com');
+  }
+
   const fetchOptions = {
+    ...init,
     signal: controller.signal,
-    headers: {
-      'User-Agent':
-        'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36',
-      Referer: 'https://movie.douban.com/',
-      Accept: 'application/json, text/plain, */*',
-      Origin: 'https://movie.douban.com',
-    },
+    headers,
   };
 
   try {

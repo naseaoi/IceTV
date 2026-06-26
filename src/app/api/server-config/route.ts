@@ -1,46 +1,48 @@
 import { NextRequest, NextResponse } from 'next/server';
 
 import { getOptionalActiveUser } from '@/lib/api-auth';
-import { getConfig } from '@/lib/config';
+import { getConfig, getPublicConfig } from '@/lib/config';
 import { getStorageType } from '@/lib/storage-type';
 import { CURRENT_VERSION } from '@/lib/version';
 
 export const runtime = 'nodejs';
 
 export async function GET(request: NextRequest) {
-  const config = await getConfig();
   const activeUser = await getOptionalActiveUser(request);
   const canReadSensitiveConfig = !!activeUser;
+  const publicConfig = await getPublicConfig();
+  const config = canReadSensitiveConfig ? await getConfig() : null;
   const result = {
-    SiteName: config.SiteConfig.SiteName,
-    SiteIcon: config.SiteConfig.SiteIcon || '',
+    SiteName: publicConfig.SiteName,
+    SiteIcon: publicConfig.SiteIcon,
+    Announcement: publicConfig.Announcement,
     StorageType: getStorageType(),
     Version: CURRENT_VERSION,
-    OpenRegister: !!config.UserConfig.OpenRegister,
+    OpenRegister: publicConfig.OpenRegister,
     UpdateRepos: process.env.NEXT_PUBLIC_UPDATE_REPOS || 'naseaoi/IceTV',
     UpdateBranch: process.env.NEXT_PUBLIC_UPDATE_BRANCH || 'main',
     DoubanProxyType: canReadSensitiveConfig
-      ? config.SiteConfig.DoubanProxyType
+      ? config!.SiteConfig.DoubanProxyType
       : 'direct',
     DoubanProxy: canReadSensitiveConfig
-      ? config.SiteConfig.DoubanProxy || ''
+      ? config!.SiteConfig.DoubanProxy || ''
       : '',
     DoubanImageProxyType: canReadSensitiveConfig
-      ? config.SiteConfig.DoubanImageProxyType
+      ? config!.SiteConfig.DoubanImageProxyType
       : 'direct',
     DoubanImageProxy: canReadSensitiveConfig
-      ? config.SiteConfig.DoubanImageProxy || ''
+      ? config!.SiteConfig.DoubanImageProxy || ''
       : '',
-    DisableYellowFilter: config.SiteConfig.DisableYellowFilter,
-    EnableLiveEntry: config.SiteConfig.EnableLiveEntry,
-    CustomCategories: config.CustomCategories.filter(
-      (category) => !category.disabled,
-    ).map((category) => ({
-      name: category.name || '',
-      type: category.type,
-      query: category.query,
-    })),
-    FluidSearch: config.SiteConfig.FluidSearch,
+    DisableYellowFilter: publicConfig.DisableYellowFilter,
+    EnableLiveEntry: publicConfig.EnableLiveEntry,
+    CustomCategories: publicConfig.CustomCategories,
+    FluidSearch: publicConfig.FluidSearch,
   };
-  return NextResponse.json(result);
+  return NextResponse.json(result, {
+    headers: {
+      'Cache-Control': canReadSensitiveConfig
+        ? 'private, max-age=60, stale-while-revalidate=300'
+        : 'public, max-age=60, stale-while-revalidate=300',
+    },
+  });
 }

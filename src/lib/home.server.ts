@@ -3,6 +3,8 @@ import { fetchDoubanData } from './douban';
 import { HomeInitialData } from './home.types';
 import { DoubanItem } from './types';
 
+const HOME_REVALIDATE_SECONDS = 21600;
+
 interface DoubanCategoryApiResponse {
   items: Array<{
     id: string;
@@ -27,7 +29,9 @@ async function getServerDoubanRecentHot(params: {
 }): Promise<DoubanItem[]> {
   const { kind, category, type, limit = 20, start = 0 } = params;
   const target = `https://m.douban.com/rexxar/api/v2/subject/recent_hot/${kind}?start=${start}&limit=${limit}&category=${category}&type=${type}`;
-  const doubanData = await fetchDoubanData<DoubanCategoryApiResponse>(target);
+  const doubanData = await fetchDoubanData<DoubanCategoryApiResponse>(target, {
+    next: { revalidate: HOME_REVALIDATE_SECONDS },
+  });
 
   return doubanData.items.map((item) => ({
     id: item.id,
@@ -57,7 +61,9 @@ export async function getHomeInitialData(): Promise<HomeInitialData> {
           category: 'show',
           type: 'show',
         }),
-        getBangumiCalendarData(),
+        getBangumiCalendarData({
+          next: { revalidate: HOME_REVALIDATE_SECONDS },
+        }),
       ]);
 
     return {

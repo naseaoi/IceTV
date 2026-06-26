@@ -38,6 +38,161 @@ interface UseSearchAggregationParams {
   searchQuery: string;
 }
 
+type SearchIndexBucket = {
+  yearMap: Map<string, SearchResult[]>;
+  yearOrder: string[];
+};
+
+type SearchAggregationIndex = {
+  resultCount: number;
+  titleBuckets: Map<string, SearchIndexBucket>;
+  titleOrder: string[];
+  sources: Map<string, string>;
+  titles: Set<string>;
+  years: Set<string>;
+  version: number;
+};
+
+function createSearchAggregationIndex(): SearchAggregationIndex {
+  return {
+    resultCount: 0,
+    titleBuckets: new Map(),
+    titleOrder: [],
+    sources: new Map(),
+    titles: new Set(),
+    years: new Set(),
+    version: 0,
+  };
+}
+
+function addSearchResultToIndex(
+  index: SearchAggregationIndex,
+  item: SearchResult,
+) {
+  if (item.source && item.source_name) {
+    index.sources.set(item.source, item.source_name);
+  }
+  if (item.title) {
+    index.titles.add(item.title);
+  }
+  if (item.year) {
+    index.years.add(item.year);
+  }
+
+  const normalizedTitle = normalizeTitleForAggregation(item.title || '');
+  if (!normalizedTitle) {
+    index.resultCount += 1;
+    return;
+  }
+
+  let bucket = index.titleBuckets.get(normalizedTitle);
+  if (!bucket) {
+    bucket = {
+      yearMap: new Map(),
+      yearOrder: [],
+    };
+    index.titleBuckets.set(normalizedTitle, bucket);
+    index.titleOrder.push(normalizedTitle);
+  }
+
+  const normalizedYear =
+    item.year && item.year !== 'unknown' ? item.year : 'unknown';
+  let yearItems = bucket.yearMap.get(normalizedYear);
+  if (!yearItems) {
+    yearItems = [];
+    bucket.yearMap.set(normalizedYear, yearItems);
+    bucket.yearOrder.push(normalizedYear);
+  }
+  yearItems.push(item);
+  index.resultCount += 1;
+}
+
+function canAppendSearchResults(
+  previousResults: SearchResult[],
+  nextResults: SearchResult[],
+) {
+  if (previousResults.length > nextResults.length) {
+    return false;
+  }
+  if (previousResults.length === 0) {
+    return true;
+  }
+
+  const lastPreviousIndex = previousResults.length - 1;
+  return (
+    nextResults[0] === previousResults[0] &&
+    nextResults[lastPreviousIndex] === previousResults[lastPreviousIndex]
+  );
+}
+
+function buildSearchAggregationIndex(searchResults: SearchResult[]) {
+  const index = createSearchAggregationIndex();
+  searchResults.forEach((item) => addSearchResultToIndex(index, item));
+  return index;
+}
+
+function useSearchAggregationIndex(searchResults: SearchResult[]) {
+  const indexRef = useRef<SearchAggregationIndex>(
+    createSearchAggregationIndex(),
+  );
+  const previousResultsRef = useRef<SearchResult[]>([]);
+
+  return useMemo(() => {
+    const previousResults = previousResultsRef.current;
+    const isAppend = canAppendSearchResults(previousResults, searchResults);
+    let index = indexRef.current;
+
+    if (isAppend) {
+      searchResults
+        .slice(previousResults.length)
+        .forEach((item) => addSearchResultToIndex(index, item));
+    } else {
+      index = buildSearchAggregationIndex(searchResults);
+    }
+
+    index.version += 1;
+    indexRef.current = index;
+    previousResultsRef.current = searchResults;
+
+    return {
+      index,
+      version: index.version,
+    };
+  }, [searchResults]);
+}
+
+function materializeAggregatedResults(index: SearchAggregationIndex) {
+  const groupedResults: [string, SearchResult[]][] = [];
+
+  index.titleOrder.forEach((normalizedTitle) => {
+    const bucket = index.titleBuckets.get(normalizedTitle);
+    if (!bucket) return;
+
+    const knownYears = bucket.yearOrder.filter((year) => year !== 'unknown');
+    const unknownItems = bucket.yearMap.get('unknown') || [];
+    const mergeUnknownYear =
+      unknownItems.length > 0 && knownYears.length === 1 ? knownYears[0] : '';
+
+    bucket.yearOrder
+      .filter((year) => bucket.yearMap.has(year))
+      .forEach((year) => {
+        if (year === 'unknown' && mergeUnknownYear) {
+          return;
+        }
+
+        const yearItems = bucket.yearMap.get(year) || [];
+        const group =
+          year === mergeUnknownYear
+            ? yearItems.concat(unknownItems)
+            : yearItems;
+
+        groupedResults.push([`${normalizedTitle}-${year}`, group]);
+      });
+  });
+
+  return groupedResults;
+}
+
 export function useSearchAggregation({
   searchResults,
   filterAll,
@@ -65,65 +220,12 @@ export function useSearchAggregation({
   };
 
   const trimmedSearchQuery = useMemo(() => searchQuery.trim(), [searchQuery]);
+  const searchIndexState = useSearchAggregationIndex(searchResults);
 
-  // 聚合后的结果（按标题和年份分组）
-  const aggregatedResults = useMemo(() => {
-    const titleBuckets = new Map<string, SearchResult[]>();
-    const titleOrder: string[] = [];
-
-    searchResults.forEach((item) => {
-      const normalizedTitle = normalizeTitleForAggregation(item.title || '');
-      if (!normalizedTitle) {
-        return;
-      }
-      if (!titleBuckets.has(normalizedTitle)) {
-        titleBuckets.set(normalizedTitle, []);
-        titleOrder.push(normalizedTitle);
-      }
-      titleBuckets.get(normalizedTitle)!.push(item);
-    });
-
-    const groupedResults: [string, SearchResult[]][] = [];
-
-    titleOrder.forEach((normalizedTitle) => {
-      const bucket = titleBuckets.get(normalizedTitle) || [];
-      if (bucket.length === 0) return;
-
-      const yearMap = new Map<string, SearchResult[]>();
-      const yearOrder: string[] = [];
-
-      bucket.forEach((item) => {
-        const normalizedYear =
-          item.year && item.year !== 'unknown' ? item.year : 'unknown';
-        if (!yearMap.has(normalizedYear)) {
-          yearMap.set(normalizedYear, []);
-          yearOrder.push(normalizedYear);
-        }
-        yearMap.get(normalizedYear)!.push(item);
-      });
-
-      const knownYears = yearOrder.filter((year) => year !== 'unknown');
-      const unknownItems = yearMap.get('unknown') || [];
-
-      if (unknownItems.length > 0) {
-        if (knownYears.length === 1) {
-          yearMap.get(knownYears[0])!.push(...unknownItems);
-          yearMap.delete('unknown');
-        }
-      }
-
-      yearOrder
-        .filter((year) => yearMap.has(year))
-        .forEach((year) => {
-          groupedResults.push([
-            `${normalizedTitle}-${year}`,
-            yearMap.get(year)!,
-          ]);
-        });
-    });
-
-    return groupedResults;
-  }, [searchResults]);
+  const aggregatedResults = useMemo(
+    () => materializeAggregatedResults(searchIndexState.index),
+    [searchIndexState.index, searchIndexState.version],
+  );
 
   const aggregatedResultItems = useMemo<AggregatedResultItem[]>(() => {
     return aggregatedResults.map(([mapKey, group]) => {
@@ -188,37 +290,27 @@ export function useSearchAggregation({
 
   // 构建筛选选项
   const filterOptions = useMemo(() => {
-    const sourcesSet = new Map<string, string>();
-    const titlesSet = new Set<string>();
-    const yearsSet = new Set<string>();
-
-    searchResults.forEach((item) => {
-      if (item.source && item.source_name) {
-        sourcesSet.set(item.source, item.source_name);
-      }
-      if (item.title) titlesSet.add(item.title);
-      if (item.year) yearsSet.add(item.year);
-    });
+    const { sources, titles, years } = searchIndexState.index;
 
     const sourceOptions: { label: string; value: string }[] = [
       { label: '全部来源', value: 'all' },
-      ...Array.from(sourcesSet.entries())
+      ...Array.from(sources.entries())
         .sort((a, b) => a[1].localeCompare(b[1]))
         .map(([value, label]) => ({ label, value })),
     ];
 
     const titleOptions: { label: string; value: string }[] = [
       { label: '全部标题', value: 'all' },
-      ...Array.from(titlesSet.values())
+      ...Array.from(titles.values())
         .sort((a, b) => a.localeCompare(b))
         .map((t) => ({ label: t, value: t })),
     ];
 
-    const years = Array.from(yearsSet.values());
-    const knownYears = years
+    const yearValues = Array.from(years.values());
+    const knownYears = yearValues
       .filter((y) => y !== 'unknown')
       .sort((a, b) => parseInt(b) - parseInt(a));
-    const hasUnknown = years.includes('unknown');
+    const hasUnknown = yearValues.includes('unknown');
     const yearOptions: { label: string; value: string }[] = [
       { label: '全部年份', value: 'all' },
       ...knownYears.map((y) => ({ label: y, value: y })),
@@ -238,11 +330,21 @@ export function useSearchAggregation({
     ];
 
     return { categoriesAll, categoriesAgg };
-  }, [searchResults]);
+  }, [searchIndexState.index, searchIndexState.version]);
 
   // 非聚合筛选+排序
   const filteredAllResults = useMemo(() => {
     const { source, title, year, yearOrder } = filterAll;
+
+    if (
+      source === 'all' &&
+      title === 'all' &&
+      year === 'all' &&
+      yearOrder === 'none'
+    ) {
+      return searchResults;
+    }
+
     const filtered = searchResults.filter((item) => {
       if (source !== 'all' && item.source !== source) return false;
       if (title !== 'all' && item.title !== title) return false;
@@ -272,6 +374,16 @@ export function useSearchAggregation({
   // 聚合筛选+排序
   const filteredAggResults = useMemo(() => {
     const { source, title, year, yearOrder } = filterAgg;
+
+    if (
+      source === 'all' &&
+      title === 'all' &&
+      year === 'all' &&
+      yearOrder === 'none'
+    ) {
+      return aggregatedResultItems;
+    }
+
     const filtered = aggregatedResultItems.filter((item) => {
       const gTitle = item.title;
       const gYear = item.year;

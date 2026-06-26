@@ -1,5 +1,3 @@
-import { cookies } from 'next/headers';
-
 import PageLayout from '@/components/PageLayout';
 
 function CapsuleSwitchSkeleton() {
@@ -60,14 +58,7 @@ function SkeletonSectionHeader() {
   );
 }
 
-/** 首页骨架屏：读取 cw_count cookie 适配"继续观看"区域 */
-export default async function HomeLoading() {
-  const cookieStore = await cookies();
-  const cwCount = Math.min(
-    parseInt(cookieStore.get('cw_count')?.value || '0', 10) || 0,
-    8,
-  );
-
+export default function HomeLoading() {
   return (
     <PageLayout>
       <div className='overflow-visible px-2 pb-2 pt-4 sm:px-10 sm:pt-8'>
@@ -77,17 +68,6 @@ export default async function HomeLoading() {
         </div>
 
         <div className='mx-auto max-w-[95%]'>
-          {/* 继续观看骨架：根据 cookie 中缓存的数量渲染，无记录则不渲染 */}
-          {cwCount > 0 && (
-            <section className='mb-4'>
-              <div className='mb-4 flex items-center justify-between'>
-                <div className='h-7 w-24 animate-pulse rounded bg-gray-200 dark:bg-gray-800' />
-                <div className='h-5 w-10 animate-pulse rounded bg-gray-200 dark:bg-gray-800' />
-              </div>
-              <SkeletonRow count={cwCount} withSubtitle />
-            </section>
-          )}
-
           {/* 推荐区域骨架 */}
           <section className='mb-4'>
             <SkeletonSectionHeader />

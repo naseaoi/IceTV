@@ -29,6 +29,7 @@ import { UserMenu } from './UserMenu';
 
 import { getAuthInfoFromBrowserCookie } from '@/lib/auth';
 import { useSmartHomeNav } from '@/hooks/useSmartHomeNav';
+import { RuntimeConfig } from '@/lib/runtime-config';
 
 interface SidebarContextType {
   isCollapsed: boolean;
@@ -64,6 +65,55 @@ const SiteIcon = () => {
 interface SidebarProps {
   onToggle?: (collapsed: boolean) => void;
   activePath?: string;
+}
+
+type SidebarMenuItem = {
+  icon: typeof Film;
+  label: string;
+  href: string;
+};
+
+function getSidebarMenuItems(runtimeConfig?: RuntimeConfig): SidebarMenuItem[] {
+  const nextItems: SidebarMenuItem[] = [
+    {
+      icon: Film,
+      label: '电影',
+      href: '/douban?type=movie',
+    },
+    {
+      icon: Tv,
+      label: '剧集',
+      href: '/douban?type=tv',
+    },
+    {
+      icon: Cat,
+      label: '动漫',
+      href: '/douban?type=anime',
+    },
+    {
+      icon: Clover,
+      label: '综艺',
+      href: '/douban?type=show',
+    },
+  ];
+
+  if (runtimeConfig?.ENABLE_LIVE_ENTRY) {
+    nextItems.push({
+      icon: Radio,
+      label: '直播',
+      href: '/live',
+    });
+  }
+
+  if ((runtimeConfig?.CUSTOM_CATEGORIES?.length ?? 0) > 0) {
+    nextItems.push({
+      icon: Star,
+      label: '自定义',
+      href: '/douban?type=custom',
+    });
+  }
+
+  return nextItems;
 }
 
 // 在浏览器环境下通过全局变量缓存折叠状态，避免组件重新挂载时出现初始值闪烁
@@ -165,16 +215,8 @@ const Sidebar = ({ onToggle, activePath = '/' }: SidebarProps) => {
     const routes = [
       '/',
       '/search',
-      '/douban?type=movie',
-      '/douban?type=tv',
-      '/douban?type=anime',
-      '/douban?type=show',
-      '/douban?type=custom',
+      ...getSidebarMenuItems(window.RUNTIME_CONFIG).map((item) => item.href),
     ];
-
-    if (window.RUNTIME_CONFIG?.ENABLE_LIVE_ENTRY) {
-      routes.push('/live');
-    }
 
     const prefetchAll = () => {
       routes.forEach(prefetchRoute);
@@ -207,71 +249,23 @@ const Sidebar = ({ onToggle, activePath = '/' }: SidebarProps) => {
     isCollapsed,
   };
 
-  const [menuItems, setMenuItems] = useState([
-    {
-      icon: Film,
-      label: '电影',
-      href: '/douban?type=movie',
-    },
-    {
-      icon: Tv,
-      label: '剧集',
-      href: '/douban?type=tv',
-    },
-    {
-      icon: Cat,
-      label: '动漫',
-      href: '/douban?type=anime',
-    },
-    {
-      icon: Clover,
-      label: '综艺',
-      href: '/douban?type=show',
-    },
-  ]);
+  const [menuItems, setMenuItems] = useState<SidebarMenuItem[]>(() =>
+    getSidebarMenuItems(
+      typeof window === 'undefined' ? undefined : window.RUNTIME_CONFIG,
+    ),
+  );
 
   useEffect(() => {
-    const runtimeConfig = window.RUNTIME_CONFIG;
-    const nextItems = [
-      {
-        icon: Film,
-        label: '电影',
-        href: '/douban?type=movie',
-      },
-      {
-        icon: Tv,
-        label: '剧集',
-        href: '/douban?type=tv',
-      },
-      {
-        icon: Cat,
-        label: '动漫',
-        href: '/douban?type=anime',
-      },
-      {
-        icon: Clover,
-        label: '综艺',
-        href: '/douban?type=show',
-      },
-    ];
+    const updateMenuItems = () => {
+      setMenuItems(getSidebarMenuItems(window.RUNTIME_CONFIG));
+    };
 
-    if (runtimeConfig?.ENABLE_LIVE_ENTRY) {
-      nextItems.push({
-        icon: Radio,
-        label: '直播',
-        href: '/live',
-      });
-    }
+    updateMenuItems();
+    window.addEventListener('runtime-config-updated', updateMenuItems);
 
-    if ((runtimeConfig?.CUSTOM_CATEGORIES?.length ?? 0) > 0) {
-      nextItems.push({
-        icon: Star,
-        label: '自定义',
-        href: '/douban?type=custom',
-      });
-    }
-
-    setMenuItems(nextItems);
+    return () => {
+      window.removeEventListener('runtime-config-updated', updateMenuItems);
+    };
   }, []);
 
   return (

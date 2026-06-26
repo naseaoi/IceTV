@@ -5,11 +5,43 @@ import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { useEffect, useState } from 'react';
 
+import { RuntimeConfig } from '@/lib/runtime-config';
+
 interface MobileBottomNavProps {
   /**
    * 主动指定当前激活的路径。当未提供时，自动使用 usePathname() 获取的路径。
    */
   activePath?: string;
+}
+
+type MobileNavItem = {
+  icon: typeof Home;
+  label: string;
+  href: string;
+};
+
+function getMobileNavItems(runtimeConfig?: RuntimeConfig): MobileNavItem[] {
+  const nextItems: MobileNavItem[] = [
+    { icon: Home, label: '首页', href: '/' },
+    { icon: Film, label: '电影', href: '/douban?type=movie' },
+    { icon: Tv, label: '剧集', href: '/douban?type=tv' },
+    { icon: Cat, label: '动漫', href: '/douban?type=anime' },
+    { icon: Clover, label: '综艺', href: '/douban?type=show' },
+  ];
+
+  if (runtimeConfig?.ENABLE_LIVE_ENTRY) {
+    nextItems.push({ icon: Radio, label: '直播', href: '/live' });
+  }
+
+  if ((runtimeConfig?.CUSTOM_CATEGORIES?.length ?? 0) > 0) {
+    nextItems.push({
+      icon: Star,
+      label: '自定义',
+      href: '/douban?type=custom',
+    });
+  }
+
+  return nextItems;
 }
 
 const MobileBottomNav = ({ activePath }: MobileBottomNavProps) => {
@@ -18,53 +50,23 @@ const MobileBottomNav = ({ activePath }: MobileBottomNavProps) => {
   // 当前激活路径：优先使用传入的 activePath，否则回退到浏览器地址
   const currentActive = activePath ?? pathname;
 
-  const [navItems, setNavItems] = useState([
-    { icon: Home, label: '首页', href: '/' },
-    {
-      icon: Film,
-      label: '电影',
-      href: '/douban?type=movie',
-    },
-    {
-      icon: Tv,
-      label: '剧集',
-      href: '/douban?type=tv',
-    },
-    {
-      icon: Cat,
-      label: '动漫',
-      href: '/douban?type=anime',
-    },
-    {
-      icon: Clover,
-      label: '综艺',
-      href: '/douban?type=show',
-    },
-  ]);
+  const [navItems, setNavItems] = useState<MobileNavItem[]>(() =>
+    getMobileNavItems(
+      typeof window === 'undefined' ? undefined : window.RUNTIME_CONFIG,
+    ),
+  );
 
   useEffect(() => {
-    const runtimeConfig = window.RUNTIME_CONFIG;
-    const nextItems = [
-      { icon: Home, label: '首页', href: '/' },
-      { icon: Film, label: '电影', href: '/douban?type=movie' },
-      { icon: Tv, label: '剧集', href: '/douban?type=tv' },
-      { icon: Cat, label: '动漫', href: '/douban?type=anime' },
-      { icon: Clover, label: '综艺', href: '/douban?type=show' },
-    ];
+    const updateNavItems = () => {
+      setNavItems(getMobileNavItems(window.RUNTIME_CONFIG));
+    };
 
-    if (runtimeConfig?.ENABLE_LIVE_ENTRY) {
-      nextItems.push({ icon: Radio, label: '直播', href: '/live' });
-    }
+    updateNavItems();
+    window.addEventListener('runtime-config-updated', updateNavItems);
 
-    if ((runtimeConfig?.CUSTOM_CATEGORIES?.length ?? 0) > 0) {
-      nextItems.push({
-        icon: Star,
-        label: '自定义',
-        href: '/douban?type=custom',
-      });
-    }
-
-    setNavItems(nextItems);
+    return () => {
+      window.removeEventListener('runtime-config-updated', updateNavItems);
+    };
   }, []);
 
   const isActive = (href: string) => {

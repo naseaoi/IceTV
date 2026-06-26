@@ -10,7 +10,6 @@ import PageLayout from '@/components/PageLayout';
 import SearchResultFilter from '@/components/SearchResultFilter';
 import SearchSuggestions from '@/components/SearchSuggestions';
 import VideoCard from '@/components/VideoCard';
-import { useProgressiveRender } from '@/hooks/useProgressiveRender';
 
 import {
   useSearchExecution,
@@ -21,6 +20,7 @@ import {
   FilterState,
 } from '@/features/search/hooks/useSearchAggregation';
 import SearchHistory from '@/features/search/components/SearchHistory';
+import { VirtualizedSearchGrid } from '@/features/search/components/VirtualizedSearchGrid';
 
 const SEARCH_VIEW_MODE_STORAGE_KEY = 'searchViewModeByQuery';
 
@@ -133,16 +133,6 @@ export default function SearchPageClient() {
     });
 
   const trimmedSearchQuery = useMemo(() => searchQuery.trim(), [searchQuery]);
-
-  // 渐进渲染：大量结果时分批上屏，避免一次性创建全部 DOM 节点
-  const { visibleItems: visibleAggResults } = useProgressiveRender(
-    filteredAggResults,
-    { initialCount: 30, step: 24 },
-  );
-  const { visibleItems: visibleAllResults } = useProgressiveRender(
-    filteredAllResults,
-    { initialCount: 30, step: 24 },
-  );
 
   // 初始化：搜索历史、滚动监听、流式搜索设置
   useEffect(() => {
@@ -381,60 +371,60 @@ export default function SearchPageClient() {
                   </div>
                 )
               ) : (
-                <div
-                  key={`search-results-${viewMode}`}
-                  className='grid grid-cols-3 justify-start gap-x-2 gap-y-14 px-0 sm:grid-cols-[repeat(auto-fill,_minmax(11rem,_1fr))] sm:gap-x-8 sm:gap-y-20 sm:px-2'
-                >
-                  {viewMode === 'agg'
-                    ? visibleAggResults.map((item) => {
-                        return (
-                          <div key={`agg-${item.mapKey}`} className='w-full'>
-                            <VideoCard
-                              ref={getGroupRef(item.mapKey)}
-                              from='search'
-                              isAggregate={true}
-                              title={item.title}
-                              poster={item.poster}
-                              year={item.year}
-                              episodes={item.stats.episodes}
-                              source_names={item.stats.source_names}
-                              douban_id={item.stats.douban_id}
-                              query={
-                                trimmedSearchQuery !== item.title
-                                  ? trimmedSearchQuery
-                                  : ''
-                              }
-                              type={item.type}
-                              aggregateGroup={item.group}
-                            />
-                          </div>
-                        );
-                      })
-                    : visibleAllResults.map((item) => (
-                        <div
-                          key={`all-${item.source}-${item.id}`}
-                          className='w-full'
-                        >
-                          <VideoCard
-                            id={item.id}
-                            title={item.title}
-                            poster={item.poster}
-                            episodes={item.episodes.length}
-                            source={item.source}
-                            source_name={item.source_name}
-                            douban_id={item.douban_id}
-                            query={
-                              trimmedSearchQuery !== item.title
-                                ? trimmedSearchQuery
-                                : ''
-                            }
-                            year={item.year}
-                            from='search'
-                            type={item.episodes.length > 1 ? 'tv' : 'movie'}
-                          />
-                        </div>
-                      ))}
-                </div>
+                <>
+                  {viewMode === 'agg' ? (
+                    <VirtualizedSearchGrid
+                      key='search-results-agg'
+                      items={filteredAggResults}
+                      getKey={(item) => `agg-${item.mapKey}`}
+                      renderItem={(item) => (
+                        <VideoCard
+                          ref={getGroupRef(item.mapKey)}
+                          from='search'
+                          isAggregate={true}
+                          title={item.title}
+                          poster={item.poster}
+                          year={item.year}
+                          episodes={item.stats.episodes}
+                          source_names={item.stats.source_names}
+                          douban_id={item.stats.douban_id}
+                          query={
+                            trimmedSearchQuery !== item.title
+                              ? trimmedSearchQuery
+                              : ''
+                          }
+                          type={item.type}
+                          aggregateGroup={item.group}
+                        />
+                      )}
+                    />
+                  ) : (
+                    <VirtualizedSearchGrid
+                      key='search-results-all'
+                      items={filteredAllResults}
+                      getKey={(item) => `all-${item.source}-${item.id}`}
+                      renderItem={(item) => (
+                        <VideoCard
+                          id={item.id}
+                          title={item.title}
+                          poster={item.poster}
+                          episodes={item.episodes.length}
+                          source={item.source}
+                          source_name={item.source_name}
+                          douban_id={item.douban_id}
+                          query={
+                            trimmedSearchQuery !== item.title
+                              ? trimmedSearchQuery
+                              : ''
+                          }
+                          year={item.year}
+                          from='search'
+                          type={item.episodes.length > 1 ? 'tv' : 'movie'}
+                        />
+                      )}
+                    />
+                  )}
+                </>
               )}
             </section>
           ) : (

@@ -20,8 +20,16 @@ export interface BangumiCalendarData {
   }[];
 }
 
-export async function getBangumiCalendarData(): Promise<BangumiCalendarData[]> {
-  const response = await fetch('https://api.bgm.tv/calendar');
+type BangumiFetchInit = RequestInit & {
+  next?: {
+    revalidate?: number;
+  };
+};
+
+export async function getBangumiCalendarData(
+  init: BangumiFetchInit = {},
+): Promise<BangumiCalendarData[]> {
+  const response = await fetch('https://api.bgm.tv/calendar', init);
 
   if (!response.ok) {
     throw new Error(`获取 Bangumi 日历失败: ${response.status}`);

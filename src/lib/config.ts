@@ -1,3 +1,5 @@
+import { revalidateTag, unstable_cache } from 'next/cache';
+
 import { db } from '@/lib/db';
 import { getOwnerUsername } from '@/lib/env.server';
 
@@ -52,8 +54,8 @@ export const API_CONFIG = {
   },
 };
 
-// 在模块加载时根据环境决定配置来源
 let cachedConfig: AdminConfig;
+const PUBLIC_CONFIG_CACHE_TAG = 'public-config';
 
 // 从配置文件补充管理员配置
 export function refineConfig(adminConfig: AdminConfig): AdminConfig {
@@ -473,6 +475,7 @@ export async function resetConfig() {
   );
   await db.saveAdminConfig(adminConfig);
   cachedConfig = cloneConfig(adminConfig);
+  invalidatePublicConfigCache();
 
   return;
 }
@@ -481,23 +484,36 @@ export async function saveConfig(config: AdminConfig): Promise<AdminConfig> {
   const nextConfig = configSelfCheck(cloneConfig(config));
   await db.saveAdminConfig(nextConfig);
   cachedConfig = cloneConfig(nextConfig);
+  invalidatePublicConfigCache();
   return cloneConfig(cachedConfig);
 }
 
-export async function getCacheTime(): Promise<number> {
-  const config = await getConfig();
-  return config.SiteConfig.SiteInterfaceCacheTime || 7200;
+export function getCacheTime(config: AdminConfig): number;
+export function getCacheTime(): Promise<number>;
+export function getCacheTime(config?: AdminConfig): number | Promise<number> {
+  if (config) {
+    return config.SiteConfig.SiteInterfaceCacheTime || 7200;
+  }
+
+  return getConfig().then(
+    (currentConfig) => currentConfig.SiteConfig.SiteInterfaceCacheTime || 7200,
+  );
 }
 
-export async function getAvailableApiSites(user?: string): Promise<ApiSite[]> {
-  const config = await getConfig();
-  const allApiSites = config.SourceConfig.filter((s) => !s.disabled);
+export async function getAvailableApiSites(
+  user?: string,
+  config?: AdminConfig,
+): Promise<ApiSite[]> {
+  const currentConfig = config || (await getConfig());
+  const allApiSites = currentConfig.SourceConfig.filter((s) => !s.disabled);
 
   if (!user) {
     return allApiSites;
   }
 
-  const userConfig = config.UserConfig.Users.find((u) => u.username === user);
+  const userConfig = currentConfig.UserConfig.Users.find(
+    (u) => u.username === user,
+  );
   if (!userConfig) {
     return allApiSites;
   }
@@ -516,12 +532,17 @@ export async function getAvailableApiSites(user?: string): Promise<ApiSite[]> {
   }
 
   // 如果没有 enabledApis 配置，则根据 tags 查找
-  if (userConfig.tags && userConfig.tags.length > 0 && config.UserConfig.Tags) {
+  if (
+    userConfig.tags &&
+    userConfig.tags.length > 0 &&
+    currentConfig.UserConfig.Tags
+  ) {
     const enabledApisFromTags = new Set<string>();
 
-    // 遍历用户的所有 tags，收集对应的 enabledApis
     userConfig.tags.forEach((tagName) => {
-      const tagConfig = config.UserConfig.Tags?.find((t) => t.name === tagName);
+      const tagConfig = currentConfig.UserConfig.Tags?.find(
+        (t) => t.name === tagName,
+      );
       if (tagConfig && tagConfig.enabledApis) {
         tagConfig.enabledApis.forEach((apiKey) =>
           enabledApisFromTags.add(apiKey),
@@ -547,8 +568,40 @@ export async function getAvailableApiSites(user?: string): Promise<ApiSite[]> {
 
 export async function setCachedConfig(config: AdminConfig) {
   cachedConfig = configSelfCheck(cloneConfig(config));
+  invalidatePublicConfigCache();
 }
 
 function cloneConfig(config: AdminConfig): AdminConfig {
   return JSON.parse(JSON.stringify(config)) as AdminConfig;
+}
+
+export const getPublicConfig = unstable_cache(
+  async () => {
+    const config = await getConfig();
+
+    return {
+      SiteName: config.SiteConfig.SiteName,
+      SiteIcon: config.SiteConfig.SiteIcon || '',
+      Announcement: config.SiteConfig.Announcement,
+      OpenRegister: !!config.UserConfig.OpenRegister,
+      DisableYellowFilter: config.SiteConfig.DisableYellowFilter,
+      EnableLiveEntry: config.SiteConfig.EnableLiveEntry,
+      CustomCategories: config.CustomCategories.filter(
+        (category) => !category.disabled,
+      ).map((category) => ({
+        name: category.name || '',
+        type: category.type,
+        query: category.query,
+      })),
+      FluidSearch: config.SiteConfig.FluidSearch,
+    };
+  },
+  [PUBLIC_CONFIG_CACHE_TAG],
+  { revalidate: 60, tags: [PUBLIC_CONFIG_CACHE_TAG] },
+);
+
+function invalidatePublicConfigCache() {
+  try {
+    revalidateTag(PUBLIC_CONFIG_CACHE_TAG);
+  } catch {}
 }

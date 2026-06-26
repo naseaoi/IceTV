@@ -1,8 +1,3 @@
-/**
- * 全局 RUNTIME_CONFIG 类型定义与类型安全访问器。
- * layout.tsx 在服务端将配置序列化后通过 <script> 注入到 window.RUNTIME_CONFIG。
- */
-
 export interface RuntimeConfig {
   STORAGE_TYPE: string;
   OPEN_REGISTER: boolean;
@@ -34,22 +29,10 @@ export const DEFAULT_RUNTIME_CONFIG: RuntimeConfig = {
   FLUID_SEARCH: true,
 };
 
-declare global {
-  interface Window {
-    RUNTIME_CONFIG?: RuntimeConfig;
-    __sidebarCollapsed?: boolean;
-  }
-}
-
-/** 获取运行时配置（仅客户端可用）。服务端调用时返回 undefined。 */
-export function getRuntimeConfig(): RuntimeConfig | undefined {
-  if (typeof window === 'undefined') {
-    return undefined;
-  }
-  return window.RUNTIME_CONFIG;
-}
-
-type ServerConfigFallback = {
+export type ServerConfigPayload = {
+  SiteName?: string;
+  SiteIcon?: string;
+  Announcement?: string;
   StorageType?: string;
   OpenRegister?: boolean;
   UpdateRepos?: string;
@@ -64,62 +47,112 @@ type ServerConfigFallback = {
   FluidSearch?: boolean;
 };
 
+declare global {
+  interface Window {
+    RUNTIME_CONFIG?: RuntimeConfig;
+    __runtimeConfigReady?: boolean;
+    __sidebarCollapsed?: boolean;
+  }
+}
+
+export function getRuntimeConfig(): RuntimeConfig | undefined {
+  if (typeof window === 'undefined') {
+    return undefined;
+  }
+  return window.RUNTIME_CONFIG;
+}
+
+function runtimeConfigFromServerConfig(
+  data: ServerConfigPayload,
+): RuntimeConfig {
+  return {
+    STORAGE_TYPE: data.StorageType || DEFAULT_RUNTIME_CONFIG.STORAGE_TYPE,
+    OPEN_REGISTER:
+      data.OpenRegister === undefined
+        ? DEFAULT_RUNTIME_CONFIG.OPEN_REGISTER
+        : data.OpenRegister,
+    UPDATE_REPOS: data.UpdateRepos || DEFAULT_RUNTIME_CONFIG.UPDATE_REPOS,
+    UPDATE_BRANCH: data.UpdateBranch || DEFAULT_RUNTIME_CONFIG.UPDATE_BRANCH,
+    DOUBAN_PROXY_TYPE:
+      data.DoubanProxyType || DEFAULT_RUNTIME_CONFIG.DOUBAN_PROXY_TYPE,
+    DOUBAN_PROXY: data.DoubanProxy || DEFAULT_RUNTIME_CONFIG.DOUBAN_PROXY,
+    DOUBAN_IMAGE_PROXY_TYPE:
+      data.DoubanImageProxyType ||
+      DEFAULT_RUNTIME_CONFIG.DOUBAN_IMAGE_PROXY_TYPE,
+    DOUBAN_IMAGE_PROXY:
+      data.DoubanImageProxy || DEFAULT_RUNTIME_CONFIG.DOUBAN_IMAGE_PROXY,
+    DISABLE_YELLOW_FILTER:
+      data.DisableYellowFilter === undefined
+        ? DEFAULT_RUNTIME_CONFIG.DISABLE_YELLOW_FILTER
+        : data.DisableYellowFilter,
+    ENABLE_LIVE_ENTRY:
+      data.EnableLiveEntry === undefined
+        ? DEFAULT_RUNTIME_CONFIG.ENABLE_LIVE_ENTRY
+        : data.EnableLiveEntry,
+    CUSTOM_CATEGORIES:
+      data.CustomCategories || DEFAULT_RUNTIME_CONFIG.CUSTOM_CATEGORIES,
+    FLUID_SEARCH:
+      data.FluidSearch === undefined
+        ? DEFAULT_RUNTIME_CONFIG.FLUID_SEARCH
+        : data.FluidSearch,
+  };
+}
+
+let serverConfigRequest: Promise<ServerConfigPayload> | null = null;
+
+export async function fetchClientServerConfig(): Promise<ServerConfigPayload> {
+  if (!serverConfigRequest) {
+    serverConfigRequest = fetch('/api/server-config', {
+      method: 'GET',
+      cache: 'no-cache',
+    })
+      .then((response) => {
+        if (!response.ok) {
+          throw new Error(`server-config: ${response.status}`);
+        }
+        return response.json() as Promise<ServerConfigPayload>;
+      })
+      .finally(() => {
+        serverConfigRequest = null;
+      });
+  }
+
+  return serverConfigRequest;
+}
+
+export function applyClientServerConfig(
+  data: ServerConfigPayload,
+): RuntimeConfig {
+  const nextConfig = runtimeConfigFromServerConfig(data);
+
+  if (typeof window !== 'undefined') {
+    window.RUNTIME_CONFIG = nextConfig;
+    window.__runtimeConfigReady = true;
+    window.dispatchEvent(
+      new CustomEvent('runtime-config-updated', { detail: nextConfig }),
+    );
+  }
+
+  return nextConfig;
+}
+
+export async function refreshClientRuntimeConfig(): Promise<RuntimeConfig> {
+  const data = await fetchClientServerConfig();
+  return applyClientServerConfig(data);
+}
+
 export async function ensureClientRuntimeConfig(): Promise<RuntimeConfig> {
   const runtimeConfig = getRuntimeConfig();
-  if (runtimeConfig) {
+  if (runtimeConfig && window.__runtimeConfigReady) {
     return runtimeConfig;
   }
 
   try {
-    const response = await fetch('/api/server-config', {
-      method: 'GET',
-      cache: 'no-store',
-    });
-    if (!response.ok) {
-      throw new Error(`server-config: ${response.status}`);
-    }
-
-    const data = (await response.json()) as ServerConfigFallback;
-    const nextConfig: RuntimeConfig = {
-      STORAGE_TYPE: data.StorageType || DEFAULT_RUNTIME_CONFIG.STORAGE_TYPE,
-      OPEN_REGISTER:
-        data.OpenRegister === undefined
-          ? DEFAULT_RUNTIME_CONFIG.OPEN_REGISTER
-          : data.OpenRegister,
-      UPDATE_REPOS: data.UpdateRepos || DEFAULT_RUNTIME_CONFIG.UPDATE_REPOS,
-      UPDATE_BRANCH: data.UpdateBranch || DEFAULT_RUNTIME_CONFIG.UPDATE_BRANCH,
-      DOUBAN_PROXY_TYPE:
-        data.DoubanProxyType || DEFAULT_RUNTIME_CONFIG.DOUBAN_PROXY_TYPE,
-      DOUBAN_PROXY: data.DoubanProxy || DEFAULT_RUNTIME_CONFIG.DOUBAN_PROXY,
-      DOUBAN_IMAGE_PROXY_TYPE:
-        data.DoubanImageProxyType ||
-        DEFAULT_RUNTIME_CONFIG.DOUBAN_IMAGE_PROXY_TYPE,
-      DOUBAN_IMAGE_PROXY:
-        data.DoubanImageProxy || DEFAULT_RUNTIME_CONFIG.DOUBAN_IMAGE_PROXY,
-      DISABLE_YELLOW_FILTER:
-        data.DisableYellowFilter === undefined
-          ? DEFAULT_RUNTIME_CONFIG.DISABLE_YELLOW_FILTER
-          : data.DisableYellowFilter,
-      ENABLE_LIVE_ENTRY:
-        data.EnableLiveEntry === undefined
-          ? DEFAULT_RUNTIME_CONFIG.ENABLE_LIVE_ENTRY
-          : data.EnableLiveEntry,
-      CUSTOM_CATEGORIES:
-        data.CustomCategories || DEFAULT_RUNTIME_CONFIG.CUSTOM_CATEGORIES,
-      FLUID_SEARCH:
-        data.FluidSearch === undefined
-          ? DEFAULT_RUNTIME_CONFIG.FLUID_SEARCH
-          : data.FluidSearch,
-    };
-
-    if (typeof window !== 'undefined') {
-      window.RUNTIME_CONFIG = nextConfig;
-    }
-
-    return nextConfig;
+    return await refreshClientRuntimeConfig();
   } catch {
     if (typeof window !== 'undefined') {
       window.RUNTIME_CONFIG = DEFAULT_RUNTIME_CONFIG;
+      window.__runtimeConfigReady = true;
     }
     return DEFAULT_RUNTIME_CONFIG;
   }
