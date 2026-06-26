@@ -12,7 +12,7 @@ import {
 import Link from 'next/link';
 import { useEffect, useMemo, useState } from 'react';
 
-import { getBangumiCalendarData } from '@/lib/bangumi';
+import { GetBangumiCalendarData } from '@/lib/bangumi.client';
 import {
   clearAllFavorites,
   getAllFavorites,
@@ -186,7 +186,7 @@ export default function HomeClient({ initialData }: HomeClientProps) {
     const refreshRecommendData = async () => {
       try {
         const [moviesData, tvShowsData, varietyShowsData, bangumiData] =
-          await Promise.all([
+          await Promise.allSettled([
             getDoubanCategories({
               kind: 'movie',
               category: '热门',
@@ -194,24 +194,34 @@ export default function HomeClient({ initialData }: HomeClientProps) {
             }),
             getDoubanCategories({ kind: 'tv', category: 'tv', type: 'tv' }),
             getDoubanCategories({ kind: 'tv', category: 'show', type: 'show' }),
-            getBangumiCalendarData(),
+            GetBangumiCalendarData(),
           ]);
 
         if (cancelled) {
           return;
         }
 
-        if (moviesData.code === 200) {
-          setHotMovies(moviesData.list);
+        if (
+          moviesData.status === 'fulfilled' &&
+          moviesData.value.code === 200
+        ) {
+          setHotMovies(moviesData.value.list);
         }
-        if (tvShowsData.code === 200) {
-          setHotTvShows(tvShowsData.list);
+        if (
+          tvShowsData.status === 'fulfilled' &&
+          tvShowsData.value.code === 200
+        ) {
+          setHotTvShows(tvShowsData.value.list);
         }
-        if (varietyShowsData.code === 200) {
-          setHotVarietyShows(varietyShowsData.list);
+        if (
+          varietyShowsData.status === 'fulfilled' &&
+          varietyShowsData.value.code === 200
+        ) {
+          setHotVarietyShows(varietyShowsData.value.list);
         }
-
-        setBangumiCalendarData(bangumiData);
+        if (bangumiData.status === 'fulfilled') {
+          setBangumiCalendarData(bangumiData.value);
+        }
       } catch (error) {
         console.error('获取推荐数据失败:', error);
       } finally {

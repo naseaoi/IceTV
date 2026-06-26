@@ -43,41 +43,32 @@ async function getServerDoubanRecentHot(params: {
 }
 
 export async function getHomeInitialData(): Promise<HomeInitialData> {
-  try {
-    const [hotMovies, hotTvShows, hotVarietyShows, bangumiCalendarData] =
-      await Promise.all([
-        getServerDoubanRecentHot({
-          kind: 'movie',
-          category: '热门',
-          type: '全部',
-        }),
-        getServerDoubanRecentHot({
-          kind: 'tv',
-          category: 'tv',
-          type: 'tv',
-        }),
-        getServerDoubanRecentHot({
-          kind: 'tv',
-          category: 'show',
-          type: 'show',
-        }),
-        getBangumiCalendarData({
-          next: { revalidate: HOME_REVALIDATE_SECONDS },
-        }),
-      ]);
+  const [hotMovies, hotTvShows, hotVarietyShows, bangumiCalendarData] =
+    await Promise.all([
+      getServerDoubanRecentHot({
+        kind: 'movie',
+        category: '热门',
+        type: '全部',
+      }).catch(() => []),
+      getServerDoubanRecentHot({
+        kind: 'tv',
+        category: 'tv',
+        type: 'tv',
+      }).catch(() => []),
+      getServerDoubanRecentHot({
+        kind: 'tv',
+        category: 'show',
+        type: 'show',
+      }).catch(() => []),
+      getBangumiCalendarData({
+        next: { revalidate: HOME_REVALIDATE_SECONDS },
+      }).catch(() => []),
+    ]);
 
-    return {
-      hotMovies,
-      hotTvShows,
-      hotVarietyShows,
-      bangumiCalendarData,
-    };
-  } catch {
-    return {
-      hotMovies: [],
-      hotTvShows: [],
-      hotVarietyShows: [],
-      bangumiCalendarData: [],
-    };
-  }
+  return {
+    hotMovies,
+    hotTvShows,
+    hotVarietyShows,
+    bangumiCalendarData,
+  };
 }

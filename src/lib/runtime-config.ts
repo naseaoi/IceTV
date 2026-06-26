@@ -65,6 +65,11 @@ export function getRuntimeConfig(): RuntimeConfig | undefined {
 function runtimeConfigFromServerConfig(
   data: ServerConfigPayload,
 ): RuntimeConfig {
+  const doubanImageProxyType =
+    !data.DoubanImageProxyType || data.DoubanImageProxyType === 'direct'
+      ? DEFAULT_RUNTIME_CONFIG.DOUBAN_IMAGE_PROXY_TYPE
+      : data.DoubanImageProxyType;
+
   return {
     STORAGE_TYPE: data.StorageType || DEFAULT_RUNTIME_CONFIG.STORAGE_TYPE,
     OPEN_REGISTER:
@@ -76,9 +81,7 @@ function runtimeConfigFromServerConfig(
     DOUBAN_PROXY_TYPE:
       data.DoubanProxyType || DEFAULT_RUNTIME_CONFIG.DOUBAN_PROXY_TYPE,
     DOUBAN_PROXY: data.DoubanProxy || DEFAULT_RUNTIME_CONFIG.DOUBAN_PROXY,
-    DOUBAN_IMAGE_PROXY_TYPE:
-      data.DoubanImageProxyType ||
-      DEFAULT_RUNTIME_CONFIG.DOUBAN_IMAGE_PROXY_TYPE,
+    DOUBAN_IMAGE_PROXY_TYPE: doubanImageProxyType,
     DOUBAN_IMAGE_PROXY:
       data.DoubanImageProxy || DEFAULT_RUNTIME_CONFIG.DOUBAN_IMAGE_PROXY,
     DISABLE_YELLOW_FILTER:

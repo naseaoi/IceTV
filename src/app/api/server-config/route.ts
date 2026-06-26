@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 
 import { getOptionalActiveUser } from '@/lib/api-auth';
 import { getConfig, getPublicConfig } from '@/lib/config';
+import { DEFAULT_RUNTIME_CONFIG } from '@/lib/runtime-config';
 import { getStorageType } from '@/lib/storage-type';
 import { CURRENT_VERSION } from '@/lib/version';
 
@@ -12,6 +13,11 @@ export async function GET(request: NextRequest) {
   const canReadSensitiveConfig = !!activeUser;
   const publicConfig = await getPublicConfig();
   const config = canReadSensitiveConfig ? await getConfig() : null;
+  const doubanImageProxyType =
+    canReadSensitiveConfig &&
+    config!.SiteConfig.DoubanImageProxyType !== 'direct'
+      ? config!.SiteConfig.DoubanImageProxyType
+      : DEFAULT_RUNTIME_CONFIG.DOUBAN_IMAGE_PROXY_TYPE;
   const result = {
     SiteName: publicConfig.SiteName,
     SiteIcon: publicConfig.SiteIcon,
@@ -27,12 +33,10 @@ export async function GET(request: NextRequest) {
     DoubanProxy: canReadSensitiveConfig
       ? config!.SiteConfig.DoubanProxy || ''
       : '',
-    DoubanImageProxyType: canReadSensitiveConfig
-      ? config!.SiteConfig.DoubanImageProxyType
-      : 'direct',
+    DoubanImageProxyType: doubanImageProxyType,
     DoubanImageProxy: canReadSensitiveConfig
       ? config!.SiteConfig.DoubanImageProxy || ''
-      : '',
+      : DEFAULT_RUNTIME_CONFIG.DOUBAN_IMAGE_PROXY,
     DisableYellowFilter: publicConfig.DisableYellowFilter,
     EnableLiveEntry: publicConfig.EnableLiveEntry,
     CustomCategories: publicConfig.CustomCategories,

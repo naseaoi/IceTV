@@ -33,11 +33,8 @@ const PLACEHOLDER_COLORS = [
   '#818cf8',
   '#22c55e',
 ];
-const NEXT_IMAGE_OPTIMIZED_HOSTS = new Set([
-  'img.doubanio.cmliussss.net',
-  'img.doubanio.cmliussss.com',
-  'lain.bgm.tv',
-]);
+const NEXT_IMAGE_OPTIMIZED_HOSTS = new Set(['lain.bgm.tv']);
+const DEFAULT_DOUBAN_IMAGE_CDN_HOST = 'img.doubanio.cmliussss.net';
 
 /** 全局事件总线：某个实例加载成功后通知同 src 的其他实例 */
 const imageLoadEmitter = new EventTarget();
@@ -134,6 +131,18 @@ function canUseNextImageOptimization(url: string): boolean {
   }
 }
 
+function toDefaultDoubanImageCdn(url: string): string {
+  try {
+    const parsed = new URL(url);
+    if (/^img\d+\.doubanio\.com$/.test(parsed.hostname)) {
+      parsed.hostname = DEFAULT_DOUBAN_IMAGE_CDN_HOST;
+      return parsed.toString();
+    }
+  } catch {}
+
+  return url;
+}
+
 /** 最大重试次数（首次加载不算，失败后最多再试 MAX_RETRIES 次） */
 const MAX_RETRIES = 2;
 /** 每次重试间隔 ms */
@@ -183,13 +192,19 @@ const CoverImage: React.FC<CoverImageProps> = memo(function CoverImage({
 }) {
   const isEmpty = !src || src.trim() === '';
   const [retryKey, setRetryKey] = useState(0);
+  const [useDefaultDoubanCdn, setUseDefaultDoubanCdn] = useState(false);
   const retryCountRef = useRef(0);
   const releaseSlotRef = useRef<(() => void) | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
 
   const processed = useMemo(
-    () => (isEmpty ? '' : processImageUrl(src)),
-    [src, isEmpty],
+    () =>
+      isEmpty
+        ? ''
+        : useDefaultDoubanCdn
+          ? toDefaultDoubanImageCdn(processImageUrl(src))
+          : processImageUrl(src),
+    [src, isEmpty, useDefaultDoubanCdn],
   );
 
   const needsUnoptimized = useMemo(() => {
@@ -238,6 +253,7 @@ const CoverImage: React.FC<CoverImageProps> = memo(function CoverImage({
   useEffect(() => {
     retryCountRef.current = 0;
     setRetryKey(0);
+    setUseDefaultDoubanCdn(false);
     setHasError(false);
     const isCached = isImageCached(src);
     setLoaded(isCached);
@@ -319,6 +335,14 @@ const CoverImage: React.FC<CoverImageProps> = memo(function CoverImage({
   }, [src]);
 
   const handleError = useCallback(() => {
+    const defaultCdnUrl = toDefaultDoubanImageCdn(processed);
+    if (!useDefaultDoubanCdn && defaultCdnUrl !== processed) {
+      retryCountRef.current = 0;
+      setUseDefaultDoubanCdn(true);
+      setLoaded(false);
+      return;
+    }
+
     if (!enableRetry || retryCountRef.current >= MAX_RETRIES) {
       setHasError(true);
       setLoaded(true);
@@ -334,7 +358,7 @@ const CoverImage: React.FC<CoverImageProps> = memo(function CoverImage({
     setTimeout(() => {
       setRetryKey(Date.now());
     }, RETRY_DELAY);
-  }, [enableRetry]);
+  }, [enableRetry, processed, useDefaultDoubanCdn]);
 
   if (showFallback) {
     return (
@@ -360,7 +384,7 @@ const CoverImage: React.FC<CoverImageProps> = memo(function CoverImage({
           alt={alt}
           fill
           sizes={sizes}
-          quality={quality}
+          quality={needsUnoptimized ? undefined : quality}
           preload={priority}
           unoptimized={needsUnoptimized}
           placeholder='blur'
