@@ -548,12 +548,25 @@ export function useArtPlayer(params: UseArtPlayerParams) {
                 console.error('HLS Error:', _event, data);
                 if (data.fatal) {
                   const errorDetails = String(data?.details || '');
+                  const errorReason = `${String(data?.type || 'unknown')}:${errorDetails || 'fatal'}`;
                   if (
                     data.type === Hls.ErrorTypes.NETWORK_ERROR &&
-                    switchToServerProxy(
-                      `${String(data?.type || 'unknown')}:${errorDetails || 'fatal'}`,
-                    )
+                    switchToServerProxy(errorReason)
                   ) {
+                    return;
+                  }
+
+                  if (
+                    data.type === Hls.ErrorTypes.NETWORK_ERROR &&
+                    currentUseServerProxy &&
+                    !loadingSessionRef.current.playbackStartNotified
+                  ) {
+                    if (typeof hls.stopLoad === 'function') {
+                      hls.stopLoad();
+                    }
+                    setIsVideoLoading(false);
+                    setRealtimeLoadSpeed('');
+                    setError('播放源加载失败，请尝试切换其他源站');
                     return;
                   }
 
