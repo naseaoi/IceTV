@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 
 import { isGuardFailure, requireActiveUser } from '@/lib/api-auth';
-import { getCachedLiveChannels } from '@/lib/live';
+import { getCachedLiveChannels, isLiveEntryEnabled } from '@/lib/live';
 
 export const runtime = 'nodejs';
 
@@ -9,6 +9,10 @@ export async function GET(request: NextRequest) {
   try {
     const guardResult = await requireActiveUser(request);
     if (isGuardFailure(guardResult)) return guardResult.response;
+
+    if (!(await isLiveEntryEnabled())) {
+      return NextResponse.json({ error: '直播未开启' }, { status: 404 });
+    }
 
     const { searchParams } = new URL(request.url);
     const sourceKey = searchParams.get('source');

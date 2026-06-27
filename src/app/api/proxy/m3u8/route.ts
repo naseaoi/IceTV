@@ -17,6 +17,11 @@ import {
   UrlValidationError,
   validateProxyUrlForRequest,
 } from '@/lib/url-guard';
+import { isLiveEntryEnabled } from '@/lib/live';
+import {
+  fetchResponseThroughProxy,
+  getProxyUrlForTarget,
+} from '@/lib/http-proxy-json';
 
 import { getProxySourceKey, resolveProxyUserAgent } from '../utils';
 
@@ -147,6 +152,33 @@ async function fetchM3U8Data(
   isLive: boolean,
   skipCache: boolean,
 ): Promise<M3U8LoadResult> {
+  if (isLive) {
+    const proxyUrl = getProxyUrlForTarget(new URL(url));
+    if (proxyUrl) {
+      try {
+        const response = await fetchResponseThroughProxy(
+          new URL(url),
+          proxyUrl,
+          {
+            timeoutMs: 15_000,
+            userAgent: ua,
+            maxBytes: MAX_M3U8_BYTES,
+            accept: 'application/vnd.apple.mpegurl,text/plain,*/*',
+          },
+        );
+        return {
+          content: response.body.toString('utf8'),
+          contentType:
+            response.headers.get('content-type') ||
+            'application/vnd.apple.mpegurl',
+          finalUrl: url,
+          status: response.status,
+          statusText: response.statusText,
+        };
+      } catch {}
+    }
+  }
+
   const response = await fetchWithUrlGuard(url, {
     cache: 'no-cache',
     redirect: 'follow',
@@ -219,6 +251,10 @@ export async function GET(request: NextRequest) {
   const isLive = searchParams.get('icetv-live') === '1';
   if (!url) {
     return NextResponse.json({ error: 'Missing url' }, { status: 400 });
+  }
+
+  if (isLive && !(await isLiveEntryEnabled())) {
+    return NextResponse.json({ error: '直播未开启' }, { status: 404 });
   }
 
   const validation = await validateProxyUrlForRequest(url);
@@ -354,7 +390,8 @@ async function rewriteM3U8Content(
   // 直播场景跳过此优化：直播通常依赖服务端注入特定 UA / 处理鉴权，直连易失败。
   const corsCapable =
     !isLive && source ? isSourceCorsCapable(source) === true : false;
-  const effectiveAllowCors = !forceServer && (allowCORS || corsCapable);
+  const effectiveAllowCors =
+    !isLive && !forceServer && (allowCORS || corsCapable);
 
   const lines = content.split('\n');
   const rewrittenLines: Array<string | Promise<string>> = [];

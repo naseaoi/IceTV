@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 
 import { getOptionalActiveUser } from '@/lib/api-auth';
 import { getConfig } from '@/lib/config';
+import { isLiveEntryEnabledInConfig } from '@/lib/live';
 
 export const runtime = 'nodejs';
 
@@ -12,6 +13,10 @@ export async function GET(request: NextRequest) {
 
     if (!config) {
       return NextResponse.json({ error: '配置未找到' }, { status: 404 });
+    }
+
+    if (!isLiveEntryEnabledInConfig(config)) {
+      return NextResponse.json({ error: '直播未开启' }, { status: 404 });
     }
 
     // 过滤出所有非 disabled 的直播源

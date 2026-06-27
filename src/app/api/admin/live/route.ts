@@ -6,6 +6,25 @@ import { deleteCachedLiveChannels, refreshLiveChannels } from '@/lib/live';
 
 export const runtime = 'nodejs';
 
+type EditableLiveInfo = {
+  key: string;
+  name: string;
+  url: string;
+  ua: string;
+  epg: string;
+  from: 'custom' | 'config';
+  channelNumber: number;
+  disabled: boolean;
+};
+
+async function refreshOrRejectLiveSource(liveInfo: EditableLiveInfo) {
+  const channelNumber = await refreshLiveChannels(liveInfo);
+  if (channelNumber <= 0) {
+    throw new Error('未获取到频道列表，请检查直播源地址');
+  }
+  return channelNumber;
+}
+
 export async function POST(request: NextRequest) {
   try {
     const guardResult = await requireAdmin(request);
@@ -15,6 +34,11 @@ export async function POST(request: NextRequest) {
 
     const body = await request.json();
     const { action, key, name, url, ua, epg } = body;
+    const cleanKey = typeof key === 'string' ? key.trim() : '';
+    const cleanName = typeof name === 'string' ? name.trim() : '';
+    const cleanUrl = typeof url === 'string' ? url.trim() : '';
+    const cleanUa = typeof ua === 'string' ? ua.trim() : '';
+    const cleanEpg = typeof epg === 'string' ? epg.trim() : '';
 
     if (!config) {
       return NextResponse.json({ error: '配置不存在' }, { status: 404 });
@@ -27,8 +51,15 @@ export async function POST(request: NextRequest) {
 
     switch (action) {
       case 'add':
+        if (!cleanKey || !cleanName || !cleanUrl) {
+          return NextResponse.json(
+            { error: '直播源参数不完整' },
+            { status: 400 },
+          );
+        }
+
         // 检查是否已存在相同的 key
-        if (config.LiveConfig.some((l) => l.key === key)) {
+        if (config.LiveConfig.some((l) => l.key === cleanKey)) {
           return NextResponse.json(
             { error: '直播源 key 已存在' },
             { status: 400 },
@@ -36,22 +67,29 @@ export async function POST(request: NextRequest) {
         }
 
         const liveInfo = {
-          key: key as string,
-          name: name as string,
-          url: url as string,
-          ua: ua || '',
-          epg: epg || '',
+          key: cleanKey,
+          name: cleanName,
+          url: cleanUrl,
+          ua: cleanUa,
+          epg: cleanEpg,
           from: 'custom' as 'custom' | 'config',
           channelNumber: 0,
           disabled: false,
         };
 
         try {
-          const nums = await refreshLiveChannels(liveInfo);
-          liveInfo.channelNumber = nums;
+          liveInfo.channelNumber = await refreshOrRejectLiveSource(liveInfo);
         } catch (error) {
           console.error('刷新直播源失败:', error);
-          liveInfo.channelNumber = 0;
+          return NextResponse.json(
+            {
+              error:
+                error instanceof Error
+                  ? error.message
+                  : '未获取到频道列表，请检查直播源地址',
+            },
+            { status: 400 },
+          );
         }
 
         // 添加新的直播源
@@ -60,7 +98,9 @@ export async function POST(request: NextRequest) {
 
       case 'delete':
         // 删除直播源
-        const deleteIndex = config.LiveConfig.findIndex((l) => l.key === key);
+        const deleteIndex = config.LiveConfig.findIndex(
+          (l) => l.key === cleanKey,
+        );
         if (deleteIndex === -1) {
           return NextResponse.json({ error: '直播源不存在' }, { status: 404 });
         }
@@ -73,14 +113,14 @@ export async function POST(request: NextRequest) {
           );
         }
 
-        deleteCachedLiveChannels(key);
+        deleteCachedLiveChannels(cleanKey);
 
         config.LiveConfig.splice(deleteIndex, 1);
         break;
 
       case 'enable':
         // 启用直播源
-        const enableSource = config.LiveConfig.find((l) => l.key === key);
+        const enableSource = config.LiveConfig.find((l) => l.key === cleanKey);
         if (!enableSource) {
           return NextResponse.json({ error: '直播源不存在' }, { status: 404 });
         }
@@ -89,7 +129,7 @@ export async function POST(request: NextRequest) {
 
       case 'disable':
         // 禁用直播源
-        const disableSource = config.LiveConfig.find((l) => l.key === key);
+        const disableSource = config.LiveConfig.find((l) => l.key === cleanKey);
         if (!disableSource) {
           return NextResponse.json({ error: '直播源不存在' }, { status: 404 });
         }
@@ -98,7 +138,7 @@ export async function POST(request: NextRequest) {
 
       case 'edit':
         // 编辑直播源
-        const editSource = config.LiveConfig.find((l) => l.key === key);
+        const editSource = config.LiveConfig.find((l) => l.key === cleanKey);
         if (!editSource) {
           return NextResponse.json({ error: '直播源不存在' }, { status: 404 });
         }
@@ -111,20 +151,45 @@ export async function POST(request: NextRequest) {
           );
         }
 
-        // 更新字段（除了 key 和 from）
-        editSource.name = name as string;
-        editSource.url = url as string;
-        editSource.ua = ua || '';
-        editSource.epg = epg || '';
+        if (!cleanName || !cleanUrl) {
+          return NextResponse.json(
+            { error: '直播源参数不完整' },
+            { status: 400 },
+          );
+        }
 
-        // 刷新频道数
+        const nextEditSource = {
+          ...editSource,
+          name: cleanName,
+          url: cleanUrl,
+          ua: cleanUa,
+          epg: cleanEpg,
+          disabled: editSource.disabled === true,
+          channelNumber: editSource.channelNumber || 0,
+        };
+
         try {
-          const nums = await refreshLiveChannels(editSource);
-          editSource.channelNumber = nums;
+          nextEditSource.channelNumber =
+            await refreshOrRejectLiveSource(nextEditSource);
         } catch (error) {
           console.error('刷新直播源失败:', error);
-          editSource.channelNumber = 0;
+          return NextResponse.json(
+            {
+              error:
+                error instanceof Error
+                  ? error.message
+                  : '未获取到频道列表，请检查直播源地址',
+            },
+            { status: 400 },
+          );
         }
+
+        // 更新字段（除了 key 和 from）
+        editSource.name = nextEditSource.name;
+        editSource.url = nextEditSource.url;
+        editSource.ua = nextEditSource.ua;
+        editSource.epg = nextEditSource.epg;
+        editSource.channelNumber = nextEditSource.channelNumber;
         break;
 
       case 'sort':

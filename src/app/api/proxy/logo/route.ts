@@ -1,6 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server';
 
 import { getConfig } from '@/lib/config';
+import {
+  fetchResponseThroughProxy,
+  getProxyUrlForTarget,
+} from '@/lib/http-proxy-json';
 import { authorizeProxyRequest } from '@/lib/proxy-auth';
 import {
   fetchWithUrlGuard,
@@ -56,40 +60,25 @@ export async function GET(request: NextRequest) {
       },
     });
 
-    if (!imageResponse.ok) {
-      return NextResponse.json(
-        { error: imageResponse.statusText },
-        { status: imageResponse.status },
-      );
-    }
-
-    const contentType = imageResponse.headers.get('content-type');
-    if (!contentType?.toLowerCase().startsWith('image/')) {
-      return NextResponse.json(
-        { error: 'Invalid image response' },
-        { status: 415 },
-      );
-    }
-
-    // 创建响应头
-    const headers = new Headers();
-    if (contentType) {
-      headers.set('Content-Type', contentType);
-    }
-
-    // 设置缓存头
-    headers.set('Cache-Control', 'public, max-age=86400, s-maxage=86400'); // 缓存一天
-
-    const imageData = await readArrayBufferLimited(
-      imageResponse,
-      MAX_LOGO_BYTES,
-    );
-
-    return new Response(imageData, {
-      status: 200,
-      headers,
-    });
+    return await buildLogoResponse(imageResponse);
   } catch (error) {
+    const proxyUrl = getProxyUrlForTarget(new URL(validation.url));
+    if (proxyUrl) {
+      try {
+        const response = await fetchResponseThroughProxy(
+          new URL(validation.url),
+          proxyUrl,
+          {
+            timeoutMs: 15_000,
+            userAgent: ua,
+            maxBytes: MAX_LOGO_BYTES,
+            accept: 'image/*,*/*',
+          },
+        );
+        return buildLogoBufferResponse(response.body, response.headers);
+      } catch {}
+    }
+
     if (error instanceof UrlValidationError) {
       return NextResponse.json({ error: error.reason }, { status: 403 });
     }
@@ -102,4 +91,48 @@ export async function GET(request: NextRequest) {
       { status: 500 },
     );
   }
+}
+
+async function buildLogoResponse(imageResponse: Response) {
+  if (!imageResponse.ok) {
+    return NextResponse.json(
+      { error: imageResponse.statusText },
+      { status: imageResponse.status },
+    );
+  }
+
+  const imageData = await readArrayBufferLimited(imageResponse, MAX_LOGO_BYTES);
+  return buildLogoBufferResponse(imageData, imageResponse.headers);
+}
+
+function buildLogoBufferResponse(
+  imageData: ArrayBuffer | Buffer,
+  sourceHeaders: Headers,
+) {
+  const contentType = sourceHeaders.get('content-type');
+  if (!contentType?.toLowerCase().startsWith('image/')) {
+    return NextResponse.json(
+      { error: 'Invalid image response' },
+      { status: 415 },
+    );
+  }
+
+  const headers = new Headers();
+  headers.set('Content-Type', contentType);
+  headers.set('Cache-Control', 'public, max-age=86400, s-maxage=86400');
+
+  return new Response(bufferToArrayBuffer(imageData), {
+    status: 200,
+    headers,
+  });
+}
+
+function bufferToArrayBuffer(buffer: ArrayBuffer | Buffer): ArrayBuffer {
+  if (buffer instanceof ArrayBuffer) {
+    return buffer;
+  }
+  return buffer.buffer.slice(
+    buffer.byteOffset,
+    buffer.byteOffset + buffer.byteLength,
+  ) as ArrayBuffer;
 }

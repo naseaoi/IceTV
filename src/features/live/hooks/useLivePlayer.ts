@@ -10,6 +10,7 @@ import type ArtplayerType from 'artplayer';
 
 import type { LiveChannel, LiveSource } from '../types';
 import {
+  assignManagedVideoCleanup,
   createHlsLoaderClass,
   destroyManagedHls,
   getManagedVideo,
@@ -122,6 +123,40 @@ function cleanupPlayer(artPlayerRef: MutableRefObject<ArtplayerType | null>) {
   }
 }
 
+function requestLiveAutoplay(
+  video: HTMLVideoElement | null,
+  options: { muted?: boolean } = {},
+) {
+  if (!video) return;
+  if (options.muted) {
+    video.muted = true;
+    video.defaultMuted = true;
+  }
+  video.autoplay = true;
+  video.playsInline = true;
+  if (!video.paused && !video.ended) return;
+  const playResult = video.play();
+  if (playResult && typeof playResult.catch === 'function') {
+    playResult.catch(() => {});
+  }
+}
+
+function seekVideoToLiveEdge(
+  video: HTMLVideoElement,
+  hls: { liveSyncPosition?: unknown },
+) {
+  const liveSyncPosition = Number(hls.liveSyncPosition);
+  if (!Number.isFinite(liveSyncPosition) || liveSyncPosition <= 0) {
+    return false;
+  }
+  try {
+    video.currentTime = liveSyncPosition;
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 interface UseLivePlayerParams {
   videoUrl: string;
   currentChannel: LiveChannel | null;
@@ -145,11 +180,22 @@ export function useLivePlayer({
 }: UseLivePlayerParams) {
   const artPlayerRef = useRef<ArtplayerType | null>(null);
   const loadedUrlRef = useRef('');
+  const mutedAutoplayRequestedRef = useRef(false);
+  const userPausedRef = useRef(false);
 
   const doCleanup = () => {
     setUnsupportedType(null);
     loadedUrlRef.current = '';
+    mutedAutoplayRequestedRef.current = false;
+    userPausedRef.current = false;
     cleanupPlayer(artPlayerRef);
+  };
+
+  const requestInitialLiveAutoplay = (video: HTMLVideoElement | null) => {
+    if (userPausedRef.current) return;
+    const shouldMute = !mutedAutoplayRequestedRef.current;
+    mutedAutoplayRequestedRef.current = true;
+    requestLiveAutoplay(video, { muted: shouldMute });
   };
 
   useEffect(() => {
@@ -185,6 +231,8 @@ export function useLivePlayer({
         if (artPlayerRef.current && loadedUrlRef.current === targetUrl) {
           return;
         }
+        mutedAutoplayRequestedRef.current = false;
+        userPausedRef.current = false;
 
         const LiveHlsLoader = createHlsLoaderClass(
           Hls.DefaultConfig.loader as unknown as new (config: unknown) => {
@@ -234,12 +282,54 @@ export function useLivePlayer({
               lowLatencyMode: true,
               maxBufferLength: 30,
               backBufferLength: 30,
+              liveSyncDurationCount: 2,
+              liveMaxLatencyDurationCount: 5,
+              initialLiveManifestSize: 1,
+              startPosition: -1,
             }),
             loader: LiveHlsLoader as unknown as typeof Hls.DefaultConfig.loader,
           });
           hls.loadSource(url);
           hls.attachMedia(video);
           managedVideo.hls = hls;
+
+          let alignedToLiveEdge = false;
+          const alignToLiveEdge = (force = false) => {
+            if (alignedToLiveEdge && !force) return;
+            const aligned = seekVideoToLiveEdge(video, hls);
+            if (!aligned) return;
+            alignedToLiveEdge = true;
+          };
+
+          const handleVideoPause = () => {
+            userPausedRef.current = true;
+            video.autoplay = false;
+            video.removeAttribute('autoplay');
+          };
+
+          const handleVideoPlay = () => {
+            if (!userPausedRef.current) return;
+            userPausedRef.current = false;
+            alignToLiveEdge(true);
+          };
+
+          video.addEventListener('pause', handleVideoPause);
+          video.addEventListener('play', handleVideoPlay);
+          assignManagedVideoCleanup(video, () => {
+            video.removeEventListener('pause', handleVideoPause);
+            video.removeEventListener('play', handleVideoPlay);
+          });
+
+          hls.on(Hls.Events.MANIFEST_PARSED, function () {
+            hls.startLoad(-1);
+            alignToLiveEdge();
+            requestInitialLiveAutoplay(video);
+          });
+
+          hls.on(Hls.Events.LEVEL_UPDATED, function () {
+            alignToLiveEdge();
+            requestInitialLiveAutoplay(video);
+          });
 
           hls.on(Hls.Events.ERROR, function (_event: any, data: any) {
             console.error('HLS Error:', _event, data);
@@ -267,7 +357,8 @@ export function useLivePlayer({
           url: targetUrl,
           ...createArtPlayerConfig({
             isLive: true,
-            moreVideoAttr: { preload: 'metadata' },
+            muted: true,
+            moreVideoAttr: { preload: 'metadata', autoplay: true, muted: true },
           }),
           type,
           customType,
@@ -281,6 +372,7 @@ export function useLivePlayer({
         ap.on('ready', () => {
           setError(null);
           setIsVideoLoading(false);
+          requestInitialLiveAutoplay(ap.video);
         });
         ap.on('loadstart', () => {
           setIsVideoLoading(true);
@@ -290,6 +382,7 @@ export function useLivePlayer({
         });
         ap.on('canplay', () => {
           setIsVideoLoading(false);
+          requestInitialLiveAutoplay(ap.video);
         });
         ap.on('waiting', () => {
           setIsVideoLoading(true);
@@ -318,6 +411,8 @@ export function useLivePlayer({
   useEffect(() => {
     return () => {
       loadedUrlRef.current = '';
+      mutedAutoplayRequestedRef.current = false;
+      userPausedRef.current = false;
       cleanupPlayer(artPlayerRef);
     };
   }, []);
@@ -325,12 +420,15 @@ export function useLivePlayer({
   useEffect(() => {
     const handleBeforeUnload = () => {
       loadedUrlRef.current = '';
+      userPausedRef.current = false;
       cleanupPlayer(artPlayerRef);
     };
     window.addEventListener('beforeunload', handleBeforeUnload);
     return () => {
       window.removeEventListener('beforeunload', handleBeforeUnload);
       loadedUrlRef.current = '';
+      mutedAutoplayRequestedRef.current = false;
+      userPausedRef.current = false;
       cleanupPlayer(artPlayerRef);
     };
   }, []);

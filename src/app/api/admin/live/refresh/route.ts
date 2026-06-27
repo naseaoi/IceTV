@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 
 import { isGuardFailure, requireAdmin } from '@/lib/api-auth';
 import { getConfig, saveConfig } from '@/lib/config';
-import { refreshLiveChannels } from '@/lib/live';
+import { isLiveEntryEnabledInConfig, refreshLiveChannels } from '@/lib/live';
 
 export const runtime = 'nodejs';
 
@@ -12,6 +12,13 @@ export async function POST(request: NextRequest) {
     if (isGuardFailure(guardResult)) return guardResult.response;
 
     const config = await getConfig();
+
+    if (!isLiveEntryEnabledInConfig(config)) {
+      return NextResponse.json({
+        success: true,
+        message: '直播未开启，已跳过刷新',
+      });
+    }
 
     // 并发刷新所有启用的直播源
     const refreshPromises = (config.LiveConfig || [])

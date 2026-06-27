@@ -1,6 +1,11 @@
 import { getConfig, saveConfig } from '@/lib/config';
+import {
+  fetchTextThroughProxy,
+  getProxyUrlForTarget,
+} from '@/lib/http-proxy-json';
 
 const defaultUA = 'AptvPlayer/1.4.10';
+const MAX_LIVE_PLAYLIST_BYTES = 5 * 1024 * 1024;
 
 export interface LiveChannels {
   channelNumber: number;
@@ -38,6 +43,17 @@ export function deleteCachedLiveChannels(key: string) {
   delete inflightRequests[key];
 }
 
+export function isLiveEntryEnabledInConfig(config: {
+  SiteConfig?: { EnableLiveEntry?: boolean };
+}) {
+  return config.SiteConfig?.EnableLiveEntry === true;
+}
+
+export async function isLiveEntryEnabled() {
+  const config = await getConfig();
+  return isLiveEntryEnabledInConfig(config);
+}
+
 export async function getCachedLiveChannels(
   key: string,
 ): Promise<LiveChannels | null> {
@@ -47,6 +63,10 @@ export async function getCachedLiveChannels(
   }
 
   const config = await getConfig();
+  if (!isLiveEntryEnabledInConfig(config)) {
+    return null;
+  }
+
   const liveInfo = config.LiveConfig?.find((live) => live.key === key);
   if (!liveInfo) {
     return null;
@@ -77,18 +97,14 @@ export async function refreshLiveChannels(liveInfo: {
 
   const doRefresh = async (): Promise<number> => {
     delete cachedLiveChannels[liveInfo.key];
-    const ua = liveInfo.ua || defaultUA;
-    const response = await fetch(liveInfo.url, {
-      headers: {
-        'User-Agent': ua,
-      },
-    });
-    const data = await response.text();
-    const result = parseM3U(liveInfo.key, data);
-    const epgUrl = liveInfo.epg || result.tvgUrl;
+    const ua = liveInfo.ua?.trim() || defaultUA;
+    const sourceUrl = liveInfo.url.trim();
+    const data = await fetchLivePlaylistText(sourceUrl, ua);
+    const result = parseLivePlaylist(liveInfo.key, data);
+    const epgUrl = liveInfo.epg?.trim() || result.tvgUrl;
     const epgs = await parseEpg(
       epgUrl,
-      liveInfo.ua || defaultUA,
+      ua,
       result.channels.map((channel) => channel.tvgId).filter((tvgId) => tvgId),
     );
     cachedLiveChannels[liveInfo.key] = {
@@ -107,6 +123,32 @@ export async function refreshLiveChannels(liveInfo: {
     delete inflightRequests[liveInfo.key];
   });
   return inflightRequests[liveInfo.key];
+}
+
+async function fetchLivePlaylistText(url: string, ua: string): Promise<string> {
+  try {
+    const response = await fetch(url, {
+      headers: {
+        'User-Agent': ua,
+      },
+    });
+    if (!response.ok) {
+      throw new Error(`直播源请求失败: ${response.status}`);
+    }
+    return await response.text();
+  } catch (error) {
+    const targetUrl = new URL(url);
+    const proxyUrl = getProxyUrlForTarget(targetUrl);
+    if (!proxyUrl) {
+      throw error;
+    }
+
+    return fetchTextThroughProxy(targetUrl, proxyUrl, {
+      timeoutMs: 15_000,
+      userAgent: ua,
+      maxBytes: MAX_LIVE_PLAYLIST_BYTES,
+    });
+  }
 }
 
 async function parseEpg(
@@ -229,6 +271,31 @@ async function parseEpg(
  * @param m3uContent M3U文件的内容字符串
  * @returns 频道信息数组
  */
+export function parseLivePlaylist(
+  sourceKey: string,
+  content: string,
+): {
+  tvgUrl: string;
+  channels: {
+    id: string;
+    tvgId: string;
+    name: string;
+    logo: string;
+    group: string;
+    url: string;
+  }[];
+} {
+  const normalizedContent = content.replace(/^\uFEFF/, '');
+  if (
+    /^\s*#EXTM3U/im.test(normalizedContent) ||
+    /^\s*#EXTINF:/im.test(normalizedContent)
+  ) {
+    return parseM3U(sourceKey, normalizedContent);
+  }
+
+  return parseTextIptv(sourceKey, normalizedContent);
+}
+
 function parseM3U(
   sourceKey: string,
   m3uContent: string,
@@ -319,6 +386,68 @@ function parseM3U(
   }
 
   return { tvgUrl, channels };
+}
+
+function parseTextIptv(
+  sourceKey: string,
+  content: string,
+): {
+  tvgUrl: string;
+  channels: {
+    id: string;
+    tvgId: string;
+    name: string;
+    logo: string;
+    group: string;
+    url: string;
+  }[];
+} {
+  const channels: {
+    id: string;
+    tvgId: string;
+    name: string;
+    logo: string;
+    group: string;
+    url: string;
+  }[] = [];
+  const lines = content
+    .split('\n')
+    .map((line) => line.trim())
+    .filter(Boolean);
+
+  let group = '未分组';
+  let channelIndex = 0;
+
+  for (const line of lines) {
+    const separatorIndex = line.indexOf(',');
+    if (separatorIndex === -1) {
+      continue;
+    }
+
+    const name = line.slice(0, separatorIndex).trim();
+    const value = line.slice(separatorIndex + 1).trim();
+
+    if (!name || !value) {
+      continue;
+    }
+
+    if (value.toLowerCase() === '#genre#') {
+      group = name;
+      continue;
+    }
+
+    channels.push({
+      id: `${sourceKey}-${channelIndex}`,
+      tvgId: name,
+      name,
+      logo: '',
+      group,
+      url: value,
+    });
+    channelIndex++;
+  }
+
+  return { tvgUrl: '', channels };
 }
 
 // utils/urlResolver.js

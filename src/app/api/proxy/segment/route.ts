@@ -2,6 +2,11 @@ import { NextRequest, NextResponse } from 'next/server';
 
 import { authorizeProxyRequest } from '@/lib/proxy-auth';
 import {
+  fetchStreamThroughProxy,
+  getProxyUrlForTarget,
+} from '@/lib/http-proxy-json';
+import { isLiveEntryEnabled } from '@/lib/live';
+import {
   assertContentLength,
   createLimitedReadableStream,
   ResponseSizeLimitError,
@@ -31,6 +36,10 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ error: 'Missing url' }, { status: 400 });
   }
 
+  if (isLiveStream && !(await isLiveEntryEnabled())) {
+    return NextResponse.json({ error: '直播未开启' }, { status: 404 });
+  }
+
   const validation = await validateProxyUrlForRequest(url);
   if (!validation.ok) {
     return NextResponse.json({ error: validation.reason }, { status: 403 });
@@ -56,6 +65,36 @@ export async function GET(request: NextRequest) {
       headers.Range = range;
     }
 
+    if (isLiveStream) {
+      const proxyUrl = getProxyUrlForTarget(new URL(validation.url));
+      if (proxyUrl) {
+        try {
+          const response = await fetchStreamThroughProxy(
+            new URL(validation.url),
+            proxyUrl,
+            {
+              timeoutMs: 20_000,
+              userAgent: ua,
+              maxBytes: MAX_SEGMENT_BYTES,
+              accept: '*/*',
+              headers,
+            },
+          );
+          assertContentLength(response.headers, MAX_SEGMENT_BYTES);
+
+          if (source) {
+            markSourceCors(source, responseAllowsCors(response.headers));
+          }
+
+          return new Response(response.body, {
+            status: response.status,
+            statusText: response.statusText,
+            headers: buildSegmentResponseHeaders(response.headers, true),
+          });
+        } catch {}
+      }
+    }
+
     const response = await fetchWithUrlGuard(validation.url, { headers });
     if (!response.ok) {
       return NextResponse.json(
@@ -70,44 +109,10 @@ export async function GET(request: NextRequest) {
       markSourceCors(source, responseAllowsCors(response.headers));
     }
 
-    const responseHeaders = new Headers();
-    responseHeaders.set('Access-Control-Allow-Origin', '*');
-    responseHeaders.set('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
-    responseHeaders.set(
-      'Access-Control-Allow-Headers',
-      'Content-Type, Range, Origin, Accept',
+    const responseHeaders = buildSegmentResponseHeaders(
+      response.headers,
+      isLiveStream,
     );
-    responseHeaders.set(
-      'Access-Control-Expose-Headers',
-      'Content-Length, Content-Range',
-    );
-    // 直播分片必须实时回源，点播分片则允许浏览器短时复用。
-    responseHeaders.set(
-      'Cache-Control',
-      isLiveStream
-        ? 'no-cache'
-        : 'public, max-age=3600, stale-while-revalidate=300',
-    );
-
-    const contentType = response.headers.get('content-type');
-    if (contentType) {
-      responseHeaders.set('Content-Type', contentType);
-    }
-
-    const contentLength = response.headers.get('content-length');
-    if (contentLength) {
-      responseHeaders.set('Content-Length', contentLength);
-    }
-
-    const acceptRanges = response.headers.get('accept-ranges');
-    if (acceptRanges) {
-      responseHeaders.set('Accept-Ranges', acceptRanges);
-    }
-
-    const contentRange = response.headers.get('content-range');
-    if (contentRange) {
-      responseHeaders.set('Content-Range', contentRange);
-    }
 
     return new Response(
       createLimitedReadableStream(response.body, MAX_SEGMENT_BYTES),
@@ -130,4 +135,49 @@ export async function GET(request: NextRequest) {
       { status: 500 },
     );
   }
+}
+
+function buildSegmentResponseHeaders(
+  sourceHeaders: Headers,
+  isLiveStream: boolean,
+) {
+  const responseHeaders = new Headers();
+  responseHeaders.set('Access-Control-Allow-Origin', '*');
+  responseHeaders.set('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+  responseHeaders.set(
+    'Access-Control-Allow-Headers',
+    'Content-Type, Range, Origin, Accept',
+  );
+  responseHeaders.set(
+    'Access-Control-Expose-Headers',
+    'Content-Length, Content-Range',
+  );
+  responseHeaders.set(
+    'Cache-Control',
+    isLiveStream
+      ? 'no-cache'
+      : 'public, max-age=3600, stale-while-revalidate=300',
+  );
+
+  const contentType = sourceHeaders.get('content-type');
+  if (contentType) {
+    responseHeaders.set('Content-Type', contentType);
+  }
+
+  const contentLength = sourceHeaders.get('content-length');
+  if (contentLength) {
+    responseHeaders.set('Content-Length', contentLength);
+  }
+
+  const acceptRanges = sourceHeaders.get('accept-ranges');
+  if (acceptRanges) {
+    responseHeaders.set('Accept-Ranges', acceptRanges);
+  }
+
+  const contentRange = sourceHeaders.get('content-range');
+  if (contentRange) {
+    responseHeaders.set('Content-Range', contentRange);
+  }
+
+  return responseHeaders;
 }

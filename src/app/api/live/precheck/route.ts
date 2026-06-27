@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 
 import { isGuardFailure, requireActiveUser } from '@/lib/api-auth';
 import { getConfig } from '@/lib/config';
+import { isLiveEntryEnabledInConfig } from '@/lib/live';
 import {
   fetchWithUrlGuard,
   UrlValidationError,
@@ -13,6 +14,11 @@ export const runtime = 'nodejs';
 export async function GET(request: NextRequest) {
   const guardResult = await requireActiveUser(request);
   if (isGuardFailure(guardResult)) return guardResult.response;
+
+  const config = await getConfig();
+  if (!isLiveEntryEnabledInConfig(config)) {
+    return NextResponse.json({ error: '直播未开启' }, { status: 404 });
+  }
 
   const { searchParams } = new URL(request.url);
   const url = searchParams.get('url');
@@ -30,7 +36,6 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ error: validation.reason }, { status: 403 });
   }
 
-  const config = await getConfig();
   const liveSource = config.LiveConfig?.find((s: any) => s.key === source);
   if (!liveSource) {
     return NextResponse.json({ error: 'Source not found' }, { status: 404 });

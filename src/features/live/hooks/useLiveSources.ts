@@ -158,7 +158,7 @@ export function useLiveSources({
   const [loadingStage, setLoadingStage] = useState<
     'loading' | 'fetching' | 'ready'
   >('loading');
-  const [loadingMessage, setLoadingMessage] = useState('正在加载直播源...');
+  const [loadingMessage, setLoadingMessage] = useState('加载直播源');
   const [error, setError] = useState<string | null>(null);
 
   const [liveSources, setLiveSources] = useState<LiveSource[]>([]);
@@ -343,7 +343,7 @@ export function useLiveSources({
   const fetchLiveSources = async () => {
     try {
       setLoadingStage('fetching');
-      setLoadingMessage('正在获取直播源...');
+      setLoadingMessage('获取直播源');
 
       const response = await fetch('/api/live/sources');
       if (!response.ok) throw new Error('获取直播源失败');
@@ -372,7 +372,7 @@ export function useLiveSources({
       }
 
       setLoadingStage('ready');
-      setLoadingMessage('准备就绪...');
+      setLoadingMessage('准备就绪');
       setTimeout(() => setLoading(false), 1000);
     } catch (err) {
       console.error('获取直播源失败:', err);

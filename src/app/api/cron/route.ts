@@ -6,7 +6,7 @@ import { db } from '@/lib/db';
 import { parseStorageKey } from '@/lib/utils';
 import { getOwnerUsername } from '@/lib/env.server';
 import { fetchVideoDetail } from '@/lib/fetchVideoDetail';
-import { refreshLiveChannels } from '@/lib/live';
+import { isLiveEntryEnabledInConfig, refreshLiveChannels } from '@/lib/live';
 import { SearchResult } from '@/lib/types';
 import { fetchWithUrlGuard } from '@/lib/url-guard';
 
@@ -80,6 +80,9 @@ async function cronJob() {
 
 async function refreshAllLiveChannels() {
   const config = await getConfig();
+  if (!isLiveEntryEnabledInConfig(config)) {
+    return;
+  }
 
   // 并发刷新所有启用的直播源
   const refreshPromises = (config.LiveConfig || [])

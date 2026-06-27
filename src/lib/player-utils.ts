@@ -206,6 +206,10 @@ export interface HlsConfigOverrides {
   startFragPrefetch?: boolean;
   progressive?: boolean;
   testBandwidth?: boolean;
+  liveSyncDurationCount?: number;
+  liveMaxLatencyDurationCount?: number;
+  initialLiveManifestSize?: number;
+  startPosition?: number;
   loader?: unknown;
 }
 
@@ -241,6 +245,8 @@ export function createHlsConfig(overrides?: HlsConfigOverrides) {
 
 export interface ArtPlayerConfigOverrides {
   isLive?: boolean;
+  muted?: boolean;
+  autoplay?: boolean;
   setting?: boolean;
   playbackRate?: boolean;
   fastForward?: boolean;

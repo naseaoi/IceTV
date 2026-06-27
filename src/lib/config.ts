@@ -465,7 +465,14 @@ export function configSelfCheck(adminConfig: AdminConfig): AdminConfig {
 
   // 直播源去重
   const seenLiveKeys = new Set<string>();
-  adminConfig.LiveConfig = adminConfig.LiveConfig.filter((live) => {
+  adminConfig.LiveConfig = adminConfig.LiveConfig.map((live) => ({
+    ...live,
+    key: live.key.trim(),
+    name: live.name.trim(),
+    url: live.url.trim(),
+    ua: live.ua?.trim(),
+    epg: live.epg?.trim(),
+  })).filter((live) => {
     if (seenLiveKeys.has(live.key)) {
       return false;
     }
