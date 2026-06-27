@@ -40,6 +40,12 @@ jobs:
         id: release
         run: node scripts/prepare-release.js
 
+      - name: Stop on tag mismatch
+        if: github.event_name == 'push' && github.ref_name != steps.release.outputs.tag
+        run: |
+          echo "当前推送 tag 为 ${{ github.ref_name }}，CHANGELOG 顶部版本为 ${{ steps.release.outputs.tag }}。"
+          exit 1
+
       - name: Set lowercase repository owner
         id: image
         run: |

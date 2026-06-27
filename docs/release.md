@@ -98,11 +98,13 @@ git tag -a v0.3.x -m "v0.3.x"
 git push origin v0.3.x
 ```
 
-`v*` tag 推送触发镜像构建。
+`v*` tag 推送会同时触发镜像构建和 GitHub Release 同步。Release 工作流只读取已存在 tag，不创建 tag。
 
 ## Release
 
-生成发布说明：
+通常不需要手动执行。tag 推送后 `Sync GitHub Release` 会校验推送 tag 与 `CHANGELOG.md` 顶部版本一致，再自动创建或更新 GitHub Release。
+
+手动兜底时先生成发布说明：
 
 ```powershell
 pnpm release:prepare
@@ -111,7 +113,7 @@ pnpm release:prepare
 如果 Release 不存在：
 
 ```powershell
-gh release create v0.3.x --title "v0.3.x" --notes-file "<notes_file>"
+gh release create v0.3.x --verify-tag --title "v0.3.x" --notes-file "<notes_file>"
 ```
 
 如果 Release 已存在：
@@ -131,8 +133,10 @@ gh release edit v0.3.x --title "v0.3.x" --notes-file "<notes_file>"
 ```powershell
 git ls-remote --heads origin main
 git ls-remote --tags origin v0.3.x
+gh run list --workflow "Build & Push Docker image" --limit 5
+gh run list --workflow "Sync GitHub Release" --limit 5
 gh release view v0.3.x --json tagName,url,isDraft,isPrerelease,name,body
 git status --short --branch
 ```
 
-确认 PR 已合并到 `main`、tag 已推送、Release 非 draft、工作区干净。
+确认 PR 已合并到 `main`、tag 已推送、镜像构建通过、Release 非 draft、工作区干净。
