@@ -40,6 +40,7 @@ import {
   PlayerLoadingSessionState,
   resetPlayerLoadingSessionState,
   shouldDismissLoadingFromCanPlay,
+  shouldDismissLoadingFromReadyFrame,
 } from '@/features/play/lib/playerLoading';
 import { WakeLockSentinel } from '@/features/play/lib/playTypes';
 import { filterAdsFromM3U8 } from '@/features/play/lib/playUtils';
@@ -49,6 +50,7 @@ import {
   applyResumeTime,
   isWithinAutoResumeWindow,
   resolvePendingResumeTime,
+  resolveResumeTimeTarget,
   shouldForcePlaybackStartFromHead,
 } from '@/features/play/lib/resumePlayback';
 import type { ResumeMode } from '@/features/play/lib/resumePlayback';
@@ -103,11 +105,18 @@ export interface UseArtPlayerParams {
   /** 当前源从 browser 回退到 server 前触发，用于重置同源重试超时窗口。 */
   onSourceProxyFallbackStarted?: () => void;
   /** 播放器收集到当前源的测速数据后回调（速度+分辨率+延迟） */
-  onCurrentSourceVideoInfo?: (info: {
-    quality: string;
-    loadSpeed: string;
-    pingTime: number;
-  }) => void;
+  onCurrentSourceVideoInfo?: (
+    info: {
+      quality: string;
+      loadSpeed: string;
+      pingTime: number;
+    },
+    context: {
+      source: string;
+      id: string;
+      videoUrl: string;
+    },
+  ) => void;
 }
 
 // ---------------------------------------------------------------------------
@@ -200,6 +209,11 @@ export function useArtPlayer(params: UseArtPlayerParams) {
       try {
         // 预取 m3u8 清单（与模块加载并行），填充服务端缓存
         const preSourceKey = detailRef.current?.source || '';
+        const playbackInfoContext = {
+          source: detailRef.current?.source || detail?.source || '',
+          id: detailRef.current?.id || detail?.id || '',
+          videoUrl,
+        };
         const preUseProxy = isServerProxy(preSourceKey);
         // 构建 m3u8 代理 URL；携带 icetv-source 以便服务端做 CORS 能力探测，
         // 后续请求可自动将 segment/key 直连源站（若源支持 CORS）
@@ -537,11 +551,14 @@ export function useArtPlayer(params: UseArtPlayerParams) {
                           : w >= 854
                             ? '480p'
                             : 'SD';
-                onCurrentSourceVideoInfo?.({
-                  quality,
-                  loadSpeed: firstFragSpeed,
-                  pingTime: firstFragPing,
-                });
+                onCurrentSourceVideoInfo?.(
+                  {
+                    quality,
+                    loadSpeed: firstFragSpeed,
+                    pingTime: firstFragPing,
+                  },
+                  playbackInfoContext,
+                );
               };
 
               const onHlsError = function (_event: unknown, data: any) {
@@ -831,6 +848,38 @@ export function useArtPlayer(params: UseArtPlayerParams) {
           notifyPlayerPlaybackStarted();
         };
 
+        let initialPlaybackRequestInFlight = false;
+        const requestInitialPlayback = (
+          video: HTMLVideoElement | null | undefined,
+        ) => {
+          if (!video || initialPlaybackRequestInFlight) {
+            return;
+          }
+
+          initialPlaybackRequestInFlight = true;
+          getManagedVideo(video).hls?.startLoad?.();
+          void video
+            .play()
+            .then(() => {
+              finishInitialLoading();
+            })
+            .catch((err) => {
+              initialPlaybackRequestInFlight = false;
+              if (
+                err instanceof DOMException &&
+                err.name === 'NotAllowedError' &&
+                shouldDismissLoadingFromReadyFrame(video)
+              ) {
+                finishInitialLoading();
+                getManagedVideo(video).hls?.stopLoad?.();
+                return;
+              }
+              console.warn('自动起播失败:', err);
+            });
+        };
+
+        let lastPendingResumeSeekAt = 0;
+
         const completePendingResumeIfReady = () => {
           if (
             !hasReachedResumeTarget(
@@ -844,6 +893,46 @@ export function useArtPlayer(params: UseArtPlayerParams) {
           loadingSessionRef.current.pendingInitialResumeTarget = null;
           finishInitialLoading();
           return true;
+        };
+
+        const retryPendingResumePosition = () => {
+          const target = loadingSessionRef.current.pendingInitialResumeTarget;
+          if (!Number.isFinite(target) || (target ?? 0) <= 0) {
+            return false;
+          }
+
+          if (hasReachedResumeTarget(player.currentTime || 0, target)) {
+            return false;
+          }
+
+          const now = performance.now();
+          if (now - lastPendingResumeSeekAt < 500) {
+            return false;
+          }
+
+          try {
+            const safeTarget = resolveResumeTimeTarget(
+              target as number,
+              player.duration,
+            );
+            if (safeTarget <= 0) {
+              return false;
+            }
+            loadingSessionRef.current.pendingInitialResumeTarget = safeTarget;
+            if (applyResumeTime(player, safeTarget)) {
+              lastPendingResumeSeekAt = now;
+              stableCurrentTimeRef.current = safeTarget;
+              return true;
+            }
+          } catch (err) {
+            console.warn('重试恢复播放进度失败:', err);
+          }
+
+          return false;
+        };
+
+        const finishLoadingFromPlaybackStarted = () => {
+          finishInitialLoading();
         };
 
         const ensureInitialPlaybackPosition = () => {
@@ -862,8 +951,16 @@ export function useArtPlayer(params: UseArtPlayerParams) {
           if (pendingResumeTime !== null) {
             intendedResumeTarget = pendingResumeTime;
             try {
-              if (applyResumeTime(player, pendingResumeTime)) {
-                appliedResumeTarget = player.currentTime || pendingResumeTime;
+              const safeResumeTarget = resolveResumeTimeTarget(
+                pendingResumeTime,
+                player.duration,
+              );
+              if (
+                safeResumeTarget > 0 &&
+                applyResumeTime(player, safeResumeTarget)
+              ) {
+                appliedResumeTarget = safeResumeTarget;
+                lastPendingResumeSeekAt = performance.now();
               }
               if (resumeModeRef.current === 'history') {
                 allowAutoResumeRef.current = false;
@@ -892,6 +989,35 @@ export function useArtPlayer(params: UseArtPlayerParams) {
           return appliedResumeTarget;
         };
 
+        const finishInitialLoadingIfMediaReady = () => {
+          if (cancelled) {
+            return;
+          }
+
+          ensureInitialPlaybackPosition();
+
+          const activeVideo = player.video as HTMLVideoElement | null;
+          const isPlayingReady = shouldDismissLoadingFromCanPlay(activeVideo);
+          if (isPlayingReady) {
+            finishLoadingFromPlaybackStarted();
+          }
+
+          const hasReadyFrame = shouldDismissLoadingFromReadyFrame(activeVideo);
+          if (loadingSessionRef.current.pendingInitialResumeTarget !== null) {
+            if (!completePendingResumeIfReady()) {
+              retryPendingResumePosition();
+            }
+            if (!isPlayingReady && hasReadyFrame) {
+              requestInitialPlayback(activeVideo);
+            }
+            return;
+          }
+
+          if (hasReadyFrame) {
+            requestInitialPlayback(activeVideo);
+          }
+        };
+
         // --- 播放器事件 ---
 
         player.on('ready', () => {
@@ -902,6 +1028,10 @@ export function useArtPlayer(params: UseArtPlayerParams) {
         });
 
         player.on('play', () => {
+          const activeVideo = player.video as HTMLVideoElement | undefined;
+          if (activeVideo) {
+            getManagedVideo(activeVideo).hls?.startLoad?.();
+          }
           requestWakeLock();
           setIsPlaying(true);
         });
@@ -910,13 +1040,10 @@ export function useArtPlayer(params: UseArtPlayerParams) {
         // 某些 HLS 流 canplay 可能不触发，因此这里也要兜底套用初始恢复进度。
         player.on('video:playing', () => {
           ensureInitialPlaybackPosition();
-
+          finishLoadingFromPlaybackStarted();
           if (loadingSessionRef.current.pendingInitialResumeTarget !== null) {
-            completePendingResumeIfReady();
-            return;
+            retryPendingResumePosition();
           }
-
-          finishInitialLoading();
         });
 
         player.on('pause', () => {
@@ -969,13 +1096,11 @@ export function useArtPlayer(params: UseArtPlayerParams) {
             player.notice.show = '';
           }, 0);
 
-          if (
-            loadingSessionRef.current.pendingInitialResumeTarget === null &&
-            shouldDismissLoadingFromCanPlay(player.video)
-          ) {
-            finishInitialLoading();
-          }
+          finishInitialLoadingIfMediaReady();
         });
+
+        player.on('video:loadeddata', finishInitialLoadingIfMediaReady);
+        player.on('video:progress', finishInitialLoadingIfMediaReady);
 
         // 跳过片头片尾
         player.on('video:timeupdate', () => {
@@ -983,6 +1108,10 @@ export function useArtPlayer(params: UseArtPlayerParams) {
 
           if (loadingSessionRef.current.pendingInitialResumeTarget !== null) {
             completePendingResumeIfReady();
+          }
+
+          if (shouldDismissLoadingFromCanPlay(player.video)) {
+            finishLoadingFromPlaybackStarted();
           }
 
           // HLS 兜底：部分源不会在播放结束时派发 ended 事件，
@@ -1079,6 +1208,9 @@ export function useArtPlayer(params: UseArtPlayerParams) {
         if (player.video) {
           ensureVideoSource(player.video as HTMLVideoElement, videoUrl);
         }
+
+        window.setTimeout(finishInitialLoadingIfMediaReady, 0);
+        window.setTimeout(finishInitialLoadingIfMediaReady, 500);
       } catch (err) {
         console.error('创建播放器失败:', err);
         setError('播放器初始化失败');

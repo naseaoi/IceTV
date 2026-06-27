@@ -3,7 +3,7 @@ import {
   markPlayerLoadingSessionStarted,
   resetPlayerLoadingSessionState,
   shouldDismissLoadingFromCanPlay,
-  shouldDismissLoadingFromPlaybackProgress,
+  shouldDismissLoadingFromReadyFrame,
 } from '@/features/play/lib/playerLoading';
 
 describe('playerLoading', () => {
@@ -19,10 +19,36 @@ describe('playerLoading', () => {
     ).toBe(true);
   });
 
-  it('播放时间已明显推进时，可以判定新视频已经起播', () => {
-    expect(shouldDismissLoadingFromPlaybackProgress(1.01)).toBe(true);
-    expect(shouldDismissLoadingFromPlaybackProgress(1)).toBe(false);
-    expect(shouldDismissLoadingFromPlaybackProgress(0.3)).toBe(false);
+  it('首帧已解码且当前位置有缓存时，可以关闭加载遮罩', () => {
+    const video = {
+      readyState: 4,
+      videoWidth: 1920,
+      currentTime: 0,
+      ended: false,
+      buffered: {
+        length: 1,
+        start: () => 0.023,
+        end: () => 121,
+      },
+    };
+
+    expect(shouldDismissLoadingFromReadyFrame(video)).toBe(true);
+  });
+
+  it('只有元数据或没有有效缓存时，不关闭加载遮罩', () => {
+    const video = {
+      readyState: 1,
+      videoWidth: 0,
+      currentTime: 0,
+      ended: false,
+      buffered: {
+        length: 0,
+        start: () => 0,
+        end: () => 0,
+      },
+    };
+
+    expect(shouldDismissLoadingFromReadyFrame(video)).toBe(false);
   });
 
   it('恢复进度达到目标附近后即可关闭遮罩', () => {

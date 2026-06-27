@@ -21,6 +21,16 @@ type PartialProbeResult = {
   pingTime: number;
 };
 
+type VideoDimensions = {
+  width: number;
+  height: number;
+};
+
+type SegmentProbeResult = {
+  loadSpeed: string;
+  dimensions: VideoDimensions | null;
+};
+
 class ProbeError extends Error {
   partial?: PartialProbeResult;
 
@@ -59,6 +69,17 @@ function mapWidthToQuality(width: number): string {
   if (width >= 1280) return '720p';
   if (width >= 854) return '480p';
   if (width > 0) return 'SD';
+  return '未知';
+}
+
+function mapDimensionsToQuality(dimensions: VideoDimensions): string {
+  const height = dimensions.height;
+  if (height >= 2160) return '4K';
+  if (height >= 1440) return '2K';
+  if (height >= 1080) return '1080p';
+  if (height >= 720) return '720p';
+  if (height >= 480) return '480p';
+  if (height > 0) return 'SD';
   return '未知';
 }
 
@@ -176,6 +197,228 @@ function getFirstSegmentUrl(content: string): string | null {
   return getNonCommentLines(content)[0] || null;
 }
 
+function concatChunks(chunks: Uint8Array[], totalBytes: number): Uint8Array {
+  const result = new Uint8Array(totalBytes);
+  let offset = 0;
+  for (const chunk of chunks) {
+    result.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  return result;
+}
+
+function collectTsPayload(sample: Uint8Array): Uint8Array {
+  const packets: Uint8Array[] = [];
+  let total = 0;
+  for (let offset = 0; offset + 188 <= sample.byteLength; offset += 188) {
+    if (sample[offset] !== 0x47) continue;
+    const adaptationControl = (sample[offset + 3] >> 4) & 0x03;
+    if (adaptationControl === 0 || adaptationControl === 2) continue;
+
+    let payloadOffset = offset + 4;
+    if (adaptationControl === 3) {
+      payloadOffset += 1 + sample[offset + 4];
+    }
+    if (payloadOffset >= offset + 188) continue;
+
+    const payload = sample.subarray(payloadOffset, offset + 188);
+    packets.push(payload);
+    total += payload.byteLength;
+  }
+  return concatChunks(packets, total);
+}
+
+function findAnnexBNalUnits(bytes: Uint8Array): Uint8Array[] {
+  const starts: Array<{ pos: number; len: number }> = [];
+  for (let i = 0; i < bytes.byteLength - 4; i += 1) {
+    if (bytes[i] === 0 && bytes[i + 1] === 0 && bytes[i + 2] === 1) {
+      starts.push({ pos: i, len: 3 });
+      i += 2;
+      continue;
+    }
+    if (
+      bytes[i] === 0 &&
+      bytes[i + 1] === 0 &&
+      bytes[i + 2] === 0 &&
+      bytes[i + 3] === 1
+    ) {
+      starts.push({ pos: i, len: 4 });
+      i += 3;
+    }
+  }
+
+  const units: Uint8Array[] = [];
+  for (let i = 0; i < starts.length; i += 1) {
+    const start = starts[i].pos + starts[i].len;
+    const end = starts[i + 1]?.pos ?? bytes.byteLength;
+    if (end > start) {
+      units.push(bytes.subarray(start, end));
+    }
+  }
+  return units;
+}
+
+function nalToRbsp(nal: Uint8Array): Uint8Array {
+  const bytes: number[] = [];
+  for (let i = 1; i < nal.byteLength; i += 1) {
+    if (
+      i + 2 < nal.byteLength &&
+      nal[i] === 0 &&
+      nal[i + 1] === 0 &&
+      nal[i + 2] === 3
+    ) {
+      bytes.push(0, 0);
+      i += 2;
+      continue;
+    }
+    bytes.push(nal[i]);
+  }
+  return Uint8Array.from(bytes);
+}
+
+class BitReader {
+  private bitOffset = 0;
+
+  constructor(private readonly bytes: Uint8Array) {}
+
+  readBit(): number {
+    const byte = this.bytes[this.bitOffset >> 3] || 0;
+    const value = (byte >> (7 - (this.bitOffset & 7))) & 1;
+    this.bitOffset += 1;
+    return value;
+  }
+
+  readBits(count: number): number {
+    let value = 0;
+    for (let i = 0; i < count; i += 1) {
+      value = (value << 1) | this.readBit();
+    }
+    return value;
+  }
+
+  readUE(): number {
+    let zeros = 0;
+    while (this.bitOffset < this.bytes.byteLength * 8 && this.readBit() === 0) {
+      zeros += 1;
+    }
+    return (1 << zeros) - 1 + this.readBits(zeros);
+  }
+
+  readSE(): number {
+    const value = this.readUE();
+    return value & 1 ? (value + 1) >> 1 : -(value >> 1);
+  }
+}
+
+function skipScalingList(reader: BitReader, size: number): void {
+  let lastScale = 8;
+  let nextScale = 8;
+  for (let i = 0; i < size; i += 1) {
+    if (nextScale !== 0) {
+      const deltaScale = reader.readSE();
+      nextScale = (lastScale + deltaScale + 256) % 256;
+    }
+    lastScale = nextScale === 0 ? lastScale : nextScale;
+  }
+}
+
+function parseSpsDimensions(nal: Uint8Array): VideoDimensions | null {
+  try {
+    const reader = new BitReader(nalToRbsp(nal));
+    const profileIdc = reader.readBits(8);
+    reader.readBits(8);
+    reader.readBits(8);
+    reader.readUE();
+
+    let chromaFormatIdc = 1;
+    if (
+      [100, 110, 122, 244, 44, 83, 86, 118, 128, 138, 139, 134, 135].includes(
+        profileIdc,
+      )
+    ) {
+      chromaFormatIdc = reader.readUE();
+      if (chromaFormatIdc === 3) reader.readBit();
+      reader.readUE();
+      reader.readUE();
+      reader.readBit();
+      if (reader.readBit()) {
+        const count = chromaFormatIdc !== 3 ? 8 : 12;
+        for (let i = 0; i < count; i += 1) {
+          if (reader.readBit()) {
+            skipScalingList(reader, i < 6 ? 16 : 64);
+          }
+        }
+      }
+    }
+
+    reader.readUE();
+    const picOrderCntType = reader.readUE();
+    if (picOrderCntType === 0) {
+      reader.readUE();
+    } else if (picOrderCntType === 1) {
+      reader.readBit();
+      reader.readSE();
+      reader.readSE();
+      const cycleCount = reader.readUE();
+      for (let i = 0; i < cycleCount; i += 1) {
+        reader.readSE();
+      }
+    }
+
+    reader.readUE();
+    reader.readBit();
+    const picWidthInMbsMinus1 = reader.readUE();
+    const picHeightInMapUnitsMinus1 = reader.readUE();
+    const frameMbsOnlyFlag = reader.readBit();
+    if (!frameMbsOnlyFlag) reader.readBit();
+    reader.readBit();
+
+    let cropLeft = 0;
+    let cropRight = 0;
+    let cropTop = 0;
+    let cropBottom = 0;
+    if (reader.readBit()) {
+      cropLeft = reader.readUE();
+      cropRight = reader.readUE();
+      cropTop = reader.readUE();
+      cropBottom = reader.readUE();
+    }
+
+    let cropUnitX = 1;
+    let cropUnitY = 2 - frameMbsOnlyFlag;
+    if (chromaFormatIdc === 1) {
+      cropUnitX = 2;
+      cropUnitY = 2 * (2 - frameMbsOnlyFlag);
+    } else if (chromaFormatIdc === 2) {
+      cropUnitX = 2;
+      cropUnitY = 2 - frameMbsOnlyFlag;
+    }
+
+    return {
+      width:
+        (picWidthInMbsMinus1 + 1) * 16 - (cropLeft + cropRight) * cropUnitX,
+      height:
+        (2 - frameMbsOnlyFlag) * (picHeightInMapUnitsMinus1 + 1) * 16 -
+        (cropTop + cropBottom) * cropUnitY,
+    };
+  } catch {
+    return null;
+  }
+}
+
+function detectSegmentDimensions(sample: Uint8Array): VideoDimensions | null {
+  const payload = collectTsPayload(sample);
+  const units = findAnnexBNalUnits(payload);
+  for (const unit of units) {
+    if (((unit[0] || 0) & 0x1f) !== 7) continue;
+    const dimensions = parseSpsDimensions(unit);
+    if (dimensions?.width && dimensions.height) {
+      return dimensions;
+    }
+  }
+  return null;
+}
+
 /** 带宽测量目标样本量（字节）。达到后提前中断，避免长尾拖慢测速。 */
 const BANDWIDTH_SAMPLE_TARGET_BYTES = 512 * 1024;
 /** 带宽测量请求的 Range 上限（字节）。1MB 够大，单次 TS 切片通常也不会超过。 */
@@ -189,7 +432,9 @@ const BANDWIDTH_MIN_VALID_BYTES = 64 * 1024;
  * 下载首个 segment 样本并基于"首字节到达 → 达标字节"的时间窗计算带宽。
  * 忽略 TCP/TLS 握手阶段，避免把连接建立开销摊到速度里。
  */
-async function measureSegmentBandwidth(segmentUrl: string): Promise<string> {
+async function measureSegmentBandwidth(
+  segmentUrl: string,
+): Promise<SegmentProbeResult> {
   const controller = new AbortController();
   const timeoutTimer = setTimeout(
     () => controller.abort(),
@@ -211,13 +456,23 @@ async function measureSegmentBandwidth(segmentUrl: string): Promise<string> {
     if (!reader) {
       // 老浏览器无 ReadableStream，退回到一次性下载（精度会差但能跑）
       const buf = await response.arrayBuffer();
-      if (buf.byteLength < BANDWIDTH_MIN_VALID_BYTES) return '未知';
+      const sample = new Uint8Array(buf);
+      if (buf.byteLength < BANDWIDTH_MIN_VALID_BYTES) {
+        return {
+          loadSpeed: '未知',
+          dimensions: detectSegmentDimensions(sample),
+        };
+      }
       // 没有首字节时间，只能用响应总耗时粗算，偏保守
-      return formatBytesPerSecond(buf.byteLength / 0.5);
+      return {
+        loadSpeed: formatBytesPerSecond(buf.byteLength / 0.5),
+        dimensions: detectSegmentDimensions(sample),
+      };
     }
 
     let bytes = 0;
     let firstByteAt = 0;
+    const chunks: Uint8Array[] = [];
     while (true) {
       const { done, value } = await reader.read();
       if (done) break;
@@ -226,6 +481,7 @@ async function measureSegmentBandwidth(segmentUrl: string): Promise<string> {
         firstByteAt = performance.now();
       }
       bytes += value.byteLength;
+      chunks.push(value);
       if (bytes >= BANDWIDTH_SAMPLE_TARGET_BYTES) {
         // 主动中止：达到目标样本即可，避免长尾拖慢测速
         try {
@@ -237,14 +493,20 @@ async function measureSegmentBandwidth(segmentUrl: string): Promise<string> {
       }
     }
 
+    const sample = concatChunks(chunks, bytes);
+    const dimensions = detectSegmentDimensions(sample);
+
     if (bytes < BANDWIDTH_MIN_VALID_BYTES || firstByteAt === 0) {
-      return '未知';
+      return { loadSpeed: '未知', dimensions };
     }
 
     const elapsed = performance.now() - firstByteAt;
-    if (elapsed <= 0) return '未知';
+    if (elapsed <= 0) return { loadSpeed: '未知', dimensions };
 
-    return formatBytesPerSecond(bytes / (elapsed / 1000));
+    return {
+      loadSpeed: formatBytesPerSecond(bytes / (elapsed / 1000)),
+      dimensions,
+    };
   } catch (err) {
     if ((err as Error)?.name === 'AbortError') {
       throw new Error('Timeout loading first segment');
@@ -342,17 +604,14 @@ async function probeWithMode(
         'Timeout loading media playlist',
       );
       if (!mediaPlaylistResponse.ok) {
-        throw new ProbeError('Failed to load media playlist', partial);
+        throw new ProbeError('Failed to load media playlist');
       }
       mediaPlaylistContent = await mediaPlaylistResponse.text();
     }
 
-    const pingTime = await pingPromise;
-    partial = { quality, pingTime };
-
     const firstSegmentUrl = getFirstSegmentUrl(mediaPlaylistContent);
     if (!firstSegmentUrl) {
-      throw new ProbeError('Missing media segment url', partial);
+      throw new ProbeError('Missing media segment url');
     }
 
     // 下载首个分片样本做带宽估算。
@@ -361,10 +620,20 @@ async function probeWithMode(
     //      TCP 慢启动 + TLS/代理首包延迟占据耗时主导，算出的 KB/s 会严重偏低。
     //   2) 排除握手开销：从「首字节到达」开始计时，而非 fetch 发起时刻。
     //   3) 滑动达标：累计到 ≥ 512KB 或流结束即停止，避免长尾请求拖长总时长。
-    const loadSpeed = await measureSegmentBandwidth(firstSegmentUrl);
+    const segmentProbe = await measureSegmentBandwidth(firstSegmentUrl);
+    const loadSpeed = segmentProbe.loadSpeed;
+    if (loadSpeed === '未知') {
+      throw new ProbeError('Insufficient first segment sample');
+    }
+
+    const pingTime = await pingPromise;
+    const detectedQuality = segmentProbe.dimensions
+      ? mapDimensionsToQuality(segmentProbe.dimensions)
+      : quality;
+    partial = { quality: detectedQuality, pingTime };
 
     return {
-      quality,
+      quality: detectedQuality,
       loadSpeed,
       pingTime,
     };

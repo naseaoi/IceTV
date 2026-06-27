@@ -405,9 +405,12 @@ function PlayPageClient() {
       clearTargetEpisodeProgressRef,
     ]),
     onCurrentSourceVideoInfo: useCallback(
-      (info: { quality: string; loadSpeed: string; pingTime: number }) => {
-        const src = currentSourceRef.current;
-        const id = currentIdRef.current;
+      (
+        info: { quality: string; loadSpeed: string; pingTime: number },
+        context?: { source: string; id: string; videoUrl: string },
+      ) => {
+        const src = context?.source || currentSourceRef.current;
+        const id = context?.id || currentIdRef.current;
         if (!src || !id) return;
         const key = `${src}-${id}`;
         writePlayerInfo(key, info);

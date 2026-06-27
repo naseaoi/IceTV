@@ -429,7 +429,11 @@ async function rewriteM3U8Content(
             buildProxyPath(
               'm3u8',
               resolvedUrl,
-              allowCORS ? { allowCORS: 'true' } : {},
+              forceServer
+                ? { forceServer: 'true' }
+                : allowCORS
+                  ? { allowCORS: 'true' }
+                  : {},
             ),
           );
         } else {

@@ -19,6 +19,7 @@ import {
   clearSourceFailure,
   markSourceFailed,
 } from '@/lib/failed-source-cooldown';
+import { getManagedVideo } from '@/lib/player-runtime';
 import { mergeSourceBundle } from '@/lib/source-bundle';
 import { SearchResult, SkipConfig } from '@/lib/types';
 
@@ -52,6 +53,52 @@ function parseLoadSpeedKBps(speed?: string): number {
   if (unit === 'Mbps' || unit === 'Mb/s') return (value * 1024) / 8;
   if (unit === 'MB/s') return value * 1024;
   return value;
+}
+
+function hasDisplayText(value?: string): boolean {
+  const text = value?.trim();
+  return !!text && text !== 'unknown';
+}
+
+function mergeSourceSwitchDetail(
+  preferred: SearchResult,
+  fallback?: SearchResult,
+  previous?: SearchResult | null,
+): SearchResult {
+  return {
+    ...fallback,
+    ...preferred,
+    title: hasDisplayText(preferred.title)
+      ? preferred.title
+      : hasDisplayText(fallback?.title)
+        ? fallback!.title
+        : previous?.title || '',
+    poster: preferred.poster || fallback?.poster || previous?.poster || '',
+    episodes:
+      preferred.episodes && preferred.episodes.length > 0
+        ? preferred.episodes
+        : fallback?.episodes || [],
+    episodes_titles:
+      preferred.episodes_titles && preferred.episodes_titles.length > 0
+        ? preferred.episodes_titles
+        : fallback?.episodes_titles || [],
+    source_name: preferred.source_name || fallback?.source_name || '',
+    year: hasDisplayText(preferred.year)
+      ? preferred.year
+      : hasDisplayText(fallback?.year)
+        ? fallback!.year
+        : previous?.year || preferred.year || fallback?.year || '',
+    class: preferred.class || fallback?.class || previous?.class,
+    desc: preferred.desc || fallback?.desc || previous?.desc,
+    type_name:
+      preferred.type_name || fallback?.type_name || previous?.type_name,
+    douban_id:
+      preferred.douban_id || fallback?.douban_id || previous?.douban_id,
+    related_sources:
+      preferred.related_sources ||
+      fallback?.related_sources ||
+      previous?.related_sources,
+  };
 }
 
 interface UseSourceSwitchOptions {
@@ -138,6 +185,19 @@ export function useSourceSwitch(options: UseSourceSwitchOptions) {
 
   const handleLoadingTimeoutRef = useRef<(() => void) | null>(null);
 
+  const stopActiveHlsLoading = useCallback(() => {
+    const video = artPlayerRef.current?.video as HTMLVideoElement | undefined;
+    if (!video) return;
+
+    const managedVideo = getManagedVideo(video);
+    try {
+      managedVideo.hls?.stopLoad?.();
+    } catch (err) {
+      console.warn('停止失败源加载失败:', err);
+    }
+    setRealtimeLoadSpeed('');
+  }, [artPlayerRef, setRealtimeLoadSpeed]);
+
   const handleSourceChange = useCallback(
     async (
       newSource: string,
@@ -196,7 +256,11 @@ export function useSourceSwitch(options: UseSourceSwitchOptions) {
           }
         }
 
-        let newDetail = targetSource;
+        let newDetail = mergeSourceSwitchDetail(
+          targetSource,
+          targetSource,
+          previousDetail,
+        );
 
         try {
           const detailRes = await fetch(
@@ -208,10 +272,12 @@ export function useSourceSwitch(options: UseSourceSwitchOptions) {
           if (detailRes.ok) {
             const fullDetail = (await detailRes.json()) as SearchResult;
             if (fullDetail.episodes && fullDetail.episodes.length > 0) {
-              newDetail = fullDetail;
-              setAvailableSources((prev) =>
-                mergeSourceBundle(prev, fullDetail),
+              newDetail = mergeSourceSwitchDetail(
+                fullDetail,
+                targetSource,
+                previousDetail,
               );
+              setAvailableSources((prev) => mergeSourceBundle(prev, newDetail));
             }
           }
         } catch (err) {
@@ -300,8 +366,14 @@ export function useSourceSwitch(options: UseSourceSwitchOptions) {
         resumeTimeRef.current = nextResumeState.resumeTime;
         resumeModeRef.current = nextResumeState.resumeMode;
 
-        setVideoTitle(newDetail.title || newTitle);
-        setVideoYear(newDetail.year);
+        setVideoTitle(
+          newDetail.title || newTitle || previousDetail?.title || '',
+        );
+        setVideoYear(
+          hasDisplayText(newDetail.year)
+            ? newDetail.year
+            : previousDetail?.year || '',
+        );
         setVideoCover(newDetail.poster);
         setVideoDoubanId(newDetail.douban_id || 0);
         setCurrentSource(newDetail.source);
@@ -373,10 +445,6 @@ export function useSourceSwitch(options: UseSourceSwitchOptions) {
   );
 
   const handleLoadingTimeout = useCallback(() => {
-    if (!autoSwitchSourceOnTimeout) {
-      return;
-    }
-
     const curSource = currentSourceRef.current;
     const curId = currentIdRef.current;
     const curDetail = detailRef.current;
@@ -389,6 +457,11 @@ export function useSourceSwitch(options: UseSourceSwitchOptions) {
     const curKey = `${curSource}-${curId}`;
     failedSourcesRef.current.add(curKey);
     markSourceFailed(curKey);
+
+    if (!autoSwitchSourceOnTimeout) {
+      stopActiveHlsLoading();
+      return;
+    }
 
     const anchor = sourceSwitchEpisodeAnchorRef.current;
     const referenceDetail = anchor?.detail || curDetail;
@@ -412,7 +485,10 @@ export function useSourceSwitch(options: UseSourceSwitchOptions) {
       }
       return true;
     });
-    if (candidates.length === 0) return;
+    if (candidates.length === 0) {
+      stopActiveHlsLoading();
+      return;
+    }
 
     const ranked = [...candidates].sort((a, b) => {
       const aInfo = precomputedVideoInfo.get(`${a.source}-${a.id}`);
@@ -422,9 +498,13 @@ export function useSourceSwitch(options: UseSourceSwitchOptions) {
       return bSpeed - aSpeed;
     });
     const next = ranked[0];
-    if (!next) return;
+    if (!next) {
+      stopActiveHlsLoading();
+      return;
+    }
 
     autoFallbackInProgressRef.current = true;
+    stopActiveHlsLoading();
     void handleSourceChange(next.source, next.id, next.title, {
       isAutoFallback: true,
     });
@@ -433,6 +513,7 @@ export function useSourceSwitch(options: UseSourceSwitchOptions) {
     availableSources,
     precomputedVideoInfo,
     currentEpisodeIndex,
+    stopActiveHlsLoading,
     currentSourceRef,
     currentIdRef,
     detailRef,

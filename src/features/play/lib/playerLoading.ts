@@ -17,14 +17,41 @@ export function shouldDismissLoadingFromCanPlay(
   return !video.paused && !video.ended;
 }
 
-/**
- * 某些浏览器/内核在切集后会先更新 currentTime，再补发 playing；
- * 只要已离开起播零点区间，就说明新视频已实际推进，可以安全收起遮罩。
- */
-export function shouldDismissLoadingFromPlaybackProgress(
-  currentTime: number,
+interface ReadyFrameVideo {
+  readyState: number;
+  videoWidth: number;
+  currentTime: number;
+  ended: boolean;
+  buffered: {
+    length: number;
+    start(index: number): number;
+    end(index: number): number;
+  };
+}
+
+export function shouldDismissLoadingFromReadyFrame(
+  video: ReadyFrameVideo | null | undefined,
 ): boolean {
-  return Number.isFinite(currentTime) && currentTime > 1;
+  if (!video || video.ended) {
+    return false;
+  }
+
+  if (video.readyState < 2 || video.videoWidth <= 0) {
+    return false;
+  }
+
+  const currentTime = Number.isFinite(video.currentTime)
+    ? video.currentTime
+    : 0;
+  for (let i = 0; i < video.buffered.length; i += 1) {
+    const start = video.buffered.start(i);
+    const end = video.buffered.end(i);
+    if (start <= currentTime + 0.5 && end > currentTime) {
+      return true;
+    }
+  }
+
+  return false;
 }
 
 /**

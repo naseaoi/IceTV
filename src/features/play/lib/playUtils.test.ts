@@ -94,4 +94,23 @@ describe('filterAdsFromM3U8', () => {
     expect(output).not.toContain('grid-ad-6.ts');
     expect(output).toContain('main-a-1.ts');
   });
+
+  it('会移除正片后的连续短尾部广告区间并保留 ENDLIST', () => {
+    const input = createPlaylist([
+      ['#EXTINF:356,', 'main-a.ts'],
+      ['#EXT-X-DISCONTINUITY', '#EXTINF:20,', 'mid-ad.ts'],
+      ['#EXT-X-DISCONTINUITY', '#EXTINF:1320,', 'main-b.ts'],
+      ['#EXT-X-DISCONTINUITY', '#EXTINF:19.633333,', 'tail-ad-a.ts'],
+      ['#EXT-X-DISCONTINUITY', '#EXTINF:42.542000,', 'tail-ad-b.ts'],
+      ['#EXT-X-ENDLIST'],
+    ]);
+
+    const output = filterAdsFromM3U8(input);
+
+    expect(output).not.toContain('tail-ad-a.ts');
+    expect(output).not.toContain('tail-ad-b.ts');
+    expect(output).toContain('main-a.ts');
+    expect(output).toContain('main-b.ts');
+    expect(output.trim().endsWith('#EXT-X-ENDLIST')).toBe(true);
+  });
 });

@@ -331,6 +331,36 @@ function isShortMidrollAdCandidate(
   );
 }
 
+function isTrailingShortAdBlockCandidate(
+  segments: ParsedDiscontinuitySegment[],
+  index: number,
+  maxDuration: number,
+) {
+  if (index <= 0 || index >= segments.length) return false;
+
+  const segment = segments[index];
+  if (!isShortEdgeAdCandidate(segment, maxDuration)) return false;
+
+  let firstTrailingIndex = segments.length;
+  let trailingDuration = 0;
+  for (let i = segments.length - 1; i >= 0; i -= 1) {
+    const current = segments[i];
+    if (!isShortEdgeAdCandidate(current, maxDuration)) {
+      break;
+    }
+    firstTrailingIndex = i;
+    trailingDuration += current.duration;
+  }
+
+  if (index < firstTrailingIndex) return false;
+  if (firstTrailingIndex === 0) return false;
+  if (trailingDuration <= 0 || trailingDuration >= 150) return false;
+  if (trailingDuration >= maxDuration * 0.25) return false;
+
+  const previous = segments[firstTrailingIndex - 1];
+  return previous.duration >= Math.max(120, maxDuration * 0.5);
+}
+
 function isCoarseFingerprintAdCandidate(
   segments: ParsedDiscontinuitySegment[],
   analysis: SegmentAnalysis,
@@ -366,6 +396,9 @@ function getSegmentAdReason(
   if (isCoarseFingerprintAdCandidate(segments, analysis, index)) {
     return 'duration-grid';
   }
+  if (isTrailingShortAdBlockCandidate(segments, index, analysis.maxDuration)) {
+    return 'tail-short';
+  }
   if (isShortMidrollAdCandidate(segments, index, analysis.maxDuration)) {
     return 'midroll-short';
   }
@@ -391,6 +424,10 @@ function isAdSegment(
   // 首尾短区间沿用旧策略，优先清理片头片尾广告。
   const isEdge = index === 0 || index === segments.length - 1;
   if (isEdge && isShortEdgeAdCandidate(segment, analysis.maxDuration)) {
+    return true;
+  }
+
+  if (isTrailingShortAdBlockCandidate(segments, index, analysis.maxDuration)) {
     return true;
   }
 
@@ -454,6 +491,14 @@ export function filterAdsFromM3U8(m3u8Content: string): string {
     for (const l of segments[i].lines) {
       contentLines.push(l);
     }
+  }
+
+  const hadEndList = lines.some((line) => line.trim() === '#EXT-X-ENDLIST');
+  const hasEndList = contentLines.some(
+    (line) => line.trim() === '#EXT-X-ENDLIST',
+  );
+  if (hadEndList && !hasEndList) {
+    contentLines.push('#EXT-X-ENDLIST');
   }
 
   return contentLines.join('\n');
