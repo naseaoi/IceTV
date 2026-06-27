@@ -14,6 +14,7 @@ import {
   PlayerPageLayout,
 } from '@/components/PlayerPageLayout';
 import EpisodeSelector from '@/features/play/components/EpisodeSelector';
+import { getSourceFailure } from '@/lib/failed-source-cooldown';
 import { SearchResult } from '@/lib/types';
 import { normalizeInlineText } from '@/lib/utils';
 
@@ -94,10 +95,18 @@ const playAccents: Record<string, PlayerPageAccent> = {
 function PlayLoadingOverlay({
   loadingTimedOut,
   videoLoadingStage,
+  realtimeLoadSpeed,
 }: {
   loadingTimedOut: boolean;
   videoLoadingStage: 'initing' | 'sourceChanging';
+  realtimeLoadSpeed: string;
 }) {
+  const statusText =
+    realtimeLoadSpeed ||
+    (videoLoadingStage === 'sourceChanging'
+      ? '正在切换源站...'
+      : '正在加载视频...');
+
   return (
     <div className='absolute inset-0 z-[500] flex items-center justify-center overflow-hidden rounded-xl bg-black/85 backdrop-blur-sm transition-all duration-300'>
       {loadingTimedOut ? (
@@ -131,6 +140,9 @@ function PlayLoadingOverlay({
                 </div>
               )}
             </div>
+          </div>
+          <div className='mt-5 min-h-[22px] rounded-full bg-white/10 px-3 py-1 text-xs font-medium text-white/80 ring-1 ring-white/15'>
+            {statusText}
           </div>
 
           <style jsx>{`
@@ -337,6 +349,7 @@ export function PlayMainContent(props: PlayMainContentProps) {
     onAddSources,
     onLoadingTimeout,
     searchType,
+    realtimeLoadSpeed,
   } = props;
 
   const { TitleIcon, accent } = useMemo(
@@ -364,6 +377,16 @@ export function PlayMainContent(props: PlayMainContentProps) {
   const headerYearText = (detail?.year || videoYear || '').toString();
   const [loadingTimedOut, setLoadingTimedOut] = useState(false);
   const onLoadingTimeoutRef = useRef(onLoadingTimeout);
+  const currentSourceFailure = useMemo(() => {
+    const key =
+      currentSource && currentId ? `${currentSource}-${currentId}` : '';
+    return key ? getSourceFailure(key) : null;
+  }, [currentSource, currentId, isVideoLoading, videoLoadingAttempt]);
+  const loadingStatusText =
+    realtimeLoadSpeed ||
+    (currentSourceFailure?.coolingDown
+      ? `当前源${currentSourceFailure.label}`
+      : '');
 
   useEffect(() => {
     onLoadingTimeoutRef.current = onLoadingTimeout;
@@ -417,6 +440,7 @@ export function PlayMainContent(props: PlayMainContentProps) {
             <PlayLoadingOverlay
               loadingTimedOut={loadingTimedOut}
               videoLoadingStage={videoLoadingStage}
+              realtimeLoadSpeed={loadingStatusText}
             />
           )}
           {authRecoveryVisible && (

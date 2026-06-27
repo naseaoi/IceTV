@@ -5,18 +5,18 @@ import {
   stripAdSegmentsByPhysicalSignal,
 } from '@/lib/ad-segment-detector';
 import { getBaseUrl, resolveUrl } from '@/lib/live';
-import {
-  readTextLimited,
-  ResponseSizeLimitError,
-} from '@/lib/proxy-response-limits';
+import { readTextLimited } from '@/lib/proxy-response-limits';
 import { appendProxySignature, authorizeProxyRequest } from '@/lib/proxy-auth';
+import {
+  classifyProxyFailure,
+  createProxyFailureDiagnostic,
+  logProxyFailure,
+  ProxyRouteError,
+  toProxyFailurePayload,
+} from '@/lib/proxy-diagnostics';
 import { createSwrCache } from '@/lib/server-cache';
 import { isSourceCorsCapable } from '@/lib/source-capability';
-import {
-  fetchWithUrlGuard,
-  UrlValidationError,
-  validateProxyUrlForRequest,
-} from '@/lib/url-guard';
+import { fetchWithUrlGuard, validateProxyUrlForRequest } from '@/lib/url-guard';
 import { isLiveEntryEnabled } from '@/lib/live';
 import {
   fetchResponseThroughProxy,
@@ -43,6 +43,13 @@ type M3U8CacheEntry = {
 type M3U8LoadResult = M3U8CacheEntry & {
   status: number;
   statusText: string;
+};
+
+type M3U8ProxyRequestContext = {
+  startedAt: number;
+  proxyMode: string;
+  userAction: string | null;
+  userInitiated: boolean;
 };
 
 const m3u8Cache = createSwrCache<M3U8CacheEntry>({
@@ -151,6 +158,7 @@ async function fetchM3U8Data(
   source: string | null,
   isLive: boolean,
   skipCache: boolean,
+  context: M3U8ProxyRequestContext,
 ): Promise<M3U8LoadResult> {
   if (isLive) {
     const proxyUrl = getProxyUrlForTarget(new URL(url));
@@ -166,16 +174,48 @@ async function fetchM3U8Data(
             accept: 'application/vnd.apple.mpegurl,text/plain,*/*',
           },
         );
+        const content = response.body.toString('utf8');
+        const contentType = response.headers.get('content-type') || '';
+        assertM3U8Content(content, contentType, {
+          route: 'm3u8',
+          source,
+          targetUrl: url,
+          proxyUrl,
+          stage: 'response',
+          reason: 'content-type',
+          upstreamStatus: response.status,
+          status: 502,
+          elapsedMs: Date.now() - context.startedAt,
+          proxyMode: 'env-proxy',
+          isLive,
+          userAction: context.userAction,
+          userInitiated: context.userInitiated,
+        });
         return {
-          content: response.body.toString('utf8'),
-          contentType:
-            response.headers.get('content-type') ||
-            'application/vnd.apple.mpegurl',
+          content,
+          contentType: contentType || 'application/vnd.apple.mpegurl',
           finalUrl: url,
           status: response.status,
           statusText: response.statusText,
         };
-      } catch {}
+      } catch (error) {
+        logProxyFailure(
+          classifyProxyFailure(error, {
+            route: 'm3u8',
+            source,
+            targetUrl: url,
+            proxyUrl,
+            stage: 'proxy',
+            reason: 'proxy-response',
+            status: 502,
+            elapsedMs: Date.now() - context.startedAt,
+            proxyMode: 'env-proxy',
+            isLive,
+            userAction: context.userAction,
+            userInitiated: context.userInitiated,
+          }),
+        );
+      }
     }
   }
 
@@ -189,13 +229,40 @@ async function fetchM3U8Data(
   });
 
   if (!response.ok) {
-    throw new Error('Failed to fetch m3u8');
+    throw new ProxyRouteError({
+      route: 'm3u8',
+      source,
+      targetUrl: response.url || url,
+      stage: 'upstream',
+      reason: 'upstream-http',
+      upstreamStatus: response.status,
+      status: response.status,
+      message: `Upstream m3u8 returned HTTP ${response.status}`,
+      elapsedMs: Date.now() - context.startedAt,
+      proxyMode: context.proxyMode,
+      isLive,
+      userAction: context.userAction,
+      userInitiated: context.userInitiated,
+    });
   }
 
-  const contentType =
-    response.headers.get('Content-Type') || 'application/vnd.apple.mpegurl';
+  const contentType = response.headers.get('Content-Type') || '';
   const finalUrl = response.url;
   let content = await readTextLimited(response, MAX_M3U8_BYTES);
+  assertM3U8Content(content, contentType, {
+    route: 'm3u8',
+    source,
+    targetUrl: finalUrl || url,
+    stage: 'response',
+    reason: 'content-type',
+    upstreamStatus: response.status,
+    status: 502,
+    elapsedMs: Date.now() - context.startedAt,
+    proxyMode: context.proxyMode,
+    isLive,
+    userAction: context.userAction,
+    userInitiated: context.userInitiated,
+  });
 
   if (!isLive && shouldRunAdDetection(source)) {
     try {
@@ -210,14 +277,14 @@ async function fetchM3U8Data(
   ) {
     m3u8Cache.set(url, {
       content,
-      contentType,
+      contentType: contentType || 'application/vnd.apple.mpegurl',
       finalUrl,
     });
   }
 
   return {
     content,
-    contentType,
+    contentType: contentType || 'application/vnd.apple.mpegurl',
     finalUrl,
     status: response.status,
     statusText: response.statusText,
@@ -230,12 +297,20 @@ function loadM3U8Data(
   source: string | null,
   isLive: boolean,
   skipCache: boolean,
+  context: M3U8ProxyRequestContext,
 ): Promise<M3U8LoadResult> {
   const key = getM3U8LoadInflightKey(url, ua, source, isLive, skipCache);
   const existing = m3u8LoadInflight.get(key);
   if (existing) return existing;
 
-  const task = fetchM3U8Data(url, ua, source, isLive, skipCache).finally(() => {
+  const task = fetchM3U8Data(
+    url,
+    ua,
+    source,
+    isLive,
+    skipCache,
+    context,
+  ).finally(() => {
     m3u8LoadInflight.delete(key);
   });
   m3u8LoadInflight.set(key, task);
@@ -243,14 +318,32 @@ function loadM3U8Data(
 }
 
 export async function GET(request: NextRequest) {
+  const startedAt = Date.now();
   const { searchParams } = new URL(request.url);
   const url = searchParams.get('url');
   const allowCORS = searchParams.get('allowCORS') === 'true';
   const forceServer = searchParams.get('forceServer') === 'true';
   const source = getProxySourceKey(searchParams);
   const isLive = searchParams.get('icetv-live') === '1';
+  const proxyMode = getPlaybackProxyMode(allowCORS, forceServer);
+  const userAction = searchParams.get('icetv-switch');
+  const userInitiated = searchParams.get('icetv-user-switch') === '1';
   if (!url) {
-    return NextResponse.json({ error: 'Missing url' }, { status: 400 });
+    const diagnostic = createProxyFailureDiagnostic({
+      route: 'm3u8',
+      source,
+      stage: 'request',
+      reason: 'missing-url',
+      elapsedMs: Date.now() - startedAt,
+      proxyMode,
+      isLive,
+      userAction,
+      userInitiated,
+    });
+    logProxyFailure(diagnostic);
+    return NextResponse.json(toProxyFailurePayload(diagnostic), {
+      status: diagnostic.status,
+    });
   }
 
   if (isLive && !(await isLiveEntryEnabled())) {
@@ -259,7 +352,24 @@ export async function GET(request: NextRequest) {
 
   const validation = await validateProxyUrlForRequest(url);
   if (!validation.ok) {
-    return NextResponse.json({ error: validation.reason }, { status: 403 });
+    const diagnostic = createProxyFailureDiagnostic({
+      route: 'm3u8',
+      source,
+      targetUrl: url,
+      stage: 'validation',
+      reason: 'invalid-url',
+      status: 403,
+      message: validation.reason,
+      elapsedMs: Date.now() - startedAt,
+      proxyMode,
+      isLive,
+      userAction,
+      userInitiated,
+    });
+    logProxyFailure(diagnostic);
+    return NextResponse.json(toProxyFailurePayload(diagnostic), {
+      status: diagnostic.status,
+    });
   }
 
   const authFailure = await authorizeProxyRequest(
@@ -268,7 +378,23 @@ export async function GET(request: NextRequest) {
     validation.url,
   );
   if (authFailure) {
-    return authFailure;
+    const diagnostic = createProxyFailureDiagnostic({
+      route: 'm3u8',
+      source,
+      targetUrl: validation.url,
+      stage: 'auth',
+      reason: 'auth-failed',
+      status: authFailure.status || 403,
+      elapsedMs: Date.now() - startedAt,
+      proxyMode,
+      isLive,
+      userAction,
+      userInitiated,
+    });
+    logProxyFailure(diagnostic);
+    return NextResponse.json(toProxyFailurePayload(diagnostic), {
+      status: diagnostic.status,
+    });
   }
 
   const ua = await resolveProxyUserAgent(source);
@@ -316,6 +442,12 @@ export async function GET(request: NextRequest) {
       source,
       isLive,
       skipCache,
+      {
+        startedAt,
+        proxyMode,
+        userAction,
+        userInitiated,
+      },
     );
     const baseUrl = getBaseUrl(loaded.finalUrl);
     const modifiedContent = await rewriteM3U8Content(
@@ -347,18 +479,56 @@ export async function GET(request: NextRequest) {
       headers,
     });
   } catch (error) {
-    if (error instanceof UrlValidationError) {
-      return NextResponse.json({ error: error.reason }, { status: 403 });
-    }
-    if (error instanceof ResponseSizeLimitError) {
-      return NextResponse.json({ error: error.message }, { status: 413 });
-    }
-
-    return NextResponse.json(
-      { error: 'Failed to fetch m3u8' },
-      { status: 500 },
-    );
+    const diagnostic = classifyProxyFailure(error, {
+      route: 'm3u8',
+      source,
+      targetUrl: validation.url,
+      stage: 'upstream',
+      reason: 'upstream-fetch',
+      status: 500,
+      elapsedMs: Date.now() - startedAt,
+      proxyMode,
+      isLive,
+      userAction,
+      userInitiated,
+    });
+    logProxyFailure(diagnostic);
+    return NextResponse.json(toProxyFailurePayload(diagnostic), {
+      status: diagnostic.status,
+    });
   }
+}
+
+function assertM3U8Content(
+  content: string,
+  contentType: string,
+  context: ConstructorParameters<typeof ProxyRouteError>[0],
+): void {
+  if (content.includes('#EXTM3U')) {
+    return;
+  }
+
+  const normalized = contentType.toLowerCase();
+  if (
+    normalized.includes('mpegurl') ||
+    normalized.includes('octet-stream') ||
+    normalized.includes('text/plain')
+  ) {
+    return;
+  }
+
+  throw new ProxyRouteError({
+    ...context,
+    message: `Unexpected m3u8 content type: ${contentType || 'empty'}`,
+  });
+}
+
+function getPlaybackProxyMode(
+  allowCORS: boolean,
+  forceServer: boolean,
+): string {
+  if (forceServer) return 'server-proxy';
+  return allowCORS ? 'browser-direct' : 'server-proxy';
 }
 
 async function rewriteM3U8Content(
@@ -383,6 +553,9 @@ async function rewriteM3U8Content(
 
   const host = req.headers.get('host');
   const proxyBase = `${protocol}://${host}/api/proxy`;
+  const requestSearchParams = new URL(req.url).searchParams;
+  const switchAction = requestSearchParams.get('icetv-switch');
+  const userSwitch = requestSearchParams.get('icetv-user-switch');
 
   // 源站 CORS 能力探测结果：若已确认支持，即便 admin 将其标为 server-proxy，
   // 也把 segment / key URL 直接输出为源站原始 URL，省掉一跳服务端转发。
@@ -419,6 +592,12 @@ async function rewriteM3U8Content(
       }
       if (isLive) {
         params.set('icetv-live', '1');
+      }
+      if (switchAction) {
+        params.set('icetv-switch', switchAction);
+      }
+      if (userSwitch) {
+        params.set('icetv-user-switch', userSwitch);
       }
       await appendProxySignature(params, path, targetUrl);
       return `${proxyBase}/${path}?${params.toString()}`;

@@ -37,6 +37,7 @@ import {
   type SourceSwitchCleanupTask,
 } from '@/features/play/lib/sourceSwitchCleanup';
 import type {
+  PlaybackRequestMode,
   SkipConfigState,
   VideoLoadingStage,
   VideoQualityInfo,
@@ -118,6 +119,7 @@ interface UseSourceSwitchOptions {
   stableCurrentTimeRef: RefObject<number>;
   clearTargetEpisodeProgressRef: RefObject<boolean>;
   sourceSwitchEpisodeAnchorRef: RefObject<SourceSwitchEpisodeAnchor | null>;
+  playbackRequestModeRef: RefObject<PlaybackRequestMode>;
   failedSourcesRef: RefObject<Set<string>>;
   autoFallbackInProgressRef: RefObject<boolean>;
   pendingSourceSwitchCleanupRef: RefObject<SourceSwitchCleanupTask | null>;
@@ -160,6 +162,7 @@ export function useSourceSwitch(options: UseSourceSwitchOptions) {
     stableCurrentTimeRef,
     clearTargetEpisodeProgressRef,
     sourceSwitchEpisodeAnchorRef,
+    playbackRequestModeRef,
     failedSourcesRef,
     autoFallbackInProgressRef,
     pendingSourceSwitchCleanupRef,
@@ -227,6 +230,9 @@ export function useSourceSwitch(options: UseSourceSwitchOptions) {
         setError('未找到匹配结果');
         return;
       }
+      playbackRequestModeRef.current = isAutoFallback
+        ? 'auto-source'
+        : 'manual-source';
 
       const currentRequestId = ++sourceChangeRequestIdRef.current;
       const previousSource = currentSourceRef.current;
@@ -245,7 +251,9 @@ export function useSourceSwitch(options: UseSourceSwitchOptions) {
         setVideoLoadingStage('sourceChanging');
         setIsVideoLoading(true);
         setVideoLoadingAttempt((prev) => prev + 1);
-        setRealtimeLoadSpeed('测速中...');
+        setRealtimeLoadSpeed(
+          isAutoFallback ? '正在尝试其他源...' : '正在切换源站...',
+        );
         setError(null);
 
         if (artPlayerRef.current) {
@@ -322,7 +330,10 @@ export function useSourceSwitch(options: UseSourceSwitchOptions) {
           failedSourcesRef.current.add(targetKey);
 
           if (isAutoFallback) {
-            markSourceFailed(targetKey);
+            markSourceFailed(targetKey, {
+              reason: 'missing-episode',
+              message: `missing episode ${episodeAnchor.episodeIndex + 1}`,
+            });
             setIsVideoLoading(false);
             setRealtimeLoadSpeed('');
             handleLoadingTimeoutRef.current?.();
@@ -343,6 +354,7 @@ export function useSourceSwitch(options: UseSourceSwitchOptions) {
           }
           setIsVideoLoading(false);
           setRealtimeLoadSpeed('');
+          playbackRequestModeRef.current = 'initial';
           return;
         }
 
@@ -381,6 +393,7 @@ export function useSourceSwitch(options: UseSourceSwitchOptions) {
         setDetail(newDetail);
         currentEpisodeIndexRef.current = targetIndex;
         setCurrentEpisodeIndex(targetIndex);
+        setRealtimeLoadSpeed('正在加载新源...');
 
         if (
           previousSource &&
@@ -403,6 +416,11 @@ export function useSourceSwitch(options: UseSourceSwitchOptions) {
         pendingSourceSwitchCleanupRef.current = null;
         setIsVideoLoading(false);
         setRealtimeLoadSpeed('');
+        playbackRequestModeRef.current = 'initial';
+        markSourceFailed(`${newSource}-${newId}`, {
+          reason: 'source-switch',
+          message: err instanceof Error ? err.message : 'source switch failed',
+        });
         setError(err instanceof Error ? err.message : '换源失败');
       }
     },
@@ -420,6 +438,7 @@ export function useSourceSwitch(options: UseSourceSwitchOptions) {
       stableCurrentTimeRef,
       clearTargetEpisodeProgressRef,
       sourceSwitchEpisodeAnchorRef,
+      playbackRequestModeRef,
       failedSourcesRef,
       autoFallbackInProgressRef,
       pendingSourceSwitchCleanupRef,
@@ -456,12 +475,17 @@ export function useSourceSwitch(options: UseSourceSwitchOptions) {
 
     const curKey = `${curSource}-${curId}`;
     failedSourcesRef.current.add(curKey);
-    markSourceFailed(curKey);
+    markSourceFailed(curKey, {
+      reason: 'timeout',
+      message: 'video loading timeout',
+    });
 
     if (!autoSwitchSourceOnTimeout) {
+      setRealtimeLoadSpeed('当前源加载超时');
       stopActiveHlsLoading();
       return;
     }
+    setRealtimeLoadSpeed('正在尝试其他源...');
 
     const anchor = sourceSwitchEpisodeAnchorRef.current;
     const referenceDetail = anchor?.detail || curDetail;
@@ -521,6 +545,7 @@ export function useSourceSwitch(options: UseSourceSwitchOptions) {
     failedSourcesRef,
     sourceSwitchEpisodeAnchorRef,
     autoFallbackInProgressRef,
+    setRealtimeLoadSpeed,
     handleSourceChange,
   ]);
 

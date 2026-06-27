@@ -9,6 +9,7 @@ import { SearchResult } from '@/lib/types';
 
 import type { SourceSwitchEpisodeAnchor } from '@/features/play/lib/episodeResumePolicy';
 import type { ResumeMode } from '@/features/play/lib/resumePlayback';
+import type { PlaybackRequestMode } from '@/features/play/hooks/usePlayPageState';
 
 interface UseEpisodeSwitchOptions {
   detailRef: RefObject<SearchResult | null>;
@@ -18,6 +19,7 @@ interface UseEpisodeSwitchOptions {
   stableCurrentTimeRef: RefObject<number>;
   clearTargetEpisodeProgressRef: RefObject<boolean>;
   sourceSwitchEpisodeAnchorRef: RefObject<SourceSwitchEpisodeAnchor | null>;
+  playbackRequestModeRef: RefObject<PlaybackRequestMode>;
   doSaveCurrentProgress: () => void | Promise<unknown>;
   setIsVideoLoading: Dispatch<SetStateAction<boolean>>;
   setVideoLoadingStage: Dispatch<SetStateAction<'initing' | 'sourceChanging'>>;
@@ -40,6 +42,7 @@ export function useEpisodeSwitch({
   stableCurrentTimeRef,
   clearTargetEpisodeProgressRef,
   sourceSwitchEpisodeAnchorRef,
+  playbackRequestModeRef,
   doSaveCurrentProgress,
   setIsVideoLoading,
   setVideoLoadingStage,
@@ -63,6 +66,7 @@ export function useEpisodeSwitch({
 
       doSaveCurrentProgress();
       sourceSwitchEpisodeAnchorRef.current = null;
+      playbackRequestModeRef.current = 'episode';
       clearTargetEpisodeProgressRef.current = true;
       stableCurrentTimeRef.current = 0;
       resumeTimeRef.current = 0;
@@ -82,6 +86,7 @@ export function useEpisodeSwitch({
       stableCurrentTimeRef,
       clearTargetEpisodeProgressRef,
       sourceSwitchEpisodeAnchorRef,
+      playbackRequestModeRef,
       doSaveCurrentProgress,
       setIsVideoLoading,
       setVideoLoadingStage,

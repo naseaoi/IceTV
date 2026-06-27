@@ -7,7 +7,10 @@ import React, {
   useSyncExternalStore,
 } from 'react';
 
-import { isSourceCoolingDown } from '@/lib/failed-source-cooldown';
+import {
+  getSourceFailure,
+  type SourceFailureInfo,
+} from '@/lib/failed-source-cooldown';
 import { collapseSourcesForDisplay } from '@/lib/source-bundle';
 import { normalizeTitleForSourceMatch } from '@/lib/source-match';
 import { SearchResult } from '@/lib/types';
@@ -233,14 +236,17 @@ export const SourcesTab: React.FC<SourcesTabProps> = ({
     return 0;
   };
 
-  // 冷却中的源 key 集合：sessionStorage 里最近 5 分钟内 15s 超时过的源。
-  const coolingDownKeys = useMemo(() => {
-    const set = new Set<string>();
+  // 读取近期失败源记录
+  const sourceFailures = useMemo(() => {
+    const map = new Map<string, SourceFailureInfo>();
     for (const source of displaySources) {
       const key = `${source.source}-${source.id}`;
-      if (isSourceCoolingDown(key)) set.add(key);
+      const failure = getSourceFailure(key);
+      if (failure.coolingDown) {
+        map.set(key, failure);
+      }
     }
-    return set;
+    return map;
   }, [displaySources, isActive]);
 
   const sortedSources = useMemo(() => {
@@ -266,7 +272,7 @@ export const SourcesTab: React.FC<SourcesTabProps> = ({
               ? measuredVideoInfo.pingTime
               : Number.MAX_SAFE_INTEGER,
           hasMeasuredInfo,
-          coolingDown: coolingDownKeys.has(sourceKey),
+          coolingDown: sourceFailures.has(sourceKey),
         };
       })
       .sort((a, b) => {
@@ -290,7 +296,7 @@ export const SourcesTab: React.FC<SourcesTabProps> = ({
         return a.index - b.index;
       })
       .map((item) => item.source);
-  }, [displaySources, probeSnapshot, coolingDownKeys]);
+  }, [displaySources, probeSnapshot, sourceFailures]);
 
   // 将当前源滚动到视口中央。仅在满足条件时调用，避免与用户手动滚动冲突。
   const scrollCurrentIntoView = useCallback((smooth = true) => {
@@ -435,7 +441,12 @@ export const SourcesTab: React.FC<SourcesTabProps> = ({
             const sourceKey = `${source.source}-${source.id}`;
             const videoInfo = probeSnapshot.get(sourceKey)?.info;
             const isTesting = videoInfo?.loadSpeed === '测量中...';
-            const isCoolingDown = coolingDownKeys.has(sourceKey);
+            const failureInfo = sourceFailures.get(sourceKey);
+            const isCoolingDown = !!failureInfo;
+            const failureLabel = failureInfo?.label || '近期失败';
+            const failureTitle = failureInfo
+              ? `${failureLabel}${failureInfo.count > 1 ? ` · ${failureInfo.count}次` : ''}`
+              : undefined;
             const episodeCount = Math.max(
               source.episodes.length,
               source.episodes_titles?.length || 0,
@@ -458,9 +469,7 @@ export const SourcesTab: React.FC<SourcesTabProps> = ({
                         ? 'cursor-pointer bg-gray-50/80 opacity-60 ring-1 ring-gray-200/60 hover:bg-gray-100/80 hover:opacity-100 hover:ring-gray-300/60 dark:bg-white/[0.04] dark:ring-white/[0.06] dark:hover:bg-white/[0.08] dark:hover:ring-white/[0.1]'
                         : 'cursor-pointer bg-gray-50/80 ring-1 ring-gray-200/60 hover:bg-gray-100/80 hover:ring-gray-300/60 dark:bg-white/[0.04] dark:ring-white/[0.06] dark:hover:bg-white/[0.08] dark:hover:ring-white/[0.1]'
                   }`.trim()}
-                title={
-                  isCoolingDown ? '该源最近加载超时，已暂时降权' : undefined
-                }
+                title={failureTitle}
               >
                 {/* 标题行 */}
                 <div className='flex min-w-0 items-center justify-between gap-1'>
@@ -517,7 +526,7 @@ export const SourcesTab: React.FC<SourcesTabProps> = ({
                   </span>
                   {isCoolingDown ? (
                     <span className='flex-shrink-0 text-[10px] font-medium text-red-400 dark:text-red-400/80'>
-                      近期失败
+                      {failureLabel}
                     </span>
                   ) : (
                     episodeCount > 1 && (

@@ -9,14 +9,16 @@ import { isLiveEntryEnabled } from '@/lib/live';
 import {
   assertContentLength,
   createLimitedReadableStream,
-  ResponseSizeLimitError,
 } from '@/lib/proxy-response-limits';
-import { markSourceCors, responseAllowsCors } from '@/lib/source-capability';
 import {
-  fetchWithUrlGuard,
-  UrlValidationError,
-  validateProxyUrlForRequest,
-} from '@/lib/url-guard';
+  classifyProxyFailure,
+  createProxyFailureDiagnostic,
+  logProxyFailure,
+  ProxyRouteError,
+  toProxyFailurePayload,
+} from '@/lib/proxy-diagnostics';
+import { markSourceCors, responseAllowsCors } from '@/lib/source-capability';
+import { fetchWithUrlGuard, validateProxyUrlForRequest } from '@/lib/url-guard';
 
 import { getProxySourceKey, resolveProxyUserAgent } from '../utils';
 
@@ -25,6 +27,7 @@ export const runtime = 'nodejs';
 const MAX_SEGMENT_BYTES = 256 * 1024 * 1024;
 
 export async function GET(request: NextRequest) {
+  const startedAt = Date.now();
   const { searchParams } = new URL(request.url);
   const url = searchParams.get('url');
   const source = getProxySourceKey(searchParams);
@@ -32,8 +35,26 @@ export async function GET(request: NextRequest) {
   // 点播场景下 m3u8 URL 现在也携带 source 做 CORS 能力探测，因此不能再把
   // "有 source" 一律视为直播，否则点播分片会被标 no-cache 影响 HTTP 缓存。
   const isLiveStream = searchParams.get('icetv-live') === '1';
+  const proxyMode = 'server-proxy';
+  const userAction = searchParams.get('icetv-switch');
+  const userInitiated = searchParams.get('icetv-user-switch') === '1';
+  const range = request.headers.get('range');
   if (!url) {
-    return NextResponse.json({ error: 'Missing url' }, { status: 400 });
+    const diagnostic = createProxyFailureDiagnostic({
+      route: 'segment',
+      source,
+      stage: 'request',
+      reason: 'missing-url',
+      elapsedMs: Date.now() - startedAt,
+      proxyMode,
+      isLive: isLiveStream,
+      userAction,
+      userInitiated,
+    });
+    logProxyFailure(diagnostic);
+    return NextResponse.json(toProxyFailurePayload(diagnostic), {
+      status: diagnostic.status,
+    });
   }
 
   if (isLiveStream && !(await isLiveEntryEnabled())) {
@@ -42,7 +63,25 @@ export async function GET(request: NextRequest) {
 
   const validation = await validateProxyUrlForRequest(url);
   if (!validation.ok) {
-    return NextResponse.json({ error: validation.reason }, { status: 403 });
+    const diagnostic = createProxyFailureDiagnostic({
+      route: 'segment',
+      source,
+      targetUrl: url,
+      stage: 'validation',
+      reason: 'invalid-url',
+      status: 403,
+      message: validation.reason,
+      elapsedMs: Date.now() - startedAt,
+      proxyMode,
+      isLive: isLiveStream,
+      range,
+      userAction,
+      userInitiated,
+    });
+    logProxyFailure(diagnostic);
+    return NextResponse.json(toProxyFailurePayload(diagnostic), {
+      status: diagnostic.status,
+    });
   }
 
   const authFailure = await authorizeProxyRequest(
@@ -51,11 +90,27 @@ export async function GET(request: NextRequest) {
     validation.url,
   );
   if (authFailure) {
-    return authFailure;
+    const diagnostic = createProxyFailureDiagnostic({
+      route: 'segment',
+      source,
+      targetUrl: validation.url,
+      stage: 'auth',
+      reason: 'auth-failed',
+      status: authFailure.status || 403,
+      elapsedMs: Date.now() - startedAt,
+      proxyMode,
+      isLive: isLiveStream,
+      range,
+      userAction,
+      userInitiated,
+    });
+    logProxyFailure(diagnostic);
+    return NextResponse.json(toProxyFailurePayload(diagnostic), {
+      status: diagnostic.status,
+    });
   }
 
   const ua = await resolveProxyUserAgent(source);
-  const range = request.headers.get('range');
 
   try {
     const headers: Record<string, string> = {
@@ -81,6 +136,22 @@ export async function GET(request: NextRequest) {
             },
           );
           assertContentLength(response.headers, MAX_SEGMENT_BYTES);
+          assertSegmentContentType(response.headers, {
+            route: 'segment',
+            source,
+            targetUrl: validation.url,
+            proxyUrl,
+            stage: 'response',
+            reason: 'content-type',
+            upstreamStatus: response.status,
+            status: 502,
+            elapsedMs: Date.now() - startedAt,
+            proxyMode: 'env-proxy',
+            isLive: isLiveStream,
+            range,
+            userAction,
+            userInitiated,
+          });
 
           if (source) {
             markSourceCors(source, responseAllowsCors(response.headers));
@@ -91,18 +162,67 @@ export async function GET(request: NextRequest) {
             statusText: response.statusText,
             headers: buildSegmentResponseHeaders(response.headers, true),
           });
-        } catch {}
+        } catch (error) {
+          logProxyFailure(
+            classifyProxyFailure(error, {
+              route: 'segment',
+              source,
+              targetUrl: validation.url,
+              proxyUrl,
+              stage: 'proxy',
+              reason: 'proxy-response',
+              status: 502,
+              elapsedMs: Date.now() - startedAt,
+              proxyMode: 'env-proxy',
+              isLive: isLiveStream,
+              range,
+              userAction,
+              userInitiated,
+            }),
+          );
+        }
       }
     }
 
     const response = await fetchWithUrlGuard(validation.url, { headers });
     if (!response.ok) {
-      return NextResponse.json(
-        { error: 'Failed to fetch segment' },
-        { status: response.status },
-      );
+      const diagnostic = createProxyFailureDiagnostic({
+        route: 'segment',
+        source,
+        targetUrl: response.url || validation.url,
+        stage: 'upstream',
+        reason: 'upstream-http',
+        upstreamStatus: response.status,
+        status: response.status,
+        message: `Upstream segment returned HTTP ${response.status}`,
+        elapsedMs: Date.now() - startedAt,
+        proxyMode,
+        isLive: isLiveStream,
+        range,
+        userAction,
+        userInitiated,
+      });
+      logProxyFailure(diagnostic);
+      return NextResponse.json(toProxyFailurePayload(diagnostic), {
+        status: diagnostic.status,
+      });
     }
     assertContentLength(response.headers, MAX_SEGMENT_BYTES);
+    assertSegmentContentType(response.headers, {
+      route: 'segment',
+      source,
+      targetUrl: response.url || validation.url,
+      stage: 'response',
+      reason: 'content-type',
+      upstreamStatus: response.status,
+      status: 502,
+      elapsedMs: Date.now() - startedAt,
+      proxyMode,
+      isLive: isLiveStream,
+      range,
+      userAction,
+      userInitiated,
+    });
 
     // 只用真实 segment 响应学习跨域能力，避免被 m3u8 响应头误导。
     if (source) {
@@ -123,18 +243,44 @@ export async function GET(request: NextRequest) {
       },
     );
   } catch (error) {
-    if (error instanceof UrlValidationError) {
-      return NextResponse.json({ error: error.reason }, { status: 403 });
-    }
-    if (error instanceof ResponseSizeLimitError) {
-      return NextResponse.json({ error: error.message }, { status: 413 });
-    }
-
-    return NextResponse.json(
-      { error: 'Failed to fetch segment' },
-      { status: 500 },
-    );
+    const diagnostic = classifyProxyFailure(error, {
+      route: 'segment',
+      source,
+      targetUrl: validation.url,
+      stage: 'upstream',
+      reason: 'upstream-fetch',
+      status: 500,
+      elapsedMs: Date.now() - startedAt,
+      proxyMode,
+      isLive: isLiveStream,
+      range,
+      userAction,
+      userInitiated,
+    });
+    logProxyFailure(diagnostic);
+    return NextResponse.json(toProxyFailurePayload(diagnostic), {
+      status: diagnostic.status,
+    });
   }
+}
+
+function assertSegmentContentType(
+  headers: Headers,
+  context: ConstructorParameters<typeof ProxyRouteError>[0],
+): void {
+  const contentType = headers.get('content-type')?.toLowerCase() || '';
+  if (!contentType) return;
+  if (
+    !contentType.includes('text/html') &&
+    !contentType.includes('application/json')
+  ) {
+    return;
+  }
+
+  throw new ProxyRouteError({
+    ...context,
+    message: `Unexpected segment content type: ${contentType}`,
+  });
 }
 
 function buildSegmentResponseHeaders(

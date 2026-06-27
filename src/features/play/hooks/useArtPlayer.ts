@@ -8,6 +8,10 @@ import {
 
 import { SearchResult } from '@/lib/types';
 import {
+  clearSourceFailure,
+  markSourceFailed,
+} from '@/lib/failed-source-cooldown';
+import {
   clearSourceProxyOverride,
   isServerProxy,
   rememberSourceServerProxy,
@@ -46,6 +50,7 @@ import { WakeLockSentinel } from '@/features/play/lib/playTypes';
 import { filterAdsFromM3U8 } from '@/features/play/lib/playUtils';
 import { resolveNextStablePlaybackTime } from '@/features/play/hooks/usePlayProgress';
 import { resolveSourceSwitchCurrentPlayTime } from '@/features/play/lib/episodeResumePolicy';
+import type { PlaybackRequestMode } from '@/features/play/hooks/usePlayPageState';
 import {
   applyResumeTime,
   isWithinAutoResumeWindow,
@@ -63,6 +68,64 @@ interface SkipConfig {
   enable: boolean;
   intro_time: number;
   outro_time: number;
+}
+
+type HlsErrorTypes = {
+  NETWORK_ERROR: string;
+  MEDIA_ERROR: string;
+};
+
+function getHlsErrorStatus(data: any): number | undefined {
+  const candidates = [
+    data?.response?.code,
+    data?.response?.status,
+    data?.networkDetails?.status,
+  ];
+  for (const item of candidates) {
+    const status = Number(item);
+    if (Number.isFinite(status) && status > 0) {
+      return status;
+    }
+  }
+  return undefined;
+}
+
+function getHlsErrorText(data: any): string {
+  return [
+    data?.type,
+    data?.details,
+    data?.error?.message,
+    data?.response?.text,
+    data?.networkDetails?.statusText,
+  ]
+    .filter(Boolean)
+    .join(' ');
+}
+
+function resolveHlsSourceFailureReason(
+  data: any,
+  usingServerProxy: boolean,
+  errorTypes: HlsErrorTypes,
+): string {
+  const status = getHlsErrorStatus(data);
+  const text = getHlsErrorText(data).toLowerCase();
+  if (status && status >= 500 && usingServerProxy) return `proxy-${status}`;
+  if (text.includes('err_connection_closed')) return 'connection-closed';
+  if (text.includes('connection_closed')) return 'connection-closed';
+  if (!usingServerProxy && data?.type === errorTypes.NETWORK_ERROR) {
+    return 'cors';
+  }
+  if (usingServerProxy && data?.type === errorTypes.NETWORK_ERROR) {
+    return 'proxy-error';
+  }
+  if (text.includes('frag') || text.includes('segment')) {
+    return 'segment-failed';
+  }
+  if (text.includes('manifest')) return 'manifest-failed';
+  if (text.includes('level')) return 'playlist-failed';
+  if (data?.type === errorTypes.MEDIA_ERROR) return 'hls-media';
+  if (data?.type === errorTypes.NETWORK_ERROR) return 'hls-network';
+  return 'hls-fatal';
 }
 
 export interface UseArtPlayerParams {
@@ -83,6 +146,7 @@ export interface UseArtPlayerParams {
   allowAutoResumeRef: MutableRefObject<boolean>;
   stableCurrentTimeRef: MutableRefObject<number>;
   clearTargetEpisodeProgressRef: MutableRefObject<boolean>;
+  playbackRequestModeRef: MutableRefObject<PlaybackRequestMode>;
   lastVolumeRef: MutableRefObject<number>;
   lastPlaybackRateRef: MutableRefObject<number>;
   lastSkipCheckRef: MutableRefObject<number>;
@@ -142,6 +206,7 @@ export function useArtPlayer(params: UseArtPlayerParams) {
     allowAutoResumeRef,
     stableCurrentTimeRef,
     clearTargetEpisodeProgressRef,
+    playbackRequestModeRef,
     lastVolumeRef,
     lastPlaybackRateRef,
     lastSkipCheckRef,
@@ -215,17 +280,23 @@ export function useArtPlayer(params: UseArtPlayerParams) {
           videoUrl,
         };
         const preUseProxy = isServerProxy(preSourceKey);
-        // 构建 m3u8 代理 URL；携带 icetv-source 以便服务端做 CORS 能力探测，
-        // 后续请求可自动将 segment/key 直连源站（若源支持 CORS）
-        const appendSource = (url: string) =>
-          preSourceKey
-            ? `${url}${url.includes('?') ? '&' : '?'}icetv-source=${encodeURIComponent(preSourceKey)}`
-            : url;
+        const appendPlaybackRequestContext = (params: URLSearchParams) => {
+          const mode = playbackRequestModeRef.current || 'initial';
+          params.set('icetv-switch', mode);
+          params.set('icetv-user-switch', mode === 'manual-source' ? '1' : '0');
+        };
         const buildProxyUrl = (rawUrl: string) => {
-          const base = preUseProxy
-            ? `/api/proxy/m3u8?url=${encodeURIComponent(rawUrl)}&forceServer=true`
-            : `/api/proxy/m3u8?url=${encodeURIComponent(rawUrl)}&allowCORS=true`;
-          return appendSource(base);
+          const params = new URLSearchParams({ url: rawUrl });
+          if (preUseProxy) {
+            params.set('forceServer', 'true');
+          } else {
+            params.set('allowCORS', 'true');
+          }
+          if (preSourceKey) {
+            params.set('icetv-source', preSourceKey);
+          }
+          appendPlaybackRequestContext(params);
+          return `/api/proxy/m3u8?${params.toString()}`;
         };
 
         const preM3u8Url = buildProxyUrl(videoUrl);
@@ -352,12 +423,17 @@ export function useArtPlayer(params: UseArtPlayerParams) {
                 rawUrl: string,
                 useServerProxy: boolean,
               ) => {
-                const baseTargetUrl = useServerProxy
-                  ? `/api/proxy/m3u8?url=${encodeURIComponent(rawUrl)}&forceServer=true`
-                  : `/api/proxy/m3u8?url=${encodeURIComponent(rawUrl)}&allowCORS=true`;
-                return sourceKey
-                  ? `${baseTargetUrl}&icetv-source=${encodeURIComponent(sourceKey)}`
-                  : baseTargetUrl;
+                const params = new URLSearchParams({ url: rawUrl });
+                if (useServerProxy) {
+                  params.set('forceServer', 'true');
+                } else {
+                  params.set('allowCORS', 'true');
+                }
+                if (sourceKey) {
+                  params.set('icetv-source', sourceKey);
+                }
+                appendPlaybackRequestContext(params);
+                return `/api/proxy/m3u8?${params.toString()}`;
               };
               let currentUseServerProxy = isServerProxy(sourceKey);
               let targetUrl = buildTargetUrl(url, currentUseServerProxy);
@@ -386,6 +462,22 @@ export function useArtPlayer(params: UseArtPlayerParams) {
               resetSpeedFallbackTimer();
 
               let lastStallRecoveryAt = 0;
+              const failureKey =
+                playbackInfoContext.source && playbackInfoContext.id
+                  ? `${playbackInfoContext.source}-${playbackInfoContext.id}`
+                  : '';
+              const markCurrentSourceFailure = (
+                reason: string,
+                message?: string,
+                status?: number,
+              ) => {
+                if (!failureKey) return;
+                markSourceFailed(failureKey, {
+                  reason,
+                  message,
+                  status,
+                });
+              };
 
               const preservePlaybackPositionBeforeReload = () => {
                 const resumeTime = resolveSourceSwitchCurrentPlayTime({
@@ -412,6 +504,8 @@ export function useArtPlayer(params: UseArtPlayerParams) {
                   sourceKey,
                   reason,
                 });
+                setRealtimeLoadSpeed('直连失败，切换代理...');
+                markCurrentSourceFailure('cors-fallback', reason);
 
                 try {
                   if (sourceKey) {
@@ -424,7 +518,7 @@ export function useArtPlayer(params: UseArtPlayerParams) {
                   firstFragPing = 0;
                   videoInfoReported = false;
                   fragLoadStart = performance.now();
-                  setRealtimeLoadSpeed('测速中...');
+                  setRealtimeLoadSpeed('代理加载中...');
                   resetSpeedFallbackTimer();
                   preservePlaybackPositionBeforeReload();
                   onSourceProxyFallbackStarted?.();
@@ -482,6 +576,13 @@ export function useArtPlayer(params: UseArtPlayerParams) {
                     Number(end.toFixed(2)),
                   ]),
                 });
+                setRealtimeLoadSpeed('当前源加载慢，尝试恢复...');
+                try {
+                  const activePlayer = artPlayerRef.current;
+                  if (activePlayer) {
+                    activePlayer.notice.show = '当前源加载慢，尝试恢复...';
+                  }
+                } catch {}
 
                 const now = Date.now();
                 if (now - lastStallRecoveryAt < 1500) {
@@ -563,15 +664,27 @@ export function useArtPlayer(params: UseArtPlayerParams) {
 
               const onHlsError = function (_event: unknown, data: any) {
                 console.error('HLS Error:', _event, data);
+                const errorStatus = getHlsErrorStatus(data);
+                const errorDetails = String(data?.details || '');
+                const errorReason = `${String(data?.type || 'unknown')}:${errorDetails || 'fatal'}`;
+                const sourceFailureReason = resolveHlsSourceFailureReason(
+                  data,
+                  currentUseServerProxy,
+                  Hls.ErrorTypes,
+                );
                 if (data.fatal) {
-                  const errorDetails = String(data?.details || '');
-                  const errorReason = `${String(data?.type || 'unknown')}:${errorDetails || 'fatal'}`;
                   if (
                     data.type === Hls.ErrorTypes.NETWORK_ERROR &&
                     switchToServerProxy(errorReason)
                   ) {
                     return;
                   }
+
+                  markCurrentSourceFailure(
+                    sourceFailureReason,
+                    errorReason,
+                    errorStatus,
+                  );
 
                   if (
                     data.type === Hls.ErrorTypes.NETWORK_ERROR &&
@@ -603,12 +716,28 @@ export function useArtPlayer(params: UseArtPlayerParams) {
                     data.type,
                     Hls.ErrorTypes,
                   );
+                  return;
+                }
+
+                if (
+                  data.type === Hls.ErrorTypes.NETWORK_ERROR &&
+                  /frag|segment|level|manifest/i.test(errorDetails)
+                ) {
+                  markCurrentSourceFailure(
+                    sourceFailureReason,
+                    errorReason,
+                    errorStatus,
+                  );
+                  setRealtimeLoadSpeed('当前源加载慢，尝试恢复...');
                 }
               };
               const onHlsFragLoaded = function (_: unknown, data: any) {
                 if (speedFallbackTimer) {
                   clearTimeout(speedFallbackTimer);
                   speedFallbackTimer = null;
+                }
+                if (failureKey) {
+                  clearSourceFailure(failureKey);
                 }
                 const stats = data.frag.stats;
                 const loadedBytes = stats.loaded ?? stats.total ?? 0;
@@ -825,6 +954,37 @@ export function useArtPlayer(params: UseArtPlayerParams) {
           return true;
         };
 
+        const showSourceSwitchSuccessNotice = () => {
+          const mode = playbackRequestModeRef.current;
+          if (mode !== 'manual-source' && mode !== 'auto-source') {
+            return;
+          }
+
+          const activeDetail = detailRef.current;
+          const sourceName =
+            activeDetail?.source_name ||
+            activeDetail?.source?.toString() ||
+            '当前源';
+          const playTime = Math.max(
+            player.currentTime || 0,
+            stableCurrentTimeRef.current || 0,
+          );
+          const progressText = playTime > 1 ? '已保留进度' : '从头播放';
+          const prefix = mode === 'auto-source' ? '已自动切换到' : '已切换到';
+          const notice = `${prefix} ${sourceName} · ${progressText}`;
+
+          window.setTimeout(() => {
+            if (artPlayerRef.current !== player) {
+              return;
+            }
+            try {
+              player.notice.show = notice;
+            } catch (err) {
+              console.warn('显示换源成功提示失败:', err);
+            }
+          }, 50);
+        };
+
         const notifyPlayerPlaybackStarted = () => {
           const activeVideo = player.video as HTMLVideoElement | undefined;
           const activeSourceKey = detailRef.current?.source || '';
@@ -834,7 +994,9 @@ export function useArtPlayer(params: UseArtPlayerParams) {
               clearSourceProxyOverride(activeSourceKey);
             }
           }
+          showSourceSwitchSuccessNotice();
           onPlaybackStarted?.();
+          playbackRequestModeRef.current = 'initial';
         };
 
         const finishInitialLoading = () => {
@@ -1226,6 +1388,7 @@ export function useArtPlayer(params: UseArtPlayerParams) {
     videoUrl,
     loading,
     blockAdEnabled,
+    playbackRequestModeRef,
     onPlaybackStarted,
     onSourceProxyFallbackStarted,
   ]);

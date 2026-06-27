@@ -1,74 +1,131 @@
-/**
- * 源站短期失败冷却：把近期 15s 加载超时的源记录在 sessionStorage 里，
- * 在 SourcesTab 的排序里降权，减少用户反复踩坑的概率。
- *
- * 规则：
- * - 冷却时长 5 分钟；超过后自动恢复
- * - 用户主动点击失败源 → 手动清除该源的冷却记录（尊重用户意图）
- * - 成功起播 → 清除该源的冷却记录
- * - 使用 sessionStorage：tab 关闭后自动消失，避免把过期 token 问题带到下次会话
- */
 const STORAGE_KEY = 'icetv_failed_sources';
 const COOLDOWN_MS = 5 * 60 * 1000;
+const MAX_FAILURE_TEXT_LENGTH = 80;
 
-type FailedRecord = Record<string, number>;
+export interface SourceFailureMarkOptions {
+  reason?: string;
+  message?: string;
+  stage?: string;
+  status?: number;
+}
+
+export interface SourceFailureRecord {
+  ts: number;
+  count: number;
+  reason?: string;
+  message?: string;
+  stage?: string;
+  status?: number;
+}
+
+export interface SourceFailureInfo {
+  coolingDown: boolean;
+  count: number;
+  remainingMs: number;
+  failedAt?: number;
+  reason?: string;
+  message?: string;
+  stage?: string;
+  status?: number;
+  label: string;
+}
+
+type StoredFailureRecord = Record<string, number | SourceFailureRecord>;
+type NormalizedFailureRecord = Record<string, SourceFailureRecord>;
 
 function isStorageAvailable(): boolean {
   return typeof window !== 'undefined' && !!window.sessionStorage;
 }
 
-function readAll(): FailedRecord {
+function readAll(): NormalizedFailureRecord {
   if (!isStorageAvailable()) return {};
   try {
     const raw = window.sessionStorage.getItem(STORAGE_KEY);
     if (!raw) return {};
-    const parsed = JSON.parse(raw);
-    return parsed && typeof parsed === 'object' ? parsed : {};
+    const parsed = JSON.parse(raw) as StoredFailureRecord;
+    if (!parsed || typeof parsed !== 'object') return {};
+
+    const now = Date.now();
+    const data: NormalizedFailureRecord = {};
+    for (const [key, value] of Object.entries(parsed)) {
+      const record = normalizeStoredRecord(value);
+      if (!record) continue;
+      if (now - record.ts > COOLDOWN_MS) continue;
+      data[key] = record;
+    }
+    return data;
   } catch {
     return {};
   }
 }
 
-function writeAll(data: FailedRecord): void {
+function writeAll(data: NormalizedFailureRecord): void {
   if (!isStorageAvailable()) return;
   try {
-    // 写入前顺手清理已过期的条目，控制体积
     const now = Date.now();
     for (const key of Object.keys(data)) {
-      if (now - data[key] > COOLDOWN_MS) {
+      if (now - data[key].ts > COOLDOWN_MS) {
         delete data[key];
       }
     }
     window.sessionStorage.setItem(STORAGE_KEY, JSON.stringify(data));
-  } catch {
-    // 容量/隐私模式下写失败时静默忽略
-  }
+  } catch {}
 }
 
-/** 记录一次源站加载超时，开始 5 分钟冷却 */
-export function markSourceFailed(key: string): void {
+export function markSourceFailed(
+  key: string,
+  options: SourceFailureMarkOptions = {},
+): void {
   if (!key) return;
   const data = readAll();
-  data[key] = Date.now();
+  const now = Date.now();
+  const previous = data[key];
+  data[key] = {
+    ts: now,
+    count: previous ? previous.count + 1 : 1,
+    reason: normalizeFailureText(options.reason) || previous?.reason,
+    message: normalizeFailureText(options.message) || previous?.message,
+    stage: normalizeFailureText(options.stage) || previous?.stage,
+    status: Number.isFinite(options.status) ? options.status : previous?.status,
+  };
   writeAll(data);
 }
 
-/** 检查源站是否处于冷却期（true 表示近期失败，应在排序里降权） */
-export function isSourceCoolingDown(key: string): boolean {
-  if (!key) return false;
+export function getSourceFailure(key: string): SourceFailureInfo {
+  if (!key) {
+    return createEmptyFailureInfo();
+  }
+
   const data = readAll();
-  const ts = data[key];
-  if (!ts) return false;
-  if (Date.now() - ts > COOLDOWN_MS) {
-    // 过期，顺手清理
+  const record = data[key];
+  if (!record) {
+    return createEmptyFailureInfo();
+  }
+
+  const elapsed = Date.now() - record.ts;
+  if (elapsed > COOLDOWN_MS) {
     delete data[key];
     writeAll(data);
-    return false;
+    return createEmptyFailureInfo();
   }
-  return true;
+
+  return {
+    coolingDown: true,
+    count: record.count,
+    remainingMs: Math.max(0, COOLDOWN_MS - elapsed),
+    failedAt: record.ts,
+    reason: record.reason,
+    message: record.message,
+    stage: record.stage,
+    status: record.status,
+    label: getSourceFailureLabel(record.reason, record.message, record.status),
+  };
 }
 
-/** 手动清除某个源的冷却记录（用户主动点击/成功起播时调用） */
+export function isSourceCoolingDown(key: string): boolean {
+  return getSourceFailure(key).coolingDown;
+}
+
 export function clearSourceFailure(key: string): void {
   if (!key) return;
   const data = readAll();
@@ -76,4 +133,69 @@ export function clearSourceFailure(key: string): void {
     delete data[key];
     writeAll(data);
   }
+}
+
+export function getSourceFailureLabel(
+  reason?: string,
+  message?: string,
+  status?: number,
+): string {
+  if (status && status >= 500) return `代理 ${status}`;
+
+  const text = `${reason || ''} ${message || ''}`.toLowerCase();
+  if (!text.trim()) return '近期失败';
+  if (text.includes('proxy-500') || text.includes(' 500')) return '代理 500';
+  if (text.includes('connection_closed')) return '连接关闭';
+  if (text.includes('err_connection_closed')) return '连接关闭';
+  if (text.includes('cors')) return 'CORS 失败';
+  if (text.includes('timeout') || text.includes('超时')) return '加载超时';
+  if (text.includes('proxy')) return '代理失败';
+  if (text.includes('segment') || text.includes('frag')) return '分片失败';
+  if (text.includes('manifest') || text.includes('level')) return '清单失败';
+  if (text.includes('probe')) return '测速失败';
+  if (text.includes('episode')) return '集数不匹配';
+  if (text.includes('network') || text.includes('fetch')) return '连接失败';
+  if (text.includes('media')) return '媒体错误';
+  return '近期失败';
+}
+
+function normalizeStoredRecord(
+  value: number | SourceFailureRecord,
+): SourceFailureRecord | null {
+  if (typeof value === 'number' && Number.isFinite(value)) {
+    return { ts: value, count: 1 };
+  }
+  if (!value || typeof value !== 'object') {
+    return null;
+  }
+
+  const ts = Number(value.ts);
+  if (!Number.isFinite(ts) || ts <= 0) {
+    return null;
+  }
+
+  const count = Number(value.count);
+  return {
+    ts,
+    count: Number.isFinite(count) && count > 0 ? count : 1,
+    reason: normalizeFailureText(value.reason),
+    message: normalizeFailureText(value.message),
+    stage: normalizeFailureText(value.stage),
+    status: Number.isFinite(value.status) ? value.status : undefined,
+  };
+}
+
+function createEmptyFailureInfo(): SourceFailureInfo {
+  return {
+    coolingDown: false,
+    count: 0,
+    remainingMs: 0,
+    label: '',
+  };
+}
+
+function normalizeFailureText(value?: string): string | undefined {
+  const text = value?.trim();
+  if (!text) return undefined;
+  return text.slice(0, MAX_FAILURE_TEXT_LENGTH);
 }

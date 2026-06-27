@@ -20,6 +20,11 @@ export interface SkipConfigState {
 
 export type LoadingStage = 'searching' | 'preferring' | 'fetching' | 'ready';
 export type VideoLoadingStage = 'initing' | 'sourceChanging';
+export type PlaybackRequestMode =
+  | 'initial'
+  | 'episode'
+  | 'manual-source'
+  | 'auto-source';
 export type VideoQualityInfo = {
   quality: string;
   loadSpeed: string;
@@ -137,6 +142,7 @@ export function usePlayPageState(searchParams: ReadonlyURLSearchParams) {
   );
   const failedSourcesRef = useRef<Set<string>>(new Set());
   const autoFallbackInProgressRef = useRef(false);
+  const playbackRequestModeRef = useRef<PlaybackRequestMode>('initial');
 
   const [optimizationEnabled] = useState<boolean>(() => {
     if (typeof window !== 'undefined') {
@@ -245,6 +251,7 @@ export function usePlayPageState(searchParams: ReadonlyURLSearchParams) {
     sourceSwitchEpisodeAnchorRef,
     failedSourcesRef,
     autoFallbackInProgressRef,
+    playbackRequestModeRef,
     optimizationEnabled,
     precomputedVideoInfo,
     setPrecomputedVideoInfo,
