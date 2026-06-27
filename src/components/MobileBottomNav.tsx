@@ -3,7 +3,9 @@
 import { Cat, Clover, Film, Home, Radio, Star, Tv } from 'lucide-react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import { useEffect, useState } from 'react';
+import { useMemo } from 'react';
+
+import { useRuntimeConfig } from './RuntimeConfigProvider';
 
 import { RuntimeConfig } from '@/lib/runtime-config';
 
@@ -20,6 +22,12 @@ type MobileNavItem = {
   href: string;
 };
 
+const LIVE_ROUTE = '/live';
+
+function shouldPrefetchRoute(href: string): boolean {
+  return href !== LIVE_ROUTE;
+}
+
 function getMobileNavItems(runtimeConfig?: RuntimeConfig): MobileNavItem[] {
   const nextItems: MobileNavItem[] = [
     { icon: Home, label: '首页', href: '/' },
@@ -30,7 +38,7 @@ function getMobileNavItems(runtimeConfig?: RuntimeConfig): MobileNavItem[] {
   ];
 
   if (runtimeConfig?.ENABLE_LIVE_ENTRY) {
-    nextItems.push({ icon: Radio, label: '直播', href: '/live' });
+    nextItems.push({ icon: Radio, label: '直播', href: LIVE_ROUTE });
   }
 
   if ((runtimeConfig?.CUSTOM_CATEGORIES?.length ?? 0) > 0) {
@@ -46,28 +54,15 @@ function getMobileNavItems(runtimeConfig?: RuntimeConfig): MobileNavItem[] {
 
 const MobileBottomNav = ({ activePath }: MobileBottomNavProps) => {
   const pathname = usePathname();
+  const runtimeConfig = useRuntimeConfig();
 
   // 当前激活路径：优先使用传入的 activePath，否则回退到浏览器地址
   const currentActive = activePath ?? pathname;
 
-  const [navItems, setNavItems] = useState<MobileNavItem[]>(() =>
-    getMobileNavItems(
-      typeof window === 'undefined' ? undefined : window.RUNTIME_CONFIG,
-    ),
+  const navItems = useMemo(
+    () => getMobileNavItems(runtimeConfig),
+    [runtimeConfig],
   );
-
-  useEffect(() => {
-    const updateNavItems = () => {
-      setNavItems(getMobileNavItems(window.RUNTIME_CONFIG));
-    };
-
-    updateNavItems();
-    window.addEventListener('runtime-config-updated', updateNavItems);
-
-    return () => {
-      window.removeEventListener('runtime-config-updated', updateNavItems);
-    };
-  }, []);
 
   const isActive = (href: string) => {
     const typeMatch = href.match(/type=([^&]+)/)?.[1];
@@ -104,6 +99,7 @@ const MobileBottomNav = ({ activePath }: MobileBottomNavProps) => {
             >
               <Link
                 href={item.href}
+                prefetch={shouldPrefetchRoute(item.href) ? undefined : false}
                 className='flex h-14 w-full flex-col items-center justify-center gap-1 text-xs'
               >
                 <item.icon

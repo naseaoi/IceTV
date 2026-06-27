@@ -21,6 +21,14 @@ import {
 } from 'react';
 import { createPortal } from 'react-dom';
 
+import {
+  SIDEBAR_BUTTON_STATE_CLASS,
+  SIDEBAR_ITEM_ICON_CLASS,
+  SIDEBAR_ITEM_ICON_WRAP_CLASS,
+  SIDEBAR_ITEM_LAYOUT_CLASS,
+  getSidebarItemLabelClass,
+} from './SidebarItem';
+
 import AdminSelect from '@/features/admin/components/AdminSelect';
 import AlertModal from '@/features/admin/components/AlertModal';
 import { useAlertModal } from '@/features/admin/hooks/useAlertModal';
@@ -615,29 +623,29 @@ export const UserMenu: React.FC<UserMenuProps> = ({
         <div className='mx-3 h-px bg-gradient-to-r from-transparent via-gray-200/80 to-transparent dark:via-white/[0.10]' />
 
         {/* 功能按钮网格 - 统一包含登出和版本 */}
-        <div className='grid grid-cols-2 gap-1.5 p-2.5'>
+        <div className='grid grid-cols-2 gap-1.5 px-2.5 py-2'>
           {menuActions.map(
             ({ icon: Icon, label, onClick, danger, version }) => (
               <button
                 key={label}
                 onClick={onClick}
-                className={`relative flex flex-col items-center gap-2 rounded-xl px-1 py-4 transition-colors ${
+                className={`relative flex flex-col items-center gap-2 rounded-xl px-1 py-3 transition-colors ${
                   danger
                     ? 'text-rose-600 hover:bg-rose-50/70 dark:text-rose-300 dark:hover:bg-rose-500/10'
                     : 'text-gray-600 hover:bg-gray-100/70 dark:text-gray-300 dark:hover:bg-white/[0.06]'
                 }`}
               >
                 <div
-                  className={`flex h-10 w-10 items-center justify-center rounded-xl ${
+                  className={`flex h-12 w-12 items-center justify-center rounded-xl ${
                     danger
                       ? 'bg-rose-50/80 dark:bg-rose-500/10'
                       : 'bg-gray-100/80 dark:bg-white/[0.06]'
                   }`}
                 >
-                  <Icon className='h-[18px] w-[18px]' />
+                  <Icon className='h-[22px] w-[22px]' />
                 </div>
                 <span
-                  className={`text-xs font-medium ${version ? 'font-mono' : ''}`}
+                  className={`text-sm font-medium ${version ? 'font-mono' : ''}`}
                 >
                   {label}
                 </span>
@@ -1124,23 +1132,17 @@ export const UserMenu: React.FC<UserMenuProps> = ({
           <button
             ref={buttonRef}
             onClick={handleMenuClick}
-            className='group flex min-h-[40px] w-full items-center justify-start gap-3 rounded-lg px-2 py-2 pl-4 text-sm text-gray-500 transition-colors duration-200 hover:bg-gray-100/30 hover:text-green-600 dark:text-gray-400 dark:hover:text-green-400'
+            className={`${SIDEBAR_ITEM_LAYOUT_CLASS} w-full ${SIDEBAR_BUTTON_STATE_CLASS}`}
             aria-label='User Menu'
             title='用户'
           >
-            <div className='relative flex h-4 w-4 flex-shrink-0 items-center justify-center'>
-              <User className='h-4 w-4' />
+            <div className={`relative ${SIDEBAR_ITEM_ICON_WRAP_CLASS}`}>
+              <User className={SIDEBAR_ITEM_ICON_CLASS} />
               {updateStatus === UpdateStatus.HAS_UPDATE && (
                 <div className='absolute -right-1 -top-1 h-2 w-2 rounded-full bg-yellow-500'></div>
               )}
             </div>
-            <span
-              className={`overflow-hidden whitespace-nowrap transition-[max-width,opacity] duration-300 ease-[cubic-bezier(0.25,0.1,0.25,1)] ${
-                isCollapsed ? 'max-w-0 opacity-0' : 'max-w-[120px] opacity-100'
-              }`}
-            >
-              用户
-            </span>
+            <span className={getSidebarItemLabelClass(isCollapsed)}>用户</span>
           </button>
         </div>
       ) : (

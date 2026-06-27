@@ -5,6 +5,14 @@ import { usePathname } from 'next/navigation';
 import { useTheme } from 'next-themes';
 import { useEffect, useRef, useState } from 'react';
 
+import {
+  SIDEBAR_BUTTON_STATE_CLASS,
+  SIDEBAR_ITEM_ICON_CLASS,
+  SIDEBAR_ITEM_ICON_WRAP_CLASS,
+  SIDEBAR_ITEM_LAYOUT_CLASS,
+  getSidebarItemLabelClass,
+} from './SidebarItem';
+
 interface ThemeToggleProps {
   variant?: 'icon' | 'sidebar';
   isCollapsed?: boolean;
@@ -46,17 +54,13 @@ export function ThemeToggle({
     // SSR/hydration 阶段：渲染带默认图标的占位符避免图标闪烁
     if (variant === 'sidebar') {
       return (
-        <div className='group flex min-h-[40px] w-full items-center justify-start gap-3 rounded-lg px-2 py-2 pl-4 text-sm text-gray-500 dark:text-gray-400'>
-          <div className='flex h-4 w-4 flex-shrink-0 items-center justify-center'>
-            <Moon className='h-4 w-4' />
+        <div
+          className={`${SIDEBAR_ITEM_LAYOUT_CLASS} w-full text-gray-500 dark:text-gray-400`}
+        >
+          <div className={SIDEBAR_ITEM_ICON_WRAP_CLASS}>
+            <Moon className={SIDEBAR_ITEM_ICON_CLASS} />
           </div>
-          <span
-            className={`overflow-hidden whitespace-nowrap transition-[max-width,opacity] duration-300 ease-[cubic-bezier(0.25,0.1,0.25,1)] ${
-              isCollapsed ? 'max-w-0 opacity-0' : 'max-w-[120px] opacity-100'
-            }`}
-          >
-            主题
-          </span>
+          <span className={getSidebarItemLabelClass(isCollapsed)}>主题</span>
         </div>
       );
     }
@@ -124,24 +128,18 @@ export function ThemeToggle({
       <button
         ref={buttonRef}
         onClick={toggleTheme}
-        className='group flex min-h-[40px] w-full items-center justify-start gap-3 rounded-lg px-2 py-2 pl-4 text-sm text-gray-500 transition-colors duration-200 hover:bg-gray-100/30 hover:text-green-600 dark:text-gray-400 dark:hover:text-green-400'
+        className={`${SIDEBAR_ITEM_LAYOUT_CLASS} w-full ${SIDEBAR_BUTTON_STATE_CLASS}`}
         aria-label='Toggle theme'
         title='主题'
       >
-        <div className='flex h-4 w-4 flex-shrink-0 items-center justify-center'>
+        <div className={SIDEBAR_ITEM_ICON_WRAP_CLASS}>
           {resolvedTheme === 'dark' ? (
-            <Sun className='h-4 w-4' />
+            <Sun className={SIDEBAR_ITEM_ICON_CLASS} />
           ) : (
-            <Moon className='h-4 w-4' />
+            <Moon className={SIDEBAR_ITEM_ICON_CLASS} />
           )}
         </div>
-        <span
-          className={`overflow-hidden whitespace-nowrap transition-[max-width,opacity] duration-300 ease-[cubic-bezier(0.25,0.1,0.25,1)] ${
-            isCollapsed ? 'max-w-0 opacity-0' : 'max-w-[120px] opacity-100'
-          }`}
-        >
-          主题
-        </span>
+        <span className={getSidebarItemLabelClass(isCollapsed)}>主题</span>
       </button>
     );
   }

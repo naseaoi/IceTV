@@ -799,7 +799,7 @@ const VideoCard = forwardRef<VideoCardHandle, VideoCardProps>(
     return (
       <>
         <div
-          className='group relative w-full cursor-pointer rounded-lg bg-transparent transition-[transform,opacity] duration-300 ease-in-out hover:z-[500] hover:scale-[1.05] active:scale-[0.97] active:opacity-80'
+          className='group relative w-full cursor-pointer rounded-lg bg-transparent transition-[transform,opacity] duration-300 ease-in-out hover:z-[500] hover:scale-[1.025] active:scale-[0.97] active:opacity-80'
           onClick={handleClick}
           onMouseEnter={handlePrefetch}
           onMouseLeave={cancelPrefetch}

@@ -3,11 +3,13 @@ import { Inter } from 'next/font/google';
 
 import './globals.css';
 
+import { getPublicConfig } from '@/lib/config';
 import { serializeForInlineScript } from '@/lib/script-serialization';
 import { getStorageType } from '@/lib/storage-type';
 
 import { GlobalErrorIndicator } from '../components/GlobalErrorIndicator';
 import { CardInteractionProvider } from '../components/CardInteractionProvider';
+import { RuntimeConfigProvider } from '../components/RuntimeConfigProvider';
 import { SiteProvider } from '../components/SiteProvider';
 import { SWRegister } from '../components/SWRegister';
 import { ThemeProvider } from '../components/ThemeProvider';
@@ -51,9 +53,13 @@ export default async function RootLayout({
 }: {
   children: React.ReactNode;
 }) {
+  const publicConfig = await getPublicConfig();
+  const initialSiteName = publicConfig.SiteName || siteName;
+  const initialSiteIcon = publicConfig.SiteIcon || siteIcon;
+  const initialAnnouncement = publicConfig.Announcement || announcement;
   const runtimeConfig = {
     STORAGE_TYPE: storageType,
-    OPEN_REGISTER: false,
+    OPEN_REGISTER: publicConfig.OpenRegister,
     UPDATE_REPOS: process.env.NEXT_PUBLIC_UPDATE_REPOS || 'naseaoi/IceTV',
     UPDATE_BRANCH: process.env.NEXT_PUBLIC_UPDATE_BRANCH || 'main',
     DOUBAN_PROXY_TYPE: process.env.NEXT_PUBLIC_DOUBAN_PROXY_TYPE || 'direct',
@@ -62,11 +68,10 @@ export default async function RootLayout({
       process.env.NEXT_PUBLIC_DOUBAN_IMAGE_PROXY_TYPE ||
       'cmliussss-cdn-tencent',
     DOUBAN_IMAGE_PROXY: process.env.NEXT_PUBLIC_DOUBAN_IMAGE_PROXY || '',
-    DISABLE_YELLOW_FILTER:
-      process.env.NEXT_PUBLIC_DISABLE_YELLOW_FILTER === 'true',
-    ENABLE_LIVE_ENTRY: false,
-    CUSTOM_CATEGORIES: [],
-    FLUID_SEARCH: process.env.NEXT_PUBLIC_FLUID_SEARCH !== 'false',
+    DISABLE_YELLOW_FILTER: publicConfig.DisableYellowFilter,
+    ENABLE_LIVE_ENTRY: publicConfig.EnableLiveEntry,
+    CUSTOM_CATEGORIES: publicConfig.CustomCategories,
+    FLUID_SEARCH: publicConfig.FluidSearch,
   };
   const serializedRuntimeConfig = serializeForInlineScript(runtimeConfig);
 
@@ -75,9 +80,9 @@ export default async function RootLayout({
       <head>
         <link
           rel='apple-touch-icon'
-          href={siteIcon || '/icons/icon-192x192.png'}
+          href={initialSiteIcon || '/icons/icon-192x192.png'}
         />
-        <link rel='icon' href={siteIcon || '/favicon.ico'} />
+        <link rel='icon' href={initialSiteIcon || '/favicon.ico'} />
         <script
           dangerouslySetInnerHTML={{
             __html: `(() => {
@@ -108,17 +113,19 @@ export default async function RootLayout({
           enableSystem
           disableTransitionOnChange
         >
-          <SiteProvider
-            siteName={siteName}
-            siteIcon={siteIcon}
-            announcement={announcement}
-          >
-            <CardInteractionProvider>
-              {children}
-              <GlobalErrorIndicator />
-              <SWRegister />
-            </CardInteractionProvider>
-          </SiteProvider>
+          <RuntimeConfigProvider initialConfig={runtimeConfig}>
+            <SiteProvider
+              siteName={initialSiteName}
+              siteIcon={initialSiteIcon}
+              announcement={initialAnnouncement}
+            >
+              <CardInteractionProvider>
+                {children}
+                <GlobalErrorIndicator />
+                <SWRegister />
+              </CardInteractionProvider>
+            </SiteProvider>
+          </RuntimeConfigProvider>
         </ThemeProvider>
       </body>
     </html>

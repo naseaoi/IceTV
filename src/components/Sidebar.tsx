@@ -19,11 +19,22 @@ import {
   useContext,
   useEffect,
   useLayoutEffect,
+  useMemo,
   useRef,
   useState,
 } from 'react';
 
+import { useRuntimeConfig } from './RuntimeConfigProvider';
 import { useSite } from './SiteProvider';
+import {
+  SIDEBAR_BUTTON_STATE_CLASS,
+  SIDEBAR_ITEM_ICON_CLASS,
+  SIDEBAR_ITEM_ICON_WRAP_CLASS,
+  SIDEBAR_ITEM_LAYOUT_CLASS,
+  SIDEBAR_LINK_ICON_CLASS,
+  SIDEBAR_LINK_STATE_CLASS,
+  getSidebarItemLabelClass,
+} from './SidebarItem';
 import { ThemeToggle } from './ThemeToggle';
 import { UserMenu } from './UserMenu';
 
@@ -73,6 +84,12 @@ type SidebarMenuItem = {
   href: string;
 };
 
+const LIVE_ROUTE = '/live';
+
+function shouldPrefetchRoute(href: string): boolean {
+  return href !== LIVE_ROUTE;
+}
+
 function getSidebarMenuItems(runtimeConfig?: RuntimeConfig): SidebarMenuItem[] {
   const nextItems: SidebarMenuItem[] = [
     {
@@ -101,7 +118,7 @@ function getSidebarMenuItems(runtimeConfig?: RuntimeConfig): SidebarMenuItem[] {
     nextItems.push({
       icon: Radio,
       label: '直播',
-      href: '/live',
+      href: LIVE_ROUTE,
     });
   }
 
@@ -148,6 +165,7 @@ const getInitialSidebarCollapsed = (): boolean => {
 const Sidebar = ({ onToggle, activePath = '/' }: SidebarProps) => {
   const router = useRouter();
   const pathname = usePathname();
+  const runtimeConfig = useRuntimeConfig();
   const { siteName } = useSite();
   const goHome = useSmartHomeNav();
   // 若同一次 SPA 会话中已经读取过折叠状态，则直接复用，避免闪烁
@@ -202,6 +220,9 @@ const Sidebar = ({ onToggle, activePath = '/' }: SidebarProps) => {
 
   const prefetchRoute = useCallback(
     (href: string) => {
+      if (!shouldPrefetchRoute(href)) {
+        return;
+      }
       if (prefetchedRoutesRef.current.has(href)) {
         return;
       }
@@ -215,7 +236,7 @@ const Sidebar = ({ onToggle, activePath = '/' }: SidebarProps) => {
     const routes = [
       '/',
       '/search',
-      ...getSidebarMenuItems(window.RUNTIME_CONFIG).map((item) => item.href),
+      ...getSidebarMenuItems(runtimeConfig).map((item) => item.href),
     ];
 
     const prefetchAll = () => {
@@ -243,30 +264,16 @@ const Sidebar = ({ onToggle, activePath = '/' }: SidebarProps) => {
         clearTimeout(timeoutId);
       }
     };
-  }, [prefetchRoute]);
+  }, [prefetchRoute, runtimeConfig]);
 
   const contextValue = {
     isCollapsed,
   };
 
-  const [menuItems, setMenuItems] = useState<SidebarMenuItem[]>(() =>
-    getSidebarMenuItems(
-      typeof window === 'undefined' ? undefined : window.RUNTIME_CONFIG,
-    ),
+  const menuItems = useMemo(
+    () => getSidebarMenuItems(runtimeConfig),
+    [runtimeConfig],
   );
-
-  useEffect(() => {
-    const updateMenuItems = () => {
-      setMenuItems(getSidebarMenuItems(window.RUNTIME_CONFIG));
-    };
-
-    updateMenuItems();
-    window.addEventListener('runtime-config-updated', updateMenuItems);
-
-    return () => {
-      window.removeEventListener('runtime-config-updated', updateMenuItems);
-    };
-  }, []);
 
   return (
     <SidebarContext.Provider value={contextValue}>
@@ -275,7 +282,7 @@ const Sidebar = ({ onToggle, activePath = '/' }: SidebarProps) => {
         <aside
           data-sidebar
           className={`fixed left-0 top-0 z-10 h-screen border-r border-gray-200/50 bg-white/40 shadow-lg backdrop-blur-xl transition-[width] duration-300 ease-[cubic-bezier(0.25,0.1,0.25,1)] dark:border-gray-700/50 dark:bg-gray-900/70 ${
-            isCollapsed ? 'w-16' : 'w-64'
+            isCollapsed ? 'w-20' : 'w-60'
           }`}
           style={{
             backdropFilter: 'blur(20px)',
@@ -284,7 +291,7 @@ const Sidebar = ({ onToggle, activePath = '/' }: SidebarProps) => {
         >
           <div className='flex h-full flex-col'>
             {/* 顶部品牌区域 - 完全复制菜单项布局结构以保证对齐 */}
-            <div className='flex items-center px-2 pb-4 pt-6'>
+            <div className='flex items-center px-2 pb-5 pt-6'>
               <Link
                 href='/'
                 data-brand-link
@@ -292,19 +299,19 @@ const Sidebar = ({ onToggle, activePath = '/' }: SidebarProps) => {
                   e.preventDefault();
                   goHome();
                 }}
-                className={`flex min-h-[40px] w-full select-none items-center justify-start overflow-hidden rounded-lg py-2 transition-[padding,gap] duration-300 ease-[cubic-bezier(0.25,0.1,0.25,1)] hover:opacity-90 ${
-                  isCollapsed ? 'gap-0 px-[2px]' : 'gap-3 px-2'
+                className={`flex min-h-[52px] w-full select-none items-center justify-start overflow-hidden rounded-xl py-2.5 transition-[padding,gap] duration-300 ease-[cubic-bezier(0.25,0.1,0.25,1)] hover:opacity-90 ${
+                  isCollapsed ? 'gap-0 px-1' : 'gap-3.5 px-2'
                 }`}
               >
-                <div className='flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-xl border border-gray-100 bg-gray-50 p-1.5 shadow-sm dark:border-gray-700/50 dark:bg-gray-800/50'>
+                <div className='flex h-[52px] w-[52px] flex-shrink-0 items-center justify-center rounded-xl border border-gray-100 bg-gray-50 p-1.5 shadow-sm dark:border-gray-700/50 dark:bg-gray-800/50'>
                   <SiteIcon />
                 </div>
                 <span
                   data-sidebar-label
-                  className={`overflow-hidden whitespace-nowrap text-lg font-bold tracking-tight text-gray-800 transition-[max-width,opacity] duration-300 ease-[cubic-bezier(0.25,0.1,0.25,1)] dark:text-gray-100 ${
+                  className={`overflow-hidden whitespace-nowrap text-xl font-bold tracking-tight text-gray-800 transition-[max-width,opacity] duration-300 ease-[cubic-bezier(0.25,0.1,0.25,1)] dark:text-gray-100 ${
                     isCollapsed
                       ? 'max-w-0 opacity-0'
-                      : 'max-w-[140px] opacity-100'
+                      : 'max-w-[135px] opacity-100'
                   }`}
                 >
                   {siteName}
@@ -315,7 +322,7 @@ const Sidebar = ({ onToggle, activePath = '/' }: SidebarProps) => {
             <div className='mx-3 h-px bg-gradient-to-r from-transparent via-gray-200 to-transparent dark:via-gray-700' />
 
             {/* 首页和搜索导航 */}
-            <nav className='mt-4 space-y-1 px-2'>
+            <nav className='mt-5 space-y-1.5 px-3'>
               <Link
                 href='/'
                 onClick={(e) => {
@@ -324,20 +331,16 @@ const Sidebar = ({ onToggle, activePath = '/' }: SidebarProps) => {
                   goHome();
                 }}
                 data-active={active === '/'}
-                className={`group flex min-h-[40px] items-center rounded-lg px-2 py-2 pl-4 font-medium text-gray-700 transition-colors duration-200 hover:bg-gray-100/30 hover:text-green-600 data-[active=true]:bg-green-500/20 data-[active=true]:text-green-700 dark:text-gray-300 dark:hover:text-green-400 dark:data-[active=true]:bg-green-500/10 dark:data-[active=true]:text-green-400 ${
+                className={`${SIDEBAR_ITEM_LAYOUT_CLASS} font-medium ${SIDEBAR_LINK_STATE_CLASS} ${
                   isCollapsed ? 'mx-0 w-full max-w-none' : 'mx-0'
-                } justify-start gap-3`}
+                }`}
               >
-                <div className='flex h-4 w-4 flex-shrink-0 items-center justify-center'>
-                  <Home className='h-4 w-4 text-gray-500 group-hover:text-green-600 data-[active=true]:text-green-700 dark:text-gray-400 dark:group-hover:text-green-400 dark:data-[active=true]:text-green-400' />
+                <div className={SIDEBAR_ITEM_ICON_WRAP_CLASS}>
+                  <Home className={SIDEBAR_LINK_ICON_CLASS} />
                 </div>
                 <span
                   data-sidebar-label
-                  className={`overflow-hidden whitespace-nowrap transition-[max-width,opacity] duration-300 ease-[cubic-bezier(0.25,0.1,0.25,1)] ${
-                    isCollapsed
-                      ? 'max-w-0 opacity-0'
-                      : 'max-w-[120px] opacity-100'
-                  }`}
+                  className={getSidebarItemLabelClass(isCollapsed)}
                 >
                   首页
                 </span>
@@ -355,20 +358,16 @@ const Sidebar = ({ onToggle, activePath = '/' }: SidebarProps) => {
                 }}
                 onMouseEnter={() => prefetchRoute('/search')}
                 data-active={active === '/search'}
-                className={`group flex min-h-[40px] items-center rounded-lg px-2 py-2 pl-4 font-medium text-gray-700 transition-colors duration-200 hover:bg-gray-100/30 hover:text-green-600 data-[active=true]:bg-green-500/20 data-[active=true]:text-green-700 dark:text-gray-300 dark:hover:text-green-400 dark:data-[active=true]:bg-green-500/10 dark:data-[active=true]:text-green-400 ${
+                className={`${SIDEBAR_ITEM_LAYOUT_CLASS} font-medium ${SIDEBAR_LINK_STATE_CLASS} ${
                   isCollapsed ? 'mx-0 w-full max-w-none' : 'mx-0'
-                } justify-start gap-3`}
+                }`}
               >
-                <div className='flex h-4 w-4 flex-shrink-0 items-center justify-center'>
-                  <Search className='h-4 w-4 text-gray-500 group-hover:text-green-600 data-[active=true]:text-green-700 dark:text-gray-400 dark:group-hover:text-green-400 dark:data-[active=true]:text-green-400' />
+                <div className={SIDEBAR_ITEM_ICON_WRAP_CLASS}>
+                  <Search className={SIDEBAR_LINK_ICON_CLASS} />
                 </div>
                 <span
                   data-sidebar-label
-                  className={`overflow-hidden whitespace-nowrap transition-[max-width,opacity] duration-300 ease-[cubic-bezier(0.25,0.1,0.25,1)] ${
-                    isCollapsed
-                      ? 'max-w-0 opacity-0'
-                      : 'max-w-[120px] opacity-100'
-                  }`}
+                  className={getSidebarItemLabelClass(isCollapsed)}
                 >
                   搜索
                 </span>
@@ -376,8 +375,8 @@ const Sidebar = ({ onToggle, activePath = '/' }: SidebarProps) => {
             </nav>
 
             {/* 菜单项 */}
-            <div className='flex-1 overflow-y-auto px-2 pt-4'>
-              <div className='space-y-1'>
+            <div className='flex-1 overflow-y-auto px-3 pt-5'>
+              <div className='space-y-1.5'>
                 {menuItems.map((item) => {
                   // 检查当前路径是否匹配这个菜单项
                   const typeMatch = item.href.match(/type=([^&]+)/)?.[1];
@@ -395,23 +394,22 @@ const Sidebar = ({ onToggle, activePath = '/' }: SidebarProps) => {
                     <Link
                       key={item.label}
                       href={item.href}
+                      prefetch={
+                        shouldPrefetchRoute(item.href) ? undefined : false
+                      }
                       onClick={() => setActive(item.href)}
                       onMouseEnter={() => prefetchRoute(item.href)}
                       data-active={isActive}
-                      className={`group flex min-h-[40px] items-center rounded-lg px-2 py-2 pl-4 text-sm text-gray-700 transition-colors duration-200 hover:bg-gray-100/30 hover:text-green-600 data-[active=true]:bg-green-500/20 data-[active=true]:text-green-700 dark:text-gray-300 dark:hover:text-green-400 dark:data-[active=true]:bg-green-500/10 dark:data-[active=true]:text-green-400 ${
+                      className={`${SIDEBAR_ITEM_LAYOUT_CLASS} ${SIDEBAR_LINK_STATE_CLASS} ${
                         isCollapsed ? 'mx-0 w-full max-w-none' : 'mx-0'
-                      } justify-start gap-3`}
+                      }`}
                     >
-                      <div className='flex h-4 w-4 flex-shrink-0 items-center justify-center'>
-                        <Icon className='h-4 w-4 text-gray-500 group-hover:text-green-600 data-[active=true]:text-green-700 dark:text-gray-400 dark:group-hover:text-green-400 dark:data-[active=true]:text-green-400' />
+                      <div className={SIDEBAR_ITEM_ICON_WRAP_CLASS}>
+                        <Icon className={SIDEBAR_LINK_ICON_CLASS} />
                       </div>
                       <span
                         data-sidebar-label
-                        className={`overflow-hidden whitespace-nowrap transition-[max-width,opacity] duration-300 ease-[cubic-bezier(0.25,0.1,0.25,1)] ${
-                          isCollapsed
-                            ? 'max-w-0 opacity-0'
-                            : 'max-w-[120px] opacity-100'
-                        }`}
+                        className={getSidebarItemLabelClass(isCollapsed)}
                       >
                         {item.label}
                       </span>
@@ -422,26 +420,22 @@ const Sidebar = ({ onToggle, activePath = '/' }: SidebarProps) => {
             </div>
 
             {/* 底部折叠/展开按钮 */}
-            <div className='px-2 pb-4 pt-2'>
+            <div className='px-3 pb-4 pt-2'>
               <div className='mx-1 mb-2 h-px bg-gradient-to-r from-transparent via-gray-200 to-transparent dark:via-gray-700' />
-              <div className='space-y-1'>
+              <div className='space-y-1.5'>
                 <UserMenu variant='sidebar' isCollapsed={isCollapsed} />
                 <ThemeToggle variant='sidebar' isCollapsed={isCollapsed} />
                 <button
                   onClick={handleToggle}
-                  className={`group flex min-h-[40px] w-full items-center justify-start gap-3 rounded-lg px-2 py-2 pl-4 text-sm text-gray-500 transition-colors duration-200 hover:bg-gray-100/30 hover:text-green-600 dark:text-gray-400 dark:hover:text-green-400`}
+                  className={`${SIDEBAR_ITEM_LAYOUT_CLASS} w-full ${SIDEBAR_BUTTON_STATE_CLASS}`}
                   title={isCollapsed ? '展开侧栏' : '折叠侧栏'}
                 >
-                  <div className='flex h-4 w-4 flex-shrink-0 items-center justify-center'>
-                    <Menu className='h-4 w-4' />
+                  <div className={SIDEBAR_ITEM_ICON_WRAP_CLASS}>
+                    <Menu className={SIDEBAR_ITEM_ICON_CLASS} />
                   </div>
                   <span
                     data-sidebar-label
-                    className={`overflow-hidden whitespace-nowrap transition-[max-width,opacity] duration-300 ease-[cubic-bezier(0.25,0.1,0.25,1)] ${
-                      isCollapsed
-                        ? 'max-w-0 opacity-0'
-                        : 'max-w-[120px] opacity-100'
-                    }`}
+                    className={getSidebarItemLabelClass(isCollapsed)}
                   >
                     折叠
                   </span>
@@ -453,7 +447,7 @@ const Sidebar = ({ onToggle, activePath = '/' }: SidebarProps) => {
         <div
           data-sidebar-offset
           className={`sidebar-offset transition-[width] duration-300 ease-[cubic-bezier(0.25,0.1,0.25,1)] ${
-            isCollapsed ? 'w-16' : 'w-64'
+            isCollapsed ? 'w-20' : 'w-60'
           }`}
         ></div>
       </div>

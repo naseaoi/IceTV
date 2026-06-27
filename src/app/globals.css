@@ -95,15 +95,15 @@ html.dark body {
 /* 防止侧栏折叠状态在刷新时闪烁：CSS 在 React 水合前即生效 */
 @media (min-width: 768px) {
   html[data-sidebar-collapsed='true'] [data-sidebar] {
-    width: 4rem;
+    width: 5rem;
   }
   html[data-sidebar-collapsed='true'] .sidebar-offset {
-    width: 4rem;
+    width: 5rem;
   }
   /* 折叠态品牌链接内边距和间距，消除图标位置偏移 */
   html[data-sidebar-collapsed='true'] [data-sidebar] [data-brand-link] {
-    padding-left: 2px;
-    padding-right: 2px;
+    padding-left: 0.25rem;
+    padding-right: 0.25rem;
     gap: 0;
   }
   /* 折叠态隐藏文字标签 */
