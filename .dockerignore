@@ -17,8 +17,9 @@ node_modules
 *.swp
 *.swo
 
-# 文档与元数据（构建不需要）
+# 文档与元数据
 *.md
+!CHANGELOG.md
 LICENSE
 docs/
 
