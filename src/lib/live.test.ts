@@ -1,4 +1,4 @@
-import { parseLivePlaylist } from '@/lib/live';
+import { parseEpgXmlForChannels, parseLivePlaylist } from '@/lib/live';
 
 describe('parseLivePlaylist', () => {
   it('解析文本 IPTV 分组清单', () => {
@@ -54,5 +54,37 @@ describe('parseLivePlaylist', () => {
         url: 'https://example.test/cctv1.m3u8',
       },
     ]);
+  });
+});
+
+describe('parseEpgXmlForChannels', () => {
+  it('通过 display-name 匹配第三方 EPG 频道', () => {
+    const result = parseEpgXmlForChannels(
+      [
+        '<?xml version="1.0" encoding="UTF-8"?>',
+        '<tv>',
+        '<channel id="1">',
+        '<display-name lang="zh">CCTV1</display-name>',
+        '</channel>',
+        '<programme start="20260627000000 +0800" stop="20260627003000 +0800" channel="1">',
+        '<title lang="zh">新闻联播</title>',
+        '</programme>',
+        '</tv>',
+      ].join('\n'),
+      [
+        { tvgId: 'CCTV1.cn@HD', name: 'CCTV-1 (1080p)' },
+        { tvgId: '', name: 'CCTV1' },
+      ],
+    );
+
+    expect(result['CCTV1.cn@HD']).toEqual([
+      {
+        start: '20260627000000 +0800',
+        end: '20260627003000 +0800',
+        title: '新闻联播',
+      },
+    ]);
+    expect(result['CCTV-1 (1080p)']).toEqual(result['CCTV1.cn@HD']);
+    expect(result.CCTV1).toEqual(result['CCTV1.cn@HD']);
   });
 });

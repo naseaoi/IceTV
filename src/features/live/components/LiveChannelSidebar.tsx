@@ -120,6 +120,28 @@ function EpgTab({
   const currentIndex = programs.findIndex((program) =>
     isProgramLive(program, currentTime),
   );
+  const programListRef = useRef<HTMLDivElement | null>(null);
+  const currentProgramRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    if (currentIndex === -1) {
+      return;
+    }
+
+    const timer = window.setTimeout(() => {
+      const list = programListRef.current;
+      const item = currentProgramRef.current;
+      if (!list || !item) {
+        return;
+      }
+
+      const top =
+        item.offsetTop - list.clientHeight / 2 + item.clientHeight / 2;
+      list.scrollTo({ top: Math.max(0, top), behavior: 'smooth' });
+    }, 80);
+
+    return () => window.clearTimeout(timer);
+  }, [currentChannel?.id, currentIndex, programs.length]);
 
   if (!currentChannel) {
     return (
@@ -172,7 +194,10 @@ function EpgTab({
           message='当前频道未提供节目单数据'
         />
       ) : (
-        <div className='min-h-0 flex-1 overflow-y-auto p-3'>
+        <div
+          ref={programListRef}
+          className='min-h-0 flex-1 overflow-y-auto p-3'
+        >
           <div className='space-y-2'>
             {programs.map((program, index) => {
               const isCurrent = index === currentIndex;
@@ -181,6 +206,7 @@ function EpgTab({
               return (
                 <div
                   key={`${program.start}-${program.title}-${index}`}
+                  ref={isCurrent ? currentProgramRef : undefined}
                   className={`rounded-lg border p-3 transition-colors ${
                     isCurrent
                       ? 'border-green-500/30 bg-green-500/10 dark:bg-green-500/20'

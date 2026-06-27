@@ -1,11 +1,17 @@
+import { Buffer } from 'node:buffer';
+import { gunzipSync } from 'node:zlib';
+
 import { getConfig, saveConfig } from '@/lib/config';
 import {
+  fetchResponseThroughProxy,
   fetchTextThroughProxy,
   getProxyUrlForTarget,
 } from '@/lib/http-proxy-json';
 
 const defaultUA = 'AptvPlayer/1.4.10';
 const MAX_LIVE_PLAYLIST_BYTES = 5 * 1024 * 1024;
+const MAX_EPG_RESPONSE_BYTES = 50 * 1024 * 1024;
+const MAX_EPG_TEXT_BYTES = 100 * 1024 * 1024;
 
 export interface LiveChannels {
   channelNumber: number;
@@ -105,7 +111,10 @@ export async function refreshLiveChannels(liveInfo: {
     const epgs = await parseEpg(
       epgUrl,
       ua,
-      result.channels.map((channel) => channel.tvgId).filter((tvgId) => tvgId),
+      result.channels.map((channel) => ({
+        tvgId: channel.tvgId,
+        name: channel.name,
+      })),
     );
     cachedLiveChannels[liveInfo.key] = {
       data: {
@@ -154,7 +163,7 @@ async function fetchLivePlaylistText(url: string, ua: string): Promise<string> {
 async function parseEpg(
   epgUrl: string,
   ua: string,
-  tvgIds: string[],
+  channels: { tvgId: string; name: string }[],
 ): Promise<{
   [key: string]: {
     start: string;
@@ -166,104 +175,259 @@ async function parseEpg(
     return {};
   }
 
-  const tvgs = new Set(tvgIds);
-  const result: {
-    [key: string]: { start: string; end: string; title: string }[];
-  } = {};
+  try {
+    const epgText = await fetchEpgText(epgUrl, ua);
+    return parseEpgXmlForChannels(epgText, channels);
+  } catch (error) {
+    console.warn('解析节目单失败:', error);
+  }
+
+  return {};
+}
+
+async function fetchEpgText(url: string, ua: string): Promise<string> {
+  const targetUrl = new URL(url);
 
   try {
-    const response = await fetch(epgUrl, {
+    const response = await fetch(targetUrl, {
       headers: {
+        Accept: 'application/xml,text/xml,*/*',
         'User-Agent': ua,
       },
     });
     if (!response.ok) {
-      return {};
+      throw new Error(`节目单请求失败: ${response.status}`);
+    }
+    const buffer = await readResponseBody(response, MAX_EPG_RESPONSE_BYTES);
+    return decodeEpgBuffer(buffer, response.headers, targetUrl);
+  } catch (error) {
+    const proxyUrl = getProxyUrlForTarget(targetUrl);
+    if (!proxyUrl) {
+      throw error;
     }
 
-    // 使用 ReadableStream 逐行处理，避免将整个文件加载到内存
-    const reader = response.body?.getReader();
-    if (!reader) {
-      return {};
+    const response = await fetchResponseThroughProxy(targetUrl, proxyUrl, {
+      timeoutMs: 30_000,
+      userAgent: ua,
+      maxBytes: MAX_EPG_RESPONSE_BYTES,
+      accept: 'application/xml,text/xml,*/*',
+    });
+    return decodeEpgBuffer(response.body, response.headers, targetUrl);
+  }
+}
+
+async function readResponseBody(
+  response: Response,
+  maxBytes: number,
+): Promise<Buffer> {
+  const reader = response.body?.getReader();
+  if (!reader) {
+    return Buffer.alloc(0);
+  }
+
+  const chunks: Buffer[] = [];
+  let totalBytes = 0;
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    const chunk = Buffer.from(value);
+    totalBytes += chunk.length;
+    if (totalBytes > maxBytes) {
+      throw new Error('节目单文件过大');
     }
+    chunks.push(chunk);
+  }
 
-    const decoder = new TextDecoder();
-    let buffer = '';
-    let currentTvgId = '';
-    let currentProgram: { start: string; end: string; title: string } | null =
-      null;
-    let shouldSkipCurrentProgram = false;
+  return Buffer.concat(chunks);
+}
 
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
+function decodeEpgBuffer(buffer: Buffer, headers: Headers, url: URL): string {
+  const contentEncoding = headers.get('content-encoding') || '';
+  const shouldGunzip =
+    contentEncoding.toLowerCase().includes('gzip') ||
+    url.pathname.toLowerCase().endsWith('.gz') ||
+    (buffer[0] === 0x1f && buffer[1] === 0x8b);
+  const decodedBuffer = shouldGunzip ? gunzipSync(buffer) : buffer;
+  if (decodedBuffer.length > MAX_EPG_TEXT_BYTES) {
+    throw new Error('节目单解压后文件过大');
+  }
+  return decodedBuffer.toString('utf8').replace(/^\uFEFF/, '');
+}
 
-      buffer += decoder.decode(value, { stream: true });
-      const lines = buffer.split('\n');
+export function parseEpgXmlForChannels(
+  content: string,
+  channels: { tvgId: string; name: string }[],
+): {
+  [key: string]: {
+    start: string;
+    end: string;
+    title: string;
+  }[];
+} {
+  const result: {
+    [key: string]: { start: string; end: string; title: string }[];
+  } = {};
+  const aliasToKeys = buildEpgAliasMap(channels);
+  const epgChannelToKeys = new Map<string, Set<string>>();
 
-      // 保留最后一行（可能不完整）
-      buffer = lines.pop() || '';
+  for (const channel of channels) {
+    for (const key of getChannelResultKeys(channel)) {
+      mergeKeySet(epgChannelToKeys, key, new Set([key]));
+    }
+  }
 
-      // 处理完整的行
-      for (const line of lines) {
-        const trimmedLine = line.trim();
-        if (!trimmedLine) continue;
+  const channelBlockRegex =
+    /<channel\s+[^>]*id="([^"]+)"[^>]*>([\s\S]*?)<\/channel>/g;
+  let channelMatch: RegExpExecArray | null;
+  while ((channelMatch = channelBlockRegex.exec(content))) {
+    const epgChannelId = channelMatch[1];
+    const channelBody = channelMatch[2];
+    const matchedKeys = matchEpgKeys(aliasToKeys, epgChannelId);
+    const displayNameRegex =
+      /<display-name(?:\s+[^>]*)?>([\s\S]*?)<\/display-name>/g;
+    let displayNameMatch: RegExpExecArray | null;
 
-        // 解析 <programme> 标签
-        if (trimmedLine.startsWith('<programme')) {
-          // 提取 tvg-id
-          const tvgIdMatch = trimmedLine.match(/channel="([^"]*)"/);
-          currentTvgId = tvgIdMatch ? tvgIdMatch[1] : '';
-
-          // 提取开始时间
-          const startMatch = trimmedLine.match(/start="([^"]*)"/);
-          const start = startMatch ? startMatch[1] : '';
-
-          // 提取结束时间
-          const endMatch = trimmedLine.match(/stop="([^"]*)"/);
-          const end = endMatch ? endMatch[1] : '';
-
-          if (currentTvgId && start && end) {
-            currentProgram = { start, end, title: '' };
-            // 优化：如果当前频道不在我们关注的列表中，标记为跳过
-            shouldSkipCurrentProgram = !tvgs.has(currentTvgId);
-          }
-        }
-        // 解析 <title> 标签 - 只有在需要解析当前节目时才处理
-        else if (
-          trimmedLine.startsWith('<title') &&
-          currentProgram &&
-          !shouldSkipCurrentProgram
-        ) {
-          // 处理带有语言属性的title标签，如 <title lang="zh">远方的家2025-60</title>
-          const titleMatch = trimmedLine.match(
-            /<title(?:\s+[^>]*)?>(.*?)<\/title>/,
-          );
-          if (titleMatch && currentProgram) {
-            currentProgram.title = titleMatch[1];
-
-            // 保存节目信息（这里不需要再检查tvgs.has，因为shouldSkipCurrentProgram已经确保了相关性）
-            if (!result[currentTvgId]) {
-              result[currentTvgId] = [];
-            }
-            result[currentTvgId].push({ ...currentProgram });
-
-            currentProgram = null;
-          }
-        }
-        // 处理 </programme> 标签
-        else if (trimmedLine === '</programme>') {
-          currentProgram = null;
-          currentTvgId = '';
-          shouldSkipCurrentProgram = false; // 重置跳过标志
-        }
+    while ((displayNameMatch = displayNameRegex.exec(channelBody))) {
+      const displayName = stripXmlText(displayNameMatch[1]);
+      const keys = matchEpgKeys(aliasToKeys, displayName);
+      for (const key of keys) {
+        matchedKeys.add(key);
       }
     }
-  } catch (error) {
-    // ignore
+
+    if (matchedKeys.size > 0) {
+      mergeKeySet(epgChannelToKeys, epgChannelId, matchedKeys);
+    }
+  }
+
+  const programmeRegex = /<programme\s+([^>]*)>([\s\S]*?)<\/programme>/g;
+  let programmeMatch: RegExpExecArray | null;
+  while ((programmeMatch = programmeRegex.exec(content))) {
+    const attrs = programmeMatch[1];
+    const body = programmeMatch[2];
+    const epgChannelId = getXmlAttr(attrs, 'channel');
+    const start = getXmlAttr(attrs, 'start');
+    const end = getXmlAttr(attrs, 'stop');
+    if (!epgChannelId || !start || !end) {
+      continue;
+    }
+
+    const keys =
+      epgChannelToKeys.get(epgChannelId) ||
+      matchEpgKeys(aliasToKeys, epgChannelId);
+    if (!keys || keys.size === 0) {
+      continue;
+    }
+
+    const titleMatch = body.match(/<title(?:\s+[^>]*)?>([\s\S]*?)<\/title>/);
+    const title = titleMatch ? stripXmlText(titleMatch[1]) : '';
+    if (!title) {
+      continue;
+    }
+
+    for (const key of keys) {
+      if (!result[key]) {
+        result[key] = [];
+      }
+      result[key].push({ start, end, title });
+    }
   }
 
   return result;
+}
+
+function buildEpgAliasMap(channels: { tvgId: string; name: string }[]) {
+  const aliasToKeys = new Map<string, Set<string>>();
+  for (const channel of channels) {
+    const keys = getChannelResultKeys(channel);
+    for (const value of [channel.tvgId, channel.name]) {
+      for (const alias of createEpgAliases(value)) {
+        mergeKeySet(aliasToKeys, alias, keys);
+      }
+    }
+  }
+  return aliasToKeys;
+}
+
+function getChannelResultKeys(channel: { tvgId: string; name: string }) {
+  return new Set([channel.tvgId, channel.name].filter(Boolean));
+}
+
+function matchEpgKeys(aliasToKeys: Map<string, Set<string>>, value: string) {
+  const matchedKeys = new Set<string>();
+  for (const alias of createEpgAliases(value)) {
+    const keys = aliasToKeys.get(alias);
+    if (!keys) {
+      continue;
+    }
+    for (const key of keys) {
+      matchedKeys.add(key);
+    }
+  }
+  return matchedKeys;
+}
+
+function createEpgAliases(value: string) {
+  const values = new Set<string>();
+  const raw = value.trim();
+  if (!raw) {
+    return values;
+  }
+
+  values.add(raw);
+  values.add(raw.replace(/[\[(（【].*?[\])）】]/g, ''));
+  values.add(raw.split('@')[0]);
+  values.add(raw.split('.')[0]);
+  values.add(raw.replace(/\.(cn|com|tv).*$/i, ''));
+
+  const normalizedValues = new Set<string>();
+  for (const item of values) {
+    const normalized = normalizeEpgAlias(item);
+    if (normalized) {
+      normalizedValues.add(normalized);
+    }
+  }
+  return normalizedValues;
+}
+
+function normalizeEpgAlias(value: string) {
+  return value
+    .toLowerCase()
+    .replace(/[\[(（【].*?[\])）】]/g, '')
+    .replace(/(4k|8k|1080p|720p|2160p|uhd|fhd|hd|sd)/gi, '')
+    .replace(/(高清|超清|标清|频道|综合|蓝光)/g, '')
+    .replace(/[^a-z0-9\u4e00-\u9fa5]/g, '');
+}
+
+function mergeKeySet(
+  target: Map<string, Set<string>>,
+  key: string,
+  values: Set<string>,
+) {
+  if (!key) {
+    return;
+  }
+  const current = target.get(key) || new Set<string>();
+  for (const value of values) {
+    current.add(value);
+  }
+  target.set(key, current);
+}
+
+function getXmlAttr(attrs: string, name: string) {
+  const match = attrs.match(new RegExp(`${name}="([^"]*)"`));
+  return match ? stripXmlText(match[1]) : '';
+}
+
+function stripXmlText(value: string) {
+  return value
+    .replace(/<!\[CDATA\[([\s\S]*?)\]\]>/g, '$1')
+    .replace(/&amp;/g, '&')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&quot;/g, '"')
+    .replace(/&apos;/g, "'")
+    .trim();
 }
 
 /**
