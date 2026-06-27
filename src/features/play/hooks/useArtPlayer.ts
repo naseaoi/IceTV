@@ -22,10 +22,13 @@ import {
   destroyManagedHls,
   getManagedVideo,
   getPlayerModules,
+  isManagedVideoExpectedAbort,
+  markManagedVideoExpectedAbort,
   prefetchM3U8,
   runManagedVideoCleanup,
 } from '@/lib/player-runtime';
 import { preconnectForUrl } from '@/lib/preconnect';
+import { logHlsError } from '@/lib/hls-error-log';
 import {
   ensureVideoSource,
   formatTime,
@@ -523,6 +526,7 @@ export function useArtPlayer(params: UseArtPlayerParams) {
                   preservePlaybackPositionBeforeReload();
                   onSourceProxyFallbackStarted?.();
                   if (typeof hls.stopLoad === 'function') {
+                    markManagedVideoExpectedAbort(video);
                     hls.stopLoad();
                   }
                   hls.loadSource(fallbackTargetUrl);
@@ -663,7 +667,6 @@ export function useArtPlayer(params: UseArtPlayerParams) {
               };
 
               const onHlsError = function (_event: unknown, data: any) {
-                console.error('HLS Error:', _event, data);
                 const errorStatus = getHlsErrorStatus(data);
                 const errorDetails = String(data?.details || '');
                 const errorReason = `${String(data?.type || 'unknown')}:${errorDetails || 'fatal'}`;
@@ -672,6 +675,21 @@ export function useArtPlayer(params: UseArtPlayerParams) {
                   currentUseServerProxy,
                   Hls.ErrorTypes,
                 );
+                const logResult = logHlsError(_event, data, {
+                  scope: 'vod',
+                  sourceKey: failureKey || sourceKey,
+                  phase: currentUseServerProxy
+                    ? 'server-proxy'
+                    : 'browser-direct',
+                  expectedAbort:
+                    videoRuntimeCleaned ||
+                    isManagedVideoExpectedAbort(video) ||
+                    playbackRequestModeRef.current !== 'initial',
+                });
+                if (logResult.expectedAbort) {
+                  return;
+                }
+
                 if (data.fatal) {
                   if (
                     data.type === Hls.ErrorTypes.NETWORK_ERROR &&

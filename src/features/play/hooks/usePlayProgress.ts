@@ -608,6 +608,13 @@ export function usePlayProgress({
 
   const requestWakeLock = async () => {
     try {
+      if (
+        typeof document !== 'undefined' &&
+        document.visibilityState !== 'visible'
+      ) {
+        console.debug('Wake Lock 页面不可见，跳过请求');
+        return;
+      }
       if ('wakeLock' in navigator) {
         wakeLockRef.current = await (
           navigator as unknown as {
@@ -616,6 +623,18 @@ export function usePlayProgress({
         ).wakeLock.request('screen');
       }
     } catch (err) {
+      const wakeLockMessage =
+        err instanceof Error ? err.message.toLowerCase() : '';
+      if (
+        err instanceof DOMException &&
+        err.name === 'NotAllowedError' &&
+        (wakeLockMessage.includes('not visible') ||
+          (typeof document !== 'undefined' &&
+            document.visibilityState !== 'visible'))
+      ) {
+        console.debug('Wake Lock 页面不可见，浏览器拒绝请求:', err);
+        return;
+      }
       console.warn('Wake Lock 请求失败:', err);
     }
   };

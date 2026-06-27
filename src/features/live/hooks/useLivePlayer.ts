@@ -15,8 +15,10 @@ import {
   destroyManagedHls,
   getManagedVideo,
   getPlayerModules,
+  isManagedVideoExpectedAbort,
   runManagedVideoCleanup,
 } from '@/lib/player-runtime';
+import { logHlsError } from '@/lib/hls-error-log';
 import {
   createArtPlayerConfig,
   createHlsConfig,
@@ -313,9 +315,11 @@ export function useLivePlayer({
             alignToLiveEdge(true);
           };
 
+          let videoRuntimeCleaned = false;
           video.addEventListener('pause', handleVideoPause);
           video.addEventListener('play', handleVideoPlay);
           assignManagedVideoCleanup(video, () => {
+            videoRuntimeCleaned = true;
             video.removeEventListener('pause', handleVideoPause);
             video.removeEventListener('play', handleVideoPlay);
           });
@@ -332,7 +336,16 @@ export function useLivePlayer({
           });
 
           hls.on(Hls.Events.ERROR, function (_event: any, data: any) {
-            console.error('HLS Error:', _event, data);
+            const logResult = logHlsError(_event, data, {
+              scope: 'live',
+              sourceKey,
+              phase: 'live',
+              expectedAbort:
+                videoRuntimeCleaned || isManagedVideoExpectedAbort(video),
+            });
+            if (logResult.expectedAbort) {
+              return;
+            }
             if (data.fatal) {
               handleHlsFatalError(hls, data.type, Hls.ErrorTypes);
             }

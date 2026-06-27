@@ -19,7 +19,10 @@ import {
   clearSourceFailure,
   markSourceFailed,
 } from '@/lib/failed-source-cooldown';
-import { getManagedVideo } from '@/lib/player-runtime';
+import {
+  getManagedVideo,
+  markManagedVideoExpectedAbort,
+} from '@/lib/player-runtime';
 import { mergeSourceBundle } from '@/lib/source-bundle';
 import { SearchResult, SkipConfig } from '@/lib/types';
 
@@ -194,6 +197,7 @@ export function useSourceSwitch(options: UseSourceSwitchOptions) {
 
     const managedVideo = getManagedVideo(video);
     try {
+      markManagedVideoExpectedAbort(video);
       managedVideo.hls?.stopLoad?.();
     } catch (err) {
       console.warn('停止失败源加载失败:', err);

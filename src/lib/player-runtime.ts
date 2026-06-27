@@ -34,6 +34,8 @@ export type ManagedVideoElement = HTMLVideoElement & {
   __icetvUsingServerProxy?: boolean;
   /** browser 起播失败时，挂给外层事件复用的同源 server 回退入口。 */
   __icetvSwitchToServerProxy?: ((reason: string) => boolean) | null;
+  /** 预期媒体请求中止截止时间 */
+  __icetvExpectedAbortUntil?: number;
 };
 
 let playerModulesPromise: Promise<PlayerModules> | null = null;
@@ -74,6 +76,7 @@ export function runManagedVideoCleanup(video?: HTMLVideoElement | null): void {
   const managedVideo = video as ManagedVideoElement | null | undefined;
   if (!managedVideo) return;
 
+  markManagedVideoExpectedAbort(managedVideo);
   const cleanup = managedVideo.__icetvHlsCleanup;
   managedVideo.__icetvHlsCleanup = null;
   cleanup?.();
@@ -92,8 +95,26 @@ export function destroyManagedHls(video?: HTMLVideoElement | null): void {
   const managedVideo = video as ManagedVideoElement | null | undefined;
   if (!managedVideo?.hls) return;
 
+  markManagedVideoExpectedAbort(managedVideo);
   managedVideo.hls.destroy();
   managedVideo.hls = null;
+}
+
+export function markManagedVideoExpectedAbort(
+  video?: HTMLVideoElement | null,
+  windowMs = 4_000,
+): void {
+  const managedVideo = video as ManagedVideoElement | null | undefined;
+  if (!managedVideo) return;
+  managedVideo.__icetvExpectedAbortUntil = Date.now() + windowMs;
+}
+
+export function isManagedVideoExpectedAbort(
+  video?: HTMLVideoElement | null,
+): boolean {
+  const managedVideo = video as ManagedVideoElement | null | undefined;
+  const until = managedVideo?.__icetvExpectedAbortUntil || 0;
+  return until > Date.now();
 }
 
 type HlsLoaderFactoryOptions = {
