@@ -20,6 +20,15 @@ type LoaderCallbacks = {
   onSuccess?: (...args: unknown[]) => unknown;
 };
 
+type HoverControlsArtPlayer = {
+  controls?: { show: boolean };
+  setting?: { show: boolean };
+  template?: { $player?: HTMLElement };
+  on?: (event: string, callback: (...args: unknown[]) => void) => unknown;
+  off?: (event: string, callback?: (...args: unknown[]) => void) => unknown;
+  isDestroy?: boolean;
+};
+
 export type ManagedVideoElement = HTMLVideoElement & {
   hls?: HlsType | null;
   __icetvHlsCleanup?: (() => void) | null;
@@ -115,6 +124,87 @@ export function isManagedVideoExpectedAbort(
   const managedVideo = video as ManagedVideoElement | null | undefined;
   const until = managedVideo?.__icetvExpectedAbortUntil || 0;
   return until > Date.now();
+}
+
+function isElementHovered(element: HTMLElement): boolean {
+  try {
+    return element.matches(':hover');
+  } catch {
+    return false;
+  }
+}
+
+export function bindPlayerHoverControls(artPlayer: unknown): () => void {
+  const art = artPlayer as HoverControlsArtPlayer;
+  const player = art.template?.$player;
+  if (!player || !art.controls) return () => {};
+
+  let disposed = false;
+  let pointerInside = isElementHovered(player);
+
+  const showControls = () => {
+    if (disposed || art.isDestroy || !art.controls) return;
+    art.controls.show = true;
+  };
+
+  const hideControls = () => {
+    if (disposed || art.isDestroy || !art.controls) return;
+    art.controls.show = false;
+    if (art.setting?.show) {
+      art.setting.show = false;
+    }
+  };
+
+  const handlePointerEnter = () => {
+    pointerInside = true;
+    showControls();
+  };
+
+  const handlePointerMove = () => {
+    pointerInside = true;
+    showControls();
+  };
+
+  const handlePointerLeave = () => {
+    pointerInside = false;
+    hideControls();
+  };
+
+  const handleControlState = (state: unknown) => {
+    if (state === false && pointerInside) {
+      showControls();
+    }
+  };
+
+  const handlePlayerTick = () => {
+    if (pointerInside) {
+      showControls();
+    }
+  };
+
+  const cleanup = () => {
+    if (disposed) return;
+    disposed = true;
+    player.removeEventListener('mouseenter', handlePointerEnter);
+    player.removeEventListener('mousemove', handlePointerMove);
+    player.removeEventListener('mouseleave', handlePointerLeave);
+    art.off?.('control', handleControlState);
+    art.off?.('video:timeupdate', handlePlayerTick);
+    art.off?.('destroy', cleanup);
+  };
+
+  player.addEventListener('mouseenter', handlePointerEnter);
+  player.addEventListener('mousemove', handlePointerMove);
+  player.addEventListener('mouseleave', handlePointerLeave);
+  art.on?.('control', handleControlState);
+  art.on?.('video:timeupdate', handlePlayerTick);
+  art.on?.('destroy', cleanup);
+
+  if (pointerInside) {
+    showControls();
+  }
+
+  return cleanup;
 }
 
 type HlsLoaderFactoryOptions = {

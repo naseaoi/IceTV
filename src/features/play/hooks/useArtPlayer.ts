@@ -18,6 +18,7 @@ import {
 } from '@/lib/proxy-modes';
 import {
   assignManagedVideoCleanup,
+  bindPlayerHoverControls,
   createHlsLoaderClass,
   destroyManagedHls,
   getManagedVideo,
@@ -926,6 +927,7 @@ export function useArtPlayer(params: UseArtPlayerParams) {
         if (!player) {
           return;
         }
+        bindPlayerHoverControls(player);
 
         // 共用切换集数逻辑：幂等地触发自动切下一集，
         // 让 ended / 跳片尾 / 临近片尾兜底 三条通道复用同一个出口，避免重复点

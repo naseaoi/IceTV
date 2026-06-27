@@ -11,6 +11,7 @@ import type ArtplayerType from 'artplayer';
 import type { LiveChannel, LiveSource } from '../types';
 import {
   assignManagedVideoCleanup,
+  bindPlayerHoverControls,
   createHlsLoaderClass,
   destroyManagedHls,
   getManagedVideo,
@@ -376,6 +377,7 @@ export function useLivePlayer({
           type,
           customType,
         });
+        bindPlayerHoverControls(artPlayerRef.current);
         loadedUrlRef.current = targetUrl;
 
         const ap = artPlayerRef.current as unknown as {
