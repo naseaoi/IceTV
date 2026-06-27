@@ -5,7 +5,7 @@ import { getBangumiCalendarData } from '@/lib/bangumi';
 const HOME_REVALIDATE_SECONDS = 21600;
 
 export const runtime = 'nodejs';
-export const revalidate = HOME_REVALIDATE_SECONDS;
+export const revalidate = 21600;
 
 export async function GET() {
   try {
