@@ -19,18 +19,11 @@ function normalizeStorageType(value: string | undefined): StorageType | null {
 }
 
 export function getMySqlConnectionUrl(): string {
-  return (
-    process.env.DATABASE_URL ||
-    process.env.MYSQL_URL ||
-    process.env.MySQL ||
-    ''
-  ).trim();
+  return (process.env.DATABASE_URL || '').trim();
 }
 
 export function getStorageType(): StorageType {
-  const configured = normalizeStorageType(
-    process.env.NEXT_PUBLIC_STORAGE_TYPE || process.env.STORAGE_TYPE,
-  );
+  const configured = normalizeStorageType(process.env.NEXT_PUBLIC_STORAGE_TYPE);
 
   if (configured) {
     return configured;

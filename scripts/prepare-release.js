@@ -7,16 +7,13 @@ const path = require('path');
 const { extractLatestRelease } = require('../src/lib/changelog-utils');
 
 function findChangelogPath() {
-  const candidates = ['CHANGELOG', 'CHANGELOG.md'];
+  const changelogPath = path.join(process.cwd(), 'CHANGELOG.md');
 
-  for (const candidate of candidates) {
-    const candidatePath = path.join(process.cwd(), candidate);
-    if (fs.existsSync(candidatePath)) {
-      return candidatePath;
-    }
+  if (fs.existsSync(changelogPath)) {
+    return changelogPath;
   }
 
-  throw new Error('未找到 CHANGELOG 或 CHANGELOG.md');
+  throw new Error('未找到 CHANGELOG.md');
 }
 
 function appendGithubOutput(key, value) {

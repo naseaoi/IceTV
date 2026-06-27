@@ -23,11 +23,11 @@ git log --oneline "$previousTag..HEAD"
 git log --no-merges --pretty=format:"- %s (%h)" "$previousTag..HEAD"
 ```
 
-用上一个 tag 到当前 `HEAD` 的提交整理本次 `CHANGELOG` 条目。
+用上一个 tag 到当前 `HEAD` 的提交整理本次 `CHANGELOG.md` 条目。
 
 ## 更新版本
 
-在 `CHANGELOG` 顶部新增版本条目：
+在 `CHANGELOG.md` 顶部新增版本条目：
 
 ```md
 ## [0.3.x] - YYYY-MM-DD
@@ -68,7 +68,7 @@ git status --short --branch
 ## 提交
 
 ```powershell
-git add CHANGELOG package.json public/changelog.json <本次改动文件>
+git add CHANGELOG.md package.json public/changelog.json <本次改动文件>
 git commit -m "chore(release): v0.3.x"
 git status --short --branch
 ```

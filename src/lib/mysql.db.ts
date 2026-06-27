@@ -95,9 +95,7 @@ export class MySqlStorage implements IStorage {
     const resolvedUrl = databaseUrl || getMySqlConnectionUrl();
 
     if (!resolvedUrl) {
-      throw new Error(
-        'MySQL 存储模式缺少连接串，请配置 DATABASE_URL、MYSQL_URL 或 MySQL',
-      );
+      throw new Error('MySQL 存储模式缺少连接串，请配置 DATABASE_URL');
     }
 
     this.pool = mysql.createPool(createPoolOptions(resolvedUrl));

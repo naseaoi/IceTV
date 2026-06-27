@@ -8,21 +8,13 @@ let appVersion = packageJson.version || '0.0.0';
 
 try {
   const fs = require('fs');
-  const changelogPaths = [
-    path.join(__dirname, 'CHANGELOG'),
-    path.join(__dirname, 'CHANGELOG.md'),
-  ];
+  const changelogPath = path.join(__dirname, 'CHANGELOG.md');
 
-  for (const changelogPath of changelogPaths) {
-    if (!fs.existsSync(changelogPath)) {
-      continue;
-    }
-
+  if (fs.existsSync(changelogPath)) {
     const content = fs.readFileSync(changelogPath, 'utf8');
     const latestVersion = extractLatestVersion(content);
     if (latestVersion) {
       appVersion = latestVersion;
-      break;
     }
   }
 } catch {

@@ -72,12 +72,6 @@
 - Docker + 本地 SQLite
 - Vercel + MySQL 云数据库
 
-开发文档：
-
-- [架构与分层规范](docs/architecture.md) — 目录结构、命名约定、新增 feature 模板
-- [Admin 模块](docs/admin.md) — 可复用 hooks、tab 子组件目录、测试入口
-- [API 鉴权](docs/api-auth.md) — Guard 模块、新增 API 模板、状态码约定
-
 ### 服务器本地 SQLite 存储
 
 ```yml
@@ -111,16 +105,8 @@ Vercel 项目中至少配置以下环境变量：
 ```bash
 ICETV_USERNAME=admin
 ICETV_PASSWORD=your_strong_password
-NEXT_PUBLIC_STORAGE_TYPE=mysql
 DATABASE_URL=mysql://user:password@host:3306/dbname?ssl-mode=REQUIRED
 ```
-
-说明：
-
-- `DATABASE_URL` 为标准 MySQL 连接串。
-- 如云数据库要求自定义证书，可额外配置 `MYSQL_SSL_CA`。
-- 如证书链校验需要放宽，可配置 `MYSQL_SSL_REJECT_UNAUTHORIZED=false`。
-- 未显式设置 `NEXT_PUBLIC_STORAGE_TYPE` 时，只要检测到 MySQL 连接串，服务端会自动切换到 `mysql`。
 
 ## 配置文件
 
@@ -174,24 +160,19 @@ IceTV 支持标准的苹果 CMS V10 API 格式。
 
 ## 环境变量
 
-| 变量                          | 说明                                   | 可选值                | 默认值                              |
-| ----------------------------- | -------------------------------------- | --------------------- | ----------------------------------- |
-| ICETV_USERNAME                | 站长账号                               | 任意字符串            | 无默认，必填字段                    |
-| ICETV_PASSWORD                | 站长密码                               | 任意字符串            | 无默认，必填字段                    |
-| NEXT_PUBLIC_STORAGE_TYPE      | 播放记录/收藏的存储方式                | `localdb`、`mysql`    | 自动识别，默认 `localdb`            |
-| DATABASE_URL                  | MySQL 连接串                           | `mysql://...`         | 无默认                              |
-| MYSQL_URL                     | MySQL 连接串别名                       | `mysql://...`         | 无默认                              |
-| MySQL                         | MySQL 连接串兼容别名                   | `mysql://...`         | 无默认                              |
-| LOCAL_DB_PATH                 | 本地 SQLite 文件路径（`localdb` 模式） | 绝对路径              | `/data/icetv-data.sqlite`（Docker） |
-| MYSQL_SSL_CA                  | MySQL CA 证书内容                      | PEM 文本              | 无默认                              |
-| MYSQL_SSL_REJECT_UNAUTHORIZED | MySQL SSL 证书校验开关                 | `true`、`false`       | `true`                              |
-| MYSQL_CONNECTION_LIMIT        | MySQL 连接池大小                       | 正整数                | `5`                                 |
-| AUTH_SESSION_TTL_HOURS        | 登录态有效期（小时）                   | 正整数或 `0`          | `720`                               |
-| NEXT_PUBLIC_UPDATE_REPOS      | 版本检查仓库列表（逗号分隔）           | owner/repo,owner/repo | naseaoi/IceTV                       |
-| NEXT_PUBLIC_UPDATE_BRANCH     | 版本检查分支                           | 分支名                | main                                |
-
-- 版本检查由后端接口 `/api/version/latest` 统一获取，前端不再直接请求 GitHub Raw。若仓库改名，更新 `NEXT_PUBLIC_UPDATE_REPOS` 并重启服务即可生效。
-- `AUTH_SESSION_TTL_HOURS` 未设置或为空时使用 `720` 小时；设置为 `0` 或负数时登录态长期有效。
+| 变量                            | 用途         | 必填           | 默认值                              | 可选值 / 格式              |
+| ------------------------------- | ------------ | -------------- | ----------------------------------- | -------------------------- |
+| `ICETV_USERNAME`                | 站长账号     | 是             | 无                                  | 任意字符串                 |
+| `ICETV_PASSWORD`                | 站长密码     | 是             | 无                                  | 任意字符串                 |
+| `AUTH_SESSION_TTL_HOURS`        | 登录态时长   | 否             | `720`                               | 正整数或 `0`               |
+| `NEXT_PUBLIC_STORAGE_TYPE`      | 存储类型     | 否             | 自动识别，默认 `localdb`            | `localdb` / `mysql`        |
+| `LOCAL_DB_PATH`                 | SQLite 路径  | 否             | `/data/icetv-data.sqlite`（Docker） | 绝对路径                   |
+| `DATABASE_URL`                  | MySQL 连接   | MySQL 模式必填 | 无                                  | `mysql://...`              |
+| `MYSQL_SSL_CA`                  | MySQL CA     | 否             | 无                                  | PEM 文本                   |
+| `MYSQL_SSL_REJECT_UNAUTHORIZED` | MySQL SSL    | 否             | `true`                              | `true` / `false`           |
+| `MYSQL_CONNECTION_LIMIT`        | MySQL 连接池 | 否             | `5`                                 | 正整数                     |
+| `NEXT_PUBLIC_UPDATE_REPOS`      | 版本检查     | 否             | `naseaoi/IceTV`                     | `owner/repo,owner/repo...` |
+| `NEXT_PUBLIC_UPDATE_BRANCH`     | 版本检查     | 否             | `main`                              | 分支名                     |
 
 ## 客户端
 

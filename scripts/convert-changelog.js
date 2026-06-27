@@ -36,22 +36,27 @@ async function formatJsonFileContent(outputPath, data) {
 
 async function main() {
   try {
-    const changelogPath = path.join(process.cwd(), 'CHANGELOG');
+    const changelogPath = path.join(process.cwd(), 'CHANGELOG.md');
     const outputPath = path.join(process.cwd(), 'public/changelog.json');
 
-    console.log('正在读取 CHANGELOG 文件...');
+    if (!fs.existsSync(changelogPath)) {
+      console.error('❌ 未找到 CHANGELOG.md');
+      process.exit(1);
+    }
+
+    console.log('正在读取 CHANGELOG.md...');
     const changelogContent = fs.readFileSync(changelogPath, 'utf-8');
 
-    console.log('正在解析 CHANGELOG 内容...');
+    console.log('正在解析 CHANGELOG.md 内容...');
     const changelogData = buildChangelogManifest(changelogContent);
 
     if (changelogData.entries.length === 0) {
-      console.error('❌ 未在 CHANGELOG 中找到任何版本');
+      console.error('❌ 未在 CHANGELOG.md 中找到任何版本');
       process.exit(1);
     }
 
     if (changelogData.errors.length > 0) {
-      console.error('❌ CHANGELOG 校验失败:');
+      console.error('❌ CHANGELOG.md 校验失败:');
       changelogData.errors.forEach((error) => {
         console.error(`   - ${error}`);
       });
