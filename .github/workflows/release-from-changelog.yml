@@ -3,10 +3,8 @@ name: Sync GitHub Release
 on:
   workflow_dispatch:
   push:
-    branches: [main, master]
-    paths:
-      - CHANGELOG
-      - CHANGELOG.md
+    tags:
+      - 'v*'
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -37,6 +35,12 @@ jobs:
       - name: Fetch tags
         run: git fetch --tags --force
 
+      - name: Stop on tag mismatch
+        if: github.event_name == 'push' && github.ref_name != steps.prepare.outputs.tag
+        run: |
+          echo "当前推送 tag 为 ${{ github.ref_name }}，CHANGELOG 顶部版本为 ${{ steps.prepare.outputs.tag }}。"
+          exit 1
+
       - name: Check tag state
         id: tag_state
         env:
@@ -58,6 +62,12 @@ jobs:
             echo "same_commit=false" >> "$GITHUB_OUTPUT"
           fi
 
+      - name: Stop when tag is missing
+        if: steps.tag_state.outputs.exists != 'true'
+        run: |
+          echo "未找到 ${{ steps.prepare.outputs.tag }} tag。请先在 main 发布提交上创建并推送 tag。"
+          exit 1
+
       - name: Stop on released version drift
         if: steps.tag_state.outputs.exists == 'true' && steps.tag_state.outputs.same_commit != 'true'
         run: |
@@ -65,21 +75,7 @@ jobs:
           echo "当前提交为 ${{ steps.tag_state.outputs.head_commit }}。请递增 CHANGELOG 顶部版本后再继续发布。"
           exit 1
 
-      - name: Create GitHub Release
-        if: steps.tag_state.outputs.exists != 'true'
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          RELEASE_TAG: ${{ steps.prepare.outputs.tag }}
-          RELEASE_TITLE: ${{ steps.prepare.outputs.title }}
-          RELEASE_NOTES_FILE: ${{ steps.prepare.outputs.notes_file }}
-        run: |
-          gh release create "$RELEASE_TAG" \
-            --target "$GITHUB_SHA" \
-            --title "$RELEASE_TITLE" \
-            --notes-file "$RELEASE_NOTES_FILE"
-
-      - name: Update GitHub Release
-        if: steps.tag_state.outputs.exists == 'true' && steps.tag_state.outputs.same_commit == 'true'
+      - name: Create or update GitHub Release
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           RELEASE_TAG: ${{ steps.prepare.outputs.tag }}
