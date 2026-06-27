@@ -144,7 +144,7 @@ export function bindPlayerHoverControls(artPlayer: unknown): () => void {
   let disposed = false;
   let pointerInside = isElementHovered(player);
   let pointerIdle = false;
-  let idleHideTimer: ReturnType<typeof window.setTimeout> | null = null;
+  let idleHideTimer: number | null = null;
 
   const clearIdleHideTimer = () => {
     if (!idleHideTimer) return;
