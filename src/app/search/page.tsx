@@ -1,3 +1,4 @@
+import { connection } from 'next/server';
 import { Suspense } from 'react';
 
 import PageLayout from '@/components/PageLayout';
@@ -17,7 +18,9 @@ function SearchPageSkeleton() {
   );
 }
 
-export default function SearchPage() {
+export default async function SearchPage() {
+  await connection();
+
   return (
     <Suspense fallback={<SearchPageSkeleton />}>
       <SearchPageClient />

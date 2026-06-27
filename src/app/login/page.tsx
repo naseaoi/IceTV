@@ -1,8 +1,7 @@
 'use client';
 
 import { AlertCircle, CheckCircle, Eye, EyeOff } from 'lucide-react';
-import { useSearchParams } from 'next/navigation';
-import { Suspense, useEffect, useState } from 'react';
+import { useEffect, useState } from 'react';
 
 import { CURRENT_VERSION } from '@/lib/version';
 import { checkForUpdates, UpdateStatus } from '@/lib/version-check';
@@ -68,7 +67,6 @@ function VersionDisplay() {
 }
 
 function LoginPageClient() {
-  const searchParams = useSearchParams();
   const [password, setPassword] = useState('');
   const [username, setUsername] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
@@ -138,7 +136,8 @@ function LoginPageClient() {
       });
 
       if (res.ok && mode === 'login') {
-        const redirect = searchParams.get('redirect') || '/';
+        const redirect =
+          new URLSearchParams(window.location.search).get('redirect') || '/';
         window.location.href = redirect;
       } else if (res.ok && mode === 'register') {
         setSuccess('注册成功，请使用新账号登录');
@@ -320,9 +319,5 @@ function LoginPageClient() {
 }
 
 export default function LoginPage() {
-  return (
-    <Suspense fallback={<div>Loading...</div>}>
-      <LoginPageClient />
-    </Suspense>
-  );
+  return <LoginPageClient />;
 }

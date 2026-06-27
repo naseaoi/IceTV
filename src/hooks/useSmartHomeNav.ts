@@ -1,6 +1,6 @@
 'use client';
 
-import { usePathname, useRouter, useSearchParams } from 'next/navigation';
+import { usePathname, useRouter } from 'next/navigation';
 import { useCallback, useEffect, useRef } from 'react';
 
 // 记录本会话内的路由访问栈，用于判断从当前页返回首页时
@@ -22,19 +22,21 @@ function pushPath(path: string) {
  */
 export function useSmartHomeNav() {
   const pathname = usePathname();
-  const searchParams = useSearchParams();
   const router = useRouter();
   const lastPathRef = useRef<string | null>(null);
 
   useEffect(() => {
     if (!pathname) return;
-    const queryString = searchParams.toString();
+    const queryString =
+      typeof window === 'undefined'
+        ? ''
+        : window.location.search.replace(/^\?/, '');
     const currentPath = queryString ? `${pathname}?${queryString}` : pathname;
     if (lastPathRef.current !== currentPath) {
       pushPath(currentPath);
       lastPathRef.current = currentPath;
     }
-  }, [pathname, searchParams]);
+  });
 
   return useCallback(() => {
     const prev = navStack[navStack.length - 2];
