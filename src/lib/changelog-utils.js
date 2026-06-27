@@ -241,8 +241,5 @@ module.exports = {
   buildChangelogManifest,
   extractLatestVersion,
   extractLatestRelease,
-  getEntryByVersion,
   parseChangelog,
-  renderReleaseNotes,
-  validateChangelog,
 };

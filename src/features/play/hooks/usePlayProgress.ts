@@ -3,7 +3,6 @@ import { Dispatch, MutableRefObject, SetStateAction, useEffect } from 'react';
 import type Artplayer from 'artplayer';
 
 import {
-  deletePlayRecord,
   generateStorageKey,
   getAllPlayRecords,
   PlayRecord,
@@ -67,7 +66,7 @@ export function savePlaybackCheckpoint(
   }
 }
 
-export function hasMeaningfulPlaybackTime(time: number): boolean {
+function hasMeaningfulPlaybackTime(time: number): boolean {
   return Number.isFinite(time) && time > 1;
 }
 
@@ -304,33 +303,6 @@ export function resolvePlaybackRestoreCandidate({
     resumeTime: selectedCandidate.resumeTime,
     resumeMode: selectedCandidate.resumeMode,
   };
-}
-
-export function restorePlaybackCheckpoint(
-  currentSourceRef: MutableRefObject<string>,
-  currentIdRef: MutableRefObject<string>,
-  setCurrentEpisodeIndex: Dispatch<SetStateAction<number>>,
-  resumeTimeRef: MutableRefObject<number | null>,
-  resumeModeRef: MutableRefObject<ResumeMode>,
-): boolean {
-  const checkpoint = readMatchingPlaybackCheckpoint(
-    currentSourceRef,
-    currentIdRef,
-  );
-  if (!checkpoint) {
-    return false;
-  }
-
-  if (checkpoint.episodeIndex >= 0) {
-    setCurrentEpisodeIndex(checkpoint.episodeIndex);
-  }
-  if (checkpoint.currentTime > 0) {
-    resumeTimeRef.current = checkpoint.currentTime;
-    resumeModeRef.current = 'forced';
-  }
-
-  clearPlaybackCheckpointStorage();
-  return true;
 }
 
 // ---------------------------------------------------------------------------
@@ -861,16 +833,4 @@ export function usePlayProgress({
     requestWakeLock,
     releaseWakeLock,
   };
-}
-
-// ---------------------------------------------------------------------------
-// 换源时清理旧播放记录
-// ---------------------------------------------------------------------------
-
-export async function deleteOldPlayRecord(source: string, id: string) {
-  try {
-    await deletePlayRecord(source, id);
-  } catch (err) {
-    console.error('清除播放记录失败:', err);
-  }
 }

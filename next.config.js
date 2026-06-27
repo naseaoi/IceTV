@@ -1,4 +1,3 @@
-/** @type {import('next').NextConfig} */
 const path = require('path');
 
 const { extractLatestVersion } = require('./src/lib/changelog-utils');
@@ -17,14 +16,11 @@ try {
       appVersion = latestVersion;
     }
   }
-} catch {
-  // Ignore and keep fallback version.
-}
+} catch {}
 
 const nextConfig = {
   output: 'standalone',
   reactStrictMode: false,
-  // dev server 允许的访问来源
   allowedDevOrigins: ['127.0.0.1', 'localhost'],
   compiler: {
     removeConsole:
@@ -33,9 +29,6 @@ const nextConfig = {
         : false,
   },
   serverExternalPackages: ['better-sqlite3', 'mysql2'],
-  // 客户端 Router Cache：页面段在内存中保留 5 分钟，
-  // 与首页 ISR revalidate=300 对齐，首页 → 搜索页 → 首页可复用组件树，
-  // 首页返回时复用组件树、状态和滚动位置。
   experimental: {
     staleTimes: {
       dynamic: 300,
@@ -46,12 +39,9 @@ const nextConfig = {
     NEXT_PUBLIC_APP_VERSION: appVersion,
   },
 
-  // Uncoment to add domain whitelist
   images: {
     unoptimized: false,
-    // 优先输出 AVIF/WebP，节省带宽；现代浏览器自动协商
     formats: ['image/avif', 'image/webp'],
-    // 服务端最小缓存 TTL：封面内容变化极少，延长到 7 天降低重复优化开销
     minimumCacheTTL: 7 * 24 * 60 * 60,
     qualities: [72, 75],
     deviceSizes: [640, 750, 828, 1080],
@@ -73,34 +63,6 @@ const nextConfig = {
   },
 
   webpack(config) {
-    // Grab the existing rule that handles SVG imports
-    const fileLoaderRule = config.module.rules.find((rule) =>
-      rule.test?.test?.('.svg'),
-    );
-
-    config.module.rules.push(
-      // Reapply the existing rule, but only for svg imports ending in ?url
-      {
-        ...fileLoaderRule,
-        test: /\.svg$/i,
-        resourceQuery: /url/, // *.svg?url
-      },
-      // Convert all other *.svg imports to React components
-      {
-        test: /\.svg$/i,
-        issuer: { not: /\.(css|scss|sass)$/ },
-        resourceQuery: { not: /url/ }, // exclude if *.svg?url
-        loader: '@svgr/webpack',
-        options: {
-          dimensions: false,
-          titleProp: true,
-        },
-      },
-    );
-
-    // Modify the file loader rule to ignore *.svg, since we have it handled now.
-    fileLoaderRule.exclude = /\.svg$/i;
-
     config.resolve.fallback = {
       ...config.resolve.fallback,
       net: false,

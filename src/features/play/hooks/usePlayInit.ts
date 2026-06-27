@@ -65,7 +65,7 @@ function resolveHarvestWindow(testResult: { loadSpeed: string }): number {
 // 结果中选最优源。快源不再被慢源拖累，大幅缩短用户等待时间。
 // ---------------------------------------------------------------------------
 
-export async function preferBestSource(
+async function preferBestSource(
   sources: SearchResult[],
   setPrecomputedVideoInfo: Dispatch<
     SetStateAction<

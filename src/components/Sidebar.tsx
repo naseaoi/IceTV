@@ -16,7 +16,6 @@ import { usePathname, useRouter } from 'next/navigation';
 import {
   createContext,
   useCallback,
-  useContext,
   useEffect,
   useLayoutEffect,
   useMemo,
@@ -50,9 +49,6 @@ const SidebarContext = createContext<SidebarContextType>({
   isCollapsed: false,
 });
 
-export const useSidebar = () => useContext(SidebarContext);
-
-// 站点图标：有自定义则用自定义，否则用默认 favicon
 const SiteIcon = () => {
   const { siteIcon, siteName } = useSite();
   const iconSrc = siteIcon || '/favicon.ico';
@@ -64,7 +60,6 @@ const SiteIcon = () => {
       className='h-full w-full object-contain'
       onError={(e) => {
         const img = e.target as HTMLImageElement;
-        // 自定义图标加载失败时回退到默认 favicon
         if (img.src !== window.location.origin + '/favicon.ico') {
           img.src = '/favicon.ico';
         }

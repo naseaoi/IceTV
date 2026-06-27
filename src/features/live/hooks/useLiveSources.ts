@@ -22,7 +22,7 @@ import type {
 // ----- EPG 数据清洗 -----
 
 /** 去除重叠节目、只保留今日节目、重叠时保留较短节目 */
-export function cleanEpgData(programs: EpgProgram[]): EpgProgram[] {
+function cleanEpgData(programs: EpgProgram[]): EpgProgram[] {
   if (!programs || programs.length === 0) return programs;
 
   const today = new Date();

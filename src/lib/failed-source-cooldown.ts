@@ -9,7 +9,7 @@ export interface SourceFailureMarkOptions {
   status?: number;
 }
 
-export interface SourceFailureRecord {
+interface SourceFailureRecord {
   ts: number;
   count: number;
   reason?: string;
@@ -122,10 +122,6 @@ export function getSourceFailure(key: string): SourceFailureInfo {
   };
 }
 
-export function isSourceCoolingDown(key: string): boolean {
-  return getSourceFailure(key).coolingDown;
-}
-
 export function clearSourceFailure(key: string): void {
   if (!key) return;
   const data = readAll();
@@ -135,7 +131,7 @@ export function clearSourceFailure(key: string): void {
   }
 }
 
-export function getSourceFailureLabel(
+function getSourceFailureLabel(
   reason?: string,
   message?: string,
   status?: number,

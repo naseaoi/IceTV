@@ -1,6 +1,6 @@
 import { NextRequest } from 'next/server';
 
-export type AuthRole = 'owner' | 'admin' | 'user';
+type AuthRole = 'owner' | 'admin' | 'user';
 
 export type AuthCookiePayload = {
   username?: string;

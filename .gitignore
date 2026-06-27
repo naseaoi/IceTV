@@ -48,6 +48,7 @@ public/sw.js.map
 
 # local data
 /data/
+/tmp/
 
 # claude code
 .claude/

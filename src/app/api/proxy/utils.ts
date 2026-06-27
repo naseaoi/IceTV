@@ -1,7 +1,7 @@
 import { getConfig } from '@/lib/config';
 
-export const DEFAULT_LIVE_UA = 'AptvPlayer/1.4.10';
-export const DEFAULT_BROWSER_UA =
+const DEFAULT_LIVE_UA = 'AptvPlayer/1.4.10';
+const DEFAULT_BROWSER_UA =
   'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36';
 
 export function getProxySourceKey(searchParams: URLSearchParams) {

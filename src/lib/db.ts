@@ -31,12 +31,12 @@ async function getStorage(): Promise<IStorage> {
 }
 
 // 工具函数：生成存储key
-export function generateStorageKey(source: string, id: string): string {
+function generateStorageKey(source: string, id: string): string {
   return `${source}+${id}`;
 }
 
 // 导出便捷方法
-export class DbManager {
+class DbManager {
   private async getStorage(): Promise<IStorage> {
     return getStorage();
   }

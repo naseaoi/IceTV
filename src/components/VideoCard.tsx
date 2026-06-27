@@ -67,7 +67,7 @@ const preventContextMenu = (e: React.MouseEvent) => {
   return false;
 };
 
-export interface VideoCardProps {
+interface VideoCardProps {
   id?: string;
   source?: string;
   title?: string;

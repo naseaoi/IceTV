@@ -42,14 +42,6 @@ function makeSearchCacheKey(
 }
 
 /**
- * 判断一个条目当前是否仍在软过期窗口内（可作为 stale 数据返回）
- */
-export function isStale(entry: CachedPageEntry): boolean {
-  const now = Date.now();
-  return entry.expiresAt <= now && now < entry.staleUntil;
-}
-
-/**
  * 读取缓存。返回值同时给出 fresh / stale 状态，调用方可据此决定是否后台刷新。
  * - fresh: 直接用
  * - stale: 可先返回，再触发后台刷新

@@ -4,21 +4,9 @@ export type SourceTestResult = {
   pingTime: number;
 };
 
-export type AdRange = {
-  start: number;
-  end: number;
-  reason: string;
-};
-
-// 广告 URL 关键词：覆盖常见命名（ad/ads/promo），以及第三方广告 SDK
-// （vast/vmap/ima/doubleclick）和常见广告位命名（banner/sponsor/bumper）。
-// 用 (^|分隔符) 边界限定，避免误伤 "advance/header" 等正常词。
-export const AD_KEYWORD_RE =
+const AD_KEYWORD_RE =
   /(^|[\/_.?=&-])(ad|ads|adbreak|advert|commercial|promo|preroll|midroll|postroll|bumper|banner|sponsor|vast|vmap|ima|doubleclick|splash)($|[\/_.?=&-])/i;
-// 广告 HLS 标签：除 HLS 标准 SCTE-35 / CUE-OUT / DATERANGE 外，
-// 补充 Adobe/部分国内 CDN 常用的 OATCLS-SCTE35、SPLICEPOINT-SCTE35、
-// 以及非标的 ASSET / BREAK / AD-START / AD-END / TYPE=AD。
-export const AD_TAG_RE =
+const AD_TAG_RE =
   /#EXT-X-CUE-OUT|#EXT-X-DATERANGE|#EXT-OATCLS-SCTE35|#EXT-X-SPLICEPOINT-SCTE35|#EXT-X-ASSET|#EXT-X-BREAK|#EXT-X-AD-(?:START|END|SIGNAL)|SCTE35|X-ASSET-LIST|CLASS="?ad"?|TYPE="?AD"?/i;
 
 export function calculateSourceScore(
@@ -86,7 +74,7 @@ function parseExtinfDuration(line: string): number {
   return duration;
 }
 
-export function isLikelyAdUri(uri: string): boolean {
+function isLikelyAdUri(uri: string): boolean {
   if (!uri) return false;
   const normalized = uri.toLowerCase();
   if (AD_KEYWORD_RE.test(normalized)) return true;
@@ -110,35 +98,6 @@ export function isLikelyAdUri(uri: string): boolean {
     return false;
   }
   return false;
-}
-
-export function mergeAdRanges(ranges: AdRange[]): AdRange[] {
-  if (!ranges.length) return [];
-
-  const sorted = [...ranges]
-    .filter((item) => item.end > item.start)
-    .sort((a, b) => a.start - b.start);
-
-  if (!sorted.length) return [];
-
-  const merged: AdRange[] = [];
-  for (const range of sorted) {
-    const prev = merged[merged.length - 1];
-    if (!prev) {
-      merged.push({ ...range });
-      continue;
-    }
-    if (range.start <= prev.end + 0.35) {
-      prev.end = Math.max(prev.end, range.end);
-      if (prev.reason !== range.reason) {
-        prev.reason = `${prev.reason}|${range.reason}`;
-      }
-    } else {
-      merged.push({ ...range });
-    }
-  }
-
-  return merged;
 }
 
 type ParsedDiscontinuitySegment = {
@@ -385,29 +344,6 @@ function isCoarseFingerprintAdCandidate(
   return true;
 }
 
-function getSegmentAdReason(
-  segments: ParsedDiscontinuitySegment[],
-  analysis: SegmentAnalysis,
-  index: number,
-) {
-  const segment = segments[index];
-  if (segment.hasAdTag) return 'tag';
-  if (segment.hasAdUri) return 'uri';
-  if (isCoarseFingerprintAdCandidate(segments, analysis, index)) {
-    return 'duration-grid';
-  }
-  if (isTrailingShortAdBlockCandidate(segments, index, analysis.maxDuration)) {
-    return 'tail-short';
-  }
-  if (isShortMidrollAdCandidate(segments, index, analysis.maxDuration)) {
-    return 'midroll-short';
-  }
-  if (isShortEdgeAdCandidate(segment, analysis.maxDuration)) {
-    return 'edge-short';
-  }
-  return 'unknown';
-}
-
 function isAdSegment(
   segments: ParsedDiscontinuitySegment[],
   analysis: SegmentAnalysis,
@@ -502,90 +438,4 @@ export function filterAdsFromM3U8(m3u8Content: string): string {
   }
 
   return contentLines.join('\n');
-}
-
-export function collectAdRangesFromM3U8(m3u8Content: string): AdRange[] {
-  if (!m3u8Content || !m3u8Content.includes('#EXTINF')) return [];
-
-  if (m3u8Content.includes('#EXT-X-DISCONTINUITY')) {
-    const segments = parseDiscontinuitySegments(m3u8Content);
-    if (!segments.length) return [];
-
-    const analysis = analyzeSegments(segments);
-    const ranges: AdRange[] = [];
-    let timeline = 0;
-
-    for (let i = 0; i < segments.length; i++) {
-      const segment = segments[i];
-      const start = timeline;
-      const end = timeline + segment.duration;
-
-      if (segment.duration > 0 && isAdSegment(segments, analysis, i)) {
-        ranges.push({
-          start,
-          end,
-          reason: getSegmentAdReason(segments, analysis, i),
-        });
-      }
-
-      timeline = end;
-    }
-
-    return mergeAdRanges(ranges);
-  }
-
-  const lines = m3u8Content.split('\n');
-  const ranges: AdRange[] = [];
-  let timeline = 0;
-  let currentDuration = 0;
-  let cueOutActive = false;
-  let adTagMarked = false;
-
-  for (const rawLine of lines) {
-    const line = rawLine.trim();
-    if (!line) continue;
-
-    if (line.startsWith('#EXTINF:')) {
-      currentDuration = parseExtinfDuration(line);
-      continue;
-    }
-
-    if (line.startsWith('#')) {
-      if (line.startsWith('#EXT-X-CUE-IN')) {
-        cueOutActive = false;
-        adTagMarked = false;
-        continue;
-      }
-
-      if (line.startsWith('#EXT-X-CUE-OUT') || AD_TAG_RE.test(line)) {
-        cueOutActive = true;
-        adTagMarked = true;
-      }
-      continue;
-    }
-
-    const duration = currentDuration;
-    const start = timeline;
-    const end = timeline + duration;
-
-    const byUriKeyword = isLikelyAdUri(line);
-    const byTag = cueOutActive || adTagMarked;
-
-    if (duration > 0 && (byUriKeyword || byTag)) {
-      ranges.push({
-        start,
-        end,
-        reason: byUriKeyword ? 'uri' : 'tag',
-      });
-    }
-
-    timeline = end;
-    currentDuration = 0;
-
-    if (!cueOutActive) {
-      adTagMarked = false;
-    }
-  }
-
-  return mergeAdRanges(ranges);
 }

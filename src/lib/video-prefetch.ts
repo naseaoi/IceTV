@@ -38,7 +38,7 @@ function drainDetailPrefetchQueue() {
   }
 }
 
-export function prefetchVideoDetail(
+function prefetchVideoDetail(
   source: string | undefined,
   id: string | undefined,
 ): void {

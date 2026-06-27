@@ -10,7 +10,7 @@ export interface ApiSite {
   detail?: string;
 }
 
-export interface LiveCfg {
+interface LiveCfg {
   name: string;
   url: string;
   ua?: string;

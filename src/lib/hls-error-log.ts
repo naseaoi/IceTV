@@ -1,5 +1,5 @@
-export type HlsErrorLogScope = 'vod' | 'live';
-export type HlsErrorLogLevel = 'error' | 'debug';
+type HlsErrorLogScope = 'vod' | 'live';
+type HlsErrorLogLevel = 'error' | 'debug';
 
 export interface HlsErrorLogContext {
   scope: HlsErrorLogScope;
@@ -118,7 +118,7 @@ export function isAbortLikeHlsError(data: any): boolean {
   return false;
 }
 
-export function normalizeHlsErrorStage(data: any): string {
+function normalizeHlsErrorStage(data: any): string {
   const details = String(data?.details || '').trim();
   if (details) return details;
   const type = String(data?.type || '').trim();

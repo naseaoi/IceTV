@@ -79,5 +79,3 @@ export function normalizeChangelogManifest(value: unknown): ChangelogManifest {
 export const changelogData = normalizeChangelogManifest(rawChangelogManifest);
 
 export const changelog = changelogData.entries;
-
-export default changelog;

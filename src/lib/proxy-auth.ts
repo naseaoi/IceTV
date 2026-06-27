@@ -15,11 +15,11 @@ const EXPIRES_PARAM = 'icetv-expires';
 const SIGNATURE_TTL_MS = 10 * 60 * 1000;
 const SIGNATURE_RE = /^[a-f0-9]{64}$/i;
 
-export function getProxySignatureExpiresAt(now: number = Date.now()): number {
+function getProxySignatureExpiresAt(now: number = Date.now()): number {
   return now + SIGNATURE_TTL_MS;
 }
 
-export async function signProxyTarget(
+async function signProxyTarget(
   purpose: ProxySignaturePurpose,
   targetUrl: string,
   expiresAt: number = getProxySignatureExpiresAt(),

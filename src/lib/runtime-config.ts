@@ -139,12 +139,12 @@ export function applyClientServerConfig(
   return nextConfig;
 }
 
-export async function refreshClientRuntimeConfig(): Promise<RuntimeConfig> {
+async function refreshClientRuntimeConfig(): Promise<RuntimeConfig> {
   const data = await fetchClientServerConfig();
   return applyClientServerConfig(data);
 }
 
-export async function ensureClientRuntimeConfig(): Promise<RuntimeConfig> {
+async function ensureClientRuntimeConfig(): Promise<RuntimeConfig> {
   const runtimeConfig = getRuntimeConfig();
   if (runtimeConfig && window.__runtimeConfigReady) {
     return runtimeConfig;

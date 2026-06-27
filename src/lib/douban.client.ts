@@ -231,10 +231,7 @@ function getDoubanProxyConfig(): {
   };
 }
 
-/**
- * 浏览器端豆瓣分类数据获取函数
- */
-export async function fetchDoubanCategories(
+async function fetchDoubanCategories(
   params: DoubanCategoriesParams,
   proxyUrl: string,
   useTencentCDN = false,
@@ -370,7 +367,7 @@ export function getDoubanList(params: DoubanListParams): Promise<DoubanResult> {
   });
 }
 
-export async function fetchDoubanList(
+async function fetchDoubanList(
   params: DoubanListParams,
   proxyUrl: string,
   useTencentCDN = false,

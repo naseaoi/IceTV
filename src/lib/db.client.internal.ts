@@ -37,7 +37,7 @@ type SessionLostDetail = {
   inPlayerPage: boolean;
 };
 
-export type ClientRequestErrorKind =
+type ClientRequestErrorKind =
   | 'network'
   | 'request_aborted'
   | 'http'
@@ -53,7 +53,7 @@ type ClientRequestErrorOptions = {
   cause?: unknown;
 };
 
-export class ClientRequestError extends Error {
+class ClientRequestError extends Error {
   readonly kind: ClientRequestErrorKind;
   readonly url: string;
   readonly method: string;
@@ -75,9 +75,7 @@ export class ClientRequestError extends Error {
   }
 }
 
-export function isClientRequestError(
-  error: unknown,
-): error is ClientRequestError {
+function isClientRequestError(error: unknown): error is ClientRequestError {
   return error instanceof ClientRequestError;
 }
 
@@ -137,7 +135,7 @@ function isTransientHttpStatus(status: number): boolean {
   return status === 408 || status === 425 || status === 429 || status >= 500;
 }
 
-export function isRetryableClientRequestError(error: unknown): boolean {
+function isRetryableClientRequestError(error: unknown): boolean {
   if (!isClientRequestError(error)) {
     return false;
   }
@@ -278,7 +276,7 @@ export function triggerGlobalError(message: string) {
 // localStorage 工具
 // ================================================================
 
-export function getStorageValueWithLegacy(
+function getStorageValueWithLegacy(
   key: string,
   legacyKey?: string,
 ): string | null {
@@ -294,17 +292,6 @@ export function getStorageValueWithLegacy(
     localStorage.setItem(key, legacyRaw);
   }
   return legacyRaw;
-}
-
-export function setStorageValueWithLegacyCleanup(
-  key: string,
-  value: string,
-  legacyKey?: string,
-): void {
-  localStorage.setItem(key, value);
-  if (legacyKey) {
-    localStorage.removeItem(legacyKey);
-  }
 }
 
 // ================================================================
@@ -401,7 +388,7 @@ const LEGACY_CACHE_PREFIX = 'moontv_cache_';
 const CACHE_VERSION = '1.0.0';
 const CACHE_EXPIRE_TIME = 60 * 60 * 1000; // 一小时缓存过期
 
-export class HybridCacheManager {
+class HybridCacheManager {
   private static instance: HybridCacheManager;
 
   static getInstance(): HybridCacheManager {

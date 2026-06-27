@@ -1,6 +1,6 @@
-export type ProxyRouteName = 'm3u8' | 'segment';
+type ProxyRouteName = 'm3u8' | 'segment';
 
-export type ProxyFailureStage =
+type ProxyFailureStage =
   | 'request'
   | 'validation'
   | 'auth'
@@ -10,7 +10,7 @@ export type ProxyFailureStage =
   | 'rewrite'
   | 'internal';
 
-export type ProxyFailureReason =
+type ProxyFailureReason =
   | 'missing-url'
   | 'invalid-url'
   | 'auth-failed'

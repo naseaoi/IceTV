@@ -8,9 +8,9 @@ import {
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 
-export type SearchFilterKey = 'source' | 'title' | 'year' | 'yearOrder';
+type SearchFilterKey = 'source' | 'title' | 'year' | 'yearOrder';
 
-export interface SearchFilterOption {
+interface SearchFilterOption {
   label: string;
   value: string;
 }
@@ -172,7 +172,7 @@ const SearchResultFilter: React.FC<SearchResultFilterProps> = ({
 
   return (
     <>
-      <div className='relative inline-flex rounded-full p-0.5 sm:p-1 bg-transparent gap-1 sm:gap-2'>
+      <div className='relative inline-flex gap-1 rounded-full bg-transparent p-0.5 sm:gap-2 sm:p-1'>
         {categories.map((category) => (
           <div
             key={category.key}
@@ -183,19 +183,19 @@ const SearchResultFilter: React.FC<SearchResultFilterProps> = ({
           >
             <button
               onClick={() => handleCategoryClick(category.key)}
-              className={`relative z-10 px-1.5 py-0.5 sm:px-2 sm:py-1 md:px-4 md:py-2 text-xs sm:text-sm font-medium rounded-full transition-all duration-200 whitespace-nowrap ${
+              className={`relative z-10 whitespace-nowrap rounded-full px-1.5 py-0.5 text-xs font-medium transition-all duration-200 sm:px-2 sm:py-1 sm:text-sm md:px-4 md:py-2 ${
                 activeCategory === category.key
                   ? isDefaultValue(category.key)
-                    ? 'text-gray-900 dark:text-gray-100 cursor-default'
-                    : 'text-green-600 dark:text-green-400 cursor-default'
+                    ? 'cursor-default text-gray-900 dark:text-gray-100'
+                    : 'cursor-default text-green-600 dark:text-green-400'
                   : isDefaultValue(category.key)
-                    ? 'text-gray-700 hover:text-gray-900 dark:text-gray-400 dark:hover:text-gray-100 cursor-pointer'
-                    : 'text-green-600 hover:text-green-700 dark:text-green-400 dark:hover:text-green-300 cursor-pointer'
+                    ? 'cursor-pointer text-gray-700 hover:text-gray-900 dark:text-gray-400 dark:hover:text-gray-100'
+                    : 'cursor-pointer text-green-600 hover:text-green-700 dark:text-green-400 dark:hover:text-green-300'
               }`}
             >
               <span>{getDisplayText(category.key)}</span>
               <svg
-                className={`inline-block w-2.5 h-2.5 sm:w-3 sm:h-3 ml-0.5 sm:ml-1 transition-transform duration-200 ${activeCategory === category.key ? 'rotate-180' : ''}`}
+                className={`ml-0.5 inline-block h-2.5 w-2.5 transition-transform duration-200 sm:ml-1 sm:h-3 sm:w-3 ${activeCategory === category.key ? 'rotate-180' : ''}`}
                 fill='none'
                 stroke='currentColor'
                 viewBox='0 0 24 24'
@@ -230,20 +230,20 @@ const SearchResultFilter: React.FC<SearchResultFilterProps> = ({
               }
               onChange({ ...mergedValues, yearOrder: next });
             }}
-            className={`relative z-10 px-1.5 py-0.5 sm:px-2 sm:py-1 md:px-4 md:py-2 text-xs sm:text-sm font-medium rounded-full transition-all duration-200 whitespace-nowrap ${
+            className={`relative z-10 whitespace-nowrap rounded-full px-1.5 py-0.5 text-xs font-medium transition-all duration-200 sm:px-2 sm:py-1 sm:text-sm md:px-4 md:py-2 ${
               mergedValues.yearOrder === 'none'
-                ? 'text-gray-700 hover:text-gray-900 dark:text-gray-400 dark:hover:text-gray-100 cursor-pointer'
-                : 'text-green-600 hover:text-green-700 dark:text-green-400 dark:hover:text-green-300 cursor-pointer'
+                ? 'cursor-pointer text-gray-700 hover:text-gray-900 dark:text-gray-400 dark:hover:text-gray-100'
+                : 'cursor-pointer text-green-600 hover:text-green-700 dark:text-green-400 dark:hover:text-green-300'
             }`}
             aria-label={`按年份${mergedValues.yearOrder === 'none' ? '排序' : mergedValues.yearOrder === 'desc' ? '降序' : '升序'}排序`}
           >
             <span>年份</span>
             {mergedValues.yearOrder === 'none' ? (
-              <ArrowUpDown className='inline-block ml-1 w-4 h-4 sm:w-4 sm:h-4' />
+              <ArrowUpDown className='ml-1 inline-block h-4 w-4 sm:h-4 sm:w-4' />
             ) : mergedValues.yearOrder === 'desc' ? (
-              <ArrowDownWideNarrow className='inline-block ml-1 w-4 h-4 sm:w-4 sm:h-4' />
+              <ArrowDownWideNarrow className='ml-1 inline-block h-4 w-4 sm:h-4 sm:w-4' />
             ) : (
-              <ArrowUpNarrowWide className='inline-block ml-1 w-4 h-4 sm:w-4 sm:h-4' />
+              <ArrowUpNarrowWide className='ml-1 inline-block h-4 w-4 sm:h-4 sm:w-4' />
             )}
           </button>
         </div>
@@ -253,7 +253,7 @@ const SearchResultFilter: React.FC<SearchResultFilterProps> = ({
         createPortal(
           <div
             ref={dropdownRef}
-            className='fixed z-[9999] bg-white/80 dark:bg-gray-900/70 rounded-2xl border border-gray-200/70 dark:border-white/10 backdrop-blur-xl shadow-2xl ring-1 ring-black/10 dark:ring-white/10 max-h-[50vh] flex flex-col'
+            className='fixed z-[9999] flex max-h-[50vh] flex-col rounded-2xl border border-gray-200/70 bg-white/80 shadow-2xl ring-1 ring-black/10 backdrop-blur-xl dark:border-white/10 dark:bg-gray-900/70 dark:ring-white/10'
             style={{
               left: `${dropdownPosition.x}px`,
               top: `${dropdownPosition.y}px`,
@@ -266,8 +266,8 @@ const SearchResultFilter: React.FC<SearchResultFilterProps> = ({
               position: 'fixed',
             }}
           >
-            <div className='p-2 sm:p-4 overflow-y-auto flex-1 min-h-0'>
-              <div className='grid grid-cols-3 sm:grid-cols-4 md:grid-cols-5 gap-1 sm:gap-2'>
+            <div className='min-h-0 flex-1 overflow-y-auto p-2 sm:p-4'>
+              <div className='grid grid-cols-3 gap-1 sm:grid-cols-4 sm:gap-2 md:grid-cols-5'>
                 {categories
                   .find((cat) => cat.key === activeCategory)
                   ?.options.map((option) => (
@@ -276,10 +276,10 @@ const SearchResultFilter: React.FC<SearchResultFilterProps> = ({
                       onClick={() =>
                         handleOptionSelect(activeCategory, option.value)
                       }
-                      className={`px-2 py-1.5 sm:px-3 sm:py-2 text-xs sm:text-sm rounded-lg transition-all duration-200 text-left ${
+                      className={`rounded-lg px-2 py-1.5 text-left text-xs transition-all duration-200 sm:px-3 sm:py-2 sm:text-sm ${
                         isOptionSelected(activeCategory, option.value)
-                          ? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400 border border-green-200 dark:border-green-700'
-                          : 'text-gray-700 dark:text-gray-300 hover:bg-gray-100/80 dark:hover:bg-gray-700/80'
+                          ? 'border border-green-200 bg-green-100 text-green-700 dark:border-green-700 dark:bg-green-900/30 dark:text-green-400'
+                          : 'text-gray-700 hover:bg-gray-100/80 dark:text-gray-300 dark:hover:bg-gray-700/80'
                       }`}
                     >
                       {option.label}

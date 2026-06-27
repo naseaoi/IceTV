@@ -5,7 +5,7 @@ export class ResponseSizeLimitError extends Error {
   }
 }
 
-export function parseContentLength(headers: Headers): number | null {
+function parseContentLength(headers: Headers): number | null {
   const raw = headers.get('content-length');
   if (!raw) {
     return null;

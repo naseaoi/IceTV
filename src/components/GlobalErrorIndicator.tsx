@@ -14,7 +14,6 @@ export function GlobalErrorIndicator() {
   const [isReplacing, setIsReplacing] = useState(false);
 
   useEffect(() => {
-    // 监听自定义错误事件
     const handleError = (event: CustomEvent) => {
       const { message } = event.detail;
       const newError: ErrorInfo = {
@@ -23,7 +22,6 @@ export function GlobalErrorIndicator() {
         timestamp: Date.now(),
       };
 
-      // 如果已有错误，开始替换动画
       if (currentError) {
         setCurrentError(newError);
         setIsReplacing(true);
@@ -33,14 +31,12 @@ export function GlobalErrorIndicator() {
           setIsReplacing(false);
         }, 200);
       } else {
-        // 第一次显示错误
         setCurrentError(newError);
       }
 
       setIsVisible(true);
     };
 
-    // 监听错误事件
     window.addEventListener('globalError', handleError as EventListener);
 
     return () => {
@@ -59,23 +55,22 @@ export function GlobalErrorIndicator() {
   }
 
   return (
-    <div className='fixed top-4 right-4 z-[2000]'>
-      {/* 错误卡片 */}
+    <div className='fixed right-4 top-4 z-[2000]'>
       <div
-        className={`bg-red-500 text-white px-4 py-3 rounded-lg shadow-lg flex items-center justify-between min-w-[300px] max-w-[400px] transition-all duration-300 ${
+        className={`flex min-w-[300px] max-w-[400px] items-center justify-between rounded-lg bg-red-500 px-4 py-3 text-white shadow-lg transition-all duration-300 ${
           isReplacing ? 'scale-105 bg-red-400' : 'scale-100 bg-red-500'
         } animate-fade-in`}
       >
-        <span className='text-sm font-medium flex-1 mr-3'>
+        <span className='mr-3 flex-1 text-sm font-medium'>
           {currentError.message}
         </span>
         <button
           onClick={handleClose}
-          className='text-white hover:text-red-100 transition-colors flex-shrink-0'
+          className='flex-shrink-0 text-white transition-colors hover:text-red-100'
           aria-label='关闭错误提示'
         >
           <svg
-            className='w-5 h-5'
+            className='h-5 w-5'
             fill='none'
             stroke='currentColor'
             viewBox='0 0 24 24'
@@ -91,15 +86,4 @@ export function GlobalErrorIndicator() {
       </div>
     </div>
   );
-}
-
-// 全局错误触发函数
-export function triggerGlobalError(message: string) {
-  if (typeof window !== 'undefined') {
-    window.dispatchEvent(
-      new CustomEvent('globalError', {
-        detail: { message },
-      })
-    );
-  }
 }

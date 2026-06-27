@@ -10,10 +10,7 @@ export const normalizeTitleForSourceMatch = (title: string): string => {
     .replace(/[·•・.。:：,，!！?？'"`~～_\-—]/g, '');
 };
 
-export const isYearMatched = (
-  resultYear: string,
-  targetYear: string,
-): boolean => {
+const isYearMatched = (resultYear: string, targetYear: string): boolean => {
   if (!targetYear) {
     return true;
   }
@@ -27,7 +24,7 @@ export const isYearMatched = (
   );
 };
 
-export const isSearchTypeMatched = (
+const isSearchTypeMatched = (
   episodesLength: number,
   searchType: SearchType,
 ): boolean => {
@@ -35,7 +32,6 @@ export const isSearchTypeMatched = (
     return true;
   }
 
-  // 搜索阶段部分源（如 giri）尚无完整剧集信息，跳过类型检查
   if (episodesLength === 0) {
     return true;
   }
