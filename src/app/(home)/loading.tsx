@@ -55,7 +55,7 @@ function SkeletonRow({
 }) {
   return (
     <div className='relative'>
-      <div className='scrollbar-hide flex space-x-6 overflow-x-auto py-1 pb-12 pl-1 pr-4 sm:py-2 sm:pb-14 sm:pr-6'>
+      <div className='scrollbar-hide flex space-x-7 overflow-x-auto py-1 pb-12 pl-1 pr-4 sm:py-2 sm:pb-14 sm:pr-6'>
         {Array.from({ length: count }).map((_, index) => (
           <SkeletonCard key={index} withSubtitle={withSubtitle} />
         ))}
