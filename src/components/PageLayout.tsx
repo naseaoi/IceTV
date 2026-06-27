@@ -6,12 +6,19 @@ import Sidebar from './Sidebar';
 interface PageLayoutProps {
   children: React.ReactNode;
   activePath?: string;
+  contentMode?: 'default' | 'player';
+  showDesktopBack?: boolean;
 }
 
-const PageLayout = ({ children, activePath = '/' }: PageLayoutProps) => {
+const PageLayout = ({
+  children,
+  activePath = '/',
+  contentMode = 'default',
+  showDesktopBack: showDesktopBackOverride,
+}: PageLayoutProps) => {
   const showMobileBack = ['/play', '/live'].includes(activePath);
-  const showDesktopBack = activePath === '/live';
-  const isPlayPage = activePath === '/play';
+  const showDesktopBack = showDesktopBackOverride ?? activePath === '/live';
+  const isPlayerPage = contentMode === 'player' || activePath === '/play';
 
   return (
     <div className='min-h-screen w-full'>
@@ -39,12 +46,12 @@ const PageLayout = ({ children, activePath = '/' }: PageLayoutProps) => {
           {/* 主内容 */}
           <main
             className={`flex-1 md:mb-0 md:mt-0 md:min-h-0 ${
-              isPlayPage
+              isPlayerPage
                 ? 'mb-0 mt-12 h-[calc(100dvh-3rem-3.5rem-env(safe-area-inset-bottom)-4px)] overflow-hidden md:h-auto md:overflow-visible'
                 : 'mb-14 mt-12'
             }`}
             style={
-              isPlayPage
+              isPlayerPage
                 ? undefined
                 : {
                     paddingBottom: 'calc(3.5rem + env(safe-area-inset-bottom))',

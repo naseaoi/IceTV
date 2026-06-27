@@ -29,6 +29,8 @@ export interface LiveSource {
   disabled?: boolean;
 }
 
+export type LivePanelTab = 'channels' | 'epg' | 'sources';
+
 // EPG 节目信息
 export interface EpgProgram {
   start: string;

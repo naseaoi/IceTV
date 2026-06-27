@@ -11,7 +11,13 @@ import { useRouter, useSearchParams } from 'next/navigation';
 
 import { parseCustomTimeFormat } from '@/lib/time';
 
-import type { EpgData, EpgProgram, LiveChannel, LiveSource } from '../types';
+import type {
+  EpgData,
+  EpgProgram,
+  LiveChannel,
+  LivePanelTab,
+  LiveSource,
+} from '../types';
 
 // ----- EPG 数据清洗 -----
 
@@ -131,8 +137,8 @@ interface UseLiveSourcesReturn {
   groupedChannels: Record<string, LiveChannel[]>;
   selectedGroup: string;
   setSelectedGroup: Dispatch<SetStateAction<string>>;
-  activeTab: 'channels' | 'sources';
-  setActiveTab: Dispatch<SetStateAction<'channels' | 'sources'>>;
+  activeTab: LivePanelTab;
+  setActiveTab: Dispatch<SetStateAction<LivePanelTab>>;
   isChannelListCollapsed: boolean;
   setIsChannelListCollapsed: Dispatch<SetStateAction<boolean>>;
   filteredChannels: LiveChannel[];
@@ -189,9 +195,7 @@ export function useLiveSources({
     Record<string, LiveChannel[]>
   >({});
   const [selectedGroup, setSelectedGroup] = useState<string>('');
-  const [activeTab, setActiveTab] = useState<'channels' | 'sources'>(
-    'channels',
-  );
+  const [activeTab, setActiveTab] = useState<LivePanelTab>('channels');
   const [isChannelListCollapsed, setIsChannelListCollapsed] = useState(false);
   const [filteredChannels, setFilteredChannels] = useState<LiveChannel[]>([]);
 
@@ -276,21 +280,23 @@ export function useLiveSources({
         ),
       );
 
-      // 默认选中频道
+      let selectedChannel: LiveChannel | null = null;
       if (channels.length > 0) {
         if (needLoadChannel) {
           const foundChannel = channels.find((c) => c.id === needLoadChannel);
           if (foundChannel) {
-            setCurrentChannel(foundChannel);
-            setVideoUrl(foundChannel.url);
+            selectedChannel = foundChannel;
             setTimeout(() => scrollToChannel(foundChannel), 200);
           } else {
-            setCurrentChannel(channels[0]);
-            setVideoUrl(channels[0].url);
+            selectedChannel = channels[0];
           }
         } else {
-          setCurrentChannel(channels[0]);
-          setVideoUrl(channels[0].url);
+          selectedChannel = channels[0];
+        }
+
+        if (selectedChannel) {
+          setCurrentChannel(selectedChannel);
+          setVideoUrl(selectedChannel.url);
         }
       }
 
@@ -322,6 +328,10 @@ export function useLiveSources({
       if (targetGroup) {
         setActiveTab('channels');
         setTimeout(() => simulateGroupClick(targetGroup), 500);
+      }
+
+      if (selectedChannel) {
+        void loadChannelEpg(selectedChannel, source);
       }
 
       setIsVideoLoading(false);
