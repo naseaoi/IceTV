@@ -328,7 +328,10 @@ div[data-media-provider] video {
 
 /* --- 进度条 --- */
 .art-progress {
+  height: 18px !important;
   padding: 0 12px !important;
+  display: flex !important;
+  align-items: center !important;
 }
 
 .art-progress .art-control-progress-inner {
