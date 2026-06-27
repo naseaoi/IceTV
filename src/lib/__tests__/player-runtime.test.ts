@@ -68,7 +68,13 @@ function createHoverControlsHarness() {
 }
 
 describe('player runtime hover controls', () => {
+  beforeEach(() => {
+    jest.useFakeTimers();
+  });
+
   afterEach(() => {
+    jest.clearAllTimers();
+    jest.useRealTimers();
     document.body.innerHTML = '';
   });
 
@@ -101,6 +107,47 @@ describe('player runtime hover controls', () => {
     harness.setControlsVisible(false);
 
     expect(harness.controlsVisible).toBe(true);
+  });
+
+  it('hides controls after two seconds without mouse movement', () => {
+    const harness = createHoverControlsHarness();
+    bindPlayerHoverControls(harness.art);
+
+    harness.player.dispatchEvent(new MouseEvent('mouseenter'));
+    jest.advanceTimersByTime(1_999);
+
+    expect(harness.controlsVisible).toBe(true);
+
+    jest.advanceTimersByTime(1);
+
+    expect(harness.controlsVisible).toBe(false);
+  });
+
+  it('resets the idle timer while the mouse moves', () => {
+    const harness = createHoverControlsHarness();
+    bindPlayerHoverControls(harness.art);
+
+    harness.player.dispatchEvent(new MouseEvent('mouseenter'));
+    jest.advanceTimersByTime(1_500);
+    harness.player.dispatchEvent(new MouseEvent('mousemove'));
+    jest.advanceTimersByTime(1_500);
+
+    expect(harness.controlsVisible).toBe(true);
+
+    jest.advanceTimersByTime(500);
+
+    expect(harness.controlsVisible).toBe(false);
+  });
+
+  it('keeps controls hidden after the idle timeout on player ticks', () => {
+    const harness = createHoverControlsHarness();
+    bindPlayerHoverControls(harness.art);
+
+    harness.player.dispatchEvent(new MouseEvent('mouseenter'));
+    jest.advanceTimersByTime(2_000);
+    harness.emit('video:timeupdate');
+
+    expect(harness.controlsVisible).toBe(false);
   });
 
   it('removes hover listeners during cleanup', () => {

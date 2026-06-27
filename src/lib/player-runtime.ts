@@ -29,6 +29,8 @@ type HoverControlsArtPlayer = {
   isDestroy?: boolean;
 };
 
+const PLAYER_HOVER_CONTROLS_IDLE_HIDE_MS = 2_000;
+
 export type ManagedVideoElement = HTMLVideoElement & {
   hls?: HlsType | null;
   __icetvHlsCleanup?: (() => void) | null;
@@ -141,6 +143,14 @@ export function bindPlayerHoverControls(artPlayer: unknown): () => void {
 
   let disposed = false;
   let pointerInside = isElementHovered(player);
+  let pointerIdle = false;
+  let idleHideTimer: ReturnType<typeof window.setTimeout> | null = null;
+
+  const clearIdleHideTimer = () => {
+    if (!idleHideTimer) return;
+    window.clearTimeout(idleHideTimer);
+    idleHideTimer = null;
+  };
 
   const showControls = () => {
     if (disposed || art.isDestroy || !art.controls) return;
@@ -155,29 +165,39 @@ export function bindPlayerHoverControls(artPlayer: unknown): () => void {
     }
   };
 
-  const handlePointerEnter = () => {
-    pointerInside = true;
-    showControls();
+  const scheduleIdleHide = () => {
+    clearIdleHideTimer();
+    if (!pointerInside) return;
+    pointerIdle = false;
+    idleHideTimer = window.setTimeout(() => {
+      idleHideTimer = null;
+      if (!pointerInside) return;
+      pointerIdle = true;
+      hideControls();
+    }, PLAYER_HOVER_CONTROLS_IDLE_HIDE_MS);
   };
 
-  const handlePointerMove = () => {
+  const markPointerActive = () => {
     pointerInside = true;
     showControls();
+    scheduleIdleHide();
   };
 
   const handlePointerLeave = () => {
     pointerInside = false;
+    pointerIdle = false;
+    clearIdleHideTimer();
     hideControls();
   };
 
   const handleControlState = (state: unknown) => {
-    if (state === false && pointerInside) {
+    if (state === false && pointerInside && !pointerIdle) {
       showControls();
     }
   };
 
   const handlePlayerTick = () => {
-    if (pointerInside) {
+    if (pointerInside && !pointerIdle) {
       showControls();
     }
   };
@@ -185,16 +205,17 @@ export function bindPlayerHoverControls(artPlayer: unknown): () => void {
   const cleanup = () => {
     if (disposed) return;
     disposed = true;
-    player.removeEventListener('mouseenter', handlePointerEnter);
-    player.removeEventListener('mousemove', handlePointerMove);
+    clearIdleHideTimer();
+    player.removeEventListener('mouseenter', markPointerActive);
+    player.removeEventListener('mousemove', markPointerActive);
     player.removeEventListener('mouseleave', handlePointerLeave);
     art.off?.('control', handleControlState);
     art.off?.('video:timeupdate', handlePlayerTick);
     art.off?.('destroy', cleanup);
   };
 
-  player.addEventListener('mouseenter', handlePointerEnter);
-  player.addEventListener('mousemove', handlePointerMove);
+  player.addEventListener('mouseenter', markPointerActive);
+  player.addEventListener('mousemove', markPointerActive);
   player.addEventListener('mouseleave', handlePointerLeave);
   art.on?.('control', handleControlState);
   art.on?.('video:timeupdate', handlePlayerTick);
@@ -202,6 +223,7 @@ export function bindPlayerHoverControls(artPlayer: unknown): () => void {
 
   if (pointerInside) {
     showControls();
+    scheduleIdleHide();
   }
 
   return cleanup;
