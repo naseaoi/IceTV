@@ -310,7 +310,7 @@ export function CardInteractionProvider({
 }
 
 export function useCardInteractionManager() {
-  const context = useContext(CardInteractionContext);
+  const context = useOptionalCardInteractionManager();
 
   if (!context) {
     throw new Error(
@@ -319,6 +319,10 @@ export function useCardInteractionManager() {
   }
 
   return context;
+}
+
+export function useOptionalCardInteractionManager() {
+  return useContext(CardInteractionContext);
 }
 
 export function useFavoriteStatus(

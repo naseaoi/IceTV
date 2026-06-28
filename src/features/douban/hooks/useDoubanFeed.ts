@@ -74,12 +74,15 @@ export function getCurrentWeekday(): string {
 }
 
 function isSnapshotEqual(a: FeedSnapshot, b: FeedSnapshot): boolean {
+  return isFeedSelectionEqual(a, b) && a.currentPage === b.currentPage;
+}
+
+function isFeedSelectionEqual(a: FeedSnapshot, b: FeedSnapshot): boolean {
   return (
     a.type === b.type &&
     a.primarySelection === b.primarySelection &&
     a.secondarySelection === b.secondarySelection &&
     a.selectedWeekday === b.selectedWeekday &&
-    a.currentPage === b.currentPage &&
     JSON.stringify(a.multiLevelSelection) ===
       JSON.stringify(b.multiLevelSelection)
   );
@@ -597,7 +600,7 @@ export function useDoubanFeed(type: string) {
 
         if (data.code === 200) {
           const currentSnapshot = { ...currentParamsRef.current };
-          if (isSnapshotEqual(requestSnapshot, currentSnapshot)) {
+          if (isFeedSelectionEqual(requestSnapshot, currentSnapshot)) {
             const nextHasMore = data.list.length !== 0;
             setDoubanData((prev) => {
               const nextData = [...prev, ...data.list];

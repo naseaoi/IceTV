@@ -7,7 +7,7 @@ import React, { memo, useCallback, useEffect, useId } from 'react';
 import { getAuthInfoFromBrowserCookie } from '@/lib/auth';
 import { useLongPress } from '@/hooks/useLongPress';
 
-import { useCardInteractionManager } from '@/components/CardInteractionProvider';
+import { useOptionalCardInteractionManager } from '@/components/CardInteractionProvider';
 import CoverImage from '@/components/CoverImage';
 
 const noSelectStyle = {
@@ -70,7 +70,9 @@ function PosterCard({
 }: PosterCardProps) {
   const router = useRouter();
   const interactionId = useId();
-  const { showActionSheet, hideActionSheet } = useCardInteractionManager();
+  const interactionManager = useOptionalCardInteractionManager();
+  const showActionSheet = interactionManager?.showActionSheet;
+  const hideActionSheet = interactionManager?.hideActionSheet;
   const externalUrl = buildExternalUrl(doubanId, isBangumi);
 
   const getLoginRedirectUrl = useCallback(() => {
@@ -109,6 +111,10 @@ function PosterCard({
       width: number;
       height: number;
     }) => {
+      if (!showActionSheet) {
+        return;
+      }
+
       showActionSheet(interactionId, {
         title,
         poster,
@@ -118,7 +124,7 @@ function PosterCard({
             label: '播放',
             icon: <PlayCircleIcon size={20} />,
             onClick: () => {
-              hideActionSheet(interactionId);
+              hideActionSheet?.(interactionId);
               handlePlay();
             },
             color: 'primary' as const,
@@ -130,7 +136,7 @@ function PosterCard({
                   label: isBangumi ? 'Bangumi 详情' : '豆瓣详情',
                   icon: <LinkIcon size={20} />,
                   onClick: () => {
-                    hideActionSheet(interactionId);
+                    hideActionSheet?.(interactionId);
                     handleExternalOpen();
                   },
                   color: 'default' as const,
@@ -162,7 +168,7 @@ function PosterCard({
 
   useEffect(() => {
     return () => {
-      hideActionSheet(interactionId);
+      hideActionSheet?.(interactionId);
     };
   }, [hideActionSheet, interactionId]);
 

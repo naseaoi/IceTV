@@ -8,6 +8,7 @@ import DoubanCustomSelector from '@/components/DoubanCustomSelector';
 import DoubanSelector from '@/components/DoubanSelector';
 import PageLayout from '@/components/PageLayout';
 import PosterCard from '@/components/PosterCard';
+import { VirtualizedGrid } from '@/components/VirtualizedGrid';
 import { DoubanPageIcon } from '@/features/douban/components/DoubanPageIcon';
 import { useDoubanFeed } from '@/features/douban/hooks/useDoubanFeed';
 import { useInfiniteScroll } from '@/features/douban/hooks/useInfiniteScroll';
@@ -16,7 +17,22 @@ import {
   getDoubanPageDescription,
   getDoubanPageTitle,
 } from '@/features/douban/lib/pageMeta';
-import { useProgressiveRender } from '@/hooks/useProgressiveRender';
+
+const DOUBAN_GRID_CLASS =
+  'grid grid-cols-3 justify-start gap-x-2 gap-y-12 px-0 sm:grid-cols-[repeat(auto-fill,_180px)] sm:gap-x-6 sm:gap-y-20 sm:px-2';
+
+const DOUBAN_GRID_LAYOUT = {
+  mobileColumnCount: 3,
+  mobileColumnGap: 8,
+  mobileRowGap: 48,
+  mobileItemWidth: 96,
+  mobileContentHeight: 32,
+  desktopColumnGap: 24,
+  desktopRowGap: 80,
+  desktopMinColumnWidth: 180,
+  desktopItemWidth: 180,
+  desktopContentHeight: 32,
+};
 
 export function DoubanPageClient() {
   const searchParams = useSearchParams();
@@ -42,17 +58,10 @@ export function DoubanPageClient() {
     () => Array.from({ length: 25 }, (_, index) => index),
     [],
   );
-
-  const { visibleItems: visibleDoubanData, isFullyRendered } =
-    useProgressiveRender(doubanData, {
-      enabled: !loading && selectorsReady,
-      initialCount: 24,
-      step: 18,
-      delayMs: 16,
-    });
+  const canLoadMore = hasMore && !isLoadingMore && !loading && selectorsReady;
 
   const loadingRef = useInfiniteScroll<HTMLDivElement>({
-    enabled: hasMore && !isLoadingMore && !loading && isFullyRendered,
+    enabled: canLoadMore,
     onLoadMore: loadNextPage,
   });
 
@@ -97,32 +106,43 @@ export function DoubanPageClient() {
           </div>
 
           <div className='mt-8 overflow-visible'>
-            <div className='grid grid-cols-3 justify-start gap-x-2 gap-y-12 px-0 sm:grid-cols-[repeat(auto-fill,_180px)] sm:gap-x-6 sm:gap-y-20 sm:px-2'>
-              {loading || !selectorsReady
-                ? skeletonData.map((index) => (
-                    <div key={index} className='w-24 sm:w-[180px]'>
-                      <DoubanCardSkeleton />
-                    </div>
-                  ))
-                : visibleDoubanData.map((item) => (
-                    <div key={item.id} className='w-24 sm:w-[180px]'>
-                      <PosterCard
-                        title={item.title}
-                        poster={item.poster}
-                        doubanId={Number(item.id)}
-                        rate={item.rate}
-                        year={item.year}
-                        type={type === 'movie' ? 'movie' : ''}
-                        isBangumi={
-                          type === 'anime' && primarySelection === '每日放送'
-                        }
-                      />
-                    </div>
-                  ))}
-            </div>
+            {loading || !selectorsReady ? (
+              <div className={DOUBAN_GRID_CLASS}>
+                {skeletonData.map((index) => (
+                  <div key={index} className='w-24 sm:w-[180px]'>
+                    <DoubanCardSkeleton />
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <VirtualizedGrid
+                items={doubanData}
+                getKey={(item) => item.id}
+                renderItem={(item) => (
+                  <PosterCard
+                    title={item.title}
+                    poster={item.poster}
+                    doubanId={Number(item.id)}
+                    rate={item.rate}
+                    year={item.year}
+                    type={type === 'movie' ? 'movie' : ''}
+                    isBangumi={
+                      type === 'anime' && primarySelection === '每日放送'
+                    }
+                  />
+                )}
+                layout={DOUBAN_GRID_LAYOUT}
+                fallbackClassName={DOUBAN_GRID_CLASS}
+                fallbackItemClassName='w-24 sm:w-[180px]'
+              />
+            )}
 
             {hasMore && !loading && (
-              <div ref={loadingRef} className='mt-12 flex justify-center py-8'>
+              <div
+                ref={loadingRef}
+                className='mt-12 flex justify-center py-8'
+                data-can-load-more={canLoadMore ? 'true' : 'false'}
+              >
                 {isLoadingMore && (
                   <div className='flex items-center gap-2'>
                     <div className='h-6 w-6 animate-spin rounded-full border-b-2 border-green-500'></div>
