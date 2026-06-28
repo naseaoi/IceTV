@@ -6,6 +6,7 @@ import {
   ChevronDown,
   ChevronUp,
   Download,
+  Github,
   Plus,
   RefreshCw,
   X,
@@ -199,9 +200,20 @@ export const VersionPanel: React.FC<VersionPanelProps> = ({
         {/* 标题栏 */}
         <div className='flex flex-shrink-0 items-center justify-between border-b border-gray-200/80 px-5 py-4 dark:border-gray-700/80'>
           <div className='flex items-center gap-3'>
-            <h3 className='text-base font-semibold text-gray-800 dark:text-gray-200'>
-              版本信息
-            </h3>
+            <div className='flex items-center gap-1.5'>
+              <h3 className='text-base font-semibold text-gray-800 dark:text-gray-200'>
+                版本信息
+              </h3>
+              <a
+                href={repoUrl}
+                target='_blank'
+                rel='noopener noreferrer'
+                className='flex h-6 w-6 items-center justify-center rounded-full text-gray-400 transition-colors hover:bg-gray-100 hover:text-gray-700 dark:hover:bg-gray-800 dark:hover:text-gray-200'
+                aria-label='打开项目 GitHub'
+              >
+                <Github className='h-4 w-4' />
+              </a>
+            </div>
             <span className='rounded-full bg-gray-100 px-2.5 py-0.5 text-xs font-medium text-gray-600 dark:bg-gray-800 dark:text-gray-400'>
               v{CURRENT_VERSION}
             </span>
