@@ -182,8 +182,10 @@ const CoverImage: React.FC<CoverImageProps> = memo(function CoverImage({
     [processed, src],
   );
 
-  const cached =
-    !isEmpty && isCoverImageCached(cacheKeys, { includePersistent: false });
+  const cached = useMemo(
+    () => !isEmpty && isCoverImageCached(cacheKeys),
+    [cacheKeys, isEmpty],
+  );
   // 可见性门控：只有进入/接近可视区域才允许 acquire slot。
   // 首屏 priority 图片直接放行。
   const [isNearViewport, setIsNearViewport] = useState(cached || priority);
@@ -212,32 +214,28 @@ const CoverImage: React.FC<CoverImageProps> = memo(function CoverImage({
     [resolvedPlaceholderColor],
   );
 
-  // src 变化时重置所有状态（包括释放旧 slot）
-  useEffect(() => {
+  useIsomorphicLayoutEffect(() => {
     retryCountRef.current = 0;
     setRetryKey(0);
     setUseDefaultDoubanCdn(false);
     setHasError(false);
-    const isCached = isCoverImageCached([src]);
+    releaseSlotRef.current?.();
+    releaseSlotRef.current = null;
+  }, [src]);
+
+  useIsomorphicLayoutEffect(() => {
+    if (isEmpty) return;
+
+    const isCached = isCoverImageCached(cacheKeys);
     setLoaded(isCached);
     setSlotGranted(isCached);
     setIsNearViewport(isCached || priority);
 
-    // 释放旧 slot
-    releaseSlotRef.current?.();
-    releaseSlotRef.current = null;
-  }, [priority, src]);
-
-  useIsomorphicLayoutEffect(() => {
-    if (isEmpty || loaded || hasError) return;
-    if (!isCoverImageCached(cacheKeys)) return;
-
-    setLoaded(true);
-    setSlotGranted(true);
-    setIsNearViewport(true);
-    releaseSlotRef.current?.();
-    releaseSlotRef.current = null;
-  }, [cacheKeys, hasError, isEmpty, loaded]);
+    if (isCached) {
+      releaseSlotRef.current?.();
+      releaseSlotRef.current = null;
+    }
+  }, [cacheKeys, isEmpty, priority]);
 
   // 可见性检测：进入视口附近一小段距离时就开始预加载
   // 首页横向滚动行控制不可见卡片排队
@@ -370,7 +368,7 @@ const CoverImage: React.FC<CoverImageProps> = memo(function CoverImage({
           blurDataURL={blurDataURL}
           className={`${fit === 'contain' ? 'object-contain' : 'object-cover'} transition-opacity duration-200 ${loaded ? 'opacity-100' : 'opacity-0'}`}
           referrerPolicy='no-referrer'
-          loading={priority ? 'eager' : 'lazy'}
+          loading={priority || loaded ? 'eager' : 'lazy'}
           onLoad={handleLoad}
           onError={handleError}
           style={

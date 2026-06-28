@@ -23,6 +23,7 @@ import {
 import { getDoubanCategories } from '@/lib/douban.client';
 import { HomeInitialData } from '@/lib/home.types';
 import { DoubanItem } from '@/lib/types';
+import { primeDefaultDoubanFeedViewCache } from '@/features/douban/hooks/useDoubanFeed';
 
 import CapsuleSwitch from '@/components/CapsuleSwitch';
 import ContinueWatching from '@/components/ContinueWatching';
@@ -122,6 +123,11 @@ function RecommendationSection({
       </ScrollableRow>
     </section>
   );
+}
+
+function getTodayWeekday(): string {
+  const weekdays = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+  return weekdays[new Date().getDay()];
 }
 
 export default function HomeClient({ initialData }: HomeClientProps) {
@@ -291,9 +297,9 @@ export default function HomeClient({ initialData }: HomeClientProps) {
     return unsubscribe;
   }, [activeTab]);
 
+  const currentWeekday = useMemo(() => getTodayWeekday(), []);
+
   const todayAnimes = useMemo(() => {
-    const weekdays = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
-    const currentWeekday = weekdays[new Date().getDay()];
     const items =
       bangumiCalendarData.find((item) => item.weekday.en === currentWeekday)
         ?.items || [];
@@ -305,7 +311,16 @@ export default function HomeClient({ initialData }: HomeClientProps) {
       rate: anime.rating?.score?.toFixed(1) || '',
       year: anime.air_date?.split('-')?.[0] || '',
     }));
-  }, [bangumiCalendarData]);
+  }, [bangumiCalendarData, currentWeekday]);
+
+  useEffect(() => {
+    primeDefaultDoubanFeedViewCache('movie', hotMovies);
+    primeDefaultDoubanFeedViewCache('tv', hotTvShows);
+    primeDefaultDoubanFeedViewCache('show', hotVarietyShows);
+    primeDefaultDoubanFeedViewCache('anime', todayAnimes, {
+      selectedWeekday: currentWeekday,
+    });
+  }, [currentWeekday, hotMovies, hotTvShows, hotVarietyShows, todayAnimes]);
 
   const handleCloseAnnouncement = (currentAnnouncement: string) => {
     setShowAnnouncement(false);
