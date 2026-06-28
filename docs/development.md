@@ -19,7 +19,7 @@ src/
         └── internal.ts      # 业务域内部类型
 ```
 
-现有 feature：`admin` · `home` · `live` · `play` · `search` · `douban`
+Feature 列表：`admin` · `home` · `live` · `play` · `search` · `douban`
 
 ### 归属判断
 
@@ -47,7 +47,7 @@ const { MySqlStorage } = await import('./mysql.db.js');
 
 Webpack 端由 `next.config.js` 的 `resolve.extensionAlias` 把 `.js` 映射回 `.ts`。
 
-### 新增 feature
+### Feature 骨架
 
 建立完整骨架，即使部分子目录为空：
 
@@ -67,7 +67,7 @@ features/<new-domain>/
 
 ### 可复用 hooks
 
-新增 tab 或对话框时优先复用：
+Tab 或对话框优先复用：
 
 | Hook                      | 用途                                |
 | ------------------------- | ----------------------------------- |
@@ -79,9 +79,9 @@ features/<new-domain>/
 | `useAlertModal`           | 全局提示弹窗                        |
 | `useLoadingState`         | 按钮/操作加载态                     |
 
-### tab 拆分
+### Tab 目录
 
-巨型 tab 已拆为子组件目录：
+Tab 子组件目录：
 
 - [components/tabs/user-config/](../src/features/admin/components/tabs/user-config/) — 用户与用户组的表单/对话框/列表
 - [components/tabs/video-source/](../src/features/admin/components/tabs/video-source/) — 视频源行/表单/有效性弹窗
@@ -113,7 +113,7 @@ features/<new-domain>/
 | `requireAdmin`      | admin + owner |
 | `requireOwner`      | 仅 owner      |
 
-### 新增 API 模板
+### API 模板
 
 普通用户接口：
 
@@ -147,7 +147,7 @@ if (isGuardFailure(guardResult)) return guardResult.response;
 | 404    | 资源不存在       |
 | 500    | 服务异常         |
 
-### 已接入 Guard 的路由
+### Guard 路由检查
 
 ```bash
 grep -rl "requireActiveUser\|requireAdmin\|requireOwner" src/app/api

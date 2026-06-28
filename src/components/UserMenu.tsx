@@ -75,7 +75,7 @@ export const UserMenu: React.FC<UserMenuProps> = ({
   const [storageType, setStorageType] = useState<string>('localdb');
   const [mounted, setMounted] = useState(false);
 
-  // Body 滚动锁定 - 使用 overflow 方式避免布局问题
+  // Body 滚动锁定
   useEffect(() => {
     if (isSettingsOpen || isChangePasswordOpen) {
       const body = document.body;
@@ -240,6 +240,7 @@ export const UserMenu: React.FC<UserMenuProps> = ({
     const PANEL_WIDTH_PX = 224;
     const VIEWPORT_GAP_PX = 8;
     const ANCHOR_GAP_PX = 8;
+    const SIDEBAR_PANEL_GAP_PX = 10;
     const MIN_PANEL_HEIGHT_GUESS_PX = 280;
 
     const clamp = (value: number, min: number, max: number) =>
@@ -269,8 +270,11 @@ export const UserMenu: React.FC<UserMenuProps> = ({
         };
       }
 
+      const sidebarRect = buttonRef.current
+        ?.closest<HTMLElement>('[data-sidebar]')
+        ?.getBoundingClientRect();
       const left = clamp(
-        rect.left,
+        (sidebarRect?.right ?? rect.right) + SIDEBAR_PANEL_GAP_PX,
         VIEWPORT_GAP_PX,
         window.innerWidth - PANEL_WIDTH_PX - VIEWPORT_GAP_PX,
       );
@@ -690,7 +694,7 @@ export const UserMenu: React.FC<UserMenuProps> = ({
           data-panel-content
           style={{
             touchAction: 'pan-y', // 只允许垂直滚动
-            overscrollBehavior: 'contain', // 防止滚动冒泡
+            overscrollBehavior: 'contain',
           }}
         >
           {/* 标题栏 */}
