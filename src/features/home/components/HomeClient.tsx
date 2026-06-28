@@ -13,6 +13,7 @@ import Link from 'next/link';
 import { useEffect, useMemo, useState } from 'react';
 
 import { GetBangumiCalendarData } from '@/lib/bangumi.client';
+import { selectBangumiCardCover } from '@/lib/bangumi-normalize';
 import {
   clearAllFavorites,
   getAllFavorites,
@@ -300,12 +301,7 @@ export default function HomeClient({ initialData }: HomeClientProps) {
     return items.map((anime) => ({
       id: anime.id.toString(),
       title: anime.name_cn || anime.name,
-      poster:
-        anime.images.large ||
-        anime.images.common ||
-        anime.images.medium ||
-        anime.images.small ||
-        anime.images.grid,
+      poster: selectBangumiCardCover(anime.images),
       rate: anime.rating?.score?.toFixed(1) || '',
       year: anime.air_date?.split('-')?.[0] || '',
     }));

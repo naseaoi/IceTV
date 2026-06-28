@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 
 import { GetBangumiCalendarData } from '@/lib/bangumi.client';
+import { selectBangumiCardCover } from '@/lib/bangumi-normalize';
 import {
   getDoubanCategories,
   getDoubanList,
@@ -243,12 +244,7 @@ export function useDoubanFeed(type: string) {
             list: weekdayData.items.map((item) => ({
               id: item.id?.toString() || '',
               title: item.name_cn || item.name,
-              poster:
-                item.images.large ||
-                item.images.common ||
-                item.images.medium ||
-                item.images.small ||
-                item.images.grid,
+              poster: selectBangumiCardCover(item.images),
               rate: item.rating?.score?.toFixed(1) || '',
               year: item.air_date?.split('-')?.[0] || '',
             })),

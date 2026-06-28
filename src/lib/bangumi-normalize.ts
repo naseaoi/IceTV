@@ -1,4 +1,20 @@
 import type { BangumiCalendarData } from './bangumi';
+import { toBangumiCoverProxyUrl } from './bangumi-cover-url';
+
+export function selectBangumiCardCover(
+  images: BangumiCalendarData['items'][number]['images'],
+): string {
+  const optimizedLargeCover = toBangumiCoverProxyUrl(images.large);
+
+  return (
+    optimizedLargeCover ||
+    images.large ||
+    images.common ||
+    images.medium ||
+    images.small ||
+    images.grid
+  );
+}
 
 export function normalizeBangumiCalendarData(
   data: unknown,

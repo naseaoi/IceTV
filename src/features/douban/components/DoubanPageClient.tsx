@@ -97,13 +97,15 @@ export function DoubanPageClient() {
           </div>
 
           <div className='mt-8 overflow-visible'>
-            <div className='grid grid-cols-3 justify-start gap-x-2 gap-y-12 px-0 sm:grid-cols-[repeat(auto-fill,minmax(160px,1fr))] sm:gap-x-8 sm:gap-y-20 sm:px-2'>
+            <div className='grid grid-cols-3 justify-start gap-x-2 gap-y-12 px-0 sm:grid-cols-[repeat(auto-fill,_180px)] sm:gap-x-6 sm:gap-y-20 sm:px-2'>
               {loading || !selectorsReady
                 ? skeletonData.map((index) => (
-                    <DoubanCardSkeleton key={index} />
+                    <div key={index} className='w-24 sm:w-[180px]'>
+                      <DoubanCardSkeleton />
+                    </div>
                   ))
                 : visibleDoubanData.map((item) => (
-                    <div key={item.id} className='w-full'>
+                    <div key={item.id} className='w-24 sm:w-[180px]'>
                       <VideoCard
                         from='douban'
                         title={item.title}
