@@ -84,12 +84,12 @@ const WeekdaySelector: React.FC<WeekdaySelectorProps> = ({
   return (
     <div
       ref={containerRef}
-      className={`relative inline-flex bg-gray-200/60 rounded-lg p-0.5 sm:p-1 dark:bg-gray-700/60 backdrop-blur-sm ${className}`}
+      className={`relative inline-flex rounded-lg bg-gray-200/60 p-0.5 backdrop-blur-sm dark:bg-gray-700/60 sm:p-1 ${className}`}
     >
       {/* 滑动的白色背景指示器 */}
       {indicatorStyle.width > 0 && (
         <div
-          className='absolute top-0.5 bottom-0.5 sm:top-1 sm:bottom-1 bg-white dark:bg-gray-500 rounded-lg shadow-sm transition-all duration-300 ease-out'
+          className='absolute bottom-0.5 top-0.5 rounded-lg bg-white shadow-sm transition-all duration-300 ease-out dark:bg-gray-500 sm:bottom-1 sm:top-1'
           style={{
             left: `${indicatorStyle.left}px`,
             width: `${indicatorStyle.width}px`,
@@ -109,10 +109,10 @@ const WeekdaySelector: React.FC<WeekdaySelectorProps> = ({
               setSelectedWeekday(weekday.value);
               onWeekdayChange(weekday.value);
             }}
-            className={`relative z-10 px-2 py-1 sm:px-4 sm:py-2 text-xs sm:text-sm font-medium rounded-lg transition-all duration-200 whitespace-nowrap ${
+            className={`relative z-10 whitespace-nowrap rounded-lg px-2 py-1 text-xs font-medium transition-all duration-200 sm:px-4 sm:py-2 sm:text-sm ${
               isActive
-                ? 'text-gray-900 dark:text-gray-100 cursor-default'
-                : 'text-gray-600 hover:text-gray-800 dark:text-gray-400 dark:hover:text-gray-200 cursor-pointer'
+                ? 'cursor-default text-gray-900 dark:text-gray-100'
+                : 'cursor-pointer text-gray-600 hover:text-gray-800 dark:text-gray-400 dark:hover:text-gray-200'
             }`}
             title={weekday.label}
           >

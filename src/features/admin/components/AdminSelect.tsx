@@ -51,7 +51,7 @@ export default function AdminSelect({
       <button
         type='button'
         onClick={() => setIsOpen(!isOpen)}
-        className='w-full px-3 py-2.5 pr-10 border border-gray-300 dark:border-gray-600 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-green-500 focus:border-green-500 transition-all duration-200 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 shadow-sm hover:border-gray-400 dark:hover:border-gray-500 text-left'
+        className='w-full rounded-lg border border-gray-300 bg-white px-3 py-2.5 pr-10 text-left text-sm text-gray-900 shadow-sm transition-all duration-200 hover:border-gray-400 focus:border-green-500 focus:outline-none focus:ring-2 focus:ring-green-500 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100 dark:hover:border-gray-500'
       >
         <span
           className={selectedOption ? '' : 'text-gray-400 dark:text-gray-500'}
@@ -61,15 +61,15 @@ export default function AdminSelect({
       </button>
 
       {/* 箭头图标 */}
-      <div className='absolute inset-y-0 right-0 flex items-center pr-3 pointer-events-none'>
+      <div className='pointer-events-none absolute inset-y-0 right-0 flex items-center pr-3'>
         <ChevronDown
-          className={`w-4 h-4 text-gray-400 dark:text-gray-500 transition-transform duration-200 ${isOpen ? 'rotate-180' : ''}`}
+          className={`h-4 w-4 text-gray-400 transition-transform duration-200 dark:text-gray-500 ${isOpen ? 'rotate-180' : ''}`}
         />
       </div>
 
       {/* 下拉选项列表 */}
       {isOpen && (
-        <div className='absolute z-50 w-full mt-1 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-lg shadow-lg max-h-60 overflow-auto'>
+        <div className='absolute z-50 mt-1 max-h-60 w-full overflow-auto rounded-lg border border-gray-300 bg-white shadow-lg dark:border-gray-600 dark:bg-gray-800'>
           {options.map((opt) => {
             const isSelected = opt.value === value;
             return (
@@ -80,15 +80,15 @@ export default function AdminSelect({
                   onChange(opt.value);
                   setIsOpen(false);
                 }}
-                className={`w-full px-3 py-2.5 text-left text-sm transition-colors duration-150 flex items-center justify-between hover:bg-gray-100 dark:hover:bg-gray-700 ${
+                className={`flex w-full items-center justify-between px-3 py-2.5 text-left text-sm transition-colors duration-150 hover:bg-gray-100 dark:hover:bg-gray-700 ${
                   isSelected
-                    ? 'bg-green-50 dark:bg-green-900/20 text-green-600 dark:text-green-400'
+                    ? 'bg-green-50 text-green-600 dark:bg-green-900/20 dark:text-green-400'
                     : 'text-gray-900 dark:text-gray-100'
                 }`}
               >
                 <span className='truncate'>{opt.label}</span>
                 {isSelected && (
-                  <Check className='w-4 h-4 text-green-600 dark:text-green-400 flex-shrink-0 ml-2' />
+                  <Check className='ml-2 h-4 w-4 flex-shrink-0 text-green-600 dark:text-green-400' />
                 )}
               </button>
             );

@@ -17,10 +17,10 @@ const CollapsibleTab = ({
   children,
 }: CollapsibleTabProps) => {
   return (
-    <div className='rounded-xl shadow-sm mb-4 overflow-hidden bg-white/80 backdrop-blur-md dark:bg-gray-800/50 dark:ring-1 dark:ring-gray-700'>
+    <div className='mb-4 overflow-hidden rounded-xl bg-white/80 shadow-sm backdrop-blur-md dark:bg-gray-800/50 dark:ring-1 dark:ring-gray-700'>
       <button
         onClick={onToggle}
-        className='w-full px-6 py-4 flex items-center justify-between bg-gray-50/70 dark:bg-gray-800/60 hover:bg-gray-100/80 dark:hover:bg-gray-700/60 transition-colors'
+        className='flex w-full items-center justify-between bg-gray-50/70 px-6 py-4 transition-colors hover:bg-gray-100/80 dark:bg-gray-800/60 dark:hover:bg-gray-700/60'
       >
         <div className='flex items-center gap-3'>
           {icon}
