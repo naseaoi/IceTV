@@ -33,6 +33,7 @@ import ContinueWatching from '@/components/ContinueWatching';
 import ConfirmModal from '@/components/modals/ConfirmModal';
 import InfoModal from '@/components/modals/InfoModal';
 import PageLayout from '@/components/PageLayout';
+import PosterCard from '@/components/PosterCard';
 import ScrollableRow from '@/components/ScrollableRow';
 import { useSite } from '@/components/SiteProvider';
 import VideoCard from '@/components/VideoCard';
@@ -111,11 +112,10 @@ function RecommendationSection({
                 key={item.id}
                 className='w-24 min-w-[96px] sm:w-44 sm:min-w-[180px]'
               >
-                <VideoCard
-                  from='douban'
+                <PosterCard
                   title={item.title}
                   poster={item.poster}
-                  douban_id={Number(item.id)}
+                  doubanId={Number(item.id)}
                   rate={item.rate}
                   year={item.year}
                   type={type}
@@ -153,12 +153,10 @@ export default function HomeClient({
     initialData.bangumiCalendarData,
   );
   const [loading, setLoading] = useState(
-    !(
-      initialData.hotMovies.length > 0 ||
-      initialData.hotTvShows.length > 0 ||
-      initialData.hotVarietyShows.length > 0 ||
-      initialData.bangumiCalendarData.length > 0
-    ),
+    initialData.hotMovies.length === 0 ||
+      initialData.hotTvShows.length === 0 ||
+      initialData.hotVarietyShows.length === 0 ||
+      initialData.bangumiCalendarData.length === 0,
   );
   const { announcement } = useSite();
 
@@ -178,14 +176,17 @@ export default function HomeClient({
   }, [announcement]);
 
   useEffect(() => {
-    // ISR 已提供有效数据时跳过客户端重复请求，节省带宽和加载时间
-    const hasInitialData =
-      initialData.hotMovies.length > 0 ||
-      initialData.hotTvShows.length > 0 ||
-      initialData.hotVarietyShows.length > 0 ||
-      initialData.bangumiCalendarData.length > 0;
+    const shouldLoadHotMovies = initialData.hotMovies.length === 0;
+    const shouldLoadHotTvShows = initialData.hotTvShows.length === 0;
+    const shouldLoadHotVarietyShows = initialData.hotVarietyShows.length === 0;
+    const shouldLoadBangumi = initialData.bangumiCalendarData.length === 0;
 
-    if (hasInitialData) {
+    if (
+      !shouldLoadHotMovies &&
+      !shouldLoadHotTvShows &&
+      !shouldLoadHotVarietyShows &&
+      !shouldLoadBangumi
+    ) {
       setLoading(false);
       return;
     }
@@ -196,14 +197,26 @@ export default function HomeClient({
       try {
         const [moviesData, tvShowsData, varietyShowsData, bangumiData] =
           await Promise.allSettled([
-            getDoubanCategories({
-              kind: 'movie',
-              category: '热门',
-              type: '全部',
-            }),
-            getDoubanCategories({ kind: 'tv', category: 'tv', type: 'tv' }),
-            getDoubanCategories({ kind: 'tv', category: 'show', type: 'show' }),
-            GetBangumiCalendarData(),
+            shouldLoadHotMovies
+              ? getDoubanCategories({
+                  kind: 'movie',
+                  category: '热门',
+                  type: '全部',
+                })
+              : Promise.resolve(null),
+            shouldLoadHotTvShows
+              ? getDoubanCategories({ kind: 'tv', category: 'tv', type: 'tv' })
+              : Promise.resolve(null),
+            shouldLoadHotVarietyShows
+              ? getDoubanCategories({
+                  kind: 'tv',
+                  category: 'show',
+                  type: 'show',
+                })
+              : Promise.resolve(null),
+            shouldLoadBangumi
+              ? GetBangumiCalendarData()
+              : Promise.resolve(null),
           ]);
 
         if (cancelled) {
@@ -212,23 +225,23 @@ export default function HomeClient({
 
         if (
           moviesData.status === 'fulfilled' &&
-          moviesData.value.code === 200
+          moviesData.value?.code === 200
         ) {
           setHotMovies(moviesData.value.list);
         }
         if (
           tvShowsData.status === 'fulfilled' &&
-          tvShowsData.value.code === 200
+          tvShowsData.value?.code === 200
         ) {
           setHotTvShows(tvShowsData.value.list);
         }
         if (
           varietyShowsData.status === 'fulfilled' &&
-          varietyShowsData.value.code === 200
+          varietyShowsData.value?.code === 200
         ) {
           setHotVarietyShows(varietyShowsData.value.list);
         }
-        if (bangumiData.status === 'fulfilled') {
+        if (bangumiData.status === 'fulfilled' && bangumiData.value) {
           setBangumiCalendarData(bangumiData.value);
         }
       } catch (error) {

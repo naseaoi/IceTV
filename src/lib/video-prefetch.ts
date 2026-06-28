@@ -1,5 +1,3 @@
-import { preloadPlayerModules } from '@/lib/player-runtime';
-
 const prefetchedDetails = new Set<string>();
 const PREFETCH_DETAIL_MAX = 200;
 const PREFETCH_DETAIL_CONCURRENCY = 3;
@@ -74,6 +72,5 @@ export function warmupForPlayback(
   source: string | undefined,
   id: string | undefined,
 ): void {
-  preloadPlayerModules();
   prefetchVideoDetail(source, id);
 }

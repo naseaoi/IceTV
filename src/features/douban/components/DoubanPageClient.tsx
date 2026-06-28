@@ -7,7 +7,7 @@ import DoubanCardSkeleton from '@/components/DoubanCardSkeleton';
 import DoubanCustomSelector from '@/components/DoubanCustomSelector';
 import DoubanSelector from '@/components/DoubanSelector';
 import PageLayout from '@/components/PageLayout';
-import VideoCard from '@/components/VideoCard';
+import PosterCard from '@/components/PosterCard';
 import { DoubanPageIcon } from '@/features/douban/components/DoubanPageIcon';
 import { useDoubanFeed } from '@/features/douban/hooks/useDoubanFeed';
 import { useInfiniteScroll } from '@/features/douban/hooks/useInfiniteScroll';
@@ -106,11 +106,10 @@ export function DoubanPageClient() {
                   ))
                 : visibleDoubanData.map((item) => (
                     <div key={item.id} className='w-24 sm:w-[180px]'>
-                      <VideoCard
-                        from='douban'
+                      <PosterCard
                         title={item.title}
                         poster={item.poster}
-                        douban_id={Number(item.id)}
+                        doubanId={Number(item.id)}
                         rate={item.rate}
                         year={item.year}
                         type={type === 'movie' ? 'movie' : ''}
