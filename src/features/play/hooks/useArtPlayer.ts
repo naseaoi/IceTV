@@ -18,14 +18,17 @@ import {
 } from '@/lib/proxy-modes';
 import {
   assignManagedVideoCleanup,
+  bindPlayerMobileControls,
   bindPlayerHoverControls,
   createHlsLoaderClass,
   destroyManagedHls,
   getManagedVideo,
   getPlayerModules,
+  isPlayerFastForwarding,
   isManagedVideoExpectedAbort,
   markManagedVideoExpectedAbort,
   prefetchM3U8,
+  restorePlayerPlaybackRate,
   runManagedVideoCleanup,
 } from '@/lib/player-runtime';
 import { preconnectForUrl } from '@/lib/preconnect';
@@ -330,6 +333,10 @@ export function useArtPlayer(params: UseArtPlayerParams) {
         // 非WebKit浏览器且播放器已存在，使用switch方法切换
         if (!isWebkit && artPlayerRef.current) {
           resetPlayerLoadingSessionState(loadingSessionRef.current);
+          restorePlayerPlaybackRate(
+            artPlayerRef.current,
+            lastPlaybackRateRef.current,
+          );
           artPlayerRef.current.switch = videoUrl;
           artPlayerRef.current.title = `${videoTitle} - 第${currentEpisodeIndex + 1}集`;
           if (artPlayerRef.current?.video) {
@@ -366,7 +373,7 @@ export function useArtPlayer(params: UseArtPlayerParams) {
             isLive: false,
             setting: true,
             playbackRate: true,
-            fastForward: true,
+            fastForward: false,
           }),
           customType: {
             m3u8: function (video: HTMLVideoElement, url: string) {
@@ -928,6 +935,7 @@ export function useArtPlayer(params: UseArtPlayerParams) {
           return;
         }
         bindPlayerHoverControls(player);
+        bindPlayerMobileControls(player);
 
         // 共用切换集数逻辑：幂等地触发自动切下一集，
         // 让 ended / 跳片尾 / 临近片尾兜底 三条通道复用同一个出口，避免重复点
@@ -938,6 +946,7 @@ export function useArtPlayer(params: UseArtPlayerParams) {
           const idx = currentEpisodeIndexRef.current;
           if (!d?.episodes || idx >= d.episodes.length - 1) return false;
           autoAdvancedRef.current = true;
+          restorePlayerPlaybackRate(player, lastPlaybackRateRef.current);
           handleNextEpisode();
           return true;
         };
@@ -1237,6 +1246,7 @@ export function useArtPlayer(params: UseArtPlayerParams) {
         player.on('video:ended', () => {
           releaseWakeLock();
           setIsPlaying(false);
+          restorePlayerPlaybackRate(player, lastPlaybackRateRef.current);
           // 自动播放下一集（共用切换集数逻辑）
           tryAutoAdvanceEpisode();
         });
@@ -1250,6 +1260,9 @@ export function useArtPlayer(params: UseArtPlayerParams) {
         });
 
         player.on('video:ratechange', () => {
+          if (isPlayerFastForwarding(player)) {
+            return;
+          }
           lastPlaybackRateRef.current = player.playbackRate as number;
         });
 

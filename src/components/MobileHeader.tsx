@@ -27,9 +27,8 @@ const MobileHeader = ({ showBackButton = false }: MobileHeaderProps) => {
 
   return (
     <header className='fixed left-0 right-0 top-0 z-[999] w-full border-b border-gray-200/50 bg-white/70 shadow-sm backdrop-blur-xl dark:border-gray-700/50 dark:bg-gray-900/70 md:hidden'>
-      <div className='flex h-12 items-center justify-between px-4'>
-        {/* 左侧：搜索按钮、返回按钮和设置按钮 */}
-        <div className='flex items-center gap-2'>
+      <div className='grid h-12 grid-cols-3 items-center px-3'>
+        <div className='flex min-w-0 items-center justify-start gap-1'>
           <Link
             href='/search'
             onClick={(e) => {
@@ -59,25 +58,21 @@ const MobileHeader = ({ showBackButton = false }: MobileHeaderProps) => {
           {showBackButton && <BackButton />}
         </div>
 
-        {/* 右侧按钮 */}
-        <div className='flex items-center gap-2'>
-          <ThemeToggle />
-          <UserMenu />
-        </div>
-      </div>
-
-      {/* 中间：Logo（绝对居中） */}
-      <div className='absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2'>
         <Link
           href='/'
           onClick={(e) => {
             e.preventDefault();
             goHome();
           }}
-          className='text-2xl font-bold tracking-tight text-green-600 transition-opacity hover:opacity-80'
+          className='mx-auto block max-w-full truncate px-1 text-center text-xl font-bold tracking-tight text-green-600 transition-opacity hover:opacity-80'
         >
           {siteName}
         </Link>
+
+        <div className='flex min-w-0 items-center justify-end gap-1'>
+          <ThemeToggle />
+          <UserMenu />
+        </div>
       </div>
     </header>
   );

@@ -489,7 +489,7 @@ div[data-media-provider] video {
 }
 
 /* --- 锁定按钮（移动端） --- */
-.art-lock {
+.art-video-player .art-layer-lock {
   background: rgba(17, 24, 32, 0.7) !important;
   backdrop-filter: blur(12px) !important;
   -webkit-backdrop-filter: blur(12px) !important;
@@ -498,8 +498,19 @@ div[data-media-provider] video {
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2) !important;
 }
 
-.art-lock .art-icon svg {
+.art-video-player .art-layer-lock .art-icon svg {
   fill: #d1d5db !important;
+}
+
+.art-video-player:not(.art-fullscreen):not(.art-fullscreen-web)
+  .art-layer-lock {
+  display: none !important;
+}
+
+.art-video-player.art-fullscreen .art-layer-lock,
+.art-video-player.art-fullscreen-web .art-layer-lock {
+  left: auto !important;
+  right: var(--art-padding) !important;
 }
 
 /* --- 迷你进度条 --- */

@@ -23,13 +23,36 @@ type LoaderCallbacks = {
 type HoverControlsArtPlayer = {
   controls?: { show: boolean };
   setting?: { show: boolean };
-  template?: { $player?: HTMLElement };
+  template?: {
+    $player?: HTMLElement;
+    $video?: HTMLVideoElement;
+  };
   on?: (event: string, callback: (...args: unknown[]) => void) => unknown;
   off?: (event: string, callback?: (...args: unknown[]) => void) => unknown;
   isDestroy?: boolean;
 };
 
+type MobileControlsArtPlayer = HoverControlsArtPlayer & {
+  constructor?: {
+    DBCLICK_TIME?: number;
+    FAST_FORWARD_TIME?: number;
+    FAST_FORWARD_VALUE?: number;
+  };
+  isLock?: boolean;
+  playing?: boolean;
+  playbackRate?: number;
+  toggle?: () => void;
+  __icetvFastForwardActive?: boolean;
+};
+
 const PLAYER_HOVER_CONTROLS_IDLE_HIDE_MS = 2_000;
+const PLAYER_MOBILE_TOUCH_MOVE_THRESHOLD_PX = 10;
+const PLAYER_MOBILE_CLICK_SUPPRESS_MS = 700;
+const PLAYER_DEFAULT_FAST_FORWARD_TIME_MS = 1_000;
+const PLAYER_DEFAULT_FAST_FORWARD_VALUE = 3;
+const PLAYER_LOCK_CONTROL_SELECTOR =
+  '.art-bottom, .art-controls, .art-progress, .art-settings, .art-contextmenus';
+const PLAYER_LOCK_TOGGLE_SELECTOR = '.art-layer-lock';
 
 export type ManagedVideoElement = HTMLVideoElement & {
   hls?: HlsType | null;
@@ -136,10 +159,83 @@ function isElementHovered(element: HTMLElement): boolean {
   }
 }
 
+function isArtPlayerMobile(player: HTMLElement): boolean {
+  return player.classList.contains('art-mobile');
+}
+
+function getEventTargetElement(event: Event): HTMLElement | null {
+  const target = event.target;
+  return target instanceof HTMLElement ? target : null;
+}
+
+function isEventFromElement(event: Event, element: Element): boolean {
+  const path =
+    typeof event.composedPath === 'function' ? event.composedPath() : [];
+  if (path.includes(element)) return true;
+
+  const target = event.target;
+  return target instanceof Node && element.contains(target);
+}
+
+function stopPlayerControlEvent(event: Event): void {
+  event.preventDefault();
+  event.stopPropagation();
+  event.stopImmediatePropagation();
+}
+
+function shouldBlockLockedControlEvent(event: Event): boolean {
+  const target = getEventTargetElement(event);
+  if (!target) return false;
+  if (target.closest(PLAYER_LOCK_TOGGLE_SELECTOR)) return false;
+  return !!target.closest(PLAYER_LOCK_CONTROL_SELECTOR);
+}
+
+function hidePlayerControls(art: MobileControlsArtPlayer): void {
+  if (!art.controls) return;
+  art.controls.show = false;
+  if (art.setting?.show) {
+    art.setting.show = false;
+  }
+}
+
+export function isPlayerFastForwarding(artPlayer: unknown): boolean {
+  const art = artPlayer as MobileControlsArtPlayer;
+  if (art.__icetvFastForwardActive) return true;
+
+  const fastForwardValue =
+    art.constructor?.FAST_FORWARD_VALUE ?? PLAYER_DEFAULT_FAST_FORWARD_VALUE;
+  const playbackRate = Number(art.playbackRate);
+  if (Math.abs(playbackRate - fastForwardValue) > 0.01) return false;
+
+  return !!art.template?.$player?.classList.contains('art-fast-forward');
+}
+
+export function restorePlayerPlaybackRate(
+  artPlayer: unknown,
+  playbackRate: number,
+): void {
+  const art = artPlayer as MobileControlsArtPlayer;
+  const safePlaybackRate =
+    Number.isFinite(playbackRate) && playbackRate > 0 ? playbackRate : 1;
+
+  art.__icetvFastForwardActive = false;
+  art.template?.$player?.classList.remove('art-fast-forward');
+
+  if (
+    typeof art.playbackRate === 'number' &&
+    Math.abs(art.playbackRate - safePlaybackRate) <= 0.01
+  ) {
+    return;
+  }
+
+  art.playbackRate = safePlaybackRate;
+}
+
 export function bindPlayerHoverControls(artPlayer: unknown): () => void {
   const art = artPlayer as HoverControlsArtPlayer;
   const player = art.template?.$player;
   if (!player || !art.controls) return () => {};
+  if (isArtPlayerMobile(player)) return () => {};
 
   let disposed = false;
   let pointerInside = isElementHovered(player);
@@ -225,6 +321,179 @@ export function bindPlayerHoverControls(artPlayer: unknown): () => void {
     showControls();
     scheduleIdleHide();
   }
+
+  return cleanup;
+}
+
+export function bindPlayerMobileControls(artPlayer: unknown): () => void {
+  const art = artPlayer as MobileControlsArtPlayer;
+  const player = art.template?.$player;
+  const video = art.template?.$video;
+  if (!player || !video || !art.controls || !isArtPlayerMobile(player)) {
+    return () => {};
+  }
+
+  let disposed = false;
+  let pressTimer: number | null = null;
+  let fastForwardActive = false;
+  let previousPlaybackRate = 1;
+  let suppressClickUntil = 0;
+  let startTouch: { x: number; y: number } | null = null;
+
+  const clearPressTimer = () => {
+    if (pressTimer === null) return;
+    window.clearTimeout(pressTimer);
+    pressTimer = null;
+  };
+
+  const finishFastForward = () => {
+    clearPressTimer();
+    if (!fastForwardActive) {
+      startTouch = null;
+      return;
+    }
+
+    suppressClickUntil = Date.now() + PLAYER_MOBILE_CLICK_SUPPRESS_MS;
+    fastForwardActive = false;
+    startTouch = null;
+    restorePlayerPlaybackRate(art, previousPlaybackRate);
+    hidePlayerControls(art);
+  };
+
+  const handleTouchStart = (event: TouchEvent) => {
+    if (
+      disposed ||
+      event.touches.length !== 1 ||
+      !art.playing ||
+      !isEventFromElement(event, video)
+    ) {
+      return;
+    }
+
+    const touch = event.touches[0];
+    startTouch = { x: touch.clientX, y: touch.clientY };
+    previousPlaybackRate =
+      typeof art.playbackRate === 'number' && art.playbackRate > 0
+        ? art.playbackRate
+        : 1;
+    clearPressTimer();
+
+    pressTimer = window.setTimeout(() => {
+      if (disposed || !startTouch || !art.playing) return;
+
+      fastForwardActive = true;
+      art.__icetvFastForwardActive = true;
+      art.template?.$player?.classList.add('art-fast-forward');
+      art.playbackRate =
+        art.constructor?.FAST_FORWARD_VALUE ??
+        PLAYER_DEFAULT_FAST_FORWARD_VALUE;
+      suppressClickUntil = Date.now() + PLAYER_MOBILE_CLICK_SUPPRESS_MS;
+      hidePlayerControls(art);
+    }, art.constructor?.FAST_FORWARD_TIME ?? PLAYER_DEFAULT_FAST_FORWARD_TIME_MS);
+  };
+
+  const handleTouchMove = (event: TouchEvent) => {
+    if (!startTouch || event.touches.length !== 1) return;
+
+    const touch = event.touches[0];
+    const moved = Math.hypot(
+      touch.clientX - startTouch.x,
+      touch.clientY - startTouch.y,
+    );
+    if (moved <= PLAYER_MOBILE_TOUCH_MOVE_THRESHOLD_PX) return;
+
+    finishFastForward();
+  };
+
+  const handleTouchEnd = () => {
+    finishFastForward();
+  };
+
+  const handleClickCapture = (event: MouseEvent) => {
+    if (Date.now() > suppressClickUntil) return;
+    stopPlayerControlEvent(event);
+    hidePlayerControls(art);
+  };
+
+  const handleLockedControlCapture = (event: Event) => {
+    if (!art.isLock || !shouldBlockLockedControlEvent(event)) return;
+    stopPlayerControlEvent(event);
+  };
+
+  const handleDblClick = () => {
+    if (!art.isLock) return;
+    art.toggle?.();
+  };
+
+  const captureOptions: AddEventListenerOptions = {
+    capture: true,
+    passive: false,
+  };
+  const passiveOptions: AddEventListenerOptions = { passive: true };
+
+  video.addEventListener('touchstart', handleTouchStart, passiveOptions);
+  video.addEventListener('touchmove', handleTouchMove, passiveOptions);
+  document.addEventListener('touchend', handleTouchEnd, passiveOptions);
+  document.addEventListener('touchcancel', handleTouchEnd, passiveOptions);
+  video.addEventListener('click', handleClickCapture, true);
+
+  for (const eventName of [
+    'click',
+    'touchstart',
+    'touchmove',
+    'touchend',
+    'pointerdown',
+    'pointermove',
+    'pointerup',
+    'mousedown',
+    'mousemove',
+    'mouseup',
+  ]) {
+    player.addEventListener(
+      eventName,
+      handleLockedControlCapture,
+      captureOptions,
+    );
+  }
+
+  art.on?.('dblclick', handleDblClick);
+
+  const cleanup = () => {
+    if (disposed) return;
+    disposed = true;
+    clearPressTimer();
+    art.__icetvFastForwardActive = false;
+    player.classList.remove('art-fast-forward');
+    video.removeEventListener('touchstart', handleTouchStart, passiveOptions);
+    video.removeEventListener('touchmove', handleTouchMove, passiveOptions);
+    document.removeEventListener('touchend', handleTouchEnd, passiveOptions);
+    document.removeEventListener('touchcancel', handleTouchEnd, passiveOptions);
+    video.removeEventListener('click', handleClickCapture, true);
+
+    for (const eventName of [
+      'click',
+      'touchstart',
+      'touchmove',
+      'touchend',
+      'pointerdown',
+      'pointermove',
+      'pointerup',
+      'mousedown',
+      'mousemove',
+      'mouseup',
+    ]) {
+      player.removeEventListener(
+        eventName,
+        handleLockedControlCapture,
+        captureOptions,
+      );
+    }
+
+    art.off?.('dblclick', handleDblClick);
+    art.off?.('destroy', cleanup);
+  };
+
+  art.on?.('destroy', cleanup);
 
   return cleanup;
 }
