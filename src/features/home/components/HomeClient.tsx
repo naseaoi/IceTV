@@ -23,7 +23,10 @@ import {
 import { getDoubanCategories } from '@/lib/douban.client';
 import { HomeInitialData } from '@/lib/home.types';
 import { DoubanItem } from '@/lib/types';
-import { primeDefaultDoubanFeedViewCache } from '@/features/douban/hooks/useDoubanFeed';
+import {
+  getCurrentWeekday,
+  primeDefaultDoubanFeedViewCache,
+} from '@/features/douban/hooks/useDoubanFeed';
 
 import CapsuleSwitch from '@/components/CapsuleSwitch';
 import ContinueWatching from '@/components/ContinueWatching';
@@ -123,11 +126,6 @@ function RecommendationSection({
       </ScrollableRow>
     </section>
   );
-}
-
-function getTodayWeekday(): string {
-  const weekdays = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
-  return weekdays[new Date().getDay()];
 }
 
 export default function HomeClient({ initialData }: HomeClientProps) {
@@ -297,7 +295,7 @@ export default function HomeClient({ initialData }: HomeClientProps) {
     return unsubscribe;
   }, [activeTab]);
 
-  const currentWeekday = useMemo(() => getTodayWeekday(), []);
+  const currentWeekday = useMemo(() => getCurrentWeekday(), []);
 
   const todayAnimes = useMemo(() => {
     const items =

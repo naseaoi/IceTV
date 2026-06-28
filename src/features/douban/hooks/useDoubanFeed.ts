@@ -1,6 +1,12 @@
 'use client';
 
-import { useCallback, useEffect, useRef, useState } from 'react';
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+} from 'react';
 
 import { GetBangumiCalendarData } from '@/lib/bangumi.client';
 import { selectBangumiCardCover } from '@/lib/bangumi-normalize';
@@ -58,6 +64,11 @@ function computeInitialSecondary(type: string): string {
   if (type === 'tv') return 'tv';
   if (type === 'show') return 'show';
   return '全部';
+}
+
+export function getCurrentWeekday(): string {
+  const weekdays = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+  return weekdays[new Date().getDay()];
 }
 
 function isSnapshotEqual(a: FeedSnapshot, b: FeedSnapshot): boolean {
@@ -179,7 +190,9 @@ export function useDoubanFeed(type: string) {
   const [multiLevelValues, setMultiLevelValues] = useState<
     Record<string, string>
   >({ ...DEFAULT_MULTI_LEVEL });
-  const [selectedWeekday, setSelectedWeekday] = useState<string>('');
+  const [selectedWeekday, setSelectedWeekday] = useState<string>(() =>
+    getCurrentWeekday(),
+  );
 
   const currentParamsRef = useRef<FeedSnapshot>({
     type: '',
@@ -222,7 +235,7 @@ export function useDoubanFeed(type: string) {
     return () => clearTimeout(timer);
   }, []);
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     setSelectorsReady(false);
     let nextPrimarySelection = '';
     let nextSecondarySelection = '全部';
