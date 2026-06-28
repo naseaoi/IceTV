@@ -158,15 +158,13 @@ export function CardInteractionProvider({
   }, [applyFavorites]);
 
   useEffect(() => {
-    void ensureFavoritesLoaded();
-
     return subscribeToDataUpdates(
       'favoritesUpdated',
       (newFavorites: Record<string, Favorite>) => {
         applyFavorites(newFavorites);
       },
     );
-  }, [applyFavorites, ensureFavoritesLoaded]);
+  }, [applyFavorites]);
 
   const showActionSheet = useCallback(
     (ownerId: string, payload: ActionSheetPayload, onClose?: () => void) => {
@@ -327,6 +325,7 @@ export function useFavoriteStatus(
   source?: string,
   id?: string,
   enabled = true,
+  loadOnMount = false,
 ) {
   const { ensureFavoritesLoaded, getFavoriteStatus, subscribeFavoriteKey } =
     useCardInteractionManager();
@@ -340,12 +339,12 @@ export function useFavoriteStatus(
   }, [enabled, id, source]);
 
   useEffect(() => {
-    if (!storageKey) {
+    if (!storageKey || !loadOnMount) {
       return;
     }
 
     void ensureFavoritesLoaded();
-  }, [ensureFavoritesLoaded, storageKey]);
+  }, [ensureFavoritesLoaded, loadOnMount, storageKey]);
 
   const subscribe = useCallback(
     (listener: FavoriteListener) => {
