@@ -39,6 +39,7 @@ import VideoCard from '@/components/VideoCard';
 
 interface HomeClientProps {
   initialData: HomeInitialData;
+  continueWatchingSkeletonCount?: number;
 }
 
 type FavoriteItem = {
@@ -128,7 +129,10 @@ function RecommendationSection({
   );
 }
 
-export default function HomeClient({ initialData }: HomeClientProps) {
+export default function HomeClient({
+  initialData,
+  continueWatchingSkeletonCount = 0,
+}: HomeClientProps) {
   const [activeTab, setActiveTab] = useState<'home' | 'favorites'>('home');
   // 滑入方向：切到收藏时从右侧进入，切回首页时从左侧进入
   const [slideKey, setSlideKey] = useState(0);
@@ -389,7 +393,9 @@ export default function HomeClient({ initialData }: HomeClientProps) {
               </section>
             ) : (
               <div className='-mb-8 sm:-mb-10'>
-                <ContinueWatching />
+                <ContinueWatching
+                  initialSkeletonCount={continueWatchingSkeletonCount}
+                />
 
                 <RecommendationSection
                   title='热门电影'

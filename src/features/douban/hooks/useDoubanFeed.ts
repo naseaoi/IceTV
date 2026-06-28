@@ -40,7 +40,7 @@ const DEFAULT_MULTI_LEVEL: Record<string, string> = {
   label: 'all',
   sort: 'T',
 };
-const FEED_VIEW_CACHE_MS = 2 * 60 * 1000;
+const FEED_VIEW_CACHE_MS = 60 * 60 * 1000;
 const FEED_LOAD_DEBOUNCE_MS = 50;
 
 const feedViewCache = new Map<
@@ -48,9 +48,11 @@ const feedViewCache = new Map<
   {
     data: DoubanItem[];
     hasMore: boolean;
+    currentPage: number;
     expiresAt: number;
   }
 >();
+const lastFeedSnapshotByType = new Map<string, FeedSnapshot>();
 
 function computeInitialPrimary(type: string): string {
   if (type === 'movie') return '热门';
@@ -125,10 +127,16 @@ function writeFeedViewCache(
   data: DoubanItem[],
   hasMore: boolean,
 ) {
+  const currentPage = Math.max(0, snapshot.currentPage);
   feedViewCache.set(getFeedViewCacheKey(snapshot), {
     data,
     hasMore,
+    currentPage,
     expiresAt: Date.now() + FEED_VIEW_CACHE_MS,
+  });
+  lastFeedSnapshotByType.set(snapshot.type, {
+    ...snapshot,
+    currentPage,
   });
 
   if (feedViewCache.size > 20) {
@@ -137,6 +145,24 @@ function writeFeedViewCache(
       feedViewCache.delete(firstKey);
     }
   }
+}
+
+function readLastFeedSnapshot(type: string): FeedSnapshot | null {
+  const snapshot = lastFeedSnapshotByType.get(type);
+  if (!snapshot) {
+    return null;
+  }
+
+  const cached = readFeedViewCache(snapshot);
+  if (!cached) {
+    lastFeedSnapshotByType.delete(type);
+    return null;
+  }
+
+  return {
+    ...snapshot,
+    currentPage: cached.currentPage,
+  };
 }
 
 function getInitialHasMore(snapshot: FeedSnapshot, data: DoubanItem[]) {
@@ -176,6 +202,7 @@ export function useDoubanFeed(type: string) {
   const [isLoadingMore, setIsLoadingMore] = useState(false);
   const [selectorsReady, setSelectorsReady] = useState(false);
   const debounceTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const restoredCurrentPageRef = useRef<number | null>(null);
 
   const [customCategories, setCustomCategories] = useState<CustomCategory[]>(
     [],
@@ -274,23 +301,38 @@ export function useDoubanFeed(type: string) {
       nextSecondarySelection = '全部';
     }
 
-    const nextMultiLevelValues = { ...DEFAULT_MULTI_LEVEL };
-    setPrimarySelection(nextPrimarySelection);
-    setSecondarySelection(nextSecondarySelection);
-    setMultiLevelValues(nextMultiLevelValues);
+    let nextMultiLevelValues = { ...DEFAULT_MULTI_LEVEL };
+    let nextSelectedWeekday = selectedWeekday;
 
-    const cached = readFeedViewCache({
+    const restoredSnapshot = readLastFeedSnapshot(type);
+    const requestSnapshot = restoredSnapshot ?? {
       type,
       primarySelection: nextPrimarySelection,
       secondarySelection: nextSecondarySelection,
       multiLevelSelection: nextMultiLevelValues,
       selectedWeekday,
       currentPage: 0,
-    });
+    };
+
+    if (restoredSnapshot) {
+      nextPrimarySelection = restoredSnapshot.primarySelection;
+      nextSecondarySelection = restoredSnapshot.secondarySelection;
+      nextMultiLevelValues = restoredSnapshot.multiLevelSelection;
+      nextSelectedWeekday = restoredSnapshot.selectedWeekday;
+    }
+
+    setPrimarySelection(nextPrimarySelection);
+    setSecondarySelection(nextSecondarySelection);
+    setMultiLevelValues(nextMultiLevelValues);
+    setSelectedWeekday(nextSelectedWeekday);
+
+    const cached = readFeedViewCache(requestSnapshot);
 
     if (cached) {
       setDoubanData(cached.data);
-      setCurrentPage(0);
+      restoredCurrentPageRef.current =
+        cached.currentPage > 0 ? cached.currentPage : null;
+      setCurrentPage(cached.currentPage);
       setHasMore(cached.hasMore);
       setIsLoadingMore(false);
       setLoading(false);
@@ -343,7 +385,9 @@ export function useDoubanFeed(type: string) {
       const cached = readFeedViewCache(requestSnapshot);
       if (cached) {
         setDoubanData(cached.data);
-        setCurrentPage(0);
+        restoredCurrentPageRef.current =
+          cached.currentPage > 0 ? cached.currentPage : null;
+        setCurrentPage(cached.currentPage);
         setHasMore(cached.hasMore);
         setIsLoadingMore(false);
         setLoading(false);
@@ -428,6 +472,8 @@ export function useDoubanFeed(type: string) {
         if (isSnapshotEqual(requestSnapshot, currentSnapshot)) {
           const nextHasMore = getInitialHasMore(requestSnapshot, data.list);
           setDoubanData(data.list);
+          restoredCurrentPageRef.current = null;
+          setCurrentPage(0);
           setHasMore(nextHasMore);
           setLoading(false);
           writeFeedViewCache(requestSnapshot, data.list, nextHasMore);
@@ -479,6 +525,10 @@ export function useDoubanFeed(type: string) {
 
   useEffect(() => {
     if (currentPage <= 0) return;
+    if (restoredCurrentPageRef.current === currentPage) {
+      restoredCurrentPageRef.current = null;
+      return;
+    }
 
     const fetchMoreData = async () => {
       const requestSnapshot: FeedSnapshot = {
@@ -548,8 +598,13 @@ export function useDoubanFeed(type: string) {
         if (data.code === 200) {
           const currentSnapshot = { ...currentParamsRef.current };
           if (isSnapshotEqual(requestSnapshot, currentSnapshot)) {
-            setDoubanData((prev) => [...prev, ...data.list]);
-            setHasMore(data.list.length !== 0);
+            const nextHasMore = data.list.length !== 0;
+            setDoubanData((prev) => {
+              const nextData = [...prev, ...data.list];
+              writeFeedViewCache(requestSnapshot, nextData, nextHasMore);
+              return nextData;
+            });
+            setHasMore(nextHasMore);
             setIsLoadingMore(false);
           }
         } else {
