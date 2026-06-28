@@ -38,6 +38,7 @@ RUN pnpm config set registry https://registry.npmmirror.com \
 # ---- 第 2 阶段：构建项目 ----
 FROM node:20-bookworm-slim AS builder
 ARG PNPM_VERSION=10.14.0
+ARG NEXT_PUBLIC_APP_VERSION
 ENV COREPACK_HOME=/corepack
 ENV COREPACK_NPM_REGISTRY=https://registry.npmmirror.com
 
@@ -55,6 +56,7 @@ WORKDIR /app
 
 ENV HUSKY=0
 ENV SQLITE_BUSY_TIMEOUT_MS=20000
+ENV NEXT_PUBLIC_APP_VERSION=${NEXT_PUBLIC_APP_VERSION}
 
 # 复制依赖
 COPY --from=deps /app/node_modules ./node_modules
@@ -69,6 +71,7 @@ RUN pnpm run build
 
 # ---- 第 3 阶段：生成运行时镜像 ----
 FROM node:20-bookworm-slim AS runner
+ARG NEXT_PUBLIC_APP_VERSION
 
 # 创建非 root 用户
 RUN groupadd --gid 1001 nodejs && useradd --uid 1001 --gid nodejs --create-home --shell /usr/sbin/nologin nextjs
@@ -80,6 +83,7 @@ ENV HOSTNAME=0.0.0.0
 ENV PORT=3000
 ENV DOCKER_ENV=true
 ENV LOCAL_DB_PATH=/data/icetv-data.sqlite
+ENV NEXT_PUBLIC_APP_VERSION=${NEXT_PUBLIC_APP_VERSION}
 
 # 从构建器中复制 standalone 输出
 COPY --from=builder --chown=nextjs:nodejs /app/.next/standalone ./
