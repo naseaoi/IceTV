@@ -3,6 +3,11 @@ import { Suspense } from 'react';
 import DoubanCardSkeleton from '@/components/DoubanCardSkeleton';
 import PageLayout from '@/components/PageLayout';
 import { DoubanPageClient } from '@/features/douban/components/DoubanPageClient';
+import {
+  DOUBAN_GRID_CLASS,
+  DOUBAN_GRID_ITEM_CLASS,
+  DOUBAN_GRID_WRAPPER_CLASS,
+} from '@/features/douban/lib/grid-layout';
 
 function DoubanPageFallback() {
   const skeletonData = Array.from({ length: 25 }, (_, index) => index);
@@ -20,12 +25,14 @@ function DoubanPageFallback() {
           </div>
 
           <div className='mt-8 overflow-visible'>
-            <div className='grid grid-cols-3 justify-start gap-x-2 gap-y-12 px-0 sm:grid-cols-[repeat(auto-fill,_180px)] sm:gap-x-6 sm:gap-y-20 sm:px-2'>
-              {skeletonData.map((index) => (
-                <div key={index} className='w-24 sm:w-[180px]'>
-                  <DoubanCardSkeleton />
-                </div>
-              ))}
+            <div className={DOUBAN_GRID_WRAPPER_CLASS}>
+              <div className={DOUBAN_GRID_CLASS}>
+                {skeletonData.map((index) => (
+                  <div key={index} className={DOUBAN_GRID_ITEM_CLASS}>
+                    <DoubanCardSkeleton />
+                  </div>
+                ))}
+              </div>
             </div>
           </div>
         </div>

@@ -13,26 +13,16 @@ import { DoubanPageIcon } from '@/features/douban/components/DoubanPageIcon';
 import { useDoubanFeed } from '@/features/douban/hooks/useDoubanFeed';
 import { useInfiniteScroll } from '@/features/douban/hooks/useInfiniteScroll';
 import {
+  DOUBAN_GRID_CLASS,
+  DOUBAN_GRID_ITEM_CLASS,
+  DOUBAN_GRID_LAYOUT,
+  DOUBAN_GRID_WRAPPER_CLASS,
+} from '@/features/douban/lib/grid-layout';
+import {
   getDoubanActivePath,
   getDoubanPageDescription,
   getDoubanPageTitle,
 } from '@/features/douban/lib/pageMeta';
-
-const DOUBAN_GRID_CLASS =
-  'grid grid-cols-3 justify-start gap-x-2 gap-y-12 px-0 sm:grid-cols-[repeat(auto-fill,_180px)] sm:gap-x-6 sm:gap-y-20 sm:px-2';
-
-const DOUBAN_GRID_LAYOUT = {
-  mobileColumnCount: 3,
-  mobileColumnGap: 8,
-  mobileRowGap: 48,
-  mobileItemWidth: 96,
-  mobileContentHeight: 32,
-  desktopColumnGap: 24,
-  desktopRowGap: 80,
-  desktopMinColumnWidth: 180,
-  desktopItemWidth: 180,
-  desktopContentHeight: 32,
-};
 
 export function DoubanPageClient() {
   const searchParams = useSearchParams();
@@ -106,36 +96,38 @@ export function DoubanPageClient() {
           </div>
 
           <div className='mt-8 overflow-visible'>
-            {loading || !selectorsReady ? (
-              <div className={DOUBAN_GRID_CLASS}>
-                {skeletonData.map((index) => (
-                  <div key={index} className='w-24 sm:w-[180px]'>
-                    <DoubanCardSkeleton />
-                  </div>
-                ))}
-              </div>
-            ) : (
-              <VirtualizedGrid
-                items={doubanData}
-                getKey={(item) => item.id}
-                renderItem={(item) => (
-                  <PosterCard
-                    title={item.title}
-                    poster={item.poster}
-                    doubanId={Number(item.id)}
-                    rate={item.rate}
-                    year={item.year}
-                    type={type === 'movie' ? 'movie' : ''}
-                    isBangumi={
-                      type === 'anime' && primarySelection === '每日放送'
-                    }
-                  />
-                )}
-                layout={DOUBAN_GRID_LAYOUT}
-                fallbackClassName={DOUBAN_GRID_CLASS}
-                fallbackItemClassName='w-24 sm:w-[180px]'
-              />
-            )}
+            <div className={DOUBAN_GRID_WRAPPER_CLASS}>
+              {loading || !selectorsReady ? (
+                <div className={DOUBAN_GRID_CLASS}>
+                  {skeletonData.map((index) => (
+                    <div key={index} className={DOUBAN_GRID_ITEM_CLASS}>
+                      <DoubanCardSkeleton />
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <VirtualizedGrid
+                  items={doubanData}
+                  getKey={(item) => item.id}
+                  renderItem={(item) => (
+                    <PosterCard
+                      title={item.title}
+                      poster={item.poster}
+                      doubanId={Number(item.id)}
+                      rate={item.rate}
+                      year={item.year}
+                      type={type === 'movie' ? 'movie' : ''}
+                      isBangumi={
+                        type === 'anime' && primarySelection === '每日放送'
+                      }
+                    />
+                  )}
+                  layout={DOUBAN_GRID_LAYOUT}
+                  fallbackClassName={DOUBAN_GRID_CLASS}
+                  fallbackItemClassName={DOUBAN_GRID_ITEM_CLASS}
+                />
+              )}
+            </div>
 
             {hasMore && !loading && (
               <div

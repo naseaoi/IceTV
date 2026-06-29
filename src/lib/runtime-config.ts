@@ -73,11 +73,6 @@ export function getRuntimeConfig(): RuntimeConfig | undefined {
 function runtimeConfigFromServerConfig(
   data: ServerConfigPayload,
 ): RuntimeConfig {
-  const doubanImageProxyType =
-    !data.DoubanImageProxyType || data.DoubanImageProxyType === 'direct'
-      ? DEFAULT_RUNTIME_CONFIG.DOUBAN_IMAGE_PROXY_TYPE
-      : data.DoubanImageProxyType;
-
   return {
     STORAGE_TYPE: data.StorageType || DEFAULT_RUNTIME_CONFIG.STORAGE_TYPE,
     OPEN_REGISTER:
@@ -92,7 +87,9 @@ function runtimeConfigFromServerConfig(
     BANGUMI_DATA_SOURCE:
       data.BangumiDataSource || DEFAULT_RUNTIME_CONFIG.BANGUMI_DATA_SOURCE,
     BANGUMI_PROXY: data.BangumiProxy || DEFAULT_RUNTIME_CONFIG.BANGUMI_PROXY,
-    DOUBAN_IMAGE_PROXY_TYPE: doubanImageProxyType,
+    DOUBAN_IMAGE_PROXY_TYPE:
+      data.DoubanImageProxyType ||
+      DEFAULT_RUNTIME_CONFIG.DOUBAN_IMAGE_PROXY_TYPE,
     DOUBAN_IMAGE_PROXY:
       data.DoubanImageProxy || DEFAULT_RUNTIME_CONFIG.DOUBAN_IMAGE_PROXY,
     DISABLE_YELLOW_FILTER:
