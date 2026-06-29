@@ -50,3 +50,38 @@ export function withTimeout<T>(
     }
   });
 }
+
+export function withAbortableTimeout<T>(
+  task: (signal: AbortSignal) => Promise<T>,
+  timeoutMs: number,
+  message: string,
+  parentSignal?: AbortSignal,
+): Promise<T> {
+  const controller = new AbortController();
+  let timeoutId: ReturnType<typeof setTimeout> | null = null;
+
+  const abortFromParent = () => {
+    controller.abort(parentSignal?.reason);
+  };
+
+  if (parentSignal?.aborted) {
+    abortFromParent();
+  } else {
+    parentSignal?.addEventListener('abort', abortFromParent, { once: true });
+  }
+
+  const timeout = new Promise<never>((_, reject) => {
+    timeoutId = setTimeout(() => {
+      const error = new Error(message);
+      controller.abort(error);
+      reject(error);
+    }, timeoutMs);
+  });
+
+  return Promise.race([task(controller.signal), timeout]).finally(() => {
+    if (timeoutId) {
+      clearTimeout(timeoutId);
+    }
+    parentSignal?.removeEventListener('abort', abortFromParent);
+  });
+}

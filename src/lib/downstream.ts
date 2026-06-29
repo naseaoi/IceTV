@@ -42,11 +42,61 @@ interface GirigiriPlayExtractResult {
   poster: string;
 }
 
+interface SearchFromApiOptions {
+  maxSearchPages?: number;
+  signal?: AbortSignal;
+}
+
 const GIRI_FALLBACK_ORIGINS = [
   'https://anime.girigirilove.icu',
   'https://ani.girigirilove.com',
 ];
 const GIRI_DISABLED_ORIGINS = new Set(['https://anime.girigirilove.com']);
+const EXTRA_SEARCH_PAGE_CONCURRENCY = 2;
+
+function createTimedAbortController(
+  parentSignal: AbortSignal | undefined,
+  timeoutMs: number,
+) {
+  const controller = new AbortController();
+  let timeoutFired = false;
+
+  const abortFromParent = () => {
+    controller.abort(parentSignal?.reason);
+  };
+
+  if (parentSignal?.aborted) {
+    abortFromParent();
+  } else {
+    parentSignal?.addEventListener('abort', abortFromParent, { once: true });
+  }
+
+  const timeoutId = setTimeout(() => {
+    timeoutFired = true;
+    controller.abort(new Error('timeout'));
+  }, timeoutMs);
+
+  return {
+    signal: controller.signal,
+    isTimeout: () => timeoutFired,
+    cleanup: () => {
+      clearTimeout(timeoutId);
+      parentSignal?.removeEventListener('abort', abortFromParent);
+    },
+  };
+}
+
+function isAbortError(error: unknown): boolean {
+  if (!(error instanceof Error)) {
+    return false;
+  }
+
+  return (
+    error.name === 'AbortError' ||
+    (error as Error & { code?: number }).code === 20 ||
+    error.message.includes('aborted')
+  );
+}
 
 function isGirigiriSource(apiSite: ApiSite): boolean {
   return /girigirilove\.(?:com|icu)/i.test(apiSite.api);
@@ -283,6 +333,7 @@ async function fetchGirigiriEpisodePlayUrl(
 async function runWithConcurrency<T>(
   tasks: Array<() => Promise<T>>,
   concurrency: number,
+  shouldContinue: () => boolean = () => true,
 ): Promise<T[]> {
   if (tasks.length === 0) return [];
 
@@ -290,7 +341,7 @@ async function runWithConcurrency<T>(
   let index = 0;
 
   async function worker() {
-    while (index < tasks.length) {
+    while (shouldContinue() && index < tasks.length) {
       const current = index;
       index += 1;
       results[current] = await tasks[current]();
@@ -309,16 +360,16 @@ async function runWithConcurrency<T>(
 async function fetchGirigiriSuggestList(
   origin: string,
   query: string,
+  signal?: AbortSignal,
 ): Promise<GirigiriSuggestItem[] | null> {
   const searchUrl = `${origin}/index.php/ajax/suggest?mid=1&wd=${encodeURIComponent(query)}`;
 
-  const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), 8000);
+  const abortState = createTimedAbortController(signal, 8000);
 
   try {
     const response = await fetch(searchUrl, {
       headers: API_CONFIG.search.headers,
-      signal: controller.signal,
+      signal: abortState.signal,
     });
 
     if (!response.ok) return null;
@@ -329,18 +380,23 @@ async function fetchGirigiriSuggestList(
   } catch {
     return null;
   } finally {
-    clearTimeout(timeoutId);
+    abortState.cleanup();
   }
 }
 
 async function searchFromGirigiri(
   apiSite: ApiSite,
   query: string,
+  signal?: AbortSignal,
 ): Promise<SearchResult[]> {
   const origins = getGirigiriOrigins(apiSite);
 
   for (const origin of origins) {
-    const list = await fetchGirigiriSuggestList(origin, query);
+    if (signal?.aborted) {
+      return [];
+    }
+
+    const list = await fetchGirigiriSuggestList(origin, query, signal);
     if (!list) {
       continue;
     }
@@ -584,7 +640,12 @@ async function searchWithCache(
   page: number,
   url: string,
   timeoutMs = 8000,
+  signal?: AbortSignal,
 ): Promise<{ results: SearchResult[]; pageCount?: number }> {
+  if (signal?.aborted) {
+    return { results: [] };
+  }
+
   // 1. fresh 命中直接返回
   const cached = getCachedSearchPage(apiSite.key, query, page);
   if (cached) {
@@ -611,7 +672,7 @@ async function searchWithCache(
 
   // 3. 完全未命中：回源（同 key 并发合并）
   return dedupeSearchLoad(apiSite.key, query, page, () =>
-    fetchAndCacheSearchPage(apiSite, query, page, url, timeoutMs),
+    fetchAndCacheSearchPage(apiSite, query, page, url, timeoutMs, signal),
   );
 }
 
@@ -624,17 +685,21 @@ async function fetchAndCacheSearchPage(
   page: number,
   url: string,
   timeoutMs: number,
+  signal?: AbortSignal,
 ): Promise<{ results: SearchResult[]; pageCount?: number }> {
-  const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+  if (signal?.aborted) {
+    return { results: [] };
+  }
+
+  const abortState = createTimedAbortController(signal, timeoutMs);
 
   try {
     const response = await fetch(url, {
       headers: API_CONFIG.search.headers,
-      signal: controller.signal,
+      signal: abortState.signal,
     });
 
-    clearTimeout(timeoutId);
+    abortState.cleanup();
 
     if (!response.ok) {
       if (response.status === 403) {
@@ -688,13 +753,9 @@ async function fetchAndCacheSearchPage(
     setCachedSearchPage(apiSite.key, query, page, 'ok', results, pageCount);
     return { results, pageCount };
   } catch (error: any) {
-    clearTimeout(timeoutId);
-    // 识别被 AbortController 中止（超时）
-    const aborted =
-      error?.name === 'AbortError' ||
-      error?.code === 20 ||
-      error?.message?.includes('aborted');
-    if (aborted) {
+    abortState.cleanup();
+    const abortedByParent = Boolean(signal?.aborted && !abortState.isTimeout());
+    if (isAbortError(error) && !abortedByParent) {
       setCachedSearchPage(apiSite.key, query, page, 'timeout', []);
     }
     return { results: [] };
@@ -704,10 +765,14 @@ async function fetchAndCacheSearchPage(
 export async function searchFromApi(
   apiSite: ApiSite,
   query: string,
-  options: { maxSearchPages?: number } = {},
+  options: SearchFromApiOptions = {},
 ): Promise<SearchResult[]> {
+  if (options.signal?.aborted) {
+    return [];
+  }
+
   if (isGirigiriSource(apiSite)) {
-    return searchFromGirigiri(apiSite, query);
+    return searchFromGirigiri(apiSite, query, options.signal);
   }
 
   try {
@@ -722,6 +787,7 @@ export async function searchFromApi(
       1,
       apiUrl,
       8000,
+      options.signal,
     );
     const results = firstPageResult.results;
     const pageCountFromFirst = firstPageResult.pageCount;
@@ -737,7 +803,7 @@ export async function searchFromApi(
 
     // 如果有额外页数，获取更多页的结果
     if (pagesToFetch > 0) {
-      const additionalPagePromises = [];
+      const additionalPageTasks = [];
 
       for (let page = 2; page <= pagesToFetch + 1; page++) {
         const pageUrl =
@@ -746,23 +812,28 @@ export async function searchFromApi(
             .replace('{query}', encodeURIComponent(query))
             .replace('{page}', page.toString());
 
-        const pagePromise = (async () => {
-          // 使用新的缓存搜索函数处理分页
+        additionalPageTasks.push(async () => {
+          if (options.signal?.aborted) {
+            return [];
+          }
+
           const pageResult = await searchWithCache(
             apiSite,
             query,
             page,
             pageUrl,
             8000,
+            options.signal,
           );
           return pageResult.results;
-        })();
-
-        additionalPagePromises.push(pagePromise);
+        });
       }
 
-      // 等待所有额外页的结果
-      const additionalResults = await Promise.all(additionalPagePromises);
+      const additionalResults = await runWithConcurrency(
+        additionalPageTasks,
+        EXTRA_SEARCH_PAGE_CONCURRENCY,
+        () => !options.signal?.aborted,
+      );
 
       // 合并所有页的结果
       additionalResults.forEach((pageResults) => {
@@ -781,9 +852,10 @@ export async function searchFromApi(
 export async function searchFirstPageFromApi(
   apiSite: ApiSite,
   query: string,
+  options: { signal?: AbortSignal } = {},
 ): Promise<SearchResult[]> {
   if (isGirigiriSource(apiSite)) {
-    return searchFromGirigiri(apiSite, query);
+    return searchFromGirigiri(apiSite, query, options.signal);
   }
 
   try {
@@ -795,6 +867,7 @@ export async function searchFirstPageFromApi(
       1,
       apiUrl,
       6000,
+      options.signal,
     );
     return firstPageResult.results;
   } catch {

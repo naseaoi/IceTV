@@ -496,6 +496,10 @@ export class LocalSqliteStorage implements IStorage {
     this.stmts.deletePlayRecord.run(userName, key);
   }
 
+  async deleteAllPlayRecords(userName: string): Promise<void> {
+    this.stmts.deletePlayRecordsByUser.run(userName);
+  }
+
   async getFavorite(userName: string, key: string): Promise<Favorite | null> {
     const row = this.stmts.getFavorite.get(userName, key) as
       | { favorite_json: string }
@@ -531,6 +535,10 @@ export class LocalSqliteStorage implements IStorage {
 
   async deleteFavorite(userName: string, key: string): Promise<void> {
     this.stmts.deleteFavorite.run(userName, key);
+  }
+
+  async deleteAllFavorites(userName: string): Promise<void> {
+    this.stmts.deleteFavoritesByUser.run(userName);
   }
 
   async registerUser(userName: string, password: string): Promise<void> {

@@ -1,3 +1,4 @@
+import type { ApiSite } from '@/lib/config';
 import { SearchResult } from '@/lib/types';
 
 // 缓存状态类型
@@ -13,12 +14,31 @@ export interface CachedPageEntry {
   pageCount?: number; // 仅第一页可选存储
 }
 
+export interface SearchAggregateCacheParams {
+  query: string;
+  apiSites: ApiSite[];
+  maxSearchPages: number;
+  disableYellowFilter: boolean;
+}
+
+export interface CachedSearchAggregateEntry {
+  expiresAt: number;
+  staleUntil: number;
+  results: SearchResult[];
+}
+
 // 缓存配置
 const SEARCH_CACHE_TTL_MS = 10 * 60 * 1000; // 10分钟 新鲜期
 const SEARCH_CACHE_STALE_MS = 10 * 60 * 1000; // 10分钟 软过期窗口
+const SEARCH_AGGREGATE_CACHE_TTL_MS = 2 * 60 * 1000;
+const SEARCH_AGGREGATE_CACHE_STALE_MS = 3 * 60 * 1000;
 const CACHE_CLEANUP_INTERVAL_MS = 5 * 60 * 1000; // 5分钟清理一次
 const MAX_CACHE_SIZE = 1000; // 最大缓存条目数量
+const MAX_AGGREGATE_CACHE_SIZE = 200;
 const SEARCH_CACHE: Map<string, CachedPageEntry> = new Map();
+const SEARCH_AGGREGATE_CACHE: Map<string, CachedSearchAggregateEntry> =
+  new Map();
+const SEARCH_AGGREGATE_REFRESH_INFLIGHT: Map<string, Promise<void>> = new Map();
 
 // 正在进行的同 key 回源请求，抑制雷群
 const SEARCH_INFLIGHT: Map<
@@ -39,6 +59,84 @@ function makeSearchCacheKey(
   page: number,
 ): string {
   return `${sourceKey}::${query.trim()}::${page}`;
+}
+
+function makeSearchAggregateCacheKey(
+  params: SearchAggregateCacheParams,
+): string {
+  const sourceKey = JSON.stringify(
+    params.apiSites.map((site) => [
+      site.key,
+      site.name,
+      site.api,
+      site.detail || '',
+    ]),
+  );
+
+  return JSON.stringify([
+    params.query.trim(),
+    params.maxSearchPages,
+    params.disableYellowFilter ? 'yellow-off' : 'yellow-on',
+    sourceKey,
+  ]);
+}
+
+export function peekCachedSearchAggregate(
+  params: SearchAggregateCacheParams,
+): { entry: CachedSearchAggregateEntry; fresh: boolean } | null {
+  const key = makeSearchAggregateCacheKey(params);
+  const entry = SEARCH_AGGREGATE_CACHE.get(key);
+  if (!entry) return null;
+
+  const now = Date.now();
+  if (now < entry.expiresAt) return { entry, fresh: true };
+  if (now < entry.staleUntil) return { entry, fresh: false };
+  SEARCH_AGGREGATE_CACHE.delete(key);
+  return null;
+}
+
+export function setCachedSearchAggregate(
+  params: SearchAggregateCacheParams,
+  results: SearchResult[],
+): void {
+  if (results.length === 0) return;
+
+  ensureAutoCleanupStarted();
+
+  const now = Date.now();
+  if (now - lastCleanupTime > CACHE_CLEANUP_INTERVAL_MS) {
+    performCacheCleanup();
+  }
+
+  const key = makeSearchAggregateCacheKey(params);
+  SEARCH_AGGREGATE_CACHE.set(key, {
+    expiresAt: now + SEARCH_AGGREGATE_CACHE_TTL_MS,
+    staleUntil:
+      now + SEARCH_AGGREGATE_CACHE_TTL_MS + SEARCH_AGGREGATE_CACHE_STALE_MS,
+    results,
+  });
+
+  trimCacheByStaleUntil(SEARCH_AGGREGATE_CACHE, MAX_AGGREGATE_CACHE_SIZE);
+}
+
+export function refreshCachedSearchAggregate(
+  params: SearchAggregateCacheParams,
+  loader: () => Promise<SearchResult[]>,
+): Promise<void> {
+  const key = makeSearchAggregateCacheKey(params);
+  const existing = SEARCH_AGGREGATE_REFRESH_INFLIGHT.get(key);
+  if (existing) return existing;
+
+  const task = loader()
+    .then((results) => {
+      setCachedSearchAggregate(params, results);
+    })
+    .finally(() => {
+      SEARCH_AGGREGATE_REFRESH_INFLIGHT.delete(key);
+    });
+
+  SEARCH_AGGREGATE_REFRESH_INFLIGHT.set(key, task);
+  return task;
 }
 
 /**
@@ -131,6 +229,8 @@ export function setCachedSearchPage(
     data,
     pageCount,
   });
+
+  trimCacheByStaleUntil(SEARCH_CACHE, MAX_CACHE_SIZE);
 }
 
 /**
@@ -152,6 +252,7 @@ function performCacheCleanup(): {
 } {
   const now = Date.now();
   const keysToDelete: string[] = [];
+  const aggregateKeysToDelete: string[] = [];
   let sizeLimitedDeleted = 0;
 
   // 1. 清理彻底过期条目（超出软过期窗口）
@@ -160,21 +261,21 @@ function performCacheCleanup(): {
       keysToDelete.push(key);
     }
   });
+  SEARCH_AGGREGATE_CACHE.forEach((entry, key) => {
+    if (entry.staleUntil <= now) {
+      aggregateKeysToDelete.push(key);
+    }
+  });
 
   const expiredCount = keysToDelete.length;
   keysToDelete.forEach((key) => SEARCH_CACHE.delete(key));
+  aggregateKeysToDelete.forEach((key) => SEARCH_AGGREGATE_CACHE.delete(key));
 
-  // 2. 如果缓存大小超限，清理最老的条目（LRU策略，按 staleUntil 排序）
-  if (SEARCH_CACHE.size > MAX_CACHE_SIZE) {
-    const entries = Array.from(SEARCH_CACHE.entries());
-    entries.sort((a, b) => a[1].staleUntil - b[1].staleUntil);
-
-    const toRemove = SEARCH_CACHE.size - MAX_CACHE_SIZE;
-    for (let i = 0; i < toRemove; i++) {
-      SEARCH_CACHE.delete(entries[i][0]);
-      sizeLimitedDeleted++;
-    }
-  }
+  sizeLimitedDeleted += trimCacheByStaleUntil(SEARCH_CACHE, MAX_CACHE_SIZE);
+  sizeLimitedDeleted += trimCacheByStaleUntil(
+    SEARCH_AGGREGATE_CACHE,
+    MAX_AGGREGATE_CACHE_SIZE,
+  );
 
   lastCleanupTime = now;
 
@@ -183,6 +284,23 @@ function performCacheCleanup(): {
     total: SEARCH_CACHE.size,
     sizeLimited: sizeLimitedDeleted,
   };
+}
+
+function trimCacheByStaleUntil<T extends { staleUntil: number }>(
+  cache: Map<string, T>,
+  maxSize: number,
+): number {
+  if (cache.size <= maxSize) return 0;
+
+  const entries = Array.from(cache.entries());
+  entries.sort((a, b) => a[1].staleUntil - b[1].staleUntil);
+
+  const toRemove = cache.size - maxSize;
+  for (let i = 0; i < toRemove; i++) {
+    cache.delete(entries[i][0]);
+  }
+
+  return toRemove;
 }
 
 /**

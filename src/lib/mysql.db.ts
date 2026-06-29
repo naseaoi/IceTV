@@ -227,6 +227,13 @@ export class MySqlStorage implements IStorage {
     );
   }
 
+  async deleteAllPlayRecords(userName: string): Promise<void> {
+    await this.ensureInitialized();
+    await this.pool.execute('DELETE FROM play_records WHERE username = ?', [
+      userName,
+    ]);
+  }
+
   async getFavorite(userName: string, key: string): Promise<Favorite | null> {
     await this.ensureInitialized();
     const [rows] = await this.pool.query<JsonRow[]>(
@@ -276,6 +283,13 @@ export class MySqlStorage implements IStorage {
       'DELETE FROM favorites WHERE username = ? AND favorite_key = ?',
       [userName, key],
     );
+  }
+
+  async deleteAllFavorites(userName: string): Promise<void> {
+    await this.ensureInitialized();
+    await this.pool.execute('DELETE FROM favorites WHERE username = ?', [
+      userName,
+    ]);
   }
 
   async registerUser(userName: string, password: string): Promise<void> {
