@@ -30,6 +30,9 @@ import {
 
 import CapsuleSwitch from '@/components/CapsuleSwitch';
 import ContinueWatching from '@/components/ContinueWatching';
+import HomePosterCardSkeleton, {
+  HOME_POSTER_CARD_CLASS,
+} from '@/components/HomePosterCardSkeleton';
 import ConfirmModal from '@/components/modals/ConfirmModal';
 import InfoModal from '@/components/modals/InfoModal';
 import PageLayout from '@/components/PageLayout';
@@ -66,12 +69,7 @@ type RecommendationLoadingState = {
 
 function RecommendationSkeletonRow() {
   return Array.from({ length: 8 }).map((_, index) => (
-    <div key={index} className='w-24 min-w-[96px] sm:w-44 sm:min-w-[180px]'>
-      <div className='relative aspect-[2/3] w-full animate-pulse overflow-hidden rounded-lg bg-gray-200 dark:bg-gray-800'>
-        <div className='absolute inset-0 bg-gray-300 dark:bg-gray-700'></div>
-      </div>
-      <div className='mt-2 h-5 animate-pulse rounded bg-gray-200 dark:bg-gray-800'></div>
-    </div>
+    <HomePosterCardSkeleton key={index} />
   ));
 }
 
@@ -126,10 +124,7 @@ function RecommendationSection({
           RecommendationSkeletonRow()
         ) : items.length > 0 ? (
           items.map((item, index) => (
-            <div
-              key={item.id}
-              className='w-24 min-w-[96px] sm:w-44 sm:min-w-[180px]'
-            >
+            <div key={item.id} className={HOME_POSTER_CARD_CLASS}>
               <PosterCard
                 title={item.title}
                 poster={item.poster}

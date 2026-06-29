@@ -16,6 +16,9 @@ import { parseStorageKey } from '@/lib/utils';
 
 import ScrollableRow from '@/components/ScrollableRow';
 import VideoCard from '@/components/VideoCard';
+import HomePosterCardSkeleton, {
+  HOME_POSTER_CARD_CLASS,
+} from '@/components/HomePosterCardSkeleton';
 import ConfirmModal from '@/components/modals/ConfirmModal';
 
 interface ContinueWatchingProps {
@@ -167,16 +170,7 @@ export default function ContinueWatching({
         <ScrollableRow>
           {loading
             ? Array.from({ length: skeletonCount }).map((_, index) => (
-                <div
-                  key={index}
-                  className='w-24 min-w-[96px] sm:w-44 sm:min-w-[180px]'
-                >
-                  <div className='relative aspect-[2/3] w-full animate-pulse overflow-hidden rounded-lg bg-gray-200 dark:bg-gray-800'>
-                    <div className='absolute inset-0 bg-gray-300 dark:bg-gray-700'></div>
-                  </div>
-                  <div className='mx-auto mt-2 h-5 w-4/5 animate-pulse rounded bg-gray-200 dark:bg-gray-800'></div>
-                  <div className='mx-auto mt-1 h-[22px] w-16 animate-pulse rounded bg-gray-200 dark:bg-gray-800'></div>
-                </div>
+                <HomePosterCardSkeleton key={index} withSubtitle />
               ))
             : playRecords.map((record, index) => {
                 const parsedKey = parseKey(record.key);
@@ -186,10 +180,7 @@ export default function ContinueWatching({
 
                 const { source, id } = parsedKey;
                 return (
-                  <div
-                    key={record.key}
-                    className='w-24 min-w-[96px] sm:w-44 sm:min-w-[180px]'
-                  >
+                  <div key={record.key} className={HOME_POSTER_CARD_CLASS}>
                     <VideoCard
                       id={id}
                       title={record.title}
