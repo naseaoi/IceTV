@@ -8,10 +8,12 @@ import AlertModal from '@/features/admin/components/AlertModal';
 import { useAlertModal } from '@/features/admin/hooks/useAlertModal';
 import {
   BANGUMI_DATA_SOURCE_STORAGE_KEY,
+  BANGUMI_PROXY_URL_STORAGE_KEY,
   DEFAULT_BANGUMI_DATA_SOURCE,
   bangumiDataSourceOptions,
   normalizeBangumiDataSource,
   readDefaultBangumiDataSource,
+  readDefaultBangumiProxyUrl,
 } from '@/lib/bangumi-source';
 import {
   doubanDataSourceOptions,
@@ -42,6 +44,7 @@ export function SettingsPanel({ onClose }: SettingsPanelProps) {
   const [bangumiDataSource, setBangumiDataSource] = useState(
     DEFAULT_BANGUMI_DATA_SOURCE,
   );
+  const [bangumiProxyUrl, setBangumiProxyUrl] = useState('');
   const [doubanImageProxyType, setDoubanImageProxyType] = useState('direct');
   const [doubanImageProxyUrl, setDoubanImageProxyUrl] = useState('');
   const { alertModal, showAlert, hideAlert } = useAlertModal();
@@ -78,6 +81,16 @@ export function SettingsPanel({ onClose }: SettingsPanelProps) {
       setBangumiDataSource(normalizeBangumiDataSource(savedBangumiDataSource));
     } else {
       setBangumiDataSource(readDefaultBangumiDataSource());
+    }
+
+    const defaultBangumiProxy = readDefaultBangumiProxyUrl();
+    const savedBangumiProxyUrl = localStorage.getItem(
+      BANGUMI_PROXY_URL_STORAGE_KEY,
+    );
+    if (savedBangumiProxyUrl !== null) {
+      setBangumiProxyUrl(savedBangumiProxyUrl);
+    } else if (defaultBangumiProxy) {
+      setBangumiProxyUrl(defaultBangumiProxy);
     }
 
     const defaultDoubanImageProxyType =
@@ -177,6 +190,11 @@ export function SettingsPanel({ onClose }: SettingsPanelProps) {
     showProxyToast();
   };
 
+  const handleBangumiProxyUrlChange = (value: string) => {
+    setBangumiProxyUrl(value);
+    localStorage.setItem(BANGUMI_PROXY_URL_STORAGE_KEY, value);
+  };
+
   const handleDoubanImageProxyTypeChange = (value: string) => {
     setDoubanImageProxyType(value);
     localStorage.setItem('doubanImageProxyType', value);
@@ -197,6 +215,7 @@ export function SettingsPanel({ onClose }: SettingsPanelProps) {
     const defaultDoubanImageProxyUrl =
       window.RUNTIME_CONFIG?.DOUBAN_IMAGE_PROXY || '';
     const defaultBangumiDataSource = readDefaultBangumiDataSource();
+    const defaultBangumiProxy = readDefaultBangumiProxyUrl();
     const defaultFluidSearch = window.RUNTIME_CONFIG?.FLUID_SEARCH !== false;
 
     setDefaultAggregateSearch(true);
@@ -207,13 +226,14 @@ export function SettingsPanel({ onClose }: SettingsPanelProps) {
     setDoubanProxyUrl(defaultDoubanProxy);
     setDoubanDataSource(defaultDoubanProxyType);
     setBangumiDataSource(defaultBangumiDataSource);
+    setBangumiProxyUrl(defaultBangumiProxy);
     setDoubanImageProxyType(defaultDoubanImageProxyType);
     setDoubanImageProxyUrl(defaultDoubanImageProxyUrl);
 
     localStorage.setItem('defaultAggregateSearch', JSON.stringify(true));
     localStorage.setItem('enableOptimization', JSON.stringify(true));
     writeBooleanLocalSetting(AUTO_SWITCH_SOURCE_ON_TIMEOUT_STORAGE_KEY, false);
-    localStorage.setItem('fluidSearch', JSON.stringify(defaultFluidSearch));
+    localStorage.removeItem('fluidSearch');
     localStorage.setItem('liveDirectConnect', JSON.stringify(false));
     localStorage.setItem('doubanProxyUrl', defaultDoubanProxy);
     localStorage.setItem('doubanDataSource', defaultDoubanProxyType);
@@ -221,6 +241,7 @@ export function SettingsPanel({ onClose }: SettingsPanelProps) {
       BANGUMI_DATA_SOURCE_STORAGE_KEY,
       defaultBangumiDataSource,
     );
+    localStorage.setItem(BANGUMI_PROXY_URL_STORAGE_KEY, defaultBangumiProxy);
     localStorage.setItem('doubanImageProxyType', defaultDoubanImageProxyType);
     localStorage.setItem('doubanImageProxyUrl', defaultDoubanImageProxyUrl);
   };
@@ -362,6 +383,28 @@ export function SettingsPanel({ onClose }: SettingsPanelProps) {
                 </div>
               )}
             </div>
+
+            {bangumiDataSource === 'custom' && (
+              <div className='space-y-3'>
+                <div>
+                  <h4 className='text-sm font-medium text-gray-700 dark:text-gray-300'>
+                    Bangumi 代理地址
+                  </h4>
+                  <p className='mt-1 text-xs text-gray-500 dark:text-gray-400'>
+                    自定义代理服务器地址
+                  </p>
+                </div>
+                <input
+                  type='text'
+                  className='w-full rounded-lg border border-gray-300 bg-white px-3 py-2.5 text-sm text-gray-900 placeholder-gray-500 shadow-sm transition-all duration-200 hover:border-gray-400 focus:border-green-500 focus:outline-none focus:ring-2 focus:ring-green-500 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100 dark:placeholder-gray-400 dark:hover:border-gray-500'
+                  placeholder='例如: https://proxy.example.com/fetch?url='
+                  value={bangumiProxyUrl}
+                  onChange={(event) =>
+                    handleBangumiProxyUrlChange(event.target.value)
+                  }
+                />
+              </div>
+            )}
 
             <div className='space-y-3'>
               <div>

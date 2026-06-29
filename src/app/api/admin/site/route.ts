@@ -22,6 +22,7 @@ export async function POST(request: NextRequest) {
       DoubanProxyType,
       DoubanProxy,
       BangumiDataSource,
+      BangumiProxy,
       DoubanImageProxyType,
       DoubanImageProxy,
       DisableYellowFilter,
@@ -36,6 +37,7 @@ export async function POST(request: NextRequest) {
       DoubanProxyType: string;
       DoubanProxy: string;
       BangumiDataSource?: string;
+      BangumiProxy?: string;
       DoubanImageProxyType: string;
       DoubanImageProxy: string;
       DisableYellowFilter: boolean;
@@ -53,6 +55,7 @@ export async function POST(request: NextRequest) {
       typeof DoubanProxy !== 'string' ||
       (BangumiDataSource !== undefined &&
         typeof BangumiDataSource !== 'string') ||
+      (BangumiProxy !== undefined && typeof BangumiProxy !== 'string') ||
       typeof DoubanImageProxyType !== 'string' ||
       typeof DoubanImageProxy !== 'string' ||
       typeof DisableYellowFilter !== 'boolean' ||
@@ -78,6 +81,10 @@ export async function POST(request: NextRequest) {
       DoubanProxy,
       BangumiDataSource:
         BangumiDataSource || adminConfig.SiteConfig.BangumiDataSource,
+      BangumiProxy:
+        BangumiProxy !== undefined
+          ? BangumiProxy
+          : adminConfig.SiteConfig.BangumiProxy || '',
       DoubanImageProxyType,
       DoubanImageProxy,
       DisableYellowFilter,

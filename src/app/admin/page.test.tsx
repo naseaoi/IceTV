@@ -102,6 +102,8 @@ describe('AdminPage role visibility', () => {
       SiteInterfaceCacheTime: 300,
       DoubanProxyType: '',
       DoubanProxy: '',
+      BangumiDataSource: 'server',
+      BangumiProxy: '',
       DoubanImageProxyType: '',
       DoubanImageProxy: '',
       DisableYellowFilter: false,

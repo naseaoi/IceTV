@@ -2,6 +2,10 @@ import {
   fetchBangumiCalendarJson,
   type BangumiFetchInit,
 } from './bangumi-fetch';
+import {
+  BANGUMI_CALENDAR_FRESH_SECONDS,
+  BANGUMI_CALENDAR_MAX_AGE_SECONDS,
+} from './home-cache';
 import { normalizeBangumiCalendarData } from './bangumi-normalize';
 
 export interface BangumiCalendarData {
@@ -27,13 +31,15 @@ export interface BangumiCalendarData {
 }
 
 const BANGUMI_CALENDAR_URL = 'https://api.bgm.tv/calendar';
-const BANGUMI_CACHE_MS = 60 * 60 * 1000;
+const BANGUMI_CACHE_FRESH_MS = BANGUMI_CALENDAR_FRESH_SECONDS * 1000;
+const BANGUMI_CACHE_MAX_AGE_MS = BANGUMI_CALENDAR_MAX_AGE_SECONDS * 1000;
 const BANGUMI_MAX_ATTEMPTS = 2;
 
 let bangumiCalendarCache:
   | {
       data: BangumiCalendarData[];
-      expiresAt: number;
+      freshUntil: number;
+      staleUntil: number;
     }
   | undefined;
 
@@ -46,6 +52,7 @@ export async function getBangumiCalendarData(
     return cachedData;
   }
 
+  const staleData = getCachedBangumiCalendarData({ allowStale: true });
   const maxAttempts = init.timeoutMs ? 1 : BANGUMI_MAX_ATTEMPTS;
 
   for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
@@ -57,18 +64,26 @@ export async function getBangumiCalendarData(
       const calendarData = normalizeBangumiCalendarData(data);
 
       if (isUsableBangumiCalendarData(calendarData)) {
+        const now = Date.now();
         bangumiCalendarCache = {
           data: calendarData,
-          expiresAt: Date.now() + BANGUMI_CACHE_MS,
+          freshUntil: now + BANGUMI_CACHE_FRESH_MS,
+          staleUntil: now + BANGUMI_CACHE_MAX_AGE_MS,
         };
         return calendarData;
       }
 
       if (attempt === maxAttempts) {
+        if (staleData) {
+          return staleData;
+        }
         return calendarData;
       }
     } catch (error) {
       if (attempt === maxAttempts) {
+        if (staleData) {
+          return staleData;
+        }
         throw error;
       }
     }
@@ -77,15 +92,22 @@ export async function getBangumiCalendarData(
   return [];
 }
 
-export function getCachedBangumiCalendarData():
-  | BangumiCalendarData[]
-  | undefined {
+export function getCachedBangumiCalendarData(
+  options: {
+    allowStale?: boolean;
+  } = {},
+): BangumiCalendarData[] | undefined {
   if (!bangumiCalendarCache) {
     return undefined;
   }
 
-  if (bangumiCalendarCache.expiresAt <= Date.now()) {
+  const now = Date.now();
+  if (bangumiCalendarCache.staleUntil <= now) {
     bangumiCalendarCache = undefined;
+    return undefined;
+  }
+
+  if (!options.allowStale && bangumiCalendarCache.freshUntil <= now) {
     return undefined;
   }
 

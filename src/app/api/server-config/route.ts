@@ -4,7 +4,7 @@ import { getOptionalActiveUser } from '@/lib/api-auth';
 import { getConfig, getPublicConfig } from '@/lib/config';
 import { DEFAULT_RUNTIME_CONFIG } from '@/lib/runtime-config';
 import { getStorageType } from '@/lib/storage-type';
-import { CURRENT_VERSION } from '@/lib/version';
+import { CURRENT_UPDATE_BRANCH, CURRENT_VERSION } from '@/lib/version';
 
 export const runtime = 'nodejs';
 
@@ -26,7 +26,7 @@ export async function GET(request: NextRequest) {
     Version: CURRENT_VERSION,
     OpenRegister: publicConfig.OpenRegister,
     UpdateRepos: process.env.NEXT_PUBLIC_UPDATE_REPOS || 'naseaoi/IceTV',
-    UpdateBranch: process.env.NEXT_PUBLIC_UPDATE_BRANCH || 'main',
+    UpdateBranch: CURRENT_UPDATE_BRANCH,
     DoubanProxyType: canReadSensitiveConfig
       ? config!.SiteConfig.DoubanProxyType
       : 'direct',
@@ -34,6 +34,9 @@ export async function GET(request: NextRequest) {
       ? config!.SiteConfig.DoubanProxy || ''
       : '',
     BangumiDataSource: publicConfig.BangumiDataSource,
+    BangumiProxy: canReadSensitiveConfig
+      ? config!.SiteConfig.BangumiProxy || ''
+      : DEFAULT_RUNTIME_CONFIG.BANGUMI_PROXY,
     DoubanImageProxyType: doubanImageProxyType,
     DoubanImageProxy: canReadSensitiveConfig
       ? config!.SiteConfig.DoubanImageProxy || ''

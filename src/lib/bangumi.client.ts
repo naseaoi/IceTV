@@ -2,25 +2,61 @@
 
 export type { BangumiCalendarData } from './bangumi';
 import type { BangumiCalendarData } from './bangumi';
+import {
+  BANGUMI_CALENDAR_FRESH_SECONDS,
+  BANGUMI_CALENDAR_MAX_AGE_SECONDS,
+} from './home-cache';
 import { normalizeBangumiCalendarData } from './bangumi-normalize';
-import { readBangumiDataSource } from './bangumi-source';
+import { readBangumiDataSource, readBangumiProxyUrl } from './bangumi-source';
 
 const BANGUMI_CALENDAR_URL = 'https://api.bgm.tv/calendar';
+const BANGUMI_CALENDAR_CACHE_STORAGE_KEY = 'bangumiCalendarCache';
+const BANGUMI_CALENDAR_FRESH_MS = BANGUMI_CALENDAR_FRESH_SECONDS * 1000;
+const BANGUMI_CALENDAR_MAX_AGE_MS = BANGUMI_CALENDAR_MAX_AGE_SECONDS * 1000;
 
 interface BangumiCalendarClientOptions {
   timeoutMs?: number;
 }
 
+interface BangumiCalendarClientCache {
+  data: unknown;
+  freshUntil: number;
+  staleUntil: number;
+}
+
 export async function GetBangumiCalendarData(
   options: BangumiCalendarClientOptions = {},
 ): Promise<BangumiCalendarData[]> {
-  const source = readBangumiDataSource();
-
-  if (source === 'direct') {
-    return await fetchBangumiCalendarDirect(options);
+  const cachedData = readBangumiCalendarClientCache();
+  if (cachedData) {
+    return cachedData;
   }
 
-  return await fetchBangumiCalendarFromServer(options);
+  const staleData = readBangumiCalendarClientCache({ allowStale: true });
+  const source = readBangumiDataSource();
+  let data: BangumiCalendarData[];
+
+  try {
+    if (source === 'direct') {
+      data = await fetchBangumiCalendarDirect(options);
+    } else if (source === 'custom') {
+      data = await fetchBangumiCalendarCustomProxy(options);
+    } else {
+      data = await fetchBangumiCalendarFromServer(options);
+    }
+  } catch (error) {
+    if (staleData) {
+      return staleData;
+    }
+    throw error;
+  }
+
+  if (isUsableBangumiCalendarData(data)) {
+    writeBangumiCalendarClientCache(data);
+    return data;
+  }
+
+  return staleData ?? data;
 }
 
 async function fetchBangumiCalendarFromServer(
@@ -65,4 +101,106 @@ async function fetchBangumiCalendarDirect(
       window.clearTimeout(timeoutId);
     }
   }
+}
+
+async function fetchBangumiCalendarCustomProxy(
+  options: BangumiCalendarClientOptions,
+): Promise<BangumiCalendarData[]> {
+  const proxyUrl = readBangumiProxyUrl().trim();
+  if (!proxyUrl) {
+    throw new Error('Bangumi custom proxy URL is empty');
+  }
+
+  const controller = new AbortController();
+  const timeoutId = options.timeoutMs
+    ? window.setTimeout(() => controller.abort(), options.timeoutMs)
+    : undefined;
+
+  try {
+    const response = await fetch(
+      `${proxyUrl}${encodeURIComponent(BANGUMI_CALENDAR_URL)}`,
+      {
+        cache: 'no-store',
+        signal: controller.signal,
+      },
+    );
+
+    if (!response.ok) {
+      throw new Error(`Bangumi calendar: ${response.status}`);
+    }
+
+    return normalizeBangumiCalendarData(await response.json());
+  } finally {
+    if (timeoutId !== undefined) {
+      window.clearTimeout(timeoutId);
+    }
+  }
+}
+
+function readBangumiCalendarClientCache(
+  options: {
+    allowStale?: boolean;
+  } = {},
+): BangumiCalendarData[] | null {
+  if (typeof window === 'undefined') {
+    return null;
+  }
+
+  try {
+    const rawCache = window.localStorage.getItem(
+      BANGUMI_CALENDAR_CACHE_STORAGE_KEY,
+    );
+    if (!rawCache) {
+      return null;
+    }
+
+    const cache = JSON.parse(rawCache) as BangumiCalendarClientCache;
+    const now = Date.now();
+    if (!Number.isFinite(cache.staleUntil) || cache.staleUntil <= now) {
+      window.localStorage.removeItem(BANGUMI_CALENDAR_CACHE_STORAGE_KEY);
+      return null;
+    }
+
+    if (
+      !options.allowStale &&
+      (!Number.isFinite(cache.freshUntil) || cache.freshUntil <= now)
+    ) {
+      return null;
+    }
+
+    const data = normalizeBangumiCalendarData(cache.data);
+    if (!isUsableBangumiCalendarData(data)) {
+      window.localStorage.removeItem(BANGUMI_CALENDAR_CACHE_STORAGE_KEY);
+      return null;
+    }
+
+    return data;
+  } catch {
+    window.localStorage.removeItem(BANGUMI_CALENDAR_CACHE_STORAGE_KEY);
+    return null;
+  }
+}
+
+function writeBangumiCalendarClientCache(data: BangumiCalendarData[]): void {
+  if (typeof window === 'undefined' || !isUsableBangumiCalendarData(data)) {
+    return;
+  }
+
+  const now = Date.now();
+  try {
+    window.localStorage.setItem(
+      BANGUMI_CALENDAR_CACHE_STORAGE_KEY,
+      JSON.stringify({
+        data,
+        freshUntil: now + BANGUMI_CALENDAR_FRESH_MS,
+        staleUntil: now + BANGUMI_CALENDAR_MAX_AGE_MS,
+      }),
+    );
+  } catch {
+    window.localStorage.removeItem(BANGUMI_CALENDAR_CACHE_STORAGE_KEY);
+  }
+}
+
+function isUsableBangumiCalendarData(data: BangumiCalendarData[]): boolean {
+  return data.some((item) => item.items.length > 0);
 }

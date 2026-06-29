@@ -1,6 +1,11 @@
 export const BANGUMI_DATA_SOURCE_STORAGE_KEY = 'bangumiDataSource';
+export const BANGUMI_PROXY_URL_STORAGE_KEY = 'bangumiProxyUrl';
 
-export const BANGUMI_DATA_SOURCE_VALUES = ['server', 'direct'] as const;
+export const BANGUMI_DATA_SOURCE_VALUES = [
+  'server',
+  'direct',
+  'custom',
+] as const;
 
 export type BangumiDataSource = (typeof BANGUMI_DATA_SOURCE_VALUES)[number];
 
@@ -15,6 +20,7 @@ export const bangumiDataSourceOptions: {
     value: 'server',
     label: '代理（服务器请求）',
   },
+  { value: 'custom', label: '自定义代理' },
 ];
 
 export function readDefaultBangumiDataSource(): BangumiDataSource {
@@ -44,4 +50,24 @@ export function readBangumiDataSource(): BangumiDataSource {
   return savedSource === null
     ? readDefaultBangumiDataSource()
     : normalizeBangumiDataSource(savedSource);
+}
+
+export function readDefaultBangumiProxyUrl(): string {
+  if (typeof window === 'undefined') {
+    return '';
+  }
+
+  return window.RUNTIME_CONFIG?.BANGUMI_PROXY || '';
+}
+
+export function readBangumiProxyUrl(): string {
+  if (typeof window === 'undefined') {
+    return '';
+  }
+
+  const savedProxyUrl = window.localStorage.getItem(
+    BANGUMI_PROXY_URL_STORAGE_KEY,
+  );
+
+  return savedProxyUrl === null ? readDefaultBangumiProxyUrl() : savedProxyUrl;
 }

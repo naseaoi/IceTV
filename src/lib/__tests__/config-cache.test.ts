@@ -15,6 +15,7 @@ const baseConfig: AdminConfig = {
     DoubanProxyType: 'direct',
     DoubanProxy: '',
     BangumiDataSource: 'server',
+    BangumiProxy: '',
     DoubanImageProxyType: 'direct',
     DoubanImageProxy: '',
     DisableYellowFilter: false,
@@ -75,5 +76,21 @@ describe('config cache persistence', () => {
 
     const after = await getConfig();
     expect(after.SiteConfig.SiteName).toBe('IceTV');
+  });
+
+  it('defaults missing fluid search config to enabled', async () => {
+    const { configSelfCheck } = await loadConfigModule(jest.fn());
+    const config = cloneBaseConfig();
+    delete (config.SiteConfig as Partial<typeof config.SiteConfig>).FluidSearch;
+
+    expect(configSelfCheck(config).SiteConfig.FluidSearch).toBe(true);
+  });
+
+  it('keeps disabled fluid search config disabled', async () => {
+    const { configSelfCheck } = await loadConfigModule(jest.fn());
+    const config = cloneBaseConfig();
+    config.SiteConfig.FluidSearch = false;
+
+    expect(configSelfCheck(config).SiteConfig.FluidSearch).toBe(false);
   });
 });

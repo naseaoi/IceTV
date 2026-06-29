@@ -154,4 +154,39 @@ describe('getBangumiCalendarData', () => {
 
     expect(requestMock).toHaveBeenCalledTimes(1);
   });
+
+  it('keeps stale Bangumi calendar data available for home rendering', async () => {
+    const nowSpy = jest.spyOn(Date, 'now').mockReturnValue(1000);
+    mockHttpsRequest([calendarPayload]);
+    const { getBangumiCalendarData, getCachedBangumiCalendarData } =
+      await loadBangumiModule();
+
+    await getBangumiCalendarData();
+
+    nowSpy.mockReturnValue(1000 + 6 * 60 * 60 * 1000 + 1);
+    expect(getCachedBangumiCalendarData()).toBeUndefined();
+    expect(
+      getCachedBangumiCalendarData({ allowStale: true })?.[0].items[0].id,
+    ).toBe(1);
+
+    nowSpy.mockReturnValue(1000 + 24 * 60 * 60 * 1000 + 1);
+    expect(getCachedBangumiCalendarData({ allowStale: true })).toBeUndefined();
+  });
+
+  it('uses stale Bangumi calendar data when refresh fails', async () => {
+    const nowSpy = jest.spyOn(Date, 'now').mockReturnValue(1000);
+    const requestMock = mockHttpsRequest([
+      calendarPayload,
+      new Error('network failed'),
+    ]);
+    const { getBangumiCalendarData } = await loadBangumiModule();
+
+    await getBangumiCalendarData();
+
+    nowSpy.mockReturnValue(1000 + 6 * 60 * 60 * 1000 + 1);
+    const data = await getBangumiCalendarData({ timeoutMs: 1000 });
+
+    expect(data[0].items[0].id).toBe(1);
+    expect(requestMock).toHaveBeenCalledTimes(2);
+  });
 });

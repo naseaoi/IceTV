@@ -1,6 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server';
 
 import { getBangumiCalendarData } from '@/lib/bangumi';
+import {
+  BANGUMI_CALENDAR_FRESH_SECONDS,
+  BANGUMI_CALENDAR_STALE_SECONDS,
+} from '@/lib/home-cache';
 
 const MIN_TIMEOUT_MS = 1000;
 const MAX_TIMEOUT_MS = 30000;
@@ -31,7 +35,7 @@ export async function GET(request: NextRequest) {
 
     return NextResponse.json(data, {
       headers: {
-        'Cache-Control': 'public, max-age=3600, stale-while-revalidate=21600',
+        'Cache-Control': `public, max-age=${BANGUMI_CALENDAR_FRESH_SECONDS}, stale-while-revalidate=${BANGUMI_CALENDAR_STALE_SECONDS}`,
       },
     });
   } catch {

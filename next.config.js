@@ -3,13 +3,14 @@ const path = require('path');
 const { extractLatestVersion } = require('./src/lib/changelog-utils');
 const packageJson = require('./package.json');
 
-let appVersion = packageJson.version || '0.0.0';
+const explicitAppVersion = process.env.NEXT_PUBLIC_APP_VERSION?.trim();
+let appVersion = explicitAppVersion || packageJson.version || '0.0.0';
 
 try {
   const fs = require('fs');
   const changelogPath = path.join(__dirname, 'CHANGELOG.md');
 
-  if (fs.existsSync(changelogPath)) {
+  if (!explicitAppVersion && fs.existsSync(changelogPath)) {
     const content = fs.readFileSync(changelogPath, 'utf8');
     const latestVersion = extractLatestVersion(content);
     if (latestVersion) {

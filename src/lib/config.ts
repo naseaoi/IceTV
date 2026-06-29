@@ -238,6 +238,7 @@ async function getInitConfig(
       BangumiDataSource: normalizeBangumiDataSource(
         process.env.NEXT_PUBLIC_BANGUMI_DATA_SOURCE,
       ),
+      BangumiProxy: process.env.NEXT_PUBLIC_BANGUMI_PROXY || '',
       DoubanImageProxyType:
         process.env.NEXT_PUBLIC_DOUBAN_IMAGE_PROXY_TYPE ||
         'cmliussss-cdn-tencent',
@@ -400,6 +401,7 @@ export function configSelfCheck(adminConfig: AdminConfig): AdminConfig {
       BangumiDataSource: normalizeBangumiDataSource(
         process.env.NEXT_PUBLIC_BANGUMI_DATA_SOURCE,
       ),
+      BangumiProxy: process.env.NEXT_PUBLIC_BANGUMI_PROXY || '',
       DoubanImageProxyType:
         process.env.NEXT_PUBLIC_DOUBAN_IMAGE_PROXY_TYPE ||
         'cmliussss-cdn-tencent',
@@ -416,9 +418,17 @@ export function configSelfCheck(adminConfig: AdminConfig): AdminConfig {
   if (typeof adminConfig.SiteConfig.EnableLiveEntry !== 'boolean') {
     adminConfig.SiteConfig.EnableLiveEntry = false;
   }
+  if (typeof adminConfig.SiteConfig.FluidSearch !== 'boolean') {
+    adminConfig.SiteConfig.FluidSearch =
+      process.env.NEXT_PUBLIC_FLUID_SEARCH !== 'false';
+  }
   adminConfig.SiteConfig.BangumiDataSource = normalizeBangumiDataSource(
     adminConfig.SiteConfig.BangumiDataSource || DEFAULT_BANGUMI_DATA_SOURCE,
   );
+  if (typeof adminConfig.SiteConfig.BangumiProxy !== 'string') {
+    adminConfig.SiteConfig.BangumiProxy =
+      process.env.NEXT_PUBLIC_BANGUMI_PROXY || '';
+  }
 
   // 站长变更自检
   const ownerUser = getOwnerUsername();
