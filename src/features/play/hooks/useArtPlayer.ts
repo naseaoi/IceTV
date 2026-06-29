@@ -332,6 +332,8 @@ export function useArtPlayer(params: UseArtPlayerParams) {
             return;
           }
 
+          resumeTimeRef.current = null;
+          resumeModeRef.current = null;
           autoAdvanceArmedRef.current = true;
           setIsVideoLoading(false);
           setRealtimeLoadSpeed('');
@@ -465,8 +467,6 @@ export function useArtPlayer(params: UseArtPlayerParams) {
 
           loadingSessionRef.current.pendingInitialResumeTarget =
             appliedResumeTarget;
-          resumeTimeRef.current = null;
-          resumeModeRef.current = null;
           const fallbackTime =
             intendedResumeTarget !== null
               ? intendedResumeTarget
