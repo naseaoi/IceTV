@@ -14,6 +14,7 @@ const baseConfig: AdminConfig = {
     SiteInterfaceCacheTime: 300,
     DoubanProxyType: 'direct',
     DoubanProxy: '',
+    BangumiDataSource: 'server',
     DoubanImageProxyType: 'direct',
     DoubanImageProxy: '',
     DisableYellowFilter: false,

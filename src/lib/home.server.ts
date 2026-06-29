@@ -1,4 +1,4 @@
-import { getBangumiCalendarData } from './bangumi';
+import { getCachedBangumiCalendarData } from './bangumi';
 import { fetchDoubanData } from './douban';
 import { HomeInitialData } from './home.types';
 import { DoubanItem } from './types';
@@ -60,9 +60,7 @@ export async function getHomeInitialData(): Promise<HomeInitialData> {
         category: 'show',
         type: 'show',
       }).catch(() => []),
-      getBangumiCalendarData({
-        next: { revalidate: HOME_REVALIDATE_SECONDS },
-      }).catch(() => []),
+      getCachedBangumiCalendarData() ?? [],
     ]);
 
   return {

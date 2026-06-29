@@ -7,6 +7,7 @@ export interface SiteConfig {
   SiteInterfaceCacheTime: number;
   DoubanProxyType: string;
   DoubanProxy: string;
+  BangumiDataSource: string;
   DoubanImageProxyType: string;
   DoubanImageProxy: string;
   DisableYellowFilter: boolean;

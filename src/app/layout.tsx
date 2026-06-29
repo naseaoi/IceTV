@@ -64,6 +64,7 @@ export default async function RootLayout({
     UPDATE_BRANCH: process.env.NEXT_PUBLIC_UPDATE_BRANCH || 'main',
     DOUBAN_PROXY_TYPE: process.env.NEXT_PUBLIC_DOUBAN_PROXY_TYPE || 'direct',
     DOUBAN_PROXY: process.env.NEXT_PUBLIC_DOUBAN_PROXY || '',
+    BANGUMI_DATA_SOURCE: publicConfig.BangumiDataSource,
     DOUBAN_IMAGE_PROXY_TYPE:
       process.env.NEXT_PUBLIC_DOUBAN_IMAGE_PROXY_TYPE ||
       'cmliussss-cdn-tencent',

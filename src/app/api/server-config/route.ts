@@ -33,6 +33,7 @@ export async function GET(request: NextRequest) {
     DoubanProxy: canReadSensitiveConfig
       ? config!.SiteConfig.DoubanProxy || ''
       : '',
+    BangumiDataSource: publicConfig.BangumiDataSource,
     DoubanImageProxyType: doubanImageProxyType,
     DoubanImageProxy: canReadSensitiveConfig
       ? config!.SiteConfig.DoubanImageProxy || ''

@@ -204,6 +204,7 @@ async function fetchWithTimeout(
 
 type DoubanProxyType =
   | 'direct'
+  | 'server'
   | 'cors-proxy-zwei'
   | 'cmliussss-cdn-tencent'
   | 'cmliussss-cdn-ali'
@@ -322,13 +323,15 @@ export function getDoubanCategories(
         return fetchDoubanCategories(params, 'https://cors-anywhere.com/');
       case 'custom':
         return fetchDoubanCategories(params, proxyUrl);
-      case 'direct':
-      default: {
+      case 'server': {
         const response = await fetch(
           `/api/douban/categories?kind=${kind}&category=${category}&type=${type}&limit=${pageLimit}&start=${pageStart}`,
         );
         return response.json();
       }
+      case 'direct':
+      default:
+        return fetchDoubanCategories(params, '');
     }
   });
 }
@@ -356,13 +359,15 @@ export function getDoubanList(params: DoubanListParams): Promise<DoubanResult> {
         return fetchDoubanList(params, 'https://cors-anywhere.com/');
       case 'custom':
         return fetchDoubanList(params, proxyUrl);
-      case 'direct':
-      default: {
+      case 'server': {
         const response = await fetch(
           `/api/douban?tag=${tag}&type=${type}&pageSize=${pageLimit}&pageStart=${pageStart}`,
         );
         return response.json();
       }
+      case 'direct':
+      default:
+        return fetchDoubanList(params, '');
     }
   });
 }
@@ -479,13 +484,15 @@ export function getDoubanRecommends(
         return fetchDoubanRecommends(params, 'https://cors-anywhere.com/');
       case 'custom':
         return fetchDoubanRecommends(params, proxyUrl);
-      case 'direct':
-      default: {
+      case 'server': {
         const response = await fetch(
           `/api/douban/recommends?kind=${kind}&limit=${pageLimit}&start=${pageStart}&category=${category}&format=${format}&region=${region}&year=${year}&platform=${platform}&sort=${sort}&label=${label}`,
         );
         return response.json();
       }
+      case 'direct':
+      default:
+        return fetchDoubanRecommends(params, '');
     }
   });
 }

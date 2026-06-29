@@ -5,6 +5,7 @@ export interface RuntimeConfig {
   UPDATE_BRANCH: string;
   DOUBAN_PROXY_TYPE: string;
   DOUBAN_PROXY: string;
+  BANGUMI_DATA_SOURCE: string;
   DOUBAN_IMAGE_PROXY_TYPE: string;
   DOUBAN_IMAGE_PROXY: string;
   DISABLE_YELLOW_FILTER: boolean;
@@ -21,6 +22,7 @@ export const DEFAULT_RUNTIME_CONFIG: RuntimeConfig = {
   UPDATE_BRANCH: 'main',
   DOUBAN_PROXY_TYPE: 'direct',
   DOUBAN_PROXY: '',
+  BANGUMI_DATA_SOURCE: 'server',
   DOUBAN_IMAGE_PROXY_TYPE: 'cmliussss-cdn-tencent',
   DOUBAN_IMAGE_PROXY: '',
   DISABLE_YELLOW_FILTER: false,
@@ -39,6 +41,7 @@ export type ServerConfigPayload = {
   UpdateBranch?: string;
   DoubanProxyType?: string;
   DoubanProxy?: string;
+  BangumiDataSource?: string;
   DoubanImageProxyType?: string;
   DoubanImageProxy?: string;
   DisableYellowFilter?: boolean;
@@ -81,6 +84,8 @@ function runtimeConfigFromServerConfig(
     DOUBAN_PROXY_TYPE:
       data.DoubanProxyType || DEFAULT_RUNTIME_CONFIG.DOUBAN_PROXY_TYPE,
     DOUBAN_PROXY: data.DoubanProxy || DEFAULT_RUNTIME_CONFIG.DOUBAN_PROXY,
+    BANGUMI_DATA_SOURCE:
+      data.BangumiDataSource || DEFAULT_RUNTIME_CONFIG.BANGUMI_DATA_SOURCE,
     DOUBAN_IMAGE_PROXY_TYPE: doubanImageProxyType,
     DOUBAN_IMAGE_PROXY:
       data.DoubanImageProxy || DEFAULT_RUNTIME_CONFIG.DOUBAN_IMAGE_PROXY,

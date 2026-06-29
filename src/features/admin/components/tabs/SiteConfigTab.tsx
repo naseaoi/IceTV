@@ -13,6 +13,11 @@ import { showError, showSuccess } from '@/features/admin/lib/notifications';
 import { AdminConfig } from '@/features/admin/types/api';
 import { SiteConfig } from '@/features/admin/types/internal';
 import {
+  DEFAULT_BANGUMI_DATA_SOURCE,
+  bangumiDataSourceOptions,
+  normalizeBangumiDataSource,
+} from '@/lib/bangumi-source';
+import {
   doubanDataSourceOptions,
   doubanImageProxyTypeOptions,
   getThanksInfo,
@@ -36,6 +41,7 @@ const SiteConfigComponent = ({
     SiteInterfaceCacheTime: 7200,
     DoubanProxyType: 'direct',
     DoubanProxy: '',
+    BangumiDataSource: DEFAULT_BANGUMI_DATA_SOURCE,
     DoubanImageProxyType: 'cmliussss-cdn-tencent',
     DoubanImageProxy: '',
     DisableYellowFilter: false,
@@ -53,6 +59,9 @@ const SiteConfigComponent = ({
         ...config.SiteConfig,
         DoubanProxyType: config.SiteConfig.DoubanProxyType || 'direct',
         DoubanProxy: config.SiteConfig.DoubanProxy || '',
+        BangumiDataSource: normalizeBangumiDataSource(
+          config.SiteConfig.BangumiDataSource,
+        ),
         DoubanImageProxyType:
           config.SiteConfig.DoubanImageProxyType || 'cmliussss-cdn-tencent',
         DoubanImageProxy: config.SiteConfig.DoubanImageProxy || '',
@@ -73,6 +82,13 @@ const SiteConfigComponent = ({
     setSiteSettings((prev) => ({
       ...prev,
       DoubanProxyType: value,
+    }));
+  };
+
+  const handleBangumiDataSourceChange = (value: string) => {
+    setSiteSettings((prev) => ({
+      ...prev,
+      BangumiDataSource: normalizeBangumiDataSource(value),
     }));
   };
 
@@ -316,6 +332,22 @@ const SiteConfigComponent = ({
               </p>
             </div>
           )}
+        </div>
+
+        <div className='space-y-3'>
+          <div>
+            <label className='mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300'>
+              Bangumi 数据代理
+            </label>
+            <AdminSelect
+              value={siteSettings.BangumiDataSource}
+              onChange={(value) => handleBangumiDataSourceChange(value)}
+              options={bangumiDataSourceOptions}
+            />
+            <p className='mt-1 text-xs text-gray-500 dark:text-gray-400'>
+              选择获取新番放送数据的方式
+            </p>
+          </div>
         </div>
 
         {/* 豆瓣图片代理设置 */}

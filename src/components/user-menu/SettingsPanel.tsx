@@ -7,6 +7,13 @@ import AdminSelect from '@/features/admin/components/AdminSelect';
 import AlertModal from '@/features/admin/components/AlertModal';
 import { useAlertModal } from '@/features/admin/hooks/useAlertModal';
 import {
+  BANGUMI_DATA_SOURCE_STORAGE_KEY,
+  DEFAULT_BANGUMI_DATA_SOURCE,
+  bangumiDataSourceOptions,
+  normalizeBangumiDataSource,
+  readDefaultBangumiDataSource,
+} from '@/lib/bangumi-source';
+import {
   doubanDataSourceOptions,
   doubanImageProxyTypeOptions,
   getThanksInfo,
@@ -32,6 +39,9 @@ export function SettingsPanel({ onClose }: SettingsPanelProps) {
   const [fluidSearch, setFluidSearch] = useState(true);
   const [liveDirectConnect, setLiveDirectConnect] = useState(false);
   const [doubanDataSource, setDoubanDataSource] = useState('direct');
+  const [bangumiDataSource, setBangumiDataSource] = useState(
+    DEFAULT_BANGUMI_DATA_SOURCE,
+  );
   const [doubanImageProxyType, setDoubanImageProxyType] = useState('direct');
   const [doubanImageProxyUrl, setDoubanImageProxyUrl] = useState('');
   const { alertModal, showAlert, hideAlert } = useAlertModal();
@@ -59,6 +69,15 @@ export function SettingsPanel({ onClose }: SettingsPanelProps) {
       setDoubanProxyUrl(savedDoubanProxyUrl);
     } else if (defaultDoubanProxy) {
       setDoubanProxyUrl(defaultDoubanProxy);
+    }
+
+    const savedBangumiDataSource = localStorage.getItem(
+      BANGUMI_DATA_SOURCE_STORAGE_KEY,
+    );
+    if (savedBangumiDataSource !== null) {
+      setBangumiDataSource(normalizeBangumiDataSource(savedBangumiDataSource));
+    } else {
+      setBangumiDataSource(readDefaultBangumiDataSource());
     }
 
     const defaultDoubanImageProxyType =
@@ -151,6 +170,13 @@ export function SettingsPanel({ onClose }: SettingsPanelProps) {
     showProxyToast();
   };
 
+  const handleBangumiDataSourceChange = (value: string) => {
+    const nextSource = normalizeBangumiDataSource(value);
+    setBangumiDataSource(nextSource);
+    localStorage.setItem(BANGUMI_DATA_SOURCE_STORAGE_KEY, nextSource);
+    showProxyToast();
+  };
+
   const handleDoubanImageProxyTypeChange = (value: string) => {
     setDoubanImageProxyType(value);
     localStorage.setItem('doubanImageProxyType', value);
@@ -170,6 +196,7 @@ export function SettingsPanel({ onClose }: SettingsPanelProps) {
       window.RUNTIME_CONFIG?.DOUBAN_IMAGE_PROXY_TYPE || 'direct';
     const defaultDoubanImageProxyUrl =
       window.RUNTIME_CONFIG?.DOUBAN_IMAGE_PROXY || '';
+    const defaultBangumiDataSource = readDefaultBangumiDataSource();
     const defaultFluidSearch = window.RUNTIME_CONFIG?.FLUID_SEARCH !== false;
 
     setDefaultAggregateSearch(true);
@@ -179,6 +206,7 @@ export function SettingsPanel({ onClose }: SettingsPanelProps) {
     setLiveDirectConnect(false);
     setDoubanProxyUrl(defaultDoubanProxy);
     setDoubanDataSource(defaultDoubanProxyType);
+    setBangumiDataSource(defaultBangumiDataSource);
     setDoubanImageProxyType(defaultDoubanImageProxyType);
     setDoubanImageProxyUrl(defaultDoubanImageProxyUrl);
 
@@ -189,6 +217,10 @@ export function SettingsPanel({ onClose }: SettingsPanelProps) {
     localStorage.setItem('liveDirectConnect', JSON.stringify(false));
     localStorage.setItem('doubanProxyUrl', defaultDoubanProxy);
     localStorage.setItem('doubanDataSource', defaultDoubanProxyType);
+    localStorage.setItem(
+      BANGUMI_DATA_SOURCE_STORAGE_KEY,
+      defaultBangumiDataSource,
+    );
     localStorage.setItem('doubanImageProxyType', defaultDoubanImageProxyType);
     localStorage.setItem('doubanImageProxyUrl', defaultDoubanImageProxyUrl);
   };
@@ -295,7 +327,41 @@ export function SettingsPanel({ onClose }: SettingsPanelProps) {
               </div>
             )}
 
-            <div className='border-t border-gray-200 dark:border-gray-700'></div>
+            <div className='space-y-3'>
+              <div>
+                <h4 className='text-sm font-medium text-gray-700 dark:text-gray-300'>
+                  Bangumi 数据代理
+                </h4>
+                <p className='mt-1 text-xs text-gray-500 dark:text-gray-400'>
+                  选择获取新番放送数据的方式
+                </p>
+              </div>
+              <AdminSelect
+                value={bangumiDataSource}
+                onChange={(value) => handleBangumiDataSourceChange(value)}
+                options={bangumiDataSourceOptions}
+              />
+
+              {getThanksInfo(bangumiDataSource) && (
+                <div className='mt-3'>
+                  <button
+                    type='button'
+                    onClick={() =>
+                      window.open(
+                        getThanksInfo(bangumiDataSource)!.url,
+                        '_blank',
+                      )
+                    }
+                    className='flex w-full cursor-pointer items-center justify-center gap-1.5 px-3 text-xs text-gray-500 dark:text-gray-400'
+                  >
+                    <span className='font-medium'>
+                      {getThanksInfo(bangumiDataSource)!.text}
+                    </span>
+                    <ExternalLink className='w-3.5 opacity-70' />
+                  </button>
+                </div>
+              )}
+            </div>
 
             <div className='space-y-3'>
               <div>
