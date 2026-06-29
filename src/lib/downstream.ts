@@ -42,8 +42,14 @@ interface GirigiriPlayExtractResult {
   poster: string;
 }
 
+const GIRI_FALLBACK_ORIGINS = [
+  'https://anime.girigirilove.icu',
+  'https://ani.girigirilove.com',
+];
+const GIRI_DISABLED_ORIGINS = new Set(['https://anime.girigirilove.com']);
+
 function isGirigiriSource(apiSite: ApiSite): boolean {
-  return /girigirilove\.com/i.test(apiSite.api);
+  return /girigirilove\.(?:com|icu)/i.test(apiSite.api);
 }
 
 // giri 页面请求用浏览器风格 headers，降低 CF 盾触发概率
@@ -100,6 +106,70 @@ function toAbsoluteUrl(url: string, origin: string): string {
   }
 }
 
+function normalizeOrigin(origin: string): string {
+  return origin.replace(/\/+$/, '').toLowerCase();
+}
+
+function uniqueOrigins(origins: string[]): string[] {
+  const seen = new Set<string>();
+  return origins
+    .map((origin) => origin.replace(/\/+$/, ''))
+    .filter((origin) => {
+      const normalized = normalizeOrigin(origin);
+      if (
+        !normalized ||
+        seen.has(normalized) ||
+        GIRI_DISABLED_ORIGINS.has(normalized)
+      ) {
+        return false;
+      }
+      seen.add(normalized);
+      return true;
+    });
+}
+
+function isEnabledGirigiriOrigin(origin: string): boolean {
+  return !GIRI_DISABLED_ORIGINS.has(normalizeOrigin(origin));
+}
+
+function includeEnabledGirigiriOrigin(origin: string): string[] {
+  if (!isEnabledGirigiriOrigin(origin)) {
+    return [];
+  }
+  return [origin];
+}
+
+function getGirigiriOrigins(apiSite: ApiSite): string[] {
+  return uniqueOrigins([
+    ...includeEnabledGirigiriOrigin(getSiteOrigin(apiSite)),
+    ...GIRI_FALLBACK_ORIGINS,
+  ]);
+}
+
+function prioritizeGirigiriOrigins(
+  origins: string[],
+  preferredOrigin: string,
+): string[] {
+  return uniqueOrigins([
+    ...includeEnabledGirigiriOrigin(preferredOrigin),
+    ...origins.filter((origin) => origin !== preferredOrigin),
+  ]);
+}
+
+async function fetchGiriHtmlFromOrigins(
+  origins: string[],
+  path: string,
+): Promise<{ origin: string; html: string } | null> {
+  for (const origin of origins) {
+    const html = await fetchGiriHtml(toAbsoluteUrl(path, origin));
+    if (html) {
+      return { origin, html };
+    }
+  }
+
+  return null;
+}
+
 function decodeGirigiriPlayUrl(rawUrl: string, encrypt: number): string {
   const normalized = rawUrl.replace(/\\\//g, '/');
 
@@ -123,23 +193,10 @@ function decodeGirigiriPlayUrl(rawUrl: string, encrypt: number): string {
   return normalized;
 }
 
-async function fetchGirigiriEpisodePlayUrl(
+function parseGirigiriEpisodePlayHtml(
+  html: string,
   origin: string,
-  playPath: string,
-): Promise<GirigiriPlayExtractResult> {
-  const playUrl = toAbsoluteUrl(playPath, origin);
-  const html = await fetchGiriHtml(playUrl);
-
-  if (!html) {
-    return {
-      url: null,
-      title: '',
-      year: 'unknown',
-      desc: '',
-      poster: '',
-    };
-  }
-
+): GirigiriPlayExtractResult {
   const title =
     html.match(/class="player-title-link"[^>]*>([^<]+)<\/a>/)?.[1]?.trim() ||
     html.match(/<title>([^<_]+)/)?.[1]?.trim() ||
@@ -192,6 +249,37 @@ async function fetchGirigiriEpisodePlayUrl(
   };
 }
 
+async function fetchGirigiriEpisodePlayUrl(
+  origins: string[],
+  playPath: string,
+): Promise<GirigiriPlayExtractResult> {
+  let fallbackResult: GirigiriPlayExtractResult | null = null;
+
+  for (const origin of origins) {
+    const playUrl = toAbsoluteUrl(playPath, origin);
+    const html = await fetchGiriHtml(playUrl);
+    if (!html) {
+      continue;
+    }
+
+    const result = parseGirigiriEpisodePlayHtml(html, origin);
+    if (result.url) {
+      return result;
+    }
+    fallbackResult = fallbackResult || result;
+  }
+
+  return (
+    fallbackResult || {
+      url: null,
+      title: '',
+      year: 'unknown',
+      desc: '',
+      poster: '',
+    }
+  );
+}
+
 async function runWithConcurrency<T>(
   tasks: Array<() => Promise<T>>,
   concurrency: number,
@@ -218,11 +306,10 @@ async function runWithConcurrency<T>(
   return results;
 }
 
-async function searchFromGirigiri(
-  apiSite: ApiSite,
+async function fetchGirigiriSuggestList(
+  origin: string,
   query: string,
-): Promise<SearchResult[]> {
-  const origin = getSiteOrigin(apiSite);
+): Promise<GirigiriSuggestItem[] | null> {
   const searchUrl = `${origin}/index.php/ajax/suggest?mid=1&wd=${encodeURIComponent(query)}`;
 
   const controller = new AbortController();
@@ -234,13 +321,29 @@ async function searchFromGirigiri(
       signal: controller.signal,
     });
 
-    clearTimeout(timeoutId);
-
-    if (!response.ok) return [];
+    if (!response.ok) return null;
     const data = await response.json();
-    const list = Array.isArray(data?.list)
+    return Array.isArray(data?.list)
       ? (data.list as GirigiriSuggestItem[])
-      : [];
+      : null;
+  } catch {
+    return null;
+  } finally {
+    clearTimeout(timeoutId);
+  }
+}
+
+async function searchFromGirigiri(
+  apiSite: ApiSite,
+  query: string,
+): Promise<SearchResult[]> {
+  const origins = getGirigiriOrigins(apiSite);
+
+  for (const origin of origins) {
+    const list = await fetchGirigiriSuggestList(origin, query);
+    if (!list) {
+      continue;
+    }
 
     return list
       .map((item) => {
@@ -264,10 +367,9 @@ async function searchFromGirigiri(
         } as SearchResult;
       })
       .filter((item): item is SearchResult => Boolean(item));
-  } catch {
-    clearTimeout(timeoutId);
-    return [];
   }
+
+  return [];
 }
 
 /**
@@ -278,7 +380,7 @@ async function searchFromGirigiri(
  * 以取回完整的版本清单。
  */
 async function resolveGirigiriEpisodeVariants(
-  origin: string,
+  origins: string[],
   videoId: string,
   detailHtml: string,
 ): Promise<GiriEpisodeVariant[]> {
@@ -294,13 +396,12 @@ async function resolveGirigiriEpisodeVariants(
   const probePlayPath =
     fromDetail[0]?.episodes[0]?.playPath ||
     `/playGV${videoId}-${probeGroupId}-1/`;
-  const probeUrl = toAbsoluteUrl(probePlayPath, origin);
-  const probeHtml = await fetchGiriHtml(probeUrl);
-  if (!probeHtml) {
+  const probeResult = await fetchGiriHtmlFromOrigins(origins, probePlayPath);
+  if (!probeResult?.html) {
     return fromDetail;
   }
 
-  const fromProbe = extractGirigiriEpisodeVariants(probeHtml);
+  const fromProbe = extractGirigiriEpisodeVariants(probeResult.html);
   return fromProbe.length > fromDetail.length ? fromProbe : fromDetail;
 }
 
@@ -309,13 +410,18 @@ async function getDetailFromGirigiri(
   id: string,
 ): Promise<SearchResult> {
   const { videoId, groupId: preferredGroupId } = parseGirigiriVariantId(id);
-  const origin = getSiteOrigin(apiSite);
-  const detailUrl = `${origin}/GV${videoId}/`;
-  const html = await fetchGiriHtml(detailUrl);
+  const origins = getGirigiriOrigins(apiSite);
+  const detailResult = await fetchGiriHtmlFromOrigins(
+    origins,
+    `/GV${videoId}/`,
+  );
 
-  if (!html) {
+  if (!detailResult?.html) {
     throw new Error('详情页请求失败或被 Cloudflare 拦截');
   }
+
+  const { origin, html } = detailResult;
+  const activeOrigins = prioritizeGirigiriOrigins(origins, origin);
 
   const title =
     html
@@ -340,7 +446,7 @@ async function getDetailFromGirigiri(
   const poster = toAbsoluteUrl(posterRaw, origin);
 
   const episodeVariants = await resolveGirigiriEpisodeVariants(
-    origin,
+    activeOrigins,
     videoId,
     html,
   );
@@ -360,7 +466,7 @@ async function getDetailFromGirigiri(
     episodeEntries.map(
       ([playPath]) =>
         async () =>
-          fetchGirigiriEpisodePlayUrl(origin, playPath),
+          fetchGirigiriEpisodePlayUrl(activeOrigins, playPath),
     ),
     4,
   );

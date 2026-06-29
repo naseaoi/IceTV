@@ -13,6 +13,7 @@ export interface ProbeEntry {
   info: VideoInfo;
   ts: number;
   source: 'probe' | 'player' | 'pending';
+  previousInfo?: VideoInfo;
 }
 
 const PROBE_TTL_MS = 10 * 60_000;
@@ -120,10 +121,17 @@ async function runProbe(
   sourceInput: SearchResult,
   options: ProbeOptions,
 ) {
+  const existingEntry = state.entries.get(key);
+  const previousInfo =
+    existingEntry?.source === 'pending'
+      ? existingEntry.previousInfo
+      : existingEntry?.info;
+
   setEntry(key, {
     info: { quality: '未知', loadSpeed: '测量中...', pingTime: 0 },
     ts: Date.now(),
     source: 'pending',
+    previousInfo,
   });
 
   let resolved = sourceInput;
