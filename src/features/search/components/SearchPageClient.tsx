@@ -256,13 +256,7 @@ export default function SearchPageClient() {
   return (
     <PageLayout activePath='/search'>
       <div className='overflow-visible px-4 py-4 sm:px-10 sm:py-8'>
-        <div
-          className={`transition-all duration-500 ease-out ${
-            showResults
-              ? 'mb-8 pt-0'
-              : 'flex min-h-[60vh] flex-col items-center justify-center'
-          }`}
-        >
+        <div className={`${showResults ? 'mb-8 pt-0' : 'pt-[20vh]'}`}>
           <form onSubmit={handleSearch} className='mx-auto w-full max-w-2xl'>
             <div className='relative'>
               <Search className='absolute left-3 top-1/2 h-5 w-5 -translate-y-1/2 text-gray-400 dark:text-gray-500' />
@@ -315,11 +309,13 @@ export default function SearchPageClient() {
           </form>
 
           {!showResults && (
-            <div className='mt-8 w-full max-w-2xl'>
-              <SearchHistory
-                searchHistory={searchHistory}
-                setSearchQuery={setSearchQuery}
-              />
+            <div className='mx-auto mt-8 w-full max-w-2xl'>
+              <div className='mx-auto h-[120px] w-full'>
+                <SearchHistory
+                  searchHistory={searchHistory}
+                  setSearchQuery={setSearchQuery}
+                />
+              </div>
             </div>
           )}
         </div>

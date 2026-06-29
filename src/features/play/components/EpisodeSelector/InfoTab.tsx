@@ -67,6 +67,7 @@ export const InfoTab: React.FC<InfoTabProps> = ({
             src={videoCover}
             alt={videoTitle}
             sizes='(max-width: 640px) 96px, (max-width: 1280px) 112px, 128px'
+            quality={60}
             priority
           />
         </div>

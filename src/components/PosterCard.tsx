@@ -272,7 +272,7 @@ function PosterCard({
       </div>
 
       <div
-        className='mt-2 text-center'
+        className='mt-2 h-5 text-center'
         style={noSelectStyle}
         onContextMenu={preventContextMenu}
       >
