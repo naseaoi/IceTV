@@ -25,6 +25,14 @@ function createGiriSite(api: string): ApiSite {
   };
 }
 
+function createGenericSite(): ApiSite {
+  return {
+    key: 'generic-mp4',
+    name: 'Generic MP4',
+    api: 'https://api.example',
+  };
+}
+
 describe('downstream giri source', () => {
   beforeEach(() => {
     global.fetch = jest.fn();
@@ -81,7 +89,6 @@ describe('downstream giri source', () => {
     const urls = fetchMock.mock.calls.map(([input]) => String(input));
 
     expect(urls).toEqual([
-      'https://anime.girigirilove.icu/index.php/ajax/suggest?mid=1&wd=fallback',
       'https://ani.girigirilove.com/index.php/ajax/suggest?mid=1&wd=fallback',
     ]);
     expect(results[0]).toEqual(
@@ -142,6 +149,78 @@ describe('downstream giri source', () => {
         poster: 'https://anime.girigirilove.icu/detail.jpg',
         episodes: ['https://cdn.example/video.m3u8'],
         episodes_titles: ['第1集'],
+      }),
+    );
+  });
+
+  it('giri 详情会保留播放页返回的 mp4 地址', async () => {
+    const detailHtml = `
+      <html>
+        <h3 class="slide-info-title">MP4 Anime</h3>
+        <div class="anthology-list-box">
+          <a href="/playGV200-1-1/">第1集</a>
+        </div>
+      </html>
+    `;
+    const playHtml = `
+      <html>
+        <script>
+          var player_aaaa={"encrypt":0,"url":"https://cdn.example/video.mp4?token=abc"};
+        </script>
+      </html>
+    `;
+    const fetchMock = global.fetch as jest.Mock;
+    fetchMock.mockImplementation(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url === 'https://ani.girigirilove.com/GV200/') {
+        return createTextResponse(detailHtml);
+      }
+      if (url === 'https://ani.girigirilove.com/playGV200-1-1/') {
+        return createTextResponse(playHtml);
+      }
+      return createTextResponse('', false);
+    });
+
+    const detail = await getDetailFromApi(
+      createGiriSite('https://ani.girigirilove.com'),
+      '200',
+    );
+
+    expect(detail.episodes).toEqual([
+      'https://cdn.example/video.mp4?token=abc',
+    ]);
+    expect(detail.episodes_titles).toEqual(['第1集']);
+  });
+
+  it('通用 CMS 搜索会保留 mp4 播放地址', async () => {
+    const fetchMock = global.fetch as jest.Mock;
+    fetchMock.mockResolvedValue(
+      createJsonResponse({
+        pagecount: 1,
+        list: [
+          {
+            vod_id: 300,
+            vod_name: 'MP4 Video',
+            vod_pic: 'https://cdn.example/poster.jpg',
+            vod_play_url:
+              '第1集$https://cdn.example/video.mp4?token=abc#第2集$https://cdn.example/video.m3u8',
+            vod_year: '2026',
+            vod_content: '',
+          },
+        ],
+      }),
+    );
+
+    const results = await searchFirstPageFromApi(createGenericSite(), 'mp4');
+
+    expect(results[0]).toEqual(
+      expect.objectContaining({
+        id: '300',
+        episodes: [
+          'https://cdn.example/video.mp4?token=abc',
+          'https://cdn.example/video.m3u8',
+        ],
+        episodes_titles: ['第1集', '第2集'],
       }),
     );
   });

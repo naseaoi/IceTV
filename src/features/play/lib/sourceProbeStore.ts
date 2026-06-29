@@ -1,6 +1,7 @@
-import { getVideoResolutionFromM3u8 } from '@/lib/hls-utils';
 import { getProxyModes, shouldUseServerProxy } from '@/lib/proxy-modes';
 import { SearchResult } from '@/lib/types';
+
+import { probeVodEpisodeUrl } from '@/features/play/lib/vodProbe';
 
 export interface VideoInfo {
   quality: string;
@@ -176,7 +177,7 @@ async function runProbe(
     if (!probeEpisodeUrl) {
       throw new Error('Requested episode is unavailable for probe');
     }
-    const info = await getVideoResolutionFromM3u8(
+    const info = await probeVodEpisodeUrl(
       probeEpisodeUrl,
       useProxy,
       resolved.source,

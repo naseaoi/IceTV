@@ -1,6 +1,10 @@
 import { useEffect, useRef } from 'react';
 
-import { clearSourceProxyOverride, isServerProxy } from '@/lib/proxy-modes';
+import {
+  clearSourceProxyOverride,
+  isServerProxy,
+  rememberSourceServerProxy,
+} from '@/lib/proxy-modes';
 import {
   bindPlayerHoverControls,
   bindPlayerMobileControls,
@@ -42,7 +46,12 @@ import {
   shouldForcePlaybackStartFromHead,
 } from '@/features/play/lib/resumePlayback';
 import { createVodM3u8Loader } from '@/features/play/lib/vodHlsRuntime';
-import { buildVodProxyUrl } from '@/features/play/lib/vodProxyUrl';
+import {
+  buildVodProxyUrl,
+  buildVodSegmentProxyUrl,
+  isVodM3u8Url,
+  isVodMp4Url,
+} from '@/features/play/lib/vodProxyUrl';
 
 export type { UseArtPlayerParams } from '@/features/play/hooks/artPlayerTypes';
 
@@ -93,6 +102,7 @@ export function useArtPlayer(params: UseArtPlayerParams) {
   });
   const autoAdvanceArmedRef = useRef<boolean>(false);
   const autoAdvancedRef = useRef<boolean>(false);
+  const playerMediaKindRef = useRef<'hls' | 'native' | null>(null);
 
   useEffect(() => {
     if (
@@ -121,6 +131,7 @@ export function useArtPlayer(params: UseArtPlayerParams) {
     const initPlayer = async () => {
       try {
         const preSourceKey = detailRef.current?.source || '';
+        const mediaKind = isVodM3u8Url(videoUrl) ? 'hls' : 'native';
         const playbackInfoContext = {
           source: detailRef.current?.source || detail?.source || '',
           id: detailRef.current?.id || detail?.id || '',
@@ -134,14 +145,29 @@ export function useArtPlayer(params: UseArtPlayerParams) {
             sourceKey: preSourceKey,
             playbackRequestMode: playbackRequestModeRef.current || 'initial',
           });
+        const buildSegmentProxyUrl = (rawUrl: string) =>
+          buildVodSegmentProxyUrl({
+            rawUrl,
+            sourceKey: preSourceKey,
+            playbackRequestMode: playbackRequestModeRef.current || 'initial',
+          });
+        const resolvePlaybackUrl = (rawUrl: string) =>
+          mediaKind === 'hls' || !preUseProxy
+            ? rawUrl
+            : buildSegmentProxyUrl(rawUrl);
+        const playbackUrl = resolvePlaybackUrl(videoUrl);
 
-        prefetchM3U8(buildProxyUrl(videoUrl));
+        if (mediaKind === 'hls') {
+          prefetchM3U8(buildProxyUrl(videoUrl));
+        }
         preconnectForUrl(videoUrl);
 
         const nextEpisodeUrl =
           detail?.episodes?.[currentEpisodeIndex + 1] ?? null;
         if (nextEpisodeUrl) {
-          prefetchM3U8(buildProxyUrl(nextEpisodeUrl));
+          if (isVodM3u8Url(nextEpisodeUrl)) {
+            prefetchM3U8(buildProxyUrl(nextEpisodeUrl));
+          }
           preconnectForUrl(nextEpisodeUrl);
         }
 
@@ -153,18 +179,23 @@ export function useArtPlayer(params: UseArtPlayerParams) {
           typeof (window as unknown as Record<string, unknown>)
             .webkitConvertPointFromNodeToPage === 'function';
 
-        if (!isWebkit && artPlayerRef.current) {
+        if (
+          !isWebkit &&
+          artPlayerRef.current &&
+          mediaKind === 'hls' &&
+          playerMediaKindRef.current === mediaKind
+        ) {
           resetPlayerLoadingSessionState(loadingSessionRef.current);
           restorePlayerPlaybackRate(
             artPlayerRef.current,
             lastPlaybackRateRef.current,
           );
-          artPlayerRef.current.switch = videoUrl;
+          artPlayerRef.current.switch = playbackUrl;
           artPlayerRef.current.title = `${videoTitle} - 第${currentEpisodeIndex + 1}集`;
           if (artPlayerRef.current?.video) {
             ensureVideoSource(
               artPlayerRef.current.video as HTMLVideoElement,
-              videoUrl,
+              playbackUrl,
             );
           }
           return;
@@ -208,13 +239,14 @@ export function useArtPlayer(params: UseArtPlayerParams) {
 
         artPlayerRef.current = new Artplayer({
           container: artRef.current,
-          url: videoUrl,
+          url: playbackUrl,
           ...createArtPlayerConfig({
             isLive: false,
             setting: true,
             playbackRate: true,
             fastForward: false,
           }),
+          type: mediaKind === 'native' && isVodMp4Url(videoUrl) ? 'mp4' : '',
           customType: {
             m3u8: m3u8Loader,
           },
@@ -236,8 +268,53 @@ export function useArtPlayer(params: UseArtPlayerParams) {
         if (!player) {
           return;
         }
+        playerMediaKindRef.current = mediaKind;
         bindPlayerHoverControls(player);
         bindPlayerMobileControls(player);
+        let nativeUseServerProxy = mediaKind === 'native' && preUseProxy;
+        let nativeFallbackStarted = false;
+
+        if (mediaKind === 'native' && player.video) {
+          getManagedVideo(
+            player.video as HTMLVideoElement,
+          ).__icetvUsingServerProxy = nativeUseServerProxy;
+        }
+
+        const switchNativeToServerProxy = (reason: string) => {
+          if (mediaKind !== 'native' || nativeUseServerProxy) {
+            return false;
+          }
+
+          const fallbackUrl = buildSegmentProxyUrl(videoUrl);
+          console.warn('原生视频直连起播失败，切换服务端代理重试', {
+            sourceKey: preSourceKey,
+            reason,
+          });
+
+          if (preSourceKey) {
+            rememberSourceServerProxy(preSourceKey);
+          }
+          nativeUseServerProxy = true;
+          nativeFallbackStarted = true;
+          setRealtimeLoadSpeed('直连失败，切换代理...');
+          setIsVideoLoading(true);
+          onSourceProxyFallbackStarted?.();
+
+          try {
+            player.switch = fallbackUrl;
+            const activeVideo = player.video as HTMLVideoElement | undefined;
+            if (activeVideo) {
+              const managedVideo = getManagedVideo(activeVideo);
+              managedVideo.__icetvUsingServerProxy = true;
+              ensureVideoSource(activeVideo, fallbackUrl);
+              void activeVideo.play().catch(() => {});
+            }
+            return true;
+          } catch (error) {
+            console.error('切换原生视频服务端代理失败:', error);
+            return false;
+          }
+        };
 
         const tryAutoAdvanceEpisode = (): boolean => {
           if (!autoAdvanceArmedRef.current) return false;
@@ -652,6 +729,13 @@ export function useArtPlayer(params: UseArtPlayerParams) {
         player.on('error', (err: Error) => {
           console.error('播放器错误:', err);
           if (player.currentTime > 0) return;
+          if (
+            mediaKind === 'native' &&
+            !nativeFallbackStarted &&
+            switchNativeToServerProxy(err.message || 'player-error')
+          ) {
+            return;
+          }
           const activeVideo = player.video as HTMLVideoElement | undefined;
           const activeManagedVideo = activeVideo
             ? getManagedVideo(activeVideo)
@@ -684,7 +768,7 @@ export function useArtPlayer(params: UseArtPlayerParams) {
         });
 
         if (player.video) {
-          ensureVideoSource(player.video as HTMLVideoElement, videoUrl);
+          ensureVideoSource(player.video as HTMLVideoElement, playbackUrl);
         }
 
         window.setTimeout(finishInitialLoadingIfMediaReady, 0);

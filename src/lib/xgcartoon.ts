@@ -20,11 +20,10 @@ export interface XgcartoonSearchResultItem {
   tags: string[];
 }
 
-const XGCARTOON_EPISODE_LINK_REGEX =
-  /href="\/user\/page_direct\?cartoon_id=([^&]+)&(?:amp;)?chapter_id=([^"]+)"[^>]*>[\s\S]*?<span[^>]*>(.*?)<\/span>/g;
-
-const XGCARTOON_SEARCH_RESULT_REGEX =
-  /href="\/detail\/([^"]+)"[^>]*class="topic-list-item"[\s\S]*?<amp-img[^>]+src="([^"]+)"[\s\S]*?<\/amp-img>[\s\S]*?<div[^>]*>([\s\S]*?)<\/div>/g;
+const XGCARTOON_VIDEO_CDN_ORIGIN = 'https://xgct-video.bzcdn.net';
+const XGCARTOON_VARIANT_ID_REGEX = /^(.*)__xg_(.+)$/;
+const XGCARTOON_PLAYER_VID_REGEX =
+  /player\.htm\?[^"'<>]*\bvid=([0-9a-f-]{16,})/i;
 
 function cleanText(rawText: string): string {
   return normalizeInlineText(rawText.replace(/<[^>]+>/g, ' '));
@@ -41,24 +40,77 @@ export function buildXgcartoonPlayUrl(
   cartoonId: string,
   chapterId: string,
 ): string {
-  return `/user/page_direct?cartoon_id=${cartoonId}&chapter_id=${chapterId}`;
+  return `/user/page_direct?cartoon_id=${encodeURIComponent(cartoonId)}&chapter_id=${encodeURIComponent(chapterId)}`;
 }
 
-// 从详情页HTML提取剧集列表
-export function extractXgcartoonEpisodes(
-  html: string,
-): XgcartoonEpisodeEntry[] {
-  const matches = Array.from(html.matchAll(XGCARTOON_EPISODE_LINK_REGEX));
-  if (matches.length === 0) {
-    return [];
+export function buildXgcartoonVideoPath(
+  cartoonId: string,
+  chapterId: string,
+): string {
+  return `/video/${encodeURIComponent(cartoonId)}/${encodeURIComponent(chapterId)}.html`;
+}
+
+export function buildXgcartoonVariantId(
+  cartoonId: string,
+  groupId: string,
+  isDefault: boolean,
+): string {
+  return isDefault ? cartoonId : `${cartoonId}__xg_${groupId}`;
+}
+
+export function parseXgcartoonVariantId(id: string): {
+  cartoonId: string;
+  groupId: string | null;
+} {
+  const match = id.match(XGCARTOON_VARIANT_ID_REGEX);
+  if (!match) {
+    return { cartoonId: id, groupId: null };
   }
 
+  return {
+    cartoonId: match[1],
+    groupId: match[2],
+  };
+}
+
+export function buildXgcartoonPlaylistUrl(videoId: string): string {
+  return `${XGCARTOON_VIDEO_CDN_ORIGIN}/${encodeURIComponent(videoId)}/playlist.m3u8`;
+}
+
+export function extractXgcartoonPlayerVid(html: string): string | null {
+  const normalizedHtml = html.replace(/&amp;/g, '&');
+  const match = normalizedHtml.match(XGCARTOON_PLAYER_VID_REGEX);
+  return match ? match[1] : null;
+}
+
+function parseEpisodeAnchors(
+  html: string,
+  requireChapterClass: boolean,
+): XgcartoonEpisodeEntry[] {
+  const anchorMatches = Array.from(
+    html.matchAll(/<a\b([^>]*)>([\s\S]*?)<\/a>/g),
+  );
   const episodes: XgcartoonEpisodeEntry[] = [];
   const seenChapterIds = new Set<string>();
 
-  for (const match of matches) {
-    const chapterId = match[2];
-    const title = cleanText(match[3] || '');
+  for (const match of anchorMatches) {
+    const attrs = match[1] || '';
+    if (requireChapterClass && !/\bgoto-chapter\b/.test(attrs)) {
+      continue;
+    }
+
+    const hrefMatch = attrs.match(
+      /href="\/user\/page_direct\?cartoon_id=([^"&]+)&(?:amp;)?chapter_id=([^"]+)"/,
+    );
+    if (!hrefMatch) {
+      continue;
+    }
+
+    const chapterId = hrefMatch[2];
+    const titleAttr = attrs.match(/\btitle="([^"]*)"/)?.[1] || '';
+    const spanTitle =
+      match[2].match(/<span[^>]*>([\s\S]*?)<\/span>/)?.[1] || '';
+    const title = cleanText(titleAttr || spanTitle || match[2] || '');
 
     if (!chapterId || seenChapterIds.has(chapterId)) {
       continue;
@@ -74,8 +126,16 @@ export function extractXgcartoonEpisodes(
   return episodes;
 }
 
-// 提取剧集变体（多个播放源）
 // 从详情页HTML提取分组的剧集列表
+export function extractXgcartoonEpisodes(
+  html: string,
+): XgcartoonEpisodeEntry[] {
+  const chapterEpisodes = parseEpisodeAnchors(html, true);
+  return chapterEpisodes.length > 0
+    ? chapterEpisodes
+    : parseEpisodeAnchors(html, false);
+}
+
 export function extractXgcartoonEpisodeVariants(
   html: string,
 ): XgcartoonEpisodeVariant[] {

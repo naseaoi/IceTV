@@ -1,8 +1,13 @@
 import {
+  buildXgcartoonPlaylistUrl,
   buildXgcartoonPlayUrl,
+  buildXgcartoonVideoPath,
+  buildXgcartoonVariantId,
   extractXgcartoonEpisodes,
   extractXgcartoonEpisodeVariants,
+  extractXgcartoonPlayerVid,
   extractXgcartoonSearchResults,
+  parseXgcartoonVariantId,
   parseXgcartoonDetailUrl,
 } from '@/lib/xgcartoon';
 
@@ -47,6 +52,13 @@ describe('xgcartoon', () => {
     });
   });
 
+  describe('buildXgcartoonVideoPath', () => {
+    it('构建直接视频页路径', () => {
+      const url = buildXgcartoonVideoPath('test-cartoon', 'abc123');
+      expect(url).toBe('/video/test-cartoon/abc123.html');
+    });
+  });
+
   describe('extractXgcartoonEpisodes', () => {
     it('从HTML提取剧集列表', () => {
       const episodes = extractXgcartoonEpisodes(MOCK_DETAIL_HTML);
@@ -78,6 +90,63 @@ describe('xgcartoon', () => {
       `;
       const episodes = extractXgcartoonEpisodes(html);
       expect(episodes).toHaveLength(1);
+    });
+
+    it('优先提取选集区域的剧集链接', () => {
+      const html = `
+        <a href="/user/page_direct?cartoon_id=test&amp;chapter_id=first" class="btn btn-base"><span>播放</span></a>
+        <a href="/user/page_direct?cartoon_id=test&amp;chapter_id=latest"><span>27</span></a>
+        <div class="detail-right__volumes">
+          <a href="/user/page_direct?cartoon_id=test&amp;chapter_id=first" title="第01集" class="goto-chapter chapter-box text-truncate"><span>第01集</span></a>
+          <a href="/user/page_direct?cartoon_id=test&amp;chapter_id=second" title="第02集" class="goto-chapter chapter-box text-truncate"><span>第02集</span></a>
+        </div>
+      `;
+      const episodes = extractXgcartoonEpisodes(html);
+
+      expect(episodes).toEqual([
+        { chapterId: 'first', title: '第01集' },
+        { chapterId: 'second', title: '第02集' },
+      ]);
+    });
+  });
+
+  describe('extractXgcartoonPlayerVid', () => {
+    it('从播放页iframe提取vid', () => {
+      const html = `
+        <iframe src="https://pframe.xgcartoon.com/player.htm?vid=ca4cb380-f955-412a-8891-02820f6b50a0&amp;autoplay=false"></iframe>
+      `;
+
+      expect(extractXgcartoonPlayerVid(html)).toBe(
+        'ca4cb380-f955-412a-8891-02820f6b50a0',
+      );
+    });
+  });
+
+  describe('buildXgcartoonPlaylistUrl', () => {
+    it('构建CDN播放列表URL', () => {
+      expect(buildXgcartoonPlaylistUrl('ca4cb380-f955')).toBe(
+        'https://xgct-video.bzcdn.net/ca4cb380-f955/playlist.m3u8',
+      );
+    });
+  });
+
+  describe('xgcartoon variant id', () => {
+    it('构建和解析默认变体ID', () => {
+      const id = buildXgcartoonVariantId('test-cartoon', '1', true);
+      expect(id).toBe('test-cartoon');
+      expect(parseXgcartoonVariantId(id)).toEqual({
+        cartoonId: 'test-cartoon',
+        groupId: null,
+      });
+    });
+
+    it('构建和解析非默认变体ID', () => {
+      const id = buildXgcartoonVariantId('test-cartoon', '2', false);
+      expect(id).toBe('test-cartoon__xg_2');
+      expect(parseXgcartoonVariantId(id)).toEqual({
+        cartoonId: 'test-cartoon',
+        groupId: '2',
+      });
     });
   });
 

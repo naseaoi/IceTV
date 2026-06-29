@@ -1,5 +1,21 @@
 import type { PlaybackRequestMode } from '@/features/play/hooks/usePlayPageState';
 
+function pathMatchesExtension(rawUrl: string, extension: string): boolean {
+  try {
+    return new URL(rawUrl).pathname.toLowerCase().endsWith(extension);
+  } catch {
+    return new RegExp(`\\${extension}(?:$|[?#])`, 'i').test(rawUrl);
+  }
+}
+
+export function isVodM3u8Url(rawUrl: string): boolean {
+  return pathMatchesExtension(rawUrl, '.m3u8');
+}
+
+export function isVodMp4Url(rawUrl: string): boolean {
+  return pathMatchesExtension(rawUrl, '.mp4');
+}
+
 export function appendVodPlaybackRequestContext(
   params: URLSearchParams,
   mode: PlaybackRequestMode,
@@ -30,4 +46,21 @@ export function buildVodProxyUrl({
   }
   appendVodPlaybackRequestContext(params, playbackRequestMode);
   return `/api/proxy/m3u8?${params.toString()}`;
+}
+
+export function buildVodSegmentProxyUrl({
+  rawUrl,
+  sourceKey,
+  playbackRequestMode,
+}: {
+  rawUrl: string;
+  sourceKey: string;
+  playbackRequestMode: PlaybackRequestMode;
+}): string {
+  const params = new URLSearchParams({ url: rawUrl });
+  if (sourceKey) {
+    params.set('icetv-source', sourceKey);
+  }
+  appendVodPlaybackRequestContext(params, playbackRequestMode);
+  return `/api/proxy/segment?${params.toString()}`;
 }

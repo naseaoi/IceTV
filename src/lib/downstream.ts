@@ -7,8 +7,13 @@ import {
   parseGirigiriVariantId,
 } from '@/lib/giri';
 import {
+  buildXgcartoonPlaylistUrl,
+  buildXgcartoonVideoPath,
+  buildXgcartoonVariantId,
   extractXgcartoonEpisodeVariants,
+  extractXgcartoonPlayerVid,
   extractXgcartoonSearchResults,
+  parseXgcartoonVariantId,
   type XgcartoonEpisodeEntry,
 } from '@/lib/xgcartoon';
 import {
@@ -53,10 +58,15 @@ interface SearchFromApiOptions {
 }
 
 const GIRI_FALLBACK_ORIGINS = [
-  'https://anime.girigirilove.icu',
   'https://ani.girigirilove.com',
+  'https://anime.girigirilove.icu',
 ];
 const GIRI_DISABLED_ORIGINS = new Set(['https://anime.girigirilove.com']);
+const XGCARTOON_FALLBACK_ORIGINS = [
+  'https://cn1.xgcartoon.com',
+  'https://cn.xgcartoon.com',
+  'https://www.xgcartoon.com',
+];
 const EXTRA_SEARCH_PAGE_CONCURRENCY = 2;
 
 function createTimedAbortController(
@@ -205,12 +215,23 @@ function getGirigiriOrigins(apiSite: ApiSite): string[] {
   ]);
 }
 
+function getXgcartoonOrigins(apiSite: ApiSite): string[] {
+  return uniqueOrigins([getSiteOrigin(apiSite), ...XGCARTOON_FALLBACK_ORIGINS]);
+}
+
 function prioritizeGirigiriOrigins(
   origins: string[],
   preferredOrigin: string,
 ): string[] {
   return uniqueOrigins([
     ...includeEnabledGirigiriOrigin(preferredOrigin),
+    ...origins.filter((origin) => origin !== preferredOrigin),
+  ]);
+}
+
+function prioritizeOrigins(origins: string[], preferredOrigin: string) {
+  return uniqueOrigins([
+    preferredOrigin,
     ...origins.filter((origin) => origin !== preferredOrigin),
   ]);
 }
@@ -224,6 +245,68 @@ async function fetchGiriHtmlFromOrigins(
     if (html) {
       return { origin, html };
     }
+  }
+
+  return null;
+}
+
+async function fetchXgcartoonHtml(
+  url: string,
+  signal?: AbortSignal,
+  referer?: string,
+): Promise<{ html: string; finalUrl: string } | null> {
+  const abortState = createTimedAbortController(signal, 10000);
+
+  try {
+    const headers = referer
+      ? { ...GIRI_HTML_HEADERS, Referer: referer }
+      : GIRI_HTML_HEADERS;
+    const res = await fetch(url, {
+      headers,
+      redirect: 'follow',
+      signal: abortState.signal,
+    });
+    if (!res.ok) {
+      return null;
+    }
+    return {
+      html: await res.text(),
+      finalUrl: res.url || url,
+    };
+  } catch {
+    return null;
+  } finally {
+    abortState.cleanup();
+  }
+}
+
+async function fetchXgcartoonHtmlFromOrigins(
+  origins: string[],
+  path: string,
+  signal?: AbortSignal,
+  referer?: string,
+): Promise<{ origin: string; html: string; finalUrl: string } | null> {
+  for (const origin of origins) {
+    if (signal?.aborted) {
+      return null;
+    }
+
+    const url = toAbsoluteUrl(path, origin);
+    const result = await fetchXgcartoonHtml(url, signal, referer);
+    if (!result) {
+      continue;
+    }
+
+    let finalOrigin = origin;
+    try {
+      finalOrigin = new URL(result.finalUrl).origin;
+    } catch {}
+
+    return {
+      origin: finalOrigin,
+      html: result.html,
+      finalUrl: result.finalUrl,
+    };
   }
 
   return null;
@@ -446,25 +529,25 @@ async function searchFromXgcartoon(
     return [];
   }
 
-  const searchUrl = `https://www.xgcartoon.com/search?q=${encodeURIComponent(query)}`;
+  const origins = getXgcartoonOrigins(apiSite);
+  const searchPath = `/search?q=${encodeURIComponent(query)}`;
 
   try {
-    const res = await fetch(searchUrl, {
-      headers: GIRI_HTML_HEADERS,
+    const result = await fetchXgcartoonHtmlFromOrigins(
+      origins,
+      searchPath,
       signal,
-    });
-
-    if (!res.ok) {
+    );
+    if (!result) {
       return [];
     }
 
-    const html = await res.text();
-    const results = extractXgcartoonSearchResults(html);
+    const results = extractXgcartoonSearchResults(result.html);
 
     return results.map((item) => ({
       id: item.cartoonId,
       title: item.title,
-      poster: item.poster,
+      poster: toAbsoluteUrl(item.poster, result.origin),
       episodes: [],
       episodes_titles: [],
       source: apiSite.key,
@@ -647,107 +730,204 @@ async function getDetailFromGirigiri(
   };
 }
 
+function extractXgcartoonTitle(html: string): string {
+  const rawTitle =
+    html.match(
+      /<div class="detail-right__title"[\s\S]*?<h1[^>]*>([\s\S]*?)<\/h1>/,
+    )?.[1] ||
+    html.match(/<h1[^>]*>([\s\S]*?)<\/h1>/)?.[1] ||
+    html.match(/<title>([^<]+)/)?.[1] ||
+    '';
+
+  return cleanHtmlTags(rawTitle)
+    .replace(/^🍴/, '')
+    .replace(/\s*免费高清卡通动漫在线看\s*-\s*西瓜卡通\s*$/i, '')
+    .trim();
+}
+
+function extractXgcartoonPoster(html: string, origin: string): string {
+  const rawPoster =
+    html.match(
+      /<div class="detail-sider"[\s\S]*?<amp-img[^>]+src="([^"]+)"/i,
+    )?.[1] ||
+    html.match(/<amp-img[^>]+src="([^"]*\/cover\/[^"]+)"/i)?.[1] ||
+    '';
+
+  return toAbsoluteUrl(rawPoster.replace(/&amp;/g, '&'), origin);
+}
+
+function extractXgcartoonDesc(html: string): string {
+  const rawDesc =
+    html.match(
+      /<div class="detail-right__desc[^"]*"[^>]*>[\s\S]*?<p[^>]*>([\s\S]*?)<\/p>/,
+    )?.[1] || '';
+
+  return cleanHtmlTags(rawDesc).trim();
+}
+
+function extractXgcartoonClass(html: string): string {
+  return Array.from(
+    html.matchAll(/<div class="tag tag-secondary"[^>]*>([\s\S]*?)<\/div>/g),
+  )
+    .map((match) => cleanHtmlTags(match[1]).trim())
+    .filter(Boolean)
+    .join(',');
+}
+
+async function fetchXgcartoonEpisodePlaylistUrl(
+  origins: string[],
+  cartoonId: string,
+  episode: XgcartoonEpisodeEntry,
+  referer: string,
+): Promise<string | null> {
+  const playPath = buildXgcartoonVideoPath(cartoonId, episode.chapterId);
+  const result = await fetchXgcartoonHtmlFromOrigins(
+    origins,
+    playPath,
+    undefined,
+    referer,
+  );
+  if (!result) {
+    return null;
+  }
+
+  const videoId = extractXgcartoonPlayerVid(result.html);
+  return videoId ? buildXgcartoonPlaylistUrl(videoId) : null;
+}
+
+async function resolveXgcartoonEpisodes(
+  origins: string[],
+  cartoonId: string,
+  episodes: XgcartoonEpisodeEntry[],
+  referer: string,
+): Promise<{ episodes: string[]; titles: string[] }> {
+  const results = await runWithConcurrency(
+    episodes.map((episode) => async () => {
+      const url = await fetchXgcartoonEpisodePlaylistUrl(
+        origins,
+        cartoonId,
+        episode,
+        referer,
+      );
+      return url ? { url, title: episode.title } : null;
+    }),
+    4,
+  );
+
+  const resolvedEpisodes: string[] = [];
+  const resolvedTitles: string[] = [];
+  results.forEach((result, index) => {
+    if (!result?.url) {
+      return;
+    }
+
+    resolvedEpisodes.push(result.url);
+    resolvedTitles.push(result.title || `${index + 1}`);
+  });
+
+  return {
+    episodes: resolvedEpisodes,
+    titles: resolvedTitles,
+  };
+}
+
 async function getDetailFromXgcartoon(
   apiSite: ApiSite,
   id: string,
 ): Promise<SearchResult> {
-  const cartoonId = id;
-  const detailUrl = `https://www.xgcartoon.com/detail/${cartoonId}`;
+  const { cartoonId, groupId: preferredGroupId } = parseXgcartoonVariantId(id);
+  const origins = getXgcartoonOrigins(apiSite);
+  const detailResult = await fetchXgcartoonHtmlFromOrigins(
+    origins,
+    `/detail/${encodeURIComponent(cartoonId)}`,
+  );
 
-  const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), 10000);
+  if (!detailResult) {
+    throw new Error('详情页请求失败');
+  }
 
-  try {
-    const res = await fetch(detailUrl, {
-      headers: GIRI_HTML_HEADERS,
-      signal: controller.signal,
-    });
+  const { origin, html, finalUrl } = detailResult;
+  const activeOrigins = prioritizeOrigins(origins, origin);
+  const title = extractXgcartoonTitle(html) || cartoonId;
+  const poster = extractXgcartoonPoster(html, origin);
+  const desc = extractXgcartoonDesc(html);
+  const className = extractXgcartoonClass(html);
+  const variants = extractXgcartoonEpisodeVariants(html);
 
-    clearTimeout(timeoutId);
+  if (variants.length === 0) {
+    throw new Error('未提取到剧集');
+  }
 
-    if (!res.ok) {
-      throw new Error('详情页请求失败');
-    }
+  const selectedVariant =
+    variants.find((variant) => variant.groupId === preferredGroupId) ||
+    variants[0];
+  const resolved = await resolveXgcartoonEpisodes(
+    activeOrigins,
+    cartoonId,
+    selectedVariant.episodes,
+    finalUrl,
+  );
 
-    const html = await res.text();
+  if (resolved.episodes.length === 0) {
+    throw new Error('未提取到有效播放地址');
+  }
 
-    const title =
-      html.match(/<h2[^>]*>([\s\S]*?)【[^\]]+】<\/h2>/)?.[1]?.trim() ||
-      html.match(/<title>([^<]+)/)?.[1]?.trim() ||
-      '';
-
-    const posterMatch = html.match(
-      /<amp-img[^>]+src="([^"]+)"[^>]*class="[^"]*detail-cover/,
-    );
-    const poster = posterMatch ? posterMatch[1].replace(/&amp;/g, '&') : '';
-
-    const descMatch = html.match(
-      /<div[^>]*class="[^"]*简介[^"]*"[^>]*>([\s\S]*?)<\/div>/,
-    );
-    const desc = descMatch ? cleanHtmlTags(descMatch[1]).trim() : '';
-
-    const variants = extractXgcartoonEpisodeVariants(html);
-
-    if (variants.length === 0) {
-      throw new Error('未提取到剧集');
-    }
-
-    // 使用第一个变体作为主结果
-    const primaryVariant = variants[0];
-    const episodeUrls = primaryVariant.episodes.map(
-      (ep) =>
-        `https://www.xgcartoon.com/user/page_direct?cartoon_id=${cartoonId}&chapter_id=${ep.chapterId}`,
-    );
-    const episodesTitles = primaryVariant.episodes.map((ep) => ep.title);
-
-    // 构建其他变体作为 related_sources
-    const relatedSources: SearchResult[] = variants.slice(1).map((variant) => {
-      const variantEpisodeUrls = variant.episodes.map(
-        (ep) =>
-          `https://www.xgcartoon.com/user/page_direct?cartoon_id=${cartoonId}&chapter_id=${ep.chapterId}`,
-      );
-      const variantEpisodesTitles = variant.episodes.map((ep) => ep.title);
-
-      return {
-        id: `${cartoonId}_${variant.groupId}`,
-        title: title || cartoonId,
-        poster,
-        episodes: variantEpisodeUrls,
-        episodes_titles: variantEpisodesTitles,
-        source: apiSite.key,
-        source_name: apiSite.name,
-        variant_label: variant.label,
-        class: '',
-        year: 'unknown',
-        desc,
-        type_name: '动漫',
-        douban_id: 0,
-      };
-    });
-
-    return {
-      id: cartoonId,
-      title: title || cartoonId,
+  const relatedSources: SearchResult[] = variants
+    .filter((variant) => variant.groupId !== selectedVariant.groupId)
+    .map((variant) => ({
+      id: buildXgcartoonVariantId(
+        cartoonId,
+        variant.groupId,
+        variant.isDefault,
+      ),
+      title,
       poster,
-      episodes: episodeUrls,
-      episodes_titles: episodesTitles,
+      episodes: [],
+      episodes_titles: variant.episodes.map(
+        (entry, index) => entry.title || `${index + 1}`,
+      ),
       source: apiSite.key,
       source_name: apiSite.name,
-      variant_label: primaryVariant.label,
-      related_sources: relatedSources,
-      class: '',
+      variant_label: variant.label,
+      class: className,
       year: 'unknown',
       desc,
       type_name: '动漫',
       douban_id: 0,
-    };
-  } catch (error) {
-    clearTimeout(timeoutId);
-    throw new Error(`获取详情失败: ${error}`);
+    }));
+
+  return {
+    id: buildXgcartoonVariantId(
+      cartoonId,
+      selectedVariant.groupId,
+      selectedVariant.isDefault,
+    ),
+    title,
+    poster,
+    episodes: resolved.episodes,
+    episodes_titles: resolved.titles,
+    source: apiSite.key,
+    source_name: apiSite.name,
+    variant_label: selectedVariant.label,
+    related_sources: relatedSources,
+    class: className,
+    year: 'unknown',
+    desc,
+    type_name: '动漫',
+    douban_id: 0,
+  };
+}
+
+function isSupportedVodPlaybackUrl(url: string): boolean {
+  try {
+    const pathname = new URL(url).pathname.toLowerCase();
+    return pathname.endsWith('.m3u8') || pathname.endsWith('.mp4');
+  } catch {
+    return /\.(?:m3u8|mp4)(?:$|[?#])/i.test(url);
   }
 }
 
-// 从 vod_play_url 中解析出 m3u8 播放链接和对应标题
+// 从 vod_play_url 中解析出播放链接和对应标题
 function parseVodPlayUrl(vodPlayUrl: string): {
   episodes: string[];
   titles: string[];
@@ -762,7 +942,7 @@ function parseVodPlayUrl(vodPlayUrl: string): {
     const pairs = source.split('#');
     for (const pair of pairs) {
       const parts = pair.split('$');
-      if (parts.length === 2 && parts[1].endsWith('.m3u8')) {
+      if (parts.length === 2 && isSupportedVodPlaybackUrl(parts[1])) {
         matchTitles.push(parts[0]);
         matchEpisodes.push(parts[1]);
       }
@@ -1028,8 +1208,8 @@ export async function searchFirstPageFromApi(
   }
 }
 
-// 匹配 m3u8 链接的正则
-const M3U8_PATTERN = /(https?:\/\/[^"'\s]+?\.m3u8)/g;
+const PLAYBACK_URL_PATTERN =
+  /(https?:\/\/[^"'\s]+?\.(?:m3u8|mp4)(?:[?#][^"'\s<]*)?)/gi;
 
 export async function getDetailFromApi(
   apiSite: ApiSite,
@@ -1080,9 +1260,8 @@ export async function getDetailFromApi(
     : { episodes: [], titles: [] };
   let episodes = parsedEpisodes;
 
-  // 如果播放源为空，则尝试从内容中解析 m3u8
   if (episodes.length === 0 && videoDetail.vod_content) {
-    const matches = videoDetail.vod_content.match(M3U8_PATTERN) || [];
+    const matches = videoDetail.vod_content.match(PLAYBACK_URL_PATTERN) || [];
     episodes = matches.map((link: string) => link.replace(/^\$/, ''));
   }
 
@@ -1134,7 +1313,8 @@ async function handleSpecialSourceDetail(
   }
 
   if (matches.length === 0) {
-    const generalPattern = /\$(https?:\/\/[^"'\s]+?\.m3u8)/g;
+    const generalPattern =
+      /\$(https?:\/\/[^"'\s]+?\.(?:m3u8|mp4)(?:[?#][^"'\s<]*)?)/gi;
     matches = html.match(generalPattern) || [];
   }
 
