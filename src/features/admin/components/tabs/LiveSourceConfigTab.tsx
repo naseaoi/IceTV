@@ -20,6 +20,7 @@ import {
 } from '@dnd-kit/sortable';
 import { useEffect, useState } from 'react';
 
+import ConfirmModal from '@/components/modals/ConfirmModal';
 import AlertModal from '@/features/admin/components/AlertModal';
 import { LiveSourceAddForm } from '@/features/admin/components/tabs/live-source/LiveSourceAddForm';
 import { LiveSourceEditForm } from '@/features/admin/components/tabs/live-source/LiveSourceEditForm';
@@ -51,6 +52,7 @@ const LiveSourceConfig = ({
   const [showAddForm, setShowAddForm] = useState(false);
   const [editingLiveSource, setEditingLiveSource] =
     useState<LiveDataSource | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<LiveDataSource | null>(null);
   const [orderChanged, setOrderChanged] = useState(false);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [newLiveSource, setNewLiveSource] = useState<LiveDataSource>({
@@ -103,8 +105,17 @@ const LiveSourceConfig = ({
   };
 
   const handleDelete = (key: string) => {
-    withLoading(`deleteLiveSource_${key}`, () =>
-      callLiveSourceApi({ action: 'delete', key }),
+    const target = liveSources.find((source) => source.key === key);
+    if (!target) return;
+    setDeleteTarget(target);
+  };
+
+  const handleConfirmDelete = () => {
+    const target = deleteTarget;
+    if (!target) return;
+    setDeleteTarget(null);
+    withLoading(`deleteLiveSource_${target.key}`, () =>
+      callLiveSourceApi({ action: 'delete', key: target.key }),
     ).catch(() => void 0);
   };
 
@@ -226,7 +237,10 @@ const LiveSourceConfig = ({
             </span>
           </button>
           <button
-            onClick={() => setShowAddForm(!showAddForm)}
+            onClick={() => {
+              setShowAddForm(!showAddForm);
+              setEditingLiveSource(null);
+            }}
             className={
               showAddForm ? buttonStyles.secondary : buttonStyles.success
             }
@@ -308,9 +322,7 @@ const LiveSourceConfig = ({
                     isToggleLoading={isLoading(
                       `toggleLiveSource_${liveSource.key}`,
                     )}
-                    isEditLoading={isLoading(
-                      `editLiveSource_${liveSource.key}`,
-                    )}
+                    isEditLoading={isLoading('editLiveSource')}
                     isDeleteLoading={isLoading(
                       `deleteLiveSource_${liveSource.key}`,
                     )}
@@ -349,6 +361,20 @@ const LiveSourceConfig = ({
         message={alertModal.message}
         timer={alertModal.timer}
         showConfirm={alertModal.showConfirm}
+      />
+
+      <ConfirmModal
+        isOpen={!!deleteTarget}
+        title='确认删除直播源'
+        message={
+          deleteTarget
+            ? `确定要删除直播源「${deleteTarget.name}」吗？`
+            : undefined
+        }
+        onClose={() => setDeleteTarget(null)}
+        onConfirm={handleConfirmDelete}
+        confirmText='删除'
+        danger
       />
     </div>
   );

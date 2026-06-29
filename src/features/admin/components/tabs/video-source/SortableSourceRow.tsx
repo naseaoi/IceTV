@@ -28,6 +28,7 @@ interface SortableSourceRowProps {
   onSelectSource: (key: string, checked: boolean) => void;
   onToggleProxyMode: (key: string) => void;
   onToggleEnable: (key: string) => void;
+  onEdit: (source: DataSource) => void;
   onDelete: (key: string) => void;
 }
 
@@ -41,6 +42,7 @@ export function SortableSourceRow({
   onSelectSource,
   onToggleProxyMode,
   onToggleEnable,
+  onEdit,
   onDelete,
 }: SortableSourceRowProps) {
   const { attributes, listeners, setNodeRef, transform, transition } =
@@ -92,15 +94,18 @@ export function SortableSourceRow({
         {source.detail || '-'}
       </td>
       <td className='max-w-[1rem] whitespace-nowrap px-6 py-4'>
-        <span
-          className={`rounded-full px-2 py-1 text-xs ${
+        <button
+          onClick={() => onToggleEnable(source.key)}
+          disabled={isToggleLoading}
+          className={`rounded-full px-2 py-1 text-xs transition-colors ${
             !source.disabled
               ? statusBadgeStyles.enabled
               : statusBadgeStyles.disabled
-          }`}
+          } ${isToggleLoading ? 'cursor-not-allowed opacity-50' : 'cursor-pointer'}`}
+          title={!source.disabled ? '点击禁用' : '点击启用'}
         >
           {!source.disabled ? '启用中' : '已禁用'}
-        </span>
+        </button>
       </td>
       <td className='whitespace-nowrap px-6 py-4'>
         <button
@@ -136,27 +141,20 @@ export function SortableSourceRow({
       </td>
       <td className='space-x-2 whitespace-nowrap px-6 py-4 text-right text-sm font-medium'>
         <button
-          onClick={() => onToggleEnable(source.key)}
-          disabled={isToggleLoading}
-          className={`inline-flex items-center rounded-full px-3 py-1.5 text-xs font-medium ${
-            !source.disabled
-              ? buttonStyles.roundedDanger
-              : buttonStyles.roundedSuccess
-          } transition-colors ${isToggleLoading ? 'cursor-not-allowed opacity-50' : ''}`}
+          onClick={() => onEdit(source)}
+          className={buttonStyles.roundedPrimary}
         >
-          {!source.disabled ? '禁用' : '启用'}
+          编辑
         </button>
-        {source.from !== 'config' && (
-          <button
-            onClick={() => onDelete(source.key)}
-            disabled={isDeleteLoading}
-            className={`${buttonStyles.roundedSecondary} ${
-              isDeleteLoading ? 'cursor-not-allowed opacity-50' : ''
-            }`}
-          >
-            删除
-          </button>
-        )}
+        <button
+          onClick={() => onDelete(source.key)}
+          disabled={isDeleteLoading}
+          className={`${buttonStyles.roundedSecondary} ${
+            isDeleteLoading ? 'cursor-not-allowed opacity-50' : ''
+          }`}
+        >
+          删除
+        </button>
       </td>
     </tr>
   );

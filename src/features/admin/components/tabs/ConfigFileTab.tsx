@@ -1,5 +1,6 @@
 'use client';
 
+import { Download } from 'lucide-react';
 import { useEffect, useState } from 'react';
 
 import AlertModal from '@/features/admin/components/AlertModal';
@@ -87,6 +88,30 @@ const ConfigFileComponent = ({
         throw err;
       }
     });
+  };
+
+  const handleExport = () => {
+    if (!configContent.trim()) {
+      showError('配置文件内容为空', showAlert);
+      return;
+    }
+
+    const blob = new Blob([configContent], {
+      type: 'application/json;charset=utf-8',
+    });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    const timestamp = new Date()
+      .toISOString()
+      .replace(/[-:]/g, '')
+      .replace(/\..+$/, '');
+    link.href = url;
+    link.download = `icetv-config-${timestamp}.json`;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    URL.revokeObjectURL(url);
+    showSuccess('配置文件已导出', showAlert);
   };
 
   if (!config) {
@@ -203,21 +228,35 @@ const ConfigFileComponent = ({
             />
           </div>
 
-          <div className='flex items-center justify-between'>
+          <div className='flex items-center justify-between gap-4'>
             <div className='text-xs text-gray-500 dark:text-gray-400'>
               支持 JSON 格式，用于配置视频源和自定义分类
             </div>
-            <button
-              onClick={handleSave}
-              disabled={isLoading('saveConfig')}
-              className={`rounded-lg px-4 py-2 transition-colors ${
-                isLoading('saveConfig')
-                  ? buttonStyles.disabled
-                  : buttonStyles.success
-              }`}
-            >
-              {isLoading('saveConfig') ? '保存中…' : '保存'}
-            </button>
+            <div className='flex items-center gap-2'>
+              <button
+                onClick={handleExport}
+                disabled={!configContent.trim()}
+                className={`inline-flex items-center gap-1.5 rounded-lg px-4 py-2 transition-colors ${
+                  !configContent.trim()
+                    ? buttonStyles.disabled
+                    : buttonStyles.secondary
+                }`}
+              >
+                <Download size={16} />
+                导出
+              </button>
+              <button
+                onClick={handleSave}
+                disabled={isLoading('saveConfig')}
+                className={`rounded-lg px-4 py-2 transition-colors ${
+                  isLoading('saveConfig')
+                    ? buttonStyles.disabled
+                    : buttonStyles.success
+                }`}
+              >
+                {isLoading('saveConfig') ? '保存中…' : '保存'}
+              </button>
+            </div>
           </div>
         </div>
       </div>

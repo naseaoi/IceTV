@@ -25,6 +25,7 @@ import AlertModal from '@/features/admin/components/AlertModal';
 import { SortableSourceRow } from '@/features/admin/components/tabs/video-source/SortableSourceRow';
 import { SourceValidationModal } from '@/features/admin/components/tabs/video-source/SourceValidationModal';
 import { VideoSourceAddForm } from '@/features/admin/components/tabs/video-source/VideoSourceAddForm';
+import { VideoSourceEditForm } from '@/features/admin/components/tabs/video-source/VideoSourceEditForm';
 import { useAdminSourceActions } from '@/features/admin/hooks/useAdminSourceActions';
 import { useAlertModal } from '@/features/admin/hooks/useAlertModal';
 import { useLoadingState } from '@/features/admin/hooks/useLoadingState';
@@ -52,6 +53,8 @@ const VideoSourceConfig = ({
   });
   const [sources, setSources] = useState<DataSource[]>([]);
   const [showAddForm, setShowAddForm] = useState(false);
+  const [editingSource, setEditingSource] = useState<DataSource | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<DataSource | null>(null);
   const [orderChanged, setOrderChanged] = useState(false);
   const [newSource, setNewSource] = useState<DataSource>({
     name: '',
@@ -147,8 +150,17 @@ const VideoSourceConfig = ({
   };
 
   const handleDelete = (key: string) => {
-    withLoading(`deleteSource_${key}`, () =>
-      callSourceApi({ action: 'delete', key }),
+    const target = sources.find((source) => source.key === key);
+    if (!target) return;
+    setDeleteTarget(target);
+  };
+
+  const handleConfirmDelete = () => {
+    const target = deleteTarget;
+    if (!target) return;
+    setDeleteTarget(null);
+    withLoading(`deleteSource_${target.key}`, () =>
+      callSourceApi({ action: 'delete', key: target.key }),
     ).catch(() => void 0);
   };
 
@@ -171,6 +183,20 @@ const VideoSourceConfig = ({
         from: 'custom',
       });
       setShowAddForm(false);
+    }).catch(() => void 0);
+  };
+
+  const handleEditSource = () => {
+    if (!editingSource || !editingSource.name || !editingSource.api) return;
+    withLoading('editSource', async () => {
+      await callSourceApi({
+        action: 'edit',
+        key: editingSource.key,
+        name: editingSource.name,
+        api: editingSource.api,
+        detail: editingSource.detail || '',
+      });
+      setEditingSource(null);
     }).catch(() => void 0);
   };
 
@@ -328,7 +354,10 @@ const VideoSourceConfig = ({
               )}
             </button>
             <button
-              onClick={() => setShowAddForm(!showAddForm)}
+              onClick={() => {
+                setShowAddForm(!showAddForm);
+                setEditingSource(null);
+              }}
               className={
                 showAddForm ? buttonStyles.secondary : buttonStyles.success
               }
@@ -345,6 +374,16 @@ const VideoSourceConfig = ({
           onChange={setNewSource}
           onSubmit={handleAddSource}
           isSubmitting={isLoading('addSource')}
+        />
+      )}
+
+      {editingSource && (
+        <VideoSourceEditForm
+          editingSource={editingSource}
+          onChange={setEditingSource}
+          onSubmit={handleEditSource}
+          onCancel={() => setEditingSource(null)}
+          isSubmitting={isLoading('editSource')}
         />
       )}
 
@@ -414,6 +453,10 @@ const VideoSourceConfig = ({
                     onSelectSource={handleSelectSource}
                     onToggleProxyMode={handleToggleProxyMode}
                     onToggleEnable={handleToggleEnable}
+                    onEdit={(source) => {
+                      setEditingSource(source);
+                      setShowAddForm(false);
+                    }}
                     onDelete={handleDelete}
                   />
                 ))}
@@ -474,6 +517,20 @@ const VideoSourceConfig = ({
           {confirmModal.message}
         </p>
       </ConfirmModal>
+
+      <ConfirmModal
+        isOpen={!!deleteTarget}
+        title='确认删除视频源'
+        message={
+          deleteTarget
+            ? `确定要删除视频源「${deleteTarget.name}」吗？`
+            : undefined
+        }
+        onClose={() => setDeleteTarget(null)}
+        onConfirm={handleConfirmDelete}
+        confirmText='删除'
+        danger
+      />
     </div>
   );
 };
