@@ -29,6 +29,28 @@ const XGCARTOON_FALLBACK_ORIGINS = [
   'https://www.xgcartoon.com',
 ];
 
+function normalizeXgcartoonSearchText(text: string): string {
+  return text
+    .normalize('NFKC')
+    .toLowerCase()
+    .replace(/[《》「」『』【】()[\]（）]/g, '')
+    .replace(/[\s\u00a0\u3000·•・.。:：,，!！?？'"`~～_\-—]/g, '');
+}
+
+function isRelevantXgcartoonSearchResult(
+  query: string,
+  title: string,
+): boolean {
+  const normalizedQuery = normalizeXgcartoonSearchText(query);
+  const normalizedTitle = normalizeXgcartoonSearchText(title);
+
+  if (!normalizedQuery || !normalizedTitle) {
+    return false;
+  }
+
+  return normalizedTitle.includes(normalizedQuery);
+}
+
 export function isXgcartoonSource(apiSite: ApiSite): boolean {
   return /xgcartoon\.com/i.test(apiSite.api);
 }
@@ -121,7 +143,9 @@ export async function searchFromXgcartoon(
       return [];
     }
 
-    const results = extractXgcartoonSearchResults(result.html);
+    const results = extractXgcartoonSearchResults(result.html).filter((item) =>
+      isRelevantXgcartoonSearchResult(query, item.title),
+    );
 
     return results.map((item) => ({
       id: item.cartoonId,

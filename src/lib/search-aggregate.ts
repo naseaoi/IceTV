@@ -39,7 +39,11 @@ export async function runSearchAggregation({
         `${site.name} timeout`,
         signal,
       );
-      const filteredResults = filterSearchResults(results, disableYellowFilter);
+      const filteredResults = filterSearchResults(
+        results,
+        query,
+        disableYellowFilter,
+      );
       onSourceResult?.(site, filteredResults);
       return filteredResults;
     } catch (error) {
@@ -65,14 +69,37 @@ export async function runSearchAggregation({
 
 function filterSearchResults(
   results: SearchResult[],
+  query: string,
   disableYellowFilter: boolean,
 ): SearchResult[] {
-  if (disableYellowFilter) {
-    return results;
-  }
-
   return results.filter((result) => {
     const typeName = result.type_name || '';
-    return !yellowWords.some((word: string) => typeName.includes(word));
+    if (
+      !disableYellowFilter &&
+      yellowWords.some((word: string) => typeName.includes(word))
+    ) {
+      return false;
+    }
+
+    return isTitleMatchedSearchQuery(result.title || '', query);
   });
+}
+
+function normalizeSearchMatchText(text: string): string {
+  return text
+    .normalize('NFKC')
+    .toLowerCase()
+    .replace(/[《》「」『』【】()[\]（）]/g, '')
+    .replace(/[\s\u00a0\u3000·•・.。:：,，!！?？'"`~～_\-—]/g, '');
+}
+
+function isTitleMatchedSearchQuery(title: string, query: string): boolean {
+  const normalizedTitle = normalizeSearchMatchText(title);
+  const normalizedQuery = normalizeSearchMatchText(query);
+
+  if (!normalizedQuery) {
+    return true;
+  }
+
+  return normalizedTitle.includes(normalizedQuery);
 }

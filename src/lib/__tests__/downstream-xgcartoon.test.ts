@@ -1,5 +1,5 @@
 import type { ApiSite } from '@/lib/config';
-import { getDetailFromApi } from '@/lib/downstream';
+import { getDetailFromApi, searchFirstPageFromApi } from '@/lib/downstream';
 
 const originalFetch = global.fetch;
 
@@ -94,5 +94,61 @@ describe('downstream xgcartoon source', () => {
         episodes_titles: ['第01集'],
       }),
     );
+  });
+
+  it('搜索会过滤标题无关结果', async () => {
+    const searchHtml = `
+      <a href="/detail/busan-1" target="_blank" class="topic-list-item">
+        <amp-img src="/cover/busan.jpg"></amp-img>
+        <div class="topic-list-item--author">作者 [韩国]</div>
+        <div class="h3 mb12">釜山行【韩语】</div>
+      </a>
+      <a href="/detail/seoul-station" target="_blank" class="topic-list-item">
+        <amp-img src="/cover/seoul.jpg"></amp-img>
+        <div class="topic-list-item--author">作者 [韩国]</div>
+        <div class="h3 mb12">首尔站（釜山行前传）【韩语】</div>
+      </a>
+      <a href="/detail/unrelated" target="_blank" class="topic-list-item">
+        <amp-img src="/cover/unrelated.jpg"></amp-img>
+        <div class="topic-list-item--author">作者 [日本]</div>
+        <div class="h3 mb12">完全无关的动画</div>
+      </a>
+    `;
+    const fetchMock = global.fetch as jest.Mock;
+    fetchMock.mockResolvedValue(createTextResponse(searchHtml));
+
+    const results = await searchFirstPageFromApi(
+      createXgcartoonSite(),
+      '《釜山行》',
+    );
+
+    expect(results.map((item) => item.title)).toEqual([
+      '釜山行【韩语】',
+      '首尔站（釜山行前传）【韩语】',
+    ]);
+  });
+
+  it('搜索无标题命中时返回空结果', async () => {
+    const searchHtml = `
+      <a href="/detail/fog-hill" target="_blank" class="topic-list-item">
+        <amp-img src="/cover/fog.jpg"></amp-img>
+        <div class="topic-list-item--author">作者 [国漫]</div>
+        <div class="h3 mb12">雾山五行【国语】</div>
+      </a>
+      <a href="/detail/unrelated" target="_blank" class="topic-list-item">
+        <amp-img src="/cover/unrelated.jpg"></amp-img>
+        <div class="topic-list-item--author">作者 [日本]</div>
+        <div class="h3 mb12">完全无关的动画</div>
+      </a>
+    `;
+    const fetchMock = global.fetch as jest.Mock;
+    fetchMock.mockResolvedValue(createTextResponse(searchHtml));
+
+    const results = await searchFirstPageFromApi(
+      createXgcartoonSite(),
+      '釜山行',
+    );
+
+    expect(results).toEqual([]);
   });
 });
