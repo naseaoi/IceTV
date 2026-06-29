@@ -1,21 +1,19 @@
 import { API_CONFIG, ApiSite, getConfig } from '@/lib/config';
 import {
-  buildGirigiriVariantId,
-  countGirigiriVariantTabs,
-  extractGirigiriEpisodeVariants,
-  type GiriEpisodeVariant,
-  parseGirigiriVariantId,
-} from '@/lib/giri';
+  getDetailFromGirigiri,
+  isGirigiriSource,
+  searchFromGirigiri,
+} from '@/lib/downstream-sources/giri';
 import {
-  buildXgcartoonPlaylistUrl,
-  buildXgcartoonVideoPath,
-  buildXgcartoonVariantId,
-  extractXgcartoonEpisodeVariants,
-  extractXgcartoonPlayerVid,
-  extractXgcartoonSearchResults,
-  parseXgcartoonVariantId,
-  type XgcartoonEpisodeEntry,
-} from '@/lib/xgcartoon';
+  getDetailFromXgcartoon,
+  isXgcartoonSource,
+  searchFromXgcartoon,
+} from '@/lib/downstream-sources/xgcartoon';
+import {
+  createTimedAbortController,
+  isAbortError,
+  runWithConcurrency,
+} from '@/lib/downstream-sources/shared';
 import {
   dedupeSearchLoad,
   getCachedSearchPage,
@@ -38,885 +36,12 @@ interface ApiSearchItem {
   type_name?: string;
 }
 
-interface GirigiriSuggestItem {
-  id: number | string;
-  name: string;
-  pic?: string;
-}
-
-interface GirigiriPlayExtractResult {
-  url: string | null;
-  title: string;
-  year: string;
-  desc: string;
-  poster: string;
-}
-
 interface SearchFromApiOptions {
   maxSearchPages?: number;
   signal?: AbortSignal;
 }
 
-const GIRI_FALLBACK_ORIGINS = [
-  'https://ani.girigirilove.com',
-  'https://anime.girigirilove.icu',
-];
-const GIRI_DISABLED_ORIGINS = new Set(['https://anime.girigirilove.com']);
-const XGCARTOON_FALLBACK_ORIGINS = [
-  'https://cn1.xgcartoon.com',
-  'https://cn.xgcartoon.com',
-  'https://www.xgcartoon.com',
-];
 const EXTRA_SEARCH_PAGE_CONCURRENCY = 2;
-
-function createTimedAbortController(
-  parentSignal: AbortSignal | undefined,
-  timeoutMs: number,
-) {
-  const controller = new AbortController();
-  let timeoutFired = false;
-
-  const abortFromParent = () => {
-    controller.abort(parentSignal?.reason);
-  };
-
-  if (parentSignal?.aborted) {
-    abortFromParent();
-  } else {
-    parentSignal?.addEventListener('abort', abortFromParent, { once: true });
-  }
-
-  const timeoutId = setTimeout(() => {
-    timeoutFired = true;
-    controller.abort(new Error('timeout'));
-  }, timeoutMs);
-
-  return {
-    signal: controller.signal,
-    isTimeout: () => timeoutFired,
-    cleanup: () => {
-      clearTimeout(timeoutId);
-      parentSignal?.removeEventListener('abort', abortFromParent);
-    },
-  };
-}
-
-function isAbortError(error: unknown): boolean {
-  if (!(error instanceof Error)) {
-    return false;
-  }
-
-  return (
-    error.name === 'AbortError' ||
-    (error as Error & { code?: number }).code === 20 ||
-    error.message.includes('aborted')
-  );
-}
-
-function isGirigiriSource(apiSite: ApiSite): boolean {
-  return /girigirilove\.(?:com|icu)/i.test(apiSite.api);
-}
-
-function isXgcartoonSource(apiSite: ApiSite): boolean {
-  return /xgcartoon\.com/i.test(apiSite.api);
-}
-
-// giri 页面请求用浏览器风格 headers，降低 CF 盾触发概率
-const GIRI_HTML_HEADERS: Record<string, string> = {
-  'User-Agent':
-    'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
-  Accept:
-    'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
-  'Accept-Language': 'zh-CN,zh;q=0.9,en;q=0.8',
-};
-
-/** 检测 HTML 是否为 Cloudflare challenge 页面 */
-function isCfChallenge(html: string): boolean {
-  return (
-    html.includes('cf-browser-verification') ||
-    html.includes('cf_chl_opt') ||
-    html.includes('challenge-platform') ||
-    (html.includes('Just a moment') && html.includes('cloudflare'))
-  );
-}
-
-/** giri 页面 fetch，遇到 CF challenge 自动重试一次 */
-async function fetchGiriHtml(url: string): Promise<string | null> {
-  for (let attempt = 0; attempt < 2; attempt++) {
-    try {
-      const res = await fetch(url, { headers: GIRI_HTML_HEADERS });
-      if (!res.ok) return null;
-      const html = await res.text();
-      if (!isCfChallenge(html)) return html;
-      // CF challenge，等 1.5 秒后重试
-      if (attempt === 0) await new Promise((r) => setTimeout(r, 1500));
-    } catch {
-      return null;
-    }
-  }
-  return null;
-}
-
-function getSiteOrigin(apiSite: ApiSite): string {
-  const fallback = apiSite.api.replace(/\/+$/, '');
-  try {
-    return new URL(apiSite.api).origin;
-  } catch {
-    return fallback;
-  }
-}
-
-function toAbsoluteUrl(url: string, origin: string): string {
-  if (!url) return '';
-  try {
-    return new URL(url, origin).toString();
-  } catch {
-    return url;
-  }
-}
-
-function normalizeOrigin(origin: string): string {
-  return origin.replace(/\/+$/, '').toLowerCase();
-}
-
-function uniqueOrigins(origins: string[]): string[] {
-  const seen = new Set<string>();
-  return origins
-    .map((origin) => origin.replace(/\/+$/, ''))
-    .filter((origin) => {
-      const normalized = normalizeOrigin(origin);
-      if (
-        !normalized ||
-        seen.has(normalized) ||
-        GIRI_DISABLED_ORIGINS.has(normalized)
-      ) {
-        return false;
-      }
-      seen.add(normalized);
-      return true;
-    });
-}
-
-function isEnabledGirigiriOrigin(origin: string): boolean {
-  return !GIRI_DISABLED_ORIGINS.has(normalizeOrigin(origin));
-}
-
-function includeEnabledGirigiriOrigin(origin: string): string[] {
-  if (!isEnabledGirigiriOrigin(origin)) {
-    return [];
-  }
-  return [origin];
-}
-
-function getGirigiriOrigins(apiSite: ApiSite): string[] {
-  return uniqueOrigins([
-    ...includeEnabledGirigiriOrigin(getSiteOrigin(apiSite)),
-    ...GIRI_FALLBACK_ORIGINS,
-  ]);
-}
-
-function getXgcartoonOrigins(apiSite: ApiSite): string[] {
-  return uniqueOrigins([getSiteOrigin(apiSite), ...XGCARTOON_FALLBACK_ORIGINS]);
-}
-
-function prioritizeGirigiriOrigins(
-  origins: string[],
-  preferredOrigin: string,
-): string[] {
-  return uniqueOrigins([
-    ...includeEnabledGirigiriOrigin(preferredOrigin),
-    ...origins.filter((origin) => origin !== preferredOrigin),
-  ]);
-}
-
-function prioritizeOrigins(origins: string[], preferredOrigin: string) {
-  return uniqueOrigins([
-    preferredOrigin,
-    ...origins.filter((origin) => origin !== preferredOrigin),
-  ]);
-}
-
-async function fetchGiriHtmlFromOrigins(
-  origins: string[],
-  path: string,
-): Promise<{ origin: string; html: string } | null> {
-  for (const origin of origins) {
-    const html = await fetchGiriHtml(toAbsoluteUrl(path, origin));
-    if (html) {
-      return { origin, html };
-    }
-  }
-
-  return null;
-}
-
-async function fetchXgcartoonHtml(
-  url: string,
-  signal?: AbortSignal,
-  referer?: string,
-): Promise<{ html: string; finalUrl: string } | null> {
-  const abortState = createTimedAbortController(signal, 10000);
-
-  try {
-    const headers = referer
-      ? { ...GIRI_HTML_HEADERS, Referer: referer }
-      : GIRI_HTML_HEADERS;
-    const res = await fetch(url, {
-      headers,
-      redirect: 'follow',
-      signal: abortState.signal,
-    });
-    if (!res.ok) {
-      return null;
-    }
-    return {
-      html: await res.text(),
-      finalUrl: res.url || url,
-    };
-  } catch {
-    return null;
-  } finally {
-    abortState.cleanup();
-  }
-}
-
-async function fetchXgcartoonHtmlFromOrigins(
-  origins: string[],
-  path: string,
-  signal?: AbortSignal,
-  referer?: string,
-): Promise<{ origin: string; html: string; finalUrl: string } | null> {
-  for (const origin of origins) {
-    if (signal?.aborted) {
-      return null;
-    }
-
-    const url = toAbsoluteUrl(path, origin);
-    const result = await fetchXgcartoonHtml(url, signal, referer);
-    if (!result) {
-      continue;
-    }
-
-    let finalOrigin = origin;
-    try {
-      finalOrigin = new URL(result.finalUrl).origin;
-    } catch {}
-
-    return {
-      origin: finalOrigin,
-      html: result.html,
-      finalUrl: result.finalUrl,
-    };
-  }
-
-  return null;
-}
-
-function decodeGirigiriPlayUrl(rawUrl: string, encrypt: number): string {
-  const normalized = rawUrl.replace(/\\\//g, '/');
-
-  if (encrypt === 2) {
-    try {
-      const base64Decoded = Buffer.from(normalized, 'base64').toString('utf8');
-      return decodeURIComponent(base64Decoded);
-    } catch {
-      return normalized;
-    }
-  }
-
-  if (encrypt === 1) {
-    try {
-      return decodeURIComponent(normalized);
-    } catch {
-      return normalized;
-    }
-  }
-
-  return normalized;
-}
-
-function parseGirigiriEpisodePlayHtml(
-  html: string,
-  origin: string,
-): GirigiriPlayExtractResult {
-  const title =
-    html.match(/class="player-title-link"[^>]*>([^<]+)<\/a>/)?.[1]?.trim() ||
-    html.match(/<title>([^<_]+)/)?.[1]?.trim() ||
-    '';
-  const desc =
-    cleanHtmlTags(
-      html.match(/<div class="small-text">([\s\S]*?)<\/div>/)?.[1] ||
-        html.match(/<meta\s+name="description"\s+content="([^"]*)"/i)?.[1] ||
-        '',
-    ).trim() || '';
-  const year =
-    html.match(/<div class="cor4"\s+title="(\d{4})">/)?.[1] ||
-    html.match(/<a[^>]*>(\d{4})<\/a>/)?.[1] ||
-    'unknown';
-  const poster = toAbsoluteUrl(
-    html.match(/<div class="this-pic">[\s\S]*?data-src="([^"]+)"/i)?.[1] ||
-      html.match(/<img[^>]+data-src="([^"]+)"/i)?.[1] ||
-      '',
-    origin,
-  );
-
-  const playerBlock =
-    html.match(/var\s+player_aaaa\s*=\s*(\{[\s\S]*?\});/)?.[1] || '';
-  const encryptMatch = playerBlock.match(/"encrypt":(\d+)/);
-  const urlMatch = playerBlock.match(/"url":"([^"]+)"/);
-  if (!urlMatch) {
-    return {
-      url: null,
-      title,
-      year,
-      desc,
-      poster,
-    };
-  }
-
-  const encrypt = encryptMatch ? Number(encryptMatch[1]) : 0;
-  const decoded = decodeGirigiriPlayUrl(urlMatch[1], encrypt);
-  const normalizedUrl = /^https?:\/\//i.test(decoded)
-    ? decoded
-    : decoded.startsWith('//')
-      ? `https:${decoded}`
-      : '';
-
-  return {
-    url: normalizedUrl || null,
-    title,
-    year,
-    desc,
-    poster,
-  };
-}
-
-async function fetchGirigiriEpisodePlayUrl(
-  origins: string[],
-  playPath: string,
-): Promise<GirigiriPlayExtractResult> {
-  let fallbackResult: GirigiriPlayExtractResult | null = null;
-
-  for (const origin of origins) {
-    const playUrl = toAbsoluteUrl(playPath, origin);
-    const html = await fetchGiriHtml(playUrl);
-    if (!html) {
-      continue;
-    }
-
-    const result = parseGirigiriEpisodePlayHtml(html, origin);
-    if (result.url) {
-      return result;
-    }
-    fallbackResult = fallbackResult || result;
-  }
-
-  return (
-    fallbackResult || {
-      url: null,
-      title: '',
-      year: 'unknown',
-      desc: '',
-      poster: '',
-    }
-  );
-}
-
-async function runWithConcurrency<T>(
-  tasks: Array<() => Promise<T>>,
-  concurrency: number,
-  shouldContinue: () => boolean = () => true,
-): Promise<T[]> {
-  if (tasks.length === 0) return [];
-
-  const results: T[] = new Array(tasks.length);
-  let index = 0;
-
-  async function worker() {
-    while (shouldContinue() && index < tasks.length) {
-      const current = index;
-      index += 1;
-      results[current] = await tasks[current]();
-    }
-  }
-
-  const workers = Array.from(
-    { length: Math.min(concurrency, tasks.length) },
-    () => worker(),
-  );
-  await Promise.all(workers);
-
-  return results;
-}
-
-async function fetchGirigiriSuggestList(
-  origin: string,
-  query: string,
-  signal?: AbortSignal,
-): Promise<GirigiriSuggestItem[] | null> {
-  const searchUrl = `${origin}/index.php/ajax/suggest?mid=1&wd=${encodeURIComponent(query)}`;
-
-  const abortState = createTimedAbortController(signal, 8000);
-
-  try {
-    const response = await fetch(searchUrl, {
-      headers: API_CONFIG.search.headers,
-      signal: abortState.signal,
-    });
-
-    if (!response.ok) return null;
-    const data = await response.json();
-    return Array.isArray(data?.list)
-      ? (data.list as GirigiriSuggestItem[])
-      : null;
-  } catch {
-    return null;
-  } finally {
-    abortState.cleanup();
-  }
-}
-
-async function searchFromGirigiri(
-  apiSite: ApiSite,
-  query: string,
-  signal?: AbortSignal,
-): Promise<SearchResult[]> {
-  const origins = getGirigiriOrigins(apiSite);
-
-  for (const origin of origins) {
-    if (signal?.aborted) {
-      return [];
-    }
-
-    const list = await fetchGirigiriSuggestList(origin, query, signal);
-    if (!list) {
-      continue;
-    }
-
-    return list
-      .map((item) => {
-        const id = String(item.id || '').trim();
-        const title = (item.name || '').trim();
-        if (!id || !title) return null;
-
-        return {
-          id,
-          title,
-          poster: toAbsoluteUrl(item.pic || '', origin),
-          episodes: [],
-          episodes_titles: [],
-          source: apiSite.key,
-          source_name: apiSite.name,
-          class: '',
-          year: 'unknown',
-          desc: '',
-          type_name: '动漫',
-          douban_id: 0,
-        } as SearchResult;
-      })
-      .filter((item): item is SearchResult => Boolean(item));
-  }
-
-  return [];
-}
-
-async function searchFromXgcartoon(
-  apiSite: ApiSite,
-  query: string,
-  signal?: AbortSignal,
-): Promise<SearchResult[]> {
-  if (!query.trim()) {
-    return [];
-  }
-
-  const origins = getXgcartoonOrigins(apiSite);
-  const searchPath = `/search?q=${encodeURIComponent(query)}`;
-
-  try {
-    const result = await fetchXgcartoonHtmlFromOrigins(
-      origins,
-      searchPath,
-      signal,
-    );
-    if (!result) {
-      return [];
-    }
-
-    const results = extractXgcartoonSearchResults(result.html);
-
-    return results.map((item) => ({
-      id: item.cartoonId,
-      title: item.title,
-      poster: toAbsoluteUrl(item.poster, result.origin),
-      episodes: [],
-      episodes_titles: [],
-      source: apiSite.key,
-      source_name: apiSite.name,
-      class: item.tags.join(','),
-      year: 'unknown',
-      desc: item.author,
-      type_name: '动漫',
-      douban_id: 0,
-    }));
-  } catch (error) {
-    if (isAbortError(error)) {
-      return [];
-    }
-    return [];
-  }
-}
-
-// 解析 giri 详情页的多版本选集列表
-async function resolveGirigiriEpisodeVariants(
-  origins: string[],
-  videoId: string,
-  detailHtml: string,
-): Promise<GiriEpisodeVariant[]> {
-  const fromDetail = extractGirigiriEpisodeVariants(detailHtml);
-  const tabCount = countGirigiriVariantTabs(detailHtml);
-
-  // tab 条暗示版本数 <= 已解析版本数，或根本没有多 tab，直接返回
-  if (tabCount <= fromDetail.length || tabCount < 2) {
-    return fromDetail;
-  }
-
-  const probeGroupId = fromDetail[0]?.groupId || '1';
-  const probePlayPath =
-    fromDetail[0]?.episodes[0]?.playPath ||
-    `/playGV${videoId}-${probeGroupId}-1/`;
-  const probeResult = await fetchGiriHtmlFromOrigins(origins, probePlayPath);
-  if (!probeResult?.html) {
-    return fromDetail;
-  }
-
-  const fromProbe = extractGirigiriEpisodeVariants(probeResult.html);
-  return fromProbe.length > fromDetail.length ? fromProbe : fromDetail;
-}
-
-async function getDetailFromGirigiri(
-  apiSite: ApiSite,
-  id: string,
-): Promise<SearchResult> {
-  const { videoId, groupId: preferredGroupId } = parseGirigiriVariantId(id);
-  const origins = getGirigiriOrigins(apiSite);
-  const detailResult = await fetchGiriHtmlFromOrigins(
-    origins,
-    `/GV${videoId}/`,
-  );
-
-  if (!detailResult?.html) {
-    throw new Error('详情页请求失败或被 Cloudflare 拦截');
-  }
-
-  const { origin, html } = detailResult;
-  const activeOrigins = prioritizeGirigiriOrigins(origins, origin);
-
-  const title =
-    html
-      .match(/<h3 class="slide-info-title[^"]*">([^<]+)<\/h3>/)?.[1]
-      ?.trim() ||
-    html.match(/<title>([^<_]+)/)?.[1]?.trim() ||
-    '';
-  const descRaw =
-    html.match(/id="height_limit"[^>]*>([\s\S]*?)<\/div>/)?.[1] ||
-    html.match(/<meta\s+name="description"\s+content="([^"]*)"/i)?.[1] ||
-    '';
-  const desc = cleanHtmlTags(descRaw).trim();
-  const year =
-    html.match(/<em class="cor4">年份：<\/em>\s*(\d{4})/)?.[1] ||
-    html.match(/href="\/search\/[^"]*?(\d{4})\/"/)?.[1] ||
-    html.match(/<a[^>]*>(\d{4})<\/a>/)?.[1] ||
-    'unknown';
-  const posterRaw =
-    html.match(/<div class="detail-pic">[\s\S]*?data-src="([^"]+)"/i)?.[1] ||
-    html.match(/<img[^>]+data-src="([^"]+)"/i)?.[1] ||
-    '';
-  const poster = toAbsoluteUrl(posterRaw, origin);
-
-  const episodeVariants = await resolveGirigiriEpisodeVariants(
-    activeOrigins,
-    videoId,
-    html,
-  );
-  if (episodeVariants.length === 0) {
-    throw new Error('详情页未提取到可播放剧集');
-  }
-
-  const selectedVariant =
-    episodeVariants.find((variant) => variant.groupId === preferredGroupId) ||
-    episodeVariants[0];
-  const episodeEntries = selectedVariant.episodes.map(
-    (entry, index) =>
-      [entry.playPath, entry.title || `${index + 1}`] as [string, string],
-  );
-
-  const playResults = await runWithConcurrency(
-    episodeEntries.map(
-      ([playPath]) =>
-        async () =>
-          fetchGirigiriEpisodePlayUrl(activeOrigins, playPath),
-    ),
-    4,
-  );
-
-  const episodes: string[] = [];
-  const episodesTitles: string[] = [];
-  playResults.forEach((result, index) => {
-    if (result.url) {
-      episodes.push(result.url);
-      episodesTitles.push(episodeEntries[index][1]);
-    }
-  });
-
-  const fallbackMeta = playResults.find(
-    (item) => item.title || item.poster || item.desc || item.year !== 'unknown',
-  );
-
-  const finalTitle = title || fallbackMeta?.title || '';
-  const finalPoster = poster || fallbackMeta?.poster || '';
-  const finalYear = year !== 'unknown' ? year : fallbackMeta?.year || 'unknown';
-  const finalDesc = desc || fallbackMeta?.desc || '';
-
-  if (episodes.length === 0) {
-    throw new Error('未提取到有效播放地址');
-  }
-
-  const relatedSources = episodeVariants
-    .filter((variant) => variant.groupId !== selectedVariant.groupId)
-    .map(
-      (variant) =>
-        ({
-          id: buildGirigiriVariantId(
-            videoId,
-            variant.groupId,
-            variant.isDefault,
-          ),
-          title: finalTitle,
-          poster: finalPoster,
-          episodes: [],
-          episodes_titles: variant.episodes.map(
-            (entry, index) => entry.title || `${index + 1}`,
-          ),
-          source: apiSite.key,
-          source_name: apiSite.name,
-          variant_label: variant.label,
-          class: '',
-          year: finalYear,
-          desc: finalDesc,
-          type_name: '动漫',
-          douban_id: 0,
-        }) satisfies SearchResult,
-    );
-
-  return {
-    id: buildGirigiriVariantId(
-      videoId,
-      selectedVariant.groupId,
-      selectedVariant.isDefault,
-    ),
-    title: finalTitle,
-    poster: finalPoster,
-    episodes,
-    episodes_titles: episodesTitles,
-    source: apiSite.key,
-    source_name: apiSite.name,
-    variant_label: selectedVariant.label,
-    class: '',
-    year: finalYear,
-    desc: finalDesc,
-    type_name: '动漫',
-    douban_id: 0,
-    related_sources: relatedSources,
-  };
-}
-
-function extractXgcartoonTitle(html: string): string {
-  const rawTitle =
-    html.match(
-      /<div class="detail-right__title"[\s\S]*?<h1[^>]*>([\s\S]*?)<\/h1>/,
-    )?.[1] ||
-    html.match(/<h1[^>]*>([\s\S]*?)<\/h1>/)?.[1] ||
-    html.match(/<title>([^<]+)/)?.[1] ||
-    '';
-
-  return cleanHtmlTags(rawTitle)
-    .replace(/^🍴/, '')
-    .replace(/\s*免费高清卡通动漫在线看\s*-\s*西瓜卡通\s*$/i, '')
-    .trim();
-}
-
-function extractXgcartoonPoster(html: string, origin: string): string {
-  const rawPoster =
-    html.match(
-      /<div class="detail-sider"[\s\S]*?<amp-img[^>]+src="([^"]+)"/i,
-    )?.[1] ||
-    html.match(/<amp-img[^>]+src="([^"]*\/cover\/[^"]+)"/i)?.[1] ||
-    '';
-
-  return toAbsoluteUrl(rawPoster.replace(/&amp;/g, '&'), origin);
-}
-
-function extractXgcartoonDesc(html: string): string {
-  const rawDesc =
-    html.match(
-      /<div class="detail-right__desc[^"]*"[^>]*>[\s\S]*?<p[^>]*>([\s\S]*?)<\/p>/,
-    )?.[1] || '';
-
-  return cleanHtmlTags(rawDesc).trim();
-}
-
-function extractXgcartoonClass(html: string): string {
-  return Array.from(
-    html.matchAll(/<div class="tag tag-secondary"[^>]*>([\s\S]*?)<\/div>/g),
-  )
-    .map((match) => cleanHtmlTags(match[1]).trim())
-    .filter(Boolean)
-    .join(',');
-}
-
-async function fetchXgcartoonEpisodePlaylistUrl(
-  origins: string[],
-  cartoonId: string,
-  episode: XgcartoonEpisodeEntry,
-  referer: string,
-): Promise<string | null> {
-  const playPath = buildXgcartoonVideoPath(cartoonId, episode.chapterId);
-  const result = await fetchXgcartoonHtmlFromOrigins(
-    origins,
-    playPath,
-    undefined,
-    referer,
-  );
-  if (!result) {
-    return null;
-  }
-
-  const videoId = extractXgcartoonPlayerVid(result.html);
-  return videoId ? buildXgcartoonPlaylistUrl(videoId) : null;
-}
-
-async function resolveXgcartoonEpisodes(
-  origins: string[],
-  cartoonId: string,
-  episodes: XgcartoonEpisodeEntry[],
-  referer: string,
-): Promise<{ episodes: string[]; titles: string[] }> {
-  const results = await runWithConcurrency(
-    episodes.map((episode) => async () => {
-      const url = await fetchXgcartoonEpisodePlaylistUrl(
-        origins,
-        cartoonId,
-        episode,
-        referer,
-      );
-      return url ? { url, title: episode.title } : null;
-    }),
-    4,
-  );
-
-  const resolvedEpisodes: string[] = [];
-  const resolvedTitles: string[] = [];
-  results.forEach((result, index) => {
-    if (!result?.url) {
-      return;
-    }
-
-    resolvedEpisodes.push(result.url);
-    resolvedTitles.push(result.title || `${index + 1}`);
-  });
-
-  return {
-    episodes: resolvedEpisodes,
-    titles: resolvedTitles,
-  };
-}
-
-async function getDetailFromXgcartoon(
-  apiSite: ApiSite,
-  id: string,
-): Promise<SearchResult> {
-  const { cartoonId, groupId: preferredGroupId } = parseXgcartoonVariantId(id);
-  const origins = getXgcartoonOrigins(apiSite);
-  const detailResult = await fetchXgcartoonHtmlFromOrigins(
-    origins,
-    `/detail/${encodeURIComponent(cartoonId)}`,
-  );
-
-  if (!detailResult) {
-    throw new Error('详情页请求失败');
-  }
-
-  const { origin, html, finalUrl } = detailResult;
-  const activeOrigins = prioritizeOrigins(origins, origin);
-  const title = extractXgcartoonTitle(html) || cartoonId;
-  const poster = extractXgcartoonPoster(html, origin);
-  const desc = extractXgcartoonDesc(html);
-  const className = extractXgcartoonClass(html);
-  const variants = extractXgcartoonEpisodeVariants(html);
-
-  if (variants.length === 0) {
-    throw new Error('未提取到剧集');
-  }
-
-  const selectedVariant =
-    variants.find((variant) => variant.groupId === preferredGroupId) ||
-    variants[0];
-  const resolved = await resolveXgcartoonEpisodes(
-    activeOrigins,
-    cartoonId,
-    selectedVariant.episodes,
-    finalUrl,
-  );
-
-  if (resolved.episodes.length === 0) {
-    throw new Error('未提取到有效播放地址');
-  }
-
-  const relatedSources: SearchResult[] = variants
-    .filter((variant) => variant.groupId !== selectedVariant.groupId)
-    .map((variant) => ({
-      id: buildXgcartoonVariantId(
-        cartoonId,
-        variant.groupId,
-        variant.isDefault,
-      ),
-      title,
-      poster,
-      episodes: [],
-      episodes_titles: variant.episodes.map(
-        (entry, index) => entry.title || `${index + 1}`,
-      ),
-      source: apiSite.key,
-      source_name: apiSite.name,
-      variant_label: variant.label,
-      class: className,
-      year: 'unknown',
-      desc,
-      type_name: '动漫',
-      douban_id: 0,
-    }));
-
-  return {
-    id: buildXgcartoonVariantId(
-      cartoonId,
-      selectedVariant.groupId,
-      selectedVariant.isDefault,
-    ),
-    title,
-    poster,
-    episodes: resolved.episodes,
-    episodes_titles: resolved.titles,
-    source: apiSite.key,
-    source_name: apiSite.name,
-    variant_label: selectedVariant.label,
-    related_sources: relatedSources,
-    class: className,
-    year: 'unknown',
-    desc,
-    type_name: '动漫',
-    douban_id: 0,
-  };
-}
 
 function isSupportedVodPlaybackUrl(url: string): boolean {
   try {
@@ -927,7 +52,6 @@ function isSupportedVodPlaybackUrl(url: string): boolean {
   }
 }
 
-// 从 vod_play_url 中解析出播放链接和对应标题
 function parseVodPlayUrl(vodPlayUrl: string): {
   episodes: string[];
   titles: string[];
@@ -956,9 +80,6 @@ function parseVodPlayUrl(vodPlayUrl: string): {
   return { episodes, titles };
 }
 
-/**
- * 通用的带缓存搜索函数
- */
 async function searchWithCache(
   apiSite: ApiSite,
   query: string,
@@ -971,7 +92,6 @@ async function searchWithCache(
     return { results: [] };
   }
 
-  // 1. fresh 命中直接返回
   const cached = getCachedSearchPage(apiSite.key, query, page);
   if (cached) {
     if (cached.status === 'ok') {
@@ -981,29 +101,22 @@ async function searchWithCache(
     }
   }
 
-  // 2. 软过期命中：立即返回旧值，同时后台刷新（若无同 key 请求在途）
   const stale = peekCachedSearchPage(apiSite.key, query, page);
   if (stale && !stale.fresh) {
     dedupeSearchLoad(apiSite.key, query, page, () =>
       fetchAndCacheSearchPage(apiSite, query, page, url, timeoutMs),
-    ).catch(() => {
-      /* 后台刷新失败保留旧值 */
-    });
+    ).catch(() => {});
     if (stale.entry.status === 'ok') {
       return { results: stale.entry.data, pageCount: stale.entry.pageCount };
     }
     return { results: [] };
   }
 
-  // 3. 完全未命中：回源（同 key 并发合并）
   return dedupeSearchLoad(apiSite.key, query, page, () =>
     fetchAndCacheSearchPage(apiSite, query, page, url, timeoutMs, signal),
   );
 }
 
-/**
- * 真正的回源逻辑，统一由 searchWithCache 调度，内部负责写入缓存。
- */
 async function fetchAndCacheSearchPage(
   apiSite: ApiSite,
   query: string,
@@ -1040,11 +153,9 @@ async function fetchAndCacheSearchPage(
       !Array.isArray(data.list) ||
       data.list.length === 0
     ) {
-      // 空结果不做负缓存要求，这里不写入缓存
       return { results: [] };
     }
 
-    // 处理结果数据
     const allResults = data.list.map((item: ApiSearchItem) => {
       const { episodes, titles } = item.vod_play_url
         ? parseVodPlayUrl(item.vod_play_url)
@@ -1068,13 +179,11 @@ async function fetchAndCacheSearchPage(
       };
     });
 
-    // 过滤掉集数为 0 的结果
     const results = allResults.filter(
       (result: SearchResult) => result.episodes.length > 0,
     );
 
     const pageCount = page === 1 ? data.pagecount || 1 : undefined;
-    // 写入缓存（成功）
     setCachedSearchPage(apiSite.key, query, page, 'ok', results, pageCount);
     return { results, pageCount };
   } catch (error: any) {
@@ -1109,7 +218,6 @@ export async function searchFromApi(
     const apiUrl =
       apiBaseUrl + API_CONFIG.search.path + encodeURIComponent(query);
 
-    // 使用新的缓存搜索函数处理第一页
     const firstPageResult = await searchWithCache(
       apiSite,
       query,
@@ -1125,12 +233,9 @@ export async function searchFromApi(
       options.maxSearchPages ??
       (await getConfig()).SiteConfig.SearchDownstreamMaxPage;
 
-    // 获取总页数
     const pageCount = pageCountFromFirst || 1;
-    // 确定需要获取的额外页数
     const pagesToFetch = Math.min(pageCount - 1, MAX_SEARCH_PAGES - 1);
 
-    // 如果有额外页数，获取更多页的结果
     if (pagesToFetch > 0) {
       const additionalPageTasks = [];
 
@@ -1164,7 +269,6 @@ export async function searchFromApi(
         () => !options.signal?.aborted,
       );
 
-      // 合并所有页的结果
       additionalResults.forEach((pageResults) => {
         if (pageResults.length > 0) {
           results.push(...pageResults);
@@ -1318,33 +422,27 @@ async function handleSpecialSourceDetail(
     matches = html.match(generalPattern) || [];
   }
 
-  // 去重并清理链接前缀
   matches = Array.from(new Set(matches)).map((link: string) => {
-    link = link.substring(1); // 去掉开头的 $
+    link = link.substring(1);
     const parenIndex = link.indexOf('(');
     return parenIndex > 0 ? link.substring(0, parenIndex) : link;
   });
 
-  // 根据 matches 数量生成剧集标题
   const episodes_titles = Array.from({ length: matches.length }, (_, i) =>
     (i + 1).toString(),
   );
 
-  // 提取标题
   const titleMatch = html.match(/<h1[^>]*>([^<]+)<\/h1>/);
   const titleText = titleMatch ? titleMatch[1].trim() : '';
 
-  // 提取描述
   const descMatch = html.match(
     /<div[^>]*class=["']sketch["'][^>]*>([\s\S]*?)<\/div>/,
   );
   const descText = descMatch ? cleanHtmlTags(descMatch[1]) : '';
 
-  // 提取封面
   const coverMatch = html.match(/(https?:\/\/[^"'\s]+?\.jpg)/g);
   const coverUrl = coverMatch ? coverMatch[0].trim() : '';
 
-  // 提取年份
   const yearMatch = html.match(/>(\d{4})</);
   const yearText = yearMatch ? yearMatch[1] : 'unknown';
 
