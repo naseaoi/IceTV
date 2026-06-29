@@ -78,6 +78,7 @@ export function useSearchExecution({
   const eventSourceRef = useRef<EventSource | null>(null);
   const pendingResultsRef = useRef<SearchResult[]>([]);
   const flushTimerRef = useRef<number | null>(null);
+  const hasFirstBatchRef = useRef<boolean>(false);
 
   // query 值作为 effect 依赖
   const query = (searchParams.get('q') || '').trim();
@@ -99,6 +100,7 @@ export function useSearchExecution({
       flushTimerRef.current = null;
     }
     pendingResultsRef.current = [];
+    hasFirstBatchRef.current = false;
 
     if (query) {
       const cachedSnapshot = getSearchSnapshot(query);
@@ -170,7 +172,15 @@ export function useSearchExecution({
                         )
                       : (payload.results as SearchResult[]);
                   pendingResultsRef.current.push(...incoming);
-                  if (!flushTimerRef.current) {
+
+                  if (!hasFirstBatchRef.current) {
+                    hasFirstBatchRef.current = true;
+                    const toAppend = pendingResultsRef.current;
+                    pendingResultsRef.current = [];
+                    startTransition(() => {
+                      setSearchResults((prev) => prev.concat(toAppend));
+                    });
+                  } else if (!flushTimerRef.current) {
                     flushTimerRef.current = window.setTimeout(() => {
                       const toAppend = pendingResultsRef.current;
                       pendingResultsRef.current = [];

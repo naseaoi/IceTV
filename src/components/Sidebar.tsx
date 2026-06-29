@@ -322,7 +322,6 @@ const Sidebar = ({ onToggle, activePath = '/' }: SidebarProps) => {
                 href='/'
                 onClick={(e) => {
                   e.preventDefault();
-                  setActive('/');
                   goHome();
                 }}
                 data-active={active === '/'}
@@ -347,9 +346,7 @@ const Sidebar = ({ onToggle, activePath = '/' }: SidebarProps) => {
                   if (!authInfo?.username) {
                     e.preventDefault();
                     router.push('/login?redirect=%2Fsearch');
-                    return;
                   }
-                  setActive('/search');
                 }}
                 onMouseEnter={() => prefetchRoute('/search')}
                 data-active={active === '/search'}
@@ -392,7 +389,6 @@ const Sidebar = ({ onToggle, activePath = '/' }: SidebarProps) => {
                       prefetch={
                         shouldPrefetchRoute(item.href) ? undefined : false
                       }
-                      onClick={() => setActive(item.href)}
                       onMouseEnter={() => prefetchRoute(item.href)}
                       data-active={isActive}
                       className={`${SIDEBAR_ITEM_LAYOUT_CLASS} ${SIDEBAR_LINK_STATE_CLASS} ${

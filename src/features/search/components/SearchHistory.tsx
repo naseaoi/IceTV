@@ -21,18 +21,18 @@ export default function SearchHistory({
 
   return (
     <section className='mb-12'>
-      <h2 className='mb-4 text-left text-xl font-bold text-gray-800 dark:text-gray-200'>
+      <h2 className='mb-4 text-center text-xl font-bold text-gray-800 dark:text-gray-200'>
         搜索历史
         {searchHistory.length > 0 && (
           <button
             onClick={() => setShowClearConfirm(true)}
-            className='ml-3 text-sm text-gray-500 transition-colors hover:text-red-500 dark:text-gray-400 dark:hover:text-red-500'
+            className='ml-3 text-sm text-red-500 transition-colors hover:text-red-600 dark:text-red-400 dark:hover:text-red-500'
           >
             清空
           </button>
         )}
       </h2>
-      <div className='flex flex-wrap gap-2'>
+      <div className='flex flex-wrap justify-center gap-2'>
         {searchHistory.map((item) => (
           <div key={item} className='group relative'>
             <button

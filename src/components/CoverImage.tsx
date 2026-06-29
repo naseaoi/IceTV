@@ -346,11 +346,10 @@ const CoverImage: React.FC<CoverImageProps> = memo(function CoverImage({
     <div ref={containerRef} className='absolute inset-0'>
       {!loaded && (
         <div
-          className='pointer-events-none absolute inset-0 z-10 flex items-center justify-center rounded-lg'
+          className='pointer-events-none absolute inset-0 z-10 overflow-hidden rounded-lg'
           style={loadingBackdropStyle}
         >
-          <div className='absolute inset-0 animate-pulse rounded-lg bg-white/10 dark:bg-white/5' />
-          <div className='relative h-5 w-5 animate-spin rounded-full border-2 border-white/35 border-t-white/80 dark:border-white/20 dark:border-t-white/60' />
+          <div className='via-white/8 absolute inset-0 animate-shimmer bg-gradient-to-r from-white/0 to-white/0 dark:from-white/0 dark:via-white/5 dark:to-white/0' />
         </div>
       )}
       {slotGranted && (
