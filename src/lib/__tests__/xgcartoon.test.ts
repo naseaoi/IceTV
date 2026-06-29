@@ -1,9 +1,8 @@
-import { describe, expect, it } from 'vitest';
-
 import {
   buildXgcartoonPlayUrl,
   extractXgcartoonEpisodes,
   extractXgcartoonEpisodeVariants,
+  extractXgcartoonSearchResults,
   parseXgcartoonDetailUrl,
 } from '@/lib/xgcartoon';
 
@@ -95,9 +94,72 @@ describe('xgcartoon', () => {
       expect(variants[0].episodes).toHaveLength(3);
     });
 
+    it('提取多季度分组', () => {
+      const html = `
+        <div>第1季【全26集】</div>
+        <a href="/user/page_direct?cartoon_id=test&chapter_id=s1e1"><span>第01集</span></a>
+        <a href="/user/page_direct?cartoon_id=test&chapter_id=s1e2"><span>第02集</span></a>
+        <div>第2季【全27集】</div>
+        <a href="/user/page_direct?cartoon_id=test&chapter_id=s2e1"><span>第01集</span></a>
+        <a href="/user/page_direct?cartoon_id=test&chapter_id=s2e2"><span>第02集</span></a>
+        <a href="/user/page_direct?cartoon_id=test&chapter_id=s2e3"><span>第03集</span></a>
+      `;
+
+      const variants = extractXgcartoonEpisodeVariants(html);
+
+      expect(variants).toHaveLength(2);
+      expect(variants[0].groupId).toBe('1');
+      expect(variants[0].label).toBe('第1季【全26集】');
+      expect(variants[0].episodes).toHaveLength(2);
+
+      expect(variants[1].groupId).toBe('2');
+      expect(variants[1].label).toBe('第2季【全27集】');
+      expect(variants[1].episodes).toHaveLength(3);
+    });
+
     it('无剧集时返回空数组', () => {
       const variants = extractXgcartoonEpisodeVariants('<div>无内容</div>');
       expect(variants).toEqual([]);
+    });
+  });
+
+  describe('extractXgcartoonSearchResults', () => {
+    it('从搜索页HTML提取动漫列表', () => {
+      const html = `
+        <a href="/detail/test-cartoon-1" target="_blank" class="topic-list-item">
+          <amp-img src="https://static-a.xgcartoon.com/cover/test.jpg?w=300&h=256&q=100">
+          <div class="topic-list-item--author">测试作者 [日本]</div>
+          <div class="h3 mb12">测试动漫【日语】</div>
+        </a>
+        <a href="/detail/test-cartoon-2" target="_blank" class="topic-list-item">
+          <amp-img src="https://static-a.xgcartoon.com/cover/test2.jpg">
+          <div class="topic-list-item--author">作者2 [中国]</div>
+          <div class="h3 mb12">动漫2【国语】</div>
+        </a>
+      `;
+
+      const results = extractXgcartoonSearchResults(html);
+      expect(results).toHaveLength(2);
+      expect(results[0].cartoonId).toBe('test-cartoon-1');
+      expect(results[0].title).toBe('测试动漫【日语】');
+      expect(results[1].cartoonId).toBe('test-cartoon-2');
+      expect(results[1].title).toBe('动漫2【国语】');
+    });
+
+    it('去重相同的cartoonId', () => {
+      const html = `
+        <a href="/detail/test-cartoon" class="topic-list-item">
+          <amp-img src="test.jpg">
+          <div class="h3">测试动漫</div>
+        </a>
+        <a href="/detail/test-cartoon" class="topic-list-item">
+          <amp-img src="test.jpg">
+          <div class="h3">测试动漫</div>
+        </a>
+      `;
+
+      const results = extractXgcartoonSearchResults(html);
+      expect(results).toHaveLength(1);
     });
   });
 });

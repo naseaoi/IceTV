@@ -7,6 +7,11 @@ import {
   parseGirigiriVariantId,
 } from '@/lib/giri';
 import {
+  extractXgcartoonEpisodeVariants,
+  extractXgcartoonSearchResults,
+  type XgcartoonEpisodeEntry,
+} from '@/lib/xgcartoon';
+import {
   dedupeSearchLoad,
   getCachedSearchPage,
   peekCachedSearchPage,
@@ -100,6 +105,10 @@ function isAbortError(error: unknown): boolean {
 
 function isGirigiriSource(apiSite: ApiSite): boolean {
   return /girigirilove\.(?:com|icu)/i.test(apiSite.api);
+}
+
+function isXgcartoonSource(apiSite: ApiSite): boolean {
+  return /xgcartoon\.com/i.test(apiSite.api);
 }
 
 // giri 页面请求用浏览器风格 headers，降低 CF 盾触发概率
@@ -428,13 +437,53 @@ async function searchFromGirigiri(
   return [];
 }
 
-/**
- * 解析 giri 详情页的多版本选集列表。
- * 详情页常只 SSR 默认 tab 的 anthology-list-box，切换其他 tab 依赖前端 AJAX；
- * 此时仅靠详情页解析只能拿到 1 个版本。若检测到 tab 条宣告的版本数多于已解析
- * 到的版本数，则补抓默认播放页 HTML（通常把全部 tab 的列表都渲染在 DOM 中），
- * 以取回完整的版本清单。
- */
+async function searchFromXgcartoon(
+  apiSite: ApiSite,
+  query: string,
+  signal?: AbortSignal,
+): Promise<SearchResult[]> {
+  if (!query.trim()) {
+    return [];
+  }
+
+  const searchUrl = `https://www.xgcartoon.com/search?q=${encodeURIComponent(query)}`;
+
+  try {
+    const res = await fetch(searchUrl, {
+      headers: GIRI_HTML_HEADERS,
+      signal,
+    });
+
+    if (!res.ok) {
+      return [];
+    }
+
+    const html = await res.text();
+    const results = extractXgcartoonSearchResults(html);
+
+    return results.map((item) => ({
+      id: item.cartoonId,
+      title: item.title,
+      poster: item.poster,
+      episodes: [],
+      episodes_titles: [],
+      source: apiSite.key,
+      source_name: apiSite.name,
+      class: item.tags.join(','),
+      year: 'unknown',
+      desc: item.author,
+      type_name: '动漫',
+      douban_id: 0,
+    }));
+  } catch (error) {
+    if (isAbortError(error)) {
+      return [];
+    }
+    return [];
+  }
+}
+
+// 解析 giri 详情页的多版本选集列表
 async function resolveGirigiriEpisodeVariants(
   origins: string[],
   videoId: string,
@@ -598,11 +647,107 @@ async function getDetailFromGirigiri(
   };
 }
 
-/**
- * 从 vod_play_url 中解析出 m3u8 播放链接和对应标题。
- * 格式: 多播放源用 $$$ 分隔，每个源内集与集之间用 # 分隔，标题与链接用 $ 分隔。
- * 取集数最多的播放源。
- */
+async function getDetailFromXgcartoon(
+  apiSite: ApiSite,
+  id: string,
+): Promise<SearchResult> {
+  const cartoonId = id;
+  const detailUrl = `https://www.xgcartoon.com/detail/${cartoonId}`;
+
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 10000);
+
+  try {
+    const res = await fetch(detailUrl, {
+      headers: GIRI_HTML_HEADERS,
+      signal: controller.signal,
+    });
+
+    clearTimeout(timeoutId);
+
+    if (!res.ok) {
+      throw new Error('详情页请求失败');
+    }
+
+    const html = await res.text();
+
+    const title =
+      html.match(/<h2[^>]*>([\s\S]*?)【[^\]]+】<\/h2>/)?.[1]?.trim() ||
+      html.match(/<title>([^<]+)/)?.[1]?.trim() ||
+      '';
+
+    const posterMatch = html.match(
+      /<amp-img[^>]+src="([^"]+)"[^>]*class="[^"]*detail-cover/,
+    );
+    const poster = posterMatch ? posterMatch[1].replace(/&amp;/g, '&') : '';
+
+    const descMatch = html.match(
+      /<div[^>]*class="[^"]*简介[^"]*"[^>]*>([\s\S]*?)<\/div>/,
+    );
+    const desc = descMatch ? cleanHtmlTags(descMatch[1]).trim() : '';
+
+    const variants = extractXgcartoonEpisodeVariants(html);
+
+    if (variants.length === 0) {
+      throw new Error('未提取到剧集');
+    }
+
+    // 使用第一个变体作为主结果
+    const primaryVariant = variants[0];
+    const episodeUrls = primaryVariant.episodes.map(
+      (ep) =>
+        `https://www.xgcartoon.com/user/page_direct?cartoon_id=${cartoonId}&chapter_id=${ep.chapterId}`,
+    );
+    const episodesTitles = primaryVariant.episodes.map((ep) => ep.title);
+
+    // 构建其他变体作为 related_sources
+    const relatedSources: SearchResult[] = variants.slice(1).map((variant) => {
+      const variantEpisodeUrls = variant.episodes.map(
+        (ep) =>
+          `https://www.xgcartoon.com/user/page_direct?cartoon_id=${cartoonId}&chapter_id=${ep.chapterId}`,
+      );
+      const variantEpisodesTitles = variant.episodes.map((ep) => ep.title);
+
+      return {
+        id: `${cartoonId}_${variant.groupId}`,
+        title: title || cartoonId,
+        poster,
+        episodes: variantEpisodeUrls,
+        episodes_titles: variantEpisodesTitles,
+        source: apiSite.key,
+        source_name: apiSite.name,
+        variant_label: variant.label,
+        class: '',
+        year: 'unknown',
+        desc,
+        type_name: '动漫',
+        douban_id: 0,
+      };
+    });
+
+    return {
+      id: cartoonId,
+      title: title || cartoonId,
+      poster,
+      episodes: episodeUrls,
+      episodes_titles: episodesTitles,
+      source: apiSite.key,
+      source_name: apiSite.name,
+      variant_label: primaryVariant.label,
+      related_sources: relatedSources,
+      class: '',
+      year: 'unknown',
+      desc,
+      type_name: '动漫',
+      douban_id: 0,
+    };
+  } catch (error) {
+    clearTimeout(timeoutId);
+    throw new Error(`获取详情失败: ${error}`);
+  }
+}
+
+// 从 vod_play_url 中解析出 m3u8 播放链接和对应标题
 function parseVodPlayUrl(vodPlayUrl: string): {
   episodes: string[];
   titles: string[];
@@ -775,6 +920,10 @@ export async function searchFromApi(
     return searchFromGirigiri(apiSite, query, options.signal);
   }
 
+  if (isXgcartoonSource(apiSite)) {
+    return searchFromXgcartoon(apiSite, query, options.signal);
+  }
+
   try {
     const apiBaseUrl = apiSite.api;
     const apiUrl =
@@ -858,6 +1007,10 @@ export async function searchFirstPageFromApi(
     return searchFromGirigiri(apiSite, query, options.signal);
   }
 
+  if (isXgcartoonSource(apiSite)) {
+    return searchFromXgcartoon(apiSite, query, options.signal);
+  }
+
   try {
     const apiUrl =
       apiSite.api + API_CONFIG.search.path + encodeURIComponent(query);
@@ -884,6 +1037,10 @@ export async function getDetailFromApi(
 ): Promise<SearchResult> {
   if (isGirigiriSource(apiSite)) {
     return getDetailFromGirigiri(apiSite, id);
+  }
+
+  if (isXgcartoonSource(apiSite)) {
+    return getDetailFromXgcartoon(apiSite, id);
   }
 
   if (apiSite.detail) {
