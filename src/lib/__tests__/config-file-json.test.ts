@@ -1,4 +1,9 @@
-import { removeConfigFileEntries } from '../config-file-json';
+import type { AdminConfig } from '@/features/admin/types/api';
+
+import {
+  buildConfigFileFromAdminConfig,
+  removeConfigFileEntries,
+} from '../config-file-json';
 
 describe('removeConfigFileEntries', () => {
   it('removes video source entries from api_site', () => {
@@ -54,5 +59,98 @@ describe('removeConfigFileEntries', () => {
     expect(removeConfigFileEntries(configFile, 'api_site', ['giri'])).toBe(
       configFile,
     );
+  });
+});
+
+describe('buildConfigFileFromAdminConfig', () => {
+  it('uses current admin video and live source lists', () => {
+    const config: AdminConfig = {
+      ConfigSubscribtion: {
+        URL: '',
+        AutoUpdate: false,
+        LastCheck: '',
+      },
+      ConfigFile: JSON.stringify({
+        cache_time: 7200,
+        api_site: {
+          old: { name: '旧视频源', api: 'https://old.example.com' },
+        },
+        lives: {
+          'yang-1989': {
+            name: 'yang-1989',
+            url: 'https://old.example.com/live.m3u',
+          },
+        },
+        custom_category: [
+          {
+            name: '电影',
+            type: 'movie',
+            query: '电影',
+          },
+        ],
+      }),
+      SiteConfig: {
+        SiteName: 'IceTV',
+        SiteIcon: '',
+        Announcement: '',
+        EnableLiveEntry: false,
+        SearchDownstreamMaxPage: 5,
+        SiteInterfaceCacheTime: 7200,
+        DoubanProxyType: 'direct',
+        DoubanProxy: '',
+        BangumiDataSource: 'server',
+        BangumiProxy: '',
+        DoubanImageProxyType: 'direct',
+        DoubanImageProxy: '',
+        DisableYellowFilter: false,
+        FluidSearch: true,
+      },
+      UserConfig: {
+        Users: [],
+      },
+      SourceConfig: [
+        {
+          key: 'giri',
+          name: 'giri资源',
+          api: 'https://ani.girigirilove.com',
+          detail: '',
+          from: 'custom',
+        },
+      ],
+      CustomCategories: [],
+      LiveConfig: [
+        {
+          key: 'github',
+          name: 'github',
+          url: 'https://example.com/github.m3u',
+          ua: '',
+          epg: '',
+          from: 'custom',
+          channelNumber: 12,
+        },
+      ],
+    };
+
+    const result = JSON.parse(buildConfigFileFromAdminConfig(config));
+
+    expect(result.api_site).toEqual({
+      giri: {
+        name: 'giri资源',
+        api: 'https://ani.girigirilove.com',
+      },
+    });
+    expect(result.lives).toEqual({
+      github: {
+        name: 'github',
+        url: 'https://example.com/github.m3u',
+      },
+    });
+    expect(result.custom_category).toEqual([
+      {
+        name: '电影',
+        type: 'movie',
+        query: '电影',
+      },
+    ]);
   });
 });

@@ -25,9 +25,11 @@ interface SortableSourceRowProps {
   isProxyModeLoading: boolean;
   isToggleLoading: boolean;
   isDeleteLoading: boolean;
+  isValidationLoading: boolean;
   onSelectSource: (key: string, checked: boolean) => void;
   onToggleProxyMode: (key: string) => void;
   onToggleEnable: (key: string) => void;
+  onValidate: (key: string) => void;
   onEdit: (source: DataSource) => void;
   onDelete: (key: string) => void;
 }
@@ -39,9 +41,11 @@ export function SortableSourceRow({
   isProxyModeLoading,
   isToggleLoading,
   isDeleteLoading,
+  isValidationLoading,
   onSelectSource,
   onToggleProxyMode,
   onToggleEnable,
+  onValidate,
   onEdit,
   onDelete,
 }: SortableSourceRowProps) {
@@ -134,9 +138,16 @@ export function SortableSourceRow({
             {validationStatus.icon} {validationStatus.text}
           </span>
         ) : (
-          <span className='rounded-full bg-gray-100 px-2 py-1 text-xs text-gray-600 dark:bg-gray-900/20 dark:text-gray-400'>
+          <button
+            onClick={() => onValidate(source.key)}
+            disabled={isValidationLoading}
+            className={`rounded-full bg-gray-100 px-2 py-1 text-xs text-gray-600 transition-colors hover:bg-gray-200 dark:bg-gray-900/20 dark:text-gray-400 dark:hover:bg-gray-800/40 ${
+              isValidationLoading ? 'cursor-not-allowed opacity-50' : ''
+            }`}
+            title='点击检测该源'
+          >
             未检测
-          </span>
+          </button>
         )}
       </td>
       <td className='space-x-2 whitespace-nowrap px-6 py-4 text-right text-sm font-medium'>

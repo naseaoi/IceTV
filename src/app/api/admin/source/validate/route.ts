@@ -12,6 +12,7 @@ export async function GET(request: NextRequest) {
 
   const { searchParams } = new URL(request.url);
   const searchKeyword = searchParams.get('q');
+  const sourceKey = searchParams.get('source')?.trim();
 
   if (!searchKeyword) {
     return new Response(JSON.stringify({ error: '搜索关键词不能为空' }), {
@@ -23,7 +24,13 @@ export async function GET(request: NextRequest) {
   }
 
   const config = await getConfig();
-  const apiSites = config.SourceConfig;
+  const apiSites = sourceKey
+    ? config.SourceConfig.filter((site) => site.key === sourceKey)
+    : config.SourceConfig;
+
+  if (sourceKey && apiSites.length === 0) {
+    return NextResponse.json({ error: '源不存在' }, { status: 404 });
+  }
 
   // 共享状态
   let streamClosed = false;

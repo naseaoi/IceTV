@@ -2,7 +2,10 @@ import { NextRequest, NextResponse } from 'next/server';
 
 import { isGuardFailure, requireAdmin } from '@/lib/api-auth';
 import { getConfig, saveConfig } from '@/lib/config';
-import { removeConfigFileEntries } from '@/lib/config-file-json';
+import {
+  buildConfigFileFromAdminConfig,
+  removeConfigFileEntries,
+} from '@/lib/config-file-json';
 import { deleteCachedLiveChannels, refreshLiveChannels } from '@/lib/live';
 
 export const runtime = 'nodejs';
@@ -217,6 +220,8 @@ export async function POST(request: NextRequest) {
       default:
         return NextResponse.json({ error: '未知操作' }, { status: 400 });
     }
+
+    config.ConfigFile = buildConfigFileFromAdminConfig(config);
 
     // 保存配置
     await saveConfig(config);

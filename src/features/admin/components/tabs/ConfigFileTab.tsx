@@ -1,6 +1,4 @@
 'use client';
-
-import { Download } from 'lucide-react';
 import { useEffect, useState } from 'react';
 
 import AlertModal from '@/features/admin/components/AlertModal';
@@ -10,6 +8,7 @@ import { adminPost } from '@/features/admin/lib/api';
 import { buttonStyles } from '@/features/admin/lib/buttonStyles';
 import { showError, showSuccess } from '@/features/admin/lib/notifications';
 import { AdminConfig } from '@/features/admin/types/api';
+import { buildConfigFileFromAdminConfig } from '@/lib/config-file-json';
 
 const ConfigFileComponent = ({
   config,
@@ -26,8 +25,8 @@ const ConfigFileComponent = ({
   const [lastCheckTime, setLastCheckTime] = useState<string>('');
 
   useEffect(() => {
-    if (config?.ConfigFile) {
-      setConfigContent(config.ConfigFile);
+    if (config) {
+      setConfigContent(buildConfigFileFromAdminConfig(config));
     }
     if (config?.ConfigSubscribtion) {
       setSubscriptionUrl(config.ConfigSubscribtion.URL);
@@ -236,13 +235,12 @@ const ConfigFileComponent = ({
               <button
                 onClick={handleExport}
                 disabled={!configContent.trim()}
-                className={`inline-flex items-center gap-1.5 rounded-lg px-4 py-2 transition-colors ${
+                className={`rounded-lg px-4 py-2 transition-colors ${
                   !configContent.trim()
                     ? buttonStyles.disabled
                     : buttonStyles.secondary
                 }`}
               >
-                <Download size={16} />
                 导出
               </button>
               <button

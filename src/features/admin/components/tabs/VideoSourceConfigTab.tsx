@@ -76,6 +76,9 @@ const VideoSourceConfig = ({
   const [showValidationModal, setShowValidationModal, openValidationModal] =
     useModalState(false);
   const [searchKeyword, setSearchKeyword] = useState('');
+  const [pendingValidationSourceKey, setPendingValidationSourceKey] = useState<
+    string | null
+  >(null);
 
   const sensors = useSensors(
     useSensor(PointerSensor, {
@@ -223,11 +226,35 @@ const VideoSourceConfig = ({
   const { isValidating, startValidation, getValidationStatus } =
     useSourceValidation({ sources, showAlert });
 
+  const handleOpenValidationModal = () => {
+    setPendingValidationSourceKey(null);
+    openValidationModal();
+  };
+
+  const handleCloseValidationModal = () => {
+    setShowValidationModal(false);
+    setPendingValidationSourceKey(null);
+  };
+
   const handleStartValidation = async () => {
     setShowValidationModal(false);
+    const sourceKey = pendingValidationSourceKey || undefined;
+    setPendingValidationSourceKey(null);
     await withLoading('validateSources', async () => {
-      await startValidation(searchKeyword);
+      await startValidation(searchKeyword, sourceKey);
     });
+  };
+
+  const handleValidateSource = (key: string) => {
+    if (!searchKeyword.trim()) {
+      setPendingValidationSourceKey(key);
+      openValidationModal();
+      return;
+    }
+
+    withLoading('validateSources', async () => {
+      await startValidation(searchKeyword, key);
+    }).catch(() => void 0);
   };
 
   const handleSelectAll = useCallback(
@@ -338,7 +365,7 @@ const VideoSourceConfig = ({
           </div>
           <div className='order-1 flex items-center gap-2 sm:order-2'>
             <button
-              onClick={openValidationModal}
+              onClick={handleOpenValidationModal}
               disabled={isValidating}
               className={`flex items-center space-x-1 rounded-lg px-3 py-1 text-sm transition-colors ${
                 isValidating ? buttonStyles.disabled : buttonStyles.primary
@@ -450,9 +477,11 @@ const VideoSourceConfig = ({
                     isProxyModeLoading={isLoading(`proxyMode_${source.key}`)}
                     isToggleLoading={isLoading(`toggleSource_${source.key}`)}
                     isDeleteLoading={isLoading(`deleteSource_${source.key}`)}
+                    isValidationLoading={isValidating}
                     onSelectSource={handleSelectSource}
                     onToggleProxyMode={handleToggleProxyMode}
                     onToggleEnable={handleToggleEnable}
+                    onValidate={handleValidateSource}
                     onEdit={(source) => {
                       setEditingSource(source);
                       setShowAddForm(false);
@@ -486,7 +515,7 @@ const VideoSourceConfig = ({
         isOpen={showValidationModal}
         searchKeyword={searchKeyword}
         onSearchKeywordChange={setSearchKeyword}
-        onClose={() => setShowValidationModal(false)}
+        onClose={handleCloseValidationModal}
         onStart={handleStartValidation}
       />
 

@@ -213,7 +213,7 @@ const DataMigration = ({ onRefreshConfig }: DataMigrationProps) => {
           <div className='flex flex-col rounded-lg border border-gray-200 bg-white p-6 transition-shadow hover:shadow-sm dark:border-gray-700 dark:bg-gray-800'>
             <div className='mb-6 flex items-center gap-3'>
               <div className='flex h-8 w-8 items-center justify-center rounded-lg bg-blue-50 dark:bg-blue-900/20'>
-                <Download className='h-4 w-4 text-blue-600 dark:text-blue-400' />
+                <Upload className='h-4 w-4 text-blue-600 dark:text-blue-400' />
               </div>
               <div>
                 <h3 className='font-semibold text-gray-900 dark:text-gray-100'>
@@ -277,7 +277,7 @@ const DataMigration = ({ onRefreshConfig }: DataMigrationProps) => {
                   </div>
                 ) : (
                   <div className='flex items-center justify-center gap-2'>
-                    <Download className='h-4 w-4' />
+                    <Upload className='h-4 w-4' />
                     导出数据
                   </div>
                 )}
@@ -289,14 +289,14 @@ const DataMigration = ({ onRefreshConfig }: DataMigrationProps) => {
           <div className='flex flex-col rounded-lg border border-gray-200 bg-white p-6 transition-shadow hover:shadow-sm dark:border-gray-700 dark:bg-gray-800'>
             <div className='mb-6 flex items-center gap-3'>
               <div className='flex h-8 w-8 items-center justify-center rounded-lg bg-red-50 dark:bg-red-900/20'>
-                <Upload className='h-4 w-4 text-red-600 dark:text-red-400' />
+                <Download className='h-4 w-4 text-red-600 dark:text-red-400' />
               </div>
               <div>
                 <h3 className='font-semibold text-gray-900 dark:text-gray-100'>
                   数据导入
                 </h3>
                 <p className='text-sm text-red-600 dark:text-red-400'>
-                  ⚠️ 将清空现有数据
+                  将清空现有数据
                 </p>
               </div>
             </div>
@@ -361,7 +361,7 @@ const DataMigration = ({ onRefreshConfig }: DataMigrationProps) => {
                   </div>
                 ) : (
                   <div className='flex items-center justify-center gap-2'>
-                    <Upload className='h-4 w-4' />
+                    <Download className='h-4 w-4' />
                     导入数据
                   </div>
                 )}

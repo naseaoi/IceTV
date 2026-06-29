@@ -2,7 +2,10 @@ import { NextRequest, NextResponse } from 'next/server';
 
 import { isGuardFailure, requireAdmin } from '@/lib/api-auth';
 import { getConfig, saveConfig } from '@/lib/config';
-import { removeConfigFileEntries } from '@/lib/config-file-json';
+import {
+  buildConfigFileFromAdminConfig,
+  removeConfigFileEntries,
+} from '@/lib/config-file-json';
 
 export const runtime = 'nodejs';
 
@@ -285,6 +288,8 @@ export async function POST(request: NextRequest) {
       default:
         return NextResponse.json({ error: '未知操作' }, { status: 400 });
     }
+
+    adminConfig.ConfigFile = buildConfigFileFromAdminConfig(adminConfig);
 
     // 持久化到存储
     await saveConfig(adminConfig);
