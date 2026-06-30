@@ -69,7 +69,7 @@ export function UserTable({
 
   return (
     <div
-      className='relative max-h-[28rem] overflow-x-auto overflow-y-auto rounded-lg border border-gray-200 dark:border-gray-700'
+      className='relative overflow-x-auto rounded-lg border border-gray-200 dark:border-gray-700'
       data-table='user-list'
     >
       <table className='min-w-full divide-y divide-gray-200 dark:divide-gray-700'>

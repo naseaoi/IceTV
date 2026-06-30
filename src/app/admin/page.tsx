@@ -1,6 +1,6 @@
 'use client';
 
-import { Loader2 } from 'lucide-react';
+import { Loader2, RotateCcw } from 'lucide-react';
 import { Suspense, useEffect, useState } from 'react';
 
 import PageLayout from '@/components/PageLayout';
@@ -65,12 +65,18 @@ function AdminPageClient() {
   if (loading) {
     return (
       <PageLayout activePath='/admin'>
-        <div className='px-2 py-4 sm:px-10 sm:py-8'>
-          <div className='mx-auto max-w-[95%]'>
-            <h1 className='mb-8 text-2xl font-bold text-gray-900 dark:text-gray-100'>
-              管理员设置
-            </h1>
-            <div className='flex min-h-[320px] items-center justify-center rounded-xl border border-gray-200 bg-white/80 backdrop-blur-md dark:border-gray-700 dark:bg-gray-800/50'>
+        <div className='px-2 py-4 sm:px-10 sm:py-8 md:-mb-14 md:flex md:h-dvh md:min-h-0 md:flex-col'>
+          <div className='mx-auto w-full max-w-[95%] md:flex md:min-h-0 md:flex-1 md:flex-col'>
+            {/* Tab 占位行 */}
+            <div className='flex h-[52px] shrink-0 items-end gap-1.5 pr-1'>
+              <div className='h-11 w-28 animate-pulse rounded-t-lg bg-gray-200 dark:bg-gray-700' />
+              <div className='h-9 w-24 animate-pulse rounded-t-lg bg-gray-100 dark:bg-gray-800' />
+              <div className='h-9 w-24 animate-pulse rounded-t-lg bg-gray-100 dark:bg-gray-800' />
+              <div className='h-9 w-28 animate-pulse rounded-t-lg bg-gray-100 dark:bg-gray-800' />
+            </div>
+
+            {/* 内容卡占位 */}
+            <section className='flex min-w-0 items-center justify-center rounded-xl rounded-tl-none border border-gray-200 bg-white/80 p-4 shadow-sm backdrop-blur-md dark:border-gray-700 dark:bg-gray-800/50 sm:p-6 md:min-h-0 md:flex-1'>
               <div className='flex flex-col items-center gap-4 text-center'>
                 <Loader2 className='h-10 w-10 animate-spin text-green-500' />
                 <div>
@@ -82,7 +88,7 @@ function AdminPageClient() {
                   </p>
                 </div>
               </div>
-            </div>
+            </section>
           </div>
         </div>
       </PageLayout>
@@ -96,44 +102,38 @@ function AdminPageClient() {
 
   return (
     <PageLayout activePath='/admin'>
-      <div className='px-2 py-4 sm:px-10 sm:py-8'>
-        <div className='mx-auto max-w-[95%]'>
-          {/* 标题 + 重置配置按钮 */}
-          <div className='mb-8 flex items-center gap-2'>
-            <h1 className='text-2xl font-bold text-gray-900 dark:text-gray-100'>
-              管理员设置
-            </h1>
+      <div className='px-2 py-4 sm:px-10 sm:py-8 md:-mb-14 md:flex md:h-dvh md:min-h-0 md:flex-col'>
+        <div className='mx-auto w-full max-w-[95%] md:flex md:min-h-0 md:flex-1 md:flex-col'>
+          {/* 顶部 header: Tab 导航 + 重置配置 */}
+          <div className='flex shrink-0 items-end gap-3'>
+            <div className='min-w-0 flex-1'>
+              <AdminNav
+                tabs={visibleTabs}
+                activeTab={activeTab}
+                onSelect={setActiveTab}
+              />
+            </div>
             {config && isOwnerRole && (
               <button
                 onClick={handleResetConfig}
-                className={`rounded-md px-3 py-1 text-xs transition-colors ${buttonStyles.dangerSmall}`}
+                title='重置配置'
+                aria-label='重置配置'
+                className='mb-2 flex shrink-0 items-center justify-center rounded-full p-2 text-red-600 transition-colors hover:bg-red-50 dark:text-red-400 dark:hover:bg-red-900/30'
               >
-                重置配置
+                <RotateCcw size={18} />
               </button>
             )}
           </div>
 
-          {/* 侧边导航 + 内容区 */}
-          <div className='gap-6 md:grid md:grid-cols-[200px_1fr]'>
-            <aside className='mb-4 md:mb-0'>
-              <div className='rounded-xl bg-white/80 p-2 shadow-sm backdrop-blur-md dark:bg-gray-800/50 dark:ring-1 dark:ring-gray-700 md:sticky md:top-4'>
-                <AdminNav
-                  tabs={visibleTabs}
-                  activeTab={activeTab}
-                  onSelect={setActiveTab}
-                />
-              </div>
-            </aside>
-
-            <section className='min-w-0 rounded-xl bg-white/80 p-4 shadow-sm backdrop-blur-md dark:bg-gray-800/50 dark:ring-1 dark:ring-gray-700 sm:p-6'>
-              <AdminTabContent
-                activeTab={activeTab}
-                config={config}
-                role={role}
-                refreshConfig={fetchConfig}
-              />
-            </section>
-          </div>
+          {/* 内容区 */}
+          <section className='min-w-0 overflow-auto rounded-xl rounded-tl-none border border-gray-200 bg-white/80 p-4 shadow-sm backdrop-blur-md dark:border-gray-700 dark:bg-gray-800/50 sm:p-6 md:min-h-0 md:flex-1'>
+            <AdminTabContent
+              activeTab={activeTab}
+              config={config}
+              role={role}
+              refreshConfig={fetchConfig}
+            />
+          </section>
         </div>
       </div>
 

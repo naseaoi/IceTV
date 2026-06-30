@@ -270,7 +270,7 @@ const LiveSourceConfig = ({
       )}
 
       <div
-        className='relative max-h-[28rem] overflow-x-auto overflow-y-auto rounded-lg border border-gray-200 dark:border-gray-700'
+        className='relative overflow-x-auto rounded-lg border border-gray-200 dark:border-gray-700'
         data-table='live-source-list'
       >
         <DndContext

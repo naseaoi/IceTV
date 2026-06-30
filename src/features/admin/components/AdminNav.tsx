@@ -12,17 +12,17 @@ interface AdminNavProps {
 }
 
 const baseItem =
-  'flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-colors';
+  'relative flex shrink-0 items-center gap-2 whitespace-nowrap rounded-t-lg border transition-all';
 const activeItem =
-  'bg-green-50 text-green-700 dark:bg-green-900/30 dark:text-green-300';
+  'z-10 -mb-px border-gray-200 border-b-transparent bg-white/80 px-6 py-3 text-base font-semibold text-green-700 backdrop-blur-md dark:border-gray-700 dark:border-b-transparent dark:bg-gray-800/50 dark:text-green-300';
 const idleItem =
-  'text-gray-600 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-700/60';
+  'border-transparent bg-gray-100/70 px-5 py-2.5 text-sm font-medium text-gray-500 hover:bg-gray-200/70 hover:text-gray-700 dark:bg-gray-800/30 dark:text-gray-400 dark:hover:bg-gray-700/50 dark:hover:text-gray-200';
 
 const AdminNav = ({ tabs, activeTab, onSelect }: AdminNavProps) => {
   return (
     <nav
       aria-label='管理导航'
-      className='flex gap-2 overflow-x-auto md:flex-col md:gap-1 md:overflow-visible'
+      className='flex h-[52px] items-end gap-1.5 overflow-x-auto pr-1'
     >
       {tabs.map((tab) => {
         const Icon = tab.icon;
@@ -33,11 +33,9 @@ const AdminNav = ({ tabs, activeTab, onSelect }: AdminNavProps) => {
             type='button'
             onClick={() => onSelect(tab.id)}
             aria-current={isActive ? 'page' : undefined}
-            className={`${baseItem} shrink-0 whitespace-nowrap md:w-full ${
-              isActive ? activeItem : idleItem
-            }`}
+            className={`${baseItem} ${isActive ? activeItem : idleItem}`}
           >
-            <Icon size={18} className='shrink-0' />
+            <Icon size={isActive ? 20 : 17} className='shrink-0' />
             {tab.label}
           </button>
         );

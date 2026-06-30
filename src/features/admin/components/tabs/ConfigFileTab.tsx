@@ -122,10 +122,10 @@ const ConfigFileComponent = ({
   }
 
   return (
-    <div className='space-y-4'>
-      <div className='grid grid-cols-1 gap-4 lg:grid-cols-2'>
+    <div className='flex h-full flex-col'>
+      <div className='grid min-h-0 flex-1 grid-cols-1 gap-4 lg:grid-cols-2 lg:grid-rows-1'>
         {/* 配置订阅区域 */}
-        <div className='rounded-lg border border-gray-200 bg-white p-6 shadow-sm dark:border-gray-700 dark:bg-gray-800'>
+        <div className='self-start rounded-lg border border-gray-200 bg-white p-6 shadow-sm dark:border-gray-700 dark:bg-gray-800'>
           <div className='mb-6 flex items-center justify-between'>
             <h3 className='text-xl font-semibold text-gray-900 dark:text-gray-100'>
               配置订阅
@@ -209,15 +209,14 @@ const ConfigFileComponent = ({
         </div>
 
         {/* 配置文件编辑区域 */}
-        <div className='space-y-4 rounded-lg border border-gray-200 bg-white p-6 shadow-sm dark:border-gray-700 dark:bg-gray-800'>
-          <div className='relative'>
+        <div className='flex min-h-0 flex-col gap-4 rounded-lg border border-gray-200 bg-white p-6 shadow-sm dark:border-gray-700 dark:bg-gray-800'>
+          <div className='relative min-h-[28rem] flex-1'>
             <textarea
               value={configContent}
               onChange={(e) => setConfigContent(e.target.value)}
-              rows={20}
               placeholder='请输入配置文件内容（JSON 格式）...'
               disabled={false}
-              className='w-full resize-none rounded-lg border border-gray-300 bg-white px-4 py-3 font-mono text-sm leading-relaxed text-gray-900 transition-all duration-200 hover:border-gray-400 focus:border-transparent focus:ring-2 focus:ring-blue-500 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100 dark:hover:border-gray-500'
+              className='h-full w-full resize-none rounded-lg border border-gray-300 bg-white px-4 py-3 font-mono text-sm leading-relaxed text-gray-900 transition-all duration-200 hover:border-gray-400 focus:border-transparent focus:ring-2 focus:ring-blue-500 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100 dark:hover:border-gray-500'
               style={{
                 fontFamily:
                   'ui-monospace, SFMono-Regular, "SF Mono", Consolas, "Liberation Mono", Menlo, monospace',

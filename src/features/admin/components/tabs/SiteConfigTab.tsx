@@ -275,25 +275,19 @@ const SiteConfigComponent = ({
             rows={1}
             className='w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-gray-900 focus:border-transparent focus:ring-2 focus:ring-green-500 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100'
           />
+          <p className='mt-1.5 text-xs text-gray-400 dark:text-gray-500'>
+            修改后将会重新推送给用户
+          </p>
         </div>
 
         {/* 豆瓣数据源设置 */}
         <div className='space-y-3'>
           <div>
-            <label className='mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300'>
-              豆瓣数据代理
-            </label>
-            <AdminSelect
-              value={siteSettings.DoubanProxyType}
-              onChange={(value) => handleDoubanDataSourceChange(value)}
-              options={doubanDataSourceOptions}
-            />
-            <p className='mt-1 text-xs text-gray-500 dark:text-gray-400'>
-              选择获取豆瓣数据的方式
-            </p>
-
-            {getThanksInfo(siteSettings.DoubanProxyType) && (
-              <div className='mt-3'>
+            <div className='mb-2 flex items-baseline justify-between gap-2'>
+              <label className='block text-sm font-medium text-gray-700 dark:text-gray-300'>
+                豆瓣数据代理
+              </label>
+              {getThanksInfo(siteSettings.DoubanProxyType) && (
                 <button
                   type='button'
                   onClick={() =>
@@ -302,15 +296,23 @@ const SiteConfigComponent = ({
                       '_blank',
                     )
                   }
-                  className='flex w-full cursor-pointer items-center justify-center gap-1.5 px-3 text-xs text-gray-500 dark:text-gray-400'
+                  className='flex shrink-0 cursor-pointer items-center gap-1 text-[11px] leading-none text-gray-400 hover:text-gray-600 dark:text-gray-500 dark:hover:text-gray-300'
                 >
                   <span className='font-medium'>
                     {getThanksInfo(siteSettings.DoubanProxyType)!.text}
                   </span>
-                  <ExternalLink className='w-3.5 opacity-70' />
+                  <ExternalLink className='h-3 w-3 opacity-70' />
                 </button>
-              </div>
-            )}
+              )}
+            </div>
+            <AdminSelect
+              value={siteSettings.DoubanProxyType}
+              onChange={(value) => handleDoubanDataSourceChange(value)}
+              options={doubanDataSourceOptions}
+            />
+            <p className='mt-1 text-xs text-gray-500 dark:text-gray-400'>
+              选择获取豆瓣数据的方式
+            </p>
           </div>
 
           {siteSettings.DoubanProxyType === 'custom' && (
@@ -379,20 +381,11 @@ const SiteConfigComponent = ({
         {/* 豆瓣图片代理设置 */}
         <div className='space-y-3'>
           <div>
-            <label className='mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300'>
-              豆瓣图片代理
-            </label>
-            <AdminSelect
-              value={siteSettings.DoubanImageProxyType}
-              onChange={(value) => handleDoubanImageProxyChange(value)}
-              options={doubanImageProxyTypeOptions}
-            />
-            <p className='mt-1 text-xs text-gray-500 dark:text-gray-400'>
-              选择获取豆瓣图片的方式
-            </p>
-
-            {getThanksInfo(siteSettings.DoubanImageProxyType) && (
-              <div className='mt-3'>
+            <div className='mb-2 flex items-baseline justify-between gap-2'>
+              <label className='block text-sm font-medium text-gray-700 dark:text-gray-300'>
+                豆瓣图片代理
+              </label>
+              {getThanksInfo(siteSettings.DoubanImageProxyType) && (
                 <button
                   type='button'
                   onClick={() =>
@@ -401,15 +394,23 @@ const SiteConfigComponent = ({
                       '_blank',
                     )
                   }
-                  className='flex w-full cursor-pointer items-center justify-center gap-1.5 px-3 text-xs text-gray-500 dark:text-gray-400'
+                  className='flex shrink-0 cursor-pointer items-center gap-1 text-[11px] leading-none text-gray-400 hover:text-gray-600 dark:text-gray-500 dark:hover:text-gray-300'
                 >
                   <span className='font-medium'>
                     {getThanksInfo(siteSettings.DoubanImageProxyType)!.text}
                   </span>
-                  <ExternalLink className='w-3.5 opacity-70' />
+                  <ExternalLink className='h-3 w-3 opacity-70' />
                 </button>
-              </div>
-            )}
+              )}
+            </div>
+            <AdminSelect
+              value={siteSettings.DoubanImageProxyType}
+              onChange={(value) => handleDoubanImageProxyChange(value)}
+              options={doubanImageProxyTypeOptions}
+            />
+            <p className='mt-1 text-xs text-gray-500 dark:text-gray-400'>
+              选择获取豆瓣图片的方式
+            </p>
           </div>
 
           {siteSettings.DoubanImageProxyType === 'custom' && (
