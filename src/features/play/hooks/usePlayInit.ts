@@ -15,12 +15,17 @@ import { isVodM3u8Url } from '@/features/play/lib/vodProxyUrl';
 // ---------------------------------------------------------------------------
 
 const DETAIL_CACHE_TTL_MS = 3 * 60 * 1000;
+const IS_DEVELOPMENT = process.env.NODE_ENV !== 'production';
 const detailCache = new Map<
   string,
   { data: SearchResult; expiresAt: number }
 >();
 
 function getCachedDetail(source: string, id: string): SearchResult | null {
+  if (IS_DEVELOPMENT) {
+    return null;
+  }
+
   const key = `${source}::${id}`;
   const entry = detailCache.get(key);
   if (!entry) return null;
@@ -32,6 +37,10 @@ function getCachedDetail(source: string, id: string): SearchResult | null {
 }
 
 function setCachedDetail(source: string, id: string, data: SearchResult) {
+  if (IS_DEVELOPMENT) {
+    return;
+  }
+
   const key = `${source}::${id}`;
   detailCache.set(key, { data, expiresAt: Date.now() + DETAIL_CACHE_TTL_MS });
   // 防止无限膨胀
@@ -354,7 +363,7 @@ export function usePlayInit({
         }
         const detailResponse = await fetch(
           `/api/detail?source=${source}&id=${id}`,
-          { signal },
+          IS_DEVELOPMENT ? { signal, cache: 'no-store' } : { signal },
         );
         if (!detailResponse.ok) {
           throw new Error('获取视频详情失败');

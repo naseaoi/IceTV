@@ -47,6 +47,8 @@ import type {
 } from '@/features/play/hooks/usePlayPageState';
 import type { ResumeMode } from '@/features/play/lib/resumePlayback';
 
+const IS_DEVELOPMENT = process.env.NODE_ENV !== 'production';
+
 function parseLoadSpeedKBps(speed?: string): number {
   if (!speed) return 0;
   const match = speed.match(/^([\d.]+)\s*(Mbps|Mb\/s|KB\/s|MB\/s)$/);
@@ -277,6 +279,7 @@ export function useSourceSwitch(options: UseSourceSwitchOptions) {
         try {
           const detailRes = await fetch(
             `/api/detail?source=${newSource}&id=${newId}`,
+            IS_DEVELOPMENT ? { cache: 'no-store' } : undefined,
           );
           if (currentRequestId !== sourceChangeRequestIdRef.current) {
             return;
