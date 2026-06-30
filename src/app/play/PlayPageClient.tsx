@@ -435,28 +435,7 @@ export function PlayPageClient() {
     };
   }, [doSaveCheckpoint, doSaveCurrentProgress]);
 
-  if (loading) {
-    return (
-      <PlayLoadingView
-        loadingStage={loadingStage}
-        loadingMessage={loadingMessage}
-        onBack={() => router.back()}
-      />
-    );
-  }
-
-  if (error) {
-    return (
-      <PlayErrorView
-        error={error}
-        videoTitle={videoTitle}
-        onBack={() => window.history.back()}
-        onRetry={() => window.location.reload()}
-      />
-    );
-  }
-
-  return (
+  const renderMainContent = (playbackError: string | null) => (
     <PlayMainContent
       videoTitle={videoTitle}
       totalEpisodes={totalEpisodes}
@@ -492,6 +471,36 @@ export function PlayPageClient() {
       onAddSources={handleAddSources}
       onLoadingTimeout={handleLoadingTimeout}
       searchType={searchType}
+      playbackError={playbackError}
     />
   );
+
+  if (loading) {
+    return (
+      <PlayLoadingView
+        loadingStage={loadingStage}
+        loadingMessage={loadingMessage}
+        onBack={() => router.back()}
+      />
+    );
+  }
+
+  if (error) {
+    const hasSwitchableSource = availableSources.some(
+      (s) => `${s.source}-${s.id}` !== `${currentSource}-${currentId}`,
+    );
+    if (detail && hasSwitchableSource) {
+      return renderMainContent(error);
+    }
+    return (
+      <PlayErrorView
+        error={error}
+        videoTitle={videoTitle}
+        onBack={() => window.history.back()}
+        onRetry={() => window.location.reload()}
+      />
+    );
+  }
+
+  return renderMainContent(null);
 }

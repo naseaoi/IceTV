@@ -393,7 +393,7 @@ export function createVodM3u8Loader({
           }
           setIsVideoLoading(false);
           setRealtimeLoadSpeed('');
-          setError('播放源加载失败，请尝试切换其他源站');
+          setError('当前源加载失败');
           return;
         }
 
