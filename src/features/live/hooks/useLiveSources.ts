@@ -245,7 +245,12 @@ export function useLiveSources({
       setIsVideoLoading(true);
 
       const response = await fetch(`/api/live/channels?source=${source.key}`);
-      if (!response.ok) throw new Error('获取频道列表失败');
+      if (!response.ok) {
+        if (response.status === 401) {
+          throw new Error('请先登录后再观看直播');
+        }
+        throw new Error('获取频道列表失败');
+      }
 
       const result = await response.json();
       if (!result.success) throw new Error(result.error || '获取频道列表失败');
@@ -337,6 +342,7 @@ export function useLiveSources({
       setIsVideoLoading(false);
     } catch (err) {
       console.error('获取频道列表失败:', err);
+      setError(err instanceof Error ? err.message : '获取频道列表失败');
       setCurrentChannels([]);
       setGroupedChannels({});
       setFilteredChannels([]);

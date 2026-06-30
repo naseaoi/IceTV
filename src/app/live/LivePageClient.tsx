@@ -76,6 +76,8 @@ function LiveLoadingView({
 }
 
 function LiveErrorView({ error }: { error: string }) {
+  const isAuthError = error.includes('登录');
+
   return (
     <PageLayout activePath='/live' contentMode='player' showDesktopBack={false}>
       <div className='flex min-h-screen items-center justify-center bg-transparent'>
@@ -84,15 +86,28 @@ function LiveErrorView({ error }: { error: string }) {
           tone='red'
           title='哎呀，出现了一些问题'
           message={error}
-          description='请检查网络连接或稍后重试。'
+          description={
+            isAuthError
+              ? '登录后即可观看直播频道。'
+              : '请检查网络连接或稍后重试。'
+          }
         >
-          <button
-            onClick={() => window.location.reload()}
-            className='flex w-full transform items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-blue-500 to-cyan-600 px-6 py-3 font-medium text-white shadow-lg transition-all duration-200 hover:scale-105 hover:from-blue-600 hover:to-cyan-700 hover:shadow-xl'
-          >
-            <RefreshCw className='h-4 w-4' />
-            重新尝试
-          </button>
+          {isAuthError ? (
+            <button
+              onClick={() => (window.location.href = '/login?redirect=%2Flive')}
+              className='flex w-full transform items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-blue-500 to-cyan-600 px-6 py-3 font-medium text-white shadow-lg transition-all duration-200 hover:scale-105 hover:from-blue-600 hover:to-cyan-700 hover:shadow-xl'
+            >
+              前往登录
+            </button>
+          ) : (
+            <button
+              onClick={() => window.location.reload()}
+              className='flex w-full transform items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-blue-500 to-cyan-600 px-6 py-3 font-medium text-white shadow-lg transition-all duration-200 hover:scale-105 hover:from-blue-600 hover:to-cyan-700 hover:shadow-xl'
+            >
+              <RefreshCw className='h-4 w-4' />
+              重新尝试
+            </button>
+          )}
         </LoadingStatePanel>
       </div>
     </PageLayout>
