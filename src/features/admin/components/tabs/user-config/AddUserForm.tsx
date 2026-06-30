@@ -1,5 +1,8 @@
 'use client';
 
+import { X } from 'lucide-react';
+
+import ModalShell from '@/components/modals/ModalShell';
 import AdminSelect from '@/features/admin/components/AdminSelect';
 import { buttonStyles } from '@/features/admin/lib/buttonStyles';
 
@@ -16,24 +19,40 @@ interface NewUserDraft {
 
 interface AddUserFormProps {
   value: NewUserDraft;
+  isOpen: boolean;
   onChange: (next: NewUserDraft) => void;
   userGroups: UserGroupOption[];
   onSubmit: () => void;
+  onCancel: () => void;
   isSubmitting: boolean;
 }
 
 export function AddUserForm({
   value,
+  isOpen,
   onChange,
   userGroups,
   onSubmit,
+  onCancel,
   isSubmitting,
 }: AddUserFormProps) {
   const disabled = !value.username || !value.password || isSubmitting;
 
   return (
-    <div className='mb-4 rounded-lg border border-gray-200 bg-gray-50 p-4 dark:border-gray-700 dark:bg-gray-900'>
-      <div className='space-y-4'>
+    <ModalShell isOpen={isOpen} onClose={onCancel} panelClassName='max-w-md'>
+      <div className='space-y-4 p-6'>
+        <div className='flex items-center justify-between'>
+          <h5 className='text-base font-semibold text-gray-900 dark:text-gray-100'>
+            添加用户
+          </h5>
+          <button
+            onClick={onCancel}
+            aria-label='关闭'
+            className='text-gray-400 transition-colors hover:text-gray-600 dark:hover:text-gray-300'
+          >
+            <X className='h-5 w-5' />
+          </button>
+        </div>
         <div className='grid grid-cols-1 gap-4 sm:grid-cols-2'>
           <input
             type='text'
@@ -71,7 +90,10 @@ export function AddUserForm({
             placeholder='无用户组（无限制）'
           />
         </div>
-        <div className='flex justify-end'>
+        <div className='flex justify-end space-x-2'>
+          <button onClick={onCancel} className={buttonStyles.secondary}>
+            取消
+          </button>
           <button
             onClick={onSubmit}
             disabled={disabled}
@@ -81,6 +103,6 @@ export function AddUserForm({
           </button>
         </div>
       </div>
-    </div>
+    </ModalShell>
   );
 }

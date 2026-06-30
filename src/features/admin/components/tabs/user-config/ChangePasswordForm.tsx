@@ -1,10 +1,14 @@
 'use client';
 
+import { X } from 'lucide-react';
+
+import ModalShell from '@/components/modals/ModalShell';
 import { buttonStyles } from '@/features/admin/lib/buttonStyles';
 
 interface ChangePasswordFormProps {
   username: string;
   password: string;
+  isOpen: boolean;
   onPasswordChange: (next: string) => void;
   onSubmit: () => void;
   onCancel: () => void;
@@ -14,6 +18,7 @@ interface ChangePasswordFormProps {
 export function ChangePasswordForm({
   username,
   password,
+  isOpen,
   onPasswordChange,
   onSubmit,
   onCancel,
@@ -22,41 +27,49 @@ export function ChangePasswordForm({
   const disabled = !password || isSubmitting;
 
   return (
-    <div className='mb-4 rounded-lg border border-blue-200 bg-blue-50 p-4 dark:border-blue-700 dark:bg-blue-900/20'>
-      <h5 className='mb-3 text-sm font-medium text-blue-800 dark:text-blue-300'>
-        修改用户密码
-      </h5>
-      <div className='flex flex-col gap-4 sm:flex-row sm:gap-3'>
-        <input
-          type='text'
-          placeholder='用户名'
-          value={username}
-          disabled
-          className='flex-1 cursor-not-allowed rounded-lg border border-gray-300 bg-gray-100 px-3 py-2 text-gray-900 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-100'
-        />
-        <input
-          type='password'
-          placeholder='新密码'
-          value={password}
-          onChange={(e) => onPasswordChange(e.target.value)}
-          className='flex-1 rounded-lg border border-gray-300 bg-white px-3 py-2 text-gray-900 focus:border-transparent focus:ring-2 focus:ring-blue-500 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100'
-        />
-        <button
-          onClick={onSubmit}
-          disabled={disabled}
-          className={`w-full sm:w-auto ${
-            disabled ? buttonStyles.disabled : buttonStyles.primary
-          }`}
-        >
-          {isSubmitting ? '修改中...' : '修改密码'}
-        </button>
-        <button
-          onClick={onCancel}
-          className={`w-full sm:w-auto ${buttonStyles.secondary}`}
-        >
-          取消
-        </button>
+    <ModalShell isOpen={isOpen} onClose={onCancel} panelClassName='max-w-md'>
+      <div className='space-y-4 p-6'>
+        <div className='flex items-center justify-between'>
+          <h5 className='text-base font-semibold text-gray-900 dark:text-gray-100'>
+            修改用户密码
+          </h5>
+          <button
+            onClick={onCancel}
+            aria-label='关闭'
+            className='text-gray-400 transition-colors hover:text-gray-600 dark:hover:text-gray-300'
+          >
+            <X className='h-5 w-5' />
+          </button>
+        </div>
+        <div className='space-y-3'>
+          <input
+            type='text'
+            placeholder='用户名'
+            value={username}
+            disabled
+            className='w-full cursor-not-allowed rounded-lg border border-gray-300 bg-gray-100 px-3 py-2 text-gray-900 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-100'
+          />
+          <input
+            type='password'
+            placeholder='新密码'
+            value={password}
+            onChange={(e) => onPasswordChange(e.target.value)}
+            className='w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-gray-900 focus:border-transparent focus:ring-2 focus:ring-blue-500 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100'
+          />
+        </div>
+        <div className='flex justify-end space-x-2'>
+          <button onClick={onCancel} className={buttonStyles.secondary}>
+            取消
+          </button>
+          <button
+            onClick={onSubmit}
+            disabled={disabled}
+            className={disabled ? buttonStyles.disabled : buttonStyles.primary}
+          >
+            {isSubmitting ? '修改中...' : '修改密码'}
+          </button>
+        </div>
       </div>
-    </div>
+    </ModalShell>
   );
 }

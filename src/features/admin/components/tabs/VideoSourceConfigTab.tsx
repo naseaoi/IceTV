@@ -382,37 +382,34 @@ const VideoSourceConfig = ({
             </button>
             <button
               onClick={() => {
-                setShowAddForm(!showAddForm);
+                setShowAddForm(true);
                 setEditingSource(null);
               }}
-              className={
-                showAddForm ? buttonStyles.secondary : buttonStyles.success
-              }
+              className={buttonStyles.success}
             >
-              {showAddForm ? '取消' : '添加视频源'}
+              添加视频源
             </button>
           </div>
         </div>
       </div>
 
-      {showAddForm && (
-        <VideoSourceAddForm
-          newSource={newSource}
-          onChange={setNewSource}
-          onSubmit={handleAddSource}
-          isSubmitting={isLoading('addSource')}
-        />
-      )}
+      <VideoSourceAddForm
+        newSource={newSource}
+        isOpen={showAddForm}
+        onChange={setNewSource}
+        onSubmit={handleAddSource}
+        onCancel={() => setShowAddForm(false)}
+        isSubmitting={isLoading('addSource')}
+      />
 
-      {editingSource && (
-        <VideoSourceEditForm
-          editingSource={editingSource}
-          onChange={setEditingSource}
-          onSubmit={handleEditSource}
-          onCancel={() => setEditingSource(null)}
-          isSubmitting={isLoading('editSource')}
-        />
-      )}
+      <VideoSourceEditForm
+        editingSource={editingSource}
+        isOpen={!!editingSource}
+        onChange={setEditingSource}
+        onSubmit={handleEditSource}
+        onCancel={() => setEditingSource(null)}
+        isSubmitting={isLoading('editSource')}
+      />
 
       <div
         className='relative overflow-x-auto rounded-lg border border-gray-200 dark:border-gray-700'

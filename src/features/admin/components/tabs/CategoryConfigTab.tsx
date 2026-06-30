@@ -23,14 +23,13 @@ import { CSS } from '@dnd-kit/utilities';
 import { GripVertical } from 'lucide-react';
 import { useEffect, useState } from 'react';
 
-import AdminSelect from '@/features/admin/components/AdminSelect';
 import AlertModal from '@/features/admin/components/AlertModal';
+import { CategoryAddForm } from '@/features/admin/components/tabs/category/CategoryAddForm';
 import { useAlertModal } from '@/features/admin/hooks/useAlertModal';
 import { useAdminSourceActions } from '@/features/admin/hooks/useAdminSourceActions';
 import { useLoadingState } from '@/features/admin/hooks/useLoadingState';
 import {
   buttonStyles,
-  inputStyles,
   statusBadgeStyles,
 } from '@/features/admin/lib/buttonStyles';
 import { showError } from '@/features/admin/lib/notifications';
@@ -268,68 +267,22 @@ const CategoryConfig = ({
           自定义分类列表
         </h4>
         <button
-          onClick={() => setShowAddForm(!showAddForm)}
-          className={`rounded-lg px-3 py-1 text-sm transition-colors ${
-            showAddForm ? buttonStyles.secondary : buttonStyles.success
-          }`}
+          onClick={() => setShowAddForm(true)}
+          className={`rounded-lg px-3 py-1 text-sm transition-colors ${buttonStyles.success}`}
         >
-          {showAddForm ? '取消' : '添加分类'}
+          添加分类
         </button>
       </div>
 
-      {showAddForm && (
-        <div className='space-y-4 rounded-lg border border-gray-200 bg-gray-50 p-4 dark:border-gray-700 dark:bg-gray-900'>
-          <div className='grid grid-cols-1 gap-4 sm:grid-cols-2'>
-            <input
-              type='text'
-              placeholder='分类名称'
-              value={newCategory.name}
-              onChange={(e) =>
-                setNewCategory((prev) => ({ ...prev, name: e.target.value }))
-              }
-              className={inputStyles.base}
-            />
-            <AdminSelect
-              value={newCategory.type}
-              onChange={(value) =>
-                setNewCategory((prev) => ({
-                  ...prev,
-                  type: value as 'movie' | 'tv',
-                }))
-              }
-              options={categoryTypeOptions}
-            />
-            <input
-              type='text'
-              placeholder='搜索关键词'
-              value={newCategory.query}
-              onChange={(e) =>
-                setNewCategory((prev) => ({ ...prev, query: e.target.value }))
-              }
-              className={inputStyles.base}
-            />
-          </div>
-          <div className='flex justify-end'>
-            <button
-              onClick={handleAddCategory}
-              disabled={
-                !newCategory.name ||
-                !newCategory.query ||
-                isLoading('addCategory')
-              }
-              className={`w-full px-4 py-2 sm:w-auto ${
-                !newCategory.name ||
-                !newCategory.query ||
-                isLoading('addCategory')
-                  ? buttonStyles.disabled
-                  : buttonStyles.success
-              }`}
-            >
-              {isLoading('addCategory') ? '添加中...' : '添加'}
-            </button>
-          </div>
-        </div>
-      )}
+      <CategoryAddForm
+        newCategory={newCategory}
+        isOpen={showAddForm}
+        typeOptions={categoryTypeOptions}
+        onChange={setNewCategory}
+        onSubmit={handleAddCategory}
+        onCancel={() => setShowAddForm(false)}
+        isSubmitting={isLoading('addCategory')}
+      />
 
       {/* 分类表格 */}
       <div className='relative overflow-x-auto rounded-lg border border-gray-200 dark:border-gray-700'>

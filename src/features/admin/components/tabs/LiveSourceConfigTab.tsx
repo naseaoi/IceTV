@@ -238,36 +238,33 @@ const LiveSourceConfig = ({
           </button>
           <button
             onClick={() => {
-              setShowAddForm(!showAddForm);
+              setShowAddForm(true);
               setEditingLiveSource(null);
             }}
-            className={
-              showAddForm ? buttonStyles.secondary : buttonStyles.success
-            }
+            className={buttonStyles.success}
           >
-            {showAddForm ? '取消' : '添加直播源'}
+            添加直播源
           </button>
         </div>
       </div>
 
-      {showAddForm && (
-        <LiveSourceAddForm
-          newLiveSource={newLiveSource}
-          onChange={setNewLiveSource}
-          onSubmit={handleAddLiveSource}
-          isSubmitting={isLoading('addLiveSource')}
-        />
-      )}
+      <LiveSourceAddForm
+        newLiveSource={newLiveSource}
+        isOpen={showAddForm}
+        onChange={setNewLiveSource}
+        onSubmit={handleAddLiveSource}
+        onCancel={() => setShowAddForm(false)}
+        isSubmitting={isLoading('addLiveSource')}
+      />
 
-      {editingLiveSource && (
-        <LiveSourceEditForm
-          editingLiveSource={editingLiveSource}
-          onChange={setEditingLiveSource}
-          onSubmit={handleEditLiveSource}
-          onCancel={handleCancelEdit}
-          isSubmitting={isLoading('editLiveSource')}
-        />
-      )}
+      <LiveSourceEditForm
+        editingLiveSource={editingLiveSource}
+        isOpen={!!editingLiveSource}
+        onChange={setEditingLiveSource}
+        onSubmit={handleEditLiveSource}
+        onCancel={handleCancelEdit}
+        isSubmitting={isLoading('editLiveSource')}
+      />
 
       <div
         className='relative overflow-x-auto rounded-lg border border-gray-200 dark:border-gray-700'
