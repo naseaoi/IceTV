@@ -70,11 +70,11 @@ describe('downstream giri source', () => {
     ]);
   });
 
-  it('giri 搜索会跳过已禁用原域名并按候选域名回退', async () => {
+  it('giri 搜索以后台配置域名为准', async () => {
     const fetchMock = global.fetch as jest.Mock;
     fetchMock.mockImplementation(async (input: RequestInfo | URL) => {
       const url = String(input);
-      if (url.startsWith('https://ani.girigirilove.com')) {
+      if (url.startsWith('https://anime.girigirilove.icu')) {
         return createJsonResponse({
           list: [{ id: 101, name: 'Fallback Anime', pic: '/fallback.jpg' }],
         });
@@ -83,18 +83,18 @@ describe('downstream giri source', () => {
     });
 
     const results = await searchFirstPageFromApi(
-      createGiriSite('https://anime.girigirilove.com'),
+      createGiriSite('https://anime.girigirilove.icu'),
       'fallback',
     );
     const urls = fetchMock.mock.calls.map(([input]) => String(input));
 
     expect(urls).toEqual([
-      'https://ani.girigirilove.com/index.php/ajax/suggest?mid=1&wd=fallback',
+      'https://anime.girigirilove.icu/index.php/ajax/suggest?mid=1&wd=fallback',
     ]);
     expect(results[0]).toEqual(
       expect.objectContaining({
         id: '101',
-        poster: 'https://ani.girigirilove.com/fallback.jpg',
+        poster: 'https://anime.girigirilove.icu/fallback.jpg',
       }),
     );
   });
@@ -135,12 +135,11 @@ describe('downstream giri source', () => {
     });
 
     const detail = await getDetailFromApi(
-      createGiriSite('https://anime.girigirilove.com'),
+      createGiriSite('https://anime.girigirilove.icu'),
       '100',
     );
     const urls = fetchMock.mock.calls.map(([input]) => String(input));
 
-    expect(urls).not.toContain('https://anime.girigirilove.com/GV100/');
     expect(urls).toContain('https://anime.girigirilove.icu/GV100/');
     expect(urls).toContain('https://anime.girigirilove.icu/playGV100-1-1/');
     expect(detail).toEqual(

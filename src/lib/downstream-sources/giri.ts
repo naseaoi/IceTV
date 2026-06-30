@@ -13,10 +13,8 @@ import {
   BROWSER_HTML_HEADERS,
   createTimedAbortController,
   getSiteOrigin,
-  normalizeOrigin,
   runWithConcurrency,
   toAbsoluteUrl,
-  uniqueOrigins,
 } from './shared';
 
 interface GirigiriSuggestItem {
@@ -33,14 +31,8 @@ interface GirigiriPlayExtractResult {
   poster: string;
 }
 
-const GIRI_FALLBACK_ORIGINS = [
-  'https://ani.girigirilove.com',
-  'https://anime.girigirilove.icu',
-];
-const GIRI_DISABLED_ORIGINS = new Set(['https://anime.girigirilove.com']);
-
 export function isGirigiriSource(apiSite: ApiSite): boolean {
-  return /girigirilove\.(?:com|icu)/i.test(apiSite.api);
+  return /girigirilove\./i.test(apiSite.api);
 }
 
 function isCfChallenge(html: string): boolean {
@@ -67,38 +59,8 @@ async function fetchGiriHtml(url: string): Promise<string | null> {
   return null;
 }
 
-function isEnabledGirigiriOrigin(origin: string): boolean {
-  return !GIRI_DISABLED_ORIGINS.has(normalizeOrigin(origin));
-}
-
-function includeEnabledGirigiriOrigin(origin: string): string[] {
-  if (!isEnabledGirigiriOrigin(origin)) {
-    return [];
-  }
-  return [origin];
-}
-
 function getGirigiriOrigins(apiSite: ApiSite): string[] {
-  return uniqueOrigins(
-    [
-      ...includeEnabledGirigiriOrigin(getSiteOrigin(apiSite)),
-      ...GIRI_FALLBACK_ORIGINS,
-    ],
-    GIRI_DISABLED_ORIGINS,
-  );
-}
-
-function prioritizeGirigiriOrigins(
-  origins: string[],
-  preferredOrigin: string,
-): string[] {
-  return uniqueOrigins(
-    [
-      ...includeEnabledGirigiriOrigin(preferredOrigin),
-      ...origins.filter((origin) => origin !== preferredOrigin),
-    ],
-    GIRI_DISABLED_ORIGINS,
-  );
+  return [getSiteOrigin(apiSite)];
 }
 
 async function fetchGiriHtmlFromOrigins(
@@ -337,7 +299,7 @@ export async function getDetailFromGirigiri(
   }
 
   const { origin, html } = detailResult;
-  const activeOrigins = prioritizeGirigiriOrigins(origins, origin);
+  const activeOrigins = origins;
 
   const title =
     html
