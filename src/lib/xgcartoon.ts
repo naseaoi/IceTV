@@ -24,6 +24,9 @@ const XGCARTOON_VIDEO_CDN_ORIGIN = 'https://xgct-video.bzcdn.net';
 const XGCARTOON_VARIANT_ID_REGEX = /^(.*)__xg_(.+)$/;
 const XGCARTOON_PLAYER_VID_REGEX =
   /player\.htm\?[^"'<>]*\bvid=([0-9a-f-]{16,})/i;
+const XGCARTOON_VOLUME_TITLE_REGEX =
+  /<div\b[^>]*class="[^"]*\bvolume-title\b[^"]*"[^>]*>([\s\S]*?)<\/div>/gi;
+const XGCARTOON_LEGACY_SEASON_REGEX = /第(\d+)季【[^】]+】/g;
 
 function cleanText(rawText: string): string {
   return normalizeInlineText(rawText.replace(/<[^>]+>/g, ' '));
@@ -139,13 +142,34 @@ export function extractXgcartoonEpisodes(
 export function extractXgcartoonEpisodeVariants(
   html: string,
 ): XgcartoonEpisodeVariant[] {
-  const variants: XgcartoonEpisodeVariant[] = [];
+  const volumeMatches = Array.from(
+    html.matchAll(XGCARTOON_VOLUME_TITLE_REGEX),
+  ).map((match, index) => {
+    const start = match.index || 0;
+    return {
+      groupId: `${index + 1}`,
+      label: cleanText(match[1] || ''),
+      start,
+      end: start + match[0].length,
+    };
+  });
 
-  // 查找所有季度标题
-  const seasonMatches = Array.from(html.matchAll(/第(\d+)季【[^】]+】/g));
+  const groupedVolumes =
+    volumeMatches.length > 0
+      ? volumeMatches
+      : Array.from(html.matchAll(XGCARTOON_LEGACY_SEASON_REGEX)).map(
+          (match, index) => {
+            const start = match.index || 0;
+            return {
+              groupId: match[1] || `${index + 1}`,
+              label: cleanText(match[0] || ''),
+              start,
+              end: start + match[0].length,
+            };
+          },
+        );
 
-  if (seasonMatches.length === 0) {
-    // 没有分季，提取所有剧集作为单个组
+  if (groupedVolumes.length === 0) {
     const episodes = extractXgcartoonEpisodes(html);
     if (episodes.length === 0) {
       return [];
@@ -161,36 +185,27 @@ export function extractXgcartoonEpisodeVariants(
     ];
   }
 
-  // 有多季，按季度分组
-  for (let i = 0; i < seasonMatches.length; i++) {
-    const seasonMatch = seasonMatches[i];
-    const seasonNum = seasonMatch[1];
-    const seasonTitle = seasonMatch[0];
-    const seasonStartPos = seasonMatch.index || 0;
+  return groupedVolumes
+    .map((volumeMatch, index) => {
+      const nextMatch = groupedVolumes[index + 1];
+      const volumeHtml = html.substring(
+        volumeMatch.end,
+        nextMatch?.start || html.length,
+      );
+      const episodes = extractXgcartoonEpisodes(volumeHtml);
 
-    // 确定这一季的结束位置（下一季的开始位置，或HTML末尾）
-    const seasonEndPos =
-      i < seasonMatches.length - 1
-        ? seasonMatches[i + 1].index || html.length
-        : html.length;
+      if (episodes.length === 0) {
+        return null;
+      }
 
-    // 提取这一季的HTML片段
-    const seasonHtml = html.substring(seasonStartPos, seasonEndPos);
-
-    // 从这一季的HTML中提取剧集
-    const episodes = extractXgcartoonEpisodes(seasonHtml);
-
-    if (episodes.length > 0) {
-      variants.push({
-        groupId: seasonNum,
-        label: seasonTitle,
-        isDefault: i === 0,
+      return {
+        groupId: volumeMatch.groupId,
+        label: volumeMatch.label,
+        isDefault: index === 0,
         episodes,
-      });
-    }
-  }
-
-  return variants;
+      };
+    })
+    .filter((variant): variant is XgcartoonEpisodeVariant => Boolean(variant));
 }
 
 // 从搜索结果页HTML提取动漫列表
