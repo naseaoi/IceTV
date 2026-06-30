@@ -1,87 +1,22 @@
 'use client';
 
-import {
-  Database,
-  FileText,
-  FolderOpen,
-  Loader2,
-  Settings,
-  Tv,
-  Users,
-  Video,
-} from 'lucide-react';
-import dynamic from 'next/dynamic';
+import { Loader2 } from 'lucide-react';
 import { Suspense, useEffect, useState } from 'react';
 
 import PageLayout from '@/components/PageLayout';
 import ConfirmModal from '@/components/modals/ConfirmModal';
+import AdminNav from '@/features/admin/components/AdminNav';
+import AdminTabContent from '@/features/admin/components/AdminTabContent';
 import AlertModal from '@/features/admin/components/AlertModal';
-import CollapsibleTab from '@/features/admin/components/CollapsibleTab';
+import { getVisibleTabs } from '@/features/admin/lib/admin-tabs';
 import { buttonStyles } from '@/features/admin/lib/buttonStyles';
 import { showError } from '@/features/admin/lib/notifications';
 import { isOwner } from '@/features/admin/lib/permissions';
 import { useAlertModal } from '@/features/admin/hooks/useAlertModal';
 import { useAdminPageActions } from '@/features/admin/hooks/useAdminPageActions';
+import { useAdminTab } from '@/features/admin/hooks/useAdminTab';
 import { useLoadingState } from '@/features/admin/hooks/useLoadingState';
 import { AdminConfig } from '@/features/admin/types/api';
-
-function AdminTabLoading() {
-  return (
-    <div className='flex min-h-32 items-center justify-center text-sm text-gray-500 dark:text-gray-400'>
-      <Loader2 className='mr-2 h-4 w-4 animate-spin text-green-500' />
-      加载中...
-    </div>
-  );
-}
-
-const DataMigration = dynamic(
-  () => import('../../components/DataMigration.js').then((mod) => mod.default),
-  {
-    loading: AdminTabLoading,
-  },
-);
-const CategoryConfig = dynamic(
-  () =>
-    import('../../features/admin/components/tabs/CategoryConfigTab.js').then(
-      (mod) => mod.default,
-    ),
-  { loading: AdminTabLoading },
-);
-const ConfigFileComponent = dynamic(
-  () =>
-    import('../../features/admin/components/tabs/ConfigFileTab.js').then(
-      (mod) => mod.default,
-    ),
-  { loading: AdminTabLoading },
-);
-const LiveSourceConfig = dynamic(
-  () =>
-    import('../../features/admin/components/tabs/LiveSourceConfigTab.js').then(
-      (mod) => mod.default,
-    ),
-  { loading: AdminTabLoading },
-);
-const SiteConfigComponent = dynamic(
-  () =>
-    import('../../features/admin/components/tabs/SiteConfigTab.js').then(
-      (mod) => mod.default,
-    ),
-  { loading: AdminTabLoading },
-);
-const UserConfig = dynamic(
-  () =>
-    import('../../features/admin/components/tabs/UserConfigTab.js').then(
-      (mod) => mod.default,
-    ),
-  { loading: AdminTabLoading },
-);
-const VideoSourceConfig = dynamic(
-  () =>
-    import('../../features/admin/components/tabs/VideoSourceConfigTab.js').then(
-      (mod) => mod.default,
-    ),
-  { loading: AdminTabLoading },
-);
 
 function AdminPageClient() {
   const { alertModal, showAlert, hideAlert } = useAlertModal();
@@ -91,15 +26,10 @@ function AdminPageClient() {
   const [error, setError] = useState<string | null>(null);
   const [role, setRole] = useState<'owner' | 'admin' | null>(null);
   const [showResetConfigModal, setShowResetConfigModal] = useState(false);
-  const [expandedTabs, setExpandedTabs] = useState<{ [key: string]: boolean }>({
-    userConfig: false,
-    videoSource: false,
-    liveSource: false,
-    siteConfig: false,
-    categoryConfig: false,
-    configFile: false,
-    dataMigration: false,
-  });
+
+  const isOwnerRole = isOwner(role);
+  const visibleTabs = getVisibleTabs(isOwnerRole);
+  const { activeTab, setActiveTab } = useAdminTab(isOwnerRole);
 
   const { fetchConfig, resetConfig } = useAdminPageActions({
     showAlert,
@@ -113,14 +43,6 @@ function AdminPageClient() {
     // 首次加载时显示骨架
     fetchConfig(true);
   }, [fetchConfig]);
-
-  // 切换标签展开状态
-  const toggleTab = (tabKey: string) => {
-    setExpandedTabs((prev) => ({
-      ...prev,
-      [tabKey]: !prev[tabKey],
-    }));
-  };
 
   // 新增: 重置配置处理函数
   const handleResetConfig = () => {
@@ -181,7 +103,7 @@ function AdminPageClient() {
             <h1 className='text-2xl font-bold text-gray-900 dark:text-gray-100'>
               管理员设置
             </h1>
-            {config && isOwner(role) && (
+            {config && isOwnerRole && (
               <button
                 onClick={handleResetConfig}
                 className={`rounded-md px-3 py-1 text-xs transition-colors ${buttonStyles.dangerSmall}`}
@@ -191,113 +113,26 @@ function AdminPageClient() {
             )}
           </div>
 
-          {/* 配置文件标签 - 仅站长可见 */}
-          {isOwner(role) && (
-            <CollapsibleTab
-              title='配置文件'
-              icon={
-                <FileText
-                  size={20}
-                  className='text-gray-600 dark:text-gray-400'
+          {/* 侧边导航 + 内容区 */}
+          <div className='gap-6 md:grid md:grid-cols-[200px_1fr]'>
+            <aside className='mb-4 md:mb-0'>
+              <div className='rounded-xl bg-white/80 p-2 shadow-sm backdrop-blur-md dark:bg-gray-800/50 dark:ring-1 dark:ring-gray-700 md:sticky md:top-4'>
+                <AdminNav
+                  tabs={visibleTabs}
+                  activeTab={activeTab}
+                  onSelect={setActiveTab}
                 />
-              }
-              isExpanded={expandedTabs.configFile}
-              onToggle={() => toggleTab('configFile')}
-            >
-              <ConfigFileComponent
-                config={config}
-                refreshConfig={fetchConfig}
-              />
-            </CollapsibleTab>
-          )}
+              </div>
+            </aside>
 
-          {/* 站点配置标签 */}
-          <CollapsibleTab
-            title='站点配置'
-            icon={
-              <Settings
-                size={20}
-                className='text-gray-600 dark:text-gray-400'
-              />
-            }
-            isExpanded={expandedTabs.siteConfig}
-            onToggle={() => toggleTab('siteConfig')}
-          >
-            <SiteConfigComponent config={config} refreshConfig={fetchConfig} />
-          </CollapsibleTab>
-
-          <div className='space-y-4'>
-            {/* 用户配置标签 */}
-            <CollapsibleTab
-              title='用户配置'
-              icon={
-                <Users size={20} className='text-gray-600 dark:text-gray-400' />
-              }
-              isExpanded={expandedTabs.userConfig}
-              onToggle={() => toggleTab('userConfig')}
-            >
-              <UserConfig
+            <section className='min-w-0 rounded-xl bg-white/80 p-4 shadow-sm backdrop-blur-md dark:bg-gray-800/50 dark:ring-1 dark:ring-gray-700 sm:p-6'>
+              <AdminTabContent
+                activeTab={activeTab}
                 config={config}
                 role={role}
                 refreshConfig={fetchConfig}
               />
-            </CollapsibleTab>
-
-            {/* 视频源配置标签 */}
-            <CollapsibleTab
-              title='视频源配置'
-              icon={
-                <Video size={20} className='text-gray-600 dark:text-gray-400' />
-              }
-              isExpanded={expandedTabs.videoSource}
-              onToggle={() => toggleTab('videoSource')}
-            >
-              <VideoSourceConfig config={config} refreshConfig={fetchConfig} />
-            </CollapsibleTab>
-
-            {/* 直播源配置标签 */}
-            <CollapsibleTab
-              title='直播源配置'
-              icon={
-                <Tv size={20} className='text-gray-600 dark:text-gray-400' />
-              }
-              isExpanded={expandedTabs.liveSource}
-              onToggle={() => toggleTab('liveSource')}
-            >
-              <LiveSourceConfig config={config} refreshConfig={fetchConfig} />
-            </CollapsibleTab>
-
-            {/* 分类配置标签 */}
-            <CollapsibleTab
-              title='分类配置'
-              icon={
-                <FolderOpen
-                  size={20}
-                  className='text-gray-600 dark:text-gray-400'
-                />
-              }
-              isExpanded={expandedTabs.categoryConfig}
-              onToggle={() => toggleTab('categoryConfig')}
-            >
-              <CategoryConfig config={config} refreshConfig={fetchConfig} />
-            </CollapsibleTab>
-
-            {/* 数据迁移标签 - 仅站长可见 */}
-            {isOwner(role) && (
-              <CollapsibleTab
-                title='数据迁移'
-                icon={
-                  <Database
-                    size={20}
-                    className='text-gray-600 dark:text-gray-400'
-                  />
-                }
-                isExpanded={expandedTabs.dataMigration}
-                onToggle={() => toggleTab('dataMigration')}
-              >
-                <DataMigration onRefreshConfig={fetchConfig} />
-              </CollapsibleTab>
-            )}
+            </section>
           </div>
         </div>
       </div>

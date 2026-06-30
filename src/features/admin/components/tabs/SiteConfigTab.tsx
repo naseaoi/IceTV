@@ -180,10 +180,11 @@ const SiteConfigComponent = ({
                   type='button'
                   disabled={iconUploading}
                   onClick={() => iconFileRef.current?.click()}
-                  className='flex flex-shrink-0 items-center gap-1.5 rounded-lg border border-gray-300 bg-white px-3 py-2 text-xs font-medium text-gray-700 transition-colors hover:bg-gray-50 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-300 dark:hover:bg-gray-700'
+                  aria-label={iconUploading ? '上传中' : '上传图标'}
+                  title={iconUploading ? '上传中...' : '上传图标'}
+                  className='flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-lg border border-gray-300 bg-white text-gray-700 transition-colors hover:bg-gray-50 disabled:opacity-60 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-300 dark:hover:bg-gray-700'
                 >
-                  <Upload className='h-3.5 w-3.5' />
-                  {iconUploading ? '上传中...' : '上传'}
+                  <Upload className='h-5 w-5' />
                 </button>
                 {siteSettings.SiteIcon && (
                   <button

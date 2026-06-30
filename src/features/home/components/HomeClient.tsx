@@ -34,7 +34,7 @@ import HomePosterCardSkeleton, {
   HOME_POSTER_CARD_CLASS,
 } from '@/components/HomePosterCardSkeleton';
 import ConfirmModal from '@/components/modals/ConfirmModal';
-import InfoModal from '@/components/modals/InfoModal';
+import AnnouncementModal from '@/components/modals/AnnouncementModal';
 import PageLayout from '@/components/PageLayout';
 import PosterCard from '@/components/PosterCard';
 import ScrollableRow from '@/components/ScrollableRow';
@@ -517,9 +517,8 @@ export default function HomeClient({
       </div>
 
       {announcement && (
-        <InfoModal
+        <AnnouncementModal
           isOpen={showAnnouncement}
-          title='提示'
           message={announcement}
           onClose={() => handleCloseAnnouncement(announcement)}
         />
