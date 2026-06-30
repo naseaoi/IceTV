@@ -490,12 +490,15 @@ export function configSelfCheck(adminConfig: AdminConfig): AdminConfig {
   const seenLiveKeys = new Set<string>();
   adminConfig.LiveConfig = adminConfig.LiveConfig.map((live) => ({
     ...live,
-    key: live.key.trim(),
-    name: live.name.trim(),
-    url: live.url.trim(),
-    ua: live.ua?.trim(),
-    epg: live.epg?.trim(),
+    key: trimConfigString(live.key),
+    name: trimConfigString(live.name),
+    url: trimConfigString(live.url),
+    ua: trimOptionalConfigString(live.ua),
+    epg: trimOptionalConfigString(live.epg),
   })).filter((live) => {
+    if (!live.key || !live.name || !live.url) {
+      return false;
+    }
     if (seenLiveKeys.has(live.key)) {
       return false;
     }
@@ -504,6 +507,19 @@ export function configSelfCheck(adminConfig: AdminConfig): AdminConfig {
   });
 
   return adminConfig;
+}
+
+function trimConfigString(value: unknown): string {
+  return typeof value === 'string' ? value.trim() : '';
+}
+
+function trimOptionalConfigString(value: unknown): string | undefined {
+  if (typeof value !== 'string') {
+    return undefined;
+  }
+
+  const trimmed = value.trim();
+  return trimmed || undefined;
 }
 
 export async function resetConfig() {

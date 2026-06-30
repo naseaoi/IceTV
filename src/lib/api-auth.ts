@@ -87,6 +87,15 @@ export async function requireActiveUser(
   }
 
   const secret = getOwnerPassword();
+  if (!secret || authInfo.sessionType !== 'account') {
+    return {
+      response: NextResponse.json(
+        { error: unauthorizedMessage },
+        { status: unauthorizedStatus },
+      ),
+    };
+  }
+
   const signData = getSignatureData(
     authInfo.sessionType,
     authInfo.expiresAt,

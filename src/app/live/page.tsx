@@ -11,6 +11,8 @@ import { getOwnerPassword, getOwnerUsername } from '@/lib/env.server';
 
 import LivePageClient from './LivePageClient';
 
+export const runtime = 'nodejs';
+
 export default async function LivePage() {
   const config = await getPublicConfig();
 
