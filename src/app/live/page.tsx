@@ -12,6 +12,7 @@ import { getOwnerPassword, getOwnerUsername } from '@/lib/env.server';
 import LivePageClient from './LivePageClient';
 
 export const runtime = 'nodejs';
+export const dynamic = 'force-dynamic';
 
 export default async function LivePage() {
   const config = await getPublicConfig();
