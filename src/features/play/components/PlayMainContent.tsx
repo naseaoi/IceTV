@@ -14,6 +14,7 @@ import {
   PlayerPageLayout,
 } from '@/components/PlayerPageLayout';
 import EpisodeSelector from '@/features/play/components/EpisodeSelector';
+import type { VideoLoadingStage } from '@/features/play/hooks/usePlayPageState';
 import { getSourceFailure } from '@/lib/failed-source-cooldown';
 import { SearchResult } from '@/lib/types';
 import { normalizeInlineText } from '@/lib/utils';
@@ -28,7 +29,7 @@ interface PlayMainContentProps {
   artRef: RefObject<HTMLDivElement | null>;
   isVideoLoading: boolean;
   isPlaying: boolean;
-  videoLoadingStage: 'initing' | 'sourceChanging';
+  videoLoadingStage: VideoLoadingStage;
   videoLoadingAttempt: number;
   realtimeLoadSpeed: string;
   authRecoveryVisible: boolean;
@@ -131,30 +132,47 @@ function PlayerOverlayPanel({
   );
 }
 
+const LOADING_STAGE_CONFIG: Record<
+  VideoLoadingStage,
+  { title: string; status: string; timeoutTitle: string; icon: ReactNode }
+> = {
+  initing: {
+    title: '正在加载视频',
+    status: '正在加载视频...',
+    timeoutTitle: '加载视频超时',
+    icon: <Tv className='h-9 w-9' />,
+  },
+  sourceChanging: {
+    title: '正在切换源站',
+    status: '正在切换源站...',
+    timeoutTitle: '切换播放源超时',
+    icon: <RefreshCw className='h-9 w-9' />,
+  },
+  episodeChanging: {
+    title: '正在切换剧集',
+    status: '正在切换剧集...',
+    timeoutTitle: '切换剧集超时',
+    icon: <RefreshCw className='h-9 w-9' />,
+  },
+};
+
 function PlayLoadingOverlay({
   loadingTimedOut,
   videoLoadingStage,
   realtimeLoadSpeed,
 }: {
   loadingTimedOut: boolean;
-  videoLoadingStage: 'initing' | 'sourceChanging';
+  videoLoadingStage: VideoLoadingStage;
   realtimeLoadSpeed: string;
 }) {
-  const statusText =
-    realtimeLoadSpeed ||
-    (videoLoadingStage === 'sourceChanging'
-      ? '正在切换源站...'
-      : '正在加载视频...');
+  const stageConfig = LOADING_STAGE_CONFIG[videoLoadingStage];
+  const statusText = realtimeLoadSpeed || stageConfig.status;
 
   if (loadingTimedOut) {
     return (
       <PlayerOverlayPanel
         zClassName='z-[500]'
-        title={
-          videoLoadingStage === 'sourceChanging'
-            ? '切换播放源超时'
-            : '加载视频超时'
-        }
+        title={stageConfig.timeoutTitle}
         message={`已等待超过 ${PLAYER_LOADING_TIMEOUT_SECONDS} 秒，可能是网络问题或播放源不可用`}
       />
     );
@@ -165,16 +183,8 @@ function PlayLoadingOverlay({
       zClassName='z-[500]'
       tone='blue'
       glow
-      icon={
-        videoLoadingStage === 'sourceChanging' ? (
-          <RefreshCw className='h-9 w-9' />
-        ) : (
-          <Tv className='h-9 w-9' />
-        )
-      }
-      title={
-        videoLoadingStage === 'sourceChanging' ? '正在切换源站' : '正在加载视频'
-      }
+      icon={stageConfig.icon}
+      title={stageConfig.title}
       message={statusText}
     />
   );

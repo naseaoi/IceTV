@@ -166,7 +166,7 @@ export function PlayPageClient() {
   }, [detail, currentEpisodeIndex]);
 
   useEffect(() => {
-    if (!isVideoLoading && videoLoadingStage === 'sourceChanging') {
+    if (!isVideoLoading && videoLoadingStage !== 'initing') {
       setVideoLoadingStage('initing');
     }
   }, [isVideoLoading, videoLoadingStage, setVideoLoadingStage]);

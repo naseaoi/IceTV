@@ -19,7 +19,10 @@ export interface SkipConfigState {
 }
 
 export type LoadingStage = 'searching' | 'preferring' | 'fetching' | 'ready';
-export type VideoLoadingStage = 'initing' | 'sourceChanging';
+export type VideoLoadingStage =
+  | 'initing'
+  | 'sourceChanging'
+  | 'episodeChanging';
 export type PlaybackRequestMode =
   | 'initial'
   | 'episode'
