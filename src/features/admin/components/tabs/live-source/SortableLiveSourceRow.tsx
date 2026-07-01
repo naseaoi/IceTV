@@ -82,52 +82,38 @@ export function SortableLiveSourceRow({
           : '-'}
       </td>
       <td className='max-w-[1rem] whitespace-nowrap px-6 py-4'>
-        <span
-          className={`rounded-full px-2 py-1 text-xs ${
-            !liveSource.disabled
-              ? statusBadgeStyles.enabled
-              : statusBadgeStyles.disabled
-          }`}
-        >
-          {!liveSource.disabled ? '启用中' : '已禁用'}
-        </span>
-      </td>
-      <td className='space-x-2 whitespace-nowrap px-6 py-4 text-right text-sm font-medium'>
         <button
           onClick={() => onToggleEnable(liveSource.key)}
           disabled={isToggleLoading}
-          className={`inline-flex items-center rounded-full px-3 py-1.5 text-xs font-medium ${
+          className={`rounded-full px-2 py-1 text-xs transition-colors ${
             !liveSource.disabled
-              ? buttonStyles.roundedDanger
-              : buttonStyles.roundedSuccess
-          } transition-colors ${
-            isToggleLoading ? 'cursor-not-allowed opacity-50' : ''
+              ? statusBadgeStyles.enabled
+              : statusBadgeStyles.disabled
+          } ${isToggleLoading ? 'cursor-not-allowed opacity-50' : 'cursor-pointer'}`}
+          title={!liveSource.disabled ? '点击禁用' : '点击启用'}
+        >
+          {!liveSource.disabled ? '启用中' : '已禁用'}
+        </button>
+      </td>
+      <td className='space-x-2 whitespace-nowrap px-6 py-4 text-right text-sm font-medium'>
+        <button
+          onClick={() => onEdit(liveSource)}
+          disabled={isEditLoading}
+          className={`${buttonStyles.roundedPrimary} ${
+            isEditLoading ? 'cursor-not-allowed opacity-50' : ''
           }`}
         >
-          {!liveSource.disabled ? '禁用' : '启用'}
+          编辑
         </button>
-        {liveSource.from !== 'config' && (
-          <>
-            <button
-              onClick={() => onEdit(liveSource)}
-              disabled={isEditLoading}
-              className={`${buttonStyles.roundedPrimary} ${
-                isEditLoading ? 'cursor-not-allowed opacity-50' : ''
-              }`}
-            >
-              编辑
-            </button>
-            <button
-              onClick={() => onDelete(liveSource.key)}
-              disabled={isDeleteLoading}
-              className={`${buttonStyles.roundedSecondary} ${
-                isDeleteLoading ? 'cursor-not-allowed opacity-50' : ''
-              }`}
-            >
-              删除
-            </button>
-          </>
-        )}
+        <button
+          onClick={() => onDelete(liveSource.key)}
+          disabled={isDeleteLoading}
+          className={`${buttonStyles.roundedSecondary} ${
+            isDeleteLoading ? 'cursor-not-allowed opacity-50' : ''
+          }`}
+        >
+          删除
+        </button>
       </td>
     </tr>
   );

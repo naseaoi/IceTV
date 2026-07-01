@@ -3,7 +3,6 @@
 import {
   AlertTriangle,
   CheckCircle2,
-  Loader2,
   Radio,
   RefreshCw,
   Tv,
@@ -57,6 +56,7 @@ function LiveLoadingView({
               )
             }
             tone='blue'
+            glow
             title='正在加载'
             message={message}
             progress={progress}
@@ -76,6 +76,8 @@ function LiveLoadingView({
 }
 
 function LiveErrorView({ error }: { error: string }) {
+  const isAuthError = error.includes('登录');
+
   return (
     <PageLayout activePath='/live' contentMode='player' showDesktopBack={false}>
       <div className='flex min-h-screen items-center justify-center bg-transparent'>
@@ -84,15 +86,17 @@ function LiveErrorView({ error }: { error: string }) {
           tone='red'
           title='哎呀，出现了一些问题'
           message={error}
-          description='请检查网络连接或稍后重试。'
+          description={isAuthError ? undefined : '请检查网络连接或稍后重试。'}
         >
-          <button
-            onClick={() => window.location.reload()}
-            className='flex w-full transform items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-blue-500 to-cyan-600 px-6 py-3 font-medium text-white shadow-lg transition-all duration-200 hover:scale-105 hover:from-blue-600 hover:to-cyan-700 hover:shadow-xl'
-          >
-            <RefreshCw className='h-4 w-4' />
-            重新尝试
-          </button>
+          {isAuthError ? null : (
+            <button
+              onClick={() => window.location.reload()}
+              className='flex w-full transform items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-blue-500 to-cyan-600 px-6 py-3 font-medium text-white shadow-lg transition-all duration-200 hover:scale-105 hover:from-blue-600 hover:to-cyan-700 hover:shadow-xl'
+            >
+              <RefreshCw className='h-4 w-4' />
+              重新尝试
+            </button>
+          )}
         </LoadingStatePanel>
       </div>
     </PageLayout>
@@ -163,15 +167,12 @@ function LivePlayerOverlay({
         <div className='absolute inset-0 z-[500] flex items-center justify-center overflow-hidden rounded-xl bg-black/85 shadow-lg backdrop-blur-sm transition-all duration-300'>
           <LoadingStatePanel
             compact
+            glow
             icon={<Tv className='h-9 w-9' />}
             tone='blue'
             title='IPTV 加载中...'
             description='正在拉取频道流并初始化播放器缓冲。'
-          >
-            <div className='flex items-center justify-center text-sky-300'>
-              <Loader2 className='h-5 w-5 animate-spin' />
-            </div>
-          </LoadingStatePanel>
+          />
         </div>
       )}
     </>

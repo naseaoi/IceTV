@@ -13,6 +13,7 @@ import Link from 'next/link';
 import { useEffect, useMemo, useState } from 'react';
 
 import { GetBangumiCalendarData } from '@/lib/bangumi.client';
+import { selectBangumiCardCover } from '@/lib/bangumi-normalize';
 import {
   clearAllFavorites,
   getAllFavorites,
@@ -22,18 +23,27 @@ import {
 import { getDoubanCategories } from '@/lib/douban.client';
 import { HomeInitialData } from '@/lib/home.types';
 import { DoubanItem } from '@/lib/types';
+import {
+  getCurrentWeekday,
+  primeDefaultDoubanFeedViewCache,
+} from '@/features/douban/hooks/useDoubanFeed';
 
 import CapsuleSwitch from '@/components/CapsuleSwitch';
 import ContinueWatching from '@/components/ContinueWatching';
+import HomePosterCardSkeleton, {
+  HOME_POSTER_CARD_CLASS,
+} from '@/components/HomePosterCardSkeleton';
 import ConfirmModal from '@/components/modals/ConfirmModal';
-import InfoModal from '@/components/modals/InfoModal';
+import AnnouncementModal from '@/components/modals/AnnouncementModal';
 import PageLayout from '@/components/PageLayout';
+import PosterCard from '@/components/PosterCard';
 import ScrollableRow from '@/components/ScrollableRow';
 import { useSite } from '@/components/SiteProvider';
 import VideoCard from '@/components/VideoCard';
 
 interface HomeClientProps {
   initialData: HomeInitialData;
+  continueWatchingSkeletonCount?: number;
 }
 
 type FavoriteItem = {
@@ -50,15 +60,25 @@ type FavoriteItem = {
   origin?: 'vod' | 'live';
 };
 
+type RecommendationLoadingState = {
+  hotMovies: boolean;
+  hotTvShows: boolean;
+  hotVarietyShows: boolean;
+  bangumiCalendar: boolean;
+};
+
 function RecommendationSkeletonRow() {
   return Array.from({ length: 8 }).map((_, index) => (
-    <div key={index} className='w-24 min-w-[96px] sm:w-44 sm:min-w-[180px]'>
-      <div className='relative aspect-[2/3] w-full animate-pulse overflow-hidden rounded-lg bg-gray-200 dark:bg-gray-800'>
-        <div className='absolute inset-0 bg-gray-300 dark:bg-gray-700'></div>
-      </div>
-      <div className='mt-2 h-5 animate-pulse rounded bg-gray-200 dark:bg-gray-800'></div>
-    </div>
+    <HomePosterCardSkeleton key={index} />
   ));
+}
+
+function RecommendationEmptyRow({ message }: { message: string }) {
+  return (
+    <div className='flex min-h-[172px] min-w-full items-center justify-center rounded-lg border border-dashed border-gray-200 bg-gray-50 text-sm text-gray-500 dark:border-gray-700 dark:bg-gray-900/40 dark:text-gray-400 sm:min-h-[298px]'>
+      {message}
+    </div>
+  );
 }
 
 function RecommendationSection({
@@ -71,6 +91,7 @@ function RecommendationSection({
   type,
   isBangumi = false,
   priorityCount = 0,
+  emptyMessage,
 }: {
   title: string;
   href: string;
@@ -81,6 +102,7 @@ function RecommendationSection({
   type?: string;
   isBangumi?: boolean;
   priorityCount?: number;
+  emptyMessage?: string;
 }) {
   return (
     <section className='mb-4'>
@@ -98,32 +120,41 @@ function RecommendationSection({
         </Link>
       </div>
       <ScrollableRow>
-        {loading
-          ? RecommendationSkeletonRow()
-          : items.map((item, index) => (
-              <div
-                key={item.id}
-                className='w-24 min-w-[96px] sm:w-44 sm:min-w-[180px]'
-              >
-                <VideoCard
-                  from='douban'
-                  title={item.title}
-                  poster={item.poster}
-                  douban_id={Number(item.id)}
-                  rate={item.rate}
-                  year={item.year}
-                  type={type}
-                  isBangumi={isBangumi}
-                  priority={index < priorityCount}
-                />
-              </div>
-            ))}
+        {loading ? (
+          RecommendationSkeletonRow()
+        ) : items.length > 0 ? (
+          items.map((item, index) => (
+            <div key={item.id} className={HOME_POSTER_CARD_CLASS}>
+              <PosterCard
+                title={item.title}
+                poster={item.poster}
+                doubanId={Number(item.id)}
+                rate={item.rate}
+                year={item.year}
+                type={type}
+                isBangumi={isBangumi}
+                priority={index < priorityCount}
+              />
+            </div>
+          ))
+        ) : emptyMessage ? (
+          <RecommendationEmptyRow message={emptyMessage} />
+        ) : null}
       </ScrollableRow>
     </section>
   );
 }
 
-export default function HomeClient({ initialData }: HomeClientProps) {
+function hasUsableBangumiCalendarData(
+  data: HomeInitialData['bangumiCalendarData'],
+): boolean {
+  return data.some((item) => item.items.length > 0);
+}
+
+export default function HomeClient({
+  initialData,
+  continueWatchingSkeletonCount = 0,
+}: HomeClientProps) {
   const [activeTab, setActiveTab] = useState<'home' | 'favorites'>('home');
   // 滑入方向：切到收藏时从右侧进入，切回首页时从左侧进入
   const [slideKey, setSlideKey] = useState(0);
@@ -143,14 +174,13 @@ export default function HomeClient({ initialData }: HomeClientProps) {
   const [bangumiCalendarData, setBangumiCalendarData] = useState(
     initialData.bangumiCalendarData,
   );
-  const [loading, setLoading] = useState(
-    !(
-      initialData.hotMovies.length > 0 ||
-      initialData.hotTvShows.length > 0 ||
-      initialData.hotVarietyShows.length > 0 ||
-      initialData.bangumiCalendarData.length > 0
-    ),
-  );
+  const [bangumiUnavailable, setBangumiUnavailable] = useState(false);
+  const [loading, setLoading] = useState<RecommendationLoadingState>(() => ({
+    hotMovies: initialData.hotMovies.length === 0,
+    hotTvShows: initialData.hotTvShows.length === 0,
+    hotVarietyShows: initialData.hotVarietyShows.length === 0,
+    bangumiCalendar: initialData.bangumiCalendarData.length === 0,
+  }));
   const { announcement } = useSite();
 
   const [showAnnouncement, setShowAnnouncement] = useState(false);
@@ -169,69 +199,114 @@ export default function HomeClient({ initialData }: HomeClientProps) {
   }, [announcement]);
 
   useEffect(() => {
-    // ISR 已提供有效数据时跳过客户端重复请求，节省带宽和加载时间
-    const hasInitialData =
-      initialData.hotMovies.length > 0 ||
-      initialData.hotTvShows.length > 0 ||
-      initialData.hotVarietyShows.length > 0 ||
-      initialData.bangumiCalendarData.length > 0;
-
-    if (hasInitialData) {
-      setLoading(false);
-      return;
-    }
+    const shouldLoadHotMovies = initialData.hotMovies.length === 0;
+    const shouldLoadHotTvShows = initialData.hotTvShows.length === 0;
+    const shouldLoadHotVarietyShows = initialData.hotVarietyShows.length === 0;
+    const shouldLoadBangumi = initialData.bangumiCalendarData.length === 0;
 
     let cancelled = false;
 
-    const refreshRecommendData = async () => {
+    const finishLoading = (key: keyof RecommendationLoadingState) => {
+      if (!cancelled) {
+        setLoading((prev) => ({ ...prev, [key]: false }));
+      }
+    };
+
+    const loadHotMovies = async () => {
+      if (!shouldLoadHotMovies) {
+        return;
+      }
+
       try {
-        const [moviesData, tvShowsData, varietyShowsData, bangumiData] =
-          await Promise.allSettled([
-            getDoubanCategories({
-              kind: 'movie',
-              category: '热门',
-              type: '全部',
-            }),
-            getDoubanCategories({ kind: 'tv', category: 'tv', type: 'tv' }),
-            getDoubanCategories({ kind: 'tv', category: 'show', type: 'show' }),
-            GetBangumiCalendarData(),
-          ]);
+        const moviesData = await getDoubanCategories({
+          kind: 'movie',
+          category: '热门',
+          type: '全部',
+        });
 
-        if (cancelled) {
-          return;
-        }
-
-        if (
-          moviesData.status === 'fulfilled' &&
-          moviesData.value.code === 200
-        ) {
-          setHotMovies(moviesData.value.list);
-        }
-        if (
-          tvShowsData.status === 'fulfilled' &&
-          tvShowsData.value.code === 200
-        ) {
-          setHotTvShows(tvShowsData.value.list);
-        }
-        if (
-          varietyShowsData.status === 'fulfilled' &&
-          varietyShowsData.value.code === 200
-        ) {
-          setHotVarietyShows(varietyShowsData.value.list);
-        }
-        if (bangumiData.status === 'fulfilled') {
-          setBangumiCalendarData(bangumiData.value);
+        if (!cancelled && moviesData.code === 200) {
+          setHotMovies(moviesData.list);
         }
       } catch (error) {
-        console.error('获取推荐数据失败:', error);
+        console.error('获取热门电影失败:', error);
       } finally {
+        finishLoading('hotMovies');
+      }
+    };
+
+    const loadHotTvShows = async () => {
+      if (!shouldLoadHotTvShows) {
+        return;
+      }
+
+      try {
+        const tvShowsData = await getDoubanCategories({
+          kind: 'tv',
+          category: 'tv',
+          type: 'tv',
+        });
+
+        if (!cancelled && tvShowsData.code === 200) {
+          setHotTvShows(tvShowsData.list);
+        }
+      } catch (error) {
+        console.error('获取热门剧集失败:', error);
+      } finally {
+        finishLoading('hotTvShows');
+      }
+    };
+
+    const loadHotVarietyShows = async () => {
+      if (!shouldLoadHotVarietyShows) {
+        return;
+      }
+
+      try {
+        const varietyShowsData = await getDoubanCategories({
+          kind: 'tv',
+          category: 'show',
+          type: 'show',
+        });
+
+        if (!cancelled && varietyShowsData.code === 200) {
+          setHotVarietyShows(varietyShowsData.list);
+        }
+      } catch (error) {
+        console.error('获取热门综艺失败:', error);
+      } finally {
+        finishLoading('hotVarietyShows');
+      }
+    };
+
+    const loadBangumi = async () => {
+      if (!shouldLoadBangumi) {
+        return;
+      }
+
+      try {
+        const bangumiData = await GetBangumiCalendarData();
+
+        if (!cancelled && hasUsableBangumiCalendarData(bangumiData)) {
+          setBangumiCalendarData(bangumiData);
+          setBangumiUnavailable(false);
+          finishLoading('bangumiCalendar');
+        } else if (!cancelled) {
+          setBangumiUnavailable(true);
+          finishLoading('bangumiCalendar');
+        }
+      } catch (error) {
+        console.error('获取新番放送失败:', error);
         if (!cancelled) {
-          setLoading(false);
+          setBangumiUnavailable(true);
+          finishLoading('bangumiCalendar');
         }
       }
     };
 
-    refreshRecommendData();
+    void loadHotMovies();
+    void loadHotTvShows();
+    void loadHotVarietyShows();
+    void loadBangumi();
 
     return () => {
       cancelled = true;
@@ -290,9 +365,9 @@ export default function HomeClient({ initialData }: HomeClientProps) {
     return unsubscribe;
   }, [activeTab]);
 
+  const currentWeekday = useMemo(() => getCurrentWeekday(), []);
+
   const todayAnimes = useMemo(() => {
-    const weekdays = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
-    const currentWeekday = weekdays[new Date().getDay()];
     const items =
       bangumiCalendarData.find((item) => item.weekday.en === currentWeekday)
         ?.items || [];
@@ -300,16 +375,20 @@ export default function HomeClient({ initialData }: HomeClientProps) {
     return items.map((anime) => ({
       id: anime.id.toString(),
       title: anime.name_cn || anime.name,
-      poster:
-        anime.images.large ||
-        anime.images.common ||
-        anime.images.medium ||
-        anime.images.small ||
-        anime.images.grid,
+      poster: selectBangumiCardCover(anime.images),
       rate: anime.rating?.score?.toFixed(1) || '',
       year: anime.air_date?.split('-')?.[0] || '',
     }));
-  }, [bangumiCalendarData]);
+  }, [bangumiCalendarData, currentWeekday]);
+
+  useEffect(() => {
+    primeDefaultDoubanFeedViewCache('movie', hotMovies);
+    primeDefaultDoubanFeedViewCache('tv', hotTvShows);
+    primeDefaultDoubanFeedViewCache('show', hotVarietyShows);
+    primeDefaultDoubanFeedViewCache('anime', todayAnimes, {
+      selectedWeekday: currentWeekday,
+    });
+  }, [currentWeekday, hotMovies, hotTvShows, hotVarietyShows, todayAnimes]);
 
   const handleCloseAnnouncement = (currentAnnouncement: string) => {
     setShowAnnouncement(false);
@@ -380,7 +459,9 @@ export default function HomeClient({ initialData }: HomeClientProps) {
               </section>
             ) : (
               <div className='-mb-8 sm:-mb-10'>
-                <ContinueWatching />
+                <ContinueWatching
+                  initialSkeletonCount={continueWatchingSkeletonCount}
+                />
 
                 <RecommendationSection
                   title='热门电影'
@@ -388,7 +469,7 @@ export default function HomeClient({ initialData }: HomeClientProps) {
                   icon={Film}
                   iconClassName='h-5 w-5 text-blue-500'
                   items={hotMovies}
-                  loading={loading && hotMovies.length === 0}
+                  loading={loading.hotMovies && hotMovies.length === 0}
                   type='movie'
                   priorityCount={4}
                 />
@@ -399,7 +480,7 @@ export default function HomeClient({ initialData }: HomeClientProps) {
                   icon={Tv}
                   iconClassName='h-5 w-5 text-emerald-500'
                   items={hotTvShows}
-                  loading={loading && hotTvShows.length === 0}
+                  loading={loading.hotTvShows && hotTvShows.length === 0}
                 />
 
                 <RecommendationSection
@@ -408,8 +489,15 @@ export default function HomeClient({ initialData }: HomeClientProps) {
                   icon={Cat}
                   iconClassName='h-5 w-5 text-pink-500'
                   items={todayAnimes}
-                  loading={loading && todayAnimes.length === 0}
+                  loading={
+                    loading.bangumiCalendar &&
+                    todayAnimes.length === 0 &&
+                    !bangumiUnavailable
+                  }
                   isBangumi={true}
+                  emptyMessage={
+                    bangumiUnavailable ? '暂时无法获取数据' : undefined
+                  }
                 />
 
                 <RecommendationSection
@@ -418,7 +506,9 @@ export default function HomeClient({ initialData }: HomeClientProps) {
                   icon={Clover}
                   iconClassName='h-5 w-5 text-violet-500'
                   items={hotVarietyShows}
-                  loading={loading && hotVarietyShows.length === 0}
+                  loading={
+                    loading.hotVarietyShows && hotVarietyShows.length === 0
+                  }
                 />
               </div>
             )}
@@ -427,9 +517,8 @@ export default function HomeClient({ initialData }: HomeClientProps) {
       </div>
 
       {announcement && (
-        <InfoModal
+        <AnnouncementModal
           isOpen={showAnnouncement}
-          title='提示'
           message={announcement}
           onClose={() => handleCloseAnnouncement(announcement)}
         />

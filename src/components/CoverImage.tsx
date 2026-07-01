@@ -5,23 +5,21 @@ import React, {
   memo,
   useCallback,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
 } from 'react';
 
+import {
+  isCoverImageCached,
+  markCoverImagesLoaded,
+  subscribeCoverImageLoaded,
+} from '@/lib/cover-image-cache';
 import { imageScheduler } from '@/lib/image-scheduler';
 import { processImageUrl } from '@/lib/utils';
 
 import NoImageCover from '@/components/NoImageCover';
-
-// ================================================================
-// 封面图片内存缓存 + 跨实例通知
-// ================================================================
-
-const loadedImageCache = new Map<string, number>();
-const CACHE_MAX_SIZE = 500;
-const CACHE_TRIM_TO_SIZE = 250;
 
 const PLACEHOLDER_COLORS = [
   '#94a3b8',
@@ -33,43 +31,9 @@ const PLACEHOLDER_COLORS = [
   '#818cf8',
   '#22c55e',
 ];
-const NEXT_IMAGE_OPTIMIZED_HOSTS = new Set(['lain.bgm.tv']);
 const DEFAULT_DOUBAN_IMAGE_CDN_HOST = 'img.doubanio.cmliussss.net';
-
-/** 全局事件总线：某个实例加载成功后通知同 src 的其他实例 */
-const imageLoadEmitter = new EventTarget();
-
-function markImageLoaded(url: string) {
-  if (!url) return;
-  loadedImageCache.delete(url);
-  loadedImageCache.set(url, Date.now());
-
-  if (loadedImageCache.size > CACHE_MAX_SIZE) {
-    const evictCount = loadedImageCache.size - CACHE_TRIM_TO_SIZE;
-    const cacheKeys = Array.from(loadedImageCache.keys());
-    for (
-      let index = 0;
-      index < evictCount && index < cacheKeys.length;
-      index += 1
-    ) {
-      loadedImageCache.delete(cacheKeys[index]);
-    }
-  }
-
-  imageLoadEmitter.dispatchEvent(new CustomEvent('loaded', { detail: url }));
-}
-
-function isImageCached(url: string): boolean {
-  if (!url || !loadedImageCache.has(url)) {
-    return false;
-  }
-
-  // 命中时刷新访问顺序，保留热图。
-  const cachedAt = loadedImageCache.get(url) ?? Date.now();
-  loadedImageCache.delete(url);
-  loadedImageCache.set(url, cachedAt);
-  return true;
-}
+const useIsomorphicLayoutEffect =
+  typeof window === 'undefined' ? useEffect : useLayoutEffect;
 
 function pickPlaceholderColor(seed: string): string {
   if (!seed) {
@@ -115,20 +79,12 @@ function buildBlurDataURL(color: string): string {
   return `data:image/svg+xml;charset=UTF-8,${encodeURIComponent(svg)}`;
 }
 
-function canUseNextImageOptimization(url: string): boolean {
+function needsImageUnoptimized(url: string): boolean {
   if (!url || url.startsWith('/') || url.startsWith('data:')) {
     return false;
   }
 
-  try {
-    const parsed = new URL(url);
-    return (
-      parsed.protocol === 'https:' &&
-      NEXT_IMAGE_OPTIMIZED_HOSTS.has(parsed.hostname)
-    );
-  } catch {
-    return false;
-  }
+  return true;
 }
 
 function toDefaultDoubanImageCdn(url: string): string {
@@ -196,6 +152,7 @@ const CoverImage: React.FC<CoverImageProps> = memo(function CoverImage({
   const retryCountRef = useRef(0);
   const releaseSlotRef = useRef<(() => void) | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
+  const imageRef = useRef<HTMLImageElement>(null);
 
   const processed = useMemo(
     () =>
@@ -209,7 +166,7 @@ const CoverImage: React.FC<CoverImageProps> = memo(function CoverImage({
 
   const needsUnoptimized = useMemo(() => {
     if (!processed) return false;
-    return !canUseNextImageOptimization(processed);
+    return needsImageUnoptimized(processed);
   }, [processed]);
 
   const displaySrc = useMemo(
@@ -220,7 +177,15 @@ const CoverImage: React.FC<CoverImageProps> = memo(function CoverImage({
     [processed, retryKey],
   );
 
-  const cached = !isEmpty && isImageCached(src);
+  const cacheKeys = useMemo(
+    () => Array.from(new Set([src, processed].filter(Boolean))),
+    [processed, src],
+  );
+
+  const cached = useMemo(
+    () => !isEmpty && isCoverImageCached(cacheKeys),
+    [cacheKeys, isEmpty],
+  );
   // 可见性门控：只有进入/接近可视区域才允许 acquire slot。
   // 首屏 priority 图片直接放行。
   const [isNearViewport, setIsNearViewport] = useState(cached || priority);
@@ -249,21 +214,28 @@ const CoverImage: React.FC<CoverImageProps> = memo(function CoverImage({
     [resolvedPlaceholderColor],
   );
 
-  // src 变化时重置所有状态（包括释放旧 slot）
-  useEffect(() => {
+  useIsomorphicLayoutEffect(() => {
     retryCountRef.current = 0;
     setRetryKey(0);
     setUseDefaultDoubanCdn(false);
     setHasError(false);
-    const isCached = isImageCached(src);
+    releaseSlotRef.current?.();
+    releaseSlotRef.current = null;
+  }, [src]);
+
+  useIsomorphicLayoutEffect(() => {
+    if (isEmpty) return;
+
+    const isCached = isCoverImageCached(cacheKeys);
     setLoaded(isCached);
     setSlotGranted(isCached);
     setIsNearViewport(isCached || priority);
 
-    // 释放旧 slot
-    releaseSlotRef.current?.();
-    releaseSlotRef.current = null;
-  }, [priority, src]);
+    if (isCached) {
+      releaseSlotRef.current?.();
+      releaseSlotRef.current = null;
+    }
+  }, [cacheKeys, isEmpty, priority]);
 
   // 可见性检测：进入视口附近一小段距离时就开始预加载
   // 首页横向滚动行控制不可见卡片排队
@@ -310,29 +282,33 @@ const CoverImage: React.FC<CoverImageProps> = memo(function CoverImage({
   useEffect(() => {
     if (loaded || hasError || isEmpty) return;
 
-    const handler = (e: Event) => {
-      if ((e as CustomEvent).detail === src) {
-        setLoaded(true);
-        setRetryKey(0); // 停止可能进行中的重试
-        // 跨实例同步成功 → 释放 slot（不再需要自己加载）
-        releaseSlotRef.current?.();
-        releaseSlotRef.current = null;
-      }
-    };
-
-    imageLoadEmitter.addEventListener('loaded', handler);
-    return () => imageLoadEmitter.removeEventListener('loaded', handler);
-  }, [src, loaded, hasError, isEmpty]);
+    return subscribeCoverImageLoaded(cacheKeys, () => {
+      setLoaded(true);
+      setSlotGranted(true);
+      setIsNearViewport(true);
+      setRetryKey(0);
+      releaseSlotRef.current?.();
+      releaseSlotRef.current = null;
+    });
+  }, [cacheKeys, loaded, hasError, isEmpty]);
 
   const showFallback = isEmpty || hasError;
 
   const handleLoad = useCallback(() => {
     setLoaded(true);
-    markImageLoaded(src);
+    markCoverImagesLoaded(cacheKeys);
     // 加载完成 → 释放 slot
     releaseSlotRef.current?.();
     releaseSlotRef.current = null;
-  }, [src]);
+  }, [cacheKeys]);
+
+  useEffect(() => {
+    if (!slotGranted || loaded || hasError) return;
+    const image = imageRef.current;
+    if (image?.complete && image.naturalWidth > 0) {
+      handleLoad();
+    }
+  }, [displaySrc, handleLoad, hasError, loaded, slotGranted]);
 
   const handleError = useCallback(() => {
     const defaultCdnUrl = toDefaultDoubanImageCdn(processed);
@@ -370,16 +346,16 @@ const CoverImage: React.FC<CoverImageProps> = memo(function CoverImage({
     <div ref={containerRef} className='absolute inset-0'>
       {!loaded && (
         <div
-          className='pointer-events-none absolute inset-0 z-10 flex items-center justify-center rounded-lg'
+          className='pointer-events-none absolute inset-0 z-10 overflow-hidden rounded-lg'
           style={loadingBackdropStyle}
         >
-          <div className='absolute inset-0 animate-pulse rounded-lg bg-white/10 dark:bg-white/5' />
-          <div className='relative h-5 w-5 animate-spin rounded-full border-2 border-white/35 border-t-white/80 dark:border-white/20 dark:border-t-white/60' />
+          <div className='via-white/8 absolute inset-0 animate-shimmer bg-gradient-to-r from-white/0 to-white/0 dark:from-white/0 dark:via-white/5 dark:to-white/0' />
         </div>
       )}
       {slotGranted && (
         <Image
           key={retryKey}
+          ref={imageRef}
           src={displaySrc}
           alt={alt}
           fill
@@ -391,7 +367,7 @@ const CoverImage: React.FC<CoverImageProps> = memo(function CoverImage({
           blurDataURL={blurDataURL}
           className={`${fit === 'contain' ? 'object-contain' : 'object-cover'} transition-opacity duration-200 ${loaded ? 'opacity-100' : 'opacity-0'}`}
           referrerPolicy='no-referrer'
-          loading={priority ? 'eager' : 'lazy'}
+          loading={priority || loaded ? 'eager' : 'lazy'}
           onLoad={handleLoad}
           onError={handleError}
           style={

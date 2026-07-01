@@ -10,6 +10,10 @@ import type { PrecacheEntry, SerwistGlobalConfig } from 'serwist';
 
 import {
   excludeDefaultApiRuntimeCache,
+  shouldHandleBangumiCoverCache,
+  shouldHandleExternalCoverCache,
+  shouldHandleImageProxyCache,
+  shouldHandleNextImageCache,
   shouldHandleVodSegmentCache,
 } from './lib/sw-cache-rules';
 
@@ -124,8 +128,11 @@ const serwist = new Serwist({
     // next/image 缓存（视频墙一次可铺满，放宽条目上限）
     {
       matcher: ({ url }) =>
-        /^\/_next\/image\?url=.+$/.test(url.pathname + url.search),
-      handler: new StaleWhileRevalidate({
+        shouldHandleNextImageCache({
+          pathname: url.pathname,
+          search: url.search,
+        }),
+      handler: new CacheFirst({
         cacheName: 'next-image-cache',
         plugins: [
           new CacheableResponsePlugin({ statuses: [0, 200] }),
@@ -139,7 +146,10 @@ const serwist = new Serwist({
     // 封面代理缓存
     {
       matcher: ({ url }) =>
-        /^\/api\/image-proxy\?url=.+$/.test(url.pathname + url.search),
+        shouldHandleImageProxyCache({
+          pathname: url.pathname,
+          search: url.search,
+        }),
       handler: new CacheFirst({
         cacheName: 'cover-proxy-cache',
         plugins: [
@@ -151,13 +161,29 @@ const serwist = new Serwist({
         ],
       }),
     },
+    // Bangumi 封面代理缓存
+    {
+      matcher: ({ url }) =>
+        shouldHandleBangumiCoverCache({
+          pathname: url.pathname,
+        }),
+      handler: new CacheFirst({
+        cacheName: 'bangumi-cover-cache',
+        plugins: [
+          new CacheableResponsePlugin({ statuses: [0, 200] }),
+          new ExpirationPlugin({
+            maxEntries: 600,
+            maxAgeSeconds: 30 * 24 * 60 * 60,
+            purgeOnQuotaError: true,
+          }),
+        ],
+      }),
+    },
     // 豆瓣外部图片缓存
     {
       matcher: ({ url }) =>
-        /^(img\d+\.doubanio\.com|img3\.doubanio\.com|img\.doubanio\.cmliussss\.(net|com))$/.test(
-          url.hostname,
-        ),
-      handler: new StaleWhileRevalidate({
+        shouldHandleExternalCoverCache({ hostname: url.hostname }),
+      handler: new CacheFirst({
         cacheName: 'external-cover-cache',
         plugins: [
           new CacheableResponsePlugin({ statuses: [0, 200] }),

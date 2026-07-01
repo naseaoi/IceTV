@@ -6,6 +6,7 @@ import './globals.css';
 import { getPublicConfig } from '@/lib/config';
 import { serializeForInlineScript } from '@/lib/script-serialization';
 import { getStorageType } from '@/lib/storage-type';
+import { CURRENT_UPDATE_BRANCH } from '@/lib/version';
 
 import { GlobalErrorIndicator } from '../components/GlobalErrorIndicator';
 import { CardInteractionProvider } from '../components/CardInteractionProvider';
@@ -61,9 +62,11 @@ export default async function RootLayout({
     STORAGE_TYPE: storageType,
     OPEN_REGISTER: publicConfig.OpenRegister,
     UPDATE_REPOS: process.env.NEXT_PUBLIC_UPDATE_REPOS || 'naseaoi/IceTV',
-    UPDATE_BRANCH: process.env.NEXT_PUBLIC_UPDATE_BRANCH || 'main',
+    UPDATE_BRANCH: CURRENT_UPDATE_BRANCH,
     DOUBAN_PROXY_TYPE: process.env.NEXT_PUBLIC_DOUBAN_PROXY_TYPE || 'direct',
     DOUBAN_PROXY: process.env.NEXT_PUBLIC_DOUBAN_PROXY || '',
+    BANGUMI_DATA_SOURCE: publicConfig.BangumiDataSource,
+    BANGUMI_PROXY: process.env.NEXT_PUBLIC_BANGUMI_PROXY || '',
     DOUBAN_IMAGE_PROXY_TYPE:
       process.env.NEXT_PUBLIC_DOUBAN_IMAGE_PROXY_TYPE ||
       'cmliussss-cdn-tencent',

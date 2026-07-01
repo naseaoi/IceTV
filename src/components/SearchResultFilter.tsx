@@ -34,6 +34,22 @@ const DEFAULTS: Record<SearchFilterKey, string> = {
   yearOrder: 'none',
 };
 
+function estimateTextWidth(text: string): number {
+  return Array.from(text).reduce((width, char) => {
+    if (/[\u4e00-\u9fff\u3040-\u30ff\uac00-\ud7af]/.test(char)) {
+      return width + 15;
+    }
+    if (/[A-Z0-9]/.test(char)) {
+      return width + 9;
+    }
+    return width + 7;
+  }, 0);
+}
+
+function clampPanelWidth(width: number, minWidth: number, maxWidth: number) {
+  return Math.min(Math.max(width, minWidth), maxWidth);
+}
+
 const SearchResultFilter: React.FC<SearchResultFilterProps> = ({
   categories,
   values,
@@ -63,18 +79,31 @@ const SearchResultFilter: React.FC<SearchResultFilterProps> = ({
       const rect = element.getBoundingClientRect();
       const viewportWidth = window.innerWidth;
       const isMobile = viewportWidth < 768;
+      const category = categories.find((cat) => cat.key === categoryKey);
+      const maxOptionTextWidth = Math.max(
+        0,
+        ...(category?.options || []).map((option) =>
+          estimateTextWidth(option.label),
+        ),
+      );
+      const minWidth = categoryKey === 'title' ? 280 : 120;
+      const maxWidth = categoryKey === 'title' ? 640 : 420;
+      const contentWidth =
+        categoryKey === 'title'
+          ? maxOptionTextWidth + 56
+          : maxOptionTextWidth + 40;
 
       let x = rect.left;
-      // 为标题筛选设置更大的最小宽度，其他保持原来的最小宽度
-      const minWidth = categoryKey === 'title' ? 400 : 240;
-      let dropdownWidth = Math.max(rect.width, minWidth);
-      let useFixedWidth = false;
+      let dropdownWidth = clampPanelWidth(
+        Math.max(rect.width, contentWidth),
+        minWidth,
+        maxWidth,
+      );
 
       if (isMobile) {
         const padding = 16;
         const maxWidth = viewportWidth - padding * 2;
         dropdownWidth = Math.min(dropdownWidth, maxWidth);
-        useFixedWidth = true;
 
         if (x + dropdownWidth > viewportWidth - padding) {
           x = viewportWidth - dropdownWidth - padding;
@@ -87,7 +116,7 @@ const SearchResultFilter: React.FC<SearchResultFilterProps> = ({
       setDropdownPosition({
         x,
         y: rect.bottom,
-        width: useFixedWidth ? dropdownWidth : rect.width,
+        width: dropdownWidth,
       });
     }
   };
@@ -137,7 +166,6 @@ const SearchResultFilter: React.FC<SearchResultFilterProps> = ({
 
   useEffect(() => {
     const handleScroll = () => {
-      // 滚动时直接关闭面板，而不是重新计算位置
       if (activeCategory) {
         setActiveCategory(null);
       }
@@ -145,7 +173,6 @@ const SearchResultFilter: React.FC<SearchResultFilterProps> = ({
     const handleResize = () => {
       if (activeCategory) calculateDropdownPosition(activeCategory);
     };
-    // 监听 body 滚动事件，因为该项目的滚动容器是 document.body
     document.body.addEventListener('scroll', handleScroll, { passive: true });
     window.addEventListener('resize', handleResize);
     return () => {
@@ -253,21 +280,25 @@ const SearchResultFilter: React.FC<SearchResultFilterProps> = ({
         createPortal(
           <div
             ref={dropdownRef}
-            className='fixed z-[9999] flex max-h-[50vh] flex-col rounded-2xl border border-gray-200/70 bg-white/80 shadow-2xl ring-1 ring-black/10 backdrop-blur-xl dark:border-white/10 dark:bg-gray-900/70 dark:ring-white/10'
+            className='fixed z-[9999] flex flex-col rounded-2xl border border-gray-200/70 bg-white/80 shadow-2xl ring-1 ring-black/10 backdrop-blur-xl dark:border-white/10 dark:bg-gray-900/70 dark:ring-white/10'
             style={{
               left: `${dropdownPosition.x}px`,
               top: `${dropdownPosition.y}px`,
-              ...(typeof window !== 'undefined' && window.innerWidth < 768
-                ? { width: `${dropdownPosition.width}px` }
-                : {
-                    minWidth: `${Math.max(dropdownPosition.width, activeCategory === 'title' ? 400 : 240)}px`,
-                  }),
-              maxWidth: '600px',
+              width: `${dropdownPosition.width}px`,
+              maxWidth: activeCategory === 'title' ? '720px' : '600px',
+              maxHeight:
+                activeCategory === 'title' ? 'min(60vh, 520px)' : '50vh',
               position: 'fixed',
             }}
           >
             <div className='min-h-0 flex-1 overflow-y-auto p-2 sm:p-4'>
-              <div className='grid grid-cols-3 gap-1 sm:grid-cols-4 sm:gap-2 md:grid-cols-5'>
+              <div
+                className={
+                  activeCategory === 'title'
+                    ? 'flex flex-col gap-1'
+                    : 'flex flex-wrap gap-1 sm:gap-2'
+                }
+              >
                 {categories
                   .find((cat) => cat.key === activeCategory)
                   ?.options.map((option) => (
@@ -277,12 +308,24 @@ const SearchResultFilter: React.FC<SearchResultFilterProps> = ({
                         handleOptionSelect(activeCategory, option.value)
                       }
                       className={`rounded-lg px-2 py-1.5 text-left text-xs transition-all duration-200 sm:px-3 sm:py-2 sm:text-sm ${
+                        activeCategory === 'title'
+                          ? 'w-full'
+                          : 'whitespace-nowrap'
+                      } ${
                         isOptionSelected(activeCategory, option.value)
                           ? 'border border-green-200 bg-green-100 text-green-700 dark:border-green-700 dark:bg-green-900/30 dark:text-green-400'
                           : 'text-gray-700 hover:bg-gray-100/80 dark:text-gray-300 dark:hover:bg-gray-700/80'
                       }`}
                     >
-                      {option.label}
+                      <span
+                        className={
+                          activeCategory === 'title'
+                            ? 'block truncate'
+                            : 'block'
+                        }
+                      >
+                        {option.label}
+                      </span>
                     </button>
                   ))}
               </div>

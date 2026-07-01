@@ -1,5 +1,4 @@
 'use client';
-
 import { useEffect, useState } from 'react';
 
 import AlertModal from '@/features/admin/components/AlertModal';
@@ -9,6 +8,7 @@ import { adminPost } from '@/features/admin/lib/api';
 import { buttonStyles } from '@/features/admin/lib/buttonStyles';
 import { showError, showSuccess } from '@/features/admin/lib/notifications';
 import { AdminConfig } from '@/features/admin/types/api';
+import { buildConfigFileFromAdminConfig } from '@/lib/config-file-json';
 
 const ConfigFileComponent = ({
   config,
@@ -25,8 +25,8 @@ const ConfigFileComponent = ({
   const [lastCheckTime, setLastCheckTime] = useState<string>('');
 
   useEffect(() => {
-    if (config?.ConfigFile) {
-      setConfigContent(config.ConfigFile);
+    if (config) {
+      setConfigContent(buildConfigFileFromAdminConfig(config));
     }
     if (config?.ConfigSubscribtion) {
       setSubscriptionUrl(config.ConfigSubscribtion.URL);
@@ -89,6 +89,30 @@ const ConfigFileComponent = ({
     });
   };
 
+  const handleExport = () => {
+    if (!configContent.trim()) {
+      showError('配置文件内容为空', showAlert);
+      return;
+    }
+
+    const blob = new Blob([configContent], {
+      type: 'application/json;charset=utf-8',
+    });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    const timestamp = new Date()
+      .toISOString()
+      .replace(/[-:]/g, '')
+      .replace(/\..+$/, '');
+    link.href = url;
+    link.download = `icetv-config-${timestamp}.json`;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    URL.revokeObjectURL(url);
+    showSuccess('配置文件已导出', showAlert);
+  };
+
   if (!config) {
     return (
       <div className='text-center text-gray-500 dark:text-gray-400'>
@@ -98,10 +122,10 @@ const ConfigFileComponent = ({
   }
 
   return (
-    <div className='space-y-4'>
-      <div className='grid grid-cols-1 gap-4 lg:grid-cols-2'>
+    <div className='flex h-full flex-col'>
+      <div className='grid min-h-0 flex-1 grid-cols-1 gap-4 lg:grid-cols-2 lg:grid-rows-1'>
         {/* 配置订阅区域 */}
-        <div className='rounded-lg border border-gray-200 bg-white p-6 shadow-sm dark:border-gray-700 dark:bg-gray-800'>
+        <div className='self-start rounded-lg border border-gray-200 bg-white p-6 shadow-sm dark:border-gray-700 dark:bg-gray-800'>
           <div className='mb-6 flex items-center justify-between'>
             <h3 className='text-xl font-semibold text-gray-900 dark:text-gray-100'>
               配置订阅
@@ -185,15 +209,14 @@ const ConfigFileComponent = ({
         </div>
 
         {/* 配置文件编辑区域 */}
-        <div className='space-y-4 rounded-lg border border-gray-200 bg-white p-6 shadow-sm dark:border-gray-700 dark:bg-gray-800'>
-          <div className='relative'>
+        <div className='flex min-h-0 flex-col gap-4 rounded-lg border border-gray-200 bg-white p-6 shadow-sm dark:border-gray-700 dark:bg-gray-800'>
+          <div className='relative min-h-[28rem] flex-1'>
             <textarea
               value={configContent}
               onChange={(e) => setConfigContent(e.target.value)}
-              rows={20}
               placeholder='请输入配置文件内容（JSON 格式）...'
               disabled={false}
-              className='w-full resize-none rounded-lg border border-gray-300 bg-white px-4 py-3 font-mono text-sm leading-relaxed text-gray-900 transition-all duration-200 hover:border-gray-400 focus:border-transparent focus:ring-2 focus:ring-blue-500 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100 dark:hover:border-gray-500'
+              className='h-full w-full resize-none rounded-lg border border-gray-300 bg-white px-4 py-3 font-mono text-sm leading-relaxed text-gray-900 transition-all duration-200 hover:border-gray-400 focus:border-transparent focus:ring-2 focus:ring-blue-500 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100 dark:hover:border-gray-500'
               style={{
                 fontFamily:
                   'ui-monospace, SFMono-Regular, "SF Mono", Consolas, "Liberation Mono", Menlo, monospace',
@@ -203,21 +226,34 @@ const ConfigFileComponent = ({
             />
           </div>
 
-          <div className='flex items-center justify-between'>
+          <div className='flex items-center justify-between gap-4'>
             <div className='text-xs text-gray-500 dark:text-gray-400'>
               支持 JSON 格式，用于配置视频源和自定义分类
             </div>
-            <button
-              onClick={handleSave}
-              disabled={isLoading('saveConfig')}
-              className={`rounded-lg px-4 py-2 transition-colors ${
-                isLoading('saveConfig')
-                  ? buttonStyles.disabled
-                  : buttonStyles.success
-              }`}
-            >
-              {isLoading('saveConfig') ? '保存中…' : '保存'}
-            </button>
+            <div className='flex items-center gap-2'>
+              <button
+                onClick={handleExport}
+                disabled={!configContent.trim()}
+                className={`rounded-lg px-4 py-2 transition-colors ${
+                  !configContent.trim()
+                    ? buttonStyles.disabled
+                    : buttonStyles.secondary
+                }`}
+              >
+                导出
+              </button>
+              <button
+                onClick={handleSave}
+                disabled={isLoading('saveConfig')}
+                className={`rounded-lg px-4 py-2 transition-colors ${
+                  isLoading('saveConfig')
+                    ? buttonStyles.disabled
+                    : buttonStyles.success
+                }`}
+              >
+                {isLoading('saveConfig') ? '保存中…' : '保存'}
+              </button>
+            </div>
           </div>
         </div>
       </div>

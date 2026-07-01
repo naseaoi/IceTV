@@ -1,10 +1,13 @@
 import { NextRequest, NextResponse } from 'next/server';
 
 import { isGuardFailure, requireActiveUser } from '@/lib/api-auth';
-import { runWithConcurrency, withTimeout } from '@/lib/concurrency';
 import { getAvailableApiSites, getConfig } from '@/lib/config';
-import { searchFromApi } from '@/lib/downstream';
-import { yellowWords } from '@/lib/yellow';
+import { runSearchAggregation } from '@/lib/search-aggregate';
+import {
+  peekCachedSearchAggregate,
+  refreshCachedSearchAggregate,
+  setCachedSearchAggregate,
+} from '@/lib/search-cache';
 
 export const runtime = 'nodejs';
 
@@ -29,9 +32,59 @@ export async function GET(request: NextRequest) {
   const config = await getConfig();
   const apiSites = await getAvailableApiSites(guardResult.username, config);
   const maxSearchPages = config.SiteConfig.SearchDownstreamMaxPage;
+  const aggregateCacheParams = {
+    query,
+    apiSites,
+    maxSearchPages,
+    disableYellowFilter: config.SiteConfig.DisableYellowFilter,
+  };
+  const cachedAggregate = peekCachedSearchAggregate(aggregateCacheParams);
+
+  if (cachedAggregate) {
+    if (!cachedAggregate.fresh) {
+      void refreshCachedSearchAggregate(aggregateCacheParams, () =>
+        runSearchAggregation({
+          apiSites,
+          query,
+          maxSearchPages,
+          disableYellowFilter: config.SiteConfig.DisableYellowFilter,
+          sourceConcurrency: SEARCH_SOURCE_CONCURRENCY,
+        }),
+      ).catch(() => {});
+    }
+
+    return createSearchStreamResponse(
+      buildCachedSearchStream(
+        query,
+        apiSites.length,
+        cachedAggregate.entry.results,
+      ),
+    );
+  }
 
   // 共享状态
   let streamClosed = false;
+  const searchAbortController = new AbortController();
+
+  const abortSearch = () => {
+    if (!searchAbortController.signal.aborted) {
+      searchAbortController.abort();
+    }
+  };
+
+  const closeSearch = () => {
+    streamClosed = true;
+    abortSearch();
+  };
+  const cleanupRequestSignal = () => {
+    request.signal.removeEventListener('abort', closeSearch);
+  };
+
+  if (request.signal.aborted) {
+    closeSearch();
+  } else {
+    request.signal.addEventListener('abort', closeSearch, { once: true });
+  }
 
   // 创建可读流
   const stream = new ReadableStream({
@@ -54,6 +107,7 @@ export async function GET(request: NextRequest) {
           // 控制器已关闭或出现其他错误
           console.warn('Failed to enqueue data:', error);
           streamClosed = true;
+          abortSearch();
           return false;
         }
       };
@@ -67,119 +121,129 @@ export async function GET(request: NextRequest) {
       })}\n\n`;
 
       if (!safeEnqueue(encoder.encode(startEvent))) {
+        cleanupRequestSignal();
         return; // 连接已关闭，提前退出
       }
 
       // 记录已完成的源数量
       let completedSources = 0;
-      const allResults: any[] = [];
-
-      // 为每个源创建搜索 Promise
-      const searchTasks = apiSites.map((site) => async () => {
-        try {
-          // 添加超时控制
-          const searchPromise = withTimeout(
-            searchFromApi(site, query, { maxSearchPages }),
-            20000,
-            `${site.name} timeout`,
-          );
-
-          const results = (await searchPromise) as any[];
-
-          // 过滤黄色内容
-          let filteredResults = results;
-          if (!config.SiteConfig.DisableYellowFilter) {
-            filteredResults = results.filter((result) => {
-              const typeName = result.type_name || '';
-              return !yellowWords.some((word: string) =>
-                typeName.includes(word),
-              );
-            });
-          }
-
-          // 发送该源的搜索结果
+      const finalResults = await runSearchAggregation({
+        apiSites,
+        query,
+        maxSearchPages,
+        disableYellowFilter: config.SiteConfig.DisableYellowFilter,
+        sourceConcurrency: SEARCH_SOURCE_CONCURRENCY,
+        signal: searchAbortController.signal,
+        shouldContinue: () =>
+          !streamClosed && !searchAbortController.signal.aborted,
+        onSourceResult: (site, results) => {
           completedSources++;
 
-          if (!streamClosed) {
-            const sourceEvent = `data: ${JSON.stringify({
-              type: 'source_result',
-              source: site.key,
-              sourceName: site.name,
-              results: filteredResults,
-              timestamp: Date.now(),
-            })}\n\n`;
-
-            if (!safeEnqueue(encoder.encode(sourceEvent))) {
-              streamClosed = true;
-              return; // 连接已关闭，停止处理
-            }
+          if (streamClosed) {
+            return;
           }
 
-          if (filteredResults.length > 0) {
-            allResults.push(...filteredResults);
-          }
-        } catch (error) {
-          console.warn(`搜索失败 ${site.name}:`, error);
+          const sourceEvent = `data: ${JSON.stringify({
+            type: 'source_result',
+            source: site.key,
+            sourceName: site.name,
+            results,
+            timestamp: Date.now(),
+          })}\n\n`;
 
-          // 发送源错误事件
+          if (!safeEnqueue(encoder.encode(sourceEvent))) {
+            streamClosed = true;
+          }
+        },
+        onSourceError: (site, error) => {
           completedSources++;
 
-          if (!streamClosed) {
-            const errorEvent = `data: ${JSON.stringify({
-              type: 'source_error',
-              source: site.key,
-              sourceName: site.name,
-              error: error instanceof Error ? error.message : '搜索失败',
-              timestamp: Date.now(),
-            })}\n\n`;
-
-            if (!safeEnqueue(encoder.encode(errorEvent))) {
-              streamClosed = true;
-              return; // 连接已关闭，停止处理
-            }
+          if (streamClosed) {
+            return;
           }
-        }
 
-        // 检查是否所有源都已完成
-        if (completedSources === apiSites.length) {
-          if (!streamClosed) {
-            // 发送最终完成事件
-            const completeEvent = `data: ${JSON.stringify({
-              type: 'complete',
-              totalResults: allResults.length,
-              completedSources,
-              timestamp: Date.now(),
-            })}\n\n`;
+          const errorEvent = `data: ${JSON.stringify({
+            type: 'source_error',
+            source: site.key,
+            sourceName: site.name,
+            error: error instanceof Error ? error.message : '搜索失败',
+            timestamp: Date.now(),
+          })}\n\n`;
 
-            if (safeEnqueue(encoder.encode(completeEvent))) {
-              // 只有在成功发送完成事件后才关闭流
-              try {
-                controller.close();
-              } catch (error) {
-                console.warn('Failed to close controller:', error);
-              }
-            }
+          if (!safeEnqueue(encoder.encode(errorEvent))) {
+            streamClosed = true;
           }
-        }
+        },
       });
 
-      // 等待所有搜索完成
-      await runWithConcurrency(
-        searchTasks,
-        SEARCH_SOURCE_CONCURRENCY,
-        () => !streamClosed,
-      );
+      if (!streamClosed) {
+        if (finalResults.length > 0) {
+          setCachedSearchAggregate(aggregateCacheParams, finalResults);
+        }
+
+        const completeEvent = `data: ${JSON.stringify({
+          type: 'complete',
+          totalResults: finalResults.length,
+          completedSources,
+          timestamp: Date.now(),
+        })}\n\n`;
+
+        if (safeEnqueue(encoder.encode(completeEvent))) {
+          try {
+            controller.close();
+          } catch (error) {
+            console.warn('Failed to close controller:', error);
+          }
+        }
+      }
+
+      cleanupRequestSignal();
     },
 
     cancel() {
       // 客户端断开连接时，标记流已关闭
-      streamClosed = true;
+      closeSearch();
+      cleanupRequestSignal();
       console.log('Client disconnected, cancelling search stream');
     },
   });
 
   // 返回流式响应
-  return new Response(stream, {
+  return createSearchStreamResponse(stream);
+}
+
+function buildCachedSearchStream(
+  query: string,
+  totalSources: number,
+  results: unknown[],
+): string {
+  return [
+    {
+      type: 'start',
+      query,
+      totalSources,
+      timestamp: Date.now(),
+    },
+    {
+      type: 'source_result',
+      source: 'aggregate-cache',
+      sourceName: 'aggregate-cache',
+      results,
+      timestamp: Date.now(),
+    },
+    {
+      type: 'complete',
+      totalResults: results.length,
+      completedSources: totalSources,
+      timestamp: Date.now(),
+    },
+  ]
+    .map((event) => `data: ${JSON.stringify(event)}\n\n`)
+    .join('');
+}
+
+function createSearchStreamResponse(body: BodyInit) {
+  return new Response(body, {
     headers: {
       'Content-Type': 'text/event-stream',
       'Cache-Control': 'no-cache',

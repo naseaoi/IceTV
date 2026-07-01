@@ -541,19 +541,15 @@ const UserConfig = ({ config, role, refreshConfig }: UserConfigProps) => {
           </h4>
           <button
             onClick={() => {
-              setShowAddUserGroupForm(!showAddUserGroupForm);
+              setShowAddUserGroupForm(true);
               if (showEditUserGroupForm) {
                 setShowEditUserGroupForm(false);
                 setEditingUserGroup(null);
               }
             }}
-            className={
-              showAddUserGroupForm
-                ? buttonStyles.secondary
-                : buttonStyles.primary
-            }
+            className={buttonStyles.primary}
           >
-            {showAddUserGroupForm ? '取消' : '添加用户组'}
+            添加用户组
           </button>
         </div>
 
@@ -591,48 +587,48 @@ const UserConfig = ({ config, role, refreshConfig }: UserConfigProps) => {
             )}
             <button
               onClick={() => {
-                setShowAddUserForm(!showAddUserForm);
+                setShowAddUserForm(true);
                 if (showChangePasswordForm) {
                   setShowChangePasswordForm(false);
                   setChangePasswordUser({ username: '', password: '' });
                 }
               }}
-              className={
-                showAddUserForm ? buttonStyles.secondary : buttonStyles.success
-              }
+              className={buttonStyles.success}
             >
-              {showAddUserForm ? '取消' : '添加用户'}
+              添加用户
             </button>
           </div>
         </div>
 
-        {showAddUserForm && (
-          <AddUserForm
-            value={newUser}
-            onChange={setNewUser}
-            userGroups={userGroups}
-            onSubmit={handleAddUser}
-            isSubmitting={isLoading('addUser')}
-          />
-        )}
+        <AddUserForm
+          value={newUser}
+          isOpen={showAddUserForm}
+          onChange={setNewUser}
+          userGroups={userGroups}
+          onSubmit={handleAddUser}
+          onCancel={() => {
+            setShowAddUserForm(false);
+            setNewUser({ username: '', password: '', userGroup: '' });
+          }}
+          isSubmitting={isLoading('addUser')}
+        />
 
-        {showChangePasswordForm && (
-          <ChangePasswordForm
-            username={changePasswordUser.username}
-            password={changePasswordUser.password}
-            onPasswordChange={(next) =>
-              setChangePasswordUser((prev) => ({ ...prev, password: next }))
-            }
-            onSubmit={handleChangePassword}
-            onCancel={() => {
-              setShowChangePasswordForm(false);
-              setChangePasswordUser({ username: '', password: '' });
-            }}
-            isSubmitting={isLoading(
-              `changePassword_${changePasswordUser.username}`,
-            )}
-          />
-        )}
+        <ChangePasswordForm
+          username={changePasswordUser.username}
+          password={changePasswordUser.password}
+          isOpen={showChangePasswordForm}
+          onPasswordChange={(next) =>
+            setChangePasswordUser((prev) => ({ ...prev, password: next }))
+          }
+          onSubmit={handleChangePassword}
+          onCancel={() => {
+            setShowChangePasswordForm(false);
+            setChangePasswordUser({ username: '', password: '' });
+          }}
+          isSubmitting={isLoading(
+            `changePassword_${changePasswordUser.username}`,
+          )}
+        />
 
         <UserTable
           users={config.UserConfig.Users}

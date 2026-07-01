@@ -19,10 +19,9 @@ import { resolveSourceProbeEpisodeIndex } from '@/features/play/lib/sourceProbeP
 import {
   getOrProbe,
   getSnapshot,
-  invalidateProbe,
-  resetProbes,
   seedProbeResults,
   subscribe,
+  type ProbeEntry,
   type VideoInfo,
 } from '@/features/play/lib/sourceProbeStore';
 
@@ -46,6 +45,135 @@ interface SourcesTabProps {
   onSourceDetailFetched?: (updated: SearchResult) => void;
   /** 搜索到新源后，通知父组件追加到 availableSources */
   onAddSources?: (newSources: SearchResult[]) => void;
+}
+
+export function getCompletedProbeInfo(
+  entry: ProbeEntry | undefined,
+): VideoInfo | undefined {
+  if (!entry) return undefined;
+  return entry.source === 'pending' ? entry.previousInfo : entry.info;
+}
+
+const isSortingReadyVideoInfo = (videoInfo?: VideoInfo): boolean => {
+  if (!videoInfo || videoInfo.hasError) return false;
+  return (
+    videoInfo.loadSpeed !== '测量中...' &&
+    videoInfo.loadSpeed !== '未知' &&
+    videoInfo.loadSpeed !== '播放中'
+  );
+};
+
+const getSortStatusRank = (videoInfo?: VideoInfo): number => {
+  if (isSortingReadyVideoInfo(videoInfo)) {
+    return 0;
+  }
+  if (videoInfo?.hasError) {
+    return 2;
+  }
+  return 1;
+};
+
+const parseSpeedToKBps = (loadSpeed?: string): number => {
+  if (!loadSpeed || loadSpeed === '未知' || loadSpeed === '测量中...') {
+    return 0;
+  }
+
+  const match = loadSpeed.match(/^([\d.]+)\s*(Mbps|Mb\/s|KB\/s|MB\/s)$/);
+  if (!match) {
+    return 0;
+  }
+
+  const value = Number.parseFloat(match[1]);
+  if (!Number.isFinite(value) || value <= 0) {
+    return 0;
+  }
+
+  const unit = match[2];
+  if (unit === 'Mbps' || unit === 'Mb/s') {
+    return (value * 1024) / 8;
+  }
+  if (unit === 'MB/s') {
+    return value * 1024;
+  }
+  return value;
+};
+
+const getQualityRank = (quality?: string): number => {
+  if (!quality || quality === '未知' || quality === '错误') {
+    return 0;
+  }
+
+  const normalized = quality.toUpperCase();
+  if (normalized.includes('4K') || normalized.includes('2160')) {
+    return 5;
+  }
+  if (normalized.includes('2K') || normalized.includes('1440')) {
+    return 4;
+  }
+  if (normalized.includes('1080')) {
+    return 3;
+  }
+  if (normalized.includes('720')) {
+    return 2;
+  }
+  if (normalized.includes('480')) {
+    return 1;
+  }
+  return 0;
+};
+
+export function sortSourcesForDisplay(
+  displaySources: SearchResult[],
+  probeSnapshot: ReadonlyMap<string, ProbeEntry>,
+  sourceFailures: ReadonlyMap<string, SourceFailureInfo>,
+): SearchResult[] {
+  return displaySources
+    .map((source, index) => {
+      const sourceKey = `${source.source}-${source.id}`;
+      const entry = probeSnapshot.get(sourceKey);
+      const videoInfo = getCompletedProbeInfo(entry);
+      const hasMeasuredInfo = isSortingReadyVideoInfo(videoInfo);
+      const measuredVideoInfo = hasMeasuredInfo ? videoInfo : undefined;
+
+      return {
+        source,
+        index,
+        sortStatusRank: getSortStatusRank(videoInfo),
+        qualityRank: measuredVideoInfo
+          ? getQualityRank(measuredVideoInfo.quality)
+          : 0,
+        speedKBps: measuredVideoInfo
+          ? parseSpeedToKBps(measuredVideoInfo.loadSpeed)
+          : 0,
+        pingTime:
+          measuredVideoInfo && Number.isFinite(measuredVideoInfo.pingTime)
+            ? measuredVideoInfo.pingTime
+            : Number.MAX_SAFE_INTEGER,
+        hasMeasuredInfo,
+        coolingDown: sourceFailures.has(sourceKey),
+      };
+    })
+    .sort((a, b) => {
+      if (a.coolingDown !== b.coolingDown) {
+        return a.coolingDown ? 1 : -1;
+      }
+      if (a.sortStatusRank !== b.sortStatusRank) {
+        return a.sortStatusRank - b.sortStatusRank;
+      }
+      if (a.hasMeasuredInfo && b.hasMeasuredInfo) {
+        if (a.speedKBps !== b.speedKBps) {
+          return b.speedKBps - a.speedKBps;
+        }
+        if (a.pingTime !== b.pingTime) {
+          return a.pingTime - b.pingTime;
+        }
+        if (a.qualityRank !== b.qualityRank) {
+          return b.qualityRank - a.qualityRank;
+        }
+      }
+      return a.index - b.index;
+    })
+    .map((item) => item.source);
 }
 
 export const SourcesTab: React.FC<SourcesTabProps> = ({
@@ -140,27 +268,6 @@ export const SourcesTab: React.FC<SourcesTabProps> = ({
     [activeDetail, currentEpisodeIndex, onSourceDetailFetched],
   );
 
-  // 排序判定：真实的 probe/player 成功结果才参与
-  const isSortingReadyVideoInfo = (videoInfo?: VideoInfo): boolean => {
-    if (!videoInfo || videoInfo.hasError) return false;
-    return (
-      videoInfo.loadSpeed !== '测量中...' &&
-      videoInfo.loadSpeed !== '未知' &&
-      videoInfo.loadSpeed !== '播放中'
-    );
-  };
-
-  const getSortStatusRank = (videoInfo?: VideoInfo): number => {
-    if (isSortingReadyVideoInfo(videoInfo)) {
-      return 0;
-    }
-    if (videoInfo?.hasError) {
-      return 2;
-    }
-    // 未知代表源仍可访问，只是暂时拿不到可信测速/分辨率；应排在失败前面。
-    return 1;
-  };
-
   // 后台测速：进入/刷新 Tab 时，对未测过的源分批 probe。
   // 当前播放源跳过 probe（播放器会通过 writePlayerInfo 回填真实带宽）。
   useEffect(() => {
@@ -187,55 +294,6 @@ export const SourcesTab: React.FC<SourcesTabProps> = ({
     [onSourceChange],
   );
 
-  const parseSpeedToKBps = (loadSpeed?: string): number => {
-    if (!loadSpeed || loadSpeed === '未知' || loadSpeed === '测量中...') {
-      return 0;
-    }
-
-    const match = loadSpeed.match(/^([\d.]+)\s*(Mbps|Mb\/s|KB\/s|MB\/s)$/);
-    if (!match) {
-      return 0;
-    }
-
-    const value = Number.parseFloat(match[1]);
-    if (!Number.isFinite(value) || value <= 0) {
-      return 0;
-    }
-
-    const unit = match[2];
-    if (unit === 'Mbps' || unit === 'Mb/s') {
-      return (value * 1024) / 8;
-    }
-    if (unit === 'MB/s') {
-      return value * 1024;
-    }
-    return value;
-  };
-
-  const getQualityRank = (quality?: string): number => {
-    if (!quality || quality === '未知' || quality === '错误') {
-      return 0;
-    }
-
-    const normalized = quality.toUpperCase();
-    if (normalized.includes('4K') || normalized.includes('2160')) {
-      return 5;
-    }
-    if (normalized.includes('2K') || normalized.includes('1440')) {
-      return 4;
-    }
-    if (normalized.includes('1080')) {
-      return 3;
-    }
-    if (normalized.includes('720')) {
-      return 2;
-    }
-    if (normalized.includes('480')) {
-      return 1;
-    }
-    return 0;
-  };
-
   // 读取近期失败源记录
   const sourceFailures = useMemo(() => {
     const map = new Map<string, SourceFailureInfo>();
@@ -250,52 +308,7 @@ export const SourcesTab: React.FC<SourcesTabProps> = ({
   }, [displaySources, isActive]);
 
   const sortedSources = useMemo(() => {
-    return displaySources
-      .map((source, index) => {
-        const sourceKey = `${source.source}-${source.id}`;
-        const videoInfo = probeSnapshot.get(sourceKey)?.info;
-        const hasMeasuredInfo = isSortingReadyVideoInfo(videoInfo);
-        const measuredVideoInfo = hasMeasuredInfo ? videoInfo : undefined;
-
-        return {
-          source,
-          index,
-          sortStatusRank: getSortStatusRank(videoInfo),
-          qualityRank: measuredVideoInfo
-            ? getQualityRank(measuredVideoInfo.quality)
-            : 0,
-          speedKBps: measuredVideoInfo
-            ? parseSpeedToKBps(measuredVideoInfo.loadSpeed)
-            : 0,
-          pingTime:
-            measuredVideoInfo && Number.isFinite(measuredVideoInfo.pingTime)
-              ? measuredVideoInfo.pingTime
-              : Number.MAX_SAFE_INTEGER,
-          hasMeasuredInfo,
-          coolingDown: sourceFailures.has(sourceKey),
-        };
-      })
-      .sort((a, b) => {
-        if (a.coolingDown !== b.coolingDown) {
-          return a.coolingDown ? 1 : -1;
-        }
-        if (a.sortStatusRank !== b.sortStatusRank) {
-          return a.sortStatusRank - b.sortStatusRank;
-        }
-        if (a.hasMeasuredInfo && b.hasMeasuredInfo) {
-          if (a.speedKBps !== b.speedKBps) {
-            return b.speedKBps - a.speedKBps;
-          }
-          if (a.pingTime !== b.pingTime) {
-            return a.pingTime - b.pingTime;
-          }
-          if (a.qualityRank !== b.qualityRank) {
-            return b.qualityRank - a.qualityRank;
-          }
-        }
-        return a.index - b.index;
-      })
-      .map((item) => item.source);
+    return sortSourcesForDisplay(displaySources, probeSnapshot, sourceFailures);
   }, [displaySources, probeSnapshot, sourceFailures]);
 
   // 将当前源滚动到视口中央。仅在满足条件时调用，避免与用户手动滚动冲突。
@@ -558,8 +571,6 @@ export const SourcesTab: React.FC<SourcesTabProps> = ({
                       className='cursor-pointer text-[10px] text-blue-400 hover:underline dark:text-blue-400'
                       onClick={(e) => {
                         e.stopPropagation();
-                        // 立即清掉失败态，交给 store 重新驱动"检测中"
-                        invalidateProbe(sourceKey);
                         void getOrProbe(source, {
                           force: true,
                           episodeIndex: resolveSourceProbeEpisodeIndex({
@@ -608,9 +619,6 @@ export const SourcesTab: React.FC<SourcesTabProps> = ({
                   currentSource && currentId
                     ? `${currentSource}-${currentId}`
                     : '';
-                // 保留当前播放源的 player 真实带宽，其余全部重测
-                resetProbes(curKey ? [curKey] : []);
-
                 const toTest = displaySources.filter((s) => {
                   const key = `${s.source}-${s.id}`;
                   return key !== curKey;

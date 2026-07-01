@@ -20,6 +20,7 @@ interface LoadingStatePanelProps {
   steps?: StepItem[];
   compact?: boolean;
   className?: string;
+  glow?: boolean;
   children?: React.ReactNode;
 }
 
@@ -27,9 +28,6 @@ const toneMap: Record<
   Tone,
   {
     halo: string;
-    orb: string;
-    ring: string;
-    ripple: string;
     iconTone: string;
     text: string;
     mutedText: string;
@@ -42,9 +40,6 @@ const toneMap: Record<
 > = {
   emerald: {
     halo: 'from-emerald-500/25 via-green-500/10 to-transparent',
-    orb: 'bg-emerald-400/40',
-    ring: 'from-emerald-400/70 via-green-500/40 to-emerald-300/20',
-    ripple: 'border-emerald-300/45 dark:border-emerald-400/30',
     iconTone: 'text-emerald-500 dark:text-emerald-300',
     text: 'text-gray-900 dark:text-gray-100',
     mutedText: 'text-gray-600 dark:text-gray-300',
@@ -56,9 +51,6 @@ const toneMap: Record<
   },
   blue: {
     halo: 'from-sky-500/25 via-blue-500/10 to-transparent',
-    orb: 'bg-sky-400/40',
-    ring: 'from-sky-400/70 via-blue-500/40 to-sky-300/20',
-    ripple: 'border-sky-300/45 dark:border-sky-400/30',
     iconTone: 'text-sky-500 dark:text-sky-300',
     text: 'text-gray-900 dark:text-gray-100',
     mutedText: 'text-gray-600 dark:text-gray-300',
@@ -70,9 +62,6 @@ const toneMap: Record<
   },
   amber: {
     halo: 'from-amber-500/25 via-orange-500/10 to-transparent',
-    orb: 'bg-amber-400/40',
-    ring: 'from-amber-400/70 via-orange-500/40 to-amber-300/20',
-    ripple: 'border-amber-300/45 dark:border-amber-400/30',
     iconTone: 'text-amber-500 dark:text-amber-300',
     text: 'text-gray-900 dark:text-gray-100',
     mutedText: 'text-gray-600 dark:text-gray-300',
@@ -84,9 +73,6 @@ const toneMap: Record<
   },
   red: {
     halo: 'from-red-500/25 via-rose-500/10 to-transparent',
-    orb: 'bg-red-400/40',
-    ring: 'from-red-400/70 via-rose-500/40 to-red-300/20',
-    ripple: 'border-red-300/45 dark:border-red-400/30',
     iconTone: 'text-red-500 dark:text-red-300',
     text: 'text-gray-900 dark:text-gray-100',
     mutedText: 'text-gray-600 dark:text-gray-300',
@@ -111,6 +97,7 @@ const LoadingStatePanel: React.FC<LoadingStatePanelProps> = ({
   steps,
   compact = false,
   className = '',
+  glow = false,
   children,
 }) => {
   const colors = toneMap[tone];
@@ -128,27 +115,18 @@ const LoadingStatePanel: React.FC<LoadingStatePanelProps> = ({
 
       <div className='relative flex flex-col items-center text-center'>
         <div className='relative mb-7'>
-          <div
-            className={`ls-ripple absolute -inset-5 rounded-full border ${colors.ripple}`}
-          />
-          <div
-            className={`ls-ripple ls-ripple-delay absolute -inset-5 rounded-full border ${colors.ripple}`}
-          />
-          <div className='ls-spinner-shell relative z-[2] mx-auto h-24 w-24'>
+          <div className='relative z-[2] mx-auto h-24 w-24'>
+            {glow && (
+              <div
+                className={`ls-glow-ring absolute -inset-1 rounded-full ${colors.iconTone}`}
+              />
+            )}
             <div
-              className={`ls-spinner-ring-outer absolute inset-0 rounded-full border-2 border-transparent bg-gradient-to-r ${colors.ring}`}
-            />
-            <div className='ls-spinner-ring-inner absolute inset-[10px] rounded-full border border-white/40 dark:border-white/20' />
-            <div className='ls-spinner-cutout absolute inset-[2px] rounded-full bg-transparent' />
-            <div
-              className={`ls-float absolute inset-0 z-[2] flex items-center justify-center ${colors.iconTone}`}
+              className={`relative flex h-24 w-24 items-center justify-center rounded-full bg-gradient-to-br ${colors.halo} ${colors.iconTone}`}
             >
               {icon}
             </div>
           </div>
-          <div
-            className={`ls-ping-soft absolute right-2 top-3 h-3.5 w-3.5 rounded-full ${colors.orb}`}
-          />
         </div>
 
         <h3

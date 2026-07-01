@@ -198,22 +198,22 @@ const DataMigration = ({ onRefreshConfig }: DataMigrationProps) => {
 
   return (
     <>
-      <div className='max-w-6xl mx-auto space-y-6'>
+      <div className='mx-auto max-w-6xl space-y-6'>
         {/* 简洁警告提示 */}
-        <div className='flex items-center gap-3 p-4 border border-amber-200 dark:border-amber-700 rounded-lg bg-amber-50/30 dark:bg-amber-900/5'>
-          <AlertTriangle className='w-5 h-5 text-amber-600 dark:text-amber-400 flex-shrink-0' />
+        <div className='flex items-center gap-3 rounded-lg border border-amber-200 bg-amber-50/30 p-4 dark:border-amber-700 dark:bg-amber-900/5'>
+          <AlertTriangle className='h-5 w-5 flex-shrink-0 text-amber-600 dark:text-amber-400' />
           <p className='text-sm text-amber-800 dark:text-amber-200'>
             数据迁移操作请谨慎，确保已备份重要数据
           </p>
         </div>
 
         {/* 主要操作区域 - 响应式布局 */}
-        <div className='grid grid-cols-1 lg:grid-cols-2 gap-6'>
+        <div className='grid grid-cols-1 gap-6 lg:grid-cols-2'>
           {/* 数据导出 */}
-          <div className='border border-gray-200 dark:border-gray-700 rounded-lg p-6 bg-white dark:bg-gray-800 hover:shadow-sm transition-shadow flex flex-col'>
-            <div className='flex items-center gap-3 mb-6'>
-              <div className='w-8 h-8 rounded-lg bg-blue-50 dark:bg-blue-900/20 flex items-center justify-center'>
-                <Download className='w-4 h-4 text-blue-600 dark:text-blue-400' />
+          <div className='flex flex-col rounded-lg border border-gray-200 bg-white p-6 transition-shadow hover:shadow-sm dark:border-gray-700 dark:bg-gray-800'>
+            <div className='mb-6 flex items-center gap-3'>
+              <div className='flex h-8 w-8 items-center justify-center rounded-lg bg-blue-50 dark:bg-blue-900/20'>
+                <Upload className='h-4 w-4 text-blue-600 dark:text-blue-400' />
               </div>
               <div>
                 <h3 className='font-semibold text-gray-900 dark:text-gray-100'>
@@ -225,12 +225,12 @@ const DataMigration = ({ onRefreshConfig }: DataMigrationProps) => {
               </div>
             </div>
 
-            <div className='flex-1 flex flex-col'>
+            <div className='flex flex-1 flex-col'>
               <div className='space-y-4'>
                 {/* 密码输入 */}
                 <div>
-                  <label className='flex items-center gap-2 text-sm font-medium text-gray-700 dark:text-gray-300 mb-2'>
-                    <Lock className='w-4 h-4' />
+                  <label className='mb-2 flex items-center gap-2 text-sm font-medium text-gray-700 dark:text-gray-300'>
+                    <Lock className='h-4 w-4' />
                     加密密码
                   </label>
                   <input
@@ -238,17 +238,17 @@ const DataMigration = ({ onRefreshConfig }: DataMigrationProps) => {
                     value={exportPassword}
                     onChange={(e) => setExportPassword(e.target.value)}
                     placeholder='设置强密码保护备份文件'
-                    className='w-full px-3 py-2.5 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-colors'
+                    className='w-full rounded-lg border border-gray-300 bg-white px-3 py-2.5 text-gray-900 transition-colors focus:border-blue-500 focus:ring-2 focus:ring-blue-500 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-100'
                     disabled={isExporting}
                   />
-                  <p className='text-xs text-gray-500 dark:text-gray-400 mt-1'>
+                  <p className='mt-1 text-xs text-gray-500 dark:text-gray-400'>
                     导入时需要使用相同密码
                   </p>
                 </div>
 
                 {/* 备份内容列表 */}
-                <div className='text-xs text-gray-600 dark:text-gray-400 space-y-1'>
-                  <p className='font-medium text-gray-700 dark:text-gray-300 mb-2'>
+                <div className='space-y-1 text-xs text-gray-600 dark:text-gray-400'>
+                  <p className='mb-2 font-medium text-gray-700 dark:text-gray-300'>
                     备份内容：
                   </p>
                   <div className='grid grid-cols-2 gap-1'>
@@ -264,20 +264,20 @@ const DataMigration = ({ onRefreshConfig }: DataMigrationProps) => {
               <button
                 onClick={handleExport}
                 disabled={isExporting || !exportPassword.trim()}
-                className={`w-full px-4 py-2.5 rounded-lg font-medium transition-colors mt-10 ${
+                className={`mt-10 w-full rounded-lg px-4 py-2.5 font-medium transition-colors ${
                   isExporting || !exportPassword.trim()
-                    ? 'bg-gray-100 dark:bg-gray-700 cursor-not-allowed text-gray-500 dark:text-gray-400'
-                    : 'bg-blue-600 hover:bg-blue-700 text-white'
+                    ? 'cursor-not-allowed bg-gray-100 text-gray-500 dark:bg-gray-700 dark:text-gray-400'
+                    : 'bg-blue-600 text-white hover:bg-blue-700'
                 }`}
               >
                 {isExporting ? (
                   <div className='flex items-center justify-center gap-2'>
-                    <div className='w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin'></div>
+                    <div className='h-4 w-4 animate-spin rounded-full border-2 border-white border-t-transparent'></div>
                     导出中...
                   </div>
                 ) : (
                   <div className='flex items-center justify-center gap-2'>
-                    <Download className='w-4 h-4' />
+                    <Upload className='h-4 w-4' />
                     导出数据
                   </div>
                 )}
@@ -286,30 +286,30 @@ const DataMigration = ({ onRefreshConfig }: DataMigrationProps) => {
           </div>
 
           {/* 数据导入 */}
-          <div className='border border-gray-200 dark:border-gray-700 rounded-lg p-6 bg-white dark:bg-gray-800 hover:shadow-sm transition-shadow flex flex-col'>
-            <div className='flex items-center gap-3 mb-6'>
-              <div className='w-8 h-8 rounded-lg bg-red-50 dark:bg-red-900/20 flex items-center justify-center'>
-                <Upload className='w-4 h-4 text-red-600 dark:text-red-400' />
+          <div className='flex flex-col rounded-lg border border-gray-200 bg-white p-6 transition-shadow hover:shadow-sm dark:border-gray-700 dark:bg-gray-800'>
+            <div className='mb-6 flex items-center gap-3'>
+              <div className='flex h-8 w-8 items-center justify-center rounded-lg bg-red-50 dark:bg-red-900/20'>
+                <Download className='h-4 w-4 text-red-600 dark:text-red-400' />
               </div>
               <div>
                 <h3 className='font-semibold text-gray-900 dark:text-gray-100'>
                   数据导入
                 </h3>
                 <p className='text-sm text-red-600 dark:text-red-400'>
-                  ⚠️ 将清空现有数据
+                  将清空现有数据
                 </p>
               </div>
             </div>
 
-            <div className='flex-1 flex flex-col'>
+            <div className='flex flex-1 flex-col'>
               <div className='space-y-4'>
                 {/* 文件选择 */}
                 <div>
-                  <label className='flex items-center gap-2 text-sm font-medium text-gray-700 dark:text-gray-300 mb-2'>
-                    <FileCheck className='w-4 h-4' />
+                  <label className='mb-2 flex items-center gap-2 text-sm font-medium text-gray-700 dark:text-gray-300'>
+                    <FileCheck className='h-4 w-4' />
                     备份文件
                     {selectedFile && (
-                      <span className='ml-auto text-xs text-green-600 dark:text-green-400 font-normal'>
+                      <span className='ml-auto text-xs font-normal text-green-600 dark:text-green-400'>
                         {selectedFile.name} (
                         {(selectedFile.size / 1024).toFixed(1)} KB)
                       </span>
@@ -320,15 +320,15 @@ const DataMigration = ({ onRefreshConfig }: DataMigrationProps) => {
                     type='file'
                     accept='.dat'
                     onChange={handleFileSelect}
-                    className='w-full px-3 py-2.5 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 focus:ring-2 focus:ring-red-500 focus:border-red-500 file:mr-3 file:py-1.5 file:px-3 file:rounded file:border-0 file:text-sm file:font-medium file:bg-gray-50 dark:file:bg-gray-600 file:text-gray-700 dark:file:text-gray-300 hover:file:bg-gray-100 dark:hover:file:bg-gray-500 transition-colors'
+                    className='w-full rounded-lg border border-gray-300 bg-white px-3 py-2.5 text-gray-900 transition-colors file:mr-3 file:rounded file:border-0 file:bg-gray-50 file:px-3 file:py-1.5 file:text-sm file:font-medium file:text-gray-700 hover:file:bg-gray-100 focus:border-red-500 focus:ring-2 focus:ring-red-500 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-100 dark:file:bg-gray-600 dark:file:text-gray-300 dark:hover:file:bg-gray-500'
                     disabled={isImporting}
                   />
                 </div>
 
                 {/* 密码输入 */}
                 <div>
-                  <label className='flex items-center gap-2 text-sm font-medium text-gray-700 dark:text-gray-300 mb-2'>
-                    <Lock className='w-4 h-4' />
+                  <label className='mb-2 flex items-center gap-2 text-sm font-medium text-gray-700 dark:text-gray-300'>
+                    <Lock className='h-4 w-4' />
                     解密密码
                   </label>
                   <input
@@ -336,7 +336,7 @@ const DataMigration = ({ onRefreshConfig }: DataMigrationProps) => {
                     value={importPassword}
                     onChange={(e) => setImportPassword(e.target.value)}
                     placeholder='输入导出时的加密密码'
-                    className='w-full px-3 py-2.5 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 focus:ring-2 focus:ring-red-500 focus:border-red-500 transition-colors'
+                    className='w-full rounded-lg border border-gray-300 bg-white px-3 py-2.5 text-gray-900 transition-colors focus:border-red-500 focus:ring-2 focus:ring-red-500 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-100'
                     disabled={isImporting}
                   />
                 </div>
@@ -348,20 +348,20 @@ const DataMigration = ({ onRefreshConfig }: DataMigrationProps) => {
                 disabled={
                   isImporting || !selectedFile || !importPassword.trim()
                 }
-                className={`w-full px-4 py-2.5 rounded-lg font-medium transition-colors mt-10 ${
+                className={`mt-10 w-full rounded-lg px-4 py-2.5 font-medium transition-colors ${
                   isImporting || !selectedFile || !importPassword.trim()
-                    ? 'bg-gray-100 dark:bg-gray-700 cursor-not-allowed text-gray-500 dark:text-gray-400'
-                    : 'bg-red-600 hover:bg-red-700 text-white'
+                    ? 'cursor-not-allowed bg-gray-100 text-gray-500 dark:bg-gray-700 dark:text-gray-400'
+                    : 'bg-red-600 text-white hover:bg-red-700'
                 }`}
               >
                 {isImporting ? (
                   <div className='flex items-center justify-center gap-2'>
-                    <div className='w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin'></div>
+                    <div className='h-4 w-4 animate-spin rounded-full border-2 border-white border-t-transparent'></div>
                     导入中...
                   </div>
                 ) : (
                   <div className='flex items-center justify-center gap-2'>
-                    <Upload className='w-4 h-4' />
+                    <Download className='h-4 w-4' />
                     导入数据
                   </div>
                 )}

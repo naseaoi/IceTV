@@ -137,6 +137,6 @@ describe('PlayMainContent', () => {
     );
 
     expect(screen.queryByText('切换播放源超时')).not.toBeInTheDocument();
-    expect(screen.getByText('切换中')).toBeInTheDocument();
+    expect(screen.getByText('正在切换源站')).toBeInTheDocument();
   });
 });

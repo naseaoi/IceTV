@@ -79,6 +79,11 @@ class DbManager {
     await storage.deletePlayRecord(userName, key);
   }
 
+  async deleteAllPlayRecords(userName: string): Promise<void> {
+    const storage = await this.getStorage();
+    await storage.deleteAllPlayRecords(userName);
+  }
+
   /** 按原始 key 写入播放记录（用于数据导入等场景） */
   async setPlayRecordByKey(
     userName: string,
@@ -125,6 +130,11 @@ class DbManager {
     const key = generateStorageKey(source, id);
     const storage = await this.getStorage();
     await storage.deleteFavorite(userName, key);
+  }
+
+  async deleteAllFavorites(userName: string): Promise<void> {
+    const storage = await this.getStorage();
+    await storage.deleteAllFavorites(userName);
   }
 
   /** 按原始 key 写入收藏（用于数据导入等场景） */

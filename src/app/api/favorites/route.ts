@@ -141,14 +141,7 @@ export async function DELETE(request: NextRequest) {
       }
       await db.deleteFavorite(username, parsed.source, parsed.id);
     } else {
-      // 清空全部
-      const all = await db.getAllFavorites(username);
-      await Promise.all(
-        Object.keys(all).map(async (k) => {
-          const p = parseStorageKey(k);
-          if (p) await db.deleteFavorite(username, p.source, p.id);
-        }),
-      );
+      await db.deleteAllFavorites(username);
     }
 
     return NextResponse.json({ success: true }, { status: 200 });

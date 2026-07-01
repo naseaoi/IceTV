@@ -23,6 +23,10 @@ import SearchHistory from '@/features/search/components/SearchHistory';
 import { VirtualizedSearchGrid } from '@/features/search/components/VirtualizedSearchGrid';
 
 const SEARCH_VIEW_MODE_STORAGE_KEY = 'searchViewModeByQuery';
+const AGGREGATED_SEARCH_GRID_LAYOUT = {
+  mobileContentHeight: 32,
+  desktopContentHeight: 32,
+};
 
 function getSearchViewModeByQuery(query: string): 'agg' | 'all' | null {
   if (typeof window === 'undefined') {
@@ -70,6 +74,8 @@ function setSearchViewModeByQuery(query: string, mode: 'agg' | 'all') {
 export default function SearchPageClient() {
   const router = useRouter();
   const searchParams = useSearchParams();
+  const urlQuery = searchParams.get('q') || '';
+  const activeSearchQuery = useMemo(() => urlQuery.trim(), [urlQuery]);
 
   // 搜索历史 & UI 状态
   const [searchHistory, setSearchHistory] = useState<string[]>([]);
@@ -129,10 +135,8 @@ export default function SearchPageClient() {
       searchResults,
       filterAll,
       filterAgg,
-      searchQuery,
+      searchQuery: activeSearchQuery,
     });
-
-  const trimmedSearchQuery = useMemo(() => searchQuery.trim(), [searchQuery]);
 
   // 初始化：搜索历史、滚动监听、流式搜索设置
   useEffect(() => {
@@ -178,9 +182,6 @@ export default function SearchPageClient() {
       }
     };
   }, []);
-
-  // 提取 query 值，避免 searchParams 引用变化导致重复触发
-  const urlQuery = searchParams.get('q') || '';
 
   // searchParams 变化时同步 searchQuery 和 suggestions
   useEffect(() => {
@@ -254,9 +255,9 @@ export default function SearchPageClient() {
 
   return (
     <PageLayout activePath='/search'>
-      <div className='mb-10 overflow-visible px-4 py-4 sm:px-10 sm:py-8'>
-        <div className='mb-8'>
-          <form onSubmit={handleSearch} className='mx-auto max-w-2xl'>
+      <div className='overflow-visible px-4 py-4 sm:px-10 sm:py-8'>
+        <div className={`${showResults ? 'mb-8 pt-0' : 'pt-[20vh]'}`}>
+          <form onSubmit={handleSearch} className='mx-auto w-full max-w-2xl'>
             <div className='relative'>
               <Search className='absolute left-3 top-1/2 h-5 w-5 -translate-y-1/2 text-gray-400 dark:text-gray-500' />
               <input
@@ -306,10 +307,21 @@ export default function SearchPageClient() {
               />
             </div>
           </form>
+
+          {!showResults && (
+            <div className='mx-auto mt-8 w-full max-w-2xl'>
+              <div className='mx-auto h-[120px] w-full'>
+                <SearchHistory
+                  searchHistory={searchHistory}
+                  setSearchQuery={setSearchQuery}
+                />
+              </div>
+            </div>
+          )}
         </div>
 
-        <div className='mx-auto mt-12 max-w-[95%] overflow-visible'>
-          {showResults ? (
+        {showResults && (
+          <div className='mx-auto mt-12 max-w-[95%] overflow-visible'>
             <section className='mb-12'>
               <div className='mb-4'>
                 <h2 className='text-xl font-bold text-gray-800 dark:text-gray-200'>
@@ -377,6 +389,7 @@ export default function SearchPageClient() {
                       key='search-results-agg'
                       items={filteredAggResults}
                       getKey={(item) => `agg-${item.mapKey}`}
+                      layout={AGGREGATED_SEARCH_GRID_LAYOUT}
                       renderItem={(item) => (
                         <VideoCard
                           ref={getGroupRef(item.mapKey)}
@@ -389,8 +402,8 @@ export default function SearchPageClient() {
                           source_names={item.stats.source_names}
                           douban_id={item.stats.douban_id}
                           query={
-                            trimmedSearchQuery !== item.title
-                              ? trimmedSearchQuery
+                            activeSearchQuery !== item.title
+                              ? activeSearchQuery
                               : ''
                           }
                           type={item.type}
@@ -413,8 +426,8 @@ export default function SearchPageClient() {
                           source_name={item.source_name}
                           douban_id={item.douban_id}
                           query={
-                            trimmedSearchQuery !== item.title
-                              ? trimmedSearchQuery
+                            activeSearchQuery !== item.title
+                              ? activeSearchQuery
                               : ''
                           }
                           year={item.year}
@@ -427,13 +440,8 @@ export default function SearchPageClient() {
                 </>
               )}
             </section>
-          ) : (
-            <SearchHistory
-              searchHistory={searchHistory}
-              setSearchQuery={setSearchQuery}
-            />
-          )}
-        </div>
+          </div>
+        )}
       </div>
 
       <button

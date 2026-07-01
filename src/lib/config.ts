@@ -2,6 +2,10 @@ import { db } from '@/lib/db';
 import { getOwnerUsername } from '@/lib/env.server';
 
 import { AdminConfig } from '@/features/admin/types/api';
+import {
+  DEFAULT_BANGUMI_DATA_SOURCE,
+  normalizeBangumiDataSource,
+} from '@/lib/bangumi-source';
 
 export interface ApiSite {
   key: string;
@@ -231,6 +235,10 @@ async function getInitConfig(
       SiteInterfaceCacheTime: cfgFile.cache_time || 7200,
       DoubanProxyType: process.env.NEXT_PUBLIC_DOUBAN_PROXY_TYPE || 'direct',
       DoubanProxy: process.env.NEXT_PUBLIC_DOUBAN_PROXY || '',
+      BangumiDataSource: normalizeBangumiDataSource(
+        process.env.NEXT_PUBLIC_BANGUMI_DATA_SOURCE,
+      ),
+      BangumiProxy: process.env.NEXT_PUBLIC_BANGUMI_PROXY || '',
       DoubanImageProxyType:
         process.env.NEXT_PUBLIC_DOUBAN_IMAGE_PROXY_TYPE ||
         'cmliussss-cdn-tencent',
@@ -390,6 +398,10 @@ export function configSelfCheck(adminConfig: AdminConfig): AdminConfig {
       SiteInterfaceCacheTime: 7200,
       DoubanProxyType: process.env.NEXT_PUBLIC_DOUBAN_PROXY_TYPE || 'direct',
       DoubanProxy: process.env.NEXT_PUBLIC_DOUBAN_PROXY || '',
+      BangumiDataSource: normalizeBangumiDataSource(
+        process.env.NEXT_PUBLIC_BANGUMI_DATA_SOURCE,
+      ),
+      BangumiProxy: process.env.NEXT_PUBLIC_BANGUMI_PROXY || '',
       DoubanImageProxyType:
         process.env.NEXT_PUBLIC_DOUBAN_IMAGE_PROXY_TYPE ||
         'cmliussss-cdn-tencent',
@@ -405,6 +417,17 @@ export function configSelfCheck(adminConfig: AdminConfig): AdminConfig {
   }
   if (typeof adminConfig.SiteConfig.EnableLiveEntry !== 'boolean') {
     adminConfig.SiteConfig.EnableLiveEntry = false;
+  }
+  if (typeof adminConfig.SiteConfig.FluidSearch !== 'boolean') {
+    adminConfig.SiteConfig.FluidSearch =
+      process.env.NEXT_PUBLIC_FLUID_SEARCH !== 'false';
+  }
+  adminConfig.SiteConfig.BangumiDataSource = normalizeBangumiDataSource(
+    adminConfig.SiteConfig.BangumiDataSource || DEFAULT_BANGUMI_DATA_SOURCE,
+  );
+  if (typeof adminConfig.SiteConfig.BangumiProxy !== 'string') {
+    adminConfig.SiteConfig.BangumiProxy =
+      process.env.NEXT_PUBLIC_BANGUMI_PROXY || '';
   }
 
   // 站长变更自检
@@ -467,12 +490,15 @@ export function configSelfCheck(adminConfig: AdminConfig): AdminConfig {
   const seenLiveKeys = new Set<string>();
   adminConfig.LiveConfig = adminConfig.LiveConfig.map((live) => ({
     ...live,
-    key: live.key.trim(),
-    name: live.name.trim(),
-    url: live.url.trim(),
-    ua: live.ua?.trim(),
-    epg: live.epg?.trim(),
+    key: trimConfigString(live.key),
+    name: trimConfigString(live.name),
+    url: trimConfigString(live.url),
+    ua: trimOptionalConfigString(live.ua),
+    epg: trimOptionalConfigString(live.epg),
   })).filter((live) => {
+    if (!live.key || !live.name || !live.url) {
+      return false;
+    }
     if (seenLiveKeys.has(live.key)) {
       return false;
     }
@@ -481,6 +507,19 @@ export function configSelfCheck(adminConfig: AdminConfig): AdminConfig {
   });
 
   return adminConfig;
+}
+
+function trimConfigString(value: unknown): string {
+  return typeof value === 'string' ? value.trim() : '';
+}
+
+function trimOptionalConfigString(value: unknown): string | undefined {
+  if (typeof value !== 'string') {
+    return undefined;
+  }
+
+  const trimmed = value.trim();
+  return trimmed || undefined;
 }
 
 export async function resetConfig() {
@@ -613,6 +652,7 @@ async function readPublicConfig() {
     OpenRegister: !!config.UserConfig.OpenRegister,
     DisableYellowFilter: config.SiteConfig.DisableYellowFilter,
     EnableLiveEntry: config.SiteConfig.EnableLiveEntry,
+    BangumiDataSource: config.SiteConfig.BangumiDataSource,
     CustomCategories: config.CustomCategories.filter(
       (category) => !category.disabled,
     ).map((category) => ({

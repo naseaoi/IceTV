@@ -1,19 +1,6 @@
-import { cookies } from 'next/headers';
-
+import HomePosterCardSkeleton from '@/components/HomePosterCardSkeleton';
 import PageLayout from '@/components/PageLayout';
-
-const MAX_CONTINUE_WATCHING_SKELETON_COUNT = 8;
-
-async function getContinueWatchingSkeletonCount() {
-  const cookieStore = await cookies();
-  const rawCount = Number(cookieStore.get('cw_count')?.value || 0);
-
-  if (!Number.isFinite(rawCount) || rawCount <= 0) {
-    return 0;
-  }
-
-  return Math.min(Math.floor(rawCount), MAX_CONTINUE_WATCHING_SKELETON_COUNT);
-}
+import { getContinueWatchingSkeletonCount } from '@/lib/continue-watching.server';
 
 function CapsuleSwitchSkeleton() {
   return (
@@ -32,20 +19,6 @@ function CapsuleSwitchSkeleton() {
   );
 }
 
-function SkeletonCard({ withSubtitle = false }: { withSubtitle?: boolean }) {
-  return (
-    <div className='w-24 min-w-[96px] sm:w-44 sm:min-w-[180px]'>
-      <div className='relative aspect-[2/3] w-full animate-pulse overflow-hidden rounded-lg bg-gray-200 dark:bg-gray-800'>
-        <div className='absolute inset-0 bg-gray-300 dark:bg-gray-700' />
-      </div>
-      <div className='mx-auto mt-2 h-5 w-4/5 animate-pulse rounded bg-gray-200 dark:bg-gray-800' />
-      {withSubtitle && (
-        <div className='mx-auto mt-1 h-[22px] w-16 animate-pulse rounded bg-gray-200 dark:bg-gray-800' />
-      )}
-    </div>
-  );
-}
-
 function SkeletonRow({
   count,
   withSubtitle = false,
@@ -57,7 +30,7 @@ function SkeletonRow({
     <div className='relative'>
       <div className='scrollbar-hide flex space-x-7 overflow-x-auto py-1 pb-12 pl-1 pr-4 sm:py-2 sm:pb-14 sm:pr-6'>
         {Array.from({ length: count }).map((_, index) => (
-          <SkeletonCard key={index} withSubtitle={withSubtitle} />
+          <HomePosterCardSkeleton key={index} withSubtitle={withSubtitle} />
         ))}
       </div>
     </div>

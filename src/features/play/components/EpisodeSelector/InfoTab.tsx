@@ -60,14 +60,15 @@ export const InfoTab: React.FC<InfoTabProps> = ({
   return (
     <div className='flex-1 space-y-5 overflow-y-auto p-5 sm:p-6'>
       {/* 封面 + 基本信息 */}
-      <div className='flex gap-5'>
+      <div className='flex gap-4 sm:gap-5'>
         {/* 封面 */}
-        <div className='relative aspect-[2/3] w-28 flex-shrink-0 overflow-hidden rounded-xl bg-gray-200 shadow-md shadow-black/10 ring-1 ring-black/10 dark:bg-gray-800 dark:shadow-black/30 dark:ring-white/10'>
+        <div className='relative aspect-[2/3] w-24 flex-shrink-0 overflow-hidden rounded-xl bg-gray-200 shadow-md shadow-black/10 ring-1 ring-black/10 dark:bg-gray-800 dark:shadow-black/30 dark:ring-white/10 sm:w-28 xl:w-32'>
           <CoverImage
             src={videoCover}
             alt={videoTitle}
-            sizes='112px'
-            enableRetry={false}
+            sizes='(max-width: 640px) 96px, (max-width: 1280px) 112px, 128px'
+            quality={60}
+            priority
           />
         </div>
 
@@ -79,6 +80,7 @@ export const InfoTab: React.FC<InfoTabProps> = ({
               {videoTitle || '影片标题'}
             </h3>
             <button
+              aria-label={favorited ? '取消收藏' : '收藏'}
               onClick={(e) => {
                 e.stopPropagation();
                 onToggleFavorite();

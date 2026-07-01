@@ -40,9 +40,7 @@ function buildEpisodeEntries(matches: RegExpMatchArray[]): GiriEpisodeEntry[] {
   return entries;
 }
 
-// 截取 anthology-tab 区块内容；该区块常含嵌套 swiper-slide 的 div，
-// 直接用懒惰匹配 `</div>` 会过早结束，因此按下一个已知兄弟块（anthology-list-box
-// 或 anthology-list）作为结束标记。
+// 截取 anthology-tab 区块内容
 function sliceAnthologyTabSection(html: string): string {
   const startMatch = html.match(/<div class="anthology-tab[^"]*">/);
   if (!startMatch || startMatch.index === undefined) {
@@ -69,7 +67,7 @@ function extractVariantLabels(html: string): string[] {
   );
 }
 
-/** 统计源站详情页 tab 条里的版本数量（用于判断是否需要补抓其他版本的选集） */
+// 统计源站详情页版本数量
 export function countGirigiriVariantTabs(html: string): number {
   return extractVariantLabels(html).length;
 }

@@ -29,7 +29,7 @@ export function useSourceValidation({
     ValidationResult[]
   >([]);
 
-  const startValidation = async (searchKeyword: string) => {
+  const startValidation = async (searchKeyword: string, sourceKey?: string) => {
     if (!searchKeyword.trim()) {
       showAlert({
         type: 'warning',
@@ -39,23 +39,52 @@ export function useSourceValidation({
       return;
     }
 
-    setIsValidating(true);
-    setValidationResults([]);
+    const targetSource = sourceKey
+      ? sources.find((source) => source.key === sourceKey)
+      : null;
+    if (sourceKey && !targetSource) {
+      showAlert({
+        type: 'error',
+        title: '验证失败',
+        message: '源不存在',
+      });
+      return;
+    }
 
-    const initialResults: ValidationResult[] = sources.map((source) => ({
+    setIsValidating(true);
+    const targets = targetSource ? [targetSource] : sources;
+    const initialResults: ValidationResult[] = targets.map((source) => ({
       key: source.key,
       name: source.name,
       status: 'validating',
       message: '检测中...',
       resultCount: 0,
     }));
-    setValidationResults(initialResults);
+
+    setValidationResults((prev) => {
+      if (!sourceKey) {
+        return initialResults;
+      }
+
+      const initialResult = initialResults[0];
+      const exists = prev.some((result) => result.key === sourceKey);
+      if (exists) {
+        return prev.map((result) =>
+          result.key === sourceKey ? initialResult : result,
+        );
+      }
+      return [...prev, initialResult];
+    });
 
     try {
+      const params = new URLSearchParams({
+        q: searchKeyword.trim(),
+      });
+      if (sourceKey) {
+        params.set('source', sourceKey);
+      }
       const eventSource = new EventSource(
-        `/api/admin/source/validate?q=${encodeURIComponent(
-          searchKeyword.trim(),
-        )}`,
+        `/api/admin/source/validate?${params.toString()}`,
       );
 
       eventSource.onmessage = (event) => {

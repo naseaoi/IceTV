@@ -29,14 +29,10 @@ jest.mock('@/components/modals/ConfirmModal', () => ({
   }) => (isOpen ? <button onClick={onConfirm}>ConfirmModal</button> : null),
 }));
 
-jest.mock('@/features/admin/components/CollapsibleTab', () => ({
-  __esModule: true,
-  default: ({ title, children }: { title: string; children: ReactNode }) => (
-    <section>
-      <h2>{title}</h2>
-      {children}
-    </section>
-  ),
+jest.mock('next/navigation', () => ({
+  useRouter: () => ({ replace: jest.fn() }),
+  usePathname: () => '/admin',
+  useSearchParams: () => new URLSearchParams(),
 }));
 
 jest.mock('@/features/admin/components/tabs/UserConfigTab', () => ({
@@ -102,6 +98,8 @@ describe('AdminPage role visibility', () => {
       SiteInterfaceCacheTime: 300,
       DoubanProxyType: '',
       DoubanProxy: '',
+      BangumiDataSource: 'server',
+      BangumiProxy: '',
       DoubanImageProxyType: '',
       DoubanImageProxy: '',
       DisableYellowFilter: false,

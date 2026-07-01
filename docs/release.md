@@ -4,9 +4,28 @@
 
 - 日常改动只进入 `dev` 分支。
 - `main` 只通过 `dev -> main` PR 更新。
-- tag 只打在已经合并到 `main` 的发布提交上。
-- 推送 `v*` tag 后，Docker 镜像和 GitHub Release 自动构建。
+- 正式 tag 只打在已经合并到 `main` 的发布提交上，格式为 `vX.Y.Z`。
+- dev 测试 tag 可打在 `dev` 分支提交上，格式为 `vX.Y.Z-dev.N`。
+- 正式 tag 会构建 Docker 镜像和 GitHub Release；dev 测试 tag 只构建 Docker 镜像。
 - `CHANGELOG.md`、`public/changelog.json` 和 GitHub Release 面向普通用户，不写内部发布流程、CI、测试、重构、文档维护等实现细节。
+
+## Dev 镜像测试
+
+`dev` 分支不会因普通 push 构建镜像。需要线上测试时，在目标提交上推送预发布 tag：
+
+```powershell
+git switch dev
+git pull --ff-only origin dev
+git tag -a v0.4.2-dev.1 -m "v0.4.2-dev.1"
+git push origin v0.4.2-dev.1
+```
+
+推送后会生成：
+
+- `ghcr.io/naseaoi/icetv:dev`
+- `ghcr.io/naseaoi/icetv:0.4.2-dev.1`
+
+dev tag 不更新 `latest`，也不创建 GitHub Release。
 
 ## 发布说明规则
 

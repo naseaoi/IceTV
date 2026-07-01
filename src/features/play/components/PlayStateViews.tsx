@@ -120,6 +120,7 @@ export function PlayLoadingView({
           <LoadingStatePanel
             icon={getLoadingStageIcon(loadingStage)}
             tone='emerald'
+            glow
             title='正在加载'
             message={loadingMessage}
             progress={loadingProgress}
@@ -157,34 +158,35 @@ export function PlayErrorView({
         <LoadingStatePanel
           icon={<AlertTriangle className='h-10 w-10' />}
           tone='red'
-          title='哎呀，出现了一些问题'
-          message={error}
-          description='请检查网络连接或稍后重试。'
+          title={error}
+          message='请检查网络连接或稍后重试。'
         >
-          <button
-            onClick={onBack}
-            className='flex w-full transform items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-green-500 to-emerald-600 px-6 py-3 font-medium text-white shadow-lg transition-all duration-200 hover:scale-105 hover:from-green-600 hover:to-emerald-700 hover:shadow-xl'
-          >
-            {videoTitle ? (
-              <>
-                <Search className='h-4 w-4' />
-                返回搜索
-              </>
-            ) : (
-              <>
-                <ArrowLeft className='h-4 w-4' />
-                返回上页
-              </>
-            )}
-          </button>
+          <div className='flex items-center justify-center gap-3'>
+            <button
+              onClick={onBack}
+              className='inline-flex transform items-center gap-1.5 rounded-lg bg-gradient-to-r from-green-500 to-emerald-600 px-3.5 py-2 text-sm font-medium text-white shadow-lg transition-all duration-200 hover:scale-105 hover:from-green-600 hover:to-emerald-700 hover:shadow-xl'
+            >
+              {videoTitle ? (
+                <>
+                  <Search className='h-4 w-4' />
+                  返回搜索
+                </>
+              ) : (
+                <>
+                  <ArrowLeft className='h-4 w-4' />
+                  返回上页
+                </>
+              )}
+            </button>
 
-          <button
-            onClick={onRetry}
-            className='flex w-full items-center justify-center gap-2 rounded-xl bg-gray-100 px-6 py-3 font-medium text-gray-700 transition-colors duration-200 hover:bg-gray-200 dark:bg-gray-700 dark:text-gray-300 dark:hover:bg-gray-600'
-          >
-            <RefreshCw className='h-4 w-4' />
-            重新尝试
-          </button>
+            <button
+              onClick={onRetry}
+              className='inline-flex items-center gap-1.5 rounded-lg bg-gray-100 px-3.5 py-2 text-sm font-medium text-gray-700 transition-colors duration-200 hover:bg-gray-200 dark:bg-gray-700 dark:text-gray-300 dark:hover:bg-gray-600'
+            >
+              <RefreshCw className='h-4 w-4' />
+              重新尝试
+            </button>
+          </div>
         </LoadingStatePanel>
       </div>
     </PageLayout>

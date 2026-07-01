@@ -622,9 +622,6 @@ async function probeWithMode(
     //   3) 滑动达标：累计到 ≥ 512KB 或流结束即停止，避免长尾请求拖长总时长。
     const segmentProbe = await measureSegmentBandwidth(firstSegmentUrl);
     const loadSpeed = segmentProbe.loadSpeed;
-    if (loadSpeed === '未知') {
-      throw new ProbeError('Insufficient first segment sample');
-    }
 
     const pingTime = await pingPromise;
     const detectedQuality = segmentProbe.dimensions

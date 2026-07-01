@@ -1,4 +1,4 @@
-import { AlertTriangle, Cat, Clover, Film, Tv } from 'lucide-react';
+import { AlertTriangle, Cat, Clover, Film, RefreshCw, Tv } from 'lucide-react';
 import {
   ReactNode,
   RefObject,
@@ -14,6 +14,7 @@ import {
   PlayerPageLayout,
 } from '@/components/PlayerPageLayout';
 import EpisodeSelector from '@/features/play/components/EpisodeSelector';
+import type { VideoLoadingStage } from '@/features/play/hooks/usePlayPageState';
 import { getSourceFailure } from '@/lib/failed-source-cooldown';
 import { SearchResult } from '@/lib/types';
 import { normalizeInlineText } from '@/lib/utils';
@@ -28,7 +29,7 @@ interface PlayMainContentProps {
   artRef: RefObject<HTMLDivElement | null>;
   isVideoLoading: boolean;
   isPlaying: boolean;
-  videoLoadingStage: 'initing' | 'sourceChanging';
+  videoLoadingStage: VideoLoadingStage;
   videoLoadingAttempt: number;
   realtimeLoadSpeed: string;
   authRecoveryVisible: boolean;
@@ -56,6 +57,7 @@ interface PlayMainContentProps {
   onAddSources?: (newSources: SearchResult[]) => void;
   onLoadingTimeout?: () => void;
   searchType?: string;
+  playbackError?: string | null;
 }
 
 const PLAYER_LOADING_TIMEOUT_MS = 15_000;
@@ -92,129 +94,109 @@ const playAccents: Record<string, PlayerPageAccent> = {
   },
 };
 
+function PlayerOverlayPanel({
+  title,
+  message,
+  description,
+  zClassName,
+  icon = <AlertTriangle className='h-9 w-9' />,
+  tone = 'red',
+  glow = false,
+}: {
+  title: string;
+  message?: string;
+  description?: string;
+  zClassName: string;
+  icon?: ReactNode;
+  tone?: 'emerald' | 'blue' | 'amber' | 'red';
+  glow?: boolean;
+}) {
+  return (
+    <div
+      className={`absolute inset-0 ${zClassName} flex items-center justify-center overflow-hidden rounded-xl bg-black/85 backdrop-blur-sm transition-all duration-300`}
+    >
+      <LoadingStatePanel
+        compact
+        glow={glow}
+        icon={icon}
+        tone={tone}
+        title={title}
+        titleClassName='text-xl text-white sm:text-2xl'
+        message={message}
+        messageClassName='mx-auto max-w-[16rem] text-sm leading-6 text-gray-300 sm:max-w-none'
+        description={description}
+        descriptionClassName='text-gray-400'
+        className='max-w-[19rem] p-4 sm:max-w-lg sm:p-6'
+      />
+    </div>
+  );
+}
+
+const LOADING_STAGE_CONFIG: Record<
+  VideoLoadingStage,
+  { title: string; status: string; timeoutTitle: string; icon: ReactNode }
+> = {
+  initing: {
+    title: '正在加载视频',
+    status: '正在加载视频...',
+    timeoutTitle: '加载视频超时',
+    icon: <Tv className='h-9 w-9' />,
+  },
+  sourceChanging: {
+    title: '正在切换源站',
+    status: '正在切换源站...',
+    timeoutTitle: '切换播放源超时',
+    icon: <RefreshCw className='h-9 w-9' />,
+  },
+  episodeChanging: {
+    title: '正在切换剧集',
+    status: '正在切换剧集...',
+    timeoutTitle: '切换剧集超时',
+    icon: <RefreshCw className='h-9 w-9' />,
+  },
+};
+
 function PlayLoadingOverlay({
   loadingTimedOut,
   videoLoadingStage,
   realtimeLoadSpeed,
 }: {
   loadingTimedOut: boolean;
-  videoLoadingStage: 'initing' | 'sourceChanging';
+  videoLoadingStage: VideoLoadingStage;
   realtimeLoadSpeed: string;
 }) {
-  const statusText =
-    realtimeLoadSpeed ||
-    (videoLoadingStage === 'sourceChanging'
-      ? '正在切换源站...'
-      : '正在加载视频...');
+  const stageConfig = LOADING_STAGE_CONFIG[videoLoadingStage];
+  const statusText = realtimeLoadSpeed || stageConfig.status;
+
+  if (loadingTimedOut) {
+    return (
+      <PlayerOverlayPanel
+        zClassName='z-[500]'
+        title={stageConfig.timeoutTitle}
+        message={`已等待超过 ${PLAYER_LOADING_TIMEOUT_SECONDS} 秒，可能是网络问题或播放源不可用`}
+      />
+    );
+  }
 
   return (
-    <div className='absolute inset-0 z-[500] flex items-center justify-center overflow-hidden rounded-xl bg-black/85 backdrop-blur-sm transition-all duration-300'>
-      {loadingTimedOut ? (
-        <LoadingStatePanel
-          compact
-          icon={<AlertTriangle className='h-9 w-9' />}
-          tone='red'
-          title={
-            videoLoadingStage === 'sourceChanging'
-              ? '切换播放源超时'
-              : '加载视频超时'
-          }
-          titleClassName='text-xl text-white sm:text-2xl'
-          message={`已等待超过 ${PLAYER_LOADING_TIMEOUT_SECONDS} 秒，可能是网络问题或播放源不可用`}
-          messageClassName='mx-auto max-w-[16rem] text-sm leading-6 text-gray-300 sm:max-w-none'
-          className='max-w-[19rem] p-4 sm:max-w-lg sm:p-6'
-        />
-      ) : (
-        <div className='flex flex-col items-center'>
-          <div className='relative'>
-            <div className='player-ripple absolute -inset-4 rounded-full border border-emerald-300/40' />
-            <div className='player-ripple player-ripple-delay absolute -inset-4 rounded-full border border-emerald-300/40' />
-            <div className='player-spinner-shell relative z-[2] mx-auto h-20 w-20 sm:h-24 sm:w-24'>
-              <div className='player-ring-outer absolute inset-0 rounded-full border-2 border-transparent bg-gradient-to-r from-emerald-400/70 via-green-500/40 to-emerald-300/20' />
-              <div className='player-ring-inner absolute inset-[10px] rounded-full border border-white/30' />
-              <div className='absolute inset-[2px] rounded-full bg-transparent' />
-              <div className='player-orb absolute right-1 top-2 h-3 w-3 rounded-full bg-emerald-400/40' />
-              {videoLoadingStage === 'sourceChanging' && (
-                <div className='absolute inset-0 z-10 flex items-center justify-center text-xs font-bold text-white/70'>
-                  切换中
-                </div>
-              )}
-            </div>
-          </div>
-          <div className='mt-5 min-h-[22px] rounded-full bg-white/10 px-3 py-1 text-xs font-medium text-white/80 ring-1 ring-white/15'>
-            {statusText}
-          </div>
+    <PlayerOverlayPanel
+      zClassName='z-[500]'
+      tone='blue'
+      glow
+      icon={stageConfig.icon}
+      title={stageConfig.title}
+      message={statusText}
+    />
+  );
+}
 
-          <style jsx>{`
-            .player-ripple {
-              animation: player-ripple 2.4s ease-out infinite;
-              transform-origin: center;
-            }
-            .player-ripple-delay {
-              animation-delay: 1.2s;
-            }
-            .player-spinner-shell {
-              filter: drop-shadow(0 8px 26px rgba(0, 0, 0, 0.12));
-            }
-            .player-ring-outer {
-              mask: radial-gradient(circle, transparent 58%, black 59%);
-              -webkit-mask: radial-gradient(circle, transparent 58%, black 59%);
-              animation: player-rotate 2.6s linear infinite;
-            }
-            .player-ring-inner {
-              animation: player-rotate-reverse 3.3s linear infinite;
-            }
-            .player-orb {
-              animation: player-ping 1.8s ease-out infinite;
-            }
-            @keyframes player-rotate {
-              0% {
-                transform: rotate(0deg);
-              }
-              100% {
-                transform: rotate(360deg);
-              }
-            }
-            @keyframes player-rotate-reverse {
-              0% {
-                transform: rotate(0deg);
-              }
-              100% {
-                transform: rotate(-360deg);
-              }
-            }
-            @keyframes player-ripple {
-              0% {
-                transform: scale(0.92);
-                opacity: 0.45;
-              }
-              70% {
-                transform: scale(1.2);
-                opacity: 0;
-              }
-              100% {
-                transform: scale(1.2);
-                opacity: 0;
-              }
-            }
-            @keyframes player-ping {
-              0% {
-                transform: scale(0.9);
-                opacity: 0.65;
-              }
-              70% {
-                transform: scale(1.9);
-                opacity: 0;
-              }
-              100% {
-                transform: scale(1.9);
-                opacity: 0;
-              }
-            }
-          `}</style>
-        </div>
-      )}
-    </div>
+function PlaybackErrorOverlay({ message }: { message: string }) {
+  return (
+    <PlayerOverlayPanel
+      zClassName='z-[510]'
+      title={message}
+      message='请从右侧面板手动切换其他源站。'
+    />
   );
 }
 
@@ -350,6 +332,7 @@ export function PlayMainContent(props: PlayMainContentProps) {
     onLoadingTimeout,
     searchType,
     realtimeLoadSpeed,
+    playbackError,
   } = props;
 
   const { TitleIcon, accent } = useMemo(
@@ -393,7 +376,7 @@ export function PlayMainContent(props: PlayMainContentProps) {
   }, [onLoadingTimeout]);
 
   useEffect(() => {
-    if (!isVideoLoading) {
+    if (!isVideoLoading || playbackError) {
       setLoadingTimedOut(false);
       return;
     }
@@ -403,7 +386,7 @@ export function PlayMainContent(props: PlayMainContentProps) {
       onLoadingTimeoutRef.current?.();
     }, PLAYER_LOADING_TIMEOUT_MS);
     return () => clearTimeout(timer);
-  }, [isVideoLoading, videoLoadingStage, videoLoadingAttempt]);
+  }, [isVideoLoading, videoLoadingStage, videoLoadingAttempt, playbackError]);
 
   const headerTags = buildHeaderTags({
     headerSourceText,
@@ -436,13 +419,14 @@ export function PlayMainContent(props: PlayMainContentProps) {
       tags={headerTags}
       playerOverlay={
         <>
-          {isVideoLoading && (
+          {isVideoLoading && !playbackError && (
             <PlayLoadingOverlay
               loadingTimedOut={loadingTimedOut}
               videoLoadingStage={videoLoadingStage}
               realtimeLoadSpeed={loadingStatusText}
             />
           )}
+          {playbackError && <PlaybackErrorOverlay message={playbackError} />}
           {authRecoveryVisible && (
             <AuthRecoveryOverlay
               message={authRecoveryReasonMessage}

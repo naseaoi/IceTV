@@ -25,6 +25,7 @@ import AlertModal from '@/features/admin/components/AlertModal';
 import { SortableSourceRow } from '@/features/admin/components/tabs/video-source/SortableSourceRow';
 import { SourceValidationModal } from '@/features/admin/components/tabs/video-source/SourceValidationModal';
 import { VideoSourceAddForm } from '@/features/admin/components/tabs/video-source/VideoSourceAddForm';
+import { VideoSourceEditForm } from '@/features/admin/components/tabs/video-source/VideoSourceEditForm';
 import { useAdminSourceActions } from '@/features/admin/hooks/useAdminSourceActions';
 import { useAlertModal } from '@/features/admin/hooks/useAlertModal';
 import { useLoadingState } from '@/features/admin/hooks/useLoadingState';
@@ -52,6 +53,8 @@ const VideoSourceConfig = ({
   });
   const [sources, setSources] = useState<DataSource[]>([]);
   const [showAddForm, setShowAddForm] = useState(false);
+  const [editingSource, setEditingSource] = useState<DataSource | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<DataSource | null>(null);
   const [orderChanged, setOrderChanged] = useState(false);
   const [newSource, setNewSource] = useState<DataSource>({
     name: '',
@@ -73,6 +76,9 @@ const VideoSourceConfig = ({
   const [showValidationModal, setShowValidationModal, openValidationModal] =
     useModalState(false);
   const [searchKeyword, setSearchKeyword] = useState('');
+  const [pendingValidationSourceKey, setPendingValidationSourceKey] = useState<
+    string | null
+  >(null);
 
   const sensors = useSensors(
     useSensor(PointerSensor, {
@@ -147,8 +153,17 @@ const VideoSourceConfig = ({
   };
 
   const handleDelete = (key: string) => {
-    withLoading(`deleteSource_${key}`, () =>
-      callSourceApi({ action: 'delete', key }),
+    const target = sources.find((source) => source.key === key);
+    if (!target) return;
+    setDeleteTarget(target);
+  };
+
+  const handleConfirmDelete = () => {
+    const target = deleteTarget;
+    if (!target) return;
+    setDeleteTarget(null);
+    withLoading(`deleteSource_${target.key}`, () =>
+      callSourceApi({ action: 'delete', key: target.key }),
     ).catch(() => void 0);
   };
 
@@ -171,6 +186,20 @@ const VideoSourceConfig = ({
         from: 'custom',
       });
       setShowAddForm(false);
+    }).catch(() => void 0);
+  };
+
+  const handleEditSource = () => {
+    if (!editingSource || !editingSource.name || !editingSource.api) return;
+    withLoading('editSource', async () => {
+      await callSourceApi({
+        action: 'edit',
+        key: editingSource.key,
+        name: editingSource.name,
+        api: editingSource.api,
+        detail: editingSource.detail || '',
+      });
+      setEditingSource(null);
     }).catch(() => void 0);
   };
 
@@ -197,11 +226,35 @@ const VideoSourceConfig = ({
   const { isValidating, startValidation, getValidationStatus } =
     useSourceValidation({ sources, showAlert });
 
+  const handleOpenValidationModal = () => {
+    setPendingValidationSourceKey(null);
+    openValidationModal();
+  };
+
+  const handleCloseValidationModal = () => {
+    setShowValidationModal(false);
+    setPendingValidationSourceKey(null);
+  };
+
   const handleStartValidation = async () => {
     setShowValidationModal(false);
+    const sourceKey = pendingValidationSourceKey || undefined;
+    setPendingValidationSourceKey(null);
     await withLoading('validateSources', async () => {
-      await startValidation(searchKeyword);
+      await startValidation(searchKeyword, sourceKey);
     });
+  };
+
+  const handleValidateSource = (key: string) => {
+    if (!searchKeyword.trim()) {
+      setPendingValidationSourceKey(key);
+      openValidationModal();
+      return;
+    }
+
+    withLoading('validateSources', async () => {
+      await startValidation(searchKeyword, key);
+    }).catch(() => void 0);
   };
 
   const handleSelectAll = useCallback(
@@ -312,7 +365,7 @@ const VideoSourceConfig = ({
           </div>
           <div className='order-1 flex items-center gap-2 sm:order-2'>
             <button
-              onClick={openValidationModal}
+              onClick={handleOpenValidationModal}
               disabled={isValidating}
               className={`flex items-center space-x-1 rounded-lg px-3 py-1 text-sm transition-colors ${
                 isValidating ? buttonStyles.disabled : buttonStyles.primary
@@ -328,28 +381,38 @@ const VideoSourceConfig = ({
               )}
             </button>
             <button
-              onClick={() => setShowAddForm(!showAddForm)}
-              className={
-                showAddForm ? buttonStyles.secondary : buttonStyles.success
-              }
+              onClick={() => {
+                setShowAddForm(true);
+                setEditingSource(null);
+              }}
+              className={buttonStyles.success}
             >
-              {showAddForm ? '取消' : '添加视频源'}
+              添加视频源
             </button>
           </div>
         </div>
       </div>
 
-      {showAddForm && (
-        <VideoSourceAddForm
-          newSource={newSource}
-          onChange={setNewSource}
-          onSubmit={handleAddSource}
-          isSubmitting={isLoading('addSource')}
-        />
-      )}
+      <VideoSourceAddForm
+        newSource={newSource}
+        isOpen={showAddForm}
+        onChange={setNewSource}
+        onSubmit={handleAddSource}
+        onCancel={() => setShowAddForm(false)}
+        isSubmitting={isLoading('addSource')}
+      />
+
+      <VideoSourceEditForm
+        editingSource={editingSource}
+        isOpen={!!editingSource}
+        onChange={setEditingSource}
+        onSubmit={handleEditSource}
+        onCancel={() => setEditingSource(null)}
+        isSubmitting={isLoading('editSource')}
+      />
 
       <div
-        className='relative max-h-[28rem] overflow-x-auto overflow-y-auto rounded-lg border border-gray-200 dark:border-gray-700'
+        className='relative overflow-x-auto rounded-lg border border-gray-200 dark:border-gray-700'
         data-table='source-list'
       >
         <DndContext
@@ -411,9 +474,15 @@ const VideoSourceConfig = ({
                     isProxyModeLoading={isLoading(`proxyMode_${source.key}`)}
                     isToggleLoading={isLoading(`toggleSource_${source.key}`)}
                     isDeleteLoading={isLoading(`deleteSource_${source.key}`)}
+                    isValidationLoading={isValidating}
                     onSelectSource={handleSelectSource}
                     onToggleProxyMode={handleToggleProxyMode}
                     onToggleEnable={handleToggleEnable}
+                    onValidate={handleValidateSource}
+                    onEdit={(source) => {
+                      setEditingSource(source);
+                      setShowAddForm(false);
+                    }}
                     onDelete={handleDelete}
                   />
                 ))}
@@ -443,7 +512,7 @@ const VideoSourceConfig = ({
         isOpen={showValidationModal}
         searchKeyword={searchKeyword}
         onSearchKeywordChange={setSearchKeyword}
-        onClose={() => setShowValidationModal(false)}
+        onClose={handleCloseValidationModal}
         onStart={handleStartValidation}
       />
 
@@ -474,6 +543,20 @@ const VideoSourceConfig = ({
           {confirmModal.message}
         </p>
       </ConfirmModal>
+
+      <ConfirmModal
+        isOpen={!!deleteTarget}
+        title='确认删除视频源'
+        message={
+          deleteTarget
+            ? `确定要删除视频源「${deleteTarget.name}」吗？`
+            : undefined
+        }
+        onClose={() => setDeleteTarget(null)}
+        onConfirm={handleConfirmDelete}
+        confirmText='删除'
+        danger
+      />
     </div>
   );
 };

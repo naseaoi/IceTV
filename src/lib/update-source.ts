@@ -1,8 +1,9 @@
 import { getRuntimeConfig } from '@/lib/runtime-config';
+import { CURRENT_UPDATE_BRANCH } from '@/lib/version';
 
 const DEFAULT_UPDATE_REPOS = ['naseaoi/IceTV'];
 
-const DEFAULT_UPDATE_BRANCH = 'main';
+const DEFAULT_UPDATE_BRANCH = CURRENT_UPDATE_BRANCH;
 
 function normalizeRepos(input: unknown): string[] {
   const values = Array.isArray(input)

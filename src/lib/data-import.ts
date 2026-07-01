@@ -136,6 +136,16 @@ function normalizeAdminConfig(value: unknown): AdminConfig {
     MAX_LONG_STRING_LENGTH,
   );
   limitString(
+    config.SiteConfig.BangumiDataSource,
+    'Bangumi数据代理类型',
+    MAX_SHORT_STRING_LENGTH,
+  );
+  limitString(
+    config.SiteConfig.BangumiProxy,
+    'Bangumi代理',
+    MAX_LONG_STRING_LENGTH,
+  );
+  limitString(
     config.SiteConfig.DoubanImageProxyType,
     '豆瓣图片代理类型',
     MAX_SHORT_STRING_LENGTH,

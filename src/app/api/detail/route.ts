@@ -6,6 +6,7 @@ import { getDetailFromApi } from '@/lib/downstream';
 import { createSwrCache } from '@/lib/server-cache';
 
 export const runtime = 'nodejs';
+const IS_DEVELOPMENT = process.env.NODE_ENV !== 'production';
 
 // 进程内 SWR 缓存：detail 回源多为外部采集站，易出现 N 个用户同一 id 并发穿透。
 // 新鲜 10 分钟、软过期再 20 分钟内返回旧值并后台刷新。
@@ -42,15 +43,23 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: '无效的API来源' }, { status: 400 });
     }
 
-    const result = await detailCache.getOrLoad(`${sourceCode}::${id}`, () =>
-      getDetailFromApi(apiSite, id),
-    );
+    const result = IS_DEVELOPMENT
+      ? await getDetailFromApi(apiSite, id)
+      : await detailCache.getOrLoad(`${sourceCode}::${id}`, () =>
+          getDetailFromApi(apiSite, id),
+        );
 
     return NextResponse.json(result, {
       headers: {
-        'Cache-Control': `public, max-age=${cacheTime}, s-maxage=${cacheTime}`,
-        'CDN-Cache-Control': `public, s-maxage=${cacheTime}`,
-        'Vercel-CDN-Cache-Control': `public, s-maxage=${cacheTime}`,
+        'Cache-Control': IS_DEVELOPMENT
+          ? 'no-store'
+          : `public, max-age=${cacheTime}, s-maxage=${cacheTime}`,
+        'CDN-Cache-Control': IS_DEVELOPMENT
+          ? 'no-store'
+          : `public, s-maxage=${cacheTime}`,
+        'Vercel-CDN-Cache-Control': IS_DEVELOPMENT
+          ? 'no-store'
+          : `public, s-maxage=${cacheTime}`,
         'Netlify-Vary': 'query',
       },
     });

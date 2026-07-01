@@ -38,7 +38,6 @@ import { ThemeToggle } from './ThemeToggle';
 import { UserMenu } from './UserMenu';
 
 import { getAuthInfoFromBrowserCookie } from '@/lib/auth';
-import { useSmartHomeNav } from '@/hooks/useSmartHomeNav';
 import { RuntimeConfig } from '@/lib/runtime-config';
 
 interface SidebarContextType {
@@ -162,7 +161,6 @@ const Sidebar = ({ onToggle, activePath = '/' }: SidebarProps) => {
   const pathname = usePathname();
   const runtimeConfig = useRuntimeConfig();
   const { siteName } = useSite();
-  const goHome = useSmartHomeNav();
   // 若同一次 SPA 会话中已经读取过折叠状态，则直接复用，避免闪烁
   const [isCollapsed, setIsCollapsed] = useState<boolean>(
     getInitialSidebarCollapsed,
@@ -290,10 +288,6 @@ const Sidebar = ({ onToggle, activePath = '/' }: SidebarProps) => {
               <Link
                 href='/'
                 data-brand-link
-                onClick={(e) => {
-                  e.preventDefault();
-                  goHome();
-                }}
                 className={`flex min-h-[52px] w-full select-none items-center justify-start overflow-hidden rounded-xl py-2.5 transition-[padding,gap] duration-300 ease-[cubic-bezier(0.25,0.1,0.25,1)] hover:opacity-90 ${
                   isCollapsed ? 'gap-0 px-1' : 'gap-3.5 px-2'
                 }`}
@@ -320,11 +314,6 @@ const Sidebar = ({ onToggle, activePath = '/' }: SidebarProps) => {
             <nav className='mt-5 space-y-1.5 px-3'>
               <Link
                 href='/'
-                onClick={(e) => {
-                  e.preventDefault();
-                  setActive('/');
-                  goHome();
-                }}
                 data-active={active === '/'}
                 className={`${SIDEBAR_ITEM_LAYOUT_CLASS} font-medium ${SIDEBAR_LINK_STATE_CLASS} ${
                   isCollapsed ? 'mx-0 w-full max-w-none' : 'mx-0'
@@ -347,9 +336,7 @@ const Sidebar = ({ onToggle, activePath = '/' }: SidebarProps) => {
                   if (!authInfo?.username) {
                     e.preventDefault();
                     router.push('/login?redirect=%2Fsearch');
-                    return;
                   }
-                  setActive('/search');
                 }}
                 onMouseEnter={() => prefetchRoute('/search')}
                 data-active={active === '/search'}
@@ -392,7 +379,6 @@ const Sidebar = ({ onToggle, activePath = '/' }: SidebarProps) => {
                       prefetch={
                         shouldPrefetchRoute(item.href) ? undefined : false
                       }
-                      onClick={() => setActive(item.href)}
                       onMouseEnter={() => prefetchRoute(item.href)}
                       data-active={isActive}
                       className={`${SIDEBAR_ITEM_LAYOUT_CLASS} ${SIDEBAR_LINK_STATE_CLASS} ${

@@ -3,23 +3,29 @@ import { Dispatch, MutableRefObject, SetStateAction, useEffect } from 'react';
 import { filterSourcesForPlayback } from '@/lib/source-match';
 import { mergeSourceBundle } from '@/lib/source-bundle';
 import { SearchResult } from '@/lib/types';
-import { getVideoResolutionFromM3u8 } from '@/lib/hls-utils';
 import { prefetchM3U8 } from '@/lib/player-runtime';
 import { getProxyModes, shouldUseServerProxy } from '@/lib/proxy-modes';
 
 import { calculateSourceScore } from '@/features/play/lib/playUtils';
+import { probeVodEpisodeUrl } from '@/features/play/lib/vodProbe';
+import { isVodM3u8Url } from '@/features/play/lib/vodProxyUrl';
 
 // ---------------------------------------------------------------------------
 // 客户端 detail 内存缓存 — 短时间退出重进时避免重复请求
 // ---------------------------------------------------------------------------
 
 const DETAIL_CACHE_TTL_MS = 3 * 60 * 1000;
+const IS_DEVELOPMENT = process.env.NODE_ENV !== 'production';
 const detailCache = new Map<
   string,
   { data: SearchResult; expiresAt: number }
 >();
 
 function getCachedDetail(source: string, id: string): SearchResult | null {
+  if (IS_DEVELOPMENT) {
+    return null;
+  }
+
   const key = `${source}::${id}`;
   const entry = detailCache.get(key);
   if (!entry) return null;
@@ -31,6 +37,10 @@ function getCachedDetail(source: string, id: string): SearchResult | null {
 }
 
 function setCachedDetail(source: string, id: string, data: SearchResult) {
+  if (IS_DEVELOPMENT) {
+    return;
+  }
+
   const key = `${source}::${id}`;
   detailCache.set(key, { data, expiresAt: Date.now() + DETAIL_CACHE_TTL_MS });
   // 防止无限膨胀
@@ -175,7 +185,7 @@ async function preferBestSource(
       // 一旦首选起播失败自动降级时能省掉一次回源 RTT。
       // 忽略带签名 token 的 URL（proxy 缓存已跳过签名 URL，这里预取也没意义）
       const runnerUpEpisode = scored[1]?.source.episodes?.[0];
-      if (runnerUpEpisode) {
+      if (runnerUpEpisode && isVodM3u8Url(runnerUpEpisode)) {
         prefetchM3U8(
           `/api/proxy/m3u8?url=${encodeURIComponent(runnerUpEpisode)}`,
         );
@@ -193,7 +203,7 @@ async function preferBestSource(
         continue;
       }
       const useProxy = shouldUseServerProxy(source.source, proxyModes);
-      getVideoResolutionFromM3u8(source.episodes[0], useProxy, source.source)
+      probeVodEpisodeUrl(source.episodes[0], useProxy, source.source)
         .then((testResult) => {
           if (settled) return;
           collectedResults.push({ source, testResult });
@@ -353,7 +363,7 @@ export function usePlayInit({
         }
         const detailResponse = await fetch(
           `/api/detail?source=${source}&id=${id}`,
-          { signal },
+          IS_DEVELOPMENT ? { signal, cache: 'no-store' } : { signal },
         );
         if (!detailResponse.ok) {
           throw new Error('获取视频详情失败');

@@ -102,14 +102,7 @@ export async function DELETE(request: NextRequest) {
 
       await db.deletePlayRecord(username, parsed.source, parsed.id);
     } else {
-      // 未提供 key，则清空全部播放记录
-      const all = await db.getAllPlayRecords(username);
-      await Promise.all(
-        Object.keys(all).map(async (k) => {
-          const p = parseStorageKey(k);
-          if (p) await db.deletePlayRecord(username, p.source, p.id);
-        }),
-      );
+      await db.deleteAllPlayRecords(username);
     }
 
     return NextResponse.json({ success: true }, { status: 200 });

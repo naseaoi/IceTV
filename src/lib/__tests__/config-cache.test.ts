@@ -14,6 +14,8 @@ const baseConfig: AdminConfig = {
     SiteInterfaceCacheTime: 300,
     DoubanProxyType: 'direct',
     DoubanProxy: '',
+    BangumiDataSource: 'server',
+    BangumiProxy: '',
     DoubanImageProxyType: 'direct',
     DoubanImageProxy: '',
     DisableYellowFilter: false,
@@ -74,5 +76,53 @@ describe('config cache persistence', () => {
 
     const after = await getConfig();
     expect(after.SiteConfig.SiteName).toBe('IceTV');
+  });
+
+  it('defaults missing fluid search config to enabled', async () => {
+    const { configSelfCheck } = await loadConfigModule(jest.fn());
+    const config = cloneBaseConfig();
+    delete (config.SiteConfig as Partial<typeof config.SiteConfig>).FluidSearch;
+
+    expect(configSelfCheck(config).SiteConfig.FluidSearch).toBe(true);
+  });
+
+  it('keeps disabled fluid search config disabled', async () => {
+    const { configSelfCheck } = await loadConfigModule(jest.fn());
+    const config = cloneBaseConfig();
+    config.SiteConfig.FluidSearch = false;
+
+    expect(configSelfCheck(config).SiteConfig.FluidSearch).toBe(false);
+  });
+
+  it('drops invalid live source entries during config self check', async () => {
+    const { configSelfCheck } = await loadConfigModule(jest.fn());
+    const config = cloneBaseConfig();
+    config.LiveConfig = [
+      {
+        key: ' valid ',
+        name: ' Live ',
+        url: ' https://example.com/live.m3u ',
+        ua: ' ',
+        epg: null,
+        from: 'custom',
+      },
+      {
+        key: null,
+        name: 'Broken',
+        url: 'https://example.com/broken.m3u',
+        from: 'custom',
+      },
+    ] as unknown as AdminConfig['LiveConfig'];
+
+    expect(configSelfCheck(config).LiveConfig).toEqual([
+      {
+        key: 'valid',
+        name: 'Live',
+        url: 'https://example.com/live.m3u',
+        ua: undefined,
+        epg: undefined,
+        from: 'custom',
+      },
+    ]);
   });
 });

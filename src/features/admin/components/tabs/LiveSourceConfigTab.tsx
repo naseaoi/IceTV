@@ -20,6 +20,7 @@ import {
 } from '@dnd-kit/sortable';
 import { useEffect, useState } from 'react';
 
+import ConfirmModal from '@/components/modals/ConfirmModal';
 import AlertModal from '@/features/admin/components/AlertModal';
 import { LiveSourceAddForm } from '@/features/admin/components/tabs/live-source/LiveSourceAddForm';
 import { LiveSourceEditForm } from '@/features/admin/components/tabs/live-source/LiveSourceEditForm';
@@ -51,6 +52,7 @@ const LiveSourceConfig = ({
   const [showAddForm, setShowAddForm] = useState(false);
   const [editingLiveSource, setEditingLiveSource] =
     useState<LiveDataSource | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<LiveDataSource | null>(null);
   const [orderChanged, setOrderChanged] = useState(false);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [newLiveSource, setNewLiveSource] = useState<LiveDataSource>({
@@ -103,8 +105,17 @@ const LiveSourceConfig = ({
   };
 
   const handleDelete = (key: string) => {
-    withLoading(`deleteLiveSource_${key}`, () =>
-      callLiveSourceApi({ action: 'delete', key }),
+    const target = liveSources.find((source) => source.key === key);
+    if (!target) return;
+    setDeleteTarget(target);
+  };
+
+  const handleConfirmDelete = () => {
+    const target = deleteTarget;
+    if (!target) return;
+    setDeleteTarget(null);
+    withLoading(`deleteLiveSource_${target.key}`, () =>
+      callLiveSourceApi({ action: 'delete', key: target.key }),
     ).catch(() => void 0);
   };
 
@@ -226,37 +237,37 @@ const LiveSourceConfig = ({
             </span>
           </button>
           <button
-            onClick={() => setShowAddForm(!showAddForm)}
-            className={
-              showAddForm ? buttonStyles.secondary : buttonStyles.success
-            }
+            onClick={() => {
+              setShowAddForm(true);
+              setEditingLiveSource(null);
+            }}
+            className={buttonStyles.success}
           >
-            {showAddForm ? '取消' : '添加直播源'}
+            添加直播源
           </button>
         </div>
       </div>
 
-      {showAddForm && (
-        <LiveSourceAddForm
-          newLiveSource={newLiveSource}
-          onChange={setNewLiveSource}
-          onSubmit={handleAddLiveSource}
-          isSubmitting={isLoading('addLiveSource')}
-        />
-      )}
+      <LiveSourceAddForm
+        newLiveSource={newLiveSource}
+        isOpen={showAddForm}
+        onChange={setNewLiveSource}
+        onSubmit={handleAddLiveSource}
+        onCancel={() => setShowAddForm(false)}
+        isSubmitting={isLoading('addLiveSource')}
+      />
 
-      {editingLiveSource && (
-        <LiveSourceEditForm
-          editingLiveSource={editingLiveSource}
-          onChange={setEditingLiveSource}
-          onSubmit={handleEditLiveSource}
-          onCancel={handleCancelEdit}
-          isSubmitting={isLoading('editLiveSource')}
-        />
-      )}
+      <LiveSourceEditForm
+        editingLiveSource={editingLiveSource}
+        isOpen={!!editingLiveSource}
+        onChange={setEditingLiveSource}
+        onSubmit={handleEditLiveSource}
+        onCancel={handleCancelEdit}
+        isSubmitting={isLoading('editLiveSource')}
+      />
 
       <div
-        className='relative max-h-[28rem] overflow-x-auto overflow-y-auto rounded-lg border border-gray-200 dark:border-gray-700'
+        className='relative overflow-x-auto rounded-lg border border-gray-200 dark:border-gray-700'
         data-table='live-source-list'
       >
         <DndContext
@@ -308,9 +319,7 @@ const LiveSourceConfig = ({
                     isToggleLoading={isLoading(
                       `toggleLiveSource_${liveSource.key}`,
                     )}
-                    isEditLoading={isLoading(
-                      `editLiveSource_${liveSource.key}`,
-                    )}
+                    isEditLoading={isLoading('editLiveSource')}
                     isDeleteLoading={isLoading(
                       `deleteLiveSource_${liveSource.key}`,
                     )}
@@ -349,6 +358,20 @@ const LiveSourceConfig = ({
         message={alertModal.message}
         timer={alertModal.timer}
         showConfirm={alertModal.showConfirm}
+      />
+
+      <ConfirmModal
+        isOpen={!!deleteTarget}
+        title='确认删除直播源'
+        message={
+          deleteTarget
+            ? `确定要删除直播源「${deleteTarget.name}」吗？`
+            : undefined
+        }
+        onClose={() => setDeleteTarget(null)}
+        onConfirm={handleConfirmDelete}
+        confirmText='删除'
+        danger
       />
     </div>
   );

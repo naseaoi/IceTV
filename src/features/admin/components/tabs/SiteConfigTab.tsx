@@ -13,6 +13,11 @@ import { showError, showSuccess } from '@/features/admin/lib/notifications';
 import { AdminConfig } from '@/features/admin/types/api';
 import { SiteConfig } from '@/features/admin/types/internal';
 import {
+  DEFAULT_BANGUMI_DATA_SOURCE,
+  bangumiDataSourceOptions,
+  normalizeBangumiDataSource,
+} from '@/lib/bangumi-source';
+import {
   doubanDataSourceOptions,
   doubanImageProxyTypeOptions,
   getThanksInfo,
@@ -36,6 +41,8 @@ const SiteConfigComponent = ({
     SiteInterfaceCacheTime: 7200,
     DoubanProxyType: 'direct',
     DoubanProxy: '',
+    BangumiDataSource: DEFAULT_BANGUMI_DATA_SOURCE,
+    BangumiProxy: '',
     DoubanImageProxyType: 'cmliussss-cdn-tencent',
     DoubanImageProxy: '',
     DisableYellowFilter: false,
@@ -53,12 +60,16 @@ const SiteConfigComponent = ({
         ...config.SiteConfig,
         DoubanProxyType: config.SiteConfig.DoubanProxyType || 'direct',
         DoubanProxy: config.SiteConfig.DoubanProxy || '',
+        BangumiDataSource: normalizeBangumiDataSource(
+          config.SiteConfig.BangumiDataSource,
+        ),
+        BangumiProxy: config.SiteConfig.BangumiProxy || '',
         DoubanImageProxyType:
           config.SiteConfig.DoubanImageProxyType || 'cmliussss-cdn-tencent',
         DoubanImageProxy: config.SiteConfig.DoubanImageProxy || '',
-        EnableLiveEntry: config.SiteConfig.EnableLiveEntry || false,
-        DisableYellowFilter: config.SiteConfig.DisableYellowFilter || false,
-        FluidSearch: config.SiteConfig.FluidSearch || true,
+        EnableLiveEntry: config.SiteConfig.EnableLiveEntry ?? false,
+        DisableYellowFilter: config.SiteConfig.DisableYellowFilter ?? false,
+        FluidSearch: config.SiteConfig.FluidSearch ?? true,
       });
       // 初始化图标预览
       const icon = config.SiteConfig.SiteIcon;
@@ -73,6 +84,13 @@ const SiteConfigComponent = ({
     setSiteSettings((prev) => ({
       ...prev,
       DoubanProxyType: value,
+    }));
+  };
+
+  const handleBangumiDataSourceChange = (value: string) => {
+    setSiteSettings((prev) => ({
+      ...prev,
+      BangumiDataSource: normalizeBangumiDataSource(value),
     }));
   };
 
@@ -162,10 +180,11 @@ const SiteConfigComponent = ({
                   type='button'
                   disabled={iconUploading}
                   onClick={() => iconFileRef.current?.click()}
-                  className='flex flex-shrink-0 items-center gap-1.5 rounded-lg border border-gray-300 bg-white px-3 py-2 text-xs font-medium text-gray-700 transition-colors hover:bg-gray-50 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-300 dark:hover:bg-gray-700'
+                  aria-label={iconUploading ? '上传中' : '上传图标'}
+                  title={iconUploading ? '上传中...' : '上传图标'}
+                  className='flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-lg border border-gray-300 bg-white text-gray-700 transition-colors hover:bg-gray-50 disabled:opacity-60 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-300 dark:hover:bg-gray-700'
                 >
-                  <Upload className='h-3.5 w-3.5' />
-                  {iconUploading ? '上传中...' : '上传'}
+                  <Upload className='h-5 w-5' />
                 </button>
                 {siteSettings.SiteIcon && (
                   <button
@@ -254,27 +273,21 @@ const SiteConfigComponent = ({
               }))
             }
             rows={1}
-            className='w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-gray-900 focus:border-transparent focus:ring-2 focus:ring-green-500 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100'
+            className='w-full resize-y rounded-lg border border-gray-300 bg-white px-3 py-2 text-gray-900 focus:border-transparent focus:ring-2 focus:ring-green-500 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100'
           />
+          <p className='mt-1.5 text-xs text-gray-400 dark:text-gray-500'>
+            修改后将会重新推送给用户
+          </p>
         </div>
 
         {/* 豆瓣数据源设置 */}
         <div className='space-y-3'>
           <div>
-            <label className='mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300'>
-              豆瓣数据代理
-            </label>
-            <AdminSelect
-              value={siteSettings.DoubanProxyType}
-              onChange={(value) => handleDoubanDataSourceChange(value)}
-              options={doubanDataSourceOptions}
-            />
-            <p className='mt-1 text-xs text-gray-500 dark:text-gray-400'>
-              选择获取豆瓣数据的方式
-            </p>
-
-            {getThanksInfo(siteSettings.DoubanProxyType) && (
-              <div className='mt-3'>
+            <div className='mb-2 flex items-baseline justify-between gap-2'>
+              <label className='block text-sm font-medium text-gray-700 dark:text-gray-300'>
+                豆瓣数据代理
+              </label>
+              {getThanksInfo(siteSettings.DoubanProxyType) && (
                 <button
                   type='button'
                   onClick={() =>
@@ -283,15 +296,23 @@ const SiteConfigComponent = ({
                       '_blank',
                     )
                   }
-                  className='flex w-full cursor-pointer items-center justify-center gap-1.5 px-3 text-xs text-gray-500 dark:text-gray-400'
+                  className='flex shrink-0 cursor-pointer items-center gap-1 text-[11px] leading-none text-gray-400 hover:text-gray-600 dark:text-gray-500 dark:hover:text-gray-300'
                 >
                   <span className='font-medium'>
                     {getThanksInfo(siteSettings.DoubanProxyType)!.text}
                   </span>
-                  <ExternalLink className='w-3.5 opacity-70' />
+                  <ExternalLink className='h-3 w-3 opacity-70' />
                 </button>
-              </div>
-            )}
+              )}
+            </div>
+            <AdminSelect
+              value={siteSettings.DoubanProxyType}
+              onChange={(value) => handleDoubanDataSourceChange(value)}
+              options={doubanDataSourceOptions}
+            />
+            <p className='mt-1 text-xs text-gray-500 dark:text-gray-400'>
+              选择获取豆瓣数据的方式
+            </p>
           </div>
 
           {siteSettings.DoubanProxyType === 'custom' && (
@@ -318,23 +339,53 @@ const SiteConfigComponent = ({
           )}
         </div>
 
-        {/* 豆瓣图片代理设置 */}
         <div className='space-y-3'>
           <div>
             <label className='mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300'>
-              豆瓣图片代理
+              Bangumi 数据代理
             </label>
             <AdminSelect
-              value={siteSettings.DoubanImageProxyType}
-              onChange={(value) => handleDoubanImageProxyChange(value)}
-              options={doubanImageProxyTypeOptions}
+              value={siteSettings.BangumiDataSource}
+              onChange={(value) => handleBangumiDataSourceChange(value)}
+              options={bangumiDataSourceOptions}
             />
             <p className='mt-1 text-xs text-gray-500 dark:text-gray-400'>
-              选择获取豆瓣图片的方式
+              选择获取新番放送数据的方式
             </p>
+          </div>
 
-            {getThanksInfo(siteSettings.DoubanImageProxyType) && (
-              <div className='mt-3'>
+          {siteSettings.BangumiDataSource === 'custom' && (
+            <div>
+              <label className='mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300'>
+                Bangumi 代理地址
+              </label>
+              <input
+                type='text'
+                placeholder='例如: https://proxy.example.com/fetch?url='
+                value={siteSettings.BangumiProxy}
+                onChange={(e) =>
+                  setSiteSettings((prev) => ({
+                    ...prev,
+                    BangumiProxy: e.target.value,
+                  }))
+                }
+                className='w-full rounded-lg border border-gray-300 bg-white px-3 py-2.5 text-sm text-gray-900 placeholder-gray-500 shadow-sm transition-all duration-200 hover:border-gray-400 focus:border-green-500 focus:outline-none focus:ring-2 focus:ring-green-500 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100 dark:placeholder-gray-400 dark:hover:border-gray-500'
+              />
+              <p className='mt-1 text-xs text-gray-500 dark:text-gray-400'>
+                自定义代理服务器地址
+              </p>
+            </div>
+          )}
+        </div>
+
+        {/* 豆瓣图片代理设置 */}
+        <div className='space-y-3'>
+          <div>
+            <div className='mb-2 flex items-baseline justify-between gap-2'>
+              <label className='block text-sm font-medium text-gray-700 dark:text-gray-300'>
+                豆瓣图片代理
+              </label>
+              {getThanksInfo(siteSettings.DoubanImageProxyType) && (
                 <button
                   type='button'
                   onClick={() =>
@@ -343,15 +394,23 @@ const SiteConfigComponent = ({
                       '_blank',
                     )
                   }
-                  className='flex w-full cursor-pointer items-center justify-center gap-1.5 px-3 text-xs text-gray-500 dark:text-gray-400'
+                  className='flex shrink-0 cursor-pointer items-center gap-1 text-[11px] leading-none text-gray-400 hover:text-gray-600 dark:text-gray-500 dark:hover:text-gray-300'
                 >
                   <span className='font-medium'>
                     {getThanksInfo(siteSettings.DoubanImageProxyType)!.text}
                   </span>
-                  <ExternalLink className='w-3.5 opacity-70' />
+                  <ExternalLink className='h-3 w-3 opacity-70' />
                 </button>
-              </div>
-            )}
+              )}
+            </div>
+            <AdminSelect
+              value={siteSettings.DoubanImageProxyType}
+              onChange={(value) => handleDoubanImageProxyChange(value)}
+              options={doubanImageProxyTypeOptions}
+            />
+            <p className='mt-1 text-xs text-gray-500 dark:text-gray-400'>
+              选择获取豆瓣图片的方式
+            </p>
           </div>
 
           {siteSettings.DoubanImageProxyType === 'custom' && (

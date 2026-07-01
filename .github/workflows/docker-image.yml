@@ -26,6 +26,7 @@ jobs:
     outputs:
       image: ghcr.io/${{ steps.image.outputs.owner }}/${{ steps.image.outputs.repo }}
       tags: ${{ steps.tags.outputs.tags }}
+      app_version: ${{ steps.tags.outputs.app_version }}
 
     steps:
       - name: Checkout source code
@@ -36,12 +37,41 @@ jobs:
         with:
           node-version: 20
 
+      - name: Resolve tag kind
+        id: tag_kind
+        env:
+          REF_NAME: ${{ github.ref_name }}
+          EVENT_NAME: ${{ github.event_name }}
+        run: |
+          if [ "$EVENT_NAME" = "workflow_dispatch" ]; then
+            echo "kind=manual" >> "$GITHUB_OUTPUT"
+            echo "version=" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          if [[ "$REF_NAME" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "kind=stable" >> "$GITHUB_OUTPUT"
+            echo "version=${REF_NAME#v}" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          if [[ "$REF_NAME" =~ ^v[0-9]+\.[0-9]+\.[0-9]+-dev\.[0-9]+$ ]]; then
+            echo "kind=dev" >> "$GITHUB_OUTPUT"
+            echo "version=${REF_NAME#v}" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          echo "不支持的 Docker 构建 tag: $REF_NAME"
+          echo "正式版本使用 vX.Y.Z，dev 预发布使用 vX.Y.Z-dev.N。"
+          exit 1
+
       - name: Prepare release metadata
+        if: steps.tag_kind.outputs.kind != 'dev'
         id: release
         run: node scripts/prepare-release.js
 
       - name: Stop on tag mismatch
-        if: github.event_name == 'push' && github.ref_name != steps.release.outputs.tag
+        if: github.event_name == 'push' && steps.tag_kind.outputs.kind == 'stable' && github.ref_name != steps.release.outputs.tag
         run: |
           echo "当前推送 tag 为 ${{ github.ref_name }}，CHANGELOG 顶部版本为 ${{ steps.release.outputs.tag }}。"
           exit 1
@@ -58,11 +88,18 @@ jobs:
           IMAGE_NAME: ghcr.io/${{ steps.image.outputs.owner }}/${{ steps.image.outputs.repo }}
           MANUAL_TAG: ${{ github.event.inputs.tag }}
           VERSION_TAG: ${{ steps.release.outputs.version }}
+          TAG_KIND: ${{ steps.tag_kind.outputs.kind }}
+          TAG_VERSION: ${{ steps.tag_kind.outputs.version }}
         run: |
           if [ -n "$MANUAL_TAG" ]; then
             raw_tags="$MANUAL_TAG"
+            app_version="${VERSION_TAG:-${MANUAL_TAG#v}}"
+          elif [ "$TAG_KIND" = "dev" ]; then
+            raw_tags="$TAG_VERSION dev"
+            app_version="$TAG_VERSION"
           else
             raw_tags="$VERSION_TAG latest"
+            app_version="$VERSION_TAG"
           fi
 
           {
@@ -71,6 +108,7 @@ jobs:
               echo "$IMAGE_NAME:$tag"
             done
             echo "EOF"
+            echo "app_version=$app_version"
           } >> "$GITHUB_OUTPUT"
 
   build:
@@ -111,6 +149,8 @@ jobs:
         with:
           context: .
           file: ./Dockerfile
+          build-args: |
+            NEXT_PUBLIC_APP_VERSION=${{ needs.prepare.outputs.app_version }}
           platforms: ${{ matrix.platform }}
           outputs: type=image,name=${{ needs.prepare.outputs.image }},push-by-digest=true,name-canonical=true,push=true
 

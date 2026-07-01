@@ -1,46 +1,44 @@
 'use client';
 
-import { Bell, X } from 'lucide-react';
+import { Megaphone, X } from 'lucide-react';
 
 import ModalShell from '@/components/modals/ModalShell';
 
-interface InfoModalProps {
+interface AnnouncementModalProps {
   isOpen: boolean;
-  title: string;
   message: string;
   onClose: () => void;
   confirmText?: string;
 }
 
-export default function InfoModal({
+export default function AnnouncementModal({
   isOpen,
-  title,
   message,
   onClose,
   confirmText = '我知道了',
-}: InfoModalProps) {
+}: AnnouncementModalProps) {
   return (
     <ModalShell isOpen={isOpen} onClose={onClose} panelClassName='max-w-md'>
       <div className='p-6 sm:p-7'>
         <div className='mb-5 flex items-start justify-between'>
           <div className='flex items-center gap-3'>
             <span className='inline-flex h-10 w-10 items-center justify-center rounded-xl bg-emerald-50 text-emerald-600 dark:bg-emerald-500/10 dark:text-emerald-300'>
-              <Bell className='h-5 w-5' />
+              <Megaphone className='h-5 w-5' />
             </span>
             <h3 className='text-xl font-semibold text-gray-900 dark:text-gray-100'>
-              {title}
+              公告
             </h3>
           </div>
           <button
             onClick={onClose}
             className='rounded-lg p-1 text-gray-400 transition-colors hover:bg-gray-100/70 hover:text-gray-600 dark:hover:bg-white/[0.06] dark:hover:text-gray-200'
-            aria-label='关闭提示'
+            aria-label='关闭公告'
           >
             <X className='h-5 w-5' />
           </button>
         </div>
 
-        <div className='rounded-xl border border-emerald-200/70 bg-gradient-to-r from-emerald-50 to-teal-50 px-4 py-3 text-sm leading-7 text-gray-700 dark:border-emerald-500/30 dark:from-emerald-500/10 dark:to-teal-500/10 dark:text-gray-200'>
+        <div className='max-h-[40vh] overflow-y-auto whitespace-pre-line break-words rounded-xl border border-emerald-200/70 bg-gradient-to-r from-emerald-50 to-teal-50 px-4 py-3 text-sm leading-7 text-gray-700 dark:border-emerald-500/30 dark:from-emerald-500/10 dark:to-teal-500/10 dark:text-gray-200'>
           {message}
         </div>
 

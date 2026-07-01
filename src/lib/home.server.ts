@@ -1,9 +1,8 @@
-import { getBangumiCalendarData } from './bangumi';
+import { getCachedBangumiCalendarData } from './bangumi';
 import { fetchDoubanData } from './douban';
+import { HOME_RECOMMENDATION_REVALIDATE_SECONDS } from './home-cache';
 import { HomeInitialData } from './home.types';
 import { DoubanItem } from './types';
-
-const HOME_REVALIDATE_SECONDS = 21600;
 
 interface DoubanCategoryApiResponse {
   items: Array<{
@@ -30,7 +29,7 @@ async function getServerDoubanRecentHot(params: {
   const { kind, category, type, limit = 20, start = 0 } = params;
   const target = `https://m.douban.com/rexxar/api/v2/subject/recent_hot/${kind}?start=${start}&limit=${limit}&category=${category}&type=${type}`;
   const doubanData = await fetchDoubanData<DoubanCategoryApiResponse>(target, {
-    next: { revalidate: HOME_REVALIDATE_SECONDS },
+    next: { revalidate: HOME_RECOMMENDATION_REVALIDATE_SECONDS },
   });
 
   return doubanData.items.map((item) => ({
@@ -60,9 +59,7 @@ export async function getHomeInitialData(): Promise<HomeInitialData> {
         category: 'show',
         type: 'show',
       }).catch(() => []),
-      getBangumiCalendarData({
-        next: { revalidate: HOME_REVALIDATE_SECONDS },
-      }).catch(() => []),
+      getCachedBangumiCalendarData({ allowStale: true }) ?? [],
     ]);
 
   return {

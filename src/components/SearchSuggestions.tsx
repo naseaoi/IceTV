@@ -45,7 +45,7 @@ export default function SearchSuggestions({
         `/api/search/suggestions?q=${encodeURIComponent(searchQuery)}`,
         {
           signal: controller.signal,
-        }
+        },
       );
       if (response.ok) {
         const data = await response.json();
@@ -53,7 +53,7 @@ export default function SearchSuggestions({
           (item: { text: string }) => ({
             text: item.text,
             type: 'related' as const,
-          })
+          }),
         );
         setSuggestions(apiSuggestions);
       }
@@ -85,7 +85,7 @@ export default function SearchSuggestions({
         }
       }, 300); //300ms
     },
-    [isVisible, fetchSuggestionsFromAPI]
+    [isVisible, fetchSuggestionsFromAPI],
   );
 
   useEffect(() => {
@@ -148,15 +148,15 @@ export default function SearchSuggestions({
   return (
     <div
       ref={containerRef}
-      className='absolute top-full left-0 right-0 z-[600] mt-1 bg-white dark:bg-gray-800 rounded-lg shadow-lg border border-gray-200 dark:border-gray-700 max-h-80 overflow-y-auto'
+      className='absolute left-0 right-0 top-full z-[600] mt-1 max-h-80 overflow-y-auto rounded-lg border border-gray-200 bg-white shadow-lg dark:border-gray-700 dark:bg-gray-800'
     >
       {suggestions.map((suggestion) => (
         <button
           key={`related-${suggestion.text}`}
           onClick={() => onSelect(suggestion.text)}
-          className="w-full px-4 py-3 text-left hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors duration-150 flex items-center gap-3"
+          className='flex w-full items-center gap-3 px-4 py-3 text-left transition-colors duration-150 hover:bg-gray-50 dark:hover:bg-gray-700'
         >
-          <span className='flex-1 text-sm text-gray-700 dark:text-gray-300 truncate'>
+          <span className='flex-1 truncate text-sm text-gray-700 dark:text-gray-300'>
             {suggestion.text}
           </span>
         </button>

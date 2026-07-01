@@ -489,7 +489,7 @@ div[data-media-provider] video {
 }
 
 /* --- 锁定按钮（移动端） --- */
-.art-lock {
+.art-video-player .art-layer-lock {
   background: rgba(17, 24, 32, 0.7) !important;
   backdrop-filter: blur(12px) !important;
   -webkit-backdrop-filter: blur(12px) !important;
@@ -498,8 +498,19 @@ div[data-media-provider] video {
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2) !important;
 }
 
-.art-lock .art-icon svg {
+.art-video-player .art-layer-lock .art-icon svg {
   fill: #d1d5db !important;
+}
+
+.art-video-player:not(.art-fullscreen):not(.art-fullscreen-web)
+  .art-layer-lock {
+  display: none !important;
+}
+
+.art-video-player.art-fullscreen .art-layer-lock,
+.art-video-player.art-fullscreen-web .art-layer-lock {
+  left: auto !important;
+  right: var(--art-padding) !important;
 }
 
 /* --- 迷你进度条 --- */
@@ -572,35 +583,17 @@ div[data-media-provider] video {
    LoadingStatePanel 动画（改为全局样式，避免在 Server Component 中引入 styled-jsx）
    ========================================================================== */
 
-.ls-ripple {
-  animation: ls-ripple 2.4s ease-out infinite;
-  transform-origin: center;
-}
-
-.ls-ripple-delay {
-  animation-delay: 1.2s;
-}
-
-.ls-spinner-shell {
-  filter: drop-shadow(0 8px 26px rgba(0, 0, 0, 0.12));
-}
-
-.ls-spinner-ring-outer {
-  mask: radial-gradient(circle, transparent 58%, black 59%);
-  -webkit-mask: radial-gradient(circle, transparent 58%, black 59%);
-  animation: ls-rotate 2.6s linear infinite;
-}
-
-.ls-spinner-ring-inner {
-  animation: ls-rotate-reverse 3.3s linear infinite;
-}
-
-.ls-float {
-  animation: ls-float 2.8s ease-in-out infinite;
-}
-
-.ls-ping-soft {
-  animation: ls-ping-soft 1.8s ease-out infinite;
+.ls-glow-ring {
+  background: conic-gradient(
+    from 0deg,
+    transparent 0deg,
+    transparent 200deg,
+    currentColor 320deg,
+    transparent 360deg
+  );
+  mask: radial-gradient(circle, transparent 62%, black 64%);
+  -webkit-mask: radial-gradient(circle, transparent 62%, black 64%);
+  animation: ls-rotate 1.4s linear infinite;
 }
 
 .ls-shimmer {
@@ -635,55 +628,6 @@ div[data-media-provider] video {
   }
 }
 
-@keyframes ls-rotate-reverse {
-  0% {
-    transform: rotate(0deg);
-  }
-  100% {
-    transform: rotate(-360deg);
-  }
-}
-
-@keyframes ls-float {
-  0%,
-  100% {
-    transform: translateY(0px);
-  }
-  50% {
-    transform: translateY(-5px);
-  }
-}
-
-@keyframes ls-ripple {
-  0% {
-    transform: scale(0.92);
-    opacity: 0.45;
-  }
-  70% {
-    transform: scale(1.2);
-    opacity: 0;
-  }
-  100% {
-    transform: scale(1.2);
-    opacity: 0;
-  }
-}
-
-@keyframes ls-ping-soft {
-  0% {
-    transform: scale(0.9);
-    opacity: 0.65;
-  }
-  70% {
-    transform: scale(1.9);
-    opacity: 0;
-  }
-  100% {
-    transform: scale(1.9);
-    opacity: 0;
-  }
-}
-
 @keyframes ls-shimmer-sweep {
   0% {
     transform: translateX(-100%);
@@ -691,4 +635,34 @@ div[data-media-provider] video {
   100% {
     transform: translateX(100%);
   }
+}
+
+/* 卡片封面扫光动画 */
+@keyframes shimmer {
+  0% {
+    transform: translateX(-100%);
+  }
+  100% {
+    transform: translateX(100%);
+  }
+}
+
+.animate-shimmer {
+  animation: shimmer 1.5s ease-in-out infinite;
+}
+
+/* 搜索结果卡片渐显动画 */
+@keyframes fade-in {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.animate-fade-in {
+  animation: fade-in 0.4s ease-out forwards;
 }

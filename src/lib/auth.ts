@@ -29,8 +29,12 @@ export function getAuthInfoFromCookie(
     return null;
   }
 
+  return parseAuthCookieValue(authCookie.value);
+}
+
+export function parseAuthCookieValue(value: string): AuthCookiePayload | null {
   try {
-    const decoded = decodeURIComponent(authCookie.value);
+    const decoded = decodeURIComponent(value);
     const authData = JSON.parse(decoded);
     return authData;
   } catch (error) {

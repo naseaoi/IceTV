@@ -1,8 +1,15 @@
 'use client';
 
-import { useCallback, useEffect, useRef, useState } from 'react';
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+} from 'react';
 
 import { GetBangumiCalendarData } from '@/lib/bangumi.client';
+import { selectBangumiCardCover } from '@/lib/bangumi-normalize';
 import {
   getDoubanCategories,
   getDoubanList,
@@ -33,6 +40,19 @@ const DEFAULT_MULTI_LEVEL: Record<string, string> = {
   label: 'all',
   sort: 'T',
 };
+const FEED_VIEW_CACHE_MS = 60 * 60 * 1000;
+const FEED_LOAD_DEBOUNCE_MS = 50;
+
+const feedViewCache = new Map<
+  string,
+  {
+    data: DoubanItem[];
+    hasMore: boolean;
+    currentPage: number;
+    expiresAt: number;
+  }
+>();
+const lastFeedSnapshotByType = new Map<string, FeedSnapshot>();
 
 function computeInitialPrimary(type: string): string {
   if (type === 'movie') return '热门';
@@ -48,16 +68,133 @@ function computeInitialSecondary(type: string): string {
   return '全部';
 }
 
+export function getCurrentWeekday(): string {
+  const weekdays = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+  return weekdays[new Date().getDay()];
+}
+
 function isSnapshotEqual(a: FeedSnapshot, b: FeedSnapshot): boolean {
+  return isFeedSelectionEqual(a, b) && a.currentPage === b.currentPage;
+}
+
+function isFeedSelectionEqual(a: FeedSnapshot, b: FeedSnapshot): boolean {
   return (
     a.type === b.type &&
     a.primarySelection === b.primarySelection &&
     a.secondarySelection === b.secondarySelection &&
     a.selectedWeekday === b.selectedWeekday &&
-    a.currentPage === b.currentPage &&
     JSON.stringify(a.multiLevelSelection) ===
       JSON.stringify(b.multiLevelSelection)
   );
+}
+
+function getFeedViewCacheKey(snapshot: FeedSnapshot): string {
+  const selectedWeekday =
+    snapshot.type === 'anime' && snapshot.primarySelection === '每日放送'
+      ? snapshot.selectedWeekday
+      : '';
+
+  return JSON.stringify([
+    snapshot.type,
+    snapshot.primarySelection,
+    snapshot.secondarySelection,
+    selectedWeekday,
+    normalizeMultiLevelSelection(snapshot.multiLevelSelection),
+  ]);
+}
+
+function normalizeMultiLevelSelection(values: Record<string, string>) {
+  return Object.keys(values)
+    .sort()
+    .map((key) => [key, values[key]]);
+}
+
+function readFeedViewCache(snapshot: FeedSnapshot) {
+  const key = getFeedViewCacheKey(snapshot);
+  const cached = feedViewCache.get(key);
+
+  if (!cached) {
+    return null;
+  }
+
+  if (cached.expiresAt <= Date.now()) {
+    feedViewCache.delete(key);
+    return null;
+  }
+
+  return cached;
+}
+
+function writeFeedViewCache(
+  snapshot: FeedSnapshot,
+  data: DoubanItem[],
+  hasMore: boolean,
+) {
+  const currentPage = Math.max(0, snapshot.currentPage);
+  feedViewCache.set(getFeedViewCacheKey(snapshot), {
+    data,
+    hasMore,
+    currentPage,
+    expiresAt: Date.now() + FEED_VIEW_CACHE_MS,
+  });
+  lastFeedSnapshotByType.set(snapshot.type, {
+    ...snapshot,
+    currentPage,
+  });
+
+  if (feedViewCache.size > 20) {
+    const firstKey = feedViewCache.keys().next().value;
+    if (firstKey) {
+      feedViewCache.delete(firstKey);
+    }
+  }
+}
+
+function readLastFeedSnapshot(type: string): FeedSnapshot | null {
+  const snapshot = lastFeedSnapshotByType.get(type);
+  if (!snapshot) {
+    return null;
+  }
+
+  const cached = readFeedViewCache(snapshot);
+  if (!cached) {
+    lastFeedSnapshotByType.delete(type);
+    return null;
+  }
+
+  return {
+    ...snapshot,
+    currentPage: cached.currentPage,
+  };
+}
+
+function getInitialHasMore(snapshot: FeedSnapshot, data: DoubanItem[]) {
+  if (snapshot.type === 'anime' && snapshot.primarySelection === '每日放送') {
+    return false;
+  }
+
+  return data.length !== 0;
+}
+
+export function primeDefaultDoubanFeedViewCache(
+  type: string,
+  data: DoubanItem[],
+  options: { selectedWeekday?: string } = {},
+) {
+  if (data.length === 0) {
+    return;
+  }
+
+  const snapshot: FeedSnapshot = {
+    type,
+    primarySelection: computeInitialPrimary(type),
+    secondarySelection: computeInitialSecondary(type),
+    multiLevelSelection: { ...DEFAULT_MULTI_LEVEL },
+    selectedWeekday: type === 'anime' ? options.selectedWeekday || '' : '',
+    currentPage: 0,
+  };
+
+  writeFeedViewCache(snapshot, data, getInitialHasMore(snapshot, data));
 }
 
 export function useDoubanFeed(type: string) {
@@ -68,6 +205,7 @@ export function useDoubanFeed(type: string) {
   const [isLoadingMore, setIsLoadingMore] = useState(false);
   const [selectorsReady, setSelectorsReady] = useState(false);
   const debounceTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const restoredCurrentPageRef = useRef<number | null>(null);
 
   const [customCategories, setCustomCategories] = useState<CustomCategory[]>(
     [],
@@ -82,7 +220,9 @@ export function useDoubanFeed(type: string) {
   const [multiLevelValues, setMultiLevelValues] = useState<
     Record<string, string>
   >({ ...DEFAULT_MULTI_LEVEL });
-  const [selectedWeekday, setSelectedWeekday] = useState<string>('');
+  const [selectedWeekday, setSelectedWeekday] = useState<string>(() =>
+    getCurrentWeekday(),
+  );
 
   const currentParamsRef = useRef<FeedSnapshot>({
     type: '',
@@ -125,9 +265,10 @@ export function useDoubanFeed(type: string) {
     return () => clearTimeout(timer);
   }, []);
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     setSelectorsReady(false);
-    setLoading(true);
+    let nextPrimarySelection = '';
+    let nextSecondarySelection = '全部';
 
     if (type === 'custom' && customCategories.length > 0) {
       const types = Array.from(
@@ -140,33 +281,69 @@ export function useDoubanFeed(type: string) {
         } else {
           selectedType = 'tv';
         }
-        setPrimarySelection(selectedType);
+        nextPrimarySelection = selectedType;
 
         const firstCategory = customCategories.find(
           (cat) => cat.type === selectedType,
         );
         if (firstCategory) {
-          setSecondarySelection(firstCategory.query);
+          nextSecondarySelection = firstCategory.query;
         }
       }
     } else if (type === 'movie') {
-      setPrimarySelection('热门');
-      setSecondarySelection('全部');
+      nextPrimarySelection = '热门';
+      nextSecondarySelection = '全部';
     } else if (type === 'tv') {
-      setPrimarySelection('最近热门');
-      setSecondarySelection('tv');
+      nextPrimarySelection = '最近热门';
+      nextSecondarySelection = 'tv';
     } else if (type === 'show') {
-      setPrimarySelection('最近热门');
-      setSecondarySelection('show');
+      nextPrimarySelection = '最近热门';
+      nextSecondarySelection = 'show';
     } else if (type === 'anime') {
-      setPrimarySelection('每日放送');
-      setSecondarySelection('全部');
-    } else {
-      setPrimarySelection('');
-      setSecondarySelection('全部');
+      nextPrimarySelection = '每日放送';
+      nextSecondarySelection = '全部';
     }
 
-    setMultiLevelValues({ ...DEFAULT_MULTI_LEVEL });
+    let nextMultiLevelValues = { ...DEFAULT_MULTI_LEVEL };
+    let nextSelectedWeekday = selectedWeekday;
+
+    const restoredSnapshot = readLastFeedSnapshot(type);
+    const requestSnapshot = restoredSnapshot ?? {
+      type,
+      primarySelection: nextPrimarySelection,
+      secondarySelection: nextSecondarySelection,
+      multiLevelSelection: nextMultiLevelValues,
+      selectedWeekday,
+      currentPage: 0,
+    };
+
+    if (restoredSnapshot) {
+      nextPrimarySelection = restoredSnapshot.primarySelection;
+      nextSecondarySelection = restoredSnapshot.secondarySelection;
+      nextMultiLevelValues = restoredSnapshot.multiLevelSelection;
+      nextSelectedWeekday = restoredSnapshot.selectedWeekday;
+    }
+
+    setPrimarySelection(nextPrimarySelection);
+    setSecondarySelection(nextSecondarySelection);
+    setMultiLevelValues(nextMultiLevelValues);
+    setSelectedWeekday(nextSelectedWeekday);
+
+    const cached = readFeedViewCache(requestSnapshot);
+
+    if (cached) {
+      setDoubanData(cached.data);
+      restoredCurrentPageRef.current =
+        cached.currentPage > 0 ? cached.currentPage : null;
+      setCurrentPage(cached.currentPage);
+      setHasMore(cached.hasMore);
+      setIsLoadingMore(false);
+      setLoading(false);
+      setSelectorsReady(true);
+      return;
+    }
+
+    setLoading(true);
 
     const timer = setTimeout(() => {
       setSelectorsReady(true);
@@ -208,6 +385,18 @@ export function useDoubanFeed(type: string) {
     };
 
     try {
+      const cached = readFeedViewCache(requestSnapshot);
+      if (cached) {
+        setDoubanData(cached.data);
+        restoredCurrentPageRef.current =
+          cached.currentPage > 0 ? cached.currentPage : null;
+        setCurrentPage(cached.currentPage);
+        setHasMore(cached.hasMore);
+        setIsLoadingMore(false);
+        setLoading(false);
+        return;
+      }
+
       setLoading(true);
       setDoubanData([]);
       setCurrentPage(0);
@@ -243,12 +432,7 @@ export function useDoubanFeed(type: string) {
             list: weekdayData.items.map((item) => ({
               id: item.id?.toString() || '',
               title: item.name_cn || item.name,
-              poster:
-                item.images.large ||
-                item.images.common ||
-                item.images.medium ||
-                item.images.small ||
-                item.images.grid,
+              poster: selectBangumiCardCover(item.images),
               rate: item.rating?.score?.toFixed(1) || '',
               year: item.air_date?.split('-')?.[0] || '',
             })),
@@ -289,9 +473,13 @@ export function useDoubanFeed(type: string) {
       if (data.code === 200) {
         const currentSnapshot = { ...currentParamsRef.current };
         if (isSnapshotEqual(requestSnapshot, currentSnapshot)) {
+          const nextHasMore = getInitialHasMore(requestSnapshot, data.list);
           setDoubanData(data.list);
-          setHasMore(data.list.length !== 0);
+          restoredCurrentPageRef.current = null;
+          setCurrentPage(0);
+          setHasMore(nextHasMore);
           setLoading(false);
+          writeFeedViewCache(requestSnapshot, data.list, nextHasMore);
         }
       } else {
         throw new Error(data.message || '获取数据失败');
@@ -321,7 +509,7 @@ export function useDoubanFeed(type: string) {
 
     debounceTimeoutRef.current = setTimeout(() => {
       loadInitialData();
-    }, 100);
+    }, FEED_LOAD_DEBOUNCE_MS);
 
     return () => {
       if (debounceTimeoutRef.current) {
@@ -340,6 +528,10 @@ export function useDoubanFeed(type: string) {
 
   useEffect(() => {
     if (currentPage <= 0) return;
+    if (restoredCurrentPageRef.current === currentPage) {
+      restoredCurrentPageRef.current = null;
+      return;
+    }
 
     const fetchMoreData = async () => {
       const requestSnapshot: FeedSnapshot = {
@@ -408,9 +600,14 @@ export function useDoubanFeed(type: string) {
 
         if (data.code === 200) {
           const currentSnapshot = { ...currentParamsRef.current };
-          if (isSnapshotEqual(requestSnapshot, currentSnapshot)) {
-            setDoubanData((prev) => [...prev, ...data.list]);
-            setHasMore(data.list.length !== 0);
+          if (isFeedSelectionEqual(requestSnapshot, currentSnapshot)) {
+            const nextHasMore = data.list.length !== 0;
+            setDoubanData((prev) => {
+              const nextData = [...prev, ...data.list];
+              writeFeedViewCache(requestSnapshot, nextData, nextHasMore);
+              return nextData;
+            });
+            setHasMore(nextHasMore);
             setIsLoadingMore(false);
           }
         } else {

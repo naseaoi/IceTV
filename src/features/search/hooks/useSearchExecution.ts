@@ -21,7 +21,7 @@ interface SearchSnapshotCache {
   useFluidSearch: boolean;
 }
 
-const SEARCH_SNAPSHOT_TTL_MS = 5 * 60 * 1000;
+const SEARCH_SNAPSHOT_TTL_MS = 60 * 60 * 1000;
 const searchSnapshotCache = new Map<string, SearchSnapshotCache>();
 
 function getSearchSnapshotCacheKey(query: string) {
@@ -78,8 +78,9 @@ export function useSearchExecution({
   const eventSourceRef = useRef<EventSource | null>(null);
   const pendingResultsRef = useRef<SearchResult[]>([]);
   const flushTimerRef = useRef<number | null>(null);
+  const hasFirstBatchRef = useRef<boolean>(false);
 
-  // 提取 query 值作为 effect 依赖，避免 searchParams 引用变化导致重复触发
+  // query 值作为 effect 依赖
   const query = (searchParams.get('q') || '').trim();
 
   // 核心搜索 effect
@@ -99,6 +100,7 @@ export function useSearchExecution({
       flushTimerRef.current = null;
     }
     pendingResultsRef.current = [];
+    hasFirstBatchRef.current = false;
 
     if (query) {
       const cachedSnapshot = getSearchSnapshot(query);
@@ -170,7 +172,15 @@ export function useSearchExecution({
                         )
                       : (payload.results as SearchResult[]);
                   pendingResultsRef.current.push(...incoming);
-                  if (!flushTimerRef.current) {
+
+                  if (!hasFirstBatchRef.current) {
+                    hasFirstBatchRef.current = true;
+                    const toAppend = pendingResultsRef.current;
+                    pendingResultsRef.current = [];
+                    startTransition(() => {
+                      setSearchResults((prev) => prev.concat(toAppend));
+                    });
+                  } else if (!flushTimerRef.current) {
                     flushTimerRef.current = window.setTimeout(() => {
                       const toAppend = pendingResultsRef.current;
                       pendingResultsRef.current = [];
@@ -188,7 +198,7 @@ export function useSearchExecution({
                 break;
               case 'complete':
                 setCompletedSources(payload.completedSources || 0);
-                // 完成前确保将缓冲写入
+                // 完成前写入缓冲
                 if (pendingResultsRef.current.length > 0) {
                   const toAppend = pendingResultsRef.current;
                   pendingResultsRef.current = [];
@@ -274,7 +284,7 @@ export function useSearchExecution({
 
   useEffect(() => {
     const query = currentQueryRef.current;
-    // 搜索进行中不写入快照，避免空结果覆盖有效缓存
+    // 搜索进行中不写入快照
     if (!query || !showResults || isLoading) {
       return;
     }

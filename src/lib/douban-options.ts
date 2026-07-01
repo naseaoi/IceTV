@@ -4,7 +4,8 @@
 
 /** 豆瓣数据代理选项 */
 export const doubanDataSourceOptions: { value: string; label: string }[] = [
-  { value: 'direct', label: '直连（服务器直接请求豆瓣）' },
+  { value: 'direct', label: '直连（浏览器请求）' },
+  { value: 'server', label: '代理（服务器请求）' },
   { value: 'cors-proxy-zwei', label: 'Cors Proxy By Zwei' },
   {
     value: 'cmliussss-cdn-tencent',
@@ -16,8 +17,8 @@ export const doubanDataSourceOptions: { value: string; label: string }[] = [
 
 /** 豆瓣图片代理选项 */
 export const doubanImageProxyTypeOptions: { value: string; label: string }[] = [
-  { value: 'direct', label: '直连（浏览器直接请求豆瓣）' },
-  { value: 'server', label: '服务器代理（由服务器代理请求豆瓣）' },
+  { value: 'direct', label: '直连（浏览器请求）' },
+  { value: 'server', label: '代理（服务器请求）' },
   { value: 'img3', label: '豆瓣官方精品 CDN（阿里云）' },
   {
     value: 'cmliussss-cdn-tencent',

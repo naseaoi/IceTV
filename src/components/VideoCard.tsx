@@ -261,11 +261,36 @@ const VideoCard = forwardRef<VideoCardHandle, VideoCardProps>(
         ? 'movie'
         : 'tv'
       : type;
+    const favoriteStorageKey = useMemo(() => {
+      if (!actualSource || !actualId) {
+        return null;
+      }
+
+      return generateStorageKey(actualSource, actualId);
+    }, [actualId, actualSource]);
+    const shouldTrackFavoriteStatus =
+      from === 'playrecord' && !!favoriteStorageKey;
     const favorited = useFavoriteStatus(
       actualSource,
       actualId,
-      from !== 'douban' && from !== 'search' && !!actualSource && !!actualId,
+      shouldTrackFavoriteStatus,
     );
+    const visibleFavorited = from === 'favorite' ? true : favorited;
+
+    const loadFavoriteStatus = useCallback(async () => {
+      if (!favoriteStorageKey || from === 'douban') {
+        return false;
+      }
+
+      await ensureFavoritesLoaded();
+      const nextFavorited = getFavoriteStatus(favoriteStorageKey);
+
+      if (from === 'search') {
+        setSearchFavorited(nextFavorited);
+      }
+
+      return nextFavorited;
+    }, [ensureFavoritesLoaded, favoriteStorageKey, from, getFavoriteStatus]);
 
     const handleToggleFavorite = useCallback(
       async (e: React.MouseEvent) => {
@@ -274,8 +299,15 @@ const VideoCard = forwardRef<VideoCardHandle, VideoCardProps>(
         if (from === 'douban' || !actualSource || !actualId) return;
 
         try {
-          const currentFavorited =
-            from === 'search' ? searchFavorited : favorited;
+          let currentFavorited: boolean;
+
+          if (from === 'favorite') {
+            currentFavorited = true;
+          } else if (from === 'search' && searchFavorited !== null) {
+            currentFavorited = searchFavorited;
+          } else {
+            currentFavorited = await loadFavoriteStatus();
+          }
 
           if (currentFavorited) {
             // 收藏页取消收藏需要二次确认
@@ -323,10 +355,10 @@ const VideoCard = forwardRef<VideoCardHandle, VideoCardProps>(
         actualYear,
         actualPoster,
         actualEpisodes,
-        favorited,
         searchFavorited,
         showConfirm,
         interactionId,
+        loadFavoriteStatus,
       ],
     );
 
@@ -458,6 +490,10 @@ const VideoCard = forwardRef<VideoCardHandle, VideoCardProps>(
     // hover / focus 预热：提前加载 detail 与播放器模块，进入播放页几乎无等待
     // 仅对拥有 source+id 的普通卡片生效（聚合卡、豆瓣卡跳转路径不同，跳过）
     const handlePrefetch = useCallback(() => {
+      if (shouldTrackFavoriteStatus) {
+        void loadFavoriteStatus();
+      }
+
       if (origin === 'live') return;
       if (from === 'douban') return;
       if (isAggregate) return;
@@ -470,7 +506,15 @@ const VideoCard = forwardRef<VideoCardHandle, VideoCardProps>(
         prefetchTimerRef.current = null;
         warmupForPlayback(actualSource, actualId);
       }, PREFETCH_INTENT_DELAY_MS);
-    }, [actualId, actualSource, from, isAggregate, origin]);
+    }, [
+      actualId,
+      actualSource,
+      from,
+      isAggregate,
+      loadFavoriteStatus,
+      origin,
+      shouldTrackFavoriteStatus,
+    ]);
 
     const cancelPrefetch = useCallback(() => {
       if (!prefetchTimerRef.current) return;
@@ -496,15 +540,11 @@ const VideoCard = forwardRef<VideoCardHandle, VideoCardProps>(
       if (
         from === 'search' &&
         !isAggregate &&
-        actualSource &&
-        actualId &&
+        favoriteStorageKey &&
         searchFavorited === null
       ) {
         try {
-          await ensureFavoritesLoaded();
-          setSearchFavorited(
-            getFavoriteStatus(generateStorageKey(actualSource, actualId)),
-          );
+          await loadFavoriteStatus();
         } catch (err) {
           setSearchFavorited(false);
         }
@@ -512,11 +552,25 @@ const VideoCard = forwardRef<VideoCardHandle, VideoCardProps>(
     }, [
       from,
       isAggregate,
-      actualSource,
-      actualId,
+      favoriteStorageKey,
       searchFavorited,
-      ensureFavoritesLoaded,
-      getFavoriteStatus,
+      loadFavoriteStatus,
+    ]);
+
+    const requestVisibleFavoriteStatus = useCallback(() => {
+      if (from === 'search') {
+        void checkSearchFavoriteStatus();
+        return;
+      }
+
+      if (shouldTrackFavoriteStatus) {
+        void loadFavoriteStatus();
+      }
+    }, [
+      checkSearchFavoriteStatus,
+      from,
+      loadFavoriteStatus,
+      shouldTrackFavoriteStatus,
     ]);
 
     const closeActionSheet = useCallback(() => {
@@ -532,26 +586,9 @@ const VideoCard = forwardRef<VideoCardHandle, VideoCardProps>(
         setActionSheetAnchorRect(null);
         setShowMobileActions(true);
 
-        // 异步检查收藏状态，不阻塞菜单显示
-        if (
-          from === 'search' &&
-          !isAggregate &&
-          actualSource &&
-          actualId &&
-          searchFavorited === null
-        ) {
-          checkSearchFavoriteStatus();
-        }
+        requestVisibleFavoriteStatus();
       }
-    }, [
-      showMobileActions,
-      from,
-      isAggregate,
-      actualSource,
-      actualId,
-      searchFavorited,
-      checkSearchFavoriteStatus,
-    ]);
+    }, [showMobileActions, requestVisibleFavoriteStatus]);
 
     // 长按手势hook
     const longPressProps = useLongPress({
@@ -635,7 +672,7 @@ const VideoCard = forwardRef<VideoCardHandle, VideoCardProps>(
       // 收藏/取消收藏操作
       if (config.showHeart && from !== 'douban' && actualSource && actualId) {
         const currentFavorited =
-          from === 'search' ? searchFavorited : favorited;
+          from === 'search' ? searchFavorited : visibleFavorited;
 
         if (from === 'search') {
           // 搜索结果：根据加载状态显示不同的选项
@@ -738,7 +775,7 @@ const VideoCard = forwardRef<VideoCardHandle, VideoCardProps>(
       from,
       actualSource,
       actualId,
-      favorited,
+      visibleFavorited,
       searchFavorited,
       actualDoubanId,
       isBangumi,
@@ -799,7 +836,7 @@ const VideoCard = forwardRef<VideoCardHandle, VideoCardProps>(
     return (
       <>
         <div
-          className='group relative w-full cursor-pointer rounded-lg bg-transparent transition-[transform,opacity] duration-300 ease-in-out hover:z-[500] hover:scale-[1.025] active:scale-[0.97] active:opacity-80'
+          className={`group relative w-full cursor-pointer rounded-lg bg-transparent transition-[transform,opacity] duration-300 ease-in-out hover:z-[500] hover:scale-[1.025] active:scale-[0.97] active:opacity-80 ${from === 'search' ? 'animate-fade-in' : ''}`}
           onClick={handleClick}
           onMouseEnter={handlePrefetch}
           onMouseLeave={cancelPrefetch}
@@ -829,16 +866,7 @@ const VideoCard = forwardRef<VideoCardHandle, VideoCardProps>(
             });
             setShowMobileActions(true);
 
-            // 异步检查收藏状态，不阻塞菜单显示
-            if (
-              from === 'search' &&
-              !isAggregate &&
-              actualSource &&
-              actualId &&
-              searchFavorited === null
-            ) {
-              checkSearchFavoriteStatus();
-            }
+            requestVisibleFavoriteStatus();
 
             return false;
           }}
@@ -913,7 +941,7 @@ const VideoCard = forwardRef<VideoCardHandle, VideoCardProps>(
                     onClick={handleToggleFavorite}
                     size={20}
                     className={`transition-all duration-300 ease-out ${
-                      favorited
+                      visibleFavorited
                         ? 'fill-red-600 stroke-red-600'
                         : 'fill-transparent stroke-white hover:stroke-red-400'
                     } hover:scale-[1.1]`}

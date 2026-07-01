@@ -1,6 +1,8 @@
 import { lookup } from 'dns/promises';
 import net from 'net';
 
+import { isDevProxyActive } from '@/lib/dev-proxy';
+
 const BLOCKED_HOSTNAMES = new Set([
   'localhost',
   'metadata',
@@ -165,6 +167,10 @@ async function assertSafeNetworkTarget(raw: string): Promise<void> {
     if (isBlockedAddress(hostname)) {
       throw new UrlValidationError('Blocked destination');
     }
+    return;
+  }
+
+  if (isDevProxyActive()) {
     return;
   }
 

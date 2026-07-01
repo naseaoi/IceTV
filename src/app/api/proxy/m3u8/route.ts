@@ -38,6 +38,7 @@ type M3U8CacheEntry = {
   content: string;
   contentType: string;
   finalUrl: string;
+  loadedAt: number;
 };
 
 type M3U8LoadResult = M3U8CacheEntry & {
@@ -59,12 +60,20 @@ const m3u8Cache = createSwrCache<M3U8CacheEntry>({
   maxSize: 500,
 });
 
+const m3u8RewriteCache = createSwrCache<string>({
+  name: 'proxy-m3u8-rewrite',
+  freshMs: 30_000,
+  staleMs: 30_000,
+  maxSize: 200,
+});
+
 // 识别带 token/签名的短时效 URL：命中后跳过本地 SWR 缓存，
 // 避免缓存把过期 token 沉淀下来导致 hls.js 拉 ts 直接 403。
 // 只匹配 query 中的明显签名字段；保守一点漏判好过误判。
 const SIGNED_URL_PARAM_RE =
   /[?&](sign|signature|auth_key|auth|token|expires?|expire|hmac|x-amz-signature|security_token|oss_expires|wssecret|wstime|ccode|ksign)=/i;
 const MAX_M3U8_BYTES = 2 * 1024 * 1024;
+const MAX_REWRITE_CACHE_CONTENT_BYTES = 256 * 1024;
 
 function isSignedM3U8Url(rawUrl: string): boolean {
   if (!rawUrl) return false;
@@ -124,6 +133,7 @@ function refreshM3U8Cache(
         content,
         contentType,
         finalUrl: response.url,
+        loadedAt: Date.now(),
       });
     } catch {
       /* 后台刷新失败保留旧值 */
@@ -195,6 +205,7 @@ async function fetchM3U8Data(
           content,
           contentType: contentType || 'application/vnd.apple.mpegurl',
           finalUrl: url,
+          loadedAt: Date.now(),
           status: response.status,
           statusText: response.statusText,
         };
@@ -249,6 +260,7 @@ async function fetchM3U8Data(
   const contentType = response.headers.get('Content-Type') || '';
   const finalUrl = response.url;
   let content = await readTextLimited(response, MAX_M3U8_BYTES);
+  const loadedAt = Date.now();
   assertM3U8Content(content, contentType, {
     route: 'm3u8',
     source,
@@ -279,6 +291,7 @@ async function fetchM3U8Data(
       content,
       contentType: contentType || 'application/vnd.apple.mpegurl',
       finalUrl,
+      loadedAt,
     });
   }
 
@@ -286,6 +299,7 @@ async function fetchM3U8Data(
     content,
     contentType: contentType || 'application/vnd.apple.mpegurl',
     finalUrl,
+    loadedAt,
     status: response.status,
     statusText: response.statusText,
   };
@@ -409,15 +423,15 @@ export async function GET(request: NextRequest) {
         // 软过期：后台刷新，不阻塞当前响应
         void refreshM3U8Cache(validation.url, ua, source);
       }
-      const baseUrl = getBaseUrl(value.finalUrl);
-      const modifiedContent = await rewriteM3U8Content(
-        value.content,
-        baseUrl,
+      const modifiedContent = await getRewrittenM3U8Content(
+        value,
+        validation.url,
         request,
         allowCORS,
         forceServer,
         source,
         isLive,
+        !skipCache,
       );
 
       const headers = new Headers();
@@ -449,15 +463,15 @@ export async function GET(request: NextRequest) {
         userInitiated,
       },
     );
-    const baseUrl = getBaseUrl(loaded.finalUrl);
-    const modifiedContent = await rewriteM3U8Content(
-      loaded.content,
-      baseUrl,
+    const modifiedContent = await getRewrittenM3U8Content(
+      loaded,
+      validation.url,
       request,
       allowCORS,
       forceServer,
       source,
       isLive,
+      !skipCache,
     );
     const headers = new Headers();
     headers.set('Content-Type', loaded.contentType);
@@ -496,6 +510,94 @@ export async function GET(request: NextRequest) {
     return NextResponse.json(toProxyFailurePayload(diagnostic), {
       status: diagnostic.status,
     });
+  }
+}
+
+async function getRewrittenM3U8Content(
+  entry: M3U8CacheEntry,
+  originalUrl: string,
+  req: NextRequest,
+  allowCORS: boolean,
+  forceServer: boolean,
+  source: string | null,
+  isLive: boolean,
+  cacheable: boolean,
+): Promise<string> {
+  const cacheKey =
+    cacheable &&
+    !isLive &&
+    entry.content.length <= MAX_REWRITE_CACHE_CONTENT_BYTES
+      ? getM3U8RewriteCacheKey(
+          entry,
+          originalUrl,
+          req,
+          allowCORS,
+          forceServer,
+          source,
+          isLive,
+        )
+      : null;
+
+  if (cacheKey) {
+    const cached = m3u8RewriteCache.peek(cacheKey);
+    if (cached) {
+      return cached.value;
+    }
+  }
+
+  const modifiedContent = await rewriteM3U8Content(
+    entry.content,
+    getBaseUrl(entry.finalUrl),
+    req,
+    allowCORS,
+    forceServer,
+    source,
+    isLive,
+  );
+
+  if (cacheKey) {
+    m3u8RewriteCache.set(cacheKey, modifiedContent);
+  }
+
+  return modifiedContent;
+}
+
+function getM3U8RewriteCacheKey(
+  entry: M3U8CacheEntry,
+  originalUrl: string,
+  req: NextRequest,
+  allowCORS: boolean,
+  forceServer: boolean,
+  source: string | null,
+  isLive: boolean,
+): string {
+  const requestUrl = new URL(req.url);
+  const refererProtocol = getRequestProtocol(req);
+  const host = req.headers.get('host') || '';
+  return [
+    originalUrl,
+    entry.finalUrl,
+    String(entry.loadedAt),
+    refererProtocol,
+    host,
+    allowCORS ? 'cors' : 'proxy',
+    forceServer ? 'force' : 'auto',
+    source || '',
+    isLive ? 'live' : 'vod',
+    requestUrl.searchParams.get('icetv-switch') || '',
+    requestUrl.searchParams.get('icetv-user-switch') || '',
+  ].join('\0');
+}
+
+function getRequestProtocol(req: NextRequest): string {
+  const referer = req.headers.get('referer');
+  if (!referer) return 'http';
+
+  try {
+    const refererUrl = new URL(referer);
+    return refererUrl.protocol.replace(':', '');
+  } catch {
+    return 'http';
   }
 }
 
@@ -540,17 +642,7 @@ async function rewriteM3U8Content(
   source: string | null,
   isLive: boolean,
 ): Promise<string> {
-  const referer = req.headers.get('referer');
-  let protocol = 'http';
-  if (referer) {
-    try {
-      const refererUrl = new URL(referer);
-      protocol = refererUrl.protocol.replace(':', '');
-    } catch (error) {
-      // ignore
-    }
-  }
-
+  const protocol = getRequestProtocol(req);
   const host = req.headers.get('host');
   const proxyBase = `${protocol}://${host}/api/proxy`;
   const requestSearchParams = new URL(req.url).searchParams;
