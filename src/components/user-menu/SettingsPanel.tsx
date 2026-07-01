@@ -292,9 +292,28 @@ export function SettingsPanel({ onClose }: SettingsPanelProps) {
           <div className='space-y-6'>
             <div className='space-y-3'>
               <div>
-                <h4 className='text-sm font-medium text-gray-700 dark:text-gray-300'>
-                  豆瓣数据代理
-                </h4>
+                <div className='flex items-baseline justify-between gap-2'>
+                  <h4 className='text-sm font-medium text-gray-700 dark:text-gray-300'>
+                    豆瓣数据代理
+                  </h4>
+                  {getThanksInfo(doubanDataSource) && (
+                    <button
+                      type='button'
+                      onClick={() =>
+                        window.open(
+                          getThanksInfo(doubanDataSource)!.url,
+                          '_blank',
+                        )
+                      }
+                      className='flex shrink-0 cursor-pointer items-center gap-1 text-[11px] leading-none text-gray-400 hover:text-gray-600 dark:text-gray-500 dark:hover:text-gray-300'
+                    >
+                      <span className='font-medium'>
+                        {getThanksInfo(doubanDataSource)!.text}
+                      </span>
+                      <ExternalLink className='h-3 w-3 opacity-70' />
+                    </button>
+                  )}
+                </div>
                 <p className='mt-1 text-xs text-gray-500 dark:text-gray-400'>
                   选择获取豆瓣数据的方式
                 </p>
@@ -304,26 +323,6 @@ export function SettingsPanel({ onClose }: SettingsPanelProps) {
                 onChange={(value) => handleDoubanDataSourceChange(value)}
                 options={doubanDataSourceOptions}
               />
-
-              {getThanksInfo(doubanDataSource) && (
-                <div className='mt-3'>
-                  <button
-                    type='button'
-                    onClick={() =>
-                      window.open(
-                        getThanksInfo(doubanDataSource)!.url,
-                        '_blank',
-                      )
-                    }
-                    className='flex w-full cursor-pointer items-center justify-center gap-1.5 px-3 text-xs text-gray-500 dark:text-gray-400'
-                  >
-                    <span className='font-medium'>
-                      {getThanksInfo(doubanDataSource)!.text}
-                    </span>
-                    <ExternalLink className='w-3.5 opacity-70' />
-                  </button>
-                </div>
-              )}
             </div>
 
             {doubanDataSource === 'custom' && (
@@ -350,9 +349,28 @@ export function SettingsPanel({ onClose }: SettingsPanelProps) {
 
             <div className='space-y-3'>
               <div>
-                <h4 className='text-sm font-medium text-gray-700 dark:text-gray-300'>
-                  豆瓣图片代理
-                </h4>
+                <div className='flex items-baseline justify-between gap-2'>
+                  <h4 className='text-sm font-medium text-gray-700 dark:text-gray-300'>
+                    豆瓣图片代理
+                  </h4>
+                  {getThanksInfo(doubanImageProxyType) && (
+                    <button
+                      type='button'
+                      onClick={() =>
+                        window.open(
+                          getThanksInfo(doubanImageProxyType)!.url,
+                          '_blank',
+                        )
+                      }
+                      className='flex shrink-0 cursor-pointer items-center gap-1 text-[11px] leading-none text-gray-400 hover:text-gray-600 dark:text-gray-500 dark:hover:text-gray-300'
+                    >
+                      <span className='font-medium'>
+                        {getThanksInfo(doubanImageProxyType)!.text}
+                      </span>
+                      <ExternalLink className='h-3 w-3 opacity-70' />
+                    </button>
+                  )}
+                </div>
                 <p className='mt-1 text-xs text-gray-500 dark:text-gray-400'>
                   选择获取豆瓣图片的方式
                 </p>
@@ -362,26 +380,6 @@ export function SettingsPanel({ onClose }: SettingsPanelProps) {
                 onChange={(value) => handleDoubanImageProxyTypeChange(value)}
                 options={doubanImageProxyTypeOptions}
               />
-
-              {getThanksInfo(doubanImageProxyType) && (
-                <div className='mt-3'>
-                  <button
-                    type='button'
-                    onClick={() =>
-                      window.open(
-                        getThanksInfo(doubanImageProxyType)!.url,
-                        '_blank',
-                      )
-                    }
-                    className='flex w-full cursor-pointer items-center justify-center gap-1.5 px-3 text-xs text-gray-500 dark:text-gray-400'
-                  >
-                    <span className='font-medium'>
-                      {getThanksInfo(doubanImageProxyType)!.text}
-                    </span>
-                    <ExternalLink className='w-3.5 opacity-70' />
-                  </button>
-                </div>
-              )}
             </div>
 
             {doubanImageProxyType === 'custom' && (

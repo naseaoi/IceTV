@@ -273,7 +273,7 @@ const SiteConfigComponent = ({
               }))
             }
             rows={1}
-            className='w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-gray-900 focus:border-transparent focus:ring-2 focus:ring-green-500 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100'
+            className='w-full resize-y rounded-lg border border-gray-300 bg-white px-3 py-2 text-gray-900 focus:border-transparent focus:ring-2 focus:ring-green-500 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100'
           />
           <p className='mt-1.5 text-xs text-gray-400 dark:text-gray-500'>
             修改后将会重新推送给用户

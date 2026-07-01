@@ -38,7 +38,7 @@ export default function AnnouncementModal({
           </button>
         </div>
 
-        <div className='rounded-xl border border-emerald-200/70 bg-gradient-to-r from-emerald-50 to-teal-50 px-4 py-3 text-sm leading-7 text-gray-700 dark:border-emerald-500/30 dark:from-emerald-500/10 dark:to-teal-500/10 dark:text-gray-200'>
+        <div className='max-h-[40vh] overflow-y-auto whitespace-pre-line break-words rounded-xl border border-emerald-200/70 bg-gradient-to-r from-emerald-50 to-teal-50 px-4 py-3 text-sm leading-7 text-gray-700 dark:border-emerald-500/30 dark:from-emerald-500/10 dark:to-teal-500/10 dark:text-gray-200'>
           {message}
         </div>
 
