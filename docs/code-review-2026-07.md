@@ -102,7 +102,7 @@
 | 安全遗留/工程杂项 | 已完成 | 2026-07-02：bcrypt 识别 `$2y$` 并记录 bcryptjs 回退；`AUTH_SESSION_TTL_HOURS <= 0` 回退默认 TTL；开启 React Strict Mode；Node 基线升至 22.14 并补 `engines`；Docker 增加 HEALTHCHECK；`start.js` 就绪轮询加超时；移除 MySQL 新建表冗余 username 索引；通过 `node --check start.js`、`eslint --max-warnings=0 src`、`tsc --noEmit --incremental false`、`jest --runInBand` |
 | 重复代码          | 已完成 | 2026-07-02：`douban.client` 合并三套代理分支并复用 `createTimedAbortController`；新增豆瓣代理配置 helper；豆瓣上游响应类型与字段转换抽成 `douban-normalize` 并被客户端/服务端 route 共用；豆瓣 API Cache-Control 响应头抽成公共 helper；新增 normalizer/proxy 配置测试；通过 `eslint --max-warnings=0 src`、`tsc --noEmit --incremental false`、`jest --runInBand`        |
 | 测试              | 已完成 | 2026-07-02：补 `auth.server` cookie 解析与 HMAC 签名测试；新增 SQLite 核心持久化契约测试覆盖播放记录/收藏/搜索历史/跳过配置/导入快照；P1 中新增 Bangumi calendar 与数据导入 route 测试并抽 route 测试 Web API polyfill；通过 `eslint --max-warnings=0 src`、`tsc --noEmit --incremental false`、`jest --runInBand`                                                        |
-| 单文件堆叠        | 待修复 | -                                                                                                                                                                                                                                                                                                                                                                         |
+| 单文件堆叠        | 已完成 | 2026-07-02：`db.client.internal` 拆出 `db.client.cache`，主文件从 849 行降至 511 行；`VideoCard` 拆出类型与 memo 比较器并补比较器测试，主组件从 1213 行降至 1040 行；`usePlayProgress` 拆出 checkpoint/恢复候选逻辑到 `playProgressRestore`，hook 从 733 行降至 468 行；通过 `eslint --max-warnings=0 src`、`tsc --noEmit --incremental false`、`jest --runInBand`        |
 
 ### 重复代码
 

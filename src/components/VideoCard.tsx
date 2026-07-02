@@ -26,7 +26,6 @@ import {
   saveFavorite,
 } from '@/lib/db.client';
 import { getAuthInfoFromBrowserCookie } from '@/lib/auth.client';
-import { SearchResult } from '@/lib/types';
 import { warmupForPlayback } from '@/lib/video-prefetch';
 import { useLongPress } from '@/hooks/useLongPress';
 import { savePlayIntent } from '@/lib/play-intent';
@@ -36,6 +35,15 @@ import {
   useFavoriteStatus,
 } from '@/components/CardInteractionProvider';
 import CoverImage from '@/components/CoverImage';
+import { areVideoCardPropsEqual } from '@/components/video-card/compare';
+import type {
+  VideoCardHandle,
+  VideoCardProps,
+} from '@/components/video-card/types';
+export type {
+  VideoCardHandle,
+  VideoCardProps,
+} from '@/components/video-card/types';
 
 /** 禁用文本选中和长按弹出的内联样式 */
 const noSelectStyle = {
@@ -66,110 +74,6 @@ const preventContextMenu = (e: React.MouseEvent) => {
   e.preventDefault();
   return false;
 };
-
-interface VideoCardProps {
-  id?: string;
-  source?: string;
-  title?: string;
-  query?: string;
-  poster?: string;
-  priority?: boolean;
-  episodes?: number;
-  source_name?: string;
-  source_names?: string[];
-  progress?: number;
-  resumeTime?: number;
-  year?: string;
-  from: 'playrecord' | 'favorite' | 'search' | 'douban';
-  currentEpisode?: number;
-  douban_id?: number;
-  onDelete?: () => void;
-  rate?: string;
-  type?: string;
-  isBangumi?: boolean;
-  isAggregate?: boolean;
-  origin?: 'vod' | 'live';
-  aggregateGroup?: SearchResult[];
-}
-
-export type VideoCardHandle = {
-  setEpisodes: (episodes?: number) => void;
-  setSourceNames: (names?: string[]) => void;
-  setDoubanId: (id?: number) => void;
-};
-
-function isSameStringArray(prev?: string[], next?: string[]): boolean {
-  if (prev === next) {
-    return true;
-  }
-  if (!prev || !next) {
-    return !prev && !next;
-  }
-  if (prev.length !== next.length) {
-    return false;
-  }
-
-  return prev.every((item, index) => item === next[index]);
-}
-
-function isSameAggregateGroup(
-  prev?: SearchResult[],
-  next?: SearchResult[],
-): boolean {
-  if (prev === next) {
-    return true;
-  }
-  if (!prev || !next) {
-    return !prev && !next;
-  }
-  if (prev.length !== next.length) {
-    return false;
-  }
-
-  return prev.every((item, index) => {
-    const nextItem = next[index];
-    return (
-      item.id === nextItem.id &&
-      item.source === nextItem.source &&
-      item.title === nextItem.title &&
-      item.poster === nextItem.poster &&
-      item.year === nextItem.year &&
-      item.source_name === nextItem.source_name &&
-      item.douban_id === nextItem.douban_id &&
-      item.episodes.length === nextItem.episodes.length &&
-      item.episodes_titles.length === nextItem.episodes_titles.length
-    );
-  });
-}
-
-function areVideoCardPropsEqual(
-  prev: Readonly<VideoCardProps>,
-  next: Readonly<VideoCardProps>,
-): boolean {
-  return (
-    prev.id === next.id &&
-    prev.source === next.source &&
-    prev.title === next.title &&
-    prev.query === next.query &&
-    prev.poster === next.poster &&
-    prev.priority === next.priority &&
-    prev.episodes === next.episodes &&
-    prev.source_name === next.source_name &&
-    isSameStringArray(prev.source_names, next.source_names) &&
-    prev.progress === next.progress &&
-    prev.resumeTime === next.resumeTime &&
-    prev.year === next.year &&
-    prev.from === next.from &&
-    prev.currentEpisode === next.currentEpisode &&
-    prev.douban_id === next.douban_id &&
-    prev.rate === next.rate &&
-    prev.type === next.type &&
-    prev.isBangumi === next.isBangumi &&
-    prev.isAggregate === next.isAggregate &&
-    prev.origin === next.origin &&
-    isSameAggregateGroup(prev.aggregateGroup, next.aggregateGroup)
-  );
-}
 
 const VideoCard = forwardRef<VideoCardHandle, VideoCardProps>(
   function VideoCard(
