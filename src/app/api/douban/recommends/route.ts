@@ -1,7 +1,12 @@
 import { NextRequest, NextResponse } from 'next/server';
 
+import { createPublicApiCacheHeaders } from '@/lib/api-cache-headers';
 import { getCacheTime } from '@/lib/config';
 import { fetchDoubanData } from '@/lib/douban';
+import {
+  DoubanRecommendApiResponse,
+  normalizeDoubanRecommendItems,
+} from '@/lib/douban-normalize';
 import { createSwrCache } from '@/lib/server-cache';
 import { DoubanResult } from '@/lib/types';
 
@@ -13,23 +18,6 @@ const recommendsCache = createSwrCache<DoubanResult>({
   staleMs: 30 * 60 * 1000,
   maxSize: 500,
 });
-
-interface DoubanRecommendApiResponse {
-  total: number;
-  items: Array<{
-    id: string;
-    title: string;
-    year: string;
-    type: string;
-    pic: {
-      large: string;
-      normal: string;
-    };
-    rating: {
-      value: number;
-    };
-  }>;
-}
 
 export const runtime = 'nodejs';
 
@@ -105,15 +93,7 @@ export async function GET(request: NextRequest) {
     const response = await recommendsCache.getOrLoad(target, async () => {
       const doubanData =
         await fetchDoubanData<DoubanRecommendApiResponse>(target);
-      const list = doubanData.items
-        .filter((item) => item.type == 'movie' || item.type == 'tv')
-        .map((item) => ({
-          id: item.id,
-          title: item.title,
-          poster: item.pic?.normal || item.pic?.large || '',
-          rate: item.rating?.value ? item.rating.value.toFixed(1) : '',
-          year: item.year,
-        }));
+      const list = normalizeDoubanRecommendItems(doubanData.items);
       const payload: DoubanResult = {
         code: 200,
         message: '获取成功',
@@ -124,12 +104,7 @@ export async function GET(request: NextRequest) {
 
     const cacheTime = await getCacheTime();
     return NextResponse.json(response, {
-      headers: {
-        'Cache-Control': `public, max-age=${cacheTime}, s-maxage=${cacheTime}`,
-        'CDN-Cache-Control': `public, s-maxage=${cacheTime}`,
-        'Vercel-CDN-Cache-Control': `public, s-maxage=${cacheTime}`,
-        'Netlify-Vary': 'query',
-      },
+      headers: createPublicApiCacheHeaders(cacheTime),
     });
   } catch (error) {
     return NextResponse.json({ error: '获取豆瓣数据失败' }, { status: 500 });

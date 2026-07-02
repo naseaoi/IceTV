@@ -1,24 +1,13 @@
 import { NextResponse } from 'next/server';
 
+import { createPublicApiCacheHeaders } from '@/lib/api-cache-headers';
 import { getCacheTime } from '@/lib/config';
 import { fetchDoubanData } from '@/lib/douban';
-import { DoubanItem, DoubanResult } from '@/lib/types';
-
-interface DoubanCategoryApiResponse {
-  total: number;
-  items: Array<{
-    id: string;
-    title: string;
-    card_subtitle: string;
-    pic: {
-      large: string;
-      normal: string;
-    };
-    rating: {
-      value: number;
-    };
-  }>;
-}
+import {
+  DoubanCategoryApiResponse,
+  normalizeDoubanCategoryItems,
+} from '@/lib/douban-normalize';
+import { DoubanResult } from '@/lib/types';
 
 export const runtime = 'nodejs';
 
@@ -67,14 +56,7 @@ export async function GET(request: Request) {
     // 调用豆瓣 API
     const doubanData = await fetchDoubanData<DoubanCategoryApiResponse>(target);
 
-    // 转换数据格式
-    const list: DoubanItem[] = doubanData.items.map((item) => ({
-      id: item.id,
-      title: item.title,
-      poster: item.pic?.normal || item.pic?.large || '',
-      rate: item.rating?.value ? item.rating.value.toFixed(1) : '',
-      year: item.card_subtitle?.match(/(\d{4})/)?.[1] || '',
-    }));
+    const list = normalizeDoubanCategoryItems(doubanData.items);
 
     const response: DoubanResult = {
       code: 200,
@@ -84,12 +66,7 @@ export async function GET(request: Request) {
 
     const cacheTime = await getCacheTime();
     return NextResponse.json(response, {
-      headers: {
-        'Cache-Control': `public, max-age=${cacheTime}, s-maxage=${cacheTime}`,
-        'CDN-Cache-Control': `public, s-maxage=${cacheTime}`,
-        'Vercel-CDN-Cache-Control': `public, s-maxage=${cacheTime}`,
-        'Netlify-Vary': 'query',
-      },
+      headers: createPublicApiCacheHeaders(cacheTime),
     });
   } catch (error) {
     return NextResponse.json({ error: '获取豆瓣数据失败' }, { status: 500 });

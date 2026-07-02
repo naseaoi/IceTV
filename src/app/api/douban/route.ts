@@ -1,18 +1,14 @@
 import { NextResponse } from 'next/server';
 
+import { createPublicApiCacheHeaders } from '@/lib/api-cache-headers';
 import { getCacheTime } from '@/lib/config';
 import { fetchDoubanData } from '@/lib/douban';
+import {
+  DoubanListApiResponse,
+  normalizeDoubanListSubjects,
+} from '@/lib/douban-normalize';
 import { createSwrCache } from '@/lib/server-cache';
 import { DoubanItem, DoubanResult } from '@/lib/types';
-
-interface DoubanApiResponse {
-  subjects: Array<{
-    id: string;
-    title: string;
-    cover: string;
-    rate: string;
-  }>;
-}
 
 export const runtime = 'nodejs';
 
@@ -69,14 +65,8 @@ export async function GET(request: Request) {
 
   try {
     const response = await doubanRouteCache.getOrLoad(target, async () => {
-      const doubanData = await fetchDoubanData<DoubanApiResponse>(target);
-      const list: DoubanItem[] = doubanData.subjects.map((item) => ({
-        id: item.id,
-        title: item.title,
-        poster: item.cover,
-        rate: item.rate,
-        year: '',
-      }));
+      const doubanData = await fetchDoubanData<DoubanListApiResponse>(target);
+      const list = normalizeDoubanListSubjects(doubanData.subjects);
 
       return {
         code: 200,
@@ -164,11 +154,6 @@ async function fetchTop250Result(target: string): Promise<DoubanResult> {
 async function createDoubanJsonResponse(response: DoubanResult) {
   const cacheTime = await getCacheTime();
   return NextResponse.json(response, {
-    headers: {
-      'Cache-Control': `public, max-age=${cacheTime}, s-maxage=${cacheTime}`,
-      'CDN-Cache-Control': `public, s-maxage=${cacheTime}`,
-      'Vercel-CDN-Cache-Control': `public, s-maxage=${cacheTime}`,
-      'Netlify-Vary': 'query',
-    },
+    headers: createPublicApiCacheHeaders(cacheTime),
   });
 }
