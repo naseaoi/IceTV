@@ -1,10 +1,10 @@
-'use client';
+﻿'use client';
 
 import { AlertCircle, AlertTriangle, CheckCircle } from 'lucide-react';
 import { useEffect } from 'react';
 
 import ModalShell from '@/components/modals/ModalShell';
-import { type AlertType } from '@/features/admin/hooks/useAlertModal';
+import { type AlertType } from '@/hooks/useAlertModal';
 
 interface AlertModalProps {
   isOpen: boolean;

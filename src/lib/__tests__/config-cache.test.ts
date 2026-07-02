@@ -1,6 +1,6 @@
-/** @jest-environment node */
+﻿/** @jest-environment node */
 
-import { AdminConfig } from '@/features/admin/types/api';
+import { AdminConfig } from '@/types/admin';
 
 const baseConfig: AdminConfig = {
   ConfigSubscribtion: { URL: '', AutoUpdate: false, LastCheck: '' },

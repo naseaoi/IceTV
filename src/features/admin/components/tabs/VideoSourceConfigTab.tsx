@@ -1,4 +1,4 @@
-'use client';
+﻿'use client';
 
 import {
   closestCenter,
@@ -21,19 +21,19 @@ import {
 import { useCallback, useEffect, useMemo, useState } from 'react';
 
 import ConfirmModal from '@/components/modals/ConfirmModal';
-import AlertModal from '@/features/admin/components/AlertModal';
+import AlertModal from '@/components/modals/AlertModal';
 import { SortableSourceRow } from '@/features/admin/components/tabs/video-source/SortableSourceRow';
 import { SourceValidationModal } from '@/features/admin/components/tabs/video-source/SourceValidationModal';
 import { VideoSourceAddForm } from '@/features/admin/components/tabs/video-source/VideoSourceAddForm';
 import { VideoSourceEditForm } from '@/features/admin/components/tabs/video-source/VideoSourceEditForm';
 import { useAdminSourceActions } from '@/features/admin/hooks/useAdminSourceActions';
-import { useAlertModal } from '@/features/admin/hooks/useAlertModal';
+import { useAlertModal } from '@/hooks/useAlertModal';
 import { useLoadingState } from '@/features/admin/hooks/useLoadingState';
 import { useSourceBatchOperation } from '@/features/admin/hooks/useSourceBatchOperation';
 import { useSourceValidation } from '@/features/admin/hooks/useSourceValidation';
 import { buttonStyles } from '@/features/admin/lib/buttonStyles';
 import { showError } from '@/features/admin/lib/notifications';
-import { AdminConfig } from '@/features/admin/types/api';
+import { AdminConfig } from '@/types/admin';
 import { DataSource } from '@/features/admin/types/internal';
 import { useModalState } from '@/hooks/useModalState';
 

@@ -1,10 +1,10 @@
-import { NextRequest, NextResponse } from 'next/server';
+﻿import { NextRequest, NextResponse } from 'next/server';
 
-import { getBangumiCalendarData } from '@/lib/bangumi';
+import { getBangumiCalendarData } from '@/features/bangumi/lib/bangumi';
 import {
   BANGUMI_CALENDAR_FRESH_SECONDS,
   BANGUMI_CALENDAR_STALE_SECONDS,
-} from '@/lib/home-cache';
+} from '@/features/home/lib/home-cache';
 
 const MIN_TIMEOUT_MS = 1000;
 const MAX_TIMEOUT_MS = 30000;

@@ -1,4 +1,4 @@
-import { AdminConfig } from '@/features/admin/types/api';
+﻿import { AdminConfig } from '@/types/admin';
 
 import { configSelfCheck } from './config';
 import { getOwnerUsername } from './env.server';

@@ -1,8 +1,8 @@
-import {
+﻿import {
   consumeMatchingPlayIntent,
   PLAY_INTENT_KEY,
   savePlayIntent,
-} from '@/features/play/lib/playIntent';
+} from '@/lib/play-intent';
 
 describe('playIntent', () => {
   beforeEach(() => {

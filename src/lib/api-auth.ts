@@ -1,6 +1,6 @@
-import { NextRequest, NextResponse } from 'next/server';
+﻿import { NextRequest, NextResponse } from 'next/server';
 
-import { getAuthInfoFromCookie, getSignatureData } from './auth';
+import { getAuthInfoFromCookie, getSignatureData } from './auth.server';
 import { getConfig } from './config';
 import { getOwnerUsername } from './env.server';
 import { verifyAuthSignature } from './signing-secret.server';

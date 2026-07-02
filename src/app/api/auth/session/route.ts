@@ -1,6 +1,6 @@
-import { NextRequest, NextResponse } from 'next/server';
+﻿import { NextRequest, NextResponse } from 'next/server';
 
-import { getAuthInfoFromCookie, getSignatureData } from '@/lib/auth';
+import { getAuthInfoFromCookie, getSignatureData } from '@/lib/auth.server';
 import { getConfig } from '@/lib/config';
 import { getOwnerUsername } from '@/lib/env.server';
 import { NO_STORE_HEADERS } from '@/lib/http-cache';

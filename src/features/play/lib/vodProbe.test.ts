@@ -1,8 +1,8 @@
-import { getVideoResolutionFromM3u8 } from '@/lib/hls-utils';
+﻿import { getVideoResolutionFromM3u8 } from '@/features/play/lib/hls-utils';
 
 import { probeVodEpisodeUrl } from '@/features/play/lib/vodProbe';
 
-jest.mock('@/lib/hls-utils', () => ({
+jest.mock('@/features/play/lib/hls-utils', () => ({
   getVideoResolutionFromM3u8: jest.fn(),
 }));
 

@@ -1,4 +1,4 @@
-'use client';
+﻿'use client';
 
 import type Artplayer from 'artplayer';
 import {
@@ -33,7 +33,7 @@ import {
   resolveSourceSwitchResumeState,
   type SourceSwitchEpisodeAnchor,
 } from '@/features/play/lib/episodeResumePolicy';
-import { savePlayIntent } from '@/features/play/lib/playIntent';
+import { savePlayIntent } from '@/lib/play-intent';
 import {
   finalizeSourceSwitchCleanup,
   shouldFinalizeSourceSwitchCleanup,

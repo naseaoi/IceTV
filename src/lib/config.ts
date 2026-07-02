@@ -1,7 +1,7 @@
-import { db } from '@/lib/db';
+﻿import { db } from '@/lib/db';
 import { getOwnerUsername } from '@/lib/env.server';
 
-import { AdminConfig } from '@/features/admin/types/api';
+import { AdminConfig } from '@/types/admin';
 import {
   DEFAULT_BANGUMI_DATA_SOURCE,
   normalizeBangumiDataSource,

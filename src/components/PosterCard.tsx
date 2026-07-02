@@ -1,10 +1,10 @@
-'use client';
+﻿'use client';
 
 import { Link as LinkIcon, PlayCircleIcon } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import React, { memo, useCallback, useEffect, useId } from 'react';
 
-import { getAuthInfoFromBrowserCookie } from '@/lib/auth';
+import { getAuthInfoFromBrowserCookie } from '@/lib/auth.client';
 import { useLongPress } from '@/hooks/useLongPress';
 
 import { useOptionalCardInteractionManager } from '@/components/CardInteractionProvider';

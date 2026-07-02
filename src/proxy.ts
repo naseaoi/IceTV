@@ -1,4 +1,4 @@
-import { NextRequest, NextResponse } from 'next/server';
+﻿import { NextRequest, NextResponse } from 'next/server';
 
 import {
   generateSignature,
@@ -7,7 +7,7 @@ import {
   getSignatureData,
   shouldRefreshSession,
   verifySignature,
-} from '@/lib/auth';
+} from '@/lib/auth.server';
 import { getOwnerPassword } from '@/lib/env.server';
 
 function isSecureRequest(request: NextRequest): boolean {

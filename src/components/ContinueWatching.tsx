@@ -1,10 +1,10 @@
-'use client';
+﻿'use client';
 
 import { useEffect, useLayoutEffect, useState } from 'react';
 
 import { History } from 'lucide-react';
 
-import { getAuthInfoFromBrowserCookie } from '@/lib/auth';
+import { getAuthInfoFromBrowserCookie } from '@/lib/auth.client';
 import type { PlayRecord } from '@/lib/db.client';
 import {
   clearAllPlayRecords,

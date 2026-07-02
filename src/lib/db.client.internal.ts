@@ -1,4 +1,4 @@
-/**
+﻿/**
  * db.client.ts 的内部基础设施：
  * - 存储/网络工具函数
  * - HybridCacheManager
@@ -7,7 +7,7 @@
  * 该文件不包含 'use client' 指令，由 db.client.ts 统一声明。
  */
 
-import { getAuthInfoFromBrowserCookie } from './auth';
+import { getAuthInfoFromBrowserCookie } from './auth.client';
 import type { SkipConfig } from './types';
 import type { PlayRecord, Favorite, CacheUpdateEvent } from './db.client';
 

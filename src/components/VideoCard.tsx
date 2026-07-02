@@ -1,4 +1,4 @@
-import {
+﻿import {
   ExternalLink,
   Heart,
   Link,
@@ -25,11 +25,11 @@ import {
   generateStorageKey,
   saveFavorite,
 } from '@/lib/db.client';
-import { getAuthInfoFromBrowserCookie } from '@/lib/auth';
+import { getAuthInfoFromBrowserCookie } from '@/lib/auth.client';
 import { SearchResult } from '@/lib/types';
 import { warmupForPlayback } from '@/lib/video-prefetch';
 import { useLongPress } from '@/hooks/useLongPress';
-import { savePlayIntent } from '@/features/play/lib/playIntent';
+import { savePlayIntent } from '@/lib/play-intent';
 
 import {
   useCardInteractionManager,

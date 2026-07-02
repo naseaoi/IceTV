@@ -1,4 +1,4 @@
-import { Dispatch, MutableRefObject, SetStateAction, useEffect } from 'react';
+﻿import { Dispatch, MutableRefObject, SetStateAction, useEffect } from 'react';
 
 import type Artplayer from 'artplayer';
 
@@ -17,7 +17,7 @@ import {
   SessionLostReason,
   WakeLockSentinel,
 } from '@/features/play/lib/playTypes';
-import { consumeMatchingPlayIntent } from '@/features/play/lib/playIntent';
+import { consumeMatchingPlayIntent } from '@/lib/play-intent';
 import {
   applyResumeTime,
   isWithinAutoResumeWindow,

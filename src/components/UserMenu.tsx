@@ -1,4 +1,4 @@
-'use client';
+﻿'use client';
 
 import {
   GitBranch,
@@ -29,7 +29,7 @@ import {
   getSidebarItemLabelClass,
 } from './SidebarItem';
 
-import { getAuthInfoFromBrowserCookie } from '@/lib/auth';
+import { getAuthInfoFromBrowserCookie } from '@/lib/auth.client';
 import { getClientAuthRuntimeConfig } from '@/lib/runtime-config';
 import { CURRENT_VERSION } from '@/lib/version';
 import { checkForUpdates, UpdateStatus } from '@/lib/version-check';

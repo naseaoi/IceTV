@@ -1,8 +1,8 @@
-/** @jest-environment node */
+﻿/** @jest-environment node */
 
 import { webcrypto } from 'crypto';
 
-import { generateSignature } from '../auth';
+import { generateSignature } from '../auth.server';
 import { appendProxySignature, verifyProxySignature } from '../proxy-auth';
 
 Object.defineProperty(globalThis, 'crypto', {

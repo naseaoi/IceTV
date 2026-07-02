@@ -1,9 +1,9 @@
-'use client';
+﻿'use client';
 
 import { AlertTriangle, Download, FileCheck, Lock, Upload } from 'lucide-react';
 import { useRef, useState } from 'react';
 
-import AlertModal from '@/features/admin/components/AlertModal';
+import AlertModal from '@/components/modals/AlertModal';
 
 interface DataMigrationProps {
   onRefreshConfig?: () => Promise<void>;

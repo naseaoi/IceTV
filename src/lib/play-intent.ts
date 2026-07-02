@@ -1,7 +1,6 @@
-import type { ResumeMode } from '@/features/play/lib/resumePlayback';
-
 export const PLAY_INTENT_KEY = 'icetv_play_intent';
 const PLAY_INTENT_TTL_MS = 5 * 60 * 1000;
+type PlayIntentResumeMode = 'forced' | null;
 
 interface PlayIntentPayload {
   source: string;
@@ -27,7 +26,7 @@ interface ConsumePlayIntentOptions {
 interface PlayIntentRestoreState {
   episodeIndex: number;
   resumeTime: number;
-  resumeMode: ResumeMode;
+  resumeMode: PlayIntentResumeMode;
 }
 
 function isValidPlayIntentPayload(

@@ -1,6 +1,6 @@
-import { NextRequest, NextResponse } from 'next/server';
+﻿import { NextRequest, NextResponse } from 'next/server';
 
-import { getBangumiCoverTargetUrl } from '@/lib/bangumi-cover-url';
+import { getBangumiCoverTargetUrl } from '@/features/bangumi/lib/bangumi-cover-url';
 import {
   fetchStreamThroughProxy,
   getProxyUrlForTarget,

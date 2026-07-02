@@ -1,4 +1,4 @@
-/**
+﻿/**
  * 广告段识别纯函数的单测。
  * 覆盖本地强信号（EXTINF 整数规律、Host 异常）与兜底短路路径。
  * 网络相关的码率兜底路径不在此测试范围内（需 fetch stub）。
@@ -6,7 +6,7 @@
 import {
   shouldRunAdDetection,
   stripAdSegmentsByPhysicalSignal,
-} from '@/lib/ad-segment-detector';
+} from '@/features/play/lib/ad-segment-detector';
 
 describe('shouldRunAdDetection', () => {
   test('仅对 rycj 源站启用', () => {

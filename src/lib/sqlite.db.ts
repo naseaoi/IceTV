@@ -1,8 +1,8 @@
-import Database from 'better-sqlite3';
+﻿import Database from 'better-sqlite3';
 import { existsSync, mkdirSync, readFileSync } from 'fs';
 import path from 'path';
 
-import { AdminConfig } from '@/features/admin/types/api';
+import { AdminConfig } from '@/types/admin';
 
 import { hashPassword, verifyPassword } from './password';
 import {

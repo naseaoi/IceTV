@@ -1,11 +1,11 @@
-import { NextRequest, NextResponse } from 'next/server';
+﻿import { NextRequest, NextResponse } from 'next/server';
 
 import { authorizeProxyRequest } from '@/lib/proxy-auth';
 import {
   fetchResponseThroughProxy,
   getProxyUrlForTarget,
 } from '@/lib/http-proxy-json';
-import { isLiveEntryEnabled } from '@/lib/live';
+import { isLiveEntryEnabled } from '@/features/live/lib/live';
 import { markSourceCors, responseAllowsCors } from '@/lib/source-capability';
 import {
   readArrayBufferLimited,

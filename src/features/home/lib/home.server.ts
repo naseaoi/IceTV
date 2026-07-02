@@ -1,8 +1,9 @@
-import { getCachedBangumiCalendarData } from './bangumi';
-import { fetchDoubanData } from './douban';
+import { getCachedBangumiCalendarData } from '@/features/bangumi/lib/bangumi';
+import { fetchDoubanData } from '@/lib/douban';
+import { DoubanItem } from '@/lib/types';
+
 import { HOME_RECOMMENDATION_REVALIDATE_SECONDS } from './home-cache';
 import { HomeInitialData } from './home.types';
-import { DoubanItem } from './types';
 
 interface DoubanCategoryApiResponse {
   items: Array<{

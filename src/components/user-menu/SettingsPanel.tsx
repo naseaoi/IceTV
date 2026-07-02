@@ -1,11 +1,11 @@
-'use client';
+﻿'use client';
 
 import { ExternalLink, X } from 'lucide-react';
 import { useEffect, useState } from 'react';
 
 import AdminSelect from '@/features/admin/components/AdminSelect';
-import AlertModal from '@/features/admin/components/AlertModal';
-import { useAlertModal } from '@/features/admin/hooks/useAlertModal';
+import AlertModal from '@/components/modals/AlertModal';
+import { useAlertModal } from '@/hooks/useAlertModal';
 import {
   BANGUMI_DATA_SOURCE_STORAGE_KEY,
   BANGUMI_PROXY_URL_STORAGE_KEY,

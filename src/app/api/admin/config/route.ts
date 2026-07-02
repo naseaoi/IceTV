@@ -1,6 +1,6 @@
-import { NextRequest, NextResponse } from 'next/server';
+﻿import { NextRequest, NextResponse } from 'next/server';
 
-import { AdminConfigResult } from '@/features/admin/types/api';
+import { AdminConfigResult } from '@/types/admin';
 import { isGuardFailure, requireAdmin } from '@/lib/api-auth';
 import { getConfig } from '@/lib/config';
 

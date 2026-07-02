@@ -1,8 +1,8 @@
-'use client';
+﻿'use client';
 
 import { useCallback, useState } from 'react';
 
-import { useAlertModal } from '@/features/admin/hooks/useAlertModal';
+import { useAlertModal } from '@/hooks/useAlertModal';
 import { useLoadingState } from '@/features/admin/hooks/useLoadingState';
 
 type BatchAction = 'batch_enable' | 'batch_disable' | 'batch_delete';

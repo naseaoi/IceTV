@@ -1,4 +1,4 @@
-import type { AdminConfig } from '@/features/admin/types/api';
+﻿import type { AdminConfig } from '@/types/admin';
 
 type ConfigFileData = {
   api_site?: Record<string, unknown>;

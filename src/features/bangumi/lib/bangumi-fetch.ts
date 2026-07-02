@@ -4,7 +4,10 @@ import { request as httpsRequest } from 'node:https';
 import { connect as netConnect, Socket } from 'node:net';
 import { connect as tlsConnect, TLSSocket } from 'node:tls';
 
-import { fetchJsonThroughProxy, getProxyUrlForTarget } from './http-proxy-json';
+import {
+  fetchJsonThroughProxy,
+  getProxyUrlForTarget,
+} from '@/lib/http-proxy-json';
 
 export type BangumiFetchInit = RequestInit & {
   timeoutMs?: number;

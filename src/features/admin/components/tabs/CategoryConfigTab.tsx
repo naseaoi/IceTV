@@ -1,4 +1,4 @@
-'use client';
+﻿'use client';
 
 import {
   closestCenter,
@@ -23,9 +23,9 @@ import { CSS } from '@dnd-kit/utilities';
 import { GripVertical } from 'lucide-react';
 import { useEffect, useState } from 'react';
 
-import AlertModal from '@/features/admin/components/AlertModal';
+import AlertModal from '@/components/modals/AlertModal';
 import { CategoryAddForm } from '@/features/admin/components/tabs/category/CategoryAddForm';
-import { useAlertModal } from '@/features/admin/hooks/useAlertModal';
+import { useAlertModal } from '@/hooks/useAlertModal';
 import { useAdminSourceActions } from '@/features/admin/hooks/useAdminSourceActions';
 import { useLoadingState } from '@/features/admin/hooks/useLoadingState';
 import {
@@ -33,7 +33,7 @@ import {
   statusBadgeStyles,
 } from '@/features/admin/lib/buttonStyles';
 import { showError } from '@/features/admin/lib/notifications';
-import { AdminConfig } from '@/features/admin/types/api';
+import { AdminConfig } from '@/types/admin';
 import { CustomCategory } from '@/features/admin/types/internal';
 
 const CategoryConfig = ({

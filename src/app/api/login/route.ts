@@ -1,4 +1,4 @@
-import crypto from 'crypto';
+﻿import crypto from 'crypto';
 import { NextRequest, NextResponse } from 'next/server';
 
 import {
@@ -6,7 +6,7 @@ import {
   generateSignature,
   getSessionExpiresAt,
   getSignatureData,
-} from '@/lib/auth';
+} from '@/lib/auth.server';
 import { getConfig } from '@/lib/config';
 import { db } from '@/lib/db';
 import { getOwnerPassword, getOwnerUsername } from '@/lib/env.server';

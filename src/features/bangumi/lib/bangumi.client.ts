@@ -1,13 +1,16 @@
-'use client';
+﻿'use client';
 
 export type { BangumiCalendarData } from './bangumi';
 import type { BangumiCalendarData } from './bangumi';
 import {
   BANGUMI_CALENDAR_FRESH_SECONDS,
   BANGUMI_CALENDAR_MAX_AGE_SECONDS,
-} from './home-cache';
+} from '@/features/home/lib/home-cache';
 import { normalizeBangumiCalendarData } from './bangumi-normalize';
-import { readBangumiDataSource, readBangumiProxyUrl } from './bangumi-source';
+import {
+  readBangumiDataSource,
+  readBangumiProxyUrl,
+} from '@/lib/bangumi-source';
 
 const BANGUMI_CALENDAR_URL = 'https://api.bgm.tv/calendar';
 const BANGUMI_CALENDAR_CACHE_STORAGE_KEY = 'bangumiCalendarCache';

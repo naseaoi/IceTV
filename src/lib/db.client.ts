@@ -1,7 +1,7 @@
-'use client';
+﻿'use client';
 
-import { getAuthInfoFromBrowserCookie } from './auth';
-import { SkipConfig } from './types';
+import { getAuthInfoFromBrowserCookie } from './auth.client';
+import type { Favorite, PlayRecord, SkipConfig } from './types';
 
 import {
   cacheManager,
@@ -14,31 +14,7 @@ import {
   createOptimisticWriter,
 } from './db.client.internal';
 
-// ---- 类型 ----
-export interface PlayRecord {
-  title: string;
-  source_name: string;
-  year: string;
-  cover: string;
-  index: number; // 第几集
-  total_episodes: number; // 总集数
-  play_time: number; // 播放进度（秒）
-  total_time: number; // 总进度（秒）
-  save_time: number; // 记录保存时间（时间戳）
-  search_title?: string; // 搜索时使用的标题
-}
-
-// ---- 收藏类型 ----
-export interface Favorite {
-  title: string;
-  source_name: string;
-  year: string;
-  cover: string;
-  total_episodes: number;
-  save_time: number;
-  search_title?: string;
-  origin?: 'vod' | 'live';
-}
+export type { Favorite, PlayRecord, SkipConfig } from './types';
 
 // 搜索历史最大保存条数
 const SEARCH_HISTORY_LIMIT = 20;

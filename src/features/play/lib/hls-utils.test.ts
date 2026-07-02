@@ -1,4 +1,4 @@
-import { getVideoResolutionFromM3u8 } from '@/lib/hls-utils';
+﻿import { getVideoResolutionFromM3u8 } from '@/features/play/lib/hls-utils';
 
 describe('getVideoResolutionFromM3u8', () => {
   const originalFetch = global.fetch;

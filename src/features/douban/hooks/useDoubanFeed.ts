@@ -1,4 +1,4 @@
-'use client';
+﻿'use client';
 
 import {
   useCallback,
@@ -8,8 +8,8 @@ import {
   useState,
 } from 'react';
 
-import { GetBangumiCalendarData } from '@/lib/bangumi.client';
-import { selectBangumiCardCover } from '@/lib/bangumi-normalize';
+import { GetBangumiCalendarData } from '@/features/bangumi/lib/bangumi.client';
+import { selectBangumiCardCover } from '@/features/bangumi/lib/bangumi-normalize';
 import {
   getDoubanCategories,
   getDoubanList,

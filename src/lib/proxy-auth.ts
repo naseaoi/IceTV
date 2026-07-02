@@ -1,6 +1,6 @@
-import type { NextRequest, NextResponse } from 'next/server';
+﻿import type { NextRequest, NextResponse } from 'next/server';
 
-import { generateSignature, verifySignature } from './auth';
+import { generateSignature, verifySignature } from './auth.server';
 import { getAuthSigningSecret } from './signing-secret.server';
 
 export type ProxySignaturePurpose =

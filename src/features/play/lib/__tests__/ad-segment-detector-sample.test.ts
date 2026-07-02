@@ -1,4 +1,4 @@
-/**
+﻿/**
  * 真实样本回归：用户报告链接 rycj/2000k/hls/index.m3u8，
  * 在 7:15-7:37 (435.77~457.77s) 有广告。
  *
@@ -13,7 +13,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
 
-import { stripAdSegmentsByPhysicalSignal } from '@/lib/ad-segment-detector';
+import { stripAdSegmentsByPhysicalSignal } from '@/features/play/lib/ad-segment-detector';
 
 const ORIGIN =
   'https://cdn.ryplay12.com/20250713/19853_cd5f3209/2000k/hls/index.m3u8';

@@ -1,4 +1,4 @@
-import { getBaseUrl, resolveUrl } from '@/lib/live';
+﻿import { getBaseUrl, resolveUrl } from '@/lib/url-resolve';
 import { fetchWithUrlGuard } from '@/lib/url-guard';
 
 interface DiscontSegment {

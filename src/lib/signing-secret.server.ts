@@ -1,4 +1,4 @@
-import { verifySignature } from './auth';
+﻿import { verifySignature } from './auth.server';
 import { getOwnerPassword } from './env.server';
 
 const AUTH_SECRET_ENV_KEYS = ['AUTH_SECRET', 'ICETV_AUTH_SECRET'] as const;

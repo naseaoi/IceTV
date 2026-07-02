@@ -1,4 +1,7 @@
-import { parseEpgXmlForChannels, parseLivePlaylist } from '@/lib/live';
+﻿import {
+  parseEpgXmlForChannels,
+  parseLivePlaylist,
+} from '@/features/live/lib/live';
 
 describe('parseLivePlaylist', () => {
   it('解析文本 IPTV 分组清单', () => {

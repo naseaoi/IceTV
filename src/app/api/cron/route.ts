@@ -1,4 +1,4 @@
-import * as crypto from 'crypto';
+﻿import * as crypto from 'crypto';
 import { NextRequest, NextResponse } from 'next/server';
 
 import { getConfig, refineConfig, saveConfig } from '@/lib/config';
@@ -6,7 +6,10 @@ import { db } from '@/lib/db';
 import { parseStorageKey } from '@/lib/utils';
 import { getOwnerUsername } from '@/lib/env.server';
 import { fetchVideoDetail } from '@/lib/fetchVideoDetail';
-import { isLiveEntryEnabledInConfig, refreshLiveChannels } from '@/lib/live';
+import {
+  isLiveEntryEnabledInConfig,
+  refreshLiveChannels,
+} from '@/features/live/lib/live';
 import { SearchResult } from '@/lib/types';
 import { fetchWithUrlGuard } from '@/lib/url-guard';
 

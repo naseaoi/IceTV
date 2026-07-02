@@ -1,4 +1,4 @@
-import { getSessionExpiresAt } from '../auth';
+﻿import { getSessionExpiresAt } from '../auth.server';
 
 describe('getSessionExpiresAt', () => {
   const originalTtl = process.env.AUTH_SESSION_TTL_HOURS;

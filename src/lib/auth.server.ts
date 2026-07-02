@@ -1,6 +1,8 @@
+﻿import 'server-only';
+
 import { NextRequest } from 'next/server';
 
-type AuthRole = 'owner' | 'admin' | 'user';
+export type AuthRole = 'owner' | 'admin' | 'user';
 
 export type AuthCookiePayload = {
   username?: string;
@@ -10,16 +12,10 @@ export type AuthCookiePayload = {
   sessionType?: 'account';
 };
 
-export type AuthMetaPayload = {
-  username?: string;
-  role?: AuthRole;
-};
-
 const SESSION_HOUR_MS = 60 * 60 * 1000;
 const DEFAULT_SESSION_TTL_HOURS = 24 * 30;
 const PERMANENT_SESSION_EXPIRES_AT = Date.parse('2099-12-31T23:59:59.999Z');
 
-// 从cookie获取认证信息 (服务端使用)
 export function getAuthInfoFromCookie(
   request: NextRequest,
 ): AuthCookiePayload | null {
@@ -42,83 +38,6 @@ export function parseAuthCookieValue(value: string): AuthCookiePayload | null {
   }
 }
 
-// 从cookie获取认证信息 (客户端使用)
-export function getAuthInfoFromBrowserCookie(): AuthMetaPayload | null {
-  if (typeof window === 'undefined') {
-    return null;
-  }
-
-  try {
-    const parseCookieJson = <T>(value: string): T | null => {
-      try {
-        return JSON.parse(value) as T;
-      } catch (_) {
-        // continue fallback decoding
-      }
-
-      try {
-        return JSON.parse(decodeURIComponent(value)) as T;
-      } catch (_) {
-        // continue fallback decoding
-      }
-
-      try {
-        return JSON.parse(decodeURIComponent(decodeURIComponent(value))) as T;
-      } catch (_) {
-        return null;
-      }
-    };
-
-    // 解析 document.cookie
-    const cookies = document.cookie.split(';').reduce(
-      (acc, cookie) => {
-        const trimmed = cookie.trim();
-        const firstEqualIndex = trimmed.indexOf('=');
-
-        if (firstEqualIndex > 0) {
-          const key = trimmed.substring(0, firstEqualIndex);
-          const value = trimmed.substring(firstEqualIndex + 1);
-          if (key && value) {
-            acc[key] = value;
-          }
-        }
-
-        return acc;
-      },
-      {} as Record<string, string>,
-    );
-
-    const authMetaCookie = cookies['auth_meta'];
-    if (authMetaCookie) {
-      const authMeta = parseCookieJson<AuthMetaPayload>(authMetaCookie);
-      if (authMeta) {
-        return authMeta;
-      }
-    }
-
-    const authCookie = cookies['auth'];
-    if (!authCookie) {
-      return null;
-    }
-
-    const authData = parseCookieJson<AuthCookiePayload>(authCookie);
-    if (!authData) {
-      return null;
-    }
-
-    return {
-      username: authData.username,
-      role: authData.role,
-    };
-  } catch (error) {
-    return null;
-  }
-}
-
-/**
- * 读取会话过期时间配置。
- * 未配置时默认采用长期登录，只有主动登出才会失效。
- */
 export function getSessionExpiresAt(now: number = Date.now()): number {
   const ttlHoursRaw = process.env.AUTH_SESSION_TTL_HOURS;
 
@@ -138,9 +57,6 @@ export function getSessionExpiresAt(now: number = Date.now()): number {
   return now + Math.max(1, ttlHours) * SESSION_HOUR_MS;
 }
 
-/**
- * 统一生成签名原文，避免登录、校验、续期各处规则不一致。
- */
 export function getSignatureData(
   sessionType: AuthCookiePayload['sessionType'],
   expiresAt: number,
@@ -157,10 +73,6 @@ export function getSignatureData(
   return `${username}:${expiresAt}`;
 }
 
-/**
- * 判断当前会话是否需要刷新过期时间。
- * 永久会话只在首次迁移时刷新一次；有限时长会话在临近过期时续期。
- */
 export function shouldRefreshSession(
   currentExpiresAt: number,
   nextExpiresAt: number,
@@ -181,7 +93,6 @@ export function shouldRefreshSession(
   return remainingMs <= refreshThresholdMs;
 }
 
-// CryptoKey 缓存：secret 在应用生命周期内不变，避免每次请求都 importKey
 let _cachedSecret: string | null = null;
 let _cachedKey: CryptoKey | null = null;
 let _cachedSigningSecret: string | null = null;
@@ -221,10 +132,6 @@ async function getCachedSigningKey(secret: string): Promise<CryptoKey> {
   return _cachedSigningKey;
 }
 
-/**
- * 使用 HMAC-SHA256 生成签名。
- * 用于登录写入和 proxy 续期写回。
- */
 export async function generateSignature(
   data: string,
   secret: string,
@@ -238,10 +145,6 @@ export async function generateSignature(
     .join('');
 }
 
-/**
- * 使用 HMAC-SHA256 验证签名。
- * 用于 session 校验和 proxy 认证。
- */
 export async function verifySignature(
   data: string,
   signature: string,

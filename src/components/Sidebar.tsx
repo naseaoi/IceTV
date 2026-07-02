@@ -1,4 +1,4 @@
-'use client';
+﻿'use client';
 
 import {
   Cat,
@@ -37,7 +37,7 @@ import {
 import { ThemeToggle } from './ThemeToggle';
 import { UserMenu } from './UserMenu';
 
-import { getAuthInfoFromBrowserCookie } from '@/lib/auth';
+import { getAuthInfoFromBrowserCookie } from '@/lib/auth.client';
 import { RuntimeConfig } from '@/lib/runtime-config';
 
 interface SidebarContextType {

@@ -1,16 +1,16 @@
-'use client';
+﻿'use client';
 
 import { ExternalLink, ImagePlus, Trash2, Upload } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 
 import AdminSelect from '@/features/admin/components/AdminSelect';
-import AlertModal from '@/features/admin/components/AlertModal';
-import { useAlertModal } from '@/features/admin/hooks/useAlertModal';
+import AlertModal from '@/components/modals/AlertModal';
+import { useAlertModal } from '@/hooks/useAlertModal';
 import { useLoadingState } from '@/features/admin/hooks/useLoadingState';
 import { adminPost } from '@/features/admin/lib/api';
 import { buttonStyles } from '@/features/admin/lib/buttonStyles';
 import { showError, showSuccess } from '@/features/admin/lib/notifications';
-import { AdminConfig } from '@/features/admin/types/api';
+import { AdminConfig } from '@/types/admin';
 import { SiteConfig } from '@/features/admin/types/internal';
 import {
   DEFAULT_BANGUMI_DATA_SOURCE,

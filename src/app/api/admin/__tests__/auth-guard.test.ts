@@ -1,6 +1,6 @@
-/** @jest-environment node */
+﻿/** @jest-environment node */
 
-import { getAuthInfoFromCookie } from '@/lib/auth';
+import { getAuthInfoFromCookie } from '@/lib/auth.server';
 import { getConfig, resetConfig, saveConfig } from '@/lib/config';
 import { getOwnerPassword, getOwnerUsername } from '@/lib/env.server';
 import { verifyAuthSignature } from '@/lib/signing-secret.server';
@@ -70,7 +70,7 @@ if (!(globalThis as any).Response) {
   (globalThis as any).Response = MinimalResponse;
 }
 
-jest.mock('@/lib/auth', () => ({
+jest.mock('@/lib/auth.server', () => ({
   getAuthInfoFromCookie: jest.fn(),
   getSignatureData: jest.fn(() => 'mock-sign-data'),
 }));

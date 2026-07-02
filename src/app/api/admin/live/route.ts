@@ -1,4 +1,4 @@
-import { NextRequest, NextResponse } from 'next/server';
+﻿import { NextRequest, NextResponse } from 'next/server';
 
 import { isGuardFailure, requireAdmin } from '@/lib/api-auth';
 import { getConfig, saveConfig } from '@/lib/config';
@@ -6,7 +6,10 @@ import {
   buildConfigFileFromAdminConfig,
   removeConfigFileEntries,
 } from '@/lib/config-file-json';
-import { deleteCachedLiveChannels, refreshLiveChannels } from '@/lib/live';
+import {
+  deleteCachedLiveChannels,
+  refreshLiveChannels,
+} from '@/features/live/lib/live';
 
 export const runtime = 'nodejs';
 

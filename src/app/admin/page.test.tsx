@@ -1,4 +1,4 @@
-import type { ReactNode } from 'react';
+﻿import type { ReactNode } from 'react';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 
 import AdminPage from '@/app/admin/page';
@@ -13,7 +13,7 @@ jest.mock('@/components/DataMigration', () => ({
   default: () => <div>DataMigration</div>,
 }));
 
-jest.mock('@/features/admin/components/AlertModal', () => ({
+jest.mock('@/components/modals/AlertModal', () => ({
   __esModule: true,
   default: () => null,
 }));
@@ -60,7 +60,7 @@ jest.mock('@/features/admin/components/tabs/SiteConfigTab', () => ({
   default: () => <div>SiteConfigTab</div>,
 }));
 
-jest.mock('@/features/admin/hooks/useAlertModal', () => ({
+jest.mock('@/hooks/useAlertModal', () => ({
   useAlertModal: () => ({
     alertModal: { isOpen: false, type: 'success', title: '' },
     showAlert: jest.fn(),

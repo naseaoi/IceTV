@@ -1,5 +1,5 @@
-import { BangumiCalendarData } from './bangumi';
-import { DoubanItem } from './types';
+import { BangumiCalendarData } from '@/features/bangumi/lib/bangumi';
+import { DoubanItem } from '@/lib/types';
 
 export interface HomeInitialData {
   hotMovies: DoubanItem[];

@@ -1,8 +1,11 @@
-import { NextRequest, NextResponse } from 'next/server';
+﻿import { NextRequest, NextResponse } from 'next/server';
 
 import { isGuardFailure, requireAdmin } from '@/lib/api-auth';
 import { getConfig, saveConfig } from '@/lib/config';
-import { isLiveEntryEnabledInConfig, refreshLiveChannels } from '@/lib/live';
+import {
+  isLiveEntryEnabledInConfig,
+  refreshLiveChannels,
+} from '@/features/live/lib/live';
 
 export const runtime = 'nodejs';
 

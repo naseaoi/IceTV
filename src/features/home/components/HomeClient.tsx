@@ -1,4 +1,4 @@
-'use client';
+﻿'use client';
 
 import {
   Cat,
@@ -12,8 +12,8 @@ import {
 import Link from 'next/link';
 import { useEffect, useMemo, useState } from 'react';
 
-import { GetBangumiCalendarData } from '@/lib/bangumi.client';
-import { selectBangumiCardCover } from '@/lib/bangumi-normalize';
+import { GetBangumiCalendarData } from '@/features/bangumi/lib/bangumi.client';
+import { selectBangumiCardCover } from '@/features/bangumi/lib/bangumi-normalize';
 import {
   clearAllFavorites,
   getAllFavorites,
@@ -21,7 +21,7 @@ import {
   subscribeToDataUpdates,
 } from '@/lib/db.client';
 import { getDoubanCategories } from '@/lib/douban.client';
-import { HomeInitialData } from '@/lib/home.types';
+import { HomeInitialData } from '@/features/home/lib/home.types';
 import { DoubanItem } from '@/lib/types';
 import {
   getCurrentWeekday,

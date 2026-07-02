@@ -1,8 +1,8 @@
-'use client';
+﻿'use client';
 
 import { useCallback } from 'react';
 
-import { type ShowAlertFn } from '@/features/admin/hooks/useAlertModal';
+import { type ShowAlertFn } from '@/hooks/useAlertModal';
 import { adminPost } from '@/features/admin/lib/api';
 import { showError } from '@/features/admin/lib/notifications';
 

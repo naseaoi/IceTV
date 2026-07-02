@@ -1,4 +1,4 @@
-import { getVideoResolutionFromM3u8 } from '@/lib/hls-utils';
+﻿import { getVideoResolutionFromM3u8 } from '@/features/play/lib/hls-utils';
 import { formatBytesPerSecond } from '@/lib/player-utils';
 import {
   clearSourceProxyOverride,

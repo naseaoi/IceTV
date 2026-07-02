@@ -1,13 +1,13 @@
-'use client';
+﻿'use client';
 import { useEffect, useState } from 'react';
 
-import AlertModal from '@/features/admin/components/AlertModal';
-import { useAlertModal } from '@/features/admin/hooks/useAlertModal';
+import AlertModal from '@/components/modals/AlertModal';
+import { useAlertModal } from '@/hooks/useAlertModal';
 import { useLoadingState } from '@/features/admin/hooks/useLoadingState';
 import { adminPost } from '@/features/admin/lib/api';
 import { buttonStyles } from '@/features/admin/lib/buttonStyles';
 import { showError, showSuccess } from '@/features/admin/lib/notifications';
-import { AdminConfig } from '@/features/admin/types/api';
+import { AdminConfig } from '@/types/admin';
 import { buildConfigFileFromAdminConfig } from '@/lib/config-file-json';
 
 const ConfigFileComponent = ({

@@ -5,7 +5,7 @@ import {
 import {
   BANGUMI_CALENDAR_FRESH_SECONDS,
   BANGUMI_CALENDAR_MAX_AGE_SECONDS,
-} from './home-cache';
+} from '@/features/home/lib/home-cache';
 import { normalizeBangumiCalendarData } from './bangumi-normalize';
 
 export interface BangumiCalendarData {
