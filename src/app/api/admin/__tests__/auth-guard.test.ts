@@ -1,8 +1,9 @@
 /** @jest-environment node */
 
-import { getAuthInfoFromCookie, verifySignature } from '@/lib/auth';
+import { getAuthInfoFromCookie } from '@/lib/auth';
 import { getConfig, resetConfig, saveConfig } from '@/lib/config';
 import { getOwnerPassword, getOwnerUsername } from '@/lib/env.server';
+import { verifyAuthSignature } from '@/lib/signing-secret.server';
 
 if (!(globalThis as any).Headers) {
   class MinimalHeaders {
@@ -72,7 +73,6 @@ if (!(globalThis as any).Response) {
 jest.mock('@/lib/auth', () => ({
   getAuthInfoFromCookie: jest.fn(),
   getSignatureData: jest.fn(() => 'mock-sign-data'),
-  verifySignature: jest.fn(),
 }));
 
 jest.mock('@/lib/config', () => ({
@@ -84,6 +84,10 @@ jest.mock('@/lib/config', () => ({
 jest.mock('@/lib/env.server', () => ({
   getOwnerUsername: jest.fn(),
   getOwnerPassword: jest.fn(),
+}));
+
+jest.mock('@/lib/signing-secret.server', () => ({
+  verifyAuthSignature: jest.fn(),
 }));
 
 function getHandlers() {
@@ -101,8 +105,8 @@ function getHandlers() {
 describe('admin api auth guard regression', () => {
   const mockedGetAuthInfoFromCookie =
     getAuthInfoFromCookie as jest.MockedFunction<typeof getAuthInfoFromCookie>;
-  const mockedVerifySignature = verifySignature as jest.MockedFunction<
-    typeof verifySignature
+  const mockedVerifyAuthSignature = verifyAuthSignature as jest.MockedFunction<
+    typeof verifyAuthSignature
   >;
   const mockedGetConfig = getConfig as jest.MockedFunction<typeof getConfig>;
   const mockedResetConfig = resetConfig as jest.MockedFunction<
@@ -151,7 +155,7 @@ describe('admin api auth guard regression', () => {
     process.env.NEXT_PUBLIC_STORAGE_TYPE = 'localdb';
     mockedGetOwnerUsername.mockReturnValue('owner-1');
     mockedGetOwnerPassword.mockReturnValue('owner-secret');
-    mockedVerifySignature.mockResolvedValue(true);
+    mockedVerifyAuthSignature.mockResolvedValue(true);
     mockedGetConfig.mockResolvedValue(baseConfig as never);
   });
 

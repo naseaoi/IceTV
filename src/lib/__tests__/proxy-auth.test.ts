@@ -2,6 +2,7 @@
 
 import { webcrypto } from 'crypto';
 
+import { generateSignature } from '../auth';
 import { appendProxySignature, verifyProxySignature } from '../proxy-auth';
 
 Object.defineProperty(globalThis, 'crypto', {
@@ -13,6 +14,20 @@ jest.mock('../env.server', () => ({
 }));
 
 describe('proxy auth signatures', () => {
+  const originalAuthSecret = process.env.AUTH_SECRET;
+
+  beforeEach(() => {
+    process.env.AUTH_SECRET = 'auth-secret';
+  });
+
+  afterEach(() => {
+    if (originalAuthSecret === undefined) {
+      delete process.env.AUTH_SECRET;
+    } else {
+      process.env.AUTH_SECRET = originalAuthSecret;
+    }
+  });
+
   it('accepts a valid signature for the same purpose and target', async () => {
     const targetUrl = 'https://example.com/live/segment.ts';
     const params = new URLSearchParams({ url: targetUrl });
@@ -38,5 +53,23 @@ describe('proxy auth signatures', () => {
     await expect(verifyProxySignature(params, 'key', targetUrl)).resolves.toBe(
       false,
     );
+  });
+
+  it('rejects signatures created with the owner password', async () => {
+    const targetUrl = 'https://example.com/live/segment.ts';
+    const expiresAt = Date.now() + 60_000;
+    const signature = await generateSignature(
+      JSON.stringify(['segment', targetUrl, expiresAt]),
+      'owner-secret',
+    );
+    const params = new URLSearchParams({
+      url: targetUrl,
+      'icetv-expires': String(expiresAt),
+      'icetv-signature': signature,
+    });
+
+    await expect(
+      verifyProxySignature(params, 'segment', targetUrl),
+    ).resolves.toBe(false);
   });
 });

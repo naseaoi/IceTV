@@ -152,7 +152,9 @@ describe('AdminPage role visibility', () => {
     });
 
     expect(screen.getByText('数据迁移')).toBeInTheDocument();
-    expect(screen.getByText('重置配置')).toBeInTheDocument();
+    expect(
+      screen.getByRole('button', { name: '重置配置' }),
+    ).toBeInTheDocument();
   });
 
   it('hides owner-only sections for admin', async () => {
@@ -165,7 +167,9 @@ describe('AdminPage role visibility', () => {
 
     expect(screen.queryByText('配置文件')).not.toBeInTheDocument();
     expect(screen.queryByText('数据迁移')).not.toBeInTheDocument();
-    expect(screen.queryByText('重置配置')).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole('button', { name: '重置配置' }),
+    ).not.toBeInTheDocument();
   });
 
   it('opens reset confirm modal and triggers reset action', async () => {
@@ -175,10 +179,12 @@ describe('AdminPage role visibility', () => {
     render(<AdminPage />);
 
     await waitFor(() => {
-      expect(screen.getByText('重置配置')).toBeInTheDocument();
+      expect(
+        screen.getByRole('button', { name: '重置配置' }),
+      ).toBeInTheDocument();
     });
 
-    fireEvent.click(screen.getByText('重置配置'));
+    fireEvent.click(screen.getByRole('button', { name: '重置配置' }));
 
     await waitFor(() => {
       expect(screen.getByText('ConfirmModal')).toBeInTheDocument();

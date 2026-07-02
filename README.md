@@ -85,6 +85,8 @@ services:
     environment:
       - ICETV_USERNAME=admin
       - ICETV_PASSWORD=admin_password
+      - AUTH_SECRET=replace_with_random_auth_secret
+      - CRON_SECRET=replace_with_random_secret
       - LOCAL_DB_PATH=/data/icetv-data.sqlite
     volumes:
       - icetv-data:/data
@@ -105,6 +107,8 @@ Vercel 项目中至少配置以下环境变量：
 ```bash
 ICETV_USERNAME=admin
 ICETV_PASSWORD=your_strong_password
+AUTH_SECRET=replace_with_random_auth_secret
+CRON_SECRET=replace_with_random_cron_secret
 DATABASE_URL=mysql://user:password@host:3306/dbname?ssl-mode=REQUIRED
 ```
 
@@ -164,6 +168,8 @@ IceTV 支持标准的苹果 CMS V10 API 格式。
 | ------------------------------- | ------------ | -------------- | ----------------------------------- | -------------------------- |
 | `ICETV_USERNAME`                | 站长账号     | 是             | 无                                  | 任意字符串                 |
 | `ICETV_PASSWORD`                | 站长密码     | 是             | 无                                  | 任意字符串                 |
+| `AUTH_SECRET`                   | 签名密钥     | 是             | 无                                  | 高熵随机字符串             |
+| `CRON_SECRET`                   | 定时任务密钥 | Docker 必填    | 无                                  | 高熵随机字符串             |
 | `AUTH_SESSION_TTL_HOURS`        | 登录态时长   | 否             | `720`                               | 正整数或 `0`               |
 | `NEXT_PUBLIC_STORAGE_TYPE`      | 存储类型     | 否             | 自动识别，默认 `localdb`            | `localdb` / `mysql`        |
 | `LOCAL_DB_PATH`                 | SQLite 路径  | 否             | `/data/icetv-data.sqlite`（Docker） | 绝对路径                   |

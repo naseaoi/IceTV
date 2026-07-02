@@ -296,9 +296,7 @@ export class MySqlStorage implements IStorage {
     await this.ensureInitialized();
     const hashed = await hashPassword(password);
     await this.pool.execute(
-      `INSERT INTO users (username, password)
-       VALUES (?, ?)
-       ON DUPLICATE KEY UPDATE password = VALUES(password)`,
+      'INSERT INTO users (username, password) VALUES (?, ?)',
       [userName, hashed],
     );
   }

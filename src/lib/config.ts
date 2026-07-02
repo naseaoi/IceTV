@@ -57,7 +57,10 @@ export const API_CONFIG = {
 };
 
 let cachedConfig: AdminConfig;
+let cachedConfigVersion = '';
 const PUBLIC_CONFIG_CACHE_TAG = 'public-config';
+type ManagedUser = AdminConfig['UserConfig']['Users'][number];
+const configVersionByObject = new WeakMap<AdminConfig, string>();
 
 type NextCacheApi = {
   revalidateTag?: (tag: string) => void;
@@ -341,8 +344,10 @@ export async function getConfig(): Promise<AdminConfig> {
     shouldPersist = true;
   }
   const originalConfigJson = JSON.stringify(adminConfig);
-  adminConfig = configSelfCheck(adminConfig);
+  adminConfig = await syncConfigUsersWithDb(configSelfCheck(adminConfig));
   cachedConfig = adminConfig;
+  cachedConfigVersion = getConfigVersion(cachedConfig);
+  bindConfigVersion(cachedConfig, cachedConfigVersion);
 
   if (!shouldPersist) {
     shouldPersist = JSON.stringify(cachedConfig) !== originalConfigJson;
@@ -538,17 +543,103 @@ export async function resetConfig() {
   );
   await db.saveAdminConfig(adminConfig);
   cachedConfig = cloneConfig(adminConfig);
+  cachedConfigVersion = getConfigVersion(cachedConfig);
+  bindConfigVersion(cachedConfig, cachedConfigVersion);
   invalidatePublicConfigCache();
 
   return;
 }
 
 export async function saveConfig(config: AdminConfig): Promise<AdminConfig> {
-  const nextConfig = configSelfCheck(cloneConfig(config));
+  const expectedVersion = configVersionByObject.get(config);
+  if (expectedVersion) {
+    await assertConfigVersion(expectedVersion);
+  }
+
+  const nextConfig = await syncConfigUsersWithDb(
+    configSelfCheck(cloneConfig(config)),
+  );
   await db.saveAdminConfig(nextConfig);
   cachedConfig = cloneConfig(nextConfig);
+  cachedConfigVersion = getConfigVersion(cachedConfig);
+  bindConfigVersion(cachedConfig, cachedConfigVersion);
   invalidatePublicConfigCache();
   return cloneConfig(cachedConfig);
+}
+
+export class ConfigConflictError extends Error {
+  constructor() {
+    super('配置已被其他操作更新，请刷新后重试');
+    this.name = 'ConfigConflictError';
+  }
+}
+
+async function assertConfigVersion(expectedVersion: string): Promise<void> {
+  const currentConfig = await db.getAdminConfig();
+  if (!currentConfig) {
+    if (expectedVersion !== '') {
+      throw new ConfigConflictError();
+    }
+    return;
+  }
+
+  if (getConfigVersion(configSelfCheck(currentConfig)) !== expectedVersion) {
+    throw new ConfigConflictError();
+  }
+}
+
+async function syncConfigUsersWithDb(
+  adminConfig: AdminConfig,
+): Promise<AdminConfig> {
+  let userNames: string[];
+  try {
+    userNames = await db.getAllUsers();
+  } catch (error) {
+    console.error('获取用户列表失败:', error);
+    return adminConfig;
+  }
+
+  const ownerUsername = getOwnerUsername();
+  const existingUsers = new Map(
+    adminConfig.UserConfig.Users.map((user) => [user.username, user]),
+  );
+  const nextUsers: ManagedUser[] = [];
+  const seenUsernames = new Set<string>();
+
+  if (ownerUsername) {
+    const ownerEntry = existingUsers.get(ownerUsername);
+    nextUsers.push({
+      username: ownerUsername,
+      role: 'owner',
+      banned: false,
+      enabledApis: cloneStringList(ownerEntry?.enabledApis),
+      tags: cloneStringList(ownerEntry?.tags),
+    });
+    seenUsernames.add(ownerUsername);
+  }
+
+  for (const userName of userNames) {
+    if (!userName || seenUsernames.has(userName)) {
+      continue;
+    }
+
+    const existingUser = existingUsers.get(userName);
+    nextUsers.push({
+      username: userName,
+      role: existingUser?.role === 'admin' ? 'admin' : 'user',
+      banned: !!existingUser?.banned,
+      enabledApis: cloneStringList(existingUser?.enabledApis),
+      tags: cloneStringList(existingUser?.tags),
+    });
+    seenUsernames.add(userName);
+  }
+
+  adminConfig.UserConfig.Users = nextUsers;
+  return adminConfig;
+}
+
+function cloneStringList(value?: string[]): string[] | undefined {
+  return Array.isArray(value) ? [...value] : undefined;
 }
 
 export function getCacheTime(config: AdminConfig): number;
@@ -635,11 +726,27 @@ export async function getAvailableApiSites(
 
 export async function setCachedConfig(config: AdminConfig) {
   cachedConfig = configSelfCheck(cloneConfig(config));
+  cachedConfigVersion = getConfigVersion(cachedConfig);
+  bindConfigVersion(cachedConfig, cachedConfigVersion);
   invalidatePublicConfigCache();
 }
 
 function cloneConfig(config: AdminConfig): AdminConfig {
-  return JSON.parse(JSON.stringify(config)) as AdminConfig;
+  const cloned = JSON.parse(JSON.stringify(config)) as AdminConfig;
+  const version = configVersionByObject.get(config);
+  if (version) {
+    bindConfigVersion(cloned, version);
+  }
+  return cloned;
+}
+
+function bindConfigVersion(config: AdminConfig, version: string): AdminConfig {
+  configVersionByObject.set(config, version);
+  return config;
+}
+
+function getConfigVersion(config: AdminConfig): string {
+  return JSON.stringify(config);
 }
 
 async function readPublicConfig() {

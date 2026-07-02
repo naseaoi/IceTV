@@ -108,7 +108,8 @@ export async function POST(request: NextRequest) {
 
     switch (action) {
       case 'add': {
-        if (targetEntry) {
+        const targetExistsInDb = await db.checkUserExist(targetUsername!);
+        if (targetEntry || targetExistsInDb) {
           return NextResponse.json({ error: '用户已存在' }, { status: 400 });
         }
         if (!targetPassword) {

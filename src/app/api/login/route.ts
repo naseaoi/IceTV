@@ -10,6 +10,7 @@ import {
 import { getConfig } from '@/lib/config';
 import { db } from '@/lib/db';
 import { getOwnerPassword, getOwnerUsername } from '@/lib/env.server';
+import { getAuthSigningSecret } from '@/lib/signing-secret.server';
 
 export const runtime = 'nodejs';
 
@@ -217,14 +218,12 @@ async function generateAuthCookie(
   role: AuthRole,
   username: string,
 ): Promise<LoginAuthCookiePayload> {
-  const ownerPassword = getOwnerPassword();
-  if (!ownerPassword) {
-    throw new Error('站长密码未配置，无法生成会话签名');
-  }
-
   const expiresAt = getSessionExpiresAt();
   const signatureData = getSignatureData('account', expiresAt, username);
-  const signature = await generateSignature(signatureData, ownerPassword);
+  const signature = await generateSignature(
+    signatureData,
+    getAuthSigningSecret(),
+  );
 
   return {
     role,

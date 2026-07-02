@@ -1,13 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server';
 
-import {
-  getAuthInfoFromCookie,
-  getSignatureData,
-  verifySignature,
-} from '@/lib/auth';
+import { getAuthInfoFromCookie, getSignatureData } from '@/lib/auth';
 import { getConfig } from '@/lib/config';
-import { getOwnerPassword, getOwnerUsername } from '@/lib/env.server';
+import { getOwnerUsername } from '@/lib/env.server';
 import { NO_STORE_HEADERS } from '@/lib/http-cache';
+import { verifyAuthSignature } from '@/lib/signing-secret.server';
 
 export const runtime = 'nodejs';
 
@@ -40,7 +37,6 @@ function sessionResponse(
 export async function GET(request: NextRequest) {
   try {
     const ownerUsername = getOwnerUsername();
-    const ownerPassword = getOwnerPassword();
     const authInfo = getAuthInfoFromCookie(request);
 
     if (!authInfo) {
@@ -58,10 +54,10 @@ export async function GET(request: NextRequest) {
       return sessionResponse(false, 'session_expired', authInfo.username);
     }
 
-    const isValidSignature = await verifySignature(
+    const isValidSignature = await verifyAuthSignature(
       getSignatureData('account', authInfo.expiresAt, authInfo.username),
       authInfo.signature,
-      ownerPassword,
+      { allowLegacyOwnerPassword: true },
     );
 
     if (!isValidSignature) {

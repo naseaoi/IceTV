@@ -61,13 +61,24 @@ const intervalId = setInterval(() => {
 
 // 执行 cron 任务的函数
 function executeCronJob() {
-  const cronUrl = `http://${process.env.HOSTNAME || 'localhost'}:${
-    process.env.PORT || 3000
-  }/api/cron`;
+  const hostname = process.env.HOSTNAME || 'localhost';
+  const port = process.env.PORT || 3000;
+  const cronUrl = `http://${hostname}:${port}/api/cron`;
+  const cronSecret = getCronSecret();
+  const requestOptions = {
+    hostname,
+    port,
+    path: '/api/cron',
+    headers: cronSecret
+      ? {
+          Authorization: `Bearer ${cronSecret}`,
+        }
+      : undefined,
+  };
 
   console.log(`Executing cron job: ${cronUrl}`);
 
-  const req = http.get(cronUrl, (res) => {
+  const req = http.get(requestOptions, (res) => {
     let data = '';
 
     res.on('data', (chunk) => {
@@ -91,4 +102,13 @@ function executeCronJob() {
     console.error('Cron job timeout');
     req.destroy();
   });
+}
+
+function getCronSecret() {
+  return (
+    process.env.CRON_SECRET ||
+    process.env.ICETV_CRON_SECRET ||
+    process.env.VERCEL_CRON_SECRET ||
+    ''
+  );
 }

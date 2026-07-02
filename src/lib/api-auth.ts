@@ -1,12 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server';
 
-import {
-  getAuthInfoFromCookie,
-  getSignatureData,
-  verifySignature,
-} from './auth';
+import { getAuthInfoFromCookie, getSignatureData } from './auth';
 import { getConfig } from './config';
-import { getOwnerPassword, getOwnerUsername } from './env.server';
+import { getOwnerUsername } from './env.server';
+import { verifyAuthSignature } from './signing-secret.server';
 
 type RequireActiveUserOptions = {
   unauthorizedMessage?: string;
@@ -86,8 +83,7 @@ export async function requireActiveUser(
     };
   }
 
-  const secret = getOwnerPassword();
-  if (!secret || authInfo.sessionType !== 'account') {
+  if (authInfo.sessionType !== 'account') {
     return {
       response: NextResponse.json(
         { error: unauthorizedMessage },
@@ -102,7 +98,9 @@ export async function requireActiveUser(
     authInfo.username,
   );
 
-  const isValid = await verifySignature(signData, authInfo.signature, secret);
+  const isValid = await verifyAuthSignature(signData, authInfo.signature, {
+    allowLegacyOwnerPassword: true,
+  });
   if (!isValid) {
     return {
       response: NextResponse.json(

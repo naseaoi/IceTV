@@ -277,7 +277,7 @@ export class LocalSqliteStorage implements IStorage {
       ),
       // users
       registerUser: this.db.prepare(
-        'INSERT OR REPLACE INTO users (username, password) VALUES (?, ?)',
+        'INSERT INTO users (username, password) VALUES (?, ?)',
       ),
       getPassword: this.db.prepare(
         'SELECT password FROM users WHERE username = ?',

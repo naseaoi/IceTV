@@ -39,18 +39,7 @@ export async function POST(request: NextRequest) {
     }
 
     await db.registerUser(username, password);
-
-    const alreadyInConfig = config.UserConfig.Users.some(
-      (u) => u.username === username,
-    );
-    if (!alreadyInConfig) {
-      config.UserConfig.Users.push({
-        username,
-        role: 'user',
-        banned: false,
-      });
-      await saveConfig(config);
-    }
+    await saveConfig(config);
 
     return NextResponse.json({ ok: true });
   } catch {
