@@ -2,6 +2,10 @@
   "name": "icetv",
   "version": "0.4.2",
   "private": true,
+  "engines": {
+    "node": ">=22.14.0 <25",
+    "pnpm": ">=10.14.0"
+  },
   "scripts": {
     "dev": "pnpm gen:changelog && pnpm gen:manifest && next dev --webpack -H 0.0.0.0",
     "dev:turbo": "pnpm gen:changelog && pnpm gen:manifest && next dev --turbopack -H 0.0.0.0",

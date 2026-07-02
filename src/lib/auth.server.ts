@@ -46,12 +46,9 @@ export function getSessionExpiresAt(now: number = Date.now()): number {
   }
 
   const ttlHours = Number(ttlHoursRaw);
-  if (!Number.isFinite(ttlHours)) {
+  if (!Number.isFinite(ttlHours) || ttlHours <= 0) {
+    console.warn('AUTH_SESSION_TTL_HOURS 无效，使用默认会话时长');
     return now + DEFAULT_SESSION_TTL_HOURS * SESSION_HOUR_MS;
-  }
-
-  if (ttlHours <= 0) {
-    return PERMANENT_SESSION_EXPIRES_AT;
   }
 
   return now + Math.max(1, ttlHours) * SESSION_HOUR_MS;

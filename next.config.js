@@ -17,11 +17,13 @@ try {
       appVersion = latestVersion;
     }
   }
-} catch {}
+} catch (error) {
+  console.warn('读取版本号失败:', error);
+}
 
 const nextConfig = {
   output: 'standalone',
-  reactStrictMode: false,
+  reactStrictMode: true,
   allowedDevOrigins: ['127.0.0.1', 'localhost'],
   compiler: {
     removeConsole:

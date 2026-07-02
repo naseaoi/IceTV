@@ -25,12 +25,26 @@ generateManifest();
 // 直接在当前进程中启动 standalone Server（`server.js`）
 require('./server.js');
 
+const READY_POLL_INTERVAL_MS = 1000;
+const READY_POLL_TIMEOUT_MS = readPositiveInteger(
+  process.env.READY_POLL_TIMEOUT_MS,
+  120000,
+);
+
 // 每 1 秒轮询一次，直到请求成功
 const TARGET_URL = `http://${process.env.HOSTNAME || 'localhost'}:${
   process.env.PORT || 3000
 }/login`;
+const readyPollStartedAt = Date.now();
 
 const intervalId = setInterval(() => {
+  if (Date.now() - readyPollStartedAt > READY_POLL_TIMEOUT_MS) {
+    console.error(`Server readiness polling timed out: ${TARGET_URL}`);
+    clearInterval(intervalId);
+    process.exit(1);
+    return;
+  }
+
   console.log(`Fetching ${TARGET_URL} ...`);
 
   const req = http.get(TARGET_URL, (res) => {
@@ -52,12 +66,18 @@ const intervalId = setInterval(() => {
         60 * 60 * 1000,
       ); // 每小时执行一次
     }
+
+    res.resume();
+  });
+
+  req.on('error', (error) => {
+    console.warn('Server readiness polling failed:', error.message);
   });
 
   req.setTimeout(2000, () => {
     req.destroy();
   });
-}, 1000);
+}, READY_POLL_INTERVAL_MS);
 
 // 执行 cron 任务的函数
 function executeCronJob() {
@@ -111,4 +131,9 @@ function getCronSecret() {
     process.env.VERCEL_CRON_SECRET ||
     ''
   );
+}
+
+function readPositiveInteger(value, fallback) {
+  const parsed = Number.parseInt(value || '', 10);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
 }

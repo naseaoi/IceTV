@@ -119,15 +119,13 @@ export class MySqlStorage implements IStorage {
         username VARCHAR(191) NOT NULL,
         record_key VARCHAR(255) NOT NULL,
         record_json LONGTEXT NOT NULL,
-        PRIMARY KEY (username, record_key),
-        KEY idx_play_records_username (username)
+        PRIMARY KEY (username, record_key)
       ) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci`,
       `CREATE TABLE IF NOT EXISTS favorites (
         username VARCHAR(191) NOT NULL,
         favorite_key VARCHAR(255) NOT NULL,
         favorite_json LONGTEXT NOT NULL,
-        PRIMARY KEY (username, favorite_key),
-        KEY idx_favorites_username (username)
+        PRIMARY KEY (username, favorite_key)
       ) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci`,
       `CREATE TABLE IF NOT EXISTS search_history (
         username VARCHAR(191) NOT NULL,
@@ -140,8 +138,7 @@ export class MySqlStorage implements IStorage {
         username VARCHAR(191) NOT NULL,
         config_key VARCHAR(255) NOT NULL,
         config_json LONGTEXT NOT NULL,
-        PRIMARY KEY (username, config_key),
-        KEY idx_skip_configs_username (username)
+        PRIMARY KEY (username, config_key)
       ) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci`,
       `CREATE TABLE IF NOT EXISTS admin_config (
         id TINYINT NOT NULL PRIMARY KEY,

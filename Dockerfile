@@ -1,5 +1,5 @@
 # ---- 第 1 阶段：安装依赖 ----
-FROM node:20-bookworm-slim AS deps
+FROM node:22-bookworm-slim AS deps
 
 ARG PNPM_VERSION=10.14.0
 
@@ -36,7 +36,7 @@ RUN pnpm config set registry https://registry.npmmirror.com \
   && pnpm install --frozen-lockfile
 
 # ---- 第 2 阶段：构建项目 ----
-FROM node:20-bookworm-slim AS builder
+FROM node:22-bookworm-slim AS builder
 ARG PNPM_VERSION=10.14.0
 ARG NEXT_PUBLIC_APP_VERSION
 ENV COREPACK_HOME=/corepack
@@ -70,7 +70,7 @@ ENV DOCKER_ENV=true
 RUN pnpm run build
 
 # ---- 第 3 阶段：生成运行时镜像 ----
-FROM node:20-bookworm-slim AS runner
+FROM node:22-bookworm-slim AS runner
 ARG NEXT_PUBLIC_APP_VERSION
 
 # 创建非 root 用户
@@ -100,6 +100,8 @@ USER nextjs
 
 EXPOSE 3000
 VOLUME ["/data"]
+
+HEALTHCHECK --interval=30s --timeout=5s --start-period=30s --retries=3 CMD node -e "const http=require('http');const port=process.env.PORT||3000;const req=http.get({host:'127.0.0.1',port,path:'/login',timeout:4000},res=>{res.resume();process.exit(res.statusCode>=200&&res.statusCode<500?0:1)});req.on('error',()=>process.exit(1));req.on('timeout',()=>{req.destroy();process.exit(1)})"
 
 # 使用自定义启动脚本，先预加载配置再启动服务器
 CMD ["node", "start.js"] 

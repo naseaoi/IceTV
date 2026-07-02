@@ -10,6 +10,7 @@ describe('getSessionExpiresAt', () => {
     } else {
       process.env.AUTH_SESSION_TTL_HOURS = originalTtl;
     }
+    jest.restoreAllMocks();
   });
 
   it('uses a 30 day default ttl', () => {
@@ -18,11 +19,13 @@ describe('getSessionExpiresAt', () => {
     expect(getSessionExpiresAt(now)).toBe(now + 30 * 24 * 60 * 60 * 1000);
   });
 
-  it('keeps explicit permanent sessions', () => {
+  it('uses the default ttl when configured ttl is not positive', () => {
     process.env.AUTH_SESSION_TTL_HOURS = '0';
+    const warnSpy = jest.spyOn(console, 'warn').mockImplementation(() => {});
 
-    expect(getSessionExpiresAt(now)).toBe(
-      Date.parse('2099-12-31T23:59:59.999Z'),
+    expect(getSessionExpiresAt(now)).toBe(now + 30 * 24 * 60 * 60 * 1000);
+    expect(warnSpy).toHaveBeenCalledWith(
+      'AUTH_SESSION_TTL_HOURS 无效，使用默认会话时长',
     );
   });
 });
