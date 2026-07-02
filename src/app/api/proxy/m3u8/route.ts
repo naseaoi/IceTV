@@ -272,7 +272,9 @@ async function fetchM3U8Data(
   if (!isLive && shouldRunAdDetection(source)) {
     try {
       content = await stripAdSegmentsByPhysicalSignal(content, finalUrl, ua);
-    } catch {}
+    } catch (error) {
+      console.warn('m3u8 广告段检测失败:', error);
+    }
   }
 
   if (

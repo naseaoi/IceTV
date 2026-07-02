@@ -41,7 +41,9 @@ async function fetchBangumiCalendarJsonWithFallback(
         timeoutMs: init.timeoutMs ?? BANGUMI_DEFAULT_TIMEOUT_MS,
         userAgent: 'IceTV',
       });
-    } catch {}
+    } catch (error) {
+      console.warn('Bangumi HTTP 代理请求失败:', error);
+    }
   }
 
   for (const socksProxyUrl of getSocksProxyUrls()) {
@@ -51,7 +53,8 @@ async function fetchBangumiCalendarJsonWithFallback(
         socksProxyUrl,
         init,
       );
-    } catch {
+    } catch (error) {
+      console.warn('Bangumi SOCKS 代理请求失败:', error);
       continue;
     }
   }

@@ -76,7 +76,9 @@ export async function GET(request: NextRequest) {
           },
         );
         return buildLogoBufferResponse(response.body, response.headers);
-      } catch {}
+      } catch (proxyError) {
+        console.warn('代理 logo 环境代理回源失败:', proxyError);
+      }
     }
 
     if (error instanceof UrlValidationError) {

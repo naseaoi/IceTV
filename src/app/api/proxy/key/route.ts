@@ -82,7 +82,9 @@ export async function GET(request: NextRequest) {
               'Cache-Control': 'no-cache',
             },
           });
-        } catch {}
+        } catch (proxyError) {
+          console.warn('代理 key 环境代理回源失败:', proxyError);
+        }
       }
     }
 

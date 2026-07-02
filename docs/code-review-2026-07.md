@@ -60,7 +60,7 @@
 | ------ | ------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | 架构   | 已完成 | 2026-07-02：`AdminConfig` 下沉到 `src/types`；通用 AlertModal/useAlertModal 与 play intent 上移；auth 拆分 client/server 并接入 `server-only`；home/live/play/bangumi 单域文件归位；wire 类型合并；admin user 与 m3u8 route 抽出业务逻辑；通过 `eslint --max-warnings=0 src`、`tsc --noEmit --incremental false`、`jest --runInBand`                     |
 | 性能   | 已完成 | 2026-07-02：新增 `getConfigForRead` 只读缓存与 `CONFIG_CACHE_TTL_MS`；代理 DNS 30s 缓存并复用入口校验；搜索聚合加入服务端失败源冷却与 miss 请求合并；m3u8 重写缓存上限提升到 2MB；豆瓣主接口接入 SWR；env proxy 流式转发接入背压；封面缓存持久化改 idle 防抖；通过 `eslint --max-warnings=0 src`、`tsc --noEmit --incremental false`、`jest --runInBand` |
-| 可靠性 | 待修复 | -                                                                                                                                                                                                                                                                                                                                                        |
+| 可靠性 | 已完成 | 2026-07-02：新增 `error.tsx`、`global-error.tsx`、`not-found.tsx`；Bangumi 日历故障改为错误 JSON + 502 并补路由测试；搜索、配置缓存失效、代理 fallback、Bangumi 代理 fallback 补服务端日志；数据导入 500 响应脱敏并补测试；通过 `eslint --max-warnings=0 src`、`tsc --noEmit --incremental false`、`jest --runInBand`                                    |
 
 ### 架构
 

@@ -18,12 +18,15 @@ export async function GET(request: NextRequest) {
     const source = request.nextUrl.searchParams.get('source');
 
     if (source && source !== 'server') {
-      return NextResponse.json([], {
-        status: 400,
-        headers: {
-          'Cache-Control': 'no-store',
+      return NextResponse.json(
+        { error: '不支持的 Bangumi 数据源' },
+        {
+          status: 400,
+          headers: {
+            'Cache-Control': 'no-store',
+          },
         },
-      });
+      );
     }
 
     const timeoutMs = readTimeoutMs(
@@ -38,12 +41,17 @@ export async function GET(request: NextRequest) {
         'Cache-Control': `public, max-age=${BANGUMI_CALENDAR_FRESH_SECONDS}, stale-while-revalidate=${BANGUMI_CALENDAR_STALE_SECONDS}`,
       },
     });
-  } catch {
-    return NextResponse.json([], {
-      headers: {
-        'Cache-Control': 'no-store',
+  } catch (error) {
+    console.error('Bangumi 日历接口失败:', error);
+    return NextResponse.json(
+      { error: '获取 Bangumi 日历失败' },
+      {
+        status: 502,
+        headers: {
+          'Cache-Control': 'no-store',
+        },
       },
-    });
+    );
   }
 }
 

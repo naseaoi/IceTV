@@ -824,5 +824,7 @@ export const getPublicConfig: typeof readPublicConfig =
 function invalidatePublicConfigCache() {
   try {
     nextCacheApi?.revalidateTag?.(PUBLIC_CONFIG_CACHE_TAG);
-  } catch {}
+  } catch (error) {
+    console.warn('公开配置缓存失效失败:', error);
+  }
 }
