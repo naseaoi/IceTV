@@ -184,7 +184,10 @@ export async function GET(request: NextRequest) {
       }
     }
 
-    const response = await fetchWithUrlGuard(validation.url, { headers });
+    const response = await fetchWithUrlGuard(validation.url, {
+      headers,
+      skipInitialValidation: true,
+    });
     if (!response.ok) {
       const diagnostic = createProxyFailureDiagnostic({
         route: 'segment',

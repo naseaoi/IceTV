@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 
 import { isGuardFailure, requireActiveUser } from '@/lib/api-auth';
-import { getAvailableApiSites, getConfig } from '@/lib/config';
+import { getAvailableApiSites, getConfigForRead } from '@/lib/config';
 import { runSearchAggregation } from '@/lib/search-aggregate';
 import {
   peekCachedSearchAggregate,
@@ -29,7 +29,7 @@ export async function GET(request: NextRequest) {
     });
   }
 
-  const config = await getConfig();
+  const config = await getConfigForRead();
   const apiSites = await getAvailableApiSites(guardResult.username, config);
   const maxSearchPages = config.SiteConfig.SearchDownstreamMaxPage;
   const aggregateCacheParams = {

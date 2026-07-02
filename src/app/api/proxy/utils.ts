@@ -1,4 +1,4 @@
-import { getConfig } from '@/lib/config';
+import { getConfigForRead } from '@/lib/config';
 
 const DEFAULT_LIVE_UA = 'AptvPlayer/1.4.10';
 const DEFAULT_BROWSER_UA =
@@ -13,7 +13,7 @@ export function getProxySourceKey(searchParams: URLSearchParams) {
 }
 
 export async function resolveProxyUserAgent(source: string | null) {
-  const config = await getConfig();
+  const config = await getConfigForRead();
   const liveSource = source
     ? config.LiveConfig?.find((s: any) => s.key === source)
     : null;

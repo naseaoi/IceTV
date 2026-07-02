@@ -1,12 +1,16 @@
 import { NextRequest, NextResponse } from 'next/server';
 
 import { isGuardFailure, requireActiveUser } from '@/lib/api-auth';
-import { getAvailableApiSites, getCacheTime, getConfig } from '@/lib/config';
+import {
+  getAvailableApiSites,
+  getCacheTime,
+  getConfigForRead,
+} from '@/lib/config';
 import { runSearchAggregation } from '@/lib/search-aggregate';
 import {
+  loadCachedSearchAggregate,
   peekCachedSearchAggregate,
   refreshCachedSearchAggregate,
-  setCachedSearchAggregate,
 } from '@/lib/search-cache';
 
 export const runtime = 'nodejs';
@@ -35,7 +39,7 @@ export async function GET(request: NextRequest) {
     );
   }
 
-  const config = await getConfig();
+  const config = await getConfigForRead();
   const cacheTime = getCacheTime(config);
   const apiSites = await getAvailableApiSites(guardResult.username, config);
   const maxSearchPages = config.SiteConfig.SearchDownstreamMaxPage;
@@ -74,20 +78,20 @@ export async function GET(request: NextRequest) {
   }
 
   try {
-    const flattenedResults = await runSearchAggregation({
-      apiSites,
-      query,
-      maxSearchPages,
-      disableYellowFilter: config.SiteConfig.DisableYellowFilter,
-      sourceConcurrency: SEARCH_SOURCE_CONCURRENCY,
-      signal: request.signal,
-    });
+    const flattenedResults = await loadCachedSearchAggregate(
+      aggregateCacheParams,
+      () =>
+        runSearchAggregation({
+          apiSites,
+          query,
+          maxSearchPages,
+          disableYellowFilter: config.SiteConfig.DisableYellowFilter,
+          sourceConcurrency: SEARCH_SOURCE_CONCURRENCY,
+        }),
+    );
     if (flattenedResults.length === 0) {
-      // no cache if empty
       return NextResponse.json({ results: [] }, { status: 200 });
     }
-
-    setCachedSearchAggregate(aggregateCacheParams, flattenedResults);
 
     return NextResponse.json(
       { results: flattenedResults },

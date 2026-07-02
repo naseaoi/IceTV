@@ -11,7 +11,7 @@ export type M3U8RewriteEntry = {
   loadedAt: number;
 };
 
-const MAX_REWRITE_CACHE_CONTENT_BYTES = 256 * 1024;
+const MAX_REWRITE_CACHE_CONTENT_BYTES = 2 * 1024 * 1024;
 
 const m3u8RewriteCache = createSwrCache<string>({
   name: 'proxy-m3u8-rewrite',

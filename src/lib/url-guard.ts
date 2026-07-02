@@ -11,6 +11,21 @@ const BLOCKED_HOSTNAMES = new Set([
 
 const MAX_REDIRECTS = 5;
 const DEFAULT_FETCH_TIMEOUT_MS = 15_000;
+const DEFAULT_DNS_CACHE_TTL_MS = 30_000;
+
+type DnsLookup = typeof lookup;
+
+type GuardedFetchInit = RequestInit & {
+  skipInitialValidation?: boolean;
+};
+
+type DnsCacheEntry = {
+  addresses: { address: string }[];
+  expiresAt: number;
+};
+
+const dnsCache = new Map<string, DnsCacheEntry>();
+let dnsLookup: DnsLookup = lookup;
 
 export type UrlValidationResult =
   | { ok: true; url: string }
@@ -71,14 +86,18 @@ export async function validateProxyUrlForRequest(
 
 export async function fetchWithUrlGuard(
   raw: string,
-  init: RequestInit = {},
+  init: GuardedFetchInit = {},
 ): Promise<Response> {
+  const { skipInitialValidation = false, ...fetchInit } = init;
   let currentUrl = raw;
-  const requestedRedirect = init.redirect;
+  const requestedRedirect = fetchInit.redirect;
   const timeoutMs = getFetchTimeoutMs();
 
   for (let redirectCount = 0; redirectCount <= MAX_REDIRECTS; redirectCount++) {
-    const validation = await validateProxyUrlForRequest(currentUrl);
+    const validation =
+      skipInitialValidation && redirectCount === 0
+        ? { ok: true as const, url: currentUrl }
+        : await validateProxyUrlForRequest(currentUrl);
     if (!validation.ok) {
       throw new UrlValidationError(validation.reason);
     }
@@ -88,9 +107,9 @@ export async function fetchWithUrlGuard(
     let response: Response;
     try {
       response = await fetch(validation.url, {
-        ...init,
+        ...fetchInit,
         redirect: 'manual',
-        signal: init.signal || controller.signal,
+        signal: fetchInit.signal || controller.signal,
       });
     } finally {
       windowLikeClearTimeout(timeout);
@@ -119,6 +138,18 @@ export async function fetchWithUrlGuard(
   throw new UrlValidationError('Too many redirects');
 }
 
+export function clearUrlGuardDnsCacheForTests(): void {
+  dnsCache.clear();
+}
+
+export function setUrlGuardDnsLookupForTests(nextLookup: DnsLookup): void {
+  dnsLookup = nextLookup;
+}
+
+export function resetUrlGuardDnsLookupForTests(): void {
+  dnsLookup = lookup;
+}
+
 function getFetchTimeoutMs(): number {
   const configured = Number.parseInt(
     process.env.PROXY_FETCH_TIMEOUT_MS || '',
@@ -127,6 +158,16 @@ function getFetchTimeoutMs(): number {
   return Number.isFinite(configured) && configured > 0
     ? configured
     : DEFAULT_FETCH_TIMEOUT_MS;
+}
+
+function getDnsCacheTtlMs(): number {
+  const configured = Number.parseInt(
+    process.env.PROXY_DNS_CACHE_TTL_MS || '',
+    10,
+  );
+  return Number.isFinite(configured) && configured >= 0
+    ? configured
+    : DEFAULT_DNS_CACHE_TTL_MS;
 }
 
 function windowLikeSetTimeout(
@@ -176,7 +217,7 @@ async function assertSafeNetworkTarget(raw: string): Promise<void> {
 
   let addresses: { address: string }[];
   try {
-    addresses = await lookup(hostname, { all: true, verbatim: true });
+    addresses = await lookupHostname(hostname);
   } catch {
     throw new UrlValidationError('DNS lookup failed');
   }
@@ -188,6 +229,23 @@ async function assertSafeNetworkTarget(raw: string): Promise<void> {
   if (addresses.some((entry) => isBlockedAddress(entry.address))) {
     throw new UrlValidationError('Blocked destination');
   }
+}
+
+async function lookupHostname(
+  hostname: string,
+): Promise<{ address: string }[]> {
+  const ttlMs = getDnsCacheTtlMs();
+  const now = Date.now();
+  const cached = dnsCache.get(hostname);
+  if (ttlMs > 0 && cached && cached.expiresAt > now) {
+    return cached.addresses;
+  }
+
+  const addresses = await dnsLookup(hostname, { all: true, verbatim: true });
+  if (ttlMs > 0) {
+    dnsCache.set(hostname, { addresses, expiresAt: now + ttlMs });
+  }
+  return addresses;
 }
 
 function isRedirectResponse(status: number): boolean {

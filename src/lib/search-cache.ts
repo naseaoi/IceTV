@@ -39,6 +39,10 @@ const SEARCH_CACHE: Map<string, CachedPageEntry> = new Map();
 const SEARCH_AGGREGATE_CACHE: Map<string, CachedSearchAggregateEntry> =
   new Map();
 const SEARCH_AGGREGATE_REFRESH_INFLIGHT: Map<string, Promise<void>> = new Map();
+const SEARCH_AGGREGATE_LOAD_INFLIGHT: Map<
+  string,
+  Promise<SearchResult[]>
+> = new Map();
 
 // 正在进行的同 key 回源请求，抑制雷群
 const SEARCH_INFLIGHT: Map<
@@ -136,6 +140,27 @@ export function refreshCachedSearchAggregate(
     });
 
   SEARCH_AGGREGATE_REFRESH_INFLIGHT.set(key, task);
+  return task;
+}
+
+export function loadCachedSearchAggregate(
+  params: SearchAggregateCacheParams,
+  loader: () => Promise<SearchResult[]>,
+): Promise<SearchResult[]> {
+  const key = makeSearchAggregateCacheKey(params);
+  const existing = SEARCH_AGGREGATE_LOAD_INFLIGHT.get(key);
+  if (existing) return existing;
+
+  const task = loader()
+    .then((results) => {
+      setCachedSearchAggregate(params, results);
+      return results;
+    })
+    .finally(() => {
+      SEARCH_AGGREGATE_LOAD_INFLIGHT.delete(key);
+    });
+
+  SEARCH_AGGREGATE_LOAD_INFLIGHT.set(key, task);
   return task;
 }
 

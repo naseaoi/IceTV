@@ -91,6 +91,7 @@ function refreshM3U8Cache(
         redirect: 'follow',
         credentials: 'same-origin',
         headers: { 'User-Agent': ua },
+        skipInitialValidation: true,
       });
       if (!response.ok) return;
       const contentType = response.headers.get('Content-Type') || '';
@@ -228,6 +229,7 @@ async function fetchM3U8Data(
     headers: {
       'User-Agent': ua,
     },
+    skipInitialValidation: true,
   });
 
   if (!response.ok) {

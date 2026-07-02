@@ -1,7 +1,7 @@
 ﻿import { NextRequest, NextResponse } from 'next/server';
 
 import { getAuthInfoFromCookie, getSignatureData } from './auth.server';
-import { getConfig } from './config';
+import { getConfigForRead } from './config';
 import { getOwnerUsername } from './env.server';
 import { verifyAuthSignature } from './signing-secret.server';
 
@@ -119,7 +119,7 @@ export async function requireActiveUser(
     };
   }
 
-  const config = await getConfig();
+  const config = await getConfigForRead();
   const user = config.UserConfig.Users.find(
     (entry) => entry.username === username,
   );
@@ -185,7 +185,7 @@ export async function requireAdmin(
     };
   }
 
-  const config = await getConfig();
+  const config = await getConfigForRead();
   const user = config.UserConfig.Users.find(
     (entry) => entry.username === guardResult.username,
   );

@@ -65,6 +65,18 @@ function cloneBaseConfig(): AdminConfig {
 }
 
 describe('config cache persistence', () => {
+  const originalConfigCacheTtl = process.env.CONFIG_CACHE_TTL_MS;
+
+  afterEach(() => {
+    if (originalConfigCacheTtl === undefined) {
+      delete process.env.CONFIG_CACHE_TTL_MS;
+    } else {
+      process.env.CONFIG_CACHE_TTL_MS = originalConfigCacheTtl;
+    }
+    jest.useRealTimers();
+    jest.restoreAllMocks();
+  });
+
   it('returns cloned config objects', async () => {
     const { getConfig } = await loadConfigModule(jest.fn());
     const first = await getConfig();
@@ -91,6 +103,54 @@ describe('config cache persistence', () => {
 
     const after = await getConfig();
     expect(after.SiteConfig.SiteName).toBe('IceTV');
+  });
+
+  it('reuses read config until ttl expires', async () => {
+    process.env.CONFIG_CACHE_TTL_MS = '10';
+    jest.useFakeTimers();
+    jest.setSystemTime(new Date('2026-01-01T00:00:00.000Z'));
+
+    const nextConfig = cloneBaseConfig();
+    nextConfig.SiteConfig.SiteName = 'Next';
+    const getAdminConfig = jest
+      .fn()
+      .mockResolvedValueOnce(cloneBaseConfig())
+      .mockResolvedValueOnce(nextConfig);
+    const { getConfigForRead } = await loadConfigModule(jest.fn(), {
+      getAdminConfig,
+    });
+
+    const first = await getConfigForRead();
+    const second = await getConfigForRead();
+    expect(second).toBe(first);
+    expect(getAdminConfig).toHaveBeenCalledTimes(1);
+
+    jest.advanceTimersByTime(11);
+    const third = await getConfigForRead();
+    expect(third.SiteConfig.SiteName).toBe('Next');
+    expect(getAdminConfig).toHaveBeenCalledTimes(2);
+  });
+
+  it('returns detached api site entries from read cache', async () => {
+    const adminConfig = cloneBaseConfig();
+    adminConfig.SourceConfig = [
+      {
+        key: 'source-1',
+        name: 'Source 1',
+        api: 'https://example.com/api.php',
+        disabled: false,
+        from: 'custom',
+      },
+    ];
+    const { getAvailableApiSites } = await loadConfigModule(jest.fn(), {
+      adminConfig,
+    });
+
+    const first = await getAvailableApiSites();
+    first[0].name = 'Mutated';
+    const second = await getAvailableApiSites();
+
+    expect(second[0].name).toBe('Source 1');
   });
 
   it('uses database users as the source of truth', async () => {

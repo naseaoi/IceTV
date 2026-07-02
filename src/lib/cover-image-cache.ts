@@ -7,6 +7,17 @@ const loadedImageCache = new Map<string, number>();
 const imageLoadEmitter =
   typeof EventTarget === 'undefined' ? null : new EventTarget();
 let storageHydrated = false;
+let persistScheduled = false;
+let persistTimer: ReturnType<typeof setTimeout> | null = null;
+let persistIdleHandle: number | null = null;
+
+type IdleWindow = Window & {
+  requestIdleCallback?: (
+    callback: () => void,
+    options?: { timeout: number },
+  ) => number;
+  cancelIdleCallback?: (handle: number) => void;
+};
 
 function normalizeKeys(keys: string[]): string[] {
   return Array.from(
@@ -91,6 +102,47 @@ function persistToStorage() {
   } catch {}
 }
 
+function schedulePersistToStorage() {
+  if (persistScheduled) {
+    return;
+  }
+
+  persistScheduled = true;
+  const persist = () => {
+    persistScheduled = false;
+    persistTimer = null;
+    persistIdleHandle = null;
+    persistToStorage();
+  };
+
+  if (typeof window !== 'undefined') {
+    const idleWindow = window as IdleWindow;
+    if (typeof idleWindow.requestIdleCallback === 'function') {
+      persistIdleHandle = idleWindow.requestIdleCallback(persist, {
+        timeout: 1000,
+      });
+      return;
+    }
+  }
+
+  persistTimer = setTimeout(persist, 200);
+}
+
+function cancelScheduledPersist() {
+  if (persistTimer) {
+    clearTimeout(persistTimer);
+    persistTimer = null;
+  }
+
+  if (persistIdleHandle !== null && typeof window !== 'undefined') {
+    const idleWindow = window as IdleWindow;
+    idleWindow.cancelIdleCallback?.(persistIdleHandle);
+    persistIdleHandle = null;
+  }
+
+  persistScheduled = false;
+}
+
 function emitLoaded(key: string) {
   if (!imageLoadEmitter) {
     return;
@@ -122,7 +174,7 @@ export function markCoverImagesLoaded(keys: string[]) {
   }
 
   trimCache();
-  persistToStorage();
+  schedulePersistToStorage();
   for (const key of cacheKeys) {
     emitLoaded(key);
   }
@@ -146,7 +198,6 @@ export function isCoverImageCached(
     return false;
   }
 
-  const shouldPersist = options.includePersistent !== false;
   const cachedAt = loadedImageCache.get(hitKey) ?? Date.now();
   for (const key of cacheKeys) {
     loadedImageCache.delete(key);
@@ -154,9 +205,6 @@ export function isCoverImageCached(
   }
 
   trimCache();
-  if (shouldPersist) {
-    persistToStorage();
-  }
   return true;
 }
 
@@ -181,7 +229,13 @@ export function subscribeCoverImageLoaded(
 }
 
 export function clearCoverImageCacheForTests() {
+  cancelScheduledPersist();
   loadedImageCache.clear();
   storageHydrated = false;
   getSessionStorage()?.removeItem(STORAGE_KEY);
+}
+
+export function flushCoverImageCacheForTests() {
+  cancelScheduledPersist();
+  persistToStorage();
 }

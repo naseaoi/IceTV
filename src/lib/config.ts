@@ -58,7 +58,9 @@ export const API_CONFIG = {
 
 let cachedConfig: AdminConfig;
 let cachedConfigVersion = '';
+let cachedConfigLoadedAt = 0;
 const PUBLIC_CONFIG_CACHE_TAG = 'public-config';
+const DEFAULT_CONFIG_CACHE_TTL_MS = 30_000;
 type ManagedUser = AdminConfig['UserConfig']['Users'][number];
 const configVersionByObject = new WeakMap<AdminConfig, string>();
 
@@ -323,13 +325,11 @@ async function getInitConfig(
   return adminConfig;
 }
 
-export async function getConfig(): Promise<AdminConfig> {
-  // 直接使用内存缓存
-  if (cachedConfig) {
-    return cloneConfig(cachedConfig);
+async function loadConfig(): Promise<AdminConfig> {
+  if (cachedConfig && isCachedConfigFresh()) {
+    return cachedConfig;
   }
 
-  // 读 db
   let adminConfig: AdminConfig | null = null;
   let shouldPersist = false;
   try {
@@ -347,6 +347,7 @@ export async function getConfig(): Promise<AdminConfig> {
   adminConfig = await syncConfigUsersWithDb(configSelfCheck(adminConfig));
   cachedConfig = adminConfig;
   cachedConfigVersion = getConfigVersion(cachedConfig);
+  cachedConfigLoadedAt = Date.now();
   bindConfigVersion(cachedConfig, cachedConfigVersion);
 
   if (!shouldPersist) {
@@ -361,7 +362,26 @@ export async function getConfig(): Promise<AdminConfig> {
     }
   }
 
-  return cloneConfig(cachedConfig);
+  return cachedConfig;
+}
+
+export async function getConfig(): Promise<AdminConfig> {
+  return cloneConfig(await loadConfig());
+}
+
+export async function getConfigForRead(): Promise<Readonly<AdminConfig>> {
+  return loadConfig();
+}
+
+function isCachedConfigFresh(): boolean {
+  return Date.now() - cachedConfigLoadedAt < getConfigCacheTtlMs();
+}
+
+function getConfigCacheTtlMs(): number {
+  const configured = Number.parseInt(process.env.CONFIG_CACHE_TTL_MS || '', 10);
+  return Number.isFinite(configured) && configured >= 0
+    ? configured
+    : DEFAULT_CONFIG_CACHE_TTL_MS;
 }
 
 export function configSelfCheck(adminConfig: AdminConfig): AdminConfig {
@@ -544,6 +564,7 @@ export async function resetConfig() {
   await db.saveAdminConfig(adminConfig);
   cachedConfig = cloneConfig(adminConfig);
   cachedConfigVersion = getConfigVersion(cachedConfig);
+  cachedConfigLoadedAt = Date.now();
   bindConfigVersion(cachedConfig, cachedConfigVersion);
   invalidatePublicConfigCache();
 
@@ -562,6 +583,7 @@ export async function saveConfig(config: AdminConfig): Promise<AdminConfig> {
   await db.saveAdminConfig(nextConfig);
   cachedConfig = cloneConfig(nextConfig);
   cachedConfigVersion = getConfigVersion(cachedConfig);
+  cachedConfigLoadedAt = Date.now();
   bindConfigVersion(cachedConfig, cachedConfigVersion);
   invalidatePublicConfigCache();
   return cloneConfig(cachedConfig);
@@ -642,28 +664,32 @@ function cloneStringList(value?: string[]): string[] | undefined {
   return Array.isArray(value) ? [...value] : undefined;
 }
 
-export function getCacheTime(config: AdminConfig): number;
+export function getCacheTime(config: Readonly<AdminConfig>): number;
 export function getCacheTime(): Promise<number>;
-export function getCacheTime(config?: AdminConfig): number | Promise<number> {
+export function getCacheTime(
+  config?: Readonly<AdminConfig>,
+): number | Promise<number> {
   if (config) {
     return config.SiteConfig.SiteInterfaceCacheTime || 7200;
   }
 
-  if (cachedConfig) {
+  if (cachedConfig && isCachedConfigFresh()) {
     return cachedConfig.SiteConfig.SiteInterfaceCacheTime || 7200;
   }
 
-  return getConfig().then(
+  return getConfigForRead().then(
     (currentConfig) => currentConfig.SiteConfig.SiteInterfaceCacheTime || 7200,
   );
 }
 
 export async function getAvailableApiSites(
   user?: string,
-  config?: AdminConfig,
+  config?: Readonly<AdminConfig>,
 ): Promise<ApiSite[]> {
-  const currentConfig = config || (await getConfig());
-  const allApiSites = currentConfig.SourceConfig.filter((s) => !s.disabled);
+  const currentConfig = config || (await getConfigForRead());
+  const allApiSites = currentConfig.SourceConfig.filter((s) => !s.disabled).map(
+    toApiSite,
+  );
 
   if (!user) {
     return allApiSites;
@@ -724,9 +750,19 @@ export async function getAvailableApiSites(
   return allApiSites;
 }
 
+function toApiSite(site: ApiSite): ApiSite {
+  return {
+    key: site.key,
+    name: site.name,
+    api: site.api,
+    detail: site.detail,
+  };
+}
+
 export async function setCachedConfig(config: AdminConfig) {
   cachedConfig = configSelfCheck(cloneConfig(config));
   cachedConfigVersion = getConfigVersion(cachedConfig);
+  cachedConfigLoadedAt = Date.now();
   bindConfigVersion(cachedConfig, cachedConfigVersion);
   invalidatePublicConfigCache();
 }
@@ -750,7 +786,7 @@ function getConfigVersion(config: AdminConfig): string {
 }
 
 async function readPublicConfig() {
-  const config = await getConfig();
+  const config = await getConfigForRead();
 
   return {
     SiteName: config.SiteConfig.SiteName,

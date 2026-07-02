@@ -1,7 +1,12 @@
 ﻿/** @jest-environment node */
 
 import { getAuthInfoFromCookie } from '@/lib/auth.server';
-import { getConfig, resetConfig, saveConfig } from '@/lib/config';
+import {
+  getConfig,
+  getConfigForRead,
+  resetConfig,
+  saveConfig,
+} from '@/lib/config';
 import { getOwnerPassword, getOwnerUsername } from '@/lib/env.server';
 import { verifyAuthSignature } from '@/lib/signing-secret.server';
 
@@ -77,6 +82,7 @@ jest.mock('@/lib/auth.server', () => ({
 
 jest.mock('@/lib/config', () => ({
   getConfig: jest.fn(),
+  getConfigForRead: jest.fn(),
   resetConfig: jest.fn(),
   saveConfig: jest.fn(),
 }));
@@ -109,6 +115,9 @@ describe('admin api auth guard regression', () => {
     typeof verifyAuthSignature
   >;
   const mockedGetConfig = getConfig as jest.MockedFunction<typeof getConfig>;
+  const mockedGetConfigForRead = getConfigForRead as jest.MockedFunction<
+    typeof getConfigForRead
+  >;
   const mockedResetConfig = resetConfig as jest.MockedFunction<
     typeof resetConfig
   >;
@@ -157,6 +166,7 @@ describe('admin api auth guard regression', () => {
     mockedGetOwnerPassword.mockReturnValue('owner-secret');
     mockedVerifyAuthSignature.mockResolvedValue(true);
     mockedGetConfig.mockResolvedValue(baseConfig as never);
+    mockedGetConfigForRead.mockResolvedValue(baseConfig as never);
   });
 
   it('returns 401 when request is unauthenticated', async () => {

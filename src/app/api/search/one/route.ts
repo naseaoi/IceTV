@@ -1,7 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server';
 
 import { isGuardFailure, requireActiveUser } from '@/lib/api-auth';
-import { getAvailableApiSites, getCacheTime, getConfig } from '@/lib/config';
+import {
+  getAvailableApiSites,
+  getCacheTime,
+  getConfigForRead,
+} from '@/lib/config';
 import { searchFromApi } from '@/lib/downstream';
 import { yellowWords } from '@/lib/yellow';
 
@@ -31,7 +35,7 @@ export async function GET(request: NextRequest) {
     );
   }
 
-  const config = await getConfig();
+  const config = await getConfigForRead();
   const cacheTime = getCacheTime(config);
   const apiSites = await getAvailableApiSites(guardResult.username, config);
   const maxSearchPages = config.SiteConfig.SearchDownstreamMaxPage;

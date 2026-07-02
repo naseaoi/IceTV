@@ -2,7 +2,7 @@
 
 import { AdminConfig } from '@/types/admin';
 import { isGuardFailure, requireActiveUser } from '@/lib/api-auth';
-import { getAvailableApiSites, getConfig } from '@/lib/config';
+import { getAvailableApiSites, getConfigForRead } from '@/lib/config';
 import { searchFirstPageFromApi } from '@/lib/downstream';
 import { yellowWords } from '@/lib/yellow';
 
@@ -13,7 +13,7 @@ export async function GET(request: NextRequest) {
     const guardResult = await requireActiveUser(request);
     if (isGuardFailure(guardResult)) return guardResult.response;
 
-    const config = await getConfig();
+    const config = await getConfigForRead();
     const { searchParams } = new URL(request.url);
     const query = searchParams.get('q')?.trim();
 
@@ -49,7 +49,7 @@ export async function GET(request: NextRequest) {
 }
 
 async function generateSuggestions(
-  config: AdminConfig,
+  config: Readonly<AdminConfig>,
   query: string,
   username: string,
 ): Promise<
