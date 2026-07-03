@@ -214,6 +214,7 @@ export class LocalSqliteStorage implements IStorage {
       runWithBusyRetry('迁移 SQLite 历史数据', () => {
         this.migrateFromLegacyJsonIfNeeded();
       });
+      this.checkpointWal();
     }
   }
 
@@ -471,6 +472,14 @@ export class LocalSqliteStorage implements IStorage {
 
     migrate();
     console.log(`检测到旧 JSON 数据，已迁移到 SQLite: ${this.dbPath}`);
+  }
+
+  private checkpointWal(): void {
+    try {
+      this.db.pragma('wal_checkpoint(TRUNCATE)');
+    } catch (error) {
+      console.warn('SQLite WAL checkpoint 失败:', error);
+    }
   }
 
   async getPlayRecord(

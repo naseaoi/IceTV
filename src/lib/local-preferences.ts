@@ -2,6 +2,9 @@ export const DEFAULT_AGGREGATE_SEARCH_STORAGE_KEY = 'defaultAggregateSearch';
 export const ENABLE_OPTIMIZATION_STORAGE_KEY = 'enableOptimization';
 export const FLUID_SEARCH_STORAGE_KEY = 'fluidSearch';
 export const LIVE_DIRECT_CONNECT_STORAGE_KEY = 'liveDirectConnect';
+export const BLOCK_AD_STORAGE_KEY = 'enable_blockad';
+export const SIDEBAR_COLLAPSED_STORAGE_KEY = 'sidebarCollapsed';
+export const SEEN_ANNOUNCEMENT_STORAGE_KEY = 'hasSeenAnnouncement';
 
 function readStoredBoolean(key: string): boolean | undefined {
   if (typeof window === 'undefined') {
@@ -35,6 +38,22 @@ function resetStoredBoolean(key: string) {
   }
 
   window.localStorage.removeItem(key);
+}
+
+function readStoredString(key: string): string | undefined {
+  if (typeof window === 'undefined') {
+    return undefined;
+  }
+
+  return window.localStorage.getItem(key) ?? undefined;
+}
+
+function writeStoredString(key: string, value: string) {
+  if (typeof window === 'undefined') {
+    return;
+  }
+
+  window.localStorage.setItem(key, value);
 }
 
 export function readDefaultAggregateSearch(): boolean {
@@ -126,4 +145,28 @@ export function writeLiveDirectConnect(value: boolean) {
 
 export function resetLiveDirectConnect() {
   resetStoredBoolean(LIVE_DIRECT_CONNECT_STORAGE_KEY);
+}
+
+export function readBlockAdEnabled(): boolean {
+  return readStoredBoolean(BLOCK_AD_STORAGE_KEY) ?? true;
+}
+
+export function writeBlockAdEnabled(value: boolean) {
+  writeStoredBoolean(BLOCK_AD_STORAGE_KEY, value);
+}
+
+export function readSidebarCollapsed(): boolean {
+  return readStoredBoolean(SIDEBAR_COLLAPSED_STORAGE_KEY) ?? false;
+}
+
+export function writeSidebarCollapsed(value: boolean) {
+  writeStoredBoolean(SIDEBAR_COLLAPSED_STORAGE_KEY, value);
+}
+
+export function readSeenAnnouncement(): string | undefined {
+  return readStoredString(SEEN_ANNOUNCEMENT_STORAGE_KEY);
+}
+
+export function writeSeenAnnouncement(value: string) {
+  writeStoredString(SEEN_ANNOUNCEMENT_STORAGE_KEY, value);
 }

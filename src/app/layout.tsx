@@ -4,6 +4,7 @@ import { Inter } from 'next/font/google';
 import './globals.css';
 
 import { getPublicConfig } from '@/lib/config';
+import { SIDEBAR_COLLAPSED_STORAGE_KEY } from '@/lib/local-preferences';
 import { serializeForInlineScript } from '@/lib/script-serialization';
 import { getStorageType } from '@/lib/storage-type';
 import { CURRENT_UPDATE_BRANCH } from '@/lib/version';
@@ -81,6 +82,9 @@ export default async function RootLayout({
     FLUID_SEARCH: publicConfig.FluidSearch,
   };
   const serializedRuntimeConfig = serializeForInlineScript(runtimeConfig);
+  const serializedSidebarCollapsedStorageKey = serializeForInlineScript(
+    SIDEBAR_COLLAPSED_STORAGE_KEY,
+  );
 
   return (
     <html lang='zh-CN' suppressHydrationWarning>
@@ -94,7 +98,7 @@ export default async function RootLayout({
           dangerouslySetInnerHTML={{
             __html: `(() => {
   try {
-    const saved = localStorage.getItem('sidebarCollapsed');
+    const saved = localStorage.getItem(${serializedSidebarCollapsedStorageKey});
     if (saved === null) return;
     const collapsed = JSON.parse(saved) === true;
     window.__sidebarCollapsed = collapsed;

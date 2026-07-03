@@ -4,7 +4,10 @@ import type Artplayer from 'artplayer';
 import type { ReadonlyURLSearchParams } from 'next/navigation';
 import { useEffect, useRef, useState } from 'react';
 
-import { readEnableOptimization } from '@/lib/local-preferences';
+import {
+  readBlockAdEnabled,
+  readEnableOptimization,
+} from '@/lib/local-preferences';
 import { SearchResult } from '@/lib/types';
 
 import type { SourceSwitchEpisodeAnchor } from '@/features/play/lib/episodeResumePolicy';
@@ -61,13 +64,8 @@ export function usePlayPageState(searchParams: ReadonlyURLSearchParams) {
 
   const lastSkipCheckRef = useRef(0);
 
-  const [blockAdEnabled, setBlockAdEnabled] = useState<boolean>(() => {
-    if (typeof window !== 'undefined') {
-      const v = localStorage.getItem('enable_blockad');
-      if (v !== null) return v === 'true';
-    }
-    return true;
-  });
+  const [blockAdEnabled, setBlockAdEnabled] =
+    useState<boolean>(readBlockAdEnabled);
   const blockAdEnabledRef = useRef(blockAdEnabled);
   useEffect(() => {
     blockAdEnabledRef.current = blockAdEnabled;

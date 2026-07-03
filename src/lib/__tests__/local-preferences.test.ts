@@ -1,20 +1,29 @@
 import {
+  BLOCK_AD_STORAGE_KEY,
   DEFAULT_AGGREGATE_SEARCH_STORAGE_KEY,
   ENABLE_OPTIMIZATION_STORAGE_KEY,
   FLUID_SEARCH_STORAGE_KEY,
   LIVE_DIRECT_CONNECT_STORAGE_KEY,
+  SEEN_ANNOUNCEMENT_STORAGE_KEY,
+  SIDEBAR_COLLAPSED_STORAGE_KEY,
   readAggregateSearch,
+  readBlockAdEnabled,
   readEnableOptimization,
   readFluidSearch,
   readLiveDirectConnect,
+  readSeenAnnouncement,
+  readSidebarCollapsed,
   resetAggregateSearch,
   resetEnableOptimization,
   resetFluidSearch,
   resetLiveDirectConnect,
   writeAggregateSearch,
+  writeBlockAdEnabled,
   writeEnableOptimization,
   writeFluidSearch,
   writeLiveDirectConnect,
+  writeSeenAnnouncement,
+  writeSidebarCollapsed,
 } from '../local-preferences';
 
 describe('local preferences', () => {
@@ -90,5 +99,32 @@ describe('local preferences', () => {
 
     expect(localStorage.getItem(LIVE_DIRECT_CONNECT_STORAGE_KEY)).toBeNull();
     expect(readLiveDirectConnect()).toBe(true);
+  });
+
+  it('stores block ad preference through the shared helper', () => {
+    expect(readBlockAdEnabled()).toBe(true);
+
+    writeBlockAdEnabled(false);
+
+    expect(localStorage.getItem(BLOCK_AD_STORAGE_KEY)).toBe('false');
+    expect(readBlockAdEnabled()).toBe(false);
+  });
+
+  it('stores sidebar collapsed preference through the shared helper', () => {
+    expect(readSidebarCollapsed()).toBe(false);
+
+    writeSidebarCollapsed(true);
+
+    expect(localStorage.getItem(SIDEBAR_COLLAPSED_STORAGE_KEY)).toBe('true');
+    expect(readSidebarCollapsed()).toBe(true);
+  });
+
+  it('stores seen announcement through the shared helper', () => {
+    writeSeenAnnouncement('notice-v1');
+
+    expect(localStorage.getItem(SEEN_ANNOUNCEMENT_STORAGE_KEY)).toBe(
+      'notice-v1',
+    );
+    expect(readSeenAnnouncement()).toBe('notice-v1');
   });
 });

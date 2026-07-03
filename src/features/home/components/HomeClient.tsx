@@ -22,6 +22,10 @@ import {
 } from '@/lib/db.client';
 import { getDoubanCategories } from '@/lib/douban.client';
 import { HomeInitialData } from '@/features/home/lib/home.types';
+import {
+  readSeenAnnouncement,
+  writeSeenAnnouncement,
+} from '@/lib/local-preferences';
 import { DoubanItem } from '@/lib/types';
 import {
   getCurrentWeekday,
@@ -189,7 +193,7 @@ export default function HomeClient({
 
   useEffect(() => {
     if (typeof window !== 'undefined' && announcement) {
-      const hasSeenAnnouncement = localStorage.getItem('hasSeenAnnouncement');
+      const hasSeenAnnouncement = readSeenAnnouncement();
       if (hasSeenAnnouncement !== announcement) {
         setShowAnnouncement(true);
       } else {
@@ -392,7 +396,7 @@ export default function HomeClient({
 
   const handleCloseAnnouncement = (currentAnnouncement: string) => {
     setShowAnnouncement(false);
-    localStorage.setItem('hasSeenAnnouncement', currentAnnouncement);
+    writeSeenAnnouncement(currentAnnouncement);
   };
 
   return (

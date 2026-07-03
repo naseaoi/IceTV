@@ -6,6 +6,7 @@ import {
   destroyManagedHls,
   runManagedVideoCleanup,
 } from '@/lib/player-runtime';
+import { writeBlockAdEnabled } from '@/lib/local-preferences';
 import { formatTime } from '@/lib/player-utils';
 
 import type { ResumeMode } from '@/features/play/lib/resumePlayback';
@@ -41,7 +42,7 @@ export function createArtPlayerSettings({
       onClick() {
         const newVal = !blockAdEnabled;
         try {
-          localStorage.setItem('enable_blockad', String(newVal));
+          writeBlockAdEnabled(newVal);
           if (artPlayerRef.current) {
             resumeTimeRef.current = artPlayerRef.current.currentTime;
             resumeModeRef.current = 'forced';

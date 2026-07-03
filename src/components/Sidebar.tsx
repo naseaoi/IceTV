@@ -23,6 +23,11 @@ import {
   useState,
 } from 'react';
 
+import {
+  readSidebarCollapsed,
+  writeSidebarCollapsed,
+} from '@/lib/local-preferences';
+
 import { useRuntimeConfig } from './RuntimeConfigProvider';
 import { useSite } from './SiteProvider';
 import {
@@ -128,7 +133,6 @@ function getSidebarMenuItems(runtimeConfig?: RuntimeConfig): SidebarMenuItem[] {
   return nextItems;
 }
 
-// 在浏览器环境下通过全局变量缓存折叠状态，避免组件重新挂载时出现初始值闪烁
 declare global {
   interface Window {
     __sidebarCollapsed?: boolean;
@@ -144,17 +148,7 @@ const getInitialSidebarCollapsed = (): boolean => {
     return window.__sidebarCollapsed;
   }
 
-  const saved = localStorage.getItem('sidebarCollapsed');
-  if (saved === null) {
-    return false;
-  }
-
-  try {
-    const parsed = JSON.parse(saved);
-    return parsed === true;
-  } catch {
-    return false;
-  }
+  return readSidebarCollapsed();
 };
 
 const Sidebar = ({ onToggle, activePath = '/' }: SidebarProps) => {
@@ -162,13 +156,11 @@ const Sidebar = ({ onToggle, activePath = '/' }: SidebarProps) => {
   const pathname = usePathname();
   const runtimeConfig = useRuntimeConfig();
   const { siteName } = useSite();
-  // 若同一次 SPA 会话中已经读取过折叠状态，则直接复用，避免闪烁
   const [isCollapsed, setIsCollapsed] = useState<boolean>(
     getInitialSidebarCollapsed,
   );
   const prefetchedRoutesRef = useRef<Set<string>>(new Set());
 
-  // 当折叠状态变化时，同步到 <html> data 属性，供首屏 CSS 使用
   useLayoutEffect(() => {
     if (typeof document !== 'undefined') {
       if (isCollapsed) {
@@ -179,7 +171,6 @@ const Sidebar = ({ onToggle, activePath = '/' }: SidebarProps) => {
     }
   }, [isCollapsed]);
 
-  // 首次挂载后启用过渡动画，避免 SSR→客户端折叠状态差异导致闪烁
   useLayoutEffect(() => {
     requestAnimationFrame(() => {
       document.querySelector('[data-sidebar]')?.setAttribute('data-ready', '');
@@ -192,7 +183,6 @@ const Sidebar = ({ onToggle, activePath = '/' }: SidebarProps) => {
   const [active, setActive] = useState(activePath);
 
   useEffect(() => {
-    // 优先使用传入的 activePath
     if (activePath) {
       setActive(activePath);
     } else {
@@ -205,7 +195,7 @@ const Sidebar = ({ onToggle, activePath = '/' }: SidebarProps) => {
   const handleToggle = useCallback(() => {
     const newState = !isCollapsed;
     setIsCollapsed(newState);
-    localStorage.setItem('sidebarCollapsed', JSON.stringify(newState));
+    writeSidebarCollapsed(newState);
     if (typeof window !== 'undefined') {
       window.__sidebarCollapsed = newState;
     }
@@ -271,7 +261,6 @@ const Sidebar = ({ onToggle, activePath = '/' }: SidebarProps) => {
 
   return (
     <SidebarContext.Provider value={contextValue}>
-      {/* 在移动端隐藏侧边栏 */}
       <div className='hidden md:flex'>
         <aside
           data-sidebar
@@ -284,7 +273,6 @@ const Sidebar = ({ onToggle, activePath = '/' }: SidebarProps) => {
           }}
         >
           <div className='flex h-full flex-col'>
-            {/* 顶部品牌区域 - 完全复制菜单项布局结构以保证对齐 */}
             <div className='flex items-center px-2 pb-5 pt-6'>
               <Link
                 href='/'
@@ -308,10 +296,8 @@ const Sidebar = ({ onToggle, activePath = '/' }: SidebarProps) => {
                 </span>
               </Link>
             </div>
-            {/* 分割线 */}
             <div className='mx-3 h-px bg-gradient-to-r from-transparent via-gray-200 to-transparent dark:via-gray-700' />
 
-            {/* 首页和搜索导航 */}
             <nav className='mt-5 space-y-1.5 px-3'>
               <Link
                 href='/'
@@ -357,14 +343,11 @@ const Sidebar = ({ onToggle, activePath = '/' }: SidebarProps) => {
               </Link>
             </nav>
 
-            {/* 菜单项 */}
             <div className='flex-1 overflow-y-auto px-3 pt-5'>
               <div className='space-y-1.5'>
                 {menuItems.map((item) => {
-                  // 检查当前路径是否匹配这个菜单项
                   const typeMatch = item.href.match(/type=([^&]+)/)?.[1];
 
-                  // 解码URL以进行正确的比较
                   const decodedActive = decodeURIComponent(active);
                   const decodedItemHref = decodeURIComponent(item.href);
 
@@ -401,7 +384,6 @@ const Sidebar = ({ onToggle, activePath = '/' }: SidebarProps) => {
               </div>
             </div>
 
-            {/* 底部折叠/展开按钮 */}
             <div className='px-3 pb-4 pt-2'>
               <div className='mx-1 mb-2 h-px bg-gradient-to-r from-transparent via-gray-200 to-transparent dark:via-gray-700' />
               <div className='space-y-1.5'>
