@@ -11,6 +11,8 @@ import {
 } from '@/lib/auth.server';
 import { proxy } from '@/proxy';
 
+const AUTH_SECRET = 'auth-secret-with-at-least-32-chars';
+
 Object.defineProperty(globalThis, 'crypto', {
   value: webcrypto,
 });
@@ -93,7 +95,7 @@ const ORIGINAL_ENV = {
 
 describe('proxy middleware session handling', () => {
   beforeEach(() => {
-    process.env.AUTH_SECRET = 'auth-secret';
+    process.env.AUTH_SECRET = AUTH_SECRET;
     process.env.ICETV_PASSWORD = 'owner-pass';
     delete process.env.ICETV_AUTH_SECRET;
     delete process.env.AUTH_SESSION_TTL_HOURS;
@@ -111,7 +113,7 @@ describe('proxy middleware session handling', () => {
 
   it('keeps AUTH_SECRET-signed session without touching cookies', async () => {
     const cookie = await buildAuthCookie(
-      'auth-secret',
+      AUTH_SECRET,
       Date.now() + 29 * 24 * HOUR_MS,
     );
 
@@ -121,7 +123,7 @@ describe('proxy middleware session handling', () => {
   });
 
   it('refreshes near-expiry session with AUTH_SECRET signature', async () => {
-    const cookie = await buildAuthCookie('auth-secret', Date.now() + HOUR_MS);
+    const cookie = await buildAuthCookie(AUTH_SECRET, Date.now() + HOUR_MS);
 
     const response = (await proxy(createRequest(cookie))) as MockResponse;
 
@@ -133,7 +135,7 @@ describe('proxy middleware session handling', () => {
       verifySignature(
         getSignatureData('account', refreshed.expiresAt, 'alice'),
         refreshed.signature,
-        'auth-secret',
+        AUTH_SECRET,
       ),
     ).resolves.toBe(true);
   });
@@ -150,7 +152,7 @@ describe('proxy middleware session handling', () => {
       verifySignature(
         getSignatureData('account', refreshed.expiresAt, 'alice'),
         refreshed.signature,
-        'auth-secret',
+        AUTH_SECRET,
       ),
     ).resolves.toBe(true);
     await expect(

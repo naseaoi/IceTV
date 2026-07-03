@@ -5,6 +5,8 @@ import { webcrypto } from 'crypto';
 import { generateSignature } from '../auth.server';
 import { appendProxySignature, verifyProxySignature } from '../proxy-auth';
 
+const AUTH_SECRET = 'auth-secret-with-at-least-32-chars';
+
 Object.defineProperty(globalThis, 'crypto', {
   value: webcrypto,
 });
@@ -17,7 +19,7 @@ describe('proxy auth signatures', () => {
   const originalAuthSecret = process.env.AUTH_SECRET;
 
   beforeEach(() => {
-    process.env.AUTH_SECRET = 'auth-secret';
+    process.env.AUTH_SECRET = AUTH_SECRET;
   });
 
   afterEach(() => {

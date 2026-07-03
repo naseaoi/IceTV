@@ -5,6 +5,7 @@ import { getOwnerPassword } from './env.server';
 
 const AUTH_SECRET_ENV_KEYS = ['AUTH_SECRET', 'ICETV_AUTH_SECRET'] as const;
 const DEFAULT_LEGACY_COOKIE_CUTOFF_DATE = '2026-10-01T00:00:00.000Z';
+const AUTH_SIGNING_SECRET_MIN_LENGTH = 32;
 
 type VerifyAuthSignatureOptions = {
   allowLegacyOwnerPassword?: boolean;
@@ -14,6 +15,10 @@ function readEnvSecret(keys: readonly string[]): string | null {
   for (const key of keys) {
     const value = process.env[key]?.trim();
     if (value) {
+      if (value.length < AUTH_SIGNING_SECRET_MIN_LENGTH) {
+        throw new Error(`${key} 长度不能少于 32 个字符`);
+      }
+
       return value;
     }
   }

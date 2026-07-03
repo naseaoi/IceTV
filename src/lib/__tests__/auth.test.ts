@@ -28,17 +28,17 @@ describe('getSessionExpiresAt', () => {
     jest.restoreAllMocks();
   });
 
-  it('uses a 30 day default ttl', () => {
+  it('uses a 7 day default ttl', () => {
     delete process.env.AUTH_SESSION_TTL_HOURS;
 
-    expect(getSessionExpiresAt(now)).toBe(now + 30 * 24 * 60 * 60 * 1000);
+    expect(getSessionExpiresAt(now)).toBe(now + 7 * 24 * 60 * 60 * 1000);
   });
 
   it('uses the default ttl when configured ttl is not positive', () => {
     process.env.AUTH_SESSION_TTL_HOURS = '0';
     const warnSpy = jest.spyOn(console, 'warn').mockImplementation(() => {});
 
-    expect(getSessionExpiresAt(now)).toBe(now + 30 * 24 * 60 * 60 * 1000);
+    expect(getSessionExpiresAt(now)).toBe(now + 7 * 24 * 60 * 60 * 1000);
     expect(warnSpy).toHaveBeenCalledWith(
       'AUTH_SESSION_TTL_HOURS 无效，使用默认会话时长',
     );

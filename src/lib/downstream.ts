@@ -151,7 +151,9 @@ async function fetchAndCacheSearchPage(
       !Array.isArray(data.list) ||
       data.list.length === 0
     ) {
-      return { results: [] };
+      const pageCount = page === 1 ? data?.pagecount || 1 : undefined;
+      setCachedSearchPage(apiSite.key, query, page, 'ok', [], pageCount);
+      return { results: [], pageCount };
     }
 
     const allResults = data.list.map((item: ApiSearchItem) => {

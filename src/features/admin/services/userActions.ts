@@ -1,5 +1,6 @@
 ﻿import { ConfigConflictError, getConfig, saveConfig } from '@/lib/config';
 import { db } from '@/lib/db';
+import { validateAccountPassword } from '@/lib/password-policy';
 import { assertValidUsername, normalizeUsername } from '@/lib/username';
 
 const ACTIONS = [
@@ -144,6 +145,10 @@ export async function handleAdminUserAction({
             { status: 400 },
           );
         }
+        const passwordError = validateAccountPassword(targetPassword);
+        if (passwordError) {
+          return toActionResponse({ error: passwordError }, { status: 400 });
+        }
         await db.registerUser(cleanTargetUsername, targetPassword);
 
         const { userGroup } = body as { userGroup?: string };
@@ -236,6 +241,10 @@ export async function handleAdminUserAction({
         }
         if (!targetPassword) {
           return toActionResponse({ error: '缺少新密码' }, { status: 400 });
+        }
+        const passwordError = validateAccountPassword(targetPassword);
+        if (passwordError) {
+          return toActionResponse({ error: passwordError }, { status: 400 });
         }
 
         if (targetEntry.role === 'owner') {

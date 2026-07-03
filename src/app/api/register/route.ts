@@ -3,6 +3,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getConfig, saveConfig } from '@/lib/config';
 import { db } from '@/lib/db';
 import { getOwnerUsername } from '@/lib/env.server';
+import { validateAccountPassword } from '@/lib/password-policy';
 import { isValidUsername, normalizeUsername } from '@/lib/username';
 
 export const runtime = 'nodejs';
@@ -43,8 +44,9 @@ export async function POST(request: NextRequest) {
         { status: 400 },
       );
     }
-    if (!password) {
-      return NextResponse.json({ error: '密码不能为空' }, { status: 400 });
+    const passwordError = validateAccountPassword(password);
+    if (passwordError) {
+      return NextResponse.json({ error: passwordError }, { status: 400 });
     }
 
     const ownerUsername = getOwnerUsername();

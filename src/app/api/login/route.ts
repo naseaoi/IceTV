@@ -16,14 +16,10 @@ import { normalizeUsername } from '@/lib/username';
 
 export const runtime = 'nodejs';
 
-/**
- * 时序安全的字符串比对，防止通过响应时间差推断密码内容。
- */
 function safeEqual(a: string, b: string): boolean {
   const bufA = Buffer.from(a, 'utf8');
   const bufB = Buffer.from(b, 'utf8');
   if (bufA.length !== bufB.length) {
-    // 长度不同时仍执行一次比对，保持恒定时间
     crypto.timingSafeEqual(bufA, Buffer.alloc(bufA.length));
     return false;
   }
@@ -180,6 +176,7 @@ function clearLoginFailures(key: string): void {
 
 function isSecureRequest(req: NextRequest): boolean {
   return (
+    process.env.NODE_ENV === 'production' ||
     req.nextUrl.protocol === 'https:' ||
     req.headers.get('x-forwarded-proto') === 'https'
   );
@@ -238,7 +235,6 @@ function clearAuthCookies(response: NextResponse, req: NextRequest): void {
   });
 }
 
-// 生成认证Cookie（带签名）
 async function generateAuthCookie(
   role: AuthRole,
   username: string,
@@ -298,13 +294,11 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: '密码不能为空' }, { status: 400 });
     }
 
-    // 可能是站长，直接读环境变量
     if (
       typeof rawUsername === 'string' &&
       safeEqual(rawUsername, ownerUsername) &&
       safeEqual(password, ownerPassword)
     ) {
-      // 验证成功，设置认证cookie
       const response = NextResponse.json({ ok: true });
       const authPayload = await generateAuthCookie('owner', rawUsername);
       setAuthCookies(response, req, authPayload);
@@ -338,7 +332,6 @@ export async function POST(req: NextRequest) {
         return NextResponse.json({ error: '用户被封禁' }, { status: 401 });
       }
 
-      // 验证成功，设置认证cookie
       const response = NextResponse.json({ ok: true });
       const authPayload = await generateAuthCookie(
         user?.role || 'user',

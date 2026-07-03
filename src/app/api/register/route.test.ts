@@ -138,13 +138,30 @@ describe('register route', () => {
     const { POST } = require('./route');
 
     const response = await POST(
-      createRequest({ username: ' demo-user ', password: 'secret' }),
+      createRequest({ username: ' demo-user ', password: 'strong-password' }),
     );
 
     await expect(response.json()).resolves.toEqual({ ok: true });
     expect(response.status).toBe(200);
-    expect(db.registerUser).toHaveBeenCalledWith('demo-user', 'secret');
+    expect(db.registerUser).toHaveBeenCalledWith(
+      'demo-user',
+      'strong-password',
+    );
     expect(saveConfig).toHaveBeenCalledTimes(1);
+  });
+
+  it('rejects weak passwords', async () => {
+    const { POST } = require('./route');
+
+    const response = await POST(
+      createRequest({ username: 'demo-user', password: 'short' }),
+    );
+
+    await expect(response.json()).resolves.toEqual({
+      error: '密码长度不能少于 8 位',
+    });
+    expect(response.status).toBe(400);
+    expect(db.registerUser).not.toHaveBeenCalled();
   });
 
   it('returns 409 when username already exists', async () => {
@@ -152,7 +169,7 @@ describe('register route', () => {
     const { POST } = require('./route');
 
     const response = await POST(
-      createRequest({ username: 'demo-user', password: 'secret' }),
+      createRequest({ username: 'demo-user', password: 'strong-password' }),
     );
 
     await expect(response.json()).resolves.toEqual({ error: '用户名已存在' });
@@ -167,7 +184,7 @@ describe('register route', () => {
     const { POST } = require('./route');
 
     const response = await POST(
-      createRequest({ username: 'demo-user', password: 'secret' }),
+      createRequest({ username: 'demo-user', password: 'strong-password' }),
     );
 
     await expect(response.json()).resolves.toEqual({ error: '用户名已存在' });

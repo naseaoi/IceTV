@@ -1,6 +1,10 @@
 ﻿import * as crypto from 'crypto';
 import { NextRequest, NextResponse } from 'next/server';
 
+import {
+  decodeConfigSubscriptionContent,
+  readConfigSubscriptionText,
+} from '@/lib/config-subscription';
 import { getConfig, refineConfig, saveConfig } from '@/lib/config';
 import { db } from '@/lib/db';
 import { parseStorageKey } from '@/lib/utils';
@@ -23,7 +27,6 @@ export async function GET(request: NextRequest) {
 
     console.log('Cron job triggered:', new Date().toISOString());
 
-    // fire-and-forget：避免 cron 任务超时，后台异步执行
     cronJob().catch((err) => console.error('Cron job background error:', err));
 
     return NextResponse.json({
@@ -87,7 +90,6 @@ async function refreshAllLiveChannels() {
     return;
   }
 
-  // 并发刷新所有启用的直播源
   const refreshPromises = (config.LiveConfig || [])
     .filter((liveInfo) => !liveInfo.disabled)
     .map(async (liveInfo) => {
@@ -103,10 +105,8 @@ async function refreshAllLiveChannels() {
       }
     });
 
-  // 等待所有刷新任务完成
   await Promise.all(refreshPromises);
 
-  // 保存配置
   await saveConfig(config);
 }
 
@@ -125,14 +125,11 @@ async function refreshConfig() {
         throw new Error(`请求失败: ${response.status} ${response.statusText}`);
       }
 
-      const configContent = await response.text();
+      const configContent = await readConfigSubscriptionText(response);
 
-      // 对 configContent 进行 base58 解码
       let decodedContent;
       try {
-        const bs58 = (await import('bs58')).default;
-        const decodedBytes = bs58.decode(configContent);
-        decodedContent = new TextDecoder().decode(decodedBytes);
+        decodedContent = await decodeConfigSubscriptionContent(configContent);
       } catch (decodeError) {
         console.warn('Base58 解码失败:', decodeError);
         throw decodeError;
@@ -162,10 +159,8 @@ async function refreshRecordAndFavorites() {
     if (ownerUsername && !users.includes(ownerUsername)) {
       users.push(ownerUsername);
     }
-    // 函数级缓存：key 为 `${source}+${id}`，值为 Promise<VideoDetail | null>
     const detailCache = new Map<string, Promise<SearchResult | null>>();
 
-    // 获取详情 Promise（带缓存和错误处理）
     const getDetail = async (
       source: string,
       id: string,
@@ -180,7 +175,6 @@ async function refreshRecordAndFavorites() {
           fallbackTitle: fallbackTitle.trim(),
         })
           .then((detail) => {
-            // 成功时才缓存结果
             const successPromise = Promise.resolve(detail);
             detailCache.set(key, successPromise);
             return detail;
@@ -194,7 +188,6 @@ async function refreshRecordAndFavorites() {
     };
 
     for (const user of users) {
-      // 播放记录
       try {
         const playRecords = await db.getAllPlayRecords(user);
         const totalRecords = Object.keys(playRecords).length;
@@ -240,7 +233,6 @@ async function refreshRecordAndFavorites() {
             processedRecords++;
           } catch (err) {
             console.error(`处理播放记录失败 (${key}):`, err);
-            // 继续处理下一个记录
           }
         }
 
@@ -249,7 +241,6 @@ async function refreshRecordAndFavorites() {
         console.error(`获取用户播放记录失败 (${user}):`, err);
       }
 
-      // 收藏
       try {
         let favorites = await db.getAllFavorites(user);
         favorites = Object.fromEntries(
@@ -295,7 +286,6 @@ async function refreshRecordAndFavorites() {
             processedFavorites++;
           } catch (err) {
             console.error(`处理收藏失败 (${key}):`, err);
-            // 继续处理下一个收藏
           }
         }
 
