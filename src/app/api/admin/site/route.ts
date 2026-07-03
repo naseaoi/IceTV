@@ -17,6 +17,10 @@ export async function POST(request: NextRequest) {
       SiteIcon,
       Announcement,
       EnableLiveEntry,
+      DefaultAggregateSearch,
+      EnableOptimization,
+      AutoSwitchSourceOnTimeout,
+      LiveDirectConnect,
       SearchDownstreamMaxPage,
       SiteInterfaceCacheTime,
       DoubanProxyType,
@@ -32,6 +36,10 @@ export async function POST(request: NextRequest) {
       SiteIcon: string;
       Announcement: string;
       EnableLiveEntry: boolean;
+      DefaultAggregateSearch: boolean;
+      EnableOptimization: boolean;
+      AutoSwitchSourceOnTimeout: boolean;
+      LiveDirectConnect: boolean;
       SearchDownstreamMaxPage: number;
       SiteInterfaceCacheTime: number;
       DoubanProxyType: string;
@@ -49,6 +57,10 @@ export async function POST(request: NextRequest) {
       typeof SiteName !== 'string' ||
       typeof Announcement !== 'string' ||
       typeof EnableLiveEntry !== 'boolean' ||
+      typeof DefaultAggregateSearch !== 'boolean' ||
+      typeof EnableOptimization !== 'boolean' ||
+      typeof AutoSwitchSourceOnTimeout !== 'boolean' ||
+      typeof LiveDirectConnect !== 'boolean' ||
       typeof SearchDownstreamMaxPage !== 'number' ||
       typeof SiteInterfaceCacheTime !== 'number' ||
       typeof DoubanProxyType !== 'string' ||
@@ -75,6 +87,10 @@ export async function POST(request: NextRequest) {
           : adminConfig.SiteConfig.SiteIcon || '',
       Announcement,
       EnableLiveEntry,
+      DefaultAggregateSearch,
+      EnableOptimization,
+      AutoSwitchSourceOnTimeout,
+      LiveDirectConnect,
       SearchDownstreamMaxPage,
       SiteInterfaceCacheTime,
       DoubanProxyType,

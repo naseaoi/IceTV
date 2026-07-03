@@ -13,6 +13,10 @@ export interface RuntimeConfig {
   DOUBAN_IMAGE_PROXY: string;
   DISABLE_YELLOW_FILTER: boolean;
   ENABLE_LIVE_ENTRY: boolean;
+  DEFAULT_AGGREGATE_SEARCH: boolean;
+  ENABLE_OPTIMIZATION: boolean;
+  AUTO_SWITCH_SOURCE_ON_TIMEOUT: boolean;
+  LIVE_DIRECT_CONNECT: boolean;
   CUSTOM_CATEGORIES: { name: string; type: 'movie' | 'tv'; query: string }[];
   FLUID_SEARCH: boolean;
 }
@@ -31,6 +35,10 @@ export const DEFAULT_RUNTIME_CONFIG: RuntimeConfig = {
   DOUBAN_IMAGE_PROXY: '',
   DISABLE_YELLOW_FILTER: false,
   ENABLE_LIVE_ENTRY: false,
+  DEFAULT_AGGREGATE_SEARCH: true,
+  ENABLE_OPTIMIZATION: true,
+  AUTO_SWITCH_SOURCE_ON_TIMEOUT: false,
+  LIVE_DIRECT_CONNECT: false,
   CUSTOM_CATEGORIES: [],
   FLUID_SEARCH: true,
 };
@@ -51,6 +59,10 @@ export type ServerConfigPayload = {
   DoubanImageProxy?: string;
   DisableYellowFilter?: boolean;
   EnableLiveEntry?: boolean;
+  DefaultAggregateSearch?: boolean;
+  EnableOptimization?: boolean;
+  AutoSwitchSourceOnTimeout?: boolean;
+  LiveDirectConnect?: boolean;
   CustomCategories?: RuntimeConfig['CUSTOM_CATEGORIES'];
   FluidSearch?: boolean;
 };
@@ -100,6 +112,22 @@ function runtimeConfigFromServerConfig(
       data.EnableLiveEntry === undefined
         ? DEFAULT_RUNTIME_CONFIG.ENABLE_LIVE_ENTRY
         : data.EnableLiveEntry,
+    DEFAULT_AGGREGATE_SEARCH:
+      data.DefaultAggregateSearch === undefined
+        ? DEFAULT_RUNTIME_CONFIG.DEFAULT_AGGREGATE_SEARCH
+        : data.DefaultAggregateSearch,
+    ENABLE_OPTIMIZATION:
+      data.EnableOptimization === undefined
+        ? DEFAULT_RUNTIME_CONFIG.ENABLE_OPTIMIZATION
+        : data.EnableOptimization,
+    AUTO_SWITCH_SOURCE_ON_TIMEOUT:
+      data.AutoSwitchSourceOnTimeout === undefined
+        ? DEFAULT_RUNTIME_CONFIG.AUTO_SWITCH_SOURCE_ON_TIMEOUT
+        : data.AutoSwitchSourceOnTimeout,
+    LIVE_DIRECT_CONNECT:
+      data.LiveDirectConnect === undefined
+        ? DEFAULT_RUNTIME_CONFIG.LIVE_DIRECT_CONNECT
+        : data.LiveDirectConnect,
     CUSTOM_CATEGORIES:
       data.CustomCategories || DEFAULT_RUNTIME_CONFIG.CUSTOM_CATEGORIES,
     FLUID_SEARCH:

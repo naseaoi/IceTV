@@ -10,6 +10,10 @@ export interface AdminConfig {
     SiteIcon: string;
     Announcement: string;
     EnableLiveEntry: boolean;
+    DefaultAggregateSearch: boolean;
+    EnableOptimization: boolean;
+    AutoSwitchSourceOnTimeout: boolean;
+    LiveDirectConnect: boolean;
     SearchDownstreamMaxPage: number;
     SiteInterfaceCacheTime: number;
     DoubanProxyType: string;

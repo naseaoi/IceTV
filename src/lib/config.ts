@@ -240,6 +240,10 @@ async function getInitConfig(
         process.env.ANNOUNCEMENT ||
         '本网站仅提供影视信息搜索服务，所有内容均来自第三方网站。本站不存储任何视频资源，不对任何内容的准确性、合法性、完整性负责。',
       EnableLiveEntry: false,
+      DefaultAggregateSearch: true,
+      EnableOptimization: true,
+      AutoSwitchSourceOnTimeout: false,
+      LiveDirectConnect: false,
       SearchDownstreamMaxPage:
         Number(process.env.NEXT_PUBLIC_SEARCH_MAX_PAGE) || 5,
       SiteInterfaceCacheTime: cfgFile.cache_time || 7200,
@@ -423,6 +427,10 @@ export function configSelfCheck(adminConfig: AdminConfig): AdminConfig {
         process.env.ANNOUNCEMENT ||
         '本网站仅提供影视信息搜索服务，所有内容均来自第三方网站。本站不存储任何视频资源，不对任何内容的准确性、合法性、完整性负责。',
       EnableLiveEntry: false,
+      DefaultAggregateSearch: true,
+      EnableOptimization: true,
+      AutoSwitchSourceOnTimeout: false,
+      LiveDirectConnect: false,
       SearchDownstreamMaxPage:
         Number(process.env.NEXT_PUBLIC_SEARCH_MAX_PAGE) || 5,
       SiteInterfaceCacheTime: 7200,
@@ -447,6 +455,18 @@ export function configSelfCheck(adminConfig: AdminConfig): AdminConfig {
   }
   if (typeof adminConfig.SiteConfig.EnableLiveEntry !== 'boolean') {
     adminConfig.SiteConfig.EnableLiveEntry = false;
+  }
+  if (typeof adminConfig.SiteConfig.DefaultAggregateSearch !== 'boolean') {
+    adminConfig.SiteConfig.DefaultAggregateSearch = true;
+  }
+  if (typeof adminConfig.SiteConfig.EnableOptimization !== 'boolean') {
+    adminConfig.SiteConfig.EnableOptimization = true;
+  }
+  if (typeof adminConfig.SiteConfig.AutoSwitchSourceOnTimeout !== 'boolean') {
+    adminConfig.SiteConfig.AutoSwitchSourceOnTimeout = false;
+  }
+  if (typeof adminConfig.SiteConfig.LiveDirectConnect !== 'boolean') {
+    adminConfig.SiteConfig.LiveDirectConnect = false;
   }
   if (typeof adminConfig.SiteConfig.FluidSearch !== 'boolean') {
     adminConfig.SiteConfig.FluidSearch =
@@ -812,6 +832,10 @@ async function readPublicConfig() {
     OpenRegister: !!config.UserConfig.OpenRegister,
     DisableYellowFilter: config.SiteConfig.DisableYellowFilter,
     EnableLiveEntry: config.SiteConfig.EnableLiveEntry,
+    DefaultAggregateSearch: config.SiteConfig.DefaultAggregateSearch,
+    EnableOptimization: config.SiteConfig.EnableOptimization,
+    AutoSwitchSourceOnTimeout: config.SiteConfig.AutoSwitchSourceOnTimeout,
+    LiveDirectConnect: config.SiteConfig.LiveDirectConnect,
     BangumiDataSource: config.SiteConfig.BangumiDataSource,
     CustomCategories: config.CustomCategories.filter(
       (category) => !category.disabled,

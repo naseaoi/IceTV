@@ -38,29 +38,11 @@ import {
   readDoubanProxyUrl,
 } from '@/lib/douban-source';
 import {
-  AUTO_SWITCH_SOURCE_ON_TIMEOUT_STORAGE_KEY,
-  removeBooleanLocalSetting,
-  readBooleanLocalSetting,
-  writeBooleanLocalSetting,
-} from '@/lib/local-settings';
-import {
-  readAggregateSearch,
-  readDefaultAggregateSearch,
-  readDefaultEnableOptimization,
-  readDefaultFluidSearch,
-  readDefaultLiveDirectConnect,
-  readEnableOptimization,
-  readFluidSearch,
-  readLiveDirectConnect,
-  resetAggregateSearch,
-  resetEnableOptimization,
-  resetFluidSearch,
-  resetLiveDirectConnect,
-  writeAggregateSearch,
-  writeEnableOptimization,
-  writeFluidSearch,
-  writeLiveDirectConnect,
-} from '@/lib/local-preferences';
+  localPreferenceToggleDefinitions,
+  readLocalPreferenceToggleDefaultState,
+  readLocalPreferenceToggleState,
+  resetAllLocalPreferenceToggles,
+} from '@/lib/local-preference-toggles';
 
 import { useBodyScrollLock } from './useBodyScrollLock';
 
@@ -70,13 +52,10 @@ interface SettingsPanelProps {
 
 export function SettingsPanel({ onClose }: SettingsPanelProps) {
   const helperTextClassName = 'mt-1 text-xs text-gray-400 dark:text-gray-500';
-  const [defaultAggregateSearch, setDefaultAggregateSearch] = useState(true);
+  const [localPreferenceToggles, setLocalPreferenceToggles] = useState(
+    readLocalPreferenceToggleDefaultState,
+  );
   const [doubanProxyUrl, setDoubanProxyUrl] = useState('');
-  const [enableOptimization, setEnableOptimization] = useState(true);
-  const [autoSwitchSourceOnTimeout, setAutoSwitchSourceOnTimeout] =
-    useState(false);
-  const [fluidSearch, setFluidSearch] = useState(true);
-  const [liveDirectConnect, setLiveDirectConnect] = useState(false);
   const [doubanDataSource, setDoubanDataSource] = useState('direct');
   const [bangumiDataSource, setBangumiDataSource] = useState(
     DEFAULT_BANGUMI_DATA_SOURCE,
@@ -90,7 +69,7 @@ export function SettingsPanel({ onClose }: SettingsPanelProps) {
   useBodyScrollLock(true);
 
   useEffect(() => {
-    setDefaultAggregateSearch(readAggregateSearch());
+    setLocalPreferenceToggles(readLocalPreferenceToggleState());
 
     setDoubanDataSource(readDoubanProxyType());
     setDoubanProxyUrl(readDoubanProxyUrl());
@@ -99,13 +78,6 @@ export function SettingsPanel({ onClose }: SettingsPanelProps) {
 
     setDoubanImageProxyType(readDoubanImageProxyType());
     setDoubanImageProxyUrl(readDoubanImageProxyUrl());
-    setEnableOptimization(readEnableOptimization());
-
-    setAutoSwitchSourceOnTimeout(
-      readBooleanLocalSetting(AUTO_SWITCH_SOURCE_ON_TIMEOUT_STORAGE_KEY, false),
-    );
-    setFluidSearch(readFluidSearch());
-    setLiveDirectConnect(readLiveDirectConnect());
   }, []);
 
   const showProxyToast = () => {
@@ -117,34 +89,24 @@ export function SettingsPanel({ onClose }: SettingsPanelProps) {
     });
   };
 
-  const handleAggregateToggle = (value: boolean) => {
-    setDefaultAggregateSearch(value);
-    writeAggregateSearch(value);
-  };
-
   const handleDoubanProxyUrlChange = (value: string) => {
     setDoubanProxyUrl(value);
     localStorage.setItem(DOUBAN_PROXY_URL_STORAGE_KEY, value);
   };
 
-  const handleOptimizationToggle = (value: boolean) => {
-    setEnableOptimization(value);
-    writeEnableOptimization(value);
-  };
+  const handleLocalPreferenceToggle = (
+    id: keyof typeof localPreferenceToggles,
+    value: boolean,
+  ) => {
+    setLocalPreferenceToggles((prev) => ({
+      ...prev,
+      [id]: value,
+    }));
 
-  const handleAutoSwitchSourceOnTimeoutToggle = (value: boolean) => {
-    setAutoSwitchSourceOnTimeout(value);
-    writeBooleanLocalSetting(AUTO_SWITCH_SOURCE_ON_TIMEOUT_STORAGE_KEY, value);
-  };
-
-  const handleFluidSearchToggle = (value: boolean) => {
-    setFluidSearch(value);
-    writeFluidSearch(value);
-  };
-
-  const handleLiveDirectConnectToggle = (value: boolean) => {
-    setLiveDirectConnect(value);
-    writeLiveDirectConnect(value);
+    const definition = localPreferenceToggleDefinitions.find(
+      (item) => item.id === id,
+    );
+    definition?.writeValue(value);
   };
 
   const handleDoubanDataSourceChange = (value: string) => {
@@ -183,16 +145,10 @@ export function SettingsPanel({ onClose }: SettingsPanelProps) {
     const defaultDoubanImageProxyUrl = readDefaultDoubanImageProxyUrl();
     const defaultBangumiDataSource = readDefaultBangumiDataSource();
     const defaultBangumiProxy = readDefaultBangumiProxyUrl();
-    const defaultAggregateSearch = readDefaultAggregateSearch();
-    const defaultEnableOptimization = readDefaultEnableOptimization();
-    const defaultFluidSearch = readDefaultFluidSearch();
-    const defaultLiveDirectConnect = readDefaultLiveDirectConnect();
+    const defaultLocalPreferenceToggles =
+      readLocalPreferenceToggleDefaultState();
 
-    setDefaultAggregateSearch(defaultAggregateSearch);
-    setEnableOptimization(defaultEnableOptimization);
-    setAutoSwitchSourceOnTimeout(false);
-    setFluidSearch(defaultFluidSearch);
-    setLiveDirectConnect(defaultLiveDirectConnect);
+    setLocalPreferenceToggles(defaultLocalPreferenceToggles);
     setDoubanProxyUrl(defaultDoubanProxy);
     setDoubanDataSource(defaultDoubanProxyType);
     setBangumiDataSource(defaultBangumiDataSource);
@@ -200,11 +156,7 @@ export function SettingsPanel({ onClose }: SettingsPanelProps) {
     setDoubanImageProxyType(defaultDoubanImageProxyType);
     setDoubanImageProxyUrl(defaultDoubanImageProxyUrl);
 
-    resetAggregateSearch();
-    resetEnableOptimization();
-    removeBooleanLocalSetting(AUTO_SWITCH_SOURCE_ON_TIMEOUT_STORAGE_KEY);
-    resetFluidSearch();
-    resetLiveDirectConnect();
+    resetAllLocalPreferenceToggles();
     localStorage.removeItem(DOUBAN_PROXY_URL_STORAGE_KEY);
     localStorage.removeItem(DOUBAN_DATA_SOURCE_STORAGE_KEY);
     localStorage.removeItem(BANGUMI_DATA_SOURCE_STORAGE_KEY);
@@ -422,132 +374,38 @@ export function SettingsPanel({ onClose }: SettingsPanelProps) {
               </div>
             )}
 
-            <div className='flex items-center justify-between'>
-              <div>
-                <h4 className='text-sm font-medium text-gray-700 dark:text-gray-300'>
-                  默认聚合搜索结果
-                </h4>
-                <p className={helperTextClassName}>
-                  搜索时默认按标题和年份聚合显示结果
-                </p>
-              </div>
-              <label className='flex cursor-pointer items-center'>
-                <div className='relative'>
-                  <input
-                    type='checkbox'
-                    className='peer sr-only'
-                    checked={defaultAggregateSearch}
-                    onChange={(event) =>
-                      handleAggregateToggle(event.target.checked)
-                    }
-                  />
-                  <div className='h-6 w-11 rounded-full bg-gray-300 transition-colors peer-checked:bg-green-500 dark:bg-gray-600'></div>
-                  <div className='absolute left-0.5 top-0.5 h-5 w-5 rounded-full bg-white transition-transform peer-checked:translate-x-5'></div>
+            {localPreferenceToggleDefinitions.map((definition) => (
+              <div
+                key={definition.id}
+                className='flex items-center justify-between'
+              >
+                <div>
+                  <h4 className='text-sm font-medium text-gray-700 dark:text-gray-300'>
+                    {definition.title}
+                  </h4>
+                  <p className={helperTextClassName}>
+                    {definition.description}
+                  </p>
                 </div>
-              </label>
-            </div>
-
-            <div className='flex items-center justify-between'>
-              <div>
-                <h4 className='text-sm font-medium text-gray-700 dark:text-gray-300'>
-                  优选和测速
-                </h4>
-                <p className={helperTextClassName}>
-                  如出现播放器劫持问题可关闭
-                </p>
+                <label className='flex cursor-pointer items-center'>
+                  <div className='relative'>
+                    <input
+                      type='checkbox'
+                      className='peer sr-only'
+                      checked={localPreferenceToggles[definition.id]}
+                      onChange={(event) =>
+                        handleLocalPreferenceToggle(
+                          definition.id,
+                          event.target.checked,
+                        )
+                      }
+                    />
+                    <div className='h-6 w-11 rounded-full bg-gray-300 transition-colors peer-checked:bg-green-500 dark:bg-gray-600'></div>
+                    <div className='absolute left-0.5 top-0.5 h-5 w-5 rounded-full bg-white transition-transform peer-checked:translate-x-5'></div>
+                  </div>
+                </label>
               </div>
-              <label className='flex cursor-pointer items-center'>
-                <div className='relative'>
-                  <input
-                    type='checkbox'
-                    className='peer sr-only'
-                    checked={enableOptimization}
-                    onChange={(event) =>
-                      handleOptimizationToggle(event.target.checked)
-                    }
-                  />
-                  <div className='h-6 w-11 rounded-full bg-gray-300 transition-colors peer-checked:bg-green-500 dark:bg-gray-600'></div>
-                  <div className='absolute left-0.5 top-0.5 h-5 w-5 rounded-full bg-white transition-transform peer-checked:translate-x-5'></div>
-                </div>
-              </label>
-            </div>
-
-            <div className='flex items-center justify-between'>
-              <div>
-                <h4 className='text-sm font-medium text-gray-700 dark:text-gray-300'>
-                  源站超时自动换源(实验性)
-                </h4>
-                <p className={helperTextClassName}>
-                  播放源加载超时后，自动切换到下一个候选源
-                </p>
-              </div>
-              <label className='flex cursor-pointer items-center'>
-                <div className='relative'>
-                  <input
-                    type='checkbox'
-                    className='peer sr-only'
-                    checked={autoSwitchSourceOnTimeout}
-                    onChange={(event) =>
-                      handleAutoSwitchSourceOnTimeoutToggle(
-                        event.target.checked,
-                      )
-                    }
-                  />
-                  <div className='h-6 w-11 rounded-full bg-gray-300 transition-colors peer-checked:bg-green-500 dark:bg-gray-600'></div>
-                  <div className='absolute left-0.5 top-0.5 h-5 w-5 rounded-full bg-white transition-transform peer-checked:translate-x-5'></div>
-                </div>
-              </label>
-            </div>
-
-            <div className='flex items-center justify-between'>
-              <div>
-                <h4 className='text-sm font-medium text-gray-700 dark:text-gray-300'>
-                  流式搜索输出
-                </h4>
-                <p className={helperTextClassName}>
-                  启用搜索结果实时流式输出，关闭后使用传统一次性搜索
-                </p>
-              </div>
-              <label className='flex cursor-pointer items-center'>
-                <div className='relative'>
-                  <input
-                    type='checkbox'
-                    className='peer sr-only'
-                    checked={fluidSearch}
-                    onChange={(event) =>
-                      handleFluidSearchToggle(event.target.checked)
-                    }
-                  />
-                  <div className='h-6 w-11 rounded-full bg-gray-300 transition-colors peer-checked:bg-green-500 dark:bg-gray-600'></div>
-                  <div className='absolute left-0.5 top-0.5 h-5 w-5 rounded-full bg-white transition-transform peer-checked:translate-x-5'></div>
-                </div>
-              </label>
-            </div>
-
-            <div className='flex items-center justify-between'>
-              <div>
-                <h4 className='text-sm font-medium text-gray-700 dark:text-gray-300'>
-                  IPTV 视频浏览器直连
-                </h4>
-                <p className={helperTextClassName}>
-                  开启 IPTV 视频浏览器直连时，需要自备 Allow CORS 插件
-                </p>
-              </div>
-              <label className='flex cursor-pointer items-center'>
-                <div className='relative'>
-                  <input
-                    type='checkbox'
-                    className='peer sr-only'
-                    checked={liveDirectConnect}
-                    onChange={(event) =>
-                      handleLiveDirectConnectToggle(event.target.checked)
-                    }
-                  />
-                  <div className='h-6 w-11 rounded-full bg-gray-300 transition-colors peer-checked:bg-green-500 dark:bg-gray-600'></div>
-                  <div className='absolute left-0.5 top-0.5 h-5 w-5 rounded-full bg-white transition-transform peer-checked:translate-x-5'></div>
-                </div>
-              </label>
-            </div>
+            ))}
           </div>
         </div>
       </div>

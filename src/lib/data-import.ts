@@ -123,6 +123,10 @@ function normalizeAdminConfig(value: unknown): AdminConfig {
   limitString(config.SiteConfig.SiteIcon, '站点图标', MAX_LONG_STRING_LENGTH);
   limitString(config.SiteConfig.Announcement, '公告', MAX_LONG_STRING_LENGTH);
   assertBoolean(config.SiteConfig.EnableLiveEntry, '直播入口');
+  assertBoolean(config.SiteConfig.DefaultAggregateSearch, '默认聚合搜索');
+  assertBoolean(config.SiteConfig.EnableOptimization, '优选和测速');
+  assertBoolean(config.SiteConfig.AutoSwitchSourceOnTimeout, '超时自动换源');
+  assertBoolean(config.SiteConfig.LiveDirectConnect, 'IPTV直连');
   assertFiniteNumber(config.SiteConfig.SearchDownstreamMaxPage, '搜索页数');
   assertFiniteNumber(config.SiteConfig.SiteInterfaceCacheTime, '缓存时间');
   limitString(

@@ -35,6 +35,12 @@ export function UserGroupFormDialog({
   const submitText = mode === 'add' ? '添加用户组' : '保存修改';
   const loadingText = mode === 'add' ? '添加中...' : '保存中...';
   const isAdd = mode === 'add';
+  const selectableApiKeys = sources
+    .filter((source) => !source.disabled)
+    .map((source) => source.key);
+  const isAllSelected =
+    selectableApiKeys.length > 0 &&
+    selectableApiKeys.every((key) => value.enabledApis.includes(key));
 
   return (
     <AdminDialog
@@ -60,9 +66,29 @@ export function UserGroupFormDialog({
         )}
 
         <div>
-          <label className='mb-4 block text-sm font-medium text-gray-700 dark:text-gray-300'>
-            可用视频源
-          </label>
+          <div className='mb-4 flex items-center justify-between gap-3'>
+            <label className='block text-sm font-medium text-gray-700 dark:text-gray-300'>
+              可用视频源
+            </label>
+            <label className='flex items-center gap-2 text-sm text-gray-600 dark:text-gray-400'>
+              <input
+                type='checkbox'
+                checked={isAllSelected}
+                onChange={(event) =>
+                  onChange({
+                    ...value,
+                    enabledApis: event.target.checked ? selectableApiKeys : [],
+                  })
+                }
+                className={`rounded border-gray-300 dark:border-gray-600 dark:bg-gray-700 ${
+                  isAdd
+                    ? 'text-blue-600 focus:ring-blue-500 dark:text-blue-500'
+                    : 'text-purple-600 focus:ring-purple-500 dark:text-purple-500'
+                }`}
+              />
+              全选
+            </label>
+          </div>
           <ApiSourcePicker
             sources={sources}
             selected={value.enabledApis}

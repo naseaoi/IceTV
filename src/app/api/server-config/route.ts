@@ -79,6 +79,10 @@ export async function GET(request: NextRequest) {
       : DEFAULT_RUNTIME_CONFIG.DOUBAN_IMAGE_PROXY,
     DisableYellowFilter: publicConfig.DisableYellowFilter,
     EnableLiveEntry: publicConfig.EnableLiveEntry,
+    DefaultAggregateSearch: publicConfig.DefaultAggregateSearch,
+    EnableOptimization: publicConfig.EnableOptimization,
+    AutoSwitchSourceOnTimeout: publicConfig.AutoSwitchSourceOnTimeout,
+    LiveDirectConnect: publicConfig.LiveDirectConnect,
     CustomCategories: publicConfig.CustomCategories,
     FluidSearch: publicConfig.FluidSearch,
   };

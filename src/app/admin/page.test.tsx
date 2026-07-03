@@ -93,7 +93,13 @@ describe('AdminPage role visibility', () => {
     ConfigFile: '',
     SiteConfig: {
       SiteName: 'IceTV',
+      SiteIcon: '',
       Announcement: '',
+      EnableLiveEntry: false,
+      DefaultAggregateSearch: true,
+      EnableOptimization: true,
+      AutoSwitchSourceOnTimeout: false,
+      LiveDirectConnect: false,
       SearchDownstreamMaxPage: 1,
       SiteInterfaceCacheTime: 300,
       DoubanProxyType: '',

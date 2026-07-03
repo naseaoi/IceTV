@@ -38,7 +38,11 @@ function resetStoredBoolean(key: string) {
 }
 
 export function readDefaultAggregateSearch(): boolean {
-  return true;
+  if (typeof window === 'undefined') {
+    return true;
+  }
+
+  return window.RUNTIME_CONFIG?.DEFAULT_AGGREGATE_SEARCH !== false;
 }
 
 export function readAggregateSearch(): boolean {
@@ -57,7 +61,11 @@ export function resetAggregateSearch() {
 }
 
 export function readDefaultEnableOptimization(): boolean {
-  return true;
+  if (typeof window === 'undefined') {
+    return true;
+  }
+
+  return window.RUNTIME_CONFIG?.ENABLE_OPTIMIZATION !== false;
 }
 
 export function readEnableOptimization(): boolean {
@@ -98,7 +106,11 @@ export function resetFluidSearch() {
 }
 
 export function readDefaultLiveDirectConnect(): boolean {
-  return false;
+  if (typeof window === 'undefined') {
+    return false;
+  }
+
+  return window.RUNTIME_CONFIG?.LIVE_DIRECT_CONNECT === true;
 }
 
 export function readLiveDirectConnect(): boolean {

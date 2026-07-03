@@ -73,6 +73,10 @@ export default async function RootLayout({
     DOUBAN_IMAGE_PROXY: process.env.NEXT_PUBLIC_DOUBAN_IMAGE_PROXY || '',
     DISABLE_YELLOW_FILTER: publicConfig.DisableYellowFilter,
     ENABLE_LIVE_ENTRY: publicConfig.EnableLiveEntry,
+    DEFAULT_AGGREGATE_SEARCH: publicConfig.DefaultAggregateSearch,
+    ENABLE_OPTIMIZATION: publicConfig.EnableOptimization,
+    AUTO_SWITCH_SOURCE_ON_TIMEOUT: publicConfig.AutoSwitchSourceOnTimeout,
+    LIVE_DIRECT_CONNECT: publicConfig.LiveDirectConnect,
     CUSTOM_CATEGORIES: publicConfig.CustomCategories,
     FLUID_SEARCH: publicConfig.FluidSearch,
   };

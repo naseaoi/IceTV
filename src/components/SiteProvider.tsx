@@ -13,6 +13,7 @@ import {
   applyClientServerConfig,
   fetchClientServerConfig,
 } from '@/lib/runtime-config';
+import { withSiteIconCacheBuster } from '@/lib/site-icon';
 
 const SiteContext = createContext<{
   siteName: string;
@@ -66,7 +67,10 @@ export function SiteProvider({
         }
 
         const nextSiteName = data.SiteName || siteName;
-        const nextSiteIcon = data.SiteIcon || '';
+        const nextSiteIcon = withSiteIconCacheBuster(
+          data.SiteIcon || '',
+          Date.now(),
+        );
         const nextAnnouncement = data.Announcement || defaultAnnouncement;
 
         setSiteState({

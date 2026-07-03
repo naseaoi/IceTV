@@ -3,6 +3,10 @@ export interface SiteConfig {
   SiteIcon: string; // 站点图标 URL（外部链接或 /api/admin/site-icon 本地路径）
   Announcement: string;
   EnableLiveEntry: boolean;
+  DefaultAggregateSearch: boolean;
+  EnableOptimization: boolean;
+  AutoSwitchSourceOnTimeout: boolean;
+  LiveDirectConnect: boolean;
   SearchDownstreamMaxPage: number;
   SiteInterfaceCacheTime: number;
   DoubanProxyType: string;

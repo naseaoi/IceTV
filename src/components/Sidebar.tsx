@@ -50,7 +50,8 @@ const SidebarContext = createContext<SidebarContextType>({
 
 const SiteIcon = () => {
   const { siteIcon, siteName } = useSite();
-  const iconSrc = siteIcon || '/favicon.ico';
+  const fallbackIcon = '/icons/icon-192x192.png';
+  const iconSrc = siteIcon || fallbackIcon;
 
   return (
     <img
@@ -59,8 +60,8 @@ const SiteIcon = () => {
       className='h-full w-full object-contain'
       onError={(e) => {
         const img = e.target as HTMLImageElement;
-        if (img.src !== window.location.origin + '/favicon.ico') {
-          img.src = '/favicon.ico';
+        if (img.src !== window.location.origin + fallbackIcon) {
+          img.src = fallbackIcon;
         }
       }}
     />

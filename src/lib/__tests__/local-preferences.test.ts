@@ -54,29 +54,41 @@ describe('local preferences', () => {
     expect(readFluidSearch()).toBe(false);
   });
 
-  it('uses built-in default after aggregate reset', () => {
+  it('falls back to runtime config after aggregate reset', () => {
+    window.RUNTIME_CONFIG = {
+      DEFAULT_AGGREGATE_SEARCH: false,
+    } as typeof window.RUNTIME_CONFIG;
+
     writeAggregateSearch(false);
     resetAggregateSearch();
 
     expect(
       localStorage.getItem(DEFAULT_AGGREGATE_SEARCH_STORAGE_KEY),
     ).toBeNull();
-    expect(readAggregateSearch()).toBe(true);
+    expect(readAggregateSearch()).toBe(false);
   });
 
-  it('uses built-in default after optimization reset', () => {
+  it('falls back to runtime config after optimization reset', () => {
+    window.RUNTIME_CONFIG = {
+      ENABLE_OPTIMIZATION: false,
+    } as typeof window.RUNTIME_CONFIG;
+
     writeEnableOptimization(false);
     resetEnableOptimization();
 
     expect(localStorage.getItem(ENABLE_OPTIMIZATION_STORAGE_KEY)).toBeNull();
-    expect(readEnableOptimization()).toBe(true);
+    expect(readEnableOptimization()).toBe(false);
   });
 
-  it('uses built-in default after live direct connect reset', () => {
+  it('falls back to runtime config after live direct connect reset', () => {
+    window.RUNTIME_CONFIG = {
+      LIVE_DIRECT_CONNECT: true,
+    } as typeof window.RUNTIME_CONFIG;
+
     writeLiveDirectConnect(true);
     resetLiveDirectConnect();
 
     expect(localStorage.getItem(LIVE_DIRECT_CONNECT_STORAGE_KEY)).toBeNull();
-    expect(readLiveDirectConnect()).toBe(false);
+    expect(readLiveDirectConnect()).toBe(true);
   });
 });

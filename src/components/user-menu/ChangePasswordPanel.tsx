@@ -3,6 +3,8 @@
 import { X } from 'lucide-react';
 import { useState } from 'react';
 
+import { PasswordInput } from '@/components/PasswordInput';
+
 import { useBodyScrollLock } from './useBodyScrollLock';
 
 interface ChangePasswordPanelProps {
@@ -109,9 +111,8 @@ export function ChangePasswordPanel({
               <label className='mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300'>
                 当前密码
               </label>
-              <input
-                type='password'
-                className='w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 placeholder-gray-500 transition-colors focus:border-transparent focus:outline-none focus:ring-2 focus:ring-green-500 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100 dark:placeholder-gray-400'
+              <PasswordInput
+                className='w-full rounded-md border border-gray-300 bg-white px-3 py-2 pr-10 text-sm text-gray-900 placeholder-gray-500 transition-colors focus:border-transparent focus:outline-none focus:ring-2 focus:ring-green-500 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100 dark:placeholder-gray-400'
                 placeholder='请输入当前密码'
                 value={oldPassword}
                 onChange={(event) => setOldPassword(event.target.value)}
@@ -123,9 +124,8 @@ export function ChangePasswordPanel({
               <label className='mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300'>
                 新密码
               </label>
-              <input
-                type='password'
-                className='w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 placeholder-gray-500 transition-colors focus:border-transparent focus:outline-none focus:ring-2 focus:ring-green-500 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100 dark:placeholder-gray-400'
+              <PasswordInput
+                className='w-full rounded-md border border-gray-300 bg-white px-3 py-2 pr-10 text-sm text-gray-900 placeholder-gray-500 transition-colors focus:border-transparent focus:outline-none focus:ring-2 focus:ring-green-500 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100 dark:placeholder-gray-400'
                 placeholder='请输入新密码'
                 value={newPassword}
                 onChange={(event) => setNewPassword(event.target.value)}
@@ -137,9 +137,8 @@ export function ChangePasswordPanel({
               <label className='mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300'>
                 确认密码
               </label>
-              <input
-                type='password'
-                className='w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 placeholder-gray-500 transition-colors focus:border-transparent focus:outline-none focus:ring-2 focus:ring-green-500 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100 dark:placeholder-gray-400'
+              <PasswordInput
+                className='w-full rounded-md border border-gray-300 bg-white px-3 py-2 pr-10 text-sm text-gray-900 placeholder-gray-500 transition-colors focus:border-transparent focus:outline-none focus:ring-2 focus:ring-green-500 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100 dark:placeholder-gray-400'
                 placeholder='请再次输入新密码'
                 value={confirmPassword}
                 onChange={(event) => setConfirmPassword(event.target.value)}

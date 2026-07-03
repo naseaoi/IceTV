@@ -3,6 +3,7 @@
 import { X } from 'lucide-react';
 
 import ModalShell from '@/components/modals/ModalShell';
+import { PasswordInput } from '@/components/PasswordInput';
 import { buttonStyles } from '@/features/admin/lib/buttonStyles';
 
 interface ChangePasswordFormProps {
@@ -49,12 +50,11 @@ export function ChangePasswordForm({
             disabled
             className='w-full cursor-not-allowed rounded-lg border border-gray-300 bg-gray-100 px-3 py-2 text-gray-900 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-100'
           />
-          <input
-            type='password'
+          <PasswordInput
             placeholder='新密码'
             value={password}
             onChange={(e) => onPasswordChange(e.target.value)}
-            className='w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-gray-900 focus:border-transparent focus:ring-2 focus:ring-blue-500 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100'
+            className='w-full rounded-lg border border-gray-300 bg-white px-3 py-2 pr-10 text-gray-900 focus:border-transparent focus:ring-2 focus:ring-blue-500 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100'
           />
         </div>
         <div className='flex justify-end space-x-2'>

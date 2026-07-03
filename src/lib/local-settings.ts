@@ -28,6 +28,14 @@ export function readBooleanLocalSetting(
   }
 }
 
+export function readDefaultAutoSwitchSourceOnTimeout(): boolean {
+  if (typeof window === 'undefined') {
+    return false;
+  }
+
+  return window.RUNTIME_CONFIG?.AUTO_SWITCH_SOURCE_ON_TIMEOUT === true;
+}
+
 export function writeBooleanLocalSetting(key: string, value: boolean) {
   if (typeof window === 'undefined') {
     return;
