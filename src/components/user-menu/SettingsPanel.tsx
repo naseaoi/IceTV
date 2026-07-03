@@ -1,10 +1,11 @@
 ﻿'use client';
 
-import { ExternalLink, X } from 'lucide-react';
+import { ExternalLink, RotateCcw, X } from 'lucide-react';
 import { useEffect, useState } from 'react';
 
 import AdminSelect from '@/components/admin/AdminSelect';
 import AlertModal from '@/components/modals/AlertModal';
+import ConfirmModal from '@/components/modals/ConfirmModal';
 import { useAlertModal } from '@/hooks/useAlertModal';
 import {
   BANGUMI_DATA_SOURCE_STORAGE_KEY,
@@ -68,6 +69,7 @@ interface SettingsPanelProps {
 }
 
 export function SettingsPanel({ onClose }: SettingsPanelProps) {
+  const helperTextClassName = 'mt-1 text-xs text-gray-400 dark:text-gray-500';
   const [defaultAggregateSearch, setDefaultAggregateSearch] = useState(true);
   const [doubanProxyUrl, setDoubanProxyUrl] = useState('');
   const [enableOptimization, setEnableOptimization] = useState(true);
@@ -82,6 +84,7 @@ export function SettingsPanel({ onClose }: SettingsPanelProps) {
   const [bangumiProxyUrl, setBangumiProxyUrl] = useState('');
   const [doubanImageProxyType, setDoubanImageProxyType] = useState('direct');
   const [doubanImageProxyUrl, setDoubanImageProxyUrl] = useState('');
+  const [showResetConfirm, setShowResetConfirm] = useState(false);
   const { alertModal, showAlert, hideAlert } = useAlertModal();
 
   useBodyScrollLock(true);
@@ -232,25 +235,31 @@ export function SettingsPanel({ onClose }: SettingsPanelProps) {
           }}
         >
           <div className='mb-6 flex items-center justify-between'>
-            <div className='flex items-center gap-3'>
+            <div>
               <h3 className='text-xl font-bold text-gray-800 dark:text-gray-200'>
                 本地设置
               </h3>
+              <p className='mt-1 text-xs text-gray-500 dark:text-gray-400'>
+                设置保存在本地浏览器中
+              </p>
+            </div>
+            <div className='flex items-center gap-2'>
               <button
-                onClick={handleResetSettings}
-                className='rounded border border-red-200 px-2 py-1 text-xs text-red-500 transition-colors hover:border-red-300 hover:bg-red-50 hover:text-red-700 dark:border-red-800 dark:text-red-400 dark:hover:border-red-700 dark:hover:bg-red-900/20 dark:hover:text-red-300'
+                onClick={() => setShowResetConfirm(true)}
+                className='flex h-8 w-8 items-center justify-center rounded-full p-1 text-red-500 transition-colors hover:bg-red-50 hover:text-red-600 dark:text-red-400 dark:hover:bg-red-900/20 dark:hover:text-red-300'
                 title='重置为默认设置'
+                aria-label='重置为默认设置'
               >
-                恢复默认
+                <RotateCcw className='h-4 w-4' />
+              </button>
+              <button
+                onClick={onClose}
+                className='flex h-8 w-8 items-center justify-center rounded-full p-1 text-gray-500 transition-colors hover:bg-gray-100 dark:hover:bg-gray-800'
+                aria-label='Close'
+              >
+                <X className='h-full w-full' />
               </button>
             </div>
-            <button
-              onClick={onClose}
-              className='flex h-8 w-8 items-center justify-center rounded-full p-1 text-gray-500 transition-colors hover:bg-gray-100 dark:hover:bg-gray-800'
-              aria-label='Close'
-            >
-              <X className='h-full w-full' />
-            </button>
           </div>
 
           <div className='space-y-6'>
@@ -278,9 +287,6 @@ export function SettingsPanel({ onClose }: SettingsPanelProps) {
                     </button>
                   )}
                 </div>
-                <p className='mt-1 text-xs text-gray-500 dark:text-gray-400'>
-                  选择获取豆瓣数据的方式
-                </p>
               </div>
               <AdminSelect
                 value={doubanDataSource}
@@ -295,9 +301,7 @@ export function SettingsPanel({ onClose }: SettingsPanelProps) {
                   <h4 className='text-sm font-medium text-gray-700 dark:text-gray-300'>
                     豆瓣代理地址
                   </h4>
-                  <p className='mt-1 text-xs text-gray-500 dark:text-gray-400'>
-                    自定义代理服务器地址
-                  </p>
+                  <p className={helperTextClassName}>自定义代理服务器地址</p>
                 </div>
                 <input
                   type='text'
@@ -335,9 +339,6 @@ export function SettingsPanel({ onClose }: SettingsPanelProps) {
                     </button>
                   )}
                 </div>
-                <p className='mt-1 text-xs text-gray-500 dark:text-gray-400'>
-                  选择获取豆瓣图片的方式
-                </p>
               </div>
               <AdminSelect
                 value={doubanImageProxyType}
@@ -352,7 +353,7 @@ export function SettingsPanel({ onClose }: SettingsPanelProps) {
                   <h4 className='text-sm font-medium text-gray-700 dark:text-gray-300'>
                     豆瓣图片代理地址
                   </h4>
-                  <p className='mt-1 text-xs text-gray-500 dark:text-gray-400'>
+                  <p className={helperTextClassName}>
                     自定义图片代理服务器地址
                   </p>
                 </div>
@@ -373,9 +374,6 @@ export function SettingsPanel({ onClose }: SettingsPanelProps) {
                 <h4 className='text-sm font-medium text-gray-700 dark:text-gray-300'>
                   Bangumi 数据代理
                 </h4>
-                <p className='mt-1 text-xs text-gray-500 dark:text-gray-400'>
-                  选择获取新番放送数据的方式
-                </p>
               </div>
               <AdminSelect
                 value={bangumiDataSource}
@@ -410,9 +408,7 @@ export function SettingsPanel({ onClose }: SettingsPanelProps) {
                   <h4 className='text-sm font-medium text-gray-700 dark:text-gray-300'>
                     Bangumi 代理地址
                   </h4>
-                  <p className='mt-1 text-xs text-gray-500 dark:text-gray-400'>
-                    自定义代理服务器地址
-                  </p>
+                  <p className={helperTextClassName}>自定义代理服务器地址</p>
                 </div>
                 <input
                   type='text'
@@ -426,14 +422,12 @@ export function SettingsPanel({ onClose }: SettingsPanelProps) {
               </div>
             )}
 
-            <div className='border-t border-gray-200 dark:border-gray-700'></div>
-
             <div className='flex items-center justify-between'>
               <div>
                 <h4 className='text-sm font-medium text-gray-700 dark:text-gray-300'>
                   默认聚合搜索结果
                 </h4>
-                <p className='mt-1 text-xs text-gray-500 dark:text-gray-400'>
+                <p className={helperTextClassName}>
                   搜索时默认按标题和年份聚合显示结果
                 </p>
               </div>
@@ -458,7 +452,7 @@ export function SettingsPanel({ onClose }: SettingsPanelProps) {
                 <h4 className='text-sm font-medium text-gray-700 dark:text-gray-300'>
                   优选和测速
                 </h4>
-                <p className='mt-1 text-xs text-gray-500 dark:text-gray-400'>
+                <p className={helperTextClassName}>
                   如出现播放器劫持问题可关闭
                 </p>
               </div>
@@ -483,7 +477,7 @@ export function SettingsPanel({ onClose }: SettingsPanelProps) {
                 <h4 className='text-sm font-medium text-gray-700 dark:text-gray-300'>
                   源站超时自动换源(实验性)
                 </h4>
-                <p className='mt-1 text-xs text-gray-500 dark:text-gray-400'>
+                <p className={helperTextClassName}>
                   播放源加载超时后，自动切换到下一个候选源
                 </p>
               </div>
@@ -510,7 +504,7 @@ export function SettingsPanel({ onClose }: SettingsPanelProps) {
                 <h4 className='text-sm font-medium text-gray-700 dark:text-gray-300'>
                   流式搜索输出
                 </h4>
-                <p className='mt-1 text-xs text-gray-500 dark:text-gray-400'>
+                <p className={helperTextClassName}>
                   启用搜索结果实时流式输出，关闭后使用传统一次性搜索
                 </p>
               </div>
@@ -535,7 +529,7 @@ export function SettingsPanel({ onClose }: SettingsPanelProps) {
                 <h4 className='text-sm font-medium text-gray-700 dark:text-gray-300'>
                   IPTV 视频浏览器直连
                 </h4>
-                <p className='mt-1 text-xs text-gray-500 dark:text-gray-400'>
+                <p className={helperTextClassName}>
                   开启 IPTV 视频浏览器直连时，需要自备 Allow CORS 插件
                 </p>
               </div>
@@ -555,14 +549,18 @@ export function SettingsPanel({ onClose }: SettingsPanelProps) {
               </label>
             </div>
           </div>
-
-          <div className='mt-6 border-t border-gray-200 pt-4 dark:border-gray-700'>
-            <p className='text-center text-xs text-gray-500 dark:text-gray-400'>
-              这些设置保存在本地浏览器中
-            </p>
-          </div>
         </div>
       </div>
+      <ConfirmModal
+        isOpen={showResetConfirm}
+        title='确认恢复默认设置？'
+        message='该操作会清空当前浏览器中的本地设置，并恢复为默认值。'
+        danger
+        cancelText='取消'
+        confirmText='确认恢复'
+        onCancel={() => setShowResetConfirm(false)}
+        onConfirm={handleResetSettings}
+      />
       <AlertModal
         isOpen={alertModal.isOpen}
         onClose={hideAlert}
