@@ -39,10 +39,13 @@ export async function POST(request: NextRequest) {
     }
 
     await db.registerUser(username, password);
-    await saveConfig(config);
+    void saveConfig(config).catch((error) => {
+      console.warn('注册用户配置同步失败:', error);
+    });
 
     return NextResponse.json({ ok: true });
-  } catch {
+  } catch (error) {
+    console.error('注册失败:', error);
     return NextResponse.json({ error: '注册失败' }, { status: 500 });
   }
 }

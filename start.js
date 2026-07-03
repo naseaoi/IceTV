@@ -21,6 +21,7 @@ function generateManifest() {
 }
 
 generateManifest();
+warnMissingCronSecret();
 
 // 直接在当前进程中启动 standalone Server（`server.js`）
 require('./server.js');
@@ -130,6 +131,16 @@ function getCronSecret() {
     process.env.ICETV_CRON_SECRET ||
     process.env.VERCEL_CRON_SECRET ||
     ''
+  );
+}
+
+function warnMissingCronSecret() {
+  if (getCronSecret()) {
+    return;
+  }
+
+  console.warn(
+    '⚠️ CRON_SECRET is not configured. Internal cron requests will return 401 until CRON_SECRET, ICETV_CRON_SECRET, or VERCEL_CRON_SECRET is set.',
   );
 }
 

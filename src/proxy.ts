@@ -6,9 +6,11 @@ import {
   getSessionExpiresAt,
   getSignatureData,
   shouldRefreshSession,
-  verifySignature,
 } from '@/lib/auth.server';
-import { getOwnerPassword } from '@/lib/env.server';
+import {
+  getConfiguredAuthSigningSecret,
+  verifyAuthSignature,
+} from '@/lib/signing-secret.server';
 
 function isSecureRequest(request: NextRequest): boolean {
   return (
@@ -90,10 +92,8 @@ export async function proxy(request: NextRequest) {
   }
 
   const response = NextResponse.next();
-  const ownerPassword = getOwnerPassword();
 
   if (
-    !ownerPassword ||
     !authInfo.signature ||
     !authInfo.expiresAt ||
     authInfo.sessionType !== 'account' ||
@@ -109,25 +109,27 @@ export async function proxy(request: NextRequest) {
     authInfo.expiresAt,
     authInfo.username,
   );
-  const isValid = await verifySignature(
-    signatureData,
-    authInfo.signature,
-    ownerPassword,
-  );
+  const isValid = await verifyAuthSignature(signatureData, authInfo.signature, {
+    allowLegacyOwnerPassword: true,
+  });
 
   if (!isValid) {
     clearAuthCookies(response, request);
     return response;
   }
 
+  const signingSecret = getConfiguredAuthSigningSecret();
   const nextExpiresAt = getSessionExpiresAt();
-  if (!shouldRefreshSession(authInfo.expiresAt, nextExpiresAt)) {
+  if (
+    !signingSecret ||
+    !shouldRefreshSession(authInfo.expiresAt, nextExpiresAt)
+  ) {
     return response;
   }
 
   const nextSignature = await generateSignature(
     getSignatureData(authInfo.sessionType, nextExpiresAt, authInfo.username),
-    ownerPassword,
+    signingSecret,
   );
 
   setAuthCookies(response, request, {
