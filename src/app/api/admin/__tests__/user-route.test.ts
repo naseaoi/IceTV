@@ -3,7 +3,7 @@
 import type { NextRequest } from 'next/server';
 
 import { requireAdmin } from '@/lib/api-auth';
-import { getConfig, saveConfig } from '@/lib/config';
+import { ConfigConflictError, getConfig, saveConfig } from '@/lib/config';
 import { db } from '@/lib/db';
 
 jest.mock('@/lib/api-auth', () => ({
@@ -11,10 +11,19 @@ jest.mock('@/lib/api-auth', () => ({
   requireAdmin: jest.fn(),
 }));
 
-jest.mock('@/lib/config', () => ({
-  getConfig: jest.fn(),
-  saveConfig: jest.fn(),
-}));
+jest.mock('@/lib/config', () => {
+  class ConfigConflictError extends Error {
+    constructor() {
+      super('配置已被其他操作更新，请刷新后重试');
+      this.name = 'ConfigConflictError';
+    }
+  }
+  return {
+    getConfig: jest.fn(),
+    saveConfig: jest.fn(),
+    ConfigConflictError,
+  };
+});
 
 jest.mock('@/lib/db', () => ({
   db: {
@@ -192,5 +201,22 @@ describe('admin user route', () => {
         ],
       },
     });
+  });
+
+  it('returns 409 when persisting hits a config conflict', async () => {
+    const POST = getHandler();
+    (db.checkUserExist as jest.Mock).mockResolvedValue(false);
+    (db.registerUser as jest.Mock).mockResolvedValue(undefined);
+    (saveConfig as jest.Mock).mockRejectedValue(new ConfigConflictError());
+
+    const response = await POST(
+      createRequest({
+        action: 'add',
+        targetUsername: 'new-user',
+        targetPassword: 'new-password',
+      }),
+    );
+
+    expect(response.status).toBe(409);
   });
 });

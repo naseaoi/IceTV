@@ -1,4 +1,4 @@
-﻿import { getConfig, saveConfig } from '@/lib/config';
+﻿import { ConfigConflictError, getConfig, saveConfig } from '@/lib/config';
 import { db } from '@/lib/db';
 
 const ACTIONS = [
@@ -465,6 +465,9 @@ export async function handleAdminUserAction({
       },
     );
   } catch (error) {
+    if (error instanceof ConfigConflictError) {
+      return toActionResponse({ error: error.message }, { status: 409 });
+    }
     console.error('用户管理操作失败:', error);
     return toActionResponse(
       {

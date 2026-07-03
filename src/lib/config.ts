@@ -601,13 +601,12 @@ export async function resetConfig() {
 
 export async function saveConfig(config: AdminConfig): Promise<AdminConfig> {
   const expectedVersion = configVersionByObject.get(config);
-  if (expectedVersion) {
-    await assertConfigVersion(expectedVersion);
-  }
-
   const nextConfig = await syncConfigUsersWithDb(
     configSelfCheck(cloneConfig(config)),
   );
+  if (expectedVersion) {
+    await assertConfigVersion(expectedVersion);
+  }
   await db.saveAdminConfig(nextConfig);
   cachedConfig = cloneConfig(nextConfig);
   cachedConfigVersion = getConfigVersion(cachedConfig);

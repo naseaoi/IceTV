@@ -61,7 +61,13 @@ export async function verifyAuthSignature(
     return false;
   }
 
-  return verifySignature(data, signature, legacySecret);
+  const legacyValid = await verifySignature(data, signature, legacySecret);
+  if (legacyValid) {
+    console.warn(
+      '检测到使用旧站长口令验签的会话，建议尽快让用户重新登录，并用 LEGACY_COOKIE_CUTOFF_DATE 关闭兼容期',
+    );
+  }
+  return legacyValid;
 }
 
 function isLegacyOwnerPasswordSignatureAllowed(): boolean {

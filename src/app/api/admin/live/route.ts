@@ -1,6 +1,7 @@
 ﻿import { NextRequest, NextResponse } from 'next/server';
 
 import { isGuardFailure, requireAdmin } from '@/lib/api-auth';
+import { configConflictResponse } from '@/lib/api-config-error';
 import { getConfig, saveConfig } from '@/lib/config';
 import {
   buildConfigFileFromAdminConfig,
@@ -231,6 +232,8 @@ export async function POST(request: NextRequest) {
 
     return NextResponse.json({ success: true });
   } catch (error) {
+    const conflict = configConflictResponse(error);
+    if (conflict) return conflict;
     return NextResponse.json(
       { error: error instanceof Error ? error.message : '操作失败' },
       { status: 500 },

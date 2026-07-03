@@ -49,16 +49,37 @@ type LoginAttemptState = {
 
 const loginAttempts = new Map<string, LoginAttemptState>();
 
+function getTrustedProxyCount(): number {
+  const raw = Number.parseInt(process.env.TRUSTED_PROXY_COUNT || '', 10);
+  return Number.isFinite(raw) && raw > 0 ? raw : 0;
+}
+
 function getClientIp(req: NextRequest): string {
   const forwardedFor = req.headers.get('x-forwarded-for');
+  const trustedProxyCount = getTrustedProxyCount();
+
+  if (trustedProxyCount > 0 && forwardedFor) {
+    const parts = forwardedFor
+      .split(',')
+      .map((part) => part.trim())
+      .filter(Boolean);
+    const index = parts.length - trustedProxyCount;
+    if (index >= 0 && parts[index]) {
+      return parts[index];
+    }
+  }
+
+  const realIp =
+    req.headers.get('cf-connecting-ip') || req.headers.get('x-real-ip');
+  if (realIp) {
+    return realIp.trim();
+  }
+
   if (forwardedFor) {
     return forwardedFor.split(',')[0]?.trim() || 'unknown';
   }
-  return (
-    req.headers.get('x-real-ip') ||
-    req.headers.get('cf-connecting-ip') ||
-    'unknown'
-  );
+
+  return 'unknown';
 }
 
 function getAttemptKey(req: NextRequest, username?: string): string {

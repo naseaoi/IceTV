@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 
 import { isGuardFailure, requireAdmin } from '@/lib/api-auth';
+import { configConflictResponse } from '@/lib/api-config-error';
 import { getConfig, saveConfig } from '@/lib/config';
 
 export const runtime = 'nodejs';
@@ -159,6 +160,8 @@ export async function POST(request: NextRequest) {
       },
     );
   } catch (error) {
+    const conflict = configConflictResponse(error);
+    if (conflict) return conflict;
     console.error('分类管理操作失败:', error);
     return NextResponse.json({ error: '分类管理操作失败' }, { status: 500 });
   }
