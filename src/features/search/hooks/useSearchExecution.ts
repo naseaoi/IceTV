@@ -2,6 +2,7 @@ import { startTransition, useEffect, useRef, useState } from 'react';
 import { ReadonlyURLSearchParams } from 'next/navigation';
 
 import { addSearchHistory } from '@/lib/db.client';
+import { readFluidSearch } from '@/lib/local-preferences';
 import { SearchResult } from '@/lib/types';
 
 import { sortBatchForNoOrder } from '../lib/searchUtils';
@@ -126,14 +127,7 @@ export function useSearchExecution({
       // 每次搜索时重新读取设置
       let currentFluidSearch = true;
       if (typeof window !== 'undefined') {
-        const savedFluidSearch = localStorage.getItem('fluidSearch');
-        if (savedFluidSearch !== null) {
-          currentFluidSearch = JSON.parse(savedFluidSearch);
-        } else {
-          const defaultFluidSearch =
-            window.RUNTIME_CONFIG?.FLUID_SEARCH !== false;
-          currentFluidSearch = defaultFluidSearch;
-        }
+        currentFluidSearch = readFluidSearch();
       }
       setUseFluidSearch(currentFluidSearch);
 

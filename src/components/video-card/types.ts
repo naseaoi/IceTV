@@ -25,6 +25,17 @@ export interface VideoCardProps {
   aggregateGroup?: SearchResult[];
 }
 
+export interface VideoCardDisplayConfig {
+  showSourceName: boolean;
+  showProgress: boolean;
+  showPlayButton: boolean;
+  showHeart: boolean;
+  showCheckCircle: boolean;
+  showDoubanLink: boolean;
+  showRating: boolean;
+  showYear: boolean;
+}
+
 export type VideoCardHandle = {
   setEpisodes: (episodes?: number) => void;
   setSourceNames: (names?: string[]) => void;

@@ -2,6 +2,8 @@ import { createProxySourceHelper } from '@/lib/proxy-source-helper';
 
 export const DOUBAN_DATA_SOURCE_STORAGE_KEY = 'doubanDataSource';
 export const DOUBAN_PROXY_URL_STORAGE_KEY = 'doubanProxyUrl';
+export const DOUBAN_IMAGE_PROXY_TYPE_STORAGE_KEY = 'doubanImageProxyType';
+export const DOUBAN_IMAGE_PROXY_URL_STORAGE_KEY = 'doubanImageProxyUrl';
 
 export const DOUBAN_PROXY_TYPE_VALUES = [
   'direct',
@@ -26,6 +28,15 @@ const doubanProxySourceHelper = createProxySourceHelper({
   readRuntimeProxyUrl: () => window.RUNTIME_CONFIG?.DOUBAN_PROXY,
 });
 
+const doubanImageProxySourceHelper = createProxySourceHelper({
+  values: DOUBAN_PROXY_TYPE_VALUES,
+  defaultValue: DEFAULT_DOUBAN_PROXY_TYPE,
+  sourceStorageKey: DOUBAN_IMAGE_PROXY_TYPE_STORAGE_KEY,
+  proxyUrlStorageKey: DOUBAN_IMAGE_PROXY_URL_STORAGE_KEY,
+  readRuntimeSource: () => window.RUNTIME_CONFIG?.DOUBAN_IMAGE_PROXY_TYPE,
+  readRuntimeProxyUrl: () => window.RUNTIME_CONFIG?.DOUBAN_IMAGE_PROXY,
+});
+
 export function normalizeDoubanProxyType(value: unknown): DoubanProxyType {
   return doubanProxySourceHelper.normalizeSource(value);
 }
@@ -44,4 +55,20 @@ export function readDefaultDoubanProxyUrl(): string {
 
 export function readDoubanProxyUrl(): string {
   return doubanProxySourceHelper.readProxyUrl();
+}
+
+export function readDefaultDoubanImageProxyType(): DoubanProxyType {
+  return doubanImageProxySourceHelper.readDefaultSource();
+}
+
+export function readDoubanImageProxyType(): DoubanProxyType {
+  return doubanImageProxySourceHelper.readSource();
+}
+
+export function readDefaultDoubanImageProxyUrl(): string {
+  return doubanImageProxySourceHelper.readDefaultProxyUrl();
+}
+
+export function readDoubanImageProxyUrl(): string {
+  return doubanImageProxySourceHelper.readProxyUrl();
 }

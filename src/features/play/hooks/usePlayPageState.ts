@@ -4,6 +4,7 @@ import type Artplayer from 'artplayer';
 import type { ReadonlyURLSearchParams } from 'next/navigation';
 import { useEffect, useRef, useState } from 'react';
 
+import { readEnableOptimization } from '@/lib/local-preferences';
 import { SearchResult } from '@/lib/types';
 
 import type { SourceSwitchEpisodeAnchor } from '@/features/play/lib/episodeResumePolicy';
@@ -148,17 +149,11 @@ export function usePlayPageState(searchParams: ReadonlyURLSearchParams) {
   const playbackRequestModeRef = useRef<PlaybackRequestMode>('initial');
 
   const [optimizationEnabled] = useState<boolean>(() => {
-    if (typeof window !== 'undefined') {
-      const saved = localStorage.getItem('enableOptimization');
-      if (saved !== null) {
-        try {
-          return JSON.parse(saved);
-        } catch {
-          /* ignore */
-        }
-      }
+    if (typeof window === 'undefined') {
+      return true;
     }
-    return true;
+
+    return readEnableOptimization();
   });
 
   const [precomputedVideoInfo, setPrecomputedVideoInfo] = useState<
