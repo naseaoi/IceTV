@@ -32,22 +32,18 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ error: 'Missing url' }, { status: 400 });
   }
 
+  const authFailure = await authorizeProxyRequest(request, 'key', url);
+  if (authFailure) {
+    return authFailure;
+  }
+
   if (isLiveStream && !(await isLiveEntryEnabled())) {
     return NextResponse.json({ error: '直播未开启' }, { status: 404 });
   }
 
   const validation = await validateProxyUrlForRequest(url);
   if (!validation.ok) {
-    return NextResponse.json({ error: validation.reason }, { status: 403 });
-  }
-
-  const authFailure = await authorizeProxyRequest(
-    request,
-    'key',
-    validation.url,
-  );
-  if (authFailure) {
-    return authFailure;
+    return NextResponse.json({ error: 'Invalid URL' }, { status: 403 });
   }
 
   const ua = await resolveProxyUserAgent(source);
@@ -118,7 +114,7 @@ export async function GET(request: NextRequest) {
     });
   } catch (error) {
     if (error instanceof UrlValidationError) {
-      return NextResponse.json({ error: error.reason }, { status: 403 });
+      return NextResponse.json({ error: 'Invalid URL' }, { status: 403 });
     }
     if (error instanceof ResponseSizeLimitError) {
       return NextResponse.json({ error: error.message }, { status: 413 });

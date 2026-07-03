@@ -24,18 +24,14 @@ async function proxyImage(request: NextRequest, method: 'GET' | 'HEAD') {
     return NextResponse.json({ error: 'Missing image URL' }, { status: 400 });
   }
 
-  const validation = await validateProxyUrlForRequest(imageUrl);
-  if (!validation.ok) {
-    return NextResponse.json({ error: validation.reason }, { status: 403 });
-  }
-
-  const authFailure = await authorizeProxyRequest(
-    request,
-    'image',
-    validation.url,
-  );
+  const authFailure = await authorizeProxyRequest(request, 'image', imageUrl);
   if (authFailure) {
     return authFailure;
+  }
+
+  const validation = await validateProxyUrlForRequest(imageUrl);
+  if (!validation.ok) {
+    return NextResponse.json({ error: 'Invalid URL' }, { status: 403 });
   }
 
   try {
@@ -112,7 +108,7 @@ async function proxyImage(request: NextRequest, method: 'GET' | 'HEAD') {
     );
   } catch (error) {
     if (error instanceof UrlValidationError) {
-      return NextResponse.json({ error: error.reason }, { status: 403 });
+      return NextResponse.json({ error: 'Invalid URL' }, { status: 403 });
     }
     if (error instanceof ResponseSizeLimitError) {
       return NextResponse.json({ error: error.message }, { status: 413 });

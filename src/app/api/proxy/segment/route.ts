@@ -57,20 +57,15 @@ export async function GET(request: NextRequest) {
     });
   }
 
-  if (isLiveStream && !(await isLiveEntryEnabled())) {
-    return NextResponse.json({ error: '直播未开启' }, { status: 404 });
-  }
-
-  const validation = await validateProxyUrlForRequest(url);
-  if (!validation.ok) {
+  const authFailure = await authorizeProxyRequest(request, 'segment', url);
+  if (authFailure) {
     const diagnostic = createProxyFailureDiagnostic({
       route: 'segment',
       source,
       targetUrl: url,
-      stage: 'validation',
-      reason: 'invalid-url',
-      status: 403,
-      message: validation.reason,
+      stage: 'auth',
+      reason: 'auth-failed',
+      status: authFailure.status || 403,
       elapsedMs: Date.now() - startedAt,
       proxyMode,
       isLive: isLiveStream,
@@ -84,19 +79,20 @@ export async function GET(request: NextRequest) {
     });
   }
 
-  const authFailure = await authorizeProxyRequest(
-    request,
-    'segment',
-    validation.url,
-  );
-  if (authFailure) {
+  if (isLiveStream && !(await isLiveEntryEnabled())) {
+    return NextResponse.json({ error: '直播未开启' }, { status: 404 });
+  }
+
+  const validation = await validateProxyUrlForRequest(url);
+  if (!validation.ok) {
     const diagnostic = createProxyFailureDiagnostic({
       route: 'segment',
       source,
-      targetUrl: validation.url,
-      stage: 'auth',
-      reason: 'auth-failed',
-      status: authFailure.status || 403,
+      targetUrl: url,
+      stage: 'validation',
+      reason: 'invalid-url',
+      status: 403,
+      message: 'Invalid URL',
       elapsedMs: Date.now() - startedAt,
       proxyMode,
       isLive: isLiveStream,

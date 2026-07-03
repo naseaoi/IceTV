@@ -51,6 +51,27 @@ export async function GET(request: NextRequest) {
     });
   }
 
+  const authFailure = await authorizeProxyRequest(request, 'm3u8', url);
+  if (authFailure) {
+    const diagnostic = createProxyFailureDiagnostic({
+      route: 'm3u8',
+      source,
+      targetUrl: url,
+      stage: 'auth',
+      reason: 'auth-failed',
+      status: authFailure.status || 403,
+      elapsedMs: Date.now() - startedAt,
+      proxyMode,
+      isLive,
+      userAction,
+      userInitiated,
+    });
+    logProxyFailure(diagnostic);
+    return NextResponse.json(toProxyFailurePayload(diagnostic), {
+      status: diagnostic.status,
+    });
+  }
+
   if (isLive && !(await isLiveEntryEnabled())) {
     return NextResponse.json({ error: '直播未开启' }, { status: 404 });
   }
@@ -64,32 +85,7 @@ export async function GET(request: NextRequest) {
       stage: 'validation',
       reason: 'invalid-url',
       status: 403,
-      message: validation.reason,
-      elapsedMs: Date.now() - startedAt,
-      proxyMode,
-      isLive,
-      userAction,
-      userInitiated,
-    });
-    logProxyFailure(diagnostic);
-    return NextResponse.json(toProxyFailurePayload(diagnostic), {
-      status: diagnostic.status,
-    });
-  }
-
-  const authFailure = await authorizeProxyRequest(
-    request,
-    'm3u8',
-    validation.url,
-  );
-  if (authFailure) {
-    const diagnostic = createProxyFailureDiagnostic({
-      route: 'm3u8',
-      source,
-      targetUrl: validation.url,
-      stage: 'auth',
-      reason: 'auth-failed',
-      status: authFailure.status || 403,
+      message: 'Invalid URL',
       elapsedMs: Date.now() - startedAt,
       proxyMode,
       isLive,

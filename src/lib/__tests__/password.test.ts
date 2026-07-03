@@ -26,6 +26,10 @@ describe('password hashing', () => {
       match: false,
       needsRehash: false,
     });
+    await expect(verifyPassword('short', 'legacy-pass')).resolves.toEqual({
+      match: false,
+      needsRehash: false,
+    });
   });
 
   it('verifies bcrypt 2y hashes', async () => {

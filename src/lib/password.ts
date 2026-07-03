@@ -1,3 +1,5 @@
+import crypto from 'crypto';
+
 import bcryptjs from 'bcryptjs';
 
 const BCRYPT_ROUNDS = 10;
@@ -44,6 +46,14 @@ export async function verifyPassword(
     return { match, needsRehash: false };
   }
 
-  const match = stored === plain;
+  const plainBuffer = Buffer.from(plain, 'utf8');
+  const storedBuffer = Buffer.from(stored, 'utf8');
+  const match =
+    plainBuffer.length === storedBuffer.length
+      ? crypto.timingSafeEqual(plainBuffer, storedBuffer)
+      : crypto.timingSafeEqual(
+          storedBuffer,
+          Buffer.alloc(storedBuffer.length),
+        ) && false;
   return { match, needsRehash: match };
 }

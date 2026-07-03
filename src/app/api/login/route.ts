@@ -10,6 +10,7 @@ import {
 import { getConfig } from '@/lib/config';
 import { db } from '@/lib/db';
 import { getOwnerPassword, getOwnerUsername } from '@/lib/env.server';
+import { verifyPassword } from '@/lib/password';
 import { getAuthSigningSecret } from '@/lib/signing-secret.server';
 import { normalizeUsername } from '@/lib/username';
 
@@ -41,6 +42,8 @@ const LOGIN_MAX_ATTEMPTS = 10;
 const LOGIN_WINDOW_MS = 10 * 60 * 1000;
 const LOGIN_LOCK_MS = 15 * 60 * 1000;
 const LOGIN_MAP_MAX_SIZE = 10000;
+const DUMMY_PASSWORD_HASH =
+  '$2b$10$J4vvp7o4hU/dCA4bL.lkUOp3ln9qAhmtTN81BNVvFa1afAhuOnBA2';
 
 type LoginAttemptState = {
   failCount: number;
@@ -316,21 +319,23 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: '用户名或密码错误' }, { status: 401 });
     }
 
-    const config = await getConfig();
-    const user = config.UserConfig.Users.find((u) => u.username === username);
-    if (user && user.banned) {
-      return NextResponse.json({ error: '用户被封禁' }, { status: 401 });
-    }
-
-    // 校验用户密码
     try {
-      const pass = await db.verifyUser(username, password);
+      const userExists = await db.checkUserExist(username);
+      const pass = userExists
+        ? await db.verifyUser(username, password)
+        : (await verifyPassword(password, DUMMY_PASSWORD_HASH)).match;
       if (!pass) {
         markLoginFailure(rateLimitState.key);
         return NextResponse.json(
           { error: '用户名或密码错误' },
           { status: 401 },
         );
+      }
+
+      const config = await getConfig();
+      const user = config.UserConfig.Users.find((u) => u.username === username);
+      if (user && user.banned) {
+        return NextResponse.json({ error: '用户被封禁' }, { status: 401 });
       }
 
       // 验证成功，设置认证cookie

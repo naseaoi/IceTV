@@ -33,7 +33,7 @@ export async function GET(request: NextRequest) {
 
   const validation = await validateProxyUrlForRequest(url);
   if (!validation.ok) {
-    return NextResponse.json({ error: validation.reason }, { status: 403 });
+    return NextResponse.json({ error: 'Invalid URL' }, { status: 403 });
   }
 
   const liveSource = config.LiveConfig?.find((s: any) => s.key === source);
@@ -73,7 +73,7 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ success: true, type: 'm3u8' }, { status: 200 });
   } catch (error) {
     if (error instanceof UrlValidationError) {
-      return NextResponse.json({ error: error.reason }, { status: 403 });
+      return NextResponse.json({ error: 'Invalid URL' }, { status: 403 });
     }
 
     return NextResponse.json(
