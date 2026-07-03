@@ -1,7 +1,7 @@
 ﻿import { NextRequest, NextResponse } from 'next/server';
 
 import { isGuardFailure, requireActiveUser } from '@/lib/api-auth';
-import { getConfig } from '@/lib/config';
+import { getConfigForRead } from '@/lib/config';
 import { isLiveEntryEnabledInConfig } from '@/features/live/lib/live';
 import {
   fetchWithUrlGuard,
@@ -15,7 +15,7 @@ export async function GET(request: NextRequest) {
   const guardResult = await requireActiveUser(request);
   if (isGuardFailure(guardResult)) return guardResult.response;
 
-  const config = await getConfig();
+  const config = await getConfigForRead();
   if (!isLiveEntryEnabledInConfig(config)) {
     return NextResponse.json({ error: '直播未开启' }, { status: 404 });
   }

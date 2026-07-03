@@ -3,7 +3,7 @@
 import { ExternalLink, X } from 'lucide-react';
 import { useEffect, useState } from 'react';
 
-import AdminSelect from '@/features/admin/components/AdminSelect';
+import AdminSelect from '@/components/admin/AdminSelect';
 import AlertModal from '@/components/modals/AlertModal';
 import { useAlertModal } from '@/hooks/useAlertModal';
 import {

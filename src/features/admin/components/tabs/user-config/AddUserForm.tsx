@@ -1,9 +1,9 @@
-'use client';
+﻿'use client';
 
 import { X } from 'lucide-react';
 
 import ModalShell from '@/components/modals/ModalShell';
-import AdminSelect from '@/features/admin/components/AdminSelect';
+import AdminSelect from '@/components/admin/AdminSelect';
 import { buttonStyles } from '@/features/admin/lib/buttonStyles';
 
 interface UserGroupOption {

@@ -1,4 +1,6 @@
-﻿import type { NextRequest, NextResponse } from 'next/server';
+import 'server-only';
+
+import type { NextRequest, NextResponse } from 'next/server';
 
 import { generateSignature, verifySignature } from './auth.server';
 import { getAuthSigningSecret } from './signing-secret.server';

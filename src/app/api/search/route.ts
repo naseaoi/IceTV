@@ -61,7 +61,9 @@ export async function GET(request: NextRequest) {
           disableYellowFilter: config.SiteConfig.DisableYellowFilter,
           sourceConcurrency: SEARCH_SOURCE_CONCURRENCY,
         }),
-      ).catch(() => {});
+      ).catch((error) => {
+        console.warn('搜索聚合后台刷新失败:', error);
+      });
     }
 
     return NextResponse.json(

@@ -1,4 +1,6 @@
-﻿import { AdminConfig } from '@/types/admin';
+import 'server-only';
+
+import { AdminConfig } from '@/types/admin';
 
 import { getStorageType } from './storage-type';
 import {

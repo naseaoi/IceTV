@@ -1,4 +1,6 @@
-﻿import { db } from '@/lib/db';
+import 'server-only';
+
+import { db } from '@/lib/db';
 import { getOwnerUsername } from '@/lib/env.server';
 
 import { AdminConfig } from '@/types/admin';
@@ -76,7 +78,8 @@ type NextCacheApi = {
 function loadNextCacheApi(): NextCacheApi | null {
   try {
     return require('next/cache') as NextCacheApi;
-  } catch {
+  } catch (error) {
+    console.warn('加载 Next 缓存接口失败:', error);
     return null;
   }
 }
@@ -87,6 +90,7 @@ export function refineConfig(adminConfig: AdminConfig): AdminConfig {
   try {
     fileConfig = JSON.parse(adminConfig.ConfigFile) as ConfigFileStruct;
   } catch (e) {
+    console.warn('解析配置文件失败:', e);
     fileConfig = {} as ConfigFileStruct;
   }
 
@@ -223,6 +227,7 @@ async function getInitConfig(
   try {
     cfgFile = JSON.parse(configFile) as ConfigFileStruct;
   } catch (e) {
+    console.warn('解析初始配置文件失败:', e);
     cfgFile = {} as ConfigFileStruct;
   }
   const adminConfig: AdminConfig = {
@@ -370,7 +375,7 @@ export async function getConfig(): Promise<AdminConfig> {
 }
 
 export async function getConfigForRead(): Promise<Readonly<AdminConfig>> {
-  return loadConfig();
+  return deepFreeze(await loadConfig());
 }
 
 function isCachedConfigFresh(): boolean {
@@ -774,6 +779,18 @@ function cloneConfig(config: AdminConfig): AdminConfig {
     bindConfigVersion(cloned, version);
   }
   return cloned;
+}
+
+function deepFreeze<T extends object>(value: T): Readonly<T> {
+  Object.freeze(value);
+
+  for (const item of Object.values(value)) {
+    if (item && typeof item === 'object' && !Object.isFrozen(item)) {
+      deepFreeze(item as object);
+    }
+  }
+
+  return value;
 }
 
 function bindConfigVersion(config: AdminConfig, version: string): AdminConfig {

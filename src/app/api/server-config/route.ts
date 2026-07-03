@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 
 import { getOptionalActiveUser } from '@/lib/api-auth';
-import { getConfig, getPublicConfig } from '@/lib/config';
+import { getConfigForRead, getPublicConfig } from '@/lib/config';
 import { DEFAULT_RUNTIME_CONFIG } from '@/lib/runtime-config';
 import { getStorageType } from '@/lib/storage-type';
 import { CURRENT_UPDATE_BRANCH, CURRENT_VERSION } from '@/lib/version';
@@ -46,7 +46,7 @@ export async function GET(request: NextRequest) {
   const activeUser = await getOptionalActiveUser(request);
   const canReadSensitiveConfig = !!activeUser;
   const publicConfig = await getPublicConfig();
-  const config = await getConfig();
+  const config = await getConfigForRead();
   const doubanProxyType = canReadSensitiveConfig
     ? config.SiteConfig.DoubanProxyType
     : getPublicDoubanProxyType(config.SiteConfig.DoubanProxyType);

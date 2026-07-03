@@ -1,7 +1,7 @@
 ﻿import { NextRequest, NextResponse } from 'next/server';
 
 import { getAuthInfoFromCookie, getSignatureData } from '@/lib/auth.server';
-import { getConfig } from '@/lib/config';
+import { getConfigForRead } from '@/lib/config';
 import { getOwnerUsername } from '@/lib/env.server';
 import { NO_STORE_HEADERS } from '@/lib/http-cache';
 import { verifyAuthSignature } from '@/lib/signing-secret.server';
@@ -68,7 +68,7 @@ export async function GET(request: NextRequest) {
       return sessionResponse(true, 'ok', authInfo.username);
     }
 
-    const config = await getConfig();
+    const config = await getConfigForRead();
     const user = config.UserConfig.Users.find(
       (u) => u.username === authInfo.username,
     );

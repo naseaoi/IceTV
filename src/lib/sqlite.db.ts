@@ -1,4 +1,6 @@
-﻿import Database from 'better-sqlite3';
+import 'server-only';
+
+import Database from 'better-sqlite3';
 import { existsSync, mkdirSync, readFileSync } from 'fs';
 import path from 'path';
 

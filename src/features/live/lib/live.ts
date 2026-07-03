@@ -1,7 +1,7 @@
 import { Buffer } from 'node:buffer';
 import { gunzipSync } from 'node:zlib';
 
-import { getConfig, saveConfig } from '@/lib/config';
+import { getConfig, getConfigForRead, saveConfig } from '@/lib/config';
 import {
   fetchResponseThroughProxy,
   fetchTextThroughProxy,
@@ -56,7 +56,7 @@ export function isLiveEntryEnabledInConfig(config: {
 }
 
 export async function isLiveEntryEnabled() {
-  const config = await getConfig();
+  const config = await getConfigForRead();
   return isLiveEntryEnabledInConfig(config);
 }
 
@@ -68,7 +68,7 @@ export async function getCachedLiveChannels(
     return entry.data;
   }
 
-  const config = await getConfig();
+  const config = await getConfigForRead();
   if (!isLiveEntryEnabledInConfig(config)) {
     return null;
   }
@@ -81,8 +81,14 @@ export async function getCachedLiveChannels(
   if (channelNum === 0) {
     return null;
   }
-  liveInfo.channelNumber = channelNum;
-  await saveConfig(config);
+  const writableConfig = await getConfig();
+  const writableLiveInfo = writableConfig.LiveConfig?.find(
+    (live) => live.key === key,
+  );
+  if (writableLiveInfo) {
+    writableLiveInfo.channelNumber = channelNum;
+    await saveConfig(writableConfig);
+  }
   return cachedLiveChannels[key]?.data || null;
 }
 

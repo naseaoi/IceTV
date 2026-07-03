@@ -16,9 +16,6 @@ interface AdminSelectProps {
   className?: string;
 }
 
-/**
- * 后台通用自定义下拉选择框，样式与站点配置中的下拉框一致。
- */
 export default function AdminSelect({
   value,
   onChange,
@@ -47,7 +44,6 @@ export default function AdminSelect({
 
   return (
     <div ref={containerRef} className={`relative ${className}`}>
-      {/* 触发按钮 */}
       <button
         type='button'
         onClick={() => setIsOpen(!isOpen)}
@@ -60,14 +56,12 @@ export default function AdminSelect({
         </span>
       </button>
 
-      {/* 箭头图标 */}
       <div className='pointer-events-none absolute inset-y-0 right-0 flex items-center pr-3'>
         <ChevronDown
           className={`h-4 w-4 text-gray-400 transition-transform duration-200 dark:text-gray-500 ${isOpen ? 'rotate-180' : ''}`}
         />
       </div>
 
-      {/* 下拉选项列表 */}
       {isOpen && (
         <div className='absolute z-50 mt-1 max-h-60 w-full overflow-auto rounded-lg border border-gray-300 bg-white shadow-lg dark:border-gray-600 dark:bg-gray-800'>
           {options.map((opt) => {

@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 
-import { getConfig } from '@/lib/config';
+import { getConfigForRead } from '@/lib/config';
 import {
   fetchResponseThroughProxy,
   getProxyUrlForTarget,
@@ -46,7 +46,7 @@ export async function GET(request: NextRequest) {
     return authFailure;
   }
 
-  const config = await getConfig();
+  const config = await getConfigForRead();
   const liveSource = config.LiveConfig?.find((s: any) => s.key === source);
   const ua = liveSource?.ua || 'AptvPlayer/1.4.10';
 

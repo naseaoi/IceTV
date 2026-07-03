@@ -1,7 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server';
 
 import { isGuardFailure, requireActiveUser } from '@/lib/api-auth';
-import { getAvailableApiSites, getCacheTime, getConfig } from '@/lib/config';
+import {
+  getAvailableApiSites,
+  getCacheTime,
+  getConfigForRead,
+} from '@/lib/config';
 import { getDetailFromApi } from '@/lib/downstream';
 import { createSwrCache } from '@/lib/server-cache';
 
@@ -34,7 +38,7 @@ export async function GET(request: NextRequest) {
   }
 
   try {
-    const config = await getConfig();
+    const config = await getConfigForRead();
     const cacheTime = getCacheTime(config);
     const apiSites = await getAvailableApiSites(guardResult.username, config);
     const apiSite = apiSites.find((site) => site.key === sourceCode);

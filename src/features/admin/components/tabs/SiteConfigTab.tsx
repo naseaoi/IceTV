@@ -3,7 +3,7 @@
 import { ExternalLink, ImagePlus, Trash2, Upload } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 
-import AdminSelect from '@/features/admin/components/AdminSelect';
+import AdminSelect from '@/components/admin/AdminSelect';
 import AlertModal from '@/components/modals/AlertModal';
 import { useAlertModal } from '@/hooks/useAlertModal';
 import { useLoadingState } from '@/features/admin/hooks/useLoadingState';

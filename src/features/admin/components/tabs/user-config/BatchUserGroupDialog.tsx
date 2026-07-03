@@ -1,7 +1,7 @@
-'use client';
+﻿'use client';
 
 import AdminDialog from '@/features/admin/components/AdminDialog';
-import AdminSelect from '@/features/admin/components/AdminSelect';
+import AdminSelect from '@/components/admin/AdminSelect';
 import { buttonStyles } from '@/features/admin/lib/buttonStyles';
 
 interface UserGroupOption {

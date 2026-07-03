@@ -1,4 +1,6 @@
-﻿import mysql from 'mysql2/promise';
+import 'server-only';
+
+import mysql from 'mysql2/promise';
 import type { PoolConnection, RowDataPacket } from 'mysql2/promise';
 
 import { AdminConfig } from '@/types/admin';
