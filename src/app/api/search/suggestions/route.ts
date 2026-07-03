@@ -28,19 +28,9 @@ export async function GET(request: NextRequest) {
       guardResult.username,
     );
 
-    // 从配置中获取缓存时间，如果没有配置则使用默认值300秒（5分钟）
-    const cacheTime = config.SiteConfig.SiteInterfaceCacheTime || 300;
-
     return NextResponse.json(
       { suggestions },
-      {
-        headers: {
-          'Cache-Control': `public, max-age=${cacheTime}, s-maxage=${cacheTime}`,
-          'CDN-Cache-Control': `public, s-maxage=${cacheTime}`,
-          'Vercel-CDN-Cache-Control': `public, s-maxage=${cacheTime}`,
-          'Netlify-Vary': 'query',
-        },
-      },
+      { headers: { 'Cache-Control': 'private, no-store' } },
     );
   } catch (error) {
     console.error('获取搜索建议失败', error);
