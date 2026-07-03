@@ -282,7 +282,7 @@ function isRedirectResponse(status: number): boolean {
 }
 
 function isBlockedAddress(address: string): boolean {
-  const normalized = normalizeIpAddress(address);
+  const normalized = normalizeHostname(address);
   const ipVersion = net.isIP(normalized);
 
   if (ipVersion === 4) {
@@ -294,14 +294,6 @@ function isBlockedAddress(address: string): boolean {
   }
 
   return false;
-}
-
-function normalizeIpAddress(address: string): string {
-  const lower = normalizeHostname(address);
-  if (lower.startsWith('::ffff:')) {
-    return lower.slice('::ffff:'.length);
-  }
-  return lower;
 }
 
 function isBlockedIpv4(address: string): boolean {
@@ -326,6 +318,114 @@ function isBlockedIpv4(address: string): boolean {
 }
 
 function isBlockedIpv6(address: string): boolean {
+  const bytes = ipv6ToBytes(address);
+  if (bytes) {
+    const embeddedIpv4 = extractEmbeddedIpv4(bytes);
+    if (embeddedIpv4 && isBlockedIpv4(embeddedIpv4)) {
+      return true;
+    }
+    if (isBlockedIpv6Bytes(bytes)) {
+      return true;
+    }
+  }
+  return isBlockedIpv6ByPrefix(address);
+}
+
+function isBlockedIpv6Bytes(bytes: number[]): boolean {
+  const isUnspecified = bytes.every((byte) => byte === 0);
+  const isLoopback =
+    bytes.slice(0, 15).every((byte) => byte === 0) && bytes[15] === 1;
+  const isUniqueLocal = (bytes[0] & 0xfe) === 0xfc;
+  const isLinkLocal = bytes[0] === 0xfe && (bytes[1] & 0xc0) === 0x80;
+  const isSiteLocal = bytes[0] === 0xfe && (bytes[1] & 0xc0) === 0xc0;
+  const isMulticast = bytes[0] === 0xff;
+
+  return (
+    isUnspecified ||
+    isLoopback ||
+    isUniqueLocal ||
+    isLinkLocal ||
+    isSiteLocal ||
+    isMulticast
+  );
+}
+
+function extractEmbeddedIpv4(bytes: number[]): string | null {
+  const firstTenZero = bytes.slice(0, 10).every((byte) => byte === 0);
+  const isMapped = firstTenZero && bytes[10] === 0xff && bytes[11] === 0xff;
+  const isCompatible = bytes.slice(0, 12).every((byte) => byte === 0);
+  const isNat64 =
+    bytes[0] === 0x00 &&
+    bytes[1] === 0x64 &&
+    bytes[2] === 0xff &&
+    bytes[3] === 0x9b;
+  const is6to4 = bytes[0] === 0x20 && bytes[1] === 0x02;
+
+  if (isMapped || isCompatible || isNat64) {
+    return bytes.slice(12, 16).join('.');
+  }
+
+  if (is6to4) {
+    return bytes.slice(2, 6).join('.');
+  }
+
+  return null;
+}
+
+function ipv6ToBytes(address: string): number[] | null {
+  let head = address;
+  const lastColon = head.lastIndexOf(':');
+  const tail = head.slice(lastColon + 1);
+  if (tail.includes('.')) {
+    const octets = tail.split('.').map((part) => Number.parseInt(part, 10));
+    if (
+      octets.length !== 4 ||
+      octets.some((part) => !Number.isInteger(part) || part < 0 || part > 255)
+    ) {
+      return null;
+    }
+    const high = ((octets[0] << 8) | octets[1]).toString(16);
+    const low = ((octets[2] << 8) | octets[3]).toString(16);
+    head = `${head.slice(0, lastColon + 1)}${high}:${low}`;
+  }
+
+  const halves = head.split('::');
+  if (halves.length > 2) {
+    return null;
+  }
+
+  const headGroups = halves[0] ? halves[0].split(':') : [];
+  const tailGroups =
+    halves.length === 2 ? (halves[1] ? halves[1].split(':') : []) : [];
+
+  let groups: string[];
+  if (halves.length === 2) {
+    const missing = 8 - headGroups.length - tailGroups.length;
+    if (missing < 0) {
+      return null;
+    }
+    groups = [...headGroups, ...new Array(missing).fill('0'), ...tailGroups];
+  } else {
+    groups = headGroups;
+  }
+
+  if (groups.length !== 8) {
+    return null;
+  }
+
+  const bytes: number[] = [];
+  for (const group of groups) {
+    if (!/^[0-9a-f]{1,4}$/i.test(group)) {
+      return null;
+    }
+    const value = Number.parseInt(group, 16);
+    bytes.push((value >> 8) & 0xff, value & 0xff);
+  }
+
+  return bytes;
+}
+
+function isBlockedIpv6ByPrefix(address: string): boolean {
   const lower = address.toLowerCase();
   return (
     lower === '::' ||

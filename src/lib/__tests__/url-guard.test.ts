@@ -54,6 +54,30 @@ describe('url guard', () => {
     });
   });
 
+  it('blocks ipv4-mapped ipv6 in hex form', () => {
+    expect(validateProxyUrl('http://[::ffff:7f00:1]/a')).toEqual({
+      ok: false,
+      reason: 'Blocked destination',
+    });
+    expect(
+      validateProxyUrl('http://[::ffff:a9fe:a9fe]/latest/meta-data/'),
+    ).toEqual({
+      ok: false,
+      reason: 'Blocked destination',
+    });
+  });
+
+  it('blocks ipv4-mapped ipv6 in dotted form', () => {
+    expect(validateProxyUrl('http://[::ffff:127.0.0.1]/a')).toEqual({
+      ok: false,
+      reason: 'Blocked destination',
+    });
+  });
+
+  it('allows ipv4-mapped ipv6 pointing at a public address', () => {
+    expect(validateProxyUrl('http://[::ffff:808:808]/a').ok).toBe(true);
+  });
+
   it('blocks redirects to private addresses', async () => {
     (global.fetch as jest.Mock).mockResolvedValue({
       body: null,
