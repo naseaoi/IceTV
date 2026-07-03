@@ -32,4 +32,28 @@ describe('sqlite user storage', () => {
       storage.verifyUser('demo-user', 'second-password'),
     ).resolves.toBe(false);
   });
+
+  it('normalizes usernames before storing and looking them up', async () => {
+    const storage = new LocalSqliteStorage(':memory:');
+
+    await storage.registerUser(' Alice_User ', 'password');
+
+    await expect(storage.getAllUsers()).resolves.toEqual(['alice_user']);
+    await expect(storage.checkUserExist('ALICE_USER')).resolves.toBe(true);
+    await expect(storage.verifyUser('ALICE_USER', 'password')).resolves.toBe(
+      true,
+    );
+    await expect(storage.registerUser('alice_user', 'other')).rejects.toThrow();
+  });
+
+  it('rejects invalid and overlong usernames', async () => {
+    const storage = new LocalSqliteStorage(':memory:');
+
+    await expect(storage.registerUser('bad name', 'password')).rejects.toThrow(
+      '用户名只能包含',
+    );
+    await expect(
+      storage.registerUser('a'.repeat(65), 'password'),
+    ).rejects.toThrow('用户名只能包含');
+  });
 });

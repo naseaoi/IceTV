@@ -5,6 +5,7 @@ import { getConfigForRead } from '@/lib/config';
 import { getOwnerUsername } from '@/lib/env.server';
 import { NO_STORE_HEADERS } from '@/lib/http-cache';
 import { verifyAuthSignature } from '@/lib/signing-secret.server';
+import { normalizeUsername } from '@/lib/username';
 
 export const runtime = 'nodejs';
 
@@ -68,20 +69,19 @@ export async function GET(request: NextRequest) {
       return sessionResponse(true, 'ok', authInfo.username);
     }
 
+    const username = normalizeUsername(authInfo.username);
     const config = await getConfigForRead();
-    const user = config.UserConfig.Users.find(
-      (u) => u.username === authInfo.username,
-    );
+    const user = config.UserConfig.Users.find((u) => u.username === username);
 
     if (!user) {
-      return sessionResponse(false, 'user_not_found', authInfo.username);
+      return sessionResponse(false, 'user_not_found', username);
     }
 
     if (user.banned) {
-      return sessionResponse(false, 'user_banned', authInfo.username);
+      return sessionResponse(false, 'user_banned', username);
     }
 
-    return sessionResponse(true, 'ok', authInfo.username);
+    return sessionResponse(true, 'ok', username);
   } catch (error) {
     console.error('会话检查失败:', error);
     return NextResponse.json(

@@ -3,6 +3,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getConfig, saveConfig } from '@/lib/config';
 import { db } from '@/lib/db';
 import { getOwnerUsername } from '@/lib/env.server';
+import { isValidUsername, normalizeUsername } from '@/lib/username';
 
 export const runtime = 'nodejs';
 
@@ -28,18 +29,26 @@ export async function POST(request: NextRequest) {
       password?: string;
     };
 
-    const username = (body.username || '').trim();
+    const username = normalizeUsername(body.username || '');
     const password = body.password || '';
 
     if (!username) {
       return NextResponse.json({ error: '用户名不能为空' }, { status: 400 });
+    }
+    if (!isValidUsername(username)) {
+      return NextResponse.json(
+        {
+          error: '用户名只能包含字母、数字、点、下划线和连字符，长度不超过 64',
+        },
+        { status: 400 },
+      );
     }
     if (!password) {
       return NextResponse.json({ error: '密码不能为空' }, { status: 400 });
     }
 
     const ownerUsername = getOwnerUsername();
-    if (username === ownerUsername) {
+    if (username === normalizeUsername(ownerUsername)) {
       return NextResponse.json({ error: '该用户名不可注册' }, { status: 400 });
     }
 

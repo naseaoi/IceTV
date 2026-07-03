@@ -46,14 +46,20 @@ function isCfChallenge(html: string): boolean {
 
 async function fetchGiriHtml(url: string): Promise<string | null> {
   for (let attempt = 0; attempt < 2; attempt++) {
+    const abortState = createTimedAbortController(undefined, 10000);
     try {
-      const res = await fetch(url, { headers: BROWSER_HTML_HEADERS });
+      const res = await fetch(url, {
+        headers: BROWSER_HTML_HEADERS,
+        signal: abortState.signal,
+      });
       if (!res.ok) return null;
       const html = await res.text();
       if (!isCfChallenge(html)) return html;
       if (attempt === 0) await new Promise((r) => setTimeout(r, 1500));
     } catch {
       return null;
+    } finally {
+      abortState.cleanup();
     }
   }
   return null;

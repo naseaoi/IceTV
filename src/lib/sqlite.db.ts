@@ -14,6 +14,7 @@ import {
   SkipConfig,
   StorageImportData,
 } from './types';
+import { assertValidUsername, normalizeUsername } from './username';
 
 const SEARCH_HISTORY_LIMIT = 20;
 
@@ -411,41 +412,46 @@ export class LocalSqliteStorage implements IStorage {
       );
 
       for (const [userName, password] of Object.entries(legacyData.users)) {
-        insertUser.run(userName, password);
+        const username = assertValidUsername(userName);
+        insertUser.run(username, password);
       }
 
       for (const [userName, records] of Object.entries(
         legacyData.playRecords,
       )) {
+        const username = assertValidUsername(userName);
         for (const [key, record] of Object.entries(records)) {
-          insertPlayRecord.run(userName, key, JSON.stringify(record));
+          insertPlayRecord.run(username, key, JSON.stringify(record));
         }
       }
 
       for (const [userName, favorites] of Object.entries(
         legacyData.favorites,
       )) {
+        const username = assertValidUsername(userName);
         for (const [key, favorite] of Object.entries(favorites)) {
-          insertFavorite.run(userName, key, JSON.stringify(favorite));
+          insertFavorite.run(username, key, JSON.stringify(favorite));
         }
       }
 
       for (const [userName, keywords] of Object.entries(
         legacyData.searchHistory,
       )) {
+        const username = assertValidUsername(userName);
         if (!Array.isArray(keywords)) {
           continue;
         }
         keywords.slice(0, SEARCH_HISTORY_LIMIT).forEach((keyword, index) => {
-          insertHistory.run(userName, keyword, index);
+          insertHistory.run(username, keyword, index);
         });
       }
 
       for (const [userName, configs] of Object.entries(
         legacyData.skipConfigs,
       )) {
+        const username = assertValidUsername(userName);
         for (const [key, config] of Object.entries(configs)) {
-          insertSkipConfig.run(userName, key, JSON.stringify(config));
+          insertSkipConfig.run(username, key, JSON.stringify(config));
         }
       }
 
@@ -462,7 +468,8 @@ export class LocalSqliteStorage implements IStorage {
     userName: string,
     key: string,
   ): Promise<PlayRecord | null> {
-    const row = this.stmts.getPlayRecord.get(userName, key) as
+    const username = normalizeUsername(userName);
+    const row = this.stmts.getPlayRecord.get(username, key) as
       | { record_json: string }
       | undefined;
     return parseJsonValue<PlayRecord>(row?.record_json);
@@ -473,13 +480,15 @@ export class LocalSqliteStorage implements IStorage {
     key: string,
     record: PlayRecord,
   ): Promise<void> {
-    this.stmts.setPlayRecord.run(userName, key, JSON.stringify(record));
+    const username = normalizeUsername(userName);
+    this.stmts.setPlayRecord.run(username, key, JSON.stringify(record));
   }
 
   async getAllPlayRecords(
     userName: string,
   ): Promise<{ [key: string]: PlayRecord }> {
-    const rows = this.stmts.getAllPlayRecords.all(userName) as {
+    const username = normalizeUsername(userName);
+    const rows = this.stmts.getAllPlayRecords.all(username) as {
       record_key: string;
       record_json: string;
     }[];
@@ -495,15 +504,18 @@ export class LocalSqliteStorage implements IStorage {
   }
 
   async deletePlayRecord(userName: string, key: string): Promise<void> {
-    this.stmts.deletePlayRecord.run(userName, key);
+    const username = normalizeUsername(userName);
+    this.stmts.deletePlayRecord.run(username, key);
   }
 
   async deleteAllPlayRecords(userName: string): Promise<void> {
-    this.stmts.deletePlayRecordsByUser.run(userName);
+    const username = normalizeUsername(userName);
+    this.stmts.deletePlayRecordsByUser.run(username);
   }
 
   async getFavorite(userName: string, key: string): Promise<Favorite | null> {
-    const row = this.stmts.getFavorite.get(userName, key) as
+    const username = normalizeUsername(userName);
+    const row = this.stmts.getFavorite.get(username, key) as
       | { favorite_json: string }
       | undefined;
     return parseJsonValue<Favorite>(row?.favorite_json);
@@ -514,13 +526,15 @@ export class LocalSqliteStorage implements IStorage {
     key: string,
     favorite: Favorite,
   ): Promise<void> {
-    this.stmts.setFavorite.run(userName, key, JSON.stringify(favorite));
+    const username = normalizeUsername(userName);
+    this.stmts.setFavorite.run(username, key, JSON.stringify(favorite));
   }
 
   async getAllFavorites(
     userName: string,
   ): Promise<{ [key: string]: Favorite }> {
-    const rows = this.stmts.getAllFavorites.all(userName) as {
+    const username = normalizeUsername(userName);
+    const rows = this.stmts.getAllFavorites.all(username) as {
       favorite_key: string;
       favorite_json: string;
     }[];
@@ -536,20 +550,24 @@ export class LocalSqliteStorage implements IStorage {
   }
 
   async deleteFavorite(userName: string, key: string): Promise<void> {
-    this.stmts.deleteFavorite.run(userName, key);
+    const username = normalizeUsername(userName);
+    this.stmts.deleteFavorite.run(username, key);
   }
 
   async deleteAllFavorites(userName: string): Promise<void> {
-    this.stmts.deleteFavoritesByUser.run(userName);
+    const username = normalizeUsername(userName);
+    this.stmts.deleteFavoritesByUser.run(username);
   }
 
   async registerUser(userName: string, password: string): Promise<void> {
+    const username = assertValidUsername(userName);
     const hashed = await hashPassword(password);
-    this.stmts.registerUser.run(userName, hashed);
+    this.stmts.registerUser.run(username, hashed);
   }
 
   async verifyUser(userName: string, password: string): Promise<boolean> {
-    const row = this.stmts.getPassword.get(userName) as
+    const username = normalizeUsername(userName);
+    const row = this.stmts.getPassword.get(username) as
       | { password: string }
       | undefined;
     if (!row) return false;
@@ -557,21 +575,24 @@ export class LocalSqliteStorage implements IStorage {
     const { match, needsRehash } = await verifyPassword(password, row.password);
     if (match && needsRehash) {
       const hashed = await hashPassword(password);
-      this.stmts.updatePassword.run(hashed, userName);
+      this.stmts.updatePassword.run(hashed, username);
     }
     return match;
   }
 
   async checkUserExist(userName: string): Promise<boolean> {
-    return Boolean(this.stmts.checkUserExist.get(userName));
+    const username = normalizeUsername(userName);
+    return Boolean(this.stmts.checkUserExist.get(username));
   }
 
   async changePassword(userName: string, newPassword: string): Promise<void> {
+    const username = normalizeUsername(userName);
     const hashed = await hashPassword(newPassword);
-    this.stmts.updatePassword.run(hashed, userName);
+    this.stmts.updatePassword.run(hashed, username);
   }
 
   async deleteUser(userName: string): Promise<void> {
+    const username = normalizeUsername(userName);
     const remove = this.db.transaction((targetUser: string) => {
       this.stmts.deleteUserRow.run(targetUser);
       this.stmts.deletePlayRecordsByUser.run(targetUser);
@@ -579,40 +600,38 @@ export class LocalSqliteStorage implements IStorage {
       this.stmts.deleteSearchHistoryByUser.run(targetUser);
       this.stmts.deleteSkipConfigsByUser.run(targetUser);
     });
-    remove(userName);
+    remove(username);
   }
 
   async getSearchHistory(userName: string): Promise<string[]> {
-    const rows = this.stmts.getSearchHistory.all(userName) as {
+    const username = normalizeUsername(userName);
+    const rows = this.stmts.getSearchHistory.all(username) as {
       keyword: string;
     }[];
     return rows.map((row) => row.keyword);
   }
 
   async addSearchHistory(userName: string, keyword: string): Promise<void> {
-    // 纯 SQL 优化：避免先 SELECT 全部再 JS 处理再 DELETE+INSERT 的 N+1 模式
+    const username = normalizeUsername(userName);
     const save = this.db.transaction((targetUser: string, kw: string) => {
-      // 1. 删除该关键词（如果已存在）
       this.stmts.deleteSearchHistoryKeyword.run(targetUser, kw);
-      // 2. 所有现有记录 sort_index + 1
       this.stmts.updateSearchHistoryIndex.run(targetUser);
-      // 3. 插入新关键词到 sort_index = 0
       this.stmts.insertSearchHistory.run(targetUser, kw, 0);
-      // 4. 删除超出限制的记录
       this.stmts.deleteSearchHistoryOverflow.run(
         targetUser,
         SEARCH_HISTORY_LIMIT,
       );
     });
-    save(userName, keyword);
+    save(username, keyword);
   }
 
   async deleteSearchHistory(userName: string, keyword?: string): Promise<void> {
+    const username = normalizeUsername(userName);
     if (!keyword) {
-      this.stmts.deleteSearchHistoryAll.run(userName);
+      this.stmts.deleteSearchHistoryAll.run(username);
       return;
     }
-    this.stmts.deleteSearchHistoryOne.run(userName, keyword);
+    this.stmts.deleteSearchHistoryOne.run(username, keyword);
   }
 
   async getAllUsers(): Promise<string[]> {
@@ -643,8 +662,9 @@ export class LocalSqliteStorage implements IStorage {
     source: string,
     id: string,
   ): Promise<SkipConfig | null> {
+    const username = normalizeUsername(userName);
     const key = `${source}+${id}`;
-    const row = this.stmts.getSkipConfig.get(userName, key) as
+    const row = this.stmts.getSkipConfig.get(username, key) as
       | { config_json: string }
       | undefined;
     return parseJsonValue<SkipConfig>(row?.config_json);
@@ -656,8 +676,9 @@ export class LocalSqliteStorage implements IStorage {
     id: string,
     config: SkipConfig,
   ): Promise<void> {
+    const username = normalizeUsername(userName);
     const key = `${source}+${id}`;
-    this.stmts.setSkipConfig.run(userName, key, JSON.stringify(config));
+    this.stmts.setSkipConfig.run(username, key, JSON.stringify(config));
   }
 
   async deleteSkipConfig(
@@ -665,14 +686,16 @@ export class LocalSqliteStorage implements IStorage {
     source: string,
     id: string,
   ): Promise<void> {
+    const username = normalizeUsername(userName);
     const key = `${source}+${id}`;
-    this.stmts.deleteSkipConfig.run(userName, key);
+    this.stmts.deleteSkipConfig.run(username, key);
   }
 
   async getAllSkipConfigs(
     userName: string,
   ): Promise<{ [key: string]: SkipConfig }> {
-    const rows = this.stmts.getAllSkipConfigs.all(userName) as {
+    const username = normalizeUsername(userName);
+    const rows = this.stmts.getAllSkipConfigs.all(username) as {
       config_key: string;
       config_json: string;
     }[];
@@ -717,26 +740,28 @@ export class LocalSqliteStorage implements IStorage {
       this.stmts.setAdminConfig.run(JSON.stringify(snapshot.adminConfig));
 
       for (const [userName, passwordHash] of Object.entries(snapshot.users)) {
-        this.stmts.registerUser.run(userName, passwordHash);
+        const username = assertValidUsername(userName);
+        this.stmts.registerUser.run(username, passwordHash);
       }
 
       for (const [userName, userData] of Object.entries(snapshot.userData)) {
+        const username = assertValidUsername(userName);
         for (const [key, record] of Object.entries(userData.playRecords)) {
-          this.stmts.setPlayRecord.run(userName, key, JSON.stringify(record));
+          this.stmts.setPlayRecord.run(username, key, JSON.stringify(record));
         }
 
         for (const [key, favorite] of Object.entries(userData.favorites)) {
-          this.stmts.setFavorite.run(userName, key, JSON.stringify(favorite));
+          this.stmts.setFavorite.run(username, key, JSON.stringify(favorite));
         }
 
         userData.searchHistory
           .slice(0, SEARCH_HISTORY_LIMIT)
           .forEach((keyword, index) => {
-            this.stmts.insertSearchHistory.run(userName, keyword, index);
+            this.stmts.insertSearchHistory.run(username, keyword, index);
           });
 
         for (const [key, config] of Object.entries(userData.skipConfigs)) {
-          this.stmts.setSkipConfig.run(userName, key, JSON.stringify(config));
+          this.stmts.setSkipConfig.run(username, key, JSON.stringify(config));
         }
       }
     });

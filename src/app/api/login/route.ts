@@ -11,6 +11,7 @@ import { getConfig } from '@/lib/config';
 import { db } from '@/lib/db';
 import { getOwnerPassword, getOwnerUsername } from '@/lib/env.server';
 import { getAuthSigningSecret } from '@/lib/signing-secret.server';
+import { normalizeUsername } from '@/lib/username';
 
 export const runtime = 'nodejs';
 
@@ -262,7 +263,9 @@ export async function POST(req: NextRequest) {
 
     const body = (await req.json()) as { username?: string; password?: string };
     const usernameInput =
-      typeof body.username === 'string' ? body.username : undefined;
+      typeof body.username === 'string'
+        ? normalizeUsername(body.username)
+        : undefined;
     const rateLimitState = getRateLimitState(req, usernameInput);
     if (rateLimitState.blocked) {
       return NextResponse.json(
@@ -280,9 +283,12 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const { username, password } = body;
+    const rawUsername = body.username;
+    const username =
+      typeof rawUsername === 'string' ? normalizeUsername(rawUsername) : '';
+    const { password } = body;
 
-    if (!username || typeof username !== 'string') {
+    if (!username) {
       return NextResponse.json({ error: '用户名不能为空' }, { status: 400 });
     }
     if (!password || typeof password !== 'string') {
@@ -291,17 +297,21 @@ export async function POST(req: NextRequest) {
 
     // 可能是站长，直接读环境变量
     if (
-      safeEqual(username, ownerUsername) &&
+      typeof rawUsername === 'string' &&
+      safeEqual(rawUsername, ownerUsername) &&
       safeEqual(password, ownerPassword)
     ) {
       // 验证成功，设置认证cookie
       const response = NextResponse.json({ ok: true });
-      const authPayload = await generateAuthCookie('owner', username);
+      const authPayload = await generateAuthCookie('owner', rawUsername);
       setAuthCookies(response, req, authPayload);
       clearLoginFailures(rateLimitState.key);
 
       return response;
-    } else if (safeEqual(username, ownerUsername)) {
+    } else if (
+      typeof rawUsername === 'string' &&
+      safeEqual(rawUsername, ownerUsername)
+    ) {
       markLoginFailure(rateLimitState.key);
       return NextResponse.json({ error: '用户名或密码错误' }, { status: 401 });
     }

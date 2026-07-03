@@ -1,5 +1,6 @@
 ﻿import { ConfigConflictError, getConfig, saveConfig } from '@/lib/config';
 import { db } from '@/lib/db';
+import { assertValidUsername, normalizeUsername } from '@/lib/username';
 
 const ACTIONS = [
   'add',
@@ -48,14 +49,22 @@ export async function handleAdminUserAction({
   operatorUsername,
   operatorRole,
 }: AdminUserActionContext): Promise<AdminUserActionResponse> {
-  const username = operatorUsername;
+  const username = normalizeUsername(operatorUsername);
 
   try {
-    const { targetUsername, targetPassword, action } = body as {
+    const {
+      targetUsername: rawTargetUsername,
+      targetPassword,
+      action,
+    } = body as {
       targetUsername?: string;
       targetPassword?: string;
       action?: (typeof ACTIONS)[number];
     };
+    const targetUsername =
+      typeof rawTargetUsername === 'string'
+        ? normalizeUsername(rawTargetUsername)
+        : undefined;
 
     if (!action || !ACTIONS.includes(action)) {
       return actionResponse({ error: '参数格式错误' }, 400);
@@ -113,7 +122,19 @@ export async function handleAdminUserAction({
 
     switch (action) {
       case 'add': {
-        const targetExistsInDb = await db.checkUserExist(targetUsername!);
+        let cleanTargetUsername: string;
+        try {
+          cleanTargetUsername = assertValidUsername(targetUsername!);
+        } catch (error) {
+          return toActionResponse(
+            {
+              error: error instanceof Error ? error.message : '用户名格式错误',
+            },
+            { status: 400 },
+          );
+        }
+
+        const targetExistsInDb = await db.checkUserExist(cleanTargetUsername);
         if (targetEntry || targetExistsInDb) {
           return toActionResponse({ error: '用户已存在' }, { status: 400 });
         }
@@ -123,12 +144,12 @@ export async function handleAdminUserAction({
             { status: 400 },
           );
         }
-        await db.registerUser(targetUsername!, targetPassword);
+        await db.registerUser(cleanTargetUsername, targetPassword);
 
         const { userGroup } = body as { userGroup?: string };
 
         const newUser: any = {
-          username: targetUsername!,
+          username: cleanTargetUsername,
           role: 'user',
         };
 
@@ -397,14 +418,20 @@ export async function handleAdminUserAction({
         break;
       }
       case 'batchUpdateUserGroups': {
-        const { usernames, userGroups } = body as {
+        const { usernames: rawUsernames, userGroups } = body as {
           usernames: string[];
           userGroups: string[];
         };
 
-        if (!usernames || !Array.isArray(usernames) || usernames.length === 0) {
+        if (
+          !rawUsernames ||
+          !Array.isArray(rawUsernames) ||
+          rawUsernames.length === 0
+        ) {
           return toActionResponse({ error: '缺少用户名列表' }, { status: 400 });
         }
+
+        const usernames = rawUsernames.map((item) => normalizeUsername(item));
 
         if (operatorRole !== 'owner') {
           for (const targetUsername of usernames) {

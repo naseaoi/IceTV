@@ -594,4 +594,18 @@ describe('mysql storage contract', () => {
       'source+1': skipConfig,
     });
   });
+
+  it('normalizes usernames before storing and looking them up', async () => {
+    const storage = new MySqlStorage('mysql://demo:demo@localhost:3306/icetv');
+
+    await storage.clearAllData();
+    await storage.registerUser(' Alice_User ', 'password');
+
+    await expect(storage.getAllUsers()).resolves.toEqual(['alice_user']);
+    await expect(storage.checkUserExist('ALICE_USER')).resolves.toBe(true);
+    await expect(storage.verifyUser('ALICE_USER', 'password')).resolves.toBe(
+      true,
+    );
+    await expect(storage.registerUser('alice_user', 'other')).rejects.toThrow();
+  });
 });

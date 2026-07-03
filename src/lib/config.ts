@@ -8,6 +8,7 @@ import {
   DEFAULT_BANGUMI_DATA_SOURCE,
   normalizeBangumiDataSource,
 } from '@/lib/bangumi-source';
+import { normalizeUsername } from '@/lib/username';
 
 export interface ApiSite {
   key: string;
@@ -485,22 +486,32 @@ export function configSelfCheck(adminConfig: AdminConfig): AdminConfig {
 
   // 站长变更自检
   const ownerUser = getOwnerUsername();
+  const normalizedOwnerUser = normalizeUsername(ownerUser || '');
+
+  adminConfig.UserConfig.Users = adminConfig.UserConfig.Users.map((user) => {
+    const normalized = normalizeUsername(user.username || '');
+    return {
+      ...user,
+      username: normalized === normalizedOwnerUser ? ownerUser! : normalized,
+    };
+  }).filter((user) => Boolean(user.username));
 
   // 去重
   const seenUsernames = new Set<string>();
   adminConfig.UserConfig.Users = adminConfig.UserConfig.Users.filter((user) => {
-    if (seenUsernames.has(user.username)) {
+    const dedupeKey = normalizeUsername(user.username);
+    if (seenUsernames.has(dedupeKey)) {
       return false;
     }
-    seenUsernames.add(user.username);
+    seenUsernames.add(dedupeKey);
     return true;
   });
   // 过滤站长
   const originOwnerCfg = adminConfig.UserConfig.Users.find(
-    (u) => u.username === ownerUser,
+    (u) => normalizeUsername(u.username) === normalizedOwnerUser,
   );
   adminConfig.UserConfig.Users = adminConfig.UserConfig.Users.filter(
-    (user) => user.username !== ownerUser,
+    (user) => normalizeUsername(user.username) !== normalizedOwnerUser,
   );
   // 其他用户不得拥有 owner 权限
   adminConfig.UserConfig.Users.forEach((user) => {
@@ -650,13 +661,20 @@ async function syncConfigUsersWithDb(
 
   const ownerUsername = getOwnerUsername();
   const existingUsers = new Map(
-    adminConfig.UserConfig.Users.map((user) => [user.username, user]),
+    adminConfig.UserConfig.Users.map((user) => [
+      normalizeUsername(user.username),
+      user,
+    ]),
   );
   const nextUsers: ManagedUser[] = [];
   const seenUsernames = new Set<string>();
 
+  const normalizedOwnerUsername = normalizeUsername(ownerUsername || '');
+
   if (ownerUsername) {
-    const ownerEntry = existingUsers.get(ownerUsername);
+    const ownerEntry =
+      existingUsers.get(ownerUsername) ||
+      existingUsers.get(normalizedOwnerUsername);
     nextUsers.push({
       username: ownerUsername,
       role: 'owner',
@@ -664,23 +682,24 @@ async function syncConfigUsersWithDb(
       enabledApis: cloneStringList(ownerEntry?.enabledApis),
       tags: cloneStringList(ownerEntry?.tags),
     });
-    seenUsernames.add(ownerUsername);
+    seenUsernames.add(normalizedOwnerUsername);
   }
 
   for (const userName of userNames) {
-    if (!userName || seenUsernames.has(userName)) {
+    const normalizedUserName = normalizeUsername(userName);
+    if (!normalizedUserName || seenUsernames.has(normalizedUserName)) {
       continue;
     }
 
-    const existingUser = existingUsers.get(userName);
+    const existingUser = existingUsers.get(normalizedUserName);
     nextUsers.push({
-      username: userName,
+      username: normalizedUserName,
       role: existingUser?.role === 'admin' ? 'admin' : 'user',
       banned: !!existingUser?.banned,
       enabledApis: cloneStringList(existingUser?.enabledApis),
       tags: cloneStringList(existingUser?.tags),
     });
-    seenUsernames.add(userName);
+    seenUsernames.add(normalizedUserName);
   }
 
   adminConfig.UserConfig.Users = nextUsers;
@@ -722,8 +741,9 @@ export async function getAvailableApiSites(
     return allApiSites;
   }
 
+  const lookupUsername = normalizeUsername(user);
   const userConfig = currentConfig.UserConfig.Users.find(
-    (u) => u.username === user,
+    (u) => u.username === lookupUsername,
   );
   if (!userConfig) {
     return allApiSites;

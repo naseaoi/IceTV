@@ -27,7 +27,10 @@ let storageInstancePromise: Promise<IStorage> | null = null;
 
 async function getStorage(): Promise<IStorage> {
   if (!storageInstancePromise) {
-    storageInstancePromise = createStorage();
+    storageInstancePromise = createStorage().catch((error) => {
+      storageInstancePromise = null;
+      throw error;
+    });
   }
   return storageInstancePromise;
 }

@@ -137,8 +137,6 @@ async function fetchAndCacheSearchPage(
       signal: abortState.signal,
     });
 
-    abortState.cleanup();
-
     if (!response.ok) {
       if (response.status === 403) {
         setCachedSearchPage(apiSite.key, query, page, 'forbidden', []);
@@ -193,6 +191,8 @@ async function fetchAndCacheSearchPage(
       setCachedSearchPage(apiSite.key, query, page, 'timeout', []);
     }
     return { results: [] };
+  } finally {
+    abortState.cleanup();
   }
 }
 
@@ -334,58 +334,57 @@ export async function getDetailFromApi(
   const detailUrl = `${apiSite.api}${API_CONFIG.detail.path}${id}`;
 
   const abortState = createTimedAbortController(undefined, 10000);
-  let response: Response;
   try {
-    response = await fetch(detailUrl, {
+    const response = await fetch(detailUrl, {
       headers: API_CONFIG.detail.headers,
       signal: abortState.signal,
     });
+
+    if (!response.ok) {
+      throw new Error(`详情请求失败: ${response.status}`);
+    }
+
+    const data = await response.json();
+
+    if (
+      !data ||
+      !data.list ||
+      !Array.isArray(data.list) ||
+      data.list.length === 0
+    ) {
+      throw new Error('获取到的详情内容无效');
+    }
+
+    const videoDetail = data.list[0];
+    const { episodes: parsedEpisodes, titles } = videoDetail.vod_play_url
+      ? parseVodPlayUrl(videoDetail.vod_play_url)
+      : { episodes: [], titles: [] };
+    let episodes = parsedEpisodes;
+
+    if (episodes.length === 0 && videoDetail.vod_content) {
+      const matches = videoDetail.vod_content.match(PLAYBACK_URL_PATTERN) || [];
+      episodes = matches.map((link: string) => link.replace(/^\$/, ''));
+    }
+
+    return {
+      id: id.toString(),
+      title: videoDetail.vod_name,
+      poster: videoDetail.vod_pic,
+      episodes,
+      episodes_titles: titles,
+      source: apiSite.key,
+      source_name: apiSite.name,
+      class: videoDetail.vod_class,
+      year: videoDetail.vod_year
+        ? videoDetail.vod_year.match(/\d{4}/)?.[0] || ''
+        : 'unknown',
+      desc: cleanHtmlTags(videoDetail.vod_content),
+      type_name: videoDetail.type_name,
+      douban_id: videoDetail.vod_douban_id,
+    };
   } finally {
     abortState.cleanup();
   }
-
-  if (!response.ok) {
-    throw new Error(`详情请求失败: ${response.status}`);
-  }
-
-  const data = await response.json();
-
-  if (
-    !data ||
-    !data.list ||
-    !Array.isArray(data.list) ||
-    data.list.length === 0
-  ) {
-    throw new Error('获取到的详情内容无效');
-  }
-
-  const videoDetail = data.list[0];
-  const { episodes: parsedEpisodes, titles } = videoDetail.vod_play_url
-    ? parseVodPlayUrl(videoDetail.vod_play_url)
-    : { episodes: [], titles: [] };
-  let episodes = parsedEpisodes;
-
-  if (episodes.length === 0 && videoDetail.vod_content) {
-    const matches = videoDetail.vod_content.match(PLAYBACK_URL_PATTERN) || [];
-    episodes = matches.map((link: string) => link.replace(/^\$/, ''));
-  }
-
-  return {
-    id: id.toString(),
-    title: videoDetail.vod_name,
-    poster: videoDetail.vod_pic,
-    episodes,
-    episodes_titles: titles,
-    source: apiSite.key,
-    source_name: apiSite.name,
-    class: videoDetail.vod_class,
-    year: videoDetail.vod_year
-      ? videoDetail.vod_year.match(/\d{4}/)?.[0] || ''
-      : 'unknown',
-    desc: cleanHtmlTags(videoDetail.vod_content),
-    type_name: videoDetail.type_name,
-    douban_id: videoDetail.vod_douban_id,
-  };
 }
 
 async function handleSpecialSourceDetail(
@@ -395,21 +394,22 @@ async function handleSpecialSourceDetail(
   const detailUrl = `${apiSite.detail}/index.php/vod/detail/id/${id}.html`;
 
   const abortState = createTimedAbortController(undefined, 10000);
-  let response: Response;
+  let html = '';
   try {
-    response = await fetch(detailUrl, {
+    const response = await fetch(detailUrl, {
       headers: API_CONFIG.detail.headers,
       signal: abortState.signal,
     });
+
+    if (!response.ok) {
+      throw new Error(`详情页请求失败: ${response.status}`);
+    }
+
+    html = await response.text();
   } finally {
     abortState.cleanup();
   }
 
-  if (!response.ok) {
-    throw new Error(`详情页请求失败: ${response.status}`);
-  }
-
-  const html = await response.text();
   let matches: string[] = [];
 
   if (apiSite.key === 'ffzy') {

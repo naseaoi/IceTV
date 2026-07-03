@@ -4,6 +4,7 @@ import { getAuthInfoFromCookie, getSignatureData } from './auth.server';
 import { getConfigForRead } from './config';
 import { getOwnerUsername } from './env.server';
 import { verifyAuthSignature } from './signing-secret.server';
+import { normalizeUsername } from './username';
 
 type RequireActiveUserOptions = {
   unauthorizedMessage?: string;
@@ -110,15 +111,16 @@ export async function requireActiveUser(
     };
   }
 
-  const username = authInfo.username;
-  const isOwner = username === getOwnerUsername();
+  const cookieUsername = authInfo.username;
+  const isOwner = cookieUsername === getOwnerUsername();
   if (isOwner) {
     return {
-      username,
+      username: cookieUsername,
       isOwner,
     };
   }
 
+  const username = normalizeUsername(cookieUsername);
   const config = await getConfigForRead();
   const user = config.UserConfig.Users.find(
     (entry) => entry.username === username,

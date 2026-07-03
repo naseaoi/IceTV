@@ -7,6 +7,7 @@ import {
   buildConfigFileFromAdminConfig,
   removeConfigFileEntries,
 } from '@/lib/config-file-json';
+import { validateProxyUrlForRequest } from '@/lib/url-guard';
 
 export const runtime = 'nodejs';
 
@@ -25,6 +26,31 @@ type Action =
 
 interface BaseBody {
   action?: Action;
+}
+
+async function validateSourceApiUrl(
+  api: string,
+): Promise<{ ok: true; api: string } | { ok: false; response: NextResponse }> {
+  const cleanApi = api.trim();
+  if (!cleanApi) {
+    return {
+      ok: false,
+      response: NextResponse.json({ error: '缺少必要参数' }, { status: 400 }),
+    };
+  }
+
+  const validation = await validateProxyUrlForRequest(cleanApi);
+  if (!validation.ok) {
+    return {
+      ok: false,
+      response: NextResponse.json(
+        { error: '采集源地址不可用' },
+        { status: 400 },
+      ),
+    };
+  }
+
+  return { ok: true, api: validation.url.trim() };
 }
 
 export async function POST(request: NextRequest) {
@@ -63,17 +89,25 @@ export async function POST(request: NextRequest) {
           api?: string;
           detail?: string;
         };
-        if (!key || !name || !api) {
+        const cleanKey = typeof key === 'string' ? key.trim() : '';
+        const cleanName = typeof name === 'string' ? name.trim() : '';
+        const cleanApi = typeof api === 'string' ? api.trim() : '';
+        const cleanDetail = typeof detail === 'string' ? detail.trim() : '';
+        if (!cleanKey || !cleanName || !cleanApi) {
           return NextResponse.json({ error: '缺少必要参数' }, { status: 400 });
         }
-        if (adminConfig.SourceConfig.some((s) => s.key === key)) {
+        const sourceApi = await validateSourceApiUrl(cleanApi);
+        if (!sourceApi.ok) {
+          return sourceApi.response;
+        }
+        if (adminConfig.SourceConfig.some((s) => s.key === cleanKey)) {
           return NextResponse.json({ error: '该源已存在' }, { status: 400 });
         }
         adminConfig.SourceConfig.push({
-          key,
-          name,
-          api,
-          detail,
+          key: cleanKey,
+          name: cleanName,
+          api: sourceApi.api,
+          detail: cleanDetail,
           from: 'custom',
           disabled: false,
         });
@@ -93,6 +127,10 @@ export async function POST(request: NextRequest) {
         if (!cleanKey || !cleanName || !cleanApi) {
           return NextResponse.json({ error: '缺少必要参数' }, { status: 400 });
         }
+        const sourceApi = await validateSourceApiUrl(cleanApi);
+        if (!sourceApi.ok) {
+          return sourceApi.response;
+        }
         const entry = adminConfig.SourceConfig.find(
           (source) => source.key === cleanKey,
         );
@@ -100,7 +138,7 @@ export async function POST(request: NextRequest) {
           return NextResponse.json({ error: '源不存在' }, { status: 404 });
         }
         entry.name = cleanName;
-        entry.api = cleanApi;
+        entry.api = sourceApi.api;
         entry.detail = cleanDetail;
         break;
       }
