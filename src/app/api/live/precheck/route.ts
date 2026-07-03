@@ -50,6 +50,7 @@ export async function GET(request: NextRequest) {
       headers: {
         'User-Agent': ua,
       },
+      skipInitialValidation: true,
     });
 
     if (!response.ok) {

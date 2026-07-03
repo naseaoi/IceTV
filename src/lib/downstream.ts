@@ -333,15 +333,16 @@ export async function getDetailFromApi(
 
   const detailUrl = `${apiSite.api}${API_CONFIG.detail.path}${id}`;
 
-  const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), 10000);
-
-  const response = await fetch(detailUrl, {
-    headers: API_CONFIG.detail.headers,
-    signal: controller.signal,
-  });
-
-  clearTimeout(timeoutId);
+  const abortState = createTimedAbortController(undefined, 10000);
+  let response: Response;
+  try {
+    response = await fetch(detailUrl, {
+      headers: API_CONFIG.detail.headers,
+      signal: abortState.signal,
+    });
+  } finally {
+    abortState.cleanup();
+  }
 
   if (!response.ok) {
     throw new Error(`详情请求失败: ${response.status}`);
@@ -393,15 +394,16 @@ async function handleSpecialSourceDetail(
 ): Promise<SearchResult> {
   const detailUrl = `${apiSite.detail}/index.php/vod/detail/id/${id}.html`;
 
-  const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), 10000);
-
-  const response = await fetch(detailUrl, {
-    headers: API_CONFIG.detail.headers,
-    signal: controller.signal,
-  });
-
-  clearTimeout(timeoutId);
+  const abortState = createTimedAbortController(undefined, 10000);
+  let response: Response;
+  try {
+    response = await fetch(detailUrl, {
+      headers: API_CONFIG.detail.headers,
+      signal: abortState.signal,
+    });
+  } finally {
+    abortState.cleanup();
+  }
 
   if (!response.ok) {
     throw new Error(`详情页请求失败: ${response.status}`);

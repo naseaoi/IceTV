@@ -21,6 +21,14 @@ import {
   getThanksInfo,
 } from '@/lib/douban-options';
 import {
+  DOUBAN_DATA_SOURCE_STORAGE_KEY,
+  DOUBAN_PROXY_URL_STORAGE_KEY,
+  readDefaultDoubanProxyType,
+  readDefaultDoubanProxyUrl,
+  readDoubanProxyType,
+  readDoubanProxyUrl,
+} from '@/lib/douban-source';
+import {
   AUTO_SWITCH_SOURCE_ON_TIMEOUT_STORAGE_KEY,
   readBooleanLocalSetting,
   writeBooleanLocalSetting,
@@ -57,22 +65,8 @@ export function SettingsPanel({ onClose }: SettingsPanelProps) {
       setDefaultAggregateSearch(JSON.parse(savedAggregateSearch));
     }
 
-    const defaultDoubanProxyType =
-      window.RUNTIME_CONFIG?.DOUBAN_PROXY_TYPE || 'direct';
-    const savedDoubanDataSource = localStorage.getItem('doubanDataSource');
-    if (savedDoubanDataSource !== null) {
-      setDoubanDataSource(savedDoubanDataSource);
-    } else if (defaultDoubanProxyType) {
-      setDoubanDataSource(defaultDoubanProxyType);
-    }
-
-    const defaultDoubanProxy = window.RUNTIME_CONFIG?.DOUBAN_PROXY || '';
-    const savedDoubanProxyUrl = localStorage.getItem('doubanProxyUrl');
-    if (savedDoubanProxyUrl !== null) {
-      setDoubanProxyUrl(savedDoubanProxyUrl);
-    } else if (defaultDoubanProxy) {
-      setDoubanProxyUrl(defaultDoubanProxy);
-    }
+    setDoubanDataSource(readDoubanProxyType());
+    setDoubanProxyUrl(readDoubanProxyUrl());
 
     const savedBangumiDataSource = localStorage.getItem(
       BANGUMI_DATA_SOURCE_STORAGE_KEY,
@@ -154,7 +148,7 @@ export function SettingsPanel({ onClose }: SettingsPanelProps) {
 
   const handleDoubanProxyUrlChange = (value: string) => {
     setDoubanProxyUrl(value);
-    localStorage.setItem('doubanProxyUrl', value);
+    localStorage.setItem(DOUBAN_PROXY_URL_STORAGE_KEY, value);
   };
 
   const handleOptimizationToggle = (value: boolean) => {
@@ -179,7 +173,7 @@ export function SettingsPanel({ onClose }: SettingsPanelProps) {
 
   const handleDoubanDataSourceChange = (value: string) => {
     setDoubanDataSource(value);
-    localStorage.setItem('doubanDataSource', value);
+    localStorage.setItem(DOUBAN_DATA_SOURCE_STORAGE_KEY, value);
     showProxyToast();
   };
 
@@ -207,9 +201,8 @@ export function SettingsPanel({ onClose }: SettingsPanelProps) {
   };
 
   const handleResetSettings = () => {
-    const defaultDoubanProxyType =
-      window.RUNTIME_CONFIG?.DOUBAN_PROXY_TYPE || 'direct';
-    const defaultDoubanProxy = window.RUNTIME_CONFIG?.DOUBAN_PROXY || '';
+    const defaultDoubanProxyType = readDefaultDoubanProxyType();
+    const defaultDoubanProxy = readDefaultDoubanProxyUrl();
     const defaultDoubanImageProxyType =
       window.RUNTIME_CONFIG?.DOUBAN_IMAGE_PROXY_TYPE || 'direct';
     const defaultDoubanImageProxyUrl =
@@ -235,8 +228,11 @@ export function SettingsPanel({ onClose }: SettingsPanelProps) {
     writeBooleanLocalSetting(AUTO_SWITCH_SOURCE_ON_TIMEOUT_STORAGE_KEY, false);
     localStorage.removeItem('fluidSearch');
     localStorage.setItem('liveDirectConnect', JSON.stringify(false));
-    localStorage.setItem('doubanProxyUrl', defaultDoubanProxy);
-    localStorage.setItem('doubanDataSource', defaultDoubanProxyType);
+    localStorage.setItem(DOUBAN_PROXY_URL_STORAGE_KEY, defaultDoubanProxy);
+    localStorage.setItem(
+      DOUBAN_DATA_SOURCE_STORAGE_KEY,
+      defaultDoubanProxyType,
+    );
     localStorage.setItem(
       BANGUMI_DATA_SOURCE_STORAGE_KEY,
       defaultBangumiDataSource,

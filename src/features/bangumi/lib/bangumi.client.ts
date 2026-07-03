@@ -11,6 +11,7 @@ import {
   readBangumiDataSource,
   readBangumiProxyUrl,
 } from '@/lib/bangumi-source';
+import { createTimedAbortController } from '@/lib/downstream-sources/shared';
 
 const BANGUMI_CALENDAR_URL = 'https://api.bgm.tv/calendar';
 const BANGUMI_CALENDAR_CACHE_STORAGE_KEY = 'bangumiCalendarCache';
@@ -83,15 +84,12 @@ async function fetchBangumiCalendarFromServer(
 async function fetchBangumiCalendarDirect(
   options: BangumiCalendarClientOptions,
 ): Promise<BangumiCalendarData[]> {
-  const controller = new AbortController();
-  const timeoutId = options.timeoutMs
-    ? window.setTimeout(() => controller.abort(), options.timeoutMs)
-    : undefined;
+  const abortState = createOptionalAbortState(options.timeoutMs);
 
   try {
     const response = await fetch(BANGUMI_CALENDAR_URL, {
       cache: 'no-store',
-      signal: controller.signal,
+      signal: abortState?.signal,
     });
 
     if (!response.ok) {
@@ -100,9 +98,7 @@ async function fetchBangumiCalendarDirect(
 
     return normalizeBangumiCalendarData(await response.json());
   } finally {
-    if (timeoutId !== undefined) {
-      window.clearTimeout(timeoutId);
-    }
+    abortState?.cleanup();
   }
 }
 
@@ -114,17 +110,14 @@ async function fetchBangumiCalendarCustomProxy(
     throw new Error('Bangumi custom proxy URL is empty');
   }
 
-  const controller = new AbortController();
-  const timeoutId = options.timeoutMs
-    ? window.setTimeout(() => controller.abort(), options.timeoutMs)
-    : undefined;
+  const abortState = createOptionalAbortState(options.timeoutMs);
 
   try {
     const response = await fetch(
       `${proxyUrl}${encodeURIComponent(BANGUMI_CALENDAR_URL)}`,
       {
         cache: 'no-store',
-        signal: controller.signal,
+        signal: abortState?.signal,
       },
     );
 
@@ -134,10 +127,14 @@ async function fetchBangumiCalendarCustomProxy(
 
     return normalizeBangumiCalendarData(await response.json());
   } finally {
-    if (timeoutId !== undefined) {
-      window.clearTimeout(timeoutId);
-    }
+    abortState?.cleanup();
   }
+}
+
+function createOptionalAbortState(timeoutMs: number | undefined) {
+  return timeoutMs
+    ? createTimedAbortController(undefined, timeoutMs)
+    : undefined;
 }
 
 function readBangumiCalendarClientCache(

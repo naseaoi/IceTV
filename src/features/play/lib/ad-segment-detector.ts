@@ -1,4 +1,5 @@
-﻿import { getBaseUrl, resolveUrl } from '@/lib/url-resolve';
+import { createTimedAbortController } from '@/lib/downstream-sources/shared';
+import { getBaseUrl, resolveUrl } from '@/lib/url-resolve';
 import { fetchWithUrlGuard } from '@/lib/url-guard';
 
 interface DiscontSegment {
@@ -241,17 +242,15 @@ function computeDurationMode(segments: DiscontSegment[]): number | null {
 }
 
 async function fetchTsSize(url: string, ua: string): Promise<number> {
+  const abortState = createTimedAbortController(undefined, 5000);
   try {
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), 5000);
     const res = await fetchWithUrlGuard(url, {
       method: 'GET',
       headers: { 'User-Agent': ua, Range: 'bytes=0-187' },
-      signal: controller.signal,
+      signal: abortState.signal,
       cache: 'no-store',
       redirect: 'follow',
     });
-    clearTimeout(timer);
     if (!res.ok || res.status !== 206) return 0;
     const cr = res.headers.get('content-range') || '';
     const total = Number.parseInt(cr.split('/')[1] || '0', 10);
@@ -262,6 +261,8 @@ async function fetchTsSize(url: string, ua: string): Promise<number> {
     return Number.isFinite(total) ? total : 0;
   } catch {
     return 0;
+  } finally {
+    abortState.cleanup();
   }
 }
 

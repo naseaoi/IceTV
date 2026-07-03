@@ -1,6 +1,7 @@
 'use client';
 
 import Link from 'next/link';
+import { useEffect } from 'react';
 
 export default function GlobalError({
   error,
@@ -9,7 +10,9 @@ export default function GlobalError({
   error: Error & { digest?: string };
   reset: () => void;
 }) {
-  console.error('全局渲染失败:', error);
+  useEffect(() => {
+    console.error('全局渲染失败:', error);
+  }, [error]);
 
   return (
     <html lang='zh-CN'>

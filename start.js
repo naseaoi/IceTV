@@ -22,6 +22,7 @@ function generateManifest() {
 
 generateManifest();
 warnMissingCronSecret();
+warnWeakAuthSecret();
 
 // 直接在当前进程中启动 standalone Server（`server.js`）
 require('./server.js');
@@ -33,9 +34,8 @@ const READY_POLL_TIMEOUT_MS = readPositiveInteger(
 );
 
 // 每 1 秒轮询一次，直到请求成功
-const TARGET_URL = `http://${process.env.HOSTNAME || 'localhost'}:${
-  process.env.PORT || 3000
-}/login`;
+const REQUEST_HOSTNAME = '127.0.0.1';
+const TARGET_URL = `http://${REQUEST_HOSTNAME}:${process.env.PORT || 3000}/login`;
 const readyPollStartedAt = Date.now();
 
 const intervalId = setInterval(() => {
@@ -82,7 +82,7 @@ const intervalId = setInterval(() => {
 
 // 执行 cron 任务的函数
 function executeCronJob() {
-  const hostname = process.env.HOSTNAME || 'localhost';
+  const hostname = REQUEST_HOSTNAME;
   const port = process.env.PORT || 3000;
   const cronUrl = `http://${hostname}:${port}/api/cron`;
   const cronSecret = getCronSecret();
@@ -142,6 +142,21 @@ function warnMissingCronSecret() {
   console.warn(
     '⚠️ CRON_SECRET is not configured. Internal cron requests will return 401 until CRON_SECRET, ICETV_CRON_SECRET, or VERCEL_CRON_SECRET is set.',
   );
+}
+
+function warnWeakAuthSecret() {
+  const secret = getAuthSecret();
+  if (secret && secret.length >= 32) {
+    return;
+  }
+
+  console.warn(
+    '⚠️ AUTH_SECRET is missing or shorter than 32 characters. Configure AUTH_SECRET or ICETV_AUTH_SECRET with a high-entropy value.',
+  );
+}
+
+function getAuthSecret() {
+  return process.env.AUTH_SECRET || process.env.ICETV_AUTH_SECRET || '';
 }
 
 function readPositiveInteger(value, fallback) {

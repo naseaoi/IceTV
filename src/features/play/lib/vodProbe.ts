@@ -4,6 +4,7 @@ import {
   clearSourceProxyOverride,
   rememberSourceServerProxy,
 } from '@/lib/proxy-modes';
+import { createTimedAbortController } from '@/lib/downstream-sources/shared';
 
 import {
   buildVodSegmentProxyUrl,
@@ -20,16 +21,6 @@ export type VodProbeResult = {
 const MP4_PROBE_TIMEOUT_MS = 8_000;
 const MP4_PROBE_MAX_BYTES = 256 * 1024;
 const MP4_PROBE_MIN_SPEED_BYTES = 32 * 1024;
-
-function withAbortTimeout(timeoutMs: number) {
-  const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
-
-  return {
-    signal: controller.signal,
-    cleanup: () => clearTimeout(timeoutId),
-  };
-}
 
 function buildMp4ProbeUrl(
   rawUrl: string,
@@ -86,7 +77,10 @@ async function probeMp4WithMode(
   sourceKey: string,
 ): Promise<VodProbeResult> {
   const url = buildMp4ProbeUrl(rawUrl, useProxy, sourceKey);
-  const abortState = withAbortTimeout(MP4_PROBE_TIMEOUT_MS);
+  const abortState = createTimedAbortController(
+    undefined,
+    MP4_PROBE_TIMEOUT_MS,
+  );
   const startedAt = performance.now();
 
   try {

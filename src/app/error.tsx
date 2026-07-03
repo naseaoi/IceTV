@@ -1,6 +1,7 @@
 'use client';
 
 import Link from 'next/link';
+import { useEffect } from 'react';
 
 export default function AppError({
   error,
@@ -9,7 +10,9 @@ export default function AppError({
   error: Error & { digest?: string };
   reset: () => void;
 }) {
-  console.error('页面渲染失败:', error);
+  useEffect(() => {
+    console.error('页面渲染失败:', error);
+  }, [error]);
 
   return (
     <main className='flex min-h-screen items-center justify-center bg-white px-6 text-gray-900 dark:bg-gray-950 dark:text-gray-100'>

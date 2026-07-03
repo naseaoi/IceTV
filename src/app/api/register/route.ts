@@ -6,6 +6,21 @@ import { getOwnerUsername } from '@/lib/env.server';
 
 export const runtime = 'nodejs';
 
+function isDuplicateUserError(error: unknown): boolean {
+  if (
+    error &&
+    typeof error === 'object' &&
+    'code' in error &&
+    (error as { code?: unknown }).code === 'ER_DUP_ENTRY'
+  ) {
+    return true;
+  }
+
+  return (
+    error instanceof Error && /unique|duplicate|constraint/i.test(error.message)
+  );
+}
+
 export async function POST(request: NextRequest) {
   try {
     const body = (await request.json()) as {
@@ -45,6 +60,10 @@ export async function POST(request: NextRequest) {
 
     return NextResponse.json({ ok: true });
   } catch (error) {
+    if (isDuplicateUserError(error)) {
+      return NextResponse.json({ error: '用户名已存在' }, { status: 409 });
+    }
+
     console.error('注册失败:', error);
     return NextResponse.json({ error: '注册失败' }, { status: 500 });
   }

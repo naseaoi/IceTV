@@ -1,3 +1,5 @@
+import { createTimedAbortController } from '@/lib/downstream-sources/shared';
+
 type DoubanFetchInit = RequestInit & {
   next?: {
     revalidate?: number;
@@ -8,8 +10,10 @@ export async function fetchDoubanData<T>(
   url: string,
   init: DoubanFetchInit = {},
 ): Promise<T> {
-  const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), 10000);
+  const abortState = createTimedAbortController(
+    init.signal ?? undefined,
+    10000,
+  );
   const headers = new Headers(init.headers);
 
   if (!headers.has('User-Agent')) {
@@ -30,13 +34,12 @@ export async function fetchDoubanData<T>(
 
   const fetchOptions = {
     ...init,
-    signal: controller.signal,
+    signal: abortState.signal,
     headers,
   };
 
   try {
     const response = await fetch(url, fetchOptions);
-    clearTimeout(timeoutId);
 
     if (!response.ok) {
       throw new Error(`HTTP error! Status: ${response.status}`);
@@ -44,7 +47,8 @@ export async function fetchDoubanData<T>(
 
     return await response.json();
   } catch (error) {
-    clearTimeout(timeoutId);
     throw error;
+  } finally {
+    abortState.cleanup();
   }
 }

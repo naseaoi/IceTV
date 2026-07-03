@@ -12,6 +12,7 @@ const BLOCKED_HOSTNAMES = new Set([
 const MAX_REDIRECTS = 5;
 const DEFAULT_FETCH_TIMEOUT_MS = 15_000;
 const DEFAULT_DNS_CACHE_TTL_MS = 30_000;
+const DEFAULT_DNS_NEGATIVE_CACHE_TTL_MS = 5_000;
 
 type DnsLookup = typeof lookup;
 
@@ -22,6 +23,7 @@ type GuardedFetchInit = RequestInit & {
 type DnsCacheEntry = {
   addresses: { address: string }[];
   expiresAt: number;
+  failed?: boolean;
 };
 
 const dnsCache = new Map<string, DnsCacheEntry>();
@@ -170,6 +172,16 @@ function getDnsCacheTtlMs(): number {
     : DEFAULT_DNS_CACHE_TTL_MS;
 }
 
+function getDnsNegativeCacheTtlMs(): number {
+  const configured = Number.parseInt(
+    process.env.PROXY_DNS_NEGATIVE_CACHE_TTL_MS || '',
+    10,
+  );
+  return Number.isFinite(configured) && configured >= 0
+    ? configured
+    : DEFAULT_DNS_NEGATIVE_CACHE_TTL_MS;
+}
+
 function windowLikeSetTimeout(
   callback: () => void,
   timeoutMs: number,
@@ -238,10 +250,27 @@ async function lookupHostname(
   const now = Date.now();
   const cached = dnsCache.get(hostname);
   if (ttlMs > 0 && cached && cached.expiresAt > now) {
+    if (cached.failed) {
+      throw new Error('DNS lookup failed');
+    }
     return cached.addresses;
   }
 
-  const addresses = await dnsLookup(hostname, { all: true, verbatim: true });
+  let addresses: { address: string }[];
+  try {
+    addresses = await dnsLookup(hostname, { all: true, verbatim: true });
+  } catch (error) {
+    const negativeTtlMs = getDnsNegativeCacheTtlMs();
+    if (negativeTtlMs > 0) {
+      dnsCache.set(hostname, {
+        addresses: [],
+        expiresAt: now + negativeTtlMs,
+        failed: true,
+      });
+    }
+    throw error;
+  }
+
   if (ttlMs > 0) {
     dnsCache.set(hostname, { addresses, expiresAt: now + ttlMs });
   }

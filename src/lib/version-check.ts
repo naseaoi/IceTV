@@ -1,6 +1,7 @@
 'use client';
 
 import { CURRENT_VERSION } from '@/lib/version';
+import { createTimedAbortController } from '@/lib/downstream-sources/shared';
 
 // 版本检查结果枚举
 export enum UpdateStatus {
@@ -50,15 +51,12 @@ async function checkForUpdatesInternal(): Promise<UpdateStatus> {
  * @returns Promise<string | null> - 版本字符串或null
  */
 async function fetchLatestVersion(): Promise<string | null> {
-  let timeoutId: ReturnType<typeof setTimeout> | undefined;
+  const abortState = createTimedAbortController(undefined, 5000);
 
   try {
-    const controller = new AbortController();
-    timeoutId = setTimeout(() => controller.abort(), 5000); // 5秒超时
-
     const response = await fetch('/api/version/latest', {
       method: 'GET',
-      signal: controller.signal,
+      signal: abortState.signal,
       cache: 'no-store',
     });
 
@@ -77,9 +75,7 @@ async function fetchLatestVersion(): Promise<string | null> {
   } catch (error) {
     return null;
   } finally {
-    if (timeoutId) {
-      clearTimeout(timeoutId);
-    }
+    abortState.cleanup();
   }
 }
 

@@ -1,5 +1,5 @@
 # ---- 第 1 阶段：安装依赖 ----
-FROM node:22-bookworm-slim AS deps
+FROM node:22.14-bookworm-slim AS deps
 
 ARG PNPM_VERSION=10.14.0
 
@@ -36,7 +36,7 @@ RUN pnpm config set registry https://registry.npmmirror.com \
   && pnpm install --frozen-lockfile
 
 # ---- 第 2 阶段：构建项目 ----
-FROM node:22-bookworm-slim AS builder
+FROM node:22.14-bookworm-slim AS builder
 ARG PNPM_VERSION=10.14.0
 ARG NEXT_PUBLIC_APP_VERSION
 ENV COREPACK_HOME=/corepack
@@ -70,7 +70,7 @@ ENV DOCKER_ENV=true
 RUN pnpm run build
 
 # ---- 第 3 阶段：生成运行时镜像 ----
-FROM node:22-bookworm-slim AS runner
+FROM node:22.14-bookworm-slim AS runner
 ARG NEXT_PUBLIC_APP_VERSION
 
 # 创建非 root 用户

@@ -3,6 +3,7 @@ import { NextResponse } from 'next/server';
 import { createPublicApiCacheHeaders } from '@/lib/api-cache-headers';
 import { getCacheTime } from '@/lib/config';
 import { fetchDoubanData } from '@/lib/douban';
+import { createTimedAbortController } from '@/lib/downstream-sources/shared';
 import {
   DoubanListApiResponse,
   normalizeDoubanListSubjects,
@@ -98,11 +99,10 @@ async function handleTop250(pageStart: number) {
 }
 
 async function fetchTop250Result(target: string): Promise<DoubanResult> {
-  const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), 10000);
+  const abortState = createTimedAbortController(undefined, 10000);
 
   const fetchOptions = {
-    signal: controller.signal,
+    signal: abortState.signal,
     headers: {
       'User-Agent':
         'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36',
@@ -147,7 +147,7 @@ async function fetchTop250Result(target: string): Promise<DoubanResult> {
       list: movies,
     };
   } finally {
-    clearTimeout(timeoutId);
+    abortState.cleanup();
   }
 }
 
