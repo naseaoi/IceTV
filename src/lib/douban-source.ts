@@ -19,6 +19,21 @@ export type DoubanProxyType = (typeof DOUBAN_PROXY_TYPE_VALUES)[number];
 
 export const DEFAULT_DOUBAN_PROXY_TYPE: DoubanProxyType = 'direct';
 
+export const DOUBAN_IMAGE_PROXY_TYPE_VALUES = [
+  'direct',
+  'server',
+  'img3',
+  'cmliussss-cdn-tencent',
+  'cmliussss-cdn-ali',
+  'custom',
+] as const;
+
+export type DoubanImageProxyType =
+  (typeof DOUBAN_IMAGE_PROXY_TYPE_VALUES)[number];
+
+export const DEFAULT_DOUBAN_IMAGE_PROXY_TYPE: DoubanImageProxyType =
+  'cmliussss-cdn-tencent';
+
 const doubanProxySourceHelper = createProxySourceHelper({
   values: DOUBAN_PROXY_TYPE_VALUES,
   defaultValue: DEFAULT_DOUBAN_PROXY_TYPE,
@@ -29,8 +44,8 @@ const doubanProxySourceHelper = createProxySourceHelper({
 });
 
 const doubanImageProxySourceHelper = createProxySourceHelper({
-  values: DOUBAN_PROXY_TYPE_VALUES,
-  defaultValue: DEFAULT_DOUBAN_PROXY_TYPE,
+  values: DOUBAN_IMAGE_PROXY_TYPE_VALUES,
+  defaultValue: DEFAULT_DOUBAN_IMAGE_PROXY_TYPE,
   sourceStorageKey: DOUBAN_IMAGE_PROXY_TYPE_STORAGE_KEY,
   proxyUrlStorageKey: DOUBAN_IMAGE_PROXY_URL_STORAGE_KEY,
   readRuntimeSource: () => window.RUNTIME_CONFIG?.DOUBAN_IMAGE_PROXY_TYPE,
@@ -39,6 +54,12 @@ const doubanImageProxySourceHelper = createProxySourceHelper({
 
 export function normalizeDoubanProxyType(value: unknown): DoubanProxyType {
   return doubanProxySourceHelper.normalizeSource(value);
+}
+
+export function normalizeDoubanImageProxyType(
+  value: unknown,
+): DoubanImageProxyType {
+  return doubanImageProxySourceHelper.normalizeSource(value);
 }
 
 export function readDefaultDoubanProxyType(): DoubanProxyType {
@@ -57,11 +78,11 @@ export function readDoubanProxyUrl(): string {
   return doubanProxySourceHelper.readProxyUrl();
 }
 
-export function readDefaultDoubanImageProxyType(): DoubanProxyType {
+export function readDefaultDoubanImageProxyType(): DoubanImageProxyType {
   return doubanImageProxySourceHelper.readDefaultSource();
 }
 
-export function readDoubanImageProxyType(): DoubanProxyType {
+export function readDoubanImageProxyType(): DoubanImageProxyType {
   return doubanImageProxySourceHelper.readSource();
 }
 

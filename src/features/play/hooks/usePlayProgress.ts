@@ -1,5 +1,7 @@
 ﻿import { Dispatch, MutableRefObject, SetStateAction, useEffect } from 'react';
 
+import { useCallback, useRef } from 'react';
+
 import type Artplayer from 'artplayer';
 
 import {
@@ -236,32 +238,44 @@ export function usePlayProgress({
   setCurrentEpisodeIndex,
   cleanupPlayer,
 }: UsePlayProgressParams) {
-  const doSave = () =>
-    saveCurrentPlayProgress(
-      artPlayerRef,
-      currentSourceRef,
-      currentIdRef,
-      videoTitleRef,
-      detailRef,
-      currentEpisodeIndexRef,
-      stableCurrentTimeRef,
-      clearTargetEpisodeProgressRef,
-      saveStateRef,
-      lastSaveTimeRef,
-      searchTitle,
-    );
+  const searchTitleRef = useRef(searchTitle);
 
-  const doCheckpoint = (reason?: SessionLostReason) =>
-    savePlaybackCheckpoint(
-      currentSourceRef,
-      currentIdRef,
-      currentEpisodeIndexRef,
-      videoTitleRef,
-      artPlayerRef,
-      stableCurrentTimeRef,
-      clearTargetEpisodeProgressRef,
-      reason,
-    );
+  useEffect(() => {
+    searchTitleRef.current = searchTitle;
+  }, [searchTitle]);
+
+  const doSave = useCallback(
+    () =>
+      saveCurrentPlayProgress(
+        artPlayerRef,
+        currentSourceRef,
+        currentIdRef,
+        videoTitleRef,
+        detailRef,
+        currentEpisodeIndexRef,
+        stableCurrentTimeRef,
+        clearTargetEpisodeProgressRef,
+        saveStateRef,
+        lastSaveTimeRef,
+        searchTitleRef.current,
+      ),
+    [],
+  );
+
+  const doCheckpoint = useCallback(
+    (reason?: SessionLostReason) =>
+      savePlaybackCheckpoint(
+        currentSourceRef,
+        currentIdRef,
+        currentEpisodeIndexRef,
+        videoTitleRef,
+        artPlayerRef,
+        stableCurrentTimeRef,
+        clearTargetEpisodeProgressRef,
+        reason,
+      ),
+    [],
+  );
 
   const persistPlaybackState = () => {
     doCheckpoint();

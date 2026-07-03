@@ -1,8 +1,13 @@
 import {
   DEFAULT_DOUBAN_PROXY_TYPE,
   DOUBAN_DATA_SOURCE_STORAGE_KEY,
+  DOUBAN_IMAGE_PROXY_TYPE_STORAGE_KEY,
+  DOUBAN_IMAGE_PROXY_URL_STORAGE_KEY,
   DOUBAN_PROXY_URL_STORAGE_KEY,
+  normalizeDoubanImageProxyType,
   normalizeDoubanProxyType,
+  readDoubanImageProxyType,
+  readDoubanImageProxyUrl,
   readDoubanProxyType,
   readDoubanProxyUrl,
 } from '../douban-source';
@@ -25,6 +30,8 @@ describe('readDoubanProxyType', () => {
   beforeEach(() => {
     localStorage.removeItem(DOUBAN_DATA_SOURCE_STORAGE_KEY);
     localStorage.removeItem(DOUBAN_PROXY_URL_STORAGE_KEY);
+    localStorage.removeItem(DOUBAN_IMAGE_PROXY_TYPE_STORAGE_KEY);
+    localStorage.removeItem(DOUBAN_IMAGE_PROXY_URL_STORAGE_KEY);
     delete window.RUNTIME_CONFIG;
   });
 
@@ -55,5 +62,24 @@ describe('readDoubanProxyType', () => {
     );
 
     expect(readDoubanProxyUrl()).toBe('https://local.example/fetch?url=');
+  });
+
+  it('keeps img3 as a supported image proxy type', () => {
+    expect(normalizeDoubanImageProxyType('img3')).toBe('img3');
+
+    localStorage.setItem(DOUBAN_IMAGE_PROXY_TYPE_STORAGE_KEY, 'img3');
+
+    expect(readDoubanImageProxyType()).toBe('img3');
+  });
+
+  it('keeps image proxy url separate from data proxy url', () => {
+    localStorage.setItem(DOUBAN_PROXY_URL_STORAGE_KEY, 'https://data.example/');
+    localStorage.setItem(
+      DOUBAN_IMAGE_PROXY_URL_STORAGE_KEY,
+      'https://image.example/',
+    );
+
+    expect(readDoubanProxyUrl()).toBe('https://data.example/');
+    expect(readDoubanImageProxyUrl()).toBe('https://image.example/');
   });
 });

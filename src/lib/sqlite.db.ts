@@ -176,18 +176,23 @@ export class LocalSqliteStorage implements IStorage {
       process.env.LOCAL_DB_PATH ||
       defaultSqlitePath;
 
+    const isMemoryDb = configuredPath === ':memory:';
     const isLegacyJsonPath = configuredPath.toLowerCase().endsWith('.json');
-    this.dbPath = isLegacyJsonPath
-      ? configuredPath.replace(/\.json$/i, '.sqlite')
-      : configuredPath;
+    this.dbPath = isMemoryDb
+      ? configuredPath
+      : isLegacyJsonPath
+        ? configuredPath.replace(/\.json$/i, '.sqlite')
+        : configuredPath;
 
     const candidates = [defaultJsonPath, legacyJsonPath];
-    if (isLegacyJsonPath) {
+    if (!isMemoryDb && isLegacyJsonPath) {
       candidates.unshift(configuredPath);
     }
-    this.legacyJsonPaths = Array.from(new Set(candidates));
+    this.legacyJsonPaths = isMemoryDb ? [] : Array.from(new Set(candidates));
 
-    mkdirSync(path.dirname(this.dbPath), { recursive: true });
+    if (!isMemoryDb) {
+      mkdirSync(path.dirname(this.dbPath), { recursive: true });
+    }
 
     const busyTimeoutMs = parseBusyTimeoutMs(
       process.env.SQLITE_BUSY_TIMEOUT_MS,
@@ -197,15 +202,19 @@ export class LocalSqliteStorage implements IStorage {
       return new Database(this.dbPath, { timeout: busyTimeoutMs });
     });
     runWithBusyRetry('初始化 SQLite 数据库', () => {
-      this.db.pragma('journal_mode = WAL');
-      this.db.pragma('synchronous = NORMAL');
+      if (!isMemoryDb) {
+        this.db.pragma('journal_mode = WAL');
+        this.db.pragma('synchronous = NORMAL');
+      }
       this.db.pragma(`busy_timeout = ${busyTimeoutMs}`);
       this.initializeSchema();
     });
     this.stmts = this.prepareStatements();
-    runWithBusyRetry('迁移 SQLite 历史数据', () => {
-      this.migrateFromLegacyJsonIfNeeded();
-    });
+    if (!isMemoryDb) {
+      runWithBusyRetry('迁移 SQLite 历史数据', () => {
+        this.migrateFromLegacyJsonIfNeeded();
+      });
+    }
   }
 
   private initializeSchema(): void {
