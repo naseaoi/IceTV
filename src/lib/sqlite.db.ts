@@ -624,7 +624,14 @@ export class LocalSqliteStorage implements IStorage {
     const row = this.stmts.getAdminConfig.get() as
       | { config_json: string }
       | undefined;
-    return parseJsonValue<AdminConfig>(row?.config_json);
+    if (!row) {
+      return null;
+    }
+    const parsed = parseJsonValue<AdminConfig>(row.config_json);
+    if (!parsed) {
+      throw new Error('管理员配置解析失败');
+    }
+    return parsed;
   }
 
   async setAdminConfig(config: AdminConfig): Promise<void> {

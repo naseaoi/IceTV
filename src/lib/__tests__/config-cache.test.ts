@@ -220,6 +220,39 @@ describe('config cache persistence', () => {
     expect(saveAdminConfig).not.toHaveBeenCalled();
   });
 
+  it('serves cached config when a later read fails', async () => {
+    process.env.CONFIG_CACHE_TTL_MS = '0';
+    const realConfig = cloneBaseConfig();
+    realConfig.SiteConfig.SiteName = 'Real-Site';
+    const getAdminConfig = jest
+      .fn()
+      .mockResolvedValueOnce(realConfig)
+      .mockRejectedValueOnce(new Error('read failed'));
+    const { getConfig } = await loadConfigModule(jest.fn(), {
+      getAdminConfig,
+    });
+
+    const first = await getConfig();
+    expect(first.SiteConfig.SiteName).toBe('Real-Site');
+
+    const second = await getConfig();
+    expect(second.SiteConfig.SiteName).toBe('Real-Site');
+    expect(getAdminConfig).toHaveBeenCalledTimes(2);
+  });
+
+  it('throws instead of persisting defaults when the first read fails', async () => {
+    const saveAdminConfig = jest.fn();
+    const getAdminConfig = jest
+      .fn()
+      .mockRejectedValue(new Error('read failed'));
+    const { getConfig } = await loadConfigModule(saveAdminConfig, {
+      getAdminConfig,
+    });
+
+    await expect(getConfig()).rejects.toThrow('read failed');
+    expect(saveAdminConfig).not.toHaveBeenCalled();
+  });
+
   it('defaults missing fluid search config to enabled', async () => {
     const { configSelfCheck } = await loadConfigModule(jest.fn());
     const config = cloneBaseConfig();

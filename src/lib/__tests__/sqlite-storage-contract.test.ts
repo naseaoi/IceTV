@@ -138,4 +138,28 @@ describe('sqlite storage contract', () => {
       'source+1': skipConfig,
     });
   });
+
+  it('returns null when admin config is absent', async () => {
+    const storage = new LocalSqliteStorage(':memory:');
+    await expect(storage.getAdminConfig()).resolves.toBeNull();
+  });
+
+  it('throws instead of rebuilding when admin config is corrupt', async () => {
+    const storage = new LocalSqliteStorage(':memory:');
+    await storage.replaceAllData({
+      adminConfig,
+      users: {},
+      userData: {},
+    });
+
+    (
+      storage as unknown as {
+        db: { prepare: (sql: string) => { run: (value: string) => void } };
+      }
+    ).db
+      .prepare('UPDATE admin_config SET config_json = ? WHERE id = 1')
+      .run('{not-valid-json');
+
+    await expect(storage.getAdminConfig()).rejects.toThrow();
+  });
 });

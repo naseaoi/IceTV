@@ -339,15 +339,18 @@ async function loadConfig(): Promise<AdminConfig> {
     return cachedConfig;
   }
 
-  let adminConfig: AdminConfig | null = null;
-  let shouldPersist = false;
+  let adminConfig: AdminConfig | null;
   try {
     adminConfig = await db.getAdminConfig();
   } catch (e) {
     console.error('获取管理员配置失败:', e);
+    if (cachedConfig) {
+      return cachedConfig;
+    }
+    throw e;
   }
 
-  // db 中无配置，执行一次初始化
+  let shouldPersist = false;
   if (!adminConfig) {
     adminConfig = await getInitConfig('');
     shouldPersist = true;

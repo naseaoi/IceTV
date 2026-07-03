@@ -423,7 +423,15 @@ export class MySqlStorage implements IStorage {
     const [rows] = await this.pool.query<JsonRow[]>(
       'SELECT config_json FROM admin_config WHERE id = 1 LIMIT 1',
     );
-    return parseJsonValue<AdminConfig>(rows[0]?.config_json);
+    const raw = rows[0]?.config_json;
+    if (raw == null) {
+      return null;
+    }
+    const parsed = parseJsonValue<AdminConfig>(raw);
+    if (!parsed) {
+      throw new Error('管理员配置解析失败');
+    }
+    return parsed;
   }
 
   async setAdminConfig(config: AdminConfig): Promise<void> {
