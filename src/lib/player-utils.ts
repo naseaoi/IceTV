@@ -206,6 +206,7 @@ export interface HlsConfigOverrides {
   startFragPrefetch?: boolean;
   progressive?: boolean;
   testBandwidth?: boolean;
+  preserveManualLevelOnError?: boolean;
   liveSyncDurationCount?: number;
   liveMaxLatencyDurationCount?: number;
   initialLiveManifestSize?: number;

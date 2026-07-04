@@ -15,6 +15,11 @@ interface HlsQualityController {
   levels?: HlsLevelLike[];
   currentLevel: number;
   startLevel: number;
+  loadLevel?: number;
+  nextLevel?: number;
+  nextLoadLevel?: number;
+  autoLevelCapping?: number;
+  __icetvManualQualityLocked?: boolean;
 }
 
 export interface QualityOption {
@@ -24,6 +29,30 @@ export interface QualityOption {
 }
 
 const QUALITY_CONTROL_NAME = 'icetv-quality';
+
+export function applyAutoQualityLevel(hls: HlsQualityController): void {
+  hls.__icetvManualQualityLocked = false;
+  hls.startLevel = -1;
+  hls.currentLevel = -1;
+  hls.loadLevel = -1;
+  hls.nextLevel = -1;
+  hls.nextLoadLevel = -1;
+  hls.autoLevelCapping = -1;
+}
+
+export function applyManualQualityLevel(
+  hls: HlsQualityController,
+  levelIndex: number,
+  options: { userSelected?: boolean } = {},
+): void {
+  hls.__icetvManualQualityLocked = options.userSelected === true;
+  hls.startLevel = levelIndex;
+  hls.currentLevel = levelIndex;
+  hls.loadLevel = levelIndex;
+  hls.nextLevel = levelIndex;
+  hls.nextLoadLevel = levelIndex;
+  hls.autoLevelCapping = -1;
+}
 
 export function formatQualityLabel(level: HlsLevelLike): string {
   const height = level.height || 0;
@@ -142,10 +171,10 @@ function registerQualityControl(
     onSelect(item: QualitySelectorItem) {
       if (item.levelIndex < 0) {
         writePreferredQualityHeight(null);
-        hls.currentLevel = -1;
+        applyAutoQualityLevel(hls);
       } else {
         writePreferredQualityHeight(item.height);
-        hls.currentLevel = item.levelIndex;
+        applyManualQualityLevel(hls, item.levelIndex, { userSelected: true });
       }
       art.notice.show = `画质: ${item.html}`;
       return item.html;

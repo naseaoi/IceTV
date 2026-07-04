@@ -37,6 +37,8 @@ import type {
 } from '@/features/play/hooks/artPlayerTypes';
 import { resolveSourceSwitchCurrentPlayTime } from '@/features/play/lib/episodeResumePolicy';
 import {
+  applyAutoQualityLevel,
+  applyManualQualityLevel,
   findPreferredLevelIndex,
   markQualityControlTemporaryAuto,
   registerQualityControlWhenReady,
@@ -135,6 +137,7 @@ export function createVodM3u8Loader({
           maxBufferLength: 30,
           maxMaxBufferLength: 120,
           backBufferLength: 30,
+          preserveManualLevelOnError: true,
         }),
         manifestLoadingTimeOut: 6000,
         manifestLoadingMaxRetry: 1,
@@ -194,7 +197,7 @@ export function createVodM3u8Loader({
       }
     };
     const releaseQualityLockToAuto = () => {
-      hls.currentLevel = -1;
+      applyAutoQualityLevel(hls);
       hls.startLoad();
       markQualityControlTemporaryAuto(artPlayerRef, hls);
       setRealtimeLoadSpeed('所选画质加载失败，已临时切回自动');
@@ -414,6 +417,7 @@ export function createVodM3u8Loader({
         if (
           data.type === Hls.ErrorTypes.NETWORK_ERROR &&
           hls.autoLevelEnabled === false &&
+          hls.__icetvManualQualityLocked !== true &&
           /frag|level/i.test(errorDetails)
         ) {
           clearQualityLockProbe();
@@ -510,12 +514,14 @@ export function createVodM3u8Loader({
       const levelCount = Array.isArray(data?.levels) ? data.levels.length : 0;
       const preferredLevel = findPreferredLevelIndex(hls.levels || []);
       if (preferredLevel !== null) {
-        hls.startLevel = preferredLevel;
-        hls.currentLevel = preferredLevel;
+        applyManualQualityLevel(hls, preferredLevel);
         clearQualityLockProbe();
         qualityLockProbeTimer = setTimeout(() => {
           qualityLockProbeTimer = null;
-          if (hls.autoLevelEnabled === false) {
+          if (
+            hls.autoLevelEnabled === false &&
+            hls.__icetvManualQualityLocked !== true
+          ) {
             releaseQualityLockToAuto();
           }
         }, 10000);

@@ -1,9 +1,17 @@
 ﻿import { getVideoResolutionFromM3u8 } from '@/features/play/lib/hls-utils';
 
+import { shouldAutoFallbackToServer } from '@/lib/proxy-modes';
+
 import { probeVodEpisodeUrl } from '@/features/play/lib/vodProbe';
 
 jest.mock('@/features/play/lib/hls-utils', () => ({
   getVideoResolutionFromM3u8: jest.fn(),
+}));
+
+jest.mock('@/lib/proxy-modes', () => ({
+  clearSourceProxyOverride: jest.fn(),
+  rememberSourceServerProxy: jest.fn(),
+  shouldAutoFallbackToServer: jest.fn(() => false),
 }));
 
 function createSampleResponse(size: number, ok = true, status = 206) {
@@ -16,6 +24,10 @@ function createSampleResponse(size: number, ok = true, status = 206) {
 
 describe('probeVodEpisodeUrl', () => {
   const originalFetch = global.fetch;
+
+  beforeEach(() => {
+    (shouldAutoFallbackToServer as jest.Mock).mockReturnValue(false);
+  });
 
   afterEach(() => {
     global.fetch = originalFetch;
@@ -95,7 +107,8 @@ describe('probeVodEpisodeUrl', () => {
     );
   });
 
-  it('mp4 直连失败后回退到 segment 代理', async () => {
+  it('mp4 自动代理模式直连失败后回退到 segment 代理', async () => {
+    (shouldAutoFallbackToServer as jest.Mock).mockReturnValue(true);
     const fetchMock = jest
       .fn()
       .mockRejectedValueOnce(new Error('direct failed'))
