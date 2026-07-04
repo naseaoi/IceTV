@@ -33,7 +33,8 @@ import type {
 import { resolveSourceSwitchCurrentPlayTime } from '@/features/play/lib/episodeResumePolicy';
 import {
   findPreferredLevelIndex,
-  registerQualitySettingWhenReady,
+  markQualityControlTemporaryAuto,
+  registerQualityControlWhenReady,
 } from '@/features/play/lib/hlsQuality';
 import type { PlayerLoadingSessionState } from '@/features/play/lib/playerLoading';
 import type { ResumeMode } from '@/features/play/lib/resumePlayback';
@@ -190,6 +191,7 @@ export function createVodM3u8Loader({
     const releaseQualityLockToAuto = () => {
       hls.currentLevel = -1;
       hls.startLoad();
+      markQualityControlTemporaryAuto(artPlayerRef, hls);
       setRealtimeLoadSpeed('所选画质加载失败，已临时切回自动');
       try {
         const activePlayer = artPlayerRef.current;
@@ -515,7 +517,7 @@ export function createVodM3u8Loader({
           hls.nextLevel = picked;
         }
       }
-      registerQualitySettingWhenReady(artPlayerRef, hls);
+      registerQualityControlWhenReady(artPlayerRef, hls);
     };
     hls.on(Hls.Events.MANIFEST_PARSED, onManifestParsed);
     managedVideo.__icetvHlsHandlers = {

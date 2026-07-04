@@ -23,9 +23,7 @@ export interface QualityOption {
   label: string;
 }
 
-const QUALITY_SETTING_NAME = 'icetv-quality';
-const QUALITY_ICON =
-  '<text x="50%" y="50%" font-size="18" font-weight="bold" text-anchor="middle" dominant-baseline="middle" fill="#ffffff">HD</text>';
+const QUALITY_CONTROL_NAME = 'icetv-quality';
 
 export function formatQualityLabel(level: HlsLevelLike): string {
   const height = level.height || 0;
@@ -83,34 +81,43 @@ export function findPreferredLevelIndex(levels: HlsLevelLike[]): number | null {
   return bestIndex >= 0 ? bestIndex : null;
 }
 
-function registerQualitySetting(
+interface QualityControlApi {
+  update: (option: Record<string, unknown>) => void;
+  remove: (name: string) => void;
+}
+
+interface QualitySelectorItem {
+  html: string;
+  default: boolean;
+  levelIndex: number;
+  height: number;
+}
+
+function registerQualityControl(
   art: Artplayer,
   hls: HlsQualityController,
+  forceAuto = false,
 ): void {
   const levels = hls.levels || [];
-  const settingApi = art.setting as unknown as {
-    add: (option: Record<string, unknown>) => void;
-    update: (option: Record<string, unknown>) => void;
-    remove: (name: string) => void;
-  };
+  const controlApi = art.controls as unknown as QualityControlApi;
 
   if (levels.length < 2) {
     try {
-      settingApi.remove(QUALITY_SETTING_NAME);
+      controlApi.remove(QUALITY_CONTROL_NAME);
     } catch {
-      // 无同名设置项
+      // 无同名控件
     }
     return;
   }
 
   const options = buildQualityOptions(levels);
-  const preferredIndex = findPreferredLevelIndex(levels);
+  const preferredIndex = forceAuto ? null : findPreferredLevelIndex(levels);
   const activeOption =
     preferredIndex === null
       ? null
       : options.find((option) => option.levelIndex === preferredIndex) || null;
 
-  const selector = [
+  const selector: QualitySelectorItem[] = [
     {
       html: '自动',
       default: !activeOption,
@@ -125,14 +132,14 @@ function registerQualitySetting(
     })),
   ];
 
-  const settingOption = {
-    name: QUALITY_SETTING_NAME,
-    html: '画质',
-    icon: QUALITY_ICON,
-    width: 200,
-    tooltip: activeOption?.label || '自动',
+  const controlOption = {
+    name: QUALITY_CONTROL_NAME,
+    position: 'right',
+    index: 10,
+    style: { marginRight: '10px' },
+    html: activeOption?.label || '自动',
     selector,
-    onSelect(item: { html: string; levelIndex: number; height: number }) {
+    onSelect(item: QualitySelectorItem) {
       if (item.levelIndex < 0) {
         writePreferredQualityHeight(null);
         hls.currentLevel = -1;
@@ -140,31 +147,43 @@ function registerQualitySetting(
         writePreferredQualityHeight(item.height);
         hls.currentLevel = item.levelIndex;
       }
+      art.notice.show = `画质: ${item.html}`;
       return item.html;
     },
   };
 
   try {
-    settingApi.update(settingOption);
+    controlApi.update(controlOption);
   } catch (error) {
-    console.warn('注册画质设置失败:', error);
+    console.warn('注册画质控件失败:', error);
   }
 }
 
-export function registerQualitySettingWhenReady(
+export function markQualityControlTemporaryAuto(
+  artPlayerRef: MutableRefObject<Artplayer | null>,
+  hls: HlsQualityController,
+): void {
+  const art = artPlayerRef.current;
+  if (!art) {
+    return;
+  }
+  registerQualityControl(art, hls, true);
+}
+
+export function registerQualityControlWhenReady(
   artPlayerRef: MutableRefObject<Artplayer | null>,
   hls: HlsQualityController,
   attempts = 10,
 ): void {
   const art = artPlayerRef.current;
   if (art) {
-    registerQualitySetting(art, hls);
+    registerQualityControl(art, hls);
     return;
   }
   if (attempts <= 0) {
     return;
   }
   setTimeout(() => {
-    registerQualitySettingWhenReady(artPlayerRef, hls, attempts - 1);
+    registerQualityControlWhenReady(artPlayerRef, hls, attempts - 1);
   }, 300);
 }
