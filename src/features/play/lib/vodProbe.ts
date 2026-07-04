@@ -1,10 +1,13 @@
 ﻿import { getVideoResolutionFromM3u8 } from '@/features/play/lib/hls-utils';
 import { formatBytesPerSecond } from '@/lib/player-utils';
+import { isLazyEpisodeUrl } from '@/lib/lazy-episodes';
 import {
   clearSourceProxyOverride,
   rememberSourceServerProxy,
 } from '@/lib/proxy-modes';
 import { createTimedAbortController } from '@/lib/downstream-sources/shared';
+
+import { resolveLazyEpisodeUrl } from '@/features/play/lib/lazyEpisode';
 
 import {
   buildVodSegmentProxyUrl,
@@ -147,12 +150,16 @@ export async function probeVodEpisodeUrl(
   useProxy: boolean,
   sourceKey: string,
 ): Promise<VodProbeResult> {
-  if (isVodM3u8Url(rawUrl)) {
-    return getVideoResolutionFromM3u8(rawUrl, useProxy, sourceKey);
+  const targetUrl = isLazyEpisodeUrl(rawUrl)
+    ? await resolveLazyEpisodeUrl(sourceKey, rawUrl)
+    : rawUrl;
+
+  if (isVodM3u8Url(targetUrl)) {
+    return getVideoResolutionFromM3u8(targetUrl, useProxy, sourceKey);
   }
 
-  if (isVodMp4Url(rawUrl)) {
-    return probeMp4(rawUrl, useProxy, sourceKey);
+  if (isVodMp4Url(targetUrl)) {
+    return probeMp4(targetUrl, useProxy, sourceKey);
   }
 
   throw new Error('Unsupported vod url for probe');

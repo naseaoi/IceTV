@@ -6,6 +6,7 @@ import {
   type GiriEpisodeVariant,
   parseGirigiriVariantId,
 } from '@/lib/giri';
+import { buildLazyEpisodeUrl } from '@/lib/lazy-episodes';
 import type { SearchResult } from '@/lib/types';
 import { cleanHtmlTags } from '@/lib/utils';
 
@@ -13,7 +14,6 @@ import {
   BROWSER_HTML_HEADERS,
   createTimedAbortController,
   getSiteOrigin,
-  runWithConcurrency,
   toAbsoluteUrl,
 } from './shared';
 
@@ -342,59 +342,13 @@ export async function getDetailFromGirigiri(
   const selectedVariant =
     episodeVariants.find((variant) => variant.groupId === preferredGroupId) ||
     episodeVariants[0];
-  const episodeEntries = selectedVariant.episodes.map(
-    (entry, index) =>
-      [entry.playPath, entry.title || `${index + 1}`] as [string, string],
+
+  const episodes = selectedVariant.episodes.map((entry) =>
+    buildLazyEpisodeUrl('giri', entry.playPath),
   );
-
-  const playResults = await runWithConcurrency(
-    episodeEntries.map(
-      ([playPath]) =>
-        async () =>
-          fetchGirigiriEpisodePlayUrl(activeOrigins, playPath),
-    ),
-    4,
+  const episodesTitles = selectedVariant.episodes.map(
+    (entry, index) => entry.title || `${index + 1}`,
   );
-
-  const failedIndexes = playResults
-    .map((result, index) => (result.url ? -1 : index))
-    .filter((index) => index >= 0);
-  if (failedIndexes.length > 0) {
-    const retryResults = await runWithConcurrency(
-      failedIndexes.map(
-        (index) => async () =>
-          fetchGirigiriEpisodePlayUrl(activeOrigins, episodeEntries[index][0]),
-      ),
-      2,
-    );
-    retryResults.forEach((result, position) => {
-      if (result.url) {
-        playResults[failedIndexes[position]] = result;
-      }
-    });
-  }
-
-  const episodes: string[] = [];
-  const episodesTitles: string[] = [];
-  playResults.forEach((result, index) => {
-    if (result.url) {
-      episodes.push(result.url);
-      episodesTitles.push(episodeEntries[index][1]);
-    }
-  });
-
-  const fallbackMeta = playResults.find(
-    (item) => item.title || item.poster || item.desc || item.year !== 'unknown',
-  );
-
-  const finalTitle = title || fallbackMeta?.title || '';
-  const finalPoster = poster || fallbackMeta?.poster || '';
-  const finalYear = year !== 'unknown' ? year : fallbackMeta?.year || 'unknown';
-  const finalDesc = desc || fallbackMeta?.desc || '';
-
-  if (episodes.length === 0) {
-    throw new Error('未提取到有效播放地址');
-  }
 
   const relatedSources = episodeVariants
     .filter((variant) => variant.groupId !== selectedVariant.groupId)
@@ -406,8 +360,8 @@ export async function getDetailFromGirigiri(
             variant.groupId,
             variant.isDefault,
           ),
-          title: finalTitle,
-          poster: finalPoster,
+          title,
+          poster,
           episodes: [],
           episodes_titles: variant.episodes.map(
             (entry, index) => entry.title || `${index + 1}`,
@@ -416,8 +370,8 @@ export async function getDetailFromGirigiri(
           source_name: apiSite.name,
           variant_label: variant.label,
           class: '',
-          year: finalYear,
-          desc: finalDesc,
+          year,
+          desc,
           type_name: '动漫',
           douban_id: 0,
         }) satisfies SearchResult,
@@ -429,18 +383,27 @@ export async function getDetailFromGirigiri(
       selectedVariant.groupId,
       selectedVariant.isDefault,
     ),
-    title: finalTitle,
-    poster: finalPoster,
+    title,
+    poster,
     episodes,
     episodes_titles: episodesTitles,
     source: apiSite.key,
     source_name: apiSite.name,
     variant_label: selectedVariant.label,
     class: '',
-    year: finalYear,
-    desc: finalDesc,
+    year,
+    desc,
     type_name: '动漫',
     douban_id: 0,
     related_sources: relatedSources,
   };
+}
+
+export async function resolveGirigiriEpisodePlayUrlByPath(
+  apiSite: ApiSite,
+  playPath: string,
+): Promise<string | null> {
+  const origins = getGirigiriOrigins(apiSite);
+  const result = await fetchGirigiriEpisodePlayUrl(origins, playPath);
+  return result.url;
 }

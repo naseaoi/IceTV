@@ -1,5 +1,6 @@
 import type { ApiSite } from '@/lib/config';
 import { getDetailFromApi, searchFirstPageFromApi } from '@/lib/downstream';
+import { resolveGirigiriEpisodePlayUrlByPath } from '@/lib/downstream-sources/giri';
 
 const originalFetch = global.fetch;
 
@@ -99,7 +100,7 @@ describe('downstream giri source', () => {
     );
   });
 
-  it('giri 详情会沿用成功域名获取播放页', async () => {
+  it('giri 详情只抓详情页并返回懒地址', async () => {
     const detailHtml = `
       <html>
         <h3 class="slide-info-title">Detail Anime</h3>
@@ -111,25 +112,11 @@ describe('downstream giri source', () => {
         </div>
       </html>
     `;
-    const playHtml = `
-      <html>
-        <a class="player-title-link">Detail Anime</a>
-        <div class="small-text">播放简介</div>
-        <div class="cor4" title="2026"></div>
-        <div class="this-pic"><img data-src="/play.jpg"></div>
-        <script>
-          var player_aaaa={"encrypt":0,"url":"https://cdn.example/video.m3u8"};
-        </script>
-      </html>
-    `;
     const fetchMock = global.fetch as jest.Mock;
     fetchMock.mockImplementation(async (input: RequestInfo | URL) => {
       const url = String(input);
       if (url === 'https://anime.girigirilove.icu/GV100/') {
         return createTextResponse(detailHtml);
-      }
-      if (url === 'https://anime.girigirilove.icu/playGV100-1-1/') {
-        return createTextResponse(playHtml);
       }
       return createTextResponse('', false);
     });
@@ -140,27 +127,43 @@ describe('downstream giri source', () => {
     );
     const urls = fetchMock.mock.calls.map(([input]) => String(input));
 
-    expect(urls).toContain('https://anime.girigirilove.icu/GV100/');
-    expect(urls).toContain('https://anime.girigirilove.icu/playGV100-1-1/');
+    expect(urls).toEqual(['https://anime.girigirilove.icu/GV100/']);
     expect(detail).toEqual(
       expect.objectContaining({
         title: 'Detail Anime',
         poster: 'https://anime.girigirilove.icu/detail.jpg',
-        episodes: ['https://cdn.example/video.m3u8'],
+        episodes: ['icetv-lazy://giri/playGV100-1-1/'],
         episodes_titles: ['第1集'],
       }),
     );
   });
 
-  it('giri 详情会保留播放页返回的 mp4 地址', async () => {
-    const detailHtml = `
+  it('resolveGirigiriEpisodePlayUrlByPath 解析播放页 m3u8 地址', async () => {
+    const playHtml = `
       <html>
-        <h3 class="slide-info-title">MP4 Anime</h3>
-        <div class="anthology-list-box">
-          <a href="/playGV200-1-1/">第1集</a>
-        </div>
+        <script>
+          var player_aaaa={"encrypt":0,"url":"https://cdn.example/video.m3u8"};
+        </script>
       </html>
     `;
+    const fetchMock = global.fetch as jest.Mock;
+    fetchMock.mockImplementation(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url === 'https://anime.girigirilove.icu/playGV100-1-9/') {
+        return createTextResponse(playHtml);
+      }
+      return createTextResponse('', false);
+    });
+
+    await expect(
+      resolveGirigiriEpisodePlayUrlByPath(
+        createGiriSite('https://anime.girigirilove.icu'),
+        '/playGV100-1-9/',
+      ),
+    ).resolves.toBe('https://cdn.example/video.m3u8');
+  });
+
+  it('resolveGirigiriEpisodePlayUrlByPath 保留 mp4 地址', async () => {
     const playHtml = `
       <html>
         <script>
@@ -171,24 +174,18 @@ describe('downstream giri source', () => {
     const fetchMock = global.fetch as jest.Mock;
     fetchMock.mockImplementation(async (input: RequestInfo | URL) => {
       const url = String(input);
-      if (url === 'https://ani.girigirilove.com/GV200/') {
-        return createTextResponse(detailHtml);
-      }
       if (url === 'https://ani.girigirilove.com/playGV200-1-1/') {
         return createTextResponse(playHtml);
       }
       return createTextResponse('', false);
     });
 
-    const detail = await getDetailFromApi(
-      createGiriSite('https://ani.girigirilove.com'),
-      '200',
-    );
-
-    expect(detail.episodes).toEqual([
-      'https://cdn.example/video.mp4?token=abc',
-    ]);
-    expect(detail.episodes_titles).toEqual(['第1集']);
+    await expect(
+      resolveGirigiriEpisodePlayUrlByPath(
+        createGiriSite('https://ani.girigirilove.com'),
+        '/playGV200-1-1/',
+      ),
+    ).resolves.toBe('https://cdn.example/video.mp4?token=abc');
   });
 
   it('通用 CMS 搜索会保留 mp4 播放地址', async () => {

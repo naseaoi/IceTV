@@ -1,13 +1,14 @@
 'use client';
 
 import { useRouter, useSearchParams } from 'next/navigation';
-import { useCallback, useEffect } from 'react';
+import { useCallback, useEffect, useRef } from 'react';
 
 import {
   destroyManagedHls,
   preloadPlayerModules,
   runManagedVideoCleanup,
 } from '@/lib/player-runtime';
+import { isLazyEpisodeUrl } from '@/lib/lazy-episodes';
 import { mergeSourceBundle } from '@/lib/source-bundle';
 import { SearchResult } from '@/lib/types';
 import { preloadProxyModes } from '@/lib/proxy-modes';
@@ -22,6 +23,11 @@ import { useArtPlayer } from '@/features/play/hooks/useArtPlayer';
 import { useAuthRecovery } from '@/features/play/hooks/useAuthRecovery';
 import { useAutoSwitchOnTimeoutSetting } from '@/features/play/hooks/useAutoSwitchOnTimeoutSetting';
 import { useEpisodeSwitch } from '@/features/play/hooks/useEpisodeSwitch';
+import {
+  peekResolvedLazyEpisodeUrl,
+  prewarmLazyEpisodeUrl,
+  resolveLazyEpisodeUrl,
+} from '@/features/play/lib/lazyEpisode';
 import { usePlayFavorite } from '@/features/play/hooks/usePlayFavorite';
 import { usePlayInit, updateVideoUrl } from '@/features/play/hooks/usePlayInit';
 import { usePlayPageState } from '@/features/play/hooks/usePlayPageState';
@@ -160,10 +166,6 @@ export function PlayPageClient() {
     artPlayerRef,
     setSkipConfig,
   });
-
-  useEffect(() => {
-    updateVideoUrl(detail, currentEpisodeIndex, videoUrl, setVideoUrl);
-  }, [detail, currentEpisodeIndex]);
 
   useEffect(() => {
     if (!isVideoLoading && videoLoadingStage !== 'initing') {
@@ -324,6 +326,76 @@ export function PlayPageClient() {
     setSourceSearchError,
     cleanupPlayer,
   });
+
+  const lastResolvedLazyEpisodeRef = useRef<{
+    lazyUrl: string;
+    url: string;
+  } | null>(null);
+
+  useEffect(() => {
+    const episodes = detail?.episodes || [];
+    const targetUrl =
+      currentEpisodeIndex < episodes.length
+        ? episodes[currentEpisodeIndex] || ''
+        : '';
+
+    if (!targetUrl || !isLazyEpisodeUrl(targetUrl)) {
+      updateVideoUrl(detail, currentEpisodeIndex, videoUrl, setVideoUrl);
+      return;
+    }
+
+    const source = detail?.source || '';
+    const nextLazyUrl = episodes[currentEpisodeIndex + 1] || '';
+    const prewarmNext = () => {
+      if (nextLazyUrl) prewarmLazyEpisodeUrl(source, nextLazyUrl);
+    };
+
+    const lastResolved = lastResolvedLazyEpisodeRef.current;
+    if (
+      videoUrl &&
+      lastResolved?.lazyUrl === targetUrl &&
+      lastResolved.url === videoUrl
+    ) {
+      return;
+    }
+
+    const cachedUrl = peekResolvedLazyEpisodeUrl(source, targetUrl);
+    if (cachedUrl) {
+      lastResolvedLazyEpisodeRef.current = {
+        lazyUrl: targetUrl,
+        url: cachedUrl,
+      };
+      if (cachedUrl !== videoUrl) {
+        setVideoUrl(cachedUrl);
+      }
+      prewarmNext();
+      return;
+    }
+
+    let cancelled = false;
+    setVideoUrl('');
+    resolveLazyEpisodeUrl(source, targetUrl)
+      .then((resolvedUrl) => {
+        if (cancelled) return;
+        lastResolvedLazyEpisodeRef.current = {
+          lazyUrl: targetUrl,
+          url: resolvedUrl,
+        };
+        setVideoUrl(resolvedUrl);
+        prewarmNext();
+      })
+      .catch(() => {
+        if (cancelled) return;
+        handleLoadingTimeout();
+        if (!autoSwitchSourceOnTimeout) {
+          setRealtimeLoadSpeed('播放地址解析失败');
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [detail, currentEpisodeIndex]);
 
   const handleSourceDetailFetched = useCallback(
     (updated: SearchResult) => {

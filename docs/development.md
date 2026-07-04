@@ -116,6 +116,22 @@ Guard 选择：
 - 优先复用现有 `authorizeProxyRequest()`、`fetchWithUrlGuard()`、`validateProxyUrlForRequest()`
 - 不要直接裸 `fetch` 外部用户输入 URL
 
+## 逐集解析型源站
+
+部分源站的详情页只给集数结构，每一集的真实播放地址要单独抓一次播放页。这类源站统一走懒解析协议：详情阶段返回 `icetv-lazy://` 懒地址，播放时经 `/api/episode-url` 按需解析。
+
+接入新的这类源站：
+
+- `src/lib/lazy-episodes.ts`：新增 kind 与对应的路径白名单正则
+- `src/lib/downstream-sources/<site>.ts`：详情的 `episodes` 用 `buildLazyEpisodeUrl(kind, path)` 生成；导出 `resolveXxxEpisodeUrlByPath(apiSite, path)` 做单集解析
+- `src/app/api/episode-url/route.ts`：在 `matchesLazyKind` 和 `resolveEpisodeUrl` 里接上新 kind
+- 客户端不用改：播放入口、测速、预热、详情快照对懒地址的处理是通用的
+
+约束：
+
+- 不要在详情阶段全量抓播放页
+- 不要绕过 `/api/episode-url` 在客户端直接解析源站地址
+
 ## Admin 模块
 
 Admin 维持“导航 + 当前 tab 内容”结构。
