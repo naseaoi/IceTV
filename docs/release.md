@@ -14,16 +14,16 @@
 - `main` 上的最新正式版决定当前稳定版本，例如 `v0.4.2`。
 - `dev` 上继续开发下一个正式版本，例如 `0.4.3`。
 - `dev` 阶段的测试发布只在 `dev` 分支打 tag，例如 `v0.4.3-dev.1`、`v0.4.3-dev.2`。
-- 同一轮 `dev` 测试期间，`CHANGELOG.md`、`package.json`、`public/changelog.json` 保持下一正式版号，例如 `0.4.3`，只递增 `-dev.N`。
+- `dev` tag 只表达预发布序号，不要求同步修改 `CHANGELOG.md`、`package.json`、`public/changelog.json`。
 - `v0.4.3-dev.N` 只触发 dev 镜像构建，不创建 GitHub Release，不更新正式版 `latest`。
-- `dev` 验证完成后，发起 `dev -> main` PR；合并到 `main` 的同一版本提交再打正式 tag `v0.4.3`。
+- `dev` 验证完成后，再整理 `CHANGELOG.md`、`package.json`、`public/changelog.json` 为 `0.4.3`，发起 `dev -> main` PR；合并到 `main` 的同一版本提交再打正式 tag `v0.4.3`。
 
 示例：
 
 - 当前 `main` 为 `v0.4.2`
-- 当前 `dev` 版本为 `0.4.3`
+- 当前 `dev` 正在验证 `0.4.3`
 - 测试阶段依次推送 `v0.4.3-dev.1`、`v0.4.3-dev.2`
-- 验证完成后，`dev -> main` 合并，最后在 `main` 上打 `v0.4.3`
+- 验证完成后，更新版本文件并发起 `dev -> main` 合并，最后在 `main` 上打 `v0.4.3`
 
 ## Dev 镜像测试
 
@@ -42,6 +42,12 @@ git push origin v0.4.2-dev.1
 - `ghcr.io/naseaoi/icetv:0.4.2-dev.1`
 
 dev tag 不更新 `latest`，也不创建 GitHub Release。
+
+dev tag 阶段不改：
+
+- `CHANGELOG.md`
+- `package.json`
+- `public/changelog.json`
 
 ## 发布说明规则
 
@@ -97,6 +103,8 @@ git push origin dev
 - `public/changelog.json`
 
 ## 3. 更新版本
+
+以下步骤只用于正式版发布，不用于 `dev` tag 测试。
 
 在 `CHANGELOG.md` 顶部新增版本条目：
 
