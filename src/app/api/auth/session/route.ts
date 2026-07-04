@@ -1,13 +1,11 @@
-import { NextRequest, NextResponse } from 'next/server';
+﻿import { NextRequest, NextResponse } from 'next/server';
 
-import {
-  getAuthInfoFromCookie,
-  getSignatureData,
-  verifySignature,
-} from '@/lib/auth';
-import { getConfig } from '@/lib/config';
-import { getOwnerPassword, getOwnerUsername } from '@/lib/env.server';
+import { getAuthInfoFromCookie, getSignatureData } from '@/lib/auth.server';
+import { getConfigForRead } from '@/lib/config';
+import { getOwnerUsername } from '@/lib/env.server';
 import { NO_STORE_HEADERS } from '@/lib/http-cache';
+import { verifyAuthSignature } from '@/lib/signing-secret.server';
+import { normalizeUsername } from '@/lib/username';
 
 export const runtime = 'nodejs';
 
@@ -40,7 +38,6 @@ function sessionResponse(
 export async function GET(request: NextRequest) {
   try {
     const ownerUsername = getOwnerUsername();
-    const ownerPassword = getOwnerPassword();
     const authInfo = getAuthInfoFromCookie(request);
 
     if (!authInfo) {
@@ -58,10 +55,10 @@ export async function GET(request: NextRequest) {
       return sessionResponse(false, 'session_expired', authInfo.username);
     }
 
-    const isValidSignature = await verifySignature(
+    const isValidSignature = await verifyAuthSignature(
       getSignatureData('account', authInfo.expiresAt, authInfo.username),
       authInfo.signature,
-      ownerPassword,
+      { allowLegacyOwnerPassword: true },
     );
 
     if (!isValidSignature) {
@@ -72,20 +69,19 @@ export async function GET(request: NextRequest) {
       return sessionResponse(true, 'ok', authInfo.username);
     }
 
-    const config = await getConfig();
-    const user = config.UserConfig.Users.find(
-      (u) => u.username === authInfo.username,
-    );
+    const username = normalizeUsername(authInfo.username);
+    const config = await getConfigForRead();
+    const user = config.UserConfig.Users.find((u) => u.username === username);
 
     if (!user) {
-      return sessionResponse(false, 'user_not_found', authInfo.username);
+      return sessionResponse(false, 'user_not_found', username);
     }
 
     if (user.banned) {
-      return sessionResponse(false, 'user_banned', authInfo.username);
+      return sessionResponse(false, 'user_banned', username);
     }
 
-    return sessionResponse(true, 'ok', authInfo.username);
+    return sessionResponse(true, 'ok', username);
   } catch (error) {
     console.error('会话检查失败:', error);
     return NextResponse.json(

@@ -1,3 +1,5 @@
+import crypto from 'crypto';
+
 import bcryptjs from 'bcryptjs';
 
 const BCRYPT_ROUNDS = 10;
@@ -15,7 +17,10 @@ function getBcryptApi(): Promise<BcryptApi> {
         const loaded = mod as unknown as { default?: BcryptApi } & BcryptApi;
         return loaded.default ?? loaded;
       })
-      .catch(() => bcryptjs);
+      .catch((error) => {
+        console.warn('原生 bcrypt 加载失败，使用 bcryptjs:', error);
+        return bcryptjs;
+      });
   }
 
   return bcryptApiPromise;
@@ -30,14 +35,25 @@ export async function verifyPassword(
   plain: string,
   stored: string,
 ): Promise<{ match: boolean; needsRehash: boolean }> {
-  const isBcrypt = /^\$2[ab]\$\d{2}\$.{53}$/.test(stored);
+  const isBcrypt = /^\$2[aby]\$\d{2}\$.{53}$/.test(stored);
 
   if (isBcrypt) {
     const bcrypt = await getBcryptApi();
-    const match = await bcrypt.compare(plain, stored);
+    const comparableHash = stored.startsWith('$2y$')
+      ? `$2b$${stored.slice(4)}`
+      : stored;
+    const match = await bcrypt.compare(plain, comparableHash);
     return { match, needsRehash: false };
   }
 
-  const match = stored === plain;
+  const plainBuffer = Buffer.from(plain, 'utf8');
+  const storedBuffer = Buffer.from(stored, 'utf8');
+  const match =
+    plainBuffer.length === storedBuffer.length
+      ? crypto.timingSafeEqual(plainBuffer, storedBuffer)
+      : crypto.timingSafeEqual(
+          storedBuffer,
+          Buffer.alloc(storedBuffer.length),
+        ) && false;
   return { match, needsRehash: match };
 }

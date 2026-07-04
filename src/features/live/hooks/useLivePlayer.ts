@@ -20,6 +20,7 @@ import {
   runManagedVideoCleanup,
 } from '@/lib/player-runtime';
 import { logHlsError } from '@/lib/hls-error-log';
+import { readLiveDirectConnect } from '@/lib/local-preferences';
 import {
   createArtPlayerConfig,
   createHlsConfig,
@@ -247,8 +248,7 @@ export function useLivePlayer({
               if (!currentUrl) return;
 
               const isLiveDirectConnect =
-                typeof window !== 'undefined' &&
-                localStorage.getItem('liveDirectConnect') === 'true';
+                typeof window !== 'undefined' && readLiveDirectConnect();
 
               try {
                 const nextUrl = new URL(currentUrl, window.location.origin);

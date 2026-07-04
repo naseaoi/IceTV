@@ -1,8 +1,8 @@
-import { NextRequest, NextResponse } from 'next/server';
+﻿import { NextRequest, NextResponse } from 'next/server';
 
-import { AdminConfig } from '@/features/admin/types/api';
+import { AdminConfig } from '@/types/admin';
 import { isGuardFailure, requireActiveUser } from '@/lib/api-auth';
-import { getAvailableApiSites, getConfig } from '@/lib/config';
+import { getAvailableApiSites, getConfigForRead } from '@/lib/config';
 import { searchFirstPageFromApi } from '@/lib/downstream';
 import { yellowWords } from '@/lib/yellow';
 
@@ -13,12 +13,15 @@ export async function GET(request: NextRequest) {
     const guardResult = await requireActiveUser(request);
     if (isGuardFailure(guardResult)) return guardResult.response;
 
-    const config = await getConfig();
+    const config = await getConfigForRead();
     const { searchParams } = new URL(request.url);
     const query = searchParams.get('q')?.trim();
 
     if (!query) {
-      return NextResponse.json({ suggestions: [] });
+      return NextResponse.json(
+        { suggestions: [] },
+        { headers: { 'Cache-Control': 'private, no-store' } },
+      );
     }
 
     // 生成建议
@@ -28,19 +31,9 @@ export async function GET(request: NextRequest) {
       guardResult.username,
     );
 
-    // 从配置中获取缓存时间，如果没有配置则使用默认值300秒（5分钟）
-    const cacheTime = config.SiteConfig.SiteInterfaceCacheTime || 300;
-
     return NextResponse.json(
       { suggestions },
-      {
-        headers: {
-          'Cache-Control': `public, max-age=${cacheTime}, s-maxage=${cacheTime}`,
-          'CDN-Cache-Control': `public, s-maxage=${cacheTime}`,
-          'Vercel-CDN-Cache-Control': `public, s-maxage=${cacheTime}`,
-          'Netlify-Vary': 'query',
-        },
-      },
+      { headers: { 'Cache-Control': 'private, no-store' } },
     );
   } catch (error) {
     console.error('获取搜索建议失败', error);
@@ -49,7 +42,7 @@ export async function GET(request: NextRequest) {
 }
 
 async function generateSuggestions(
-  config: AdminConfig,
+  config: Readonly<AdminConfig>,
   query: string,
   username: string,
 ): Promise<

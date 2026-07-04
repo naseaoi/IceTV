@@ -1,4 +1,4 @@
-'use client';
+﻿'use client';
 
 import { Loader2, RotateCcw } from 'lucide-react';
 import { Suspense, useEffect, useState } from 'react';
@@ -7,16 +7,16 @@ import PageLayout from '@/components/PageLayout';
 import ConfirmModal from '@/components/modals/ConfirmModal';
 import AdminNav from '@/features/admin/components/AdminNav';
 import AdminTabContent from '@/features/admin/components/AdminTabContent';
-import AlertModal from '@/features/admin/components/AlertModal';
+import AlertModal from '@/components/modals/AlertModal';
 import { getVisibleTabs } from '@/features/admin/lib/admin-tabs';
 import { buttonStyles } from '@/features/admin/lib/buttonStyles';
 import { showError } from '@/features/admin/lib/notifications';
 import { isOwner } from '@/features/admin/lib/permissions';
-import { useAlertModal } from '@/features/admin/hooks/useAlertModal';
+import { useAlertModal } from '@/hooks/useAlertModal';
 import { useAdminPageActions } from '@/features/admin/hooks/useAdminPageActions';
 import { useAdminTab } from '@/features/admin/hooks/useAdminTab';
 import { useLoadingState } from '@/features/admin/hooks/useLoadingState';
-import { AdminConfig } from '@/features/admin/types/api';
+import { AdminConfig } from '@/types/admin';
 
 function AdminPageClient() {
   const { alertModal, showAlert, hideAlert } = useAlertModal();

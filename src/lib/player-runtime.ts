@@ -63,6 +63,7 @@ export type ManagedVideoElement = HTMLVideoElement & {
   __icetvHlsHandlers?: {
     onError: (...args: unknown[]) => void;
     onFragLoaded: (...args: unknown[]) => void;
+    onManifestParsed?: (...args: unknown[]) => void;
   } | null;
   /** 当前会话内该 video 实际使用的流量路由，供起播成功后清理短期兜底记忆。 */
   __icetvUsingServerProxy?: boolean;

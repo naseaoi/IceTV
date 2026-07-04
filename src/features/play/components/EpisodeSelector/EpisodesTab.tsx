@@ -6,8 +6,14 @@ import React, {
   useState,
 } from 'react';
 
-import { SearchResult } from '@/lib/types';
+import { EpisodeGroup, SearchResult } from '@/lib/types';
 import { normalizeInlineText } from '@/lib/utils';
+
+interface EpisodePage {
+  label: string;
+  start: number;
+  end: number;
+}
 
 interface EpisodesTabProps {
   totalEpisodes: number;
@@ -15,10 +21,54 @@ interface EpisodesTabProps {
   episodesPerPage: number;
   value: number;
   onChange?: (episodeNumber: number) => void;
+  episodeGroups?: EpisodeGroup[];
   variantSources?: SearchResult[];
   currentSource?: string;
   currentId?: string;
   onSourceChange?: (source: string, id: string, title: string) => void;
+}
+
+function buildNumericPages(
+  totalEpisodes: number,
+  episodesPerPage: number,
+): EpisodePage[] {
+  const pageCount = Math.ceil(totalEpisodes / episodesPerPage);
+  return Array.from({ length: pageCount }, (_, i) => {
+    const start = i * episodesPerPage + 1;
+    const end = Math.min(start + episodesPerPage - 1, totalEpisodes);
+    return { label: `${start}-${end}`, start, end };
+  });
+}
+
+function buildGroupPages(
+  groups: EpisodeGroup[],
+  episodesPerPage: number,
+): EpisodePage[] {
+  const pages: EpisodePage[] = [];
+  let start = 1;
+
+  for (const group of groups) {
+    const groupEnd = start + group.count - 1;
+    if (group.count <= episodesPerPage) {
+      pages.push({ label: group.label, start, end: groupEnd });
+    } else {
+      for (
+        let pageStart = start;
+        pageStart <= groupEnd;
+        pageStart += episodesPerPage
+      ) {
+        const pageEnd = Math.min(pageStart + episodesPerPage - 1, groupEnd);
+        pages.push({
+          label: `${group.label} ${pageStart - start + 1}-${pageEnd - start + 1}`,
+          start: pageStart,
+          end: pageEnd,
+        });
+      }
+    }
+    start = groupEnd + 1;
+  }
+
+  return pages;
 }
 
 export const EpisodesTab: React.FC<EpisodesTabProps> = ({
@@ -27,27 +77,42 @@ export const EpisodesTab: React.FC<EpisodesTabProps> = ({
   episodesPerPage,
   value,
   onChange,
+  episodeGroups,
   variantSources = [],
   currentSource,
   currentId,
   onSourceChange,
 }) => {
-  const pageCount = Math.ceil(totalEpisodes / episodesPerPage);
-  const initialPage = Math.floor((value - 1) / episodesPerPage);
-  const [currentPage, setCurrentPage] = useState<number>(initialPage);
+  const pages = useMemo(() => {
+    const groupTotal = (episodeGroups || []).reduce(
+      (sum, group) => sum + group.count,
+      0,
+    );
+    if (
+      episodeGroups &&
+      episodeGroups.length > 1 &&
+      groupTotal === totalEpisodes
+    ) {
+      return buildGroupPages(episodeGroups, episodesPerPage);
+    }
+    return buildNumericPages(totalEpisodes, episodesPerPage);
+  }, [episodeGroups, episodesPerPage, totalEpisodes]);
+
+  const findPageIndex = useCallback(
+    (episodeNumber: number) => {
+      const index = pages.findIndex(
+        (page) => episodeNumber >= page.start && episodeNumber <= page.end,
+      );
+      return index >= 0 ? index : 0;
+    },
+    [pages],
+  );
+
+  const [currentPage, setCurrentPage] = useState<number>(() =>
+    findPageIndex(value),
+  );
+  const pageCount = pages.length;
   const showPagination = pageCount > 1;
-
-  const categoriesAsc = useMemo(() => {
-    return Array.from({ length: pageCount }, (_, i) => {
-      const start = i * episodesPerPage + 1;
-      const end = Math.min(start + episodesPerPage - 1, totalEpisodes);
-      return { start, end };
-    });
-  }, [pageCount, episodesPerPage, totalEpisodes]);
-
-  const categories = useMemo(() => {
-    return categoriesAsc.map(({ start, end }) => `${start}-${end}`);
-  }, [categoriesAsc]);
 
   const categoryContainerRef = useRef<HTMLDivElement>(null);
   const buttonRefs = useRef<(HTMLButtonElement | null)[]>([]);
@@ -102,18 +167,20 @@ export const EpisodesTab: React.FC<EpisodesTabProps> = ({
   }, [currentPage, pageCount]);
 
   useEffect(() => {
-    setCurrentPage(Math.floor((value - 1) / episodesPerPage));
-  }, [episodesPerPage, value]);
+    setCurrentPage(findPageIndex(value));
+  }, [findPageIndex, value]);
 
   const handleCategoryClick = useCallback((index: number) => {
     setCurrentPage(index);
   }, []);
 
-  const currentStart = currentPage * episodesPerPage + 1;
-  const currentEnd = Math.min(
-    currentStart + episodesPerPage - 1,
-    totalEpisodes,
-  );
+  const activePage = pages[Math.min(currentPage, pageCount - 1)] || {
+    label: '',
+    start: 1,
+    end: totalEpisodes,
+  };
+  const currentStart = activePage.start;
+  const currentEnd = Math.min(activePage.end, totalEpisodes);
 
   return (
     <>
@@ -183,11 +250,11 @@ export const EpisodesTab: React.FC<EpisodesTabProps> = ({
               onMouseLeave={() => setIsCategoryHovered(false)}
             >
               <div className='flex w-max min-w-full justify-center gap-1'>
-                {categories.map((label, idx) => {
+                {pages.map((page, idx) => {
                   const isActive = idx === currentPage;
                   return (
                     <button
-                      key={label}
+                      key={`${page.label}-${page.start}`}
                       ref={(el) => {
                         buttonRefs.current[idx] = el;
                       }}
@@ -200,7 +267,7 @@ export const EpisodesTab: React.FC<EpisodesTabProps> = ({
                         }
                       `.trim()}
                     >
-                      {label}
+                      {page.label}
                     </button>
                   );
                 })}

@@ -5,6 +5,7 @@ import { useRouter, useSearchParams } from 'next/navigation';
 import React, { useEffect, useMemo, useState } from 'react';
 
 import { getSearchHistory, subscribeToDataUpdates } from '@/lib/db.client';
+import { readAggregateSearch } from '@/lib/local-preferences';
 
 import PageLayout from '@/components/PageLayout';
 import SearchResultFilter from '@/components/SearchResultFilter';
@@ -99,13 +100,11 @@ export default function SearchPageClient() {
 
   // 聚合开关
   const getDefaultAggregate = () => {
-    if (typeof window !== 'undefined') {
-      const userSetting = localStorage.getItem('defaultAggregateSearch');
-      if (userSetting !== null) {
-        return JSON.parse(userSetting);
-      }
+    if (typeof window === 'undefined') {
+      return true;
     }
-    return true;
+
+    return readAggregateSearch();
   };
 
   const [viewMode, setViewMode] = useState<'agg' | 'all'>(() => {

@@ -1,8 +1,8 @@
-'use client';
+﻿'use client';
 
 import { useState } from 'react';
 
-import { useAlertModal } from '@/features/admin/hooks/useAlertModal';
+import { useAlertModal } from '@/hooks/useAlertModal';
 import { DataSource } from '@/features/admin/types/internal';
 
 import type { SourceValidationStatus } from '@/features/admin/components/tabs/video-source/SortableSourceRow';

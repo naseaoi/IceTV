@@ -1,4 +1,6 @@
-import { AdminConfig } from '@/features/admin/types/api';
+import 'server-only';
+
+import { AdminConfig } from '@/types/admin';
 
 import { getStorageType } from './storage-type';
 import {
@@ -25,7 +27,10 @@ let storageInstancePromise: Promise<IStorage> | null = null;
 
 async function getStorage(): Promise<IStorage> {
   if (!storageInstancePromise) {
-    storageInstancePromise = createStorage();
+    storageInstancePromise = createStorage().catch((error) => {
+      storageInstancePromise = null;
+      throw error;
+    });
   }
   return storageInstancePromise;
 }

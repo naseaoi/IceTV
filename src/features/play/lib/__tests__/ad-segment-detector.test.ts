@@ -1,0 +1,230 @@
+﻿/**
+ * 广告段识别纯函数的单测。
+ * 覆盖本地强信号（EXTINF 整数规律、Host 异常）与兜底短路路径。
+ * 网络相关的码率兜底路径不在此测试范围内（需 fetch stub）。
+ */
+import {
+  shouldRunAdDetection,
+  stripAdSegmentsByPhysicalSignal,
+} from '@/features/play/lib/ad-segment-detector';
+
+describe('shouldRunAdDetection', () => {
+  test('仅对 rycj 源站启用', () => {
+    expect(shouldRunAdDetection('rycj')).toBe(true);
+    expect(shouldRunAdDetection('other')).toBe(false);
+    expect(shouldRunAdDetection(null)).toBe(false);
+    expect(shouldRunAdDetection('')).toBe(false);
+  });
+});
+
+describe('stripAdSegmentsByPhysicalSignal', () => {
+  test('不含 DISCONTINUITY 时原样返回', async () => {
+    const m3u8 = [
+      '#EXTM3U',
+      '#EXT-X-VERSION:3',
+      '#EXTINF:5,',
+      'a.ts',
+      '#EXT-X-ENDLIST',
+    ].join('\n');
+    const result = await stripAdSegmentsByPhysicalSignal(
+      m3u8,
+      'https://cdn.example.com/x/index.m3u8',
+      'ua',
+    );
+    expect(result).toBe(m3u8);
+  });
+
+  test('段数不足时原样返回', async () => {
+    const m3u8 = [
+      '#EXTM3U',
+      '#EXT-X-DISCONTINUITY',
+      '#EXTINF:5,',
+      'a.ts',
+      '#EXT-X-DISCONTINUITY',
+      '#EXTINF:5,',
+      'b.ts',
+      '#EXT-X-ENDLIST',
+    ].join('\n');
+    const result = await stripAdSegmentsByPhysicalSignal(
+      m3u8,
+      'https://cdn.example.com/x/index.m3u8',
+      'ua',
+    );
+    expect(result).toBe(m3u8);
+  });
+
+  // -------------- 信号 A: EXTINF 整数规律 --------------
+
+  /** 构造正片段：每个段内 6 个零散浮点 EXTINF */
+  function buildNormalSegment(seed: number): string[] {
+    // 精度到微秒的零散浮点，模拟 rycj 源
+    const durs = [
+      4.170833 + seed * 0.01,
+      3.628622 - seed * 0.007,
+      5.130122 + seed * 0.003,
+      2.002 + seed * 0.005,
+      4.504 + seed * 0.002,
+      3.378 + seed * 0.004,
+    ];
+    const lines: string[] = ['#EXT-X-DISCONTINUITY'];
+    durs.forEach((d, i) => {
+      lines.push(`#EXTINF:${d.toFixed(6)},`);
+      lines.push(`normal_${seed}_${i}.ts`);
+    });
+    return lines;
+  }
+
+  /** 构造广告段：TS 时长清一色整数 + 尾帧 */
+  function buildAdSegment(): string[] {
+    const durs = [4.0, 4.0, 4.0, 4.0, 4.0, 2.0];
+    const lines: string[] = ['#EXT-X-DISCONTINUITY'];
+    durs.forEach((d, i) => {
+      lines.push(`#EXTINF:${d.toFixed(6)},`);
+      lines.push(`ad_${i}.ts`);
+    });
+    return lines;
+  }
+
+  test('EXTINF 整数规律段被识别并剔除', async () => {
+    const lines = ['#EXTM3U', '#EXT-X-VERSION:3', '#EXT-X-TARGETDURATION:8'];
+    // 5 正 + 1 广告 + 3 正
+    for (let i = 0; i < 5; i++) lines.push(...buildNormalSegment(i));
+    lines.push(...buildAdSegment());
+    for (let i = 5; i < 8; i++) lines.push(...buildNormalSegment(i));
+    lines.push('#EXT-X-ENDLIST');
+    const m3u8 = lines.join('\n');
+
+    const result = await stripAdSegmentsByPhysicalSignal(
+      m3u8,
+      'https://cdn.example.com/x/index.m3u8',
+      'ua',
+    );
+    // 广告 ts 全部被剔除
+    expect(result).not.toMatch(/ad_\d+\.ts/);
+    // 正片 ts 保留
+    expect(result).toMatch(/normal_0_0\.ts/);
+    expect(result).toMatch(/normal_7_5\.ts/);
+  });
+
+  test('EXTINF 40ms 粗粒度步进段被识别并剔除', async () => {
+    const lines = ['#EXTM3U', '#EXT-X-VERSION:3', '#EXT-X-TARGETDURATION:8'];
+    for (let i = 0; i < 4; i++) lines.push(...buildNormalSegment(i));
+
+    lines.push('#EXT-X-DISCONTINUITY');
+    [4.0, 5.48, 4.0, 3.24, 4.0, 0.28].forEach((d, i) => {
+      lines.push(`#EXTINF:${d.toFixed(6)},`);
+      lines.push(`coarse_ad_${i}.ts`);
+    });
+
+    for (let i = 4; i < 8; i++) lines.push(...buildNormalSegment(i));
+    lines.push('#EXT-X-ENDLIST');
+    const m3u8 = lines.join('\n');
+
+    const result = await stripAdSegmentsByPhysicalSignal(
+      m3u8,
+      'https://cdn.example.com/x/index.m3u8',
+      'ua',
+    );
+
+    expect(result).not.toMatch(/coarse_ad_\d+\.ts/);
+    expect(result).toMatch(/normal_0_0\.ts/);
+    expect(result).toMatch(/normal_7_5\.ts/);
+  });
+
+  test('整片都是整数切片的源站不被误判', async () => {
+    // 所有段 EXTINF 都是 4.0，基线整数率 = 1.0，差异 = 0 → 不判
+    const lines = ['#EXTM3U'];
+    for (let s = 0; s < 6; s++) {
+      lines.push('#EXT-X-DISCONTINUITY');
+      for (let i = 0; i < 5; i++) {
+        lines.push('#EXTINF:4.000000,');
+        lines.push(`s${s}_${i}.ts`);
+      }
+    }
+    lines.push('#EXT-X-ENDLIST');
+    const m3u8 = lines.join('\n');
+
+    const result = await stripAdSegmentsByPhysicalSignal(
+      m3u8,
+      'https://cdn.example.com/x/index.m3u8',
+      'ua',
+    );
+    expect(result).toBe(m3u8);
+  });
+
+  // -------------- 信号 B: Host 异常 --------------
+
+  test('TS host 异常段被识别并剔除', async () => {
+    const lines = ['#EXTM3U'];
+    // 5 个正片段：相对路径（resolve 后 host = cdn.main.com）
+    for (let s = 0; s < 5; s++) {
+      lines.push('#EXT-X-DISCONTINUITY');
+      for (let i = 0; i < 4; i++) {
+        // 故意让时长零散，避免误触信号 A
+        lines.push(`#EXTINF:${(4.17 + i * 0.11).toFixed(6)},`);
+        lines.push(`normal_${s}_${i}.ts`);
+      }
+    }
+    // 1 个广告段：绝对 URL 指向另一个 host
+    lines.push('#EXT-X-DISCONTINUITY');
+    for (let i = 0; i < 3; i++) {
+      lines.push(`#EXTINF:${(5.23 + i * 0.09).toFixed(6)},`);
+      lines.push(`https://ads.evil-cdn.net/ad_${i}.ts`);
+    }
+    lines.push('#EXT-X-ENDLIST');
+    const m3u8 = lines.join('\n');
+
+    const result = await stripAdSegmentsByPhysicalSignal(
+      m3u8,
+      'https://cdn.main.com/x/index.m3u8',
+      'ua',
+    );
+    expect(result).not.toMatch(/ads\.evil-cdn\.net/);
+    expect(result).toMatch(/normal_0_0\.ts/);
+  });
+
+  test('段内只有 1 个绝对 URL 时不足以判广告', async () => {
+    // 保守策略：段内至少 2 个绝对 URL TS 才启用 host 异常识别
+    const lines = ['#EXTM3U'];
+    for (let s = 0; s < 4; s++) {
+      lines.push('#EXT-X-DISCONTINUITY');
+      for (let i = 0; i < 4; i++) {
+        lines.push(`#EXTINF:${(4.17 + i * 0.11).toFixed(6)},`);
+        lines.push(`normal_${s}_${i}.ts`);
+      }
+    }
+    lines.push('#EXT-X-DISCONTINUITY');
+    lines.push('#EXTINF:5.231,');
+    lines.push('https://ads.evil-cdn.net/only_one.ts');
+    lines.push('#EXT-X-ENDLIST');
+    const m3u8 = lines.join('\n');
+
+    const result = await stripAdSegmentsByPhysicalSignal(
+      m3u8,
+      'https://cdn.main.com/x/index.m3u8',
+      'ua',
+    );
+    expect(result).toMatch(/only_one\.ts/);
+  });
+
+  // -------------- 短路路径 --------------
+
+  test('段切分不规整（众数覆盖率低）且无 A/B 信号时原样返回', async () => {
+    // 5 段时长各异，无明显众数；EXTINF 浮点无整数；全相对路径
+    const lines = ['#EXTM3U', '#EXT-X-VERSION:3', '#EXT-X-TARGETDURATION:10'];
+    const durs = [5.123, 8.456, 12.789, 6.111, 10.333];
+    durs.forEach((d, i) => {
+      lines.push('#EXT-X-DISCONTINUITY');
+      lines.push(`#EXTINF:${d.toFixed(6)},`);
+      lines.push(`s${i}.ts`);
+    });
+    lines.push('#EXT-X-ENDLIST');
+    const m3u8 = lines.join('\n');
+    const result = await stripAdSegmentsByPhysicalSignal(
+      m3u8,
+      'https://cdn.example.com/x/index.m3u8',
+      'ua',
+    );
+    expect(result).toBe(m3u8);
+  });
+});

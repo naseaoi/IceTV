@@ -1,8 +1,8 @@
-import { NextRequest, NextResponse } from 'next/server';
+﻿import { NextRequest, NextResponse } from 'next/server';
 
 import { isGuardFailure, requireActiveUser } from '@/lib/api-auth';
-import { getConfig } from '@/lib/config';
-import { isLiveEntryEnabledInConfig } from '@/lib/live';
+import { getConfigForRead } from '@/lib/config';
+import { isLiveEntryEnabledInConfig } from '@/features/live/lib/live';
 import {
   fetchWithUrlGuard,
   UrlValidationError,
@@ -15,7 +15,7 @@ export async function GET(request: NextRequest) {
   const guardResult = await requireActiveUser(request);
   if (isGuardFailure(guardResult)) return guardResult.response;
 
-  const config = await getConfig();
+  const config = await getConfigForRead();
   if (!isLiveEntryEnabledInConfig(config)) {
     return NextResponse.json({ error: '直播未开启' }, { status: 404 });
   }
@@ -33,7 +33,7 @@ export async function GET(request: NextRequest) {
 
   const validation = await validateProxyUrlForRequest(url);
   if (!validation.ok) {
-    return NextResponse.json({ error: validation.reason }, { status: 403 });
+    return NextResponse.json({ error: 'Invalid URL' }, { status: 403 });
   }
 
   const liveSource = config.LiveConfig?.find((s: any) => s.key === source);
@@ -50,6 +50,7 @@ export async function GET(request: NextRequest) {
       headers: {
         'User-Agent': ua,
       },
+      skipInitialValidation: true,
     });
 
     if (!response.ok) {
@@ -72,7 +73,7 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ success: true, type: 'm3u8' }, { status: 200 });
   } catch (error) {
     if (error instanceof UrlValidationError) {
-      return NextResponse.json({ error: error.reason }, { status: 403 });
+      return NextResponse.json({ error: 'Invalid URL' }, { status: 403 });
     }
 
     return NextResponse.json(

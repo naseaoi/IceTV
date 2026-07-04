@@ -1,11 +1,14 @@
+import 'server-only';
+
 import { db } from '@/lib/db';
 import { getOwnerUsername } from '@/lib/env.server';
 
-import { AdminConfig } from '@/features/admin/types/api';
+import { AdminConfig } from '@/types/admin';
 import {
   DEFAULT_BANGUMI_DATA_SOURCE,
   normalizeBangumiDataSource,
 } from '@/lib/bangumi-source';
+import { normalizeUsername } from '@/lib/username';
 
 export interface ApiSite {
   key: string;
@@ -57,7 +60,12 @@ export const API_CONFIG = {
 };
 
 let cachedConfig: AdminConfig;
+let cachedConfigVersion = '';
+let cachedConfigLoadedAt = 0;
 const PUBLIC_CONFIG_CACHE_TAG = 'public-config';
+const DEFAULT_CONFIG_CACHE_TTL_MS = 30_000;
+type ManagedUser = AdminConfig['UserConfig']['Users'][number];
+const configVersionByObject = new WeakMap<AdminConfig, string>();
 
 type NextCacheApi = {
   revalidateTag?: (tag: string) => void;
@@ -71,7 +79,8 @@ type NextCacheApi = {
 function loadNextCacheApi(): NextCacheApi | null {
   try {
     return require('next/cache') as NextCacheApi;
-  } catch {
+  } catch (error) {
+    console.warn('加载 Next 缓存接口失败:', error);
     return null;
   }
 }
@@ -82,6 +91,7 @@ export function refineConfig(adminConfig: AdminConfig): AdminConfig {
   try {
     fileConfig = JSON.parse(adminConfig.ConfigFile) as ConfigFileStruct;
   } catch (e) {
+    console.warn('解析配置文件失败:', e);
     fileConfig = {} as ConfigFileStruct;
   }
 
@@ -218,6 +228,7 @@ async function getInitConfig(
   try {
     cfgFile = JSON.parse(configFile) as ConfigFileStruct;
   } catch (e) {
+    console.warn('解析初始配置文件失败:', e);
     cfgFile = {} as ConfigFileStruct;
   }
   const adminConfig: AdminConfig = {
@@ -230,6 +241,10 @@ async function getInitConfig(
         process.env.ANNOUNCEMENT ||
         '本网站仅提供影视信息搜索服务，所有内容均来自第三方网站。本站不存储任何视频资源，不对任何内容的准确性、合法性、完整性负责。',
       EnableLiveEntry: false,
+      DefaultAggregateSearch: true,
+      EnableOptimization: true,
+      AutoSwitchSourceOnTimeout: false,
+      LiveDirectConnect: false,
       SearchDownstreamMaxPage:
         Number(process.env.NEXT_PUBLIC_SEARCH_MAX_PAGE) || 5,
       SiteInterfaceCacheTime: cfgFile.cache_time || 7200,
@@ -320,29 +335,33 @@ async function getInitConfig(
   return adminConfig;
 }
 
-export async function getConfig(): Promise<AdminConfig> {
-  // 直接使用内存缓存
-  if (cachedConfig) {
-    return cloneConfig(cachedConfig);
+async function loadConfig(): Promise<AdminConfig> {
+  if (cachedConfig && isCachedConfigFresh()) {
+    return cachedConfig;
   }
 
-  // 读 db
-  let adminConfig: AdminConfig | null = null;
-  let shouldPersist = false;
+  let adminConfig: AdminConfig | null;
   try {
     adminConfig = await db.getAdminConfig();
   } catch (e) {
     console.error('获取管理员配置失败:', e);
+    if (cachedConfig) {
+      return cachedConfig;
+    }
+    throw e;
   }
 
-  // db 中无配置，执行一次初始化
+  let shouldPersist = false;
   if (!adminConfig) {
     adminConfig = await getInitConfig('');
     shouldPersist = true;
   }
   const originalConfigJson = JSON.stringify(adminConfig);
-  adminConfig = configSelfCheck(adminConfig);
+  adminConfig = await syncConfigUsersWithDb(configSelfCheck(adminConfig));
   cachedConfig = adminConfig;
+  cachedConfigVersion = getConfigVersion(cachedConfig);
+  cachedConfigLoadedAt = Date.now();
+  bindConfigVersion(cachedConfig, cachedConfigVersion);
 
   if (!shouldPersist) {
     shouldPersist = JSON.stringify(cachedConfig) !== originalConfigJson;
@@ -356,7 +375,26 @@ export async function getConfig(): Promise<AdminConfig> {
     }
   }
 
-  return cloneConfig(cachedConfig);
+  return cachedConfig;
+}
+
+export async function getConfig(): Promise<AdminConfig> {
+  return cloneConfig(await loadConfig());
+}
+
+export async function getConfigForRead(): Promise<Readonly<AdminConfig>> {
+  return deepFreeze(await loadConfig());
+}
+
+function isCachedConfigFresh(): boolean {
+  return Date.now() - cachedConfigLoadedAt < getConfigCacheTtlMs();
+}
+
+function getConfigCacheTtlMs(): number {
+  const configured = Number.parseInt(process.env.CONFIG_CACHE_TTL_MS || '', 10);
+  return Number.isFinite(configured) && configured >= 0
+    ? configured
+    : DEFAULT_CONFIG_CACHE_TTL_MS;
 }
 
 export function configSelfCheck(adminConfig: AdminConfig): AdminConfig {
@@ -393,6 +431,10 @@ export function configSelfCheck(adminConfig: AdminConfig): AdminConfig {
         process.env.ANNOUNCEMENT ||
         '本网站仅提供影视信息搜索服务，所有内容均来自第三方网站。本站不存储任何视频资源，不对任何内容的准确性、合法性、完整性负责。',
       EnableLiveEntry: false,
+      DefaultAggregateSearch: true,
+      EnableOptimization: true,
+      AutoSwitchSourceOnTimeout: false,
+      LiveDirectConnect: false,
       SearchDownstreamMaxPage:
         Number(process.env.NEXT_PUBLIC_SEARCH_MAX_PAGE) || 5,
       SiteInterfaceCacheTime: 7200,
@@ -418,6 +460,18 @@ export function configSelfCheck(adminConfig: AdminConfig): AdminConfig {
   if (typeof adminConfig.SiteConfig.EnableLiveEntry !== 'boolean') {
     adminConfig.SiteConfig.EnableLiveEntry = false;
   }
+  if (typeof adminConfig.SiteConfig.DefaultAggregateSearch !== 'boolean') {
+    adminConfig.SiteConfig.DefaultAggregateSearch = true;
+  }
+  if (typeof adminConfig.SiteConfig.EnableOptimization !== 'boolean') {
+    adminConfig.SiteConfig.EnableOptimization = true;
+  }
+  if (typeof adminConfig.SiteConfig.AutoSwitchSourceOnTimeout !== 'boolean') {
+    adminConfig.SiteConfig.AutoSwitchSourceOnTimeout = false;
+  }
+  if (typeof adminConfig.SiteConfig.LiveDirectConnect !== 'boolean') {
+    adminConfig.SiteConfig.LiveDirectConnect = false;
+  }
   if (typeof adminConfig.SiteConfig.FluidSearch !== 'boolean') {
     adminConfig.SiteConfig.FluidSearch =
       process.env.NEXT_PUBLIC_FLUID_SEARCH !== 'false';
@@ -432,22 +486,32 @@ export function configSelfCheck(adminConfig: AdminConfig): AdminConfig {
 
   // 站长变更自检
   const ownerUser = getOwnerUsername();
+  const normalizedOwnerUser = normalizeUsername(ownerUser || '');
+
+  adminConfig.UserConfig.Users = adminConfig.UserConfig.Users.map((user) => {
+    const normalized = normalizeUsername(user.username || '');
+    return {
+      ...user,
+      username: normalized === normalizedOwnerUser ? ownerUser! : normalized,
+    };
+  }).filter((user) => Boolean(user.username));
 
   // 去重
   const seenUsernames = new Set<string>();
   adminConfig.UserConfig.Users = adminConfig.UserConfig.Users.filter((user) => {
-    if (seenUsernames.has(user.username)) {
+    const dedupeKey = normalizeUsername(user.username);
+    if (seenUsernames.has(dedupeKey)) {
       return false;
     }
-    seenUsernames.add(user.username);
+    seenUsernames.add(dedupeKey);
     return true;
   });
   // 过滤站长
   const originOwnerCfg = adminConfig.UserConfig.Users.find(
-    (u) => u.username === ownerUser,
+    (u) => normalizeUsername(u.username) === normalizedOwnerUser,
   );
   adminConfig.UserConfig.Users = adminConfig.UserConfig.Users.filter(
-    (user) => user.username !== ownerUser,
+    (user) => normalizeUsername(user.username) !== normalizedOwnerUser,
   );
   // 其他用户不得拥有 owner 权限
   adminConfig.UserConfig.Users.forEach((user) => {
@@ -538,48 +602,148 @@ export async function resetConfig() {
   );
   await db.saveAdminConfig(adminConfig);
   cachedConfig = cloneConfig(adminConfig);
+  cachedConfigVersion = getConfigVersion(cachedConfig);
+  cachedConfigLoadedAt = Date.now();
+  bindConfigVersion(cachedConfig, cachedConfigVersion);
   invalidatePublicConfigCache();
 
   return;
 }
 
 export async function saveConfig(config: AdminConfig): Promise<AdminConfig> {
-  const nextConfig = configSelfCheck(cloneConfig(config));
+  const expectedVersion = configVersionByObject.get(config);
+  const nextConfig = await syncConfigUsersWithDb(
+    configSelfCheck(cloneConfig(config)),
+  );
+  if (expectedVersion) {
+    await assertConfigVersion(expectedVersion);
+  }
   await db.saveAdminConfig(nextConfig);
   cachedConfig = cloneConfig(nextConfig);
+  cachedConfigVersion = getConfigVersion(cachedConfig);
+  cachedConfigLoadedAt = Date.now();
+  bindConfigVersion(cachedConfig, cachedConfigVersion);
   invalidatePublicConfigCache();
   return cloneConfig(cachedConfig);
 }
 
-export function getCacheTime(config: AdminConfig): number;
+export class ConfigConflictError extends Error {
+  constructor() {
+    super('配置已被其他操作更新，请刷新后重试');
+    this.name = 'ConfigConflictError';
+  }
+}
+
+async function assertConfigVersion(expectedVersion: string): Promise<void> {
+  const currentConfig = await db.getAdminConfig();
+  if (!currentConfig) {
+    if (expectedVersion !== '') {
+      throw new ConfigConflictError();
+    }
+    return;
+  }
+
+  if (getConfigVersion(configSelfCheck(currentConfig)) !== expectedVersion) {
+    throw new ConfigConflictError();
+  }
+}
+
+async function syncConfigUsersWithDb(
+  adminConfig: AdminConfig,
+): Promise<AdminConfig> {
+  let userNames: string[];
+  try {
+    userNames = await db.getAllUsers();
+  } catch (error) {
+    console.error('获取用户列表失败:', error);
+    return adminConfig;
+  }
+
+  const ownerUsername = getOwnerUsername();
+  const existingUsers = new Map(
+    adminConfig.UserConfig.Users.map((user) => [
+      normalizeUsername(user.username),
+      user,
+    ]),
+  );
+  const nextUsers: ManagedUser[] = [];
+  const seenUsernames = new Set<string>();
+
+  const normalizedOwnerUsername = normalizeUsername(ownerUsername || '');
+
+  if (ownerUsername) {
+    const ownerEntry =
+      existingUsers.get(ownerUsername) ||
+      existingUsers.get(normalizedOwnerUsername);
+    nextUsers.push({
+      username: ownerUsername,
+      role: 'owner',
+      banned: false,
+      enabledApis: cloneStringList(ownerEntry?.enabledApis),
+      tags: cloneStringList(ownerEntry?.tags),
+    });
+    seenUsernames.add(normalizedOwnerUsername);
+  }
+
+  for (const userName of userNames) {
+    const normalizedUserName = normalizeUsername(userName);
+    if (!normalizedUserName || seenUsernames.has(normalizedUserName)) {
+      continue;
+    }
+
+    const existingUser = existingUsers.get(normalizedUserName);
+    nextUsers.push({
+      username: normalizedUserName,
+      role: existingUser?.role === 'admin' ? 'admin' : 'user',
+      banned: !!existingUser?.banned,
+      enabledApis: cloneStringList(existingUser?.enabledApis),
+      tags: cloneStringList(existingUser?.tags),
+    });
+    seenUsernames.add(normalizedUserName);
+  }
+
+  adminConfig.UserConfig.Users = nextUsers;
+  return adminConfig;
+}
+
+function cloneStringList(value?: string[]): string[] | undefined {
+  return Array.isArray(value) ? [...value] : undefined;
+}
+
+export function getCacheTime(config: Readonly<AdminConfig>): number;
 export function getCacheTime(): Promise<number>;
-export function getCacheTime(config?: AdminConfig): number | Promise<number> {
+export function getCacheTime(
+  config?: Readonly<AdminConfig>,
+): number | Promise<number> {
   if (config) {
     return config.SiteConfig.SiteInterfaceCacheTime || 7200;
   }
 
-  if (cachedConfig) {
+  if (cachedConfig && isCachedConfigFresh()) {
     return cachedConfig.SiteConfig.SiteInterfaceCacheTime || 7200;
   }
 
-  return getConfig().then(
+  return getConfigForRead().then(
     (currentConfig) => currentConfig.SiteConfig.SiteInterfaceCacheTime || 7200,
   );
 }
 
 export async function getAvailableApiSites(
   user?: string,
-  config?: AdminConfig,
+  config?: Readonly<AdminConfig>,
 ): Promise<ApiSite[]> {
-  const currentConfig = config || (await getConfig());
-  const allApiSites = currentConfig.SourceConfig.filter((s) => !s.disabled);
+  const currentConfig = config || (await getConfigForRead());
+  const allApiSites = currentConfig.SourceConfig.filter((s) => !s.disabled).map(
+    toApiSite,
+  );
 
   if (!user) {
     return allApiSites;
   }
 
+  const lookupUsername = normalizeUsername(user);
   const userConfig = currentConfig.UserConfig.Users.find(
-    (u) => u.username === user,
+    (u) => u.username === lookupUsername,
   );
   if (!userConfig) {
     return allApiSites;
@@ -633,17 +797,55 @@ export async function getAvailableApiSites(
   return allApiSites;
 }
 
+function toApiSite(site: ApiSite): ApiSite {
+  return {
+    key: site.key,
+    name: site.name,
+    api: site.api,
+    detail: site.detail,
+  };
+}
+
 export async function setCachedConfig(config: AdminConfig) {
   cachedConfig = configSelfCheck(cloneConfig(config));
+  cachedConfigVersion = getConfigVersion(cachedConfig);
+  cachedConfigLoadedAt = Date.now();
+  bindConfigVersion(cachedConfig, cachedConfigVersion);
   invalidatePublicConfigCache();
 }
 
 function cloneConfig(config: AdminConfig): AdminConfig {
-  return JSON.parse(JSON.stringify(config)) as AdminConfig;
+  const cloned = JSON.parse(JSON.stringify(config)) as AdminConfig;
+  const version = configVersionByObject.get(config);
+  if (version) {
+    bindConfigVersion(cloned, version);
+  }
+  return cloned;
+}
+
+function deepFreeze<T extends object>(value: T): Readonly<T> {
+  Object.freeze(value);
+
+  for (const item of Object.values(value)) {
+    if (item && typeof item === 'object' && !Object.isFrozen(item)) {
+      deepFreeze(item as object);
+    }
+  }
+
+  return value;
+}
+
+function bindConfigVersion(config: AdminConfig, version: string): AdminConfig {
+  configVersionByObject.set(config, version);
+  return config;
+}
+
+function getConfigVersion(config: AdminConfig): string {
+  return JSON.stringify(config);
 }
 
 async function readPublicConfig() {
-  const config = await getConfig();
+  const config = await getConfigForRead();
 
   return {
     SiteName: config.SiteConfig.SiteName,
@@ -652,6 +854,10 @@ async function readPublicConfig() {
     OpenRegister: !!config.UserConfig.OpenRegister,
     DisableYellowFilter: config.SiteConfig.DisableYellowFilter,
     EnableLiveEntry: config.SiteConfig.EnableLiveEntry,
+    DefaultAggregateSearch: config.SiteConfig.DefaultAggregateSearch,
+    EnableOptimization: config.SiteConfig.EnableOptimization,
+    AutoSwitchSourceOnTimeout: config.SiteConfig.AutoSwitchSourceOnTimeout,
+    LiveDirectConnect: config.SiteConfig.LiveDirectConnect,
     BangumiDataSource: config.SiteConfig.BangumiDataSource,
     CustomCategories: config.CustomCategories.filter(
       (category) => !category.disabled,
@@ -681,5 +887,7 @@ export const getPublicConfig: typeof readPublicConfig =
 function invalidatePublicConfigCache() {
   try {
     nextCacheApi?.revalidateTag?.(PUBLIC_CONFIG_CACHE_TAG);
-  } catch {}
+  } catch (error) {
+    console.warn('公开配置缓存失效失败:', error);
+  }
 }

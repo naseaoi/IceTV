@@ -1,4 +1,4 @@
-import type { ReactNode } from 'react';
+﻿import type { ReactNode } from 'react';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 
 import AdminPage from '@/app/admin/page';
@@ -13,7 +13,7 @@ jest.mock('@/components/DataMigration', () => ({
   default: () => <div>DataMigration</div>,
 }));
 
-jest.mock('@/features/admin/components/AlertModal', () => ({
+jest.mock('@/components/modals/AlertModal', () => ({
   __esModule: true,
   default: () => null,
 }));
@@ -60,7 +60,7 @@ jest.mock('@/features/admin/components/tabs/SiteConfigTab', () => ({
   default: () => <div>SiteConfigTab</div>,
 }));
 
-jest.mock('@/features/admin/hooks/useAlertModal', () => ({
+jest.mock('@/hooks/useAlertModal', () => ({
   useAlertModal: () => ({
     alertModal: { isOpen: false, type: 'success', title: '' },
     showAlert: jest.fn(),
@@ -93,7 +93,13 @@ describe('AdminPage role visibility', () => {
     ConfigFile: '',
     SiteConfig: {
       SiteName: 'IceTV',
+      SiteIcon: '',
       Announcement: '',
+      EnableLiveEntry: false,
+      DefaultAggregateSearch: true,
+      EnableOptimization: true,
+      AutoSwitchSourceOnTimeout: false,
+      LiveDirectConnect: false,
       SearchDownstreamMaxPage: 1,
       SiteInterfaceCacheTime: 300,
       DoubanProxyType: '',
@@ -152,7 +158,9 @@ describe('AdminPage role visibility', () => {
     });
 
     expect(screen.getByText('数据迁移')).toBeInTheDocument();
-    expect(screen.getByText('重置配置')).toBeInTheDocument();
+    expect(
+      screen.getByRole('button', { name: '重置配置' }),
+    ).toBeInTheDocument();
   });
 
   it('hides owner-only sections for admin', async () => {
@@ -165,7 +173,9 @@ describe('AdminPage role visibility', () => {
 
     expect(screen.queryByText('配置文件')).not.toBeInTheDocument();
     expect(screen.queryByText('数据迁移')).not.toBeInTheDocument();
-    expect(screen.queryByText('重置配置')).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole('button', { name: '重置配置' }),
+    ).not.toBeInTheDocument();
   });
 
   it('opens reset confirm modal and triggers reset action', async () => {
@@ -175,10 +185,12 @@ describe('AdminPage role visibility', () => {
     render(<AdminPage />);
 
     await waitFor(() => {
-      expect(screen.getByText('重置配置')).toBeInTheDocument();
+      expect(
+        screen.getByRole('button', { name: '重置配置' }),
+      ).toBeInTheDocument();
     });
 
-    fireEvent.click(screen.getByText('重置配置'));
+    fireEvent.click(screen.getByRole('button', { name: '重置配置' }));
 
     await waitFor(() => {
       expect(screen.getByText('ConfirmModal')).toBeInTheDocument();

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 
 import { isGuardFailure, requireOwner } from '@/lib/api-auth';
+import { configConflictResponse } from '@/lib/api-config-error';
 import { getConfig, refineConfig, saveConfig } from '@/lib/config';
 
 export const runtime = 'nodejs';
@@ -62,6 +63,8 @@ export async function POST(request: NextRequest) {
       message: '配置文件更新成功',
     });
   } catch (error) {
+    const conflict = configConflictResponse(error);
+    if (conflict) return conflict;
     console.error('更新配置文件失败:', error);
     return NextResponse.json({ error: '更新配置文件失败' }, { status: 500 });
   }

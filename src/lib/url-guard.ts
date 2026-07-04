@@ -11,6 +11,23 @@ const BLOCKED_HOSTNAMES = new Set([
 
 const MAX_REDIRECTS = 5;
 const DEFAULT_FETCH_TIMEOUT_MS = 15_000;
+const DEFAULT_DNS_CACHE_TTL_MS = 30_000;
+const DEFAULT_DNS_NEGATIVE_CACHE_TTL_MS = 5_000;
+
+type DnsLookup = typeof lookup;
+
+type GuardedFetchInit = RequestInit & {
+  skipInitialValidation?: boolean;
+};
+
+type DnsCacheEntry = {
+  addresses: { address: string }[];
+  expiresAt: number;
+  failed?: boolean;
+};
+
+const dnsCache = new Map<string, DnsCacheEntry>();
+let dnsLookup: DnsLookup = lookup;
 
 export type UrlValidationResult =
   | { ok: true; url: string }
@@ -71,14 +88,18 @@ export async function validateProxyUrlForRequest(
 
 export async function fetchWithUrlGuard(
   raw: string,
-  init: RequestInit = {},
+  init: GuardedFetchInit = {},
 ): Promise<Response> {
+  const { skipInitialValidation = false, ...fetchInit } = init;
   let currentUrl = raw;
-  const requestedRedirect = init.redirect;
+  const requestedRedirect = fetchInit.redirect;
   const timeoutMs = getFetchTimeoutMs();
 
   for (let redirectCount = 0; redirectCount <= MAX_REDIRECTS; redirectCount++) {
-    const validation = await validateProxyUrlForRequest(currentUrl);
+    const validation =
+      skipInitialValidation && redirectCount === 0
+        ? { ok: true as const, url: currentUrl }
+        : await validateProxyUrlForRequest(currentUrl);
     if (!validation.ok) {
       throw new UrlValidationError(validation.reason);
     }
@@ -88,9 +109,9 @@ export async function fetchWithUrlGuard(
     let response: Response;
     try {
       response = await fetch(validation.url, {
-        ...init,
+        ...fetchInit,
         redirect: 'manual',
-        signal: init.signal || controller.signal,
+        signal: fetchInit.signal || controller.signal,
       });
     } finally {
       windowLikeClearTimeout(timeout);
@@ -119,6 +140,18 @@ export async function fetchWithUrlGuard(
   throw new UrlValidationError('Too many redirects');
 }
 
+export function clearUrlGuardDnsCacheForTests(): void {
+  dnsCache.clear();
+}
+
+export function setUrlGuardDnsLookupForTests(nextLookup: DnsLookup): void {
+  dnsLookup = nextLookup;
+}
+
+export function resetUrlGuardDnsLookupForTests(): void {
+  dnsLookup = lookup;
+}
+
 function getFetchTimeoutMs(): number {
   const configured = Number.parseInt(
     process.env.PROXY_FETCH_TIMEOUT_MS || '',
@@ -127,6 +160,26 @@ function getFetchTimeoutMs(): number {
   return Number.isFinite(configured) && configured > 0
     ? configured
     : DEFAULT_FETCH_TIMEOUT_MS;
+}
+
+function getDnsCacheTtlMs(): number {
+  const configured = Number.parseInt(
+    process.env.PROXY_DNS_CACHE_TTL_MS || '',
+    10,
+  );
+  return Number.isFinite(configured) && configured >= 0
+    ? configured
+    : DEFAULT_DNS_CACHE_TTL_MS;
+}
+
+function getDnsNegativeCacheTtlMs(): number {
+  const configured = Number.parseInt(
+    process.env.PROXY_DNS_NEGATIVE_CACHE_TTL_MS || '',
+    10,
+  );
+  return Number.isFinite(configured) && configured >= 0
+    ? configured
+    : DEFAULT_DNS_NEGATIVE_CACHE_TTL_MS;
 }
 
 function windowLikeSetTimeout(
@@ -176,7 +229,7 @@ async function assertSafeNetworkTarget(raw: string): Promise<void> {
 
   let addresses: { address: string }[];
   try {
-    addresses = await lookup(hostname, { all: true, verbatim: true });
+    addresses = await lookupHostname(hostname);
   } catch {
     throw new UrlValidationError('DNS lookup failed');
   }
@@ -190,12 +243,46 @@ async function assertSafeNetworkTarget(raw: string): Promise<void> {
   }
 }
 
+async function lookupHostname(
+  hostname: string,
+): Promise<{ address: string }[]> {
+  const ttlMs = getDnsCacheTtlMs();
+  const now = Date.now();
+  const cached = dnsCache.get(hostname);
+  if (ttlMs > 0 && cached && cached.expiresAt > now) {
+    if (cached.failed) {
+      throw new Error('DNS lookup failed');
+    }
+    return cached.addresses;
+  }
+
+  let addresses: { address: string }[];
+  try {
+    addresses = await dnsLookup(hostname, { all: true, verbatim: true });
+  } catch (error) {
+    const negativeTtlMs = getDnsNegativeCacheTtlMs();
+    if (negativeTtlMs > 0) {
+      dnsCache.set(hostname, {
+        addresses: [],
+        expiresAt: now + negativeTtlMs,
+        failed: true,
+      });
+    }
+    throw error;
+  }
+
+  if (ttlMs > 0) {
+    dnsCache.set(hostname, { addresses, expiresAt: now + ttlMs });
+  }
+  return addresses;
+}
+
 function isRedirectResponse(status: number): boolean {
   return status >= 300 && status < 400;
 }
 
 function isBlockedAddress(address: string): boolean {
-  const normalized = normalizeIpAddress(address);
+  const normalized = normalizeHostname(address);
   const ipVersion = net.isIP(normalized);
 
   if (ipVersion === 4) {
@@ -207,14 +294,6 @@ function isBlockedAddress(address: string): boolean {
   }
 
   return false;
-}
-
-function normalizeIpAddress(address: string): string {
-  const lower = normalizeHostname(address);
-  if (lower.startsWith('::ffff:')) {
-    return lower.slice('::ffff:'.length);
-  }
-  return lower;
 }
 
 function isBlockedIpv4(address: string): boolean {
@@ -239,6 +318,114 @@ function isBlockedIpv4(address: string): boolean {
 }
 
 function isBlockedIpv6(address: string): boolean {
+  const bytes = ipv6ToBytes(address);
+  if (bytes) {
+    const embeddedIpv4 = extractEmbeddedIpv4(bytes);
+    if (embeddedIpv4 && isBlockedIpv4(embeddedIpv4)) {
+      return true;
+    }
+    if (isBlockedIpv6Bytes(bytes)) {
+      return true;
+    }
+  }
+  return isBlockedIpv6ByPrefix(address);
+}
+
+function isBlockedIpv6Bytes(bytes: number[]): boolean {
+  const isUnspecified = bytes.every((byte) => byte === 0);
+  const isLoopback =
+    bytes.slice(0, 15).every((byte) => byte === 0) && bytes[15] === 1;
+  const isUniqueLocal = (bytes[0] & 0xfe) === 0xfc;
+  const isLinkLocal = bytes[0] === 0xfe && (bytes[1] & 0xc0) === 0x80;
+  const isSiteLocal = bytes[0] === 0xfe && (bytes[1] & 0xc0) === 0xc0;
+  const isMulticast = bytes[0] === 0xff;
+
+  return (
+    isUnspecified ||
+    isLoopback ||
+    isUniqueLocal ||
+    isLinkLocal ||
+    isSiteLocal ||
+    isMulticast
+  );
+}
+
+function extractEmbeddedIpv4(bytes: number[]): string | null {
+  const firstTenZero = bytes.slice(0, 10).every((byte) => byte === 0);
+  const isMapped = firstTenZero && bytes[10] === 0xff && bytes[11] === 0xff;
+  const isCompatible = bytes.slice(0, 12).every((byte) => byte === 0);
+  const isNat64 =
+    bytes[0] === 0x00 &&
+    bytes[1] === 0x64 &&
+    bytes[2] === 0xff &&
+    bytes[3] === 0x9b;
+  const is6to4 = bytes[0] === 0x20 && bytes[1] === 0x02;
+
+  if (isMapped || isCompatible || isNat64) {
+    return bytes.slice(12, 16).join('.');
+  }
+
+  if (is6to4) {
+    return bytes.slice(2, 6).join('.');
+  }
+
+  return null;
+}
+
+function ipv6ToBytes(address: string): number[] | null {
+  let head = address;
+  const lastColon = head.lastIndexOf(':');
+  const tail = head.slice(lastColon + 1);
+  if (tail.includes('.')) {
+    const octets = tail.split('.').map((part) => Number.parseInt(part, 10));
+    if (
+      octets.length !== 4 ||
+      octets.some((part) => !Number.isInteger(part) || part < 0 || part > 255)
+    ) {
+      return null;
+    }
+    const high = ((octets[0] << 8) | octets[1]).toString(16);
+    const low = ((octets[2] << 8) | octets[3]).toString(16);
+    head = `${head.slice(0, lastColon + 1)}${high}:${low}`;
+  }
+
+  const halves = head.split('::');
+  if (halves.length > 2) {
+    return null;
+  }
+
+  const headGroups = halves[0] ? halves[0].split(':') : [];
+  const tailGroups =
+    halves.length === 2 ? (halves[1] ? halves[1].split(':') : []) : [];
+
+  let groups: string[];
+  if (halves.length === 2) {
+    const missing = 8 - headGroups.length - tailGroups.length;
+    if (missing < 0) {
+      return null;
+    }
+    groups = [...headGroups, ...new Array(missing).fill('0'), ...tailGroups];
+  } else {
+    groups = headGroups;
+  }
+
+  if (groups.length !== 8) {
+    return null;
+  }
+
+  const bytes: number[] = [];
+  for (const group of groups) {
+    if (!/^[0-9a-f]{1,4}$/i.test(group)) {
+      return null;
+    }
+    const value = Number.parseInt(group, 16);
+    bytes.push((value >> 8) & 0xff, value & 0xff);
+  }
+
+  return bytes;
+}
+
+function isBlockedIpv6ByPrefix(address: string): boolean {
   const lower = address.toLowerCase();
   return (
     lower === '::' ||

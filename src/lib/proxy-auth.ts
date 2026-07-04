@@ -1,7 +1,9 @@
+import 'server-only';
+
 import type { NextRequest, NextResponse } from 'next/server';
 
-import { generateSignature, verifySignature } from './auth';
-import { getOwnerPassword } from './env.server';
+import { generateSignature, verifySignature } from './auth.server';
+import { getAuthSigningSecret } from './signing-secret.server';
 
 export type ProxySignaturePurpose =
   | 'image'
@@ -26,7 +28,7 @@ async function signProxyTarget(
 ): Promise<{ expiresAt: number; signature: string }> {
   const signature = await generateSignature(
     getProxySignaturePayload(purpose, targetUrl, expiresAt),
-    getOwnerPassword(),
+    getAuthSigningSecret(),
   );
 
   return { expiresAt, signature };
@@ -59,11 +61,16 @@ export async function verifyProxySignature(
     return false;
   }
 
-  return verifySignature(
-    getProxySignaturePayload(purpose, targetUrl, expiresAt),
-    signature,
-    getOwnerPassword(),
-  );
+  try {
+    return await verifySignature(
+      getProxySignaturePayload(purpose, targetUrl, expiresAt),
+      signature,
+      getAuthSigningSecret(),
+    );
+  } catch (error) {
+    console.error('代理签名密钥未配置:', error);
+    return false;
+  }
 }
 
 export async function authorizeProxyRequest(

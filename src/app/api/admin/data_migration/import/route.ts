@@ -118,10 +118,7 @@ export async function POST(req: NextRequest) {
     }
 
     console.error('数据导入失败:', error);
-    return NextResponse.json(
-      { error: error instanceof Error ? error.message : '导入失败' },
-      { status: 500 },
-    );
+    return NextResponse.json({ error: '导入失败' }, { status: 500 });
   }
 }
 

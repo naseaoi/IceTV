@@ -1,3 +1,5 @@
+import { createProxySourceHelper } from '@/lib/proxy-source-helper';
+
 export const BANGUMI_DATA_SOURCE_STORAGE_KEY = 'bangumiDataSource';
 export const BANGUMI_PROXY_URL_STORAGE_KEY = 'bangumiProxyUrl';
 
@@ -10,6 +12,15 @@ export const BANGUMI_DATA_SOURCE_VALUES = [
 export type BangumiDataSource = (typeof BANGUMI_DATA_SOURCE_VALUES)[number];
 
 export const DEFAULT_BANGUMI_DATA_SOURCE: BangumiDataSource = 'server';
+
+const bangumiProxySourceHelper = createProxySourceHelper({
+  values: BANGUMI_DATA_SOURCE_VALUES,
+  defaultValue: DEFAULT_BANGUMI_DATA_SOURCE,
+  sourceStorageKey: BANGUMI_DATA_SOURCE_STORAGE_KEY,
+  proxyUrlStorageKey: BANGUMI_PROXY_URL_STORAGE_KEY,
+  readRuntimeSource: () => window.RUNTIME_CONFIG?.BANGUMI_DATA_SOURCE,
+  readRuntimeProxyUrl: () => window.RUNTIME_CONFIG?.BANGUMI_PROXY,
+});
 
 export const bangumiDataSourceOptions: {
   value: BangumiDataSource;
@@ -24,50 +35,21 @@ export const bangumiDataSourceOptions: {
 ];
 
 export function readDefaultBangumiDataSource(): BangumiDataSource {
-  if (typeof window === 'undefined') {
-    return DEFAULT_BANGUMI_DATA_SOURCE;
-  }
-
-  return normalizeBangumiDataSource(window.RUNTIME_CONFIG?.BANGUMI_DATA_SOURCE);
+  return bangumiProxySourceHelper.readDefaultSource();
 }
 
 export function normalizeBangumiDataSource(value: unknown): BangumiDataSource {
-  return typeof value === 'string' &&
-    BANGUMI_DATA_SOURCE_VALUES.includes(value as BangumiDataSource)
-    ? (value as BangumiDataSource)
-    : DEFAULT_BANGUMI_DATA_SOURCE;
+  return bangumiProxySourceHelper.normalizeSource(value);
 }
 
 export function readBangumiDataSource(): BangumiDataSource {
-  if (typeof window === 'undefined') {
-    return DEFAULT_BANGUMI_DATA_SOURCE;
-  }
-
-  const savedSource = window.localStorage.getItem(
-    BANGUMI_DATA_SOURCE_STORAGE_KEY,
-  );
-
-  return savedSource === null
-    ? readDefaultBangumiDataSource()
-    : normalizeBangumiDataSource(savedSource);
+  return bangumiProxySourceHelper.readSource();
 }
 
 export function readDefaultBangumiProxyUrl(): string {
-  if (typeof window === 'undefined') {
-    return '';
-  }
-
-  return window.RUNTIME_CONFIG?.BANGUMI_PROXY || '';
+  return bangumiProxySourceHelper.readDefaultProxyUrl();
 }
 
 export function readBangumiProxyUrl(): string {
-  if (typeof window === 'undefined') {
-    return '';
-  }
-
-  const savedProxyUrl = window.localStorage.getItem(
-    BANGUMI_PROXY_URL_STORAGE_KEY,
-  );
-
-  return savedProxyUrl === null ? readDefaultBangumiProxyUrl() : savedProxyUrl;
+  return bangumiProxySourceHelper.readProxyUrl();
 }

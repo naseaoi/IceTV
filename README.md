@@ -85,6 +85,8 @@ services:
     environment:
       - ICETV_USERNAME=admin
       - ICETV_PASSWORD=admin_password
+      - AUTH_SECRET=replace_with_random_auth_secret
+      - CRON_SECRET=replace_with_random_secret
       - LOCAL_DB_PATH=/data/icetv-data.sqlite
     volumes:
       - icetv-data:/data
@@ -105,6 +107,8 @@ Vercel 项目中至少配置以下环境变量：
 ```bash
 ICETV_USERNAME=admin
 ICETV_PASSWORD=your_strong_password
+AUTH_SECRET=replace_with_random_auth_secret
+CRON_SECRET=replace_with_random_cron_secret
 DATABASE_URL=mysql://user:password@host:3306/dbname?ssl-mode=REQUIRED
 ```
 
@@ -160,19 +164,30 @@ IceTV 支持标准的苹果 CMS V10 API 格式。
 
 ## 环境变量
 
-| 变量                            | 用途         | 必填           | 默认值                              | 可选值 / 格式              |
-| ------------------------------- | ------------ | -------------- | ----------------------------------- | -------------------------- |
-| `ICETV_USERNAME`                | 站长账号     | 是             | 无                                  | 任意字符串                 |
-| `ICETV_PASSWORD`                | 站长密码     | 是             | 无                                  | 任意字符串                 |
-| `AUTH_SESSION_TTL_HOURS`        | 登录态时长   | 否             | `720`                               | 正整数或 `0`               |
-| `NEXT_PUBLIC_STORAGE_TYPE`      | 存储类型     | 否             | 自动识别，默认 `localdb`            | `localdb` / `mysql`        |
-| `LOCAL_DB_PATH`                 | SQLite 路径  | 否             | `/data/icetv-data.sqlite`（Docker） | 绝对路径                   |
-| `DATABASE_URL`                  | MySQL 连接   | MySQL 模式必填 | 无                                  | `mysql://...`              |
-| `MYSQL_SSL_CA`                  | MySQL CA     | 否             | 无                                  | PEM 文本                   |
-| `MYSQL_SSL_REJECT_UNAUTHORIZED` | MySQL SSL    | 否             | `true`                              | `true` / `false`           |
-| `MYSQL_CONNECTION_LIMIT`        | MySQL 连接池 | 否             | `5`                                 | 正整数                     |
-| `NEXT_PUBLIC_UPDATE_REPOS`      | 版本检查     | 否             | `naseaoi/IceTV`                     | `owner/repo,owner/repo...` |
-| `NEXT_PUBLIC_UPDATE_BRANCH`     | 版本检查     | 否             | `main`                              | 分支名                     |
+| 变量                            | 用途           | 必填           | 默认值                              | 可选值 / 格式                                                    |
+| ------------------------------- | -------------- | -------------- | ----------------------------------- | ---------------------------------------------------------------- |
+| `ICETV_USERNAME`                | 站长账号       | 是             | 无                                  | 任意字符串                                                       |
+| `ICETV_PASSWORD`                | 站长密码       | 是             | 无                                  | 任意字符串                                                       |
+| `AUTH_SECRET`                   | 签名密钥       | 是             | 无                                  | 高熵随机字符串，至少 32 字符；别名：`ICETV_AUTH_SECRET`          |
+| `CRON_SECRET`                   | 定时任务密钥   | Docker 必填    | 无                                  | 高熵随机字符串；别名：`ICETV_CRON_SECRET` / `VERCEL_CRON_SECRET` |
+| `LEGACY_COOKIE_CUTOFF_DATE`     | 旧登录态截止   | 否             | `2026-08-01T00:00:00.000Z`          | ISO 日期字符串                                                   |
+| `AUTH_SESSION_TTL_HOURS`        | 登录态时长     | 否             | `168`                               | 正整数                                                           |
+| `NEXT_PUBLIC_STORAGE_TYPE`      | 存储类型       | 否             | 自动识别，默认 `localdb`            | `localdb` / `mysql`                                              |
+| `LOCAL_DB_PATH`                 | SQLite 路径    | 否             | `/data/icetv-data.sqlite`（Docker） | 绝对路径；别名：`LOCAL_SQLITE_PATH`                              |
+| `DATABASE_URL`                  | MySQL 连接     | MySQL 模式必填 | 无                                  | `mysql://...`                                                    |
+| `MYSQL_SSL_CA`                  | MySQL CA       | 否             | 无                                  | PEM 文本                                                         |
+| `MYSQL_SSL_REJECT_UNAUTHORIZED` | MySQL SSL      | 否             | `true`                              | `true` / `false`                                                 |
+| `MYSQL_CONNECTION_LIMIT`        | MySQL 连接池   | 否             | `5`                                 | 正整数                                                           |
+| `MYSQL_MAX_IDLE`                | MySQL 空闲池   | 否             | 同连接池上限                        | 正整数                                                           |
+| `MYSQL_IDLE_TIMEOUT_MS`         | MySQL 空闲超时 | 否             | `60000`                             | 毫秒                                                             |
+| `NEXT_PUBLIC_UPDATE_REPOS`      | 版本检查       | 否             | `naseaoi/IceTV`                     | `owner/repo,owner/repo...`                                       |
+| `NEXT_PUBLIC_UPDATE_BRANCH`     | 版本检查       | 否             | `main`                              | 分支名                                                           |
+
+站点名称、图标、公告、豆瓣/Bangumi 代理、流式搜索、搜索最大页数等运行选项可在后台配置，不建议优先使用环境变量覆盖。
+
+高级调优变量：`CONFIG_CACHE_TTL_MS`、`PROXY_FETCH_TIMEOUT_MS`、`PROXY_DNS_CACHE_TTL_MS`、`PROXY_DNS_NEGATIVE_CACHE_TTL_MS`、`SEARCH_SOURCE_FAILURE_COOLDOWN_MS`、`SQLITE_BUSY_TIMEOUT_MS`、`SQLITE_INIT_RETRY_COUNT`、`SQLITE_INIT_RETRY_DELAY_MS`、`TRUSTED_PROXY_COUNT`、`DEV_PROXY_ENABLED`。
+
+当前配置写入采用应用层乐观锁，推荐单实例部署；多实例部署需让管理操作固定路由到同一实例。
 
 ## 客户端
 

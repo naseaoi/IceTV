@@ -6,6 +6,7 @@ import {
   type GiriEpisodeVariant,
   parseGirigiriVariantId,
 } from '@/lib/giri';
+import { buildLazyEpisodeUrl } from '@/lib/lazy-episodes';
 import type { SearchResult } from '@/lib/types';
 import { cleanHtmlTags } from '@/lib/utils';
 
@@ -13,7 +14,6 @@ import {
   BROWSER_HTML_HEADERS,
   createTimedAbortController,
   getSiteOrigin,
-  runWithConcurrency,
   toAbsoluteUrl,
 } from './shared';
 
@@ -46,15 +46,22 @@ function isCfChallenge(html: string): boolean {
 
 async function fetchGiriHtml(url: string): Promise<string | null> {
   for (let attempt = 0; attempt < 2; attempt++) {
+    const abortState = createTimedAbortController(undefined, 10000);
     try {
-      const res = await fetch(url, { headers: BROWSER_HTML_HEADERS });
-      if (!res.ok) return null;
-      const html = await res.text();
-      if (!isCfChallenge(html)) return html;
-      if (attempt === 0) await new Promise((r) => setTimeout(r, 1500));
+      const res = await fetch(url, {
+        headers: BROWSER_HTML_HEADERS,
+        signal: abortState.signal,
+      });
+      if (res.ok) {
+        const html = await res.text();
+        if (!isCfChallenge(html)) return html;
+      }
     } catch {
-      return null;
+      // 重试
+    } finally {
+      abortState.cleanup();
     }
+    if (attempt === 0) await new Promise((r) => setTimeout(r, 1500));
   }
   return null;
 }
@@ -335,41 +342,13 @@ export async function getDetailFromGirigiri(
   const selectedVariant =
     episodeVariants.find((variant) => variant.groupId === preferredGroupId) ||
     episodeVariants[0];
-  const episodeEntries = selectedVariant.episodes.map(
-    (entry, index) =>
-      [entry.playPath, entry.title || `${index + 1}`] as [string, string],
+
+  const episodes = selectedVariant.episodes.map((entry) =>
+    buildLazyEpisodeUrl('giri', entry.playPath),
   );
-
-  const playResults = await runWithConcurrency(
-    episodeEntries.map(
-      ([playPath]) =>
-        async () =>
-          fetchGirigiriEpisodePlayUrl(activeOrigins, playPath),
-    ),
-    4,
+  const episodesTitles = selectedVariant.episodes.map(
+    (entry, index) => entry.title || `${index + 1}`,
   );
-
-  const episodes: string[] = [];
-  const episodesTitles: string[] = [];
-  playResults.forEach((result, index) => {
-    if (result.url) {
-      episodes.push(result.url);
-      episodesTitles.push(episodeEntries[index][1]);
-    }
-  });
-
-  const fallbackMeta = playResults.find(
-    (item) => item.title || item.poster || item.desc || item.year !== 'unknown',
-  );
-
-  const finalTitle = title || fallbackMeta?.title || '';
-  const finalPoster = poster || fallbackMeta?.poster || '';
-  const finalYear = year !== 'unknown' ? year : fallbackMeta?.year || 'unknown';
-  const finalDesc = desc || fallbackMeta?.desc || '';
-
-  if (episodes.length === 0) {
-    throw new Error('未提取到有效播放地址');
-  }
 
   const relatedSources = episodeVariants
     .filter((variant) => variant.groupId !== selectedVariant.groupId)
@@ -381,8 +360,8 @@ export async function getDetailFromGirigiri(
             variant.groupId,
             variant.isDefault,
           ),
-          title: finalTitle,
-          poster: finalPoster,
+          title,
+          poster,
           episodes: [],
           episodes_titles: variant.episodes.map(
             (entry, index) => entry.title || `${index + 1}`,
@@ -391,8 +370,8 @@ export async function getDetailFromGirigiri(
           source_name: apiSite.name,
           variant_label: variant.label,
           class: '',
-          year: finalYear,
-          desc: finalDesc,
+          year,
+          desc,
           type_name: '动漫',
           douban_id: 0,
         }) satisfies SearchResult,
@@ -404,18 +383,27 @@ export async function getDetailFromGirigiri(
       selectedVariant.groupId,
       selectedVariant.isDefault,
     ),
-    title: finalTitle,
-    poster: finalPoster,
+    title,
+    poster,
     episodes,
     episodes_titles: episodesTitles,
     source: apiSite.key,
     source_name: apiSite.name,
     variant_label: selectedVariant.label,
     class: '',
-    year: finalYear,
-    desc: finalDesc,
+    year,
+    desc,
     type_name: '动漫',
     douban_id: 0,
     related_sources: relatedSources,
   };
+}
+
+export async function resolveGirigiriEpisodePlayUrlByPath(
+  apiSite: ApiSite,
+  playPath: string,
+): Promise<string | null> {
+  const origins = getGirigiriOrigins(apiSite);
+  const result = await fetchGirigiriEpisodePlayUrl(origins, playPath);
+  return result.url;
 }

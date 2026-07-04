@@ -1,6 +1,6 @@
-import HomeClient from '@/features/home/components/HomeClient';
+﻿import HomeClient from '@/features/home/components/HomeClient';
 import { getContinueWatchingSkeletonCount } from '@/lib/continue-watching.server';
-import { getHomeInitialData } from '@/lib/home.server';
+import { getHomeInitialData } from '@/features/home/lib/home.server';
 
 export const revalidate = 43200;
 

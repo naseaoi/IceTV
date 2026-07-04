@@ -1,3 +1,4 @@
+import { isLazyEpisodeUrl } from '@/lib/lazy-episodes';
 import { getProxyModes, shouldUseServerProxy } from '@/lib/proxy-modes';
 import { SearchResult } from '@/lib/types';
 
@@ -170,10 +171,14 @@ async function runProbe(
   try {
     const proxyModes = await getProxyModes();
     const useProxy = shouldUseServerProxy(resolved.source, proxyModes);
-    const probeEpisodeUrl = resolveRequestedProbeEpisodeUrl(
+    let probeEpisodeUrl = resolveRequestedProbeEpisodeUrl(
       resolved,
       options.episodeIndex,
     );
+    // 懒地址源只解析第 1 集用于测速
+    if (probeEpisodeUrl && isLazyEpisodeUrl(probeEpisodeUrl)) {
+      probeEpisodeUrl = resolved.episodes[0] || probeEpisodeUrl;
+    }
     if (!probeEpisodeUrl) {
       throw new Error('Requested episode is unavailable for probe');
     }

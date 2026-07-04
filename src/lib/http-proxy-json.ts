@@ -175,6 +175,7 @@ function fetchHttpsStreamThroughProxy(
     let headerBuffer = Buffer.alloc(0);
     let controllerRef: ReadableStreamDefaultController<Uint8Array> | null =
       null;
+    let socketPaused = false;
 
     const fail = (error: Error) => {
       if (settled) {
@@ -190,6 +191,12 @@ function fetchHttpsStreamThroughProxy(
     const stream = new ReadableStream<Uint8Array>({
       start(controller) {
         controllerRef = controller;
+      },
+      pull() {
+        if (socketPaused) {
+          socketPaused = false;
+          secureSocket?.resume();
+        }
       },
       cancel() {
         secureSocket?.destroy();
@@ -259,7 +266,7 @@ function fetchHttpsStreamThroughProxy(
 
           const bodyChunk = headerBuffer.subarray(headerEndIndex + 4);
           if (bodyChunk.length > 0) {
-            enqueueProxyStreamChunk(
+            const enqueued = enqueueProxyStreamChunk(
               bodyChunk,
               options.maxBytes,
               (nextBytes) => {
@@ -269,11 +276,15 @@ function fetchHttpsStreamThroughProxy(
               controllerRef,
               fail,
             );
+            if (enqueued && shouldPauseWebStream(controllerRef)) {
+              socketPaused = true;
+              secureSocket?.pause();
+            }
           }
           return;
         }
 
-        enqueueProxyStreamChunk(
+        const enqueued = enqueueProxyStreamChunk(
           chunk,
           options.maxBytes,
           (nextBytes) => {
@@ -283,6 +294,10 @@ function fetchHttpsStreamThroughProxy(
           controllerRef,
           fail,
         );
+        if (enqueued && shouldPauseWebStream(controllerRef)) {
+          socketPaused = true;
+          secureSocket?.pause();
+        }
       });
       secureSocket.once('end', () => {
         controllerRef?.close();
@@ -553,10 +568,15 @@ function headersFromNodeHeaders(
 }
 
 function nodeStreamToReadableStream(
-  stream: NodeJS.ReadableStream & { destroy(error?: Error): void },
+  stream: NodeJS.ReadableStream & {
+    destroy(error?: Error): void;
+    pause(): void;
+    resume(): void;
+  },
   maxBytes: number,
 ): ReadableStream<Uint8Array> {
   let total = 0;
+  let paused = false;
 
   return new ReadableStream<Uint8Array>({
     start(controller) {
@@ -568,6 +588,10 @@ function nodeStreamToReadableStream(
           return;
         }
         controller.enqueue(chunk);
+        if (shouldPauseWebStream(controller)) {
+          paused = true;
+          stream.pause();
+        }
       });
       stream.once('end', () => {
         controller.close();
@@ -579,6 +603,12 @@ function nodeStreamToReadableStream(
     cancel() {
       stream.destroy();
     },
+    pull() {
+      if (paused) {
+        paused = false;
+        stream.resume();
+      }
+    },
   });
 }
 
@@ -589,14 +619,22 @@ function enqueueProxyStreamChunk(
   currentBytes: number,
   controller: ReadableStreamDefaultController<Uint8Array> | null,
   fail: (error: Error) => void,
-) {
+): boolean {
   const nextBytes = currentBytes + chunk.byteLength;
   if (nextBytes > maxBytes) {
     fail(new Error('代理响应过大'));
-    return;
+    return false;
   }
   setTotal(nextBytes);
   controller?.enqueue(chunk);
+  return true;
+}
+
+function shouldPauseWebStream(
+  controller: ReadableStreamDefaultController<Uint8Array> | null,
+): boolean {
+  const desiredSize = controller?.desiredSize;
+  return typeof desiredSize === 'number' && desiredSize <= 0;
 }
 
 function getDefaultPort(url: URL): string {

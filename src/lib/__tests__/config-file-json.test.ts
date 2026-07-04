@@ -1,4 +1,4 @@
-import type { AdminConfig } from '@/features/admin/types/api';
+﻿import type { AdminConfig } from '@/types/admin';
 
 import {
   buildConfigFileFromAdminConfig,
@@ -94,6 +94,10 @@ describe('buildConfigFileFromAdminConfig', () => {
         SiteIcon: '',
         Announcement: '',
         EnableLiveEntry: false,
+        DefaultAggregateSearch: true,
+        EnableOptimization: true,
+        AutoSwitchSourceOnTimeout: false,
+        LiveDirectConnect: false,
         SearchDownstreamMaxPage: 5,
         SiteInterfaceCacheTime: 7200,
         DoubanProxyType: 'direct',

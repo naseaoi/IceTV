@@ -1,13 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 
-export const runtime = 'nodejs';
+import { isSecureRequest } from '@/lib/auth.server';
 
-function isSecureRequest(req: NextRequest): boolean {
-  return (
-    req.nextUrl.protocol === 'https:' ||
-    req.headers.get('x-forwarded-proto') === 'https'
-  );
-}
+export const runtime = 'nodejs';
 
 export async function POST(req: NextRequest) {
   const response = NextResponse.json({ ok: true });

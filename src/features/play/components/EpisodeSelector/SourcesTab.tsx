@@ -11,6 +11,7 @@ import {
   getSourceFailure,
   type SourceFailureInfo,
 } from '@/lib/failed-source-cooldown';
+import { readEnableOptimization } from '@/lib/local-preferences';
 import { collapseSourcesForDisplay } from '@/lib/source-bundle';
 import { normalizeTitleForSourceMatch } from '@/lib/source-match';
 import { SearchResult } from '@/lib/types';
@@ -212,17 +213,11 @@ export const SourcesTab: React.FC<SourcesTabProps> = ({
   const [isCurrentInView, setIsCurrentInView] = useState(true);
 
   const [optimizationEnabled] = useState<boolean>(() => {
-    if (typeof window !== 'undefined') {
-      const saved = localStorage.getItem('enableOptimization');
-      if (saved !== null) {
-        try {
-          return JSON.parse(saved);
-        } catch {
-          /* ignore */
-        }
-      }
+    if (typeof window === 'undefined') {
+      return true;
     }
-    return true;
+
+    return readEnableOptimization();
   });
 
   const displaySources = useMemo(

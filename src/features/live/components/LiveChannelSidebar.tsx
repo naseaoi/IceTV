@@ -1,8 +1,11 @@
-import { MutableRefObject, ReactNode, useEffect, useMemo, useRef } from 'react';
+﻿import { MutableRefObject, ReactNode, useEffect, useMemo, useRef } from 'react';
 
 import { Clock, Heart, Radio, Target, Tv } from 'lucide-react';
 
-import { formatTimeToHHMM, parseCustomTimeFormat } from '@/lib/time';
+import {
+  formatTimeToHHMM,
+  parseCustomTimeFormat,
+} from '@/features/live/lib/time';
 
 import type {
   EpgData,

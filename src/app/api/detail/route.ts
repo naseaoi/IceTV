@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 
 import { isGuardFailure, requireActiveUser } from '@/lib/api-auth';
-import { getAvailableApiSites, getCacheTime, getConfig } from '@/lib/config';
+import { getAvailableApiSites, getConfigForRead } from '@/lib/config';
 import { getDetailFromApi } from '@/lib/downstream';
 import { createSwrCache } from '@/lib/server-cache';
 
@@ -34,8 +34,7 @@ export async function GET(request: NextRequest) {
   }
 
   try {
-    const config = await getConfig();
-    const cacheTime = getCacheTime(config);
+    const config = await getConfigForRead();
     const apiSites = await getAvailableApiSites(guardResult.username, config);
     const apiSite = apiSites.find((site) => site.key === sourceCode);
 
@@ -51,16 +50,7 @@ export async function GET(request: NextRequest) {
 
     return NextResponse.json(result, {
       headers: {
-        'Cache-Control': IS_DEVELOPMENT
-          ? 'no-store'
-          : `public, max-age=${cacheTime}, s-maxage=${cacheTime}`,
-        'CDN-Cache-Control': IS_DEVELOPMENT
-          ? 'no-store'
-          : `public, s-maxage=${cacheTime}`,
-        'Vercel-CDN-Cache-Control': IS_DEVELOPMENT
-          ? 'no-store'
-          : `public, s-maxage=${cacheTime}`,
-        'Netlify-Vary': 'query',
+        'Cache-Control': 'private, no-store',
       },
     });
   } catch (error) {

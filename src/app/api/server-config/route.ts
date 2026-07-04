@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 
 import { getOptionalActiveUser } from '@/lib/api-auth';
-import { getConfig, getPublicConfig } from '@/lib/config';
+import { getConfigForRead, getPublicConfig } from '@/lib/config';
 import { DEFAULT_RUNTIME_CONFIG } from '@/lib/runtime-config';
 import { getStorageType } from '@/lib/storage-type';
 import { CURRENT_UPDATE_BRANCH, CURRENT_VERSION } from '@/lib/version';
@@ -46,7 +46,7 @@ export async function GET(request: NextRequest) {
   const activeUser = await getOptionalActiveUser(request);
   const canReadSensitiveConfig = !!activeUser;
   const publicConfig = await getPublicConfig();
-  const config = await getConfig();
+  const config = await getConfigForRead();
   const doubanProxyType = canReadSensitiveConfig
     ? config.SiteConfig.DoubanProxyType
     : getPublicDoubanProxyType(config.SiteConfig.DoubanProxyType);
@@ -79,6 +79,10 @@ export async function GET(request: NextRequest) {
       : DEFAULT_RUNTIME_CONFIG.DOUBAN_IMAGE_PROXY,
     DisableYellowFilter: publicConfig.DisableYellowFilter,
     EnableLiveEntry: publicConfig.EnableLiveEntry,
+    DefaultAggregateSearch: publicConfig.DefaultAggregateSearch,
+    EnableOptimization: publicConfig.EnableOptimization,
+    AutoSwitchSourceOnTimeout: publicConfig.AutoSwitchSourceOnTimeout,
+    LiveDirectConnect: publicConfig.LiveDirectConnect,
     CustomCategories: publicConfig.CustomCategories,
     FluidSearch: publicConfig.FluidSearch,
   };
@@ -87,6 +91,7 @@ export async function GET(request: NextRequest) {
       'Cache-Control': canReadSensitiveConfig
         ? 'private, max-age=60, stale-while-revalidate=300'
         : 'public, max-age=60, stale-while-revalidate=300',
+      Vary: 'Cookie',
     },
   });
 }

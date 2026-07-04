@@ -26,6 +26,13 @@ export function ConfigureUserApisDialog({
   onSave,
   isSaving,
 }: ConfigureUserApisDialogProps) {
+  const selectableApiKeys = sources
+    .filter((source) => !source.disabled)
+    .map((source) => source.key);
+  const isAllSelected =
+    selectableApiKeys.length > 0 &&
+    selectableApiKeys.every((key) => selectedApis.includes(key));
+
   return (
     <AdminDialog
       isOpen={isOpen}
@@ -54,15 +61,30 @@ export function ConfigureUserApisDialog({
             </span>
           </div>
           <p className='mt-1 text-sm text-blue-700 dark:text-blue-400'>
-            提示：全不选为无限制，选中的采集源将限制用户只能访问这些源
+            全不选为无限制，选中的采集源将限制用户只能访问这些源
           </p>
         </div>
       </div>
 
       <div className='mb-6'>
-        <h4 className='mb-4 text-sm font-medium text-gray-700 dark:text-gray-300'>
-          选择可用的采集源：
-        </h4>
+        <div className='mb-4 flex items-center justify-between gap-3'>
+          <h4 className='text-sm font-medium text-gray-700 dark:text-gray-300'>
+            选择可用的采集源：
+          </h4>
+          <label className='flex items-center gap-2 text-sm text-gray-600 dark:text-gray-400'>
+            <input
+              type='checkbox'
+              checked={isAllSelected}
+              onChange={(event) =>
+                onSelectedApisChange(
+                  event.target.checked ? selectableApiKeys : [],
+                )
+              }
+              className='rounded border-gray-300 text-blue-600 focus:ring-blue-500 dark:border-gray-600 dark:bg-gray-700 dark:text-blue-500'
+            />
+            全选
+          </label>
+        </div>
         <ApiSourcePicker
           sources={sources}
           selected={selectedApis}

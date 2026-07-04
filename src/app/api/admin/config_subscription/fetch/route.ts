@@ -1,6 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server';
 
 import { isGuardFailure, requireOwner } from '@/lib/api-auth';
+import {
+  decodeConfigSubscriptionContent,
+  readConfigSubscriptionText,
+} from '@/lib/config-subscription';
 import { fetchWithUrlGuard, UrlValidationError } from '@/lib/url-guard';
 
 export const runtime = 'nodejs';
@@ -18,7 +22,6 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: '缺少URL参数' }, { status: 400 });
     }
 
-    // 直接 fetch URL 获取配置内容
     const response = await fetchWithUrlGuard(url);
 
     if (!response.ok) {
@@ -28,14 +31,11 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const configContent = await response.text();
+    const configContent = await readConfigSubscriptionText(response);
 
-    // 对 configContent 进行 base58 解码
     let decodedContent;
     try {
-      const bs58 = (await import('bs58')).default;
-      const decodedBytes = bs58.decode(configContent);
-      decodedContent = new TextDecoder().decode(decodedBytes);
+      decodedContent = await decodeConfigSubscriptionContent(configContent);
     } catch (decodeError) {
       console.warn('Base58 解码失败', decodeError);
       throw decodeError;

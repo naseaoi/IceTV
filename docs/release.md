@@ -9,6 +9,22 @@
 - 正式 tag 会构建 Docker 镜像和 GitHub Release；dev 测试 tag 只构建 Docker 镜像。
 - `CHANGELOG.md`、`public/changelog.json` 和 GitHub Release 面向普通用户，不写内部发布流程、CI、测试、重构、文档维护等实现细节。
 
+## 版本关系
+
+- `main` 上的最新正式版决定当前稳定版本，例如 `v0.4.2`。
+- `dev` 上继续开发下一个正式版本，例如 `0.4.3`。
+- `dev` 阶段的测试发布只在 `dev` 分支打 tag，例如 `v0.4.3-dev.1`、`v0.4.3-dev.2`。
+- `dev` tag 只表达预发布序号，不要求同步修改 `CHANGELOG.md`、`package.json`、`public/changelog.json`。
+- `v0.4.3-dev.N` 只触发 dev 镜像构建，不创建 GitHub Release，不更新正式版 `latest`。
+- `dev` 验证完成后，再整理 `CHANGELOG.md`、`package.json`、`public/changelog.json` 为 `0.4.3`，发起 `dev -> main` PR；合并到 `main` 的同一版本提交再打正式 tag `v0.4.3`。
+
+示例：
+
+- 当前 `main` 为 `v0.4.2`
+- 当前 `dev` 正在验证 `0.4.3`
+- 测试阶段依次推送 `v0.4.3-dev.1`、`v0.4.3-dev.2`
+- 验证完成后，更新版本文件并发起 `dev -> main` 合并，最后在 `main` 上打 `v0.4.3`
+
 ## Dev 镜像测试
 
 `dev` 分支不会因普通 push 构建镜像。需要线上测试时，在目标提交上推送预发布 tag：
@@ -26,6 +42,12 @@ git push origin v0.4.2-dev.1
 - `ghcr.io/naseaoi/icetv:0.4.2-dev.1`
 
 dev tag 不更新 `latest`，也不创建 GitHub Release。
+
+dev tag 阶段不改：
+
+- `CHANGELOG.md`
+- `package.json`
+- `public/changelog.json`
 
 ## 发布说明规则
 
@@ -81,6 +103,8 @@ git push origin dev
 - `public/changelog.json`
 
 ## 3. 更新版本
+
+以下步骤只用于正式版发布，不用于 `dev` tag 测试。
 
 在 `CHANGELOG.md` 顶部新增版本条目：
 

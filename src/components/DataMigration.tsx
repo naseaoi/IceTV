@@ -1,9 +1,10 @@
-'use client';
+﻿'use client';
 
 import { AlertTriangle, Download, FileCheck, Lock, Upload } from 'lucide-react';
 import { useRef, useState } from 'react';
 
-import AlertModal from '@/features/admin/components/AlertModal';
+import AlertModal from '@/components/modals/AlertModal';
+import { PasswordInput } from '@/components/PasswordInput';
 
 interface DataMigrationProps {
   onRefreshConfig?: () => Promise<void>;
@@ -233,12 +234,11 @@ const DataMigration = ({ onRefreshConfig }: DataMigrationProps) => {
                     <Lock className='h-4 w-4' />
                     加密密码
                   </label>
-                  <input
-                    type='password'
+                  <PasswordInput
                     value={exportPassword}
                     onChange={(e) => setExportPassword(e.target.value)}
                     placeholder='设置强密码保护备份文件'
-                    className='w-full rounded-lg border border-gray-300 bg-white px-3 py-2.5 text-gray-900 transition-colors focus:border-blue-500 focus:ring-2 focus:ring-blue-500 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-100'
+                    className='w-full rounded-lg border border-gray-300 bg-white px-3 py-2.5 pr-10 text-gray-900 transition-colors focus:border-blue-500 focus:ring-2 focus:ring-blue-500 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-100'
                     disabled={isExporting}
                   />
                   <p className='mt-1 text-xs text-gray-500 dark:text-gray-400'>
@@ -331,12 +331,11 @@ const DataMigration = ({ onRefreshConfig }: DataMigrationProps) => {
                     <Lock className='h-4 w-4' />
                     解密密码
                   </label>
-                  <input
-                    type='password'
+                  <PasswordInput
                     value={importPassword}
                     onChange={(e) => setImportPassword(e.target.value)}
                     placeholder='输入导出时的加密密码'
-                    className='w-full rounded-lg border border-gray-300 bg-white px-3 py-2.5 text-gray-900 transition-colors focus:border-red-500 focus:ring-2 focus:ring-red-500 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-100'
+                    className='w-full rounded-lg border border-gray-300 bg-white px-3 py-2.5 pr-10 text-gray-900 transition-colors focus:border-red-500 focus:ring-2 focus:ring-red-500 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-100'
                     disabled={isImporting}
                   />
                 </div>

@@ -1,7 +1,7 @@
-'use client';
+﻿'use client';
 
 import AdminDialog from '@/features/admin/components/AdminDialog';
-import AdminSelect from '@/features/admin/components/AdminSelect';
+import AdminSelect from '@/components/admin/AdminSelect';
 import { buttonStyles } from '@/features/admin/lib/buttonStyles';
 
 interface UserGroupOption {
@@ -58,7 +58,7 @@ export function ConfigureUserGroupDialog({
             </span>
           </div>
           <p className='mt-1 text-sm text-blue-700 dark:text-blue-400'>
-            提示：选择&ldquo;无用户组&rdquo;为无限制，选择特定用户组将限制用户只能访问该用户组允许的采集源
+            选择&ldquo;无用户组&rdquo;为无限制，选择特定用户组将限制用户只能访问该用户组允许的采集源
           </p>
         </div>
       </div>
@@ -83,9 +83,6 @@ export function ConfigureUserGroupDialog({
           ]}
           placeholder='无用户组（无限制）'
         />
-        <p className='mt-2 text-xs text-gray-500 dark:text-gray-400'>
-          选择&ldquo;无用户组&rdquo;为无限制，选择特定用户组将限制用户只能访问该用户组允许的采集源
-        </p>
       </div>
 
       <div className='flex justify-end space-x-3'>

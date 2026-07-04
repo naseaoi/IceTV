@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 
 import { isGuardFailure, requireActiveUser } from '@/lib/api-auth';
-import { getAvailableApiSites, getCacheTime, getConfig } from '@/lib/config';
+import { getAvailableApiSites, getConfigForRead } from '@/lib/config';
 import { searchFromApi } from '@/lib/downstream';
 import { yellowWords } from '@/lib/yellow';
 
@@ -17,22 +17,13 @@ export async function GET(request: NextRequest) {
   const resourceId = searchParams.get('resourceId');
 
   if (!query || !resourceId) {
-    const cacheTime = await getCacheTime();
     return NextResponse.json(
       { result: null, error: '缺少必要参数: q 或 resourceId' },
-      {
-        headers: {
-          'Cache-Control': `public, max-age=${cacheTime}, s-maxage=${cacheTime}`,
-          'CDN-Cache-Control': `public, s-maxage=${cacheTime}`,
-          'Vercel-CDN-Cache-Control': `public, s-maxage=${cacheTime}`,
-          'Netlify-Vary': 'query',
-        },
-      },
+      { headers: { 'Cache-Control': 'private, no-store' } },
     );
   }
 
-  const config = await getConfig();
-  const cacheTime = getCacheTime(config);
+  const config = await getConfigForRead();
   const apiSites = await getAvailableApiSites(guardResult.username, config);
   const maxSearchPages = config.SiteConfig.SearchDownstreamMaxPage;
 
@@ -68,14 +59,7 @@ export async function GET(request: NextRequest) {
     } else {
       return NextResponse.json(
         { results: result },
-        {
-          headers: {
-            'Cache-Control': `public, max-age=${cacheTime}, s-maxage=${cacheTime}`,
-            'CDN-Cache-Control': `public, s-maxage=${cacheTime}`,
-            'Vercel-CDN-Cache-Control': `public, s-maxage=${cacheTime}`,
-            'Netlify-Vary': 'query',
-          },
-        },
+        { headers: { 'Cache-Control': 'private, no-store' } },
       );
     }
   } catch (error) {

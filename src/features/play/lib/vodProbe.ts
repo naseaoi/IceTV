@@ -1,9 +1,13 @@
-import { getVideoResolutionFromM3u8 } from '@/lib/hls-utils';
+﻿import { getVideoResolutionFromM3u8 } from '@/features/play/lib/hls-utils';
 import { formatBytesPerSecond } from '@/lib/player-utils';
+import { isLazyEpisodeUrl } from '@/lib/lazy-episodes';
 import {
   clearSourceProxyOverride,
   rememberSourceServerProxy,
 } from '@/lib/proxy-modes';
+import { createTimedAbortController } from '@/lib/downstream-sources/shared';
+
+import { resolveLazyEpisodeUrl } from '@/features/play/lib/lazyEpisode';
 
 import {
   buildVodSegmentProxyUrl,
@@ -20,16 +24,6 @@ export type VodProbeResult = {
 const MP4_PROBE_TIMEOUT_MS = 8_000;
 const MP4_PROBE_MAX_BYTES = 256 * 1024;
 const MP4_PROBE_MIN_SPEED_BYTES = 32 * 1024;
-
-function withAbortTimeout(timeoutMs: number) {
-  const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
-
-  return {
-    signal: controller.signal,
-    cleanup: () => clearTimeout(timeoutId),
-  };
-}
 
 function buildMp4ProbeUrl(
   rawUrl: string,
@@ -86,7 +80,10 @@ async function probeMp4WithMode(
   sourceKey: string,
 ): Promise<VodProbeResult> {
   const url = buildMp4ProbeUrl(rawUrl, useProxy, sourceKey);
-  const abortState = withAbortTimeout(MP4_PROBE_TIMEOUT_MS);
+  const abortState = createTimedAbortController(
+    undefined,
+    MP4_PROBE_TIMEOUT_MS,
+  );
   const startedAt = performance.now();
 
   try {
@@ -153,12 +150,16 @@ export async function probeVodEpisodeUrl(
   useProxy: boolean,
   sourceKey: string,
 ): Promise<VodProbeResult> {
-  if (isVodM3u8Url(rawUrl)) {
-    return getVideoResolutionFromM3u8(rawUrl, useProxy, sourceKey);
+  const targetUrl = isLazyEpisodeUrl(rawUrl)
+    ? await resolveLazyEpisodeUrl(sourceKey, rawUrl)
+    : rawUrl;
+
+  if (isVodM3u8Url(targetUrl)) {
+    return getVideoResolutionFromM3u8(targetUrl, useProxy, sourceKey);
   }
 
-  if (isVodMp4Url(rawUrl)) {
-    return probeMp4(rawUrl, useProxy, sourceKey);
+  if (isVodMp4Url(targetUrl)) {
+    return probeMp4(targetUrl, useProxy, sourceKey);
   }
 
   throw new Error('Unsupported vod url for probe');

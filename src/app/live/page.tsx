@@ -1,8 +1,7 @@
 import { notFound } from 'next/navigation';
 
+import LivePageClient from '@/features/live/LivePageClient';
 import { getPublicConfig } from '@/lib/config';
-
-import LivePageClient from './LivePageClient';
 
 export default async function LivePage() {
   const config = await getPublicConfig();

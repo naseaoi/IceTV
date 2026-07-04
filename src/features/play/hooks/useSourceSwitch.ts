@@ -1,4 +1,4 @@
-'use client';
+﻿'use client';
 
 import type Artplayer from 'artplayer';
 import {
@@ -33,7 +33,8 @@ import {
   resolveSourceSwitchResumeState,
   type SourceSwitchEpisodeAnchor,
 } from '@/features/play/lib/episodeResumePolicy';
-import { savePlayIntent } from '@/features/play/lib/playIntent';
+import { saveDetailSnapshot } from '@/features/play/lib/detailSnapshot';
+import { savePlayIntent } from '@/lib/play-intent';
 import {
   finalizeSourceSwitchCleanup,
   shouldFinalizeSourceSwitchCleanup,
@@ -287,6 +288,7 @@ export function useSourceSwitch(options: UseSourceSwitchOptions) {
           if (detailRes.ok) {
             const fullDetail = (await detailRes.json()) as SearchResult;
             if (fullDetail.episodes && fullDetail.episodes.length > 0) {
+              saveDetailSnapshot(newSource, newId, fullDetail);
               newDetail = mergeSourceSwitchDetail(
                 fullDetail,
                 targetSource,

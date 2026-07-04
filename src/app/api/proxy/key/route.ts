@@ -1,11 +1,11 @@
-import { NextRequest, NextResponse } from 'next/server';
+﻿import { NextRequest, NextResponse } from 'next/server';
 
 import { authorizeProxyRequest } from '@/lib/proxy-auth';
 import {
   fetchResponseThroughProxy,
   getProxyUrlForTarget,
 } from '@/lib/http-proxy-json';
-import { isLiveEntryEnabled } from '@/lib/live';
+import { isLiveEntryEnabled } from '@/features/live/lib/live';
 import { markSourceCors, responseAllowsCors } from '@/lib/source-capability';
 import {
   readArrayBufferLimited,
@@ -32,22 +32,18 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ error: 'Missing url' }, { status: 400 });
   }
 
+  const authFailure = await authorizeProxyRequest(request, 'key', url);
+  if (authFailure) {
+    return authFailure;
+  }
+
   if (isLiveStream && !(await isLiveEntryEnabled())) {
     return NextResponse.json({ error: '直播未开启' }, { status: 404 });
   }
 
   const validation = await validateProxyUrlForRequest(url);
   if (!validation.ok) {
-    return NextResponse.json({ error: validation.reason }, { status: 403 });
-  }
-
-  const authFailure = await authorizeProxyRequest(
-    request,
-    'key',
-    validation.url,
-  );
-  if (authFailure) {
-    return authFailure;
+    return NextResponse.json({ error: 'Invalid URL' }, { status: 403 });
   }
 
   const ua = await resolveProxyUserAgent(source);
@@ -82,7 +78,9 @@ export async function GET(request: NextRequest) {
               'Cache-Control': 'no-cache',
             },
           });
-        } catch {}
+        } catch (proxyError) {
+          console.warn('代理 key 环境代理回源失败:', proxyError);
+        }
       }
     }
 
@@ -90,6 +88,7 @@ export async function GET(request: NextRequest) {
       headers: {
         'User-Agent': ua,
       },
+      skipInitialValidation: true,
     });
     if (!response.ok) {
       return NextResponse.json(
@@ -110,12 +109,12 @@ export async function GET(request: NextRequest) {
           response.headers.get('Content-Type') || 'application/octet-stream',
         'Access-Control-Allow-Origin': '*',
         'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
-        'Cache-Control': 'public, max-age=3600',
+        'Cache-Control': 'private, max-age=3600',
       },
     });
   } catch (error) {
     if (error instanceof UrlValidationError) {
-      return NextResponse.json({ error: error.reason }, { status: 403 });
+      return NextResponse.json({ error: 'Invalid URL' }, { status: 403 });
     }
     if (error instanceof ResponseSizeLimitError) {
       return NextResponse.json({ error: error.message }, { status: 413 });

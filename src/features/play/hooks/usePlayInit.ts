@@ -7,6 +7,10 @@ import { prefetchM3U8 } from '@/lib/player-runtime';
 import { getProxyModes, shouldUseServerProxy } from '@/lib/proxy-modes';
 
 import { calculateSourceScore } from '@/features/play/lib/playUtils';
+import {
+  readDetailSnapshot,
+  saveDetailSnapshot,
+} from '@/features/play/lib/detailSnapshot';
 import { probeVodEpisodeUrl } from '@/features/play/lib/vodProbe';
 import { isVodM3u8Url } from '@/features/play/lib/vodProxyUrl';
 
@@ -249,6 +253,16 @@ export function updateVideoUrl(
   }
 }
 
+function hasDetailContentChange(
+  prev: SearchResult,
+  next: SearchResult,
+): boolean {
+  return (
+    next.episodes.length !== prev.episodes.length ||
+    (!!next.title && next.title !== prev.title)
+  );
+}
+
 function mergeSourceResult(
   preferred: SearchResult,
   fallback?: SearchResult,
@@ -351,6 +365,44 @@ export function usePlayInit({
     const abortController = new AbortController();
     const { signal } = abortController;
 
+    const fetchDetailData = async (
+      source: string,
+      id: string,
+    ): Promise<SearchResult> => {
+      const detailResponse = await fetch(
+        `/api/detail?source=${source}&id=${id}`,
+        IS_DEVELOPMENT ? { signal, cache: 'no-store' } : { signal },
+      );
+      if (!detailResponse.ok) {
+        throw new Error('获取视频详情失败');
+      }
+      const detailData = (await detailResponse.json()) as SearchResult;
+      setCachedDetail(source, id, detailData);
+      saveDetailSnapshot(source, id, detailData);
+      return detailData;
+    };
+
+    // 快照秒播后后台刷新详情，追更时更新界面
+    const revalidateDetailSnapshot = (
+      source: string,
+      id: string,
+      snapshot: SearchResult,
+    ) => {
+      void fetchDetailData(source, id)
+        .then((fresh) => {
+          if (signal.aborted) return;
+          if (!fresh.episodes || fresh.episodes.length === 0) return;
+          if (!hasDetailContentChange(snapshot, fresh)) return;
+          setDetail((prev) =>
+            prev && prev.source === source && prev.id === id
+              ? mergeSourceResult(fresh, prev)
+              : prev,
+          );
+          setAvailableSources((prev) => mergeSourceBundle(prev, fresh));
+        })
+        .catch(() => undefined);
+    };
+
     const fetchSourceDetail = async (
       source: string,
       id: string,
@@ -361,16 +413,13 @@ export function usePlayInit({
           if (!signal.aborted) setSourceSearchLoading(false);
           return cached;
         }
-        const detailResponse = await fetch(
-          `/api/detail?source=${source}&id=${id}`,
-          IS_DEVELOPMENT ? { signal, cache: 'no-store' } : { signal },
-        );
-        if (!detailResponse.ok) {
-          throw new Error('获取视频详情失败');
+        const snapshot = readDetailSnapshot(source, id);
+        if (snapshot) {
+          if (!signal.aborted) setSourceSearchLoading(false);
+          revalidateDetailSnapshot(source, id, snapshot);
+          return snapshot;
         }
-        const detailData = (await detailResponse.json()) as SearchResult;
-        setCachedDetail(source, id, detailData);
-        return detailData;
+        return await fetchDetailData(source, id);
       } catch (err) {
         if (signal.aborted) return null;
         console.error('获取视频详情失败:', err);
@@ -397,12 +446,20 @@ export function usePlayInit({
           searchType:
             searchType === 'tv' || searchType === 'movie' ? searchType : '',
         });
-        setAvailableSources(results);
+        // 保留已通过 detail 补全的条目（搜索可能晚于详情先行路径完成）
+        setAvailableSources((prev) => {
+          const detailed = prev.filter(
+            (item) => item.episodes && item.episodes.length > 0,
+          );
+          return detailed.reduce(
+            (acc, item) => mergeSourceBundle(acc, item),
+            results,
+          );
+        });
         return results;
       } catch (err) {
         if (signal.aborted) return [];
         setSourceSearchError(err instanceof Error ? err.message : '搜索失败');
-        setAvailableSources([]);
         return [];
       } finally {
         if (!signal.aborted) setSourceSearchLoading(false);
@@ -424,6 +481,40 @@ export function usePlayInit({
       return null;
     };
 
+    const finalizePlaybackDetail = async (detailData: SearchResult) => {
+      setNeedPrefer(false);
+      setCurrentSource(detailData.source);
+      setCurrentId(detailData.id);
+      // 防御：detailData.year 为 unknown 时保留 URL 参数中的年份
+      const resolvedYear =
+        detailData.year && detailData.year !== 'unknown'
+          ? detailData.year
+          : videoYearRef.current || detailData.year;
+      setVideoYear(resolvedYear);
+      setVideoTitle(detailData.title || videoTitleRef.current);
+      setVideoCover(detailData.poster);
+      setVideoDoubanId(detailData.douban_id || 0);
+      setDetail(detailData);
+      if (currentEpisodeIndex >= detailData.episodes.length) {
+        setCurrentEpisodeIndex(0);
+      }
+
+      // 规范URL参数
+      const newUrl = new URL(window.location.href);
+      newUrl.searchParams.set('source', detailData.source);
+      newUrl.searchParams.set('id', detailData.id);
+      newUrl.searchParams.set('year', resolvedYear);
+      newUrl.searchParams.set('title', detailData.title);
+      newUrl.searchParams.delete('prefer');
+      window.history.replaceState({}, '', newUrl.toString());
+
+      setLoadingStage('ready');
+      setLoadingMessage('准备就绪，即将开始播放...');
+      // 保留很短的过渡，避免 loading 文案闪烁。
+      await new Promise((r) => setTimeout(r, 200));
+      setLoading(false);
+    };
+
     const initAll = async () => {
       if (signal.aborted) return;
       if (!currentSource && !currentId && !videoTitle && !searchTitle) {
@@ -441,6 +532,24 @@ export function usePlayInit({
 
       // 优先使用搜索页通过 sessionStorage 传递的聚合组数据，避免重新搜索导致源站列表不一致
       const cachedGroup = loadAggregateGroup();
+
+      // 指定源且无需优选时详情先行直接起播，聚合搜索转入后台补齐换源列表
+      if (
+        !cachedGroup &&
+        currentSource &&
+        currentId &&
+        !needPreferRef.current
+      ) {
+        const fastDetail = await fetchSourceDetail(currentSource, currentId);
+        if (signal.aborted) return;
+        if (fastDetail?.episodes && fastDetail.episodes.length > 0) {
+          setAvailableSources(mergeSourceBundle([], fastDetail));
+          void fetchSourcesData(searchTitle || videoTitle);
+          await finalizePlaybackDetail(fastDetail);
+          return;
+        }
+      }
+
       let sourcesInfo: SearchResult[];
       if (cachedGroup) {
         sourcesInfo = filterSourcesForPlayback(cachedGroup, {
@@ -526,37 +635,7 @@ export function usePlayInit({
       }
 
       if (signal.aborted) return;
-      setNeedPrefer(false);
-      setCurrentSource(detailData.source);
-      setCurrentId(detailData.id);
-      // 防御：detailData.year 为 unknown 时保留 URL 参数中的年份
-      const resolvedYear =
-        detailData.year && detailData.year !== 'unknown'
-          ? detailData.year
-          : videoYearRef.current || detailData.year;
-      setVideoYear(resolvedYear);
-      setVideoTitle(detailData.title || videoTitleRef.current);
-      setVideoCover(detailData.poster);
-      setVideoDoubanId(detailData.douban_id || 0);
-      setDetail(detailData);
-      if (currentEpisodeIndex >= detailData.episodes.length) {
-        setCurrentEpisodeIndex(0);
-      }
-
-      // 规范URL参数
-      const newUrl = new URL(window.location.href);
-      newUrl.searchParams.set('source', detailData.source);
-      newUrl.searchParams.set('id', detailData.id);
-      newUrl.searchParams.set('year', resolvedYear);
-      newUrl.searchParams.set('title', detailData.title);
-      newUrl.searchParams.delete('prefer');
-      window.history.replaceState({}, '', newUrl.toString());
-
-      setLoadingStage('ready');
-      setLoadingMessage('准备就绪，即将开始播放...');
-      // 保留很短的过渡，避免 loading 文案闪烁。
-      await new Promise((r) => setTimeout(r, 200));
-      setLoading(false);
+      await finalizePlaybackDetail(detailData);
     };
 
     initAll();

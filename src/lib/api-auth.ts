@@ -1,12 +1,10 @@
-import { NextRequest, NextResponse } from 'next/server';
+﻿import { NextRequest, NextResponse } from 'next/server';
 
-import {
-  getAuthInfoFromCookie,
-  getSignatureData,
-  verifySignature,
-} from './auth';
-import { getConfig } from './config';
-import { getOwnerPassword, getOwnerUsername } from './env.server';
+import { getAuthInfoFromCookie, getSignatureData } from './auth.server';
+import { getConfigForRead } from './config';
+import { getOwnerUsername } from './env.server';
+import { verifyAuthSignature } from './signing-secret.server';
+import { normalizeUsername } from './username';
 
 type RequireActiveUserOptions = {
   unauthorizedMessage?: string;
@@ -86,8 +84,7 @@ export async function requireActiveUser(
     };
   }
 
-  const secret = getOwnerPassword();
-  if (!secret || authInfo.sessionType !== 'account') {
+  if (authInfo.sessionType !== 'account') {
     return {
       response: NextResponse.json(
         { error: unauthorizedMessage },
@@ -102,7 +99,9 @@ export async function requireActiveUser(
     authInfo.username,
   );
 
-  const isValid = await verifySignature(signData, authInfo.signature, secret);
+  const isValid = await verifyAuthSignature(signData, authInfo.signature, {
+    allowLegacyOwnerPassword: true,
+  });
   if (!isValid) {
     return {
       response: NextResponse.json(
@@ -112,16 +111,17 @@ export async function requireActiveUser(
     };
   }
 
-  const username = authInfo.username;
-  const isOwner = username === getOwnerUsername();
+  const cookieUsername = authInfo.username;
+  const isOwner = cookieUsername === getOwnerUsername();
   if (isOwner) {
     return {
-      username,
+      username: cookieUsername,
       isOwner,
     };
   }
 
-  const config = await getConfig();
+  const username = normalizeUsername(cookieUsername);
+  const config = await getConfigForRead();
   const user = config.UserConfig.Users.find(
     (entry) => entry.username === username,
   );
@@ -187,7 +187,7 @@ export async function requireAdmin(
     };
   }
 
-  const config = await getConfig();
+  const config = await getConfigForRead();
   const user = config.UserConfig.Users.find(
     (entry) => entry.username === guardResult.username,
   );

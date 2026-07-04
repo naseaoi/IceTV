@@ -1,4 +1,4 @@
-import {
+﻿import {
   Dispatch,
   MutableRefObject,
   SetStateAction,
@@ -9,7 +9,7 @@ import {
 
 import { useRouter, useSearchParams } from 'next/navigation';
 
-import { parseCustomTimeFormat } from '@/lib/time';
+import { parseCustomTimeFormat } from '@/features/live/lib/time';
 
 import type {
   EpgData,

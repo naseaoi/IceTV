@@ -1,11 +1,11 @@
-'use client';
+﻿'use client';
 
 import { useCallback } from 'react';
 
 import { adminGet } from '@/features/admin/lib/api';
 import { showError, showSuccess } from '@/features/admin/lib/notifications';
-import { type ShowAlertFn } from '@/features/admin/hooks/useAlertModal';
-import { type AdminConfigResult } from '@/features/admin/types/api';
+import { type ShowAlertFn } from '@/hooks/useAlertModal';
+import { type AdminConfigResult } from '@/types/admin';
 
 interface UseAdminPageActionsOptions {
   showAlert: ShowAlertFn;

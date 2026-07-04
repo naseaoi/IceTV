@@ -1,0 +1,73 @@
+export interface AdminConfig {
+  ConfigSubscribtion: {
+    URL: string;
+    AutoUpdate: boolean;
+    LastCheck: string;
+  };
+  ConfigFile: string;
+  SiteConfig: {
+    SiteName: string;
+    SiteIcon: string;
+    Announcement: string;
+    EnableLiveEntry: boolean;
+    DefaultAggregateSearch: boolean;
+    EnableOptimization: boolean;
+    AutoSwitchSourceOnTimeout: boolean;
+    LiveDirectConnect: boolean;
+    SearchDownstreamMaxPage: number;
+    SiteInterfaceCacheTime: number;
+    DoubanProxyType: string;
+    DoubanProxy: string;
+    BangumiDataSource: string;
+    BangumiProxy: string;
+    DoubanImageProxyType: string;
+    DoubanImageProxy: string;
+    DisableYellowFilter: boolean;
+    FluidSearch: boolean;
+  };
+  UserConfig: {
+    Users: {
+      username: string;
+      role: 'user' | 'admin' | 'owner';
+      banned?: boolean;
+      enabledApis?: string[];
+      tags?: string[];
+    }[];
+    OpenRegister?: boolean;
+    Tags?: {
+      name: string;
+      enabledApis: string[];
+    }[];
+  };
+  SourceConfig: {
+    key: string;
+    name: string;
+    api: string;
+    detail?: string;
+    from: 'config' | 'custom';
+    disabled?: boolean;
+    proxyMode?: 'server' | 'browser';
+  }[];
+  CustomCategories: {
+    name?: string;
+    type: 'movie' | 'tv';
+    query: string;
+    from: 'config' | 'custom';
+    disabled?: boolean;
+  }[];
+  LiveConfig?: {
+    key: string;
+    name: string;
+    url: string;
+    ua?: string;
+    epg?: string;
+    from: 'config' | 'custom';
+    channelNumber?: number;
+    disabled?: boolean;
+  }[];
+}
+
+export interface AdminConfigResult {
+  Role: 'owner' | 'admin';
+  Config: AdminConfig;
+}

@@ -1,156 +1,179 @@
-# 开发文档
+# 开发速记
 
-## 架构与分层规范
+给 AI 和开发者的开工前速读版。只保留当前项目里高频、容易改错、会影响实际行为的约束。
 
-### 目录
+## 目录归属
 
 ```text
 src/
-├── app/<route>/page.tsx     # 仅装配 + 渲染分支，不写业务
-├── components/              # 跨 feature 通用 UI
-├── hooks/                   # 跨 feature 通用 hooks
-├── lib/                     # 跨 feature 通用工具
-└── features/<domain>/
-    ├── components/          # 业务域专属 UI
-    ├── hooks/               # 业务域专属 hooks
-    ├── lib/                 # 业务域专属纯逻辑
-    └── types/
-        ├── api.ts           # API / 跨业务域共享类型
-        └── internal.ts      # 业务域内部类型
+├── app/                    # 路由入口，只做装配
+├── components/             # 跨 feature 通用 UI
+├── hooks/                  # 跨 feature 通用 hooks
+├── lib/                    # 跨 feature 通用工具
+└── features/<domain>/      # 业务域实现
 ```
 
-Feature 列表：`admin` · `home` · `live` · `play` · `search` · `douban`
+- 只被一个业务域使用的代码，放 `src/features/<domain>/`
+- 被两个及以上业务域复用的代码，放 `src/components`、`src/hooks`、`src/lib`
+- `page.tsx`、`route.ts` 优先做装配，不堆业务细节
+- 导入统一走 `@/...`
 
-### 归属判断
+## 容易改错的入口
 
-| 资产                 | 归属                                        |
-| -------------------- | ------------------------------------------- |
-| 只被某一业务域使用   | `features/<domain>/components\|hooks\|lib/` |
-| 被两个以上业务域使用 | `src/components\|hooks\|lib/`               |
-| 业务域内部类型       | `features/<domain>/types/internal.ts`       |
-| API / 跨业务域类型   | `features/<domain>/types/api.ts`            |
+- 管理后台入口：`src/app/admin/page.tsx`
+- 管理后台实现：`src/features/admin/`
+- 搜索聚合：`src/app/api/search/route.ts`、`src/lib/search-aggregate.ts`、`src/lib/search-cache.ts`
+- 本地设置面板：`src/components/user-menu/SettingsPanel.tsx`
+- 播放页：`src/features/play/`
+- 直播页：`src/features/live/`
+- Bangumi 首页取数：`src/features/bangumi/lib/bangumi.client.ts`
 
-### 命名
+## 本地设置
 
-- 文件：短横线（`source-match.ts`），不用蛇形
-- 组件：大驼峰（`HomeClient.tsx`）
-- Hook：`use` + 小驼峰（`useEpisodeSwitch.ts`）
-- 导入：统一 `@/...` 绝对路径
+这类设置不要分散直接读写 `localStorage`。
 
-### 动态 import
+- 布尔偏好走 `src/lib/local-preferences.ts`
+  - `defaultAggregateSearch`
+  - `enableOptimization`
+  - `fluidSearch`
+  - `liveDirectConnect`
+- 带事件通知的布尔设置走 `src/lib/local-settings.ts`
+  - `AUTO_SWITCH_SOURCE_ON_TIMEOUT_STORAGE_KEY`
+- Bangumi 设置走 `src/lib/bangumi-source.ts`
+- Douban 代理设置走 `src/lib/douban-source.ts`
 
-tsconfig `moduleResolution: Node16` 要求相对动态 import 显式带 `.js`：
+如果新增本地设置：
+
+- 先补 helper
+- 再在设置面板和消费方统一接入
+- 不要在页面里各自手写 key 和默认值
+
+## 鉴权与会话
+
+- 页面/API 鉴权入口：`src/lib/api-auth.ts`
+- Cookie 签名和登录签名统一走：`src/lib/signing-secret.server.ts`
+- 新签名依赖 `AUTH_SECRET` 或 `ICETV_AUTH_SECRET`
+- 旧 cookie 兼容校验由 `LEGACY_COOKIE_CUTOFF_DATE` 控制
+- 不要再用站长密码直接生成新会话签名
+
+Guard 选择：
+
+- `requireActiveUser`：任意登录用户
+- `requireAdmin`：`admin` + `owner`
+- `requireOwner`：仅 `owner`
+
+## 配置读写
+
+配置相关优先看 `src/lib/config.ts`。
+
+- 纯读路径优先用 `getConfigForRead()`
+- 需要修改时用 `getConfig()` 取可写对象，再走 `saveConfig()`
+- `saveConfig()` 可能抛 `ConfigConflictError`
+- 配置里的用户列表会和数据库做同步，不要自己维护第二套真相源
+
+如果是管理后台用户操作：
+
+- 优先复用 `src/features/admin/services/userActions.ts`
+- 不要在 `route.ts` 里重新展开权限和用户组逻辑
+
+## 搜索
+
+搜索链路已经有缓存和失败冷却，不要绕开。
+
+- 聚合执行：`runSearchAggregation()`
+- 聚合缓存：`search-cache.ts`
+- 失败源冷却：`search-aggregate.ts`
+- `/api/search` 命中缓存时会先返回旧结果，再后台刷新
+
+如果改搜索：
+
+- 先确认是改 API 行为、缓存策略，还是前端展示
+- 不要在页面层重新拼一套聚合/冷却逻辑
+
+## Bangumi 与 Douban
+
+- 首页 Bangumi 数据读取走 `src/features/bangumi/lib/bangumi.client.ts`
+- 它会按本地设置在 `server` / `direct` / `custom` 之间切换
+- 它带本地缓存和失败回退
+- Bangumi 服务端接口：`src/app/api/bangumi/calendar/route.ts`
+- Douban 主接口：`src/app/api/douban/route.ts`
+
+如果改 Bangumi/Douban：
+
+- 先区分是服务端数据源逻辑，还是设置面板文案/入口
+- 不要只改设置面板，不改真实读数路径
+
+## 代理与外部请求
+
+安全相关入口不要绕开。
+
+- 代理签名：`src/lib/proxy-auth.ts`
+- 外链 URL 校验：`src/lib/url-guard.ts`
+- 代理路由：`src/app/api/proxy/*`
+
+任何代理、图片转发、m3u8、分片、外部 fetch：
+
+- 优先复用现有 `authorizeProxyRequest()`、`fetchWithUrlGuard()`、`validateProxyUrlForRequest()`
+- 不要直接裸 `fetch` 外部用户输入 URL
+
+## 逐集解析型源站
+
+部分源站的详情页只给集数结构，每一集的真实播放地址要单独抓一次播放页。这类源站统一走懒解析协议：详情阶段返回 `icetv-lazy://` 懒地址，播放时经 `/api/episode-url` 按需解析。
+
+接入新的这类源站：
+
+- `src/lib/lazy-episodes.ts`：新增 kind 与对应的路径白名单正则
+- `src/lib/downstream-sources/<site>.ts`：详情的 `episodes` 用 `buildLazyEpisodeUrl(kind, path)` 生成；导出 `resolveXxxEpisodeUrlByPath(apiSite, path)` 做单集解析
+- `src/app/api/episode-url/route.ts`：在 `matchesLazyKind` 和 `resolveEpisodeUrl` 里接上新 kind
+- 客户端不用改：播放入口、测速、预热、详情快照对懒地址的处理是通用的
+
+约束：
+
+- 不要在详情阶段全量抓播放页
+- 不要绕过 `/api/episode-url` 在客户端直接解析源站地址
+
+## Admin 模块
+
+Admin 维持“导航 + 当前 tab 内容”结构。
+
+- tab 注册：`src/features/admin/lib/admin-tabs.ts`
+- tab 切换：`src/features/admin/hooks/useAdminTab.ts`
+- 内容挂载：`src/features/admin/components/AdminTabContent.tsx`
+
+新增 tab：
+
+- 先加 `admin-tabs.ts`
+- 再加 `AdminTabContent.tsx`
+- 再补对应 feature 目录实现
+
+通用弹窗优先复用：
+
+- `@/components/modals/ConfirmModal`
+- `@/components/modals/AlertModal`
+
+## 动态 import
+
+项目使用 `moduleResolution: Node16`。
+
+- 相对动态导入必须显式带 `.js`
+
+示例：
 
 ```ts
 const { MySqlStorage } = await import('./mysql.db.js');
 ```
 
-Webpack 端由 `next.config.js` 的 `resolve.extensionAlias` 把 `.js` 映射回 `.ts`。
+## 改动后最小验证
 
-### Feature 骨架
-
-新建 feature 建立完整骨架(结构见上方目录树),即使部分子目录暂时为空。
-
-## Admin 模块
-
-入口 [src/app/admin/page.tsx](../src/app/admin/page.tsx)，实现位于 [src/features/admin/](../src/features/admin/)。
-
-### 职责边界
-
-- 页面容器 [page.tsx](../src/app/admin/page.tsx) 只负责装配、路由级状态与可见性控制。
-- tab 组件负责页面内业务状态与交互，不直接依赖其他 feature 的实现细节。
-- 与管理后台无关的通用能力放在 `src/lib` 或 `src/components`。
-
-### 布局
-
-侧边导航 + 内容区(master-detail)。导航项由 [lib/admin-tabs.ts](../src/features/admin/lib/admin-tabs.ts) 定义,激活 tab 写入 URL(`?tab=`)并由 [hooks/useAdminTab.ts](../src/features/admin/hooks/useAdminTab.ts) 读写。[components/AdminNav.tsx](../src/features/admin/components/AdminNav.tsx) 渲染导航,[components/AdminTabContent.tsx](../src/features/admin/components/AdminTabContent.tsx) 用 `dynamic` 懒加载并只渲染当前激活 tab。新增 tab 在 `admin-tabs.ts` 注册 + 在 `AdminTabContent` 分支挂载。
-
-### 可复用 hooks
-
-Tab 或对话框优先复用：
-
-| Hook                      | 用途                                |
-| ------------------------- | ----------------------------------- |
-| `useAdminPageActions`     | 页面级配置读取与重置                |
-| `useAdminTab`             | 激活 tab 的 URL(`?tab=`)读写        |
-| `useAdminUserActions`     | 用户增删改、角色、用户组操作        |
-| `useAdminSourceActions`   | 视频源 / 直播源 / 分类的 CRUD       |
-| `useSourceValidation`     | 视频源有效性流式检测                |
-| `useSourceBatchOperation` | 视频源批量启用/禁用/删除 + 确认弹窗 |
-| `useAlertModal`           | 全局提示弹窗                        |
-| `useLoadingState`         | 按钮/操作加载态                     |
-
-### 目录约定
-
-- `components/`: 纯视图组件;`ConfirmModal.tsx` 从 `@/components/modals/ConfirmModal` 重导出,统一 admin 内引用路径。
-- `lib/`: 请求(api)、权限(permissions)、通知(notifications)、样式(buttonStyles)、tab 元数据(admin-tabs)。
-- `types.ts` / `types/api.ts`: 内部共享类型 / API 类型(新代码优先从 `api.ts` 导入)。
-
-Tab 子组件目录(新对话框统一放入对应子目录):
-
-- [components/tabs/user-config/](../src/features/admin/components/tabs/user-config/) — 用户与用户组的表单/对话框/列表
-- [components/tabs/video-source/](../src/features/admin/components/tabs/video-source/) — 视频源行/表单/有效性弹窗
-- [components/tabs/live-source/](../src/features/admin/components/tabs/live-source/) — 直播源行/添加/编辑表单
-
-### 测试
-
-- [src/app/admin/page.test.tsx](../src/app/admin/page.test.tsx)
-- [src/features/admin/hooks/**tests**/](../src/features/admin/hooks/__tests__/) — 优先覆盖配置加载、重置、用户删除、源保存等关键路径
-
-## API 鉴权
-
-### 核心模块
-
-| 模块                                              | 职责                                                                     |
-| ------------------------------------------------- | ------------------------------------------------------------------------ |
-| [src/lib/api-auth.ts](../src/lib/api-auth.ts)     | `requireActiveUser` / `requireAdmin` / `requireOwner` / `isGuardFailure` |
-| [src/lib/env.server.ts](../src/lib/env.server.ts) | `getOwnerUsername()` / `getOwnerPassword()`                              |
-| [src/lib/config.ts](../src/lib/config.ts)         | `getConfig` / `resetConfig`                                              |
-| [src/lib/db.ts](../src/lib/db.ts)                 | 服务端统一数据访问入口                                                   |
-
-### 权限层级
-
-| Guard               | 可访问角色    |
-| ------------------- | ------------- |
-| `requireActiveUser` | 任意登录用户  |
-| `requireAdmin`      | admin + owner |
-| `requireOwner`      | 仅 owner      |
-
-### API 模板
-
-按权限层级替换 guard 函数名即可：
-
-```ts
-const guardResult = await requireActiveUser(request);
-if (isGuardFailure(guardResult)) return guardResult.response;
-const username = guardResult.username;
-```
-
-管理员接口换成 `requireAdmin`,站长接口换成 `requireOwner`(二者无 `username` 返回)。
-
-### 状态码
-
-| 状态码 | 语义             |
-| ------ | ---------------- |
-| 401    | 未登录           |
-| 403    | 已登录但权限不足 |
-| 400    | 参数错误         |
-| 404    | 资源不存在       |
-| 500    | 服务异常         |
-
-### Guard 路由检查
+常用命令：
 
 ```bash
-grep -rl "requireActiveUser\|requireAdmin\|requireOwner" src/app/api
+pnpm lint
+pnpm typecheck
+pnpm test
 ```
 
-### 测试
+如果只改局部：
 
-每个权限接口至少覆盖：未登录 → 401、权限不足 → 403、具备权限 → 200。
-
-回归位置：[src/app/api/admin/**tests**/auth-guard.test.ts](../src/app/api/admin/__tests__/auth-guard.test.ts)
-
-### 环境变量
-
-- `ICETV_USERNAME` / `ICETV_PASSWORD`
-- 不支持裸名 `USERNAME` / `PASSWORD`
+- 至少跑相关测试
+- 没有现成测试时，说明未验证项

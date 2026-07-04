@@ -106,6 +106,49 @@ describe('episodeMapping', () => {
     });
   });
 
+  it('两边都是连续编号但起点不同(Part.2 续编号)时，按相对位置继承', () => {
+    const currentDetail = createSearchResult({
+      episodes: Array.from({ length: 12 }, (_, i) => `a${i + 1}`),
+      episodes_titles: Array.from({ length: 12 }, (_, i) => `${i + 14}`),
+    });
+    const targetDetail = createSearchResult({
+      source: 'source-b',
+      source_name: 'Source B',
+      episodes: Array.from({ length: 12 }, (_, i) => `b${i + 1}`),
+      episodes_titles: Array.from({ length: 12 }, (_, i) => `第${i + 1}集`),
+    });
+
+    // 当前"22"(下标8) → 目标"第9集"(下标8)
+    expect(resolveEpisodeTargetIndex(currentDetail, 8, targetDetail)).toEqual({
+      index: 8,
+      preserveProgress: true,
+    });
+    // 反向:从 1..12 切到 14..25
+    expect(resolveEpisodeTargetIndex(targetDetail, 7, currentDetail)).toEqual({
+      index: 7,
+      preserveProgress: true,
+    });
+  });
+
+  it('连续编号但集数长度不同(全集 vs Part.2)时不做相对位置映射', () => {
+    const fullDetail = createSearchResult({
+      episodes: Array.from({ length: 25 }, (_, i) => `a${i + 1}`),
+      episodes_titles: Array.from({ length: 25 }, (_, i) => `${i + 1}`),
+    });
+    const partDetail = createSearchResult({
+      source: 'source-b',
+      source_name: 'Source B',
+      episodes: Array.from({ length: 12 }, (_, i) => `b${i + 1}`),
+      episodes_titles: Array.from({ length: 12 }, (_, i) => `${i + 14}`),
+    });
+
+    // 全集第5集在 Part.2(14..25) 中不存在
+    expect(resolveEpisodeTargetIndex(fullDetail, 4, partDetail)).toEqual({
+      index: 4,
+      preserveProgress: false,
+    });
+  });
+
   it('目标源标题里漏了当前集时拒绝按下标硬塞，preserveProgress=false', () => {
     const currentDetail = createSearchResult({
       episodes: Array.from({ length: 12 }, (_, i) => `a${i + 1}`),

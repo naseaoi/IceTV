@@ -1,11 +1,12 @@
-'use client';
+﻿'use client';
 
-import { ExternalLink, X } from 'lucide-react';
+import { ExternalLink, RotateCcw, X } from 'lucide-react';
 import { useEffect, useState } from 'react';
 
-import AdminSelect from '@/features/admin/components/AdminSelect';
-import AlertModal from '@/features/admin/components/AlertModal';
-import { useAlertModal } from '@/features/admin/hooks/useAlertModal';
+import AdminSelect from '@/components/admin/AdminSelect';
+import AlertModal from '@/components/modals/AlertModal';
+import ConfirmModal from '@/components/modals/ConfirmModal';
+import { useAlertModal } from '@/hooks/useAlertModal';
 import {
   BANGUMI_DATA_SOURCE_STORAGE_KEY,
   BANGUMI_PROXY_URL_STORAGE_KEY,
@@ -14,6 +15,8 @@ import {
   normalizeBangumiDataSource,
   readDefaultBangumiDataSource,
   readDefaultBangumiProxyUrl,
+  readBangumiDataSource,
+  readBangumiProxyUrl,
 } from '@/lib/bangumi-source';
 import {
   doubanDataSourceOptions,
@@ -21,10 +24,25 @@ import {
   getThanksInfo,
 } from '@/lib/douban-options';
 import {
-  AUTO_SWITCH_SOURCE_ON_TIMEOUT_STORAGE_KEY,
-  readBooleanLocalSetting,
-  writeBooleanLocalSetting,
-} from '@/lib/local-settings';
+  DOUBAN_DATA_SOURCE_STORAGE_KEY,
+  DOUBAN_IMAGE_PROXY_TYPE_STORAGE_KEY,
+  DOUBAN_IMAGE_PROXY_URL_STORAGE_KEY,
+  DOUBAN_PROXY_URL_STORAGE_KEY,
+  readDefaultDoubanImageProxyType,
+  readDefaultDoubanImageProxyUrl,
+  readDoubanImageProxyType,
+  readDoubanImageProxyUrl,
+  readDefaultDoubanProxyType,
+  readDefaultDoubanProxyUrl,
+  readDoubanProxyType,
+  readDoubanProxyUrl,
+} from '@/lib/douban-source';
+import {
+  localPreferenceToggleDefinitions,
+  readLocalPreferenceToggleDefaultState,
+  readLocalPreferenceToggleState,
+  resetAllLocalPreferenceToggles,
+} from '@/lib/local-preference-toggles';
 
 import { useBodyScrollLock } from './useBodyScrollLock';
 
@@ -33,13 +51,11 @@ interface SettingsPanelProps {
 }
 
 export function SettingsPanel({ onClose }: SettingsPanelProps) {
-  const [defaultAggregateSearch, setDefaultAggregateSearch] = useState(true);
+  const helperTextClassName = 'mt-1 text-xs text-gray-400 dark:text-gray-500';
+  const [localPreferenceToggles, setLocalPreferenceToggles] = useState(
+    readLocalPreferenceToggleDefaultState,
+  );
   const [doubanProxyUrl, setDoubanProxyUrl] = useState('');
-  const [enableOptimization, setEnableOptimization] = useState(true);
-  const [autoSwitchSourceOnTimeout, setAutoSwitchSourceOnTimeout] =
-    useState(false);
-  const [fluidSearch, setFluidSearch] = useState(true);
-  const [liveDirectConnect, setLiveDirectConnect] = useState(false);
   const [doubanDataSource, setDoubanDataSource] = useState('direct');
   const [bangumiDataSource, setBangumiDataSource] = useState(
     DEFAULT_BANGUMI_DATA_SOURCE,
@@ -47,95 +63,21 @@ export function SettingsPanel({ onClose }: SettingsPanelProps) {
   const [bangumiProxyUrl, setBangumiProxyUrl] = useState('');
   const [doubanImageProxyType, setDoubanImageProxyType] = useState('direct');
   const [doubanImageProxyUrl, setDoubanImageProxyUrl] = useState('');
+  const [showResetConfirm, setShowResetConfirm] = useState(false);
   const { alertModal, showAlert, hideAlert } = useAlertModal();
 
   useBodyScrollLock(true);
 
   useEffect(() => {
-    const savedAggregateSearch = localStorage.getItem('defaultAggregateSearch');
-    if (savedAggregateSearch !== null) {
-      setDefaultAggregateSearch(JSON.parse(savedAggregateSearch));
-    }
+    setLocalPreferenceToggles(readLocalPreferenceToggleState());
 
-    const defaultDoubanProxyType =
-      window.RUNTIME_CONFIG?.DOUBAN_PROXY_TYPE || 'direct';
-    const savedDoubanDataSource = localStorage.getItem('doubanDataSource');
-    if (savedDoubanDataSource !== null) {
-      setDoubanDataSource(savedDoubanDataSource);
-    } else if (defaultDoubanProxyType) {
-      setDoubanDataSource(defaultDoubanProxyType);
-    }
+    setDoubanDataSource(readDoubanProxyType());
+    setDoubanProxyUrl(readDoubanProxyUrl());
+    setBangumiDataSource(readBangumiDataSource());
+    setBangumiProxyUrl(readBangumiProxyUrl());
 
-    const defaultDoubanProxy = window.RUNTIME_CONFIG?.DOUBAN_PROXY || '';
-    const savedDoubanProxyUrl = localStorage.getItem('doubanProxyUrl');
-    if (savedDoubanProxyUrl !== null) {
-      setDoubanProxyUrl(savedDoubanProxyUrl);
-    } else if (defaultDoubanProxy) {
-      setDoubanProxyUrl(defaultDoubanProxy);
-    }
-
-    const savedBangumiDataSource = localStorage.getItem(
-      BANGUMI_DATA_SOURCE_STORAGE_KEY,
-    );
-    if (savedBangumiDataSource !== null) {
-      setBangumiDataSource(normalizeBangumiDataSource(savedBangumiDataSource));
-    } else {
-      setBangumiDataSource(readDefaultBangumiDataSource());
-    }
-
-    const defaultBangumiProxy = readDefaultBangumiProxyUrl();
-    const savedBangumiProxyUrl = localStorage.getItem(
-      BANGUMI_PROXY_URL_STORAGE_KEY,
-    );
-    if (savedBangumiProxyUrl !== null) {
-      setBangumiProxyUrl(savedBangumiProxyUrl);
-    } else if (defaultBangumiProxy) {
-      setBangumiProxyUrl(defaultBangumiProxy);
-    }
-
-    const defaultDoubanImageProxyType =
-      window.RUNTIME_CONFIG?.DOUBAN_IMAGE_PROXY_TYPE || 'direct';
-    const savedDoubanImageProxyType = localStorage.getItem(
-      'doubanImageProxyType',
-    );
-    if (savedDoubanImageProxyType !== null) {
-      setDoubanImageProxyType(savedDoubanImageProxyType);
-    } else if (defaultDoubanImageProxyType) {
-      setDoubanImageProxyType(defaultDoubanImageProxyType);
-    }
-
-    const defaultDoubanImageProxyUrl =
-      window.RUNTIME_CONFIG?.DOUBAN_IMAGE_PROXY || '';
-    const savedDoubanImageProxyUrl = localStorage.getItem(
-      'doubanImageProxyUrl',
-    );
-    if (savedDoubanImageProxyUrl !== null) {
-      setDoubanImageProxyUrl(savedDoubanImageProxyUrl);
-    } else if (defaultDoubanImageProxyUrl) {
-      setDoubanImageProxyUrl(defaultDoubanImageProxyUrl);
-    }
-
-    const savedEnableOptimization = localStorage.getItem('enableOptimization');
-    if (savedEnableOptimization !== null) {
-      setEnableOptimization(JSON.parse(savedEnableOptimization));
-    }
-
-    setAutoSwitchSourceOnTimeout(
-      readBooleanLocalSetting(AUTO_SWITCH_SOURCE_ON_TIMEOUT_STORAGE_KEY, false),
-    );
-
-    const savedFluidSearch = localStorage.getItem('fluidSearch');
-    const defaultFluidSearch = window.RUNTIME_CONFIG?.FLUID_SEARCH !== false;
-    if (savedFluidSearch !== null) {
-      setFluidSearch(JSON.parse(savedFluidSearch));
-    } else {
-      setFluidSearch(defaultFluidSearch);
-    }
-
-    const savedLiveDirectConnect = localStorage.getItem('liveDirectConnect');
-    if (savedLiveDirectConnect !== null) {
-      setLiveDirectConnect(JSON.parse(savedLiveDirectConnect));
-    }
+    setDoubanImageProxyType(readDoubanImageProxyType());
+    setDoubanImageProxyUrl(readDoubanImageProxyUrl());
   }, []);
 
   const showProxyToast = () => {
@@ -147,39 +89,29 @@ export function SettingsPanel({ onClose }: SettingsPanelProps) {
     });
   };
 
-  const handleAggregateToggle = (value: boolean) => {
-    setDefaultAggregateSearch(value);
-    localStorage.setItem('defaultAggregateSearch', JSON.stringify(value));
-  };
-
   const handleDoubanProxyUrlChange = (value: string) => {
     setDoubanProxyUrl(value);
-    localStorage.setItem('doubanProxyUrl', value);
+    localStorage.setItem(DOUBAN_PROXY_URL_STORAGE_KEY, value);
   };
 
-  const handleOptimizationToggle = (value: boolean) => {
-    setEnableOptimization(value);
-    localStorage.setItem('enableOptimization', JSON.stringify(value));
-  };
+  const handleLocalPreferenceToggle = (
+    id: keyof typeof localPreferenceToggles,
+    value: boolean,
+  ) => {
+    setLocalPreferenceToggles((prev) => ({
+      ...prev,
+      [id]: value,
+    }));
 
-  const handleAutoSwitchSourceOnTimeoutToggle = (value: boolean) => {
-    setAutoSwitchSourceOnTimeout(value);
-    writeBooleanLocalSetting(AUTO_SWITCH_SOURCE_ON_TIMEOUT_STORAGE_KEY, value);
-  };
-
-  const handleFluidSearchToggle = (value: boolean) => {
-    setFluidSearch(value);
-    localStorage.setItem('fluidSearch', JSON.stringify(value));
-  };
-
-  const handleLiveDirectConnectToggle = (value: boolean) => {
-    setLiveDirectConnect(value);
-    localStorage.setItem('liveDirectConnect', JSON.stringify(value));
+    const definition = localPreferenceToggleDefinitions.find(
+      (item) => item.id === id,
+    );
+    definition?.writeValue(value);
   };
 
   const handleDoubanDataSourceChange = (value: string) => {
     setDoubanDataSource(value);
-    localStorage.setItem('doubanDataSource', value);
+    localStorage.setItem(DOUBAN_DATA_SOURCE_STORAGE_KEY, value);
     showProxyToast();
   };
 
@@ -197,32 +129,26 @@ export function SettingsPanel({ onClose }: SettingsPanelProps) {
 
   const handleDoubanImageProxyTypeChange = (value: string) => {
     setDoubanImageProxyType(value);
-    localStorage.setItem('doubanImageProxyType', value);
+    localStorage.setItem(DOUBAN_IMAGE_PROXY_TYPE_STORAGE_KEY, value);
     showProxyToast();
   };
 
   const handleDoubanImageProxyUrlChange = (value: string) => {
     setDoubanImageProxyUrl(value);
-    localStorage.setItem('doubanImageProxyUrl', value);
+    localStorage.setItem(DOUBAN_IMAGE_PROXY_URL_STORAGE_KEY, value);
   };
 
   const handleResetSettings = () => {
-    const defaultDoubanProxyType =
-      window.RUNTIME_CONFIG?.DOUBAN_PROXY_TYPE || 'direct';
-    const defaultDoubanProxy = window.RUNTIME_CONFIG?.DOUBAN_PROXY || '';
-    const defaultDoubanImageProxyType =
-      window.RUNTIME_CONFIG?.DOUBAN_IMAGE_PROXY_TYPE || 'direct';
-    const defaultDoubanImageProxyUrl =
-      window.RUNTIME_CONFIG?.DOUBAN_IMAGE_PROXY || '';
+    const defaultDoubanProxyType = readDefaultDoubanProxyType();
+    const defaultDoubanProxy = readDefaultDoubanProxyUrl();
+    const defaultDoubanImageProxyType = readDefaultDoubanImageProxyType();
+    const defaultDoubanImageProxyUrl = readDefaultDoubanImageProxyUrl();
     const defaultBangumiDataSource = readDefaultBangumiDataSource();
     const defaultBangumiProxy = readDefaultBangumiProxyUrl();
-    const defaultFluidSearch = window.RUNTIME_CONFIG?.FLUID_SEARCH !== false;
+    const defaultLocalPreferenceToggles =
+      readLocalPreferenceToggleDefaultState();
 
-    setDefaultAggregateSearch(true);
-    setEnableOptimization(true);
-    setAutoSwitchSourceOnTimeout(false);
-    setFluidSearch(defaultFluidSearch);
-    setLiveDirectConnect(false);
+    setLocalPreferenceToggles(defaultLocalPreferenceToggles);
     setDoubanProxyUrl(defaultDoubanProxy);
     setDoubanDataSource(defaultDoubanProxyType);
     setBangumiDataSource(defaultBangumiDataSource);
@@ -230,20 +156,13 @@ export function SettingsPanel({ onClose }: SettingsPanelProps) {
     setDoubanImageProxyType(defaultDoubanImageProxyType);
     setDoubanImageProxyUrl(defaultDoubanImageProxyUrl);
 
-    localStorage.setItem('defaultAggregateSearch', JSON.stringify(true));
-    localStorage.setItem('enableOptimization', JSON.stringify(true));
-    writeBooleanLocalSetting(AUTO_SWITCH_SOURCE_ON_TIMEOUT_STORAGE_KEY, false);
-    localStorage.removeItem('fluidSearch');
-    localStorage.setItem('liveDirectConnect', JSON.stringify(false));
-    localStorage.setItem('doubanProxyUrl', defaultDoubanProxy);
-    localStorage.setItem('doubanDataSource', defaultDoubanProxyType);
-    localStorage.setItem(
-      BANGUMI_DATA_SOURCE_STORAGE_KEY,
-      defaultBangumiDataSource,
-    );
-    localStorage.setItem(BANGUMI_PROXY_URL_STORAGE_KEY, defaultBangumiProxy);
-    localStorage.setItem('doubanImageProxyType', defaultDoubanImageProxyType);
-    localStorage.setItem('doubanImageProxyUrl', defaultDoubanImageProxyUrl);
+    resetAllLocalPreferenceToggles();
+    localStorage.removeItem(DOUBAN_PROXY_URL_STORAGE_KEY);
+    localStorage.removeItem(DOUBAN_DATA_SOURCE_STORAGE_KEY);
+    localStorage.removeItem(BANGUMI_DATA_SOURCE_STORAGE_KEY);
+    localStorage.removeItem(BANGUMI_PROXY_URL_STORAGE_KEY);
+    localStorage.removeItem(DOUBAN_IMAGE_PROXY_TYPE_STORAGE_KEY);
+    localStorage.removeItem(DOUBAN_IMAGE_PROXY_URL_STORAGE_KEY);
   };
 
   return (
@@ -268,25 +187,31 @@ export function SettingsPanel({ onClose }: SettingsPanelProps) {
           }}
         >
           <div className='mb-6 flex items-center justify-between'>
-            <div className='flex items-center gap-3'>
+            <div>
               <h3 className='text-xl font-bold text-gray-800 dark:text-gray-200'>
                 本地设置
               </h3>
+              <p className='mt-1 text-xs text-gray-500 dark:text-gray-400'>
+                设置保存在本地浏览器中
+              </p>
+            </div>
+            <div className='flex items-center gap-2'>
               <button
-                onClick={handleResetSettings}
-                className='rounded border border-red-200 px-2 py-1 text-xs text-red-500 transition-colors hover:border-red-300 hover:bg-red-50 hover:text-red-700 dark:border-red-800 dark:text-red-400 dark:hover:border-red-700 dark:hover:bg-red-900/20 dark:hover:text-red-300'
+                onClick={() => setShowResetConfirm(true)}
+                className='flex h-8 w-8 items-center justify-center rounded-full p-1 text-red-500 transition-colors hover:bg-red-50 hover:text-red-600 dark:text-red-400 dark:hover:bg-red-900/20 dark:hover:text-red-300'
                 title='重置为默认设置'
+                aria-label='重置为默认设置'
               >
-                恢复默认
+                <RotateCcw className='h-4 w-4' />
+              </button>
+              <button
+                onClick={onClose}
+                className='flex h-8 w-8 items-center justify-center rounded-full p-1 text-gray-500 transition-colors hover:bg-gray-100 dark:hover:bg-gray-800'
+                aria-label='Close'
+              >
+                <X className='h-full w-full' />
               </button>
             </div>
-            <button
-              onClick={onClose}
-              className='flex h-8 w-8 items-center justify-center rounded-full p-1 text-gray-500 transition-colors hover:bg-gray-100 dark:hover:bg-gray-800'
-              aria-label='Close'
-            >
-              <X className='h-full w-full' />
-            </button>
           </div>
 
           <div className='space-y-6'>
@@ -314,9 +239,6 @@ export function SettingsPanel({ onClose }: SettingsPanelProps) {
                     </button>
                   )}
                 </div>
-                <p className='mt-1 text-xs text-gray-500 dark:text-gray-400'>
-                  选择获取豆瓣数据的方式
-                </p>
               </div>
               <AdminSelect
                 value={doubanDataSource}
@@ -331,9 +253,7 @@ export function SettingsPanel({ onClose }: SettingsPanelProps) {
                   <h4 className='text-sm font-medium text-gray-700 dark:text-gray-300'>
                     豆瓣代理地址
                   </h4>
-                  <p className='mt-1 text-xs text-gray-500 dark:text-gray-400'>
-                    自定义代理服务器地址
-                  </p>
+                  <p className={helperTextClassName}>自定义代理服务器地址</p>
                 </div>
                 <input
                   type='text'
@@ -371,9 +291,6 @@ export function SettingsPanel({ onClose }: SettingsPanelProps) {
                     </button>
                   )}
                 </div>
-                <p className='mt-1 text-xs text-gray-500 dark:text-gray-400'>
-                  选择获取豆瓣图片的方式
-                </p>
               </div>
               <AdminSelect
                 value={doubanImageProxyType}
@@ -388,7 +305,7 @@ export function SettingsPanel({ onClose }: SettingsPanelProps) {
                   <h4 className='text-sm font-medium text-gray-700 dark:text-gray-300'>
                     豆瓣图片代理地址
                   </h4>
-                  <p className='mt-1 text-xs text-gray-500 dark:text-gray-400'>
+                  <p className={helperTextClassName}>
                     自定义图片代理服务器地址
                   </p>
                 </div>
@@ -409,9 +326,6 @@ export function SettingsPanel({ onClose }: SettingsPanelProps) {
                 <h4 className='text-sm font-medium text-gray-700 dark:text-gray-300'>
                   Bangumi 数据代理
                 </h4>
-                <p className='mt-1 text-xs text-gray-500 dark:text-gray-400'>
-                  选择获取新番放送数据的方式
-                </p>
               </div>
               <AdminSelect
                 value={bangumiDataSource}
@@ -446,9 +360,7 @@ export function SettingsPanel({ onClose }: SettingsPanelProps) {
                   <h4 className='text-sm font-medium text-gray-700 dark:text-gray-300'>
                     Bangumi 代理地址
                   </h4>
-                  <p className='mt-1 text-xs text-gray-500 dark:text-gray-400'>
-                    自定义代理服务器地址
-                  </p>
+                  <p className={helperTextClassName}>自定义代理服务器地址</p>
                 </div>
                 <input
                   type='text'
@@ -462,143 +374,51 @@ export function SettingsPanel({ onClose }: SettingsPanelProps) {
               </div>
             )}
 
-            <div className='border-t border-gray-200 dark:border-gray-700'></div>
-
-            <div className='flex items-center justify-between'>
-              <div>
-                <h4 className='text-sm font-medium text-gray-700 dark:text-gray-300'>
-                  默认聚合搜索结果
-                </h4>
-                <p className='mt-1 text-xs text-gray-500 dark:text-gray-400'>
-                  搜索时默认按标题和年份聚合显示结果
-                </p>
-              </div>
-              <label className='flex cursor-pointer items-center'>
-                <div className='relative'>
-                  <input
-                    type='checkbox'
-                    className='peer sr-only'
-                    checked={defaultAggregateSearch}
-                    onChange={(event) =>
-                      handleAggregateToggle(event.target.checked)
-                    }
-                  />
-                  <div className='h-6 w-11 rounded-full bg-gray-300 transition-colors peer-checked:bg-green-500 dark:bg-gray-600'></div>
-                  <div className='absolute left-0.5 top-0.5 h-5 w-5 rounded-full bg-white transition-transform peer-checked:translate-x-5'></div>
+            {localPreferenceToggleDefinitions.map((definition) => (
+              <div
+                key={definition.id}
+                className='flex items-center justify-between'
+              >
+                <div>
+                  <h4 className='text-sm font-medium text-gray-700 dark:text-gray-300'>
+                    {definition.title}
+                  </h4>
+                  <p className={helperTextClassName}>
+                    {definition.description}
+                  </p>
                 </div>
-              </label>
-            </div>
-
-            <div className='flex items-center justify-between'>
-              <div>
-                <h4 className='text-sm font-medium text-gray-700 dark:text-gray-300'>
-                  优选和测速
-                </h4>
-                <p className='mt-1 text-xs text-gray-500 dark:text-gray-400'>
-                  如出现播放器劫持问题可关闭
-                </p>
+                <label className='flex cursor-pointer items-center'>
+                  <div className='relative'>
+                    <input
+                      type='checkbox'
+                      className='peer sr-only'
+                      checked={localPreferenceToggles[definition.id]}
+                      onChange={(event) =>
+                        handleLocalPreferenceToggle(
+                          definition.id,
+                          event.target.checked,
+                        )
+                      }
+                    />
+                    <div className='h-6 w-11 rounded-full bg-gray-300 transition-colors peer-checked:bg-green-500 dark:bg-gray-600'></div>
+                    <div className='absolute left-0.5 top-0.5 h-5 w-5 rounded-full bg-white transition-transform peer-checked:translate-x-5'></div>
+                  </div>
+                </label>
               </div>
-              <label className='flex cursor-pointer items-center'>
-                <div className='relative'>
-                  <input
-                    type='checkbox'
-                    className='peer sr-only'
-                    checked={enableOptimization}
-                    onChange={(event) =>
-                      handleOptimizationToggle(event.target.checked)
-                    }
-                  />
-                  <div className='h-6 w-11 rounded-full bg-gray-300 transition-colors peer-checked:bg-green-500 dark:bg-gray-600'></div>
-                  <div className='absolute left-0.5 top-0.5 h-5 w-5 rounded-full bg-white transition-transform peer-checked:translate-x-5'></div>
-                </div>
-              </label>
-            </div>
-
-            <div className='flex items-center justify-between'>
-              <div>
-                <h4 className='text-sm font-medium text-gray-700 dark:text-gray-300'>
-                  源站超时自动换源(实验性)
-                </h4>
-                <p className='mt-1 text-xs text-gray-500 dark:text-gray-400'>
-                  播放源加载超时后，自动切换到下一个候选源
-                </p>
-              </div>
-              <label className='flex cursor-pointer items-center'>
-                <div className='relative'>
-                  <input
-                    type='checkbox'
-                    className='peer sr-only'
-                    checked={autoSwitchSourceOnTimeout}
-                    onChange={(event) =>
-                      handleAutoSwitchSourceOnTimeoutToggle(
-                        event.target.checked,
-                      )
-                    }
-                  />
-                  <div className='h-6 w-11 rounded-full bg-gray-300 transition-colors peer-checked:bg-green-500 dark:bg-gray-600'></div>
-                  <div className='absolute left-0.5 top-0.5 h-5 w-5 rounded-full bg-white transition-transform peer-checked:translate-x-5'></div>
-                </div>
-              </label>
-            </div>
-
-            <div className='flex items-center justify-between'>
-              <div>
-                <h4 className='text-sm font-medium text-gray-700 dark:text-gray-300'>
-                  流式搜索输出
-                </h4>
-                <p className='mt-1 text-xs text-gray-500 dark:text-gray-400'>
-                  启用搜索结果实时流式输出，关闭后使用传统一次性搜索
-                </p>
-              </div>
-              <label className='flex cursor-pointer items-center'>
-                <div className='relative'>
-                  <input
-                    type='checkbox'
-                    className='peer sr-only'
-                    checked={fluidSearch}
-                    onChange={(event) =>
-                      handleFluidSearchToggle(event.target.checked)
-                    }
-                  />
-                  <div className='h-6 w-11 rounded-full bg-gray-300 transition-colors peer-checked:bg-green-500 dark:bg-gray-600'></div>
-                  <div className='absolute left-0.5 top-0.5 h-5 w-5 rounded-full bg-white transition-transform peer-checked:translate-x-5'></div>
-                </div>
-              </label>
-            </div>
-
-            <div className='flex items-center justify-between'>
-              <div>
-                <h4 className='text-sm font-medium text-gray-700 dark:text-gray-300'>
-                  IPTV 视频浏览器直连
-                </h4>
-                <p className='mt-1 text-xs text-gray-500 dark:text-gray-400'>
-                  开启 IPTV 视频浏览器直连时，需要自备 Allow CORS 插件
-                </p>
-              </div>
-              <label className='flex cursor-pointer items-center'>
-                <div className='relative'>
-                  <input
-                    type='checkbox'
-                    className='peer sr-only'
-                    checked={liveDirectConnect}
-                    onChange={(event) =>
-                      handleLiveDirectConnectToggle(event.target.checked)
-                    }
-                  />
-                  <div className='h-6 w-11 rounded-full bg-gray-300 transition-colors peer-checked:bg-green-500 dark:bg-gray-600'></div>
-                  <div className='absolute left-0.5 top-0.5 h-5 w-5 rounded-full bg-white transition-transform peer-checked:translate-x-5'></div>
-                </div>
-              </label>
-            </div>
-          </div>
-
-          <div className='mt-6 border-t border-gray-200 pt-4 dark:border-gray-700'>
-            <p className='text-center text-xs text-gray-500 dark:text-gray-400'>
-              这些设置保存在本地浏览器中
-            </p>
+            ))}
           </div>
         </div>
       </div>
+      <ConfirmModal
+        isOpen={showResetConfirm}
+        title='确认恢复默认设置？'
+        message='该操作会清空当前浏览器中的本地设置，并恢复为默认值。'
+        danger
+        cancelText='取消'
+        confirmText='确认恢复'
+        onCancel={() => setShowResetConfirm(false)}
+        onConfirm={handleResetSettings}
+      />
       <AlertModal
         isOpen={alertModal.isOpen}
         onClose={hideAlert}

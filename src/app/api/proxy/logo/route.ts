@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 
-import { getConfig } from '@/lib/config';
+import { getConfigForRead } from '@/lib/config';
 import {
   fetchResponseThroughProxy,
   getProxyUrlForTarget,
@@ -32,21 +32,17 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ error: 'Missing image URL' }, { status: 400 });
   }
 
-  const validation = await validateProxyUrlForRequest(imageUrl);
-  if (!validation.ok) {
-    return NextResponse.json({ error: validation.reason }, { status: 403 });
-  }
-
-  const authFailure = await authorizeProxyRequest(
-    request,
-    'logo',
-    validation.url,
-  );
+  const authFailure = await authorizeProxyRequest(request, 'logo', imageUrl);
   if (authFailure) {
     return authFailure;
   }
 
-  const config = await getConfig();
+  const validation = await validateProxyUrlForRequest(imageUrl);
+  if (!validation.ok) {
+    return NextResponse.json({ error: 'Invalid URL' }, { status: 403 });
+  }
+
+  const config = await getConfigForRead();
   const liveSource = config.LiveConfig?.find((s: any) => s.key === source);
   const ua = liveSource?.ua || 'AptvPlayer/1.4.10';
 
@@ -58,6 +54,7 @@ export async function GET(request: NextRequest) {
       headers: {
         'User-Agent': ua,
       },
+      skipInitialValidation: true,
     });
 
     return await buildLogoResponse(imageResponse);
@@ -76,11 +73,13 @@ export async function GET(request: NextRequest) {
           },
         );
         return buildLogoBufferResponse(response.body, response.headers);
-      } catch {}
+      } catch (proxyError) {
+        console.warn('代理 logo 环境代理回源失败:', proxyError);
+      }
     }
 
     if (error instanceof UrlValidationError) {
-      return NextResponse.json({ error: error.reason }, { status: 403 });
+      return NextResponse.json({ error: 'Invalid URL' }, { status: 403 });
     }
     if (error instanceof ResponseSizeLimitError) {
       return NextResponse.json({ error: error.message }, { status: 413 });

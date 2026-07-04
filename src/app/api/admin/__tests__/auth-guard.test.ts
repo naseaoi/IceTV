@@ -1,8 +1,14 @@
-/** @jest-environment node */
+﻿/** @jest-environment node */
 
-import { getAuthInfoFromCookie, verifySignature } from '@/lib/auth';
-import { getConfig, resetConfig, saveConfig } from '@/lib/config';
+import { getAuthInfoFromCookie } from '@/lib/auth.server';
+import {
+  getConfig,
+  getConfigForRead,
+  resetConfig,
+  saveConfig,
+} from '@/lib/config';
 import { getOwnerPassword, getOwnerUsername } from '@/lib/env.server';
+import { verifyAuthSignature } from '@/lib/signing-secret.server';
 
 if (!(globalThis as any).Headers) {
   class MinimalHeaders {
@@ -69,14 +75,14 @@ if (!(globalThis as any).Response) {
   (globalThis as any).Response = MinimalResponse;
 }
 
-jest.mock('@/lib/auth', () => ({
+jest.mock('@/lib/auth.server', () => ({
   getAuthInfoFromCookie: jest.fn(),
   getSignatureData: jest.fn(() => 'mock-sign-data'),
-  verifySignature: jest.fn(),
 }));
 
 jest.mock('@/lib/config', () => ({
   getConfig: jest.fn(),
+  getConfigForRead: jest.fn(),
   resetConfig: jest.fn(),
   saveConfig: jest.fn(),
 }));
@@ -84,6 +90,10 @@ jest.mock('@/lib/config', () => ({
 jest.mock('@/lib/env.server', () => ({
   getOwnerUsername: jest.fn(),
   getOwnerPassword: jest.fn(),
+}));
+
+jest.mock('@/lib/signing-secret.server', () => ({
+  verifyAuthSignature: jest.fn(),
 }));
 
 function getHandlers() {
@@ -101,10 +111,13 @@ function getHandlers() {
 describe('admin api auth guard regression', () => {
   const mockedGetAuthInfoFromCookie =
     getAuthInfoFromCookie as jest.MockedFunction<typeof getAuthInfoFromCookie>;
-  const mockedVerifySignature = verifySignature as jest.MockedFunction<
-    typeof verifySignature
+  const mockedVerifyAuthSignature = verifyAuthSignature as jest.MockedFunction<
+    typeof verifyAuthSignature
   >;
   const mockedGetConfig = getConfig as jest.MockedFunction<typeof getConfig>;
+  const mockedGetConfigForRead = getConfigForRead as jest.MockedFunction<
+    typeof getConfigForRead
+  >;
   const mockedResetConfig = resetConfig as jest.MockedFunction<
     typeof resetConfig
   >;
@@ -123,6 +136,11 @@ describe('admin api auth guard regression', () => {
       SiteName: 'IceTV',
       SiteIcon: '',
       Announcement: '',
+      EnableLiveEntry: false,
+      DefaultAggregateSearch: true,
+      EnableOptimization: true,
+      AutoSwitchSourceOnTimeout: false,
+      LiveDirectConnect: false,
       SearchDownstreamMaxPage: 5,
       SiteInterfaceCacheTime: 300,
       DoubanProxyType: 'direct',
@@ -151,8 +169,9 @@ describe('admin api auth guard regression', () => {
     process.env.NEXT_PUBLIC_STORAGE_TYPE = 'localdb';
     mockedGetOwnerUsername.mockReturnValue('owner-1');
     mockedGetOwnerPassword.mockReturnValue('owner-secret');
-    mockedVerifySignature.mockResolvedValue(true);
+    mockedVerifyAuthSignature.mockResolvedValue(true);
     mockedGetConfig.mockResolvedValue(baseConfig as never);
+    mockedGetConfigForRead.mockResolvedValue(baseConfig as never);
   });
 
   it('returns 401 when request is unauthenticated', async () => {
@@ -230,6 +249,10 @@ describe('admin api auth guard regression', () => {
         SiteName: 'IceTV',
         Announcement: 'hello',
         EnableLiveEntry: false,
+        DefaultAggregateSearch: true,
+        EnableOptimization: true,
+        AutoSwitchSourceOnTimeout: false,
+        LiveDirectConnect: false,
         SearchDownstreamMaxPage: 5,
         SiteInterfaceCacheTime: 300,
         DoubanProxyType: 'direct',

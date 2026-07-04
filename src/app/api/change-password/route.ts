@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 
 import { isGuardFailure, requireActiveUser } from '@/lib/api-auth';
 import { db } from '@/lib/db';
+import { validateAccountPassword } from '@/lib/password-policy';
 
 export const runtime = 'nodejs';
 
@@ -21,6 +22,11 @@ export async function POST(request: NextRequest) {
     // 验证新密码
     if (!newPassword || typeof newPassword !== 'string') {
       return NextResponse.json({ error: '新密码不得为空' }, { status: 400 });
+    }
+
+    const passwordError = validateAccountPassword(newPassword);
+    if (passwordError) {
+      return NextResponse.json({ error: passwordError }, { status: 400 });
     }
 
     const username = guardResult.username;

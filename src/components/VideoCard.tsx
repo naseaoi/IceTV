@@ -1,9 +1,8 @@
-import {
+﻿import {
   ExternalLink,
   Heart,
   Link,
   PlayCircleIcon,
-  Radio,
   Trash2,
 } from 'lucide-react';
 import { useRouter } from 'next/navigation';
@@ -25,24 +24,28 @@ import {
   generateStorageKey,
   saveFavorite,
 } from '@/lib/db.client';
-import { getAuthInfoFromBrowserCookie } from '@/lib/auth';
-import { SearchResult } from '@/lib/types';
+import { getAuthInfoFromBrowserCookie } from '@/lib/auth.client';
 import { warmupForPlayback } from '@/lib/video-prefetch';
 import { useLongPress } from '@/hooks/useLongPress';
-import { savePlayIntent } from '@/features/play/lib/playIntent';
+import { savePlayIntent } from '@/lib/play-intent';
 
 import {
   useCardInteractionManager,
   useFavoriteStatus,
 } from '@/components/CardInteractionProvider';
-import CoverImage from '@/components/CoverImage';
-
-/** 禁用文本选中和长按弹出的内联样式 */
-const noSelectStyle = {
-  WebkitUserSelect: 'none',
-  userSelect: 'none',
-  WebkitTouchCallout: 'none',
-} as React.CSSProperties;
+import { areVideoCardPropsEqual } from '@/components/video-card/compare';
+import { noSelectStyle } from '@/components/video-card/constants';
+import { VideoCardPoster } from '@/components/video-card/VideoCardPoster';
+import { VideoCardTitle } from '@/components/video-card/VideoCardTitle';
+import type {
+  VideoCardDisplayConfig,
+  VideoCardHandle,
+  VideoCardProps,
+} from '@/components/video-card/types';
+export type {
+  VideoCardHandle,
+  VideoCardProps,
+} from '@/components/video-card/types';
 
 const PREFETCH_INTENT_DELAY_MS = 180;
 
@@ -59,116 +62,6 @@ function canUseHoverPrefetch(): boolean {
   ).connection;
   if (connection?.saveData) return false;
   return !['slow-2g', '2g'].includes(connection?.effectiveType || '');
-}
-
-/** 阻止默认右键菜单 */
-const preventContextMenu = (e: React.MouseEvent) => {
-  e.preventDefault();
-  return false;
-};
-
-interface VideoCardProps {
-  id?: string;
-  source?: string;
-  title?: string;
-  query?: string;
-  poster?: string;
-  priority?: boolean;
-  episodes?: number;
-  source_name?: string;
-  source_names?: string[];
-  progress?: number;
-  resumeTime?: number;
-  year?: string;
-  from: 'playrecord' | 'favorite' | 'search' | 'douban';
-  currentEpisode?: number;
-  douban_id?: number;
-  onDelete?: () => void;
-  rate?: string;
-  type?: string;
-  isBangumi?: boolean;
-  isAggregate?: boolean;
-  origin?: 'vod' | 'live';
-  aggregateGroup?: SearchResult[];
-}
-
-export type VideoCardHandle = {
-  setEpisodes: (episodes?: number) => void;
-  setSourceNames: (names?: string[]) => void;
-  setDoubanId: (id?: number) => void;
-};
-
-function isSameStringArray(prev?: string[], next?: string[]): boolean {
-  if (prev === next) {
-    return true;
-  }
-  if (!prev || !next) {
-    return !prev && !next;
-  }
-  if (prev.length !== next.length) {
-    return false;
-  }
-
-  return prev.every((item, index) => item === next[index]);
-}
-
-function isSameAggregateGroup(
-  prev?: SearchResult[],
-  next?: SearchResult[],
-): boolean {
-  if (prev === next) {
-    return true;
-  }
-  if (!prev || !next) {
-    return !prev && !next;
-  }
-  if (prev.length !== next.length) {
-    return false;
-  }
-
-  return prev.every((item, index) => {
-    const nextItem = next[index];
-    return (
-      item.id === nextItem.id &&
-      item.source === nextItem.source &&
-      item.title === nextItem.title &&
-      item.poster === nextItem.poster &&
-      item.year === nextItem.year &&
-      item.source_name === nextItem.source_name &&
-      item.douban_id === nextItem.douban_id &&
-      item.episodes.length === nextItem.episodes.length &&
-      item.episodes_titles.length === nextItem.episodes_titles.length
-    );
-  });
-}
-
-function areVideoCardPropsEqual(
-  prev: Readonly<VideoCardProps>,
-  next: Readonly<VideoCardProps>,
-): boolean {
-  return (
-    prev.id === next.id &&
-    prev.source === next.source &&
-    prev.title === next.title &&
-    prev.query === next.query &&
-    prev.poster === next.poster &&
-    prev.priority === next.priority &&
-    prev.episodes === next.episodes &&
-    prev.source_name === next.source_name &&
-    isSameStringArray(prev.source_names, next.source_names) &&
-    prev.progress === next.progress &&
-    prev.resumeTime === next.resumeTime &&
-    prev.year === next.year &&
-    prev.from === next.from &&
-    prev.currentEpisode === next.currentEpisode &&
-    prev.douban_id === next.douban_id &&
-    prev.rate === next.rate &&
-    prev.type === next.type &&
-    prev.isBangumi === next.isBangumi &&
-    prev.isAggregate === next.isAggregate &&
-    prev.origin === next.origin &&
-    isSameAggregateGroup(prev.aggregateGroup, next.aggregateGroup)
-  );
 }
 
 const VideoCard = forwardRef<VideoCardHandle, VideoCardProps>(
@@ -597,7 +490,7 @@ const VideoCard = forwardRef<VideoCardHandle, VideoCardProps>(
       longPressDelay: 500,
     });
 
-    const config = useMemo(() => {
+    const config = useMemo<VideoCardDisplayConfig>(() => {
       const configs = {
         playrecord: {
           showSourceName: true,
@@ -876,334 +769,33 @@ const VideoCard = forwardRef<VideoCardHandle, VideoCardProps>(
             return false;
           }}
         >
-          {/* 海报容器 */}
-          <div
-            className={`relative aspect-[2/3] overflow-hidden rounded-lg ${
-              origin === 'live'
-                ? 'ring-1 ring-gray-300/80 dark:ring-gray-600/80'
-                : ''
-            }`}
-            style={noSelectStyle}
-            onContextMenu={preventContextMenu}
-          >
-            {/* 封面 */}
-            <CoverImage
-              src={actualPoster}
-              alt={actualTitle}
-              priority={priority}
-              fit={origin === 'live' ? 'contain' : 'cover'}
-            />
+          <VideoCardPoster
+            title={actualTitle}
+            poster={actualPoster}
+            priority={priority}
+            origin={origin}
+            from={from}
+            config={config}
+            year={actualYear}
+            rate={rate}
+            episodes={actualEpisodes}
+            currentEpisode={currentEpisode}
+            doubanId={actualDoubanId}
+            isBangumi={isBangumi}
+            isAggregate={isAggregate}
+            sourceNames={dynamicSourceNames}
+            progress={progress}
+            visibleFavorited={visibleFavorited}
+            onDeleteRecord={handleDeleteRecord}
+            onToggleFavorite={handleToggleFavorite}
+          />
 
-            {/* 悬浮遮罩 */}
-            <div
-              className='absolute inset-0 bg-gradient-to-t from-black/80 via-black/20 to-transparent opacity-0 transition-opacity duration-300 ease-in-out group-hover:opacity-100'
-              style={noSelectStyle}
-              onContextMenu={preventContextMenu}
-            />
-
-            {/* 播放按钮 */}
-            {config.showPlayButton && (
-              <div
-                data-button='true'
-                className='absolute inset-0 flex items-center justify-center opacity-0 transition-all delay-75 duration-300 ease-in-out group-hover:scale-100 group-hover:opacity-100'
-                style={noSelectStyle}
-                onContextMenu={preventContextMenu}
-              >
-                <PlayCircleIcon
-                  size={50}
-                  strokeWidth={0.8}
-                  className='fill-transparent text-white transition-all duration-300 ease-out hover:scale-[1.1] hover:fill-green-500'
-                  style={noSelectStyle}
-                  onContextMenu={preventContextMenu}
-                />
-              </div>
-            )}
-
-            {/* 操作按钮 */}
-            {(config.showHeart || config.showCheckCircle) && (
-              <div
-                data-button='true'
-                className='absolute bottom-3 right-3 flex translate-y-2 gap-3 opacity-0 transition-all duration-300 ease-in-out sm:group-hover:translate-y-0 sm:group-hover:opacity-100'
-                style={noSelectStyle}
-                onContextMenu={preventContextMenu}
-              >
-                {config.showCheckCircle && (
-                  <Trash2
-                    onClick={handleDeleteRecord}
-                    size={20}
-                    className='text-white transition-all duration-300 ease-out hover:scale-[1.1] hover:stroke-red-500'
-                    style={noSelectStyle}
-                    onContextMenu={preventContextMenu}
-                  />
-                )}
-                {config.showHeart && from !== 'search' && (
-                  <Heart
-                    onClick={handleToggleFavorite}
-                    size={20}
-                    className={`transition-all duration-300 ease-out ${
-                      visibleFavorited
-                        ? 'fill-red-600 stroke-red-600'
-                        : 'fill-transparent stroke-white hover:stroke-red-400'
-                    } hover:scale-[1.1]`}
-                    style={noSelectStyle}
-                    onContextMenu={preventContextMenu}
-                  />
-                )}
-              </div>
-            )}
-
-            {/* 年份徽章 */}
-            {config.showYear &&
-              actualYear &&
-              actualYear !== 'unknown' &&
-              actualYear.trim() !== '' && (
-                <div
-                  className='absolute left-2 top-2 rounded bg-black/50 px-2 py-1 text-xs font-medium text-white shadow-sm backdrop-blur-sm transition-all duration-300 ease-out group-hover:opacity-90'
-                  style={noSelectStyle}
-                  onContextMenu={preventContextMenu}
-                >
-                  {actualYear}
-                </div>
-              )}
-
-            {/* 徽章 */}
-            {config.showRating && rate && (
-              <div
-                className='absolute right-2 top-2 flex h-7 w-7 items-center justify-center rounded-full bg-pink-500 text-xs font-bold text-white shadow-md transition-all duration-300 ease-out group-hover:scale-110'
-                style={noSelectStyle}
-                onContextMenu={preventContextMenu}
-              >
-                {rate}
-              </div>
-            )}
-
-            {actualEpisodes && actualEpisodes > 1 && (
-              <div
-                className='absolute right-2 top-2 rounded-md bg-green-500 px-2 py-1 text-xs font-semibold text-white shadow-md transition-all duration-300 ease-out group-hover:scale-110'
-                style={noSelectStyle}
-                onContextMenu={preventContextMenu}
-              >
-                {currentEpisode
-                  ? `${currentEpisode}/${actualEpisodes}`
-                  : actualEpisodes}
-              </div>
-            )}
-
-            {/* 豆瓣链接 */}
-            {config.showDoubanLink &&
-              actualDoubanId &&
-              actualDoubanId !== 0 && (
-                <a
-                  href={
-                    isBangumi
-                      ? `https://bgm.tv/subject/${actualDoubanId.toString()}`
-                      : `https://movie.douban.com/subject/${actualDoubanId.toString()}`
-                  }
-                  target='_blank'
-                  rel='noopener noreferrer'
-                  onClick={(e) => e.stopPropagation()}
-                  className='absolute left-2 top-2 -translate-x-2 opacity-0 transition-all delay-100 duration-300 ease-in-out sm:group-hover:translate-x-0 sm:group-hover:opacity-100'
-                  style={noSelectStyle}
-                  onContextMenu={preventContextMenu}
-                >
-                  <div
-                    className='flex h-7 w-7 items-center justify-center rounded-full bg-green-500 text-xs font-bold text-white shadow-md transition-all duration-300 ease-out hover:scale-[1.1] hover:bg-green-600'
-                    style={noSelectStyle}
-                    onContextMenu={preventContextMenu}
-                  >
-                    <Link
-                      size={16}
-                      style={
-                        {
-                          ...noSelectStyle,
-                          pointerEvents: 'none',
-                        } as React.CSSProperties
-                      }
-                    />
-                  </div>
-                </a>
-              )}
-
-            {/* 聚合播放源指示器 */}
-            {isAggregate &&
-              dynamicSourceNames &&
-              dynamicSourceNames.length > 0 &&
-              (() => {
-                const uniqueSources = Array.from(new Set(dynamicSourceNames));
-                const sourceCount = uniqueSources.length;
-
-                return (
-                  <div
-                    className='absolute bottom-2 right-2 opacity-0 transition-all delay-75 duration-300 ease-in-out sm:group-hover:opacity-100'
-                    style={noSelectStyle}
-                    onContextMenu={preventContextMenu}
-                  >
-                    <div
-                      className='group/sources relative'
-                      style={noSelectStyle}
-                    >
-                      <div
-                        className='flex h-6 w-6 cursor-pointer items-center justify-center rounded-full bg-gray-700 text-xs font-bold text-white shadow-md transition-all duration-300 ease-out hover:scale-[1.1] hover:bg-gray-600 sm:h-7 sm:w-7'
-                        style={noSelectStyle}
-                        onContextMenu={preventContextMenu}
-                      >
-                        {sourceCount}
-                      </div>
-
-                      {/* 播放源详情悬浮框 */}
-                      {(() => {
-                        // 优先显示的播放源（常见的主流平台）
-                        const prioritySources = [
-                          '爱奇艺',
-                          '腾讯视频',
-                          '优酷',
-                          '芒果TV',
-                          '哔哩哔哩',
-                          'Netflix',
-                          'Disney+',
-                        ];
-
-                        // 按优先级排序播放源
-                        const sortedSources = uniqueSources.sort((a, b) => {
-                          const aIndex = prioritySources.indexOf(a);
-                          const bIndex = prioritySources.indexOf(b);
-                          if (aIndex !== -1 && bIndex !== -1)
-                            return aIndex - bIndex;
-                          if (aIndex !== -1) return -1;
-                          if (bIndex !== -1) return 1;
-                          return a.localeCompare(b);
-                        });
-
-                        const maxDisplayCount = 6; // 最多显示6个
-                        const displaySources = sortedSources.slice(
-                          0,
-                          maxDisplayCount,
-                        );
-                        const hasMore = sortedSources.length > maxDisplayCount;
-                        const remainingCount =
-                          sortedSources.length - maxDisplayCount;
-
-                        return (
-                          <div
-                            className='pointer-events-none invisible absolute bottom-full right-0 z-50 mb-2 -translate-x-0 opacity-0 transition-all delay-100 duration-200 ease-out group-hover/sources:visible group-hover/sources:opacity-100 sm:right-0 sm:translate-x-0'
-                            style={noSelectStyle}
-                            onContextMenu={preventContextMenu}
-                          >
-                            <div
-                              className='w-[7em] overflow-hidden rounded-lg border border-white/10 bg-gray-800/90 p-1.5 text-xs text-white shadow-xl backdrop-blur-sm sm:w-[7.5em] sm:p-2 sm:text-xs'
-                              style={noSelectStyle}
-                              onContextMenu={preventContextMenu}
-                            >
-                              {/* 单列布局 */}
-                              <div className='space-y-0.5 sm:space-y-1'>
-                                {displaySources.map((sourceName, index) => (
-                                  <div
-                                    key={index}
-                                    className='flex min-w-0 items-center gap-1 sm:gap-1.5'
-                                  >
-                                    <div className='h-0.5 w-0.5 flex-shrink-0 rounded-full bg-blue-400 sm:h-1 sm:w-1'></div>
-                                    <span
-                                      className='block w-[4em] shrink-0 truncate text-[10px] leading-tight sm:text-xs'
-                                      title={sourceName}
-                                    >
-                                      {sourceName}
-                                    </span>
-                                  </div>
-                                ))}
-                              </div>
-
-                              {/* 显示更多提示 */}
-                              {hasMore && (
-                                <div className='mt-1 border-t border-gray-700/50 pt-1 sm:mt-2 sm:pt-1.5'>
-                                  <div className='flex items-center justify-center text-gray-400'>
-                                    <span className='text-[10px] font-medium sm:text-xs'>
-                                      +{remainingCount} 播放源
-                                    </span>
-                                  </div>
-                                </div>
-                              )}
-
-                              {/* 小箭头 */}
-                              <div className='absolute right-2 top-full h-0 w-0 border-l-[4px] border-r-[4px] border-t-[4px] border-transparent border-t-gray-800/90 sm:right-3 sm:border-l-[6px] sm:border-r-[6px] sm:border-t-[6px]'></div>
-                            </div>
-                          </div>
-                        );
-                      })()}
-                    </div>
-                  </div>
-                );
-              })()}
-
-            {/* 进度条：覆盖在封面底部 */}
-            {config.showProgress && progress !== undefined && progress > 0 && (
-              <div
-                className='absolute bottom-0 left-0 right-0 h-1 bg-black/30'
-                style={noSelectStyle}
-                onContextMenu={preventContextMenu}
-              >
-                <div
-                  className='h-full bg-green-500 transition-all duration-500 ease-out'
-                  style={
-                    {
-                      width: `${progress}%`,
-                      ...noSelectStyle,
-                    } as React.CSSProperties
-                  }
-                  onContextMenu={preventContextMenu}
-                />
-              </div>
-            )}
-          </div>
-
-          {/* 标题与来源：保留在文档流中，让卡片高度稳定参与布局，避免首页区块间距被压缩。 */}
-          <div
-            className='mt-2 text-center'
-            style={noSelectStyle}
-            onContextMenu={preventContextMenu}
-          >
-            <div className='relative' style={noSelectStyle}>
-              <span
-                className='peer block truncate text-sm font-semibold text-gray-900 transition-colors duration-300 ease-in-out group-hover:text-green-600 dark:text-gray-100 dark:group-hover:text-green-400'
-                style={noSelectStyle}
-                onContextMenu={preventContextMenu}
-              >
-                {actualTitle}
-              </span>
-              {/* 自定义 tooltip */}
-              <div
-                className='pointer-events-none invisible absolute bottom-full left-1/2 mb-2 -translate-x-1/2 transform whitespace-nowrap rounded-md bg-gray-800 px-3 py-1 text-xs text-white opacity-0 shadow-lg transition-all delay-100 duration-200 ease-out peer-hover:visible peer-hover:opacity-100'
-                style={noSelectStyle}
-                onContextMenu={preventContextMenu}
-              >
-                {actualTitle}
-                <div
-                  className='absolute left-1/2 top-full h-0 w-0 -translate-x-1/2 transform border-l-4 border-r-4 border-t-4 border-transparent border-t-gray-800'
-                  style={noSelectStyle}
-                ></div>
-              </div>
-            </div>
-            {config.showSourceName && source_name && (
-              <span
-                className='mt-1 block text-xs text-gray-500 dark:text-gray-400'
-                style={noSelectStyle}
-                onContextMenu={preventContextMenu}
-              >
-                <span
-                  className='inline-block rounded border border-gray-500/60 px-2 py-0.5 transition-all duration-300 ease-in-out group-hover:border-green-500/60 group-hover:text-green-600 dark:border-gray-400/60 dark:group-hover:text-green-400'
-                  style={noSelectStyle}
-                  onContextMenu={preventContextMenu}
-                >
-                  {origin === 'live' && (
-                    <Radio
-                      size={12}
-                      className='mr-1.5 inline-block text-gray-500 dark:text-gray-400'
-                    />
-                  )}
-                  {source_name}
-                </span>
-              </span>
-            )}
-          </div>
+          <VideoCardTitle
+            title={actualTitle}
+            sourceName={source_name}
+            origin={origin}
+            config={config}
+          />
         </div>
       </>
     );

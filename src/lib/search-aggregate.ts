@@ -16,6 +16,14 @@ export interface SearchAggregationOptions {
   onSourceError?: (site: ApiSite, error: unknown) => void;
 }
 
+type SourceFailureCooldown = {
+  expiresAt: number;
+  error: Error;
+};
+
+const DEFAULT_SOURCE_FAILURE_COOLDOWN_MS = 5 * 60 * 1000;
+const sourceFailureCooldowns = new Map<string, SourceFailureCooldown>();
+
 export async function runSearchAggregation({
   apiSites,
   query,
@@ -28,6 +36,12 @@ export async function runSearchAggregation({
   onSourceError,
 }: SearchAggregationOptions): Promise<SearchResult[]> {
   const searchTasks = apiSites.map((site) => async () => {
+    const cooldown = getSourceFailureCooldown(site);
+    if (cooldown) {
+      onSourceError?.(site, cooldown.error);
+      return [];
+    }
+
     try {
       const results = await withAbortableTimeout(
         (childSignal) =>
@@ -44,6 +58,7 @@ export async function runSearchAggregation({
         query,
         disableYellowFilter,
       );
+      clearSourceFailureCooldown(site);
       onSourceResult?.(site, filteredResults);
       return filteredResults;
     } catch (error) {
@@ -51,6 +66,9 @@ export async function runSearchAggregation({
         `搜索失败 ${site.name}:`,
         error instanceof Error ? error.message : error,
       );
+      if (!signal?.aborted) {
+        markSourceFailureCooldown(site, error);
+      }
       onSourceError?.(site, error);
       return [];
     }
@@ -65,6 +83,50 @@ export async function runSearchAggregation({
   return results
     .filter((result) => result.status === 'fulfilled')
     .flatMap((result) => result.value);
+}
+
+export function clearSearchSourceFailureCooldownsForTests(): void {
+  sourceFailureCooldowns.clear();
+}
+
+function getSourceFailureCooldown(site: ApiSite): SourceFailureCooldown | null {
+  const key = getSourceFailureKey(site);
+  const record = sourceFailureCooldowns.get(key);
+  if (!record) return null;
+  if (record.expiresAt > Date.now()) return record;
+  sourceFailureCooldowns.delete(key);
+  return null;
+}
+
+function markSourceFailureCooldown(site: ApiSite, error: unknown): void {
+  const cooldownMs = getSourceFailureCooldownMs();
+  if (cooldownMs <= 0) return;
+
+  sourceFailureCooldowns.set(getSourceFailureKey(site), {
+    expiresAt: Date.now() + cooldownMs,
+    error:
+      error instanceof Error
+        ? error
+        : new Error(typeof error === 'string' ? error : '搜索源失败'),
+  });
+}
+
+function clearSourceFailureCooldown(site: ApiSite): void {
+  sourceFailureCooldowns.delete(getSourceFailureKey(site));
+}
+
+function getSourceFailureKey(site: ApiSite): string {
+  return site.key || site.api || site.name;
+}
+
+function getSourceFailureCooldownMs(): number {
+  const configured = Number.parseInt(
+    process.env.SEARCH_SOURCE_FAILURE_COOLDOWN_MS || '',
+    10,
+  );
+  return Number.isFinite(configured) && configured >= 0
+    ? configured
+    : DEFAULT_SOURCE_FAILURE_COOLDOWN_MS;
 }
 
 function filterSearchResults(

@@ -1,4 +1,4 @@
-import { AdminConfig } from '@/features/admin/types/api';
+﻿import { AdminConfig } from '@/types/admin';
 
 // 播放记录数据结构
 export interface PlayRecord {
@@ -11,7 +11,7 @@ export interface PlayRecord {
   play_time: number; // 播放进度（秒）
   total_time: number; // 总进度（秒）
   save_time: number; // 记录保存时间（时间戳）
-  search_title: string; // 搜索时使用的标题
+  search_title?: string; // 搜索时使用的标题
 }
 
 // 收藏数据结构
@@ -22,7 +22,7 @@ export interface Favorite {
   year: string;
   cover: string;
   save_time: number; // 记录保存时间（时间戳）
-  search_title: string; // 搜索时使用的标题
+  search_title?: string; // 搜索时使用的标题
   origin?: 'vod' | 'live';
 }
 
@@ -102,6 +102,11 @@ export interface IStorage {
 }
 
 // 搜索结果数据结构
+export interface EpisodeGroup {
+  label: string;
+  count: number;
+}
+
 export interface SearchResult {
   id: string;
   title: string;
@@ -117,6 +122,7 @@ export interface SearchResult {
   type_name?: string;
   douban_id?: number;
   related_sources?: SearchResult[];
+  episode_groups?: EpisodeGroup[];
 }
 
 // 豆瓣数据结构

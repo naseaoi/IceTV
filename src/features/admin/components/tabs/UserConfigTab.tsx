@@ -1,8 +1,8 @@
-'use client';
+﻿'use client';
 
 import { useCallback, useMemo, useState } from 'react';
 
-import AlertModal from '@/features/admin/components/AlertModal';
+import AlertModal from '@/components/modals/AlertModal';
 import { AddUserForm } from '@/features/admin/components/tabs/user-config/AddUserForm';
 import { BatchUserGroupDialog } from '@/features/admin/components/tabs/user-config/BatchUserGroupDialog';
 import { ChangePasswordForm } from '@/features/admin/components/tabs/user-config/ChangePasswordForm';
@@ -14,14 +14,14 @@ import { UserGroupFormDialog } from '@/features/admin/components/tabs/user-confi
 import { UserGroupTable } from '@/features/admin/components/tabs/user-config/UserGroupTable';
 import { UserTable } from '@/features/admin/components/tabs/user-config/UserTable';
 import { useAdminUserActions } from '@/features/admin/hooks/useAdminUserActions';
-import { useAlertModal } from '@/features/admin/hooks/useAlertModal';
+import { useAlertModal } from '@/hooks/useAlertModal';
 import { useLoadingState } from '@/features/admin/hooks/useLoadingState';
 import { buttonStyles } from '@/features/admin/lib/buttonStyles';
 import { showError, showSuccess } from '@/features/admin/lib/notifications';
 import { getSelectableUsers } from '@/features/admin/lib/permissions';
-import { AdminConfig } from '@/features/admin/types/api';
+import { AdminConfig } from '@/types/admin';
 import { useModalState } from '@/hooks/useModalState';
-import { getAuthInfoFromBrowserCookie } from '@/lib/auth';
+import { getAuthInfoFromBrowserCookie } from '@/lib/auth.client';
 
 interface UserConfigProps {
   config: AdminConfig | null;

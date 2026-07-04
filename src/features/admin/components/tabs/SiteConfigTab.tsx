@@ -1,16 +1,16 @@
-'use client';
+﻿'use client';
 
 import { ExternalLink, ImagePlus, Trash2, Upload } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 
-import AdminSelect from '@/features/admin/components/AdminSelect';
-import AlertModal from '@/features/admin/components/AlertModal';
-import { useAlertModal } from '@/features/admin/hooks/useAlertModal';
+import AdminSelect from '@/components/admin/AdminSelect';
+import AlertModal from '@/components/modals/AlertModal';
+import { useAlertModal } from '@/hooks/useAlertModal';
 import { useLoadingState } from '@/features/admin/hooks/useLoadingState';
 import { adminPost } from '@/features/admin/lib/api';
 import { buttonStyles } from '@/features/admin/lib/buttonStyles';
 import { showError, showSuccess } from '@/features/admin/lib/notifications';
-import { AdminConfig } from '@/features/admin/types/api';
+import { AdminConfig } from '@/types/admin';
 import { SiteConfig } from '@/features/admin/types/internal';
 import {
   DEFAULT_BANGUMI_DATA_SOURCE,
@@ -22,6 +22,7 @@ import {
   doubanImageProxyTypeOptions,
   getThanksInfo,
 } from '@/lib/douban-options';
+import { localPreferenceToggleDefinitions } from '@/lib/local-preference-toggles';
 
 const SiteConfigComponent = ({
   config,
@@ -37,6 +38,10 @@ const SiteConfigComponent = ({
     SiteIcon: '',
     Announcement: '',
     EnableLiveEntry: false,
+    DefaultAggregateSearch: true,
+    EnableOptimization: true,
+    AutoSwitchSourceOnTimeout: false,
+    LiveDirectConnect: false,
     SearchDownstreamMaxPage: 1,
     SiteInterfaceCacheTime: 7200,
     DoubanProxyType: 'direct',
@@ -68,6 +73,12 @@ const SiteConfigComponent = ({
           config.SiteConfig.DoubanImageProxyType || 'cmliussss-cdn-tencent',
         DoubanImageProxy: config.SiteConfig.DoubanImageProxy || '',
         EnableLiveEntry: config.SiteConfig.EnableLiveEntry ?? false,
+        DefaultAggregateSearch:
+          config.SiteConfig.DefaultAggregateSearch ?? true,
+        EnableOptimization: config.SiteConfig.EnableOptimization ?? true,
+        AutoSwitchSourceOnTimeout:
+          config.SiteConfig.AutoSwitchSourceOnTimeout ?? false,
+        LiveDirectConnect: config.SiteConfig.LiveDirectConnect ?? false,
         DisableYellowFilter: config.SiteConfig.DisableYellowFilter ?? false,
         FluidSearch: config.SiteConfig.FluidSearch ?? true,
       });
@@ -100,6 +111,23 @@ const SiteConfigComponent = ({
       ...prev,
       DoubanImageProxyType: value,
     }));
+  };
+
+  const handleLocalPreferenceDefaultToggle = (
+    siteConfigKey:
+      | 'DefaultAggregateSearch'
+      | 'EnableOptimization'
+      | 'AutoSwitchSourceOnTimeout'
+      | 'FluidSearch'
+      | 'LiveDirectConnect',
+  ) => {
+    setSiteSettings(
+      (prev) =>
+        ({
+          ...prev,
+          [siteConfigKey]: !prev[siteConfigKey],
+        }) as SiteConfig,
+    );
   };
 
   // 保存站点配置
@@ -145,9 +173,14 @@ const SiteConfigComponent = ({
 
         {/* 站点图标 */}
         <div>
-          <label className='mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300'>
-            站点图标
-          </label>
+          <div className='mb-2 flex items-end gap-2'>
+            <label className='text-sm font-medium text-gray-700 dark:text-gray-300'>
+              站点图标
+            </label>
+            <p className='text-xs text-gray-400 dark:text-gray-500'>
+              PNG/JPEG/WebP/SVG/ICO，≤512KB
+            </p>
+          </div>
           <div className='flex items-start gap-3'>
             {/* 预览 */}
             <div className='flex h-10 w-10 flex-shrink-0 items-center justify-center overflow-hidden rounded-lg border border-gray-300 bg-gray-50 dark:border-gray-600 dark:bg-gray-800'>
@@ -162,9 +195,8 @@ const SiteConfigComponent = ({
                 <ImagePlus className='h-5 w-5 text-gray-400' />
               )}
             </div>
-            <div className='flex-1 space-y-2'>
-              {/* URL 输入 + 操作按钮同行 */}
-              <div className='flex items-center gap-2'>
+            <div className='min-w-0 flex-1 space-y-2'>
+              <div className='flex min-w-0 items-center gap-2'>
                 <input
                   type='text'
                   value={siteSettings.SiteIcon}
@@ -176,40 +208,44 @@ const SiteConfigComponent = ({
                   placeholder='输入图标 URL 或上传文件'
                   className='min-w-0 flex-1 rounded-lg border border-gray-300 bg-white px-3 py-2 text-gray-900 focus:border-transparent focus:ring-2 focus:ring-green-500 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100'
                 />
-                <button
-                  type='button'
-                  disabled={iconUploading}
-                  onClick={() => iconFileRef.current?.click()}
-                  aria-label={iconUploading ? '上传中' : '上传图标'}
-                  title={iconUploading ? '上传中...' : '上传图标'}
-                  className='flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-lg border border-gray-300 bg-white text-gray-700 transition-colors hover:bg-gray-50 disabled:opacity-60 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-300 dark:hover:bg-gray-700'
-                >
-                  <Upload className='h-5 w-5' />
-                </button>
-                {siteSettings.SiteIcon && (
+                <div className='flex shrink-0 items-center gap-2'>
                   <button
                     type='button'
-                    onClick={async () => {
-                      if (
-                        siteSettings.SiteIcon.startsWith('/api/admin/site-icon')
-                      ) {
-                        try {
-                          await fetch('/api/admin/site-icon', {
-                            method: 'DELETE',
-                          });
-                        } catch {
-                          /* ignore */
-                        }
-                      }
-                      setSiteSettings((prev) => ({ ...prev, SiteIcon: '' }));
-                      setIconPreview('');
-                    }}
-                    className='flex flex-shrink-0 items-center gap-1.5 rounded-lg border border-red-300 px-3 py-2 text-xs font-medium text-red-600 transition-colors hover:bg-red-50 dark:border-red-600/50 dark:text-red-400 dark:hover:bg-red-900/20'
+                    disabled={iconUploading}
+                    onClick={() => iconFileRef.current?.click()}
+                    aria-label={iconUploading ? '上传中' : '上传图标'}
+                    title={iconUploading ? '上传中...' : '上传图标'}
+                    className='flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-lg border border-gray-300 bg-white text-gray-700 transition-colors hover:bg-gray-50 disabled:opacity-60 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-300 dark:hover:bg-gray-700'
                   >
-                    <Trash2 className='h-3.5 w-3.5' />
-                    清除
+                    <Upload className='h-5 w-5' />
                   </button>
-                )}
+                  {siteSettings.SiteIcon && (
+                    <button
+                      type='button'
+                      onClick={async () => {
+                        if (
+                          siteSettings.SiteIcon.startsWith(
+                            '/api/admin/site-icon',
+                          )
+                        ) {
+                          try {
+                            await fetch('/api/admin/site-icon', {
+                              method: 'DELETE',
+                            });
+                          } catch {
+                            /* ignore */
+                          }
+                        }
+                        setSiteSettings((prev) => ({ ...prev, SiteIcon: '' }));
+                        setIconPreview('');
+                      }}
+                      className='flex flex-shrink-0 items-center gap-1.5 rounded-lg border border-red-300 px-3 py-2 text-xs font-medium text-red-600 transition-colors hover:bg-red-50 dark:border-red-600/50 dark:text-red-400 dark:hover:bg-red-900/20'
+                    >
+                      <Trash2 className='h-3.5 w-3.5' />
+                      清除
+                    </button>
+                  )}
+                </div>
               </div>
               <input
                 ref={iconFileRef}
@@ -254,16 +290,18 @@ const SiteConfigComponent = ({
               />
             </div>
           </div>
-          <p className='mt-1.5 text-xs text-gray-400 dark:text-gray-500'>
-            支持 URL 链接或本地上传（PNG/JPEG/WebP/SVG/ICO，≤512KB）
-          </p>
         </div>
 
         {/* 站点公告 */}
         <div>
-          <label className='mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300'>
-            站点公告
-          </label>
+          <div className='mb-2 flex items-end gap-2'>
+            <label className='text-sm font-medium text-gray-700 dark:text-gray-300'>
+              站点公告
+            </label>
+            <p className='text-xs text-gray-400 dark:text-gray-500'>
+              修改后将会重新推送给用户
+            </p>
+          </div>
           <textarea
             value={siteSettings.Announcement}
             onChange={(e) =>
@@ -275,9 +313,6 @@ const SiteConfigComponent = ({
             rows={1}
             className='w-full resize-y rounded-lg border border-gray-300 bg-white px-3 py-2 text-gray-900 focus:border-transparent focus:ring-2 focus:ring-green-500 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100'
           />
-          <p className='mt-1.5 text-xs text-gray-400 dark:text-gray-500'>
-            修改后将会重新推送给用户
-          </p>
         </div>
 
         {/* 豆瓣数据源设置 */}
@@ -310,9 +345,6 @@ const SiteConfigComponent = ({
               onChange={(value) => handleDoubanDataSourceChange(value)}
               options={doubanDataSourceOptions}
             />
-            <p className='mt-1 text-xs text-gray-500 dark:text-gray-400'>
-              选择获取豆瓣数据的方式
-            </p>
           </div>
 
           {siteSettings.DoubanProxyType === 'custom' && (
@@ -328,45 +360,6 @@ const SiteConfigComponent = ({
                   setSiteSettings((prev) => ({
                     ...prev,
                     DoubanProxy: e.target.value,
-                  }))
-                }
-                className='w-full rounded-lg border border-gray-300 bg-white px-3 py-2.5 text-sm text-gray-900 placeholder-gray-500 shadow-sm transition-all duration-200 hover:border-gray-400 focus:border-green-500 focus:outline-none focus:ring-2 focus:ring-green-500 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100 dark:placeholder-gray-400 dark:hover:border-gray-500'
-              />
-              <p className='mt-1 text-xs text-gray-500 dark:text-gray-400'>
-                自定义代理服务器地址
-              </p>
-            </div>
-          )}
-        </div>
-
-        <div className='space-y-3'>
-          <div>
-            <label className='mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300'>
-              Bangumi 数据代理
-            </label>
-            <AdminSelect
-              value={siteSettings.BangumiDataSource}
-              onChange={(value) => handleBangumiDataSourceChange(value)}
-              options={bangumiDataSourceOptions}
-            />
-            <p className='mt-1 text-xs text-gray-500 dark:text-gray-400'>
-              选择获取新番放送数据的方式
-            </p>
-          </div>
-
-          {siteSettings.BangumiDataSource === 'custom' && (
-            <div>
-              <label className='mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300'>
-                Bangumi 代理地址
-              </label>
-              <input
-                type='text'
-                placeholder='例如: https://proxy.example.com/fetch?url='
-                value={siteSettings.BangumiProxy}
-                onChange={(e) =>
-                  setSiteSettings((prev) => ({
-                    ...prev,
-                    BangumiProxy: e.target.value,
                   }))
                 }
                 className='w-full rounded-lg border border-gray-300 bg-white px-3 py-2.5 text-sm text-gray-900 placeholder-gray-500 shadow-sm transition-all duration-200 hover:border-gray-400 focus:border-green-500 focus:outline-none focus:ring-2 focus:ring-green-500 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100 dark:placeholder-gray-400 dark:hover:border-gray-500'
@@ -408,9 +401,6 @@ const SiteConfigComponent = ({
               onChange={(value) => handleDoubanImageProxyChange(value)}
               options={doubanImageProxyTypeOptions}
             />
-            <p className='mt-1 text-xs text-gray-500 dark:text-gray-400'>
-              选择获取豆瓣图片的方式
-            </p>
           </div>
 
           {siteSettings.DoubanImageProxyType === 'custom' && (
@@ -432,6 +422,42 @@ const SiteConfigComponent = ({
               />
               <p className='mt-1 text-xs text-gray-500 dark:text-gray-400'>
                 自定义图片代理服务器地址
+              </p>
+            </div>
+          )}
+        </div>
+
+        <div className='space-y-3'>
+          <div>
+            <label className='mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300'>
+              Bangumi 数据代理
+            </label>
+            <AdminSelect
+              value={siteSettings.BangumiDataSource}
+              onChange={(value) => handleBangumiDataSourceChange(value)}
+              options={bangumiDataSourceOptions}
+            />
+          </div>
+
+          {siteSettings.BangumiDataSource === 'custom' && (
+            <div>
+              <label className='mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300'>
+                Bangumi 代理地址
+              </label>
+              <input
+                type='text'
+                placeholder='例如: https://proxy.example.com/fetch?url='
+                value={siteSettings.BangumiProxy}
+                onChange={(e) =>
+                  setSiteSettings((prev) => ({
+                    ...prev,
+                    BangumiProxy: e.target.value,
+                  }))
+                }
+                className='w-full rounded-lg border border-gray-300 bg-white px-3 py-2.5 text-sm text-gray-900 placeholder-gray-500 shadow-sm transition-all duration-200 hover:border-gray-400 focus:border-green-500 focus:outline-none focus:ring-2 focus:ring-green-500 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100 dark:placeholder-gray-400 dark:hover:border-gray-500'
+              />
+              <p className='mt-1 text-xs text-gray-500 dark:text-gray-400'>
+                自定义代理服务器地址
               </p>
             </div>
           )}
@@ -546,38 +572,55 @@ const SiteConfigComponent = ({
             />
           </button>
         </div>
+      </div>
 
-        <div className='flex min-h-[96px] items-center justify-between gap-4 rounded-lg border border-gray-200 bg-gray-50 p-4 dark:border-gray-700 dark:bg-gray-800/55'>
-          <div>
-            <p className='text-sm font-medium text-gray-900 dark:text-gray-100'>
-              启用流式搜索
-            </p>
-            <p className='mt-1 text-xs text-gray-500 dark:text-gray-400'>
-              启用后搜索结果将实时流式返回，提升用户体验。
-            </p>
-          </div>
-          <button
-            type='button'
-            onClick={() =>
-              setSiteSettings((prev) => ({
-                ...prev,
-                FluidSearch: !prev.FluidSearch,
-              }))
-            }
-            className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
-              siteSettings.FluidSearch
-                ? 'bg-green-500'
-                : 'bg-gray-300 dark:bg-gray-600'
-            }`}
-            aria-label='切换流式搜索'
-            aria-pressed={siteSettings.FluidSearch}
-          >
-            <span
-              className={`inline-block h-5 w-5 transform rounded-full bg-white transition-transform ${
-                siteSettings.FluidSearch ? 'translate-x-5' : 'translate-x-0.5'
-              }`}
-            />
-          </button>
+      <div className='space-y-3'>
+        <div>
+          <h3 className='text-sm font-medium text-gray-900 dark:text-gray-100'>
+            本地设置默认值
+          </h3>
+          <p className='mt-1 text-xs text-gray-500 dark:text-gray-400'>
+            这里的设置会作为用户“本地设置”的默认值。
+          </p>
+        </div>
+
+        <div className='grid grid-cols-1 gap-6 md:grid-cols-2'>
+          {localPreferenceToggleDefinitions.map((definition) => {
+            const enabled = siteSettings[definition.siteConfigKey];
+
+            return (
+              <div
+                key={definition.id}
+                className='flex min-h-[96px] items-center justify-between gap-4 rounded-lg border border-gray-200 bg-gray-50 p-4 dark:border-gray-700 dark:bg-gray-800/55'
+              >
+                <div>
+                  <p className='text-sm font-medium text-gray-900 dark:text-gray-100'>
+                    {definition.title}
+                  </p>
+                  <p className='mt-1 text-xs text-gray-500 dark:text-gray-400'>
+                    {definition.description}
+                  </p>
+                </div>
+                <button
+                  type='button'
+                  onClick={() =>
+                    handleLocalPreferenceDefaultToggle(definition.siteConfigKey)
+                  }
+                  className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
+                    enabled ? 'bg-green-500' : 'bg-gray-300 dark:bg-gray-600'
+                  }`}
+                  aria-label={`切换${definition.title}`}
+                  aria-pressed={enabled}
+                >
+                  <span
+                    className={`inline-block h-5 w-5 transform rounded-full bg-white transition-transform ${
+                      enabled ? 'translate-x-5' : 'translate-x-0.5'
+                    }`}
+                  />
+                </button>
+              </div>
+            );
+          })}
         </div>
       </div>
 

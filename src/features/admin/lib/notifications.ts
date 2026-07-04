@@ -1,4 +1,4 @@
-import { type ShowAlertFn } from '@/features/admin/hooks/useAlertModal';
+﻿import { type ShowAlertFn } from '@/hooks/useAlertModal';
 
 export function showError(message: string, showAlert?: ShowAlertFn) {
   if (showAlert) {

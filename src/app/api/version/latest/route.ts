@@ -10,8 +10,13 @@ import {
   getUpdateRepos,
 } from '@/lib/update-source';
 import { parseChangelog } from '@/lib/changelog-utils';
+import { createTimedAbortController } from '@/lib/downstream-sources/shared';
+import { readResponseTextWithLimit } from '@/lib/response-text';
 
 export const runtime = 'nodejs';
+
+const CHANGELOG_MAX_BYTES = 2 * 1024 * 1024;
+const CHANGELOG_TIMEOUT_MS = 10_000;
 
 interface RemoteChangelogEntry {
   version: string;
@@ -25,14 +30,27 @@ async function fetchChangelogFromUrl(url: string): Promise<{
   latestVersion: string | null;
   changelog: RemoteChangelogEntry[];
 } | null> {
+  const abortState = createTimedAbortController(
+    undefined,
+    CHANGELOG_TIMEOUT_MS,
+  );
   try {
-    const response = await fetch(url, { method: 'GET' });
+    const response = await fetch(url, {
+      method: 'GET',
+      signal: abortState.signal,
+    });
     if (!response.ok) {
       return null;
     }
 
+    const content = await readResponseTextWithLimit(
+      response,
+      CHANGELOG_MAX_BYTES,
+      '更新日志',
+    );
+
     if (url.endsWith('.json')) {
-      const manifest = normalizeChangelogManifest(await response.json());
+      const manifest = normalizeChangelogManifest(JSON.parse(content));
       if (!manifest.latestVersion && manifest.entries.length === 0) {
         return null;
       }
@@ -44,7 +62,6 @@ async function fetchChangelogFromUrl(url: string): Promise<{
       };
     }
 
-    const content = await response.text();
     const parsed = parseChangelog(content);
     const changelog = parsed.entries
       .map((entry: RemoteChangelogEntry) => normalizeChangelogEntry(entry))
@@ -64,6 +81,8 @@ async function fetchChangelogFromUrl(url: string): Promise<{
     };
   } catch {
     return null;
+  } finally {
+    abortState.cleanup();
   }
 }
 

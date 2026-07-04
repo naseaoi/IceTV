@@ -1,10 +1,10 @@
-'use client';
+﻿'use client';
 
 import { Loader2 } from 'lucide-react';
 import dynamic from 'next/dynamic';
 
 import { type AdminTabId } from '@/features/admin/lib/admin-tabs';
-import { type AdminConfig } from '@/features/admin/types/api';
+import { type AdminConfig } from '@/types/admin';
 
 function AdminTabLoading() {
   return (

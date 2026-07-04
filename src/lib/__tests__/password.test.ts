@@ -26,5 +26,23 @@ describe('password hashing', () => {
       match: false,
       needsRehash: false,
     });
+    await expect(verifyPassword('short', 'legacy-pass')).resolves.toEqual({
+      match: false,
+      needsRehash: false,
+    });
+  });
+
+  it('verifies bcrypt 2y hashes', async () => {
+    const hashed = await hashPassword('secret-pass');
+    const phpStyleHash = hashed.replace(/^\$2[ab]\$/, '$2y$');
+
+    await expect(verifyPassword('secret-pass', phpStyleHash)).resolves.toEqual({
+      match: true,
+      needsRehash: false,
+    });
+    await expect(verifyPassword('wrong-pass', phpStyleHash)).resolves.toEqual({
+      match: false,
+      needsRehash: false,
+    });
   });
 });

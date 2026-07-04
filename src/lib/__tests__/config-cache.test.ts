@@ -1,6 +1,6 @@
-/** @jest-environment node */
+﻿/** @jest-environment node */
 
-import { AdminConfig } from '@/features/admin/types/api';
+import { AdminConfig } from '@/types/admin';
 
 const baseConfig: AdminConfig = {
   ConfigSubscribtion: { URL: '', AutoUpdate: false, LastCheck: '' },
@@ -10,6 +10,10 @@ const baseConfig: AdminConfig = {
     SiteIcon: '',
     Announcement: '',
     EnableLiveEntry: false,
+    DefaultAggregateSearch: true,
+    EnableOptimization: true,
+    AutoSwitchSourceOnTimeout: false,
+    LiveDirectConnect: false,
     SearchDownstreamMaxPage: 5,
     SiteInterfaceCacheTime: 300,
     DoubanProxyType: 'direct',
@@ -31,11 +35,26 @@ const baseConfig: AdminConfig = {
   LiveConfig: [],
 };
 
-async function loadConfigModule(saveAdminConfig: jest.Mock) {
+type LoadConfigOptions = {
+  adminConfig?: AdminConfig;
+  getAdminConfig?: jest.Mock;
+  userNames?: string[];
+};
+
+async function loadConfigModule(
+  saveAdminConfig: jest.Mock,
+  options: LoadConfigOptions = {},
+) {
   jest.resetModules();
+  const adminConfig = options.adminConfig || cloneBaseConfig();
+  const getAdminConfig =
+    options.getAdminConfig || jest.fn().mockResolvedValue(adminConfig);
+  const userNames = options.userNames || [];
+
   jest.doMock('@/lib/db', () => ({
     db: {
-      getAdminConfig: jest.fn().mockResolvedValue(cloneBaseConfig()),
+      getAdminConfig,
+      getAllUsers: jest.fn().mockResolvedValue(userNames),
       saveAdminConfig,
     },
   }));
@@ -50,6 +69,18 @@ function cloneBaseConfig(): AdminConfig {
 }
 
 describe('config cache persistence', () => {
+  const originalConfigCacheTtl = process.env.CONFIG_CACHE_TTL_MS;
+
+  afterEach(() => {
+    if (originalConfigCacheTtl === undefined) {
+      delete process.env.CONFIG_CACHE_TTL_MS;
+    } else {
+      process.env.CONFIG_CACHE_TTL_MS = originalConfigCacheTtl;
+    }
+    jest.useRealTimers();
+    jest.restoreAllMocks();
+  });
+
   it('returns cloned config objects', async () => {
     const { getConfig } = await loadConfigModule(jest.fn());
     const first = await getConfig();
@@ -76,6 +107,150 @@ describe('config cache persistence', () => {
 
     const after = await getConfig();
     expect(after.SiteConfig.SiteName).toBe('IceTV');
+  });
+
+  it('reuses read config until ttl expires', async () => {
+    process.env.CONFIG_CACHE_TTL_MS = '10';
+    jest.useFakeTimers();
+    jest.setSystemTime(new Date('2026-01-01T00:00:00.000Z'));
+
+    const nextConfig = cloneBaseConfig();
+    nextConfig.SiteConfig.SiteName = 'Next';
+    const getAdminConfig = jest
+      .fn()
+      .mockResolvedValueOnce(cloneBaseConfig())
+      .mockResolvedValueOnce(nextConfig);
+    const { getConfigForRead } = await loadConfigModule(jest.fn(), {
+      getAdminConfig,
+    });
+
+    const first = await getConfigForRead();
+    const second = await getConfigForRead();
+    expect(second).toBe(first);
+    expect(getAdminConfig).toHaveBeenCalledTimes(1);
+
+    jest.advanceTimersByTime(11);
+    const third = await getConfigForRead();
+    expect(third.SiteConfig.SiteName).toBe('Next');
+    expect(getAdminConfig).toHaveBeenCalledTimes(2);
+  });
+
+  it('returns detached api site entries from read cache', async () => {
+    const adminConfig = cloneBaseConfig();
+    adminConfig.SourceConfig = [
+      {
+        key: 'source-1',
+        name: 'Source 1',
+        api: 'https://example.com/api.php',
+        disabled: false,
+        from: 'custom',
+      },
+    ];
+    const { getAvailableApiSites } = await loadConfigModule(jest.fn(), {
+      adminConfig,
+    });
+
+    const first = await getAvailableApiSites();
+    first[0].name = 'Mutated';
+    const second = await getAvailableApiSites();
+
+    expect(second[0].name).toBe('Source 1');
+  });
+
+  it('uses database users as the source of truth', async () => {
+    const adminConfig = cloneBaseConfig();
+    adminConfig.UserConfig.Users = [
+      { username: 'owner-1', role: 'owner', banned: false },
+      {
+        username: 'db-user',
+        role: 'admin',
+        banned: true,
+        tags: ['vip'],
+      },
+      { username: 'stale-user', role: 'user', banned: false },
+    ];
+
+    const { getConfig } = await loadConfigModule(jest.fn(), {
+      adminConfig,
+      userNames: ['db-user', 'new-user'],
+    });
+
+    const config = await getConfig();
+
+    expect(config.UserConfig.Users).toEqual([
+      {
+        username: 'owner-1',
+        role: 'owner',
+        banned: false,
+        enabledApis: undefined,
+        tags: undefined,
+      },
+      {
+        username: 'db-user',
+        role: 'admin',
+        banned: true,
+        enabledApis: undefined,
+        tags: ['vip'],
+      },
+      {
+        username: 'new-user',
+        role: 'user',
+        banned: false,
+        enabledApis: undefined,
+        tags: undefined,
+      },
+    ]);
+  });
+
+  it('rejects stale config writes', async () => {
+    const saveAdminConfig = jest.fn();
+    const changedConfig = cloneBaseConfig();
+    changedConfig.SiteConfig.SiteName = 'Changed elsewhere';
+    const getAdminConfig = jest
+      .fn()
+      .mockResolvedValueOnce(cloneBaseConfig())
+      .mockResolvedValueOnce(changedConfig);
+    const { ConfigConflictError, getConfig, saveConfig } =
+      await loadConfigModule(saveAdminConfig, { getAdminConfig });
+
+    const config = await getConfig();
+    config.SiteConfig.Announcement = 'local change';
+
+    await expect(saveConfig(config)).rejects.toThrow(ConfigConflictError);
+    expect(saveAdminConfig).not.toHaveBeenCalled();
+  });
+
+  it('serves cached config when a later read fails', async () => {
+    process.env.CONFIG_CACHE_TTL_MS = '0';
+    const realConfig = cloneBaseConfig();
+    realConfig.SiteConfig.SiteName = 'Real-Site';
+    const getAdminConfig = jest
+      .fn()
+      .mockResolvedValueOnce(realConfig)
+      .mockRejectedValueOnce(new Error('read failed'));
+    const { getConfig } = await loadConfigModule(jest.fn(), {
+      getAdminConfig,
+    });
+
+    const first = await getConfig();
+    expect(first.SiteConfig.SiteName).toBe('Real-Site');
+
+    const second = await getConfig();
+    expect(second.SiteConfig.SiteName).toBe('Real-Site');
+    expect(getAdminConfig).toHaveBeenCalledTimes(2);
+  });
+
+  it('throws instead of persisting defaults when the first read fails', async () => {
+    const saveAdminConfig = jest.fn();
+    const getAdminConfig = jest
+      .fn()
+      .mockRejectedValue(new Error('read failed'));
+    const { getConfig } = await loadConfigModule(saveAdminConfig, {
+      getAdminConfig,
+    });
+
+    await expect(getConfig()).rejects.toThrow('read failed');
+    expect(saveAdminConfig).not.toHaveBeenCalled();
   });
 
   it('defaults missing fluid search config to enabled', async () => {

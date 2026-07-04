@@ -1,5 +1,6 @@
 import type { ApiSite } from '@/lib/config';
 import { getDetailFromApi, searchFirstPageFromApi } from '@/lib/downstream';
+import { resolveXgcartoonEpisodeUrlByPath } from '@/lib/downstream-sources/xgcartoon';
 
 const originalFetch = global.fetch;
 
@@ -29,7 +30,7 @@ describe('downstream xgcartoon source', () => {
     jest.clearAllMocks();
   });
 
-  it('详情会解析播放页iframe并返回m3u8地址', async () => {
+  it('详情只抓详情页并按结构返回懒地址与分组计数', async () => {
     const detailHtml = `
       <html>
         <div class="detail-sider">
@@ -49,11 +50,6 @@ describe('downstream xgcartoon source', () => {
         </div>
       </html>
     `;
-    const playHtmlByChapter: Record<string, string> = {
-      c1: '<iframe src="https://pframe.xgcartoon.com/player.htm?vid=11111111-1111-4111-8111-111111111111&amp;autoplay=false"></iframe>',
-      c2: '<iframe src="https://pframe.xgcartoon.com/player.htm?vid=22222222-2222-4222-8222-222222222222&amp;autoplay=false"></iframe>',
-      c3: '<iframe src="https://pframe.xgcartoon.com/player.htm?vid=33333333-3333-4333-8333-333333333333&amp;autoplay=false"></iframe>',
-    };
 
     const fetchMock = global.fetch as jest.Mock;
     fetchMock.mockImplementation(async (input: RequestInfo | URL) => {
@@ -61,17 +57,16 @@ describe('downstream xgcartoon source', () => {
       if (url === 'https://www.xgcartoon.com/detail/test-cartoon') {
         return createTextResponse(detailHtml);
       }
-
-      const chapterId =
-        url.match(/\/video\/test-cartoon\/([^/]+)\.html/)?.[1] || '';
-      return createTextResponse(playHtmlByChapter[chapterId] || '', true);
+      return createTextResponse('', false);
     });
 
     const detail = await getDetailFromApi(
       createXgcartoonSite(),
       'test-cartoon',
     );
+    const urls = fetchMock.mock.calls.map(([input]) => String(input));
 
+    expect(urls).toEqual(['https://www.xgcartoon.com/detail/test-cartoon']);
     expect(detail).toEqual(
       expect.objectContaining({
         id: 'test-cartoon',
@@ -79,21 +74,75 @@ describe('downstream xgcartoon source', () => {
         poster:
           'https://static-a.xgcartoon.com/cover/test-cartoon.jpg?w=230&h=280',
         episodes: [
-          'https://xgct-video.bzcdn.net/11111111-1111-4111-8111-111111111111/playlist.m3u8',
-          'https://xgct-video.bzcdn.net/22222222-2222-4222-8222-222222222222/playlist.m3u8',
+          'icetv-lazy://xgcartoon/video/test-cartoon/c1.html',
+          'icetv-lazy://xgcartoon/video/test-cartoon/c2.html',
+          'icetv-lazy://xgcartoon/video/test-cartoon/c3.html',
         ],
-        episodes_titles: ['第01集', '第02集'],
+        episodes_titles: ['第01集', '第02集', '第01集'],
+        episode_groups: [
+          { label: '第1季【全2集】', count: 2 },
+          { label: '第2季【全1集】', count: 1 },
+        ],
         class: '动作',
         desc: '测试简介',
       }),
     );
-    expect(detail.related_sources?.[0]).toEqual(
-      expect.objectContaining({
-        id: 'test-cartoon__xg_2',
-        episodes: [],
-        episodes_titles: ['第01集'],
-      }),
+    expect(detail.related_sources).toBeUndefined();
+  });
+
+  it('resolveXgcartoonEpisodeUrlByPath 解析播放页并拼出 CDN 地址', async () => {
+    const fetchMock = global.fetch as jest.Mock;
+    fetchMock.mockImplementation(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (/\/video\/test-cartoon\/c1\.html$/.test(url)) {
+        return createTextResponse(
+          '<iframe src="https://pframe.xgcartoon.com/player.htm?vid=11111111-1111-4111-8111-111111111111&amp;autoplay=false"></iframe>',
+        );
+      }
+      return createTextResponse('', false);
+    });
+
+    await expect(
+      resolveXgcartoonEpisodeUrlByPath(
+        createXgcartoonSite(),
+        '/video/test-cartoon/c1.html',
+      ),
+    ).resolves.toBe(
+      'https://xgct-video.bzcdn.net/11111111-1111-4111-8111-111111111111/playlist.m3u8',
     );
+  });
+
+  it('携带旧版 __xg_ 后缀ID时仍返回合并后的完整剧集', async () => {
+    const detailHtml = `
+      <html>
+        <div class="detail-right__title"><h1>测试动漫</h1></div>
+        <div class="detail-right__volumes">
+          <div class="col-12 volume-title">第1季【全1集】</div>
+          <a href="/user/page_direct?cartoon_id=test-cartoon&amp;chapter_id=c1" title="第01集" class="goto-chapter chapter-box text-truncate"><span>第01集</span></a>
+          <div class="col-12 volume-title">第2季【全1集】</div>
+          <a href="/user/page_direct?cartoon_id=test-cartoon&amp;chapter_id=c2" title="第01集" class="goto-chapter chapter-box text-truncate"><span>第01集</span></a>
+        </div>
+      </html>
+    `;
+    const fetchMock = global.fetch as jest.Mock;
+    fetchMock.mockImplementation(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url === 'https://www.xgcartoon.com/detail/test-cartoon') {
+        return createTextResponse(detailHtml);
+      }
+      return createTextResponse('', false);
+    });
+
+    const detail = await getDetailFromApi(
+      createXgcartoonSite(),
+      'test-cartoon__xg_2',
+    );
+
+    expect(detail.id).toBe('test-cartoon');
+    expect(detail.episodes).toEqual([
+      'icetv-lazy://xgcartoon/video/test-cartoon/c1.html',
+      'icetv-lazy://xgcartoon/video/test-cartoon/c2.html',
+    ]);
   });
 
   it('搜索会过滤标题无关结果', async () => {

@@ -1,7 +1,9 @@
+import 'server-only';
+
 import mysql from 'mysql2/promise';
 import type { PoolConnection, RowDataPacket } from 'mysql2/promise';
 
-import { AdminConfig } from '@/features/admin/types/api';
+import { AdminConfig } from '@/types/admin';
 
 import { hashPassword, verifyPassword } from './password';
 import { getMySqlConnectionUrl } from './storage-type';
@@ -12,6 +14,7 @@ import {
   SkipConfig,
   StorageImportData,
 } from './types';
+import { assertValidUsername, normalizeUsername } from './username';
 
 const SEARCH_HISTORY_LIMIT = 20;
 
@@ -103,7 +106,10 @@ export class MySqlStorage implements IStorage {
 
   private async ensureInitialized(): Promise<void> {
     if (!this.initPromise) {
-      this.initPromise = this.initializeSchema();
+      this.initPromise = this.initializeSchema().catch((error) => {
+        this.initPromise = null;
+        throw error;
+      });
     }
 
     return this.initPromise;
@@ -119,15 +125,13 @@ export class MySqlStorage implements IStorage {
         username VARCHAR(191) NOT NULL,
         record_key VARCHAR(255) NOT NULL,
         record_json LONGTEXT NOT NULL,
-        PRIMARY KEY (username, record_key),
-        KEY idx_play_records_username (username)
+        PRIMARY KEY (username, record_key)
       ) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci`,
       `CREATE TABLE IF NOT EXISTS favorites (
         username VARCHAR(191) NOT NULL,
         favorite_key VARCHAR(255) NOT NULL,
         favorite_json LONGTEXT NOT NULL,
-        PRIMARY KEY (username, favorite_key),
-        KEY idx_favorites_username (username)
+        PRIMARY KEY (username, favorite_key)
       ) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci`,
       `CREATE TABLE IF NOT EXISTS search_history (
         username VARCHAR(191) NOT NULL,
@@ -140,8 +144,7 @@ export class MySqlStorage implements IStorage {
         username VARCHAR(191) NOT NULL,
         config_key VARCHAR(255) NOT NULL,
         config_json LONGTEXT NOT NULL,
-        PRIMARY KEY (username, config_key),
-        KEY idx_skip_configs_username (username)
+        PRIMARY KEY (username, config_key)
       ) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci`,
       `CREATE TABLE IF NOT EXISTS admin_config (
         id TINYINT NOT NULL PRIMARY KEY,
@@ -178,9 +181,10 @@ export class MySqlStorage implements IStorage {
     key: string,
   ): Promise<PlayRecord | null> {
     await this.ensureInitialized();
+    const username = normalizeUsername(userName);
     const [rows] = await this.pool.query<JsonRow[]>(
       'SELECT record_json FROM play_records WHERE username = ? AND record_key = ? LIMIT 1',
-      [userName, key],
+      [username, key],
     );
     return parseJsonValue<PlayRecord>(rows[0]?.record_json);
   }
@@ -191,11 +195,12 @@ export class MySqlStorage implements IStorage {
     record: PlayRecord,
   ): Promise<void> {
     await this.ensureInitialized();
+    const username = normalizeUsername(userName);
     await this.pool.execute(
       `INSERT INTO play_records (username, record_key, record_json)
        VALUES (?, ?, ?)
        ON DUPLICATE KEY UPDATE record_json = VALUES(record_json)`,
-      [userName, key, JSON.stringify(record)],
+      [username, key, JSON.stringify(record)],
     );
   }
 
@@ -203,9 +208,10 @@ export class MySqlStorage implements IStorage {
     userName: string,
   ): Promise<{ [key: string]: PlayRecord }> {
     await this.ensureInitialized();
+    const username = normalizeUsername(userName);
     const [rows] = await this.pool.query<JsonRow[]>(
       'SELECT record_key, record_json FROM play_records WHERE username = ?',
-      [userName],
+      [username],
     );
 
     const result: Record<string, PlayRecord> = {};
@@ -221,24 +227,27 @@ export class MySqlStorage implements IStorage {
 
   async deletePlayRecord(userName: string, key: string): Promise<void> {
     await this.ensureInitialized();
+    const username = normalizeUsername(userName);
     await this.pool.execute(
       'DELETE FROM play_records WHERE username = ? AND record_key = ?',
-      [userName, key],
+      [username, key],
     );
   }
 
   async deleteAllPlayRecords(userName: string): Promise<void> {
     await this.ensureInitialized();
+    const username = normalizeUsername(userName);
     await this.pool.execute('DELETE FROM play_records WHERE username = ?', [
-      userName,
+      username,
     ]);
   }
 
   async getFavorite(userName: string, key: string): Promise<Favorite | null> {
     await this.ensureInitialized();
+    const username = normalizeUsername(userName);
     const [rows] = await this.pool.query<JsonRow[]>(
       'SELECT favorite_json FROM favorites WHERE username = ? AND favorite_key = ? LIMIT 1',
-      [userName, key],
+      [username, key],
     );
     return parseJsonValue<Favorite>(rows[0]?.favorite_json);
   }
@@ -249,11 +258,12 @@ export class MySqlStorage implements IStorage {
     favorite: Favorite,
   ): Promise<void> {
     await this.ensureInitialized();
+    const username = normalizeUsername(userName);
     await this.pool.execute(
       `INSERT INTO favorites (username, favorite_key, favorite_json)
        VALUES (?, ?, ?)
        ON DUPLICATE KEY UPDATE favorite_json = VALUES(favorite_json)`,
-      [userName, key, JSON.stringify(favorite)],
+      [username, key, JSON.stringify(favorite)],
     );
   }
 
@@ -261,9 +271,10 @@ export class MySqlStorage implements IStorage {
     userName: string,
   ): Promise<{ [key: string]: Favorite }> {
     await this.ensureInitialized();
+    const username = normalizeUsername(userName);
     const [rows] = await this.pool.query<JsonRow[]>(
       'SELECT favorite_key, favorite_json FROM favorites WHERE username = ?',
-      [userName],
+      [username],
     );
 
     const result: Record<string, Favorite> = {};
@@ -279,35 +290,37 @@ export class MySqlStorage implements IStorage {
 
   async deleteFavorite(userName: string, key: string): Promise<void> {
     await this.ensureInitialized();
+    const username = normalizeUsername(userName);
     await this.pool.execute(
       'DELETE FROM favorites WHERE username = ? AND favorite_key = ?',
-      [userName, key],
+      [username, key],
     );
   }
 
   async deleteAllFavorites(userName: string): Promise<void> {
     await this.ensureInitialized();
+    const username = normalizeUsername(userName);
     await this.pool.execute('DELETE FROM favorites WHERE username = ?', [
-      userName,
+      username,
     ]);
   }
 
   async registerUser(userName: string, password: string): Promise<void> {
     await this.ensureInitialized();
+    const username = assertValidUsername(userName);
     const hashed = await hashPassword(password);
     await this.pool.execute(
-      `INSERT INTO users (username, password)
-       VALUES (?, ?)
-       ON DUPLICATE KEY UPDATE password = VALUES(password)`,
-      [userName, hashed],
+      'INSERT INTO users (username, password) VALUES (?, ?)',
+      [username, hashed],
     );
   }
 
   async verifyUser(userName: string, password: string): Promise<boolean> {
     await this.ensureInitialized();
+    const username = normalizeUsername(userName);
     const [rows] = await this.pool.query<JsonRow[]>(
       'SELECT password FROM users WHERE username = ? LIMIT 1',
-      [userName],
+      [username],
     );
     const stored = rows[0]?.password;
 
@@ -321,7 +334,7 @@ export class MySqlStorage implements IStorage {
       const hashed = await hashPassword(password);
       await this.pool.execute(
         'UPDATE users SET password = ? WHERE username = ?',
-        [hashed, userName],
+        [hashed, username],
       );
     }
 
@@ -330,86 +343,92 @@ export class MySqlStorage implements IStorage {
 
   async checkUserExist(userName: string): Promise<boolean> {
     await this.ensureInitialized();
+    const username = normalizeUsername(userName);
     const [rows] = await this.pool.query<RowDataPacket[]>(
       'SELECT 1 AS v FROM users WHERE username = ? LIMIT 1',
-      [userName],
+      [username],
     );
     return rows.length > 0;
   }
 
   async changePassword(userName: string, newPassword: string): Promise<void> {
     await this.ensureInitialized();
+    const username = normalizeUsername(userName);
     const hashed = await hashPassword(newPassword);
     await this.pool.execute(
       'UPDATE users SET password = ? WHERE username = ?',
-      [hashed, userName],
+      [hashed, username],
     );
   }
 
   async deleteUser(userName: string): Promise<void> {
+    const username = normalizeUsername(userName);
     await this.withTransaction(async (connection) => {
       await connection.execute('DELETE FROM users WHERE username = ?', [
-        userName,
+        username,
       ]);
       await connection.execute('DELETE FROM play_records WHERE username = ?', [
-        userName,
+        username,
       ]);
       await connection.execute('DELETE FROM favorites WHERE username = ?', [
-        userName,
+        username,
       ]);
       await connection.execute(
         'DELETE FROM search_history WHERE username = ?',
-        [userName],
+        [username],
       );
       await connection.execute('DELETE FROM skip_configs WHERE username = ?', [
-        userName,
+        username,
       ]);
     });
   }
 
   async getSearchHistory(userName: string): Promise<string[]> {
     await this.ensureInitialized();
+    const username = normalizeUsername(userName);
     const [rows] = await this.pool.query<JsonRow[]>(
       'SELECT keyword FROM search_history WHERE username = ? ORDER BY sort_index ASC',
-      [userName],
+      [username],
     );
     return rows.map((row) => row.keyword).filter(Boolean) as string[];
   }
 
   async addSearchHistory(userName: string, keyword: string): Promise<void> {
+    const username = normalizeUsername(userName);
     await this.withTransaction(async (connection) => {
       await connection.execute(
         'DELETE FROM search_history WHERE username = ? AND keyword = ?',
-        [userName, keyword],
+        [username, keyword],
       );
       await connection.execute(
         'UPDATE search_history SET sort_index = sort_index + 1 WHERE username = ?',
-        [userName],
+        [username],
       );
       await connection.execute(
         'INSERT INTO search_history (username, keyword, sort_index) VALUES (?, ?, 0)',
-        [userName, keyword],
+        [username, keyword],
       );
       await connection.execute(
         'DELETE FROM search_history WHERE username = ? AND sort_index >= ?',
-        [userName, SEARCH_HISTORY_LIMIT],
+        [username, SEARCH_HISTORY_LIMIT],
       );
     });
   }
 
   async deleteSearchHistory(userName: string, keyword?: string): Promise<void> {
     await this.ensureInitialized();
+    const username = normalizeUsername(userName);
 
     if (!keyword) {
       await this.pool.execute('DELETE FROM search_history WHERE username = ?', [
-        userName,
+        username,
       ]);
       return;
     }
 
     await this.pool.execute(
       'DELETE FROM search_history WHERE username = ? AND keyword = ?',
-      [userName, keyword],
+      [username, keyword],
     );
   }
 
@@ -426,7 +445,15 @@ export class MySqlStorage implements IStorage {
     const [rows] = await this.pool.query<JsonRow[]>(
       'SELECT config_json FROM admin_config WHERE id = 1 LIMIT 1',
     );
-    return parseJsonValue<AdminConfig>(rows[0]?.config_json);
+    const raw = rows[0]?.config_json;
+    if (raw == null) {
+      return null;
+    }
+    const parsed = parseJsonValue<AdminConfig>(raw);
+    if (!parsed) {
+      throw new Error('管理员配置解析失败');
+    }
+    return parsed;
   }
 
   async setAdminConfig(config: AdminConfig): Promise<void> {
@@ -445,10 +472,11 @@ export class MySqlStorage implements IStorage {
     id: string,
   ): Promise<SkipConfig | null> {
     await this.ensureInitialized();
+    const username = normalizeUsername(userName);
     const key = `${source}+${id}`;
     const [rows] = await this.pool.query<JsonRow[]>(
       'SELECT config_json FROM skip_configs WHERE username = ? AND config_key = ? LIMIT 1',
-      [userName, key],
+      [username, key],
     );
     return parseJsonValue<SkipConfig>(rows[0]?.config_json);
   }
@@ -460,12 +488,13 @@ export class MySqlStorage implements IStorage {
     config: SkipConfig,
   ): Promise<void> {
     await this.ensureInitialized();
+    const username = normalizeUsername(userName);
     const key = `${source}+${id}`;
     await this.pool.execute(
       `INSERT INTO skip_configs (username, config_key, config_json)
        VALUES (?, ?, ?)
        ON DUPLICATE KEY UPDATE config_json = VALUES(config_json)`,
-      [userName, key, JSON.stringify(config)],
+      [username, key, JSON.stringify(config)],
     );
   }
 
@@ -475,10 +504,11 @@ export class MySqlStorage implements IStorage {
     id: string,
   ): Promise<void> {
     await this.ensureInitialized();
+    const username = normalizeUsername(userName);
     const key = `${source}+${id}`;
     await this.pool.execute(
       'DELETE FROM skip_configs WHERE username = ? AND config_key = ?',
-      [userName, key],
+      [username, key],
     );
   }
 
@@ -486,9 +516,10 @@ export class MySqlStorage implements IStorage {
     userName: string,
   ): Promise<{ [key: string]: SkipConfig }> {
     await this.ensureInitialized();
+    const username = normalizeUsername(userName);
     const [rows] = await this.pool.query<JsonRow[]>(
       'SELECT config_key, config_json FROM skip_configs WHERE username = ?',
-      [userName],
+      [username],
     );
 
     const result: Record<string, SkipConfig> = {};
@@ -528,24 +559,26 @@ export class MySqlStorage implements IStorage {
       );
 
       for (const [userName, passwordHash] of Object.entries(data.users)) {
+        const username = assertValidUsername(userName);
         await connection.execute(
           'INSERT INTO users (username, password) VALUES (?, ?)',
-          [userName, passwordHash],
+          [username, passwordHash],
         );
       }
 
       for (const [userName, userData] of Object.entries(data.userData)) {
+        const username = assertValidUsername(userName);
         for (const [key, record] of Object.entries(userData.playRecords)) {
           await connection.execute(
             'INSERT INTO play_records (username, record_key, record_json) VALUES (?, ?, ?)',
-            [userName, key, JSON.stringify(record)],
+            [username, key, JSON.stringify(record)],
           );
         }
 
         for (const [key, favorite] of Object.entries(userData.favorites)) {
           await connection.execute(
             'INSERT INTO favorites (username, favorite_key, favorite_json) VALUES (?, ?, ?)',
-            [userName, key, JSON.stringify(favorite)],
+            [username, key, JSON.stringify(favorite)],
           );
         }
 
@@ -557,14 +590,14 @@ export class MySqlStorage implements IStorage {
           const keyword = searchHistory[index];
           await connection.execute(
             'INSERT INTO search_history (username, keyword, sort_index) VALUES (?, ?, ?)',
-            [userName, keyword, index],
+            [username, keyword, index],
           );
         }
 
         for (const [key, config] of Object.entries(userData.skipConfigs)) {
           await connection.execute(
             'INSERT INTO skip_configs (username, config_key, config_json) VALUES (?, ?, ?)',
-            [userName, key, JSON.stringify(config)],
+            [username, key, JSON.stringify(config)],
           );
         }
       }

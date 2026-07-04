@@ -1,4 +1,4 @@
-'use client';
+﻿'use client';
 
 import {
   closestCenter,
@@ -21,17 +21,17 @@ import {
 import { useEffect, useState } from 'react';
 
 import ConfirmModal from '@/components/modals/ConfirmModal';
-import AlertModal from '@/features/admin/components/AlertModal';
+import AlertModal from '@/components/modals/AlertModal';
 import { LiveSourceAddForm } from '@/features/admin/components/tabs/live-source/LiveSourceAddForm';
 import { LiveSourceEditForm } from '@/features/admin/components/tabs/live-source/LiveSourceEditForm';
 import { SortableLiveSourceRow } from '@/features/admin/components/tabs/live-source/SortableLiveSourceRow';
 import { useAdminSourceActions } from '@/features/admin/hooks/useAdminSourceActions';
-import { useAlertModal } from '@/features/admin/hooks/useAlertModal';
+import { useAlertModal } from '@/hooks/useAlertModal';
 import { useLoadingState } from '@/features/admin/hooks/useLoadingState';
 import { adminPost } from '@/features/admin/lib/api';
 import { buttonStyles } from '@/features/admin/lib/buttonStyles';
 import { showError } from '@/features/admin/lib/notifications';
-import { AdminConfig } from '@/features/admin/types/api';
+import { AdminConfig } from '@/types/admin';
 import { LiveDataSource } from '@/features/admin/types/internal';
 
 const LiveSourceConfig = ({

@@ -1,12 +1,12 @@
 import { NextRequest, NextResponse } from 'next/server';
 
 import { isGuardFailure, requireActiveUser } from '@/lib/api-auth';
-import { getAvailableApiSites, getCacheTime, getConfig } from '@/lib/config';
+import { getAvailableApiSites, getConfigForRead } from '@/lib/config';
 import { runSearchAggregation } from '@/lib/search-aggregate';
 import {
+  loadCachedSearchAggregate,
   peekCachedSearchAggregate,
   refreshCachedSearchAggregate,
-  setCachedSearchAggregate,
 } from '@/lib/search-cache';
 
 export const runtime = 'nodejs';
@@ -21,22 +21,13 @@ export async function GET(request: NextRequest) {
   const query = searchParams.get('q');
 
   if (!query) {
-    const cacheTime = await getCacheTime();
     return NextResponse.json(
       { results: [] },
-      {
-        headers: {
-          'Cache-Control': `public, max-age=${cacheTime}, s-maxage=${cacheTime}`,
-          'CDN-Cache-Control': `public, s-maxage=${cacheTime}`,
-          'Vercel-CDN-Cache-Control': `public, s-maxage=${cacheTime}`,
-          'Netlify-Vary': 'query',
-        },
-      },
+      { headers: { 'Cache-Control': 'private, no-store' } },
     );
   }
 
-  const config = await getConfig();
-  const cacheTime = getCacheTime(config);
+  const config = await getConfigForRead();
   const apiSites = await getAvailableApiSites(guardResult.username, config);
   const maxSearchPages = config.SiteConfig.SearchDownstreamMaxPage;
   const aggregateCacheParams = {
@@ -57,50 +48,35 @@ export async function GET(request: NextRequest) {
           disableYellowFilter: config.SiteConfig.DisableYellowFilter,
           sourceConcurrency: SEARCH_SOURCE_CONCURRENCY,
         }),
-      ).catch(() => {});
+      ).catch((error) => {
+        console.warn('搜索聚合后台刷新失败:', error);
+      });
     }
 
     return NextResponse.json(
       { results: cachedAggregate.entry.results },
-      {
-        headers: {
-          'Cache-Control': `public, max-age=${cacheTime}, s-maxage=${cacheTime}`,
-          'CDN-Cache-Control': `public, s-maxage=${cacheTime}`,
-          'Vercel-CDN-Cache-Control': `public, s-maxage=${cacheTime}`,
-          'Netlify-Vary': 'query',
-        },
-      },
+      { headers: { 'Cache-Control': 'private, no-store' } },
     );
   }
 
   try {
-    const flattenedResults = await runSearchAggregation({
-      apiSites,
-      query,
-      maxSearchPages,
-      disableYellowFilter: config.SiteConfig.DisableYellowFilter,
-      sourceConcurrency: SEARCH_SOURCE_CONCURRENCY,
-      signal: request.signal,
-    });
-    if (flattenedResults.length === 0) {
-      // no cache if empty
-      return NextResponse.json({ results: [] }, { status: 200 });
-    }
-
-    setCachedSearchAggregate(aggregateCacheParams, flattenedResults);
-
+    const flattenedResults = await loadCachedSearchAggregate(
+      aggregateCacheParams,
+      () =>
+        runSearchAggregation({
+          apiSites,
+          query,
+          maxSearchPages,
+          disableYellowFilter: config.SiteConfig.DisableYellowFilter,
+          sourceConcurrency: SEARCH_SOURCE_CONCURRENCY,
+        }),
+    );
     return NextResponse.json(
       { results: flattenedResults },
-      {
-        headers: {
-          'Cache-Control': `public, max-age=${cacheTime}, s-maxage=${cacheTime}`,
-          'CDN-Cache-Control': `public, s-maxage=${cacheTime}`,
-          'Vercel-CDN-Cache-Control': `public, s-maxage=${cacheTime}`,
-          'Netlify-Vary': 'query',
-        },
-      },
+      { headers: { 'Cache-Control': 'private, no-store' } },
     );
   } catch (error) {
+    console.error('搜索聚合失败:', error);
     return NextResponse.json({ error: '搜索失败' }, { status: 500 });
   }
 }

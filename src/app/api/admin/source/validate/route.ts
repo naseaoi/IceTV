@@ -3,6 +3,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { isGuardFailure, requireAdmin } from '@/lib/api-auth';
 import { getConfig } from '@/lib/config';
 import { API_CONFIG } from '@/lib/config';
+import { createTimedAbortController } from '@/lib/downstream-sources/shared';
 
 export const runtime = 'nodejs';
 
@@ -79,17 +80,13 @@ export async function GET(request: NextRequest) {
             searchKeyword,
           )}`;
 
-          // 设置超时控制
-          const controller = new AbortController();
-          const timeoutId = setTimeout(() => controller.abort(), 10000);
+          const abortState = createTimedAbortController(undefined, 10000);
 
           try {
             const response = await fetch(searchUrl, {
               headers: API_CONFIG.search.headers,
-              signal: controller.signal,
+              signal: abortState.signal,
             });
-
-            clearTimeout(timeoutId);
 
             if (!response.ok) {
               throw new Error(`HTTP ${response.status}`);
@@ -138,7 +135,7 @@ export async function GET(request: NextRequest) {
               }
             }
           } finally {
-            clearTimeout(timeoutId);
+            abortState.cleanup();
           }
         } catch (error) {
           console.warn(`验证失败 ${site.name}:`, error);

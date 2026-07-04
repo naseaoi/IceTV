@@ -1,33 +1,9 @@
 import he from 'he';
 
-type DoubanImageProxyType =
-  | 'direct'
-  | 'server'
-  | 'img3'
-  | 'cmliussss-cdn-tencent'
-  | 'cmliussss-cdn-ali'
-  | 'custom';
-
-function getDoubanImageProxyConfig(): {
-  proxyType: DoubanImageProxyType;
-  proxyUrl: string;
-} {
-  if (typeof window === 'undefined') {
-    return { proxyType: 'cmliussss-cdn-tencent', proxyUrl: '' };
-  }
-  const doubanImageProxyType =
-    localStorage.getItem('doubanImageProxyType') ||
-    window.RUNTIME_CONFIG?.DOUBAN_IMAGE_PROXY_TYPE ||
-    'cmliussss-cdn-tencent';
-  const doubanImageProxy =
-    localStorage.getItem('doubanImageProxyUrl') ||
-    window.RUNTIME_CONFIG?.DOUBAN_IMAGE_PROXY ||
-    '';
-  return {
-    proxyType: doubanImageProxyType as DoubanImageProxyType,
-    proxyUrl: doubanImageProxy,
-  };
-}
+import {
+  readDoubanImageProxyType,
+  readDoubanImageProxyUrl,
+} from '@/lib/douban-source';
 
 export function processImageUrl(originalUrl: string): string {
   if (!originalUrl) return originalUrl;
@@ -36,7 +12,8 @@ export function processImageUrl(originalUrl: string): string {
     return originalUrl;
   }
 
-  const { proxyType, proxyUrl } = getDoubanImageProxyConfig();
+  const proxyType = readDoubanImageProxyType();
+  const proxyUrl = readDoubanImageProxyUrl();
   switch (proxyType) {
     case 'direct':
       return originalUrl;

@@ -1,8 +1,12 @@
-import { NextRequest, NextResponse } from 'next/server';
+﻿import { NextRequest, NextResponse } from 'next/server';
 
 import { isGuardFailure, requireAdmin } from '@/lib/api-auth';
+import { configConflictResponse } from '@/lib/api-config-error';
 import { getConfig, saveConfig } from '@/lib/config';
-import { isLiveEntryEnabledInConfig, refreshLiveChannels } from '@/lib/live';
+import {
+  isLiveEntryEnabledInConfig,
+  refreshLiveChannels,
+} from '@/features/live/lib/live';
 
 export const runtime = 'nodejs';
 
@@ -43,6 +47,8 @@ export async function POST(request: NextRequest) {
       message: '直播源刷新成功',
     });
   } catch (error) {
+    const conflict = configConflictResponse(error);
+    if (conflict) return conflict;
     console.error('直播源刷新失败:', error);
     return NextResponse.json(
       { error: error instanceof Error ? error.message : '刷新失败' },

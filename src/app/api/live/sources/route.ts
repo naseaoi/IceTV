@@ -1,15 +1,15 @@
-import { NextRequest, NextResponse } from 'next/server';
+﻿import { NextRequest, NextResponse } from 'next/server';
 
 import { getOptionalActiveUser } from '@/lib/api-auth';
-import { getConfig } from '@/lib/config';
-import { isLiveEntryEnabledInConfig } from '@/lib/live';
+import { getConfigForRead } from '@/lib/config';
+import { isLiveEntryEnabledInConfig } from '@/features/live/lib/live';
 
 export const runtime = 'nodejs';
 
 export async function GET(request: NextRequest) {
   try {
     const activeUser = await getOptionalActiveUser(request);
-    const config = await getConfig();
+    const config = await getConfigForRead();
 
     if (!config) {
       return NextResponse.json({ error: '配置未找到' }, { status: 404 });

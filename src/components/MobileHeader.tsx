@@ -1,4 +1,4 @@
-'use client';
+﻿'use client';
 
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
@@ -9,7 +9,7 @@ import { useSite } from './SiteProvider';
 import { ThemeToggle } from './ThemeToggle';
 import { UserMenu } from './UserMenu';
 
-import { getAuthInfoFromBrowserCookie } from '@/lib/auth';
+import { getAuthInfoFromBrowserCookie } from '@/lib/auth.client';
 import { useSmartHomeNav } from '@/hooks/useSmartHomeNav';
 
 interface MobileHeaderProps {

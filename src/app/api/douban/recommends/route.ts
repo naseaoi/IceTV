@@ -1,7 +1,12 @@
 import { NextRequest, NextResponse } from 'next/server';
 
+import { createPublicApiCacheHeaders } from '@/lib/api-cache-headers';
 import { getCacheTime } from '@/lib/config';
 import { fetchDoubanData } from '@/lib/douban';
+import {
+  DoubanRecommendApiResponse,
+  normalizeDoubanRecommendItems,
+} from '@/lib/douban-normalize';
 import { createSwrCache } from '@/lib/server-cache';
 import { DoubanResult } from '@/lib/types';
 
@@ -14,23 +19,6 @@ const recommendsCache = createSwrCache<DoubanResult>({
   maxSize: 500,
 });
 
-interface DoubanRecommendApiResponse {
-  total: number;
-  items: Array<{
-    id: string;
-    title: string;
-    year: string;
-    type: string;
-    pic: {
-      large: string;
-      normal: string;
-    };
-    rating: {
-      value: number;
-    };
-  }>;
-}
-
 export const runtime = 'nodejs';
 
 export async function GET(request: NextRequest) {
@@ -38,8 +26,8 @@ export async function GET(request: NextRequest) {
 
   // 获取参数
   const kind = searchParams.get('kind');
-  const pageLimit = parseInt(searchParams.get('limit') || '20');
-  const pageStart = parseInt(searchParams.get('start') || '0');
+  const pageLimit = Number(searchParams.get('limit') || '20');
+  const pageStart = Number(searchParams.get('start') || '0');
   const category =
     searchParams.get('category') === 'all' ? '' : searchParams.get('category');
   const format =
@@ -56,6 +44,27 @@ export async function GET(request: NextRequest) {
 
   if (!kind) {
     return NextResponse.json({ error: '缺少必要参数: kind' }, { status: 400 });
+  }
+
+  if (!['tv', 'movie'].includes(kind)) {
+    return NextResponse.json(
+      { error: 'kind 参数必须是 tv 或 movie' },
+      { status: 400 },
+    );
+  }
+
+  if (!Number.isInteger(pageLimit) || pageLimit < 1 || pageLimit > 100) {
+    return NextResponse.json(
+      { error: 'pageSize 必须在 1-100 之间' },
+      { status: 400 },
+    );
+  }
+
+  if (!Number.isInteger(pageStart) || pageStart < 0) {
+    return NextResponse.json(
+      { error: 'pageStart 不能小于 0' },
+      { status: 400 },
+    );
   }
 
   const selectedCategories = { 类型: category } as any;
@@ -105,15 +114,7 @@ export async function GET(request: NextRequest) {
     const response = await recommendsCache.getOrLoad(target, async () => {
       const doubanData =
         await fetchDoubanData<DoubanRecommendApiResponse>(target);
-      const list = doubanData.items
-        .filter((item) => item.type == 'movie' || item.type == 'tv')
-        .map((item) => ({
-          id: item.id,
-          title: item.title,
-          poster: item.pic?.normal || item.pic?.large || '',
-          rate: item.rating?.value ? item.rating.value.toFixed(1) : '',
-          year: item.year,
-        }));
+      const list = normalizeDoubanRecommendItems(doubanData.items);
       const payload: DoubanResult = {
         code: 200,
         message: '获取成功',
@@ -124,12 +125,7 @@ export async function GET(request: NextRequest) {
 
     const cacheTime = await getCacheTime();
     return NextResponse.json(response, {
-      headers: {
-        'Cache-Control': `public, max-age=${cacheTime}, s-maxage=${cacheTime}`,
-        'CDN-Cache-Control': `public, s-maxage=${cacheTime}`,
-        'Vercel-CDN-Cache-Control': `public, s-maxage=${cacheTime}`,
-        'Netlify-Vary': 'query',
-      },
+      headers: createPublicApiCacheHeaders(cacheTime),
     });
   } catch (error) {
     return NextResponse.json({ error: '获取豆瓣数据失败' }, { status: 500 });

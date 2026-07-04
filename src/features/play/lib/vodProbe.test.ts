@@ -1,8 +1,8 @@
-import { getVideoResolutionFromM3u8 } from '@/lib/hls-utils';
+﻿import { getVideoResolutionFromM3u8 } from '@/features/play/lib/hls-utils';
 
 import { probeVodEpisodeUrl } from '@/features/play/lib/vodProbe';
 
-jest.mock('@/lib/hls-utils', () => ({
+jest.mock('@/features/play/lib/hls-utils', () => ({
   getVideoResolutionFromM3u8: jest.fn(),
 }));
 
@@ -38,6 +38,34 @@ describe('probeVodEpisodeUrl', () => {
     });
     expect(getVideoResolutionFromM3u8).toHaveBeenCalledWith(
       'https://example.test/index.m3u8',
+      false,
+      'giri',
+    );
+  });
+
+  it('懒地址先解析再按 m3u8 探测', async () => {
+    const lazyUrl = 'icetv-lazy://giri/playGV9-1-1/';
+    const fetchMock = jest.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ url: 'https://cdn.example/lazy.m3u8' }),
+    } as Response);
+    global.fetch = fetchMock as unknown as typeof fetch;
+    (getVideoResolutionFromM3u8 as jest.Mock).mockResolvedValue({
+      quality: '720p',
+      loadSpeed: '2.0 MB/s',
+      pingTime: 50,
+    });
+
+    await expect(probeVodEpisodeUrl(lazyUrl, false, 'giri')).resolves.toEqual({
+      quality: '720p',
+      loadSpeed: '2.0 MB/s',
+      pingTime: 50,
+    });
+    expect(fetchMock).toHaveBeenCalledWith(
+      `/api/episode-url?source=giri&url=${encodeURIComponent(lazyUrl)}`,
+    );
+    expect(getVideoResolutionFromM3u8).toHaveBeenCalledWith(
+      'https://cdn.example/lazy.m3u8',
       false,
       'giri',
     );
