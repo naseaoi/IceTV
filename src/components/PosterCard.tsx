@@ -2,9 +2,17 @@
 
 import { Link as LinkIcon, PlayCircleIcon } from 'lucide-react';
 import { useRouter } from 'next/navigation';
-import React, { memo, useCallback, useEffect, useId } from 'react';
+import React, { memo, useCallback, useEffect, useId, useRef } from 'react';
 
 import { getAuthInfoFromBrowserCookie } from '@/lib/auth.client';
+import {
+  canUseHoverPrefetch,
+  canUseNetworkPrefetch,
+  findLocalPlaybackTargetByTitle,
+  PREFETCH_INTENT_DELAY_MS,
+  transferWarmedSearchToAggregateGroup,
+  warmupSearchForTitle,
+} from '@/lib/video-prefetch';
 import { useLongPress } from '@/hooks/useLongPress';
 
 import { useOptionalCardInteractionManager } from '@/components/CardInteractionProvider';
@@ -70,6 +78,7 @@ function PosterCard({
 }: PosterCardProps) {
   const router = useRouter();
   const interactionId = useId();
+  const prefetchTimerRef = useRef<number | null>(null);
   const interactionManager = useOptionalCardInteractionManager();
   const showActionSheet = interactionManager?.showActionSheet;
   const hideActionSheet = interactionManager?.hideActionSheet;
@@ -81,6 +90,15 @@ function PosterCard({
   }, []);
 
   const buildPlayUrl = useCallback(() => {
+    const localTarget = findLocalPlaybackTargetByTitle(title, year);
+    if (localTarget) {
+      return `/play?source=${encodeURIComponent(localTarget.source)}&id=${encodeURIComponent(
+        localTarget.id,
+      )}&title=${encodeURIComponent(title.trim())}${
+        year ? `&year=${year}` : ''
+      }${type ? `&stype=${type}` : ''}`;
+    }
+
     return `/play?title=${encodeURIComponent(title.trim())}${
       year ? `&year=${year}` : ''
     }${type ? `&stype=${type}` : ''}`;
@@ -93,8 +111,35 @@ function PosterCard({
       return;
     }
 
+    const hasLocalTarget = !!findLocalPlaybackTargetByTitle(title, year);
+    if (canUseNetworkPrefetch() && !hasLocalTarget) {
+      transferWarmedSearchToAggregateGroup(title);
+      warmupSearchForTitle(title);
+    }
     router.push(buildPlayUrl());
-  }, [buildPlayUrl, getLoginRedirectUrl, router]);
+  }, [buildPlayUrl, getLoginRedirectUrl, router, title, year]);
+
+  // hover / focus 预热：提前触发标题聚合搜索并预取播放页路由
+  const handlePrefetch = useCallback(() => {
+    if (!canUseHoverPrefetch()) return;
+
+    router.prefetch('/play');
+    if (prefetchTimerRef.current) {
+      window.clearTimeout(prefetchTimerRef.current);
+    }
+    prefetchTimerRef.current = window.setTimeout(() => {
+      prefetchTimerRef.current = null;
+      warmupSearchForTitle(title);
+    }, PREFETCH_INTENT_DELAY_MS);
+  }, [router, title]);
+
+  const cancelPrefetch = useCallback(() => {
+    if (!prefetchTimerRef.current) return;
+    window.clearTimeout(prefetchTimerRef.current);
+    prefetchTimerRef.current = null;
+  }, []);
+
+  useEffect(() => cancelPrefetch, [cancelPrefetch]);
 
   const handleExternalOpen = useCallback(() => {
     if (!externalUrl) {
@@ -176,6 +221,10 @@ function PosterCard({
     <div
       className='group relative w-full cursor-pointer rounded-lg bg-transparent transition-[transform,opacity] duration-300 ease-in-out hover:z-[500] hover:scale-[1.025] active:scale-[0.97] active:opacity-80'
       onClick={handlePlay}
+      onMouseEnter={handlePrefetch}
+      onMouseLeave={cancelPrefetch}
+      onFocus={handlePrefetch}
+      onBlur={cancelPrefetch}
       {...longPressProps}
       style={
         {

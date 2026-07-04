@@ -332,6 +332,11 @@ interface UsePlayInitParams {
   >;
 }
 
+interface QuickSearchResponse {
+  detail?: SearchResult | null;
+  sources?: SearchResult[];
+}
+
 export function usePlayInit({
   currentSource,
   currentId,
@@ -466,6 +471,28 @@ export function usePlayInit({
       }
     };
 
+    const fetchQuickPlayableData = async (
+      query: string,
+    ): Promise<QuickSearchResponse | null> => {
+      const params = new URLSearchParams({ q: query.trim() });
+      if (videoYearRef.current) {
+        params.set('year', videoYearRef.current);
+      }
+      if (searchType === 'tv' || searchType === 'movie') {
+        params.set('stype', searchType);
+      }
+
+      try {
+        const response = await fetch(`/api/search/quick?${params.toString()}`, {
+          signal,
+        });
+        if (!response.ok) return null;
+        return (await response.json()) as QuickSearchResponse;
+      } catch {
+        return null;
+      }
+    };
+
     // 从 sessionStorage 读取聚合组数据（搜索页传递），读后立即清理
     const loadAggregateGroup = (): SearchResult[] | null => {
       try {
@@ -481,7 +508,10 @@ export function usePlayInit({
       return null;
     };
 
-    const finalizePlaybackDetail = async (detailData: SearchResult) => {
+    const finalizePlaybackDetail = async (
+      detailData: SearchResult,
+      options?: { skipTransitionDelay?: boolean },
+    ) => {
       setNeedPrefer(false);
       setCurrentSource(detailData.source);
       setCurrentId(detailData.id);
@@ -510,8 +540,10 @@ export function usePlayInit({
 
       setLoadingStage('ready');
       setLoadingMessage('准备就绪，即将开始播放...');
-      // 保留很短的过渡，避免 loading 文案闪烁。
-      await new Promise((r) => setTimeout(r, 200));
+      // 慢路径保留 200ms 过渡，快路径直接起播
+      if (!options?.skipTransitionDelay) {
+        await new Promise((r) => setTimeout(r, 200));
+      }
       setLoading(false);
     };
 
@@ -534,18 +566,41 @@ export function usePlayInit({
       const cachedGroup = loadAggregateGroup();
 
       // 指定源且无需优选时详情先行直接起播，聚合搜索转入后台补齐换源列表
-      if (
-        !cachedGroup &&
-        currentSource &&
-        currentId &&
-        !needPreferRef.current
-      ) {
+      if (currentSource && currentId && !needPreferRef.current) {
         const fastDetail = await fetchSourceDetail(currentSource, currentId);
         if (signal.aborted) return;
         if (fastDetail?.episodes && fastDetail.episodes.length > 0) {
           setAvailableSources(mergeSourceBundle([], fastDetail));
           void fetchSourcesData(searchTitle || videoTitle);
-          await finalizePlaybackDetail(fastDetail);
+          await finalizePlaybackDetail(fastDetail, {
+            skipTransitionDelay: true,
+          });
+          return;
+        }
+      }
+
+      const quickQuery = searchTitle || videoTitle;
+      if (!cachedGroup && !currentSource && !currentId && optimizationEnabled) {
+        const quickData = quickQuery
+          ? await fetchQuickPlayableData(quickQuery)
+          : null;
+        if (signal.aborted) return;
+
+        const quickDetail = quickData?.detail;
+        if (quickDetail?.episodes && quickDetail.episodes.length > 0) {
+          const quickSources = quickData?.sources || [quickDetail];
+          saveDetailSnapshot(quickDetail.source, quickDetail.id, quickDetail);
+          setAvailableSources(
+            quickSources.reduce(
+              (acc, item) => mergeSourceBundle(acc, item),
+              [] as SearchResult[],
+            ),
+          );
+          setSourceSearchLoading(true);
+          void fetchSourcesData(quickQuery);
+          await finalizePlaybackDetail(quickDetail, {
+            skipTransitionDelay: true,
+          });
           return;
         }
       }

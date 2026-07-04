@@ -25,7 +25,6 @@ interface PlayLoadingViewProps {
 
 interface PlayErrorViewProps {
   error: string;
-  videoTitle: string;
   onBack: () => void;
   onRetry: () => void;
 }
@@ -146,12 +145,7 @@ export function PlayLoadingView({
   );
 }
 
-export function PlayErrorView({
-  error,
-  videoTitle,
-  onBack,
-  onRetry,
-}: PlayErrorViewProps) {
+export function PlayErrorView({ error, onBack, onRetry }: PlayErrorViewProps) {
   return (
     <PageLayout activePath='/play'>
       <div className='flex min-h-screen items-center justify-center bg-transparent'>
@@ -166,17 +160,8 @@ export function PlayErrorView({
               onClick={onBack}
               className='inline-flex transform items-center gap-1.5 rounded-lg bg-gradient-to-r from-green-500 to-emerald-600 px-3.5 py-2 text-sm font-medium text-white shadow-lg transition-all duration-200 hover:scale-105 hover:from-green-600 hover:to-emerald-700 hover:shadow-xl'
             >
-              {videoTitle ? (
-                <>
-                  <Search className='h-4 w-4' />
-                  返回搜索
-                </>
-              ) : (
-                <>
-                  <ArrowLeft className='h-4 w-4' />
-                  返回上页
-                </>
-              )}
+              <ArrowLeft className='h-4 w-4' />
+              返回前页
             </button>
 
             <button

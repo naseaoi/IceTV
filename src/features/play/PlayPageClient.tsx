@@ -1,7 +1,7 @@
 'use client';
 
 import { useRouter, useSearchParams } from 'next/navigation';
-import { useCallback, useEffect, useRef } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 
 import {
   destroyManagedHls,
@@ -36,6 +36,8 @@ import { useSkipConfig } from '@/features/play/hooks/useSkipConfig';
 import { useSourceSwitch } from '@/features/play/hooks/useSourceSwitch';
 import { writePlayerInfo } from '@/features/play/lib/sourceProbeStore';
 import { usePlayerKeyboard } from '@/hooks/usePlayerKeyboard';
+
+const DIRECT_STARTUP_LOADING_DELAY_MS = 140;
 
 export function PlayPageClient() {
   const router = useRouter();
@@ -135,8 +137,30 @@ export function PlayPageClient() {
   } = state;
 
   const totalEpisodes = detail?.episodes?.length || 0;
+  const canDelayStartupLoading =
+    !!currentSource && !!currentId && !needPreferRef.current;
+  const [showStartupLoading, setShowStartupLoading] = useState(false);
 
   const autoSwitchSourceOnTimeout = useAutoSwitchOnTimeoutSetting();
+
+  useEffect(() => {
+    if (!loading) {
+      setShowStartupLoading(false);
+      return;
+    }
+
+    if (!canDelayStartupLoading) {
+      setShowStartupLoading(true);
+      return;
+    }
+
+    setShowStartupLoading(false);
+    const timer = window.setTimeout(() => {
+      setShowStartupLoading(true);
+    }, DIRECT_STARTUP_LOADING_DELAY_MS);
+
+    return () => window.clearTimeout(timer);
+  }, [loading, canDelayStartupLoading]);
 
   const cleanupPlayer = useCallback(() => {
     const player = artPlayerRef.current;
@@ -548,6 +572,8 @@ export function PlayPageClient() {
   );
 
   if (loading) {
+    if (!showStartupLoading) return null;
+
     return (
       <PlayLoadingView
         loadingStage={loadingStage}
@@ -567,7 +593,6 @@ export function PlayPageClient() {
     return (
       <PlayErrorView
         error={error}
-        videoTitle={videoTitle}
         onBack={() => window.history.back()}
         onRetry={() => window.location.reload()}
       />
