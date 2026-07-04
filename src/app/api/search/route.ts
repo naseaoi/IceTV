@@ -71,10 +71,6 @@ export async function GET(request: NextRequest) {
           sourceConcurrency: SEARCH_SOURCE_CONCURRENCY,
         }),
     );
-    if (flattenedResults.length === 0) {
-      return NextResponse.json({ results: [] }, { status: 200 });
-    }
-
     return NextResponse.json(
       { results: flattenedResults },
       { headers: { 'Cache-Control': 'private, no-store' } },

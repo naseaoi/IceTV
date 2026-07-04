@@ -91,6 +91,7 @@ export async function GET(request: NextRequest) {
       'Cache-Control': canReadSensitiveConfig
         ? 'private, max-age=60, stale-while-revalidate=300'
         : 'public, max-age=60, stale-while-revalidate=300',
+      Vary: 'Cookie',
     },
   });
 }

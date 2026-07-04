@@ -18,7 +18,10 @@ export async function GET(request: NextRequest) {
     const query = searchParams.get('q')?.trim();
 
     if (!query) {
-      return NextResponse.json({ suggestions: [] });
+      return NextResponse.json(
+        { suggestions: [] },
+        { headers: { 'Cache-Control': 'private, no-store' } },
+      );
     }
 
     // 生成建议

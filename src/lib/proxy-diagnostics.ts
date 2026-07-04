@@ -130,7 +130,6 @@ export function classifyProxyFailure(
       stage: 'validation',
       reason: 'invalid-url',
       status: 403,
-      message,
       error,
     });
   }
