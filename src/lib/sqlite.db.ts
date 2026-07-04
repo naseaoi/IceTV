@@ -41,6 +41,19 @@ function isSqliteBusyError(error: unknown): boolean {
   return code === 'SQLITE_BUSY' || /database is locked/i.test(error.message);
 }
 
+function isSqliteUniqueConstraintError(error: unknown): boolean {
+  if (!(error instanceof Error)) {
+    return false;
+  }
+
+  const code = (error as Error & { code?: string }).code;
+  return (
+    code === 'SQLITE_CONSTRAINT_PRIMARYKEY' ||
+    code === 'SQLITE_CONSTRAINT_UNIQUE' ||
+    /unique constraint failed/i.test(error.message)
+  );
+}
+
 function runWithBusyRetry<T>(label: string, task: () => T): T {
   const maxRetries = parseBusyTimeoutMs(process.env.SQLITE_INIT_RETRY_COUNT, 8);
   const retryDelayMs = parseBusyTimeoutMs(
@@ -579,8 +592,18 @@ export class LocalSqliteStorage implements IStorage {
 
   async registerUser(userName: string, password: string): Promise<void> {
     const username = assertValidUsername(userName);
+    if (this.stmts.checkUserExist.get(username)) {
+      throw new Error('用户已存在');
+    }
     const hashed = await hashPassword(password);
-    this.stmts.registerUser.run(username, hashed);
+    try {
+      this.stmts.registerUser.run(username, hashed);
+    } catch (error) {
+      if (isSqliteUniqueConstraintError(error)) {
+        throw new Error('用户已存在');
+      }
+      throw error;
+    }
   }
 
   async verifyUser(userName: string, password: string): Promise<boolean> {
