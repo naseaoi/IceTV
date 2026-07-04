@@ -23,7 +23,12 @@ import {
   HLS_START_LEVEL_STRATEGY,
   pickStartLevelFromStrategy,
 } from '@/lib/player-utils';
-import { isServerProxy, rememberSourceServerProxy } from '@/lib/proxy-modes';
+import {
+  clearSourceProxyOverride,
+  isServerProxy,
+  rememberSourceServerProxy,
+  shouldAutoFallbackToServer,
+} from '@/lib/proxy-modes';
 
 import type { PlaybackRequestMode } from '@/features/play/hooks/usePlayPageState';
 import type {
@@ -156,7 +161,7 @@ export function createVodM3u8Loader({
         playbackRequestMode: playbackRequestModeRef.current || 'initial',
       });
 
-    let currentUseServerProxy = isServerProxy(sourceKey);
+    let currentUseServerProxy = isServerProxy(sourceKey, url);
     let targetUrl = buildTargetUrl(url, currentUseServerProxy);
     managedVideo.__icetvUsingServerProxy = currentUseServerProxy;
 
@@ -233,7 +238,11 @@ export function createVodM3u8Loader({
     };
 
     const switchToServerProxy = (reason: string) => {
-      if (currentUseServerProxy) {
+      if (
+        currentUseServerProxy ||
+        !sourceKey ||
+        !shouldAutoFallbackToServer(sourceKey)
+      ) {
         return false;
       }
 
@@ -247,7 +256,7 @@ export function createVodM3u8Loader({
 
       try {
         if (sourceKey) {
-          rememberSourceServerProxy(sourceKey);
+          rememberSourceServerProxy(sourceKey, url);
         }
         currentUseServerProxy = true;
         targetUrl = fallbackTargetUrl;
@@ -431,6 +440,9 @@ export function createVodM3u8Loader({
           }
           setIsVideoLoading(false);
           setRealtimeLoadSpeed('');
+          if (sourceKey) {
+            clearSourceProxyOverride(sourceKey, url);
+          }
           setError('当前源加载失败');
           return;
         }

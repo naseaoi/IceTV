@@ -126,6 +126,8 @@ export function PlayPageClient() {
     setVideoLoadingStage,
     videoLoadingAttempt,
     setVideoLoadingAttempt,
+    playbackRetryNonce,
+    setPlaybackRetryNonce,
     realtimeLoadSpeed,
     setRealtimeLoadSpeed,
     saveIntervalRef,
@@ -268,9 +270,11 @@ export function PlayPageClient() {
       sourceSwitchEpisodeAnchorRef,
       playbackRequestModeRef,
       doSaveCurrentProgress,
+      setError,
       setIsVideoLoading,
       setVideoLoadingStage,
       setVideoLoadingAttempt,
+      setRealtimeLoadSpeed,
       setCurrentEpisodeIndex,
     });
 
@@ -419,7 +423,7 @@ export function PlayPageClient() {
     return () => {
       cancelled = true;
     };
-  }, [detail, currentEpisodeIndex]);
+  }, [detail, currentEpisodeIndex, playbackRetryNonce]);
 
   const handleSourceDetailFetched = useCallback(
     (updated: SearchResult) => {
@@ -448,6 +452,7 @@ export function PlayPageClient() {
     videoCover,
     videoTitle,
     loading,
+    playbackRetryNonce,
     detail,
     currentEpisodeIndex,
     totalEpisodes,
@@ -531,6 +536,32 @@ export function PlayPageClient() {
     };
   }, [doSaveCheckpoint, doSaveCurrentProgress]);
 
+  const handleRetryPlayback = useCallback(() => {
+    playbackRequestModeRef.current = 'episode';
+    clearTargetEpisodeProgressRef.current = true;
+    stableCurrentTimeRef.current = 0;
+    resumeTimeRef.current = 0;
+    resumeModeRef.current = null;
+    setError(null);
+    setIsVideoLoading(true);
+    setVideoLoadingStage('episodeChanging');
+    setVideoLoadingAttempt((prev) => prev + 1);
+    setRealtimeLoadSpeed('正在切换剧集...');
+    setPlaybackRetryNonce((prev) => prev + 1);
+  }, [
+    playbackRequestModeRef,
+    clearTargetEpisodeProgressRef,
+    stableCurrentTimeRef,
+    resumeTimeRef,
+    resumeModeRef,
+    setError,
+    setIsVideoLoading,
+    setVideoLoadingStage,
+    setVideoLoadingAttempt,
+    setRealtimeLoadSpeed,
+    setPlaybackRetryNonce,
+  ]);
+
   const renderMainContent = (playbackError: string | null) => (
     <PlayMainContent
       videoTitle={videoTitle}
@@ -550,6 +581,7 @@ export function PlayPageClient() {
       onReloginAndRecover={handleReloginAndRecover}
       onDismissAuthRecovery={dismissAuthRecovery}
       onEpisodeChange={handleEpisodeChange}
+      onRetryPlayback={handleRetryPlayback}
       onSourceChange={handleSourceChange}
       currentSource={currentSource}
       currentId={currentId}
@@ -584,10 +616,7 @@ export function PlayPageClient() {
   }
 
   if (error) {
-    const hasSwitchableSource = availableSources.some(
-      (s) => `${s.source}-${s.id}` !== `${currentSource}-${currentId}`,
-    );
-    if (detail && hasSwitchableSource) {
+    if (detail) {
       return renderMainContent(error);
     }
     return (

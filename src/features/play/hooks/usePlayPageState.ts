@@ -167,6 +167,7 @@ export function usePlayPageState(searchParams: ReadonlyURLSearchParams) {
   const [videoLoadingStage, setVideoLoadingStage] =
     useState<VideoLoadingStage>('initing');
   const [videoLoadingAttempt, setVideoLoadingAttempt] = useState(0);
+  const [playbackRetryNonce, setPlaybackRetryNonce] = useState(0);
   const [realtimeLoadSpeed, setRealtimeLoadSpeed] =
     useState<string>('测速中...');
 
@@ -262,6 +263,8 @@ export function usePlayPageState(searchParams: ReadonlyURLSearchParams) {
     setVideoLoadingStage,
     videoLoadingAttempt,
     setVideoLoadingAttempt,
+    playbackRetryNonce,
+    setPlaybackRetryNonce,
     realtimeLoadSpeed,
     setRealtimeLoadSpeed,
     saveIntervalRef,

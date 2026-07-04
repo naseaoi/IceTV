@@ -234,7 +234,11 @@ function validateSourceConfig(config: AdminConfig): void {
       assertBoolean(source.disabled, '视频源状态');
     }
     if (source.proxyMode !== undefined) {
-      if (source.proxyMode !== 'server' && source.proxyMode !== 'browser') {
+      if (
+        source.proxyMode !== 'server' &&
+        source.proxyMode !== 'browser' &&
+        source.proxyMode !== 'auto'
+      ) {
         throw new ImportValidationError('视频源代理模式格式无效');
       }
     }

@@ -2,6 +2,7 @@ import { formatBytesPerSecond } from '@/lib/player-utils';
 import {
   clearSourceProxyOverride,
   rememberSourceServerProxy,
+  shouldAutoFallbackToServer,
 } from '@/lib/proxy-modes';
 
 type VideoProbeResult = {
@@ -655,17 +656,17 @@ export async function getVideoResolutionFromM3u8(
   try {
     const result = await probeWithMode(m3u8Url, useProxy, sourceKey);
     if (!useProxy && sourceKey) {
-      clearSourceProxyOverride(sourceKey);
+      clearSourceProxyOverride(sourceKey, m3u8Url);
     }
     return result;
   } catch (error) {
     const firstError = normalizeProbeError(error);
 
-    if (!useProxy) {
+    if (!useProxy && sourceKey && shouldAutoFallbackToServer(sourceKey)) {
       try {
         const fallbackResult = await probeWithMode(m3u8Url, true, sourceKey);
         if (sourceKey) {
-          rememberSourceServerProxy(sourceKey);
+          rememberSourceServerProxy(sourceKey, m3u8Url);
         }
         return fallbackResult;
       } catch (fallbackError) {

@@ -11,6 +11,7 @@ export function useArtPlayer(params: UseArtPlayerParams) {
     artRef,
     videoUrl,
     loading,
+    playbackRetryNonce,
     detail,
     currentEpisodeIndex,
     totalEpisodes,
@@ -66,6 +67,7 @@ export function useArtPlayer(params: UseArtPlayerParams) {
     };
   }, [
     videoUrl,
+    playbackRetryNonce,
     loading,
     blockAdEnabled,
     playbackRequestModeRef,

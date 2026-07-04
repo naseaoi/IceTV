@@ -170,7 +170,6 @@ async function runProbe(
 
   try {
     const proxyModes = await getProxyModes();
-    const useProxy = shouldUseServerProxy(resolved.source, proxyModes);
     let probeEpisodeUrl = resolveRequestedProbeEpisodeUrl(
       resolved,
       options.episodeIndex,
@@ -182,6 +181,11 @@ async function runProbe(
     if (!probeEpisodeUrl) {
       throw new Error('Requested episode is unavailable for probe');
     }
+    const useProxy = shouldUseServerProxy(
+      resolved.source,
+      probeEpisodeUrl,
+      proxyModes,
+    );
     const info = await probeVodEpisodeUrl(
       probeEpisodeUrl,
       useProxy,

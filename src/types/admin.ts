@@ -46,7 +46,7 @@ export interface AdminConfig {
     detail?: string;
     from: 'config' | 'custom';
     disabled?: boolean;
-    proxyMode?: 'server' | 'browser';
+    proxyMode?: 'server' | 'browser' | 'auto';
   }[];
   CustomCategories: {
     name?: string;

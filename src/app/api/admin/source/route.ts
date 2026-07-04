@@ -312,9 +312,13 @@ export async function POST(request: NextRequest) {
         };
         if (!key)
           return NextResponse.json({ error: '缺少 key 参数' }, { status: 400 });
-        if (proxyMode !== 'server' && proxyMode !== 'browser') {
+        if (
+          proxyMode !== 'server' &&
+          proxyMode !== 'browser' &&
+          proxyMode !== 'auto'
+        ) {
           return NextResponse.json(
-            { error: 'proxyMode 必须为 server 或 browser' },
+            { error: 'proxyMode 必须为 server、browser 或 auto' },
             { status: 400 },
           );
         }

@@ -37,6 +37,7 @@ interface PlayMainContentProps {
   onReloginAndRecover: () => void;
   onDismissAuthRecovery: () => void;
   onEpisodeChange: (episodeNumber: number) => void;
+  onRetryPlayback: () => void;
   onSourceChange: (newSource: string, newId: string, newTitle: string) => void;
   currentSource: string;
   currentId: string;
@@ -98,6 +99,7 @@ function PlayerOverlayPanel({
   title,
   message,
   description,
+  children,
   zClassName,
   icon = <AlertTriangle className='h-9 w-9' />,
   tone = 'red',
@@ -106,6 +108,7 @@ function PlayerOverlayPanel({
   title: string;
   message?: string;
   description?: string;
+  children?: ReactNode;
   zClassName: string;
   icon?: ReactNode;
   tone?: 'emerald' | 'blue' | 'amber' | 'red';
@@ -127,7 +130,9 @@ function PlayerOverlayPanel({
         description={description}
         descriptionClassName='text-gray-400'
         className='max-w-[19rem] p-4 sm:max-w-lg sm:p-6'
-      />
+      >
+        {children}
+      </LoadingStatePanel>
     </div>
   );
 }
@@ -190,13 +195,28 @@ function PlayLoadingOverlay({
   );
 }
 
-function PlaybackErrorOverlay({ message }: { message: string }) {
+function PlaybackErrorOverlay({
+  message,
+  onRetry,
+}: {
+  message: string;
+  onRetry: () => void;
+}) {
   return (
     <PlayerOverlayPanel
       zClassName='z-[510]'
       title={message}
       message='请从右侧面板手动切换其他源站。'
-    />
+    >
+      <button
+        type='button'
+        onClick={onRetry}
+        className='mx-auto inline-flex h-10 items-center justify-center gap-2 rounded-lg bg-white px-4 text-sm font-medium text-zinc-950 transition-colors hover:bg-zinc-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/70'
+      >
+        <RefreshCw className='h-4 w-4' />
+        <span>继续尝试</span>
+      </button>
+    </PlayerOverlayPanel>
   );
 }
 
@@ -314,6 +334,7 @@ export function PlayMainContent(props: PlayMainContentProps) {
     onReloginAndRecover,
     onDismissAuthRecovery,
     onEpisodeChange,
+    onRetryPlayback,
     onSourceChange,
     currentSource,
     currentId,
@@ -426,7 +447,12 @@ export function PlayMainContent(props: PlayMainContentProps) {
               realtimeLoadSpeed={loadingStatusText}
             />
           )}
-          {playbackError && <PlaybackErrorOverlay message={playbackError} />}
+          {playbackError && (
+            <PlaybackErrorOverlay
+              message={playbackError}
+              onRetry={onRetryPlayback}
+            />
+          )}
           {authRecoveryVisible && (
             <AuthRecoveryOverlay
               message={authRecoveryReasonMessage}

@@ -56,6 +56,25 @@ export function SortableSourceRow({
     transform: CSS.Transform.toString(transform),
     transition,
   } as CSSProperties;
+  const proxyMode = source.proxyMode || 'browser';
+  const proxyModeClassName =
+    proxyMode === 'server'
+      ? 'bg-blue-100 text-blue-800 hover:bg-blue-200 dark:bg-blue-900/20 dark:text-blue-300 dark:hover:bg-blue-900/40'
+      : proxyMode === 'auto'
+        ? 'bg-emerald-100 text-emerald-800 hover:bg-emerald-200 dark:bg-emerald-900/20 dark:text-emerald-300 dark:hover:bg-emerald-900/40'
+        : 'bg-gray-100 text-gray-600 hover:bg-gray-200 dark:bg-gray-900/20 dark:text-gray-400 dark:hover:bg-gray-800/40';
+  const proxyModeTitle =
+    proxyMode === 'server'
+      ? '播放和测速流量走服务端代理'
+      : proxyMode === 'auto'
+        ? '播放和测速流量自动选择路由'
+        : '播放和测速流量走浏览器直连';
+  const proxyModeText =
+    proxyMode === 'server'
+      ? '服务端'
+      : proxyMode === 'auto'
+        ? '自动'
+        : '浏览器';
 
   return (
     <tr
@@ -115,18 +134,10 @@ export function SortableSourceRow({
         <button
           onClick={() => onToggleProxyMode(source.key)}
           disabled={isProxyModeLoading}
-          className={`rounded-full px-2 py-1 text-xs transition-colors ${
-            source.proxyMode === 'server'
-              ? 'bg-blue-100 text-blue-800 hover:bg-blue-200 dark:bg-blue-900/20 dark:text-blue-300 dark:hover:bg-blue-900/40'
-              : 'bg-gray-100 text-gray-600 hover:bg-gray-200 dark:bg-gray-900/20 dark:text-gray-400 dark:hover:bg-gray-800/40'
-          } ${isProxyModeLoading ? 'cursor-not-allowed opacity-50' : 'cursor-pointer'}`}
-          title={
-            source.proxyMode === 'server'
-              ? '播放和测速流量走服务端代理'
-              : '播放和测速流量走浏览器直连'
-          }
+          className={`rounded-full px-2 py-1 text-xs transition-colors ${proxyModeClassName} ${isProxyModeLoading ? 'cursor-not-allowed opacity-50' : 'cursor-pointer'}`}
+          title={proxyModeTitle}
         >
-          {source.proxyMode === 'server' ? '服务端' : '浏览器'}
+          {proxyModeText}
         </button>
       </td>
       <td className='max-w-[1rem] whitespace-nowrap px-6 py-4'>

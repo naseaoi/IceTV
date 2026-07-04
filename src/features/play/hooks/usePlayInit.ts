@@ -206,8 +206,13 @@ async function preferBestSource(
         if (pendingCount === 0) finalize();
         continue;
       }
-      const useProxy = shouldUseServerProxy(source.source, proxyModes);
-      probeVodEpisodeUrl(source.episodes[0], useProxy, source.source)
+      const episodeUrl = source.episodes[0];
+      const useProxy = shouldUseServerProxy(
+        source.source,
+        episodeUrl,
+        proxyModes,
+      );
+      probeVodEpisodeUrl(episodeUrl, useProxy, source.source)
         .then((testResult) => {
           if (settled) return;
           collectedResults.push({ source, testResult });

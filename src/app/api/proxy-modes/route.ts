@@ -4,7 +4,7 @@ import { getConfigForRead } from '@/lib/config';
 
 export const runtime = 'nodejs';
 
-/** 返回源站流量路由映射：{ [sourceKey]: 'server' | 'browser' } */
+/** 返回源站流量路由映射 */
 export async function GET() {
   try {
     const config = await getConfigForRead();

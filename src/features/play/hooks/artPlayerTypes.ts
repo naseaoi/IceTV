@@ -26,6 +26,7 @@ export interface UseArtPlayerParams {
   videoCover: string;
   videoTitle: string;
   loading: boolean;
+  playbackRetryNonce: number;
   detail: SearchResult | null;
   currentEpisodeIndex: number;
   totalEpisodes: number;

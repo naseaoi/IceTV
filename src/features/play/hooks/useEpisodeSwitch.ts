@@ -24,9 +24,11 @@ interface UseEpisodeSwitchOptions {
   sourceSwitchEpisodeAnchorRef: RefObject<SourceSwitchEpisodeAnchor | null>;
   playbackRequestModeRef: RefObject<PlaybackRequestMode>;
   doSaveCurrentProgress: () => void | Promise<unknown>;
+  setError: Dispatch<SetStateAction<string | null>>;
   setIsVideoLoading: Dispatch<SetStateAction<boolean>>;
   setVideoLoadingStage: Dispatch<SetStateAction<VideoLoadingStage>>;
   setVideoLoadingAttempt: Dispatch<SetStateAction<number>>;
+  setRealtimeLoadSpeed: Dispatch<SetStateAction<string>>;
   setCurrentEpisodeIndex: Dispatch<SetStateAction<number>>;
 }
 
@@ -47,9 +49,11 @@ export function useEpisodeSwitch({
   sourceSwitchEpisodeAnchorRef,
   playbackRequestModeRef,
   doSaveCurrentProgress,
+  setError,
   setIsVideoLoading,
   setVideoLoadingStage,
   setVideoLoadingAttempt,
+  setRealtimeLoadSpeed,
   setCurrentEpisodeIndex,
 }: UseEpisodeSwitchOptions): EpisodeSwitchHandlers {
   const switchEpisode = useCallback(
@@ -76,9 +80,11 @@ export function useEpisodeSwitch({
       resumeModeRef.current = null;
       currentEpisodeIndexRef.current = targetEpisodeIndex;
 
+      setError(null);
       setIsVideoLoading(true);
       setVideoLoadingStage('episodeChanging');
       setVideoLoadingAttempt((prev) => prev + 1);
+      setRealtimeLoadSpeed('正在切换剧集...');
       setCurrentEpisodeIndex(targetEpisodeIndex);
     },
     [
@@ -91,9 +97,11 @@ export function useEpisodeSwitch({
       sourceSwitchEpisodeAnchorRef,
       playbackRequestModeRef,
       doSaveCurrentProgress,
+      setError,
       setIsVideoLoading,
       setVideoLoadingStage,
       setVideoLoadingAttempt,
+      setRealtimeLoadSpeed,
       setCurrentEpisodeIndex,
     ],
   );

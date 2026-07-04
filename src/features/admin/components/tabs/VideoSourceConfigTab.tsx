@@ -146,7 +146,13 @@ const VideoSourceConfig = ({
   const handleToggleProxyMode = (key: string) => {
     const target = sources.find((s) => s.key === key);
     if (!target) return;
-    const newMode = target.proxyMode === 'server' ? 'browser' : 'server';
+    const currentMode = target.proxyMode || 'browser';
+    const newMode =
+      currentMode === 'browser'
+        ? 'server'
+        : currentMode === 'server'
+          ? 'auto'
+          : 'browser';
     withLoading(`proxyMode_${key}`, () =>
       callSourceApi({ action: 'set_proxy_mode', key, proxyMode: newMode }),
     ).catch(() => void 0);

@@ -4,6 +4,7 @@ import {
   clearSourceProxyOverride,
   isServerProxy,
   rememberSourceServerProxy,
+  shouldAutoFallbackToServer,
 } from '@/lib/proxy-modes';
 import {
   bindPlayerHoverControls,
@@ -118,7 +119,7 @@ export async function initializeArtPlayer(
       id: detailRef.current?.id || detail?.id || '',
       videoUrl,
     };
-    const preUseProxy = isServerProxy(preSourceKey);
+    const preUseProxy = isServerProxy(preSourceKey, videoUrl);
     const buildProxyUrl = (rawUrl: string) =>
       buildVodProxyUrl({
         rawUrl,
@@ -264,7 +265,12 @@ export async function initializeArtPlayer(
     }
 
     const switchNativeToServerProxy = (reason: string) => {
-      if (mediaKind !== 'native' || nativeUseServerProxy) {
+      if (
+        mediaKind !== 'native' ||
+        nativeUseServerProxy ||
+        !preSourceKey ||
+        !shouldAutoFallbackToServer(preSourceKey)
+      ) {
         return false;
       }
 
@@ -275,7 +281,7 @@ export async function initializeArtPlayer(
       });
 
       if (preSourceKey) {
-        rememberSourceServerProxy(preSourceKey);
+        rememberSourceServerProxy(preSourceKey, videoUrl);
       }
       nativeUseServerProxy = true;
       nativeFallbackStarted = true;
@@ -385,7 +391,7 @@ export async function initializeArtPlayer(
       if (activeVideo && activeSourceKey) {
         const activeManagedVideo = getManagedVideo(activeVideo);
         if (activeManagedVideo.__icetvUsingServerProxy === false) {
-          clearSourceProxyOverride(activeSourceKey);
+          clearSourceProxyOverride(activeSourceKey, videoUrl);
         }
       }
       showSourceSwitchSuccessNotice();
