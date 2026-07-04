@@ -53,14 +53,6 @@ export function buildXgcartoonVideoPath(
   return `/video/${encodeURIComponent(cartoonId)}/${encodeURIComponent(chapterId)}.html`;
 }
 
-export function buildXgcartoonVariantId(
-  cartoonId: string,
-  groupId: string,
-  isDefault: boolean,
-): string {
-  return isDefault ? cartoonId : `${cartoonId}__xg_${groupId}`;
-}
-
 export function parseXgcartoonVariantId(id: string): {
   cartoonId: string;
   groupId: string | null;

@@ -81,19 +81,52 @@ describe('downstream xgcartoon source', () => {
         episodes: [
           'https://xgct-video.bzcdn.net/11111111-1111-4111-8111-111111111111/playlist.m3u8',
           'https://xgct-video.bzcdn.net/22222222-2222-4222-8222-222222222222/playlist.m3u8',
+          'https://xgct-video.bzcdn.net/33333333-3333-4333-8333-333333333333/playlist.m3u8',
         ],
-        episodes_titles: ['第01集', '第02集'],
+        episodes_titles: ['第01集', '第02集', '第01集'],
+        episode_groups: [
+          { label: '第1季【全2集】', count: 2 },
+          { label: '第2季【全1集】', count: 1 },
+        ],
         class: '动作',
         desc: '测试简介',
       }),
     );
-    expect(detail.related_sources?.[0]).toEqual(
-      expect.objectContaining({
-        id: 'test-cartoon__xg_2',
-        episodes: [],
-        episodes_titles: ['第01集'],
-      }),
+    expect(detail.related_sources).toBeUndefined();
+  });
+
+  it('携带旧版 __xg_ 后缀ID时仍返回合并后的完整剧集', async () => {
+    const detailHtml = `
+      <html>
+        <div class="detail-right__title"><h1>测试动漫</h1></div>
+        <div class="detail-right__volumes">
+          <div class="col-12 volume-title">第1季【全1集】</div>
+          <a href="/user/page_direct?cartoon_id=test-cartoon&amp;chapter_id=c1" title="第01集" class="goto-chapter chapter-box text-truncate"><span>第01集</span></a>
+          <div class="col-12 volume-title">第2季【全1集】</div>
+          <a href="/user/page_direct?cartoon_id=test-cartoon&amp;chapter_id=c2" title="第01集" class="goto-chapter chapter-box text-truncate"><span>第01集</span></a>
+        </div>
+      </html>
+    `;
+    const fetchMock = global.fetch as jest.Mock;
+    fetchMock.mockImplementation(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url === 'https://www.xgcartoon.com/detail/test-cartoon') {
+        return createTextResponse(detailHtml);
+      }
+      const chapterId =
+        url.match(/\/video\/test-cartoon\/([^/]+)\.html/)?.[1] || '';
+      return createTextResponse(
+        `<iframe src="https://pframe.xgcartoon.com/player.htm?vid=${chapterId}1111111-1111-4111-8111-111111111111&amp;autoplay=false"></iframe>`,
+      );
+    });
+
+    const detail = await getDetailFromApi(
+      createXgcartoonSite(),
+      'test-cartoon__xg_2',
     );
+
+    expect(detail.id).toBe('test-cartoon');
+    expect(detail.episodes).toHaveLength(2);
   });
 
   it('搜索会过滤标题无关结果', async () => {

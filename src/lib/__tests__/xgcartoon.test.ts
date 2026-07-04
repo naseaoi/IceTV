@@ -2,7 +2,6 @@ import {
   buildXgcartoonPlaylistUrl,
   buildXgcartoonPlayUrl,
   buildXgcartoonVideoPath,
-  buildXgcartoonVariantId,
   extractXgcartoonEpisodes,
   extractXgcartoonEpisodeVariants,
   extractXgcartoonPlayerVid,
@@ -131,19 +130,15 @@ describe('xgcartoon', () => {
   });
 
   describe('xgcartoon variant id', () => {
-    it('构建和解析默认变体ID', () => {
-      const id = buildXgcartoonVariantId('test-cartoon', '1', true);
-      expect(id).toBe('test-cartoon');
-      expect(parseXgcartoonVariantId(id)).toEqual({
+    it('解析无后缀ID', () => {
+      expect(parseXgcartoonVariantId('test-cartoon')).toEqual({
         cartoonId: 'test-cartoon',
         groupId: null,
       });
     });
 
-    it('构建和解析非默认变体ID', () => {
-      const id = buildXgcartoonVariantId('test-cartoon', '2', false);
-      expect(id).toBe('test-cartoon__xg_2');
-      expect(parseXgcartoonVariantId(id)).toEqual({
+    it('解析旧版 __xg_ 后缀ID', () => {
+      expect(parseXgcartoonVariantId('test-cartoon__xg_2')).toEqual({
         cartoonId: 'test-cartoon',
         groupId: '2',
       });

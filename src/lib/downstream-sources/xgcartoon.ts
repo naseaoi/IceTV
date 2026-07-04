@@ -2,7 +2,6 @@ import type { ApiSite } from '@/lib/config';
 import {
   buildXgcartoonPlaylistUrl,
   buildXgcartoonVideoPath,
-  buildXgcartoonVariantId,
   extractXgcartoonEpisodeVariants,
   extractXgcartoonPlayerVid,
   extractXgcartoonSearchResults,
@@ -239,34 +238,41 @@ async function resolveXgcartoonEpisodes(
   cartoonId: string,
   episodes: XgcartoonEpisodeEntry[],
   referer: string,
-): Promise<{ episodes: string[]; titles: string[] }> {
-  const results = await runWithConcurrency(
-    episodes.map((episode) => async () => {
-      const url = await fetchXgcartoonEpisodePlaylistUrl(
-        origins,
-        cartoonId,
-        episode,
-        referer,
-      );
-      return url ? { url, title: episode.title } : null;
-    }),
+): Promise<{ urls: (string | null)[]; titles: string[] }> {
+  const urls = await runWithConcurrency(
+    episodes.map(
+      (episode) => async () =>
+        fetchXgcartoonEpisodePlaylistUrl(origins, cartoonId, episode, referer),
+    ),
     4,
   );
 
-  const resolvedEpisodes: string[] = [];
-  const resolvedTitles: string[] = [];
-  results.forEach((result, index) => {
-    if (!result?.url) {
-      return;
-    }
-
-    resolvedEpisodes.push(result.url);
-    resolvedTitles.push(result.title || `${index + 1}`);
-  });
+  const failedIndexes = urls
+    .map((url, index) => (url ? -1 : index))
+    .filter((index) => index >= 0);
+  if (failedIndexes.length > 0) {
+    const retryUrls = await runWithConcurrency(
+      failedIndexes.map(
+        (index) => async () =>
+          fetchXgcartoonEpisodePlaylistUrl(
+            origins,
+            cartoonId,
+            episodes[index],
+            referer,
+          ),
+      ),
+      2,
+    );
+    retryUrls.forEach((url, position) => {
+      if (url) {
+        urls[failedIndexes[position]] = url;
+      }
+    });
+  }
 
   return {
-    episodes: resolvedEpisodes,
-    titles: resolvedTitles,
+    urls,
+    titles: episodes.map((episode, index) => episode.title || `${index + 1}`),
   };
 }
 
@@ -274,7 +280,7 @@ export async function getDetailFromXgcartoon(
   apiSite: ApiSite,
   id: string,
 ): Promise<SearchResult> {
-  const { cartoonId, groupId: preferredGroupId } = parseXgcartoonVariantId(id);
+  const { cartoonId } = parseXgcartoonVariantId(id);
   const origins = getXgcartoonOrigins(apiSite);
   const detailResult = await fetchXgcartoonHtmlFromOrigins(
     origins,
@@ -297,58 +303,48 @@ export async function getDetailFromXgcartoon(
     throw new Error('未提取到剧集');
   }
 
-  const selectedVariant =
-    variants.find((variant) => variant.groupId === preferredGroupId) ||
-    variants[0];
+  const flatEntries = variants.flatMap((variant, groupIndex) =>
+    variant.episodes.map((episode) => ({ groupIndex, episode })),
+  );
   const resolved = await resolveXgcartoonEpisodes(
     activeOrigins,
     cartoonId,
-    selectedVariant.episodes,
+    flatEntries.map((entry) => entry.episode),
     finalUrl,
   );
 
-  if (resolved.episodes.length === 0) {
+  const episodes: string[] = [];
+  const episodesTitles: string[] = [];
+  const groupCounts = new Array<number>(variants.length).fill(0);
+  resolved.urls.forEach((url, index) => {
+    if (!url) {
+      return;
+    }
+    episodes.push(url);
+    episodesTitles.push(resolved.titles[index]);
+    groupCounts[flatEntries[index].groupIndex] += 1;
+  });
+
+  if (episodes.length === 0) {
     throw new Error('未提取到有效播放地址');
   }
 
-  const relatedSources: SearchResult[] = variants
-    .filter((variant) => variant.groupId !== selectedVariant.groupId)
-    .map((variant) => ({
-      id: buildXgcartoonVariantId(
-        cartoonId,
-        variant.groupId,
-        variant.isDefault,
-      ),
-      title,
-      poster,
-      episodes: [],
-      episodes_titles: variant.episodes.map(
-        (entry, index) => entry.title || `${index + 1}`,
-      ),
-      source: apiSite.key,
-      source_name: apiSite.name,
-      variant_label: variant.label,
-      class: className,
-      year: 'unknown',
-      desc,
-      type_name: '动漫',
-      douban_id: 0,
-    }));
+  const episodeGroups = variants
+    .map((variant, index) => ({
+      label: variant.label,
+      count: groupCounts[index],
+    }))
+    .filter((group) => group.count > 0);
 
   return {
-    id: buildXgcartoonVariantId(
-      cartoonId,
-      selectedVariant.groupId,
-      selectedVariant.isDefault,
-    ),
+    id: cartoonId,
     title,
     poster,
-    episodes: resolved.episodes,
-    episodes_titles: resolved.titles,
+    episodes,
+    episodes_titles: episodesTitles,
     source: apiSite.key,
     source_name: apiSite.name,
-    variant_label: selectedVariant.label,
-    related_sources: relatedSources,
+    episode_groups: episodeGroups.length > 1 ? episodeGroups : undefined,
     class: className,
     year: 'unknown',
     desc,

@@ -31,6 +31,10 @@ import type {
   CurrentSourceVideoInfoContext,
 } from '@/features/play/hooks/artPlayerTypes';
 import { resolveSourceSwitchCurrentPlayTime } from '@/features/play/lib/episodeResumePolicy';
+import {
+  findPreferredLevelIndex,
+  registerQualitySettingWhenReady,
+} from '@/features/play/lib/hlsQuality';
 import type { PlayerLoadingSessionState } from '@/features/play/lib/playerLoading';
 import type { ResumeMode } from '@/features/play/lib/resumePlayback';
 import {
@@ -114,6 +118,9 @@ export function createVodM3u8Loader({
       if (oldHandlers) {
         hls.off(Hls.Events.ERROR, oldHandlers.onError);
         hls.off(Hls.Events.FRAG_LOADED, oldHandlers.onFragLoaded);
+        if (oldHandlers.onManifestParsed) {
+          hls.off(Hls.Events.MANIFEST_PARSED, oldHandlers.onManifestParsed);
+        }
       }
     } else {
       destroyManagedHls(managedVideo);
@@ -173,6 +180,24 @@ export function createVodM3u8Loader({
     resetSpeedFallbackTimer();
 
     let lastStallRecoveryAt = 0;
+    let qualityLockProbeTimer: ReturnType<typeof setTimeout> | null = null;
+    const clearQualityLockProbe = () => {
+      if (qualityLockProbeTimer) {
+        clearTimeout(qualityLockProbeTimer);
+        qualityLockProbeTimer = null;
+      }
+    };
+    const releaseQualityLockToAuto = () => {
+      hls.currentLevel = -1;
+      hls.startLoad();
+      setRealtimeLoadSpeed('所选画质加载失败，已临时切回自动');
+      try {
+        const activePlayer = artPlayerRef.current;
+        if (activePlayer) {
+          activePlayer.notice.show = '所选画质加载失败，已临时切回自动';
+        }
+      } catch {}
+    };
     const failureKey =
       playbackInfoContext.source && playbackInfoContext.id
         ? `${playbackInfoContext.source}-${playbackInfoContext.id}`
@@ -339,6 +364,7 @@ export function createVodM3u8Loader({
     const cleanupVideoRuntime = () => {
       if (videoRuntimeCleaned) return;
       videoRuntimeCleaned = true;
+      clearQualityLockProbe();
       if (speedFallbackTimer) {
         clearTimeout(speedFallbackTimer);
       }
@@ -374,6 +400,16 @@ export function createVodM3u8Loader({
       }
 
       if (data.fatal) {
+        if (
+          data.type === Hls.ErrorTypes.NETWORK_ERROR &&
+          hls.autoLevelEnabled === false &&
+          /frag|level/i.test(errorDetails)
+        ) {
+          clearQualityLockProbe();
+          releaseQualityLockToAuto();
+          return;
+        }
+
         if (
           data.type === Hls.ErrorTypes.NETWORK_ERROR &&
           switchToServerProxy(errorReason)
@@ -426,6 +462,7 @@ export function createVodM3u8Loader({
     };
 
     const onHlsFragLoaded = function (_: unknown, data: any) {
+      clearQualityLockProbe();
       if (speedFallbackTimer) {
         clearTimeout(speedFallbackTimer);
         speedFallbackTimer = null;
@@ -454,21 +491,37 @@ export function createVodM3u8Loader({
 
     hls.on(Hls.Events.ERROR, onHlsError);
     hls.on(Hls.Events.FRAG_LOADED, onHlsFragLoaded);
-    const onManifestParsed = (_evt: unknown, data: { levels?: unknown[] }) => {
+    const onManifestParsed = (_evt: unknown, rawData: unknown) => {
+      const data = rawData as { levels?: unknown[] } | null;
       const levelCount = Array.isArray(data?.levels) ? data.levels.length : 0;
-      const picked = pickStartLevelFromStrategy(
-        HLS_START_LEVEL_STRATEGY,
-        levelCount,
-      );
-      if (picked !== undefined) {
-        hls.startLevel = picked;
-        hls.nextLevel = picked;
+      const preferredLevel = findPreferredLevelIndex(hls.levels || []);
+      if (preferredLevel !== null) {
+        hls.startLevel = preferredLevel;
+        hls.currentLevel = preferredLevel;
+        clearQualityLockProbe();
+        qualityLockProbeTimer = setTimeout(() => {
+          qualityLockProbeTimer = null;
+          if (hls.autoLevelEnabled === false) {
+            releaseQualityLockToAuto();
+          }
+        }, 10000);
+      } else {
+        const picked = pickStartLevelFromStrategy(
+          HLS_START_LEVEL_STRATEGY,
+          levelCount,
+        );
+        if (picked !== undefined) {
+          hls.startLevel = picked;
+          hls.nextLevel = picked;
+        }
       }
+      registerQualitySettingWhenReady(artPlayerRef, hls);
     };
     hls.on(Hls.Events.MANIFEST_PARSED, onManifestParsed);
     managedVideo.__icetvHlsHandlers = {
       onError: onHlsError,
       onFragLoaded: onHlsFragLoaded,
+      onManifestParsed,
     };
 
     video.addEventListener('loadeddata', tryReportVideoInfo);

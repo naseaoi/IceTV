@@ -102,6 +102,11 @@ export interface IStorage {
 }
 
 // 搜索结果数据结构
+export interface EpisodeGroup {
+  label: string;
+  count: number;
+}
+
 export interface SearchResult {
   id: string;
   title: string;
@@ -117,6 +122,7 @@ export interface SearchResult {
   type_name?: string;
   douban_id?: number;
   related_sources?: SearchResult[];
+  episode_groups?: EpisodeGroup[];
 }
 
 // 豆瓣数据结构

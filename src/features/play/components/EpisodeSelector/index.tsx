@@ -148,6 +148,7 @@ const EpisodeSelector: React.FC<EpisodeSelectorProps> = ({
           episodesPerPage={episodesPerPage}
           value={value}
           onChange={onChange}
+          episodeGroups={detail?.episode_groups}
           variantSources={variantSources}
           currentSource={currentSource}
           currentId={currentId}

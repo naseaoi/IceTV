@@ -52,15 +52,16 @@ async function fetchGiriHtml(url: string): Promise<string | null> {
         headers: BROWSER_HTML_HEADERS,
         signal: abortState.signal,
       });
-      if (!res.ok) return null;
-      const html = await res.text();
-      if (!isCfChallenge(html)) return html;
-      if (attempt === 0) await new Promise((r) => setTimeout(r, 1500));
+      if (res.ok) {
+        const html = await res.text();
+        if (!isCfChallenge(html)) return html;
+      }
     } catch {
-      return null;
+      // 重试
     } finally {
       abortState.cleanup();
     }
+    if (attempt === 0) await new Promise((r) => setTimeout(r, 1500));
   }
   return null;
 }
@@ -354,6 +355,24 @@ export async function getDetailFromGirigiri(
     ),
     4,
   );
+
+  const failedIndexes = playResults
+    .map((result, index) => (result.url ? -1 : index))
+    .filter((index) => index >= 0);
+  if (failedIndexes.length > 0) {
+    const retryResults = await runWithConcurrency(
+      failedIndexes.map(
+        (index) => async () =>
+          fetchGirigiriEpisodePlayUrl(activeOrigins, episodeEntries[index][0]),
+      ),
+      2,
+    );
+    retryResults.forEach((result, position) => {
+      if (result.url) {
+        playResults[failedIndexes[position]] = result;
+      }
+    });
+  }
 
   const episodes: string[] = [];
   const episodesTitles: string[] = [];

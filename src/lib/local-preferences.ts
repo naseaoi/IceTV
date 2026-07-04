@@ -3,6 +3,7 @@ export const ENABLE_OPTIMIZATION_STORAGE_KEY = 'enableOptimization';
 export const FLUID_SEARCH_STORAGE_KEY = 'fluidSearch';
 export const LIVE_DIRECT_CONNECT_STORAGE_KEY = 'liveDirectConnect';
 export const BLOCK_AD_STORAGE_KEY = 'enable_blockad';
+export const PREFERRED_QUALITY_STORAGE_KEY = 'preferredQuality';
 export const SIDEBAR_COLLAPSED_STORAGE_KEY = 'sidebarCollapsed';
 export const SEEN_ANNOUNCEMENT_STORAGE_KEY = 'hasSeenAnnouncement';
 
@@ -169,4 +170,20 @@ export function readSeenAnnouncement(): string | undefined {
 
 export function writeSeenAnnouncement(value: string) {
   writeStoredString(SEEN_ANNOUNCEMENT_STORAGE_KEY, value);
+}
+
+export function readPreferredQualityHeight(): number | null {
+  const raw = readStoredString(PREFERRED_QUALITY_STORAGE_KEY);
+  if (!raw || raw === 'auto') {
+    return null;
+  }
+  const height = Number.parseInt(raw, 10);
+  return Number.isFinite(height) && height > 0 ? height : null;
+}
+
+export function writePreferredQualityHeight(height: number | null) {
+  writeStoredString(
+    PREFERRED_QUALITY_STORAGE_KEY,
+    height && height > 0 ? String(height) : 'auto',
+  );
 }

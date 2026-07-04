@@ -40,6 +40,24 @@ export function extractEpisodeNumberFromTitle(title: string): number | null {
   return Number.isFinite(episodeNumber) ? episodeNumber : null;
 }
 
+function parseConsecutiveNumbering(titles: string[]): number[] | null {
+  if (titles.length < 2) {
+    return null;
+  }
+  const numbers: number[] = [];
+  for (let i = 0; i < titles.length; i += 1) {
+    const n = extractEpisodeNumberFromTitle(titles[i] || '');
+    if (n === null || !Number.isInteger(n)) {
+      return null;
+    }
+    if (i > 0 && n !== numbers[i - 1] + 1) {
+      return null;
+    }
+    numbers.push(n);
+  }
+  return numbers;
+}
+
 function titlesLookLikeEpisodeNumbering(titles: string[]): boolean {
   if (titles.length < 2) {
     return false;
@@ -90,6 +108,17 @@ export function resolveEpisodeTargetIndex(
 
     if (matchedIndex >= 0) {
       return { index: matchedIndex, preserveProgress: true };
+    }
+
+    const currentSeq = parseConsecutiveNumbering(currentTitles);
+    const targetSeq = parseConsecutiveNumbering(targetTitles);
+    if (
+      currentSeq &&
+      targetSeq &&
+      currentSeq.length === targetSeq.length &&
+      safeCurrentIndex < targetSeq.length
+    ) {
+      return { index: safeCurrentIndex, preserveProgress: true };
     }
 
     if (titlesLookLikeEpisodeNumbering(targetTitles)) {
