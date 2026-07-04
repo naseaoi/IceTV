@@ -26,8 +26,8 @@ export async function GET(request: NextRequest) {
 
   // 获取参数
   const kind = searchParams.get('kind');
-  const pageLimit = parseInt(searchParams.get('limit') || '20');
-  const pageStart = parseInt(searchParams.get('start') || '0');
+  const pageLimit = Number(searchParams.get('limit') || '20');
+  const pageStart = Number(searchParams.get('start') || '0');
   const category =
     searchParams.get('category') === 'all' ? '' : searchParams.get('category');
   const format =
@@ -44,6 +44,27 @@ export async function GET(request: NextRequest) {
 
   if (!kind) {
     return NextResponse.json({ error: '缺少必要参数: kind' }, { status: 400 });
+  }
+
+  if (!['tv', 'movie'].includes(kind)) {
+    return NextResponse.json(
+      { error: 'kind 参数必须是 tv 或 movie' },
+      { status: 400 },
+    );
+  }
+
+  if (!Number.isInteger(pageLimit) || pageLimit < 1 || pageLimit > 100) {
+    return NextResponse.json(
+      { error: 'pageSize 必须在 1-100 之间' },
+      { status: 400 },
+    );
+  }
+
+  if (!Number.isInteger(pageStart) || pageStart < 0) {
+    return NextResponse.json(
+      { error: 'pageStart 不能小于 0' },
+      { status: 400 },
+    );
   }
 
   const selectedCategories = { 类型: category } as any;
