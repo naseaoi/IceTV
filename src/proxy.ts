@@ -5,19 +5,13 @@ import {
   getAuthInfoFromCookie,
   getSessionExpiresAt,
   getSignatureData,
+  isSecureRequest,
   shouldRefreshSession,
 } from '@/lib/auth.server';
 import {
   getConfiguredAuthSigningSecret,
   verifyAuthSignature,
 } from '@/lib/signing-secret.server';
-
-function isSecureRequest(request: NextRequest): boolean {
-  return (
-    request.nextUrl.protocol === 'https:' ||
-    request.headers.get('x-forwarded-proto') === 'https'
-  );
-}
 
 function clearAuthCookies(response: NextResponse, request: NextRequest): void {
   const secure = isSecureRequest(request);

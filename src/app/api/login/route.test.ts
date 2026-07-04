@@ -37,10 +37,14 @@ jest.mock('@/lib/signing-secret.server', () => ({
 
 const { POST } = require('./route') as typeof import('./route');
 
-function createLoginRequest(username: string, password: string): NextRequest {
+function createLoginRequest(
+  username: string,
+  password: string,
+  headers: Record<string, string> = {},
+): NextRequest {
   return {
     nextUrl: new URL('http://localhost/api/login'),
-    headers: new Headers({ 'Content-Type': 'application/json' }),
+    headers: new Headers({ 'Content-Type': 'application/json', ...headers }),
     json: async () => ({ username, password }),
   } as NextRequest;
 }
@@ -81,5 +85,49 @@ describe('login route enumeration hardening', () => {
       'password',
       expect.stringMatching(/^\$2b\$10\$/),
     );
+  });
+});
+
+describe('login route rate limiting', () => {
+  beforeEach(() => {
+    jest.clearAllMocks();
+    mockGetConfig.mockResolvedValue({ UserConfig: { Users: [] } });
+    mockVerifyPassword.mockResolvedValue({ match: false, needsRehash: false });
+  });
+
+  it('locks a username after repeated failures across rotating ip headers', async () => {
+    mockCheckUserExist.mockResolvedValue(true);
+    mockVerifyUser.mockResolvedValue(false);
+
+    for (let i = 0; i < 30; i++) {
+      const response = await POST(
+        createLoginRequest('sprayed-user', 'wrong-password', {
+          'x-forwarded-for': `203.0.113.${i}`,
+        }),
+      );
+      expect(response.status).toBe(401);
+    }
+
+    const blocked = await POST(
+      createLoginRequest('sprayed-user', 'wrong-password', {
+        'x-forwarded-for': '198.51.100.1',
+      }),
+    );
+
+    expect(blocked.status).toBe(429);
+    expect(mockVerifyUser).toHaveBeenCalledTimes(30);
+  });
+
+  it('keeps other usernames unaffected by a locked username bucket', async () => {
+    mockCheckUserExist.mockResolvedValue(true);
+    mockVerifyUser.mockResolvedValue(false);
+
+    const response = await POST(
+      createLoginRequest('another-user', 'wrong-password', {
+        'x-forwarded-for': '198.51.100.2',
+      }),
+    );
+
+    expect(response.status).toBe(401);
   });
 });

@@ -170,7 +170,7 @@ IceTV 支持标准的苹果 CMS V10 API 格式。
 | `ICETV_PASSWORD`                | 站长密码       | 是             | 无                                  | 任意字符串                                                       |
 | `AUTH_SECRET`                   | 签名密钥       | 是             | 无                                  | 高熵随机字符串，至少 32 字符；别名：`ICETV_AUTH_SECRET`          |
 | `CRON_SECRET`                   | 定时任务密钥   | Docker 必填    | 无                                  | 高熵随机字符串；别名：`ICETV_CRON_SECRET` / `VERCEL_CRON_SECRET` |
-| `LEGACY_COOKIE_CUTOFF_DATE`     | 旧登录态截止   | 否             | `2026-10-01T00:00:00.000Z`          | ISO 日期字符串                                                   |
+| `LEGACY_COOKIE_CUTOFF_DATE`     | 旧登录态截止   | 否             | `2026-08-01T00:00:00.000Z`          | ISO 日期字符串                                                   |
 | `AUTH_SESSION_TTL_HOURS`        | 登录态时长     | 否             | `168`                               | 正整数                                                           |
 | `NEXT_PUBLIC_STORAGE_TYPE`      | 存储类型       | 否             | 自动识别，默认 `localdb`            | `localdb` / `mysql`                                              |
 | `LOCAL_DB_PATH`                 | SQLite 路径    | 否             | `/data/icetv-data.sqlite`（Docker） | 绝对路径；别名：`LOCAL_SQLITE_PATH`                              |

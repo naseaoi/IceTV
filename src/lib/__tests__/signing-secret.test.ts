@@ -22,11 +22,13 @@ jest.mock('../env.server', () => ({
 describe('auth signing secret', () => {
   const originalAuthSecret = process.env.AUTH_SECRET;
   const originalIcetvAuthSecret = process.env.ICETV_AUTH_SECRET;
+  const originalLegacyCutoff = process.env.LEGACY_COOKIE_CUTOFF_DATE;
 
   beforeEach(() => {
     jest.clearAllMocks();
     delete process.env.AUTH_SECRET;
     delete process.env.ICETV_AUTH_SECRET;
+    process.env.LEGACY_COOKIE_CUTOFF_DATE = '2099-01-01T00:00:00.000Z';
     (getOwnerPassword as jest.Mock).mockReturnValue('owner-secret');
   });
 
@@ -41,6 +43,12 @@ describe('auth signing secret', () => {
       delete process.env.ICETV_AUTH_SECRET;
     } else {
       process.env.ICETV_AUTH_SECRET = originalIcetvAuthSecret;
+    }
+
+    if (originalLegacyCutoff === undefined) {
+      delete process.env.LEGACY_COOKIE_CUTOFF_DATE;
+    } else {
+      process.env.LEGACY_COOKIE_CUTOFF_DATE = originalLegacyCutoff;
     }
   });
 
@@ -75,5 +83,18 @@ describe('auth signing secret', () => {
         allowLegacyOwnerPassword: true,
       }),
     ).resolves.toBe(true);
+  });
+
+  it('rejects legacy owner-password sessions after the cutoff date', async () => {
+    process.env.AUTH_SECRET = AUTH_SECRET;
+    process.env.LEGACY_COOKIE_CUTOFF_DATE = '2020-01-01T00:00:00.000Z';
+    const data = 'user:1777777777777';
+    const legacySignature = await generateSignature(data, 'owner-secret');
+
+    await expect(
+      verifyAuthSignature(data, legacySignature, {
+        allowLegacyOwnerPassword: true,
+      }),
+    ).resolves.toBe(false);
   });
 });

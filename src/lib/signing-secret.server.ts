@@ -4,7 +4,7 @@ import { verifySignature } from './auth.server';
 import { getOwnerPassword } from './env.server';
 
 const AUTH_SECRET_ENV_KEYS = ['AUTH_SECRET', 'ICETV_AUTH_SECRET'] as const;
-const DEFAULT_LEGACY_COOKIE_CUTOFF_DATE = '2026-10-01T00:00:00.000Z';
+const DEFAULT_LEGACY_COOKIE_CUTOFF_DATE = '2026-08-01T00:00:00.000Z';
 const AUTH_SIGNING_SECRET_MIN_LENGTH = 32;
 
 type VerifyAuthSignatureOptions = {

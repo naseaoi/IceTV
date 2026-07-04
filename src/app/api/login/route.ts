@@ -6,6 +6,7 @@ import {
   generateSignature,
   getSessionExpiresAt,
   getSignatureData,
+  isSecureRequest,
 } from '@/lib/auth.server';
 import { getConfig } from '@/lib/config';
 import { db } from '@/lib/db';
@@ -35,6 +36,7 @@ type LoginAuthCookiePayload = AuthCookiePayload & {
   sessionType: 'account';
 };
 const LOGIN_MAX_ATTEMPTS = 10;
+const LOGIN_USER_MAX_ATTEMPTS = 30;
 const LOGIN_WINDOW_MS = 10 * 60 * 1000;
 const LOGIN_LOCK_MS = 15 * 60 * 1000;
 const LOGIN_MAP_MAX_SIZE = 10000;
@@ -82,8 +84,30 @@ function getClientIp(req: NextRequest): string {
   return 'unknown';
 }
 
-function getAttemptKey(req: NextRequest, username?: string): string {
-  return `${getClientIp(req)}:${username || 'anonymous'}`;
+type AttemptBucket = {
+  key: string;
+  maxAttempts: number;
+};
+
+function getAttemptBuckets(
+  req: NextRequest,
+  username?: string,
+): AttemptBucket[] {
+  const buckets: AttemptBucket[] = [
+    {
+      key: `ip:${getClientIp(req)}:${username || 'anonymous'}`,
+      maxAttempts: LOGIN_MAX_ATTEMPTS,
+    },
+  ];
+
+  if (username) {
+    buckets.push({
+      key: `user:${username}`,
+      maxAttempts: LOGIN_USER_MAX_ATTEMPTS,
+    });
+  }
+
+  return buckets;
 }
 
 function getLockRemainingMs(state: LoginAttemptState, now: number): number {
@@ -96,33 +120,40 @@ function getRateLimitState(
 ): {
   blocked: boolean;
   retryAfterSec?: number;
-  key: string;
+  buckets: AttemptBucket[];
 } {
   const now = Date.now();
-  const key = getAttemptKey(req, username);
-  const state = loginAttempts.get(key);
+  const buckets = getAttemptBuckets(req, username);
+  let retryAfterSec: number | undefined;
 
-  if (!state) {
-    return { blocked: false, key };
+  for (const bucket of buckets) {
+    const state = loginAttempts.get(bucket.key);
+    if (!state) {
+      continue;
+    }
+
+    const lockRemainingMs = getLockRemainingMs(state, now);
+    if (lockRemainingMs > 0) {
+      retryAfterSec = Math.max(
+        retryAfterSec ?? 0,
+        Math.ceil(lockRemainingMs / 1000),
+      );
+      continue;
+    }
+
+    if (now - state.windowStart > LOGIN_WINDOW_MS) {
+      loginAttempts.delete(bucket.key);
+    }
   }
 
-  if (getLockRemainingMs(state, now) > 0) {
-    return {
-      blocked: true,
-      retryAfterSec: Math.ceil(getLockRemainingMs(state, now) / 1000),
-      key,
-    };
-  }
-
-  if (now - state.windowStart > LOGIN_WINDOW_MS) {
-    loginAttempts.delete(key);
-    return { blocked: false, key };
-  }
-
-  return { blocked: false, key };
+  return {
+    blocked: retryAfterSec !== undefined,
+    retryAfterSec,
+    buckets,
+  };
 }
 
-function markLoginFailure(key: string): void {
+function markLoginFailure(buckets: AttemptBucket[]): void {
   const now = Date.now();
 
   // 容量保护：超限时清理过期条目，仍超限则丢弃最旧条目
@@ -153,33 +184,27 @@ function markLoginFailure(key: string): void {
     }
   }
 
-  const state = loginAttempts.get(key);
-  if (!state || now - state.windowStart > LOGIN_WINDOW_MS) {
-    loginAttempts.set(key, {
-      failCount: 1,
-      windowStart: now,
-      lockedUntil: 0,
-    });
-    return;
-  }
+  for (const bucket of buckets) {
+    const state = loginAttempts.get(bucket.key);
+    if (!state || now - state.windowStart > LOGIN_WINDOW_MS) {
+      loginAttempts.set(bucket.key, {
+        failCount: 1,
+        windowStart: now,
+        lockedUntil: 0,
+      });
+      continue;
+    }
 
-  state.failCount += 1;
-  if (state.failCount >= LOGIN_MAX_ATTEMPTS) {
-    state.lockedUntil = now + LOGIN_LOCK_MS;
+    state.failCount += 1;
+    if (state.failCount >= bucket.maxAttempts) {
+      state.lockedUntil = now + LOGIN_LOCK_MS;
+    }
+    loginAttempts.set(bucket.key, state);
   }
-  loginAttempts.set(key, state);
 }
 
-function clearLoginFailures(key: string): void {
-  loginAttempts.delete(key);
-}
-
-function isSecureRequest(req: NextRequest): boolean {
-  return (
-    process.env.NODE_ENV === 'production' ||
-    req.nextUrl.protocol === 'https:' ||
-    req.headers.get('x-forwarded-proto') === 'https'
-  );
+function clearLoginFailures(buckets: AttemptBucket[]): void {
+  buckets.forEach((bucket) => loginAttempts.delete(bucket.key));
 }
 
 function setAuthCookies(
@@ -302,14 +327,14 @@ export async function POST(req: NextRequest) {
       const response = NextResponse.json({ ok: true });
       const authPayload = await generateAuthCookie('owner', rawUsername);
       setAuthCookies(response, req, authPayload);
-      clearLoginFailures(rateLimitState.key);
+      clearLoginFailures(rateLimitState.buckets);
 
       return response;
     } else if (
       typeof rawUsername === 'string' &&
       safeEqual(rawUsername, ownerUsername)
     ) {
-      markLoginFailure(rateLimitState.key);
+      markLoginFailure(rateLimitState.buckets);
       return NextResponse.json({ error: '用户名或密码错误' }, { status: 401 });
     }
 
@@ -319,7 +344,7 @@ export async function POST(req: NextRequest) {
         ? await db.verifyUser(username, password)
         : (await verifyPassword(password, DUMMY_PASSWORD_HASH)).match;
       if (!pass) {
-        markLoginFailure(rateLimitState.key);
+        markLoginFailure(rateLimitState.buckets);
         return NextResponse.json(
           { error: '用户名或密码错误' },
           { status: 401 },
@@ -338,7 +363,7 @@ export async function POST(req: NextRequest) {
         username,
       );
       setAuthCookies(response, req, authPayload);
-      clearLoginFailures(rateLimitState.key);
+      clearLoginFailures(rateLimitState.buckets);
 
       return response;
     } catch (err) {

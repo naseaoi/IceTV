@@ -91,12 +91,14 @@ const ORIGINAL_ENV = {
   ICETV_AUTH_SECRET: process.env.ICETV_AUTH_SECRET,
   ICETV_PASSWORD: process.env.ICETV_PASSWORD,
   AUTH_SESSION_TTL_HOURS: process.env.AUTH_SESSION_TTL_HOURS,
+  LEGACY_COOKIE_CUTOFF_DATE: process.env.LEGACY_COOKIE_CUTOFF_DATE,
 };
 
 describe('proxy middleware session handling', () => {
   beforeEach(() => {
     process.env.AUTH_SECRET = AUTH_SECRET;
     process.env.ICETV_PASSWORD = 'owner-pass';
+    process.env.LEGACY_COOKIE_CUTOFF_DATE = '2099-01-01T00:00:00.000Z';
     delete process.env.ICETV_AUTH_SECRET;
     delete process.env.AUTH_SESSION_TTL_HOURS;
   });
