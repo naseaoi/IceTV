@@ -83,6 +83,9 @@ function PosterCard({
   const showActionSheet = interactionManager?.showActionSheet;
   const hideActionSheet = interactionManager?.hideActionSheet;
   const externalUrl = buildExternalUrl(doubanId, isBangumi);
+  const externalLinkLabel = isBangumi
+    ? `打开${title}的 Bangumi 页面`
+    : `打开${title}的豆瓣页面`;
 
   const getLoginRedirectUrl = useCallback(() => {
     const currentUrl = window.location.pathname + window.location.search;
@@ -283,7 +286,7 @@ function PosterCard({
 
         {rate && (
           <div
-            className='absolute right-2 top-2 flex h-7 w-7 items-center justify-center rounded-full bg-pink-500 text-xs font-bold text-white shadow-md transition-all duration-300 ease-out group-hover:scale-110'
+            className='absolute right-2 top-2 flex h-7 w-7 items-center justify-center rounded-full bg-pink-700 text-xs font-bold text-white shadow-md transition-all duration-300 ease-out group-hover:scale-110'
             style={noSelectStyle}
             onContextMenu={preventContextMenu}
           >
@@ -300,6 +303,8 @@ function PosterCard({
             className='absolute left-2 top-2 -translate-x-2 opacity-0 transition-all delay-100 duration-300 ease-in-out sm:group-hover:translate-x-0 sm:group-hover:opacity-100'
             style={noSelectStyle}
             onContextMenu={preventContextMenu}
+            aria-label={externalLinkLabel}
+            title={externalLinkLabel}
           >
             <div
               className='flex h-7 w-7 items-center justify-center rounded-full bg-green-500 text-xs font-bold text-white shadow-md transition-all duration-300 ease-out hover:scale-[1.1] hover:bg-green-600'
@@ -308,6 +313,7 @@ function PosterCard({
             >
               <LinkIcon
                 size={16}
+                aria-hidden='true'
                 style={
                   {
                     ...noSelectStyle,

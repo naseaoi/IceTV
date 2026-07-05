@@ -16,6 +16,7 @@ import {
   markCoverImagesLoaded,
   subscribeCoverImageLoaded,
 } from '@/lib/cover-image-cache';
+import { readDoubanImageProxyType } from '@/lib/douban-source';
 import { imageScheduler } from '@/lib/image-scheduler';
 import { processImageUrl } from '@/lib/utils';
 
@@ -97,6 +98,15 @@ function toDefaultDoubanImageCdn(url: string): string {
   } catch {}
 
   return url;
+}
+
+function isOriginalDoubanImageUrl(url: string): boolean {
+  try {
+    const parsed = new URL(url, 'http://localhost');
+    return /^img\d+\.doubanio\.com$/.test(parsed.hostname);
+  } catch {
+    return false;
+  }
 }
 
 /** 最大重试次数（首次加载不算，失败后最多再试 MAX_RETRIES 次） */
@@ -182,17 +192,11 @@ const CoverImage: React.FC<CoverImageProps> = memo(function CoverImage({
     [processed, src],
   );
 
-  const cached = useMemo(
-    () => !isEmpty && isCoverImageCached(cacheKeys),
-    [cacheKeys, isEmpty],
-  );
-  // 可见性门控：只有进入/接近可视区域才允许 acquire slot。
-  // 首屏 priority 图片直接放行。
-  const [isNearViewport, setIsNearViewport] = useState(cached || priority);
-  const [loaded, setLoaded] = useState(cached);
+  const loadImmediately = !isEmpty && priority;
+  const [isNearViewport, setIsNearViewport] = useState(loadImmediately);
+  const [loaded, setLoaded] = useState(false);
   const [hasError, setHasError] = useState(false);
-  // 并发调度：是否已获得加载 slot（缓存命中则直接跳过排队）
-  const [slotGranted, setSlotGranted] = useState(cached);
+  const [slotGranted, setSlotGranted] = useState(loadImmediately);
 
   const resolvedPlaceholderColor = useMemo(() => {
     if (placeholderColor && /^#[0-9a-fA-F]{6}$/.test(placeholderColor)) {
@@ -228,7 +232,7 @@ const CoverImage: React.FC<CoverImageProps> = memo(function CoverImage({
 
     const isCached = isCoverImageCached(cacheKeys);
     setLoaded(isCached);
-    setSlotGranted(isCached);
+    setSlotGranted(isCached || priority);
     setIsNearViewport(isCached || priority);
 
     if (isCached) {
@@ -311,6 +315,17 @@ const CoverImage: React.FC<CoverImageProps> = memo(function CoverImage({
   }, [displaySrc, handleLoad, hasError, loaded, slotGranted]);
 
   const handleError = useCallback(() => {
+    const isDirectDoubanImage =
+      readDoubanImageProxyType() === 'direct' &&
+      isOriginalDoubanImageUrl(processed);
+    if (isDirectDoubanImage) {
+      setHasError(true);
+      setLoaded(true);
+      releaseSlotRef.current?.();
+      releaseSlotRef.current = null;
+      return;
+    }
+
     const defaultCdnUrl = toDefaultDoubanImageCdn(processed);
     if (!useDefaultDoubanCdn && defaultCdnUrl !== processed) {
       retryCountRef.current = 0;
@@ -362,6 +377,7 @@ const CoverImage: React.FC<CoverImageProps> = memo(function CoverImage({
           sizes={sizes}
           quality={needsUnoptimized ? undefined : quality}
           preload={priority}
+          fetchPriority={priority ? 'high' : undefined}
           unoptimized={needsUnoptimized}
           placeholder='blur'
           blurDataURL={blurDataURL}
