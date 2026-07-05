@@ -33,7 +33,7 @@ export const DEFAULT_RUNTIME_PARAMS: RuntimeParamSettings = {
   ProxyRequestTimeoutSeconds: 15,
 };
 
-const RUNTIME_PARAM_RANGES: Record<
+export const RUNTIME_PARAM_RANGES: Record<
   keyof RuntimeParamSettings,
   { min: number; max: number }
 > = {

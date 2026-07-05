@@ -156,24 +156,24 @@ function runtimeConfigFromServerConfig(
         ? DEFAULT_RUNTIME_CONFIG.FLUID_SEARCH
         : data.FluidSearch,
     VOD_PAGE_TIMEOUT_SECONDS:
-      data.VodPageTimeoutSeconds ||
+      data.VodPageTimeoutSeconds ??
       DEFAULT_RUNTIME_CONFIG.VOD_PAGE_TIMEOUT_SECONDS,
     PLAYBACK_HISTORY_PAGE_SIZE:
-      data.PlaybackHistoryPageSize ||
+      data.PlaybackHistoryPageSize ??
       DEFAULT_RUNTIME_CONFIG.PLAYBACK_HISTORY_PAGE_SIZE,
     PLAYBACK_HISTORY_LIMIT:
-      data.PlaybackHistoryLimit ||
+      data.PlaybackHistoryLimit ??
       DEFAULT_RUNTIME_CONFIG.PLAYBACK_HISTORY_LIMIT,
     SEARCH_HISTORY_LIMIT:
-      data.SearchHistoryLimit || DEFAULT_RUNTIME_CONFIG.SEARCH_HISTORY_LIMIT,
+      data.SearchHistoryLimit ?? DEFAULT_RUNTIME_CONFIG.SEARCH_HISTORY_LIMIT,
     SOURCE_FAILURE_COOLDOWN_SECONDS:
-      data.SourceFailureCooldownSeconds ||
+      data.SourceFailureCooldownSeconds ??
       DEFAULT_RUNTIME_CONFIG.SOURCE_FAILURE_COOLDOWN_SECONDS,
     CONTINUE_WATCHING_LIMIT:
-      data.ContinueWatchingLimit ||
+      data.ContinueWatchingLimit ??
       DEFAULT_RUNTIME_CONFIG.CONTINUE_WATCHING_LIMIT,
     COVER_IMAGE_CACHE_SIZE:
-      data.CoverImageCacheSize || DEFAULT_RUNTIME_CONFIG.COVER_IMAGE_CACHE_SIZE,
+      data.CoverImageCacheSize ?? DEFAULT_RUNTIME_CONFIG.COVER_IMAGE_CACHE_SIZE,
   };
 }
 

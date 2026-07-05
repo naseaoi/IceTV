@@ -1,7 +1,10 @@
 import type { ReactNode, RefObject } from 'react';
 import { act, fireEvent, render, screen } from '@testing-library/react';
 
-import { PlayMainContent } from '@/features/play/components/PlayMainContent';
+import {
+  PlayMainContent,
+  buildLoadingTimeoutMessage,
+} from '@/features/play/components/PlayMainContent';
 import type { SearchResult } from '@/lib/types';
 
 const PLAYER_LOADING_TIMEOUT_MS = 15_000;
@@ -75,6 +78,12 @@ describe('PlayMainContent', () => {
     jest.useRealTimers();
     window.matchMedia = originalMatchMedia;
     global.ResizeObserver = originalResizeObserver;
+  });
+
+  it('uses the configured timeout seconds in loading timeout copy', () => {
+    expect(buildLoadingTimeoutMessage(20)).toBe(
+      '已等待超过 20 秒，可能是网络问题或播放源不可用',
+    );
   });
 
   it('在新的换源轮次开始后重置超时提示', () => {

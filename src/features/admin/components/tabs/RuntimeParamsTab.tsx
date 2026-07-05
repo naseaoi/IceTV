@@ -10,17 +10,20 @@ import { showError, showSuccess } from '@/features/admin/lib/notifications';
 import { useAlertModal } from '@/hooks/useAlertModal';
 import {
   DEFAULT_RUNTIME_PARAMS,
+  RUNTIME_PARAM_RANGES,
   RuntimeParamSettings,
   normalizeRuntimeParams,
   runtimeParamsFromConfig,
 } from '@/lib/runtime-params';
+import {
+  applyClientServerConfig,
+  fetchClientServerConfig,
+} from '@/lib/runtime-config';
 import { AdminConfig } from '@/types/admin';
 
 type RuntimeParamField = {
   key: keyof RuntimeParamSettings;
   label: string;
-  min: number;
-  max?: number;
 };
 
 type RuntimeParamGroup = {
@@ -32,40 +35,33 @@ const runtimeParamGroups: RuntimeParamGroup[] = [
   {
     title: '搜索',
     fields: [
-      {
-        key: 'SearchDownstreamMaxPage',
-        label: '搜索接口可拉取最大页数',
-        min: 1,
-      },
+      { key: 'SearchDownstreamMaxPage', label: '搜索接口可拉取最大页数' },
       {
         key: 'SearchRequestTimeoutSeconds',
         label: '搜索接口请求超时时间（秒）',
-        min: 1,
       },
-      { key: 'SearchHistoryLimit', label: '搜索历史条数上限', min: 1 },
+      { key: 'SearchHistoryLimit', label: '搜索历史条数上限' },
     ],
   },
   {
     title: '播放',
     fields: [
-      { key: 'VodPageTimeoutSeconds', label: '点播页超时时间（秒）', min: 5 },
+      { key: 'VodPageTimeoutSeconds', label: '点播页超时时间（秒）' },
       {
         key: 'SourceFailureCooldownSeconds',
         label: '播放源失败冷却时间（秒）',
-        min: 0,
       },
-      { key: 'ContinueWatchingLimit', label: '继续观看首页显示数量', min: 1 },
+      { key: 'ContinueWatchingLimit', label: '继续观看首页显示数量' },
     ],
   },
   {
     title: '历史与导入',
     fields: [
-      { key: 'PlaybackHistoryPageSize', label: '历史播放单页数量', min: 1 },
-      { key: 'PlaybackHistoryLimit', label: '历史播放条数上限', min: 1 },
+      { key: 'PlaybackHistoryPageSize', label: '历史播放单页数量' },
+      { key: 'PlaybackHistoryLimit', label: '历史播放条数上限' },
       {
         key: 'DataImportPlaybackSessionsLimit',
         label: '数据导入单用户历史播放上限',
-        min: 1,
       },
     ],
   },
@@ -75,18 +71,15 @@ const runtimeParamGroups: RuntimeParamGroup[] = [
       {
         key: 'SiteInterfaceCacheTime',
         label: '站点接口缓存时间（秒）',
-        min: 1,
       },
-      { key: 'CoverImageCacheSize', label: '图片/封面缓存数量上限', min: 50 },
+      { key: 'CoverImageCacheSize', label: '图片/封面缓存数量上限' },
       {
         key: 'LivePrecheckTimeoutSeconds',
         label: '直播预检查超时时间（秒）',
-        min: 1,
       },
       {
         key: 'ProxyRequestTimeoutSeconds',
         label: '代理请求超时时间（秒）',
-        min: 1,
       },
     ],
   },
@@ -141,9 +134,14 @@ const RuntimeParamsTab = ({
           normalizedRuntimeParams,
           '保存失败',
         );
+        try {
+          applyClientServerConfig(await fetchClientServerConfig());
+        } catch (error) {
+          console.warn('刷新客户端运行配置失败:', error);
+        }
 
         setBaselineRuntimeParams(normalizedRuntimeParams);
-        showSuccess('保存成功, 请刷新页面', showAlert);
+        showSuccess('保存成功', showAlert);
         await refreshConfig();
       });
     } catch (err) {
@@ -189,8 +187,8 @@ const RuntimeParamsTab = ({
                 </label>
                 <input
                   type='number'
-                  min={field.min}
-                  max={field.max}
+                  min={RUNTIME_PARAM_RANGES[field.key].min}
+                  max={RUNTIME_PARAM_RANGES[field.key].max}
                   value={runtimeParams[field.key]}
                   onChange={(event) =>
                     setRuntimeParams((prev) => ({
