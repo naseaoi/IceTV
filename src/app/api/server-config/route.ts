@@ -8,40 +8,6 @@ import { CURRENT_UPDATE_BRANCH, CURRENT_VERSION } from '@/lib/version';
 
 export const runtime = 'nodejs';
 
-const PUBLIC_DOUBAN_PROXY_TYPES = new Set([
-  'direct',
-  'server',
-  'cors-proxy-zwei',
-  'cmliussss-cdn-tencent',
-  'cmliussss-cdn-ali',
-  'cors-anywhere',
-]);
-
-const PUBLIC_DOUBAN_IMAGE_PROXY_TYPES = new Set([
-  'direct',
-  'img3',
-  'cmliussss-cdn-tencent',
-  'cmliussss-cdn-ali',
-]);
-
-function getPublicDoubanProxyType(proxyType: string | undefined): string {
-  return proxyType && PUBLIC_DOUBAN_PROXY_TYPES.has(proxyType)
-    ? proxyType
-    : DEFAULT_RUNTIME_CONFIG.DOUBAN_PROXY_TYPE;
-}
-
-function getPublicBangumiDataSource(dataSource: string | undefined): string {
-  return dataSource === 'direct' || dataSource === 'server'
-    ? dataSource
-    : DEFAULT_RUNTIME_CONFIG.BANGUMI_DATA_SOURCE;
-}
-
-function getPublicDoubanImageProxyType(proxyType: string | undefined): string {
-  return proxyType && PUBLIC_DOUBAN_IMAGE_PROXY_TYPES.has(proxyType)
-    ? proxyType
-    : DEFAULT_RUNTIME_CONFIG.DOUBAN_IMAGE_PROXY_TYPE;
-}
-
 export async function GET(request: NextRequest) {
   const activeUser = await getOptionalActiveUser(request);
   const canReadSensitiveConfig = !!activeUser;
@@ -49,13 +15,13 @@ export async function GET(request: NextRequest) {
   const config = await getConfigForRead();
   const doubanProxyType = canReadSensitiveConfig
     ? config.SiteConfig.DoubanProxyType
-    : getPublicDoubanProxyType(config.SiteConfig.DoubanProxyType);
+    : publicConfig.DoubanProxyType;
   const bangumiDataSource = canReadSensitiveConfig
     ? config.SiteConfig.BangumiDataSource
-    : getPublicBangumiDataSource(publicConfig.BangumiDataSource);
+    : publicConfig.BangumiDataSource;
   const doubanImageProxyType = canReadSensitiveConfig
     ? config.SiteConfig.DoubanImageProxyType
-    : getPublicDoubanImageProxyType(config.SiteConfig.DoubanImageProxyType);
+    : publicConfig.DoubanImageProxyType;
   const result = {
     SiteName: publicConfig.SiteName,
     SiteIcon: publicConfig.SiteIcon,

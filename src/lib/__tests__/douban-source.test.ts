@@ -43,6 +43,14 @@ describe('readDoubanProxyType', () => {
     expect(readDoubanProxyType()).toBe('server');
   });
 
+  it('uses runtime image proxy config by default', () => {
+    window.RUNTIME_CONFIG = {
+      DOUBAN_IMAGE_PROXY_TYPE: 'img3',
+    } as typeof window.RUNTIME_CONFIG;
+
+    expect(readDoubanImageProxyType()).toBe('img3');
+  });
+
   it('uses local storage before runtime config', () => {
     window.RUNTIME_CONFIG = {
       DOUBAN_PROXY_TYPE: 'server',

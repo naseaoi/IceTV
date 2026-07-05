@@ -11,7 +11,7 @@ export const BANGUMI_DATA_SOURCE_VALUES = [
 
 export type BangumiDataSource = (typeof BANGUMI_DATA_SOURCE_VALUES)[number];
 
-export const DEFAULT_BANGUMI_DATA_SOURCE: BangumiDataSource = 'server';
+export const DEFAULT_BANGUMI_DATA_SOURCE: BangumiDataSource = 'direct';
 
 const bangumiProxySourceHelper = createProxySourceHelper({
   values: BANGUMI_DATA_SOURCE_VALUES,

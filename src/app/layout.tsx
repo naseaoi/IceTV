@@ -64,13 +64,11 @@ export default async function RootLayout({
     OPEN_REGISTER: publicConfig.OpenRegister,
     UPDATE_REPOS: process.env.NEXT_PUBLIC_UPDATE_REPOS || 'naseaoi/IceTV',
     UPDATE_BRANCH: CURRENT_UPDATE_BRANCH,
-    DOUBAN_PROXY_TYPE: process.env.NEXT_PUBLIC_DOUBAN_PROXY_TYPE || 'direct',
+    DOUBAN_PROXY_TYPE: publicConfig.DoubanProxyType,
     DOUBAN_PROXY: process.env.NEXT_PUBLIC_DOUBAN_PROXY || '',
     BANGUMI_DATA_SOURCE: publicConfig.BangumiDataSource,
     BANGUMI_PROXY: process.env.NEXT_PUBLIC_BANGUMI_PROXY || '',
-    DOUBAN_IMAGE_PROXY_TYPE:
-      process.env.NEXT_PUBLIC_DOUBAN_IMAGE_PROXY_TYPE ||
-      'cmliussss-cdn-tencent',
+    DOUBAN_IMAGE_PROXY_TYPE: publicConfig.DoubanImageProxyType,
     DOUBAN_IMAGE_PROXY: process.env.NEXT_PUBLIC_DOUBAN_IMAGE_PROXY || '',
     DISABLE_YELLOW_FILTER: publicConfig.DisableYellowFilter,
     ENABLE_LIVE_ENTRY: publicConfig.EnableLiveEntry,

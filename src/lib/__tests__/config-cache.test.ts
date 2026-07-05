@@ -261,6 +261,38 @@ describe('config cache persistence', () => {
     expect(configSelfCheck(config).SiteConfig.FluidSearch).toBe(true);
   });
 
+  it('exposes proxy defaults in public config', async () => {
+    const adminConfig = cloneBaseConfig();
+    adminConfig.SiteConfig.DoubanProxyType = 'server';
+    adminConfig.SiteConfig.DoubanImageProxyType = 'img3';
+    adminConfig.SiteConfig.BangumiDataSource = 'direct';
+    const { getPublicConfig } = await loadConfigModule(jest.fn(), {
+      adminConfig,
+    });
+
+    await expect(getPublicConfig()).resolves.toMatchObject({
+      DoubanProxyType: 'server',
+      DoubanImageProxyType: 'img3',
+      BangumiDataSource: 'direct',
+    });
+  });
+
+  it('falls back custom proxy defaults in public config', async () => {
+    const adminConfig = cloneBaseConfig();
+    adminConfig.SiteConfig.DoubanProxyType = 'custom';
+    adminConfig.SiteConfig.DoubanImageProxyType = 'custom';
+    adminConfig.SiteConfig.BangumiDataSource = 'custom';
+    const { getPublicConfig } = await loadConfigModule(jest.fn(), {
+      adminConfig,
+    });
+
+    await expect(getPublicConfig()).resolves.toMatchObject({
+      DoubanProxyType: 'direct',
+      DoubanImageProxyType: 'direct',
+      BangumiDataSource: 'direct',
+    });
+  });
+
   it('keeps disabled fluid search config disabled', async () => {
     const { configSelfCheck } = await loadConfigModule(jest.fn());
     const config = cloneBaseConfig();

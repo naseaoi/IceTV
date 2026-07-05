@@ -8,6 +8,10 @@ import {
   DEFAULT_BANGUMI_DATA_SOURCE,
   normalizeBangumiDataSource,
 } from '@/lib/bangumi-source';
+import {
+  DEFAULT_DOUBAN_IMAGE_PROXY_TYPE,
+  DEFAULT_DOUBAN_PROXY_TYPE,
+} from '@/lib/douban-source';
 import { normalizeUsername } from '@/lib/username';
 
 export interface ApiSite {
@@ -64,6 +68,20 @@ let cachedConfigVersion = '';
 let cachedConfigLoadedAt = 0;
 const PUBLIC_CONFIG_CACHE_TAG = 'public-config';
 const DEFAULT_CONFIG_CACHE_TTL_MS = 30_000;
+const PUBLIC_DOUBAN_PROXY_TYPES = new Set([
+  'direct',
+  'server',
+  'cors-proxy-zwei',
+  'cmliussss-cdn-tencent',
+  'cmliussss-cdn-ali',
+  'cors-anywhere',
+]);
+const PUBLIC_DOUBAN_IMAGE_PROXY_TYPES = new Set([
+  'direct',
+  'img3',
+  'cmliussss-cdn-tencent',
+  'cmliussss-cdn-ali',
+]);
 type ManagedUser = AdminConfig['UserConfig']['Users'][number];
 const configVersionByObject = new WeakMap<AdminConfig, string>();
 
@@ -83,6 +101,30 @@ function loadNextCacheApi(): NextCacheApi | null {
     console.warn('加载 Next 缓存接口失败:', error);
     return null;
   }
+}
+
+export function getPublicDoubanProxyType(
+  proxyType: string | undefined,
+): string {
+  return proxyType && PUBLIC_DOUBAN_PROXY_TYPES.has(proxyType)
+    ? proxyType
+    : DEFAULT_DOUBAN_PROXY_TYPE;
+}
+
+export function getPublicBangumiDataSource(
+  dataSource: string | undefined,
+): string {
+  return dataSource === 'direct' || dataSource === 'server'
+    ? dataSource
+    : DEFAULT_BANGUMI_DATA_SOURCE;
+}
+
+export function getPublicDoubanImageProxyType(
+  proxyType: string | undefined,
+): string {
+  return proxyType && PUBLIC_DOUBAN_IMAGE_PROXY_TYPES.has(proxyType)
+    ? proxyType
+    : DEFAULT_DOUBAN_IMAGE_PROXY_TYPE;
 }
 
 // 从配置文件补充管理员配置
@@ -256,7 +298,7 @@ async function getInitConfig(
       BangumiProxy: process.env.NEXT_PUBLIC_BANGUMI_PROXY || '',
       DoubanImageProxyType:
         process.env.NEXT_PUBLIC_DOUBAN_IMAGE_PROXY_TYPE ||
-        'cmliussss-cdn-tencent',
+        DEFAULT_DOUBAN_IMAGE_PROXY_TYPE,
       DoubanImageProxy: process.env.NEXT_PUBLIC_DOUBAN_IMAGE_PROXY || '',
       DisableYellowFilter:
         process.env.NEXT_PUBLIC_DISABLE_YELLOW_FILTER === 'true',
@@ -446,7 +488,7 @@ export function configSelfCheck(adminConfig: AdminConfig): AdminConfig {
       BangumiProxy: process.env.NEXT_PUBLIC_BANGUMI_PROXY || '',
       DoubanImageProxyType:
         process.env.NEXT_PUBLIC_DOUBAN_IMAGE_PROXY_TYPE ||
-        'cmliussss-cdn-tencent',
+        DEFAULT_DOUBAN_IMAGE_PROXY_TYPE,
       DoubanImageProxy: process.env.NEXT_PUBLIC_DOUBAN_IMAGE_PROXY || '',
       DisableYellowFilter:
         process.env.NEXT_PUBLIC_DISABLE_YELLOW_FILTER === 'true',
@@ -858,7 +900,15 @@ async function readPublicConfig() {
     EnableOptimization: config.SiteConfig.EnableOptimization,
     AutoSwitchSourceOnTimeout: config.SiteConfig.AutoSwitchSourceOnTimeout,
     LiveDirectConnect: config.SiteConfig.LiveDirectConnect,
-    BangumiDataSource: config.SiteConfig.BangumiDataSource,
+    DoubanProxyType: getPublicDoubanProxyType(
+      config.SiteConfig.DoubanProxyType,
+    ),
+    BangumiDataSource: getPublicBangumiDataSource(
+      config.SiteConfig.BangumiDataSource,
+    ),
+    DoubanImageProxyType: getPublicDoubanImageProxyType(
+      config.SiteConfig.DoubanImageProxyType,
+    ),
     CustomCategories: config.CustomCategories.filter(
       (category) => !category.disabled,
     ).map((category) => ({

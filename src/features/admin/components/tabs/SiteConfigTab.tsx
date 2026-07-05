@@ -22,6 +22,7 @@ import {
   doubanImageProxyTypeOptions,
   getThanksInfo,
 } from '@/lib/douban-options';
+import { DEFAULT_DOUBAN_IMAGE_PROXY_TYPE } from '@/lib/douban-source';
 import { localPreferenceToggleDefinitions } from '@/lib/local-preference-toggles';
 
 const SiteConfigComponent = ({
@@ -48,7 +49,7 @@ const SiteConfigComponent = ({
     DoubanProxy: '',
     BangumiDataSource: DEFAULT_BANGUMI_DATA_SOURCE,
     BangumiProxy: '',
-    DoubanImageProxyType: 'cmliussss-cdn-tencent',
+    DoubanImageProxyType: DEFAULT_DOUBAN_IMAGE_PROXY_TYPE,
     DoubanImageProxy: '',
     DisableYellowFilter: false,
     FluidSearch: true,
@@ -70,7 +71,8 @@ const SiteConfigComponent = ({
         ),
         BangumiProxy: config.SiteConfig.BangumiProxy || '',
         DoubanImageProxyType:
-          config.SiteConfig.DoubanImageProxyType || 'cmliussss-cdn-tencent',
+          config.SiteConfig.DoubanImageProxyType ||
+          DEFAULT_DOUBAN_IMAGE_PROXY_TYPE,
         DoubanImageProxy: config.SiteConfig.DoubanImageProxy || '',
         EnableLiveEntry: config.SiteConfig.EnableLiveEntry ?? false,
         DefaultAggregateSearch:

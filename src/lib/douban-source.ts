@@ -31,8 +31,7 @@ export const DOUBAN_IMAGE_PROXY_TYPE_VALUES = [
 export type DoubanImageProxyType =
   (typeof DOUBAN_IMAGE_PROXY_TYPE_VALUES)[number];
 
-export const DEFAULT_DOUBAN_IMAGE_PROXY_TYPE: DoubanImageProxyType =
-  'cmliussss-cdn-tencent';
+export const DEFAULT_DOUBAN_IMAGE_PROXY_TYPE: DoubanImageProxyType = 'direct';
 
 const doubanProxySourceHelper = createProxySourceHelper({
   values: DOUBAN_PROXY_TYPE_VALUES,

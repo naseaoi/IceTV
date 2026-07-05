@@ -71,6 +71,8 @@ type RecommendationLoadingState = {
   bangumiCalendar: boolean;
 };
 
+const RECOMMENDATION_UNAVAILABLE_MESSAGE = '暂时无法获取数据';
+
 function RecommendationSkeletonRow() {
   return Array.from({ length: 8 }).map((_, index) => (
     <HomePosterCardSkeleton key={index} />
@@ -178,7 +180,12 @@ export default function HomeClient({
   const [bangumiCalendarData, setBangumiCalendarData] = useState(
     initialData.bangumiCalendarData,
   );
-  const [bangumiUnavailable, setBangumiUnavailable] = useState(false);
+  const [unavailable, setUnavailable] = useState<RecommendationLoadingState>({
+    hotMovies: false,
+    hotTvShows: false,
+    hotVarietyShows: false,
+    bangumiCalendar: false,
+  });
   const [loading, setLoading] = useState<RecommendationLoadingState>(() => ({
     hotMovies: initialData.hotMovies.length === 0,
     hotTvShows: initialData.hotTvShows.length === 0,
@@ -215,6 +222,14 @@ export default function HomeClient({
         setLoading((prev) => ({ ...prev, [key]: false }));
       }
     };
+    const setSectionUnavailable = (
+      key: keyof RecommendationLoadingState,
+      value: boolean,
+    ) => {
+      if (!cancelled) {
+        setUnavailable((prev) => ({ ...prev, [key]: value }));
+      }
+    };
 
     const loadHotMovies = async () => {
       if (!shouldLoadHotMovies) {
@@ -228,11 +243,15 @@ export default function HomeClient({
           type: '全部',
         });
 
-        if (!cancelled && moviesData.code === 200) {
+        if (!cancelled && moviesData.code === 200 && moviesData.list.length) {
           setHotMovies(moviesData.list);
+          setSectionUnavailable('hotMovies', false);
+        } else {
+          setSectionUnavailable('hotMovies', true);
         }
       } catch (error) {
         console.error('获取热门电影失败:', error);
+        setSectionUnavailable('hotMovies', true);
       } finally {
         finishLoading('hotMovies');
       }
@@ -250,11 +269,15 @@ export default function HomeClient({
           type: 'tv',
         });
 
-        if (!cancelled && tvShowsData.code === 200) {
+        if (!cancelled && tvShowsData.code === 200 && tvShowsData.list.length) {
           setHotTvShows(tvShowsData.list);
+          setSectionUnavailable('hotTvShows', false);
+        } else {
+          setSectionUnavailable('hotTvShows', true);
         }
       } catch (error) {
         console.error('获取热门剧集失败:', error);
+        setSectionUnavailable('hotTvShows', true);
       } finally {
         finishLoading('hotTvShows');
       }
@@ -272,11 +295,19 @@ export default function HomeClient({
           type: 'show',
         });
 
-        if (!cancelled && varietyShowsData.code === 200) {
+        if (
+          !cancelled &&
+          varietyShowsData.code === 200 &&
+          varietyShowsData.list.length
+        ) {
           setHotVarietyShows(varietyShowsData.list);
+          setSectionUnavailable('hotVarietyShows', false);
+        } else {
+          setSectionUnavailable('hotVarietyShows', true);
         }
       } catch (error) {
         console.error('获取热门综艺失败:', error);
+        setSectionUnavailable('hotVarietyShows', true);
       } finally {
         finishLoading('hotVarietyShows');
       }
@@ -292,16 +323,16 @@ export default function HomeClient({
 
         if (!cancelled && hasUsableBangumiCalendarData(bangumiData)) {
           setBangumiCalendarData(bangumiData);
-          setBangumiUnavailable(false);
+          setSectionUnavailable('bangumiCalendar', false);
           finishLoading('bangumiCalendar');
         } else if (!cancelled) {
-          setBangumiUnavailable(true);
+          setSectionUnavailable('bangumiCalendar', true);
           finishLoading('bangumiCalendar');
         }
       } catch (error) {
         console.error('获取新番放送失败:', error);
         if (!cancelled) {
-          setBangumiUnavailable(true);
+          setSectionUnavailable('bangumiCalendar', true);
           finishLoading('bangumiCalendar');
         }
       }
@@ -476,6 +507,11 @@ export default function HomeClient({
                   loading={loading.hotMovies && hotMovies.length === 0}
                   type='movie'
                   priorityCount={4}
+                  emptyMessage={
+                    unavailable.hotMovies
+                      ? RECOMMENDATION_UNAVAILABLE_MESSAGE
+                      : undefined
+                  }
                 />
 
                 <RecommendationSection
@@ -485,6 +521,11 @@ export default function HomeClient({
                   iconClassName='h-5 w-5 text-emerald-500'
                   items={hotTvShows}
                   loading={loading.hotTvShows && hotTvShows.length === 0}
+                  emptyMessage={
+                    unavailable.hotTvShows
+                      ? RECOMMENDATION_UNAVAILABLE_MESSAGE
+                      : undefined
+                  }
                 />
 
                 <RecommendationSection
@@ -496,11 +537,13 @@ export default function HomeClient({
                   loading={
                     loading.bangumiCalendar &&
                     todayAnimes.length === 0 &&
-                    !bangumiUnavailable
+                    !unavailable.bangumiCalendar
                   }
                   isBangumi={true}
                   emptyMessage={
-                    bangumiUnavailable ? '暂时无法获取数据' : undefined
+                    unavailable.bangumiCalendar
+                      ? RECOMMENDATION_UNAVAILABLE_MESSAGE
+                      : undefined
                   }
                 />
 
@@ -512,6 +555,11 @@ export default function HomeClient({
                   items={hotVarietyShows}
                   loading={
                     loading.hotVarietyShows && hotVarietyShows.length === 0
+                  }
+                  emptyMessage={
+                    unavailable.hotVarietyShows
+                      ? RECOMMENDATION_UNAVAILABLE_MESSAGE
+                      : undefined
                   }
                 />
               </div>
