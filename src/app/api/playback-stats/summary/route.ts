@@ -5,6 +5,7 @@ import {
   buildPlaybackDailyStatsFromTotals,
   buildPlaybackStatsSummaryFromParts,
 } from '@/features/playback-stats/lib/summary';
+import { dedupePlaybackSessionsByTitle } from '@/features/playback-stats/lib/history';
 import { isGuardFailure, requireActiveUser } from '@/lib/api-auth';
 import { db } from '@/lib/db';
 import { NO_STORE_HEADERS } from '@/lib/http-cache';
@@ -22,7 +23,7 @@ export async function GET(request: NextRequest) {
     const [totals, dailyTotals, recentItems, topItems] = await Promise.all([
       db.getPlaybackWatchTotals(guardResult.username, weekStart),
       db.getPlaybackRangeWatchTotals(guardResult.username, dailyRanges),
-      db.getPlaybackSessions(guardResult.username, { limit: 6 }),
+      db.getPlaybackSessions(guardResult.username, { limit: 50 }),
       db.getPlaybackTopItems(guardResult.username, 6),
     ]);
     const dailyWatchSeconds = buildPlaybackDailyStatsFromTotals(
@@ -35,7 +36,7 @@ export async function GET(request: NextRequest) {
         totalWatchSeconds: totals.totalWatchSeconds,
         weekWatchSeconds: totals.periodWatchSeconds,
         dailyWatchSeconds,
-        recentItems,
+        recentItems: dedupePlaybackSessionsByTitle(recentItems, 6),
         topItems,
       }),
       {

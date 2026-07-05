@@ -2,6 +2,7 @@
 
 import { getAuthInfoFromBrowserCookie } from '@/lib/auth.client';
 
+import { dedupePlaybackSessionsByTitle } from '@/features/playback-stats/lib/history';
 import type {
   PlaybackHistoryResponse,
   PlaybackStatsSummary,
@@ -33,7 +34,7 @@ export function getCachedPlaybackHistorySnapshot(): PlaybackHistoryResponse | nu
       : null;
   return snapshot
     ? {
-        items: [...snapshot.items],
+        items: dedupePlaybackSessionsByTitle(snapshot.items),
         nextCursor: snapshot.nextCursor,
       }
     : null;
@@ -47,7 +48,7 @@ export function cachePlaybackHistorySnapshot(
   playbackHistoryCache = {
     username,
     data: {
-      items: [...snapshot.items],
+      items: dedupePlaybackSessionsByTitle(snapshot.items),
       nextCursor: snapshot.nextCursor,
     },
   };
@@ -63,11 +64,15 @@ export async function getPlaybackStatsSummary(): Promise<PlaybackStatsSummary | 
     throw new Error(`Playback stats summary failed: ${response.status}`);
   }
   const summary = (await response.json()) as PlaybackStatsSummary;
+  const normalizedSummary = {
+    ...summary,
+    recentItems: dedupePlaybackSessionsByTitle(summary.recentItems, 6),
+  };
   const username = getAuthInfoFromBrowserCookie()?.username;
   if (username) {
-    playbackStatsSummaryCache = { username, data: summary };
+    playbackStatsSummaryCache = { username, data: normalizedSummary };
   }
-  return summary;
+  return normalizedSummary;
 }
 
 export async function getPlaybackHistory(

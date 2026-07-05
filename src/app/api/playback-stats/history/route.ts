@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 
 import type { PlaybackHistoryResponse } from '@/features/playback-stats/types';
+import { dedupePlaybackSessionsByTitle } from '@/features/playback-stats/lib/history';
 import { isGuardFailure, requireActiveUser } from '@/lib/api-auth';
 import { getConfigForRead } from '@/lib/config';
 import { db } from '@/lib/db';
@@ -32,16 +33,18 @@ export async function GET(request: NextRequest) {
     );
     const cursor = searchParams.get('cursor');
     const keyword = normalizePlaybackSearchKeyword(searchParams.get('q') ?? '');
+    const fetchLimit = Math.min(Math.max(limit * 5, limit + 1), 500);
     const sessions = await db.getPlaybackSessions(guardResult.username, {
-      limit: limit + 1,
+      limit: fetchLimit,
       cursor: cursor ? Number(cursor) : undefined,
       keyword,
     });
-    const items = sessions.slice(0, limit);
+    const dedupedSessions = dedupePlaybackSessionsByTitle(sessions, limit + 1);
+    const items = dedupedSessions.slice(0, limit);
     const response: PlaybackHistoryResponse = {
       items,
       nextCursor:
-        sessions.length > limit && items.length > 0
+        dedupedSessions.length > limit && items.length > 0
           ? items[items.length - 1].started_at
           : null,
     };

@@ -84,7 +84,7 @@ function PlaybackStatsSkeleton() {
         <div className='h-28 animate-pulse rounded-lg bg-gray-100 dark:bg-gray-900' />
         <div className='h-28 animate-pulse rounded-lg bg-gray-100 dark:bg-gray-900' />
       </div>
-      <div className='mt-3 h-40 animate-pulse rounded-lg bg-gray-100 dark:bg-gray-900' />
+      <div className='mt-3 h-44 animate-pulse rounded-lg bg-gray-100 dark:bg-gray-900' />
       <div className='mt-3 grid gap-3 lg:grid-cols-2'>
         <div className='h-36 animate-pulse rounded-lg bg-gray-100 dark:bg-gray-900' />
         <div className='h-36 animate-pulse rounded-lg bg-gray-100 dark:bg-gray-900' />
@@ -178,7 +178,7 @@ export function PlaybackStatsPanel() {
         />
       </div>
 
-      <div className='mt-3 rounded-lg border border-gray-200 bg-white/70 p-4 dark:border-gray-700 dark:bg-gray-900/50'>
+      <div className='mt-3 h-44 rounded-lg border border-gray-200 bg-white/70 p-4 dark:border-gray-700 dark:bg-gray-900/50'>
         <div className='mb-4 flex items-center justify-between gap-3 text-sm'>
           <div className='flex items-center gap-2 font-medium text-gray-700 dark:text-gray-200'>
             <BarChart3 className='h-4 w-4 text-blue-500' />
@@ -191,7 +191,7 @@ export function PlaybackStatsPanel() {
             </div>
           )}
         </div>
-        <div className='grid grid-cols-7 items-end gap-2'>
+        <div className='grid h-24 grid-cols-7 items-end gap-2'>
           {displaySummary.dailyWatchSeconds.map((item) => {
             const height = Math.max(
               8,
@@ -201,7 +201,7 @@ export function PlaybackStatsPanel() {
             return (
               <div
                 key={item.date}
-                className='flex min-w-0 flex-col items-center'
+                className='flex h-full min-w-0 flex-col items-center justify-end'
               >
                 <button
                   type='button'

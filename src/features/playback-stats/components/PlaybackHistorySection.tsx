@@ -9,6 +9,10 @@ import {
   getCachedPlaybackHistorySnapshot,
   getPlaybackHistory,
 } from '@/features/playback-stats/lib/client';
+import {
+  dedupePlaybackSessionsByTitle,
+  getPlaybackSessionMergeKey,
+} from '@/features/playback-stats/lib/history';
 import { useRuntimeConfig } from '@/components/RuntimeConfigProvider';
 import type { PlaybackHistoryResponse } from '@/features/playback-stats/types';
 import type { PlaybackSession } from '@/lib/types';
@@ -45,8 +49,8 @@ export function PlaybackHistorySection() {
     Math.floor(runtimeConfig.PLAYBACK_HISTORY_LIMIT || 500),
   );
   const cachedHistory = getCachedPlaybackHistorySnapshot();
-  const [items, setItems] = useState<PlaybackSession[]>(
-    () => cachedHistory?.items || [],
+  const [items, setItems] = useState<PlaybackSession[]>(() =>
+    dedupePlaybackSessionsByTitle(cachedHistory?.items || []),
   );
   const [nextCursor, setNextCursor] = useState<number | null>(
     () => cachedHistory?.nextCursor || null,
@@ -90,20 +94,30 @@ export function PlaybackHistorySection() {
         );
         if (!cancelled) {
           if (hasKeyword) {
-            setItems(response.items);
+            setItems(dedupePlaybackSessionsByTitle(response.items));
             setNextCursor(response.nextCursor);
             return;
           }
 
           const responseIds = new Set(response.items.map((item) => item.id));
+          const responseKeys = new Set(
+            dedupePlaybackSessionsByTitle(response.items).map(
+              getPlaybackSessionMergeKey,
+            ),
+          );
           const cachedTail =
             snapshotBeforeFetch &&
             snapshotBeforeFetch.items.length > response.items.length
               ? snapshotBeforeFetch.items.filter(
-                  (item) => !responseIds.has(item.id),
+                  (item) =>
+                    !responseIds.has(item.id) &&
+                    !responseKeys.has(getPlaybackSessionMergeKey(item)),
                 )
               : [];
-          const nextItems = [...response.items, ...cachedTail];
+          const nextItems = dedupePlaybackSessionsByTitle([
+            ...response.items,
+            ...cachedTail,
+          ]);
           const nextHistory = {
             items: nextItems,
             nextCursor:
@@ -144,7 +158,10 @@ export function PlaybackHistorySection() {
         Math.min(historyPageSize, remaining),
       );
       setItems((prev) => {
-        const nextItems = [...prev, ...response.items];
+        const nextItems = dedupePlaybackSessionsByTitle(
+          [...prev, ...response.items],
+          historyLimit,
+        );
         if (!searchKeyword) {
           cachePlaybackHistorySnapshot({
             items: nextItems,

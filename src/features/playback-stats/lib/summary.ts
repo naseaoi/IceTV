@@ -9,6 +9,7 @@ import type {
   PlaybackStatsSummary,
   PlaybackTopItem,
 } from '@/features/playback-stats/types';
+import { dedupePlaybackSessionsByTitle } from '@/features/playback-stats/lib/history';
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 
@@ -131,7 +132,7 @@ export function buildPlaybackStatsSummary(
     totalWatchSeconds,
     weekWatchSeconds,
     dailyWatchSeconds: buildPlaybackDailyStats(weekSessions, now),
-    recentItems: sessions.slice(0, 6),
+    recentItems: dedupePlaybackSessionsByTitle(sessions, 6),
     topItems: buildTopItems(sessions),
   };
 }
@@ -153,7 +154,7 @@ export function buildPlaybackStatsSummaryFromParts({
     totalWatchSeconds: Math.max(0, Math.floor(totalWatchSeconds || 0)),
     weekWatchSeconds: Math.max(0, Math.floor(weekWatchSeconds || 0)),
     dailyWatchSeconds,
-    recentItems: recentItems.slice(0, 6),
+    recentItems: dedupePlaybackSessionsByTitle(recentItems, 6),
     topItems: topItems.slice(0, 6),
   };
 }
