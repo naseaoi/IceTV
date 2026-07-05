@@ -106,7 +106,9 @@ function loadNextCacheApi(): NextCacheApi | null {
   try {
     return require('next/cache') as NextCacheApi;
   } catch (error) {
-    console.warn('加载 Next 缓存接口失败:', error);
+    if (process.env.NODE_ENV !== 'test') {
+      console.warn('加载 Next 缓存接口失败:', error);
+    }
     return null;
   }
 }

@@ -2,6 +2,22 @@ import type { ApiSite } from '@/lib/config';
 import { getDetailFromApi, searchFirstPageFromApi } from '@/lib/downstream';
 import { resolveGirigiriEpisodePlayUrlByPath } from '@/lib/downstream-sources/giri';
 
+jest.mock('@/lib/config', () => ({
+  API_CONFIG: {
+    search: {
+      path: '/api.php/provide/vod/?ac=detail&wd=',
+      pagePath: '/api.php/provide/vod/?ac=detail&wd={query}&pg={page}',
+    },
+    detail: {
+      path: '/api.php/provide/vod/?ac=detail&ids=',
+      headers: {},
+    },
+  },
+  getConfigForRead: jest.fn().mockResolvedValue({
+    SiteConfig: require('@/lib/runtime-params').DEFAULT_RUNTIME_PARAMS,
+  }),
+}));
+
 const originalFetch = global.fetch;
 
 function createJsonResponse(data: unknown, ok = true): Response {

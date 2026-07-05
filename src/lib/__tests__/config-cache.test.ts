@@ -224,6 +224,9 @@ describe('config cache persistence', () => {
 
   it('serves cached config when a later read fails', async () => {
     process.env.CONFIG_CACHE_TTL_MS = '0';
+    const consoleErrorSpy = jest
+      .spyOn(console, 'error')
+      .mockImplementation(() => undefined);
     const realConfig = cloneBaseConfig();
     realConfig.SiteConfig.SiteName = 'Real-Site';
     const getAdminConfig = jest
@@ -240,9 +243,16 @@ describe('config cache persistence', () => {
     const second = await getConfig();
     expect(second.SiteConfig.SiteName).toBe('Real-Site');
     expect(getAdminConfig).toHaveBeenCalledTimes(2);
+    expect(consoleErrorSpy).toHaveBeenCalledWith(
+      '获取管理员配置失败:',
+      expect.any(Error),
+    );
   });
 
   it('throws instead of persisting defaults when the first read fails', async () => {
+    const consoleErrorSpy = jest
+      .spyOn(console, 'error')
+      .mockImplementation(() => undefined);
     const saveAdminConfig = jest.fn();
     const getAdminConfig = jest
       .fn()
@@ -253,6 +263,10 @@ describe('config cache persistence', () => {
 
     await expect(getConfig()).rejects.toThrow('read failed');
     expect(saveAdminConfig).not.toHaveBeenCalled();
+    expect(consoleErrorSpy).toHaveBeenCalledWith(
+      '获取管理员配置失败:',
+      expect.any(Error),
+    );
   });
 
   it('defaults missing fluid search config to enabled', async () => {

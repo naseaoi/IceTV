@@ -22,7 +22,10 @@ import {
 } from '@/lib/search-cache';
 import { SearchResult } from '@/lib/types';
 import { cleanHtmlTags } from '@/lib/utils';
-import { normalizeRuntimeParams } from '@/lib/runtime-params';
+import {
+  DEFAULT_RUNTIME_PARAMS,
+  normalizeRuntimeParams,
+} from '@/lib/runtime-params';
 
 interface ApiSearchItem {
   vod_id: string;
@@ -43,6 +46,15 @@ interface SearchFromApiOptions {
 }
 
 const EXTRA_SEARCH_PAGE_CONCURRENCY = 2;
+
+async function readSearchRuntimeParams() {
+  try {
+    const config = await getConfigForRead();
+    return normalizeRuntimeParams(config.SiteConfig);
+  } catch {
+    return DEFAULT_RUNTIME_PARAMS;
+  }
+}
 
 function isSupportedVodPlaybackUrl(url: string): boolean {
   try {
@@ -217,8 +229,7 @@ export async function searchFromApi(
   }
 
   try {
-    const config = await getConfigForRead();
-    const runtimeParams = normalizeRuntimeParams(config.SiteConfig);
+    const runtimeParams = await readSearchRuntimeParams();
     const searchTimeoutMs = runtimeParams.SearchRequestTimeoutSeconds * 1000;
     const apiBaseUrl = apiSite.api;
     const apiUrl =
@@ -301,8 +312,7 @@ export async function searchFirstPageFromApi(
   }
 
   try {
-    const config = await getConfigForRead();
-    const runtimeParams = normalizeRuntimeParams(config.SiteConfig);
+    const runtimeParams = await readSearchRuntimeParams();
     const apiUrl =
       apiSite.api + API_CONFIG.search.path + encodeURIComponent(query);
     const firstPageResult = await searchWithCache(
