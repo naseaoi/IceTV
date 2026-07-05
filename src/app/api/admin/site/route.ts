@@ -3,6 +3,11 @@ import { NextRequest, NextResponse } from 'next/server';
 import { isGuardFailure, requireAdmin } from '@/lib/api-auth';
 import { configConflictResponse } from '@/lib/api-config-error';
 import { getConfig, saveConfig } from '@/lib/config';
+import { normalizeSiteBangumiDataSource } from '@/lib/bangumi-source';
+import {
+  normalizeSiteDoubanImageProxyType,
+  normalizeSiteDoubanProxyType,
+} from '@/lib/douban-options';
 
 export const runtime = 'nodejs';
 
@@ -25,11 +30,8 @@ export async function POST(request: NextRequest) {
       SearchDownstreamMaxPage,
       SiteInterfaceCacheTime,
       DoubanProxyType,
-      DoubanProxy,
       BangumiDataSource,
-      BangumiProxy,
       DoubanImageProxyType,
-      DoubanImageProxy,
       DisableYellowFilter,
       FluidSearch,
     } = body as {
@@ -44,11 +46,8 @@ export async function POST(request: NextRequest) {
       SearchDownstreamMaxPage: number;
       SiteInterfaceCacheTime: number;
       DoubanProxyType: string;
-      DoubanProxy: string;
       BangumiDataSource?: string;
-      BangumiProxy?: string;
       DoubanImageProxyType: string;
-      DoubanImageProxy: string;
       DisableYellowFilter: boolean;
       FluidSearch: boolean;
     };
@@ -65,16 +64,24 @@ export async function POST(request: NextRequest) {
       typeof SearchDownstreamMaxPage !== 'number' ||
       typeof SiteInterfaceCacheTime !== 'number' ||
       typeof DoubanProxyType !== 'string' ||
-      typeof DoubanProxy !== 'string' ||
       (BangumiDataSource !== undefined &&
         typeof BangumiDataSource !== 'string') ||
-      (BangumiProxy !== undefined && typeof BangumiProxy !== 'string') ||
       typeof DoubanImageProxyType !== 'string' ||
-      typeof DoubanImageProxy !== 'string' ||
       typeof DisableYellowFilter !== 'boolean' ||
       typeof FluidSearch !== 'boolean'
     ) {
       return NextResponse.json({ error: '参数格式错误' }, { status: 400 });
+    }
+
+    if (
+      DoubanProxyType === 'custom' ||
+      BangumiDataSource === 'custom' ||
+      DoubanImageProxyType === 'custom'
+    ) {
+      return NextResponse.json(
+        { error: '站点配置不支持自定义代理，请在本地设置中配置' },
+        { status: 400 },
+      );
     }
 
     const adminConfig = await getConfig();
@@ -94,16 +101,15 @@ export async function POST(request: NextRequest) {
       LiveDirectConnect,
       SearchDownstreamMaxPage,
       SiteInterfaceCacheTime,
-      DoubanProxyType,
-      DoubanProxy,
-      BangumiDataSource:
+      DoubanProxyType: normalizeSiteDoubanProxyType(DoubanProxyType),
+      DoubanProxy: '',
+      BangumiDataSource: normalizeSiteBangumiDataSource(
         BangumiDataSource || adminConfig.SiteConfig.BangumiDataSource,
-      BangumiProxy:
-        BangumiProxy !== undefined
-          ? BangumiProxy
-          : adminConfig.SiteConfig.BangumiProxy || '',
-      DoubanImageProxyType,
-      DoubanImageProxy,
+      ),
+      BangumiProxy: '',
+      DoubanImageProxyType:
+        normalizeSiteDoubanImageProxyType(DoubanImageProxyType),
+      DoubanImageProxy: '',
       DisableYellowFilter,
       FluidSearch,
     };

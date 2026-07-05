@@ -34,6 +34,18 @@ export const bangumiDataSourceOptions: {
   { value: 'custom', label: '自定义代理' },
 ];
 
+export const siteBangumiDataSourceOptions = bangumiDataSourceOptions.filter(
+  (option) => option.value !== 'custom',
+);
+
+export function normalizeSiteBangumiDataSource(
+  value: unknown,
+): BangumiDataSource {
+  return siteBangumiDataSourceOptions.some((option) => option.value === value)
+    ? (value as BangumiDataSource)
+    : DEFAULT_BANGUMI_DATA_SOURCE;
+}
+
 export function readDefaultBangumiDataSource(): BangumiDataSource {
   return bangumiProxySourceHelper.readDefaultSource();
 }

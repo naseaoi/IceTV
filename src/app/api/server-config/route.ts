@@ -2,6 +2,11 @@ import { NextRequest, NextResponse } from 'next/server';
 
 import { getOptionalActiveUser } from '@/lib/api-auth';
 import { getConfigForRead, getPublicConfig } from '@/lib/config';
+import { normalizeSiteBangumiDataSource } from '@/lib/bangumi-source';
+import {
+  normalizeSiteDoubanImageProxyType,
+  normalizeSiteDoubanProxyType,
+} from '@/lib/douban-options';
 import { DEFAULT_RUNTIME_CONFIG } from '@/lib/runtime-config';
 import { getStorageType } from '@/lib/storage-type';
 import { CURRENT_UPDATE_BRANCH, CURRENT_VERSION } from '@/lib/version';
@@ -14,13 +19,13 @@ export async function GET(request: NextRequest) {
   const publicConfig = await getPublicConfig();
   const config = await getConfigForRead();
   const doubanProxyType = canReadSensitiveConfig
-    ? config.SiteConfig.DoubanProxyType
+    ? normalizeSiteDoubanProxyType(config.SiteConfig.DoubanProxyType)
     : publicConfig.DoubanProxyType;
   const bangumiDataSource = canReadSensitiveConfig
-    ? config.SiteConfig.BangumiDataSource
+    ? normalizeSiteBangumiDataSource(config.SiteConfig.BangumiDataSource)
     : publicConfig.BangumiDataSource;
   const doubanImageProxyType = canReadSensitiveConfig
-    ? config.SiteConfig.DoubanImageProxyType
+    ? normalizeSiteDoubanImageProxyType(config.SiteConfig.DoubanImageProxyType)
     : publicConfig.DoubanImageProxyType;
   const result = {
     SiteName: publicConfig.SiteName,
@@ -32,17 +37,11 @@ export async function GET(request: NextRequest) {
     UpdateRepos: process.env.NEXT_PUBLIC_UPDATE_REPOS || 'naseaoi/IceTV',
     UpdateBranch: CURRENT_UPDATE_BRANCH,
     DoubanProxyType: doubanProxyType,
-    DoubanProxy: canReadSensitiveConfig
-      ? config.SiteConfig.DoubanProxy || ''
-      : '',
+    DoubanProxy: DEFAULT_RUNTIME_CONFIG.DOUBAN_PROXY,
     BangumiDataSource: bangumiDataSource,
-    BangumiProxy: canReadSensitiveConfig
-      ? config.SiteConfig.BangumiProxy || ''
-      : DEFAULT_RUNTIME_CONFIG.BANGUMI_PROXY,
+    BangumiProxy: DEFAULT_RUNTIME_CONFIG.BANGUMI_PROXY,
     DoubanImageProxyType: doubanImageProxyType,
-    DoubanImageProxy: canReadSensitiveConfig
-      ? config.SiteConfig.DoubanImageProxy || ''
-      : DEFAULT_RUNTIME_CONFIG.DOUBAN_IMAGE_PROXY,
+    DoubanImageProxy: DEFAULT_RUNTIME_CONFIG.DOUBAN_IMAGE_PROXY,
     DisableYellowFilter: publicConfig.DisableYellowFilter,
     EnableLiveEntry: publicConfig.EnableLiveEntry,
     DefaultAggregateSearch: publicConfig.DefaultAggregateSearch,

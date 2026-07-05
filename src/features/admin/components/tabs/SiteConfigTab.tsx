@@ -14,13 +14,15 @@ import { AdminConfig } from '@/types/admin';
 import { SiteConfig } from '@/features/admin/types/internal';
 import {
   DEFAULT_BANGUMI_DATA_SOURCE,
-  bangumiDataSourceOptions,
-  normalizeBangumiDataSource,
+  normalizeSiteBangumiDataSource,
+  siteBangumiDataSourceOptions,
 } from '@/lib/bangumi-source';
 import {
-  doubanDataSourceOptions,
-  doubanImageProxyTypeOptions,
   getThanksInfo,
+  normalizeSiteDoubanImageProxyType,
+  normalizeSiteDoubanProxyType,
+  siteDoubanDataSourceOptions,
+  siteDoubanImageProxyTypeOptions,
 } from '@/lib/douban-options';
 import { DEFAULT_DOUBAN_IMAGE_PROXY_TYPE } from '@/lib/douban-source';
 import { localPreferenceToggleDefinitions } from '@/lib/local-preference-toggles';
@@ -67,16 +69,18 @@ const SiteConfigComponent = ({
     if (config?.SiteConfig) {
       setSiteSettings({
         ...config.SiteConfig,
-        DoubanProxyType: config.SiteConfig.DoubanProxyType || 'direct',
-        DoubanProxy: config.SiteConfig.DoubanProxy || '',
-        BangumiDataSource: normalizeBangumiDataSource(
+        DoubanProxyType: normalizeSiteDoubanProxyType(
+          config.SiteConfig.DoubanProxyType,
+        ),
+        DoubanProxy: '',
+        BangumiDataSource: normalizeSiteBangumiDataSource(
           config.SiteConfig.BangumiDataSource,
         ),
-        BangumiProxy: config.SiteConfig.BangumiProxy || '',
-        DoubanImageProxyType:
-          config.SiteConfig.DoubanImageProxyType ||
-          DEFAULT_DOUBAN_IMAGE_PROXY_TYPE,
-        DoubanImageProxy: config.SiteConfig.DoubanImageProxy || '',
+        BangumiProxy: '',
+        DoubanImageProxyType: normalizeSiteDoubanImageProxyType(
+          config.SiteConfig.DoubanImageProxyType,
+        ),
+        DoubanImageProxy: '',
         EnableLiveEntry: config.SiteConfig.EnableLiveEntry ?? false,
         DefaultAggregateSearch:
           config.SiteConfig.DefaultAggregateSearch ?? true,
@@ -100,13 +104,16 @@ const SiteConfigComponent = ({
     setSiteSettings((prev) => ({
       ...prev,
       DoubanProxyType: value,
+      DoubanProxy: '',
     }));
   };
 
   const handleBangumiDataSourceChange = (value: string) => {
+    const nextSource = normalizeSiteBangumiDataSource(value);
     setSiteSettings((prev) => ({
       ...prev,
-      BangumiDataSource: normalizeBangumiDataSource(value),
+      BangumiDataSource: nextSource,
+      BangumiProxy: '',
     }));
   };
 
@@ -115,6 +122,7 @@ const SiteConfigComponent = ({
     setSiteSettings((prev) => ({
       ...prev,
       DoubanImageProxyType: value,
+      DoubanImageProxy: '',
     }));
   };
 
@@ -365,32 +373,9 @@ const SiteConfigComponent = ({
             <AdminSelect
               value={siteSettings.DoubanProxyType}
               onChange={(value) => handleDoubanDataSourceChange(value)}
-              options={doubanDataSourceOptions}
+              options={siteDoubanDataSourceOptions}
             />
           </div>
-
-          {siteSettings.DoubanProxyType === 'custom' && (
-            <div>
-              <label className='mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300'>
-                豆瓣代理地址
-              </label>
-              <input
-                type='text'
-                placeholder='例如: https://proxy.example.com/fetch?url='
-                value={siteSettings.DoubanProxy}
-                onChange={(e) =>
-                  setSiteSettings((prev) => ({
-                    ...prev,
-                    DoubanProxy: e.target.value,
-                  }))
-                }
-                className='w-full rounded-lg border border-gray-300 bg-white px-3 py-2.5 text-sm text-gray-900 placeholder-gray-500 shadow-sm transition-all duration-200 hover:border-gray-400 focus:border-green-500 focus:outline-none focus:ring-2 focus:ring-green-500 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100 dark:placeholder-gray-400 dark:hover:border-gray-500'
-              />
-              <p className='mt-1 text-xs text-gray-500 dark:text-gray-400'>
-                自定义代理服务器地址
-              </p>
-            </div>
-          )}
         </div>
 
         {/* 豆瓣图片代理设置 */}
@@ -421,32 +406,9 @@ const SiteConfigComponent = ({
             <AdminSelect
               value={siteSettings.DoubanImageProxyType}
               onChange={(value) => handleDoubanImageProxyChange(value)}
-              options={doubanImageProxyTypeOptions}
+              options={siteDoubanImageProxyTypeOptions}
             />
           </div>
-
-          {siteSettings.DoubanImageProxyType === 'custom' && (
-            <div>
-              <label className='mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300'>
-                豆瓣图片代理地址
-              </label>
-              <input
-                type='text'
-                placeholder='例如: https://proxy.example.com/fetch?url='
-                value={siteSettings.DoubanImageProxy}
-                onChange={(e) =>
-                  setSiteSettings((prev) => ({
-                    ...prev,
-                    DoubanImageProxy: e.target.value,
-                  }))
-                }
-                className='w-full rounded-lg border border-gray-300 bg-white px-3 py-2.5 text-sm text-gray-900 placeholder-gray-500 shadow-sm transition-all duration-200 hover:border-gray-400 focus:border-green-500 focus:outline-none focus:ring-2 focus:ring-green-500 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100 dark:placeholder-gray-400 dark:hover:border-gray-500'
-              />
-              <p className='mt-1 text-xs text-gray-500 dark:text-gray-400'>
-                自定义图片代理服务器地址
-              </p>
-            </div>
-          )}
         </div>
 
         <div className='space-y-3'>
@@ -457,32 +419,9 @@ const SiteConfigComponent = ({
             <AdminSelect
               value={siteSettings.BangumiDataSource}
               onChange={(value) => handleBangumiDataSourceChange(value)}
-              options={bangumiDataSourceOptions}
+              options={siteBangumiDataSourceOptions}
             />
           </div>
-
-          {siteSettings.BangumiDataSource === 'custom' && (
-            <div>
-              <label className='mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300'>
-                Bangumi 代理地址
-              </label>
-              <input
-                type='text'
-                placeholder='例如: https://proxy.example.com/fetch?url='
-                value={siteSettings.BangumiProxy}
-                onChange={(e) =>
-                  setSiteSettings((prev) => ({
-                    ...prev,
-                    BangumiProxy: e.target.value,
-                  }))
-                }
-                className='w-full rounded-lg border border-gray-300 bg-white px-3 py-2.5 text-sm text-gray-900 placeholder-gray-500 shadow-sm transition-all duration-200 hover:border-gray-400 focus:border-green-500 focus:outline-none focus:ring-2 focus:ring-green-500 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100 dark:placeholder-gray-400 dark:hover:border-gray-500'
-              />
-              <p className='mt-1 text-xs text-gray-500 dark:text-gray-400'>
-                自定义代理服务器地址
-              </p>
-            </div>
-          )}
         </div>
 
         {/* 搜索接口可拉取最大页数 */}

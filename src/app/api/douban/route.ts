@@ -1,6 +1,7 @@
-import { NextResponse } from 'next/server';
+import { NextRequest, NextResponse } from 'next/server';
 
 import { createPublicApiCacheHeaders } from '@/lib/api-cache-headers';
+import { isGuardFailure, requireActiveUser } from '@/lib/api-auth';
 import { getCacheTime } from '@/lib/config';
 import { fetchDoubanData } from '@/lib/douban';
 import { createTimedAbortController } from '@/lib/downstream-sources/shared';
@@ -9,6 +10,10 @@ import {
   normalizeDoubanListSubjects,
 } from '@/lib/douban-normalize';
 import { createSwrCache } from '@/lib/server-cache';
+import {
+  recordServerProxyFailure,
+  requireServerProxyQuota,
+} from '@/lib/server-proxy-guard';
 import { DoubanItem, DoubanResult } from '@/lib/types';
 
 export const runtime = 'nodejs';
@@ -20,7 +25,20 @@ const doubanRouteCache = createSwrCache<DoubanResult>({
   maxSize: 500,
 });
 
-export async function GET(request: Request) {
+export async function GET(request: NextRequest) {
+  const guardResult = await requireActiveUser(request, {
+    unauthorizedMessage: 'Unauthorized',
+    includeUserStateCode: false,
+  });
+  if (isGuardFailure(guardResult)) return guardResult.response;
+
+  const quotaFailure = requireServerProxyQuota(
+    'douban-data',
+    request,
+    guardResult.username,
+  );
+  if (quotaFailure) return quotaFailure;
+
   const { searchParams } = new URL(request.url);
 
   const type = searchParams.get('type');
@@ -75,7 +93,8 @@ export async function GET(request: Request) {
     });
 
     return createDoubanJsonResponse(response);
-  } catch {
+  } catch (error) {
+    recordServerProxyFailure('douban-data', error);
     return NextResponse.json({ error: '获取豆瓣数据失败' }, { status: 500 });
   }
 }
@@ -88,7 +107,8 @@ async function handleTop250(pageStart: number) {
       fetchTop250Result(target),
     );
     return createDoubanJsonResponse(response);
-  } catch {
+  } catch (error) {
+    recordServerProxyFailure('douban-data', error);
     return NextResponse.json(
       { error: '获取豆瓣 Top250 数据失败' },
       { status: 500 },

@@ -1,5 +1,6 @@
 import he from 'he';
 
+import { getAuthInfoFromBrowserCookie } from '@/lib/auth.client';
 import {
   readDoubanImageProxyType,
   readDoubanImageProxyUrl,
@@ -12,8 +13,8 @@ export function processImageUrl(originalUrl: string): string {
     return originalUrl;
   }
 
-  const proxyType = readDoubanImageProxyType();
-  const proxyUrl = readDoubanImageProxyUrl();
+  const proxyType = getUsableDoubanImageProxyType(readDoubanImageProxyType());
+  const proxyUrl = readDoubanImageProxyUrl().trim();
   switch (proxyType) {
     case 'direct':
       return originalUrl;
@@ -32,10 +33,21 @@ export function processImageUrl(originalUrl: string): string {
         'img.doubanio.cmliussss.com',
       );
     case 'custom':
+      if (!proxyUrl) {
+        return originalUrl;
+      }
       return `${proxyUrl}${encodeURIComponent(originalUrl)}`;
     default:
       return originalUrl;
   }
+}
+
+function getUsableDoubanImageProxyType(proxyType: string): string {
+  if (proxyType !== 'server') {
+    return proxyType;
+  }
+
+  return getAuthInfoFromBrowserCookie()?.username ? proxyType : 'direct';
 }
 
 function decodeHtmlText(text: string): string {

@@ -6,6 +6,8 @@ import { useEffect, useRef, useState } from 'react';
 interface AdminSelectOption {
   label: string;
   value: string;
+  disabled?: boolean;
+  disabledReason?: string;
 }
 
 interface AdminSelectProps {
@@ -70,17 +72,31 @@ export default function AdminSelect({
               <button
                 key={opt.value}
                 type='button'
+                disabled={opt.disabled}
+                title={opt.disabledReason}
                 onClick={() => {
+                  if (opt.disabled) {
+                    return;
+                  }
                   onChange(opt.value);
                   setIsOpen(false);
                 }}
-                className={`flex w-full items-center justify-between px-3 py-2.5 text-left text-sm transition-colors duration-150 hover:bg-gray-100 dark:hover:bg-gray-700 ${
-                  isSelected
-                    ? 'bg-green-50 text-green-600 dark:bg-green-900/20 dark:text-green-400'
-                    : 'text-gray-900 dark:text-gray-100'
+                className={`flex w-full items-center justify-between gap-3 px-3 py-2.5 text-left text-sm transition-colors duration-150 ${
+                  opt.disabled
+                    ? 'cursor-not-allowed text-gray-400 dark:text-gray-500'
+                    : isSelected
+                      ? 'bg-green-50 text-green-600 hover:bg-green-50 dark:bg-green-900/20 dark:text-green-400 dark:hover:bg-green-900/20'
+                      : 'text-gray-900 hover:bg-gray-100 dark:text-gray-100 dark:hover:bg-gray-700'
                 }`}
               >
-                <span className='truncate'>{opt.label}</span>
+                <span className='flex min-w-0 items-center gap-2'>
+                  <span className='truncate'>{opt.label}</span>
+                  {opt.disabledReason && (
+                    <span className='shrink-0 text-xs text-rose-500 dark:text-rose-400'>
+                      {opt.disabledReason}
+                    </span>
+                  )}
+                </span>
                 {isSelected && (
                   <Check className='ml-2 h-4 w-4 flex-shrink-0 text-green-600 dark:text-green-400' />
                 )}

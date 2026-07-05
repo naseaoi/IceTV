@@ -1,3 +1,5 @@
+import type { NextRequest } from 'next/server';
+
 import { installWebPolyfills } from '@/app/api/test-utils/web-polyfills';
 import { fetchDoubanData } from '@/lib/douban';
 
@@ -11,10 +13,17 @@ jest.mock('@/lib/douban', () => ({
   fetchDoubanData: jest.fn(),
 }));
 
+jest.mock('@/lib/api-auth', () => ({
+  requireActiveUser: jest
+    .fn()
+    .mockResolvedValue({ username: 'demo', isOwner: false }),
+  isGuardFailure: (result: object) => 'response' in result,
+}));
+
 const { GET } = require('./route') as typeof import('./route');
 
-function createRequest(url: string): Request {
-  return new Request(url);
+function createRequest(url: string): NextRequest {
+  return new Request(url) as unknown as NextRequest;
 }
 
 describe('douban categories route input validation', () => {

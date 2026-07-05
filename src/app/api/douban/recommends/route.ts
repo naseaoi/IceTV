@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 
 import { createPublicApiCacheHeaders } from '@/lib/api-cache-headers';
+import { isGuardFailure, requireActiveUser } from '@/lib/api-auth';
 import { getCacheTime } from '@/lib/config';
 import { fetchDoubanData } from '@/lib/douban';
 import {
@@ -8,6 +9,10 @@ import {
   normalizeDoubanRecommendItems,
 } from '@/lib/douban-normalize';
 import { createSwrCache } from '@/lib/server-cache';
+import {
+  recordServerProxyFailure,
+  requireServerProxyQuota,
+} from '@/lib/server-proxy-guard';
 import { DoubanResult } from '@/lib/types';
 
 // 进程内 SWR 缓存：同参数请求合并回源 + 软过期后台刷新
@@ -22,6 +27,19 @@ const recommendsCache = createSwrCache<DoubanResult>({
 export const runtime = 'nodejs';
 
 export async function GET(request: NextRequest) {
+  const guardResult = await requireActiveUser(request, {
+    unauthorizedMessage: 'Unauthorized',
+    includeUserStateCode: false,
+  });
+  if (isGuardFailure(guardResult)) return guardResult.response;
+
+  const quotaFailure = requireServerProxyQuota(
+    'douban-data',
+    request,
+    guardResult.username,
+  );
+  if (quotaFailure) return quotaFailure;
+
   const { searchParams } = new URL(request.url);
 
   // 获取参数
@@ -128,6 +146,7 @@ export async function GET(request: NextRequest) {
       headers: createPublicApiCacheHeaders(cacheTime),
     });
   } catch (error) {
+    recordServerProxyFailure('douban-data', error);
     return NextResponse.json({ error: '获取豆瓣数据失败' }, { status: 500 });
   }
 }

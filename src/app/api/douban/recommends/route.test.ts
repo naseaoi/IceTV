@@ -13,6 +13,13 @@ jest.mock('@/lib/douban', () => ({
   fetchDoubanData: jest.fn(),
 }));
 
+jest.mock('@/lib/api-auth', () => ({
+  requireActiveUser: jest
+    .fn()
+    .mockResolvedValue({ username: 'demo', isOwner: false }),
+  isGuardFailure: (result: object) => 'response' in result,
+}));
+
 const { GET } = require('./route') as typeof import('./route');
 
 function createRequest(url: string): NextRequest {

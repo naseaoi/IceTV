@@ -7,7 +7,12 @@ import { AdminConfig } from '@/types/admin';
 import {
   DEFAULT_BANGUMI_DATA_SOURCE,
   normalizeBangumiDataSource,
+  normalizeSiteBangumiDataSource,
 } from '@/lib/bangumi-source';
+import {
+  normalizeSiteDoubanImageProxyType,
+  normalizeSiteDoubanProxyType,
+} from '@/lib/douban-options';
 import {
   DEFAULT_DOUBAN_IMAGE_PROXY_TYPE,
   DEFAULT_DOUBAN_PROXY_TYPE,
@@ -70,7 +75,6 @@ const PUBLIC_CONFIG_CACHE_TAG = 'public-config';
 const DEFAULT_CONFIG_CACHE_TTL_MS = 30_000;
 const PUBLIC_DOUBAN_PROXY_TYPES = new Set([
   'direct',
-  'server',
   'cors-proxy-zwei',
   'cmliussss-cdn-tencent',
   'cmliussss-cdn-ali',
@@ -114,9 +118,7 @@ export function getPublicDoubanProxyType(
 export function getPublicBangumiDataSource(
   dataSource: string | undefined,
 ): string {
-  return dataSource === 'direct' || dataSource === 'server'
-    ? dataSource
-    : DEFAULT_BANGUMI_DATA_SOURCE;
+  return dataSource === 'direct' ? dataSource : DEFAULT_BANGUMI_DATA_SOURCE;
 }
 
 export function getPublicDoubanImageProxyType(
@@ -518,13 +520,23 @@ export function configSelfCheck(adminConfig: AdminConfig): AdminConfig {
     adminConfig.SiteConfig.FluidSearch =
       process.env.NEXT_PUBLIC_FLUID_SEARCH !== 'false';
   }
-  adminConfig.SiteConfig.BangumiDataSource = normalizeBangumiDataSource(
+  adminConfig.SiteConfig.DoubanProxyType = normalizeSiteDoubanProxyType(
+    adminConfig.SiteConfig.DoubanProxyType,
+  );
+  adminConfig.SiteConfig.DoubanProxy = '';
+  adminConfig.SiteConfig.BangumiDataSource = normalizeSiteBangumiDataSource(
     adminConfig.SiteConfig.BangumiDataSource || DEFAULT_BANGUMI_DATA_SOURCE,
   );
   if (typeof adminConfig.SiteConfig.BangumiProxy !== 'string') {
     adminConfig.SiteConfig.BangumiProxy =
       process.env.NEXT_PUBLIC_BANGUMI_PROXY || '';
   }
+  adminConfig.SiteConfig.BangumiProxy = '';
+  adminConfig.SiteConfig.DoubanImageProxyType =
+    normalizeSiteDoubanImageProxyType(
+      adminConfig.SiteConfig.DoubanImageProxyType,
+    );
+  adminConfig.SiteConfig.DoubanImageProxy = '';
 
   // 站长变更自检
   const ownerUser = getOwnerUsername();

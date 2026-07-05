@@ -261,7 +261,7 @@ describe('config cache persistence', () => {
     expect(configSelfCheck(config).SiteConfig.FluidSearch).toBe(true);
   });
 
-  it('exposes proxy defaults in public config', async () => {
+  it('exposes public-safe proxy defaults in public config', async () => {
     const adminConfig = cloneBaseConfig();
     adminConfig.SiteConfig.DoubanProxyType = 'server';
     adminConfig.SiteConfig.DoubanImageProxyType = 'img3';
@@ -271,7 +271,7 @@ describe('config cache persistence', () => {
     });
 
     await expect(getPublicConfig()).resolves.toMatchObject({
-      DoubanProxyType: 'server',
+      DoubanProxyType: 'direct',
       DoubanImageProxyType: 'img3',
       BangumiDataSource: 'direct',
     });
@@ -290,6 +290,28 @@ describe('config cache persistence', () => {
       DoubanProxyType: 'direct',
       DoubanImageProxyType: 'direct',
       BangumiDataSource: 'direct',
+    });
+  });
+
+  it('clears custom proxy values from stored site config', async () => {
+    const { configSelfCheck } = await loadConfigModule(jest.fn());
+    const config = cloneBaseConfig();
+    config.SiteConfig.DoubanProxyType = 'custom';
+    config.SiteConfig.DoubanProxy = 'https://data.example/fetch?url=';
+    config.SiteConfig.DoubanImageProxyType = 'custom';
+    config.SiteConfig.DoubanImageProxy = 'https://image.example/fetch?url=';
+    config.SiteConfig.BangumiDataSource = 'custom';
+    config.SiteConfig.BangumiProxy = 'https://bangumi.example/fetch?url=';
+
+    const checked = configSelfCheck(config);
+
+    expect(checked.SiteConfig).toMatchObject({
+      DoubanProxyType: 'direct',
+      DoubanProxy: '',
+      DoubanImageProxyType: 'direct',
+      DoubanImageProxy: '',
+      BangumiDataSource: 'direct',
+      BangumiProxy: '',
     });
   });
 

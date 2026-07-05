@@ -9,6 +9,7 @@ import {
 } from './douban-normalize';
 import { readDoubanProxyType, readDoubanProxyUrl } from './douban-source';
 import { DoubanResult } from './types';
+import { getAuthInfoFromBrowserCookie } from './auth.client';
 
 // ================================================================
 // 请求去重 + SWR 缓存：避免切换筛选条件后重复请求相同数据
@@ -174,8 +175,8 @@ function fetchWithDoubanProxy(
   serverPath: string,
   loader: DoubanProxyLoader,
 ): Promise<DoubanResult> {
-  const proxyType = readDoubanProxyType();
-  const proxyUrl = readDoubanProxyUrl();
+  const proxyType = getUsableDoubanProxyType(readDoubanProxyType());
+  const proxyUrl = readDoubanProxyUrl().trim();
   switch (proxyType) {
     case 'cors-proxy-zwei':
       return loader('https://ciao-cors.is-an.org/');
@@ -186,6 +187,9 @@ function fetchWithDoubanProxy(
     case 'cors-anywhere':
       return loader('https://cors-anywhere.com/');
     case 'custom':
+      if (!proxyUrl) {
+        throw new Error('豆瓣自定义代理地址不能为空');
+      }
       return loader(proxyUrl);
     case 'server':
       return fetch(serverPath).then((response) => response.json());
@@ -193,6 +197,14 @@ function fetchWithDoubanProxy(
     default:
       return loader('');
   }
+}
+
+function getUsableDoubanProxyType(proxyType: string): string {
+  if (proxyType !== 'server') {
+    return proxyType;
+  }
+
+  return getAuthInfoFromBrowserCookie()?.username ? proxyType : 'direct';
 }
 
 function createQueryString(

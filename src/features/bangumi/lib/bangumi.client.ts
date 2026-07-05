@@ -11,6 +11,7 @@ import {
   readBangumiDataSource,
   readBangumiProxyUrl,
 } from '@/lib/bangumi-source';
+import { getAuthInfoFromBrowserCookie } from '@/lib/auth.client';
 import { createTimedAbortController } from '@/lib/downstream-sources/shared';
 
 const BANGUMI_CALENDAR_URL = 'https://api.bgm.tv/calendar';
@@ -37,7 +38,7 @@ export async function GetBangumiCalendarData(
   }
 
   const staleData = readBangumiCalendarClientCache({ allowStale: true });
-  const source = readBangumiDataSource();
+  const source = getUsableBangumiDataSource(readBangumiDataSource());
   let data: BangumiCalendarData[];
 
   try {
@@ -61,6 +62,14 @@ export async function GetBangumiCalendarData(
   }
 
   return staleData ?? data;
+}
+
+function getUsableBangumiDataSource(source: string): string {
+  if (source !== 'server') {
+    return source;
+  }
+
+  return getAuthInfoFromBrowserCookie()?.username ? source : 'direct';
 }
 
 async function fetchBangumiCalendarFromServer(
