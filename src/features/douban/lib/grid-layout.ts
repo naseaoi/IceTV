@@ -1,4 +1,4 @@
-export const DOUBAN_GRID_WRAPPER_CLASS = 'px-0 sm:px-2';
+export const DOUBAN_GRID_WRAPPER_CLASS = 'px-0';
 
 export const DOUBAN_GRID_CLASS =
   'grid grid-cols-3 justify-start gap-x-2 gap-y-12 sm:grid-cols-[repeat(auto-fill,_180px)] sm:gap-x-7 sm:gap-y-20';
