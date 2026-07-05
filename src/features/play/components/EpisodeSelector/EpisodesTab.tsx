@@ -115,8 +115,11 @@ export const EpisodesTab: React.FC<EpisodesTabProps> = ({
   const showPagination = pageCount > 1;
 
   const categoryContainerRef = useRef<HTMLDivElement>(null);
+  const episodeContainerRef = useRef<HTMLDivElement>(null);
   const buttonRefs = useRef<(HTMLButtonElement | null)[]>([]);
+  const episodeButtonRefs = useRef<(HTMLButtonElement | null)[]>([]);
   const [isCategoryHovered, setIsCategoryHovered] = useState(false);
+  const [hasEpisodeTopFade, setHasEpisodeTopFade] = useState(false);
 
   const preventPageScroll = useCallback(
     (e: WheelEvent) => {
@@ -182,10 +185,50 @@ export const EpisodesTab: React.FC<EpisodesTabProps> = ({
   const currentStart = activePage.start;
   const currentEnd = Math.min(activePage.end, totalEpisodes);
 
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      const container = episodeContainerRef.current;
+      const button = episodeButtonRefs.current[value];
+      if (!container || !button) return;
+
+      const containerRect = container.getBoundingClientRect();
+      const buttonRect = button.getBoundingClientRect();
+      const isVisible =
+        buttonRect.top >= containerRect.top &&
+        buttonRect.bottom <= containerRect.bottom;
+
+      if (isVisible) return;
+
+      const targetScrollTop =
+        container.scrollTop +
+        (buttonRect.top - containerRect.top) -
+        container.clientHeight / 2 +
+        button.clientHeight / 2;
+      const maxScrollTop = container.scrollHeight - container.clientHeight;
+
+      container.scrollTo({
+        top: Math.max(0, Math.min(targetScrollTop, maxScrollTop)),
+        behavior: 'smooth',
+      });
+      setHasEpisodeTopFade(true);
+    }, 80);
+
+    return () => clearTimeout(timer);
+  }, [currentPage, currentEnd, currentStart, value]);
+
+  const episodeContainerStyle = hasEpisodeTopFade
+    ? {
+        WebkitMaskImage:
+          'linear-gradient(to bottom, transparent 0, #000 2rem, #000 100%)',
+        maskImage:
+          'linear-gradient(to bottom, transparent 0, #000 2rem, #000 100%)',
+      }
+    : undefined;
+
   return (
     <>
       {(variantSources.length > 1 || showPagination) && (
-        <div className='flex flex-shrink-0 flex-col gap-3 px-5 py-3 sm:px-6'>
+        <div className='flex flex-shrink-0 flex-col gap-2 px-5 pb-2 pt-2 sm:px-6'>
           {variantSources.length > 1 && (
             <div className='flex flex-wrap justify-center gap-2'>
               {variantSources.map((variant, index) => {
@@ -277,11 +320,14 @@ export const EpisodesTab: React.FC<EpisodesTabProps> = ({
         </div>
       )}
 
-      {showPagination && (
-        <div className='mx-5 h-px bg-gradient-to-r from-transparent via-gray-200/80 to-transparent dark:via-white/[0.10] sm:mx-6' />
-      )}
-
-      <div className='flex flex-1 flex-wrap content-start justify-center gap-2 overflow-y-auto p-5 sm:p-6'>
+      <div
+        ref={episodeContainerRef}
+        className='flex flex-1 flex-wrap content-start justify-center gap-2 overflow-y-auto px-5 pb-5 pt-2 sm:px-6 sm:pb-6'
+        onScroll={(event) => {
+          setHasEpisodeTopFade(event.currentTarget.scrollTop > 4);
+        }}
+        style={episodeContainerStyle}
+      >
         {(() => {
           const len = currentEnd - currentStart + 1;
           return Array.from({ length: len }, (_, i) => currentStart + i);
@@ -309,6 +355,9 @@ export const EpisodesTab: React.FC<EpisodesTabProps> = ({
           return (
             <button
               key={episodeNumber}
+              ref={(el) => {
+                episodeButtonRefs.current[episodeNumber] = el;
+              }}
               onClick={() => onChange?.(episodeNumber - 1)}
               style={{
                 width: `calc(${dynamicSpan} * 3rem + ${dynamicSpan - 1} * 0.5rem)`,

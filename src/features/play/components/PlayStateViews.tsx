@@ -114,7 +114,7 @@ export function PlayLoadingView({
 
   return (
     <PageLayout activePath='/play'>
-      <div className='flex h-[calc(100dvh-3rem-3.5rem-env(safe-area-inset-bottom))] items-center justify-center md:h-full'>
+      <div className='flex h-full items-center justify-center'>
         <div className='flex w-full max-w-2xl flex-col items-center gap-4 px-4'>
           <LoadingStatePanel
             icon={getLoadingStageIcon(loadingStage)}
@@ -148,7 +148,7 @@ export function PlayLoadingView({
 export function PlayErrorView({ error, onBack, onRetry }: PlayErrorViewProps) {
   return (
     <PageLayout activePath='/play'>
-      <div className='flex min-h-screen items-center justify-center bg-transparent'>
+      <div className='flex h-full items-center justify-center bg-transparent'>
         <LoadingStatePanel
           icon={<AlertTriangle className='h-10 w-10' />}
           tone='red'

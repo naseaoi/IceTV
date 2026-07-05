@@ -28,7 +28,6 @@ interface PlayMainContentProps {
   setIsEpisodeSelectorCollapsed: (collapsed: boolean) => void;
   artRef: RefObject<HTMLDivElement | null>;
   isVideoLoading: boolean;
-  isPlaying: boolean;
   videoLoadingStage: VideoLoadingStage;
   videoLoadingAttempt: number;
   realtimeLoadSpeed: string;
@@ -69,29 +68,21 @@ const playAccents: Record<string, PlayerPageAccent> = {
     icon: 'text-blue-500 dark:text-blue-400',
     glow: 'bg-blue-400/10 dark:bg-blue-400/20',
     sub: 'text-blue-600/80 dark:text-blue-400/70',
-    aurora: ['59,130,246', '96,165,250'],
-    auroraLight: ['147,197,253', '191,219,254'],
   },
   tv: {
     icon: 'text-emerald-500 dark:text-emerald-400',
     glow: 'bg-emerald-400/10 dark:bg-emerald-400/20',
     sub: 'text-emerald-600/80 dark:text-emerald-400/70',
-    aurora: ['16,185,129', '52,211,153'],
-    auroraLight: ['110,231,183', '167,243,208'],
   },
   anime: {
     icon: 'text-pink-500 dark:text-pink-400',
     glow: 'bg-pink-400/10 dark:bg-pink-400/20',
     sub: 'text-pink-600/80 dark:text-pink-400/70',
-    aurora: ['236,72,153', '244,114,182'],
-    auroraLight: ['249,168,212', '251,207,232'],
   },
   variety: {
     icon: 'text-violet-500 dark:text-violet-400',
     glow: 'bg-violet-400/10 dark:bg-violet-400/20',
     sub: 'text-violet-600/80 dark:text-violet-400/70',
-    aurora: ['139,92,246', '167,139,250'],
-    auroraLight: ['196,181,253', '221,214,254'],
   },
 };
 
@@ -326,7 +317,6 @@ export function PlayMainContent(props: PlayMainContentProps) {
     setIsEpisodeSelectorCollapsed,
     artRef,
     isVideoLoading,
-    isPlaying,
     videoLoadingStage,
     videoLoadingAttempt,
     authRecoveryVisible,
@@ -422,7 +412,6 @@ export function PlayMainContent(props: PlayMainContentProps) {
       titleFallback='影片标题'
       titleIcon={TitleIcon}
       accent={accent}
-      isPlaying={isPlaying}
       isPanelCollapsed={isEpisodeSelectorCollapsed}
       onTogglePanel={() =>
         setIsEpisodeSelectorCollapsed(!isEpisodeSelectorCollapsed)

@@ -2,6 +2,7 @@ import { ExternalLink, Heart } from 'lucide-react';
 import React, { useMemo } from 'react';
 
 import CoverImage from '@/components/CoverImage';
+import { SectionTitle } from '@/features/play/components/EpisodeSelector/SectionTitle';
 import { SearchResult } from '@/lib/types';
 
 interface InfoTabProps {
@@ -13,6 +14,7 @@ interface InfoTabProps {
   onToggleFavorite: () => void;
   videoCover: string;
   videoDoubanId: number;
+  scrollMode?: 'panel' | 'desc';
 }
 
 const FavoriteIcon = ({ filled }: { filled: boolean }) => {
@@ -44,6 +46,7 @@ export const InfoTab: React.FC<InfoTabProps> = ({
   onToggleFavorite,
   videoCover,
   videoDoubanId,
+  scrollMode = 'panel',
 }) => {
   const formattedDesc = useMemo(() => {
     const raw = detail?.desc;
@@ -57,11 +60,28 @@ export const InfoTab: React.FC<InfoTabProps> = ({
     return paragraphs.map((p) => `　　${p}`).join('\n');
   }, [detail?.desc]);
 
+  const descOnlyScroll = scrollMode === 'desc';
+  const doubanId =
+    Number.isFinite(videoDoubanId) && videoDoubanId > 0 ? videoDoubanId : 0;
+  const descStyle = descOnlyScroll
+    ? {
+        whiteSpace: 'pre-line',
+        WebkitMaskImage:
+          'linear-gradient(to bottom, #000 calc(100% - 2rem), transparent 100%)',
+        maskImage:
+          'linear-gradient(to bottom, #000 calc(100% - 2rem), transparent 100%)',
+      }
+    : { whiteSpace: 'pre-line' };
+
   return (
-    <div className='flex-1 space-y-5 overflow-y-auto p-5 sm:p-6'>
-      {/* 封面 + 基本信息 */}
-      <div className='flex gap-4 sm:gap-5'>
-        {/* 封面 */}
+    <div
+      className={
+        descOnlyScroll
+          ? 'flex min-h-0 flex-col gap-2 px-5 pb-1 pt-4 sm:px-6 sm:pb-1 sm:pt-5'
+          : 'flex-1 space-y-3 overflow-y-auto p-5 sm:p-6'
+      }
+    >
+      <div className='flex flex-shrink-0 gap-4 sm:gap-5'>
         <div className='relative aspect-[2/3] w-24 flex-shrink-0 overflow-hidden rounded-xl bg-gray-200 shadow-md shadow-black/10 ring-1 ring-black/10 dark:bg-gray-800 dark:shadow-black/30 dark:ring-white/10 sm:w-28 xl:w-32'>
           <CoverImage
             src={videoCover}
@@ -72,9 +92,7 @@ export const InfoTab: React.FC<InfoTabProps> = ({
           />
         </div>
 
-        {/* 标题 + 标签：紧凑排列，垂直居中对齐封面 */}
-        <div className='flex min-w-0 flex-1 flex-col justify-center gap-2.5'>
-          {/* 标题 + 收藏 */}
+        <div className='flex min-w-0 flex-1 flex-col justify-end gap-2.5 pb-0.5'>
           <div className='flex items-center gap-2'>
             <h3 className='min-w-0 truncate text-base font-bold leading-snug text-gray-900 dark:text-gray-100'>
               {videoTitle || '影片标题'}
@@ -91,13 +109,27 @@ export const InfoTab: React.FC<InfoTabProps> = ({
             </button>
           </div>
 
-          {/* 第一行标签：来源、年份、集数 */}
+          {doubanId > 0 && (
+            <a
+              href={`https://movie.douban.com/subject/${doubanId}`}
+              target='_blank'
+              rel='noopener noreferrer'
+              className='inline-flex w-fit items-center gap-1 text-[11px] font-medium text-emerald-600 transition-colors hover:text-emerald-700 hover:underline dark:text-emerald-400 dark:hover:text-emerald-300'
+            >
+              <ExternalLink className='h-3 w-3' />
+              豆瓣
+            </a>
+          )}
+
           <div className='flex flex-wrap gap-1.5'>
             {detail?.source_name && (
               <span className='inline-flex items-center rounded-full bg-emerald-50 px-2 py-0.5 text-[11px] font-semibold text-emerald-700 ring-1 ring-emerald-200/60 dark:bg-emerald-900/30 dark:text-emerald-300 dark:ring-emerald-500/20'>
                 {detail.source_name}
               </span>
             )}
+          </div>
+
+          <div className='flex flex-wrap gap-1.5'>
             {(detail?.year || videoYear) && (
               <span className='inline-flex items-center rounded-full bg-gray-100 px-2 py-0.5 text-[11px] font-medium text-gray-600 dark:bg-gray-800 dark:text-gray-400'>
                 {detail?.year || videoYear}
@@ -110,7 +142,6 @@ export const InfoTab: React.FC<InfoTabProps> = ({
             )}
           </div>
 
-          {/* 第二行标签：分区、类型 */}
           {(detail?.class || detail?.type_name) && (
             <div className='flex flex-wrap gap-1.5'>
               {detail?.class && (
@@ -125,37 +156,30 @@ export const InfoTab: React.FC<InfoTabProps> = ({
               )}
             </div>
           )}
-
-          {/* 豆瓣链接 */}
-          {videoDoubanId !== 0 && (
-            <a
-              href={`https://movie.douban.com/subject/${videoDoubanId}`}
-              target='_blank'
-              rel='noopener noreferrer'
-              className='inline-flex w-fit items-center gap-1 text-[11px] font-medium text-emerald-600 transition-colors hover:text-emerald-700 hover:underline dark:text-emerald-400 dark:hover:text-emerald-300'
-            >
-              <ExternalLink className='h-3 w-3' />
-              豆瓣详情
-            </a>
-          )}
         </div>
       </div>
 
-      {/* 简介 */}
       {detail?.desc && (
-        <div className='pt-2'>
-          <div className='mb-3 flex items-center gap-2'>
-            <div className='h-4 w-[3px] rounded-full bg-emerald-500/70 dark:bg-emerald-400/60' />
-            <h4 className='text-sm font-semibold text-gray-700 dark:text-gray-300'>
-              简介
-            </h4>
+        <div
+          className={
+            descOnlyScroll
+              ? 'flex min-h-0 flex-1 flex-col pt-1'
+              : 'flex flex-col pt-1'
+          }
+        >
+          <div className='mb-1.5 flex-shrink-0'>
+            <SectionTitle label='简介' />
           </div>
-          <p
-            className='text-[13px] leading-[1.8] text-gray-600 dark:text-gray-400'
-            style={{ whiteSpace: 'pre-line' }}
-          >
-            {formattedDesc}
-          </p>
+          <div className={descOnlyScroll ? 'relative min-h-0 flex-1' : ''}>
+            <p
+              className={`text-[13px] leading-[1.8] text-gray-600 dark:text-gray-400 ${
+                descOnlyScroll ? 'h-full min-h-0 overflow-y-auto pb-5' : ''
+              }`.trim()}
+              style={descStyle}
+            >
+              {formattedDesc}
+            </p>
+          </div>
         </div>
       )}
     </div>

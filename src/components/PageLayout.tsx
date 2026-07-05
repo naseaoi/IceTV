@@ -33,7 +33,11 @@ const PageLayout = ({
         </div>
 
         {/* 主内容区域 */}
-        <div className='min-w-0 flex-1 transition-[margin] duration-300 ease-[cubic-bezier(0.25,0.1,0.25,1)] md:flex md:flex-col'>
+        <div
+          className={`min-w-0 flex-1 transition-[margin] duration-300 ease-[cubic-bezier(0.25,0.1,0.25,1)] md:flex md:flex-col ${
+            isPlayerPage ? 'md:h-dvh md:min-h-0' : ''
+          }`}
+        >
           {/* 桌面端顶部工具栏 */}
           {showDesktopBack && (
             <div className='hidden items-center gap-1 px-4 py-2 sm:px-10 md:flex'>
@@ -47,7 +51,7 @@ const PageLayout = ({
           <main
             className={`flex-1 md:mb-0 md:mt-0 md:min-h-0 ${
               isPlayerPage
-                ? 'mb-0 mt-12 h-[calc(100dvh-3rem-3.5rem-env(safe-area-inset-bottom)-4px)] overflow-hidden md:h-auto md:overflow-visible'
+                ? 'mb-0 mt-12 h-[calc(100dvh-3rem-3.5rem-env(safe-area-inset-bottom)-4px)] overflow-hidden md:h-auto'
                 : 'mb-14 mt-12'
             }`}
             style={

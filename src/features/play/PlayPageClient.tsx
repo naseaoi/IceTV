@@ -120,7 +120,6 @@ export function PlayPageClient() {
     setIsEpisodeSelectorCollapsed,
     isVideoLoading,
     setIsVideoLoading,
-    isPlaying,
     setIsPlaying,
     videoLoadingStage,
     setVideoLoadingStage,
@@ -572,7 +571,6 @@ export function PlayPageClient() {
       setIsEpisodeSelectorCollapsed={setIsEpisodeSelectorCollapsed}
       artRef={artRef}
       isVideoLoading={isVideoLoading}
-      isPlaying={isPlaying}
       videoLoadingStage={videoLoadingStage}
       videoLoadingAttempt={videoLoadingAttempt}
       realtimeLoadSpeed={realtimeLoadSpeed}

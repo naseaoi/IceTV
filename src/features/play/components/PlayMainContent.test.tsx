@@ -87,7 +87,6 @@ describe('PlayMainContent', () => {
       setIsEpisodeSelectorCollapsed: jest.fn(),
       artRef: { current: null } as RefObject<HTMLDivElement | null>,
       isVideoLoading: true,
-      isPlaying: false,
       videoLoadingStage: 'sourceChanging' as const,
       videoLoadingAttempt: 0,
       realtimeLoadSpeed: '测速中...',
@@ -154,7 +153,6 @@ describe('PlayMainContent', () => {
         setIsEpisodeSelectorCollapsed={jest.fn()}
         artRef={{ current: null } as RefObject<HTMLDivElement | null>}
         isVideoLoading={false}
-        isPlaying={false}
         videoLoadingStage='episodeChanging'
         videoLoadingAttempt={1}
         realtimeLoadSpeed=''
