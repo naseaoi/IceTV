@@ -9,6 +9,17 @@ export interface SiteConfig {
   LiveDirectConnect: boolean;
   SearchDownstreamMaxPage: number;
   SiteInterfaceCacheTime: number;
+  VodPageTimeoutSeconds: number;
+  PlaybackHistoryPageSize: number;
+  PlaybackHistoryLimit: number;
+  SearchHistoryLimit: number;
+  SearchRequestTimeoutSeconds: number;
+  SourceFailureCooldownSeconds: number;
+  ContinueWatchingLimit: number;
+  CoverImageCacheSize: number;
+  DataImportPlaybackSessionsLimit: number;
+  LivePrecheckTimeoutSeconds: number;
+  ProxyRequestTimeoutSeconds: number;
   DoubanProxyType: string;
   DoubanProxy: string;
   BangumiDataSource: string;

@@ -14,6 +14,7 @@ import {
   RuntimeConfig,
   getRuntimeConfig,
 } from '@/lib/runtime-config';
+import { markClientHydrated } from '@/lib/client-hydration';
 
 const RuntimeConfigContext = createContext<RuntimeConfig>(
   DEFAULT_RUNTIME_CONFIG,
@@ -30,6 +31,8 @@ export function RuntimeConfigProvider({
     useState<RuntimeConfig>(initialConfig);
 
   useEffect(() => {
+    markClientHydrated();
+
     const currentConfig = getRuntimeConfig();
     if (currentConfig) {
       setRuntimeConfig(currentConfig);

@@ -20,6 +20,7 @@ import HomePosterCardSkeleton, {
   HOME_POSTER_CARD_CLASS,
 } from '@/components/HomePosterCardSkeleton';
 import ConfirmModal from '@/components/modals/ConfirmModal';
+import { useRuntimeConfig } from '@/components/RuntimeConfigProvider';
 
 interface ContinueWatchingProps {
   className?: string;
@@ -30,6 +31,8 @@ const useIsomorphicLayoutEffect =
   typeof window !== 'undefined' ? useLayoutEffect : useEffect;
 
 type PlayRecordWithKey = PlayRecord & { key: string };
+
+const DEFAULT_CONTINUE_WATCHING_LIMIT = 10;
 
 function sortPlayRecords(
   allRecords: Record<string, PlayRecord>,
@@ -42,7 +45,7 @@ function sortPlayRecords(
     .sort((a, b) => b.save_time - a.save_time);
 }
 
-function readInitialState(fallbackSkeletonCount = 0) {
+function readInitialState(limit: number, fallbackSkeletonCount = 0) {
   if (typeof window === 'undefined') {
     return {
       playRecords: [] as PlayRecordWithKey[],
@@ -63,7 +66,7 @@ function readInitialState(fallbackSkeletonCount = 0) {
   const cachedRecords = getCachedPlayRecordsSnapshot();
   if (cachedRecords) {
     return {
-      playRecords: sortPlayRecords(cachedRecords),
+      playRecords: sortPlayRecords(cachedRecords).slice(0, limit),
       loading: false,
       skeletonCount: 0,
     };
@@ -76,7 +79,7 @@ function readInitialState(fallbackSkeletonCount = 0) {
   return {
     playRecords: [] as PlayRecordWithKey[],
     loading: cachedCount > 0,
-    skeletonCount: cachedCount > 0 ? Math.min(cachedCount, 8) : 0,
+    skeletonCount: cachedCount > 0 ? Math.min(cachedCount, limit) : 0,
   };
 }
 
@@ -84,13 +87,29 @@ export default function ContinueWatching({
   className,
   initialSkeletonCount = 0,
 }: ContinueWatchingProps) {
+  const runtimeConfig = useRuntimeConfig();
+  const continueWatchingLimit = Math.max(
+    1,
+    Math.floor(
+      runtimeConfig.CONTINUE_WATCHING_LIMIT || DEFAULT_CONTINUE_WATCHING_LIMIT,
+    ),
+  );
+  const normalizedInitialSkeletonCount = Math.min(
+    initialSkeletonCount,
+    continueWatchingLimit,
+  );
   const [playRecords, setPlayRecords] = useState<PlayRecordWithKey[]>([]);
-  const [loading, setLoading] = useState(initialSkeletonCount > 0);
-  const [skeletonCount, setSkeletonCount] = useState(initialSkeletonCount);
+  const [loading, setLoading] = useState(normalizedInitialSkeletonCount > 0);
+  const [skeletonCount, setSkeletonCount] = useState(
+    normalizedInitialSkeletonCount,
+  );
   const [showClearConfirm, setShowClearConfirm] = useState(false);
 
   const updatePlayRecords = (allRecords: Record<string, PlayRecord>) => {
-    const sortedRecords = sortPlayRecords(allRecords);
+    const sortedRecords = sortPlayRecords(allRecords).slice(
+      0,
+      continueWatchingLimit,
+    );
 
     setPlayRecords(sortedRecords);
     const count = String(sortedRecords.length);
@@ -103,11 +122,14 @@ export default function ContinueWatching({
   };
 
   useIsomorphicLayoutEffect(() => {
-    const nextState = readInitialState(initialSkeletonCount);
+    const nextState = readInitialState(
+      continueWatchingLimit,
+      normalizedInitialSkeletonCount,
+    );
     setPlayRecords(nextState.playRecords);
     setLoading(nextState.loading);
     setSkeletonCount(nextState.skeletonCount);
-  }, []);
+  }, [continueWatchingLimit, normalizedInitialSkeletonCount]);
 
   useEffect(() => {
     const isAuthenticated = !!getAuthInfoFromBrowserCookie()?.username;

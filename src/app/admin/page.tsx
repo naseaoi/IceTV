@@ -8,7 +8,10 @@ import ConfirmModal from '@/components/modals/ConfirmModal';
 import AdminNav from '@/features/admin/components/AdminNav';
 import AdminTabContent from '@/features/admin/components/AdminTabContent';
 import AlertModal from '@/components/modals/AlertModal';
-import { SITE_CONFIG_FORM_ID } from '@/features/admin/lib/admin-form-ids';
+import {
+  RUNTIME_PARAMS_FORM_ID,
+  SITE_CONFIG_FORM_ID,
+} from '@/features/admin/lib/admin-form-ids';
 import { getVisibleTabs } from '@/features/admin/lib/admin-tabs';
 import { buttonStyles } from '@/features/admin/lib/buttonStyles';
 import { showError } from '@/features/admin/lib/notifications';
@@ -31,11 +34,29 @@ function AdminPageClient() {
   const [role, setRole] = useState<'owner' | 'admin' | null>(null);
   const [showResetConfigModal, setShowResetConfigModal] = useState(false);
   const [siteConfigSaving, setSiteConfigSaving] = useState(false);
+  const [runtimeParamsSaving, setRuntimeParamsSaving] = useState(false);
+  const [siteConfigDirty, setSiteConfigDirty] = useState(false);
+  const [runtimeParamsDirty, setRuntimeParamsDirty] = useState(false);
 
   const isOwnerRole = isOwner(role);
   const visibleTabs = getVisibleTabs(isOwnerRole);
   const { activeTab, setActiveTab } = useAdminTab(isOwnerRole);
-  const showSiteConfigSave = Boolean(config) && activeTab === 'site';
+  const activeSaveAction =
+    activeTab === 'site'
+      ? {
+          formId: SITE_CONFIG_FORM_ID,
+          saving: siteConfigSaving,
+          dirty: siteConfigDirty,
+          title: '保存站点配置',
+        }
+      : activeTab === 'runtime'
+        ? {
+            formId: RUNTIME_PARAMS_FORM_ID,
+            saving: runtimeParamsSaving,
+            dirty: runtimeParamsDirty,
+            title: '保存运行参数',
+          }
+        : null;
 
   const { fetchConfig, resetConfig } = useAdminPageActions({
     showAlert,
@@ -119,20 +140,34 @@ function AdminPageClient() {
                 onSelect={setActiveTab}
               />
             </div>
-            {showSiteConfigSave && (
+            {config && activeSaveAction && (
               <button
                 type='submit'
-                form={SITE_CONFIG_FORM_ID}
-                disabled={siteConfigSaving}
-                title={siteConfigSaving ? '保存中...' : '保存站点配置'}
-                aria-label={siteConfigSaving ? '保存中' : '保存站点配置'}
+                form={activeSaveAction.formId}
+                disabled={activeSaveAction.saving || !activeSaveAction.dirty}
+                title={
+                  activeSaveAction.saving
+                    ? '保存中...'
+                    : activeSaveAction.dirty
+                      ? activeSaveAction.title
+                      : '没有改动'
+                }
+                aria-label={
+                  activeSaveAction.saving
+                    ? '保存中'
+                    : activeSaveAction.dirty
+                      ? activeSaveAction.title
+                      : '没有改动'
+                }
                 className={`${headerActionButtonClassName} ${
-                  siteConfigSaving
+                  activeSaveAction.saving
                     ? 'cursor-not-allowed bg-gray-400 dark:bg-gray-600'
-                    : 'bg-green-600 hover:bg-green-700 dark:bg-green-600 dark:hover:bg-green-700'
+                    : activeSaveAction.dirty
+                      ? 'bg-green-600 hover:bg-green-700 dark:bg-green-600 dark:hover:bg-green-700'
+                      : 'cursor-not-allowed bg-gray-200 text-gray-400 dark:bg-gray-700 dark:text-gray-500'
                 }`}
               >
-                {siteConfigSaving ? (
+                {activeSaveAction.saving ? (
                   <Loader2 size={18} className='animate-spin' />
                 ) : (
                   <Save size={18} />
@@ -160,6 +195,9 @@ function AdminPageClient() {
               role={role}
               refreshConfig={fetchConfig}
               onSiteConfigSavingChange={setSiteConfigSaving}
+              onRuntimeParamsSavingChange={setRuntimeParamsSaving}
+              onSiteConfigDirtyChange={setSiteConfigDirty}
+              onRuntimeParamsDirtyChange={setRuntimeParamsDirty}
             />
           </section>
         </div>

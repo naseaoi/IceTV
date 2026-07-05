@@ -96,6 +96,8 @@ export async function initializeArtPlayer(
     handleNextEpisode,
     handleSkipConfigChange,
     saveCurrentPlayProgress,
+    reportPlaybackStats,
+    startPlaybackStatsSession,
     requestWakeLock,
     releaseWakeLock,
     cleanupPlayer,
@@ -395,6 +397,7 @@ export async function initializeArtPlayer(
         }
       }
       showSourceSwitchSuccessNotice();
+      startPlaybackStatsSession?.();
       onPlaybackStarted?.();
       playbackRequestModeRef.current = 'initial';
     };
@@ -604,11 +607,13 @@ export async function initializeArtPlayer(
     player.on('pause', () => {
       void releaseWakeLock();
       saveCurrentPlayProgress();
+      reportPlaybackStats?.(true);
       setIsPlaying(false);
     });
 
     player.on('video:ended', () => {
       void releaseWakeLock();
+      reportPlaybackStats?.(true);
       setIsPlaying(false);
       restorePlayerPlaybackRate(player, lastPlaybackRateRef.current);
       tryAutoAdvanceEpisode();
@@ -757,6 +762,7 @@ export async function initializeArtPlayer(
       if (now - lastSaveTimeRef.current > 5000) {
         saveCurrentPlayProgress();
       }
+      reportPlaybackStats?.();
     });
 
     player.on('video:seeking', () => {

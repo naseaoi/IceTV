@@ -26,71 +26,129 @@ import {
 } from '@/lib/douban-options';
 import { DEFAULT_DOUBAN_IMAGE_PROXY_TYPE } from '@/lib/douban-source';
 import { localPreferenceToggleDefinitions } from '@/lib/local-preference-toggles';
+import { DEFAULT_RUNTIME_PARAMS } from '@/lib/runtime-params';
+
+const DEFAULT_SITE_SETTINGS: SiteConfig = {
+  SiteName: '',
+  SiteIcon: '',
+  Announcement: '',
+  EnableLiveEntry: false,
+  DefaultAggregateSearch: true,
+  EnableOptimization: true,
+  AutoSwitchSourceOnTimeout: false,
+  LiveDirectConnect: false,
+  ...DEFAULT_RUNTIME_PARAMS,
+  DoubanProxyType: 'direct',
+  DoubanProxy: '',
+  BangumiDataSource: DEFAULT_BANGUMI_DATA_SOURCE,
+  BangumiProxy: '',
+  DoubanImageProxyType: DEFAULT_DOUBAN_IMAGE_PROXY_TYPE,
+  DoubanImageProxy: '',
+  DisableYellowFilter: false,
+  FluidSearch: true,
+};
+
+type EditableSiteSettings = Pick<
+  SiteConfig,
+  | 'SiteName'
+  | 'SiteIcon'
+  | 'Announcement'
+  | 'EnableLiveEntry'
+  | 'DefaultAggregateSearch'
+  | 'EnableOptimization'
+  | 'AutoSwitchSourceOnTimeout'
+  | 'LiveDirectConnect'
+  | 'DoubanProxyType'
+  | 'BangumiDataSource'
+  | 'DoubanImageProxyType'
+  | 'DisableYellowFilter'
+  | 'FluidSearch'
+>;
+
+function buildSiteSettings(config: AdminConfig): SiteConfig {
+  return {
+    ...config.SiteConfig,
+    DoubanProxyType: normalizeSiteDoubanProxyType(
+      config.SiteConfig.DoubanProxyType,
+    ),
+    DoubanProxy: '',
+    BangumiDataSource: normalizeSiteBangumiDataSource(
+      config.SiteConfig.BangumiDataSource,
+    ),
+    BangumiProxy: '',
+    DoubanImageProxyType: normalizeSiteDoubanImageProxyType(
+      config.SiteConfig.DoubanImageProxyType,
+    ),
+    DoubanImageProxy: '',
+    EnableLiveEntry: config.SiteConfig.EnableLiveEntry ?? false,
+    DefaultAggregateSearch: config.SiteConfig.DefaultAggregateSearch ?? true,
+    EnableOptimization: config.SiteConfig.EnableOptimization ?? true,
+    AutoSwitchSourceOnTimeout:
+      config.SiteConfig.AutoSwitchSourceOnTimeout ?? false,
+    LiveDirectConnect: config.SiteConfig.LiveDirectConnect ?? false,
+    DisableYellowFilter: config.SiteConfig.DisableYellowFilter ?? false,
+    FluidSearch: config.SiteConfig.FluidSearch ?? true,
+  };
+}
+
+function normalizeEditableSiteSettings(
+  value: SiteConfig,
+): EditableSiteSettings {
+  return {
+    SiteName: value.SiteName || '',
+    SiteIcon: value.SiteIcon || '',
+    Announcement: value.Announcement || '',
+    EnableLiveEntry: value.EnableLiveEntry ?? false,
+    DefaultAggregateSearch: value.DefaultAggregateSearch ?? true,
+    EnableOptimization: value.EnableOptimization ?? true,
+    AutoSwitchSourceOnTimeout: value.AutoSwitchSourceOnTimeout ?? false,
+    LiveDirectConnect: value.LiveDirectConnect ?? false,
+    DoubanProxyType: normalizeSiteDoubanProxyType(value.DoubanProxyType),
+    BangumiDataSource: normalizeSiteBangumiDataSource(value.BangumiDataSource),
+    DoubanImageProxyType: normalizeSiteDoubanImageProxyType(
+      value.DoubanImageProxyType,
+    ),
+    DisableYellowFilter: value.DisableYellowFilter ?? false,
+    FluidSearch: value.FluidSearch ?? true,
+  };
+}
 
 const SiteConfigComponent = ({
   config,
   refreshConfig,
   onSavingChange,
+  onDirtyChange,
 }: {
   config: AdminConfig | null;
   refreshConfig: () => Promise<void>;
   onSavingChange?: (saving: boolean) => void;
+  onDirtyChange?: (dirty: boolean) => void;
 }) => {
   const { alertModal, showAlert, hideAlert } = useAlertModal();
   const { withLoading } = useLoadingState();
-  const [siteSettings, setSiteSettings] = useState<SiteConfig>({
-    SiteName: '',
-    SiteIcon: '',
-    Announcement: '',
-    EnableLiveEntry: false,
-    DefaultAggregateSearch: true,
-    EnableOptimization: true,
-    AutoSwitchSourceOnTimeout: false,
-    LiveDirectConnect: false,
-    SearchDownstreamMaxPage: 1,
-    SiteInterfaceCacheTime: 7200,
-    DoubanProxyType: 'direct',
-    DoubanProxy: '',
-    BangumiDataSource: DEFAULT_BANGUMI_DATA_SOURCE,
-    BangumiProxy: '',
-    DoubanImageProxyType: DEFAULT_DOUBAN_IMAGE_PROXY_TYPE,
-    DoubanImageProxy: '',
-    DisableYellowFilter: false,
-    FluidSearch: true,
-  });
+  const [siteSettings, setSiteSettings] = useState<SiteConfig>(
+    DEFAULT_SITE_SETTINGS,
+  );
+  const [baselineSiteSettings, setBaselineSiteSettings] =
+    useState<EditableSiteSettings>(() =>
+      normalizeEditableSiteSettings(DEFAULT_SITE_SETTINGS),
+    );
 
   // 站点图标相关状态
   const [iconPreview, setIconPreview] = useState<string>('');
   const [iconUploading, setIconUploading] = useState(false);
   const iconFileRef = useRef<HTMLInputElement>(null);
   const savingRef = useRef(false);
+  const normalizedSiteSettings = normalizeEditableSiteSettings(siteSettings);
+  const siteSettingsDirty =
+    JSON.stringify(normalizedSiteSettings) !==
+    JSON.stringify(baselineSiteSettings);
 
   useEffect(() => {
     if (config?.SiteConfig) {
-      setSiteSettings({
-        ...config.SiteConfig,
-        DoubanProxyType: normalizeSiteDoubanProxyType(
-          config.SiteConfig.DoubanProxyType,
-        ),
-        DoubanProxy: '',
-        BangumiDataSource: normalizeSiteBangumiDataSource(
-          config.SiteConfig.BangumiDataSource,
-        ),
-        BangumiProxy: '',
-        DoubanImageProxyType: normalizeSiteDoubanImageProxyType(
-          config.SiteConfig.DoubanImageProxyType,
-        ),
-        DoubanImageProxy: '',
-        EnableLiveEntry: config.SiteConfig.EnableLiveEntry ?? false,
-        DefaultAggregateSearch:
-          config.SiteConfig.DefaultAggregateSearch ?? true,
-        EnableOptimization: config.SiteConfig.EnableOptimization ?? true,
-        AutoSwitchSourceOnTimeout:
-          config.SiteConfig.AutoSwitchSourceOnTimeout ?? false,
-        LiveDirectConnect: config.SiteConfig.LiveDirectConnect ?? false,
-        DisableYellowFilter: config.SiteConfig.DisableYellowFilter ?? false,
-        FluidSearch: config.SiteConfig.FluidSearch ?? true,
-      });
+      const nextSiteSettings = buildSiteSettings(config);
+      setSiteSettings(nextSiteSettings);
+      setBaselineSiteSettings(normalizeEditableSiteSettings(nextSiteSettings));
       // 初始化图标预览
       const icon = config.SiteConfig.SiteIcon;
       if (icon) {
@@ -98,6 +156,10 @@ const SiteConfigComponent = ({
       }
     }
   }, [config]);
+
+  useEffect(() => {
+    onDirtyChange?.(siteSettingsDirty);
+  }, [onDirtyChange, siteSettingsDirty]);
 
   // 处理豆瓣数据源变化
   const handleDoubanDataSourceChange = (value: string) => {
@@ -144,7 +206,7 @@ const SiteConfigComponent = ({
   };
 
   const handleSave = async () => {
-    if (savingRef.current) {
+    if (savingRef.current || !siteSettingsDirty) {
       return;
     }
 
@@ -155,6 +217,7 @@ const SiteConfigComponent = ({
       await withLoading('saveSiteConfig', async () => {
         await adminPost('/api/admin/site', { ...siteSettings }, '保存失败');
 
+        setBaselineSiteSettings(normalizedSiteSettings);
         showSuccess('保存成功, 请刷新页面', showAlert);
         await refreshConfig();
       });
@@ -422,44 +485,6 @@ const SiteConfigComponent = ({
               options={siteBangumiDataSourceOptions}
             />
           </div>
-        </div>
-
-        {/* 搜索接口可拉取最大页数 */}
-        <div>
-          <label className='mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300'>
-            搜索接口可拉取最大页数
-          </label>
-          <input
-            type='number'
-            min={1}
-            value={siteSettings.SearchDownstreamMaxPage}
-            onChange={(e) =>
-              setSiteSettings((prev) => ({
-                ...prev,
-                SearchDownstreamMaxPage: Number(e.target.value),
-              }))
-            }
-            className='w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-gray-900 focus:border-transparent focus:ring-2 focus:ring-green-500 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100'
-          />
-        </div>
-
-        {/* 站点接口缓存时间 */}
-        <div>
-          <label className='mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300'>
-            站点接口缓存时间（秒）
-          </label>
-          <input
-            type='number'
-            min={1}
-            value={siteSettings.SiteInterfaceCacheTime}
-            onChange={(e) =>
-              setSiteSettings((prev) => ({
-                ...prev,
-                SiteInterfaceCacheTime: Number(e.target.value),
-              }))
-            }
-            className='w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-gray-900 focus:border-transparent focus:ring-2 focus:ring-green-500 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100'
-          />
         </div>
       </div>
 

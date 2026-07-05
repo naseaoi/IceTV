@@ -1,5 +1,6 @@
 ﻿import { NextRequest, NextResponse } from 'next/server';
 
+import { getConfigForRead } from '@/lib/config';
 import { authorizeProxyRequest } from '@/lib/proxy-auth';
 import {
   fetchStreamThroughProxy,
@@ -19,6 +20,7 @@ import {
 } from '@/lib/proxy-diagnostics';
 import { markSourceCors, responseAllowsCors } from '@/lib/source-capability';
 import { fetchWithUrlGuard, validateProxyUrlForRequest } from '@/lib/url-guard';
+import { normalizeRuntimeParams } from '@/lib/runtime-params';
 
 import { getProxySourceKey, resolveProxyUserAgent } from '../utils';
 
@@ -107,6 +109,10 @@ export async function GET(request: NextRequest) {
   }
 
   const ua = await resolveProxyUserAgent(source);
+  const runtimeParams = normalizeRuntimeParams(
+    (await getConfigForRead()).SiteConfig,
+  );
+  const timeoutMs = runtimeParams.ProxyRequestTimeoutSeconds * 1000;
 
   try {
     const headers: Record<string, string> = {
@@ -124,7 +130,7 @@ export async function GET(request: NextRequest) {
             new URL(validation.url),
             proxyUrl,
             {
-              timeoutMs: 20_000,
+              timeoutMs,
               userAgent: ua,
               maxBytes: MAX_SEGMENT_BYTES,
               accept: '*/*',
@@ -183,6 +189,7 @@ export async function GET(request: NextRequest) {
     const response = await fetchWithUrlGuard(validation.url, {
       headers,
       skipInitialValidation: true,
+      timeoutMs,
     });
     if (!response.ok) {
       const diagnostic = createProxyFailureDiagnostic({

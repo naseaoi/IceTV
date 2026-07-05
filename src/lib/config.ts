@@ -17,6 +17,10 @@ import {
   DEFAULT_DOUBAN_IMAGE_PROXY_TYPE,
   DEFAULT_DOUBAN_PROXY_TYPE,
 } from '@/lib/douban-source';
+import {
+  DEFAULT_RUNTIME_PARAMS,
+  normalizeRuntimeParams,
+} from '@/lib/runtime-params';
 import { normalizeUsername } from '@/lib/username';
 
 export interface ApiSite {
@@ -289,9 +293,12 @@ async function getInitConfig(
       EnableOptimization: true,
       AutoSwitchSourceOnTimeout: false,
       LiveDirectConnect: false,
-      SearchDownstreamMaxPage:
-        Number(process.env.NEXT_PUBLIC_SEARCH_MAX_PAGE) || 5,
-      SiteInterfaceCacheTime: cfgFile.cache_time || 7200,
+      ...normalizeRuntimeParams({
+        ...DEFAULT_RUNTIME_PARAMS,
+        SearchDownstreamMaxPage:
+          Number(process.env.NEXT_PUBLIC_SEARCH_MAX_PAGE) || 5,
+        SiteInterfaceCacheTime: cfgFile.cache_time || 7200,
+      }),
       DoubanProxyType: process.env.NEXT_PUBLIC_DOUBAN_PROXY_TYPE || 'direct',
       DoubanProxy: process.env.NEXT_PUBLIC_DOUBAN_PROXY || '',
       BangumiDataSource: normalizeBangumiDataSource(
@@ -479,9 +486,12 @@ export function configSelfCheck(adminConfig: AdminConfig): AdminConfig {
       EnableOptimization: true,
       AutoSwitchSourceOnTimeout: false,
       LiveDirectConnect: false,
-      SearchDownstreamMaxPage:
-        Number(process.env.NEXT_PUBLIC_SEARCH_MAX_PAGE) || 5,
-      SiteInterfaceCacheTime: 7200,
+      ...normalizeRuntimeParams({
+        ...DEFAULT_RUNTIME_PARAMS,
+        SearchDownstreamMaxPage:
+          Number(process.env.NEXT_PUBLIC_SEARCH_MAX_PAGE) || 5,
+        SiteInterfaceCacheTime: 7200,
+      }),
       DoubanProxyType: process.env.NEXT_PUBLIC_DOUBAN_PROXY_TYPE || 'direct',
       DoubanProxy: process.env.NEXT_PUBLIC_DOUBAN_PROXY || '',
       BangumiDataSource: normalizeBangumiDataSource(
@@ -520,6 +530,10 @@ export function configSelfCheck(adminConfig: AdminConfig): AdminConfig {
     adminConfig.SiteConfig.FluidSearch =
       process.env.NEXT_PUBLIC_FLUID_SEARCH !== 'false';
   }
+  Object.assign(
+    adminConfig.SiteConfig,
+    normalizeRuntimeParams(adminConfig.SiteConfig),
+  );
   adminConfig.SiteConfig.DoubanProxyType = normalizeSiteDoubanProxyType(
     adminConfig.SiteConfig.DoubanProxyType,
   );
@@ -770,15 +784,17 @@ export function getCacheTime(
   config?: Readonly<AdminConfig>,
 ): number | Promise<number> {
   if (config) {
-    return config.SiteConfig.SiteInterfaceCacheTime || 7200;
+    return normalizeRuntimeParams(config.SiteConfig).SiteInterfaceCacheTime;
   }
 
   if (cachedConfig && isCachedConfigFresh()) {
-    return cachedConfig.SiteConfig.SiteInterfaceCacheTime || 7200;
+    return normalizeRuntimeParams(cachedConfig.SiteConfig)
+      .SiteInterfaceCacheTime;
   }
 
   return getConfigForRead().then(
-    (currentConfig) => currentConfig.SiteConfig.SiteInterfaceCacheTime || 7200,
+    (currentConfig) =>
+      normalizeRuntimeParams(currentConfig.SiteConfig).SiteInterfaceCacheTime,
   );
 }
 
@@ -912,6 +928,7 @@ async function readPublicConfig() {
     EnableOptimization: config.SiteConfig.EnableOptimization,
     AutoSwitchSourceOnTimeout: config.SiteConfig.AutoSwitchSourceOnTimeout,
     LiveDirectConnect: config.SiteConfig.LiveDirectConnect,
+    ...normalizeRuntimeParams(config.SiteConfig),
     DoubanProxyType: getPublicDoubanProxyType(
       config.SiteConfig.DoubanProxyType,
     ),

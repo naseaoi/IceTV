@@ -78,6 +78,13 @@ export default async function RootLayout({
     LIVE_DIRECT_CONNECT: publicConfig.LiveDirectConnect,
     CUSTOM_CATEGORIES: publicConfig.CustomCategories,
     FLUID_SEARCH: publicConfig.FluidSearch,
+    VOD_PAGE_TIMEOUT_SECONDS: publicConfig.VodPageTimeoutSeconds,
+    PLAYBACK_HISTORY_PAGE_SIZE: publicConfig.PlaybackHistoryPageSize,
+    PLAYBACK_HISTORY_LIMIT: publicConfig.PlaybackHistoryLimit,
+    SEARCH_HISTORY_LIMIT: publicConfig.SearchHistoryLimit,
+    SOURCE_FAILURE_COOLDOWN_SECONDS: publicConfig.SourceFailureCooldownSeconds,
+    CONTINUE_WATCHING_LIMIT: publicConfig.ContinueWatchingLimit,
+    COVER_IMAGE_CACHE_SIZE: publicConfig.CoverImageCacheSize,
   };
   const serializedRuntimeConfig = serializeForInlineScript(runtimeConfig);
   const serializedSidebarCollapsedStorageKey = serializeForInlineScript(

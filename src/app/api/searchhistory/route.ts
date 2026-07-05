@@ -2,12 +2,11 @@ import { NextRequest, NextResponse } from 'next/server';
 
 import { isGuardFailure, requireActiveUser } from '@/lib/api-auth';
 import { db } from '@/lib/db';
+import { getConfigForRead } from '@/lib/config';
 import { NO_STORE_HEADERS } from '@/lib/http-cache';
+import { normalizeRuntimeParams } from '@/lib/runtime-params';
 
 export const runtime = 'nodejs';
-
-// 最大保存条数（与客户端保持一致）
-const HISTORY_LIMIT = 20;
 
 /**
  * GET /api/searchhistory
@@ -51,11 +50,21 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    await db.addSearchHistory(guardResult.username, keyword);
+    const runtimeParams = normalizeRuntimeParams(
+      (await getConfigForRead()).SiteConfig,
+    );
 
-    // 再次获取最新列表，确保客户端与服务端同步
+    await db.addSearchHistory(
+      guardResult.username,
+      keyword,
+      runtimeParams.SearchHistoryLimit,
+    );
+
     const history = await db.getSearchHistory(guardResult.username);
-    return NextResponse.json(history.slice(0, HISTORY_LIMIT), { status: 200 });
+    return NextResponse.json(
+      history.slice(0, runtimeParams.SearchHistoryLimit),
+      { status: 200 },
+    );
   } catch (err) {
     console.error('添加搜索历史失败', err);
     return NextResponse.json(

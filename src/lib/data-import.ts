@@ -3,8 +3,10 @@
 import { configSelfCheck } from './config';
 import { getOwnerUsername } from './env.server';
 import { hashPassword } from './password';
+import { normalizeRuntimeParams } from './runtime-params';
 import {
   Favorite,
+  PlaybackSession,
   PlayRecord,
   SkipConfig,
   StorageImportData,
@@ -15,6 +17,7 @@ import { parseStorageKey } from './utils';
 const MAX_USERS = 1000;
 const MAX_RECORDS_PER_USER = 20000;
 const MAX_FAVORITES_PER_USER = 20000;
+const MAX_PLAYBACK_SESSIONS_PER_USER = 500;
 const MAX_SKIP_CONFIGS_PER_USER = 2000;
 const MAX_SEARCH_HISTORY = 20;
 const MAX_TOTAL_ITEMS = 150000;
@@ -61,12 +64,18 @@ export async function parseImportData(
 
   for (const [username, rawUserData] of userEntries) {
     assertKey(username, '用户名', MAX_USERNAME_LENGTH);
-    const normalizedUserData = normalizeUserData(rawUserData, username);
+    const normalizedUserData = normalizeUserData(
+      rawUserData,
+      username,
+      adminConfig.SiteConfig.SearchHistoryLimit,
+      adminConfig.SiteConfig.DataImportPlaybackSessionsLimit,
+    );
     totalItems +=
       Object.keys(normalizedUserData.playRecords).length +
       Object.keys(normalizedUserData.favorites).length +
       normalizedUserData.searchHistory.length +
-      Object.keys(normalizedUserData.skipConfigs).length;
+      Object.keys(normalizedUserData.skipConfigs).length +
+      Object.keys(normalizedUserData.playbackSessions).length;
 
     if (totalItems > MAX_TOTAL_ITEMS) {
       throw new ImportValidationError('导入数据量超出限制', 413);
@@ -129,6 +138,10 @@ function normalizeAdminConfig(value: unknown): AdminConfig {
   assertBoolean(config.SiteConfig.LiveDirectConnect, 'IPTV直连');
   assertFiniteNumber(config.SiteConfig.SearchDownstreamMaxPage, '搜索页数');
   assertFiniteNumber(config.SiteConfig.SiteInterfaceCacheTime, '缓存时间');
+  const runtimeParams = normalizeRuntimeParams(config.SiteConfig);
+  for (const [key, value] of Object.entries(runtimeParams)) {
+    assertFiniteNumber(value, key);
+  }
   limitString(
     config.SiteConfig.DoubanProxyType,
     '豆瓣代理类型',
@@ -297,6 +310,8 @@ function validateLiveConfig(config: AdminConfig): void {
 function normalizeUserData(
   value: unknown,
   username: string,
+  searchHistoryLimit: number,
+  playbackSessionsLimit: number,
 ): StorageUserImportData {
   const input = requireObject(value, `用户 ${username} 数据格式无效`);
   return {
@@ -312,13 +327,22 @@ function normalizeUserData(
       MAX_FAVORITES_PER_USER,
       normalizeFavorite,
     ),
-    searchHistory: normalizeSearchHistory(input.searchHistory),
+    searchHistory: normalizeSearchHistory(
+      input.searchHistory,
+      searchHistoryLimit,
+    ),
     skipConfigs: normalizeRecordMap(
       input.skipConfigs,
       '跳过配置',
       MAX_SKIP_CONFIGS_PER_USER,
       normalizeSkipConfig,
       true,
+    ),
+    playbackSessions: normalizeRecordMap(
+      input.playbackSessions,
+      '播放统计',
+      playbackSessionsLimit || MAX_PLAYBACK_SESSIONS_PER_USER,
+      normalizePlaybackSession,
     ),
   };
 }
@@ -327,7 +351,7 @@ function normalizeRecordMap<T>(
   value: unknown,
   label: string,
   maxEntries: number,
-  normalizeValue: (value: unknown) => T,
+  normalizeValue: (value: unknown, key: string) => T,
   requireStorageKey: boolean = false,
 ): Record<string, T> {
   if (value === undefined || value === null) {
@@ -345,7 +369,7 @@ function normalizeRecordMap<T>(
     if (requireStorageKey && !parseStorageKey(key)) {
       throw new ImportValidationError(`${label} key 格式无效`);
     }
-    output[key] = normalizeValue(item);
+    output[key] = normalizeValue(item, key);
   }
   return output;
 }
@@ -402,14 +426,18 @@ function normalizeFavorite(value: unknown): Favorite {
   };
 }
 
-function normalizeSearchHistory(value: unknown): string[] {
+function normalizeSearchHistory(
+  value: unknown,
+  limit = MAX_SEARCH_HISTORY,
+): string[] {
   if (value === undefined || value === null) {
     return [];
   }
   if (!Array.isArray(value)) {
     throw new ImportValidationError('搜索历史格式无效');
   }
-  return value.slice(0, MAX_SEARCH_HISTORY).map((item) => {
+  const safeLimit = Math.min(Math.max(Math.floor(limit), 1), 200);
+  return value.slice(0, safeLimit).map((item) => {
     const keyword = limitString(item, '搜索关键词', 191).trim();
     if (!keyword) {
       throw new ImportValidationError('搜索关键词不能为空');
@@ -434,6 +462,51 @@ function normalizeSkipConfig(value: unknown): SkipConfig {
       0,
       MAX_SECONDS,
     ),
+  };
+}
+
+function normalizePlaybackSession(
+  value: unknown,
+  key: string,
+): PlaybackSession {
+  const input = requireObject(value, '播放统计格式无效');
+  if (!/^[a-zA-Z0-9_-]{8,80}$/.test(key)) {
+    throw new ImportValidationError('播放统计 key 格式无效');
+  }
+
+  const startedAt = assertFiniteNumber(input.started_at, '开始时间');
+  const endedAt = assertFiniteNumber(input.ended_at, '结束时间');
+
+  return {
+    id: key,
+    source: limitString(input.source, '视频源', MAX_KEY_LENGTH),
+    video_id: limitString(input.video_id, '视频 ID', MAX_KEY_LENGTH),
+    episode_index: assertBoundedNumber(input.episode_index, '集数', 0, 10000),
+    title: limitString(input.title, '标题', MAX_SHORT_STRING_LENGTH),
+    source_name: limitString(
+      input.source_name,
+      '源名称',
+      MAX_SHORT_STRING_LENGTH,
+    ),
+    cover: limitString(input.cover, '封面', MAX_LONG_STRING_LENGTH),
+    year: limitString(input.year, '年份', MAX_SHORT_STRING_LENGTH),
+    started_at: startedAt,
+    ended_at: Math.max(startedAt, endedAt),
+    watch_seconds: assertBoundedNumber(
+      input.watch_seconds,
+      '观看时长',
+      0,
+      MAX_SECONDS,
+    ),
+    last_position: assertBoundedNumber(
+      input.last_position,
+      '最后进度',
+      0,
+      MAX_SECONDS,
+    ),
+    total_time: assertBoundedNumber(input.total_time, '总时长', 0, MAX_SECONDS),
+    created_at: assertFiniteNumber(input.created_at, '创建时间'),
+    updated_at: assertFiniteNumber(input.updated_at, '更新时间'),
   };
 }
 

@@ -18,6 +18,7 @@ type DnsLookup = typeof lookup;
 
 type GuardedFetchInit = RequestInit & {
   skipInitialValidation?: boolean;
+  timeoutMs?: number;
 };
 
 type DnsCacheEntry = {
@@ -90,10 +91,13 @@ export async function fetchWithUrlGuard(
   raw: string,
   init: GuardedFetchInit = {},
 ): Promise<Response> {
-  const { skipInitialValidation = false, ...fetchInit } = init;
+  const { skipInitialValidation = false, timeoutMs, ...fetchInit } = init;
   let currentUrl = raw;
   const requestedRedirect = fetchInit.redirect;
-  const timeoutMs = getFetchTimeoutMs();
+  const fetchTimeoutMs =
+    Number.isFinite(timeoutMs) && Number(timeoutMs) > 0
+      ? Math.floor(Number(timeoutMs))
+      : getFetchTimeoutMs();
 
   for (let redirectCount = 0; redirectCount <= MAX_REDIRECTS; redirectCount++) {
     const validation =
@@ -105,7 +109,10 @@ export async function fetchWithUrlGuard(
     }
 
     const controller = new AbortController();
-    const timeout = windowLikeSetTimeout(() => controller.abort(), timeoutMs);
+    const timeout = windowLikeSetTimeout(
+      () => controller.abort(),
+      fetchTimeoutMs,
+    );
     let response: Response;
     try {
       response = await fetch(validation.url, {

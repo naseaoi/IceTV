@@ -13,6 +13,7 @@ import {
   PlayerPageAccent,
   PlayerPageLayout,
 } from '@/components/PlayerPageLayout';
+import { useRuntimeConfig } from '@/components/RuntimeConfigProvider';
 import EpisodeSelector from '@/features/play/components/EpisodeSelector';
 import type { VideoLoadingStage } from '@/features/play/hooks/usePlayPageState';
 import { getSourceFailure } from '@/lib/failed-source-cooldown';
@@ -60,8 +61,7 @@ interface PlayMainContentProps {
   playbackError?: string | null;
 }
 
-const PLAYER_LOADING_TIMEOUT_MS = 15_000;
-const PLAYER_LOADING_TIMEOUT_SECONDS = PLAYER_LOADING_TIMEOUT_MS / 1000;
+const DEFAULT_PLAYER_LOADING_TIMEOUT_SECONDS = 15;
 
 const playAccents: Record<string, PlayerPageAccent> = {
   film: {
@@ -156,10 +156,12 @@ function PlayLoadingOverlay({
   loadingTimedOut,
   videoLoadingStage,
   realtimeLoadSpeed,
+  timeoutSeconds,
 }: {
   loadingTimedOut: boolean;
   videoLoadingStage: VideoLoadingStage;
   realtimeLoadSpeed: string;
+  timeoutSeconds: number;
 }) {
   const stageConfig = LOADING_STAGE_CONFIG[videoLoadingStage];
   const statusText = realtimeLoadSpeed || stageConfig.status;
@@ -169,7 +171,7 @@ function PlayLoadingOverlay({
       <PlayerOverlayPanel
         zClassName='z-[500]'
         title={stageConfig.timeoutTitle}
-        message={`已等待超过 ${PLAYER_LOADING_TIMEOUT_SECONDS} 秒，可能是网络问题或播放源不可用`}
+        message={`已等待超过 ${timeoutSeconds} 秒，可能是网络问题或播放源不可用`}
       />
     );
   }
@@ -370,6 +372,15 @@ export function PlayMainContent(props: PlayMainContentProps) {
     .join(' · ');
   const headerYearText = (detail?.year || videoYear || '').toString();
   const [loadingTimedOut, setLoadingTimedOut] = useState(false);
+  const runtimeConfig = useRuntimeConfig();
+  const loadingTimeoutSeconds = Math.max(
+    1,
+    Math.floor(
+      runtimeConfig.VOD_PAGE_TIMEOUT_SECONDS ||
+        DEFAULT_PLAYER_LOADING_TIMEOUT_SECONDS,
+    ),
+  );
+  const loadingTimeoutMs = loadingTimeoutSeconds * 1000;
   const onLoadingTimeoutRef = useRef(onLoadingTimeout);
   const currentSourceFailure = useMemo(() => {
     const key =
@@ -395,9 +406,15 @@ export function PlayMainContent(props: PlayMainContentProps) {
     const timer = setTimeout(() => {
       setLoadingTimedOut(true);
       onLoadingTimeoutRef.current?.();
-    }, PLAYER_LOADING_TIMEOUT_MS);
+    }, loadingTimeoutMs);
     return () => clearTimeout(timer);
-  }, [isVideoLoading, videoLoadingStage, videoLoadingAttempt, playbackError]);
+  }, [
+    isVideoLoading,
+    videoLoadingStage,
+    videoLoadingAttempt,
+    playbackError,
+    loadingTimeoutMs,
+  ]);
 
   const headerTags = buildHeaderTags({
     headerSourceText,
@@ -434,6 +451,7 @@ export function PlayMainContent(props: PlayMainContentProps) {
               loadingTimedOut={loadingTimedOut}
               videoLoadingStage={videoLoadingStage}
               realtimeLoadSpeed={loadingStatusText}
+              timeoutSeconds={loadingTimeoutSeconds}
             />
           )}
           {playbackError && (

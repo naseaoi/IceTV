@@ -1,9 +1,15 @@
 /** @jest-environment node */
 
 import type { AdminConfig } from '@/types/admin';
+import { DEFAULT_RUNTIME_PARAMS } from '@/lib/runtime-params';
 
 import { LocalSqliteStorage } from '../sqlite.db';
-import type { Favorite, PlayRecord, SkipConfig } from '../types';
+import type {
+  Favorite,
+  PlaybackSession,
+  PlayRecord,
+  SkipConfig,
+} from '../types';
 
 const adminConfig: AdminConfig = {
   ConfigSubscribtion: { URL: '', AutoUpdate: false, LastCheck: '' },
@@ -17,6 +23,7 @@ const adminConfig: AdminConfig = {
     EnableOptimization: true,
     AutoSwitchSourceOnTimeout: false,
     LiveDirectConnect: false,
+    ...DEFAULT_RUNTIME_PARAMS,
     SearchDownstreamMaxPage: 5,
     SiteInterfaceCacheTime: 300,
     DoubanProxyType: 'direct',
@@ -67,6 +74,24 @@ const skipConfig: SkipConfig = {
   outro_time: 30,
 };
 
+const playbackSession: PlaybackSession = {
+  id: 'session_demo_1',
+  source: 'source',
+  video_id: '1',
+  episode_index: 1,
+  title: 'Demo',
+  source_name: 'Source',
+  cover: '',
+  year: '2026',
+  started_at: 1000,
+  ended_at: 2000,
+  watch_seconds: 60,
+  last_position: 60,
+  total_time: 120,
+  created_at: 1000,
+  updated_at: 2000,
+};
+
 describe('sqlite storage contract', () => {
   it('persists user scoped data and deletes it with the user', async () => {
     const storage = new LocalSqliteStorage(':memory:');
@@ -75,6 +100,7 @@ describe('sqlite storage contract', () => {
     await storage.setPlayRecord('demo-user', 'source+1', playRecord);
     await storage.setFavorite('demo-user', 'source+1', favorite);
     await storage.setSkipConfig('demo-user', 'source', '1', skipConfig);
+    await storage.setPlaybackSession('demo-user', playbackSession);
     await storage.addSearchHistory('demo-user', 'first');
     await storage.addSearchHistory('demo-user', 'second');
     await storage.addSearchHistory('demo-user', 'first');
@@ -89,6 +115,9 @@ describe('sqlite storage contract', () => {
     await expect(
       storage.getSkipConfig('demo-user', 'source', '1'),
     ).resolves.toEqual(skipConfig);
+    await expect(storage.getPlaybackSessions('demo-user')).resolves.toEqual([
+      playbackSession,
+    ]);
     await expect(storage.getSearchHistory('demo-user')).resolves.toEqual([
       'first',
       'second',
@@ -100,7 +129,38 @@ describe('sqlite storage contract', () => {
     await expect(storage.getAllPlayRecords('demo-user')).resolves.toEqual({});
     await expect(storage.getAllFavorites('demo-user')).resolves.toEqual({});
     await expect(storage.getAllSkipConfigs('demo-user')).resolves.toEqual({});
+    await expect(storage.getPlaybackSessions('demo-user')).resolves.toEqual([]);
     await expect(storage.getSearchHistory('demo-user')).resolves.toEqual([]);
+  });
+
+  it('searches playback sessions before applying the page limit', async () => {
+    const storage = new LocalSqliteStorage(':memory:');
+    const recentSession: PlaybackSession = {
+      ...playbackSession,
+      id: 'session_recent',
+      title: 'Recent Show',
+      started_at: 3000,
+    };
+    const matchedSession: PlaybackSession = {
+      ...playbackSession,
+      id: 'session_matched',
+      video_id: 'hidden-video',
+      title: 'Hidden Gem',
+      started_at: 2000,
+    };
+    const otherUserSession: PlaybackSession = {
+      ...matchedSession,
+      id: 'session_other_user',
+      started_at: 4000,
+    };
+
+    await storage.setPlaybackSession('demo-user', recentSession);
+    await storage.setPlaybackSession('demo-user', matchedSession);
+    await storage.setPlaybackSession('other-user', otherUserSession);
+
+    await expect(
+      storage.getPlaybackSessions('demo-user', { limit: 1, keyword: 'hidden' }),
+    ).resolves.toEqual([matchedSession]);
   });
 
   it('replaces all data from an import snapshot', async () => {
@@ -118,6 +178,7 @@ describe('sqlite storage contract', () => {
           favorites: { 'source+1': favorite },
           searchHistory: ['first', 'second'],
           skipConfigs: { 'source+1': skipConfig },
+          playbackSessions: { [playbackSession.id]: playbackSession },
         },
       },
     });
@@ -137,6 +198,9 @@ describe('sqlite storage contract', () => {
     await expect(storage.getAllSkipConfigs('demo-user')).resolves.toEqual({
       'source+1': skipConfig,
     });
+    await expect(storage.getPlaybackSessions('demo-user')).resolves.toEqual([
+      playbackSession,
+    ]);
   });
 
   it('returns null when admin config is absent', async () => {

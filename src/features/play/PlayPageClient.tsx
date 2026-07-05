@@ -23,6 +23,7 @@ import { useArtPlayer } from '@/features/play/hooks/useArtPlayer';
 import { useAuthRecovery } from '@/features/play/hooks/useAuthRecovery';
 import { useAutoSwitchOnTimeoutSetting } from '@/features/play/hooks/useAutoSwitchOnTimeoutSetting';
 import { useEpisodeSwitch } from '@/features/play/hooks/useEpisodeSwitch';
+import { usePlaybackStatsReporter } from '@/features/playback-stats/hooks/usePlaybackStatsReporter';
 import {
   peekResolvedLazyEpisodeUrl,
   prewarmLazyEpisodeUrl,
@@ -258,6 +259,17 @@ export function PlayPageClient() {
     cleanupPlayer,
   });
 
+  const { startPlaybackStatsSession, reportPlaybackStats } =
+    usePlaybackStatsReporter({
+      artPlayerRef,
+      currentSourceRef,
+      currentIdRef,
+      videoTitleRef,
+      detailRef,
+      currentEpisodeIndexRef,
+      stableCurrentTimeRef,
+    });
+
   const { handleEpisodeChange, handlePreviousEpisode, handleNextEpisode } =
     useEpisodeSwitch({
       detailRef,
@@ -479,6 +491,8 @@ export function PlayPageClient() {
     handleNextEpisode,
     handleSkipConfigChange,
     saveCurrentPlayProgress: doSaveCurrentProgress,
+    reportPlaybackStats,
+    startPlaybackStatsSession,
     requestWakeLock,
     releaseWakeLock,
     cleanupPlayer,
@@ -530,10 +544,11 @@ export function PlayPageClient() {
 
   useEffect(() => {
     return () => {
+      reportPlaybackStats(true);
       doSaveCheckpoint();
       void doSaveCurrentProgress();
     };
-  }, [doSaveCheckpoint, doSaveCurrentProgress]);
+  }, [reportPlaybackStats, doSaveCheckpoint, doSaveCurrentProgress]);
 
   const handleRetryPlayback = useCallback(() => {
     playbackRequestModeRef.current = 'episode';

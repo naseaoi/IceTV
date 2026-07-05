@@ -1,0 +1,99 @@
+'use client';
+
+import { getAuthInfoFromBrowserCookie } from '@/lib/auth.client';
+
+import type {
+  PlaybackHistoryResponse,
+  PlaybackStatsSummary,
+} from '@/features/playback-stats/types';
+
+const PLAYBACK_HISTORY_PAGE_SIZE = 10;
+
+let playbackStatsSummaryCache: {
+  username: string;
+  data: PlaybackStatsSummary;
+} | null = null;
+let playbackHistoryCache: {
+  username: string;
+  data: PlaybackHistoryResponse;
+} | null = null;
+
+export function getCachedPlaybackStatsSummarySnapshot(): PlaybackStatsSummary | null {
+  const username = getAuthInfoFromBrowserCookie()?.username;
+  return username && playbackStatsSummaryCache?.username === username
+    ? playbackStatsSummaryCache.data
+    : null;
+}
+
+export function getCachedPlaybackHistorySnapshot(): PlaybackHistoryResponse | null {
+  const username = getAuthInfoFromBrowserCookie()?.username;
+  const snapshot =
+    username && playbackHistoryCache?.username === username
+      ? playbackHistoryCache.data
+      : null;
+  return snapshot
+    ? {
+        items: [...snapshot.items],
+        nextCursor: snapshot.nextCursor,
+      }
+    : null;
+}
+
+export function cachePlaybackHistorySnapshot(
+  snapshot: PlaybackHistoryResponse,
+): void {
+  const username = getAuthInfoFromBrowserCookie()?.username;
+  if (!username) return;
+  playbackHistoryCache = {
+    username,
+    data: {
+      items: [...snapshot.items],
+      nextCursor: snapshot.nextCursor,
+    },
+  };
+}
+
+export async function getPlaybackStatsSummary(): Promise<PlaybackStatsSummary | null> {
+  if (!getAuthInfoFromBrowserCookie()?.username) return null;
+
+  const response = await fetch('/api/playback-stats/summary?range=7d', {
+    cache: 'no-store',
+  });
+  if (!response.ok) {
+    throw new Error(`Playback stats summary failed: ${response.status}`);
+  }
+  const summary = (await response.json()) as PlaybackStatsSummary;
+  const username = getAuthInfoFromBrowserCookie()?.username;
+  if (username) {
+    playbackStatsSummaryCache = { username, data: summary };
+  }
+  return summary;
+}
+
+export async function getPlaybackHistory(
+  cursor?: number,
+  keyword?: string,
+  limit = PLAYBACK_HISTORY_PAGE_SIZE,
+): Promise<PlaybackHistoryResponse> {
+  if (!getAuthInfoFromBrowserCookie()?.username) {
+    return { items: [], nextCursor: null };
+  }
+
+  const params = new URLSearchParams({
+    limit: String(limit),
+  });
+  if (cursor) params.set('cursor', String(cursor));
+  if (keyword) params.set('q', keyword);
+
+  const response = await fetch(`/api/playback-stats/history?${params}`, {
+    cache: 'no-store',
+  });
+  if (!response.ok) {
+    throw new Error(`Playback history failed: ${response.status}`);
+  }
+  const history = (await response.json()) as PlaybackHistoryResponse;
+  if (!cursor && !keyword) {
+    cachePlaybackHistorySnapshot(history);
+  }
+  return history;
+}

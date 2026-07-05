@@ -1,6 +1,7 @@
 /** @jest-environment node */
 
 import type { AdminConfig } from '@/types/admin';
+import { DEFAULT_RUNTIME_PARAMS } from '@/lib/runtime-params';
 
 type SearchHistoryRow = {
   username: string;
@@ -13,6 +14,7 @@ type FakeState = {
   playRecords: Map<string, Map<string, string>>;
   favorites: Map<string, Map<string, string>>;
   skipConfigs: Map<string, Map<string, string>>;
+  playbackSessions: Map<string, Record<string, unknown>>;
   searchHistory: SearchHistoryRow[];
   adminConfig: string | null;
 };
@@ -29,6 +31,7 @@ function cloneState(state: FakeState): FakeState {
     playRecords: cloneNestedMap(state.playRecords),
     favorites: cloneNestedMap(state.favorites),
     skipConfigs: cloneNestedMap(state.skipConfigs),
+    playbackSessions: new Map(state.playbackSessions),
     searchHistory: state.searchHistory.map((row) => ({ ...row })),
     adminConfig: state.adminConfig,
   };
@@ -40,6 +43,7 @@ function createState(): FakeState {
     playRecords: new Map(),
     favorites: new Map(),
     skipConfigs: new Map(),
+    playbackSessions: new Map(),
     searchHistory: [],
     adminConfig: null,
   };
@@ -184,6 +188,16 @@ function createFakePool() {
       return [[], []];
     }
 
+    if (normalized === 'DELETE FROM playback_sessions WHERE username = ?') {
+      const [username] = params as [string];
+      for (const [id, row] of currentState.playbackSessions.entries()) {
+        if (row.username === username) {
+          currentState.playbackSessions.delete(id);
+        }
+      }
+      return [[], []];
+    }
+
     if (normalized === 'DELETE FROM play_records') {
       currentState.playRecords.clear();
       return [[], []];
@@ -196,6 +210,131 @@ function createFakePool() {
 
     if (normalized === 'DELETE FROM skip_configs') {
       currentState.skipConfigs.clear();
+      return [[], []];
+    }
+
+    if (normalized === 'DELETE FROM playback_sessions') {
+      currentState.playbackSessions.clear();
+      return [[], []];
+    }
+
+    if (
+      normalized ===
+      'INSERT INTO playback_sessions ( id, username, source, video_id, episode_index, title, source_name, cover, year, started_at, ended_at, watch_seconds, last_position, total_time, created_at, updated_at ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON DUPLICATE KEY UPDATE username = VALUES(username), source = VALUES(source), video_id = VALUES(video_id), episode_index = VALUES(episode_index), title = VALUES(title), source_name = VALUES(source_name), cover = VALUES(cover), year = VALUES(year), started_at = VALUES(started_at), ended_at = VALUES(ended_at), watch_seconds = VALUES(watch_seconds), last_position = VALUES(last_position), total_time = VALUES(total_time), created_at = VALUES(created_at), updated_at = VALUES(updated_at)'
+    ) {
+      const [
+        id,
+        username,
+        source,
+        videoId,
+        episodeIndex,
+        title,
+        sourceName,
+        cover,
+        year,
+        startedAt,
+        endedAt,
+        watchSeconds,
+        lastPosition,
+        totalTime,
+        createdAt,
+        updatedAt,
+      ] = params as [
+        string,
+        string,
+        string,
+        string,
+        number,
+        string,
+        string,
+        string,
+        string,
+        number,
+        number,
+        number,
+        number,
+        number,
+        number,
+        number,
+      ];
+      currentState.playbackSessions.set(id, {
+        id,
+        username,
+        source,
+        video_id: videoId,
+        episode_index: episodeIndex,
+        title,
+        source_name: sourceName,
+        cover,
+        year,
+        started_at: startedAt,
+        ended_at: endedAt,
+        watch_seconds: watchSeconds,
+        last_position: lastPosition,
+        total_time: totalTime,
+        created_at: createdAt,
+        updated_at: updatedAt,
+      });
+      return [[], []];
+    }
+
+    if (
+      normalized ===
+      'INSERT INTO playback_sessions ( id, username, source, video_id, episode_index, title, source_name, cover, year, started_at, ended_at, watch_seconds, last_position, total_time, created_at, updated_at ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
+    ) {
+      const [
+        id,
+        username,
+        source,
+        videoId,
+        episodeIndex,
+        title,
+        sourceName,
+        cover,
+        year,
+        startedAt,
+        endedAt,
+        watchSeconds,
+        lastPosition,
+        totalTime,
+        createdAt,
+        updatedAt,
+      ] = params as [
+        string,
+        string,
+        string,
+        string,
+        number,
+        string,
+        string,
+        string,
+        string,
+        number,
+        number,
+        number,
+        number,
+        number,
+        number,
+        number,
+      ];
+      currentState.playbackSessions.set(id, {
+        id,
+        username,
+        source,
+        video_id: videoId,
+        episode_index: episodeIndex,
+        title,
+        source_name: sourceName,
+        cover,
+        year,
+        started_at: startedAt,
+        ended_at: endedAt,
+        watch_seconds: watchSeconds,
+        last_position: lastPosition,
+        total_time: totalTime,
+        created_at: createdAt,
+        updated_at: updatedAt,
+      });
       return [[], []];
     }
 
@@ -380,6 +519,20 @@ function createFakePool() {
 
     if (
       normalized ===
+      'SELECT id, source, video_id, episode_index, title, source_name, cover, year, started_at, ended_at, watch_seconds, last_position, total_time, created_at, updated_at FROM playback_sessions WHERE username = ? ORDER BY started_at DESC LIMIT ?'
+    ) {
+      const [username, limit] = params as [string, number];
+      return [
+        Array.from(currentState.playbackSessions.values())
+          .filter((row) => row.username === username)
+          .sort((a, b) => Number(b.started_at || 0) - Number(a.started_at || 0))
+          .slice(0, limit),
+        [],
+      ];
+    }
+
+    if (
+      normalized ===
       'SELECT keyword FROM search_history WHERE username = ? ORDER BY sort_index ASC'
     ) {
       const [username] = params as [string];
@@ -459,7 +612,12 @@ jest.mock('mysql2/promise', () => ({
 }));
 
 import { MySqlStorage } from '../mysql.db';
-import type { Favorite, PlayRecord, SkipConfig } from '../types';
+import type {
+  Favorite,
+  PlaybackSession,
+  PlayRecord,
+  SkipConfig,
+} from '../types';
 
 const adminConfig: AdminConfig = {
   ConfigSubscribtion: { URL: '', AutoUpdate: false, LastCheck: '' },
@@ -473,6 +631,7 @@ const adminConfig: AdminConfig = {
     EnableOptimization: true,
     AutoSwitchSourceOnTimeout: false,
     LiveDirectConnect: false,
+    ...DEFAULT_RUNTIME_PARAMS,
     SearchDownstreamMaxPage: 5,
     SiteInterfaceCacheTime: 300,
     DoubanProxyType: 'direct',
@@ -523,6 +682,24 @@ const skipConfig: SkipConfig = {
   outro_time: 30,
 };
 
+const playbackSession: PlaybackSession = {
+  id: 'session_demo_1',
+  source: 'source',
+  video_id: '1',
+  episode_index: 1,
+  title: 'Demo',
+  source_name: 'Source',
+  cover: '',
+  year: '2026',
+  started_at: 1000,
+  ended_at: 2000,
+  watch_seconds: 60,
+  last_position: 60,
+  total_time: 120,
+  created_at: 1000,
+  updated_at: 2000,
+};
+
 describe('mysql storage contract', () => {
   it('persists user scoped data and deletes it with the user', async () => {
     const storage = new MySqlStorage('mysql://demo:demo@localhost:3306/icetv');
@@ -531,6 +708,7 @@ describe('mysql storage contract', () => {
     await storage.setPlayRecord('demo-user', 'source+1', playRecord);
     await storage.setFavorite('demo-user', 'source+1', favorite);
     await storage.setSkipConfig('demo-user', 'source', '1', skipConfig);
+    await storage.setPlaybackSession('demo-user', playbackSession);
     await storage.addSearchHistory('demo-user', 'first');
     await storage.addSearchHistory('demo-user', 'second');
     await storage.addSearchHistory('demo-user', 'first');
@@ -545,6 +723,9 @@ describe('mysql storage contract', () => {
     await expect(
       storage.getSkipConfig('demo-user', 'source', '1'),
     ).resolves.toEqual(skipConfig);
+    await expect(storage.getPlaybackSessions('demo-user')).resolves.toEqual([
+      playbackSession,
+    ]);
     await expect(storage.getSearchHistory('demo-user')).resolves.toEqual([
       'first',
       'second',
@@ -556,6 +737,7 @@ describe('mysql storage contract', () => {
     await expect(storage.getAllPlayRecords('demo-user')).resolves.toEqual({});
     await expect(storage.getAllFavorites('demo-user')).resolves.toEqual({});
     await expect(storage.getAllSkipConfigs('demo-user')).resolves.toEqual({});
+    await expect(storage.getPlaybackSessions('demo-user')).resolves.toEqual([]);
     await expect(storage.getSearchHistory('demo-user')).resolves.toEqual([]);
   });
 
@@ -574,6 +756,7 @@ describe('mysql storage contract', () => {
           favorites: { 'source+1': favorite },
           searchHistory: ['first', 'second'],
           skipConfigs: { 'source+1': skipConfig },
+          playbackSessions: { [playbackSession.id]: playbackSession },
         },
       },
     });
@@ -593,6 +776,9 @@ describe('mysql storage contract', () => {
     await expect(storage.getAllSkipConfigs('demo-user')).resolves.toEqual({
       'source+1': skipConfig,
     });
+    await expect(storage.getPlaybackSessions('demo-user')).resolves.toEqual([
+      playbackSession,
+    ]);
   });
 
   it('normalizes usernames before storing and looking them up', async () => {

@@ -1,6 +1,7 @@
 ﻿/** @jest-environment node */
 
 import { AdminConfig } from '@/types/admin';
+import { DEFAULT_RUNTIME_PARAMS } from '@/lib/runtime-params';
 
 const baseConfig: AdminConfig = {
   ConfigSubscribtion: { URL: '', AutoUpdate: false, LastCheck: '' },
@@ -14,6 +15,7 @@ const baseConfig: AdminConfig = {
     EnableOptimization: true,
     AutoSwitchSourceOnTimeout: false,
     LiveDirectConnect: false,
+    ...DEFAULT_RUNTIME_PARAMS,
     SearchDownstreamMaxPage: 5,
     SiteInterfaceCacheTime: 300,
     DoubanProxyType: 'direct',

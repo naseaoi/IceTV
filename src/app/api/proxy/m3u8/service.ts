@@ -6,12 +6,14 @@ import {
   fetchResponseThroughProxy,
   getProxyUrlForTarget,
 } from '@/lib/http-proxy-json';
+import { getConfigForRead } from '@/lib/config';
 import {
   classifyProxyFailure,
   logProxyFailure,
   ProxyRouteError,
 } from '@/lib/proxy-diagnostics';
 import { readTextLimited } from '@/lib/proxy-response-limits';
+import { normalizeRuntimeParams } from '@/lib/runtime-params';
 import { createSwrCache } from '@/lib/server-cache';
 import { fetchWithUrlGuard } from '@/lib/url-guard';
 
@@ -47,6 +49,13 @@ const MAX_M3U8_BYTES = 2 * 1024 * 1024;
 const m3u8RefreshInflight = new Map<string, Promise<void>>();
 const m3u8LoadInflight = new Map<string, Promise<M3U8LoadResult>>();
 
+async function getProxyRequestTimeoutMs(): Promise<number> {
+  const config = await getConfigForRead();
+  return (
+    normalizeRuntimeParams(config.SiteConfig).ProxyRequestTimeoutSeconds * 1000
+  );
+}
+
 export function isSignedM3U8Url(rawUrl: string): boolean {
   if (!rawUrl) return false;
   if (!rawUrl.includes('?')) return false;
@@ -67,12 +76,14 @@ export function refreshM3U8Cache(
 
   const task = (async () => {
     try {
+      const timeoutMs = await getProxyRequestTimeoutMs();
       const response = await fetchWithUrlGuard(url, {
         cache: 'no-cache',
         redirect: 'follow',
         credentials: 'same-origin',
         headers: { 'User-Agent': ua },
         skipInitialValidation: true,
+        timeoutMs,
       });
       if (!response.ok) return;
       const contentType = response.headers.get('Content-Type') || '';
@@ -167,6 +178,7 @@ async function fetchM3U8Data(
   skipCache: boolean,
   context: M3U8ProxyRequestContext,
 ): Promise<M3U8LoadResult> {
+  const timeoutMs = await getProxyRequestTimeoutMs();
   if (isLive) {
     const proxyUrl = getProxyUrlForTarget(new URL(url));
     if (proxyUrl) {
@@ -175,7 +187,7 @@ async function fetchM3U8Data(
           new URL(url),
           proxyUrl,
           {
-            timeoutMs: 15_000,
+            timeoutMs,
             userAgent: ua,
             maxBytes: MAX_M3U8_BYTES,
             accept: 'application/vnd.apple.mpegurl,text/plain,*/*',
@@ -235,6 +247,7 @@ async function fetchM3U8Data(
       'User-Agent': ua,
     },
     skipInitialValidation: true,
+    timeoutMs,
   });
 
   if (!response.ok) {

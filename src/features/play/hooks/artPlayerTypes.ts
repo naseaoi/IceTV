@@ -54,6 +54,8 @@ export interface UseArtPlayerParams {
   handleNextEpisode: () => void;
   handleSkipConfigChange: (newConfig: SkipConfig) => Promise<void>;
   saveCurrentPlayProgress: () => void;
+  reportPlaybackStats?: (force?: boolean) => void;
+  startPlaybackStatsSession?: () => void;
   requestWakeLock: () => Promise<void>;
   releaseWakeLock: () => Promise<void>;
   cleanupPlayer: () => void;

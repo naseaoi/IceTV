@@ -62,6 +62,13 @@ export async function POST(req: NextRequest) {
         searchHistory: await db.getSearchHistory(username),
         // 跳过片头片尾配置
         skipConfigs: await db.getAllSkipConfigs(username),
+        playbackSessions: Object.fromEntries(
+          (
+            await db.getPlaybackSessions(username, {
+              limit: 500,
+            })
+          ).map((session) => [session.id, session]),
+        ),
       };
 
       exportData.data.userData[username] = userData;

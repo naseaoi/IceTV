@@ -88,6 +88,7 @@ export async function POST(request: NextRequest) {
 
     // 更新缓存中的站点设置
     adminConfig.SiteConfig = {
+      ...adminConfig.SiteConfig,
       SiteName,
       SiteIcon:
         typeof SiteIcon === 'string'

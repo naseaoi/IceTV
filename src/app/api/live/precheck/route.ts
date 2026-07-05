@@ -8,6 +8,7 @@ import {
   UrlValidationError,
   validateProxyUrlForRequest,
 } from '@/lib/url-guard';
+import { normalizeRuntimeParams } from '@/lib/runtime-params';
 
 export const runtime = 'nodejs';
 
@@ -16,6 +17,7 @@ export async function GET(request: NextRequest) {
   if (isGuardFailure(guardResult)) return guardResult.response;
 
   const config = await getConfigForRead();
+  const runtimeParams = normalizeRuntimeParams(config.SiteConfig);
   if (!isLiveEntryEnabledInConfig(config)) {
     return NextResponse.json({ error: '直播未开启' }, { status: 404 });
   }
@@ -51,6 +53,7 @@ export async function GET(request: NextRequest) {
         'User-Agent': ua,
       },
       skipInitialValidation: true,
+      timeoutMs: runtimeParams.LivePrecheckTimeoutSeconds * 1000,
     });
 
     if (!response.ok) {

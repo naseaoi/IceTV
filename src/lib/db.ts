@@ -6,6 +6,12 @@ import { getStorageType } from './storage-type';
 import {
   Favorite,
   IStorage,
+  PlaybackRangeWatchTotal,
+  PlaybackStatsTopItem,
+  PlaybackSession,
+  PlaybackSessionQuery,
+  PlaybackTimeRange,
+  PlaybackWatchTotals,
   PlayRecord,
   SkipConfig,
   StorageImportData,
@@ -191,9 +197,13 @@ class DbManager {
     return storage.getSearchHistory(userName);
   }
 
-  async addSearchHistory(userName: string, keyword: string): Promise<void> {
+  async addSearchHistory(
+    userName: string,
+    keyword: string,
+    limit?: number,
+  ): Promise<void> {
     const storage = await this.getStorage();
-    await storage.addSearchHistory(userName, keyword);
+    await storage.addSearchHistory(userName, keyword, limit);
   }
 
   async deleteSearchHistory(userName: string, keyword?: string): Promise<void> {
@@ -249,6 +259,46 @@ class DbManager {
   ): Promise<{ [key: string]: SkipConfig }> {
     const storage = await this.getStorage();
     return storage.getAllSkipConfigs(userName);
+  }
+
+  async savePlaybackSession(
+    userName: string,
+    session: PlaybackSession,
+  ): Promise<void> {
+    const storage = await this.getStorage();
+    await storage.setPlaybackSession(userName, session);
+  }
+
+  async getPlaybackSessions(
+    userName: string,
+    query?: PlaybackSessionQuery,
+  ): Promise<PlaybackSession[]> {
+    const storage = await this.getStorage();
+    return storage.getPlaybackSessions(userName, query);
+  }
+
+  async getPlaybackWatchTotals(
+    userName: string,
+    since: number,
+  ): Promise<PlaybackWatchTotals> {
+    const storage = await this.getStorage();
+    return storage.getPlaybackWatchTotals(userName, since);
+  }
+
+  async getPlaybackRangeWatchTotals(
+    userName: string,
+    ranges: PlaybackTimeRange[],
+  ): Promise<PlaybackRangeWatchTotal[]> {
+    const storage = await this.getStorage();
+    return storage.getPlaybackRangeWatchTotals(userName, ranges);
+  }
+
+  async getPlaybackTopItems(
+    userName: string,
+    limit?: number,
+  ): Promise<PlaybackStatsTopItem[]> {
+    const storage = await this.getStorage();
+    return storage.getPlaybackTopItems(userName, limit);
   }
 
   async clearAllData(): Promise<void> {

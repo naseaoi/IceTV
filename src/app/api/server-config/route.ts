@@ -50,6 +50,13 @@ export async function GET(request: NextRequest) {
     LiveDirectConnect: publicConfig.LiveDirectConnect,
     CustomCategories: publicConfig.CustomCategories,
     FluidSearch: publicConfig.FluidSearch,
+    VodPageTimeoutSeconds: publicConfig.VodPageTimeoutSeconds,
+    PlaybackHistoryPageSize: publicConfig.PlaybackHistoryPageSize,
+    PlaybackHistoryLimit: publicConfig.PlaybackHistoryLimit,
+    SearchHistoryLimit: publicConfig.SearchHistoryLimit,
+    SourceFailureCooldownSeconds: publicConfig.SourceFailureCooldownSeconds,
+    ContinueWatchingLimit: publicConfig.ContinueWatchingLimit,
+    CoverImageCacheSize: publicConfig.CoverImageCacheSize,
   };
   return NextResponse.json(result, {
     headers: {

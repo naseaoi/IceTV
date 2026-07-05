@@ -1,6 +1,7 @@
 ﻿'use client';
 
 import { getAuthInfoFromBrowserCookie } from './auth.client';
+import { getRuntimeConfig } from './runtime-config';
 import type { Favorite, PlayRecord, SkipConfig } from './types';
 
 import {
@@ -16,8 +17,12 @@ import {
 
 export type { Favorite, PlayRecord, SkipConfig } from './types';
 
-// 搜索历史最大保存条数
-const SEARCH_HISTORY_LIMIT = 20;
+function getSearchHistoryLimit(): number {
+  return Math.max(
+    1,
+    Math.floor(getRuntimeConfig()?.SEARCH_HISTORY_LIMIT || 20),
+  );
+}
 
 /**
  * 生成存储key
@@ -201,8 +206,9 @@ export async function addSearchHistory(keyword: string): Promise<void> {
 
   const buildNewHistory = (arr: string[]): string[] => {
     const newHistory = [trimmed, ...arr.filter((k) => k !== trimmed)];
-    if (newHistory.length > SEARCH_HISTORY_LIMIT) {
-      newHistory.length = SEARCH_HISTORY_LIMIT;
+    const limit = getSearchHistoryLimit();
+    if (newHistory.length > limit) {
+      newHistory.length = limit;
     }
     return newHistory;
   };
@@ -263,6 +269,14 @@ export async function deleteSearchHistory(keyword: string): Promise<void> {
 
 export async function getAllFavorites(): Promise<Record<string, Favorite>> {
   return _getAllFavorites();
+}
+
+export function getCachedFavoritesSnapshot(): Record<string, Favorite> | null {
+  if (typeof window === 'undefined') {
+    return null;
+  }
+
+  return cacheManager.getCachedFavorites();
 }
 
 export async function saveFavorite(
