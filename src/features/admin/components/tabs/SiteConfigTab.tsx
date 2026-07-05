@@ -1,14 +1,14 @@
 ﻿'use client';
 
 import { ExternalLink, ImagePlus, Trash2, Upload } from 'lucide-react';
-import { useEffect, useRef, useState } from 'react';
+import { type FormEvent, useEffect, useRef, useState } from 'react';
 
 import AdminSelect from '@/components/admin/AdminSelect';
 import AlertModal from '@/components/modals/AlertModal';
 import { useAlertModal } from '@/hooks/useAlertModal';
 import { useLoadingState } from '@/features/admin/hooks/useLoadingState';
 import { adminPost } from '@/features/admin/lib/api';
-import { buttonStyles } from '@/features/admin/lib/buttonStyles';
+import { SITE_CONFIG_FORM_ID } from '@/features/admin/lib/admin-form-ids';
 import { showError, showSuccess } from '@/features/admin/lib/notifications';
 import { AdminConfig } from '@/types/admin';
 import { SiteConfig } from '@/features/admin/types/internal';
@@ -28,12 +28,14 @@ import { localPreferenceToggleDefinitions } from '@/lib/local-preference-toggles
 const SiteConfigComponent = ({
   config,
   refreshConfig,
+  onSavingChange,
 }: {
   config: AdminConfig | null;
   refreshConfig: () => Promise<void>;
+  onSavingChange?: (saving: boolean) => void;
 }) => {
   const { alertModal, showAlert, hideAlert } = useAlertModal();
-  const { isLoading, withLoading } = useLoadingState();
+  const { withLoading } = useLoadingState();
   const [siteSettings, setSiteSettings] = useState<SiteConfig>({
     SiteName: '',
     SiteIcon: '',
@@ -59,6 +61,7 @@ const SiteConfigComponent = ({
   const [iconPreview, setIconPreview] = useState<string>('');
   const [iconUploading, setIconUploading] = useState(false);
   const iconFileRef = useRef<HTMLInputElement>(null);
+  const savingRef = useRef(false);
 
   useEffect(() => {
     if (config?.SiteConfig) {
@@ -132,19 +135,32 @@ const SiteConfigComponent = ({
     );
   };
 
-  // 保存站点配置
   const handleSave = async () => {
-    await withLoading('saveSiteConfig', async () => {
-      try {
+    if (savingRef.current) {
+      return;
+    }
+
+    savingRef.current = true;
+    onSavingChange?.(true);
+
+    try {
+      await withLoading('saveSiteConfig', async () => {
         await adminPost('/api/admin/site', { ...siteSettings }, '保存失败');
 
         showSuccess('保存成功, 请刷新页面', showAlert);
         await refreshConfig();
-      } catch (err) {
-        showError(err instanceof Error ? err.message : '保存失败', showAlert);
-        throw err;
-      }
-    });
+      });
+    } catch (err) {
+      showError(err instanceof Error ? err.message : '保存失败', showAlert);
+    } finally {
+      savingRef.current = false;
+      onSavingChange?.(false);
+    }
+  };
+
+  const handleSubmit = (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    void handleSave();
   };
 
   if (!config) {
@@ -156,7 +172,11 @@ const SiteConfigComponent = ({
   }
 
   return (
-    <div className='space-y-6'>
+    <form
+      id={SITE_CONFIG_FORM_ID}
+      onSubmit={handleSubmit}
+      className='space-y-6'
+    >
       <div className='grid grid-cols-1 gap-6 md:grid-cols-2'>
         {/* 站点名称 */}
         <div>
@@ -626,21 +646,6 @@ const SiteConfigComponent = ({
         </div>
       </div>
 
-      {/* 操作按钮 */}
-      <div className='flex justify-end'>
-        <button
-          onClick={handleSave}
-          disabled={isLoading('saveSiteConfig')}
-          className={`px-4 py-2 ${
-            isLoading('saveSiteConfig')
-              ? buttonStyles.disabled
-              : buttonStyles.success
-          } rounded-lg transition-colors`}
-        >
-          {isLoading('saveSiteConfig') ? '保存中…' : '保存'}
-        </button>
-      </div>
-
       {/* 通用弹窗组件 */}
       <AlertModal
         isOpen={alertModal.isOpen}
@@ -651,7 +656,7 @@ const SiteConfigComponent = ({
         timer={alertModal.timer}
         showConfirm={alertModal.showConfirm}
       />
-    </div>
+    </form>
   );
 };
 

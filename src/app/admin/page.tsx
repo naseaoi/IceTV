@@ -1,6 +1,6 @@
 ﻿'use client';
 
-import { Loader2, RotateCcw } from 'lucide-react';
+import { Loader2, RotateCcw, Save } from 'lucide-react';
 import { Suspense, useEffect, useState } from 'react';
 
 import PageLayout from '@/components/PageLayout';
@@ -8,6 +8,7 @@ import ConfirmModal from '@/components/modals/ConfirmModal';
 import AdminNav from '@/features/admin/components/AdminNav';
 import AdminTabContent from '@/features/admin/components/AdminTabContent';
 import AlertModal from '@/components/modals/AlertModal';
+import { SITE_CONFIG_FORM_ID } from '@/features/admin/lib/admin-form-ids';
 import { getVisibleTabs } from '@/features/admin/lib/admin-tabs';
 import { buttonStyles } from '@/features/admin/lib/buttonStyles';
 import { showError } from '@/features/admin/lib/notifications';
@@ -18,6 +19,9 @@ import { useAdminTab } from '@/features/admin/hooks/useAdminTab';
 import { useLoadingState } from '@/features/admin/hooks/useLoadingState';
 import { AdminConfig } from '@/types/admin';
 
+const headerActionButtonClassName =
+  'mb-2 flex h-9 w-10 shrink-0 items-center justify-center rounded-lg text-white transition-colors';
+
 function AdminPageClient() {
   const { alertModal, showAlert, hideAlert } = useAlertModal();
   const { isLoading, withLoading } = useLoadingState();
@@ -26,10 +30,12 @@ function AdminPageClient() {
   const [error, setError] = useState<string | null>(null);
   const [role, setRole] = useState<'owner' | 'admin' | null>(null);
   const [showResetConfigModal, setShowResetConfigModal] = useState(false);
+  const [siteConfigSaving, setSiteConfigSaving] = useState(false);
 
   const isOwnerRole = isOwner(role);
   const visibleTabs = getVisibleTabs(isOwnerRole);
   const { activeTab, setActiveTab } = useAdminTab(isOwnerRole);
+  const showSiteConfigSave = Boolean(config) && activeTab === 'site';
 
   const { fetchConfig, resetConfig } = useAdminPageActions({
     showAlert,
@@ -113,12 +119,33 @@ function AdminPageClient() {
                 onSelect={setActiveTab}
               />
             </div>
+            {showSiteConfigSave && (
+              <button
+                type='submit'
+                form={SITE_CONFIG_FORM_ID}
+                disabled={siteConfigSaving}
+                title={siteConfigSaving ? '保存中...' : '保存站点配置'}
+                aria-label={siteConfigSaving ? '保存中' : '保存站点配置'}
+                className={`${headerActionButtonClassName} ${
+                  siteConfigSaving
+                    ? 'cursor-not-allowed bg-gray-400 dark:bg-gray-600'
+                    : 'bg-green-600 hover:bg-green-700 dark:bg-green-600 dark:hover:bg-green-700'
+                }`}
+              >
+                {siteConfigSaving ? (
+                  <Loader2 size={18} className='animate-spin' />
+                ) : (
+                  <Save size={18} />
+                )}
+              </button>
+            )}
             {config && isOwnerRole && (
               <button
+                type='button'
                 onClick={handleResetConfig}
                 title='重置配置'
                 aria-label='重置配置'
-                className='mb-2 flex shrink-0 items-center justify-center rounded-full p-2 text-red-600 transition-colors hover:bg-red-50 dark:text-red-400 dark:hover:bg-red-900/30'
+                className={`${headerActionButtonClassName} bg-red-600 hover:bg-red-700 dark:bg-red-600 dark:hover:bg-red-700`}
               >
                 <RotateCcw size={18} />
               </button>
@@ -132,6 +159,7 @@ function AdminPageClient() {
               config={config}
               role={role}
               refreshConfig={fetchConfig}
+              onSiteConfigSavingChange={setSiteConfigSaving}
             />
           </section>
         </div>
@@ -177,7 +205,7 @@ function AdminPageClient() {
               />
             </svg>
             <span className='text-sm font-medium text-yellow-800 dark:text-yellow-300'>
-              ⚠️ 危险操作警告
+              危险操作警告
             </span>
           </div>
           <p className='text-sm text-yellow-700 dark:text-yellow-400'>

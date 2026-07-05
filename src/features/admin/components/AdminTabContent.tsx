@@ -50,6 +50,7 @@ interface AdminTabContentProps {
   config: AdminConfig | null;
   role: 'owner' | 'admin' | null;
   refreshConfig: () => Promise<void>;
+  onSiteConfigSavingChange?: (saving: boolean) => void;
 }
 
 const AdminTabContent = ({
@@ -57,6 +58,7 @@ const AdminTabContent = ({
   config,
   role,
   refreshConfig,
+  onSiteConfigSavingChange,
 }: AdminTabContentProps) => {
   switch (activeTab) {
     case 'config-file':
@@ -65,7 +67,11 @@ const AdminTabContent = ({
       );
     case 'site':
       return (
-        <SiteConfigComponent config={config} refreshConfig={refreshConfig} />
+        <SiteConfigComponent
+          config={config}
+          refreshConfig={refreshConfig}
+          onSavingChange={onSiteConfigSavingChange}
+        />
       );
     case 'user':
       return (
