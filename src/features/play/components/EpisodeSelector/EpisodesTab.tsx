@@ -228,9 +228,9 @@ export const EpisodesTab: React.FC<EpisodesTabProps> = ({
   return (
     <>
       {(variantSources.length > 1 || showPagination) && (
-        <div className='flex flex-shrink-0 flex-col gap-2 px-5 pb-2 pt-2 sm:px-6'>
+        <div className='flex min-w-0 flex-shrink-0 flex-col gap-2 px-5 pb-2 pt-2 sm:px-6'>
           {variantSources.length > 1 && (
-            <div className='flex flex-wrap justify-center gap-2'>
+            <div className='flex min-w-0 flex-wrap justify-center gap-2'>
               {variantSources.map((variant, index) => {
                 const isActive =
                   variant.source === currentSource && variant.id === currentId;
@@ -287,7 +287,7 @@ export const EpisodesTab: React.FC<EpisodesTabProps> = ({
 
           {showPagination && (
             <div
-              className='overflow-x-auto'
+              className='min-w-0 overflow-x-auto'
               ref={categoryContainerRef}
               onMouseEnter={() => setIsCategoryHovered(true)}
               onMouseLeave={() => setIsCategoryHovered(false)}
@@ -322,7 +322,7 @@ export const EpisodesTab: React.FC<EpisodesTabProps> = ({
 
       <div
         ref={episodeContainerRef}
-        className='flex flex-1 flex-wrap content-start justify-center gap-2 overflow-y-auto px-5 pb-5 pt-2 sm:px-6 sm:pb-6'
+        className='flex min-w-0 flex-1 flex-wrap content-start justify-center gap-2 overflow-y-auto overflow-x-hidden px-5 pb-5 pt-2 sm:px-6 sm:pb-6'
         onScroll={(event) => {
           setHasEpisodeTopFade(event.currentTarget.scrollTop > 4);
         }}

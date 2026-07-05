@@ -4,23 +4,27 @@ import dynamic from 'next/dynamic';
 import { getSourceBundle } from '@/lib/source-bundle';
 import { normalizeTitleForSourceMatch } from '@/lib/source-match';
 import { SearchResult } from '@/lib/types';
+import { PlayerPanelContent } from '@/components/PlayerPanelTabBar';
 
 import { SectionTitle } from '@/features/play/components/EpisodeSelector/SectionTitle';
 import { TabBar } from '@/features/play/components/EpisodeSelector/TabBar';
+
+const infoSkeletonLineWidths = [
+  'w-full',
+  'w-[96%]',
+  'w-[92%]',
+  'w-[98%]',
+  'w-[88%]',
+  'w-[94%]',
+  'w-[84%]',
+  'w-[90%]',
+  'w-[72%]',
+];
 
 function EpisodeTabLoading() {
   return (
     <div className='flex min-h-0 flex-1 items-center justify-center p-6 text-sm text-gray-500 dark:text-gray-400'>
       加载中...
-    </div>
-  );
-}
-
-function SectionTitleLoading() {
-  return (
-    <div className='flex w-full flex-col items-center justify-center gap-0.5 py-1'>
-      <div className='h-4 w-10 animate-pulse rounded bg-gray-200/70 dark:bg-white/[0.07]' />
-      <div className='h-0.5 w-7 animate-pulse rounded-full bg-emerald-500/40 dark:bg-emerald-400/40' />
     </div>
   );
 }
@@ -43,14 +47,14 @@ function InfoTabLoading() {
           </div>
         </div>
       </div>
-      <div className='flex min-h-0 flex-1 flex-col'>
-        <div className='mb-1.5 flex-shrink-0'>
-          <SectionTitleLoading />
-        </div>
-        <div className='space-y-2'>
-          <div className='h-3.5 animate-pulse rounded bg-gray-200/70 dark:bg-white/[0.07]' />
-          <div className='h-3.5 animate-pulse rounded bg-gray-200/70 dark:bg-white/[0.07]' />
-          <div className='h-3.5 w-5/6 animate-pulse rounded bg-gray-200/70 dark:bg-white/[0.07]' />
+      <div className='flex min-h-0 flex-1 flex-col overflow-hidden'>
+        <div className='flex min-h-0 flex-1 flex-col gap-2.5 overflow-hidden'>
+          {infoSkeletonLineWidths.map((widthClass, index) => (
+            <div
+              key={index}
+              className={`h-[18px] flex-shrink-0 animate-pulse rounded bg-gray-200/70 dark:bg-white/[0.07] ${widthClass}`}
+            />
+          ))}
         </div>
       </div>
     </div>
@@ -304,13 +308,15 @@ const EpisodeSelector: React.FC<EpisodeSelectorProps> = ({
   );
 
   return (
-    <div className='flex h-full flex-col overflow-hidden rounded-xl bg-white/60 ring-1 ring-black/[0.06] backdrop-blur-sm dark:bg-white/[0.04] dark:ring-white/[0.08] md:ml-1'>
+    <div className='flex h-full flex-col overflow-hidden md:ml-1'>
       <div className='flex min-h-0 flex-1 flex-col md:hidden'>
         <TabBar tabs={mobileTabs} active={mobileTab} onChange={setMobileTab} />
 
-        {mobileTab === 'episodes' && hasEpisodesTab && renderEpisodesTab()}
-        {mobileTab === 'info' && renderInfoTab('panel')}
-        {mobileTab === 'sources' && renderSourcesTab()}
+        <PlayerPanelContent>
+          {mobileTab === 'episodes' && hasEpisodesTab && renderEpisodesTab()}
+          {mobileTab === 'info' && renderInfoTab('panel')}
+          {mobileTab === 'sources' && renderSourcesTab()}
+        </PlayerPanelContent>
       </div>
 
       <div className='hidden min-h-0 flex-1 flex-col md:flex'>
@@ -320,25 +326,27 @@ const EpisodeSelector: React.FC<EpisodeSelectorProps> = ({
           onChange={setDesktopTab}
         />
 
-        {desktopTab === 'main' &&
-          (hasEpisodesTab ? (
-            <div className='grid min-h-0 flex-1 grid-rows-2 gap-0'>
-              <div className='flex min-h-0 flex-col'>
-                {renderInfoTab('desc')}
-              </div>
-              <div className='flex min-h-0 flex-col'>
-                <div className='flex-shrink-0 px-5 pt-0 sm:px-6'>
-                  <SectionTitle label='选集' />
+        <PlayerPanelContent>
+          {desktopTab === 'main' &&
+            (hasEpisodesTab ? (
+              <div className='grid min-h-0 min-w-0 flex-1 grid-rows-2 gap-0 overflow-hidden'>
+                <div className='flex min-h-0 min-w-0 flex-col overflow-hidden'>
+                  {renderInfoTab('desc')}
                 </div>
-                <div className='flex min-h-0 flex-1 flex-col'>
-                  {renderEpisodesTab()}
+                <div className='flex min-h-0 min-w-0 flex-col overflow-hidden'>
+                  <div className='flex-shrink-0 px-5 pt-0 sm:px-6'>
+                    <SectionTitle label='选集' />
+                  </div>
+                  <div className='flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden'>
+                    {renderEpisodesTab()}
+                  </div>
                 </div>
               </div>
-            </div>
-          ) : (
-            renderInfoTab('panel')
-          ))}
-        {desktopTab === 'sources' && renderSourcesTab()}
+            ) : (
+              renderInfoTab('panel')
+            ))}
+          {desktopTab === 'sources' && renderSourcesTab()}
+        </PlayerPanelContent>
       </div>
     </div>
   );

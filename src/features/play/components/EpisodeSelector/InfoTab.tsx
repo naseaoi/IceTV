@@ -2,7 +2,6 @@ import { ExternalLink, Heart } from 'lucide-react';
 import React, { useMemo } from 'react';
 
 import CoverImage from '@/components/CoverImage';
-import { SectionTitle } from '@/features/play/components/EpisodeSelector/SectionTitle';
 import { SearchResult } from '@/lib/types';
 
 interface InfoTabProps {
@@ -37,6 +36,8 @@ const FavoriteIcon = ({ filled }: { filled: boolean }) => {
   );
 };
 
+const DESC_PARAGRAPH_SEPARATOR = /(?:\r?\n)+|[^\S\r\n]{2,}/;
+
 export const InfoTab: React.FC<InfoTabProps> = ({
   videoTitle,
   totalEpisodes,
@@ -53,7 +54,7 @@ export const InfoTab: React.FC<InfoTabProps> = ({
     if (!raw) return '';
 
     const paragraphs = raw
-      .split(/\r?\n+|\s{3,}/)
+      .split(DESC_PARAGRAPH_SEPARATOR)
       .map((p) => p.trim())
       .filter(Boolean);
 
@@ -77,11 +78,11 @@ export const InfoTab: React.FC<InfoTabProps> = ({
     <div
       className={
         descOnlyScroll
-          ? 'flex min-h-0 flex-col gap-2 px-5 pb-1 pt-4 sm:px-6 sm:pb-1 sm:pt-5'
-          : 'flex-1 space-y-3 overflow-y-auto p-5 sm:p-6'
+          ? 'flex min-h-0 min-w-0 flex-col gap-2 overflow-hidden px-5 pb-1 pt-4 sm:px-6 sm:pb-1 sm:pt-5'
+          : 'min-w-0 flex-1 space-y-3 overflow-y-auto overflow-x-hidden p-5 sm:p-6'
       }
     >
-      <div className='flex flex-shrink-0 gap-4 sm:gap-5'>
+      <div className='flex min-w-0 flex-shrink-0 gap-4 sm:gap-5'>
         <div className='relative aspect-[2/3] w-24 flex-shrink-0 overflow-hidden rounded-xl bg-gray-200 shadow-md shadow-black/10 ring-1 ring-black/10 dark:bg-gray-800 dark:shadow-black/30 dark:ring-white/10 sm:w-28 xl:w-32'>
           <CoverImage
             src={videoCover}
@@ -93,8 +94,8 @@ export const InfoTab: React.FC<InfoTabProps> = ({
         </div>
 
         <div className='flex min-w-0 flex-1 flex-col justify-end gap-2.5 pb-0.5'>
-          <div className='flex items-center gap-2'>
-            <h3 className='min-w-0 truncate text-base font-bold leading-snug text-gray-900 dark:text-gray-100'>
+          <div className='flex min-w-0 items-center gap-2'>
+            <h3 className='min-w-0 max-w-full truncate text-base font-bold leading-snug text-gray-900 dark:text-gray-100'>
               {videoTitle || '影片标题'}
             </h3>
             <button
@@ -167,13 +168,12 @@ export const InfoTab: React.FC<InfoTabProps> = ({
               : 'flex flex-col pt-1'
           }
         >
-          <div className='mb-1.5 flex-shrink-0'>
-            <SectionTitle label='简介' />
-          </div>
           <div className={descOnlyScroll ? 'relative min-h-0 flex-1' : ''}>
             <p
-              className={`text-[13px] leading-[1.8] text-gray-600 dark:text-gray-400 ${
-                descOnlyScroll ? 'h-full min-h-0 overflow-y-auto pb-5' : ''
+              className={`max-w-full break-words text-[13px] leading-[1.8] text-gray-600 dark:text-gray-400 ${
+                descOnlyScroll
+                  ? 'h-full min-h-0 overflow-y-auto overflow-x-hidden pb-5'
+                  : ''
               }`.trim()}
               style={descStyle}
             >

@@ -9,7 +9,7 @@ export function BackButton({ variant = 'default' }: BackButtonProps) {
     return (
       <button
         onClick={() => window.history.back()}
-        className='flex h-12 w-12 flex-shrink-0 items-center justify-center rounded-xl bg-white/60 text-gray-600 ring-1 ring-black/[0.06] transition-colors hover:bg-gray-100 hover:text-gray-900 dark:bg-white/[0.04] dark:text-gray-300 dark:ring-white/[0.08] dark:hover:bg-white/10 dark:hover:text-white'
+        className='flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-lg bg-white/60 text-gray-600 ring-1 ring-black/[0.06] transition-colors hover:bg-gray-100 hover:text-gray-900 dark:bg-white/[0.04] dark:text-gray-300 dark:ring-white/[0.08] dark:hover:bg-white/10 dark:hover:text-white'
         aria-label='返回'
       >
         <ArrowLeft className='h-5 w-5' />
