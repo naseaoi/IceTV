@@ -296,9 +296,10 @@ class DbManager {
   async getPlaybackTopItems(
     userName: string,
     limit?: number,
+    since?: number,
   ): Promise<PlaybackStatsTopItem[]> {
     const storage = await this.getStorage();
-    return storage.getPlaybackTopItems(userName, limit);
+    return storage.getPlaybackTopItems(userName, limit, since);
   }
 
   async clearAllData(): Promise<void> {

@@ -24,7 +24,7 @@ export async function GET(request: NextRequest) {
       db.getPlaybackWatchTotals(guardResult.username, weekStart),
       db.getPlaybackRangeWatchTotals(guardResult.username, dailyRanges),
       db.getPlaybackSessions(guardResult.username, { limit: 50 }),
-      db.getPlaybackTopItems(guardResult.username, 6),
+      db.getPlaybackTopItems(guardResult.username, 6, weekStart),
     ]);
     const dailyWatchSeconds = buildPlaybackDailyStatsFromTotals(
       dailyRanges,

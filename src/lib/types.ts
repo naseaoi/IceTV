@@ -170,6 +170,7 @@ export interface IStorage {
   getPlaybackTopItems(
     userName: string,
     limit?: number,
+    since?: number,
   ): Promise<PlaybackStatsTopItem[]>;
 
   // 数据清理相关

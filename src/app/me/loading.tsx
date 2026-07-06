@@ -1,0 +1,40 @@
+import PageLayout from '@/components/PageLayout';
+import { FavoritePreviewSkeleton } from '@/features/favorites/components/FavoritePreviewSkeleton';
+import { PlaybackHistorySkeleton } from '@/features/playback-stats/components/PlaybackHistorySkeleton';
+import { PlaybackStatsSkeleton } from '@/features/playback-stats/components/PlaybackStatsSkeleton';
+
+function MineSwitchSkeleton() {
+  return (
+    <div className='relative flex items-end'>
+      <div className='absolute bottom-0 left-0 right-0 h-[1px] bg-gradient-to-r from-transparent via-gray-300/60 to-transparent dark:via-white/20' />
+      {Array.from({ length: 2 }).map((_, index) => (
+        <div key={index} className='relative px-6 py-3'>
+          <div className='flex items-center gap-2'>
+            <div className='h-4 w-4 animate-pulse rounded bg-gray-200 dark:bg-gray-800' />
+            <div className='h-5 w-10 animate-pulse rounded bg-gray-200 dark:bg-gray-800' />
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+export default function MeLoading() {
+  return (
+    <PageLayout activePath='/'>
+      <div className='overflow-visible px-2 pb-2 pt-4 sm:px-10 sm:pt-8'>
+        <div className='mb-4 flex justify-center'>
+          <MineSwitchSkeleton />
+        </div>
+
+        <div className='mx-auto max-w-[95%]'>
+          <div className='-mb-8 sm:-mb-10'>
+            <FavoritePreviewSkeleton />
+            <PlaybackStatsSkeleton />
+            <PlaybackHistorySkeleton />
+          </div>
+        </div>
+      </div>
+    </PageLayout>
+  );
+}

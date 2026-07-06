@@ -1,5 +1,16 @@
 import type { PlaybackSession } from '@/lib/types';
 
+type DedupePlaybackSessionsOptions = {
+  limit?: number;
+  mergeWatchSeconds?: boolean;
+};
+
+type PlaybackSessionGroup = {
+  session: PlaybackSession;
+  watchSeconds: number;
+  ids: Set<string>;
+};
+
 function normalizePlaybackTitleKey(title: string): string {
   return title.trim().replace(/\s+/g, ' ').toLocaleLowerCase();
 }
@@ -29,24 +40,48 @@ export function getPlaybackSessionMergeKey(session: PlaybackSession): string {
 
 export function dedupePlaybackSessionsByTitle(
   sessions: PlaybackSession[],
-  limit?: number,
+  options?: number | DedupePlaybackSessionsOptions,
 ): PlaybackSession[] {
-  const grouped = new Map<string, PlaybackSession>();
+  const limit = typeof options === 'number' ? options : options?.limit;
+  const mergeWatchSeconds =
+    typeof options === 'number' ? false : options?.mergeWatchSeconds === true;
+  const grouped = new Map<string, PlaybackSessionGroup>();
 
   for (const session of sessions) {
     const key = getPlaybackSessionMergeKey(session);
     const existing = grouped.get(key);
+    if (!existing) {
+      grouped.set(key, {
+        session,
+        watchSeconds: Math.max(0, session.watch_seconds || 0),
+        ids: new Set([session.id]),
+      });
+      continue;
+    }
+
+    if (!existing.ids.has(session.id)) {
+      existing.watchSeconds += Math.max(0, session.watch_seconds || 0);
+      existing.ids.add(session.id);
+    }
+
     if (
-      !existing ||
-      getPlaybackSessionTime(session) >= getPlaybackSessionTime(existing)
+      getPlaybackSessionTime(session) >=
+      getPlaybackSessionTime(existing.session)
     ) {
-      grouped.set(key, session);
+      existing.session = session;
     }
   }
 
-  const deduped = Array.from(grouped.values()).sort(
-    (a, b) => getPlaybackSessionTime(b) - getPlaybackSessionTime(a),
+  const deduped = Array.from(grouped.values()).map((group) =>
+    mergeWatchSeconds
+      ? {
+          ...group.session,
+          watch_seconds: group.watchSeconds,
+        }
+      : group.session,
   );
+
+  deduped.sort((a, b) => getPlaybackSessionTime(b) - getPlaybackSessionTime(a));
 
   return typeof limit === 'number' ? deduped.slice(0, limit) : deduped;
 }

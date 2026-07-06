@@ -763,10 +763,19 @@ export class MySqlStorage implements IStorage {
   async getPlaybackTopItems(
     userName: string,
     limit = 6,
+    since?: number,
   ): Promise<PlaybackStatsTopItem[]> {
     await this.ensureInitialized();
     const username = normalizeUsername(userName);
     const safeLimit = Math.min(Math.max(Math.floor(limit), 1), 20);
+    const periodStart = Number.isFinite(since)
+      ? Math.max(0, Math.floor(since as number))
+      : null;
+    const periodCondition = periodStart === null ? '' : ' AND started_at >= ?';
+    const aggregateParams =
+      periodStart === null
+        ? [username, safeLimit]
+        : [username, periodStart, safeLimit];
     const [rows] = await this.pool.query<JsonRow[]>(
       `SELECT
         source,
@@ -775,22 +784,26 @@ export class MySqlStorage implements IStorage {
         COUNT(*) AS session_count,
         MAX(CASE WHEN ended_at > started_at THEN ended_at ELSE started_at END) AS last_watched_at
       FROM playback_sessions
-      WHERE username = ?
+      WHERE username = ?${periodCondition}
       GROUP BY source, video_id
       ORDER BY watch_seconds DESC, last_watched_at DESC
       LIMIT ?`,
-      [username, safeLimit],
+      aggregateParams,
     );
 
     const items: PlaybackStatsTopItem[] = [];
     for (const row of rows) {
+      const metadataParams =
+        periodStart === null
+          ? [username, row.source || '', row.video_id || '']
+          : [username, row.source || '', row.video_id || '', periodStart];
       const [metadataRows] = await this.pool.query<JsonRow[]>(
         `SELECT title, source_name, cover, year
         FROM playback_sessions
-        WHERE username = ? AND source = ? AND video_id = ?
+        WHERE username = ? AND source = ? AND video_id = ?${periodCondition}
         ORDER BY started_at DESC
         LIMIT 1`,
-        [username, row.source || '', row.video_id || ''],
+        metadataParams,
       );
       const metadata = metadataRows[0];
 

@@ -971,9 +971,18 @@ export class LocalSqliteStorage implements IStorage {
   async getPlaybackTopItems(
     userName: string,
     limit = 6,
+    since?: number,
   ): Promise<PlaybackStatsTopItem[]> {
     const username = normalizeUsername(userName);
     const safeLimit = Math.min(Math.max(Math.floor(limit), 1), 20);
+    const periodStart = Number.isFinite(since)
+      ? Math.max(0, Math.floor(since as number))
+      : null;
+    const periodCondition = periodStart === null ? '' : ' AND started_at >= ?';
+    const aggregateParams =
+      periodStart === null
+        ? [username, safeLimit]
+        : [username, periodStart, safeLimit];
     const rows = this.db
       .prepare(
         `SELECT
@@ -983,22 +992,26 @@ export class LocalSqliteStorage implements IStorage {
           COUNT(*) AS session_count,
           MAX(CASE WHEN ended_at > started_at THEN ended_at ELSE started_at END) AS last_watched_at
         FROM playback_sessions
-        WHERE username = ?
+        WHERE username = ?${periodCondition}
         GROUP BY source, video_id
         ORDER BY watch_seconds DESC, last_watched_at DESC
         LIMIT ?`,
       )
-      .all(username, safeLimit) as PlaybackTopAggregateRow[];
+      .all(...aggregateParams) as PlaybackTopAggregateRow[];
     const metadataStmt = this.db.prepare(
       `SELECT title, source_name, cover, year
         FROM playback_sessions
-        WHERE username = ? AND source = ? AND video_id = ?
+        WHERE username = ? AND source = ? AND video_id = ?${periodCondition}
         ORDER BY started_at DESC
         LIMIT 1`,
     );
 
     return rows.map((row) => {
-      const metadata = metadataStmt.get(username, row.source, row.video_id) as
+      const metadataParams =
+        periodStart === null
+          ? [username, row.source, row.video_id]
+          : [username, row.source, row.video_id, periodStart];
+      const metadata = metadataStmt.get(...metadataParams) as
         | PlaybackTopMetadataRow
         | undefined;
 

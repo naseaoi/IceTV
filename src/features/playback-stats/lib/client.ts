@@ -6,6 +6,8 @@ import { dedupePlaybackSessionsByTitle } from '@/features/playback-stats/lib/his
 import type {
   PlaybackHistoryResponse,
   PlaybackStatsSummary,
+  PlaybackTopItemsResponse,
+  PlaybackTopRange,
 } from '@/features/playback-stats/types';
 
 const PLAYBACK_HISTORY_PAGE_SIZE = 10;
@@ -34,7 +36,9 @@ export function getCachedPlaybackHistorySnapshot(): PlaybackHistoryResponse | nu
       : null;
   return snapshot
     ? {
-        items: dedupePlaybackSessionsByTitle(snapshot.items),
+        items: dedupePlaybackSessionsByTitle(snapshot.items, {
+          mergeWatchSeconds: true,
+        }),
         nextCursor: snapshot.nextCursor,
       }
     : null;
@@ -48,7 +52,9 @@ export function cachePlaybackHistorySnapshot(
   playbackHistoryCache = {
     username,
     data: {
-      items: dedupePlaybackSessionsByTitle(snapshot.items),
+      items: dedupePlaybackSessionsByTitle(snapshot.items, {
+        mergeWatchSeconds: true,
+      }),
       nextCursor: snapshot.nextCursor,
     },
   };
@@ -73,6 +79,23 @@ export async function getPlaybackStatsSummary(): Promise<PlaybackStatsSummary | 
     playbackStatsSummaryCache = { username, data: normalizedSummary };
   }
   return normalizedSummary;
+}
+
+export async function getPlaybackTopItems(
+  range: PlaybackTopRange,
+): Promise<PlaybackTopItemsResponse> {
+  if (!getAuthInfoFromBrowserCookie()?.username) {
+    return { range, items: [] };
+  }
+
+  const params = new URLSearchParams({ range });
+  const response = await fetch(`/api/playback-stats/top?${params}`, {
+    cache: 'no-store',
+  });
+  if (!response.ok) {
+    throw new Error(`Playback top items failed: ${response.status}`);
+  }
+  return (await response.json()) as PlaybackTopItemsResponse;
 }
 
 export async function getPlaybackHistory(

@@ -7,6 +7,8 @@ export type PlaybackDailyStat = {
 
 export type PlaybackTopItem = PlaybackStatsTopItem;
 
+export type PlaybackTopRange = 'week' | 'month' | 'all';
+
 export type PlaybackStatsSummary = {
   totalWatchSeconds: number;
   weekWatchSeconds: number;
@@ -18,4 +20,9 @@ export type PlaybackStatsSummary = {
 export type PlaybackHistoryResponse = {
   items: PlaybackSession[];
   nextCursor: number | null;
+};
+
+export type PlaybackTopItemsResponse = {
+  range: PlaybackTopRange;
+  items: PlaybackTopItem[];
 };

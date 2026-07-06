@@ -1,16 +1,25 @@
 'use client';
 
-import { BarChart3, Clock3, History, TrendingUp } from 'lucide-react';
+import { BarChart3, Clock3, TrendingUp } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
 
 import {
   getCachedPlaybackStatsSummarySnapshot,
   getPlaybackStatsSummary,
+  getPlaybackTopItems,
 } from '@/features/playback-stats/lib/client';
-import type { PlaybackStatsSummary } from '@/features/playback-stats/types';
+import { PlaybackStatsSkeleton } from '@/features/playback-stats/components/PlaybackStatsSkeleton';
+import type {
+  PlaybackStatsSummary,
+  PlaybackTopRange,
+} from '@/features/playback-stats/types';
 
-const RECENT_ITEM_LIMIT = 4;
-const TOP_ITEM_LIMIT = 4;
+const TOP_ITEM_LIMIT = 3;
+const TOP_RANGE_OPTIONS: Array<{ value: PlaybackTopRange; label: string }> = [
+  { value: 'week', label: '周' },
+  { value: 'month', label: '月' },
+  { value: 'all', label: '总' },
+];
 const DAY_MS = 24 * 60 * 60 * 1000;
 
 function formatDuration(seconds: number): string {
@@ -64,7 +73,7 @@ function StatTile({
   value: string;
 }) {
   return (
-    <div className='rounded-lg border border-gray-200 bg-white/70 p-4 dark:border-gray-700 dark:bg-gray-900/50'>
+    <div className='h-full rounded-lg border border-gray-200 bg-white/70 p-4 dark:border-gray-700 dark:bg-gray-900/50'>
       <div className='mb-3 flex items-center gap-2 text-sm text-gray-500 dark:text-gray-400'>
         <Icon className='h-4 w-4 text-green-500' />
         {label}
@@ -76,20 +85,124 @@ function StatTile({
   );
 }
 
-function PlaybackStatsSkeleton() {
+function TopContentTile({
+  items,
+}: {
+  items: PlaybackStatsSummary['topItems'];
+}) {
+  const [activeRange, setActiveRange] = useState<PlaybackTopRange>('week');
+  const [loadingRange, setLoadingRange] = useState<PlaybackTopRange | null>(
+    null,
+  );
+  const [loadedRanges, setLoadedRanges] = useState<
+    Record<PlaybackTopRange, boolean>
+  >({
+    week: true,
+    month: false,
+    all: false,
+  });
+  const [itemsByRange, setItemsByRange] = useState<
+    Record<PlaybackTopRange, PlaybackStatsSummary['topItems']>
+  >({
+    week: items,
+    month: [],
+    all: [],
+  });
+
+  useEffect(() => {
+    setItemsByRange((prev) => ({ ...prev, week: items }));
+    setLoadedRanges((prev) => ({ ...prev, week: true }));
+  }, [items]);
+
+  useEffect(() => {
+    if (activeRange === 'week' || loadedRanges[activeRange]) return;
+
+    let cancelled = false;
+    setLoadingRange(activeRange);
+    getPlaybackTopItems(activeRange)
+      .then((response) => {
+        if (cancelled) return;
+        setItemsByRange((prev) => ({
+          ...prev,
+          [response.range]: response.items,
+        }));
+        setLoadedRanges((prev) => ({
+          ...prev,
+          [response.range]: true,
+        }));
+      })
+      .catch((error) => {
+        if (!cancelled) {
+          console.error('获取常看内容失败:', error);
+        }
+      })
+      .finally(() => {
+        if (!cancelled) {
+          setLoadingRange(null);
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [activeRange, loadedRanges]);
+
+  const activeItems = itemsByRange[activeRange];
+  const isLoading = loadingRange === activeRange;
+
   return (
-    <section className='mb-4'>
-      <div className='mb-4 h-7 w-32 animate-pulse rounded bg-gray-200 dark:bg-gray-800' />
-      <div className='grid gap-3 sm:grid-cols-2'>
-        <div className='h-28 animate-pulse rounded-lg bg-gray-100 dark:bg-gray-900' />
-        <div className='h-28 animate-pulse rounded-lg bg-gray-100 dark:bg-gray-900' />
+    <div className='flex h-36 min-w-0 flex-col overflow-hidden rounded-lg border border-gray-200 bg-white/70 p-4 dark:border-gray-700 dark:bg-gray-900/50'>
+      <div className='mb-3 flex min-w-0 items-center justify-between gap-2 text-sm text-gray-500 dark:text-gray-400'>
+        <div className='flex min-w-0 items-center gap-2'>
+          <TrendingUp className='h-4 w-4 shrink-0 text-pink-500' />
+          <span className='truncate'>常看内容</span>
+        </div>
+        <div className='flex h-6 shrink-0 rounded border border-gray-200 bg-gray-50 p-0.5 dark:border-gray-700 dark:bg-gray-800'>
+          {TOP_RANGE_OPTIONS.map((option) => {
+            const selected = activeRange === option.value;
+            return (
+              <button
+                key={option.value}
+                type='button'
+                className={`min-w-7 rounded px-2 text-xs transition-colors focus:outline-none focus:ring-2 focus:ring-green-500/30 ${
+                  selected
+                    ? 'bg-green-600 text-white'
+                    : 'text-gray-500 hover:bg-white hover:text-gray-800 dark:text-gray-400 dark:hover:bg-gray-700 dark:hover:text-gray-100'
+                }`}
+                aria-pressed={selected}
+                onClick={() => setActiveRange(option.value)}
+              >
+                {option.label}
+              </button>
+            );
+          })}
+        </div>
       </div>
-      <div className='mt-3 h-44 animate-pulse rounded-lg bg-gray-100 dark:bg-gray-900' />
-      <div className='mt-3 grid gap-3 lg:grid-cols-2'>
-        <div className='h-36 animate-pulse rounded-lg bg-gray-100 dark:bg-gray-900' />
-        <div className='h-36 animate-pulse rounded-lg bg-gray-100 dark:bg-gray-900' />
-      </div>
-    </section>
+      {activeItems.length > 0 ? (
+        <div className={`min-w-0 space-y-2 ${isLoading ? 'opacity-50' : ''}`}>
+          {activeItems.slice(0, TOP_ITEM_LIMIT).map((item) => (
+            <div
+              key={`${item.source}+${item.videoId}`}
+              className='flex min-w-0 items-center justify-between gap-3 text-sm'
+            >
+              <div
+                className='min-w-0 flex-1 truncate text-gray-800 dark:text-gray-100'
+                title={item.title}
+              >
+                {item.title}
+              </div>
+              <div className='shrink-0 text-gray-500 dark:text-gray-400'>
+                {formatDuration(item.watchSeconds)}
+              </div>
+            </div>
+          ))}
+        </div>
+      ) : (
+        <div className='flex min-h-0 flex-1 items-center justify-center rounded-lg border border-dashed border-gray-200 bg-gray-50 text-sm text-gray-500 dark:border-gray-700 dark:bg-gray-900/40 dark:text-gray-400'>
+          {isLoading ? '加载中...' : '暂无常看内容'}
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -165,7 +278,7 @@ export function PlaybackStatsPanel() {
         观看统计
       </h2>
 
-      <div className='grid gap-3 sm:grid-cols-2'>
+      <div className='grid min-w-0 gap-3 sm:grid-cols-2'>
         <StatTile
           icon={Clock3}
           label='本周观看'
@@ -178,114 +291,59 @@ export function PlaybackStatsPanel() {
         />
       </div>
 
-      <div className='mt-3 h-44 rounded-lg border border-gray-200 bg-white/70 p-4 dark:border-gray-700 dark:bg-gray-900/50'>
-        <div className='mb-4 flex items-center justify-between gap-3 text-sm'>
-          <div className='flex items-center gap-2 font-medium text-gray-700 dark:text-gray-200'>
-            <BarChart3 className='h-4 w-4 text-blue-500' />
-            最近一周
-          </div>
-          {activeDailyItem && (
-            <div className='shrink-0 text-xs text-gray-500 dark:text-gray-400'>
-              {formatShortDate(activeDailyItem.date)} ·{' '}
-              {formatDuration(activeDailyItem.watchSeconds)}
+      <div className='mt-3 grid min-w-0 items-stretch gap-3 md:grid-cols-2'>
+        <div className='h-36 rounded-lg border border-gray-200 bg-white/70 p-4 dark:border-gray-700 dark:bg-gray-900/50'>
+          <div className='mb-3 flex items-center justify-between gap-3 text-sm'>
+            <div className='flex items-center gap-2 font-medium text-gray-700 dark:text-gray-200'>
+              <BarChart3 className='h-4 w-4 text-blue-500' />
+              最近一周
             </div>
-          )}
-        </div>
-        <div className='grid h-24 grid-cols-7 items-end gap-2'>
-          {displaySummary.dailyWatchSeconds.map((item) => {
-            const height = Math.max(
-              8,
-              Math.round((item.watchSeconds / maxDailySeconds) * 96),
-            );
-            const isActive = activeDailyItem?.date === item.date;
-            return (
-              <div
-                key={item.date}
-                className='flex h-full min-w-0 flex-col items-center justify-end'
-              >
-                <button
-                  type='button'
-                  className={`w-full rounded-t transition-colors focus:outline-none focus:ring-2 focus:ring-green-500/40 ${
-                    isActive
-                      ? 'bg-green-600'
-                      : 'bg-green-500/80 hover:bg-green-500'
-                  }`}
-                  style={{ height }}
-                  title={formatDuration(item.watchSeconds)}
-                  aria-label={`${formatShortDate(item.date)} ${formatDuration(
-                    item.watchSeconds,
-                  )}`}
-                  onClick={() => setActiveDailyDate(item.date)}
-                  onFocus={() => setActiveDailyDate(item.date)}
-                  onMouseEnter={() => setActiveDailyDate(item.date)}
-                />
-                <div className='mt-2 truncate text-xs text-gray-500 dark:text-gray-400'>
-                  {formatShortDate(item.date)}
-                </div>
+            {activeDailyItem && (
+              <div className='shrink-0 text-xs text-green-600 dark:text-green-400'>
+                {formatShortDate(activeDailyItem.date)} ·{' '}
+                {formatDuration(activeDailyItem.watchSeconds)}
               </div>
-            );
-          })}
-        </div>
-      </div>
-
-      <div className='mt-3 grid gap-3 lg:grid-cols-2'>
-        <div className='rounded-lg border border-gray-200 bg-white/70 p-4 dark:border-gray-700 dark:bg-gray-900/50'>
-          <div className='mb-3 flex items-center gap-2 text-sm font-medium text-gray-700 dark:text-gray-200'>
-            <History className='h-4 w-4 text-orange-500' />
-            最近观看
+            )}
           </div>
-          {displaySummary.recentItems.length > 0 ? (
-            <div className='space-y-2'>
-              {displaySummary.recentItems
-                .slice(0, RECENT_ITEM_LIMIT)
-                .map((item) => (
-                  <div
-                    key={item.id}
-                    className='flex min-w-0 items-center justify-between gap-3 text-sm'
-                  >
-                    <div className='min-w-0 truncate text-gray-800 dark:text-gray-100'>
-                      {item.title}
-                    </div>
-                    <div className='shrink-0 text-gray-500 dark:text-gray-400'>
-                      {formatDuration(item.watch_seconds)}
-                    </div>
-                  </div>
-                ))}
-            </div>
-          ) : (
-            <div className='flex min-h-[88px] items-center justify-center rounded-lg border border-dashed border-gray-200 bg-gray-50 text-sm text-gray-500 dark:border-gray-700 dark:bg-gray-900/40 dark:text-gray-400'>
-              暂无最近观看
-            </div>
-          )}
-        </div>
-
-        <div className='rounded-lg border border-gray-200 bg-white/70 p-4 dark:border-gray-700 dark:bg-gray-900/50'>
-          <div className='mb-3 flex items-center gap-2 text-sm font-medium text-gray-700 dark:text-gray-200'>
-            <TrendingUp className='h-4 w-4 text-pink-500' />
-            常看内容
-          </div>
-          {displaySummary.topItems.length > 0 ? (
-            <div className='space-y-2'>
-              {displaySummary.topItems.slice(0, TOP_ITEM_LIMIT).map((item) => (
+          <div className='grid h-20 grid-cols-7 gap-2'>
+            {displaySummary.dailyWatchSeconds.map((item) => {
+              const height = Math.max(
+                8,
+                Math.round((item.watchSeconds / maxDailySeconds) * 56),
+              );
+              const isActive = activeDailyItem?.date === item.date;
+              return (
                 <div
-                  key={`${item.source}+${item.videoId}`}
-                  className='flex min-w-0 items-center justify-between gap-3 text-sm'
+                  key={item.date}
+                  className='grid h-full min-w-0 grid-rows-[1fr_auto] items-end'
                 >
-                  <div className='min-w-0 truncate text-gray-800 dark:text-gray-100'>
-                    {item.title}
+                  <div className='flex h-14 items-end'>
+                    <button
+                      type='button'
+                      className={`w-full rounded-t transition-colors focus:outline-none focus:ring-2 focus:ring-green-500/40 ${
+                        isActive
+                          ? 'bg-green-600'
+                          : 'bg-green-500/80 hover:bg-green-500'
+                      }`}
+                      style={{ height }}
+                      title={formatDuration(item.watchSeconds)}
+                      aria-label={`${formatShortDate(item.date)} ${formatDuration(
+                        item.watchSeconds,
+                      )}`}
+                      onClick={() => setActiveDailyDate(item.date)}
+                      onFocus={() => setActiveDailyDate(item.date)}
+                      onMouseEnter={() => setActiveDailyDate(item.date)}
+                    />
                   </div>
-                  <div className='shrink-0 text-gray-500 dark:text-gray-400'>
-                    {formatDuration(item.watchSeconds)}
+                  <div className='mt-2 truncate text-center text-xs text-gray-500 dark:text-gray-400'>
+                    {formatShortDate(item.date)}
                   </div>
                 </div>
-              ))}
-            </div>
-          ) : (
-            <div className='flex min-h-[88px] items-center justify-center rounded-lg border border-dashed border-gray-200 bg-gray-50 text-sm text-gray-500 dark:border-gray-700 dark:bg-gray-900/40 dark:text-gray-400'>
-              暂无常看内容
-            </div>
-          )}
+              );
+            })}
+          </div>
         </div>
+        <TopContentTile items={displaySummary.topItems} />
       </div>
     </section>
   );

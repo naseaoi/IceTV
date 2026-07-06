@@ -140,15 +140,7 @@ declare global {
 }
 
 const getInitialSidebarCollapsed = (): boolean => {
-  if (typeof window === 'undefined') {
-    return false;
-  }
-
-  if (typeof window.__sidebarCollapsed === 'boolean') {
-    return window.__sidebarCollapsed;
-  }
-
-  return readSidebarCollapsed();
+  return false;
 };
 
 const Sidebar = ({ onToggle, activePath = '/' }: SidebarProps) => {
@@ -160,6 +152,15 @@ const Sidebar = ({ onToggle, activePath = '/' }: SidebarProps) => {
     getInitialSidebarCollapsed,
   );
   const prefetchedRoutesRef = useRef<Set<string>>(new Set());
+
+  useLayoutEffect(() => {
+    const collapsed =
+      typeof window.__sidebarCollapsed === 'boolean'
+        ? window.__sidebarCollapsed
+        : readSidebarCollapsed();
+    setIsCollapsed(collapsed);
+    onToggle?.(collapsed);
+  }, [onToggle]);
 
   useLayoutEffect(() => {
     if (typeof document !== 'undefined') {

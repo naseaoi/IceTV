@@ -74,6 +74,33 @@ describe('playback history dedupe', () => {
     ]);
   });
 
+  it('can merge watch seconds into the latest session', () => {
+    const watchedSession = createSession({
+      id: 'session_watched',
+      source: 'source-a',
+      title: 'Demo',
+      episode_index: 1,
+      watch_seconds: 75,
+      started_at: 1000,
+      ended_at: 2000,
+    });
+    const latestSession = createSession({
+      id: 'session_latest',
+      source: 'source-a',
+      title: ' Demo ',
+      episode_index: 2,
+      watch_seconds: 0,
+      started_at: 3000,
+      ended_at: 4000,
+    });
+
+    expect(
+      dedupePlaybackSessionsByTitle([watchedSession, latestSession], {
+        mergeWatchSeconds: true,
+      }),
+    ).toEqual([{ ...latestSession, watch_seconds: 75 }]);
+  });
+
   it('dedupes recent summary items without changing watch totals', () => {
     const sessions = [
       createSession({

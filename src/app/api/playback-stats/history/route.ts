@@ -39,7 +39,10 @@ export async function GET(request: NextRequest) {
       cursor: cursor ? Number(cursor) : undefined,
       keyword,
     });
-    const dedupedSessions = dedupePlaybackSessionsByTitle(sessions, limit + 1);
+    const dedupedSessions = dedupePlaybackSessionsByTitle(sessions, {
+      limit: limit + 1,
+      mergeWatchSeconds: true,
+    });
     const items = dedupedSessions.slice(0, limit);
     const response: PlaybackHistoryResponse = {
       items,
