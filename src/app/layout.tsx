@@ -11,6 +11,7 @@ import { CURRENT_UPDATE_BRANCH } from '@/lib/version';
 
 import { GlobalErrorIndicator } from '../components/GlobalErrorIndicator';
 import { CardInteractionProvider } from '../components/CardInteractionProvider';
+import { ClientErrorReporter } from '../components/ClientErrorReporter';
 import { RuntimeConfigProvider } from '../components/RuntimeConfigProvider';
 import { SiteProvider } from '../components/SiteProvider';
 import { SWRegister } from '../components/SWRegister';
@@ -137,6 +138,7 @@ export default async function RootLayout({
             >
               <CardInteractionProvider>
                 {children}
+                <ClientErrorReporter />
                 <GlobalErrorIndicator />
                 <SWRegister />
               </CardInteractionProvider>

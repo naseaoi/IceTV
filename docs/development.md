@@ -76,6 +76,14 @@ Guard 选择：
 - 优先复用 `src/features/admin/services/userActions.ts`
 - 不要在 `route.ts` 里重新展开权限和用户组逻辑
 
+## 错误处理与日志
+
+- 客户端严重错误日志统一走 `src/lib/client-error-reporting.ts`
+- 根布局已挂载 `src/components/ClientErrorReporter.tsx`，负责 `error` 和 `unhandledrejection`
+- `src/app/error.tsx`、`src/app/global-error.tsx` 生产环境只展示通用提示，开发环境展示错误类型、信息、编号和堆栈
+- 业务可恢复错误优先返回明确文案，不要抛给全局错误边界
+- API 返回给前端的 `error` 只放可展示信息；敏感上下文只打服务端日志
+
 ## 搜索
 
 搜索链路已经有缓存和失败冷却，不要绕开。

@@ -3,6 +3,11 @@
 import Link from 'next/link';
 import { useEffect } from 'react';
 
+import {
+  buildClientErrorReport,
+  reportClientError,
+} from '@/lib/client-error-reporting';
+
 export default function AppError({
   error,
   reset,
@@ -10,8 +15,16 @@ export default function AppError({
   error: Error & { digest?: string };
   reset: () => void;
 }) {
+  const isDevelopment = process.env.NODE_ENV !== 'production';
+  const details = isDevelopment
+    ? buildClientErrorReport('页面渲染失败', error)
+    : null;
+
   useEffect(() => {
-    console.error('页面渲染失败:', error);
+    reportClientError({
+      context: '页面渲染失败',
+      error,
+    });
   }, [error]);
 
   return (
@@ -23,6 +36,18 @@ export default function AppError({
             当前页面出现错误，请重新加载。
           </p>
         </div>
+        {details && (
+          <div className='max-h-72 overflow-auto rounded-md border border-red-200 bg-red-50 p-3 text-left text-xs leading-5 text-red-900 dark:border-red-900/60 dark:bg-red-950/40 dark:text-red-100'>
+            <div>错误类型：{details.name || 'Unknown'}</div>
+            <div>错误信息：{details.message}</div>
+            {details.digest && <div>错误编号：{details.digest}</div>}
+            {details.stack && (
+              <pre className='mt-2 whitespace-pre-wrap break-words'>
+                {details.stack}
+              </pre>
+            )}
+          </div>
+        )}
         <div className='flex justify-center gap-3'>
           <button
             type='button'
