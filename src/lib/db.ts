@@ -14,6 +14,8 @@ import {
   PlaybackWatchTotals,
   PlayRecord,
   SkipConfig,
+  SourceRouteStatInput,
+  SourceRouteStatsItem,
   StorageImportData,
 } from './types';
 
@@ -300,6 +302,18 @@ class DbManager {
   ): Promise<PlaybackStatsTopItem[]> {
     const storage = await this.getStorage();
     return storage.getPlaybackTopItems(userName, limit, since);
+  }
+
+  async recordSourceRouteStat(input: SourceRouteStatInput): Promise<void> {
+    const storage = await this.getStorage();
+    await storage.recordSourceRouteStat(input);
+  }
+
+  async getSourceRouteStats(
+    sinceDate: string,
+  ): Promise<SourceRouteStatsItem[]> {
+    const storage = await this.getStorage();
+    return storage.getSourceRouteStats(sinceDate);
   }
 
   async clearAllData(): Promise<void> {

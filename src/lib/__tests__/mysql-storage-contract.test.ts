@@ -9,6 +9,15 @@ type SearchHistoryRow = {
   sortIndex: number;
 };
 
+type SourceRouteStatsRow = {
+  source: string;
+  routeMode: 'browser' | 'server';
+  bucketDate: string;
+  successCount: number;
+  failureCount: number;
+  updatedAt: number;
+};
+
 type FakeState = {
   users: Map<string, string>;
   playRecords: Map<string, Map<string, string>>;
@@ -16,6 +25,7 @@ type FakeState = {
   skipConfigs: Map<string, Map<string, string>>;
   playbackSessions: Map<string, Record<string, unknown>>;
   searchHistory: SearchHistoryRow[];
+  sourceRouteStats: SourceRouteStatsRow[];
   adminConfig: string | null;
 };
 
@@ -33,6 +43,7 @@ function cloneState(state: FakeState): FakeState {
     skipConfigs: cloneNestedMap(state.skipConfigs),
     playbackSessions: new Map(state.playbackSessions),
     searchHistory: state.searchHistory.map((row) => ({ ...row })),
+    sourceRouteStats: state.sourceRouteStats.map((row) => ({ ...row })),
     adminConfig: state.adminConfig,
   };
 }
@@ -45,6 +56,7 @@ function createState(): FakeState {
     skipConfigs: new Map(),
     playbackSessions: new Map(),
     searchHistory: [],
+    sourceRouteStats: [],
     adminConfig: null,
   };
 }
@@ -426,6 +438,54 @@ function createFakePool() {
       return [[], []];
     }
 
+    if (
+      normalized.startsWith(
+        'INSERT INTO source_route_stats ( source, route_mode, bucket_date, success_count, failure_count, updated_at ) VALUES (?, ?, ?, ?, ?, ?) ON DUPLICATE KEY UPDATE',
+      )
+    ) {
+      const [
+        source,
+        routeMode,
+        bucketDate,
+        successCount,
+        failureCount,
+        updatedAt,
+      ] = params as [
+        string,
+        'browser' | 'server',
+        string,
+        number,
+        number,
+        number,
+      ];
+      const row = currentState.sourceRouteStats.find(
+        (item) =>
+          item.source === source &&
+          item.routeMode === routeMode &&
+          item.bucketDate === bucketDate,
+      );
+      if (row) {
+        row.successCount += successCount;
+        row.failureCount += failureCount;
+        row.updatedAt = updatedAt;
+      } else {
+        currentState.sourceRouteStats.push({
+          source,
+          routeMode,
+          bucketDate,
+          successCount,
+          failureCount,
+          updatedAt,
+        });
+      }
+      return [[], []];
+    }
+
+    if (normalized === 'DELETE FROM source_route_stats') {
+      currentState.sourceRouteStats = [];
+      return [[], []];
+    }
+
     throw new Error(`Unhandled execute SQL: ${normalized}`);
   };
 
@@ -572,6 +632,38 @@ function createFakePool() {
       return [currentState.users.has(username) ? [{ v: 1 }] : [], []];
     }
 
+    if (
+      normalized ===
+      'SELECT source, route_mode, COALESCE(SUM(success_count), 0) AS success_count, COALESCE(SUM(failure_count), 0) AS failure_count FROM source_route_stats WHERE bucket_date >= ? GROUP BY source, route_mode'
+    ) {
+      const [sinceDate] = params as [string];
+      const grouped = new Map<
+        string,
+        {
+          source: string;
+          route_mode: 'browser' | 'server';
+          success_count: number;
+          failure_count: number;
+        }
+      >();
+
+      for (const row of currentState.sourceRouteStats) {
+        if (row.bucketDate < sinceDate) continue;
+        const key = `${row.source}:${row.routeMode}`;
+        const current = grouped.get(key) || {
+          source: row.source,
+          route_mode: row.routeMode,
+          success_count: 0,
+          failure_count: 0,
+        };
+        current.success_count += row.successCount;
+        current.failure_count += row.failureCount;
+        grouped.set(key, current);
+      }
+
+      return [Array.from(grouped.values()), []];
+    }
+
     throw new Error(`Unhandled query SQL: ${normalized}`);
   };
 
@@ -617,6 +709,7 @@ import type {
   PlaybackSession,
   PlayRecord,
   SkipConfig,
+  SourceRouteStatsItem,
 } from '../types';
 
 const adminConfig: AdminConfig = {
@@ -699,6 +792,12 @@ const playbackSession: PlaybackSession = {
   created_at: 1000,
   updated_at: 2000,
 };
+
+function sortRouteStats(items: SourceRouteStatsItem[]) {
+  return [...items].sort((a, b) =>
+    `${a.source}:${a.routeMode}`.localeCompare(`${b.source}:${b.routeMode}`),
+  );
+}
 
 describe('mysql storage contract', () => {
   it('persists user scoped data and deletes it with the user', async () => {
@@ -793,5 +892,64 @@ describe('mysql storage contract', () => {
       true,
     );
     await expect(storage.registerUser('alice_user', 'other')).rejects.toThrow();
+  });
+
+  it('aggregates source route stats by date and mode', async () => {
+    const storage = new MySqlStorage('mysql://demo:demo@localhost:3306/icetv');
+
+    await storage.clearAllData();
+    await storage.recordSourceRouteStat({
+      source: 'source-a',
+      routeMode: 'browser',
+      success: true,
+      eventAt: Date.UTC(2026, 0, 8),
+    });
+    await storage.recordSourceRouteStat({
+      source: 'source-a',
+      routeMode: 'browser',
+      success: false,
+      eventAt: Date.UTC(2026, 0, 8),
+    });
+    await storage.recordSourceRouteStat({
+      source: 'source-a',
+      routeMode: 'server',
+      success: true,
+      eventAt: Date.UTC(2026, 0, 7),
+    });
+    await storage.recordSourceRouteStat({
+      source: 'source-a',
+      routeMode: 'browser',
+      success: true,
+      eventAt: Date.UTC(2025, 11, 31),
+    });
+    await storage.recordSourceRouteStat({
+      source: 'source-b',
+      routeMode: 'browser',
+      success: true,
+      eventAt: Date.UTC(2026, 0, 8),
+    });
+
+    const stats = await storage.getSourceRouteStats('2026-01-02');
+
+    expect(sortRouteStats(stats)).toEqual([
+      {
+        source: 'source-a',
+        routeMode: 'browser',
+        successCount: 1,
+        failureCount: 1,
+      },
+      {
+        source: 'source-a',
+        routeMode: 'server',
+        successCount: 1,
+        failureCount: 0,
+      },
+      {
+        source: 'source-b',
+        routeMode: 'browser',
+        successCount: 1,
+        failureCount: 0,
+      },
+    ]);
   });
 });

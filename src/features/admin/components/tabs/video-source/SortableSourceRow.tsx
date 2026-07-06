@@ -18,10 +18,23 @@ export type SourceValidationStatus = {
   message: string;
 };
 
+export type RouteModeStats = {
+  successCount: number;
+  failureCount: number;
+  totalCount: number;
+  successRate: number | null;
+};
+
+export type SourceRouteStatsView = {
+  browser?: RouteModeStats;
+  server?: RouteModeStats;
+};
+
 interface SortableSourceRowProps {
   source: DataSource;
   isSelected: boolean;
   validationStatus: SourceValidationStatus | null;
+  sourceRouteStats: SourceRouteStatsView | null;
   isProxyModeLoading: boolean;
   isToggleLoading: boolean;
   isDeleteLoading: boolean;
@@ -38,6 +51,7 @@ export function SortableSourceRow({
   source,
   isSelected,
   validationStatus,
+  sourceRouteStats,
   isProxyModeLoading,
   isToggleLoading,
   isDeleteLoading,
@@ -75,6 +89,23 @@ export function SortableSourceRow({
       : proxyMode === 'auto'
         ? '自动'
         : '浏览器';
+
+  const renderRouteStats = (label: string, stats?: RouteModeStats) => {
+    const rate =
+      stats && stats.successRate !== null
+        ? `${Math.round(stats.successRate * 100)}%`
+        : '-';
+    const count = stats ? `${stats.successCount}/${stats.totalCount}` : '-';
+    return (
+      <div className='flex items-center justify-between gap-3'>
+        <span className='text-gray-500 dark:text-gray-400'>{label}</span>
+        <span className='font-medium text-gray-900 dark:text-gray-100'>
+          {rate}
+        </span>
+        <span className='text-gray-500 dark:text-gray-400'>{count}</span>
+      </div>
+    );
+  };
 
   return (
     <tr
@@ -139,6 +170,12 @@ export function SortableSourceRow({
         >
           {proxyModeText}
         </button>
+      </td>
+      <td className='min-w-[9rem] whitespace-nowrap px-6 py-4 text-xs'>
+        <div className='space-y-1'>
+          {renderRouteStats('直连', sourceRouteStats?.browser)}
+          {renderRouteStats('代理', sourceRouteStats?.server)}
+        </div>
       </td>
       <td className='max-w-[1rem] whitespace-nowrap px-6 py-4'>
         {validationStatus ? (

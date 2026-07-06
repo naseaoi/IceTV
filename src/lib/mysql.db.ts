@@ -22,6 +22,8 @@ import {
   PlaybackWatchTotals,
   PlayRecord,
   SkipConfig,
+  SourceRouteStatInput,
+  SourceRouteStatsItem,
   StorageImportData,
 } from './types';
 import { assertValidUsername, normalizeUsername } from './username';
@@ -117,6 +119,9 @@ type JsonRow = RowDataPacket & {
   record_key?: string;
   favorite_key?: string;
   config_key?: string;
+  route_mode?: string;
+  success_count?: number | string;
+  failure_count?: number | string;
 };
 
 export class MySqlStorage implements IStorage {
@@ -198,6 +203,16 @@ export class MySqlStorage implements IStorage {
       `CREATE TABLE IF NOT EXISTS admin_config (
         id TINYINT NOT NULL PRIMARY KEY,
         config_json LONGTEXT NOT NULL
+      ) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci`,
+      `CREATE TABLE IF NOT EXISTS source_route_stats (
+        source VARCHAR(191) NOT NULL,
+        route_mode VARCHAR(16) NOT NULL,
+        bucket_date CHAR(10) NOT NULL,
+        success_count INT NOT NULL DEFAULT 0,
+        failure_count INT NOT NULL DEFAULT 0,
+        updated_at BIGINT NOT NULL,
+        PRIMARY KEY (source, route_mode, bucket_date),
+        KEY idx_source_route_stats_bucket (bucket_date)
       ) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci`,
     ];
 
@@ -823,6 +838,63 @@ export class MySqlStorage implements IStorage {
     return items;
   }
 
+  async recordSourceRouteStat(input: SourceRouteStatInput): Promise<void> {
+    await this.ensureInitialized();
+    const source = input.source.trim().slice(0, 191);
+    if (!source) return;
+    const routeMode = input.routeMode === 'server' ? 'server' : 'browser';
+    const eventAt = Number.isFinite(input.eventAt) ? input.eventAt : Date.now();
+    const bucketDate = new Date(eventAt).toISOString().slice(0, 10);
+    const successIncrement = input.success ? 1 : 0;
+    const failureIncrement = input.success ? 0 : 1;
+
+    await this.pool.execute(
+      `INSERT INTO source_route_stats (
+        source, route_mode, bucket_date, success_count, failure_count, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?)
+      ON DUPLICATE KEY UPDATE
+        success_count = success_count + VALUES(success_count),
+        failure_count = failure_count + VALUES(failure_count),
+        updated_at = VALUES(updated_at)`,
+      [
+        source,
+        routeMode,
+        bucketDate,
+        successIncrement,
+        failureIncrement,
+        Date.now(),
+      ],
+    );
+  }
+
+  async getSourceRouteStats(
+    sinceDate: string,
+  ): Promise<SourceRouteStatsItem[]> {
+    await this.ensureInitialized();
+    const [rows] = await this.pool.query<JsonRow[]>(
+      `SELECT
+        source,
+        route_mode,
+        COALESCE(SUM(success_count), 0) AS success_count,
+        COALESCE(SUM(failure_count), 0) AS failure_count
+      FROM source_route_stats
+      WHERE bucket_date >= ?
+      GROUP BY source, route_mode`,
+      [sinceDate],
+    );
+
+    return rows
+      .filter(
+        (row) => row.route_mode === 'browser' || row.route_mode === 'server',
+      )
+      .map((row) => ({
+        source: row.source || '',
+        routeMode: row.route_mode as SourceRouteStatsItem['routeMode'],
+        successCount: Number(row.success_count || 0),
+        failureCount: Number(row.failure_count || 0),
+      }));
+  }
+
   async clearAllData(): Promise<void> {
     await this.withTransaction(async (connection) => {
       await connection.execute('DELETE FROM users');
@@ -832,6 +904,7 @@ export class MySqlStorage implements IStorage {
       await connection.execute('DELETE FROM skip_configs');
       await connection.execute('DELETE FROM playback_sessions');
       await connection.execute('DELETE FROM admin_config');
+      await connection.execute('DELETE FROM source_route_stats');
     });
   }
 
@@ -844,6 +917,7 @@ export class MySqlStorage implements IStorage {
       await connection.execute('DELETE FROM skip_configs');
       await connection.execute('DELETE FROM playback_sessions');
       await connection.execute('DELETE FROM admin_config');
+      await connection.execute('DELETE FROM source_route_stats');
 
       await connection.execute(
         'INSERT INTO admin_config (id, config_json) VALUES (1, ?)',

@@ -79,6 +79,22 @@ export interface PlaybackStatsTopItem {
   lastWatchedAt: number;
 }
 
+export type SourceRouteMode = 'browser' | 'server';
+
+export interface SourceRouteStatInput {
+  source: string;
+  routeMode: SourceRouteMode;
+  success: boolean;
+  eventAt: number;
+}
+
+export interface SourceRouteStatsItem {
+  source: string;
+  routeMode: SourceRouteMode;
+  successCount: number;
+  failureCount: number;
+}
+
 export interface StorageUserImportData {
   playRecords: { [key: string]: PlayRecord };
   favorites: { [key: string]: Favorite };
@@ -172,6 +188,8 @@ export interface IStorage {
     limit?: number,
     since?: number,
   ): Promise<PlaybackStatsTopItem[]>;
+  recordSourceRouteStat(input: SourceRouteStatInput): Promise<void>;
+  getSourceRouteStats(sinceDate: string): Promise<SourceRouteStatsItem[]>;
 
   // 数据清理相关
   clearAllData(): Promise<void>;

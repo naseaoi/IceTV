@@ -9,6 +9,7 @@ import type {
   PlaybackSession,
   PlayRecord,
   SkipConfig,
+  SourceRouteStatsItem,
 } from '../types';
 
 const adminConfig: AdminConfig = {
@@ -91,6 +92,12 @@ const playbackSession: PlaybackSession = {
   created_at: 1000,
   updated_at: 2000,
 };
+
+function sortRouteStats(items: SourceRouteStatsItem[]) {
+  return [...items].sort((a, b) =>
+    `${a.source}:${a.routeMode}`.localeCompare(`${b.source}:${b.routeMode}`),
+  );
+}
 
 describe('sqlite storage contract', () => {
   it('persists user scoped data and deletes it with the user', async () => {
@@ -225,5 +232,63 @@ describe('sqlite storage contract', () => {
       .run('{not-valid-json');
 
     await expect(storage.getAdminConfig()).rejects.toThrow();
+  });
+
+  it('aggregates source route stats by date and mode', async () => {
+    const storage = new LocalSqliteStorage(':memory:');
+
+    await storage.recordSourceRouteStat({
+      source: 'source-a',
+      routeMode: 'browser',
+      success: true,
+      eventAt: Date.UTC(2026, 0, 8),
+    });
+    await storage.recordSourceRouteStat({
+      source: 'source-a',
+      routeMode: 'browser',
+      success: false,
+      eventAt: Date.UTC(2026, 0, 8),
+    });
+    await storage.recordSourceRouteStat({
+      source: 'source-a',
+      routeMode: 'server',
+      success: true,
+      eventAt: Date.UTC(2026, 0, 7),
+    });
+    await storage.recordSourceRouteStat({
+      source: 'source-a',
+      routeMode: 'browser',
+      success: true,
+      eventAt: Date.UTC(2025, 11, 31),
+    });
+    await storage.recordSourceRouteStat({
+      source: 'source-b',
+      routeMode: 'browser',
+      success: true,
+      eventAt: Date.UTC(2026, 0, 8),
+    });
+
+    const stats = await storage.getSourceRouteStats('2026-01-02');
+
+    expect(sortRouteStats(stats)).toEqual([
+      {
+        source: 'source-a',
+        routeMode: 'browser',
+        successCount: 1,
+        failureCount: 1,
+      },
+      {
+        source: 'source-a',
+        routeMode: 'server',
+        successCount: 1,
+        failureCount: 0,
+      },
+      {
+        source: 'source-b',
+        routeMode: 'browser',
+        successCount: 1,
+        failureCount: 0,
+      },
+    ]);
   });
 });

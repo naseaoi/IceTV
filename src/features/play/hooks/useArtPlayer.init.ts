@@ -6,6 +6,7 @@ import {
   rememberSourceServerProxy,
   shouldAutoFallbackToServer,
 } from '@/lib/proxy-modes';
+import { reportSourceRouteStat } from '@/lib/source-route-stats.client';
 import {
   bindPlayerHoverControls,
   bindPlayerMobileControls,
@@ -259,6 +260,23 @@ export async function initializeArtPlayer(
     bindPlayerMobileControls(player);
     let nativeUseServerProxy = mediaKind === 'native' && preUseProxy;
     let nativeFallbackStarted = false;
+    const nativeRouteStatReported = {
+      browser: { success: false, failure: false },
+      server: { success: false, failure: false },
+    };
+    const reportNativeRouteStat = (success: boolean) => {
+      if (mediaKind !== 'native' || !preSourceKey) return;
+      const mode = nativeUseServerProxy ? 'server' : 'browser';
+      const state = nativeRouteStatReported[mode];
+      if (success) {
+        if (state.success) return;
+        state.success = true;
+      } else {
+        if (state.failure) return;
+        state.failure = true;
+      }
+      reportSourceRouteStat(preSourceKey, mode, success);
+    };
 
     if (mediaKind === 'native' && player.video) {
       getManagedVideo(
@@ -281,6 +299,7 @@ export async function initializeArtPlayer(
         sourceKey: preSourceKey,
         reason,
       });
+      reportNativeRouteStat(false);
 
       if (preSourceKey) {
         rememberSourceServerProxy(preSourceKey, videoUrl);
@@ -396,6 +415,7 @@ export async function initializeArtPlayer(
           clearSourceProxyOverride(activeSourceKey, videoUrl);
         }
       }
+      reportNativeRouteStat(true);
       showSourceSwitchSuccessNotice();
       startPlaybackStatsSession?.();
       onPlaybackStarted?.();
@@ -737,6 +757,7 @@ export async function initializeArtPlayer(
       if (player.currentTime > 0) {
         return;
       }
+      reportNativeRouteStat(false);
       if (
         mediaKind === 'native' &&
         !nativeFallbackStarted &&

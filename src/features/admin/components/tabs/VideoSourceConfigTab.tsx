@@ -22,7 +22,11 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 
 import ConfirmModal from '@/components/modals/ConfirmModal';
 import AlertModal from '@/components/modals/AlertModal';
-import { SortableSourceRow } from '@/features/admin/components/tabs/video-source/SortableSourceRow';
+import {
+  type RouteModeStats,
+  SortableSourceRow,
+  type SourceRouteStatsView,
+} from '@/features/admin/components/tabs/video-source/SortableSourceRow';
 import { SourceValidationModal } from '@/features/admin/components/tabs/video-source/SourceValidationModal';
 import { VideoSourceAddForm } from '@/features/admin/components/tabs/video-source/VideoSourceAddForm';
 import { VideoSourceEditForm } from '@/features/admin/components/tabs/video-source/VideoSourceEditForm';
@@ -32,10 +36,35 @@ import { useLoadingState } from '@/features/admin/hooks/useLoadingState';
 import { useSourceBatchOperation } from '@/features/admin/hooks/useSourceBatchOperation';
 import { useSourceValidation } from '@/features/admin/hooks/useSourceValidation';
 import { buttonStyles } from '@/features/admin/lib/buttonStyles';
+import { adminGet } from '@/features/admin/lib/api';
 import { showError } from '@/features/admin/lib/notifications';
 import { AdminConfig } from '@/types/admin';
 import { DataSource } from '@/features/admin/types/internal';
 import { useModalState } from '@/hooks/useModalState';
+import type { SourceRouteStatsItem } from '@/lib/types';
+
+type SourceRouteStatsBySource = Record<string, SourceRouteStatsView>;
+
+function toRouteModeStats(item: SourceRouteStatsItem): RouteModeStats {
+  const totalCount = item.successCount + item.failureCount;
+  return {
+    successCount: item.successCount,
+    failureCount: item.failureCount,
+    totalCount,
+    successRate: totalCount > 0 ? item.successCount / totalCount : null,
+  };
+}
+
+function buildSourceRouteStats(
+  items: SourceRouteStatsItem[],
+): SourceRouteStatsBySource {
+  return items.reduce<SourceRouteStatsBySource>((acc, item) => {
+    const current = acc[item.source] || {};
+    current[item.routeMode] = toRouteModeStats(item);
+    acc[item.source] = current;
+    return acc;
+  }, {});
+}
 
 const VideoSourceConfig = ({
   config,
@@ -52,6 +81,8 @@ const VideoSourceConfig = ({
     showAlert,
   });
   const [sources, setSources] = useState<DataSource[]>([]);
+  const [sourceRouteStats, setSourceRouteStats] =
+    useState<SourceRouteStatsBySource>({});
   const [showAddForm, setShowAddForm] = useState(false);
   const [editingSource, setEditingSource] = useState<DataSource | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<DataSource | null>(null);
@@ -120,6 +151,28 @@ const VideoSourceConfig = ({
     });
 
     setSelectedSources(new Set());
+  }, [config]);
+
+  useEffect(() => {
+    if (!config?.SourceConfig) return;
+    let cancelled = false;
+    adminGet<{ stats: SourceRouteStatsItem[] }>(
+      '/api/admin/source-route-stats?days=7',
+      '读取路由统计失败',
+    )
+      .then((payload) => {
+        if (cancelled) return;
+        setSourceRouteStats(buildSourceRouteStats(payload.stats || []));
+      })
+      .catch((error) => {
+        if (cancelled) return;
+        console.warn('读取路由统计失败:', error);
+        setSourceRouteStats({});
+      });
+
+    return () => {
+      cancelled = true;
+    };
   }, [config]);
 
   const callSourceApi = useCallback(
@@ -459,6 +512,9 @@ const VideoSourceConfig = ({
                   流量路由
                 </th>
                 <th className='px-6 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400'>
+                  7天成功率
+                </th>
+                <th className='px-6 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400'>
                   有效性
                 </th>
                 <th className='px-6 py-3 text-right text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400'>
@@ -477,6 +533,7 @@ const VideoSourceConfig = ({
                     source={source}
                     isSelected={selectedSources.has(source.key)}
                     validationStatus={getValidationStatus(source.key)}
+                    sourceRouteStats={sourceRouteStats[source.key] || null}
                     isProxyModeLoading={isLoading(`proxyMode_${source.key}`)}
                     isToggleLoading={isLoading(`toggleSource_${source.key}`)}
                     isDeleteLoading={isLoading(`deleteSource_${source.key}`)}

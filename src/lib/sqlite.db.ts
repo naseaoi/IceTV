@@ -22,6 +22,8 @@ import {
   PlaybackWatchTotals,
   PlayRecord,
   SkipConfig,
+  SourceRouteStatInput,
+  SourceRouteStatsItem,
   StorageImportData,
 } from './types';
 import { assertValidUsername, normalizeUsername } from './username';
@@ -118,6 +120,13 @@ type PlaybackTopMetadataRow = {
 
 type PlaybackRangeWatchTotalRow = {
   watch_seconds: number | null;
+};
+
+type SourceRouteStatsRow = {
+  source: string;
+  route_mode: string;
+  success_count: number | null;
+  failure_count: number | null;
 };
 
 function ensureObject<T>(value: unknown, fallback: T): T {
@@ -331,6 +340,19 @@ export class LocalSqliteStorage implements IStorage {
         id INTEGER PRIMARY KEY CHECK (id = 1),
         config_json TEXT NOT NULL
       );
+
+      CREATE TABLE IF NOT EXISTS source_route_stats (
+        source TEXT NOT NULL,
+        route_mode TEXT NOT NULL,
+        bucket_date TEXT NOT NULL,
+        success_count INTEGER NOT NULL DEFAULT 0,
+        failure_count INTEGER NOT NULL DEFAULT 0,
+        updated_at INTEGER NOT NULL,
+        PRIMARY KEY (source, route_mode, bucket_date)
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_source_route_stats_bucket
+        ON source_route_stats (bucket_date);
     `);
   }
 
@@ -1029,6 +1051,63 @@ export class LocalSqliteStorage implements IStorage {
     });
   }
 
+  async recordSourceRouteStat(input: SourceRouteStatInput): Promise<void> {
+    const source = input.source.trim().slice(0, 191);
+    if (!source) return;
+    const routeMode = input.routeMode === 'server' ? 'server' : 'browser';
+    const eventAt = Number.isFinite(input.eventAt) ? input.eventAt : Date.now();
+    const bucketDate = new Date(eventAt).toISOString().slice(0, 10);
+    const successIncrement = input.success ? 1 : 0;
+    const failureIncrement = input.success ? 0 : 1;
+
+    this.db
+      .prepare(
+        `INSERT INTO source_route_stats (
+          source, route_mode, bucket_date, success_count, failure_count, updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?)
+        ON CONFLICT(source, route_mode, bucket_date) DO UPDATE SET
+          success_count = success_count + excluded.success_count,
+          failure_count = failure_count + excluded.failure_count,
+          updated_at = excluded.updated_at`,
+      )
+      .run(
+        source,
+        routeMode,
+        bucketDate,
+        successIncrement,
+        failureIncrement,
+        Date.now(),
+      );
+  }
+
+  async getSourceRouteStats(
+    sinceDate: string,
+  ): Promise<SourceRouteStatsItem[]> {
+    const rows = this.db
+      .prepare(
+        `SELECT
+          source,
+          route_mode,
+          COALESCE(SUM(success_count), 0) AS success_count,
+          COALESCE(SUM(failure_count), 0) AS failure_count
+        FROM source_route_stats
+        WHERE bucket_date >= ?
+        GROUP BY source, route_mode`,
+      )
+      .all(sinceDate) as SourceRouteStatsRow[];
+
+    return rows
+      .filter(
+        (row) => row.route_mode === 'browser' || row.route_mode === 'server',
+      )
+      .map((row) => ({
+        source: row.source,
+        routeMode: row.route_mode as SourceRouteStatsItem['routeMode'],
+        successCount: Number(row.success_count || 0),
+        failureCount: Number(row.failure_count || 0),
+      }));
+  }
+
   async clearAllData(): Promise<void> {
     const clear = this.db.transaction(() => {
       this.db.exec(`
@@ -1039,6 +1118,7 @@ export class LocalSqliteStorage implements IStorage {
         DELETE FROM skip_configs;
         DELETE FROM playback_sessions;
         DELETE FROM admin_config;
+        DELETE FROM source_route_stats;
       `);
     });
 
@@ -1056,6 +1136,7 @@ export class LocalSqliteStorage implements IStorage {
         DELETE FROM skip_configs;
         DELETE FROM playback_sessions;
         DELETE FROM admin_config;
+        DELETE FROM source_route_stats;
       `);
 
       this.stmts.setAdminConfig.run(JSON.stringify(snapshot.adminConfig));

@@ -29,6 +29,7 @@ import {
   rememberSourceServerProxy,
   shouldAutoFallbackToServer,
 } from '@/lib/proxy-modes';
+import { reportSourceRouteStat } from '@/lib/source-route-stats.client';
 
 import type { PlaybackRequestMode } from '@/features/play/hooks/usePlayPageState';
 import type {
@@ -167,6 +168,23 @@ export function createVodM3u8Loader({
     let currentUseServerProxy = isServerProxy(sourceKey, url);
     let targetUrl = buildTargetUrl(url, currentUseServerProxy);
     managedVideo.__icetvUsingServerProxy = currentUseServerProxy;
+    const routeStatReported = {
+      browser: { success: false, failure: false },
+      server: { success: false, failure: false },
+    };
+    const reportRouteStat = (success: boolean) => {
+      if (!sourceKey) return;
+      const mode = currentUseServerProxy ? 'server' : 'browser';
+      const state = routeStatReported[mode];
+      if (success) {
+        if (state.success) return;
+        state.success = true;
+      } else {
+        if (state.failure) return;
+        state.failure = true;
+      }
+      reportSourceRouteStat(sourceKey, mode, success);
+    };
 
     setRealtimeLoadSpeed('测速中...');
 
@@ -254,6 +272,7 @@ export function createVodM3u8Loader({
         sourceKey,
         reason,
       });
+      reportRouteStat(false);
       setRealtimeLoadSpeed('直连失败，切换代理...');
       markCurrentSourceFailure('cors-fallback', reason);
 
@@ -447,6 +466,7 @@ export function createVodM3u8Loader({
           if (sourceKey) {
             clearSourceProxyOverride(sourceKey, url);
           }
+          reportRouteStat(false);
           setError('当前源加载失败');
           return;
         }
@@ -485,6 +505,7 @@ export function createVodM3u8Loader({
         clearTimeout(speedFallbackTimer);
         speedFallbackTimer = null;
       }
+      reportRouteStat(true);
       if (failureKey) {
         clearSourceFailure(failureKey);
       }
