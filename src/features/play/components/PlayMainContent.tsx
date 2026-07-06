@@ -64,7 +64,7 @@ interface PlayMainContentProps {
 const DEFAULT_PLAYER_LOADING_TIMEOUT_SECONDS = 15;
 
 export function buildLoadingTimeoutMessage(timeoutSeconds: number): string {
-  return `已等待超过 ${timeoutSeconds} 秒，可能是网络问题或播放源不可用`;
+  return `已等待超过 ${timeoutSeconds} 秒，源站响应超时`;
 }
 
 const playAccents: Record<string, PlayerPageAccent> = {

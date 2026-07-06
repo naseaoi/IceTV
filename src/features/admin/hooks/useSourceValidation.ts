@@ -29,7 +29,10 @@ export function useSourceValidation({
     ValidationResult[]
   >([]);
 
-  const startValidation = async (searchKeyword: string, sourceKey?: string) => {
+  const startValidation = async (
+    searchKeyword: string,
+    sourceKeys?: string | string[],
+  ) => {
     if (!searchKeyword.trim()) {
       showAlert({
         type: 'warning',
@@ -39,10 +42,19 @@ export function useSourceValidation({
       return;
     }
 
-    const targetSource = sourceKey
-      ? sources.find((source) => source.key === sourceKey)
-      : null;
-    if (sourceKey && !targetSource) {
+    const requestedKeys =
+      typeof sourceKeys === 'string'
+        ? [sourceKeys]
+        : Array.isArray(sourceKeys)
+          ? sourceKeys
+          : [];
+    const requestedKeySet =
+      requestedKeys.length > 0 ? new Set(requestedKeys) : null;
+    const targets = requestedKeySet
+      ? sources.filter((source) => requestedKeySet.has(source.key))
+      : sources;
+
+    if (requestedKeySet && targets.length !== requestedKeySet.size) {
       showAlert({
         type: 'error',
         title: '验证失败',
@@ -52,7 +64,6 @@ export function useSourceValidation({
     }
 
     setIsValidating(true);
-    const targets = targetSource ? [targetSource] : sources;
     const initialResults: ValidationResult[] = targets.map((source) => ({
       key: source.key,
       name: source.name,
@@ -62,26 +73,33 @@ export function useSourceValidation({
     }));
 
     setValidationResults((prev) => {
-      if (!sourceKey) {
+      if (!requestedKeySet) {
         return initialResults;
       }
 
-      const initialResult = initialResults[0];
-      const exists = prev.some((result) => result.key === sourceKey);
-      if (exists) {
-        return prev.map((result) =>
-          result.key === sourceKey ? initialResult : result,
-        );
-      }
-      return [...prev, initialResult];
+      const initialResultMap = new Map(
+        initialResults.map((result) => [result.key, result]),
+      );
+      const next = prev.map(
+        (result) => initialResultMap.get(result.key) || result,
+      );
+      const existingKeys = new Set(prev.map((result) => result.key));
+      initialResults.forEach((result) => {
+        if (!existingKeys.has(result.key)) {
+          next.push(result);
+        }
+      });
+      return next;
     });
 
     try {
       const params = new URLSearchParams({
         q: searchKeyword.trim(),
       });
-      if (sourceKey) {
-        params.set('source', sourceKey);
+      if (requestedKeys.length === 1) {
+        params.set('source', requestedKeys[0]);
+      } else if (requestedKeys.length > 1) {
+        params.set('sources', requestedKeys.join(','));
       }
       const eventSource = new EventSource(
         `/api/admin/source/validate?${params.toString()}`,

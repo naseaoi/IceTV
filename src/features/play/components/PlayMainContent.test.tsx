@@ -82,7 +82,7 @@ describe('PlayMainContent', () => {
 
   it('uses the configured timeout seconds in loading timeout copy', () => {
     expect(buildLoadingTimeoutMessage(20)).toBe(
-      '已等待超过 20 秒，可能是网络问题或播放源不可用',
+      '已等待超过 20 秒，源站响应超时',
     );
   });
 

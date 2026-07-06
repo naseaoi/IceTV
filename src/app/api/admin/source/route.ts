@@ -22,6 +22,7 @@ type Action =
   | 'batch_disable'
   | 'batch_enable'
   | 'batch_delete'
+  | 'batch_set_proxy_mode'
   | 'set_proxy_mode';
 
 interface BaseBody {
@@ -72,6 +73,7 @@ export async function POST(request: NextRequest) {
       'batch_disable',
       'batch_enable',
       'batch_delete',
+      'batch_set_proxy_mode',
       'set_proxy_mode',
     ];
     if (!action || !ACTIONS.includes(action)) {
@@ -279,6 +281,40 @@ export async function POST(request: NextRequest) {
             }
           });
         }
+        break;
+      }
+      case 'batch_set_proxy_mode': {
+        const { keys, proxyMode } = body as {
+          keys?: string[];
+          proxyMode?: string;
+        };
+        if (!Array.isArray(keys) || keys.length === 0) {
+          return NextResponse.json(
+            { error: '缺少 keys 参数或为空' },
+            { status: 400 },
+          );
+        }
+        if (
+          proxyMode !== 'server' &&
+          proxyMode !== 'browser' &&
+          proxyMode !== 'auto'
+        ) {
+          return NextResponse.json(
+            { error: 'proxyMode 必须为 server、browser 或 auto' },
+            { status: 400 },
+          );
+        }
+        const keySet = new Set(
+          keys
+            .filter((key): key is string => typeof key === 'string')
+            .map((key) => key.trim())
+            .filter(Boolean),
+        );
+        adminConfig.SourceConfig.forEach((entry) => {
+          if (keySet.has(entry.key)) {
+            entry.proxyMode = proxyMode;
+          }
+        });
         break;
       }
       case 'sort': {

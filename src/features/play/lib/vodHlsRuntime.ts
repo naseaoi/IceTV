@@ -329,7 +329,7 @@ export function createVodM3u8Loader({
         ? nextRange[0] - (activeRange ? activeRange[1] : currentTime)
         : null;
 
-      console.warn('检测到点播播放卡顿，尝试恢复', {
+      console.warn('检测到点播播放卡顿', {
         reason,
         currentTime: Number(currentTime.toFixed(2)),
         readyState: video.readyState,
@@ -341,11 +341,11 @@ export function createVodM3u8Loader({
           Number(end.toFixed(2)),
         ]),
       });
-      setRealtimeLoadSpeed('当前源加载慢，尝试恢复...');
+      setRealtimeLoadSpeed('源站响应较慢，正在继续加载');
       try {
         const activePlayer = artPlayerRef.current;
         if (activePlayer) {
-          activePlayer.notice.show = '当前源加载慢，尝试恢复...';
+          activePlayer.notice.show = '源站响应较慢，正在继续加载';
         }
       } catch {}
 
@@ -495,7 +495,7 @@ export function createVodM3u8Loader({
         /frag|segment|level|manifest/i.test(errorDetails)
       ) {
         markCurrentSourceFailure(sourceFailureReason, errorReason, errorStatus);
-        setRealtimeLoadSpeed('当前源加载慢，尝试恢复...');
+        setRealtimeLoadSpeed('源站响应较慢，正在继续加载');
       }
     };
 

@@ -27,6 +27,7 @@ import {
   SortableSourceRow,
   type SourceRouteStatsView,
 } from '@/features/admin/components/tabs/video-source/SortableSourceRow';
+import { BatchSourceMenu } from '@/features/admin/components/tabs/video-source/BatchSourceMenu';
 import { SourceValidationModal } from '@/features/admin/components/tabs/video-source/SourceValidationModal';
 import { VideoSourceAddForm } from '@/features/admin/components/tabs/video-source/VideoSourceAddForm';
 import { VideoSourceEditForm } from '@/features/admin/components/tabs/video-source/VideoSourceEditForm';
@@ -107,9 +108,8 @@ const VideoSourceConfig = ({
   const [showValidationModal, setShowValidationModal, openValidationModal] =
     useModalState(false);
   const [searchKeyword, setSearchKeyword] = useState('');
-  const [pendingValidationSourceKey, setPendingValidationSourceKey] = useState<
-    string | null
-  >(null);
+  const [pendingValidationSourceKeys, setPendingValidationSourceKeys] =
+    useState<string[] | null>(null);
 
   const sensors = useSensors(
     useSensor(PointerSensor, {
@@ -285,35 +285,43 @@ const VideoSourceConfig = ({
   const { isValidating, startValidation, getValidationStatus } =
     useSourceValidation({ sources, showAlert });
 
-  const handleOpenValidationModal = () => {
-    setPendingValidationSourceKey(null);
+  const handleOpenValidationModal = (sourceKeys?: string[]) => {
+    setSearchKeyword('');
+    setPendingValidationSourceKeys(sourceKeys || null);
     openValidationModal();
   };
 
   const handleCloseValidationModal = () => {
     setShowValidationModal(false);
-    setPendingValidationSourceKey(null);
+    setSearchKeyword('');
+    setPendingValidationSourceKeys(null);
   };
 
   const handleStartValidation = async () => {
+    const keyword = searchKeyword;
     setShowValidationModal(false);
-    const sourceKey = pendingValidationSourceKey || undefined;
-    setPendingValidationSourceKey(null);
+    setSearchKeyword('');
+    const sourceKeys = pendingValidationSourceKeys || undefined;
+    setPendingValidationSourceKeys(null);
     await withLoading('validateSources', async () => {
-      await startValidation(searchKeyword, sourceKey);
+      await startValidation(keyword, sourceKeys);
     });
   };
 
   const handleValidateSource = (key: string) => {
-    if (!searchKeyword.trim()) {
-      setPendingValidationSourceKey(key);
-      openValidationModal();
+    handleOpenValidationModal([key]);
+  };
+
+  const handleBatchValidation = () => {
+    if (selectedSources.size === 0) {
+      showAlert({
+        type: 'warning',
+        title: '请先选择要检测的视频源',
+        message: '请选择至少一个视频源',
+      });
       return;
     }
-
-    withLoading('validateSources', async () => {
-      await startValidation(searchKeyword, key);
-    }).catch(() => void 0);
+    handleOpenValidationModal(Array.from(selectedSources));
   };
 
   const handleSelectAll = useCallback(
@@ -361,7 +369,10 @@ const VideoSourceConfig = ({
   const isAnyBatchLoading =
     isLoading('batchSource_batch_enable') ||
     isLoading('batchSource_batch_disable') ||
-    isLoading('batchSource_batch_delete');
+    isLoading('batchSource_batch_delete') ||
+    isLoading('batchSource_batch_set_proxy_mode_browser') ||
+    isLoading('batchSource_batch_set_proxy_mode_server') ||
+    isLoading('batchSource_batch_set_proxy_mode_auto');
 
   return (
     <div className='space-y-6'>
@@ -380,65 +391,33 @@ const VideoSourceConfig = ({
                   已选择 {selectedSources.size} 个视频源
                 </span>
               </span>
-              <button
-                onClick={() => requestBatchOperation('batch_enable')}
-                disabled={isLoading('batchSource_batch_enable')}
-                className={`px-3 py-1 text-sm ${
-                  isLoading('batchSource_batch_enable')
-                    ? buttonStyles.disabled
-                    : buttonStyles.success
-                }`}
-              >
-                {isLoading('batchSource_batch_enable')
-                  ? '启用中...'
-                  : '批量启用'}
-              </button>
-              <button
-                onClick={() => requestBatchOperation('batch_disable')}
-                disabled={isLoading('batchSource_batch_disable')}
-                className={`px-3 py-1 text-sm ${
-                  isLoading('batchSource_batch_disable')
-                    ? buttonStyles.disabled
-                    : buttonStyles.warning
-                }`}
-              >
-                {isLoading('batchSource_batch_disable')
-                  ? '禁用中...'
-                  : '批量禁用'}
-              </button>
-              <button
-                onClick={() => requestBatchOperation('batch_delete')}
-                disabled={isLoading('batchSource_batch_delete')}
-                className={`px-3 py-1 text-sm ${
-                  isLoading('batchSource_batch_delete')
-                    ? buttonStyles.disabled
-                    : buttonStyles.danger
-                }`}
-              >
-                {isLoading('batchSource_batch_delete')
-                  ? '删除中...'
-                  : '批量删除'}
-              </button>
+              <BatchSourceMenu
+                selectedCount={selectedSources.size}
+                isEnableLoading={isLoading('batchSource_batch_enable')}
+                isDisableLoading={isLoading('batchSource_batch_disable')}
+                isDeleteLoading={isLoading('batchSource_batch_delete')}
+                isValidationLoading={isValidating}
+                isBrowserRouteLoading={isLoading(
+                  'batchSource_batch_set_proxy_mode_browser',
+                )}
+                isServerRouteLoading={isLoading(
+                  'batchSource_batch_set_proxy_mode_server',
+                )}
+                isAutoRouteLoading={isLoading(
+                  'batchSource_batch_set_proxy_mode_auto',
+                )}
+                onEnable={() => requestBatchOperation('batch_enable')}
+                onDisable={() => requestBatchOperation('batch_disable')}
+                onDelete={() => requestBatchOperation('batch_delete')}
+                onValidate={handleBatchValidation}
+                onSetProxyMode={(proxyMode) =>
+                  requestBatchOperation('batch_set_proxy_mode', { proxyMode })
+                }
+              />
             </div>
             <div className='order-2 hidden h-6 w-px bg-gray-300 dark:bg-gray-600 sm:block'></div>
           </div>
           <div className='order-1 flex items-center gap-2 sm:order-2'>
-            <button
-              onClick={handleOpenValidationModal}
-              disabled={isValidating}
-              className={`flex items-center space-x-1 rounded-lg px-3 py-1 text-sm transition-colors ${
-                isValidating ? buttonStyles.disabled : buttonStyles.primary
-              }`}
-            >
-              {isValidating ? (
-                <>
-                  <div className='h-3 w-3 animate-spin rounded-full border border-white border-t-transparent'></div>
-                  <span>检测中...</span>
-                </>
-              ) : (
-                '有效性检测'
-              )}
-            </button>
             <button
               onClick={() => {
                 setShowAddForm(true);

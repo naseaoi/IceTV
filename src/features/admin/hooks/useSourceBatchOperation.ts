@@ -5,7 +5,23 @@ import { useCallback, useState } from 'react';
 import { useAlertModal } from '@/hooks/useAlertModal';
 import { useLoadingState } from '@/features/admin/hooks/useLoadingState';
 
-type BatchAction = 'batch_enable' | 'batch_disable' | 'batch_delete';
+type SourceProxyMode = 'server' | 'browser' | 'auto';
+
+type BatchAction =
+  | 'batch_enable'
+  | 'batch_disable'
+  | 'batch_delete'
+  | 'batch_set_proxy_mode';
+
+interface BatchOperationOptions {
+  proxyMode?: SourceProxyMode;
+}
+
+const proxyModeLabels: Record<SourceProxyMode, string> = {
+  browser: '浏览器直连',
+  server: '服务端代理',
+  auto: '自动选择',
+};
 
 interface ConfirmModalState {
   isOpen: boolean;
@@ -46,7 +62,7 @@ export function useSourceBatchOperation({
   }, []);
 
   const requestBatchOperation = useCallback(
-    (action: BatchAction) => {
+    (action: BatchAction, options: BatchOperationOptions = {}) => {
       if (selectedSources.size === 0) {
         showAlert({
           type: 'warning',
@@ -59,20 +75,44 @@ export function useSourceBatchOperation({
       const keys = Array.from(selectedSources);
       let confirmMessage = '';
       let actionName = '';
+      let successMessage = '';
+      let loadingKey = `batchSource_${action}`;
+      const body: Record<string, unknown> = { action, keys };
 
       switch (action) {
         case 'batch_enable':
           confirmMessage = `确定要启用选中的 ${keys.length} 个视频源吗？`;
-          actionName = '批量启用';
+          actionName = '启用';
+          successMessage = `启用了 ${keys.length} 个视频源`;
           break;
         case 'batch_disable':
           confirmMessage = `确定要禁用选中的 ${keys.length} 个视频源吗？`;
-          actionName = '批量禁用';
+          actionName = '禁用';
+          successMessage = `禁用了 ${keys.length} 个视频源`;
           break;
         case 'batch_delete':
           confirmMessage = `确定要删除选中的 ${keys.length} 个视频源吗？此操作不可恢复！`;
-          actionName = '批量删除';
+          actionName = '删除';
+          successMessage = `删除了 ${keys.length} 个视频源`;
           break;
+        case 'batch_set_proxy_mode': {
+          const proxyMode = options.proxyMode;
+          if (!proxyMode) {
+            showAlert({
+              type: 'error',
+              title: '参数错误',
+              message: '缺少流量路由参数',
+            });
+            return;
+          }
+          const proxyModeLabel = proxyModeLabels[proxyMode];
+          confirmMessage = `确定要将选中的 ${keys.length} 个视频源流量路由改为「${proxyModeLabel}」吗？`;
+          actionName = `设置流量路由为${proxyModeLabel}`;
+          successMessage = `已将 ${keys.length} 个视频源流量路由改为「${proxyModeLabel}」`;
+          loadingKey = `${loadingKey}_${proxyMode}`;
+          body.proxyMode = proxyMode;
+          break;
+        }
       }
 
       setConfirmModal({
@@ -81,13 +121,11 @@ export function useSourceBatchOperation({
         message: confirmMessage,
         onConfirm: async () => {
           try {
-            await withLoading(`batchSource_${action}`, () =>
-              callSourceApi({ action, keys }),
-            );
+            await withLoading(loadingKey, () => callSourceApi(body));
             showAlert({
               type: 'success',
               title: `${actionName}成功`,
-              message: `${actionName}了 ${keys.length} 个视频源`,
+              message: successMessage,
               timer: 2000,
             });
             onClearSelection();
