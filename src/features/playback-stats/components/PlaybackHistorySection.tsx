@@ -240,6 +240,8 @@ export function PlaybackHistorySection() {
         </h2>
         <div className='relative w-full sm:w-72'>
           <input
+            id='playback-history-search'
+            name='playbackHistorySearch'
             type='text'
             value={searchText}
             onChange={(event) => setSearchText(event.target.value)}

@@ -1,7 +1,7 @@
 ﻿'use client';
 
 import { AlertTriangle, Download, FileCheck, Lock, Upload } from 'lucide-react';
-import { useRef, useState } from 'react';
+import { type FormEvent, useRef, useState } from 'react';
 
 import AlertModal from '@/components/modals/AlertModal';
 import { PasswordInput } from '@/components/PasswordInput';
@@ -9,6 +9,10 @@ import { PasswordInput } from '@/components/PasswordInput';
 interface DataMigrationProps {
   onRefreshConfig?: () => Promise<void>;
 }
+
+const EXPORT_PASSWORD_ID = 'data-export-password';
+const IMPORT_FILE_ID = 'data-import-file';
+const IMPORT_PASSWORD_ID = 'data-import-password';
 
 const DataMigration = ({ onRefreshConfig }: DataMigrationProps) => {
   const [exportPassword, setExportPassword] = useState('');
@@ -41,7 +45,6 @@ const DataMigration = ({ onRefreshConfig }: DataMigrationProps) => {
     setAlertModal((prev) => ({ ...prev, isOpen: false }));
   };
 
-  // 导出数据
   const handleExport = async () => {
     if (!exportPassword.trim()) {
       showAlert({
@@ -70,12 +73,10 @@ const DataMigration = ({ onRefreshConfig }: DataMigrationProps) => {
         throw new Error(errorData.error || `导出失败: ${response.status}`);
       }
 
-      // 获取文件名
       const contentDisposition = response.headers.get('content-disposition');
       const filenameMatch = contentDisposition?.match(/filename="(.+)"/);
       const filename = filenameMatch?.[1] || 'icetv-backup.dat';
 
-      // 下载文件
       const blob = await response.blob();
       const url = window.URL.createObjectURL(blob);
       const a = document.createElement('a');
@@ -109,7 +110,6 @@ const DataMigration = ({ onRefreshConfig }: DataMigrationProps) => {
     }
   };
 
-  // 文件选择处理
   const handleFileSelect = (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
     if (file) {
@@ -117,7 +117,6 @@ const DataMigration = ({ onRefreshConfig }: DataMigrationProps) => {
     }
   };
 
-  // 导入数据
   const handleImport = async () => {
     if (!selectedFile) {
       showAlert({
@@ -170,19 +169,16 @@ const DataMigration = ({ onRefreshConfig }: DataMigrationProps) => {
         confirmText: '刷新页面',
         showConfirm: true,
         onConfirm: async () => {
-          // 清理状态
           setSelectedFile(null);
           setImportPassword('');
           if (fileInputRef.current) {
             fileInputRef.current.value = '';
           }
 
-          // 刷新配置
           if (onRefreshConfig) {
             await onRefreshConfig();
           }
 
-          // 刷新页面
           window.location.reload();
         },
       });
@@ -197,10 +193,19 @@ const DataMigration = ({ onRefreshConfig }: DataMigrationProps) => {
     }
   };
 
+  const handleExportSubmit = (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    void handleExport();
+  };
+
+  const handleImportSubmit = (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    void handleImport();
+  };
+
   return (
     <>
       <div className='mx-auto max-w-6xl space-y-6'>
-        {/* 简洁警告提示 */}
         <div className='flex items-center gap-3 rounded-lg border border-amber-200 bg-amber-50/30 p-4 dark:border-amber-700 dark:bg-amber-900/5'>
           <AlertTriangle className='h-5 w-5 flex-shrink-0 text-amber-600 dark:text-amber-400' />
           <p className='text-sm text-amber-800 dark:text-amber-200'>
@@ -208,9 +213,7 @@ const DataMigration = ({ onRefreshConfig }: DataMigrationProps) => {
           </p>
         </div>
 
-        {/* 主要操作区域 - 响应式布局 */}
         <div className='grid grid-cols-1 gap-6 lg:grid-cols-2'>
-          {/* 数据导出 */}
           <div className='flex flex-col rounded-lg border border-gray-200 bg-white p-6 transition-shadow hover:shadow-sm dark:border-gray-700 dark:bg-gray-800'>
             <div className='mb-6 flex items-center gap-3'>
               <div className='flex h-8 w-8 items-center justify-center rounded-lg bg-blue-50 dark:bg-blue-900/20'>
@@ -226,15 +229,22 @@ const DataMigration = ({ onRefreshConfig }: DataMigrationProps) => {
               </div>
             </div>
 
-            <div className='flex flex-1 flex-col'>
+            <form
+              onSubmit={handleExportSubmit}
+              className='flex flex-1 flex-col'
+            >
               <div className='space-y-4'>
-                {/* 密码输入 */}
                 <div>
-                  <label className='mb-2 flex items-center gap-2 text-sm font-medium text-gray-700 dark:text-gray-300'>
+                  <label
+                    htmlFor={EXPORT_PASSWORD_ID}
+                    className='mb-2 flex items-center gap-2 text-sm font-medium text-gray-700 dark:text-gray-300'
+                  >
                     <Lock className='h-4 w-4' />
                     加密密码
                   </label>
                   <PasswordInput
+                    id={EXPORT_PASSWORD_ID}
+                    name='exportPassword'
                     value={exportPassword}
                     onChange={(e) => setExportPassword(e.target.value)}
                     placeholder='设置强密码保护备份文件'
@@ -246,7 +256,6 @@ const DataMigration = ({ onRefreshConfig }: DataMigrationProps) => {
                   </p>
                 </div>
 
-                {/* 备份内容列表 */}
                 <div className='space-y-1 text-xs text-gray-600 dark:text-gray-400'>
                   <p className='mb-2 font-medium text-gray-700 dark:text-gray-300'>
                     备份内容：
@@ -260,9 +269,8 @@ const DataMigration = ({ onRefreshConfig }: DataMigrationProps) => {
                 </div>
               </div>
 
-              {/* 导出按钮 */}
               <button
-                onClick={handleExport}
+                type='submit'
                 disabled={isExporting || !exportPassword.trim()}
                 className={`mt-10 w-full rounded-lg px-4 py-2.5 font-medium transition-colors ${
                   isExporting || !exportPassword.trim()
@@ -282,10 +290,9 @@ const DataMigration = ({ onRefreshConfig }: DataMigrationProps) => {
                   </div>
                 )}
               </button>
-            </div>
+            </form>
           </div>
 
-          {/* 数据导入 */}
           <div className='flex flex-col rounded-lg border border-gray-200 bg-white p-6 transition-shadow hover:shadow-sm dark:border-gray-700 dark:bg-gray-800'>
             <div className='mb-6 flex items-center gap-3'>
               <div className='flex h-8 w-8 items-center justify-center rounded-lg bg-red-50 dark:bg-red-900/20'>
@@ -301,11 +308,16 @@ const DataMigration = ({ onRefreshConfig }: DataMigrationProps) => {
               </div>
             </div>
 
-            <div className='flex flex-1 flex-col'>
+            <form
+              onSubmit={handleImportSubmit}
+              className='flex flex-1 flex-col'
+            >
               <div className='space-y-4'>
-                {/* 文件选择 */}
                 <div>
-                  <label className='mb-2 flex items-center gap-2 text-sm font-medium text-gray-700 dark:text-gray-300'>
+                  <label
+                    htmlFor={IMPORT_FILE_ID}
+                    className='mb-2 flex items-center gap-2 text-sm font-medium text-gray-700 dark:text-gray-300'
+                  >
                     <FileCheck className='h-4 w-4' />
                     备份文件
                     {selectedFile && (
@@ -317,6 +329,8 @@ const DataMigration = ({ onRefreshConfig }: DataMigrationProps) => {
                   </label>
                   <input
                     ref={fileInputRef}
+                    id={IMPORT_FILE_ID}
+                    name='backupFile'
                     type='file'
                     accept='.dat'
                     onChange={handleFileSelect}
@@ -325,13 +339,17 @@ const DataMigration = ({ onRefreshConfig }: DataMigrationProps) => {
                   />
                 </div>
 
-                {/* 密码输入 */}
                 <div>
-                  <label className='mb-2 flex items-center gap-2 text-sm font-medium text-gray-700 dark:text-gray-300'>
+                  <label
+                    htmlFor={IMPORT_PASSWORD_ID}
+                    className='mb-2 flex items-center gap-2 text-sm font-medium text-gray-700 dark:text-gray-300'
+                  >
                     <Lock className='h-4 w-4' />
                     解密密码
                   </label>
                   <PasswordInput
+                    id={IMPORT_PASSWORD_ID}
+                    name='importPassword'
                     value={importPassword}
                     onChange={(e) => setImportPassword(e.target.value)}
                     placeholder='输入导出时的加密密码'
@@ -341,9 +359,8 @@ const DataMigration = ({ onRefreshConfig }: DataMigrationProps) => {
                 </div>
               </div>
 
-              {/* 导入按钮 */}
               <button
-                onClick={handleImport}
+                type='submit'
                 disabled={
                   isImporting || !selectedFile || !importPassword.trim()
                 }
@@ -365,12 +382,11 @@ const DataMigration = ({ onRefreshConfig }: DataMigrationProps) => {
                   </div>
                 )}
               </button>
-            </div>
+            </form>
           </div>
         </div>
       </div>
 
-      {/* 弹窗组件 */}
       <AlertModal
         isOpen={alertModal.isOpen}
         onClose={hideAlert}

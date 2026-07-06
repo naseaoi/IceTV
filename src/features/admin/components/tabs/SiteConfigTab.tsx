@@ -251,10 +251,15 @@ const SiteConfigComponent = ({
       <div className='grid grid-cols-1 gap-6 md:grid-cols-2'>
         {/* 站点名称 */}
         <div>
-          <label className='mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300'>
+          <label
+            htmlFor='site-name'
+            className='mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300'
+          >
             站点名称
           </label>
           <input
+            id='site-name'
+            name='siteName'
             type='text'
             value={siteSettings.SiteName}
             onChange={(e) =>
@@ -267,7 +272,10 @@ const SiteConfigComponent = ({
         {/* 站点图标 */}
         <div>
           <div className='mb-2 flex items-end gap-2'>
-            <label className='text-sm font-medium text-gray-700 dark:text-gray-300'>
+            <label
+              htmlFor='site-icon'
+              className='text-sm font-medium text-gray-700 dark:text-gray-300'
+            >
               站点图标
             </label>
             <p className='text-xs text-gray-400 dark:text-gray-500'>
@@ -291,6 +299,8 @@ const SiteConfigComponent = ({
             <div className='min-w-0 flex-1 space-y-2'>
               <div className='flex min-w-0 items-center gap-2'>
                 <input
+                  id='site-icon'
+                  name='siteIcon'
                   type='text'
                   value={siteSettings.SiteIcon}
                   onChange={(e) => {
@@ -341,8 +351,11 @@ const SiteConfigComponent = ({
                 </div>
               </div>
               <input
+                id='site-icon-file'
+                name='siteIconFile'
                 ref={iconFileRef}
                 type='file'
+                aria-label='上传站点图标'
                 accept='image/png,image/jpeg,image/webp,image/svg+xml,image/gif,image/x-icon'
                 className='hidden'
                 onChange={async (e) => {
@@ -388,7 +401,10 @@ const SiteConfigComponent = ({
         {/* 站点公告 */}
         <div>
           <div className='mb-2 flex items-end gap-2'>
-            <label className='text-sm font-medium text-gray-700 dark:text-gray-300'>
+            <label
+              htmlFor='site-announcement'
+              className='text-sm font-medium text-gray-700 dark:text-gray-300'
+            >
               站点公告
             </label>
             <p className='text-xs text-gray-400 dark:text-gray-500'>
@@ -396,6 +412,8 @@ const SiteConfigComponent = ({
             </p>
           </div>
           <textarea
+            id='site-announcement'
+            name='siteAnnouncement'
             value={siteSettings.Announcement}
             onChange={(e) =>
               setSiteSettings((prev) => ({
@@ -412,7 +430,10 @@ const SiteConfigComponent = ({
         <div className='space-y-3'>
           <div>
             <div className='mb-2 flex items-baseline justify-between gap-2'>
-              <label className='block text-sm font-medium text-gray-700 dark:text-gray-300'>
+              <label
+                htmlFor='site-douban-proxy-type'
+                className='block text-sm font-medium text-gray-700 dark:text-gray-300'
+              >
                 豆瓣数据代理
               </label>
               {getThanksInfo(siteSettings.DoubanProxyType) && (
@@ -434,6 +455,7 @@ const SiteConfigComponent = ({
               )}
             </div>
             <AdminSelect
+              id='site-douban-proxy-type'
               value={siteSettings.DoubanProxyType}
               onChange={(value) => handleDoubanDataSourceChange(value)}
               options={siteDoubanDataSourceOptions}
@@ -445,7 +467,10 @@ const SiteConfigComponent = ({
         <div className='space-y-3'>
           <div>
             <div className='mb-2 flex items-baseline justify-between gap-2'>
-              <label className='block text-sm font-medium text-gray-700 dark:text-gray-300'>
+              <label
+                htmlFor='site-douban-image-proxy-type'
+                className='block text-sm font-medium text-gray-700 dark:text-gray-300'
+              >
                 豆瓣图片代理
               </label>
               {getThanksInfo(siteSettings.DoubanImageProxyType) && (
@@ -467,6 +492,7 @@ const SiteConfigComponent = ({
               )}
             </div>
             <AdminSelect
+              id='site-douban-image-proxy-type'
               value={siteSettings.DoubanImageProxyType}
               onChange={(value) => handleDoubanImageProxyChange(value)}
               options={siteDoubanImageProxyTypeOptions}
@@ -476,10 +502,14 @@ const SiteConfigComponent = ({
 
         <div className='space-y-3'>
           <div>
-            <label className='mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300'>
+            <label
+              htmlFor='site-bangumi-data-source'
+              className='mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300'
+            >
               Bangumi 数据代理
             </label>
             <AdminSelect
+              id='site-bangumi-data-source'
               value={siteSettings.BangumiDataSource}
               onChange={(value) => handleBangumiDataSourceChange(value)}
               options={siteBangumiDataSourceOptions}

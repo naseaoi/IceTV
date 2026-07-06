@@ -10,6 +10,10 @@ import { showError, showSuccess } from '@/features/admin/lib/notifications';
 import { AdminConfig } from '@/types/admin';
 import { buildConfigFileFromAdminConfig } from '@/lib/config-file-json';
 
+const CONFIG_SUBSCRIPTION_URL_ID = 'config-subscription-url';
+const CONFIG_FILE_CONTENT_ID = 'config-file-content';
+const CONFIG_FILE_HELP_ID = 'config-file-help';
+
 const ConfigFileComponent = ({
   config,
   refreshConfig,
@@ -35,7 +39,6 @@ const ConfigFileComponent = ({
     }
   }, [config]);
 
-  // 拉取订阅配置
   const handleFetchConfig = async () => {
     if (!subscriptionUrl.trim()) {
       showError('请输入订阅URL', showAlert);
@@ -51,7 +54,6 @@ const ConfigFileComponent = ({
         );
         if (data.configContent) {
           setConfigContent(data.configContent);
-          // 更新本地配置的最后检查时间
           const currentTime = new Date().toISOString();
           setLastCheckTime(currentTime);
           showSuccess('配置拉取成功', showAlert);
@@ -65,7 +67,6 @@ const ConfigFileComponent = ({
     });
   };
 
-  // 保存配置文件
   const handleSave = async () => {
     await withLoading('saveConfig', async () => {
       try {
@@ -124,7 +125,6 @@ const ConfigFileComponent = ({
   return (
     <div className='flex h-full flex-col'>
       <div className='grid min-h-0 flex-1 grid-cols-1 gap-4 lg:grid-cols-2 lg:grid-rows-1'>
-        {/* 配置订阅区域 */}
         <div className='self-start rounded-lg border border-gray-200 bg-white p-6 shadow-sm dark:border-gray-700 dark:bg-gray-800'>
           <div className='mb-6 flex items-center justify-between'>
             <h3 className='text-xl font-semibold text-gray-900 dark:text-gray-100'>
@@ -139,12 +139,16 @@ const ConfigFileComponent = ({
           </div>
 
           <div className='space-y-6'>
-            {/* 订阅URL输入 */}
             <div>
-              <label className='mb-3 block text-sm font-medium text-gray-700 dark:text-gray-300'>
+              <label
+                htmlFor={CONFIG_SUBSCRIPTION_URL_ID}
+                className='mb-3 block text-sm font-medium text-gray-700 dark:text-gray-300'
+              >
                 订阅URL
               </label>
               <input
+                id={CONFIG_SUBSCRIPTION_URL_ID}
+                name='subscriptionUrl'
                 type='url'
                 value={subscriptionUrl}
                 onChange={(e) => setSubscriptionUrl(e.target.value)}
@@ -157,9 +161,9 @@ const ConfigFileComponent = ({
               </p>
             </div>
 
-            {/* 拉取配置按钮 */}
             <div className='pt-2'>
               <button
+                type='button'
                 onClick={handleFetchConfig}
                 disabled={isLoading('fetchConfig') || !subscriptionUrl.trim()}
                 className={`w-full rounded-lg px-6 py-3 font-medium transition-all duration-200 ${
@@ -179,7 +183,6 @@ const ConfigFileComponent = ({
               </button>
             </div>
 
-            {/* 自动更新开关 */}
             <div className='flex min-h-[96px] items-center justify-between gap-4 rounded-lg border border-gray-200 bg-gray-50 p-4 dark:border-gray-700 dark:bg-gray-800/55'>
               <div>
                 <p className='text-sm font-medium text-gray-900 dark:text-gray-100'>
@@ -208,10 +211,15 @@ const ConfigFileComponent = ({
           </div>
         </div>
 
-        {/* 配置文件编辑区域 */}
         <div className='flex min-h-0 flex-col gap-4 rounded-lg border border-gray-200 bg-white p-6 shadow-sm dark:border-gray-700 dark:bg-gray-800'>
           <div className='relative min-h-[28rem] flex-1'>
+            <label htmlFor={CONFIG_FILE_CONTENT_ID} className='sr-only'>
+              配置文件内容
+            </label>
             <textarea
+              id={CONFIG_FILE_CONTENT_ID}
+              name='configFileContent'
+              aria-describedby={CONFIG_FILE_HELP_ID}
               value={configContent}
               onChange={(e) => setConfigContent(e.target.value)}
               placeholder='请输入配置文件内容（JSON 格式）...'
@@ -227,11 +235,15 @@ const ConfigFileComponent = ({
           </div>
 
           <div className='flex items-center justify-between gap-4'>
-            <div className='text-xs text-gray-500 dark:text-gray-400'>
+            <div
+              id={CONFIG_FILE_HELP_ID}
+              className='text-xs text-gray-500 dark:text-gray-400'
+            >
               支持 JSON 格式，用于配置视频源和自定义分类
             </div>
             <div className='flex items-center gap-2'>
               <button
+                type='button'
                 onClick={handleExport}
                 disabled={!configContent.trim()}
                 className={`rounded-lg px-4 py-2 transition-colors ${
@@ -243,6 +255,7 @@ const ConfigFileComponent = ({
                 导出
               </button>
               <button
+                type='button'
                 onClick={handleSave}
                 disabled={isLoading('saveConfig')}
                 className={`rounded-lg px-4 py-2 transition-colors ${
@@ -258,7 +271,6 @@ const ConfigFileComponent = ({
         </div>
       </div>
 
-      {/* 通用弹窗组件 */}
       <AlertModal
         isOpen={alertModal.isOpen}
         onClose={hideAlert}

@@ -30,10 +30,15 @@ describe('useAdminPageActions', () => {
     const setLoading = jest.fn();
     const showAlert = jest.fn();
 
-    mockedAdminGet.mockResolvedValueOnce({
-      Role: 'owner',
-      Config: { SiteConfig: { SiteName: 'Luna' } },
-    } as never);
+    mockedAdminGet
+      .mockResolvedValueOnce({
+        authenticated: true,
+        role: 'owner',
+      } as never)
+      .mockResolvedValueOnce({
+        Role: 'owner',
+        Config: { SiteConfig: { SiteName: 'Luna' } },
+      } as never);
 
     const { result } = renderHook(() =>
       useAdminPageActions({
@@ -50,13 +55,56 @@ describe('useAdminPageActions', () => {
     });
 
     expect(setLoading).toHaveBeenNthCalledWith(1, true);
-    expect(mockedAdminGet).toHaveBeenCalledWith(
+    expect(mockedAdminGet).toHaveBeenNthCalledWith(
+      1,
+      '/api/auth/status',
+      '获取登录状态失败',
+    );
+    expect(mockedAdminGet).toHaveBeenNthCalledWith(
+      2,
       '/api/admin/config',
       '获取配置失败',
     );
     expect(setConfig).toHaveBeenCalled();
     expect(setRole).toHaveBeenCalledWith('owner');
     expect(setError).toHaveBeenCalledWith(null);
+    expect(setLoading).toHaveBeenLastCalledWith(false);
+  });
+
+  it('stops before admin config when user is not admin', async () => {
+    const setConfig = jest.fn();
+    const setRole = jest.fn();
+    const setError = jest.fn();
+    const setLoading = jest.fn();
+    const showAlert = jest.fn();
+
+    mockedAdminGet.mockResolvedValueOnce({
+      authenticated: true,
+      role: 'user',
+    } as never);
+
+    const { result } = renderHook(() =>
+      useAdminPageActions({
+        showAlert,
+        setConfig,
+        setRole,
+        setError,
+        setLoading,
+      }),
+    );
+
+    await act(async () => {
+      await result.current.fetchConfig(true);
+    });
+
+    expect(mockedAdminGet).toHaveBeenCalledTimes(1);
+    expect(mockedAdminGet).toHaveBeenCalledWith(
+      '/api/auth/status',
+      '获取登录状态失败',
+    );
+    expect(setConfig).not.toHaveBeenCalled();
+    expect(setRole).not.toHaveBeenCalled();
+    expect(setError).toHaveBeenCalledWith('权限不足');
     expect(setLoading).toHaveBeenLastCalledWith(false);
   });
 

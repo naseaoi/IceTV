@@ -149,6 +149,20 @@ describe('AdminPage role visibility', () => {
     );
   }
 
+  function setupError(error: string) {
+    mockUseAdminPageActions.mockImplementation(
+      (options: UseAdminPageActionsOptions) => ({
+        fetchConfig: async () => {
+          options.setConfig(null);
+          options.setRole(null);
+          options.setError(error);
+          options.setLoading(false);
+        },
+        resetConfig: async () => {},
+      }),
+    );
+  }
+
   it('shows owner-only sections for owner', async () => {
     setupRole('owner');
     render(<AdminPage />);
@@ -201,5 +215,37 @@ describe('AdminPage role visibility', () => {
     await waitFor(() => {
       expect(resetConfig).toHaveBeenCalledTimes(1);
     });
+  });
+
+  it('shows login action when admin config is unauthorized', async () => {
+    setupError('获取配置失败: 401');
+    render(<AdminPage />);
+
+    await waitFor(() => {
+      expect(screen.getByText('需要登录')).toBeInTheDocument();
+    });
+
+    expect(
+      screen.getByText('请先登录管理员账号后再进入后台。'),
+    ).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: '前往登录' })).toHaveAttribute(
+      'href',
+      '/login?redirect=%2Fadmin',
+    );
+  });
+
+  it('shows permission message when admin config is forbidden', async () => {
+    setupError('获取配置失败: 403');
+    render(<AdminPage />);
+
+    await waitFor(() => {
+      expect(screen.getByText('无后台权限')).toBeInTheDocument();
+    });
+
+    expect(screen.getByText('当前账号没有后台访问权限。')).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: '返回首页' })).toHaveAttribute(
+      'href',
+      '/',
+    );
   });
 });

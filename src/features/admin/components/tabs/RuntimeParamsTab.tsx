@@ -85,6 +85,10 @@ const runtimeParamGroups: RuntimeParamGroup[] = [
   },
 ];
 
+function getRuntimeParamInputId(key: keyof RuntimeParamSettings) {
+  return `runtime-param-${key}`;
+}
+
 const RuntimeParamsTab = ({
   config,
   refreshConfig,
@@ -180,26 +184,35 @@ const RuntimeParamsTab = ({
             {group.title}
           </h3>
           <div className='grid grid-cols-1 gap-6 md:grid-cols-2 xl:grid-cols-3'>
-            {group.fields.map((field) => (
-              <div key={field.key}>
-                <label className='mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300'>
-                  {field.label}
-                </label>
-                <input
-                  type='number'
-                  min={RUNTIME_PARAM_RANGES[field.key].min}
-                  max={RUNTIME_PARAM_RANGES[field.key].max}
-                  value={runtimeParams[field.key]}
-                  onChange={(event) =>
-                    setRuntimeParams((prev) => ({
-                      ...prev,
-                      [field.key]: Number(event.target.value),
-                    }))
-                  }
-                  className='w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-gray-900 focus:border-transparent focus:ring-2 focus:ring-green-500 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100'
-                />
-              </div>
-            ))}
+            {group.fields.map((field) => {
+              const inputId = getRuntimeParamInputId(field.key);
+
+              return (
+                <div key={field.key}>
+                  <label
+                    htmlFor={inputId}
+                    className='mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300'
+                  >
+                    {field.label}
+                  </label>
+                  <input
+                    id={inputId}
+                    name={field.key}
+                    type='number'
+                    min={RUNTIME_PARAM_RANGES[field.key].min}
+                    max={RUNTIME_PARAM_RANGES[field.key].max}
+                    value={runtimeParams[field.key]}
+                    onChange={(event) =>
+                      setRuntimeParams((prev) => ({
+                        ...prev,
+                        [field.key]: Number(event.target.value),
+                      }))
+                    }
+                    className='w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-gray-900 focus:border-transparent focus:ring-2 focus:ring-green-500 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100'
+                  />
+                </div>
+              );
+            })}
           </div>
         </section>
       ))}

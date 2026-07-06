@@ -11,6 +11,7 @@ interface AdminSelectOption {
 }
 
 interface AdminSelectProps {
+  id?: string;
   value: string;
   onChange: (value: string) => void;
   options: AdminSelectOption[];
@@ -19,6 +20,7 @@ interface AdminSelectProps {
 }
 
 export default function AdminSelect({
+  id,
   value,
   onChange,
   options,
@@ -47,6 +49,7 @@ export default function AdminSelect({
   return (
     <div ref={containerRef} className={`relative ${className}`}>
       <button
+        id={id}
         type='button'
         onClick={() => setIsOpen(!isOpen)}
         className='w-full rounded-lg border border-gray-300 bg-white px-3 py-2.5 pr-10 text-left text-sm text-gray-900 shadow-sm transition-all duration-200 hover:border-gray-400 focus:border-green-500 focus:outline-none focus:ring-2 focus:ring-green-500 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100 dark:hover:border-gray-500'

@@ -146,6 +146,11 @@ export function PlayLoadingView({
 }
 
 export function PlayErrorView({ error, onBack, onRetry }: PlayErrorViewProps) {
+  const message =
+    error === '缺少必要参数'
+      ? '缺少播放目标参数，请从搜索结果、收藏或历史记录重新进入。'
+      : '请检查网络连接或稍后重试。';
+
   return (
     <PageLayout activePath='/play'>
       <div className='flex h-full items-center justify-center bg-transparent'>
@@ -153,7 +158,7 @@ export function PlayErrorView({ error, onBack, onRetry }: PlayErrorViewProps) {
           icon={<AlertTriangle className='h-10 w-10' />}
           tone='red'
           title={error}
-          message='请检查网络连接或稍后重试。'
+          message={message}
         >
           <div className='flex items-center justify-center gap-3'>
             <button

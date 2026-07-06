@@ -7,6 +7,11 @@ import { showError, showSuccess } from '@/features/admin/lib/notifications';
 import { type ShowAlertFn } from '@/hooks/useAlertModal';
 import { type AdminConfigResult } from '@/types/admin';
 
+type AdminAuthStatus = {
+  authenticated: boolean;
+  role: AdminConfigResult['Role'] | 'user' | null;
+};
+
 interface UseAdminPageActionsOptions {
   showAlert: ShowAlertFn;
   setConfig: (config: AdminConfigResult['Config']) => void;
@@ -23,6 +28,17 @@ export function useAdminPageActions(options: UseAdminPageActionsOptions) {
       try {
         if (showLoading) {
           setLoading(true);
+        }
+
+        const authStatus = await adminGet<AdminAuthStatus>(
+          '/api/auth/status',
+          '获取登录状态失败',
+        );
+        if (!authStatus.authenticated) {
+          throw new Error('Unauthorized');
+        }
+        if (authStatus.role !== 'owner' && authStatus.role !== 'admin') {
+          throw new Error('权限不足');
         }
 
         const data = await adminGet<AdminConfigResult>(
