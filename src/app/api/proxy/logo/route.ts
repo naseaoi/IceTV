@@ -7,15 +7,15 @@ import {
 } from '@/lib/http-proxy-json';
 import { authorizeProxyRequest } from '@/lib/proxy-auth';
 import {
-  fetchWithUrlGuard,
-  UrlValidationError,
-  validateProxyUrlForRequest,
-} from '@/lib/url-guard';
-import {
   readArrayBufferLimited,
   ResponseSizeLimitError,
 } from '@/lib/proxy-response-limits';
 import { normalizeRuntimeParams } from '@/lib/runtime-params';
+import {
+  fetchWithUrlGuard,
+  UrlValidationError,
+  validateProxyUrlForRequest,
+} from '@/lib/url-guard';
 
 export const runtime = 'nodejs';
 

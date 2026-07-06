@@ -1,17 +1,15 @@
+import type Artplayer from 'artplayer';
 import type { MutableRefObject } from 'react';
 
-import type Artplayer from 'artplayer';
-
-import type { PlayRecord } from '@/lib/db.client';
-import type { SearchResult } from '@/lib/types';
-
 import {
-  LEGACY_PLAY_CHECKPOINT_KEY,
-  PLAY_CHECKPOINT_KEY,
   type PlayCheckpoint,
   type SessionLostReason,
+  LEGACY_PLAY_CHECKPOINT_KEY,
+  PLAY_CHECKPOINT_KEY,
 } from '@/features/play/lib/playTypes';
 import type { ResumeMode } from '@/features/play/lib/resumePlayback';
+import type { PlayRecord } from '@/lib/db.client';
+import type { SearchResult } from '@/lib/types';
 
 export function savePlaybackCheckpoint(
   currentSourceRef: MutableRefObject<string>,

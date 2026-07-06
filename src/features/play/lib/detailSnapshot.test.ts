@@ -1,9 +1,8 @@
-import type { SearchResult } from '@/lib/types';
-
 import {
   readDetailSnapshot,
   saveDetailSnapshot,
 } from '@/features/play/lib/detailSnapshot';
+import type { SearchResult } from '@/lib/types';
 
 function createDetail(overrides: Partial<SearchResult> = {}): SearchResult {
   return {

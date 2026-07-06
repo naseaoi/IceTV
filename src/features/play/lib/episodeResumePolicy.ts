@@ -1,6 +1,5 @@
-import type { SearchResult } from '@/lib/types';
-
 import type { ResumeMode } from '@/features/play/lib/resumePlayback';
+import type { SearchResult } from '@/lib/types';
 
 export interface SourceSwitchResumeState {
   resumeTime: number;

@@ -1,29 +1,28 @@
 import 'server-only';
 
-import { db } from '@/lib/db';
-import { getOwnerUsername } from '@/lib/env.server';
-
-import { AdminConfig } from '@/types/admin';
 import {
   DEFAULT_BANGUMI_DATA_SOURCE,
   normalizeBangumiDataSource,
   normalizeSiteBangumiDataSource,
 } from '@/lib/bangumi-source';
+import { db } from '@/lib/db';
+import { PUBLIC_DOUBAN_IMAGE_PROXY_TYPES } from '@/lib/douban-image-url';
 import {
   normalizeSiteDoubanImageProxyType,
   normalizeSiteDoubanProxyType,
 } from '@/lib/douban-options';
 import {
+  type DoubanImageProxyType,
   DEFAULT_DOUBAN_IMAGE_PROXY_TYPE,
   DEFAULT_DOUBAN_PROXY_TYPE,
-  type DoubanImageProxyType,
 } from '@/lib/douban-source';
-import { PUBLIC_DOUBAN_IMAGE_PROXY_TYPES } from '@/lib/douban-image-url';
+import { getOwnerUsername } from '@/lib/env.server';
 import {
   DEFAULT_RUNTIME_PARAMS,
   normalizeRuntimeParams,
 } from '@/lib/runtime-params';
 import { normalizeUsername } from '@/lib/username';
+import { AdminConfig } from '@/types/admin';
 
 export interface ApiSite {
   key: string;

@@ -5,14 +5,13 @@ import {
   useCallback,
 } from 'react';
 
-import { SearchResult } from '@/lib/types';
-
-import type { SourceSwitchEpisodeAnchor } from '@/features/play/lib/episodeResumePolicy';
-import type { ResumeMode } from '@/features/play/lib/resumePlayback';
 import type {
   PlaybackRequestMode,
   VideoLoadingStage,
 } from '@/features/play/hooks/usePlayPageState';
+import type { SourceSwitchEpisodeAnchor } from '@/features/play/lib/episodeResumePolicy';
+import type { ResumeMode } from '@/features/play/lib/resumePlayback';
+import { SearchResult } from '@/lib/types';
 
 interface UseEpisodeSwitchOptions {
   detailRef: RefObject<SearchResult | null>;

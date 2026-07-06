@@ -1,9 +1,8 @@
-import type { SearchResult } from '@/lib/types';
-
 import {
   extractEpisodeNumberFromTitle,
   resolveEpisodeTargetIndex,
 } from '@/features/play/lib/episodeMapping';
+import type { SearchResult } from '@/lib/types';
 
 function createSearchResult(partial: Partial<SearchResult>): SearchResult {
   return {

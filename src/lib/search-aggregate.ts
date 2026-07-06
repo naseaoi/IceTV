@@ -1,5 +1,5 @@
-import type { ApiSite } from '@/lib/config';
 import { runWithConcurrency, withAbortableTimeout } from '@/lib/concurrency';
+import type { ApiSite } from '@/lib/config';
 import { searchFromApi } from '@/lib/downstream';
 import type { SearchResult } from '@/lib/types';
 import { yellowWords } from '@/lib/yellow';

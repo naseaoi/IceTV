@@ -1,11 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server';
 
+import { dedupePlaybackSessionsByTitle } from '@/features/playback-stats/lib/history';
 import {
   buildPlaybackDailyRanges,
   buildPlaybackDailyStatsFromTotals,
   buildPlaybackStatsSummaryFromParts,
 } from '@/features/playback-stats/lib/summary';
-import { dedupePlaybackSessionsByTitle } from '@/features/playback-stats/lib/history';
 import { isGuardFailure, requireActiveUser } from '@/lib/api-auth';
 import { db } from '@/lib/db';
 import { NO_STORE_HEADERS } from '@/lib/http-cache';

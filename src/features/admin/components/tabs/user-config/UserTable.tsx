@@ -1,13 +1,13 @@
 'use client';
 
+import { buttonStyles } from '@/features/admin/lib/buttonStyles';
 import {
+  type PermissionContext,
   canChangeUserPassword,
   canConfigureUser,
   canDeleteManagedUser,
   canOperateUser,
-  type PermissionContext,
 } from '@/features/admin/lib/permissions';
-import { buttonStyles } from '@/features/admin/lib/buttonStyles';
 
 interface User {
   username: string;

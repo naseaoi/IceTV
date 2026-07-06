@@ -1,9 +1,9 @@
 ﻿'use client';
 
 import {
+  type DragEndEvent,
   closestCenter,
   DndContext,
-  type DragEndEvent,
   PointerSensor,
   TouchSensor,
   useSensor,
@@ -20,29 +20,29 @@ import {
 } from '@dnd-kit/sortable';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 
-import ConfirmModal from '@/components/modals/ConfirmModal';
 import AlertModal from '@/components/modals/AlertModal';
+import ConfirmModal from '@/components/modals/ConfirmModal';
+import { BatchSourceMenu } from '@/features/admin/components/tabs/video-source/BatchSourceMenu';
 import {
   type RouteModeStats,
-  SortableSourceRow,
   type SourceRouteStatsView,
+  SortableSourceRow,
 } from '@/features/admin/components/tabs/video-source/SortableSourceRow';
-import { BatchSourceMenu } from '@/features/admin/components/tabs/video-source/BatchSourceMenu';
 import { SourceValidationModal } from '@/features/admin/components/tabs/video-source/SourceValidationModal';
 import { VideoSourceAddForm } from '@/features/admin/components/tabs/video-source/VideoSourceAddForm';
 import { VideoSourceEditForm } from '@/features/admin/components/tabs/video-source/VideoSourceEditForm';
 import { useAdminSourceActions } from '@/features/admin/hooks/useAdminSourceActions';
-import { useAlertModal } from '@/hooks/useAlertModal';
 import { useLoadingState } from '@/features/admin/hooks/useLoadingState';
 import { useSourceBatchOperation } from '@/features/admin/hooks/useSourceBatchOperation';
 import { useSourceValidation } from '@/features/admin/hooks/useSourceValidation';
-import { buttonStyles } from '@/features/admin/lib/buttonStyles';
 import { adminGet } from '@/features/admin/lib/api';
+import { buttonStyles } from '@/features/admin/lib/buttonStyles';
 import { showError } from '@/features/admin/lib/notifications';
-import { AdminConfig } from '@/types/admin';
 import { DataSource } from '@/features/admin/types/internal';
+import { useAlertModal } from '@/hooks/useAlertModal';
 import { useModalState } from '@/hooks/useModalState';
 import type { SourceRouteStatsItem } from '@/lib/types';
+import { AdminConfig } from '@/types/admin';
 
 type SourceRouteStatsBySource = Record<string, SourceRouteStatsView>;
 

@@ -21,18 +21,18 @@ import {
 } from 'react';
 import { createPortal } from 'react-dom';
 
-import {
-  SIDEBAR_BUTTON_STATE_CLASS,
-  SIDEBAR_ITEM_ICON_CLASS,
-  SIDEBAR_ITEM_ICON_WRAP_CLASS,
-  SIDEBAR_ITEM_LAYOUT_CLASS,
-  getSidebarItemLabelClass,
-} from './SidebarItem';
-
 import { getAuthInfoFromBrowserCookie } from '@/lib/auth.client';
 import { getClientAuthRuntimeConfig } from '@/lib/runtime-config';
 import { CURRENT_VERSION } from '@/lib/version';
 import { checkForUpdates, UpdateStatus } from '@/lib/version-check';
+
+import {
+  getSidebarItemLabelClass,
+  SIDEBAR_BUTTON_STATE_CLASS,
+  SIDEBAR_ITEM_ICON_CLASS,
+  SIDEBAR_ITEM_ICON_WRAP_CLASS,
+  SIDEBAR_ITEM_LAYOUT_CLASS,
+} from './SidebarItem';
 
 interface AuthInfo {
   username?: string;

@@ -1,45 +1,20 @@
 import type { MutableRefObject } from 'react';
 
-import {
-  clearSourceProxyOverride,
-  isServerProxy,
-  rememberSourceServerProxy,
-  shouldAutoFallbackToServer,
-} from '@/lib/proxy-modes';
-import { reportSourceRouteStat } from '@/lib/source-route-stats.client';
-import {
-  bindPlayerHoverControls,
-  bindPlayerMobileControls,
-  createHlsLoaderClass,
-  getManagedVideo,
-  getPlayerModules,
-  isPlayerFastForwarding,
-  prefetchM3U8,
-  restorePlayerPlaybackRate,
-} from '@/lib/player-runtime';
-import { preconnectForUrl } from '@/lib/preconnect';
-import {
-  configureArtplayerStatics,
-  createArtPlayerConfig,
-  ensureVideoSource,
-  formatTime,
-} from '@/lib/player-utils';
-
 import type { UseArtPlayerParams } from '@/features/play/hooks/artPlayerTypes';
 import { resolveNextStablePlaybackTime } from '@/features/play/hooks/usePlayProgress';
 import {
+  createArtPlayerControls,
+  createArtPlayerSettings,
+} from '@/features/play/lib/artPlayerSettings';
+import {
+  type PlayerLoadingSessionState,
   hasReachedResumeTarget,
   markPlayerLoadingSessionStarted,
-  type PlayerLoadingSessionState,
   resetPlayerLoadingSessionState,
   shouldDismissLoadingFromCanPlay,
   shouldDismissLoadingFromReadyFrame,
 } from '@/features/play/lib/playerLoading';
 import { filterAdsFromM3U8 } from '@/features/play/lib/playUtils';
-import {
-  createArtPlayerControls,
-  createArtPlayerSettings,
-} from '@/features/play/lib/artPlayerSettings';
 import {
   applyResumeTime,
   isWithinAutoResumeWindow,
@@ -54,6 +29,30 @@ import {
   isVodM3u8Url,
   isVodMp4Url,
 } from '@/features/play/lib/vodProxyUrl';
+import {
+  bindPlayerHoverControls,
+  bindPlayerMobileControls,
+  createHlsLoaderClass,
+  getManagedVideo,
+  getPlayerModules,
+  isPlayerFastForwarding,
+  prefetchM3U8,
+  restorePlayerPlaybackRate,
+} from '@/lib/player-runtime';
+import {
+  configureArtplayerStatics,
+  createArtPlayerConfig,
+  ensureVideoSource,
+  formatTime,
+} from '@/lib/player-utils';
+import { preconnectForUrl } from '@/lib/preconnect';
+import {
+  clearSourceProxyOverride,
+  isServerProxy,
+  rememberSourceServerProxy,
+  shouldAutoFallbackToServer,
+} from '@/lib/proxy-modes';
+import { reportSourceRouteStat } from '@/lib/source-route-stats.client';
 
 interface UseArtPlayerInitState {
   loadingSessionRef: MutableRefObject<PlayerLoadingSessionState>;

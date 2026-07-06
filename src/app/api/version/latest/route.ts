@@ -4,14 +4,14 @@ import {
   normalizeChangelogEntry,
   normalizeChangelogManifest,
 } from '@/lib/changelog';
+import { parseChangelog } from '@/lib/changelog-utils';
+import { createTimedAbortController } from '@/lib/downstream-sources/shared';
+import { readResponseTextWithLimit } from '@/lib/response-text';
 import {
   buildChangelogUrls,
   getUpdateBranch,
   getUpdateRepos,
 } from '@/lib/update-source';
-import { parseChangelog } from '@/lib/changelog-utils';
-import { createTimedAbortController } from '@/lib/downstream-sources/shared';
-import { readResponseTextWithLimit } from '@/lib/response-text';
 
 export const runtime = 'nodejs';
 

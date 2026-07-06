@@ -1,8 +1,8 @@
 import { connection } from 'next/server';
 import { Suspense } from 'react';
 
-import { PlayPageClient } from '@/features/play/PlayPageClient';
 import { PlayLoadingView } from '@/features/play/components/PlayStateViews';
+import { PlayPageClient } from '@/features/play/PlayPageClient';
 
 export default async function PlayPage() {
   await connection();

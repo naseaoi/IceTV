@@ -4,6 +4,8 @@ import { Clock3, History, X } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import { useCallback, useEffect, useState } from 'react';
 
+import { useRuntimeConfig } from '@/components/RuntimeConfigProvider';
+import { PlaybackHistoryItemSkeleton } from '@/features/playback-stats/components/PlaybackHistorySkeleton';
 import {
   cachePlaybackHistorySnapshot,
   getCachedPlaybackHistorySnapshot,
@@ -13,11 +15,9 @@ import {
   dedupePlaybackSessionsByTitle,
   getPlaybackSessionMergeKey,
 } from '@/features/playback-stats/lib/history';
-import { PlaybackHistoryItemSkeleton } from '@/features/playback-stats/components/PlaybackHistorySkeleton';
-import { useRuntimeConfig } from '@/components/RuntimeConfigProvider';
 import type { PlaybackHistoryResponse } from '@/features/playback-stats/types';
-import type { PlaybackSession } from '@/lib/types';
 import { savePlayIntent } from '@/lib/play-intent';
+import type { PlaybackSession } from '@/lib/types';
 import { canUseNetworkPrefetch, warmupForPlayback } from '@/lib/video-prefetch';
 
 function formatDuration(seconds: number): string {

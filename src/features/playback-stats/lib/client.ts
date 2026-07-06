@@ -1,7 +1,5 @@
 'use client';
 
-import { getAuthInfoFromBrowserCookie } from '@/lib/auth.client';
-
 import { dedupePlaybackSessionsByTitle } from '@/features/playback-stats/lib/history';
 import type {
   PlaybackHistoryResponse,
@@ -9,6 +7,7 @@ import type {
   PlaybackTopItemsResponse,
   PlaybackTopRange,
 } from '@/features/playback-stats/types';
+import { getAuthInfoFromBrowserCookie } from '@/lib/auth.client';
 
 const PLAYBACK_HISTORY_PAGE_SIZE = 10;
 

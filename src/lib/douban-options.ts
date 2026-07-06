@@ -1,8 +1,8 @@
 import {
-  DEFAULT_DOUBAN_IMAGE_PROXY_TYPE,
-  DEFAULT_DOUBAN_PROXY_TYPE,
   type DoubanImageProxyType,
   type DoubanProxyType,
+  DEFAULT_DOUBAN_IMAGE_PROXY_TYPE,
+  DEFAULT_DOUBAN_PROXY_TYPE,
 } from '@/lib/douban-source';
 
 /** 豆瓣数据代理选项 */

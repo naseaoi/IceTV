@@ -3,17 +3,6 @@
 import { useRouter, useSearchParams } from 'next/navigation';
 import { useCallback, useEffect, useRef, useState } from 'react';
 
-import {
-  destroyManagedHls,
-  preloadPlayerModules,
-  runManagedVideoCleanup,
-} from '@/lib/player-runtime';
-import { isLazyEpisodeUrl } from '@/lib/lazy-episodes';
-import { mergeSourceBundle } from '@/lib/source-bundle';
-import { SearchResult } from '@/lib/types';
-import { preloadProxyModes } from '@/lib/proxy-modes';
-import { clearSourceFailure } from '@/lib/failed-source-cooldown';
-
 import { PlayMainContent } from '@/features/play/components/PlayMainContent';
 import {
   PlayErrorView,
@@ -23,20 +12,30 @@ import { useArtPlayer } from '@/features/play/hooks/useArtPlayer';
 import { useAuthRecovery } from '@/features/play/hooks/useAuthRecovery';
 import { useAutoSwitchOnTimeoutSetting } from '@/features/play/hooks/useAutoSwitchOnTimeoutSetting';
 import { useEpisodeSwitch } from '@/features/play/hooks/useEpisodeSwitch';
-import { usePlaybackStatsReporter } from '@/features/playback-stats/hooks/usePlaybackStatsReporter';
+import { usePlayFavorite } from '@/features/play/hooks/usePlayFavorite';
+import { updateVideoUrl, usePlayInit } from '@/features/play/hooks/usePlayInit';
+import { usePlayPageState } from '@/features/play/hooks/usePlayPageState';
+import { usePlayProgress } from '@/features/play/hooks/usePlayProgress';
+import { useSkipConfig } from '@/features/play/hooks/useSkipConfig';
+import { useSourceSwitch } from '@/features/play/hooks/useSourceSwitch';
 import {
   peekResolvedLazyEpisodeUrl,
   prewarmLazyEpisodeUrl,
   resolveLazyEpisodeUrl,
 } from '@/features/play/lib/lazyEpisode';
-import { usePlayFavorite } from '@/features/play/hooks/usePlayFavorite';
-import { usePlayInit, updateVideoUrl } from '@/features/play/hooks/usePlayInit';
-import { usePlayPageState } from '@/features/play/hooks/usePlayPageState';
-import { usePlayProgress } from '@/features/play/hooks/usePlayProgress';
-import { useSkipConfig } from '@/features/play/hooks/useSkipConfig';
-import { useSourceSwitch } from '@/features/play/hooks/useSourceSwitch';
 import { writePlayerInfo } from '@/features/play/lib/sourceProbeStore';
+import { usePlaybackStatsReporter } from '@/features/playback-stats/hooks/usePlaybackStatsReporter';
 import { usePlayerKeyboard } from '@/hooks/usePlayerKeyboard';
+import { clearSourceFailure } from '@/lib/failed-source-cooldown';
+import { isLazyEpisodeUrl } from '@/lib/lazy-episodes';
+import {
+  destroyManagedHls,
+  preloadPlayerModules,
+  runManagedVideoCleanup,
+} from '@/lib/player-runtime';
+import { preloadProxyModes } from '@/lib/proxy-modes';
+import { mergeSourceBundle } from '@/lib/source-bundle';
+import { SearchResult } from '@/lib/types';
 
 const DIRECT_STARTUP_LOADING_DELAY_MS = 140;
 

@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react';
 
+import type { FavoriteItem } from '@/features/favorites/types';
 import {
   clearAllFavorites,
   getAllFavorites,
@@ -10,11 +11,9 @@ import {
   getCachedPlayRecordsSnapshot,
   subscribeToDataUpdates,
 } from '@/lib/db.client';
+import { FAVORITE_ITEMS_COUNT_COOKIE } from '@/lib/favorites-count';
 import type { Favorite } from '@/lib/types';
 import { parseStorageKey } from '@/lib/utils';
-import { FAVORITE_ITEMS_COUNT_COOKIE } from '@/lib/favorites-count';
-
-import type { FavoriteItem } from '@/features/favorites/types';
 
 const FAVORITE_ITEMS_COUNT_STORAGE_KEY = 'favoriteItemsCount';
 const MAX_FAVORITE_SKELETON_COUNT = 8;

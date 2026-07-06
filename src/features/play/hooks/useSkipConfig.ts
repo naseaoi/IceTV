@@ -9,14 +9,13 @@ import {
   useEffect,
 } from 'react';
 
+import type { SkipConfigState } from '@/features/play/hooks/usePlayPageState';
+import { formatTimeSimple } from '@/features/play/lib/formatTime';
 import {
   deleteSkipConfig,
   getSkipConfig,
   saveSkipConfig,
 } from '@/lib/db.client';
-
-import { formatTimeSimple } from '@/features/play/lib/formatTime';
-import type { SkipConfigState } from '@/features/play/hooks/usePlayPageState';
 
 interface UseSkipConfigOptions {
   currentSource: string;

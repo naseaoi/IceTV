@@ -1,6 +1,5 @@
-import { MutableRefObject, useEffect } from 'react';
-
 import type Artplayer from 'artplayer';
+import { MutableRefObject, useEffect } from 'react';
 
 /**
  * 通用播放器键盘快捷键 hook

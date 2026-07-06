@@ -1,11 +1,11 @@
 ﻿import { NextRequest, NextResponse } from 'next/server';
 
 import { getBangumiCalendarData } from '@/features/bangumi/lib/bangumi';
-import { isGuardFailure, requireActiveUser } from '@/lib/api-auth';
 import {
   BANGUMI_CALENDAR_FRESH_SECONDS,
   BANGUMI_CALENDAR_STALE_SECONDS,
 } from '@/features/home/lib/home-cache';
+import { isGuardFailure, requireActiveUser } from '@/lib/api-auth';
 import {
   recordServerProxyFailure,
   requireServerProxyQuota,

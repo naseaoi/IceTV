@@ -1,9 +1,9 @@
 import type { NextRequest } from 'next/server';
 
+import { appendProxySignature } from '@/lib/proxy-auth';
 import { createSwrCache } from '@/lib/server-cache';
 import { isSourceCorsCapable } from '@/lib/source-capability';
 import { getBaseUrl, resolveUrl } from '@/lib/url-resolve';
-import { appendProxySignature } from '@/lib/proxy-auth';
 
 export type M3U8RewriteEntry = {
   content: string;

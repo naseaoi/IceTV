@@ -1,7 +1,26 @@
 import type Artplayer from 'artplayer';
 import type { Dispatch, MutableRefObject, SetStateAction } from 'react';
 
-import type { SearchResult } from '@/lib/types';
+import type {
+  CurrentSourceVideoInfo,
+  CurrentSourceVideoInfoContext,
+} from '@/features/play/hooks/artPlayerTypes';
+import type { PlaybackRequestMode } from '@/features/play/hooks/usePlayPageState';
+import { resolveSourceSwitchCurrentPlayTime } from '@/features/play/lib/episodeResumePolicy';
+import {
+  applyAutoQualityLevel,
+  applyManualQualityLevel,
+  findPreferredLevelIndex,
+  markQualityControlTemporaryAuto,
+  registerQualityControlWhenReady,
+} from '@/features/play/lib/hlsQuality';
+import {
+  getHlsErrorStatus,
+  resolveHlsSourceFailureReason,
+} from '@/features/play/lib/hlsSourceFailure';
+import type { PlayerLoadingSessionState } from '@/features/play/lib/playerLoading';
+import type { ResumeMode } from '@/features/play/lib/resumePlayback';
+import { buildVodProxyUrl } from '@/features/play/lib/vodProxyUrl';
 import {
   clearSourceFailure,
   markSourceFailed,
@@ -30,27 +49,7 @@ import {
   shouldAutoFallbackToServer,
 } from '@/lib/proxy-modes';
 import { reportSourceRouteStat } from '@/lib/source-route-stats.client';
-
-import type { PlaybackRequestMode } from '@/features/play/hooks/usePlayPageState';
-import type {
-  CurrentSourceVideoInfo,
-  CurrentSourceVideoInfoContext,
-} from '@/features/play/hooks/artPlayerTypes';
-import { resolveSourceSwitchCurrentPlayTime } from '@/features/play/lib/episodeResumePolicy';
-import {
-  applyAutoQualityLevel,
-  applyManualQualityLevel,
-  findPreferredLevelIndex,
-  markQualityControlTemporaryAuto,
-  registerQualityControlWhenReady,
-} from '@/features/play/lib/hlsQuality';
-import type { PlayerLoadingSessionState } from '@/features/play/lib/playerLoading';
-import type { ResumeMode } from '@/features/play/lib/resumePlayback';
-import {
-  getHlsErrorStatus,
-  resolveHlsSourceFailureReason,
-} from '@/features/play/lib/hlsSourceFailure';
-import { buildVodProxyUrl } from '@/features/play/lib/vodProxyUrl';
+import type { SearchResult } from '@/lib/types';
 
 type HlsLoaderConstructor = new (config: unknown) => {
   load: (...args: unknown[]) => void;

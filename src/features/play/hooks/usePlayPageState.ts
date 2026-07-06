@@ -4,17 +4,16 @@ import type Artplayer from 'artplayer';
 import type { ReadonlyURLSearchParams } from 'next/navigation';
 import { useEffect, useRef, useState } from 'react';
 
+import type { PlayProgressSaveState } from '@/features/play/hooks/usePlayProgress';
+import type { SourceSwitchEpisodeAnchor } from '@/features/play/lib/episodeResumePolicy';
+import type { WakeLockSentinel } from '@/features/play/lib/playTypes';
+import type { ResumeMode } from '@/features/play/lib/resumePlayback';
+import type { SourceSwitchCleanupTask } from '@/features/play/lib/sourceSwitchCleanup';
 import {
   readBlockAdEnabled,
   readEnableOptimization,
 } from '@/lib/local-preferences';
 import { SearchResult } from '@/lib/types';
-
-import type { SourceSwitchEpisodeAnchor } from '@/features/play/lib/episodeResumePolicy';
-import type { PlayProgressSaveState } from '@/features/play/hooks/usePlayProgress';
-import type { WakeLockSentinel } from '@/features/play/lib/playTypes';
-import type { ResumeMode } from '@/features/play/lib/resumePlayback';
-import type { SourceSwitchCleanupTask } from '@/features/play/lib/sourceSwitchCleanup';
 
 export interface SkipConfigState {
   enable: boolean;

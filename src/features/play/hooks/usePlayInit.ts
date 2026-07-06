@@ -1,18 +1,17 @@
 import { Dispatch, MutableRefObject, SetStateAction, useEffect } from 'react';
 
-import { filterSourcesForPlayback } from '@/lib/source-match';
-import { mergeSourceBundle } from '@/lib/source-bundle';
-import { SearchResult } from '@/lib/types';
-import { prefetchM3U8 } from '@/lib/player-runtime';
-import { getProxyModes, shouldUseServerProxy } from '@/lib/proxy-modes';
-
-import { calculateSourceScore } from '@/features/play/lib/playUtils';
 import {
   readDetailSnapshot,
   saveDetailSnapshot,
 } from '@/features/play/lib/detailSnapshot';
+import { calculateSourceScore } from '@/features/play/lib/playUtils';
 import { probeVodEpisodeUrl } from '@/features/play/lib/vodProbe';
 import { isVodM3u8Url } from '@/features/play/lib/vodProxyUrl';
+import { prefetchM3U8 } from '@/lib/player-runtime';
+import { getProxyModes, shouldUseServerProxy } from '@/lib/proxy-modes';
+import { mergeSourceBundle } from '@/lib/source-bundle';
+import { filterSourcesForPlayback } from '@/lib/source-match';
+import { SearchResult } from '@/lib/types';
 
 // ---------------------------------------------------------------------------
 // 客户端 detail 内存缓存 — 短时间退出重进时避免重复请求

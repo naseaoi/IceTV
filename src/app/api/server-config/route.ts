@@ -1,8 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 
 import { getOptionalActiveUser } from '@/lib/api-auth';
-import { getConfigForRead, getPublicConfig } from '@/lib/config';
 import { normalizeSiteBangumiDataSource } from '@/lib/bangumi-source';
+import { getConfigForRead, getPublicConfig } from '@/lib/config';
 import {
   normalizeSiteDoubanImageProxyType,
   normalizeSiteDoubanProxyType,

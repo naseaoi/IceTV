@@ -6,8 +6,8 @@ import {
   extractXgcartoonEpisodeVariants,
   extractXgcartoonPlayerVid,
   extractXgcartoonSearchResults,
-  parseXgcartoonVariantId,
   parseXgcartoonDetailUrl,
+  parseXgcartoonVariantId,
 } from '@/lib/xgcartoon';
 
 const MOCK_DETAIL_HTML = `

@@ -2,13 +2,13 @@ import he from 'he';
 
 import { getAuthInfoFromBrowserCookie } from '@/lib/auth.client';
 import {
-  readDoubanImageProxyType,
-  readDoubanImageProxyUrl,
-} from '@/lib/douban-source';
-import {
   getUsableDoubanImageProxyType,
   processDoubanImageUrl,
 } from '@/lib/douban-image-url';
+import {
+  readDoubanImageProxyType,
+  readDoubanImageProxyUrl,
+} from '@/lib/douban-source';
 
 export function processImageUrl(originalUrl: string): string {
   if (!originalUrl) return originalUrl;

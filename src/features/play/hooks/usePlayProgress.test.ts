@@ -1,9 +1,9 @@
 import {
-  resolveNextStablePlaybackTime,
-  resolveProtectedPlaybackTime,
-  resolvePlaybackRestoreCandidate,
-  isPlayRecordCompatibleWithDetail,
   isPlaybackCheckpointCompatibleWithDetail,
+  isPlayRecordCompatibleWithDetail,
+  resolveNextStablePlaybackTime,
+  resolvePlaybackRestoreCandidate,
+  resolveProtectedPlaybackTime,
   saveCurrentPlayProgress,
   savePlaybackCheckpoint,
   shouldApplyHistoryRestore,

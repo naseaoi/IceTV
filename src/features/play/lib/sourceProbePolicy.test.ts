@@ -1,6 +1,5 @@
-import type { SearchResult } from '@/lib/types';
-
 import { resolveSourceProbeEpisodeIndex } from '@/features/play/lib/sourceProbePolicy';
+import type { SearchResult } from '@/lib/types';
 
 function createSearchResult(partial: Partial<SearchResult>): SearchResult {
   return {

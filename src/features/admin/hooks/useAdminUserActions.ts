@@ -3,8 +3,8 @@
 import { useCallback } from 'react';
 
 import { adminPost } from '@/features/admin/lib/api';
-import { type ShowAlertFn } from '@/hooks/useAlertModal';
 import { showError } from '@/features/admin/lib/notifications';
+import { type ShowAlertFn } from '@/hooks/useAlertModal';
 
 type UserAction =
   | 'add'

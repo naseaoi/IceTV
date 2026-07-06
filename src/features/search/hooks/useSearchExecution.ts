@@ -1,5 +1,5 @@
-import { startTransition, useEffect, useRef, useState } from 'react';
 import { ReadonlyURLSearchParams } from 'next/navigation';
+import { startTransition, useEffect, useRef, useState } from 'react';
 
 import { addSearchHistory } from '@/lib/db.client';
 import { readFluidSearch } from '@/lib/local-preferences';

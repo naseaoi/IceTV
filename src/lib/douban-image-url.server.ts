@@ -3,13 +3,13 @@ import 'server-only';
 import { cookies } from 'next/headers';
 
 import {
-  DEFAULT_DOUBAN_IMAGE_PROXY_TYPE,
-  type DoubanImageProxyType,
-} from '@/lib/douban-source';
-import {
   DOUBAN_IMAGE_PROXY_TYPE_COOKIE,
   normalizePublicDoubanImageProxyType,
 } from '@/lib/douban-image-url';
+import {
+  type DoubanImageProxyType,
+  DEFAULT_DOUBAN_IMAGE_PROXY_TYPE,
+} from '@/lib/douban-source';
 
 export async function readServerDoubanImageProxyType(
   defaultProxyType: string | undefined,

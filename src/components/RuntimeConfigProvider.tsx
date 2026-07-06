@@ -9,12 +9,12 @@ import {
   useState,
 } from 'react';
 
+import { markClientHydrated } from '@/lib/client-hydration';
 import {
   DEFAULT_RUNTIME_CONFIG,
-  RuntimeConfig,
   getRuntimeConfig,
+  RuntimeConfig,
 } from '@/lib/runtime-config';
-import { markClientHydrated } from '@/lib/client-hydration';
 
 const RuntimeConfigContext = createContext<RuntimeConfig>(
   DEFAULT_RUNTIME_CONFIG,

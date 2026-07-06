@@ -1,7 +1,6 @@
 'use client';
 
 import VideoCard from '@/components/VideoCard';
-
 import type { FavoriteItem } from '@/features/favorites/types';
 
 export function FavoriteGrid({

@@ -1,8 +1,7 @@
+import { probeVodEpisodeUrl } from '@/features/play/lib/vodProbe';
 import { isLazyEpisodeUrl } from '@/lib/lazy-episodes';
 import { getProxyModes, shouldUseServerProxy } from '@/lib/proxy-modes';
 import { SearchResult } from '@/lib/types';
-
-import { probeVodEpisodeUrl } from '@/features/play/lib/vodProbe';
 
 export interface VideoInfo {
   quality: string;

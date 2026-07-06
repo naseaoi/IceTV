@@ -1,11 +1,10 @@
 import type Artplayer from 'artplayer';
 import type { Dispatch, MutableRefObject, SetStateAction } from 'react';
 
-import type { SearchResult, SkipConfig } from '@/lib/types';
-
 import type { PlaybackRequestMode } from '@/features/play/hooks/usePlayPageState';
 import type { WakeLockSentinel } from '@/features/play/lib/playTypes';
 import type { ResumeMode } from '@/features/play/lib/resumePlayback';
+import type { SearchResult, SkipConfig } from '@/lib/types';
 
 export type CurrentSourceVideoInfo = {
   quality: string;

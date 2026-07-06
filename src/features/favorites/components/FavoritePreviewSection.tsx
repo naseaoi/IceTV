@@ -8,7 +8,6 @@ import HomePosterCardSkeleton, {
 } from '@/components/HomePosterCardSkeleton';
 import ScrollableRow from '@/components/ScrollableRow';
 import VideoCard from '@/components/VideoCard';
-
 import type { FavoriteItem } from '@/features/favorites/types';
 
 export function FavoritePreviewSection({

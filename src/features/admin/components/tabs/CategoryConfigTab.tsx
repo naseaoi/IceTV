@@ -1,9 +1,9 @@
 ﻿'use client';
 
 import {
+  type DragEndEvent,
   closestCenter,
   DndContext,
-  type DragEndEvent,
   PointerSensor,
   TouchSensor,
   useSensor,
@@ -25,7 +25,6 @@ import { useEffect, useState } from 'react';
 
 import AlertModal from '@/components/modals/AlertModal';
 import { CategoryAddForm } from '@/features/admin/components/tabs/category/CategoryAddForm';
-import { useAlertModal } from '@/hooks/useAlertModal';
 import { useAdminSourceActions } from '@/features/admin/hooks/useAdminSourceActions';
 import { useLoadingState } from '@/features/admin/hooks/useLoadingState';
 import {
@@ -33,8 +32,9 @@ import {
   statusBadgeStyles,
 } from '@/features/admin/lib/buttonStyles';
 import { showError } from '@/features/admin/lib/notifications';
-import { AdminConfig } from '@/types/admin';
 import { CustomCategory } from '@/features/admin/types/internal';
+import { useAlertModal } from '@/hooks/useAlertModal';
+import { AdminConfig } from '@/types/admin';
 
 const CategoryConfig = ({
   config,

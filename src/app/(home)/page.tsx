@@ -1,6 +1,6 @@
 ﻿import HomeClient from '@/features/home/components/HomeClient';
-import { getContinueWatchingSkeletonCount } from '@/lib/continue-watching.server';
 import { getHomeInitialData } from '@/features/home/lib/home.server';
+import { getContinueWatchingSkeletonCount } from '@/lib/continue-watching.server';
 
 export const dynamic = 'force-dynamic';
 

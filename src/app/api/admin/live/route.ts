@@ -1,5 +1,9 @@
 ﻿import { NextRequest, NextResponse } from 'next/server';
 
+import {
+  deleteCachedLiveChannels,
+  refreshLiveChannels,
+} from '@/features/live/lib/live';
 import { isGuardFailure, requireAdmin } from '@/lib/api-auth';
 import { configConflictResponse } from '@/lib/api-config-error';
 import { getConfig, saveConfig } from '@/lib/config';
@@ -7,10 +11,6 @@ import {
   buildConfigFileFromAdminConfig,
   removeConfigFileEntries,
 } from '@/lib/config-file-json';
-import {
-  deleteCachedLiveChannels,
-  refreshLiveChannels,
-} from '@/features/live/lib/live';
 import { validateProxyUrlForRequest } from '@/lib/url-guard';
 
 export const runtime = 'nodejs';

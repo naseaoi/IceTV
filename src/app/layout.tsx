@@ -1,7 +1,7 @@
+import './globals.css';
+
 import type { Metadata, Viewport } from 'next';
 import { Inter } from 'next/font/google';
-
-import './globals.css';
 
 import { getPublicConfig } from '@/lib/config';
 import { SIDEBAR_COLLAPSED_STORAGE_KEY } from '@/lib/local-preferences';
@@ -9,9 +9,9 @@ import { serializeForInlineScript } from '@/lib/script-serialization';
 import { getStorageType } from '@/lib/storage-type';
 import { CURRENT_UPDATE_BRANCH } from '@/lib/version';
 
-import { GlobalErrorIndicator } from '../components/GlobalErrorIndicator';
 import { CardInteractionProvider } from '../components/CardInteractionProvider';
 import { ClientErrorReporter } from '../components/ClientErrorReporter';
+import { GlobalErrorIndicator } from '../components/GlobalErrorIndicator';
 import { RuntimeConfigProvider } from '../components/RuntimeConfigProvider';
 import { SiteProvider } from '../components/SiteProvider';
 import { SWRegister } from '../components/SWRegister';

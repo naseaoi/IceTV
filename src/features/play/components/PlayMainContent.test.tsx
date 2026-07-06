@@ -1,9 +1,9 @@
-import type { ReactNode, RefObject } from 'react';
 import { act, fireEvent, render, screen } from '@testing-library/react';
+import type { ReactNode, RefObject } from 'react';
 
 import {
-  PlayMainContent,
   buildLoadingTimeoutMessage,
+  PlayMainContent,
 } from '@/features/play/components/PlayMainContent';
 import type { SearchResult } from '@/lib/types';
 

@@ -3,8 +3,8 @@
 import { ReactNode } from 'react';
 
 import {
-  VirtualizedGrid,
   type VirtualizedGridLayoutConfig,
+  VirtualizedGrid,
 } from '@/components/VirtualizedGrid';
 
 interface VirtualizedSearchGridProps<T> {

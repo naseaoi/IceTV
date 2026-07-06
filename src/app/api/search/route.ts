@@ -2,13 +2,13 @@ import { NextRequest, NextResponse } from 'next/server';
 
 import { isGuardFailure, requireActiveUser } from '@/lib/api-auth';
 import { getAvailableApiSites, getConfigForRead } from '@/lib/config';
+import { normalizeRuntimeParams } from '@/lib/runtime-params';
 import { runSearchAggregation } from '@/lib/search-aggregate';
 import {
   loadCachedSearchAggregate,
   peekCachedSearchAggregate,
   refreshCachedSearchAggregate,
 } from '@/lib/search-cache';
-import { normalizeRuntimeParams } from '@/lib/runtime-params';
 
 export const runtime = 'nodejs';
 

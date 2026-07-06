@@ -3,9 +3,9 @@
 import { Star } from 'lucide-react';
 import { useState } from 'react';
 
-import PageLayout from '@/components/PageLayout';
-import ConfirmModal from '@/components/modals/ConfirmModal';
 import HomePosterCardSkeleton from '@/components/HomePosterCardSkeleton';
+import ConfirmModal from '@/components/modals/ConfirmModal';
+import PageLayout from '@/components/PageLayout';
 import { FavoriteGrid } from '@/features/favorites/components/FavoriteGrid';
 import { useFavoriteItems } from '@/features/favorites/hooks/useFavoriteItems';
 import { HomeMineSwitch } from '@/features/home/components/HomeMineSwitch';

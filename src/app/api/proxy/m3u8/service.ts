@@ -2,11 +2,11 @@ import {
   shouldRunAdDetection,
   stripAdSegmentsByPhysicalSignal,
 } from '@/features/play/lib/ad-segment-detector';
+import { getConfigForRead } from '@/lib/config';
 import {
   fetchResponseThroughProxy,
   getProxyUrlForTarget,
 } from '@/lib/http-proxy-json';
-import { getConfigForRead } from '@/lib/config';
 import {
   classifyProxyFailure,
   logProxyFailure,

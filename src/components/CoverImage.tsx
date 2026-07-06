@@ -11,6 +11,7 @@ import React, {
   useState,
 } from 'react';
 
+import NoImageCover from '@/components/NoImageCover';
 import {
   isCoverImageCached,
   markCoverImagesLoaded,
@@ -19,8 +20,6 @@ import {
 import { readDoubanImageProxyType } from '@/lib/douban-source';
 import { imageScheduler } from '@/lib/image-scheduler';
 import { processImageUrl } from '@/lib/utils';
-
-import NoImageCover from '@/components/NoImageCover';
 
 const PLACEHOLDER_COLORS = [
   '#94a3b8',

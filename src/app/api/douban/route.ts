@@ -1,14 +1,14 @@
 import { NextRequest, NextResponse } from 'next/server';
 
-import { createPublicApiCacheHeaders } from '@/lib/api-cache-headers';
 import { isGuardFailure, requireActiveUser } from '@/lib/api-auth';
+import { createPublicApiCacheHeaders } from '@/lib/api-cache-headers';
 import { getCacheTime } from '@/lib/config';
 import { fetchDoubanData } from '@/lib/douban';
-import { createTimedAbortController } from '@/lib/downstream-sources/shared';
 import {
   DoubanListApiResponse,
   normalizeDoubanListSubjects,
 } from '@/lib/douban-normalize';
+import { createTimedAbortController } from '@/lib/downstream-sources/shared';
 import { createSwrCache } from '@/lib/server-cache';
 import {
   recordServerProxyFailure,

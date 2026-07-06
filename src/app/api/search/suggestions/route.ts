@@ -1,10 +1,10 @@
 ﻿import { NextRequest, NextResponse } from 'next/server';
 
-import { AdminConfig } from '@/types/admin';
 import { isGuardFailure, requireActiveUser } from '@/lib/api-auth';
 import { getAvailableApiSites, getConfigForRead } from '@/lib/config';
 import { searchFirstPageFromApi } from '@/lib/downstream';
 import { yellowWords } from '@/lib/yellow';
+import { AdminConfig } from '@/types/admin';
 
 export const runtime = 'nodejs';
 

@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 
-import type { PlaybackHistoryResponse } from '@/features/playback-stats/types';
 import { dedupePlaybackSessionsByTitle } from '@/features/playback-stats/lib/history';
+import type { PlaybackHistoryResponse } from '@/features/playback-stats/types';
 import { isGuardFailure, requireActiveUser } from '@/lib/api-auth';
 import { getConfigForRead } from '@/lib/config';
 import { db } from '@/lib/db';

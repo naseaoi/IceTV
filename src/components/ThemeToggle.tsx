@@ -6,11 +6,11 @@ import { useTheme } from 'next-themes';
 import { useEffect, useRef, useState } from 'react';
 
 import {
+  getSidebarItemLabelClass,
   SIDEBAR_BUTTON_STATE_CLASS,
   SIDEBAR_ITEM_ICON_CLASS,
   SIDEBAR_ITEM_ICON_WRAP_CLASS,
   SIDEBAR_ITEM_LAYOUT_CLASS,
-  getSidebarItemLabelClass,
 } from './SidebarItem';
 
 interface ThemeToggleProps {

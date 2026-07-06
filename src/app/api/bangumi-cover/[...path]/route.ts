@@ -2,9 +2,9 @@
 
 import { getBangumiCoverTargetUrl } from '@/features/bangumi/lib/bangumi-cover-url';
 import {
+  type ProxyStreamResult,
   fetchStreamThroughProxy,
   getProxyUrlForTarget,
-  type ProxyStreamResult,
 } from '@/lib/http-proxy-json';
 import {
   assertContentLength,

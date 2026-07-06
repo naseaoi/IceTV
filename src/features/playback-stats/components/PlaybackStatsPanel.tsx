@@ -3,12 +3,12 @@
 import { BarChart3, Clock3, TrendingUp } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
 
+import { PlaybackStatsSkeleton } from '@/features/playback-stats/components/PlaybackStatsSkeleton';
 import {
   getCachedPlaybackStatsSummarySnapshot,
   getPlaybackStatsSummary,
   getPlaybackTopItems,
 } from '@/features/playback-stats/lib/client';
-import { PlaybackStatsSkeleton } from '@/features/playback-stats/components/PlaybackStatsSkeleton';
 import type {
   PlaybackStatsSummary,
   PlaybackTopRange,

@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 
-import { createPublicApiCacheHeaders } from '@/lib/api-cache-headers';
 import { isGuardFailure, requireActiveUser } from '@/lib/api-auth';
+import { createPublicApiCacheHeaders } from '@/lib/api-cache-headers';
 import { getCacheTime } from '@/lib/config';
 import { fetchDoubanData } from '@/lib/douban';
 import {

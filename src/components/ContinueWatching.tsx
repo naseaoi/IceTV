@@ -1,9 +1,15 @@
 ﻿'use client';
 
+import { History } from 'lucide-react';
 import { useEffect, useLayoutEffect, useState } from 'react';
 
-import { History } from 'lucide-react';
-
+import HomePosterCardSkeleton, {
+  HOME_POSTER_CARD_CLASS,
+} from '@/components/HomePosterCardSkeleton';
+import ConfirmModal from '@/components/modals/ConfirmModal';
+import { useRuntimeConfig } from '@/components/RuntimeConfigProvider';
+import ScrollableRow from '@/components/ScrollableRow';
+import VideoCard from '@/components/VideoCard';
 import { getAuthInfoFromBrowserCookie } from '@/lib/auth.client';
 import type { PlayRecord } from '@/lib/db.client';
 import {
@@ -13,14 +19,6 @@ import {
   subscribeToDataUpdates,
 } from '@/lib/db.client';
 import { parseStorageKey } from '@/lib/utils';
-
-import ScrollableRow from '@/components/ScrollableRow';
-import VideoCard from '@/components/VideoCard';
-import HomePosterCardSkeleton, {
-  HOME_POSTER_CARD_CLASS,
-} from '@/components/HomePosterCardSkeleton';
-import ConfirmModal from '@/components/modals/ConfirmModal';
-import { useRuntimeConfig } from '@/components/RuntimeConfigProvider';
 
 interface ContinueWatchingProps {
   className?: string;

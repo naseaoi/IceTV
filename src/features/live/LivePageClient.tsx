@@ -1,5 +1,7 @@
 'use client';
 
+import '@/features/live/types';
+
 import {
   AlertTriangle,
   CheckCircle2,
@@ -16,12 +18,10 @@ import {
   PlayerPageAccent,
   PlayerPageLayout,
 } from '@/components/PlayerPageLayout';
-
 import { LiveChannelSidebar } from '@/features/live/components/LiveChannelSidebar';
 import { useLiveFavorite } from '@/features/live/hooks/useLiveFavorite';
 import { useLivePlayer } from '@/features/live/hooks/useLivePlayer';
 import { useLiveSources } from '@/features/live/hooks/useLiveSources';
-import '@/features/live/types';
 import { usePlayerKeyboard } from '@/hooks/usePlayerKeyboard';
 
 const liveAccent: PlayerPageAccent = {

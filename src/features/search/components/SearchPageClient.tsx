@@ -4,24 +4,22 @@ import { ChevronUp, Search, X } from 'lucide-react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import React, { useEffect, useMemo, useState } from 'react';
 
-import { getSearchHistory, subscribeToDataUpdates } from '@/lib/db.client';
-import { readAggregateSearch } from '@/lib/local-preferences';
-
 import PageLayout from '@/components/PageLayout';
 import SearchResultFilter from '@/components/SearchResultFilter';
 import SearchSuggestions from '@/components/SearchSuggestions';
 import VideoCard from '@/components/VideoCard';
-
-import {
-  useSearchExecution,
-  clearSearchSnapshotCache,
-} from '@/features/search/hooks/useSearchExecution';
-import {
-  useSearchAggregation,
-  FilterState,
-} from '@/features/search/hooks/useSearchAggregation';
 import SearchHistory from '@/features/search/components/SearchHistory';
 import { VirtualizedSearchGrid } from '@/features/search/components/VirtualizedSearchGrid';
+import {
+  FilterState,
+  useSearchAggregation,
+} from '@/features/search/hooks/useSearchAggregation';
+import {
+  clearSearchSnapshotCache,
+  useSearchExecution,
+} from '@/features/search/hooks/useSearchExecution';
+import { getSearchHistory, subscribeToDataUpdates } from '@/lib/db.client';
+import { readAggregateSearch } from '@/lib/local-preferences';
 
 const SEARCH_VIEW_MODE_STORAGE_KEY = 'searchViewModeByQuery';
 const AGGREGATED_SEARCH_GRID_LAYOUT = {

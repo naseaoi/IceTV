@@ -7,24 +7,23 @@ import React, {
   useSyncExternalStore,
 } from 'react';
 
+import { resolveSourceProbeEpisodeIndex } from '@/features/play/lib/sourceProbePolicy';
 import {
-  getSourceFailure,
+  type ProbeEntry,
+  type VideoInfo,
+  getOrProbe,
+  getSnapshot,
+  seedProbeResults,
+  subscribe,
+} from '@/features/play/lib/sourceProbeStore';
+import {
   type SourceFailureInfo,
+  getSourceFailure,
 } from '@/lib/failed-source-cooldown';
 import { readEnableOptimization } from '@/lib/local-preferences';
 import { collapseSourcesForDisplay } from '@/lib/source-bundle';
 import { normalizeTitleForSourceMatch } from '@/lib/source-match';
 import { SearchResult } from '@/lib/types';
-
-import { resolveSourceProbeEpisodeIndex } from '@/features/play/lib/sourceProbePolicy';
-import {
-  getOrProbe,
-  getSnapshot,
-  seedProbeResults,
-  subscribe,
-  type ProbeEntry,
-  type VideoInfo,
-} from '@/features/play/lib/sourceProbeStore';
 
 const VIDEO_INFO_BATCH_SIZE = 3;
 

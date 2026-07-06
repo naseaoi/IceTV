@@ -3,10 +3,10 @@ import { promisify } from 'util';
 import { gunzip } from 'zlib';
 
 import { isGuardFailure, requireOwner } from '@/lib/api-auth';
+import { setCachedConfig } from '@/lib/config';
 import { SimpleCrypto } from '@/lib/crypto';
 import { ImportValidationError, parseImportData } from '@/lib/data-import';
 import { db } from '@/lib/db';
-import { setCachedConfig } from '@/lib/config';
 
 export const runtime = 'nodejs';
 

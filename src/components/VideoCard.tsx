@@ -8,10 +8,10 @@
 import { useRouter } from 'next/navigation';
 import React, {
   forwardRef,
-  useId,
   memo,
   useCallback,
   useEffect,
+  useId,
   useImperativeHandle,
   useMemo,
   useRef,
@@ -19,12 +19,27 @@ import React, {
 } from 'react';
 
 import {
+  useCardInteractionManager,
+  useFavoriteStatus,
+} from '@/components/CardInteractionProvider';
+import { areVideoCardPropsEqual } from '@/components/video-card/compare';
+import { noSelectStyle } from '@/components/video-card/constants';
+import type {
+  VideoCardDisplayConfig,
+  VideoCardHandle,
+  VideoCardProps,
+} from '@/components/video-card/types';
+import { VideoCardPoster } from '@/components/video-card/VideoCardPoster';
+import { VideoCardTitle } from '@/components/video-card/VideoCardTitle';
+import { useLongPress } from '@/hooks/useLongPress';
+import { getAuthInfoFromBrowserCookie } from '@/lib/auth.client';
+import {
   deleteFavorite,
   deletePlayRecord,
   generateStorageKey,
   saveFavorite,
 } from '@/lib/db.client';
-import { getAuthInfoFromBrowserCookie } from '@/lib/auth.client';
+import { savePlayIntent } from '@/lib/play-intent';
 import {
   canUseHoverPrefetch,
   canUseNetworkPrefetch,
@@ -34,22 +49,6 @@ import {
   warmupForPlayback,
   warmupSearchForTitle,
 } from '@/lib/video-prefetch';
-import { useLongPress } from '@/hooks/useLongPress';
-import { savePlayIntent } from '@/lib/play-intent';
-
-import {
-  useCardInteractionManager,
-  useFavoriteStatus,
-} from '@/components/CardInteractionProvider';
-import { areVideoCardPropsEqual } from '@/components/video-card/compare';
-import { noSelectStyle } from '@/components/video-card/constants';
-import { VideoCardPoster } from '@/components/video-card/VideoCardPoster';
-import { VideoCardTitle } from '@/components/video-card/VideoCardTitle';
-import type {
-  VideoCardDisplayConfig,
-  VideoCardHandle,
-  VideoCardProps,
-} from '@/components/video-card/types';
 export type {
   VideoCardHandle,
   VideoCardProps,

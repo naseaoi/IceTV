@@ -1,7 +1,7 @@
 /** @jest-environment node */
 
-import type { AdminConfig } from '@/types/admin';
 import { DEFAULT_RUNTIME_PARAMS } from '@/lib/runtime-params';
+import type { AdminConfig } from '@/types/admin';
 
 jest.mock('../env.server', () => ({
   getOwnerUsername: () => 'owner',

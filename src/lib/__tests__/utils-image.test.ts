@@ -1,5 +1,5 @@
-import { processImageUrl } from '../utils';
 import { DOUBAN_IMAGE_PROXY_TYPE_STORAGE_KEY } from '../douban-source';
+import { processImageUrl } from '../utils';
 
 describe('processImageUrl', () => {
   beforeEach(() => {

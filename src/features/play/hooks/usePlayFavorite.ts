@@ -1,8 +1,8 @@
 import { MutableRefObject } from 'react';
 
+import { useFavoriteSync } from '@/hooks/useFavoriteSync';
 import { deleteFavorite, saveFavorite } from '@/lib/db.client';
 import { SearchResult } from '@/lib/types';
-import { useFavoriteSync } from '@/hooks/useFavoriteSync';
 
 interface UsePlayFavoriteParams {
   currentSource: string;

@@ -2,10 +2,9 @@
 
 import { useState } from 'react';
 
-import { useAlertModal } from '@/hooks/useAlertModal';
-import { DataSource } from '@/features/admin/types/internal';
-
 import type { SourceValidationStatus } from '@/features/admin/components/tabs/video-source/SortableSourceRow';
+import { DataSource } from '@/features/admin/types/internal';
+import { useAlertModal } from '@/hooks/useAlertModal';
 
 interface ValidationResult {
   key: string;

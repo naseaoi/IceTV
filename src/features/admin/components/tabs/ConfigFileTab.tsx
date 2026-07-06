@@ -2,13 +2,13 @@
 import { useEffect, useState } from 'react';
 
 import AlertModal from '@/components/modals/AlertModal';
-import { useAlertModal } from '@/hooks/useAlertModal';
 import { useLoadingState } from '@/features/admin/hooks/useLoadingState';
 import { adminPost } from '@/features/admin/lib/api';
 import { buttonStyles } from '@/features/admin/lib/buttonStyles';
 import { showError, showSuccess } from '@/features/admin/lib/notifications';
-import { AdminConfig } from '@/types/admin';
+import { useAlertModal } from '@/hooks/useAlertModal';
 import { buildConfigFileFromAdminConfig } from '@/lib/config-file-json';
+import { AdminConfig } from '@/types/admin';
 
 const CONFIG_SUBSCRIPTION_URL_ID = 'config-subscription-url';
 const CONFIG_FILE_CONTENT_ID = 'config-file-content';

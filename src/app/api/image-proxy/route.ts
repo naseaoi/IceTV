@@ -3,11 +3,6 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getOptionalActiveUser } from '@/lib/api-auth';
 import { authorizeProxyRequest } from '@/lib/proxy-auth';
 import {
-  fetchWithUrlGuard,
-  UrlValidationError,
-  validateProxyUrlForRequest,
-} from '@/lib/url-guard';
-import {
   assertContentLength,
   createLimitedReadableStream,
   ResponseSizeLimitError,
@@ -16,6 +11,11 @@ import {
   recordServerProxyFailure,
   requireServerProxyQuota,
 } from '@/lib/server-proxy-guard';
+import {
+  fetchWithUrlGuard,
+  UrlValidationError,
+  validateProxyUrlForRequest,
+} from '@/lib/url-guard';
 
 export const runtime = 'nodejs';
 

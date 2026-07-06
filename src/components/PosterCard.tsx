@@ -4,6 +4,9 @@ import { Link as LinkIcon, PlayCircleIcon } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import React, { memo, useCallback, useEffect, useId, useRef } from 'react';
 
+import { useOptionalCardInteractionManager } from '@/components/CardInteractionProvider';
+import CoverImage from '@/components/CoverImage';
+import { useLongPress } from '@/hooks/useLongPress';
 import { getAuthInfoFromBrowserCookie } from '@/lib/auth.client';
 import {
   canUseHoverPrefetch,
@@ -13,10 +16,6 @@ import {
   transferWarmedSearchToAggregateGroup,
   warmupSearchForTitle,
 } from '@/lib/video-prefetch';
-import { useLongPress } from '@/hooks/useLongPress';
-
-import { useOptionalCardInteractionManager } from '@/components/CardInteractionProvider';
-import CoverImage from '@/components/CoverImage';
 
 const noSelectStyle = {
   WebkitUserSelect: 'none',

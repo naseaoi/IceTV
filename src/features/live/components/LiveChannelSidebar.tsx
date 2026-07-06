@@ -1,12 +1,10 @@
-﻿import { MutableRefObject, ReactNode, useEffect, useMemo, useRef } from 'react';
-
-import { Clock, Heart, Radio, Target, Tv } from 'lucide-react';
+﻿import { Clock, Heart, Radio, Target, Tv } from 'lucide-react';
+import { MutableRefObject, ReactNode, useEffect, useMemo, useRef } from 'react';
 
 import {
   PlayerPanelContent,
   PlayerPanelTabBar,
 } from '@/components/PlayerPanelTabBar';
-
 import {
   formatTimeToHHMM,
   parseCustomTimeFormat,

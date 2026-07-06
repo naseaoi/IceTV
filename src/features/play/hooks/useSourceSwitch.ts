@@ -10,6 +10,26 @@ import {
   useRef,
 } from 'react';
 
+import type {
+  PlaybackRequestMode,
+  SkipConfigState,
+  VideoLoadingStage,
+  VideoQualityInfo,
+} from '@/features/play/hooks/usePlayPageState';
+import { saveDetailSnapshot } from '@/features/play/lib/detailSnapshot';
+import { resolveEpisodeTargetIndex } from '@/features/play/lib/episodeMapping';
+import {
+  type SourceSwitchEpisodeAnchor,
+  resolveSourceSwitchCurrentPlayTime,
+  resolveSourceSwitchEpisodeAnchor,
+  resolveSourceSwitchResumeState,
+} from '@/features/play/lib/episodeResumePolicy';
+import type { ResumeMode } from '@/features/play/lib/resumePlayback';
+import {
+  type SourceSwitchCleanupTask,
+  finalizeSourceSwitchCleanup,
+  shouldFinalizeSourceSwitchCleanup,
+} from '@/features/play/lib/sourceSwitchCleanup';
 import {
   deletePlayRecord,
   deleteSkipConfig,
@@ -19,34 +39,13 @@ import {
   clearSourceFailure,
   markSourceFailed,
 } from '@/lib/failed-source-cooldown';
+import { savePlayIntent } from '@/lib/play-intent';
 import {
   getManagedVideo,
   markManagedVideoExpectedAbort,
 } from '@/lib/player-runtime';
 import { mergeSourceBundle } from '@/lib/source-bundle';
 import { SearchResult, SkipConfig } from '@/lib/types';
-
-import { resolveEpisodeTargetIndex } from '@/features/play/lib/episodeMapping';
-import {
-  resolveSourceSwitchCurrentPlayTime,
-  resolveSourceSwitchEpisodeAnchor,
-  resolveSourceSwitchResumeState,
-  type SourceSwitchEpisodeAnchor,
-} from '@/features/play/lib/episodeResumePolicy';
-import { saveDetailSnapshot } from '@/features/play/lib/detailSnapshot';
-import { savePlayIntent } from '@/lib/play-intent';
-import {
-  finalizeSourceSwitchCleanup,
-  shouldFinalizeSourceSwitchCleanup,
-  type SourceSwitchCleanupTask,
-} from '@/features/play/lib/sourceSwitchCleanup';
-import type {
-  PlaybackRequestMode,
-  SkipConfigState,
-  VideoLoadingStage,
-  VideoQualityInfo,
-} from '@/features/play/hooks/usePlayPageState';
-import type { ResumeMode } from '@/features/play/lib/resumePlayback';
 
 const IS_DEVELOPMENT = process.env.NODE_ENV !== 'production';
 

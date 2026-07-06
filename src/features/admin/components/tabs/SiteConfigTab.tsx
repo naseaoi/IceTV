@@ -5,13 +5,12 @@ import { type FormEvent, useEffect, useRef, useState } from 'react';
 
 import AdminSelect from '@/components/admin/AdminSelect';
 import AlertModal from '@/components/modals/AlertModal';
-import { useAlertModal } from '@/hooks/useAlertModal';
 import { useLoadingState } from '@/features/admin/hooks/useLoadingState';
-import { adminPost } from '@/features/admin/lib/api';
 import { SITE_CONFIG_FORM_ID } from '@/features/admin/lib/admin-form-ids';
+import { adminPost } from '@/features/admin/lib/api';
 import { showError, showSuccess } from '@/features/admin/lib/notifications';
-import { AdminConfig } from '@/types/admin';
 import { SiteConfig } from '@/features/admin/types/internal';
+import { useAlertModal } from '@/hooks/useAlertModal';
 import {
   DEFAULT_BANGUMI_DATA_SOURCE,
   normalizeSiteBangumiDataSource,
@@ -27,6 +26,7 @@ import {
 import { DEFAULT_DOUBAN_IMAGE_PROXY_TYPE } from '@/lib/douban-source';
 import { localPreferenceToggleDefinitions } from '@/lib/local-preference-toggles';
 import { DEFAULT_RUNTIME_PARAMS } from '@/lib/runtime-params';
+import { AdminConfig } from '@/types/admin';
 
 const DEFAULT_SITE_SETTINGS: SiteConfig = {
   SiteName: '',

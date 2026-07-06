@@ -1,20 +1,18 @@
 ﻿import { getVideoResolutionFromM3u8 } from '@/features/play/lib/hls-utils';
-import { formatBytesPerSecond } from '@/lib/player-utils';
-import { isLazyEpisodeUrl } from '@/lib/lazy-episodes';
-import {
-  clearSourceProxyOverride,
-  rememberSourceServerProxy,
-  shouldAutoFallbackToServer,
-} from '@/lib/proxy-modes';
-import { createTimedAbortController } from '@/lib/downstream-sources/shared';
-
 import { resolveLazyEpisodeUrl } from '@/features/play/lib/lazyEpisode';
-
 import {
   buildVodSegmentProxyUrl,
   isVodM3u8Url,
   isVodMp4Url,
 } from '@/features/play/lib/vodProxyUrl';
+import { createTimedAbortController } from '@/lib/downstream-sources/shared';
+import { isLazyEpisodeUrl } from '@/lib/lazy-episodes';
+import { formatBytesPerSecond } from '@/lib/player-utils';
+import {
+  clearSourceProxyOverride,
+  rememberSourceServerProxy,
+  shouldAutoFallbackToServer,
+} from '@/lib/proxy-modes';
 
 export type VodProbeResult = {
   quality: string;

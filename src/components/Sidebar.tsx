@@ -23,27 +23,26 @@ import {
   useState,
 } from 'react';
 
+import { getAuthInfoFromBrowserCookie } from '@/lib/auth.client';
 import {
   readSidebarCollapsed,
   writeSidebarCollapsed,
 } from '@/lib/local-preferences';
+import { RuntimeConfig } from '@/lib/runtime-config';
 
 import { useRuntimeConfig } from './RuntimeConfigProvider';
-import { useSite } from './SiteProvider';
 import {
+  getSidebarItemLabelClass,
   SIDEBAR_BUTTON_STATE_CLASS,
   SIDEBAR_ITEM_ICON_CLASS,
   SIDEBAR_ITEM_ICON_WRAP_CLASS,
   SIDEBAR_ITEM_LAYOUT_CLASS,
   SIDEBAR_LINK_ICON_CLASS,
   SIDEBAR_LINK_STATE_CLASS,
-  getSidebarItemLabelClass,
 } from './SidebarItem';
+import { useSite } from './SiteProvider';
 import { ThemeToggle } from './ThemeToggle';
 import { UserMenu } from './UserMenu';
-
-import { getAuthInfoFromBrowserCookie } from '@/lib/auth.client';
-import { RuntimeConfig } from '@/lib/runtime-config';
 
 interface SidebarContextType {
   isCollapsed: boolean;

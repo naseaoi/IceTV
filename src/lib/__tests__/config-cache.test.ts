@@ -1,7 +1,7 @@
 ﻿/** @jest-environment node */
 
-import { AdminConfig } from '@/types/admin';
 import { DEFAULT_RUNTIME_PARAMS } from '@/lib/runtime-params';
+import { AdminConfig } from '@/types/admin';
 
 const baseConfig: AdminConfig = {
   ConfigSubscribtion: { URL: '', AutoUpdate: false, LastCheck: '' },

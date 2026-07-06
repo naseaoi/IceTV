@@ -1,10 +1,10 @@
 ﻿import { NextRequest, NextResponse } from 'next/server';
 
-import { isGuardFailure, requireActiveUser } from '@/lib/api-auth';
 import {
   getCachedLiveChannels,
   isLiveEntryEnabled,
 } from '@/features/live/lib/live';
+import { isGuardFailure, requireActiveUser } from '@/lib/api-auth';
 
 export const runtime = 'nodejs';
 

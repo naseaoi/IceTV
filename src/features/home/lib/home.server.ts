@@ -1,12 +1,12 @@
 import { getCachedBangumiCalendarData } from '@/features/bangumi/lib/bangumi';
+import { getPublicConfig } from '@/lib/config';
 import { fetchDoubanData } from '@/lib/douban';
 import { processDoubanImageUrl } from '@/lib/douban-image-url';
 import { readServerDoubanImageProxyType } from '@/lib/douban-image-url.server';
-import { getPublicConfig } from '@/lib/config';
 import { DoubanItem } from '@/lib/types';
 
-import { HOME_RECOMMENDATION_REVALIDATE_SECONDS } from './home-cache';
 import { HomeInitialData } from './home.types';
+import { HOME_RECOMMENDATION_REVALIDATE_SECONDS } from './home-cache';
 
 interface DoubanCategoryApiResponse {
   items: Array<{

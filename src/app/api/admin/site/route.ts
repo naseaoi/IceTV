@@ -2,8 +2,8 @@ import { NextRequest, NextResponse } from 'next/server';
 
 import { isGuardFailure, requireAdmin } from '@/lib/api-auth';
 import { configConflictResponse } from '@/lib/api-config-error';
-import { getConfig, saveConfig } from '@/lib/config';
 import { normalizeSiteBangumiDataSource } from '@/lib/bangumi-source';
+import { getConfig, saveConfig } from '@/lib/config';
 import {
   normalizeSiteDoubanImageProxyType,
   normalizeSiteDoubanProxyType,

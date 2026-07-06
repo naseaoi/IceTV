@@ -1,6 +1,5 @@
-import type { SearchResult } from '@/lib/types';
-
 import { resolveEpisodeTargetIndex } from '@/features/play/lib/episodeMapping';
+import type { SearchResult } from '@/lib/types';
 
 interface ResolveSourceProbeEpisodeIndexOptions {
   activeDetail: SearchResult | null;

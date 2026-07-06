@@ -8,17 +8,29 @@ import AlertModal from '@/components/modals/AlertModal';
 import ConfirmModal from '@/components/modals/ConfirmModal';
 import { CustomProxyActions } from '@/components/proxy/CustomProxyActions';
 import { useAlertModal } from '@/hooks/useAlertModal';
+import { getAuthInfoFromBrowserCookie } from '@/lib/auth.client';
 import {
   BANGUMI_DATA_SOURCE_STORAGE_KEY,
   BANGUMI_PROXY_URL_STORAGE_KEY,
-  DEFAULT_BANGUMI_DATA_SOURCE,
   bangumiDataSourceOptions,
+  DEFAULT_BANGUMI_DATA_SOURCE,
   normalizeBangumiDataSource,
-  readDefaultBangumiDataSource,
-  readDefaultBangumiProxyUrl,
   readBangumiDataSource,
   readBangumiProxyUrl,
+  readDefaultBangumiDataSource,
+  readDefaultBangumiProxyUrl,
 } from '@/lib/bangumi-source';
+import type { CustomProxyTestKind } from '@/lib/custom-proxy-test';
+import {
+  CUSTOM_PROXY_LABELS,
+  getCustomProxyError,
+  normalizeCustomProxyUrl,
+  testCustomProxy,
+} from '@/lib/custom-proxy-test';
+import {
+  clearDoubanImageProxyTypeCookie,
+  writeDoubanImageProxyTypeCookie,
+} from '@/lib/douban-image-url';
 import {
   doubanDataSourceOptions,
   doubanImageProxyTypeOptions,
@@ -31,10 +43,10 @@ import {
   DOUBAN_PROXY_URL_STORAGE_KEY,
   readDefaultDoubanImageProxyType,
   readDefaultDoubanImageProxyUrl,
-  readDoubanImageProxyType,
-  readDoubanImageProxyUrl,
   readDefaultDoubanProxyType,
   readDefaultDoubanProxyUrl,
+  readDoubanImageProxyType,
+  readDoubanImageProxyUrl,
   readDoubanProxyType,
   readDoubanProxyUrl,
 } from '@/lib/douban-source';
@@ -44,18 +56,6 @@ import {
   readLocalPreferenceToggleState,
   resetAllLocalPreferenceToggles,
 } from '@/lib/local-preference-toggles';
-import { getAuthInfoFromBrowserCookie } from '@/lib/auth.client';
-import type { CustomProxyTestKind } from '@/lib/custom-proxy-test';
-import {
-  CUSTOM_PROXY_LABELS,
-  getCustomProxyError,
-  normalizeCustomProxyUrl,
-  testCustomProxy,
-} from '@/lib/custom-proxy-test';
-import {
-  clearDoubanImageProxyTypeCookie,
-  writeDoubanImageProxyTypeCookie,
-} from '@/lib/douban-image-url';
 
 import { useBodyScrollLock } from './useBodyScrollLock';
 

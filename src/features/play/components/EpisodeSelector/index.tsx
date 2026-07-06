@@ -1,13 +1,12 @@
-import React, { useEffect, useMemo, useState } from 'react';
 import dynamic from 'next/dynamic';
+import React, { useEffect, useMemo, useState } from 'react';
 
+import { PlayerPanelContent } from '@/components/PlayerPanelTabBar';
+import { SectionTitle } from '@/features/play/components/EpisodeSelector/SectionTitle';
+import { TabBar } from '@/features/play/components/EpisodeSelector/TabBar';
 import { getSourceBundle } from '@/lib/source-bundle';
 import { normalizeTitleForSourceMatch } from '@/lib/source-match';
 import { SearchResult } from '@/lib/types';
-import { PlayerPanelContent } from '@/components/PlayerPanelTabBar';
-
-import { SectionTitle } from '@/features/play/components/EpisodeSelector/SectionTitle';
-import { TabBar } from '@/features/play/components/EpisodeSelector/TabBar';
 
 const infoSkeletonLineWidths = [
   'w-full',

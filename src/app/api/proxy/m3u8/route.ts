@@ -1,5 +1,6 @@
 ﻿import { NextRequest, NextResponse } from 'next/server';
 
+import { isLiveEntryEnabled } from '@/features/live/lib/live';
 import { getRewrittenM3U8Content } from '@/features/play/lib/m3u8-rewrite';
 import { authorizeProxyRequest } from '@/lib/proxy-auth';
 import {
@@ -9,16 +10,14 @@ import {
   toProxyFailurePayload,
 } from '@/lib/proxy-diagnostics';
 import { validateProxyUrlForRequest } from '@/lib/url-guard';
-import { isLiveEntryEnabled } from '@/features/live/lib/live';
 
+import { getProxySourceKey, resolveProxyUserAgent } from '../utils';
 import {
   isSignedM3U8Url,
   loadM3U8Data,
   peekM3U8Cache,
   refreshM3U8Cache,
 } from './service';
-
-import { getProxySourceKey, resolveProxyUserAgent } from '../utils';
 
 export const runtime = 'nodejs';
 

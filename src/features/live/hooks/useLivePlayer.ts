@@ -1,3 +1,4 @@
+import type ArtplayerType from 'artplayer';
 import {
   Dispatch,
   MutableRefObject,
@@ -6,9 +7,8 @@ import {
   useRef,
 } from 'react';
 
-import type ArtplayerType from 'artplayer';
-
-import type { LiveChannel, LiveSource } from '../types';
+import { logHlsError } from '@/lib/hls-error-log';
+import { readLiveDirectConnect } from '@/lib/local-preferences';
 import {
   assignManagedVideoCleanup,
   bindPlayerHoverControls,
@@ -19,15 +19,15 @@ import {
   isManagedVideoExpectedAbort,
   runManagedVideoCleanup,
 } from '@/lib/player-runtime';
-import { logHlsError } from '@/lib/hls-error-log';
-import { readLiveDirectConnect } from '@/lib/local-preferences';
 import {
+  configureArtplayerStatics,
   createArtPlayerConfig,
   createHlsConfig,
-  configureArtplayerStatics,
   ensureVideoSource,
   handleHlsFatalError,
 } from '@/lib/player-utils';
+
+import type { LiveChannel, LiveSource } from '../types';
 
 const LIVE_PRECHECK_CACHE_TTL_MS = 5 * 60 * 1000;
 const livePrecheckCache = new Map<

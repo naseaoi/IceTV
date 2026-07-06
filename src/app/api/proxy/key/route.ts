@@ -7,17 +7,17 @@ import {
   getProxyUrlForTarget,
 } from '@/lib/http-proxy-json';
 import { authorizeProxyRequest } from '@/lib/proxy-auth';
-import { markSourceCors, responseAllowsCors } from '@/lib/source-capability';
 import {
   readArrayBufferLimited,
   ResponseSizeLimitError,
 } from '@/lib/proxy-response-limits';
+import { normalizeRuntimeParams } from '@/lib/runtime-params';
+import { markSourceCors, responseAllowsCors } from '@/lib/source-capability';
 import {
   fetchWithUrlGuard,
   UrlValidationError,
   validateProxyUrlForRequest,
 } from '@/lib/url-guard';
-import { normalizeRuntimeParams } from '@/lib/runtime-params';
 
 import { getProxySourceKey, resolveProxyUserAgent } from '../utils';
 

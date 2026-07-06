@@ -4,20 +4,6 @@ import { Cat, ChevronRight, Clover, Film, Tv } from 'lucide-react';
 import Link from 'next/link';
 import { useEffect, useMemo, useState } from 'react';
 
-import { GetBangumiCalendarData } from '@/features/bangumi/lib/bangumi.client';
-import { selectBangumiCardCover } from '@/features/bangumi/lib/bangumi-normalize';
-import { getDoubanCategories } from '@/lib/douban.client';
-import { HomeInitialData } from '@/features/home/lib/home.types';
-import {
-  readSeenAnnouncement,
-  writeSeenAnnouncement,
-} from '@/lib/local-preferences';
-import { DoubanItem } from '@/lib/types';
-import {
-  getCurrentWeekday,
-  primeDefaultDoubanFeedViewCache,
-} from '@/features/douban/hooks/useDoubanFeed';
-
 import ContinueWatching from '@/components/ContinueWatching';
 import HomePosterCardSkeleton, {
   HOME_POSTER_CARD_CLASS,
@@ -27,6 +13,19 @@ import PageLayout from '@/components/PageLayout';
 import PosterCard from '@/components/PosterCard';
 import ScrollableRow from '@/components/ScrollableRow';
 import { useSite } from '@/components/SiteProvider';
+import { GetBangumiCalendarData } from '@/features/bangumi/lib/bangumi.client';
+import { selectBangumiCardCover } from '@/features/bangumi/lib/bangumi-normalize';
+import {
+  getCurrentWeekday,
+  primeDefaultDoubanFeedViewCache,
+} from '@/features/douban/hooks/useDoubanFeed';
+import { HomeInitialData } from '@/features/home/lib/home.types';
+import { getDoubanCategories } from '@/lib/douban.client';
+import {
+  readSeenAnnouncement,
+  writeSeenAnnouncement,
+} from '@/lib/local-preferences';
+import { DoubanItem } from '@/lib/types';
 
 import { HomeMineSwitch } from './HomeMineSwitch';
 

@@ -14,14 +14,14 @@ import { UserGroupFormDialog } from '@/features/admin/components/tabs/user-confi
 import { UserGroupTable } from '@/features/admin/components/tabs/user-config/UserGroupTable';
 import { UserTable } from '@/features/admin/components/tabs/user-config/UserTable';
 import { useAdminUserActions } from '@/features/admin/hooks/useAdminUserActions';
-import { useAlertModal } from '@/hooks/useAlertModal';
 import { useLoadingState } from '@/features/admin/hooks/useLoadingState';
 import { buttonStyles } from '@/features/admin/lib/buttonStyles';
 import { showError, showSuccess } from '@/features/admin/lib/notifications';
 import { getSelectableUsers } from '@/features/admin/lib/permissions';
-import { AdminConfig } from '@/types/admin';
+import { useAlertModal } from '@/hooks/useAlertModal';
 import { useModalState } from '@/hooks/useModalState';
 import { getAuthInfoFromBrowserCookie } from '@/lib/auth.client';
+import { AdminConfig } from '@/types/admin';
 
 interface UserConfigProps {
   config: AdminConfig | null;

@@ -1,13 +1,13 @@
 import React, { useEffect, useMemo, useRef } from 'react';
 
-import { SearchResult } from '@/lib/types';
-import { VideoCardHandle } from '@/components/VideoCard';
 import { SearchFilterCategory } from '@/components/SearchResultFilter';
+import { VideoCardHandle } from '@/components/VideoCard';
+import { SearchResult } from '@/lib/types';
 
 import {
-  normalizeTitleForAggregation,
   compareYear,
   computeGroupStats,
+  normalizeTitleForAggregation,
 } from '../lib/searchUtils';
 
 export type FilterState = {

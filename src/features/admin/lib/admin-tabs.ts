@@ -1,3 +1,4 @@
+import type { LucideIcon } from 'lucide-react';
 import {
   Database,
   FileText,
@@ -8,7 +9,6 @@ import {
   Users,
   Video,
 } from 'lucide-react';
-import type { LucideIcon } from 'lucide-react';
 
 export type AdminTabId =
   | 'config-file'

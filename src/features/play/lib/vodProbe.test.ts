@@ -1,8 +1,6 @@
 ﻿import { getVideoResolutionFromM3u8 } from '@/features/play/lib/hls-utils';
-
-import { shouldAutoFallbackToServer } from '@/lib/proxy-modes';
-
 import { probeVodEpisodeUrl } from '@/features/play/lib/vodProbe';
+import { shouldAutoFallbackToServer } from '@/lib/proxy-modes';
 
 jest.mock('@/features/play/lib/hls-utils', () => ({
   getVideoResolutionFromM3u8: jest.fn(),

@@ -1,4 +1,4 @@
-import { createTimedAbortController } from './downstream-sources/shared';
+import { getAuthInfoFromBrowserCookie } from './auth.client';
 import {
   DoubanCategoryApiResponse,
   DoubanListApiResponse,
@@ -8,8 +8,8 @@ import {
   normalizeDoubanRecommendItems,
 } from './douban-normalize';
 import { readDoubanProxyType, readDoubanProxyUrl } from './douban-source';
+import { createTimedAbortController } from './downstream-sources/shared';
 import { DoubanResult } from './types';
-import { getAuthInfoFromBrowserCookie } from './auth.client';
 
 // ================================================================
 // 请求去重 + SWR 缓存：避免切换筛选条件后重复请求相同数据

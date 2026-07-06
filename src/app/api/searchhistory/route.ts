@@ -1,8 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 
 import { isGuardFailure, requireActiveUser } from '@/lib/api-auth';
-import { db } from '@/lib/db';
 import { getConfigForRead } from '@/lib/config';
+import { db } from '@/lib/db';
 import { NO_STORE_HEADERS } from '@/lib/http-cache';
 import { normalizeRuntimeParams } from '@/lib/runtime-params';
 

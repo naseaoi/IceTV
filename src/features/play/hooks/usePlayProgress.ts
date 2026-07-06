@@ -1,27 +1,7 @@
-﻿import { Dispatch, MutableRefObject, SetStateAction, useEffect } from 'react';
-
+﻿import type Artplayer from 'artplayer';
+import { Dispatch, MutableRefObject, SetStateAction, useEffect } from 'react';
 import { useCallback, useRef } from 'react';
 
-import type Artplayer from 'artplayer';
-
-import {
-  generateStorageKey,
-  getAllPlayRecords,
-  PlayRecord,
-  savePlayRecord,
-} from '@/lib/db.client';
-import { SearchResult } from '@/lib/types';
-
-import {
-  SessionLostReason,
-  WakeLockSentinel,
-} from '@/features/play/lib/playTypes';
-import { consumeMatchingPlayIntent } from '@/lib/play-intent';
-import {
-  applyResumeTime,
-  isWithinAutoResumeWindow,
-} from '@/features/play/lib/resumePlayback';
-import type { ResumeMode } from '@/features/play/lib/resumePlayback';
 import {
   clearPlaybackCheckpointStorage,
   hasMeaningfulPlaybackTime,
@@ -33,6 +13,23 @@ import {
   savePlaybackCheckpoint,
   shouldApplyHistoryRestore,
 } from '@/features/play/lib/playProgressRestore';
+import {
+  SessionLostReason,
+  WakeLockSentinel,
+} from '@/features/play/lib/playTypes';
+import type { ResumeMode } from '@/features/play/lib/resumePlayback';
+import {
+  applyResumeTime,
+  isWithinAutoResumeWindow,
+} from '@/features/play/lib/resumePlayback';
+import {
+  generateStorageKey,
+  getAllPlayRecords,
+  PlayRecord,
+  savePlayRecord,
+} from '@/lib/db.client';
+import { consumeMatchingPlayIntent } from '@/lib/play-intent';
+import { SearchResult } from '@/lib/types';
 
 export {
   clearPlaybackCheckpointStorage,

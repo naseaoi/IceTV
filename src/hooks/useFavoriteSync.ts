@@ -1,9 +1,9 @@
 import { Dispatch, SetStateAction, useEffect } from 'react';
 
 import {
+  generateStorageKey,
   isFavorited as checkIsFavorited,
   subscribeToDataUpdates,
-  generateStorageKey,
 } from '@/lib/db.client';
 
 /**

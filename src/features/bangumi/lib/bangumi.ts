@@ -1,11 +1,12 @@
 import {
-  fetchBangumiCalendarJson,
-  type BangumiFetchInit,
-} from './bangumi-fetch';
-import {
   BANGUMI_CALENDAR_FRESH_SECONDS,
   BANGUMI_CALENDAR_MAX_AGE_SECONDS,
 } from '@/features/home/lib/home-cache';
+
+import {
+  type BangumiFetchInit,
+  fetchBangumiCalendarJson,
+} from './bangumi-fetch';
 import { normalizeBangumiCalendarData } from './bangumi-normalize';
 
 export interface BangumiCalendarData {
