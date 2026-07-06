@@ -22,6 +22,7 @@ interface HlsQualityController {
   nextAutoLevel?: number;
   autoLevelCapping?: number;
   __icetvManualQualityLocked?: boolean;
+  __icetvDefaultQualityLevel?: number | null;
 }
 
 export interface QualityOption {
@@ -76,6 +77,49 @@ export function findHighestLevelIndex(levels: HlsLevelLike[]): number | null {
     }
   });
   return bestIndex;
+}
+
+export function findNextLowerLevelIndex(
+  levels: HlsLevelLike[],
+  currentLevelIndex: number,
+): number | null {
+  const currentLevel = levels[currentLevelIndex];
+  if (!currentLevel || levels.length === 0) {
+    return null;
+  }
+
+  const currentHeight = currentLevel.height || 0;
+  const currentBitrate = currentLevel.bitrate || 0;
+  let bestIndex = -1;
+  let bestHeight = -1;
+  let bestBitrate = -1;
+
+  levels.forEach((level, index) => {
+    if (index === currentLevelIndex) {
+      return;
+    }
+
+    const height = level.height || 0;
+    const bitrate = level.bitrate || 0;
+    const lowerByHeight = currentHeight > 0 && height < currentHeight;
+    const lowerByBitrate =
+      currentHeight <= 0 && currentBitrate > 0 && bitrate < currentBitrate;
+
+    if (!lowerByHeight && !lowerByBitrate) {
+      return;
+    }
+
+    if (
+      height > bestHeight ||
+      (height === bestHeight && bitrate > bestBitrate)
+    ) {
+      bestIndex = index;
+      bestHeight = height;
+      bestBitrate = bitrate;
+    }
+  });
+
+  return bestIndex >= 0 ? bestIndex : null;
 }
 
 export function applyAutoQualityLevel(
@@ -250,7 +294,7 @@ function registerQualityControl(
     : qualityPreference.mode === 'manual'
       ? findLevelIndexByHeight(levels, qualityPreference.height)
       : qualityPreference.mode === 'default'
-        ? findHighestLevelIndex(levels)
+        ? (hls.__icetvDefaultQualityLevel ?? findHighestLevelIndex(levels))
         : null;
   const activeOption =
     preferredIndex === null
@@ -283,7 +327,8 @@ function registerQualityControl(
       if (item.levelIndex < 0) {
         writePreferredQualityHeight(null);
         applyAutoQualityLevel(hls, {
-          startLevelIndex: findHighestLevelIndex(levels),
+          startLevelIndex:
+            hls.__icetvDefaultQualityLevel ?? findHighestLevelIndex(levels),
         });
       } else {
         writePreferredQualityHeight(item.height);

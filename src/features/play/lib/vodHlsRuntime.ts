@@ -13,6 +13,7 @@ import {
   applyManualQualityLevel,
   findHighestLevelIndex,
   findLevelIndexByHeight,
+  findNextLowerLevelIndex,
   markQualityControlTemporaryAuto,
   registerQualityControlWhenReady,
   seedAutoQualityStartLevel,
@@ -86,6 +87,23 @@ function resolveVideoQuality(videoWidth: number): string {
   if (videoWidth >= 1280) return '720p';
   if (videoWidth >= 854) return '480p';
   return 'SD';
+}
+
+function getCurrentHlsLevelIndex(hls: any): number | null {
+  const candidates = [hls.currentLevel, hls.loadLevel, hls.nextLoadLevel];
+  for (const candidate of candidates) {
+    if (typeof candidate === 'number' && candidate >= 0) {
+      return candidate;
+    }
+  }
+  return null;
+}
+
+function getDefaultQualityLevel(sourceKey: string, levels: any[]) {
+  if (sourceKey === 'xigua') {
+    return findLevelIndexByHeight(levels, 720) ?? findHighestLevelIndex(levels);
+  }
+  return findHighestLevelIndex(levels);
 }
 
 export function createVodM3u8Loader({
@@ -227,6 +245,50 @@ export function createVodM3u8Loader({
           activePlayer.notice.show = message;
         }
       } catch {}
+    };
+    const tryDowngradeQualityLevel = (message: string) => {
+      if (hls.__icetvManualQualityLocked === true) {
+        return false;
+      }
+
+      const currentLevel = getCurrentHlsLevelIndex(hls);
+      if (currentLevel === null) {
+        return false;
+      }
+
+      const nextLevel = findNextLowerLevelIndex(hls.levels || [], currentLevel);
+      if (nextLevel === null) {
+        return false;
+      }
+
+      applyDefaultQualityLevel(hls, nextLevel);
+      if (typeof hls.startLoad === 'function') {
+        hls.startLoad();
+      }
+      const level = hls.levels?.[nextLevel];
+      const label = level?.height ? `${level.height}p` : '较低画质';
+      const notice = `${message}，已切换到${label}`;
+      setRealtimeLoadSpeed(notice);
+      try {
+        const activePlayer = artPlayerRef.current;
+        if (activePlayer) {
+          activePlayer.notice.show = notice;
+        }
+      } catch {}
+      return true;
+    };
+    const stopWithSourceError = (reason: string, status?: number) => {
+      markCurrentSourceFailure('proxy-error', reason, status);
+      if (typeof hls.stopLoad === 'function') {
+        hls.stopLoad();
+      }
+      setIsVideoLoading(false);
+      setRealtimeLoadSpeed('');
+      if (sourceKey) {
+        clearSourceProxyOverride(sourceKey, url);
+      }
+      reportRouteStat(false);
+      setError('当前源加载失败');
     };
     const failureKey =
       playbackInfoContext.source && playbackInfoContext.id
@@ -437,6 +499,12 @@ export function createVodM3u8Loader({
       const isFragOrLevelNetworkError =
         data.type === Hls.ErrorTypes.NETWORK_ERROR &&
         /frag|segment|level/i.test(errorDetails);
+      const isFragNetworkError =
+        data.type === Hls.ErrorTypes.NETWORK_ERROR &&
+        /frag|segment/i.test(errorDetails);
+      const isManifestOrLevelNetworkError =
+        data.type === Hls.ErrorTypes.NETWORK_ERROR &&
+        /manifest|level/i.test(errorDetails);
 
       if (
         isFragOrLevelNetworkError &&
@@ -454,6 +522,21 @@ export function createVodM3u8Loader({
 
       if (data.fatal) {
         if (
+          data.type === Hls.ErrorTypes.NETWORK_ERROR &&
+          currentUseServerProxy
+        ) {
+          stopWithSourceError(errorReason, errorStatus);
+          return;
+        }
+
+        if (
+          isFragNetworkError &&
+          tryDowngradeQualityLevel('当前画质分片加载失败')
+        ) {
+          return;
+        }
+
+        if (
           isFragOrLevelNetworkError &&
           hls.autoLevelEnabled === false &&
           hls.__icetvManualQualityLocked !== true
@@ -463,10 +546,7 @@ export function createVodM3u8Loader({
           return;
         }
 
-        if (
-          data.type === Hls.ErrorTypes.NETWORK_ERROR &&
-          switchToServerProxy(errorReason)
-        ) {
+        if (isManifestOrLevelNetworkError && switchToServerProxy(errorReason)) {
           return;
         }
 
@@ -559,8 +639,12 @@ export function createVodM3u8Loader({
         qualityPreference.mode === 'manual'
           ? findLevelIndexByHeight(levels, qualityPreference.height)
           : qualityPreference.mode === 'default'
-            ? findHighestLevelIndex(levels)
+            ? getDefaultQualityLevel(sourceKey, levels)
             : null;
+      hls.__icetvDefaultQualityLevel = getDefaultQualityLevel(
+        sourceKey,
+        levels,
+      );
       if (preferredLevel !== null && qualityPreference.mode !== 'auto') {
         if (qualityPreference.mode === 'manual') {
           applyManualQualityLevel(hls, preferredLevel);

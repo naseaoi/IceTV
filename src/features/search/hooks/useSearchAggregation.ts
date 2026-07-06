@@ -224,7 +224,7 @@ export function useSearchAggregation({
 
   const aggregatedResults = useMemo(
     () => materializeAggregatedResults(searchIndexState.index),
-    [searchIndexState.index],
+    [searchIndexState],
   );
 
   const aggregatedResultItems = useMemo<AggregatedResultItem[]>(() => {
@@ -329,7 +329,7 @@ export function useSearchAggregation({
     ];
 
     return { categoriesAll, categoriesAgg };
-  }, [searchIndexState.index]);
+  }, [searchIndexState]);
 
   // 非聚合筛选排序
   const filteredAllResults = useMemo(() => {

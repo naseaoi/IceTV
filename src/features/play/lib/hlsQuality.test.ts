@@ -4,6 +4,7 @@ import {
   applyManualQualityLevel,
   findHighestLevelIndex,
   findLevelIndexByHeight,
+  findNextLowerLevelIndex,
   seedAutoQualityStartLevel,
 } from '@/features/play/lib/hlsQuality';
 
@@ -130,6 +131,20 @@ describe('hls quality level controls', () => {
           { height: 720, bitrate: 2500 },
         ],
         1080,
+      ),
+    ).toBe(2);
+  });
+
+  it('finds the next lower level by height', () => {
+    expect(
+      findNextLowerLevelIndex(
+        [
+          { height: 240, bitrate: 100 },
+          { height: 360, bitrate: 200 },
+          { height: 720, bitrate: 512 },
+          { height: 1080, bitrate: 2000 },
+        ],
+        3,
       ),
     ).toBe(2);
   });
