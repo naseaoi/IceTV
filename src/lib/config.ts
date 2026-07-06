@@ -16,7 +16,9 @@ import {
 import {
   DEFAULT_DOUBAN_IMAGE_PROXY_TYPE,
   DEFAULT_DOUBAN_PROXY_TYPE,
+  type DoubanImageProxyType,
 } from '@/lib/douban-source';
+import { PUBLIC_DOUBAN_IMAGE_PROXY_TYPES } from '@/lib/douban-image-url';
 import {
   DEFAULT_RUNTIME_PARAMS,
   normalizeRuntimeParams,
@@ -84,12 +86,6 @@ const PUBLIC_DOUBAN_PROXY_TYPES = new Set([
   'cmliussss-cdn-ali',
   'cors-anywhere',
 ]);
-const PUBLIC_DOUBAN_IMAGE_PROXY_TYPES = new Set([
-  'direct',
-  'img3',
-  'cmliussss-cdn-tencent',
-  'cmliussss-cdn-ali',
-]);
 type ManagedUser = AdminConfig['UserConfig']['Users'][number];
 const configVersionByObject = new WeakMap<AdminConfig, string>();
 
@@ -130,7 +126,8 @@ export function getPublicBangumiDataSource(
 export function getPublicDoubanImageProxyType(
   proxyType: string | undefined,
 ): string {
-  return proxyType && PUBLIC_DOUBAN_IMAGE_PROXY_TYPES.has(proxyType)
+  return proxyType &&
+    PUBLIC_DOUBAN_IMAGE_PROXY_TYPES.has(proxyType as DoubanImageProxyType)
     ? proxyType
     : DEFAULT_DOUBAN_IMAGE_PROXY_TYPE;
 }

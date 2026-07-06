@@ -5,6 +5,10 @@ import {
   readDoubanImageProxyType,
   readDoubanImageProxyUrl,
 } from '@/lib/douban-source';
+import {
+  getUsableDoubanImageProxyType,
+  processDoubanImageUrl,
+} from '@/lib/douban-image-url';
 
 export function processImageUrl(originalUrl: string): string {
   if (!originalUrl) return originalUrl;
@@ -13,41 +17,15 @@ export function processImageUrl(originalUrl: string): string {
     return originalUrl;
   }
 
-  const proxyType = getUsableDoubanImageProxyType(readDoubanImageProxyType());
-  const proxyUrl = readDoubanImageProxyUrl().trim();
-  switch (proxyType) {
-    case 'direct':
-      return originalUrl;
-    case 'server':
-      return `/api/image-proxy?url=${encodeURIComponent(originalUrl)}`;
-    case 'img3':
-      return originalUrl.replace(/img\d+\.doubanio\.com/g, 'img3.doubanio.com');
-    case 'cmliussss-cdn-tencent':
-      return originalUrl.replace(
-        /img\d+\.doubanio\.com/g,
-        'img.doubanio.cmliussss.net',
-      );
-    case 'cmliussss-cdn-ali':
-      return originalUrl.replace(
-        /img\d+\.doubanio\.com/g,
-        'img.doubanio.cmliussss.com',
-      );
-    case 'custom':
-      if (!proxyUrl) {
-        return originalUrl;
-      }
-      return `${proxyUrl}${encodeURIComponent(originalUrl)}`;
-    default:
-      return originalUrl;
-  }
-}
-
-function getUsableDoubanImageProxyType(proxyType: string): string {
-  if (proxyType !== 'server') {
-    return proxyType;
-  }
-
-  return getAuthInfoFromBrowserCookie()?.username ? proxyType : 'direct';
+  const proxyType = getUsableDoubanImageProxyType(
+    readDoubanImageProxyType(),
+    Boolean(getAuthInfoFromBrowserCookie()?.username),
+  );
+  return processDoubanImageUrl(
+    originalUrl,
+    proxyType,
+    readDoubanImageProxyUrl(),
+  );
 }
 
 function decodeHtmlText(text: string): string {

@@ -14,9 +14,11 @@ import type { FavoriteItem } from '@/features/favorites/types';
 export function FavoritePreviewSection({
   items,
   loading,
+  skeletonCount = 0,
 }: {
   items: FavoriteItem[];
   loading: boolean;
+  skeletonCount?: number;
 }) {
   return (
     <section className='mb-4'>
@@ -37,8 +39,8 @@ export function FavoritePreviewSection({
       </div>
 
       <ScrollableRow>
-        {loading ? (
-          Array.from({ length: 6 }).map((_, index) => (
+        {loading && skeletonCount > 0 && items.length === 0 ? (
+          Array.from({ length: skeletonCount }).map((_, index) => (
             <HomePosterCardSkeleton key={index} withSubtitle />
           ))
         ) : items.length > 0 ? (

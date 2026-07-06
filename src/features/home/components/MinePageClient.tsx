@@ -8,8 +8,16 @@ import { PlaybackStatsPanel } from '@/features/playback-stats/components/Playbac
 
 import { HomeMineSwitch } from './HomeMineSwitch';
 
-export function MinePageClient() {
-  const { favoriteItems, loading: favoritesLoading } = useFavoriteItems(true);
+export function MinePageClient({
+  favoriteSkeletonCount = 0,
+}: {
+  favoriteSkeletonCount?: number;
+}) {
+  const {
+    favoriteItems,
+    loading: favoritesLoading,
+    skeletonCount: favoriteLoadingSkeletonCount,
+  } = useFavoriteItems(true, favoriteSkeletonCount);
 
   return (
     <PageLayout activePath='/'>
@@ -23,6 +31,7 @@ export function MinePageClient() {
             <FavoritePreviewSection
               items={favoriteItems}
               loading={favoritesLoading}
+              skeletonCount={favoriteLoadingSkeletonCount}
             />
             <PlaybackStatsPanel />
             <PlaybackHistorySection />

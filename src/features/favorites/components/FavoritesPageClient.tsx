@@ -10,10 +10,10 @@ import { FavoriteGrid } from '@/features/favorites/components/FavoriteGrid';
 import { useFavoriteItems } from '@/features/favorites/hooks/useFavoriteItems';
 import { HomeMineSwitch } from '@/features/home/components/HomeMineSwitch';
 
-function FavoriteGridSkeleton() {
+function FavoriteGridSkeleton({ count = 12 }: { count?: number }) {
   return (
     <div className='grid grid-cols-3 justify-start gap-x-2 gap-y-14 px-0 sm:grid-cols-[repeat(auto-fill,_180px)] sm:gap-x-6 sm:gap-y-20 sm:px-2'>
-      {Array.from({ length: 12 }).map((_, index) => (
+      {Array.from({ length: count }).map((_, index) => (
         <div key={index} className='w-24 sm:w-[180px]'>
           <HomePosterCardSkeleton withSubtitle />
         </div>
@@ -22,8 +22,13 @@ function FavoriteGridSkeleton() {
   );
 }
 
-export function FavoritesPageClient() {
-  const { favoriteItems, loading, clearFavorites } = useFavoriteItems(true);
+export function FavoritesPageClient({
+  favoriteSkeletonCount = 0,
+}: {
+  favoriteSkeletonCount?: number;
+}) {
+  const { favoriteItems, loading, skeletonCount, clearFavorites } =
+    useFavoriteItems(true, favoriteSkeletonCount);
   const [showClearConfirm, setShowClearConfirm] = useState(false);
 
   return (
@@ -49,8 +54,8 @@ export function FavoritesPageClient() {
             )}
           </div>
 
-          {loading ? (
-            <FavoriteGridSkeleton />
+          {loading && skeletonCount > 0 && favoriteItems.length === 0 ? (
+            <FavoriteGridSkeleton count={skeletonCount} />
           ) : (
             <FavoriteGrid items={favoriteItems} />
           )}

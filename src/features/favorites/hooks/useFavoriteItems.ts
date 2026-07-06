@@ -10,11 +10,14 @@ import {
   getCachedPlayRecordsSnapshot,
   subscribeToDataUpdates,
 } from '@/lib/db.client';
-import { isClientHydrated } from '@/lib/client-hydration';
 import type { Favorite } from '@/lib/types';
 import { parseStorageKey } from '@/lib/utils';
+import { FAVORITE_ITEMS_COUNT_COOKIE } from '@/lib/favorites-count';
 
 import type { FavoriteItem } from '@/features/favorites/types';
+
+const FAVORITE_ITEMS_COUNT_STORAGE_KEY = 'favoriteItemsCount';
+const MAX_FAVORITE_SKELETON_COUNT = 8;
 
 function buildFavoriteItemsFromRecords(
   allFavorites: Record<string, Favorite>,
@@ -64,16 +67,56 @@ function readCachedFavoriteItems(): FavoriteItem[] | null {
   );
 }
 
-function readInitialFavoriteItems(): FavoriteItem[] | null {
-  return isClientHydrated() ? readCachedFavoriteItems() : null;
+function readClientSkeletonCount(): number {
+  if (typeof window === 'undefined') {
+    return 0;
+  }
+
+  const cachedItems = readCachedFavoriteItems();
+  if (cachedItems) {
+    return Math.min(cachedItems.length, MAX_FAVORITE_SKELETON_COUNT);
+  }
+
+  const savedCount = Number.parseInt(
+    window.localStorage.getItem(FAVORITE_ITEMS_COUNT_STORAGE_KEY) || '0',
+    10,
+  );
+  return Number.isFinite(savedCount) && savedCount > 0
+    ? Math.min(savedCount, MAX_FAVORITE_SKELETON_COUNT)
+    : 0;
 }
 
-export function useFavoriteItems(enabled: boolean) {
-  const [favoriteItems, setFavoriteItems] = useState<FavoriteItem[]>(
-    () => readInitialFavoriteItems() || [],
+function writeFavoriteItemsCount(count: number) {
+  if (typeof window === 'undefined') {
+    return;
+  }
+
+  const safeCount = Math.max(0, Math.floor(count));
+  try {
+    window.localStorage.setItem(
+      FAVORITE_ITEMS_COUNT_STORAGE_KEY,
+      String(safeCount),
+    );
+  } catch {}
+
+  if (safeCount > 0) {
+    document.cookie = `${FAVORITE_ITEMS_COUNT_COOKIE}=${safeCount};path=/;max-age=${365 * 24 * 60 * 60};samesite=lax`;
+  } else {
+    document.cookie = `${FAVORITE_ITEMS_COUNT_COOKIE}=0;path=/;max-age=0;samesite=lax`;
+  }
+}
+
+export function useFavoriteItems(enabled: boolean, initialSkeletonCount = 0) {
+  const normalizedInitialSkeletonCount = Math.min(
+    Math.max(0, Math.floor(initialSkeletonCount)),
+    MAX_FAVORITE_SKELETON_COUNT,
   );
+  const [favoriteItems, setFavoriteItems] = useState<FavoriteItem[]>([]);
   const [loading, setLoading] = useState(
-    () => enabled && !readInitialFavoriteItems(),
+    () => enabled && normalizedInitialSkeletonCount > 0,
+  );
+  const [skeletonCount, setSkeletonCount] = useState(
+    normalizedInitialSkeletonCount,
   );
 
   useEffect(() => {
@@ -82,9 +125,19 @@ export function useFavoriteItems(enabled: boolean) {
     let cancelled = false;
     const cachedItems = readCachedFavoriteItems();
     if (cachedItems) {
+      setSkeletonCount(
+        Math.min(cachedItems.length, MAX_FAVORITE_SKELETON_COUNT),
+      );
       setFavoriteItems(cachedItems);
+    } else {
+      setSkeletonCount((prev) => Math.max(prev, readClientSkeletonCount()));
     }
-    setLoading(!cachedItems);
+    setLoading(
+      cachedItems
+        ? cachedItems.length > 0
+        : Math.max(normalizedInitialSkeletonCount, readClientSkeletonCount()) >
+            0,
+    );
 
     const loadFavorites = async (favorites?: Record<string, Favorite>) => {
       try {
@@ -92,6 +145,8 @@ export function useFavoriteItems(enabled: boolean) {
         const items = await buildFavoriteItems(allFavorites);
         if (!cancelled) {
           setFavoriteItems(items);
+          setSkeletonCount(Math.min(items.length, MAX_FAVORITE_SKELETON_COUNT));
+          writeFavoriteItemsCount(items.length);
         }
       } finally {
         if (!cancelled) {
@@ -118,11 +173,14 @@ export function useFavoriteItems(enabled: boolean) {
   const clearFavorites = async () => {
     await clearAllFavorites();
     setFavoriteItems([]);
+    setSkeletonCount(0);
+    writeFavoriteItemsCount(0);
   };
 
   return {
     favoriteItems,
     loading,
+    skeletonCount,
     clearFavorites,
   };
 }

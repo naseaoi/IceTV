@@ -52,6 +52,10 @@ import {
   normalizeCustomProxyUrl,
   testCustomProxy,
 } from '@/lib/custom-proxy-test';
+import {
+  clearDoubanImageProxyTypeCookie,
+  writeDoubanImageProxyTypeCookie,
+} from '@/lib/douban-image-url';
 
 import { useBodyScrollLock } from './useBodyScrollLock';
 
@@ -287,6 +291,7 @@ export function SettingsPanel({ onClose }: SettingsPanelProps) {
       }
     }
     localStorage.setItem(DOUBAN_IMAGE_PROXY_TYPE_STORAGE_KEY, value);
+    writeDoubanImageProxyTypeCookie(value);
     showProxyToast();
   };
 
@@ -296,11 +301,13 @@ export function SettingsPanel({ onClose }: SettingsPanelProps) {
       localStorage.setItem(DOUBAN_IMAGE_PROXY_URL_STORAGE_KEY, value);
       if (doubanImageProxyType === 'custom') {
         localStorage.setItem(DOUBAN_IMAGE_PROXY_TYPE_STORAGE_KEY, 'custom');
+        clearDoubanImageProxyTypeCookie();
       }
     } else {
       localStorage.removeItem(DOUBAN_IMAGE_PROXY_URL_STORAGE_KEY);
       if (doubanImageProxyType === 'custom') {
         localStorage.removeItem(DOUBAN_IMAGE_PROXY_TYPE_STORAGE_KEY);
+        clearDoubanImageProxyTypeCookie();
       }
     }
     setCustomProxyErrors((prev) => ({
@@ -374,6 +381,7 @@ export function SettingsPanel({ onClose }: SettingsPanelProps) {
     localStorage.removeItem(BANGUMI_PROXY_URL_STORAGE_KEY);
     localStorage.removeItem(DOUBAN_IMAGE_PROXY_TYPE_STORAGE_KEY);
     localStorage.removeItem(DOUBAN_IMAGE_PROXY_URL_STORAGE_KEY);
+    clearDoubanImageProxyTypeCookie();
     setCustomProxyErrors({});
   };
 
@@ -473,6 +481,8 @@ export function SettingsPanel({ onClose }: SettingsPanelProps) {
                 </div>
                 <div className='flex items-center gap-2'>
                   <input
+                    id='local-douban-proxy-url'
+                    name='localDoubanProxyUrl'
                     type='text'
                     className='min-w-0 flex-1 rounded-lg border border-gray-300 bg-white px-3 py-2.5 text-sm text-gray-900 placeholder-gray-500 shadow-sm transition-all duration-200 hover:border-gray-400 focus:border-green-500 focus:outline-none focus:ring-2 focus:ring-green-500 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100 dark:placeholder-gray-400 dark:hover:border-gray-500'
                     placeholder='例如: https://proxy.example.com/fetch?url='
@@ -537,6 +547,8 @@ export function SettingsPanel({ onClose }: SettingsPanelProps) {
                 </div>
                 <div className='flex items-center gap-2'>
                   <input
+                    id='local-douban-image-proxy-url'
+                    name='localDoubanImageProxyUrl'
                     type='text'
                     className='min-w-0 flex-1 rounded-lg border border-gray-300 bg-white px-3 py-2.5 text-sm text-gray-900 placeholder-gray-500 shadow-sm transition-all duration-200 hover:border-gray-400 focus:border-green-500 focus:outline-none focus:ring-2 focus:ring-green-500 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100 dark:placeholder-gray-400 dark:hover:border-gray-500'
                     placeholder='例如: https://proxy.example.com/fetch?url='
@@ -602,6 +614,8 @@ export function SettingsPanel({ onClose }: SettingsPanelProps) {
                 </div>
                 <div className='flex items-center gap-2'>
                   <input
+                    id='local-bangumi-proxy-url'
+                    name='localBangumiProxyUrl'
                     type='text'
                     className='min-w-0 flex-1 rounded-lg border border-gray-300 bg-white px-3 py-2.5 text-sm text-gray-900 placeholder-gray-500 shadow-sm transition-all duration-200 hover:border-gray-400 focus:border-green-500 focus:outline-none focus:ring-2 focus:ring-green-500 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100 dark:placeholder-gray-400 dark:hover:border-gray-500'
                     placeholder='例如: https://proxy.example.com/fetch?url='
@@ -636,6 +650,8 @@ export function SettingsPanel({ onClose }: SettingsPanelProps) {
                 <label className='flex cursor-pointer items-center'>
                   <div className='relative'>
                     <input
+                      id={`local-${definition.id}`}
+                      name={definition.id}
                       type='checkbox'
                       className='peer sr-only'
                       checked={localPreferenceToggles[definition.id]}
