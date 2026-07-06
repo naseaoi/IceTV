@@ -1,8 +1,10 @@
-/**
- * 豆瓣代理选项定义 — UserMenu（本地设置）和 SiteConfigTab（管理后台）共用。
- */
+import {
+  type DoubanImageProxyType,
+  type DoubanProxyType,
+  DEFAULT_DOUBAN_IMAGE_PROXY_TYPE,
+  DEFAULT_DOUBAN_PROXY_TYPE,
+} from '@/lib/douban-source';
 
-/** 豆瓣数据代理选项 */
 export const doubanDataSourceOptions: { value: string; label: string }[] = [
   { value: 'direct', label: '直连（浏览器请求）' },
   { value: 'server', label: '代理（服务器请求）' },
@@ -15,11 +17,13 @@ export const doubanDataSourceOptions: { value: string; label: string }[] = [
   { value: 'custom', label: '自定义代理' },
 ];
 
-/** 豆瓣图片代理选项 */
+export const siteDoubanDataSourceOptions = doubanDataSourceOptions.filter(
+  (option) => option.value !== 'custom',
+);
+
 export const doubanImageProxyTypeOptions: { value: string; label: string }[] = [
   { value: 'direct', label: '直连（浏览器请求）' },
   { value: 'server', label: '代理（服务器请求）' },
-  { value: 'img3', label: '豆瓣官方精品 CDN（阿里云）' },
   {
     value: 'cmliussss-cdn-tencent',
     label: '豆瓣 CDN By CMLiussss（腾讯云）',
@@ -28,7 +32,25 @@ export const doubanImageProxyTypeOptions: { value: string; label: string }[] = [
   { value: 'custom', label: '自定义代理' },
 ];
 
-/** 根据代理类型返回感谢信息，无需感谢时返回 null */
+export const siteDoubanImageProxyTypeOptions =
+  doubanImageProxyTypeOptions.filter((option) => option.value !== 'custom');
+
+export function normalizeSiteDoubanProxyType(value: unknown): DoubanProxyType {
+  return siteDoubanDataSourceOptions.some((option) => option.value === value)
+    ? (value as DoubanProxyType)
+    : DEFAULT_DOUBAN_PROXY_TYPE;
+}
+
+export function normalizeSiteDoubanImageProxyType(
+  value: unknown,
+): DoubanImageProxyType {
+  return siteDoubanImageProxyTypeOptions.some(
+    (option) => option.value === value,
+  )
+    ? (value as DoubanImageProxyType)
+    : DEFAULT_DOUBAN_IMAGE_PROXY_TYPE;
+}
+
 export function getThanksInfo(
   dataSource: string,
 ): { text: string; url: string } | null {

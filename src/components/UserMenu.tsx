@@ -21,18 +21,18 @@ import {
 } from 'react';
 import { createPortal } from 'react-dom';
 
-import {
-  SIDEBAR_BUTTON_STATE_CLASS,
-  SIDEBAR_ITEM_ICON_CLASS,
-  SIDEBAR_ITEM_ICON_WRAP_CLASS,
-  SIDEBAR_ITEM_LAYOUT_CLASS,
-  getSidebarItemLabelClass,
-} from './SidebarItem';
-
 import { getAuthInfoFromBrowserCookie } from '@/lib/auth.client';
 import { getClientAuthRuntimeConfig } from '@/lib/runtime-config';
 import { CURRENT_VERSION } from '@/lib/version';
 import { checkForUpdates, UpdateStatus } from '@/lib/version-check';
+
+import {
+  getSidebarItemLabelClass,
+  SIDEBAR_BUTTON_STATE_CLASS,
+  SIDEBAR_ITEM_ICON_CLASS,
+  SIDEBAR_ITEM_ICON_WRAP_CLASS,
+  SIDEBAR_ITEM_LAYOUT_CLASS,
+} from './SidebarItem';
 
 interface AuthInfo {
   username?: string;
@@ -384,7 +384,7 @@ export const UserMenu: React.FC<UserMenuProps> = ({
             ref={buttonRef}
             onClick={handleMenuClick}
             className={`${SIDEBAR_ITEM_LAYOUT_CLASS} w-full ${SIDEBAR_BUTTON_STATE_CLASS}`}
-            aria-label='User Menu'
+            aria-label='用户'
             title='用户'
           >
             <div className={`relative ${SIDEBAR_ITEM_ICON_WRAP_CLASS}`}>
@@ -402,7 +402,7 @@ export const UserMenu: React.FC<UserMenuProps> = ({
             ref={buttonRef}
             onClick={handleMenuClick}
             className='flex h-10 w-10 items-center justify-center rounded-full p-2 text-gray-600 transition-colors hover:bg-gray-200/50 dark:text-gray-300 dark:hover:bg-gray-700/50'
-            aria-label='User Menu'
+            aria-label='用户菜单'
           >
             <User className='h-full w-full' />
           </button>

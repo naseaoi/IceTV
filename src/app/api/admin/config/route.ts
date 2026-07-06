@@ -1,8 +1,8 @@
 ﻿import { NextRequest, NextResponse } from 'next/server';
 
-import { AdminConfigResult } from '@/types/admin';
 import { isGuardFailure, requireAdmin } from '@/lib/api-auth';
 import { getConfig } from '@/lib/config';
+import { AdminConfigResult } from '@/types/admin';
 
 export const runtime = 'nodejs';
 

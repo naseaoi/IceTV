@@ -1,5 +1,9 @@
 ﻿import { NextRequest, NextResponse } from 'next/server';
 
+import {
+  deleteCachedLiveChannels,
+  refreshLiveChannels,
+} from '@/features/live/lib/live';
 import { isGuardFailure, requireAdmin } from '@/lib/api-auth';
 import { configConflictResponse } from '@/lib/api-config-error';
 import { getConfig, saveConfig } from '@/lib/config';
@@ -7,10 +11,7 @@ import {
   buildConfigFileFromAdminConfig,
   removeConfigFileEntries,
 } from '@/lib/config-file-json';
-import {
-  deleteCachedLiveChannels,
-  refreshLiveChannels,
-} from '@/features/live/lib/live';
+import { validateProxyUrlForRequest } from '@/lib/url-guard';
 
 export const runtime = 'nodejs';
 
@@ -26,11 +27,30 @@ type EditableLiveInfo = {
 };
 
 async function refreshOrRejectLiveSource(liveInfo: EditableLiveInfo) {
+  await validateLiveSourceUrls(liveInfo);
+
   const channelNumber = await refreshLiveChannels(liveInfo);
   if (channelNumber <= 0) {
     throw new Error('未获取到频道列表，请检查直播源地址');
   }
   return channelNumber;
+}
+
+async function validateLiveSourceUrls(liveInfo: EditableLiveInfo) {
+  const sourceValidation = await validateProxyUrlForRequest(liveInfo.url);
+  if (!sourceValidation.ok) {
+    throw new Error('直播源地址无效');
+  }
+
+  const epgUrl = liveInfo.epg.trim();
+  if (!epgUrl) {
+    return;
+  }
+
+  const epgValidation = await validateProxyUrlForRequest(epgUrl);
+  if (!epgValidation.ok) {
+    throw new Error('节目单地址无效');
+  }
 }
 
 export async function POST(request: NextRequest) {

@@ -1,5 +1,5 @@
-import type { ApiSite } from '@/lib/config';
 import { runWithConcurrency, withAbortableTimeout } from '@/lib/concurrency';
+import type { ApiSite } from '@/lib/config';
 import { searchFromApi } from '@/lib/downstream';
 import type { SearchResult } from '@/lib/types';
 import { yellowWords } from '@/lib/yellow';
@@ -11,6 +11,7 @@ export interface SearchAggregationOptions {
   disableYellowFilter: boolean;
   sourceConcurrency: number;
   signal?: AbortSignal;
+  sourceFailureCooldownMs?: number;
   shouldContinue?: () => boolean;
   onSourceResult?: (site: ApiSite, results: SearchResult[]) => void;
   onSourceError?: (site: ApiSite, error: unknown) => void;
@@ -31,12 +32,13 @@ export async function runSearchAggregation({
   disableYellowFilter,
   sourceConcurrency,
   signal,
+  sourceFailureCooldownMs,
   shouldContinue,
   onSourceResult,
   onSourceError,
 }: SearchAggregationOptions): Promise<SearchResult[]> {
   const searchTasks = apiSites.map((site) => async () => {
-    const cooldown = getSourceFailureCooldown(site);
+    const cooldown = getSourceFailureCooldown(site, sourceFailureCooldownMs);
     if (cooldown) {
       onSourceError?.(site, cooldown.error);
       return [];
@@ -67,7 +69,7 @@ export async function runSearchAggregation({
         error instanceof Error ? error.message : error,
       );
       if (!signal?.aborted) {
-        markSourceFailureCooldown(site, error);
+        markSourceFailureCooldown(site, error, sourceFailureCooldownMs);
       }
       onSourceError?.(site, error);
       return [];
@@ -89,7 +91,12 @@ export function clearSearchSourceFailureCooldownsForTests(): void {
   sourceFailureCooldowns.clear();
 }
 
-function getSourceFailureCooldown(site: ApiSite): SourceFailureCooldown | null {
+function getSourceFailureCooldown(
+  site: ApiSite,
+  sourceFailureCooldownMs?: number,
+): SourceFailureCooldown | null {
+  const cooldownMs = getSourceFailureCooldownMs(sourceFailureCooldownMs);
+  if (cooldownMs <= 0) return null;
   const key = getSourceFailureKey(site);
   const record = sourceFailureCooldowns.get(key);
   if (!record) return null;
@@ -98,8 +105,12 @@ function getSourceFailureCooldown(site: ApiSite): SourceFailureCooldown | null {
   return null;
 }
 
-function markSourceFailureCooldown(site: ApiSite, error: unknown): void {
-  const cooldownMs = getSourceFailureCooldownMs();
+function markSourceFailureCooldown(
+  site: ApiSite,
+  error: unknown,
+  sourceFailureCooldownMs?: number,
+): void {
+  const cooldownMs = getSourceFailureCooldownMs(sourceFailureCooldownMs);
   if (cooldownMs <= 0) return;
 
   sourceFailureCooldowns.set(getSourceFailureKey(site), {
@@ -119,7 +130,14 @@ function getSourceFailureKey(site: ApiSite): string {
   return site.key || site.api || site.name;
 }
 
-function getSourceFailureCooldownMs(): number {
+function getSourceFailureCooldownMs(sourceFailureCooldownMs?: number): number {
+  if (
+    sourceFailureCooldownMs !== undefined &&
+    Number.isFinite(sourceFailureCooldownMs)
+  ) {
+    return Math.max(0, Math.floor(sourceFailureCooldownMs));
+  }
+
   const configured = Number.parseInt(
     process.env.SEARCH_SOURCE_FAILURE_COOLDOWN_MS || '',
     10,

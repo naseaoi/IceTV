@@ -1,11 +1,4 @@
 import {
-  AUTO_SWITCH_SOURCE_ON_TIMEOUT_STORAGE_KEY,
-  readBooleanLocalSetting,
-  readDefaultAutoSwitchSourceOnTimeout,
-  removeBooleanLocalSetting,
-  writeBooleanLocalSetting,
-} from '@/lib/local-settings';
-import {
   readAggregateSearch,
   readDefaultAggregateSearch,
   readDefaultEnableOptimization,
@@ -23,6 +16,13 @@ import {
   writeFluidSearch,
   writeLiveDirectConnect,
 } from '@/lib/local-preferences';
+import {
+  AUTO_SWITCH_SOURCE_ON_TIMEOUT_STORAGE_KEY,
+  readBooleanLocalSetting,
+  readDefaultAutoSwitchSourceOnTimeout,
+  removeBooleanLocalSetting,
+  writeBooleanLocalSetting,
+} from '@/lib/local-settings';
 
 export type LocalPreferenceToggleId =
   | 'defaultAggregateSearch'

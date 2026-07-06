@@ -1,5 +1,5 @@
-import { processImageUrl } from '../utils';
 import { DOUBAN_IMAGE_PROXY_TYPE_STORAGE_KEY } from '../douban-source';
+import { processImageUrl } from '../utils';
 
 describe('processImageUrl', () => {
   beforeEach(() => {
@@ -19,11 +19,14 @@ describe('processImageUrl', () => {
     );
   });
 
-  it('uses the shared douban image proxy helper for img3', () => {
-    localStorage.setItem(DOUBAN_IMAGE_PROXY_TYPE_STORAGE_KEY, 'img3');
+  it('uses the shared douban image proxy helper for supported cdn values', () => {
+    localStorage.setItem(
+      DOUBAN_IMAGE_PROXY_TYPE_STORAGE_KEY,
+      'cmliussss-cdn-tencent',
+    );
 
     expect(processImageUrl('https://img1.doubanio.com/view/photo/s.jpg')).toBe(
-      'https://img3.doubanio.com/view/photo/s.jpg',
+      'https://img.doubanio.cmliussss.net/view/photo/s.jpg',
     );
   });
 

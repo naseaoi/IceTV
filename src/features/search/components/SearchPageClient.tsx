@@ -4,24 +4,22 @@ import { ChevronUp, Search, X } from 'lucide-react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import React, { useEffect, useMemo, useState } from 'react';
 
-import { getSearchHistory, subscribeToDataUpdates } from '@/lib/db.client';
-import { readAggregateSearch } from '@/lib/local-preferences';
-
 import PageLayout from '@/components/PageLayout';
 import SearchResultFilter from '@/components/SearchResultFilter';
 import SearchSuggestions from '@/components/SearchSuggestions';
 import VideoCard from '@/components/VideoCard';
-
-import {
-  useSearchExecution,
-  clearSearchSnapshotCache,
-} from '@/features/search/hooks/useSearchExecution';
-import {
-  useSearchAggregation,
-  FilterState,
-} from '@/features/search/hooks/useSearchAggregation';
 import SearchHistory from '@/features/search/components/SearchHistory';
 import { VirtualizedSearchGrid } from '@/features/search/components/VirtualizedSearchGrid';
+import {
+  FilterState,
+  useSearchAggregation,
+} from '@/features/search/hooks/useSearchAggregation';
+import {
+  clearSearchSnapshotCache,
+  useSearchExecution,
+} from '@/features/search/hooks/useSearchExecution';
+import { getSearchHistory, subscribeToDataUpdates } from '@/lib/db.client';
+import { readAggregateSearch } from '@/lib/local-preferences';
 
 const SEARCH_VIEW_MODE_STORAGE_KEY = 'searchViewModeByQuery';
 const AGGREGATED_SEARCH_GRID_LAYOUT = {
@@ -139,7 +137,7 @@ export default function SearchPageClient() {
 
   // 初始化：搜索历史、滚动监听、流式搜索设置
   useEffect(() => {
-    !searchParams.get('q') && document.getElementById('searchInput')?.focus();
+    !urlQuery && document.getElementById('searchInput')?.focus();
 
     getSearchHistory().then(setSearchHistory);
 
@@ -180,9 +178,9 @@ export default function SearchPageClient() {
         window.cancelAnimationFrame(frameId);
       }
     };
-  }, []);
+  }, [urlQuery]);
 
-  // searchParams 变化时同步 searchQuery 和 suggestions
+  // 同步搜索参数
   useEffect(() => {
     if (urlQuery) {
       setSearchQuery(urlQuery);
@@ -192,7 +190,7 @@ export default function SearchPageClient() {
     }
   }, [urlQuery]);
 
-  // 按关键词恢复聚合开关状态（用于返回搜索页时保持原视图）
+  // 恢复视图模式
   useEffect(() => {
     const trimmed = urlQuery.trim();
     if (!trimmed) {
@@ -200,12 +198,14 @@ export default function SearchPageClient() {
     }
 
     const cachedMode = getSearchViewModeByQuery(trimmed);
-    if (cachedMode && cachedMode !== viewMode) {
-      setViewMode(cachedMode);
+    if (cachedMode) {
+      setViewMode((currentMode) =>
+        cachedMode !== currentMode ? cachedMode : currentMode,
+      );
     }
   }, [urlQuery]);
 
-  // 按关键词保存当前聚合开关状态
+  // 保存视图模式
   useEffect(() => {
     const trimmed = urlQuery.trim();
     if (!trimmed) {

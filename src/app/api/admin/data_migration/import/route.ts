@@ -3,10 +3,10 @@ import { promisify } from 'util';
 import { gunzip } from 'zlib';
 
 import { isGuardFailure, requireOwner } from '@/lib/api-auth';
+import { setCachedConfig } from '@/lib/config';
 import { SimpleCrypto } from '@/lib/crypto';
 import { ImportValidationError, parseImportData } from '@/lib/data-import';
 import { db } from '@/lib/db';
-import { setCachedConfig } from '@/lib/config';
 
 export const runtime = 'nodejs';
 
@@ -49,7 +49,7 @@ export async function POST(req: NextRequest) {
     let decryptedData: string;
     try {
       decryptedData = SimpleCrypto.decrypt(encryptedData, password);
-    } catch (error) {
+    } catch {
       return NextResponse.json(
         { error: '解密失败，请检查密码是否正确' },
         { status: 400 },
@@ -94,7 +94,7 @@ export async function POST(req: NextRequest) {
     let importData: any;
     try {
       importData = JSON.parse(decompressedData);
-    } catch (error) {
+    } catch {
       return NextResponse.json({ error: '备份文件格式错误' }, { status: 400 });
     }
 

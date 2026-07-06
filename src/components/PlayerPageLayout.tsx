@@ -1,8 +1,7 @@
 'use client';
 
-import { ReactNode, RefObject, useEffect, useRef, useState } from 'react';
-
 import { LucideIcon } from 'lucide-react';
+import { ReactNode, RefObject } from 'react';
 
 import { BackButton } from '@/components/BackButton';
 import PageLayout from '@/components/PageLayout';
@@ -11,8 +10,6 @@ export interface PlayerPageAccent {
   icon: string;
   glow: string;
   sub: string;
-  aurora: [string, string];
-  auroraLight: [string, string];
 }
 
 interface PlayerPageLayoutProps {
@@ -21,7 +18,6 @@ interface PlayerPageLayoutProps {
   titleFallback: string;
   titleIcon: LucideIcon;
   accent: PlayerPageAccent;
-  isPlaying: boolean;
   isPanelCollapsed: boolean;
   onTogglePanel: () => void;
   panelToggleTitle: string;
@@ -43,11 +39,11 @@ const TogglePanelButton = ({
 }) => (
   <button
     onClick={onClick}
-    className='flex items-center gap-1.5 rounded-full p-2 text-gray-600 transition-colors hover:bg-gray-200/50 dark:text-gray-300 dark:hover:bg-gray-700/50'
+    className='flex items-center gap-2 rounded-full p-2.5 text-gray-600 transition-colors hover:bg-gray-200/50 dark:text-gray-300 dark:hover:bg-gray-700/50'
     title={title}
   >
     <svg
-      className={`h-4 w-4 transition-transform duration-200 ${
+      className={`h-5 w-5 transition-transform duration-200 ${
         collapsed ? 'rotate-180' : 'rotate-0'
       }`}
       fill='none'
@@ -61,8 +57,29 @@ const TogglePanelButton = ({
         d='M9 5l7 7-7 7'
       />
     </svg>
-    <span className='text-xs font-medium'>{collapsed ? '显示' : '隐藏'}</span>
+    <span className='text-sm font-medium'>{collapsed ? '显示' : '隐藏'}</span>
   </button>
+);
+
+const TitleIconBadge = ({
+  icon: Icon,
+  accent,
+  size = 'md',
+}: {
+  icon: LucideIcon;
+  accent: PlayerPageAccent;
+  size?: 'md' | 'lg';
+}) => (
+  <span className='relative flex-shrink-0'>
+    <Icon
+      className={`${size === 'lg' ? 'h-8 w-8' : 'h-6 w-6'} ${accent.icon}`}
+    />
+    <span
+      className={`absolute ${
+        size === 'lg' ? '-inset-2' : '-inset-1.5'
+      } rounded-full ${accent.glow} blur-sm`}
+    />
+  </span>
 );
 
 export function PlayerPageLayout({
@@ -71,7 +88,6 @@ export function PlayerPageLayout({
   titleFallback,
   titleIcon: TitleIcon,
   accent,
-  isPlaying,
   isPanelCollapsed,
   onTogglePanel,
   panelToggleTitle,
@@ -81,179 +97,84 @@ export function PlayerPageLayout({
   playerOverlay,
   rightPanel,
 }: PlayerPageLayoutProps) {
-  const playerWrapRef = useRef<HTMLDivElement>(null);
-  const [playerHeight, setPlayerHeight] = useState<number | null>(null);
-  const expandedHeightRef = useRef<number | null>(null);
-  const [isDesktop, setIsDesktop] = useState(false);
-
-  useEffect(() => {
-    const el = playerWrapRef.current;
-    if (!el) return;
-    const ro = new ResizeObserver(([entry]) => {
-      const h = entry.contentRect.height;
-      if (h > 0) {
-        setPlayerHeight(h);
-        if (!isPanelCollapsed) {
-          expandedHeightRef.current = h;
-        }
-      }
-    });
-    ro.observe(el);
-    return () => ro.disconnect();
-  }, [isPanelCollapsed]);
-
-  useEffect(() => {
-    const mq = window.matchMedia('(min-width: 768px)');
-    setIsDesktop(mq.matches);
-    const handler = (event: MediaQueryListEvent) => setIsDesktop(event.matches);
-    mq.addEventListener('change', handler);
-    return () => mq.removeEventListener('change', handler);
-  }, []);
-
   return (
     <PageLayout
       activePath={activePath}
       contentMode='player'
       showDesktopBack={false}
     >
-      <div className='relative flex h-full min-h-0 flex-col gap-3 overflow-hidden px-4 py-2 sm:px-6 md:overflow-visible lg:px-[3rem] 2xl:px-20'>
-        <div className='pointer-events-none absolute -inset-x-16 top-0 h-80 overflow-hidden'>
-          <div
-            className='absolute inset-0 dark:hidden'
-            style={{
-              background: [
-                `radial-gradient(ellipse 90% 60% at 30% 0%, rgba(${accent.aurora[0]},0.10) 0%, transparent 70%)`,
-                `radial-gradient(ellipse 60% 50% at 70% 5%, rgba(${accent.aurora[1]},0.08) 0%, transparent 70%)`,
-                `radial-gradient(ellipse 50% 45% at 45% 20%, rgba(${accent.aurora[0]},0.06) 0%, transparent 65%)`,
-              ].join(', '),
-              animation: 'aurora-breathe 8s ease-in-out infinite',
-              animationPlayState: isPlaying ? 'running' : 'paused',
-              transformOrigin: 'top center',
-              mask: 'linear-gradient(to right, transparent, black 4rem, black calc(100% - 4rem), transparent)',
-              WebkitMask:
-                'linear-gradient(to right, transparent, black 4rem, black calc(100% - 4rem), transparent)',
-            }}
-          />
-          <div
-            className='absolute inset-0 hidden dark:block'
-            style={{
-              background: [
-                `radial-gradient(ellipse 90% 60% at 30% 0%, rgba(${accent.auroraLight[0]},0.16) 0%, transparent 70%)`,
-                `radial-gradient(ellipse 60% 50% at 70% 5%, rgba(${accent.auroraLight[1]},0.12) 0%, transparent 70%)`,
-                `radial-gradient(ellipse 50% 45% at 45% 20%, rgba(${accent.auroraLight[0]},0.09) 0%, transparent 65%)`,
-              ].join(', '),
-              animation: 'aurora-breathe 8s ease-in-out infinite',
-              animationPlayState: isPlaying ? 'running' : 'paused',
-              transformOrigin: 'top center',
-              mask: 'linear-gradient(to right, transparent, black 4rem, black calc(100% - 4rem), transparent)',
-              WebkitMask:
-                'linear-gradient(to right, transparent, black 4rem, black calc(100% - 4rem), transparent)',
-            }}
-          />
-        </div>
-
-        <div className='h-1 flex-shrink-0 sm:h-4' />
-
-        <div className='relative flex-shrink-0 pb-3'>
-          <div className='flex justify-center'>
-            <h1 className='flex min-w-0 items-center gap-2.5 text-xl font-bold text-gray-900 dark:text-gray-100 sm:text-2xl'>
-              <span className='relative flex-shrink-0'>
-                <TitleIcon className={`h-6 w-6 ${accent.icon}`} />
+      <div className='relative flex h-full min-h-0 flex-col overflow-hidden px-4 py-2 sm:px-6'>
+        {/* 移动端头部：居中标题 + 标签 */}
+        <div className='relative flex-shrink-0 pb-3 pt-1 md:hidden'>
+          <h1 className='flex min-w-0 items-center justify-center gap-2.5 text-xl font-bold text-gray-900 dark:text-gray-100'>
+            <TitleIconBadge icon={TitleIcon} accent={accent} />
+            <span className='max-w-[60vw] truncate'>
+              {title || titleFallback}
+            </span>
+            {titleSuffix && (
+              <>
+                <span className='h-4 w-px flex-shrink-0 bg-gray-300 dark:bg-gray-600' />
                 <span
-                  className={`absolute -inset-1.5 rounded-full ${accent.glow} blur-sm`}
-                />
+                  className={`text-sm font-semibold ${accent.sub} flex-shrink-0 whitespace-nowrap`}
+                >
+                  {titleSuffix}
+                </span>
+              </>
+            )}
+          </h1>
+          {tags.length > 0 && (
+            <div className='mt-2 flex flex-wrap items-center justify-center gap-2 text-[11px] font-medium'>
+              {tags.map((tag, index) => (
+                <span key={index}>{tag}</span>
+              ))}
+            </div>
+          )}
+        </div>
+
+        {/* 桌面端单行顶栏 */}
+        <div className='relative hidden h-[5.5rem] flex-shrink-0 items-center gap-4 md:flex'>
+          <BackButton variant='icon' />
+          <TitleIconBadge icon={TitleIcon} accent={accent} size='lg' />
+          <h1 className='min-w-0 truncate text-2xl font-bold text-gray-900 dark:text-gray-100'>
+            {title || titleFallback}
+          </h1>
+          {titleSuffix && (
+            <>
+              <span className='h-5 w-px flex-shrink-0 bg-gray-300 dark:bg-gray-600' />
+              <span
+                className={`text-lg font-semibold ${accent.sub} flex-shrink-0 whitespace-nowrap`}
+              >
+                {titleSuffix}
               </span>
-              <span className='max-w-[60vw] truncate sm:max-w-[50vw]'>
-                {title || titleFallback}
-              </span>
-              {titleSuffix && (
-                <>
-                  <span className='h-4 w-px flex-shrink-0 bg-gray-300 dark:bg-gray-600' />
-                  <span
-                    className={`text-sm font-semibold ${accent.sub} flex-shrink-0 whitespace-nowrap`}
-                  >
-                    {titleSuffix}
-                  </span>
-                </>
-              )}
-            </h1>
-          </div>
-
-          <div className='relative mt-2 flex min-h-[1.75rem] items-center justify-center md:justify-between'>
-            <div className='hidden flex-shrink-0 md:block'>
-              <BackButton />
-            </div>
-
-            <div className='flex items-center justify-center md:pointer-events-none md:absolute md:inset-0'>
-              <div className='flex flex-wrap items-center justify-center gap-2 text-[11px] font-medium'>
-                {tags.map((tag, index) => (
-                  <span key={index}>{tag}</span>
-                ))}
-              </div>
-            </div>
-
-            <div className='hidden flex-shrink-0 lg:block'>
-              <TogglePanelButton
-                collapsed={isPanelCollapsed}
-                onClick={onTogglePanel}
-                title={panelToggleTitle}
-              />
-            </div>
+            </>
+          )}
+          <div className='ml-auto hidden flex-shrink-0 lg:block'>
+            <TogglePanelButton
+              collapsed={isPanelCollapsed}
+              onClick={onTogglePanel}
+              title={panelToggleTitle}
+            />
           </div>
         </div>
 
-        <div className='h-px flex-shrink-0 bg-gradient-to-r from-transparent via-gray-200/80 to-transparent dark:via-white/[0.10]' />
-
-        <div
-          className={`grid min-h-0 flex-1 ${
-            isPanelCollapsed
-              ? 'grid-cols-1'
-              : 'grid-cols-1 grid-rows-[auto_minmax(0,1fr)] gap-3 md:grid-cols-4 md:grid-rows-1'
-          }`}
-        >
-          <div
-            className={`overflow-hidden rounded-xl ${
-              isPanelCollapsed ? 'col-span-1' : 'md:col-span-3'
-            }`}
-          >
-            <div
-              ref={playerWrapRef}
-              className={`relative max-h-[38dvh] w-full md:max-h-[80vh] ${
-                isPanelCollapsed ? '' : 'aspect-video'
-              }`}
-              style={
-                isPanelCollapsed && expandedHeightRef.current
-                  ? { height: `${expandedHeightRef.current}px` }
-                  : undefined
-              }
-            >
-              <div className='absolute inset-0'>
-                <div
-                  ref={artRef}
-                  className='h-full w-full overflow-hidden rounded-xl bg-black shadow-lg ring-1 ring-black/10 dark:ring-white/10'
-                />
-                {playerOverlay}
-              </div>
+        {/* 内容区：移动端上下排列，桌面端播放器吃满剩余宽高 + 固定宽右面板 */}
+        <div className='flex min-h-0 flex-1 flex-col md:flex-row'>
+          <div className='relative aspect-video max-h-[38dvh] w-full flex-shrink-0 md:aspect-auto md:h-full md:max-h-none md:min-w-0 md:flex-1'>
+            <div className='absolute inset-0'>
+              <div
+                ref={artRef}
+                className='h-full w-full overflow-hidden rounded-xl bg-black shadow-lg ring-1 ring-black/10 dark:ring-white/10'
+              />
+              {playerOverlay}
             </div>
           </div>
 
           <div
-            className={`min-h-0 overflow-hidden ${
+            className={`min-h-0 overflow-hidden transition-[max-width,margin,opacity] duration-300 ease-[cubic-bezier(0.25,0.1,0.25,1)] md:mt-0 md:h-full md:w-[21rem] md:flex-none xl:w-[24rem] ${
               isPanelCollapsed
-                ? 'h-0 md:col-span-1 lg:pointer-events-none lg:max-w-0 lg:opacity-0'
-                : 'md:col-span-1 lg:max-w-[100%] lg:opacity-100'
+                ? 'hidden md:pointer-events-none md:ml-0 md:block md:max-w-0 md:opacity-0'
+                : 'mt-3 flex-1 md:ml-3 md:max-w-[24rem] md:opacity-100'
             }`}
-            style={
-              isPanelCollapsed
-                ? undefined
-                : playerHeight
-                  ? isDesktop
-                    ? { height: `${playerHeight}px` }
-                    : { height: '100%' }
-                  : isDesktop
-                    ? { height: '300px' }
-                    : { height: '100%' }
-            }
           >
             {rightPanel}
           </div>

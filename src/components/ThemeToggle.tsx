@@ -6,11 +6,11 @@ import { useTheme } from 'next-themes';
 import { useEffect, useRef, useState } from 'react';
 
 import {
+  getSidebarItemLabelClass,
   SIDEBAR_BUTTON_STATE_CLASS,
   SIDEBAR_ITEM_ICON_CLASS,
   SIDEBAR_ITEM_ICON_WRAP_CLASS,
   SIDEBAR_ITEM_LAYOUT_CLASS,
-  getSidebarItemLabelClass,
 } from './SidebarItem';
 
 interface ThemeToggleProps {
@@ -129,7 +129,7 @@ export function ThemeToggle({
         ref={buttonRef}
         onClick={toggleTheme}
         className={`${SIDEBAR_ITEM_LAYOUT_CLASS} w-full ${SIDEBAR_BUTTON_STATE_CLASS}`}
-        aria-label='Toggle theme'
+        aria-label='主题'
         title='主题'
       >
         <div className={SIDEBAR_ITEM_ICON_WRAP_CLASS}>
@@ -149,7 +149,7 @@ export function ThemeToggle({
       ref={buttonRef}
       onClick={toggleTheme}
       className='flex h-10 w-10 items-center justify-center rounded-full p-2 text-gray-600 transition-colors hover:bg-gray-200/50 dark:text-gray-300 dark:hover:bg-gray-700/50'
-      aria-label='Toggle theme'
+      aria-label='切换主题'
     >
       {resolvedTheme === 'dark' ? (
         <Sun className='h-full w-full' />

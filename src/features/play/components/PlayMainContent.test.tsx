@@ -1,7 +1,10 @@
+import { act, fireEvent, render, screen } from '@testing-library/react';
 import type { ReactNode, RefObject } from 'react';
-import { act, render, screen } from '@testing-library/react';
 
-import { PlayMainContent } from '@/features/play/components/PlayMainContent';
+import {
+  buildLoadingTimeoutMessage,
+  PlayMainContent,
+} from '@/features/play/components/PlayMainContent';
 import type { SearchResult } from '@/lib/types';
 
 const PLAYER_LOADING_TIMEOUT_MS = 15_000;
@@ -77,6 +80,12 @@ describe('PlayMainContent', () => {
     global.ResizeObserver = originalResizeObserver;
   });
 
+  it('uses the configured timeout seconds in loading timeout copy', () => {
+    expect(buildLoadingTimeoutMessage(20)).toBe(
+      '已等待超过 20 秒，源站响应超时',
+    );
+  });
+
   it('在新的换源轮次开始后重置超时提示', () => {
     const baseProps = {
       videoTitle: '测试视频',
@@ -87,7 +96,6 @@ describe('PlayMainContent', () => {
       setIsEpisodeSelectorCollapsed: jest.fn(),
       artRef: { current: null } as RefObject<HTMLDivElement | null>,
       isVideoLoading: true,
-      isPlaying: false,
       videoLoadingStage: 'sourceChanging' as const,
       videoLoadingAttempt: 0,
       realtimeLoadSpeed: '测速中...',
@@ -96,6 +104,7 @@ describe('PlayMainContent', () => {
       onReloginAndRecover: jest.fn(),
       onDismissAuthRecovery: jest.fn(),
       onEpisodeChange: jest.fn(),
+      onRetryPlayback: jest.fn(),
       onSourceChange: jest.fn(),
       currentSource: 'source-a',
       currentId: 'source-a-id',
@@ -138,5 +147,51 @@ describe('PlayMainContent', () => {
 
     expect(screen.queryByText('切换播放源超时')).not.toBeInTheDocument();
     expect(screen.getByText('正在切换源站')).toBeInTheDocument();
+  });
+
+  it('在播放器失败层支持继续尝试', () => {
+    const onRetryPlayback = jest.fn();
+
+    render(
+      <PlayMainContent
+        videoTitle='测试视频'
+        totalEpisodes={1}
+        detail={detail}
+        currentEpisodeIndex={0}
+        isEpisodeSelectorCollapsed={false}
+        setIsEpisodeSelectorCollapsed={jest.fn()}
+        artRef={{ current: null } as RefObject<HTMLDivElement | null>}
+        isVideoLoading={false}
+        videoLoadingStage='episodeChanging'
+        videoLoadingAttempt={1}
+        realtimeLoadSpeed=''
+        authRecoveryVisible={false}
+        authRecoveryReasonMessage=''
+        onReloginAndRecover={jest.fn()}
+        onDismissAuthRecovery={jest.fn()}
+        onEpisodeChange={jest.fn()}
+        onRetryPlayback={onRetryPlayback}
+        onSourceChange={jest.fn()}
+        currentSource='source-a'
+        currentId='source-a-id'
+        searchTitle='测试视频'
+        availableSources={[detail]}
+        sourceSearchLoading={false}
+        sourceSearchError={null}
+        precomputedVideoInfo={new Map()}
+        videoYear='2026'
+        favorited={false}
+        onToggleFavorite={jest.fn()}
+        videoCover=''
+        videoDoubanId={0}
+        playbackError='当前源加载失败'
+      />,
+    );
+
+    expect(screen.getByText('当前源加载失败')).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: '继续尝试' }));
+
+    expect(onRetryPlayback).toHaveBeenCalledTimes(1);
   });
 });

@@ -1,5 +1,5 @@
-import type { ReactNode } from 'react';
 import { render, screen } from '@testing-library/react';
+import type { ReactNode } from 'react';
 
 import AnnouncementModal from '@/components/modals/AnnouncementModal';
 

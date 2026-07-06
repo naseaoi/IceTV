@@ -1,7 +1,10 @@
-﻿import { MutableRefObject, ReactNode, useEffect, useMemo, useRef } from 'react';
+﻿import { Clock, Heart, Radio, Target, Tv } from 'lucide-react';
+import { MutableRefObject, ReactNode, useEffect, useMemo, useRef } from 'react';
 
-import { Clock, Heart, Radio, Target, Tv } from 'lucide-react';
-
+import {
+  PlayerPanelContent,
+  PlayerPanelTabBar,
+} from '@/components/PlayerPanelTabBar';
 import {
   formatTimeToHHMM,
   parseCustomTimeFormat,
@@ -118,7 +121,7 @@ function EpgTab({
   | 'favorited'
   | 'handleToggleFavorite'
 >) {
-  const currentTime = useMemo(() => new Date(), [epgData]);
+  const currentTime = useMemo(() => new Date(), []);
   const programs = epgData?.programs || [];
   const currentIndex = programs.findIndex((program) =>
     isProgramLive(program, currentTime),
@@ -301,180 +304,170 @@ export function LiveChannelSidebar({
   }, [selectedGroup, groupedChannels, groupContainerRef]);
 
   return (
-    <div className='flex h-full flex-col overflow-hidden rounded-xl bg-white/60 ring-1 ring-black/[0.06] backdrop-blur-sm dark:bg-white/[0.04] dark:ring-white/[0.08] md:ml-1'>
-      <div className='flex flex-shrink-0 border-b border-gray-200/80 dark:border-white/10'>
-        {tabs.map((tab) => (
-          <button
-            key={tab.key}
-            onClick={() => setActiveTab(tab.key)}
-            className={`relative min-h-[64px] flex-1 py-[18px] text-center text-sm font-medium transition-all duration-200 ${
-              activeTab === tab.key
-                ? 'text-green-600 dark:text-green-400'
-                : 'text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-300'
-            }`}
-          >
-            {tab.label}
-            {activeTab === tab.key && (
-              <div className='absolute bottom-0 left-1/4 right-1/4 h-0.5 rounded-full bg-green-500 dark:bg-green-400' />
-            )}
-          </button>
-        ))}
-      </div>
+    <div className='flex h-full flex-col overflow-hidden md:ml-1'>
+      <PlayerPanelTabBar
+        tabs={tabs}
+        active={activeTab}
+        onChange={setActiveTab}
+        ariaLabel='直播面板标签'
+      />
 
-      {activeTab === 'channels' && (
-        <div className='flex min-h-0 flex-1 flex-col overflow-hidden'>
-          <div className='flex flex-shrink-0 items-center gap-3 border-b border-gray-200/80 px-4 dark:border-white/10'>
-            {isSwitchingSource && (
-              <div className='flex items-center gap-2 whitespace-nowrap text-xs text-amber-600 dark:text-amber-400'>
-                <div className='h-2 w-2 animate-pulse rounded-full bg-amber-500' />
-                切换中
-              </div>
-            )}
-            <div
-              ref={groupContainerRef}
-              className='min-w-0 flex-1 overflow-x-auto'
-            >
-              <div className='flex min-w-max gap-3'>
-                {Object.keys(groupedChannels).map((group, index) => (
-                  <button
-                    key={group}
-                    data-group={group}
-                    ref={(el) => {
-                      groupButtonRefs.current[index] = el;
-                    }}
-                    onClick={() => handleGroupChange(group)}
-                    disabled={isSwitchingSource}
-                    className={`relative w-20 flex-shrink-0 overflow-hidden py-3 text-center text-sm font-medium transition-colors ${
-                      isSwitchingSource
-                        ? 'cursor-not-allowed text-gray-400 opacity-50 dark:text-gray-600'
-                        : selectedGroup === group
-                          ? 'text-green-500 dark:text-green-400'
-                          : 'text-gray-600 hover:text-green-600 dark:text-gray-300 dark:hover:text-green-400'
-                    }`}
-                    title={group}
-                  >
-                    <span className='block truncate px-1'>{group}</span>
-                    {selectedGroup === group && !isSwitchingSource && (
-                      <div className='absolute bottom-0 left-0 right-0 h-0.5 rounded-full bg-green-500 dark:bg-green-400' />
-                    )}
-                  </button>
-                ))}
+      <PlayerPanelContent>
+        {activeTab === 'channels' && (
+          <div className='flex min-h-0 flex-1 flex-col overflow-hidden'>
+            <div className='flex flex-shrink-0 items-center gap-3 border-b border-gray-200/80 px-4 dark:border-white/10'>
+              {isSwitchingSource && (
+                <div className='flex items-center gap-2 whitespace-nowrap text-xs text-amber-600 dark:text-amber-400'>
+                  <div className='h-2 w-2 animate-pulse rounded-full bg-amber-500' />
+                  切换中
+                </div>
+              )}
+              <div
+                ref={groupContainerRef}
+                className='min-w-0 flex-1 overflow-x-auto'
+              >
+                <div className='flex min-w-max gap-3'>
+                  {Object.keys(groupedChannels).map((group, index) => (
+                    <button
+                      key={group}
+                      data-group={group}
+                      ref={(el) => {
+                        groupButtonRefs.current[index] = el;
+                      }}
+                      onClick={() => handleGroupChange(group)}
+                      disabled={isSwitchingSource}
+                      className={`relative w-20 flex-shrink-0 overflow-hidden py-3 text-center text-sm font-medium transition-colors ${
+                        isSwitchingSource
+                          ? 'cursor-not-allowed text-gray-400 opacity-50 dark:text-gray-600'
+                          : selectedGroup === group
+                            ? 'text-green-500 dark:text-green-400'
+                            : 'text-gray-600 hover:text-green-600 dark:text-gray-300 dark:hover:text-green-400'
+                      }`}
+                      title={group}
+                    >
+                      <span className='block truncate px-1'>{group}</span>
+                      {selectedGroup === group && !isSwitchingSource && (
+                        <div className='absolute bottom-0 left-0 right-0 h-0.5 rounded-full bg-green-500 dark:bg-green-400' />
+                      )}
+                    </button>
+                  ))}
+                </div>
               </div>
             </div>
-          </div>
 
-          <div
-            ref={channelListRef}
-            className='min-h-0 flex-1 space-y-2 overflow-y-auto p-3'
-          >
-            {filteredChannels.length > 0 ? (
-              filteredChannels.map((channel) => {
-                const isActive = channel.id === currentChannel?.id;
-                return (
-                  <button
-                    key={channel.id}
-                    data-channel-id={channel.id}
-                    onClick={() => handleChannelChange(channel)}
-                    disabled={isSwitchingSource}
-                    className={`w-full rounded-lg p-3 text-left transition-all duration-200 ${
-                      isSwitchingSource
-                        ? 'cursor-not-allowed opacity-50'
-                        : isActive
-                          ? 'border border-green-300 bg-green-100 dark:border-green-700 dark:bg-green-900/30'
+            <div
+              ref={channelListRef}
+              className='min-h-0 flex-1 space-y-2 overflow-y-auto p-3'
+            >
+              {filteredChannels.length > 0 ? (
+                filteredChannels.map((channel) => {
+                  const isActive = channel.id === currentChannel?.id;
+                  return (
+                    <button
+                      key={channel.id}
+                      data-channel-id={channel.id}
+                      onClick={() => handleChannelChange(channel)}
+                      disabled={isSwitchingSource}
+                      className={`w-full rounded-lg p-3 text-left transition-all duration-200 ${
+                        isSwitchingSource
+                          ? 'cursor-not-allowed opacity-50'
+                          : isActive
+                            ? 'border border-green-300 bg-green-100 dark:border-green-700 dark:bg-green-900/30'
+                            : 'hover:bg-gray-100 dark:hover:bg-white/10'
+                      }`}
+                    >
+                      <div className='flex items-center gap-3'>
+                        <ChannelLogo
+                          channel={channel}
+                          source={currentSource}
+                          size='sm'
+                        />
+                        <div className='min-w-0 flex-1'>
+                          <div className='truncate text-sm font-medium text-gray-900 dark:text-gray-100'>
+                            {channel.name}
+                          </div>
+                          <div className='mt-1 truncate text-xs text-gray-500 dark:text-gray-400'>
+                            {channel.group}
+                          </div>
+                        </div>
+                      </div>
+                    </button>
+                  );
+                })
+              ) : (
+                <EmptyPanel
+                  icon={
+                    <Tv className='h-8 w-8 text-gray-400 dark:text-gray-600' />
+                  }
+                  title='暂无可用频道'
+                  message='请选择其他直播源或稍后再试'
+                />
+              )}
+            </div>
+          </div>
+        )}
+
+        {activeTab === 'epg' && (
+          <EpgTab
+            currentChannel={currentChannel}
+            currentSource={currentSource}
+            epgData={epgData}
+            isEpgLoading={isEpgLoading}
+            favorited={favorited}
+            handleToggleFavorite={handleToggleFavorite}
+          />
+        )}
+
+        {activeTab === 'sources' && (
+          <div className='min-h-0 flex-1 overflow-y-auto p-3'>
+            <div className='space-y-2'>
+              {liveSources.length > 0 ? (
+                liveSources.map((source) => {
+                  const isCurrentSource = source.key === currentSource?.key;
+                  return (
+                    <button
+                      key={source.key}
+                      onClick={() => {
+                        if (!isCurrentSource) handleSourceChange(source);
+                      }}
+                      className={`relative flex w-full items-start gap-3 rounded-lg px-3 py-3 text-left transition-all duration-200 ${
+                        isCurrentSource
+                          ? 'border border-green-500/30 bg-green-500/10 dark:bg-green-500/20'
                           : 'hover:bg-gray-100 dark:hover:bg-white/10'
-                    }`}
-                  >
-                    <div className='flex items-center gap-3'>
-                      <ChannelLogo
-                        channel={channel}
-                        source={currentSource}
-                        size='sm'
-                      />
+                      }`}
+                    >
+                      <div className='flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-lg bg-gray-100 dark:bg-gray-800'>
+                        <Radio className='h-5 w-5 text-gray-500' />
+                      </div>
                       <div className='min-w-0 flex-1'>
                         <div className='truncate text-sm font-medium text-gray-900 dark:text-gray-100'>
-                          {channel.name}
+                          {source.name}
                         </div>
-                        <div className='mt-1 truncate text-xs text-gray-500 dark:text-gray-400'>
-                          {channel.group}
+                        <div className='mt-1 text-xs text-gray-500 dark:text-gray-400'>
+                          {!source.channelNumber || source.channelNumber === 0
+                            ? '-'
+                            : `${source.channelNumber} 个频道`}
                         </div>
                       </div>
-                    </div>
-                  </button>
-                );
-              })
-            ) : (
-              <EmptyPanel
-                icon={
-                  <Tv className='h-8 w-8 text-gray-400 dark:text-gray-600' />
-                }
-                title='暂无可用频道'
-                message='请选择其他直播源或稍后再试'
-              />
-            )}
+                      {isCurrentSource && (
+                        <div className='absolute right-3 top-3 h-2 w-2 rounded-full bg-green-500' />
+                      )}
+                    </button>
+                  );
+                })
+              ) : (
+                <EmptyPanel
+                  icon={
+                    <Radio className='h-8 w-8 text-gray-400 dark:text-gray-600' />
+                  }
+                  title='暂无可用直播源'
+                  message='请检查网络连接或联系管理员添加直播源'
+                />
+              )}
+            </div>
           </div>
-        </div>
-      )}
-
-      {activeTab === 'epg' && (
-        <EpgTab
-          currentChannel={currentChannel}
-          currentSource={currentSource}
-          epgData={epgData}
-          isEpgLoading={isEpgLoading}
-          favorited={favorited}
-          handleToggleFavorite={handleToggleFavorite}
-        />
-      )}
-
-      {activeTab === 'sources' && (
-        <div className='min-h-0 flex-1 overflow-y-auto p-3'>
-          <div className='space-y-2'>
-            {liveSources.length > 0 ? (
-              liveSources.map((source) => {
-                const isCurrentSource = source.key === currentSource?.key;
-                return (
-                  <button
-                    key={source.key}
-                    onClick={() => {
-                      if (!isCurrentSource) handleSourceChange(source);
-                    }}
-                    className={`relative flex w-full items-start gap-3 rounded-lg px-3 py-3 text-left transition-all duration-200 ${
-                      isCurrentSource
-                        ? 'border border-green-500/30 bg-green-500/10 dark:bg-green-500/20'
-                        : 'hover:bg-gray-100 dark:hover:bg-white/10'
-                    }`}
-                  >
-                    <div className='flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-lg bg-gray-100 dark:bg-gray-800'>
-                      <Radio className='h-5 w-5 text-gray-500' />
-                    </div>
-                    <div className='min-w-0 flex-1'>
-                      <div className='truncate text-sm font-medium text-gray-900 dark:text-gray-100'>
-                        {source.name}
-                      </div>
-                      <div className='mt-1 text-xs text-gray-500 dark:text-gray-400'>
-                        {!source.channelNumber || source.channelNumber === 0
-                          ? '-'
-                          : `${source.channelNumber} 个频道`}
-                      </div>
-                    </div>
-                    {isCurrentSource && (
-                      <div className='absolute right-3 top-3 h-2 w-2 rounded-full bg-green-500' />
-                    )}
-                  </button>
-                );
-              })
-            ) : (
-              <EmptyPanel
-                icon={
-                  <Radio className='h-8 w-8 text-gray-400 dark:text-gray-600' />
-                }
-                title='暂无可用直播源'
-                message='请检查网络连接或联系管理员添加直播源'
-              />
-            )}
-          </div>
-        </div>
-      )}
+        )}
+      </PlayerPanelContent>
     </div>
   );
 }

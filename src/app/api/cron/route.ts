@@ -2,20 +2,20 @@
 import { NextRequest, NextResponse } from 'next/server';
 
 import {
-  decodeConfigSubscriptionContent,
-  readConfigSubscriptionText,
-} from '@/lib/config-subscription';
-import { getConfig, refineConfig, saveConfig } from '@/lib/config';
-import { db } from '@/lib/db';
-import { parseStorageKey } from '@/lib/utils';
-import { getOwnerUsername } from '@/lib/env.server';
-import { fetchVideoDetail } from '@/lib/fetchVideoDetail';
-import {
   isLiveEntryEnabledInConfig,
   refreshLiveChannels,
 } from '@/features/live/lib/live';
+import { getConfig, refineConfig, saveConfig } from '@/lib/config';
+import {
+  decodeConfigSubscriptionContent,
+  readConfigSubscriptionText,
+} from '@/lib/config-subscription';
+import { db } from '@/lib/db';
+import { getOwnerUsername } from '@/lib/env.server';
+import { fetchVideoDetail } from '@/lib/fetchVideoDetail';
 import { SearchResult } from '@/lib/types';
 import { fetchWithUrlGuard } from '@/lib/url-guard';
+import { parseStorageKey } from '@/lib/utils';
 
 export const runtime = 'nodejs';
 
@@ -137,7 +137,7 @@ async function refreshConfig() {
 
       try {
         JSON.parse(decodedContent);
-      } catch (e) {
+      } catch {
         throw new Error('配置文件格式错误，请检查 JSON 语法');
       }
       config.ConfigFile = decodedContent;

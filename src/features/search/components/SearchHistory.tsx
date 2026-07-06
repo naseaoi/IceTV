@@ -2,8 +2,8 @@ import { X } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import React, { useState } from 'react';
 
-import { clearSearchHistory, deleteSearchHistory } from '@/lib/db.client';
 import ConfirmModal from '@/components/modals/ConfirmModal';
+import { clearSearchHistory, deleteSearchHistory } from '@/lib/db.client';
 
 interface SearchHistoryProps {
   searchHistory: string[];

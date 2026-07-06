@@ -1,13 +1,13 @@
-﻿import {
+﻿import { useRouter, useSearchParams } from 'next/navigation';
+import {
   Dispatch,
   MutableRefObject,
   SetStateAction,
+  useCallback,
   useEffect,
   useRef,
   useState,
 } from 'react';
-
-import { useRouter, useSearchParams } from 'next/navigation';
 
 import { parseCustomTimeFormat } from '@/features/live/lib/time';
 
@@ -158,6 +158,7 @@ export function useLiveSources({
 }: UseLiveSourcesParams): UseLiveSourcesReturn {
   const searchParams = useSearchParams();
   const router = useRouter();
+  const [initialSearchParamsString] = useState(() => searchParams.toString());
 
   // ----- State -----
   const [loading, setLoading] = useState(true);
@@ -355,8 +356,11 @@ export function useLiveSources({
     }
   };
 
-  // ----- 获取直播源列表 -----
-  const fetchLiveSources = async () => {
+  const fetchChannelsRef =
+    useRef<(source: LiveSource) => Promise<void>>(fetchChannels);
+  fetchChannelsRef.current = fetchChannels;
+
+  const fetchLiveSources = useCallback(async () => {
     try {
       setLoadingStage('fetching');
       setLoadingMessage('获取直播源');
@@ -376,14 +380,14 @@ export function useLiveSources({
           const foundSource = sources.find((s) => s.key === needLoadSource);
           if (foundSource) {
             setCurrentSource(foundSource);
-            await fetchChannels(foundSource);
+            await fetchChannelsRef.current(foundSource);
           } else {
             setCurrentSource(firstSource);
-            await fetchChannels(firstSource);
+            await fetchChannelsRef.current(firstSource);
           }
         } else {
           setCurrentSource(firstSource);
-          await fetchChannels(firstSource);
+          await fetchChannelsRef.current(firstSource);
         }
       }
 
@@ -395,7 +399,7 @@ export function useLiveSources({
       setLiveSources([]);
       setLoading(false);
     } finally {
-      const newSearchParams = new URLSearchParams(searchParams.toString());
+      const newSearchParams = new URLSearchParams(initialSearchParamsString);
       newSearchParams.delete('source');
       newSearchParams.delete('id');
       const newUrl = newSearchParams.toString()
@@ -403,7 +407,7 @@ export function useLiveSources({
         : window.location.pathname;
       router.replace(newUrl);
     }
-  };
+  }, [initialSearchParamsString, needLoadSource, router]);
 
   // ----- 切换直播源 -----
   const handleSourceChange = async (source: LiveSource) => {
@@ -474,7 +478,6 @@ export function useLiveSources({
     void loadChannelEpg(channel, currentSource);
   };
 
-  // ----- 切换分组 -----
   const handleGroupChange = (group: string) => {
     if (isSwitchingSource) return;
     setSelectedGroup(group);
@@ -488,12 +491,10 @@ export function useLiveSources({
     }
   };
 
-  // ----- 初始化 -----
   useEffect(() => {
     fetchLiveSources();
-  }, []);
+  }, [fetchLiveSources]);
 
-  // ----- 加载进度 -----
   const loadingStageOrder = ['loading', 'fetching', 'ready'];
   const loadingStageIndex = loadingStageOrder.indexOf(loadingStage);
   const loadingProgress =

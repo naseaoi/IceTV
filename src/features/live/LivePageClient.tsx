@@ -1,5 +1,7 @@
 'use client';
 
+import '@/features/live/types';
+
 import {
   AlertTriangle,
   CheckCircle2,
@@ -16,20 +18,16 @@ import {
   PlayerPageAccent,
   PlayerPageLayout,
 } from '@/components/PlayerPageLayout';
-
 import { LiveChannelSidebar } from '@/features/live/components/LiveChannelSidebar';
 import { useLiveFavorite } from '@/features/live/hooks/useLiveFavorite';
 import { useLivePlayer } from '@/features/live/hooks/useLivePlayer';
 import { useLiveSources } from '@/features/live/hooks/useLiveSources';
-import '@/features/live/types';
 import { usePlayerKeyboard } from '@/hooks/usePlayerKeyboard';
 
 const liveAccent: PlayerPageAccent = {
   icon: 'text-sky-500 dark:text-sky-400',
   glow: 'bg-sky-400/10 dark:bg-sky-400/20',
   sub: 'text-sky-600/80 dark:text-sky-400/70',
-  aurora: ['14,165,233', '34,197,94'],
-  auroraLight: ['125,211,252', '134,239,172'],
 };
 
 function LiveLoadingView({
@@ -45,7 +43,7 @@ function LiveLoadingView({
 }) {
   return (
     <PageLayout activePath='/live' contentMode='player' showDesktopBack={false}>
-      <div className='flex h-[calc(100dvh-3rem-3.5rem-env(safe-area-inset-bottom))] items-center justify-center md:h-full'>
+      <div className='flex h-full items-center justify-center'>
         <div className='flex w-full max-w-2xl flex-col items-center gap-4 px-4'>
           <LoadingStatePanel
             icon={
@@ -80,7 +78,7 @@ function LiveErrorView({ error }: { error: string }) {
 
   return (
     <PageLayout activePath='/live' contentMode='player' showDesktopBack={false}>
-      <div className='flex min-h-screen items-center justify-center bg-transparent'>
+      <div className='flex h-full items-center justify-center bg-transparent'>
         <LoadingStatePanel
           icon={<AlertTriangle className='h-10 w-10' />}
           tone='red'
@@ -252,7 +250,6 @@ function LivePageClient() {
       titleFallback='直播'
       titleIcon={Radio}
       accent={liveAccent}
-      isPlaying={Boolean(sources.videoUrl) && !sources.isVideoLoading}
       isPanelCollapsed={sources.isChannelListCollapsed}
       onTogglePanel={() =>
         sources.setIsChannelListCollapsed(!sources.isChannelListCollapsed)

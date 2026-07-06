@@ -241,25 +241,6 @@ function setAuthCookies(
   );
 }
 
-function clearAuthCookies(response: NextResponse, req: NextRequest): void {
-  const secure = isSecureRequest(req);
-  const clearOptions = {
-    path: '/',
-    expires: new Date(0),
-    sameSite: 'lax' as const,
-    secure,
-  };
-
-  response.cookies.set('auth', '', {
-    ...clearOptions,
-    httpOnly: true,
-  });
-  response.cookies.set('auth_meta', '', {
-    ...clearOptions,
-    httpOnly: false,
-  });
-}
-
 async function generateAuthCookie(
   role: AuthRole,
   username: string,

@@ -13,6 +13,7 @@ import {
   PlayerPageAccent,
   PlayerPageLayout,
 } from '@/components/PlayerPageLayout';
+import { useRuntimeConfig } from '@/components/RuntimeConfigProvider';
 import EpisodeSelector from '@/features/play/components/EpisodeSelector';
 import type { VideoLoadingStage } from '@/features/play/hooks/usePlayPageState';
 import { getSourceFailure } from '@/lib/failed-source-cooldown';
@@ -28,7 +29,6 @@ interface PlayMainContentProps {
   setIsEpisodeSelectorCollapsed: (collapsed: boolean) => void;
   artRef: RefObject<HTMLDivElement | null>;
   isVideoLoading: boolean;
-  isPlaying: boolean;
   videoLoadingStage: VideoLoadingStage;
   videoLoadingAttempt: number;
   realtimeLoadSpeed: string;
@@ -37,6 +37,7 @@ interface PlayMainContentProps {
   onReloginAndRecover: () => void;
   onDismissAuthRecovery: () => void;
   onEpisodeChange: (episodeNumber: number) => void;
+  onRetryPlayback: () => void;
   onSourceChange: (newSource: string, newId: string, newTitle: string) => void;
   currentSource: string;
   currentId: string;
@@ -60,37 +61,32 @@ interface PlayMainContentProps {
   playbackError?: string | null;
 }
 
-const PLAYER_LOADING_TIMEOUT_MS = 15_000;
-const PLAYER_LOADING_TIMEOUT_SECONDS = PLAYER_LOADING_TIMEOUT_MS / 1000;
+const DEFAULT_PLAYER_LOADING_TIMEOUT_SECONDS = 15;
+
+export function buildLoadingTimeoutMessage(timeoutSeconds: number): string {
+  return `已等待超过 ${timeoutSeconds} 秒，源站响应超时`;
+}
 
 const playAccents: Record<string, PlayerPageAccent> = {
   film: {
     icon: 'text-blue-500 dark:text-blue-400',
     glow: 'bg-blue-400/10 dark:bg-blue-400/20',
     sub: 'text-blue-600/80 dark:text-blue-400/70',
-    aurora: ['59,130,246', '96,165,250'],
-    auroraLight: ['147,197,253', '191,219,254'],
   },
   tv: {
     icon: 'text-emerald-500 dark:text-emerald-400',
     glow: 'bg-emerald-400/10 dark:bg-emerald-400/20',
     sub: 'text-emerald-600/80 dark:text-emerald-400/70',
-    aurora: ['16,185,129', '52,211,153'],
-    auroraLight: ['110,231,183', '167,243,208'],
   },
   anime: {
     icon: 'text-pink-500 dark:text-pink-400',
     glow: 'bg-pink-400/10 dark:bg-pink-400/20',
     sub: 'text-pink-600/80 dark:text-pink-400/70',
-    aurora: ['236,72,153', '244,114,182'],
-    auroraLight: ['249,168,212', '251,207,232'],
   },
   variety: {
     icon: 'text-violet-500 dark:text-violet-400',
     glow: 'bg-violet-400/10 dark:bg-violet-400/20',
     sub: 'text-violet-600/80 dark:text-violet-400/70',
-    aurora: ['139,92,246', '167,139,250'],
-    auroraLight: ['196,181,253', '221,214,254'],
   },
 };
 
@@ -98,6 +94,7 @@ function PlayerOverlayPanel({
   title,
   message,
   description,
+  children,
   zClassName,
   icon = <AlertTriangle className='h-9 w-9' />,
   tone = 'red',
@@ -106,6 +103,7 @@ function PlayerOverlayPanel({
   title: string;
   message?: string;
   description?: string;
+  children?: ReactNode;
   zClassName: string;
   icon?: ReactNode;
   tone?: 'emerald' | 'blue' | 'amber' | 'red';
@@ -127,7 +125,9 @@ function PlayerOverlayPanel({
         description={description}
         descriptionClassName='text-gray-400'
         className='max-w-[19rem] p-4 sm:max-w-lg sm:p-6'
-      />
+      >
+        {children}
+      </LoadingStatePanel>
     </div>
   );
 }
@@ -160,10 +160,12 @@ function PlayLoadingOverlay({
   loadingTimedOut,
   videoLoadingStage,
   realtimeLoadSpeed,
+  timeoutSeconds,
 }: {
   loadingTimedOut: boolean;
   videoLoadingStage: VideoLoadingStage;
   realtimeLoadSpeed: string;
+  timeoutSeconds: number;
 }) {
   const stageConfig = LOADING_STAGE_CONFIG[videoLoadingStage];
   const statusText = realtimeLoadSpeed || stageConfig.status;
@@ -173,7 +175,7 @@ function PlayLoadingOverlay({
       <PlayerOverlayPanel
         zClassName='z-[500]'
         title={stageConfig.timeoutTitle}
-        message={`已等待超过 ${PLAYER_LOADING_TIMEOUT_SECONDS} 秒，可能是网络问题或播放源不可用`}
+        message={buildLoadingTimeoutMessage(timeoutSeconds)}
       />
     );
   }
@@ -190,13 +192,28 @@ function PlayLoadingOverlay({
   );
 }
 
-function PlaybackErrorOverlay({ message }: { message: string }) {
+function PlaybackErrorOverlay({
+  message,
+  onRetry,
+}: {
+  message: string;
+  onRetry: () => void;
+}) {
   return (
     <PlayerOverlayPanel
       zClassName='z-[510]'
       title={message}
       message='请从右侧面板手动切换其他源站。'
-    />
+    >
+      <button
+        type='button'
+        onClick={onRetry}
+        className='mx-auto inline-flex h-10 items-center justify-center gap-2 rounded-lg bg-white px-4 text-sm font-medium text-zinc-950 transition-colors hover:bg-zinc-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/70'
+      >
+        <RefreshCw className='h-4 w-4' />
+        <span>继续尝试</span>
+      </button>
+    </PlayerOverlayPanel>
   );
 }
 
@@ -306,7 +323,6 @@ export function PlayMainContent(props: PlayMainContentProps) {
     setIsEpisodeSelectorCollapsed,
     artRef,
     isVideoLoading,
-    isPlaying,
     videoLoadingStage,
     videoLoadingAttempt,
     authRecoveryVisible,
@@ -314,6 +330,7 @@ export function PlayMainContent(props: PlayMainContentProps) {
     onReloginAndRecover,
     onDismissAuthRecovery,
     onEpisodeChange,
+    onRetryPlayback,
     onSourceChange,
     currentSource,
     currentId,
@@ -359,12 +376,21 @@ export function PlayMainContent(props: PlayMainContentProps) {
     .join(' · ');
   const headerYearText = (detail?.year || videoYear || '').toString();
   const [loadingTimedOut, setLoadingTimedOut] = useState(false);
+  const runtimeConfig = useRuntimeConfig();
+  const loadingTimeoutSeconds = Math.max(
+    1,
+    Math.floor(
+      runtimeConfig.VOD_PAGE_TIMEOUT_SECONDS ||
+        DEFAULT_PLAYER_LOADING_TIMEOUT_SECONDS,
+    ),
+  );
+  const loadingTimeoutMs = loadingTimeoutSeconds * 1000;
   const onLoadingTimeoutRef = useRef(onLoadingTimeout);
   const currentSourceFailure = useMemo(() => {
     const key =
       currentSource && currentId ? `${currentSource}-${currentId}` : '';
     return key ? getSourceFailure(key) : null;
-  }, [currentSource, currentId, isVideoLoading, videoLoadingAttempt]);
+  }, [currentSource, currentId]);
   const loadingStatusText =
     realtimeLoadSpeed ||
     (currentSourceFailure?.coolingDown
@@ -384,9 +410,15 @@ export function PlayMainContent(props: PlayMainContentProps) {
     const timer = setTimeout(() => {
       setLoadingTimedOut(true);
       onLoadingTimeoutRef.current?.();
-    }, PLAYER_LOADING_TIMEOUT_MS);
+    }, loadingTimeoutMs);
     return () => clearTimeout(timer);
-  }, [isVideoLoading, videoLoadingStage, videoLoadingAttempt, playbackError]);
+  }, [
+    isVideoLoading,
+    videoLoadingStage,
+    videoLoadingAttempt,
+    playbackError,
+    loadingTimeoutMs,
+  ]);
 
   const headerTags = buildHeaderTags({
     headerSourceText,
@@ -401,7 +433,6 @@ export function PlayMainContent(props: PlayMainContentProps) {
       titleFallback='影片标题'
       titleIcon={TitleIcon}
       accent={accent}
-      isPlaying={isPlaying}
       isPanelCollapsed={isEpisodeSelectorCollapsed}
       onTogglePanel={() =>
         setIsEpisodeSelectorCollapsed(!isEpisodeSelectorCollapsed)
@@ -424,9 +455,15 @@ export function PlayMainContent(props: PlayMainContentProps) {
               loadingTimedOut={loadingTimedOut}
               videoLoadingStage={videoLoadingStage}
               realtimeLoadSpeed={loadingStatusText}
+              timeoutSeconds={loadingTimeoutSeconds}
             />
           )}
-          {playbackError && <PlaybackErrorOverlay message={playbackError} />}
+          {playbackError && (
+            <PlaybackErrorOverlay
+              message={playbackError}
+              onRetry={onRetryPlayback}
+            />
+          )}
           {authRecoveryVisible && (
             <AuthRecoveryOverlay
               message={authRecoveryReasonMessage}

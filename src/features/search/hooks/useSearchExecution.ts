@@ -1,5 +1,5 @@
-import { startTransition, useEffect, useRef, useState } from 'react';
 import { ReadonlyURLSearchParams } from 'next/navigation';
+import { startTransition, useEffect, useRef, useState } from 'react';
 
 import { addSearchHistory } from '@/lib/db.client';
 import { readFluidSearch } from '@/lib/local-preferences';
@@ -42,7 +42,6 @@ function getSearchSnapshot(query: string): SearchSnapshotCache | null {
   return snapshot;
 }
 
-/** 清除指定关键词的搜索快照缓存；不传参则清除全部 */
 export function clearSearchSnapshotCache(query?: string) {
   if (query) {
     searchSnapshotCache.delete(getSearchSnapshotCacheKey(query));
@@ -80,13 +79,23 @@ export function useSearchExecution({
   const pendingResultsRef = useRef<SearchResult[]>([]);
   const flushTimerRef = useRef<number | null>(null);
   const hasFirstBatchRef = useRef<boolean>(false);
+  const orderingRef = useRef({
+    viewMode,
+    filterAggYearOrder,
+    filterAllYearOrder,
+  });
 
-  // query 值作为 effect 依赖
+  useEffect(() => {
+    orderingRef.current = {
+      viewMode,
+      filterAggYearOrder,
+      filterAllYearOrder,
+    };
+  }, [filterAggYearOrder, filterAllYearOrder, viewMode]);
+
   const query = (searchParams.get('q') || '').trim();
 
-  // 核心搜索 effect
   useEffect(() => {
-    // 相同关键词不重复搜索
     if (query === currentQueryRef.current) return;
     currentQueryRef.current = query;
 
@@ -154,10 +163,15 @@ export function useSearchExecution({
                   Array.isArray(payload.results) &&
                   payload.results.length > 0
                 ) {
+                  const {
+                    viewMode: activeViewMode,
+                    filterAggYearOrder: activeAggYearOrder,
+                    filterAllYearOrder: activeAllYearOrder,
+                  } = orderingRef.current;
                   const activeYearOrder =
-                    viewMode === 'agg'
-                      ? filterAggYearOrder
-                      : filterAllYearOrder;
+                    activeViewMode === 'agg'
+                      ? activeAggYearOrder
+                      : activeAllYearOrder;
                   const incoming: SearchResult[] =
                     activeYearOrder === 'none'
                       ? sortBatchForNoOrder(
@@ -244,8 +258,15 @@ export function useSearchExecution({
             if (currentQueryRef.current !== trimmed) return;
 
             if (data.results && Array.isArray(data.results)) {
+              const {
+                viewMode: activeViewMode,
+                filterAggYearOrder: activeAggYearOrder,
+                filterAllYearOrder: activeAllYearOrder,
+              } = orderingRef.current;
               const activeYearOrder =
-                viewMode === 'agg' ? filterAggYearOrder : filterAllYearOrder;
+                activeViewMode === 'agg'
+                  ? activeAggYearOrder
+                  : activeAllYearOrder;
               const results: SearchResult[] =
                 activeYearOrder === 'none'
                   ? sortBatchForNoOrder(
@@ -265,7 +286,6 @@ export function useSearchExecution({
           });
       }
 
-      // 保存到搜索历史
       addSearchHistory(query);
     } else {
       setSearchResults([]);
@@ -278,7 +298,6 @@ export function useSearchExecution({
 
   useEffect(() => {
     const query = currentQueryRef.current;
-    // 搜索进行中不写入快照
     if (!query || !showResults || isLoading) {
       return;
     }
@@ -298,7 +317,7 @@ export function useSearchExecution({
     isLoading,
   ]);
 
-  // 组件卸载时清理连接
+  // 连接清理
   useEffect(() => {
     return () => {
       if (eventSourceRef.current) {

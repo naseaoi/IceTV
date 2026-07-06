@@ -1,5 +1,6 @@
 /** @jest-environment node */
 
+import { DEFAULT_RUNTIME_PARAMS } from '@/lib/runtime-params';
 import type { AdminConfig } from '@/types/admin';
 
 type SearchHistoryRow = {
@@ -8,12 +9,23 @@ type SearchHistoryRow = {
   sortIndex: number;
 };
 
+type SourceRouteStatsRow = {
+  source: string;
+  routeMode: 'browser' | 'server';
+  bucketDate: string;
+  successCount: number;
+  failureCount: number;
+  updatedAt: number;
+};
+
 type FakeState = {
   users: Map<string, string>;
   playRecords: Map<string, Map<string, string>>;
   favorites: Map<string, Map<string, string>>;
   skipConfigs: Map<string, Map<string, string>>;
+  playbackSessions: Map<string, Record<string, unknown>>;
   searchHistory: SearchHistoryRow[];
+  sourceRouteStats: SourceRouteStatsRow[];
   adminConfig: string | null;
 };
 
@@ -29,7 +41,9 @@ function cloneState(state: FakeState): FakeState {
     playRecords: cloneNestedMap(state.playRecords),
     favorites: cloneNestedMap(state.favorites),
     skipConfigs: cloneNestedMap(state.skipConfigs),
+    playbackSessions: new Map(state.playbackSessions),
     searchHistory: state.searchHistory.map((row) => ({ ...row })),
+    sourceRouteStats: state.sourceRouteStats.map((row) => ({ ...row })),
     adminConfig: state.adminConfig,
   };
 }
@@ -40,7 +54,9 @@ function createState(): FakeState {
     playRecords: new Map(),
     favorites: new Map(),
     skipConfigs: new Map(),
+    playbackSessions: new Map(),
     searchHistory: [],
+    sourceRouteStats: [],
     adminConfig: null,
   };
 }
@@ -184,6 +200,16 @@ function createFakePool() {
       return [[], []];
     }
 
+    if (normalized === 'DELETE FROM playback_sessions WHERE username = ?') {
+      const [username] = params as [string];
+      for (const [id, row] of currentState.playbackSessions.entries()) {
+        if (row.username === username) {
+          currentState.playbackSessions.delete(id);
+        }
+      }
+      return [[], []];
+    }
+
     if (normalized === 'DELETE FROM play_records') {
       currentState.playRecords.clear();
       return [[], []];
@@ -196,6 +222,131 @@ function createFakePool() {
 
     if (normalized === 'DELETE FROM skip_configs') {
       currentState.skipConfigs.clear();
+      return [[], []];
+    }
+
+    if (normalized === 'DELETE FROM playback_sessions') {
+      currentState.playbackSessions.clear();
+      return [[], []];
+    }
+
+    if (
+      normalized ===
+      'INSERT INTO playback_sessions ( id, username, source, video_id, episode_index, title, source_name, cover, year, started_at, ended_at, watch_seconds, last_position, total_time, created_at, updated_at ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON DUPLICATE KEY UPDATE username = VALUES(username), source = VALUES(source), video_id = VALUES(video_id), episode_index = VALUES(episode_index), title = VALUES(title), source_name = VALUES(source_name), cover = VALUES(cover), year = VALUES(year), started_at = VALUES(started_at), ended_at = VALUES(ended_at), watch_seconds = VALUES(watch_seconds), last_position = VALUES(last_position), total_time = VALUES(total_time), created_at = VALUES(created_at), updated_at = VALUES(updated_at)'
+    ) {
+      const [
+        id,
+        username,
+        source,
+        videoId,
+        episodeIndex,
+        title,
+        sourceName,
+        cover,
+        year,
+        startedAt,
+        endedAt,
+        watchSeconds,
+        lastPosition,
+        totalTime,
+        createdAt,
+        updatedAt,
+      ] = params as [
+        string,
+        string,
+        string,
+        string,
+        number,
+        string,
+        string,
+        string,
+        string,
+        number,
+        number,
+        number,
+        number,
+        number,
+        number,
+        number,
+      ];
+      currentState.playbackSessions.set(id, {
+        id,
+        username,
+        source,
+        video_id: videoId,
+        episode_index: episodeIndex,
+        title,
+        source_name: sourceName,
+        cover,
+        year,
+        started_at: startedAt,
+        ended_at: endedAt,
+        watch_seconds: watchSeconds,
+        last_position: lastPosition,
+        total_time: totalTime,
+        created_at: createdAt,
+        updated_at: updatedAt,
+      });
+      return [[], []];
+    }
+
+    if (
+      normalized ===
+      'INSERT INTO playback_sessions ( id, username, source, video_id, episode_index, title, source_name, cover, year, started_at, ended_at, watch_seconds, last_position, total_time, created_at, updated_at ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
+    ) {
+      const [
+        id,
+        username,
+        source,
+        videoId,
+        episodeIndex,
+        title,
+        sourceName,
+        cover,
+        year,
+        startedAt,
+        endedAt,
+        watchSeconds,
+        lastPosition,
+        totalTime,
+        createdAt,
+        updatedAt,
+      ] = params as [
+        string,
+        string,
+        string,
+        string,
+        number,
+        string,
+        string,
+        string,
+        string,
+        number,
+        number,
+        number,
+        number,
+        number,
+        number,
+        number,
+      ];
+      currentState.playbackSessions.set(id, {
+        id,
+        username,
+        source,
+        video_id: videoId,
+        episode_index: episodeIndex,
+        title,
+        source_name: sourceName,
+        cover,
+        year,
+        started_at: startedAt,
+        ended_at: endedAt,
+        watch_seconds: watchSeconds,
+        last_position: lastPosition,
+        total_time: totalTime,
+        created_at: createdAt,
+        updated_at: updatedAt,
+      });
       return [[], []];
     }
 
@@ -284,6 +435,54 @@ function createFakePool() {
 
     if (normalized === 'DELETE FROM admin_config') {
       currentState.adminConfig = null;
+      return [[], []];
+    }
+
+    if (
+      normalized.startsWith(
+        'INSERT INTO source_route_stats ( source, route_mode, bucket_date, success_count, failure_count, updated_at ) VALUES (?, ?, ?, ?, ?, ?) ON DUPLICATE KEY UPDATE',
+      )
+    ) {
+      const [
+        source,
+        routeMode,
+        bucketDate,
+        successCount,
+        failureCount,
+        updatedAt,
+      ] = params as [
+        string,
+        'browser' | 'server',
+        string,
+        number,
+        number,
+        number,
+      ];
+      const row = currentState.sourceRouteStats.find(
+        (item) =>
+          item.source === source &&
+          item.routeMode === routeMode &&
+          item.bucketDate === bucketDate,
+      );
+      if (row) {
+        row.successCount += successCount;
+        row.failureCount += failureCount;
+        row.updatedAt = updatedAt;
+      } else {
+        currentState.sourceRouteStats.push({
+          source,
+          routeMode,
+          bucketDate,
+          successCount,
+          failureCount,
+          updatedAt,
+        });
+      }
+      return [[], []];
+    }
+
+    if (normalized === 'DELETE FROM source_route_stats') {
+      currentState.sourceRouteStats = [];
       return [[], []];
     }
 
@@ -380,6 +579,20 @@ function createFakePool() {
 
     if (
       normalized ===
+      'SELECT id, source, video_id, episode_index, title, source_name, cover, year, started_at, ended_at, watch_seconds, last_position, total_time, created_at, updated_at FROM playback_sessions WHERE username = ? ORDER BY started_at DESC LIMIT ?'
+    ) {
+      const [username, limit] = params as [string, number];
+      return [
+        Array.from(currentState.playbackSessions.values())
+          .filter((row) => row.username === username)
+          .sort((a, b) => Number(b.started_at || 0) - Number(a.started_at || 0))
+          .slice(0, limit),
+        [],
+      ];
+    }
+
+    if (
+      normalized ===
       'SELECT keyword FROM search_history WHERE username = ? ORDER BY sort_index ASC'
     ) {
       const [username] = params as [string];
@@ -417,6 +630,38 @@ function createFakePool() {
     if (normalized === 'SELECT 1 AS v FROM users WHERE username = ? LIMIT 1') {
       const [username] = params as [string];
       return [currentState.users.has(username) ? [{ v: 1 }] : [], []];
+    }
+
+    if (
+      normalized ===
+      'SELECT source, route_mode, COALESCE(SUM(success_count), 0) AS success_count, COALESCE(SUM(failure_count), 0) AS failure_count FROM source_route_stats WHERE bucket_date >= ? GROUP BY source, route_mode'
+    ) {
+      const [sinceDate] = params as [string];
+      const grouped = new Map<
+        string,
+        {
+          source: string;
+          route_mode: 'browser' | 'server';
+          success_count: number;
+          failure_count: number;
+        }
+      >();
+
+      for (const row of currentState.sourceRouteStats) {
+        if (row.bucketDate < sinceDate) continue;
+        const key = `${row.source}:${row.routeMode}`;
+        const current = grouped.get(key) || {
+          source: row.source,
+          route_mode: row.routeMode,
+          success_count: 0,
+          failure_count: 0,
+        };
+        current.success_count += row.successCount;
+        current.failure_count += row.failureCount;
+        grouped.set(key, current);
+      }
+
+      return [Array.from(grouped.values()), []];
     }
 
     throw new Error(`Unhandled query SQL: ${normalized}`);
@@ -459,7 +704,13 @@ jest.mock('mysql2/promise', () => ({
 }));
 
 import { MySqlStorage } from '../mysql.db';
-import type { Favorite, PlayRecord, SkipConfig } from '../types';
+import type {
+  Favorite,
+  PlaybackSession,
+  PlayRecord,
+  SkipConfig,
+  SourceRouteStatsItem,
+} from '../types';
 
 const adminConfig: AdminConfig = {
   ConfigSubscribtion: { URL: '', AutoUpdate: false, LastCheck: '' },
@@ -473,6 +724,7 @@ const adminConfig: AdminConfig = {
     EnableOptimization: true,
     AutoSwitchSourceOnTimeout: false,
     LiveDirectConnect: false,
+    ...DEFAULT_RUNTIME_PARAMS,
     SearchDownstreamMaxPage: 5,
     SiteInterfaceCacheTime: 300,
     DoubanProxyType: 'direct',
@@ -523,6 +775,30 @@ const skipConfig: SkipConfig = {
   outro_time: 30,
 };
 
+const playbackSession: PlaybackSession = {
+  id: 'session_demo_1',
+  source: 'source',
+  video_id: '1',
+  episode_index: 1,
+  title: 'Demo',
+  source_name: 'Source',
+  cover: '',
+  year: '2026',
+  started_at: 1000,
+  ended_at: 2000,
+  watch_seconds: 60,
+  last_position: 60,
+  total_time: 120,
+  created_at: 1000,
+  updated_at: 2000,
+};
+
+function sortRouteStats(items: SourceRouteStatsItem[]) {
+  return [...items].sort((a, b) =>
+    `${a.source}:${a.routeMode}`.localeCompare(`${b.source}:${b.routeMode}`),
+  );
+}
+
 describe('mysql storage contract', () => {
   it('persists user scoped data and deletes it with the user', async () => {
     const storage = new MySqlStorage('mysql://demo:demo@localhost:3306/icetv');
@@ -531,6 +807,7 @@ describe('mysql storage contract', () => {
     await storage.setPlayRecord('demo-user', 'source+1', playRecord);
     await storage.setFavorite('demo-user', 'source+1', favorite);
     await storage.setSkipConfig('demo-user', 'source', '1', skipConfig);
+    await storage.setPlaybackSession('demo-user', playbackSession);
     await storage.addSearchHistory('demo-user', 'first');
     await storage.addSearchHistory('demo-user', 'second');
     await storage.addSearchHistory('demo-user', 'first');
@@ -545,6 +822,9 @@ describe('mysql storage contract', () => {
     await expect(
       storage.getSkipConfig('demo-user', 'source', '1'),
     ).resolves.toEqual(skipConfig);
+    await expect(storage.getPlaybackSessions('demo-user')).resolves.toEqual([
+      playbackSession,
+    ]);
     await expect(storage.getSearchHistory('demo-user')).resolves.toEqual([
       'first',
       'second',
@@ -556,6 +836,7 @@ describe('mysql storage contract', () => {
     await expect(storage.getAllPlayRecords('demo-user')).resolves.toEqual({});
     await expect(storage.getAllFavorites('demo-user')).resolves.toEqual({});
     await expect(storage.getAllSkipConfigs('demo-user')).resolves.toEqual({});
+    await expect(storage.getPlaybackSessions('demo-user')).resolves.toEqual([]);
     await expect(storage.getSearchHistory('demo-user')).resolves.toEqual([]);
   });
 
@@ -574,6 +855,7 @@ describe('mysql storage contract', () => {
           favorites: { 'source+1': favorite },
           searchHistory: ['first', 'second'],
           skipConfigs: { 'source+1': skipConfig },
+          playbackSessions: { [playbackSession.id]: playbackSession },
         },
       },
     });
@@ -593,6 +875,9 @@ describe('mysql storage contract', () => {
     await expect(storage.getAllSkipConfigs('demo-user')).resolves.toEqual({
       'source+1': skipConfig,
     });
+    await expect(storage.getPlaybackSessions('demo-user')).resolves.toEqual([
+      playbackSession,
+    ]);
   });
 
   it('normalizes usernames before storing and looking them up', async () => {
@@ -607,5 +892,64 @@ describe('mysql storage contract', () => {
       true,
     );
     await expect(storage.registerUser('alice_user', 'other')).rejects.toThrow();
+  });
+
+  it('aggregates source route stats by date and mode', async () => {
+    const storage = new MySqlStorage('mysql://demo:demo@localhost:3306/icetv');
+
+    await storage.clearAllData();
+    await storage.recordSourceRouteStat({
+      source: 'source-a',
+      routeMode: 'browser',
+      success: true,
+      eventAt: Date.UTC(2026, 0, 8),
+    });
+    await storage.recordSourceRouteStat({
+      source: 'source-a',
+      routeMode: 'browser',
+      success: false,
+      eventAt: Date.UTC(2026, 0, 8),
+    });
+    await storage.recordSourceRouteStat({
+      source: 'source-a',
+      routeMode: 'server',
+      success: true,
+      eventAt: Date.UTC(2026, 0, 7),
+    });
+    await storage.recordSourceRouteStat({
+      source: 'source-a',
+      routeMode: 'browser',
+      success: true,
+      eventAt: Date.UTC(2025, 11, 31),
+    });
+    await storage.recordSourceRouteStat({
+      source: 'source-b',
+      routeMode: 'browser',
+      success: true,
+      eventAt: Date.UTC(2026, 0, 8),
+    });
+
+    const stats = await storage.getSourceRouteStats('2026-01-02');
+
+    expect(sortRouteStats(stats)).toEqual([
+      {
+        source: 'source-a',
+        routeMode: 'browser',
+        successCount: 1,
+        failureCount: 1,
+      },
+      {
+        source: 'source-a',
+        routeMode: 'server',
+        successCount: 1,
+        failureCount: 0,
+      },
+      {
+        source: 'source-b',
+        routeMode: 'browser',
+        successCount: 1,
+        failureCount: 0,
+      },
+    ]);
   });
 });

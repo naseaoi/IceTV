@@ -11,7 +11,7 @@ export const BANGUMI_DATA_SOURCE_VALUES = [
 
 export type BangumiDataSource = (typeof BANGUMI_DATA_SOURCE_VALUES)[number];
 
-export const DEFAULT_BANGUMI_DATA_SOURCE: BangumiDataSource = 'server';
+export const DEFAULT_BANGUMI_DATA_SOURCE: BangumiDataSource = 'direct';
 
 const bangumiProxySourceHelper = createProxySourceHelper({
   values: BANGUMI_DATA_SOURCE_VALUES,
@@ -33,6 +33,18 @@ export const bangumiDataSourceOptions: {
   },
   { value: 'custom', label: '自定义代理' },
 ];
+
+export const siteBangumiDataSourceOptions = bangumiDataSourceOptions.filter(
+  (option) => option.value !== 'custom',
+);
+
+export function normalizeSiteBangumiDataSource(
+  value: unknown,
+): BangumiDataSource {
+  return siteBangumiDataSourceOptions.some((option) => option.value === value)
+    ? (value as BangumiDataSource)
+    : DEFAULT_BANGUMI_DATA_SOURCE;
+}
 
 export function readDefaultBangumiDataSource(): BangumiDataSource {
   return bangumiProxySourceHelper.readDefaultSource();

@@ -14,6 +14,10 @@ export async function GET(request: NextRequest) {
   const { searchParams } = new URL(request.url);
   const searchKeyword = searchParams.get('q');
   const sourceKey = searchParams.get('source')?.trim();
+  const sourceKeys = (searchParams.get('sources') || '')
+    .split(',')
+    .map((key) => key.trim())
+    .filter(Boolean);
 
   if (!searchKeyword) {
     return new Response(JSON.stringify({ error: '搜索关键词不能为空' }), {
@@ -25,11 +29,17 @@ export async function GET(request: NextRequest) {
   }
 
   const config = await getConfig();
-  const apiSites = sourceKey
-    ? config.SourceConfig.filter((site) => site.key === sourceKey)
+  const sourceKeySet =
+    sourceKeys.length > 0
+      ? new Set(sourceKeys)
+      : sourceKey
+        ? new Set([sourceKey])
+        : null;
+  const apiSites = sourceKeySet
+    ? config.SourceConfig.filter((site) => sourceKeySet.has(site.key))
     : config.SourceConfig;
 
-  if (sourceKey && apiSites.length === 0) {
+  if (sourceKeySet && apiSites.length !== sourceKeySet.size) {
     return NextResponse.json({ error: '源不存在' }, { status: 404 });
   }
 

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 
 import { isGuardFailure, requireActiveUser } from '@/lib/api-auth';
+import type { ApiSite } from '@/lib/config';
 import { getAvailableApiSites, getConfigForRead } from '@/lib/config';
 import {
   isGirigiriSource,
@@ -11,7 +12,6 @@ import {
   resolveXgcartoonEpisodeUrlByPath,
 } from '@/lib/downstream-sources/xgcartoon';
 import { parseLazyEpisodeUrl } from '@/lib/lazy-episodes';
-import type { ApiSite } from '@/lib/config';
 import { createSwrCache } from '@/lib/server-cache';
 
 export const runtime = 'nodejs';

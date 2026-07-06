@@ -7,14 +7,15 @@ import {
 } from '@/lib/http-proxy-json';
 import { authorizeProxyRequest } from '@/lib/proxy-auth';
 import {
+  readArrayBufferLimited,
+  ResponseSizeLimitError,
+} from '@/lib/proxy-response-limits';
+import { normalizeRuntimeParams } from '@/lib/runtime-params';
+import {
   fetchWithUrlGuard,
   UrlValidationError,
   validateProxyUrlForRequest,
 } from '@/lib/url-guard';
-import {
-  readArrayBufferLimited,
-  ResponseSizeLimitError,
-} from '@/lib/proxy-response-limits';
 
 export const runtime = 'nodejs';
 
@@ -43,6 +44,8 @@ export async function GET(request: NextRequest) {
   }
 
   const config = await getConfigForRead();
+  const runtimeParams = normalizeRuntimeParams(config.SiteConfig);
+  const timeoutMs = runtimeParams.ProxyRequestTimeoutSeconds * 1000;
   const liveSource = config.LiveConfig?.find((s: any) => s.key === source);
   const ua = liveSource?.ua || 'AptvPlayer/1.4.10';
 
@@ -55,6 +58,7 @@ export async function GET(request: NextRequest) {
         'User-Agent': ua,
       },
       skipInitialValidation: true,
+      timeoutMs,
     });
 
     return await buildLogoResponse(imageResponse);
@@ -66,7 +70,7 @@ export async function GET(request: NextRequest) {
           new URL(validation.url),
           proxyUrl,
           {
-            timeoutMs: 15_000,
+            timeoutMs,
             userAgent: ua,
             maxBytes: MAX_LOGO_BYTES,
             accept: 'image/*,*/*',

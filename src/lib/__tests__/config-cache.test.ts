@@ -1,5 +1,6 @@
 ﻿/** @jest-environment node */
 
+import { DEFAULT_RUNTIME_PARAMS } from '@/lib/runtime-params';
 import { AdminConfig } from '@/types/admin';
 
 const baseConfig: AdminConfig = {
@@ -14,6 +15,7 @@ const baseConfig: AdminConfig = {
     EnableOptimization: true,
     AutoSwitchSourceOnTimeout: false,
     LiveDirectConnect: false,
+    ...DEFAULT_RUNTIME_PARAMS,
     SearchDownstreamMaxPage: 5,
     SiteInterfaceCacheTime: 300,
     DoubanProxyType: 'direct',
@@ -222,6 +224,9 @@ describe('config cache persistence', () => {
 
   it('serves cached config when a later read fails', async () => {
     process.env.CONFIG_CACHE_TTL_MS = '0';
+    const consoleErrorSpy = jest
+      .spyOn(console, 'error')
+      .mockImplementation(() => undefined);
     const realConfig = cloneBaseConfig();
     realConfig.SiteConfig.SiteName = 'Real-Site';
     const getAdminConfig = jest
@@ -238,9 +243,16 @@ describe('config cache persistence', () => {
     const second = await getConfig();
     expect(second.SiteConfig.SiteName).toBe('Real-Site');
     expect(getAdminConfig).toHaveBeenCalledTimes(2);
+    expect(consoleErrorSpy).toHaveBeenCalledWith(
+      '获取管理员配置失败:',
+      expect.any(Error),
+    );
   });
 
   it('throws instead of persisting defaults when the first read fails', async () => {
+    const consoleErrorSpy = jest
+      .spyOn(console, 'error')
+      .mockImplementation(() => undefined);
     const saveAdminConfig = jest.fn();
     const getAdminConfig = jest
       .fn()
@@ -251,6 +263,10 @@ describe('config cache persistence', () => {
 
     await expect(getConfig()).rejects.toThrow('read failed');
     expect(saveAdminConfig).not.toHaveBeenCalled();
+    expect(consoleErrorSpy).toHaveBeenCalledWith(
+      '获取管理员配置失败:',
+      expect.any(Error),
+    );
   });
 
   it('defaults missing fluid search config to enabled', async () => {
@@ -259,6 +275,60 @@ describe('config cache persistence', () => {
     delete (config.SiteConfig as Partial<typeof config.SiteConfig>).FluidSearch;
 
     expect(configSelfCheck(config).SiteConfig.FluidSearch).toBe(true);
+  });
+
+  it('exposes public-safe proxy defaults in public config', async () => {
+    const adminConfig = cloneBaseConfig();
+    adminConfig.SiteConfig.DoubanProxyType = 'server';
+    adminConfig.SiteConfig.DoubanImageProxyType = 'cmliussss-cdn-ali';
+    adminConfig.SiteConfig.BangumiDataSource = 'direct';
+    const { getPublicConfig } = await loadConfigModule(jest.fn(), {
+      adminConfig,
+    });
+
+    await expect(getPublicConfig()).resolves.toMatchObject({
+      DoubanProxyType: 'direct',
+      DoubanImageProxyType: 'cmliussss-cdn-ali',
+      BangumiDataSource: 'direct',
+    });
+  });
+
+  it('falls back custom proxy defaults in public config', async () => {
+    const adminConfig = cloneBaseConfig();
+    adminConfig.SiteConfig.DoubanProxyType = 'custom';
+    adminConfig.SiteConfig.DoubanImageProxyType = 'custom';
+    adminConfig.SiteConfig.BangumiDataSource = 'custom';
+    const { getPublicConfig } = await loadConfigModule(jest.fn(), {
+      adminConfig,
+    });
+
+    await expect(getPublicConfig()).resolves.toMatchObject({
+      DoubanProxyType: 'direct',
+      DoubanImageProxyType: 'direct',
+      BangumiDataSource: 'direct',
+    });
+  });
+
+  it('clears custom proxy values from stored site config', async () => {
+    const { configSelfCheck } = await loadConfigModule(jest.fn());
+    const config = cloneBaseConfig();
+    config.SiteConfig.DoubanProxyType = 'custom';
+    config.SiteConfig.DoubanProxy = 'https://data.example/fetch?url=';
+    config.SiteConfig.DoubanImageProxyType = 'custom';
+    config.SiteConfig.DoubanImageProxy = 'https://image.example/fetch?url=';
+    config.SiteConfig.BangumiDataSource = 'custom';
+    config.SiteConfig.BangumiProxy = 'https://bangumi.example/fetch?url=';
+
+    const checked = configSelfCheck(config);
+
+    expect(checked.SiteConfig).toMatchObject({
+      DoubanProxyType: 'direct',
+      DoubanProxy: '',
+      DoubanImageProxyType: 'direct',
+      DoubanImageProxy: '',
+      BangumiDataSource: 'direct',
+      BangumiProxy: '',
+    });
   });
 
   it('keeps disabled fluid search config disabled', async () => {

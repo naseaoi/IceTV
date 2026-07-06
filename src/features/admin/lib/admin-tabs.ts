@@ -1,17 +1,19 @@
+import type { LucideIcon } from 'lucide-react';
 import {
   Database,
   FileText,
   FolderOpen,
   Settings,
+  SlidersHorizontal,
   Tv,
   Users,
   Video,
 } from 'lucide-react';
-import type { LucideIcon } from 'lucide-react';
 
 export type AdminTabId =
   | 'config-file'
   | 'site'
+  | 'runtime'
   | 'user'
   | 'video-source'
   | 'live-source'
@@ -28,6 +30,12 @@ export interface AdminTabMeta {
 export const ADMIN_TABS: AdminTabMeta[] = [
   { id: 'config-file', label: '配置文件', icon: FileText, ownerOnly: true },
   { id: 'site', label: '站点配置', icon: Settings, ownerOnly: false },
+  {
+    id: 'runtime',
+    label: '运行参数',
+    icon: SlidersHorizontal,
+    ownerOnly: false,
+  },
   { id: 'user', label: '用户配置', icon: Users, ownerOnly: false },
   { id: 'video-source', label: '视频源配置', icon: Video, ownerOnly: false },
   { id: 'live-source', label: '直播源配置', icon: Tv, ownerOnly: false },

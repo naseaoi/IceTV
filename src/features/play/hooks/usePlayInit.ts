@@ -1,22 +1,23 @@
-import { Dispatch, MutableRefObject, SetStateAction, useEffect } from 'react';
+import {
+  Dispatch,
+  MutableRefObject,
+  SetStateAction,
+  useEffect,
+  useRef,
+} from 'react';
 
-import { filterSourcesForPlayback } from '@/lib/source-match';
-import { mergeSourceBundle } from '@/lib/source-bundle';
-import { SearchResult } from '@/lib/types';
-import { prefetchM3U8 } from '@/lib/player-runtime';
-import { getProxyModes, shouldUseServerProxy } from '@/lib/proxy-modes';
-
-import { calculateSourceScore } from '@/features/play/lib/playUtils';
 import {
   readDetailSnapshot,
   saveDetailSnapshot,
 } from '@/features/play/lib/detailSnapshot';
+import { calculateSourceScore } from '@/features/play/lib/playUtils';
 import { probeVodEpisodeUrl } from '@/features/play/lib/vodProbe';
 import { isVodM3u8Url } from '@/features/play/lib/vodProxyUrl';
-
-// ---------------------------------------------------------------------------
-// 客户端 detail 内存缓存 — 短时间退出重进时避免重复请求
-// ---------------------------------------------------------------------------
+import { prefetchM3U8 } from '@/lib/player-runtime';
+import { getProxyModes, shouldUseServerProxy } from '@/lib/proxy-modes';
+import { mergeSourceBundle } from '@/lib/source-bundle';
+import { filterSourcesForPlayback } from '@/lib/source-match';
+import { SearchResult } from '@/lib/types';
 
 const DETAIL_CACHE_TTL_MS = 3 * 60 * 1000;
 const IS_DEVELOPMENT = process.env.NODE_ENV !== 'production';
@@ -47,16 +48,11 @@ function setCachedDetail(source: string, id: string, data: SearchResult) {
 
   const key = `${source}::${id}`;
   detailCache.set(key, { data, expiresAt: Date.now() + DETAIL_CACHE_TTL_MS });
-  // 防止无限膨胀
   if (detailCache.size > 100) {
     const oldest = detailCache.keys().next().value;
     if (oldest) detailCache.delete(oldest);
   }
 }
-
-// ---------------------------------------------------------------------------
-// resolveHarvestWindow — 根据首个测速结果自适应调整收割窗口
-// ---------------------------------------------------------------------------
 
 /** 高速源缩短等待，低速源保持完整窗口 */
 function resolveHarvestWindow(testResult: { loadSpeed: string }): number {
@@ -67,17 +63,10 @@ function resolveHarvestWindow(testResult: { loadSpeed: string }): number {
   let speedKBps: number;
   if (unit === 'Mbps') speedKBps = (value * 1024) / 8;
   else speedKBps = unit === 'MB/s' ? value * 1024 : value;
-  // > 2 MB/s → 500ms，> 1 MB/s → 800ms，否则 1500ms
   if (speedKBps >= 2048) return 500;
   if (speedKBps >= 1024) return 800;
   return 1500;
 }
-
-// ---------------------------------------------------------------------------
-// preferBestSource — 播放源优选（竞速模式）
-// 所有源同时并发测试，首个成功后启动短暂收割窗口，窗口结束后从已收集
-// 结果中选最优源。快源不再被慢源拖累，大幅缩短用户等待时间。
-// ---------------------------------------------------------------------------
 
 async function preferBestSource(
   sources: SearchResult[],
@@ -104,7 +93,6 @@ async function preferBestSource(
   let settled = false;
 
   return new Promise<SearchResult>((resolveMain) => {
-    // 外部中止时立即返回首个源
     if (signal?.aborted) {
       resolveMain(sources[0]);
       return;
@@ -118,13 +106,11 @@ async function preferBestSource(
     };
     signal?.addEventListener('abort', onAbort, { once: true });
 
-    // 最终从已收集结果中选出最优源并返回
     const finalize = () => {
       if (settled) return;
       settled = true;
       if (harvestTimer) clearTimeout(harvestTimer);
 
-      // 构建预计算 Map（SourcesTab 复用）
       const newVideoInfoMap = new Map<
         string,
         {
@@ -140,7 +126,6 @@ async function preferBestSource(
         newVideoInfoMap.set(key, r.testResult);
         collectedKeys.add(key);
       }
-      // 未完成的源标记为 hasError，后续 SourcesTab 会自行重新测速
       for (const s of sources) {
         const key = `${s.source}-${s.id}`;
         if (!collectedKeys.has(key)) {
@@ -159,7 +144,6 @@ async function preferBestSource(
         return;
       }
 
-      // 评分排序
       const validSpeeds = collectedResults
         .map((r) => {
           const m = r.testResult.loadSpeed.match(
@@ -185,9 +169,6 @@ async function preferBestSource(
       }));
       scored.sort((a, b) => b.score - a.score);
 
-      // 预热运行 up：把排名第二的源的 m3u8 打进服务端 SWR 缓存，
-      // 一旦首选起播失败自动降级时能省掉一次回源 RTT。
-      // 忽略带签名 token 的 URL（proxy 缓存已跳过签名 URL，这里预取也没意义）
       const runnerUpEpisode = scored[1]?.source.episodes?.[0];
       if (runnerUpEpisode && isVodM3u8Url(runnerUpEpisode)) {
         prefetchM3U8(
@@ -198,7 +179,6 @@ async function preferBestSource(
       resolveMain(scored[0].source);
     };
 
-    // 全量并发测试
     let pendingCount = sources.length;
     for (const source of sources) {
       if (!source.episodes || source.episodes.length === 0) {
@@ -206,32 +186,29 @@ async function preferBestSource(
         if (pendingCount === 0) finalize();
         continue;
       }
-      const useProxy = shouldUseServerProxy(source.source, proxyModes);
-      probeVodEpisodeUrl(source.episodes[0], useProxy, source.source)
+      const episodeUrl = source.episodes[0];
+      const useProxy = shouldUseServerProxy(
+        source.source,
+        episodeUrl,
+        proxyModes,
+      );
+      probeVodEpisodeUrl(episodeUrl, useProxy, source.source)
         .then((testResult) => {
           if (settled) return;
           collectedResults.push({ source, testResult });
-          // 首个成功：启动自适应收割窗口
           if (!harvestTimer) {
             const windowMs = resolveHarvestWindow(testResult);
             harvestTimer = setTimeout(finalize, windowMs);
           }
         })
-        .catch(() => {
-          // 测速失败，不计入
-        })
+        .catch(() => {})
         .finally(() => {
           pendingCount--;
-          // 所有源都完成了（无论成败），直接 finalize
           if (pendingCount === 0 && !settled) finalize();
         });
     }
   });
 }
-
-// ---------------------------------------------------------------------------
-// updateVideoUrl — 更新视频播放地址
-// ---------------------------------------------------------------------------
 
 export function updateVideoUrl(
   detailData: SearchResult | null,
@@ -332,6 +309,11 @@ interface UsePlayInitParams {
   >;
 }
 
+interface QuickSearchResponse {
+  detail?: SearchResult | null;
+  sources?: SearchResult[];
+}
+
 export function usePlayInit({
   currentSource,
   currentId,
@@ -361,9 +343,68 @@ export function usePlayInit({
   setSourceSearchError,
   setPrecomputedVideoInfo,
 }: UsePlayInitParams) {
+  const initialParamsRef = useRef({
+    currentEpisodeIndex,
+    currentId,
+    currentSource,
+    needPreferRef,
+    optimizationEnabled,
+    searchTitle,
+    searchType,
+    setAvailableSources,
+    setCurrentEpisodeIndex,
+    setCurrentId,
+    setCurrentSource,
+    setDetail,
+    setError,
+    setLoading,
+    setLoadingMessage,
+    setLoadingStage,
+    setNeedPrefer,
+    setPrecomputedVideoInfo,
+    setSourceSearchError,
+    setSourceSearchLoading,
+    setVideoCover,
+    setVideoDoubanId,
+    setVideoTitle,
+    setVideoYear,
+    videoTitle,
+    videoTitleRef,
+    videoYearRef,
+  });
+
   useEffect(() => {
     const abortController = new AbortController();
     const { signal } = abortController;
+    const {
+      currentEpisodeIndex,
+      currentId,
+      currentSource,
+      needPreferRef,
+      optimizationEnabled,
+      searchTitle,
+      searchType,
+      setAvailableSources,
+      setCurrentEpisodeIndex,
+      setCurrentId,
+      setCurrentSource,
+      setDetail,
+      setError,
+      setLoading,
+      setLoadingMessage,
+      setLoadingStage,
+      setNeedPrefer,
+      setPrecomputedVideoInfo,
+      setSourceSearchError,
+      setSourceSearchLoading,
+      setVideoCover,
+      setVideoDoubanId,
+      setVideoTitle,
+      setVideoYear,
+      videoTitle,
+      videoTitleRef,
+      videoYearRef,
+    } = initialParamsRef.current;
 
     const fetchDetailData = async (
       source: string,
@@ -382,7 +423,7 @@ export function usePlayInit({
       return detailData;
     };
 
-    // 快照秒播后后台刷新详情，追更时更新界面
+    // 后台刷新详情
     const revalidateDetailSnapshot = (
       source: string,
       id: string,
@@ -446,7 +487,6 @@ export function usePlayInit({
           searchType:
             searchType === 'tv' || searchType === 'movie' ? searchType : '',
         });
-        // 保留已通过 detail 补全的条目（搜索可能晚于详情先行路径完成）
         setAvailableSources((prev) => {
           const detailed = prev.filter(
             (item) => item.episodes && item.episodes.length > 0,
@@ -466,7 +506,28 @@ export function usePlayInit({
       }
     };
 
-    // 从 sessionStorage 读取聚合组数据（搜索页传递），读后立即清理
+    const fetchQuickPlayableData = async (
+      query: string,
+    ): Promise<QuickSearchResponse | null> => {
+      const params = new URLSearchParams({ q: query.trim() });
+      if (videoYearRef.current) {
+        params.set('year', videoYearRef.current);
+      }
+      if (searchType === 'tv' || searchType === 'movie') {
+        params.set('stype', searchType);
+      }
+
+      try {
+        const response = await fetch(`/api/search/quick?${params.toString()}`, {
+          signal,
+        });
+        if (!response.ok) return null;
+        return (await response.json()) as QuickSearchResponse;
+      } catch {
+        return null;
+      }
+    };
+
     const loadAggregateGroup = (): SearchResult[] | null => {
       try {
         const raw = sessionStorage.getItem('aggregate_group');
@@ -476,16 +537,18 @@ export function usePlayInit({
           if (Array.isArray(parsed) && parsed.length > 0) return parsed;
         }
       } catch {
-        // 解析失败，静默忽略
+        return null;
       }
       return null;
     };
 
-    const finalizePlaybackDetail = async (detailData: SearchResult) => {
+    const finalizePlaybackDetail = async (
+      detailData: SearchResult,
+      options?: { skipTransitionDelay?: boolean },
+    ) => {
       setNeedPrefer(false);
       setCurrentSource(detailData.source);
       setCurrentId(detailData.id);
-      // 防御：detailData.year 为 unknown 时保留 URL 参数中的年份
       const resolvedYear =
         detailData.year && detailData.year !== 'unknown'
           ? detailData.year
@@ -499,7 +562,6 @@ export function usePlayInit({
         setCurrentEpisodeIndex(0);
       }
 
-      // 规范URL参数
       const newUrl = new URL(window.location.href);
       newUrl.searchParams.set('source', detailData.source);
       newUrl.searchParams.set('id', detailData.id);
@@ -510,8 +572,9 @@ export function usePlayInit({
 
       setLoadingStage('ready');
       setLoadingMessage('准备就绪，即将开始播放...');
-      // 保留很短的过渡，避免 loading 文案闪烁。
-      await new Promise((r) => setTimeout(r, 200));
+      if (!options?.skipTransitionDelay) {
+        await new Promise((r) => setTimeout(r, 200));
+      }
       setLoading(false);
     };
 
@@ -530,22 +593,43 @@ export function usePlayInit({
           : '正在搜索播放源...',
       );
 
-      // 优先使用搜索页通过 sessionStorage 传递的聚合组数据，避免重新搜索导致源站列表不一致
       const cachedGroup = loadAggregateGroup();
 
-      // 指定源且无需优选时详情先行直接起播，聚合搜索转入后台补齐换源列表
-      if (
-        !cachedGroup &&
-        currentSource &&
-        currentId &&
-        !needPreferRef.current
-      ) {
+      if (currentSource && currentId && !needPreferRef.current) {
         const fastDetail = await fetchSourceDetail(currentSource, currentId);
         if (signal.aborted) return;
         if (fastDetail?.episodes && fastDetail.episodes.length > 0) {
           setAvailableSources(mergeSourceBundle([], fastDetail));
           void fetchSourcesData(searchTitle || videoTitle);
-          await finalizePlaybackDetail(fastDetail);
+          await finalizePlaybackDetail(fastDetail, {
+            skipTransitionDelay: true,
+          });
+          return;
+        }
+      }
+
+      const quickQuery = searchTitle || videoTitle;
+      if (!cachedGroup && !currentSource && !currentId && optimizationEnabled) {
+        const quickData = quickQuery
+          ? await fetchQuickPlayableData(quickQuery)
+          : null;
+        if (signal.aborted) return;
+
+        const quickDetail = quickData?.detail;
+        if (quickDetail?.episodes && quickDetail.episodes.length > 0) {
+          const quickSources = quickData?.sources || [quickDetail];
+          saveDetailSnapshot(quickDetail.source, quickDetail.id, quickDetail);
+          setAvailableSources(
+            quickSources.reduce(
+              (acc, item) => mergeSourceBundle(acc, item),
+              [] as SearchResult[],
+            ),
+          );
+          setSourceSearchLoading(true);
+          void fetchSourcesData(quickQuery);
+          await finalizePlaybackDetail(quickDetail, {
+            skipTransitionDelay: true,
+          });
           return;
         }
       }
@@ -619,7 +703,6 @@ export function usePlayInit({
       }
       if (signal.aborted) return;
 
-      // 选定源的 episodes 为空（搜索阶段的残缺数据），补调 detail 获取完整信息
       if (!detailData.episodes || detailData.episodes.length === 0) {
         setLoadingStage('fetching');
         setLoadingMessage('正在获取视频详情...');

@@ -9,14 +9,13 @@ import {
   useEffect,
 } from 'react';
 
+import type { SkipConfigState } from '@/features/play/hooks/usePlayPageState';
+import { formatTimeSimple } from '@/features/play/lib/formatTime';
 import {
   deleteSkipConfig,
   getSkipConfig,
   saveSkipConfig,
 } from '@/lib/db.client';
-
-import { formatTimeSimple } from '@/features/play/lib/formatTime';
-import type { SkipConfigState } from '@/features/play/hooks/usePlayPageState';
 
 interface UseSkipConfigOptions {
   currentSource: string;
@@ -131,7 +130,7 @@ export function useSkipConfig({
     ],
   );
 
-  // 进入新视频时读取已存档的跳过配置
+  // 读取跳过配置
   useEffect(() => {
     const initSkipConfig = async () => {
       if (!currentSource || !currentId) return;
@@ -142,8 +141,8 @@ export function useSkipConfig({
         console.error('读取跳过片头片尾配置失败:', err);
       }
     };
-    initSkipConfig();
-  }, []);
+    void initSkipConfig();
+  }, [currentSource, currentId, setSkipConfig]);
 
   return { handleSkipConfigChange };
 }

@@ -1,11 +1,10 @@
 import type Artplayer from 'artplayer';
 import type { Dispatch, MutableRefObject, SetStateAction } from 'react';
 
-import type { SearchResult, SkipConfig } from '@/lib/types';
-
 import type { PlaybackRequestMode } from '@/features/play/hooks/usePlayPageState';
 import type { WakeLockSentinel } from '@/features/play/lib/playTypes';
 import type { ResumeMode } from '@/features/play/lib/resumePlayback';
+import type { SearchResult, SkipConfig } from '@/lib/types';
 
 export type CurrentSourceVideoInfo = {
   quality: string;
@@ -26,6 +25,7 @@ export interface UseArtPlayerParams {
   videoCover: string;
   videoTitle: string;
   loading: boolean;
+  playbackRetryNonce: number;
   detail: SearchResult | null;
   currentEpisodeIndex: number;
   totalEpisodes: number;
@@ -53,6 +53,8 @@ export interface UseArtPlayerParams {
   handleNextEpisode: () => void;
   handleSkipConfigChange: (newConfig: SkipConfig) => Promise<void>;
   saveCurrentPlayProgress: () => void;
+  reportPlaybackStats?: (force?: boolean) => void;
+  startPlaybackStatsSession?: () => void;
   requestWakeLock: () => Promise<void>;
   releaseWakeLock: () => Promise<void>;
   cleanupPlayer: () => void;

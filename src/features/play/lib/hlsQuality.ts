@@ -3,6 +3,7 @@ import type { MutableRefObject } from 'react';
 
 import {
   readPreferredQualityHeight,
+  readPreferredQualityPreference,
   writePreferredQualityHeight,
 } from '@/lib/local-preferences';
 
@@ -15,6 +16,13 @@ interface HlsQualityController {
   levels?: HlsLevelLike[];
   currentLevel: number;
   startLevel: number;
+  loadLevel?: number;
+  nextLevel?: number;
+  nextLoadLevel?: number;
+  nextAutoLevel?: number;
+  autoLevelCapping?: number;
+  __icetvManualQualityLocked?: boolean;
+  __icetvDefaultQualityLevel?: number | null;
 }
 
 export interface QualityOption {
@@ -24,6 +32,152 @@ export interface QualityOption {
 }
 
 const QUALITY_CONTROL_NAME = 'icetv-quality';
+
+function trySetHlsQualityValue<K extends keyof HlsQualityController>(
+  hls: HlsQualityController,
+  key: K,
+  value: HlsQualityController[K],
+): void {
+  try {
+    hls[key] = value;
+  } catch {}
+}
+
+function normalizeLevelIndex(
+  levels: HlsLevelLike[] | undefined,
+  levelIndex: number | null | undefined,
+): number | null {
+  if (levelIndex === null || levelIndex === undefined || levelIndex < 0) {
+    return null;
+  }
+  if (!levels?.length) {
+    return levelIndex;
+  }
+  return Math.min(levels.length - 1, Math.floor(levelIndex));
+}
+
+export function findHighestLevelIndex(levels: HlsLevelLike[]): number | null {
+  if (levels.length === 0) {
+    return null;
+  }
+
+  let bestIndex = 0;
+  let bestHeight = levels[0]?.height || 0;
+  let bestBitrate = levels[0]?.bitrate || 0;
+  levels.forEach((level, index) => {
+    const height = level.height || 0;
+    const bitrate = level.bitrate || 0;
+    if (
+      height > bestHeight ||
+      (height === bestHeight && bitrate > bestBitrate)
+    ) {
+      bestIndex = index;
+      bestHeight = height;
+      bestBitrate = bitrate;
+    }
+  });
+  return bestIndex;
+}
+
+export function findNextLowerLevelIndex(
+  levels: HlsLevelLike[],
+  currentLevelIndex: number,
+): number | null {
+  const currentLevel = levels[currentLevelIndex];
+  if (!currentLevel || levels.length === 0) {
+    return null;
+  }
+
+  const currentHeight = currentLevel.height || 0;
+  const currentBitrate = currentLevel.bitrate || 0;
+  let bestIndex = -1;
+  let bestHeight = -1;
+  let bestBitrate = -1;
+
+  levels.forEach((level, index) => {
+    if (index === currentLevelIndex) {
+      return;
+    }
+
+    const height = level.height || 0;
+    const bitrate = level.bitrate || 0;
+    const lowerByHeight = currentHeight > 0 && height < currentHeight;
+    const lowerByBitrate =
+      currentHeight <= 0 && currentBitrate > 0 && bitrate < currentBitrate;
+
+    if (!lowerByHeight && !lowerByBitrate) {
+      return;
+    }
+
+    if (
+      height > bestHeight ||
+      (height === bestHeight && bitrate > bestBitrate)
+    ) {
+      bestIndex = index;
+      bestHeight = height;
+      bestBitrate = bitrate;
+    }
+  });
+
+  return bestIndex >= 0 ? bestIndex : null;
+}
+
+export function applyAutoQualityLevel(
+  hls: HlsQualityController,
+  options: { startLevelIndex?: number | null } = {},
+): void {
+  const startLevelIndex = normalizeLevelIndex(
+    hls.levels,
+    options.startLevelIndex,
+  );
+  hls.__icetvManualQualityLocked = false;
+  trySetHlsQualityValue(hls, 'startLevel', startLevelIndex ?? -1);
+  trySetHlsQualityValue(hls, 'currentLevel', -1);
+  trySetHlsQualityValue(hls, 'loadLevel', -1);
+  trySetHlsQualityValue(hls, 'nextLevel', -1);
+  trySetHlsQualityValue(hls, 'nextLoadLevel', -1);
+  if (startLevelIndex !== null) {
+    trySetHlsQualityValue(hls, 'nextAutoLevel', startLevelIndex);
+  }
+  trySetHlsQualityValue(hls, 'autoLevelCapping', -1);
+}
+
+export function seedAutoQualityStartLevel(
+  hls: HlsQualityController,
+  startLevelIndex: number | null,
+): void {
+  const normalizedLevelIndex = normalizeLevelIndex(hls.levels, startLevelIndex);
+  if (normalizedLevelIndex === null) {
+    return;
+  }
+  hls.__icetvManualQualityLocked = false;
+  trySetHlsQualityValue(hls, 'startLevel', normalizedLevelIndex);
+  trySetHlsQualityValue(hls, 'nextAutoLevel', normalizedLevelIndex);
+  trySetHlsQualityValue(hls, 'autoLevelCapping', -1);
+}
+
+export function applyManualQualityLevel(
+  hls: HlsQualityController,
+  levelIndex: number,
+  options: { userSelected?: boolean } = {},
+): void {
+  hls.__icetvManualQualityLocked = options.userSelected === true;
+  trySetHlsQualityValue(hls, 'startLevel', levelIndex);
+  trySetHlsQualityValue(hls, 'currentLevel', levelIndex);
+  trySetHlsQualityValue(hls, 'loadLevel', levelIndex);
+  trySetHlsQualityValue(hls, 'nextLevel', levelIndex);
+  trySetHlsQualityValue(hls, 'nextLoadLevel', levelIndex);
+  trySetHlsQualityValue(hls, 'autoLevelCapping', -1);
+}
+
+export function applyDefaultQualityLevel(
+  hls: HlsQualityController,
+  levelIndex: number,
+): void {
+  hls.__icetvManualQualityLocked = false;
+  trySetHlsQualityValue(hls, 'currentLevel', levelIndex);
+  trySetHlsQualityValue(hls, 'autoLevelCapping', -1);
+}
 
 export function formatQualityLabel(level: HlsLevelLike): string {
   const height = level.height || 0;
@@ -81,6 +235,29 @@ export function findPreferredLevelIndex(levels: HlsLevelLike[]): number | null {
   return bestIndex >= 0 ? bestIndex : null;
 }
 
+export function findLevelIndexByHeight(
+  levels: HlsLevelLike[],
+  preferredHeight: number,
+): number | null {
+  if (!preferredHeight || levels.length === 0) {
+    return null;
+  }
+
+  let bestIndex = -1;
+  let bestDelta = Number.POSITIVE_INFINITY;
+  let bestBitrate = -1;
+  levels.forEach((level, index) => {
+    const delta = Math.abs((level.height || 0) - preferredHeight);
+    const bitrate = level.bitrate || 0;
+    if (delta < bestDelta || (delta === bestDelta && bitrate > bestBitrate)) {
+      bestDelta = delta;
+      bestIndex = index;
+      bestBitrate = bitrate;
+    }
+  });
+  return bestIndex >= 0 ? bestIndex : null;
+}
+
 interface QualityControlApi {
   update: (option: Record<string, unknown>) => void;
   remove: (name: string) => void;
@@ -111,7 +288,14 @@ function registerQualityControl(
   }
 
   const options = buildQualityOptions(levels);
-  const preferredIndex = forceAuto ? null : findPreferredLevelIndex(levels);
+  const qualityPreference = readPreferredQualityPreference();
+  const preferredIndex = forceAuto
+    ? null
+    : qualityPreference.mode === 'manual'
+      ? findLevelIndexByHeight(levels, qualityPreference.height)
+      : qualityPreference.mode === 'default'
+        ? (hls.__icetvDefaultQualityLevel ?? findHighestLevelIndex(levels))
+        : null;
   const activeOption =
     preferredIndex === null
       ? null
@@ -142,10 +326,13 @@ function registerQualityControl(
     onSelect(item: QualitySelectorItem) {
       if (item.levelIndex < 0) {
         writePreferredQualityHeight(null);
-        hls.currentLevel = -1;
+        applyAutoQualityLevel(hls, {
+          startLevelIndex:
+            hls.__icetvDefaultQualityLevel ?? findHighestLevelIndex(levels),
+        });
       } else {
         writePreferredQualityHeight(item.height);
-        hls.currentLevel = item.levelIndex;
+        applyManualQualityLevel(hls, item.levelIndex, { userSelected: true });
       }
       art.notice.show = `画质: ${item.html}`;
       return item.html;

@@ -5,6 +5,11 @@ import {
   BANGUMI_CALENDAR_FRESH_SECONDS,
   BANGUMI_CALENDAR_STALE_SECONDS,
 } from '@/features/home/lib/home-cache';
+import { isGuardFailure, requireActiveUser } from '@/lib/api-auth';
+import {
+  recordServerProxyFailure,
+  requireServerProxyQuota,
+} from '@/lib/server-proxy-guard';
 
 const MIN_TIMEOUT_MS = 1000;
 const MAX_TIMEOUT_MS = 30000;
@@ -15,6 +20,19 @@ export const revalidate = 0;
 
 export async function GET(request: NextRequest) {
   try {
+    const guardResult = await requireActiveUser(request, {
+      unauthorizedMessage: 'Unauthorized',
+      includeUserStateCode: false,
+    });
+    if (isGuardFailure(guardResult)) return guardResult.response;
+
+    const quotaFailure = requireServerProxyQuota(
+      'bangumi-data',
+      request,
+      guardResult.username,
+    );
+    if (quotaFailure) return quotaFailure;
+
     const source = request.nextUrl.searchParams.get('source');
 
     if (source && source !== 'server') {
@@ -42,6 +60,7 @@ export async function GET(request: NextRequest) {
       },
     });
   } catch (error) {
+    recordServerProxyFailure('bangumi-data', error);
     console.error('Bangumi 日历接口失败:', error);
     return NextResponse.json(
       { error: '获取 Bangumi 日历失败' },

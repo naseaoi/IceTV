@@ -1,9 +1,9 @@
-import { API_CONFIG, type ApiSite } from '@/lib/config';
+import { type ApiSite, API_CONFIG } from '@/lib/config';
 import {
+  type GiriEpisodeVariant,
   buildGirigiriVariantId,
   countGirigiriVariantTabs,
   extractGirigiriEpisodeVariants,
-  type GiriEpisodeVariant,
   parseGirigiriVariantId,
 } from '@/lib/giri';
 import { buildLazyEpisodeUrl } from '@/lib/lazy-episodes';

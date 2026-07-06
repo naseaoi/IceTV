@@ -1,43 +1,20 @@
 import type { MutableRefObject } from 'react';
 
-import {
-  clearSourceProxyOverride,
-  isServerProxy,
-  rememberSourceServerProxy,
-} from '@/lib/proxy-modes';
-import {
-  bindPlayerHoverControls,
-  bindPlayerMobileControls,
-  createHlsLoaderClass,
-  getManagedVideo,
-  getPlayerModules,
-  isPlayerFastForwarding,
-  prefetchM3U8,
-  restorePlayerPlaybackRate,
-} from '@/lib/player-runtime';
-import { preconnectForUrl } from '@/lib/preconnect';
-import {
-  configureArtplayerStatics,
-  createArtPlayerConfig,
-  ensureVideoSource,
-  formatTime,
-} from '@/lib/player-utils';
-
 import type { UseArtPlayerParams } from '@/features/play/hooks/artPlayerTypes';
 import { resolveNextStablePlaybackTime } from '@/features/play/hooks/usePlayProgress';
 import {
+  createArtPlayerControls,
+  createArtPlayerSettings,
+} from '@/features/play/lib/artPlayerSettings';
+import {
+  type PlayerLoadingSessionState,
   hasReachedResumeTarget,
   markPlayerLoadingSessionStarted,
-  type PlayerLoadingSessionState,
   resetPlayerLoadingSessionState,
   shouldDismissLoadingFromCanPlay,
   shouldDismissLoadingFromReadyFrame,
 } from '@/features/play/lib/playerLoading';
 import { filterAdsFromM3U8 } from '@/features/play/lib/playUtils';
-import {
-  createArtPlayerControls,
-  createArtPlayerSettings,
-} from '@/features/play/lib/artPlayerSettings';
 import {
   applyResumeTime,
   isWithinAutoResumeWindow,
@@ -52,6 +29,30 @@ import {
   isVodM3u8Url,
   isVodMp4Url,
 } from '@/features/play/lib/vodProxyUrl';
+import {
+  bindPlayerHoverControls,
+  bindPlayerMobileControls,
+  createHlsLoaderClass,
+  getManagedVideo,
+  getPlayerModules,
+  isPlayerFastForwarding,
+  prefetchM3U8,
+  restorePlayerPlaybackRate,
+} from '@/lib/player-runtime';
+import {
+  configureArtplayerStatics,
+  createArtPlayerConfig,
+  ensureVideoSource,
+  formatTime,
+} from '@/lib/player-utils';
+import { preconnectForUrl } from '@/lib/preconnect';
+import {
+  clearSourceProxyOverride,
+  isServerProxy,
+  rememberSourceServerProxy,
+  shouldAutoFallbackToServer,
+} from '@/lib/proxy-modes';
+import { reportSourceRouteStat } from '@/lib/source-route-stats.client';
 
 interface UseArtPlayerInitState {
   loadingSessionRef: MutableRefObject<PlayerLoadingSessionState>;
@@ -95,6 +96,8 @@ export async function initializeArtPlayer(
     handleNextEpisode,
     handleSkipConfigChange,
     saveCurrentPlayProgress,
+    reportPlaybackStats,
+    startPlaybackStatsSession,
     requestWakeLock,
     releaseWakeLock,
     cleanupPlayer,
@@ -118,7 +121,7 @@ export async function initializeArtPlayer(
       id: detailRef.current?.id || detail?.id || '',
       videoUrl,
     };
-    const preUseProxy = isServerProxy(preSourceKey);
+    const preUseProxy = isServerProxy(preSourceKey, videoUrl);
     const buildProxyUrl = (rawUrl: string) =>
       buildVodProxyUrl({
         rawUrl,
@@ -256,6 +259,23 @@ export async function initializeArtPlayer(
     bindPlayerMobileControls(player);
     let nativeUseServerProxy = mediaKind === 'native' && preUseProxy;
     let nativeFallbackStarted = false;
+    const nativeRouteStatReported = {
+      browser: { success: false, failure: false },
+      server: { success: false, failure: false },
+    };
+    const reportNativeRouteStat = (success: boolean) => {
+      if (mediaKind !== 'native' || !preSourceKey) return;
+      const mode = nativeUseServerProxy ? 'server' : 'browser';
+      const state = nativeRouteStatReported[mode];
+      if (success) {
+        if (state.success) return;
+        state.success = true;
+      } else {
+        if (state.failure) return;
+        state.failure = true;
+      }
+      reportSourceRouteStat(preSourceKey, mode, success);
+    };
 
     if (mediaKind === 'native' && player.video) {
       getManagedVideo(
@@ -264,7 +284,12 @@ export async function initializeArtPlayer(
     }
 
     const switchNativeToServerProxy = (reason: string) => {
-      if (mediaKind !== 'native' || nativeUseServerProxy) {
+      if (
+        mediaKind !== 'native' ||
+        nativeUseServerProxy ||
+        !preSourceKey ||
+        !shouldAutoFallbackToServer(preSourceKey)
+      ) {
         return false;
       }
 
@@ -273,9 +298,10 @@ export async function initializeArtPlayer(
         sourceKey: preSourceKey,
         reason,
       });
+      reportNativeRouteStat(false);
 
       if (preSourceKey) {
-        rememberSourceServerProxy(preSourceKey);
+        rememberSourceServerProxy(preSourceKey, videoUrl);
       }
       nativeUseServerProxy = true;
       nativeFallbackStarted = true;
@@ -385,10 +411,12 @@ export async function initializeArtPlayer(
       if (activeVideo && activeSourceKey) {
         const activeManagedVideo = getManagedVideo(activeVideo);
         if (activeManagedVideo.__icetvUsingServerProxy === false) {
-          clearSourceProxyOverride(activeSourceKey);
+          clearSourceProxyOverride(activeSourceKey, videoUrl);
         }
       }
+      reportNativeRouteStat(true);
       showSourceSwitchSuccessNotice();
+      startPlaybackStatsSession?.();
       onPlaybackStarted?.();
       playbackRequestModeRef.current = 'initial';
     };
@@ -598,11 +626,13 @@ export async function initializeArtPlayer(
     player.on('pause', () => {
       void releaseWakeLock();
       saveCurrentPlayProgress();
+      reportPlaybackStats?.(true);
       setIsPlaying(false);
     });
 
     player.on('video:ended', () => {
       void releaseWakeLock();
+      reportPlaybackStats?.(true);
       setIsPlaying(false);
       restorePlayerPlaybackRate(player, lastPlaybackRateRef.current);
       tryAutoAdvanceEpisode();
@@ -726,6 +756,7 @@ export async function initializeArtPlayer(
       if (player.currentTime > 0) {
         return;
       }
+      reportNativeRouteStat(false);
       if (
         mediaKind === 'native' &&
         !nativeFallbackStarted &&
@@ -751,6 +782,7 @@ export async function initializeArtPlayer(
       if (now - lastSaveTimeRef.current > 5000) {
         saveCurrentPlayProgress();
       }
+      reportPlaybackStats?.();
     });
 
     player.on('video:seeking', () => {

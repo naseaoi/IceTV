@@ -33,6 +33,8 @@ describe('auth signing secret', () => {
   });
 
   afterEach(() => {
+    jest.restoreAllMocks();
+
     if (originalAuthSecret === undefined) {
       delete process.env.AUTH_SECRET;
     } else {
@@ -74,6 +76,9 @@ describe('auth signing secret', () => {
     process.env.AUTH_SECRET = AUTH_SECRET;
     const data = 'user:1777777777777';
     const legacySignature = await generateSignature(data, 'owner-secret');
+    const consoleWarnSpy = jest
+      .spyOn(console, 'warn')
+      .mockImplementation(() => undefined);
 
     await expect(verifyAuthSignature(data, legacySignature)).resolves.toBe(
       false,
@@ -83,6 +88,9 @@ describe('auth signing secret', () => {
         allowLegacyOwnerPassword: true,
       }),
     ).resolves.toBe(true);
+    expect(consoleWarnSpy).toHaveBeenCalledWith(
+      '检测到使用旧站长口令验签的会话，建议尽快让用户重新登录，并用 LEGACY_COOKIE_CUTOFF_DATE 关闭兼容期',
+    );
   });
 
   it('rejects legacy owner-password sessions after the cutoff date', async () => {

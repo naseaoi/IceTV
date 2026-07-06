@@ -5,9 +5,9 @@ import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { useMemo } from 'react';
 
-import { useRuntimeConfig } from './RuntimeConfigProvider';
-
 import { RuntimeConfig } from '@/lib/runtime-config';
+
+import { useRuntimeConfig } from './RuntimeConfigProvider';
 
 interface MobileBottomNavProps {
   /**

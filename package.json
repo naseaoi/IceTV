@@ -1,6 +1,6 @@
 {
   "name": "icetv",
-  "version": "0.4.3",
+  "version": "0.4.4",
   "private": true,
   "engines": {
     "node": ">=22.14.0 <25",
@@ -83,7 +83,7 @@
   },
   "lint-staged": {
     "**/*.{js,jsx,ts,tsx}": [
-      "eslint --max-warnings=0 --no-warn-ignored --ignore-pattern public/sw.js --ignore-pattern public/workbox-*.js",
+      "eslint --quiet --no-warn-ignored --ignore-pattern public/sw.js --ignore-pattern public/workbox-*.js",
       "prettier -w --ignore-unknown --no-error-on-unmatched-pattern"
     ],
     "**/*.{json,css,scss,md,webmanifest}": [

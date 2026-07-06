@@ -3,13 +3,12 @@
 import { AlertCircle, CheckCircle, Eye, EyeOff } from 'lucide-react';
 import { useEffect, useState } from 'react';
 
-import { CURRENT_VERSION } from '@/lib/version';
-import { checkForUpdates, UpdateStatus } from '@/lib/version-check';
-import { getPrimaryRepoUrl } from '@/lib/update-source';
-import { getClientAuthRuntimeConfig } from '@/lib/runtime-config';
-
 import { useSite } from '@/components/SiteProvider';
 import { ThemeToggle } from '@/components/ThemeToggle';
+import { getClientAuthRuntimeConfig } from '@/lib/runtime-config';
+import { getPrimaryRepoUrl } from '@/lib/update-source';
+import { CURRENT_VERSION } from '@/lib/version';
+import { checkForUpdates, UpdateStatus } from '@/lib/version-check';
 
 function VersionDisplay() {
   const [updateStatus, setUpdateStatus] = useState<UpdateStatus | null>(null);
@@ -151,7 +150,7 @@ export function LoginPageClient() {
         const data = await res.json().catch(() => ({}));
         setError(data.error ?? '服务器错误');
       }
-    } catch (error) {
+    } catch {
       setError('网络错误，请稍后重试');
     } finally {
       setLoading(false);

@@ -10,6 +10,7 @@ import {
   statusBadgeStyles,
 } from '@/features/admin/lib/buttonStyles';
 import { DataSource } from '@/features/admin/types/internal';
+import { DEFAULT_SOURCE_PROXY_MODE } from '@/lib/proxy-modes';
 
 export type SourceValidationStatus = {
   text: string;
@@ -18,10 +19,23 @@ export type SourceValidationStatus = {
   message: string;
 };
 
+export type RouteModeStats = {
+  successCount: number;
+  failureCount: number;
+  totalCount: number;
+  successRate: number | null;
+};
+
+export type SourceRouteStatsView = {
+  browser?: RouteModeStats;
+  server?: RouteModeStats;
+};
+
 interface SortableSourceRowProps {
   source: DataSource;
   isSelected: boolean;
   validationStatus: SourceValidationStatus | null;
+  sourceRouteStats: SourceRouteStatsView | null;
   isProxyModeLoading: boolean;
   isToggleLoading: boolean;
   isDeleteLoading: boolean;
@@ -38,6 +52,7 @@ export function SortableSourceRow({
   source,
   isSelected,
   validationStatus,
+  sourceRouteStats,
   isProxyModeLoading,
   isToggleLoading,
   isDeleteLoading,
@@ -56,6 +71,42 @@ export function SortableSourceRow({
     transform: CSS.Transform.toString(transform),
     transition,
   } as CSSProperties;
+  const proxyMode = source.proxyMode || DEFAULT_SOURCE_PROXY_MODE;
+  const proxyModeClassName =
+    proxyMode === 'server'
+      ? 'bg-blue-100 text-blue-800 hover:bg-blue-200 dark:bg-blue-900/20 dark:text-blue-300 dark:hover:bg-blue-900/40'
+      : proxyMode === 'auto'
+        ? 'bg-emerald-100 text-emerald-800 hover:bg-emerald-200 dark:bg-emerald-900/20 dark:text-emerald-300 dark:hover:bg-emerald-900/40'
+        : 'bg-gray-100 text-gray-600 hover:bg-gray-200 dark:bg-gray-900/20 dark:text-gray-400 dark:hover:bg-gray-800/40';
+  const proxyModeTitle =
+    proxyMode === 'server'
+      ? '播放和测速流量走服务端代理'
+      : proxyMode === 'auto'
+        ? '播放和测速流量自动选择路由'
+        : '播放和测速流量走浏览器直连';
+  const proxyModeText =
+    proxyMode === 'server'
+      ? '服务端'
+      : proxyMode === 'auto'
+        ? '自动'
+        : '浏览器';
+
+  const renderRouteStats = (label: string, stats?: RouteModeStats) => {
+    const rate =
+      stats && stats.successRate !== null
+        ? `${Math.round(stats.successRate * 100)}%`
+        : '-';
+    const count = stats ? `${stats.successCount}/${stats.totalCount}` : '-';
+    return (
+      <div className='flex items-center justify-between gap-3'>
+        <span className='text-gray-500 dark:text-gray-400'>{label}</span>
+        <span className='font-medium text-gray-900 dark:text-gray-100'>
+          {rate}
+        </span>
+        <span className='text-gray-500 dark:text-gray-400'>{count}</span>
+      </div>
+    );
+  };
 
   return (
     <tr
@@ -115,19 +166,17 @@ export function SortableSourceRow({
         <button
           onClick={() => onToggleProxyMode(source.key)}
           disabled={isProxyModeLoading}
-          className={`rounded-full px-2 py-1 text-xs transition-colors ${
-            source.proxyMode === 'server'
-              ? 'bg-blue-100 text-blue-800 hover:bg-blue-200 dark:bg-blue-900/20 dark:text-blue-300 dark:hover:bg-blue-900/40'
-              : 'bg-gray-100 text-gray-600 hover:bg-gray-200 dark:bg-gray-900/20 dark:text-gray-400 dark:hover:bg-gray-800/40'
-          } ${isProxyModeLoading ? 'cursor-not-allowed opacity-50' : 'cursor-pointer'}`}
-          title={
-            source.proxyMode === 'server'
-              ? '播放和测速流量走服务端代理'
-              : '播放和测速流量走浏览器直连'
-          }
+          className={`rounded-full px-2 py-1 text-xs transition-colors ${proxyModeClassName} ${isProxyModeLoading ? 'cursor-not-allowed opacity-50' : 'cursor-pointer'}`}
+          title={proxyModeTitle}
         >
-          {source.proxyMode === 'server' ? '服务端' : '浏览器'}
+          {proxyModeText}
         </button>
+      </td>
+      <td className='min-w-[9rem] whitespace-nowrap px-6 py-4 text-xs'>
+        <div className='space-y-1'>
+          {renderRouteStats('直连', sourceRouteStats?.browser)}
+          {renderRouteStats('代理', sourceRouteStats?.server)}
+        </div>
       </td>
       <td className='max-w-[1rem] whitespace-nowrap px-6 py-4'>
         {validationStatus ? (

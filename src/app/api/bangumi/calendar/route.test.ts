@@ -18,12 +18,19 @@ async function loadRoute(getBangumiCalendarData: jest.Mock) {
   jest.doMock('@/features/bangumi/lib/bangumi', () => ({
     getBangumiCalendarData,
   }));
+  jest.doMock('@/lib/api-auth', () => ({
+    requireActiveUser: jest
+      .fn()
+      .mockResolvedValue({ username: 'demo', isOwner: false }),
+    isGuardFailure: (result: object) => 'response' in result,
+  }));
   return require('./route') as CalendarRouteModule;
 }
 
 describe('bangumi calendar route', () => {
   afterEach(() => {
     jest.dontMock('@/features/bangumi/lib/bangumi');
+    jest.dontMock('@/lib/api-auth');
     jest.restoreAllMocks();
   });
 
@@ -46,6 +53,7 @@ describe('bangumi calendar route', () => {
       .fn()
       .mockRejectedValue(new Error('network failed'));
     const errorSpy = jest.spyOn(console, 'error').mockImplementation(() => {});
+    const warnSpy = jest.spyOn(console, 'warn').mockImplementation(() => {});
     const { GET } = await loadRoute(getBangumiCalendarData);
 
     const response = await GET(
@@ -58,6 +66,13 @@ describe('bangumi calendar route', () => {
     expect(errorSpy).toHaveBeenCalledWith(
       'Bangumi 日历接口失败:',
       expect.any(Error),
+    );
+    expect(warnSpy).toHaveBeenCalledWith(
+      '[server-proxy.failure]',
+      expect.objectContaining({
+        kind: 'bangumi-data',
+        reason: 'network failed',
+      }),
     );
   });
 });

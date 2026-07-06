@@ -1,7 +1,7 @@
+import './globals.css';
+
 import type { Metadata, Viewport } from 'next';
 import { Inter } from 'next/font/google';
-
-import './globals.css';
 
 import { getPublicConfig } from '@/lib/config';
 import { SIDEBAR_COLLAPSED_STORAGE_KEY } from '@/lib/local-preferences';
@@ -9,8 +9,9 @@ import { serializeForInlineScript } from '@/lib/script-serialization';
 import { getStorageType } from '@/lib/storage-type';
 import { CURRENT_UPDATE_BRANCH } from '@/lib/version';
 
-import { GlobalErrorIndicator } from '../components/GlobalErrorIndicator';
 import { CardInteractionProvider } from '../components/CardInteractionProvider';
+import { ClientErrorReporter } from '../components/ClientErrorReporter';
+import { GlobalErrorIndicator } from '../components/GlobalErrorIndicator';
 import { RuntimeConfigProvider } from '../components/RuntimeConfigProvider';
 import { SiteProvider } from '../components/SiteProvider';
 import { SWRegister } from '../components/SWRegister';
@@ -64,13 +65,11 @@ export default async function RootLayout({
     OPEN_REGISTER: publicConfig.OpenRegister,
     UPDATE_REPOS: process.env.NEXT_PUBLIC_UPDATE_REPOS || 'naseaoi/IceTV',
     UPDATE_BRANCH: CURRENT_UPDATE_BRANCH,
-    DOUBAN_PROXY_TYPE: process.env.NEXT_PUBLIC_DOUBAN_PROXY_TYPE || 'direct',
+    DOUBAN_PROXY_TYPE: publicConfig.DoubanProxyType,
     DOUBAN_PROXY: process.env.NEXT_PUBLIC_DOUBAN_PROXY || '',
     BANGUMI_DATA_SOURCE: publicConfig.BangumiDataSource,
     BANGUMI_PROXY: process.env.NEXT_PUBLIC_BANGUMI_PROXY || '',
-    DOUBAN_IMAGE_PROXY_TYPE:
-      process.env.NEXT_PUBLIC_DOUBAN_IMAGE_PROXY_TYPE ||
-      'cmliussss-cdn-tencent',
+    DOUBAN_IMAGE_PROXY_TYPE: publicConfig.DoubanImageProxyType,
     DOUBAN_IMAGE_PROXY: process.env.NEXT_PUBLIC_DOUBAN_IMAGE_PROXY || '',
     DISABLE_YELLOW_FILTER: publicConfig.DisableYellowFilter,
     ENABLE_LIVE_ENTRY: publicConfig.EnableLiveEntry,
@@ -80,6 +79,13 @@ export default async function RootLayout({
     LIVE_DIRECT_CONNECT: publicConfig.LiveDirectConnect,
     CUSTOM_CATEGORIES: publicConfig.CustomCategories,
     FLUID_SEARCH: publicConfig.FluidSearch,
+    VOD_PAGE_TIMEOUT_SECONDS: publicConfig.VodPageTimeoutSeconds,
+    PLAYBACK_HISTORY_PAGE_SIZE: publicConfig.PlaybackHistoryPageSize,
+    PLAYBACK_HISTORY_LIMIT: publicConfig.PlaybackHistoryLimit,
+    SEARCH_HISTORY_LIMIT: publicConfig.SearchHistoryLimit,
+    SOURCE_FAILURE_COOLDOWN_SECONDS: publicConfig.SourceFailureCooldownSeconds,
+    CONTINUE_WATCHING_LIMIT: publicConfig.ContinueWatchingLimit,
+    COVER_IMAGE_CACHE_SIZE: publicConfig.CoverImageCacheSize,
   };
   const serializedRuntimeConfig = serializeForInlineScript(runtimeConfig);
   const serializedSidebarCollapsedStorageKey = serializeForInlineScript(
@@ -132,6 +138,7 @@ export default async function RootLayout({
             >
               <CardInteractionProvider>
                 {children}
+                <ClientErrorReporter />
                 <GlobalErrorIndicator />
                 <SWRegister />
               </CardInteractionProvider>

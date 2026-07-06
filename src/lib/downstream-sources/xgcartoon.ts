@@ -1,4 +1,7 @@
 import type { ApiSite } from '@/lib/config';
+import { buildLazyEpisodeUrl } from '@/lib/lazy-episodes';
+import type { SearchResult } from '@/lib/types';
+import { cleanHtmlTags } from '@/lib/utils';
 import {
   buildXgcartoonPlaylistUrl,
   buildXgcartoonVideoPath,
@@ -7,9 +10,6 @@ import {
   extractXgcartoonSearchResults,
   parseXgcartoonVariantId,
 } from '@/lib/xgcartoon';
-import { buildLazyEpisodeUrl } from '@/lib/lazy-episodes';
-import type { SearchResult } from '@/lib/types';
-import { cleanHtmlTags } from '@/lib/utils';
 
 import {
   BROWSER_HTML_HEADERS,

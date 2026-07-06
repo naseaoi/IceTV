@@ -1,19 +1,23 @@
-import { API_CONFIG, ApiSite, getConfig } from '@/lib/config';
+import { API_CONFIG, ApiSite, getConfigForRead } from '@/lib/config';
 import {
   getDetailFromGirigiri,
   isGirigiriSource,
   searchFromGirigiri,
 } from '@/lib/downstream-sources/giri';
 import {
+  createTimedAbortController,
+  isAbortError,
+  runWithConcurrency,
+} from '@/lib/downstream-sources/shared';
+import {
   getDetailFromXgcartoon,
   isXgcartoonSource,
   searchFromXgcartoon,
 } from '@/lib/downstream-sources/xgcartoon';
 import {
-  createTimedAbortController,
-  isAbortError,
-  runWithConcurrency,
-} from '@/lib/downstream-sources/shared';
+  DEFAULT_RUNTIME_PARAMS,
+  normalizeRuntimeParams,
+} from '@/lib/runtime-params';
 import {
   dedupeSearchLoad,
   getCachedSearchPage,
@@ -42,6 +46,15 @@ interface SearchFromApiOptions {
 }
 
 const EXTRA_SEARCH_PAGE_CONCURRENCY = 2;
+
+async function readSearchRuntimeParams() {
+  try {
+    const config = await getConfigForRead();
+    return normalizeRuntimeParams(config.SiteConfig);
+  } catch {
+    return DEFAULT_RUNTIME_PARAMS;
+  }
+}
 
 function isSupportedVodPlaybackUrl(url: string): boolean {
   try {
@@ -216,6 +229,8 @@ export async function searchFromApi(
   }
 
   try {
+    const runtimeParams = await readSearchRuntimeParams();
+    const searchTimeoutMs = runtimeParams.SearchRequestTimeoutSeconds * 1000;
     const apiBaseUrl = apiSite.api;
     const apiUrl =
       apiBaseUrl + API_CONFIG.search.path + encodeURIComponent(query);
@@ -225,15 +240,14 @@ export async function searchFromApi(
       query,
       1,
       apiUrl,
-      8000,
+      searchTimeoutMs,
       options.signal,
     );
     const results = firstPageResult.results;
     const pageCountFromFirst = firstPageResult.pageCount;
 
     const MAX_SEARCH_PAGES =
-      options.maxSearchPages ??
-      (await getConfig()).SiteConfig.SearchDownstreamMaxPage;
+      options.maxSearchPages ?? runtimeParams.SearchDownstreamMaxPage;
 
     const pageCount = pageCountFromFirst || 1;
     const pagesToFetch = Math.min(pageCount - 1, MAX_SEARCH_PAGES - 1);
@@ -258,7 +272,7 @@ export async function searchFromApi(
             query,
             page,
             pageUrl,
-            8000,
+            searchTimeoutMs,
             options.signal,
           );
           return pageResult.results;
@@ -279,7 +293,7 @@ export async function searchFromApi(
     }
 
     return results;
-  } catch (error) {
+  } catch {
     return [];
   }
 }
@@ -298,6 +312,7 @@ export async function searchFirstPageFromApi(
   }
 
   try {
+    const runtimeParams = await readSearchRuntimeParams();
     const apiUrl =
       apiSite.api + API_CONFIG.search.path + encodeURIComponent(query);
     const firstPageResult = await searchWithCache(
@@ -305,7 +320,7 @@ export async function searchFirstPageFromApi(
       query,
       1,
       apiUrl,
-      6000,
+      runtimeParams.SearchRequestTimeoutSeconds * 1000,
       options.signal,
     );
     return firstPageResult.results;

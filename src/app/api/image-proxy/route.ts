@@ -1,16 +1,21 @@
 import { NextRequest, NextResponse } from 'next/server';
 
+import { getOptionalActiveUser } from '@/lib/api-auth';
 import { authorizeProxyRequest } from '@/lib/proxy-auth';
-import {
-  fetchWithUrlGuard,
-  UrlValidationError,
-  validateProxyUrlForRequest,
-} from '@/lib/url-guard';
 import {
   assertContentLength,
   createLimitedReadableStream,
   ResponseSizeLimitError,
 } from '@/lib/proxy-response-limits';
+import {
+  recordServerProxyFailure,
+  requireServerProxyQuota,
+} from '@/lib/server-proxy-guard';
+import {
+  fetchWithUrlGuard,
+  UrlValidationError,
+  validateProxyUrlForRequest,
+} from '@/lib/url-guard';
 
 export const runtime = 'nodejs';
 
@@ -34,6 +39,14 @@ async function proxyImage(request: NextRequest, method: 'GET' | 'HEAD') {
     return NextResponse.json({ error: 'Invalid URL' }, { status: 403 });
   }
 
+  const activeUser = await getOptionalActiveUser(request);
+  const quotaFailure = requireServerProxyQuota(
+    'douban-image',
+    request,
+    activeUser?.username,
+  );
+  if (quotaFailure) return quotaFailure;
+
   try {
     const imageResponse = await fetchWithUrlGuard(validation.url, {
       method,
@@ -48,6 +61,7 @@ async function proxyImage(request: NextRequest, method: 'GET' | 'HEAD') {
     });
 
     if (!imageResponse.ok) {
+      recordServerProxyFailure('douban-image', imageResponse.status);
       return NextResponse.json(
         { error: imageResponse.statusText },
         { status: imageResponse.status },
@@ -58,6 +72,7 @@ async function proxyImage(request: NextRequest, method: 'GET' | 'HEAD') {
     const headers = new Headers();
     const contentType = imageResponse.headers.get('content-type');
     if (!contentType?.toLowerCase().startsWith('image/')) {
+      recordServerProxyFailure('douban-image', contentType || 'content-type');
       return NextResponse.json(
         { error: 'Invalid image response' },
         { status: 415 },
@@ -111,9 +126,11 @@ async function proxyImage(request: NextRequest, method: 'GET' | 'HEAD') {
       return NextResponse.json({ error: 'Invalid URL' }, { status: 403 });
     }
     if (error instanceof ResponseSizeLimitError) {
+      recordServerProxyFailure('douban-image', error);
       return NextResponse.json({ error: error.message }, { status: 413 });
     }
 
+    recordServerProxyFailure('douban-image', error);
     return NextResponse.json(
       { error: 'Error fetching image' },
       { status: 500 },

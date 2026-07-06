@@ -1,7 +1,6 @@
 /** @jest-environment node */
 
 import { webcrypto } from 'crypto';
-
 import type { NextRequest, NextResponse } from 'next/server';
 
 import {
@@ -103,6 +102,10 @@ describe('proxy middleware session handling', () => {
     delete process.env.AUTH_SESSION_TTL_HOURS;
   });
 
+  afterEach(() => {
+    jest.restoreAllMocks();
+  });
+
   afterAll(() => {
     Object.entries(ORIGINAL_ENV).forEach(([key, value]) => {
       if (value === undefined) {
@@ -144,6 +147,9 @@ describe('proxy middleware session handling', () => {
 
   it('migrates legacy owner-password session to AUTH_SECRET on refresh', async () => {
     const cookie = await buildAuthCookie('owner-pass', Date.now() + HOUR_MS);
+    const consoleWarnSpy = jest
+      .spyOn(console, 'warn')
+      .mockImplementation(() => undefined);
 
     const response = (await proxy(createRequest(cookie))) as MockResponse;
 
@@ -164,6 +170,9 @@ describe('proxy middleware session handling', () => {
         'owner-pass',
       ),
     ).resolves.toBe(false);
+    expect(consoleWarnSpy).toHaveBeenCalledWith(
+      '检测到使用旧站长口令验签的会话，建议尽快让用户重新登录，并用 LEGACY_COOKIE_CUTOFF_DATE 关闭兼容期',
+    );
   });
 
   it('clears cookies when signature is invalid', async () => {
@@ -191,9 +200,15 @@ describe('proxy middleware session handling', () => {
   it('accepts legacy session without re-signing when AUTH_SECRET is missing', async () => {
     delete process.env.AUTH_SECRET;
     const cookie = await buildAuthCookie('owner-pass', Date.now() + HOUR_MS);
+    const consoleWarnSpy = jest
+      .spyOn(console, 'warn')
+      .mockImplementation(() => undefined);
 
     const response = (await proxy(createRequest(cookie))) as MockResponse;
 
     expect(response.cookieCalls).toHaveLength(0);
+    expect(consoleWarnSpy).toHaveBeenCalledWith(
+      '检测到使用旧站长口令验签的会话，建议尽快让用户重新登录，并用 LEGACY_COOKIE_CUTOFF_DATE 关闭兼容期',
+    );
   });
 });

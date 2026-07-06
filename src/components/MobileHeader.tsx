@@ -4,13 +4,13 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useEffect } from 'react';
 
+import { useSmartHomeNav } from '@/hooks/useSmartHomeNav';
+import { getAuthInfoFromBrowserCookie } from '@/lib/auth.client';
+
 import { BackButton } from './BackButton';
 import { useSite } from './SiteProvider';
 import { ThemeToggle } from './ThemeToggle';
 import { UserMenu } from './UserMenu';
-
-import { getAuthInfoFromBrowserCookie } from '@/lib/auth.client';
-import { useSmartHomeNav } from '@/hooks/useSmartHomeNav';
 
 interface MobileHeaderProps {
   showBackButton?: boolean;

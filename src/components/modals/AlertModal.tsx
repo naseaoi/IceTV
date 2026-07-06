@@ -1,7 +1,7 @@
 ﻿'use client';
 
 import { AlertCircle, AlertTriangle, CheckCircle } from 'lucide-react';
-import { useEffect } from 'react';
+import { type ReactNode, useEffect } from 'react';
 
 import ModalShell from '@/components/modals/ModalShell';
 import { type AlertType } from '@/hooks/useAlertModal';
@@ -12,7 +12,7 @@ interface AlertModalProps {
   type: AlertType;
   title: string;
   message?: string;
-  html?: string;
+  children?: ReactNode;
   timer?: number;
   showConfirm?: boolean;
   confirmText?: string;
@@ -26,7 +26,7 @@ export default function AlertModal({
   type,
   title,
   message,
-  html,
+  children,
   timer,
   showConfirm = false,
   confirmText = '确定',
@@ -86,11 +86,10 @@ export default function AlertModal({
           </div>
         </div>
 
-        {html && (
-          <div
-            className='mb-5 rounded-xl border border-gray-200/70 bg-gray-50 p-3 text-sm leading-6 text-gray-700 dark:border-white/10 dark:bg-gray-800/70 dark:text-gray-200'
-            dangerouslySetInnerHTML={{ __html: html }}
-          />
+        {children && (
+          <div className='mb-5 rounded-xl border border-gray-200/70 bg-gray-50 p-3 text-sm leading-6 text-gray-700 dark:border-white/10 dark:bg-gray-800/70 dark:text-gray-200'>
+            {children}
+          </div>
         )}
 
         {(shouldShowSingleCloseButton || (showConfirm && onConfirm)) && (

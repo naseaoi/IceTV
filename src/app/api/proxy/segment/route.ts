@@ -1,15 +1,12 @@
 ﻿import { NextRequest, NextResponse } from 'next/server';
 
-import { authorizeProxyRequest } from '@/lib/proxy-auth';
+import { isLiveEntryEnabled } from '@/features/live/lib/live';
+import { getConfigForRead } from '@/lib/config';
 import {
   fetchStreamThroughProxy,
   getProxyUrlForTarget,
 } from '@/lib/http-proxy-json';
-import { isLiveEntryEnabled } from '@/features/live/lib/live';
-import {
-  assertContentLength,
-  createLimitedReadableStream,
-} from '@/lib/proxy-response-limits';
+import { authorizeProxyRequest } from '@/lib/proxy-auth';
 import {
   classifyProxyFailure,
   createProxyFailureDiagnostic,
@@ -17,6 +14,11 @@ import {
   ProxyRouteError,
   toProxyFailurePayload,
 } from '@/lib/proxy-diagnostics';
+import {
+  assertContentLength,
+  createLimitedReadableStream,
+} from '@/lib/proxy-response-limits';
+import { normalizeRuntimeParams } from '@/lib/runtime-params';
 import { markSourceCors, responseAllowsCors } from '@/lib/source-capability';
 import { fetchWithUrlGuard, validateProxyUrlForRequest } from '@/lib/url-guard';
 
@@ -107,6 +109,10 @@ export async function GET(request: NextRequest) {
   }
 
   const ua = await resolveProxyUserAgent(source);
+  const runtimeParams = normalizeRuntimeParams(
+    (await getConfigForRead()).SiteConfig,
+  );
+  const timeoutMs = runtimeParams.ProxyRequestTimeoutSeconds * 1000;
 
   try {
     const headers: Record<string, string> = {
@@ -124,7 +130,7 @@ export async function GET(request: NextRequest) {
             new URL(validation.url),
             proxyUrl,
             {
-              timeoutMs: 20_000,
+              timeoutMs,
               userAgent: ua,
               maxBytes: MAX_SEGMENT_BYTES,
               accept: '*/*',
@@ -183,6 +189,7 @@ export async function GET(request: NextRequest) {
     const response = await fetchWithUrlGuard(validation.url, {
       headers,
       skipInitialValidation: true,
+      timeoutMs,
     });
     if (!response.ok) {
       const diagnostic = createProxyFailureDiagnostic({

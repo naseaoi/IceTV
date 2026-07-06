@@ -126,8 +126,19 @@ export function VirtualizedGrid<T>({
       return;
     }
 
+    let frameId: number | null = null;
     const updateWidth = () => {
-      setContainerWidth(container.getBoundingClientRect().width);
+      if (frameId !== null) {
+        return;
+      }
+
+      frameId = window.requestAnimationFrame(() => {
+        frameId = null;
+        const nextWidth = Math.round(container.getBoundingClientRect().width);
+        setContainerWidth((currentWidth) =>
+          currentWidth === nextWidth ? currentWidth : nextWidth,
+        );
+      });
     };
 
     updateWidth();
@@ -137,6 +148,9 @@ export function VirtualizedGrid<T>({
     window.addEventListener('resize', updateWidth);
 
     return () => {
+      if (frameId !== null) {
+        window.cancelAnimationFrame(frameId);
+      }
       observer.disconnect();
       window.removeEventListener('resize', updateWidth);
     };

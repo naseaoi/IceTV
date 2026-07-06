@@ -280,7 +280,6 @@ const MobileActionSheet: React.FC<MobileActionSheetProps> = ({
         alt={title}
         fit={origin === 'live' ? 'contain' : 'cover'}
         sizes='48px'
-        enableRetry={false}
       />
     </div>
   );

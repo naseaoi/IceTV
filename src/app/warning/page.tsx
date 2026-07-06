@@ -1,4 +1,5 @@
 import { Metadata } from 'next';
+import Link from 'next/link';
 
 export const metadata: Metadata = {
   title: '安全警告 - IceTV',
@@ -9,7 +10,6 @@ export default function WarningPage() {
   return (
     <div className='flex min-h-screen items-center justify-center bg-gradient-to-br from-red-50 to-orange-50 p-4'>
       <div className='w-full max-w-2xl rounded-2xl border border-red-200 bg-white p-4 shadow-2xl sm:p-8'>
-        {/* 警告图标 */}
         <div className='mb-4 flex justify-center sm:mb-6'>
           <div className='flex h-16 w-16 items-center justify-center rounded-full bg-red-100 sm:h-20 sm:w-20'>
             <svg
@@ -28,7 +28,6 @@ export default function WarningPage() {
           </div>
         </div>
 
-        {/* 标题 */}
         <div className='mb-6 text-center sm:mb-8'>
           <h1 className='mb-2 text-2xl font-bold text-gray-900 sm:text-3xl'>
             安全合规配置警告
@@ -36,7 +35,6 @@ export default function WarningPage() {
           <div className='mx-auto h-1 w-12 rounded-full bg-red-500 sm:w-16'></div>
         </div>
 
-        {/* 警告内容 */}
         <div className='space-y-4 text-gray-700 sm:space-y-6'>
           <div className='rounded-r-lg border-l-4 border-red-500 bg-red-50 p-3 sm:p-4'>
             <p className='mb-2 text-base font-semibold text-red-800 sm:text-lg'>
@@ -85,7 +83,15 @@ export default function WarningPage() {
           </div>
         </div>
 
-        {/* 底部装饰 */}
+        <div className='mt-6 flex justify-center sm:mt-8'>
+          <Link
+            href='/'
+            className='inline-flex h-10 items-center justify-center rounded-lg bg-red-600 px-4 text-sm font-medium text-white transition-colors hover:bg-red-700'
+          >
+            返回首页
+          </Link>
+        </div>
+
         <div className='mt-6 border-t border-gray-200 pt-4 sm:mt-8 sm:pt-6'>
           <div className='text-center text-xs text-gray-500 sm:text-sm'>
             <p>为确保系统安全性和合规性，请及时完成安全配置</p>

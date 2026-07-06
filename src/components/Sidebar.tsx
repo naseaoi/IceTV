@@ -23,27 +23,26 @@ import {
   useState,
 } from 'react';
 
+import { getAuthInfoFromBrowserCookie } from '@/lib/auth.client';
 import {
   readSidebarCollapsed,
   writeSidebarCollapsed,
 } from '@/lib/local-preferences';
+import { RuntimeConfig } from '@/lib/runtime-config';
 
 import { useRuntimeConfig } from './RuntimeConfigProvider';
-import { useSite } from './SiteProvider';
 import {
+  getSidebarItemLabelClass,
   SIDEBAR_BUTTON_STATE_CLASS,
   SIDEBAR_ITEM_ICON_CLASS,
   SIDEBAR_ITEM_ICON_WRAP_CLASS,
   SIDEBAR_ITEM_LAYOUT_CLASS,
   SIDEBAR_LINK_ICON_CLASS,
   SIDEBAR_LINK_STATE_CLASS,
-  getSidebarItemLabelClass,
 } from './SidebarItem';
+import { useSite } from './SiteProvider';
 import { ThemeToggle } from './ThemeToggle';
 import { UserMenu } from './UserMenu';
-
-import { getAuthInfoFromBrowserCookie } from '@/lib/auth.client';
-import { RuntimeConfig } from '@/lib/runtime-config';
 
 interface SidebarContextType {
   isCollapsed: boolean;
@@ -140,15 +139,7 @@ declare global {
 }
 
 const getInitialSidebarCollapsed = (): boolean => {
-  if (typeof window === 'undefined') {
-    return false;
-  }
-
-  if (typeof window.__sidebarCollapsed === 'boolean') {
-    return window.__sidebarCollapsed;
-  }
-
-  return readSidebarCollapsed();
+  return false;
 };
 
 const Sidebar = ({ onToggle, activePath = '/' }: SidebarProps) => {
@@ -160,6 +151,15 @@ const Sidebar = ({ onToggle, activePath = '/' }: SidebarProps) => {
     getInitialSidebarCollapsed,
   );
   const prefetchedRoutesRef = useRef<Set<string>>(new Set());
+
+  useLayoutEffect(() => {
+    const collapsed =
+      typeof window.__sidebarCollapsed === 'boolean'
+        ? window.__sidebarCollapsed
+        : readSidebarCollapsed();
+    setIsCollapsed(collapsed);
+    onToggle?.(collapsed);
+  }, [onToggle]);
 
   useLayoutEffect(() => {
     if (typeof document !== 'undefined') {

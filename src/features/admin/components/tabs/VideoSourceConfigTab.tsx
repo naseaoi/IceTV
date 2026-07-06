@@ -1,9 +1,9 @@
 ﻿'use client';
 
 import {
+  type DragEndEvent,
   closestCenter,
   DndContext,
-  type DragEndEvent,
   PointerSensor,
   TouchSensor,
   useSensor,
@@ -20,22 +20,53 @@ import {
 } from '@dnd-kit/sortable';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 
-import ConfirmModal from '@/components/modals/ConfirmModal';
 import AlertModal from '@/components/modals/AlertModal';
-import { SortableSourceRow } from '@/features/admin/components/tabs/video-source/SortableSourceRow';
+import ConfirmModal from '@/components/modals/ConfirmModal';
+import { BatchSourceMenu } from '@/features/admin/components/tabs/video-source/BatchSourceMenu';
+import {
+  type RouteModeStats,
+  type SourceRouteStatsView,
+  SortableSourceRow,
+} from '@/features/admin/components/tabs/video-source/SortableSourceRow';
 import { SourceValidationModal } from '@/features/admin/components/tabs/video-source/SourceValidationModal';
 import { VideoSourceAddForm } from '@/features/admin/components/tabs/video-source/VideoSourceAddForm';
 import { VideoSourceEditForm } from '@/features/admin/components/tabs/video-source/VideoSourceEditForm';
 import { useAdminSourceActions } from '@/features/admin/hooks/useAdminSourceActions';
-import { useAlertModal } from '@/hooks/useAlertModal';
 import { useLoadingState } from '@/features/admin/hooks/useLoadingState';
 import { useSourceBatchOperation } from '@/features/admin/hooks/useSourceBatchOperation';
 import { useSourceValidation } from '@/features/admin/hooks/useSourceValidation';
+import { adminGet } from '@/features/admin/lib/api';
 import { buttonStyles } from '@/features/admin/lib/buttonStyles';
 import { showError } from '@/features/admin/lib/notifications';
-import { AdminConfig } from '@/types/admin';
 import { DataSource } from '@/features/admin/types/internal';
+import { useAlertModal } from '@/hooks/useAlertModal';
 import { useModalState } from '@/hooks/useModalState';
+import { DEFAULT_SOURCE_PROXY_MODE } from '@/lib/proxy-modes';
+import type { SourceRouteStatsItem } from '@/lib/types';
+import { AdminConfig } from '@/types/admin';
+
+type SourceRouteStatsBySource = Record<string, SourceRouteStatsView>;
+
+function toRouteModeStats(item: SourceRouteStatsItem): RouteModeStats {
+  const totalCount = item.successCount + item.failureCount;
+  return {
+    successCount: item.successCount,
+    failureCount: item.failureCount,
+    totalCount,
+    successRate: totalCount > 0 ? item.successCount / totalCount : null,
+  };
+}
+
+function buildSourceRouteStats(
+  items: SourceRouteStatsItem[],
+): SourceRouteStatsBySource {
+  return items.reduce<SourceRouteStatsBySource>((acc, item) => {
+    const current = acc[item.source] || {};
+    current[item.routeMode] = toRouteModeStats(item);
+    acc[item.source] = current;
+    return acc;
+  }, {});
+}
 
 const VideoSourceConfig = ({
   config,
@@ -52,6 +83,8 @@ const VideoSourceConfig = ({
     showAlert,
   });
   const [sources, setSources] = useState<DataSource[]>([]);
+  const [sourceRouteStats, setSourceRouteStats] =
+    useState<SourceRouteStatsBySource>({});
   const [showAddForm, setShowAddForm] = useState(false);
   const [editingSource, setEditingSource] = useState<DataSource | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<DataSource | null>(null);
@@ -76,9 +109,8 @@ const VideoSourceConfig = ({
   const [showValidationModal, setShowValidationModal, openValidationModal] =
     useModalState(false);
   const [searchKeyword, setSearchKeyword] = useState('');
-  const [pendingValidationSourceKey, setPendingValidationSourceKey] = useState<
-    string | null
-  >(null);
+  const [pendingValidationSourceKeys, setPendingValidationSourceKeys] =
+    useState<string[] | null>(null);
 
   const sensors = useSensors(
     useSensor(PointerSensor, {
@@ -122,6 +154,28 @@ const VideoSourceConfig = ({
     setSelectedSources(new Set());
   }, [config]);
 
+  useEffect(() => {
+    if (!config?.SourceConfig) return;
+    let cancelled = false;
+    adminGet<{ stats: SourceRouteStatsItem[] }>(
+      '/api/admin/source-route-stats?days=7',
+      '读取路由统计失败',
+    )
+      .then((payload) => {
+        if (cancelled) return;
+        setSourceRouteStats(buildSourceRouteStats(payload.stats || []));
+      })
+      .catch((error) => {
+        if (cancelled) return;
+        console.warn('读取路由统计失败:', error);
+        setSourceRouteStats({});
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [config]);
+
   const callSourceApi = useCallback(
     async (body: Record<string, unknown>) => {
       try {
@@ -146,7 +200,13 @@ const VideoSourceConfig = ({
   const handleToggleProxyMode = (key: string) => {
     const target = sources.find((s) => s.key === key);
     if (!target) return;
-    const newMode = target.proxyMode === 'server' ? 'browser' : 'server';
+    const currentMode = target.proxyMode || DEFAULT_SOURCE_PROXY_MODE;
+    const newMode =
+      currentMode === 'browser'
+        ? 'server'
+        : currentMode === 'server'
+          ? 'auto'
+          : 'browser';
     withLoading(`proxyMode_${key}`, () =>
       callSourceApi({ action: 'set_proxy_mode', key, proxyMode: newMode }),
     ).catch(() => void 0);
@@ -226,35 +286,43 @@ const VideoSourceConfig = ({
   const { isValidating, startValidation, getValidationStatus } =
     useSourceValidation({ sources, showAlert });
 
-  const handleOpenValidationModal = () => {
-    setPendingValidationSourceKey(null);
+  const handleOpenValidationModal = (sourceKeys?: string[]) => {
+    setSearchKeyword('');
+    setPendingValidationSourceKeys(sourceKeys || null);
     openValidationModal();
   };
 
   const handleCloseValidationModal = () => {
     setShowValidationModal(false);
-    setPendingValidationSourceKey(null);
+    setSearchKeyword('');
+    setPendingValidationSourceKeys(null);
   };
 
   const handleStartValidation = async () => {
+    const keyword = searchKeyword;
     setShowValidationModal(false);
-    const sourceKey = pendingValidationSourceKey || undefined;
-    setPendingValidationSourceKey(null);
+    setSearchKeyword('');
+    const sourceKeys = pendingValidationSourceKeys || undefined;
+    setPendingValidationSourceKeys(null);
     await withLoading('validateSources', async () => {
-      await startValidation(searchKeyword, sourceKey);
+      await startValidation(keyword, sourceKeys);
     });
   };
 
   const handleValidateSource = (key: string) => {
-    if (!searchKeyword.trim()) {
-      setPendingValidationSourceKey(key);
-      openValidationModal();
+    handleOpenValidationModal([key]);
+  };
+
+  const handleBatchValidation = () => {
+    if (selectedSources.size === 0) {
+      showAlert({
+        type: 'warning',
+        title: '请先选择要检测的视频源',
+        message: '请选择至少一个视频源',
+      });
       return;
     }
-
-    withLoading('validateSources', async () => {
-      await startValidation(searchKeyword, key);
-    }).catch(() => void 0);
+    handleOpenValidationModal(Array.from(selectedSources));
   };
 
   const handleSelectAll = useCallback(
@@ -302,7 +370,10 @@ const VideoSourceConfig = ({
   const isAnyBatchLoading =
     isLoading('batchSource_batch_enable') ||
     isLoading('batchSource_batch_disable') ||
-    isLoading('batchSource_batch_delete');
+    isLoading('batchSource_batch_delete') ||
+    isLoading('batchSource_batch_set_proxy_mode_browser') ||
+    isLoading('batchSource_batch_set_proxy_mode_server') ||
+    isLoading('batchSource_batch_set_proxy_mode_auto');
 
   return (
     <div className='space-y-6'>
@@ -321,65 +392,33 @@ const VideoSourceConfig = ({
                   已选择 {selectedSources.size} 个视频源
                 </span>
               </span>
-              <button
-                onClick={() => requestBatchOperation('batch_enable')}
-                disabled={isLoading('batchSource_batch_enable')}
-                className={`px-3 py-1 text-sm ${
-                  isLoading('batchSource_batch_enable')
-                    ? buttonStyles.disabled
-                    : buttonStyles.success
-                }`}
-              >
-                {isLoading('batchSource_batch_enable')
-                  ? '启用中...'
-                  : '批量启用'}
-              </button>
-              <button
-                onClick={() => requestBatchOperation('batch_disable')}
-                disabled={isLoading('batchSource_batch_disable')}
-                className={`px-3 py-1 text-sm ${
-                  isLoading('batchSource_batch_disable')
-                    ? buttonStyles.disabled
-                    : buttonStyles.warning
-                }`}
-              >
-                {isLoading('batchSource_batch_disable')
-                  ? '禁用中...'
-                  : '批量禁用'}
-              </button>
-              <button
-                onClick={() => requestBatchOperation('batch_delete')}
-                disabled={isLoading('batchSource_batch_delete')}
-                className={`px-3 py-1 text-sm ${
-                  isLoading('batchSource_batch_delete')
-                    ? buttonStyles.disabled
-                    : buttonStyles.danger
-                }`}
-              >
-                {isLoading('batchSource_batch_delete')
-                  ? '删除中...'
-                  : '批量删除'}
-              </button>
+              <BatchSourceMenu
+                selectedCount={selectedSources.size}
+                isEnableLoading={isLoading('batchSource_batch_enable')}
+                isDisableLoading={isLoading('batchSource_batch_disable')}
+                isDeleteLoading={isLoading('batchSource_batch_delete')}
+                isValidationLoading={isValidating}
+                isBrowserRouteLoading={isLoading(
+                  'batchSource_batch_set_proxy_mode_browser',
+                )}
+                isServerRouteLoading={isLoading(
+                  'batchSource_batch_set_proxy_mode_server',
+                )}
+                isAutoRouteLoading={isLoading(
+                  'batchSource_batch_set_proxy_mode_auto',
+                )}
+                onEnable={() => requestBatchOperation('batch_enable')}
+                onDisable={() => requestBatchOperation('batch_disable')}
+                onDelete={() => requestBatchOperation('batch_delete')}
+                onValidate={handleBatchValidation}
+                onSetProxyMode={(proxyMode) =>
+                  requestBatchOperation('batch_set_proxy_mode', { proxyMode })
+                }
+              />
             </div>
             <div className='order-2 hidden h-6 w-px bg-gray-300 dark:bg-gray-600 sm:block'></div>
           </div>
           <div className='order-1 flex items-center gap-2 sm:order-2'>
-            <button
-              onClick={handleOpenValidationModal}
-              disabled={isValidating}
-              className={`flex items-center space-x-1 rounded-lg px-3 py-1 text-sm transition-colors ${
-                isValidating ? buttonStyles.disabled : buttonStyles.primary
-              }`}
-            >
-              {isValidating ? (
-                <>
-                  <div className='h-3 w-3 animate-spin rounded-full border border-white border-t-transparent'></div>
-                  <span>检测中...</span>
-                </>
-              ) : (
-                '有效性检测'
-              )}
-            </button>
             <button
               onClick={() => {
                 setShowAddForm(true);
@@ -453,6 +492,9 @@ const VideoSourceConfig = ({
                   流量路由
                 </th>
                 <th className='px-6 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400'>
+                  7天成功率
+                </th>
+                <th className='px-6 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400'>
                   有效性
                 </th>
                 <th className='px-6 py-3 text-right text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400'>
@@ -471,6 +513,7 @@ const VideoSourceConfig = ({
                     source={source}
                     isSelected={selectedSources.has(source.key)}
                     validationStatus={getValidationStatus(source.key)}
+                    sourceRouteStats={sourceRouteStats[source.key] || null}
                     isProxyModeLoading={isLoading(`proxyMode_${source.key}`)}
                     isToggleLoading={isLoading(`toggleSource_${source.key}`)}
                     isDeleteLoading={isLoading(`deleteSource_${source.key}`)}

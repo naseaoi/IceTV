@@ -217,34 +217,6 @@ div[data-media-provider] video {
   }
 }
 
-/* 播放页顶部流光呼吸动画 */
-@keyframes aurora-breathe {
-  0% {
-    opacity: 0.5;
-    transform: scale(1) translateX(0);
-  }
-  20% {
-    opacity: 1;
-    transform: scale(1.15) translateX(3%);
-  }
-  40% {
-    opacity: 0.55;
-    transform: scale(0.95) translateX(-4%);
-  }
-  60% {
-    opacity: 0.95;
-    transform: scale(1.1) translateX(2%);
-  }
-  80% {
-    opacity: 0.5;
-    transform: scale(0.97) translateX(-2%);
-  }
-  100% {
-    opacity: 0.5;
-    transform: scale(1) translateX(0);
-  }
-}
-
 /* ImagePlaceholder 骨架屏动画 */
 @keyframes shine {
   0% {

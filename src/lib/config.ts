@@ -1,14 +1,28 @@
 import 'server-only';
 
-import { db } from '@/lib/db';
-import { getOwnerUsername } from '@/lib/env.server';
-
-import { AdminConfig } from '@/types/admin';
 import {
   DEFAULT_BANGUMI_DATA_SOURCE,
   normalizeBangumiDataSource,
+  normalizeSiteBangumiDataSource,
 } from '@/lib/bangumi-source';
+import { db } from '@/lib/db';
+import { PUBLIC_DOUBAN_IMAGE_PROXY_TYPES } from '@/lib/douban-image-url';
+import {
+  normalizeSiteDoubanImageProxyType,
+  normalizeSiteDoubanProxyType,
+} from '@/lib/douban-options';
+import {
+  type DoubanImageProxyType,
+  DEFAULT_DOUBAN_IMAGE_PROXY_TYPE,
+  DEFAULT_DOUBAN_PROXY_TYPE,
+} from '@/lib/douban-source';
+import { getOwnerUsername } from '@/lib/env.server';
+import {
+  DEFAULT_RUNTIME_PARAMS,
+  normalizeRuntimeParams,
+} from '@/lib/runtime-params';
 import { normalizeUsername } from '@/lib/username';
+import { AdminConfig } from '@/types/admin';
 
 export interface ApiSite {
   key: string;
@@ -64,6 +78,13 @@ let cachedConfigVersion = '';
 let cachedConfigLoadedAt = 0;
 const PUBLIC_CONFIG_CACHE_TAG = 'public-config';
 const DEFAULT_CONFIG_CACHE_TTL_MS = 30_000;
+const PUBLIC_DOUBAN_PROXY_TYPES = new Set([
+  'direct',
+  'cors-proxy-zwei',
+  'cmliussss-cdn-tencent',
+  'cmliussss-cdn-ali',
+  'cors-anywhere',
+]);
 type ManagedUser = AdminConfig['UserConfig']['Users'][number];
 const configVersionByObject = new WeakMap<AdminConfig, string>();
 
@@ -80,9 +101,34 @@ function loadNextCacheApi(): NextCacheApi | null {
   try {
     return require('next/cache') as NextCacheApi;
   } catch (error) {
-    console.warn('加载 Next 缓存接口失败:', error);
+    if (process.env.NODE_ENV !== 'test') {
+      console.warn('加载 Next 缓存接口失败:', error);
+    }
     return null;
   }
+}
+
+export function getPublicDoubanProxyType(
+  proxyType: string | undefined,
+): string {
+  return proxyType && PUBLIC_DOUBAN_PROXY_TYPES.has(proxyType)
+    ? proxyType
+    : DEFAULT_DOUBAN_PROXY_TYPE;
+}
+
+export function getPublicBangumiDataSource(
+  dataSource: string | undefined,
+): string {
+  return dataSource === 'direct' ? dataSource : DEFAULT_BANGUMI_DATA_SOURCE;
+}
+
+export function getPublicDoubanImageProxyType(
+  proxyType: string | undefined,
+): string {
+  return proxyType &&
+    PUBLIC_DOUBAN_IMAGE_PROXY_TYPES.has(proxyType as DoubanImageProxyType)
+    ? proxyType
+    : DEFAULT_DOUBAN_IMAGE_PROXY_TYPE;
 }
 
 // 从配置文件补充管理员配置
@@ -245,9 +291,12 @@ async function getInitConfig(
       EnableOptimization: true,
       AutoSwitchSourceOnTimeout: false,
       LiveDirectConnect: false,
-      SearchDownstreamMaxPage:
-        Number(process.env.NEXT_PUBLIC_SEARCH_MAX_PAGE) || 5,
-      SiteInterfaceCacheTime: cfgFile.cache_time || 7200,
+      ...normalizeRuntimeParams({
+        ...DEFAULT_RUNTIME_PARAMS,
+        SearchDownstreamMaxPage:
+          Number(process.env.NEXT_PUBLIC_SEARCH_MAX_PAGE) || 5,
+        SiteInterfaceCacheTime: cfgFile.cache_time || 7200,
+      }),
       DoubanProxyType: process.env.NEXT_PUBLIC_DOUBAN_PROXY_TYPE || 'direct',
       DoubanProxy: process.env.NEXT_PUBLIC_DOUBAN_PROXY || '',
       BangumiDataSource: normalizeBangumiDataSource(
@@ -256,7 +305,7 @@ async function getInitConfig(
       BangumiProxy: process.env.NEXT_PUBLIC_BANGUMI_PROXY || '',
       DoubanImageProxyType:
         process.env.NEXT_PUBLIC_DOUBAN_IMAGE_PROXY_TYPE ||
-        'cmliussss-cdn-tencent',
+        DEFAULT_DOUBAN_IMAGE_PROXY_TYPE,
       DoubanImageProxy: process.env.NEXT_PUBLIC_DOUBAN_IMAGE_PROXY || '',
       DisableYellowFilter:
         process.env.NEXT_PUBLIC_DISABLE_YELLOW_FILTER === 'true',
@@ -435,9 +484,12 @@ export function configSelfCheck(adminConfig: AdminConfig): AdminConfig {
       EnableOptimization: true,
       AutoSwitchSourceOnTimeout: false,
       LiveDirectConnect: false,
-      SearchDownstreamMaxPage:
-        Number(process.env.NEXT_PUBLIC_SEARCH_MAX_PAGE) || 5,
-      SiteInterfaceCacheTime: 7200,
+      ...normalizeRuntimeParams({
+        ...DEFAULT_RUNTIME_PARAMS,
+        SearchDownstreamMaxPage:
+          Number(process.env.NEXT_PUBLIC_SEARCH_MAX_PAGE) || 5,
+        SiteInterfaceCacheTime: 7200,
+      }),
       DoubanProxyType: process.env.NEXT_PUBLIC_DOUBAN_PROXY_TYPE || 'direct',
       DoubanProxy: process.env.NEXT_PUBLIC_DOUBAN_PROXY || '',
       BangumiDataSource: normalizeBangumiDataSource(
@@ -446,7 +498,7 @@ export function configSelfCheck(adminConfig: AdminConfig): AdminConfig {
       BangumiProxy: process.env.NEXT_PUBLIC_BANGUMI_PROXY || '',
       DoubanImageProxyType:
         process.env.NEXT_PUBLIC_DOUBAN_IMAGE_PROXY_TYPE ||
-        'cmliussss-cdn-tencent',
+        DEFAULT_DOUBAN_IMAGE_PROXY_TYPE,
       DoubanImageProxy: process.env.NEXT_PUBLIC_DOUBAN_IMAGE_PROXY || '',
       DisableYellowFilter:
         process.env.NEXT_PUBLIC_DISABLE_YELLOW_FILTER === 'true',
@@ -476,13 +528,27 @@ export function configSelfCheck(adminConfig: AdminConfig): AdminConfig {
     adminConfig.SiteConfig.FluidSearch =
       process.env.NEXT_PUBLIC_FLUID_SEARCH !== 'false';
   }
-  adminConfig.SiteConfig.BangumiDataSource = normalizeBangumiDataSource(
+  Object.assign(
+    adminConfig.SiteConfig,
+    normalizeRuntimeParams(adminConfig.SiteConfig),
+  );
+  adminConfig.SiteConfig.DoubanProxyType = normalizeSiteDoubanProxyType(
+    adminConfig.SiteConfig.DoubanProxyType,
+  );
+  adminConfig.SiteConfig.DoubanProxy = '';
+  adminConfig.SiteConfig.BangumiDataSource = normalizeSiteBangumiDataSource(
     adminConfig.SiteConfig.BangumiDataSource || DEFAULT_BANGUMI_DATA_SOURCE,
   );
   if (typeof adminConfig.SiteConfig.BangumiProxy !== 'string') {
     adminConfig.SiteConfig.BangumiProxy =
       process.env.NEXT_PUBLIC_BANGUMI_PROXY || '';
   }
+  adminConfig.SiteConfig.BangumiProxy = '';
+  adminConfig.SiteConfig.DoubanImageProxyType =
+    normalizeSiteDoubanImageProxyType(
+      adminConfig.SiteConfig.DoubanImageProxyType,
+    );
+  adminConfig.SiteConfig.DoubanImageProxy = '';
 
   // 站长变更自检
   const ownerUser = getOwnerUsername();
@@ -716,15 +782,17 @@ export function getCacheTime(
   config?: Readonly<AdminConfig>,
 ): number | Promise<number> {
   if (config) {
-    return config.SiteConfig.SiteInterfaceCacheTime || 7200;
+    return normalizeRuntimeParams(config.SiteConfig).SiteInterfaceCacheTime;
   }
 
   if (cachedConfig && isCachedConfigFresh()) {
-    return cachedConfig.SiteConfig.SiteInterfaceCacheTime || 7200;
+    return normalizeRuntimeParams(cachedConfig.SiteConfig)
+      .SiteInterfaceCacheTime;
   }
 
   return getConfigForRead().then(
-    (currentConfig) => currentConfig.SiteConfig.SiteInterfaceCacheTime || 7200,
+    (currentConfig) =>
+      normalizeRuntimeParams(currentConfig.SiteConfig).SiteInterfaceCacheTime,
   );
 }
 
@@ -858,7 +926,16 @@ async function readPublicConfig() {
     EnableOptimization: config.SiteConfig.EnableOptimization,
     AutoSwitchSourceOnTimeout: config.SiteConfig.AutoSwitchSourceOnTimeout,
     LiveDirectConnect: config.SiteConfig.LiveDirectConnect,
-    BangumiDataSource: config.SiteConfig.BangumiDataSource,
+    ...normalizeRuntimeParams(config.SiteConfig),
+    DoubanProxyType: getPublicDoubanProxyType(
+      config.SiteConfig.DoubanProxyType,
+    ),
+    BangumiDataSource: getPublicBangumiDataSource(
+      config.SiteConfig.BangumiDataSource,
+    ),
+    DoubanImageProxyType: getPublicDoubanImageProxyType(
+      config.SiteConfig.DoubanImageProxyType,
+    ),
     CustomCategories: config.CustomCategories.filter(
       (category) => !category.disabled,
     ).map((category) => ({

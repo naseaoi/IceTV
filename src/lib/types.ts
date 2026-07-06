@@ -26,11 +26,81 @@ export interface Favorite {
   origin?: 'vod' | 'live';
 }
 
+export interface PlaybackSession {
+  id: string;
+  source: string;
+  video_id: string;
+  episode_index: number;
+  title: string;
+  source_name: string;
+  cover: string;
+  year: string;
+  started_at: number;
+  ended_at: number;
+  watch_seconds: number;
+  last_position: number;
+  total_time: number;
+  created_at: number;
+  updated_at: number;
+}
+
+export interface PlaybackSessionQuery {
+  since?: number;
+  limit?: number;
+  cursor?: number;
+  keyword?: string;
+}
+
+export interface PlaybackWatchTotals {
+  totalWatchSeconds: number;
+  periodWatchSeconds: number;
+}
+
+export interface PlaybackTimeRange {
+  key: string;
+  start: number;
+  end: number;
+}
+
+export interface PlaybackRangeWatchTotal {
+  key: string;
+  watchSeconds: number;
+}
+
+export interface PlaybackStatsTopItem {
+  source: string;
+  videoId: string;
+  title: string;
+  sourceName: string;
+  cover: string;
+  year: string;
+  watchSeconds: number;
+  sessionCount: number;
+  lastWatchedAt: number;
+}
+
+export type SourceRouteMode = 'browser' | 'server';
+
+export interface SourceRouteStatInput {
+  source: string;
+  routeMode: SourceRouteMode;
+  success: boolean;
+  eventAt: number;
+}
+
+export interface SourceRouteStatsItem {
+  source: string;
+  routeMode: SourceRouteMode;
+  successCount: number;
+  failureCount: number;
+}
+
 export interface StorageUserImportData {
   playRecords: { [key: string]: PlayRecord };
   favorites: { [key: string]: Favorite };
   searchHistory: string[];
   skipConfigs: { [key: string]: SkipConfig };
+  playbackSessions: { [key: string]: PlaybackSession };
 }
 
 export interface StorageImportData {
@@ -71,7 +141,11 @@ export interface IStorage {
 
   // 搜索历史相关
   getSearchHistory(userName: string): Promise<string[]>;
-  addSearchHistory(userName: string, keyword: string): Promise<void>;
+  addSearchHistory(
+    userName: string,
+    keyword: string,
+    limit?: number,
+  ): Promise<void>;
   deleteSearchHistory(userName: string, keyword?: string): Promise<void>;
 
   // 用户列表
@@ -95,6 +169,27 @@ export interface IStorage {
   ): Promise<void>;
   deleteSkipConfig(userName: string, source: string, id: string): Promise<void>;
   getAllSkipConfigs(userName: string): Promise<{ [key: string]: SkipConfig }>;
+
+  setPlaybackSession(userName: string, session: PlaybackSession): Promise<void>;
+  getPlaybackSessions(
+    userName: string,
+    query?: PlaybackSessionQuery,
+  ): Promise<PlaybackSession[]>;
+  getPlaybackWatchTotals(
+    userName: string,
+    since: number,
+  ): Promise<PlaybackWatchTotals>;
+  getPlaybackRangeWatchTotals(
+    userName: string,
+    ranges: PlaybackTimeRange[],
+  ): Promise<PlaybackRangeWatchTotal[]>;
+  getPlaybackTopItems(
+    userName: string,
+    limit?: number,
+    since?: number,
+  ): Promise<PlaybackStatsTopItem[]>;
+  recordSourceRouteStat(input: SourceRouteStatInput): Promise<void>;
+  getSourceRouteStats(sinceDate: string): Promise<SourceRouteStatsItem[]>;
 
   // 数据清理相关
   clearAllData(): Promise<void>;

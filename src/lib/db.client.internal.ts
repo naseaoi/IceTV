@@ -8,8 +8,8 @@
  */
 
 import { getAuthInfoFromBrowserCookie } from './auth.client';
+import type { CacheUpdateEvent, Favorite, PlayRecord } from './db.client';
 import { cacheManager } from './db.client.cache';
-import type { PlayRecord, Favorite, CacheUpdateEvent } from './db.client';
 
 export { cacheManager } from './db.client.cache';
 

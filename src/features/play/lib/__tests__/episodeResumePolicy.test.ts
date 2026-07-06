@@ -1,10 +1,9 @@
-import type { SearchResult } from '@/lib/types';
-
 import {
-  resolveSourceSwitchEpisodeAnchor,
   resolveSourceSwitchCurrentPlayTime,
+  resolveSourceSwitchEpisodeAnchor,
   resolveSourceSwitchResumeState,
 } from '@/features/play/lib/episodeResumePolicy';
+import type { SearchResult } from '@/lib/types';
 
 function createSearchResult(partial: Partial<SearchResult>): SearchResult {
   return {

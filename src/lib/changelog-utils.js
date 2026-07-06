@@ -187,10 +187,6 @@ function extractLatestVersion(content) {
   return parseChangelog(content).latestVersion;
 }
 
-function getEntryByVersion(entries, version) {
-  return entries.find((entry) => entry.version === version) || null;
-}
-
 function renderReleaseNotes(entry) {
   if (!entry) {
     return '';

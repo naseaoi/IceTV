@@ -1,6 +1,7 @@
+import { getRuntimeConfig } from '@/lib/runtime-config';
+
 const STORAGE_KEY = 'icetv:cover-image-loaded';
-const CACHE_MAX_SIZE = 500;
-const CACHE_TRIM_TO_SIZE = 250;
+const DEFAULT_CACHE_MAX_SIZE = 500;
 const LOADED_EVENT = 'loaded';
 
 const loadedImageCache = new Map<string, number>();
@@ -35,6 +36,15 @@ function getSessionStorage(): Storage | null {
   } catch {
     return null;
   }
+}
+
+function getCacheMaxSize(): number {
+  return Math.max(
+    50,
+    Math.floor(
+      getRuntimeConfig()?.COVER_IMAGE_CACHE_SIZE || DEFAULT_CACHE_MAX_SIZE,
+    ),
+  );
 }
 
 function hydrateFromStorage() {
@@ -76,11 +86,13 @@ function hydrateFromStorage() {
 }
 
 function trimCache() {
-  if (loadedImageCache.size <= CACHE_MAX_SIZE) {
+  const cacheMaxSize = getCacheMaxSize();
+  if (loadedImageCache.size <= cacheMaxSize) {
     return;
   }
 
-  const evictCount = loadedImageCache.size - CACHE_TRIM_TO_SIZE;
+  const trimToSize = Math.max(1, Math.floor(cacheMaxSize / 2));
+  const evictCount = loadedImageCache.size - trimToSize;
   const cacheKeys = Array.from(loadedImageCache.keys());
   for (
     let index = 0;

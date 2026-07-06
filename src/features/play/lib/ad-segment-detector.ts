@@ -1,6 +1,6 @@
 import { createTimedAbortController } from '@/lib/downstream-sources/shared';
-import { getBaseUrl, resolveUrl } from '@/lib/url-resolve';
 import { fetchWithUrlGuard } from '@/lib/url-guard';
+import { getBaseUrl, resolveUrl } from '@/lib/url-resolve';
 
 interface DiscontSegment {
   lineIndices: number[];

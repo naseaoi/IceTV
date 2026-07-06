@@ -1,7 +1,7 @@
 import {
+  type SourceSwitchCleanupTask,
   finalizeSourceSwitchCleanup,
   shouldFinalizeSourceSwitchCleanup,
-  type SourceSwitchCleanupTask,
 } from '@/features/play/lib/sourceSwitchCleanup';
 
 describe('sourceSwitchCleanup', () => {

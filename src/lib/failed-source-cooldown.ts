@@ -1,5 +1,7 @@
+import { getRuntimeConfig } from '@/lib/runtime-config';
+
 const STORAGE_KEY = 'icetv_failed_sources';
-const COOLDOWN_MS = 5 * 60 * 1000;
+const DEFAULT_COOLDOWN_MS = 5 * 60 * 1000;
 const MAX_FAILURE_TEXT_LENGTH = 80;
 
 export interface SourceFailureMarkOptions {
@@ -37,6 +39,13 @@ function isStorageAvailable(): boolean {
   return typeof window !== 'undefined' && !!window.sessionStorage;
 }
 
+function getCooldownMs(): number {
+  const configured = getRuntimeConfig()?.SOURCE_FAILURE_COOLDOWN_SECONDS;
+  return configured === undefined
+    ? DEFAULT_COOLDOWN_MS
+    : Math.max(0, Math.floor(configured)) * 1000;
+}
+
 function readAll(): NormalizedFailureRecord {
   if (!isStorageAvailable()) return {};
   try {
@@ -46,11 +55,12 @@ function readAll(): NormalizedFailureRecord {
     if (!parsed || typeof parsed !== 'object') return {};
 
     const now = Date.now();
+    const cooldownMs = getCooldownMs();
     const data: NormalizedFailureRecord = {};
     for (const [key, value] of Object.entries(parsed)) {
       const record = normalizeStoredRecord(value);
       if (!record) continue;
-      if (now - record.ts > COOLDOWN_MS) continue;
+      if (now - record.ts > cooldownMs) continue;
       data[key] = record;
     }
     return data;
@@ -63,8 +73,9 @@ function writeAll(data: NormalizedFailureRecord): void {
   if (!isStorageAvailable()) return;
   try {
     const now = Date.now();
+    const cooldownMs = getCooldownMs();
     for (const key of Object.keys(data)) {
-      if (now - data[key].ts > COOLDOWN_MS) {
+      if (now - data[key].ts > cooldownMs) {
         delete data[key];
       }
     }
@@ -103,7 +114,8 @@ export function getSourceFailure(key: string): SourceFailureInfo {
   }
 
   const elapsed = Date.now() - record.ts;
-  if (elapsed > COOLDOWN_MS) {
+  const cooldownMs = getCooldownMs();
+  if (elapsed > cooldownMs) {
     delete data[key];
     writeAll(data);
     return createEmptyFailureInfo();
@@ -112,7 +124,7 @@ export function getSourceFailure(key: string): SourceFailureInfo {
   return {
     coolingDown: true,
     count: record.count,
-    remainingMs: Math.max(0, COOLDOWN_MS - elapsed),
+    remainingMs: Math.max(0, cooldownMs - elapsed),
     failedAt: record.ts,
     reason: record.reason,
     message: record.message,

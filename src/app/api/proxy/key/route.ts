@@ -1,16 +1,18 @@
 ﻿import { NextRequest, NextResponse } from 'next/server';
 
-import { authorizeProxyRequest } from '@/lib/proxy-auth';
+import { isLiveEntryEnabled } from '@/features/live/lib/live';
+import { getConfigForRead } from '@/lib/config';
 import {
   fetchResponseThroughProxy,
   getProxyUrlForTarget,
 } from '@/lib/http-proxy-json';
-import { isLiveEntryEnabled } from '@/features/live/lib/live';
-import { markSourceCors, responseAllowsCors } from '@/lib/source-capability';
+import { authorizeProxyRequest } from '@/lib/proxy-auth';
 import {
   readArrayBufferLimited,
   ResponseSizeLimitError,
 } from '@/lib/proxy-response-limits';
+import { normalizeRuntimeParams } from '@/lib/runtime-params';
+import { markSourceCors, responseAllowsCors } from '@/lib/source-capability';
 import {
   fetchWithUrlGuard,
   UrlValidationError,
@@ -47,6 +49,10 @@ export async function GET(request: NextRequest) {
   }
 
   const ua = await resolveProxyUserAgent(source);
+  const runtimeParams = normalizeRuntimeParams(
+    (await getConfigForRead()).SiteConfig,
+  );
+  const timeoutMs = runtimeParams.ProxyRequestTimeoutSeconds * 1000;
 
   try {
     if (isLiveStream) {
@@ -57,7 +63,7 @@ export async function GET(request: NextRequest) {
             new URL(validation.url),
             proxyUrl,
             {
-              timeoutMs: 15_000,
+              timeoutMs,
               userAgent: ua,
               maxBytes: MAX_KEY_BYTES,
               accept: '*/*',
@@ -89,6 +95,7 @@ export async function GET(request: NextRequest) {
         'User-Agent': ua,
       },
       skipInitialValidation: true,
+      timeoutMs,
     });
     if (!response.ok) {
       return NextResponse.json(

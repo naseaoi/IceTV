@@ -14,39 +14,76 @@ export default function ScrollableRow({
   const [showLeftScroll, setShowLeftScroll] = useState(false);
   const [showRightScroll, setShowRightScroll] = useState(false);
   const [isHovered, setIsHovered] = useState(false);
+  const animationFrameRef = useRef<number | null>(null);
+  const scrollButtonStateRef = useRef({ left: false, right: false });
+
+  const updateScrollButtonState = useCallback(
+    (nextState: { left: boolean; right: boolean }) => {
+      const currentState = scrollButtonStateRef.current;
+
+      if (currentState.left !== nextState.left) {
+        currentState.left = nextState.left;
+        setShowLeftScroll(nextState.left);
+      }
+
+      if (currentState.right !== nextState.right) {
+        currentState.right = nextState.right;
+        setShowRightScroll(nextState.right);
+      }
+    },
+    [],
+  );
 
   const checkScroll = useCallback(() => {
     const el = containerRef.current;
     if (!el) return;
     const { scrollWidth, clientWidth, scrollLeft } = el;
     const threshold = 1;
-    setShowRightScroll(scrollWidth - (scrollLeft + clientWidth) > threshold);
-    setShowLeftScroll(scrollLeft > threshold);
-  }, []);
+    updateScrollButtonState({
+      left: scrollLeft > threshold,
+      right: scrollWidth - (scrollLeft + clientWidth) > threshold,
+    });
+  }, [updateScrollButtonState]);
 
-  // 单个 useEffect 统一管理所有 observer，不依赖 children
+  const scheduleCheckScroll = useCallback(() => {
+    if (typeof window.requestAnimationFrame !== 'function') {
+      checkScroll();
+      return;
+    }
+
+    if (animationFrameRef.current !== null) {
+      return;
+    }
+
+    animationFrameRef.current = window.requestAnimationFrame(() => {
+      animationFrameRef.current = null;
+      checkScroll();
+    });
+  }, [checkScroll]);
+
   useEffect(() => {
     const el = containerRef.current;
     if (!el) return;
 
     checkScroll();
 
-    // ResizeObserver 监听容器尺寸变化（包括子元素导致的尺寸变化）
-    const resizeObserver = new ResizeObserver(checkScroll);
+    const resizeObserver = new ResizeObserver(scheduleCheckScroll);
     resizeObserver.observe(el);
 
-    // MutationObserver 监听子元素增删（覆盖 children 变化场景）
-    const mutationObserver = new MutationObserver(checkScroll);
+    const mutationObserver = new MutationObserver(scheduleCheckScroll);
     mutationObserver.observe(el, {
       childList: true,
-      subtree: true,
     });
 
     return () => {
       resizeObserver.disconnect();
       mutationObserver.disconnect();
+      if (animationFrameRef.current !== null) {
+        window.cancelAnimationFrame(animationFrameRef.current);
+        animationFrameRef.current = null;
+      }
     };
-  }, [checkScroll]);
+  }, [checkScroll, scheduleCheckScroll]);
 
   const handleScrollRightClick = () => {
     containerRef.current?.scrollBy({
@@ -67,14 +104,14 @@ export default function ScrollableRow({
       className='relative'
       onMouseEnter={() => {
         setIsHovered(true);
-        checkScroll();
+        scheduleCheckScroll();
       }}
       onMouseLeave={() => setIsHovered(false)}
     >
       <div
         ref={containerRef}
         className='scrollbar-hide flex space-x-7 overflow-x-auto py-1 pb-12 pl-1 pr-4 sm:py-2 sm:pb-14 sm:pr-6'
-        onScroll={checkScroll}
+        onScroll={scheduleCheckScroll}
       >
         {children}
       </div>
@@ -98,10 +135,15 @@ export default function ScrollableRow({
             }}
           >
             <button
+              type='button'
+              aria-label='向左滚动'
               onClick={handleScrollLeftClick}
               className='flex h-12 w-12 items-center justify-center rounded-full border border-gray-200 bg-white/95 shadow-lg transition-transform hover:scale-105 hover:bg-white dark:border-gray-600 dark:bg-gray-800/90 dark:hover:bg-gray-700'
             >
-              <ChevronLeft className='h-6 w-6 text-gray-600 dark:text-gray-300' />
+              <ChevronLeft
+                className='h-6 w-6 text-gray-600 dark:text-gray-300'
+                aria-hidden='true'
+              />
             </button>
           </div>
         </div>
@@ -127,10 +169,15 @@ export default function ScrollableRow({
             }}
           >
             <button
+              type='button'
+              aria-label='向右滚动'
               onClick={handleScrollRightClick}
               className='flex h-12 w-12 items-center justify-center rounded-full border border-gray-200 bg-white/95 shadow-lg transition-transform hover:scale-105 hover:bg-white dark:border-gray-600 dark:bg-gray-800/90 dark:hover:bg-gray-700'
             >
-              <ChevronRight className='h-6 w-6 text-gray-600 dark:text-gray-300' />
+              <ChevronRight
+                className='h-6 w-6 text-gray-600 dark:text-gray-300'
+                aria-hidden='true'
+              />
             </button>
           </div>
         </div>

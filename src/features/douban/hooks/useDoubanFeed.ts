@@ -350,7 +350,7 @@ export function useDoubanFeed(type: string) {
     }, 50);
 
     return () => clearTimeout(timer);
-  }, [type, customCategories]);
+  }, [type, customCategories, selectedWeekday]);
 
   const getRequestParams = useCallback(
     (pageStart: number) => {
@@ -486,7 +486,13 @@ export function useDoubanFeed(type: string) {
       }
     } catch (err) {
       console.error(err);
-      setLoading(false);
+      const currentSnapshot = { ...currentParamsRef.current };
+      if (isSnapshotEqual(requestSnapshot, currentSnapshot)) {
+        setCurrentPage(0);
+        setHasMore(false);
+        setIsLoadingMore(false);
+        setLoading(false);
+      }
     }
   }, [
     type,
@@ -615,7 +621,11 @@ export function useDoubanFeed(type: string) {
         }
       } catch (err) {
         console.error(err);
-        setIsLoadingMore(false);
+        const currentSnapshot = { ...currentParamsRef.current };
+        if (isFeedSelectionEqual(requestSnapshot, currentSnapshot)) {
+          setHasMore(false);
+          setIsLoadingMore(false);
+        }
       }
     };
 

@@ -1,6 +1,5 @@
-import type { SearchResult } from '@/lib/types';
-
 import { resolveRequestedProbeEpisodeUrl } from '@/features/play/lib/sourceProbeStore';
+import type { SearchResult } from '@/lib/types';
 
 function createSearchResult(partial: Partial<SearchResult>): SearchResult {
   return {

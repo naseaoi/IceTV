@@ -8,10 +8,22 @@ import { AdminConfig } from '@/types/admin';
 
 import { hashPassword, verifyPassword } from './password';
 import {
+  buildPlaybackSearchLikePattern,
+  normalizePlaybackSearchKeyword,
+} from './playback-query';
+import {
   Favorite,
   IStorage,
+  PlaybackRangeWatchTotal,
+  PlaybackSession,
+  PlaybackSessionQuery,
+  PlaybackStatsTopItem,
+  PlaybackTimeRange,
+  PlaybackWatchTotals,
   PlayRecord,
   SkipConfig,
+  SourceRouteStatInput,
+  SourceRouteStatsItem,
   StorageImportData,
 } from './types';
 import { assertValidUsername, normalizeUsername } from './username';
@@ -84,6 +96,37 @@ type LocalDbSchema = {
   searchHistory: Record<string, string[]>;
   skipConfigs: Record<string, Record<string, SkipConfig>>;
   adminConfig: AdminConfig | null;
+};
+
+type PlaybackWatchTotalsRow = {
+  total_watch_seconds: number | null;
+  period_watch_seconds: number | null;
+};
+
+type PlaybackTopAggregateRow = {
+  source: string;
+  video_id: string;
+  watch_seconds: number | null;
+  session_count: number | null;
+  last_watched_at: number | null;
+};
+
+type PlaybackTopMetadataRow = {
+  title: string | null;
+  source_name: string | null;
+  cover: string | null;
+  year: string | null;
+};
+
+type PlaybackRangeWatchTotalRow = {
+  watch_seconds: number | null;
+};
+
+type SourceRouteStatsRow = {
+  source: string;
+  route_mode: string;
+  success_count: number | null;
+  failure_count: number | null;
 };
 
 function ensureObject<T>(value: unknown, fallback: T): T {
@@ -162,6 +205,7 @@ export class LocalSqliteStorage implements IStorage {
     setSkipConfig: Database.Statement;
     deleteSkipConfig: Database.Statement;
     getAllSkipConfigs: Database.Statement;
+    setPlaybackSession: Database.Statement;
     // admin_config
     getAdminConfig: Database.Statement;
     setAdminConfig: Database.Statement;
@@ -170,6 +214,7 @@ export class LocalSqliteStorage implements IStorage {
     deleteFavoritesByUser: Database.Statement;
     deleteSearchHistoryByUser: Database.Statement;
     deleteSkipConfigsByUser: Database.Statement;
+    deletePlaybackSessionsByUser: Database.Statement;
   };
 
   constructor(dbPath?: string) {
@@ -266,10 +311,48 @@ export class LocalSqliteStorage implements IStorage {
         PRIMARY KEY (username, config_key)
       );
 
+      CREATE TABLE IF NOT EXISTS playback_sessions (
+        id TEXT PRIMARY KEY,
+        username TEXT NOT NULL,
+        source TEXT NOT NULL,
+        video_id TEXT NOT NULL,
+        episode_index INTEGER NOT NULL,
+        title TEXT NOT NULL,
+        source_name TEXT NOT NULL,
+        cover TEXT NOT NULL,
+        year TEXT NOT NULL,
+        started_at INTEGER NOT NULL,
+        ended_at INTEGER NOT NULL,
+        watch_seconds INTEGER NOT NULL,
+        last_position INTEGER NOT NULL,
+        total_time INTEGER NOT NULL,
+        created_at INTEGER NOT NULL,
+        updated_at INTEGER NOT NULL
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_playback_sessions_user_started_at
+        ON playback_sessions (username, started_at);
+
+      CREATE INDEX IF NOT EXISTS idx_playback_sessions_user_video
+        ON playback_sessions (username, source, video_id);
+
       CREATE TABLE IF NOT EXISTS admin_config (
         id INTEGER PRIMARY KEY CHECK (id = 1),
         config_json TEXT NOT NULL
       );
+
+      CREATE TABLE IF NOT EXISTS source_route_stats (
+        source TEXT NOT NULL,
+        route_mode TEXT NOT NULL,
+        bucket_date TEXT NOT NULL,
+        success_count INTEGER NOT NULL DEFAULT 0,
+        failure_count INTEGER NOT NULL DEFAULT 0,
+        updated_at INTEGER NOT NULL,
+        PRIMARY KEY (source, route_mode, bucket_date)
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_source_route_stats_bucket
+        ON source_route_stats (bucket_date);
     `);
   }
 
@@ -353,6 +436,29 @@ export class LocalSqliteStorage implements IStorage {
       getAllSkipConfigs: this.db.prepare(
         'SELECT config_key, config_json FROM skip_configs WHERE username = ?',
       ),
+      setPlaybackSession: this.db.prepare(
+        `INSERT INTO playback_sessions (
+          id, username, source, video_id, episode_index, title, source_name,
+          cover, year, started_at, ended_at, watch_seconds, last_position,
+          total_time, created_at, updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(id) DO UPDATE SET
+          username = excluded.username,
+          source = excluded.source,
+          video_id = excluded.video_id,
+          episode_index = excluded.episode_index,
+          title = excluded.title,
+          source_name = excluded.source_name,
+          cover = excluded.cover,
+          year = excluded.year,
+          started_at = excluded.started_at,
+          ended_at = excluded.ended_at,
+          watch_seconds = excluded.watch_seconds,
+          last_position = excluded.last_position,
+          total_time = excluded.total_time,
+          created_at = excluded.created_at,
+          updated_at = excluded.updated_at`,
+      ),
       // admin_config
       getAdminConfig: this.db.prepare(
         'SELECT config_json FROM admin_config WHERE id = 1',
@@ -373,6 +479,9 @@ export class LocalSqliteStorage implements IStorage {
       deleteSkipConfigsByUser: this.db.prepare(
         'DELETE FROM skip_configs WHERE username = ?',
       ),
+      deletePlaybackSessionsByUser: this.db.prepare(
+        'DELETE FROM playback_sessions WHERE username = ?',
+      ),
     };
   }
 
@@ -383,6 +492,7 @@ export class LocalSqliteStorage implements IStorage {
       'SELECT 1 AS v FROM favorites LIMIT 1',
       'SELECT 1 AS v FROM search_history LIMIT 1',
       'SELECT 1 AS v FROM skip_configs LIMIT 1',
+      'SELECT 1 AS v FROM playback_sessions LIMIT 1',
       'SELECT 1 AS v FROM admin_config LIMIT 1',
     ];
     return checks.some((sql) => Boolean(this.db.prepare(sql).get()));
@@ -640,6 +750,7 @@ export class LocalSqliteStorage implements IStorage {
       this.stmts.deleteFavoritesByUser.run(targetUser);
       this.stmts.deleteSearchHistoryByUser.run(targetUser);
       this.stmts.deleteSkipConfigsByUser.run(targetUser);
+      this.stmts.deletePlaybackSessionsByUser.run(targetUser);
     });
     remove(username);
   }
@@ -652,16 +763,18 @@ export class LocalSqliteStorage implements IStorage {
     return rows.map((row) => row.keyword);
   }
 
-  async addSearchHistory(userName: string, keyword: string): Promise<void> {
+  async addSearchHistory(
+    userName: string,
+    keyword: string,
+    limit = SEARCH_HISTORY_LIMIT,
+  ): Promise<void> {
     const username = normalizeUsername(userName);
+    const historyLimit = Math.min(Math.max(Math.floor(limit), 1), 200);
     const save = this.db.transaction((targetUser: string, kw: string) => {
       this.stmts.deleteSearchHistoryKeyword.run(targetUser, kw);
       this.stmts.updateSearchHistoryIndex.run(targetUser);
       this.stmts.insertSearchHistory.run(targetUser, kw, 0);
-      this.stmts.deleteSearchHistoryOverflow.run(
-        targetUser,
-        SEARCH_HISTORY_LIMIT,
-      );
+      this.stmts.deleteSearchHistoryOverflow.run(targetUser, historyLimit);
     });
     save(username, keyword);
   }
@@ -751,6 +864,250 @@ export class LocalSqliteStorage implements IStorage {
     return result;
   }
 
+  async setPlaybackSession(
+    userName: string,
+    session: PlaybackSession,
+  ): Promise<void> {
+    const username = normalizeUsername(userName);
+    this.stmts.setPlaybackSession.run(
+      session.id,
+      username,
+      session.source,
+      session.video_id,
+      session.episode_index,
+      session.title,
+      session.source_name,
+      session.cover,
+      session.year,
+      session.started_at,
+      session.ended_at,
+      session.watch_seconds,
+      session.last_position,
+      session.total_time,
+      session.created_at,
+      session.updated_at,
+    );
+  }
+
+  async getPlaybackSessions(
+    userName: string,
+    query: PlaybackSessionQuery = {},
+  ): Promise<PlaybackSession[]> {
+    const username = normalizeUsername(userName);
+    const conditions = ['username = ?'];
+    const params: Array<string | number> = [username];
+
+    if (Number.isFinite(query.since)) {
+      conditions.push('started_at >= ?');
+      params.push(query.since as number);
+    }
+
+    if (Number.isFinite(query.cursor)) {
+      conditions.push('started_at < ?');
+      params.push(query.cursor as number);
+    }
+
+    const keyword = normalizePlaybackSearchKeyword(query.keyword);
+    if (keyword) {
+      const likePattern = buildPlaybackSearchLikePattern(keyword);
+      conditions.push(
+        "(title LIKE ? ESCAPE '!' OR source_name LIKE ? ESCAPE '!' OR year LIKE ? ESCAPE '!' OR video_id LIKE ? ESCAPE '!')",
+      );
+      params.push(likePattern, likePattern, likePattern, likePattern);
+    }
+
+    const limit = Math.min(Math.max(Math.floor(query.limit ?? 100), 1), 500);
+    params.push(limit);
+
+    const rows = this.db
+      .prepare(
+        `SELECT
+          id, source, video_id, episode_index, title, source_name, cover, year,
+          started_at, ended_at, watch_seconds, last_position, total_time,
+          created_at, updated_at
+        FROM playback_sessions
+        WHERE ${conditions.join(' AND ')}
+        ORDER BY started_at DESC
+        LIMIT ?`,
+      )
+      .all(...params) as PlaybackSession[];
+
+    return rows;
+  }
+
+  async getPlaybackWatchTotals(
+    userName: string,
+    since: number,
+  ): Promise<PlaybackWatchTotals> {
+    const username = normalizeUsername(userName);
+    const periodStart = Number.isFinite(since)
+      ? Math.max(0, Math.floor(since))
+      : 0;
+    const row = this.db
+      .prepare(
+        `SELECT
+          COALESCE(SUM(CASE WHEN watch_seconds > 0 THEN watch_seconds ELSE 0 END), 0) AS total_watch_seconds,
+          COALESCE(SUM(CASE WHEN started_at >= ? AND watch_seconds > 0 THEN watch_seconds ELSE 0 END), 0) AS period_watch_seconds
+        FROM playback_sessions
+        WHERE username = ?`,
+      )
+      .get(periodStart, username) as PlaybackWatchTotalsRow | undefined;
+
+    return {
+      totalWatchSeconds: Number(row?.total_watch_seconds || 0),
+      periodWatchSeconds: Number(row?.period_watch_seconds || 0),
+    };
+  }
+
+  async getPlaybackRangeWatchTotals(
+    userName: string,
+    ranges: PlaybackTimeRange[],
+  ): Promise<PlaybackRangeWatchTotal[]> {
+    const username = normalizeUsername(userName);
+    if (ranges.length === 0) return [];
+
+    const stmt = this.db.prepare(
+      `SELECT COALESCE(SUM(CASE WHEN watch_seconds > 0 THEN watch_seconds ELSE 0 END), 0) AS watch_seconds
+      FROM playback_sessions
+      WHERE username = ? AND started_at >= ? AND started_at < ?`,
+    );
+
+    return ranges.map((range) => {
+      const start = Number.isFinite(range.start)
+        ? Math.max(0, Math.floor(range.start))
+        : 0;
+      const end = Number.isFinite(range.end)
+        ? Math.max(start, Math.floor(range.end))
+        : start;
+      const row = stmt.get(username, start, end) as
+        | PlaybackRangeWatchTotalRow
+        | undefined;
+
+      return {
+        key: range.key,
+        watchSeconds: Number(row?.watch_seconds || 0),
+      };
+    });
+  }
+
+  async getPlaybackTopItems(
+    userName: string,
+    limit = 6,
+    since?: number,
+  ): Promise<PlaybackStatsTopItem[]> {
+    const username = normalizeUsername(userName);
+    const safeLimit = Math.min(Math.max(Math.floor(limit), 1), 20);
+    const periodStart = Number.isFinite(since)
+      ? Math.max(0, Math.floor(since as number))
+      : null;
+    const periodCondition = periodStart === null ? '' : ' AND started_at >= ?';
+    const aggregateParams =
+      periodStart === null
+        ? [username, safeLimit]
+        : [username, periodStart, safeLimit];
+    const rows = this.db
+      .prepare(
+        `SELECT
+          source,
+          video_id,
+          COALESCE(SUM(CASE WHEN watch_seconds > 0 THEN watch_seconds ELSE 0 END), 0) AS watch_seconds,
+          COUNT(*) AS session_count,
+          MAX(CASE WHEN ended_at > started_at THEN ended_at ELSE started_at END) AS last_watched_at
+        FROM playback_sessions
+        WHERE username = ?${periodCondition}
+        GROUP BY source, video_id
+        ORDER BY watch_seconds DESC, last_watched_at DESC
+        LIMIT ?`,
+      )
+      .all(...aggregateParams) as PlaybackTopAggregateRow[];
+    const metadataStmt = this.db.prepare(
+      `SELECT title, source_name, cover, year
+        FROM playback_sessions
+        WHERE username = ? AND source = ? AND video_id = ?${periodCondition}
+        ORDER BY started_at DESC
+        LIMIT 1`,
+    );
+
+    return rows.map((row) => {
+      const metadataParams =
+        periodStart === null
+          ? [username, row.source, row.video_id]
+          : [username, row.source, row.video_id, periodStart];
+      const metadata = metadataStmt.get(...metadataParams) as
+        | PlaybackTopMetadataRow
+        | undefined;
+
+      return {
+        source: row.source,
+        videoId: row.video_id,
+        title: metadata?.title || '',
+        sourceName: metadata?.source_name || '',
+        cover: metadata?.cover || '',
+        year: metadata?.year || '',
+        watchSeconds: Number(row.watch_seconds || 0),
+        sessionCount: Number(row.session_count || 0),
+        lastWatchedAt: Number(row.last_watched_at || 0),
+      };
+    });
+  }
+
+  async recordSourceRouteStat(input: SourceRouteStatInput): Promise<void> {
+    const source = input.source.trim().slice(0, 191);
+    if (!source) return;
+    const routeMode = input.routeMode === 'server' ? 'server' : 'browser';
+    const eventAt = Number.isFinite(input.eventAt) ? input.eventAt : Date.now();
+    const bucketDate = new Date(eventAt).toISOString().slice(0, 10);
+    const successIncrement = input.success ? 1 : 0;
+    const failureIncrement = input.success ? 0 : 1;
+
+    this.db
+      .prepare(
+        `INSERT INTO source_route_stats (
+          source, route_mode, bucket_date, success_count, failure_count, updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?)
+        ON CONFLICT(source, route_mode, bucket_date) DO UPDATE SET
+          success_count = success_count + excluded.success_count,
+          failure_count = failure_count + excluded.failure_count,
+          updated_at = excluded.updated_at`,
+      )
+      .run(
+        source,
+        routeMode,
+        bucketDate,
+        successIncrement,
+        failureIncrement,
+        Date.now(),
+      );
+  }
+
+  async getSourceRouteStats(
+    sinceDate: string,
+  ): Promise<SourceRouteStatsItem[]> {
+    const rows = this.db
+      .prepare(
+        `SELECT
+          source,
+          route_mode,
+          COALESCE(SUM(success_count), 0) AS success_count,
+          COALESCE(SUM(failure_count), 0) AS failure_count
+        FROM source_route_stats
+        WHERE bucket_date >= ?
+        GROUP BY source, route_mode`,
+      )
+      .all(sinceDate) as SourceRouteStatsRow[];
+
+    return rows
+      .filter(
+        (row) => row.route_mode === 'browser' || row.route_mode === 'server',
+      )
+      .map((row) => ({
+        source: row.source,
+        routeMode: row.route_mode as SourceRouteStatsItem['routeMode'],
+        successCount: Number(row.success_count || 0),
+        failureCount: Number(row.failure_count || 0),
+      }));
+  }
+
   async clearAllData(): Promise<void> {
     const clear = this.db.transaction(() => {
       this.db.exec(`
@@ -759,7 +1116,9 @@ export class LocalSqliteStorage implements IStorage {
         DELETE FROM favorites;
         DELETE FROM search_history;
         DELETE FROM skip_configs;
+        DELETE FROM playback_sessions;
         DELETE FROM admin_config;
+        DELETE FROM source_route_stats;
       `);
     });
 
@@ -775,7 +1134,9 @@ export class LocalSqliteStorage implements IStorage {
         DELETE FROM favorites;
         DELETE FROM search_history;
         DELETE FROM skip_configs;
+        DELETE FROM playback_sessions;
         DELETE FROM admin_config;
+        DELETE FROM source_route_stats;
       `);
 
       this.stmts.setAdminConfig.run(JSON.stringify(snapshot.adminConfig));
@@ -803,6 +1164,27 @@ export class LocalSqliteStorage implements IStorage {
 
         for (const [key, config] of Object.entries(userData.skipConfigs)) {
           this.stmts.setSkipConfig.run(username, key, JSON.stringify(config));
+        }
+
+        for (const session of Object.values(userData.playbackSessions)) {
+          this.stmts.setPlaybackSession.run(
+            session.id,
+            username,
+            session.source,
+            session.video_id,
+            session.episode_index,
+            session.title,
+            session.source_name,
+            session.cover,
+            session.year,
+            session.started_at,
+            session.ended_at,
+            session.watch_seconds,
+            session.last_position,
+            session.total_time,
+            session.created_at,
+            session.updated_at,
+          );
         }
       }
     });

@@ -1,7 +1,8 @@
-import { NextRequest, NextResponse } from 'next/server';
+import { NextRequest } from 'next/server';
 
 import { isGuardFailure, requireActiveUser } from '@/lib/api-auth';
 import { getAvailableApiSites, getConfigForRead } from '@/lib/config';
+import { normalizeRuntimeParams } from '@/lib/runtime-params';
 import { runSearchAggregation } from '@/lib/search-aggregate';
 import {
   peekCachedSearchAggregate,
@@ -30,8 +31,11 @@ export async function GET(request: NextRequest) {
   }
 
   const config = await getConfigForRead();
+  const runtimeParams = normalizeRuntimeParams(config.SiteConfig);
   const apiSites = await getAvailableApiSites(guardResult.username, config);
-  const maxSearchPages = config.SiteConfig.SearchDownstreamMaxPage;
+  const maxSearchPages = runtimeParams.SearchDownstreamMaxPage;
+  const sourceFailureCooldownMs =
+    runtimeParams.SourceFailureCooldownSeconds * 1000;
   const aggregateCacheParams = {
     query,
     apiSites,
@@ -49,6 +53,7 @@ export async function GET(request: NextRequest) {
           maxSearchPages,
           disableYellowFilter: config.SiteConfig.DisableYellowFilter,
           sourceConcurrency: SEARCH_SOURCE_CONCURRENCY,
+          sourceFailureCooldownMs,
         }),
       ).catch((error) => {
         console.warn('流式搜索聚合后台刷新失败:', error);
@@ -135,6 +140,7 @@ export async function GET(request: NextRequest) {
         maxSearchPages,
         disableYellowFilter: config.SiteConfig.DisableYellowFilter,
         sourceConcurrency: SEARCH_SOURCE_CONCURRENCY,
+        sourceFailureCooldownMs,
         signal: searchAbortController.signal,
         shouldContinue: () =>
           !streamClosed && !searchAbortController.signal.aborted,

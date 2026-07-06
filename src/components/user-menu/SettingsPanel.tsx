@@ -1,23 +1,36 @@
 ﻿'use client';
 
 import { ExternalLink, RotateCcw, X } from 'lucide-react';
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 
 import AdminSelect from '@/components/admin/AdminSelect';
 import AlertModal from '@/components/modals/AlertModal';
 import ConfirmModal from '@/components/modals/ConfirmModal';
+import { CustomProxyActions } from '@/components/proxy/CustomProxyActions';
 import { useAlertModal } from '@/hooks/useAlertModal';
+import { getAuthInfoFromBrowserCookie } from '@/lib/auth.client';
 import {
   BANGUMI_DATA_SOURCE_STORAGE_KEY,
   BANGUMI_PROXY_URL_STORAGE_KEY,
-  DEFAULT_BANGUMI_DATA_SOURCE,
   bangumiDataSourceOptions,
+  DEFAULT_BANGUMI_DATA_SOURCE,
   normalizeBangumiDataSource,
-  readDefaultBangumiDataSource,
-  readDefaultBangumiProxyUrl,
   readBangumiDataSource,
   readBangumiProxyUrl,
+  readDefaultBangumiDataSource,
+  readDefaultBangumiProxyUrl,
 } from '@/lib/bangumi-source';
+import type { CustomProxyTestKind } from '@/lib/custom-proxy-test';
+import {
+  CUSTOM_PROXY_LABELS,
+  getCustomProxyError,
+  normalizeCustomProxyUrl,
+  testCustomProxy,
+} from '@/lib/custom-proxy-test';
+import {
+  clearDoubanImageProxyTypeCookie,
+  writeDoubanImageProxyTypeCookie,
+} from '@/lib/douban-image-url';
 import {
   doubanDataSourceOptions,
   doubanImageProxyTypeOptions,
@@ -30,10 +43,10 @@ import {
   DOUBAN_PROXY_URL_STORAGE_KEY,
   readDefaultDoubanImageProxyType,
   readDefaultDoubanImageProxyUrl,
-  readDoubanImageProxyType,
-  readDoubanImageProxyUrl,
   readDefaultDoubanProxyType,
   readDefaultDoubanProxyUrl,
+  readDoubanImageProxyType,
+  readDoubanImageProxyUrl,
   readDoubanProxyType,
   readDoubanProxyUrl,
 } from '@/lib/douban-source';
@@ -50,6 +63,10 @@ interface SettingsPanelProps {
   onClose: () => void;
 }
 
+type CustomProxyField = CustomProxyTestKind;
+
+const SERVER_PROXY_DISABLED_REASON = '登录后可用';
+
 export function SettingsPanel({ onClose }: SettingsPanelProps) {
   const helperTextClassName = 'mt-1 text-xs text-gray-400 dark:text-gray-500';
   const [localPreferenceToggles, setLocalPreferenceToggles] = useState(
@@ -63,22 +80,69 @@ export function SettingsPanel({ onClose }: SettingsPanelProps) {
   const [bangumiProxyUrl, setBangumiProxyUrl] = useState('');
   const [doubanImageProxyType, setDoubanImageProxyType] = useState('direct');
   const [doubanImageProxyUrl, setDoubanImageProxyUrl] = useState('');
+  const [isAuthenticated, setIsAuthenticated] = useState(false);
+  const [customProxyErrors, setCustomProxyErrors] = useState<
+    Partial<Record<CustomProxyField, string>>
+  >({});
+  const [testingProxy, setTestingProxy] = useState<CustomProxyField | null>(
+    null,
+  );
   const [showResetConfirm, setShowResetConfirm] = useState(false);
   const { alertModal, showAlert, hideAlert } = useAlertModal();
 
   useBodyScrollLock(true);
 
   useEffect(() => {
+    const loggedIn = Boolean(getAuthInfoFromBrowserCookie()?.username);
+    const nextDoubanSource = readDoubanProxyType();
+    const nextDoubanProxyUrl = readDoubanProxyUrl();
+    const nextBangumiSource = readBangumiDataSource();
+    const nextBangumiProxyUrl = readBangumiProxyUrl();
+    const nextDoubanImageSource = readDoubanImageProxyType();
+    const nextDoubanImageProxyUrl = readDoubanImageProxyUrl();
+    const resolvedDoubanSource = resolveInitialProxySource(
+      nextDoubanSource,
+      nextDoubanProxyUrl,
+      loggedIn,
+      DOUBAN_DATA_SOURCE_STORAGE_KEY,
+    );
+    const resolvedBangumiSource = resolveInitialProxySource(
+      nextBangumiSource,
+      nextBangumiProxyUrl,
+      loggedIn,
+      BANGUMI_DATA_SOURCE_STORAGE_KEY,
+    );
+    const resolvedDoubanImageSource = resolveInitialProxySource(
+      nextDoubanImageSource,
+      nextDoubanImageProxyUrl,
+      loggedIn,
+      DOUBAN_IMAGE_PROXY_TYPE_STORAGE_KEY,
+    );
+
+    setIsAuthenticated(loggedIn);
     setLocalPreferenceToggles(readLocalPreferenceToggleState());
 
-    setDoubanDataSource(readDoubanProxyType());
-    setDoubanProxyUrl(readDoubanProxyUrl());
-    setBangumiDataSource(readBangumiDataSource());
-    setBangumiProxyUrl(readBangumiProxyUrl());
+    setDoubanDataSource(resolvedDoubanSource);
+    setDoubanProxyUrl(nextDoubanProxyUrl);
+    setBangumiDataSource(normalizeBangumiDataSource(resolvedBangumiSource));
+    setBangumiProxyUrl(nextBangumiProxyUrl);
 
-    setDoubanImageProxyType(readDoubanImageProxyType());
-    setDoubanImageProxyUrl(readDoubanImageProxyUrl());
+    setDoubanImageProxyType(resolvedDoubanImageSource);
+    setDoubanImageProxyUrl(nextDoubanImageProxyUrl);
   }, []);
+
+  const doubanDataOptions = useMemo(
+    () => markServerProxyOption(doubanDataSourceOptions, isAuthenticated),
+    [isAuthenticated],
+  );
+  const doubanImageOptions = useMemo(
+    () => markServerProxyOption(doubanImageProxyTypeOptions, isAuthenticated),
+    [isAuthenticated],
+  );
+  const bangumiOptions = useMemo(
+    () => markServerProxyOption(bangumiDataSourceOptions, isAuthenticated),
+    [isAuthenticated],
+  );
 
   const showProxyToast = () => {
     showAlert({
@@ -89,9 +153,32 @@ export function SettingsPanel({ onClose }: SettingsPanelProps) {
     });
   };
 
+  const showLoginRequiredToast = () => {
+    showAlert({
+      type: 'warning',
+      title: '登录后可用',
+      message: '服务器请求会消耗本站资源，请登录后使用。',
+      timer: 2400,
+    });
+  };
+
   const handleDoubanProxyUrlChange = (value: string) => {
     setDoubanProxyUrl(value);
-    localStorage.setItem(DOUBAN_PROXY_URL_STORAGE_KEY, value);
+    if (normalizeCustomProxyUrl(value)) {
+      localStorage.setItem(DOUBAN_PROXY_URL_STORAGE_KEY, value);
+      if (doubanDataSource === 'custom') {
+        localStorage.setItem(DOUBAN_DATA_SOURCE_STORAGE_KEY, 'custom');
+      }
+    } else {
+      localStorage.removeItem(DOUBAN_PROXY_URL_STORAGE_KEY);
+      if (doubanDataSource === 'custom') {
+        localStorage.removeItem(DOUBAN_DATA_SOURCE_STORAGE_KEY);
+      }
+    }
+    setCustomProxyErrors((prev) => ({
+      ...prev,
+      'douban-data': getCustomProxyError('douban-data', value),
+    }));
   };
 
   const handleLocalPreferenceToggle = (
@@ -110,32 +197,163 @@ export function SettingsPanel({ onClose }: SettingsPanelProps) {
   };
 
   const handleDoubanDataSourceChange = (value: string) => {
+    if (!canSelectProxyValue(value, isAuthenticated)) {
+      showLoginRequiredToast();
+      return;
+    }
     setDoubanDataSource(value);
+    if (value === 'custom') {
+      const error = getCustomProxyError('douban-data', doubanProxyUrl);
+      setCustomProxyErrors((prev) => ({
+        ...prev,
+        'douban-data': error,
+      }));
+      if (error) {
+        showAlert({
+          type: 'warning',
+          title: '代理地址必填',
+          message: error,
+          timer: 2200,
+        });
+        return;
+      }
+    }
     localStorage.setItem(DOUBAN_DATA_SOURCE_STORAGE_KEY, value);
     showProxyToast();
   };
 
   const handleBangumiDataSourceChange = (value: string) => {
     const nextSource = normalizeBangumiDataSource(value);
+    if (!canSelectProxyValue(nextSource, isAuthenticated)) {
+      showLoginRequiredToast();
+      return;
+    }
     setBangumiDataSource(nextSource);
+    if (nextSource === 'custom') {
+      const error = getCustomProxyError('bangumi', bangumiProxyUrl);
+      setCustomProxyErrors((prev) => ({
+        ...prev,
+        bangumi: error,
+      }));
+      if (error) {
+        showAlert({
+          type: 'warning',
+          title: '代理地址必填',
+          message: error,
+          timer: 2200,
+        });
+        return;
+      }
+    }
     localStorage.setItem(BANGUMI_DATA_SOURCE_STORAGE_KEY, nextSource);
     showProxyToast();
   };
 
   const handleBangumiProxyUrlChange = (value: string) => {
     setBangumiProxyUrl(value);
-    localStorage.setItem(BANGUMI_PROXY_URL_STORAGE_KEY, value);
+    if (normalizeCustomProxyUrl(value)) {
+      localStorage.setItem(BANGUMI_PROXY_URL_STORAGE_KEY, value);
+      if (bangumiDataSource === 'custom') {
+        localStorage.setItem(BANGUMI_DATA_SOURCE_STORAGE_KEY, 'custom');
+      }
+    } else {
+      localStorage.removeItem(BANGUMI_PROXY_URL_STORAGE_KEY);
+      if (bangumiDataSource === 'custom') {
+        localStorage.removeItem(BANGUMI_DATA_SOURCE_STORAGE_KEY);
+      }
+    }
+    setCustomProxyErrors((prev) => ({
+      ...prev,
+      bangumi: getCustomProxyError('bangumi', value),
+    }));
   };
 
   const handleDoubanImageProxyTypeChange = (value: string) => {
+    if (!canSelectProxyValue(value, isAuthenticated)) {
+      showLoginRequiredToast();
+      return;
+    }
     setDoubanImageProxyType(value);
+    if (value === 'custom') {
+      const error = getCustomProxyError('douban-image', doubanImageProxyUrl);
+      setCustomProxyErrors((prev) => ({
+        ...prev,
+        'douban-image': error,
+      }));
+      if (error) {
+        showAlert({
+          type: 'warning',
+          title: '代理地址必填',
+          message: error,
+          timer: 2200,
+        });
+        return;
+      }
+    }
     localStorage.setItem(DOUBAN_IMAGE_PROXY_TYPE_STORAGE_KEY, value);
+    writeDoubanImageProxyTypeCookie(value);
     showProxyToast();
   };
 
   const handleDoubanImageProxyUrlChange = (value: string) => {
     setDoubanImageProxyUrl(value);
-    localStorage.setItem(DOUBAN_IMAGE_PROXY_URL_STORAGE_KEY, value);
+    if (normalizeCustomProxyUrl(value)) {
+      localStorage.setItem(DOUBAN_IMAGE_PROXY_URL_STORAGE_KEY, value);
+      if (doubanImageProxyType === 'custom') {
+        localStorage.setItem(DOUBAN_IMAGE_PROXY_TYPE_STORAGE_KEY, 'custom');
+        clearDoubanImageProxyTypeCookie();
+      }
+    } else {
+      localStorage.removeItem(DOUBAN_IMAGE_PROXY_URL_STORAGE_KEY);
+      if (doubanImageProxyType === 'custom') {
+        localStorage.removeItem(DOUBAN_IMAGE_PROXY_TYPE_STORAGE_KEY);
+        clearDoubanImageProxyTypeCookie();
+      }
+    }
+    setCustomProxyErrors((prev) => ({
+      ...prev,
+      'douban-image': getCustomProxyError('douban-image', value),
+    }));
+  };
+
+  const handleTestCustomProxy = async (
+    kind: CustomProxyField,
+    proxyUrl: string,
+  ) => {
+    const error = getCustomProxyError(kind, proxyUrl);
+    if (error) {
+      setCustomProxyErrors((prev) => ({ ...prev, [kind]: error }));
+      showAlert({
+        type: 'warning',
+        title: '代理地址必填',
+        message: error,
+        timer: 2200,
+      });
+      return;
+    }
+
+    setTestingProxy(kind);
+    try {
+      await testCustomProxy(kind, proxyUrl);
+      setCustomProxyErrors((prev) => ({ ...prev, [kind]: '' }));
+      showAlert({
+        type: 'success',
+        title: '测试通过',
+        message: `${CUSTOM_PROXY_LABELS[kind]}可用`,
+        timer: 2200,
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : '代理测试失败';
+      setCustomProxyErrors((prev) => ({ ...prev, [kind]: message }));
+      showAlert({
+        type: 'error',
+        title: '测试失败',
+        message,
+        timer: 3000,
+      });
+    } finally {
+      setTestingProxy(null);
+    }
   };
 
   const handleResetSettings = () => {
@@ -163,6 +381,8 @@ export function SettingsPanel({ onClose }: SettingsPanelProps) {
     localStorage.removeItem(BANGUMI_PROXY_URL_STORAGE_KEY);
     localStorage.removeItem(DOUBAN_IMAGE_PROXY_TYPE_STORAGE_KEY);
     localStorage.removeItem(DOUBAN_IMAGE_PROXY_URL_STORAGE_KEY);
+    clearDoubanImageProxyTypeCookie();
+    setCustomProxyErrors({});
   };
 
   return (
@@ -243,27 +463,41 @@ export function SettingsPanel({ onClose }: SettingsPanelProps) {
               <AdminSelect
                 value={doubanDataSource}
                 onChange={(value) => handleDoubanDataSourceChange(value)}
-                options={doubanDataSourceOptions}
+                options={doubanDataOptions}
               />
             </div>
 
             {doubanDataSource === 'custom' && (
-              <div className='space-y-3'>
-                <div>
+              <div className='space-y-2'>
+                <div className='flex items-center justify-between gap-3'>
                   <h4 className='text-sm font-medium text-gray-700 dark:text-gray-300'>
                     豆瓣代理地址
                   </h4>
-                  <p className={helperTextClassName}>自定义代理服务器地址</p>
+                  {customProxyErrors['douban-data'] && (
+                    <p className='truncate text-xs text-rose-500 dark:text-rose-400'>
+                      {customProxyErrors['douban-data']}
+                    </p>
+                  )}
                 </div>
-                <input
-                  type='text'
-                  className='w-full rounded-lg border border-gray-300 bg-white px-3 py-2.5 text-sm text-gray-900 placeholder-gray-500 shadow-sm transition-all duration-200 hover:border-gray-400 focus:border-green-500 focus:outline-none focus:ring-2 focus:ring-green-500 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100 dark:placeholder-gray-400 dark:hover:border-gray-500'
-                  placeholder='例如: https://proxy.example.com/fetch?url='
-                  value={doubanProxyUrl}
-                  onChange={(event) =>
-                    handleDoubanProxyUrlChange(event.target.value)
-                  }
-                />
+                <div className='flex items-center gap-2'>
+                  <input
+                    id='local-douban-proxy-url'
+                    name='localDoubanProxyUrl'
+                    type='text'
+                    className='min-w-0 flex-1 rounded-lg border border-gray-300 bg-white px-3 py-2.5 text-sm text-gray-900 placeholder-gray-500 shadow-sm transition-all duration-200 hover:border-gray-400 focus:border-green-500 focus:outline-none focus:ring-2 focus:ring-green-500 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100 dark:placeholder-gray-400 dark:hover:border-gray-500'
+                    placeholder='例如: https://proxy.example.com/fetch?url='
+                    value={doubanProxyUrl}
+                    onChange={(event) =>
+                      handleDoubanProxyUrlChange(event.target.value)
+                    }
+                  />
+                  <CustomProxyActions
+                    isTesting={testingProxy === 'douban-data'}
+                    onTest={() =>
+                      handleTestCustomProxy('douban-data', doubanProxyUrl)
+                    }
+                  />
+                </div>
               </div>
             )}
 
@@ -295,29 +529,41 @@ export function SettingsPanel({ onClose }: SettingsPanelProps) {
               <AdminSelect
                 value={doubanImageProxyType}
                 onChange={(value) => handleDoubanImageProxyTypeChange(value)}
-                options={doubanImageProxyTypeOptions}
+                options={doubanImageOptions}
               />
             </div>
 
             {doubanImageProxyType === 'custom' && (
-              <div className='space-y-3'>
-                <div>
+              <div className='space-y-2'>
+                <div className='flex items-center justify-between gap-3'>
                   <h4 className='text-sm font-medium text-gray-700 dark:text-gray-300'>
                     豆瓣图片代理地址
                   </h4>
-                  <p className={helperTextClassName}>
-                    自定义图片代理服务器地址
-                  </p>
+                  {customProxyErrors['douban-image'] && (
+                    <p className='truncate text-xs text-rose-500 dark:text-rose-400'>
+                      {customProxyErrors['douban-image']}
+                    </p>
+                  )}
                 </div>
-                <input
-                  type='text'
-                  className='w-full rounded-lg border border-gray-300 bg-white px-3 py-2.5 text-sm text-gray-900 placeholder-gray-500 shadow-sm transition-all duration-200 hover:border-gray-400 focus:border-green-500 focus:outline-none focus:ring-2 focus:ring-green-500 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100 dark:placeholder-gray-400 dark:hover:border-gray-500'
-                  placeholder='例如: https://proxy.example.com/fetch?url='
-                  value={doubanImageProxyUrl}
-                  onChange={(event) =>
-                    handleDoubanImageProxyUrlChange(event.target.value)
-                  }
-                />
+                <div className='flex items-center gap-2'>
+                  <input
+                    id='local-douban-image-proxy-url'
+                    name='localDoubanImageProxyUrl'
+                    type='text'
+                    className='min-w-0 flex-1 rounded-lg border border-gray-300 bg-white px-3 py-2.5 text-sm text-gray-900 placeholder-gray-500 shadow-sm transition-all duration-200 hover:border-gray-400 focus:border-green-500 focus:outline-none focus:ring-2 focus:ring-green-500 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100 dark:placeholder-gray-400 dark:hover:border-gray-500'
+                    placeholder='例如: https://proxy.example.com/fetch?url='
+                    value={doubanImageProxyUrl}
+                    onChange={(event) =>
+                      handleDoubanImageProxyUrlChange(event.target.value)
+                    }
+                  />
+                  <CustomProxyActions
+                    isTesting={testingProxy === 'douban-image'}
+                    onTest={() =>
+                      handleTestCustomProxy('douban-image', doubanImageProxyUrl)
+                    }
+                  />
+                </div>
               </div>
             )}
 
@@ -330,7 +576,7 @@ export function SettingsPanel({ onClose }: SettingsPanelProps) {
               <AdminSelect
                 value={bangumiDataSource}
                 onChange={(value) => handleBangumiDataSourceChange(value)}
-                options={bangumiDataSourceOptions}
+                options={bangumiOptions}
               />
 
               {getThanksInfo(bangumiDataSource) && (
@@ -355,22 +601,36 @@ export function SettingsPanel({ onClose }: SettingsPanelProps) {
             </div>
 
             {bangumiDataSource === 'custom' && (
-              <div className='space-y-3'>
-                <div>
+              <div className='space-y-2'>
+                <div className='flex items-center justify-between gap-3'>
                   <h4 className='text-sm font-medium text-gray-700 dark:text-gray-300'>
                     Bangumi 代理地址
                   </h4>
-                  <p className={helperTextClassName}>自定义代理服务器地址</p>
+                  {customProxyErrors.bangumi && (
+                    <p className='truncate text-xs text-rose-500 dark:text-rose-400'>
+                      {customProxyErrors.bangumi}
+                    </p>
+                  )}
                 </div>
-                <input
-                  type='text'
-                  className='w-full rounded-lg border border-gray-300 bg-white px-3 py-2.5 text-sm text-gray-900 placeholder-gray-500 shadow-sm transition-all duration-200 hover:border-gray-400 focus:border-green-500 focus:outline-none focus:ring-2 focus:ring-green-500 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100 dark:placeholder-gray-400 dark:hover:border-gray-500'
-                  placeholder='例如: https://proxy.example.com/fetch?url='
-                  value={bangumiProxyUrl}
-                  onChange={(event) =>
-                    handleBangumiProxyUrlChange(event.target.value)
-                  }
-                />
+                <div className='flex items-center gap-2'>
+                  <input
+                    id='local-bangumi-proxy-url'
+                    name='localBangumiProxyUrl'
+                    type='text'
+                    className='min-w-0 flex-1 rounded-lg border border-gray-300 bg-white px-3 py-2.5 text-sm text-gray-900 placeholder-gray-500 shadow-sm transition-all duration-200 hover:border-gray-400 focus:border-green-500 focus:outline-none focus:ring-2 focus:ring-green-500 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100 dark:placeholder-gray-400 dark:hover:border-gray-500'
+                    placeholder='例如: https://proxy.example.com/fetch?url='
+                    value={bangumiProxyUrl}
+                    onChange={(event) =>
+                      handleBangumiProxyUrlChange(event.target.value)
+                    }
+                  />
+                  <CustomProxyActions
+                    isTesting={testingProxy === 'bangumi'}
+                    onTest={() =>
+                      handleTestCustomProxy('bangumi', bangumiProxyUrl)
+                    }
+                  />
+                </div>
               </div>
             )}
 
@@ -390,6 +650,8 @@ export function SettingsPanel({ onClose }: SettingsPanelProps) {
                 <label className='flex cursor-pointer items-center'>
                   <div className='relative'>
                     <input
+                      id={`local-${definition.id}`}
+                      name={definition.id}
                       type='checkbox'
                       className='peer sr-only'
                       checked={localPreferenceToggles[definition.id]}
@@ -429,4 +691,41 @@ export function SettingsPanel({ onClose }: SettingsPanelProps) {
       />
     </>
   );
+}
+
+function markServerProxyOption<T extends { value: string; label: string }>(
+  options: T[],
+  isAuthenticated: boolean,
+) {
+  return options.map((option) =>
+    option.value === 'server' && !isAuthenticated
+      ? {
+          ...option,
+          disabled: true,
+          disabledReason: SERVER_PROXY_DISABLED_REASON,
+        }
+      : option,
+  );
+}
+
+function canSelectProxyValue(value: string, isAuthenticated: boolean): boolean {
+  return value !== 'server' || isAuthenticated;
+}
+
+function resolveInitialProxySource(
+  source: string,
+  proxyUrl: string,
+  isAuthenticated: boolean,
+  storageKey: string,
+): string {
+  if (source === 'server' && !isAuthenticated) {
+    return 'direct';
+  }
+
+  if (source === 'custom' && !normalizeCustomProxyUrl(proxyUrl)) {
+    localStorage.removeItem(storageKey);
+    return 'direct';
+  }
+
+  return source;
 }

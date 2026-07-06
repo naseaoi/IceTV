@@ -3,6 +3,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { isGuardFailure, requireActiveUser } from '@/lib/api-auth';
 import { getAvailableApiSites, getConfigForRead } from '@/lib/config';
 import { searchFromApi } from '@/lib/downstream';
+import { normalizeRuntimeParams } from '@/lib/runtime-params';
 import { yellowWords } from '@/lib/yellow';
 
 export const runtime = 'nodejs';
@@ -25,7 +26,9 @@ export async function GET(request: NextRequest) {
 
   const config = await getConfigForRead();
   const apiSites = await getAvailableApiSites(guardResult.username, config);
-  const maxSearchPages = config.SiteConfig.SearchDownstreamMaxPage;
+  const maxSearchPages = normalizeRuntimeParams(
+    config.SiteConfig,
+  ).SearchDownstreamMaxPage;
 
   try {
     // 根据 resourceId 查找对应的 API 站点
@@ -62,7 +65,7 @@ export async function GET(request: NextRequest) {
         { headers: { 'Cache-Control': 'private, no-store' } },
       );
     }
-  } catch (error) {
+  } catch {
     return NextResponse.json(
       {
         error: '搜索失败',

@@ -19,6 +19,13 @@ export interface RuntimeConfig {
   LIVE_DIRECT_CONNECT: boolean;
   CUSTOM_CATEGORIES: { name: string; type: 'movie' | 'tv'; query: string }[];
   FLUID_SEARCH: boolean;
+  VOD_PAGE_TIMEOUT_SECONDS: number;
+  PLAYBACK_HISTORY_PAGE_SIZE: number;
+  PLAYBACK_HISTORY_LIMIT: number;
+  SEARCH_HISTORY_LIMIT: number;
+  SOURCE_FAILURE_COOLDOWN_SECONDS: number;
+  CONTINUE_WATCHING_LIMIT: number;
+  COVER_IMAGE_CACHE_SIZE: number;
 }
 
 export const DEFAULT_RUNTIME_CONFIG: RuntimeConfig = {
@@ -29,9 +36,9 @@ export const DEFAULT_RUNTIME_CONFIG: RuntimeConfig = {
   UPDATE_BRANCH: CURRENT_UPDATE_BRANCH,
   DOUBAN_PROXY_TYPE: 'direct',
   DOUBAN_PROXY: '',
-  BANGUMI_DATA_SOURCE: 'server',
+  BANGUMI_DATA_SOURCE: 'direct',
   BANGUMI_PROXY: '',
-  DOUBAN_IMAGE_PROXY_TYPE: 'cmliussss-cdn-tencent',
+  DOUBAN_IMAGE_PROXY_TYPE: 'direct',
   DOUBAN_IMAGE_PROXY: '',
   DISABLE_YELLOW_FILTER: false,
   ENABLE_LIVE_ENTRY: false,
@@ -41,6 +48,13 @@ export const DEFAULT_RUNTIME_CONFIG: RuntimeConfig = {
   LIVE_DIRECT_CONNECT: false,
   CUSTOM_CATEGORIES: [],
   FLUID_SEARCH: true,
+  VOD_PAGE_TIMEOUT_SECONDS: 15,
+  PLAYBACK_HISTORY_PAGE_SIZE: 10,
+  PLAYBACK_HISTORY_LIMIT: 500,
+  SEARCH_HISTORY_LIMIT: 20,
+  SOURCE_FAILURE_COOLDOWN_SECONDS: 300,
+  CONTINUE_WATCHING_LIMIT: 10,
+  COVER_IMAGE_CACHE_SIZE: 500,
 };
 
 export type ServerConfigPayload = {
@@ -65,6 +79,13 @@ export type ServerConfigPayload = {
   LiveDirectConnect?: boolean;
   CustomCategories?: RuntimeConfig['CUSTOM_CATEGORIES'];
   FluidSearch?: boolean;
+  VodPageTimeoutSeconds?: number;
+  PlaybackHistoryPageSize?: number;
+  PlaybackHistoryLimit?: number;
+  SearchHistoryLimit?: number;
+  SourceFailureCooldownSeconds?: number;
+  ContinueWatchingLimit?: number;
+  CoverImageCacheSize?: number;
 };
 
 declare global {
@@ -134,6 +155,25 @@ function runtimeConfigFromServerConfig(
       data.FluidSearch === undefined
         ? DEFAULT_RUNTIME_CONFIG.FLUID_SEARCH
         : data.FluidSearch,
+    VOD_PAGE_TIMEOUT_SECONDS:
+      data.VodPageTimeoutSeconds ??
+      DEFAULT_RUNTIME_CONFIG.VOD_PAGE_TIMEOUT_SECONDS,
+    PLAYBACK_HISTORY_PAGE_SIZE:
+      data.PlaybackHistoryPageSize ??
+      DEFAULT_RUNTIME_CONFIG.PLAYBACK_HISTORY_PAGE_SIZE,
+    PLAYBACK_HISTORY_LIMIT:
+      data.PlaybackHistoryLimit ??
+      DEFAULT_RUNTIME_CONFIG.PLAYBACK_HISTORY_LIMIT,
+    SEARCH_HISTORY_LIMIT:
+      data.SearchHistoryLimit ?? DEFAULT_RUNTIME_CONFIG.SEARCH_HISTORY_LIMIT,
+    SOURCE_FAILURE_COOLDOWN_SECONDS:
+      data.SourceFailureCooldownSeconds ??
+      DEFAULT_RUNTIME_CONFIG.SOURCE_FAILURE_COOLDOWN_SECONDS,
+    CONTINUE_WATCHING_LIMIT:
+      data.ContinueWatchingLimit ??
+      DEFAULT_RUNTIME_CONFIG.CONTINUE_WATCHING_LIMIT,
+    COVER_IMAGE_CACHE_SIZE:
+      data.CoverImageCacheSize ?? DEFAULT_RUNTIME_CONFIG.COVER_IMAGE_CACHE_SIZE,
   };
 }
 

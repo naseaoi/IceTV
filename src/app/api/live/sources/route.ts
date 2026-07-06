@@ -1,8 +1,8 @@
 ﻿import { NextRequest, NextResponse } from 'next/server';
 
+import { isLiveEntryEnabledInConfig } from '@/features/live/lib/live';
 import { getOptionalActiveUser } from '@/lib/api-auth';
 import { getConfigForRead } from '@/lib/config';
-import { isLiveEntryEnabledInConfig } from '@/features/live/lib/live';
 
 export const runtime = 'nodejs';
 

@@ -8,10 +8,10 @@
 import { useRouter } from 'next/navigation';
 import React, {
   forwardRef,
-  useId,
   memo,
   useCallback,
   useEffect,
+  useId,
   useImperativeHandle,
   useMemo,
   useRef,
@@ -19,50 +19,40 @@ import React, {
 } from 'react';
 
 import {
-  deleteFavorite,
-  deletePlayRecord,
-  generateStorageKey,
-  saveFavorite,
-} from '@/lib/db.client';
-import { getAuthInfoFromBrowserCookie } from '@/lib/auth.client';
-import { warmupForPlayback } from '@/lib/video-prefetch';
-import { useLongPress } from '@/hooks/useLongPress';
-import { savePlayIntent } from '@/lib/play-intent';
-
-import {
   useCardInteractionManager,
   useFavoriteStatus,
 } from '@/components/CardInteractionProvider';
 import { areVideoCardPropsEqual } from '@/components/video-card/compare';
 import { noSelectStyle } from '@/components/video-card/constants';
-import { VideoCardPoster } from '@/components/video-card/VideoCardPoster';
-import { VideoCardTitle } from '@/components/video-card/VideoCardTitle';
 import type {
   VideoCardDisplayConfig,
   VideoCardHandle,
   VideoCardProps,
 } from '@/components/video-card/types';
+import { VideoCardPoster } from '@/components/video-card/VideoCardPoster';
+import { VideoCardTitle } from '@/components/video-card/VideoCardTitle';
+import { useLongPress } from '@/hooks/useLongPress';
+import { getAuthInfoFromBrowserCookie } from '@/lib/auth.client';
+import {
+  deleteFavorite,
+  deletePlayRecord,
+  generateStorageKey,
+  saveFavorite,
+} from '@/lib/db.client';
+import { savePlayIntent } from '@/lib/play-intent';
+import {
+  canUseHoverPrefetch,
+  canUseNetworkPrefetch,
+  findLocalPlaybackTargetByTitle,
+  PREFETCH_INTENT_DELAY_MS,
+  transferWarmedSearchToAggregateGroup,
+  warmupForPlayback,
+  warmupSearchForTitle,
+} from '@/lib/video-prefetch';
 export type {
   VideoCardHandle,
   VideoCardProps,
 } from '@/components/video-card/types';
-
-const PREFETCH_INTENT_DELAY_MS = 180;
-
-function canUseHoverPrefetch(): boolean {
-  if (typeof window === 'undefined') return false;
-  if (!window.matchMedia('(hover: hover) and (pointer: fine)').matches) {
-    return false;
-  }
-
-  const connection = (
-    navigator as Navigator & {
-      connection?: { saveData?: boolean; effectiveType?: string };
-    }
-  ).connection;
-  if (connection?.saveData) return false;
-  return !['slow-2g', '2g'].includes(connection?.effectiveType || '');
-}
 
 const VideoCard = forwardRef<VideoCardHandle, VideoCardProps>(
   function VideoCard(
@@ -235,7 +225,7 @@ const VideoCard = forwardRef<VideoCardHandle, VideoCardProps>(
               setSearchFavorited(true);
             }
           }
-        } catch (err) {
+        } catch {
           throw new Error('切换收藏状态失败');
         }
       },
@@ -306,6 +296,23 @@ const VideoCard = forwardRef<VideoCardHandle, VideoCardProps>(
           '',
         )}&id=${actualId.replace('live_', '')}`;
       }
+      if (from === 'douban') {
+        const localTarget = findLocalPlaybackTargetByTitle(
+          actualTitle,
+          actualYear,
+        );
+        if (localTarget) {
+          return `/play?source=${encodeURIComponent(localTarget.source)}&id=${encodeURIComponent(
+            localTarget.id,
+          )}&title=${encodeURIComponent(actualTitle.trim())}${
+            actualYear ? `&year=${actualYear}` : ''
+          }${actualSearchType ? `&stype=${actualSearchType}` : ''}${
+            actualQuery
+              ? `&stitle=${encodeURIComponent(actualQuery.trim())}`
+              : ''
+          }`;
+        }
+      }
       if (from === 'douban' || (isAggregate && !actualSource && !actualId)) {
         saveAggregateGroup();
         return `/play?title=${encodeURIComponent(actualTitle.trim())}${
@@ -345,6 +352,30 @@ const VideoCard = forwardRef<VideoCardHandle, VideoCardProps>(
       return `/login?redirect=${encodeURIComponent(currentUrl)}`;
     };
 
+    // 点击时预热：聚合卡数据经 sessionStorage 传递，跳过
+    const warmupOnNavigate = useCallback(() => {
+      if (origin === 'live' || isAggregate) return;
+      if (!canUseNetworkPrefetch()) return;
+
+      if (from === 'douban' || !actualSource || !actualId) {
+        if (!findLocalPlaybackTargetByTitle(actualTitle, actualYear)) {
+          transferWarmedSearchToAggregateGroup(actualQuery || actualTitle);
+        }
+        warmupSearchForTitle(actualQuery || actualTitle);
+        return;
+      }
+      warmupForPlayback(actualSource, actualId);
+    }, [
+      origin,
+      isAggregate,
+      from,
+      actualSource,
+      actualId,
+      actualQuery,
+      actualTitle,
+      actualYear,
+    ]);
+
     const handleClick = useCallback(() => {
       const authInfo = getAuthInfoFromBrowserCookie();
       if (!authInfo?.username) {
@@ -368,6 +399,7 @@ const VideoCard = forwardRef<VideoCardHandle, VideoCardProps>(
         });
       }
 
+      warmupOnNavigate();
       const url = buildPlayUrl();
       if (url) router.push(url);
     }, [
@@ -378,34 +410,41 @@ const VideoCard = forwardRef<VideoCardHandle, VideoCardProps>(
       actualId,
       currentEpisode,
       resumeTime,
+      warmupOnNavigate,
     ]);
 
-    // hover / focus 预热：提前加载 detail 与播放器模块，进入播放页几乎无等待
-    // 仅对拥有 source+id 的普通卡片生效（聚合卡、豆瓣卡跳转路径不同，跳过）
+    // hover / focus 预热：带 source+id 的卡片预取 detail，豆瓣卡预热标题搜索
     const handlePrefetch = useCallback(() => {
       if (shouldTrackFavoriteStatus) {
         void loadFavoriteStatus();
       }
 
       if (origin === 'live') return;
-      if (from === 'douban') return;
       if (isAggregate) return;
       if (!canUseHoverPrefetch()) return;
 
+      router.prefetch('/play');
       if (prefetchTimerRef.current) {
         window.clearTimeout(prefetchTimerRef.current);
       }
       prefetchTimerRef.current = window.setTimeout(() => {
         prefetchTimerRef.current = null;
+        if (from === 'douban' || !actualSource || !actualId) {
+          warmupSearchForTitle(actualQuery || actualTitle);
+          return;
+        }
         warmupForPlayback(actualSource, actualId);
       }, PREFETCH_INTENT_DELAY_MS);
     }, [
       actualId,
       actualSource,
+      actualQuery,
+      actualTitle,
       from,
       isAggregate,
       loadFavoriteStatus,
       origin,
+      router,
       shouldTrackFavoriteStatus,
     ]);
 
@@ -438,7 +477,7 @@ const VideoCard = forwardRef<VideoCardHandle, VideoCardProps>(
       ) {
         try {
           await loadFavoriteStatus();
-        } catch (err) {
+        } catch {
           setSearchFavorited(false);
         }
       }
@@ -516,9 +555,9 @@ const VideoCard = forwardRef<VideoCardHandle, VideoCardProps>(
           showSourceName: true,
           showProgress: false,
           showPlayButton: true,
-          showHeart: true, // 移动端菜单中需要显示收藏选项
+          showHeart: true,
           showCheckCircle: false,
-          showDoubanLink: true, // 移动端菜单中显示豆瓣链接
+          showDoubanLink: true,
           showRating: false,
           showYear: true,
         },
@@ -534,9 +573,9 @@ const VideoCard = forwardRef<VideoCardHandle, VideoCardProps>(
         },
       };
       return configs[from] || configs.search;
-    }, [from, isAggregate, douban_id, rate]);
+    }, [from, rate]);
 
-    // 菜单操作项按需构建：仅在用户触发菜单时计算，避免每个卡片实例挂载时的开销
+    // 菜单操作项
     const buildMobileActions = useCallback(() => {
       const actions = [];
 
@@ -596,7 +635,7 @@ const VideoCard = forwardRef<VideoCardHandle, VideoCardProps>(
               id: 'favorite-loading',
               label: '收藏加载中...',
               icon: <Heart size={20} />,
-              onClick: () => {}, // 加载中时不响应点击
+              onClick: () => {},
               disabled: true,
             });
           }
@@ -672,11 +711,11 @@ const VideoCard = forwardRef<VideoCardHandle, VideoCardProps>(
       searchFavorited,
       actualDoubanId,
       isBangumi,
-      isAggregate,
-      dynamicSourceNames,
       handleClick,
+      handlePlayInNewTab,
       handleToggleFavorite,
       handleDeleteRecord,
+      origin,
     ]);
 
     useEffect(() => {

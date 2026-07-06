@@ -1,5 +1,3 @@
-import type { SearchResult } from '@/lib/types';
-
 import {
   getCompletedProbeInfo,
   sortSourcesForDisplay,
@@ -8,6 +6,7 @@ import type {
   ProbeEntry,
   VideoInfo,
 } from '@/features/play/lib/sourceProbeStore';
+import type { SearchResult } from '@/lib/types';
 
 function createSource(partial: Partial<SearchResult>): SearchResult {
   return {

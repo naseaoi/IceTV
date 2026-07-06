@@ -5,14 +5,13 @@ import {
   useCallback,
 } from 'react';
 
-import { SearchResult } from '@/lib/types';
-
-import type { SourceSwitchEpisodeAnchor } from '@/features/play/lib/episodeResumePolicy';
-import type { ResumeMode } from '@/features/play/lib/resumePlayback';
 import type {
   PlaybackRequestMode,
   VideoLoadingStage,
 } from '@/features/play/hooks/usePlayPageState';
+import type { SourceSwitchEpisodeAnchor } from '@/features/play/lib/episodeResumePolicy';
+import type { ResumeMode } from '@/features/play/lib/resumePlayback';
+import { SearchResult } from '@/lib/types';
 
 interface UseEpisodeSwitchOptions {
   detailRef: RefObject<SearchResult | null>;
@@ -24,9 +23,11 @@ interface UseEpisodeSwitchOptions {
   sourceSwitchEpisodeAnchorRef: RefObject<SourceSwitchEpisodeAnchor | null>;
   playbackRequestModeRef: RefObject<PlaybackRequestMode>;
   doSaveCurrentProgress: () => void | Promise<unknown>;
+  setError: Dispatch<SetStateAction<string | null>>;
   setIsVideoLoading: Dispatch<SetStateAction<boolean>>;
   setVideoLoadingStage: Dispatch<SetStateAction<VideoLoadingStage>>;
   setVideoLoadingAttempt: Dispatch<SetStateAction<number>>;
+  setRealtimeLoadSpeed: Dispatch<SetStateAction<string>>;
   setCurrentEpisodeIndex: Dispatch<SetStateAction<number>>;
 }
 
@@ -47,9 +48,11 @@ export function useEpisodeSwitch({
   sourceSwitchEpisodeAnchorRef,
   playbackRequestModeRef,
   doSaveCurrentProgress,
+  setError,
   setIsVideoLoading,
   setVideoLoadingStage,
   setVideoLoadingAttempt,
+  setRealtimeLoadSpeed,
   setCurrentEpisodeIndex,
 }: UseEpisodeSwitchOptions): EpisodeSwitchHandlers {
   const switchEpisode = useCallback(
@@ -76,9 +79,11 @@ export function useEpisodeSwitch({
       resumeModeRef.current = null;
       currentEpisodeIndexRef.current = targetEpisodeIndex;
 
+      setError(null);
       setIsVideoLoading(true);
       setVideoLoadingStage('episodeChanging');
       setVideoLoadingAttempt((prev) => prev + 1);
+      setRealtimeLoadSpeed('正在切换剧集...');
       setCurrentEpisodeIndex(targetEpisodeIndex);
     },
     [
@@ -91,9 +96,11 @@ export function useEpisodeSwitch({
       sourceSwitchEpisodeAnchorRef,
       playbackRequestModeRef,
       doSaveCurrentProgress,
+      setError,
       setIsVideoLoading,
       setVideoLoadingStage,
       setVideoLoadingAttempt,
+      setRealtimeLoadSpeed,
       setCurrentEpisodeIndex,
     ],
   );

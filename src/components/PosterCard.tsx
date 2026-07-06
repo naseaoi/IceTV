@@ -2,13 +2,20 @@
 
 import { Link as LinkIcon, PlayCircleIcon } from 'lucide-react';
 import { useRouter } from 'next/navigation';
-import React, { memo, useCallback, useEffect, useId } from 'react';
-
-import { getAuthInfoFromBrowserCookie } from '@/lib/auth.client';
-import { useLongPress } from '@/hooks/useLongPress';
+import React, { memo, useCallback, useEffect, useId, useRef } from 'react';
 
 import { useOptionalCardInteractionManager } from '@/components/CardInteractionProvider';
 import CoverImage from '@/components/CoverImage';
+import { useLongPress } from '@/hooks/useLongPress';
+import { getAuthInfoFromBrowserCookie } from '@/lib/auth.client';
+import {
+  canUseHoverPrefetch,
+  canUseNetworkPrefetch,
+  findLocalPlaybackTargetByTitle,
+  PREFETCH_INTENT_DELAY_MS,
+  transferWarmedSearchToAggregateGroup,
+  warmupSearchForTitle,
+} from '@/lib/video-prefetch';
 
 const noSelectStyle = {
   WebkitUserSelect: 'none',
@@ -70,10 +77,14 @@ function PosterCard({
 }: PosterCardProps) {
   const router = useRouter();
   const interactionId = useId();
+  const prefetchTimerRef = useRef<number | null>(null);
   const interactionManager = useOptionalCardInteractionManager();
   const showActionSheet = interactionManager?.showActionSheet;
   const hideActionSheet = interactionManager?.hideActionSheet;
   const externalUrl = buildExternalUrl(doubanId, isBangumi);
+  const externalLinkLabel = isBangumi
+    ? `打开${title}的 Bangumi 页面`
+    : `打开${title}的豆瓣页面`;
 
   const getLoginRedirectUrl = useCallback(() => {
     const currentUrl = window.location.pathname + window.location.search;
@@ -81,6 +92,15 @@ function PosterCard({
   }, []);
 
   const buildPlayUrl = useCallback(() => {
+    const localTarget = findLocalPlaybackTargetByTitle(title, year);
+    if (localTarget) {
+      return `/play?source=${encodeURIComponent(localTarget.source)}&id=${encodeURIComponent(
+        localTarget.id,
+      )}&title=${encodeURIComponent(title.trim())}${
+        year ? `&year=${year}` : ''
+      }${type ? `&stype=${type}` : ''}`;
+    }
+
     return `/play?title=${encodeURIComponent(title.trim())}${
       year ? `&year=${year}` : ''
     }${type ? `&stype=${type}` : ''}`;
@@ -93,8 +113,35 @@ function PosterCard({
       return;
     }
 
+    const hasLocalTarget = !!findLocalPlaybackTargetByTitle(title, year);
+    if (canUseNetworkPrefetch() && !hasLocalTarget) {
+      transferWarmedSearchToAggregateGroup(title);
+      warmupSearchForTitle(title);
+    }
     router.push(buildPlayUrl());
-  }, [buildPlayUrl, getLoginRedirectUrl, router]);
+  }, [buildPlayUrl, getLoginRedirectUrl, router, title, year]);
+
+  // hover / focus 预热：提前触发标题聚合搜索并预取播放页路由
+  const handlePrefetch = useCallback(() => {
+    if (!canUseHoverPrefetch()) return;
+
+    router.prefetch('/play');
+    if (prefetchTimerRef.current) {
+      window.clearTimeout(prefetchTimerRef.current);
+    }
+    prefetchTimerRef.current = window.setTimeout(() => {
+      prefetchTimerRef.current = null;
+      warmupSearchForTitle(title);
+    }, PREFETCH_INTENT_DELAY_MS);
+  }, [router, title]);
+
+  const cancelPrefetch = useCallback(() => {
+    if (!prefetchTimerRef.current) return;
+    window.clearTimeout(prefetchTimerRef.current);
+    prefetchTimerRef.current = null;
+  }, []);
+
+  useEffect(() => cancelPrefetch, [cancelPrefetch]);
 
   const handleExternalOpen = useCallback(() => {
     if (!externalUrl) {
@@ -176,6 +223,10 @@ function PosterCard({
     <div
       className='group relative w-full cursor-pointer rounded-lg bg-transparent transition-[transform,opacity] duration-300 ease-in-out hover:z-[500] hover:scale-[1.025] active:scale-[0.97] active:opacity-80'
       onClick={handlePlay}
+      onMouseEnter={handlePrefetch}
+      onMouseLeave={cancelPrefetch}
+      onFocus={handlePrefetch}
+      onBlur={cancelPrefetch}
       {...longPressProps}
       style={
         {
@@ -234,7 +285,7 @@ function PosterCard({
 
         {rate && (
           <div
-            className='absolute right-2 top-2 flex h-7 w-7 items-center justify-center rounded-full bg-pink-500 text-xs font-bold text-white shadow-md transition-all duration-300 ease-out group-hover:scale-110'
+            className='absolute right-2 top-2 flex h-7 w-7 items-center justify-center rounded-full bg-pink-700 text-xs font-bold text-white shadow-md transition-all duration-300 ease-out group-hover:scale-110'
             style={noSelectStyle}
             onContextMenu={preventContextMenu}
           >
@@ -251,6 +302,8 @@ function PosterCard({
             className='absolute left-2 top-2 -translate-x-2 opacity-0 transition-all delay-100 duration-300 ease-in-out sm:group-hover:translate-x-0 sm:group-hover:opacity-100'
             style={noSelectStyle}
             onContextMenu={preventContextMenu}
+            aria-label={externalLinkLabel}
+            title={externalLinkLabel}
           >
             <div
               className='flex h-7 w-7 items-center justify-center rounded-full bg-green-500 text-xs font-bold text-white shadow-md transition-all duration-300 ease-out hover:scale-[1.1] hover:bg-green-600'
@@ -259,6 +312,7 @@ function PosterCard({
             >
               <LinkIcon
                 size={16}
+                aria-hidden='true'
                 style={
                   {
                     ...noSelectStyle,

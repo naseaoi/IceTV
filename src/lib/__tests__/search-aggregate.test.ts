@@ -36,6 +36,7 @@ describe('runSearchAggregation', () => {
   });
 
   afterEach(() => {
+    jest.restoreAllMocks();
     if (originalCooldown === undefined) {
       delete process.env.SEARCH_SOURCE_FAILURE_COOLDOWN_MS;
     } else {
@@ -81,6 +82,9 @@ describe('runSearchAggregation', () => {
       api: 'https://api.example',
     };
     const onSourceError = jest.fn();
+    const consoleWarnSpy = jest
+      .spyOn(console, 'warn')
+      .mockImplementation(() => undefined);
     (searchFromApi as jest.Mock)
       .mockRejectedValueOnce(new Error('timeout'))
       .mockResolvedValue([createResult({ title: '恢复' })]);
@@ -117,5 +121,6 @@ describe('runSearchAggregation', () => {
 
     expect(searchFromApi).toHaveBeenCalledTimes(2);
     expect(results.map((item) => item.title)).toEqual(['恢复']);
+    expect(consoleWarnSpy).toHaveBeenCalledWith('搜索失败 失败源:', 'timeout');
   });
 });

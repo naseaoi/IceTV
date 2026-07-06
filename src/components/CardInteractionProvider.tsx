@@ -11,18 +11,17 @@ import React, {
   useSyncExternalStore,
 } from 'react';
 
+import MobileActionSheet, {
+  ActionItem,
+  ActionSheetAnchorRect,
+} from '@/components/MobileActionSheet';
+import ConfirmModal from '@/components/modals/ConfirmModal';
 import {
   Favorite,
   generateStorageKey,
   getAllFavorites,
   subscribeToDataUpdates,
 } from '@/lib/db.client';
-
-import MobileActionSheet, {
-  ActionItem,
-  ActionSheetAnchorRect,
-} from '@/components/MobileActionSheet';
-import ConfirmModal from '@/components/modals/ConfirmModal';
 
 type ActionSheetPayload = {
   title: string;

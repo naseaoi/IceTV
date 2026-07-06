@@ -1,68 +1,38 @@
 ﻿'use client';
 
-import {
-  Cat,
-  ChevronRight,
-  Clover,
-  Film,
-  Home as HomeIcon,
-  Star,
-  Tv,
-} from 'lucide-react';
+import { Cat, ChevronRight, Clover, Film, Tv } from 'lucide-react';
 import Link from 'next/link';
 import { useEffect, useMemo, useState } from 'react';
 
-import { GetBangumiCalendarData } from '@/features/bangumi/lib/bangumi.client';
-import { selectBangumiCardCover } from '@/features/bangumi/lib/bangumi-normalize';
-import {
-  clearAllFavorites,
-  getAllFavorites,
-  getAllPlayRecords,
-  subscribeToDataUpdates,
-} from '@/lib/db.client';
-import { getDoubanCategories } from '@/lib/douban.client';
-import { HomeInitialData } from '@/features/home/lib/home.types';
-import {
-  readSeenAnnouncement,
-  writeSeenAnnouncement,
-} from '@/lib/local-preferences';
-import { DoubanItem } from '@/lib/types';
-import {
-  getCurrentWeekday,
-  primeDefaultDoubanFeedViewCache,
-} from '@/features/douban/hooks/useDoubanFeed';
-
-import CapsuleSwitch from '@/components/CapsuleSwitch';
 import ContinueWatching from '@/components/ContinueWatching';
 import HomePosterCardSkeleton, {
   HOME_POSTER_CARD_CLASS,
 } from '@/components/HomePosterCardSkeleton';
-import ConfirmModal from '@/components/modals/ConfirmModal';
 import AnnouncementModal from '@/components/modals/AnnouncementModal';
 import PageLayout from '@/components/PageLayout';
 import PosterCard from '@/components/PosterCard';
 import ScrollableRow from '@/components/ScrollableRow';
 import { useSite } from '@/components/SiteProvider';
-import VideoCard from '@/components/VideoCard';
+import { GetBangumiCalendarData } from '@/features/bangumi/lib/bangumi.client';
+import { selectBangumiCardCover } from '@/features/bangumi/lib/bangumi-normalize';
+import {
+  getCurrentWeekday,
+  primeDefaultDoubanFeedViewCache,
+} from '@/features/douban/hooks/useDoubanFeed';
+import { HomeInitialData } from '@/features/home/lib/home.types';
+import { getDoubanCategories } from '@/lib/douban.client';
+import {
+  readSeenAnnouncement,
+  writeSeenAnnouncement,
+} from '@/lib/local-preferences';
+import { DoubanItem } from '@/lib/types';
+
+import { HomeMineSwitch } from './HomeMineSwitch';
 
 interface HomeClientProps {
   initialData: HomeInitialData;
   continueWatchingSkeletonCount?: number;
 }
-
-type FavoriteItem = {
-  id: string;
-  source: string;
-  title: string;
-  year?: string;
-  poster: string;
-  episodes: number;
-  source_name: string;
-  currentEpisode?: number;
-  progress?: number;
-  search_title?: string;
-  origin?: 'vod' | 'live';
-};
 
 type RecommendationLoadingState = {
   hotMovies: boolean;
@@ -70,6 +40,8 @@ type RecommendationLoadingState = {
   hotVarietyShows: boolean;
   bangumiCalendar: boolean;
 };
+
+const RECOMMENDATION_UNAVAILABLE_MESSAGE = '暂时无法获取数据';
 
 function RecommendationSkeletonRow() {
   return Array.from({ length: 8 }).map((_, index) => (
@@ -159,17 +131,6 @@ export default function HomeClient({
   initialData,
   continueWatchingSkeletonCount = 0,
 }: HomeClientProps) {
-  const [activeTab, setActiveTab] = useState<'home' | 'favorites'>('home');
-  // 滑入方向：切到收藏时从右侧进入，切回首页时从左侧进入
-  const [slideKey, setSlideKey] = useState(0);
-  const [slideFrom, setSlideFrom] = useState<'left' | 'right' | null>(null);
-  const handleTabChange = (value: string) => {
-    const newTab = value as 'home' | 'favorites';
-    if (newTab === activeTab) return;
-    setSlideFrom(newTab === 'favorites' ? 'right' : 'left');
-    setSlideKey((k) => k + 1);
-    setActiveTab(newTab);
-  };
   const [hotMovies, setHotMovies] = useState(initialData.hotMovies);
   const [hotTvShows, setHotTvShows] = useState(initialData.hotTvShows);
   const [hotVarietyShows, setHotVarietyShows] = useState(
@@ -178,7 +139,12 @@ export default function HomeClient({
   const [bangumiCalendarData, setBangumiCalendarData] = useState(
     initialData.bangumiCalendarData,
   );
-  const [bangumiUnavailable, setBangumiUnavailable] = useState(false);
+  const [unavailable, setUnavailable] = useState<RecommendationLoadingState>({
+    hotMovies: false,
+    hotTvShows: false,
+    hotVarietyShows: false,
+    bangumiCalendar: false,
+  });
   const [loading, setLoading] = useState<RecommendationLoadingState>(() => ({
     hotMovies: initialData.hotMovies.length === 0,
     hotTvShows: initialData.hotTvShows.length === 0,
@@ -188,8 +154,6 @@ export default function HomeClient({
   const { announcement } = useSite();
 
   const [showAnnouncement, setShowAnnouncement] = useState(false);
-  const [showClearFavConfirm, setShowClearFavConfirm] = useState(false);
-  const [favoriteItems, setFavoriteItems] = useState<FavoriteItem[]>([]);
 
   useEffect(() => {
     if (typeof window !== 'undefined' && announcement) {
@@ -215,6 +179,14 @@ export default function HomeClient({
         setLoading((prev) => ({ ...prev, [key]: false }));
       }
     };
+    const setSectionUnavailable = (
+      key: keyof RecommendationLoadingState,
+      value: boolean,
+    ) => {
+      if (!cancelled) {
+        setUnavailable((prev) => ({ ...prev, [key]: value }));
+      }
+    };
 
     const loadHotMovies = async () => {
       if (!shouldLoadHotMovies) {
@@ -228,11 +200,15 @@ export default function HomeClient({
           type: '全部',
         });
 
-        if (!cancelled && moviesData.code === 200) {
+        if (!cancelled && moviesData.code === 200 && moviesData.list.length) {
           setHotMovies(moviesData.list);
+          setSectionUnavailable('hotMovies', false);
+        } else {
+          setSectionUnavailable('hotMovies', true);
         }
       } catch (error) {
         console.error('获取热门电影失败:', error);
+        setSectionUnavailable('hotMovies', true);
       } finally {
         finishLoading('hotMovies');
       }
@@ -250,11 +226,15 @@ export default function HomeClient({
           type: 'tv',
         });
 
-        if (!cancelled && tvShowsData.code === 200) {
+        if (!cancelled && tvShowsData.code === 200 && tvShowsData.list.length) {
           setHotTvShows(tvShowsData.list);
+          setSectionUnavailable('hotTvShows', false);
+        } else {
+          setSectionUnavailable('hotTvShows', true);
         }
       } catch (error) {
         console.error('获取热门剧集失败:', error);
+        setSectionUnavailable('hotTvShows', true);
       } finally {
         finishLoading('hotTvShows');
       }
@@ -272,11 +252,19 @@ export default function HomeClient({
           type: 'show',
         });
 
-        if (!cancelled && varietyShowsData.code === 200) {
+        if (
+          !cancelled &&
+          varietyShowsData.code === 200 &&
+          varietyShowsData.list.length
+        ) {
           setHotVarietyShows(varietyShowsData.list);
+          setSectionUnavailable('hotVarietyShows', false);
+        } else {
+          setSectionUnavailable('hotVarietyShows', true);
         }
       } catch (error) {
         console.error('获取热门综艺失败:', error);
+        setSectionUnavailable('hotVarietyShows', true);
       } finally {
         finishLoading('hotVarietyShows');
       }
@@ -292,16 +280,16 @@ export default function HomeClient({
 
         if (!cancelled && hasUsableBangumiCalendarData(bangumiData)) {
           setBangumiCalendarData(bangumiData);
-          setBangumiUnavailable(false);
+          setSectionUnavailable('bangumiCalendar', false);
           finishLoading('bangumiCalendar');
         } else if (!cancelled) {
-          setBangumiUnavailable(true);
+          setSectionUnavailable('bangumiCalendar', true);
           finishLoading('bangumiCalendar');
         }
       } catch (error) {
         console.error('获取新番放送失败:', error);
         if (!cancelled) {
-          setBangumiUnavailable(true);
+          setSectionUnavailable('bangumiCalendar', true);
           finishLoading('bangumiCalendar');
         }
       }
@@ -315,59 +303,12 @@ export default function HomeClient({
     return () => {
       cancelled = true;
     };
-  }, []);
-
-  const updateFavoriteItems = async (allFavorites: Record<string, any>) => {
-    const allPlayRecords = await getAllPlayRecords();
-
-    const sorted = Object.entries(allFavorites)
-      .sort(([, a], [, b]) => b.save_time - a.save_time)
-      .map(([key, fav]) => {
-        const plusIndex = key.indexOf('+');
-        const source = key.slice(0, plusIndex);
-        const id = key.slice(plusIndex + 1);
-        const playRecord = allPlayRecords[key];
-
-        return {
-          id,
-          source,
-          title: fav.title,
-          year: fav.year,
-          poster: fav.cover,
-          episodes: fav.total_episodes,
-          source_name: fav.source_name,
-          currentEpisode: playRecord?.index,
-          progress:
-            playRecord?.total_time > 0
-              ? (playRecord.play_time / playRecord.total_time) * 100
-              : 0,
-          search_title: fav?.search_title,
-          origin: fav?.origin,
-        } as FavoriteItem;
-      });
-
-    setFavoriteItems(sorted);
-  };
-
-  useEffect(() => {
-    if (activeTab !== 'favorites') return;
-
-    const loadFavorites = async () => {
-      const allFavorites = await getAllFavorites();
-      await updateFavoriteItems(allFavorites);
-    };
-
-    loadFavorites();
-
-    const unsubscribe = subscribeToDataUpdates(
-      'favoritesUpdated',
-      (newFavorites: Record<string, any>) => {
-        updateFavoriteItems(newFavorites);
-      },
-    );
-
-    return unsubscribe;
-  }, [activeTab]);
+  }, [
+    initialData.bangumiCalendarData.length,
+    initialData.hotMovies.length,
+    initialData.hotTvShows.length,
+    initialData.hotVarietyShows.length,
+  ]);
 
   const currentWeekday = useMemo(() => getCurrentWeekday(), []);
 
@@ -403,119 +344,77 @@ export default function HomeClient({
     <PageLayout>
       <div className='overflow-visible px-2 pb-2 pt-4 sm:px-10 sm:pt-8'>
         <div className='mb-4 flex justify-center'>
-          <CapsuleSwitch
-            options={[
-              { label: '首页', value: 'home', icon: HomeIcon },
-              { label: '收藏', value: 'favorites', icon: Star },
-            ]}
-            active={activeTab}
-            onChange={handleTabChange}
-          />
+          <HomeMineSwitch active='home' />
         </div>
 
         <div className='mx-auto max-w-[95%]'>
-          <div
-            key={slideKey}
-            className={
-              slideFrom === 'right'
-                ? 'animate-[slide-in-right_250ms_ease-out]'
-                : slideFrom === 'left'
-                  ? 'animate-[slide-in-left_250ms_ease-out]'
-                  : ''
-            }
-          >
-            {activeTab === 'favorites' ? (
-              <section className='mb-4'>
-                <div className='mb-4 flex items-center justify-between'>
-                  <h2 className='flex items-center gap-2 text-xl font-bold text-gray-800 dark:text-gray-200'>
-                    <Star className='h-5 w-5 text-amber-500' />
-                    我的收藏
-                  </h2>
-                  {favoriteItems.length > 0 && (
-                    <button
-                      className='text-sm text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200'
-                      onClick={() => setShowClearFavConfirm(true)}
-                    >
-                      清空
-                    </button>
-                  )}
-                </div>
-                <div className='grid grid-cols-3 justify-start gap-x-2 gap-y-14 px-0 sm:grid-cols-[repeat(auto-fill,_180px)] sm:gap-x-6 sm:gap-y-20 sm:px-2'>
-                  {favoriteItems.map((item) => (
-                    <div
-                      key={item.id + item.source}
-                      className='w-24 sm:w-[180px]'
-                    >
-                      <VideoCard
-                        query={item.search_title}
-                        {...item}
-                        from='favorite'
-                        type={item.episodes > 1 ? 'tv' : ''}
-                      />
-                    </div>
-                  ))}
-                  {favoriteItems.length === 0 && (
-                    <div className='col-span-full py-8 text-center text-gray-500 dark:text-gray-400'>
-                      暂无收藏内容
-                    </div>
-                  )}
-                </div>
-              </section>
-            ) : (
-              <div className='-mb-8 sm:-mb-10'>
-                <ContinueWatching
-                  initialSkeletonCount={continueWatchingSkeletonCount}
-                />
+          <div className='-mb-8 sm:-mb-10'>
+            <ContinueWatching
+              initialSkeletonCount={continueWatchingSkeletonCount}
+            />
 
-                <RecommendationSection
-                  title='热门电影'
-                  href='/douban?type=movie'
-                  icon={Film}
-                  iconClassName='h-5 w-5 text-blue-500'
-                  items={hotMovies}
-                  loading={loading.hotMovies && hotMovies.length === 0}
-                  type='movie'
-                  priorityCount={4}
-                />
+            <RecommendationSection
+              title='热门电影'
+              href='/douban?type=movie'
+              icon={Film}
+              iconClassName='h-5 w-5 text-blue-500'
+              items={hotMovies}
+              loading={loading.hotMovies && hotMovies.length === 0}
+              type='movie'
+              priorityCount={4}
+              emptyMessage={
+                unavailable.hotMovies
+                  ? RECOMMENDATION_UNAVAILABLE_MESSAGE
+                  : undefined
+              }
+            />
 
-                <RecommendationSection
-                  title='热门剧集'
-                  href='/douban?type=tv'
-                  icon={Tv}
-                  iconClassName='h-5 w-5 text-emerald-500'
-                  items={hotTvShows}
-                  loading={loading.hotTvShows && hotTvShows.length === 0}
-                />
+            <RecommendationSection
+              title='热门剧集'
+              href='/douban?type=tv'
+              icon={Tv}
+              iconClassName='h-5 w-5 text-emerald-500'
+              items={hotTvShows}
+              loading={loading.hotTvShows && hotTvShows.length === 0}
+              emptyMessage={
+                unavailable.hotTvShows
+                  ? RECOMMENDATION_UNAVAILABLE_MESSAGE
+                  : undefined
+              }
+            />
 
-                <RecommendationSection
-                  title='新番放送'
-                  href='/douban?type=anime'
-                  icon={Cat}
-                  iconClassName='h-5 w-5 text-pink-500'
-                  items={todayAnimes}
-                  loading={
-                    loading.bangumiCalendar &&
-                    todayAnimes.length === 0 &&
-                    !bangumiUnavailable
-                  }
-                  isBangumi={true}
-                  emptyMessage={
-                    bangumiUnavailable ? '暂时无法获取数据' : undefined
-                  }
-                />
+            <RecommendationSection
+              title='新番放送'
+              href='/douban?type=anime'
+              icon={Cat}
+              iconClassName='h-5 w-5 text-pink-500'
+              items={todayAnimes}
+              loading={
+                loading.bangumiCalendar &&
+                todayAnimes.length === 0 &&
+                !unavailable.bangumiCalendar
+              }
+              isBangumi={true}
+              emptyMessage={
+                unavailable.bangumiCalendar
+                  ? RECOMMENDATION_UNAVAILABLE_MESSAGE
+                  : undefined
+              }
+            />
 
-                <RecommendationSection
-                  title='热门综艺'
-                  href='/douban?type=show'
-                  icon={Clover}
-                  iconClassName='h-5 w-5 text-violet-500'
-                  items={hotVarietyShows}
-                  loading={
-                    loading.hotVarietyShows && hotVarietyShows.length === 0
-                  }
-                />
-              </div>
-            )}
+            <RecommendationSection
+              title='热门综艺'
+              href='/douban?type=show'
+              icon={Clover}
+              iconClassName='h-5 w-5 text-violet-500'
+              items={hotVarietyShows}
+              loading={loading.hotVarietyShows && hotVarietyShows.length === 0}
+              emptyMessage={
+                unavailable.hotVarietyShows
+                  ? RECOMMENDATION_UNAVAILABLE_MESSAGE
+                  : undefined
+              }
+            />
           </div>
         </div>
       </div>
@@ -527,21 +426,6 @@ export default function HomeClient({
           onClose={() => handleCloseAnnouncement(announcement)}
         />
       )}
-
-      <ConfirmModal
-        isOpen={showClearFavConfirm}
-        title='确认清空收藏夹？'
-        message='该操作会删除所有收藏内容，删除后无法恢复。'
-        danger
-        cancelText='再想想'
-        confirmText='确认清空'
-        onCancel={() => setShowClearFavConfirm(false)}
-        onConfirm={async () => {
-          await clearAllFavorites();
-          setFavoriteItems([]);
-          setShowClearFavConfirm(false);
-        }}
-      />
     </PageLayout>
   );
 }

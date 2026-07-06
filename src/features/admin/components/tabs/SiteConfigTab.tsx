@@ -1,87 +1,154 @@
 ﻿'use client';
 
 import { ExternalLink, ImagePlus, Trash2, Upload } from 'lucide-react';
-import { useEffect, useRef, useState } from 'react';
+import { type FormEvent, useEffect, useRef, useState } from 'react';
 
 import AdminSelect from '@/components/admin/AdminSelect';
 import AlertModal from '@/components/modals/AlertModal';
-import { useAlertModal } from '@/hooks/useAlertModal';
 import { useLoadingState } from '@/features/admin/hooks/useLoadingState';
+import { SITE_CONFIG_FORM_ID } from '@/features/admin/lib/admin-form-ids';
 import { adminPost } from '@/features/admin/lib/api';
-import { buttonStyles } from '@/features/admin/lib/buttonStyles';
 import { showError, showSuccess } from '@/features/admin/lib/notifications';
-import { AdminConfig } from '@/types/admin';
 import { SiteConfig } from '@/features/admin/types/internal';
+import { useAlertModal } from '@/hooks/useAlertModal';
 import {
   DEFAULT_BANGUMI_DATA_SOURCE,
-  bangumiDataSourceOptions,
-  normalizeBangumiDataSource,
+  normalizeSiteBangumiDataSource,
+  siteBangumiDataSourceOptions,
 } from '@/lib/bangumi-source';
 import {
-  doubanDataSourceOptions,
-  doubanImageProxyTypeOptions,
   getThanksInfo,
+  normalizeSiteDoubanImageProxyType,
+  normalizeSiteDoubanProxyType,
+  siteDoubanDataSourceOptions,
+  siteDoubanImageProxyTypeOptions,
 } from '@/lib/douban-options';
+import { DEFAULT_DOUBAN_IMAGE_PROXY_TYPE } from '@/lib/douban-source';
 import { localPreferenceToggleDefinitions } from '@/lib/local-preference-toggles';
+import { DEFAULT_RUNTIME_PARAMS } from '@/lib/runtime-params';
+import { AdminConfig } from '@/types/admin';
+
+const DEFAULT_SITE_SETTINGS: SiteConfig = {
+  SiteName: '',
+  SiteIcon: '',
+  Announcement: '',
+  EnableLiveEntry: false,
+  DefaultAggregateSearch: true,
+  EnableOptimization: true,
+  AutoSwitchSourceOnTimeout: false,
+  LiveDirectConnect: false,
+  ...DEFAULT_RUNTIME_PARAMS,
+  DoubanProxyType: 'direct',
+  DoubanProxy: '',
+  BangumiDataSource: DEFAULT_BANGUMI_DATA_SOURCE,
+  BangumiProxy: '',
+  DoubanImageProxyType: DEFAULT_DOUBAN_IMAGE_PROXY_TYPE,
+  DoubanImageProxy: '',
+  DisableYellowFilter: false,
+  FluidSearch: true,
+};
+
+type EditableSiteSettings = Pick<
+  SiteConfig,
+  | 'SiteName'
+  | 'SiteIcon'
+  | 'Announcement'
+  | 'EnableLiveEntry'
+  | 'DefaultAggregateSearch'
+  | 'EnableOptimization'
+  | 'AutoSwitchSourceOnTimeout'
+  | 'LiveDirectConnect'
+  | 'DoubanProxyType'
+  | 'BangumiDataSource'
+  | 'DoubanImageProxyType'
+  | 'DisableYellowFilter'
+  | 'FluidSearch'
+>;
+
+function buildSiteSettings(config: AdminConfig): SiteConfig {
+  return {
+    ...config.SiteConfig,
+    DoubanProxyType: normalizeSiteDoubanProxyType(
+      config.SiteConfig.DoubanProxyType,
+    ),
+    DoubanProxy: '',
+    BangumiDataSource: normalizeSiteBangumiDataSource(
+      config.SiteConfig.BangumiDataSource,
+    ),
+    BangumiProxy: '',
+    DoubanImageProxyType: normalizeSiteDoubanImageProxyType(
+      config.SiteConfig.DoubanImageProxyType,
+    ),
+    DoubanImageProxy: '',
+    EnableLiveEntry: config.SiteConfig.EnableLiveEntry ?? false,
+    DefaultAggregateSearch: config.SiteConfig.DefaultAggregateSearch ?? true,
+    EnableOptimization: config.SiteConfig.EnableOptimization ?? true,
+    AutoSwitchSourceOnTimeout:
+      config.SiteConfig.AutoSwitchSourceOnTimeout ?? false,
+    LiveDirectConnect: config.SiteConfig.LiveDirectConnect ?? false,
+    DisableYellowFilter: config.SiteConfig.DisableYellowFilter ?? false,
+    FluidSearch: config.SiteConfig.FluidSearch ?? true,
+  };
+}
+
+function normalizeEditableSiteSettings(
+  value: SiteConfig,
+): EditableSiteSettings {
+  return {
+    SiteName: value.SiteName || '',
+    SiteIcon: value.SiteIcon || '',
+    Announcement: value.Announcement || '',
+    EnableLiveEntry: value.EnableLiveEntry ?? false,
+    DefaultAggregateSearch: value.DefaultAggregateSearch ?? true,
+    EnableOptimization: value.EnableOptimization ?? true,
+    AutoSwitchSourceOnTimeout: value.AutoSwitchSourceOnTimeout ?? false,
+    LiveDirectConnect: value.LiveDirectConnect ?? false,
+    DoubanProxyType: normalizeSiteDoubanProxyType(value.DoubanProxyType),
+    BangumiDataSource: normalizeSiteBangumiDataSource(value.BangumiDataSource),
+    DoubanImageProxyType: normalizeSiteDoubanImageProxyType(
+      value.DoubanImageProxyType,
+    ),
+    DisableYellowFilter: value.DisableYellowFilter ?? false,
+    FluidSearch: value.FluidSearch ?? true,
+  };
+}
 
 const SiteConfigComponent = ({
   config,
   refreshConfig,
+  onSavingChange,
+  onDirtyChange,
 }: {
   config: AdminConfig | null;
   refreshConfig: () => Promise<void>;
+  onSavingChange?: (saving: boolean) => void;
+  onDirtyChange?: (dirty: boolean) => void;
 }) => {
   const { alertModal, showAlert, hideAlert } = useAlertModal();
-  const { isLoading, withLoading } = useLoadingState();
-  const [siteSettings, setSiteSettings] = useState<SiteConfig>({
-    SiteName: '',
-    SiteIcon: '',
-    Announcement: '',
-    EnableLiveEntry: false,
-    DefaultAggregateSearch: true,
-    EnableOptimization: true,
-    AutoSwitchSourceOnTimeout: false,
-    LiveDirectConnect: false,
-    SearchDownstreamMaxPage: 1,
-    SiteInterfaceCacheTime: 7200,
-    DoubanProxyType: 'direct',
-    DoubanProxy: '',
-    BangumiDataSource: DEFAULT_BANGUMI_DATA_SOURCE,
-    BangumiProxy: '',
-    DoubanImageProxyType: 'cmliussss-cdn-tencent',
-    DoubanImageProxy: '',
-    DisableYellowFilter: false,
-    FluidSearch: true,
-  });
+  const { withLoading } = useLoadingState();
+  const [siteSettings, setSiteSettings] = useState<SiteConfig>(
+    DEFAULT_SITE_SETTINGS,
+  );
+  const [baselineSiteSettings, setBaselineSiteSettings] =
+    useState<EditableSiteSettings>(() =>
+      normalizeEditableSiteSettings(DEFAULT_SITE_SETTINGS),
+    );
 
   // 站点图标相关状态
   const [iconPreview, setIconPreview] = useState<string>('');
   const [iconUploading, setIconUploading] = useState(false);
   const iconFileRef = useRef<HTMLInputElement>(null);
+  const savingRef = useRef(false);
+  const normalizedSiteSettings = normalizeEditableSiteSettings(siteSettings);
+  const siteSettingsDirty =
+    JSON.stringify(normalizedSiteSettings) !==
+    JSON.stringify(baselineSiteSettings);
 
   useEffect(() => {
     if (config?.SiteConfig) {
-      setSiteSettings({
-        ...config.SiteConfig,
-        DoubanProxyType: config.SiteConfig.DoubanProxyType || 'direct',
-        DoubanProxy: config.SiteConfig.DoubanProxy || '',
-        BangumiDataSource: normalizeBangumiDataSource(
-          config.SiteConfig.BangumiDataSource,
-        ),
-        BangumiProxy: config.SiteConfig.BangumiProxy || '',
-        DoubanImageProxyType:
-          config.SiteConfig.DoubanImageProxyType || 'cmliussss-cdn-tencent',
-        DoubanImageProxy: config.SiteConfig.DoubanImageProxy || '',
-        EnableLiveEntry: config.SiteConfig.EnableLiveEntry ?? false,
-        DefaultAggregateSearch:
-          config.SiteConfig.DefaultAggregateSearch ?? true,
-        EnableOptimization: config.SiteConfig.EnableOptimization ?? true,
-        AutoSwitchSourceOnTimeout:
-          config.SiteConfig.AutoSwitchSourceOnTimeout ?? false,
-        LiveDirectConnect: config.SiteConfig.LiveDirectConnect ?? false,
-        DisableYellowFilter: config.SiteConfig.DisableYellowFilter ?? false,
-        FluidSearch: config.SiteConfig.FluidSearch ?? true,
-      });
+      const nextSiteSettings = buildSiteSettings(config);
+      setSiteSettings(nextSiteSettings);
+      setBaselineSiteSettings(normalizeEditableSiteSettings(nextSiteSettings));
       // 初始化图标预览
       const icon = config.SiteConfig.SiteIcon;
       if (icon) {
@@ -90,18 +157,25 @@ const SiteConfigComponent = ({
     }
   }, [config]);
 
+  useEffect(() => {
+    onDirtyChange?.(siteSettingsDirty);
+  }, [onDirtyChange, siteSettingsDirty]);
+
   // 处理豆瓣数据源变化
   const handleDoubanDataSourceChange = (value: string) => {
     setSiteSettings((prev) => ({
       ...prev,
       DoubanProxyType: value,
+      DoubanProxy: '',
     }));
   };
 
   const handleBangumiDataSourceChange = (value: string) => {
+    const nextSource = normalizeSiteBangumiDataSource(value);
     setSiteSettings((prev) => ({
       ...prev,
-      BangumiDataSource: normalizeBangumiDataSource(value),
+      BangumiDataSource: nextSource,
+      BangumiProxy: '',
     }));
   };
 
@@ -110,6 +184,7 @@ const SiteConfigComponent = ({
     setSiteSettings((prev) => ({
       ...prev,
       DoubanImageProxyType: value,
+      DoubanImageProxy: '',
     }));
   };
 
@@ -130,19 +205,33 @@ const SiteConfigComponent = ({
     );
   };
 
-  // 保存站点配置
   const handleSave = async () => {
-    await withLoading('saveSiteConfig', async () => {
-      try {
+    if (savingRef.current || !siteSettingsDirty) {
+      return;
+    }
+
+    savingRef.current = true;
+    onSavingChange?.(true);
+
+    try {
+      await withLoading('saveSiteConfig', async () => {
         await adminPost('/api/admin/site', { ...siteSettings }, '保存失败');
 
+        setBaselineSiteSettings(normalizedSiteSettings);
         showSuccess('保存成功, 请刷新页面', showAlert);
         await refreshConfig();
-      } catch (err) {
-        showError(err instanceof Error ? err.message : '保存失败', showAlert);
-        throw err;
-      }
-    });
+      });
+    } catch (err) {
+      showError(err instanceof Error ? err.message : '保存失败', showAlert);
+    } finally {
+      savingRef.current = false;
+      onSavingChange?.(false);
+    }
+  };
+
+  const handleSubmit = (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    void handleSave();
   };
 
   if (!config) {
@@ -154,14 +243,23 @@ const SiteConfigComponent = ({
   }
 
   return (
-    <div className='space-y-6'>
+    <form
+      id={SITE_CONFIG_FORM_ID}
+      onSubmit={handleSubmit}
+      className='space-y-6'
+    >
       <div className='grid grid-cols-1 gap-6 md:grid-cols-2'>
         {/* 站点名称 */}
         <div>
-          <label className='mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300'>
+          <label
+            htmlFor='site-name'
+            className='mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300'
+          >
             站点名称
           </label>
           <input
+            id='site-name'
+            name='siteName'
             type='text'
             value={siteSettings.SiteName}
             onChange={(e) =>
@@ -174,7 +272,10 @@ const SiteConfigComponent = ({
         {/* 站点图标 */}
         <div>
           <div className='mb-2 flex items-end gap-2'>
-            <label className='text-sm font-medium text-gray-700 dark:text-gray-300'>
+            <label
+              htmlFor='site-icon'
+              className='text-sm font-medium text-gray-700 dark:text-gray-300'
+            >
               站点图标
             </label>
             <p className='text-xs text-gray-400 dark:text-gray-500'>
@@ -198,6 +299,8 @@ const SiteConfigComponent = ({
             <div className='min-w-0 flex-1 space-y-2'>
               <div className='flex min-w-0 items-center gap-2'>
                 <input
+                  id='site-icon'
+                  name='siteIcon'
                   type='text'
                   value={siteSettings.SiteIcon}
                   onChange={(e) => {
@@ -248,8 +351,11 @@ const SiteConfigComponent = ({
                 </div>
               </div>
               <input
+                id='site-icon-file'
+                name='siteIconFile'
                 ref={iconFileRef}
                 type='file'
+                aria-label='上传站点图标'
                 accept='image/png,image/jpeg,image/webp,image/svg+xml,image/gif,image/x-icon'
                 className='hidden'
                 onChange={async (e) => {
@@ -280,7 +386,7 @@ const SiteConfigComponent = ({
                       data.url || `/api/admin/site-icon?t=${Date.now()}`,
                     );
                     showSuccess('图标上传成功', showAlert);
-                  } catch (err) {
+                  } catch {
                     showError('上传失败', showAlert);
                   } finally {
                     setIconUploading(false);
@@ -295,7 +401,10 @@ const SiteConfigComponent = ({
         {/* 站点公告 */}
         <div>
           <div className='mb-2 flex items-end gap-2'>
-            <label className='text-sm font-medium text-gray-700 dark:text-gray-300'>
+            <label
+              htmlFor='site-announcement'
+              className='text-sm font-medium text-gray-700 dark:text-gray-300'
+            >
               站点公告
             </label>
             <p className='text-xs text-gray-400 dark:text-gray-500'>
@@ -303,6 +412,8 @@ const SiteConfigComponent = ({
             </p>
           </div>
           <textarea
+            id='site-announcement'
+            name='siteAnnouncement'
             value={siteSettings.Announcement}
             onChange={(e) =>
               setSiteSettings((prev) => ({
@@ -319,7 +430,10 @@ const SiteConfigComponent = ({
         <div className='space-y-3'>
           <div>
             <div className='mb-2 flex items-baseline justify-between gap-2'>
-              <label className='block text-sm font-medium text-gray-700 dark:text-gray-300'>
+              <label
+                htmlFor='site-douban-proxy-type'
+                className='block text-sm font-medium text-gray-700 dark:text-gray-300'
+              >
                 豆瓣数据代理
               </label>
               {getThanksInfo(siteSettings.DoubanProxyType) && (
@@ -341,41 +455,22 @@ const SiteConfigComponent = ({
               )}
             </div>
             <AdminSelect
+              id='site-douban-proxy-type'
               value={siteSettings.DoubanProxyType}
               onChange={(value) => handleDoubanDataSourceChange(value)}
-              options={doubanDataSourceOptions}
+              options={siteDoubanDataSourceOptions}
             />
           </div>
-
-          {siteSettings.DoubanProxyType === 'custom' && (
-            <div>
-              <label className='mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300'>
-                豆瓣代理地址
-              </label>
-              <input
-                type='text'
-                placeholder='例如: https://proxy.example.com/fetch?url='
-                value={siteSettings.DoubanProxy}
-                onChange={(e) =>
-                  setSiteSettings((prev) => ({
-                    ...prev,
-                    DoubanProxy: e.target.value,
-                  }))
-                }
-                className='w-full rounded-lg border border-gray-300 bg-white px-3 py-2.5 text-sm text-gray-900 placeholder-gray-500 shadow-sm transition-all duration-200 hover:border-gray-400 focus:border-green-500 focus:outline-none focus:ring-2 focus:ring-green-500 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100 dark:placeholder-gray-400 dark:hover:border-gray-500'
-              />
-              <p className='mt-1 text-xs text-gray-500 dark:text-gray-400'>
-                自定义代理服务器地址
-              </p>
-            </div>
-          )}
         </div>
 
         {/* 豆瓣图片代理设置 */}
         <div className='space-y-3'>
           <div>
             <div className='mb-2 flex items-baseline justify-between gap-2'>
-              <label className='block text-sm font-medium text-gray-700 dark:text-gray-300'>
+              <label
+                htmlFor='site-douban-image-proxy-type'
+                className='block text-sm font-medium text-gray-700 dark:text-gray-300'
+              >
                 豆瓣图片代理
               </label>
               {getThanksInfo(siteSettings.DoubanImageProxyType) && (
@@ -397,108 +492,29 @@ const SiteConfigComponent = ({
               )}
             </div>
             <AdminSelect
+              id='site-douban-image-proxy-type'
               value={siteSettings.DoubanImageProxyType}
               onChange={(value) => handleDoubanImageProxyChange(value)}
-              options={doubanImageProxyTypeOptions}
+              options={siteDoubanImageProxyTypeOptions}
             />
           </div>
-
-          {siteSettings.DoubanImageProxyType === 'custom' && (
-            <div>
-              <label className='mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300'>
-                豆瓣图片代理地址
-              </label>
-              <input
-                type='text'
-                placeholder='例如: https://proxy.example.com/fetch?url='
-                value={siteSettings.DoubanImageProxy}
-                onChange={(e) =>
-                  setSiteSettings((prev) => ({
-                    ...prev,
-                    DoubanImageProxy: e.target.value,
-                  }))
-                }
-                className='w-full rounded-lg border border-gray-300 bg-white px-3 py-2.5 text-sm text-gray-900 placeholder-gray-500 shadow-sm transition-all duration-200 hover:border-gray-400 focus:border-green-500 focus:outline-none focus:ring-2 focus:ring-green-500 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100 dark:placeholder-gray-400 dark:hover:border-gray-500'
-              />
-              <p className='mt-1 text-xs text-gray-500 dark:text-gray-400'>
-                自定义图片代理服务器地址
-              </p>
-            </div>
-          )}
         </div>
 
         <div className='space-y-3'>
           <div>
-            <label className='mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300'>
+            <label
+              htmlFor='site-bangumi-data-source'
+              className='mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300'
+            >
               Bangumi 数据代理
             </label>
             <AdminSelect
+              id='site-bangumi-data-source'
               value={siteSettings.BangumiDataSource}
               onChange={(value) => handleBangumiDataSourceChange(value)}
-              options={bangumiDataSourceOptions}
+              options={siteBangumiDataSourceOptions}
             />
           </div>
-
-          {siteSettings.BangumiDataSource === 'custom' && (
-            <div>
-              <label className='mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300'>
-                Bangumi 代理地址
-              </label>
-              <input
-                type='text'
-                placeholder='例如: https://proxy.example.com/fetch?url='
-                value={siteSettings.BangumiProxy}
-                onChange={(e) =>
-                  setSiteSettings((prev) => ({
-                    ...prev,
-                    BangumiProxy: e.target.value,
-                  }))
-                }
-                className='w-full rounded-lg border border-gray-300 bg-white px-3 py-2.5 text-sm text-gray-900 placeholder-gray-500 shadow-sm transition-all duration-200 hover:border-gray-400 focus:border-green-500 focus:outline-none focus:ring-2 focus:ring-green-500 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100 dark:placeholder-gray-400 dark:hover:border-gray-500'
-              />
-              <p className='mt-1 text-xs text-gray-500 dark:text-gray-400'>
-                自定义代理服务器地址
-              </p>
-            </div>
-          )}
-        </div>
-
-        {/* 搜索接口可拉取最大页数 */}
-        <div>
-          <label className='mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300'>
-            搜索接口可拉取最大页数
-          </label>
-          <input
-            type='number'
-            min={1}
-            value={siteSettings.SearchDownstreamMaxPage}
-            onChange={(e) =>
-              setSiteSettings((prev) => ({
-                ...prev,
-                SearchDownstreamMaxPage: Number(e.target.value),
-              }))
-            }
-            className='w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-gray-900 focus:border-transparent focus:ring-2 focus:ring-green-500 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100'
-          />
-        </div>
-
-        {/* 站点接口缓存时间 */}
-        <div>
-          <label className='mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300'>
-            站点接口缓存时间（秒）
-          </label>
-          <input
-            type='number'
-            min={1}
-            value={siteSettings.SiteInterfaceCacheTime}
-            onChange={(e) =>
-              setSiteSettings((prev) => ({
-                ...prev,
-                SiteInterfaceCacheTime: Number(e.target.value),
-              }))
-            }
-            className='w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-gray-900 focus:border-transparent focus:ring-2 focus:ring-green-500 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100'
-          />
         </div>
       </div>
 
@@ -624,21 +640,6 @@ const SiteConfigComponent = ({
         </div>
       </div>
 
-      {/* 操作按钮 */}
-      <div className='flex justify-end'>
-        <button
-          onClick={handleSave}
-          disabled={isLoading('saveSiteConfig')}
-          className={`px-4 py-2 ${
-            isLoading('saveSiteConfig')
-              ? buttonStyles.disabled
-              : buttonStyles.success
-          } rounded-lg transition-colors`}
-        >
-          {isLoading('saveSiteConfig') ? '保存中…' : '保存'}
-        </button>
-      </div>
-
       {/* 通用弹窗组件 */}
       <AlertModal
         isOpen={alertModal.isOpen}
@@ -649,7 +650,7 @@ const SiteConfigComponent = ({
         timer={alertModal.timer}
         showConfirm={alertModal.showConfirm}
       />
-    </div>
+    </form>
   );
 };
 

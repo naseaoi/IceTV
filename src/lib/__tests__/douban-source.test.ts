@@ -1,4 +1,5 @@
 import {
+  DEFAULT_DOUBAN_IMAGE_PROXY_TYPE,
   DEFAULT_DOUBAN_PROXY_TYPE,
   DOUBAN_DATA_SOURCE_STORAGE_KEY,
   DOUBAN_IMAGE_PROXY_TYPE_STORAGE_KEY,
@@ -43,6 +44,14 @@ describe('readDoubanProxyType', () => {
     expect(readDoubanProxyType()).toBe('server');
   });
 
+  it('uses runtime image proxy config by default', () => {
+    window.RUNTIME_CONFIG = {
+      DOUBAN_IMAGE_PROXY_TYPE: 'cmliussss-cdn-ali',
+    } as typeof window.RUNTIME_CONFIG;
+
+    expect(readDoubanImageProxyType()).toBe('cmliussss-cdn-ali');
+  });
+
   it('uses local storage before runtime config', () => {
     window.RUNTIME_CONFIG = {
       DOUBAN_PROXY_TYPE: 'server',
@@ -64,12 +73,14 @@ describe('readDoubanProxyType', () => {
     expect(readDoubanProxyUrl()).toBe('https://local.example/fetch?url=');
   });
 
-  it('keeps img3 as a supported image proxy type', () => {
-    expect(normalizeDoubanImageProxyType('img3')).toBe('img3');
+  it('falls back for removed image proxy types', () => {
+    expect(normalizeDoubanImageProxyType('img3')).toBe(
+      DEFAULT_DOUBAN_IMAGE_PROXY_TYPE,
+    );
 
     localStorage.setItem(DOUBAN_IMAGE_PROXY_TYPE_STORAGE_KEY, 'img3');
 
-    expect(readDoubanImageProxyType()).toBe('img3');
+    expect(readDoubanImageProxyType()).toBe(DEFAULT_DOUBAN_IMAGE_PROXY_TYPE);
   });
 
   it('keeps image proxy url separate from data proxy url', () => {

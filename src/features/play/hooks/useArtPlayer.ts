@@ -11,6 +11,7 @@ export function useArtPlayer(params: UseArtPlayerParams) {
     artRef,
     videoUrl,
     loading,
+    playbackRetryNonce,
     detail,
     currentEpisodeIndex,
     totalEpisodes,
@@ -28,6 +29,8 @@ export function useArtPlayer(params: UseArtPlayerParams) {
   const autoAdvanceArmedRef = useRef(false);
   const autoAdvancedRef = useRef(false);
   const playerMediaKindRef = useRef<'hls' | 'native' | null>(null);
+  const paramsRef = useRef(params);
+  paramsRef.current = params;
 
   useEffect(() => {
     if (
@@ -53,7 +56,7 @@ export function useArtPlayer(params: UseArtPlayerParams) {
     autoAdvanceArmedRef.current = false;
     autoAdvancedRef.current = false;
 
-    void initializeArtPlayer(params, {
+    void initializeArtPlayer(paramsRef.current, {
       loadingSessionRef,
       autoAdvanceArmedRef,
       autoAdvancedRef,
@@ -66,10 +69,16 @@ export function useArtPlayer(params: UseArtPlayerParams) {
     };
   }, [
     videoUrl,
-    loading,
+    artRef,
     blockAdEnabled,
-    playbackRequestModeRef,
+    currentEpisodeIndex,
+    detail,
+    loading,
     onPlaybackStarted,
     onSourceProxyFallbackStarted,
+    playbackRequestModeRef,
+    playbackRetryNonce,
+    setError,
+    totalEpisodes,
   ]);
 }

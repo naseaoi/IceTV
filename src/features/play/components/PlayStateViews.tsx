@@ -25,7 +25,6 @@ interface PlayLoadingViewProps {
 
 interface PlayErrorViewProps {
   error: string;
-  videoTitle: string;
   onBack: () => void;
   onRetry: () => void;
 }
@@ -115,7 +114,7 @@ export function PlayLoadingView({
 
   return (
     <PageLayout activePath='/play'>
-      <div className='flex h-[calc(100dvh-3rem-3.5rem-env(safe-area-inset-bottom))] items-center justify-center md:h-full'>
+      <div className='flex h-full items-center justify-center'>
         <div className='flex w-full max-w-2xl flex-col items-center gap-4 px-4'>
           <LoadingStatePanel
             icon={getLoadingStageIcon(loadingStage)}
@@ -146,37 +145,28 @@ export function PlayLoadingView({
   );
 }
 
-export function PlayErrorView({
-  error,
-  videoTitle,
-  onBack,
-  onRetry,
-}: PlayErrorViewProps) {
+export function PlayErrorView({ error, onBack, onRetry }: PlayErrorViewProps) {
+  const message =
+    error === '缺少必要参数'
+      ? '缺少播放目标参数，请从搜索结果、收藏或历史记录重新进入。'
+      : '请检查网络连接或稍后重试。';
+
   return (
     <PageLayout activePath='/play'>
-      <div className='flex min-h-screen items-center justify-center bg-transparent'>
+      <div className='flex h-full items-center justify-center bg-transparent'>
         <LoadingStatePanel
           icon={<AlertTriangle className='h-10 w-10' />}
           tone='red'
           title={error}
-          message='请检查网络连接或稍后重试。'
+          message={message}
         >
           <div className='flex items-center justify-center gap-3'>
             <button
               onClick={onBack}
               className='inline-flex transform items-center gap-1.5 rounded-lg bg-gradient-to-r from-green-500 to-emerald-600 px-3.5 py-2 text-sm font-medium text-white shadow-lg transition-all duration-200 hover:scale-105 hover:from-green-600 hover:to-emerald-700 hover:shadow-xl'
             >
-              {videoTitle ? (
-                <>
-                  <Search className='h-4 w-4' />
-                  返回搜索
-                </>
-              ) : (
-                <>
-                  <ArrowLeft className='h-4 w-4' />
-                  返回上页
-                </>
-              )}
+              <ArrowLeft className='h-4 w-4' />
+              返回前页
             </button>
 
             <button

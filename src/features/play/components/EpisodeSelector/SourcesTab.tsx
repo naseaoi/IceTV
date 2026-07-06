@@ -7,24 +7,23 @@ import React, {
   useSyncExternalStore,
 } from 'react';
 
+import { resolveSourceProbeEpisodeIndex } from '@/features/play/lib/sourceProbePolicy';
 import {
-  getSourceFailure,
+  type ProbeEntry,
+  type VideoInfo,
+  getOrProbe,
+  getSnapshot,
+  seedProbeResults,
+  subscribe,
+} from '@/features/play/lib/sourceProbeStore';
+import {
   type SourceFailureInfo,
+  getSourceFailure,
 } from '@/lib/failed-source-cooldown';
 import { readEnableOptimization } from '@/lib/local-preferences';
 import { collapseSourcesForDisplay } from '@/lib/source-bundle';
 import { normalizeTitleForSourceMatch } from '@/lib/source-match';
 import { SearchResult } from '@/lib/types';
-
-import { resolveSourceProbeEpisodeIndex } from '@/features/play/lib/sourceProbePolicy';
-import {
-  getOrProbe,
-  getSnapshot,
-  seedProbeResults,
-  subscribe,
-  type ProbeEntry,
-  type VideoInfo,
-} from '@/features/play/lib/sourceProbeStore';
 
 const VIDEO_INFO_BATCH_SIZE = 3;
 
@@ -37,14 +36,11 @@ interface SourcesTabProps {
   currentId?: string;
   currentEpisodeIndex?: number;
   videoTitle?: string;
-  /** 搜索关键词（来自聚合搜索的原始关键词），用于"搜索更多源站"时扩大搜索范围 */
   searchKeyword?: string;
   onSourceChange?: (source: string, id: string, title: string) => void;
   precomputedVideoInfo?: Map<string, VideoInfo>;
   activeDetail?: SearchResult | null;
-  /** 测速前补全 detail 后，通知父组件更新 availableSources 中对应条目 */
   onSourceDetailFetched?: (updated: SearchResult) => void;
-  /** 搜索到新源后，通知父组件追加到 availableSources */
   onAddSources?: (newSources: SearchResult[]) => void;
 }
 
@@ -193,7 +189,6 @@ export const SourcesTab: React.FC<SourcesTabProps> = ({
   onSourceDetailFetched,
   onAddSources,
 }) => {
-  // 订阅共享测速 store，任何来源的写入都会驱动重渲染
   const probeSnapshot = useSyncExternalStore(
     subscribe,
     getSnapshot,
@@ -202,9 +197,7 @@ export const SourcesTab: React.FC<SourcesTabProps> = ({
 
   const currentItemRef = useRef<HTMLDivElement | null>(null);
   const listContainerRef = useRef<HTMLDivElement | null>(null);
-  // 用户正在手动滚动时置 true，抑制程序化"自动对齐当前源"造成的视口回弹。
   const userScrollingRef = useRef(false);
-  // 程序化 scrollTo 期间置 true，滚动事件触发时忽略，避免把自身滚动误判为用户滚动。
   const programmaticScrollRef = useRef(false);
   const userScrollTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const programmaticScrollTimerRef = useRef<ReturnType<
@@ -225,13 +218,10 @@ export const SourcesTab: React.FC<SourcesTabProps> = ({
     [availableSources, currentSource, currentId],
   );
 
-  // 搜索更多源站
   const [isSearchingMore, setIsSearchingMore] = useState(false);
   const [searchMoreDone, setSearchMoreDone] = useState(false);
-  // 检验全部
   const [isRetestingAll, setIsRetestingAll] = useState(false);
 
-  // 把父组件透传的 precomputedVideoInfo 灌入 store（聚合优选的历史结果）
   useEffect(() => {
     if (!precomputedVideoInfo || precomputedVideoInfo.size === 0) return;
     seedProbeResults(precomputedVideoInfo.entries());
@@ -263,8 +253,6 @@ export const SourcesTab: React.FC<SourcesTabProps> = ({
     [activeDetail, currentEpisodeIndex, onSourceDetailFetched],
   );
 
-  // 后台测速：进入/刷新 Tab 时，对未测过的源分批 probe。
-  // 当前播放源跳过 probe（播放器会通过 writePlayerInfo 回填真实带宽）。
   useEffect(() => {
     if (displaySources.length === 0) return;
     const currentKey =
@@ -274,13 +262,18 @@ export const SourcesTab: React.FC<SourcesTabProps> = ({
       if (key === currentKey) return false;
       const entry = probeSnapshot.get(key);
       if (!entry) return true;
-      // 失败过的源不自动重试，等用户点击"重试"
       if (entry.info.hasError) return false;
       return false;
     });
     if (pending.length === 0) return;
     void probeSourcesInBatches(pending);
-  }, [displaySources, currentSource, currentId, probeSourcesInBatches]);
+  }, [
+    displaySources,
+    currentSource,
+    currentId,
+    probeSnapshot,
+    probeSourcesInBatches,
+  ]);
 
   const handleSourceClick = useCallback(
     (source: SearchResult) => {
@@ -289,7 +282,6 @@ export const SourcesTab: React.FC<SourcesTabProps> = ({
     [onSourceChange],
   );
 
-  // 读取近期失败源记录
   const sourceFailures = useMemo(() => {
     const map = new Map<string, SourceFailureInfo>();
     for (const source of displaySources) {
@@ -300,13 +292,12 @@ export const SourcesTab: React.FC<SourcesTabProps> = ({
       }
     }
     return map;
-  }, [displaySources, isActive]);
+  }, [displaySources]);
 
   const sortedSources = useMemo(() => {
     return sortSourcesForDisplay(displaySources, probeSnapshot, sourceFailures);
   }, [displaySources, probeSnapshot, sourceFailures]);
 
-  // 将当前源滚动到视口中央。仅在满足条件时调用，避免与用户手动滚动冲突。
   const scrollCurrentIntoView = useCallback((smooth = true) => {
     const listContainer = listContainerRef.current;
     const currentItem = currentItemRef.current;
@@ -436,12 +427,9 @@ export const SourcesTab: React.FC<SourcesTabProps> = ({
   }
 
   return (
-    <div className='relative flex min-h-0 flex-1'>
-      <div
-        ref={listContainerRef}
-        className='flex-1 overflow-y-auto p-5 pb-20 sm:p-6'
-      >
-        <div className='grid grid-cols-2 gap-2'>
+    <div className='relative flex min-h-0 flex-1 flex-col'>
+      <div ref={listContainerRef} className='flex-1 overflow-y-auto p-5 sm:p-6'>
+        <div className='grid grid-cols-1 gap-2'>
           {sortedSources.map((source, index) => {
             const isCurrentSource =
               source.source?.toString() === currentSource?.toString() &&
@@ -469,7 +457,7 @@ export const SourcesTab: React.FC<SourcesTabProps> = ({
                     handleSourceClick(source);
                   }
                 }}
-                className={`relative flex select-none flex-col gap-1.5 rounded-lg px-2.5 py-2 transition-all duration-150
+                className={`relative grid select-none grid-cols-[minmax(0,1fr)_auto] items-center gap-x-3 gap-y-1 rounded-lg px-3 py-2 transition-all duration-150
                   ${
                     isCurrentSource
                       ? 'bg-green-50 ring-1 ring-green-500/30 dark:bg-green-500/10'
@@ -479,8 +467,7 @@ export const SourcesTab: React.FC<SourcesTabProps> = ({
                   }`.trim()}
                 title={failureTitle}
               >
-                {/* 标题行 */}
-                <div className='flex min-w-0 items-center justify-between gap-1'>
+                <div className='contents'>
                   <div className='group/title relative min-w-0 flex-1'>
                     <h3 className='truncate text-xs font-medium leading-tight text-gray-900 dark:text-gray-100'>
                       {source.title}
@@ -492,10 +479,9 @@ export const SourcesTab: React.FC<SourcesTabProps> = ({
                       </div>
                     )}
                   </div>
-                  {/* 分辨率徽章（含占位，保持高度一致） */}
                   {videoInfo && videoInfo.quality !== '未知' ? (
                     videoInfo.hasError ? (
-                      <span className='inline-flex flex-shrink-0 items-center rounded bg-red-50 px-1 py-0.5 text-[9px] font-medium text-red-500 dark:bg-red-900/20 dark:text-red-400'>
+                      <span className='inline-flex w-fit justify-self-end whitespace-nowrap rounded bg-red-50 px-1 py-0.5 text-[9px] font-medium text-red-500 dark:bg-red-900/20 dark:text-red-400'>
                         失败
                       </span>
                     ) : (
@@ -513,7 +499,7 @@ export const SourcesTab: React.FC<SourcesTabProps> = ({
                             : 'bg-amber-50 text-amber-600 dark:bg-amber-900/20 dark:text-amber-400';
                         return (
                           <span
-                            className={`inline-flex flex-shrink-0 items-center rounded px-1 py-0.5 text-[9px] font-semibold ${colorClasses}`}
+                            className={`inline-flex w-fit justify-self-end whitespace-nowrap rounded px-1 py-0.5 text-[9px] font-semibold ${colorClasses}`}
                           >
                             {videoInfo.quality}
                           </span>
@@ -521,14 +507,13 @@ export const SourcesTab: React.FC<SourcesTabProps> = ({
                       })()
                     )
                   ) : optimizationEnabled ? (
-                    <span className='inline-flex flex-shrink-0 items-center rounded px-1 py-0.5 text-[9px] font-medium text-transparent'>
+                    <span className='inline-flex w-fit justify-self-end whitespace-nowrap rounded px-1 py-0.5 text-[9px] font-medium text-transparent'>
                       --
                     </span>
                   ) : null}
                 </div>
 
-                {/* 源名称 + 集数 */}
-                <div className='flex items-center justify-between gap-1'>
+                <div className='flex min-w-0 items-center gap-2'>
                   <span className='truncate rounded-full bg-gray-100 px-1.5 py-0.5 text-[10px] font-medium text-gray-600 dark:bg-white/[0.08] dark:text-gray-400'>
                     {source.source_name}
                   </span>
@@ -545,8 +530,7 @@ export const SourcesTab: React.FC<SourcesTabProps> = ({
                   )}
                 </div>
 
-                {/* 网络信息（固定占位，避免测速前后高度跳变） */}
-                <div className='flex min-h-[16px] items-center gap-2'>
+                <div className='flex min-h-[16px] items-center justify-end gap-2 text-right'>
                   {videoInfo && isTesting ? (
                     <div className='flex items-center gap-1.5 text-[10px] font-medium text-gray-500 dark:text-gray-400'>
                       <span className='inline-block h-3 w-3 animate-spin rounded-full border-2 border-gray-300 border-t-green-500 dark:border-gray-700 dark:border-t-green-400' />
@@ -593,9 +577,8 @@ export const SourcesTab: React.FC<SourcesTabProps> = ({
                   ) : null}
                 </div>
 
-                {/* 当前源标记 */}
                 {isCurrentSource && (
-                  <div className='absolute right-1.5 top-1.5'>
+                  <div className='absolute bottom-1.5 right-1.5'>
                     <div className='h-1.5 w-1.5 rounded-full bg-green-500'></div>
                   </div>
                 )}
@@ -603,77 +586,77 @@ export const SourcesTab: React.FC<SourcesTabProps> = ({
             );
           })}
         </div>
+      </div>
 
-        <div className='mt-6 flex-shrink-0 border-t border-gray-100 pt-4 dark:border-white/[0.06]'>
-          <div className='flex gap-2'>
-            <button
-              disabled={isRetestingAll}
-              onClick={async () => {
-                setIsRetestingAll(true);
-                const curKey =
-                  currentSource && currentId
-                    ? `${currentSource}-${currentId}`
-                    : '';
-                const toTest = displaySources.filter((s) => {
-                  const key = `${s.source}-${s.id}`;
-                  return key !== curKey;
-                });
-                await probeSourcesInBatches(toTest, { force: true });
-                setIsRetestingAll(false);
-              }}
-              className='flex-1 rounded-lg py-2 text-center text-xs font-medium text-gray-500 ring-1 ring-gray-200/60 transition-colors hover:text-green-600 hover:ring-green-300 disabled:opacity-50 dark:text-gray-400 dark:ring-white/[0.08] dark:hover:text-green-400 dark:hover:ring-green-500/30'
-            >
-              {isRetestingAll ? '检验中...' : '检验全部'}
-            </button>
-            <button
-              disabled={isSearchingMore}
-              onClick={async () => {
-                if (!videoTitle) return;
-                setIsSearchingMore(true);
-                setSearchMoreDone(false);
-                try {
-                  const query = searchKeyword || videoTitle;
-                  const res = await fetch(
-                    `/api/search?q=${encodeURIComponent(query.trim())}`,
+      <div className='flex-shrink-0 px-5 pb-5 sm:px-6 sm:pb-6'>
+        <div className='mb-3 h-px rounded-full bg-gradient-to-r from-transparent via-gray-200/90 to-transparent dark:via-white/[0.12]' />
+        <div className='flex gap-2'>
+          <button
+            disabled={isRetestingAll}
+            onClick={async () => {
+              setIsRetestingAll(true);
+              const curKey =
+                currentSource && currentId
+                  ? `${currentSource}-${currentId}`
+                  : '';
+              const toTest = displaySources.filter((s) => {
+                const key = `${s.source}-${s.id}`;
+                return key !== curKey;
+              });
+              await probeSourcesInBatches(toTest, { force: true });
+              setIsRetestingAll(false);
+            }}
+            className='flex-1 rounded-lg py-2 text-center text-xs font-medium text-gray-500 ring-1 ring-gray-200/60 transition-colors hover:text-green-600 hover:ring-green-300 disabled:opacity-50 dark:text-gray-400 dark:ring-white/[0.08] dark:hover:text-green-400 dark:hover:ring-green-500/30'
+          >
+            {isRetestingAll ? '检测中...' : '检测全部'}
+          </button>
+          <button
+            disabled={isSearchingMore}
+            onClick={async () => {
+              if (!videoTitle) return;
+              setIsSearchingMore(true);
+              setSearchMoreDone(false);
+              try {
+                const query = searchKeyword || videoTitle;
+                const res = await fetch(
+                  `/api/search?q=${encodeURIComponent(query.trim())}`,
+                );
+                if (!res.ok) throw new Error('搜索失败');
+                const data = await res.json();
+                if (Array.isArray(data.results)) {
+                  const existingKeys = new Set(
+                    availableSources.map((s) => `${s.source}-${s.id}`),
                   );
-                  if (!res.ok) throw new Error('搜索失败');
-                  const data = await res.json();
-                  if (Array.isArray(data.results)) {
-                    const existingKeys = new Set(
-                      availableSources.map((s) => `${s.source}-${s.id}`),
-                    );
-                    const normalizedTitle = normalizeTitleForSourceMatch(
-                      videoTitle || '',
-                    );
-                    const newSources = (data.results as SearchResult[]).filter(
-                      (s) => {
-                        if (existingKeys.has(`${s.source}-${s.id}`))
-                          return false;
-                        if (!normalizedTitle) return true;
-                        const t = normalizeTitleForSourceMatch(s.title);
-                        return t.length > 0 && t === normalizedTitle;
-                      },
-                    );
-                    if (newSources.length > 0) {
-                      onAddSources?.(newSources);
-                    }
-                    setSearchMoreDone(true);
+                  const normalizedTitle = normalizeTitleForSourceMatch(
+                    videoTitle || '',
+                  );
+                  const newSources = (data.results as SearchResult[]).filter(
+                    (s) => {
+                      if (existingKeys.has(`${s.source}-${s.id}`)) return false;
+                      if (!normalizedTitle) return true;
+                      const t = normalizeTitleForSourceMatch(s.title);
+                      return t.length > 0 && t === normalizedTitle;
+                    },
+                  );
+                  if (newSources.length > 0) {
+                    onAddSources?.(newSources);
                   }
-                } catch {
-                  // 静默失败
-                } finally {
-                  setIsSearchingMore(false);
+                  setSearchMoreDone(true);
                 }
-              }}
-              className='flex-1 rounded-lg py-2 text-center text-xs font-medium text-gray-500 ring-1 ring-gray-200/60 transition-colors hover:text-green-600 hover:ring-green-300 disabled:opacity-50 dark:text-gray-400 dark:ring-white/[0.08] dark:hover:text-green-400 dark:hover:ring-green-500/30'
-            >
-              {isSearchingMore
-                ? '搜索中...'
-                : searchMoreDone
-                  ? '搜索完成'
-                  : '搜索更多源站'}
-            </button>
-          </div>
+              } catch {
+                setSearchMoreDone(false);
+              } finally {
+                setIsSearchingMore(false);
+              }
+            }}
+            className='flex-1 rounded-lg py-2 text-center text-xs font-medium text-gray-500 ring-1 ring-gray-200/60 transition-colors hover:text-green-600 hover:ring-green-300 disabled:opacity-50 dark:text-gray-400 dark:ring-white/[0.08] dark:hover:text-green-400 dark:hover:ring-green-500/30'
+          >
+            {isSearchingMore
+              ? '搜索中...'
+              : searchMoreDone
+                ? '搜索完成'
+                : '搜索更多源站'}
+          </button>
         </div>
       </div>
       {!isCurrentInView && currentSource && currentId && (
@@ -687,12 +670,10 @@ export const SourcesTab: React.FC<SourcesTabProps> = ({
             }
             scrollCurrentIntoView(true);
           }}
-          // 上移至 bottom-20，避免与底部"检验全部/搜索更多源站"按钮重叠
-          className='absolute bottom-20 right-5 z-10 flex h-9 w-9 items-center justify-center rounded-full bg-green-500 text-white shadow-lg transition-all hover:bg-green-600 dark:bg-green-600 dark:hover:bg-green-500'
+          className='absolute bottom-28 right-5 z-10 flex h-9 w-9 items-center justify-center rounded-full bg-green-500 text-white shadow-lg transition-all hover:bg-green-600 dark:bg-green-600 dark:hover:bg-green-500'
           aria-label='回到当前源'
           title='回到当前源'
         >
-          {/* 瞄准（crosshair）图标 */}
           <svg
             xmlns='http://www.w3.org/2000/svg'
             width='18'

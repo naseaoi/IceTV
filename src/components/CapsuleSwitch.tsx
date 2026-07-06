@@ -1,7 +1,7 @@
 'use client';
 
-import React, { useEffect, useRef, useState } from 'react';
 import type { LucideIcon } from 'lucide-react';
+import React, { useEffect, useRef, useState } from 'react';
 
 interface CapsuleSwitchProps {
   options: { label: string; value: string; icon?: LucideIcon }[];

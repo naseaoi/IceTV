@@ -1,15 +1,14 @@
 import type Artplayer from 'artplayer';
 import type { Dispatch, MutableRefObject, SetStateAction } from 'react';
 
-import type { SkipConfig } from '@/lib/types';
+import type { ResumeMode } from '@/features/play/lib/resumePlayback';
+import { writeBlockAdEnabled } from '@/lib/local-preferences';
 import {
   destroyManagedHls,
   runManagedVideoCleanup,
 } from '@/lib/player-runtime';
-import { writeBlockAdEnabled } from '@/lib/local-preferences';
 import { formatTime } from '@/lib/player-utils';
-
-import type { ResumeMode } from '@/features/play/lib/resumePlayback';
+import type { SkipConfig } from '@/lib/types';
 
 type ArtPlayerSettingsOptions = {
   artPlayerRef: MutableRefObject<Artplayer | null>;
@@ -53,7 +52,7 @@ export function createArtPlayerSettings({
             artPlayerRef.current = null;
           }
           setBlockAdEnabled(newVal);
-        } catch (_) {
+        } catch {
           return blockAdEnabled ? '当前开启' : '当前关闭';
         }
         return newVal ? '当前开启' : '当前关闭';

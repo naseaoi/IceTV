@@ -1,19 +1,18 @@
 ﻿import { getVideoResolutionFromM3u8 } from '@/features/play/lib/hls-utils';
-import { formatBytesPerSecond } from '@/lib/player-utils';
-import { isLazyEpisodeUrl } from '@/lib/lazy-episodes';
-import {
-  clearSourceProxyOverride,
-  rememberSourceServerProxy,
-} from '@/lib/proxy-modes';
-import { createTimedAbortController } from '@/lib/downstream-sources/shared';
-
 import { resolveLazyEpisodeUrl } from '@/features/play/lib/lazyEpisode';
-
 import {
   buildVodSegmentProxyUrl,
   isVodM3u8Url,
   isVodMp4Url,
 } from '@/features/play/lib/vodProxyUrl';
+import { createTimedAbortController } from '@/lib/downstream-sources/shared';
+import { isLazyEpisodeUrl } from '@/lib/lazy-episodes';
+import { formatBytesPerSecond } from '@/lib/player-utils';
+import {
+  clearSourceProxyOverride,
+  rememberSourceServerProxy,
+  shouldAutoFallbackToServer,
+} from '@/lib/proxy-modes';
 
 export type VodProbeResult = {
   quality: string;
@@ -129,17 +128,17 @@ async function probeMp4(
   try {
     const result = await probeMp4WithMode(rawUrl, useProxy, sourceKey);
     if (!useProxy && sourceKey) {
-      clearSourceProxyOverride(sourceKey);
+      clearSourceProxyOverride(sourceKey, rawUrl);
     }
     return result;
   } catch (error) {
-    if (useProxy) {
+    if (useProxy || !sourceKey || !shouldAutoFallbackToServer(sourceKey)) {
       throw error;
     }
 
     const result = await probeMp4WithMode(rawUrl, true, sourceKey);
     if (sourceKey) {
-      rememberSourceServerProxy(sourceKey);
+      rememberSourceServerProxy(sourceKey, rawUrl);
     }
     return result;
   }

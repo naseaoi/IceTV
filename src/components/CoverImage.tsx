@@ -11,6 +11,7 @@ import React, {
   useState,
 } from 'react';
 
+import NoImageCover from '@/components/NoImageCover';
 import {
   isCoverImageCached,
   markCoverImagesLoaded,
@@ -18,8 +19,6 @@ import {
 } from '@/lib/cover-image-cache';
 import { imageScheduler } from '@/lib/image-scheduler';
 import { processImageUrl } from '@/lib/utils';
-
-import NoImageCover from '@/components/NoImageCover';
 
 const PLACEHOLDER_COLORS = [
   '#94a3b8',
@@ -31,7 +30,6 @@ const PLACEHOLDER_COLORS = [
   '#818cf8',
   '#22c55e',
 ];
-const DEFAULT_DOUBAN_IMAGE_CDN_HOST = 'img.doubanio.cmliussss.net';
 const useIsomorphicLayoutEffect =
   typeof window === 'undefined' ? useEffect : useLayoutEffect;
 
@@ -87,54 +85,20 @@ function needsImageUnoptimized(url: string): boolean {
   return true;
 }
 
-function toDefaultDoubanImageCdn(url: string): string {
-  try {
-    const parsed = new URL(url);
-    if (/^img\d+\.doubanio\.com$/.test(parsed.hostname)) {
-      parsed.hostname = DEFAULT_DOUBAN_IMAGE_CDN_HOST;
-      return parsed.toString();
-    }
-  } catch {}
-
-  return url;
-}
-
-/** 最大重试次数（首次加载不算，失败后最多再试 MAX_RETRIES 次） */
-const MAX_RETRIES = 2;
-/** 每次重试间隔 ms */
-const RETRY_DELAY = 1200;
-/** 进入视口前的预加载距离，提前约一屏开始加载，滚动时封面无感衔接 */
 const VIEWPORT_PRELOAD_MARGIN = '600px';
-
-// ================================================================
-// CoverImage 组件
-// ================================================================
 
 interface CoverImageProps {
   src: string;
   alt: string;
-  /** 首屏图片预加载，提高 LCP 表现 */
   priority?: boolean;
-  /** 传给 Next.js Image 的 sizes，默认 '(max-width: 640px) 96px, 180px' */
   sizes?: string;
   quality?: number;
-  /** object-fit 模式，默认 'cover' */
   fit?: 'cover' | 'contain';
-  /** 骨架屏宽高比 class，默认 'aspect-[2/3]' */
   aspectRatio?: string;
-  /** 可选占位主色，未传时根据 src 稳定生成 */
   placeholderColor?: string;
-  /** 加载失败后自动重试（最多 2 次），默认 true */
-  enableRetry?: boolean;
-  /** 无封面兜底文案 */
   fallbackLabel?: string;
 }
 
-/**
- * 统一封面图片组件：骨架屏 → 加载 → 重试(最多2次) → 兜底。
- * 内置内存缓存 + 跨实例同步（模态框加载成功后卡片立即显示）。
- * 外层容器需要 `position: relative` + 固定宽高。
- */
 const CoverImage: React.FC<CoverImageProps> = memo(function CoverImage({
   src,
   alt,
@@ -143,25 +107,16 @@ const CoverImage: React.FC<CoverImageProps> = memo(function CoverImage({
   quality = 72,
   fit = 'cover',
   placeholderColor,
-  enableRetry = true,
   fallbackLabel = '无封面',
 }) {
   const isEmpty = !src || src.trim() === '';
-  const [retryKey, setRetryKey] = useState(0);
-  const [useDefaultDoubanCdn, setUseDefaultDoubanCdn] = useState(false);
-  const retryCountRef = useRef(0);
   const releaseSlotRef = useRef<(() => void) | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const imageRef = useRef<HTMLImageElement>(null);
 
   const processed = useMemo(
-    () =>
-      isEmpty
-        ? ''
-        : useDefaultDoubanCdn
-          ? toDefaultDoubanImageCdn(processImageUrl(src))
-          : processImageUrl(src),
-    [src, isEmpty, useDefaultDoubanCdn],
+    () => (isEmpty ? '' : processImageUrl(src)),
+    [src, isEmpty],
   );
 
   const needsUnoptimized = useMemo(() => {
@@ -169,30 +124,16 @@ const CoverImage: React.FC<CoverImageProps> = memo(function CoverImage({
     return needsImageUnoptimized(processed);
   }, [processed]);
 
-  const displaySrc = useMemo(
-    () =>
-      retryKey > 0
-        ? `${processed}${processed.includes('?') ? '&' : '?'}retry=${retryKey}`
-        : processed,
-    [processed, retryKey],
-  );
-
   const cacheKeys = useMemo(
     () => Array.from(new Set([src, processed].filter(Boolean))),
     [processed, src],
   );
 
-  const cached = useMemo(
-    () => !isEmpty && isCoverImageCached(cacheKeys),
-    [cacheKeys, isEmpty],
-  );
-  // 可见性门控：只有进入/接近可视区域才允许 acquire slot。
-  // 首屏 priority 图片直接放行。
-  const [isNearViewport, setIsNearViewport] = useState(cached || priority);
-  const [loaded, setLoaded] = useState(cached);
+  const loadImmediately = !isEmpty && priority;
+  const [isNearViewport, setIsNearViewport] = useState(loadImmediately);
+  const [loaded, setLoaded] = useState(false);
   const [hasError, setHasError] = useState(false);
-  // 并发调度：是否已获得加载 slot（缓存命中则直接跳过排队）
-  const [slotGranted, setSlotGranted] = useState(cached);
+  const [slotGranted, setSlotGranted] = useState(loadImmediately);
 
   const resolvedPlaceholderColor = useMemo(() => {
     if (placeholderColor && /^#[0-9a-fA-F]{6}$/.test(placeholderColor)) {
@@ -215,9 +156,6 @@ const CoverImage: React.FC<CoverImageProps> = memo(function CoverImage({
   );
 
   useIsomorphicLayoutEffect(() => {
-    retryCountRef.current = 0;
-    setRetryKey(0);
-    setUseDefaultDoubanCdn(false);
     setHasError(false);
     releaseSlotRef.current?.();
     releaseSlotRef.current = null;
@@ -228,7 +166,7 @@ const CoverImage: React.FC<CoverImageProps> = memo(function CoverImage({
 
     const isCached = isCoverImageCached(cacheKeys);
     setLoaded(isCached);
-    setSlotGranted(isCached);
+    setSlotGranted(isCached || priority);
     setIsNearViewport(isCached || priority);
 
     if (isCached) {
@@ -237,8 +175,6 @@ const CoverImage: React.FC<CoverImageProps> = memo(function CoverImage({
     }
   }, [cacheKeys, isEmpty, priority]);
 
-  // 可见性检测：进入视口附近一小段距离时就开始预加载
-  // 首页横向滚动行控制不可见卡片排队
   useEffect(() => {
     if (isEmpty || isNearViewport || priority) return;
     const el = containerRef.current;
@@ -257,8 +193,6 @@ const CoverImage: React.FC<CoverImageProps> = memo(function CoverImage({
     return () => io.disconnect();
   }, [isEmpty, isNearViewport, priority]);
 
-  // 请求并发 slot（可见 & 未缓存 & 未出错 & 尚未获得 slot 时排队）
-  // 注意：不把 slotGranted 放在依赖中。
   const needsSlot = !isEmpty && isNearViewport && !slotGranted && !hasError;
   const needsSlotRef = useRef(needsSlot);
   needsSlotRef.current = needsSlot;
@@ -277,8 +211,6 @@ const CoverImage: React.FC<CoverImageProps> = memo(function CoverImage({
     };
   }, [src, isNearViewport]);
 
-  // 跨实例同步：其他 CoverImage 实例加载了同一 src 时，立即标记已加载。
-  // 典型场景：模态框加载成功 → 卡片立即显示，无需等待自身请求完成。
   useEffect(() => {
     if (loaded || hasError || isEmpty) return;
 
@@ -286,7 +218,6 @@ const CoverImage: React.FC<CoverImageProps> = memo(function CoverImage({
       setLoaded(true);
       setSlotGranted(true);
       setIsNearViewport(true);
-      setRetryKey(0);
       releaseSlotRef.current?.();
       releaseSlotRef.current = null;
     });
@@ -297,7 +228,6 @@ const CoverImage: React.FC<CoverImageProps> = memo(function CoverImage({
   const handleLoad = useCallback(() => {
     setLoaded(true);
     markCoverImagesLoaded(cacheKeys);
-    // 加载完成 → 释放 slot
     releaseSlotRef.current?.();
     releaseSlotRef.current = null;
   }, [cacheKeys]);
@@ -308,33 +238,14 @@ const CoverImage: React.FC<CoverImageProps> = memo(function CoverImage({
     if (image?.complete && image.naturalWidth > 0) {
       handleLoad();
     }
-  }, [displaySrc, handleLoad, hasError, loaded, slotGranted]);
+  }, [handleLoad, hasError, loaded, processed, slotGranted]);
 
   const handleError = useCallback(() => {
-    const defaultCdnUrl = toDefaultDoubanImageCdn(processed);
-    if (!useDefaultDoubanCdn && defaultCdnUrl !== processed) {
-      retryCountRef.current = 0;
-      setUseDefaultDoubanCdn(true);
-      setLoaded(false);
-      return;
-    }
-
-    if (!enableRetry || retryCountRef.current >= MAX_RETRIES) {
-      setHasError(true);
-      setLoaded(true);
-      // 最终失败 → 释放 slot
-      releaseSlotRef.current?.();
-      releaseSlotRef.current = null;
-      return;
-    }
-    // 重试期间保持加载态
-    // 不释放 slot——重试仍在使用同一个 slot
-    setLoaded(false);
-    retryCountRef.current += 1;
-    setTimeout(() => {
-      setRetryKey(Date.now());
-    }, RETRY_DELAY);
-  }, [enableRetry, processed, useDefaultDoubanCdn]);
+    setHasError(true);
+    setLoaded(true);
+    releaseSlotRef.current?.();
+    releaseSlotRef.current = null;
+  }, []);
 
   if (showFallback) {
     return (
@@ -354,14 +265,15 @@ const CoverImage: React.FC<CoverImageProps> = memo(function CoverImage({
       )}
       {slotGranted && (
         <Image
-          key={retryKey}
+          key={processed}
           ref={imageRef}
-          src={displaySrc}
+          src={processed}
           alt={alt}
           fill
           sizes={sizes}
           quality={needsUnoptimized ? undefined : quality}
           preload={priority}
+          fetchPriority={priority ? 'high' : undefined}
           unoptimized={needsUnoptimized}
           placeholder='blur'
           blurDataURL={blurDataURL}
