@@ -1,7 +1,5 @@
 import { MutableRefObject } from 'react';
 
-import type Artplayer from 'artplayer';
-
 import { deleteFavorite, saveFavorite } from '@/lib/db.client';
 import { SearchResult } from '@/lib/types';
 import { useFavoriteSync } from '@/hooks/useFavoriteSync';

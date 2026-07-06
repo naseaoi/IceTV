@@ -1,7 +1,7 @@
 ﻿'use client';
 
 import { AlertTriangle, Download, FileCheck, Lock, Upload } from 'lucide-react';
-import { type FormEvent, useRef, useState } from 'react';
+import { type FormEvent, type ReactNode, useRef, useState } from 'react';
 
 import AlertModal from '@/components/modals/AlertModal';
 import { PasswordInput } from '@/components/PasswordInput';
@@ -25,7 +25,7 @@ const DataMigration = ({ onRefreshConfig }: DataMigrationProps) => {
     type: 'success' | 'error' | 'warning';
     title: string;
     message?: string;
-    html?: string;
+    content?: ReactNode;
     confirmText?: string;
     onConfirm?: () => void;
     showConfirm?: boolean;
@@ -157,15 +157,22 @@ const DataMigration = ({ onRefreshConfig }: DataMigrationProps) => {
       showAlert({
         type: 'success',
         title: '导入成功',
-        html: `
-          <div class="text-left">
-            <p><strong>导入完成！</strong></p>
-            <p class="mt-2">导入的用户数量: ${result.importedUsers}</p>
-            <p>备份时间: ${new Date(result.timestamp).toLocaleString('zh-CN')}</p>
-            <p>服务器版本: ${result.serverVersion || '未知版本'}</p>
-            <p class="mt-3 text-orange-600">请刷新页面以查看最新数据。</p>
+        content: (
+          <div className='text-left'>
+            <p>
+              <strong>导入完成！</strong>
+            </p>
+            <p className='mt-2'>导入的用户数量: {result.importedUsers}</p>
+            <p>
+              备份时间:{' '}
+              {result.timestamp
+                ? new Date(result.timestamp).toLocaleString('zh-CN')
+                : '未知时间'}
+            </p>
+            <p>服务器版本: {result.serverVersion || '未知版本'}</p>
+            <p className='mt-3 text-orange-600'>请刷新页面以查看最新数据。</p>
           </div>
-        `,
+        ),
         confirmText: '刷新页面',
         showConfirm: true,
         onConfirm: async () => {
@@ -393,12 +400,13 @@ const DataMigration = ({ onRefreshConfig }: DataMigrationProps) => {
         type={alertModal.type}
         title={alertModal.title}
         message={alertModal.message}
-        html={alertModal.html}
         confirmText={alertModal.confirmText}
         onConfirm={alertModal.onConfirm}
         showConfirm={alertModal.showConfirm ?? true}
         timer={alertModal.timer}
-      />
+      >
+        {alertModal.content}
+      </AlertModal>
     </>
   );
 };

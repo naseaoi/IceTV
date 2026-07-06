@@ -1,7 +1,89 @@
 ﻿import {
   parseEpgXmlForChannels,
   parseLivePlaylist,
+  refreshLiveChannels,
 } from '@/features/live/lib/live';
+import {
+  clearUrlGuardDnsCacheForTests,
+  resetUrlGuardDnsLookupForTests,
+  setUrlGuardDnsLookupForTests,
+} from '@/lib/url-guard';
+
+describe('refreshLiveChannels', () => {
+  const originalFetch = global.fetch;
+
+  beforeEach(() => {
+    clearUrlGuardDnsCacheForTests();
+    setUrlGuardDnsLookupForTests((async (
+      _hostname: string,
+      options?: unknown,
+    ) => {
+      if (options && typeof options === 'object' && 'all' in options) {
+        return [{ address: '93.184.216.34', family: 4 }];
+      }
+
+      return { address: '93.184.216.34', family: 4 };
+    }) as unknown as Parameters<typeof setUrlGuardDnsLookupForTests>[0]);
+    global.fetch = jest.fn();
+  });
+
+  afterEach(() => {
+    global.fetch = originalFetch;
+    resetUrlGuardDnsLookupForTests();
+    clearUrlGuardDnsCacheForTests();
+    jest.restoreAllMocks();
+  });
+
+  it('拒绝内网直播源地址', async () => {
+    await expect(
+      refreshLiveChannels({
+        key: 'blocked-local',
+        name: 'Blocked',
+        url: 'http://127.0.0.1/live.m3u',
+        from: 'custom',
+      }),
+    ).rejects.toThrow('Blocked destination');
+
+    expect(global.fetch).not.toHaveBeenCalled();
+  });
+
+  it('拒绝超大直播源响应', async () => {
+    const body = 'x'.repeat(5 * 1024 * 1024 + 1);
+    (global.fetch as jest.Mock).mockResolvedValue(createTextResponse(body));
+
+    await expect(
+      refreshLiveChannels({
+        key: 'large-playlist',
+        name: 'Large',
+        url: 'https://example.com/live.m3u',
+        from: 'custom',
+      }),
+    ).rejects.toThrow('直播源文件过大');
+  });
+});
+
+function createTextResponse(body: string): Response {
+  const data = Buffer.from(body);
+  let consumed = false;
+
+  return {
+    ok: true,
+    status: 200,
+    headers: { get: () => null },
+    body: {
+      getReader: () => ({
+        read: async () => {
+          if (consumed) {
+            return { done: true, value: undefined };
+          }
+
+          consumed = true;
+          return { done: false, value: data };
+        },
+      }),
+    },
+  } as unknown as Response;
+}
 
 describe('parseLivePlaylist', () => {
   it('解析文本 IPTV 分组清单', () => {

@@ -7,6 +7,7 @@ import {
   fetchTextThroughProxy,
   getProxyUrlForTarget,
 } from '@/lib/http-proxy-json';
+import { fetchWithUrlGuard, UrlValidationError } from '@/lib/url-guard';
 
 const defaultUA = 'AptvPlayer/1.4.10';
 const MAX_LIVE_PLAYLIST_BYTES = 5 * 1024 * 1024;
@@ -141,18 +142,29 @@ export async function refreshLiveChannels(liveInfo: {
 }
 
 async function fetchLivePlaylistText(url: string, ua: string): Promise<string> {
+  const targetUrl = new URL(url);
+
   try {
-    const response = await fetch(url, {
+    const response = await fetchWithUrlGuard(targetUrl.toString(), {
       headers: {
         'User-Agent': ua,
       },
+      timeoutMs: 15_000,
     });
     if (!response.ok) {
       throw new Error(`直播源请求失败: ${response.status}`);
     }
-    return await response.text();
+    const buffer = await readResponseBody(
+      response,
+      MAX_LIVE_PLAYLIST_BYTES,
+      '直播源',
+    );
+    return buffer.toString('utf8').replace(/^\uFEFF/, '');
   } catch (error) {
-    const targetUrl = new URL(url);
+    if (error instanceof UrlValidationError || isResponseLimitError(error)) {
+      throw error;
+    }
+
     const proxyUrl = getProxyUrlForTarget(targetUrl);
     if (!proxyUrl) {
       throw error;
@@ -195,18 +207,27 @@ async function fetchEpgText(url: string, ua: string): Promise<string> {
   const targetUrl = new URL(url);
 
   try {
-    const response = await fetch(targetUrl, {
+    const response = await fetchWithUrlGuard(targetUrl.toString(), {
       headers: {
         Accept: 'application/xml,text/xml,*/*',
         'User-Agent': ua,
       },
+      timeoutMs: 30_000,
     });
     if (!response.ok) {
       throw new Error(`节目单请求失败: ${response.status}`);
     }
-    const buffer = await readResponseBody(response, MAX_EPG_RESPONSE_BYTES);
+    const buffer = await readResponseBody(
+      response,
+      MAX_EPG_RESPONSE_BYTES,
+      '节目单',
+    );
     return decodeEpgBuffer(buffer, response.headers, targetUrl);
   } catch (error) {
+    if (error instanceof UrlValidationError || isResponseLimitError(error)) {
+      throw error;
+    }
+
     const proxyUrl = getProxyUrlForTarget(targetUrl);
     if (!proxyUrl) {
       throw error;
@@ -225,6 +246,7 @@ async function fetchEpgText(url: string, ua: string): Promise<string> {
 async function readResponseBody(
   response: Response,
   maxBytes: number,
+  label: string,
 ): Promise<Buffer> {
   const reader = response.body?.getReader();
   if (!reader) {
@@ -239,12 +261,16 @@ async function readResponseBody(
     const chunk = Buffer.from(value);
     totalBytes += chunk.length;
     if (totalBytes > maxBytes) {
-      throw new Error('节目单文件过大');
+      throw new Error(`${label}文件过大`);
     }
     chunks.push(chunk);
   }
 
   return Buffer.concat(chunks);
+}
+
+function isResponseLimitError(error: unknown): boolean {
+  return error instanceof Error && error.message.endsWith('文件过大');
 }
 
 function decodeEpgBuffer(buffer: Buffer, headers: Headers, url: URL): string {

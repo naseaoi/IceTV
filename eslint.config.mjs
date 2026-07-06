@@ -5,7 +5,7 @@ import unusedImportsPlugin from 'eslint-plugin-unused-imports';
 export default [
   {
     linterOptions: {
-      reportUnusedDisableDirectives: 'warn',
+      reportUnusedDisableDirectives: 'error',
     },
   },
   ...eslintConfigNext,
@@ -40,15 +40,23 @@ export default [
       'react-hooks/immutability': 'off',
       'react-hooks/set-state-in-effect': 'off',
       'react-hooks/unsupported-syntax': 'off',
-      'react-hooks/exhaustive-deps': 'off',
+      'react-hooks/exhaustive-deps': 'warn',
       'react-hooks/refs': 'off',
       'react/jsx-curly-brace-presence': 'off',
       '@next/next/no-img-element': 'off',
       '@typescript-eslint/no-unused-vars': 'off',
-      'unused-imports/no-unused-imports': 'off',
-      'unused-imports/no-unused-vars': 'off',
-      'simple-import-sort/exports': 'off',
-      'simple-import-sort/imports': 'off',
+      'unused-imports/no-unused-imports': 'error',
+      'unused-imports/no-unused-vars': [
+        'warn',
+        {
+          vars: 'all',
+          varsIgnorePattern: '^_',
+          args: 'after-used',
+          argsIgnorePattern: '^_',
+        },
+      ],
+      'simple-import-sort/exports': 'warn',
+      'simple-import-sort/imports': 'warn',
     },
   },
 ];

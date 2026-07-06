@@ -28,7 +28,6 @@ import {
   isPlaybackCheckpointCompatibleWithDetail,
   isPlayRecordCompatibleWithDetail,
   readMatchingPlaybackCheckpoint,
-  resolveNextStablePlaybackTime,
   resolvePlaybackRestoreCandidate,
   resolveProtectedPlaybackTime,
   savePlaybackCheckpoint,
