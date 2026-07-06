@@ -65,17 +65,20 @@ export const VersionPanel: React.FC<VersionPanelProps> = ({
 
   useEffect(() => {
     if (isOpen) {
-      fetchRemoteChangelog();
+      const controller = new AbortController();
+      fetchRemoteChangelog(controller.signal);
+      return () => controller.abort();
     } else {
       setShowAllEntries(false);
     }
   }, [isOpen]);
 
-  const fetchRemoteChangelog = async () => {
+  const fetchRemoteChangelog = async (signal?: AbortSignal) => {
     try {
       const response = await fetch('/api/version/latest', {
         method: 'GET',
         cache: 'no-store',
+        signal,
       });
       if (!response.ok) return;
       const data = await response.json();
@@ -94,6 +97,9 @@ export const VersionPanel: React.FC<VersionPanelProps> = ({
         );
       }
     } catch (error) {
+      if (error instanceof DOMException && error.name === 'AbortError') {
+        return;
+      }
       console.error('获取远程变更日志失败:', error);
     }
   };
