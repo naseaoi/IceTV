@@ -65,7 +65,7 @@ export async function GET(request: NextRequest) {
         { headers: { 'Cache-Control': 'private, no-store' } },
       );
     }
-  } catch (error) {
+  } catch {
     return NextResponse.json(
       {
         error: '搜索失败',

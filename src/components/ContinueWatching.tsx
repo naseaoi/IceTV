@@ -1,7 +1,7 @@
 ﻿'use client';
 
 import { History } from 'lucide-react';
-import { useEffect, useLayoutEffect, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useState } from 'react';
 
 import HomePosterCardSkeleton, {
   HOME_POSTER_CARD_CLASS,
@@ -103,21 +103,24 @@ export default function ContinueWatching({
   );
   const [showClearConfirm, setShowClearConfirm] = useState(false);
 
-  const updatePlayRecords = (allRecords: Record<string, PlayRecord>) => {
-    const sortedRecords = sortPlayRecords(allRecords).slice(
-      0,
-      continueWatchingLimit,
-    );
+  const updatePlayRecords = useCallback(
+    (allRecords: Record<string, PlayRecord>) => {
+      const sortedRecords = sortPlayRecords(allRecords).slice(
+        0,
+        continueWatchingLimit,
+      );
 
-    setPlayRecords(sortedRecords);
-    const count = String(sortedRecords.length);
-    try {
-      localStorage.setItem('continueWatchingCount', count);
-    } catch {
-      void 0;
-    }
-    document.cookie = `cw_count=${count};path=/;max-age=${365 * 24 * 60 * 60};samesite=lax`;
-  };
+      setPlayRecords(sortedRecords);
+      const count = String(sortedRecords.length);
+      try {
+        localStorage.setItem('continueWatchingCount', count);
+      } catch {
+        void 0;
+      }
+      document.cookie = `cw_count=${count};path=/;max-age=${365 * 24 * 60 * 60};samesite=lax`;
+    },
+    [continueWatchingLimit],
+  );
 
   useIsomorphicLayoutEffect(() => {
     const nextState = readInitialState(
@@ -155,7 +158,7 @@ export default function ContinueWatching({
     );
 
     return unsubscribe;
-  }, []);
+  }, [updatePlayRecords]);
 
   if (!loading && playRecords.length === 0) {
     return null;

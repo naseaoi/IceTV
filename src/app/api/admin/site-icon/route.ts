@@ -15,10 +15,6 @@ function getIconDir(): string {
   return path.join(dataDir, 'icons');
 }
 
-function getIconPath(): string {
-  return path.join(getIconDir(), 'site-icon');
-}
-
 // POST: 上传站点图标
 export async function POST(request: NextRequest) {
   const guardResult = await requireAdmin(request);

@@ -41,7 +41,7 @@ export function parseAuthCookieValue(value: string): AuthCookiePayload | null {
     const decoded = decodeURIComponent(value);
     const authData = JSON.parse(decoded);
     return authData;
-  } catch (error) {
+  } catch {
     return null;
   }
 }

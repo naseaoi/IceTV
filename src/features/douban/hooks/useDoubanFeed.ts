@@ -350,7 +350,7 @@ export function useDoubanFeed(type: string) {
     }, 50);
 
     return () => clearTimeout(timer);
-  }, [type, customCategories]);
+  }, [type, customCategories, selectedWeekday]);
 
   const getRequestParams = useCallback(
     (pageStart: number) => {

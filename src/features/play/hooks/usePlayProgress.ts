@@ -229,8 +229,6 @@ export function usePlayProgress({
   searchTitle,
   currentSource,
   currentId,
-  currentEpisodeIndex,
-  detail,
   setCurrentEpisodeIndex,
   cleanupPlayer,
 }: UsePlayProgressParams) {
@@ -255,7 +253,18 @@ export function usePlayProgress({
         lastSaveTimeRef,
         searchTitleRef.current,
       ),
-    [],
+    [
+      artPlayerRef,
+      clearTargetEpisodeProgressRef,
+      currentEpisodeIndexRef,
+      currentIdRef,
+      currentSourceRef,
+      detailRef,
+      lastSaveTimeRef,
+      saveStateRef,
+      stableCurrentTimeRef,
+      videoTitleRef,
+    ],
   );
 
   const doCheckpoint = useCallback(
@@ -270,15 +279,23 @@ export function usePlayProgress({
         clearTargetEpisodeProgressRef,
         reason,
       ),
-    [],
+    [
+      artPlayerRef,
+      clearTargetEpisodeProgressRef,
+      currentEpisodeIndexRef,
+      currentIdRef,
+      currentSourceRef,
+      stableCurrentTimeRef,
+      videoTitleRef,
+    ],
   );
 
-  const persistPlaybackState = () => {
+  const persistPlaybackState = useCallback(() => {
     doCheckpoint();
     void doSave();
-  };
+  }, [doCheckpoint, doSave]);
 
-  const requestWakeLock = async () => {
+  const requestWakeLock = useCallback(async () => {
     try {
       if (
         typeof document !== 'undefined' &&
@@ -309,9 +326,9 @@ export function usePlayProgress({
       }
       console.warn('Wake Lock 请求失败:', err);
     }
-  };
+  }, [wakeLockRef]);
 
-  const releaseWakeLock = async () => {
+  const releaseWakeLock = useCallback(async () => {
     try {
       if (wakeLockRef.current) {
         await wakeLockRef.current.release();
@@ -320,13 +337,20 @@ export function usePlayProgress({
     } catch (err) {
       console.warn('Wake Lock 释放失败:', err);
     }
-  };
+  }, [wakeLockRef]);
+
+  const clearSaveInterval = useCallback(() => {
+    if (saveIntervalRef.current) {
+      clearInterval(saveIntervalRef.current);
+      saveIntervalRef.current = null;
+    }
+  }, [saveIntervalRef]);
 
   useEffect(() => {
     // 切换到新视频时丢弃旧请求的排队状态，避免旧进度回写到新条目。
     saveStateRef.current.pending = null;
     saveStateRef.current.lastSavedFingerprint = null;
-  }, [currentSource, currentId]);
+  }, [currentSource, currentId, saveStateRef]);
 
   // 播放记录处理：source/id 就绪后优先消费显式播放意图，再检查恢复点与播放记录
   useEffect(() => {
@@ -476,7 +500,21 @@ export function usePlayProgress({
     return () => {
       disposed = true;
     };
-  }, [currentSource, currentId]);
+  }, [
+    allowAutoResumeRef,
+    artPlayerRef,
+    clearTargetEpisodeProgressRef,
+    currentEpisodeIndexRef,
+    currentId,
+    currentIdRef,
+    currentSource,
+    currentSourceRef,
+    detailRef,
+    resumeModeRef,
+    resumeTimeRef,
+    setCurrentEpisodeIndex,
+    stableCurrentTimeRef,
+  ]);
 
   // beforeunload / visibilitychange 事件处理
   useEffect(() => {
@@ -504,28 +542,23 @@ export function usePlayProgress({
       window.removeEventListener('beforeunload', handleBeforeUnload);
       document.removeEventListener('visibilitychange', handleVisibilityChange);
     };
-  }, [currentEpisodeIndex, detail, artPlayerRef.current]);
+  }, [
+    artPlayerRef,
+    cleanupPlayer,
+    persistPlaybackState,
+    releaseWakeLock,
+    requestWakeLock,
+  ]);
 
-  // 清理定时器
-  useEffect(() => {
-    return () => {
-      if (saveIntervalRef.current) {
-        clearInterval(saveIntervalRef.current);
-      }
-    };
-  }, []);
-
-  // 组件卸载时清理定时器、Wake Lock 和播放器资源
+  // 卸载清理
   useEffect(() => {
     return () => {
       persistPlaybackState();
-      if (saveIntervalRef.current) {
-        clearInterval(saveIntervalRef.current);
-      }
+      clearSaveInterval();
       releaseWakeLock();
       cleanupPlayer();
     };
-  }, []);
+  }, [cleanupPlayer, clearSaveInterval, persistPlaybackState, releaseWakeLock]);
 
   return {
     saveCurrentPlayProgress: doSave,

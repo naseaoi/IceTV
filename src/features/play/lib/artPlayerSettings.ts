@@ -52,7 +52,7 @@ export function createArtPlayerSettings({
             artPlayerRef.current = null;
           }
           setBlockAdEnabled(newVal);
-        } catch (_) {
+        } catch {
           return blockAdEnabled ? '当前开启' : '当前关闭';
         }
         return newVal ? '当前开启' : '当前关闭';

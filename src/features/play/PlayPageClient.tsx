@@ -369,6 +369,11 @@ export function PlayPageClient() {
     lazyUrl: string;
     url: string;
   } | null>(null);
+  const videoUrlRef = useRef(videoUrl);
+
+  useEffect(() => {
+    videoUrlRef.current = videoUrl;
+  }, [videoUrl]);
 
   useEffect(() => {
     const episodes = detail?.episodes || [];
@@ -376,9 +381,10 @@ export function PlayPageClient() {
       currentEpisodeIndex < episodes.length
         ? episodes[currentEpisodeIndex] || ''
         : '';
+    const currentVideoUrl = videoUrlRef.current;
 
     if (!targetUrl || !isLazyEpisodeUrl(targetUrl)) {
-      updateVideoUrl(detail, currentEpisodeIndex, videoUrl, setVideoUrl);
+      updateVideoUrl(detail, currentEpisodeIndex, currentVideoUrl, setVideoUrl);
       return;
     }
 
@@ -390,9 +396,9 @@ export function PlayPageClient() {
 
     const lastResolved = lastResolvedLazyEpisodeRef.current;
     if (
-      videoUrl &&
+      currentVideoUrl &&
       lastResolved?.lazyUrl === targetUrl &&
-      lastResolved.url === videoUrl
+      lastResolved.url === currentVideoUrl
     ) {
       return;
     }
@@ -403,7 +409,7 @@ export function PlayPageClient() {
         lazyUrl: targetUrl,
         url: cachedUrl,
       };
-      if (cachedUrl !== videoUrl) {
+      if (cachedUrl !== currentVideoUrl) {
         setVideoUrl(cachedUrl);
       }
       prewarmNext();
@@ -433,7 +439,15 @@ export function PlayPageClient() {
     return () => {
       cancelled = true;
     };
-  }, [detail, currentEpisodeIndex, playbackRetryNonce]);
+  }, [
+    autoSwitchSourceOnTimeout,
+    currentEpisodeIndex,
+    detail,
+    handleLoadingTimeout,
+    playbackRetryNonce,
+    setRealtimeLoadSpeed,
+    setVideoUrl,
+  ]);
 
   const handleSourceDetailFetched = useCallback(
     (updated: SearchResult) => {

@@ -31,7 +31,7 @@ export async function POST(request: NextRequest) {
         try {
           const nums = await refreshLiveChannels(liveInfo);
           liveInfo.channelNumber = nums;
-        } catch (error) {
+        } catch {
           liveInfo.channelNumber = 0;
         }
       });

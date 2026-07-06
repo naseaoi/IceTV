@@ -5,7 +5,13 @@ import {
   ArrowUpDown,
   ArrowUpNarrowWide,
 } from 'lucide-react';
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react';
 import { createPortal } from 'react-dom';
 
 type SearchFilterKey = 'source' | 'title' | 'year' | 'yearOrder';
@@ -73,53 +79,56 @@ const SearchResultFilter: React.FC<SearchResultFilterProps> = ({
     } as Record<SearchFilterKey, string>;
   }, [values]);
 
-  const calculateDropdownPosition = (categoryKey: SearchFilterKey) => {
-    const element = categoryRefs.current[categoryKey];
-    if (element) {
-      const rect = element.getBoundingClientRect();
-      const viewportWidth = window.innerWidth;
-      const isMobile = viewportWidth < 768;
-      const category = categories.find((cat) => cat.key === categoryKey);
-      const maxOptionTextWidth = Math.max(
-        0,
-        ...(category?.options || []).map((option) =>
-          estimateTextWidth(option.label),
-        ),
-      );
-      const minWidth = categoryKey === 'title' ? 280 : 120;
-      const maxWidth = categoryKey === 'title' ? 640 : 420;
-      const contentWidth =
-        categoryKey === 'title'
-          ? maxOptionTextWidth + 56
-          : maxOptionTextWidth + 40;
+  const calculateDropdownPosition = useCallback(
+    (categoryKey: SearchFilterKey) => {
+      const element = categoryRefs.current[categoryKey];
+      if (element) {
+        const rect = element.getBoundingClientRect();
+        const viewportWidth = window.innerWidth;
+        const isMobile = viewportWidth < 768;
+        const category = categories.find((cat) => cat.key === categoryKey);
+        const maxOptionTextWidth = Math.max(
+          0,
+          ...(category?.options || []).map((option) =>
+            estimateTextWidth(option.label),
+          ),
+        );
+        const minWidth = categoryKey === 'title' ? 280 : 120;
+        const maxWidth = categoryKey === 'title' ? 640 : 420;
+        const contentWidth =
+          categoryKey === 'title'
+            ? maxOptionTextWidth + 56
+            : maxOptionTextWidth + 40;
 
-      let x = rect.left;
-      let dropdownWidth = clampPanelWidth(
-        Math.max(rect.width, contentWidth),
-        minWidth,
-        maxWidth,
-      );
+        let x = rect.left;
+        let dropdownWidth = clampPanelWidth(
+          Math.max(rect.width, contentWidth),
+          minWidth,
+          maxWidth,
+        );
 
-      if (isMobile) {
-        const padding = 16;
-        const maxWidth = viewportWidth - padding * 2;
-        dropdownWidth = Math.min(dropdownWidth, maxWidth);
+        if (isMobile) {
+          const padding = 16;
+          const maxWidth = viewportWidth - padding * 2;
+          dropdownWidth = Math.min(dropdownWidth, maxWidth);
 
-        if (x + dropdownWidth > viewportWidth - padding) {
-          x = viewportWidth - dropdownWidth - padding;
+          if (x + dropdownWidth > viewportWidth - padding) {
+            x = viewportWidth - dropdownWidth - padding;
+          }
+          if (x < padding) {
+            x = padding;
+          }
         }
-        if (x < padding) {
-          x = padding;
-        }
+
+        setDropdownPosition({
+          x,
+          y: rect.bottom,
+          width: dropdownWidth,
+        });
       }
-
-      setDropdownPosition({
-        x,
-        y: rect.bottom,
-        width: dropdownWidth,
-      });
-    }
-  };
+    },
+    [categories],
+  );
 
   const handleCategoryClick = (categoryKey: SearchFilterKey) => {
     if (activeCategory === categoryKey) {
@@ -179,7 +188,7 @@ const SearchResultFilter: React.FC<SearchResultFilterProps> = ({
       document.body.removeEventListener('scroll', handleScroll);
       window.removeEventListener('resize', handleResize);
     };
-  }, [activeCategory]);
+  }, [activeCategory, calculateDropdownPosition]);
 
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {

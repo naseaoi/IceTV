@@ -267,7 +267,13 @@ export const SourcesTab: React.FC<SourcesTabProps> = ({
     });
     if (pending.length === 0) return;
     void probeSourcesInBatches(pending);
-  }, [displaySources, currentSource, currentId, probeSourcesInBatches]);
+  }, [
+    displaySources,
+    currentSource,
+    currentId,
+    probeSnapshot,
+    probeSourcesInBatches,
+  ]);
 
   const handleSourceClick = useCallback(
     (source: SearchResult) => {
@@ -286,7 +292,7 @@ export const SourcesTab: React.FC<SourcesTabProps> = ({
       }
     }
     return map;
-  }, [displaySources, isActive]);
+  }, [displaySources]);
 
   const sortedSources = useMemo(() => {
     return sortSourcesForDisplay(displaySources, probeSnapshot, sourceFailures);

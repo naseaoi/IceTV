@@ -390,7 +390,7 @@ export function PlayMainContent(props: PlayMainContentProps) {
     const key =
       currentSource && currentId ? `${currentSource}-${currentId}` : '';
     return key ? getSourceFailure(key) : null;
-  }, [currentSource, currentId, isVideoLoading, videoLoadingAttempt]);
+  }, [currentSource, currentId]);
   const loadingStatusText =
     realtimeLoadSpeed ||
     (currentSourceFailure?.coolingDown

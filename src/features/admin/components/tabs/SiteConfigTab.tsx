@@ -386,7 +386,7 @@ const SiteConfigComponent = ({
                       data.url || `/api/admin/site-icon?t=${Date.now()}`,
                     );
                     showSuccess('图标上传成功', showAlert);
-                  } catch (err) {
+                  } catch {
                     showError('上传失败', showAlert);
                   } finally {
                     setIconUploading(false);

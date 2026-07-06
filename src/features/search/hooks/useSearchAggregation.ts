@@ -224,7 +224,7 @@ export function useSearchAggregation({
 
   const aggregatedResults = useMemo(
     () => materializeAggregatedResults(searchIndexState.index),
-    [searchIndexState.index, searchIndexState.version],
+    [searchIndexState.index],
   );
 
   const aggregatedResultItems = useMemo<AggregatedResultItem[]>(() => {
@@ -246,7 +246,7 @@ export function useSearchAggregation({
     });
   }, [aggregatedResults]);
 
-  // 聚合增量更新：对比变化并调用卡片 ref 的 set 方法
+  // 聚合增量更新
   useEffect(() => {
     const activeKeys = new Set(
       aggregatedResultItems.map((item) => item.mapKey),
@@ -288,7 +288,6 @@ export function useSearchAggregation({
     });
   }, [aggregatedResultItems]);
 
-  // 构建筛选选项
   const filterOptions = useMemo(() => {
     const { sources, titles, years } = searchIndexState.index;
 
@@ -330,9 +329,9 @@ export function useSearchAggregation({
     ];
 
     return { categoriesAll, categoriesAgg };
-  }, [searchIndexState.index, searchIndexState.version]);
+  }, [searchIndexState.index]);
 
-  // 非聚合筛选+排序
+  // 非聚合筛选排序
   const filteredAllResults = useMemo(() => {
     const { source, title, year, yearOrder } = filterAll;
 

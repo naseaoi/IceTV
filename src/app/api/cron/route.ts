@@ -137,7 +137,7 @@ async function refreshConfig() {
 
       try {
         JSON.parse(decodedContent);
-      } catch (e) {
+      } catch {
         throw new Error('配置文件格式错误，请检查 JSON 语法');
       }
       config.ConfigFile = decodedContent;

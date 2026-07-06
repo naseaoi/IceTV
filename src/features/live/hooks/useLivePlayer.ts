@@ -421,7 +421,16 @@ export function useLivePlayer({
     return () => {
       cancelled = true;
     };
-  }, [videoUrl, currentChannel, loading]);
+  }, [
+    artRef,
+    currentChannel,
+    currentSourceRef,
+    loading,
+    setError,
+    setIsVideoLoading,
+    setUnsupportedType,
+    videoUrl,
+  ]);
 
   useEffect(() => {
     return () => {

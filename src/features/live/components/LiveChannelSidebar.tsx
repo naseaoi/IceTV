@@ -121,7 +121,7 @@ function EpgTab({
   | 'favorited'
   | 'handleToggleFavorite'
 >) {
-  const currentTime = useMemo(() => new Date(), [epgData]);
+  const currentTime = useMemo(() => new Date(), []);
   const programs = epgData?.programs || [];
   const currentIndex = programs.findIndex((program) =>
     isProgramLive(program, currentTime),

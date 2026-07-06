@@ -15,7 +15,7 @@ export function resolveUrl(baseUrl: string, relativePath: string) {
     const baseUrlObj = new URL(baseUrl);
     const resolvedUrl = new URL(relativePath, baseUrlObj);
     return resolvedUrl.href;
-  } catch (error) {
+  } catch {
     return fallbackUrlResolve(baseUrl, relativePath);
   }
 }
@@ -65,7 +65,7 @@ export function getBaseUrl(m3u8Url: string) {
       url.pathname += '/';
     }
     return url.protocol + '//' + url.host + url.pathname;
-  } catch (error) {
+  } catch {
     return m3u8Url.endsWith('/') ? m3u8Url : m3u8Url + '/';
   }
 }

@@ -225,7 +225,7 @@ const VideoCard = forwardRef<VideoCardHandle, VideoCardProps>(
               setSearchFavorited(true);
             }
           }
-        } catch (err) {
+        } catch {
           throw new Error('切换收藏状态失败');
         }
       },
@@ -477,7 +477,7 @@ const VideoCard = forwardRef<VideoCardHandle, VideoCardProps>(
       ) {
         try {
           await loadFavoriteStatus();
-        } catch (err) {
+        } catch {
           setSearchFavorited(false);
         }
       }
@@ -555,9 +555,9 @@ const VideoCard = forwardRef<VideoCardHandle, VideoCardProps>(
           showSourceName: true,
           showProgress: false,
           showPlayButton: true,
-          showHeart: true, // 移动端菜单中需要显示收藏选项
+          showHeart: true,
           showCheckCircle: false,
-          showDoubanLink: true, // 移动端菜单中显示豆瓣链接
+          showDoubanLink: true,
           showRating: false,
           showYear: true,
         },
@@ -573,9 +573,9 @@ const VideoCard = forwardRef<VideoCardHandle, VideoCardProps>(
         },
       };
       return configs[from] || configs.search;
-    }, [from, isAggregate, douban_id, rate]);
+    }, [from, rate]);
 
-    // 菜单操作项按需构建：仅在用户触发菜单时计算，避免每个卡片实例挂载时的开销
+    // 菜单操作项
     const buildMobileActions = useCallback(() => {
       const actions = [];
 
@@ -635,7 +635,7 @@ const VideoCard = forwardRef<VideoCardHandle, VideoCardProps>(
               id: 'favorite-loading',
               label: '收藏加载中...',
               icon: <Heart size={20} />,
-              onClick: () => {}, // 加载中时不响应点击
+              onClick: () => {},
               disabled: true,
             });
           }
@@ -711,11 +711,11 @@ const VideoCard = forwardRef<VideoCardHandle, VideoCardProps>(
       searchFavorited,
       actualDoubanId,
       isBangumi,
-      isAggregate,
-      dynamicSourceNames,
       handleClick,
+      handlePlayInNewTab,
       handleToggleFavorite,
       handleDeleteRecord,
+      origin,
     ]);
 
     useEffect(() => {

@@ -167,7 +167,7 @@ export function useFavoriteItems(enabled: boolean, initialSkeletonCount = 0) {
       cancelled = true;
       unsubscribe();
     };
-  }, [enabled]);
+  }, [enabled, normalizedInitialSkeletonCount]);
 
   const clearFavorites = async () => {
     await clearAllFavorites();

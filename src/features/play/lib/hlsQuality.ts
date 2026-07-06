@@ -30,14 +30,24 @@ export interface QualityOption {
 
 const QUALITY_CONTROL_NAME = 'icetv-quality';
 
+function trySetHlsQualityValue<K extends keyof HlsQualityController>(
+  hls: HlsQualityController,
+  key: K,
+  value: HlsQualityController[K],
+): void {
+  try {
+    hls[key] = value;
+  } catch {}
+}
+
 export function applyAutoQualityLevel(hls: HlsQualityController): void {
   hls.__icetvManualQualityLocked = false;
-  hls.startLevel = -1;
-  hls.currentLevel = -1;
-  hls.loadLevel = -1;
-  hls.nextLevel = -1;
-  hls.nextLoadLevel = -1;
-  hls.autoLevelCapping = -1;
+  trySetHlsQualityValue(hls, 'startLevel', -1);
+  trySetHlsQualityValue(hls, 'currentLevel', -1);
+  trySetHlsQualityValue(hls, 'loadLevel', -1);
+  trySetHlsQualityValue(hls, 'nextLevel', -1);
+  trySetHlsQualityValue(hls, 'nextLoadLevel', -1);
+  trySetHlsQualityValue(hls, 'autoLevelCapping', -1);
 }
 
 export function applyManualQualityLevel(
@@ -46,12 +56,12 @@ export function applyManualQualityLevel(
   options: { userSelected?: boolean } = {},
 ): void {
   hls.__icetvManualQualityLocked = options.userSelected === true;
-  hls.startLevel = levelIndex;
-  hls.currentLevel = levelIndex;
-  hls.loadLevel = levelIndex;
-  hls.nextLevel = levelIndex;
-  hls.nextLoadLevel = levelIndex;
-  hls.autoLevelCapping = -1;
+  trySetHlsQualityValue(hls, 'startLevel', levelIndex);
+  trySetHlsQualityValue(hls, 'currentLevel', levelIndex);
+  trySetHlsQualityValue(hls, 'loadLevel', levelIndex);
+  trySetHlsQualityValue(hls, 'nextLevel', levelIndex);
+  trySetHlsQualityValue(hls, 'nextLoadLevel', levelIndex);
+  trySetHlsQualityValue(hls, 'autoLevelCapping', -1);
 }
 
 export function formatQualityLabel(level: HlsLevelLike): string {

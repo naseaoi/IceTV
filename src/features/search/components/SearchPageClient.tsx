@@ -137,7 +137,7 @@ export default function SearchPageClient() {
 
   // 初始化：搜索历史、滚动监听、流式搜索设置
   useEffect(() => {
-    !searchParams.get('q') && document.getElementById('searchInput')?.focus();
+    !urlQuery && document.getElementById('searchInput')?.focus();
 
     getSearchHistory().then(setSearchHistory);
 
@@ -178,9 +178,9 @@ export default function SearchPageClient() {
         window.cancelAnimationFrame(frameId);
       }
     };
-  }, []);
+  }, [urlQuery]);
 
-  // searchParams 变化时同步 searchQuery 和 suggestions
+  // 同步搜索参数
   useEffect(() => {
     if (urlQuery) {
       setSearchQuery(urlQuery);
@@ -190,7 +190,7 @@ export default function SearchPageClient() {
     }
   }, [urlQuery]);
 
-  // 按关键词恢复聚合开关状态（用于返回搜索页时保持原视图）
+  // 恢复视图模式
   useEffect(() => {
     const trimmed = urlQuery.trim();
     if (!trimmed) {
@@ -198,12 +198,14 @@ export default function SearchPageClient() {
     }
 
     const cachedMode = getSearchViewModeByQuery(trimmed);
-    if (cachedMode && cachedMode !== viewMode) {
-      setViewMode(cachedMode);
+    if (cachedMode) {
+      setViewMode((currentMode) =>
+        cachedMode !== currentMode ? cachedMode : currentMode,
+      );
     }
   }, [urlQuery]);
 
-  // 按关键词保存当前聚合开关状态
+  // 保存视图模式
   useEffect(() => {
     const trimmed = urlQuery.trim();
     if (!trimmed) {

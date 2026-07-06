@@ -16,15 +16,15 @@ export type AuthMetaPayload = {
 function parseCookieJson<T>(value: string): T | null {
   try {
     return JSON.parse(value) as T;
-  } catch (_) {}
+  } catch {}
 
   try {
     return JSON.parse(decodeURIComponent(value)) as T;
-  } catch (_) {}
+  } catch {}
 
   try {
     return JSON.parse(decodeURIComponent(decodeURIComponent(value))) as T;
-  } catch (_) {
+  } catch {
     return null;
   }
 }
@@ -75,7 +75,7 @@ export function getAuthInfoFromBrowserCookie(): AuthMetaPayload | null {
       username: authData.username,
       role: authData.role,
     };
-  } catch (error) {
+  } catch {
     return null;
   }
 }

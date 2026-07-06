@@ -303,7 +303,12 @@ export default function HomeClient({
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [
+    initialData.bangumiCalendarData.length,
+    initialData.hotMovies.length,
+    initialData.hotTvShows.length,
+    initialData.hotVarietyShows.length,
+  ]);
 
   const currentWeekday = useMemo(() => getCurrentWeekday(), []);
 
