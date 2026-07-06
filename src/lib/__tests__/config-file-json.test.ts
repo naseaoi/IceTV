@@ -110,7 +110,7 @@ describe('buildConfigFileFromAdminConfig', () => {
         CoverImageCacheSize: 500,
         DataImportPlaybackSessionsLimit: 500,
         LivePrecheckTimeoutSeconds: 15,
-        ProxyRequestTimeoutSeconds: 15,
+        ProxyRequestTimeoutSeconds: 30,
         DoubanProxyType: 'direct',
         DoubanProxy: '',
         BangumiDataSource: 'server',

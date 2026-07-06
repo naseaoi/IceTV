@@ -9,10 +9,13 @@ import type { PlaybackRequestMode } from '@/features/play/hooks/usePlayPageState
 import { resolveSourceSwitchCurrentPlayTime } from '@/features/play/lib/episodeResumePolicy';
 import {
   applyAutoQualityLevel,
+  applyDefaultQualityLevel,
   applyManualQualityLevel,
-  findPreferredLevelIndex,
+  findHighestLevelIndex,
+  findLevelIndexByHeight,
   markQualityControlTemporaryAuto,
   registerQualityControlWhenReady,
+  seedAutoQualityStartLevel,
 } from '@/features/play/lib/hlsQuality';
 import {
   getHlsErrorStatus,
@@ -26,6 +29,7 @@ import {
   markSourceFailed,
 } from '@/lib/failed-source-cooldown';
 import { logHlsError } from '@/lib/hls-error-log';
+import { readPreferredQualityPreference } from '@/lib/local-preferences';
 import {
   assignManagedVideoCleanup,
   destroyManagedHls,
@@ -39,8 +43,6 @@ import {
   ensureVideoSource,
   formatBytesPerSecond,
   handleHlsFatalError,
-  HLS_START_LEVEL_STRATEGY,
-  pickStartLevelFromStrategy,
 } from '@/lib/player-utils';
 import {
   clearSourceProxyOverride,
@@ -134,20 +136,17 @@ export function createVodM3u8Loader({
       destroyManagedHls(managedVideo);
       hls = new Hls({
         ...createHlsConfig({
-          maxBufferLength: 30,
-          maxMaxBufferLength: 120,
-          backBufferLength: 30,
           preserveManualLevelOnError: true,
         }),
-        manifestLoadingTimeOut: 6000,
-        manifestLoadingMaxRetry: 1,
-        manifestLoadingRetryDelay: 500,
-        levelLoadingTimeOut: 6000,
-        levelLoadingMaxRetry: 1,
-        levelLoadingRetryDelay: 500,
-        fragLoadingTimeOut: 8000,
-        fragLoadingMaxRetry: 2,
-        fragLoadingRetryDelay: 500,
+        manifestLoadingTimeOut: 10000,
+        manifestLoadingMaxRetry: 4,
+        manifestLoadingRetryDelay: 1000,
+        levelLoadingTimeOut: 10000,
+        levelLoadingMaxRetry: 4,
+        levelLoadingRetryDelay: 1000,
+        fragLoadingTimeOut: 30000,
+        fragLoadingMaxRetry: 6,
+        fragLoadingRetryDelay: 1000,
         loader: currentBlockAd
           ? (adBlockingHlsLoader as unknown as typeof Hls.DefaultConfig.loader)
           : Hls.DefaultConfig.loader,
@@ -207,21 +206,25 @@ export function createVodM3u8Loader({
 
     let lastStallRecoveryAt = 0;
     let qualityLockProbeTimer: ReturnType<typeof setTimeout> | null = null;
+    let manualQualityNetworkFailures = 0;
+    const manualQualityFailureLimit = 2;
     const clearQualityLockProbe = () => {
       if (qualityLockProbeTimer) {
         clearTimeout(qualityLockProbeTimer);
         qualityLockProbeTimer = null;
       }
     };
-    const releaseQualityLockToAuto = () => {
+    const releaseQualityLockToAuto = (
+      message = '所选画质加载失败，已临时切回自动',
+    ) => {
       applyAutoQualityLevel(hls);
       hls.startLoad();
       markQualityControlTemporaryAuto(artPlayerRef, hls);
-      setRealtimeLoadSpeed('所选画质加载失败，已临时切回自动');
+      setRealtimeLoadSpeed(message);
       try {
         const activePlayer = artPlayerRef.current;
         if (activePlayer) {
-          activePlayer.notice.show = '所选画质加载失败，已临时切回自动';
+          activePlayer.notice.show = message;
         }
       } catch {}
     };
@@ -431,12 +434,29 @@ export function createVodM3u8Loader({
         return;
       }
 
+      const isFragOrLevelNetworkError =
+        data.type === Hls.ErrorTypes.NETWORK_ERROR &&
+        /frag|segment|level/i.test(errorDetails);
+
+      if (
+        isFragOrLevelNetworkError &&
+        hls.autoLevelEnabled === false &&
+        hls.__icetvManualQualityLocked === true
+      ) {
+        manualQualityNetworkFailures += 1;
+        if (manualQualityNetworkFailures >= manualQualityFailureLimit) {
+          manualQualityNetworkFailures = 0;
+          clearQualityLockProbe();
+          releaseQualityLockToAuto('所选画质连续加载失败，已临时切回自动');
+          return;
+        }
+      }
+
       if (data.fatal) {
         if (
-          data.type === Hls.ErrorTypes.NETWORK_ERROR &&
+          isFragOrLevelNetworkError &&
           hls.autoLevelEnabled === false &&
-          hls.__icetvManualQualityLocked !== true &&
-          /frag|level/i.test(errorDetails)
+          hls.__icetvManualQualityLocked !== true
         ) {
           clearQualityLockProbe();
           releaseQualityLockToAuto();
@@ -500,6 +520,9 @@ export function createVodM3u8Loader({
 
     const onHlsFragLoaded = function (_: unknown, data: any) {
       clearQualityLockProbe();
+      if (hls.__icetvManualQualityLocked === true) {
+        manualQualityNetworkFailures = 0;
+      }
       if (speedFallbackTimer) {
         clearTimeout(speedFallbackTimer);
         speedFallbackTimer = null;
@@ -529,12 +552,21 @@ export function createVodM3u8Loader({
 
     hls.on(Hls.Events.ERROR, onHlsError);
     hls.on(Hls.Events.FRAG_LOADED, onHlsFragLoaded);
-    const onManifestParsed = (_evt: unknown, rawData: unknown) => {
-      const data = rawData as { levels?: unknown[] } | null;
-      const levelCount = Array.isArray(data?.levels) ? data.levels.length : 0;
-      const preferredLevel = findPreferredLevelIndex(hls.levels || []);
-      if (preferredLevel !== null) {
-        applyManualQualityLevel(hls, preferredLevel);
+    const onManifestParsed = () => {
+      const levels = hls.levels || [];
+      const qualityPreference = readPreferredQualityPreference();
+      const preferredLevel =
+        qualityPreference.mode === 'manual'
+          ? findLevelIndexByHeight(levels, qualityPreference.height)
+          : qualityPreference.mode === 'default'
+            ? findHighestLevelIndex(levels)
+            : null;
+      if (preferredLevel !== null && qualityPreference.mode !== 'auto') {
+        if (qualityPreference.mode === 'manual') {
+          applyManualQualityLevel(hls, preferredLevel);
+        } else {
+          applyDefaultQualityLevel(hls, preferredLevel);
+        }
         clearQualityLockProbe();
         qualityLockProbeTimer = setTimeout(() => {
           qualityLockProbeTimer = null;
@@ -546,14 +578,7 @@ export function createVodM3u8Loader({
           }
         }, 10000);
       } else {
-        const picked = pickStartLevelFromStrategy(
-          HLS_START_LEVEL_STRATEGY,
-          levelCount,
-        );
-        if (picked !== undefined) {
-          hls.startLevel = picked;
-          hls.nextLevel = picked;
-        }
+        seedAutoQualityStartLevel(hls, findHighestLevelIndex(levels));
       }
       registerQualityControlWhenReady(artPlayerRef, hls);
     };

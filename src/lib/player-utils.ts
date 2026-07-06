@@ -7,7 +7,6 @@
 // 视频源管理
 // ---------------------------------------------------------------------------
 
-/** 确保 <video> 下有正确的 <source> 子元素，并解除 remotePlayback 限制 */
 export function ensureVideoSource(video: HTMLVideoElement | null, url: string) {
   if (!video || !url) return;
   const sources = Array.from(video.getElementsByTagName('source'));
@@ -56,10 +55,8 @@ type NetworkInfoLike = {
   downlink?: number;
 };
 
-/** 根据网络环境推算初始带宽估算值（bps），避免 HLS.js 从最低码率起播 */
 function resolveInitialBandwidthEstimate(): number {
-  // 2 Mbps，国内宽带的保守起步值
-  const DEFAULT_BPS = 2_000_000;
+  const DEFAULT_BPS = 5_000_000;
   if (typeof navigator === 'undefined') return DEFAULT_BPS;
 
   const conn = (navigator as Navigator & { connection?: NetworkInfoLike })
@@ -68,7 +65,6 @@ function resolveInitialBandwidthEstimate(): number {
   if (conn.saveData) return 500_000;
 
   if (typeof conn.downlink === 'number' && conn.downlink > 0) {
-    // downlink 是 Mbps，转 bps 后取 70% 避免高估
     return Math.max(500_000, Math.round(conn.downlink * 1_000_000 * 0.7));
   }
 
@@ -88,14 +84,9 @@ function resolveInitialBandwidthEstimate(): number {
 // HLS 缓冲策略自适应（桌面 vs 移动 / 低内存设备）
 // ---------------------------------------------------------------------------
 
-/**
- * 判定是否应当使用"轻量缓冲"策略。
- * 移动端与低内存设备下，过大的前/后向缓冲会导致 MSE OOM、卡顿、应用被系统回收。
- */
 function shouldUseLightBuffer(): boolean {
   if (typeof navigator === 'undefined') return false;
 
-  // deviceMemory 是 Chrome 私有字段，单位 GB；可能为 undefined
   const deviceMemory = (navigator as Navigator & { deviceMemory?: number })
     .deviceMemory;
   if (
@@ -106,14 +97,12 @@ function shouldUseLightBuffer(): boolean {
     return true;
   }
 
-  // 经典移动 UA 判断（桌面端 userAgent 不会匹配下列关键字）
   const ua = navigator.userAgent || '';
   if (/Android|iPhone|iPad|iPod|Mobile|Tablet/i.test(ua)) return true;
 
   return false;
 }
 
-/** 返回一组 maxBufferLength / maxMaxBufferLength / backBufferLength / maxBufferSize 默认值 */
 function resolveBufferDefaults() {
   if (shouldUseLightBuffer()) {
     return {
@@ -125,9 +114,9 @@ function resolveBufferDefaults() {
   }
   return {
     maxBufferLength: 90,
-    maxMaxBufferLength: 120,
+    maxMaxBufferLength: 600,
     backBufferLength: 90,
-    maxBufferSize: 60 * 1000 * 1000, // 60 MB
+    maxBufferSize: 120 * 1000 * 1000,
   };
 }
 
@@ -135,31 +124,18 @@ function resolveBufferDefaults() {
 // HLS 起播码率策略
 // ---------------------------------------------------------------------------
 
-/**
- * 计算 HLS 起播码率等级。
- * - hls.js 的 startLevel: -1 = 自动（通常偏保守，首片走低码率再逐步升）
- * - 根据网络估算带宽直接选择 master playlist 中一个合理等级，首帧即清晰
- *
- * 返回值：
- * - undefined：沿用 hls.js 默认（-1 auto）
- * - 数值：具体 variant index（等待 levels 解析后由 MANIFEST_PARSED 事件消费）
- */
 function resolveStartLevel(): number | undefined {
   if (typeof navigator === 'undefined') return undefined;
 
   const conn = (navigator as Navigator & { connection?: NetworkInfoLike })
     .connection;
 
-  // 省流量 / 慢网：交给 auto，避免起播就拉大码率导致卡顿
   if (!conn) return undefined;
   if (conn.saveData) return undefined;
 
   const slowTypes = new Set(['slow-2g', '2g', '3g']);
   if (conn.effectiveType && slowTypes.has(conn.effectiveType)) return undefined;
 
-  // downlink >= 10 Mbps：倾向最高码率；5~10 Mbps：倾向次高；其它交给 auto
-  // 注意：真正选择发生在 MANIFEST_PARSED 事件里（此时才知道 levels 数量），
-  //      这里只返回一个策略指示（用 Number.MAX_SAFE_INTEGER 代表"最高可用等级"）
   if (typeof conn.downlink === 'number') {
     if (conn.downlink >= 10) return Number.MAX_SAFE_INTEGER;
     if (conn.downlink >= 5) return Number.MAX_SAFE_INTEGER - 1;
@@ -167,22 +143,15 @@ function resolveStartLevel(): number | undefined {
   return undefined;
 }
 
-/**
- * 将 resolveStartLevel 返回的策略标记映射到真实 level index。
- * 调用时机：hls.js MANIFEST_PARSED 事件内（此时 hls.levels 已就绪）。
- */
 export function pickStartLevelFromStrategy(
   marker: number | undefined,
   levelCount: number,
 ): number | undefined {
   if (marker === undefined || levelCount <= 0) return undefined;
-  // 最高可用等级
   if (marker === Number.MAX_SAFE_INTEGER) return levelCount - 1;
-  // 次高
   if (marker === Number.MAX_SAFE_INTEGER - 1) {
     return Math.max(0, levelCount - 2);
   }
-  // 其它直接当作 index 使用（夹到合法范围）
   return Math.min(Math.max(0, marker), levelCount - 1);
 }
 
@@ -200,6 +169,7 @@ export interface HlsConfigOverrides {
   maxMaxBufferLength?: number;
   backBufferLength?: number;
   maxBufferSize?: number;
+  minBufferLength?: number;
   maxBufferHole?: number;
   nudgeOffset?: number;
   nudgeMaxRetry?: number;
@@ -214,27 +184,23 @@ export interface HlsConfigOverrides {
   loader?: unknown;
 }
 
-/** 创建 HLS.js 默认配置，可通过 overrides 覆盖 */
 export function createHlsConfig(overrides?: HlsConfigOverrides) {
   const bufferDefaults = resolveBufferDefaults();
   return {
     debug: false,
     enableWorker: true,
-    // 默认按点播场景取更稳妥的缓冲策略，直播再单独覆盖。
     lowLatencyMode: false,
-    // 缓冲默认按设备分档：桌面 90/120，移动/低内存 30/60，避免 MSE OOM
     maxBufferLength: bufferDefaults.maxBufferLength,
     maxMaxBufferLength: bufferDefaults.maxMaxBufferLength,
     backBufferLength: bufferDefaults.backBufferLength,
     maxBufferSize: bufferDefaults.maxBufferSize,
+    minBufferLength: 20,
     maxBufferHole: 0.5,
     nudgeOffset: 0.1,
     nudgeMaxRetry: 8,
-    // 允许更早拉起首个分片，缩短首帧等待。
     startFragPrefetch: true,
     progressive: true,
     testBandwidth: true,
-    // 根据网络环境设定初始带宽估算，避免从最低码率起播
     abrEwmaDefaultEstimate: resolveInitialBandwidthEstimate(),
     ...overrides,
   };

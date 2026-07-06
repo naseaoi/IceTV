@@ -22,7 +22,6 @@ export const DEFAULT_DOUBAN_PROXY_TYPE: DoubanProxyType = 'direct';
 export const DOUBAN_IMAGE_PROXY_TYPE_VALUES = [
   'direct',
   'server',
-  'img3',
   'cmliussss-cdn-tencent',
   'cmliussss-cdn-ali',
   'custom',

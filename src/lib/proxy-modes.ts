@@ -8,6 +8,8 @@ const OVERRIDE_TTL_MS = 30 * 60 * 1000;
 
 export type SourceProxyMode = 'browser' | 'server' | 'auto';
 
+export const DEFAULT_SOURCE_PROXY_MODE: SourceProxyMode = 'auto';
+
 type ProxyOverrideMap = Record<string, { mode: 'server'; at: number }>;
 
 function isStorageAvailable(): boolean {
@@ -56,7 +58,10 @@ function getConfiguredProxyMode(
 ): SourceProxyMode {
   const resolvedModes = modes || cachedModes || {};
   const mode = resolvedModes[sourceKey];
-  return mode === 'server' || mode === 'auto' ? mode : 'browser';
+  if (mode === 'server' || mode === 'auto' || mode === 'browser') {
+    return mode;
+  }
+  return DEFAULT_SOURCE_PROXY_MODE;
 }
 
 function getRuntimeProxyOverride(

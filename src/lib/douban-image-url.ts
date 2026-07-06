@@ -5,7 +5,6 @@ const COOKIE_MAX_AGE_SECONDS = 365 * 24 * 60 * 60;
 
 export const PUBLIC_DOUBAN_IMAGE_PROXY_TYPES = new Set<DoubanImageProxyType>([
   'direct',
-  'img3',
   'cmliussss-cdn-tencent',
   'cmliussss-cdn-ali',
 ]);
@@ -44,8 +43,6 @@ export function processDoubanImageUrl(
       return originalUrl;
     case 'server':
       return `/api/image-proxy?url=${encodeURIComponent(originalUrl)}`;
-    case 'img3':
-      return originalUrl.replace(/img\d+\.doubanio\.com/g, 'img3.doubanio.com');
     case 'cmliussss-cdn-tencent':
       return originalUrl.replace(
         /img\d+\.doubanio\.com/g,

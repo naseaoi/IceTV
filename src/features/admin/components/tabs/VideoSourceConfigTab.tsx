@@ -41,6 +41,7 @@ import { showError } from '@/features/admin/lib/notifications';
 import { DataSource } from '@/features/admin/types/internal';
 import { useAlertModal } from '@/hooks/useAlertModal';
 import { useModalState } from '@/hooks/useModalState';
+import { DEFAULT_SOURCE_PROXY_MODE } from '@/lib/proxy-modes';
 import type { SourceRouteStatsItem } from '@/lib/types';
 import { AdminConfig } from '@/types/admin';
 
@@ -199,7 +200,7 @@ const VideoSourceConfig = ({
   const handleToggleProxyMode = (key: string) => {
     const target = sources.find((s) => s.key === key);
     if (!target) return;
-    const currentMode = target.proxyMode || 'browser';
+    const currentMode = target.proxyMode || DEFAULT_SOURCE_PROXY_MODE;
     const newMode =
       currentMode === 'browser'
         ? 'server'

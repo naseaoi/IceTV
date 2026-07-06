@@ -34,6 +34,17 @@ describe('proxy modes', () => {
     ).toBe(false);
   });
 
+  it('uses automatic routing for sources without an explicit mode', async () => {
+    const mod = await loadModule({});
+    const url = 'https://cdn.example.com/show/1/index.m3u8';
+
+    expect(mod.shouldUseServerProxy('missingSource', url)).toBe(false);
+
+    mod.rememberSourceServerProxy('missingSource', url);
+
+    expect(mod.shouldUseServerProxy('missingSource', url)).toBe(true);
+  });
+
   it('stores automatic fallback per source and url', async () => {
     const mod = await loadModule({ autoSource: 'auto' });
     const firstUrl = 'https://cdn.example.com/show/1/index.m3u8';

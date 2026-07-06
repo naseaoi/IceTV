@@ -4,11 +4,14 @@ import {
   ENABLE_OPTIMIZATION_STORAGE_KEY,
   FLUID_SEARCH_STORAGE_KEY,
   LIVE_DIRECT_CONNECT_STORAGE_KEY,
+  PREFERRED_QUALITY_STORAGE_KEY,
   readAggregateSearch,
   readBlockAdEnabled,
   readEnableOptimization,
   readFluidSearch,
   readLiveDirectConnect,
+  readPreferredQualityHeight,
+  readPreferredQualityPreference,
   readSeenAnnouncement,
   readSidebarCollapsed,
   resetAggregateSearch,
@@ -22,6 +25,7 @@ import {
   writeEnableOptimization,
   writeFluidSearch,
   writeLiveDirectConnect,
+  writePreferredQualityHeight,
   writeSeenAnnouncement,
   writeSidebarCollapsed,
 } from '../local-preferences';
@@ -126,5 +130,25 @@ describe('local preferences', () => {
       'notice-v1',
     );
     expect(readSeenAnnouncement()).toBe('notice-v1');
+  });
+
+  it('distinguishes unset, auto, and manual quality preferences', () => {
+    expect(readPreferredQualityPreference()).toEqual({ mode: 'default' });
+    expect(readPreferredQualityHeight()).toBeNull();
+
+    writePreferredQualityHeight(null);
+
+    expect(localStorage.getItem(PREFERRED_QUALITY_STORAGE_KEY)).toBe('auto');
+    expect(readPreferredQualityPreference()).toEqual({ mode: 'auto' });
+    expect(readPreferredQualityHeight()).toBeNull();
+
+    writePreferredQualityHeight(720);
+
+    expect(localStorage.getItem(PREFERRED_QUALITY_STORAGE_KEY)).toBe('720');
+    expect(readPreferredQualityPreference()).toEqual({
+      mode: 'manual',
+      height: 720,
+    });
+    expect(readPreferredQualityHeight()).toBe(720);
   });
 });

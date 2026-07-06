@@ -181,6 +181,25 @@ export function readPreferredQualityHeight(): number | null {
   return Number.isFinite(height) && height > 0 ? height : null;
 }
 
+export type PreferredQualityPreference =
+  | { mode: 'default' }
+  | { mode: 'auto' }
+  | { mode: 'manual'; height: number };
+
+export function readPreferredQualityPreference(): PreferredQualityPreference {
+  const raw = readStoredString(PREFERRED_QUALITY_STORAGE_KEY);
+  if (!raw) {
+    return { mode: 'default' };
+  }
+  if (raw === 'auto') {
+    return { mode: 'auto' };
+  }
+  const height = Number.parseInt(raw, 10);
+  return Number.isFinite(height) && height > 0
+    ? { mode: 'manual', height }
+    : { mode: 'default' };
+}
+
 export function writePreferredQualityHeight(height: number | null) {
   writeStoredString(
     PREFERRED_QUALITY_STORAGE_KEY,

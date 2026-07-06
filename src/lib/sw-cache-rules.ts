@@ -54,7 +54,7 @@ export function shouldHandleBangumiCoverCache(input: {
 export function shouldHandleExternalCoverCache(input: {
   hostname: string;
 }): boolean {
-  return /^(lain\.bgm\.tv|img\d+\.doubanio\.com|img3\.doubanio\.com|img\.doubanio\.cmliussss\.(net|com))$/.test(
+  return /^(lain\.bgm\.tv|img\d+\.doubanio\.com|img\.doubanio\.cmliussss\.(net|com))$/.test(
     input.hostname,
   );
 }

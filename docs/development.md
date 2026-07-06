@@ -124,6 +124,15 @@ Guard 选择：
 - 优先复用现有 `authorizeProxyRequest()`、`fetchWithUrlGuard()`、`validateProxyUrlForRequest()`
 - 不要直接裸 `fetch` 外部用户输入 URL
 
+## 播放与代理路由
+
+视频源流量路由以后台 `SourceConfig.proxyMode` 为准。
+
+- 未显式配置时默认 `auto`
+- `browser`：浏览器直连，不自动切服务端代理
+- `server`：播放和测速都走服务端代理
+- `auto`：先浏览器直连，失败后按 `source + URL` 记一次服务端代理 fallback
+
 ## 逐集解析型源站
 
 部分源站的详情页只给集数结构，每一集的真实播放地址要单独抓一次播放页。这类源站统一走懒解析协议：详情阶段返回 `icetv-lazy://` 懒地址，播放时经 `/api/episode-url` 按需解析。

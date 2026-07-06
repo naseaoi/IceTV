@@ -10,7 +10,7 @@ const TEST_TARGET_URLS: Record<CustomProxyTestKind, string> = {
   'douban-data':
     'https://movie.douban.com/j/search_subjects?type=movie&tag=%E7%83%AD%E9%97%A8&sort=recommend&page_limit=1&page_start=0',
   'douban-image':
-    'https://img3.doubanio.com/view/photo/s_ratio_poster/public/p480747492.jpg',
+    'https://img1.doubanio.com/view/photo/s_ratio_poster/public/p480747492.jpg',
   bangumi: 'https://api.bgm.tv/calendar',
 };
 

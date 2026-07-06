@@ -280,7 +280,7 @@ describe('config cache persistence', () => {
   it('exposes public-safe proxy defaults in public config', async () => {
     const adminConfig = cloneBaseConfig();
     adminConfig.SiteConfig.DoubanProxyType = 'server';
-    adminConfig.SiteConfig.DoubanImageProxyType = 'img3';
+    adminConfig.SiteConfig.DoubanImageProxyType = 'cmliussss-cdn-ali';
     adminConfig.SiteConfig.BangumiDataSource = 'direct';
     const { getPublicConfig } = await loadConfigModule(jest.fn(), {
       adminConfig,
@@ -288,7 +288,7 @@ describe('config cache persistence', () => {
 
     await expect(getPublicConfig()).resolves.toMatchObject({
       DoubanProxyType: 'direct',
-      DoubanImageProxyType: 'img3',
+      DoubanImageProxyType: 'cmliussss-cdn-ali',
       BangumiDataSource: 'direct',
     });
   });

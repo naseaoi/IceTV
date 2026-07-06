@@ -10,6 +10,7 @@ import {
   statusBadgeStyles,
 } from '@/features/admin/lib/buttonStyles';
 import { DataSource } from '@/features/admin/types/internal';
+import { DEFAULT_SOURCE_PROXY_MODE } from '@/lib/proxy-modes';
 
 export type SourceValidationStatus = {
   text: string;
@@ -70,7 +71,7 @@ export function SortableSourceRow({
     transform: CSS.Transform.toString(transform),
     transition,
   } as CSSProperties;
-  const proxyMode = source.proxyMode || 'browser';
+  const proxyMode = source.proxyMode || DEFAULT_SOURCE_PROXY_MODE;
   const proxyModeClassName =
     proxyMode === 'server'
       ? 'bg-blue-100 text-blue-800 hover:bg-blue-200 dark:bg-blue-900/20 dark:text-blue-300 dark:hover:bg-blue-900/40'
