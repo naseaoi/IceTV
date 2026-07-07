@@ -116,7 +116,7 @@ export function UserTable({
               scope='col'
               className='px-6 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400'
             >
-              采集源权限
+              视频源权限
             </th>
             <th
               scope='col'

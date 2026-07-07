@@ -3,6 +3,8 @@ import { useRouter } from 'next/navigation';
 import React, { useState } from 'react';
 
 import ConfirmModal from '@/components/modals/ConfirmModal';
+import { clearSearchSnapshotCache } from '@/features/search/hooks/useSearchExecution';
+import { normalizeSearchQueryInput } from '@/features/search/lib/searchQuery';
 import { clearSearchHistory, deleteSearchHistory } from '@/lib/db.client';
 
 interface SearchHistoryProps {
@@ -35,8 +37,11 @@ export default function SearchHistory({
               <div key={item} className='group relative'>
                 <button
                   onClick={() => {
-                    setSearchQuery(item);
-                    router.push(`/search?q=${encodeURIComponent(item.trim())}`);
+                    const query = normalizeSearchQueryInput(item);
+                    if (!query) return;
+                    clearSearchSnapshotCache(query);
+                    setSearchQuery(query);
+                    router.push(`/search?q=${encodeURIComponent(query)}`);
                   }}
                   className='rounded-full bg-gray-500/10 px-4 py-2 text-sm text-gray-700 transition-colors duration-200 hover:bg-gray-300 dark:bg-gray-700/50 dark:text-gray-300 dark:hover:bg-gray-600'
                 >

@@ -205,7 +205,7 @@ function validateUserConfig(config: AdminConfig): void {
       assertBoolean(user.banned, '封禁状态');
     }
     if (user.enabledApis !== undefined) {
-      assertStringArray(user.enabledApis, '用户源权限', MAX_KEY_LENGTH);
+      assertStringArray(user.enabledApis, '用户视频源权限', MAX_KEY_LENGTH);
     }
     if (user.tags !== undefined) {
       assertStringArray(user.tags, '用户标签', MAX_SHORT_STRING_LENGTH);
@@ -223,7 +223,7 @@ function validateUserConfig(config: AdminConfig): void {
     for (const tag of config.UserConfig.Tags) {
       requireObject(tag, '用户组条目格式无效');
       limitString(tag.name, '用户组名称', MAX_SHORT_STRING_LENGTH);
-      assertStringArray(tag.enabledApis, '用户组源权限', MAX_KEY_LENGTH);
+      assertStringArray(tag.enabledApis, '用户组视频源权限', MAX_KEY_LENGTH);
     }
   }
 }

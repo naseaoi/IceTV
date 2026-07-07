@@ -45,7 +45,7 @@ async function validateSourceApiUrl(
     return {
       ok: false,
       response: NextResponse.json(
-        { error: '采集源地址不可用' },
+        { error: '视频源地址不可用' },
         { status: 400 },
       ),
     };

@@ -36,7 +36,7 @@ export function ConfigureUserApisDialog({
   return (
     <AdminDialog
       isOpen={isOpen}
-      title={`配置用户采集源权限 - ${username}`}
+      title={`配置用户视频源权限 - ${username}`}
       onClose={onClose}
       panelClassName='max-w-4xl max-h-[80vh] overflow-y-auto'
     >
@@ -61,7 +61,7 @@ export function ConfigureUserApisDialog({
             </span>
           </div>
           <p className='mt-1 text-sm text-blue-700 dark:text-blue-400'>
-            全不选为无限制，选中的采集源将限制用户只能访问这些源
+            全不选为无限制，选中的视频源将限制用户只能访问这些源
           </p>
         </div>
       </div>
@@ -69,7 +69,7 @@ export function ConfigureUserApisDialog({
       <div className='mb-6'>
         <div className='mb-4 flex items-center justify-between gap-3'>
           <h4 className='text-sm font-medium text-gray-700 dark:text-gray-300'>
-            选择可用的采集源：
+            选择可用的视频源：
           </h4>
           <label className='flex items-center gap-2 text-sm text-gray-600 dark:text-gray-400'>
             <input

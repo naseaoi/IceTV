@@ -594,7 +594,7 @@ export function configSelfCheck(adminConfig: AdminConfig): AdminConfig {
     tags: originOwnerCfg?.tags || undefined,
   });
 
-  // 采集源去重
+  // 视频源去重
   const seenSourceKeys = new Set<string>();
   adminConfig.SourceConfig = adminConfig.SourceConfig.filter((source) => {
     if (seenSourceKeys.has(source.key)) {

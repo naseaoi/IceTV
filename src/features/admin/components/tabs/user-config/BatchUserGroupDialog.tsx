@@ -84,7 +84,7 @@ export function BatchUserGroupDialog({
             placeholder='无用户组（无限制）'
           />
           <p className='mt-2 text-xs text-gray-500 dark:text-gray-400'>
-            选择&ldquo;无用户组&rdquo;为无限制，选择特定用户组将限制用户只能访问该用户组允许的采集源
+            选择&ldquo;无用户组&rdquo;为无限制，选择特定用户组将限制用户只能访问该用户组允许的视频源
           </p>
         </div>
       </div>

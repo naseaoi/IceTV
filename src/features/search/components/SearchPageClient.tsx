@@ -18,6 +18,7 @@ import {
   clearSearchSnapshotCache,
   useSearchExecution,
 } from '@/features/search/hooks/useSearchExecution';
+import { normalizeSearchQueryInput } from '@/features/search/lib/searchQuery';
 import { getSearchHistory, subscribeToDataUpdates } from '@/lib/db.client';
 import { readAggregateSearch } from '@/lib/local-preferences';
 
@@ -26,6 +27,16 @@ const AGGREGATED_SEARCH_GRID_LAYOUT = {
   mobileContentHeight: 32,
   desktopContentHeight: 32,
 };
+const DEFAULT_FILTER_STATE: FilterState = {
+  source: 'all',
+  title: 'all',
+  year: 'all',
+  yearOrder: 'none',
+};
+
+function createDefaultFilterState(): FilterState {
+  return { ...DEFAULT_FILTER_STATE };
+}
 
 function getSearchViewModeByQuery(query: string): 'agg' | 'all' | null {
   if (typeof window === 'undefined') {
@@ -74,7 +85,10 @@ export default function SearchPageClient() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const urlQuery = searchParams.get('q') || '';
-  const activeSearchQuery = useMemo(() => urlQuery.trim(), [urlQuery]);
+  const activeSearchQuery = useMemo(
+    () => normalizeSearchQueryInput(urlQuery),
+    [urlQuery],
+  );
 
   // 搜索历史 & UI 状态
   const [searchHistory, setSearchHistory] = useState<string[]>([]);
@@ -83,18 +97,12 @@ export default function SearchPageClient() {
   const [showSuggestions, setShowSuggestions] = useState(false);
 
   // 过滤器状态
-  const [filterAll, setFilterAll] = useState<FilterState>({
-    source: 'all',
-    title: 'all',
-    year: 'all',
-    yearOrder: 'none',
-  });
-  const [filterAgg, setFilterAgg] = useState<FilterState>({
-    source: 'all',
-    title: 'all',
-    year: 'all',
-    yearOrder: 'none',
-  });
+  const [filterAll, setFilterAll] = useState<FilterState>(() =>
+    createDefaultFilterState(),
+  );
+  const [filterAgg, setFilterAgg] = useState<FilterState>(() =>
+    createDefaultFilterState(),
+  );
 
   // 聚合开关
   const getDefaultAggregate = () => {
@@ -134,6 +142,10 @@ export default function SearchPageClient() {
       filterAgg,
       searchQuery: activeSearchQuery,
     });
+  const hasVisibleResults =
+    viewMode === 'agg'
+      ? filteredAggResults.length > 0
+      : filteredAllResults.length > 0;
 
   // 初始化：搜索历史、滚动监听、流式搜索设置
   useEffect(() => {
@@ -182,17 +194,26 @@ export default function SearchPageClient() {
 
   // 同步搜索参数
   useEffect(() => {
-    if (urlQuery) {
-      setSearchQuery(urlQuery);
+    if (activeSearchQuery) {
+      setSearchQuery(activeSearchQuery);
       setShowSuggestions(false);
     } else {
       setShowSuggestions(false);
     }
-  }, [urlQuery]);
+  }, [activeSearchQuery]);
+
+  useEffect(() => {
+    if (!activeSearchQuery) {
+      return;
+    }
+
+    setFilterAll(createDefaultFilterState());
+    setFilterAgg(createDefaultFilterState());
+  }, [activeSearchQuery]);
 
   // 恢复视图模式
   useEffect(() => {
-    const trimmed = urlQuery.trim();
+    const trimmed = activeSearchQuery;
     if (!trimmed) {
       return;
     }
@@ -203,16 +224,16 @@ export default function SearchPageClient() {
         cachedMode !== currentMode ? cachedMode : currentMode,
       );
     }
-  }, [urlQuery]);
+  }, [activeSearchQuery]);
 
   // 保存视图模式
   useEffect(() => {
-    const trimmed = urlQuery.trim();
+    const trimmed = activeSearchQuery;
     if (!trimmed) {
       return;
     }
     setSearchViewModeByQuery(trimmed, viewMode);
-  }, [urlQuery, viewMode]);
+  }, [activeSearchQuery, viewMode]);
 
   const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const value = e.target.value;
@@ -228,7 +249,7 @@ export default function SearchPageClient() {
 
   const handleSearch = (e: React.FormEvent) => {
     e.preventDefault();
-    const trimmed = searchQuery.trim().replace(/\s+/g, ' ');
+    const trimmed = normalizeSearchQueryInput(searchQuery);
     if (!trimmed) return;
 
     setSearchQuery(trimmed);
@@ -238,10 +259,13 @@ export default function SearchPageClient() {
   };
 
   const handleSuggestionSelect = (suggestion: string) => {
-    setSearchQuery(suggestion);
+    const trimmed = normalizeSearchQueryInput(suggestion);
+    if (!trimmed) return;
+
+    setSearchQuery(trimmed);
     setShowSuggestions(false);
 
-    router.push(`/search?q=${encodeURIComponent(suggestion)}`);
+    router.push(`/search?q=${encodeURIComponent(trimmed)}`);
   };
 
   const scrollToTop = () => {
@@ -295,7 +319,7 @@ export default function SearchPageClient() {
                 onSelect={handleSuggestionSelect}
                 onClose={() => setShowSuggestions(false)}
                 onEnterKey={() => {
-                  const trimmed = searchQuery.trim().replace(/\s+/g, ' ');
+                  const trimmed = normalizeSearchQueryInput(searchQuery);
                   if (!trimmed) return;
 
                   setSearchQuery(trimmed);
@@ -381,6 +405,10 @@ export default function SearchPageClient() {
                     未找到相关结果
                   </div>
                 )
+              ) : !hasVisibleResults ? (
+                <div className='py-8 text-center text-gray-500 dark:text-gray-400'>
+                  当前筛选无结果
+                </div>
               ) : (
                 <>
                   {viewMode === 'agg' ? (
