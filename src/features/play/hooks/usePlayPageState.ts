@@ -35,6 +35,12 @@ export type VideoQualityInfo = {
   quality: string;
   loadSpeed: string;
   pingTime: number;
+  hasError?: boolean;
+};
+export type SourceRecommendation = {
+  sourceName: string;
+  quality: string;
+  loadSpeed: string;
 };
 
 export function usePlayPageState(searchParams: ReadonlyURLSearchParams) {
@@ -156,6 +162,8 @@ export function usePlayPageState(searchParams: ReadonlyURLSearchParams) {
   const [precomputedVideoInfo, setPrecomputedVideoInfo] = useState<
     Map<string, VideoQualityInfo>
   >(new Map());
+  const [sourceRecommendation, setSourceRecommendation] =
+    useState<SourceRecommendation | null>(null);
   const clearTargetEpisodeProgressRef = useRef(false);
 
   const [isEpisodeSelectorCollapsed, setIsEpisodeSelectorCollapsed] =
@@ -251,6 +259,8 @@ export function usePlayPageState(searchParams: ReadonlyURLSearchParams) {
     optimizationEnabled,
     precomputedVideoInfo,
     setPrecomputedVideoInfo,
+    sourceRecommendation,
+    setSourceRecommendation,
     clearTargetEpisodeProgressRef,
     isEpisodeSelectorCollapsed,
     setIsEpisodeSelectorCollapsed,

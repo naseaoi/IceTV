@@ -15,7 +15,10 @@ import {
 } from '@/components/PlayerPageLayout';
 import { useRuntimeConfig } from '@/components/RuntimeConfigProvider';
 import EpisodeSelector from '@/features/play/components/EpisodeSelector';
-import type { VideoLoadingStage } from '@/features/play/hooks/usePlayPageState';
+import type {
+  SourceRecommendation,
+  VideoLoadingStage,
+} from '@/features/play/hooks/usePlayPageState';
 import { getSourceFailure } from '@/lib/failed-source-cooldown';
 import { SearchResult } from '@/lib/types';
 import { normalizeInlineText } from '@/lib/utils';
@@ -49,6 +52,8 @@ interface PlayMainContentProps {
     string,
     { quality: string; loadSpeed: string; pingTime: number }
   >;
+  sourceRecommendation?: SourceRecommendation | null;
+  onDismissSourceRecommendation?: () => void;
   videoYear: string;
   favorited: boolean;
   onToggleFavorite: () => void;
@@ -339,6 +344,8 @@ export function PlayMainContent(props: PlayMainContentProps) {
     sourceSearchLoading,
     sourceSearchError,
     precomputedVideoInfo,
+    sourceRecommendation,
+    onDismissSourceRecommendation,
     videoYear,
     favorited,
     onToggleFavorite,
@@ -470,6 +477,24 @@ export function PlayMainContent(props: PlayMainContentProps) {
               onReloginAndRecover={onReloginAndRecover}
               onDismissAuthRecovery={onDismissAuthRecovery}
             />
+          )}
+          {sourceRecommendation && !playbackError && (
+            <div className='absolute right-4 top-4 z-20 max-w-[min(22rem,calc(100%-2rem))] rounded-lg bg-black/70 px-3 py-2 text-xs text-white shadow-lg backdrop-blur-md'>
+              <div className='font-medium'>
+                发现更优源：{sourceRecommendation.sourceName}
+              </div>
+              <div className='mt-0.5 text-white/75'>
+                {sourceRecommendation.quality} ·{' '}
+                {sourceRecommendation.loadSpeed}
+                ，可在换源中手动选择
+              </div>
+              <button
+                className='mt-1 text-white/70 hover:text-white'
+                onClick={onDismissSourceRecommendation}
+              >
+                知道了
+              </button>
+            </div>
           )}
         </>
       }

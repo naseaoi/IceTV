@@ -193,6 +193,26 @@ function materializeAggregatedResults(index: SearchAggregationIndex) {
   return groupedResults;
 }
 
+function createAggregatedResultItem(
+  mapKey: string,
+  group: SearchResult[],
+): AggregatedResultItem {
+  const title = group[0]?.title || '';
+  const poster = group[0]?.poster || '';
+  const year = group[0]?.year || 'unknown';
+  const stats = computeGroupStats(group);
+
+  return {
+    mapKey,
+    group,
+    title,
+    poster,
+    year,
+    type: stats.episodes === 1 ? 'movie' : 'tv',
+    stats,
+  };
+}
+
 export function useSearchAggregation({
   searchResults,
   filterAll,
@@ -228,22 +248,9 @@ export function useSearchAggregation({
   );
 
   const aggregatedResultItems = useMemo<AggregatedResultItem[]>(() => {
-    return aggregatedResults.map(([mapKey, group]) => {
-      const title = group[0]?.title || '';
-      const poster = group[0]?.poster || '';
-      const year = group[0]?.year || 'unknown';
-      const stats = computeGroupStats(group);
-
-      return {
-        mapKey,
-        group,
-        title,
-        poster,
-        year,
-        type: stats.episodes === 1 ? 'movie' : 'tv',
-        stats,
-      };
-    });
+    return aggregatedResults.map(([mapKey, group]) =>
+      createAggregatedResultItem(mapKey, group),
+    );
   }, [aggregatedResults]);
 
   // 聚合增量更新
@@ -383,17 +390,20 @@ export function useSearchAggregation({
       return aggregatedResultItems;
     }
 
-    const filtered = aggregatedResultItems.filter((item) => {
-      const gTitle = item.title;
-      const gYear = item.year;
-      const hasSource =
+    const filtered = aggregatedResultItems.flatMap((item) => {
+      const group =
         source === 'all'
-          ? true
-          : item.group.some((groupItem) => groupItem.source === source);
-      if (!hasSource) return false;
-      if (title !== 'all' && gTitle !== title) return false;
-      if (year !== 'all' && gYear !== year) return false;
-      return true;
+          ? item.group
+          : item.group.filter((groupItem) => groupItem.source === source);
+      if (group.length === 0) return [];
+
+      const filteredItem =
+        source === 'all'
+          ? item
+          : createAggregatedResultItem(item.mapKey, group);
+      if (title !== 'all' && filteredItem.title !== title) return [];
+      if (year !== 'all' && filteredItem.year !== year) return [];
+      return [filteredItem];
     });
 
     if (yearOrder === 'none') {

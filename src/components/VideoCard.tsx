@@ -288,6 +288,9 @@ const VideoCard = forwardRef<VideoCardHandle, VideoCardProps>(
       }
     }, [isAggregate, aggregateGroup]);
 
+    const isSingleAggregate = isAggregate && aggregateGroup?.length === 1;
+    const isDirectStartup = from === 'playrecord' && !isAggregate;
+
     /** 根据卡片数据构建目标 URL，返回 null 表示无有效跳转 */
     const buildPlayUrl = useCallback((): string | null => {
       if (origin === 'live' && actualSource && actualId) {
@@ -318,8 +321,8 @@ const VideoCard = forwardRef<VideoCardHandle, VideoCardProps>(
         return `/play?title=${encodeURIComponent(actualTitle.trim())}${
           actualYear ? `&year=${actualYear}` : ''
         }${actualSearchType ? `&stype=${actualSearchType}` : ''}${
-          isAggregate ? '&prefer=true' : ''
-        }${
+          isAggregate && !isSingleAggregate ? '&prefer=true' : ''
+        }${isSingleAggregate ? '&singleSource=true' : ''}${
           actualQuery ? `&stitle=${encodeURIComponent(actualQuery.trim())}` : ''
         }`;
       }
@@ -327,7 +330,9 @@ const VideoCard = forwardRef<VideoCardHandle, VideoCardProps>(
         return `/play?source=${actualSource}&id=${actualId}&title=${encodeURIComponent(
           actualTitle,
         )}${actualYear ? `&year=${actualYear}` : ''}${
-          isAggregate ? '&prefer=true' : ''
+          isAggregate && !isSingleAggregate ? '&prefer=true' : ''
+        }${isSingleAggregate ? '&singleSource=true' : ''}${
+          isDirectStartup ? '&directStart=true' : ''
         }${
           actualQuery ? `&stitle=${encodeURIComponent(actualQuery.trim())}` : ''
         }${actualSearchType ? `&stype=${actualSearchType}` : ''}`;
@@ -341,6 +346,8 @@ const VideoCard = forwardRef<VideoCardHandle, VideoCardProps>(
       actualTitle,
       actualYear,
       isAggregate,
+      isSingleAggregate,
+      isDirectStartup,
       actualQuery,
       actualSearchType,
       saveAggregateGroup,

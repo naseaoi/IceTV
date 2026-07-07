@@ -39,6 +39,19 @@ import { SearchResult } from '@/lib/types';
 
 const DIRECT_STARTUP_LOADING_DELAY_MS = 140;
 
+function readInitialAggregateGroupLength() {
+  if (typeof window === 'undefined') return 0;
+
+  try {
+    const raw = window.sessionStorage.getItem('aggregate_group');
+    if (!raw) return 0;
+    const parsed = JSON.parse(raw) as unknown;
+    return Array.isArray(parsed) ? parsed.length : 0;
+  } catch {
+    return 0;
+  }
+}
+
 export function PlayPageClient() {
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -115,6 +128,8 @@ export function PlayPageClient() {
     optimizationEnabled,
     precomputedVideoInfo,
     setPrecomputedVideoInfo,
+    sourceRecommendation,
+    setSourceRecommendation,
     clearTargetEpisodeProgressRef,
     isEpisodeSelectorCollapsed,
     setIsEpisodeSelectorCollapsed,
@@ -138,14 +153,29 @@ export function PlayPageClient() {
   } = state;
 
   const totalEpisodes = detail?.episodes?.length || 0;
+  const [isSingleAggregateStartup] = useState(
+    () =>
+      searchParams.get('singleSource') === 'true' ||
+      (needPreferRef.current && readInitialAggregateGroupLength() === 1),
+  );
+  const [isDirectStartup] = useState(
+    () => searchParams.get('directStart') === 'true',
+  );
+  const shouldHideStartupLoading = isSingleAggregateStartup || isDirectStartup;
   const canDelayStartupLoading =
-    !!currentSource && !!currentId && !needPreferRef.current;
+    (!!currentSource && !!currentId && !needPreferRef.current) ||
+    shouldHideStartupLoading;
   const [showStartupLoading, setShowStartupLoading] = useState(false);
 
   const autoSwitchSourceOnTimeout = useAutoSwitchOnTimeoutSetting();
 
   useEffect(() => {
     if (!loading) {
+      setShowStartupLoading(false);
+      return;
+    }
+
+    if (shouldHideStartupLoading) {
       setShowStartupLoading(false);
       return;
     }
@@ -161,7 +191,7 @@ export function PlayPageClient() {
     }, DIRECT_STARTUP_LOADING_DELAY_MS);
 
     return () => window.clearTimeout(timer);
-  }, [loading, canDelayStartupLoading]);
+  }, [loading, canDelayStartupLoading, shouldHideStartupLoading]);
 
   const cleanupPlayer = useCallback(() => {
     const player = artPlayerRef.current;
@@ -226,6 +256,7 @@ export function PlayPageClient() {
     setSourceSearchLoading,
     setSourceSearchError,
     setPrecomputedVideoInfo,
+    setSourceRecommendation,
   });
 
   const {
@@ -616,6 +647,8 @@ export function PlayPageClient() {
       sourceSearchLoading={sourceSearchLoading}
       sourceSearchError={sourceSearchError}
       precomputedVideoInfo={precomputedVideoInfo}
+      sourceRecommendation={sourceRecommendation}
+      onDismissSourceRecommendation={() => setSourceRecommendation(null)}
       videoYear={videoYear}
       favorited={favorited}
       onToggleFavorite={handleToggleFavorite}

@@ -6,6 +6,10 @@ import {
   useRef,
 } from 'react';
 
+import type {
+  SourceRecommendation,
+  VideoQualityInfo,
+} from '@/features/play/hooks/usePlayPageState';
 import {
   readDetailSnapshot,
   saveDetailSnapshot,
@@ -21,6 +25,7 @@ import { SearchResult } from '@/lib/types';
 
 const DETAIL_CACHE_TTL_MS = 3 * 60 * 1000;
 const IS_DEVELOPMENT = process.env.NODE_ENV !== 'production';
+const SOURCE_PROBE_FOREGROUND_LIMIT = 4;
 const detailCache = new Map<
   string,
   { data: SearchResult; expiresAt: number }
@@ -54,162 +59,210 @@ function setCachedDetail(source: string, id: string, data: SearchResult) {
   }
 }
 
-/** 高速源缩短等待，低速源保持完整窗口 */
-function resolveHarvestWindow(testResult: { loadSpeed: string }): number {
-  const match = testResult.loadSpeed.match(/^([\d.]+)\s*(Mbps|KB\/s|MB\/s)$/);
-  if (!match) return 1500;
-  const value = parseFloat(match[1]);
-  const unit = match[2];
-  let speedKBps: number;
-  if (unit === 'Mbps') speedKBps = (value * 1024) / 8;
-  else speedKBps = unit === 'MB/s' ? value * 1024 : value;
-  if (speedKBps >= 2048) return 500;
-  if (speedKBps >= 1024) return 800;
-  return 1500;
+type SourceProbeResult = {
+  source: SearchResult;
+  testResult: VideoQualityInfo;
+};
+
+function getSourceKey(source: SearchResult) {
+  return `${source.source}-${source.id}`;
+}
+
+function scoreProbeResults(results: SourceProbeResult[]) {
+  const validSpeeds = results
+    .map((result) => {
+      const match = result.testResult.loadSpeed.match(
+        /^([\d.]+)\s*(Mbps|KB\/s|MB\/s)$/,
+      );
+      if (!match) return 0;
+      const value = parseFloat(match[1]);
+      const unit = match[2];
+      if (unit === 'Mbps') return (value * 1024) / 8;
+      return unit === 'MB/s' ? value * 1024 : value;
+    })
+    .filter((speed) => speed > 0);
+  const maxSpeed = validSpeeds.length > 0 ? Math.max(...validSpeeds) : 1024;
+  const validPings = results
+    .map((result) => result.testResult.pingTime)
+    .filter((ping) => ping > 0);
+  const minPing = validPings.length > 0 ? Math.min(...validPings) : 50;
+  const maxPing = validPings.length > 0 ? Math.max(...validPings) : 1000;
+
+  return results
+    .map((result) => ({
+      ...result,
+      score: calculateSourceScore(
+        result.testResult,
+        maxSpeed,
+        minPing,
+        maxPing,
+      ),
+    }))
+    .sort((a, b) => b.score - a.score);
 }
 
 async function preferBestSource(
   sources: SearchResult[],
   setPrecomputedVideoInfo: Dispatch<
-    SetStateAction<
-      Map<string, { quality: string; loadSpeed: string; pingTime: number }>
-    >
+    SetStateAction<Map<string, VideoQualityInfo>>
+  >,
+  setSourceRecommendation: Dispatch<
+    SetStateAction<SourceRecommendation | null>
   >,
   signal?: AbortSignal,
 ): Promise<SearchResult> {
   if (sources.length === 1) return sources[0];
 
-  // 预先获取流量路由配置（在 Promise 构造器外 await）
+  setSourceRecommendation(null);
   const proxyModes = await getProxyModes();
   if (signal?.aborted) return sources[0];
 
-  type TestResult = {
-    source: SearchResult;
-    testResult: { quality: string; loadSpeed: string; pingTime: number };
+  const collectedResults: SourceProbeResult[] = [];
+  let selectedResult: SourceProbeResult | null = null;
+  let recommendedKey = '';
+
+  const writeProbeInfo = (source: SearchResult, info: VideoQualityInfo) => {
+    const key = getSourceKey(source);
+    setPrecomputedVideoInfo((prev) => {
+      const next = new Map(prev);
+      next.set(key, info);
+      return next;
+    });
   };
 
-  const collectedResults: TestResult[] = [];
-  let harvestTimer: ReturnType<typeof setTimeout> | null = null;
-  let settled = false;
+  const notifyBetterSource = () => {
+    if (!selectedResult || collectedResults.length < 2) return;
+    const selectedKey = getSourceKey(selectedResult.source);
+    const scored = scoreProbeResults(collectedResults);
+    const best = scored[0];
+    const selected = scored.find(
+      (item) => getSourceKey(item.source) === selectedKey,
+    );
+    if (!best || !selected) return;
+    const bestKey = getSourceKey(best.source);
+    if (bestKey === selectedKey) return;
+    if (bestKey === recommendedKey) return;
+    if (best.score <= selected.score) return;
 
-  return new Promise<SearchResult>((resolveMain) => {
-    if (signal?.aborted) {
-      resolveMain(sources[0]);
-      return;
+    recommendedKey = bestKey;
+    setSourceRecommendation({
+      sourceName: best.source.source_name || best.source.source || '更优源',
+      quality: best.testResult.quality,
+      loadSpeed: best.testResult.loadSpeed,
+    });
+  };
+
+  const probeSource = async (
+    source: SearchResult,
+  ): Promise<SourceProbeResult | null> => {
+    if (signal?.aborted) return null;
+    const episodeUrl = source.episodes?.[0];
+    if (!episodeUrl) {
+      writeProbeInfo(source, {
+        quality: '未知',
+        loadSpeed: '未知',
+        pingTime: 0,
+        hasError: true,
+      });
+      return null;
     }
-    const onAbort = () => {
-      if (!settled) {
-        settled = true;
-        if (harvestTimer) clearTimeout(harvestTimer);
-        resolveMain(sources[0]);
-      }
-    };
-    signal?.addEventListener('abort', onAbort, { once: true });
 
-    const finalize = () => {
-      if (settled) return;
-      settled = true;
-      if (harvestTimer) clearTimeout(harvestTimer);
-
-      const newVideoInfoMap = new Map<
-        string,
-        {
-          quality: string;
-          loadSpeed: string;
-          pingTime: number;
-          hasError?: boolean;
-        }
-      >();
-      const collectedKeys = new Set<string>();
-      for (const r of collectedResults) {
-        const key = `${r.source.source}-${r.source.id}`;
-        newVideoInfoMap.set(key, r.testResult);
-        collectedKeys.add(key);
-      }
-      for (const s of sources) {
-        const key = `${s.source}-${s.id}`;
-        if (!collectedKeys.has(key)) {
-          newVideoInfoMap.set(key, {
-            quality: '未知',
-            loadSpeed: '未知',
-            pingTime: 0,
-            hasError: true,
-          });
-        }
-      }
-      setPrecomputedVideoInfo(newVideoInfoMap);
-
-      if (collectedResults.length === 0) {
-        resolveMain(sources[0]);
-        return;
-      }
-
-      const validSpeeds = collectedResults
-        .map((r) => {
-          const m = r.testResult.loadSpeed.match(
-            /^([\d.]+)\s*(Mbps|KB\/s|MB\/s)$/,
-          );
-          if (!m) return 0;
-          const v = parseFloat(m[1]);
-          const u = m[2];
-          if (u === 'Mbps') return (v * 1024) / 8;
-          return u === 'MB/s' ? v * 1024 : v;
-        })
-        .filter((s) => s > 0);
-      const maxSpeed = validSpeeds.length > 0 ? Math.max(...validSpeeds) : 1024;
-      const validPings = collectedResults
-        .map((r) => r.testResult.pingTime)
-        .filter((p) => p > 0);
-      const minPing = validPings.length > 0 ? Math.min(...validPings) : 50;
-      const maxPing = validPings.length > 0 ? Math.max(...validPings) : 1000;
-
-      const scored = collectedResults.map((r) => ({
-        ...r,
-        score: calculateSourceScore(r.testResult, maxSpeed, minPing, maxPing),
-      }));
-      scored.sort((a, b) => b.score - a.score);
-
-      const runnerUpEpisode = scored[1]?.source.episodes?.[0];
-      if (runnerUpEpisode && isVodM3u8Url(runnerUpEpisode)) {
-        prefetchM3U8(
-          `/api/proxy/m3u8?url=${encodeURIComponent(runnerUpEpisode)}`,
-        );
-      }
-
-      resolveMain(scored[0].source);
-    };
-
-    let pendingCount = sources.length;
-    for (const source of sources) {
-      if (!source.episodes || source.episodes.length === 0) {
-        pendingCount--;
-        if (pendingCount === 0) finalize();
-        continue;
-      }
-      const episodeUrl = source.episodes[0];
+    try {
       const useProxy = shouldUseServerProxy(
         source.source,
         episodeUrl,
         proxyModes,
       );
-      probeVodEpisodeUrl(episodeUrl, useProxy, source.source)
-        .then((testResult) => {
-          if (settled) return;
-          collectedResults.push({ source, testResult });
-          if (!harvestTimer) {
-            const windowMs = resolveHarvestWindow(testResult);
-            harvestTimer = setTimeout(finalize, windowMs);
-          }
-        })
-        .catch(() => {})
-        .finally(() => {
-          pendingCount--;
-          if (pendingCount === 0 && !settled) finalize();
+      const testResult = await probeVodEpisodeUrl(
+        episodeUrl,
+        useProxy,
+        source.source,
+      );
+      if (signal?.aborted) return null;
+      const result = { source, testResult };
+      collectedResults.push(result);
+      writeProbeInfo(source, testResult);
+      notifyBetterSource();
+      return result;
+    } catch {
+      if (!signal?.aborted) {
+        writeProbeInfo(source, {
+          quality: '错误',
+          loadSpeed: '未知',
+          pingTime: 0,
+          hasError: true,
         });
+      }
+      return null;
     }
-  });
-}
+  };
 
+  const probeBatchUntilSuccess = async (
+    batch: SearchResult[],
+  ): Promise<SourceProbeResult | null> => {
+    if (batch.length === 0) return null;
+
+    return new Promise((resolve) => {
+      let pending = batch.length;
+      let resolved = false;
+
+      batch.forEach((source) => {
+        probeSource(source)
+          .then((result) => {
+            if (result && !resolved) {
+              resolved = true;
+              selectedResult = result;
+              resolve(result);
+            }
+          })
+          .finally(() => {
+            pending -= 1;
+            if (pending === 0 && !resolved) {
+              resolve(null);
+            }
+          });
+      });
+    });
+  };
+
+  const probeRemainingSources = async (remainingSources: SearchResult[]) => {
+    for (
+      let start = 0;
+      start < remainingSources.length && !signal?.aborted;
+      start += SOURCE_PROBE_FOREGROUND_LIMIT
+    ) {
+      const batch = remainingSources.slice(
+        start,
+        start + SOURCE_PROBE_FOREGROUND_LIMIT,
+      );
+      await Promise.all(batch.map((source) => probeSource(source)));
+    }
+  };
+
+  for (
+    let start = 0;
+    start < sources.length && !signal?.aborted;
+    start += SOURCE_PROBE_FOREGROUND_LIMIT
+  ) {
+    const batch = sources.slice(start, start + SOURCE_PROBE_FOREGROUND_LIMIT);
+    const result = await probeBatchUntilSuccess(batch);
+    if (result) {
+      const remaining = sources.slice(start + SOURCE_PROBE_FOREGROUND_LIMIT);
+      void probeRemainingSources(remaining);
+      const runnerUpEpisode = batch.find(
+        (source) => getSourceKey(source) !== getSourceKey(result.source),
+      )?.episodes?.[0];
+      if (runnerUpEpisode && isVodM3u8Url(runnerUpEpisode)) {
+        prefetchM3U8(
+          `/api/proxy/m3u8?url=${encodeURIComponent(runnerUpEpisode)}`,
+        );
+      }
+      return result.source;
+    }
+  }
+
+  return sources[0];
+}
 export function updateVideoUrl(
   detailData: SearchResult | null,
   episodeIndex: number,
@@ -270,7 +323,7 @@ function mergeSourceResult(
 }
 
 // ---------------------------------------------------------------------------
-// usePlayInit — 入口初始化 hook
+// usePlayInit 入口初始化 hook
 // ---------------------------------------------------------------------------
 
 interface UsePlayInitParams {
@@ -303,9 +356,10 @@ interface UsePlayInitParams {
   setSourceSearchLoading: Dispatch<SetStateAction<boolean>>;
   setSourceSearchError: Dispatch<SetStateAction<string | null>>;
   setPrecomputedVideoInfo: Dispatch<
-    SetStateAction<
-      Map<string, { quality: string; loadSpeed: string; pingTime: number }>
-    >
+    SetStateAction<Map<string, VideoQualityInfo>>
+  >;
+  setSourceRecommendation: Dispatch<
+    SetStateAction<SourceRecommendation | null>
   >;
 }
 
@@ -342,6 +396,7 @@ export function usePlayInit({
   setSourceSearchLoading,
   setSourceSearchError,
   setPrecomputedVideoInfo,
+  setSourceRecommendation,
 }: UsePlayInitParams) {
   const initialParamsRef = useRef({
     currentEpisodeIndex,
@@ -362,6 +417,7 @@ export function usePlayInit({
     setLoadingStage,
     setNeedPrefer,
     setPrecomputedVideoInfo,
+    setSourceRecommendation,
     setSourceSearchError,
     setSourceSearchLoading,
     setVideoCover,
@@ -395,6 +451,7 @@ export function usePlayInit({
       setLoadingStage,
       setNeedPrefer,
       setPrecomputedVideoInfo,
+      setSourceRecommendation,
       setSourceSearchError,
       setSourceSearchLoading,
       setVideoCover,
@@ -568,6 +625,8 @@ export function usePlayInit({
       newUrl.searchParams.set('year', resolvedYear);
       newUrl.searchParams.set('title', detailData.title);
       newUrl.searchParams.delete('prefer');
+      newUrl.searchParams.delete('singleSource');
+      newUrl.searchParams.delete('directStart');
       window.history.replaceState({}, '', newUrl.toString());
 
       setLoadingStage('ready');
@@ -688,16 +747,19 @@ export function usePlayInit({
         }
       }
 
-      if (
+      const shouldPreferSource =
         (!currentSource || !currentId || needPreferRef.current) &&
-        optimizationEnabled
-      ) {
+        optimizationEnabled &&
+        sourcesInfo.length > 1;
+
+      if (shouldPreferSource) {
         setLoadingStage('preferring');
         setLoadingMessage('正在优选最佳播放源...');
 
         detailData = await preferBestSource(
           sourcesInfo,
           setPrecomputedVideoInfo,
+          setSourceRecommendation,
           signal,
         );
       }
