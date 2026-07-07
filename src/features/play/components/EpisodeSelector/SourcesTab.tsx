@@ -21,7 +21,7 @@ import { collapseSourcesForDisplay } from '@/lib/source-bundle';
 import { normalizeTitleForSourceMatch } from '@/lib/source-match';
 import { SearchResult } from '@/lib/types';
 
-const VIDEO_INFO_BATCH_SIZE = 3;
+export const VIDEO_INFO_BATCH_SIZE = 4;
 
 interface SourcesTabProps {
   availableSources: SearchResult[];

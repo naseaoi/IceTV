@@ -1,7 +1,8 @@
-import { Heart, Link, PlayCircleIcon, Trash2 } from 'lucide-react';
+import { Link, PlayCircleIcon, Trash2 } from 'lucide-react';
 import type React from 'react';
 
 import CoverImage from '@/components/CoverImage';
+import { FavoriteHeartButton } from '@/components/FavoriteHeartButton';
 import type {
   VideoCardDisplayConfig,
   VideoCardProps,
@@ -128,7 +129,7 @@ interface VideoCardPosterProps {
   progress?: number;
   visibleFavorited: boolean;
   onDeleteRecord: React.MouseEventHandler<SVGSVGElement>;
-  onToggleFavorite: React.MouseEventHandler<SVGSVGElement>;
+  onToggleFavorite: React.MouseEventHandler<HTMLButtonElement>;
 }
 
 export function VideoCardPoster({
@@ -206,14 +207,9 @@ export function VideoCardPoster({
             />
           )}
           {config.showHeart && from !== 'search' && (
-            <Heart
+            <FavoriteHeartButton
+              favorited={visibleFavorited}
               onClick={onToggleFavorite}
-              size={20}
-              className={`transition-all duration-300 ease-out ${
-                visibleFavorited
-                  ? 'fill-red-600 stroke-red-600'
-                  : 'fill-transparent stroke-white hover:stroke-red-400'
-              } hover:scale-[1.1]`}
               style={noSelectStyle}
               onContextMenu={preventContextMenu}
             />

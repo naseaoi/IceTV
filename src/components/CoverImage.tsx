@@ -232,20 +232,64 @@ const CoverImage: React.FC<CoverImageProps> = memo(function CoverImage({
     releaseSlotRef.current = null;
   }, [cacheKeys]);
 
-  useEffect(() => {
-    if (!slotGranted || loaded || hasError) return;
-    const image = imageRef.current;
-    if (image?.complete && image.naturalWidth > 0) {
-      handleLoad();
-    }
-  }, [handleLoad, hasError, loaded, processed, slotGranted]);
-
   const handleError = useCallback(() => {
     setHasError(true);
     setLoaded(true);
     releaseSlotRef.current?.();
     releaseSlotRef.current = null;
   }, []);
+
+  useEffect(() => {
+    if (!slotGranted || loaded || hasError) return;
+
+    const image = imageRef.current;
+    if (!image) return;
+
+    let cancelled = false;
+    let intervalId: ReturnType<typeof setInterval> | null = null;
+    let timeoutId: ReturnType<typeof setTimeout> | null = null;
+
+    const finishFromImageState = () => {
+      if (cancelled || !image.complete) return false;
+      if (image.naturalWidth > 0) {
+        handleLoad();
+      } else {
+        handleError();
+      }
+      return true;
+    };
+
+    if (finishFromImageState()) {
+      return;
+    }
+
+    if (typeof image.decode === 'function') {
+      void image
+        .decode()
+        .then(finishFromImageState)
+        .catch(finishFromImageState);
+    }
+
+    intervalId = setInterval(() => {
+      if (finishFromImageState() && intervalId) {
+        clearInterval(intervalId);
+        intervalId = null;
+      }
+    }, 250);
+
+    timeoutId = setTimeout(() => {
+      if (intervalId) {
+        clearInterval(intervalId);
+        intervalId = null;
+      }
+    }, 8000);
+
+    return () => {
+      cancelled = true;
+      if (intervalId) clearInterval(intervalId);
+      if (timeoutId) clearTimeout(timeoutId);
+    };
+  }, [handleError, handleLoad, hasError, loaded, processed, slotGranted]);
 
   if (showFallback) {
     return (
