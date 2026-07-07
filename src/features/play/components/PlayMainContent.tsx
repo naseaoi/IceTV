@@ -19,7 +19,6 @@ import type {
   SourceRecommendation,
   VideoLoadingStage,
 } from '@/features/play/hooks/usePlayPageState';
-import { getSourceFailure } from '@/lib/failed-source-cooldown';
 import { SearchResult } from '@/lib/types';
 import { normalizeInlineText } from '@/lib/utils';
 
@@ -393,16 +392,7 @@ export function PlayMainContent(props: PlayMainContentProps) {
   );
   const loadingTimeoutMs = loadingTimeoutSeconds * 1000;
   const onLoadingTimeoutRef = useRef(onLoadingTimeout);
-  const currentSourceFailure = useMemo(() => {
-    const key =
-      currentSource && currentId ? `${currentSource}-${currentId}` : '';
-    return key ? getSourceFailure(key) : null;
-  }, [currentSource, currentId]);
-  const loadingStatusText =
-    realtimeLoadSpeed ||
-    (currentSourceFailure?.coolingDown
-      ? `当前源${currentSourceFailure.label}`
-      : '');
+  const loadingStatusText = realtimeLoadSpeed;
 
   useEffect(() => {
     onLoadingTimeoutRef.current = onLoadingTimeout;

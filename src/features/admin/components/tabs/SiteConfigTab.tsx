@@ -35,7 +35,6 @@ const DEFAULT_SITE_SETTINGS: SiteConfig = {
   EnableLiveEntry: false,
   DefaultAggregateSearch: true,
   EnableOptimization: true,
-  AutoSwitchSourceOnTimeout: false,
   LiveDirectConnect: false,
   ...DEFAULT_RUNTIME_PARAMS,
   DoubanProxyType: 'direct',
@@ -56,7 +55,6 @@ type EditableSiteSettings = Pick<
   | 'EnableLiveEntry'
   | 'DefaultAggregateSearch'
   | 'EnableOptimization'
-  | 'AutoSwitchSourceOnTimeout'
   | 'LiveDirectConnect'
   | 'DoubanProxyType'
   | 'BangumiDataSource'
@@ -83,8 +81,6 @@ function buildSiteSettings(config: AdminConfig): SiteConfig {
     EnableLiveEntry: config.SiteConfig.EnableLiveEntry ?? false,
     DefaultAggregateSearch: config.SiteConfig.DefaultAggregateSearch ?? true,
     EnableOptimization: config.SiteConfig.EnableOptimization ?? true,
-    AutoSwitchSourceOnTimeout:
-      config.SiteConfig.AutoSwitchSourceOnTimeout ?? false,
     LiveDirectConnect: config.SiteConfig.LiveDirectConnect ?? false,
     DisableYellowFilter: config.SiteConfig.DisableYellowFilter ?? false,
     FluidSearch: config.SiteConfig.FluidSearch ?? true,
@@ -101,7 +97,6 @@ function normalizeEditableSiteSettings(
     EnableLiveEntry: value.EnableLiveEntry ?? false,
     DefaultAggregateSearch: value.DefaultAggregateSearch ?? true,
     EnableOptimization: value.EnableOptimization ?? true,
-    AutoSwitchSourceOnTimeout: value.AutoSwitchSourceOnTimeout ?? false,
     LiveDirectConnect: value.LiveDirectConnect ?? false,
     DoubanProxyType: normalizeSiteDoubanProxyType(value.DoubanProxyType),
     BangumiDataSource: normalizeSiteBangumiDataSource(value.BangumiDataSource),
@@ -192,7 +187,6 @@ const SiteConfigComponent = ({
     siteConfigKey:
       | 'DefaultAggregateSearch'
       | 'EnableOptimization'
-      | 'AutoSwitchSourceOnTimeout'
       | 'FluidSearch'
       | 'LiveDirectConnect',
   ) => {

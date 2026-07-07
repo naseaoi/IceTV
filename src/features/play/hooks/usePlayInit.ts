@@ -585,13 +585,52 @@ export function usePlayInit({
       }
     };
 
+    let aggregateGroupRawToClear = '';
+
+    const clearAggregateGroup = () => {
+      const rawToClear = aggregateGroupRawToClear;
+      if (!rawToClear) return;
+      aggregateGroupRawToClear = '';
+      window.setTimeout(() => {
+        try {
+          if (sessionStorage.getItem('aggregate_group') === rawToClear) {
+            sessionStorage.removeItem('aggregate_group');
+          }
+        } catch {
+          return;
+        }
+      }, 10000);
+    };
+
+    const clearInvalidAggregateGroup = (raw: string) => {
+      try {
+        if (sessionStorage.getItem('aggregate_group') === raw) {
+          sessionStorage.removeItem('aggregate_group');
+        }
+      } catch {
+        return;
+      }
+    };
+
     const loadAggregateGroup = (): SearchResult[] | null => {
       try {
         const raw = sessionStorage.getItem('aggregate_group');
         if (raw) {
-          sessionStorage.removeItem('aggregate_group');
           const parsed = JSON.parse(raw) as SearchResult[];
-          if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+          if (Array.isArray(parsed) && parsed.length > 0) {
+            const playableGroup = filterSourcesForPlayback(parsed, {
+              title: videoTitleRef.current,
+              year: videoYearRef.current,
+              searchType:
+                searchType === 'tv' || searchType === 'movie' ? searchType : '',
+            });
+            if (playableGroup.length === 0) {
+              clearInvalidAggregateGroup(raw);
+              return null;
+            }
+            aggregateGroupRawToClear = raw;
+            return parsed;
+          }
         }
       } catch {
         return null;
@@ -628,6 +667,7 @@ export function usePlayInit({
       newUrl.searchParams.delete('singleSource');
       newUrl.searchParams.delete('directStart');
       window.history.replaceState({}, '', newUrl.toString());
+      clearAggregateGroup();
 
       setLoadingStage('ready');
       setLoadingMessage('准备就绪，即将开始播放...');
@@ -727,6 +767,7 @@ export function usePlayInit({
       }
       if (signal.aborted) return;
       if (sourcesInfo.length === 0) {
+        clearAggregateGroup();
         setError('未找到匹配结果');
         setLoading(false);
         return;

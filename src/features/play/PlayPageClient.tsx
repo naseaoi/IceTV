@@ -10,7 +10,6 @@ import {
 } from '@/features/play/components/PlayStateViews';
 import { useArtPlayer } from '@/features/play/hooks/useArtPlayer';
 import { useAuthRecovery } from '@/features/play/hooks/useAuthRecovery';
-import { useAutoSwitchOnTimeoutSetting } from '@/features/play/hooks/useAutoSwitchOnTimeoutSetting';
 import { useEpisodeSwitch } from '@/features/play/hooks/useEpisodeSwitch';
 import { usePlayFavorite } from '@/features/play/hooks/usePlayFavorite';
 import { updateVideoUrl, usePlayInit } from '@/features/play/hooks/usePlayInit';
@@ -26,7 +25,6 @@ import {
 import { writePlayerInfo } from '@/features/play/lib/sourceProbeStore';
 import { usePlaybackStatsReporter } from '@/features/playback-stats/hooks/usePlaybackStatsReporter';
 import { usePlayerKeyboard } from '@/hooks/usePlayerKeyboard';
-import { clearSourceFailure } from '@/lib/failed-source-cooldown';
 import { isLazyEpisodeUrl } from '@/lib/lazy-episodes';
 import {
   destroyManagedHls,
@@ -122,8 +120,6 @@ export function PlayPageClient() {
     sourceChangeRequestIdRef,
     pendingSourceSwitchCleanupRef,
     sourceSwitchEpisodeAnchorRef,
-    failedSourcesRef,
-    autoFallbackInProgressRef,
     playbackRequestModeRef,
     optimizationEnabled,
     precomputedVideoInfo,
@@ -166,8 +162,6 @@ export function PlayPageClient() {
     (!!currentSource && !!currentId && !needPreferRef.current) ||
     shouldHideStartupLoading;
   const [showStartupLoading, setShowStartupLoading] = useState(false);
-
-  const autoSwitchSourceOnTimeout = useAutoSwitchOnTimeoutSetting();
 
   useEffect(() => {
     if (!loading) {
@@ -358,8 +352,6 @@ export function PlayPageClient() {
     finalizePendingSourceSwitchCleanup,
   } = useSourceSwitch({
     availableSources,
-    precomputedVideoInfo,
-    autoSwitchSourceOnTimeout,
     currentEpisodeIndex,
     artPlayerRef,
     currentSourceRef,
@@ -373,8 +365,6 @@ export function PlayPageClient() {
     clearTargetEpisodeProgressRef,
     sourceSwitchEpisodeAnchorRef,
     playbackRequestModeRef,
-    failedSourcesRef,
-    autoFallbackInProgressRef,
     pendingSourceSwitchCleanupRef,
     sourceChangeRequestIdRef,
     setError,
@@ -462,16 +452,13 @@ export function PlayPageClient() {
       .catch(() => {
         if (cancelled) return;
         handleLoadingTimeout();
-        if (!autoSwitchSourceOnTimeout) {
-          setRealtimeLoadSpeed('播放地址解析失败');
-        }
+        setRealtimeLoadSpeed('播放地址解析失败');
       });
 
     return () => {
       cancelled = true;
     };
   }, [
-    autoSwitchSourceOnTimeout,
     currentEpisodeIndex,
     detail,
     handleLoadingTimeout,
@@ -550,9 +537,6 @@ export function PlayPageClient() {
         return;
       }
 
-      autoFallbackInProgressRef.current = false;
-      failedSourcesRef.current = new Set();
-      clearSourceFailure(`${activeSource}-${activeId}`);
       sourceSwitchEpisodeAnchorRef.current = null;
       clearTargetEpisodeProgressRef.current = false;
 
@@ -561,8 +545,6 @@ export function PlayPageClient() {
       finalizePendingSourceSwitchCleanup,
       currentSourceRef,
       currentIdRef,
-      autoFallbackInProgressRef,
-      failedSourcesRef,
       sourceSwitchEpisodeAnchorRef,
       clearTargetEpisodeProgressRef,
     ]),
@@ -663,6 +645,10 @@ export function PlayPageClient() {
   );
 
   if (loading) {
+    if (shouldHideStartupLoading) {
+      return renderMainContent(null);
+    }
+
     if (!showStartupLoading) return null;
 
     return (

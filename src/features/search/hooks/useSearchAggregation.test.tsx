@@ -107,4 +107,63 @@ describe('useSearchAggregation', () => {
       '量子资源',
     ]);
   });
+
+  it('keeps selected source card stats while streaming appends other sources', () => {
+    const lziResult = createResult({
+      id: 'b',
+      title: 'Re：从零开始的异世界生活',
+      source: 'lzi',
+      source_name: '量子资源',
+      year: '2016',
+    });
+    const ffzyResult = createResult({
+      id: 'a',
+      title: 'Re：从零开始的异世界生活',
+      source: 'ffzy',
+      source_name: '非凡影视',
+      year: '2016',
+    });
+
+    const { result, rerender } = renderHook(
+      ({ searchResults }: { searchResults: SearchResult[] }) =>
+        useSearchAggregation({
+          searchResults,
+          filterAll: emptyFilter,
+          filterAgg: {
+            ...emptyFilter,
+            source: 'lzi',
+          },
+          searchQuery: '从零开始',
+        }),
+      {
+        initialProps: { searchResults: [lziResult] },
+      },
+    );
+
+    const item = result.current.filteredAggResults[0];
+    const cardHandle = {
+      setDoubanId: jest.fn(),
+      setEpisodes: jest.fn(),
+      setSourceNames: jest.fn(),
+    };
+
+    result.current.getGroupRef(item.mapKey).current = cardHandle;
+
+    rerender({
+      searchResults: [lziResult, ffzyResult],
+    });
+
+    expect(result.current.filteredAggResults).toHaveLength(1);
+    expect(result.current.filteredAggResults[0].group).toEqual([
+      expect.objectContaining({
+        source: 'lzi',
+        source_name: '量子资源',
+      }),
+    ]);
+    expect(cardHandle.setSourceNames).not.toHaveBeenCalledWith([
+      '量子资源',
+      '非凡影视',
+    ]);
+    expect(cardHandle.setSourceNames).not.toHaveBeenCalled();
+  });
 });

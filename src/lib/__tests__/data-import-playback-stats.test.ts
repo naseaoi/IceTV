@@ -20,7 +20,6 @@ const adminConfig: AdminConfig = {
     EnableLiveEntry: false,
     DefaultAggregateSearch: true,
     EnableOptimization: true,
-    AutoSwitchSourceOnTimeout: false,
     LiveDirectConnect: false,
     ...DEFAULT_RUNTIME_PARAMS,
     SearchDownstreamMaxPage: 5,

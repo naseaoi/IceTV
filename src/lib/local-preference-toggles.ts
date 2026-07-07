@@ -16,25 +16,16 @@ import {
   writeFluidSearch,
   writeLiveDirectConnect,
 } from '@/lib/local-preferences';
-import {
-  AUTO_SWITCH_SOURCE_ON_TIMEOUT_STORAGE_KEY,
-  readBooleanLocalSetting,
-  readDefaultAutoSwitchSourceOnTimeout,
-  removeBooleanLocalSetting,
-  writeBooleanLocalSetting,
-} from '@/lib/local-settings';
 
 export type LocalPreferenceToggleId =
   | 'defaultAggregateSearch'
   | 'enableOptimization'
-  | 'autoSwitchSourceOnTimeout'
   | 'fluidSearch'
   | 'liveDirectConnect';
 
 export type LocalPreferenceToggleSiteConfigKey =
   | 'DefaultAggregateSearch'
   | 'EnableOptimization'
-  | 'AutoSwitchSourceOnTimeout'
   | 'FluidSearch'
   | 'LiveDirectConnect';
 
@@ -75,25 +66,6 @@ export const localPreferenceToggleDefinitions: LocalPreferenceToggleDefinition[]
       readDefaultValue: readDefaultEnableOptimization,
       writeValue: writeEnableOptimization,
       resetValue: resetEnableOptimization,
-    },
-    {
-      id: 'autoSwitchSourceOnTimeout',
-      siteConfigKey: 'AutoSwitchSourceOnTimeout',
-      title: '源站超时自动换源(实验性)',
-      description: '播放源加载超时后，自动切换到下一个候选源',
-      readValue: () =>
-        readBooleanLocalSetting(
-          AUTO_SWITCH_SOURCE_ON_TIMEOUT_STORAGE_KEY,
-          readDefaultAutoSwitchSourceOnTimeout(),
-        ),
-      readDefaultValue: readDefaultAutoSwitchSourceOnTimeout,
-      writeValue: (value) =>
-        writeBooleanLocalSetting(
-          AUTO_SWITCH_SOURCE_ON_TIMEOUT_STORAGE_KEY,
-          value,
-        ),
-      resetValue: () =>
-        removeBooleanLocalSetting(AUTO_SWITCH_SOURCE_ON_TIMEOUT_STORAGE_KEY),
     },
     {
       id: 'fluidSearch',

@@ -20,7 +20,7 @@ function createSearchResult(partial: Partial<SearchResult>): SearchResult {
 }
 
 describe('episodeResumePolicy', () => {
-  it('自动换源时优先采用播放器里的稳定进度', () => {
+  it('换源时优先采用播放器里的稳定进度', () => {
     expect(
       resolveSourceSwitchCurrentPlayTime({
         playerCurrentTime: 12.8,
@@ -129,7 +129,7 @@ describe('episodeResumePolicy', () => {
     });
   });
 
-  it('切集后的自动换源不会继承上一集进度', () => {
+  it('切集后的换源不会继承上一集进度', () => {
     expect(
       resolveSourceSwitchResumeState({
         currentPlayTime: 1320,

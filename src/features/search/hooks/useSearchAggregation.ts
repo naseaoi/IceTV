@@ -253,48 +253,6 @@ export function useSearchAggregation({
     );
   }, [aggregatedResults]);
 
-  // 聚合增量更新
-  useEffect(() => {
-    const activeKeys = new Set(
-      aggregatedResultItems.map((item) => item.mapKey),
-    );
-
-    groupRefs.current.forEach((_, key) => {
-      if (!activeKeys.has(key)) {
-        groupRefs.current.delete(key);
-      }
-    });
-
-    groupStatsRef.current.forEach((_, key) => {
-      if (!activeKeys.has(key)) {
-        groupStatsRef.current.delete(key);
-      }
-    });
-
-    aggregatedResultItems.forEach(({ mapKey, stats }) => {
-      const prev = groupStatsRef.current.get(mapKey);
-      if (!prev) {
-        groupStatsRef.current.set(mapKey, stats);
-        return;
-      }
-      const ref = groupRefs.current.get(mapKey);
-      if (ref && ref.current) {
-        if (prev.episodes !== stats.episodes) {
-          ref.current.setEpisodes(stats.episodes);
-        }
-        const prevNames = (prev.source_names || []).join('|');
-        const nextNames = (stats.source_names || []).join('|');
-        if (prevNames !== nextNames) {
-          ref.current.setSourceNames(stats.source_names);
-        }
-        if (prev.douban_id !== stats.douban_id) {
-          ref.current.setDoubanId(stats.douban_id);
-        }
-        groupStatsRef.current.set(mapKey, stats);
-      }
-    });
-  }, [aggregatedResultItems]);
-
   const filterOptions = useMemo(() => {
     const { sources, titles, years } = searchIndexState.index;
 
@@ -428,6 +386,46 @@ export function useSearchAggregation({
         : bTitle.localeCompare(aTitle);
     });
   }, [aggregatedResultItems, filterAgg, trimmedSearchQuery]);
+
+  // 聚合增量更新
+  useEffect(() => {
+    const activeKeys = new Set(filteredAggResults.map((item) => item.mapKey));
+
+    groupRefs.current.forEach((_, key) => {
+      if (!activeKeys.has(key)) {
+        groupRefs.current.delete(key);
+      }
+    });
+
+    groupStatsRef.current.forEach((_, key) => {
+      if (!activeKeys.has(key)) {
+        groupStatsRef.current.delete(key);
+      }
+    });
+
+    filteredAggResults.forEach(({ mapKey, stats }) => {
+      const prev = groupStatsRef.current.get(mapKey);
+      if (!prev) {
+        groupStatsRef.current.set(mapKey, stats);
+        return;
+      }
+      const ref = groupRefs.current.get(mapKey);
+      if (ref && ref.current) {
+        if (prev.episodes !== stats.episodes) {
+          ref.current.setEpisodes(stats.episodes);
+        }
+        const prevNames = (prev.source_names || []).join('|');
+        const nextNames = (stats.source_names || []).join('|');
+        if (prevNames !== nextNames) {
+          ref.current.setSourceNames(stats.source_names);
+        }
+        if (prev.douban_id !== stats.douban_id) {
+          ref.current.setDoubanId(stats.douban_id);
+        }
+        groupStatsRef.current.set(mapKey, stats);
+      }
+    });
+  }, [filteredAggResults]);
 
   return {
     filterOptions,

@@ -134,7 +134,6 @@ function normalizeAdminConfig(value: unknown): AdminConfig {
   assertBoolean(config.SiteConfig.EnableLiveEntry, '直播入口');
   assertBoolean(config.SiteConfig.DefaultAggregateSearch, '默认聚合搜索');
   assertBoolean(config.SiteConfig.EnableOptimization, '优选和测速');
-  assertBoolean(config.SiteConfig.AutoSwitchSourceOnTimeout, '超时自动换源');
   assertBoolean(config.SiteConfig.LiveDirectConnect, 'IPTV直连');
   assertFiniteNumber(config.SiteConfig.SearchDownstreamMaxPage, '搜索页数');
   assertFiniteNumber(config.SiteConfig.SiteInterfaceCacheTime, '缓存时间');

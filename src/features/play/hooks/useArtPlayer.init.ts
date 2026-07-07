@@ -376,7 +376,7 @@ export async function initializeArtPlayer(
 
     const showSourceSwitchSuccessNotice = () => {
       const mode = playbackRequestModeRef.current;
-      if (mode !== 'manual-source' && mode !== 'auto-source') {
+      if (mode !== 'manual-source') {
         return;
       }
 
@@ -390,7 +390,7 @@ export async function initializeArtPlayer(
         stableCurrentTimeRef.current || 0,
       );
       const progressText = playTime > 1 ? '已保留进度' : '从头播放';
-      const prefix = mode === 'auto-source' ? '已自动切换到' : '已切换到';
+      const prefix = '已切换到';
       const notice = `${prefix} ${sourceName} · ${progressText}`;
 
       window.setTimeout(() => {

@@ -75,7 +75,6 @@ export default async function RootLayout({
     ENABLE_LIVE_ENTRY: publicConfig.EnableLiveEntry,
     DEFAULT_AGGREGATE_SEARCH: publicConfig.DefaultAggregateSearch,
     ENABLE_OPTIMIZATION: publicConfig.EnableOptimization,
-    AUTO_SWITCH_SOURCE_ON_TIMEOUT: publicConfig.AutoSwitchSourceOnTimeout,
     LIVE_DIRECT_CONNECT: publicConfig.LiveDirectConnect,
     CUSTOM_CATEGORIES: publicConfig.CustomCategories,
     FLUID_SEARCH: publicConfig.FluidSearch,

@@ -5,7 +5,6 @@ export interface SiteConfig {
   EnableLiveEntry: boolean;
   DefaultAggregateSearch: boolean;
   EnableOptimization: boolean;
-  AutoSwitchSourceOnTimeout: boolean;
   LiveDirectConnect: boolean;
   SearchDownstreamMaxPage: number;
   SiteInterfaceCacheTime: number;

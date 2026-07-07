@@ -18,17 +18,9 @@ import {
   registerQualityControlWhenReady,
   seedAutoQualityStartLevel,
 } from '@/features/play/lib/hlsQuality';
-import {
-  getHlsErrorStatus,
-  resolveHlsSourceFailureReason,
-} from '@/features/play/lib/hlsSourceFailure';
 import type { PlayerLoadingSessionState } from '@/features/play/lib/playerLoading';
 import type { ResumeMode } from '@/features/play/lib/resumePlayback';
 import { buildVodProxyUrl } from '@/features/play/lib/vodProxyUrl';
-import {
-  clearSourceFailure,
-  markSourceFailed,
-} from '@/lib/failed-source-cooldown';
 import { logHlsError } from '@/lib/hls-error-log';
 import { readPreferredQualityPreference } from '@/lib/local-preferences';
 import {
@@ -277,8 +269,7 @@ export function createVodM3u8Loader({
       } catch {}
       return true;
     };
-    const stopWithSourceError = (reason: string, status?: number) => {
-      markCurrentSourceFailure('proxy-error', reason, status);
+    const stopWithSourceError = () => {
       if (typeof hls.stopLoad === 'function') {
         hls.stopLoad();
       }
@@ -294,19 +285,6 @@ export function createVodM3u8Loader({
       playbackInfoContext.source && playbackInfoContext.id
         ? `${playbackInfoContext.source}-${playbackInfoContext.id}`
         : '';
-
-    const markCurrentSourceFailure = (
-      reason: string,
-      message?: string,
-      status?: number,
-    ) => {
-      if (!failureKey) return;
-      markSourceFailed(failureKey, {
-        reason,
-        message,
-        status,
-      });
-    };
 
     const preservePlaybackPositionBeforeReload = () => {
       const resumeTime = resolveSourceSwitchCurrentPlayTime({
@@ -338,7 +316,6 @@ export function createVodM3u8Loader({
       });
       reportRouteStat(false);
       setRealtimeLoadSpeed('直连失败，切换代理...');
-      markCurrentSourceFailure('cors-fallback', reason);
 
       try {
         if (sourceKey) {
@@ -475,14 +452,8 @@ export function createVodM3u8Loader({
     video.addEventListener('stalled', onStalled);
 
     const onHlsError = function (_event: unknown, data: any) {
-      const errorStatus = getHlsErrorStatus(data);
       const errorDetails = String(data?.details || '');
       const errorReason = `${String(data?.type || 'unknown')}:${errorDetails || 'fatal'}`;
-      const sourceFailureReason = resolveHlsSourceFailureReason(
-        data,
-        currentUseServerProxy,
-        Hls.ErrorTypes,
-      );
       const logResult = logHlsError(_event, data, {
         scope: 'vod',
         sourceKey: failureKey || sourceKey,
@@ -525,7 +496,7 @@ export function createVodM3u8Loader({
           data.type === Hls.ErrorTypes.NETWORK_ERROR &&
           currentUseServerProxy
         ) {
-          stopWithSourceError(errorReason, errorStatus);
+          stopWithSourceError();
           return;
         }
 
@@ -549,8 +520,6 @@ export function createVodM3u8Loader({
         if (isManifestOrLevelNetworkError && switchToServerProxy(errorReason)) {
           return;
         }
-
-        markCurrentSourceFailure(sourceFailureReason, errorReason, errorStatus);
 
         if (
           data.type === Hls.ErrorTypes.NETWORK_ERROR &&
@@ -593,7 +562,6 @@ export function createVodM3u8Loader({
         data.type === Hls.ErrorTypes.NETWORK_ERROR &&
         /frag|segment|level|manifest/i.test(errorDetails)
       ) {
-        markCurrentSourceFailure(sourceFailureReason, errorReason, errorStatus);
         setRealtimeLoadSpeed('源站响应较慢，正在继续加载');
       }
     };
@@ -608,9 +576,6 @@ export function createVodM3u8Loader({
         speedFallbackTimer = null;
       }
       reportRouteStat(true);
-      if (failureKey) {
-        clearSourceFailure(failureKey);
-      }
       const stats = data.frag.stats;
       const loadedBytes = stats.loaded ?? stats.total ?? 0;
       const startTime = stats.loading.first ?? 0;

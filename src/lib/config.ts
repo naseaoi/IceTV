@@ -289,7 +289,6 @@ async function getInitConfig(
       EnableLiveEntry: false,
       DefaultAggregateSearch: true,
       EnableOptimization: true,
-      AutoSwitchSourceOnTimeout: false,
       LiveDirectConnect: false,
       ...normalizeRuntimeParams({
         ...DEFAULT_RUNTIME_PARAMS,
@@ -482,7 +481,6 @@ export function configSelfCheck(adminConfig: AdminConfig): AdminConfig {
       EnableLiveEntry: false,
       DefaultAggregateSearch: true,
       EnableOptimization: true,
-      AutoSwitchSourceOnTimeout: false,
       LiveDirectConnect: false,
       ...normalizeRuntimeParams({
         ...DEFAULT_RUNTIME_PARAMS,
@@ -517,9 +515,6 @@ export function configSelfCheck(adminConfig: AdminConfig): AdminConfig {
   }
   if (typeof adminConfig.SiteConfig.EnableOptimization !== 'boolean') {
     adminConfig.SiteConfig.EnableOptimization = true;
-  }
-  if (typeof adminConfig.SiteConfig.AutoSwitchSourceOnTimeout !== 'boolean') {
-    adminConfig.SiteConfig.AutoSwitchSourceOnTimeout = false;
   }
   if (typeof adminConfig.SiteConfig.LiveDirectConnect !== 'boolean') {
     adminConfig.SiteConfig.LiveDirectConnect = false;
@@ -924,7 +919,6 @@ async function readPublicConfig() {
     EnableLiveEntry: config.SiteConfig.EnableLiveEntry,
     DefaultAggregateSearch: config.SiteConfig.DefaultAggregateSearch,
     EnableOptimization: config.SiteConfig.EnableOptimization,
-    AutoSwitchSourceOnTimeout: config.SiteConfig.AutoSwitchSourceOnTimeout,
     LiveDirectConnect: config.SiteConfig.LiveDirectConnect,
     ...normalizeRuntimeParams(config.SiteConfig),
     DoubanProxyType: getPublicDoubanProxyType(

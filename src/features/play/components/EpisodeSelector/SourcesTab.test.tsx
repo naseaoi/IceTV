@@ -89,7 +89,6 @@ describe('SourcesTab source sorting', () => {
     const sorted = sortSourcesForDisplay(
       [failedSource, successSource],
       snapshot,
-      new Map(),
     );
 
     expect(sorted.map((source) => source.id)).toEqual(['success', 'failed']);

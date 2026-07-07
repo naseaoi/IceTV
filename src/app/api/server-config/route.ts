@@ -46,7 +46,6 @@ export async function GET(request: NextRequest) {
     EnableLiveEntry: publicConfig.EnableLiveEntry,
     DefaultAggregateSearch: publicConfig.DefaultAggregateSearch,
     EnableOptimization: publicConfig.EnableOptimization,
-    AutoSwitchSourceOnTimeout: publicConfig.AutoSwitchSourceOnTimeout,
     LiveDirectConnect: publicConfig.LiveDirectConnect,
     CustomCategories: publicConfig.CustomCategories,
     FluidSearch: publicConfig.FluidSearch,

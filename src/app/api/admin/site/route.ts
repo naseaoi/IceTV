@@ -25,7 +25,6 @@ export async function POST(request: NextRequest) {
       EnableLiveEntry,
       DefaultAggregateSearch,
       EnableOptimization,
-      AutoSwitchSourceOnTimeout,
       LiveDirectConnect,
       SearchDownstreamMaxPage,
       SiteInterfaceCacheTime,
@@ -41,7 +40,6 @@ export async function POST(request: NextRequest) {
       EnableLiveEntry: boolean;
       DefaultAggregateSearch: boolean;
       EnableOptimization: boolean;
-      AutoSwitchSourceOnTimeout: boolean;
       LiveDirectConnect: boolean;
       SearchDownstreamMaxPage: number;
       SiteInterfaceCacheTime: number;
@@ -59,7 +57,6 @@ export async function POST(request: NextRequest) {
       typeof EnableLiveEntry !== 'boolean' ||
       typeof DefaultAggregateSearch !== 'boolean' ||
       typeof EnableOptimization !== 'boolean' ||
-      typeof AutoSwitchSourceOnTimeout !== 'boolean' ||
       typeof LiveDirectConnect !== 'boolean' ||
       typeof SearchDownstreamMaxPage !== 'number' ||
       typeof SiteInterfaceCacheTime !== 'number' ||
@@ -98,7 +95,6 @@ export async function POST(request: NextRequest) {
       EnableLiveEntry,
       DefaultAggregateSearch,
       EnableOptimization,
-      AutoSwitchSourceOnTimeout,
       LiveDirectConnect,
       SearchDownstreamMaxPage,
       SiteInterfaceCacheTime,

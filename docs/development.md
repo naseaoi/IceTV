@@ -37,8 +37,6 @@ src/
   - `enableOptimization`
   - `fluidSearch`
   - `liveDirectConnect`
-- 带事件通知的布尔设置走 `src/lib/local-settings.ts`
-  - `AUTO_SWITCH_SOURCE_ON_TIMEOUT_STORAGE_KEY`
 - Bangumi 设置走 `src/lib/bangumi-source.ts`
 - Douban 代理设置走 `src/lib/douban-source.ts`
 
