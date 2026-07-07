@@ -10,18 +10,32 @@ import { clearSearchHistory, deleteSearchHistory } from '@/lib/db.client';
 interface SearchHistoryProps {
   searchHistory: string[];
   setSearchQuery: (query: string) => void;
+  loading?: boolean;
 }
 
 export default function SearchHistory({
   searchHistory,
   setSearchQuery,
+  loading = false,
 }: SearchHistoryProps) {
   const router = useRouter();
   const [showClearConfirm, setShowClearConfirm] = useState(false);
 
   return (
     <section className='mb-12'>
-      {searchHistory.length > 0 && (
+      {loading ? (
+        <>
+          <div className='mx-auto mb-4 h-7 w-24 animate-pulse rounded-md bg-gray-200/80 dark:bg-white/[0.08]' />
+          <div className='flex flex-wrap justify-center gap-2'>
+            {Array.from({ length: 8 }).map((_, index) => (
+              <div
+                key={index}
+                className='h-9 w-20 animate-pulse rounded-full bg-gray-200/80 dark:bg-white/[0.08]'
+              />
+            ))}
+          </div>
+        </>
+      ) : searchHistory.length > 0 ? (
         <>
           <h2 className='mb-4 text-center text-xl font-bold text-gray-800 dark:text-gray-200'>
             搜索历史
@@ -62,7 +76,7 @@ export default function SearchHistory({
             ))}
           </div>
         </>
-      )}
+      ) : null}
 
       <ConfirmModal
         isOpen={showClearConfirm}

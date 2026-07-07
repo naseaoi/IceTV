@@ -719,6 +719,15 @@ export class MySqlStorage implements IStorage {
       }));
   }
 
+  async deletePlaybackSession(userName: string, id: string): Promise<void> {
+    await this.ensureInitialized();
+    const username = normalizeUsername(userName);
+    await this.pool.execute(
+      'DELETE FROM playback_sessions WHERE username = ? AND id = ?',
+      [username, id],
+    );
+  }
+
   async getPlaybackWatchTotals(
     userName: string,
     since: number,

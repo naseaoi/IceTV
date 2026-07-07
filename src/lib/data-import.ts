@@ -131,6 +131,7 @@ function normalizeAdminConfig(value: unknown): AdminConfig {
   limitString(config.SiteConfig.SiteName, '站点名称', MAX_SHORT_STRING_LENGTH);
   limitString(config.SiteConfig.SiteIcon, '站点图标', MAX_LONG_STRING_LENGTH);
   limitString(config.SiteConfig.Announcement, '公告', MAX_LONG_STRING_LENGTH);
+  limitString(config.SiteConfig.FooterText, '底部声明', MAX_LONG_STRING_LENGTH);
   assertBoolean(config.SiteConfig.EnableLiveEntry, '直播入口');
   assertBoolean(config.SiteConfig.DefaultAggregateSearch, '默认聚合搜索');
   assertBoolean(config.SiteConfig.EnableOptimization, '优选和测速');

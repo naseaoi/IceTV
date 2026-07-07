@@ -247,6 +247,7 @@ describe('admin api auth guard regression', () => {
       json: async () => ({
         SiteName: 'IceTV',
         Announcement: 'hello',
+        FooterText: '',
         EnableLiveEntry: false,
         DefaultAggregateSearch: true,
         EnableOptimization: true,

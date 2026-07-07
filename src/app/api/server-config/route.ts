@@ -31,6 +31,7 @@ export async function GET(request: NextRequest) {
     SiteName: publicConfig.SiteName,
     SiteIcon: publicConfig.SiteIcon,
     Announcement: publicConfig.Announcement,
+    FooterText: publicConfig.FooterText,
     StorageType: getStorageType(),
     Version: CURRENT_VERSION,
     OpenRegister: publicConfig.OpenRegister,

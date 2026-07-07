@@ -22,6 +22,7 @@ export async function POST(request: NextRequest) {
       SiteName,
       SiteIcon,
       Announcement,
+      FooterText,
       EnableLiveEntry,
       DefaultAggregateSearch,
       EnableOptimization,
@@ -37,6 +38,7 @@ export async function POST(request: NextRequest) {
       SiteName: string;
       SiteIcon: string;
       Announcement: string;
+      FooterText: string;
       EnableLiveEntry: boolean;
       DefaultAggregateSearch: boolean;
       EnableOptimization: boolean;
@@ -54,6 +56,7 @@ export async function POST(request: NextRequest) {
     if (
       typeof SiteName !== 'string' ||
       typeof Announcement !== 'string' ||
+      typeof FooterText !== 'string' ||
       typeof EnableLiveEntry !== 'boolean' ||
       typeof DefaultAggregateSearch !== 'boolean' ||
       typeof EnableOptimization !== 'boolean' ||
@@ -92,6 +95,7 @@ export async function POST(request: NextRequest) {
           ? SiteIcon
           : adminConfig.SiteConfig.SiteIcon || '',
       Announcement,
+      FooterText,
       EnableLiveEntry,
       DefaultAggregateSearch,
       EnableOptimization,

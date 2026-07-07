@@ -20,6 +20,11 @@ function parsePositiveInteger(value: string | null, fallback: number): number {
   return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
 }
 
+function normalizeSessionId(value: string | null): string | null {
+  const id = value?.trim() || '';
+  return /^[a-zA-Z0-9_-]{8,80}$/.test(id) ? id : null;
+}
+
 export async function GET(request: NextRequest) {
   try {
     const guardResult = await requireActiveUser(request);
@@ -64,6 +69,35 @@ export async function GET(request: NextRequest) {
     });
   } catch (err) {
     console.error('获取播放历史失败', err);
+    return NextResponse.json(
+      { error: 'Internal Server Error' },
+      { status: 500 },
+    );
+  }
+}
+
+export async function DELETE(request: NextRequest) {
+  try {
+    const guardResult = await requireActiveUser(request);
+    if (isGuardFailure(guardResult)) return guardResult.response;
+
+    const { searchParams } = new URL(request.url);
+    const id = normalizeSessionId(searchParams.get('id'));
+    if (!id) {
+      return NextResponse.json(
+        { error: 'Invalid playback history id' },
+        { status: 400 },
+      );
+    }
+
+    await db.deletePlaybackSession(guardResult.username, id);
+
+    return NextResponse.json(
+      { success: true },
+      { status: 200, headers: NO_STORE_HEADERS },
+    );
+  } catch (err) {
+    console.error('删除播放历史失败', err);
     return NextResponse.json(
       { error: 'Internal Server Error' },
       { status: 500 },

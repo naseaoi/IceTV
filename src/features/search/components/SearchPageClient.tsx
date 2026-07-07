@@ -92,6 +92,7 @@ export default function SearchPageClient() {
 
   // 搜索历史 & UI 状态
   const [searchHistory, setSearchHistory] = useState<string[]>([]);
+  const [searchHistoryLoading, setSearchHistoryLoading] = useState(true);
   const [showBackToTop, setShowBackToTop] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [showSuggestions, setShowSuggestions] = useState(false);
@@ -151,7 +152,22 @@ export default function SearchPageClient() {
   useEffect(() => {
     !urlQuery && document.getElementById('searchInput')?.focus();
 
-    getSearchHistory().then(setSearchHistory);
+    let historyCancelled = false;
+    setSearchHistoryLoading(true);
+    getSearchHistory()
+      .then((history) => {
+        if (!historyCancelled) {
+          setSearchHistory(history);
+        }
+      })
+      .catch((error) => {
+        console.error('获取搜索历史失败:', error);
+      })
+      .finally(() => {
+        if (!historyCancelled) {
+          setSearchHistoryLoading(false);
+        }
+      });
 
     const unsubscribe = subscribeToDataUpdates(
       'searchHistoryUpdated',
@@ -184,6 +200,7 @@ export default function SearchPageClient() {
     window.addEventListener('scroll', handleScroll, { passive: true });
 
     return () => {
+      historyCancelled = true;
       unsubscribe();
       window.removeEventListener('scroll', handleScroll);
       if (frameId !== null) {
@@ -337,6 +354,7 @@ export default function SearchPageClient() {
                 <SearchHistory
                   searchHistory={searchHistory}
                   setSearchQuery={setSearchQuery}
+                  loading={searchHistoryLoading}
                 />
               </div>
             </div>

@@ -120,6 +120,7 @@ export const EpisodesTab: React.FC<EpisodesTabProps> = ({
   const episodeButtonRefs = useRef<(HTMLButtonElement | null)[]>([]);
   const [isCategoryHovered, setIsCategoryHovered] = useState(false);
   const [hasEpisodeTopFade, setHasEpisodeTopFade] = useState(false);
+  const [hasEpisodeBottomFade, setHasEpisodeBottomFade] = useState(false);
 
   const preventPageScroll = useCallback(
     (e: WheelEvent) => {
@@ -177,6 +178,18 @@ export const EpisodesTab: React.FC<EpisodesTabProps> = ({
     setCurrentPage(index);
   }, []);
 
+  const syncEpisodeFade = useCallback(() => {
+    const container = episodeContainerRef.current;
+    if (!container) return;
+
+    const maxScrollTop = Math.max(
+      0,
+      container.scrollHeight - container.clientHeight,
+    );
+    setHasEpisodeTopFade(container.scrollTop > 4);
+    setHasEpisodeBottomFade(container.scrollTop < maxScrollTop - 4);
+  }, []);
+
   const activePage = pages[Math.min(currentPage, pageCount - 1)] || {
     label: '',
     start: 1,
@@ -211,19 +224,34 @@ export const EpisodesTab: React.FC<EpisodesTabProps> = ({
         behavior: 'smooth',
       });
       setHasEpisodeTopFade(true);
+      window.setTimeout(syncEpisodeFade, 120);
     }, 80);
 
     return () => clearTimeout(timer);
-  }, [currentPage, currentEnd, currentStart, value]);
+  }, [currentPage, currentEnd, currentStart, syncEpisodeFade, value]);
+
+  useEffect(() => {
+    const timer = window.setTimeout(syncEpisodeFade, 0);
+    return () => window.clearTimeout(timer);
+  }, [currentPage, currentEnd, currentStart, syncEpisodeFade, value]);
 
   const episodeContainerStyle = hasEpisodeTopFade
     ? {
-        WebkitMaskImage:
-          'linear-gradient(to bottom, transparent 0, #000 2rem, #000 100%)',
-        maskImage:
-          'linear-gradient(to bottom, transparent 0, #000 2rem, #000 100%)',
+        WebkitMaskImage: hasEpisodeBottomFade
+          ? 'linear-gradient(to bottom, transparent 0, #000 2rem, #000 calc(100% - 2rem), transparent 100%)'
+          : 'linear-gradient(to bottom, transparent 0, #000 2rem, #000 100%)',
+        maskImage: hasEpisodeBottomFade
+          ? 'linear-gradient(to bottom, transparent 0, #000 2rem, #000 calc(100% - 2rem), transparent 100%)'
+          : 'linear-gradient(to bottom, transparent 0, #000 2rem, #000 100%)',
       }
-    : undefined;
+    : hasEpisodeBottomFade
+      ? {
+          WebkitMaskImage:
+            'linear-gradient(to bottom, #000 0, #000 calc(100% - 2rem), transparent 100%)',
+          maskImage:
+            'linear-gradient(to bottom, #000 0, #000 calc(100% - 2rem), transparent 100%)',
+        }
+      : undefined;
 
   return (
     <>
@@ -323,9 +351,7 @@ export const EpisodesTab: React.FC<EpisodesTabProps> = ({
       <div
         ref={episodeContainerRef}
         className='flex min-w-0 flex-1 flex-wrap content-start justify-center gap-2 overflow-y-auto overflow-x-hidden px-5 pb-5 pt-2 sm:px-6 sm:pb-6'
-        onScroll={(event) => {
-          setHasEpisodeTopFade(event.currentTarget.scrollTop > 4);
-        }}
+        onScroll={syncEpisodeFade}
         style={episodeContainerStyle}
       >
         {(() => {

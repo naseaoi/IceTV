@@ -59,6 +59,7 @@ export type ServerConfigPayload = {
   SiteName?: string;
   SiteIcon?: string;
   Announcement?: string;
+  FooterText?: string;
   StorageType?: string;
   OpenRegister?: boolean;
   UpdateRepos?: string;

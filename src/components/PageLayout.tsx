@@ -1,7 +1,9 @@
 import { BackButton } from './BackButton';
 import MobileBottomNav from './MobileBottomNav';
 import MobileHeader from './MobileHeader';
+import { ScrollToTopButton } from './ScrollToTopButton';
 import Sidebar from './Sidebar';
+import { SiteFooter } from './SiteFooter';
 
 interface PageLayoutProps {
   children: React.ReactNode;
@@ -19,6 +21,9 @@ const PageLayout = ({
   const showMobileBack = ['/play', '/live'].includes(activePath);
   const showDesktopBack = showDesktopBackOverride ?? activePath === '/live';
   const isPlayerPage = contentMode === 'player' || activePath === '/play';
+  const showFooter = ['/', '/play', '/live'].includes(activePath);
+  const showScrollToTop =
+    !isPlayerPage && (activePath === '/' || activePath.startsWith('/douban'));
 
   return (
     <div className='min-h-screen w-full'>
@@ -51,18 +56,30 @@ const PageLayout = ({
           <main
             className={`flex-1 md:mb-0 md:mt-0 md:min-h-0 ${
               isPlayerPage
-                ? 'mb-0 mt-12 h-[calc(100dvh-3rem-3.5rem-env(safe-area-inset-bottom)-4px)] overflow-hidden md:h-auto'
+                ? 'mb-0 mt-12 flex h-[calc(100dvh-3rem-3.5rem-env(safe-area-inset-bottom)-4px)] flex-col overflow-hidden md:h-auto'
                 : 'mb-14 mt-12'
             }`}
             style={
               isPlayerPage
                 ? undefined
                 : {
-                    paddingBottom: 'calc(3.5rem + env(safe-area-inset-bottom))',
+                    paddingBottom: showFooter
+                      ? 'env(safe-area-inset-bottom)'
+                      : 'calc(3.5rem + env(safe-area-inset-bottom))',
                   }
             }
           >
-            {children}
+            {isPlayerPage && showFooter ? (
+              <>
+                <div className='min-h-0 flex-1 overflow-hidden'>{children}</div>
+                <SiteFooter compact />
+              </>
+            ) : (
+              <>
+                {children}
+                {showFooter && <SiteFooter />}
+              </>
+            )}
           </main>
         </div>
       </div>
@@ -71,6 +88,8 @@ const PageLayout = ({
       <div className='md:hidden'>
         <MobileBottomNav activePath={activePath} />
       </div>
+
+      {showScrollToTop && <ScrollToTopButton />}
     </div>
   );
 };

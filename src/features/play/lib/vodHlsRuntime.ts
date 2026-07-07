@@ -36,6 +36,7 @@ import {
   ensureVideoSource,
   formatBytesPerSecond,
   handleHlsFatalError,
+  showTimedArtNotice,
 } from '@/lib/player-utils';
 import {
   clearSourceProxyOverride,
@@ -234,7 +235,7 @@ export function createVodM3u8Loader({
       try {
         const activePlayer = artPlayerRef.current;
         if (activePlayer) {
-          activePlayer.notice.show = message;
+          showTimedArtNotice(activePlayer, message);
         }
       } catch {}
     };
@@ -264,7 +265,7 @@ export function createVodM3u8Loader({
       try {
         const activePlayer = artPlayerRef.current;
         if (activePlayer) {
-          activePlayer.notice.show = notice;
+          showTimedArtNotice(activePlayer, notice);
         }
       } catch {}
       return true;
@@ -386,7 +387,7 @@ export function createVodM3u8Loader({
       try {
         const activePlayer = artPlayerRef.current;
         if (activePlayer) {
-          activePlayer.notice.show = '源站响应较慢，正在继续加载';
+          showTimedArtNotice(activePlayer, '源站响应较慢，正在继续加载');
         }
       } catch {}
 

@@ -30,12 +30,27 @@ interface BangumiCalendarClientCache {
   staleUntil: number;
 }
 
+export interface BangumiCalendarClientResult {
+  data: BangumiCalendarData[];
+  usedStaleFallback: boolean;
+}
+
 export async function GetBangumiCalendarData(
   options: BangumiCalendarClientOptions = {},
 ): Promise<BangumiCalendarData[]> {
+  const result = await GetBangumiCalendarDataWithMeta(options);
+  return result.data;
+}
+
+export async function GetBangumiCalendarDataWithMeta(
+  options: BangumiCalendarClientOptions = {},
+): Promise<BangumiCalendarClientResult> {
   const cachedData = readBangumiCalendarClientCache();
   if (cachedData) {
-    return cachedData;
+    return {
+      data: cachedData,
+      usedStaleFallback: false,
+    };
   }
 
   const staleData = readBangumiCalendarClientCache({ allowStale: true });
@@ -52,17 +67,26 @@ export async function GetBangumiCalendarData(
     }
   } catch (error) {
     if (staleData) {
-      return staleData;
+      return {
+        data: staleData,
+        usedStaleFallback: true,
+      };
     }
     throw error;
   }
 
   if (isUsableBangumiCalendarData(data)) {
     writeBangumiCalendarClientCache(data);
-    return data;
+    return {
+      data,
+      usedStaleFallback: false,
+    };
   }
 
-  return staleData ?? data;
+  return {
+    data: staleData ?? data,
+    usedStaleFallback: false,
+  };
 }
 
 function getUsableBangumiDataSource(source: string): string {

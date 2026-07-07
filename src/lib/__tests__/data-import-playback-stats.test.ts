@@ -17,6 +17,7 @@ const adminConfig: AdminConfig = {
     SiteName: 'IceTV',
     SiteIcon: '',
     Announcement: '',
+    FooterText: '',
     EnableLiveEntry: false,
     DefaultAggregateSearch: true,
     EnableOptimization: true,

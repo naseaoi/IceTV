@@ -10,6 +10,8 @@ import ScrollableRow from '@/components/ScrollableRow';
 import VideoCard from '@/components/VideoCard';
 import type { FavoriteItem } from '@/features/favorites/types';
 
+const FAVORITE_PREVIEW_LIMIT = 20;
+
 export function FavoritePreviewSection({
   items,
   loading,
@@ -19,6 +21,8 @@ export function FavoritePreviewSection({
   loading: boolean;
   skeletonCount?: number;
 }) {
+  const previewItems = items.slice(0, FAVORITE_PREVIEW_LIMIT);
+
   return (
     <section className='mb-4'>
       <div className='mb-4 flex items-center justify-between'>
@@ -42,8 +46,8 @@ export function FavoritePreviewSection({
           Array.from({ length: skeletonCount }).map((_, index) => (
             <HomePosterCardSkeleton key={index} withSubtitle />
           ))
-        ) : items.length > 0 ? (
-          items.map((item, index) => (
+        ) : previewItems.length > 0 ? (
+          previewItems.map((item, index) => (
             <div key={item.id + item.source} className={HOME_POSTER_CARD_CLASS}>
               <VideoCard
                 query={item.search_title}

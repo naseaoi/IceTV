@@ -45,6 +45,29 @@ export function formatBytesPerSecond(bytesPerSecond: number): string {
   return `${kb.toFixed(1)} KB/s`;
 }
 
+export function showTimedArtNotice(
+  player: {
+    constructor?: Function & { NOTICE_TIME?: number };
+    notice?: { show: string };
+  } | null,
+  message: string,
+  durationMs = 2000,
+): void {
+  if (!player?.notice) return;
+
+  const constructorRef = player.constructor;
+  const previousDuration = constructorRef?.NOTICE_TIME;
+  if (constructorRef && Number.isFinite(durationMs) && durationMs > 0) {
+    constructorRef.NOTICE_TIME = Math.floor(durationMs);
+  }
+
+  player.notice.show = message;
+
+  if (constructorRef && typeof previousDuration === 'number') {
+    constructorRef.NOTICE_TIME = previousDuration;
+  }
+}
+
 // ---------------------------------------------------------------------------
 // HLS 初始带宽自适应估算
 // ---------------------------------------------------------------------------

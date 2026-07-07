@@ -6,6 +6,7 @@ import { useMemo } from 'react';
 import DoubanCardSkeleton from '@/components/DoubanCardSkeleton';
 import DoubanCustomSelector from '@/components/DoubanCustomSelector';
 import DoubanSelector from '@/components/DoubanSelector';
+import AlertModal from '@/components/modals/AlertModal';
 import PageLayout from '@/components/PageLayout';
 import PosterCard from '@/components/PosterCard';
 import { VirtualizedGrid } from '@/components/VirtualizedGrid';
@@ -42,6 +43,8 @@ export function DoubanPageClient() {
     handleMultiLevelChange,
     handleWeekdayChange,
     loadNextPage,
+    bangumiCalendarError,
+    clearBangumiCalendarError,
   } = useDoubanFeed(type);
 
   const skeletonData = useMemo(
@@ -156,6 +159,16 @@ export function DoubanPageClient() {
           </div>
         </div>
       </div>
+
+      <AlertModal
+        isOpen={Boolean(bangumiCalendarError)}
+        onClose={clearBangumiCalendarError}
+        type='error'
+        title='番剧数据获取失败'
+        message={bangumiCalendarError || undefined}
+        showConfirm
+        confirmText='知道了'
+      />
     </PageLayout>
   );
 }

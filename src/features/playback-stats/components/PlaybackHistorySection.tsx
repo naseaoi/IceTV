@@ -1,13 +1,15 @@
 'use client';
 
-import { Clock3, History, X } from 'lucide-react';
+import { Clock3, History, Trash2, X } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import { useCallback, useEffect, useState } from 'react';
 
+import ConfirmModal from '@/components/modals/ConfirmModal';
 import { useRuntimeConfig } from '@/components/RuntimeConfigProvider';
 import { PlaybackHistoryItemSkeleton } from '@/features/playback-stats/components/PlaybackHistorySkeleton';
 import {
   cachePlaybackHistorySnapshot,
+  deletePlaybackHistoryItem,
   getCachedPlaybackHistorySnapshot,
   getPlaybackHistory,
 } from '@/features/playback-stats/lib/client';
@@ -67,6 +69,9 @@ export function PlaybackHistorySection() {
   const [refreshing, setRefreshing] = useState(false);
   const [searchText, setSearchText] = useState('');
   const [searchKeyword, setSearchKeyword] = useState('');
+  const [deleteTarget, setDeleteTarget] = useState<PlaybackSession | null>(
+    null,
+  );
   const skeletonCount = Math.min(6, historyPageSize, historyLimit);
 
   useEffect(() => {
@@ -241,6 +246,20 @@ export function PlaybackHistorySection() {
     [router, warmupPlayback],
   );
 
+  const deleteHistoryItem = useCallback(async () => {
+    const target = deleteTarget;
+    if (!target) return;
+
+    try {
+      await deletePlaybackHistoryItem(target.id);
+      setItems((prev) => prev.filter((item) => item.id !== target.id));
+    } catch (error) {
+      console.error('删除播放历史失败:', error);
+    } finally {
+      setDeleteTarget(null);
+    }
+  }, [deleteTarget]);
+
   return (
     <section className='mb-4'>
       <div className='mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between'>
@@ -292,37 +311,50 @@ export function PlaybackHistorySection() {
           }`}
         >
           {items.map((item) => (
-            <button
-              type='button'
+            <div
               key={item.id}
-              className='flex w-full min-w-0 items-center gap-3 rounded-lg border border-gray-200 bg-white/70 p-3 text-left transition-colors hover:bg-white focus:outline-none focus:ring-2 focus:ring-orange-500/40 dark:border-gray-700 dark:bg-gray-900/50 dark:hover:bg-gray-900'
-              aria-label={`继续播放 ${item.title}`}
-              onClick={() => playHistoryItem(item)}
-              onFocus={prefetchPlayPage}
-              onMouseEnter={prefetchPlayPage}
+              className='flex w-full min-w-0 items-center gap-2 rounded-lg border border-gray-200 bg-white/70 p-3 transition-colors hover:bg-white dark:border-gray-700 dark:bg-gray-900/50 dark:hover:bg-gray-900'
             >
-              <img
-                src={item.cover || '/icons/icon-192x192.png'}
-                alt={item.title}
-                className='h-14 w-10 shrink-0 rounded object-cover'
-              />
-              <div className='min-w-0 flex-1'>
-                <div className='truncate text-sm font-medium text-gray-900 dark:text-gray-100'>
-                  {item.title}
+              <button
+                type='button'
+                className='flex min-w-0 flex-1 items-center gap-3 text-left focus:outline-none focus:ring-2 focus:ring-orange-500/40'
+                aria-label={`继续播放 ${item.title}`}
+                onClick={() => playHistoryItem(item)}
+                onFocus={prefetchPlayPage}
+                onMouseEnter={prefetchPlayPage}
+              >
+                <img
+                  src={item.cover || '/icons/icon-192x192.png'}
+                  alt={item.title}
+                  className='h-14 w-10 shrink-0 rounded object-cover'
+                />
+                <div className='min-w-0 flex-1'>
+                  <div className='truncate text-sm font-medium text-gray-900 dark:text-gray-100'>
+                    {item.title}
+                  </div>
+                  <div className='mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-gray-500 dark:text-gray-400'>
+                    <span>第 {item.episode_index} 集</span>
+                    <span>{item.source_name}</span>
+                    <span>
+                      {formatWatchedAt(item.ended_at || item.started_at)}
+                    </span>
+                  </div>
                 </div>
-                <div className='mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-gray-500 dark:text-gray-400'>
-                  <span>第 {item.episode_index} 集</span>
-                  <span>{item.source_name}</span>
-                  <span>
-                    {formatWatchedAt(item.ended_at || item.started_at)}
-                  </span>
+                <div className='flex shrink-0 items-center gap-1 text-sm text-gray-600 dark:text-gray-300'>
+                  <Clock3 className='h-4 w-4 text-green-500' />
+                  {formatDuration(item.watch_seconds)}
                 </div>
-              </div>
-              <div className='flex shrink-0 items-center gap-1 text-sm text-gray-600 dark:text-gray-300'>
-                <Clock3 className='h-4 w-4 text-green-500' />
-                {formatDuration(item.watch_seconds)}
-              </div>
-            </button>
+              </button>
+              <button
+                type='button'
+                className='ml-auto flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-gray-400 transition-colors hover:bg-rose-50 hover:text-rose-600 focus:outline-none focus:ring-2 focus:ring-rose-500/30 dark:hover:bg-rose-500/10 dark:hover:text-rose-300'
+                aria-label={`删除 ${item.title} 的播放历史`}
+                title='删除'
+                onClick={() => setDeleteTarget(item)}
+              >
+                <Trash2 className='h-4 w-4' />
+              </button>
+            </div>
           ))}
 
           {nextCursor && items.length < historyLimit && (
@@ -338,6 +370,21 @@ export function PlaybackHistorySection() {
           )}
         </div>
       )}
+
+      <ConfirmModal
+        isOpen={Boolean(deleteTarget)}
+        title='确认删除该历史？'
+        message={
+          deleteTarget
+            ? `确认删除「${deleteTarget.title}」的历史播放记录吗？`
+            : undefined
+        }
+        danger
+        cancelText='取消'
+        confirmText='删除'
+        onCancel={() => setDeleteTarget(null)}
+        onConfirm={deleteHistoryItem}
+      />
     </section>
   );
 }

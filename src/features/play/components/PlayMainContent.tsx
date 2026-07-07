@@ -66,7 +66,7 @@ interface PlayMainContentProps {
 }
 
 const DEFAULT_PLAYER_LOADING_TIMEOUT_SECONDS = 15;
-const SOURCE_RECOMMENDATION_AUTO_DISMISS_MS = 3000;
+const SOURCE_RECOMMENDATION_AUTO_DISMISS_MS = 5000;
 
 export function buildLoadingTimeoutMessage(timeoutSeconds: number): string {
   return `已等待超过 ${timeoutSeconds} 秒，源站响应超时`;
@@ -393,11 +393,18 @@ export function PlayMainContent(props: PlayMainContentProps) {
   );
   const loadingTimeoutMs = loadingTimeoutSeconds * 1000;
   const onLoadingTimeoutRef = useRef(onLoadingTimeout);
+  const onDismissSourceRecommendationRef = useRef(
+    onDismissSourceRecommendation,
+  );
   const loadingStatusText = realtimeLoadSpeed;
 
   useEffect(() => {
     onLoadingTimeoutRef.current = onLoadingTimeout;
   }, [onLoadingTimeout]);
+
+  useEffect(() => {
+    onDismissSourceRecommendationRef.current = onDismissSourceRecommendation;
+  }, [onDismissSourceRecommendation]);
 
   useEffect(() => {
     if (!isVideoLoading || playbackError) {
@@ -421,11 +428,11 @@ export function PlayMainContent(props: PlayMainContentProps) {
   useEffect(() => {
     if (!sourceRecommendation || playbackError) return;
     const timer = window.setTimeout(() => {
-      onDismissSourceRecommendation?.();
+      onDismissSourceRecommendationRef.current?.();
     }, SOURCE_RECOMMENDATION_AUTO_DISMISS_MS);
 
     return () => window.clearTimeout(timer);
-  }, [sourceRecommendation, playbackError, onDismissSourceRecommendation]);
+  }, [sourceRecommendation, playbackError]);
 
   const headerTags = buildHeaderTags({
     headerSourceText,
@@ -490,7 +497,7 @@ export function PlayMainContent(props: PlayMainContentProps) {
               </div>
               <button
                 className='mt-1 text-white/70 hover:text-white'
-                onClick={onDismissSourceRecommendation}
+                onClick={() => onDismissSourceRecommendationRef.current?.()}
               >
                 知道了
               </button>

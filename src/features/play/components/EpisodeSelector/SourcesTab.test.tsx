@@ -1,7 +1,7 @@
 import {
-  VIDEO_INFO_BATCH_SIZE,
   getCompletedProbeInfo,
   sortSourcesForDisplay,
+  VIDEO_INFO_BATCH_SIZE,
 } from '@/features/play/components/EpisodeSelector/SourcesTab';
 import type {
   ProbeEntry,

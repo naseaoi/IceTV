@@ -1,9 +1,9 @@
-import { probeVodEpisodeUrl } from '@/features/play/lib/vodProbe';
 import {
   getOrProbe,
   resetProbes,
   resolveRequestedProbeEpisodeUrl,
 } from '@/features/play/lib/sourceProbeStore';
+import { probeVodEpisodeUrl } from '@/features/play/lib/vodProbe';
 import type { SearchResult } from '@/lib/types';
 
 jest.mock('@/features/play/lib/vodProbe', () => ({

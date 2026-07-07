@@ -175,6 +175,7 @@ export interface IStorage {
     userName: string,
     query?: PlaybackSessionQuery,
   ): Promise<PlaybackSession[]>;
+  deletePlaybackSession(userName: string, id: string): Promise<void>;
   getPlaybackWatchTotals(
     userName: string,
     since: number,

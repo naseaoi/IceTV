@@ -1,4 +1,4 @@
-﻿import type { AdminConfig } from '@/types/admin';
+import type { AdminConfig } from '@/types/admin';
 
 import {
   buildConfigFileFromAdminConfig,
@@ -93,6 +93,7 @@ describe('buildConfigFileFromAdminConfig', () => {
         SiteName: 'IceTV',
         SiteIcon: '',
         Announcement: '',
+        FooterText: '',
         EnableLiveEntry: false,
         DefaultAggregateSearch: true,
         EnableOptimization: true,

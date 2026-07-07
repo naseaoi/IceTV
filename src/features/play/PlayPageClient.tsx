@@ -162,6 +162,9 @@ export function PlayPageClient() {
     (!!currentSource && !!currentId && !needPreferRef.current) ||
     shouldHideStartupLoading;
   const [showStartupLoading, setShowStartupLoading] = useState(false);
+  const dismissSourceRecommendation = useCallback(() => {
+    setSourceRecommendation(null);
+  }, [setSourceRecommendation]);
 
   useEffect(() => {
     if (!loading) {
@@ -630,7 +633,7 @@ export function PlayPageClient() {
       sourceSearchError={sourceSearchError}
       precomputedVideoInfo={precomputedVideoInfo}
       sourceRecommendation={sourceRecommendation}
-      onDismissSourceRecommendation={() => setSourceRecommendation(null)}
+      onDismissSourceRecommendation={dismissSourceRecommendation}
       videoYear={videoYear}
       favorited={favorited}
       onToggleFavorite={handleToggleFavorite}

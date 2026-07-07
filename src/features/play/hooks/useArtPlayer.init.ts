@@ -44,6 +44,7 @@ import {
   createArtPlayerConfig,
   ensureVideoSource,
   formatTime,
+  showTimedArtNotice,
 } from '@/lib/player-utils';
 import { preconnectForUrl } from '@/lib/preconnect';
 import {
@@ -398,7 +399,7 @@ export async function initializeArtPlayer(
           return;
         }
         try {
-          player.notice.show = notice;
+          showTimedArtNotice(player, notice);
         } catch (error) {
           console.warn('显示换源成功提示失败:', error);
         }

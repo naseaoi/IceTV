@@ -279,6 +279,11 @@ class DbManager {
     return storage.getPlaybackSessions(userName, query);
   }
 
+  async deletePlaybackSession(userName: string, id: string): Promise<void> {
+    const storage = await this.getStorage();
+    await storage.deletePlaybackSession(userName, id);
+  }
+
   async getPlaybackWatchTotals(
     userName: string,
     since: number,
