@@ -417,26 +417,34 @@ export default function SearchPageClient() {
                       items={filteredAggResults}
                       getKey={(item) => `agg-${item.mapKey}`}
                       layout={AGGREGATED_SEARCH_GRID_LAYOUT}
-                      renderItem={(item) => (
-                        <VideoCard
-                          ref={getGroupRef(item.mapKey)}
-                          from='search'
-                          isAggregate={true}
-                          title={item.title}
-                          poster={item.poster}
-                          year={item.year}
-                          episodes={item.stats.episodes}
-                          source_names={item.stats.source_names}
-                          douban_id={item.stats.douban_id}
-                          query={
-                            activeSearchQuery !== item.title
-                              ? activeSearchQuery
-                              : ''
-                          }
-                          type={item.type}
-                          aggregateGroup={item.group}
-                        />
-                      )}
+                      renderItem={(item) => {
+                        const singleSourceItem =
+                          item.group.length === 1 ? item.group[0] : null;
+
+                        return (
+                          <VideoCard
+                            ref={getGroupRef(item.mapKey)}
+                            id={singleSourceItem?.id}
+                            source={singleSourceItem?.source}
+                            source_name={singleSourceItem?.source_name}
+                            from='search'
+                            isAggregate={true}
+                            title={item.title}
+                            poster={item.poster}
+                            year={item.year}
+                            episodes={item.stats.episodes}
+                            source_names={item.stats.source_names}
+                            douban_id={item.stats.douban_id}
+                            query={
+                              activeSearchQuery !== item.title
+                                ? activeSearchQuery
+                                : ''
+                            }
+                            type={item.type}
+                            aggregateGroup={item.group}
+                          />
+                        );
+                      }}
                     />
                   ) : (
                     <VirtualizedSearchGrid

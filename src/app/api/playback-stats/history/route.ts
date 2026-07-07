@@ -1,6 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server';
 
-import { dedupePlaybackSessionsByTitle } from '@/features/playback-stats/lib/history';
+import {
+  dedupePlaybackSessionsByTitle,
+  filterPlaybackHistorySessions,
+} from '@/features/playback-stats/lib/history';
 import type { PlaybackHistoryResponse } from '@/features/playback-stats/types';
 import { isGuardFailure, requireActiveUser } from '@/lib/api-auth';
 import { getConfigForRead } from '@/lib/config';
@@ -39,10 +42,13 @@ export async function GET(request: NextRequest) {
       cursor: cursor ? Number(cursor) : undefined,
       keyword,
     });
-    const dedupedSessions = dedupePlaybackSessionsByTitle(sessions, {
-      limit: limit + 1,
-      mergeWatchSeconds: true,
-    });
+    const dedupedSessions = dedupePlaybackSessionsByTitle(
+      filterPlaybackHistorySessions(sessions),
+      {
+        limit: limit + 1,
+        mergeWatchSeconds: true,
+      },
+    );
     const items = dedupedSessions.slice(0, limit);
     const response: PlaybackHistoryResponse = {
       items,

@@ -83,6 +83,13 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    if (session.watch_seconds <= 0) {
+      return NextResponse.json(
+        { success: true },
+        { status: 200, headers: NO_STORE_HEADERS },
+      );
+    }
+
     await db.savePlaybackSession(guardResult.username, session);
 
     return NextResponse.json(

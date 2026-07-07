@@ -289,7 +289,13 @@ const VideoCard = forwardRef<VideoCardHandle, VideoCardProps>(
     }, [isAggregate, aggregateGroup]);
 
     const isSingleAggregate = isAggregate && aggregateGroup?.length === 1;
-    const isDirectStartup = from === 'playrecord' && !isAggregate;
+    const aggregateSourceCount = isAggregate
+      ? new Set((aggregateGroup || []).map((item) => item.source)).size
+      : 0;
+    const isDirectStartup =
+      origin === 'vod' &&
+      ((from === 'playrecord' && !isAggregate) ||
+        (from === 'search' && (!isAggregate || aggregateSourceCount === 1)));
 
     /** 根据卡片数据构建目标 URL，返回 null 表示无有效跳转 */
     const buildPlayUrl = useCallback((): string | null => {
@@ -323,6 +329,8 @@ const VideoCard = forwardRef<VideoCardHandle, VideoCardProps>(
         }${actualSearchType ? `&stype=${actualSearchType}` : ''}${
           isAggregate && !isSingleAggregate ? '&prefer=true' : ''
         }${isSingleAggregate ? '&singleSource=true' : ''}${
+          isDirectStartup ? '&directStart=true' : ''
+        }${
           actualQuery ? `&stitle=${encodeURIComponent(actualQuery.trim())}` : ''
         }`;
       }

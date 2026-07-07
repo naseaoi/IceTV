@@ -66,6 +66,7 @@ interface PlayMainContentProps {
 }
 
 const DEFAULT_PLAYER_LOADING_TIMEOUT_SECONDS = 15;
+const SOURCE_RECOMMENDATION_AUTO_DISMISS_MS = 3000;
 
 export function buildLoadingTimeoutMessage(timeoutSeconds: number): string {
   return `已等待超过 ${timeoutSeconds} 秒，源站响应超时`;
@@ -416,6 +417,15 @@ export function PlayMainContent(props: PlayMainContentProps) {
     playbackError,
     loadingTimeoutMs,
   ]);
+
+  useEffect(() => {
+    if (!sourceRecommendation || playbackError) return;
+    const timer = window.setTimeout(() => {
+      onDismissSourceRecommendation?.();
+    }, SOURCE_RECOMMENDATION_AUTO_DISMISS_MS);
+
+    return () => window.clearTimeout(timer);
+  }, [sourceRecommendation, playbackError, onDismissSourceRecommendation]);
 
   const headerTags = buildHeaderTags({
     headerSourceText,

@@ -1,6 +1,9 @@
 'use client';
 
-import { dedupePlaybackSessionsByTitle } from '@/features/playback-stats/lib/history';
+import {
+  dedupePlaybackSessionsByTitle,
+  filterPlaybackHistorySessions,
+} from '@/features/playback-stats/lib/history';
 import type {
   PlaybackHistoryResponse,
   PlaybackStatsSummary,
@@ -35,9 +38,12 @@ export function getCachedPlaybackHistorySnapshot(): PlaybackHistoryResponse | nu
       : null;
   return snapshot
     ? {
-        items: dedupePlaybackSessionsByTitle(snapshot.items, {
-          mergeWatchSeconds: true,
-        }),
+        items: dedupePlaybackSessionsByTitle(
+          filterPlaybackHistorySessions(snapshot.items),
+          {
+            mergeWatchSeconds: true,
+          },
+        ),
         nextCursor: snapshot.nextCursor,
       }
     : null;
@@ -51,9 +57,12 @@ export function cachePlaybackHistorySnapshot(
   playbackHistoryCache = {
     username,
     data: {
-      items: dedupePlaybackSessionsByTitle(snapshot.items, {
-        mergeWatchSeconds: true,
-      }),
+      items: dedupePlaybackSessionsByTitle(
+        filterPlaybackHistorySessions(snapshot.items),
+        {
+          mergeWatchSeconds: true,
+        },
+      ),
       nextCursor: snapshot.nextCursor,
     },
   };

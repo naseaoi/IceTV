@@ -13,6 +13,7 @@ import {
 } from '@/features/playback-stats/lib/client';
 import {
   dedupePlaybackSessionsByTitle,
+  filterPlaybackHistorySessions,
   getPlaybackSessionMergeKey,
 } from '@/features/playback-stats/lib/history';
 import type { PlaybackHistoryResponse } from '@/features/playback-stats/types';
@@ -51,9 +52,12 @@ export function PlaybackHistorySection() {
   );
   const cachedHistory = getCachedPlaybackHistorySnapshot();
   const [items, setItems] = useState<PlaybackSession[]>(() =>
-    dedupePlaybackSessionsByTitle(cachedHistory?.items || [], {
-      mergeWatchSeconds: true,
-    }),
+    dedupePlaybackSessionsByTitle(
+      filterPlaybackHistorySessions(cachedHistory?.items || []),
+      {
+        mergeWatchSeconds: true,
+      },
+    ),
   );
   const [nextCursor, setNextCursor] = useState<number | null>(
     () => cachedHistory?.nextCursor || null,
@@ -99,9 +103,12 @@ export function PlaybackHistorySection() {
         if (!cancelled) {
           if (hasKeyword) {
             setItems(
-              dedupePlaybackSessionsByTitle(response.items, {
-                mergeWatchSeconds: true,
-              }),
+              dedupePlaybackSessionsByTitle(
+                filterPlaybackHistorySessions(response.items),
+                {
+                  mergeWatchSeconds: true,
+                },
+              ),
             );
             setNextCursor(response.nextCursor);
             return;
@@ -109,9 +116,12 @@ export function PlaybackHistorySection() {
 
           const responseIds = new Set(response.items.map((item) => item.id));
           const responseKeys = new Set(
-            dedupePlaybackSessionsByTitle(response.items, {
-              mergeWatchSeconds: true,
-            }).map(getPlaybackSessionMergeKey),
+            dedupePlaybackSessionsByTitle(
+              filterPlaybackHistorySessions(response.items),
+              {
+                mergeWatchSeconds: true,
+              },
+            ).map(getPlaybackSessionMergeKey),
           );
           const cachedTail =
             snapshotBeforeFetch &&
@@ -123,7 +133,7 @@ export function PlaybackHistorySection() {
                 )
               : [];
           const nextItems = dedupePlaybackSessionsByTitle(
-            [...response.items, ...cachedTail],
+            filterPlaybackHistorySessions([...response.items, ...cachedTail]),
             {
               mergeWatchSeconds: true,
             },
@@ -169,7 +179,7 @@ export function PlaybackHistorySection() {
       );
       setItems((prev) => {
         const nextItems = dedupePlaybackSessionsByTitle(
-          [...prev, ...response.items],
+          filterPlaybackHistorySessions([...prev, ...response.items]),
           {
             limit: historyLimit,
             mergeWatchSeconds: true,
