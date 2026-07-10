@@ -137,7 +137,7 @@ const VideoCard = forwardRef<VideoCardHandle, VideoCardProps>(
     const actualId = id;
     const actualDoubanId = dynamicDoubanId;
     const actualEpisodes = dynamicEpisodes;
-    const actualYear = year;
+    const actualYear = normalizeCardYear(year);
     const actualQuery = query || '';
     const actualSearchType = isAggregate
       ? actualEpisodes && actualEpisodes === 1
@@ -855,5 +855,17 @@ const VideoCard = forwardRef<VideoCardHandle, VideoCardProps>(
     );
   },
 );
+
+function normalizeCardYear(year?: string): string {
+  const normalizedYear = String(year ?? '').trim();
+  if (
+    !normalizedYear ||
+    normalizedYear === 'unknown' ||
+    normalizedYear === '0'
+  ) {
+    return '';
+  }
+  return normalizedYear;
+}
 
 export default memo(VideoCard, areVideoCardPropsEqual);

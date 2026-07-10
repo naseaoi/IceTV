@@ -152,6 +152,8 @@ export function VideoCardPoster({
   onDeleteRecord,
   onToggleFavorite,
 }: VideoCardPosterProps) {
+  const displayYear = String(year ?? '').trim();
+
   return (
     <div
       className={`relative aspect-[2/3] overflow-hidden rounded-lg ${
@@ -217,15 +219,18 @@ export function VideoCardPoster({
         </div>
       )}
 
-      {config.showYear && year && year !== 'unknown' && year.trim() !== '' && (
-        <div
-          className='absolute left-2 top-2 rounded bg-black/50 px-2 py-1 text-xs font-medium text-white shadow-sm backdrop-blur-sm transition-all duration-300 ease-out group-hover:opacity-90'
-          style={noSelectStyle}
-          onContextMenu={preventContextMenu}
-        >
-          {year}
-        </div>
-      )}
+      {config.showYear &&
+        displayYear &&
+        displayYear !== 'unknown' &&
+        displayYear !== '0' && (
+          <div
+            className='absolute left-2 top-2 rounded bg-black/50 px-2 py-1 text-xs font-medium text-white shadow-sm backdrop-blur-sm transition-all duration-300 ease-out group-hover:opacity-90'
+            style={noSelectStyle}
+            onContextMenu={preventContextMenu}
+          >
+            {displayYear}
+          </div>
+        )}
 
       {config.showRating && rate && (
         <div
