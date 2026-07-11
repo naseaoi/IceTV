@@ -12,12 +12,17 @@ import React, {
 } from 'react';
 
 import NoImageCover from '@/components/NoImageCover';
+import { useRuntimeConfig } from '@/components/RuntimeConfigProvider';
 import {
   isCoverImageCached,
   markCoverImagesLoaded,
   subscribeCoverImageLoaded,
 } from '@/lib/cover-image-cache';
 import { imageScheduler } from '@/lib/image-scheduler';
+import {
+  isSourceCoverProxyUrl,
+  markSourceCoverProxyHostFailed,
+} from '@/lib/source-cover-proxy';
 import { processImageUrl } from '@/lib/utils';
 
 const PLACEHOLDER_COLORS = [
@@ -78,6 +83,10 @@ function buildBlurDataURL(color: string): string {
 }
 
 function needsImageUnoptimized(url: string): boolean {
+  if (url.startsWith('/api/image-proxy?')) {
+    return true;
+  }
+
   if (!url || url.startsWith('/') || url.startsWith('data:')) {
     return false;
   }
@@ -113,10 +122,17 @@ const CoverImage: React.FC<CoverImageProps> = memo(function CoverImage({
   const releaseSlotRef = useRef<(() => void) | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const imageRef = useRef<HTMLImageElement>(null);
+  const runtimeConfig = useRuntimeConfig();
+  const [useDirectFallback, setUseDirectFallback] = useState(false);
 
   const processed = useMemo(
-    () => (isEmpty ? '' : processImageUrl(src)),
-    [src, isEmpty],
+    () =>
+      isEmpty
+        ? ''
+        : useDirectFallback
+          ? src
+          : processImageUrl(src, runtimeConfig.SOURCE_COVER_PROXY_MODE),
+    [isEmpty, runtimeConfig.SOURCE_COVER_PROXY_MODE, src, useDirectFallback],
   );
 
   const needsUnoptimized = useMemo(() => {
@@ -157,9 +173,10 @@ const CoverImage: React.FC<CoverImageProps> = memo(function CoverImage({
 
   useIsomorphicLayoutEffect(() => {
     setHasError(false);
+    setUseDirectFallback(false);
     releaseSlotRef.current?.();
     releaseSlotRef.current = null;
-  }, [src]);
+  }, [runtimeConfig.SOURCE_COVER_PROXY_MODE, src]);
 
   useIsomorphicLayoutEffect(() => {
     if (isEmpty) return;
@@ -233,11 +250,28 @@ const CoverImage: React.FC<CoverImageProps> = memo(function CoverImage({
   }, [cacheKeys]);
 
   const handleError = useCallback(() => {
+    if (
+      runtimeConfig.SOURCE_COVER_PROXY_MODE === 'auto' &&
+      isSourceCoverProxyUrl(processed) &&
+      !useDirectFallback
+    ) {
+      markSourceCoverProxyHostFailed(src);
+      setLoaded(false);
+      setHasError(false);
+      setUseDirectFallback(true);
+      return;
+    }
+
     setHasError(true);
     setLoaded(true);
     releaseSlotRef.current?.();
     releaseSlotRef.current = null;
-  }, []);
+  }, [
+    processed,
+    runtimeConfig.SOURCE_COVER_PROXY_MODE,
+    src,
+    useDirectFallback,
+  ]);
 
   useEffect(() => {
     if (!slotGranted || loaded || hasError) return;

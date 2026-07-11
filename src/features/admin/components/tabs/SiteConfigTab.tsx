@@ -27,6 +27,11 @@ import { DEFAULT_DOUBAN_IMAGE_PROXY_TYPE } from '@/lib/douban-source';
 import { localPreferenceToggleDefinitions } from '@/lib/local-preference-toggles';
 import { DEFAULT_RUNTIME_PARAMS } from '@/lib/runtime-params';
 import { DEFAULT_SITE_FOOTER_TEXT } from '@/lib/site-footer';
+import {
+  DEFAULT_SOURCE_COVER_PROXY_MODE,
+  normalizeSourceCoverProxyMode,
+  sourceCoverProxyModeOptions,
+} from '@/lib/source-cover-proxy';
 import { AdminConfig } from '@/types/admin';
 
 const DEFAULT_SITE_SETTINGS: SiteConfig = {
@@ -45,6 +50,7 @@ const DEFAULT_SITE_SETTINGS: SiteConfig = {
   BangumiProxy: '',
   DoubanImageProxyType: DEFAULT_DOUBAN_IMAGE_PROXY_TYPE,
   DoubanImageProxy: '',
+  SourceCoverProxyMode: DEFAULT_SOURCE_COVER_PROXY_MODE,
   DisableYellowFilter: false,
   FluidSearch: true,
 };
@@ -62,6 +68,7 @@ type EditableSiteSettings = Pick<
   | 'DoubanProxyType'
   | 'BangumiDataSource'
   | 'DoubanImageProxyType'
+  | 'SourceCoverProxyMode'
   | 'DisableYellowFilter'
   | 'FluidSearch'
 >;
@@ -81,6 +88,9 @@ function buildSiteSettings(config: AdminConfig): SiteConfig {
       config.SiteConfig.DoubanImageProxyType,
     ),
     DoubanImageProxy: '',
+    SourceCoverProxyMode: normalizeSourceCoverProxyMode(
+      config.SiteConfig.SourceCoverProxyMode,
+    ),
     EnableLiveEntry: config.SiteConfig.EnableLiveEntry ?? false,
     DefaultAggregateSearch: config.SiteConfig.DefaultAggregateSearch ?? true,
     EnableOptimization: config.SiteConfig.EnableOptimization ?? true,
@@ -106,6 +116,9 @@ function normalizeEditableSiteSettings(
     BangumiDataSource: normalizeSiteBangumiDataSource(value.BangumiDataSource),
     DoubanImageProxyType: normalizeSiteDoubanImageProxyType(
       value.DoubanImageProxyType,
+    ),
+    SourceCoverProxyMode: normalizeSourceCoverProxyMode(
+      value.SourceCoverProxyMode,
     ),
     DisableYellowFilter: value.DisableYellowFilter ?? false,
     FluidSearch: value.FluidSearch ?? true,
@@ -538,6 +551,28 @@ const SiteConfigComponent = ({
               value={siteSettings.BangumiDataSource}
               onChange={(value) => handleBangumiDataSourceChange(value)}
               options={siteBangumiDataSourceOptions}
+            />
+          </div>
+        </div>
+
+        <div className='space-y-3'>
+          <div>
+            <label
+              htmlFor='site-source-cover-proxy-mode'
+              className='mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300'
+            >
+              源站封面加载
+            </label>
+            <AdminSelect
+              id='site-source-cover-proxy-mode'
+              value={siteSettings.SourceCoverProxyMode}
+              onChange={(value) =>
+                setSiteSettings((prev) => ({
+                  ...prev,
+                  SourceCoverProxyMode: normalizeSourceCoverProxyMode(value),
+                }))
+              }
+              options={sourceCoverProxyModeOptions}
             />
           </div>
         </div>

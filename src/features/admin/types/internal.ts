@@ -17,6 +17,7 @@ export interface SiteConfig {
   SourceFailureCooldownSeconds: number;
   ContinueWatchingLimit: number;
   CoverImageCacheSize: number;
+  SourceCoverProxyMode: 'auto' | 'browser' | 'server';
   DataImportPlaybackSessionsLimit: number;
   LivePrecheckTimeoutSeconds: number;
   ProxyRequestTimeoutSeconds: number;

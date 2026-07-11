@@ -57,6 +57,7 @@ export async function GET(request: NextRequest) {
     SourceFailureCooldownSeconds: publicConfig.SourceFailureCooldownSeconds,
     ContinueWatchingLimit: publicConfig.ContinueWatchingLimit,
     CoverImageCacheSize: publicConfig.CoverImageCacheSize,
+    SourceCoverProxyMode: publicConfig.SourceCoverProxyMode,
   };
   return NextResponse.json(result, {
     headers: {

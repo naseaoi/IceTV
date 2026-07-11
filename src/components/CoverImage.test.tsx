@@ -41,6 +41,7 @@ describe('CoverImage', () => {
   beforeEach(() => {
     clearCoverImageCacheForTests();
     localStorage.clear();
+    sessionStorage.clear();
     localStorage.setItem(
       DOUBAN_IMAGE_PROXY_TYPE_STORAGE_KEY,
       'cmliussss-cdn-ali',
@@ -102,5 +103,38 @@ describe('CoverImage', () => {
     await waitFor(() => {
       expect(image).toHaveClass('opacity-100');
     });
+  });
+
+  it('普通远程封面通过服务端图片代理加载', () => {
+    render(
+      <CoverImage
+        src='https://covers.example.com/poster.jpg?size=small'
+        alt='远程封面'
+        priority
+      />,
+    );
+
+    expect(screen.getByTestId('cover-image')).toHaveAttribute(
+      'src',
+      '/api/image-proxy?url=https%3A%2F%2Fcovers.example.com%2Fposter.jpg%3Fsize%3Dsmall',
+    );
+  });
+
+  it('自动模式在服务端代理失败后回退浏览器直连', () => {
+    render(
+      <CoverImage
+        src='https://covers.example.com/poster.jpg'
+        alt='自动回退封面'
+        priority
+      />,
+    );
+
+    fireEvent.error(screen.getByTestId('cover-image'));
+
+    expect(screen.getByTestId('cover-image')).toHaveAttribute(
+      'src',
+      'https://covers.example.com/poster.jpg',
+    );
+    expect(screen.queryByText('无封面')).not.toBeInTheDocument();
   });
 });

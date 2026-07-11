@@ -25,6 +25,10 @@ import {
   DEFAULT_SITE_FOOTER_TEXT,
   normalizeSiteFooterText,
 } from '@/lib/site-footer';
+import {
+  DEFAULT_SOURCE_COVER_PROXY_MODE,
+  normalizeSourceCoverProxyMode,
+} from '@/lib/source-cover-proxy';
 import { normalizeUsername } from '@/lib/username';
 import { AdminConfig } from '@/types/admin';
 
@@ -311,6 +315,9 @@ async function getInitConfig(
         process.env.NEXT_PUBLIC_DOUBAN_IMAGE_PROXY_TYPE ||
         DEFAULT_DOUBAN_IMAGE_PROXY_TYPE,
       DoubanImageProxy: process.env.NEXT_PUBLIC_DOUBAN_IMAGE_PROXY || '',
+      SourceCoverProxyMode: normalizeSourceCoverProxyMode(
+        process.env.NEXT_PUBLIC_SOURCE_COVER_PROXY_MODE,
+      ),
       DisableYellowFilter:
         process.env.NEXT_PUBLIC_DISABLE_YELLOW_FILTER === 'true',
       FluidSearch: process.env.NEXT_PUBLIC_FLUID_SEARCH !== 'false',
@@ -504,6 +511,7 @@ export function configSelfCheck(adminConfig: AdminConfig): AdminConfig {
         process.env.NEXT_PUBLIC_DOUBAN_IMAGE_PROXY_TYPE ||
         DEFAULT_DOUBAN_IMAGE_PROXY_TYPE,
       DoubanImageProxy: process.env.NEXT_PUBLIC_DOUBAN_IMAGE_PROXY || '',
+      SourceCoverProxyMode: DEFAULT_SOURCE_COVER_PROXY_MODE,
       DisableYellowFilter:
         process.env.NEXT_PUBLIC_DISABLE_YELLOW_FILTER === 'true',
       FluidSearch: process.env.NEXT_PUBLIC_FLUID_SEARCH !== 'false',
@@ -553,6 +561,9 @@ export function configSelfCheck(adminConfig: AdminConfig): AdminConfig {
       adminConfig.SiteConfig.DoubanImageProxyType,
     );
   adminConfig.SiteConfig.DoubanImageProxy = '';
+  adminConfig.SiteConfig.SourceCoverProxyMode = normalizeSourceCoverProxyMode(
+    adminConfig.SiteConfig.SourceCoverProxyMode,
+  );
 
   // 站长变更自检
   const ownerUser = getOwnerUsername();
@@ -939,6 +950,9 @@ async function readPublicConfig() {
     ),
     DoubanImageProxyType: getPublicDoubanImageProxyType(
       config.SiteConfig.DoubanImageProxyType,
+    ),
+    SourceCoverProxyMode: normalizeSourceCoverProxyMode(
+      config.SiteConfig.SourceCoverProxyMode,
     ),
     CustomCategories: config.CustomCategories.filter(
       (category) => !category.disabled,

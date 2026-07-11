@@ -16,6 +16,7 @@ const baseConfig: AdminConfig = {
     EnableOptimization: true,
     LiveDirectConnect: false,
     ...DEFAULT_RUNTIME_PARAMS,
+    SourceCoverProxyMode: 'auto',
     SearchDownstreamMaxPage: 5,
     SiteInterfaceCacheTime: 300,
     DoubanProxyType: 'direct',

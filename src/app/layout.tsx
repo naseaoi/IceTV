@@ -88,6 +88,7 @@ export default async function RootLayout({
     SOURCE_FAILURE_COOLDOWN_SECONDS: publicConfig.SourceFailureCooldownSeconds,
     CONTINUE_WATCHING_LIMIT: publicConfig.ContinueWatchingLimit,
     COVER_IMAGE_CACHE_SIZE: publicConfig.CoverImageCacheSize,
+    SOURCE_COVER_PROXY_MODE: publicConfig.SourceCoverProxyMode,
   };
   const serializedRuntimeConfig = serializeForInlineScript(runtimeConfig);
   const serializedSidebarCollapsedStorageKey = serializeForInlineScript(

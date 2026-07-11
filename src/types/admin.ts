@@ -24,6 +24,7 @@ export interface AdminConfig {
     SourceFailureCooldownSeconds: number;
     ContinueWatchingLimit: number;
     CoverImageCacheSize: number;
+    SourceCoverProxyMode?: 'auto' | 'browser' | 'server';
     DataImportPlaybackSessionsLimit: number;
     LivePrecheckTimeoutSeconds: number;
     ProxyRequestTimeoutSeconds: number;

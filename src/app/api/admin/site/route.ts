@@ -8,6 +8,7 @@ import {
   normalizeSiteDoubanImageProxyType,
   normalizeSiteDoubanProxyType,
 } from '@/lib/douban-options';
+import { normalizeSourceCoverProxyMode } from '@/lib/source-cover-proxy';
 
 export const runtime = 'nodejs';
 
@@ -32,6 +33,7 @@ export async function POST(request: NextRequest) {
       DoubanProxyType,
       BangumiDataSource,
       DoubanImageProxyType,
+      SourceCoverProxyMode,
       DisableYellowFilter,
       FluidSearch,
     } = body as {
@@ -48,6 +50,7 @@ export async function POST(request: NextRequest) {
       DoubanProxyType: string;
       BangumiDataSource?: string;
       DoubanImageProxyType: string;
+      SourceCoverProxyMode?: string;
       DisableYellowFilter: boolean;
       FluidSearch: boolean;
     };
@@ -67,6 +70,8 @@ export async function POST(request: NextRequest) {
       (BangumiDataSource !== undefined &&
         typeof BangumiDataSource !== 'string') ||
       typeof DoubanImageProxyType !== 'string' ||
+      (SourceCoverProxyMode !== undefined &&
+        typeof SourceCoverProxyMode !== 'string') ||
       typeof DisableYellowFilter !== 'boolean' ||
       typeof FluidSearch !== 'boolean'
     ) {
@@ -80,6 +85,17 @@ export async function POST(request: NextRequest) {
     ) {
       return NextResponse.json(
         { error: '站点配置不支持自定义代理，请在本地设置中配置' },
+        { status: 400 },
+      );
+    }
+
+    if (
+      SourceCoverProxyMode !== undefined &&
+      normalizeSourceCoverProxyMode(SourceCoverProxyMode) !==
+        SourceCoverProxyMode
+    ) {
+      return NextResponse.json(
+        { error: '源站封面加载模式无效' },
         { status: 400 },
       );
     }
@@ -111,6 +127,9 @@ export async function POST(request: NextRequest) {
       DoubanImageProxyType:
         normalizeSiteDoubanImageProxyType(DoubanImageProxyType),
       DoubanImageProxy: '',
+      SourceCoverProxyMode: normalizeSourceCoverProxyMode(
+        SourceCoverProxyMode ?? adminConfig.SiteConfig.SourceCoverProxyMode,
+      ),
       DisableYellowFilter,
       FluidSearch,
     };

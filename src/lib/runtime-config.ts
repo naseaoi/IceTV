@@ -1,3 +1,4 @@
+import type { SourceCoverProxyMode } from '@/lib/source-cover-proxy';
 import { CURRENT_UPDATE_BRANCH } from '@/lib/version';
 
 export interface RuntimeConfig {
@@ -25,6 +26,7 @@ export interface RuntimeConfig {
   SOURCE_FAILURE_COOLDOWN_SECONDS: number;
   CONTINUE_WATCHING_LIMIT: number;
   COVER_IMAGE_CACHE_SIZE: number;
+  SOURCE_COVER_PROXY_MODE: SourceCoverProxyMode;
 }
 
 export const DEFAULT_RUNTIME_CONFIG: RuntimeConfig = {
@@ -53,6 +55,7 @@ export const DEFAULT_RUNTIME_CONFIG: RuntimeConfig = {
   SOURCE_FAILURE_COOLDOWN_SECONDS: 300,
   CONTINUE_WATCHING_LIMIT: 10,
   COVER_IMAGE_CACHE_SIZE: 500,
+  SOURCE_COVER_PROXY_MODE: 'auto',
 };
 
 export type ServerConfigPayload = {
@@ -84,6 +87,7 @@ export type ServerConfigPayload = {
   SourceFailureCooldownSeconds?: number;
   ContinueWatchingLimit?: number;
   CoverImageCacheSize?: number;
+  SourceCoverProxyMode?: SourceCoverProxyMode;
 };
 
 declare global {
@@ -168,6 +172,9 @@ function runtimeConfigFromServerConfig(
       DEFAULT_RUNTIME_CONFIG.CONTINUE_WATCHING_LIMIT,
     COVER_IMAGE_CACHE_SIZE:
       data.CoverImageCacheSize ?? DEFAULT_RUNTIME_CONFIG.COVER_IMAGE_CACHE_SIZE,
+    SOURCE_COVER_PROXY_MODE:
+      data.SourceCoverProxyMode ??
+      DEFAULT_RUNTIME_CONFIG.SOURCE_COVER_PROXY_MODE,
   };
 }
 
