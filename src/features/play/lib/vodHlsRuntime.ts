@@ -18,6 +18,10 @@ import {
   registerQualityControlWhenReady,
   seedAutoQualityStartLevel,
 } from '@/features/play/lib/hlsQuality';
+import {
+  PLAYBACK_STALL_CONFIRMATION_DELAY_MS,
+  resolvePlaybackStallDecision,
+} from '@/features/play/lib/playbackStallRecovery';
 import type { PlayerLoadingSessionState } from '@/features/play/lib/playerLoading';
 import type { ResumeMode } from '@/features/play/lib/resumePlayback';
 import { buildVodProxyUrl } from '@/features/play/lib/vodProxyUrl';
@@ -216,6 +220,7 @@ export function createVodM3u8Loader({
     resetSpeedFallbackTimer();
 
     let lastStallRecoveryAt = 0;
+    let stallConfirmationTimer: ReturnType<typeof setTimeout> | null = null;
     let qualityLockProbeTimer: ReturnType<typeof setTimeout> | null = null;
     let manualQualityNetworkFailures = 0;
     const manualQualityFailureLimit = 2;
@@ -355,62 +360,63 @@ export function createVodM3u8Loader({
       return ranges;
     };
 
+    const clearStallConfirmation = () => {
+      if (!stallConfirmationTimer) return;
+      clearTimeout(stallConfirmationTimer);
+      stallConfirmationTimer = null;
+    };
+
     const tryRecoverPlaybackStall = (reason: 'waiting' | 'stalled') => {
-      if (video.paused || video.ended) {
+      if (video.paused || video.ended || stallConfirmationTimer) {
         return;
       }
 
-      const currentTime = video.currentTime || 0;
-      const ranges = getBufferedRanges();
-      const activeRange = ranges.find(
-        ([start, end]) => currentTime >= start && currentTime < end,
-      );
-      const nextRange = ranges.find(([start]) => start > currentTime);
-      const bufferedAhead = activeRange ? activeRange[1] - currentTime : 0;
-      const gapToNext = nextRange
-        ? nextRange[0] - (activeRange ? activeRange[1] : currentTime)
-        : null;
+      const observedTime = video.currentTime || 0;
+      stallConfirmationTimer = setTimeout(() => {
+        stallConfirmationTimer = null;
+        if (video.paused || video.ended) return;
 
-      console.warn('检测到点播播放卡顿', {
-        reason,
-        currentTime: Number(currentTime.toFixed(2)),
-        readyState: video.readyState,
-        networkState: video.networkState,
-        bufferedAhead: Number(bufferedAhead.toFixed(2)),
-        gapToNext: gapToNext === null ? null : Number(gapToNext.toFixed(2)),
-        bufferedRanges: ranges.map(([start, end]) => [
-          Number(start.toFixed(2)),
-          Number(end.toFixed(2)),
-        ]),
-      });
-      setRealtimeLoadSpeed('源站响应较慢，正在继续加载');
-      try {
-        const activePlayer = artPlayerRef.current;
-        if (activePlayer) {
-          showTimedArtNotice(activePlayer, '源站响应较慢，正在继续加载');
+        const currentTime = video.currentTime || 0;
+        if (currentTime - observedTime >= 0.05) return;
+
+        const ranges = getBufferedRanges();
+        const decision = resolvePlaybackStallDecision(currentTime, ranges);
+        if (decision.action === 'none') return;
+
+        const now = Date.now();
+        if (now - lastStallRecoveryAt < 1500) return;
+        lastStallRecoveryAt = now;
+
+        console.warn('检测到点播播放卡顿', {
+          reason,
+          currentTime: Number(currentTime.toFixed(2)),
+          readyState: video.readyState,
+          networkState: video.networkState,
+          bufferedAhead: Number(decision.bufferedAhead.toFixed(2)),
+          gapToNext:
+            decision.gapToNext === null
+              ? null
+              : Number(decision.gapToNext.toFixed(2)),
+          bufferedRanges: ranges.map(([start, end]) => [
+            Number(start.toFixed(2)),
+            Number(end.toFixed(2)),
+          ]),
+        });
+
+        if (decision.action === 'seek' && decision.targetTime !== null) {
+          video.currentTime = decision.targetTime;
+          return;
         }
-      } catch {}
 
-      const now = Date.now();
-      if (now - lastStallRecoveryAt < 1500) {
-        return;
-      }
-      lastStallRecoveryAt = now;
-
-      if (bufferedAhead > 1.5) {
-        video.currentTime = Math.min(
-          currentTime + 0.1,
-          activeRange ? activeRange[1] - 0.05 : currentTime + 0.1,
-        );
-        return;
-      }
-
-      if (nextRange && gapToNext !== null && gapToNext > 0 && gapToNext <= 1) {
-        video.currentTime = nextRange[0] + 0.05;
-        return;
-      }
-
-      hls.startLoad();
+        setRealtimeLoadSpeed('源站响应较慢，正在继续加载');
+        try {
+          const activePlayer = artPlayerRef.current;
+          if (activePlayer) {
+            showTimedArtNotice(activePlayer, '源站响应较慢，正在继续加载');
+          }
+        } catch {}
+        hls.startLoad();
+      }, PLAYBACK_STALL_CONFIRMATION_DELAY_MS);
     };
 
     const onWaiting = () => {
@@ -418,6 +424,9 @@ export function createVodM3u8Loader({
     };
     const onStalled = () => {
       tryRecoverPlaybackStall('stalled');
+    };
+    const onPlaying = () => {
+      clearStallConfirmation();
     };
 
     const tryReportVideoInfo = () => {
@@ -440,17 +449,20 @@ export function createVodM3u8Loader({
       if (videoRuntimeCleaned) return;
       videoRuntimeCleaned = true;
       clearQualityLockProbe();
+      clearStallConfirmation();
       if (speedFallbackTimer) {
         clearTimeout(speedFallbackTimer);
       }
       video.removeEventListener('waiting', onWaiting);
       video.removeEventListener('stalled', onStalled);
+      video.removeEventListener('playing', onPlaying);
       video.removeEventListener('loadeddata', tryReportVideoInfo);
     };
 
     assignManagedVideoCleanup(video, cleanupVideoRuntime);
     video.addEventListener('waiting', onWaiting);
     video.addEventListener('stalled', onStalled);
+    video.addEventListener('playing', onPlaying);
 
     const onHlsError = function (_event: unknown, data: any) {
       const errorDetails = String(data?.details || '');
