@@ -1,5 +1,6 @@
 import he from 'he';
 
+import { toBangumiCoverProxyUrl } from '@/features/bangumi/lib/bangumi-cover-url';
 import { getAuthInfoFromBrowserCookie } from '@/lib/auth.client';
 import {
   getUsableDoubanImageProxyType,
@@ -22,10 +23,12 @@ export function processImageUrl(
 ): string {
   if (!originalUrl) return originalUrl;
 
-  if (
-    originalUrl.includes('lain.bgm.tv') ||
-    /^https:\/\/img\.doubanio\.cmliussss\.(net|com)\//i.test(originalUrl)
-  ) {
+  const bangumiCoverProxyUrl = toBangumiCoverProxyUrl(originalUrl);
+  if (bangumiCoverProxyUrl) {
+    return bangumiCoverProxyUrl;
+  }
+
+  if (/^https:\/\/img\.doubanio\.cmliussss\.(net|com)\//i.test(originalUrl)) {
     return originalUrl;
   }
 

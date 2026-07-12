@@ -34,7 +34,7 @@ export function FavoriteHeartButton({
         className={`transition-colors duration-300 ease-out ${
           favorited
             ? 'fill-red-600 stroke-red-600'
-            : 'fill-transparent stroke-white hover:stroke-red-400'
+            : 'fill-black/80 stroke-black/80 hover:fill-red-400 hover:stroke-red-400'
         } ${iconClassName}`.trim()}
       />
     </button>

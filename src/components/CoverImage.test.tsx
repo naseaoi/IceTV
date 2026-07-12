@@ -22,12 +22,18 @@ jest.mock('next/image', () => {
         onLoad?: () => void;
         onError?: () => void;
         className?: string;
+        loader?: (input: {
+          src: string;
+          width: number;
+          quality?: number;
+        }) => string;
+        quality?: number;
       }
-    >(({ src, alt, onLoad, onError, className }, ref) => (
+    >(({ src, alt, onLoad, onError, className, loader, quality }, ref) => (
       <img
         ref={ref}
         data-testid='cover-image'
-        src={src}
+        src={loader ? loader({ src, width: 128, quality }) : src}
         alt={alt}
         className={className}
         onLoad={onLoad}
@@ -116,7 +122,7 @@ describe('CoverImage', () => {
 
     expect(screen.getByTestId('cover-image')).toHaveAttribute(
       'src',
-      '/api/image-proxy?url=https%3A%2F%2Fcovers.example.com%2Fposter.jpg%3Fsize%3Dsmall',
+      '/api/image-proxy?url=https%3A%2F%2Fcovers.example.com%2Fposter.jpg%3Fsize%3Dsmall&width=128&quality=72',
     );
   });
 

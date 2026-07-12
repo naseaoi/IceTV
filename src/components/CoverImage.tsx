@@ -18,6 +18,10 @@ import {
   markCoverImagesLoaded,
   subscribeCoverImageLoaded,
 } from '@/lib/cover-image-cache';
+import {
+  buildCoverImageVariantUrl,
+  supportsCoverImageVariants,
+} from '@/lib/cover-image-variants';
 import { imageScheduler } from '@/lib/image-scheduler';
 import {
   isSourceCoverProxyUrl,
@@ -82,12 +86,16 @@ function buildBlurDataURL(color: string): string {
   return `data:image/svg+xml;charset=UTF-8,${encodeURIComponent(svg)}`;
 }
 
-function needsImageUnoptimized(url: string): boolean {
-  if (url.startsWith('/api/image-proxy?')) {
-    return true;
-  }
-
-  if (!url || url.startsWith('/') || url.startsWith('data:')) {
+function needsImageUnoptimized(
+  url: string,
+  usesCoverVariants: boolean,
+): boolean {
+  if (
+    usesCoverVariants ||
+    !url ||
+    url.startsWith('/') ||
+    url.startsWith('data:')
+  ) {
     return false;
   }
 
@@ -135,10 +143,11 @@ const CoverImage: React.FC<CoverImageProps> = memo(function CoverImage({
     [isEmpty, runtimeConfig.SOURCE_COVER_PROXY_MODE, src, useDirectFallback],
   );
 
-  const needsUnoptimized = useMemo(() => {
-    if (!processed) return false;
-    return needsImageUnoptimized(processed);
-  }, [processed]);
+  const usesCoverVariants = supportsCoverImageVariants(processed);
+  const needsUnoptimized = useMemo(
+    () => needsImageUnoptimized(processed, usesCoverVariants),
+    [processed, usesCoverVariants],
+  );
 
   const cacheKeys = useMemo(
     () => Array.from(new Set([src, processed].filter(Boolean))),
@@ -348,6 +357,7 @@ const CoverImage: React.FC<CoverImageProps> = memo(function CoverImage({
           src={processed}
           alt={alt}
           fill
+          loader={usesCoverVariants ? buildCoverImageVariantUrl : undefined}
           sizes={sizes}
           quality={needsUnoptimized ? undefined : quality}
           preload={priority}

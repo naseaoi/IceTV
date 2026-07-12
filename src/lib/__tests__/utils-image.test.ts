@@ -8,9 +8,9 @@ describe('processImageUrl', () => {
     delete window.RUNTIME_CONFIG;
   });
 
-  it('keeps Bangumi cover URLs direct', () => {
+  it('routes Bangumi cover URLs through the local cover endpoint', () => {
     expect(processImageUrl('http://lain.bgm.tv/pic/cover/l/92/43/a.jpg')).toBe(
-      'http://lain.bgm.tv/pic/cover/l/92/43/a.jpg',
+      '/api/bangumi-cover/l/92/43/a.jpg',
     );
   });
 

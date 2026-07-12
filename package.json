@@ -48,7 +48,8 @@
     "react": "^19.2.5",
     "react-dom": "^19.2.5",
     "server-only": "^0.0.1",
-    "serwist": "^9.5.7"
+    "serwist": "^9.5.7",
+    "sharp": "0.34.5"
   },
   "devDependencies": {
     "@commitlint/cli": "^16.3.0",

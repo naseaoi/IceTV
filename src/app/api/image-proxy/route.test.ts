@@ -52,4 +52,16 @@ describe('image proxy route auth order', () => {
     );
     expect(mockValidateProxyUrlForRequest).not.toHaveBeenCalled();
   });
+
+  it('rejects unsupported image widths after authorization', async () => {
+    mockAuthorizeProxyRequest.mockResolvedValue(null);
+
+    const request = {
+      url: 'http://localhost/api/image-proxy?url=https%3A%2F%2Fexample.com%2Fa.jpg&width=123',
+    } as NextRequest;
+    const response = await GET(request);
+
+    expect(response.status).toBe(400);
+    expect(mockValidateProxyUrlForRequest).not.toHaveBeenCalled();
+  });
 });
