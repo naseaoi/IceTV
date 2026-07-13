@@ -8,10 +8,11 @@ import ConfirmModal from '@/components/modals/ConfirmModal';
 import PageLayout from '@/components/PageLayout';
 import { FavoriteGrid } from '@/features/favorites/components/FavoriteGrid';
 import { useFavoriteItems } from '@/features/favorites/hooks/useFavoriteItems';
+import { HomeMineSwitch } from '@/features/home/components/HomeMineSwitch';
 
 function FavoriteGridSkeleton({ count = 12 }: { count?: number }) {
   return (
-    <div className='min-[480px]:grid-cols-4 grid grid-cols-3 justify-start gap-x-3 gap-y-14 px-0 sm:grid-cols-[repeat(auto-fill,_180px)] sm:gap-x-6 sm:gap-y-20 sm:px-2'>
+    <div className='min-[480px]:grid-cols-4 grid grid-cols-3 justify-start gap-x-3 gap-y-6 px-0 sm:grid-cols-[repeat(auto-fill,_180px)] sm:gap-x-6 sm:gap-y-14 sm:px-2'>
       {Array.from({ length: count }).map((_, index) => (
         <div key={index} className='w-full sm:w-[180px]'>
           <HomePosterCardSkeleton withSubtitle />
@@ -36,6 +37,10 @@ export function FavoritesPageClient({
       mobileHeader={{ title: '我的收藏', showBack: true }}
     >
       <div className='overflow-visible px-2 pb-2 pt-4 sm:px-10 sm:pt-8'>
+        <div className='mb-4 hidden justify-center md:flex'>
+          <HomeMineSwitch active='mine' />
+        </div>
+
         <div className='mx-auto max-w-[95%]'>
           <div className='mb-6 flex items-center justify-end sm:justify-between'>
             <h1 className='hidden items-center gap-2 text-2xl font-bold text-gray-900 dark:text-gray-100 sm:flex'>

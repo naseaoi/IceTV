@@ -16,17 +16,17 @@ interface VirtualizedSearchGridProps<T> {
 }
 
 const SEARCH_GRID_FALLBACK_CLASS =
-  'grid grid-cols-3 justify-start gap-x-3 gap-y-14 px-0 min-[480px]:grid-cols-4 sm:grid-cols-[repeat(auto-fill,_minmax(11rem,_1fr))] sm:gap-x-8 sm:gap-y-20 sm:px-2';
+  'grid grid-cols-3 justify-start gap-x-3 gap-y-6 px-0 min-[480px]:grid-cols-4 sm:grid-cols-[repeat(auto-fill,_minmax(11rem,_1fr))] sm:gap-x-8 sm:gap-y-14 sm:px-2';
 
 const SEARCH_GRID_LAYOUT = {
   mobileColumnCount: 3,
   mobileWideBreakpoint: 480,
   mobileWideColumnCount: 4,
   mobileColumnGap: 12,
-  mobileRowGap: 56,
+  mobileRowGap: 24,
   mobileContentHeight: 52,
   desktopColumnGap: 32,
-  desktopRowGap: 80,
+  desktopRowGap: 56,
   desktopMinColumnWidth: 176,
   desktopContentHeight: 52,
 };

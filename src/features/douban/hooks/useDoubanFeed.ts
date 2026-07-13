@@ -760,6 +760,7 @@ export function useDoubanFeed(type: string) {
     isLoadingMore,
     primarySelection,
     secondarySelection,
+    selectedWeekday,
     customCategories,
     handlePrimaryChange,
     handleSecondaryChange,

@@ -19,7 +19,7 @@ export function FavoriteGrid({
   }
 
   return (
-    <div className='min-[480px]:grid-cols-4 grid grid-cols-3 justify-start gap-x-3 gap-y-14 px-0 sm:grid-cols-[repeat(auto-fill,_180px)] sm:gap-x-6 sm:gap-y-20 sm:px-2'>
+    <div className='min-[480px]:grid-cols-4 grid grid-cols-3 justify-start gap-x-3 gap-y-6 px-0 sm:grid-cols-[repeat(auto-fill,_180px)] sm:gap-x-6 sm:gap-y-14 sm:px-2'>
       {items.map((item) => (
         <div key={item.id + item.source} className='w-full sm:w-[180px]'>
           <VideoCard

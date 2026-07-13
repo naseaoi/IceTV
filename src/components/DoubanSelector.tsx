@@ -75,7 +75,7 @@ const animePrimaryOptions: SelectorOption[] = [
 ];
 
 // 按 type 获取对应的选项配置
-const optionsMap: Record<
+export const doubanSelectorOptionsMap: Record<
   string,
   {
     primary: SelectorOption[];
@@ -126,7 +126,7 @@ const DoubanSelector: React.FC<DoubanSelectorProps> = ({
   onMultiLevelChange,
   onWeekdayChange,
 }) => {
-  const opts = optionsMap[type] || fallbackOpts;
+  const opts = doubanSelectorOptionsMap[type] || fallbackOpts;
 
   const primary = useCapsuleIndicator();
   const secondary = useCapsuleIndicator();

@@ -101,6 +101,8 @@ const LoadingStatePanel: React.FC<LoadingStatePanelProps> = ({
   children,
 }) => {
   const colors = toneMap[tone];
+  const iconBoxClass = compact ? 'h-14 w-14 sm:h-24 sm:w-24' : 'h-24 w-24';
+  const iconMarginClass = compact ? 'mb-3 sm:mb-7' : 'mb-7';
 
   return (
     <div
@@ -114,15 +116,15 @@ const LoadingStatePanel: React.FC<LoadingStatePanelProps> = ({
       <div className='pointer-events-none absolute -bottom-24 -right-16 h-52 w-52 rounded-full bg-white/20 blur-2xl dark:bg-white/5' />
 
       <div className='relative flex flex-col items-center text-center'>
-        <div className='relative mb-7'>
-          <div className='relative z-[2] mx-auto h-24 w-24'>
+        <div className={`relative ${iconMarginClass}`}>
+          <div className={`relative z-[2] mx-auto ${iconBoxClass}`}>
             {glow && (
               <div
                 className={`ls-glow-ring absolute -inset-1 rounded-full ${colors.iconTone}`}
               />
             )}
             <div
-              className={`relative flex h-24 w-24 items-center justify-center rounded-full bg-gradient-to-br ${colors.halo} ${colors.iconTone}`}
+              className={`relative flex ${iconBoxClass} items-center justify-center rounded-full bg-gradient-to-br ${colors.halo} ${colors.iconTone}`}
             >
               {icon}
             </div>

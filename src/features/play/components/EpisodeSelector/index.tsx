@@ -1,4 +1,4 @@
-import { ArrowLeftRight, Heart, Info, LayoutGrid } from 'lucide-react';
+import { ArrowLeftRight, Heart, LayoutGrid } from 'lucide-react';
 import dynamic from 'next/dynamic';
 import React, { useMemo, useState } from 'react';
 
@@ -174,7 +174,7 @@ interface EpisodeSelectorProps {
   onAddSources?: (newSources: SearchResult[]) => void;
 }
 
-type MobileSheetKey = 'episodes' | 'info' | 'sources';
+type MobileSheetKey = 'episodes' | 'sources';
 type DesktopTabKey = 'main' | 'sources';
 
 const MOBILE_EPISODE_STRIP_SIZE = 12;
@@ -361,14 +361,6 @@ const EpisodeSelector: React.FC<EpisodeSelectorProps> = ({
               <ArrowLeftRight className='h-3.5 w-3.5' />
               换源
             </button>
-            <button
-              type='button'
-              aria-label='查看详情'
-              className='flex h-9 w-9 items-center justify-center rounded-full border border-gray-200 bg-white dark:border-gray-700 dark:bg-gray-800'
-              onClick={() => setMobileSheet('info')}
-            >
-              <Info className='h-4 w-4 text-gray-500 dark:text-gray-400' />
-            </button>
           </div>
         </div>
 
@@ -402,6 +394,10 @@ const EpisodeSelector: React.FC<EpisodeSelectorProps> = ({
           </div>
         )}
 
+        <div className='mt-3 flex min-h-0 flex-1 flex-col overflow-hidden rounded-xl border border-gray-200/60 bg-white/60 dark:border-gray-700/60 dark:bg-gray-800/40'>
+          {renderInfoTab('panel')}
+        </div>
+
         <MobileSheet
           open={mobileSheet === 'episodes'}
           title='选集'
@@ -419,16 +415,6 @@ const EpisodeSelector: React.FC<EpisodeSelectorProps> = ({
         >
           <div className='flex h-[60dvh] flex-col overflow-hidden'>
             {renderSourcesTab(() => setMobileSheet(null))}
-          </div>
-        </MobileSheet>
-
-        <MobileSheet
-          open={mobileSheet === 'info'}
-          title='详情'
-          onClose={() => setMobileSheet(null)}
-        >
-          <div className='flex h-[60dvh] flex-col overflow-hidden'>
-            {renderInfoTab('panel')}
           </div>
         </MobileSheet>
       </div>

@@ -15,6 +15,7 @@ import { VirtualizedGrid } from '@/components/VirtualizedGrid';
 import { DoubanPageIcon } from '@/features/douban/components/DoubanPageIcon';
 import { useDoubanFeed } from '@/features/douban/hooks/useDoubanFeed';
 import { useInfiniteScroll } from '@/features/douban/hooks/useInfiniteScroll';
+import { getDoubanFilterSummary } from '@/features/douban/lib/filter-summary';
 import {
   DOUBAN_GRID_CLASS,
   DOUBAN_GRID_ITEM_CLASS,
@@ -39,6 +40,7 @@ export function DoubanPageClient() {
     isLoadingMore,
     primarySelection,
     secondarySelection,
+    selectedWeekday,
     customCategories,
     handlePrimaryChange,
     handleSecondaryChange,
@@ -56,9 +58,13 @@ export function DoubanPageClient() {
   const canLoadMore = hasMore && !isLoadingMore && !loading && selectorsReady;
   const [filterSheetOpen, setFilterSheetOpen] = useState(false);
 
-  const filterSummary = [primarySelection, secondarySelection]
-    .filter(Boolean)
-    .join(' · ');
+  const filterSummary = getDoubanFilterSummary({
+    type,
+    primarySelection,
+    secondarySelection,
+    selectedWeekday,
+    customCategories,
+  });
 
   const selectorNode =
     type !== 'custom' ? (

@@ -179,7 +179,7 @@ export default function ContinueWatching({
 
   return (
     <>
-      <section className={`mb-6 sm:mb-4 ${className || ''}`}>
+      <section className={`mb-2 ${className || ''}`}>
         <div className='mb-4 flex items-center justify-between'>
           <h2 className='flex items-center gap-2 text-lg font-bold text-gray-800 dark:text-gray-200 sm:text-xl'>
             <History className='h-5 w-5 text-orange-500' />

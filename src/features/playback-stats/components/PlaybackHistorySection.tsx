@@ -262,7 +262,7 @@ export function PlaybackHistorySection() {
   }, [deleteTarget]);
 
   return (
-    <section className='mb-4'>
+    <section className='mb-2'>
       <div className='mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between'>
         <h2 className='flex items-center gap-2 text-xl font-bold text-gray-800 dark:text-gray-200'>
           <History className='h-5 w-5 text-orange-500' />
@@ -277,8 +277,8 @@ export function PlaybackHistorySection() {
             onChange={(event) => setSearchText(event.target.value)}
             placeholder='搜索历史播放'
             aria-label='搜索历史播放'
-            className={`w-full rounded-lg border border-gray-300 bg-white px-3 py-2 pr-10 text-sm text-gray-900 outline-none transition-colors placeholder:text-gray-400 focus:border-transparent focus:ring-2 focus:ring-orange-500 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100 dark:placeholder:text-gray-500 ${
-              refreshing ? 'border-orange-300 dark:border-orange-500/70' : ''
+            className={`w-full rounded-lg border border-gray-300 bg-white px-3 py-2 pr-10 text-sm text-gray-900 outline-none transition-colors placeholder:text-gray-400 focus:border-transparent focus:ring-2 focus:ring-green-500 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100 dark:placeholder:text-gray-500 ${
+              refreshing ? 'border-green-300 dark:border-green-500/70' : ''
             }`}
           />
           {searchText && (
@@ -287,7 +287,7 @@ export function PlaybackHistorySection() {
               title='清空搜索'
               aria-label='清空搜索'
               onClick={() => setSearchText('')}
-              className='absolute right-2 top-1/2 flex h-6 w-6 -translate-y-1/2 items-center justify-center rounded text-gray-400 transition-colors hover:bg-gray-100 hover:text-gray-700 focus:outline-none focus:ring-2 focus:ring-orange-500/30 dark:hover:bg-gray-700 dark:hover:text-gray-200'
+              className='absolute right-2 top-1/2 flex h-6 w-6 -translate-y-1/2 items-center justify-center rounded text-gray-400 transition-colors hover:bg-gray-100 hover:text-gray-700 focus:outline-none focus:ring-2 focus:ring-green-500/30 dark:hover:bg-gray-700 dark:hover:text-gray-200'
             >
               <X className='h-4 w-4' />
             </button>
@@ -318,7 +318,7 @@ export function PlaybackHistorySection() {
             >
               <button
                 type='button'
-                className='flex min-w-0 flex-1 items-center gap-3 text-left focus:outline-none focus:ring-2 focus:ring-orange-500/40'
+                className='flex min-w-0 flex-1 items-center gap-3 text-left focus:outline-none'
                 aria-label={`继续播放 ${item.title}`}
                 onClick={() => playHistoryItem(item)}
                 onFocus={prefetchPlayPage}

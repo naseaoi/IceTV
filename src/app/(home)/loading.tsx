@@ -28,7 +28,7 @@ function SkeletonRow({
 }) {
   return (
     <div className='relative'>
-      <div className='scrollbar-hide flex space-x-7 overflow-x-auto py-1 pb-12 pl-1 pr-4 sm:py-2 sm:pb-14 sm:pr-6'>
+      <div className='scrollbar-hide flex space-x-3 overflow-x-auto py-1 pb-3 pl-1 pr-4 sm:space-x-7 sm:py-2 sm:pb-6 sm:pr-6'>
         {Array.from({ length: count }).map((_, index) => (
           <HomePosterCardSkeleton key={index} withSubtitle={withSubtitle} />
         ))}
@@ -53,35 +53,35 @@ export default async function HomeLoading() {
     <PageLayout>
       <div className='overflow-visible px-2 pb-2 pt-4 sm:px-10 sm:pt-8'>
         {/* CapsuleSwitch 骨架 */}
-        <div className='mb-4 flex justify-center'>
+        <div className='mb-4 hidden justify-center md:flex'>
           <CapsuleSwitchSkeleton />
         </div>
 
         <div className='mx-auto max-w-[95%]'>
           {continueWatchingCount > 0 && (
-            <section className='mb-4'>
+            <section className='mb-2'>
               <SkeletonSectionHeader />
               <SkeletonRow count={continueWatchingCount} withSubtitle />
             </section>
           )}
 
           {/* 推荐区域骨架 */}
-          <section className='mb-4'>
+          <section className='mb-2'>
             <SkeletonSectionHeader />
             <SkeletonRow count={12} />
           </section>
 
-          <section className='mb-4'>
+          <section className='mb-2'>
             <SkeletonSectionHeader />
             <SkeletonRow count={12} />
           </section>
 
-          <section className='mb-4'>
+          <section className='mb-2'>
             <SkeletonSectionHeader />
             <SkeletonRow count={12} />
           </section>
 
-          <section className='mb-4'>
+          <section className='mb-2'>
             <SkeletonSectionHeader />
             <SkeletonRow count={12} />
           </section>

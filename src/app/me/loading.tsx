@@ -23,14 +23,25 @@ export default function MeLoading() {
   return (
     <PageLayout activePath='/'>
       <div className='overflow-visible px-2 pb-2 pt-4 sm:px-10 sm:pt-8'>
-        <div className='mb-4 flex justify-center'>
+        <div className='mb-4 hidden justify-center md:flex'>
           <MineSwitchSkeleton />
         </div>
 
         <div className='mx-auto max-w-[95%]'>
-          <div className='-mb-8 sm:-mb-10'>
+          <div className='mb-4 flex gap-3 md:hidden'>
+            {Array.from({ length: 3 }).map((_, index) => (
+              <div
+                key={index}
+                className='min-h-[64px] flex-1 animate-pulse rounded-xl bg-gray-200 dark:bg-gray-800'
+              />
+            ))}
+          </div>
+
+          <div className='-mb-3 sm:-mb-6'>
             <FavoritePreviewSkeleton />
-            <PlaybackStatsSkeleton />
+            <div className='pb-4'>
+              <PlaybackStatsSkeleton />
+            </div>
             <PlaybackHistorySkeleton />
           </div>
         </div>

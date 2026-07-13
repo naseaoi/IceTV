@@ -7,6 +7,7 @@ import { ReactNode } from 'react';
 import { useSmartHomeNav } from '@/hooks/useSmartHomeNav';
 
 import { BackButton } from './BackButton';
+import { SiteIcon } from './Sidebar';
 import { useSite } from './SiteProvider';
 import { ThemeToggle } from './ThemeToggle';
 import { UserMenu } from './UserMenu';
@@ -50,16 +51,21 @@ const MobileHeader = ({ title, showBack, actions }: MobileHeaderProps) => {
       style={{ paddingTop: 'env(safe-area-inset-top)' }}
     >
       {variant === 'home' && (
-        <div className='flex h-12 items-center justify-between px-3'>
+        <div className='flex h-12 items-center justify-between px-4'>
           <Link
             href='/'
             onClick={(e) => {
               e.preventDefault();
               goHome();
             }}
-            className='max-w-[60vw] truncate text-xl font-bold tracking-tight text-green-600 transition-opacity hover:opacity-80'
+            className='flex max-w-[60vw] items-center gap-2 transition-opacity hover:opacity-80'
           >
-            {siteName}
+            <span className='h-7 w-7 shrink-0'>
+              <SiteIcon />
+            </span>
+            <span className='truncate text-xl font-bold tracking-tight text-gray-900 dark:text-white'>
+              {siteName}
+            </span>
           </Link>
           <div className='flex items-center gap-1'>
             <ThemeToggle />
@@ -69,7 +75,7 @@ const MobileHeader = ({ title, showBack, actions }: MobileHeaderProps) => {
       )}
 
       {variant === 'page' && (
-        <div className='flex h-12 items-center justify-between gap-2 px-3'>
+        <div className='flex h-12 items-center justify-between gap-2 px-4'>
           <div className='flex min-w-0 items-center gap-1'>
             {showBack && <BackButton />}
             <h1 className='truncate text-lg font-bold text-gray-900 dark:text-gray-100'>
@@ -88,7 +94,7 @@ const MobileHeader = ({ title, showBack, actions }: MobileHeaderProps) => {
       )}
 
       {variant === 'player' && (
-        <div className='grid h-12 grid-cols-[2.5rem_1fr_2.5rem] items-center px-3'>
+        <div className='grid h-12 grid-cols-[2.5rem_1fr_2.5rem] items-center px-4'>
           <BackButton />
           <h1 className='truncate px-1 text-center text-base font-semibold text-gray-900 dark:text-gray-100'>
             {resolvedTitle}

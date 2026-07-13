@@ -20,7 +20,7 @@ export function PlaybackHistoryItemSkeleton() {
 
 export function PlaybackHistorySkeleton({ count = 6 }: { count?: number }) {
   return (
-    <section className='mb-4'>
+    <section className='mb-2'>
       <div className='mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between'>
         <div className='flex items-center gap-2'>
           <div className='h-5 w-5 animate-pulse rounded bg-gray-200 dark:bg-gray-800' />

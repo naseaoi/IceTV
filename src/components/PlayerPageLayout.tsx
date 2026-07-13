@@ -149,7 +149,7 @@ export function PlayerPageLayout({
           <div className='max-md:landscape:hidden flex-shrink-0 pt-3 md:hidden'>
             <div className='flex min-w-0 items-center gap-2'>
               <TitleIconBadge icon={TitleIcon} accent={accent} />
-              <h1 className='min-w-0 truncate text-base font-semibold text-gray-900 dark:text-gray-100'>
+              <h1 className='min-w-0 truncate text-lg font-semibold text-gray-900 dark:text-gray-100'>
                 {title || titleFallback}
               </h1>
               {titleSuffix && (

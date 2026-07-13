@@ -52,7 +52,7 @@ const SidebarContext = createContext<SidebarContextType>({
   isCollapsed: false,
 });
 
-const SiteIcon = () => {
+export const SiteIcon = () => {
   const { siteIcon, siteName } = useSite();
   const fallbackIcon = '/icons/icon-192x192.png';
   const iconSrc = siteIcon || fallbackIcon;

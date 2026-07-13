@@ -24,7 +24,7 @@ export function FavoritePreviewSection({
   const previewItems = items.slice(0, FAVORITE_PREVIEW_LIMIT);
 
   return (
-    <section className='mb-4'>
+    <section className='mb-2'>
       <div className='mb-4 flex items-center justify-between'>
         <h2 className='flex items-center gap-2 text-xl font-bold text-gray-800 dark:text-gray-200'>
           <Star className='h-5 w-5 text-amber-500' />

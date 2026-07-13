@@ -1,14 +1,15 @@
 'use client';
 
-import { BarChart3, ChevronDown, History, Star } from 'lucide-react';
+import { BarChart3, History, Star } from 'lucide-react';
 import Link from 'next/link';
-import { useState } from 'react';
 
 import PageLayout from '@/components/PageLayout';
 import { FavoritePreviewSection } from '@/features/favorites/components/FavoritePreviewSection';
 import { useFavoriteItems } from '@/features/favorites/hooks/useFavoriteItems';
 import { PlaybackHistorySection } from '@/features/playback-stats/components/PlaybackHistorySection';
 import { PlaybackStatsPanel } from '@/features/playback-stats/components/PlaybackStatsPanel';
+
+import { HomeMineSwitch } from './HomeMineSwitch';
 
 function QuickEntry({
   icon: Icon,
@@ -54,7 +55,6 @@ export function MinePageClient({
     loading: favoritesLoading,
     skeletonCount: favoriteLoadingSkeletonCount,
   } = useFavoriteItems(true, favoriteSkeletonCount);
-  const [statsOpen, setStatsOpen] = useState(false);
 
   const scrollToSection = (id: string) => {
     document.getElementById(id)?.scrollIntoView({ behavior: 'smooth' });
@@ -63,25 +63,26 @@ export function MinePageClient({
   return (
     <PageLayout activePath='/'>
       <div className='overflow-visible px-2 pb-2 pt-4 sm:px-10 sm:pt-8'>
+        <div className='mb-4 hidden justify-center md:flex'>
+          <HomeMineSwitch active='mine' />
+        </div>
+
         <div className='mx-auto max-w-[95%]'>
           <div className='mb-4 flex gap-3 md:hidden'>
             <QuickEntry icon={Star} label='收藏' href='/me/favorites' />
+            <QuickEntry
+              icon={BarChart3}
+              label='统计'
+              onClick={() => scrollToSection('mine-stats')}
+            />
             <QuickEntry
               icon={History}
               label='历史'
               onClick={() => scrollToSection('mine-history')}
             />
-            <QuickEntry
-              icon={BarChart3}
-              label='统计'
-              onClick={() => {
-                setStatsOpen(true);
-                requestAnimationFrame(() => scrollToSection('mine-stats'));
-              }}
-            />
           </div>
 
-          <div className='-mb-8 flex flex-col sm:-mb-10'>
+          <div className='-mb-3 flex flex-col sm:-mb-6'>
             <div className='order-1'>
               <FavoritePreviewSection
                 items={favoriteItems}
@@ -90,30 +91,12 @@ export function MinePageClient({
               />
             </div>
 
-            <div id='mine-history' className='order-2 md:order-3'>
-              <PlaybackHistorySection />
+            <div id='mine-stats' className='order-2 pb-4'>
+              <PlaybackStatsPanel />
             </div>
 
-            <div id='mine-stats' className='order-3 md:order-2'>
-              <button
-                type='button'
-                className='flex w-full items-center justify-between py-2 text-left md:hidden'
-                aria-expanded={statsOpen}
-                onClick={() => setStatsOpen((prev) => !prev)}
-              >
-                <span className='flex items-center gap-2 text-lg font-bold text-gray-800 dark:text-gray-200'>
-                  <BarChart3 className='h-5 w-5 text-sky-500' />
-                  观看统计
-                </span>
-                <ChevronDown
-                  className={`h-5 w-5 text-gray-500 transition-transform ${
-                    statsOpen ? 'rotate-180' : ''
-                  }`}
-                />
-              </button>
-              <div className={statsOpen ? '' : 'hidden md:block'}>
-                <PlaybackStatsPanel />
-              </div>
+            <div id='mine-history' className='order-3'>
+              <PlaybackHistorySection />
             </div>
           </div>
         </div>

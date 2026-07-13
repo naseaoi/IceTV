@@ -1,6 +1,6 @@
 'use client';
 
-import { MoreVertical, PlayCircleIcon, Trash2 } from 'lucide-react';
+import { Heart, MoreVertical, PlayCircleIcon, Trash2 } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import { useCallback, useId } from 'react';
 
@@ -8,7 +8,12 @@ import { useCardInteractionManager } from '@/components/CardInteractionProvider'
 import CoverImage from '@/components/CoverImage';
 import { useLongPress } from '@/hooks/useLongPress';
 import { getAuthInfoFromBrowserCookie } from '@/lib/auth.client';
-import { deletePlayRecord } from '@/lib/db.client';
+import {
+  deleteFavorite,
+  deletePlayRecord,
+  isFavorited,
+  saveFavorite,
+} from '@/lib/db.client';
 import { savePlayIntent } from '@/lib/play-intent';
 import { canUseNetworkPrefetch, warmupForPlayback } from '@/lib/video-prefetch';
 
@@ -87,7 +92,14 @@ export default function MobileContinueCard({
     });
   }, [showConfirm, interactionId, title, source, id, onDelete]);
 
-  const openActions = useCallback(() => {
+  const openActions = useCallback(async () => {
+    let favorited = false;
+    try {
+      favorited = await isFavorited(source, id);
+    } catch {
+      favorited = false;
+    }
+
     showActionSheet(interactionId, {
       title,
       poster,
@@ -99,6 +111,31 @@ export default function MobileContinueCard({
           onClick: handlePlay,
         },
         {
+          id: 'favorite',
+          label: favorited ? '取消收藏' : '收藏',
+          icon: (
+            <Heart
+              size={20}
+              className={favorited ? 'fill-red-500 text-red-500' : undefined}
+            />
+          ),
+          onClick: async () => {
+            if (favorited) {
+              await deleteFavorite(source, id);
+              return;
+            }
+            await saveFavorite(source, id, {
+              title,
+              source_name: sourceName || '',
+              year: year || '',
+              cover: poster,
+              total_episodes: totalEpisodes,
+              save_time: Date.now(),
+              search_title: query || '',
+            });
+          },
+        },
+        {
           id: 'delete',
           label: '删除记录',
           icon: <Trash2 size={20} />,
@@ -107,7 +144,20 @@ export default function MobileContinueCard({
         },
       ],
     });
-  }, [showActionSheet, interactionId, title, poster, handlePlay, handleDelete]);
+  }, [
+    showActionSheet,
+    interactionId,
+    title,
+    poster,
+    source,
+    id,
+    sourceName,
+    year,
+    totalEpisodes,
+    query,
+    handlePlay,
+    handleDelete,
+  ]);
 
   const longPressProps = useLongPress({
     onLongPress: openActions,

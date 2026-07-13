@@ -62,29 +62,21 @@ const MobileBottomNav = () => {
               <Link
                 href={item.href}
                 aria-current={active ? 'page' : undefined}
-                className='flex h-14 w-full flex-col items-center justify-center gap-1 text-xs'
+                aria-label={item.label}
+                className='flex h-14 w-full items-center justify-center'
               >
                 <span
-                  className={`flex items-center justify-center rounded-full px-3 py-0.5 ${
+                  className={`flex items-center justify-center rounded-full px-4 py-1.5 ${
                     active ? 'bg-green-500/10 dark:bg-green-400/10' : ''
                   }`}
                 >
                   <item.icon
-                    className={`h-[22px] w-[22px] ${
+                    className={`h-6 w-6 ${
                       active
                         ? 'text-green-600 dark:text-green-400'
                         : 'text-gray-500 dark:text-gray-400'
                     }`}
                   />
-                </span>
-                <span
-                  className={
-                    active
-                      ? 'text-green-600 dark:text-green-400'
-                      : 'text-gray-600 dark:text-gray-300'
-                  }
-                >
-                  {item.label}
                 </span>
               </Link>
             </li>
