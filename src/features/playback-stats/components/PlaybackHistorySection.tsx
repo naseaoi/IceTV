@@ -4,6 +4,7 @@ import { Clock3, History, Trash2, X } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import { useCallback, useEffect, useState } from 'react';
 
+import CoverImage from '@/components/CoverImage';
 import ConfirmModal from '@/components/modals/ConfirmModal';
 import { useRuntimeConfig } from '@/components/RuntimeConfigProvider';
 import { PlaybackHistoryItemSkeleton } from '@/features/playback-stats/components/PlaybackHistorySkeleton';
@@ -323,11 +324,13 @@ export function PlaybackHistorySection() {
                 onFocus={prefetchPlayPage}
                 onMouseEnter={prefetchPlayPage}
               >
-                <img
-                  src={item.cover || '/icons/icon-192x192.png'}
-                  alt={item.title}
-                  className='h-14 w-10 shrink-0 rounded object-cover'
-                />
+                <div className='relative h-14 w-10 shrink-0 overflow-hidden rounded bg-gray-100 dark:bg-gray-800'>
+                  <CoverImage
+                    src={item.cover || ''}
+                    alt={item.title}
+                    sizes='40px'
+                  />
+                </div>
                 <div className='min-w-0 flex-1'>
                   <div className='truncate text-sm font-medium text-gray-900 dark:text-gray-100'>
                     {item.title}

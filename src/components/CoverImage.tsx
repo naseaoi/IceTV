@@ -213,7 +213,7 @@ const CoverImage: React.FC<CoverImageProps> = memo(function CoverImage({
           io.disconnect();
         }
       },
-      { rootMargin: VIEWPORT_PRELOAD_MARGIN },
+      { root: document.body, rootMargin: VIEWPORT_PRELOAD_MARGIN },
     );
     io.observe(el);
     return () => io.disconnect();
