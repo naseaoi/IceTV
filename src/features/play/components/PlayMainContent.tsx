@@ -462,6 +462,7 @@ export function PlayMainContent(props: PlayMainContentProps) {
           : null
       }
       tags={headerTags}
+      mobilePanelAlwaysVisible
       playerOverlay={
         <>
           {isVideoLoading && !playbackError && (

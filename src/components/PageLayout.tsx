@@ -1,3 +1,5 @@
+import { ReactNode } from 'react';
+
 import { BackButton } from './BackButton';
 import MobileBottomNav from './MobileBottomNav';
 import MobileHeader from './MobileHeader';
@@ -5,11 +7,18 @@ import { ScrollToTopButton } from './ScrollToTopButton';
 import Sidebar from './Sidebar';
 import { SiteFooter } from './SiteFooter';
 
+interface MobileHeaderConfig {
+  title?: string;
+  showBack?: boolean;
+  actions?: ReactNode;
+}
+
 interface PageLayoutProps {
   children: React.ReactNode;
   activePath?: string;
   contentMode?: 'default' | 'player';
   showDesktopBack?: boolean;
+  mobileHeader?: MobileHeaderConfig;
 }
 
 const PageLayout = ({
@@ -17,10 +26,12 @@ const PageLayout = ({
   activePath = '/',
   contentMode = 'default',
   showDesktopBack: showDesktopBackOverride,
+  mobileHeader,
 }: PageLayoutProps) => {
   const showMobileBack = ['/play', '/live'].includes(activePath);
   const showDesktopBack = showDesktopBackOverride ?? activePath === '/live';
   const isPlayerPage = contentMode === 'player' || activePath === '/play';
+  const showBottomNav = !['/play', '/live'].includes(activePath);
   const showFooter = ['/', '/play', '/live'].includes(activePath);
   const showScrollToTop =
     !isPlayerPage && (activePath === '/' || activePath.startsWith('/douban'));
@@ -28,7 +39,11 @@ const PageLayout = ({
   return (
     <div className='min-h-screen w-full'>
       {/* 移动端头部 */}
-      <MobileHeader showBackButton={showMobileBack} />
+      <MobileHeader
+        title={mobileHeader?.title}
+        showBack={mobileHeader?.showBack ?? showMobileBack}
+        actions={mobileHeader?.actions}
+      />
 
       {/* 主要布局容器 */}
       <div className='flex min-h-screen w-full md:grid md:grid-cols-[auto_1fr]'>
@@ -56,16 +71,21 @@ const PageLayout = ({
           <main
             className={`flex-1 md:mb-0 md:mt-0 md:min-h-0 ${
               isPlayerPage
-                ? 'mb-0 mt-12 flex h-[calc(100dvh-3rem-3.5rem-env(safe-area-inset-bottom)-4px)] flex-col overflow-hidden md:h-auto'
-                : 'mb-14 mt-12'
+                ? 'mb-0 mt-[calc(3rem+env(safe-area-inset-top))] flex h-[calc(100dvh-3rem-env(safe-area-inset-top)-env(safe-area-inset-bottom)-4px)] flex-col overflow-hidden md:h-auto'
+                : `${
+                    activePath === '/search'
+                      ? 'mt-0'
+                      : 'mt-[calc(3rem+env(safe-area-inset-top))]'
+                  } ${showBottomNav ? 'mb-14' : 'mb-0'}`
             }`}
             style={
               isPlayerPage
                 ? undefined
                 : {
-                    paddingBottom: showFooter
-                      ? 'env(safe-area-inset-bottom)'
-                      : 'calc(3.5rem + env(safe-area-inset-bottom))',
+                    paddingBottom:
+                      showFooter || !showBottomNav
+                        ? 'env(safe-area-inset-bottom)'
+                        : 'calc(3.5rem + env(safe-area-inset-bottom))',
                   }
             }
           >
@@ -85,9 +105,11 @@ const PageLayout = ({
       </div>
 
       {/* 移动端底部导航 */}
-      <div className='md:hidden'>
-        <MobileBottomNav activePath={activePath} />
-      </div>
+      {showBottomNav && (
+        <div className='md:hidden'>
+          <MobileBottomNav />
+        </div>
+      )}
 
       {showScrollToTop && <ScrollToTopButton />}
     </div>

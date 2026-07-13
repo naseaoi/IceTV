@@ -6,6 +6,8 @@ export type VirtualizedGridLayoutConfig = {
   breakpoint?: number;
   posterAspectRatio?: number;
   mobileColumnCount?: number;
+  mobileWideBreakpoint?: number;
+  mobileWideColumnCount?: number;
   mobileColumnGap?: number;
   mobileRowGap?: number;
   mobileItemWidth?: number;
@@ -41,6 +43,8 @@ const DEFAULT_LAYOUT: Required<VirtualizedGridLayoutConfig> = {
   breakpoint: 640,
   posterAspectRatio: 1.5,
   mobileColumnCount: 3,
+  mobileWideBreakpoint: 480,
+  mobileWideColumnCount: 0,
   mobileColumnGap: 8,
   mobileRowGap: 56,
   mobileItemWidth: 0,
@@ -73,7 +77,10 @@ function getGridLayout(
         1,
         Math.floor((containerWidth + columnGap) / (minColumnWidth + columnGap)),
       )
-    : layout.mobileColumnCount;
+    : layout.mobileWideColumnCount > 0 &&
+        containerWidth >= layout.mobileWideBreakpoint
+      ? layout.mobileWideColumnCount
+      : layout.mobileColumnCount;
   const trackWidth =
     fixedItemWidth && isDesktop
       ? fixedItemWidth

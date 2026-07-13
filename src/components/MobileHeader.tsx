@@ -1,11 +1,10 @@
-﻿'use client';
+'use client';
 
 import Link from 'next/link';
-import { useRouter } from 'next/navigation';
-import { useEffect } from 'react';
+import { usePathname } from 'next/navigation';
+import { ReactNode } from 'react';
 
 import { useSmartHomeNav } from '@/hooks/useSmartHomeNav';
-import { getAuthInfoFromBrowserCookie } from '@/lib/auth.client';
 
 import { BackButton } from './BackButton';
 import { useSite } from './SiteProvider';
@@ -13,67 +12,90 @@ import { ThemeToggle } from './ThemeToggle';
 import { UserMenu } from './UserMenu';
 
 interface MobileHeaderProps {
-  showBackButton?: boolean;
+  title?: string;
+  showBack?: boolean;
+  actions?: ReactNode;
 }
 
-const MobileHeader = ({ showBackButton = false }: MobileHeaderProps) => {
+const PAGE_TITLES: Record<string, string> = {
+  '/categories': '分类',
+  '/me': '我的',
+};
+
+function getVariant(pathname: string): 'home' | 'player' | 'search' | 'page' {
+  if (pathname === '/') return 'home';
+  if (pathname.startsWith('/play') || pathname.startsWith('/live')) {
+    return 'player';
+  }
+  if (pathname.startsWith('/search')) return 'search';
+  return 'page';
+}
+
+const MobileHeader = ({ title, showBack, actions }: MobileHeaderProps) => {
   const { siteName } = useSite();
-  const router = useRouter();
+  const pathname = usePathname() ?? '/';
   const goHome = useSmartHomeNav();
 
-  useEffect(() => {
-    router.prefetch('/search');
-  }, [router]);
+  const variant = getVariant(pathname);
+
+  if (variant === 'search') {
+    return null;
+  }
+
+  const resolvedTitle = title || PAGE_TITLES[pathname] || siteName;
 
   return (
-    <header className='fixed left-0 right-0 top-0 z-[999] w-full border-b border-gray-200/50 bg-white/70 shadow-sm backdrop-blur-xl dark:border-gray-700/50 dark:bg-gray-900/70 md:hidden'>
-      <div className='grid h-12 grid-cols-3 items-center px-3'>
-        <div className='flex min-w-0 items-center justify-start gap-1'>
+    <header
+      className='fixed left-0 right-0 top-0 z-[999] w-full border-b border-gray-200/50 bg-white/70 shadow-sm backdrop-blur-xl dark:border-gray-700/50 dark:bg-gray-900/70 md:hidden'
+      style={{ paddingTop: 'env(safe-area-inset-top)' }}
+    >
+      {variant === 'home' && (
+        <div className='flex h-12 items-center justify-between px-3'>
           <Link
-            href='/search'
+            href='/'
             onClick={(e) => {
-              const authInfo = getAuthInfoFromBrowserCookie();
-              if (!authInfo?.username) {
-                e.preventDefault();
-                router.push('/login?redirect=%2Fsearch');
-              }
+              e.preventDefault();
+              goHome();
             }}
-            className='flex h-10 w-10 items-center justify-center rounded-full p-2 text-gray-600 transition-colors hover:bg-gray-200/50 dark:text-gray-300 dark:hover:bg-gray-700/50'
+            className='max-w-[60vw] truncate text-xl font-bold tracking-tight text-green-600 transition-opacity hover:opacity-80'
           >
-            <svg
-              className='h-full w-full'
-              fill='none'
-              stroke='currentColor'
-              viewBox='0 0 24 24'
-              xmlns='http://www.w3.org/2000/svg'
-            >
-              <path
-                strokeLinecap='round'
-                strokeLinejoin='round'
-                strokeWidth={2}
-                d='M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z'
-              />
-            </svg>
+            {siteName}
           </Link>
-          {showBackButton && <BackButton />}
+          <div className='flex items-center gap-1'>
+            <ThemeToggle />
+            <UserMenu />
+          </div>
         </div>
+      )}
 
-        <Link
-          href='/'
-          onClick={(e) => {
-            e.preventDefault();
-            goHome();
-          }}
-          className='mx-auto block max-w-full truncate px-1 text-center text-xl font-bold tracking-tight text-green-600 transition-opacity hover:opacity-80'
-        >
-          {siteName}
-        </Link>
-
-        <div className='flex min-w-0 items-center justify-end gap-1'>
-          <ThemeToggle />
-          <UserMenu />
+      {variant === 'page' && (
+        <div className='flex h-12 items-center justify-between gap-2 px-3'>
+          <div className='flex min-w-0 items-center gap-1'>
+            {showBack && <BackButton />}
+            <h1 className='truncate text-lg font-bold text-gray-900 dark:text-gray-100'>
+              {resolvedTitle}
+            </h1>
+          </div>
+          <div className='flex shrink-0 items-center gap-1'>
+            {actions ?? (
+              <>
+                <ThemeToggle />
+                <UserMenu />
+              </>
+            )}
+          </div>
         </div>
-      </div>
+      )}
+
+      {variant === 'player' && (
+        <div className='grid h-12 grid-cols-[2.5rem_1fr_2.5rem] items-center px-3'>
+          <BackButton />
+          <h1 className='truncate px-1 text-center text-base font-semibold text-gray-900 dark:text-gray-100'>
+            {resolvedTitle}
+          </h1>
+          <div className='flex items-center justify-end'>{actions}</div>
+        </div>
+      )}
     </header>
   );
 };

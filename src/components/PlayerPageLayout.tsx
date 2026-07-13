@@ -26,6 +26,7 @@ interface PlayerPageLayoutProps {
   tags?: ReactNode[];
   playerOverlay?: ReactNode;
   rightPanel: ReactNode;
+  mobilePanelAlwaysVisible?: boolean;
 }
 
 const TogglePanelButton = ({
@@ -96,41 +97,16 @@ export function PlayerPageLayout({
   tags = [],
   playerOverlay,
   rightPanel,
+  mobilePanelAlwaysVisible = false,
 }: PlayerPageLayoutProps) {
   return (
     <PageLayout
       activePath={activePath}
       contentMode='player'
       showDesktopBack={false}
+      mobileHeader={{ title: title || titleFallback }}
     >
       <div className='relative flex h-full min-h-0 flex-col overflow-hidden px-4 py-2 sm:px-6'>
-        {/* 移动端头部：居中标题 + 标签 */}
-        <div className='relative flex-shrink-0 pb-3 pt-1 md:hidden'>
-          <h1 className='flex min-w-0 items-center justify-center gap-2.5 text-xl font-bold text-gray-900 dark:text-gray-100'>
-            <TitleIconBadge icon={TitleIcon} accent={accent} />
-            <span className='max-w-[60vw] truncate'>
-              {title || titleFallback}
-            </span>
-            {titleSuffix && (
-              <>
-                <span className='h-4 w-px flex-shrink-0 bg-gray-300 dark:bg-gray-600' />
-                <span
-                  className={`text-sm font-semibold ${accent.sub} flex-shrink-0 whitespace-nowrap`}
-                >
-                  {titleSuffix}
-                </span>
-              </>
-            )}
-          </h1>
-          {tags.length > 0 && (
-            <div className='mt-2 flex flex-wrap items-center justify-center gap-2 text-[11px] font-medium'>
-              {tags.map((tag, index) => (
-                <span key={index}>{tag}</span>
-              ))}
-            </div>
-          )}
-        </div>
-
         {/* 桌面端单行顶栏 */}
         <div className='relative hidden h-[5.5rem] flex-shrink-0 items-center gap-4 md:flex'>
           <BackButton variant='icon' />
@@ -159,7 +135,7 @@ export function PlayerPageLayout({
 
         {/* 内容区：移动端上下排列，桌面端播放器吃满剩余宽高 + 固定宽右面板 */}
         <div className='flex min-h-0 flex-1 flex-col md:flex-row'>
-          <div className='relative aspect-video max-h-[38dvh] w-full flex-shrink-0 md:aspect-auto md:h-full md:max-h-none md:min-w-0 md:flex-1'>
+          <div className='max-md:landscape:aspect-auto max-md:landscape:max-h-none max-md:landscape:min-h-0 max-md:landscape:flex-1 relative aspect-video max-h-[38dvh] w-full flex-shrink-0 md:aspect-auto md:h-full md:max-h-none md:min-w-0 md:flex-1'>
             <div className='absolute inset-0'>
               <div
                 ref={artRef}
@@ -169,10 +145,36 @@ export function PlayerPageLayout({
             </div>
           </div>
 
+          {/* 移动端播放信息：标题 + 标签 */}
+          <div className='max-md:landscape:hidden flex-shrink-0 pt-3 md:hidden'>
+            <div className='flex min-w-0 items-center gap-2'>
+              <TitleIconBadge icon={TitleIcon} accent={accent} />
+              <h1 className='min-w-0 truncate text-base font-semibold text-gray-900 dark:text-gray-100'>
+                {title || titleFallback}
+              </h1>
+              {titleSuffix && (
+                <span
+                  className={`text-sm font-semibold ${accent.sub} flex-shrink-0 whitespace-nowrap`}
+                >
+                  {titleSuffix}
+                </span>
+              )}
+            </div>
+            {tags.length > 0 && (
+              <div className='mt-1.5 flex flex-wrap items-center gap-2 text-[11px] font-medium'>
+                {tags.map((tag, index) => (
+                  <span key={index}>{tag}</span>
+                ))}
+              </div>
+            )}
+          </div>
+
           <div
-            className={`min-h-0 overflow-hidden transition-[max-width,margin,opacity] duration-300 ease-[cubic-bezier(0.25,0.1,0.25,1)] md:mt-0 md:h-full md:w-[21rem] md:flex-none xl:w-[24rem] ${
+            className={`max-md:landscape:hidden min-h-0 overflow-hidden transition-[max-width,margin,opacity] duration-300 ease-[cubic-bezier(0.25,0.1,0.25,1)] md:mt-0 md:h-full md:w-[21rem] md:flex-none xl:w-[24rem] ${
               isPanelCollapsed
-                ? 'hidden md:pointer-events-none md:ml-0 md:block md:max-w-0 md:opacity-0'
+                ? `${
+                    mobilePanelAlwaysVisible ? 'mt-3 flex-1' : 'hidden'
+                  } md:pointer-events-none md:ml-0 md:mt-0 md:block md:max-w-0 md:flex-none md:opacity-0`
                 : 'mt-3 flex-1 md:ml-3 md:max-w-[24rem] md:opacity-100'
             }`}
           >

@@ -1,5 +1,5 @@
 export const HOME_POSTER_CARD_CLASS =
-  'w-24 min-w-[96px] sm:w-44 sm:min-w-[180px]';
+  'w-28 min-w-[112px] sm:w-44 sm:min-w-[180px]';
 
 interface HomePosterCardSkeletonProps {
   withSubtitle?: boolean;

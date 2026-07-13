@@ -1,114 +1,82 @@
 'use client';
 
-import { Cat, Clover, Film, Home, Radio, Star, Tv } from 'lucide-react';
+import { Home, LayoutGrid, Search, UserRound } from 'lucide-react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import { useMemo } from 'react';
-
-import { RuntimeConfig } from '@/lib/runtime-config';
-
-import { useRuntimeConfig } from './RuntimeConfigProvider';
-
-interface MobileBottomNavProps {
-  /**
-   * 主动指定当前激活的路径。当未提供时，自动使用 usePathname() 获取的路径。
-   */
-  activePath?: string;
-}
 
 type MobileNavItem = {
   icon: typeof Home;
   label: string;
   href: string;
+  match: (pathname: string) => boolean;
 };
 
-const LIVE_ROUTE = '/live';
+const NAV_ITEMS: MobileNavItem[] = [
+  {
+    icon: Home,
+    label: '首页',
+    href: '/',
+    match: (pathname) => pathname === '/',
+  },
+  {
+    icon: LayoutGrid,
+    label: '分类',
+    href: '/categories',
+    match: (pathname) =>
+      pathname.startsWith('/categories') ||
+      pathname.startsWith('/douban') ||
+      pathname.startsWith('/live'),
+  },
+  {
+    icon: Search,
+    label: '搜索',
+    href: '/search',
+    match: (pathname) => pathname.startsWith('/search'),
+  },
+  {
+    icon: UserRound,
+    label: '我的',
+    href: '/me',
+    match: (pathname) => pathname.startsWith('/me'),
+  },
+];
 
-function shouldPrefetchRoute(href: string): boolean {
-  return href !== LIVE_ROUTE;
-}
-
-function getMobileNavItems(runtimeConfig?: RuntimeConfig): MobileNavItem[] {
-  const nextItems: MobileNavItem[] = [
-    { icon: Home, label: '首页', href: '/' },
-    { icon: Film, label: '电影', href: '/douban?type=movie' },
-    { icon: Tv, label: '剧集', href: '/douban?type=tv' },
-    { icon: Cat, label: '动漫', href: '/douban?type=anime' },
-    { icon: Clover, label: '综艺', href: '/douban?type=show' },
-  ];
-
-  if (runtimeConfig?.ENABLE_LIVE_ENTRY) {
-    nextItems.push({ icon: Radio, label: '直播', href: LIVE_ROUTE });
-  }
-
-  if ((runtimeConfig?.CUSTOM_CATEGORIES?.length ?? 0) > 0) {
-    nextItems.push({
-      icon: Star,
-      label: '自定义',
-      href: '/douban?type=custom',
-    });
-  }
-
-  return nextItems;
-}
-
-const MobileBottomNav = ({ activePath }: MobileBottomNavProps) => {
+const MobileBottomNav = () => {
   const pathname = usePathname();
-  const runtimeConfig = useRuntimeConfig();
-
-  // 当前激活路径：优先使用传入的 activePath，否则回退到浏览器地址
-  const currentActive = activePath ?? pathname;
-
-  const navItems = useMemo(
-    () => getMobileNavItems(runtimeConfig),
-    [runtimeConfig],
-  );
-
-  const isActive = (href: string) => {
-    const typeMatch = href.match(/type=([^&]+)/)?.[1];
-
-    // 解码URL以进行正确的比较
-    const decodedActive = decodeURIComponent(currentActive);
-    const decodedItemHref = decodeURIComponent(href);
-
-    return (
-      decodedActive === decodedItemHref ||
-      (decodedActive.startsWith('/douban') &&
-        decodedActive.includes(`type=${typeMatch}`))
-    );
-  };
+  const currentActive = pathname ?? '/';
 
   return (
     <nav
       className='fixed left-0 right-0 z-[600] overflow-hidden border-t border-gray-200/50 bg-white/90 backdrop-blur-xl dark:border-gray-700/50 dark:bg-gray-900/80 md:hidden'
       style={{
-        /* 紧贴视口底部，同时在内部留出安全区高度 */
         bottom: 0,
         paddingBottom: 'env(safe-area-inset-bottom)',
         minHeight: 'calc(3.5rem + env(safe-area-inset-bottom))',
       }}
     >
-      <ul className='scrollbar-hide flex items-center overflow-x-auto'>
-        {navItems.map((item) => {
-          const active = isActive(item.href);
+      <ul className='flex items-center'>
+        {NAV_ITEMS.map((item) => {
+          const active = item.match(currentActive);
           return (
-            <li
-              key={item.href}
-              className='flex-shrink-0'
-              style={{ width: '20vw', minWidth: '20vw' }}
-            >
+            <li key={item.href} className='min-w-0 flex-1'>
               <Link
                 href={item.href}
-                prefetch={shouldPrefetchRoute(item.href) ? undefined : false}
+                aria-current={active ? 'page' : undefined}
                 className='flex h-14 w-full flex-col items-center justify-center gap-1 text-xs'
               >
-                <item.icon
-                  className={`h-6 w-6 ${
-                    active
-                      ? 'text-green-600 dark:text-green-400'
-                      : 'text-gray-500 dark:text-gray-400'
+                <span
+                  className={`flex items-center justify-center rounded-full px-3 py-0.5 ${
+                    active ? 'bg-green-500/10 dark:bg-green-400/10' : ''
                   }`}
-                />
+                >
+                  <item.icon
+                    className={`h-[22px] w-[22px] ${
+                      active
+                        ? 'text-green-600 dark:text-green-400'
+                        : 'text-gray-500 dark:text-gray-400'
+                    }`}
+                  />
+                </span>
                 <span
                   className={
                     active

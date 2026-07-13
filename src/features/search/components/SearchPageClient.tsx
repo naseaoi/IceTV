@@ -8,6 +8,7 @@ import PageLayout from '@/components/PageLayout';
 import SearchResultFilter from '@/components/SearchResultFilter';
 import SearchSuggestions from '@/components/SearchSuggestions';
 import VideoCard from '@/components/VideoCard';
+import MobileSearchFilterControls from '@/features/search/components/MobileSearchFilterControls';
 import SearchHistory from '@/features/search/components/SearchHistory';
 import { VirtualizedSearchGrid } from '@/features/search/components/VirtualizedSearchGrid';
 import {
@@ -295,58 +296,63 @@ export default function SearchPageClient() {
 
   return (
     <PageLayout activePath='/search'>
-      <div className='overflow-visible px-4 py-4 sm:px-10 sm:py-8'>
-        <div className={`${showResults ? 'mb-8 pt-0' : 'pt-[20vh]'}`}>
-          <form onSubmit={handleSearch} className='mx-auto w-full max-w-2xl'>
-            <div className='relative'>
-              <Search className='absolute left-3 top-1/2 h-5 w-5 -translate-y-1/2 text-gray-400 dark:text-gray-500' />
-              <input
-                id='searchInput'
-                type='text'
-                value={searchQuery}
-                onChange={handleInputChange}
-                onFocus={handleInputFocus}
-                placeholder='搜索电影、电视剧...'
-                autoComplete='off'
-                className='h-12 w-full rounded-lg border border-gray-200/50 bg-gray-50/80 py-3 pl-10 pr-12 text-sm text-gray-700 placeholder-gray-400 shadow-sm focus:bg-white focus:outline-none focus:ring-2 focus:ring-green-400 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-300 dark:placeholder-gray-500 dark:focus:bg-gray-700'
-              />
+      <div className='overflow-visible px-4 pb-4 pt-0 sm:px-10 sm:py-8'>
+        <div className={`${showResults ? 'mb-8 pt-0' : 'pt-0 md:pt-[20vh]'}`}>
+          <div
+            className='sticky top-0 z-[550] -mx-4 border-b border-gray-200/50 bg-white/80 px-4 py-2 backdrop-blur-xl dark:border-gray-700/50 dark:bg-gray-900/80 md:static md:mx-0 md:border-0 md:bg-transparent md:px-0 md:py-0 md:backdrop-blur-none md:dark:bg-transparent'
+            style={{ paddingTop: 'max(0.5rem, env(safe-area-inset-top))' }}
+          >
+            <form onSubmit={handleSearch} className='mx-auto w-full max-w-2xl'>
+              <div className='relative'>
+                <Search className='absolute left-3 top-1/2 h-5 w-5 -translate-y-1/2 text-gray-400 dark:text-gray-500' />
+                <input
+                  id='searchInput'
+                  type='text'
+                  value={searchQuery}
+                  onChange={handleInputChange}
+                  onFocus={handleInputFocus}
+                  placeholder='搜索电影、电视剧...'
+                  autoComplete='off'
+                  className='h-12 w-full rounded-lg border border-gray-200/50 bg-gray-50/80 py-3 pl-10 pr-12 text-sm text-gray-700 placeholder-gray-400 shadow-sm focus:bg-white focus:outline-none focus:ring-2 focus:ring-green-400 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-300 dark:placeholder-gray-500 dark:focus:bg-gray-700'
+                />
 
-              {searchQuery && (
-                <button
-                  type='button'
-                  onClick={() => {
-                    clearSearchSnapshotCache(searchQuery);
-                    setSearchQuery('');
+                {searchQuery && (
+                  <button
+                    type='button'
+                    onClick={() => {
+                      clearSearchSnapshotCache(searchQuery);
+                      setSearchQuery('');
+                      setShowSuggestions(false);
+                      setShowResults(false);
+                      setIsLoading(false);
+                      router.replace('/search');
+                      document.getElementById('searchInput')?.focus();
+                    }}
+                    className='absolute right-3 top-1/2 h-5 w-5 -translate-y-1/2 text-gray-400 transition-colors hover:text-gray-600 dark:text-gray-500 dark:hover:text-gray-300'
+                    aria-label='清除搜索内容'
+                  >
+                    <X className='h-5 w-5' />
+                  </button>
+                )}
+
+                <SearchSuggestions
+                  query={searchQuery}
+                  isVisible={showSuggestions}
+                  onSelect={handleSuggestionSelect}
+                  onClose={() => setShowSuggestions(false)}
+                  onEnterKey={() => {
+                    const trimmed = normalizeSearchQueryInput(searchQuery);
+                    if (!trimmed) return;
+
+                    setSearchQuery(trimmed);
                     setShowSuggestions(false);
-                    setShowResults(false);
-                    setIsLoading(false);
-                    router.replace('/search');
-                    document.getElementById('searchInput')?.focus();
+
+                    router.push(`/search?q=${encodeURIComponent(trimmed)}`);
                   }}
-                  className='absolute right-3 top-1/2 h-5 w-5 -translate-y-1/2 text-gray-400 transition-colors hover:text-gray-600 dark:text-gray-500 dark:hover:text-gray-300'
-                  aria-label='清除搜索内容'
-                >
-                  <X className='h-5 w-5' />
-                </button>
-              )}
-
-              <SearchSuggestions
-                query={searchQuery}
-                isVisible={showSuggestions}
-                onSelect={handleSuggestionSelect}
-                onClose={() => setShowSuggestions(false)}
-                onEnterKey={() => {
-                  const trimmed = normalizeSearchQueryInput(searchQuery);
-                  if (!trimmed) return;
-
-                  setSearchQuery(trimmed);
-                  setShowSuggestions(false);
-
-                  router.push(`/search?q=${encodeURIComponent(trimmed)}`);
-                }}
-              />
-            </div>
-          </form>
+                />
+              </div>
+            </form>
+          </div>
 
           {!showResults && (
             <div className='mx-auto mt-8 w-full max-w-2xl'>
@@ -379,7 +385,31 @@ export default function SearchPageClient() {
                   )}
                 </h2>
               </div>
-              <div className='mb-8 flex items-center justify-between gap-3'>
+              <div className='mb-4 sm:hidden'>
+                <MobileSearchFilterControls
+                  resultCount={
+                    viewMode === 'agg'
+                      ? filteredAggResults.length
+                      : filteredAllResults.length
+                  }
+                  categories={
+                    viewMode === 'agg'
+                      ? filterOptions.categoriesAgg
+                      : filterOptions.categoriesAll
+                  }
+                  values={viewMode === 'agg' ? filterAgg : filterAll}
+                  onChange={(v) =>
+                    viewMode === 'agg'
+                      ? setFilterAgg(v as FilterState)
+                      : setFilterAll(v as FilterState)
+                  }
+                  aggregate={viewMode === 'agg'}
+                  onAggregateChange={(aggregate) =>
+                    setViewMode(aggregate ? 'agg' : 'all')
+                  }
+                />
+              </div>
+              <div className='mb-8 hidden items-center justify-between gap-3 sm:flex'>
                 <div className='min-w-0 flex-1'>
                   {viewMode === 'agg' ? (
                     <SearchResultFilter
