@@ -11,6 +11,14 @@ import {
   readDoubanImageProxyUrl,
   readDoubanProxyType,
   readDoubanProxyUrl,
+  resetDoubanImageProxyType,
+  resetDoubanImageProxyUrl,
+  resetDoubanProxyType,
+  resetDoubanProxyUrl,
+  writeDoubanImageProxyType,
+  writeDoubanImageProxyUrl,
+  writeDoubanProxyType,
+  writeDoubanProxyUrl,
 } from '../douban-source';
 
 describe('normalizeDoubanProxyType', () => {
@@ -92,5 +100,29 @@ describe('readDoubanProxyType', () => {
 
     expect(readDoubanProxyUrl()).toBe('https://data.example/');
     expect(readDoubanImageProxyUrl()).toBe('https://image.example/');
+  });
+
+  it('writes normalized values and resets local overrides', () => {
+    window.RUNTIME_CONFIG = {
+      DOUBAN_PROXY_TYPE: 'server',
+      DOUBAN_PROXY: 'https://runtime.example/data?url=',
+      DOUBAN_IMAGE_PROXY_TYPE: 'cmliussss-cdn-ali',
+    } as typeof window.RUNTIME_CONFIG;
+
+    expect(writeDoubanProxyType('unsupported')).toBe('direct');
+    expect(writeDoubanImageProxyType('unsupported')).toBe('direct');
+    writeDoubanProxyUrl('https://local.example/data?url=');
+    writeDoubanImageProxyUrl('https://local.example/image?url=');
+
+    expect(readDoubanProxyUrl()).toBe('https://local.example/data?url=');
+    expect(readDoubanImageProxyUrl()).toBe('https://local.example/image?url=');
+
+    resetDoubanProxyType();
+    resetDoubanProxyUrl();
+    resetDoubanImageProxyType();
+    resetDoubanImageProxyUrl();
+    expect(readDoubanProxyType()).toBe('server');
+    expect(readDoubanProxyUrl()).toBe('https://runtime.example/data?url=');
+    expect(readDoubanImageProxyType()).toBe('cmliussss-cdn-ali');
   });
 });

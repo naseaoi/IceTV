@@ -41,13 +41,15 @@ export function FavoritePreviewSection({
         )}
       </div>
 
-      <ScrollableRow>
-        {loading && skeletonCount > 0 && items.length === 0 ? (
-          Array.from({ length: skeletonCount }).map((_, index) => (
+      {loading && skeletonCount > 0 && items.length === 0 ? (
+        <ScrollableRow>
+          {Array.from({ length: skeletonCount }).map((_, index) => (
             <HomePosterCardSkeleton key={index} withSubtitle />
-          ))
-        ) : previewItems.length > 0 ? (
-          previewItems.map((item, index) => (
+          ))}
+        </ScrollableRow>
+      ) : previewItems.length > 0 ? (
+        <ScrollableRow>
+          {previewItems.map((item, index) => (
             <div key={item.id + item.source} className={HOME_POSTER_CARD_CLASS}>
               <VideoCard
                 query={item.search_title}
@@ -57,13 +59,15 @@ export function FavoritePreviewSection({
                 priority={index < 4}
               />
             </div>
-          ))
-        ) : (
-          <div className='flex min-h-[198px] w-full shrink-0 items-center justify-center rounded-lg border border-dashed border-gray-200 bg-gray-50 text-sm text-gray-500 dark:border-gray-700 dark:bg-gray-900/40 dark:text-gray-400 sm:min-h-[324px]'>
+          ))}
+        </ScrollableRow>
+      ) : (
+        <div className='pb-3 sm:pb-6'>
+          <div className='flex min-h-[198px] w-full items-center justify-center rounded-lg border border-dashed border-gray-200 bg-gray-50 text-sm text-gray-500 dark:border-gray-700 dark:bg-gray-900/40 dark:text-gray-400 sm:min-h-[324px]'>
             暂无收藏内容
           </div>
-        )}
-      </ScrollableRow>
+        </div>
+      )}
     </section>
   );
 }

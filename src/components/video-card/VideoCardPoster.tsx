@@ -212,6 +212,11 @@ export function VideoCardPoster({
             <FavoriteHeartButton
               favorited={visibleFavorited}
               onClick={onToggleFavorite}
+              unfavoritedIconClassName={
+                from === 'playrecord'
+                  ? 'fill-transparent stroke-white hover:fill-red-400 hover:stroke-red-400'
+                  : undefined
+              }
               style={noSelectStyle}
               onContextMenu={preventContextMenu}
             />

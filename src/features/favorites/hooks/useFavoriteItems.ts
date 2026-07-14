@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useLayoutEffect, useState } from 'react';
 
 import type { FavoriteItem } from '@/features/favorites/types';
 import {
@@ -17,6 +17,8 @@ import { parseStorageKey } from '@/lib/utils';
 
 const FAVORITE_ITEMS_COUNT_STORAGE_KEY = 'favoriteItemsCount';
 const MAX_FAVORITE_SKELETON_COUNT = 8;
+const useIsomorphicLayoutEffect =
+  typeof window !== 'undefined' ? useLayoutEffect : useEffect;
 
 function buildFavoriteItemsFromRecords(
   allFavorites: Record<string, Favorite>,
@@ -118,25 +120,31 @@ export function useFavoriteItems(enabled: boolean, initialSkeletonCount = 0) {
     normalizedInitialSkeletonCount,
   );
 
-  useEffect(() => {
+  useIsomorphicLayoutEffect(() => {
     if (!enabled) return;
 
-    let cancelled = false;
     const cachedItems = readCachedFavoriteItems();
     if (cachedItems) {
       setSkeletonCount(
         Math.min(cachedItems.length, MAX_FAVORITE_SKELETON_COUNT),
       );
       setFavoriteItems(cachedItems);
-    } else {
-      setSkeletonCount((prev) => Math.max(prev, readClientSkeletonCount()));
+      setLoading(false);
+      return;
     }
-    setLoading(
-      cachedItems
-        ? cachedItems.length > 0
-        : Math.max(normalizedInitialSkeletonCount, readClientSkeletonCount()) >
-            0,
+
+    const clientSkeletonCount = Math.max(
+      normalizedInitialSkeletonCount,
+      readClientSkeletonCount(),
     );
+    setSkeletonCount(clientSkeletonCount);
+    setLoading(clientSkeletonCount > 0);
+  }, [enabled, normalizedInitialSkeletonCount]);
+
+  useEffect(() => {
+    if (!enabled) return;
+
+    let cancelled = false;
 
     const loadFavorites = async (favorites?: Record<string, Favorite>) => {
       try {

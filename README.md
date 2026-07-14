@@ -24,9 +24,24 @@
 
 <details>
   <summary>项目截图</summary>
-  <img src="public/screenshot1.webp" alt="项目截图" style="max-width:600px">
-  <img src="public/screenshot2.webp" alt="项目截图" style="max-width:600px">
-  <img src="public/screenshot3.webp" alt="项目截图" style="max-width:600px">
+  <table>
+    <tr>
+      <th>桌面端</th>
+      <th>移动端</th>
+    </tr>
+    <tr>
+      <td><img src="public/screenshot-home-desktop.webp" alt="首页 - 桌面端" width="640"></td>
+      <td><img src="public/screenshot-home-mobile.webp" alt="首页 - 移动端" width="203"></td>
+    </tr>
+    <tr>
+      <td><img src="public/screenshot-play-desktop.webp" alt="点播页 - 桌面端" width="640"></td>
+      <td><img src="public/screenshot-play-mobile.webp" alt="点播页 - 移动端" width="203"></td>
+    </tr>
+    <tr>
+      <td><img src="public/screenshot-me-desktop.webp" alt="我的 - 桌面端" width="640"></td>
+      <td><img src="public/screenshot-me-mobile.webp" alt="我的 - 移动端" width="203"></td>
+    </tr>
+  </table>
 </details>
 
 ---

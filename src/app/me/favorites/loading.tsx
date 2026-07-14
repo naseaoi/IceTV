@@ -3,8 +3,11 @@ import { Star } from 'lucide-react';
 import PageLayout from '@/components/PageLayout';
 import { FavoriteGridSkeleton } from '@/features/favorites/components/FavoriteGridSkeleton';
 import { HomeMineSwitch } from '@/features/home/components/HomeMineSwitch';
+import { getFavoriteSkeletonCount } from '@/lib/favorites.server';
 
-export default function FavoritesLoading() {
+export default async function FavoritesLoading() {
+  const favoriteSkeletonCount = await getFavoriteSkeletonCount();
+
   return (
     <PageLayout
       activePath='/'
@@ -26,7 +29,7 @@ export default function FavoritesLoading() {
             </div>
           </div>
 
-          <FavoriteGridSkeleton count={6} />
+          <FavoriteGridSkeleton count={favoriteSkeletonCount} />
         </div>
       </div>
     </PageLayout>

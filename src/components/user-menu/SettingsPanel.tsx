@@ -10,8 +10,6 @@ import { CustomProxyActions } from '@/components/proxy/CustomProxyActions';
 import { useAlertModal } from '@/hooks/useAlertModal';
 import { getAuthInfoFromBrowserCookie } from '@/lib/auth.client';
 import {
-  BANGUMI_DATA_SOURCE_STORAGE_KEY,
-  BANGUMI_PROXY_URL_STORAGE_KEY,
   bangumiDataSourceOptions,
   DEFAULT_BANGUMI_DATA_SOURCE,
   normalizeBangumiDataSource,
@@ -19,6 +17,10 @@ import {
   readBangumiProxyUrl,
   readDefaultBangumiDataSource,
   readDefaultBangumiProxyUrl,
+  resetBangumiDataSource,
+  resetBangumiProxyUrl,
+  writeBangumiDataSource,
+  writeBangumiProxyUrl,
 } from '@/lib/bangumi-source';
 import type { CustomProxyTestKind } from '@/lib/custom-proxy-test';
 import {
@@ -37,10 +39,8 @@ import {
   getThanksInfo,
 } from '@/lib/douban-options';
 import {
-  DOUBAN_DATA_SOURCE_STORAGE_KEY,
-  DOUBAN_IMAGE_PROXY_TYPE_STORAGE_KEY,
-  DOUBAN_IMAGE_PROXY_URL_STORAGE_KEY,
-  DOUBAN_PROXY_URL_STORAGE_KEY,
+  normalizeDoubanImageProxyType,
+  normalizeDoubanProxyType,
   readDefaultDoubanImageProxyType,
   readDefaultDoubanImageProxyUrl,
   readDefaultDoubanProxyType,
@@ -49,6 +49,14 @@ import {
   readDoubanImageProxyUrl,
   readDoubanProxyType,
   readDoubanProxyUrl,
+  resetDoubanImageProxyType,
+  resetDoubanImageProxyUrl,
+  resetDoubanProxyType,
+  resetDoubanProxyUrl,
+  writeDoubanImageProxyType,
+  writeDoubanImageProxyUrl,
+  writeDoubanProxyType,
+  writeDoubanProxyUrl,
 } from '@/lib/douban-source';
 import {
   localPreferenceToggleDefinitions,
@@ -104,19 +112,19 @@ export function SettingsPanel({ onClose }: SettingsPanelProps) {
       nextDoubanSource,
       nextDoubanProxyUrl,
       loggedIn,
-      DOUBAN_DATA_SOURCE_STORAGE_KEY,
+      resetDoubanProxyType,
     );
     const resolvedBangumiSource = resolveInitialProxySource(
       nextBangumiSource,
       nextBangumiProxyUrl,
       loggedIn,
-      BANGUMI_DATA_SOURCE_STORAGE_KEY,
+      resetBangumiDataSource,
     );
     const resolvedDoubanImageSource = resolveInitialProxySource(
       nextDoubanImageSource,
       nextDoubanImageProxyUrl,
       loggedIn,
-      DOUBAN_IMAGE_PROXY_TYPE_STORAGE_KEY,
+      resetDoubanImageProxyType,
     );
 
     setIsAuthenticated(loggedIn);
@@ -165,14 +173,14 @@ export function SettingsPanel({ onClose }: SettingsPanelProps) {
   const handleDoubanProxyUrlChange = (value: string) => {
     setDoubanProxyUrl(value);
     if (normalizeCustomProxyUrl(value)) {
-      localStorage.setItem(DOUBAN_PROXY_URL_STORAGE_KEY, value);
+      writeDoubanProxyUrl(value);
       if (doubanDataSource === 'custom') {
-        localStorage.setItem(DOUBAN_DATA_SOURCE_STORAGE_KEY, 'custom');
+        writeDoubanProxyType('custom');
       }
     } else {
-      localStorage.removeItem(DOUBAN_PROXY_URL_STORAGE_KEY);
+      resetDoubanProxyUrl();
       if (doubanDataSource === 'custom') {
-        localStorage.removeItem(DOUBAN_DATA_SOURCE_STORAGE_KEY);
+        resetDoubanProxyType();
       }
     }
     setCustomProxyErrors((prev) => ({
@@ -201,8 +209,9 @@ export function SettingsPanel({ onClose }: SettingsPanelProps) {
       showLoginRequiredToast();
       return;
     }
-    setDoubanDataSource(value);
-    if (value === 'custom') {
+    const nextSource = normalizeDoubanProxyType(value);
+    setDoubanDataSource(nextSource);
+    if (nextSource === 'custom') {
       const error = getCustomProxyError('douban-data', doubanProxyUrl);
       setCustomProxyErrors((prev) => ({
         ...prev,
@@ -218,7 +227,7 @@ export function SettingsPanel({ onClose }: SettingsPanelProps) {
         return;
       }
     }
-    localStorage.setItem(DOUBAN_DATA_SOURCE_STORAGE_KEY, value);
+    writeDoubanProxyType(nextSource);
     showProxyToast();
   };
 
@@ -245,21 +254,21 @@ export function SettingsPanel({ onClose }: SettingsPanelProps) {
         return;
       }
     }
-    localStorage.setItem(BANGUMI_DATA_SOURCE_STORAGE_KEY, nextSource);
+    writeBangumiDataSource(nextSource);
     showProxyToast();
   };
 
   const handleBangumiProxyUrlChange = (value: string) => {
     setBangumiProxyUrl(value);
     if (normalizeCustomProxyUrl(value)) {
-      localStorage.setItem(BANGUMI_PROXY_URL_STORAGE_KEY, value);
+      writeBangumiProxyUrl(value);
       if (bangumiDataSource === 'custom') {
-        localStorage.setItem(BANGUMI_DATA_SOURCE_STORAGE_KEY, 'custom');
+        writeBangumiDataSource('custom');
       }
     } else {
-      localStorage.removeItem(BANGUMI_PROXY_URL_STORAGE_KEY);
+      resetBangumiProxyUrl();
       if (bangumiDataSource === 'custom') {
-        localStorage.removeItem(BANGUMI_DATA_SOURCE_STORAGE_KEY);
+        resetBangumiDataSource();
       }
     }
     setCustomProxyErrors((prev) => ({
@@ -273,8 +282,9 @@ export function SettingsPanel({ onClose }: SettingsPanelProps) {
       showLoginRequiredToast();
       return;
     }
-    setDoubanImageProxyType(value);
-    if (value === 'custom') {
+    const nextSource = normalizeDoubanImageProxyType(value);
+    setDoubanImageProxyType(nextSource);
+    if (nextSource === 'custom') {
       const error = getCustomProxyError('douban-image', doubanImageProxyUrl);
       setCustomProxyErrors((prev) => ({
         ...prev,
@@ -290,23 +300,23 @@ export function SettingsPanel({ onClose }: SettingsPanelProps) {
         return;
       }
     }
-    localStorage.setItem(DOUBAN_IMAGE_PROXY_TYPE_STORAGE_KEY, value);
-    writeDoubanImageProxyTypeCookie(value);
+    writeDoubanImageProxyType(nextSource);
+    writeDoubanImageProxyTypeCookie(nextSource);
     showProxyToast();
   };
 
   const handleDoubanImageProxyUrlChange = (value: string) => {
     setDoubanImageProxyUrl(value);
     if (normalizeCustomProxyUrl(value)) {
-      localStorage.setItem(DOUBAN_IMAGE_PROXY_URL_STORAGE_KEY, value);
+      writeDoubanImageProxyUrl(value);
       if (doubanImageProxyType === 'custom') {
-        localStorage.setItem(DOUBAN_IMAGE_PROXY_TYPE_STORAGE_KEY, 'custom');
+        writeDoubanImageProxyType('custom');
         clearDoubanImageProxyTypeCookie();
       }
     } else {
-      localStorage.removeItem(DOUBAN_IMAGE_PROXY_URL_STORAGE_KEY);
+      resetDoubanImageProxyUrl();
       if (doubanImageProxyType === 'custom') {
-        localStorage.removeItem(DOUBAN_IMAGE_PROXY_TYPE_STORAGE_KEY);
+        resetDoubanImageProxyType();
         clearDoubanImageProxyTypeCookie();
       }
     }
@@ -375,12 +385,12 @@ export function SettingsPanel({ onClose }: SettingsPanelProps) {
     setDoubanImageProxyUrl(defaultDoubanImageProxyUrl);
 
     resetAllLocalPreferenceToggles();
-    localStorage.removeItem(DOUBAN_PROXY_URL_STORAGE_KEY);
-    localStorage.removeItem(DOUBAN_DATA_SOURCE_STORAGE_KEY);
-    localStorage.removeItem(BANGUMI_DATA_SOURCE_STORAGE_KEY);
-    localStorage.removeItem(BANGUMI_PROXY_URL_STORAGE_KEY);
-    localStorage.removeItem(DOUBAN_IMAGE_PROXY_TYPE_STORAGE_KEY);
-    localStorage.removeItem(DOUBAN_IMAGE_PROXY_URL_STORAGE_KEY);
+    resetDoubanProxyUrl();
+    resetDoubanProxyType();
+    resetBangumiDataSource();
+    resetBangumiProxyUrl();
+    resetDoubanImageProxyType();
+    resetDoubanImageProxyUrl();
     clearDoubanImageProxyTypeCookie();
     setCustomProxyErrors({});
   };
@@ -716,14 +726,14 @@ function resolveInitialProxySource(
   source: string,
   proxyUrl: string,
   isAuthenticated: boolean,
-  storageKey: string,
+  resetSource: () => void,
 ): string {
   if (source === 'server' && !isAuthenticated) {
     return 'direct';
   }
 
   if (source === 'custom' && !normalizeCustomProxyUrl(proxyUrl)) {
-    localStorage.removeItem(storageKey);
+    resetSource();
     return 'direct';
   }
 

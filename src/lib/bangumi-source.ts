@@ -58,10 +58,26 @@ export function readBangumiDataSource(): BangumiDataSource {
   return bangumiProxySourceHelper.readSource();
 }
 
+export function writeBangumiDataSource(value: unknown): BangumiDataSource {
+  return bangumiProxySourceHelper.writeSource(value);
+}
+
+export function resetBangumiDataSource(): void {
+  bangumiProxySourceHelper.resetSource();
+}
+
 export function readDefaultBangumiProxyUrl(): string {
   return bangumiProxySourceHelper.readDefaultProxyUrl();
 }
 
 export function readBangumiProxyUrl(): string {
   return bangumiProxySourceHelper.readProxyUrl();
+}
+
+export function writeBangumiProxyUrl(value: string): void {
+  bangumiProxySourceHelper.writeProxyUrl(value);
+}
+
+export function resetBangumiProxyUrl(): void {
+  bangumiProxySourceHelper.resetProxyUrl();
 }

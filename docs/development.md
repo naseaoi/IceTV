@@ -1,6 +1,6 @@
 # 开发速记
 
-给 AI 和开发者的开工前速读版。只保留当前项目里高频、容易改错、会影响实际行为的约束。
+本文档只保留当前项目里高频、容易改错、会影响实际行为的约束。
 
 ## 目录归属
 
@@ -16,7 +16,7 @@ src/
 - 只被一个业务域使用的代码，放 `src/features/<domain>/`
 - 被两个及以上业务域复用的代码，放 `src/components`、`src/hooks`、`src/lib`
 - `page.tsx`、`route.ts` 优先做装配，不堆业务细节
-- 导入统一走 `@/...`
+- 跨目录的项目内导入统一走 `@/...`；同目录内可以使用相对路径
 
 ## 容易改错的入口
 
@@ -32,13 +32,18 @@ src/
 
 这类设置不要分散直接读写 `localStorage`。
 
-- 布尔偏好走 `src/lib/local-preferences.ts`
+- 设置面板的布尔开关注册走 `src/lib/local-preference-toggles.ts`
   - `defaultAggregateSearch`
   - `enableOptimization`
   - `fluidSearch`
   - `liveDirectConnect`
-- Bangumi 设置走 `src/lib/bangumi-source.ts`
-- Douban 代理设置走 `src/lib/douban-source.ts`
+- 其他本地偏好的读写走 `src/lib/local-preferences.ts`
+  - 去广告
+  - 全局及按源画质偏好
+  - 侧栏折叠状态
+  - 公告已读状态
+- Bangumi 设置的读取、写入、重置走 `src/lib/bangumi-source.ts`
+- Douban 数据与图片代理设置的读取、写入、重置走 `src/lib/douban-source.ts`
 
 如果新增本地设置：
 
@@ -102,7 +107,8 @@ Guard 选择：
 - 它会按本地设置在 `server` / `direct` / `custom` 之间切换
 - 它带本地缓存和失败回退
 - Bangumi 服务端接口：`src/app/api/bangumi/calendar/route.ts`
-- Douban 主接口：`src/app/api/douban/route.ts`
+- Douban 客户端统一入口：`src/lib/douban.client.ts`
+- Douban 服务端接口：`src/app/api/douban/route.ts`、`src/app/api/douban/categories/route.ts`、`src/app/api/douban/recommends/route.ts`
 
 如果改 Bangumi/Douban：
 
@@ -129,7 +135,19 @@ Guard 选择：
 - 未显式配置时默认 `auto`
 - `browser`：浏览器直连，不自动切服务端代理
 - `server`：播放和测速都走服务端代理
-- `auto`：先浏览器直连，失败后按 `source + URL` 记一次服务端代理 fallback
+- `auto`：优先浏览器直连；HLS 在 20 秒内连续失败 3 次后探测服务端代理，探测成功才切换
+- 原生视频和测速在浏览器直连失败时可直接重试服务端代理
+- 自动代理覆盖按 `source + origin + path` 写入 `sessionStorage`，30 分钟后过期
+- 服务端代理连续失败 2 次会退回浏览器直连，并进入 60 秒代理重试冷却
+
+点播自动路由与画质入口：
+
+- `src/features/play/lib/vodHlsRuntime.ts`：HLS 播放、线路切换与错误恢复编排
+- `src/features/play/lib/vodAutoRoutePolicy.ts`：自动路由阈值、探测超时和冷却时间
+- `src/lib/proxy-modes.ts`：后台模式读取和会话级代理覆盖
+- `src/features/play/lib/vodHlsQualityController.ts`：画质选择、偏好恢复与失败降级
+- `src/features/play/lib/vodQualityPolicy.ts`：按源定义默认画质和降级能力
+- `src/lib/local-preferences.ts`：保存全局及按源画质偏好
 
 ## 逐集解析型源站
 
@@ -168,7 +186,7 @@ Admin 维持“导航 + 当前 tab 内容”结构。
 
 ## 动态 import
 
-项目使用 `moduleResolution: bundler`。动态导入统一使用 `@/` 路径，兼容 Webpack 与 Turbopack。
+项目使用 `moduleResolution: bundler`。项目内模块的动态导入统一使用 `@/` 路径，第三方包继续使用包名，兼容 Webpack 与 Turbopack。
 
 示例：
 

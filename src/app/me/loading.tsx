@@ -2,6 +2,7 @@ import PageLayout from '@/components/PageLayout';
 import { FavoritePreviewSkeleton } from '@/features/favorites/components/FavoritePreviewSkeleton';
 import { PlaybackHistorySkeleton } from '@/features/playback-stats/components/PlaybackHistorySkeleton';
 import { PlaybackStatsSkeleton } from '@/features/playback-stats/components/PlaybackStatsSkeleton';
+import { getFavoriteSkeletonCount } from '@/lib/favorites.server';
 
 function MineSwitchSkeleton() {
   return (
@@ -19,7 +20,9 @@ function MineSwitchSkeleton() {
   );
 }
 
-export default function MeLoading() {
+export default async function MeLoading() {
+  const favoriteSkeletonCount = await getFavoriteSkeletonCount();
+
   return (
     <PageLayout activePath='/'>
       <div className='overflow-visible px-2 pb-2 pt-4 sm:px-10 sm:pt-8'>
@@ -37,12 +40,16 @@ export default function MeLoading() {
             ))}
           </div>
 
-          <div className='-mb-3 sm:-mb-6'>
-            <FavoritePreviewSkeleton />
-            <div className='pb-4'>
+          <div className='-mb-3 flex flex-col sm:-mb-6'>
+            <div className='order-1'>
+              <FavoritePreviewSkeleton count={favoriteSkeletonCount} />
+            </div>
+            <div className='order-2 pb-4'>
               <PlaybackStatsSkeleton />
             </div>
-            <PlaybackHistorySkeleton />
+            <div className='order-3'>
+              <PlaybackHistorySkeleton />
+            </div>
           </div>
         </div>
       </div>

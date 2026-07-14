@@ -38,6 +38,20 @@ export function createProxySourceHelper<T extends string>({
       : normalizeSource(savedSource);
   }
 
+  function writeSource(value: unknown): T {
+    const normalizedSource = normalizeSource(value);
+    if (typeof window !== 'undefined') {
+      window.localStorage.setItem(sourceStorageKey, normalizedSource);
+    }
+    return normalizedSource;
+  }
+
+  function resetSource(): void {
+    if (typeof window !== 'undefined') {
+      window.localStorage.removeItem(sourceStorageKey);
+    }
+  }
+
   function readDefaultProxyUrl(): string {
     if (typeof window === 'undefined') {
       return '';
@@ -55,11 +69,27 @@ export function createProxySourceHelper<T extends string>({
     return savedProxyUrl === null ? readDefaultProxyUrl() : savedProxyUrl;
   }
 
+  function writeProxyUrl(value: string): void {
+    if (typeof window !== 'undefined') {
+      window.localStorage.setItem(proxyUrlStorageKey, value);
+    }
+  }
+
+  function resetProxyUrl(): void {
+    if (typeof window !== 'undefined') {
+      window.localStorage.removeItem(proxyUrlStorageKey);
+    }
+  }
+
   return {
     normalizeSource,
     readDefaultSource,
     readSource,
+    writeSource,
+    resetSource,
     readDefaultProxyUrl,
     readProxyUrl,
+    writeProxyUrl,
+    resetProxyUrl,
   };
 }

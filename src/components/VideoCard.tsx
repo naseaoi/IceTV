@@ -197,8 +197,7 @@ const VideoCard = forwardRef<VideoCardHandle, VideoCardProps>(
           }
 
           if (currentFavorited) {
-            // 收藏页取消收藏需要二次确认
-            if (from === 'favorite') {
+            if (from === 'favorite' || from === 'playrecord') {
               showConfirm(interactionId, {
                 title: '确认取消收藏？',
                 message: `确认取消收藏「${actualTitle}」吗？`,

@@ -6,6 +6,7 @@ interface FavoriteHeartButtonProps {
   onClick: React.MouseEventHandler<HTMLButtonElement>;
   className?: string;
   iconClassName?: string;
+  unfavoritedIconClassName?: string;
   iconSize?: number;
   style?: React.CSSProperties;
   onContextMenu?: React.MouseEventHandler<HTMLButtonElement>;
@@ -16,6 +17,7 @@ export function FavoriteHeartButton({
   onClick,
   className = '',
   iconClassName = '',
+  unfavoritedIconClassName = 'fill-black/80 stroke-black/80 hover:fill-red-400 hover:stroke-red-400',
   iconSize = 20,
   style,
   onContextMenu,
@@ -32,9 +34,7 @@ export function FavoriteHeartButton({
       <Heart
         size={iconSize}
         className={`transition-colors duration-300 ease-out ${
-          favorited
-            ? 'fill-red-600 stroke-red-600'
-            : 'fill-black/80 stroke-black/80 hover:fill-red-400 hover:stroke-red-400'
+          favorited ? 'fill-red-600 stroke-red-600' : unfavoritedIconClassName
         } ${iconClassName}`.trim()}
       />
     </button>
