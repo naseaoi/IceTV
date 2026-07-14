@@ -14,12 +14,14 @@ import {
   readPreferredQualityPreference,
   readSeenAnnouncement,
   readSidebarCollapsed,
+  readSourcePreferredQualityPreference,
   resetAggregateSearch,
   resetEnableOptimization,
   resetFluidSearch,
   resetLiveDirectConnect,
   SEEN_ANNOUNCEMENT_STORAGE_KEY,
   SIDEBAR_COLLAPSED_STORAGE_KEY,
+  SOURCE_PREFERRED_QUALITY_STORAGE_PREFIX,
   writeAggregateSearch,
   writeBlockAdEnabled,
   writeEnableOptimization,
@@ -28,6 +30,7 @@ import {
   writePreferredQualityHeight,
   writeSeenAnnouncement,
   writeSidebarCollapsed,
+  writeSourcePreferredQualityHeight,
 } from '../local-preferences';
 
 describe('local preferences', () => {
@@ -150,5 +153,42 @@ describe('local preferences', () => {
       height: 720,
     });
     expect(readPreferredQualityHeight()).toBe(720);
+  });
+
+  it('stores quality preferences independently for each source', () => {
+    writeSourcePreferredQualityHeight('xigua', null);
+    writeSourcePreferredQualityHeight('future_source', 1080);
+
+    expect(
+      localStorage.getItem(`${SOURCE_PREFERRED_QUALITY_STORAGE_PREFIX}xigua`),
+    ).toBe('auto');
+    expect(readSourcePreferredQualityPreference('xigua')).toEqual({
+      mode: 'auto',
+    });
+    expect(readSourcePreferredQualityPreference('future_source')).toEqual({
+      mode: 'manual',
+      height: 1080,
+    });
+  });
+
+  it('uses the legacy preference only for xigua', () => {
+    writePreferredQualityHeight(720);
+
+    expect(readSourcePreferredQualityPreference('xigua')).toEqual({
+      mode: 'manual',
+      height: 720,
+    });
+    expect(readSourcePreferredQualityPreference('future_source')).toEqual({
+      mode: 'default',
+    });
+  });
+
+  it('ignores invalid source keys for quality preferences', () => {
+    writeSourcePreferredQualityHeight('../xigua', 1080);
+
+    expect(readSourcePreferredQualityPreference('../xigua')).toEqual({
+      mode: 'default',
+    });
+    expect(localStorage.length).toBe(0);
   });
 });

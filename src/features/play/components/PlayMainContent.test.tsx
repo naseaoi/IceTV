@@ -25,9 +25,18 @@ jest.mock('@/features/play/components/EpisodeSelector', () => ({
 
 jest.mock('@/components/LoadingStatePanel', () => ({
   __esModule: true,
-  default: ({ title, children }: { title: string; children: ReactNode }) => (
+  default: ({
+    title,
+    message,
+    children,
+  }: {
+    title: string;
+    message?: string;
+    children: ReactNode;
+  }) => (
     <div>
       <div>{title}</div>
+      {message ? <div>{message}</div> : null}
       {children}
     </div>
   ),
@@ -155,6 +164,32 @@ describe('PlayMainContent', () => {
 
     expect(screen.queryByText('切换播放源超时')).not.toBeInTheDocument();
     expect(screen.getByText('正在切换源站')).toBeInTheDocument();
+  });
+
+  it('uses the extended loading timeout for xigua', () => {
+    render(
+      <PlayMainContent
+        {...createBaseProps()}
+        currentSource='xigua'
+        isVideoLoading
+        videoLoadingStage='episodeChanging'
+      />,
+    );
+
+    act(() => {
+      jest.advanceTimersByTime(PLAYER_LOADING_TIMEOUT_MS);
+    });
+
+    expect(screen.queryByText('切换剧集超时')).not.toBeInTheDocument();
+
+    act(() => {
+      jest.advanceTimersByTime(20_000);
+    });
+
+    expect(screen.getByText('切换剧集超时')).toBeInTheDocument();
+    expect(
+      screen.getByText('已等待超过 35 秒，源站响应超时'),
+    ).toBeInTheDocument();
   });
 
   it('优源提示在父组件重渲染后仍按首次显示时间自动关闭', () => {

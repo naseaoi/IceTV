@@ -19,6 +19,7 @@ import type {
   SourceRecommendation,
   VideoLoadingStage,
 } from '@/features/play/hooks/usePlayPageState';
+import { resolveVodPlayerLoadingTimeoutSeconds } from '@/features/play/lib/vodSourcePlaybackPolicy';
 import { SearchResult } from '@/lib/types';
 
 interface PlayMainContentProps {
@@ -327,12 +328,16 @@ export function PlayMainContent(props: PlayMainContentProps) {
 
   const [loadingTimedOut, setLoadingTimedOut] = useState(false);
   const runtimeConfig = useRuntimeConfig();
-  const loadingTimeoutSeconds = Math.max(
+  const configuredLoadingTimeoutSeconds = Math.max(
     1,
     Math.floor(
       runtimeConfig.VOD_PAGE_TIMEOUT_SECONDS ||
         DEFAULT_PLAYER_LOADING_TIMEOUT_SECONDS,
     ),
+  );
+  const loadingTimeoutSeconds = resolveVodPlayerLoadingTimeoutSeconds(
+    currentSource,
+    configuredLoadingTimeoutSeconds,
   );
   const loadingTimeoutMs = loadingTimeoutSeconds * 1000;
   const onLoadingTimeoutRef = useRef(onLoadingTimeout);
