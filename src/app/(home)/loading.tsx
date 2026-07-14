@@ -1,6 +1,7 @@
+import ContinueWatchingCardSkeleton from '@/components/ContinueWatchingCardSkeleton';
 import HomePosterCardSkeleton from '@/components/HomePosterCardSkeleton';
-import MobileContinueCardSkeleton from '@/components/MobileContinueCardSkeleton';
 import PageLayout from '@/components/PageLayout';
+import ScrollableRow from '@/components/ScrollableRow';
 import { getContinueWatchingSkeletonCount } from '@/lib/continue-watching.server';
 
 function CapsuleSwitchSkeleton() {
@@ -30,26 +31,15 @@ function SkeletonRow({
   mobileContinue?: boolean;
 }) {
   return (
-    <div className='relative'>
-      <div className='scrollbar-hide flex space-x-3 overflow-x-auto py-1 pb-3 pl-1 pr-4 sm:space-x-7 sm:py-2 sm:pb-6 sm:pr-6'>
-        {Array.from({ length: count }).map((_, index) => (
-          <div key={index} className='contents'>
-            {mobileContinue ? (
-              <>
-                <div className='shrink-0 md:hidden'>
-                  <MobileContinueCardSkeleton />
-                </div>
-                <div className='hidden shrink-0 md:block'>
-                  <HomePosterCardSkeleton withSubtitle={withSubtitle} />
-                </div>
-              </>
-            ) : (
-              <HomePosterCardSkeleton withSubtitle={withSubtitle} />
-            )}
-          </div>
-        ))}
-      </div>
-    </div>
+    <ScrollableRow>
+      {Array.from({ length: count }).map((_, index) =>
+        mobileContinue ? (
+          <ContinueWatchingCardSkeleton key={index} />
+        ) : (
+          <HomePosterCardSkeleton key={index} withSubtitle={withSubtitle} />
+        ),
+      )}
+    </ScrollableRow>
   );
 }
 

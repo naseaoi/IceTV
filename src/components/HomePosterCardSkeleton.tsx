@@ -3,13 +3,15 @@ export const HOME_POSTER_CARD_CLASS =
 
 interface HomePosterCardSkeletonProps {
   withSubtitle?: boolean;
+  className?: string;
 }
 
 export default function HomePosterCardSkeleton({
   withSubtitle = false,
+  className = HOME_POSTER_CARD_CLASS,
 }: HomePosterCardSkeletonProps) {
   return (
-    <div className={HOME_POSTER_CARD_CLASS}>
+    <div className={className}>
       <div className='group relative w-full rounded-lg bg-transparent'>
         <div className='relative aspect-[2/3] overflow-hidden rounded-lg bg-gray-200 dark:bg-gray-800'>
           <div className='absolute inset-0 animate-pulse bg-gray-300 dark:bg-gray-700' />

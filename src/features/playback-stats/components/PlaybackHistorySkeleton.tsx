@@ -1,19 +1,22 @@
 export function PlaybackHistoryItemSkeleton() {
   return (
-    <div className='flex w-full min-w-0 items-center gap-3 rounded-lg border border-gray-200 bg-white/70 p-3 dark:border-gray-700 dark:bg-gray-900/50'>
-      <div className='h-14 w-10 shrink-0 animate-pulse rounded bg-gray-200 dark:bg-gray-800' />
-      <div className='min-w-0 flex-1'>
-        <div className='h-5 w-3/5 animate-pulse rounded bg-gray-200 dark:bg-gray-800' />
-        <div className='mt-2 flex flex-wrap items-center gap-x-3 gap-y-1'>
-          <div className='h-4 w-12 animate-pulse rounded bg-gray-200 dark:bg-gray-800' />
-          <div className='h-4 w-16 animate-pulse rounded bg-gray-200 dark:bg-gray-800' />
-          <div className='h-4 w-20 animate-pulse rounded bg-gray-200 dark:bg-gray-800' />
+    <div className='flex w-full min-w-0 items-center gap-2 rounded-lg border border-gray-200 bg-white/70 p-3 dark:border-gray-700 dark:bg-gray-900/50'>
+      <div className='flex min-w-0 flex-1 items-center gap-3'>
+        <div className='h-14 w-10 shrink-0 animate-pulse rounded bg-gray-200 dark:bg-gray-800' />
+        <div className='min-w-0 flex-1'>
+          <div className='h-5 w-3/5 animate-pulse rounded bg-gray-200 dark:bg-gray-800' />
+          <div className='mt-1 flex flex-wrap items-center gap-x-3 gap-y-1'>
+            <div className='h-4 w-12 animate-pulse rounded bg-gray-200 dark:bg-gray-800' />
+            <div className='h-4 w-16 animate-pulse rounded bg-gray-200 dark:bg-gray-800' />
+            <div className='h-4 w-20 animate-pulse rounded bg-gray-200 dark:bg-gray-800' />
+          </div>
+        </div>
+        <div className='flex shrink-0 items-center gap-1'>
+          <div className='h-4 w-4 animate-pulse rounded bg-gray-200 dark:bg-gray-800' />
+          <div className='h-5 w-20 animate-pulse rounded bg-gray-200 dark:bg-gray-800' />
         </div>
       </div>
-      <div className='flex shrink-0 items-center gap-1'>
-        <div className='h-4 w-4 animate-pulse rounded bg-gray-200 dark:bg-gray-800' />
-        <div className='h-5 w-20 animate-pulse rounded bg-gray-200 dark:bg-gray-800' />
-      </div>
+      <div className='h-9 w-9 shrink-0 animate-pulse rounded-lg bg-gray-200 dark:bg-gray-800' />
     </div>
   );
 }

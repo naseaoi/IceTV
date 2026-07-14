@@ -3,11 +3,9 @@
 import { History } from 'lucide-react';
 import { useCallback, useEffect, useLayoutEffect, useState } from 'react';
 
-import HomePosterCardSkeleton, {
-  HOME_POSTER_CARD_CLASS,
-} from '@/components/HomePosterCardSkeleton';
+import ContinueWatchingCardSkeleton from '@/components/ContinueWatchingCardSkeleton';
+import { HOME_POSTER_CARD_CLASS } from '@/components/HomePosterCardSkeleton';
 import MobileContinueCard from '@/components/MobileContinueCard';
-import MobileContinueCardSkeleton from '@/components/MobileContinueCardSkeleton';
 import ConfirmModal from '@/components/modals/ConfirmModal';
 import { useRuntimeConfig } from '@/components/RuntimeConfigProvider';
 import ScrollableRow from '@/components/ScrollableRow';
@@ -197,13 +195,9 @@ export default function ContinueWatching({
         </div>
         <ScrollableRow>
           {loading
-            ? Array.from({ length: skeletonCount }).map((_, index) =>
-                isMobile ? (
-                  <MobileContinueCardSkeleton key={index} />
-                ) : (
-                  <HomePosterCardSkeleton key={index} withSubtitle />
-                ),
-              )
+            ? Array.from({ length: skeletonCount }).map((_, index) => (
+                <ContinueWatchingCardSkeleton key={index} />
+              ))
             : isMobile
               ? mobileRecords.map((record) => {
                   const parsedKey = parseKey(record.key);

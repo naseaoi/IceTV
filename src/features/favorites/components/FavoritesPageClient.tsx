@@ -3,27 +3,12 @@
 import { Star } from 'lucide-react';
 import { useState } from 'react';
 
-import HomePosterCardSkeleton from '@/components/HomePosterCardSkeleton';
 import ConfirmModal from '@/components/modals/ConfirmModal';
 import PageLayout from '@/components/PageLayout';
-import {
-  FAVORITE_GRID_CLASS,
-  FavoriteGrid,
-} from '@/features/favorites/components/FavoriteGrid';
+import { FavoriteGrid } from '@/features/favorites/components/FavoriteGrid';
+import { FavoriteGridSkeleton } from '@/features/favorites/components/FavoriteGridSkeleton';
 import { useFavoriteItems } from '@/features/favorites/hooks/useFavoriteItems';
 import { HomeMineSwitch } from '@/features/home/components/HomeMineSwitch';
-
-function FavoriteGridSkeleton({ count = 12 }: { count?: number }) {
-  return (
-    <div className={FAVORITE_GRID_CLASS}>
-      {Array.from({ length: count }).map((_, index) => (
-        <div key={index} className='w-full sm:w-[180px]'>
-          <HomePosterCardSkeleton withSubtitle />
-        </div>
-      ))}
-    </div>
-  );
-}
 
 export function FavoritesPageClient({
   favoriteSkeletonCount = 0,
