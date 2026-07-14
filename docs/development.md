@@ -65,6 +65,13 @@ Guard 选择：
 - `requireAdmin`：`admin` + `owner`
 - `requireOwner`：仅 `owner`
 
+游客访问边界：
+
+- 搜索、直播、播放、个人页和收藏页通过 `AuthenticatedRoute` 验证有效会话后再挂载业务组件
+- 受保护页面的 API 调用不能只依赖前端拦截，服务端仍需使用对应 Guard
+- 代理模式、播放路由统计等辅助接口同样属于登录后能力，不得对游客开放
+- 首页、分类、版本信息、登录注册和受限封面缓存属于公开能力
+
 ## 配置读写
 
 配置相关优先看 `src/lib/config.ts`。

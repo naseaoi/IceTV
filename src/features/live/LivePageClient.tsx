@@ -12,6 +12,7 @@ import {
 } from 'lucide-react';
 import { ReactNode, Suspense, useMemo, useRef } from 'react';
 
+import AuthenticatedRoute from '@/components/AuthenticatedRoute';
 import LoadingStatePanel from '@/components/LoadingStatePanel';
 import PageLayout from '@/components/PageLayout';
 import {
@@ -177,7 +178,7 @@ function LivePlayerOverlay({
   );
 }
 
-function LivePageClient() {
+function AuthenticatedLivePageClient() {
   const artRef = useRef<HTMLDivElement | null>(null);
   const groupContainerRef = useRef<HTMLDivElement>(null);
   const channelListRef = useRef<HTMLDivElement>(null);
@@ -295,7 +296,14 @@ function LivePageClient() {
 export default function LivePage() {
   return (
     <Suspense fallback={<div>Loading...</div>}>
-      <LivePageClient />
+      <AuthenticatedRoute
+        activePath='/live'
+        contentMode='player'
+        showDesktopBack={false}
+        message='请先登录后再观看直播。'
+      >
+        <AuthenticatedLivePageClient />
+      </AuthenticatedRoute>
     </Suspense>
   );
 }

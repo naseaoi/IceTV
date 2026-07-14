@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 
+import { isGuardFailure, requireActiveUser } from '@/lib/api-auth';
+import { getAvailableApiSites, getConfigForRead } from '@/lib/config';
 import { db } from '@/lib/db';
 import { NO_STORE_HEADERS } from '@/lib/http-cache';
 import type { SourceRouteMode, SourceRouteStatInput } from '@/lib/types';
@@ -42,11 +44,26 @@ function normalizeInput(raw: unknown): SourceRouteStatInput | null {
 
 export async function POST(request: NextRequest) {
   try {
+    const guardResult = await requireActiveUser(request);
+    if (isGuardFailure(guardResult)) return guardResult.response;
+
     const body = (await request.json()) as { stat?: unknown };
     const stat = normalizeInput(body.stat);
     if (!stat) {
       return NextResponse.json(
         { error: 'Invalid route stat' },
+        { status: 400 },
+      );
+    }
+
+    const config = await getConfigForRead();
+    const availableSources = await getAvailableApiSites(
+      guardResult.username,
+      config,
+    );
+    if (!availableSources.some((source) => source.key === stat.source)) {
+      return NextResponse.json(
+        { error: 'Invalid route stat source' },
         { status: 400 },
       );
     }

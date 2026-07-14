@@ -1,5 +1,6 @@
 'use client';
 
+import { getAuthInfoFromBrowserCookie } from '@/lib/auth.client';
 import type { SourceRouteMode } from '@/lib/types';
 
 type SourceRouteStatPayload = {
@@ -14,6 +15,8 @@ export function reportSourceRouteStat(
   routeMode: SourceRouteMode,
   success: boolean,
 ): void {
+  if (!getAuthInfoFromBrowserCookie()?.username) return;
+
   const cleanSource = source.trim();
   if (!cleanSource) return;
 

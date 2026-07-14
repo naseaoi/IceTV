@@ -3,6 +3,7 @@
 import { useSearchParams } from 'next/navigation';
 import { useCallback, useEffect, useRef, useState } from 'react';
 
+import AuthenticatedRoute from '@/components/AuthenticatedRoute';
 import { PlayMainContent } from '@/features/play/components/PlayMainContent';
 import {
   PlayErrorView,
@@ -51,7 +52,7 @@ function readInitialAggregateGroupLength() {
   }
 }
 
-export function PlayPageClient() {
+function AuthenticatedPlayPageClient() {
   const searchParams = useSearchParams();
   const goBack = useBackNavigation('/');
 
@@ -678,4 +679,16 @@ export function PlayPageClient() {
   }
 
   return renderMainContent(null);
+}
+
+export function PlayPageClient() {
+  return (
+    <AuthenticatedRoute
+      activePath='/play'
+      contentMode='player'
+      message='请先登录后再播放内容。'
+    >
+      <AuthenticatedPlayPageClient />
+    </AuthenticatedRoute>
+  );
 }
