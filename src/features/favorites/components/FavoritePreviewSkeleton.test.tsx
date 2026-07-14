@@ -1,5 +1,5 @@
-import type { ReactNode } from 'react';
 import { render } from '@testing-library/react';
+import type { ReactNode } from 'react';
 
 import { FavoritePreviewSkeleton } from '@/features/favorites/components/FavoritePreviewSkeleton';
 
