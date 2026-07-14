@@ -1,4 +1,5 @@
 import HomePosterCardSkeleton from '@/components/HomePosterCardSkeleton';
+import MobileContinueCardSkeleton from '@/components/MobileContinueCardSkeleton';
 import PageLayout from '@/components/PageLayout';
 import { getContinueWatchingSkeletonCount } from '@/lib/continue-watching.server';
 
@@ -22,15 +23,30 @@ function CapsuleSwitchSkeleton() {
 function SkeletonRow({
   count,
   withSubtitle = false,
+  mobileContinue = false,
 }: {
   count: number;
   withSubtitle?: boolean;
+  mobileContinue?: boolean;
 }) {
   return (
     <div className='relative'>
       <div className='scrollbar-hide flex space-x-3 overflow-x-auto py-1 pb-3 pl-1 pr-4 sm:space-x-7 sm:py-2 sm:pb-6 sm:pr-6'>
         {Array.from({ length: count }).map((_, index) => (
-          <HomePosterCardSkeleton key={index} withSubtitle={withSubtitle} />
+          <div key={index} className='contents'>
+            {mobileContinue ? (
+              <>
+                <div className='md:hidden'>
+                  <MobileContinueCardSkeleton />
+                </div>
+                <div className='hidden md:block'>
+                  <HomePosterCardSkeleton withSubtitle={withSubtitle} />
+                </div>
+              </>
+            ) : (
+              <HomePosterCardSkeleton withSubtitle={withSubtitle} />
+            )}
+          </div>
         ))}
       </div>
     </div>
@@ -61,7 +77,11 @@ export default async function HomeLoading() {
           {continueWatchingCount > 0 && (
             <section className='mb-2'>
               <SkeletonSectionHeader />
-              <SkeletonRow count={continueWatchingCount} withSubtitle />
+              <SkeletonRow
+                count={continueWatchingCount}
+                withSubtitle
+                mobileContinue
+              />
             </section>
           )}
 

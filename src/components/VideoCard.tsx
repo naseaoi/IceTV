@@ -39,6 +39,10 @@ import {
   generateStorageKey,
   saveFavorite,
 } from '@/lib/db.client';
+import {
+  getCurrentNavigationPath,
+  withReturnTo,
+} from '@/lib/navigation-return';
 import { savePlayIntent } from '@/lib/play-intent';
 import {
   canUseHoverPrefetch,
@@ -416,7 +420,9 @@ const VideoCard = forwardRef<VideoCardHandle, VideoCardProps>(
 
       warmupOnNavigate();
       const url = buildPlayUrl();
-      if (url) router.push(url);
+      if (url) {
+        router.push(withReturnTo(url, getCurrentNavigationPath()));
+      }
     }, [
       router,
       buildPlayUrl,
@@ -479,7 +485,9 @@ const VideoCard = forwardRef<VideoCardHandle, VideoCardProps>(
         return;
       }
       const url = buildPlayUrl();
-      if (url) window.open(url, '_blank');
+      if (url) {
+        window.open(withReturnTo(url, getCurrentNavigationPath()), '_blank');
+      }
     }, [buildPlayUrl]);
 
     // 检查搜索结果的收藏状态
@@ -849,6 +857,7 @@ const VideoCard = forwardRef<VideoCardHandle, VideoCardProps>(
             sourceName={source_name}
             origin={origin}
             config={config}
+            reserveSourceSpace={from === 'search'}
           />
         </div>
       </>

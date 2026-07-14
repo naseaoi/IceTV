@@ -1,6 +1,6 @@
 'use client';
 
-import { useRouter, useSearchParams } from 'next/navigation';
+import { useSearchParams } from 'next/navigation';
 import { useCallback, useEffect, useRef, useState } from 'react';
 
 import { PlayMainContent } from '@/features/play/components/PlayMainContent';
@@ -24,6 +24,7 @@ import {
 } from '@/features/play/lib/lazyEpisode';
 import { writePlayerInfo } from '@/features/play/lib/sourceProbeStore';
 import { usePlaybackStatsReporter } from '@/features/playback-stats/hooks/usePlaybackStatsReporter';
+import { useBackNavigation } from '@/hooks/useBackNavigation';
 import { usePlayerKeyboard } from '@/hooks/usePlayerKeyboard';
 import { isLazyEpisodeUrl } from '@/lib/lazy-episodes';
 import {
@@ -51,8 +52,8 @@ function readInitialAggregateGroupLength() {
 }
 
 export function PlayPageClient() {
-  const router = useRouter();
   const searchParams = useSearchParams();
+  const goBack = useBackNavigation('/');
 
   useEffect(() => {
     preloadProxyModes();
@@ -658,7 +659,7 @@ export function PlayPageClient() {
       <PlayLoadingView
         loadingStage={loadingStage}
         loadingMessage={loadingMessage}
-        onBack={() => router.back()}
+        onBack={goBack}
       />
     );
   }
@@ -670,7 +671,7 @@ export function PlayPageClient() {
     return (
       <PlayErrorView
         error={error}
-        onBack={() => window.history.back()}
+        onBack={goBack}
         onRetry={() => window.location.reload()}
       />
     );

@@ -12,7 +12,7 @@ import { HomeMineSwitch } from '@/features/home/components/HomeMineSwitch';
 
 function FavoriteGridSkeleton({ count = 12 }: { count?: number }) {
   return (
-    <div className='min-[480px]:grid-cols-4 grid grid-cols-3 justify-start gap-x-3 gap-y-6 px-0 sm:grid-cols-[repeat(auto-fill,_180px)] sm:gap-x-6 sm:gap-y-14 sm:px-2'>
+    <div className='grid grid-cols-3 justify-start gap-x-3 gap-y-6 px-0 xs:grid-cols-4 sm:grid-cols-[repeat(auto-fill,_180px)] sm:gap-x-6 sm:gap-y-14 sm:px-2'>
       {Array.from({ length: count }).map((_, index) => (
         <div key={index} className='w-full sm:w-[180px]'>
           <HomePosterCardSkeleton withSubtitle />

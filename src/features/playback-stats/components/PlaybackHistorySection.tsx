@@ -20,6 +20,10 @@ import {
   getPlaybackSessionMergeKey,
 } from '@/features/playback-stats/lib/history';
 import type { PlaybackHistoryResponse } from '@/features/playback-stats/types';
+import {
+  getCurrentNavigationPath,
+  withReturnTo,
+} from '@/lib/navigation-return';
 import { savePlayIntent } from '@/lib/play-intent';
 import type { PlaybackSession } from '@/lib/types';
 import { canUseNetworkPrefetch, warmupForPlayback } from '@/lib/video-prefetch';
@@ -242,7 +246,9 @@ export function PlaybackHistorySection() {
         title: item.title,
       });
       if (item.year) params.set('year', item.year);
-      router.push(`/play?${params.toString()}`);
+      router.push(
+        withReturnTo(`/play?${params.toString()}`, getCurrentNavigationPath()),
+      );
     },
     [router, warmupPlayback],
   );

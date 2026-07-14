@@ -26,11 +26,12 @@ import {
   getDoubanActivePath,
   getDoubanPageDescription,
   getDoubanPageTitle,
+  normalizeDoubanType,
 } from '@/features/douban/lib/pageMeta';
 
 export function DoubanPageClient() {
   const searchParams = useSearchParams();
-  const type = searchParams.get('type') || 'movie';
+  const type = normalizeDoubanType(searchParams.get('type'));
 
   const {
     doubanData,

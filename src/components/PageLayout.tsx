@@ -82,10 +82,7 @@ const PageLayout = ({
               isPlayerPage
                 ? undefined
                 : {
-                    paddingBottom:
-                      showFooter || !showBottomNav
-                        ? 'env(safe-area-inset-bottom)'
-                        : 'calc(3.5rem + env(safe-area-inset-bottom))',
+                    paddingBottom: 'env(safe-area-inset-bottom)',
                   }
             }
           >

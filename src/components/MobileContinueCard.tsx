@@ -6,6 +6,7 @@ import { useCallback, useId } from 'react';
 
 import { useCardInteractionManager } from '@/components/CardInteractionProvider';
 import CoverImage from '@/components/CoverImage';
+import { buildMobileContinuePlayUrl } from '@/components/mobile-continue-card/play-url';
 import { useLongPress } from '@/hooks/useLongPress';
 import { getAuthInfoFromBrowserCookie } from '@/lib/auth.client';
 import {
@@ -14,6 +15,10 @@ import {
   isFavorited,
   saveFavorite,
 } from '@/lib/db.client';
+import {
+  getCurrentNavigationPath,
+  withReturnTo,
+} from '@/lib/navigation-return';
 import { savePlayIntent } from '@/lib/play-intent';
 import { canUseNetworkPrefetch, warmupForPlayback } from '@/lib/video-prefetch';
 
@@ -71,12 +76,12 @@ export default function MobileContinueCard({
       warmupForPlayback(source, id);
     }
 
-    const url = `/play?source=${source}&id=${id}&title=${encodeURIComponent(
-      title,
-    )}${year ? `&year=${year}` : ''}${
-      query ? `&stitle=${encodeURIComponent(query.trim())}` : ''
-    }`;
-    router.push(url);
+    router.push(
+      withReturnTo(
+        buildMobileContinuePlayUrl({ source, id, title, year, query }),
+        getCurrentNavigationPath(),
+      ),
+    );
   }, [router, source, id, title, year, query, currentEpisode, resumeTime]);
 
   const handleDelete = useCallback(() => {
@@ -168,8 +173,16 @@ export default function MobileContinueCard({
 
   return (
     <div
-      className='relative h-[120px] w-[232px] shrink-0 select-none overflow-hidden rounded-xl border border-gray-200/60 bg-white dark:border-gray-700/60 dark:bg-gray-800/60'
+      role='link'
+      tabIndex={0}
+      aria-label={`继续播放 ${title}`}
+      className='relative h-[120px] w-[232px] shrink-0 select-none overflow-hidden rounded-xl border border-gray-200/60 bg-white outline-none focus-visible:ring-2 focus-visible:ring-green-500 dark:border-gray-700/60 dark:bg-gray-800/60'
       onClick={handlePlay}
+      onKeyDown={(event) => {
+        if (event.target === event.currentTarget && event.key === 'Enter') {
+          handlePlay();
+        }
+      }}
       {...longPressProps}
     >
       <div className='flex h-full'>

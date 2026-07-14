@@ -24,10 +24,6 @@ import { getSearchHistory, subscribeToDataUpdates } from '@/lib/db.client';
 import { readAggregateSearch } from '@/lib/local-preferences';
 
 const SEARCH_VIEW_MODE_STORAGE_KEY = 'searchViewModeByQuery';
-const AGGREGATED_SEARCH_GRID_LAYOUT = {
-  mobileContentHeight: 32,
-  desktopContentHeight: 32,
-};
 const DEFAULT_FILTER_STATE: FilterState = {
   source: 'all',
   title: 'all',
@@ -464,7 +460,6 @@ export default function SearchPageClient() {
                       key='search-results-agg'
                       items={filteredAggResults}
                       getKey={(item) => `agg-${item.mapKey}`}
-                      layout={AGGREGATED_SEARCH_GRID_LAYOUT}
                       renderItem={(item) => {
                         const singleSourceItem =
                           item.group.length === 1 ? item.group[0] : null;

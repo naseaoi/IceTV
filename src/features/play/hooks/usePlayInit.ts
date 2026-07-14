@@ -17,6 +17,7 @@ import {
 import { calculateSourceScore } from '@/features/play/lib/playUtils';
 import { probeVodEpisodeUrl } from '@/features/play/lib/vodProbe';
 import { isVodM3u8Url } from '@/features/play/lib/vodProxyUrl';
+import { PLAYER_EXIT_EVENT } from '@/lib/navigation-return';
 import { prefetchM3U8 } from '@/lib/player-runtime';
 import { getProxyModes, shouldUseServerProxy } from '@/lib/proxy-modes';
 import { mergeSourceBundle } from '@/lib/source-bundle';
@@ -432,6 +433,8 @@ export function usePlayInit({
   useEffect(() => {
     const abortController = new AbortController();
     const { signal } = abortController;
+    const handlePlayerExit = () => abortController.abort();
+    window.addEventListener(PLAYER_EXIT_EVENT, handlePlayerExit);
     const {
       currentEpisodeIndex,
       currentId,
@@ -642,6 +645,10 @@ export function usePlayInit({
       detailData: SearchResult,
       options?: { skipTransitionDelay?: boolean },
     ) => {
+      if (signal.aborted || window.location.pathname !== '/play') {
+        return;
+      }
+
       setNeedPrefer(false);
       setCurrentSource(detailData.source);
       setCurrentId(detailData.id);
@@ -666,13 +673,19 @@ export function usePlayInit({
       newUrl.searchParams.delete('prefer');
       newUrl.searchParams.delete('singleSource');
       newUrl.searchParams.delete('directStart');
-      window.history.replaceState({}, '', newUrl.toString());
+      if (signal.aborted || window.location.pathname !== '/play') {
+        return;
+      }
+      window.history.replaceState(window.history.state, '', newUrl.toString());
       clearAggregateGroup();
 
       setLoadingStage('ready');
       setLoadingMessage('准备就绪，即将开始播放...');
       if (!options?.skipTransitionDelay) {
         await new Promise((r) => setTimeout(r, 200));
+      }
+      if (signal.aborted) {
+        return;
       }
       setLoading(false);
     };
@@ -827,6 +840,7 @@ export function usePlayInit({
     initAll();
 
     return () => {
+      window.removeEventListener(PLAYER_EXIT_EVENT, handlePlayerExit);
       abortController.abort();
     };
   }, []);

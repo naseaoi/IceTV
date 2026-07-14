@@ -7,6 +7,7 @@ import HomePosterCardSkeleton, {
   HOME_POSTER_CARD_CLASS,
 } from '@/components/HomePosterCardSkeleton';
 import MobileContinueCard from '@/components/MobileContinueCard';
+import MobileContinueCardSkeleton from '@/components/MobileContinueCardSkeleton';
 import ConfirmModal from '@/components/modals/ConfirmModal';
 import { useRuntimeConfig } from '@/components/RuntimeConfigProvider';
 import ScrollableRow from '@/components/ScrollableRow';
@@ -198,10 +199,7 @@ export default function ContinueWatching({
           {loading
             ? Array.from({ length: skeletonCount }).map((_, index) =>
                 isMobile ? (
-                  <div
-                    key={index}
-                    className='h-[120px] w-[232px] shrink-0 animate-pulse rounded-xl bg-gray-200 dark:bg-gray-800'
-                  />
+                  <MobileContinueCardSkeleton key={index} />
                 ) : (
                   <HomePosterCardSkeleton key={index} withSubtitle />
                 ),
