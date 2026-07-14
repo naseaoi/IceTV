@@ -2,20 +2,12 @@
 
 import { ReactNode, useEffect, useMemo, useRef, useState } from 'react';
 
-export type VirtualizedGridLayoutConfig = {
-  breakpoint?: number;
-  posterAspectRatio?: number;
-  mobileColumnCount?: number;
-  mobileColumnGap?: number;
-  mobileRowGap?: number;
-  mobileItemWidth?: number;
-  mobileContentHeight?: number;
-  desktopColumnGap?: number;
-  desktopRowGap?: number;
-  desktopMinColumnWidth?: number;
-  desktopItemWidth?: number;
-  desktopContentHeight?: number;
-};
+import {
+  type VirtualizedGridLayoutConfig,
+  getGridLayout,
+} from '@/components/virtualized-grid/layout';
+
+export type { VirtualizedGridLayoutConfig } from '@/components/virtualized-grid/layout';
 
 interface VirtualizedGridProps<T> {
   items: T[];
@@ -26,74 +18,6 @@ interface VirtualizedGridProps<T> {
   fallbackCount?: number;
   fallbackClassName: string;
   fallbackItemClassName?: string;
-}
-
-type GridLayout = {
-  columnCount: number;
-  columnGap: number;
-  rowGap: number;
-  trackWidth: number;
-  itemWidth: number;
-  rowHeight: number;
-};
-
-const DEFAULT_LAYOUT: Required<VirtualizedGridLayoutConfig> = {
-  breakpoint: 640,
-  posterAspectRatio: 1.5,
-  mobileColumnCount: 3,
-  mobileColumnGap: 8,
-  mobileRowGap: 56,
-  mobileItemWidth: 0,
-  mobileContentHeight: 72,
-  desktopColumnGap: 32,
-  desktopRowGap: 80,
-  desktopMinColumnWidth: 176,
-  desktopItemWidth: 0,
-  desktopContentHeight: 98,
-};
-
-function getGridLayout(
-  containerWidth: number,
-  config: VirtualizedGridLayoutConfig = {},
-): GridLayout {
-  const layout = { ...DEFAULT_LAYOUT, ...config };
-  const isDesktop = containerWidth >= layout.breakpoint;
-  const columnGap = isDesktop
-    ? layout.desktopColumnGap
-    : layout.mobileColumnGap;
-  const rowGap = isDesktop ? layout.desktopRowGap : layout.mobileRowGap;
-  const fixedItemWidth = isDesktop
-    ? layout.desktopItemWidth
-    : layout.mobileItemWidth;
-  const minColumnWidth = isDesktop
-    ? layout.desktopMinColumnWidth
-    : Math.max(1, fixedItemWidth || 1);
-  const columnCount = isDesktop
-    ? Math.max(
-        1,
-        Math.floor((containerWidth + columnGap) / (minColumnWidth + columnGap)),
-      )
-    : layout.mobileColumnCount;
-  const trackWidth =
-    fixedItemWidth && isDesktop
-      ? fixedItemWidth
-      : (containerWidth - columnGap * (columnCount - 1)) / columnCount;
-  const itemWidth = fixedItemWidth || trackWidth;
-  const contentHeight = isDesktop
-    ? layout.desktopContentHeight
-    : layout.mobileContentHeight;
-  const rowHeight = Math.ceil(
-    itemWidth * layout.posterAspectRatio + contentHeight + rowGap,
-  );
-
-  return {
-    columnCount,
-    columnGap,
-    rowGap,
-    trackWidth,
-    itemWidth,
-    rowHeight,
-  };
 }
 
 function getScrollTop() {
@@ -118,7 +42,11 @@ export function VirtualizedGrid<T>({
 }: VirtualizedGridProps<T>) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const [containerWidth, setContainerWidth] = useState(0);
-  const [viewport, setViewport] = useState({ height: 0, scrollY: 0 });
+  const [viewport, setViewport] = useState({
+    width: 0,
+    height: 0,
+    scrollY: 0,
+  });
 
   useEffect(() => {
     const container = containerRef.current;
@@ -134,7 +62,7 @@ export function VirtualizedGrid<T>({
 
       frameId = window.requestAnimationFrame(() => {
         frameId = null;
-        const nextWidth = Math.round(container.getBoundingClientRect().width);
+        const nextWidth = container.getBoundingClientRect().width;
         setContainerWidth((currentWidth) =>
           currentWidth === nextWidth ? currentWidth : nextWidth,
         );
@@ -161,12 +89,14 @@ export function VirtualizedGrid<T>({
 
     const readViewport = () => {
       const nextViewport = {
+        width: window.innerWidth,
         height: window.innerHeight,
         scrollY: getScrollTop(),
       };
 
       setViewport((currentViewport) => {
         if (
+          currentViewport.width === nextViewport.width &&
           currentViewport.height === nextViewport.height &&
           currentViewport.scrollY === nextViewport.scrollY
         ) {
@@ -249,7 +179,11 @@ export function VirtualizedGrid<T>({
     );
   }
 
-  const computedLayout = getGridLayout(containerWidth, layout);
+  const computedLayout = getGridLayout(
+    containerWidth,
+    viewport.width || window.innerWidth,
+    layout,
+  );
   const totalRows = Math.ceil(items.length / computedLayout.columnCount);
   const totalHeight = Math.max(
     0,

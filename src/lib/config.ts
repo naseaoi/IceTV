@@ -21,6 +21,14 @@ import {
   DEFAULT_RUNTIME_PARAMS,
   normalizeRuntimeParams,
 } from '@/lib/runtime-params';
+import {
+  DEFAULT_SITE_FOOTER_TEXT,
+  normalizeSiteFooterText,
+} from '@/lib/site-footer';
+import {
+  DEFAULT_SOURCE_COVER_PROXY_MODE,
+  normalizeSourceCoverProxyMode,
+} from '@/lib/source-cover-proxy';
 import { normalizeUsername } from '@/lib/username';
 import { AdminConfig } from '@/types/admin';
 
@@ -286,10 +294,10 @@ async function getInitConfig(
       Announcement:
         process.env.ANNOUNCEMENT ||
         '本网站仅提供影视信息搜索服务，所有内容均来自第三方网站。本站不存储任何视频资源，不对任何内容的准确性、合法性、完整性负责。',
+      FooterText: DEFAULT_SITE_FOOTER_TEXT,
       EnableLiveEntry: false,
       DefaultAggregateSearch: true,
       EnableOptimization: true,
-      AutoSwitchSourceOnTimeout: false,
       LiveDirectConnect: false,
       ...normalizeRuntimeParams({
         ...DEFAULT_RUNTIME_PARAMS,
@@ -307,6 +315,9 @@ async function getInitConfig(
         process.env.NEXT_PUBLIC_DOUBAN_IMAGE_PROXY_TYPE ||
         DEFAULT_DOUBAN_IMAGE_PROXY_TYPE,
       DoubanImageProxy: process.env.NEXT_PUBLIC_DOUBAN_IMAGE_PROXY || '',
+      SourceCoverProxyMode: normalizeSourceCoverProxyMode(
+        process.env.NEXT_PUBLIC_SOURCE_COVER_PROXY_MODE,
+      ),
       DisableYellowFilter:
         process.env.NEXT_PUBLIC_DISABLE_YELLOW_FILTER === 'true',
       FluidSearch: process.env.NEXT_PUBLIC_FLUID_SEARCH !== 'false',
@@ -479,10 +490,10 @@ export function configSelfCheck(adminConfig: AdminConfig): AdminConfig {
       Announcement:
         process.env.ANNOUNCEMENT ||
         '本网站仅提供影视信息搜索服务，所有内容均来自第三方网站。本站不存储任何视频资源，不对任何内容的准确性、合法性、完整性负责。',
+      FooterText: DEFAULT_SITE_FOOTER_TEXT,
       EnableLiveEntry: false,
       DefaultAggregateSearch: true,
       EnableOptimization: true,
-      AutoSwitchSourceOnTimeout: false,
       LiveDirectConnect: false,
       ...normalizeRuntimeParams({
         ...DEFAULT_RUNTIME_PARAMS,
@@ -500,6 +511,7 @@ export function configSelfCheck(adminConfig: AdminConfig): AdminConfig {
         process.env.NEXT_PUBLIC_DOUBAN_IMAGE_PROXY_TYPE ||
         DEFAULT_DOUBAN_IMAGE_PROXY_TYPE,
       DoubanImageProxy: process.env.NEXT_PUBLIC_DOUBAN_IMAGE_PROXY || '',
+      SourceCoverProxyMode: DEFAULT_SOURCE_COVER_PROXY_MODE,
       DisableYellowFilter:
         process.env.NEXT_PUBLIC_DISABLE_YELLOW_FILTER === 'true',
       FluidSearch: process.env.NEXT_PUBLIC_FLUID_SEARCH !== 'false',
@@ -509,6 +521,9 @@ export function configSelfCheck(adminConfig: AdminConfig): AdminConfig {
   if (typeof adminConfig.SiteConfig.SiteIcon !== 'string') {
     adminConfig.SiteConfig.SiteIcon = '';
   }
+  if (typeof adminConfig.SiteConfig.FooterText !== 'string') {
+    adminConfig.SiteConfig.FooterText = DEFAULT_SITE_FOOTER_TEXT;
+  }
   if (typeof adminConfig.SiteConfig.EnableLiveEntry !== 'boolean') {
     adminConfig.SiteConfig.EnableLiveEntry = false;
   }
@@ -517,9 +532,6 @@ export function configSelfCheck(adminConfig: AdminConfig): AdminConfig {
   }
   if (typeof adminConfig.SiteConfig.EnableOptimization !== 'boolean') {
     adminConfig.SiteConfig.EnableOptimization = true;
-  }
-  if (typeof adminConfig.SiteConfig.AutoSwitchSourceOnTimeout !== 'boolean') {
-    adminConfig.SiteConfig.AutoSwitchSourceOnTimeout = false;
   }
   if (typeof adminConfig.SiteConfig.LiveDirectConnect !== 'boolean') {
     adminConfig.SiteConfig.LiveDirectConnect = false;
@@ -549,6 +561,9 @@ export function configSelfCheck(adminConfig: AdminConfig): AdminConfig {
       adminConfig.SiteConfig.DoubanImageProxyType,
     );
   adminConfig.SiteConfig.DoubanImageProxy = '';
+  adminConfig.SiteConfig.SourceCoverProxyMode = normalizeSourceCoverProxyMode(
+    adminConfig.SiteConfig.SourceCoverProxyMode,
+  );
 
   // 站长变更自检
   const ownerUser = getOwnerUsername();
@@ -594,7 +609,7 @@ export function configSelfCheck(adminConfig: AdminConfig): AdminConfig {
     tags: originOwnerCfg?.tags || undefined,
   });
 
-  // 采集源去重
+  // 视频源去重
   const seenSourceKeys = new Set<string>();
   adminConfig.SourceConfig = adminConfig.SourceConfig.filter((source) => {
     if (seenSourceKeys.has(source.key)) {
@@ -919,12 +934,12 @@ async function readPublicConfig() {
     SiteName: config.SiteConfig.SiteName,
     SiteIcon: config.SiteConfig.SiteIcon || '',
     Announcement: config.SiteConfig.Announcement,
+    FooterText: normalizeSiteFooterText(config.SiteConfig.FooterText),
     OpenRegister: !!config.UserConfig.OpenRegister,
     DisableYellowFilter: config.SiteConfig.DisableYellowFilter,
     EnableLiveEntry: config.SiteConfig.EnableLiveEntry,
     DefaultAggregateSearch: config.SiteConfig.DefaultAggregateSearch,
     EnableOptimization: config.SiteConfig.EnableOptimization,
-    AutoSwitchSourceOnTimeout: config.SiteConfig.AutoSwitchSourceOnTimeout,
     LiveDirectConnect: config.SiteConfig.LiveDirectConnect,
     ...normalizeRuntimeParams(config.SiteConfig),
     DoubanProxyType: getPublicDoubanProxyType(
@@ -935,6 +950,9 @@ async function readPublicConfig() {
     ),
     DoubanImageProxyType: getPublicDoubanImageProxyType(
       config.SiteConfig.DoubanImageProxyType,
+    ),
+    SourceCoverProxyMode: normalizeSourceCoverProxyMode(
+      config.SiteConfig.SourceCoverProxyMode,
     ),
     CustomCategories: config.CustomCategories.filter(
       (category) => !category.disabled,

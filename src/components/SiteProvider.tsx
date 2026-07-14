@@ -13,18 +13,23 @@ import {
   applyClientServerConfig,
   fetchClientServerConfig,
 } from '@/lib/runtime-config';
+import {
+  DEFAULT_SITE_FOOTER_TEXT,
+  normalizeSiteFooterText,
+} from '@/lib/site-footer';
 import { withSiteIconCacheBuster } from '@/lib/site-icon';
 
 const SiteContext = createContext<{
   siteName: string;
   siteIcon?: string;
   announcement?: string;
+  footerText: string;
 }>({
-  // 默认值
   siteName: 'IceTV',
   siteIcon: '',
   announcement:
     '本网站仅提供影视信息搜索服务，所有内容均来自第三方网站。本站不存储任何视频资源，不对任何内容的准确性、合法性、完整性负责。',
+  footerText: DEFAULT_SITE_FOOTER_TEXT,
 });
 
 export const useSite = () => useContext(SiteContext);
@@ -41,19 +46,23 @@ export function SiteProvider({
   siteName,
   siteIcon,
   announcement,
+  footerText,
 }: {
   children: ReactNode;
   siteName: string;
   siteIcon?: string;
   announcement?: string;
+  footerText?: string;
 }) {
   const defaultAnnouncement =
     announcement ||
     '本网站仅提供影视信息搜索服务，所有内容均来自第三方网站。本站不存储任何视频资源，不对任何内容的准确性、合法性、完整性负责。';
+  const defaultFooterText = normalizeSiteFooterText(footerText);
   const [siteState, setSiteState] = useState({
     siteName,
     siteIcon: siteIcon || '',
     announcement: defaultAnnouncement,
+    footerText: defaultFooterText,
   });
 
   useEffect(() => {
@@ -72,11 +81,15 @@ export function SiteProvider({
           Date.now(),
         );
         const nextAnnouncement = data.Announcement || defaultAnnouncement;
+        const nextFooterText = normalizeSiteFooterText(
+          data.FooterText || defaultFooterText,
+        );
 
         setSiteState({
           siteName: nextSiteName,
           siteIcon: nextSiteIcon,
           announcement: nextAnnouncement,
+          footerText: nextFooterText,
         });
 
         document.title = nextSiteName;
@@ -95,13 +108,14 @@ export function SiteProvider({
     return () => {
       cancelled = true;
     };
-  }, [defaultAnnouncement, siteName]);
+  }, [defaultAnnouncement, defaultFooterText, siteName]);
 
   const value = useMemo(
     () => ({
       siteName: siteState.siteName,
       siteIcon: siteState.siteIcon,
       announcement: siteState.announcement,
+      footerText: siteState.footerText,
     }),
     [siteState],
   );

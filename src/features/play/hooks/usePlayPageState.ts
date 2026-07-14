@@ -26,15 +26,17 @@ export type VideoLoadingStage =
   | 'initing'
   | 'sourceChanging'
   | 'episodeChanging';
-export type PlaybackRequestMode =
-  | 'initial'
-  | 'episode'
-  | 'manual-source'
-  | 'auto-source';
+export type PlaybackRequestMode = 'initial' | 'episode' | 'manual-source';
 export type VideoQualityInfo = {
   quality: string;
   loadSpeed: string;
   pingTime: number;
+  hasError?: boolean;
+};
+export type SourceRecommendation = {
+  sourceName: string;
+  quality: string;
+  loadSpeed: string;
 };
 
 export function usePlayPageState(searchParams: ReadonlyURLSearchParams) {
@@ -141,8 +143,6 @@ export function usePlayPageState(searchParams: ReadonlyURLSearchParams) {
   const sourceSwitchEpisodeAnchorRef = useRef<SourceSwitchEpisodeAnchor | null>(
     null,
   );
-  const failedSourcesRef = useRef<Set<string>>(new Set());
-  const autoFallbackInProgressRef = useRef(false);
   const playbackRequestModeRef = useRef<PlaybackRequestMode>('initial');
 
   const [optimizationEnabled] = useState<boolean>(() => {
@@ -156,6 +156,8 @@ export function usePlayPageState(searchParams: ReadonlyURLSearchParams) {
   const [precomputedVideoInfo, setPrecomputedVideoInfo] = useState<
     Map<string, VideoQualityInfo>
   >(new Map());
+  const [sourceRecommendation, setSourceRecommendation] =
+    useState<SourceRecommendation | null>(null);
   const clearTargetEpisodeProgressRef = useRef(false);
 
   const [isEpisodeSelectorCollapsed, setIsEpisodeSelectorCollapsed] =
@@ -245,12 +247,12 @@ export function usePlayPageState(searchParams: ReadonlyURLSearchParams) {
     sourceChangeRequestIdRef,
     pendingSourceSwitchCleanupRef,
     sourceSwitchEpisodeAnchorRef,
-    failedSourcesRef,
-    autoFallbackInProgressRef,
     playbackRequestModeRef,
     optimizationEnabled,
     precomputedVideoInfo,
     setPrecomputedVideoInfo,
+    sourceRecommendation,
+    setSourceRecommendation,
     clearTargetEpisodeProgressRef,
     isEpisodeSelectorCollapsed,
     setIsEpisodeSelectorCollapsed,

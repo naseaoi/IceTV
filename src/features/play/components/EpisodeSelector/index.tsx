@@ -1,6 +1,8 @@
+import { ArrowLeftRight, Heart, LayoutGrid } from 'lucide-react';
 import dynamic from 'next/dynamic';
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useMemo, useState } from 'react';
 
+import MobileSheet from '@/components/mobile/MobileSheet';
 import { PlayerPanelContent } from '@/components/PlayerPanelTabBar';
 import { SectionTitle } from '@/features/play/components/EpisodeSelector/SectionTitle';
 import { TabBar } from '@/features/play/components/EpisodeSelector/TabBar';
@@ -126,17 +128,26 @@ function pickDoubanId(
 }
 
 const EpisodesTab = dynamic(
-  () => import('./EpisodesTab.js').then((mod) => mod.EpisodesTab),
+  () =>
+    import('@/features/play/components/EpisodeSelector/EpisodesTab').then(
+      (mod) => mod.EpisodesTab,
+    ),
   { loading: EpisodesTabLoading },
 );
 const InfoTab = dynamic(
-  () => import('./InfoTab.js').then((mod) => mod.InfoTab),
+  () =>
+    import('@/features/play/components/EpisodeSelector/InfoTab').then(
+      (mod) => mod.InfoTab,
+    ),
   {
     loading: InfoTabLoading,
   },
 );
 const SourcesTab = dynamic(
-  () => import('./SourcesTab.js').then((mod) => mod.SourcesTab),
+  () =>
+    import('@/features/play/components/EpisodeSelector/SourcesTab').then(
+      (mod) => mod.SourcesTab,
+    ),
   { loading: EpisodeTabLoading },
 );
 
@@ -172,8 +183,10 @@ interface EpisodeSelectorProps {
   onAddSources?: (newSources: SearchResult[]) => void;
 }
 
-type MobileTabKey = 'episodes' | 'info' | 'sources';
+type MobileSheetKey = 'episodes' | 'sources';
 type DesktopTabKey = 'main' | 'sources';
+
+const MOBILE_EPISODE_STRIP_SIZE = 12;
 
 const EpisodeSelector: React.FC<EpisodeSelectorProps> = ({
   totalEpisodes,
@@ -229,45 +242,45 @@ const EpisodeSelector: React.FC<EpisodeSelectorProps> = ({
 
   const hasEpisodesTab = totalEpisodes > 1 || variantSources.length > 1;
 
-  const [mobileTab, setMobileTab] = useState<MobileTabKey>(
-    hasEpisodesTab ? 'episodes' : 'info',
-  );
+  const [mobileSheet, setMobileSheet] = useState<MobileSheetKey | null>(null);
   const [desktopTab, setDesktopTab] = useState<DesktopTabKey>('main');
 
-  const mobileTabs = useMemo(() => {
-    const tabs: { key: MobileTabKey; label: string }[] = [
-      { key: 'episodes', label: '选集' },
-      { key: 'info', label: '信息' },
-      { key: 'sources', label: '换源' },
-    ];
-    return hasEpisodesTab ? tabs : tabs.filter((tab) => tab.key !== 'episodes');
-  }, [hasEpisodesTab]);
+  const stripEpisodes = useMemo(() => {
+    if (totalEpisodes <= 1) {
+      return [];
+    }
+
+    const start = Math.max(
+      1,
+      Math.min(value - 3, totalEpisodes - MOBILE_EPISODE_STRIP_SIZE + 1),
+    );
+    const end = Math.min(totalEpisodes, start + MOBILE_EPISODE_STRIP_SIZE - 1);
+    return Array.from({ length: end - start + 1 }, (_, i) => start + i);
+  }, [totalEpisodes, value]);
 
   const desktopTabs: { key: DesktopTabKey; label: string }[] = [
     { key: 'main', label: '详情' },
     { key: 'sources', label: '换源' },
   ];
 
-  useEffect(() => {
-    if (mobileTabs.some((tab) => tab.key === mobileTab)) {
-      return;
-    }
-
-    setMobileTab(mobileTabs[0]?.key || 'info');
-  }, [mobileTab, mobileTabs]);
-
-  const renderEpisodesTab = () => (
+  const renderEpisodesTab = (afterSelect?: () => void) => (
     <EpisodesTab
       totalEpisodes={totalEpisodes}
       episodes_titles={episodes_titles}
       episodesPerPage={episodesPerPage}
       value={value}
-      onChange={onChange}
+      onChange={(episodeNumber) => {
+        onChange?.(episodeNumber);
+        afterSelect?.();
+      }}
       episodeGroups={detail?.episode_groups}
       variantSources={variantSources}
       currentSource={currentSource}
       currentId={currentId}
-      onSourceChange={onSourceChange}
+      onSourceChange={(source, id, title) => {
+        onSourceChange?.(source, id, title);
+        afterSelect?.();
+      }}
     />
   );
 
@@ -285,7 +298,7 @@ const EpisodeSelector: React.FC<EpisodeSelectorProps> = ({
     />
   );
 
-  const renderSourcesTab = () => (
+  const renderSourcesTab = (afterSelect?: () => void) => (
     <div className='flex min-h-0 flex-1 flex-col'>
       <SourcesTab
         availableSources={availableSources}
@@ -297,7 +310,10 @@ const EpisodeSelector: React.FC<EpisodeSelectorProps> = ({
         currentEpisodeIndex={Math.max(0, value - 1)}
         videoTitle={videoTitle}
         searchKeyword={searchKeyword}
-        onSourceChange={onSourceChange}
+        onSourceChange={(source, id, title) => {
+          onSourceChange?.(source, id, title);
+          afterSelect?.();
+        }}
         precomputedVideoInfo={precomputedVideoInfo}
         activeDetail={detail}
         onSourceDetailFetched={onSourceDetailFetched}
@@ -306,16 +322,110 @@ const EpisodeSelector: React.FC<EpisodeSelectorProps> = ({
     </div>
   );
 
+  const mobileActionButtonClass =
+    'flex h-9 items-center gap-1 rounded-full border border-gray-200 bg-white px-3 text-xs text-gray-700 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-200';
+
   return (
     <div className='flex h-full flex-col overflow-hidden md:ml-1'>
       <div className='flex min-h-0 flex-1 flex-col md:hidden'>
-        <TabBar tabs={mobileTabs} active={mobileTab} onChange={setMobileTab} />
+        <div className='flex items-center justify-between gap-2 py-1'>
+          <div className='flex shrink-0 items-center gap-1.5'>
+            {onToggleFavorite && (
+              <button
+                type='button'
+                aria-label={favorited ? '取消收藏' : '添加收藏'}
+                aria-pressed={favorited}
+                className='flex h-9 w-9 items-center justify-center rounded-full border border-gray-200 bg-white dark:border-gray-700 dark:bg-gray-800'
+                onClick={onToggleFavorite}
+              >
+                <Heart
+                  className={`h-4 w-4 ${
+                    favorited
+                      ? 'fill-red-500 text-red-500'
+                      : 'text-gray-500 dark:text-gray-400'
+                  }`}
+                />
+              </button>
+            )}
+            {hasEpisodesTab && (
+              <button
+                type='button'
+                className={mobileActionButtonClass}
+                onClick={() => setMobileSheet('episodes')}
+              >
+                <LayoutGrid className='h-3.5 w-3.5' />
+                选集
+              </button>
+            )}
+            <button
+              type='button'
+              className={mobileActionButtonClass}
+              onClick={() => setMobileSheet('sources')}
+            >
+              <ArrowLeftRight className='h-3.5 w-3.5' />
+              换源
+            </button>
+          </div>
+          <span className='ml-auto min-w-0 truncate text-right text-sm text-gray-600 dark:text-gray-300'>
+            {totalEpisodes > 1
+              ? `第 ${value} 集 / 共 ${totalEpisodes} 集`
+              : '正片'}
+          </span>
+        </div>
 
-        <PlayerPanelContent>
-          {mobileTab === 'episodes' && hasEpisodesTab && renderEpisodesTab()}
-          {mobileTab === 'info' && renderInfoTab('panel')}
-          {mobileTab === 'sources' && renderSourcesTab()}
-        </PlayerPanelContent>
+        {stripEpisodes.length > 0 && (
+          <div className='scrollbar-hide -mx-1 mt-2 flex gap-2 overflow-x-auto px-1 pb-1'>
+            {stripEpisodes.map((episodeNumber) => {
+              const active = episodeNumber === value;
+              return (
+                <button
+                  key={episodeNumber}
+                  type='button'
+                  aria-current={active ? 'true' : undefined}
+                  className={`h-11 min-w-[44px] shrink-0 rounded-lg border px-2 text-sm font-medium ${
+                    active
+                      ? 'border-green-500/60 bg-green-500/10 text-green-600 dark:text-green-400'
+                      : 'border-gray-200 bg-white text-gray-700 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-200'
+                  }`}
+                  onClick={() => onChange?.(episodeNumber)}
+                >
+                  {episodeNumber}
+                </button>
+              );
+            })}
+            <button
+              type='button'
+              className='h-11 shrink-0 rounded-lg border border-gray-200 bg-white px-3 text-sm text-gray-500 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-400'
+              onClick={() => setMobileSheet('episodes')}
+            >
+              全部
+            </button>
+          </div>
+        )}
+
+        <div className='mt-3 flex min-h-0 flex-1 flex-col overflow-hidden rounded-xl border border-gray-200/60 bg-white/60 dark:border-gray-700/60 dark:bg-gray-800/40'>
+          {renderInfoTab('panel')}
+        </div>
+
+        <MobileSheet
+          open={mobileSheet === 'episodes'}
+          title='选集'
+          onClose={() => setMobileSheet(null)}
+        >
+          <div className='flex h-[60dvh] flex-col overflow-hidden'>
+            {renderEpisodesTab(() => setMobileSheet(null))}
+          </div>
+        </MobileSheet>
+
+        <MobileSheet
+          open={mobileSheet === 'sources'}
+          title='换源'
+          onClose={() => setMobileSheet(null)}
+        >
+          <div className='flex h-[60dvh] flex-col overflow-hidden'>
+            {renderSourcesTab(() => setMobileSheet(null))}
+          </div>
+        </MobileSheet>
       </div>
 
       <div className='hidden min-h-0 flex-1 flex-col md:flex'>

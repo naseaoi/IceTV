@@ -15,10 +15,12 @@ import {
 } from '@/components/PlayerPageLayout';
 import { useRuntimeConfig } from '@/components/RuntimeConfigProvider';
 import EpisodeSelector from '@/features/play/components/EpisodeSelector';
-import type { VideoLoadingStage } from '@/features/play/hooks/usePlayPageState';
-import { getSourceFailure } from '@/lib/failed-source-cooldown';
+import type {
+  SourceRecommendation,
+  VideoLoadingStage,
+} from '@/features/play/hooks/usePlayPageState';
+import { resolveVodPlayerLoadingTimeoutSeconds } from '@/features/play/lib/vodSourcePlaybackPolicy';
 import { SearchResult } from '@/lib/types';
-import { normalizeInlineText } from '@/lib/utils';
 
 interface PlayMainContentProps {
   videoTitle: string;
@@ -49,6 +51,8 @@ interface PlayMainContentProps {
     string,
     { quality: string; loadSpeed: string; pingTime: number }
   >;
+  sourceRecommendation?: SourceRecommendation | null;
+  onDismissSourceRecommendation?: () => void;
   videoYear: string;
   favorited: boolean;
   onToggleFavorite: () => void;
@@ -62,6 +66,7 @@ interface PlayMainContentProps {
 }
 
 const DEFAULT_PLAYER_LOADING_TIMEOUT_SECONDS = 15;
+const SOURCE_RECOMMENDATION_AUTO_DISMISS_MS = 5000;
 
 export function buildLoadingTimeoutMessage(timeoutSeconds: number): string {
   return `已等待超过 ${timeoutSeconds} 秒，源站响应超时`;
@@ -96,7 +101,7 @@ function PlayerOverlayPanel({
   description,
   children,
   zClassName,
-  icon = <AlertTriangle className='h-9 w-9' />,
+  icon = <AlertTriangle className='h-6 w-6 sm:h-9 sm:w-9' />,
   tone = 'red',
   glow = false,
 }: {
@@ -119,12 +124,12 @@ function PlayerOverlayPanel({
         icon={icon}
         tone={tone}
         title={title}
-        titleClassName='text-xl text-white sm:text-2xl'
+        titleClassName='text-base text-white sm:text-2xl'
         message={message}
-        messageClassName='mx-auto max-w-[16rem] text-sm leading-6 text-gray-300 sm:max-w-none'
+        messageClassName='mx-auto max-w-[16rem] text-xs leading-5 text-gray-300 sm:max-w-none sm:text-sm sm:leading-6'
         description={description}
         descriptionClassName='text-gray-400'
-        className='max-w-[19rem] p-4 sm:max-w-lg sm:p-6'
+        className='max-w-[19rem] p-3 sm:max-w-lg sm:p-6'
       >
         {children}
       </LoadingStatePanel>
@@ -140,19 +145,19 @@ const LOADING_STAGE_CONFIG: Record<
     title: '正在加载视频',
     status: '正在加载视频...',
     timeoutTitle: '加载视频超时',
-    icon: <Tv className='h-9 w-9' />,
+    icon: <Tv className='h-6 w-6 sm:h-9 sm:w-9' />,
   },
   sourceChanging: {
     title: '正在切换源站',
     status: '正在切换源站...',
     timeoutTitle: '切换播放源超时',
-    icon: <RefreshCw className='h-9 w-9' />,
+    icon: <RefreshCw className='h-6 w-6 sm:h-9 sm:w-9' />,
   },
   episodeChanging: {
     title: '正在切换剧集',
     status: '正在切换剧集...',
     timeoutTitle: '切换剧集超时',
-    icon: <RefreshCw className='h-9 w-9' />,
+    icon: <RefreshCw className='h-6 w-6 sm:h-9 sm:w-9' />,
   },
 };
 
@@ -275,44 +280,6 @@ function getPlayCategory(
   return { TitleIcon: Tv, accent: playAccents.tv };
 }
 
-function buildHeaderTags({
-  headerSourceText,
-  headerYearText,
-  totalEpisodes,
-}: {
-  headerSourceText: string;
-  headerYearText: string;
-  totalEpisodes: number;
-}) {
-  const tags: ReactNode[] = [];
-
-  if (headerSourceText) {
-    tags.push(
-      <span className='inline-flex items-center rounded-full bg-emerald-50 px-2.5 py-0.5 text-emerald-700 ring-1 ring-emerald-200/60 dark:bg-emerald-900/30 dark:text-emerald-300 dark:ring-emerald-500/20'>
-        {headerSourceText}
-      </span>,
-    );
-  }
-
-  if (headerYearText) {
-    tags.push(
-      <span className='inline-flex items-center rounded-full bg-gray-100 px-2.5 py-0.5 text-gray-600 ring-1 ring-gray-200/60 dark:bg-gray-800 dark:text-gray-400 dark:ring-gray-700/60'>
-        {headerYearText}
-      </span>,
-    );
-  }
-
-  if (totalEpisodes > 1) {
-    tags.push(
-      <span className='inline-flex items-center rounded-full bg-violet-50 px-2.5 py-0.5 text-violet-600 ring-1 ring-violet-200/60 dark:bg-violet-900/30 dark:text-violet-300 dark:ring-violet-500/20'>
-        共 {totalEpisodes} 集
-      </span>,
-    );
-  }
-
-  return tags;
-}
-
 export function PlayMainContent(props: PlayMainContentProps) {
   const {
     videoTitle,
@@ -339,6 +306,8 @@ export function PlayMainContent(props: PlayMainContentProps) {
     sourceSearchLoading,
     sourceSearchError,
     precomputedVideoInfo,
+    sourceRecommendation,
+    onDismissSourceRecommendation,
     videoYear,
     favorited,
     onToggleFavorite,
@@ -357,49 +326,33 @@ export function PlayMainContent(props: PlayMainContentProps) {
     [detail?.type_name, totalEpisodes, searchType],
   );
 
-  const currentSourceMeta = useMemo(() => {
-    return availableSources.find(
-      (item) =>
-        item.source?.toString() === currentSource?.toString() &&
-        item.id?.toString() === currentId?.toString(),
-    );
-  }, [availableSources, currentSource, currentId]);
-
-  const headerSourceText = [
-    currentSourceMeta?.source_name ||
-      currentSourceMeta?.source?.toString() ||
-      currentSource?.toString() ||
-      '',
-    normalizeInlineText(currentSourceMeta?.variant_label || ''),
-  ]
-    .filter(Boolean)
-    .join(' · ');
-  const headerYearText = (detail?.year || videoYear || '').toString();
   const [loadingTimedOut, setLoadingTimedOut] = useState(false);
   const runtimeConfig = useRuntimeConfig();
-  const loadingTimeoutSeconds = Math.max(
+  const configuredLoadingTimeoutSeconds = Math.max(
     1,
     Math.floor(
       runtimeConfig.VOD_PAGE_TIMEOUT_SECONDS ||
         DEFAULT_PLAYER_LOADING_TIMEOUT_SECONDS,
     ),
   );
+  const loadingTimeoutSeconds = resolveVodPlayerLoadingTimeoutSeconds(
+    currentSource,
+    configuredLoadingTimeoutSeconds,
+  );
   const loadingTimeoutMs = loadingTimeoutSeconds * 1000;
   const onLoadingTimeoutRef = useRef(onLoadingTimeout);
-  const currentSourceFailure = useMemo(() => {
-    const key =
-      currentSource && currentId ? `${currentSource}-${currentId}` : '';
-    return key ? getSourceFailure(key) : null;
-  }, [currentSource, currentId]);
-  const loadingStatusText =
-    realtimeLoadSpeed ||
-    (currentSourceFailure?.coolingDown
-      ? `当前源${currentSourceFailure.label}`
-      : '');
+  const onDismissSourceRecommendationRef = useRef(
+    onDismissSourceRecommendation,
+  );
+  const loadingStatusText = realtimeLoadSpeed;
 
   useEffect(() => {
     onLoadingTimeoutRef.current = onLoadingTimeout;
   }, [onLoadingTimeout]);
+
+  useEffect(() => {
+    onDismissSourceRecommendationRef.current = onDismissSourceRecommendation;
+  }, [onDismissSourceRecommendation]);
 
   useEffect(() => {
     if (!isVideoLoading || playbackError) {
@@ -420,11 +373,14 @@ export function PlayMainContent(props: PlayMainContentProps) {
     loadingTimeoutMs,
   ]);
 
-  const headerTags = buildHeaderTags({
-    headerSourceText,
-    headerYearText,
-    totalEpisodes,
-  });
+  useEffect(() => {
+    if (!sourceRecommendation || playbackError) return;
+    const timer = window.setTimeout(() => {
+      onDismissSourceRecommendationRef.current?.();
+    }, SOURCE_RECOMMENDATION_AUTO_DISMISS_MS);
+
+    return () => window.clearTimeout(timer);
+  }, [sourceRecommendation, playbackError]);
 
   return (
     <PlayerPageLayout
@@ -447,7 +403,7 @@ export function PlayMainContent(props: PlayMainContentProps) {
             `第 ${currentEpisodeIndex + 1} 集`
           : null
       }
-      tags={headerTags}
+      mobilePanelAlwaysVisible
       playerOverlay={
         <>
           {isVideoLoading && !playbackError && (
@@ -470,6 +426,24 @@ export function PlayMainContent(props: PlayMainContentProps) {
               onReloginAndRecover={onReloginAndRecover}
               onDismissAuthRecovery={onDismissAuthRecovery}
             />
+          )}
+          {sourceRecommendation && !playbackError && (
+            <div className='absolute right-4 top-4 z-20 max-w-[min(22rem,calc(100%-2rem))] rounded-lg bg-black/70 px-3 py-2 text-xs text-white shadow-lg backdrop-blur-md'>
+              <div className='font-medium'>
+                发现更优源：{sourceRecommendation.sourceName}
+              </div>
+              <div className='mt-0.5 text-white/75'>
+                {sourceRecommendation.quality} ·{' '}
+                {sourceRecommendation.loadSpeed}
+                ，可在换源中手动选择
+              </div>
+              <button
+                className='mt-1 text-white/70 hover:text-white'
+                onClick={() => onDismissSourceRecommendationRef.current?.()}
+              >
+                知道了
+              </button>
+            </div>
           )}
         </>
       }

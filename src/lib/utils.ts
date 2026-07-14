@@ -1,5 +1,6 @@
 import he from 'he';
 
+import { toBangumiCoverProxyUrl } from '@/features/bangumi/lib/bangumi-cover-url';
 import { getAuthInfoFromBrowserCookie } from '@/lib/auth.client';
 import {
   getUsableDoubanImageProxyType,
@@ -9,23 +10,52 @@ import {
   readDoubanImageProxyType,
   readDoubanImageProxyUrl,
 } from '@/lib/douban-source';
+import {
+  type SourceCoverProxyMode,
+  buildSourceCoverProxyUrl,
+  normalizeSourceCoverProxyMode,
+  shouldProxySourceCover,
+} from '@/lib/source-cover-proxy';
 
-export function processImageUrl(originalUrl: string): string {
+export function processImageUrl(
+  originalUrl: string,
+  sourceCoverProxyMode?: SourceCoverProxyMode,
+): string {
   if (!originalUrl) return originalUrl;
 
-  if (!originalUrl.includes('doubanio.com')) {
+  const bangumiCoverProxyUrl = toBangumiCoverProxyUrl(originalUrl);
+  if (bangumiCoverProxyUrl) {
+    return bangumiCoverProxyUrl;
+  }
+
+  if (/^https:\/\/img\.doubanio\.cmliussss\.(net|com)\//i.test(originalUrl)) {
     return originalUrl;
   }
 
-  const proxyType = getUsableDoubanImageProxyType(
-    readDoubanImageProxyType(),
-    Boolean(getAuthInfoFromBrowserCookie()?.username),
-  );
-  return processDoubanImageUrl(
-    originalUrl,
-    proxyType,
-    readDoubanImageProxyUrl(),
-  );
+  if (originalUrl.includes('doubanio.com')) {
+    const proxyType = getUsableDoubanImageProxyType(
+      readDoubanImageProxyType(),
+      Boolean(getAuthInfoFromBrowserCookie()?.username),
+    );
+    return processDoubanImageUrl(
+      originalUrl,
+      proxyType,
+      readDoubanImageProxyUrl(),
+    );
+  }
+
+  try {
+    const url = new URL(originalUrl);
+    if (url.protocol !== 'http:' && url.protocol !== 'https:') {
+      return originalUrl;
+    }
+    const mode = normalizeSourceCoverProxyMode(sourceCoverProxyMode);
+    return shouldProxySourceCover(url.href, mode)
+      ? buildSourceCoverProxyUrl(url.href)
+      : url.href;
+  } catch {
+    return originalUrl;
+  }
 }
 
 function decodeHtmlText(text: string): string {

@@ -131,6 +131,54 @@ describe('stripAdSegmentsByPhysicalSignal', () => {
     expect(result).toMatch(/normal_7_5\.ts/);
   });
 
+  test('主流 5 秒切片中的单个 4 秒区间被识别并剔除', async () => {
+    const lines = ['#EXTM3U', '#EXT-X-VERSION:3', '#EXT-X-TARGETDURATION:5'];
+    for (let segment = 0; segment < 10; segment++) {
+      lines.push('#EXT-X-DISCONTINUITY');
+      for (let fragment = 0; fragment < 5; fragment++) {
+        const isAd = segment === 4;
+        lines.push(`#EXTINF:${isAd ? '4.000000' : '5.000000'},`);
+        lines.push(
+          `${isAd ? 'duration_ad' : `normal_${segment}`}_${fragment}.ts`,
+        );
+      }
+    }
+    lines.push('#EXT-X-ENDLIST');
+    const m3u8 = lines.join('\n');
+
+    const result = await stripAdSegmentsByPhysicalSignal(
+      m3u8,
+      'https://cdn.example.com/x/index.m3u8',
+      'ua',
+    );
+
+    expect(result).not.toMatch(/duration_ad_\d+\.ts/);
+    expect(result).toMatch(/normal_3_4\.ts/);
+    expect(result).toMatch(/normal_5_0\.ts/);
+  });
+
+  test('单个短尾片不触发局部时长偏移识别', async () => {
+    const lines = ['#EXTM3U', '#EXT-X-VERSION:3', '#EXT-X-TARGETDURATION:5'];
+    for (let segment = 0; segment < 10; segment++) {
+      lines.push('#EXT-X-DISCONTINUITY');
+      for (let fragment = 0; fragment < 5; fragment++) {
+        const duration = segment === 4 && fragment === 4 ? 1 : 5;
+        lines.push(`#EXTINF:${duration.toFixed(6)},`);
+        lines.push(`normal_${segment}_${fragment}.ts`);
+      }
+    }
+    lines.push('#EXT-X-ENDLIST');
+    const m3u8 = lines.join('\n');
+
+    const result = await stripAdSegmentsByPhysicalSignal(
+      m3u8,
+      'https://cdn.example.com/x/index.m3u8',
+      'ua',
+    );
+
+    expect(result).toBe(m3u8);
+  });
+
   test('整片都是整数切片的源站不被误判', async () => {
     // 所有段 EXTINF 都是 4.0，基线整数率 = 1.0，差异 = 0 → 不判
     const lines = ['#EXTM3U'];

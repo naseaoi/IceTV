@@ -8,29 +8,28 @@ import type {
 import type { PlaybackRequestMode } from '@/features/play/hooks/usePlayPageState';
 import { resolveSourceSwitchCurrentPlayTime } from '@/features/play/lib/episodeResumePolicy';
 import {
-  applyAutoQualityLevel,
-  applyDefaultQualityLevel,
-  applyManualQualityLevel,
-  findHighestLevelIndex,
-  findLevelIndexByHeight,
-  findNextLowerLevelIndex,
-  markQualityControlTemporaryAuto,
-  registerQualityControlWhenReady,
-  seedAutoQualityStartLevel,
-} from '@/features/play/lib/hlsQuality';
-import {
-  getHlsErrorStatus,
-  resolveHlsSourceFailureReason,
-} from '@/features/play/lib/hlsSourceFailure';
+  PLAYBACK_STALL_CONFIRMATION_DELAY_MS,
+  resolvePlaybackStallDecision,
+} from '@/features/play/lib/playbackStallRecovery';
 import type { PlayerLoadingSessionState } from '@/features/play/lib/playerLoading';
 import type { ResumeMode } from '@/features/play/lib/resumePlayback';
-import { buildVodProxyUrl } from '@/features/play/lib/vodProxyUrl';
 import {
-  clearSourceFailure,
-  markSourceFailed,
-} from '@/lib/failed-source-cooldown';
+  AUTO_ROUTE_PROXY_COOLDOWN_MS,
+  AUTO_ROUTE_PROXY_PROBE_TIMEOUT_MS,
+  BROWSER_ROUTE_FAILURE_THRESHOLD,
+  ConsecutiveRouteFailureTracker,
+  SERVER_ROUTE_FAILURE_THRESHOLD,
+} from '@/features/play/lib/vodAutoRoutePolicy';
+import { createVodHlsQualityController } from '@/features/play/lib/vodHlsQualityController';
+import {
+  buildVodProxyUrl,
+  buildVodSegmentProxyUrl,
+} from '@/features/play/lib/vodProxyUrl';
+import {
+  getVodHlsBufferOverrides,
+  getVodHlsLoadingOverrides,
+} from '@/features/play/lib/vodSourcePlaybackPolicy';
 import { logHlsError } from '@/lib/hls-error-log';
-import { readPreferredQualityPreference } from '@/lib/local-preferences';
 import {
   assignManagedVideoCleanup,
   destroyManagedHls,
@@ -44,6 +43,7 @@ import {
   ensureVideoSource,
   formatBytesPerSecond,
   handleHlsFatalError,
+  showTimedArtNotice,
 } from '@/lib/player-utils';
 import {
   clearSourceProxyOverride,
@@ -89,23 +89,6 @@ function resolveVideoQuality(videoWidth: number): string {
   return 'SD';
 }
 
-function getCurrentHlsLevelIndex(hls: any): number | null {
-  const candidates = [hls.currentLevel, hls.loadLevel, hls.nextLoadLevel];
-  for (const candidate of candidates) {
-    if (typeof candidate === 'number' && candidate >= 0) {
-      return candidate;
-    }
-  }
-  return null;
-}
-
-function getDefaultQualityLevel(sourceKey: string, levels: any[]) {
-  if (sourceKey === 'xigua') {
-    return findLevelIndexByHeight(levels, 720) ?? findHighestLevelIndex(levels);
-  }
-  return findHighestLevelIndex(levels);
-}
-
 export function createVodM3u8Loader({
   Hls,
   adBlockingHlsLoader,
@@ -134,6 +117,16 @@ export function createVodM3u8Loader({
 
     runManagedVideoCleanup(managedVideo);
 
+    const sourceKey = detailRef.current?.source || '';
+    const sharedHlsConfig = createHlsConfig({
+      preserveManualLevelOnError: true,
+    });
+    const sourceBufferOverrides = getVodHlsBufferOverrides(sourceKey);
+    const sourceLoadingOverrides = getVodHlsLoadingOverrides(sourceKey);
+    const hlsConfig = {
+      ...sharedHlsConfig,
+      ...sourceBufferOverrides,
+    };
     const currentBlockAd = blockAdEnabledRef.current;
     const existingHls = managedVideo.hls;
     const canReuseHls =
@@ -142,6 +135,13 @@ export function createVodM3u8Loader({
     let hls: any;
     if (canReuseHls) {
       hls = existingHls;
+      hls.config.maxBufferLength = hlsConfig.maxBufferLength;
+      hls.config.maxMaxBufferLength = hlsConfig.maxMaxBufferLength;
+      hls.config.maxBufferSize = hlsConfig.maxBufferSize;
+      hls.config.manifestLoadingTimeOut =
+        sourceLoadingOverrides.manifestLoadingTimeOut ?? 10000;
+      hls.config.levelLoadingTimeOut =
+        sourceLoadingOverrides.levelLoadingTimeOut ?? 10000;
       const oldHandlers = managedVideo.__icetvHlsHandlers;
       if (oldHandlers) {
         hls.off(Hls.Events.ERROR, oldHandlers.onError);
@@ -153,13 +153,13 @@ export function createVodM3u8Loader({
     } else {
       destroyManagedHls(managedVideo);
       hls = new Hls({
-        ...createHlsConfig({
-          preserveManualLevelOnError: true,
-        }),
-        manifestLoadingTimeOut: 10000,
+        ...hlsConfig,
+        manifestLoadingTimeOut:
+          sourceLoadingOverrides.manifestLoadingTimeOut ?? 10000,
         manifestLoadingMaxRetry: 4,
         manifestLoadingRetryDelay: 1000,
-        levelLoadingTimeOut: 10000,
+        levelLoadingTimeOut:
+          sourceLoadingOverrides.levelLoadingTimeOut ?? 10000,
         levelLoadingMaxRetry: 4,
         levelLoadingRetryDelay: 1000,
         fragLoadingTimeOut: 30000,
@@ -172,7 +172,6 @@ export function createVodM3u8Loader({
     }
     managedVideo.__icetvBlockAd = currentBlockAd;
 
-    const sourceKey = detailRef.current?.source || '';
     const buildTargetUrl = (rawUrl: string, useServerProxy: boolean) =>
       buildVodProxyUrl({
         rawUrl,
@@ -184,6 +183,17 @@ export function createVodM3u8Loader({
     let currentUseServerProxy = isServerProxy(sourceKey, url);
     let targetUrl = buildTargetUrl(url, currentUseServerProxy);
     managedVideo.__icetvUsingServerProxy = currentUseServerProxy;
+    const browserFailureTracker = new ConsecutiveRouteFailureTracker(
+      BROWSER_ROUTE_FAILURE_THRESHOLD,
+    );
+    const serverFailureTracker = new ConsecutiveRouteFailureTracker(
+      SERVER_ROUTE_FAILURE_THRESHOLD,
+    );
+    let videoRuntimeCleaned = false;
+    let proxyProbeInFlight = false;
+    let proxyProbeSequence = 0;
+    let proxyProbeController: AbortController | null = null;
+    let proxyRetryBlockedUntil = 0;
     const routeStatReported = {
       browser: { success: false, failure: false },
       server: { success: false, failure: false },
@@ -223,62 +233,14 @@ export function createVodM3u8Loader({
     resetSpeedFallbackTimer();
 
     let lastStallRecoveryAt = 0;
-    let qualityLockProbeTimer: ReturnType<typeof setTimeout> | null = null;
-    let manualQualityNetworkFailures = 0;
-    const manualQualityFailureLimit = 2;
-    const clearQualityLockProbe = () => {
-      if (qualityLockProbeTimer) {
-        clearTimeout(qualityLockProbeTimer);
-        qualityLockProbeTimer = null;
-      }
-    };
-    const releaseQualityLockToAuto = (
-      message = '所选画质加载失败，已临时切回自动',
-    ) => {
-      applyAutoQualityLevel(hls);
-      hls.startLoad();
-      markQualityControlTemporaryAuto(artPlayerRef, hls);
-      setRealtimeLoadSpeed(message);
-      try {
-        const activePlayer = artPlayerRef.current;
-        if (activePlayer) {
-          activePlayer.notice.show = message;
-        }
-      } catch {}
-    };
-    const tryDowngradeQualityLevel = (message: string) => {
-      if (hls.__icetvManualQualityLocked === true) {
-        return false;
-      }
-
-      const currentLevel = getCurrentHlsLevelIndex(hls);
-      if (currentLevel === null) {
-        return false;
-      }
-
-      const nextLevel = findNextLowerLevelIndex(hls.levels || [], currentLevel);
-      if (nextLevel === null) {
-        return false;
-      }
-
-      applyDefaultQualityLevel(hls, nextLevel);
-      if (typeof hls.startLoad === 'function') {
-        hls.startLoad();
-      }
-      const level = hls.levels?.[nextLevel];
-      const label = level?.height ? `${level.height}p` : '较低画质';
-      const notice = `${message}，已切换到${label}`;
-      setRealtimeLoadSpeed(notice);
-      try {
-        const activePlayer = artPlayerRef.current;
-        if (activePlayer) {
-          activePlayer.notice.show = notice;
-        }
-      } catch {}
-      return true;
-    };
-    const stopWithSourceError = (reason: string, status?: number) => {
-      markCurrentSourceFailure('proxy-error', reason, status);
+    let stallConfirmationTimer: ReturnType<typeof setTimeout> | null = null;
+    const qualityController = createVodHlsQualityController({
+      sourceKey,
+      hls,
+      artPlayerRef,
+      setRealtimeLoadSpeed,
+    });
+    const stopWithSourceError = () => {
       if (typeof hls.stopLoad === 'function') {
         hls.stopLoad();
       }
@@ -295,19 +257,6 @@ export function createVodM3u8Loader({
         ? `${playbackInfoContext.source}-${playbackInfoContext.id}`
         : '';
 
-    const markCurrentSourceFailure = (
-      reason: string,
-      message?: string,
-      status?: number,
-    ) => {
-      if (!failureKey) return;
-      markSourceFailed(failureKey, {
-        reason,
-        message,
-        status,
-      });
-    };
-
     const preservePlaybackPositionBeforeReload = () => {
       const resumeTime = resolveSourceSwitchCurrentPlayTime({
         playerCurrentTime: video.currentTime || 0,
@@ -322,8 +271,20 @@ export function createVodM3u8Loader({
       loadingSessionRef.current.pendingInitialResumeTarget = null;
     };
 
+    const cancelProxyProbe = () => {
+      if (!proxyProbeInFlight && !proxyProbeController) {
+        return;
+      }
+      proxyProbeSequence += 1;
+      proxyProbeController?.abort();
+      proxyProbeController = null;
+      proxyProbeInFlight = false;
+    };
+
     const switchToServerProxy = (reason: string) => {
       if (
+        videoRuntimeCleaned ||
+        managedVideo.hls !== hls ||
         currentUseServerProxy ||
         !sourceKey ||
         !shouldAutoFallbackToServer(sourceKey)
@@ -338,7 +299,6 @@ export function createVodM3u8Loader({
       });
       reportRouteStat(false);
       setRealtimeLoadSpeed('直连失败，切换代理...');
-      markCurrentSourceFailure('cors-fallback', reason);
 
       try {
         if (sourceKey) {
@@ -347,6 +307,8 @@ export function createVodM3u8Loader({
         currentUseServerProxy = true;
         targetUrl = fallbackTargetUrl;
         managedVideo.__icetvUsingServerProxy = true;
+        browserFailureTracker.reset();
+        serverFailureTracker.reset();
         firstFragSpeed = '';
         firstFragPing = 0;
         videoInfoReported = false;
@@ -367,7 +329,141 @@ export function createVodM3u8Loader({
         return false;
       }
     };
-    managedVideo.__icetvSwitchToServerProxy = switchToServerProxy;
+
+    const switchToBrowserDirect = (reason: string) => {
+      if (
+        videoRuntimeCleaned ||
+        managedVideo.hls !== hls ||
+        !currentUseServerProxy ||
+        !sourceKey ||
+        !shouldAutoFallbackToServer(sourceKey)
+      ) {
+        return false;
+      }
+
+      const directTargetUrl = buildTargetUrl(url, false);
+      console.warn('服务端代理连续加载失败，切回浏览器直连', {
+        sourceKey,
+        reason,
+      });
+      reportRouteStat(false);
+      clearSourceProxyOverride(sourceKey, url);
+      currentUseServerProxy = false;
+      targetUrl = directTargetUrl;
+      managedVideo.__icetvUsingServerProxy = false;
+      proxyRetryBlockedUntil = Date.now() + AUTO_ROUTE_PROXY_COOLDOWN_MS;
+      browserFailureTracker.reset();
+      serverFailureTracker.reset();
+      firstFragSpeed = '';
+      firstFragPing = 0;
+      videoInfoReported = false;
+      fragLoadStart = performance.now();
+      setRealtimeLoadSpeed('代理响应较慢，切回浏览器直连...');
+      resetSpeedFallbackTimer();
+      preservePlaybackPositionBeforeReload();
+      onSourceProxyFallbackStarted?.();
+      if (typeof hls.stopLoad === 'function') {
+        markManagedVideoExpectedAbort(video);
+        hls.stopLoad();
+      }
+      hls.loadSource(directTargetUrl);
+      ensureVideoSource(video, directTargetUrl);
+      return true;
+    };
+
+    const requestServerProxyFallback = (
+      reason: string,
+      segmentUrl: string | null,
+    ) => {
+      if (
+        videoRuntimeCleaned ||
+        managedVideo.hls !== hls ||
+        currentUseServerProxy ||
+        !sourceKey ||
+        !shouldAutoFallbackToServer(sourceKey) ||
+        Date.now() < proxyRetryBlockedUntil
+      ) {
+        return false;
+      }
+      if (proxyProbeInFlight) {
+        return true;
+      }
+
+      proxyProbeInFlight = true;
+      const probeSequence = proxyProbeSequence + 1;
+      proxyProbeSequence = probeSequence;
+      const controller = new AbortController();
+      proxyProbeController = controller;
+      const probeTimer = setTimeout(
+        () => controller.abort(),
+        AUTO_ROUTE_PROXY_PROBE_TIMEOUT_MS,
+      );
+      const probeUrl = segmentUrl
+        ? buildVodSegmentProxyUrl({
+            rawUrl: segmentUrl,
+            sourceKey,
+            playbackRequestMode: playbackRequestModeRef.current || 'initial',
+          })
+        : buildTargetUrl(url, true);
+
+      setRealtimeLoadSpeed('直连连续失败，正在检测代理...');
+      void (async () => {
+        try {
+          const response = await fetch(probeUrl, {
+            cache: 'no-store',
+            headers: segmentUrl ? { Range: 'bytes=0-65535' } : undefined,
+            signal: controller.signal,
+          });
+          if (!response.ok) {
+            return false;
+          }
+          if (segmentUrl) {
+            const reader = response.body?.getReader();
+            if (!reader) {
+              return false;
+            }
+            const chunk = await reader.read();
+            await reader.cancel().catch(() => {});
+            return !chunk.done && !!chunk.value?.byteLength;
+          }
+          const content = await response.text();
+          return content.includes('#EXTM3U');
+        } catch {
+          return false;
+        } finally {
+          clearTimeout(probeTimer);
+        }
+      })()
+        .then((proxyHealthy) => {
+          if (
+            probeSequence !== proxyProbeSequence ||
+            videoRuntimeCleaned ||
+            managedVideo.hls !== hls
+          ) {
+            return;
+          }
+          if (proxyHealthy) {
+            switchToServerProxy(reason);
+            return;
+          }
+          browserFailureTracker.reset();
+          proxyRetryBlockedUntil = Date.now() + AUTO_ROUTE_PROXY_COOLDOWN_MS;
+          setRealtimeLoadSpeed('代理响应较慢，继续浏览器直连');
+          if (typeof hls.startLoad === 'function') {
+            hls.startLoad();
+          }
+        })
+        .finally(() => {
+          if (probeSequence !== proxyProbeSequence) {
+            return;
+          }
+          proxyProbeController = null;
+          proxyProbeInFlight = false;
+        });
+      return true;
+    };
+    managedVideo.__icetvSwitchToServerProxy = (reason: string) =>
+      requestServerProxyFallback(reason, null);
 
     const getBufferedRanges = () => {
       const ranges: Array<[number, number]> = [];
@@ -377,62 +473,63 @@ export function createVodM3u8Loader({
       return ranges;
     };
 
+    const clearStallConfirmation = () => {
+      if (!stallConfirmationTimer) return;
+      clearTimeout(stallConfirmationTimer);
+      stallConfirmationTimer = null;
+    };
+
     const tryRecoverPlaybackStall = (reason: 'waiting' | 'stalled') => {
-      if (video.paused || video.ended) {
+      if (video.paused || video.ended || stallConfirmationTimer) {
         return;
       }
 
-      const currentTime = video.currentTime || 0;
-      const ranges = getBufferedRanges();
-      const activeRange = ranges.find(
-        ([start, end]) => currentTime >= start && currentTime < end,
-      );
-      const nextRange = ranges.find(([start]) => start > currentTime);
-      const bufferedAhead = activeRange ? activeRange[1] - currentTime : 0;
-      const gapToNext = nextRange
-        ? nextRange[0] - (activeRange ? activeRange[1] : currentTime)
-        : null;
+      const observedTime = video.currentTime || 0;
+      stallConfirmationTimer = setTimeout(() => {
+        stallConfirmationTimer = null;
+        if (video.paused || video.ended) return;
 
-      console.warn('检测到点播播放卡顿', {
-        reason,
-        currentTime: Number(currentTime.toFixed(2)),
-        readyState: video.readyState,
-        networkState: video.networkState,
-        bufferedAhead: Number(bufferedAhead.toFixed(2)),
-        gapToNext: gapToNext === null ? null : Number(gapToNext.toFixed(2)),
-        bufferedRanges: ranges.map(([start, end]) => [
-          Number(start.toFixed(2)),
-          Number(end.toFixed(2)),
-        ]),
-      });
-      setRealtimeLoadSpeed('源站响应较慢，正在继续加载');
-      try {
-        const activePlayer = artPlayerRef.current;
-        if (activePlayer) {
-          activePlayer.notice.show = '源站响应较慢，正在继续加载';
+        const currentTime = video.currentTime || 0;
+        if (currentTime - observedTime >= 0.05) return;
+
+        const ranges = getBufferedRanges();
+        const decision = resolvePlaybackStallDecision(currentTime, ranges);
+        if (decision.action === 'none') return;
+
+        const now = Date.now();
+        if (now - lastStallRecoveryAt < 1500) return;
+        lastStallRecoveryAt = now;
+
+        console.warn('检测到点播播放卡顿', {
+          reason,
+          currentTime: Number(currentTime.toFixed(2)),
+          readyState: video.readyState,
+          networkState: video.networkState,
+          bufferedAhead: Number(decision.bufferedAhead.toFixed(2)),
+          gapToNext:
+            decision.gapToNext === null
+              ? null
+              : Number(decision.gapToNext.toFixed(2)),
+          bufferedRanges: ranges.map(([start, end]) => [
+            Number(start.toFixed(2)),
+            Number(end.toFixed(2)),
+          ]),
+        });
+
+        if (decision.action === 'seek' && decision.targetTime !== null) {
+          video.currentTime = decision.targetTime;
+          return;
         }
-      } catch {}
 
-      const now = Date.now();
-      if (now - lastStallRecoveryAt < 1500) {
-        return;
-      }
-      lastStallRecoveryAt = now;
-
-      if (bufferedAhead > 1.5) {
-        video.currentTime = Math.min(
-          currentTime + 0.1,
-          activeRange ? activeRange[1] - 0.05 : currentTime + 0.1,
-        );
-        return;
-      }
-
-      if (nextRange && gapToNext !== null && gapToNext > 0 && gapToNext <= 1) {
-        video.currentTime = nextRange[0] + 0.05;
-        return;
-      }
-
-      hls.startLoad();
+        setRealtimeLoadSpeed('源站响应较慢，正在继续加载');
+        try {
+          const activePlayer = artPlayerRef.current;
+          if (activePlayer) {
+            showTimedArtNotice(activePlayer, '源站响应较慢，正在继续加载');
+          }
+        } catch {}
+        hls.startLoad();
+      }, PLAYBACK_STALL_CONFIRMATION_DELAY_MS);
     };
 
     const onWaiting = () => {
@@ -440,6 +537,9 @@ export function createVodM3u8Loader({
     };
     const onStalled = () => {
       tryRecoverPlaybackStall('stalled');
+    };
+    const onPlaying = () => {
+      clearStallConfirmation();
     };
 
     const tryReportVideoInfo = () => {
@@ -457,40 +557,36 @@ export function createVodM3u8Loader({
       );
     };
 
-    let videoRuntimeCleaned = false;
     const cleanupVideoRuntime = () => {
       if (videoRuntimeCleaned) return;
       videoRuntimeCleaned = true;
-      clearQualityLockProbe();
+      cancelProxyProbe();
+      managedVideo.__icetvSwitchToServerProxy = null;
+      qualityController.dispose();
+      clearStallConfirmation();
       if (speedFallbackTimer) {
         clearTimeout(speedFallbackTimer);
       }
       video.removeEventListener('waiting', onWaiting);
       video.removeEventListener('stalled', onStalled);
+      video.removeEventListener('playing', onPlaying);
       video.removeEventListener('loadeddata', tryReportVideoInfo);
     };
 
     assignManagedVideoCleanup(video, cleanupVideoRuntime);
     video.addEventListener('waiting', onWaiting);
     video.addEventListener('stalled', onStalled);
+    video.addEventListener('playing', onPlaying);
 
     const onHlsError = function (_event: unknown, data: any) {
-      const errorStatus = getHlsErrorStatus(data);
       const errorDetails = String(data?.details || '');
       const errorReason = `${String(data?.type || 'unknown')}:${errorDetails || 'fatal'}`;
-      const sourceFailureReason = resolveHlsSourceFailureReason(
-        data,
-        currentUseServerProxy,
-        Hls.ErrorTypes,
-      );
       const logResult = logHlsError(_event, data, {
         scope: 'vod',
         sourceKey: failureKey || sourceKey,
         phase: currentUseServerProxy ? 'server-proxy' : 'browser-direct',
         expectedAbort:
-          videoRuntimeCleaned ||
-          isManagedVideoExpectedAbort(video) ||
-          playbackRequestModeRef.current !== 'initial',
+          videoRuntimeCleaned || isManagedVideoExpectedAbort(video),
       });
       if (logResult.expectedAbort) {
         return;
@@ -505,19 +601,43 @@ export function createVodM3u8Loader({
       const isManifestOrLevelNetworkError =
         data.type === Hls.ErrorTypes.NETWORK_ERROR &&
         /manifest|level/i.test(errorDetails);
+      const isRouteNetworkError =
+        data.type === Hls.ErrorTypes.NETWORK_ERROR &&
+        /frag|segment|level|manifest/i.test(errorDetails);
+      let browserFailureThresholdReached = false;
+
+      if (isRouteNetworkError) {
+        if (currentUseServerProxy) {
+          const serverFailureThresholdReached = serverFailureTracker.record();
+          if (
+            (data.fatal || serverFailureThresholdReached) &&
+            switchToBrowserDirect(errorReason)
+          ) {
+            return;
+          }
+        } else {
+          browserFailureThresholdReached = browserFailureTracker.record();
+        }
+      }
 
       if (
-        isFragOrLevelNetworkError &&
-        hls.autoLevelEnabled === false &&
-        hls.__icetvManualQualityLocked === true
+        qualityController.tryRecoverManualSelectionFailure(
+          isFragOrLevelNetworkError,
+        )
       ) {
-        manualQualityNetworkFailures += 1;
-        if (manualQualityNetworkFailures >= manualQualityFailureLimit) {
-          manualQualityNetworkFailures = 0;
-          clearQualityLockProbe();
-          releaseQualityLockToAuto('所选画质连续加载失败，已临时切回自动');
-          return;
-        }
+        return;
+      }
+
+      if (
+        !currentUseServerProxy &&
+        (browserFailureThresholdReached ||
+          (data.fatal && isManifestOrLevelNetworkError)) &&
+        requestServerProxyFallback(
+          errorReason,
+          isFragNetworkError && data?.frag?.url ? String(data.frag.url) : null,
+        )
+      ) {
+        return;
       }
 
       if (data.fatal) {
@@ -525,32 +645,18 @@ export function createVodM3u8Loader({
           data.type === Hls.ErrorTypes.NETWORK_ERROR &&
           currentUseServerProxy
         ) {
-          stopWithSourceError(errorReason, errorStatus);
+          stopWithSourceError();
           return;
         }
 
         if (
-          isFragNetworkError &&
-          tryDowngradeQualityLevel('当前画质分片加载失败')
+          qualityController.tryRecoverFatalNetworkFailure({
+            isFragmentNetworkError: isFragNetworkError,
+            isFragmentOrLevelNetworkError: isFragOrLevelNetworkError,
+          })
         ) {
           return;
         }
-
-        if (
-          isFragOrLevelNetworkError &&
-          hls.autoLevelEnabled === false &&
-          hls.__icetvManualQualityLocked !== true
-        ) {
-          clearQualityLockProbe();
-          releaseQualityLockToAuto();
-          return;
-        }
-
-        if (isManifestOrLevelNetworkError && switchToServerProxy(errorReason)) {
-          return;
-        }
-
-        markCurrentSourceFailure(sourceFailureReason, errorReason, errorStatus);
 
         if (
           data.type === Hls.ErrorTypes.NETWORK_ERROR &&
@@ -593,24 +699,23 @@ export function createVodM3u8Loader({
         data.type === Hls.ErrorTypes.NETWORK_ERROR &&
         /frag|segment|level|manifest/i.test(errorDetails)
       ) {
-        markCurrentSourceFailure(sourceFailureReason, errorReason, errorStatus);
         setRealtimeLoadSpeed('源站响应较慢，正在继续加载');
       }
     };
 
     const onHlsFragLoaded = function (_: unknown, data: any) {
-      clearQualityLockProbe();
-      if (hls.__icetvManualQualityLocked === true) {
-        manualQualityNetworkFailures = 0;
+      qualityController.handleFragmentLoaded();
+      if (currentUseServerProxy) {
+        serverFailureTracker.reset();
+      } else {
+        browserFailureTracker.reset();
+        cancelProxyProbe();
       }
       if (speedFallbackTimer) {
         clearTimeout(speedFallbackTimer);
         speedFallbackTimer = null;
       }
       reportRouteStat(true);
-      if (failureKey) {
-        clearSourceFailure(failureKey);
-      }
       const stats = data.frag.stats;
       const loadedBytes = stats.loaded ?? stats.total ?? 0;
       const startTime = stats.loading.first ?? 0;
@@ -633,38 +738,7 @@ export function createVodM3u8Loader({
     hls.on(Hls.Events.ERROR, onHlsError);
     hls.on(Hls.Events.FRAG_LOADED, onHlsFragLoaded);
     const onManifestParsed = () => {
-      const levels = hls.levels || [];
-      const qualityPreference = readPreferredQualityPreference();
-      const preferredLevel =
-        qualityPreference.mode === 'manual'
-          ? findLevelIndexByHeight(levels, qualityPreference.height)
-          : qualityPreference.mode === 'default'
-            ? getDefaultQualityLevel(sourceKey, levels)
-            : null;
-      hls.__icetvDefaultQualityLevel = getDefaultQualityLevel(
-        sourceKey,
-        levels,
-      );
-      if (preferredLevel !== null && qualityPreference.mode !== 'auto') {
-        if (qualityPreference.mode === 'manual') {
-          applyManualQualityLevel(hls, preferredLevel);
-        } else {
-          applyDefaultQualityLevel(hls, preferredLevel);
-        }
-        clearQualityLockProbe();
-        qualityLockProbeTimer = setTimeout(() => {
-          qualityLockProbeTimer = null;
-          if (
-            hls.autoLevelEnabled === false &&
-            hls.__icetvManualQualityLocked !== true
-          ) {
-            releaseQualityLockToAuto();
-          }
-        }, 10000);
-      } else {
-        seedAutoQualityStartLevel(hls, findHighestLevelIndex(levels));
-      }
-      registerQualityControlWhenReady(artPlayerRef, hls);
+      qualityController.handleManifestParsed();
     };
     hls.on(Hls.Events.MANIFEST_PARSED, onManifestParsed);
     managedVideo.__icetvHlsHandlers = {

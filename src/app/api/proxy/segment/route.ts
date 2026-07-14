@@ -1,6 +1,7 @@
 ﻿import { NextRequest, NextResponse } from 'next/server';
 
 import { isLiveEntryEnabled } from '@/features/live/lib/live';
+import { resolveVodSegmentProxyTimeoutMs } from '@/features/play/lib/vodSourcePlaybackPolicy';
 import { getConfigForRead } from '@/lib/config';
 import {
   fetchStreamThroughProxy,
@@ -112,7 +113,10 @@ export async function GET(request: NextRequest) {
   const runtimeParams = normalizeRuntimeParams(
     (await getConfigForRead()).SiteConfig,
   );
-  const timeoutMs = runtimeParams.ProxyRequestTimeoutSeconds * 1000;
+  const timeoutMs = resolveVodSegmentProxyTimeoutMs(
+    source,
+    runtimeParams.ProxyRequestTimeoutSeconds * 1000,
+  );
 
   try {
     const headers: Record<string, string> = {

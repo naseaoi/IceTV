@@ -2,6 +2,7 @@ import {
   shouldRunAdDetection,
   stripAdSegmentsByPhysicalSignal,
 } from '@/features/play/lib/ad-segment-detector';
+import { resolveVodM3U8ProxyTimeoutMs } from '@/features/play/lib/vodSourcePlaybackPolicy';
 import { getConfigForRead } from '@/lib/config';
 import {
   fetchResponseThroughProxy,
@@ -49,10 +50,13 @@ const MAX_M3U8_BYTES = 2 * 1024 * 1024;
 const m3u8RefreshInflight = new Map<string, Promise<void>>();
 const m3u8LoadInflight = new Map<string, Promise<M3U8LoadResult>>();
 
-async function getProxyRequestTimeoutMs(): Promise<number> {
+async function getProxyRequestTimeoutMs(
+  source: string | null,
+): Promise<number> {
   const config = await getConfigForRead();
-  return (
-    normalizeRuntimeParams(config.SiteConfig).ProxyRequestTimeoutSeconds * 1000
+  return resolveVodM3U8ProxyTimeoutMs(
+    source,
+    normalizeRuntimeParams(config.SiteConfig).ProxyRequestTimeoutSeconds * 1000,
   );
 }
 
@@ -76,7 +80,7 @@ export function refreshM3U8Cache(
 
   const task = (async () => {
     try {
-      const timeoutMs = await getProxyRequestTimeoutMs();
+      const timeoutMs = await getProxyRequestTimeoutMs(source);
       const response = await fetchWithUrlGuard(url, {
         cache: 'no-cache',
         redirect: 'follow',
@@ -178,7 +182,7 @@ async function fetchM3U8Data(
   skipCache: boolean,
   context: M3U8ProxyRequestContext,
 ): Promise<M3U8LoadResult> {
-  const timeoutMs = await getProxyRequestTimeoutMs();
+  const timeoutMs = await getProxyRequestTimeoutMs(source);
   if (isLive) {
     const proxyUrl = getProxyUrlForTarget(new URL(url));
     if (proxyUrl) {

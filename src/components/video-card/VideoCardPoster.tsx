@@ -1,7 +1,8 @@
-import { Heart, Link, PlayCircleIcon, Trash2 } from 'lucide-react';
+import { Link, PlayCircleIcon, Trash2 } from 'lucide-react';
 import type React from 'react';
 
 import CoverImage from '@/components/CoverImage';
+import { FavoriteHeartButton } from '@/components/FavoriteHeartButton';
 import type {
   VideoCardDisplayConfig,
   VideoCardProps,
@@ -128,7 +129,7 @@ interface VideoCardPosterProps {
   progress?: number;
   visibleFavorited: boolean;
   onDeleteRecord: React.MouseEventHandler<SVGSVGElement>;
-  onToggleFavorite: React.MouseEventHandler<SVGSVGElement>;
+  onToggleFavorite: React.MouseEventHandler<HTMLButtonElement>;
 }
 
 export function VideoCardPoster({
@@ -151,6 +152,8 @@ export function VideoCardPoster({
   onDeleteRecord,
   onToggleFavorite,
 }: VideoCardPosterProps) {
+  const displayYear = String(year ?? '').trim();
+
   return (
     <div
       className={`relative aspect-[2/3] overflow-hidden rounded-lg ${
@@ -206,14 +209,14 @@ export function VideoCardPoster({
             />
           )}
           {config.showHeart && from !== 'search' && (
-            <Heart
+            <FavoriteHeartButton
+              favorited={visibleFavorited}
               onClick={onToggleFavorite}
-              size={20}
-              className={`transition-all duration-300 ease-out ${
-                visibleFavorited
-                  ? 'fill-red-600 stroke-red-600'
-                  : 'fill-transparent stroke-white hover:stroke-red-400'
-              } hover:scale-[1.1]`}
+              unfavoritedIconClassName={
+                from === 'playrecord'
+                  ? 'fill-transparent stroke-white hover:fill-red-400 hover:stroke-red-400'
+                  : undefined
+              }
               style={noSelectStyle}
               onContextMenu={preventContextMenu}
             />
@@ -221,15 +224,18 @@ export function VideoCardPoster({
         </div>
       )}
 
-      {config.showYear && year && year !== 'unknown' && year.trim() !== '' && (
-        <div
-          className='absolute left-2 top-2 rounded bg-black/50 px-2 py-1 text-xs font-medium text-white shadow-sm backdrop-blur-sm transition-all duration-300 ease-out group-hover:opacity-90'
-          style={noSelectStyle}
-          onContextMenu={preventContextMenu}
-        >
-          {year}
-        </div>
-      )}
+      {config.showYear &&
+        displayYear &&
+        displayYear !== 'unknown' &&
+        displayYear !== '0' && (
+          <div
+            className='absolute left-2 top-2 rounded bg-black/50 px-2 py-1 text-xs font-medium text-white shadow-sm backdrop-blur-sm transition-all duration-300 ease-out group-hover:opacity-90'
+            style={noSelectStyle}
+            onContextMenu={preventContextMenu}
+          >
+            {displayYear}
+          </div>
+        )}
 
       {config.showRating && rate && (
         <div

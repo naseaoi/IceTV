@@ -81,9 +81,9 @@ function RecommendationSection({
   emptyMessage?: string;
 }) {
   return (
-    <section className='mb-4'>
+    <section className='mb-2'>
       <div className='mb-4 flex items-center justify-between'>
-        <h2 className='flex items-center gap-2 text-xl font-bold text-gray-800 dark:text-gray-200'>
+        <h2 className='flex items-center gap-2 text-lg font-bold text-gray-800 dark:text-gray-200 sm:text-xl'>
           <Icon className={iconClassName} />
           {title}
         </h2>
@@ -343,12 +343,12 @@ export default function HomeClient({
   return (
     <PageLayout>
       <div className='overflow-visible px-2 pb-2 pt-4 sm:px-10 sm:pt-8'>
-        <div className='mb-4 flex justify-center'>
+        <div className='mb-4 hidden justify-center md:flex'>
           <HomeMineSwitch active='home' />
         </div>
 
         <div className='mx-auto max-w-[95%]'>
-          <div className='-mb-8 sm:-mb-10'>
+          <div className='-mb-3 sm:-mb-6'>
             <ContinueWatching
               initialSkeletonCount={continueWatchingSkeletonCount}
             />

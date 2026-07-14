@@ -8,6 +8,7 @@ import PageLayout from '@/components/PageLayout';
 import SearchResultFilter from '@/components/SearchResultFilter';
 import SearchSuggestions from '@/components/SearchSuggestions';
 import VideoCard from '@/components/VideoCard';
+import MobileSearchFilterControls from '@/features/search/components/MobileSearchFilterControls';
 import SearchHistory from '@/features/search/components/SearchHistory';
 import { VirtualizedSearchGrid } from '@/features/search/components/VirtualizedSearchGrid';
 import {
@@ -18,14 +19,21 @@ import {
   clearSearchSnapshotCache,
   useSearchExecution,
 } from '@/features/search/hooks/useSearchExecution';
+import { normalizeSearchQueryInput } from '@/features/search/lib/searchQuery';
 import { getSearchHistory, subscribeToDataUpdates } from '@/lib/db.client';
 import { readAggregateSearch } from '@/lib/local-preferences';
 
 const SEARCH_VIEW_MODE_STORAGE_KEY = 'searchViewModeByQuery';
-const AGGREGATED_SEARCH_GRID_LAYOUT = {
-  mobileContentHeight: 32,
-  desktopContentHeight: 32,
+const DEFAULT_FILTER_STATE: FilterState = {
+  source: 'all',
+  title: 'all',
+  year: 'all',
+  yearOrder: 'none',
 };
+
+function createDefaultFilterState(): FilterState {
+  return { ...DEFAULT_FILTER_STATE };
+}
 
 function getSearchViewModeByQuery(query: string): 'agg' | 'all' | null {
   if (typeof window === 'undefined') {
@@ -74,27 +82,25 @@ export default function SearchPageClient() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const urlQuery = searchParams.get('q') || '';
-  const activeSearchQuery = useMemo(() => urlQuery.trim(), [urlQuery]);
+  const activeSearchQuery = useMemo(
+    () => normalizeSearchQueryInput(urlQuery),
+    [urlQuery],
+  );
 
   // 搜索历史 & UI 状态
   const [searchHistory, setSearchHistory] = useState<string[]>([]);
+  const [searchHistoryLoading, setSearchHistoryLoading] = useState(true);
   const [showBackToTop, setShowBackToTop] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [showSuggestions, setShowSuggestions] = useState(false);
 
   // 过滤器状态
-  const [filterAll, setFilterAll] = useState<FilterState>({
-    source: 'all',
-    title: 'all',
-    year: 'all',
-    yearOrder: 'none',
-  });
-  const [filterAgg, setFilterAgg] = useState<FilterState>({
-    source: 'all',
-    title: 'all',
-    year: 'all',
-    yearOrder: 'none',
-  });
+  const [filterAll, setFilterAll] = useState<FilterState>(() =>
+    createDefaultFilterState(),
+  );
+  const [filterAgg, setFilterAgg] = useState<FilterState>(() =>
+    createDefaultFilterState(),
+  );
 
   // 聚合开关
   const getDefaultAggregate = () => {
@@ -134,12 +140,31 @@ export default function SearchPageClient() {
       filterAgg,
       searchQuery: activeSearchQuery,
     });
+  const hasVisibleResults =
+    viewMode === 'agg'
+      ? filteredAggResults.length > 0
+      : filteredAllResults.length > 0;
 
   // 初始化：搜索历史、滚动监听、流式搜索设置
   useEffect(() => {
     !urlQuery && document.getElementById('searchInput')?.focus();
 
-    getSearchHistory().then(setSearchHistory);
+    let historyCancelled = false;
+    setSearchHistoryLoading(true);
+    getSearchHistory()
+      .then((history) => {
+        if (!historyCancelled) {
+          setSearchHistory(history);
+        }
+      })
+      .catch((error) => {
+        console.error('获取搜索历史失败:', error);
+      })
+      .finally(() => {
+        if (!historyCancelled) {
+          setSearchHistoryLoading(false);
+        }
+      });
 
     const unsubscribe = subscribeToDataUpdates(
       'searchHistoryUpdated',
@@ -172,6 +197,7 @@ export default function SearchPageClient() {
     window.addEventListener('scroll', handleScroll, { passive: true });
 
     return () => {
+      historyCancelled = true;
       unsubscribe();
       window.removeEventListener('scroll', handleScroll);
       if (frameId !== null) {
@@ -182,17 +208,26 @@ export default function SearchPageClient() {
 
   // 同步搜索参数
   useEffect(() => {
-    if (urlQuery) {
-      setSearchQuery(urlQuery);
+    if (activeSearchQuery) {
+      setSearchQuery(activeSearchQuery);
       setShowSuggestions(false);
     } else {
       setShowSuggestions(false);
     }
-  }, [urlQuery]);
+  }, [activeSearchQuery]);
+
+  useEffect(() => {
+    if (!activeSearchQuery) {
+      return;
+    }
+
+    setFilterAll(createDefaultFilterState());
+    setFilterAgg(createDefaultFilterState());
+  }, [activeSearchQuery]);
 
   // 恢复视图模式
   useEffect(() => {
-    const trimmed = urlQuery.trim();
+    const trimmed = activeSearchQuery;
     if (!trimmed) {
       return;
     }
@@ -203,16 +238,16 @@ export default function SearchPageClient() {
         cachedMode !== currentMode ? cachedMode : currentMode,
       );
     }
-  }, [urlQuery]);
+  }, [activeSearchQuery]);
 
   // 保存视图模式
   useEffect(() => {
-    const trimmed = urlQuery.trim();
+    const trimmed = activeSearchQuery;
     if (!trimmed) {
       return;
     }
     setSearchViewModeByQuery(trimmed, viewMode);
-  }, [urlQuery, viewMode]);
+  }, [activeSearchQuery, viewMode]);
 
   const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const value = e.target.value;
@@ -228,7 +263,7 @@ export default function SearchPageClient() {
 
   const handleSearch = (e: React.FormEvent) => {
     e.preventDefault();
-    const trimmed = searchQuery.trim().replace(/\s+/g, ' ');
+    const trimmed = normalizeSearchQueryInput(searchQuery);
     if (!trimmed) return;
 
     setSearchQuery(trimmed);
@@ -238,10 +273,13 @@ export default function SearchPageClient() {
   };
 
   const handleSuggestionSelect = (suggestion: string) => {
-    setSearchQuery(suggestion);
+    const trimmed = normalizeSearchQueryInput(suggestion);
+    if (!trimmed) return;
+
+    setSearchQuery(trimmed);
     setShowSuggestions(false);
 
-    router.push(`/search?q=${encodeURIComponent(suggestion)}`);
+    router.push(`/search?q=${encodeURIComponent(trimmed)}`);
   };
 
   const scrollToTop = () => {
@@ -254,58 +292,63 @@ export default function SearchPageClient() {
 
   return (
     <PageLayout activePath='/search'>
-      <div className='overflow-visible px-4 py-4 sm:px-10 sm:py-8'>
-        <div className={`${showResults ? 'mb-8 pt-0' : 'pt-[20vh]'}`}>
-          <form onSubmit={handleSearch} className='mx-auto w-full max-w-2xl'>
-            <div className='relative'>
-              <Search className='absolute left-3 top-1/2 h-5 w-5 -translate-y-1/2 text-gray-400 dark:text-gray-500' />
-              <input
-                id='searchInput'
-                type='text'
-                value={searchQuery}
-                onChange={handleInputChange}
-                onFocus={handleInputFocus}
-                placeholder='搜索电影、电视剧...'
-                autoComplete='off'
-                className='h-12 w-full rounded-lg border border-gray-200/50 bg-gray-50/80 py-3 pl-10 pr-12 text-sm text-gray-700 placeholder-gray-400 shadow-sm focus:bg-white focus:outline-none focus:ring-2 focus:ring-green-400 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-300 dark:placeholder-gray-500 dark:focus:bg-gray-700'
-              />
+      <div className='overflow-visible px-4 pb-4 pt-0 sm:px-10 sm:py-8'>
+        <div className={`${showResults ? 'mb-8 pt-0' : 'pt-0 md:pt-[20vh]'}`}>
+          <div
+            className='sticky top-0 z-[550] -mx-4 border-b border-gray-200/50 bg-white/80 px-4 py-2 backdrop-blur-xl dark:border-gray-700/50 dark:bg-gray-900/80 md:static md:mx-0 md:border-0 md:bg-transparent md:px-0 md:py-0 md:backdrop-blur-none md:dark:bg-transparent'
+            style={{ paddingTop: 'max(0.5rem, env(safe-area-inset-top))' }}
+          >
+            <form onSubmit={handleSearch} className='mx-auto w-full max-w-2xl'>
+              <div className='relative'>
+                <Search className='absolute left-3 top-1/2 h-5 w-5 -translate-y-1/2 text-gray-400 dark:text-gray-500' />
+                <input
+                  id='searchInput'
+                  type='text'
+                  value={searchQuery}
+                  onChange={handleInputChange}
+                  onFocus={handleInputFocus}
+                  placeholder='搜索电影、电视剧...'
+                  autoComplete='off'
+                  className='h-12 w-full rounded-lg border border-gray-200/50 bg-gray-50/80 py-3 pl-10 pr-12 text-sm text-gray-700 placeholder-gray-400 shadow-sm focus:bg-white focus:outline-none focus:ring-2 focus:ring-green-400 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-300 dark:placeholder-gray-500 dark:focus:bg-gray-700'
+                />
 
-              {searchQuery && (
-                <button
-                  type='button'
-                  onClick={() => {
-                    clearSearchSnapshotCache(searchQuery);
-                    setSearchQuery('');
+                {searchQuery && (
+                  <button
+                    type='button'
+                    onClick={() => {
+                      clearSearchSnapshotCache(searchQuery);
+                      setSearchQuery('');
+                      setShowSuggestions(false);
+                      setShowResults(false);
+                      setIsLoading(false);
+                      router.replace('/search');
+                      document.getElementById('searchInput')?.focus();
+                    }}
+                    className='absolute right-3 top-1/2 h-5 w-5 -translate-y-1/2 text-gray-400 transition-colors hover:text-gray-600 dark:text-gray-500 dark:hover:text-gray-300'
+                    aria-label='清除搜索内容'
+                  >
+                    <X className='h-5 w-5' />
+                  </button>
+                )}
+
+                <SearchSuggestions
+                  query={searchQuery}
+                  isVisible={showSuggestions}
+                  onSelect={handleSuggestionSelect}
+                  onClose={() => setShowSuggestions(false)}
+                  onEnterKey={() => {
+                    const trimmed = normalizeSearchQueryInput(searchQuery);
+                    if (!trimmed) return;
+
+                    setSearchQuery(trimmed);
                     setShowSuggestions(false);
-                    setShowResults(false);
-                    setIsLoading(false);
-                    router.replace('/search');
-                    document.getElementById('searchInput')?.focus();
+
+                    router.push(`/search?q=${encodeURIComponent(trimmed)}`);
                   }}
-                  className='absolute right-3 top-1/2 h-5 w-5 -translate-y-1/2 text-gray-400 transition-colors hover:text-gray-600 dark:text-gray-500 dark:hover:text-gray-300'
-                  aria-label='清除搜索内容'
-                >
-                  <X className='h-5 w-5' />
-                </button>
-              )}
-
-              <SearchSuggestions
-                query={searchQuery}
-                isVisible={showSuggestions}
-                onSelect={handleSuggestionSelect}
-                onClose={() => setShowSuggestions(false)}
-                onEnterKey={() => {
-                  const trimmed = searchQuery.trim().replace(/\s+/g, ' ');
-                  if (!trimmed) return;
-
-                  setSearchQuery(trimmed);
-                  setShowSuggestions(false);
-
-                  router.push(`/search?q=${encodeURIComponent(trimmed)}`);
-                }}
-              />
-            </div>
-          </form>
+                />
+              </div>
+            </form>
+          </div>
 
           {!showResults && (
             <div className='mx-auto mt-8 w-full max-w-2xl'>
@@ -313,6 +356,7 @@ export default function SearchPageClient() {
                 <SearchHistory
                   searchHistory={searchHistory}
                   setSearchQuery={setSearchQuery}
+                  loading={searchHistoryLoading}
                 />
               </div>
             </div>
@@ -337,7 +381,31 @@ export default function SearchPageClient() {
                   )}
                 </h2>
               </div>
-              <div className='mb-8 flex items-center justify-between gap-3'>
+              <div className='mb-4 sm:hidden'>
+                <MobileSearchFilterControls
+                  resultCount={
+                    viewMode === 'agg'
+                      ? filteredAggResults.length
+                      : filteredAllResults.length
+                  }
+                  categories={
+                    viewMode === 'agg'
+                      ? filterOptions.categoriesAgg
+                      : filterOptions.categoriesAll
+                  }
+                  values={viewMode === 'agg' ? filterAgg : filterAll}
+                  onChange={(v) =>
+                    viewMode === 'agg'
+                      ? setFilterAgg(v as FilterState)
+                      : setFilterAll(v as FilterState)
+                  }
+                  aggregate={viewMode === 'agg'}
+                  onAggregateChange={(aggregate) =>
+                    setViewMode(aggregate ? 'agg' : 'all')
+                  }
+                />
+              </div>
+              <div className='mb-8 hidden items-center justify-between gap-3 sm:flex'>
                 <div className='min-w-0 flex-1'>
                   {viewMode === 'agg' ? (
                     <SearchResultFilter
@@ -381,6 +449,10 @@ export default function SearchPageClient() {
                     未找到相关结果
                   </div>
                 )
+              ) : !hasVisibleResults ? (
+                <div className='py-8 text-center text-gray-500 dark:text-gray-400'>
+                  当前筛选无结果
+                </div>
               ) : (
                 <>
                   {viewMode === 'agg' ? (
@@ -388,27 +460,34 @@ export default function SearchPageClient() {
                       key='search-results-agg'
                       items={filteredAggResults}
                       getKey={(item) => `agg-${item.mapKey}`}
-                      layout={AGGREGATED_SEARCH_GRID_LAYOUT}
-                      renderItem={(item) => (
-                        <VideoCard
-                          ref={getGroupRef(item.mapKey)}
-                          from='search'
-                          isAggregate={true}
-                          title={item.title}
-                          poster={item.poster}
-                          year={item.year}
-                          episodes={item.stats.episodes}
-                          source_names={item.stats.source_names}
-                          douban_id={item.stats.douban_id}
-                          query={
-                            activeSearchQuery !== item.title
-                              ? activeSearchQuery
-                              : ''
-                          }
-                          type={item.type}
-                          aggregateGroup={item.group}
-                        />
-                      )}
+                      renderItem={(item) => {
+                        const singleSourceItem =
+                          item.group.length === 1 ? item.group[0] : null;
+
+                        return (
+                          <VideoCard
+                            ref={getGroupRef(item.mapKey)}
+                            id={singleSourceItem?.id}
+                            source={singleSourceItem?.source}
+                            source_name={singleSourceItem?.source_name}
+                            from='search'
+                            isAggregate={true}
+                            title={item.title}
+                            poster={item.poster}
+                            year={item.year}
+                            episodes={item.stats.episodes}
+                            source_names={item.stats.source_names}
+                            douban_id={item.stats.douban_id}
+                            query={
+                              activeSearchQuery !== item.title
+                                ? activeSearchQuery
+                                : ''
+                            }
+                            type={item.type}
+                            aggregateGroup={item.group}
+                          />
+                        );
+                      }}
                     />
                   ) : (
                     <VirtualizedSearchGrid

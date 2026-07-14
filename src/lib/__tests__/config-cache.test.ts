@@ -1,4 +1,4 @@
-﻿/** @jest-environment node */
+/** @jest-environment node */
 
 import { DEFAULT_RUNTIME_PARAMS } from '@/lib/runtime-params';
 import { AdminConfig } from '@/types/admin';
@@ -10,12 +10,13 @@ const baseConfig: AdminConfig = {
     SiteName: 'IceTV',
     SiteIcon: '',
     Announcement: '',
+    FooterText: '',
     EnableLiveEntry: false,
     DefaultAggregateSearch: true,
     EnableOptimization: true,
-    AutoSwitchSourceOnTimeout: false,
     LiveDirectConnect: false,
     ...DEFAULT_RUNTIME_PARAMS,
+    SourceCoverProxyMode: 'auto',
     SearchDownstreamMaxPage: 5,
     SiteInterfaceCacheTime: 300,
     DoubanProxyType: 'direct',

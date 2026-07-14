@@ -1,6 +1,6 @@
 'use client';
 
-import { useRouter, useSearchParams } from 'next/navigation';
+import { useSearchParams } from 'next/navigation';
 import { useCallback, useEffect, useRef, useState } from 'react';
 
 import { PlayMainContent } from '@/features/play/components/PlayMainContent';
@@ -10,7 +10,6 @@ import {
 } from '@/features/play/components/PlayStateViews';
 import { useArtPlayer } from '@/features/play/hooks/useArtPlayer';
 import { useAuthRecovery } from '@/features/play/hooks/useAuthRecovery';
-import { useAutoSwitchOnTimeoutSetting } from '@/features/play/hooks/useAutoSwitchOnTimeoutSetting';
 import { useEpisodeSwitch } from '@/features/play/hooks/useEpisodeSwitch';
 import { usePlayFavorite } from '@/features/play/hooks/usePlayFavorite';
 import { updateVideoUrl, usePlayInit } from '@/features/play/hooks/usePlayInit';
@@ -25,8 +24,8 @@ import {
 } from '@/features/play/lib/lazyEpisode';
 import { writePlayerInfo } from '@/features/play/lib/sourceProbeStore';
 import { usePlaybackStatsReporter } from '@/features/playback-stats/hooks/usePlaybackStatsReporter';
+import { useBackNavigation } from '@/hooks/useBackNavigation';
 import { usePlayerKeyboard } from '@/hooks/usePlayerKeyboard';
-import { clearSourceFailure } from '@/lib/failed-source-cooldown';
 import { isLazyEpisodeUrl } from '@/lib/lazy-episodes';
 import {
   destroyManagedHls,
@@ -39,9 +38,22 @@ import { SearchResult } from '@/lib/types';
 
 const DIRECT_STARTUP_LOADING_DELAY_MS = 140;
 
+function readInitialAggregateGroupLength() {
+  if (typeof window === 'undefined') return 0;
+
+  try {
+    const raw = window.sessionStorage.getItem('aggregate_group');
+    if (!raw) return 0;
+    const parsed = JSON.parse(raw) as unknown;
+    return Array.isArray(parsed) ? parsed.length : 0;
+  } catch {
+    return 0;
+  }
+}
+
 export function PlayPageClient() {
-  const router = useRouter();
   const searchParams = useSearchParams();
+  const goBack = useBackNavigation('/');
 
   useEffect(() => {
     preloadProxyModes();
@@ -109,12 +121,12 @@ export function PlayPageClient() {
     sourceChangeRequestIdRef,
     pendingSourceSwitchCleanupRef,
     sourceSwitchEpisodeAnchorRef,
-    failedSourcesRef,
-    autoFallbackInProgressRef,
     playbackRequestModeRef,
     optimizationEnabled,
     precomputedVideoInfo,
     setPrecomputedVideoInfo,
+    sourceRecommendation,
+    setSourceRecommendation,
     clearTargetEpisodeProgressRef,
     isEpisodeSelectorCollapsed,
     setIsEpisodeSelectorCollapsed,
@@ -138,14 +150,30 @@ export function PlayPageClient() {
   } = state;
 
   const totalEpisodes = detail?.episodes?.length || 0;
+  const [isSingleAggregateStartup] = useState(
+    () =>
+      searchParams.get('singleSource') === 'true' ||
+      (needPreferRef.current && readInitialAggregateGroupLength() === 1),
+  );
+  const [isDirectStartup] = useState(
+    () => searchParams.get('directStart') === 'true',
+  );
+  const shouldHideStartupLoading = isSingleAggregateStartup || isDirectStartup;
   const canDelayStartupLoading =
-    !!currentSource && !!currentId && !needPreferRef.current;
+    (!!currentSource && !!currentId && !needPreferRef.current) ||
+    shouldHideStartupLoading;
   const [showStartupLoading, setShowStartupLoading] = useState(false);
-
-  const autoSwitchSourceOnTimeout = useAutoSwitchOnTimeoutSetting();
+  const dismissSourceRecommendation = useCallback(() => {
+    setSourceRecommendation(null);
+  }, [setSourceRecommendation]);
 
   useEffect(() => {
     if (!loading) {
+      setShowStartupLoading(false);
+      return;
+    }
+
+    if (shouldHideStartupLoading) {
       setShowStartupLoading(false);
       return;
     }
@@ -161,7 +189,7 @@ export function PlayPageClient() {
     }, DIRECT_STARTUP_LOADING_DELAY_MS);
 
     return () => window.clearTimeout(timer);
-  }, [loading, canDelayStartupLoading]);
+  }, [loading, canDelayStartupLoading, shouldHideStartupLoading]);
 
   const cleanupPlayer = useCallback(() => {
     const player = artPlayerRef.current;
@@ -226,6 +254,7 @@ export function PlayPageClient() {
     setSourceSearchLoading,
     setSourceSearchError,
     setPrecomputedVideoInfo,
+    setSourceRecommendation,
   });
 
   const {
@@ -327,8 +356,6 @@ export function PlayPageClient() {
     finalizePendingSourceSwitchCleanup,
   } = useSourceSwitch({
     availableSources,
-    precomputedVideoInfo,
-    autoSwitchSourceOnTimeout,
     currentEpisodeIndex,
     artPlayerRef,
     currentSourceRef,
@@ -342,8 +369,6 @@ export function PlayPageClient() {
     clearTargetEpisodeProgressRef,
     sourceSwitchEpisodeAnchorRef,
     playbackRequestModeRef,
-    failedSourcesRef,
-    autoFallbackInProgressRef,
     pendingSourceSwitchCleanupRef,
     sourceChangeRequestIdRef,
     setError,
@@ -431,16 +456,13 @@ export function PlayPageClient() {
       .catch(() => {
         if (cancelled) return;
         handleLoadingTimeout();
-        if (!autoSwitchSourceOnTimeout) {
-          setRealtimeLoadSpeed('播放地址解析失败');
-        }
+        setRealtimeLoadSpeed('播放地址解析失败');
       });
 
     return () => {
       cancelled = true;
     };
   }, [
-    autoSwitchSourceOnTimeout,
     currentEpisodeIndex,
     detail,
     handleLoadingTimeout,
@@ -519,9 +541,6 @@ export function PlayPageClient() {
         return;
       }
 
-      autoFallbackInProgressRef.current = false;
-      failedSourcesRef.current = new Set();
-      clearSourceFailure(`${activeSource}-${activeId}`);
       sourceSwitchEpisodeAnchorRef.current = null;
       clearTargetEpisodeProgressRef.current = false;
 
@@ -530,8 +549,6 @@ export function PlayPageClient() {
       finalizePendingSourceSwitchCleanup,
       currentSourceRef,
       currentIdRef,
-      autoFallbackInProgressRef,
-      failedSourcesRef,
       sourceSwitchEpisodeAnchorRef,
       clearTargetEpisodeProgressRef,
     ]),
@@ -616,6 +633,8 @@ export function PlayPageClient() {
       sourceSearchLoading={sourceSearchLoading}
       sourceSearchError={sourceSearchError}
       precomputedVideoInfo={precomputedVideoInfo}
+      sourceRecommendation={sourceRecommendation}
+      onDismissSourceRecommendation={dismissSourceRecommendation}
       videoYear={videoYear}
       favorited={favorited}
       onToggleFavorite={handleToggleFavorite}
@@ -630,13 +649,17 @@ export function PlayPageClient() {
   );
 
   if (loading) {
+    if (shouldHideStartupLoading) {
+      return renderMainContent(null);
+    }
+
     if (!showStartupLoading) return null;
 
     return (
       <PlayLoadingView
         loadingStage={loadingStage}
         loadingMessage={loadingMessage}
-        onBack={() => router.back()}
+        onBack={goBack}
       />
     );
   }
@@ -648,7 +671,7 @@ export function PlayPageClient() {
     return (
       <PlayErrorView
         error={error}
-        onBack={() => window.history.back()}
+        onBack={goBack}
         onRetry={() => window.location.reload()}
       />
     );

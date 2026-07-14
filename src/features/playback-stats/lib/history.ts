@@ -38,6 +38,14 @@ export function getPlaybackSessionMergeKey(session: PlaybackSession): string {
   return `${normalizePlaybackSourceKey(session)}+${titleKey}`;
 }
 
+export function filterPlaybackHistorySessions(
+  sessions: PlaybackSession[],
+): PlaybackSession[] {
+  return sessions.filter(
+    (session) => Math.max(0, session.watch_seconds || 0) > 0,
+  );
+}
+
 export function dedupePlaybackSessionsByTitle(
   sessions: PlaybackSession[],
   options?: number | DedupePlaybackSessionsOptions,

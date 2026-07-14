@@ -8,7 +8,7 @@ import {
   useState,
 } from 'react';
 
-import { GetBangumiCalendarData } from '@/features/bangumi/lib/bangumi.client';
+import { GetBangumiCalendarDataWithMeta } from '@/features/bangumi/lib/bangumi.client';
 import { selectBangumiCardCover } from '@/features/bangumi/lib/bangumi-normalize';
 import {
   getDoubanCategories,
@@ -200,6 +200,9 @@ export function primeDefaultDoubanFeedViewCache(
 export function useDoubanFeed(type: string) {
   const [doubanData, setDoubanData] = useState<DoubanItem[]>([]);
   const [loading, setLoading] = useState(false);
+  const [bangumiCalendarError, setBangumiCalendarError] = useState<
+    string | null
+  >(null);
   const [currentPage, setCurrentPage] = useState(0);
   const [hasMore, setHasMore] = useState(true);
   const [isLoadingMore, setIsLoadingMore] = useState(false);
@@ -223,6 +226,7 @@ export function useDoubanFeed(type: string) {
   const [selectedWeekday, setSelectedWeekday] = useState<string>(() =>
     getCurrentWeekday(),
   );
+  const selectedWeekdayRef = useRef(selectedWeekday);
 
   const currentParamsRef = useRef<FeedSnapshot>({
     type: '',
@@ -241,6 +245,7 @@ export function useDoubanFeed(type: string) {
   }, []);
 
   useEffect(() => {
+    selectedWeekdayRef.current = selectedWeekday;
     currentParamsRef.current = {
       type,
       primarySelection,
@@ -305,7 +310,7 @@ export function useDoubanFeed(type: string) {
     }
 
     let nextMultiLevelValues = { ...DEFAULT_MULTI_LEVEL };
-    let nextSelectedWeekday = selectedWeekday;
+    let nextSelectedWeekday = selectedWeekdayRef.current;
 
     const restoredSnapshot = readLastFeedSnapshot(type);
     const requestSnapshot = restoredSnapshot ?? {
@@ -313,7 +318,7 @@ export function useDoubanFeed(type: string) {
       primarySelection: nextPrimarySelection,
       secondarySelection: nextSecondarySelection,
       multiLevelSelection: nextMultiLevelValues,
-      selectedWeekday,
+      selectedWeekday: selectedWeekdayRef.current,
       currentPage: 0,
     };
 
@@ -350,7 +355,7 @@ export function useDoubanFeed(type: string) {
     }, 50);
 
     return () => clearTimeout(timer);
-  }, [type, customCategories, selectedWeekday]);
+  }, [type, customCategories]);
 
   const getRequestParams = useCallback(
     (pageStart: number) => {
@@ -421,7 +426,8 @@ export function useDoubanFeed(type: string) {
           throw new Error('没有找到对应的分类');
         }
       } else if (type === 'anime' && primarySelection === '每日放送') {
-        const calendarData = await GetBangumiCalendarData();
+        const calendarResult = await GetBangumiCalendarDataWithMeta();
+        const calendarData = calendarResult.data;
         const weekdayData = calendarData.find(
           (item) => item.weekday.en === selectedWeekday,
         );
@@ -437,6 +443,13 @@ export function useDoubanFeed(type: string) {
               year: item.air_date?.split('-')?.[0] || '',
             })),
           };
+          if (calendarResult.usedStaleFallback) {
+            setBangumiCalendarError(
+              'Bangumi 番剧数据获取失败，当前显示的是本地缓存。',
+            );
+          } else {
+            setBangumiCalendarError(null);
+          }
         } else {
           throw new Error('没有找到对应的日期');
         }
@@ -488,6 +501,9 @@ export function useDoubanFeed(type: string) {
       console.error(err);
       const currentSnapshot = { ...currentParamsRef.current };
       if (isSnapshotEqual(requestSnapshot, currentSnapshot)) {
+        if (type === 'anime' && primarySelection === '每日放送') {
+          setBangumiCalendarError('Bangumi 番剧数据获取失败，请稍后重试。');
+        }
         setCurrentPage(0);
         setHasMore(false);
         setIsLoadingMore(false);
@@ -715,8 +731,21 @@ export function useDoubanFeed(type: string) {
     [multiLevelValues],
   );
 
-  const handleWeekdayChange = useCallback((weekday: string) => {
-    setSelectedWeekday(weekday);
+  const handleWeekdayChange = useCallback(
+    (weekday: string) => {
+      if (weekday === selectedWeekday) return;
+      setLoading(true);
+      setCurrentPage(0);
+      setDoubanData([]);
+      setHasMore(true);
+      setIsLoadingMore(false);
+      setSelectedWeekday(weekday);
+    },
+    [selectedWeekday],
+  );
+
+  const clearBangumiCalendarError = useCallback(() => {
+    setBangumiCalendarError(null);
   }, []);
 
   const loadNextPage = useCallback(() => {
@@ -731,11 +760,14 @@ export function useDoubanFeed(type: string) {
     isLoadingMore,
     primarySelection,
     secondarySelection,
+    selectedWeekday,
     customCategories,
     handlePrimaryChange,
     handleSecondaryChange,
     handleMultiLevelChange,
     handleWeekdayChange,
     loadNextPage,
+    bangumiCalendarError,
+    clearBangumiCalendarError,
   };
 }

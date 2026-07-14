@@ -18,6 +18,7 @@ export interface ProbeEntry {
 }
 
 const PROBE_TTL_MS = 10 * 60_000;
+const PROBE_CONCURRENCY_LIMIT = 4;
 
 interface StoreState {
   entries: Map<string, ProbeEntry>;
@@ -59,6 +60,8 @@ export function writePlayerInfo(key: string, info: VideoInfo) {
 }
 
 const inflight = new Map<string, Promise<void>>();
+const probeQueue: Array<() => void> = [];
+let activeProbeCount = 0;
 
 interface ProbeOptions {
   force?: boolean;
@@ -117,6 +120,28 @@ export async function getOrProbe(
   return task;
 }
 
+function acquireProbeSlot(): Promise<() => void> {
+  return new Promise((resolve) => {
+    const grant = () => {
+      activeProbeCount += 1;
+      let released = false;
+      resolve(() => {
+        if (released) return;
+        released = true;
+        activeProbeCount = Math.max(0, activeProbeCount - 1);
+        probeQueue.shift()?.();
+      });
+    };
+
+    if (activeProbeCount < PROBE_CONCURRENCY_LIMIT) {
+      grant();
+      return;
+    }
+
+    probeQueue.push(grant);
+  });
+}
+
 async function runProbe(
   key: string,
   sourceInput: SearchResult,
@@ -135,73 +160,79 @@ async function runProbe(
     previousInfo,
   });
 
-  let resolved = sourceInput;
-  if (!resolved.episodes || resolved.episodes.length === 0) {
-    try {
-      const res = await fetch(
-        `/api/detail?source=${resolved.source}&id=${resolved.id}`,
-      );
-      if (res.ok) {
-        const full = (await res.json()) as SearchResult;
-        if (full.episodes && full.episodes.length > 0) {
-          resolved = full;
-          options.onDetailFetched?.(full);
-        }
-      }
-    } catch {
-      /* 忽略 */
-    }
-  }
-
-  if (!resolved.episodes || resolved.episodes.length === 0) {
-    setEntry(key, {
-      info: {
-        quality: '未知',
-        loadSpeed: '未知',
-        pingTime: 0,
-        hasError: true,
-      },
-      ts: Date.now(),
-      source: 'probe',
-    });
-    return;
-  }
+  const releaseProbeSlot = await acquireProbeSlot();
 
   try {
-    const proxyModes = await getProxyModes();
-    let probeEpisodeUrl = resolveRequestedProbeEpisodeUrl(
-      resolved,
-      options.episodeIndex,
-    );
-    // 懒地址源只解析第 1 集用于测速
-    if (probeEpisodeUrl && isLazyEpisodeUrl(probeEpisodeUrl)) {
-      probeEpisodeUrl = resolved.episodes[0] || probeEpisodeUrl;
+    let resolved = sourceInput;
+    if (!resolved.episodes || resolved.episodes.length === 0) {
+      try {
+        const res = await fetch(
+          `/api/detail?source=${resolved.source}&id=${resolved.id}`,
+        );
+        if (res.ok) {
+          const full = (await res.json()) as SearchResult;
+          if (full.episodes && full.episodes.length > 0) {
+            resolved = full;
+            options.onDetailFetched?.(full);
+          }
+        }
+      } catch {
+        /* 忽略 */
+      }
     }
-    if (!probeEpisodeUrl) {
-      throw new Error('Requested episode is unavailable for probe');
+
+    if (!resolved.episodes || resolved.episodes.length === 0) {
+      setEntry(key, {
+        info: {
+          quality: '未知',
+          loadSpeed: '未知',
+          pingTime: 0,
+          hasError: true,
+        },
+        ts: Date.now(),
+        source: 'probe',
+      });
+      return;
     }
-    const useProxy = shouldUseServerProxy(
-      resolved.source,
-      probeEpisodeUrl,
-      proxyModes,
-    );
-    const info = await probeVodEpisodeUrl(
-      probeEpisodeUrl,
-      useProxy,
-      resolved.source,
-    );
-    setEntry(key, { info, ts: Date.now(), source: 'probe' });
-  } catch {
-    setEntry(key, {
-      info: {
-        quality: '错误',
-        loadSpeed: '未知',
-        pingTime: 0,
-        hasError: true,
-      },
-      ts: Date.now(),
-      source: 'probe',
-    });
+
+    try {
+      const proxyModes = await getProxyModes();
+      let probeEpisodeUrl = resolveRequestedProbeEpisodeUrl(
+        resolved,
+        options.episodeIndex,
+      );
+      // 懒地址源只解析第 1 集用于测速
+      if (probeEpisodeUrl && isLazyEpisodeUrl(probeEpisodeUrl)) {
+        probeEpisodeUrl = resolved.episodes[0] || probeEpisodeUrl;
+      }
+      if (!probeEpisodeUrl) {
+        throw new Error('Requested episode is unavailable for probe');
+      }
+      const useProxy = shouldUseServerProxy(
+        resolved.source,
+        probeEpisodeUrl,
+        proxyModes,
+      );
+      const info = await probeVodEpisodeUrl(
+        probeEpisodeUrl,
+        useProxy,
+        resolved.source,
+      );
+      setEntry(key, { info, ts: Date.now(), source: 'probe' });
+    } catch {
+      setEntry(key, {
+        info: {
+          quality: '错误',
+          loadSpeed: '未知',
+          pingTime: 0,
+          hasError: true,
+        },
+        ts: Date.now(),
+        source: 'probe',
+      });
+    }
+  } finally {
+    releaseProbeSlot();
   }
 }
 

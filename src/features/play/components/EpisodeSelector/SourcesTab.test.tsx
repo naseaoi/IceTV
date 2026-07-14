@@ -1,6 +1,7 @@
 import {
   getCompletedProbeInfo,
   sortSourcesForDisplay,
+  VIDEO_INFO_BATCH_SIZE,
 } from '@/features/play/components/EpisodeSelector/SourcesTab';
 import type {
   ProbeEntry,
@@ -36,6 +37,10 @@ function createEntry(
 }
 
 describe('SourcesTab source sorting', () => {
+  it('换源测速一次并发 4 个源站', () => {
+    expect(VIDEO_INFO_BATCH_SIZE).toBe(4);
+  });
+
   it('pending 条目使用上一次完成结果参与排序', () => {
     const previousFailure: VideoInfo = {
       quality: '错误',
@@ -89,7 +94,6 @@ describe('SourcesTab source sorting', () => {
     const sorted = sortSourcesForDisplay(
       [failedSource, successSource],
       snapshot,
-      new Map(),
     );
 
     expect(sorted.map((source) => source.id)).toEqual(['success', 'failed']);

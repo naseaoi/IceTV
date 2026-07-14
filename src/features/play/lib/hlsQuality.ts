@@ -1,18 +1,14 @@
 import type Artplayer from 'artplayer';
 import type { MutableRefObject } from 'react';
 
-import {
-  readPreferredQualityHeight,
-  readPreferredQualityPreference,
-  writePreferredQualityHeight,
-} from '@/lib/local-preferences';
+import type { PreferredQualityPreference } from '@/lib/local-preferences';
 
-interface HlsLevelLike {
+export interface HlsLevelLike {
   height?: number;
   bitrate?: number;
 }
 
-interface HlsQualityController {
+export interface HlsQualityController {
   levels?: HlsLevelLike[];
   currentLevel: number;
   startLevel: number;
@@ -132,10 +128,7 @@ export function applyAutoQualityLevel(
   );
   hls.__icetvManualQualityLocked = false;
   trySetHlsQualityValue(hls, 'startLevel', startLevelIndex ?? -1);
-  trySetHlsQualityValue(hls, 'currentLevel', -1);
   trySetHlsQualityValue(hls, 'loadLevel', -1);
-  trySetHlsQualityValue(hls, 'nextLevel', -1);
-  trySetHlsQualityValue(hls, 'nextLoadLevel', -1);
   if (startLevelIndex !== null) {
     trySetHlsQualityValue(hls, 'nextAutoLevel', startLevelIndex);
   }
@@ -214,27 +207,6 @@ export function buildQualityOptions(levels: HlsLevelLike[]): QualityOption[] {
   return options;
 }
 
-export function findPreferredLevelIndex(levels: HlsLevelLike[]): number | null {
-  const preferredHeight = readPreferredQualityHeight();
-  if (!preferredHeight || levels.length === 0) {
-    return null;
-  }
-
-  let bestIndex = -1;
-  let bestDelta = Number.POSITIVE_INFINITY;
-  let bestBitrate = -1;
-  levels.forEach((level, index) => {
-    const delta = Math.abs((level.height || 0) - preferredHeight);
-    const bitrate = level.bitrate || 0;
-    if (delta < bestDelta || (delta === bestDelta && bitrate > bestBitrate)) {
-      bestDelta = delta;
-      bestIndex = index;
-      bestBitrate = bitrate;
-    }
-  });
-  return bestIndex >= 0 ? bestIndex : null;
-}
-
 export function findLevelIndexByHeight(
   levels: HlsLevelLike[],
   preferredHeight: number,
@@ -270,9 +242,17 @@ interface QualitySelectorItem {
   height: number;
 }
 
+export type HlsQualityControlOptions = {
+  preference: PreferredQualityPreference;
+  defaultLevelIndex: number | null;
+  autoStartLevelIndex: number | null;
+  onPreferenceChange: (height: number | null) => void;
+};
+
 function registerQualityControl(
   art: Artplayer,
   hls: HlsQualityController,
+  controlOptions: HlsQualityControlOptions,
   forceAuto = false,
 ): void {
   const levels = hls.levels || [];
@@ -288,13 +268,13 @@ function registerQualityControl(
   }
 
   const options = buildQualityOptions(levels);
-  const qualityPreference = readPreferredQualityPreference();
+  const qualityPreference = controlOptions.preference;
   const preferredIndex = forceAuto
     ? null
     : qualityPreference.mode === 'manual'
       ? findLevelIndexByHeight(levels, qualityPreference.height)
       : qualityPreference.mode === 'default'
-        ? (hls.__icetvDefaultQualityLevel ?? findHighestLevelIndex(levels))
+        ? controlOptions.defaultLevelIndex
         : null;
   const activeOption =
     preferredIndex === null
@@ -325,13 +305,12 @@ function registerQualityControl(
     selector,
     onSelect(item: QualitySelectorItem) {
       if (item.levelIndex < 0) {
-        writePreferredQualityHeight(null);
+        controlOptions.onPreferenceChange(null);
         applyAutoQualityLevel(hls, {
-          startLevelIndex:
-            hls.__icetvDefaultQualityLevel ?? findHighestLevelIndex(levels),
+          startLevelIndex: controlOptions.autoStartLevelIndex,
         });
       } else {
-        writePreferredQualityHeight(item.height);
+        controlOptions.onPreferenceChange(item.height);
         applyManualQualityLevel(hls, item.levelIndex, { userSelected: true });
       }
       art.notice.show = `画质: ${item.html}`;
@@ -349,28 +328,74 @@ function registerQualityControl(
 export function markQualityControlTemporaryAuto(
   artPlayerRef: MutableRefObject<Artplayer | null>,
   hls: HlsQualityController,
+  controlOptions: HlsQualityControlOptions,
 ): void {
   const art = artPlayerRef.current;
   if (!art) {
     return;
   }
-  registerQualityControl(art, hls, true);
+  registerQualityControl(art, hls, controlOptions, true);
+}
+
+export function removeQualityControlWhenReady(
+  artPlayerRef: MutableRefObject<Artplayer | null>,
+  attempts = 10,
+): () => void {
+  let disposed = false;
+  let retryTimer: ReturnType<typeof setTimeout> | null = null;
+  const run = (remainingAttempts: number) => {
+    if (disposed) {
+      return;
+    }
+    const art = artPlayerRef.current;
+    if (art) {
+      const controlApi = art.controls as unknown as QualityControlApi;
+      try {
+        controlApi.remove(QUALITY_CONTROL_NAME);
+      } catch {}
+      return;
+    }
+    if (remainingAttempts <= 0) {
+      return;
+    }
+    retryTimer = setTimeout(() => run(remainingAttempts - 1), 300);
+  };
+  run(attempts);
+  return () => {
+    disposed = true;
+    if (retryTimer) {
+      clearTimeout(retryTimer);
+    }
+  };
 }
 
 export function registerQualityControlWhenReady(
   artPlayerRef: MutableRefObject<Artplayer | null>,
   hls: HlsQualityController,
+  controlOptions: HlsQualityControlOptions,
   attempts = 10,
-): void {
-  const art = artPlayerRef.current;
-  if (art) {
-    registerQualityControl(art, hls);
-    return;
-  }
-  if (attempts <= 0) {
-    return;
-  }
-  setTimeout(() => {
-    registerQualityControlWhenReady(artPlayerRef, hls, attempts - 1);
-  }, 300);
+): () => void {
+  let disposed = false;
+  let retryTimer: ReturnType<typeof setTimeout> | null = null;
+  const run = (remainingAttempts: number) => {
+    if (disposed) {
+      return;
+    }
+    const art = artPlayerRef.current;
+    if (art) {
+      registerQualityControl(art, hls, controlOptions);
+      return;
+    }
+    if (remainingAttempts <= 0) {
+      return;
+    }
+    retryTimer = setTimeout(() => run(remainingAttempts - 1), 300);
+  };
+  run(attempts);
+  return () => {
+    disposed = true;
+    if (retryTimer) {
+      clearTimeout(retryTimer);
+    }
+  };
 }

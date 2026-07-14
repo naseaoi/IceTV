@@ -1,4 +1,7 @@
-import { dedupePlaybackSessionsByTitle } from '@/features/playback-stats/lib/history';
+import {
+  dedupePlaybackSessionsByTitle,
+  filterPlaybackHistorySessions,
+} from '@/features/playback-stats/lib/history';
 import type {
   PlaybackDailyStat,
   PlaybackStatsSummary,
@@ -131,7 +134,10 @@ export function buildPlaybackStatsSummary(
     totalWatchSeconds,
     weekWatchSeconds,
     dailyWatchSeconds: buildPlaybackDailyStats(weekSessions, now),
-    recentItems: dedupePlaybackSessionsByTitle(sessions, 6),
+    recentItems: dedupePlaybackSessionsByTitle(
+      filterPlaybackHistorySessions(sessions),
+      6,
+    ),
     topItems: buildTopItems(sessions),
   };
 }
@@ -153,7 +159,10 @@ export function buildPlaybackStatsSummaryFromParts({
     totalWatchSeconds: Math.max(0, Math.floor(totalWatchSeconds || 0)),
     weekWatchSeconds: Math.max(0, Math.floor(weekWatchSeconds || 0)),
     dailyWatchSeconds,
-    recentItems: dedupePlaybackSessionsByTitle(recentItems, 6),
+    recentItems: dedupePlaybackSessionsByTitle(
+      filterPlaybackHistorySessions(recentItems),
+      6,
+    ),
     topItems: topItems.slice(0, 6),
   };
 }

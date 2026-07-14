@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 
+import { normalizeSearchQueryInput } from '@/features/search/lib/searchQuery';
 import { isGuardFailure, requireActiveUser } from '@/lib/api-auth';
 import { getConfigForRead } from '@/lib/config';
 import { db } from '@/lib/db';
@@ -41,7 +42,7 @@ export async function POST(request: NextRequest) {
     if (isGuardFailure(guardResult)) return guardResult.response;
 
     const body = await request.json();
-    const keyword: string = body.keyword?.trim();
+    const keyword = normalizeSearchQueryInput(body.keyword || '');
 
     if (!keyword) {
       return NextResponse.json(
@@ -86,7 +87,7 @@ export async function DELETE(request: NextRequest) {
     if (isGuardFailure(guardResult)) return guardResult.response;
 
     const { searchParams } = new URL(request.url);
-    const kw = searchParams.get('keyword')?.trim();
+    const kw = normalizeSearchQueryInput(searchParams.get('keyword') || '');
 
     await db.deleteSearchHistory(guardResult.username, kw || undefined);
 

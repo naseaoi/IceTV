@@ -5,6 +5,7 @@ import { addSearchHistory } from '@/lib/db.client';
 import { readFluidSearch } from '@/lib/local-preferences';
 import { SearchResult } from '@/lib/types';
 
+import { normalizeSearchQueryInput } from '../lib/searchQuery';
 import { sortBatchForNoOrder } from '../lib/searchUtils';
 
 interface UseSearchExecutionParams {
@@ -93,7 +94,7 @@ export function useSearchExecution({
     };
   }, [filterAggYearOrder, filterAllYearOrder, viewMode]);
 
-  const query = (searchParams.get('q') || '').trim();
+  const query = normalizeSearchQueryInput(searchParams.get('q') || '');
 
   useEffect(() => {
     if (query === currentQueryRef.current) return;

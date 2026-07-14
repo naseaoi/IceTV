@@ -29,11 +29,6 @@ interface ResolveSourceSwitchEpisodeAnchorOptions {
   activeEpisodeIndex: number;
 }
 
-/**
- * 自动换源优先采用播放器里的稳定进度；
- * 若当前仅有零点几秒的探测值，则回退到待恢复的有效进度；
- * 最后回退到 stableCurrentTime（seek/timeupdate 记录的最后有效时间点）。
- */
 export function resolveSourceSwitchCurrentPlayTime({
   playerCurrentTime,
   pendingResumeTime,
@@ -70,11 +65,6 @@ export function resolveSourceSwitchEpisodeAnchor({
   };
 }
 
-/**
- * 换源本身就是一次显式的目标集选择：
- * - 有有效进度时沿用当前集进度
- * - 否则强制从目标集开头起播，并阻止目标源旧历史反向覆盖
- */
 export function resolveSourceSwitchResumeState({
   currentPlayTime,
   preserveProgress,

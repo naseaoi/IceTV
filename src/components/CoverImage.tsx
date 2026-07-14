@@ -12,12 +12,21 @@ import React, {
 } from 'react';
 
 import NoImageCover from '@/components/NoImageCover';
+import { useRuntimeConfig } from '@/components/RuntimeConfigProvider';
 import {
   isCoverImageCached,
   markCoverImagesLoaded,
   subscribeCoverImageLoaded,
 } from '@/lib/cover-image-cache';
+import {
+  buildCoverImageVariantUrl,
+  supportsCoverImageVariants,
+} from '@/lib/cover-image-variants';
 import { imageScheduler } from '@/lib/image-scheduler';
+import {
+  isSourceCoverProxyUrl,
+  markSourceCoverProxyHostFailed,
+} from '@/lib/source-cover-proxy';
 import { processImageUrl } from '@/lib/utils';
 
 const PLACEHOLDER_COLORS = [
@@ -77,8 +86,16 @@ function buildBlurDataURL(color: string): string {
   return `data:image/svg+xml;charset=UTF-8,${encodeURIComponent(svg)}`;
 }
 
-function needsImageUnoptimized(url: string): boolean {
-  if (!url || url.startsWith('/') || url.startsWith('data:')) {
+function needsImageUnoptimized(
+  url: string,
+  usesCoverVariants: boolean,
+): boolean {
+  if (
+    usesCoverVariants ||
+    !url ||
+    url.startsWith('/') ||
+    url.startsWith('data:')
+  ) {
     return false;
   }
 
@@ -113,16 +130,24 @@ const CoverImage: React.FC<CoverImageProps> = memo(function CoverImage({
   const releaseSlotRef = useRef<(() => void) | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const imageRef = useRef<HTMLImageElement>(null);
+  const runtimeConfig = useRuntimeConfig();
+  const [useDirectFallback, setUseDirectFallback] = useState(false);
 
   const processed = useMemo(
-    () => (isEmpty ? '' : processImageUrl(src)),
-    [src, isEmpty],
+    () =>
+      isEmpty
+        ? ''
+        : useDirectFallback
+          ? src
+          : processImageUrl(src, runtimeConfig.SOURCE_COVER_PROXY_MODE),
+    [isEmpty, runtimeConfig.SOURCE_COVER_PROXY_MODE, src, useDirectFallback],
   );
 
-  const needsUnoptimized = useMemo(() => {
-    if (!processed) return false;
-    return needsImageUnoptimized(processed);
-  }, [processed]);
+  const usesCoverVariants = supportsCoverImageVariants(processed);
+  const needsUnoptimized = useMemo(
+    () => needsImageUnoptimized(processed, usesCoverVariants),
+    [processed, usesCoverVariants],
+  );
 
   const cacheKeys = useMemo(
     () => Array.from(new Set([src, processed].filter(Boolean))),
@@ -157,9 +182,10 @@ const CoverImage: React.FC<CoverImageProps> = memo(function CoverImage({
 
   useIsomorphicLayoutEffect(() => {
     setHasError(false);
+    setUseDirectFallback(false);
     releaseSlotRef.current?.();
     releaseSlotRef.current = null;
-  }, [src]);
+  }, [runtimeConfig.SOURCE_COVER_PROXY_MODE, src]);
 
   useIsomorphicLayoutEffect(() => {
     if (isEmpty) return;
@@ -187,7 +213,7 @@ const CoverImage: React.FC<CoverImageProps> = memo(function CoverImage({
           io.disconnect();
         }
       },
-      { rootMargin: VIEWPORT_PRELOAD_MARGIN },
+      { root: document.body, rootMargin: VIEWPORT_PRELOAD_MARGIN },
     );
     io.observe(el);
     return () => io.disconnect();
@@ -232,20 +258,81 @@ const CoverImage: React.FC<CoverImageProps> = memo(function CoverImage({
     releaseSlotRef.current = null;
   }, [cacheKeys]);
 
-  useEffect(() => {
-    if (!slotGranted || loaded || hasError) return;
-    const image = imageRef.current;
-    if (image?.complete && image.naturalWidth > 0) {
-      handleLoad();
-    }
-  }, [handleLoad, hasError, loaded, processed, slotGranted]);
-
   const handleError = useCallback(() => {
+    if (
+      runtimeConfig.SOURCE_COVER_PROXY_MODE === 'auto' &&
+      isSourceCoverProxyUrl(processed) &&
+      !useDirectFallback
+    ) {
+      markSourceCoverProxyHostFailed(src);
+      setLoaded(false);
+      setHasError(false);
+      setUseDirectFallback(true);
+      return;
+    }
+
     setHasError(true);
     setLoaded(true);
     releaseSlotRef.current?.();
     releaseSlotRef.current = null;
-  }, []);
+  }, [
+    processed,
+    runtimeConfig.SOURCE_COVER_PROXY_MODE,
+    src,
+    useDirectFallback,
+  ]);
+
+  useEffect(() => {
+    if (!slotGranted || loaded || hasError) return;
+
+    const image = imageRef.current;
+    if (!image) return;
+
+    let cancelled = false;
+    let intervalId: ReturnType<typeof setInterval> | null = null;
+    let timeoutId: ReturnType<typeof setTimeout> | null = null;
+
+    const finishFromImageState = () => {
+      if (cancelled || !image.complete) return false;
+      if (image.naturalWidth > 0) {
+        handleLoad();
+      } else {
+        handleError();
+      }
+      return true;
+    };
+
+    if (finishFromImageState()) {
+      return;
+    }
+
+    if (typeof image.decode === 'function') {
+      void image
+        .decode()
+        .then(finishFromImageState)
+        .catch(finishFromImageState);
+    }
+
+    intervalId = setInterval(() => {
+      if (finishFromImageState() && intervalId) {
+        clearInterval(intervalId);
+        intervalId = null;
+      }
+    }, 250);
+
+    timeoutId = setTimeout(() => {
+      if (intervalId) {
+        clearInterval(intervalId);
+        intervalId = null;
+      }
+    }, 8000);
+
+    return () => {
+      cancelled = true;
+      if (intervalId) clearInterval(intervalId);
+      if (timeoutId) clearTimeout(timeoutId);
+    };
+  }, [handleError, handleLoad, hasError, loaded, processed, slotGranted]);
 
   if (showFallback) {
     return (
@@ -270,6 +357,7 @@ const CoverImage: React.FC<CoverImageProps> = memo(function CoverImage({
           src={processed}
           alt={alt}
           fill
+          loader={usesCoverVariants ? buildCoverImageVariantUrl : undefined}
           sizes={sizes}
           quality={needsUnoptimized ? undefined : quality}
           preload={priority}

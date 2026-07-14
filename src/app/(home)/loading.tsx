@@ -1,5 +1,7 @@
+import ContinueWatchingCardSkeleton from '@/components/ContinueWatchingCardSkeleton';
 import HomePosterCardSkeleton from '@/components/HomePosterCardSkeleton';
 import PageLayout from '@/components/PageLayout';
+import ScrollableRow from '@/components/ScrollableRow';
 import { getContinueWatchingSkeletonCount } from '@/lib/continue-watching.server';
 
 function CapsuleSwitchSkeleton() {
@@ -22,18 +24,22 @@ function CapsuleSwitchSkeleton() {
 function SkeletonRow({
   count,
   withSubtitle = false,
+  mobileContinue = false,
 }: {
   count: number;
   withSubtitle?: boolean;
+  mobileContinue?: boolean;
 }) {
   return (
-    <div className='relative'>
-      <div className='scrollbar-hide flex space-x-7 overflow-x-auto py-1 pb-12 pl-1 pr-4 sm:py-2 sm:pb-14 sm:pr-6'>
-        {Array.from({ length: count }).map((_, index) => (
+    <ScrollableRow>
+      {Array.from({ length: count }).map((_, index) =>
+        mobileContinue ? (
+          <ContinueWatchingCardSkeleton key={index} />
+        ) : (
           <HomePosterCardSkeleton key={index} withSubtitle={withSubtitle} />
-        ))}
-      </div>
-    </div>
+        ),
+      )}
+    </ScrollableRow>
   );
 }
 
@@ -53,35 +59,39 @@ export default async function HomeLoading() {
     <PageLayout>
       <div className='overflow-visible px-2 pb-2 pt-4 sm:px-10 sm:pt-8'>
         {/* CapsuleSwitch 骨架 */}
-        <div className='mb-4 flex justify-center'>
+        <div className='mb-4 hidden justify-center md:flex'>
           <CapsuleSwitchSkeleton />
         </div>
 
         <div className='mx-auto max-w-[95%]'>
           {continueWatchingCount > 0 && (
-            <section className='mb-4'>
+            <section className='mb-2'>
               <SkeletonSectionHeader />
-              <SkeletonRow count={continueWatchingCount} withSubtitle />
+              <SkeletonRow
+                count={continueWatchingCount}
+                withSubtitle
+                mobileContinue
+              />
             </section>
           )}
 
           {/* 推荐区域骨架 */}
-          <section className='mb-4'>
+          <section className='mb-2'>
             <SkeletonSectionHeader />
             <SkeletonRow count={12} />
           </section>
 
-          <section className='mb-4'>
+          <section className='mb-2'>
             <SkeletonSectionHeader />
             <SkeletonRow count={12} />
           </section>
 
-          <section className='mb-4'>
+          <section className='mb-2'>
             <SkeletonSectionHeader />
             <SkeletonRow count={12} />
           </section>
 
-          <section className='mb-4'>
+          <section className='mb-2'>
             <SkeletonSectionHeader />
             <SkeletonRow count={12} />
           </section>

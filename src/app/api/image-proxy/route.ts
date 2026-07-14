@@ -1,10 +1,17 @@
 import { NextRequest, NextResponse } from 'next/server';
 
 import { getOptionalActiveUser } from '@/lib/api-auth';
+import {
+  type CoverImageResizeOptions,
+  CoverImageResizeParamError,
+  parseCoverImageResizeOptions,
+  resizeCoverImage,
+} from '@/lib/cover-image-resize';
 import { authorizeProxyRequest } from '@/lib/proxy-auth';
 import {
   assertContentLength,
   createLimitedReadableStream,
+  readArrayBufferLimited,
   ResponseSizeLimitError,
 } from '@/lib/proxy-response-limits';
 import {
@@ -32,6 +39,16 @@ async function proxyImage(request: NextRequest, method: 'GET' | 'HEAD') {
   const authFailure = await authorizeProxyRequest(request, 'image', imageUrl);
   if (authFailure) {
     return authFailure;
+  }
+
+  let resizeOptions: CoverImageResizeOptions | null;
+  try {
+    resizeOptions = parseCoverImageResizeOptions(searchParams);
+  } catch (error) {
+    if (error instanceof CoverImageResizeParamError) {
+      return NextResponse.json({ error: error.message }, { status: 400 });
+    }
+    throw error;
   }
 
   const validation = await validateProxyUrlForRequest(imageUrl);
@@ -68,8 +85,6 @@ async function proxyImage(request: NextRequest, method: 'GET' | 'HEAD') {
       );
     }
 
-    // 创建响应头
-    const headers = new Headers();
     const contentType = imageResponse.headers.get('content-type');
     if (!contentType?.toLowerCase().startsWith('image/')) {
       recordServerProxyFailure('douban-image', contentType || 'content-type');
@@ -78,6 +93,25 @@ async function proxyImage(request: NextRequest, method: 'GET' | 'HEAD') {
         { status: 415 },
       );
     }
+
+    if (method === 'GET' && resizeOptions) {
+      const source = await readArrayBufferLimited(
+        imageResponse,
+        MAX_IMAGE_BYTES,
+      );
+      const resized = await resizeCoverImage(source, resizeOptions);
+      const headers = createImageProxyCacheHeaders();
+      headers.set('Content-Type', 'image/webp');
+      headers.set('Content-Length', String(resized.byteLength));
+
+      return new Response(resized, {
+        status: 200,
+        headers,
+      });
+    }
+
+    // 创建响应头
+    const headers = createImageProxyCacheHeaders();
 
     if (contentType) {
       headers.set('Content-Type', contentType);
@@ -95,15 +129,6 @@ async function proxyImage(request: NextRequest, method: 'GET' | 'HEAD') {
     if (lastModified) {
       headers.set('Last-Modified', lastModified);
     }
-
-    // 设置缓存头，便于浏览器与 SW 做跨会话复用。
-    headers.set(
-      'Cache-Control',
-      'public, max-age=2592000, s-maxage=2592000, stale-while-revalidate=86400',
-    );
-    headers.set('CDN-Cache-Control', 'public, s-maxage=15720000');
-    headers.set('Vercel-CDN-Cache-Control', 'public, s-maxage=15720000');
-    headers.set('Netlify-Vary', 'query');
 
     if (method === 'HEAD') {
       return new Response(null, {
@@ -136,6 +161,18 @@ async function proxyImage(request: NextRequest, method: 'GET' | 'HEAD') {
       { status: 500 },
     );
   }
+}
+
+function createImageProxyCacheHeaders(): Headers {
+  const headers = new Headers();
+  headers.set(
+    'Cache-Control',
+    'public, max-age=2592000, s-maxage=2592000, stale-while-revalidate=86400',
+  );
+  headers.set('CDN-Cache-Control', 'public, s-maxage=15720000');
+  headers.set('Vercel-CDN-Cache-Control', 'public, s-maxage=15720000');
+  headers.set('Netlify-Vary', 'query');
+  return headers;
 }
 
 // OrionTV 兼容接口

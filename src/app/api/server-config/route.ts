@@ -31,6 +31,7 @@ export async function GET(request: NextRequest) {
     SiteName: publicConfig.SiteName,
     SiteIcon: publicConfig.SiteIcon,
     Announcement: publicConfig.Announcement,
+    FooterText: publicConfig.FooterText,
     StorageType: getStorageType(),
     Version: CURRENT_VERSION,
     OpenRegister: publicConfig.OpenRegister,
@@ -46,7 +47,6 @@ export async function GET(request: NextRequest) {
     EnableLiveEntry: publicConfig.EnableLiveEntry,
     DefaultAggregateSearch: publicConfig.DefaultAggregateSearch,
     EnableOptimization: publicConfig.EnableOptimization,
-    AutoSwitchSourceOnTimeout: publicConfig.AutoSwitchSourceOnTimeout,
     LiveDirectConnect: publicConfig.LiveDirectConnect,
     CustomCategories: publicConfig.CustomCategories,
     FluidSearch: publicConfig.FluidSearch,
@@ -57,6 +57,7 @@ export async function GET(request: NextRequest) {
     SourceFailureCooldownSeconds: publicConfig.SourceFailureCooldownSeconds,
     ContinueWatchingLimit: publicConfig.ContinueWatchingLimit,
     CoverImageCacheSize: publicConfig.CoverImageCacheSize,
+    SourceCoverProxyMode: publicConfig.SourceCoverProxyMode,
   };
   return NextResponse.json(result, {
     headers: {

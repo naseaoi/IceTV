@@ -1,4 +1,21 @@
-export type DoubanType = 'movie' | 'tv' | 'show' | 'anime' | 'custom' | string;
+export type KnownDoubanType = 'movie' | 'tv' | 'show' | 'anime' | 'custom';
+export type DoubanType = KnownDoubanType | string;
+
+const DOUBAN_TYPES = new Set<KnownDoubanType>([
+  'movie',
+  'tv',
+  'show',
+  'anime',
+  'custom',
+]);
+
+export function normalizeDoubanType(
+  value: string | string[] | null | undefined,
+): KnownDoubanType {
+  return typeof value === 'string' && DOUBAN_TYPES.has(value as KnownDoubanType)
+    ? (value as KnownDoubanType)
+    : 'movie';
+}
 
 export function getDoubanPageTitle(type: DoubanType): string {
   return type === 'movie'

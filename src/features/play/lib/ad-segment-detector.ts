@@ -122,6 +122,63 @@ function median(values: number[]): number {
     : sorted[mid];
 }
 
+function detectByLocalDurationShift(segments: DiscontSegment[]): Set<number> {
+  const result = new Set<number>();
+  if (segments.length < 8) return result;
+
+  const typicalDurations = segments.map((segment) =>
+    median(segment.tsDurations.filter((duration) => duration > 0)),
+  );
+  const baseline = median(typicalDurations.filter((duration) => duration > 0));
+  if (baseline <= 0) return result;
+
+  const baselineTolerance = Math.max(0.15, baseline * 0.05);
+  const baselineCoverage =
+    typicalDurations.filter(
+      (duration) => Math.abs(duration - baseline) <= baselineTolerance,
+    ).length / typicalDurations.length;
+  if (baselineCoverage < 0.7) return result;
+
+  const minimumShift = Math.max(0.5, baseline * 0.12);
+  for (let i = 1; i < segments.length - 1; i++) {
+    const segment = segments[i];
+    const previous = segments[i - 1];
+    const next = segments[i + 1];
+    if (segment.tsDurations.length < 4) continue;
+    if (
+      segment.tsDurations.length !== previous.tsDurations.length ||
+      segment.tsDurations.length !== next.tsDurations.length
+    ) {
+      continue;
+    }
+
+    const typicalDuration = typicalDurations[i];
+    if (baseline - typicalDuration < minimumShift) continue;
+    if (
+      Math.abs(typicalDurations[i - 1] - baseline) > baselineTolerance ||
+      Math.abs(typicalDurations[i + 1] - baseline) > baselineTolerance
+    ) {
+      continue;
+    }
+
+    const uniformTolerance = Math.max(0.15, typicalDuration * 0.05);
+    const uniformCoverage =
+      segment.tsDurations.filter(
+        (duration) => Math.abs(duration - typicalDuration) <= uniformTolerance,
+      ).length / segment.tsDurations.length;
+    if (uniformCoverage < 0.8) continue;
+
+    const neighborDuration = (previous.duration + next.duration) / 2;
+    if (neighborDuration <= 0 || segment.duration > neighborDuration * 0.9) {
+      continue;
+    }
+
+    result.add(i);
+  }
+
+  return result;
+}
+
 function detectByExtinfIntegerPattern(segments: DiscontSegment[]): Set<number> {
   const result = new Set<number>();
   if (segments.length < 3) return result;
@@ -385,6 +442,7 @@ export async function stripAdSegmentsByPhysicalSignal(
 
   const adSet = new Set<number>();
   detectByExtinfIntegerPattern(segments).forEach((i) => adSet.add(i));
+  detectByLocalDurationShift(segments).forEach((i) => adSet.add(i));
   detectByHostAnomaly(segments, baseUrl).forEach((i) => adSet.add(i));
 
   if (adSet.size > 0) {

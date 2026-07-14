@@ -12,6 +12,7 @@ interface VideoCardTitleProps {
   sourceName?: string;
   origin: NonNullable<VideoCardProps['origin']>;
   config: VideoCardDisplayConfig;
+  reserveSourceSpace?: boolean;
 }
 
 export function VideoCardTitle({
@@ -19,10 +20,11 @@ export function VideoCardTitle({
   sourceName,
   origin,
   config,
+  reserveSourceSpace = false,
 }: VideoCardTitleProps) {
   return (
     <div
-      className='mt-2 text-center'
+      className={`mt-2 text-center ${reserveSourceSpace ? 'min-h-[46px]' : ''}`}
       style={noSelectStyle}
       onContextMenu={preventContextMenu}
     >

@@ -193,6 +193,26 @@ function materializeAggregatedResults(index: SearchAggregationIndex) {
   return groupedResults;
 }
 
+function createAggregatedResultItem(
+  mapKey: string,
+  group: SearchResult[],
+): AggregatedResultItem {
+  const title = group[0]?.title || '';
+  const poster = group[0]?.poster || '';
+  const year = group[0]?.year || 'unknown';
+  const stats = computeGroupStats(group);
+
+  return {
+    mapKey,
+    group,
+    title,
+    poster,
+    year,
+    type: stats.episodes === 1 ? 'movie' : 'tv',
+    stats,
+  };
+}
+
 export function useSearchAggregation({
   searchResults,
   filterAll,
@@ -228,65 +248,10 @@ export function useSearchAggregation({
   );
 
   const aggregatedResultItems = useMemo<AggregatedResultItem[]>(() => {
-    return aggregatedResults.map(([mapKey, group]) => {
-      const title = group[0]?.title || '';
-      const poster = group[0]?.poster || '';
-      const year = group[0]?.year || 'unknown';
-      const stats = computeGroupStats(group);
-
-      return {
-        mapKey,
-        group,
-        title,
-        poster,
-        year,
-        type: stats.episodes === 1 ? 'movie' : 'tv',
-        stats,
-      };
-    });
-  }, [aggregatedResults]);
-
-  // 聚合增量更新
-  useEffect(() => {
-    const activeKeys = new Set(
-      aggregatedResultItems.map((item) => item.mapKey),
+    return aggregatedResults.map(([mapKey, group]) =>
+      createAggregatedResultItem(mapKey, group),
     );
-
-    groupRefs.current.forEach((_, key) => {
-      if (!activeKeys.has(key)) {
-        groupRefs.current.delete(key);
-      }
-    });
-
-    groupStatsRef.current.forEach((_, key) => {
-      if (!activeKeys.has(key)) {
-        groupStatsRef.current.delete(key);
-      }
-    });
-
-    aggregatedResultItems.forEach(({ mapKey, stats }) => {
-      const prev = groupStatsRef.current.get(mapKey);
-      if (!prev) {
-        groupStatsRef.current.set(mapKey, stats);
-        return;
-      }
-      const ref = groupRefs.current.get(mapKey);
-      if (ref && ref.current) {
-        if (prev.episodes !== stats.episodes) {
-          ref.current.setEpisodes(stats.episodes);
-        }
-        const prevNames = (prev.source_names || []).join('|');
-        const nextNames = (stats.source_names || []).join('|');
-        if (prevNames !== nextNames) {
-          ref.current.setSourceNames(stats.source_names);
-        }
-        if (prev.douban_id !== stats.douban_id) {
-          ref.current.setDoubanId(stats.douban_id);
-        }
-        groupStatsRef.current.set(mapKey, stats);
-      }
-    });
-  }, [aggregatedResultItems]);
+  }, [aggregatedResults]);
 
   const filterOptions = useMemo(() => {
     const { sources, titles, years } = searchIndexState.index;
@@ -383,17 +348,20 @@ export function useSearchAggregation({
       return aggregatedResultItems;
     }
 
-    const filtered = aggregatedResultItems.filter((item) => {
-      const gTitle = item.title;
-      const gYear = item.year;
-      const hasSource =
+    const filtered = aggregatedResultItems.flatMap((item) => {
+      const group =
         source === 'all'
-          ? true
-          : item.group.some((groupItem) => groupItem.source === source);
-      if (!hasSource) return false;
-      if (title !== 'all' && gTitle !== title) return false;
-      if (year !== 'all' && gYear !== year) return false;
-      return true;
+          ? item.group
+          : item.group.filter((groupItem) => groupItem.source === source);
+      if (group.length === 0) return [];
+
+      const filteredItem =
+        source === 'all'
+          ? item
+          : createAggregatedResultItem(item.mapKey, group);
+      if (title !== 'all' && filteredItem.title !== title) return [];
+      if (year !== 'all' && filteredItem.year !== year) return [];
+      return [filteredItem];
     });
 
     if (yearOrder === 'none') {
@@ -418,6 +386,46 @@ export function useSearchAggregation({
         : bTitle.localeCompare(aTitle);
     });
   }, [aggregatedResultItems, filterAgg, trimmedSearchQuery]);
+
+  // 聚合增量更新
+  useEffect(() => {
+    const activeKeys = new Set(filteredAggResults.map((item) => item.mapKey));
+
+    groupRefs.current.forEach((_, key) => {
+      if (!activeKeys.has(key)) {
+        groupRefs.current.delete(key);
+      }
+    });
+
+    groupStatsRef.current.forEach((_, key) => {
+      if (!activeKeys.has(key)) {
+        groupStatsRef.current.delete(key);
+      }
+    });
+
+    filteredAggResults.forEach(({ mapKey, stats }) => {
+      const prev = groupStatsRef.current.get(mapKey);
+      if (!prev) {
+        groupStatsRef.current.set(mapKey, stats);
+        return;
+      }
+      const ref = groupRefs.current.get(mapKey);
+      if (ref && ref.current) {
+        if (prev.episodes !== stats.episodes) {
+          ref.current.setEpisodes(stats.episodes);
+        }
+        const prevNames = (prev.source_names || []).join('|');
+        const nextNames = (stats.source_names || []).join('|');
+        if (prevNames !== nextNames) {
+          ref.current.setSourceNames(stats.source_names);
+        }
+        if (prev.douban_id !== stats.douban_id) {
+          ref.current.setDoubanId(stats.douban_id);
+        }
+        groupStatsRef.current.set(mapKey, stats);
+      }
+    });
+  }, [filteredAggResults]);
 
   return {
     filterOptions,

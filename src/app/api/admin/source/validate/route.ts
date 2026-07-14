@@ -1,8 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 
 import { isGuardFailure, requireAdmin } from '@/lib/api-auth';
-import { getConfig } from '@/lib/config';
-import { API_CONFIG } from '@/lib/config';
+import { API_CONFIG, getConfigForRead } from '@/lib/config';
 import { createTimedAbortController } from '@/lib/downstream-sources/shared';
 
 export const runtime = 'nodejs';
@@ -28,7 +27,7 @@ export async function GET(request: NextRequest) {
     });
   }
 
-  const config = await getConfig();
+  const config = await getConfigForRead();
   const sourceKeySet =
     sourceKeys.length > 0
       ? new Set(sourceKeys)

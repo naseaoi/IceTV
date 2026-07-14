@@ -3,13 +3,14 @@
 import { History } from 'lucide-react';
 import { useCallback, useEffect, useLayoutEffect, useState } from 'react';
 
-import HomePosterCardSkeleton, {
-  HOME_POSTER_CARD_CLASS,
-} from '@/components/HomePosterCardSkeleton';
+import ContinueWatchingCardSkeleton from '@/components/ContinueWatchingCardSkeleton';
+import { HOME_POSTER_CARD_CLASS } from '@/components/HomePosterCardSkeleton';
+import MobileContinueCard from '@/components/MobileContinueCard';
 import ConfirmModal from '@/components/modals/ConfirmModal';
 import { useRuntimeConfig } from '@/components/RuntimeConfigProvider';
 import ScrollableRow from '@/components/ScrollableRow';
 import VideoCard from '@/components/VideoCard';
+import { useIsMobileViewport } from '@/hooks/useIsMobileViewport';
 import { getAuthInfoFromBrowserCookie } from '@/lib/auth.client';
 import type { PlayRecord } from '@/lib/db.client';
 import {
@@ -102,6 +103,8 @@ export default function ContinueWatching({
     normalizedInitialSkeletonCount,
   );
   const [showClearConfirm, setShowClearConfirm] = useState(false);
+  const isMobile = useIsMobileViewport();
+  const mobileRecords = playRecords.slice(0, 10);
 
   const updatePlayRecords = useCallback(
     (allRecords: Record<string, PlayRecord>) => {
@@ -175,9 +178,9 @@ export default function ContinueWatching({
 
   return (
     <>
-      <section className={`mb-4 ${className || ''}`}>
+      <section className={`mb-2 ${className || ''}`}>
         <div className='mb-4 flex items-center justify-between'>
-          <h2 className='flex items-center gap-2 text-xl font-bold text-gray-800 dark:text-gray-200'>
+          <h2 className='flex items-center gap-2 text-lg font-bold text-gray-800 dark:text-gray-200 sm:text-xl'>
             <History className='h-5 w-5 text-orange-500' />
             继续观看
           </h2>
@@ -193,44 +196,77 @@ export default function ContinueWatching({
         <ScrollableRow>
           {loading
             ? Array.from({ length: skeletonCount }).map((_, index) => (
-                <HomePosterCardSkeleton key={index} withSubtitle />
+                <ContinueWatchingCardSkeleton key={index} />
               ))
-            : playRecords.map((record, index) => {
-                const parsedKey = parseKey(record.key);
-                if (!parsedKey) {
-                  return null;
-                }
+            : isMobile
+              ? mobileRecords.map((record) => {
+                  const parsedKey = parseKey(record.key);
+                  if (!parsedKey) {
+                    return null;
+                  }
 
-                const { source, id } = parsedKey;
-                return (
-                  <div key={record.key} className={HOME_POSTER_CARD_CLASS}>
-                    <VideoCard
+                  const { source, id } = parsedKey;
+                  return (
+                    <MobileContinueCard
+                      key={record.key}
+                      source={source}
                       id={id}
                       title={record.title}
                       poster={record.cover}
                       year={record.year}
-                      source={source}
-                      source_name={record.source_name}
-                      progress={getProgress(record)}
-                      episodes={record.total_episodes}
+                      sourceName={record.source_name}
                       currentEpisode={record.index}
+                      totalEpisodes={record.total_episodes}
+                      progress={getProgress(record)}
                       resumeTime={Math.max(
                         0,
                         Math.floor(record.play_time || 0),
                       )}
                       query={record.search_title}
-                      from='playrecord'
                       onDelete={() =>
                         setPlayRecords((prev) =>
                           prev.filter((r) => r.key !== record.key),
                         )
                       }
-                      priority={index < 4}
-                      type={record.total_episodes > 1 ? 'tv' : ''}
                     />
-                  </div>
-                );
-              })}
+                  );
+                })
+              : playRecords.map((record, index) => {
+                  const parsedKey = parseKey(record.key);
+                  if (!parsedKey) {
+                    return null;
+                  }
+
+                  const { source, id } = parsedKey;
+                  return (
+                    <div key={record.key} className={HOME_POSTER_CARD_CLASS}>
+                      <VideoCard
+                        id={id}
+                        title={record.title}
+                        poster={record.cover}
+                        year={record.year}
+                        source={source}
+                        source_name={record.source_name}
+                        progress={getProgress(record)}
+                        episodes={record.total_episodes}
+                        currentEpisode={record.index}
+                        resumeTime={Math.max(
+                          0,
+                          Math.floor(record.play_time || 0),
+                        )}
+                        query={record.search_title}
+                        from='playrecord'
+                        onDelete={() =>
+                          setPlayRecords((prev) =>
+                            prev.filter((r) => r.key !== record.key),
+                          )
+                        }
+                        priority={index < 4}
+                        type={record.total_episodes > 1 ? 'tv' : ''}
+                      />
+                    </div>
+                  );
+                })}
         </ScrollableRow>
       </section>
 

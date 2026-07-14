@@ -98,7 +98,6 @@ describe('AdminPage role visibility', () => {
       EnableLiveEntry: false,
       DefaultAggregateSearch: true,
       EnableOptimization: true,
-      AutoSwitchSourceOnTimeout: false,
       LiveDirectConnect: false,
       SearchDownstreamMaxPage: 1,
       SiteInterfaceCacheTime: 300,

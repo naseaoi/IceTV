@@ -1,4 +1,7 @@
-import { dedupePlaybackSessionsByTitle } from '@/features/playback-stats/lib/history';
+import {
+  dedupePlaybackSessionsByTitle,
+  filterPlaybackHistorySessions,
+} from '@/features/playback-stats/lib/history';
 import { buildPlaybackStatsSummary } from '@/features/playback-stats/lib/summary';
 import type { PlaybackSession } from '@/lib/types';
 
@@ -99,6 +102,30 @@ describe('playback history dedupe', () => {
         mergeWatchSeconds: true,
       }),
     ).toEqual([{ ...latestSession, watch_seconds: 75 }]);
+  });
+
+  it('filters sessions without watched seconds from history', () => {
+    const failedSession = createSession({
+      id: 'session_failed',
+      watch_seconds: 0,
+      started_at: 3000,
+      ended_at: 4000,
+    });
+    const watchedSession = createSession({
+      id: 'session_watched',
+      watch_seconds: 30,
+      started_at: 1000,
+      ended_at: 2000,
+    });
+
+    expect(
+      dedupePlaybackSessionsByTitle(
+        filterPlaybackHistorySessions([failedSession, watchedSession]),
+        {
+          mergeWatchSeconds: true,
+        },
+      ),
+    ).toEqual([watchedSession]);
   });
 
   it('dedupes recent summary items without changing watch totals', () => {

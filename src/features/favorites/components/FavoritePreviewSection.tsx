@@ -10,6 +10,8 @@ import ScrollableRow from '@/components/ScrollableRow';
 import VideoCard from '@/components/VideoCard';
 import type { FavoriteItem } from '@/features/favorites/types';
 
+const FAVORITE_PREVIEW_LIMIT = 20;
+
 export function FavoritePreviewSection({
   items,
   loading,
@@ -19,8 +21,10 @@ export function FavoritePreviewSection({
   loading: boolean;
   skeletonCount?: number;
 }) {
+  const previewItems = items.slice(0, FAVORITE_PREVIEW_LIMIT);
+
   return (
-    <section className='mb-4'>
+    <section className='mb-2'>
       <div className='mb-4 flex items-center justify-between'>
         <h2 className='flex items-center gap-2 text-xl font-bold text-gray-800 dark:text-gray-200'>
           <Star className='h-5 w-5 text-amber-500' />
@@ -37,13 +41,15 @@ export function FavoritePreviewSection({
         )}
       </div>
 
-      <ScrollableRow>
-        {loading && skeletonCount > 0 && items.length === 0 ? (
-          Array.from({ length: skeletonCount }).map((_, index) => (
+      {loading && skeletonCount > 0 && items.length === 0 ? (
+        <ScrollableRow>
+          {Array.from({ length: skeletonCount }).map((_, index) => (
             <HomePosterCardSkeleton key={index} withSubtitle />
-          ))
-        ) : items.length > 0 ? (
-          items.map((item, index) => (
+          ))}
+        </ScrollableRow>
+      ) : previewItems.length > 0 ? (
+        <ScrollableRow>
+          {previewItems.map((item, index) => (
             <div key={item.id + item.source} className={HOME_POSTER_CARD_CLASS}>
               <VideoCard
                 query={item.search_title}
@@ -53,13 +59,15 @@ export function FavoritePreviewSection({
                 priority={index < 4}
               />
             </div>
-          ))
-        ) : (
-          <div className='flex min-h-[198px] min-w-full items-center justify-center rounded-lg border border-dashed border-gray-200 bg-gray-50 text-sm text-gray-500 dark:border-gray-700 dark:bg-gray-900/40 dark:text-gray-400 sm:min-h-[324px]'>
+          ))}
+        </ScrollableRow>
+      ) : (
+        <div className='pb-3 sm:pb-6'>
+          <div className='flex min-h-[198px] w-full items-center justify-center rounded-lg border border-dashed border-gray-200 bg-gray-50 text-sm text-gray-500 dark:border-gray-700 dark:bg-gray-900/40 dark:text-gray-400 sm:min-h-[324px]'>
             暂无收藏内容
           </div>
-        )}
-      </ScrollableRow>
+        </div>
+      )}
     </section>
   );
 }

@@ -357,7 +357,9 @@ export function LiveChannelSidebar({
 
             <div
               ref={channelListRef}
-              className='min-h-0 flex-1 space-y-2 overflow-y-auto p-3'
+              className={`min-h-0 flex-1 overflow-y-auto p-3 ${
+                filteredChannels.length > 0 ? 'space-y-2' : 'flex flex-col'
+              }`}
             >
               {filteredChannels.length > 0 ? (
                 filteredChannels.map((channel) => {
@@ -419,10 +421,14 @@ export function LiveChannelSidebar({
         )}
 
         {activeTab === 'sources' && (
-          <div className='min-h-0 flex-1 overflow-y-auto p-3'>
-            <div className='space-y-2'>
-              {liveSources.length > 0 ? (
-                liveSources.map((source) => {
+          <div
+            className={`min-h-0 flex-1 overflow-y-auto ${
+              liveSources.length > 0 ? 'p-3' : 'flex flex-col'
+            }`}
+          >
+            {liveSources.length > 0 ? (
+              <div className='space-y-2'>
+                {liveSources.map((source) => {
                   const isCurrentSource = source.key === currentSource?.key;
                   return (
                     <button
@@ -454,17 +460,17 @@ export function LiveChannelSidebar({
                       )}
                     </button>
                   );
-                })
-              ) : (
-                <EmptyPanel
-                  icon={
-                    <Radio className='h-8 w-8 text-gray-400 dark:text-gray-600' />
-                  }
-                  title='暂无可用直播源'
-                  message='请检查网络连接或联系管理员添加直播源'
-                />
-              )}
-            </div>
+                })}
+              </div>
+            ) : (
+              <EmptyPanel
+                icon={
+                  <Radio className='h-8 w-8 text-gray-400 dark:text-gray-600' />
+                }
+                title='暂无可用直播源'
+                message='请检查网络连接或联系管理员添加直播源'
+              />
+            )}
           </div>
         )}
       </PlayerPanelContent>

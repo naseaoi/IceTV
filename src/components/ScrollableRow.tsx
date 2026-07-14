@@ -1,3 +1,5 @@
+'use client';
+
 import { ChevronLeft, ChevronRight } from 'lucide-react';
 import { useCallback, useEffect, useRef, useState } from 'react';
 
@@ -110,7 +112,7 @@ export default function ScrollableRow({
     >
       <div
         ref={containerRef}
-        className='scrollbar-hide flex space-x-7 overflow-x-auto py-1 pb-12 pl-1 pr-4 sm:py-2 sm:pb-14 sm:pr-6'
+        className='scrollbar-hide flex space-x-3 overflow-x-auto py-1 pb-3 pl-1 pr-4 sm:space-x-7 sm:py-2 sm:pb-6 sm:pr-6'
         onScroll={scheduleCheckScroll}
       >
         {children}

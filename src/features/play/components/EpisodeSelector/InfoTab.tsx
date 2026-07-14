@@ -1,7 +1,8 @@
-import { ExternalLink, Heart } from 'lucide-react';
+import { ExternalLink } from 'lucide-react';
 import React, { useMemo } from 'react';
 
 import CoverImage from '@/components/CoverImage';
+import { FavoriteHeartButton } from '@/components/FavoriteHeartButton';
 import { SearchResult } from '@/lib/types';
 
 interface InfoTabProps {
@@ -15,26 +16,6 @@ interface InfoTabProps {
   videoDoubanId: number;
   scrollMode?: 'panel' | 'desc';
 }
-
-const FavoriteIcon = ({ filled }: { filled: boolean }) => {
-  if (filled) {
-    return (
-      <svg className='h-5 w-5' viewBox='0 0 24 24'>
-        <path
-          d='M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z'
-          fill='#ef4444'
-          stroke='#ef4444'
-          strokeWidth='2'
-          strokeLinecap='round'
-          strokeLinejoin='round'
-        />
-      </svg>
-    );
-  }
-  return (
-    <Heart className='h-5 w-5 stroke-[1.5] text-gray-500 transition-colors hover:text-red-400 dark:text-gray-400' />
-  );
-};
 
 const DESC_PARAGRAPH_SEPARATOR = /(?:\r?\n)+|[^\S\r\n]{2,}/;
 
@@ -91,24 +72,21 @@ export const InfoTab: React.FC<InfoTabProps> = ({
             quality={60}
             priority
           />
+          <FavoriteHeartButton
+            favorited={favorited}
+            onClick={(e) => {
+              e.preventDefault();
+              e.stopPropagation();
+              onToggleFavorite();
+            }}
+            className='absolute bottom-3 right-3 z-20'
+          />
         </div>
 
         <div className='flex min-w-0 flex-1 flex-col justify-end gap-2.5 pb-0.5'>
-          <div className='flex min-w-0 items-center gap-2'>
-            <h3 className='min-w-0 max-w-full truncate text-base font-bold leading-snug text-gray-900 dark:text-gray-100'>
-              {videoTitle || '影片标题'}
-            </h3>
-            <button
-              aria-label={favorited ? '取消收藏' : '收藏'}
-              onClick={(e) => {
-                e.stopPropagation();
-                onToggleFavorite();
-              }}
-              className='flex-shrink-0 rounded-full p-1.5 transition-colors hover:bg-red-50 active:scale-90 dark:hover:bg-red-900/20'
-            >
-              <FavoriteIcon filled={favorited} />
-            </button>
-          </div>
+          <h3 className='line-clamp-2 min-w-0 max-w-full text-base font-bold leading-snug text-gray-900 dark:text-gray-100'>
+            {videoTitle || '影片标题'}
+          </h3>
 
           {doubanId > 0 && (
             <a

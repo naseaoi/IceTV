@@ -8,6 +8,7 @@ import {
   normalizeSiteDoubanImageProxyType,
   normalizeSiteDoubanProxyType,
 } from '@/lib/douban-options';
+import { normalizeSourceCoverProxyMode } from '@/lib/source-cover-proxy';
 
 export const runtime = 'nodejs';
 
@@ -22,32 +23,34 @@ export async function POST(request: NextRequest) {
       SiteName,
       SiteIcon,
       Announcement,
+      FooterText,
       EnableLiveEntry,
       DefaultAggregateSearch,
       EnableOptimization,
-      AutoSwitchSourceOnTimeout,
       LiveDirectConnect,
       SearchDownstreamMaxPage,
       SiteInterfaceCacheTime,
       DoubanProxyType,
       BangumiDataSource,
       DoubanImageProxyType,
+      SourceCoverProxyMode,
       DisableYellowFilter,
       FluidSearch,
     } = body as {
       SiteName: string;
       SiteIcon: string;
       Announcement: string;
+      FooterText: string;
       EnableLiveEntry: boolean;
       DefaultAggregateSearch: boolean;
       EnableOptimization: boolean;
-      AutoSwitchSourceOnTimeout: boolean;
       LiveDirectConnect: boolean;
       SearchDownstreamMaxPage: number;
       SiteInterfaceCacheTime: number;
       DoubanProxyType: string;
       BangumiDataSource?: string;
       DoubanImageProxyType: string;
+      SourceCoverProxyMode?: string;
       DisableYellowFilter: boolean;
       FluidSearch: boolean;
     };
@@ -56,10 +59,10 @@ export async function POST(request: NextRequest) {
     if (
       typeof SiteName !== 'string' ||
       typeof Announcement !== 'string' ||
+      typeof FooterText !== 'string' ||
       typeof EnableLiveEntry !== 'boolean' ||
       typeof DefaultAggregateSearch !== 'boolean' ||
       typeof EnableOptimization !== 'boolean' ||
-      typeof AutoSwitchSourceOnTimeout !== 'boolean' ||
       typeof LiveDirectConnect !== 'boolean' ||
       typeof SearchDownstreamMaxPage !== 'number' ||
       typeof SiteInterfaceCacheTime !== 'number' ||
@@ -67,6 +70,8 @@ export async function POST(request: NextRequest) {
       (BangumiDataSource !== undefined &&
         typeof BangumiDataSource !== 'string') ||
       typeof DoubanImageProxyType !== 'string' ||
+      (SourceCoverProxyMode !== undefined &&
+        typeof SourceCoverProxyMode !== 'string') ||
       typeof DisableYellowFilter !== 'boolean' ||
       typeof FluidSearch !== 'boolean'
     ) {
@@ -84,6 +89,17 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    if (
+      SourceCoverProxyMode !== undefined &&
+      normalizeSourceCoverProxyMode(SourceCoverProxyMode) !==
+        SourceCoverProxyMode
+    ) {
+      return NextResponse.json(
+        { error: '源站封面加载模式无效' },
+        { status: 400 },
+      );
+    }
+
     const adminConfig = await getConfig();
 
     // 更新缓存中的站点设置
@@ -95,10 +111,10 @@ export async function POST(request: NextRequest) {
           ? SiteIcon
           : adminConfig.SiteConfig.SiteIcon || '',
       Announcement,
+      FooterText,
       EnableLiveEntry,
       DefaultAggregateSearch,
       EnableOptimization,
-      AutoSwitchSourceOnTimeout,
       LiveDirectConnect,
       SearchDownstreamMaxPage,
       SiteInterfaceCacheTime,
@@ -111,6 +127,9 @@ export async function POST(request: NextRequest) {
       DoubanImageProxyType:
         normalizeSiteDoubanImageProxyType(DoubanImageProxyType),
       DoubanImageProxy: '',
+      SourceCoverProxyMode: normalizeSourceCoverProxyMode(
+        SourceCoverProxyMode ?? adminConfig.SiteConfig.SourceCoverProxyMode,
+      ),
       DisableYellowFilter,
       FluidSearch,
     };

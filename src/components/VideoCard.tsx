@@ -39,6 +39,10 @@ import {
   generateStorageKey,
   saveFavorite,
 } from '@/lib/db.client';
+import {
+  getCurrentNavigationPath,
+  withReturnTo,
+} from '@/lib/navigation-return';
 import { savePlayIntent } from '@/lib/play-intent';
 import {
   canUseHoverPrefetch,
@@ -137,7 +141,7 @@ const VideoCard = forwardRef<VideoCardHandle, VideoCardProps>(
     const actualId = id;
     const actualDoubanId = dynamicDoubanId;
     const actualEpisodes = dynamicEpisodes;
-    const actualYear = year;
+    const actualYear = normalizeCardYear(year);
     const actualQuery = query || '';
     const actualSearchType = isAggregate
       ? actualEpisodes && actualEpisodes === 1
@@ -193,8 +197,7 @@ const VideoCard = forwardRef<VideoCardHandle, VideoCardProps>(
           }
 
           if (currentFavorited) {
-            // 收藏页取消收藏需要二次确认
-            if (from === 'favorite') {
+            if (from === 'favorite' || from === 'playrecord') {
               showConfirm(interactionId, {
                 title: '确认取消收藏？',
                 message: `确认取消收藏「${actualTitle}」吗？`,
@@ -288,6 +291,15 @@ const VideoCard = forwardRef<VideoCardHandle, VideoCardProps>(
       }
     }, [isAggregate, aggregateGroup]);
 
+    const isSingleAggregate = isAggregate && aggregateGroup?.length === 1;
+    const aggregateSourceCount = isAggregate
+      ? new Set((aggregateGroup || []).map((item) => item.source)).size
+      : 0;
+    const isDirectStartup =
+      origin === 'vod' &&
+      ((from === 'playrecord' && !isAggregate) ||
+        (from === 'search' && (!isAggregate || aggregateSourceCount === 1)));
+
     /** 根据卡片数据构建目标 URL，返回 null 表示无有效跳转 */
     const buildPlayUrl = useCallback((): string | null => {
       if (origin === 'live' && actualSource && actualId) {
@@ -318,7 +330,9 @@ const VideoCard = forwardRef<VideoCardHandle, VideoCardProps>(
         return `/play?title=${encodeURIComponent(actualTitle.trim())}${
           actualYear ? `&year=${actualYear}` : ''
         }${actualSearchType ? `&stype=${actualSearchType}` : ''}${
-          isAggregate ? '&prefer=true' : ''
+          isAggregate && !isSingleAggregate ? '&prefer=true' : ''
+        }${isSingleAggregate ? '&singleSource=true' : ''}${
+          isDirectStartup ? '&directStart=true' : ''
         }${
           actualQuery ? `&stitle=${encodeURIComponent(actualQuery.trim())}` : ''
         }`;
@@ -327,7 +341,9 @@ const VideoCard = forwardRef<VideoCardHandle, VideoCardProps>(
         return `/play?source=${actualSource}&id=${actualId}&title=${encodeURIComponent(
           actualTitle,
         )}${actualYear ? `&year=${actualYear}` : ''}${
-          isAggregate ? '&prefer=true' : ''
+          isAggregate && !isSingleAggregate ? '&prefer=true' : ''
+        }${isSingleAggregate ? '&singleSource=true' : ''}${
+          isDirectStartup ? '&directStart=true' : ''
         }${
           actualQuery ? `&stitle=${encodeURIComponent(actualQuery.trim())}` : ''
         }${actualSearchType ? `&stype=${actualSearchType}` : ''}`;
@@ -341,6 +357,8 @@ const VideoCard = forwardRef<VideoCardHandle, VideoCardProps>(
       actualTitle,
       actualYear,
       isAggregate,
+      isSingleAggregate,
+      isDirectStartup,
       actualQuery,
       actualSearchType,
       saveAggregateGroup,
@@ -401,7 +419,9 @@ const VideoCard = forwardRef<VideoCardHandle, VideoCardProps>(
 
       warmupOnNavigate();
       const url = buildPlayUrl();
-      if (url) router.push(url);
+      if (url) {
+        router.push(withReturnTo(url, getCurrentNavigationPath()));
+      }
     }, [
       router,
       buildPlayUrl,
@@ -464,7 +484,9 @@ const VideoCard = forwardRef<VideoCardHandle, VideoCardProps>(
         return;
       }
       const url = buildPlayUrl();
-      if (url) window.open(url, '_blank');
+      if (url) {
+        window.open(withReturnTo(url, getCurrentNavigationPath()), '_blank');
+      }
     }, [buildPlayUrl]);
 
     // 检查搜索结果的收藏状态
@@ -834,11 +856,24 @@ const VideoCard = forwardRef<VideoCardHandle, VideoCardProps>(
             sourceName={source_name}
             origin={origin}
             config={config}
+            reserveSourceSpace={from === 'search'}
           />
         </div>
       </>
     );
   },
 );
+
+function normalizeCardYear(year?: string): string {
+  const normalizedYear = String(year ?? '').trim();
+  if (
+    !normalizedYear ||
+    normalizedYear === 'unknown' ||
+    normalizedYear === '0'
+  ) {
+    return '';
+  }
+  return normalizedYear;
+}
 
 export default memo(VideoCard, areVideoCardPropsEqual);

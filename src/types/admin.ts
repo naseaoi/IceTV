@@ -9,10 +9,10 @@ export interface AdminConfig {
     SiteName: string;
     SiteIcon: string;
     Announcement: string;
+    FooterText: string;
     EnableLiveEntry: boolean;
     DefaultAggregateSearch: boolean;
     EnableOptimization: boolean;
-    AutoSwitchSourceOnTimeout: boolean;
     LiveDirectConnect: boolean;
     SearchDownstreamMaxPage: number;
     SiteInterfaceCacheTime: number;
@@ -24,6 +24,7 @@ export interface AdminConfig {
     SourceFailureCooldownSeconds: number;
     ContinueWatchingLimit: number;
     CoverImageCacheSize: number;
+    SourceCoverProxyMode?: 'auto' | 'browser' | 'server';
     DataImportPlaybackSessionsLimit: number;
     LivePrecheckTimeoutSeconds: number;
     ProxyRequestTimeoutSeconds: number;

@@ -206,6 +206,7 @@ export class LocalSqliteStorage implements IStorage {
     deleteSkipConfig: Database.Statement;
     getAllSkipConfigs: Database.Statement;
     setPlaybackSession: Database.Statement;
+    deletePlaybackSession: Database.Statement;
     // admin_config
     getAdminConfig: Database.Statement;
     setAdminConfig: Database.Statement;
@@ -229,10 +230,7 @@ export class LocalSqliteStorage implements IStorage {
       : path.resolve(process.cwd(), 'data', 'moontv-data.json');
 
     const configuredPath =
-      dbPath ||
-      process.env.LOCAL_SQLITE_PATH ||
-      process.env.LOCAL_DB_PATH ||
-      defaultSqlitePath;
+      dbPath || process.env.LOCAL_DB_PATH || defaultSqlitePath;
 
     const isMemoryDb = configuredPath === ':memory:';
     const isLegacyJsonPath = configuredPath.toLowerCase().endsWith('.json');
@@ -458,6 +456,9 @@ export class LocalSqliteStorage implements IStorage {
           total_time = excluded.total_time,
           created_at = excluded.created_at,
           updated_at = excluded.updated_at`,
+      ),
+      deletePlaybackSession: this.db.prepare(
+        'DELETE FROM playback_sessions WHERE username = ? AND id = ?',
       ),
       // admin_config
       getAdminConfig: this.db.prepare(
@@ -933,6 +934,11 @@ export class LocalSqliteStorage implements IStorage {
       .all(...params) as PlaybackSession[];
 
     return rows;
+  }
+
+  async deletePlaybackSession(userName: string, id: string): Promise<void> {
+    const username = normalizeUsername(userName);
+    this.stmts.deletePlaybackSession.run(username, id);
   }
 
   async getPlaybackWatchTotals(

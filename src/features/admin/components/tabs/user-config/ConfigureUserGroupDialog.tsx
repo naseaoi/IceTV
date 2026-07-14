@@ -58,7 +58,7 @@ export function ConfigureUserGroupDialog({
             </span>
           </div>
           <p className='mt-1 text-sm text-blue-700 dark:text-blue-400'>
-            选择&ldquo;无用户组&rdquo;为无限制，选择特定用户组将限制用户只能访问该用户组允许的采集源
+            选择&ldquo;无用户组&rdquo;为无限制，选择特定用户组将限制用户只能访问该用户组允许的视频源
           </p>
         </div>
       </div>

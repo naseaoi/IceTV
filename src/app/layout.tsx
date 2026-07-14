@@ -6,6 +6,7 @@ import { Inter } from 'next/font/google';
 import { getPublicConfig } from '@/lib/config';
 import { SIDEBAR_COLLAPSED_STORAGE_KEY } from '@/lib/local-preferences';
 import { serializeForInlineScript } from '@/lib/script-serialization';
+import { DEFAULT_SITE_FOOTER_TEXT } from '@/lib/site-footer';
 import { getStorageType } from '@/lib/storage-type';
 import { CURRENT_UPDATE_BRANCH } from '@/lib/version';
 
@@ -38,6 +39,7 @@ const siteIcon = process.env.NEXT_PUBLIC_SITE_ICON || '';
 const announcement =
   process.env.ANNOUNCEMENT ||
   '本网站仅提供影视信息搜索服务，所有内容均来自第三方网站。本站不存储任何视频资源，不对任何内容的准确性、合法性、完整性负责。';
+const footerText = DEFAULT_SITE_FOOTER_TEXT;
 
 export function generateMetadata(): Metadata {
   return {
@@ -60,6 +62,7 @@ export default async function RootLayout({
   const initialSiteName = publicConfig.SiteName || siteName;
   const initialSiteIcon = publicConfig.SiteIcon || siteIcon;
   const initialAnnouncement = publicConfig.Announcement || announcement;
+  const initialFooterText = publicConfig.FooterText || footerText;
   const runtimeConfig = {
     STORAGE_TYPE: storageType,
     OPEN_REGISTER: publicConfig.OpenRegister,
@@ -75,7 +78,6 @@ export default async function RootLayout({
     ENABLE_LIVE_ENTRY: publicConfig.EnableLiveEntry,
     DEFAULT_AGGREGATE_SEARCH: publicConfig.DefaultAggregateSearch,
     ENABLE_OPTIMIZATION: publicConfig.EnableOptimization,
-    AUTO_SWITCH_SOURCE_ON_TIMEOUT: publicConfig.AutoSwitchSourceOnTimeout,
     LIVE_DIRECT_CONNECT: publicConfig.LiveDirectConnect,
     CUSTOM_CATEGORIES: publicConfig.CustomCategories,
     FLUID_SEARCH: publicConfig.FluidSearch,
@@ -86,6 +88,7 @@ export default async function RootLayout({
     SOURCE_FAILURE_COOLDOWN_SECONDS: publicConfig.SourceFailureCooldownSeconds,
     CONTINUE_WATCHING_LIMIT: publicConfig.ContinueWatchingLimit,
     COVER_IMAGE_CACHE_SIZE: publicConfig.CoverImageCacheSize,
+    SOURCE_COVER_PROXY_MODE: publicConfig.SourceCoverProxyMode,
   };
   const serializedRuntimeConfig = serializeForInlineScript(runtimeConfig);
   const serializedSidebarCollapsedStorageKey = serializeForInlineScript(
@@ -135,6 +138,7 @@ export default async function RootLayout({
               siteName={initialSiteName}
               siteIcon={initialSiteIcon}
               announcement={initialAnnouncement}
+              footerText={initialFooterText}
             >
               <CardInteractionProvider>
                 {children}

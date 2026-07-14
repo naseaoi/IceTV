@@ -131,10 +131,10 @@ function normalizeAdminConfig(value: unknown): AdminConfig {
   limitString(config.SiteConfig.SiteName, '站点名称', MAX_SHORT_STRING_LENGTH);
   limitString(config.SiteConfig.SiteIcon, '站点图标', MAX_LONG_STRING_LENGTH);
   limitString(config.SiteConfig.Announcement, '公告', MAX_LONG_STRING_LENGTH);
+  limitString(config.SiteConfig.FooterText, '底部声明', MAX_LONG_STRING_LENGTH);
   assertBoolean(config.SiteConfig.EnableLiveEntry, '直播入口');
   assertBoolean(config.SiteConfig.DefaultAggregateSearch, '默认聚合搜索');
   assertBoolean(config.SiteConfig.EnableOptimization, '优选和测速');
-  assertBoolean(config.SiteConfig.AutoSwitchSourceOnTimeout, '超时自动换源');
   assertBoolean(config.SiteConfig.LiveDirectConnect, 'IPTV直连');
   assertFiniteNumber(config.SiteConfig.SearchDownstreamMaxPage, '搜索页数');
   assertFiniteNumber(config.SiteConfig.SiteInterfaceCacheTime, '缓存时间');
@@ -205,7 +205,7 @@ function validateUserConfig(config: AdminConfig): void {
       assertBoolean(user.banned, '封禁状态');
     }
     if (user.enabledApis !== undefined) {
-      assertStringArray(user.enabledApis, '用户源权限', MAX_KEY_LENGTH);
+      assertStringArray(user.enabledApis, '用户视频源权限', MAX_KEY_LENGTH);
     }
     if (user.tags !== undefined) {
       assertStringArray(user.tags, '用户标签', MAX_SHORT_STRING_LENGTH);
@@ -223,7 +223,7 @@ function validateUserConfig(config: AdminConfig): void {
     for (const tag of config.UserConfig.Tags) {
       requireObject(tag, '用户组条目格式无效');
       limitString(tag.name, '用户组名称', MAX_SHORT_STRING_LENGTH);
-      assertStringArray(tag.enabledApis, '用户组源权限', MAX_KEY_LENGTH);
+      assertStringArray(tag.enabledApis, '用户组视频源权限', MAX_KEY_LENGTH);
     }
   }
 }

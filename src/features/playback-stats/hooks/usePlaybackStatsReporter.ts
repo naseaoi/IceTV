@@ -80,6 +80,25 @@ export function usePlaybackStatsReporter({
   const inFlightRef = useRef(false);
   const pendingSessionRef = useRef<PlaybackSession | null>(null);
 
+  const getActiveSession = useCallback(() => {
+    const current = sessionRef.current;
+    if (!current) return null;
+
+    const source = currentSourceRef.current;
+    const videoId = currentIdRef.current;
+    const episodeIndex = currentEpisodeIndexRef.current + 1;
+
+    if (
+      current.source !== source ||
+      current.videoId !== videoId ||
+      current.episodeIndex !== episodeIndex
+    ) {
+      return null;
+    }
+
+    return current;
+  }, [currentSourceRef, currentIdRef, currentEpisodeIndexRef]);
+
   const ensureSession = useCallback(() => {
     const source = currentSourceRef.current;
     const videoId = currentIdRef.current;
@@ -149,7 +168,7 @@ export function usePlaybackStatsReporter({
 
   const reportPlaybackStats = useCallback(
     (force = false) => {
-      const state = ensureSession();
+      const state = getActiveSession();
       if (!state) return;
 
       const now = Date.now();
@@ -198,7 +217,7 @@ export function usePlaybackStatsReporter({
       void flushNetworkQueue(payload);
     },
     [
-      ensureSession,
+      getActiveSession,
       artPlayerRef,
       stableCurrentTimeRef,
       detailRef,

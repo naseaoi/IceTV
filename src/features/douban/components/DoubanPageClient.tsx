@@ -1,17 +1,21 @@
 'use client';
 
+import { SlidersHorizontal } from 'lucide-react';
 import { useSearchParams } from 'next/navigation';
-import { useMemo } from 'react';
+import { useMemo, useState } from 'react';
 
 import DoubanCardSkeleton from '@/components/DoubanCardSkeleton';
 import DoubanCustomSelector from '@/components/DoubanCustomSelector';
 import DoubanSelector from '@/components/DoubanSelector';
+import MobileFilterSheet from '@/components/mobile/MobileFilterSheet';
+import AlertModal from '@/components/modals/AlertModal';
 import PageLayout from '@/components/PageLayout';
 import PosterCard from '@/components/PosterCard';
 import { VirtualizedGrid } from '@/components/VirtualizedGrid';
 import { DoubanPageIcon } from '@/features/douban/components/DoubanPageIcon';
 import { useDoubanFeed } from '@/features/douban/hooks/useDoubanFeed';
 import { useInfiniteScroll } from '@/features/douban/hooks/useInfiniteScroll';
+import { getDoubanFilterSummary } from '@/features/douban/lib/filter-summary';
 import {
   DOUBAN_GRID_CLASS,
   DOUBAN_GRID_ITEM_CLASS,
@@ -22,11 +26,12 @@ import {
   getDoubanActivePath,
   getDoubanPageDescription,
   getDoubanPageTitle,
+  normalizeDoubanType,
 } from '@/features/douban/lib/pageMeta';
 
 export function DoubanPageClient() {
   const searchParams = useSearchParams();
-  const type = searchParams.get('type') || 'movie';
+  const type = normalizeDoubanType(searchParams.get('type'));
 
   const {
     doubanData,
@@ -36,12 +41,15 @@ export function DoubanPageClient() {
     isLoadingMore,
     primarySelection,
     secondarySelection,
+    selectedWeekday,
     customCategories,
     handlePrimaryChange,
     handleSecondaryChange,
     handleMultiLevelChange,
     handleWeekdayChange,
     loadNextPage,
+    bangumiCalendarError,
+    clearBangumiCalendarError,
   } = useDoubanFeed(type);
 
   const skeletonData = useMemo(
@@ -49,6 +57,36 @@ export function DoubanPageClient() {
     [],
   );
   const canLoadMore = hasMore && !isLoadingMore && !loading && selectorsReady;
+  const [filterSheetOpen, setFilterSheetOpen] = useState(false);
+
+  const filterSummary = getDoubanFilterSummary({
+    type,
+    primarySelection,
+    secondarySelection,
+    selectedWeekday,
+    customCategories,
+  });
+
+  const selectorNode =
+    type !== 'custom' ? (
+      <DoubanSelector
+        type={type as 'movie' | 'tv' | 'show' | 'anime'}
+        primarySelection={primarySelection}
+        secondarySelection={secondarySelection}
+        onPrimaryChange={handlePrimaryChange}
+        onSecondaryChange={handleSecondaryChange}
+        onMultiLevelChange={handleMultiLevelChange}
+        onWeekdayChange={handleWeekdayChange}
+      />
+    ) : (
+      <DoubanCustomSelector
+        customCategories={customCategories}
+        primarySelection={primarySelection}
+        secondarySelection={secondarySelection}
+        onPrimaryChange={handlePrimaryChange}
+        onSecondaryChange={handleSecondaryChange}
+      />
+    );
 
   const loadingRef = useInfiniteScroll<HTMLDivElement>({
     enabled: canLoadMore,
@@ -56,43 +94,48 @@ export function DoubanPageClient() {
   });
 
   return (
-    <PageLayout activePath={getDoubanActivePath(type)}>
+    <PageLayout
+      activePath={getDoubanActivePath(type)}
+      mobileHeader={{
+        title: getDoubanPageTitle(type),
+        showBack: true,
+        actions: (
+          <button
+            type='button'
+            aria-label='打开筛选'
+            className='flex h-9 items-center gap-1.5 rounded-full px-3 text-sm text-gray-700 hover:bg-gray-200/50 dark:text-gray-200 dark:hover:bg-gray-700/50'
+            onClick={() => setFilterSheetOpen(true)}
+          >
+            <SlidersHorizontal className='h-4 w-4' />
+            筛选
+          </button>
+        ),
+      }}
+    >
       <div className='overflow-visible px-4 py-4 sm:px-10 sm:py-8'>
         <div className='mx-auto max-w-[95%]'>
-          <div className='mb-6 space-y-4 sm:mb-8 sm:space-y-6'>
-            <div>
-              <h1 className='mb-1 flex items-center gap-2 text-2xl font-bold text-gray-800 dark:text-gray-200 sm:mb-2 sm:text-3xl'>
-                <DoubanPageIcon type={type} className='h-6 w-6 sm:h-7 sm:w-7' />
-                {getDoubanPageTitle(type)}
-              </h1>
-              <p className='text-sm text-gray-600 dark:text-gray-400 sm:text-base'>
-                {getDoubanPageDescription(type, primarySelection)}
-              </p>
-            </div>
+          <div className='mb-4 space-y-3 sm:mb-8 sm:space-y-6'>
+            <h1 className='hidden items-center gap-2 text-xl font-bold text-gray-800 dark:text-gray-200 sm:mb-2 sm:flex sm:text-3xl'>
+              <DoubanPageIcon type={type} className='h-6 w-6 sm:h-7 sm:w-7' />
+              {getDoubanPageTitle(type)}
+            </h1>
+            <p className='hidden text-sm text-gray-600 dark:text-gray-400 sm:block sm:text-base'>
+              {getDoubanPageDescription(type, primarySelection)}
+            </p>
 
-            {type !== 'custom' ? (
-              <div className='rounded-2xl border border-gray-200/30 bg-white/60 p-4 backdrop-blur-sm dark:border-gray-700/30 dark:bg-gray-800/40 sm:p-6'>
-                <DoubanSelector
-                  type={type as 'movie' | 'tv' | 'show' | 'anime'}
-                  primarySelection={primarySelection}
-                  secondarySelection={secondarySelection}
-                  onPrimaryChange={handlePrimaryChange}
-                  onSecondaryChange={handleSecondaryChange}
-                  onMultiLevelChange={handleMultiLevelChange}
-                  onWeekdayChange={handleWeekdayChange}
-                />
-              </div>
-            ) : (
-              <div className='rounded-2xl border border-gray-200/30 bg-white/60 p-4 backdrop-blur-sm dark:border-gray-700/30 dark:bg-gray-800/40 sm:p-6'>
-                <DoubanCustomSelector
-                  customCategories={customCategories}
-                  primarySelection={primarySelection}
-                  secondarySelection={secondarySelection}
-                  onPrimaryChange={handlePrimaryChange}
-                  onSecondaryChange={handleSecondaryChange}
-                />
-              </div>
+            {filterSummary && (
+              <button
+                type='button'
+                className='block max-w-full truncate text-left text-sm text-gray-600 dark:text-gray-400 sm:hidden'
+                onClick={() => setFilterSheetOpen(true)}
+              >
+                {filterSummary}
+              </button>
             )}
+
+            <div className='hidden rounded-2xl border border-gray-200/30 bg-white/60 p-4 backdrop-blur-sm dark:border-gray-700/30 dark:bg-gray-800/40 sm:block sm:p-6'>
+              {selectorNode}
+            </div>
           </div>
 
           <div className='mt-8 overflow-visible'>
@@ -156,6 +199,23 @@ export function DoubanPageClient() {
           </div>
         </div>
       </div>
+
+      <MobileFilterSheet
+        open={filterSheetOpen}
+        onClose={() => setFilterSheetOpen(false)}
+      >
+        {selectorNode}
+      </MobileFilterSheet>
+
+      <AlertModal
+        isOpen={Boolean(bangumiCalendarError)}
+        onClose={clearBangumiCalendarError}
+        type='error'
+        title='番剧数据获取失败'
+        message={bangumiCalendarError || undefined}
+        showConfirm
+        confirmText='知道了'
+      />
     </PageLayout>
   );
 }

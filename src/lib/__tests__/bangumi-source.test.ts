@@ -5,6 +5,10 @@
   normalizeBangumiDataSource,
   readBangumiDataSource,
   readBangumiProxyUrl,
+  resetBangumiDataSource,
+  resetBangumiProxyUrl,
+  writeBangumiDataSource,
+  writeBangumiProxyUrl,
 } from '../bangumi-source';
 
 describe('normalizeBangumiDataSource', () => {
@@ -56,5 +60,22 @@ describe('readBangumiDataSource', () => {
     );
 
     expect(readBangumiProxyUrl()).toBe('https://local.example/fetch?url=');
+  });
+
+  it('writes normalized values and resets local overrides', () => {
+    window.RUNTIME_CONFIG = {
+      BANGUMI_DATA_SOURCE: 'server',
+      BANGUMI_PROXY: 'https://runtime.example/fetch?url=',
+    } as typeof window.RUNTIME_CONFIG;
+
+    expect(writeBangumiDataSource('unsupported')).toBe('direct');
+    writeBangumiProxyUrl('https://local.example/fetch?url=');
+    expect(readBangumiDataSource()).toBe('direct');
+    expect(readBangumiProxyUrl()).toBe('https://local.example/fetch?url=');
+
+    resetBangumiDataSource();
+    resetBangumiProxyUrl();
+    expect(readBangumiDataSource()).toBe('server');
+    expect(readBangumiProxyUrl()).toBe('https://runtime.example/fetch?url=');
   });
 });

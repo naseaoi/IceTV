@@ -94,7 +94,6 @@ function createConfig() {
       EnableLiveEntry: false,
       DefaultAggregateSearch: true,
       EnableOptimization: true,
-      AutoSwitchSourceOnTimeout: false,
       LiveDirectConnect: false,
       SearchDownstreamMaxPage: 5,
       SiteInterfaceCacheTime: 300,

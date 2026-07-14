@@ -75,10 +75,10 @@ describe('hls quality level controls', () => {
 
     expect(hls).toMatchObject({
       startLevel: -1,
-      currentLevel: -1,
+      currentLevel: 1,
       loadLevel: -1,
-      nextLevel: -1,
-      nextLoadLevel: -1,
+      nextLevel: 1,
+      nextLoadLevel: 1,
       autoLevelCapping: -1,
       __icetvManualQualityLocked: false,
     });
@@ -101,10 +101,10 @@ describe('hls quality level controls', () => {
 
     expect(hls).toMatchObject({
       startLevel: 2,
-      currentLevel: -1,
+      currentLevel: 1,
       loadLevel: -1,
-      nextLevel: -1,
-      nextLoadLevel: -1,
+      nextLevel: 1,
+      nextLoadLevel: 1,
       nextAutoLevel: 2,
       autoLevelCapping: -1,
       __icetvManualQualityLocked: false,

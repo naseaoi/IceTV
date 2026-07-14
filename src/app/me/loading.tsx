@@ -2,6 +2,7 @@ import PageLayout from '@/components/PageLayout';
 import { FavoritePreviewSkeleton } from '@/features/favorites/components/FavoritePreviewSkeleton';
 import { PlaybackHistorySkeleton } from '@/features/playback-stats/components/PlaybackHistorySkeleton';
 import { PlaybackStatsSkeleton } from '@/features/playback-stats/components/PlaybackStatsSkeleton';
+import { getFavoriteSkeletonCount } from '@/lib/favorites.server';
 
 function MineSwitchSkeleton() {
   return (
@@ -19,19 +20,36 @@ function MineSwitchSkeleton() {
   );
 }
 
-export default function MeLoading() {
+export default async function MeLoading() {
+  const favoriteSkeletonCount = await getFavoriteSkeletonCount();
+
   return (
     <PageLayout activePath='/'>
       <div className='overflow-visible px-2 pb-2 pt-4 sm:px-10 sm:pt-8'>
-        <div className='mb-4 flex justify-center'>
+        <div className='mb-4 hidden justify-center md:flex'>
           <MineSwitchSkeleton />
         </div>
 
         <div className='mx-auto max-w-[95%]'>
-          <div className='-mb-8 sm:-mb-10'>
-            <FavoritePreviewSkeleton />
-            <PlaybackStatsSkeleton />
-            <PlaybackHistorySkeleton />
+          <div className='mb-4 flex gap-3 md:hidden'>
+            {Array.from({ length: 3 }).map((_, index) => (
+              <div
+                key={index}
+                className='min-h-[64px] flex-1 animate-pulse rounded-xl bg-gray-200 dark:bg-gray-800'
+              />
+            ))}
+          </div>
+
+          <div className='-mb-3 flex flex-col sm:-mb-6'>
+            <div className='order-1'>
+              <FavoritePreviewSkeleton count={favoriteSkeletonCount} />
+            </div>
+            <div className='order-2 pb-4'>
+              <PlaybackStatsSkeleton />
+            </div>
+            <div className='order-3'>
+              <PlaybackHistorySkeleton />
+            </div>
           </div>
         </div>
       </div>

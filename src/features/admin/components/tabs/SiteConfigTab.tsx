@@ -26,16 +26,22 @@ import {
 import { DEFAULT_DOUBAN_IMAGE_PROXY_TYPE } from '@/lib/douban-source';
 import { localPreferenceToggleDefinitions } from '@/lib/local-preference-toggles';
 import { DEFAULT_RUNTIME_PARAMS } from '@/lib/runtime-params';
+import { DEFAULT_SITE_FOOTER_TEXT } from '@/lib/site-footer';
+import {
+  DEFAULT_SOURCE_COVER_PROXY_MODE,
+  normalizeSourceCoverProxyMode,
+  sourceCoverProxyModeOptions,
+} from '@/lib/source-cover-proxy';
 import { AdminConfig } from '@/types/admin';
 
 const DEFAULT_SITE_SETTINGS: SiteConfig = {
   SiteName: '',
   SiteIcon: '',
   Announcement: '',
+  FooterText: DEFAULT_SITE_FOOTER_TEXT,
   EnableLiveEntry: false,
   DefaultAggregateSearch: true,
   EnableOptimization: true,
-  AutoSwitchSourceOnTimeout: false,
   LiveDirectConnect: false,
   ...DEFAULT_RUNTIME_PARAMS,
   DoubanProxyType: 'direct',
@@ -44,6 +50,7 @@ const DEFAULT_SITE_SETTINGS: SiteConfig = {
   BangumiProxy: '',
   DoubanImageProxyType: DEFAULT_DOUBAN_IMAGE_PROXY_TYPE,
   DoubanImageProxy: '',
+  SourceCoverProxyMode: DEFAULT_SOURCE_COVER_PROXY_MODE,
   DisableYellowFilter: false,
   FluidSearch: true,
 };
@@ -53,14 +60,15 @@ type EditableSiteSettings = Pick<
   | 'SiteName'
   | 'SiteIcon'
   | 'Announcement'
+  | 'FooterText'
   | 'EnableLiveEntry'
   | 'DefaultAggregateSearch'
   | 'EnableOptimization'
-  | 'AutoSwitchSourceOnTimeout'
   | 'LiveDirectConnect'
   | 'DoubanProxyType'
   | 'BangumiDataSource'
   | 'DoubanImageProxyType'
+  | 'SourceCoverProxyMode'
   | 'DisableYellowFilter'
   | 'FluidSearch'
 >;
@@ -80,11 +88,12 @@ function buildSiteSettings(config: AdminConfig): SiteConfig {
       config.SiteConfig.DoubanImageProxyType,
     ),
     DoubanImageProxy: '',
+    SourceCoverProxyMode: normalizeSourceCoverProxyMode(
+      config.SiteConfig.SourceCoverProxyMode,
+    ),
     EnableLiveEntry: config.SiteConfig.EnableLiveEntry ?? false,
     DefaultAggregateSearch: config.SiteConfig.DefaultAggregateSearch ?? true,
     EnableOptimization: config.SiteConfig.EnableOptimization ?? true,
-    AutoSwitchSourceOnTimeout:
-      config.SiteConfig.AutoSwitchSourceOnTimeout ?? false,
     LiveDirectConnect: config.SiteConfig.LiveDirectConnect ?? false,
     DisableYellowFilter: config.SiteConfig.DisableYellowFilter ?? false,
     FluidSearch: config.SiteConfig.FluidSearch ?? true,
@@ -98,15 +107,18 @@ function normalizeEditableSiteSettings(
     SiteName: value.SiteName || '',
     SiteIcon: value.SiteIcon || '',
     Announcement: value.Announcement || '',
+    FooterText: value.FooterText || DEFAULT_SITE_FOOTER_TEXT,
     EnableLiveEntry: value.EnableLiveEntry ?? false,
     DefaultAggregateSearch: value.DefaultAggregateSearch ?? true,
     EnableOptimization: value.EnableOptimization ?? true,
-    AutoSwitchSourceOnTimeout: value.AutoSwitchSourceOnTimeout ?? false,
     LiveDirectConnect: value.LiveDirectConnect ?? false,
     DoubanProxyType: normalizeSiteDoubanProxyType(value.DoubanProxyType),
     BangumiDataSource: normalizeSiteBangumiDataSource(value.BangumiDataSource),
     DoubanImageProxyType: normalizeSiteDoubanImageProxyType(
       value.DoubanImageProxyType,
+    ),
+    SourceCoverProxyMode: normalizeSourceCoverProxyMode(
+      value.SourceCoverProxyMode,
     ),
     DisableYellowFilter: value.DisableYellowFilter ?? false,
     FluidSearch: value.FluidSearch ?? true,
@@ -192,7 +204,6 @@ const SiteConfigComponent = ({
     siteConfigKey:
       | 'DefaultAggregateSearch'
       | 'EnableOptimization'
-      | 'AutoSwitchSourceOnTimeout'
       | 'FluidSearch'
       | 'LiveDirectConnect',
   ) => {
@@ -421,7 +432,34 @@ const SiteConfigComponent = ({
                 Announcement: e.target.value,
               }))
             }
-            rows={1}
+            rows={3}
+            className='w-full resize-y rounded-lg border border-gray-300 bg-white px-3 py-2 text-gray-900 focus:border-transparent focus:ring-2 focus:ring-green-500 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100'
+          />
+        </div>
+
+        <div>
+          <div className='mb-2 flex items-end gap-2'>
+            <label
+              htmlFor='site-footer-text'
+              className='text-sm font-medium text-gray-700 dark:text-gray-300'
+            >
+              底部声明
+            </label>
+            <p className='text-xs text-gray-400 dark:text-gray-500'>
+              支持换行，留空时使用默认文案
+            </p>
+          </div>
+          <textarea
+            id='site-footer-text'
+            name='siteFooterText'
+            value={siteSettings.FooterText}
+            onChange={(e) =>
+              setSiteSettings((prev) => ({
+                ...prev,
+                FooterText: e.target.value,
+              }))
+            }
+            rows={3}
             className='w-full resize-y rounded-lg border border-gray-300 bg-white px-3 py-2 text-gray-900 focus:border-transparent focus:ring-2 focus:ring-green-500 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100'
           />
         </div>
@@ -513,6 +551,28 @@ const SiteConfigComponent = ({
               value={siteSettings.BangumiDataSource}
               onChange={(value) => handleBangumiDataSourceChange(value)}
               options={siteBangumiDataSourceOptions}
+            />
+          </div>
+        </div>
+
+        <div className='space-y-3'>
+          <div>
+            <label
+              htmlFor='site-source-cover-proxy-mode'
+              className='mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300'
+            >
+              源站封面加载
+            </label>
+            <AdminSelect
+              id='site-source-cover-proxy-mode'
+              value={siteSettings.SourceCoverProxyMode}
+              onChange={(value) =>
+                setSiteSettings((prev) => ({
+                  ...prev,
+                  SourceCoverProxyMode: normalizeSourceCoverProxyMode(value),
+                }))
+              }
+              options={sourceCoverProxyModeOptions}
             />
           </div>
         </div>

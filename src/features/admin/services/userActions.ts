@@ -308,7 +308,7 @@ export async function handleAdminUserAction({
           username !== targetUsername
         ) {
           return toActionResponse(
-            { error: '仅站长可配置其他管理员的采集源' },
+            { error: '仅站长可配置其他管理员的视频源权限' },
             { status: 403 },
           );
         }

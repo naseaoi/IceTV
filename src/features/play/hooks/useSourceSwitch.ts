@@ -6,15 +6,12 @@ import {
   type RefObject,
   type SetStateAction,
   useCallback,
-  useEffect,
-  useRef,
 } from 'react';
 
 import type {
   PlaybackRequestMode,
   SkipConfigState,
   VideoLoadingStage,
-  VideoQualityInfo,
 } from '@/features/play/hooks/usePlayPageState';
 import { saveDetailSnapshot } from '@/features/play/lib/detailSnapshot';
 import { resolveEpisodeTargetIndex } from '@/features/play/lib/episodeMapping';
@@ -35,10 +32,6 @@ import {
   deleteSkipConfig,
   saveSkipConfig,
 } from '@/lib/db.client';
-import {
-  clearSourceFailure,
-  markSourceFailed,
-} from '@/lib/failed-source-cooldown';
 import { savePlayIntent } from '@/lib/play-intent';
 import {
   getManagedVideo,
@@ -48,18 +41,6 @@ import { mergeSourceBundle } from '@/lib/source-bundle';
 import { SearchResult, SkipConfig } from '@/lib/types';
 
 const IS_DEVELOPMENT = process.env.NODE_ENV !== 'production';
-
-function parseLoadSpeedKBps(speed?: string): number {
-  if (!speed) return 0;
-  const match = speed.match(/^([\d.]+)\s*(Mbps|Mb\/s|KB\/s|MB\/s)$/);
-  if (!match) return 0;
-  const value = Number.parseFloat(match[1]);
-  if (!Number.isFinite(value) || value <= 0) return 0;
-  const unit = match[2];
-  if (unit === 'Mbps' || unit === 'Mb/s') return (value * 1024) / 8;
-  if (unit === 'MB/s') return value * 1024;
-  return value;
-}
 
 function hasDisplayText(value?: string): boolean {
   const text = value?.trim();
@@ -109,8 +90,6 @@ function mergeSourceSwitchDetail(
 
 interface UseSourceSwitchOptions {
   availableSources: SearchResult[];
-  precomputedVideoInfo: Map<string, VideoQualityInfo>;
-  autoSwitchSourceOnTimeout: boolean;
   currentEpisodeIndex: number;
 
   artPlayerRef: RefObject<Artplayer | null>;
@@ -125,8 +104,6 @@ interface UseSourceSwitchOptions {
   clearTargetEpisodeProgressRef: RefObject<boolean>;
   sourceSwitchEpisodeAnchorRef: RefObject<SourceSwitchEpisodeAnchor | null>;
   playbackRequestModeRef: RefObject<PlaybackRequestMode>;
-  failedSourcesRef: RefObject<Set<string>>;
-  autoFallbackInProgressRef: RefObject<boolean>;
   pendingSourceSwitchCleanupRef: RefObject<SourceSwitchCleanupTask | null>;
   sourceChangeRequestIdRef: RefObject<number>;
 
@@ -153,8 +130,6 @@ interface UseSourceSwitchOptions {
 export function useSourceSwitch(options: UseSourceSwitchOptions) {
   const {
     availableSources,
-    precomputedVideoInfo,
-    autoSwitchSourceOnTimeout,
     currentEpisodeIndex,
     artPlayerRef,
     currentSourceRef,
@@ -168,8 +143,6 @@ export function useSourceSwitch(options: UseSourceSwitchOptions) {
     clearTargetEpisodeProgressRef,
     sourceSwitchEpisodeAnchorRef,
     playbackRequestModeRef,
-    failedSourcesRef,
-    autoFallbackInProgressRef,
     pendingSourceSwitchCleanupRef,
     sourceChangeRequestIdRef,
     setError,
@@ -191,8 +164,6 @@ export function useSourceSwitch(options: UseSourceSwitchOptions) {
     cleanupPlayer,
   } = options;
 
-  const handleLoadingTimeoutRef = useRef<(() => void) | null>(null);
-
   const stopActiveHlsLoading = useCallback(() => {
     const video = artPlayerRef.current?.video as HTMLVideoElement | undefined;
     if (!video) return;
@@ -208,26 +179,13 @@ export function useSourceSwitch(options: UseSourceSwitchOptions) {
   }, [artPlayerRef, setRealtimeLoadSpeed]);
 
   const handleSourceChange = useCallback(
-    async (
-      newSource: string,
-      newId: string,
-      newTitle: string,
-      switchOptions?: { isAutoFallback?: boolean },
-    ) => {
+    async (newSource: string, newId: string, newTitle: string) => {
       if (
         newSource === currentSourceRef.current &&
         newId === currentIdRef.current
       ) {
         return;
       }
-
-      const isAutoFallback = switchOptions?.isAutoFallback === true;
-
-      if (!isAutoFallback) {
-        failedSourcesRef.current = new Set();
-        clearSourceFailure(`${newSource}-${newId}`);
-      }
-      autoFallbackInProgressRef.current = isAutoFallback;
 
       const targetSource = availableSources.find(
         (source) => source.source === newSource && source.id === newId,
@@ -236,9 +194,7 @@ export function useSourceSwitch(options: UseSourceSwitchOptions) {
         setError('未找到匹配结果');
         return;
       }
-      playbackRequestModeRef.current = isAutoFallback
-        ? 'auto-source'
-        : 'manual-source';
+      playbackRequestModeRef.current = 'manual-source';
 
       const currentRequestId = ++sourceChangeRequestIdRef.current;
       const previousSource = currentSourceRef.current;
@@ -257,9 +213,7 @@ export function useSourceSwitch(options: UseSourceSwitchOptions) {
         setVideoLoadingStage('sourceChanging');
         setIsVideoLoading(true);
         setVideoLoadingAttempt((prev) => prev + 1);
-        setRealtimeLoadSpeed(
-          isAutoFallback ? '正在尝试其他源...' : '正在切换源站...',
-        );
+        setRealtimeLoadSpeed('正在切换源站...');
         setError(null);
 
         if (artPlayerRef.current) {
@@ -320,9 +274,8 @@ export function useSourceSwitch(options: UseSourceSwitchOptions) {
         );
         let targetIndex = resolvedEpisodeTarget.index;
         let preserveProgress = resolvedEpisodeTarget.preserveProgress;
-        const clearTargetEpisodeProgress = isAutoFallback
-          ? false
-          : clearTargetEpisodeProgressRef.current;
+        const clearTargetEpisodeProgress =
+          clearTargetEpisodeProgressRef.current;
 
         if (!newDetail.episodes || targetIndex >= newDetail.episodes.length) {
           targetIndex = 0;
@@ -334,20 +287,6 @@ export function useSourceSwitch(options: UseSourceSwitchOptions) {
           !clearTargetEpisodeProgress &&
           episodeAnchor.episodeIndex > 0
         ) {
-          const targetKey = `${newSource}-${newId}`;
-          failedSourcesRef.current.add(targetKey);
-
-          if (isAutoFallback) {
-            markSourceFailed(targetKey, {
-              reason: 'missing-episode',
-              message: `missing episode ${episodeAnchor.episodeIndex + 1}`,
-            });
-            setIsVideoLoading(false);
-            setRealtimeLoadSpeed('');
-            handleLoadingTimeoutRef.current?.();
-            return;
-          }
-
           const targetEpisodeNumber = episodeAnchor.episodeIndex + 1;
           const notice = `该源没有第 ${targetEpisodeNumber} 集，已保留当前播放`;
           const player = artPlayerRef.current;
@@ -425,10 +364,6 @@ export function useSourceSwitch(options: UseSourceSwitchOptions) {
         setIsVideoLoading(false);
         setRealtimeLoadSpeed('');
         playbackRequestModeRef.current = 'initial';
-        markSourceFailed(`${newSource}-${newId}`, {
-          reason: 'source-switch',
-          message: err instanceof Error ? err.message : 'source switch failed',
-        });
         setError(err instanceof Error ? err.message : '换源失败');
       }
     },
@@ -447,8 +382,6 @@ export function useSourceSwitch(options: UseSourceSwitchOptions) {
       clearTargetEpisodeProgressRef,
       sourceSwitchEpisodeAnchorRef,
       playbackRequestModeRef,
-      failedSourcesRef,
-      autoFallbackInProgressRef,
       pendingSourceSwitchCleanupRef,
       sourceChangeRequestIdRef,
       setError,
@@ -474,92 +407,16 @@ export function useSourceSwitch(options: UseSourceSwitchOptions) {
   const handleLoadingTimeout = useCallback(() => {
     const curSource = currentSourceRef.current;
     const curId = currentIdRef.current;
-    const curDetail = detailRef.current;
-    const curEpisodeIndex = Math.max(
-      currentEpisodeIndex,
-      currentEpisodeIndexRef.current,
-    );
     if (!curSource || !curId) return;
 
-    const curKey = `${curSource}-${curId}`;
-    failedSourcesRef.current.add(curKey);
-    markSourceFailed(curKey, {
-      reason: 'timeout',
-      message: 'video loading timeout',
-    });
-
-    if (!autoSwitchSourceOnTimeout) {
-      setRealtimeLoadSpeed('当前源加载超时');
-      stopActiveHlsLoading();
-      return;
-    }
-    setRealtimeLoadSpeed('正在尝试其他源...');
-
-    const anchor = sourceSwitchEpisodeAnchorRef.current;
-    const referenceDetail = anchor?.detail || curDetail;
-    const referenceEpisodeIndex = anchor
-      ? anchor.episodeIndex
-      : curEpisodeIndex;
-
-    const candidates = availableSources.filter((s) => {
-      const key = `${s.source}-${s.id}`;
-      if (key === curKey) return false;
-      if (failedSourcesRef.current.has(key)) return false;
-      if (referenceDetail && referenceEpisodeIndex > 0) {
-        const resolved = resolveEpisodeTargetIndex(
-          referenceDetail,
-          referenceEpisodeIndex,
-          s,
-        );
-        if (!resolved.preserveProgress) {
-          return false;
-        }
-      }
-      return true;
-    });
-    if (candidates.length === 0) {
-      stopActiveHlsLoading();
-      return;
-    }
-
-    const ranked = [...candidates].sort((a, b) => {
-      const aInfo = precomputedVideoInfo.get(`${a.source}-${a.id}`);
-      const bInfo = precomputedVideoInfo.get(`${b.source}-${b.id}`);
-      const aSpeed = parseLoadSpeedKBps(aInfo?.loadSpeed);
-      const bSpeed = parseLoadSpeedKBps(bInfo?.loadSpeed);
-      return bSpeed - aSpeed;
-    });
-    const next = ranked[0];
-    if (!next) {
-      stopActiveHlsLoading();
-      return;
-    }
-
-    autoFallbackInProgressRef.current = true;
+    setRealtimeLoadSpeed('当前源加载超时');
     stopActiveHlsLoading();
-    void handleSourceChange(next.source, next.id, next.title, {
-      isAutoFallback: true,
-    });
   }, [
-    autoSwitchSourceOnTimeout,
-    availableSources,
-    precomputedVideoInfo,
-    currentEpisodeIndex,
     stopActiveHlsLoading,
     currentSourceRef,
     currentIdRef,
-    detailRef,
-    currentEpisodeIndexRef,
-    failedSourcesRef,
-    sourceSwitchEpisodeAnchorRef,
-    autoFallbackInProgressRef,
     setRealtimeLoadSpeed,
-    handleSourceChange,
   ]);
-
-  useEffect(() => {
-    handleLoadingTimeoutRef.current = handleLoadingTimeout;
-  }, [handleLoadingTimeout]);
 
   const finalizePendingSourceSwitchCleanup = useCallback(
     async (activeSource: string, activeId: string) => {

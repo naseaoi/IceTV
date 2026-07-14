@@ -1,5 +1,7 @@
 ﻿'use client';
 
+import { normalizeSearchQueryInput } from '@/features/search/lib/searchQuery';
+
 import { getAuthInfoFromBrowserCookie } from './auth.client';
 import {
   cacheManager,
@@ -200,7 +202,7 @@ export async function getSearchHistory(): Promise<string[]> {
 }
 
 export async function addSearchHistory(keyword: string): Promise<void> {
-  const trimmed = keyword.trim();
+  const trimmed = normalizeSearchQueryInput(keyword);
   if (!trimmed) return;
 
   const buildNewHistory = (arr: string[]): string[] => {
@@ -247,7 +249,7 @@ export async function clearSearchHistory(): Promise<void> {
 }
 
 export async function deleteSearchHistory(keyword: string): Promise<void> {
-  const trimmed = keyword.trim();
+  const trimmed = normalizeSearchQueryInput(keyword);
   if (!trimmed) return;
 
   return _writeSearchHistory({

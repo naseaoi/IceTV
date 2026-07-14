@@ -16,16 +16,12 @@ import {
   seedProbeResults,
   subscribe,
 } from '@/features/play/lib/sourceProbeStore';
-import {
-  type SourceFailureInfo,
-  getSourceFailure,
-} from '@/lib/failed-source-cooldown';
 import { readEnableOptimization } from '@/lib/local-preferences';
 import { collapseSourcesForDisplay } from '@/lib/source-bundle';
 import { normalizeTitleForSourceMatch } from '@/lib/source-match';
 import { SearchResult } from '@/lib/types';
 
-const VIDEO_INFO_BATCH_SIZE = 3;
+export const VIDEO_INFO_BATCH_SIZE = 4;
 
 interface SourcesTabProps {
   availableSources: SearchResult[];
@@ -122,7 +118,6 @@ const getQualityRank = (quality?: string): number => {
 export function sortSourcesForDisplay(
   displaySources: SearchResult[],
   probeSnapshot: ReadonlyMap<string, ProbeEntry>,
-  sourceFailures: ReadonlyMap<string, SourceFailureInfo>,
 ): SearchResult[] {
   return displaySources
     .map((source, index) => {
@@ -147,13 +142,9 @@ export function sortSourcesForDisplay(
             ? measuredVideoInfo.pingTime
             : Number.MAX_SAFE_INTEGER,
         hasMeasuredInfo,
-        coolingDown: sourceFailures.has(sourceKey),
       };
     })
     .sort((a, b) => {
-      if (a.coolingDown !== b.coolingDown) {
-        return a.coolingDown ? 1 : -1;
-      }
       if (a.sortStatusRank !== b.sortStatusRank) {
         return a.sortStatusRank - b.sortStatusRank;
       }
@@ -282,21 +273,9 @@ export const SourcesTab: React.FC<SourcesTabProps> = ({
     [onSourceChange],
   );
 
-  const sourceFailures = useMemo(() => {
-    const map = new Map<string, SourceFailureInfo>();
-    for (const source of displaySources) {
-      const key = `${source.source}-${source.id}`;
-      const failure = getSourceFailure(key);
-      if (failure.coolingDown) {
-        map.set(key, failure);
-      }
-    }
-    return map;
-  }, [displaySources]);
-
   const sortedSources = useMemo(() => {
-    return sortSourcesForDisplay(displaySources, probeSnapshot, sourceFailures);
-  }, [displaySources, probeSnapshot, sourceFailures]);
+    return sortSourcesForDisplay(displaySources, probeSnapshot);
+  }, [displaySources, probeSnapshot]);
 
   const scrollCurrentIntoView = useCallback((smooth = true) => {
     const listContainer = listContainerRef.current;
@@ -437,12 +416,6 @@ export const SourcesTab: React.FC<SourcesTabProps> = ({
             const sourceKey = `${source.source}-${source.id}`;
             const videoInfo = probeSnapshot.get(sourceKey)?.info;
             const isTesting = videoInfo?.loadSpeed === '测量中...';
-            const failureInfo = sourceFailures.get(sourceKey);
-            const isCoolingDown = !!failureInfo;
-            const failureLabel = failureInfo?.label || '近期失败';
-            const failureTitle = failureInfo
-              ? `${failureLabel}${failureInfo.count > 1 ? ` · ${failureInfo.count}次` : ''}`
-              : undefined;
             const episodeCount = Math.max(
               source.episodes.length,
               source.episodes_titles?.length || 0,
@@ -461,11 +434,8 @@ export const SourcesTab: React.FC<SourcesTabProps> = ({
                   ${
                     isCurrentSource
                       ? 'bg-green-50 ring-1 ring-green-500/30 dark:bg-green-500/10'
-                      : isCoolingDown
-                        ? 'cursor-pointer bg-gray-50/80 opacity-60 ring-1 ring-gray-200/60 hover:bg-gray-100/80 hover:opacity-100 hover:ring-gray-300/60 dark:bg-white/[0.04] dark:ring-white/[0.06] dark:hover:bg-white/[0.08] dark:hover:ring-white/[0.1]'
-                        : 'cursor-pointer bg-gray-50/80 ring-1 ring-gray-200/60 hover:bg-gray-100/80 hover:ring-gray-300/60 dark:bg-white/[0.04] dark:ring-white/[0.06] dark:hover:bg-white/[0.08] dark:hover:ring-white/[0.1]'
+                      : 'cursor-pointer bg-gray-50/80 ring-1 ring-gray-200/60 hover:bg-gray-100/80 hover:ring-gray-300/60 dark:bg-white/[0.04] dark:ring-white/[0.06] dark:hover:bg-white/[0.08] dark:hover:ring-white/[0.1]'
                   }`.trim()}
-                title={failureTitle}
               >
                 <div className='contents'>
                   <div className='group/title relative min-w-0 flex-1'>
@@ -517,16 +487,10 @@ export const SourcesTab: React.FC<SourcesTabProps> = ({
                   <span className='truncate rounded-full bg-gray-100 px-1.5 py-0.5 text-[10px] font-medium text-gray-600 dark:bg-white/[0.08] dark:text-gray-400'>
                     {source.source_name}
                   </span>
-                  {isCoolingDown ? (
-                    <span className='flex-shrink-0 text-[10px] font-medium text-red-400 dark:text-red-400/80'>
-                      {failureLabel}
+                  {episodeCount > 1 && (
+                    <span className='flex-shrink-0 text-[10px] text-gray-400 dark:text-gray-500'>
+                      {episodeCount}集
                     </span>
-                  ) : (
-                    episodeCount > 1 && (
-                      <span className='flex-shrink-0 text-[10px] text-gray-400 dark:text-gray-500'>
-                        {episodeCount}集
-                      </span>
-                    )
                   )}
                 </div>
 

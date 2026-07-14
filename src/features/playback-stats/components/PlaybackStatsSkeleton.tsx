@@ -78,7 +78,7 @@ function TopContentSkeleton() {
 
 export function PlaybackStatsSkeleton() {
   return (
-    <section className='mb-4'>
+    <section className='mb-2'>
       <SectionHeaderSkeleton />
       <div className='grid min-w-0 gap-3 sm:grid-cols-2'>
         <StatsCardSkeleton />

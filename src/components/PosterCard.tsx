@@ -9,6 +9,10 @@ import CoverImage from '@/components/CoverImage';
 import { useLongPress } from '@/hooks/useLongPress';
 import { getAuthInfoFromBrowserCookie } from '@/lib/auth.client';
 import {
+  getCurrentNavigationPath,
+  withReturnTo,
+} from '@/lib/navigation-return';
+import {
   canUseHoverPrefetch,
   canUseNetworkPrefetch,
   findLocalPlaybackTargetByTitle,
@@ -118,7 +122,7 @@ function PosterCard({
       transferWarmedSearchToAggregateGroup(title);
       warmupSearchForTitle(title);
     }
-    router.push(buildPlayUrl());
+    router.push(withReturnTo(buildPlayUrl(), getCurrentNavigationPath()));
   }, [buildPlayUrl, getLoginRedirectUrl, router, title, year]);
 
   // hover / focus 预热：提前触发标题聚合搜索并预取播放页路由

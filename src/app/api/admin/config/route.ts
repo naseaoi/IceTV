@@ -1,7 +1,7 @@
 ﻿import { NextRequest, NextResponse } from 'next/server';
 
 import { isGuardFailure, requireAdmin } from '@/lib/api-auth';
-import { getConfig } from '@/lib/config';
+import { getConfigForRead } from '@/lib/config';
 import { AdminConfigResult } from '@/types/admin';
 
 export const runtime = 'nodejs';
@@ -13,7 +13,7 @@ export async function GET(request: NextRequest) {
     });
     if (isGuardFailure(guardResult)) return guardResult.response;
 
-    const config = await getConfig();
+    const config = await getConfigForRead();
     const result: AdminConfigResult = {
       Role: guardResult.isOwner ? 'owner' : 'admin',
       Config: config,

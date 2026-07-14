@@ -1,6 +1,9 @@
 'use client';
 
-import { dedupePlaybackSessionsByTitle } from '@/features/playback-stats/lib/history';
+import {
+  dedupePlaybackSessionsByTitle,
+  filterPlaybackHistorySessions,
+} from '@/features/playback-stats/lib/history';
 import type {
   PlaybackHistoryResponse,
   PlaybackStatsSummary,
@@ -35,9 +38,12 @@ export function getCachedPlaybackHistorySnapshot(): PlaybackHistoryResponse | nu
       : null;
   return snapshot
     ? {
-        items: dedupePlaybackSessionsByTitle(snapshot.items, {
-          mergeWatchSeconds: true,
-        }),
+        items: dedupePlaybackSessionsByTitle(
+          filterPlaybackHistorySessions(snapshot.items),
+          {
+            mergeWatchSeconds: true,
+          },
+        ),
         nextCursor: snapshot.nextCursor,
       }
     : null;
@@ -51,10 +57,25 @@ export function cachePlaybackHistorySnapshot(
   playbackHistoryCache = {
     username,
     data: {
-      items: dedupePlaybackSessionsByTitle(snapshot.items, {
-        mergeWatchSeconds: true,
-      }),
+      items: dedupePlaybackSessionsByTitle(
+        filterPlaybackHistorySessions(snapshot.items),
+        {
+          mergeWatchSeconds: true,
+        },
+      ),
       nextCursor: snapshot.nextCursor,
+    },
+  };
+}
+
+export function removePlaybackHistorySnapshotItem(id: string): void {
+  const username = getAuthInfoFromBrowserCookie()?.username;
+  if (!username || playbackHistoryCache?.username !== username) return;
+  playbackHistoryCache = {
+    username,
+    data: {
+      items: playbackHistoryCache.data.items.filter((item) => item.id !== id),
+      nextCursor: playbackHistoryCache.data.nextCursor,
     },
   };
 }
@@ -123,4 +144,24 @@ export async function getPlaybackHistory(
     cachePlaybackHistorySnapshot(history);
   }
   return history;
+}
+
+export async function deletePlaybackHistoryItem(id: string): Promise<void> {
+  const normalizedId = id.trim();
+  if (!/^[a-zA-Z0-9_-]{8,80}$/.test(normalizedId)) {
+    throw new Error('Invalid playback history id');
+  }
+
+  const response = await fetch(
+    `/api/playback-stats/history?id=${encodeURIComponent(normalizedId)}`,
+    {
+      method: 'DELETE',
+      cache: 'no-store',
+    },
+  );
+  if (!response.ok) {
+    throw new Error(`Delete playback history failed: ${response.status}`);
+  }
+
+  removePlaybackHistorySnapshotItem(normalizedId);
 }

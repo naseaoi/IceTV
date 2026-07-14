@@ -2,10 +2,10 @@ export interface SiteConfig {
   SiteName: string;
   SiteIcon: string; // 站点图标 URL（外部链接或 /api/admin/site-icon 本地路径）
   Announcement: string;
+  FooterText: string;
   EnableLiveEntry: boolean;
   DefaultAggregateSearch: boolean;
   EnableOptimization: boolean;
-  AutoSwitchSourceOnTimeout: boolean;
   LiveDirectConnect: boolean;
   SearchDownstreamMaxPage: number;
   SiteInterfaceCacheTime: number;
@@ -17,6 +17,7 @@ export interface SiteConfig {
   SourceFailureCooldownSeconds: number;
   ContinueWatchingLimit: number;
   CoverImageCacheSize: number;
+  SourceCoverProxyMode: 'auto' | 'browser' | 'server';
   DataImportPlaybackSessionsLimit: number;
   LivePrecheckTimeoutSeconds: number;
   ProxyRequestTimeoutSeconds: number;

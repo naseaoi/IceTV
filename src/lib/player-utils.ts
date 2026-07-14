@@ -1,7 +1,4 @@
-/**
- * 播放器公共工具模块
- * 提取 useArtPlayer / useLivePlayer 中共用的函数和配置
- */
+import { resolveHlsBufferDefaults } from '@/lib/hls-buffer-policy';
 
 // ---------------------------------------------------------------------------
 // 视频源管理
@@ -45,6 +42,29 @@ export function formatBytesPerSecond(bytesPerSecond: number): string {
   return `${kb.toFixed(1)} KB/s`;
 }
 
+export function showTimedArtNotice(
+  player: {
+    constructor?: Function & { NOTICE_TIME?: number };
+    notice?: { show: string };
+  } | null,
+  message: string,
+  durationMs = 2000,
+): void {
+  if (!player?.notice) return;
+
+  const constructorRef = player.constructor;
+  const previousDuration = constructorRef?.NOTICE_TIME;
+  if (constructorRef && Number.isFinite(durationMs) && durationMs > 0) {
+    constructorRef.NOTICE_TIME = Math.floor(durationMs);
+  }
+
+  player.notice.show = message;
+
+  if (constructorRef && typeof previousDuration === 'number') {
+    constructorRef.NOTICE_TIME = previousDuration;
+  }
+}
+
 // ---------------------------------------------------------------------------
 // HLS 初始带宽自适应估算
 // ---------------------------------------------------------------------------
@@ -80,44 +100,21 @@ function resolveInitialBandwidthEstimate(): number {
   }
 }
 
-// ---------------------------------------------------------------------------
-// HLS 缓冲策略自适应（桌面 vs 移动 / 低内存设备）
-// ---------------------------------------------------------------------------
-
-function shouldUseLightBuffer(): boolean {
-  if (typeof navigator === 'undefined') return false;
-
-  const deviceMemory = (navigator as Navigator & { deviceMemory?: number })
-    .deviceMemory;
-  if (
-    typeof deviceMemory === 'number' &&
-    deviceMemory > 0 &&
-    deviceMemory <= 4
-  ) {
-    return true;
-  }
-
-  const ua = navigator.userAgent || '';
-  if (/Android|iPhone|iPad|iPod|Mobile|Tablet/i.test(ua)) return true;
-
-  return false;
-}
-
 function resolveBufferDefaults() {
-  if (shouldUseLightBuffer()) {
-    return {
-      maxBufferLength: 30,
-      maxMaxBufferLength: 60,
-      backBufferLength: 30,
-      maxBufferSize: 30 * 1000 * 1000, // 30 MB
-    };
+  if (typeof navigator === 'undefined') {
+    return resolveHlsBufferDefaults({});
   }
-  return {
-    maxBufferLength: 90,
-    maxMaxBufferLength: 600,
-    backBufferLength: 90,
-    maxBufferSize: 120 * 1000 * 1000,
+
+  const navigatorWithRuntimeInfo = navigator as Navigator & {
+    connection?: NetworkInfoLike;
+    deviceMemory?: number;
   };
+  return resolveHlsBufferDefaults({
+    saveData: navigatorWithRuntimeInfo.connection?.saveData,
+    effectiveType: navigatorWithRuntimeInfo.connection?.effectiveType,
+    deviceMemory: navigatorWithRuntimeInfo.deviceMemory,
+    userAgent: navigator.userAgent || '',
+  });
 }
 
 // ---------------------------------------------------------------------------

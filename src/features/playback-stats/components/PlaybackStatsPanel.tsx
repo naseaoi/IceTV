@@ -272,7 +272,7 @@ export function PlaybackStatsPanel() {
   }
 
   return (
-    <section className='mb-4'>
+    <section className='mb-2'>
       <h2 className='mb-4 flex items-center gap-2 text-xl font-bold text-gray-800 dark:text-gray-200'>
         <BarChart3 className='h-5 w-5 text-green-500' />
         观看统计

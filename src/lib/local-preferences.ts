@@ -4,6 +4,7 @@ export const FLUID_SEARCH_STORAGE_KEY = 'fluidSearch';
 export const LIVE_DIRECT_CONNECT_STORAGE_KEY = 'liveDirectConnect';
 export const BLOCK_AD_STORAGE_KEY = 'enable_blockad';
 export const PREFERRED_QUALITY_STORAGE_KEY = 'preferredQuality';
+export const SOURCE_PREFERRED_QUALITY_STORAGE_PREFIX = 'preferredQuality:';
 export const SIDEBAR_COLLAPSED_STORAGE_KEY = 'sidebarCollapsed';
 export const SEEN_ANNOUNCEMENT_STORAGE_KEY = 'hasSeenAnnouncement';
 
@@ -186,8 +187,9 @@ export type PreferredQualityPreference =
   | { mode: 'auto' }
   | { mode: 'manual'; height: number };
 
-export function readPreferredQualityPreference(): PreferredQualityPreference {
-  const raw = readStoredString(PREFERRED_QUALITY_STORAGE_KEY);
+function parsePreferredQualityPreference(
+  raw: string | undefined,
+): PreferredQualityPreference {
   if (!raw) {
     return { mode: 'default' };
   }
@@ -200,9 +202,51 @@ export function readPreferredQualityPreference(): PreferredQualityPreference {
     : { mode: 'default' };
 }
 
+function getSourcePreferredQualityStorageKey(sourceKey: string): string | null {
+  const normalizedSourceKey = sourceKey.trim();
+  if (!/^[a-zA-Z0-9_-]{1,64}$/.test(normalizedSourceKey)) {
+    return null;
+  }
+  return `${SOURCE_PREFERRED_QUALITY_STORAGE_PREFIX}${normalizedSourceKey}`;
+}
+
+export function readPreferredQualityPreference(): PreferredQualityPreference {
+  return parsePreferredQualityPreference(
+    readStoredString(PREFERRED_QUALITY_STORAGE_KEY),
+  );
+}
+
 export function writePreferredQualityHeight(height: number | null) {
   writeStoredString(
     PREFERRED_QUALITY_STORAGE_KEY,
     height && height > 0 ? String(height) : 'auto',
   );
+}
+
+export function readSourcePreferredQualityPreference(
+  sourceKey: string,
+): PreferredQualityPreference {
+  const storageKey = getSourcePreferredQualityStorageKey(sourceKey);
+  if (!storageKey) {
+    return { mode: 'default' };
+  }
+  const sourcePreference = readStoredString(storageKey);
+  if (sourcePreference !== undefined) {
+    return parsePreferredQualityPreference(sourcePreference);
+  }
+  if (sourceKey === 'xigua') {
+    return readPreferredQualityPreference();
+  }
+  return { mode: 'default' };
+}
+
+export function writeSourcePreferredQualityHeight(
+  sourceKey: string,
+  height: number | null,
+): void {
+  const storageKey = getSourcePreferredQualityStorageKey(sourceKey);
+  if (!storageKey) {
+    return;
+  }
+  writeStoredString(storageKey, height && height > 0 ? String(height) : 'auto');
 }

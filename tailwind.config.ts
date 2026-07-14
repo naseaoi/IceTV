@@ -10,12 +10,14 @@ const config: Config = {
     './src/features/**/*.{js,ts,jsx,tsx,mdx}',
   ],
   theme: {
-    extend: {
-      screens: {
-        'mobile-landscape': {
-          raw: '(orientation: landscape) and (max-height: 700px)',
-        },
+    screens: {
+      xs: '480px',
+      ...defaultTheme.screens,
+      'mobile-landscape': {
+        raw: '(orientation: landscape) and (max-height: 700px)',
       },
+    },
+    extend: {
       fontFamily: {
         primary: [
           'Inter',
