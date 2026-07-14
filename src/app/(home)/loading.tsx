@@ -36,10 +36,10 @@ function SkeletonRow({
           <div key={index} className='contents'>
             {mobileContinue ? (
               <>
-                <div className='md:hidden'>
+                <div className='shrink-0 md:hidden'>
                   <MobileContinueCardSkeleton />
                 </div>
-                <div className='hidden md:block'>
+                <div className='hidden shrink-0 md:block'>
                   <HomePosterCardSkeleton withSubtitle={withSubtitle} />
                 </div>
               </>

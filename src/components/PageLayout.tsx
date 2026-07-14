@@ -54,7 +54,7 @@ const PageLayout = ({
 
         {/* 主内容区域 */}
         <div
-          className={`min-w-0 flex-1 transition-[margin] duration-300 ease-[cubic-bezier(0.25,0.1,0.25,1)] md:flex md:flex-col ${
+          className={`flex min-w-0 flex-1 flex-col transition-[margin] duration-300 ease-[cubic-bezier(0.25,0.1,0.25,1)] ${
             isPlayerPage ? 'md:h-dvh md:min-h-0' : ''
           }`}
         >
@@ -76,13 +76,15 @@ const PageLayout = ({
                     activePath === '/search'
                       ? 'mt-0'
                       : 'mt-[calc(3rem+env(safe-area-inset-top))]'
-                  } ${showBottomNav ? 'mb-14' : 'mb-0'}`
+                  } mb-0 ${showFooter ? 'flex flex-col' : ''}`
             }`}
             style={
               isPlayerPage
                 ? undefined
                 : {
-                    paddingBottom: 'env(safe-area-inset-bottom)',
+                    paddingBottom: showBottomNav
+                      ? 'calc(3.5rem + env(safe-area-inset-bottom))'
+                      : 'env(safe-area-inset-bottom)',
                   }
             }
           >
@@ -93,7 +95,9 @@ const PageLayout = ({
               </>
             ) : (
               <>
-                {children}
+                <div className={showFooter ? 'flex-1' : undefined}>
+                  {children}
+                </div>
                 {showFooter && <SiteFooter />}
               </>
             )}

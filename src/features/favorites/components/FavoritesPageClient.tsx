@@ -6,13 +6,16 @@ import { useState } from 'react';
 import HomePosterCardSkeleton from '@/components/HomePosterCardSkeleton';
 import ConfirmModal from '@/components/modals/ConfirmModal';
 import PageLayout from '@/components/PageLayout';
-import { FavoriteGrid } from '@/features/favorites/components/FavoriteGrid';
+import {
+  FAVORITE_GRID_CLASS,
+  FavoriteGrid,
+} from '@/features/favorites/components/FavoriteGrid';
 import { useFavoriteItems } from '@/features/favorites/hooks/useFavoriteItems';
 import { HomeMineSwitch } from '@/features/home/components/HomeMineSwitch';
 
 function FavoriteGridSkeleton({ count = 12 }: { count?: number }) {
   return (
-    <div className='grid grid-cols-3 justify-start gap-x-3 gap-y-6 px-0 xs:grid-cols-4 sm:grid-cols-[repeat(auto-fill,_180px)] sm:gap-x-6 sm:gap-y-14 sm:px-2'>
+    <div className={FAVORITE_GRID_CLASS}>
       {Array.from({ length: count }).map((_, index) => (
         <div key={index} className='w-full sm:w-[180px]'>
           <HomePosterCardSkeleton withSubtitle />
@@ -30,6 +33,12 @@ export function FavoritesPageClient({
   const { favoriteItems, loading, skeletonCount, clearFavorites } =
     useFavoriteItems(true, favoriteSkeletonCount);
   const [showClearConfirm, setShowClearConfirm] = useState(false);
+  const favoriteCount =
+    favoriteItems.length > 0
+      ? favoriteItems.length
+      : loading
+        ? skeletonCount
+        : 0;
 
   return (
     <PageLayout
@@ -42,19 +51,24 @@ export function FavoritesPageClient({
         </div>
 
         <div className='mx-auto max-w-[95%]'>
-          <div className='mb-6 flex items-center justify-end sm:justify-between'>
+          <div className='mb-6 flex items-center justify-between'>
             <h1 className='hidden items-center gap-2 text-2xl font-bold text-gray-900 dark:text-gray-100 sm:flex'>
               <Star className='h-6 w-6 text-amber-500' />
               我的收藏
             </h1>
-            {favoriteItems.length > 0 && (
-              <button
-                className='text-sm text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200'
-                onClick={() => setShowClearConfirm(true)}
-              >
-                清空
-              </button>
-            )}
+            <div className='flex flex-1 items-center justify-between gap-4 sm:flex-none sm:justify-end'>
+              <span className='text-sm text-gray-500 dark:text-gray-400'>
+                {favoriteCount} 部收藏
+              </span>
+              {favoriteItems.length > 0 && (
+                <button
+                  className='text-sm text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200'
+                  onClick={() => setShowClearConfirm(true)}
+                >
+                  清空
+                </button>
+              )}
+            </div>
           </div>
 
           {loading && skeletonCount > 0 && favoriteItems.length === 0 ? (

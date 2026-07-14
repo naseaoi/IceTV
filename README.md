@@ -67,10 +67,13 @@
 
 ## 部署
 
-本项目支持两种部署方式：
+本项目支持以下常见部署方式：
 
 - Docker + 本地 SQLite
+- Docker + MySQL
 - Vercel + MySQL 云数据库
+
+Docker 镜像同时包含 SQLite 和 MySQL 驱动。未显式设置存储类型时，配置了 `DATABASE_URL` 会自动使用 MySQL，否则使用 SQLite。
 
 ### 服务器本地 SQLite 存储
 
@@ -100,6 +103,63 @@ volumes:
 - 升级镜像前请保留 `icetv-data` 卷，避免数据丢失。
 - 建议定期备份 `icetv-data` 卷。
 
+### Docker + MySQL 存储
+
+以下示例会同时启动 IceTV 和 MySQL 8.4：
+
+```yml
+services:
+  mysql:
+    image: mysql:8.4
+    container_name: icetv-mysql
+    restart: unless-stopped
+    environment:
+      MYSQL_DATABASE: icetv
+      MYSQL_USER: icetv
+      MYSQL_PASSWORD: replace_with_mysql_password
+      MYSQL_ROOT_PASSWORD: replace_with_mysql_root_password
+    volumes:
+      - icetv-mysql:/var/lib/mysql
+    healthcheck:
+      test:
+        [
+          'CMD-SHELL',
+          'mysqladmin ping -h 127.0.0.1 -u root -p"$${MYSQL_ROOT_PASSWORD}" --silent',
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+
+  icetv-core:
+    image: ghcr.io/naseaoi/icetv:latest
+    container_name: icetv-core
+    restart: unless-stopped
+    depends_on:
+      mysql:
+        condition: service_healthy
+    ports:
+      - '3000:3000'
+    environment:
+      ICETV_USERNAME: admin
+      ICETV_PASSWORD: admin_password
+      AUTH_SECRET: replace_with_random_auth_secret
+      CRON_SECRET: replace_with_random_secret
+      NEXT_PUBLIC_STORAGE_TYPE: mysql
+      DATABASE_URL: mysql://icetv:replace_with_mysql_password@mysql:3306/icetv
+
+volumes:
+  icetv-mysql:
+```
+
+说明：
+
+- IceTV 首次使用存储功能时会自动创建所需数据表，数据库账号需要拥有目标数据库的建表和读写权限。
+- 同一 Compose 网络内应使用 MySQL 服务名 `mysql`，不能使用 `localhost`。连接宿主机上的 MySQL 时，Windows 和 macOS Docker Desktop 可使用 `host.docker.internal`。
+- 用户名或密码包含 `@`、`:`、`/`、`#` 等字符时，需要在 `DATABASE_URL` 中进行 URL 编码。
+- 升级或重建容器前请保留并备份 `icetv-mysql` 卷。
+- 使用已有 MySQL 服务时可以移除示例中的 `mysql` 服务和 `depends_on`，将 `DATABASE_URL` 指向实际数据库地址。
+
 ### Vercel + MySQL 云数据库
 
 Vercel 项目中至少配置以下环境变量：
@@ -109,8 +169,11 @@ ICETV_USERNAME=admin
 ICETV_PASSWORD=your_strong_password
 AUTH_SECRET=replace_with_random_auth_secret
 CRON_SECRET=replace_with_random_cron_secret
-DATABASE_URL=mysql://user:password@host:3306/dbname?ssl-mode=REQUIRED
+NEXT_PUBLIC_STORAGE_TYPE=mysql
+DATABASE_URL=mysql://user:password@host:3306/dbname
 ```
+
+云数据库要求 TLS 时，通过 `MYSQL_SSL_CA` 提供 CA PEM 文本。连接串中的 `ssl-mode` 参数不会启用 TLS。
 
 ## 配置文件
 
@@ -164,24 +227,24 @@ IceTV 支持标准的苹果 CMS V10 API 格式。
 
 ## 环境变量
 
-| 变量                            | 用途           | 必填           | 默认值                              | 可选值 / 格式                                                    |
-| ------------------------------- | -------------- | -------------- | ----------------------------------- | ---------------------------------------------------------------- |
-| `ICETV_USERNAME`                | 站长账号       | 是             | 无                                  | 任意字符串                                                       |
-| `ICETV_PASSWORD`                | 站长密码       | 是             | 无                                  | 任意字符串                                                       |
-| `AUTH_SECRET`                   | 签名密钥       | 是             | 无                                  | 高熵随机字符串，至少 32 字符；别名：`ICETV_AUTH_SECRET`          |
-| `CRON_SECRET`                   | 定时任务密钥   | Docker 必填    | 无                                  | 高熵随机字符串；别名：`ICETV_CRON_SECRET` / `VERCEL_CRON_SECRET` |
-| `LEGACY_COOKIE_CUTOFF_DATE`     | 旧登录态截止   | 否             | `2026-08-01T00:00:00.000Z`          | ISO 日期字符串                                                   |
-| `AUTH_SESSION_TTL_HOURS`        | 登录态时长     | 否             | `168`                               | 正整数                                                           |
-| `NEXT_PUBLIC_STORAGE_TYPE`      | 存储类型       | 否             | 自动识别，默认 `localdb`            | `localdb` / `mysql`                                              |
-| `LOCAL_DB_PATH`                 | SQLite 路径    | 否             | `/data/icetv-data.sqlite`（Docker） | 绝对路径；别名：`LOCAL_SQLITE_PATH`                              |
-| `DATABASE_URL`                  | MySQL 连接     | MySQL 模式必填 | 无                                  | `mysql://...`                                                    |
-| `MYSQL_SSL_CA`                  | MySQL CA       | 否             | 无                                  | PEM 文本                                                         |
-| `MYSQL_SSL_REJECT_UNAUTHORIZED` | MySQL SSL      | 否             | `true`                              | `true` / `false`                                                 |
-| `MYSQL_CONNECTION_LIMIT`        | MySQL 连接池   | 否             | `5`                                 | 正整数                                                           |
-| `MYSQL_MAX_IDLE`                | MySQL 空闲池   | 否             | 同连接池上限                        | 正整数                                                           |
-| `MYSQL_IDLE_TIMEOUT_MS`         | MySQL 空闲超时 | 否             | `60000`                             | 毫秒                                                             |
-| `NEXT_PUBLIC_UPDATE_REPOS`      | 版本检查       | 否             | `naseaoi/IceTV`                     | `owner/repo,owner/repo...`                                       |
-| `NEXT_PUBLIC_UPDATE_BRANCH`     | 版本检查       | 否             | `main`                              | 分支名                                                           |
+| 变量                            | 用途           | 必填           | 默认值                                           | 可选值 / 格式                                             |
+| ------------------------------- | -------------- | -------------- | ------------------------------------------------ | --------------------------------------------------------- |
+| `ICETV_USERNAME`                | 站长账号       | 是             | 无                                               | 任意字符串                                                |
+| `ICETV_PASSWORD`                | 站长密码       | 是             | 无                                               | 任意字符串                                                |
+| `AUTH_SECRET`                   | 签名密钥       | 是             | 无                                               | 高熵随机字符串，至少 32 字符                              |
+| `CRON_SECRET`                   | 定时任务密钥   | Docker 必填    | 无                                               | 高熵随机字符串                                            |
+| `LEGACY_COOKIE_CUTOFF_DATE`     | 旧登录态截止   | 否             | `2026-08-01T00:00:00.000Z`                       | ISO 日期字符串                                            |
+| `AUTH_SESSION_TTL_HOURS`        | 登录态时长     | 否             | `168`                                            | 正整数                                                    |
+| `NEXT_PUBLIC_STORAGE_TYPE`      | 存储类型       | 否             | 有 `DATABASE_URL` 时为 `mysql`，否则为 `localdb` | `localdb` / `mysql`                                       |
+| `LOCAL_DB_PATH`                 | SQLite 路径    | 否             | `/data/icetv-data.sqlite`（Docker）              | 绝对路径                                                  |
+| `DATABASE_URL`                  | MySQL 连接     | MySQL 模式必填 | 无                                               | `mysql://用户:密码@主机:端口/数据库`，特殊字符需 URL 编码 |
+| `MYSQL_SSL_CA`                  | MySQL TLS CA   | 否             | 无                                               | PEM 文本；配置后启用 TLS                                  |
+| `MYSQL_SSL_REJECT_UNAUTHORIZED` | MySQL TLS 校验 | 否             | `true`                                           | `true` / `false`；仅在配置 `MYSQL_SSL_CA` 时生效          |
+| `MYSQL_CONNECTION_LIMIT`        | MySQL 连接池   | 否             | `5`                                              | 正整数                                                    |
+| `MYSQL_MAX_IDLE`                | MySQL 空闲池   | 否             | 同连接池上限                                     | 正整数                                                    |
+| `MYSQL_IDLE_TIMEOUT_MS`         | MySQL 空闲超时 | 否             | `60000`                                          | 毫秒                                                      |
+| `NEXT_PUBLIC_UPDATE_REPOS`      | 版本检查       | 否             | `naseaoi/IceTV`                                  | `owner/repo,owner/repo...`                                |
+| `NEXT_PUBLIC_UPDATE_BRANCH`     | 版本检查       | 否             | `main`                                           | 分支名                                                    |
 
 站点名称、图标、公告、豆瓣/Bangumi 代理、流式搜索、搜索最大页数等运行选项可在后台配置，不建议优先使用环境变量覆盖。
 
@@ -191,11 +254,11 @@ IceTV 支持标准的苹果 CMS V10 API 格式。
 
 ## 客户端
 
-v0.0.0 以上版本可配合 [Selene](https://github.com/MoonTechLab/Selene) 使用，移动端体验更加友好，数据完全同步。
+可配合 [Selene](https://github.com/MoonTechLab/Selene) 使用，移动端体验更加友好，数据完全同步。
 
 ## AndroidTV 使用
 
-目前该项目可以配合 [OrionTV](https://github.com/zimplexing/OrionTV) 在 Android TV 上使用，可以直接作为 OrionTV 后端。
+可配合 [OrionTV](https://github.com/zimplexing/OrionTV) 在 Android TV 上使用，直接作为 OrionTV 后端。
 
 已实现播放记录和网页端同步。
 
@@ -213,7 +276,7 @@ v0.0.0 以上版本可配合 [Selene](https://github.com/MoonTechLab/Selene) 使
 - 请勿将部署的实例用于商业用途或公开服务
 - 如因公开分享导致的任何法律问题，用户需自行承担责任
 - 项目开发者不对用户的使用行为承担任何法律责任
-- 本项目不在中国大陆地区提供服务。如有该项目在向中国大陆地区提供服务，属个人行为。在该地区使用所产生的法律风险及责任，属于用户个人行为，与本项目无关，须自行承担全部责任。特此声明
+- 本项目不在中国大陆地区提供服务。如有该项目在向中国大陆地区提供服务，属个人行为。在该地区使用所产生的法律风险及责任，属于用户个人行为，与本项目无关，须自行承担全部责任，特此声明
 
 ## License
 

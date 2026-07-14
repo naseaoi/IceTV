@@ -21,13 +21,11 @@ jest.mock('../env.server', () => ({
 
 describe('auth signing secret', () => {
   const originalAuthSecret = process.env.AUTH_SECRET;
-  const originalIcetvAuthSecret = process.env.ICETV_AUTH_SECRET;
   const originalLegacyCutoff = process.env.LEGACY_COOKIE_CUTOFF_DATE;
 
   beforeEach(() => {
     jest.clearAllMocks();
     delete process.env.AUTH_SECRET;
-    delete process.env.ICETV_AUTH_SECRET;
     process.env.LEGACY_COOKIE_CUTOFF_DATE = '2099-01-01T00:00:00.000Z';
     (getOwnerPassword as jest.Mock).mockReturnValue('owner-secret');
   });
@@ -39,12 +37,6 @@ describe('auth signing secret', () => {
       delete process.env.AUTH_SECRET;
     } else {
       process.env.AUTH_SECRET = originalAuthSecret;
-    }
-
-    if (originalIcetvAuthSecret === undefined) {
-      delete process.env.ICETV_AUTH_SECRET;
-    } else {
-      process.env.ICETV_AUTH_SECRET = originalIcetvAuthSecret;
     }
 
     if (originalLegacyCutoff === undefined) {

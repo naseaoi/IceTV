@@ -3,6 +3,10 @@
 import { ReactNode } from 'react';
 
 import {
+  POSTER_GRID_BASE_CLASS,
+  POSTER_GRID_ROW_GAP,
+} from '@/components/poster-grid-layout';
+import {
   type VirtualizedGridLayoutConfig,
   VirtualizedGrid,
 } from '@/components/VirtualizedGrid';
@@ -15,18 +19,17 @@ interface VirtualizedSearchGridProps<T> {
   overscanRows?: number;
 }
 
-const SEARCH_GRID_FALLBACK_CLASS =
-  'grid grid-cols-3 justify-start gap-x-3 gap-y-6 px-0 xs:grid-cols-4 sm:grid-cols-[repeat(auto-fill,_minmax(11rem,_1fr))] sm:gap-x-8 sm:gap-y-14 sm:px-2';
+const SEARCH_GRID_FALLBACK_CLASS = `${POSTER_GRID_BASE_CLASS} px-0 sm:grid-cols-[repeat(auto-fill,_minmax(11rem,_1fr))] sm:gap-x-8 sm:px-2`;
 
 const SEARCH_GRID_LAYOUT = {
   mobileColumnCount: 3,
   mobileWideBreakpoint: 480,
   mobileWideColumnCount: 4,
   mobileColumnGap: 12,
-  mobileRowGap: 24,
+  mobileRowGap: POSTER_GRID_ROW_GAP,
   mobileContentHeight: 54,
   desktopColumnGap: 32,
-  desktopRowGap: 56,
+  desktopRowGap: POSTER_GRID_ROW_GAP,
   desktopMinColumnWidth: 176,
   desktopContentHeight: 54,
 };

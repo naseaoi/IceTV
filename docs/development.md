@@ -50,7 +50,7 @@ src/
 
 - 页面/API 鉴权入口：`src/lib/api-auth.ts`
 - Cookie 签名和登录签名统一走：`src/lib/signing-secret.server.ts`
-- 新签名依赖 `AUTH_SECRET` 或 `ICETV_AUTH_SECRET`
+- 新签名依赖 `AUTH_SECRET`
 - 旧 cookie 兼容校验由 `LEGACY_COOKIE_CUTOFF_DATE` 控制
 - 不要再用站长密码直接生成新会话签名
 

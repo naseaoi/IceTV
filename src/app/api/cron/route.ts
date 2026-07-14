@@ -50,11 +50,7 @@ export async function GET(request: NextRequest) {
 }
 
 function isCronAuthorized(request: NextRequest): boolean {
-  const secret =
-    process.env.CRON_SECRET ||
-    process.env.ICETV_CRON_SECRET ||
-    process.env.VERCEL_CRON_SECRET ||
-    '';
+  const secret = process.env.CRON_SECRET || '';
 
   if (!secret) {
     return false;

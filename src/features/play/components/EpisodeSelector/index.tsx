@@ -320,11 +320,6 @@ const EpisodeSelector: React.FC<EpisodeSelectorProps> = ({
     <div className='flex h-full flex-col overflow-hidden md:ml-1'>
       <div className='flex min-h-0 flex-1 flex-col md:hidden'>
         <div className='flex items-center justify-between gap-2 py-1'>
-          <span className='min-w-0 truncate text-sm text-gray-600 dark:text-gray-300'>
-            {totalEpisodes > 1
-              ? `第 ${value} 集 / 共 ${totalEpisodes} 集`
-              : '正片'}
-          </span>
           <div className='flex shrink-0 items-center gap-1.5'>
             {onToggleFavorite && (
               <button
@@ -362,6 +357,11 @@ const EpisodeSelector: React.FC<EpisodeSelectorProps> = ({
               换源
             </button>
           </div>
+          <span className='ml-auto min-w-0 truncate text-right text-sm text-gray-600 dark:text-gray-300'>
+            {totalEpisodes > 1
+              ? `第 ${value} 集 / 共 ${totalEpisodes} 集`
+              : '正片'}
+          </span>
         </div>
 
         {stripEpisodes.length > 0 && (

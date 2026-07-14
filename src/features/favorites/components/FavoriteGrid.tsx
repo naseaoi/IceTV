@@ -1,7 +1,10 @@
 'use client';
 
+import { POSTER_GRID_BASE_CLASS } from '@/components/poster-grid-layout';
 import VideoCard from '@/components/VideoCard';
 import type { FavoriteItem } from '@/features/favorites/types';
+
+export const FAVORITE_GRID_CLASS = `${POSTER_GRID_BASE_CLASS} px-0 sm:grid-cols-[repeat(auto-fill,_180px)] sm:gap-x-6 sm:px-2`;
 
 export function FavoriteGrid({
   items,
@@ -19,7 +22,7 @@ export function FavoriteGrid({
   }
 
   return (
-    <div className='grid grid-cols-3 justify-start gap-x-3 gap-y-6 px-0 xs:grid-cols-4 sm:grid-cols-[repeat(auto-fill,_180px)] sm:gap-x-6 sm:gap-y-14 sm:px-2'>
+    <div className={FAVORITE_GRID_CLASS}>
       {items.map((item) => (
         <div key={item.id + item.source} className='w-full sm:w-[180px]'>
           <VideoCard

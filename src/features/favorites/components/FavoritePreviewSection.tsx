@@ -59,7 +59,7 @@ export function FavoritePreviewSection({
             </div>
           ))
         ) : (
-          <div className='flex min-h-[198px] min-w-full items-center justify-center rounded-lg border border-dashed border-gray-200 bg-gray-50 text-sm text-gray-500 dark:border-gray-700 dark:bg-gray-900/40 dark:text-gray-400 sm:min-h-[324px]'>
+          <div className='flex min-h-[198px] w-full shrink-0 items-center justify-center rounded-lg border border-dashed border-gray-200 bg-gray-50 text-sm text-gray-500 dark:border-gray-700 dark:bg-gray-900/40 dark:text-gray-400 sm:min-h-[324px]'>
             暂无收藏内容
           </div>
         )}

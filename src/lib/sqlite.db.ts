@@ -230,10 +230,7 @@ export class LocalSqliteStorage implements IStorage {
       : path.resolve(process.cwd(), 'data', 'moontv-data.json');
 
     const configuredPath =
-      dbPath ||
-      process.env.LOCAL_SQLITE_PATH ||
-      process.env.LOCAL_DB_PATH ||
-      defaultSqlitePath;
+      dbPath || process.env.LOCAL_DB_PATH || defaultSqlitePath;
 
     const isMemoryDb = configuredPath === ':memory:';
     const isLegacyJsonPath = configuredPath.toLowerCase().endsWith('.json');
