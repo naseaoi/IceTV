@@ -16,36 +16,56 @@ function AdminTabLoading() {
 }
 
 const DataMigration = dynamic(
-  () =>
-    import('../../../components/DataMigration.js').then((mod) => mod.default),
+  () => import('@/components/DataMigration').then((mod) => mod.default),
   { loading: AdminTabLoading },
 );
 const CategoryConfig = dynamic(
-  () => import('./tabs/CategoryConfigTab.js').then((mod) => mod.default),
+  () =>
+    import('@/features/admin/components/tabs/CategoryConfigTab').then(
+      (mod) => mod.default,
+    ),
   { loading: AdminTabLoading },
 );
 const ConfigFileComponent = dynamic(
-  () => import('./tabs/ConfigFileTab.js').then((mod) => mod.default),
+  () =>
+    import('@/features/admin/components/tabs/ConfigFileTab').then(
+      (mod) => mod.default,
+    ),
   { loading: AdminTabLoading },
 );
 const LiveSourceConfig = dynamic(
-  () => import('./tabs/LiveSourceConfigTab.js').then((mod) => mod.default),
+  () =>
+    import('@/features/admin/components/tabs/LiveSourceConfigTab').then(
+      (mod) => mod.default,
+    ),
   { loading: AdminTabLoading },
 );
 const SiteConfigComponent = dynamic(
-  () => import('./tabs/SiteConfigTab.js').then((mod) => mod.default),
+  () =>
+    import('@/features/admin/components/tabs/SiteConfigTab').then(
+      (mod) => mod.default,
+    ),
   { loading: AdminTabLoading },
 );
 const RuntimeParamsComponent = dynamic(
-  () => import('./tabs/RuntimeParamsTab.js').then((mod) => mod.default),
+  () =>
+    import('@/features/admin/components/tabs/RuntimeParamsTab').then(
+      (mod) => mod.default,
+    ),
   { loading: AdminTabLoading },
 );
 const UserConfig = dynamic(
-  () => import('./tabs/UserConfigTab.js').then((mod) => mod.default),
+  () =>
+    import('@/features/admin/components/tabs/UserConfigTab').then(
+      (mod) => mod.default,
+    ),
   { loading: AdminTabLoading },
 );
 const VideoSourceConfig = dynamic(
-  () => import('./tabs/VideoSourceConfigTab.js').then((mod) => mod.default),
+  () =>
+    import('@/features/admin/components/tabs/VideoSourceConfigTab').then(
+      (mod) => mod.default,
+    ),
   { loading: AdminTabLoading },
 );
 

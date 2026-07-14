@@ -59,20 +59,23 @@ interface VersionPanelProps {
 }
 
 const SettingsPanel = dynamic<SettingsPanelProps>(
-  () => import('./user-menu/SettingsPanel.js').then((mod) => mod.SettingsPanel),
+  () =>
+    import('@/components/user-menu/SettingsPanel').then(
+      (mod) => mod.SettingsPanel,
+    ),
   { ssr: false },
 );
 
 const ChangePasswordPanel = dynamic<ChangePasswordPanelProps>(
   () =>
-    import('./user-menu/ChangePasswordPanel.js').then(
+    import('@/components/user-menu/ChangePasswordPanel').then(
       (mod) => mod.ChangePasswordPanel,
     ),
   { ssr: false },
 );
 
 const VersionPanel = dynamic<VersionPanelProps>(
-  () => import('./VersionPanel.js').then((mod) => mod.VersionPanel),
+  () => import('@/components/VersionPanel').then((mod) => mod.VersionPanel),
   { ssr: false },
 );
 

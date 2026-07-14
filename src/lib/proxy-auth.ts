@@ -83,7 +83,7 @@ export async function authorizeProxyRequest(
     return null;
   }
 
-  const { isGuardFailure, requireActiveUser } = await import('./api-auth.js');
+  const { isGuardFailure, requireActiveUser } = await import('@/lib/api-auth');
   const guardResult = await requireActiveUser(request, {
     unauthorizedMessage: 'Unauthorized',
     includeUserStateCode: false,

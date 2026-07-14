@@ -128,17 +128,26 @@ function pickDoubanId(
 }
 
 const EpisodesTab = dynamic(
-  () => import('./EpisodesTab.js').then((mod) => mod.EpisodesTab),
+  () =>
+    import('@/features/play/components/EpisodeSelector/EpisodesTab').then(
+      (mod) => mod.EpisodesTab,
+    ),
   { loading: EpisodesTabLoading },
 );
 const InfoTab = dynamic(
-  () => import('./InfoTab.js').then((mod) => mod.InfoTab),
+  () =>
+    import('@/features/play/components/EpisodeSelector/InfoTab').then(
+      (mod) => mod.InfoTab,
+    ),
   {
     loading: InfoTabLoading,
   },
 );
 const SourcesTab = dynamic(
-  () => import('./SourcesTab.js').then((mod) => mod.SourcesTab),
+  () =>
+    import('@/features/play/components/EpisodeSelector/SourcesTab').then(
+      (mod) => mod.SourcesTab,
+    ),
   { loading: EpisodeTabLoading },
 );
 

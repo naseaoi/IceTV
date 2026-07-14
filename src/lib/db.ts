@@ -23,11 +23,11 @@ async function createStorage(): Promise<IStorage> {
   const storageType = getStorageType();
 
   if (storageType === 'mysql') {
-    const { MySqlStorage } = await import('./mysql.db.js');
+    const { MySqlStorage } = await import('@/lib/mysql.db');
     return new MySqlStorage();
   }
 
-  const { LocalSqliteStorage } = await import('./sqlite.db.js');
+  const { LocalSqliteStorage } = await import('@/lib/sqlite.db');
   return new LocalSqliteStorage();
 }
 

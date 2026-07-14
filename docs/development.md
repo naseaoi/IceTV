@@ -168,17 +168,27 @@ Admin 维持“导航 + 当前 tab 内容”结构。
 
 ## 动态 import
 
-项目使用 `moduleResolution: Node16`。
-
-- 相对动态导入必须显式带 `.js`
+项目使用 `moduleResolution: bundler`。动态导入统一使用 `@/` 路径，兼容 Webpack 与 Turbopack。
 
 示例：
 
 ```ts
-const { MySqlStorage } = await import('./mysql.db.js');
+const { MySqlStorage } = await import('@/lib/mysql.db');
 ```
 
 ## 改动后最小验证
+
+本地开发默认使用 Turbopack：
+
+```bash
+pnpm dev
+```
+
+如果遇到仅在 Turbopack 下出现的兼容问题，可临时回退：
+
+```bash
+pnpm dev:webpack
+```
 
 常用命令：
 
