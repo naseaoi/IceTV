@@ -2,7 +2,10 @@ import './globals.css';
 
 import type { Metadata, Viewport } from 'next';
 import { Inter } from 'next/font/google';
+import { cookies } from 'next/headers';
 
+import { AuthProvider } from '@/components/AuthProvider';
+import { getServerAuthSession } from '@/lib/auth-session.server';
 import { getPublicConfig } from '@/lib/config';
 import { SIDEBAR_COLLAPSED_STORAGE_KEY } from '@/lib/local-preferences';
 import { serializeForInlineScript } from '@/lib/script-serialization';
@@ -58,7 +61,11 @@ export default async function RootLayout({
 }: {
   children: React.ReactNode;
 }) {
-  const publicConfig = await getPublicConfig();
+  const cookieStore = await cookies();
+  const [initialAuthSession, publicConfig] = await Promise.all([
+    getServerAuthSession(cookieStore.get('auth')?.value),
+    getPublicConfig(),
+  ]);
   const initialSiteName = publicConfig.SiteName || siteName;
   const initialSiteIcon = publicConfig.SiteIcon || siteIcon;
   const initialAnnouncement = publicConfig.Announcement || announcement;
@@ -140,12 +147,14 @@ export default async function RootLayout({
               announcement={initialAnnouncement}
               footerText={initialFooterText}
             >
-              <CardInteractionProvider>
-                {children}
-                <ClientErrorReporter />
-                <GlobalErrorIndicator />
-                <SWRegister />
-              </CardInteractionProvider>
+              <AuthProvider initialSession={initialAuthSession}>
+                <CardInteractionProvider>
+                  {children}
+                  <ClientErrorReporter />
+                  <GlobalErrorIndicator />
+                  <SWRegister />
+                </CardInteractionProvider>
+              </AuthProvider>
             </SiteProvider>
           </RuntimeConfigProvider>
         </ThemeProvider>

@@ -2,15 +2,11 @@
 
 import { Loader2, LockKeyhole, RefreshCw } from 'lucide-react';
 import Link from 'next/link';
-import { ReactNode, useEffect, useState } from 'react';
+import { ReactNode } from 'react';
 
+import { useAuthSession } from '@/components/AuthProvider';
 import LoadingStatePanel from '@/components/LoadingStatePanel';
 import PageLayout from '@/components/PageLayout';
-import { AUTH_SESSION_LOST_EVENT } from '@/lib/auth.client';
-import {
-  ClientAuthSession,
-  getClientAuthSession,
-} from '@/lib/auth-session.client';
 
 interface AuthenticatedRouteProps {
   children: ReactNode;
@@ -27,35 +23,9 @@ export default function AuthenticatedRoute({
   contentMode = 'default',
   showDesktopBack,
 }: AuthenticatedRouteProps) {
-  const [session, setSession] = useState<ClientAuthSession | null>(null);
-  const [attempt, setAttempt] = useState(0);
+  const { session, isRefreshing, refreshSession } = useAuthSession();
 
-  useEffect(() => {
-    let cancelled = false;
-
-    getClientAuthSession().then((result) => {
-      if (!cancelled) {
-        setSession(result);
-      }
-    });
-
-    return () => {
-      cancelled = true;
-    };
-  }, [attempt]);
-
-  useEffect(() => {
-    const handleSessionLost = () => {
-      setSession({ status: 'guest' });
-    };
-
-    window.addEventListener(AUTH_SESSION_LOST_EVENT, handleSessionLost);
-    return () => {
-      window.removeEventListener(AUTH_SESSION_LOST_EVENT, handleSessionLost);
-    };
-  }, []);
-
-  if (session?.status === 'authenticated') {
+  if (session.status === 'authenticated') {
     return children;
   }
 
@@ -63,7 +33,7 @@ export default function AuthenticatedRoute({
     typeof window === 'undefined'
       ? activePath
       : `${window.location.pathname}${window.location.search}`;
-  const isError = session?.status === 'error';
+  const isError = session.status === 'error';
 
   return (
     <PageLayout
@@ -71,36 +41,33 @@ export default function AuthenticatedRoute({
       contentMode={contentMode}
       showDesktopBack={showDesktopBack}
     >
-      <div className='flex min-h-[60vh] flex-1 items-center justify-center px-4 py-12'>
+      <div className='flex min-h-[calc(100dvh-6.5rem-env(safe-area-inset-top)-env(safe-area-inset-bottom))] flex-1 items-center justify-center px-4 py-12 md:min-h-[calc(100dvh-3.5rem-env(safe-area-inset-bottom))]'>
         <LoadingStatePanel
           icon={
-            session ? (
-              <LockKeyhole className='h-10 w-10' />
-            ) : (
+            isRefreshing ? (
               <Loader2 className='h-10 w-10 animate-spin' />
+            ) : (
+              <LockKeyhole className='h-10 w-10' />
             )
           }
           tone={isError ? 'red' : 'amber'}
           title={
-            session
-              ? isError
+            isRefreshing
+              ? '正在重新验证登录状态'
+              : isError
                 ? '无法验证登录状态'
                 : '需要登录'
-              : '正在验证登录状态'
           }
           message={
-            session ? (isError ? '请检查网络后重新验证。' : message) : ''
+            isRefreshing ? '' : isError ? '请检查网络后重新验证。' : message
           }
         >
-          {session && (
+          {!isRefreshing && (
             <div className='flex items-center justify-center gap-3'>
               {isError ? (
                 <button
                   type='button'
-                  onClick={() => {
-                    setSession(null);
-                    setAttempt((current) => current + 1);
-                  }}
+                  onClick={() => void refreshSession()}
                   className='inline-flex items-center gap-2 rounded-lg bg-green-600 px-4 py-2.5 text-sm font-medium text-white transition-colors hover:bg-green-700'
                 >
                   <RefreshCw className='h-4 w-4' />

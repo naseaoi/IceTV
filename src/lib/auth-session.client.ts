@@ -1,9 +1,7 @@
 import { getAuthInfoFromBrowserCookie } from '@/lib/auth.client';
+import { ClientAuthSession } from '@/lib/auth-session';
 
-export type ClientAuthSession =
-  | { status: 'authenticated'; username: string }
-  | { status: 'guest' }
-  | { status: 'error' };
+export type { ClientAuthSession } from '@/lib/auth-session';
 
 type SessionResponse = {
   authenticated?: boolean;

@@ -1,12 +1,8 @@
-import { act, render, screen } from '@testing-library/react';
+import { fireEvent, render, screen } from '@testing-library/react';
 import type { ReactNode } from 'react';
 
 import AuthenticatedRoute from '@/components/AuthenticatedRoute';
-import { AUTH_SESSION_LOST_EVENT } from '@/lib/auth.client';
-import {
-  ClientAuthSession,
-  getClientAuthSession,
-} from '@/lib/auth-session.client';
+import { useAuthSession } from '@/components/AuthProvider';
 
 jest.mock('@/components/PageLayout', () => ({
   __esModule: true,
@@ -32,48 +28,42 @@ jest.mock('@/components/LoadingStatePanel', () => ({
   ),
 }));
 
-jest.mock('@/lib/auth-session.client', () => ({
-  getClientAuthSession: jest.fn(),
+jest.mock('@/components/AuthProvider', () => ({
+  useAuthSession: jest.fn(),
 }));
 
-const mockGetClientAuthSession = getClientAuthSession as jest.MockedFunction<
-  typeof getClientAuthSession
+const mockUseAuthSession = useAuthSession as jest.MockedFunction<
+  typeof useAuthSession
 >;
+const mockRefreshSession = jest.fn().mockResolvedValue(undefined);
 
 describe('AuthenticatedRoute', () => {
   beforeEach(() => {
     jest.clearAllMocks();
+    mockUseAuthSession.mockReturnValue({
+      session: { status: 'guest' },
+      isRefreshing: false,
+      refreshSession: mockRefreshSession,
+    });
   });
 
-  it('会话确认前不挂载受保护内容', async () => {
-    let resolveSession: (session: ClientAuthSession) => void = () => {};
-    mockGetClientAuthSession.mockImplementation(
-      () =>
-        new Promise((resolve) => {
-          resolveSession = resolve;
-        }),
-    );
-
+  it('游客直接显示登录提示且不挂载受保护内容', () => {
     render(
       <AuthenticatedRoute activePath='/search' message='请先登录后再搜索'>
         <div>搜索业务内容</div>
       </AuthenticatedRoute>,
     );
 
-    expect(screen.getByText('正在验证登录状态')).toBeInTheDocument();
-    expect(screen.queryByText('搜索业务内容')).not.toBeInTheDocument();
-
-    await act(async () => resolveSession({ status: 'guest' }));
-
     expect(screen.getByText('需要登录')).toBeInTheDocument();
     expect(screen.getByText('请先登录后再搜索')).toBeInTheDocument();
     expect(screen.queryByText('搜索业务内容')).not.toBeInTheDocument();
   });
 
-  it('有效会话才挂载受保护内容', async () => {
-    mockGetClientAuthSession.mockResolvedValue({
-      status: 'authenticated',
-      username: 'alice',
+  it('服务端确认的有效会话首次渲染就挂载受保护内容', () => {
+    mockUseAuthSession.mockReturnValue({
+      session: { status: 'authenticated', username: 'alice' },
+      isRefreshing: false,
+      refreshSession: mockRefreshSession,
     });
 
     render(
@@ -82,13 +72,15 @@ describe('AuthenticatedRoute', () => {
       </AuthenticatedRoute>,
     );
 
-    expect(await screen.findByText('直播业务内容')).toBeInTheDocument();
+    expect(screen.getByText('直播业务内容')).toBeInTheDocument();
+    expect(screen.queryByText('正在验证登录状态')).not.toBeInTheDocument();
   });
 
-  it('登录状态失效后切换为统一登录提示', async () => {
-    mockGetClientAuthSession.mockResolvedValue({
-      status: 'authenticated',
-      username: 'alice',
+  it('只在用户主动重试时显示重新验证状态', () => {
+    mockUseAuthSession.mockReturnValue({
+      session: { status: 'error' },
+      isRefreshing: true,
+      refreshSession: mockRefreshSession,
     });
 
     render(
@@ -97,14 +89,24 @@ describe('AuthenticatedRoute', () => {
       </AuthenticatedRoute>,
     );
 
-    expect(await screen.findByText('搜索业务内容')).toBeInTheDocument();
+    expect(screen.getByText('正在重新验证登录状态')).toBeInTheDocument();
+    expect(screen.queryByText('搜索业务内容')).not.toBeInTheDocument();
+  });
 
-    act(() => {
-      window.dispatchEvent(new Event(AUTH_SESSION_LOST_EVENT));
+  it('会话检查失败时允许用户主动重试', () => {
+    mockUseAuthSession.mockReturnValue({
+      session: { status: 'error' },
+      isRefreshing: false,
+      refreshSession: mockRefreshSession,
     });
 
-    expect(screen.getByText('需要登录')).toBeInTheDocument();
-    expect(screen.getByText('请先登录后再搜索')).toBeInTheDocument();
-    expect(screen.queryByText('搜索业务内容')).not.toBeInTheDocument();
+    render(
+      <AuthenticatedRoute activePath='/search' message='请先登录后再搜索'>
+        <div>搜索业务内容</div>
+      </AuthenticatedRoute>,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: '重新验证' }));
+    expect(mockRefreshSession).toHaveBeenCalledTimes(1);
   });
 });
