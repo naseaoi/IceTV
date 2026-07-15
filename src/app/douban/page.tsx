@@ -1,14 +1,9 @@
 import { SlidersHorizontal } from 'lucide-react';
 import { Suspense } from 'react';
 
-import DoubanCardSkeleton from '@/components/DoubanCardSkeleton';
 import PageLayout from '@/components/PageLayout';
+import { DoubanFeedLoading } from '@/features/douban/components/DoubanFeedLoading';
 import { DoubanPageClient } from '@/features/douban/components/DoubanPageClient';
-import {
-  DOUBAN_GRID_CLASS,
-  DOUBAN_GRID_ITEM_CLASS,
-  DOUBAN_GRID_WRAPPER_CLASS,
-} from '@/features/douban/lib/grid-layout';
 import {
   getDoubanActivePath,
   getDoubanPageTitle,
@@ -16,8 +11,6 @@ import {
 } from '@/features/douban/lib/pageMeta';
 
 function DoubanPageFallback({ type }: { type: string }) {
-  const skeletonData = Array.from({ length: 25 }, (_, index) => index);
-
   return (
     <PageLayout
       activePath={getDoubanActivePath(type)}
@@ -47,15 +40,7 @@ function DoubanPageFallback({ type }: { type: string }) {
           </div>
 
           <div className='mt-8 overflow-visible'>
-            <div className={DOUBAN_GRID_WRAPPER_CLASS}>
-              <div className={DOUBAN_GRID_CLASS}>
-                {skeletonData.map((index) => (
-                  <div key={index} className={DOUBAN_GRID_ITEM_CLASS}>
-                    <DoubanCardSkeleton />
-                  </div>
-                ))}
-              </div>
-            </div>
+            <DoubanFeedLoading />
           </div>
         </div>
       </div>

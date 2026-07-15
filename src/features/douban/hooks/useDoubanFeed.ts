@@ -8,7 +8,10 @@ import {
   useState,
 } from 'react';
 
-import { GetBangumiCalendarDataWithMeta } from '@/features/bangumi/lib/bangumi.client';
+import {
+  type BangumiCalendarData,
+  GetBangumiCalendarDataWithMeta,
+} from '@/features/bangumi/lib/bangumi.client';
 import { selectBangumiCardCover } from '@/features/bangumi/lib/bangumi-normalize';
 import {
   getDoubanCategories,
@@ -176,6 +179,24 @@ function getInitialHasMore(snapshot: FeedSnapshot, data: DoubanItem[]) {
   return data.length !== 0;
 }
 
+function getBangumiWeekdayItems(
+  calendarData: BangumiCalendarData[],
+  weekday: string,
+): DoubanItem[] | null {
+  const weekdayData = calendarData.find((item) => item.weekday.en === weekday);
+  if (!weekdayData) {
+    return null;
+  }
+
+  return weekdayData.items.map((item) => ({
+    id: item.id?.toString() || '',
+    title: item.name_cn || item.name,
+    poster: selectBangumiCardCover(item.images),
+    rate: item.rating?.score?.toFixed(1) || '',
+    year: item.air_date?.split('-')?.[0] || '',
+  }));
+}
+
 export function primeDefaultDoubanFeedViewCache(
   type: string,
   data: DoubanItem[],
@@ -209,6 +230,7 @@ export function useDoubanFeed(type: string) {
   const [selectorsReady, setSelectorsReady] = useState(false);
   const debounceTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const restoredCurrentPageRef = useRef<number | null>(null);
+  const bangumiCalendarDataRef = useRef<BangumiCalendarData[] | null>(null);
 
   const [customCategories, setCustomCategories] = useState<CustomCategory[]>(
     [],
@@ -428,20 +450,16 @@ export function useDoubanFeed(type: string) {
       } else if (type === 'anime' && primarySelection === '每日放送') {
         const calendarResult = await GetBangumiCalendarDataWithMeta();
         const calendarData = calendarResult.data;
-        const weekdayData = calendarData.find(
-          (item) => item.weekday.en === selectedWeekday,
+        bangumiCalendarDataRef.current = calendarData;
+        const weekdayItems = getBangumiWeekdayItems(
+          calendarData,
+          selectedWeekday,
         );
-        if (weekdayData) {
+        if (weekdayItems) {
           data = {
             code: 200,
             message: 'success',
-            list: weekdayData.items.map((item) => ({
-              id: item.id?.toString() || '',
-              title: item.name_cn || item.name,
-              poster: selectBangumiCardCover(item.images),
-              rate: item.rating?.score?.toFixed(1) || '',
-              year: item.air_date?.split('-')?.[0] || '',
-            })),
+            list: weekdayItems,
           };
           if (calendarResult.usedStaleFallback) {
             setBangumiCalendarError(
@@ -734,6 +752,37 @@ export function useDoubanFeed(type: string) {
   const handleWeekdayChange = useCallback(
     (weekday: string) => {
       if (weekday === selectedWeekday) return;
+
+      const requestSnapshot: FeedSnapshot = {
+        type,
+        primarySelection,
+        secondarySelection,
+        multiLevelSelection: multiLevelValues,
+        selectedWeekday: weekday,
+        currentPage: 0,
+      };
+      const cached = readFeedViewCache(requestSnapshot);
+      const calendarItems = bangumiCalendarDataRef.current
+        ? getBangumiWeekdayItems(bangumiCalendarDataRef.current, weekday)
+        : null;
+
+      if (cached || calendarItems) {
+        const nextData = cached?.data ?? calendarItems ?? [];
+        const nextHasMore = cached?.hasMore ?? false;
+
+        setSelectedWeekday(weekday);
+        setDoubanData(nextData);
+        setCurrentPage(cached?.currentPage ?? 0);
+        setHasMore(nextHasMore);
+        setIsLoadingMore(false);
+        setLoading(false);
+
+        if (!cached) {
+          writeFeedViewCache(requestSnapshot, nextData, nextHasMore);
+        }
+        return;
+      }
+
       setLoading(true);
       setCurrentPage(0);
       setDoubanData([]);
@@ -741,7 +790,13 @@ export function useDoubanFeed(type: string) {
       setIsLoadingMore(false);
       setSelectedWeekday(weekday);
     },
-    [selectedWeekday],
+    [
+      multiLevelValues,
+      primarySelection,
+      secondarySelection,
+      selectedWeekday,
+      type,
+    ],
   );
 
   const clearBangumiCalendarError = useCallback(() => {

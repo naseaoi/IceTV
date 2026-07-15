@@ -2,9 +2,8 @@
 
 import { SlidersHorizontal } from 'lucide-react';
 import { useSearchParams } from 'next/navigation';
-import { useMemo, useState } from 'react';
+import { useState } from 'react';
 
-import DoubanCardSkeleton from '@/components/DoubanCardSkeleton';
 import DoubanCustomSelector from '@/components/DoubanCustomSelector';
 import DoubanSelector from '@/components/DoubanSelector';
 import MobileFilterSheet from '@/components/mobile/MobileFilterSheet';
@@ -12,6 +11,7 @@ import AlertModal from '@/components/modals/AlertModal';
 import PageLayout from '@/components/PageLayout';
 import PosterCard from '@/components/PosterCard';
 import { VirtualizedGrid } from '@/components/VirtualizedGrid';
+import { DoubanFeedLoading } from '@/features/douban/components/DoubanFeedLoading';
 import { DoubanPageIcon } from '@/features/douban/components/DoubanPageIcon';
 import { useDoubanFeed } from '@/features/douban/hooks/useDoubanFeed';
 import { useInfiniteScroll } from '@/features/douban/hooks/useInfiniteScroll';
@@ -52,10 +52,6 @@ export function DoubanPageClient() {
     clearBangumiCalendarError,
   } = useDoubanFeed(type);
 
-  const skeletonData = useMemo(
-    () => Array.from({ length: 25 }, (_, index) => index),
-    [],
-  );
   const canLoadMore = hasMore && !isLoadingMore && !loading && selectorsReady;
   const [filterSheetOpen, setFilterSheetOpen] = useState(false);
 
@@ -141,13 +137,7 @@ export function DoubanPageClient() {
           <div className='mt-8 overflow-visible'>
             <div className={DOUBAN_GRID_WRAPPER_CLASS}>
               {loading || !selectorsReady ? (
-                <div className={DOUBAN_GRID_CLASS}>
-                  {skeletonData.map((index) => (
-                    <div key={index} className={DOUBAN_GRID_ITEM_CLASS}>
-                      <DoubanCardSkeleton />
-                    </div>
-                  ))}
-                </div>
+                <DoubanFeedLoading />
               ) : (
                 <VirtualizedGrid
                   items={doubanData}
