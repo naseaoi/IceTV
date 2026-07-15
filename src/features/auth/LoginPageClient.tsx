@@ -199,6 +199,7 @@ export function LoginPageClient() {
 
       <div className='relative z-10 flex min-h-screen w-full flex-col px-4 sm:px-8 lg:w-[460px] lg:shrink-0 lg:border-l lg:border-black/5 lg:bg-white lg:px-10 lg:shadow-2xl dark:lg:border-white/10 dark:lg:bg-zinc-950'>
         <header className='flex items-center justify-end gap-1 py-4 sm:py-5'>
+          <ThemeToggle className={`${HEADER_ICON_BUTTON_CLASS} p-2.5`} />
           <Link
             href='/'
             aria-label='返回首页'
@@ -207,7 +208,6 @@ export function LoginPageClient() {
           >
             <Home className='h-5 w-5' />
           </Link>
-          <ThemeToggle className={`${HEADER_ICON_BUTTON_CLASS} p-2.5`} />
         </header>
 
         <main className='flex flex-1 items-center justify-center py-8'>
@@ -333,7 +333,7 @@ export function LoginPageClient() {
               </button>
             </form>
 
-            <div className='mt-8 text-center text-sm text-gray-500 dark:text-gray-400'>
+            <div className='mt-8 min-h-5 text-center text-sm text-gray-500 dark:text-gray-400'>
               {mode === 'login' ? (
                 registerEnabled === true ? (
                   <span>
