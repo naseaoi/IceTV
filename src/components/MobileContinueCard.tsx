@@ -165,10 +165,12 @@ export default function MobileContinueCard({
   });
 
   const progressPercent = Math.min(100, Math.max(0, progress));
+  const displaySourceName = sourceName?.trim() || source;
 
   return (
     <div
       role='link'
+      data-mobile-continue-card
       tabIndex={0}
       aria-label={`继续播放 ${title}`}
       className='relative h-[120px] w-[232px] shrink-0 select-none overflow-hidden rounded-xl border border-gray-200/60 bg-white outline-none focus-visible:ring-2 focus-visible:ring-green-500 dark:border-gray-700/60 dark:bg-gray-800/60'
@@ -189,11 +191,18 @@ export default function MobileContinueCard({
             <p className='line-clamp-2 text-[13px] font-semibold leading-snug text-gray-900 dark:text-gray-100'>
               {title}
             </p>
-            <p className='mt-1 truncate text-[11px] text-gray-500 dark:text-gray-400'>
-              {totalEpisodes > 1
-                ? `第 ${currentEpisode} 集 / 共 ${totalEpisodes} 集`
-                : sourceName || year || ''}
-            </p>
+            <div className='mt-1 space-y-0.5 text-[11px] text-gray-500 dark:text-gray-400'>
+              {(totalEpisodes > 1 || year) && (
+                <p data-mobile-continue-meta className='truncate'>
+                  {totalEpisodes > 1
+                    ? `第 ${currentEpisode} 集 / 共 ${totalEpisodes} 集`
+                    : year}
+                </p>
+              )}
+              <p data-mobile-continue-source className='truncate'>
+                {displaySourceName}
+              </p>
+            </div>
           </div>
           <p className='truncate text-[11px] text-gray-400 dark:text-gray-500'>
             已观看 {Math.round(progressPercent)}%

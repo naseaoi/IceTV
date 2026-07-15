@@ -23,11 +23,9 @@ function CapsuleSwitchSkeleton() {
 
 function SkeletonRow({
   count,
-  withSubtitle = false,
   mobileContinue = false,
 }: {
   count: number;
-  withSubtitle?: boolean;
   mobileContinue?: boolean;
 }) {
   return (
@@ -36,7 +34,7 @@ function SkeletonRow({
         mobileContinue ? (
           <ContinueWatchingCardSkeleton key={index} />
         ) : (
-          <HomePosterCardSkeleton key={index} withSubtitle={withSubtitle} />
+          <HomePosterCardSkeleton key={index} />
         ),
       )}
     </ScrollableRow>
@@ -67,11 +65,7 @@ export default async function HomeLoading() {
           {continueWatchingCount > 0 && (
             <section className='mb-2'>
               <SkeletonSectionHeader />
-              <SkeletonRow
-                count={continueWatchingCount}
-                withSubtitle
-                mobileContinue
-              />
+              <SkeletonRow count={continueWatchingCount} mobileContinue />
             </section>
           )}
 

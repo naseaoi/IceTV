@@ -3,6 +3,7 @@ import type React from 'react';
 
 import CoverImage from '@/components/CoverImage';
 import { FavoriteHeartButton } from '@/components/FavoriteHeartButton';
+import SourceNameBadge from '@/components/SourceNameBadge';
 import type {
   VideoCardDisplayConfig,
   VideoCardProps,
@@ -118,6 +119,7 @@ interface VideoCardPosterProps {
   origin: NonNullable<VideoCardProps['origin']>;
   from: VideoCardProps['from'];
   config: VideoCardDisplayConfig;
+  sourceName?: string;
   year?: string;
   rate?: string;
   episodes?: number;
@@ -139,6 +141,7 @@ export function VideoCardPoster({
   origin,
   from,
   config,
+  sourceName,
   year,
   rate,
   episodes,
@@ -174,6 +177,16 @@ export function VideoCardPoster({
         style={noSelectStyle}
         onContextMenu={preventContextMenu}
       />
+
+      {config.showSourceName && (
+        <SourceNameBadge
+          sourceName={sourceName}
+          origin={origin}
+          className={`left-2 top-2 ${
+            config.showDoubanLink ? 'sm:group-hover:opacity-0' : ''
+          }`}
+        />
+      )}
 
       {config.showPlayButton && (
         <div
@@ -229,7 +242,8 @@ export function VideoCardPoster({
         displayYear !== 'unknown' &&
         displayYear !== '0' && (
           <div
-            className='absolute left-2 top-2 rounded bg-black/50 px-2 py-1 text-xs font-medium text-white shadow-sm backdrop-blur-sm transition-all duration-300 ease-out group-hover:opacity-90'
+            data-card-year
+            className='absolute bottom-2 left-2 rounded bg-black/50 px-2 py-1 text-xs font-medium text-white shadow-sm backdrop-blur-sm transition-all duration-300 ease-out group-hover:opacity-90'
             style={noSelectStyle}
             onContextMenu={preventContextMenu}
           >
@@ -267,7 +281,7 @@ export function VideoCardPoster({
           target='_blank'
           rel='noopener noreferrer'
           onClick={(event) => event.stopPropagation()}
-          className='absolute left-2 top-2 -translate-x-2 opacity-0 transition-all delay-100 duration-300 ease-in-out sm:group-hover:translate-x-0 sm:group-hover:opacity-100'
+          className='absolute left-2 top-2 z-20 -translate-x-2 opacity-0 transition-all delay-100 duration-300 ease-in-out sm:group-hover:translate-x-0 sm:group-hover:opacity-100'
           style={noSelectStyle}
           onContextMenu={preventContextMenu}
         >

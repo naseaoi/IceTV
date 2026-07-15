@@ -94,9 +94,14 @@ export function ChangePasswordPanel({
           }}
         >
           <div className='mb-6 flex items-center justify-between'>
-            <h3 className='text-xl font-bold text-gray-800 dark:text-gray-200'>
-              修改密码
-            </h3>
+            <div>
+              <h3 className='text-xl font-bold text-gray-800 dark:text-gray-200'>
+                修改密码
+              </h3>
+              <p className='mt-1 text-xs text-gray-500 dark:text-gray-400'>
+                修改密码后需要重新登录
+              </p>
+            </div>
             <button
               onClick={onClose}
               className='flex h-8 w-8 items-center justify-center rounded-full p-1 text-gray-500 transition-colors hover:bg-gray-100 dark:hover:bg-gray-800'
@@ -153,7 +158,7 @@ export function ChangePasswordPanel({
             )}
           </div>
 
-          <div className='mt-6 flex gap-3 border-t border-gray-200 pt-4 dark:border-gray-700'>
+          <div className='mt-6 flex gap-3'>
             <button
               onClick={onClose}
               className='flex-1 rounded-md bg-gray-100 px-4 py-2 text-sm font-medium text-gray-700 transition-colors hover:bg-gray-200 dark:bg-gray-800 dark:text-gray-300 dark:hover:bg-gray-700'
@@ -173,12 +178,6 @@ export function ChangePasswordPanel({
             >
               {passwordLoading ? '修改中...' : '确认修改'}
             </button>
-          </div>
-
-          <div className='mt-4 border-t border-gray-200 pt-4 dark:border-gray-700'>
-            <p className='text-center text-xs text-gray-500 dark:text-gray-400'>
-              修改密码后需要重新登录
-            </p>
           </div>
         </div>
       </div>

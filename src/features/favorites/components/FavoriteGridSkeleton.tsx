@@ -6,7 +6,7 @@ export function FavoriteGridSkeleton({ count = 12 }: { count?: number }) {
     <div className={FAVORITE_GRID_CLASS}>
       {Array.from({ length: count }).map((_, index) => (
         <div key={index} className='w-full sm:w-[180px]'>
-          <HomePosterCardSkeleton className='w-full' withSubtitle />
+          <HomePosterCardSkeleton className='w-full' />
         </div>
       ))}
     </div>
