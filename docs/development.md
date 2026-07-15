@@ -47,6 +47,7 @@ Guard 选择：
 
 - 根布局通过 `src/lib/auth-session.server.ts` 校验 Cookie，并把初始会话注入 `AuthProvider`
 - 客户端统一通过 `AuthProvider` / `useAuthSession()` 消费会话；`AuthenticatedRoute` 只负责展示门禁
+- 受保护路由在对应 `layout.tsx` 挂载 `AuthenticatedRoute`，确保门禁先于 `loading.tsx` 和页面内 `Suspense`
 - `/api/auth/session` 仅用于显式重新验证，首次渲染和普通路由切换不调用
 - 登录状态失效时派发 `AUTH_SESSION_LOST_EVENT`，由 `AuthProvider` 统一更新
 

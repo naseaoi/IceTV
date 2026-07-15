@@ -34,7 +34,11 @@ describe('AuthProvider', () => {
   it('直接使用服务端注入的初始会话且不发起客户端检查', () => {
     render(
       <AuthProvider
-        initialSession={{ status: 'authenticated', username: 'alice' }}
+        initialSession={{
+          status: 'authenticated',
+          username: 'alice',
+          role: 'user',
+        }}
       >
         <SessionConsumer />
       </AuthProvider>,
@@ -47,7 +51,11 @@ describe('AuthProvider', () => {
   it('运行中会话失效时统一切换为游客', () => {
     render(
       <AuthProvider
-        initialSession={{ status: 'authenticated', username: 'alice' }}
+        initialSession={{
+          status: 'authenticated',
+          username: 'alice',
+          role: 'user',
+        }}
       >
         <SessionConsumer />
       </AuthProvider>,
@@ -64,6 +72,7 @@ describe('AuthProvider', () => {
     mockGetClientAuthSession.mockResolvedValue({
       status: 'authenticated',
       username: 'alice',
+      role: 'user',
     });
 
     render(

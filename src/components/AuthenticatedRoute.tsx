@@ -7,6 +7,7 @@ import { ReactNode } from 'react';
 import { useAuthSession } from '@/components/AuthProvider';
 import LoadingStatePanel from '@/components/LoadingStatePanel';
 import PageLayout from '@/components/PageLayout';
+import { AuthSessionRole } from '@/lib/auth-session';
 
 interface AuthenticatedRouteProps {
   children: ReactNode;
@@ -14,7 +15,15 @@ interface AuthenticatedRouteProps {
   message: string;
   contentMode?: 'default' | 'player';
   showDesktopBack?: boolean;
+  requiredRole?: AuthSessionRole;
+  forbiddenMessage?: string;
 }
+
+const ROLE_LEVEL: Record<AuthSessionRole, number> = {
+  user: 1,
+  admin: 2,
+  owner: 3,
+};
 
 export default function AuthenticatedRoute({
   children,
@@ -22,10 +31,16 @@ export default function AuthenticatedRoute({
   message,
   contentMode = 'default',
   showDesktopBack,
+  requiredRole = 'user',
+  forbiddenMessage = '当前账号没有访问该页面的权限。',
 }: AuthenticatedRouteProps) {
   const { session, isRefreshing, refreshSession } = useAuthSession();
 
-  if (session.status === 'authenticated') {
+  const isAuthenticated = session.status === 'authenticated';
+  const isForbidden =
+    isAuthenticated && ROLE_LEVEL[session.role] < ROLE_LEVEL[requiredRole];
+
+  if (isAuthenticated && !isForbidden) {
     return children;
   }
 
@@ -50,21 +65,29 @@ export default function AuthenticatedRoute({
               <LockKeyhole className='h-10 w-10' />
             )
           }
-          tone={isError ? 'red' : 'amber'}
+          tone={isError || isForbidden ? 'red' : 'amber'}
           title={
             isRefreshing
               ? '正在重新验证登录状态'
-              : isError
-                ? '无法验证登录状态'
-                : '需要登录'
+              : isForbidden
+                ? '权限不足'
+                : isError
+                  ? '无法验证登录状态'
+                  : '需要登录'
           }
           message={
-            isRefreshing ? '' : isError ? '请检查网络后重新验证。' : message
+            isRefreshing
+              ? ''
+              : isForbidden
+                ? forbiddenMessage
+                : isError
+                  ? '请检查网络后重新验证。'
+                  : message
           }
         >
           {!isRefreshing && (
             <div className='flex items-center justify-center gap-3'>
-              {isError ? (
+              {isForbidden ? null : isError ? (
                 <button
                   type='button'
                   onClick={() => void refreshSession()}

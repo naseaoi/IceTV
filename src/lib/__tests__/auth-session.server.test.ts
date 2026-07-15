@@ -47,12 +47,14 @@ describe('getServerAuthSession', () => {
     mockRequireActiveUserFromAuthInfo.mockResolvedValue({
       username: 'alice',
       isOwner: false,
+      role: 'user',
     });
     mockIsGuardFailure.mockReturnValue(false);
 
     await expect(getServerAuthSession('cookie')).resolves.toEqual({
       status: 'authenticated',
       username: 'alice',
+      role: 'user',
     });
     expect(mockRequireActiveUserFromAuthInfo).toHaveBeenCalledWith(authInfo);
   });

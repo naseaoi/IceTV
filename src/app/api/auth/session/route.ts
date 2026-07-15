@@ -24,12 +24,14 @@ function sessionResponse(
   authenticated: boolean,
   reason: SessionReason,
   username?: string,
+  role?: 'owner' | 'admin' | 'user',
 ) {
   return NextResponse.json(
     {
       authenticated,
       reason,
       username: username || null,
+      role: role || null,
     },
     { status: 200, headers: NO_STORE_HEADERS },
   );
@@ -66,7 +68,7 @@ export async function GET(request: NextRequest) {
     }
 
     if (authInfo.username === ownerUsername) {
-      return sessionResponse(true, 'ok', authInfo.username);
+      return sessionResponse(true, 'ok', authInfo.username, 'owner');
     }
 
     const username = normalizeUsername(authInfo.username);
@@ -81,7 +83,12 @@ export async function GET(request: NextRequest) {
       return sessionResponse(false, 'user_banned', username);
     }
 
-    return sessionResponse(true, 'ok', username);
+    return sessionResponse(
+      true,
+      'ok',
+      username,
+      user.role === 'admin' ? 'admin' : 'user',
+    );
   } catch (error) {
     console.error('会话检查失败:', error);
     return NextResponse.json(
@@ -89,6 +96,7 @@ export async function GET(request: NextRequest) {
         authenticated: false,
         reason: 'server_error',
         username: null,
+        role: null,
       },
       { status: 500, headers: NO_STORE_HEADERS },
     );

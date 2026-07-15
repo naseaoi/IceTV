@@ -32,6 +32,7 @@ describe('change-password password policy', () => {
     (requireActiveUser as jest.Mock).mockResolvedValue({
       username: 'alice',
       isOwner: false,
+      role: 'user',
     });
     (db.verifyUser as jest.Mock).mockResolvedValue(true);
   });

@@ -26,12 +26,17 @@ describe('getClientAuthSession', () => {
     mockGetAuthInfo.mockReturnValue({ username: 'alice', role: 'user' });
     (global.fetch as jest.Mock).mockResolvedValue({
       ok: true,
-      json: async () => ({ authenticated: true, username: 'alice' }),
+      json: async () => ({
+        authenticated: true,
+        username: 'alice',
+        role: 'user',
+      }),
     });
 
     await expect(getClientAuthSession()).resolves.toEqual({
       status: 'authenticated',
       username: 'alice',
+      role: 'user',
     });
     expect(global.fetch).toHaveBeenCalledWith('/api/auth/session', {
       credentials: 'same-origin',
