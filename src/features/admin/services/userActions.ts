@@ -108,6 +108,13 @@ export async function handleAdminUserAction({
         (u) => u.username === targetUsername,
       );
 
+      if (targetEntry?.role === 'owner' && operatorRole !== 'owner') {
+        return toActionResponse(
+          { error: '仅站长可操作站长账号' },
+          { status: 403 },
+        );
+      }
+
       if (
         targetEntry &&
         targetEntry.role === 'owner' &&
@@ -447,6 +454,12 @@ export async function handleAdminUserAction({
             const targetUser = adminConfig.UserConfig.Users.find(
               (u) => u.username === targetUsername,
             );
+            if (targetUser?.role === 'owner') {
+              return toActionResponse(
+                { error: `管理员无法操作站长 ${targetUsername}` },
+                { status: 403 },
+              );
+            }
             if (
               targetUser &&
               targetUser.role === 'admin' &&
