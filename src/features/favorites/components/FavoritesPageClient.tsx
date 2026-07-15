@@ -3,6 +3,7 @@
 import { Star } from 'lucide-react';
 import { useState } from 'react';
 
+import AuthenticatedRoute from '@/components/AuthenticatedRoute';
 import ConfirmModal from '@/components/modals/ConfirmModal';
 import PageLayout from '@/components/PageLayout';
 import { FavoriteGrid } from '@/features/favorites/components/FavoriteGrid';
@@ -10,7 +11,7 @@ import { FavoriteGridSkeleton } from '@/features/favorites/components/FavoriteGr
 import { useFavoriteItems } from '@/features/favorites/hooks/useFavoriteItems';
 import { HomeMineSwitch } from '@/features/home/components/HomeMineSwitch';
 
-export function FavoritesPageClient({
+function AuthenticatedFavoritesPageClient({
   favoriteSkeletonCount = 0,
 }: {
   favoriteSkeletonCount?: number;
@@ -78,5 +79,22 @@ export function FavoritesPageClient({
         }}
       />
     </PageLayout>
+  );
+}
+
+export function FavoritesPageClient({
+  favoriteSkeletonCount = 0,
+}: {
+  favoriteSkeletonCount?: number;
+}) {
+  return (
+    <AuthenticatedRoute
+      activePath='/me/favorites'
+      message='请先登录后再查看收藏内容。'
+    >
+      <AuthenticatedFavoritesPageClient
+        favoriteSkeletonCount={favoriteSkeletonCount}
+      />
+    </AuthenticatedRoute>
   );
 }

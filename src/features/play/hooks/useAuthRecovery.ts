@@ -1,10 +1,10 @@
 import { useCallback, useEffect, useState } from 'react';
 
 import {
-  AUTH_LOST_EVENT,
   SessionLostDetail,
   SessionLostReason,
 } from '@/features/play/lib/playTypes';
+import { AUTH_SESSION_LOST_EVENT } from '@/lib/auth.client';
 
 interface UseAuthRecoveryOptions {
   doSaveCheckpoint: (reason?: SessionLostReason) => void;
@@ -52,10 +52,13 @@ export function useAuthRecovery({
       setRealtimeLoadSpeed('');
     };
 
-    window.addEventListener(AUTH_LOST_EVENT, onSessionLost as EventListener);
+    window.addEventListener(
+      AUTH_SESSION_LOST_EVENT,
+      onSessionLost as EventListener,
+    );
     return () => {
       window.removeEventListener(
-        AUTH_LOST_EVENT,
+        AUTH_SESSION_LOST_EVENT,
         onSessionLost as EventListener,
       );
     };

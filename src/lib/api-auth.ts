@@ -1,6 +1,10 @@
 ﻿import { NextRequest, NextResponse } from 'next/server';
 
-import { getAuthInfoFromCookie, getSignatureData } from './auth.server';
+import {
+  AuthCookiePayload,
+  getAuthInfoFromCookie,
+  getSignatureData,
+} from './auth.server';
 import { getConfigForRead } from './config';
 import { getOwnerUsername } from './env.server';
 import { verifyAuthSignature } from './signing-secret.server';
@@ -47,6 +51,13 @@ export async function requireActiveUser(
   request: NextRequest,
   options: RequireActiveUserOptions = {},
 ): Promise<RequireActiveUserResult> {
+  return requireActiveUserFromAuthInfo(getAuthInfoFromCookie(request), options);
+}
+
+export async function requireActiveUserFromAuthInfo(
+  authInfo: AuthCookiePayload | null,
+  options: RequireActiveUserOptions = {},
+): Promise<RequireActiveUserResult> {
   const {
     unauthorizedMessage = 'Unauthorized',
     unauthorizedStatus = 401,
@@ -55,7 +66,6 @@ export async function requireActiveUser(
     includeUserStateCode = true,
   } = options;
 
-  const authInfo = getAuthInfoFromCookie(request);
   if (!authInfo || !authInfo.username) {
     return {
       response: NextResponse.json(

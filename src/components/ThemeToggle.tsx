@@ -16,11 +16,13 @@ import {
 interface ThemeToggleProps {
   variant?: 'icon' | 'sidebar';
   isCollapsed?: boolean;
+  className?: string;
 }
 
 export function ThemeToggle({
   variant = 'icon',
   isCollapsed = false,
+  className,
 }: ThemeToggleProps) {
   const [mounted, setMounted] = useState(false);
   const { setTheme, resolvedTheme } = useTheme();
@@ -65,7 +67,12 @@ export function ThemeToggle({
       );
     }
     return (
-      <div className='flex h-10 w-10 items-center justify-center rounded-full p-2 text-gray-600 dark:text-gray-300'>
+      <div
+        className={
+          className ??
+          'flex h-10 w-10 items-center justify-center rounded-full p-2 text-gray-600 dark:text-gray-300'
+        }
+      >
         <Moon className='h-full w-full' />
       </div>
     );
@@ -148,7 +155,10 @@ export function ThemeToggle({
     <button
       ref={buttonRef}
       onClick={toggleTheme}
-      className='flex h-10 w-10 items-center justify-center rounded-full p-2 text-gray-600 transition-colors hover:bg-gray-200/50 dark:text-gray-300 dark:hover:bg-gray-700/50'
+      className={
+        className ??
+        'flex h-10 w-10 items-center justify-center rounded-full p-2 text-gray-600 transition-colors hover:bg-gray-200/50 dark:text-gray-300 dark:hover:bg-gray-700/50'
+      }
       aria-label='切换主题'
     >
       {resolvedTheme === 'dark' ? (

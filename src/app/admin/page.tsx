@@ -3,6 +3,7 @@
 import { AlertTriangle, Loader2, RotateCcw, Save } from 'lucide-react';
 import { Suspense, useEffect, useState } from 'react';
 
+import AuthenticatedRoute from '@/components/AuthenticatedRoute';
 import AlertModal from '@/components/modals/AlertModal';
 import ConfirmModal from '@/components/modals/ConfirmModal';
 import PageLayout from '@/components/PageLayout';
@@ -311,7 +312,12 @@ function AdminPageClient() {
 export default function AdminPage() {
   return (
     <Suspense>
-      <AdminPageClient />
+      <AuthenticatedRoute
+        activePath='/admin'
+        message='请先登录管理员账号后再进入后台。'
+      >
+        <AdminPageClient />
+      </AuthenticatedRoute>
     </Suspense>
   );
 }

@@ -3,6 +3,7 @@
 import { BarChart3, History, Star } from 'lucide-react';
 import Link from 'next/link';
 
+import AuthenticatedRoute from '@/components/AuthenticatedRoute';
 import PageLayout from '@/components/PageLayout';
 import { FavoritePreviewSection } from '@/features/favorites/components/FavoritePreviewSection';
 import { useFavoriteItems } from '@/features/favorites/hooks/useFavoriteItems';
@@ -45,7 +46,7 @@ function QuickEntry({
   );
 }
 
-export function MinePageClient({
+function AuthenticatedMinePageClient({
   favoriteSkeletonCount = 0,
 }: {
   favoriteSkeletonCount?: number;
@@ -102,5 +103,19 @@ export function MinePageClient({
         </div>
       </div>
     </PageLayout>
+  );
+}
+
+export function MinePageClient({
+  favoriteSkeletonCount = 0,
+}: {
+  favoriteSkeletonCount?: number;
+}) {
+  return (
+    <AuthenticatedRoute activePath='/me' message='请先登录后再查看个人数据。'>
+      <AuthenticatedMinePageClient
+        favoriteSkeletonCount={favoriteSkeletonCount}
+      />
+    </AuthenticatedRoute>
   );
 }

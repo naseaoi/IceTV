@@ -1,3 +1,5 @@
+import { getAuthInfoFromBrowserCookie } from '@/lib/auth.client';
+
 let cachedModes: Record<string, string> | null = null;
 let cacheExpiry = 0;
 let inflightPromise: Promise<Record<string, string>> | null = null;
@@ -95,6 +97,10 @@ function dropLegacySourceOverride(sourceKey: string, rawUrl?: string): void {
 }
 
 async function fetchProxyModes(): Promise<Record<string, string>> {
+  if (!getAuthInfoFromBrowserCookie()?.username) {
+    return {};
+  }
+
   try {
     const res = await fetch('/api/proxy-modes');
     if (res.ok) {

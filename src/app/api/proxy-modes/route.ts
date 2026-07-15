@@ -1,16 +1,25 @@
-import { NextResponse } from 'next/server';
+import { NextRequest, NextResponse } from 'next/server';
 
-import { getConfigForRead } from '@/lib/config';
+import { isGuardFailure, requireActiveUser } from '@/lib/api-auth';
+import { getAvailableApiSites, getConfigForRead } from '@/lib/config';
 
 export const runtime = 'nodejs';
 
 /** 返回源站流量路由映射 */
-export async function GET() {
+export async function GET(request: NextRequest) {
   try {
+    const guardResult = await requireActiveUser(request);
+    if (isGuardFailure(guardResult)) return guardResult.response;
+
     const config = await getConfigForRead();
+    const availableSources = new Set(
+      (await getAvailableApiSites(guardResult.username, config)).map(
+        (source) => source.key,
+      ),
+    );
     const modes: Record<string, string> = {};
     for (const s of config.SourceConfig) {
-      if (s.proxyMode) {
+      if (s.proxyMode && availableSources.has(s.key)) {
         modes[s.key] = s.proxyMode;
       }
     }

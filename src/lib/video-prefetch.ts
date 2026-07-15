@@ -93,6 +93,7 @@ function prefetchVideoDetail(
   source: string | undefined,
   id: string | undefined,
 ): void {
+  if (!getAuthInfoFromBrowserCookie()?.username) return;
   if (!source || !id) return;
   const key = `${source}::${id}`;
   if (prefetchedDetails.has(key)) return;

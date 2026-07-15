@@ -23,7 +23,6 @@ import {
   useState,
 } from 'react';
 
-import { getAuthInfoFromBrowserCookie } from '@/lib/auth.client';
 import {
   readSidebarCollapsed,
   writeSidebarCollapsed,
@@ -318,13 +317,6 @@ const Sidebar = ({ onToggle, activePath = '/' }: SidebarProps) => {
               </Link>
               <Link
                 href='/search'
-                onClick={(e) => {
-                  const authInfo = getAuthInfoFromBrowserCookie();
-                  if (!authInfo?.username) {
-                    e.preventDefault();
-                    router.push('/login?redirect=%2Fsearch');
-                  }
-                }}
                 onMouseEnter={() => prefetchRoute('/search')}
                 data-active={active === '/search'}
                 className={`${SIDEBAR_ITEM_LAYOUT_CLASS} font-medium ${SIDEBAR_LINK_STATE_CLASS} ${

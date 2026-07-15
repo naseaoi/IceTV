@@ -7,7 +7,10 @@
  * 该文件不包含 'use client' 指令，由 db.client.ts 统一声明。
  */
 
-import { getAuthInfoFromBrowserCookie } from './auth.client';
+import {
+  AUTH_SESSION_LOST_EVENT,
+  getAuthInfoFromBrowserCookie,
+} from './auth.client';
 import type { CacheUpdateEvent, Favorite, PlayRecord } from './db.client';
 import { cacheManager } from './db.client.cache';
 
@@ -82,8 +85,6 @@ function isClientRequestError(error: unknown): error is ClientRequestError {
 }
 
 let authLossHandling = false;
-
-const AUTH_SOFT_RECOVERY_EVENT = 'auth:session-lost';
 
 function wait(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -235,10 +236,9 @@ function notifySessionLost(
   authLossHandling = true;
   const loginUrl = buildLoginUrl();
   const inPlayerPage = window.location.pathname.startsWith('/play');
-  const inHomePage = window.location.pathname === '/';
 
   window.dispatchEvent(
-    new CustomEvent<SessionLostDetail>(AUTH_SOFT_RECOVERY_EVENT, {
+    new CustomEvent<SessionLostDetail>(AUTH_SESSION_LOST_EVENT, {
       detail: {
         reason,
         sourceUrl,
@@ -247,11 +247,6 @@ function notifySessionLost(
       },
     }),
   );
-
-  // 首页和播放页不自动跳转登录，避免中断浏览体验
-  if (!inPlayerPage && !inHomePage) {
-    window.location.href = loginUrl;
-  }
 }
 
 function resetAuthLossHandlingFlag() {

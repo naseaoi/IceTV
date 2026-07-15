@@ -90,11 +90,6 @@ function PosterCard({
     ? `打开${title}的 Bangumi 页面`
     : `打开${title}的豆瓣页面`;
 
-  const getLoginRedirectUrl = useCallback(() => {
-    const currentUrl = window.location.pathname + window.location.search;
-    return `/login?redirect=${encodeURIComponent(currentUrl)}`;
-  }, []);
-
   const buildPlayUrl = useCallback(() => {
     const localTarget = findLocalPlaybackTargetByTitle(title, year);
     if (localTarget) {
@@ -111,19 +106,17 @@ function PosterCard({
   }, [title, type, year]);
 
   const handlePlay = useCallback(() => {
+    const playUrl = withReturnTo(buildPlayUrl(), getCurrentNavigationPath());
     const authInfo = getAuthInfoFromBrowserCookie();
-    if (!authInfo?.username) {
-      router.push(getLoginRedirectUrl());
-      return;
+    if (authInfo?.username) {
+      const hasLocalTarget = !!findLocalPlaybackTargetByTitle(title, year);
+      if (canUseNetworkPrefetch() && !hasLocalTarget) {
+        transferWarmedSearchToAggregateGroup(title);
+        warmupSearchForTitle(title);
+      }
     }
-
-    const hasLocalTarget = !!findLocalPlaybackTargetByTitle(title, year);
-    if (canUseNetworkPrefetch() && !hasLocalTarget) {
-      transferWarmedSearchToAggregateGroup(title);
-      warmupSearchForTitle(title);
-    }
-    router.push(withReturnTo(buildPlayUrl(), getCurrentNavigationPath()));
-  }, [buildPlayUrl, getLoginRedirectUrl, router, title, year]);
+    router.push(playUrl);
+  }, [buildPlayUrl, router, title, year]);
 
   // hover / focus 预热：提前触发标题聚合搜索并预取播放页路由
   const handlePrefetch = useCallback(() => {

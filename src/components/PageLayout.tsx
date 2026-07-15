@@ -55,7 +55,7 @@ const PageLayout = ({
         {/* 主内容区域 */}
         <div
           className={`flex min-w-0 flex-1 flex-col transition-[margin] duration-300 ease-[cubic-bezier(0.25,0.1,0.25,1)] ${
-            isPlayerPage ? 'md:h-dvh md:min-h-0' : ''
+            isPlayerPage ? 'h-dvh min-h-0' : ''
           }`}
         >
           {/* 桌面端顶部工具栏 */}
@@ -69,7 +69,7 @@ const PageLayout = ({
 
           {/* 主内容 */}
           <main
-            className={`flex-1 md:mb-0 md:mt-0 md:min-h-0 ${
+            className={`min-h-0 flex-1 md:mb-0 md:mt-0 ${
               isPlayerPage
                 ? 'mb-0 mt-[calc(3rem+env(safe-area-inset-top))] flex h-[calc(100dvh-3rem-env(safe-area-inset-top)-env(safe-area-inset-bottom)-4px)] flex-col overflow-hidden md:h-auto'
                 : `${

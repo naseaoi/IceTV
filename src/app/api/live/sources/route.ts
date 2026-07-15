@@ -1,14 +1,16 @@
 ﻿import { NextRequest, NextResponse } from 'next/server';
 
 import { isLiveEntryEnabledInConfig } from '@/features/live/lib/live';
-import { getOptionalActiveUser } from '@/lib/api-auth';
+import { isGuardFailure, requireActiveUser } from '@/lib/api-auth';
 import { getConfigForRead } from '@/lib/config';
 
 export const runtime = 'nodejs';
 
 export async function GET(request: NextRequest) {
   try {
-    const activeUser = await getOptionalActiveUser(request);
+    const guardResult = await requireActiveUser(request);
+    if (isGuardFailure(guardResult)) return guardResult.response;
+
     const config = await getConfigForRead();
 
     if (!config) {
@@ -26,15 +28,7 @@ export async function GET(request: NextRequest) {
 
     return NextResponse.json({
       success: true,
-      data: activeUser
-        ? liveSources
-        : liveSources.map((source) => ({
-            key: source.key,
-            name: source.name,
-            from: source.from,
-            channelNumber: source.channelNumber || 0,
-            disabled: !!source.disabled,
-          })),
+      data: liveSources,
     });
   } catch (error) {
     console.error('获取直播源失败:', error);

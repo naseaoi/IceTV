@@ -2,6 +2,9 @@ describe('proxy modes', () => {
   async function loadModule(modes: Record<string, string>) {
     jest.resetModules();
     sessionStorage.clear();
+    jest.doMock('@/lib/auth.client', () => ({
+      getAuthInfoFromBrowserCookie: () => ({ username: 'alice' }),
+    }));
     global.fetch = jest.fn().mockResolvedValue({
       ok: true,
       json: async () => modes,

@@ -357,7 +357,7 @@ export function LiveChannelSidebar({
 
             <div
               ref={channelListRef}
-              className={`min-h-0 flex-1 overflow-y-auto p-3 ${
+              className={`max-h-[50dvh] min-h-0 flex-1 overflow-y-auto p-3 md:max-h-none ${
                 filteredChannels.length > 0 ? 'space-y-2' : 'flex flex-col'
               }`}
             >

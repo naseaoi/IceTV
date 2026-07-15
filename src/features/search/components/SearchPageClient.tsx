@@ -4,6 +4,7 @@ import { ChevronUp, Search, X } from 'lucide-react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import React, { useEffect, useMemo, useState } from 'react';
 
+import AuthenticatedRoute from '@/components/AuthenticatedRoute';
 import PageLayout from '@/components/PageLayout';
 import SearchResultFilter from '@/components/SearchResultFilter';
 import SearchSuggestions from '@/components/SearchSuggestions';
@@ -78,7 +79,7 @@ function setSearchViewModeByQuery(query: string, mode: 'agg' | 'all') {
   } catch {}
 }
 
-export default function SearchPageClient() {
+function AuthenticatedSearchPageClient() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const urlQuery = searchParams.get('q') || '';
@@ -534,5 +535,16 @@ export default function SearchPageClient() {
         <ChevronUp className='h-6 w-6 transition-transform group-hover:scale-110' />
       </button>
     </PageLayout>
+  );
+}
+
+export default function SearchPageClient() {
+  return (
+    <AuthenticatedRoute
+      activePath='/search'
+      message='请先登录后再使用搜索功能。'
+    >
+      <AuthenticatedSearchPageClient />
+    </AuthenticatedRoute>
   );
 }
