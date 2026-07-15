@@ -227,6 +227,30 @@ div[data-media-provider] video {
   }
 }
 
+/* 登录页海报墙横向循环滚动 */
+@keyframes poster-marquee {
+  from {
+    transform: translateX(0);
+  }
+  to {
+    transform: translateX(-50%);
+  }
+}
+
+.poster-marquee {
+  animation: poster-marquee 240s linear infinite;
+}
+
+.poster-marquee-reverse {
+  animation-direction: reverse;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .poster-marquee {
+    animation: none;
+  }
+}
+
 :root {
   --skeleton-color: #f0f0f0;
   --skeleton-highlight: #e0e0e0;
