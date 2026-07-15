@@ -6,6 +6,7 @@ import { ReactNode, useEffect, useState } from 'react';
 
 import LoadingStatePanel from '@/components/LoadingStatePanel';
 import PageLayout from '@/components/PageLayout';
+import { AUTH_SESSION_LOST_EVENT } from '@/lib/auth.client';
 import {
   ClientAuthSession,
   getClientAuthSession,
@@ -42,6 +43,17 @@ export default function AuthenticatedRoute({
       cancelled = true;
     };
   }, [attempt]);
+
+  useEffect(() => {
+    const handleSessionLost = () => {
+      setSession({ status: 'guest' });
+    };
+
+    window.addEventListener(AUTH_SESSION_LOST_EVENT, handleSessionLost);
+    return () => {
+      window.removeEventListener(AUTH_SESSION_LOST_EVENT, handleSessionLost);
+    };
+  }, []);
 
   if (session?.status === 'authenticated') {
     return children;

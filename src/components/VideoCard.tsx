@@ -364,12 +364,6 @@ const VideoCard = forwardRef<VideoCardHandle, VideoCardProps>(
       saveAggregateGroup,
     ]);
 
-    /** 未登录时返回登录跳转 URL */
-    const getLoginRedirectUrl = () => {
-      const currentUrl = window.location.pathname + window.location.search;
-      return `/login?redirect=${encodeURIComponent(currentUrl)}`;
-    };
-
     // 点击时预热：聚合卡数据经 sessionStorage 传递，跳过
     const warmupOnNavigate = useCallback(() => {
       if (origin === 'live' || isAggregate) return;
@@ -395,33 +389,31 @@ const VideoCard = forwardRef<VideoCardHandle, VideoCardProps>(
     ]);
 
     const handleClick = useCallback(() => {
-      const authInfo = getAuthInfoFromBrowserCookie();
-      if (!authInfo?.username) {
-        router.push(getLoginRedirectUrl());
-        return;
-      }
-
-      if (
-        from === 'playrecord' &&
-        actualSource &&
-        actualId &&
-        currentEpisode &&
-        Number.isFinite(resumeTime) &&
-        (resumeTime || 0) > 0
-      ) {
-        savePlayIntent({
-          source: actualSource,
-          id: actualId,
-          episodeIndex: Math.max(0, currentEpisode - 1),
-          resumeTime: resumeTime || 0,
-        });
-      }
-
-      warmupOnNavigate();
       const url = buildPlayUrl();
-      if (url) {
-        router.push(withReturnTo(url, getCurrentNavigationPath()));
+      if (!url) return;
+
+      const authInfo = getAuthInfoFromBrowserCookie();
+      if (authInfo?.username) {
+        if (
+          from === 'playrecord' &&
+          actualSource &&
+          actualId &&
+          currentEpisode &&
+          Number.isFinite(resumeTime) &&
+          (resumeTime || 0) > 0
+        ) {
+          savePlayIntent({
+            source: actualSource,
+            id: actualId,
+            episodeIndex: Math.max(0, currentEpisode - 1),
+            resumeTime: resumeTime || 0,
+          });
+        }
+
+        warmupOnNavigate();
       }
+
+      router.push(withReturnTo(url, getCurrentNavigationPath()));
     }, [
       router,
       buildPlayUrl,
@@ -478,11 +470,6 @@ const VideoCard = forwardRef<VideoCardHandle, VideoCardProps>(
 
     // 新标签页播放处理函数
     const handlePlayInNewTab = useCallback(() => {
-      const authInfo = getAuthInfoFromBrowserCookie();
-      if (!authInfo?.username) {
-        window.open(getLoginRedirectUrl(), '_blank');
-        return;
-      }
       const url = buildPlayUrl();
       if (url) {
         window.open(withReturnTo(url, getCurrentNavigationPath()), '_blank');

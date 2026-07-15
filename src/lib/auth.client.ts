@@ -8,6 +8,8 @@ export type AuthCookiePayload = {
   sessionType?: 'account';
 };
 
+export const AUTH_SESSION_LOST_EVENT = 'auth:session-lost';
+
 export type AuthMetaPayload = {
   username?: string;
   role?: AuthRole;

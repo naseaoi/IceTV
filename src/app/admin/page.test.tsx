@@ -8,6 +8,11 @@ jest.mock('@/components/PageLayout', () => ({
   default: ({ children }: { children: ReactNode }) => <div>{children}</div>,
 }));
 
+jest.mock('@/components/AuthenticatedRoute', () => ({
+  __esModule: true,
+  default: ({ children }: { children: ReactNode }) => <>{children}</>,
+}));
+
 jest.mock('@/components/DataMigration', () => ({
   __esModule: true,
   default: () => <div>DataMigration</div>,

@@ -56,32 +56,27 @@ export default function MobileContinueCard({
   const { showActionSheet, showConfirm } = useCardInteractionManager();
 
   const handlePlay = useCallback(() => {
-    const authInfo = getAuthInfoFromBrowserCookie();
-    if (!authInfo?.username) {
-      const currentUrl = window.location.pathname + window.location.search;
-      router.push(`/login?redirect=${encodeURIComponent(currentUrl)}`);
-      return;
-    }
-
-    if (currentEpisode && Number.isFinite(resumeTime) && resumeTime > 0) {
-      savePlayIntent({
-        source,
-        id,
-        episodeIndex: Math.max(0, currentEpisode - 1),
-        resumeTime,
-      });
-    }
-
-    if (canUseNetworkPrefetch()) {
-      warmupForPlayback(source, id);
-    }
-
-    router.push(
-      withReturnTo(
-        buildMobileContinuePlayUrl({ source, id, title, year, query }),
-        getCurrentNavigationPath(),
-      ),
+    const playUrl = withReturnTo(
+      buildMobileContinuePlayUrl({ source, id, title, year, query }),
+      getCurrentNavigationPath(),
     );
+    const authInfo = getAuthInfoFromBrowserCookie();
+    if (authInfo?.username) {
+      if (currentEpisode && Number.isFinite(resumeTime) && resumeTime > 0) {
+        savePlayIntent({
+          source,
+          id,
+          episodeIndex: Math.max(0, currentEpisode - 1),
+          resumeTime,
+        });
+      }
+
+      if (canUseNetworkPrefetch()) {
+        warmupForPlayback(source, id);
+      }
+    }
+
+    router.push(playUrl);
   }, [router, source, id, title, year, query, currentEpisode, resumeTime]);
 
   const handleDelete = useCallback(() => {

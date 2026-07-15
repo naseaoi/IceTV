@@ -43,4 +43,3 @@ export interface WakeLockSentinel {
 
 export const PLAY_CHECKPOINT_KEY = 'icetv_play_checkpoint';
 export const LEGACY_PLAY_CHECKPOINT_KEY = 'moontv_play_checkpoint';
-export const AUTH_LOST_EVENT = 'auth:session-lost';
