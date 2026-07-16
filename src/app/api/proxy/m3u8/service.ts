@@ -1,7 +1,5 @@
-import {
-  shouldRunAdDetection,
-  stripAdSegmentsByPhysicalSignal,
-} from '@/features/play/lib/ad-segment-detector';
+import { getAdFilterCacheNamespace } from '@/features/play/lib/ad-filter-strategy-registry';
+import { filterM3U8AdsForSource } from '@/features/play/lib/ad-segment-detector';
 import { resolveVodM3U8ProxyTimeoutMs } from '@/features/play/lib/vodSourcePlaybackPolicy';
 import { getConfigForRead } from '@/lib/config';
 import {
@@ -66,8 +64,12 @@ export function isSignedM3U8Url(rawUrl: string): boolean {
   return SIGNED_URL_PARAM_RE.test(rawUrl);
 }
 
-export function peekM3U8Cache(url: string) {
-  return m3u8Cache.peek(url);
+function getM3U8CacheKey(url: string, source: string | null): string {
+  return `${getAdFilterCacheNamespace(source)}\0${url}`;
+}
+
+export function peekM3U8Cache(url: string, source: string | null) {
+  return m3u8Cache.peek(getM3U8CacheKey(url, source));
 }
 
 export function refreshM3U8Cache(
@@ -75,7 +77,8 @@ export function refreshM3U8Cache(
   ua: string,
   source: string | null,
 ): Promise<void> {
-  const existing = m3u8RefreshInflight.get(url);
+  const cacheKey = getM3U8CacheKey(url, source);
+  const existing = m3u8RefreshInflight.get(cacheKey);
   if (existing) return existing;
 
   const task = (async () => {
@@ -104,18 +107,17 @@ export function refreshM3U8Cache(
       ) {
         return;
       }
-      if (shouldRunAdDetection(source)) {
-        try {
-          content = await stripAdSegmentsByPhysicalSignal(
-            content,
-            response.url,
-            ua,
-          );
-        } catch (error) {
-          console.warn('m3u8 后台广告段检测失败:', error);
-        }
+      try {
+        content = await filterM3U8AdsForSource(
+          content,
+          response.url,
+          ua,
+          source,
+        );
+      } catch (error) {
+        console.warn('m3u8 后台广告段检测失败:', error);
       }
-      m3u8Cache.set(url, {
+      m3u8Cache.set(cacheKey, {
         content,
         contentType,
         finalUrl: response.url,
@@ -124,11 +126,11 @@ export function refreshM3U8Cache(
     } catch (error) {
       console.warn('m3u8 后台刷新失败:', error);
     } finally {
-      m3u8RefreshInflight.delete(url);
+      m3u8RefreshInflight.delete(cacheKey);
     }
   })();
 
-  m3u8RefreshInflight.set(url, task);
+  m3u8RefreshInflight.set(cacheKey, task);
   return task;
 }
 
@@ -291,9 +293,9 @@ async function fetchM3U8Data(
     userInitiated: context.userInitiated,
   });
 
-  if (!isLive && shouldRunAdDetection(source)) {
+  if (!isLive) {
     try {
-      content = await stripAdSegmentsByPhysicalSignal(content, finalUrl, ua);
+      content = await filterM3U8AdsForSource(content, finalUrl, ua, source);
     } catch (error) {
       console.warn('m3u8 广告段检测失败:', error);
     }
@@ -304,7 +306,7 @@ async function fetchM3U8Data(
     (content.includes('#EXT-X-ENDLIST') ||
       content.includes('#EXT-X-STREAM-INF'))
   ) {
-    m3u8Cache.set(url, {
+    m3u8Cache.set(getM3U8CacheKey(url, source), {
       content,
       contentType: contentType || 'application/vnd.apple.mpegurl',
       finalUrl,

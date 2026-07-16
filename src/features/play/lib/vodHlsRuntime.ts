@@ -6,6 +6,7 @@ import type {
   CurrentSourceVideoInfoContext,
 } from '@/features/play/hooks/artPlayerTypes';
 import type { PlaybackRequestMode } from '@/features/play/hooks/usePlayPageState';
+import { shouldFilterAdsOnClient } from '@/features/play/lib/ad-filter-strategy-registry';
 import { resolveSourceSwitchCurrentPlayTime } from '@/features/play/lib/episodeResumePolicy';
 import {
   PLAYBACK_STALL_CONFIRMATION_DELAY_MS,
@@ -128,9 +129,11 @@ export function createVodM3u8Loader({
       ...sourceBufferOverrides,
     };
     const currentBlockAd = blockAdEnabledRef.current;
+    const useClientAdFilter =
+      currentBlockAd && shouldFilterAdsOnClient(sourceKey);
     const existingHls = managedVideo.hls;
     const canReuseHls =
-      !!existingHls && managedVideo.__icetvBlockAd === currentBlockAd;
+      !!existingHls && managedVideo.__icetvClientAdFilter === useClientAdFilter;
 
     let hls: any;
     if (canReuseHls) {
@@ -165,12 +168,12 @@ export function createVodM3u8Loader({
         fragLoadingTimeOut: 30000,
         fragLoadingMaxRetry: 6,
         fragLoadingRetryDelay: 1000,
-        loader: currentBlockAd
+        loader: useClientAdFilter
           ? (adBlockingHlsLoader as unknown as typeof Hls.DefaultConfig.loader)
           : Hls.DefaultConfig.loader,
       });
     }
-    managedVideo.__icetvBlockAd = currentBlockAd;
+    managedVideo.__icetvClientAdFilter = useClientAdFilter;
 
     const buildTargetUrl = (rawUrl: string, useServerProxy: boolean) =>
       buildVodProxyUrl({

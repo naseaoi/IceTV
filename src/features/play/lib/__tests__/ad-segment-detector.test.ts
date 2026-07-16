@@ -4,6 +4,7 @@
  * 网络相关的码率兜底路径不在此测试范围内（需 fetch stub）。
  */
 import {
+  filterM3U8AdsForSource,
   shouldRunAdDetection,
   stripAdSegmentsByPhysicalSignal,
 } from '@/features/play/lib/ad-segment-detector';
@@ -14,6 +15,39 @@ describe('shouldRunAdDetection', () => {
     expect(shouldRunAdDetection('other')).toBe(false);
     expect(shouldRunAdDetection(null)).toBe(false);
     expect(shouldRunAdDetection('')).toBe(false);
+  });
+});
+
+describe('filterM3U8AdsForSource', () => {
+  test('不同源站策略相互隔离', async () => {
+    const lines = ['#EXTM3U', '#EXT-X-TARGETDURATION:5'];
+    for (let segment = 0; segment < 8; segment += 1) {
+      lines.push('#EXT-X-DISCONTINUITY');
+      for (let fragment = 0; fragment < 6; fragment += 1) {
+        lines.push('#EXTINF:5.000000,');
+        lines.push(`main_${segment}_${fragment}.ts`);
+      }
+    }
+    lines.push('#EXT-X-ENDLIST');
+    const m3u8 = lines.join('\n');
+
+    const [rycjResult, otherResult] = await Promise.all([
+      filterM3U8AdsForSource(
+        m3u8,
+        'https://cdn.example.com/index.m3u8',
+        'ua',
+        'rycj',
+      ),
+      filterM3U8AdsForSource(
+        m3u8,
+        'https://cdn.example.com/index.m3u8',
+        'ua',
+        'other',
+      ),
+    ]);
+
+    expect(rycjResult).not.toContain('#EXT-X-DISCONTINUITY');
+    expect(otherResult).toBe(m3u8);
   });
 });
 
@@ -104,6 +138,7 @@ describe('stripAdSegmentsByPhysicalSignal', () => {
     // 正片 ts 保留
     expect(result).toMatch(/normal_0_0\.ts/);
     expect(result).toMatch(/normal_7_5\.ts/);
+    expect(result).not.toContain('#EXT-X-DISCONTINUITY');
   });
 
   test('EXTINF 40ms 粗粒度步进段被识别并剔除', async () => {
@@ -157,7 +192,7 @@ describe('stripAdSegmentsByPhysicalSignal', () => {
     expect(result).toMatch(/normal_5_0\.ts/);
   });
 
-  test('单个短尾片不触发局部时长偏移识别', async () => {
+  test('规律切片中的单个短尾片不被删除', async () => {
     const lines = ['#EXTM3U', '#EXT-X-VERSION:3', '#EXT-X-TARGETDURATION:5'];
     for (let segment = 0; segment < 10; segment++) {
       lines.push('#EXT-X-DISCONTINUITY');
@@ -176,7 +211,64 @@ describe('stripAdSegmentsByPhysicalSignal', () => {
       'ua',
     );
 
-    expect(result).toBe(m3u8);
+    expect(result).toContain('normal_4_4.ts');
+    expect(result.match(/normal_\d+_\d+\.ts/g)).toHaveLength(50);
+    expect(result).not.toContain('#EXT-X-DISCONTINUITY');
+  });
+
+  test('规律切片的短尾广告块被删除', async () => {
+    const lines = ['#EXTM3U', '#EXT-X-TARGETDURATION:5'];
+    for (let segment = 0; segment < 9; segment += 1) {
+      lines.push('#EXT-X-DISCONTINUITY');
+      for (let fragment = 0; fragment < 6; fragment += 1) {
+        lines.push('#EXTINF:5.000000,');
+        lines.push(`main_${segment}_${fragment}.ts`);
+      }
+    }
+    lines.push('#EXT-X-DISCONTINUITY');
+    lines.push('#EXTINF:5.000000,', 'tail_ad_0.ts');
+    lines.push('#EXTINF:2.333333,', 'tail_ad_1.ts');
+    lines.push('#EXT-X-ENDLIST');
+
+    const result = await stripAdSegmentsByPhysicalSignal(
+      lines.join('\n'),
+      'https://cdn.example.com/x/index.m3u8',
+      'ua',
+    );
+
+    expect(result).not.toContain('tail_ad_0.ts');
+    expect(result).not.toContain('tail_ad_1.ts');
+    expect(result).not.toContain('#EXT-X-DISCONTINUITY');
+    expect(result.trim().endsWith('#EXT-X-ENDLIST')).toBe(true);
+  });
+
+  test('规律正片边界和广告删除边界全部连续化', async () => {
+    const lines = ['#EXTM3U', '#EXT-X-TARGETDURATION:6'];
+    for (let segment = 0; segment < 10; segment += 1) {
+      lines.push('#EXT-X-DISCONTINUITY');
+      const durations =
+        segment === 4 ? [4, 5.48, 4, 3.24, 4, 0.28] : [5, 5, 5, 5, 5, 5];
+      durations.forEach((duration, fragment) => {
+        lines.push(`#EXTINF:${duration.toFixed(6)},`);
+        lines.push(
+          segment === 4
+            ? `ad_${fragment}.ts`
+            : `main_${segment}_${fragment}.ts`,
+        );
+      });
+    }
+    lines.push('#EXT-X-ENDLIST');
+
+    const result = await stripAdSegmentsByPhysicalSignal(
+      lines.join('\n'),
+      'https://cdn.example.com/x/index.m3u8',
+      'ua',
+    );
+
+    expect(result).not.toMatch(/ad_\d+\.ts/);
+    expect(result).toContain('main_3_5.ts\n#EXTINF');
+    expect(result).toContain('main_5_0.ts');
+    expect(result).not.toContain('#EXT-X-DISCONTINUITY');
   });
 
   test('整片都是整数切片的源站不被误判', async () => {

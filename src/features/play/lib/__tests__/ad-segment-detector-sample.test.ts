@@ -28,7 +28,10 @@ const AD_TS_NAMES = [
 ];
 
 const FIXTURE_PATH = path.join(
-  __dirname,
+  process.cwd(),
+  'src',
+  'lib',
+  '__tests__',
   '__fixtures__',
   'sample-rycj.m3u8.txt',
 );
@@ -51,5 +54,6 @@ describeIfFixture('ad-segment-detector 真实样本回归', () => {
     expect(result).toContain('a176f1486fcb090d0720af7a8f8012b6.ts');
     expect(result).toContain('9dc5f5e8cc1e374a5575bf65803f56f6.ts');
     expect(result).toContain('81746c96387468a58f0a2104bbf364e4.ts');
+    expect(result).not.toContain('#EXT-X-DISCONTINUITY');
   });
 });

@@ -102,7 +102,7 @@ export async function GET(request: NextRequest) {
 
   try {
     // 查询 VOD 清单缓存（fresh/stale 皆命中；stale 命中时触发后台刷新）
-    const cached = skipCache ? null : peekM3U8Cache(validation.url);
+    const cached = skipCache ? null : peekM3U8Cache(validation.url, source);
     if (cached) {
       const { value, fresh } = cached;
       if (!fresh) {

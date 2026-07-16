@@ -1,77 +1,26 @@
+import {
+  type DiscontSegment,
+  parseDiscontinuitySegments,
+  rebuildContinuousPlaylist,
+  removeAdSegmentsKeepingDiscontinuities,
+} from '@/features/play/lib/ad-filter-manifest';
+import {
+  type ServerAdFilterSignal,
+  type SourceAdFilterStrategy,
+  getSourceAdFilterStrategy,
+  shouldRunServerAdFilter,
+} from '@/features/play/lib/ad-filter-strategy-registry';
 import { createTimedAbortController } from '@/lib/downstream-sources/shared';
 import { fetchWithUrlGuard } from '@/lib/url-guard';
 import { getBaseUrl, resolveUrl } from '@/lib/url-resolve';
 
-interface DiscontSegment {
-  lineIndices: number[];
-
-  tsPaths: string[];
-
-  tsDurations: number[];
-
+interface PeriodicLayout {
+  fragmentCount: number;
   duration: number;
 }
 
 export function shouldRunAdDetection(source: string | null): boolean {
-  if (!source) return false;
-
-  return source === 'rycj';
-}
-
-function parseSegments(m3u8Content: string): {
-  lines: string[];
-  segments: DiscontSegment[];
-} {
-  const lines = m3u8Content.split('\n');
-  const segments: DiscontSegment[] = [];
-  let current: DiscontSegment = {
-    lineIndices: [],
-    tsPaths: [],
-    tsDurations: [],
-    duration: 0,
-  };
-  let pendingDur = 0;
-  let pendingExtinfIdx = -1;
-
-  for (let i = 0; i < lines.length; i++) {
-    const raw = lines[i];
-    const t = raw.trim();
-
-    if (t === '#EXT-X-DISCONTINUITY') {
-      if (current.tsPaths.length > 0) {
-        segments.push(current);
-      }
-      current = {
-        lineIndices: [],
-        tsPaths: [],
-        tsDurations: [],
-        duration: 0,
-      };
-      pendingDur = 0;
-      pendingExtinfIdx = -1;
-      continue;
-    }
-
-    if (t.startsWith('#EXTINF:')) {
-      const raw = t.slice(8).split(',')[0]?.trim() || '';
-      pendingDur = Number.parseFloat(raw) || 0;
-      pendingExtinfIdx = i;
-      continue;
-    }
-
-    if (t && !t.startsWith('#')) {
-      if (pendingExtinfIdx >= 0) current.lineIndices.push(pendingExtinfIdx);
-      current.lineIndices.push(i);
-      current.tsPaths.push(t);
-      current.tsDurations.push(pendingDur);
-      current.duration += pendingDur;
-      pendingDur = 0;
-      pendingExtinfIdx = -1;
-    }
-  }
-  if (current.tsPaths.length > 0) segments.push(current);
-
-  return { lines, segments };
+  return shouldRunServerAdFilter(source);
 }
 
 function isNearInteger(d: number): boolean {
@@ -120,6 +69,123 @@ function median(values: number[]): number {
   return sorted.length % 2 === 0
     ? (sorted[mid - 1] + sorted[mid]) / 2
     : sorted[mid];
+}
+
+function mode(values: number[]): { value: number; coverage: number } | null {
+  if (values.length === 0) return null;
+
+  const counts = new Map<number, number>();
+  for (const value of values) {
+    counts.set(value, (counts.get(value) || 0) + 1);
+  }
+
+  let modeValue = values[0];
+  let modeCount = 0;
+  counts.forEach((count, value) => {
+    if (count > modeCount) {
+      modeValue = value;
+      modeCount = count;
+    }
+  });
+
+  return { value: modeValue, coverage: modeCount / values.length };
+}
+
+function detectPeriodicLayout(
+  segments: DiscontSegment[],
+): PeriodicLayout | null {
+  if (segments.length < 8) return null;
+
+  const fragmentMode = mode(
+    segments.map((segment) => segment.tsDurations.length),
+  );
+  if (!fragmentMode || fragmentMode.value < 3 || fragmentMode.coverage < 0.7) {
+    return null;
+  }
+
+  const fullSegments = segments.filter(
+    (segment) => segment.tsDurations.length === fragmentMode.value,
+  );
+  const duration = median(
+    fullSegments
+      .map((segment) => segment.duration)
+      .filter((value) => value > 0),
+  );
+  if (duration <= 0) return null;
+
+  const tolerance = Math.max(1, duration * 0.08);
+  const durationCoverage =
+    fullSegments.filter(
+      (segment) => Math.abs(segment.duration - duration) <= tolerance,
+    ).length / fullSegments.length;
+  if (durationCoverage < 0.7) return null;
+
+  return { fragmentCount: fragmentMode.value, duration };
+}
+
+function detectShortEdgeBlocks(
+  segments: DiscontSegment[],
+  layout: PeriodicLayout,
+): Set<number> {
+  const result = new Set<number>();
+  const durationLimit = layout.duration * 0.25;
+
+  const isCandidate = (segment: DiscontSegment) =>
+    segment.duration > 0 &&
+    segment.duration < durationLimit &&
+    segment.tsDurations.length < layout.fragmentCount;
+
+  for (let index = 0; index < segments.length; index += 1) {
+    if (!isCandidate(segments[index])) break;
+    result.add(index);
+  }
+
+  for (let index = segments.length - 1; index >= 0; index -= 1) {
+    if (!isCandidate(segments[index])) break;
+    result.add(index);
+  }
+
+  return result;
+}
+
+function detectByPeriodicDurationProfile(
+  segments: DiscontSegment[],
+  layout: PeriodicLayout,
+): Set<number> {
+  const result = new Set<number>();
+  const baselineFragmentDuration = layout.duration / layout.fragmentCount;
+  const minimumModeShift = Math.max(0.5, baselineFragmentDuration * 0.1);
+  const neighborTolerance = Math.max(1, layout.duration * 0.08);
+
+  for (let index = 1; index < segments.length - 1; index += 1) {
+    const segment = segments[index];
+    if (segment.tsDurations.length !== layout.fragmentCount) continue;
+    if (segment.duration >= layout.duration * 0.9) continue;
+    if (coarseGridRatioOfSegment(segment) < 0.85) continue;
+
+    const durationMode = mode(
+      segment.tsDurations.map((duration) => Math.round(duration * 100)),
+    );
+    if (!durationMode || durationMode.coverage < 0.5) continue;
+
+    const fragmentDuration = durationMode.value / 100;
+    if (baselineFragmentDuration - fragmentDuration < minimumModeShift) {
+      continue;
+    }
+
+    const previous = segments[index - 1];
+    const next = segments[index + 1];
+    if (
+      Math.abs(previous.duration - layout.duration) > neighborTolerance ||
+      Math.abs(next.duration - layout.duration) > neighborTolerance
+    ) {
+      continue;
+    }
+
+    result.add(index);
+  }
+
+  return result;
 }
 
 function detectByLocalDurationShift(segments: DiscontSegment[]): Set<number> {
@@ -400,32 +466,104 @@ async function detectByBitrate(
   return result;
 }
 
-function rebuildM3U8(
+function strategyUsesSignal(
+  strategy: SourceAdFilterStrategy,
+  signal: ServerAdFilterSignal,
+): boolean {
+  return strategy.server?.signals.includes(signal) === true;
+}
+
+function rebuildFilteredPlaylist(
   lines: string[],
   segments: DiscontSegment[],
   adIndices: Set<number>,
+  strategy: SourceAdFilterStrategy,
+  periodicLayout: PeriodicLayout | null,
 ): string {
-  if (adIndices.size === 0) return lines.join('\n');
-
-  const dropLines = new Set<number>();
-  adIndices.forEach((idx) => {
-    for (const li of segments[idx].lineIndices) dropLines.add(li);
-  });
-
-  const out: string[] = [];
-  let lastWasDisc = false;
-  for (let i = 0; i < lines.length; i++) {
-    if (dropLines.has(i)) continue;
-    const t = lines[i].trim();
-    if (t === '#EXT-X-DISCONTINUITY') {
-      if (lastWasDisc) continue;
-      lastWasDisc = true;
-    } else if (t !== '') {
-      lastWasDisc = false;
-    }
-    out.push(lines[i]);
+  if (periodicLayout && strategy.server?.timeline === 'continuous-periodic') {
+    return rebuildContinuousPlaylist(lines, segments, adIndices);
   }
-  return out.join('\n');
+  return removeAdSegmentsKeepingDiscontinuities(lines, segments, adIndices);
+}
+
+async function applyServerAdFilterStrategy(
+  m3u8Content: string,
+  originM3u8Url: string,
+  ua: string,
+  strategy: SourceAdFilterStrategy,
+): Promise<string> {
+  if (!strategy.server) return m3u8Content;
+  if (!m3u8Content.includes('#EXT-X-DISCONTINUITY')) return m3u8Content;
+
+  const { lines, segments } = parseDiscontinuitySegments(m3u8Content);
+  if (segments.length < 4) return m3u8Content;
+
+  const baseUrl = getBaseUrl(originM3u8Url);
+  const periodicLayout = detectPeriodicLayout(segments);
+
+  const adSet = new Set<number>();
+  if (strategyUsesSignal(strategy, 'extinf-pattern')) {
+    detectByExtinfIntegerPattern(segments).forEach((index) => adSet.add(index));
+  }
+  if (strategyUsesSignal(strategy, 'local-duration-shift')) {
+    detectByLocalDurationShift(segments).forEach((index) => adSet.add(index));
+  }
+  if (strategyUsesSignal(strategy, 'host-anomaly')) {
+    detectByHostAnomaly(segments, baseUrl).forEach((index) => adSet.add(index));
+  }
+  if (periodicLayout) {
+    if (strategyUsesSignal(strategy, 'periodic-duration-profile')) {
+      detectByPeriodicDurationProfile(segments, periodicLayout).forEach(
+        (index) => adSet.add(index),
+      );
+    }
+    if (strategyUsesSignal(strategy, 'short-edge-blocks')) {
+      detectShortEdgeBlocks(segments, periodicLayout).forEach((index) =>
+        adSet.add(index),
+      );
+    }
+  }
+
+  if (adSet.size > 0) {
+    return rebuildFilteredPlaylist(
+      lines,
+      segments,
+      adSet,
+      strategy,
+      periodicLayout,
+    );
+  }
+
+  if (strategyUsesSignal(strategy, 'bitrate-fallback')) {
+    try {
+      const bitrateSet = await detectByBitrate(segments, baseUrl, ua);
+      if (bitrateSet.size > 0) {
+        return rebuildFilteredPlaylist(
+          lines,
+          segments,
+          bitrateSet,
+          strategy,
+          periodicLayout,
+        );
+      }
+    } catch {}
+  }
+
+  if (periodicLayout && strategy.server.timeline === 'continuous-periodic') {
+    return rebuildContinuousPlaylist(lines, segments, new Set());
+  }
+  return m3u8Content;
+}
+
+export async function filterM3U8AdsForSource(
+  m3u8Content: string,
+  originM3u8Url: string,
+  ua: string,
+  source: string | null,
+): Promise<string> {
+  const strategy = getSourceAdFilterStrategy(source);
+  if (strategy?.execution !== 'server') return m3u8Content;
+  return applyServerAdFilterStrategy(m3u8Content, originM3u8Url, ua, strategy);
 }
 
 export async function stripAdSegmentsByPhysicalSignal(
@@ -433,28 +571,7 @@ export async function stripAdSegmentsByPhysicalSignal(
   originM3u8Url: string,
   ua: string,
 ): Promise<string> {
-  if (!m3u8Content.includes('#EXT-X-DISCONTINUITY')) return m3u8Content;
-
-  const { lines, segments } = parseSegments(m3u8Content);
-  if (segments.length < 4) return m3u8Content;
-
-  const baseUrl = getBaseUrl(originM3u8Url);
-
-  const adSet = new Set<number>();
-  detectByExtinfIntegerPattern(segments).forEach((i) => adSet.add(i));
-  detectByLocalDurationShift(segments).forEach((i) => adSet.add(i));
-  detectByHostAnomaly(segments, baseUrl).forEach((i) => adSet.add(i));
-
-  if (adSet.size > 0) {
-    return rebuildM3U8(lines, segments, adSet);
-  }
-
-  try {
-    const bitrateSet = await detectByBitrate(segments, baseUrl, ua);
-    if (bitrateSet.size > 0) {
-      return rebuildM3U8(lines, segments, bitrateSet);
-    }
-  } catch {}
-
-  return m3u8Content;
+  const strategy = getSourceAdFilterStrategy('rycj');
+  if (!strategy) return m3u8Content;
+  return applyServerAdFilterStrategy(m3u8Content, originM3u8Url, ua, strategy);
 }

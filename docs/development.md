@@ -110,6 +110,16 @@ Guard 选择：
 - 默认画质与降级能力：`src/features/play/lib/vodQualityPolicy.ts`
 - 画质偏好保存：`src/lib/local-preferences.ts`
 
+去广告扩展：
+
+- 源站策略注册：`src/features/play/lib/ad-filter-strategy-registry.ts`
+- 清单解析与重建：`src/features/play/lib/ad-filter-manifest.ts`
+- 服务端检测执行：`src/features/play/lib/ad-segment-detector.ts`
+- 新源优先组合现有 signal；只有现有 signal 无法表达时才新增检测器
+- 每个服务端策略必须设置独立 `id` 和 `version`，规则行为变化时递增 `version`
+- 新增或调整策略时补对应源站 fixture，验证广告删除、正片保留和时间轴边界
+- 服务端策略源不再运行客户端通用过滤，避免同一清单被二次重建
+
 ## 逐集解析型源站
 
 逐集解析源统一使用 `icetv-lazy://`：详情阶段返回懒地址，播放时经 `/api/episode-url` 按需解析。
