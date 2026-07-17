@@ -1,10 +1,12 @@
 import {
+  ADMIN_TABLE_COLUMN_WIDTHS_STORAGE_KEY,
   BLOCK_AD_STORAGE_KEY,
   DEFAULT_AGGREGATE_SEARCH_STORAGE_KEY,
   ENABLE_OPTIMIZATION_STORAGE_KEY,
   FLUID_SEARCH_STORAGE_KEY,
   LIVE_DIRECT_CONNECT_STORAGE_KEY,
   PREFERRED_QUALITY_STORAGE_KEY,
+  readAdminTableColumnWidth,
   readAggregateSearch,
   readBlockAdEnabled,
   readEnableOptimization,
@@ -22,6 +24,7 @@ import {
   SEEN_ANNOUNCEMENT_STORAGE_KEY,
   SIDEBAR_COLLAPSED_STORAGE_KEY,
   SOURCE_PREFERRED_QUALITY_STORAGE_PREFIX,
+  writeAdminTableColumnWidth,
   writeAggregateSearch,
   writeBlockAdEnabled,
   writeEnableOptimization,
@@ -133,6 +136,38 @@ describe('local preferences', () => {
       'notice-v1',
     );
     expect(readSeenAnnouncement()).toBe('notice-v1');
+  });
+
+  it('stores admin table column widths independently', () => {
+    writeAdminTableColumnWidth('source-list', 'name', 220.4);
+    writeAdminTableColumnWidth('source-list', 'api', 360);
+    writeAdminTableColumnWidth('user-list', 'name', 180);
+
+    expect(readAdminTableColumnWidth('source-list', 'name')).toBe(220);
+    expect(readAdminTableColumnWidth('source-list', 'api')).toBe(360);
+    expect(readAdminTableColumnWidth('user-list', 'name')).toBe(180);
+  });
+
+  it('ignores invalid admin table column width preferences', () => {
+    localStorage.setItem(
+      ADMIN_TABLE_COLUMN_WIDTHS_STORAGE_KEY,
+      JSON.stringify({
+        'source-list': {
+          name: 20,
+          api: '360',
+          status: 120,
+        },
+        '../unsafe': { name: 200 },
+      }),
+    );
+
+    expect(readAdminTableColumnWidth('source-list', 'name')).toBeUndefined();
+    expect(readAdminTableColumnWidth('source-list', 'api')).toBeUndefined();
+    expect(readAdminTableColumnWidth('source-list', 'status')).toBe(120);
+    expect(readAdminTableColumnWidth('../unsafe', 'name')).toBeUndefined();
+
+    writeAdminTableColumnWidth('source-list', 'name', Number.NaN);
+    expect(readAdminTableColumnWidth('source-list', 'name')).toBeUndefined();
   });
 
   it('distinguishes unset, auto, and manual quality preferences', () => {

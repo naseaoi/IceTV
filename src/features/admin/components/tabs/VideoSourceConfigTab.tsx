@@ -22,6 +22,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 
 import AlertModal from '@/components/modals/AlertModal';
 import ConfirmModal from '@/components/modals/ConfirmModal';
+import { ResizableTableHeader } from '@/features/admin/components/ResizableTableHeader';
 import { BatchSourceMenu } from '@/features/admin/components/tabs/video-source/BatchSourceMenu';
 import {
   type RouteModeStats,
@@ -41,7 +42,10 @@ import { showError } from '@/features/admin/lib/notifications';
 import { DataSource } from '@/features/admin/types/internal';
 import { useAlertModal } from '@/hooks/useAlertModal';
 import { useModalState } from '@/hooks/useModalState';
-import { DEFAULT_SOURCE_PROXY_MODE } from '@/lib/proxy-modes';
+import {
+  type SourceProxyMode,
+  DEFAULT_SOURCE_PROXY_MODE,
+} from '@/lib/proxy-modes';
 import type { SourceRouteStatsItem } from '@/lib/types';
 import { AdminConfig } from '@/types/admin';
 
@@ -197,18 +201,16 @@ const VideoSourceConfig = ({
     ).catch(() => void 0);
   };
 
-  const handleToggleProxyMode = (key: string) => {
+  const handleChangeProxyMode = (key: string, proxyMode: SourceProxyMode) => {
     const target = sources.find((s) => s.key === key);
-    if (!target) return;
-    const currentMode = target.proxyMode || DEFAULT_SOURCE_PROXY_MODE;
-    const newMode =
-      currentMode === 'browser'
-        ? 'server'
-        : currentMode === 'server'
-          ? 'auto'
-          : 'browser';
+    if (
+      !target ||
+      (target.proxyMode || DEFAULT_SOURCE_PROXY_MODE) === proxyMode
+    ) {
+      return;
+    }
     withLoading(`proxyMode_${key}`, () =>
-      callSourceApi({ action: 'set_proxy_mode', key, proxyMode: newMode }),
+      callSourceApi({ action: 'set_proxy_mode', key, proxyMode }),
     ).catch(() => void 0);
   };
 
@@ -461,11 +463,18 @@ const VideoSourceConfig = ({
           autoScroll={true}
           modifiers={[restrictToVerticalAxis, restrictToParentElement]}
         >
-          <table className='min-w-full divide-y divide-gray-200 dark:divide-gray-700'>
+          <table className='w-full table-fixed divide-y divide-gray-200 dark:divide-gray-700'>
             <thead className='sticky top-0 z-10 bg-gray-50 dark:bg-gray-900'>
               <tr>
-                <th className='w-8' />
-                <th className='w-12 px-2 py-3 text-center'>
+                <th
+                  data-column-width='32'
+                  style={{ width: 32, minWidth: 32, maxWidth: 32 }}
+                />
+                <th
+                  data-column-width='48'
+                  style={{ width: 48, minWidth: 48, maxWidth: 48 }}
+                  className='px-2 py-3 text-center'
+                >
                   <input
                     type='checkbox'
                     checked={selectAll}
@@ -473,33 +482,88 @@ const VideoSourceConfig = ({
                     className='h-4 w-4 rounded border-gray-300 bg-gray-100 text-blue-600 accent-blue-600 checked:border-blue-600 checked:bg-blue-600 focus:ring-2 focus:ring-blue-500 dark:border-gray-600 dark:bg-gray-700 dark:accent-blue-500 dark:ring-offset-gray-800 dark:checked:border-blue-500 dark:checked:bg-blue-500 dark:focus:ring-blue-600'
                   />
                 </th>
-                <th className='px-6 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400'>
+                <ResizableTableHeader
+                  tableId='source-list'
+                  columnId='name'
+                  defaultWidth={124}
+                  minWidth={96}
+                  className='px-6 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400'
+                >
                   名称
-                </th>
-                <th className='px-6 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400'>
+                </ResizableTableHeader>
+                <ResizableTableHeader
+                  tableId='source-list'
+                  columnId='key'
+                  defaultWidth={93}
+                  minWidth={72}
+                  className='px-6 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400'
+                >
                   Key
-                </th>
-                <th className='px-6 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400'>
+                </ResizableTableHeader>
+                <ResizableTableHeader
+                  tableId='source-list'
+                  columnId='api'
+                  defaultWidth={332}
+                  minWidth={112}
+                  className='px-6 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400'
+                >
                   API 地址
-                </th>
-                <th className='px-6 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400'>
+                </ResizableTableHeader>
+                <ResizableTableHeader
+                  tableId='source-list'
+                  columnId='detail'
+                  defaultWidth={209}
+                  minWidth={128}
+                  className='px-6 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400'
+                >
                   Detail 地址
-                </th>
-                <th className='px-6 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400'>
+                </ResizableTableHeader>
+                <ResizableTableHeader
+                  tableId='source-list'
+                  columnId='status'
+                  defaultWidth={88}
+                  minWidth={88}
+                  className='px-6 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400'
+                >
                   状态
-                </th>
-                <th className='px-6 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400'>
+                </ResizableTableHeader>
+                <ResizableTableHeader
+                  tableId='source-list'
+                  columnId='proxy-mode'
+                  defaultWidth={181}
+                  minWidth={112}
+                  className='px-6 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400'
+                >
                   流量路由
-                </th>
-                <th className='px-6 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400'>
+                </ResizableTableHeader>
+                <ResizableTableHeader
+                  tableId='source-list'
+                  columnId='success-rate'
+                  defaultWidth={206}
+                  minWidth={120}
+                  className='px-6 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400'
+                >
                   7天成功率
-                </th>
-                <th className='px-6 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400'>
+                </ResizableTableHeader>
+                <ResizableTableHeader
+                  tableId='source-list'
+                  columnId='validity'
+                  defaultWidth={116}
+                  minWidth={88}
+                  className='px-6 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400'
+                >
                   有效性
-                </th>
-                <th className='px-6 py-3 text-right text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400'>
+                </ResizableTableHeader>
+                <ResizableTableHeader
+                  tableId='source-list'
+                  columnId='actions'
+                  defaultWidth={160}
+                  minWidth={160}
+                  hideDivider
+                  className='px-6 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400'
+                >
                   操作
-                </th>
+                </ResizableTableHeader>
               </tr>
             </thead>
             <SortableContext
@@ -519,7 +583,7 @@ const VideoSourceConfig = ({
                     isDeleteLoading={isLoading(`deleteSource_${source.key}`)}
                     isValidationLoading={isValidating}
                     onSelectSource={handleSelectSource}
-                    onToggleProxyMode={handleToggleProxyMode}
+                    onChangeProxyMode={handleChangeProxyMode}
                     onToggleEnable={handleToggleEnable}
                     onValidate={handleValidateSource}
                     onEdit={(source) => {

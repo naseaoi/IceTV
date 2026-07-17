@@ -63,7 +63,7 @@ describe('removeConfigFileEntries', () => {
 });
 
 describe('buildConfigFileFromAdminConfig', () => {
-  it('uses current admin video and live source lists', () => {
+  it('uses current admin video, live source, and category lists', () => {
     const config: AdminConfig = {
       ConfigSubscribtion: {
         URL: '',
@@ -132,7 +132,15 @@ describe('buildConfigFileFromAdminConfig', () => {
           from: 'custom',
         },
       ],
-      CustomCategories: [],
+      CustomCategories: [
+        {
+          name: '新分类',
+          type: 'tv',
+          query: '新关键词',
+          from: 'custom',
+          disabled: true,
+        },
+      ],
       LiveConfig: [
         {
           key: 'github',
@@ -162,9 +170,9 @@ describe('buildConfigFileFromAdminConfig', () => {
     });
     expect(result.custom_category).toEqual([
       {
-        name: '电影',
-        type: 'movie',
-        query: '电影',
+        name: '新分类',
+        type: 'tv',
+        query: '新关键词',
       },
     ]);
   });

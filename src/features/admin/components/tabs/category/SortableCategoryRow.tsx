@@ -7,34 +7,32 @@ import type { CSSProperties } from 'react';
 
 import { AdminStatusSwitch } from '@/features/admin/components/AdminStatusSwitch';
 import { buttonStyles } from '@/features/admin/lib/buttonStyles';
-import { LiveDataSource } from '@/features/admin/types/internal';
+import { CustomCategory } from '@/features/admin/types/internal';
 
-interface SortableLiveSourceRowProps {
-  liveSource: LiveDataSource;
+interface SortableCategoryRowProps {
+  category: CustomCategory;
   isToggleLoading: boolean;
-  isEditLoading: boolean;
   isDeleteLoading: boolean;
-  onToggleEnable: (key: string) => void;
-  onEdit: (liveSource: LiveDataSource) => void;
-  onDelete: (key: string) => void;
+  onToggleEnable: (category: CustomCategory) => void;
+  onEdit: (category: CustomCategory) => void;
+  onDelete: (category: CustomCategory) => void;
 }
 
-export function SortableLiveSourceRow({
-  liveSource,
+export function SortableCategoryRow({
+  category,
   isToggleLoading,
-  isEditLoading,
   isDeleteLoading,
   onToggleEnable,
   onEdit,
   onDelete,
-}: SortableLiveSourceRowProps) {
+}: SortableCategoryRowProps) {
   const { attributes, listeners, setNodeRef, transform, transition } =
-    useSortable({ id: liveSource.key });
-
+    useSortable({ id: `${category.query}:${category.type}` });
   const style = {
     transform: CSS.Transform.toString(transform),
     transition,
   } as CSSProperties;
+  const operationsDisabled = isToggleLoading || isDeleteLoading;
 
   return (
     <tr
@@ -51,57 +49,50 @@ export function SortableLiveSourceRow({
         <GripVertical size={16} />
       </td>
       <td className='whitespace-nowrap px-6 py-4 text-sm text-gray-900 dark:text-gray-100'>
-        {liveSource.name}
+        {category.name || '-'}
       </td>
       <td className='whitespace-nowrap px-6 py-4 text-sm text-gray-900 dark:text-gray-100'>
-        {liveSource.key}
+        <span
+          className={`rounded-full px-2 py-1 text-xs ${
+            category.type === 'movie'
+              ? 'bg-blue-100 text-blue-800 dark:bg-blue-900/20 dark:text-blue-300'
+              : 'bg-purple-100 text-purple-800 dark:bg-purple-900/20 dark:text-purple-300'
+          }`}
+        >
+          {category.type === 'movie' ? '电影' : '电视剧'}
+        </span>
       </td>
       <td
-        className='max-w-[12rem] truncate whitespace-nowrap px-6 py-4 text-sm text-gray-900 dark:text-gray-100'
-        title={liveSource.url}
+        className='truncate whitespace-nowrap px-6 py-4 text-sm text-gray-900 dark:text-gray-100'
+        title={category.query}
       >
-        {liveSource.url}
-      </td>
-      <td
-        className='max-w-[8rem] truncate whitespace-nowrap px-6 py-4 text-sm text-gray-900 dark:text-gray-100'
-        title={liveSource.epg || '-'}
-      >
-        {liveSource.epg || '-'}
-      </td>
-      <td
-        className='max-w-[8rem] truncate whitespace-nowrap px-6 py-4 text-sm text-gray-900 dark:text-gray-100'
-        title={liveSource.ua || '-'}
-      >
-        {liveSource.ua || '-'}
-      </td>
-      <td className='whitespace-nowrap px-6 py-4 text-center text-sm text-gray-900 dark:text-gray-100'>
-        {liveSource.channelNumber && liveSource.channelNumber > 0
-          ? liveSource.channelNumber
-          : '-'}
+        {category.query}
       </td>
       <td className='whitespace-nowrap px-6 py-4'>
         <AdminStatusSwitch
-          enabled={!liveSource.disabled}
+          enabled={!category.disabled}
           isLoading={isToggleLoading}
-          ariaLabel={`${liveSource.name}状态`}
-          onToggle={() => onToggleEnable(liveSource.key)}
+          ariaLabel={`${category.name || category.query}状态`}
+          onToggle={() => onToggleEnable(category)}
         />
       </td>
       <td className='space-x-2 whitespace-nowrap px-6 py-4 text-left text-sm font-medium'>
         <button
-          onClick={() => onEdit(liveSource)}
-          disabled={isEditLoading}
+          type='button'
+          onClick={() => onEdit(category)}
+          disabled={operationsDisabled}
           className={`${buttonStyles.roundedPrimary} ${
-            isEditLoading ? 'cursor-not-allowed opacity-50' : ''
+            operationsDisabled ? 'cursor-not-allowed opacity-50' : ''
           }`}
         >
           编辑
         </button>
         <button
-          onClick={() => onDelete(liveSource.key)}
-          disabled={isDeleteLoading}
+          type='button'
+          onClick={() => onDelete(category)}
+          disabled={operationsDisabled}
           className={`${buttonStyles.roundedSecondary} ${
-            isDeleteLoading ? 'cursor-not-allowed opacity-50' : ''
+            operationsDisabled ? 'cursor-not-allowed opacity-50' : ''
           }`}
         >
           删除

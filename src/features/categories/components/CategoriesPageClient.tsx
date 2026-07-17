@@ -6,6 +6,7 @@ import { useMemo } from 'react';
 
 import PageLayout from '@/components/PageLayout';
 import { useRuntimeConfig } from '@/components/RuntimeConfigProvider';
+import { getCustomCategoryLabel } from '@/lib/runtime-config';
 
 type ChannelEntry = {
   icon: typeof Film;
@@ -66,7 +67,7 @@ export default function CategoriesPageClient() {
       entries.push({
         icon: Star,
         iconClassName: 'text-amber-500',
-        label: '自定义',
+        label: getCustomCategoryLabel(runtimeConfig),
         description: '站点自定义分类',
         href: '/douban?type=custom',
       });

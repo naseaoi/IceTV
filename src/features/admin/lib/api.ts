@@ -34,7 +34,7 @@ export async function adminGet<T>(
   endpoint: string,
   fallbackPrefix = '请求失败',
 ): Promise<T> {
-  const response = await fetch(endpoint);
+  const response = await fetch(endpoint, { cache: 'no-store' });
 
   if (!response.ok) {
     throw new Error(await resolveErrorMessage(response, fallbackPrefix));

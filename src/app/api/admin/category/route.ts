@@ -3,14 +3,38 @@ import { NextRequest, NextResponse } from 'next/server';
 import { isGuardFailure, requireAdmin } from '@/lib/api-auth';
 import { configConflictResponse } from '@/lib/api-config-error';
 import { getConfig, saveConfig } from '@/lib/config';
+import { buildConfigFileFromAdminConfig } from '@/lib/config-file-json';
 
 export const runtime = 'nodejs';
 
 // 支持的操作类型
-type Action = 'add' | 'disable' | 'enable' | 'delete' | 'sort';
+type Action = 'add' | 'edit' | 'disable' | 'enable' | 'delete' | 'sort';
 
 interface BaseBody {
   action?: Action;
+}
+
+function readCategoryFields(body: Record<string, any>): {
+  name: string;
+  type: 'movie' | 'tv' | null;
+  query: string;
+} {
+  const name = typeof body.name === 'string' ? body.name.trim() : '';
+  const query = typeof body.query === 'string' ? body.query.trim() : '';
+  const type = body.type === 'movie' || body.type === 'tv' ? body.type : null;
+  return { name, type, query };
+}
+
+function isValidCategoryFields(
+  fields: ReturnType<typeof readCategoryFields>,
+): fields is { name: string; type: 'movie' | 'tv'; query: string } {
+  return (
+    !!fields.type &&
+    fields.name.length > 0 &&
+    fields.name.length <= 64 &&
+    fields.query.length > 0 &&
+    fields.query.length <= 200
+  );
 }
 
 export async function POST(request: NextRequest) {
@@ -22,7 +46,14 @@ export async function POST(request: NextRequest) {
     const { action } = body;
 
     // 基础校验
-    const ACTIONS: Action[] = ['add', 'disable', 'enable', 'delete', 'sort'];
+    const ACTIONS: Action[] = [
+      'add',
+      'edit',
+      'disable',
+      'enable',
+      'delete',
+      'sort',
+    ];
     if (!action || !ACTIONS.includes(action)) {
       return NextResponse.json({ error: '参数格式错误' }, { status: 400 });
     }
@@ -32,14 +63,14 @@ export async function POST(request: NextRequest) {
 
     switch (action) {
       case 'add': {
-        const { name, type, query } = body as {
-          name?: string;
-          type?: 'movie' | 'tv';
-          query?: string;
-        };
-        if (!name || !type || !query) {
-          return NextResponse.json({ error: '缺少必要参数' }, { status: 400 });
+        const fields = readCategoryFields(body);
+        if (!isValidCategoryFields(fields)) {
+          return NextResponse.json(
+            { error: '分类参数格式错误' },
+            { status: 400 },
+          );
         }
+        const { name, type, query } = fields;
         // 检查是否已存在相同的查询和类型组合
         if (
           adminConfig.CustomCategories.some(
@@ -55,6 +86,43 @@ export async function POST(request: NextRequest) {
           from: 'custom',
           disabled: false,
         });
+        break;
+      }
+      case 'edit': {
+        const originalQuery =
+          typeof body.originalQuery === 'string'
+            ? body.originalQuery.trim()
+            : '';
+        const originalType =
+          body.originalType === 'movie' || body.originalType === 'tv'
+            ? body.originalType
+            : null;
+        const fields = readCategoryFields(body);
+        if (!originalQuery || !originalType || !isValidCategoryFields(fields)) {
+          return NextResponse.json(
+            { error: '分类参数格式错误' },
+            { status: 400 },
+          );
+        }
+        const entry = adminConfig.CustomCategories.find(
+          (category) =>
+            category.query === originalQuery && category.type === originalType,
+        );
+        if (!entry) {
+          return NextResponse.json({ error: '分类不存在' }, { status: 404 });
+        }
+        const duplicate = adminConfig.CustomCategories.some(
+          (category) =>
+            category !== entry &&
+            category.query === fields.query &&
+            category.type === fields.type,
+        );
+        if (duplicate) {
+          return NextResponse.json({ error: '该分类已存在' }, { status: 400 });
+        }
+        entry.name = fields.name;
+        entry.type = fields.type;
+        entry.query = fields.query;
         break;
       }
       case 'disable': {
@@ -108,13 +176,6 @@ export async function POST(request: NextRequest) {
         );
         if (idx === -1)
           return NextResponse.json({ error: '分类不存在' }, { status: 404 });
-        const entry = adminConfig.CustomCategories[idx];
-        if (entry.from === 'config') {
-          return NextResponse.json(
-            { error: '该分类不可删除' },
-            { status: 400 },
-          );
-        }
         adminConfig.CustomCategories.splice(idx, 1);
         break;
       }
@@ -147,6 +208,8 @@ export async function POST(request: NextRequest) {
       default:
         return NextResponse.json({ error: '未知操作' }, { status: 400 });
     }
+
+    adminConfig.ConfigFile = buildConfigFileFromAdminConfig(adminConfig);
 
     // 持久化到存储
     await saveConfig(adminConfig);

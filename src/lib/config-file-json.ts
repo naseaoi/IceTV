@@ -3,6 +3,7 @@
 type ConfigFileData = {
   api_site?: Record<string, unknown>;
   lives?: Record<string, unknown>;
+  custom_category?: unknown[];
   [key: string]: unknown;
 };
 
@@ -80,9 +81,22 @@ export function buildConfigFileFromAdminConfig(config: AdminConfig): string {
       }
       return [live.key, liveConfig] as const;
     });
+  const categoryEntries = (config.CustomCategories || [])
+    .filter(
+      (category) =>
+        category.name?.trim() &&
+        category.query.trim() &&
+        (category.type === 'movie' || category.type === 'tv'),
+    )
+    .map((category) => ({
+      name: category.name?.trim() || '',
+      type: category.type,
+      query: category.query.trim(),
+    }));
 
   parsed.api_site = Object.fromEntries(apiSiteEntries);
   parsed.lives = Object.fromEntries(liveEntries);
+  parsed.custom_category = categoryEntries;
 
   return JSON.stringify(parsed, null, 2);
 }

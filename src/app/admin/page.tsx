@@ -9,6 +9,7 @@ import ConfirmModal from '@/components/modals/ConfirmModal';
 import PageLayout from '@/components/PageLayout';
 import AdminNav from '@/features/admin/components/AdminNav';
 import AdminTabContent from '@/features/admin/components/AdminTabContent';
+import { AdminTabScrollPanel } from '@/features/admin/components/AdminTabScrollPanel';
 import { useAdminPageActions } from '@/features/admin/hooks/useAdminPageActions';
 import { useAdminTab } from '@/features/admin/hooks/useAdminTab';
 import { useLoadingState } from '@/features/admin/hooks/useLoadingState';
@@ -244,17 +245,19 @@ function AdminPageClient() {
             )}
           </div>
 
-          <section className='min-w-0 overflow-auto rounded-xl rounded-tl-none border border-gray-200 bg-white/80 p-4 shadow-sm backdrop-blur-md dark:border-gray-700 dark:bg-gray-800/50 sm:p-6 md:min-h-0 md:flex-1'>
-            <AdminTabContent
-              activeTab={activeTab}
-              config={config}
-              role={role}
-              refreshConfig={fetchConfig}
-              onSiteConfigSavingChange={setSiteConfigSaving}
-              onRuntimeParamsSavingChange={setRuntimeParamsSaving}
-              onSiteConfigDirtyChange={setSiteConfigDirty}
-              onRuntimeParamsDirtyChange={setRuntimeParamsDirty}
-            />
+          <section className='min-w-0 overflow-hidden rounded-xl rounded-tl-none border border-gray-200 bg-white/80 shadow-sm backdrop-blur-md dark:border-gray-700 dark:bg-gray-800/50 md:min-h-0 md:flex-1'>
+            <AdminTabScrollPanel activeTab={activeTab}>
+              <AdminTabContent
+                activeTab={activeTab}
+                config={config}
+                role={role}
+                refreshConfig={fetchConfig}
+                onSiteConfigSavingChange={setSiteConfigSaving}
+                onRuntimeParamsSavingChange={setRuntimeParamsSaving}
+                onSiteConfigDirtyChange={setSiteConfigDirty}
+                onRuntimeParamsDirtyChange={setRuntimeParamsDirty}
+              />
+            </AdminTabScrollPanel>
           </section>
         </div>
       </div>

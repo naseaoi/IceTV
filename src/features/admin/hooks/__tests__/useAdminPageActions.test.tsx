@@ -1,4 +1,4 @@
-import { act, renderHook } from '@testing-library/react';
+import { act, renderHook, waitFor } from '@testing-library/react';
 
 import { useAdminPageActions } from '@/features/admin/hooks/useAdminPageActions';
 import { adminGet } from '@/features/admin/lib/api';
@@ -106,6 +106,61 @@ describe('useAdminPageActions', () => {
     expect(setRole).not.toHaveBeenCalled();
     expect(setError).toHaveBeenCalledWith('权限不足');
     expect(setLoading).toHaveBeenLastCalledWith(false);
+  });
+
+  it('ignores an older config response that finishes last', async () => {
+    const setConfig = jest.fn();
+    let resolveFirstConfig: ((value: unknown) => void) | undefined;
+    const firstConfig = new Promise((resolve) => {
+      resolveFirstConfig = resolve;
+    });
+    let configRequestCount = 0;
+    mockedAdminGet.mockImplementation((endpoint) => {
+      if (endpoint === '/api/auth/status') {
+        return Promise.resolve({ authenticated: true, role: 'owner' }) as never;
+      }
+      configRequestCount += 1;
+      if (configRequestCount === 1) {
+        return firstConfig as never;
+      }
+      return Promise.resolve({
+        Role: 'owner',
+        Config: { SiteConfig: { SiteName: '最新配置' } },
+      }) as never;
+    });
+
+    const { result } = renderHook(() =>
+      useAdminPageActions({
+        showAlert: jest.fn(),
+        setConfig,
+        setRole: jest.fn(),
+        setError: jest.fn(),
+        setLoading: jest.fn(),
+      }),
+    );
+
+    let firstRequest: Promise<void>;
+    act(() => {
+      firstRequest = result.current.fetchConfig();
+    });
+    await waitFor(() => expect(configRequestCount).toBe(1));
+
+    await act(async () => {
+      await result.current.fetchConfig();
+    });
+
+    await act(async () => {
+      resolveFirstConfig?.({
+        Role: 'owner',
+        Config: { SiteConfig: { SiteName: '旧配置' } },
+      });
+      await firstRequest;
+    });
+
+    expect(setConfig).toHaveBeenCalledTimes(1);
+    expect(setConfig).toHaveBeenCalledWith({
+      SiteConfig: { SiteName: '最新配置' },
+    });
   });
 
   it('resets admin config through reset endpoint', async () => {

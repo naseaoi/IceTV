@@ -22,6 +22,7 @@ import { useEffect, useState } from 'react';
 
 import AlertModal from '@/components/modals/AlertModal';
 import ConfirmModal from '@/components/modals/ConfirmModal';
+import { ResizableTableHeader } from '@/features/admin/components/ResizableTableHeader';
 import { LiveSourceAddForm } from '@/features/admin/components/tabs/live-source/LiveSourceAddForm';
 import { LiveSourceEditForm } from '@/features/admin/components/tabs/live-source/LiveSourceEditForm';
 import { SortableLiveSourceRow } from '@/features/admin/components/tabs/live-source/SortableLiveSourceRow';
@@ -277,34 +278,86 @@ const LiveSourceConfig = ({
           autoScroll={true}
           modifiers={[restrictToVerticalAxis, restrictToParentElement]}
         >
-          <table className='min-w-full divide-y divide-gray-200 dark:divide-gray-700'>
+          <table className='w-full table-fixed divide-y divide-gray-200 dark:divide-gray-700'>
             <thead className='sticky top-0 z-10 bg-gray-50 dark:bg-gray-900'>
               <tr>
-                <th className='w-8' />
-                <th className='px-6 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400'>
+                <th
+                  data-column-width='32'
+                  style={{ width: 32, minWidth: 32, maxWidth: 32 }}
+                />
+                <ResizableTableHeader
+                  tableId='live-source-list'
+                  columnId='name'
+                  defaultWidth={214}
+                  minWidth={96}
+                  className='px-6 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400'
+                >
                   名称
-                </th>
-                <th className='px-6 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400'>
+                </ResizableTableHeader>
+                <ResizableTableHeader
+                  tableId='live-source-list'
+                  columnId='key'
+                  defaultWidth={129}
+                  minWidth={72}
+                  className='px-6 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400'
+                >
                   Key
-                </th>
-                <th className='px-6 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400'>
+                </ResizableTableHeader>
+                <ResizableTableHeader
+                  tableId='live-source-list'
+                  columnId='m3u-url'
+                  defaultWidth={363}
+                  minWidth={112}
+                  className='px-6 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400'
+                >
                   M3U 地址
-                </th>
-                <th className='px-6 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400'>
+                </ResizableTableHeader>
+                <ResizableTableHeader
+                  tableId='live-source-list'
+                  columnId='epg-url'
+                  defaultWidth={282}
+                  minWidth={120}
+                  className='px-6 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400'
+                >
                   节目单地址
-                </th>
-                <th className='px-6 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400'>
+                </ResizableTableHeader>
+                <ResizableTableHeader
+                  tableId='live-source-list'
+                  columnId='user-agent'
+                  defaultWidth={189}
+                  minWidth={112}
+                  className='px-6 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400'
+                >
                   自定义 UA
-                </th>
-                <th className='px-6 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400'>
+                </ResizableTableHeader>
+                <ResizableTableHeader
+                  tableId='live-source-list'
+                  columnId='channel-count'
+                  defaultWidth={128}
+                  minWidth={96}
+                  className='px-6 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400'
+                >
                   频道数
-                </th>
-                <th className='px-6 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400'>
+                </ResizableTableHeader>
+                <ResizableTableHeader
+                  tableId='live-source-list'
+                  columnId='status'
+                  defaultWidth={92}
+                  minWidth={88}
+                  className='px-6 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400'
+                >
                   状态
-                </th>
-                <th className='px-6 py-3 text-right text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400'>
+                </ResizableTableHeader>
+                <ResizableTableHeader
+                  tableId='live-source-list'
+                  columnId='actions'
+                  defaultWidth={160}
+                  minWidth={160}
+                  hideDivider
+                  className='px-6 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400'
+                >
                   操作
-                </th>
+                </ResizableTableHeader>
               </tr>
             </thead>
             <SortableContext

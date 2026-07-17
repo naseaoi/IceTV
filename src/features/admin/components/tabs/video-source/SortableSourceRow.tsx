@@ -5,12 +5,14 @@ import { CSS } from '@dnd-kit/utilities';
 import { GripVertical } from 'lucide-react';
 import type { CSSProperties } from 'react';
 
-import {
-  buttonStyles,
-  statusBadgeStyles,
-} from '@/features/admin/lib/buttonStyles';
+import AdminSelect from '@/components/admin/AdminSelect';
+import { AdminStatusSwitch } from '@/features/admin/components/AdminStatusSwitch';
+import { buttonStyles } from '@/features/admin/lib/buttonStyles';
 import { DataSource } from '@/features/admin/types/internal';
-import { DEFAULT_SOURCE_PROXY_MODE } from '@/lib/proxy-modes';
+import {
+  type SourceProxyMode,
+  DEFAULT_SOURCE_PROXY_MODE,
+} from '@/lib/proxy-modes';
 
 export type SourceValidationStatus = {
   text: string;
@@ -31,6 +33,16 @@ export type SourceRouteStatsView = {
   server?: RouteModeStats;
 };
 
+const PROXY_MODE_OPTIONS = [
+  { value: 'auto', label: '自动' },
+  { value: 'browser', label: '直连' },
+  { value: 'server', label: '代理' },
+];
+
+function isSourceProxyMode(value: string): value is SourceProxyMode {
+  return value === 'auto' || value === 'browser' || value === 'server';
+}
+
 interface SortableSourceRowProps {
   source: DataSource;
   isSelected: boolean;
@@ -41,7 +53,7 @@ interface SortableSourceRowProps {
   isDeleteLoading: boolean;
   isValidationLoading: boolean;
   onSelectSource: (key: string, checked: boolean) => void;
-  onToggleProxyMode: (key: string) => void;
+  onChangeProxyMode: (key: string, proxyMode: SourceProxyMode) => void;
   onToggleEnable: (key: string) => void;
   onValidate: (key: string) => void;
   onEdit: (source: DataSource) => void;
@@ -58,7 +70,7 @@ export function SortableSourceRow({
   isDeleteLoading,
   isValidationLoading,
   onSelectSource,
-  onToggleProxyMode,
+  onChangeProxyMode,
   onToggleEnable,
   onValidate,
   onEdit,
@@ -72,24 +84,6 @@ export function SortableSourceRow({
     transition,
   } as CSSProperties;
   const proxyMode = source.proxyMode || DEFAULT_SOURCE_PROXY_MODE;
-  const proxyModeClassName =
-    proxyMode === 'server'
-      ? 'bg-blue-100 text-blue-800 hover:bg-blue-200 dark:bg-blue-900/20 dark:text-blue-300 dark:hover:bg-blue-900/40'
-      : proxyMode === 'auto'
-        ? 'bg-emerald-100 text-emerald-800 hover:bg-emerald-200 dark:bg-emerald-900/20 dark:text-emerald-300 dark:hover:bg-emerald-900/40'
-        : 'bg-gray-100 text-gray-600 hover:bg-gray-200 dark:bg-gray-900/20 dark:text-gray-400 dark:hover:bg-gray-800/40';
-  const proxyModeTitle =
-    proxyMode === 'server'
-      ? '播放和测速流量走服务端代理'
-      : proxyMode === 'auto'
-        ? '播放和测速流量自动选择路由'
-        : '播放和测速流量走浏览器直连';
-  const proxyModeText =
-    proxyMode === 'server'
-      ? '服务端'
-      : proxyMode === 'auto'
-        ? '自动'
-        : '浏览器';
 
   const renderRouteStats = (label: string, stats?: RouteModeStats) => {
     const rate =
@@ -148,29 +142,28 @@ export function SortableSourceRow({
       >
         {source.detail || '-'}
       </td>
-      <td className='max-w-[1rem] whitespace-nowrap px-6 py-4'>
-        <button
-          onClick={() => onToggleEnable(source.key)}
-          disabled={isToggleLoading}
-          className={`rounded-full px-2 py-1 text-xs transition-colors ${
-            !source.disabled
-              ? statusBadgeStyles.enabled
-              : statusBadgeStyles.disabled
-          } ${isToggleLoading ? 'cursor-not-allowed opacity-50' : 'cursor-pointer'}`}
-          title={!source.disabled ? '点击禁用' : '点击启用'}
-        >
-          {!source.disabled ? '启用中' : '已禁用'}
-        </button>
+      <td className='whitespace-nowrap px-6 py-4'>
+        <AdminStatusSwitch
+          enabled={!source.disabled}
+          isLoading={isToggleLoading}
+          ariaLabel={`${source.name}状态`}
+          onToggle={() => onToggleEnable(source.key)}
+        />
       </td>
       <td className='whitespace-nowrap px-6 py-4'>
-        <button
-          onClick={() => onToggleProxyMode(source.key)}
+        <AdminSelect
+          value={proxyMode}
+          onChange={(value) => {
+            if (isSourceProxyMode(value)) {
+              onChangeProxyMode(source.key, value);
+            }
+          }}
+          options={PROXY_MODE_OPTIONS}
           disabled={isProxyModeLoading}
-          className={`rounded-full px-2 py-1 text-xs transition-colors ${proxyModeClassName} ${isProxyModeLoading ? 'cursor-not-allowed opacity-50' : 'cursor-pointer'}`}
-          title={proxyModeTitle}
-        >
-          {proxyModeText}
-        </button>
+          showSelectedIcon={false}
+          ariaLabel={`${source.name}流量路由`}
+          className='inline-block w-fit'
+        />
       </td>
       <td className='min-w-[9rem] whitespace-nowrap px-6 py-4 text-xs'>
         <div className='space-y-1'>
@@ -199,7 +192,7 @@ export function SortableSourceRow({
           </button>
         )}
       </td>
-      <td className='space-x-2 whitespace-nowrap px-6 py-4 text-right text-sm font-medium'>
+      <td className='space-x-2 whitespace-nowrap px-6 py-4 text-left text-sm font-medium'>
         <button
           onClick={() => onEdit(source)}
           className={buttonStyles.roundedPrimary}
