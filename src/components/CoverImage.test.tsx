@@ -130,7 +130,7 @@ describe('CoverImage', () => {
     ).toHaveAttribute('data-cover-state', 'revealed');
   });
 
-  it('缓存命中时直接显示封面，不重复播放淡入动画', async () => {
+  it('缓存命中时立即加载，并在当前图片完成后显示', async () => {
     const src =
       'https://img1.doubanio.com/view/photo/s_ratio_poster/public/p2931173550.jpg';
     markCoverImagesLoaded([src]);
@@ -138,6 +138,13 @@ describe('CoverImage', () => {
     render(<CoverImage src={src} alt='已缓存封面' priority />);
 
     const image = screen.getByTestId('cover-image');
+    expect(image).toHaveClass('opacity-0');
+    expect(document.querySelector('[data-cover-loading-backdrop]')).toHaveClass(
+      'opacity-100',
+    );
+
+    fireEvent.load(image);
+
     await waitFor(() => {
       expect(image).toHaveClass('opacity-100');
     });

@@ -104,6 +104,7 @@ const CoverImage: React.FC<CoverImageProps> = memo(function CoverImage({
   const loadImmediately = !isEmpty && priority;
   const [isNearViewport, setIsNearViewport] = useState(loadImmediately);
   const [loaded, setLoaded] = useState(false);
+  const [knownCached, setKnownCached] = useState(false);
   const [hasError, setHasError] = useState(false);
   const [slotGranted, setSlotGranted] = useState(loadImmediately);
 
@@ -112,6 +113,7 @@ const CoverImage: React.FC<CoverImageProps> = memo(function CoverImage({
     setHasError(false);
     setUseDirectFallback(false);
     setLoaded(false);
+    setKnownCached(false);
     releaseSlotRef.current?.();
     releaseSlotRef.current = null;
   }, [runtimeConfig.SOURCE_COVER_PROXY_MODE, src]);
@@ -120,7 +122,8 @@ const CoverImage: React.FC<CoverImageProps> = memo(function CoverImage({
     if (isEmpty) return;
 
     const isCached = isCoverImageCached(cacheKeys);
-    setLoaded(isCached);
+    setKnownCached(isCached);
+    setLoaded(false);
     setSlotGranted(isCached || priority);
     setIsNearViewport(isCached || priority);
 
@@ -322,7 +325,7 @@ const CoverImage: React.FC<CoverImageProps> = memo(function CoverImage({
           unoptimized={needsUnoptimized}
           className={`${fit === 'contain' ? 'object-contain' : 'object-cover'} ${loaded ? 'opacity-100' : 'opacity-0'}`}
           referrerPolicy='no-referrer'
-          loading={priority || loaded ? 'eager' : 'lazy'}
+          loading={priority || knownCached || loaded ? 'eager' : 'lazy'}
           onLoad={handleLoad}
           onError={handleError}
           style={
