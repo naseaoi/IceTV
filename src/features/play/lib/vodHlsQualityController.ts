@@ -14,7 +14,12 @@ import {
   registerQualityControlWhenReady,
   removeQualityControlWhenReady,
   seedAutoQualityStartLevel,
+  setAutoQualityMinLevel,
 } from '@/features/play/lib/hlsQuality';
+import {
+  type BufferedVideoLike,
+  getForwardBufferSeconds,
+} from '@/features/play/lib/vodBufferPriority';
 import { resolveVodQualityPolicy } from '@/features/play/lib/vodQualityPolicy';
 import {
   readSourcePreferredQualityPreference,
@@ -30,13 +35,16 @@ type VodQualityHls = HlsQualityController & {
 type VodHlsQualityControllerOptions = {
   sourceKey: string;
   hls: VodQualityHls;
+  video: BufferedVideoLike;
   artPlayerRef: MutableRefObject<Artplayer | null>;
   setRealtimeLoadSpeed: (message: string) => void;
 };
 
 export type VodHlsQualityController = {
   dispose: () => void;
+  handleBufferUpdated: () => void;
   handleFragmentLoaded: () => void;
+  handleFragmentLoading: (levelIndex: number | null) => void;
   handleManifestParsed: () => void;
   isActive: () => boolean;
   tryRecoverFatalNetworkFailure: (input: {
@@ -64,6 +72,7 @@ function getCurrentHlsLevelIndex(hls: VodQualityHls): number | null {
 export function createVodHlsQualityController({
   sourceKey,
   hls,
+  video,
   artPlayerRef,
   setRealtimeLoadSpeed,
 }: VodHlsQualityControllerOptions): VodHlsQualityController {
@@ -73,6 +82,9 @@ export function createVodHlsQualityController({
   let qualityProbeTimer: ReturnType<typeof setTimeout> | null = null;
   let controlOptions: HlsQualityControlOptions | null = null;
   let controlSyncCleanup: (() => void) | null = null;
+  let autoMinLevelIndex: number | null = null;
+  let autoPreferredLevelIndex: number | null = null;
+  let autoEmergencyMode = false;
 
   const clearQualityProbe = () => {
     if (!qualityProbeTimer) {
@@ -95,12 +107,34 @@ export function createVodHlsQualityController({
     controlSyncCleanup = null;
   };
 
+  const applyPreferredAutoFloor = (forceNextLevel: boolean) => {
+    if (autoPreferredLevelIndex === null) {
+      return;
+    }
+    autoEmergencyMode = false;
+    setAutoQualityMinLevel(hls, autoPreferredLevelIndex);
+    if (forceNextLevel) {
+      hls.nextLoadLevel = autoPreferredLevelIndex;
+      hls.nextAutoLevel = autoPreferredLevelIndex;
+    }
+  };
+
+  const applyEmergencyAutoFloor = () => {
+    if (autoMinLevelIndex === null || autoEmergencyMode) {
+      return;
+    }
+    autoEmergencyMode = true;
+    setAutoQualityMinLevel(hls, autoMinLevelIndex);
+  };
+
   const releaseToAuto = (message = '所选画质加载失败，已临时切回自动') => {
     if (!active || !controlOptions) {
       return false;
     }
     applyAutoQualityLevel(hls, {
       startLevelIndex: controlOptions.autoStartLevelIndex,
+      minLevelIndex: controlOptions.autoInitialMinLevelIndex,
+      maxLevelIndex: controlOptions.autoMaxLevelIndex,
     });
     hls.startLoad();
     markQualityControlTemporaryAuto(artPlayerRef, hls, controlOptions);
@@ -130,11 +164,20 @@ export function createVodHlsQualityController({
       levels,
       policy.autoStartHeight,
     );
+    autoMinLevelIndex = policy.autoMinHeight
+      ? findLevelIndexByHeight(levels, policy.autoMinHeight)
+      : null;
+    autoPreferredLevelIndex = autoStartLevelIndex;
+    const autoMaxLevelIndex = policy.autoMaxHeight
+      ? findLevelIndexByHeight(levels, policy.autoMaxHeight)
+      : null;
     const preference = readSourcePreferredQualityPreference(sourceKey);
     controlOptions = {
       preference,
       defaultLevelIndex,
       autoStartLevelIndex,
+      autoInitialMinLevelIndex: autoPreferredLevelIndex,
+      autoMaxLevelIndex,
       onPreferenceChange: (height) => {
         writeSourcePreferredQualityHeight(sourceKey, height);
         if (!controlOptions) {
@@ -143,6 +186,9 @@ export function createVodHlsQualityController({
         controlOptions.preference = height
           ? { mode: 'manual', height }
           : { mode: 'auto' };
+        if (height === null) {
+          applyPreferredAutoFloor(false);
+        }
       },
     };
     hls.__icetvDefaultQualityLevel = defaultLevelIndex;
@@ -171,7 +217,12 @@ export function createVodHlsQualityController({
         }
       }, DEFAULT_QUALITY_PROBE_MS);
     } else {
-      seedAutoQualityStartLevel(hls, autoStartLevelIndex);
+      seedAutoQualityStartLevel(
+        hls,
+        autoStartLevelIndex,
+        autoPreferredLevelIndex,
+        autoMaxLevelIndex,
+      );
     }
     controlSyncCleanup = registerQualityControlWhenReady(
       artPlayerRef,
@@ -187,12 +238,52 @@ export function createVodHlsQualityController({
     }
   };
 
+  const handleBufferUpdated = () => {
+    if (
+      !active ||
+      !policy?.recoveryBufferSeconds ||
+      hls.__icetvManualQualityLocked === true ||
+      hls.autoLevelEnabled === false ||
+      !autoEmergencyMode
+    ) {
+      return;
+    }
+    if (getForwardBufferSeconds(video) >= policy.recoveryBufferSeconds) {
+      applyPreferredAutoFloor(true);
+    }
+  };
+
+  const handleFragmentLoading = (levelIndex: number | null) => {
+    if (
+      !active ||
+      !policy?.emergencyBufferSeconds ||
+      hls.__icetvManualQualityLocked === true ||
+      hls.autoLevelEnabled === false ||
+      levelIndex === null ||
+      autoPreferredLevelIndex === null
+    ) {
+      return;
+    }
+    if (!autoEmergencyMode && levelIndex < autoPreferredLevelIndex) {
+      hls.nextLoadLevel = autoPreferredLevelIndex;
+      hls.nextAutoLevel = autoPreferredLevelIndex;
+      return;
+    }
+    if (levelIndex < autoPreferredLevelIndex) {
+      return;
+    }
+    if (getForwardBufferSeconds(video) < policy.emergencyBufferSeconds) {
+      applyEmergencyAutoFloor();
+    }
+  };
+
   const tryRecoverManualSelectionFailure = (
     isFragmentOrLevelNetworkError: boolean,
   ) => {
     if (
       !active ||
       !isFragmentOrLevelNetworkError ||
+      policy?.preserveManualSelectionOnFailure === true ||
       hls.autoLevelEnabled !== false ||
       hls.__icetvManualQualityLocked !== true
     ) {
@@ -224,12 +315,24 @@ export function createVodHlsQualityController({
       hls.__icetvManualQualityLocked !== true
     ) {
       const currentLevel = getCurrentHlsLevelIndex(hls);
-      const nextLevel =
+      const nextLowerLevel =
         currentLevel === null
           ? null
           : findNextLowerLevelIndex(hls.levels || [], currentLevel);
-      if (nextLevel !== null) {
-        applyAutoQualityLevel(hls, { startLevelIndex: nextLevel });
+      const nextLevel =
+        nextLowerLevel === null || currentLevel === null
+          ? null
+          : Math.max(nextLowerLevel, autoMinLevelIndex ?? nextLowerLevel);
+      if (
+        currentLevel !== null &&
+        nextLevel !== null &&
+        nextLevel < currentLevel
+      ) {
+        applyAutoQualityLevel(hls, {
+          startLevelIndex: nextLevel,
+          minLevelIndex: autoMinLevelIndex,
+          maxLevelIndex: controlOptions.autoMaxLevelIndex,
+        });
         markQualityControlTemporaryAuto(artPlayerRef, hls, controlOptions);
         hls.startLoad();
         const level = hls.levels?.[nextLevel];
@@ -256,7 +359,9 @@ export function createVodHlsQualityController({
       clearControlSync();
       removeQualityControlWhenReady(artPlayerRef, 0)();
     },
+    handleBufferUpdated,
     handleFragmentLoaded,
+    handleFragmentLoading,
     handleManifestParsed,
     isActive: () => active,
     tryRecoverFatalNetworkFailure,

@@ -9,10 +9,32 @@ export type VodHlsLoadingOverrides = {
   levelLoadingTimeOut: number;
 };
 
+export type VodSegmentPrebufferPolicy = {
+  concurrency: number;
+  durationSeconds: number;
+  height: number;
+  lookaheadSeconds: number;
+  maxFragments: number;
+  segmentHostname: string;
+};
+
 const XIGUA_SEGMENT_PROXY_TIMEOUT_MS = 28_000;
 const XIGUA_M3U8_PROXY_TIMEOUT_MS = 28_000;
 const XIGUA_HLS_LOADING_TIMEOUT_MS = 30_000;
 const XIGUA_PLAYER_LOADING_TIMEOUT_SECONDS = 35;
+
+const VOD_SEGMENT_PREBUFFER_POLICIES: Readonly<
+  Record<string, VodSegmentPrebufferPolicy>
+> = {
+  xigua: {
+    concurrency: 4,
+    durationSeconds: 70,
+    height: 720,
+    lookaheadSeconds: 12,
+    maxFragments: 18,
+    segmentHostname: 'xgct-video.bzcdn.net',
+  },
+};
 
 export function getVodHlsBufferOverrides(
   sourceKey: string,
@@ -38,6 +60,12 @@ export function getVodHlsLoadingOverrides(
     manifestLoadingTimeOut: XIGUA_HLS_LOADING_TIMEOUT_MS,
     levelLoadingTimeOut: XIGUA_HLS_LOADING_TIMEOUT_MS,
   };
+}
+
+export function resolveVodSegmentPrebufferPolicy(
+  sourceKey: string,
+): Readonly<VodSegmentPrebufferPolicy> | null {
+  return VOD_SEGMENT_PREBUFFER_POLICIES[sourceKey] ?? null;
 }
 
 export function resolveVodSegmentProxyTimeoutMs(

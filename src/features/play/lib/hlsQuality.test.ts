@@ -111,6 +111,42 @@ describe('hls quality level controls', () => {
     });
   });
 
+  it('caps auto mode without limiting manual selection', () => {
+    const hls = {
+      levels: [
+        { height: 360, maxBitrate: 200_000 },
+        { height: 720, maxBitrate: 600_000 },
+        { height: 1080, maxBitrate: 1_500_000 },
+      ],
+      config: { minAutoBitrate: 0 },
+      startLevel: -1,
+      currentLevel: -1,
+      loadLevel: -1,
+      nextLevel: -1,
+      nextLoadLevel: -1,
+      nextAutoLevel: -1,
+      autoLevelCapping: -1,
+      __icetvManualQualityLocked: false,
+    };
+
+    applyAutoQualityLevel(hls, {
+      startLevelIndex: 2,
+      minLevelIndex: 1,
+      maxLevelIndex: 1,
+    });
+
+    expect(hls.startLevel).toBe(1);
+    expect(hls.nextAutoLevel).toBe(1);
+    expect(hls.autoLevelCapping).toBe(1);
+    expect(hls.config.minAutoBitrate).toBe(200_001);
+
+    applyManualQualityLevel(hls, 2, { userSelected: true });
+
+    expect(hls.currentLevel).toBe(2);
+    expect(hls.autoLevelCapping).toBe(-1);
+    expect(hls.config.minAutoBitrate).toBe(0);
+  });
+
   it('picks the highest level by height and bitrate', () => {
     expect(
       findHighestLevelIndex([
@@ -174,5 +210,26 @@ describe('hls quality level controls', () => {
       autoLevelCapping: -1,
       __icetvManualQualityLocked: false,
     });
+  });
+
+  it('seeds auto mode with a maximum level', () => {
+    const hls = {
+      levels: [{ height: 360 }, { height: 720 }, { height: 1080 }],
+      startLevel: -1,
+      currentLevel: -1,
+      loadLevel: -1,
+      nextLevel: -1,
+      nextLoadLevel: -1,
+      nextAutoLevel: -1,
+      autoLevelCapping: -1,
+      __icetvManualQualityLocked: true,
+    };
+
+    seedAutoQualityStartLevel(hls, 2, null, 1);
+
+    expect(hls.startLevel).toBe(1);
+    expect(hls.nextAutoLevel).toBe(1);
+    expect(hls.autoLevelCapping).toBe(1);
+    expect(hls.__icetvManualQualityLocked).toBe(false);
   });
 });

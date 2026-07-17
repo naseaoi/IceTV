@@ -58,10 +58,14 @@ export type ManagedVideoElement = HTMLVideoElement & {
   hls?: HlsType | null;
   __icetvHlsCleanup?: (() => void) | null;
   __icetvClientAdFilter?: boolean;
+  __icetvFragmentHttpCacheRecovery?: boolean;
   /** HLS 事件处理器引用，复用时先移除旧的再绑定新的 */
   __icetvHlsHandlers?: {
     onError: (...args: unknown[]) => void;
     onFragLoaded: (...args: unknown[]) => void;
+    onFragLoading?: (...args: unknown[]) => void;
+    onFragBuffered?: (...args: unknown[]) => void;
+    onLevelLoaded?: (...args: unknown[]) => void;
     onManifestParsed?: (...args: unknown[]) => void;
   } | null;
   /** 当前会话内该 video 实际使用的流量路由，供起播成功后清理短期兜底记忆。 */

@@ -3,6 +3,7 @@ import {
   getVodHlsLoadingOverrides,
   resolveVodM3U8ProxyTimeoutMs,
   resolveVodPlayerLoadingTimeoutSeconds,
+  resolveVodSegmentPrebufferPolicy,
   resolveVodSegmentProxyTimeoutMs,
 } from '@/features/play/lib/vodSourcePlaybackPolicy';
 
@@ -17,6 +18,18 @@ describe('VOD source playback policy', () => {
 
   it('keeps other sources on shared buffer defaults', () => {
     expect(getVodHlsBufferOverrides('other')).toEqual({});
+  });
+
+  it('keeps xigua segment prebuffer thresholds in the source policy', () => {
+    expect(resolveVodSegmentPrebufferPolicy('xigua')).toEqual({
+      concurrency: 4,
+      durationSeconds: 70,
+      height: 720,
+      lookaheadSeconds: 12,
+      maxFragments: 18,
+      segmentHostname: 'xgct-video.bzcdn.net',
+    });
+    expect(resolveVodSegmentPrebufferPolicy('other')).toBeNull();
   });
 
   it('raises only the xigua segment proxy timeout floor', () => {

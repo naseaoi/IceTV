@@ -21,7 +21,11 @@ function createArtPlayerRef() {
 
 function createHls(levels = [240, 360, 480, 720, 1080]) {
   return {
-    levels: levels.map((height) => ({ height })),
+    levels: levels.map((height, index) => ({
+      height,
+      maxBitrate: [120_000, 220_000, 360_000, 620_000, 1_500_000][index],
+    })),
+    config: { minAutoBitrate: 0 },
     currentLevel: -1,
     startLevel: -1,
     loadLevel: -1,
@@ -36,6 +40,24 @@ function createHls(levels = [240, 360, 480, 720, 1080]) {
   };
 }
 
+function createVideo(currentTime = 0, bufferedEnd = 0, duration = 1800) {
+  const state = { bufferedEnd };
+  return {
+    state,
+    video: {
+      currentTime,
+      duration,
+      buffered: {
+        get length() {
+          return state.bufferedEnd > currentTime ? 1 : 0;
+        },
+        start: () => currentTime,
+        end: () => state.bufferedEnd,
+      },
+    } as Pick<HTMLVideoElement, 'buffered' | 'currentTime' | 'duration'>,
+  };
+}
+
 describe('VOD HLS quality controller', () => {
   beforeEach(() => {
     localStorage.clear();
@@ -47,6 +69,7 @@ describe('VOD HLS quality controller', () => {
     const controller = createVodHlsQualityController({
       sourceKey: 'xigua',
       hls,
+      video: createVideo().video,
       artPlayerRef: art.ref,
       setRealtimeLoadSpeed: jest.fn(),
     });
@@ -59,12 +82,13 @@ describe('VOD HLS quality controller', () => {
     expect(art.update).toHaveBeenCalledTimes(1);
   });
 
-  it('stores selections per source and starts auto from 720p', () => {
+  it('stores selections per source and caps auto mode at 720p', () => {
     const hls = createHls();
     const art = createArtPlayerRef();
     const controller = createVodHlsQualityController({
       sourceKey: 'xigua',
       hls,
+      video: createVideo().video,
       artPlayerRef: art.ref,
       setRealtimeLoadSpeed: jest.fn(),
     });
@@ -85,6 +109,7 @@ describe('VOD HLS quality controller', () => {
     expect(hls.startLevel).toBe(3);
     expect(hls.loadLevel).toBe(-1);
     expect(hls.nextAutoLevel).toBe(3);
+    expect(hls.autoLevelCapping).toBe(3);
   });
 
   it('restores a source-scoped manual selection as a manual lock', () => {
@@ -97,6 +122,7 @@ describe('VOD HLS quality controller', () => {
     const controller = createVodHlsQualityController({
       sourceKey: 'xigua',
       hls,
+      video: createVideo().video,
       artPlayerRef: art.ref,
       setRealtimeLoadSpeed: jest.fn(),
     });
@@ -105,6 +131,7 @@ describe('VOD HLS quality controller', () => {
 
     expect(hls.currentLevel).toBe(4);
     expect(hls.loadLevel).toBe(4);
+    expect(hls.autoLevelCapping).toBe(-1);
     expect(hls.__icetvManualQualityLocked).toBe(true);
   });
 
@@ -114,6 +141,7 @@ describe('VOD HLS quality controller', () => {
     const unconfiguredController = createVodHlsQualityController({
       sourceKey: 'other',
       hls: unconfiguredHls,
+      video: createVideo().video,
       artPlayerRef: unconfiguredArt.ref,
       setRealtimeLoadSpeed: jest.fn(),
     });
@@ -124,6 +152,7 @@ describe('VOD HLS quality controller', () => {
     const singleLevelController = createVodHlsQualityController({
       sourceKey: 'xigua',
       hls: singleLevelHls,
+      video: createVideo().video,
       artPlayerRef: singleLevelArt.ref,
       setRealtimeLoadSpeed: jest.fn(),
     });
@@ -143,6 +172,7 @@ describe('VOD HLS quality controller', () => {
     const controller = createVodHlsQualityController({
       sourceKey: 'xigua',
       hls,
+      video: createVideo().video,
       artPlayerRef: art.ref,
       setRealtimeLoadSpeed,
     });
@@ -157,6 +187,7 @@ describe('VOD HLS quality controller', () => {
 
     expect(handled).toBe(true);
     expect(hls.nextAutoLevel).toBe(3);
+    expect(hls.autoLevelCapping).toBe(3);
     expect(hls.startLoad).toHaveBeenCalledTimes(1);
     expect(setRealtimeLoadSpeed).toHaveBeenCalledWith(
       '当前画质分片加载失败，已切换到720p',
@@ -172,6 +203,7 @@ describe('VOD HLS quality controller', () => {
       const controller = createVodHlsQualityController({
         sourceKey: 'xigua',
         hls,
+        video: createVideo().video,
         artPlayerRef: ref,
         setRealtimeLoadSpeed: jest.fn(),
       });
@@ -185,5 +217,60 @@ describe('VOD HLS quality controller', () => {
     } finally {
       jest.useRealTimers();
     }
+  });
+
+  it('opens 480p only below the emergency buffer and restores 720p', () => {
+    localStorage.setItem(
+      `${SOURCE_PREFERRED_QUALITY_STORAGE_PREFIX}xigua`,
+      'auto',
+    );
+    const hls = createHls();
+    hls.autoLevelEnabled = true;
+    const bufferedVideo = createVideo(100, 125);
+    const controller = createVodHlsQualityController({
+      sourceKey: 'xigua',
+      hls,
+      video: bufferedVideo.video,
+      artPlayerRef: createArtPlayerRef().ref,
+      setRealtimeLoadSpeed: jest.fn(),
+    });
+    controller.handleManifestParsed();
+
+    bufferedVideo.state.bufferedEnd = 105.5;
+    controller.handleFragmentLoading(3);
+    expect(hls.config.minAutoBitrate).toBe(220_001);
+
+    bufferedVideo.state.bufferedEnd = 130;
+    controller.handleBufferUpdated();
+    expect(hls.config.minAutoBitrate).toBe(360_001);
+    expect(hls.nextLoadLevel).toBe(3);
+    expect(hls.nextAutoLevel).toBe(3);
+
+    hls.nextLoadLevel = 2;
+    hls.nextAutoLevel = 2;
+    controller.handleFragmentLoading(2);
+    expect(hls.nextLoadLevel).toBe(3);
+    expect(hls.nextAutoLevel).toBe(3);
+  });
+
+  it('keeps a manual 720p selection locked after network failures', () => {
+    localStorage.setItem(
+      `${SOURCE_PREFERRED_QUALITY_STORAGE_PREFIX}xigua`,
+      '720',
+    );
+    const hls = createHls();
+    const controller = createVodHlsQualityController({
+      sourceKey: 'xigua',
+      hls,
+      video: createVideo(0, 25).video,
+      artPlayerRef: createArtPlayerRef().ref,
+      setRealtimeLoadSpeed: jest.fn(),
+    });
+    controller.handleManifestParsed();
+
+    expect(controller.tryRecoverManualSelectionFailure(true)).toBe(false);
+    expect(controller.tryRecoverManualSelectionFailure(true)).toBe(false);
+    expect(hls.__icetvManualQualityLocked).toBe(true);
+    expect(hls.currentLevel).toBe(3);
   });
 });

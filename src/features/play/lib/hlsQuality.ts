@@ -6,6 +6,7 @@ import type { PreferredQualityPreference } from '@/lib/local-preferences';
 export interface HlsLevelLike {
   height?: number;
   bitrate?: number;
+  maxBitrate?: number;
 }
 
 export interface HlsQualityController {
@@ -17,8 +18,46 @@ export interface HlsQualityController {
   nextLoadLevel?: number;
   nextAutoLevel?: number;
   autoLevelCapping?: number;
+  config?: {
+    minAutoBitrate?: number;
+  };
   __icetvManualQualityLocked?: boolean;
   __icetvDefaultQualityLevel?: number | null;
+}
+
+function resolveMinAutoBitrate(
+  levels: HlsLevelLike[] | undefined,
+  levelIndex: number | null,
+): number {
+  if (levelIndex === null || levelIndex <= 0 || !levels?.length) {
+    return 0;
+  }
+
+  const previousLevel = levels[levelIndex - 1];
+  const previousBitrate =
+    previousLevel?.maxBitrate || previousLevel?.bitrate || 0;
+  if (previousBitrate > 0) {
+    return Math.floor(previousBitrate) + 1;
+  }
+
+  const level = levels[levelIndex];
+  return Math.max(0, Math.floor(level?.maxBitrate || level?.bitrate || 0));
+}
+
+export function setAutoQualityMinLevel(
+  hls: HlsQualityController,
+  levelIndex: number | null,
+): void {
+  if (!hls.config) {
+    return;
+  }
+  const normalizedLevelIndex = normalizeLevelIndex(hls.levels, levelIndex);
+  try {
+    hls.config.minAutoBitrate = resolveMinAutoBitrate(
+      hls.levels,
+      normalizedLevelIndex,
+    );
+  } catch {}
 }
 
 export interface QualityOption {
@@ -120,33 +159,91 @@ export function findNextLowerLevelIndex(
 
 export function applyAutoQualityLevel(
   hls: HlsQualityController,
-  options: { startLevelIndex?: number | null } = {},
+  options: {
+    startLevelIndex?: number | null;
+    minLevelIndex?: number | null;
+    maxLevelIndex?: number | null;
+  } = {},
 ): void {
-  const startLevelIndex = normalizeLevelIndex(
+  const normalizedStartLevelIndex = normalizeLevelIndex(
     hls.levels,
     options.startLevelIndex,
   );
+  const normalizedMaxLevelIndex = normalizeLevelIndex(
+    hls.levels,
+    options.maxLevelIndex,
+  );
+  const requestedMinLevelIndex = normalizeLevelIndex(
+    hls.levels,
+    options.minLevelIndex,
+  );
+  const normalizedMinLevelIndex =
+    requestedMinLevelIndex !== null && normalizedMaxLevelIndex !== null
+      ? Math.min(requestedMinLevelIndex, normalizedMaxLevelIndex)
+      : requestedMinLevelIndex;
+  let startLevelIndex = normalizedStartLevelIndex;
+  if (startLevelIndex !== null && normalizedMinLevelIndex !== null) {
+    startLevelIndex = Math.max(startLevelIndex, normalizedMinLevelIndex);
+  }
+  if (startLevelIndex !== null && normalizedMaxLevelIndex !== null) {
+    startLevelIndex = Math.min(startLevelIndex, normalizedMaxLevelIndex);
+  }
   hls.__icetvManualQualityLocked = false;
+  setAutoQualityMinLevel(hls, normalizedMinLevelIndex);
   trySetHlsQualityValue(hls, 'startLevel', startLevelIndex ?? -1);
   trySetHlsQualityValue(hls, 'loadLevel', -1);
   if (startLevelIndex !== null) {
     trySetHlsQualityValue(hls, 'nextAutoLevel', startLevelIndex);
   }
-  trySetHlsQualityValue(hls, 'autoLevelCapping', -1);
+  trySetHlsQualityValue(hls, 'autoLevelCapping', normalizedMaxLevelIndex ?? -1);
 }
 
 export function seedAutoQualityStartLevel(
   hls: HlsQualityController,
   startLevelIndex: number | null,
+  minLevelIndex: number | null = null,
+  maxLevelIndex: number | null = null,
 ): void {
-  const normalizedLevelIndex = normalizeLevelIndex(hls.levels, startLevelIndex);
-  if (normalizedLevelIndex === null) {
+  const normalizedStartLevelIndex = normalizeLevelIndex(
+    hls.levels,
+    startLevelIndex,
+  );
+  const normalizedMaxLevelIndex = normalizeLevelIndex(
+    hls.levels,
+    maxLevelIndex,
+  );
+  const requestedMinLevelIndex = normalizeLevelIndex(hls.levels, minLevelIndex);
+  const normalizedMinLevelIndex =
+    requestedMinLevelIndex !== null && normalizedMaxLevelIndex !== null
+      ? Math.min(requestedMinLevelIndex, normalizedMaxLevelIndex)
+      : requestedMinLevelIndex;
+  if (
+    normalizedStartLevelIndex === null &&
+    normalizedMinLevelIndex === null &&
+    normalizedMaxLevelIndex === null
+  ) {
     return;
   }
+  let effectiveStartLevelIndex = normalizedStartLevelIndex;
+  if (effectiveStartLevelIndex !== null && normalizedMinLevelIndex !== null) {
+    effectiveStartLevelIndex = Math.max(
+      effectiveStartLevelIndex,
+      normalizedMinLevelIndex,
+    );
+  }
+  if (effectiveStartLevelIndex !== null && normalizedMaxLevelIndex !== null) {
+    effectiveStartLevelIndex = Math.min(
+      effectiveStartLevelIndex,
+      normalizedMaxLevelIndex,
+    );
+  }
   hls.__icetvManualQualityLocked = false;
-  trySetHlsQualityValue(hls, 'startLevel', normalizedLevelIndex);
-  trySetHlsQualityValue(hls, 'nextAutoLevel', normalizedLevelIndex);
-  trySetHlsQualityValue(hls, 'autoLevelCapping', -1);
+  setAutoQualityMinLevel(hls, normalizedMinLevelIndex);
+  if (effectiveStartLevelIndex !== null) {
+    trySetHlsQualityValue(hls, 'startLevel', effectiveStartLevelIndex);
+    trySetHlsQualityValue(hls, 'nextAutoLevel', effectiveStartLevelIndex);
+  }
+  trySetHlsQualityValue(hls, 'autoLevelCapping', normalizedMaxLevelIndex ?? -1);
 }
 
 export function applyManualQualityLevel(
@@ -154,6 +251,7 @@ export function applyManualQualityLevel(
   levelIndex: number,
   options: { userSelected?: boolean } = {},
 ): void {
+  setAutoQualityMinLevel(hls, null);
   hls.__icetvManualQualityLocked = options.userSelected === true;
   trySetHlsQualityValue(hls, 'startLevel', levelIndex);
   trySetHlsQualityValue(hls, 'currentLevel', levelIndex);
@@ -246,6 +344,8 @@ export type HlsQualityControlOptions = {
   preference: PreferredQualityPreference;
   defaultLevelIndex: number | null;
   autoStartLevelIndex: number | null;
+  autoInitialMinLevelIndex: number | null;
+  autoMaxLevelIndex: number | null;
   onPreferenceChange: (height: number | null) => void;
 };
 
@@ -308,6 +408,8 @@ function registerQualityControl(
         controlOptions.onPreferenceChange(null);
         applyAutoQualityLevel(hls, {
           startLevelIndex: controlOptions.autoStartLevelIndex,
+          minLevelIndex: controlOptions.autoInitialMinLevelIndex,
+          maxLevelIndex: controlOptions.autoMaxLevelIndex,
         });
       } else {
         controlOptions.onPreferenceChange(item.height);
