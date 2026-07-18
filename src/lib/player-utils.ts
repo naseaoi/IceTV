@@ -212,6 +212,7 @@ export interface ArtPlayerConfigOverrides {
   muted?: boolean;
   autoplay?: boolean;
   setting?: boolean;
+  screenshot?: boolean;
   playbackRate?: boolean;
   fastForward?: boolean;
   autoPlayback?: boolean;

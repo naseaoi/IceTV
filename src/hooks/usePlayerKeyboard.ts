@@ -82,12 +82,23 @@ export function usePlayerKeyboard({
       player.notice.show = '倍速: 1.0x';
     };
 
+    const hidePauseStateIcon = (player: Artplayer) => {
+      const stateEl = (player.template as unknown as { $state?: HTMLElement })
+        .$state;
+      if (!stateEl || stateEl.style.display === 'none') return;
+      stateEl.style.display = 'none';
+      player.once('play', () => {
+        stateEl.style.display = '';
+      });
+    };
+
     const stepFrame = (direction: 1 | -1) => {
       const player = artPlayerRef.current;
       if (!player) return;
       if (player.playing) {
         player.pause();
       }
+      hidePauseStateIcon(player);
       player.notice.show = '';
       const duration = player.duration || 0;
       const next = player.currentTime + direction * FRAME_STEP_SECONDS;

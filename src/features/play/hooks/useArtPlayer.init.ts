@@ -231,6 +231,7 @@ export async function initializeArtPlayer(
         isLive: false,
         setting: true,
         playbackRate: true,
+        screenshot: true,
         fastForward: false,
       }),
       type: mediaKind === 'native' && isVodMp4Url(videoUrl) ? 'mp4' : '',
