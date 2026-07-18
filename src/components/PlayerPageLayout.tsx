@@ -5,6 +5,7 @@ import { ReactNode, RefObject } from 'react';
 
 import { BackButton } from '@/components/BackButton';
 import PageLayout from '@/components/PageLayout';
+import PlayerShortcutsModal from '@/components/PlayerShortcutsModal';
 
 export interface PlayerPageAccent {
   icon: string;
@@ -182,6 +183,7 @@ export function PlayerPageLayout({
           </div>
         </div>
       </div>
+      <PlayerShortcutsModal />
     </PageLayout>
   );
 }

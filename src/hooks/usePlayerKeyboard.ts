@@ -1,11 +1,21 @@
 import type Artplayer from 'artplayer';
 import { MutableRefObject, useEffect } from 'react';
 
-/**
- * 通用播放器键盘快捷键 hook
- * 基础功能（音量、播放/暂停、全屏）适用于 VOD + Live
- * 扩展功能（快进快退、上/下集）通过 episodeHandlers 注入
- */
+import {
+  type PlayerShortcutAction,
+  type PlayerShortcutMap,
+  arePlayerShortcutsSuspended,
+  FRAME_STEP_SECONDS,
+  PLAYER_SHORTCUTS_CHANGED_EVENT,
+  RATE_MAX,
+  RATE_MIN,
+  RATE_STEP,
+  readPlayerShortcuts,
+  resolveShortcutAction,
+  SEEK_STEP_LONG_SECONDS,
+  SEEK_STEP_SECONDS,
+  VOLUME_STEP,
+} from '@/lib/player-shortcuts';
 
 interface EpisodeHandlers {
   detailRef: MutableRefObject<{ episodes: unknown[] } | null>;
@@ -16,8 +26,12 @@ interface EpisodeHandlers {
 
 interface UsePlayerKeyboardParams {
   artPlayerRef: MutableRefObject<Artplayer | null>;
-  /** VOD 模式传入集数控制，Live 模式不传 */
   episodeHandlers?: EpisodeHandlers;
+}
+
+function clampRate(rate: number): number {
+  const rounded = Math.round(rate * 10) / 10;
+  return Math.min(RATE_MAX, Math.max(RATE_MIN, rounded));
 }
 
 export function usePlayerKeyboard({
@@ -25,107 +39,140 @@ export function usePlayerKeyboard({
   episodeHandlers,
 }: UsePlayerKeyboardParams) {
   useEffect(() => {
+    let shortcuts: PlayerShortcutMap = readPlayerShortcuts();
+
+    const syncShortcuts = () => {
+      shortcuts = readPlayerShortcuts();
+    };
+    window.addEventListener(PLAYER_SHORTCUTS_CHANGED_EVENT, syncShortcuts);
+
+    const seekBy = (seconds: number) => {
+      const player = artPlayerRef.current;
+      if (!player) return;
+      const duration = player.duration || 0;
+      const next = Math.min(
+        Math.max(0, player.currentTime + seconds),
+        duration > 0 ? duration : player.currentTime + seconds,
+      );
+      player.currentTime = next;
+      const arrow = seconds > 0 ? '快进' : '快退';
+      player.notice.show = `${arrow} ${Math.abs(seconds)} 秒`;
+    };
+
+    const changeVolume = (delta: number) => {
+      const player = artPlayerRef.current;
+      if (!player) return;
+      const next = Math.round((player.volume + delta) * 10) / 10;
+      player.volume = Math.min(1, Math.max(0, next));
+      player.notice.show = `音量: ${Math.round(player.volume * 100)}`;
+    };
+
+    const changeRate = (delta: number) => {
+      const player = artPlayerRef.current;
+      if (!player) return;
+      const next = clampRate((player.playbackRate as number) + delta);
+      player.playbackRate = next;
+      player.notice.show = `倍速: ${next.toFixed(1)}x`;
+    };
+
+    const resetRate = () => {
+      const player = artPlayerRef.current;
+      if (!player) return;
+      player.playbackRate = 1;
+      player.notice.show = '倍速: 1.0x';
+    };
+
+    const stepFrame = (direction: 1 | -1) => {
+      const player = artPlayerRef.current;
+      if (!player) return;
+      if (player.playing) {
+        player.pause();
+      }
+      player.notice.show = '';
+      const duration = player.duration || 0;
+      const next = player.currentTime + direction * FRAME_STEP_SECONDS;
+      player.currentTime = Math.min(
+        Math.max(0, next),
+        duration > 0 ? duration : next,
+      );
+    };
+
+    const toggleFullscreen = () => {
+      const player = artPlayerRef.current;
+      if (!player) return;
+      player.fullscreen = !player.fullscreen;
+    };
+
+    const switchEpisode = (direction: 1 | -1): boolean => {
+      if (!episodeHandlers) return false;
+      const detail = episodeHandlers.detailRef.current;
+      const index = episodeHandlers.currentEpisodeIndexRef.current;
+      if (direction < 0) {
+        if (detail && index > 0) {
+          episodeHandlers.handlePreviousEpisode();
+          return true;
+        }
+        return false;
+      }
+      if (detail && index < detail.episodes.length - 1) {
+        episodeHandlers.handleNextEpisode();
+        return true;
+      }
+      return false;
+    };
+
+    const actionHandlers: Record<PlayerShortcutAction, () => void> = {
+      playPause: () => artPlayerRef.current?.toggle(),
+      seekBackward: () => seekBy(-SEEK_STEP_SECONDS),
+      seekForward: () => seekBy(SEEK_STEP_SECONDS),
+      seekBackwardLong: () => seekBy(-SEEK_STEP_LONG_SECONDS),
+      seekForwardLong: () => seekBy(SEEK_STEP_LONG_SECONDS),
+      volumeUp: () => changeVolume(VOLUME_STEP),
+      volumeDown: () => changeVolume(-VOLUME_STEP),
+      fullscreen: toggleFullscreen,
+      resetRate,
+      decreaseRate: () => changeRate(-RATE_STEP),
+      increaseRate: () => changeRate(RATE_STEP),
+      frameBackward: () => stepFrame(-1),
+      frameForward: () => stepFrame(1),
+      prevEpisode: () => switchEpisode(-1),
+      nextEpisode: () => switchEpisode(1),
+    };
+
+    const isEpisodeAction = (action: PlayerShortcutAction) =>
+      action === 'prevEpisode' || action === 'nextEpisode';
+
     const handleKeyboardShortcuts = (e: KeyboardEvent) => {
-      // 忽略输入框中的按键事件
+      const target = e.target as HTMLElement;
       if (
-        (e.target as HTMLElement).tagName === 'INPUT' ||
-        (e.target as HTMLElement).tagName === 'TEXTAREA'
-      )
+        target.tagName === 'INPUT' ||
+        target.tagName === 'TEXTAREA' ||
+        target.isContentEditable
+      ) {
         return;
-
-      // --- VOD 专用：Alt+方向键切集、方向键快进快退 ---
-      if (episodeHandlers) {
-        // Alt + 左箭头 = 上一集
-        if (e.altKey && e.key === 'ArrowLeft') {
-          if (
-            episodeHandlers.detailRef.current &&
-            episodeHandlers.currentEpisodeIndexRef.current > 0
-          ) {
-            episodeHandlers.handlePreviousEpisode();
-            e.preventDefault();
-          }
-          return;
-        }
-
-        // Alt + 右箭头 = 下一集
-        if (e.altKey && e.key === 'ArrowRight') {
-          const d = episodeHandlers.detailRef.current;
-          const idx = episodeHandlers.currentEpisodeIndexRef.current;
-          if (d && idx < d.episodes.length - 1) {
-            episodeHandlers.handleNextEpisode();
-            e.preventDefault();
-          }
-          return;
-        }
-
-        // 左箭头 = 快退
-        if (!e.altKey && e.key === 'ArrowLeft') {
-          if (artPlayerRef.current && artPlayerRef.current.currentTime > 5) {
-            artPlayerRef.current.currentTime -= 10;
-            e.preventDefault();
-          }
-          return;
-        }
-
-        // 右箭头 = 快进
-        if (!e.altKey && e.key === 'ArrowRight') {
-          if (
-            artPlayerRef.current &&
-            artPlayerRef.current.currentTime < artPlayerRef.current.duration - 5
-          ) {
-            artPlayerRef.current.currentTime += 10;
-            e.preventDefault();
-          }
-          return;
-        }
       }
 
-      // --- 通用快捷键 ---
-
-      // 上箭头 = 音量+
-      if (e.key === 'ArrowUp') {
-        if (artPlayerRef.current && artPlayerRef.current.volume < 1) {
-          artPlayerRef.current.volume =
-            Math.round((artPlayerRef.current.volume + 0.1) * 10) / 10;
-          artPlayerRef.current.notice.show = `音量: ${Math.round(
-            artPlayerRef.current.volume * 100,
-          )}`;
-          e.preventDefault();
-        }
+      if (arePlayerShortcutsSuspended()) {
+        return;
       }
 
-      // 下箭头 = 音量-
-      if (e.key === 'ArrowDown') {
-        if (artPlayerRef.current && artPlayerRef.current.volume > 0) {
-          artPlayerRef.current.volume =
-            Math.round((artPlayerRef.current.volume - 0.1) * 10) / 10;
-          artPlayerRef.current.notice.show = `音量: ${Math.round(
-            artPlayerRef.current.volume * 100,
-          )}`;
-          e.preventDefault();
-        }
+      const action = resolveShortcutAction(e, shortcuts);
+      if (!action) return;
+
+      if (isEpisodeAction(action) && !episodeHandlers) {
+        return;
       }
 
-      // 空格 = 播放/暂停
-      if (e.key === ' ') {
-        if (artPlayerRef.current) {
-          artPlayerRef.current.toggle();
-          e.preventDefault();
-        }
-      }
+      if (!artPlayerRef.current) return;
 
-      // f 键 = 切换全屏
-      if (e.key === 'f' || e.key === 'F') {
-        if (artPlayerRef.current) {
-          artPlayerRef.current.fullscreen = !artPlayerRef.current.fullscreen;
-          e.preventDefault();
-        }
-      }
+      e.preventDefault();
+      actionHandlers[action]();
     };
 
     document.addEventListener('keydown', handleKeyboardShortcuts);
     return () => {
       document.removeEventListener('keydown', handleKeyboardShortcuts);
+      window.removeEventListener(PLAYER_SHORTCUTS_CHANGED_EVENT, syncShortcuts);
     };
   }, [artPlayerRef, episodeHandlers]);
 }

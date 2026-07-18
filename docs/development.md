@@ -26,6 +26,7 @@ src/
 - 其他本地偏好走 `src/lib/local-preferences.ts`
 - Bangumi 设置的读取、写入、重置走 `src/lib/bangumi-source.ts`
 - Douban 数据与图片代理设置的读取、写入、重置走 `src/lib/douban-source.ts`
+- 播放器快捷键的读取、写入与按键匹配走 `src/lib/player-shortcuts.ts`
 
 新增设置时先补 helper，再让设置面板和消费方统一接入；不要各自手写 key 和默认值。
 
@@ -109,6 +110,7 @@ Guard 选择：
 - 画质控制：`src/features/play/lib/vodHlsQualityController.ts`
 - 默认画质与降级能力：`src/features/play/lib/vodQualityPolicy.ts`
 - 画质偏好保存：`src/lib/local-preferences.ts`
+- 键盘快捷键：动作与键位定义在 `src/lib/player-shortcuts.ts`，执行在 `src/hooks/usePlayerKeyboard.ts`，配置弹窗为 `src/components/PlayerShortcutsModal.tsx`；新增动作时依次补齐三处，不要在页面单独监听 keydown
 
 去广告扩展：
 

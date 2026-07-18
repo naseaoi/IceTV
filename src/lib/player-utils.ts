@@ -244,6 +244,7 @@ export function createArtPlayerConfig(overrides?: ArtPlayerConfigOverrides) {
     subtitleOffset: false,
     miniProgressBar: false,
     mutex: true,
+    backdrop: false,
     playsInline: true,
     airplay: true,
     theme: '#3b82f6',

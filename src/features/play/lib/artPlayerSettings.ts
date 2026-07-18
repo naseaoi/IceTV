@@ -7,6 +7,7 @@ import {
   destroyManagedHls,
   runManagedVideoCleanup,
 } from '@/lib/player-runtime';
+import { OPEN_PLAYER_SHORTCUTS_EVENT } from '@/lib/player-shortcuts';
 import { formatTime } from '@/lib/player-utils';
 import type { SkipConfig } from '@/lib/types';
 
@@ -140,6 +141,18 @@ export function createArtPlayerControls({
       tooltip: '播放下一集',
       click: function () {
         handleNextEpisode();
+      },
+    },
+  ];
+}
+
+export function createArtPlayerContextmenus() {
+  return [
+    {
+      html: '快捷键配置',
+      click(this: Artplayer) {
+        this.contextmenu.show = false;
+        window.dispatchEvent(new CustomEvent(OPEN_PLAYER_SHORTCUTS_EVENT));
       },
     },
   ];

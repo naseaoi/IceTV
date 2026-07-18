@@ -28,6 +28,7 @@ import {
   handleHlsFatalError,
 } from '@/lib/player-utils';
 
+import { createArtPlayerContextmenus } from '../../play/lib/artPlayerSettings';
 import type { LiveChannel, LiveSource } from '../types';
 
 const LIVE_PRECHECK_CACHE_TTL_MS = 5 * 60 * 1000;
@@ -440,6 +441,7 @@ export function useLivePlayer({
           }),
           type,
           customType,
+          contextmenu: createArtPlayerContextmenus(),
         });
         bindPlayerHoverControls(artPlayerRef.current);
         loadedUrlRef.current = targetUrl;
