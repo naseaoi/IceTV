@@ -1,14 +1,13 @@
-﻿'use client';
+'use client';
 
 import {
-  GitBranch,
+  ChevronRight,
+  CircleUserRound,
   KeyRound,
   LogIn,
   LogOut,
   Settings,
   Shield,
-  User,
-  X,
 } from 'lucide-react';
 import dynamic from 'next/dynamic';
 import { useRouter } from 'next/navigation';
@@ -33,6 +32,7 @@ import {
   SIDEBAR_ITEM_ICON_WRAP_CLASS,
   SIDEBAR_ITEM_LAYOUT_CLASS,
 } from './SidebarItem';
+import { UserAvatar } from './user-menu/UserAvatar';
 
 interface AuthInfo {
   username?: string;
@@ -78,6 +78,28 @@ const VersionPanel = dynamic<VersionPanelProps>(
   () => import('@/components/VersionPanel').then((mod) => mod.VersionPanel),
   { ssr: false },
 );
+
+const ROLE_TEXT: Record<string, string> = {
+  owner: '站长',
+  admin: '管理员',
+  user: '用户',
+};
+
+const ROLE_BADGE_CLASS: Record<string, string> = {
+  owner:
+    'bg-yellow-100 text-yellow-800 dark:bg-yellow-900/30 dark:text-yellow-200',
+  admin:
+    'bg-purple-100 text-purple-800 dark:bg-purple-900/30 dark:text-purple-200',
+  user: 'bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-200',
+};
+
+const MENU_DIVIDER_CLASS = 'h-px bg-gray-200/70 dark:bg-white/[0.08]';
+
+const MENU_ROW_CLASS =
+  'flex w-full items-center gap-3 rounded-lg px-2.5 py-2 text-sm transition-colors';
+
+const MENU_BADGE_CLASS =
+  'flex-shrink-0 rounded-full px-1.5 py-0.5 text-[10px] font-medium';
 
 export const UserMenu: React.FC<UserMenuProps> = ({
   variant = 'icon',
@@ -200,6 +222,7 @@ export const UserMenu: React.FC<UserMenuProps> = ({
   };
 
   const handleLogin = () => {
+    setIsOpen(false);
     const redirect =
       typeof window !== 'undefined'
         ? `${window.location.pathname}${window.location.search}`
@@ -219,7 +242,13 @@ export const UserMenu: React.FC<UserMenuProps> = ({
     window.location.href = '/';
   };
 
+  const handleGoMe = () => {
+    setIsOpen(false);
+    router.push('/me');
+  };
+
   const handleAdminPanel = () => {
+    setIsOpen(false);
     router.push('/admin');
   };
 
@@ -233,54 +262,31 @@ export const UserMenu: React.FC<UserMenuProps> = ({
     setIsSettingsOpen(true);
   };
 
+  const handleVersionPanel = () => {
+    setIsOpen(false);
+    setIsVersionPanelOpen(true);
+  };
+
   const showAdminPanel =
     authInfo?.role === 'owner' || authInfo?.role === 'admin';
   const isAuthenticated = Boolean(authInfo?.username);
   const showChangePassword = isAuthenticated && authInfo?.role !== 'owner';
+  const role = authInfo?.role || 'user';
+  const hasUpdate = !isChecking && updateStatus === UpdateStatus.HAS_UPDATE;
 
-  const getRoleText = (role?: string) => {
-    switch (role) {
-      case 'owner':
-        return '站长';
-      case 'admin':
-        return '管理员';
-      case 'user':
-        return '用户';
-      default:
-        return '';
-    }
-  };
-
-  const menuActions = [
-    { icon: Settings, label: '设置', onClick: handleSettings, show: true },
+  const listActions = [
+    { icon: Settings, label: '本地设置', onClick: handleSettings, show: true },
     {
       icon: Shield,
-      label: '管理',
+      label: '管理后台',
       onClick: handleAdminPanel,
       show: showAdminPanel,
     },
     {
       icon: KeyRound,
-      label: '密码',
+      label: '修改密码',
       onClick: handleChangePassword,
       show: showChangePassword,
-    },
-    {
-      icon: GitBranch,
-      label: `v${CURRENT_VERSION}`,
-      onClick: () => {
-        setIsVersionPanelOpen(true);
-        handleCloseMenu();
-      },
-      show: true,
-      version: true,
-    },
-    {
-      icon: isAuthenticated ? LogOut : LogIn,
-      label: isAuthenticated ? '登出' : '登录',
-      onClick: isAuthenticated ? handleLogout : handleLogin,
-      show: true,
-      danger: isAuthenticated,
     },
   ].filter((action) => action.show);
 
@@ -292,89 +298,106 @@ export const UserMenu: React.FC<UserMenuProps> = ({
       />
 
       <div
-        className={`fixed z-[1001] w-56 max-w-[calc(100vw-16px)] select-none overflow-hidden rounded-2xl border border-gray-200/70 bg-white/80 shadow-2xl ring-1 ring-black/10 backdrop-blur-xl dark:border-white/10 dark:bg-gray-900/70 dark:ring-white/10 ${
-          menuPlacement === 'up' ? 'origin-bottom' : 'origin-top'
+        className={`fixed z-[1001] w-56 max-w-[calc(100vw-16px)] select-none overflow-hidden rounded-2xl border border-gray-200/70 bg-white/85 shadow-2xl ring-1 ring-black/10 backdrop-blur-xl motion-reduce:animate-none dark:border-white/10 dark:bg-gray-900/80 dark:ring-white/10 ${
+          menuPlacement === 'up' ? 'animate-menu-in-up' : 'animate-menu-in-down'
         }`}
         style={menuPos}
       >
-        <div className='relative px-4 pb-3 pt-4'>
-          <div className='absolute inset-x-0 top-0 h-14 bg-gradient-to-br from-emerald-500/10 via-green-400/5 to-transparent dark:from-emerald-500/15 dark:via-green-500/5' />
-
+        {isAuthenticated ? (
           <button
-            onClick={handleCloseMenu}
-            className='absolute right-2 top-2 z-10 rounded-lg p-1 text-gray-400 transition-colors hover:bg-gray-100/70 hover:text-gray-600 dark:hover:bg-white/[0.06] dark:hover:text-gray-200'
-            aria-label='关闭菜单'
+            onClick={handleGoMe}
+            className='group flex w-full items-center gap-3 px-4 py-3.5 text-left transition-colors hover:bg-gray-100/60 dark:hover:bg-white/[0.05]'
           >
-            <X className='h-4 w-4' />
+            <UserAvatar username={authInfo?.username} role={role} size='lg' />
+            <div className='min-w-0 flex-1'>
+              <div className='flex items-center gap-1.5'>
+                <span className='truncate text-sm font-semibold text-gray-900 dark:text-gray-100'>
+                  {authInfo?.username}
+                </span>
+                <span
+                  className={`${MENU_BADGE_CLASS} ${ROLE_BADGE_CLASS[role]}`}
+                >
+                  {ROLE_TEXT[role]}
+                </span>
+              </div>
+              <div className='mt-0.5 text-xs text-gray-500 dark:text-gray-400'>
+                查看我的主页
+              </div>
+            </div>
+            <ChevronRight className='h-4 w-4 flex-shrink-0 text-gray-400 transition-transform duration-200 group-hover:translate-x-0.5' />
           </button>
-
-          <div className='relative flex flex-col items-center text-center'>
-            <div className='flex h-12 w-12 items-center justify-center rounded-2xl bg-gradient-to-br from-emerald-200 to-green-100 text-emerald-700 shadow-lg ring-2 ring-white/80 dark:from-emerald-500/20 dark:to-green-500/15 dark:text-emerald-200 dark:ring-white/10'>
-              <User className='h-6 w-6' />
-            </div>
-            <div className='mt-2.5 max-w-full truncate text-sm font-semibold text-gray-900 dark:text-gray-100'>
-              {authInfo?.username || '未登录'}
-            </div>
-            <div className='mt-1 flex items-center gap-2'>
-              <span
-                className={`inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-medium ${
-                  !isAuthenticated
-                    ? 'bg-gray-100 text-gray-700 dark:bg-gray-800 dark:text-gray-300'
-                    : (authInfo?.role || 'user') === 'owner'
-                      ? 'bg-purple-100 text-purple-800 dark:bg-purple-900/30 dark:text-purple-200'
-                      : (authInfo?.role || 'user') === 'admin'
-                        ? 'bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-200'
-                        : 'bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-200'
-                }`}
-              >
-                {isAuthenticated
-                  ? getRoleText(authInfo?.role || 'user')
-                  : '游客'}
-              </span>
-              <span className='text-[10px] text-gray-400 dark:text-gray-500'>
-                {storageType}
-              </span>
+        ) : (
+          <div className='flex w-full items-center gap-3 px-4 py-3.5'>
+            <UserAvatar size='lg' />
+            <div className='min-w-0 flex-1'>
+              <div className='flex items-center gap-1.5'>
+                <span className='text-sm font-semibold text-gray-900 dark:text-gray-100'>
+                  游客
+                </span>
+                <span
+                  className={`${MENU_BADGE_CLASS} bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-300`}
+                >
+                  未登录
+                </span>
+              </div>
+              <div className='mt-0.5 text-xs text-gray-500 dark:text-gray-400'>
+                登录后可使用收藏与历史
+              </div>
             </div>
           </div>
+        )}
+
+        <div className={MENU_DIVIDER_CLASS} />
+
+        <div className='px-2 py-1.5'>
+          {listActions.map(({ icon: Icon, label, onClick }) => (
+            <button
+              key={label}
+              onClick={onClick}
+              className={`${MENU_ROW_CLASS} text-gray-700 hover:bg-gray-100/70 dark:text-gray-200 dark:hover:bg-white/[0.06]`}
+            >
+              <Icon className='h-4 w-4 text-gray-500 dark:text-gray-400' />
+              <span>{label}</span>
+            </button>
+          ))}
         </div>
 
-        <div className='mx-3 h-px bg-gradient-to-r from-transparent via-gray-200/80 to-transparent dark:via-white/[0.10]' />
+        <div className={MENU_DIVIDER_CLASS} />
 
-        <div className='grid grid-cols-2 gap-1.5 px-2.5 py-2'>
-          {menuActions.map(
-            ({ icon: Icon, label, onClick, danger, version }) => (
-              <button
-                key={label}
-                onClick={onClick}
-                className={`relative flex flex-col items-center gap-2 rounded-xl px-1 py-3 transition-colors ${
-                  danger
-                    ? 'text-rose-600 hover:bg-rose-50/70 dark:text-rose-300 dark:hover:bg-rose-500/10'
-                    : 'text-gray-600 hover:bg-gray-100/70 dark:text-gray-300 dark:hover:bg-white/[0.06]'
-                }`}
-              >
-                <div
-                  className={`flex h-12 w-12 items-center justify-center rounded-xl ${
-                    danger
-                      ? 'bg-rose-50/80 dark:bg-rose-500/10'
-                      : 'bg-gray-100/80 dark:bg-white/[0.06]'
-                  }`}
-                >
-                  <Icon className='h-[22px] w-[22px]' />
-                </div>
-                <span
-                  className={`text-sm font-medium ${version ? 'font-mono' : ''}`}
-                >
-                  {label}
-                </span>
-                {version &&
-                  !isChecking &&
-                  updateStatus === UpdateStatus.HAS_UPDATE && (
-                    <div className='absolute right-2 top-2 h-2 w-2 rounded-full bg-yellow-500' />
-                  )}
-              </button>
-            ),
+        <div className='px-2 py-1.5'>
+          {isAuthenticated ? (
+            <button
+              onClick={handleLogout}
+              className={`${MENU_ROW_CLASS} text-rose-600 hover:bg-rose-50/70 dark:text-rose-300 dark:hover:bg-rose-500/10`}
+            >
+              <LogOut className='h-4 w-4' />
+              <span>退出登录</span>
+            </button>
+          ) : (
+            <button
+              onClick={handleLogin}
+              className={`${MENU_ROW_CLASS} text-gray-700 hover:bg-gray-100/70 dark:text-gray-200 dark:hover:bg-white/[0.06]`}
+            >
+              <LogIn className='h-4 w-4 text-gray-500 dark:text-gray-400' />
+              <span>登录账号</span>
+            </button>
           )}
         </div>
+
+        <div className={MENU_DIVIDER_CLASS} />
+
+        <button
+          onClick={handleVersionPanel}
+          className='flex w-full items-center justify-between px-4 py-2.5 text-[11px] text-gray-400 transition-colors hover:text-gray-600 dark:text-gray-500 dark:hover:text-gray-300'
+        >
+          <span className='relative font-mono'>
+            v{CURRENT_VERSION}
+            {hasUpdate && (
+              <span className='absolute -right-2.5 top-0 h-1.5 w-1.5 rounded-full bg-yellow-500' />
+            )}
+          </span>
+          <span>{storageType}</span>
+        </button>
       </div>
     </>
   );
@@ -387,16 +410,26 @@ export const UserMenu: React.FC<UserMenuProps> = ({
             ref={buttonRef}
             onClick={handleMenuClick}
             className={`${SIDEBAR_ITEM_LAYOUT_CLASS} w-full ${SIDEBAR_BUTTON_STATE_CLASS}`}
-            aria-label='用户'
-            title='用户'
+            aria-label={isAuthenticated ? '账户' : '登录'}
+            title={isAuthenticated ? '账户' : '登录'}
           >
             <div className={`relative ${SIDEBAR_ITEM_ICON_WRAP_CLASS}`}>
-              <User className={SIDEBAR_ITEM_ICON_CLASS} />
+              {isAuthenticated ? (
+                <UserAvatar
+                  username={authInfo?.username}
+                  role={role}
+                  size='sm'
+                />
+              ) : (
+                <CircleUserRound className={SIDEBAR_ITEM_ICON_CLASS} />
+              )}
               {updateStatus === UpdateStatus.HAS_UPDATE && (
                 <div className='absolute -right-1 -top-1 h-2 w-2 rounded-full bg-yellow-500'></div>
               )}
             </div>
-            <span className={getSidebarItemLabelClass(isCollapsed)}>用户</span>
+            <span className={getSidebarItemLabelClass(isCollapsed)}>
+              {isAuthenticated ? '账户' : '登录'}
+            </span>
           </button>
         </div>
       ) : (
@@ -404,10 +437,14 @@ export const UserMenu: React.FC<UserMenuProps> = ({
           <button
             ref={buttonRef}
             onClick={handleMenuClick}
-            className='flex h-10 w-10 items-center justify-center rounded-full p-2 text-gray-600 transition-colors hover:bg-gray-200/50 dark:text-gray-300 dark:hover:bg-gray-700/50'
-            aria-label='用户菜单'
+            className='flex h-10 w-10 items-center justify-center rounded-full text-gray-600 transition-colors hover:bg-gray-200/50 dark:text-gray-300 dark:hover:bg-gray-700/50'
+            aria-label={isAuthenticated ? '账户菜单' : '登录'}
           >
-            <User className='h-full w-full' />
+            {isAuthenticated ? (
+              <UserAvatar username={authInfo?.username} role={role} size='md' />
+            ) : (
+              <CircleUserRound className='h-6 w-6' />
+            )}
           </button>
           {updateStatus === UpdateStatus.HAS_UPDATE && (
             <div className='absolute right-[2px] top-[2px] h-2 w-2 rounded-full bg-yellow-500'></div>
