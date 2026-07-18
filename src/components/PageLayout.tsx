@@ -76,17 +76,12 @@ const PageLayout = ({
                     activePath === '/search'
                       ? 'mt-0'
                       : 'mt-[calc(3rem+env(safe-area-inset-top))]'
-                  } mb-0 ${showFooter ? 'flex flex-col' : ''}`
+                  } mb-0 ${showFooter ? 'flex flex-col' : ''} ${
+                    showBottomNav
+                      ? 'pb-[calc(3.5rem+env(safe-area-inset-bottom))] md:pb-[env(safe-area-inset-bottom)]'
+                      : 'pb-[env(safe-area-inset-bottom)]'
+                  }`
             }`}
-            style={
-              isPlayerPage
-                ? undefined
-                : {
-                    paddingBottom: showBottomNav
-                      ? 'calc(3.5rem + env(safe-area-inset-bottom))'
-                      : 'env(safe-area-inset-bottom)',
-                  }
-            }
           >
             {isPlayerPage && showFooter ? (
               <>
