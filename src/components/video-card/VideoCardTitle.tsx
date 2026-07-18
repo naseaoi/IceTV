@@ -1,30 +1,14 @@
-import { Radio } from 'lucide-react';
-
-import type {
-  VideoCardDisplayConfig,
-  VideoCardProps,
-} from '@/components/video-card/types';
-
 import { noSelectStyle, preventContextMenu } from './constants';
 
 interface VideoCardTitleProps {
   title: string;
-  sourceName?: string;
-  origin: NonNullable<VideoCardProps['origin']>;
-  config: VideoCardDisplayConfig;
-  reserveSourceSpace?: boolean;
 }
 
-export function VideoCardTitle({
-  title,
-  sourceName,
-  origin,
-  config,
-  reserveSourceSpace = false,
-}: VideoCardTitleProps) {
+export function VideoCardTitle({ title }: VideoCardTitleProps) {
   return (
     <div
-      className={`mt-2 text-center ${reserveSourceSpace ? 'min-h-[46px]' : ''}`}
+      data-video-card-title
+      className='mt-2 text-center'
       style={noSelectStyle}
       onContextMenu={preventContextMenu}
     >
@@ -48,27 +32,6 @@ export function VideoCardTitle({
           ></div>
         </div>
       </div>
-      {config.showSourceName && sourceName && (
-        <span
-          className='mt-1 block text-xs text-gray-500 dark:text-gray-400'
-          style={noSelectStyle}
-          onContextMenu={preventContextMenu}
-        >
-          <span
-            className='inline-block rounded border border-gray-500/60 px-2 py-0.5 transition-all duration-300 ease-in-out group-hover:border-green-500/60 group-hover:text-green-600 dark:border-gray-400/60 dark:group-hover:text-green-400'
-            style={noSelectStyle}
-            onContextMenu={preventContextMenu}
-          >
-            {origin === 'live' && (
-              <Radio
-                size={12}
-                className='mr-1.5 inline-block text-gray-500 dark:text-gray-400'
-              />
-            )}
-            {sourceName}
-          </span>
-        </span>
-      )}
     </div>
   );
 }

@@ -1,4 +1,7 @@
-import { applyClientServerConfig } from '@/lib/runtime-config';
+import {
+  applyClientServerConfig,
+  getCustomCategoryLabel,
+} from '@/lib/runtime-config';
 
 describe('runtime config', () => {
   afterEach(() => {
@@ -15,5 +18,17 @@ describe('runtime config', () => {
     expect(config.VOD_PAGE_TIMEOUT_SECONDS).toBe(20);
     expect(config.SOURCE_FAILURE_COOLDOWN_SECONDS).toBe(0);
     expect(window.RUNTIME_CONFIG).toEqual(config);
+  });
+
+  it('uses the first configured category name as the custom entry label', () => {
+    const config = applyClientServerConfig({
+      CustomCategories: [
+        { name: ' test ', type: 'movie', query: 'test' },
+        { name: '剧集', type: 'tv', query: '剧集' },
+      ],
+    });
+
+    expect(getCustomCategoryLabel(config)).toBe('test');
+    expect(getCustomCategoryLabel()).toBe('自定义');
   });
 });

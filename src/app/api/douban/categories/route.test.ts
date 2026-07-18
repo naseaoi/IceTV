@@ -16,7 +16,7 @@ jest.mock('@/lib/douban', () => ({
 jest.mock('@/lib/api-auth', () => ({
   requireActiveUser: jest
     .fn()
-    .mockResolvedValue({ username: 'demo', isOwner: false }),
+    .mockResolvedValue({ username: 'demo', isOwner: false, role: 'user' }),
   isGuardFailure: (result: object) => 'response' in result,
 }));
 

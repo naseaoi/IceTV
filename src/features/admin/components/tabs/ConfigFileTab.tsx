@@ -1,8 +1,10 @@
 ﻿'use client';
-import { useEffect, useState } from 'react';
+import { Download, Upload } from 'lucide-react';
+import { type FormEvent, useEffect, useRef, useState } from 'react';
 
 import AlertModal from '@/components/modals/AlertModal';
 import { useLoadingState } from '@/features/admin/hooks/useLoadingState';
+import { CONFIG_FILE_FORM_ID } from '@/features/admin/lib/admin-form-ids';
 import { adminPost } from '@/features/admin/lib/api';
 import { buttonStyles } from '@/features/admin/lib/buttonStyles';
 import { showError, showSuccess } from '@/features/admin/lib/notifications';
@@ -13,13 +15,26 @@ import { AdminConfig } from '@/types/admin';
 const CONFIG_SUBSCRIPTION_URL_ID = 'config-subscription-url';
 const CONFIG_FILE_CONTENT_ID = 'config-file-content';
 const CONFIG_FILE_HELP_ID = 'config-file-help';
+const CONFIG_FILE_INPUT_ID = 'config-file-import';
+const CONFIG_FILE_MAX_SIZE = 5 * 1024 * 1024;
+
+interface ConfigFileDraft {
+  configContent: string;
+  subscriptionUrl: string;
+  autoUpdate: boolean;
+  lastCheckTime: string;
+}
 
 const ConfigFileComponent = ({
   config,
   refreshConfig,
+  onSavingChange,
+  onDirtyChange,
 }: {
   config: AdminConfig | null;
   refreshConfig: () => Promise<void>;
+  onSavingChange?: (saving: boolean) => void;
+  onDirtyChange?: (dirty: boolean) => void;
 }) => {
   const { alertModal, showAlert, hideAlert } = useAlertModal();
   const { isLoading, withLoading } = useLoadingState();
@@ -27,17 +42,43 @@ const ConfigFileComponent = ({
   const [subscriptionUrl, setSubscriptionUrl] = useState('');
   const [autoUpdate, setAutoUpdate] = useState(false);
   const [lastCheckTime, setLastCheckTime] = useState<string>('');
+  const [baselineDraft, setBaselineDraft] = useState<ConfigFileDraft>({
+    configContent: '',
+    subscriptionUrl: '',
+    autoUpdate: false,
+    lastCheckTime: '',
+  });
+  const savingRef = useRef(false);
+  const configFileInputRef = useRef<HTMLInputElement>(null);
+  const currentDraft: ConfigFileDraft = {
+    configContent,
+    subscriptionUrl,
+    autoUpdate,
+    lastCheckTime,
+  };
+  const configFileDirty =
+    JSON.stringify(currentDraft) !== JSON.stringify(baselineDraft);
+  const hasUnsavedFetchTime = lastCheckTime !== baselineDraft.lastCheckTime;
 
   useEffect(() => {
     if (config) {
-      setConfigContent(buildConfigFileFromAdminConfig(config));
-    }
-    if (config?.ConfigSubscribtion) {
-      setSubscriptionUrl(config.ConfigSubscribtion.URL);
-      setAutoUpdate(config.ConfigSubscribtion.AutoUpdate);
-      setLastCheckTime(config.ConfigSubscribtion.LastCheck || '');
+      const nextDraft = {
+        configContent: buildConfigFileFromAdminConfig(config),
+        subscriptionUrl: config.ConfigSubscribtion?.URL || '',
+        autoUpdate: config.ConfigSubscribtion?.AutoUpdate || false,
+        lastCheckTime: config.ConfigSubscribtion?.LastCheck || '',
+      };
+      setConfigContent(nextDraft.configContent);
+      setSubscriptionUrl(nextDraft.subscriptionUrl);
+      setAutoUpdate(nextDraft.autoUpdate);
+      setLastCheckTime(nextDraft.lastCheckTime);
+      setBaselineDraft(nextDraft);
     }
   }, [config]);
+
+  useEffect(() => {
+    onDirtyChange?.(configFileDirty);
+  }, [configFileDirty, onDirtyChange]);
 
   const handleFetchConfig = async () => {
     if (!subscriptionUrl.trim()) {
@@ -53,6 +94,11 @@ const ConfigFileComponent = ({
           '拉取失败',
         );
         if (data.configContent) {
+          try {
+            JSON.parse(data.configContent);
+          } catch {
+            throw new Error('订阅内容不是有效的 JSON');
+          }
           setConfigContent(data.configContent);
           const currentTime = new Date().toISOString();
           setLastCheckTime(currentTime);
@@ -68,6 +114,9 @@ const ConfigFileComponent = ({
   };
 
   const handleSave = async () => {
+    if (savingRef.current || !configFileDirty) return;
+    savingRef.current = true;
+    onSavingChange?.(true);
     await withLoading('saveConfig', async () => {
       try {
         await adminPost(
@@ -76,23 +125,38 @@ const ConfigFileComponent = ({
             configFile: configContent,
             subscriptionUrl,
             autoUpdate,
-            lastCheckTime: lastCheckTime || new Date().toISOString(),
+            lastCheckTime,
           },
           '保存失败',
         );
 
+        setBaselineDraft(currentDraft);
         showSuccess('配置文件保存成功', showAlert);
         await refreshConfig();
       } catch (err) {
         showError(err instanceof Error ? err.message : '保存失败', showAlert);
         throw err;
       }
+    }).finally(() => {
+      savingRef.current = false;
+      onSavingChange?.(false);
     });
+  };
+
+  const handleSubmit = (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    void handleSave();
   };
 
   const handleExport = () => {
     if (!configContent.trim()) {
       showError('配置文件内容为空', showAlert);
+      return;
+    }
+    try {
+      JSON.parse(configContent);
+    } catch {
+      showError('当前内容不是有效的 JSON，无法导出', showAlert);
       return;
     }
 
@@ -114,6 +178,29 @@ const ConfigFileComponent = ({
     showSuccess('配置文件已导出', showAlert);
   };
 
+  const handleImport = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    event.target.value = '';
+    if (!file) return;
+    if (!file.name.toLowerCase().endsWith('.json')) {
+      showError('只支持导入 JSON 文件', showAlert);
+      return;
+    }
+    if (file.size > CONFIG_FILE_MAX_SIZE) {
+      showError('JSON 文件不能超过 5MB', showAlert);
+      return;
+    }
+
+    try {
+      const content = await file.text();
+      JSON.parse(content);
+      setConfigContent(content);
+      showSuccess('JSON 已导入，请保存后生效', showAlert);
+    } catch {
+      showError('JSON 文件格式错误', showAlert);
+    }
+  };
+
   if (!config) {
     return (
       <div className='text-center text-gray-500 dark:text-gray-400'>
@@ -123,7 +210,11 @@ const ConfigFileComponent = ({
   }
 
   return (
-    <div className='flex h-full flex-col'>
+    <form
+      id={CONFIG_FILE_FORM_ID}
+      onSubmit={handleSubmit}
+      className='flex h-full flex-col'
+    >
       <div className='grid min-h-0 flex-1 grid-cols-1 gap-4 lg:grid-cols-2 lg:grid-rows-1'>
         <div className='self-start rounded-lg border border-gray-200 bg-white p-6 shadow-sm dark:border-gray-700 dark:bg-gray-800'>
           <div className='mb-6 flex items-center justify-between'>
@@ -131,7 +222,7 @@ const ConfigFileComponent = ({
               配置订阅
             </h3>
             <div className='rounded-full px-3 py-1.5 text-sm text-gray-500 dark:text-gray-400'>
-              最后更新:{' '}
+              {hasUnsavedFetchTime ? '本次拉取' : '最后更新'}:{' '}
               {lastCheckTime
                 ? new Date(lastCheckTime).toLocaleString('zh-CN')
                 : '从未更新'}
@@ -212,6 +303,50 @@ const ConfigFileComponent = ({
         </div>
 
         <div className='flex min-h-0 flex-col gap-4 rounded-lg border border-gray-200 bg-white p-6 shadow-sm dark:border-gray-700 dark:bg-gray-800'>
+          <div className='flex flex-wrap items-center justify-between gap-3'>
+            <div>
+              <h3 className='text-xl font-semibold text-gray-900 dark:text-gray-100'>
+                配置编辑
+              </h3>
+              <p
+                id={CONFIG_FILE_HELP_ID}
+                className='mt-1 text-xs text-gray-500 dark:text-gray-400'
+              >
+                支持 JSON 格式，用于配置视频源和自定义分类
+              </p>
+            </div>
+            <div className='flex items-center gap-2'>
+              <input
+                ref={configFileInputRef}
+                id={CONFIG_FILE_INPUT_ID}
+                type='file'
+                accept='.json,application/json'
+                className='hidden'
+                onChange={handleImport}
+              />
+              <button
+                type='button'
+                onClick={() => configFileInputRef.current?.click()}
+                className={`inline-flex items-center gap-1.5 rounded-lg px-4 py-2 transition-colors ${buttonStyles.secondary}`}
+              >
+                <Upload className='h-4 w-4' />
+                导入
+              </button>
+              <button
+                type='button'
+                onClick={handleExport}
+                disabled={!configContent.trim()}
+                className={`inline-flex items-center gap-1.5 rounded-lg px-4 py-2 transition-colors ${
+                  !configContent.trim()
+                    ? buttonStyles.disabled
+                    : buttonStyles.secondary
+                }`}
+              >
+                <Download className='h-4 w-4' />
+                导出
+              </button>
+            </div>
+          </div>
           <div className='relative min-h-[28rem] flex-1'>
             <label htmlFor={CONFIG_FILE_CONTENT_ID} className='sr-only'>
               配置文件内容
@@ -233,41 +368,6 @@ const ConfigFileComponent = ({
               data-gramm={false}
             />
           </div>
-
-          <div className='flex items-center justify-between gap-4'>
-            <div
-              id={CONFIG_FILE_HELP_ID}
-              className='text-xs text-gray-500 dark:text-gray-400'
-            >
-              支持 JSON 格式，用于配置视频源和自定义分类
-            </div>
-            <div className='flex items-center gap-2'>
-              <button
-                type='button'
-                onClick={handleExport}
-                disabled={!configContent.trim()}
-                className={`rounded-lg px-4 py-2 transition-colors ${
-                  !configContent.trim()
-                    ? buttonStyles.disabled
-                    : buttonStyles.secondary
-                }`}
-              >
-                导出
-              </button>
-              <button
-                type='button'
-                onClick={handleSave}
-                disabled={isLoading('saveConfig')}
-                className={`rounded-lg px-4 py-2 transition-colors ${
-                  isLoading('saveConfig')
-                    ? buttonStyles.disabled
-                    : buttonStyles.success
-                }`}
-              >
-                {isLoading('saveConfig') ? '保存中…' : '保存'}
-              </button>
-            </div>
-          </div>
         </div>
       </div>
 
@@ -280,7 +380,7 @@ const ConfigFileComponent = ({
         timer={alertModal.timer}
         showConfirm={alertModal.showConfirm}
       />
-    </div>
+    </form>
   );
 };
 

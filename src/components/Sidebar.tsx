@@ -27,7 +27,7 @@ import {
   readSidebarCollapsed,
   writeSidebarCollapsed,
 } from '@/lib/local-preferences';
-import { RuntimeConfig } from '@/lib/runtime-config';
+import { getCustomCategoryLabel, RuntimeConfig } from '@/lib/runtime-config';
 
 import { useRuntimeConfig } from './RuntimeConfigProvider';
 import {
@@ -123,7 +123,7 @@ function getSidebarMenuItems(runtimeConfig?: RuntimeConfig): SidebarMenuItem[] {
   if ((runtimeConfig?.CUSTOM_CATEGORIES?.length ?? 0) > 0) {
     nextItems.push({
       icon: Star,
-      label: '自定义',
+      label: getCustomCategoryLabel(runtimeConfig),
       href: '/douban?type=custom',
     });
   }

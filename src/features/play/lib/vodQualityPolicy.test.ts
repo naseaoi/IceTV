@@ -5,7 +5,12 @@ describe('VOD quality policy', () => {
     expect(resolveVodQualityPolicy('xigua')).toEqual({
       defaultHeight: 720,
       autoStartHeight: 720,
+      autoMinHeight: 480,
+      autoMaxHeight: 720,
+      emergencyBufferSeconds: 6,
+      recoveryBufferSeconds: 25,
       allowFailureDowngrade: true,
+      preserveManualSelectionOnFailure: true,
     });
   });
 

@@ -61,7 +61,7 @@ describe('AuthenticatedRoute', () => {
 
   it('服务端确认的有效会话首次渲染就挂载受保护内容', () => {
     mockUseAuthSession.mockReturnValue({
-      session: { status: 'authenticated', username: 'alice' },
+      session: { status: 'authenticated', username: 'alice', role: 'user' },
       isRefreshing: false,
       refreshSession: mockRefreshSession,
     });
@@ -74,6 +74,52 @@ describe('AuthenticatedRoute', () => {
 
     expect(screen.getByText('直播业务内容')).toBeInTheDocument();
     expect(screen.queryByText('正在验证登录状态')).not.toBeInTheDocument();
+  });
+
+  it('普通用户不能挂载管理员页面', () => {
+    mockUseAuthSession.mockReturnValue({
+      session: { status: 'authenticated', username: 'alice', role: 'user' },
+      isRefreshing: false,
+      refreshSession: mockRefreshSession,
+    });
+
+    render(
+      <AuthenticatedRoute
+        activePath='/admin'
+        forbiddenMessage='当前账号没有后台访问权限。'
+        message='请先登录管理员账号后再进入后台。'
+        requiredRole='admin'
+      >
+        <div>后台业务内容</div>
+      </AuthenticatedRoute>,
+    );
+
+    expect(screen.getByText('权限不足')).toBeInTheDocument();
+    expect(screen.getByText('当前账号没有后台访问权限。')).toBeInTheDocument();
+    expect(screen.queryByText('后台业务内容')).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole('link', { name: '前往登录' }),
+    ).not.toBeInTheDocument();
+  });
+
+  it.each(['admin', 'owner'] as const)('%s 可以挂载管理员页面', (role) => {
+    mockUseAuthSession.mockReturnValue({
+      session: { status: 'authenticated', username: 'alice', role },
+      isRefreshing: false,
+      refreshSession: mockRefreshSession,
+    });
+
+    render(
+      <AuthenticatedRoute
+        activePath='/admin'
+        message='请先登录管理员账号后再进入后台。'
+        requiredRole='admin'
+      >
+        <div>后台业务内容</div>
+      </AuthenticatedRoute>,
+    );
+
+    expect(screen.getByText('后台业务内容')).toBeInTheDocument();
   });
 
   it('只在用户主动重试时显示重新验证状态', () => {

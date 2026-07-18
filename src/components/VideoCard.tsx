@@ -824,6 +824,7 @@ const VideoCard = forwardRef<VideoCardHandle, VideoCardProps>(
             origin={origin}
             from={from}
             config={config}
+            sourceName={source_name}
             year={actualYear}
             rate={rate}
             episodes={actualEpisodes}
@@ -838,13 +839,7 @@ const VideoCard = forwardRef<VideoCardHandle, VideoCardProps>(
             onToggleFavorite={handleToggleFavorite}
           />
 
-          <VideoCardTitle
-            title={actualTitle}
-            sourceName={source_name}
-            origin={origin}
-            config={config}
-            reserveSourceSpace={from === 'search'}
-          />
+          <VideoCardTitle title={actualTitle} />
         </div>
       </>
     );

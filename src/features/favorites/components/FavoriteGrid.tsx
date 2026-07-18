@@ -15,7 +15,10 @@ export function FavoriteGrid({
 }) {
   if (items.length === 0) {
     return (
-      <div className='py-8 text-center text-gray-500 dark:text-gray-400'>
+      <div
+        data-favorite-empty-state
+        className='py-5 text-center text-gray-500 dark:text-gray-400'
+      >
         {emptyText}
       </div>
     );

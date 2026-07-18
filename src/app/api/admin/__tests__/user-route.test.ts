@@ -94,6 +94,13 @@ if (!(globalThis as any).Response) {
 }
 
 function createAdminConfig() {
+  const users: Array<{
+    username: string;
+    role: 'owner' | 'admin' | 'user';
+    banned?: boolean;
+    tags?: string[];
+  }> = [];
+
   return {
     ConfigSubscribtion: { URL: '', AutoUpdate: false, LastCheck: '' },
     ConfigFile: '',
@@ -117,7 +124,7 @@ function createAdminConfig() {
       FluidSearch: true,
     },
     UserConfig: {
-      Users: [],
+      Users: users,
       Tags: [],
       OpenRegister: false,
     },
@@ -145,6 +152,7 @@ describe('admin user route', () => {
       username: 'owner-1',
       isOwner: true,
       isAdmin: true,
+      role: 'owner',
     });
     (getConfig as jest.Mock).mockResolvedValue(createAdminConfig());
     (saveConfig as jest.Mock).mockResolvedValue(createAdminConfig());
@@ -217,5 +225,79 @@ describe('admin user route', () => {
     );
 
     expect(response.status).toBe(409);
+  });
+
+  it.each(['updateUserApis', 'updateUserGroups'])(
+    'rejects admin %s on owner account',
+    async (action) => {
+      const POST = getHandler();
+      (requireAdmin as jest.Mock).mockResolvedValue({
+        username: 'admin-1',
+        isOwner: false,
+        isAdmin: true,
+        role: 'admin',
+      });
+      const adminConfig = createAdminConfig();
+      adminConfig.UserConfig.Users.push({
+        username: 'owner-1',
+        role: 'owner',
+        banned: false,
+      });
+      (getConfig as jest.Mock).mockResolvedValue(adminConfig);
+
+      const response = await POST(
+        createRequest({
+          action,
+          targetUsername: 'owner-1',
+          enabledApis: ['source-a'],
+          userGroups: ['vip'],
+        }),
+      );
+
+      expect(response.status).toBe(403);
+      await expect(response.json()).resolves.toEqual({
+        error: '仅站长可操作站长账号',
+      });
+      expect(saveConfig).not.toHaveBeenCalled();
+    },
+  );
+
+  it('rejects admin batch group update containing owner account', async () => {
+    const POST = getHandler();
+    (requireAdmin as jest.Mock).mockResolvedValue({
+      username: 'admin-1',
+      isOwner: false,
+      isAdmin: true,
+      role: 'admin',
+    });
+    const adminConfig = createAdminConfig();
+    adminConfig.UserConfig.Users.push(
+      {
+        username: 'owner-1',
+        role: 'owner',
+        banned: false,
+      },
+      {
+        username: 'user-1',
+        role: 'user',
+        banned: false,
+      },
+    );
+    (getConfig as jest.Mock).mockResolvedValue(adminConfig);
+
+    const response = await POST(
+      createRequest({
+        action: 'batchUpdateUserGroups',
+        usernames: ['user-1', 'owner-1'],
+        userGroups: ['vip'],
+      }),
+    );
+
+    expect(response.status).toBe(403);
+    await expect(response.json()).resolves.toEqual({
+      error: '管理员无法操作站长 owner-1',
+    });
+    expect(adminConfig.UserConfig.Users[1].tags).toBeUndefined();
+    expect(saveConfig).not.toHaveBeenCalled();
   });
 });

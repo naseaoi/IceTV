@@ -12,20 +12,26 @@ interface AdminSelectOption {
 
 interface AdminSelectProps {
   id?: string;
+  ariaLabel?: string;
   value: string;
   onChange: (value: string) => void;
   options: AdminSelectOption[];
   placeholder?: string;
   className?: string;
+  disabled?: boolean;
+  showSelectedIcon?: boolean;
 }
 
 export default function AdminSelect({
   id,
+  ariaLabel,
   value,
   onChange,
   options,
   placeholder = '请选择',
   className = '',
+  disabled = false,
+  showSelectedIcon = true,
 }: AdminSelectProps) {
   const [isOpen, setIsOpen] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -51,8 +57,16 @@ export default function AdminSelect({
       <button
         id={id}
         type='button'
-        onClick={() => setIsOpen(!isOpen)}
-        className='w-full rounded-lg border border-gray-300 bg-white px-3 py-2.5 pr-10 text-left text-sm text-gray-900 shadow-sm transition-all duration-200 hover:border-gray-400 focus:border-green-500 focus:outline-none focus:ring-2 focus:ring-green-500 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100 dark:hover:border-gray-500'
+        aria-label={ariaLabel}
+        aria-haspopup='listbox'
+        aria-expanded={isOpen}
+        disabled={disabled}
+        onClick={() => setIsOpen((open) => !open)}
+        className={`w-full rounded-lg border border-gray-300 bg-white px-3 py-2.5 pr-10 text-left text-sm text-gray-900 shadow-sm transition-all duration-200 focus:border-green-500 focus:outline-none focus:ring-2 focus:ring-green-500 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100 ${
+          disabled
+            ? 'cursor-not-allowed opacity-50'
+            : 'cursor-pointer hover:border-gray-400 dark:hover:border-gray-500'
+        }`}
       >
         <span
           className={selectedOption ? '' : 'text-gray-400 dark:text-gray-500'}
@@ -67,14 +81,19 @@ export default function AdminSelect({
         />
       </div>
 
-      {isOpen && (
-        <div className='absolute z-50 mt-1 max-h-60 w-full overflow-auto rounded-lg border border-gray-300 bg-white shadow-lg dark:border-gray-600 dark:bg-gray-800'>
+      {isOpen && !disabled && (
+        <div
+          role='listbox'
+          className='absolute z-50 mt-1 max-h-60 w-full overflow-auto rounded-lg border border-gray-300 bg-white shadow-lg dark:border-gray-600 dark:bg-gray-800'
+        >
           {options.map((opt) => {
             const isSelected = opt.value === value;
             return (
               <button
                 key={opt.value}
                 type='button'
+                role='option'
+                aria-selected={isSelected}
                 disabled={opt.disabled}
                 title={opt.disabledReason}
                 onClick={() => {
@@ -100,7 +119,7 @@ export default function AdminSelect({
                     </span>
                   )}
                 </span>
-                {isSelected && (
+                {isSelected && showSelectedIcon && (
                   <Check className='ml-2 h-4 w-4 flex-shrink-0 text-green-600 dark:text-green-400' />
                 )}
               </button>

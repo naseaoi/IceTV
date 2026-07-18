@@ -12,5 +12,8 @@ describe('MobileContinueCardSkeleton', () => {
     expect(skeleton).toHaveClass('h-[120px]', 'w-[232px]', 'rounded-xl');
     expect(poster).toBeInTheDocument();
     expect(progress).toBeInTheDocument();
+    expect(
+      skeleton?.querySelector('[data-source-badge-skeleton]'),
+    ).not.toBeInTheDocument();
   });
 });

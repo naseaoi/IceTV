@@ -8,6 +8,7 @@ import HomePosterCardSkeleton, {
 } from '@/components/HomePosterCardSkeleton';
 import ScrollableRow from '@/components/ScrollableRow';
 import VideoCard from '@/components/VideoCard';
+import { FAVORITE_PREVIEW_EMPTY_HEIGHT_CLASS } from '@/features/favorites/lib/card-layout';
 import type { FavoriteItem } from '@/features/favorites/types';
 
 const FAVORITE_PREVIEW_LIMIT = 20;
@@ -44,7 +45,7 @@ export function FavoritePreviewSection({
       {loading && skeletonCount > 0 && items.length === 0 ? (
         <ScrollableRow>
           {Array.from({ length: skeletonCount }).map((_, index) => (
-            <HomePosterCardSkeleton key={index} withSubtitle />
+            <HomePosterCardSkeleton key={index} />
           ))}
         </ScrollableRow>
       ) : previewItems.length > 0 ? (
@@ -63,7 +64,10 @@ export function FavoritePreviewSection({
         </ScrollableRow>
       ) : (
         <div className='pb-3 sm:pb-6'>
-          <div className='flex min-h-[198px] w-full items-center justify-center rounded-lg border border-dashed border-gray-200 bg-gray-50 text-sm text-gray-500 dark:border-gray-700 dark:bg-gray-900/40 dark:text-gray-400 sm:min-h-[324px]'>
+          <div
+            data-favorite-empty-state
+            className={`flex w-full items-center justify-center rounded-lg border border-dashed border-gray-200 bg-gray-50 text-sm text-gray-500 dark:border-gray-700 dark:bg-gray-900/40 dark:text-gray-400 ${FAVORITE_PREVIEW_EMPTY_HEIGHT_CLASS}`}
+          >
             暂无收藏内容
           </div>
         </div>

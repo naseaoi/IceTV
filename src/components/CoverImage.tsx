@@ -11,6 +11,7 @@ import React, {
   useState,
 } from 'react';
 
+import { ImageLoadingBackdrop } from '@/components/ImagePlaceholder';
 import NoImageCover from '@/components/NoImageCover';
 import { useRuntimeConfig } from '@/components/RuntimeConfigProvider';
 import {
@@ -29,62 +30,8 @@ import {
 } from '@/lib/source-cover-proxy';
 import { processImageUrl } from '@/lib/utils';
 
-const PLACEHOLDER_COLORS = [
-  '#94a3b8',
-  '#7c83fd',
-  '#60a5fa',
-  '#34d399',
-  '#f59e0b',
-  '#f472b6',
-  '#818cf8',
-  '#22c55e',
-];
 const useIsomorphicLayoutEffect =
   typeof window === 'undefined' ? useEffect : useLayoutEffect;
-
-function pickPlaceholderColor(seed: string): string {
-  if (!seed) {
-    return PLACEHOLDER_COLORS[0];
-  }
-
-  let hash = 0;
-  for (let index = 0; index < seed.length; index += 1) {
-    hash = (hash * 33 + seed.charCodeAt(index)) >>> 0;
-  }
-
-  return PLACEHOLDER_COLORS[hash % PLACEHOLDER_COLORS.length];
-}
-
-function withAlpha(hex: string, alpha: number): string {
-  const normalized = hex.replace('#', '');
-  if (!/^[0-9a-fA-F]{6}$/.test(normalized)) {
-    return `rgba(148, 163, 184, ${alpha})`;
-  }
-
-  const r = parseInt(normalized.slice(0, 2), 16);
-  const g = parseInt(normalized.slice(2, 4), 16);
-  const b = parseInt(normalized.slice(4, 6), 16);
-  return `rgba(${r}, ${g}, ${b}, ${alpha})`;
-}
-
-function buildBlurDataURL(color: string): string {
-  const svg = `
-    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 48" preserveAspectRatio="none">
-      <defs>
-        <linearGradient id="g" x1="0" y1="0" x2="1" y2="1">
-          <stop offset="0%" stop-color="${withAlpha(color, 0.92)}" />
-          <stop offset="55%" stop-color="${withAlpha(color, 0.58)}" />
-          <stop offset="100%" stop-color="${withAlpha(color, 0.3)}" />
-        </linearGradient>
-      </defs>
-      <rect width="32" height="48" fill="url(#g)" />
-      <circle cx="7" cy="10" r="10" fill="${withAlpha('#ffffff', 0.18)}" />
-      <circle cx="28" cy="38" r="13" fill="${withAlpha('#000000', 0.08)}" />
-    </svg>
-  `;
-
-  return `data:image/svg+xml;charset=UTF-8,${encodeURIComponent(svg)}`;
-}
 
 function needsImageUnoptimized(
   url: string,
@@ -112,7 +59,6 @@ interface CoverImageProps {
   quality?: number;
   fit?: 'cover' | 'contain';
   aspectRatio?: string;
-  placeholderColor?: string;
   fallbackLabel?: string;
 }
 
@@ -123,13 +69,14 @@ const CoverImage: React.FC<CoverImageProps> = memo(function CoverImage({
   sizes = '(max-width: 640px) 96px, 180px',
   quality = 72,
   fit = 'cover',
-  placeholderColor,
   fallbackLabel = '无封面',
 }) {
   const isEmpty = !src || src.trim() === '';
   const releaseSlotRef = useRef<(() => void) | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
+  const loadingBackdropRef = useRef<HTMLDivElement>(null);
   const imageRef = useRef<HTMLImageElement>(null);
+  const shouldAnimateRevealRef = useRef(true);
   const runtimeConfig = useRuntimeConfig();
   const [useDirectFallback, setUseDirectFallback] = useState(false);
 
@@ -157,32 +104,16 @@ const CoverImage: React.FC<CoverImageProps> = memo(function CoverImage({
   const loadImmediately = !isEmpty && priority;
   const [isNearViewport, setIsNearViewport] = useState(loadImmediately);
   const [loaded, setLoaded] = useState(false);
+  const [knownCached, setKnownCached] = useState(false);
   const [hasError, setHasError] = useState(false);
   const [slotGranted, setSlotGranted] = useState(loadImmediately);
 
-  const resolvedPlaceholderColor = useMemo(() => {
-    if (placeholderColor && /^#[0-9a-fA-F]{6}$/.test(placeholderColor)) {
-      return placeholderColor;
-    }
-    return pickPlaceholderColor(src || alt);
-  }, [alt, placeholderColor, src]);
-
-  const blurDataURL = useMemo(
-    () => buildBlurDataURL(resolvedPlaceholderColor),
-    [resolvedPlaceholderColor],
-  );
-
-  const loadingBackdropStyle = useMemo(
-    () =>
-      ({
-        background: `linear-gradient(135deg, ${withAlpha(resolvedPlaceholderColor, 0.28)} 0%, ${withAlpha(resolvedPlaceholderColor, 0.14)} 100%)`,
-      }) as React.CSSProperties,
-    [resolvedPlaceholderColor],
-  );
-
   useIsomorphicLayoutEffect(() => {
+    shouldAnimateRevealRef.current = true;
     setHasError(false);
     setUseDirectFallback(false);
+    setLoaded(false);
+    setKnownCached(false);
     releaseSlotRef.current?.();
     releaseSlotRef.current = null;
   }, [runtimeConfig.SOURCE_COVER_PROXY_MODE, src]);
@@ -191,11 +122,13 @@ const CoverImage: React.FC<CoverImageProps> = memo(function CoverImage({
     if (isEmpty) return;
 
     const isCached = isCoverImageCached(cacheKeys);
-    setLoaded(isCached);
+    setKnownCached(isCached);
+    setLoaded(false);
     setSlotGranted(isCached || priority);
     setIsNearViewport(isCached || priority);
 
     if (isCached) {
+      shouldAnimateRevealRef.current = false;
       releaseSlotRef.current?.();
       releaseSlotRef.current = null;
     }
@@ -250,6 +183,32 @@ const CoverImage: React.FC<CoverImageProps> = memo(function CoverImage({
   }, [cacheKeys, loaded, hasError, isEmpty]);
 
   const showFallback = isEmpty || hasError;
+
+  useIsomorphicLayoutEffect(() => {
+    if (!loaded || showFallback || !shouldAnimateRevealRef.current) {
+      return;
+    }
+
+    const backdrop = loadingBackdropRef.current;
+    const image = imageRef.current;
+    const options: KeyframeAnimationOptions = {
+      duration: 500,
+      easing: 'cubic-bezier(0.16, 1, 0.3, 1)',
+      fill: 'both',
+    };
+    const animations: Animation[] = [];
+
+    if (typeof backdrop?.animate === 'function') {
+      animations.push(
+        backdrop.animate([{ opacity: 1 }, { opacity: 0 }], options),
+      );
+    }
+    if (typeof image?.animate === 'function') {
+      animations.push(image.animate([{ opacity: 0 }, { opacity: 1 }], options));
+    }
+
+    return () => animations.forEach((animation) => animation.cancel());
+  }, [loaded, processed, showFallback]);
 
   const handleLoad = useCallback(() => {
     setLoaded(true);
@@ -342,14 +301,15 @@ const CoverImage: React.FC<CoverImageProps> = memo(function CoverImage({
 
   return (
     <div ref={containerRef} className='absolute inset-0'>
-      {!loaded && (
-        <div
-          className='pointer-events-none absolute inset-0 z-10 overflow-hidden rounded-lg'
-          style={loadingBackdropStyle}
-        >
-          <div className='via-white/8 absolute inset-0 animate-shimmer bg-gradient-to-r from-white/0 to-white/0 dark:from-white/0 dark:via-white/5 dark:to-white/0' />
-        </div>
-      )}
+      <ImageLoadingBackdrop
+        ref={loadingBackdropRef}
+        active={!loaded}
+        data-cover-loading-backdrop
+        data-cover-state={loaded ? 'revealed' : 'loading'}
+        className={`pointer-events-none absolute inset-0 z-[100] rounded-lg ${
+          loaded ? 'opacity-0' : 'opacity-100'
+        }`}
+      />
       {slotGranted && (
         <Image
           key={processed}
@@ -363,11 +323,9 @@ const CoverImage: React.FC<CoverImageProps> = memo(function CoverImage({
           preload={priority}
           fetchPriority={priority ? 'high' : undefined}
           unoptimized={needsUnoptimized}
-          placeholder='blur'
-          blurDataURL={blurDataURL}
-          className={`${fit === 'contain' ? 'object-contain' : 'object-cover'} transition-opacity duration-200 ${loaded ? 'opacity-100' : 'opacity-0'}`}
+          className={`${fit === 'contain' ? 'object-contain' : 'object-cover'} ${loaded ? 'opacity-100' : 'opacity-0'}`}
           referrerPolicy='no-referrer'
-          loading={priority || loaded ? 'eager' : 'lazy'}
+          loading={priority || knownCached || loaded ? 'eager' : 'lazy'}
           onLoad={handleLoad}
           onError={handleError}
           style={

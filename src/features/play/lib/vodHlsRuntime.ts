@@ -6,6 +6,7 @@ import type {
   CurrentSourceVideoInfoContext,
 } from '@/features/play/hooks/artPlayerTypes';
 import type { PlaybackRequestMode } from '@/features/play/hooks/usePlayPageState';
+import { shouldFilterAdsOnClient } from '@/features/play/lib/ad-filter-strategy-registry';
 import { resolveSourceSwitchCurrentPlayTime } from '@/features/play/lib/episodeResumePolicy';
 import {
   PLAYBACK_STALL_CONFIRMATION_DELAY_MS,
@@ -20,11 +21,16 @@ import {
   ConsecutiveRouteFailureTracker,
   SERVER_ROUTE_FAILURE_THRESHOLD,
 } from '@/features/play/lib/vodAutoRoutePolicy';
+import {
+  createVodFragmentCacheRecoveryLoader,
+  shouldRecoverVodFragmentHttpCache,
+} from '@/features/play/lib/vodFragmentCacheRecovery';
 import { createVodHlsQualityController } from '@/features/play/lib/vodHlsQualityController';
 import {
   buildVodProxyUrl,
   buildVodSegmentProxyUrl,
 } from '@/features/play/lib/vodProxyUrl';
+import { createVodSegmentPrebufferController } from '@/features/play/lib/vodSegmentPrebuffer';
 import {
   getVodHlsBufferOverrides,
   getVodHlsLoadingOverrides,
@@ -128,9 +134,23 @@ export function createVodM3u8Loader({
       ...sourceBufferOverrides,
     };
     const currentBlockAd = blockAdEnabledRef.current;
+    const useClientAdFilter =
+      currentBlockAd && shouldFilterAdsOnClient(sourceKey);
+    const fragmentHttpCacheRecovery =
+      shouldRecoverVodFragmentHttpCache(sourceKey);
+    const baseLoader = useClientAdFilter
+      ? adBlockingHlsLoader
+      : (Hls.DefaultConfig.loader as HlsLoaderConstructor);
+    const sourceLoader = createVodFragmentCacheRecoveryLoader(
+      baseLoader,
+      sourceKey,
+    );
     const existingHls = managedVideo.hls;
     const canReuseHls =
-      !!existingHls && managedVideo.__icetvBlockAd === currentBlockAd;
+      !!existingHls &&
+      managedVideo.__icetvClientAdFilter === useClientAdFilter &&
+      managedVideo.__icetvFragmentHttpCacheRecovery ===
+        fragmentHttpCacheRecovery;
 
     let hls: any;
     if (canReuseHls) {
@@ -138,6 +158,7 @@ export function createVodM3u8Loader({
       hls.config.maxBufferLength = hlsConfig.maxBufferLength;
       hls.config.maxMaxBufferLength = hlsConfig.maxMaxBufferLength;
       hls.config.maxBufferSize = hlsConfig.maxBufferSize;
+      hls.config.loader = sourceLoader;
       hls.config.manifestLoadingTimeOut =
         sourceLoadingOverrides.manifestLoadingTimeOut ?? 10000;
       hls.config.levelLoadingTimeOut =
@@ -146,6 +167,15 @@ export function createVodM3u8Loader({
       if (oldHandlers) {
         hls.off(Hls.Events.ERROR, oldHandlers.onError);
         hls.off(Hls.Events.FRAG_LOADED, oldHandlers.onFragLoaded);
+        if (oldHandlers.onFragLoading) {
+          hls.off(Hls.Events.FRAG_LOADING, oldHandlers.onFragLoading);
+        }
+        if (oldHandlers.onFragBuffered) {
+          hls.off(Hls.Events.FRAG_BUFFERED, oldHandlers.onFragBuffered);
+        }
+        if (oldHandlers.onLevelLoaded) {
+          hls.off(Hls.Events.LEVEL_LOADED, oldHandlers.onLevelLoaded);
+        }
         if (oldHandlers.onManifestParsed) {
           hls.off(Hls.Events.MANIFEST_PARSED, oldHandlers.onManifestParsed);
         }
@@ -165,12 +195,11 @@ export function createVodM3u8Loader({
         fragLoadingTimeOut: 30000,
         fragLoadingMaxRetry: 6,
         fragLoadingRetryDelay: 1000,
-        loader: currentBlockAd
-          ? (adBlockingHlsLoader as unknown as typeof Hls.DefaultConfig.loader)
-          : Hls.DefaultConfig.loader,
+        loader: sourceLoader as typeof Hls.DefaultConfig.loader,
       });
     }
-    managedVideo.__icetvBlockAd = currentBlockAd;
+    managedVideo.__icetvClientAdFilter = useClientAdFilter;
+    managedVideo.__icetvFragmentHttpCacheRecovery = fragmentHttpCacheRecovery;
 
     const buildTargetUrl = (rawUrl: string, useServerProxy: boolean) =>
       buildVodProxyUrl({
@@ -183,6 +212,11 @@ export function createVodM3u8Loader({
     let currentUseServerProxy = isServerProxy(sourceKey, url);
     let targetUrl = buildTargetUrl(url, currentUseServerProxy);
     managedVideo.__icetvUsingServerProxy = currentUseServerProxy;
+    const segmentPrebufferController = createVodSegmentPrebufferController({
+      getCurrentTime: () => video.currentTime || 0,
+      isServerProxy: () => currentUseServerProxy,
+      sourceKey,
+    });
     const browserFailureTracker = new ConsecutiveRouteFailureTracker(
       BROWSER_ROUTE_FAILURE_THRESHOLD,
     );
@@ -237,6 +271,7 @@ export function createVodM3u8Loader({
     const qualityController = createVodHlsQualityController({
       sourceKey,
       hls,
+      video,
       artPlayerRef,
       setRealtimeLoadSpeed,
     });
@@ -299,6 +334,7 @@ export function createVodM3u8Loader({
       });
       reportRouteStat(false);
       setRealtimeLoadSpeed('直连失败，切换代理...');
+      segmentPrebufferController.dispose();
 
       try {
         if (sourceKey) {
@@ -541,7 +577,6 @@ export function createVodM3u8Loader({
     const onPlaying = () => {
       clearStallConfirmation();
     };
-
     const tryReportVideoInfo = () => {
       if (videoInfoReported || !firstFragSpeed) return;
       const w = video.videoWidth;
@@ -563,6 +598,7 @@ export function createVodM3u8Loader({
       cancelProxyProbe();
       managedVideo.__icetvSwitchToServerProxy = null;
       qualityController.dispose();
+      segmentPrebufferController.dispose();
       clearStallConfirmation();
       if (speedFallbackTimer) {
         clearTimeout(speedFallbackTimer);
@@ -705,6 +741,7 @@ export function createVodM3u8Loader({
 
     const onHlsFragLoaded = function (_: unknown, data: any) {
       qualityController.handleFragmentLoaded();
+      segmentPrebufferController.handlePlaybackProgress();
       if (currentUseServerProxy) {
         serverFailureTracker.reset();
       } else {
@@ -735,8 +772,33 @@ export function createVodM3u8Loader({
       }
     };
 
+    const onHlsFragLoading = function (_: unknown, data: any) {
+      const levelIndex = Number.isInteger(data?.frag?.level)
+        ? Number(data.frag.level)
+        : null;
+      qualityController.handleFragmentLoading(levelIndex);
+    };
+
+    const onHlsFragBuffered = function () {
+      qualityController.handleBufferUpdated();
+    };
+
+    const onHlsLevelLoaded = function (_: unknown, data: any) {
+      const levelIndex = Number.isInteger(data?.level)
+        ? Number(data.level)
+        : -1;
+      const levelHeight = Number(hls.levels?.[levelIndex]?.height);
+      segmentPrebufferController.handleLevelLoaded({
+        fragments: data?.details?.fragments,
+        levelHeight: Number.isFinite(levelHeight) ? levelHeight : undefined,
+      });
+    };
+
     hls.on(Hls.Events.ERROR, onHlsError);
     hls.on(Hls.Events.FRAG_LOADED, onHlsFragLoaded);
+    hls.on(Hls.Events.FRAG_LOADING, onHlsFragLoading);
+    hls.on(Hls.Events.FRAG_BUFFERED, onHlsFragBuffered);
+    hls.on(Hls.Events.LEVEL_LOADED, onHlsLevelLoaded);
     const onManifestParsed = () => {
       qualityController.handleManifestParsed();
     };
@@ -744,6 +806,9 @@ export function createVodM3u8Loader({
     managedVideo.__icetvHlsHandlers = {
       onError: onHlsError,
       onFragLoaded: onHlsFragLoaded,
+      onFragLoading: onHlsFragLoading,
+      onFragBuffered: onHlsFragBuffered,
+      onLevelLoaded: onHlsLevelLoaded,
       onManifestParsed,
     };
 

@@ -70,4 +70,52 @@ describe('useAdminSourceActions', () => {
 
     expect(mockedShowError).toHaveBeenCalledWith('save failed', showAlert);
   });
+
+  it('serializes mutations and runs the post-refresh callback', async () => {
+    let resolveFirstPost: (() => void) | undefined;
+    mockedAdminPost
+      .mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            resolveFirstPost = () => resolve({} as never);
+          }),
+      )
+      .mockResolvedValueOnce({} as never);
+    const refreshConfig = jest.fn().mockResolvedValue(undefined);
+    const afterRefresh = jest.fn().mockResolvedValue(undefined);
+
+    const { result } = renderHook(() =>
+      useAdminSourceActions({
+        endpoint: '/api/admin/category',
+        refreshConfig,
+        afterRefresh,
+        showAlert: jest.fn(),
+      }),
+    );
+
+    let firstAction: Promise<void>;
+    let secondAction: Promise<void>;
+    act(() => {
+      firstAction = result.current.runAction({ action: 'disable' });
+      secondAction = result.current.runAction({ action: 'delete' });
+    });
+
+    expect(mockedAdminPost).toHaveBeenCalledTimes(0);
+    await act(async () => {
+      await Promise.resolve();
+    });
+    expect(mockedAdminPost).toHaveBeenCalledTimes(1);
+
+    await act(async () => {
+      resolveFirstPost?.();
+      await Promise.all([firstAction, secondAction]);
+    });
+
+    expect(mockedAdminPost.mock.calls.map((call) => call[1])).toEqual([
+      { action: 'disable' },
+      { action: 'delete' },
+    ]);
+    expect(refreshConfig).toHaveBeenCalledTimes(2);
+    expect(afterRefresh).toHaveBeenCalledTimes(2);
+  });
 });

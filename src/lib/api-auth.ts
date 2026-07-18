@@ -25,6 +25,7 @@ type GuardFailure = {
 type ActiveUserInfo = {
   username: string;
   isOwner: boolean;
+  role: 'owner' | 'admin' | 'user';
 };
 
 export type RequireActiveUserResult = ActiveUserInfo | GuardFailure;
@@ -127,6 +128,7 @@ export async function requireActiveUserFromAuthInfo(
     return {
       username: cookieUsername,
       isOwner,
+      role: 'owner',
     };
   }
 
@@ -161,6 +163,7 @@ export async function requireActiveUserFromAuthInfo(
   return {
     username,
     isOwner,
+    role: user.role === 'admin' ? 'admin' : 'user',
   };
 }
 
@@ -189,20 +192,16 @@ export async function requireAdmin(
     return guardResult;
   }
 
-  if (guardResult.isOwner) {
+  if (guardResult.role === 'owner') {
     return {
       username: guardResult.username,
       isOwner: true,
       isAdmin: true,
+      role: 'owner',
     };
   }
 
-  const config = await getConfigForRead();
-  const user = config.UserConfig.Users.find(
-    (entry) => entry.username === guardResult.username,
-  );
-
-  if (!user || user.role !== 'admin' || user.banned) {
+  if (guardResult.role !== 'admin') {
     return {
       response: NextResponse.json(
         { error: forbiddenMessage },
@@ -215,6 +214,7 @@ export async function requireAdmin(
     username: guardResult.username,
     isOwner: false,
     isAdmin: true,
+    role: 'admin',
   };
 }
 

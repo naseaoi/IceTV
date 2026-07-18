@@ -26,6 +26,7 @@ src/
 - 其他本地偏好走 `src/lib/local-preferences.ts`
 - Bangumi 设置的读取、写入、重置走 `src/lib/bangumi-source.ts`
 - Douban 数据与图片代理设置的读取、写入、重置走 `src/lib/douban-source.ts`
+- 播放器快捷键的读取、写入与按键匹配走 `src/lib/player-shortcuts.ts`
 
 新增设置时先补 helper，再让设置面板和消费方统一接入；不要各自手写 key 和默认值。
 
@@ -47,6 +48,7 @@ Guard 选择：
 
 - 根布局通过 `src/lib/auth-session.server.ts` 校验 Cookie，并把初始会话注入 `AuthProvider`
 - 客户端统一通过 `AuthProvider` / `useAuthSession()` 消费会话；`AuthenticatedRoute` 只负责展示门禁
+- 受保护路由在对应 `layout.tsx` 挂载 `AuthenticatedRoute`，确保门禁先于 `loading.tsx` 和页面内 `Suspense`
 - `/api/auth/session` 仅用于显式重新验证，首次渲染和普通路由切换不调用
 - 登录状态失效时派发 `AUTH_SESSION_LOST_EVENT`，由 `AuthProvider` 统一更新
 
@@ -108,6 +110,17 @@ Guard 选择：
 - 画质控制：`src/features/play/lib/vodHlsQualityController.ts`
 - 默认画质与降级能力：`src/features/play/lib/vodQualityPolicy.ts`
 - 画质偏好保存：`src/lib/local-preferences.ts`
+- 键盘快捷键：动作与键位定义在 `src/lib/player-shortcuts.ts`，执行在 `src/hooks/usePlayerKeyboard.ts`，配置弹窗为 `src/components/PlayerShortcutsModal.tsx`；新增动作时依次补齐三处，不要在页面单独监听 keydown
+
+去广告扩展：
+
+- 源站策略注册：`src/features/play/lib/ad-filter-strategy-registry.ts`
+- 清单解析与重建：`src/features/play/lib/ad-filter-manifest.ts`
+- 服务端检测执行：`src/features/play/lib/ad-segment-detector.ts`
+- 新源优先组合现有 signal；只有现有 signal 无法表达时才新增检测器
+- 每个服务端策略必须设置独立 `id` 和 `version`，规则行为变化时递增 `version`
+- 新增或调整策略时补对应源站 fixture，验证广告删除、正片保留和时间轴边界
+- 服务端策略源不再运行客户端通用过滤，避免同一清单被二次重建
 
 ## 逐集解析型源站
 

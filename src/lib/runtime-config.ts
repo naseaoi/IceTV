@@ -58,6 +58,14 @@ export const DEFAULT_RUNTIME_CONFIG: RuntimeConfig = {
   SOURCE_COVER_PROXY_MODE: 'auto',
 };
 
+export function getCustomCategoryLabel(runtimeConfig?: RuntimeConfig): string {
+  return (
+    runtimeConfig?.CUSTOM_CATEGORIES.find((category) =>
+      category.name.trim(),
+    )?.name.trim() || '自定义'
+  );
+}
+
 export type ServerConfigPayload = {
   SiteName?: string;
   SiteIcon?: string;

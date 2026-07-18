@@ -56,6 +56,8 @@ describe('DataMigration', () => {
       target: { value: 'strong-password' },
     });
     fireEvent.click(screen.getByRole('button', { name: /导入数据/ }));
+    expect(global.fetch).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole('button', { name: '确认导入' }));
 
     expect(await screen.findByText('导入成功')).toBeInTheDocument();
     expect(

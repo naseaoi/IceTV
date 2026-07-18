@@ -144,6 +144,31 @@ html.dark body {
   display: none; /* Chrome, Safari, Opera */
 }
 
+/* 局部恢复可见滚动条（覆盖全局隐藏） */
+.scrollbar-visible {
+  -ms-overflow-style: auto;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(107, 114, 128, 0.5) transparent;
+}
+
+.scrollbar-visible::-webkit-scrollbar {
+  display: block;
+  width: 6px;
+}
+
+.scrollbar-visible::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.scrollbar-visible::-webkit-scrollbar-thumb {
+  background: rgba(107, 114, 128, 0.5);
+  border-radius: 3px;
+}
+
+.scrollbar-visible::-webkit-scrollbar-thumb:hover {
+  background: rgba(107, 114, 128, 0.8);
+}
+
 /* View Transitions API 动画 —— 允许动画期间交互 */
 ::view-transition {
   pointer-events: none;
@@ -274,27 +299,25 @@ div[data-media-provider] video {
 
 /* --- 播放器容器圆角 --- */
 .art-video-player {
-  border-radius: 16px !important;
+  border-radius: 8px !important;
   overflow: hidden !important;
 }
 
 /* --- 右键菜单 --- */
 .art-contextmenus {
-  background: rgba(17, 24, 32, 0.75) !important;
-  backdrop-filter: blur(20px) saturate(180%) !important;
-  -webkit-backdrop-filter: blur(20px) saturate(180%) !important;
-  border: 1px solid rgba(255, 255, 255, 0.1) !important;
-  border-radius: 16px !important;
+  background: rgba(0, 0, 0, 0.9) !important;
+  border: 1px solid rgba(255, 255, 255, 0.08) !important;
+  border-radius: 8px !important;
   box-shadow:
-    0 25px 50px -12px rgba(0, 0, 0, 0.4),
-    0 0 0 1px rgba(255, 255, 255, 0.08) !important;
+    0 12px 32px -8px rgba(0, 0, 0, 0.5),
+    0 0 0 1px rgba(255, 255, 255, 0.05) !important;
   padding: 6px !important;
   overflow: hidden !important;
 }
 
 .art-contextmenu {
   color: #e5e7eb !important;
-  border-radius: 10px !important;
+  border-radius: 6px !important;
   padding: 8px 14px !important;
   font-size: 13px !important;
   transition: background 0.15s ease !important;
@@ -308,6 +331,11 @@ div[data-media-provider] video {
 
 .art-contextmenu a {
   color: inherit !important;
+}
+
+/* 右键菜单播放速度隐藏 3.0 档（不影响实际速率档位） */
+.art-contextmenu-playbackRate span[data-value='3'] {
+  display: none !important;
 }
 
 /* --- 底部控制栏 --- */
@@ -365,28 +393,24 @@ div[data-media-provider] video {
 
 /* 进度条时间提示 */
 .art-progress .art-progress-tip {
-  background: rgba(17, 24, 32, 0.8) !important;
-  backdrop-filter: blur(12px) !important;
-  -webkit-backdrop-filter: blur(12px) !important;
+  background: rgba(0, 0, 0, 0.9) !important;
   color: #e5e7eb !important;
-  border-radius: 8px !important;
+  border-radius: 6px !important;
   padding: 4px 10px !important;
   font-size: 12px !important;
   font-weight: 500 !important;
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2) !important;
-  border: 1px solid rgba(255, 255, 255, 0.1) !important;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3) !important;
+  border: 1px solid rgba(255, 255, 255, 0.08) !important;
 }
 
 /* --- 设置面板 --- */
 .art-settings {
-  background: rgba(17, 24, 32, 0.75) !important;
-  backdrop-filter: blur(20px) saturate(180%) !important;
-  -webkit-backdrop-filter: blur(20px) saturate(180%) !important;
-  border: 1px solid rgba(255, 255, 255, 0.1) !important;
-  border-radius: 16px !important;
+  background: rgba(0, 0, 0, 0.9) !important;
+  border: 1px solid rgba(255, 255, 255, 0.08) !important;
+  border-radius: 8px !important;
   box-shadow:
-    0 25px 50px -12px rgba(0, 0, 0, 0.4),
-    0 0 0 1px rgba(255, 255, 255, 0.08) !important;
+    0 12px 32px -8px rgba(0, 0, 0, 0.5),
+    0 0 0 1px rgba(255, 255, 255, 0.05) !important;
   padding: 8px !important;
   padding-bottom: 10px !important;
   overflow: visible !important;
@@ -395,7 +419,7 @@ div[data-media-provider] video {
 }
 
 .art-setting-item {
-  border-radius: 10px !important;
+  border-radius: 6px !important;
   padding: 10px 14px !important;
   margin-bottom: 2px !important;
   transition: background 0.15s ease !important;
@@ -456,26 +480,22 @@ div[data-media-provider] video {
 .art-notice .art-notice-inner {
   display: inline-block !important;
   width: auto !important;
-  background: rgba(17, 24, 32, 0.8) !important;
-  backdrop-filter: blur(16px) saturate(180%) !important;
-  -webkit-backdrop-filter: blur(16px) saturate(180%) !important;
-  border: 1px solid rgba(255, 255, 255, 0.1) !important;
-  border-radius: 8px !important;
+  background: rgba(0, 0, 0, 0.9) !important;
+  border: 1px solid rgba(255, 255, 255, 0.08) !important;
+  border-radius: 6px !important;
   padding: 6px 14px !important;
   color: #e5e7eb !important;
   font-size: 13px !important;
   line-height: 1.4 !important;
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2) !important;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3) !important;
 }
 
 /* --- 信息面板 --- */
 .art-info {
-  background: rgba(17, 24, 32, 0.75) !important;
-  backdrop-filter: blur(20px) !important;
-  -webkit-backdrop-filter: blur(20px) !important;
-  border: 1px solid rgba(255, 255, 255, 0.1) !important;
-  border-radius: 16px !important;
-  box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.3) !important;
+  background: rgba(0, 0, 0, 0.9) !important;
+  border: 1px solid rgba(255, 255, 255, 0.08) !important;
+  border-radius: 8px !important;
+  box-shadow: 0 12px 32px -8px rgba(0, 0, 0, 0.5) !important;
   color: #e5e7eb !important;
 }
 
@@ -486,12 +506,10 @@ div[data-media-provider] video {
 
 /* --- 锁定按钮（移动端） --- */
 .art-video-player .art-layer-lock {
-  background: rgba(17, 24, 32, 0.7) !important;
-  backdrop-filter: blur(12px) !important;
-  -webkit-backdrop-filter: blur(12px) !important;
-  border: 1px solid rgba(255, 255, 255, 0.1) !important;
+  background: rgba(0, 0, 0, 0.9) !important;
+  border: 1px solid rgba(255, 255, 255, 0.08) !important;
   border-radius: 50% !important;
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2) !important;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3) !important;
 }
 
 .art-video-player .art-layer-lock .art-icon svg {
@@ -517,20 +535,18 @@ div[data-media-provider] video {
 
 /* --- 播放速率选择器 --- */
 .art-video-player .art-selector-list {
-  background: rgba(17, 24, 32, 0.75) !important;
-  backdrop-filter: blur(20px) saturate(180%) !important;
-  -webkit-backdrop-filter: blur(20px) saturate(180%) !important;
-  border: 1px solid rgba(255, 255, 255, 0.1) !important;
-  border-radius: 12px !important;
+  background: rgba(0, 0, 0, 0.9) !important;
+  border: 1px solid rgba(255, 255, 255, 0.08) !important;
+  border-radius: 8px !important;
   box-shadow:
-    0 25px 50px -12px rgba(0, 0, 0, 0.4),
-    0 0 0 1px rgba(255, 255, 255, 0.08) !important;
+    0 12px 32px -8px rgba(0, 0, 0, 0.5),
+    0 0 0 1px rgba(255, 255, 255, 0.05) !important;
   padding: 4px !important;
   overflow: hidden !important;
 }
 
 .art-video-player .art-selector-item {
-  border-radius: 8px !important;
+  border-radius: 6px !important;
   padding: 6px 14px !important;
   color: #d1d5db !important;
   font-size: 13px !important;
@@ -545,25 +561,23 @@ div[data-media-provider] video {
 
 /* --- Tooltip --- */
 .art-video-player [data-balloon]::after {
-  background: rgba(17, 24, 32, 0.85) !important;
-  backdrop-filter: blur(12px) !important;
-  -webkit-backdrop-filter: blur(12px) !important;
+  background: rgba(0, 0, 0, 0.9) !important;
   color: #e5e7eb !important;
-  border-radius: 8px !important;
+  border-radius: 6px !important;
   font-size: 12px !important;
   font-weight: 500 !important;
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2) !important;
-  border: 1px solid rgba(255, 255, 255, 0.1) !important;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3) !important;
+  border: 1px solid rgba(255, 255, 255, 0.08) !important;
   padding: 4px 10px !important;
 }
 
 .art-video-player [data-balloon]::before {
-  border-top-color: rgba(17, 24, 32, 0.85) !important;
+  border-top-color: rgba(0, 0, 0, 0.9) !important;
 }
 
 /* --- 设置面板 switch 开关 --- */
 .art-setting-item .art-setting-switch {
-  border-radius: 12px !important;
+  border-radius: 8px !important;
 }
 
 /* --- 全屏模式下取消圆角 --- */

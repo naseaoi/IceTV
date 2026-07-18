@@ -5,10 +5,8 @@ import { CSS } from '@dnd-kit/utilities';
 import { GripVertical } from 'lucide-react';
 import type { CSSProperties } from 'react';
 
-import {
-  buttonStyles,
-  statusBadgeStyles,
-} from '@/features/admin/lib/buttonStyles';
+import { AdminStatusSwitch } from '@/features/admin/components/AdminStatusSwitch';
+import { buttonStyles } from '@/features/admin/lib/buttonStyles';
 import { LiveDataSource } from '@/features/admin/types/internal';
 
 interface SortableLiveSourceRowProps {
@@ -81,21 +79,15 @@ export function SortableLiveSourceRow({
           ? liveSource.channelNumber
           : '-'}
       </td>
-      <td className='max-w-[1rem] whitespace-nowrap px-6 py-4'>
-        <button
-          onClick={() => onToggleEnable(liveSource.key)}
-          disabled={isToggleLoading}
-          className={`rounded-full px-2 py-1 text-xs transition-colors ${
-            !liveSource.disabled
-              ? statusBadgeStyles.enabled
-              : statusBadgeStyles.disabled
-          } ${isToggleLoading ? 'cursor-not-allowed opacity-50' : 'cursor-pointer'}`}
-          title={!liveSource.disabled ? '点击禁用' : '点击启用'}
-        >
-          {!liveSource.disabled ? '启用中' : '已禁用'}
-        </button>
+      <td className='whitespace-nowrap px-6 py-4'>
+        <AdminStatusSwitch
+          enabled={!liveSource.disabled}
+          isLoading={isToggleLoading}
+          ariaLabel={`${liveSource.name}状态`}
+          onToggle={() => onToggleEnable(liveSource.key)}
+        />
       </td>
-      <td className='space-x-2 whitespace-nowrap px-6 py-4 text-right text-sm font-medium'>
+      <td className='space-x-2 whitespace-nowrap px-6 py-4 text-left text-sm font-medium'>
         <button
           onClick={() => onEdit(liveSource)}
           disabled={isEditLoading}

@@ -57,12 +57,15 @@ const PLAYER_LOCK_TOGGLE_SELECTOR = '.art-layer-lock';
 export type ManagedVideoElement = HTMLVideoElement & {
   hls?: HlsType | null;
   __icetvHlsCleanup?: (() => void) | null;
-  /** 上次创建 HLS 实例时的去广告开关状态（用于判断切集时是否可复用） */
-  __icetvBlockAd?: boolean;
+  __icetvClientAdFilter?: boolean;
+  __icetvFragmentHttpCacheRecovery?: boolean;
   /** HLS 事件处理器引用，复用时先移除旧的再绑定新的 */
   __icetvHlsHandlers?: {
     onError: (...args: unknown[]) => void;
     onFragLoaded: (...args: unknown[]) => void;
+    onFragLoading?: (...args: unknown[]) => void;
+    onFragBuffered?: (...args: unknown[]) => void;
+    onLevelLoaded?: (...args: unknown[]) => void;
     onManifestParsed?: (...args: unknown[]) => void;
   } | null;
   /** 当前会话内该 video 实际使用的流量路由，供起播成功后清理短期兜底记忆。 */

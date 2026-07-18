@@ -13,13 +13,16 @@ describe('FavoritePreviewSkeleton', () => {
     const { container } = render(<FavoritePreviewSkeleton count={3} />);
 
     expect(container.querySelectorAll('.aspect-\\[2\\/3\\]')).toHaveLength(3);
+    expect(
+      container.querySelectorAll('[data-source-badge-skeleton]'),
+    ).toHaveLength(0);
   });
 
   it('没有收藏计数时保持空态布局高度', () => {
     const { container } = render(<FavoritePreviewSkeleton count={0} />);
-    const emptyPlaceholder = container.querySelector('.min-h-\\[198px\\]');
+    const emptyPlaceholder = container.querySelector('.min-h-\\[176px\\]');
 
     expect(container.querySelectorAll('.aspect-\\[2\\/3\\]')).toHaveLength(0);
-    expect(emptyPlaceholder).toHaveClass('sm:min-h-[324px]');
+    expect(emptyPlaceholder).toHaveClass('sm:min-h-[306px]');
   });
 });

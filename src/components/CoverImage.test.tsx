@@ -7,7 +7,10 @@ import {
 } from '@testing-library/react';
 
 import CoverImage from '@/components/CoverImage';
-import { clearCoverImageCacheForTests } from '@/lib/cover-image-cache';
+import {
+  clearCoverImageCacheForTests,
+  markCoverImagesLoaded,
+} from '@/lib/cover-image-cache';
 import { DOUBAN_IMAGE_PROXY_TYPE_STORAGE_KEY } from '@/lib/douban-source';
 
 jest.mock('next/image', () => {
@@ -92,6 +95,16 @@ describe('CoverImage', () => {
 
     const image = screen.getByTestId('cover-image');
     expect(image).toHaveClass('opacity-0');
+    expect(document.querySelector('[data-cover-loading-backdrop]')).toHaveClass(
+      'z-[100]',
+      'opacity-100',
+      'bg-gray-200/70',
+      'dark:bg-gray-700/60',
+    );
+    expect(document.querySelector('.animate-shimmer')).toHaveClass(
+      'via-white/20',
+      'dark:via-white/12',
+    );
 
     Object.defineProperty(image, 'complete', {
       configurable: true,
@@ -109,6 +122,38 @@ describe('CoverImage', () => {
     await waitFor(() => {
       expect(image).toHaveClass('opacity-100');
     });
+    expect(document.querySelector('[data-cover-loading-backdrop]')).toHaveClass(
+      'opacity-0',
+    );
+    expect(
+      document.querySelector('[data-cover-loading-backdrop]'),
+    ).toHaveAttribute('data-cover-state', 'revealed');
+  });
+
+  it('缓存命中时立即加载，并在当前图片完成后显示', async () => {
+    const src =
+      'https://img1.doubanio.com/view/photo/s_ratio_poster/public/p2931173550.jpg';
+    markCoverImagesLoaded([src]);
+
+    render(<CoverImage src={src} alt='已缓存封面' priority />);
+
+    const image = screen.getByTestId('cover-image');
+    expect(image).toHaveClass('opacity-0');
+    expect(document.querySelector('[data-cover-loading-backdrop]')).toHaveClass(
+      'opacity-100',
+    );
+
+    fireEvent.load(image);
+
+    await waitFor(() => {
+      expect(image).toHaveClass('opacity-100');
+    });
+    expect(document.querySelector('[data-cover-loading-backdrop]')).toHaveClass(
+      'opacity-0',
+    );
+    expect(
+      document.querySelector('[data-cover-loading-backdrop] .animate-shimmer'),
+    ).not.toBeInTheDocument();
   });
 
   it('普通远程封面通过服务端图片代理加载', () => {

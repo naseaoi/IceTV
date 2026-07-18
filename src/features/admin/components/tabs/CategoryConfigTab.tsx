@@ -16,24 +16,26 @@ import {
 import {
   arrayMove,
   SortableContext,
-  useSortable,
   verticalListSortingStrategy,
 } from '@dnd-kit/sortable';
-import { CSS } from '@dnd-kit/utilities';
-import { GripVertical } from 'lucide-react';
 import { useEffect, useState } from 'react';
 
 import AlertModal from '@/components/modals/AlertModal';
+import ConfirmModal from '@/components/modals/ConfirmModal';
+import { ResizableTableHeader } from '@/features/admin/components/ResizableTableHeader';
 import { CategoryAddForm } from '@/features/admin/components/tabs/category/CategoryAddForm';
+import { CategoryEditForm } from '@/features/admin/components/tabs/category/CategoryEditForm';
+import { SortableCategoryRow } from '@/features/admin/components/tabs/category/SortableCategoryRow';
 import { useAdminSourceActions } from '@/features/admin/hooks/useAdminSourceActions';
 import { useLoadingState } from '@/features/admin/hooks/useLoadingState';
-import {
-  buttonStyles,
-  statusBadgeStyles,
-} from '@/features/admin/lib/buttonStyles';
+import { buttonStyles } from '@/features/admin/lib/buttonStyles';
 import { showError } from '@/features/admin/lib/notifications';
 import { CustomCategory } from '@/features/admin/types/internal';
 import { useAlertModal } from '@/hooks/useAlertModal';
+import {
+  applyClientServerConfig,
+  fetchClientServerConfig,
+} from '@/lib/runtime-config';
 import { AdminConfig } from '@/types/admin';
 
 const CategoryConfig = ({
@@ -48,10 +50,21 @@ const CategoryConfig = ({
   const { runAction } = useAdminSourceActions({
     endpoint: '/api/admin/category',
     refreshConfig,
+    afterRefresh: async () => {
+      applyClientServerConfig(await fetchClientServerConfig());
+    },
     showAlert,
   });
   const [categories, setCategories] = useState<CustomCategory[]>([]);
   const [showAddForm, setShowAddForm] = useState(false);
+  const [editingCategory, setEditingCategory] = useState<CustomCategory | null>(
+    null,
+  );
+  const [editingIdentity, setEditingIdentity] = useState<{
+    query: string;
+    type: 'movie' | 'tv';
+  } | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<CustomCategory | null>(null);
   const [orderChanged, setOrderChanged] = useState(false);
   const [newCategory, setNewCategory] = useState<CustomCategory>({
     name: '',
@@ -100,19 +113,56 @@ const CategoryConfig = ({
     }
   };
 
-  const handleToggleEnable = (query: string, type: 'movie' | 'tv') => {
-    const target = categories.find((c) => c.query === query && c.type === type);
-    if (!target) return;
-    const action = target.disabled ? 'enable' : 'disable';
-    withLoading(`toggleCategory_${query}_${type}`, () =>
-      callCategoryApi({ action, query, type }),
+  const handleToggleEnable = (category: CustomCategory) => {
+    const action = category.disabled ? 'enable' : 'disable';
+    withLoading(`toggleCategory_${category.query}_${category.type}`, () =>
+      callCategoryApi({
+        action,
+        query: category.query,
+        type: category.type,
+      }),
     ).catch(() => void 0);
   };
 
-  const handleDelete = (query: string, type: 'movie' | 'tv') => {
-    withLoading(`deleteCategory_${query}_${type}`, () =>
-      callCategoryApi({ action: 'delete', query, type }),
+  const handleConfirmDelete = () => {
+    const target = deleteTarget;
+    if (!target) return;
+    setDeleteTarget(null);
+    withLoading(`deleteCategory_${target.query}_${target.type}`, () =>
+      callCategoryApi({
+        action: 'delete',
+        query: target.query,
+        type: target.type,
+      }),
     ).catch(() => void 0);
+  };
+
+  const handleOpenEdit = (category: CustomCategory) => {
+    setEditingIdentity({ query: category.query, type: category.type });
+    setEditingCategory({ ...category });
+    setShowAddForm(false);
+  };
+
+  const handleCancelEdit = () => {
+    setEditingCategory(null);
+    setEditingIdentity(null);
+  };
+
+  const handleEditCategory = () => {
+    if (!editingCategory?.name || !editingCategory.query || !editingIdentity) {
+      return;
+    }
+    withLoading('editCategory', async () => {
+      await callCategoryApi({
+        action: 'edit',
+        originalQuery: editingIdentity.query,
+        originalType: editingIdentity.type,
+        name: editingCategory.name,
+        type: editingCategory.type,
+        query: editingCategory.query,
+      });
+      handleCancelEdit();
+    }).catch(() => void 0);
   };
 
   const handleAddCategory = () => {
@@ -159,98 +209,6 @@ const CategoryConfig = ({
       .catch(() => void 0);
   };
 
-  // 可拖拽行封装 (dnd-kit)
-  const DraggableRow = ({ category }: { category: CustomCategory }) => {
-    const { attributes, listeners, setNodeRef, transform, transition } =
-      useSortable({ id: `${category.query}:${category.type}` });
-
-    const style = {
-      transform: CSS.Transform.toString(transform),
-      transition,
-    } as React.CSSProperties;
-
-    return (
-      <tr
-        ref={setNodeRef}
-        style={style}
-        className='select-none transition-colors hover:bg-gray-50 dark:hover:bg-gray-800'
-      >
-        <td
-          className='cursor-grab px-2 py-4 text-gray-400'
-          style={{ touchAction: 'none' }}
-          {...{ ...attributes, ...listeners }}
-        >
-          <GripVertical size={16} />
-        </td>
-        <td className='whitespace-nowrap px-6 py-4 text-sm text-gray-900 dark:text-gray-100'>
-          {category.name || '-'}
-        </td>
-        <td className='whitespace-nowrap px-6 py-4 text-sm text-gray-900 dark:text-gray-100'>
-          <span
-            className={`rounded-full px-2 py-1 text-xs ${
-              category.type === 'movie'
-                ? 'bg-blue-100 text-blue-800 dark:bg-blue-900/20 dark:text-blue-300'
-                : 'bg-purple-100 text-purple-800 dark:bg-purple-900/20 dark:text-purple-300'
-            }`}
-          >
-            {category.type === 'movie' ? '电影' : '电视剧'}
-          </span>
-        </td>
-        <td
-          className='max-w-[12rem] truncate whitespace-nowrap px-6 py-4 text-sm text-gray-900 dark:text-gray-100'
-          title={category.query}
-        >
-          {category.query}
-        </td>
-        <td className='max-w-[1rem] whitespace-nowrap px-6 py-4'>
-          <span
-            className={`rounded-full px-2 py-1 text-xs ${
-              !category.disabled
-                ? statusBadgeStyles.enabled
-                : statusBadgeStyles.disabled
-            }`}
-          >
-            {!category.disabled ? '启用中' : '已禁用'}
-          </span>
-        </td>
-        <td className='space-x-2 whitespace-nowrap px-6 py-4 text-right text-sm font-medium'>
-          <button
-            onClick={() => handleToggleEnable(category.query, category.type)}
-            disabled={isLoading(
-              `toggleCategory_${category.query}_${category.type}`,
-            )}
-            className={`inline-flex items-center rounded-full px-3 py-1.5 text-xs font-medium ${
-              !category.disabled
-                ? buttonStyles.roundedDanger
-                : buttonStyles.roundedSuccess
-            } transition-colors ${
-              isLoading(`toggleCategory_${category.query}_${category.type}`)
-                ? 'cursor-not-allowed opacity-50'
-                : ''
-            }`}
-          >
-            {!category.disabled ? '禁用' : '启用'}
-          </button>
-          {category.from !== 'config' && (
-            <button
-              onClick={() => handleDelete(category.query, category.type)}
-              disabled={isLoading(
-                `deleteCategory_${category.query}_${category.type}`,
-              )}
-              className={`${buttonStyles.roundedSecondary} ${
-                isLoading(`deleteCategory_${category.query}_${category.type}`)
-                  ? 'cursor-not-allowed opacity-50'
-                  : ''
-              }`}
-            >
-              删除
-            </button>
-          )}
-        </td>
-      </tr>
-    );
-  };
-
   if (!config) {
     return (
       <div className='text-center text-gray-500 dark:text-gray-400'>
@@ -267,7 +225,10 @@ const CategoryConfig = ({
           自定义分类列表
         </h4>
         <button
-          onClick={() => setShowAddForm(true)}
+          onClick={() => {
+            setShowAddForm(true);
+            handleCancelEdit();
+          }}
           className={`rounded-lg px-3 py-1 text-sm transition-colors ${buttonStyles.success}`}
         >
           添加分类
@@ -284,8 +245,21 @@ const CategoryConfig = ({
         isSubmitting={isLoading('addCategory')}
       />
 
+      <CategoryEditForm
+        category={editingCategory}
+        isOpen={!!editingCategory}
+        typeOptions={categoryTypeOptions}
+        onChange={setEditingCategory}
+        onSubmit={handleEditCategory}
+        onCancel={handleCancelEdit}
+        isSubmitting={isLoading('editCategory')}
+      />
+
       {/* 分类表格 */}
-      <div className='relative overflow-x-auto rounded-lg border border-gray-200 dark:border-gray-700'>
+      <div
+        className='relative overflow-x-auto rounded-lg border border-gray-200 dark:border-gray-700'
+        data-table='category-list'
+      >
         <DndContext
           sensors={sensors}
           collisionDetection={closestCenter}
@@ -293,25 +267,59 @@ const CategoryConfig = ({
           autoScroll={true}
           modifiers={[restrictToVerticalAxis, restrictToParentElement]}
         >
-          <table className='min-w-full divide-y divide-gray-200 dark:divide-gray-700'>
+          <table className='w-full table-fixed divide-y divide-gray-200 dark:divide-gray-700'>
             <thead className='sticky top-0 z-10 bg-gray-50 dark:bg-gray-900'>
               <tr>
-                <th className='w-8' />
-                <th className='px-6 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400'>
+                <th
+                  data-column-width='32'
+                  style={{ width: 32, minWidth: 32, maxWidth: 32 }}
+                />
+                <ResizableTableHeader
+                  tableId='category-list'
+                  columnId='name'
+                  defaultWidth={280}
+                  minWidth={112}
+                  className='px-6 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400'
+                >
                   分类名称
-                </th>
-                <th className='px-6 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400'>
+                </ResizableTableHeader>
+                <ResizableTableHeader
+                  tableId='category-list'
+                  columnId='type'
+                  defaultWidth={162}
+                  minWidth={88}
+                  className='px-6 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400'
+                >
                   类型
-                </th>
-                <th className='px-6 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400'>
+                </ResizableTableHeader>
+                <ResizableTableHeader
+                  tableId='category-list'
+                  columnId='query'
+                  defaultWidth={808}
+                  minWidth={120}
+                  className='px-6 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400'
+                >
                   搜索关键词
-                </th>
-                <th className='px-6 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400'>
+                </ResizableTableHeader>
+                <ResizableTableHeader
+                  tableId='category-list'
+                  columnId='status'
+                  defaultWidth={107}
+                  minWidth={88}
+                  className='px-6 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400'
+                >
                   状态
-                </th>
-                <th className='px-6 py-3 text-right text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400'>
+                </ResizableTableHeader>
+                <ResizableTableHeader
+                  tableId='category-list'
+                  columnId='actions'
+                  defaultWidth={160}
+                  minWidth={160}
+                  hideDivider
+                  className='px-6 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400'
+                >
                   操作
-                </th>
+                </ResizableTableHeader>
               </tr>
             </thead>
             <SortableContext
@@ -320,9 +328,18 @@ const CategoryConfig = ({
             >
               <tbody className='divide-y divide-gray-200 dark:divide-gray-700'>
                 {categories.map((category) => (
-                  <DraggableRow
+                  <SortableCategoryRow
                     key={`${category.query}:${category.type}`}
                     category={category}
+                    isToggleLoading={isLoading(
+                      `toggleCategory_${category.query}_${category.type}`,
+                    )}
+                    isDeleteLoading={isLoading(
+                      `deleteCategory_${category.query}_${category.type}`,
+                    )}
+                    onToggleEnable={handleToggleEnable}
+                    onEdit={handleOpenEdit}
+                    onDelete={setDeleteTarget}
                   />
                 ))}
               </tbody>
@@ -357,6 +374,20 @@ const CategoryConfig = ({
         message={alertModal.message}
         timer={alertModal.timer}
         showConfirm={alertModal.showConfirm}
+      />
+
+      <ConfirmModal
+        isOpen={!!deleteTarget}
+        title='确认删除分类'
+        message={
+          deleteTarget
+            ? `确定要删除分类「${deleteTarget.name || deleteTarget.query}」吗？`
+            : undefined
+        }
+        onClose={() => setDeleteTarget(null)}
+        onConfirm={handleConfirmDelete}
+        confirmText='删除'
+        danger
       />
     </div>
   );

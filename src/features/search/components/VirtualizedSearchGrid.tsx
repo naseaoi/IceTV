@@ -27,11 +27,11 @@ const SEARCH_GRID_LAYOUT = {
   mobileWideColumnCount: 4,
   mobileColumnGap: 12,
   mobileRowGap: POSTER_GRID_ROW_GAP,
-  mobileContentHeight: 54,
+  mobileContentHeight: 28,
   desktopColumnGap: 32,
   desktopRowGap: POSTER_GRID_ROW_GAP,
   desktopMinColumnWidth: 176,
-  desktopContentHeight: 54,
+  desktopContentHeight: 28,
 };
 
 export function VirtualizedSearchGrid<T>({

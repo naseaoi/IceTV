@@ -3,6 +3,7 @@
 import { useCallback, useMemo, useState } from 'react';
 
 import AlertModal from '@/components/modals/AlertModal';
+import ConfirmModal from '@/components/modals/ConfirmModal';
 import { AddUserForm } from '@/features/admin/components/tabs/user-config/AddUserForm';
 import { BatchUserGroupDialog } from '@/features/admin/components/tabs/user-config/BatchUserGroupDialog';
 import { ChangePasswordForm } from '@/features/admin/components/tabs/user-config/ChangePasswordForm';
@@ -27,6 +28,16 @@ interface UserConfigProps {
   config: AdminConfig | null;
   role: 'owner' | 'admin' | null;
   refreshConfig: () => Promise<void>;
+}
+
+type SensitiveUserAction = 'ban' | 'setAdmin' | 'cancelAdmin';
+
+interface PendingSensitiveUserAction {
+  action: SensitiveUserAction;
+  username: string;
+  title: string;
+  message: string;
+  confirmText: string;
 }
 
 const UserConfig = ({ config, role, refreshConfig }: UserConfigProps) => {
@@ -96,6 +107,9 @@ const UserConfig = ({ config, role, refreshConfig }: UserConfigProps) => {
   } | null>(null);
   const [showDeleteUserModal, setShowDeleteUserModal] = useModalState(false);
   const [deletingUser, setDeletingUser] = useState<string | null>(null);
+  const [pendingSensitiveUserAction, setPendingSensitiveUserAction] =
+    useState<PendingSensitiveUserAction | null>(null);
+  const [showOpenRegisterConfirm, setShowOpenRegisterConfirm] = useState(false);
 
   const currentUsername = getAuthInfoFromBrowserCookie()?.username || null;
   const permissionContext = useMemo(
@@ -247,8 +261,14 @@ const UserConfig = ({ config, role, refreshConfig }: UserConfigProps) => {
     }
   };
 
-  const handleBanUser = async (uname: string) => {
-    await withLoading(`banUser_${uname}`, () => handleUserAction('ban', uname));
+  const handleBanUser = (username: string) => {
+    setPendingSensitiveUserAction({
+      action: 'ban',
+      username,
+      title: '确认封禁用户',
+      message: `封禁后，用户「${username}」将无法登录。`,
+      confirmText: '确认封禁',
+    });
   };
 
   const handleUnbanUser = async (uname: string) => {
@@ -257,7 +277,7 @@ const UserConfig = ({ config, role, refreshConfig }: UserConfigProps) => {
     );
   };
 
-  const handleToggleOpenRegister = async () => {
+  const updateOpenRegister = async (openRegister: boolean) => {
     await withLoading('setOpenRegister', async () => {
       try {
         await userAction(
@@ -265,7 +285,7 @@ const UserConfig = ({ config, role, refreshConfig }: UserConfigProps) => {
           undefined,
           undefined,
           undefined,
-          !(config?.UserConfig?.OpenRegister ?? false),
+          openRegister,
         );
         showSuccess('开放注册设置已更新', showAlert);
       } catch (err) {
@@ -275,15 +295,44 @@ const UserConfig = ({ config, role, refreshConfig }: UserConfigProps) => {
     });
   };
 
-  const handleSetAdmin = async (uname: string) => {
-    await withLoading(`setAdmin_${uname}`, () =>
-      handleUserAction('setAdmin', uname),
-    );
+  const handleToggleOpenRegister = () => {
+    if (config?.UserConfig?.OpenRegister) {
+      void updateOpenRegister(false);
+      return;
+    }
+    setShowOpenRegisterConfirm(true);
   };
 
-  const handleRemoveAdmin = async (uname: string) => {
-    await withLoading(`removeAdmin_${uname}`, () =>
-      handleUserAction('cancelAdmin', uname),
+  const handleSetAdmin = (username: string) => {
+    setPendingSensitiveUserAction({
+      action: 'setAdmin',
+      username,
+      title: '确认设为管理员',
+      message: `用户「${username}」将获得后台管理权限。`,
+      confirmText: '确认授权',
+    });
+  };
+
+  const handleRemoveAdmin = (username: string) => {
+    setPendingSensitiveUserAction({
+      action: 'cancelAdmin',
+      username,
+      title: '确认取消管理员',
+      message: `用户「${username}」将失去后台管理权限。`,
+      confirmText: '确认取消',
+    });
+  };
+
+  const handleConfirmSensitiveUserAction = async () => {
+    const pending = pendingSensitiveUserAction;
+    if (!pending) return;
+    const loadingKey =
+      pending.action === 'cancelAdmin'
+        ? `removeAdmin_${pending.username}`
+        : `${pending.action}_${pending.username}`;
+    setPendingSensitiveUserAction(null);
+    await withLoading(loadingKey, () =>
+      handleUserAction(pending.action, pending.username),
     );
   };
 
@@ -743,6 +792,28 @@ const UserConfig = ({ config, role, refreshConfig }: UserConfigProps) => {
         onClose={closeBatchUserGroupModal}
         onConfirm={() => handleBatchSetUserGroup(selectedUserGroup)}
         isSaving={isLoading('batchSetUserGroup')}
+      />
+
+      <ConfirmModal
+        isOpen={pendingSensitiveUserAction !== null}
+        title={pendingSensitiveUserAction?.title || '确认操作'}
+        message={pendingSensitiveUserAction?.message}
+        onClose={() => setPendingSensitiveUserAction(null)}
+        onConfirm={() => void handleConfirmSensitiveUserAction()}
+        confirmText={pendingSensitiveUserAction?.confirmText}
+        danger={pendingSensitiveUserAction?.action === 'ban'}
+      />
+
+      <ConfirmModal
+        isOpen={showOpenRegisterConfirm}
+        title='确认开放注册'
+        message='开启后，未注册用户可以通过注册接口自行创建账号。'
+        onClose={() => setShowOpenRegisterConfirm(false)}
+        onConfirm={() => {
+          setShowOpenRegisterConfirm(false);
+          void updateOpenRegister(true);
+        }}
+        confirmText='确认开启'
       />
 
       <AlertModal

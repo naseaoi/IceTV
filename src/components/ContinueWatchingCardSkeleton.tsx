@@ -8,7 +8,7 @@ export default function ContinueWatchingCardSkeleton() {
         <MobileContinueCardSkeleton />
       </div>
       <div className='hidden md:block'>
-        <HomePosterCardSkeleton withSubtitle />
+        <HomePosterCardSkeleton />
       </div>
     </div>
   );

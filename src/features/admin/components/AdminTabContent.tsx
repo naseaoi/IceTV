@@ -76,8 +76,10 @@ interface AdminTabContentProps {
   refreshConfig: () => Promise<void>;
   onSiteConfigSavingChange?: (saving: boolean) => void;
   onRuntimeParamsSavingChange?: (saving: boolean) => void;
+  onConfigFileSavingChange?: (saving: boolean) => void;
   onSiteConfigDirtyChange?: (dirty: boolean) => void;
   onRuntimeParamsDirtyChange?: (dirty: boolean) => void;
+  onConfigFileDirtyChange?: (dirty: boolean) => void;
 }
 
 const AdminTabContent = ({
@@ -87,13 +89,20 @@ const AdminTabContent = ({
   refreshConfig,
   onSiteConfigSavingChange,
   onRuntimeParamsSavingChange,
+  onConfigFileSavingChange,
   onSiteConfigDirtyChange,
   onRuntimeParamsDirtyChange,
+  onConfigFileDirtyChange,
 }: AdminTabContentProps) => {
   switch (activeTab) {
     case 'config-file':
       return (
-        <ConfigFileComponent config={config} refreshConfig={refreshConfig} />
+        <ConfigFileComponent
+          config={config}
+          refreshConfig={refreshConfig}
+          onSavingChange={onConfigFileSavingChange}
+          onDirtyChange={onConfigFileDirtyChange}
+        />
       );
     case 'runtime':
       return (

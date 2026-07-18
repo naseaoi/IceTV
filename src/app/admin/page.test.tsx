@@ -34,8 +34,9 @@ jest.mock('@/components/modals/ConfirmModal', () => ({
   }) => (isOpen ? <button onClick={onConfirm}>ConfirmModal</button> : null),
 }));
 
+const mockReplace = jest.fn();
 jest.mock('next/navigation', () => ({
-  useRouter: () => ({ replace: jest.fn() }),
+  useRouter: () => ({ replace: mockReplace }),
   usePathname: () => '/admin',
   useSearchParams: () => new URLSearchParams(),
 }));
@@ -62,7 +63,11 @@ jest.mock('@/features/admin/components/tabs/ConfigFileTab', () => ({
 }));
 jest.mock('@/features/admin/components/tabs/SiteConfigTab', () => ({
   __esModule: true,
-  default: () => <div>SiteConfigTab</div>,
+  default: ({
+    onDirtyChange,
+  }: {
+    onDirtyChange?: (dirty: boolean) => void;
+  }) => <button onClick={() => onDirtyChange?.(true)}>SiteConfigTab</button>,
 }));
 
 jest.mock('@/hooks/useAlertModal', () => ({
@@ -251,5 +256,41 @@ describe('AdminPage role visibility', () => {
       'href',
       '/',
     );
+  });
+
+  it('asks before switching tabs with unsaved changes', async () => {
+    setupRole('admin');
+    render(<AdminPage />);
+
+    await waitFor(() => {
+      expect(screen.getByText('SiteConfigTab')).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByText('SiteConfigTab'));
+    fireEvent.click(screen.getByRole('button', { name: '用户配置' }));
+
+    expect(screen.getByText('ConfirmModal')).toBeInTheDocument();
+    expect(mockReplace).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByText('ConfirmModal'));
+
+    expect(mockReplace).toHaveBeenCalledWith('/admin?tab=user', {
+      scroll: false,
+    });
+  });
+
+  it('registers browser leave protection for unsaved changes', async () => {
+    setupRole('admin');
+    render(<AdminPage />);
+
+    await waitFor(() => {
+      expect(screen.getByText('SiteConfigTab')).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByText('SiteConfigTab'));
+    const event = new Event('beforeunload', { cancelable: true });
+    window.dispatchEvent(event);
+
+    expect(event.defaultPrevented).toBe(true);
   });
 });

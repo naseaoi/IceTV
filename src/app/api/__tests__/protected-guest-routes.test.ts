@@ -115,6 +115,7 @@ describe('游客受保护接口', () => {
     mockRequireActiveUser.mockResolvedValue({
       username: 'alice',
       isOwner: false,
+      role: 'user',
     } satisfies Awaited<ReturnType<RequireActiveUser>>);
     mockGetConfigForRead.mockResolvedValue({
       SourceConfig: [
@@ -137,6 +138,7 @@ describe('游客受保护接口', () => {
     mockRequireActiveUser.mockResolvedValue({
       username: 'alice',
       isOwner: false,
+      role: 'user',
     } satisfies Awaited<ReturnType<RequireActiveUser>>);
     mockGetConfigForRead.mockResolvedValue(
       {} as Awaited<ReturnType<GetConfigForRead>>,

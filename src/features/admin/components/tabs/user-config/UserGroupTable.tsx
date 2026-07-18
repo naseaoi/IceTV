@@ -1,5 +1,6 @@
 'use client';
 
+import { ResizableTableHeader } from '@/features/admin/components/ResizableTableHeader';
 import { buttonStyles } from '@/features/admin/lib/buttonStyles';
 
 interface UserGroup {
@@ -21,19 +22,41 @@ export function UserGroupTable({
   onDelete,
 }: UserGroupTableProps) {
   return (
-    <div className='relative max-h-[20rem] overflow-x-auto overflow-y-auto rounded-lg border border-gray-200 dark:border-gray-700'>
-      <table className='min-w-full divide-y divide-gray-200 dark:divide-gray-700'>
+    <div
+      className='relative max-h-[20rem] overflow-x-auto overflow-y-auto rounded-lg border border-gray-200 dark:border-gray-700'
+      data-table='user-group-list'
+    >
+      <table className='w-full table-fixed divide-y divide-gray-200 dark:divide-gray-700'>
         <thead className='sticky top-0 z-10 bg-gray-50 dark:bg-gray-900'>
           <tr>
-            <th className='px-6 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400'>
+            <ResizableTableHeader
+              tableId='user-group-list'
+              columnId='name'
+              defaultWidth={359}
+              minWidth={120}
+              className='px-6 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400'
+            >
               用户组名称
-            </th>
-            <th className='px-6 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400'>
+            </ResizableTableHeader>
+            <ResizableTableHeader
+              tableId='user-group-list'
+              columnId='source-permissions'
+              defaultWidth={867}
+              minWidth={120}
+              className='px-6 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400'
+            >
               可用视频源
-            </th>
-            <th className='px-6 py-3 text-right text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400'>
+            </ResizableTableHeader>
+            <ResizableTableHeader
+              tableId='user-group-list'
+              columnId='actions'
+              defaultWidth={364}
+              minWidth={160}
+              hideDivider
+              className='px-6 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400'
+            >
               操作
-            </th>
+            </ResizableTableHeader>
           </tr>
         </thead>
         <tbody className='divide-y divide-gray-200 dark:divide-gray-700'>
@@ -54,7 +77,7 @@ export function UserGroupTable({
                   </span>
                 </div>
               </td>
-              <td className='space-x-2 whitespace-nowrap px-6 py-4 text-right text-sm font-medium'>
+              <td className='space-x-2 whitespace-nowrap px-6 py-4 text-left text-sm font-medium'>
                 <button
                   onClick={() => onEdit(group)}
                   disabled={isEditLoading(group.name)}

@@ -3,6 +3,7 @@ import type { MutableRefObject } from 'react';
 import type { UseArtPlayerParams } from '@/features/play/hooks/artPlayerTypes';
 import { resolveNextStablePlaybackTime } from '@/features/play/hooks/usePlayProgress';
 import {
+  createArtPlayerContextmenus,
   createArtPlayerControls,
   createArtPlayerSettings,
 } from '@/features/play/lib/artPlayerSettings';
@@ -248,6 +249,7 @@ export async function initializeArtPlayer(
       controls: createArtPlayerControls({
         handleNextEpisode,
       }),
+      contextmenu: createArtPlayerContextmenus(),
     });
 
     const player = artPlayerRef.current;
@@ -676,7 +678,9 @@ export async function initializeArtPlayer(
             | 1.75
             | 2;
         }
-        player.notice.show = '';
+        if (!loadingSessionRef.current.playbackStartNotified) {
+          player.notice.show = '';
+        }
       }, 0);
 
       finishInitialLoadingIfMediaReady();

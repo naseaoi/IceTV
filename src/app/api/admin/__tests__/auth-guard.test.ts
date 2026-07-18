@@ -9,6 +9,10 @@ import {
 } from '@/lib/config';
 import { getOwnerPassword, getOwnerUsername } from '@/lib/env.server';
 import { verifyAuthSignature } from '@/lib/signing-secret.server';
+import {
+  commitStagedSiteIcon,
+  hasStagedSiteIcon,
+} from '@/lib/site-icon-storage.server';
 
 if (!(globalThis as any).Headers) {
   class MinimalHeaders {
@@ -96,6 +100,12 @@ jest.mock('@/lib/signing-secret.server', () => ({
   verifyAuthSignature: jest.fn(),
 }));
 
+jest.mock('@/lib/site-icon-storage.server', () => ({
+  commitStagedSiteIcon: jest.fn(),
+  hasStagedSiteIcon: jest.fn(),
+  removeSiteIcon: jest.fn(),
+}));
+
 function getHandlers() {
   const { GET: getAdminConfig } = require('@/app/api/admin/config/route');
   const { GET: resetAdminConfig } = require('@/app/api/admin/reset/route');
@@ -127,6 +137,11 @@ describe('admin api auth guard regression', () => {
   >;
   const mockedGetOwnerPassword = getOwnerPassword as jest.MockedFunction<
     typeof getOwnerPassword
+  >;
+  const mockedCommitStagedSiteIcon =
+    commitStagedSiteIcon as jest.MockedFunction<typeof commitStagedSiteIcon>;
+  const mockedHasStagedSiteIcon = hasStagedSiteIcon as jest.MockedFunction<
+    typeof hasStagedSiteIcon
   >;
 
   const baseConfig = {
@@ -169,6 +184,7 @@ describe('admin api auth guard regression', () => {
     mockedGetOwnerUsername.mockReturnValue('owner-1');
     mockedGetOwnerPassword.mockReturnValue('owner-secret');
     mockedVerifyAuthSignature.mockResolvedValue(true);
+    mockedHasStagedSiteIcon.mockReturnValue(true);
     mockedGetConfig.mockResolvedValue(baseConfig as never);
     mockedGetConfigForRead.mockResolvedValue(baseConfig as never);
   });
@@ -246,6 +262,7 @@ describe('admin api auth guard regression', () => {
     const request = {
       json: async () => ({
         SiteName: 'IceTV',
+        SiteIcon: '',
         Announcement: 'hello',
         FooterText: '',
         EnableLiveEntry: false,
@@ -271,5 +288,59 @@ describe('admin api auth guard regression', () => {
     expect(response.status).toBe(200);
     expect(payload).toEqual({ ok: true });
     expect(mockedSaveConfig).toHaveBeenCalledTimes(1);
+  });
+
+  it('commits a staged icon only after saving site config', async () => {
+    const { updateSiteConfig } = getHandlers();
+    mockedGetAuthInfoFromCookie.mockReturnValue({
+      username: 'owner-1',
+      expiresAt: Date.now() + 60_000,
+      signature: 'mock-signature',
+      sessionType: 'account',
+    });
+    const order: string[] = [];
+    mockedSaveConfig.mockImplementation(async () => {
+      order.push('save');
+      return baseConfig as never;
+    });
+    mockedCommitStagedSiteIcon.mockImplementation(() => {
+      order.push('commit');
+    });
+
+    const response = await updateSiteConfig({
+      json: async () => ({
+        ...baseConfig.SiteConfig,
+        FooterText: '',
+        SiteIcon: '/api/admin/site-icon',
+        SiteIconStagingToken: '11111111-1111-1111-1111-111111111111',
+      }),
+    } as any);
+
+    expect(response.status).toBe(200);
+    expect(order).toEqual(['save', 'commit']);
+  });
+
+  it('rejects a missing staged icon without saving config', async () => {
+    const { updateSiteConfig } = getHandlers();
+    mockedGetAuthInfoFromCookie.mockReturnValue({
+      username: 'owner-1',
+      expiresAt: Date.now() + 60_000,
+      signature: 'mock-signature',
+      sessionType: 'account',
+    });
+    mockedHasStagedSiteIcon.mockReturnValue(false);
+
+    const response = await updateSiteConfig({
+      json: async () => ({
+        ...baseConfig.SiteConfig,
+        FooterText: '',
+        SiteIcon: '/api/admin/site-icon',
+        SiteIconStagingToken: '11111111-1111-1111-1111-111111111111',
+      }),
+    } as any);
+
+    expect(response.status).toBe(400);
+    expect(mockedSaveConfig).not.toHaveBeenCalled();
+    expect(mockedCommitStagedSiteIcon).not.toHaveBeenCalled();
   });
 });

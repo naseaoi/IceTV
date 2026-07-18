@@ -7,6 +7,13 @@ export const PREFERRED_QUALITY_STORAGE_KEY = 'preferredQuality';
 export const SOURCE_PREFERRED_QUALITY_STORAGE_PREFIX = 'preferredQuality:';
 export const SIDEBAR_COLLAPSED_STORAGE_KEY = 'sidebarCollapsed';
 export const SEEN_ANNOUNCEMENT_STORAGE_KEY = 'hasSeenAnnouncement';
+export const ADMIN_TABLE_COLUMN_WIDTHS_STORAGE_KEY = 'adminTableColumnWidths';
+
+type AdminTableColumnWidths = Record<string, Record<string, number>>;
+
+const ADMIN_TABLE_ID_PATTERN = /^[a-zA-Z0-9_-]{1,64}$/;
+const MIN_ADMIN_TABLE_COLUMN_WIDTH = 48;
+const MAX_ADMIN_TABLE_COLUMN_WIDTH = 1200;
 
 function readStoredBoolean(key: string): boolean | undefined {
   if (typeof window === 'undefined') {
@@ -56,6 +63,93 @@ function writeStoredString(key: string, value: string) {
   }
 
   window.localStorage.setItem(key, value);
+}
+
+function isValidAdminTableId(value: string): boolean {
+  return ADMIN_TABLE_ID_PATTERN.test(value);
+}
+
+function isValidAdminTableColumnWidth(value: unknown): value is number {
+  return (
+    typeof value === 'number' &&
+    Number.isFinite(value) &&
+    value >= MIN_ADMIN_TABLE_COLUMN_WIDTH &&
+    value <= MAX_ADMIN_TABLE_COLUMN_WIDTH
+  );
+}
+
+function readAdminTableColumnWidths(): AdminTableColumnWidths {
+  const raw = readStoredString(ADMIN_TABLE_COLUMN_WIDTHS_STORAGE_KEY);
+  if (!raw) {
+    return {};
+  }
+
+  try {
+    const parsed = JSON.parse(raw) as unknown;
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+      return {};
+    }
+
+    const widths: AdminTableColumnWidths = {};
+    Object.entries(parsed).forEach(([tableId, columns]) => {
+      if (
+        !isValidAdminTableId(tableId) ||
+        !columns ||
+        typeof columns !== 'object' ||
+        Array.isArray(columns)
+      ) {
+        return;
+      }
+
+      const validColumns: Record<string, number> = {};
+      Object.entries(columns).forEach(([columnId, width]) => {
+        if (
+          isValidAdminTableId(columnId) &&
+          isValidAdminTableColumnWidth(width)
+        ) {
+          validColumns[columnId] = Math.round(width);
+        }
+      });
+      widths[tableId] = validColumns;
+    });
+    return widths;
+  } catch {
+    return {};
+  }
+}
+
+export function readAdminTableColumnWidth(
+  tableId: string,
+  columnId: string,
+): number | undefined {
+  if (!isValidAdminTableId(tableId) || !isValidAdminTableId(columnId)) {
+    return undefined;
+  }
+  return readAdminTableColumnWidths()[tableId]?.[columnId];
+}
+
+export function writeAdminTableColumnWidth(
+  tableId: string,
+  columnId: string,
+  width: number,
+): void {
+  if (
+    !isValidAdminTableId(tableId) ||
+    !isValidAdminTableId(columnId) ||
+    !isValidAdminTableColumnWidth(width)
+  ) {
+    return;
+  }
+
+  const widths = readAdminTableColumnWidths();
+  widths[tableId] = {
+    ...widths[tableId],
+    [columnId]: Math.round(width),
+  };
+  writeStoredString(
+    ADMIN_TABLE_COLUMN_WIDTHS_STORAGE_KEY,
+    JSON.stringify(widths),
+  );
 }
 
 export function readDefaultAggregateSearch(): boolean {

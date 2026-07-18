@@ -22,7 +22,11 @@ export async function getServerAuthSession(
       return { status: 'guest' };
     }
 
-    return { status: 'authenticated', username: result.username };
+    return {
+      status: 'authenticated',
+      username: result.username,
+      role: result.role,
+    };
   } catch (error) {
     console.error('服务端会话恢复失败:', error);
     return { status: 'error' };

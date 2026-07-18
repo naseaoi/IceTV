@@ -1,5 +1,5 @@
 import { Radio, X } from 'lucide-react';
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 
 import CoverImage from '@/components/CoverImage';
 
@@ -34,6 +34,11 @@ interface MobileActionSheetProps {
   anchorRect?: ActionSheetAnchorRect | null;
 }
 
+type ActionSheetContentSnapshot = Omit<
+  MobileActionSheetProps,
+  'isOpen' | 'onClose'
+>;
+
 const MobileActionSheet: React.FC<MobileActionSheetProps> = ({
   isOpen,
   onClose,
@@ -59,13 +64,52 @@ const MobileActionSheet: React.FC<MobileActionSheetProps> = ({
   } | null>(null);
   const panelRef = useRef<HTMLDivElement>(null);
 
-  const isDesktopContextMenu = useMemo(() => {
-    if (typeof window === 'undefined') {
-      return false;
-    }
-    return Boolean(anchorRect) && window.matchMedia('(pointer: fine)').matches;
-  }, [anchorRect]);
   const [desktopPosition, setDesktopPosition] = useState({ top: 12, left: 12 });
+  const contentSnapshot = useRef<ActionSheetContentSnapshot>({
+    title,
+    actions,
+    poster,
+    sources,
+    isAggregate,
+    sourceName,
+    currentEpisode,
+    totalEpisodes,
+    origin,
+    anchorRect,
+  });
+
+  if (isOpen) {
+    contentSnapshot.current = {
+      title,
+      actions,
+      poster,
+      sources,
+      isAggregate,
+      sourceName,
+      currentEpisode,
+      totalEpisodes,
+      origin,
+      anchorRect,
+    };
+  }
+
+  const {
+    title: visibleTitle,
+    actions: visibleActions,
+    poster: visiblePoster,
+    sources: visibleSources,
+    isAggregate: visibleIsAggregate,
+    sourceName: visibleSourceName,
+    currentEpisode: visibleCurrentEpisode,
+    totalEpisodes: visibleTotalEpisodes,
+    origin: visibleOrigin = 'vod',
+    anchorRect: visibleAnchorRect = null,
+  } = contentSnapshot.current;
+
+  const isDesktopContextMenu =
+    typeof window !== 'undefined' &&
+    Boolean(visibleAnchorRect) &&
+    window.matchMedia('(pointer: fine)').matches;
 
   const getInitialDesktopPosition = (rect: {
     top: number;
@@ -110,11 +154,11 @@ const MobileActionSheet: React.FC<MobileActionSheetProps> = ({
     let timer: NodeJS.Timeout;
 
     if (isOpen) {
-      const desktopMode = isDesktopContextMenu && !!anchorRect;
+      const desktopMode = isDesktopContextMenu && !!visibleAnchorRect;
       setActiveMode(desktopMode ? 'desktop' : 'mobile');
-      if (desktopMode && anchorRect) {
-        setDesktopAnchorRect(anchorRect);
-        setDesktopPosition(getInitialDesktopPosition(anchorRect));
+      if (desktopMode && visibleAnchorRect) {
+        setDesktopAnchorRect(visibleAnchorRect);
+        setDesktopPosition(getInitialDesktopPosition(visibleAnchorRect));
       }
 
       setIsVisible(true);
@@ -140,7 +184,7 @@ const MobileActionSheet: React.FC<MobileActionSheetProps> = ({
         clearTimeout(timer);
       }
     };
-  }, [anchorRect, isDesktopContextMenu, isOpen]);
+  }, [isDesktopContextMenu, isOpen, visibleAnchorRect]);
 
   useEffect(() => {
     if (
@@ -148,19 +192,19 @@ const MobileActionSheet: React.FC<MobileActionSheetProps> = ({
       isVisible &&
       activeMode === 'desktop' &&
       isDesktopContextMenu &&
-      anchorRect
+      visibleAnchorRect
     ) {
-      setDesktopAnchorRect(anchorRect);
-      setDesktopPosition(getInitialDesktopPosition(anchorRect));
+      setDesktopAnchorRect(visibleAnchorRect);
+      setDesktopPosition(getInitialDesktopPosition(visibleAnchorRect));
     }
-  }, [activeMode, anchorRect, isDesktopContextMenu, isOpen, isVisible]);
+  }, [activeMode, isDesktopContextMenu, isOpen, isVisible, visibleAnchorRect]);
 
   // 阻止背景滚动
   useEffect(() => {
     if (!isOpen) {
       return;
     }
-  }, [isOpen, poster]);
+  }, [isOpen, visiblePoster]);
 
   useEffect(() => {
     if (
@@ -209,7 +253,7 @@ const MobileActionSheet: React.FC<MobileActionSheetProps> = ({
     updatePosition();
     window.addEventListener('resize', updatePosition);
     return () => window.removeEventListener('resize', updatePosition);
-  }, [activeMode, desktopAnchorRect, isVisible, actions.length]);
+  }, [activeMode, desktopAnchorRect, isVisible, visibleActions.length]);
 
   useEffect(() => {
     if (!isVisible || activeMode !== 'desktop') {
@@ -276,9 +320,9 @@ const MobileActionSheet: React.FC<MobileActionSheetProps> = ({
   const posterPreview = (
     <div className='relative h-16 w-12 flex-shrink-0 overflow-hidden rounded-lg border border-gray-200/60 bg-gray-100 dark:border-gray-700/60 dark:bg-gray-800'>
       <CoverImage
-        src={poster || ''}
-        alt={title}
-        fit={origin === 'live' ? 'contain' : 'cover'}
+        src={visiblePoster || ''}
+        alt={visibleTitle}
+        fit={visibleOrigin === 'live' ? 'contain' : 'cover'}
         sizes='48px'
       />
     </div>
@@ -332,7 +376,7 @@ const MobileActionSheet: React.FC<MobileActionSheetProps> = ({
 
   const renderActionList = (compact?: boolean) => (
     <div className={compact ? 'py-2' : 'px-4 py-2'}>
-      {actions.map((action, index) => (
+      {visibleActions.map((action, index) => (
         <div key={action.id}>
           <button
             onClick={() => {
@@ -395,14 +439,16 @@ const MobileActionSheet: React.FC<MobileActionSheetProps> = ({
               {action.label}
             </span>
 
-            {action.id === 'play' && currentEpisode && totalEpisodes && (
-              <span className='text-sm font-medium text-gray-500 dark:text-gray-400'>
-                {currentEpisode}/{totalEpisodes}
-              </span>
-            )}
+            {action.id === 'play' &&
+              visibleCurrentEpisode &&
+              visibleTotalEpisodes && (
+                <span className='text-sm font-medium text-gray-500 dark:text-gray-400'>
+                  {visibleCurrentEpisode}/{visibleTotalEpisodes}
+                </span>
+              )}
           </button>
 
-          {index < actions.length - 1 &&
+          {index < visibleActions.length - 1 &&
             (compact ? (
               <div className='mx-4 my-0.5 h-px bg-gradient-to-r from-transparent via-gray-200/80 to-transparent dark:via-white/[0.10]' />
             ) : (
@@ -416,7 +462,7 @@ const MobileActionSheet: React.FC<MobileActionSheetProps> = ({
   const actionList = renderActionList(false);
 
   const renderSourceInfo = (compact?: boolean) =>
-    isAggregate && sources && sources.length > 0 ? (
+    visibleIsAggregate && visibleSources && visibleSources.length > 0 ? (
       <div
         className={
           compact
@@ -432,13 +478,13 @@ const MobileActionSheet: React.FC<MobileActionSheetProps> = ({
             可用播放源
           </h4>
           <p className='text-xs text-gray-500 dark:text-gray-400'>
-            共 {sources.length} 个播放源
+            共 {visibleSources.length} 个播放源
           </p>
         </div>
 
         <div className='max-h-32 overflow-y-auto'>
           <div className='grid grid-cols-2 gap-2'>
-            {sources.map((source, index) => (
+            {visibleSources.map((source, index) => (
               <div
                 key={index}
                 className='flex items-center gap-2 rounded-lg border border-gray-200 bg-gray-50/30 px-3 py-2 dark:border-gray-700 dark:bg-gray-800/30'
@@ -549,19 +595,19 @@ const MobileActionSheet: React.FC<MobileActionSheetProps> = ({
                 <div className='min-w-0 flex-1'>
                   <div className='mb-0.5 flex min-w-0 items-center gap-2'>
                     <h3 className='truncate text-sm font-semibold text-gray-900 dark:text-gray-100'>
-                      {title}
+                      {visibleTitle}
                     </h3>
                   </div>
                   <div className='flex items-center gap-2'>
-                    {sourceName && (
+                    {visibleSourceName && (
                       <span className='inline-flex items-center rounded-full bg-green-100 px-2 py-0.5 text-[11px] font-medium text-green-800 dark:bg-green-900/30 dark:text-green-200'>
-                        {origin === 'live' && (
+                        {visibleOrigin === 'live' && (
                           <Radio
                             size={10}
                             className='mr-1 inline-block text-green-600 dark:text-green-300'
                           />
                         )}
-                        {sourceName}
+                        {visibleSourceName}
                       </span>
                     )}
                   </div>
@@ -645,17 +691,17 @@ const MobileActionSheet: React.FC<MobileActionSheetProps> = ({
             <div className='min-w-0 flex-1'>
               <div className='mb-1 flex items-center gap-2'>
                 <h3 className='truncate text-lg font-semibold text-gray-900 dark:text-gray-100'>
-                  {title}
+                  {visibleTitle}
                 </h3>
-                {sourceName && (
+                {visibleSourceName && (
                   <span className='flex-shrink-0 rounded border border-gray-300 bg-gray-50 px-2 py-1 text-xs text-gray-600 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-400'>
-                    {origin === 'live' && (
+                    {visibleOrigin === 'live' && (
                       <Radio
                         size={12}
                         className='mr-1.5 inline-block text-gray-500 dark:text-gray-400'
                       />
                     )}
-                    {sourceName}
+                    {visibleSourceName}
                   </span>
                 )}
               </div>

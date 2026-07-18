@@ -64,7 +64,10 @@ export const InfoTab: React.FC<InfoTabProps> = ({
       }
     >
       <div className='flex min-w-0 flex-shrink-0 gap-4 sm:gap-5'>
-        <div className='relative aspect-[2/3] w-24 flex-shrink-0 overflow-hidden rounded-xl bg-gray-200 shadow-md shadow-black/10 ring-1 ring-black/10 dark:bg-gray-800 dark:shadow-black/30 dark:ring-white/10 sm:w-28 xl:w-32'>
+        <div
+          data-play-detail-cover
+          className='relative aspect-[2/3] w-24 flex-shrink-0 overflow-hidden rounded-xl bg-gray-200 shadow-md shadow-black/10 ring-1 ring-black/10 dark:bg-gray-800 dark:shadow-black/30 dark:ring-white/10 sm:w-28 xl:w-32'
+        >
           <CoverImage
             src={videoCover}
             alt={videoTitle}

@@ -122,7 +122,7 @@ export function ThemeToggle({
           },
           {
             duration: 380,
-            easing: 'cubic-bezier(0.33, 1, 0.68, 1)',
+            easing: 'cubic-bezier(0.25, 0.1, 0.25, 1)',
             pseudoElement: '::view-transition-new(root)',
           },
         );

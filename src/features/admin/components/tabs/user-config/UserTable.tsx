@@ -1,5 +1,6 @@
 'use client';
 
+import { ResizableTableHeader } from '@/features/admin/components/ResizableTableHeader';
 import { buttonStyles } from '@/features/admin/lib/buttonStyles';
 import {
   type PermissionContext,
@@ -72,11 +73,18 @@ export function UserTable({
       className='relative overflow-x-auto rounded-lg border border-gray-200 dark:border-gray-700'
       data-table='user-list'
     >
-      <table className='min-w-full divide-y divide-gray-200 dark:divide-gray-700'>
+      <table className='w-full table-fixed divide-y divide-gray-200 dark:divide-gray-700'>
         <thead className='sticky top-0 z-10 bg-gray-50 dark:bg-gray-900'>
           <tr>
-            <th className='w-4' />
-            <th className='w-10 px-1 py-3 text-center'>
+            <th
+              data-column-width='16'
+              style={{ width: 16, minWidth: 16, maxWidth: 16 }}
+            />
+            <th
+              data-column-width='40'
+              style={{ width: 40, minWidth: 40, maxWidth: 40 }}
+              className='px-1 py-3 text-center'
+            >
               {selectableUsersCount > 0 ? (
                 <input
                   type='checkbox'
@@ -88,42 +96,67 @@ export function UserTable({
                 <div className='h-4 w-4' />
               )}
             </th>
-            <th
+            <ResizableTableHeader
+              tableId='user-list'
+              columnId='username'
+              defaultWidth={270}
+              minWidth={96}
               scope='col'
               className='px-6 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400'
             >
               用户名
-            </th>
-            <th
+            </ResizableTableHeader>
+            <ResizableTableHeader
+              tableId='user-list'
+              columnId='role'
+              defaultWidth={164}
+              minWidth={88}
               scope='col'
               className='px-6 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400'
             >
               角色
-            </th>
-            <th
+            </ResizableTableHeader>
+            <ResizableTableHeader
+              tableId='user-list'
+              columnId='status'
+              defaultWidth={133}
+              minWidth={88}
               scope='col'
               className='px-6 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400'
             >
               状态
-            </th>
-            <th
+            </ResizableTableHeader>
+            <ResizableTableHeader
+              tableId='user-list'
+              columnId='groups'
+              defaultWidth={318}
+              minWidth={96}
               scope='col'
               className='px-6 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400'
             >
               用户组
-            </th>
-            <th
+            </ResizableTableHeader>
+            <ResizableTableHeader
+              tableId='user-list'
+              columnId='source-permissions'
+              defaultWidth={289}
+              minWidth={120}
               scope='col'
               className='px-6 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400'
             >
               视频源权限
-            </th>
-            <th
+            </ResizableTableHeader>
+            <ResizableTableHeader
+              tableId='user-list'
+              columnId='actions'
+              defaultWidth={360}
+              minWidth={360}
+              hideDivider
               scope='col'
-              className='px-6 py-3 text-right text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400'
+              className='px-6 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400'
             >
               操作
-            </th>
+            </ResizableTableHeader>
           </tr>
         </thead>
         <tbody className='divide-y divide-gray-200 dark:divide-gray-700'>
@@ -220,7 +253,7 @@ export function UserTable({
                     )}
                   </div>
                 </td>
-                <td className='space-x-2 whitespace-nowrap px-6 py-4 text-right text-sm font-medium'>
+                <td className='space-x-2 whitespace-nowrap px-6 py-4 text-left text-sm font-medium'>
                   {canChangePassword && (
                     <button
                       onClick={() => onShowChangePassword(user.username)}
