@@ -4,6 +4,7 @@ import { AlertTriangle, Download, FileCheck, Lock, Upload } from 'lucide-react';
 import { type FormEvent, type ReactNode, useRef, useState } from 'react';
 
 import AlertModal from '@/components/modals/AlertModal';
+import ConfirmModal from '@/components/modals/ConfirmModal';
 import { PasswordInput } from '@/components/PasswordInput';
 
 interface DataMigrationProps {
@@ -20,6 +21,7 @@ const DataMigration = ({ onRefreshConfig }: DataMigrationProps) => {
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [isExporting, setIsExporting] = useState(false);
   const [isImporting, setIsImporting] = useState(false);
+  const [showImportConfirm, setShowImportConfirm] = useState(false);
   const [alertModal, setAlertModal] = useState<{
     isOpen: boolean;
     type: 'success' | 'error' | 'warning';
@@ -117,7 +119,7 @@ const DataMigration = ({ onRefreshConfig }: DataMigrationProps) => {
     }
   };
 
-  const handleImport = async () => {
+  const handleImportRequest = () => {
     if (!selectedFile) {
       showAlert({
         type: 'error',
@@ -135,6 +137,13 @@ const DataMigration = ({ onRefreshConfig }: DataMigrationProps) => {
       });
       return;
     }
+
+    setShowImportConfirm(true);
+  };
+
+  const handleImport = async () => {
+    if (!selectedFile || !importPassword.trim()) return;
+    setShowImportConfirm(false);
 
     try {
       setIsImporting(true);
@@ -207,7 +216,7 @@ const DataMigration = ({ onRefreshConfig }: DataMigrationProps) => {
 
   const handleImportSubmit = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    void handleImport();
+    handleImportRequest();
   };
 
   return (
@@ -407,6 +416,17 @@ const DataMigration = ({ onRefreshConfig }: DataMigrationProps) => {
       >
         {alertModal.content}
       </AlertModal>
+
+      <ConfirmModal
+        isOpen={showImportConfirm}
+        title='确认导入数据'
+        message='导入将清空并覆盖现有管理配置、用户数据、播放记录和收藏夹，此操作无法撤销。'
+        onClose={() => setShowImportConfirm(false)}
+        onConfirm={() => void handleImport()}
+        confirmText='确认导入'
+        confirmDisabled={isImporting}
+        danger
+      />
     </>
   );
 };

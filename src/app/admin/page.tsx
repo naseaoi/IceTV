@@ -14,10 +14,14 @@ import { useAdminPageActions } from '@/features/admin/hooks/useAdminPageActions'
 import { useAdminTab } from '@/features/admin/hooks/useAdminTab';
 import { useLoadingState } from '@/features/admin/hooks/useLoadingState';
 import {
+  CONFIG_FILE_FORM_ID,
   RUNTIME_PARAMS_FORM_ID,
   SITE_CONFIG_FORM_ID,
 } from '@/features/admin/lib/admin-form-ids';
-import { getVisibleTabs } from '@/features/admin/lib/admin-tabs';
+import {
+  type AdminTabId,
+  getVisibleTabs,
+} from '@/features/admin/lib/admin-tabs';
 import { buttonStyles } from '@/features/admin/lib/buttonStyles';
 import { showError } from '@/features/admin/lib/notifications';
 import { isOwner } from '@/features/admin/lib/permissions';
@@ -75,28 +79,84 @@ function AdminPageClient() {
   const [showResetConfigModal, setShowResetConfigModal] = useState(false);
   const [siteConfigSaving, setSiteConfigSaving] = useState(false);
   const [runtimeParamsSaving, setRuntimeParamsSaving] = useState(false);
+  const [configFileSaving, setConfigFileSaving] = useState(false);
   const [siteConfigDirty, setSiteConfigDirty] = useState(false);
   const [runtimeParamsDirty, setRuntimeParamsDirty] = useState(false);
+  const [configFileDirty, setConfigFileDirty] = useState(false);
+  const [pendingTab, setPendingTab] = useState<AdminTabId | null>(null);
 
   const isOwnerRole = isOwner(role);
   const visibleTabs = getVisibleTabs(isOwnerRole);
   const { activeTab, setActiveTab } = useAdminTab(isOwnerRole);
   const activeSaveAction =
-    activeTab === 'site'
+    activeTab === 'config-file'
       ? {
-          formId: SITE_CONFIG_FORM_ID,
-          saving: siteConfigSaving,
-          dirty: siteConfigDirty,
-          title: '保存站点配置',
+          formId: CONFIG_FILE_FORM_ID,
+          saving: configFileSaving,
+          dirty: configFileDirty,
+          title: '保存配置文件',
         }
-      : activeTab === 'runtime'
+      : activeTab === 'site'
         ? {
-            formId: RUNTIME_PARAMS_FORM_ID,
-            saving: runtimeParamsSaving,
-            dirty: runtimeParamsDirty,
-            title: '保存运行参数',
+            formId: SITE_CONFIG_FORM_ID,
+            saving: siteConfigSaving,
+            dirty: siteConfigDirty,
+            title: '保存站点配置',
           }
-        : null;
+        : activeTab === 'runtime'
+          ? {
+              formId: RUNTIME_PARAMS_FORM_ID,
+              saving: runtimeParamsSaving,
+              dirty: runtimeParamsDirty,
+              title: '保存运行参数',
+            }
+          : null;
+  const hasUnsavedChanges =
+    configFileDirty || siteConfigDirty || runtimeParamsDirty;
+
+  useEffect(() => {
+    const handleBeforeUnload = (event: BeforeUnloadEvent) => {
+      if (!hasUnsavedChanges) return;
+      event.preventDefault();
+      event.returnValue = '';
+    };
+    const handleDocumentClick = (event: MouseEvent) => {
+      if (
+        !hasUnsavedChanges ||
+        event.defaultPrevented ||
+        event.button !== 0 ||
+        event.metaKey ||
+        event.ctrlKey ||
+        event.shiftKey ||
+        event.altKey
+      ) {
+        return;
+      }
+      const target = event.target;
+      if (!(target instanceof Element)) return;
+      const link = target.closest<HTMLAnchorElement>('a[href]');
+      if (!link || link.target === '_blank' || link.hasAttribute('download')) {
+        return;
+      }
+      const destination = new URL(link.href, window.location.href);
+      if (
+        destination.origin === window.location.origin &&
+        destination.pathname === window.location.pathname
+      ) {
+        return;
+      }
+      if (!window.confirm('当前页面有未保存的改动，确定要离开吗？')) {
+        event.preventDefault();
+        event.stopImmediatePropagation();
+      }
+    };
+    window.addEventListener('beforeunload', handleBeforeUnload);
+    document.addEventListener('click', handleDocumentClick, true);
+    return () => {
+      window.removeEventListener('beforeunload', handleBeforeUnload);
+      document.removeEventListener('click', handleDocumentClick, true);
+    };
+  }, [hasUnsavedChanges]);
 
   const { fetchConfig, resetConfig } = useAdminPageActions({
     showAlert,
@@ -112,6 +172,25 @@ function AdminPageClient() {
 
   const handleResetConfig = () => {
     setShowResetConfigModal(true);
+  };
+
+  const handleSelectTab = (tab: AdminTabId) => {
+    if (tab === activeTab) return;
+    if (activeSaveAction?.dirty) {
+      setPendingTab(tab);
+      return;
+    }
+    setActiveTab(tab);
+  };
+
+  const handleDiscardAndSwitchTab = () => {
+    if (!pendingTab) return;
+    if (activeTab === 'config-file') setConfigFileDirty(false);
+    if (activeTab === 'site') setSiteConfigDirty(false);
+    if (activeTab === 'runtime') setRuntimeParamsDirty(false);
+    const nextTab = pendingTab;
+    setPendingTab(null);
+    setActiveTab(nextTab);
   };
 
   const handleConfirmResetConfig = async () => {
@@ -195,7 +274,7 @@ function AdminPageClient() {
               <AdminNav
                 tabs={visibleTabs}
                 activeTab={activeTab}
-                onSelect={setActiveTab}
+                onSelect={handleSelectTab}
               />
             </div>
             {config && activeSaveAction && (
@@ -254,8 +333,10 @@ function AdminPageClient() {
                 refreshConfig={fetchConfig}
                 onSiteConfigSavingChange={setSiteConfigSaving}
                 onRuntimeParamsSavingChange={setRuntimeParamsSaving}
+                onConfigFileSavingChange={setConfigFileSaving}
                 onSiteConfigDirtyChange={setSiteConfigDirty}
                 onRuntimeParamsDirtyChange={setRuntimeParamsDirty}
+                onConfigFileDirtyChange={setConfigFileDirty}
               />
             </AdminTabScrollPanel>
           </section>
@@ -270,6 +351,17 @@ function AdminPageClient() {
         message={alertModal.message}
         timer={alertModal.timer}
         showConfirm={alertModal.showConfirm}
+      />
+
+      <ConfirmModal
+        isOpen={pendingTab !== null}
+        title='放弃未保存的改动？'
+        message='当前页面的改动尚未保存，切换后将无法恢复。'
+        onClose={() => setPendingTab(null)}
+        onConfirm={handleDiscardAndSwitchTab}
+        confirmText='放弃并切换'
+        cancelText='继续编辑'
+        danger
       />
 
       <ConfirmModal

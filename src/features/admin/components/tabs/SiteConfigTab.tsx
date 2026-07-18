@@ -149,25 +149,42 @@ const SiteConfigComponent = ({
   // 站点图标相关状态
   const [iconPreview, setIconPreview] = useState<string>('');
   const [iconUploading, setIconUploading] = useState(false);
+  const [pendingIconFile, setPendingIconFile] = useState<File | null>(null);
   const iconFileRef = useRef<HTMLInputElement>(null);
+  const iconPreviewObjectUrlRef = useRef<string | null>(null);
   const savingRef = useRef(false);
   const normalizedSiteSettings = normalizeEditableSiteSettings(siteSettings);
   const siteSettingsDirty =
     JSON.stringify(normalizedSiteSettings) !==
-    JSON.stringify(baselineSiteSettings);
+      JSON.stringify(baselineSiteSettings) || pendingIconFile !== null;
+
+  const revokeIconPreviewObjectUrl = () => {
+    if (!iconPreviewObjectUrlRef.current) return;
+    URL.revokeObjectURL(iconPreviewObjectUrlRef.current);
+    iconPreviewObjectUrlRef.current = null;
+  };
 
   useEffect(() => {
     if (config?.SiteConfig) {
       const nextSiteSettings = buildSiteSettings(config);
       setSiteSettings(nextSiteSettings);
       setBaselineSiteSettings(normalizeEditableSiteSettings(nextSiteSettings));
+      setPendingIconFile(null);
+      revokeIconPreviewObjectUrl();
       // 初始化图标预览
       const icon = config.SiteConfig.SiteIcon;
-      if (icon) {
-        setIconPreview(icon.startsWith('/') ? `${icon}?t=${Date.now()}` : icon);
-      }
+      setIconPreview(
+        icon ? (icon.startsWith('/') ? `${icon}?t=${Date.now()}` : icon) : '',
+      );
     }
   }, [config]);
+
+  useEffect(
+    () => () => {
+      revokeIconPreviewObjectUrl();
+    },
+    [],
+  );
 
   useEffect(() => {
     onDirtyChange?.(siteSettingsDirty);
@@ -226,15 +243,48 @@ const SiteConfigComponent = ({
 
     try {
       await withLoading('saveSiteConfig', async () => {
-        await adminPost('/api/admin/site', { ...siteSettings }, '保存失败');
+        let stagingToken: string | undefined;
+        if (pendingIconFile) {
+          setIconUploading(true);
+          const formData = new FormData();
+          formData.append('icon', pendingIconFile);
+          const response = await fetch('/api/admin/site-icon', {
+            method: 'POST',
+            body: formData,
+          });
+          const data = (await response.json()) as {
+            error?: string;
+            stagingToken?: string;
+          };
+          if (!response.ok || !data.stagingToken) {
+            throw new Error(data.error || '图标上传失败');
+          }
+          stagingToken = data.stagingToken;
+        }
+
+        const removeSiteIcon =
+          baselineSiteSettings.SiteIcon.startsWith('/api/admin/site-icon') &&
+          !normalizedSiteSettings.SiteIcon.startsWith('/api/admin/site-icon');
+        await adminPost(
+          '/api/admin/site',
+          {
+            ...siteSettings,
+            ...(stagingToken ? { SiteIconStagingToken: stagingToken } : {}),
+            ...(removeSiteIcon ? { RemoveSiteIcon: true } : {}),
+          },
+          '保存失败',
+        );
 
         setBaselineSiteSettings(normalizedSiteSettings);
+        setPendingIconFile(null);
+        revokeIconPreviewObjectUrl();
         showSuccess('保存成功, 请刷新页面', showAlert);
         await refreshConfig();
       });
     } catch (err) {
       showError(err instanceof Error ? err.message : '保存失败', showAlert);
     } finally {
+      setIconUploading(false);
       savingRef.current = false;
       onSavingChange?.(false);
     }
@@ -316,6 +366,8 @@ const SiteConfigComponent = ({
                   value={siteSettings.SiteIcon}
                   onChange={(e) => {
                     const url = e.target.value;
+                    setPendingIconFile(null);
+                    revokeIconPreviewObjectUrl();
                     setSiteSettings((prev) => ({ ...prev, SiteIcon: url }));
                     setIconPreview(url);
                   }}
@@ -336,20 +388,9 @@ const SiteConfigComponent = ({
                   {siteSettings.SiteIcon && (
                     <button
                       type='button'
-                      onClick={async () => {
-                        if (
-                          siteSettings.SiteIcon.startsWith(
-                            '/api/admin/site-icon',
-                          )
-                        ) {
-                          try {
-                            await fetch('/api/admin/site-icon', {
-                              method: 'DELETE',
-                            });
-                          } catch {
-                            /* ignore */
-                          }
-                        }
+                      onClick={() => {
+                        setPendingIconFile(null);
+                        revokeIconPreviewObjectUrl();
                         setSiteSettings((prev) => ({ ...prev, SiteIcon: '' }));
                         setIconPreview('');
                       }}
@@ -369,40 +410,24 @@ const SiteConfigComponent = ({
                 aria-label='上传站点图标'
                 accept='image/png,image/jpeg,image/webp,image/svg+xml,image/gif,image/x-icon'
                 className='hidden'
-                onChange={async (e) => {
+                onChange={(e) => {
                   const file = e.target.files?.[0];
                   if (!file) return;
                   if (file.size > 512 * 1024) {
                     showError('图标文件不能超过 512KB', showAlert);
+                    e.target.value = '';
                     return;
                   }
-                  setIconUploading(true);
-                  try {
-                    const formData = new FormData();
-                    formData.append('icon', file);
-                    const res = await fetch('/api/admin/site-icon', {
-                      method: 'POST',
-                      body: formData,
-                    });
-                    const data = await res.json();
-                    if (!res.ok) {
-                      showError(data.error || '上传失败', showAlert);
-                      return;
-                    }
-                    setSiteSettings((prev) => ({
-                      ...prev,
-                      SiteIcon: '/api/admin/site-icon',
-                    }));
-                    setIconPreview(
-                      data.url || `/api/admin/site-icon?t=${Date.now()}`,
-                    );
-                    showSuccess('图标上传成功', showAlert);
-                  } catch {
-                    showError('上传失败', showAlert);
-                  } finally {
-                    setIconUploading(false);
-                    e.target.value = '';
-                  }
+                  revokeIconPreviewObjectUrl();
+                  const previewUrl = URL.createObjectURL(file);
+                  iconPreviewObjectUrlRef.current = previewUrl;
+                  setPendingIconFile(file);
+                  setSiteSettings((prev) => ({
+                    ...prev,
+                    SiteIcon: '/api/admin/site-icon',
+                  }));
+                  setIconPreview(previewUrl);
+                  e.target.value = '';
                 }}
               />
             </div>

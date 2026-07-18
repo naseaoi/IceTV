@@ -8,6 +8,11 @@ import {
   normalizeSiteDoubanImageProxyType,
   normalizeSiteDoubanProxyType,
 } from '@/lib/douban-options';
+import {
+  commitStagedSiteIcon,
+  hasStagedSiteIcon,
+  removeSiteIcon,
+} from '@/lib/site-icon-storage.server';
 import { normalizeSourceCoverProxyMode } from '@/lib/source-cover-proxy';
 
 export const runtime = 'nodejs';
@@ -36,6 +41,8 @@ export async function POST(request: NextRequest) {
       SourceCoverProxyMode,
       DisableYellowFilter,
       FluidSearch,
+      SiteIconStagingToken,
+      RemoveSiteIcon,
     } = body as {
       SiteName: string;
       SiteIcon: string;
@@ -53,11 +60,14 @@ export async function POST(request: NextRequest) {
       SourceCoverProxyMode?: string;
       DisableYellowFilter: boolean;
       FluidSearch: boolean;
+      SiteIconStagingToken?: string;
+      RemoveSiteIcon?: boolean;
     };
 
     // 参数校验
     if (
       typeof SiteName !== 'string' ||
+      typeof SiteIcon !== 'string' ||
       typeof Announcement !== 'string' ||
       typeof FooterText !== 'string' ||
       typeof EnableLiveEntry !== 'boolean' ||
@@ -73,9 +83,27 @@ export async function POST(request: NextRequest) {
       (SourceCoverProxyMode !== undefined &&
         typeof SourceCoverProxyMode !== 'string') ||
       typeof DisableYellowFilter !== 'boolean' ||
-      typeof FluidSearch !== 'boolean'
+      typeof FluidSearch !== 'boolean' ||
+      (SiteIconStagingToken !== undefined &&
+        typeof SiteIconStagingToken !== 'string') ||
+      (RemoveSiteIcon !== undefined && typeof RemoveSiteIcon !== 'boolean')
     ) {
       return NextResponse.json({ error: '参数格式错误' }, { status: 400 });
+    }
+
+    if (SiteIconStagingToken && RemoveSiteIcon) {
+      return NextResponse.json({ error: '站点图标操作冲突' }, { status: 400 });
+    }
+
+    if (
+      SiteIconStagingToken &&
+      (!SiteIcon.startsWith('/api/admin/site-icon') ||
+        !hasStagedSiteIcon(SiteIconStagingToken))
+    ) {
+      return NextResponse.json(
+        { error: '暂存的站点图标不存在' },
+        { status: 400 },
+      );
     }
 
     if (
@@ -136,6 +164,12 @@ export async function POST(request: NextRequest) {
 
     // 写入数据库
     await saveConfig(adminConfig);
+
+    if (SiteIconStagingToken) {
+      commitStagedSiteIcon(SiteIconStagingToken);
+    } else if (RemoveSiteIcon) {
+      removeSiteIcon();
+    }
 
     return NextResponse.json(
       { ok: true },
