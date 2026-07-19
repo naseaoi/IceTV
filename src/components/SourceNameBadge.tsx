@@ -19,7 +19,7 @@ export default function SourceNameBadge({
     <span
       data-source-name-badge
       title={sourceName}
-      className={`pointer-events-none absolute z-10 inline-flex w-fit max-w-[calc(100%-1rem)] items-center overflow-hidden rounded bg-black/60 px-2 py-1 text-xs font-medium leading-4 text-white shadow-sm backdrop-blur-sm transition-opacity duration-200 ${className}`}
+      className={`pointer-events-none z-10 inline-flex w-fit min-w-0 items-center overflow-hidden rounded bg-black/60 px-2 py-1 text-xs font-medium leading-4 text-white shadow-sm backdrop-blur-sm transition-opacity duration-200 max-sm:px-1.5 max-sm:py-0.5 max-sm:text-[10px] ${className}`}
     >
       {origin === 'live' && <Radio className='mr-1 h-3 w-3 shrink-0' />}
       <span className='truncate'>{sourceName}</span>

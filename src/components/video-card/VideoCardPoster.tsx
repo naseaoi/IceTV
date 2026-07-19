@@ -156,6 +156,7 @@ export function VideoCardPoster({
   onToggleFavorite,
 }: VideoCardPosterProps) {
   const displayYear = String(year ?? '').trim();
+  const showEpisodeBadge = (episodes ?? 0) > 1;
 
   return (
     <div
@@ -178,14 +179,31 @@ export function VideoCardPoster({
         onContextMenu={preventContextMenu}
       />
 
-      {config.showSourceName && (
-        <SourceNameBadge
-          sourceName={sourceName}
-          origin={origin}
-          className={`left-2 top-2 ${
-            config.showDoubanLink ? 'sm:group-hover:opacity-0' : ''
-          }`}
-        />
+      {(config.showSourceName || showEpisodeBadge) && (
+        <div
+          className='absolute inset-x-2 top-2 z-10 flex items-start justify-between gap-2'
+          style={noSelectStyle}
+          onContextMenu={preventContextMenu}
+        >
+          {config.showSourceName && (
+            <SourceNameBadge
+              sourceName={sourceName}
+              origin={origin}
+              className={
+                config.showDoubanLink ? 'sm:group-hover:opacity-0' : ''
+              }
+            />
+          )}
+          {showEpisodeBadge && (
+            <div
+              className='ml-auto flex-shrink-0 whitespace-nowrap rounded-md bg-green-500 px-2 py-1 text-xs font-semibold text-white shadow-md transition-all duration-300 ease-out group-hover:scale-110 max-sm:px-1.5 max-sm:py-0.5 max-sm:text-[10px]'
+              style={noSelectStyle}
+              onContextMenu={preventContextMenu}
+            >
+              {currentEpisode ? `${currentEpisode}/${episodes}` : episodes}
+            </div>
+          )}
+        </div>
       )}
 
       {config.showPlayButton && (
@@ -258,16 +276,6 @@ export function VideoCardPoster({
           onContextMenu={preventContextMenu}
         >
           {rate}
-        </div>
-      )}
-
-      {episodes && episodes > 1 && (
-        <div
-          className='absolute right-2 top-2 rounded-md bg-green-500 px-2 py-1 text-xs font-semibold text-white shadow-md transition-all duration-300 ease-out group-hover:scale-110'
-          style={noSelectStyle}
-          onContextMenu={preventContextMenu}
-        >
-          {currentEpisode ? `${currentEpisode}/${episodes}` : episodes}
         </div>
       )}
 
