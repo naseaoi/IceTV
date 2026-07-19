@@ -3,7 +3,7 @@
 import { Moon, Sun } from 'lucide-react';
 import { usePathname } from 'next/navigation';
 import { useTheme } from 'next-themes';
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef } from 'react';
 
 import {
   getSidebarItemLabelClass,
@@ -24,7 +24,6 @@ export function ThemeToggle({
   isCollapsed = false,
   className,
 }: ThemeToggleProps) {
-  const [mounted, setMounted] = useState(false);
   const { setTheme, resolvedTheme } = useTheme();
   const pathname = usePathname();
   const buttonRef = useRef<HTMLButtonElement | null>(null);
@@ -41,42 +40,12 @@ export function ThemeToggle({
     }
   };
 
-  useEffect(() => {
-    setMounted(true);
-  }, []);
-
   // 监听主题变化和路由变化，确保主题色始终同步
   useEffect(() => {
-    if (mounted) {
+    if (resolvedTheme) {
       setThemeColor(resolvedTheme);
     }
-  }, [mounted, resolvedTheme, pathname]);
-
-  if (!mounted) {
-    // SSR/hydration 阶段：渲染带默认图标的占位符避免图标闪烁
-    if (variant === 'sidebar') {
-      return (
-        <div
-          className={`${SIDEBAR_ITEM_LAYOUT_CLASS} w-full text-gray-500 dark:text-gray-400`}
-        >
-          <div className={SIDEBAR_ITEM_ICON_WRAP_CLASS}>
-            <Moon className={SIDEBAR_ITEM_ICON_CLASS} />
-          </div>
-          <span className={getSidebarItemLabelClass(isCollapsed)}>主题</span>
-        </div>
-      );
-    }
-    return (
-      <div
-        className={
-          className ??
-          'flex h-10 w-10 items-center justify-center rounded-full p-2 text-gray-600 dark:text-gray-300'
-        }
-      >
-        <Moon className='h-full w-full' />
-      </div>
-    );
-  }
+  }, [resolvedTheme, pathname]);
 
   const toggleTheme = () => {
     const targetTheme = resolvedTheme === 'dark' ? 'light' : 'dark';
@@ -140,11 +109,8 @@ export function ThemeToggle({
         title='主题'
       >
         <div className={SIDEBAR_ITEM_ICON_WRAP_CLASS}>
-          {resolvedTheme === 'dark' ? (
-            <Sun className={SIDEBAR_ITEM_ICON_CLASS} />
-          ) : (
-            <Moon className={SIDEBAR_ITEM_ICON_CLASS} />
-          )}
+          <Sun className={`${SIDEBAR_ITEM_ICON_CLASS} hidden dark:block`} />
+          <Moon className={`${SIDEBAR_ITEM_ICON_CLASS} dark:hidden`} />
         </div>
         <span className={getSidebarItemLabelClass(isCollapsed)}>主题</span>
       </button>
@@ -161,11 +127,8 @@ export function ThemeToggle({
       }
       aria-label='切换主题'
     >
-      {resolvedTheme === 'dark' ? (
-        <Sun className='h-full w-full' />
-      ) : (
-        <Moon className='h-full w-full' />
-      )}
+      <Sun className='hidden h-full w-full dark:block' />
+      <Moon className='h-full w-full dark:hidden' />
     </button>
   );
 }

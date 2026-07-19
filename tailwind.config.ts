@@ -18,9 +18,6 @@ const config: Config = {
     screens: {
       xs: '480px',
       ...defaultTheme.screens,
-      'mobile-landscape': {
-        raw: '(orientation: landscape) and (max-height: 700px)',
-      },
     },
     extend: {
       fontFamily: {
