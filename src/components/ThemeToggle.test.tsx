@@ -84,7 +84,13 @@ describe('ThemeToggle', () => {
   });
 
   it('uses viewport-relative coordinates at high device pixel ratios', async () => {
-    const animate = jest.fn(() => ({}) as Animation);
+    let finishTransition!: () => void;
+    const transitionFinished = new Promise<void>((resolve) => {
+      finishTransition = resolve;
+    });
+    const animate = jest.fn(
+      () => ({ finished: Promise.resolve() }) as unknown as Animation,
+    );
     Object.defineProperty(document.documentElement, 'animate', {
       configurable: true,
       value: animate,
@@ -93,7 +99,10 @@ describe('ThemeToggle', () => {
       configurable: true,
       value: (callback: () => void) => {
         callback();
-        return { ready: Promise.resolve() };
+        return {
+          ready: Promise.resolve(),
+          finished: transitionFinished,
+        } as ViewTransition;
       },
     });
     Object.defineProperty(window, 'visualViewport', {
@@ -140,5 +149,62 @@ describe('ThemeToggle', () => {
       ),
     ).toBe(`${(Math.hypot(325, 769) / 800) * 100}vmax`);
     await waitFor(() => expect(animate).toHaveBeenCalledTimes(1));
+
+    finishTransition();
+    await waitFor(() =>
+      expect(
+        document.documentElement.style.getPropertyValue(
+          '--theme-transition-radius',
+        ),
+      ).toBe(''),
+    );
+  });
+
+  it('ignores repeated clicks until the current transition finishes', async () => {
+    let finishTransition!: () => void;
+    const transitionFinished = new Promise<void>((resolve) => {
+      finishTransition = resolve;
+    });
+    Object.defineProperty(document.documentElement, 'animate', {
+      configurable: true,
+      value: jest.fn(
+        () => ({ finished: Promise.resolve() }) as unknown as Animation,
+      ),
+    });
+    Object.defineProperty(document, 'startViewTransition', {
+      configurable: true,
+      value: (callback: () => void) => {
+        callback();
+        return {
+          ready: Promise.resolve(),
+          finished: transitionFinished,
+        } as ViewTransition;
+      },
+    });
+    Object.defineProperty(window, 'matchMedia', {
+      configurable: true,
+      value: () => ({ matches: false }),
+    });
+    Object.defineProperties(document.documentElement, {
+      clientWidth: { configurable: true, value: 400 },
+      clientHeight: { configurable: true, value: 800 },
+    });
+
+    render(<ThemeToggle />);
+    const button = screen.getByRole('button', { name: '切换主题' });
+
+    fireEvent.click(button);
+    fireEvent.click(button);
+
+    expect(setTheme).toHaveBeenCalledTimes(1);
+
+    finishTransition();
+    await waitFor(() =>
+      expect(
+        document.documentElement.style.getPropertyValue(
+          '--theme-transition-radius',
+        ),
+      ).toBe(''),
+    );
   });
 });

@@ -1,7 +1,7 @@
 'use client';
 
 import type { LucideIcon } from 'lucide-react';
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useCallback, useLayoutEffect, useRef, useState } from 'react';
 
 interface CapsuleSwitchProps {
   options: { label: string; value: string; icon?: LucideIcon }[];
@@ -22,20 +22,48 @@ const CapsuleSwitch: React.FC<CapsuleSwitchProps> = ({
     left: number;
     width: number;
   } | null>(null);
+  const optionValues = options.map((option) => option.value).join('\u0000');
 
-  // 计算活跃 tab 的位置和宽度
-  useEffect(() => {
+  const updateIndicator = useCallback(() => {
     const btn = buttonRefs.current.get(active);
     const container = containerRef.current;
     if (!btn || !container) return;
 
     const containerRect = container.getBoundingClientRect();
     const btnRect = btn.getBoundingClientRect();
-    setIndicator({
+    if (containerRect.width <= 0 || btnRect.width <= 0) return;
+
+    const nextIndicator = {
       left: btnRect.left - containerRect.left,
       width: btnRect.width,
-    });
-  }, [active, options]);
+    };
+    setIndicator((current) =>
+      current?.left === nextIndicator.left &&
+      current.width === nextIndicator.width
+        ? current
+        : nextIndicator,
+    );
+  }, [active]);
+
+  useLayoutEffect(() => {
+    updateIndicator();
+
+    const container = containerRef.current;
+    const activeButton = buttonRefs.current.get(active);
+    const observer =
+      typeof ResizeObserver === 'undefined'
+        ? null
+        : new ResizeObserver(updateIndicator);
+
+    if (container) observer?.observe(container);
+    if (activeButton) observer?.observe(activeButton);
+    window.addEventListener('resize', updateIndicator);
+
+    return () => {
+      observer?.disconnect();
+      window.removeEventListener('resize', updateIndicator);
+    };
+  }, [active, optionValues, updateIndicator]);
 
   return (
     <div
@@ -48,6 +76,7 @@ const CapsuleSwitch: React.FC<CapsuleSwitchProps> = ({
       {/* 滑动指示器 */}
       {indicator && (
         <div
+          data-capsule-indicator
           className='pointer-events-none absolute inset-y-0 z-0 transition-all duration-300 ease-out'
           style={{
             left: indicator.left,
@@ -76,7 +105,11 @@ const CapsuleSwitch: React.FC<CapsuleSwitchProps> = ({
           <React.Fragment key={opt.value}>
             <button
               ref={(el) => {
-                if (el) buttonRefs.current.set(opt.value, el);
+                if (el) {
+                  buttonRefs.current.set(opt.value, el);
+                } else {
+                  buttonRefs.current.delete(opt.value);
+                }
               }}
               onClick={() => onChange(opt.value)}
               className={`relative cursor-pointer select-none px-6 py-3 text-sm tracking-wider transition-colors duration-500 ${

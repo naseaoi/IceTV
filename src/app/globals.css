@@ -189,6 +189,7 @@ html.dark body {
 }
 
 ::view-transition-group(root) {
+  animation: none;
   pointer-events: none;
 }
 

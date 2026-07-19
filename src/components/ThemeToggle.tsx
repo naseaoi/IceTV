@@ -3,7 +3,8 @@
 import { Moon, Sun } from 'lucide-react';
 import { usePathname } from 'next/navigation';
 import { useTheme } from 'next-themes';
-import { type MouseEvent, useEffect } from 'react';
+import { type MouseEvent, useEffect, useRef } from 'react';
+import { flushSync } from 'react-dom';
 
 import {
   getSidebarItemLabelClass,
@@ -26,6 +27,7 @@ export function ThemeToggle({
 }: ThemeToggleProps) {
   const { setTheme, resolvedTheme } = useTheme();
   const pathname = usePathname();
+  const transitionInProgressRef = useRef(false);
 
   const setThemeColor = (theme?: string) => {
     const meta = document.querySelector('meta[name="theme-color"]');
@@ -47,12 +49,12 @@ export function ThemeToggle({
   }, [resolvedTheme, pathname]);
 
   const toggleTheme = (event: MouseEvent<HTMLButtonElement>) => {
+    if (transitionInProgressRef.current) return;
+
     const targetTheme = resolvedTheme === 'dark' ? 'light' : 'dark';
     setThemeColor(targetTheme);
 
-    const startViewTransition = (document as any).startViewTransition as
-      | ((callback: () => void) => { ready: Promise<void> })
-      | undefined;
+    const startViewTransition = document.startViewTransition;
 
     if (
       !startViewTransition ||
@@ -70,6 +72,11 @@ export function ThemeToggle({
     const viewportOffsetY = window.visualViewport?.offsetTop ?? 0;
     const viewportWidth = document.documentElement.clientWidth;
     const viewportHeight = document.documentElement.clientHeight;
+    if (viewportWidth <= 0 || viewportHeight <= 0) {
+      setTheme(targetTheme);
+      return;
+    }
+
     const centerX = rect.left + rect.width / 2 + viewportOffsetX;
     const centerY = rect.top + rect.height / 2 + viewportOffsetY;
     const maxRadius = Math.hypot(
@@ -85,14 +92,29 @@ export function ThemeToggle({
     root.style.setProperty('--theme-transition-x', `${centerXPercent}%`);
     root.style.setProperty('--theme-transition-y', `${centerYPercent}%`);
     root.style.setProperty('--theme-transition-radius', `${radiusVmax}vmax`);
+    const clearTransitionStyles = () => {
+      root.style.removeProperty('--theme-transition-x');
+      root.style.removeProperty('--theme-transition-y');
+      root.style.removeProperty('--theme-transition-radius');
+    };
 
-    const transition = startViewTransition.call(document, () => {
+    transitionInProgressRef.current = true;
+
+    let transition: ViewTransition;
+    try {
+      transition = startViewTransition.call(document, () => {
+        flushSync(() => setTheme(targetTheme));
+      });
+    } catch {
+      transitionInProgressRef.current = false;
+      clearTransitionStyles();
       setTheme(targetTheme);
-    });
+      return;
+    }
 
-    transition.ready
+    void transition.ready
       .then(() => {
-        document.documentElement.animate(
+        const animation = document.documentElement.animate(
           {
             clipPath: [
               'circle(0px at var(--theme-transition-x) var(--theme-transition-y))',
@@ -105,8 +127,16 @@ export function ThemeToggle({
             pseudoElement: '::view-transition-new(root)',
           },
         );
+        return animation.finished.catch(() => undefined);
       })
       .catch(() => undefined);
+
+    void transition.finished
+      .catch(() => undefined)
+      .finally(() => {
+        transitionInProgressRef.current = false;
+        clearTransitionStyles();
+      });
   };
 
   if (variant === 'sidebar') {
