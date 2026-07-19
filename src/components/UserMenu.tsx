@@ -20,11 +20,11 @@ import {
 } from 'react';
 import { createPortal } from 'react-dom';
 
-import { getAuthInfoFromBrowserCookie } from '@/lib/auth.client';
 import { getClientAuthRuntimeConfig } from '@/lib/runtime-config';
 import { CURRENT_VERSION } from '@/lib/version';
 import { checkForUpdates, UpdateStatus } from '@/lib/version-check';
 
+import { useAuthSession } from './AuthProvider';
 import {
   getSidebarItemLabelClass,
   SIDEBAR_BUTTON_STATE_CLASS,
@@ -33,11 +33,6 @@ import {
   SIDEBAR_ITEM_LAYOUT_CLASS,
 } from './SidebarItem';
 import { UserAvatar } from './user-menu/UserAvatar';
-
-interface AuthInfo {
-  username?: string;
-  role?: 'owner' | 'admin' | 'user';
-}
 
 interface UserMenuProps {
   variant?: 'icon' | 'sidebar';
@@ -106,6 +101,7 @@ export const UserMenu: React.FC<UserMenuProps> = ({
   isCollapsed = false,
 }) => {
   const router = useRouter();
+  const { session } = useAuthSession();
   const buttonRef = useRef<HTMLButtonElement>(null);
   const [menuPlacement, setMenuPlacement] = useState<'up' | 'down'>('down');
   const [menuPos, setMenuPos] = useState<CSSProperties>({});
@@ -113,7 +109,6 @@ export const UserMenu: React.FC<UserMenuProps> = ({
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [isChangePasswordOpen, setIsChangePasswordOpen] = useState(false);
   const [isVersionPanelOpen, setIsVersionPanelOpen] = useState(false);
-  const [authInfo, setAuthInfo] = useState<AuthInfo | null>(null);
   const [storageType, setStorageType] = useState<string>('localdb');
   const [mounted, setMounted] = useState(false);
   const [updateStatus, setUpdateStatus] = useState<UpdateStatus | null>(null);
@@ -125,13 +120,11 @@ export const UserMenu: React.FC<UserMenuProps> = ({
     setMounted(true);
 
     const loadClientState = async () => {
-      const auth = getAuthInfoFromBrowserCookie();
       const { storageType } = await getClientAuthRuntimeConfig();
       if (cancelled) {
         return;
       }
 
-      setAuthInfo(auth);
       setStorageType(storageType);
     };
 
@@ -267,11 +260,12 @@ export const UserMenu: React.FC<UserMenuProps> = ({
     setIsVersionPanelOpen(true);
   };
 
+  const isAuthenticated = session.status === 'authenticated';
+  const username = isAuthenticated ? session.username : undefined;
+  const role = isAuthenticated ? session.role : 'user';
   const showAdminPanel =
-    authInfo?.role === 'owner' || authInfo?.role === 'admin';
-  const isAuthenticated = Boolean(authInfo?.username);
-  const showChangePassword = isAuthenticated && authInfo?.role !== 'owner';
-  const role = authInfo?.role || 'user';
+    isAuthenticated && (role === 'owner' || role === 'admin');
+  const showChangePassword = isAuthenticated && role !== 'owner';
   const hasUpdate = !isChecking && updateStatus === UpdateStatus.HAS_UPDATE;
 
   const listActions = [
@@ -308,11 +302,11 @@ export const UserMenu: React.FC<UserMenuProps> = ({
             onClick={handleGoMe}
             className='group flex w-full items-center gap-3 px-4 py-3.5 text-left transition-colors hover:bg-gray-100/60 dark:hover:bg-white/[0.05]'
           >
-            <UserAvatar username={authInfo?.username} role={role} size='lg' />
+            <UserAvatar username={username} role={role} size='lg' />
             <div className='min-w-0 flex-1'>
               <div className='flex items-center gap-1.5'>
                 <span className='truncate text-sm font-semibold text-gray-900 dark:text-gray-100'>
-                  {authInfo?.username}
+                  {username}
                 </span>
                 <span
                   className={`${MENU_BADGE_CLASS} ${ROLE_BADGE_CLASS[role]}`}
@@ -415,11 +409,7 @@ export const UserMenu: React.FC<UserMenuProps> = ({
           >
             <div className={`relative ${SIDEBAR_ITEM_ICON_WRAP_CLASS}`}>
               {isAuthenticated ? (
-                <UserAvatar
-                  username={authInfo?.username}
-                  role={role}
-                  size='sm'
-                />
+                <UserAvatar username={username} role={role} size='sm' />
               ) : (
                 <CircleUserRound className={SIDEBAR_ITEM_ICON_CLASS} />
               )}
@@ -441,7 +431,7 @@ export const UserMenu: React.FC<UserMenuProps> = ({
             aria-label={isAuthenticated ? '账户菜单' : '登录'}
           >
             {isAuthenticated ? (
-              <UserAvatar username={authInfo?.username} role={role} size='md' />
+              <UserAvatar username={username} role={role} size='md' />
             ) : (
               <CircleUserRound className='h-6 w-6' />
             )}
