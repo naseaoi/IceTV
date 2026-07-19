@@ -303,6 +303,13 @@ div[data-media-provider] video {
   overflow: hidden !important;
 }
 
+/* --- 移动端播放器全宽通栏，去除圆角 --- */
+@media (max-width: 767.98px) {
+  .art-video-player {
+    border-radius: 0 !important;
+  }
+}
+
 /* --- 右键菜单 --- */
 .art-contextmenus {
   background: rgba(0, 0, 0, 0.9) !important;
