@@ -481,6 +481,36 @@ function createFakePool() {
       return [[], []];
     }
 
+    if (
+      normalized ===
+      'INSERT INTO source_route_stats ( source, route_mode, bucket_date, success_count, failure_count, updated_at ) VALUES (?, ?, ?, ?, ?, ?)'
+    ) {
+      const [
+        source,
+        routeMode,
+        bucketDate,
+        successCount,
+        failureCount,
+        updatedAt,
+      ] = params as [
+        string,
+        'browser' | 'server',
+        string,
+        number,
+        number,
+        number,
+      ];
+      currentState.sourceRouteStats.push({
+        source,
+        routeMode,
+        bucketDate,
+        successCount,
+        failureCount,
+        updatedAt,
+      });
+      return [[], []];
+    }
+
     if (normalized === 'DELETE FROM source_route_stats') {
       currentState.sourceRouteStats = [];
       return [[], []];
@@ -593,6 +623,21 @@ function createFakePool() {
 
     if (
       normalized ===
+      'SELECT id, source, video_id, episode_index, title, source_name, cover, year, started_at, ended_at, watch_seconds, last_position, total_time, created_at, updated_at FROM playback_sessions WHERE username = ? ORDER BY started_at DESC'
+    ) {
+      const [username] = params as [string];
+      return [
+        Array.from(currentState.playbackSessions.values())
+          .filter((row) => row.username === username)
+          .sort(
+            (a, b) => Number(b.started_at || 0) - Number(a.started_at || 0),
+          ),
+        [],
+      ];
+    }
+
+    if (
+      normalized ===
       'SELECT keyword FROM search_history WHERE username = ? ORDER BY sort_index ASC'
     ) {
       const [username] = params as [string];
@@ -610,6 +655,18 @@ function createFakePool() {
         Array.from(currentState.users.keys())
           .sort((a, b) => a.localeCompare(b))
           .map((username) => ({ username })),
+        [],
+      ];
+    }
+
+    if (
+      normalized ===
+      'SELECT username, password FROM users ORDER BY username ASC'
+    ) {
+      return [
+        Array.from(currentState.users.entries())
+          .sort(([a], [b]) => a.localeCompare(b))
+          .map(([username, password]) => ({ username, password })),
         [],
       ];
     }
@@ -662,6 +719,28 @@ function createFakePool() {
       }
 
       return [Array.from(grouped.values()), []];
+    }
+
+    if (
+      normalized ===
+      'SELECT source, route_mode, bucket_date, success_count, failure_count FROM source_route_stats ORDER BY bucket_date ASC, source ASC, route_mode ASC'
+    ) {
+      return [
+        [...currentState.sourceRouteStats]
+          .sort((a, b) =>
+            `${a.bucketDate}:${a.source}:${a.routeMode}`.localeCompare(
+              `${b.bucketDate}:${b.source}:${b.routeMode}`,
+            ),
+          )
+          .map((row) => ({
+            source: row.source,
+            route_mode: row.routeMode,
+            bucket_date: row.bucketDate,
+            success_count: row.successCount,
+            failure_count: row.failureCount,
+          })),
+        [],
+      ];
     }
 
     throw new Error(`Unhandled query SQL: ${normalized}`);
@@ -842,12 +921,13 @@ describe('mysql storage contract', () => {
 
   it('replaces all data from an import snapshot', async () => {
     const storage = new MySqlStorage('mysql://demo:demo@localhost:3306/icetv');
+    const passwordHash =
+      '$2b$10$abcdefghijklmnopqrstuu9dBwFh6R0D4A5gHfHnM6kQ7xS8tT9u';
 
     await storage.replaceAllData({
       adminConfig,
       users: {
-        'demo-user':
-          '$2b$10$abcdefghijklmnopqrstuu9dBwFh6R0D4A5gHfHnM6kQ7xS8tT9u',
+        'demo-user': passwordHash,
       },
       userData: {
         'demo-user': {
@@ -858,10 +938,22 @@ describe('mysql storage contract', () => {
           playbackSessions: { [playbackSession.id]: playbackSession },
         },
       },
+      sourceRouteStats: [
+        {
+          source: 'source-a',
+          routeMode: 'browser',
+          bucketDate: '2026-01-08',
+          successCount: 3,
+          failureCount: 1,
+        },
+      ],
     });
 
     await expect(storage.getAdminConfig()).resolves.toEqual(adminConfig);
     await expect(storage.getAllUsers()).resolves.toEqual(['demo-user']);
+    await expect(storage.getAllUsersWithPasswords()).resolves.toEqual({
+      'demo-user': passwordHash,
+    });
     await expect(storage.getAllPlayRecords('demo-user')).resolves.toEqual({
       'source+1': playRecord,
     });
@@ -877,6 +969,18 @@ describe('mysql storage contract', () => {
     });
     await expect(storage.getPlaybackSessions('demo-user')).resolves.toEqual([
       playbackSession,
+    ]);
+    await expect(storage.getAllPlaybackSessions('demo-user')).resolves.toEqual([
+      playbackSession,
+    ]);
+    await expect(storage.getAllSourceRouteStatBuckets()).resolves.toEqual([
+      {
+        source: 'source-a',
+        routeMode: 'browser',
+        bucketDate: '2026-01-08',
+        successCount: 3,
+        failureCount: 1,
+      },
     ]);
   });
 

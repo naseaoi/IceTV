@@ -4,7 +4,11 @@ import { getConfig, saveConfig } from '@/lib/config';
 import { db } from '@/lib/db';
 import { getOwnerUsername } from '@/lib/env.server';
 import { validateAccountPassword } from '@/lib/password-policy';
-import { isValidUsername, normalizeUsername } from '@/lib/username';
+import {
+  isValidUsername,
+  normalizeUsername,
+  USERNAME_RULE_MESSAGE,
+} from '@/lib/username';
 
 export const runtime = 'nodejs';
 
@@ -38,9 +42,7 @@ export async function POST(request: NextRequest) {
     }
     if (!isValidUsername(username)) {
       return NextResponse.json(
-        {
-          error: '用户名只能包含字母、数字、点、下划线和连字符，长度不超过 64',
-        },
+        { error: USERNAME_RULE_MESSAGE },
         { status: 400 },
       );
     }

@@ -40,6 +40,10 @@ export async function POST(req: NextRequest) {
       data: {
         // 管理员配置
         adminConfig: config,
+        // 用户密码
+        users: await db.getAllUsersWithPasswords(),
+        // 源站路由统计（按天原始行）
+        sourceRouteStats: await db.getAllSourceRouteStatBuckets(),
         // 所有用户数据
         userData: {} as { [username: string]: any },
       },
@@ -63,11 +67,10 @@ export async function POST(req: NextRequest) {
         // 跳过片头片尾配置
         skipConfigs: await db.getAllSkipConfigs(username),
         playbackSessions: Object.fromEntries(
-          (
-            await db.getPlaybackSessions(username, {
-              limit: 500,
-            })
-          ).map((session) => [session.id, session]),
+          (await db.getAllPlaybackSessions(username)).map((session) => [
+            session.id,
+            session,
+          ]),
         ),
       };
 
