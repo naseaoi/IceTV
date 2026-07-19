@@ -506,6 +506,16 @@ div[data-media-provider] video {
   color: #e5e7eb !important;
 }
 
+/* 信息面板关闭按钮 [x] 显示为 x */
+.art-info-close {
+  font-size: 0 !important;
+}
+
+.art-info-close::before {
+  content: 'x';
+  font-size: 12px;
+}
+
 /* --- 字幕样式 --- */
 .art-subtitle {
   text-shadow: 0 2px 8px rgba(0, 0, 0, 0.6) !important;

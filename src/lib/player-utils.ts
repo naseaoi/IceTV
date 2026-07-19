@@ -214,6 +214,7 @@ export interface ArtPlayerConfigOverrides {
   setting?: boolean;
   screenshot?: boolean;
   playbackRate?: boolean;
+  aspectRatio?: boolean;
   fastForward?: boolean;
   autoPlayback?: boolean;
   moreVideoAttr?: Record<string, unknown>;

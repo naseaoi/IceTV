@@ -231,6 +231,7 @@ export async function initializeArtPlayer(
         isLive: false,
         setting: true,
         playbackRate: true,
+        aspectRatio: true,
         screenshot: true,
         fastForward: false,
       }),

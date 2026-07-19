@@ -240,7 +240,7 @@ const EpisodeSelector: React.FC<EpisodeSelectorProps> = ({
     videoTitle,
   ]);
 
-  const hasEpisodesTab = totalEpisodes > 1 || variantSources.length > 1;
+  const hasEpisodesTab = totalEpisodes > 0 || variantSources.length > 1;
 
   const [mobileSheet, setMobileSheet] = useState<MobileSheetKey | null>(null);
   const [desktopTab, setDesktopTab] = useState<DesktopTabKey>('main');
