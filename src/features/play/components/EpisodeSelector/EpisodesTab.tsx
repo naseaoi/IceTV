@@ -6,6 +6,7 @@ import React, {
   useState,
 } from 'react';
 
+import { getVerticalScrollMaskStyle } from '@/lib/scroll-edge-fade';
 import { EpisodeGroup, SearchResult } from '@/lib/types';
 import { normalizeInlineText } from '@/lib/utils';
 
@@ -235,23 +236,10 @@ export const EpisodesTab: React.FC<EpisodesTabProps> = ({
     return () => window.clearTimeout(timer);
   }, [currentPage, currentEnd, currentStart, syncEpisodeFade, value]);
 
-  const episodeContainerStyle = hasEpisodeTopFade
-    ? {
-        WebkitMaskImage: hasEpisodeBottomFade
-          ? 'linear-gradient(to bottom, transparent 0, #000 2rem, #000 calc(100% - 2rem), transparent 100%)'
-          : 'linear-gradient(to bottom, transparent 0, #000 2rem, #000 100%)',
-        maskImage: hasEpisodeBottomFade
-          ? 'linear-gradient(to bottom, transparent 0, #000 2rem, #000 calc(100% - 2rem), transparent 100%)'
-          : 'linear-gradient(to bottom, transparent 0, #000 2rem, #000 100%)',
-      }
-    : hasEpisodeBottomFade
-      ? {
-          WebkitMaskImage:
-            'linear-gradient(to bottom, #000 0, #000 calc(100% - 2rem), transparent 100%)',
-          maskImage:
-            'linear-gradient(to bottom, #000 0, #000 calc(100% - 2rem), transparent 100%)',
-        }
-      : undefined;
+  const episodeContainerStyle = getVerticalScrollMaskStyle(
+    hasEpisodeTopFade,
+    hasEpisodeBottomFade,
+  );
 
   return (
     <>
