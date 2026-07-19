@@ -100,4 +100,26 @@ describe('data import playback stats', () => {
       '播放统计 key 格式无效',
     );
   });
+
+  it('keeps only the newest sessions when over the import limit', async () => {
+    const importData = createImportData();
+    importData.data.adminConfig = {
+      ...adminConfig,
+      SiteConfig: {
+        ...adminConfig.SiteConfig,
+        DataImportPlaybackSessionsLimit: 2,
+      },
+    };
+    importData.data.userData.owner.playbackSessions = {
+      session_old_1: { ...playbackSession, started_at: 1000 },
+      session_new_1: { ...playbackSession, started_at: 3000 },
+      session_mid_1: { ...playbackSession, started_at: 2000 },
+    };
+
+    const parsed = await parseImportData(importData);
+
+    expect(
+      Object.keys(parsed.snapshot.userData.owner.playbackSessions).sort(),
+    ).toEqual(['session_mid_1', 'session_new_1']);
+  });
 });

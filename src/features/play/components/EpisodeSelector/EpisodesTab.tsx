@@ -361,11 +361,14 @@ export const EpisodesTab: React.FC<EpisodesTabProps> = ({
           const isActive = episodeNumber === value;
           const rawTitle = episodes_titles?.[episodeNumber - 1];
           const match = rawTitle?.match(/(?:第)?(\d+)(?:集|话)/);
-          const displayTitle = rawTitle
-            ? match
-              ? match[1]
+          const displayTitle =
+            totalEpisodes === 1
+              ? '正片'
               : rawTitle
-            : `${episodeNumber}`;
+                ? match
+                  ? match[1]
+                  : rawTitle
+                : `${episodeNumber}`;
           const estimatedPx = Array.from(displayTitle).reduce(
             (sum, char) =>
               sum +
@@ -394,7 +397,10 @@ export const EpisodesTab: React.FC<EpisodesTabProps> = ({
                     ? 'bg-green-500 text-white shadow-md shadow-green-500/20'
                     : 'bg-gray-100 text-gray-700 hover:scale-105 hover:bg-gray-200 dark:bg-white/[0.06] dark:text-gray-300 dark:hover:bg-white/[0.12]'
                 }`.trim()}
-              title={rawTitle || `第 ${episodeNumber} 集`}
+              title={
+                rawTitle ||
+                (totalEpisodes === 1 ? '正片' : `第 ${episodeNumber} 集`)
+              }
             >
               <span className='truncate'>{displayTitle}</span>
             </button>

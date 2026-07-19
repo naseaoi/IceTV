@@ -1,4 +1,6 @@
-﻿import { AdminConfig } from '@/types/admin';
+﻿import { randomUUID } from 'crypto';
+
+import { AdminConfig } from '@/types/admin';
 
 import { configSelfCheck } from './config';
 import { getOwnerUsername } from './env.server';
@@ -9,9 +11,11 @@ import {
   PlaybackSession,
   PlayRecord,
   SkipConfig,
+  SourceRouteStatsBucket,
   StorageImportData,
   StorageUserImportData,
 } from './types';
+import { normalizeUsername } from './username';
 import { parseStorageKey } from './utils';
 
 const MAX_USERS = 1000;
@@ -26,6 +30,8 @@ const MAX_KEY_LENGTH = 255;
 const MAX_SHORT_STRING_LENGTH = 4096;
 const MAX_LONG_STRING_LENGTH = 2000000;
 const MAX_SECONDS = 365 * 24 * 60 * 60;
+const MAX_SOURCE_ROUTE_STATS = 20000;
+const MAX_ROUTE_STAT_COUNT = 1000000000;
 
 export class ImportValidationError extends Error {
   constructor(
@@ -51,6 +57,8 @@ export async function parseImportData(
   const data = requireObject(root.data, '备份文件格式无效');
   const adminConfig = normalizeAdminConfig(data.adminConfig);
   const userDataInput = requireObject(data.userData, '备份文件格式无效');
+  const importedPasswords = normalizeImportedPasswords(data.users);
+  const sourceRouteStats = normalizeSourceRouteStats(data.sourceRouteStats);
   const userEntries = Object.entries(userDataInput);
 
   if (userEntries.length > MAX_USERS) {
@@ -83,7 +91,9 @@ export async function parseImportData(
 
     userData[username] = normalizedUserData;
     if (username !== ownerUsername) {
-      users[username] = await hashPassword(crypto.randomUUID());
+      users[username] =
+        importedPasswords[normalizeUsername(username)] ??
+        (await hashPassword(randomUUID()));
     }
   }
 
@@ -92,6 +102,7 @@ export async function parseImportData(
       adminConfig,
       users,
       userData,
+      sourceRouteStats,
     },
     importedUsers: userEntries.length,
     timestamp:
@@ -107,6 +118,88 @@ export async function parseImportData(
           )
         : '未知版本',
   };
+}
+
+function normalizeImportedPasswords(value: unknown): Record<string, string> {
+  if (value === undefined || value === null) {
+    return {};
+  }
+  const input = requireObject(value, '用户密码格式无效');
+  const entries = Object.entries(input);
+  if (entries.length > MAX_USERS) {
+    throw new ImportValidationError('用户数量超出限制', 413);
+  }
+
+  const output: Record<string, string> = {};
+  for (const [username, password] of entries) {
+    assertKey(username, '用户名', MAX_USERNAME_LENGTH);
+    const stored = limitString(password, '用户密码', MAX_SHORT_STRING_LENGTH);
+    if (stored) {
+      output[normalizeUsername(username)] = stored;
+    }
+  }
+  return output;
+}
+
+function normalizeSourceRouteStats(value: unknown): SourceRouteStatsBucket[] {
+  if (value === undefined || value === null) {
+    return [];
+  }
+  if (!Array.isArray(value)) {
+    throw new ImportValidationError('源站路由统计格式无效');
+  }
+  if (value.length > MAX_SOURCE_ROUTE_STATS) {
+    throw new ImportValidationError('源站路由统计数量超出限制', 413);
+  }
+
+  const seen = new Set<string>();
+  const output: SourceRouteStatsBucket[] = [];
+  for (const item of value) {
+    const input = requireObject(item, '源站路由统计条目格式无效');
+    const source = limitString(
+      input.source,
+      '源站路由统计 source',
+      MAX_KEY_LENGTH,
+    );
+    if (!source.trim()) {
+      throw new ImportValidationError('源站路由统计 source 不能为空');
+    }
+    if (input.routeMode !== 'browser' && input.routeMode !== 'server') {
+      throw new ImportValidationError('源站路由统计模式格式无效');
+    }
+    const bucketDate = limitString(input.bucketDate, '源站路由统计日期', 10);
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(bucketDate)) {
+      throw new ImportValidationError('源站路由统计日期格式无效');
+    }
+    const key = `${source}:${input.routeMode}:${bucketDate}`;
+    if (seen.has(key)) {
+      throw new ImportValidationError('源站路由统计条目重复');
+    }
+    seen.add(key);
+
+    output.push({
+      source,
+      routeMode: input.routeMode,
+      bucketDate,
+      successCount: Math.floor(
+        assertBoundedNumber(
+          input.successCount,
+          '源站路由统计成功数',
+          0,
+          MAX_ROUTE_STAT_COUNT,
+        ),
+      ),
+      failureCount: Math.floor(
+        assertBoundedNumber(
+          input.failureCount,
+          '源站路由统计失败数',
+          0,
+          MAX_ROUTE_STAT_COUNT,
+        ),
+      ),
+    });
+  }
+  return output;
 }
 
 function normalizeAdminConfig(value: unknown): AdminConfig {
@@ -338,13 +431,35 @@ function normalizeUserData(
       normalizeSkipConfig,
       true,
     ),
-    playbackSessions: normalizeRecordMap(
+    playbackSessions: normalizePlaybackSessions(
       input.playbackSessions,
-      '播放统计',
       playbackSessionsLimit || MAX_PLAYBACK_SESSIONS_PER_USER,
-      normalizePlaybackSession,
     ),
   };
+}
+
+// 超出上限时保留最新的会话，避免整体导入失败
+function normalizePlaybackSessions(
+  value: unknown,
+  limit: number,
+): Record<string, PlaybackSession> {
+  if (value === undefined || value === null) {
+    return {};
+  }
+  const input = requireObject(value, '播放统计格式无效');
+
+  const sessions: [string, PlaybackSession][] = [];
+  for (const [key, item] of Object.entries(input)) {
+    assertKey(key, '播放统计 key', MAX_KEY_LENGTH);
+    sessions.push([key, normalizePlaybackSession(item, key)]);
+  }
+
+  const safeLimit = Math.max(1, Math.floor(limit));
+  if (sessions.length > safeLimit) {
+    sessions.sort(([, a], [, b]) => b.started_at - a.started_at);
+    sessions.length = safeLimit;
+  }
+  return Object.fromEntries(sessions);
 }
 
 function normalizeRecordMap<T>(

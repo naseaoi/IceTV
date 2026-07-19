@@ -172,12 +172,13 @@ describe('sqlite storage contract', () => {
 
   it('replaces all data from an import snapshot', async () => {
     const storage = new LocalSqliteStorage(':memory:');
+    const passwordHash =
+      '$2b$10$abcdefghijklmnopqrstuu9dBwFh6R0D4A5gHfHnM6kQ7xS8tT9u';
 
     await storage.replaceAllData({
       adminConfig,
       users: {
-        'demo-user':
-          '$2b$10$abcdefghijklmnopqrstuu9dBwFh6R0D4A5gHfHnM6kQ7xS8tT9u',
+        'demo-user': passwordHash,
       },
       userData: {
         'demo-user': {
@@ -188,10 +189,22 @@ describe('sqlite storage contract', () => {
           playbackSessions: { [playbackSession.id]: playbackSession },
         },
       },
+      sourceRouteStats: [
+        {
+          source: 'source-a',
+          routeMode: 'browser',
+          bucketDate: '2026-01-08',
+          successCount: 3,
+          failureCount: 1,
+        },
+      ],
     });
 
     await expect(storage.getAdminConfig()).resolves.toEqual(adminConfig);
     await expect(storage.getAllUsers()).resolves.toEqual(['demo-user']);
+    await expect(storage.getAllUsersWithPasswords()).resolves.toEqual({
+      'demo-user': passwordHash,
+    });
     await expect(storage.getAllPlayRecords('demo-user')).resolves.toEqual({
       'source+1': playRecord,
     });
@@ -208,6 +221,59 @@ describe('sqlite storage contract', () => {
     await expect(storage.getPlaybackSessions('demo-user')).resolves.toEqual([
       playbackSession,
     ]);
+    await expect(storage.getAllSourceRouteStatBuckets()).resolves.toEqual([
+      {
+        source: 'source-a',
+        routeMode: 'browser',
+        bucketDate: '2026-01-08',
+        successCount: 3,
+        failureCount: 1,
+      },
+    ]);
+    await expect(storage.getSourceRouteStats('2026-01-01')).resolves.toEqual([
+      {
+        source: 'source-a',
+        routeMode: 'browser',
+        successCount: 3,
+        failureCount: 1,
+      },
+    ]);
+  });
+
+  it('keeps legacy short usernames when replacing data', async () => {
+    const storage = new LocalSqliteStorage(':memory:');
+
+    await storage.replaceAllData({
+      adminConfig,
+      users: { abc: 'legacy-password-hash', admin: 'admin-password-hash' },
+      userData: {},
+      sourceRouteStats: [],
+    });
+
+    await expect(storage.getAllUsers()).resolves.toEqual(['abc', 'admin']);
+  });
+
+  it('returns all playback sessions without page limit', async () => {
+    const storage = new LocalSqliteStorage(':memory:');
+    const total = 510;
+
+    for (let index = 0; index < total; index += 1) {
+      await storage.setPlaybackSession('demo-user', {
+        ...playbackSession,
+        id: `session_bulk_${index}`,
+        started_at: 1000 + index,
+      });
+    }
+
+    const limited = await storage.getPlaybackSessions('demo-user', {
+      limit: 10000,
+    });
+    const all = await storage.getAllPlaybackSessions('demo-user');
+
+    expect(limited).toHaveLength(500);
+    expect(all).toHaveLength(total);
+    expect(all[0].id).toBe(`session_bulk_${total - 1}`);
+    expect(all[total - 1].id).toBe('session_bulk_0');
   });
 
   it('returns null when admin config is absent', async () => {
@@ -221,6 +287,7 @@ describe('sqlite storage contract', () => {
       adminConfig,
       users: {},
       userData: {},
+      sourceRouteStats: [],
     });
 
     (

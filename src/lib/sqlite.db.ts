@@ -23,10 +23,11 @@ import {
   PlayRecord,
   SkipConfig,
   SourceRouteStatInput,
+  SourceRouteStatsBucket,
   SourceRouteStatsItem,
   StorageImportData,
 } from './types';
-import { assertValidUsername, normalizeUsername } from './username';
+import { assertValidUsernameFormat, normalizeUsername } from './username';
 
 const SEARCH_HISTORY_LIMIT = 20;
 
@@ -192,6 +193,7 @@ export class LocalSqliteStorage implements IStorage {
     checkUserExist: Database.Statement;
     deleteUserRow: Database.Statement;
     getAllUsers: Database.Statement;
+    getAllUsersWithPasswords: Database.Statement;
     // search_history
     getSearchHistory: Database.Statement;
     deleteSearchHistoryAll: Database.Statement;
@@ -399,6 +401,9 @@ export class LocalSqliteStorage implements IStorage {
       getAllUsers: this.db.prepare(
         'SELECT username FROM users ORDER BY username ASC',
       ),
+      getAllUsersWithPasswords: this.db.prepare(
+        'SELECT username, password FROM users ORDER BY username ASC',
+      ),
       // search_history
       getSearchHistory: this.db.prepare(
         'SELECT keyword FROM search_history WHERE username = ? ORDER BY sort_index ASC',
@@ -546,14 +551,14 @@ export class LocalSqliteStorage implements IStorage {
       );
 
       for (const [userName, password] of Object.entries(legacyData.users)) {
-        const username = assertValidUsername(userName);
+        const username = assertValidUsernameFormat(userName);
         insertUser.run(username, password);
       }
 
       for (const [userName, records] of Object.entries(
         legacyData.playRecords,
       )) {
-        const username = assertValidUsername(userName);
+        const username = assertValidUsernameFormat(userName);
         for (const [key, record] of Object.entries(records)) {
           insertPlayRecord.run(username, key, JSON.stringify(record));
         }
@@ -562,7 +567,7 @@ export class LocalSqliteStorage implements IStorage {
       for (const [userName, favorites] of Object.entries(
         legacyData.favorites,
       )) {
-        const username = assertValidUsername(userName);
+        const username = assertValidUsernameFormat(userName);
         for (const [key, favorite] of Object.entries(favorites)) {
           insertFavorite.run(username, key, JSON.stringify(favorite));
         }
@@ -571,7 +576,7 @@ export class LocalSqliteStorage implements IStorage {
       for (const [userName, keywords] of Object.entries(
         legacyData.searchHistory,
       )) {
-        const username = assertValidUsername(userName);
+        const username = assertValidUsernameFormat(userName);
         if (!Array.isArray(keywords)) {
           continue;
         }
@@ -583,7 +588,7 @@ export class LocalSqliteStorage implements IStorage {
       for (const [userName, configs] of Object.entries(
         legacyData.skipConfigs,
       )) {
-        const username = assertValidUsername(userName);
+        const username = assertValidUsernameFormat(userName);
         for (const [key, config] of Object.entries(configs)) {
           insertSkipConfig.run(username, key, JSON.stringify(config));
         }
@@ -702,7 +707,7 @@ export class LocalSqliteStorage implements IStorage {
   }
 
   async registerUser(userName: string, password: string): Promise<void> {
-    const username = assertValidUsername(userName);
+    const username = assertValidUsernameFormat(userName);
     if (this.stmts.checkUserExist.get(username)) {
       throw new Error('用户已存在');
     }
@@ -792,6 +797,20 @@ export class LocalSqliteStorage implements IStorage {
   async getAllUsers(): Promise<string[]> {
     const rows = this.stmts.getAllUsers.all() as { username: string }[];
     return rows.map((row) => row.username);
+  }
+
+  async getAllUsersWithPasswords(): Promise<{ [username: string]: string }> {
+    const rows = this.stmts.getAllUsersWithPasswords.all() as {
+      username: string;
+      password: string;
+    }[];
+    const result: { [username: string]: string } = {};
+    for (const row of rows) {
+      if (row.username && row.password) {
+        result[row.username] = row.password;
+      }
+    }
+    return result;
   }
 
   async getAdminConfig(): Promise<AdminConfig | null> {
@@ -932,6 +951,23 @@ export class LocalSqliteStorage implements IStorage {
         LIMIT ?`,
       )
       .all(...params) as PlaybackSession[];
+
+    return rows;
+  }
+
+  async getAllPlaybackSessions(userName: string): Promise<PlaybackSession[]> {
+    const username = normalizeUsername(userName);
+    const rows = this.db
+      .prepare(
+        `SELECT
+          id, source, video_id, episode_index, title, source_name, cover, year,
+          started_at, ended_at, watch_seconds, last_position, total_time,
+          created_at, updated_at
+        FROM playback_sessions
+        WHERE username = ?
+        ORDER BY started_at DESC`,
+      )
+      .all(username) as PlaybackSession[];
 
     return rows;
   }
@@ -1114,6 +1150,28 @@ export class LocalSqliteStorage implements IStorage {
       }));
   }
 
+  async getAllSourceRouteStatBuckets(): Promise<SourceRouteStatsBucket[]> {
+    const rows = this.db
+      .prepare(
+        `SELECT source, route_mode, bucket_date, success_count, failure_count
+        FROM source_route_stats
+        ORDER BY bucket_date ASC, source ASC, route_mode ASC`,
+      )
+      .all() as (SourceRouteStatsRow & { bucket_date: string })[];
+
+    return rows
+      .filter(
+        (row) => row.route_mode === 'browser' || row.route_mode === 'server',
+      )
+      .map((row) => ({
+        source: row.source,
+        routeMode: row.route_mode as SourceRouteStatsBucket['routeMode'],
+        bucketDate: row.bucket_date,
+        successCount: Number(row.success_count || 0),
+        failureCount: Number(row.failure_count || 0),
+      }));
+  }
+
   async clearAllData(): Promise<void> {
     const clear = this.db.transaction(() => {
       this.db.exec(`
@@ -1147,13 +1205,30 @@ export class LocalSqliteStorage implements IStorage {
 
       this.stmts.setAdminConfig.run(JSON.stringify(snapshot.adminConfig));
 
+      const insertRouteStat = this.db.prepare(
+        `INSERT INTO source_route_stats (
+          source, route_mode, bucket_date, success_count, failure_count, updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?)`,
+      );
+      const routeStatUpdatedAt = Date.now();
+      for (const stat of snapshot.sourceRouteStats) {
+        insertRouteStat.run(
+          stat.source,
+          stat.routeMode,
+          stat.bucketDate,
+          stat.successCount,
+          stat.failureCount,
+          routeStatUpdatedAt,
+        );
+      }
+
       for (const [userName, passwordHash] of Object.entries(snapshot.users)) {
-        const username = assertValidUsername(userName);
+        const username = assertValidUsernameFormat(userName);
         this.stmts.registerUser.run(username, passwordHash);
       }
 
       for (const [userName, userData] of Object.entries(snapshot.userData)) {
-        const username = assertValidUsername(userName);
+        const username = assertValidUsernameFormat(userName);
         for (const [key, record] of Object.entries(userData.playRecords)) {
           this.stmts.setPlayRecord.run(username, key, JSON.stringify(record));
         }

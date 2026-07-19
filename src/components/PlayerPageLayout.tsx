@@ -107,7 +107,7 @@ export function PlayerPageLayout({
       showDesktopBack={false}
       mobileHeader={{ title: title || titleFallback }}
     >
-      <div className='relative flex h-full min-h-0 flex-col overflow-hidden px-4 py-2 sm:px-6'>
+      <div className='relative flex h-full min-h-0 flex-col overflow-hidden pb-2 md:px-6 md:pt-2'>
         {/* 桌面端单行顶栏 */}
         <div className='relative hidden h-[5.5rem] flex-shrink-0 items-center gap-4 md:flex'>
           <BackButton variant='icon' />
@@ -136,18 +136,18 @@ export function PlayerPageLayout({
 
         {/* 内容区：移动端上下排列，桌面端播放器吃满剩余宽高 + 固定宽右面板 */}
         <div className='flex min-h-0 flex-1 flex-col md:flex-row'>
-          <div className='max-md:landscape:aspect-auto max-md:landscape:max-h-none max-md:landscape:min-h-0 max-md:landscape:flex-1 relative aspect-video max-h-[38dvh] w-full flex-shrink-0 md:aspect-auto md:h-full md:max-h-none md:min-w-0 md:flex-1'>
+          <div className='relative aspect-video max-h-[38dvh] w-full flex-shrink-0 md:aspect-auto md:h-full md:max-h-none md:min-w-0 md:flex-1 max-md:landscape:aspect-auto max-md:landscape:max-h-none max-md:landscape:min-h-0 max-md:landscape:flex-1'>
             <div className='absolute inset-0'>
               <div
                 ref={artRef}
-                className='h-full w-full overflow-hidden rounded-xl bg-black shadow-lg ring-1 ring-black/10 dark:ring-white/10'
+                className='h-full w-full overflow-hidden rounded-xl bg-black shadow-lg ring-1 ring-black/10 dark:ring-white/10 max-md:rounded-none max-md:shadow-none max-md:ring-0'
               />
               {playerOverlay}
             </div>
           </div>
 
           {/* 移动端播放信息：标题 + 标签 */}
-          <div className='max-md:landscape:hidden flex-shrink-0 pt-3 md:hidden'>
+          <div className='flex-shrink-0 px-4 pt-3 md:hidden max-md:landscape:hidden'>
             <div className='flex min-w-0 items-center gap-2'>
               <TitleIconBadge icon={TitleIcon} accent={accent} />
               <h1 className='min-w-0 truncate text-lg font-semibold text-gray-900 dark:text-gray-100'>
@@ -171,7 +171,7 @@ export function PlayerPageLayout({
           </div>
 
           <div
-            className={`max-md:landscape:hidden min-h-0 overflow-hidden transition-[max-width,margin,opacity] duration-300 ease-[cubic-bezier(0.25,0.1,0.25,1)] md:mt-0 md:h-full md:w-[21rem] md:flex-none xl:w-[24rem] ${
+            className={`min-h-0 overflow-hidden transition-[max-width,margin,opacity] duration-300 ease-[cubic-bezier(0.25,0.1,0.25,1)] max-md:px-4 md:mt-0 md:h-full md:w-[21rem] md:flex-none xl:w-[24rem] max-md:landscape:hidden ${
               isPanelCollapsed
                 ? `${
                     mobilePanelAlwaysVisible ? 'mt-3 flex-1' : 'hidden'

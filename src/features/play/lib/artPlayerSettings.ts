@@ -150,6 +150,7 @@ export function createArtPlayerContextmenus() {
   return [
     {
       html: '快捷键配置',
+      index: 30,
       click(this: Artplayer) {
         this.contextmenu.show = false;
         window.dispatchEvent(new CustomEvent(OPEN_PLAYER_SHORTCUTS_EVENT));

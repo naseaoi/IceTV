@@ -50,6 +50,16 @@ export function GlobalErrorIndicator() {
     setIsReplacing(false);
   };
 
+  useEffect(() => {
+    if (!currentError) return;
+    const timer = window.setTimeout(() => {
+      setIsVisible(false);
+      setCurrentError(null);
+      setIsReplacing(false);
+    }, 10000);
+    return () => window.clearTimeout(timer);
+  }, [currentError]);
+
   if (!isVisible || !currentError) {
     return null;
   }
@@ -57,7 +67,7 @@ export function GlobalErrorIndicator() {
   return (
     <div className='fixed right-4 top-4 z-[2000]'>
       <div
-        className={`flex min-w-[300px] max-w-[400px] items-center justify-between rounded-lg bg-red-500 px-4 py-3 text-white shadow-lg transition-all duration-300 ${
+        className={`flex w-fit max-w-[min(400px,calc(100vw-2rem))] items-center justify-between rounded-lg bg-red-500 px-4 py-3 text-white shadow-lg transition-all duration-300 ${
           isReplacing ? 'scale-105 bg-red-400' : 'scale-100 bg-red-500'
         } animate-fade-in`}
       >

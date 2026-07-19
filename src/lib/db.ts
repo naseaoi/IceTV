@@ -15,6 +15,7 @@ import {
   PlayRecord,
   SkipConfig,
   SourceRouteStatInput,
+  SourceRouteStatsBucket,
   SourceRouteStatsItem,
   StorageImportData,
 } from './types';
@@ -218,6 +219,11 @@ class DbManager {
     return storage.getAllUsers();
   }
 
+  async getAllUsersWithPasswords(): Promise<{ [username: string]: string }> {
+    const storage = await this.getStorage();
+    return storage.getAllUsersWithPasswords();
+  }
+
   async getAdminConfig(): Promise<AdminConfig | null> {
     const storage = await this.getStorage();
     return storage.getAdminConfig();
@@ -279,6 +285,11 @@ class DbManager {
     return storage.getPlaybackSessions(userName, query);
   }
 
+  async getAllPlaybackSessions(userName: string): Promise<PlaybackSession[]> {
+    const storage = await this.getStorage();
+    return storage.getAllPlaybackSessions(userName);
+  }
+
   async deletePlaybackSession(userName: string, id: string): Promise<void> {
     const storage = await this.getStorage();
     await storage.deletePlaybackSession(userName, id);
@@ -319,6 +330,11 @@ class DbManager {
   ): Promise<SourceRouteStatsItem[]> {
     const storage = await this.getStorage();
     return storage.getSourceRouteStats(sinceDate);
+  }
+
+  async getAllSourceRouteStatBuckets(): Promise<SourceRouteStatsBucket[]> {
+    const storage = await this.getStorage();
+    return storage.getAllSourceRouteStatBuckets();
   }
 
   async clearAllData(): Promise<void> {

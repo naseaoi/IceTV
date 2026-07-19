@@ -95,6 +95,15 @@ export interface SourceRouteStatsItem {
   failureCount: number;
 }
 
+// 源站路由统计原始行（按天粒度）
+export interface SourceRouteStatsBucket {
+  source: string;
+  routeMode: SourceRouteMode;
+  bucketDate: string;
+  successCount: number;
+  failureCount: number;
+}
+
 export interface StorageUserImportData {
   playRecords: { [key: string]: PlayRecord };
   favorites: { [key: string]: Favorite };
@@ -107,6 +116,7 @@ export interface StorageImportData {
   adminConfig: AdminConfig;
   users: { [username: string]: string };
   userData: { [username: string]: StorageUserImportData };
+  sourceRouteStats: SourceRouteStatsBucket[];
 }
 
 // 存储接口
@@ -150,6 +160,7 @@ export interface IStorage {
 
   // 用户列表
   getAllUsers(): Promise<string[]>;
+  getAllUsersWithPasswords(): Promise<{ [username: string]: string }>;
 
   // 管理员配置相关
   getAdminConfig(): Promise<AdminConfig | null>;
@@ -175,6 +186,7 @@ export interface IStorage {
     userName: string,
     query?: PlaybackSessionQuery,
   ): Promise<PlaybackSession[]>;
+  getAllPlaybackSessions(userName: string): Promise<PlaybackSession[]>;
   deletePlaybackSession(userName: string, id: string): Promise<void>;
   getPlaybackWatchTotals(
     userName: string,
@@ -191,6 +203,7 @@ export interface IStorage {
   ): Promise<PlaybackStatsTopItem[]>;
   recordSourceRouteStat(input: SourceRouteStatInput): Promise<void>;
   getSourceRouteStats(sinceDate: string): Promise<SourceRouteStatsItem[]>;
+  getAllSourceRouteStatBuckets(): Promise<SourceRouteStatsBucket[]>;
 
   // 数据清理相关
   clearAllData(): Promise<void>;

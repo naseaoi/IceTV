@@ -33,10 +33,17 @@ export default function ModalShell({
   useEffect(() => {
     if (isOpen) {
       setMounted(true);
-      requestAnimationFrame(() => {
-        setVisible(true);
+      // 双重 rAF：等 opacity-0 完成首帧绘制后再触发入场过渡
+      let secondFrame = 0;
+      const firstFrame = requestAnimationFrame(() => {
+        secondFrame = requestAnimationFrame(() => {
+          setVisible(true);
+        });
       });
-      return;
+      return () => {
+        cancelAnimationFrame(firstFrame);
+        cancelAnimationFrame(secondFrame);
+      };
     }
 
     setVisible(false);
@@ -94,9 +101,7 @@ export default function ModalShell({
     <div
       ref={overlayRef}
       tabIndex={-1}
-      className={`fixed inset-0 z-[9999] flex items-center justify-center p-4 outline-none transition-opacity duration-200 ${
-        visible ? 'opacity-100' : 'opacity-0'
-      }`}
+      className='fixed inset-0 z-[9999] flex items-center justify-center p-4 outline-none'
       onClick={() => {
         if (closeOnBackdrop) {
           onClose();
@@ -105,8 +110,10 @@ export default function ModalShell({
       role='presentation'
     >
       <div
-        className={`w-full transform rounded-2xl border border-gray-200/70 bg-white/80 shadow-2xl ring-1 ring-black/10 backdrop-blur-xl transition-all duration-200 dark:border-white/10 dark:bg-gray-900/70 dark:ring-white/10 ${
-          visible ? 'translate-y-0 scale-100' : 'translate-y-2 scale-95'
+        className={`w-full transform rounded-2xl border border-gray-200/70 bg-white/80 shadow-2xl ring-1 ring-black/10 backdrop-blur-xl transition-[opacity,transform] duration-200 dark:border-white/10 dark:bg-gray-900/70 dark:ring-white/10 ${
+          visible
+            ? 'translate-y-0 scale-100 opacity-100'
+            : 'translate-y-2 scale-95 opacity-0'
         } ${panelClassName || ''}`}
         onClick={(event) => event.stopPropagation()}
       >

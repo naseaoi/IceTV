@@ -23,10 +23,11 @@ import {
   PlayRecord,
   SkipConfig,
   SourceRouteStatInput,
+  SourceRouteStatsBucket,
   SourceRouteStatsItem,
   StorageImportData,
 } from './types';
-import { assertValidUsername, normalizeUsername } from './username';
+import { assertValidUsernameFormat, normalizeUsername } from './username';
 
 const SEARCH_HISTORY_LIMIT = 20;
 
@@ -120,6 +121,7 @@ type JsonRow = RowDataPacket & {
   favorite_key?: string;
   config_key?: string;
   route_mode?: string;
+  bucket_date?: string;
   success_count?: number | string;
   failure_count?: number | string;
 };
@@ -371,7 +373,7 @@ export class MySqlStorage implements IStorage {
 
   async registerUser(userName: string, password: string): Promise<void> {
     await this.ensureInitialized();
-    const username = assertValidUsername(userName);
+    const username = assertValidUsernameFormat(userName);
     const hashed = await hashPassword(password);
     await this.pool.execute(
       'INSERT INTO users (username, password) VALUES (?, ?)',
@@ -511,6 +513,20 @@ export class MySqlStorage implements IStorage {
       'SELECT username FROM users ORDER BY username ASC',
     );
     return rows.map((row) => row.username).filter(Boolean) as string[];
+  }
+
+  async getAllUsersWithPasswords(): Promise<{ [username: string]: string }> {
+    await this.ensureInitialized();
+    const [rows] = await this.pool.query<JsonRow[]>(
+      'SELECT username, password FROM users ORDER BY username ASC',
+    );
+    const result: { [username: string]: string } = {};
+    for (const row of rows) {
+      if (row.username && row.password) {
+        result[row.username] = row.password;
+      }
+    }
+    return result;
   }
 
   async getAdminConfig(): Promise<AdminConfig | null> {
@@ -728,6 +744,41 @@ export class MySqlStorage implements IStorage {
     );
   }
 
+  async getAllPlaybackSessions(userName: string): Promise<PlaybackSession[]> {
+    await this.ensureInitialized();
+    const username = normalizeUsername(userName);
+    const [rows] = await this.pool.query<JsonRow[]>(
+      `SELECT
+        id, source, video_id, episode_index, title, source_name, cover, year,
+        started_at, ended_at, watch_seconds, last_position, total_time,
+        created_at, updated_at
+      FROM playback_sessions
+      WHERE username = ?
+      ORDER BY started_at DESC`,
+      [username],
+    );
+
+    return rows
+      .filter((row) => row.id)
+      .map((row) => ({
+        id: row.id || '',
+        source: row.source || '',
+        video_id: row.video_id || '',
+        episode_index: Number(row.episode_index || 0),
+        title: row.title || '',
+        source_name: row.source_name || '',
+        cover: row.cover || '',
+        year: row.year || '',
+        started_at: Number(row.started_at || 0),
+        ended_at: Number(row.ended_at || 0),
+        watch_seconds: Number(row.watch_seconds || 0),
+        last_position: Number(row.last_position || 0),
+        total_time: Number(row.total_time || 0),
+        created_at: Number(row.created_at || 0),
+        updated_at: Number(row.updated_at || 0),
+      }));
+  }
+
   async getPlaybackWatchTotals(
     userName: string,
     since: number,
@@ -904,6 +955,27 @@ export class MySqlStorage implements IStorage {
       }));
   }
 
+  async getAllSourceRouteStatBuckets(): Promise<SourceRouteStatsBucket[]> {
+    await this.ensureInitialized();
+    const [rows] = await this.pool.query<JsonRow[]>(
+      `SELECT source, route_mode, bucket_date, success_count, failure_count
+      FROM source_route_stats
+      ORDER BY bucket_date ASC, source ASC, route_mode ASC`,
+    );
+
+    return rows
+      .filter(
+        (row) => row.route_mode === 'browser' || row.route_mode === 'server',
+      )
+      .map((row) => ({
+        source: row.source || '',
+        routeMode: row.route_mode as SourceRouteStatsBucket['routeMode'],
+        bucketDate: row.bucket_date || '',
+        successCount: Number(row.success_count || 0),
+        failureCount: Number(row.failure_count || 0),
+      }));
+  }
+
   async clearAllData(): Promise<void> {
     await this.withTransaction(async (connection) => {
       await connection.execute('DELETE FROM users');
@@ -933,8 +1005,25 @@ export class MySqlStorage implements IStorage {
         [JSON.stringify(data.adminConfig)],
       );
 
+      const routeStatUpdatedAt = Date.now();
+      for (const stat of data.sourceRouteStats) {
+        await connection.execute(
+          `INSERT INTO source_route_stats (
+            source, route_mode, bucket_date, success_count, failure_count, updated_at
+          ) VALUES (?, ?, ?, ?, ?, ?)`,
+          [
+            stat.source,
+            stat.routeMode,
+            stat.bucketDate,
+            stat.successCount,
+            stat.failureCount,
+            routeStatUpdatedAt,
+          ],
+        );
+      }
+
       for (const [userName, passwordHash] of Object.entries(data.users)) {
-        const username = assertValidUsername(userName);
+        const username = assertValidUsernameFormat(userName);
         await connection.execute(
           'INSERT INTO users (username, password) VALUES (?, ?)',
           [username, passwordHash],
@@ -942,7 +1031,7 @@ export class MySqlStorage implements IStorage {
       }
 
       for (const [userName, userData] of Object.entries(data.userData)) {
-        const username = assertValidUsername(userName);
+        const username = assertValidUsernameFormat(userName);
         for (const [key, record] of Object.entries(userData.playRecords)) {
           await connection.execute(
             'INSERT INTO play_records (username, record_key, record_json) VALUES (?, ?, ?)',

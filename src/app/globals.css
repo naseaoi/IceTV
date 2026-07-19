@@ -303,6 +303,13 @@ div[data-media-provider] video {
   overflow: hidden !important;
 }
 
+/* --- 移动端播放器全宽通栏，去除圆角 --- */
+@media (max-width: 767.98px) {
+  .art-video-player {
+    border-radius: 0 !important;
+  }
+}
+
 /* --- 右键菜单 --- */
 .art-contextmenus {
   background: rgba(0, 0, 0, 0.9) !important;
@@ -497,6 +504,16 @@ div[data-media-provider] video {
   border-radius: 8px !important;
   box-shadow: 0 12px 32px -8px rgba(0, 0, 0, 0.5) !important;
   color: #e5e7eb !important;
+}
+
+/* 信息面板关闭按钮 [x] 显示为 x */
+.art-info-close {
+  font-size: 0 !important;
+}
+
+.art-info-close::before {
+  content: 'x';
+  font-size: 12px;
 }
 
 /* --- 字幕样式 --- */
