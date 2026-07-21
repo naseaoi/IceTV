@@ -113,14 +113,24 @@ function detectPeriodicLayout(
   );
   if (duration <= 0) return null;
 
-  const tolerance = Math.max(1, duration * 0.08);
+  const tolerance = Math.max(1.5, duration * 0.12);
   const durationCoverage =
     fullSegments.filter(
       (segment) => Math.abs(segment.duration - duration) <= tolerance,
     ).length / fullSegments.length;
-  if (durationCoverage < 0.7) return null;
+  if (durationCoverage < 0.55) return null;
 
   return { fragmentCount: fragmentMode.value, duration };
+}
+
+function looksLikeAdEdgeBlock(segment: DiscontSegment): boolean {
+  if (segment.tsDurations.length === 0) return false;
+  const intRatio = integerRatioOfSegment(segment);
+  const coarseRatio = coarseGridRatioOfSegment(segment);
+  if (intRatio >= 0.6) return true;
+  if (coarseRatio >= 0.85 && intRatio >= 0.3) return true;
+  if (segment.tsDurations.length >= 2 && intRatio >= 0.5) return true;
+  return false;
 }
 
 function detectShortEdgeBlocks(
@@ -133,7 +143,8 @@ function detectShortEdgeBlocks(
   const isCandidate = (segment: DiscontSegment) =>
     segment.duration > 0 &&
     segment.duration < durationLimit &&
-    segment.tsDurations.length < layout.fragmentCount;
+    segment.tsDurations.length < layout.fragmentCount &&
+    looksLikeAdEdgeBlock(segment);
 
   for (let index = 0; index < segments.length; index += 1) {
     if (!isCandidate(segments[index])) break;
@@ -287,7 +298,23 @@ function detectByExtinfIntegerPattern(segments: DiscontSegment[]): Set<number> {
       ratio >= 0.45 &&
       !(coarseBaseline >= 0.35 && coarseRatio - coarseBaseline < 0.5);
 
-    if (matchedIntegerPattern || matchedCoarseGridPattern) {
+    // 等长伪装广告：0.04s 网格 + 部分整数 EXTINF
+    const integerHits = ratio * seg.tsDurations.length;
+    const matchedCamouflagedGridPattern =
+      seg.tsDurations.length >= 4 &&
+      integerBaseline < 0.25 &&
+      coarseBaseline < 0.5 &&
+      coarseRatio >= 0.9 &&
+      ratio >= 0.3 &&
+      ratio < 0.85 &&
+      topShare >= 0.3 &&
+      integerHits >= 2;
+
+    if (
+      matchedIntegerPattern ||
+      matchedCoarseGridPattern ||
+      matchedCamouflagedGridPattern
+    ) {
       result.add(i);
     }
   }
@@ -429,6 +456,36 @@ async function computeBaselineBitrate(
   return valid[Math.floor(valid.length / 2)];
 }
 
+function collectBitrateSuspectIndices(
+  segments: DiscontSegment[],
+  durationMode: number | null,
+): number[] {
+  const suspiciousIdx: number[] = [];
+  for (let i = 0; i < segments.length; i++) {
+    const segment = segments[i];
+    if (segment.tsPaths.length === 0) continue;
+    if (
+      i === segments.length - 1 &&
+      segment.tsPaths.length === 1 &&
+      segment.duration < 5
+    ) {
+      continue;
+    }
+
+    const durationOutlier =
+      durationMode !== null && Math.abs(segment.duration - durationMode) >= 1;
+    const intRatio = integerRatioOfSegment(segment);
+    const coarseRatio = coarseGridRatioOfSegment(segment);
+    const weakExtinfPattern =
+      segment.tsDurations.length >= 4 && intRatio >= 0.3 && coarseRatio >= 0.85;
+
+    if (durationOutlier || weakExtinfPattern) {
+      suspiciousIdx.push(i);
+    }
+  }
+  return suspiciousIdx;
+}
+
 async function detectByBitrate(
   segments: DiscontSegment[],
   baseUrl: string,
@@ -436,23 +493,17 @@ async function detectByBitrate(
 ): Promise<Set<number>> {
   const result = new Set<number>();
 
-  const mode = computeDurationMode(segments);
-  if (mode === null) return result;
-
-  const suspiciousIdx: number[] = [];
-  for (let i = 0; i < segments.length; i++) {
-    const s = segments[i];
-    if (Math.abs(s.duration - mode) < 1) continue;
-
-    if (i === segments.length - 1 && s.tsPaths.length === 1 && s.duration < 5) {
-      continue;
-    }
-    suspiciousIdx.push(i);
-  }
+  const durationMode = computeDurationMode(segments);
+  const suspiciousIdx = collectBitrateSuspectIndices(segments, durationMode);
   if (suspiciousIdx.length === 0) return result;
 
+  const baselineMode =
+    durationMode ??
+    median(segments.map((segment) => segment.duration).filter((d) => d > 0));
+  if (baselineMode <= 0) return result;
+
   const [baseline, suspectRates] = await Promise.all([
-    computeBaselineBitrate(segments, mode, baseUrl, ua),
+    computeBaselineBitrate(segments, baselineMode, baseUrl, ua),
     Promise.all(
       suspiciousIdx.map((i) => computeSegmentBitrate(segments[i], baseUrl, ua)),
     ),

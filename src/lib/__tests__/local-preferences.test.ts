@@ -1,5 +1,6 @@
 import {
   ADMIN_TABLE_COLUMN_WIDTHS_STORAGE_KEY,
+  AUTO_PLAY_NEXT_STORAGE_KEY,
   BLOCK_AD_STORAGE_KEY,
   DEFAULT_AGGREGATE_SEARCH_STORAGE_KEY,
   ENABLE_OPTIMIZATION_STORAGE_KEY,
@@ -8,6 +9,7 @@ import {
   PREFERRED_QUALITY_STORAGE_KEY,
   readAdminTableColumnWidth,
   readAggregateSearch,
+  readAutoPlayNextEnabled,
   readBlockAdEnabled,
   readEnableOptimization,
   readFluidSearch,
@@ -26,6 +28,7 @@ import {
   SOURCE_PREFERRED_QUALITY_STORAGE_PREFIX,
   writeAdminTableColumnWidth,
   writeAggregateSearch,
+  writeAutoPlayNextEnabled,
   writeBlockAdEnabled,
   writeEnableOptimization,
   writeFluidSearch,
@@ -118,6 +121,15 @@ describe('local preferences', () => {
 
     expect(localStorage.getItem(BLOCK_AD_STORAGE_KEY)).toBe('false');
     expect(readBlockAdEnabled()).toBe(false);
+  });
+
+  it('stores auto play next preference through the shared helper', () => {
+    expect(readAutoPlayNextEnabled()).toBe(true);
+
+    writeAutoPlayNextEnabled(false);
+
+    expect(localStorage.getItem(AUTO_PLAY_NEXT_STORAGE_KEY)).toBe('false');
+    expect(readAutoPlayNextEnabled()).toBe(false);
   });
 
   it('stores sidebar collapsed preference through the shared helper', () => {

@@ -3,6 +3,7 @@ export const ENABLE_OPTIMIZATION_STORAGE_KEY = 'enableOptimization';
 export const FLUID_SEARCH_STORAGE_KEY = 'fluidSearch';
 export const LIVE_DIRECT_CONNECT_STORAGE_KEY = 'liveDirectConnect';
 export const BLOCK_AD_STORAGE_KEY = 'enable_blockad';
+export const AUTO_PLAY_NEXT_STORAGE_KEY = 'enable_autoplay_next';
 export const PREFERRED_QUALITY_STORAGE_KEY = 'preferredQuality';
 export const SOURCE_PREFERRED_QUALITY_STORAGE_PREFIX = 'preferredQuality:';
 export const SIDEBAR_COLLAPSED_STORAGE_KEY = 'sidebarCollapsed';
@@ -249,6 +250,14 @@ export function readBlockAdEnabled(): boolean {
 
 export function writeBlockAdEnabled(value: boolean) {
   writeStoredBoolean(BLOCK_AD_STORAGE_KEY, value);
+}
+
+export function readAutoPlayNextEnabled(): boolean {
+  return readStoredBoolean(AUTO_PLAY_NEXT_STORAGE_KEY) ?? true;
+}
+
+export function writeAutoPlayNextEnabled(value: boolean) {
+  writeStoredBoolean(AUTO_PLAY_NEXT_STORAGE_KEY, value);
 }
 
 export function readSidebarCollapsed(): boolean {

@@ -10,6 +10,7 @@ import type { WakeLockSentinel } from '@/features/play/lib/playTypes';
 import type { ResumeMode } from '@/features/play/lib/resumePlayback';
 import type { SourceSwitchCleanupTask } from '@/features/play/lib/sourceSwitchCleanup';
 import {
+  readAutoPlayNextEnabled,
   readBlockAdEnabled,
   readEnableOptimization,
 } from '@/lib/local-preferences';
@@ -71,6 +72,14 @@ export function usePlayPageState(searchParams: ReadonlyURLSearchParams) {
   useEffect(() => {
     blockAdEnabledRef.current = blockAdEnabled;
   }, [blockAdEnabled]);
+
+  const [autoPlayNextEnabled, setAutoPlayNextEnabled] = useState<boolean>(
+    readAutoPlayNextEnabled,
+  );
+  const autoPlayNextEnabledRef = useRef(autoPlayNextEnabled);
+  useEffect(() => {
+    autoPlayNextEnabledRef.current = autoPlayNextEnabled;
+  }, [autoPlayNextEnabled]);
 
   const [videoTitle, setVideoTitle] = useState(searchParams.get('title') || '');
   const [videoYear, setVideoYear] = useState(searchParams.get('year') || '');
@@ -205,6 +214,9 @@ export function usePlayPageState(searchParams: ReadonlyURLSearchParams) {
     blockAdEnabled,
     setBlockAdEnabled,
     blockAdEnabledRef,
+    autoPlayNextEnabled,
+    setAutoPlayNextEnabled,
+    autoPlayNextEnabledRef,
     videoTitle,
     setVideoTitle,
     videoYear,

@@ -2,7 +2,10 @@ import type Artplayer from 'artplayer';
 import type { Dispatch, MutableRefObject, SetStateAction } from 'react';
 
 import type { ResumeMode } from '@/features/play/lib/resumePlayback';
-import { writeBlockAdEnabled } from '@/lib/local-preferences';
+import {
+  writeAutoPlayNextEnabled,
+  writeBlockAdEnabled,
+} from '@/lib/local-preferences';
 import {
   destroyManagedHls,
   runManagedVideoCleanup,
@@ -14,10 +17,13 @@ import type { SkipConfig } from '@/lib/types';
 type ArtPlayerSettingsOptions = {
   artPlayerRef: MutableRefObject<Artplayer | null>;
   blockAdEnabled: boolean;
+  autoPlayNextEnabled: boolean;
+  autoPlayNextEnabledRef: MutableRefObject<boolean>;
   skipConfigRef: MutableRefObject<SkipConfig>;
   resumeTimeRef: MutableRefObject<number | null>;
   resumeModeRef: MutableRefObject<ResumeMode>;
   setBlockAdEnabled: Dispatch<SetStateAction<boolean>>;
+  setAutoPlayNextEnabled: Dispatch<SetStateAction<boolean>>;
   handleSkipConfigChange: (newConfig: SkipConfig) => Promise<void>;
 };
 
@@ -28,10 +34,13 @@ type ArtPlayerControlsOptions = {
 export function createArtPlayerSettings({
   artPlayerRef,
   blockAdEnabled,
+  autoPlayNextEnabled,
+  autoPlayNextEnabledRef,
   skipConfigRef,
   resumeTimeRef,
   resumeModeRef,
   setBlockAdEnabled,
+  setAutoPlayNextEnabled,
   handleSkipConfigChange,
 }: ArtPlayerSettingsOptions) {
   return [
@@ -57,6 +66,18 @@ export function createArtPlayerSettings({
           return blockAdEnabled ? '当前开启' : '当前关闭';
         }
         return newVal ? '当前开启' : '当前关闭';
+      },
+    },
+    {
+      name: '自动连播',
+      html: '自动连播',
+      switch: autoPlayNextEnabled,
+      onSwitch: function (item: { switch?: boolean }) {
+        const newVal = !item.switch;
+        writeAutoPlayNextEnabled(newVal);
+        autoPlayNextEnabledRef.current = newVal;
+        setAutoPlayNextEnabled(newVal);
+        return newVal;
       },
     },
     {

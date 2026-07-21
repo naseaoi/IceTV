@@ -77,6 +77,9 @@ export async function initializeArtPlayer(
     currentEpisodeIndex,
     blockAdEnabled,
     blockAdEnabledRef,
+    autoPlayNextEnabled,
+    autoPlayNextEnabledRef,
+    setAutoPlayNextEnabled,
     skipConfigRef,
     resumeTimeRef,
     resumeModeRef,
@@ -242,10 +245,13 @@ export async function initializeArtPlayer(
       settings: createArtPlayerSettings({
         artPlayerRef,
         blockAdEnabled,
+        autoPlayNextEnabled,
+        autoPlayNextEnabledRef,
         skipConfigRef,
         resumeTimeRef,
         resumeModeRef,
         setBlockAdEnabled,
+        setAutoPlayNextEnabled,
         handleSkipConfigChange,
       }),
       controls: createArtPlayerControls({
@@ -332,6 +338,9 @@ export async function initializeArtPlayer(
 
     const tryAutoAdvanceEpisode = () => {
       if (!autoAdvanceArmedRef.current || autoAdvancedRef.current) {
+        return false;
+      }
+      if (!autoPlayNextEnabledRef.current) {
         return false;
       }
       const currentDetail = detailRef.current;
