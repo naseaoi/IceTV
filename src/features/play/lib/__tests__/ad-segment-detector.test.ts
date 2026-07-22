@@ -167,7 +167,7 @@ describe('stripAdSegmentsByPhysicalSignal', () => {
   });
 
   test('与正片等长的伪装网格广告段被识别并剔除', async () => {
-    // 复现 rycj ep8@7:41：5 片总时长约 20s，夹杂整数与 0.04 网格
+    // rycj 第 8 集广告块及相邻正片的时长分布
     const contentDurations = [
       [4.170833, 4.170833, 5.755744, 3.420089, 2.836167],
       [2.460789, 5.296956, 4.212544, 4.295956, 5.171833],
@@ -209,16 +209,19 @@ describe('stripAdSegmentsByPhysicalSignal', () => {
     );
 
     expect(result).not.toMatch(/camouflaged_ad_\d+\.ts/);
-    expect(result).toContain('main_3_4.ts');
-    expect(result).toContain('main_4_0.ts');
-    expect(result).toContain('main_7_4.ts');
+    expect(result.match(/main_\d+_\d+\.ts/g)).toHaveLength(40);
+    contentDurations.forEach((durations, segment) => {
+      durations.forEach((_, fragment) => {
+        expect(result).toContain(`main_${segment}_${fragment}.ts`);
+      });
+    });
     expect(result).not.toContain('#EXT-X-DISCONTINUITY');
   });
 
   test('正片块时长离散时仍建立周期布局并连续化', async () => {
     const lines = ['#EXTM3U', '#EXT-X-TARGETDURATION:8'];
     const blockDurations = [
-      17.2, 19.5, 20.1, 18.0, 21.4, 19.8, 22.5, 20.0, 18.6, 19.9,
+      17.2, 19.5, 20.1, 18.0, 21.4, 19.8, 22.5, 20.2, 18.6, 19.9,
     ];
     blockDurations.forEach((blockDuration, segment) => {
       lines.push('#EXT-X-DISCONTINUITY');
@@ -237,8 +240,7 @@ describe('stripAdSegmentsByPhysicalSignal', () => {
     );
 
     expect(result).not.toContain('#EXT-X-DISCONTINUITY');
-    expect(result).toContain('main_0_0.ts');
-    expect(result).toContain('main_9_4.ts');
+    expect(result.match(/main_\d+_\d+\.ts/g)).toHaveLength(50);
   });
 
   test('主流 5 秒切片中的单个 4 秒区间被识别并剔除', async () => {
