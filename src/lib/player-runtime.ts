@@ -53,6 +53,22 @@ const PLAYER_DEFAULT_FAST_FORWARD_VALUE = 3;
 const PLAYER_LOCK_CONTROL_SELECTOR =
   '.art-bottom, .art-controls, .art-progress, .art-settings, .art-contextmenus';
 const PLAYER_LOCK_TOGGLE_SELECTOR = '.art-layer-lock';
+const PLAYER_LOCKED_CONTROL_EVENTS = [
+  'click',
+  'touchstart',
+  'touchmove',
+  'touchend',
+  'pointerdown',
+  'pointermove',
+  'pointerup',
+  'mousedown',
+  'mousemove',
+  'mouseup',
+] as const;
+
+interface PlayerMobileControlsOptions {
+  enableLongPressFastForward?: boolean;
+}
 
 export type ManagedVideoElement = HTMLVideoElement & {
   hls?: HlsType | null;
@@ -329,7 +345,10 @@ export function bindPlayerHoverControls(artPlayer: unknown): () => void {
   return cleanup;
 }
 
-export function bindPlayerMobileControls(artPlayer: unknown): () => void {
+export function bindPlayerMobileControls(
+  artPlayer: unknown,
+  { enableLongPressFastForward = true }: PlayerMobileControlsOptions = {},
+): () => void {
   const art = artPlayer as MobileControlsArtPlayer;
   const player = art.template?.$player;
   const video = art.template?.$video;
@@ -435,24 +454,15 @@ export function bindPlayerMobileControls(artPlayer: unknown): () => void {
   };
   const passiveOptions: AddEventListenerOptions = { passive: true };
 
-  video.addEventListener('touchstart', handleTouchStart, passiveOptions);
-  video.addEventListener('touchmove', handleTouchMove, passiveOptions);
-  document.addEventListener('touchend', handleTouchEnd, passiveOptions);
-  document.addEventListener('touchcancel', handleTouchEnd, passiveOptions);
-  video.addEventListener('click', handleClickCapture, true);
+  if (enableLongPressFastForward) {
+    video.addEventListener('touchstart', handleTouchStart, passiveOptions);
+    video.addEventListener('touchmove', handleTouchMove, passiveOptions);
+    document.addEventListener('touchend', handleTouchEnd, passiveOptions);
+    document.addEventListener('touchcancel', handleTouchEnd, passiveOptions);
+    video.addEventListener('click', handleClickCapture, true);
+  }
 
-  for (const eventName of [
-    'click',
-    'touchstart',
-    'touchmove',
-    'touchend',
-    'pointerdown',
-    'pointermove',
-    'pointerup',
-    'mousedown',
-    'mousemove',
-    'mouseup',
-  ]) {
+  for (const eventName of PLAYER_LOCKED_CONTROL_EVENTS) {
     player.addEventListener(
       eventName,
       handleLockedControlCapture,
@@ -468,24 +478,19 @@ export function bindPlayerMobileControls(artPlayer: unknown): () => void {
     clearPressTimer();
     art.__icetvFastForwardActive = false;
     player.classList.remove('art-fast-forward');
-    video.removeEventListener('touchstart', handleTouchStart, passiveOptions);
-    video.removeEventListener('touchmove', handleTouchMove, passiveOptions);
-    document.removeEventListener('touchend', handleTouchEnd, passiveOptions);
-    document.removeEventListener('touchcancel', handleTouchEnd, passiveOptions);
-    video.removeEventListener('click', handleClickCapture, true);
+    if (enableLongPressFastForward) {
+      video.removeEventListener('touchstart', handleTouchStart, passiveOptions);
+      video.removeEventListener('touchmove', handleTouchMove, passiveOptions);
+      document.removeEventListener('touchend', handleTouchEnd, passiveOptions);
+      document.removeEventListener(
+        'touchcancel',
+        handleTouchEnd,
+        passiveOptions,
+      );
+      video.removeEventListener('click', handleClickCapture, true);
+    }
 
-    for (const eventName of [
-      'click',
-      'touchstart',
-      'touchmove',
-      'touchend',
-      'pointerdown',
-      'pointermove',
-      'pointerup',
-      'mousedown',
-      'mousemove',
-      'mouseup',
-    ]) {
+    for (const eventName of PLAYER_LOCKED_CONTROL_EVENTS) {
       player.removeEventListener(
         eventName,
         handleLockedControlCapture,

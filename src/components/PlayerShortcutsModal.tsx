@@ -8,9 +8,11 @@ import ModalShell from '@/components/modals/ModalShell';
 import {
   type PlayerShortcutAction,
   type PlayerShortcutMap,
+  type PlayerShortcutMode,
   type ShortcutBinding,
   DEFAULT_PLAYER_SHORTCUTS,
   formatBinding,
+  isPlayerShortcutActionEnabled,
   OPEN_PLAYER_SHORTCUTS_EVENT,
   PLAYER_SHORTCUT_ACTIONS,
   readPlayerShortcuts,
@@ -52,7 +54,13 @@ function findConflict(
   return null;
 }
 
-export default function PlayerShortcutsModal() {
+interface PlayerShortcutsModalProps {
+  mode?: PlayerShortcutMode;
+}
+
+export default function PlayerShortcutsModal({
+  mode = 'vod',
+}: PlayerShortcutsModalProps) {
   const [isOpen, setIsOpen] = useState(false);
   const [draft, setDraft] = useState<PlayerShortcutMap>(
     DEFAULT_PLAYER_SHORTCUTS,
@@ -60,6 +68,9 @@ export default function PlayerShortcutsModal() {
   const [recording, setRecording] = useState<PlayerShortcutAction | null>(null);
   const [conflict, setConflict] = useState<string | null>(null);
   const [showResetConfirm, setShowResetConfirm] = useState(false);
+  const availableActions = PLAYER_SHORTCUT_ACTIONS.filter(({ action }) =>
+    isPlayerShortcutActionEnabled(mode, action),
+  );
 
   useEffect(() => {
     const handleOpen = () => {
@@ -125,11 +136,19 @@ export default function PlayerShortcutsModal() {
   }, [draft]);
 
   const handleReset = useCallback(() => {
-    setDraft({ ...DEFAULT_PLAYER_SHORTCUTS });
+    setDraft((current) => {
+      const next = { ...current };
+      PLAYER_SHORTCUT_ACTIONS.forEach(({ action }) => {
+        if (isPlayerShortcutActionEnabled(mode, action)) {
+          next[action] = { ...DEFAULT_PLAYER_SHORTCUTS[action] };
+        }
+      });
+      return next;
+    });
     setConflict(null);
     setRecording(null);
     setShowResetConfirm(false);
-  }, []);
+  }, [mode]);
 
   return (
     <ModalShell isOpen={isOpen} onClose={handleClose} panelClassName='max-w-lg'>
@@ -160,7 +179,7 @@ export default function PlayerShortcutsModal() {
         )}
 
         <div className='scrollbar-visible max-h-[45vh] space-y-1 overflow-y-scroll pr-2'>
-          {PLAYER_SHORTCUT_ACTIONS.map(({ action, label }) => (
+          {availableActions.map(({ action, label }) => (
             <div
               key={action}
               className='flex items-center justify-between rounded-lg px-3 py-2 hover:bg-gray-100/70 dark:hover:bg-white/[0.04]'
@@ -206,7 +225,11 @@ export default function PlayerShortcutsModal() {
       <ConfirmModal
         isOpen={showResetConfirm}
         title='确认恢复默认快捷键？'
-        message='该操作会将所有快捷键重置为默认键位，保存后生效。'
+        message={
+          mode === 'live'
+            ? '该操作会将直播页可用的快捷键重置为默认键位，保存后生效。'
+            : '该操作会将所有快捷键重置为默认键位，保存后生效。'
+        }
         danger
         cancelText='取消'
         confirmText='确认恢复'

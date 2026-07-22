@@ -140,7 +140,7 @@ function buildLiveHeaderTags({
   return tags;
 }
 
-function LivePlayerOverlay({
+export function LivePlayerOverlay({
   unsupportedType,
   isVideoLoading,
 }: {
@@ -150,7 +150,7 @@ function LivePlayerOverlay({
   return (
     <>
       {unsupportedType && (
-        <div className='absolute inset-0 z-[600] flex items-center justify-center overflow-hidden rounded-xl bg-black/90 shadow-lg backdrop-blur-sm transition-all duration-300'>
+        <div className='pointer-events-none absolute inset-0 z-[600] flex items-center justify-center overflow-hidden rounded-xl bg-black/90 shadow-lg backdrop-blur-sm transition-all duration-300'>
           <LoadingStatePanel
             compact
             icon={<AlertTriangle className='h-9 w-9' />}
@@ -163,7 +163,7 @@ function LivePlayerOverlay({
       )}
 
       {isVideoLoading && (
-        <div className='absolute inset-0 z-[500] flex items-center justify-center overflow-hidden rounded-xl bg-black/85 shadow-lg backdrop-blur-sm transition-all duration-300'>
+        <div className='pointer-events-none absolute inset-0 z-[500] flex items-center justify-center overflow-hidden rounded-xl bg-black/85 shadow-lg backdrop-blur-sm transition-all duration-300'>
           <LoadingStatePanel
             compact
             glow
@@ -202,7 +202,7 @@ function AuthenticatedLivePageClient() {
   });
 
   cleanupPlayerRef.current = cleanupPlayer;
-  usePlayerKeyboard({ artPlayerRef });
+  usePlayerKeyboard({ artPlayerRef, mode: 'live' });
 
   const { favorited, handleToggleFavorite } = useLiveFavorite({
     currentSource: sources.currentSource,
@@ -259,6 +259,7 @@ function AuthenticatedLivePageClient() {
         sources.isChannelListCollapsed ? '显示直播面板' : '隐藏直播面板'
       }
       artRef={artRef}
+      shortcutMode='live'
       titleSuffix={sources.currentChannel?.group || null}
       tags={headerTags}
       playerOverlay={

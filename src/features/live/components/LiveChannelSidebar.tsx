@@ -5,6 +5,7 @@ import {
   PlayerPanelContent,
   PlayerPanelTabBar,
 } from '@/components/PlayerPanelTabBar';
+import { useVerticalScrollEdgeFade } from '@/features/live/hooks/useVerticalScrollEdgeFade';
 import {
   formatTimeToHHMM,
   parseCustomTimeFormat,
@@ -128,6 +129,10 @@ function EpgTab({
   );
   const programListRef = useRef<HTMLDivElement | null>(null);
   const currentProgramRef = useRef<HTMLDivElement | null>(null);
+  const programScrollFade = useVerticalScrollEdgeFade({
+    externalRef: programListRef,
+    refreshKey: `${currentChannel?.id || ''}:${programs.length}`,
+  });
 
   useEffect(() => {
     if (currentIndex === -1) {
@@ -201,8 +206,13 @@ function EpgTab({
         />
       ) : (
         <div
-          ref={programListRef}
+          ref={programScrollFade.ref}
+          data-live-scroll-panel='epg'
+          data-top-fade={programScrollFade.hasTopFade}
+          data-bottom-fade={programScrollFade.hasBottomFade}
           className='min-h-0 flex-1 overflow-y-auto p-3'
+          onScroll={programScrollFade.onScroll}
+          style={programScrollFade.style}
         >
           <div className='space-y-2'>
             {programs.map((program, index) => {
@@ -282,6 +292,13 @@ export function LiveChannelSidebar({
   handleSourceChange,
 }: LiveChannelSidebarProps) {
   const groupButtonRefs = useRef<(HTMLButtonElement | null)[]>([]);
+  const channelScrollFade = useVerticalScrollEdgeFade({
+    externalRef: channelListRef,
+    refreshKey: `${selectedGroup}:${filteredChannels.length}`,
+  });
+  const sourceScrollFade = useVerticalScrollEdgeFade({
+    refreshKey: liveSources.length,
+  });
 
   useEffect(() => {
     if (!selectedGroup || !groupContainerRef.current) return;
@@ -356,10 +373,15 @@ export function LiveChannelSidebar({
             </div>
 
             <div
-              ref={channelListRef}
+              ref={channelScrollFade.ref}
+              data-live-scroll-panel='channels'
+              data-top-fade={channelScrollFade.hasTopFade}
+              data-bottom-fade={channelScrollFade.hasBottomFade}
               className={`max-h-[50dvh] min-h-0 flex-1 overflow-y-auto p-3 md:max-h-none ${
                 filteredChannels.length > 0 ? 'space-y-2' : 'flex flex-col'
               }`}
+              onScroll={channelScrollFade.onScroll}
+              style={channelScrollFade.style}
             >
               {filteredChannels.length > 0 ? (
                 filteredChannels.map((channel) => {
@@ -422,9 +444,15 @@ export function LiveChannelSidebar({
 
         {activeTab === 'sources' && (
           <div
+            ref={sourceScrollFade.ref}
+            data-live-scroll-panel='sources'
+            data-top-fade={sourceScrollFade.hasTopFade}
+            data-bottom-fade={sourceScrollFade.hasBottomFade}
             className={`min-h-0 flex-1 overflow-y-auto ${
               liveSources.length > 0 ? 'p-3' : 'flex flex-col'
             }`}
+            onScroll={sourceScrollFade.onScroll}
+            style={sourceScrollFade.style}
           >
             {liveSources.length > 0 ? (
               <div className='space-y-2'>

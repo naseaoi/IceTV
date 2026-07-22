@@ -27,6 +27,8 @@ export type PlayerShortcutAction =
   | 'prevEpisode'
   | 'nextEpisode';
 
+export type PlayerShortcutMode = 'vod' | 'live';
+
 export interface ShortcutBinding {
   key: string;
   shiftKey?: boolean;
@@ -74,6 +76,20 @@ export const PLAYER_SHORTCUT_ACTIONS: {
   { action: 'prevEpisode', label: '上一集' },
   { action: 'nextEpisode', label: '下一集' },
 ];
+
+const LIVE_PLAYER_SHORTCUT_ACTIONS = new Set<PlayerShortcutAction>([
+  'playPause',
+  'volumeUp',
+  'volumeDown',
+  'fullscreen',
+]);
+
+export function isPlayerShortcutActionEnabled(
+  mode: PlayerShortcutMode,
+  action: PlayerShortcutAction,
+): boolean {
+  return mode === 'vod' || LIVE_PLAYER_SHORTCUT_ACTIONS.has(action);
+}
 
 function isShortcutBinding(value: unknown): value is ShortcutBinding {
   if (!value || typeof value !== 'object') return false;

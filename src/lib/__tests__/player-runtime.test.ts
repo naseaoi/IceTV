@@ -357,6 +357,26 @@ describe('player runtime mobile controls', () => {
     expect(clickListener).toHaveBeenCalledTimes(1);
   });
 
+  it('can disable long press fast forward without disabling lock guards', () => {
+    const harness = createMobileControlsHarness();
+    const progressListener = jest.fn();
+    harness.art.isLock = true;
+    harness.progress.addEventListener('touchstart', progressListener);
+    bindPlayerMobileControls(harness.art, {
+      enableLongPressFastForward: false,
+    });
+
+    harness.video.dispatchEvent(createTouchEvent('touchstart', 10, 10));
+    jest.advanceTimersByTime(1_000);
+    harness.progress.dispatchEvent(createTouchEvent('touchstart', 10, 10));
+    harness.emit('dblclick');
+
+    expect(harness.playbackRate).toBe(1);
+    expect(isPlayerFastForwarding(harness.art)).toBe(false);
+    expect(progressListener).not.toHaveBeenCalled();
+    expect(harness.art.toggle).toHaveBeenCalledTimes(1);
+  });
+
   it('blocks locked control events and keeps the lock layer clickable', () => {
     const harness = createMobileControlsHarness();
     const progressListener = jest.fn();

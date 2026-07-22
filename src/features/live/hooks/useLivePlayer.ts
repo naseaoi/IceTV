@@ -13,6 +13,7 @@ import { readLiveDirectConnect } from '@/lib/local-preferences';
 import {
   assignManagedVideoCleanup,
   bindPlayerHoverControls,
+  bindPlayerMobileControls,
   createHlsLoaderClass,
   destroyManagedHls,
   getManagedVideo,
@@ -437,6 +438,9 @@ export function useLivePlayer({
           ...createArtPlayerConfig({
             isLive: true,
             muted: true,
+            setting: true,
+            aspectRatio: true,
+            screenshot: true,
             moreVideoAttr: { preload: 'metadata', autoplay: true, muted: true },
           }),
           type,
@@ -444,6 +448,9 @@ export function useLivePlayer({
           contextmenu: createArtPlayerContextmenus(),
         });
         bindPlayerHoverControls(artPlayerRef.current);
+        bindPlayerMobileControls(artPlayerRef.current, {
+          enableLongPressFastForward: false,
+        });
         loadedUrlRef.current = targetUrl;
 
         const ap = artPlayerRef.current as unknown as {
