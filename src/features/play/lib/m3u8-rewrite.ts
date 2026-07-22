@@ -125,8 +125,7 @@ async function rewriteM3U8Content(
   const userSwitch = requestSearchParams.get('icetv-user-switch');
   const corsCapable =
     !isLive && source ? isSourceCorsCapable(source) === true : false;
-  const effectiveAllowCors =
-    !isLive && !forceServer && (allowCORS || corsCapable);
+  const effectiveAllowCors = !forceServer && (allowCORS || corsCapable);
 
   const lines = content.split('\n');
   const rewrittenLines: Array<string | Promise<string>> = [];

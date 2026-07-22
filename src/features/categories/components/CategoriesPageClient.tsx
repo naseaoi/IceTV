@@ -6,6 +6,7 @@ import { useMemo } from 'react';
 
 import PageLayout from '@/components/PageLayout';
 import { useRuntimeConfig } from '@/components/RuntimeConfigProvider';
+import { withReturnTo } from '@/lib/navigation-return';
 import { getCustomCategoryLabel } from '@/lib/runtime-config';
 
 type ChannelEntry = {
@@ -58,7 +59,7 @@ export default function CategoriesPageClient() {
         iconClassName: 'text-red-500',
         label: '直播',
         description: '电视频道直播',
-        href: '/live',
+        href: withReturnTo('/live', '/categories'),
         prefetch: false,
       });
     }

@@ -30,9 +30,14 @@ import {
 } from '@/lib/player-utils';
 
 import { createArtPlayerContextmenus } from '../../play/lib/artPlayerSettings';
+import {
+  readBufferedRanges,
+  resolveLiveRecoveryPosition,
+} from '../lib/livePlaybackRecovery';
 import type { LiveChannel, LiveSource } from '../types';
 
 const LIVE_PRECHECK_CACHE_TTL_MS = 5 * 60 * 1000;
+const LIVE_STALL_RECOVERY_DELAY_MS = 2500;
 const livePrecheckCache = new Map<
   string,
   { type: string; expiresAt: number }
@@ -310,17 +315,17 @@ export function useLivePlayer({
 
           const hls = new Hls({
             ...createHlsConfig({
-              lowLatencyMode: true,
-              maxBufferLength: 45,
-              maxMaxBufferLength: 90,
-              backBufferLength: 15,
-              minBufferLength: 6,
+              lowLatencyMode: false,
+              maxBufferLength: 60,
+              maxMaxBufferLength: 120,
+              backBufferLength: 30,
+              minBufferLength: 12,
               maxBufferHole: 0.8,
               nudgeOffset: 0.2,
               nudgeMaxRetry: 10,
-              liveSyncDurationCount: 3,
-              liveMaxLatencyDurationCount: 7,
-              initialLiveManifestSize: 2,
+              liveSyncDurationCount: 4,
+              liveMaxLatencyDurationCount: 10,
+              initialLiveManifestSize: 3,
               startPosition: -1,
             }),
             manifestLoadingTimeOut: 8000,
@@ -331,7 +336,7 @@ export function useLivePlayer({
             levelLoadingMaxRetry: 5,
             levelLoadingRetryDelay: 500,
             levelLoadingMaxRetryTimeout: 4000,
-            fragLoadingTimeOut: 12000,
+            fragLoadingTimeOut: 15000,
             fragLoadingMaxRetry: 8,
             fragLoadingRetryDelay: 500,
             fragLoadingMaxRetryTimeout: 4000,
@@ -342,12 +347,18 @@ export function useLivePlayer({
           managedVideo.hls = hls;
 
           let alignedToLiveEdge = false;
-          let lastStallRecoveryAt = 0;
+          let stallRecoveryTimer: ReturnType<typeof setTimeout> | null = null;
           const alignToLiveEdge = (force = false) => {
             if (alignedToLiveEdge && !force) return;
             const aligned = seekVideoToLiveEdge(video, hls);
             if (!aligned) return;
             alignedToLiveEdge = true;
+          };
+
+          const clearStallRecoveryTimer = () => {
+            if (!stallRecoveryTimer) return;
+            clearTimeout(stallRecoveryTimer);
+            stallRecoveryTimer = null;
           };
 
           const handleVideoPause = () => {
@@ -364,12 +375,39 @@ export function useLivePlayer({
 
           const recoverLiveStall = () => {
             if (video.paused || video.ended) return;
-            const now = Date.now();
-            if (now - lastStallRecoveryAt < 1500) return;
-            lastStallRecoveryAt = now;
-            alignToLiveEdge(true);
-            hls.startLoad(-1);
             requestLiveAutoplay(video);
+            if (stallRecoveryTimer) return;
+
+            stallRecoveryTimer = setTimeout(() => {
+              stallRecoveryTimer = null;
+              if (
+                video.paused ||
+                video.ended ||
+                video.readyState >= HTMLMediaElement.HAVE_FUTURE_DATA
+              ) {
+                return;
+              }
+
+              const recoveryPosition = resolveLiveRecoveryPosition(
+                video.currentTime,
+                Number(hls.liveSyncPosition),
+                readBufferedRanges(video.buffered),
+              );
+              if (
+                recoveryPosition !== null &&
+                Math.abs(recoveryPosition - video.currentTime) > 0.1
+              ) {
+                video.currentTime = recoveryPosition;
+              }
+              if (!hls.loadingEnabled) {
+                hls.startLoad(-1);
+              }
+              requestLiveAutoplay(video);
+            }, LIVE_STALL_RECOVERY_DELAY_MS);
+          };
+
+          const handleLivePlaybackResumed = () => {
+            clearStallRecoveryTimer();
           };
 
           let videoRuntimeCleaned = false;
@@ -377,12 +415,19 @@ export function useLivePlayer({
           video.addEventListener('play', handleVideoPlay);
           video.addEventListener('waiting', recoverLiveStall);
           video.addEventListener('stalled', recoverLiveStall);
+          video.addEventListener('playing', handleLivePlaybackResumed);
+          video.addEventListener('canplay', handleLivePlaybackResumed);
+          video.addEventListener('seeked', handleLivePlaybackResumed);
           assignManagedVideoCleanup(video, () => {
             videoRuntimeCleaned = true;
+            clearStallRecoveryTimer();
             video.removeEventListener('pause', handleVideoPause);
             video.removeEventListener('play', handleVideoPlay);
             video.removeEventListener('waiting', recoverLiveStall);
             video.removeEventListener('stalled', recoverLiveStall);
+            video.removeEventListener('playing', handleLivePlaybackResumed);
+            video.removeEventListener('canplay', handleLivePlaybackResumed);
+            video.removeEventListener('seeked', handleLivePlaybackResumed);
           });
 
           hls.on(Hls.Events.MANIFEST_PARSED, function () {
@@ -406,12 +451,6 @@ export function useLivePlayer({
             });
             if (logResult.expectedAbort) {
               return;
-            }
-            if (
-              data.type === Hls.ErrorTypes.NETWORK_ERROR &&
-              /frag|segment|level|manifest/i.test(String(data.details || ''))
-            ) {
-              hls.startLoad(-1);
             }
             if (data.fatal) {
               handleHlsFatalError(hls, data.type, Hls.ErrorTypes);

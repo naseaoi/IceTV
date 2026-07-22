@@ -13,6 +13,7 @@ import {
 } from 'lucide-react';
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
+import type { MouseEvent } from 'react';
 import {
   createContext,
   useCallback,
@@ -27,6 +28,10 @@ import {
   readSidebarCollapsed,
   writeSidebarCollapsed,
 } from '@/lib/local-preferences';
+import {
+  getCurrentNavigationPath,
+  withReturnTo,
+} from '@/lib/navigation-return';
 import { getCustomCategoryLabel, RuntimeConfig } from '@/lib/runtime-config';
 
 import { useRuntimeConfig } from './RuntimeConfigProvider';
@@ -201,6 +206,29 @@ const Sidebar = ({ onToggle, activePath = '/' }: SidebarProps) => {
     onToggle?.(newState);
   }, [isCollapsed, onToggle]);
 
+  const handleMenuItemClick = useCallback(
+    (event: MouseEvent<HTMLAnchorElement>, href: string) => {
+      if (
+        href !== LIVE_ROUTE ||
+        event.metaKey ||
+        event.ctrlKey ||
+        event.shiftKey ||
+        event.altKey
+      ) {
+        return;
+      }
+
+      const returnTo = getCurrentNavigationPath();
+      if (returnTo.startsWith(LIVE_ROUTE)) {
+        return;
+      }
+
+      event.preventDefault();
+      router.push(withReturnTo(href, returnTo));
+    },
+    [router],
+  );
+
   const prefetchRoute = useCallback(
     (href: string) => {
       if (!shouldPrefetchRoute(href)) {
@@ -356,6 +384,7 @@ const Sidebar = ({ onToggle, activePath = '/' }: SidebarProps) => {
                         shouldPrefetchRoute(item.href) ? undefined : false
                       }
                       onMouseEnter={() => prefetchRoute(item.href)}
+                      onClick={(event) => handleMenuItemClick(event, item.href)}
                       data-active={isActive}
                       className={`${SIDEBAR_ITEM_LAYOUT_CLASS} ${SIDEBAR_LINK_STATE_CLASS} ${
                         isCollapsed ? 'mx-0 w-full max-w-none' : 'mx-0'

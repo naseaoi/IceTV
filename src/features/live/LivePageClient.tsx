@@ -23,6 +23,7 @@ import { LiveChannelSidebar } from '@/features/live/components/LiveChannelSideba
 import { useLiveFavorite } from '@/features/live/hooks/useLiveFavorite';
 import { useLivePlayer } from '@/features/live/hooks/useLivePlayer';
 import { useLiveSources } from '@/features/live/hooks/useLiveSources';
+import { useBackNavigation } from '@/hooks/useBackNavigation';
 import { usePlayerKeyboard } from '@/hooks/usePlayerKeyboard';
 
 const liveAccent: PlayerPageAccent = {
@@ -179,6 +180,7 @@ export function LivePlayerOverlay({
 }
 
 function AuthenticatedLivePageClient() {
+  const goBack = useBackNavigation();
   const artRef = useRef<HTMLDivElement | null>(null);
   const groupContainerRef = useRef<HTMLDivElement>(null);
   const channelListRef = useRef<HTMLDivElement>(null);
@@ -235,7 +237,7 @@ function AuthenticatedLivePageClient() {
         stage={sources.loadingStage}
         message={sources.loadingMessage}
         progress={sources.loadingProgress}
-        onBack={() => sources.router.back()}
+        onBack={goBack}
       />
     );
   }
