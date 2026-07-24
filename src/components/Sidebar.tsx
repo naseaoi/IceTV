@@ -20,10 +20,10 @@ import {
   useEffect,
   useLayoutEffect,
   useMemo,
-  useRef,
   useState,
 } from 'react';
 
+import { useIntentPrefetch } from '@/hooks/useIntentPrefetch';
 import {
   readSidebarCollapsed,
   writeSidebarCollapsed,
@@ -154,7 +154,7 @@ const Sidebar = ({ onToggle, activePath = '/' }: SidebarProps) => {
   const [isCollapsed, setIsCollapsed] = useState<boolean>(
     getInitialSidebarCollapsed,
   );
-  const prefetchedRoutesRef = useRef<Set<string>>(new Set());
+  const prefetchIntent = useIntentPrefetch();
 
   useLayoutEffect(() => {
     const collapsed =
@@ -234,48 +234,10 @@ const Sidebar = ({ onToggle, activePath = '/' }: SidebarProps) => {
       if (!shouldPrefetchRoute(href)) {
         return;
       }
-      if (prefetchedRoutesRef.current.has(href)) {
-        return;
-      }
-      prefetchedRoutesRef.current.add(href);
-      router.prefetch(href);
+      prefetchIntent(href);
     },
-    [router],
+    [prefetchIntent],
   );
-
-  useEffect(() => {
-    const routes = [
-      '/',
-      '/search',
-      ...getSidebarMenuItems(runtimeConfig).map((item) => item.href),
-    ];
-
-    const prefetchAll = () => {
-      routes.forEach(prefetchRoute);
-    };
-
-    let timeoutId: ReturnType<typeof setTimeout> | null = null;
-    let idleId: number | null = null;
-
-    if (typeof window !== 'undefined' && 'requestIdleCallback' in window) {
-      idleId = window.requestIdleCallback(prefetchAll, { timeout: 1500 });
-    } else {
-      timeoutId = setTimeout(prefetchAll, 800);
-    }
-
-    return () => {
-      if (
-        idleId !== null &&
-        typeof window !== 'undefined' &&
-        'cancelIdleCallback' in window
-      ) {
-        window.cancelIdleCallback(idleId);
-      }
-      if (timeoutId !== null) {
-        clearTimeout(timeoutId);
-      }
-    };
-  }, [prefetchRoute, runtimeConfig]);
 
   const contextValue = {
     isCollapsed,
@@ -328,6 +290,10 @@ const Sidebar = ({ onToggle, activePath = '/' }: SidebarProps) => {
             <nav className='mt-5 space-y-1.5 px-3'>
               <Link
                 href='/'
+                prefetch={false}
+                onMouseEnter={() => prefetchRoute('/')}
+                onFocus={() => prefetchRoute('/')}
+                onTouchStart={() => prefetchRoute('/')}
                 data-active={active === '/'}
                 className={`${SIDEBAR_ITEM_LAYOUT_CLASS} font-medium ${SIDEBAR_LINK_STATE_CLASS} ${
                   isCollapsed ? 'mx-0 w-full max-w-none' : 'mx-0'
@@ -345,7 +311,10 @@ const Sidebar = ({ onToggle, activePath = '/' }: SidebarProps) => {
               </Link>
               <Link
                 href='/search'
+                prefetch={false}
                 onMouseEnter={() => prefetchRoute('/search')}
+                onFocus={() => prefetchRoute('/search')}
+                onTouchStart={() => prefetchRoute('/search')}
                 data-active={active === '/search'}
                 className={`${SIDEBAR_ITEM_LAYOUT_CLASS} font-medium ${SIDEBAR_LINK_STATE_CLASS} ${
                   isCollapsed ? 'mx-0 w-full max-w-none' : 'mx-0'
@@ -380,10 +349,10 @@ const Sidebar = ({ onToggle, activePath = '/' }: SidebarProps) => {
                     <Link
                       key={item.label}
                       href={item.href}
-                      prefetch={
-                        shouldPrefetchRoute(item.href) ? undefined : false
-                      }
+                      prefetch={false}
                       onMouseEnter={() => prefetchRoute(item.href)}
+                      onFocus={() => prefetchRoute(item.href)}
+                      onTouchStart={() => prefetchRoute(item.href)}
                       onClick={(event) => handleMenuItemClick(event, item.href)}
                       data-active={isActive}
                       className={`${SIDEBAR_ITEM_LAYOUT_CLASS} ${SIDEBAR_LINK_STATE_CLASS} ${
