@@ -15,6 +15,7 @@ const detailCache = createSwrCache<any>({
   freshMs: 10 * 60 * 1000,
   staleMs: 20 * 60 * 1000,
   maxSize: 2000,
+  maxWeightBytes: 48 * 1024 * 1024,
 });
 
 export async function GET(request: NextRequest) {

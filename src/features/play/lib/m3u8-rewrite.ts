@@ -18,6 +18,7 @@ const m3u8RewriteCache = createSwrCache<string>({
   freshMs: 30_000,
   staleMs: 30_000,
   maxSize: 200,
+  maxWeightBytes: 16 * 1024 * 1024,
 });
 
 export async function getRewrittenM3U8Content(
