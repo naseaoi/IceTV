@@ -3,7 +3,7 @@ import { NextRequest, NextResponse } from 'next/server';
 
 import {
   isLiveEntryEnabledInConfig,
-  refreshLiveChannels,
+  refreshLiveChannelSources,
 } from '@/features/live/lib/live';
 import { getConfig, refineConfig, saveConfig } from '@/lib/config';
 import {
@@ -210,22 +210,7 @@ async function refreshAllLiveChannels() {
     return;
   }
 
-  const refreshPromises = (config.LiveConfig || [])
-    .filter((liveInfo) => !liveInfo.disabled)
-    .map(async (liveInfo) => {
-      try {
-        const nums = await refreshLiveChannels(liveInfo);
-        liveInfo.channelNumber = nums;
-      } catch (error) {
-        console.error(
-          `刷新直播源失败 [${liveInfo.name || liveInfo.key}]:`,
-          error,
-        );
-        liveInfo.channelNumber = 0;
-      }
-    });
-
-  await Promise.all(refreshPromises);
+  await refreshLiveChannelSources(config.LiveConfig || []);
 
   await saveConfig(config);
 }

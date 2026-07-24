@@ -19,7 +19,7 @@ const mockLeaseRelease = jest.fn();
 
 jest.mock('@/features/live/lib/live', () => ({
   isLiveEntryEnabledInConfig: jest.fn().mockReturnValue(false),
-  refreshLiveChannels: jest.fn(),
+  refreshLiveChannelSources: jest.fn(),
 }));
 
 jest.mock('@/lib/config', () => ({

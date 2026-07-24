@@ -2,7 +2,7 @@
 
 import {
   isLiveEntryEnabledInConfig,
-  refreshLiveChannels,
+  refreshLiveChannelSources,
 } from '@/features/live/lib/live';
 import { isGuardFailure, requireAdmin } from '@/lib/api-auth';
 import { configConflictResponse } from '@/lib/api-config-error';
@@ -24,22 +24,8 @@ export async function POST(request: NextRequest) {
       });
     }
 
-    // 并发刷新所有启用的直播源
-    const refreshPromises = (config.LiveConfig || [])
-      .filter((liveInfo) => !liveInfo.disabled)
-      .map(async (liveInfo) => {
-        try {
-          const nums = await refreshLiveChannels(liveInfo);
-          liveInfo.channelNumber = nums;
-        } catch {
-          liveInfo.channelNumber = 0;
-        }
-      });
+    await refreshLiveChannelSources(config.LiveConfig || []);
 
-    // 等待所有刷新任务完成
-    await Promise.all(refreshPromises);
-
-    // 保存配置
     await saveConfig(config);
 
     return NextResponse.json({

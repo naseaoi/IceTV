@@ -1,6 +1,7 @@
 import { Buffer } from 'node:buffer';
 import { gunzipSync } from 'node:zlib';
 
+import { runWithConcurrency } from '@/lib/concurrency';
 import { getConfig, getConfigForRead, saveConfig } from '@/lib/config';
 import {
   fetchResponseThroughProxy,
@@ -8,6 +9,7 @@ import {
   getProxyUrlForTarget,
 } from '@/lib/http-proxy-json';
 import { fetchWithUrlGuard, UrlValidationError } from '@/lib/url-guard';
+import type { AdminConfig } from '@/types/admin';
 
 const defaultUA = 'AptvPlayer/1.4.10';
 const MAX_LIVE_PLAYLIST_BYTES = 5 * 1024 * 1024;
@@ -34,15 +36,16 @@ export interface LiveChannels {
   };
 }
 
-// 带 TTL 的缓存条目
 interface CacheEntry {
   data: LiveChannels;
-  expiresAt: number;
+  freshUntil: number;
 }
 
-const CACHE_TTL_MS = 30 * 60 * 1000; // 30 分钟
+type LiveConfigEntry = NonNullable<AdminConfig['LiveConfig']>[number];
+
+const CACHE_FRESH_MS = 30 * 60 * 1000;
+const DEFAULT_LIVE_REFRESH_CONCURRENCY = 2;
 const cachedLiveChannels: { [key: string]: CacheEntry } = {};
-// 并发请求去重：同一 key 的 inflight promise
 const inflightRequests: { [key: string]: Promise<number> } = {};
 
 export function deleteCachedLiveChannels(key: string) {
@@ -65,7 +68,7 @@ export async function getCachedLiveChannels(
   key: string,
 ): Promise<LiveChannels | null> {
   const entry = cachedLiveChannels[key];
-  if (entry && Date.now() < entry.expiresAt) {
+  if (entry && Date.now() < entry.freshUntil) {
     return entry.data;
   }
 
@@ -78,6 +81,14 @@ export async function getCachedLiveChannels(
   if (!liveInfo) {
     return null;
   }
+
+  if (entry) {
+    void refreshLiveChannels(liveInfo).catch((error) => {
+      console.warn(`后台刷新直播源失败 [${liveInfo.name || key}]:`, error);
+    });
+    return entry.data;
+  }
+
   const channelNum = await refreshLiveChannels(liveInfo);
   if (channelNum === 0) {
     return null;
@@ -103,13 +114,11 @@ export async function refreshLiveChannels(liveInfo: {
   channelNumber?: number;
   disabled?: boolean;
 }): Promise<number> {
-  // 并发请求去重：如果已有 inflight 请求，直接复用
   if (liveInfo.key in inflightRequests) {
     return inflightRequests[liveInfo.key];
   }
 
   const doRefresh = async (): Promise<number> => {
-    delete cachedLiveChannels[liveInfo.key];
     const ua = liveInfo.ua?.trim() || defaultUA;
     const sourceUrl = liveInfo.url.trim();
     const data = await fetchLivePlaylistText(sourceUrl, ua);
@@ -130,7 +139,7 @@ export async function refreshLiveChannels(liveInfo: {
         epgUrl: epgUrl,
         epgs: epgs,
       },
-      expiresAt: Date.now() + CACHE_TTL_MS,
+      freshUntil: Date.now() + CACHE_FRESH_MS,
     };
     return result.channels.length;
   };
@@ -139,6 +148,36 @@ export async function refreshLiveChannels(liveInfo: {
     delete inflightRequests[liveInfo.key];
   });
   return inflightRequests[liveInfo.key];
+}
+
+export async function refreshLiveChannelSources(
+  liveInfos: LiveConfigEntry[],
+): Promise<void> {
+  const tasks = liveInfos
+    .filter((liveInfo) => !liveInfo.disabled)
+    .map((liveInfo) => async () => {
+      try {
+        liveInfo.channelNumber = await refreshLiveChannels(liveInfo);
+      } catch (error) {
+        console.error(
+          `刷新直播源失败 [${liveInfo.name || liveInfo.key}]:`,
+          error,
+        );
+      }
+    });
+
+  await runWithConcurrency(tasks, getLiveRefreshConcurrency());
+}
+
+function getLiveRefreshConcurrency() {
+  const parsed = Number.parseInt(
+    process.env.LIVE_REFRESH_CONCURRENCY || '',
+    10,
+  );
+  if (!Number.isFinite(parsed) || parsed <= 0) {
+    return DEFAULT_LIVE_REFRESH_CONCURRENCY;
+  }
+  return Math.min(2, parsed);
 }
 
 async function fetchLivePlaylistText(url: string, ua: string): Promise<string> {
