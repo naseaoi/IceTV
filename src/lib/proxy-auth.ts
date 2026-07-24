@@ -12,6 +12,21 @@ export type ProxySignaturePurpose =
   | 'm3u8'
   | 'segment';
 
+export type ProxyAuthorizationResult =
+  | {
+      authorized: true;
+      via: 'signature';
+    }
+  | {
+      authorized: true;
+      via: 'session';
+      username: string;
+    }
+  | {
+      authorized: false;
+      response: NextResponse;
+    };
+
 const SIGNATURE_PARAM = 'icetv-signature';
 const EXPIRES_PARAM = 'icetv-expires';
 const SIGNATURE_TTL_MS = 10 * 60 * 1000;
@@ -78,9 +93,18 @@ export async function authorizeProxyRequest(
   purpose: ProxySignaturePurpose,
   targetUrl: string,
 ): Promise<NextResponse | null> {
+  const result = await resolveProxyAuthorization(request, purpose, targetUrl);
+  return result.authorized ? null : result.response;
+}
+
+export async function resolveProxyAuthorization(
+  request: NextRequest,
+  purpose: ProxySignaturePurpose,
+  targetUrl: string,
+): Promise<ProxyAuthorizationResult> {
   const { searchParams } = new URL(request.url);
   if (await verifyProxySignature(searchParams, purpose, targetUrl)) {
-    return null;
+    return { authorized: true, via: 'signature' };
   }
 
   const { isGuardFailure, requireActiveUser } = await import('@/lib/api-auth');
@@ -88,7 +112,15 @@ export async function authorizeProxyRequest(
     unauthorizedMessage: 'Unauthorized',
     includeUserStateCode: false,
   });
-  return isGuardFailure(guardResult) ? guardResult.response : null;
+  if (isGuardFailure(guardResult)) {
+    return { authorized: false, response: guardResult.response };
+  }
+
+  return {
+    authorized: true,
+    via: 'session',
+    username: guardResult.username,
+  };
 }
 
 function getProxySignaturePayload(

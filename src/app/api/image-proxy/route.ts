@@ -1,13 +1,12 @@
 import { NextRequest, NextResponse } from 'next/server';
 
-import { getOptionalActiveUser } from '@/lib/api-auth';
 import {
   type CoverImageResizeOptions,
   CoverImageResizeParamError,
   parseCoverImageResizeOptions,
   resizeCoverImage,
 } from '@/lib/cover-image-resize';
-import { authorizeProxyRequest } from '@/lib/proxy-auth';
+import { resolveProxyAuthorization } from '@/lib/proxy-auth';
 import {
   assertContentLength,
   createLimitedReadableStream,
@@ -36,9 +35,13 @@ async function proxyImage(request: NextRequest, method: 'GET' | 'HEAD') {
     return NextResponse.json({ error: 'Missing image URL' }, { status: 400 });
   }
 
-  const authFailure = await authorizeProxyRequest(request, 'image', imageUrl);
-  if (authFailure) {
-    return authFailure;
+  const authorization = await resolveProxyAuthorization(
+    request,
+    'image',
+    imageUrl,
+  );
+  if (!authorization.authorized) {
+    return authorization.response;
   }
 
   let resizeOptions: CoverImageResizeOptions | null;
@@ -56,11 +59,10 @@ async function proxyImage(request: NextRequest, method: 'GET' | 'HEAD') {
     return NextResponse.json({ error: 'Invalid URL' }, { status: 403 });
   }
 
-  const activeUser = await getOptionalActiveUser(request);
   const quotaFailure = requireServerProxyQuota(
     'douban-image',
     request,
-    activeUser?.username,
+    authorization.via === 'session' ? authorization.username : undefined,
   );
   if (quotaFailure) return quotaFailure;
 
