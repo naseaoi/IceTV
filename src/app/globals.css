@@ -3,6 +3,17 @@
 @tailwind utilities;
 
 @layer utilities {
+  .home-poster-card {
+    content-visibility: auto;
+    contain-intrinsic-size: 0 174px;
+  }
+
+  @media (min-width: 640px) {
+    .home-poster-card {
+      contain-intrinsic-size: 0 298px;
+    }
+  }
+
   .scrollbar-hide {
     -ms-overflow-style: none; /* IE and Edge */
     scrollbar-width: none; /* Firefox */

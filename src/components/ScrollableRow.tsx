@@ -2,22 +2,57 @@
 
 import { ChevronLeft, ChevronRight } from 'lucide-react';
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { Children, useMemo } from 'react';
 
 interface ScrollableRowProps {
   children: React.ReactNode;
   scrollDistance?: number;
+  initialItemCount?: number;
+  mountBatchSize?: number;
 }
 
 export default function ScrollableRow({
   children,
   scrollDistance = 1000,
+  initialItemCount,
+  mountBatchSize = 8,
 }: ScrollableRowProps) {
   const containerRef = useRef<HTMLDivElement>(null);
+  const childItems = useMemo(() => Children.toArray(children), [children]);
+  const totalItemCount = childItems.length;
+  const progressiveMounting =
+    Number.isFinite(initialItemCount) && (initialItemCount || 0) > 0;
+  const normalizedInitialItemCount = progressiveMounting
+    ? Math.min(totalItemCount, Math.max(1, Math.floor(initialItemCount || 0)))
+    : totalItemCount;
+  const normalizedMountBatchSize = Math.max(1, Math.floor(mountBatchSize));
+  const [mountedItemCount, setMountedItemCount] = useState(
+    normalizedInitialItemCount,
+  );
   const [showLeftScroll, setShowLeftScroll] = useState(false);
   const [showRightScroll, setShowRightScroll] = useState(false);
   const [isHovered, setIsHovered] = useState(false);
   const animationFrameRef = useRef<number | null>(null);
   const scrollButtonStateRef = useRef({ left: false, right: false });
+
+  useEffect(() => {
+    setMountedItemCount((currentCount) =>
+      Math.min(
+        totalItemCount,
+        Math.max(currentCount, normalizedInitialItemCount),
+      ),
+    );
+  }, [normalizedInitialItemCount, totalItemCount]);
+
+  const mountMoreItems = useCallback(() => {
+    if (!progressiveMounting) {
+      return;
+    }
+
+    setMountedItemCount((currentCount) =>
+      Math.min(totalItemCount, currentCount + normalizedMountBatchSize),
+    );
+  }, [normalizedMountBatchSize, progressiveMounting, totalItemCount]);
 
   const updateScrollButtonState = useCallback(
     (nextState: { left: boolean; right: boolean }) => {
@@ -41,11 +76,27 @@ export default function ScrollableRow({
     if (!el) return;
     const { scrollWidth, clientWidth, scrollLeft } = el;
     const threshold = 1;
+    if (
+      progressiveMounting &&
+      mountedItemCount < totalItemCount &&
+      scrollWidth - (scrollLeft + clientWidth) <=
+        Math.max(clientWidth * 0.75, 240)
+    ) {
+      mountMoreItems();
+    }
     updateScrollButtonState({
       left: scrollLeft > threshold,
-      right: scrollWidth - (scrollLeft + clientWidth) > threshold,
+      right:
+        mountedItemCount < totalItemCount ||
+        scrollWidth - (scrollLeft + clientWidth) > threshold,
     });
-  }, [updateScrollButtonState]);
+  }, [
+    mountMoreItems,
+    mountedItemCount,
+    progressiveMounting,
+    totalItemCount,
+    updateScrollButtonState,
+  ]);
 
   const scheduleCheckScroll = useCallback(() => {
     if (typeof window.requestAnimationFrame !== 'function') {
@@ -88,10 +139,18 @@ export default function ScrollableRow({
   }, [checkScroll, scheduleCheckScroll]);
 
   const handleScrollRightClick = () => {
-    containerRef.current?.scrollBy({
-      left: scrollDistance,
-      behavior: 'smooth',
-    });
+    const container = containerRef.current;
+    if (!container) return;
+
+    if (progressiveMounting && mountedItemCount < totalItemCount) {
+      mountMoreItems();
+      window.requestAnimationFrame(() => {
+        container.scrollBy({ left: scrollDistance, behavior: 'smooth' });
+      });
+      return;
+    }
+
+    container.scrollBy({ left: scrollDistance, behavior: 'smooth' });
   };
 
   const handleScrollLeftClick = () => {
@@ -115,7 +174,7 @@ export default function ScrollableRow({
         className='scrollbar-hide flex space-x-3 overflow-x-auto py-1 pb-3 pl-1 pr-4 sm:space-x-7 sm:py-2 sm:pb-6 sm:pr-6'
         onScroll={scheduleCheckScroll}
       >
-        {children}
+        {childItems.slice(0, mountedItemCount)}
       </div>
       {showLeftScroll && (
         <div

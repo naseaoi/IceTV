@@ -1,5 +1,5 @@
 export const HOME_POSTER_CARD_CLASS =
-  'w-[25vw] min-w-[25vw] sm:w-44 sm:min-w-[180px]';
+  'home-poster-card w-[25vw] min-w-[25vw] sm:w-44 sm:min-w-[180px]';
 
 interface HomePosterCardSkeletonProps {
   className?: string;
