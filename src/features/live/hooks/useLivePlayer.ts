@@ -19,6 +19,7 @@ import {
   getManagedVideo,
   getPlayerModules,
   isManagedVideoExpectedAbort,
+  markManagedVideoExpectedAbort,
   runManagedVideoCleanup,
 } from '@/lib/player-runtime';
 import {
@@ -34,6 +35,14 @@ import {
   readBufferedRanges,
   resolveLiveRecoveryPosition,
 } from '../lib/livePlaybackRecovery';
+import {
+  type LivePlaybackRoute,
+  buildLiveM3u8ProxyUrl,
+  isLivePlaylistContextType,
+  isLiveRouteNetworkError,
+  LIVE_DIRECT_ROUTE_FAILURE_THRESHOLD,
+  rewriteLivePlaylistRequestUrl,
+} from '../lib/livePlaybackRoute';
 import type { LiveChannel, LiveSource } from '../types';
 
 const LIVE_PRECHECK_CACHE_TTL_MS = 5 * 60 * 1000;
@@ -192,6 +201,9 @@ export function useLivePlayer({
 }: UseLivePlayerParams) {
   const artPlayerRef = useRef<ArtplayerType | null>(null);
   const loadedUrlRef = useRef('');
+  const liveRouteRef = useRef<LivePlaybackRoute>('server');
+  const liveSourceKeyRef = useRef('');
+  const liveVideoUrlRef = useRef('');
   const mutedAutoplayRequestedRef = useRef(false);
   const userPausedRef = useRef(false);
   const loadingIndicatorTimerRef = useRef<ReturnType<typeof setTimeout> | null>(
@@ -222,6 +234,9 @@ export function useLivePlayer({
   const doCleanup = () => {
     setUnsupportedType(null);
     loadedUrlRef.current = '';
+    liveRouteRef.current = 'server';
+    liveSourceKeyRef.current = '';
+    liveVideoUrlRef.current = '';
     mutedAutoplayRequestedRef.current = false;
     userPausedRef.current = false;
     setLiveVideoLoading(false);
@@ -249,14 +264,25 @@ export function useLivePlayer({
         if (cancelled || !artRef.current) return;
 
         const sourceKey = currentSourceRef.current?.key || '';
+        liveSourceKeyRef.current = sourceKey;
+        liveVideoUrlRef.current = videoUrl;
         const type = await resolveLiveStreamType(videoUrl, sourceKey);
 
         if (cancelled || !artRef.current) return;
 
-        const targetUrl = `/api/proxy/m3u8?url=${encodeURIComponent(videoUrl)}&icetv-source=${sourceKey}&icetv-live=1`;
+        const initialRoute: LivePlaybackRoute = readLiveDirectConnect()
+          ? 'browser'
+          : 'server';
+        liveRouteRef.current = initialRoute;
+        const targetUrl = buildLiveM3u8ProxyUrl({
+          rawUrl: videoUrl,
+          sourceKey,
+          route: initialRoute,
+        });
 
         if (type !== 'm3u8') {
           loadedUrlRef.current = '';
+          liveRouteRef.current = 'server';
           cleanupPlayer(artPlayerRef);
           setUnsupportedType(type);
           setLiveVideoLoading(false);
@@ -278,32 +304,14 @@ export function useLivePlayer({
           {
             rewriteContext: (context) => {
               const currentUrl = context.url;
-              if (!currentUrl) return;
-
-              const isLiveDirectConnect =
-                typeof window !== 'undefined' && readLiveDirectConnect();
-
-              try {
-                const nextUrl = new URL(currentUrl, window.location.origin);
-                nextUrl.searchParams.set('icetv-source', sourceKey);
-                if (
-                  isLiveDirectConnect &&
-                  (context.type === 'manifest' || context.type === 'level')
-                ) {
-                  nextUrl.searchParams.set('allowCORS', 'true');
-                }
-                context.url = nextUrl.toString();
-              } catch {
-                const separator = currentUrl.includes('?') ? '&' : '?';
-                let nextUrl = `${currentUrl}${separator}icetv-source=${encodeURIComponent(sourceKey)}`;
-                if (
-                  isLiveDirectConnect &&
-                  (context.type === 'manifest' || context.type === 'level')
-                ) {
-                  nextUrl = `${nextUrl}&allowCORS=true`;
-                }
-                context.url = nextUrl;
+              if (!currentUrl || !isLivePlaylistContextType(context.type)) {
+                return;
               }
+
+              context.url = rewriteLivePlaylistRequestUrl(currentUrl, {
+                sourceKey: liveSourceKeyRef.current,
+                route: liveRouteRef.current,
+              });
             },
           },
         );
@@ -345,6 +353,60 @@ export function useLivePlayer({
           hls.loadSource(url);
           hls.attachMedia(video);
           managedVideo.hls = hls;
+
+          let videoRuntimeCleaned = false;
+          let currentRoute = liveRouteRef.current;
+          let directRouteFailureCount = 0;
+          let fallbackAttempted = false;
+          const resetDirectRouteFailures = () => {
+            directRouteFailureCount = 0;
+          };
+
+          const switchToServerProxy = (reason: string) => {
+            if (
+              fallbackAttempted ||
+              currentRoute !== 'browser' ||
+              videoRuntimeCleaned ||
+              managedVideo.hls !== hls
+            ) {
+              return false;
+            }
+
+            fallbackAttempted = true;
+            currentRoute = 'server';
+            liveRouteRef.current = 'server';
+            managedVideo.__icetvUsingServerProxy = true;
+            directRouteFailureCount = 0;
+            setLiveVideoLoading(true);
+            setError(null);
+
+            const fallbackUrl = buildLiveM3u8ProxyUrl({
+              rawUrl: liveVideoUrlRef.current,
+              sourceKey: liveSourceKeyRef.current,
+              route: 'server',
+            });
+            console.warn('直播浏览器直连失败，切换服务端代理重试', {
+              sourceKey: liveSourceKeyRef.current,
+              reason,
+            });
+
+            try {
+              if (typeof hls.stopLoad === 'function') {
+                markManagedVideoExpectedAbort(video);
+                hls.stopLoad();
+              }
+              hls.loadSource(fallbackUrl);
+              ensureVideoSource(video, fallbackUrl);
+              hls.startLoad?.(-1);
+              return true;
+            } catch (error) {
+              console.error('切换直播服务端代理失败:', error);
+              return false;
+            }
+          };
+
+          managedVideo.__icetvUsingServerProxy = currentRoute === 'server';
+          managedVideo.__icetvSwitchToServerProxy = switchToServerProxy;
 
           let alignedToLiveEdge = false;
           let stallRecoveryTimer: ReturnType<typeof setTimeout> | null = null;
@@ -410,7 +472,6 @@ export function useLivePlayer({
             clearStallRecoveryTimer();
           };
 
-          let videoRuntimeCleaned = false;
           video.addEventListener('pause', handleVideoPause);
           video.addEventListener('play', handleVideoPlay);
           video.addEventListener('waiting', recoverLiveStall);
@@ -420,6 +481,7 @@ export function useLivePlayer({
           video.addEventListener('seeked', handleLivePlaybackResumed);
           assignManagedVideoCleanup(video, () => {
             videoRuntimeCleaned = true;
+            managedVideo.__icetvSwitchToServerProxy = null;
             clearStallRecoveryTimer();
             video.removeEventListener('pause', handleVideoPause);
             video.removeEventListener('play', handleVideoPlay);
@@ -431,20 +493,28 @@ export function useLivePlayer({
           });
 
           hls.on(Hls.Events.MANIFEST_PARSED, function () {
+            resetDirectRouteFailures();
             hls.startLoad(-1);
             alignToLiveEdge();
             requestInitialLiveAutoplay(video);
           });
 
           hls.on(Hls.Events.LEVEL_UPDATED, function () {
+            resetDirectRouteFailures();
             alignToLiveEdge();
             requestInitialLiveAutoplay(video);
           });
 
+          if (Hls.Events.FRAG_LOADED) {
+            hls.on(Hls.Events.FRAG_LOADED, function () {
+              resetDirectRouteFailures();
+            });
+          }
+
           hls.on(Hls.Events.ERROR, function (_event: any, data: any) {
             const logResult = logHlsError(_event, data, {
               scope: 'live',
-              sourceKey,
+              sourceKey: liveSourceKeyRef.current,
               phase: 'live',
               expectedAbort:
                 videoRuntimeCleaned || isManagedVideoExpectedAbort(video),
@@ -452,6 +522,24 @@ export function useLivePlayer({
             if (logResult.expectedAbort) {
               return;
             }
+
+            if (
+              currentRoute === 'browser' &&
+              isLiveRouteNetworkError(data, Hls.ErrorTypes)
+            ) {
+              directRouteFailureCount += 1;
+              if (
+                (data.fatal ||
+                  directRouteFailureCount >=
+                    LIVE_DIRECT_ROUTE_FAILURE_THRESHOLD) &&
+                switchToServerProxy(
+                  `${String(data?.type || 'networkError')}:${String(data?.details || 'unknown')}`,
+                )
+              ) {
+                return;
+              }
+            }
+
             if (data.fatal) {
               handleHlsFatalError(hls, data.type, Hls.ErrorTypes);
             }
@@ -516,6 +604,10 @@ export function useLivePlayer({
         });
         ap.on('error', (err: unknown) => {
           console.error('Live player error:', err);
+          const activeVideo = ap.video;
+          getManagedVideo(activeVideo).__icetvSwitchToServerProxy?.(
+            err instanceof Error ? err.message : 'player-error',
+          );
         });
 
         if (artPlayerRef.current?.video) {
@@ -548,6 +640,9 @@ export function useLivePlayer({
     return () => {
       clearLiveLoadingTimer();
       loadedUrlRef.current = '';
+      liveRouteRef.current = 'server';
+      liveSourceKeyRef.current = '';
+      liveVideoUrlRef.current = '';
       mutedAutoplayRequestedRef.current = false;
       userPausedRef.current = false;
       cleanupPlayer(artPlayerRef);
@@ -558,6 +653,9 @@ export function useLivePlayer({
     const handleBeforeUnload = () => {
       clearLiveLoadingTimer();
       loadedUrlRef.current = '';
+      liveRouteRef.current = 'server';
+      liveSourceKeyRef.current = '';
+      liveVideoUrlRef.current = '';
       userPausedRef.current = false;
       cleanupPlayer(artPlayerRef);
     };
@@ -566,6 +664,9 @@ export function useLivePlayer({
       window.removeEventListener('beforeunload', handleBeforeUnload);
       clearLiveLoadingTimer();
       loadedUrlRef.current = '';
+      liveRouteRef.current = 'server';
+      liveSourceKeyRef.current = '';
+      liveVideoUrlRef.current = '';
       mutedAutoplayRequestedRef.current = false;
       userPausedRef.current = false;
       cleanupPlayer(artPlayerRef);

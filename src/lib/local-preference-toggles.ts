@@ -81,7 +81,7 @@ export const localPreferenceToggleDefinitions: LocalPreferenceToggleDefinition[]
       id: 'liveDirectConnect',
       siteConfigKey: 'LiveDirectConnect',
       title: 'IPTV 视频浏览器直连',
-      description: '开启时需要自备 Allow CORS 插件',
+      description: '开启时优先直连，失败会自动回退服务端代理',
       readValue: readLiveDirectConnect,
       readDefaultValue: readDefaultLiveDirectConnect,
       writeValue: writeLiveDirectConnect,
