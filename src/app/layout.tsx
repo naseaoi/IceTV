@@ -98,6 +98,7 @@ export default async function RootLayout({
     SOURCE_COVER_PROXY_MODE: publicConfig.SourceCoverProxyMode,
   };
   const serializedRuntimeConfig = serializeForInlineScript(runtimeConfig);
+  const runtimeConfigReadyForGuest = initialAuthSession.status === 'guest';
   const serializedSidebarCollapsedStorageKey = serializeForInlineScript(
     SIDEBAR_COLLAPSED_STORAGE_KEY,
   );
@@ -127,7 +128,7 @@ export default async function RootLayout({
         />
         <script
           dangerouslySetInnerHTML={{
-            __html: `window.RUNTIME_CONFIG = ${serializedRuntimeConfig}; window.__runtimeConfigReady = false;`,
+            __html: `window.RUNTIME_CONFIG = ${serializedRuntimeConfig}; window.__runtimeConfigReady = ${runtimeConfigReadyForGuest ? 'true' : 'false'};`,
           }}
         />
       </head>
