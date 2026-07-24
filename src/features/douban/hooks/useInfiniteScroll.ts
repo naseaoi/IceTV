@@ -28,7 +28,6 @@ export function useInfiniteScroll<T extends HTMLElement>({
   threshold = 0.1,
 }: UseInfiniteScrollOptions): RefCallback<T> {
   const [sentinelElement, setSentinelElement] = useState<T | null>(null);
-  const observerRef = useRef<IntersectionObserver | null>(null);
   const triggeredRef = useRef(false);
   const onLoadMoreRef = useRef(onLoadMore);
 
@@ -48,7 +47,6 @@ export function useInfiniteScroll<T extends HTMLElement>({
 
     triggeredRef.current = false;
     let frameId: number | null = null;
-    let pollTimerId: number | null = null;
     const sentinel = sentinelElement;
 
     const triggerLoadMore = () => {
@@ -98,60 +96,54 @@ export function useInfiniteScroll<T extends HTMLElement>({
       frameId = window.requestAnimationFrame(checkSentinel);
     };
 
-    const pollSentinel = () => {
-      if (frameId !== null) {
-        window.cancelAnimationFrame(frameId);
-        frameId = null;
-      }
-      readSentinel();
-      pollTimerId = window.setTimeout(pollSentinel, 160);
-    };
+    const intersectionObserver =
+      sentinel && typeof IntersectionObserver !== 'undefined'
+        ? new IntersectionObserver(
+            (entries) => {
+              if (entries[0].isIntersecting) {
+                triggerLoadMore();
+              }
+            },
+            { threshold },
+          )
+        : null;
 
     if (sentinel) {
-      const observer = new IntersectionObserver(
-        (entries) => {
-          if (entries[0].isIntersecting) {
-            triggerLoadMore();
-          }
-        },
-        { threshold },
-      );
-
-      observer.observe(sentinel);
-      observerRef.current = observer;
-    }
-    const scrollTargets = new Set<EventTarget>([
-      window,
-      document,
-      document.documentElement,
-      document.body,
-    ]);
-
-    if (document.scrollingElement) {
-      scrollTargets.add(document.scrollingElement);
+      intersectionObserver?.observe(sentinel);
     }
 
-    scrollTargets.forEach((target) => {
-      target.addEventListener('scroll', scheduleCheck, { passive: true });
+    const resizeObserver =
+      typeof ResizeObserver === 'undefined'
+        ? null
+        : new ResizeObserver(scheduleCheck);
+
+    resizeObserver?.observe(document.documentElement);
+    resizeObserver?.observe(document.body);
+    if (sentinel) {
+      resizeObserver?.observe(sentinel);
+    }
+
+    document.addEventListener('scroll', scheduleCheck, {
+      capture: true,
+      passive: true,
+    });
+    window.addEventListener('scroll', scheduleCheck, {
+      passive: true,
     });
     window.addEventListener('resize', scheduleCheck);
     scheduleCheck();
-    pollTimerId = window.setTimeout(pollSentinel, 160);
 
     return () => {
-      observerRef.current?.disconnect();
-      scrollTargets.forEach((target) => {
-        target.removeEventListener('scroll', scheduleCheck);
-      });
+      intersectionObserver?.disconnect();
+      resizeObserver?.disconnect();
+      document.removeEventListener('scroll', scheduleCheck, true);
+      window.removeEventListener('scroll', scheduleCheck);
       window.removeEventListener('resize', scheduleCheck);
       if (frameId !== null) {
         window.cancelAnimationFrame(frameId);
       }
-      if (pollTimerId !== null) {
-        window.clearTimeout(pollTimerId);
-      }
     };
-  }, [enabled, onLoadMore, sentinelElement, threshold]);
+  }, [enabled, sentinelElement, threshold]);
 
   return setSentinelRef;
 }

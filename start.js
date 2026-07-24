@@ -35,7 +35,8 @@ const READY_POLL_TIMEOUT_MS = readPositiveInteger(
 
 // 每 1 秒轮询一次，直到请求成功
 const REQUEST_HOSTNAME = '127.0.0.1';
-const TARGET_URL = `http://${REQUEST_HOSTNAME}:${process.env.PORT || 3000}/login`;
+const HEALTH_PATH = '/api/health';
+const TARGET_URL = `http://${REQUEST_HOSTNAME}:${process.env.PORT || 3000}${HEALTH_PATH}`;
 const readyPollStartedAt = Date.now();
 
 const intervalId = setInterval(() => {

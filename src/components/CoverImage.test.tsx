@@ -47,6 +47,13 @@ jest.mock('next/image', () => {
 });
 
 describe('CoverImage', () => {
+  const originalIntersectionObserver = global.IntersectionObserver;
+  const originalConnection = Object.getOwnPropertyDescriptor(
+    navigator,
+    'connection',
+  );
+  let intersectionOptions: IntersectionObserverInit | undefined;
+
   beforeEach(() => {
     clearCoverImageCacheForTests();
     localStorage.clear();
@@ -55,10 +62,38 @@ describe('CoverImage', () => {
       DOUBAN_IMAGE_PROXY_TYPE_STORAGE_KEY,
       'cmliussss-cdn-ali',
     );
+
+    global.IntersectionObserver = class IntersectionObserver {
+      readonly root = null;
+      readonly rootMargin = '';
+      readonly thresholds = [];
+
+      constructor(
+        _callback: IntersectionObserverCallback,
+        options?: IntersectionObserverInit,
+      ) {
+        intersectionOptions = options;
+      }
+
+      disconnect() {}
+      observe() {}
+      takeRecords() {
+        return [];
+      }
+      unobserve() {}
+    };
   });
 
   afterEach(() => {
     jest.useRealTimers();
+    global.IntersectionObserver = originalIntersectionObserver;
+    intersectionOptions = undefined;
+
+    if (originalConnection) {
+      Object.defineProperty(navigator, 'connection', originalConnection);
+    } else {
+      Reflect.deleteProperty(navigator, 'connection');
+    }
   });
 
   it('按当前豆瓣图片代理加载，失败后直接显示占位', () => {
@@ -187,5 +222,38 @@ describe('CoverImage', () => {
       'https://covers.example.com/poster.jpg',
     );
     expect(screen.queryByText('无封面')).not.toBeInTheDocument();
+  });
+
+  it('使用较小的横向封面预加载范围', () => {
+    render(
+      <CoverImage
+        src='https://covers.example.com/poster.jpg'
+        alt='延迟加载封面'
+      />,
+    );
+
+    expect(intersectionOptions).toEqual({
+      root: null,
+      rootMargin: '520px 180px',
+    });
+  });
+
+  it.each([
+    { effectiveType: '4g', saveData: true },
+    { effectiveType: '2g', saveData: false },
+  ])('在弱网或省流模式收紧封面预加载范围', (connection) => {
+    Object.defineProperty(navigator, 'connection', {
+      configurable: true,
+      value: connection,
+    });
+
+    render(
+      <CoverImage src='https://covers.example.com/poster.jpg' alt='弱网封面' />,
+    );
+
+    expect(intersectionOptions).toEqual({
+      root: null,
+      rootMargin: '320px 96px',
+    });
   });
 });

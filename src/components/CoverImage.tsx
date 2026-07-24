@@ -49,7 +49,27 @@ function needsImageUnoptimized(
   return true;
 }
 
-const VIEWPORT_PRELOAD_MARGIN = '600px';
+const VIEWPORT_PRELOAD_MARGIN = '520px 180px';
+const REDUCED_VIEWPORT_PRELOAD_MARGIN = '320px 96px';
+
+interface NavigatorConnection {
+  effectiveType?: string;
+  saveData?: boolean;
+}
+
+function getViewportPreloadMargin() {
+  const connection = (
+    navigator as Navigator & { connection?: NavigatorConnection }
+  ).connection;
+  const shouldReducePreload =
+    connection?.saveData === true ||
+    connection?.effectiveType === 'slow-2g' ||
+    connection?.effectiveType === '2g';
+
+  return shouldReducePreload
+    ? REDUCED_VIEWPORT_PRELOAD_MARGIN
+    : VIEWPORT_PRELOAD_MARGIN;
+}
 
 interface CoverImageProps {
   src: string;
@@ -146,7 +166,7 @@ const CoverImage: React.FC<CoverImageProps> = memo(function CoverImage({
           io.disconnect();
         }
       },
-      { root: document.body, rootMargin: VIEWPORT_PRELOAD_MARGIN },
+      { root: null, rootMargin: getViewportPreloadMargin() },
     );
     io.observe(el);
     return () => io.disconnect();
