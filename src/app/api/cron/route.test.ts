@@ -8,6 +8,12 @@ installWebPolyfills();
 
 const mockGetConfig = jest.fn();
 const mockGetAllUsers = jest.fn();
+const mockGetAllPlayRecords = jest.fn();
+const mockGetAllFavorites = jest.fn();
+const mockSavePlayRecord = jest.fn();
+const mockSaveFavorite = jest.fn();
+const mockFetchVideoDetail = jest.fn();
+const mockGetOwnerUsername = jest.fn();
 
 jest.mock('@/features/live/lib/live', () => ({
   isLiveEntryEnabledInConfig: jest.fn().mockReturnValue(false),
@@ -28,13 +34,19 @@ jest.mock('@/lib/config-subscription', () => ({
 jest.mock('@/lib/db', () => ({
   db: {
     getAllUsers: (...args: unknown[]) => mockGetAllUsers(...args),
-    getAllPlayRecords: jest.fn().mockResolvedValue({}),
-    getAllFavorites: jest.fn().mockResolvedValue({}),
+    getAllPlayRecords: (...args: unknown[]) => mockGetAllPlayRecords(...args),
+    getAllFavorites: (...args: unknown[]) => mockGetAllFavorites(...args),
+    savePlayRecord: (...args: unknown[]) => mockSavePlayRecord(...args),
+    saveFavorite: (...args: unknown[]) => mockSaveFavorite(...args),
   },
 }));
 
+jest.mock('@/lib/env.server', () => ({
+  getOwnerUsername: (...args: unknown[]) => mockGetOwnerUsername(...args),
+}));
+
 jest.mock('@/lib/fetchVideoDetail', () => ({
-  fetchVideoDetail: jest.fn(),
+  fetchVideoDetail: (...args: unknown[]) => mockFetchVideoDetail(...args),
 }));
 
 jest.mock('@/lib/url-guard', () => ({
@@ -53,14 +65,67 @@ function createRequest(url = 'http://localhost/api/cron'): NextRequest {
   } as unknown as NextRequest;
 }
 
+function createPlayRecord(overrides: Record<string, unknown> = {}) {
+  return {
+    title: '测试视频',
+    source_name: '测试源',
+    cover: 'cover.jpg',
+    year: '2026',
+    index: 1,
+    total_episodes: 1,
+    play_time: 10,
+    total_time: 100,
+    save_time: 1,
+    ...overrides,
+  };
+}
+
+function createFavorite(overrides: Record<string, unknown> = {}) {
+  return {
+    title: '测试视频',
+    source_name: '测试源',
+    cover: 'cover.jpg',
+    year: '2026',
+    total_episodes: 1,
+    save_time: 1,
+    ...overrides,
+  };
+}
+
+async function flushBackgroundTask() {
+  for (let index = 0; index < 8; index += 1) {
+    await new Promise((resolve) => setImmediate(resolve));
+  }
+}
+
+async function runMetadataTask() {
+  const response = await GET(
+    createRequest('http://localhost/api/cron?task=metadata'),
+  );
+  expect(response.status).toBe(200);
+  await flushBackgroundTask();
+}
+
 describe('cron route', () => {
   const originalCronSecret = process.env.CRON_SECRET;
+  const originalMetadataRefreshTtlMs = process.env.CRON_METADATA_REFRESH_TTL_MS;
+  const originalMetadataMaxItems = process.env.CRON_METADATA_MAX_ITEMS;
+  const originalMetadataTimeBudgetMs = process.env.CRON_METADATA_TIME_BUDGET_MS;
 
   beforeEach(() => {
     process.env.CRON_SECRET = 'test-secret';
+    delete process.env.CRON_METADATA_REFRESH_TTL_MS;
+    delete process.env.CRON_METADATA_MAX_ITEMS;
+    delete process.env.CRON_METADATA_TIME_BUDGET_MS;
     jest.clearAllMocks();
-    mockGetAllUsers.mockResolvedValue([]);
-    mockGetConfig.mockResolvedValue({
+    mockGetAllUsers.mockReset().mockResolvedValue([]);
+    mockGetAllPlayRecords.mockReset().mockResolvedValue({});
+    mockGetAllFavorites.mockReset().mockResolvedValue({});
+    mockSavePlayRecord.mockReset().mockResolvedValue(undefined);
+    mockSaveFavorite.mockReset().mockResolvedValue(undefined);
+    mockFetchVideoDetail.mockReset().mockResolvedValue(null);
+    mockGetOwnerUsername.mockReset().mockReturnValue('');
+    mockGetConfig.mockReset().mockResolvedValue({
       ConfigSubscribtion: { URL: '', AutoUpdate: false },
       LiveConfig: [],
     });
@@ -72,6 +137,19 @@ describe('cron route', () => {
     } else {
       process.env.CRON_SECRET = originalCronSecret;
     }
+
+    restoreEnvironmentVariable(
+      'CRON_METADATA_REFRESH_TTL_MS',
+      originalMetadataRefreshTtlMs,
+    );
+    restoreEnvironmentVariable(
+      'CRON_METADATA_MAX_ITEMS',
+      originalMetadataMaxItems,
+    );
+    restoreEnvironmentVariable(
+      'CRON_METADATA_TIME_BUDGET_MS',
+      originalMetadataTimeBudgetMs,
+    );
   });
 
   it('同一进程内拒绝重叠执行', async () => {
@@ -99,11 +177,11 @@ describe('cron route', () => {
       ConfigSubscribtion: { URL: '', AutoUpdate: false },
       LiveConfig: [],
     });
-    await new Promise((resolve) => setImmediate(resolve));
-    await new Promise((resolve) => setImmediate(resolve));
+    await flushBackgroundTask();
 
     const thirdResponse = await GET(createRequest());
     expect(thirdResponse.status).toBe(200);
+    await flushBackgroundTask();
   });
 
   it('拒绝未知任务类型', async () => {
@@ -113,4 +191,134 @@ describe('cron route', () => {
 
     expect(response.status).toBe(400);
   });
+
+  it('TTL 内的记录和收藏不重复获取详情', async () => {
+    const checkedAt = Date.now() - 60_000;
+    mockGetAllUsers.mockResolvedValue(['user']);
+    mockGetAllPlayRecords.mockResolvedValue({
+      'source+1': createPlayRecord({ metadata_checked_at: checkedAt }),
+    });
+    mockGetAllFavorites.mockResolvedValue({
+      'source+2': createFavorite({ metadata_checked_at: checkedAt }),
+    });
+
+    await runMetadataTask();
+
+    expect(mockFetchVideoDetail).not.toHaveBeenCalled();
+    expect(mockSavePlayRecord).not.toHaveBeenCalled();
+    expect(mockSaveFavorite).not.toHaveBeenCalled();
+  });
+
+  it('为过期条目保存最新元数据检查时间', async () => {
+    mockGetAllUsers.mockResolvedValue(['user']);
+    mockGetAllPlayRecords.mockResolvedValue({
+      'source+1': createPlayRecord({ metadata_checked_at: 1 }),
+    });
+    mockFetchVideoDetail.mockResolvedValue({
+      title: '测试视频',
+      poster: 'cover.jpg',
+      year: '2026',
+      episodes: ['第 1 集'],
+    });
+
+    await runMetadataTask();
+
+    expect(mockSavePlayRecord).toHaveBeenCalledWith(
+      'user',
+      'source',
+      '1',
+      expect.objectContaining({
+        metadata_checked_at: expect.any(Number),
+      }),
+    );
+    expect(
+      mockSavePlayRecord.mock.calls[0][3].metadata_checked_at,
+    ).toBeGreaterThan(1);
+  });
+
+  it('使用全局条目上限截断元数据刷新', async () => {
+    process.env.CRON_METADATA_MAX_ITEMS = '1';
+    mockGetAllUsers.mockResolvedValue(['user']);
+    mockGetAllPlayRecords.mockResolvedValue({
+      'source+1': createPlayRecord(),
+      'source+2': createPlayRecord({ title: '第二个视频' }),
+    });
+    mockGetAllFavorites.mockResolvedValue({
+      'source+3': createFavorite(),
+    });
+    mockFetchVideoDetail.mockResolvedValue({
+      title: '测试视频',
+      poster: 'cover.jpg',
+      year: '2026',
+      episodes: ['第 1 集'],
+    });
+
+    await runMetadataTask();
+
+    expect(mockFetchVideoDetail).toHaveBeenCalledTimes(1);
+    expect(mockSavePlayRecord).toHaveBeenCalledTimes(1);
+    expect(mockGetAllFavorites).not.toHaveBeenCalled();
+  });
+
+  it('达到时间预算后不再处理后续条目', async () => {
+    process.env.CRON_METADATA_TIME_BUDGET_MS = '10';
+    let currentTime = 1000;
+    const nowSpy = jest
+      .spyOn(Date, 'now')
+      .mockImplementation(() => currentTime);
+    mockGetAllUsers.mockResolvedValue(['user']);
+    mockGetAllPlayRecords.mockResolvedValue({
+      'source+1': createPlayRecord(),
+      'source+2': createPlayRecord({ title: '第二个视频' }),
+    });
+    mockFetchVideoDetail.mockImplementation(async () => {
+      currentTime += 20;
+      return {
+        title: '测试视频',
+        poster: 'cover.jpg',
+        year: '2026',
+        episodes: ['第 1 集'],
+      };
+    });
+
+    try {
+      await runMetadataTask();
+
+      expect(mockFetchVideoDetail).toHaveBeenCalledTimes(1);
+      expect(mockSavePlayRecord).toHaveBeenCalledTimes(1);
+      expect(mockGetAllFavorites).not.toHaveBeenCalled();
+    } finally {
+      nowSpy.mockRestore();
+    }
+  });
+
+  it('记录和收藏中的同一视频复用详情请求', async () => {
+    mockGetAllUsers.mockResolvedValue(['user']);
+    mockGetAllPlayRecords.mockResolvedValue({
+      'source+1': createPlayRecord(),
+    });
+    mockGetAllFavorites.mockResolvedValue({
+      'source+1': createFavorite(),
+    });
+    mockFetchVideoDetail.mockResolvedValue({
+      title: '更新后标题',
+      poster: 'updated.jpg',
+      year: '2026',
+      episodes: ['第 1 集', '第 2 集'],
+    });
+
+    await runMetadataTask();
+
+    expect(mockFetchVideoDetail).toHaveBeenCalledTimes(1);
+    expect(mockSavePlayRecord).toHaveBeenCalledTimes(1);
+    expect(mockSaveFavorite).toHaveBeenCalledTimes(1);
+  });
 });
+
+function restoreEnvironmentVariable(name: string, value: string | undefined) {
+  if (value === undefined) {
+    delete process.env[name];
+  } else {
+    process.env[name] = value;
+  }
+}

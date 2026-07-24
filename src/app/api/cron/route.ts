@@ -13,15 +13,65 @@ import {
 import { db } from '@/lib/db';
 import { getOwnerUsername } from '@/lib/env.server';
 import { fetchVideoDetail } from '@/lib/fetchVideoDetail';
-import { SearchResult } from '@/lib/types';
+import { Favorite, PlayRecord, SearchResult } from '@/lib/types';
 import { fetchWithUrlGuard } from '@/lib/url-guard';
 import { parseStorageKey } from '@/lib/utils';
 
 export const runtime = 'nodejs';
 
 type CronTask = 'all' | 'config' | 'live' | 'metadata';
+const DEFAULT_METADATA_REFRESH_TTL_MS = 24 * 60 * 60 * 1000;
+const DEFAULT_METADATA_REFRESH_MAX_ITEMS = 100;
+const DEFAULT_METADATA_REFRESH_TIME_BUDGET_MS = 30 * 1000;
+
+type MetadataRefreshBudget = {
+  startedAt: number;
+  maxItems: number;
+  timeBudgetMs: number;
+  processed: number;
+};
 
 let cronRunning = false;
+
+function readPositiveInteger(value: string | undefined, fallback: number) {
+  const parsed = Number.parseInt(value || '', 10);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
+}
+
+function createMetadataRefreshBudget(): MetadataRefreshBudget {
+  return {
+    startedAt: Date.now(),
+    maxItems: readPositiveInteger(
+      process.env.CRON_METADATA_MAX_ITEMS,
+      DEFAULT_METADATA_REFRESH_MAX_ITEMS,
+    ),
+    timeBudgetMs: readPositiveInteger(
+      process.env.CRON_METADATA_TIME_BUDGET_MS,
+      DEFAULT_METADATA_REFRESH_TIME_BUDGET_MS,
+    ),
+    processed: 0,
+  };
+}
+
+function canProcessMetadata(budget: MetadataRefreshBudget): boolean {
+  return (
+    budget.processed < budget.maxItems &&
+    Date.now() - budget.startedAt < budget.timeBudgetMs
+  );
+}
+
+function shouldRefreshMetadata(
+  checkedAt: number | undefined,
+  now: number,
+  ttlMs: number,
+): boolean {
+  return (
+    typeof checkedAt !== 'number' ||
+    !Number.isFinite(checkedAt) ||
+    checkedAt > now ||
+    now - checkedAt >= ttlMs
+  );
+}
 
 export async function GET(request: NextRequest) {
   try {
@@ -197,6 +247,12 @@ async function refreshRecordAndFavorites() {
     if (ownerUsername && !users.includes(ownerUsername)) {
       users.push(ownerUsername);
     }
+    const metadataRefreshTtlMs = readPositiveInteger(
+      process.env.CRON_METADATA_REFRESH_TTL_MS,
+      DEFAULT_METADATA_REFRESH_TTL_MS,
+    );
+    const metadataRefreshBudget = createMetadataRefreshBudget();
+    const refreshStartedAt = Date.now();
     const detailCache = new Map<string, Promise<SearchResult | null>>();
 
     const getDetail = async (
@@ -221,18 +277,43 @@ async function refreshRecordAndFavorites() {
     };
 
     for (const user of users) {
+      if (!canProcessMetadata(metadataRefreshBudget)) {
+        break;
+      }
+
       try {
         const playRecords = await db.getAllPlayRecords(user);
         const totalRecords = Object.keys(playRecords).length;
         let processedRecords = 0;
 
         for (const [key, record] of Object.entries(playRecords)) {
+          if (!canProcessMetadata(metadataRefreshBudget)) {
+            break;
+          }
+
           try {
             const parsed = parseStorageKey(key);
             if (!parsed) {
               console.warn(`跳过无效的播放记录键: ${key}`);
               continue;
             }
+
+            if (
+              !shouldRefreshMetadata(
+                record.metadata_checked_at,
+                refreshStartedAt,
+                metadataRefreshTtlMs,
+              )
+            ) {
+              continue;
+            }
+
+            metadataRefreshBudget.processed += 1;
+            const checkedAt = Date.now();
+            let nextRecord: PlayRecord = {
+              ...record,
+              metadata_checked_at: checkedAt,
+            };
 
             const detail = await getDetail(
               parsed.source,
@@ -241,28 +322,23 @@ async function refreshRecordAndFavorites() {
             );
             if (!detail) {
               console.warn(`跳过无法获取详情的播放记录: ${key}`);
-              continue;
+            } else {
+              const episodeCount = detail.episodes?.length || 0;
+              if (episodeCount > 0 && episodeCount !== record.total_episodes) {
+                nextRecord = {
+                  ...nextRecord,
+                  title: detail.title || record.title,
+                  cover: detail.poster || record.cover,
+                  total_episodes: episodeCount,
+                  year: detail.year || record.year,
+                };
+                console.log(
+                  `更新播放记录: ${record.title} (${record.total_episodes} -> ${episodeCount})`,
+                );
+              }
             }
 
-            const episodeCount = detail.episodes?.length || 0;
-            if (episodeCount > 0 && episodeCount !== record.total_episodes) {
-              await db.savePlayRecord(user, parsed.source, parsed.id, {
-                title: detail.title || record.title,
-                source_name: record.source_name,
-                cover: detail.poster || record.cover,
-                index: record.index,
-                total_episodes: episodeCount,
-                play_time: record.play_time,
-                year: detail.year || record.year,
-                total_time: record.total_time,
-                save_time: record.save_time,
-                search_title: record.search_title,
-              });
-              console.log(
-                `更新播放记录: ${record.title} (${record.total_episodes} -> ${episodeCount})`,
-              );
-            }
-
+            await db.savePlayRecord(user, parsed.source, parsed.id, nextRecord);
             processedRecords++;
           } catch (err) {
             console.error(`处理播放记录失败 (${key}):`, err);
@@ -274,15 +350,24 @@ async function refreshRecordAndFavorites() {
         console.error(`获取用户播放记录失败 (${user}):`, err);
       }
 
+      if (!canProcessMetadata(metadataRefreshBudget)) {
+        break;
+      }
+
       try {
-        let favorites = await db.getAllFavorites(user);
-        favorites = Object.fromEntries(
-          Object.entries(favorites).filter(([_, fav]) => fav.origin !== 'live'),
+        const favorites = Object.fromEntries(
+          Object.entries(await db.getAllFavorites(user)).filter(
+            ([, fav]) => fav.origin !== 'live',
+          ),
         );
         const totalFavorites = Object.keys(favorites).length;
         let processedFavorites = 0;
 
         for (const [key, fav] of Object.entries(favorites)) {
+          if (!canProcessMetadata(metadataRefreshBudget)) {
+            break;
+          }
+
           try {
             const parsed = parseStorageKey(key);
             if (!parsed) {
@@ -290,32 +375,50 @@ async function refreshRecordAndFavorites() {
               continue;
             }
 
+            if (
+              !shouldRefreshMetadata(
+                fav.metadata_checked_at,
+                refreshStartedAt,
+                metadataRefreshTtlMs,
+              )
+            ) {
+              continue;
+            }
+
+            metadataRefreshBudget.processed += 1;
+            const checkedAt = Date.now();
+            let nextFavorite: Favorite = {
+              ...fav,
+              metadata_checked_at: checkedAt,
+            };
             const favDetail = await getDetail(
               parsed.source,
               parsed.id,
               fav.title,
             );
+
             if (!favDetail) {
               console.warn(`跳过无法获取详情的收藏: ${key}`);
-              continue;
+            } else {
+              const favEpisodeCount = favDetail.episodes?.length || 0;
+              if (
+                favEpisodeCount > 0 &&
+                favEpisodeCount !== fav.total_episodes
+              ) {
+                nextFavorite = {
+                  ...nextFavorite,
+                  title: favDetail.title || fav.title,
+                  cover: favDetail.poster || fav.cover,
+                  year: favDetail.year || fav.year,
+                  total_episodes: favEpisodeCount,
+                };
+                console.log(
+                  `更新收藏: ${fav.title} (${fav.total_episodes} -> ${favEpisodeCount})`,
+                );
+              }
             }
 
-            const favEpisodeCount = favDetail.episodes?.length || 0;
-            if (favEpisodeCount > 0 && favEpisodeCount !== fav.total_episodes) {
-              await db.saveFavorite(user, parsed.source, parsed.id, {
-                title: favDetail.title || fav.title,
-                source_name: fav.source_name,
-                cover: favDetail.poster || fav.cover,
-                year: favDetail.year || fav.year,
-                total_episodes: favEpisodeCount,
-                save_time: fav.save_time,
-                search_title: fav.search_title,
-              });
-              console.log(
-                `更新收藏: ${fav.title} (${fav.total_episodes} -> ${favEpisodeCount})`,
-              );
-            }
-
+            await db.saveFavorite(user, parsed.source, parsed.id, nextFavorite);
             processedFavorites++;
           } catch (err) {
             console.error(`处理收藏失败 (${key}):`, err);
@@ -328,7 +431,9 @@ async function refreshRecordAndFavorites() {
       }
     }
 
-    console.log('刷新播放记录/收藏任务完成');
+    console.log(
+      `刷新播放记录/收藏任务完成: ${metadataRefreshBudget.processed}/${metadataRefreshBudget.maxItems}`,
+    );
   } catch (err) {
     console.error('刷新播放记录/收藏任务启动失败', err);
   }

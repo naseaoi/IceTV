@@ -505,6 +505,16 @@ function normalizePlayRecord(value: unknown): PlayRecord {
     play_time: assertBoundedNumber(input.play_time, '播放进度', 0, MAX_SECONDS),
     total_time: assertBoundedNumber(input.total_time, '总时长', 0, MAX_SECONDS),
     save_time: assertFiniteNumber(input.save_time, '保存时间'),
+    ...(input.metadata_checked_at === undefined
+      ? {}
+      : {
+          metadata_checked_at: assertBoundedNumber(
+            input.metadata_checked_at,
+            '元数据检查时间',
+            0,
+            Number.MAX_SAFE_INTEGER,
+          ),
+        }),
     search_title: optionalString(
       input.search_title,
       '搜索标题',
@@ -531,6 +541,16 @@ function normalizeFavorite(value: unknown): Favorite {
     year: limitString(input.year, '年份', MAX_SHORT_STRING_LENGTH),
     cover: limitString(input.cover, '封面', MAX_LONG_STRING_LENGTH),
     save_time: assertFiniteNumber(input.save_time, '保存时间'),
+    ...(input.metadata_checked_at === undefined
+      ? {}
+      : {
+          metadata_checked_at: assertBoundedNumber(
+            input.metadata_checked_at,
+            '元数据检查时间',
+            0,
+            Number.MAX_SAFE_INTEGER,
+          ),
+        }),
     search_title: optionalString(
       input.search_title,
       '搜索标题',

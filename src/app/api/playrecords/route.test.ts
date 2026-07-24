@@ -7,6 +7,7 @@ import { installWebPolyfills } from '@/app/api/test-utils/web-polyfills';
 installWebPolyfills();
 
 const mockGetAllPlayRecords = jest.fn();
+const mockSavePlayRecord = jest.fn();
 
 jest.mock('@/lib/api-auth', () => ({
   requireActiveUser: jest
@@ -18,13 +19,20 @@ jest.mock('@/lib/api-auth', () => ({
 jest.mock('@/lib/db', () => ({
   db: {
     getAllPlayRecords: (...args: unknown[]) => mockGetAllPlayRecords(...args),
+    savePlayRecord: (...args: unknown[]) => mockSavePlayRecord(...args),
   },
 }));
 
-const { GET } = require('./route') as typeof import('./route');
+const { GET, POST } = require('./route') as typeof import('./route');
 
-function createRequest(url: string): NextRequest {
-  return new Request(url) as unknown as NextRequest;
+function createRequest(url: string, init?: RequestInit): NextRequest {
+  return new Request(url, init) as unknown as NextRequest;
+}
+
+function createJsonRequest(body: unknown): NextRequest {
+  return {
+    json: async () => body,
+  } as unknown as NextRequest;
 }
 
 const records = {
@@ -67,6 +75,7 @@ describe('playrecords route', () => {
   beforeEach(() => {
     jest.clearAllMocks();
     mockGetAllPlayRecords.mockResolvedValue(records);
+    mockSavePlayRecord.mockResolvedValue(undefined);
   });
 
   it('limit 参数只返回按保存时间排序的最近记录', async () => {
@@ -88,5 +97,28 @@ describe('playrecords route', () => {
     );
 
     await expect(response.json()).resolves.toEqual(records);
+  });
+
+  it('保存播放进度时由服务端记录元数据检查时间', async () => {
+    const nowSpy = jest.spyOn(Date, 'now').mockReturnValue(1234);
+
+    try {
+      const response = await POST(
+        createJsonRequest({
+          key: 'source+new',
+          record: records['source+new'],
+        }),
+      );
+
+      expect(response.status).toBe(200);
+      expect(mockSavePlayRecord).toHaveBeenCalledWith(
+        'demo',
+        'source',
+        'new',
+        expect.objectContaining({ metadata_checked_at: 1234 }),
+      );
+    } finally {
+      nowSpy.mockRestore();
+    }
   });
 });

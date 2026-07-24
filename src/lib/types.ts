@@ -11,6 +11,7 @@ export interface PlayRecord {
   play_time: number; // 播放进度（秒）
   total_time: number; // 总进度（秒）
   save_time: number; // 记录保存时间（时间戳）
+  metadata_checked_at?: number;
   search_title?: string; // 搜索时使用的标题
 }
 
@@ -22,6 +23,7 @@ export interface Favorite {
   year: string;
   cover: string;
   save_time: number; // 记录保存时间（时间戳）
+  metadata_checked_at?: number;
   search_title?: string; // 搜索时使用的标题
   origin?: 'vod' | 'live';
 }

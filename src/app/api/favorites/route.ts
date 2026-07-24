@@ -93,9 +93,11 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    const now = Date.now();
     const finalFavorite = {
       ...favorite,
-      save_time: favorite.save_time ?? Date.now(),
+      save_time: favorite.save_time ?? now,
+      metadata_checked_at: now,
     } as Favorite;
 
     await db.saveFavorite(

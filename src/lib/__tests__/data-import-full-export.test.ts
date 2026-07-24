@@ -130,6 +130,68 @@ describe('data import full export fields', () => {
     ]);
   });
 
+  it('keeps metadata refresh timestamps', async () => {
+    const importData = createImportData();
+    importData.data.userData.owner.playRecords = {
+      'source-a+video-1': {
+        title: 'Demo',
+        source_name: 'Source A',
+        cover: '',
+        year: '2026',
+        index: 1,
+        total_episodes: 12,
+        play_time: 30,
+        total_time: 120,
+        save_time: 1000,
+        metadata_checked_at: 2000,
+      },
+    };
+    importData.data.userData.owner.favorites = {
+      'source-a+video-1': {
+        title: 'Demo',
+        source_name: 'Source A',
+        cover: '',
+        year: '2026',
+        total_episodes: 12,
+        save_time: 1000,
+        metadata_checked_at: 2000,
+      },
+    };
+
+    const parsed = await parseImportData(importData);
+
+    expect(
+      parsed.snapshot.userData.owner.playRecords['source-a+video-1']
+        .metadata_checked_at,
+    ).toBe(2000);
+    expect(
+      parsed.snapshot.userData.owner.favorites['source-a+video-1']
+        .metadata_checked_at,
+    ).toBe(2000);
+  });
+
+  it('rejects invalid metadata refresh timestamps', async () => {
+    const importData = createImportData();
+    importData.data.userData.owner.playRecords = {
+      'source-a+video-1': {
+        title: 'Demo',
+        source_name: 'Source A',
+        cover: '',
+        year: '2026',
+        index: 1,
+        total_episodes: 12,
+        play_time: 30,
+        total_time: 120,
+        save_time: 1000,
+        metadata_checked_at: -1,
+      },
+    };
+
+    await expect(parseImportData(importData)).rejects.toThrow(
+      '元数据检查时间超出限制',
+    );
+  });
+
   it('accepts legacy backups without users and route stats', async () => {
     const importData = createImportData();
     delete importData.data.users;

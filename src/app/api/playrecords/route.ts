@@ -72,9 +72,11 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    const now = Date.now();
     const finalRecord = {
       ...record,
-      save_time: record.save_time ?? Date.now(),
+      save_time: record.save_time ?? now,
+      metadata_checked_at: now,
     } as PlayRecord;
 
     await db.savePlayRecord(
