@@ -95,7 +95,7 @@ function RecommendationSection({
           <ChevronRight className='ml-1 h-4 w-4' />
         </Link>
       </div>
-      <ScrollableRow initialItemCount={10} mountBatchSize={8}>
+      <ScrollableRow initialItemCount={8} mountBatchSize={8}>
         {loading ? (
           RecommendationSkeletonRow()
         ) : items.length > 0 ? (
