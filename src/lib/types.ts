@@ -190,6 +190,7 @@ export interface IStorage {
   ): Promise<PlaybackSession[]>;
   getAllPlaybackSessions(userName: string): Promise<PlaybackSession[]>;
   deletePlaybackSession(userName: string, id: string): Promise<void>;
+  deletePlaybackSessionsBefore(updatedBefore: number): Promise<number>;
   getPlaybackWatchTotals(
     userName: string,
     since: number,

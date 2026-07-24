@@ -209,6 +209,7 @@ export class LocalSqliteStorage implements IStorage {
     getAllSkipConfigs: Database.Statement;
     setPlaybackSession: Database.Statement;
     deletePlaybackSession: Database.Statement;
+    deletePlaybackSessionsBefore: Database.Statement;
     // admin_config
     getAdminConfig: Database.Statement;
     setAdminConfig: Database.Statement;
@@ -335,6 +336,9 @@ export class LocalSqliteStorage implements IStorage {
 
       CREATE INDEX IF NOT EXISTS idx_playback_sessions_user_video
         ON playback_sessions (username, source, video_id);
+
+      CREATE INDEX IF NOT EXISTS idx_playback_sessions_updated_at
+        ON playback_sessions (updated_at);
 
       CREATE TABLE IF NOT EXISTS admin_config (
         id INTEGER PRIMARY KEY CHECK (id = 1),
@@ -464,6 +468,9 @@ export class LocalSqliteStorage implements IStorage {
       ),
       deletePlaybackSession: this.db.prepare(
         'DELETE FROM playback_sessions WHERE username = ? AND id = ?',
+      ),
+      deletePlaybackSessionsBefore: this.db.prepare(
+        'DELETE FROM playback_sessions WHERE updated_at < ?',
       ),
       // admin_config
       getAdminConfig: this.db.prepare(
@@ -975,6 +982,14 @@ export class LocalSqliteStorage implements IStorage {
   async deletePlaybackSession(userName: string, id: string): Promise<void> {
     const username = normalizeUsername(userName);
     this.stmts.deletePlaybackSession.run(username, id);
+  }
+
+  async deletePlaybackSessionsBefore(updatedBefore: number): Promise<number> {
+    const cutoff = Number.isFinite(updatedBefore)
+      ? Math.max(0, Math.floor(updatedBefore))
+      : 0;
+    const result = this.stmts.deletePlaybackSessionsBefore.run(cutoff);
+    return Number(result.changes || 0);
   }
 
   async getPlaybackWatchTotals(

@@ -24,6 +24,9 @@ type CronTask = 'all' | 'config' | 'live' | 'metadata';
 const DEFAULT_METADATA_REFRESH_TTL_MS = 24 * 60 * 60 * 1000;
 const DEFAULT_METADATA_REFRESH_MAX_ITEMS = 100;
 const DEFAULT_METADATA_REFRESH_TIME_BUDGET_MS = 30 * 1000;
+const DEFAULT_PLAYBACK_STATS_RETENTION_DAYS = 0;
+const MAX_PLAYBACK_STATS_RETENTION_DAYS = 3650;
+const DAY_MS = 24 * 60 * 60 * 1000;
 
 type MetadataRefreshBudget = {
   startedAt: number;
@@ -37,6 +40,17 @@ let cronRunning = false;
 function readPositiveInteger(value: string | undefined, fallback: number) {
   const parsed = Number.parseInt(value || '', 10);
   return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
+}
+
+function readPlaybackStatsRetentionDays(): number {
+  const parsed = Number.parseInt(
+    process.env.CRON_PLAYBACK_STATS_RETENTION_DAYS || '',
+    10,
+  );
+  if (!Number.isFinite(parsed) || parsed <= 0) {
+    return DEFAULT_PLAYBACK_STATS_RETENTION_DAYS;
+  }
+  return Math.min(parsed, MAX_PLAYBACK_STATS_RETENTION_DAYS);
 }
 
 function createMetadataRefreshBudget(): MetadataRefreshBudget {
@@ -201,6 +215,22 @@ async function cronJob(task: CronTask) {
   }
   if (task === 'all' || task === 'metadata') {
     await refreshRecordAndFavorites();
+    await cleanupPlaybackSessions();
+  }
+}
+
+async function cleanupPlaybackSessions() {
+  const retentionDays = readPlaybackStatsRetentionDays();
+  if (retentionDays <= 0) {
+    return;
+  }
+
+  const cutoff = Date.now() - retentionDays * DAY_MS;
+  const deleted = await db.deletePlaybackSessionsBefore(cutoff);
+  if (deleted > 0) {
+    console.log(
+      `播放统计清理完成：删除 ${deleted} 条超过 ${retentionDays} 天且未更新的会话`,
+    );
   }
 }
 

@@ -12,6 +12,7 @@ const mockGetAllPlayRecords = jest.fn();
 const mockGetAllFavorites = jest.fn();
 const mockSavePlayRecord = jest.fn();
 const mockSaveFavorite = jest.fn();
+const mockDeletePlaybackSessionsBefore = jest.fn();
 const mockFetchVideoDetail = jest.fn();
 const mockGetOwnerUsername = jest.fn();
 const mockAcquireCronLease = jest.fn();
@@ -44,6 +45,8 @@ jest.mock('@/lib/db', () => ({
     getAllFavorites: (...args: unknown[]) => mockGetAllFavorites(...args),
     savePlayRecord: (...args: unknown[]) => mockSavePlayRecord(...args),
     saveFavorite: (...args: unknown[]) => mockSaveFavorite(...args),
+    deletePlaybackSessionsBefore: (...args: unknown[]) =>
+      mockDeletePlaybackSessionsBefore(...args),
   },
 }));
 
@@ -117,18 +120,22 @@ describe('cron route', () => {
   const originalMetadataRefreshTtlMs = process.env.CRON_METADATA_REFRESH_TTL_MS;
   const originalMetadataMaxItems = process.env.CRON_METADATA_MAX_ITEMS;
   const originalMetadataTimeBudgetMs = process.env.CRON_METADATA_TIME_BUDGET_MS;
+  const originalPlaybackStatsRetentionDays =
+    process.env.CRON_PLAYBACK_STATS_RETENTION_DAYS;
 
   beforeEach(() => {
     process.env.CRON_SECRET = 'test-secret';
     delete process.env.CRON_METADATA_REFRESH_TTL_MS;
     delete process.env.CRON_METADATA_MAX_ITEMS;
     delete process.env.CRON_METADATA_TIME_BUDGET_MS;
+    delete process.env.CRON_PLAYBACK_STATS_RETENTION_DAYS;
     jest.clearAllMocks();
     mockGetAllUsers.mockReset().mockResolvedValue([]);
     mockGetAllPlayRecords.mockReset().mockResolvedValue({});
     mockGetAllFavorites.mockReset().mockResolvedValue({});
     mockSavePlayRecord.mockReset().mockResolvedValue(undefined);
     mockSaveFavorite.mockReset().mockResolvedValue(undefined);
+    mockDeletePlaybackSessionsBefore.mockReset().mockResolvedValue(0);
     mockFetchVideoDetail.mockReset().mockResolvedValue(null);
     mockGetOwnerUsername.mockReset().mockReturnValue('');
     mockLeaseRelease.mockReset().mockResolvedValue(undefined);
@@ -160,6 +167,10 @@ describe('cron route', () => {
     restoreEnvironmentVariable(
       'CRON_METADATA_TIME_BUDGET_MS',
       originalMetadataTimeBudgetMs,
+    );
+    restoreEnvironmentVariable(
+      'CRON_PLAYBACK_STATS_RETENTION_DAYS',
+      originalPlaybackStatsRetentionDays,
     );
   });
 
@@ -213,6 +224,24 @@ describe('cron route', () => {
 
     expect(response.status).toBe(202);
     expect(mockGetAllUsers).not.toHaveBeenCalled();
+  });
+
+  it('默认不清理播放统计历史', async () => {
+    await runMetadataTask();
+
+    expect(mockDeletePlaybackSessionsBefore).not.toHaveBeenCalled();
+  });
+
+  it('显式设置保留期后清理长期未更新的播放统计', async () => {
+    process.env.CRON_PLAYBACK_STATS_RETENTION_DAYS = '30';
+    mockDeletePlaybackSessionsBefore.mockResolvedValue(2);
+
+    await runMetadataTask();
+
+    expect(mockDeletePlaybackSessionsBefore).toHaveBeenCalledTimes(1);
+    const [cutoff] = mockDeletePlaybackSessionsBefore.mock.calls[0];
+    expect(cutoff).toEqual(expect.any(Number));
+    expect(cutoff).toBeLessThan(Date.now());
   });
 
   it('TTL 内的记录和收藏不重复获取详情', async () => {

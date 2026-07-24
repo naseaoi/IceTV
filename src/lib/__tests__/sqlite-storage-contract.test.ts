@@ -276,6 +276,26 @@ describe('sqlite storage contract', () => {
     expect(all[total - 1].id).toBe('session_bulk_0');
   });
 
+  it('按最后更新时间清理过期播放统计会话', async () => {
+    const storage = new LocalSqliteStorage(':memory:');
+
+    await storage.setPlaybackSession('demo-user', {
+      ...playbackSession,
+      id: 'session_old',
+      updated_at: 1000,
+    });
+    await storage.setPlaybackSession('demo-user', {
+      ...playbackSession,
+      id: 'session_recent',
+      updated_at: 2000,
+    });
+
+    await expect(storage.deletePlaybackSessionsBefore(1500)).resolves.toBe(1);
+    await expect(storage.getAllPlaybackSessions('demo-user')).resolves.toEqual([
+      expect.objectContaining({ id: 'session_recent' }),
+    ]);
+  });
+
   it('returns null when admin config is absent', async () => {
     const storage = new LocalSqliteStorage(':memory:');
     await expect(storage.getAdminConfig()).resolves.toBeNull();

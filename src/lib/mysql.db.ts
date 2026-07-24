@@ -200,7 +200,8 @@ export class MySqlStorage implements IStorage {
         created_at BIGINT NOT NULL,
         updated_at BIGINT NOT NULL,
         KEY idx_playback_sessions_user_started_at (username, started_at),
-        KEY idx_playback_sessions_user_video (username, source, video_id)
+        KEY idx_playback_sessions_user_video (username, source, video_id),
+        KEY idx_playback_sessions_updated_at (updated_at)
       ) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci`,
       `CREATE TABLE IF NOT EXISTS admin_config (
         id TINYINT NOT NULL PRIMARY KEY,
@@ -742,6 +743,18 @@ export class MySqlStorage implements IStorage {
       'DELETE FROM playback_sessions WHERE username = ? AND id = ?',
       [username, id],
     );
+  }
+
+  async deletePlaybackSessionsBefore(updatedBefore: number): Promise<number> {
+    await this.ensureInitialized();
+    const cutoff = Number.isFinite(updatedBefore)
+      ? Math.max(0, Math.floor(updatedBefore))
+      : 0;
+    const [result] = await this.pool.execute(
+      'DELETE FROM playback_sessions WHERE updated_at < ?',
+      [cutoff],
+    );
+    return Number((result as { affectedRows?: number }).affectedRows || 0);
   }
 
   async getAllPlaybackSessions(userName: string): Promise<PlaybackSession[]> {
