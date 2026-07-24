@@ -83,6 +83,7 @@ ENV HOSTNAME=0.0.0.0
 ENV PORT=3000
 ENV DOCKER_ENV=true
 ENV LOCAL_DB_PATH=/data/icetv-data.sqlite
+ENV CRON_LOCK_PATH=/data/icetv-cron.lock
 ENV NEXT_PUBLIC_APP_VERSION=${NEXT_PUBLIC_APP_VERSION}
 
 # 从构建器中复制 standalone 输出

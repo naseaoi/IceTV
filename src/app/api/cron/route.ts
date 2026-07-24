@@ -10,6 +10,7 @@ import {
   decodeConfigSubscriptionContent,
   readConfigSubscriptionText,
 } from '@/lib/config-subscription';
+import { acquireCronLease } from '@/lib/cron-lease';
 import { db } from '@/lib/db';
 import { getOwnerUsername } from '@/lib/env.server';
 import { fetchVideoDetail } from '@/lib/fetchVideoDetail';
@@ -97,11 +98,42 @@ export async function GET(request: NextRequest) {
     }
 
     cronRunning = true;
+    let lease;
+    try {
+      lease = await acquireCronLease();
+    } catch (error) {
+      cronRunning = false;
+      console.error('Cron lease acquisition failed:', error);
+      return NextResponse.json(
+        {
+          success: false,
+          task,
+          message: 'Cron job lease is unavailable',
+          timestamp: new Date().toISOString(),
+        },
+        { status: 503 },
+      );
+    }
+
+    if (!lease) {
+      cronRunning = false;
+      return NextResponse.json(
+        {
+          success: false,
+          task,
+          message: 'Cron job is already running in another process',
+          timestamp: new Date().toISOString(),
+        },
+        { status: 202 },
+      );
+    }
+
     console.log(`Cron job triggered [${task}]:`, new Date().toISOString());
 
     cronJob(task)
       .catch((err) => console.error('Cron job background error:', err))
-      .finally(() => {
+      .finally(async () => {
+        await lease.release();
         cronRunning = false;
       });
 

@@ -14,6 +14,8 @@ const mockSavePlayRecord = jest.fn();
 const mockSaveFavorite = jest.fn();
 const mockFetchVideoDetail = jest.fn();
 const mockGetOwnerUsername = jest.fn();
+const mockAcquireCronLease = jest.fn();
+const mockLeaseRelease = jest.fn();
 
 jest.mock('@/features/live/lib/live', () => ({
   isLiveEntryEnabledInConfig: jest.fn().mockReturnValue(false),
@@ -29,6 +31,10 @@ jest.mock('@/lib/config', () => ({
 jest.mock('@/lib/config-subscription', () => ({
   decodeConfigSubscriptionContent: jest.fn(),
   readConfigSubscriptionText: jest.fn(),
+}));
+
+jest.mock('@/lib/cron-lease', () => ({
+  acquireCronLease: (...args: unknown[]) => mockAcquireCronLease(...args),
 }));
 
 jest.mock('@/lib/db', () => ({
@@ -125,6 +131,11 @@ describe('cron route', () => {
     mockSaveFavorite.mockReset().mockResolvedValue(undefined);
     mockFetchVideoDetail.mockReset().mockResolvedValue(null);
     mockGetOwnerUsername.mockReset().mockReturnValue('');
+    mockLeaseRelease.mockReset().mockResolvedValue(undefined);
+    mockAcquireCronLease.mockReset().mockResolvedValue({
+      isHeld: () => true,
+      release: (...args: unknown[]) => mockLeaseRelease(...args),
+    });
     mockGetConfig.mockReset().mockResolvedValue({
       ConfigSubscribtion: { URL: '', AutoUpdate: false },
       LiveConfig: [],
@@ -182,6 +193,7 @@ describe('cron route', () => {
     const thirdResponse = await GET(createRequest());
     expect(thirdResponse.status).toBe(200);
     await flushBackgroundTask();
+    expect(mockLeaseRelease).toHaveBeenCalled();
   });
 
   it('拒绝未知任务类型', async () => {
@@ -190,6 +202,17 @@ describe('cron route', () => {
     );
 
     expect(response.status).toBe(400);
+  });
+
+  it('跨进程租约被占用时跳过任务', async () => {
+    mockAcquireCronLease.mockResolvedValueOnce(null);
+
+    const response = await GET(
+      createRequest('http://localhost/api/cron?task=metadata'),
+    );
+
+    expect(response.status).toBe(202);
+    expect(mockGetAllUsers).not.toHaveBeenCalled();
   });
 
   it('TTL 内的记录和收藏不重复获取详情', async () => {

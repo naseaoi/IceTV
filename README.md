@@ -248,6 +248,8 @@ IceTV 支持标准的苹果 CMS V10 API 格式。
 | `ICETV_PASSWORD`                | 站长密码       | 是             | 无                                               | 任意字符串                                                |
 | `AUTH_SECRET`                   | 签名密钥       | 是             | 无                                               | 高熵随机字符串，至少 32 字符                              |
 | `CRON_SECRET`                   | 定时任务密钥   | Docker 必填    | 无                                               | 高熵随机字符串                                            |
+| `CRON_LOCK_PATH`                | cron 租约文件  | 否             | `/data/icetv-cron.lock`（Docker）                | 可写且可由多个实例共享的绝对路径；空值关闭                |
+| `CRON_LOCK_TTL_MS`              | cron 租约时长  | 否             | `900000`                                         | 正整数毫秒                                                |
 | `LEGACY_COOKIE_CUTOFF_DATE`     | 旧登录态截止   | 否             | `2026-08-01T00:00:00.000Z`                       | ISO 日期字符串                                            |
 | `AUTH_SESSION_TTL_HOURS`        | 登录态时长     | 否             | `168`                                            | 正整数                                                    |
 | `NEXT_PUBLIC_STORAGE_TYPE`      | 存储类型       | 否             | 有 `DATABASE_URL` 时为 `mysql`，否则为 `localdb` | `localdb` / `mysql`                                       |
@@ -264,6 +266,8 @@ IceTV 支持标准的苹果 CMS V10 API 格式。
 站点名称、图标、公告、豆瓣/Bangumi 代理、流式搜索、搜索最大页数等运行选项可在后台配置，不建议优先使用环境变量覆盖。
 
 高级调优变量：`CONFIG_CACHE_TTL_MS`、`PROXY_FETCH_TIMEOUT_MS`、`PROXY_DNS_CACHE_TTL_MS`、`PROXY_DNS_NEGATIVE_CACHE_TTL_MS`、`SEARCH_SOURCE_FAILURE_COOLDOWN_MS`、`SQLITE_BUSY_TIMEOUT_MS`、`SQLITE_INIT_RETRY_COUNT`、`SQLITE_INIT_RETRY_DELAY_MS`、`TRUSTED_PROXY_COUNT`、`DEV_PROXY_ENABLED`。
+
+Docker 默认把 cron 租约写入 `/data/icetv-cron.lock`。多容器部署时，所有实例必须挂载同一个可写 `/data` 卷，租约才能阻止重复维护；没有共享文件系统时请保持单实例 cron 调度，或将 `CRON_LOCK_PATH` 设为空关闭文件租约。
 
 当前配置写入采用应用层乐观锁，推荐单实例部署；多实例部署需让管理操作固定路由到同一实例。
 
