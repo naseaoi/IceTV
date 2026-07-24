@@ -1,6 +1,6 @@
 'use client';
 
-import { RotateCcw } from 'lucide-react';
+import { X } from 'lucide-react';
 import { useCallback, useEffect, useState } from 'react';
 
 import ConfirmModal from '@/components/modals/ConfirmModal';
@@ -163,12 +163,12 @@ export default function PlayerShortcutsModal({
             </p>
           </div>
           <button
-            onClick={() => setShowResetConfirm(true)}
-            className='flex h-8 w-8 shrink-0 items-center justify-center rounded-full p-1 text-red-500 transition-colors hover:bg-red-50 hover:text-red-600 dark:text-red-400 dark:hover:bg-red-900/20 dark:hover:text-red-300'
-            title='恢复默认快捷键'
-            aria-label='恢复默认快捷键'
+            onClick={handleClose}
+            className='flex h-8 w-8 shrink-0 items-center justify-center rounded-full p-1 text-gray-500 transition-colors hover:bg-gray-100 hover:text-gray-700 dark:text-gray-400 dark:hover:bg-white/10 dark:hover:text-gray-200'
+            title='关闭'
+            aria-label='关闭'
           >
-            <RotateCcw className='h-4 w-4' />
+            <X className='h-4 w-4' />
           </button>
         </div>
 
@@ -178,7 +178,7 @@ export default function PlayerShortcutsModal({
           </div>
         )}
 
-        <div className='scrollbar-visible max-h-[45vh] space-y-1 overflow-y-scroll pr-2'>
+        <div className='scrollbar-visible max-h-[45vh] space-y-1 overflow-y-auto pr-2'>
           {availableActions.map(({ action, label }) => (
             <div
               key={action}
@@ -208,10 +208,10 @@ export default function PlayerShortcutsModal({
 
         <div className='mt-6 flex justify-end gap-3'>
           <button
-            onClick={handleClose}
-            className='rounded-lg border border-gray-200/70 bg-white px-5 py-2 text-sm font-medium text-gray-700 transition-colors hover:bg-gray-100/70 dark:border-white/10 dark:bg-gray-800/70 dark:text-gray-200 dark:hover:bg-white/[0.06]'
+            onClick={() => setShowResetConfirm(true)}
+            className='rounded-lg border border-red-200/70 bg-white px-5 py-2 text-sm font-medium text-red-600 transition-colors hover:bg-red-50 dark:border-red-400/20 dark:bg-gray-800/70 dark:text-red-400 dark:hover:bg-red-900/20'
           >
-            取消
+            重置
           </button>
           <button
             onClick={handleSave}

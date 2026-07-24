@@ -32,4 +32,21 @@ describe('PlayerShortcutsModal', () => {
     expect(screen.queryByText('下一帧')).not.toBeInTheDocument();
     expect(screen.queryByText('下一集')).not.toBeInTheDocument();
   });
+
+  it('places close in the header and reset beside save', () => {
+    render(<PlayerShortcutsModal />);
+
+    act(() => {
+      window.dispatchEvent(new CustomEvent(OPEN_PLAYER_SHORTCUTS_EVENT));
+    });
+
+    expect(screen.getByRole('button', { name: '关闭' })).toBeInTheDocument();
+    const resetButton = screen.getByRole('button', { name: '重置' });
+    expect(resetButton).toBeInTheDocument();
+    expect(resetButton.querySelector('svg')).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '保存' })).toBeInTheDocument();
+    expect(
+      screen.queryByRole('button', { name: '取消' }),
+    ).not.toBeInTheDocument();
+  });
 });
