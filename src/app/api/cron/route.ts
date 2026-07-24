@@ -19,18 +19,45 @@ import { parseStorageKey } from '@/lib/utils';
 
 export const runtime = 'nodejs';
 
+type CronTask = 'all' | 'config' | 'live' | 'metadata';
+
+let cronRunning = false;
+
 export async function GET(request: NextRequest) {
   try {
     if (!isCronAuthorized(request)) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
-    console.log('Cron job triggered:', new Date().toISOString());
+    const task = getCronTask(request);
+    if (!task) {
+      return NextResponse.json({ error: 'Invalid cron task' }, { status: 400 });
+    }
 
-    cronJob().catch((err) => console.error('Cron job background error:', err));
+    if (cronRunning) {
+      return NextResponse.json(
+        {
+          success: false,
+          task,
+          message: 'Cron job is already running',
+          timestamp: new Date().toISOString(),
+        },
+        { status: 202 },
+      );
+    }
+
+    cronRunning = true;
+    console.log(`Cron job triggered [${task}]:`, new Date().toISOString());
+
+    cronJob(task)
+      .catch((err) => console.error('Cron job background error:', err))
+      .finally(() => {
+        cronRunning = false;
+      });
 
     return NextResponse.json({
       success: true,
+      task,
       message: 'Cron job executed successfully',
       timestamp: new Date().toISOString(),
     });
@@ -47,6 +74,15 @@ export async function GET(request: NextRequest) {
       { status: 500 },
     );
   }
+}
+
+function getCronTask(request: NextRequest): CronTask | null {
+  const task = new URL(request.url).searchParams.get('task');
+  if (!task || task === 'all') return 'all';
+  if (task === 'config' || task === 'live' || task === 'metadata') {
+    return task;
+  }
+  return null;
 }
 
 function isCronAuthorized(request: NextRequest): boolean {
@@ -74,10 +110,16 @@ function safeEqual(a: string, b: string): boolean {
   return crypto.timingSafeEqual(bufA, bufB);
 }
 
-async function cronJob() {
-  await refreshConfig();
-  await refreshAllLiveChannels();
-  await refreshRecordAndFavorites();
+async function cronJob(task: CronTask) {
+  if (task === 'all' || task === 'config') {
+    await refreshConfig();
+  }
+  if (task === 'all' || task === 'live') {
+    await refreshAllLiveChannels();
+  }
+  if (task === 'all' || task === 'metadata') {
+    await refreshRecordAndFavorites();
+  }
 }
 
 async function refreshAllLiveChannels() {
@@ -169,16 +211,11 @@ async function refreshRecordAndFavorites() {
           source,
           id,
           fallbackTitle: fallbackTitle.trim(),
-        })
-          .then((detail) => {
-            const successPromise = Promise.resolve(detail);
-            detailCache.set(key, successPromise);
-            return detail;
-          })
-          .catch((err) => {
-            console.error(`获取视频详情失败 (${source}+${id}):`, err);
-            return null;
-          });
+        }).catch((err) => {
+          console.error(`获取视频详情失败 (${source}+${id}):`, err);
+          return null;
+        });
+        detailCache.set(key, promise);
       }
       return promise;
     };

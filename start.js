@@ -32,6 +32,26 @@ const READY_POLL_TIMEOUT_MS = readPositiveInteger(
   process.env.READY_POLL_TIMEOUT_MS,
   120000,
 );
+const CRON_INITIAL_DELAY_MS = readPositiveInteger(
+  process.env.CRON_INITIAL_DELAY_MS,
+  60 * 1000,
+);
+const CRON_START_STAGGER_MS = readPositiveInteger(
+  process.env.CRON_START_STAGGER_MS,
+  15 * 1000,
+);
+const CRON_CONFIG_INTERVAL_MS = readPositiveInteger(
+  process.env.CRON_CONFIG_INTERVAL_MS,
+  6 * 60 * 60 * 1000,
+);
+const CRON_LIVE_INTERVAL_MS = readPositiveInteger(
+  process.env.CRON_LIVE_INTERVAL_MS,
+  60 * 60 * 1000,
+);
+const CRON_METADATA_INTERVAL_MS = readPositiveInteger(
+  process.env.CRON_METADATA_INTERVAL_MS,
+  24 * 60 * 60 * 1000,
+);
 
 // 每 1 秒轮询一次，直到请求成功
 const REQUEST_HOSTNAME = '127.0.0.1';
@@ -54,19 +74,7 @@ const intervalId = setInterval(() => {
     if (res.statusCode && res.statusCode >= 200 && res.statusCode < 300) {
       console.log('Server is up, stop polling.');
       clearInterval(intervalId);
-
-      setTimeout(() => {
-        // 服务器启动后，立即执行一次 cron 任务
-        executeCronJob();
-      }, 3000);
-
-      // 然后设置每小时执行一次 cron 任务
-      setInterval(
-        () => {
-          executeCronJob();
-        },
-        60 * 60 * 1000,
-      ); // 每小时执行一次
+      scheduleCronTasks();
     }
 
     res.resume();
@@ -81,16 +89,33 @@ const intervalId = setInterval(() => {
   });
 }, READY_POLL_INTERVAL_MS);
 
-// 执行 cron 任务的函数
-function executeCronJob() {
+function scheduleCronTasks() {
+  [
+    { task: 'live', intervalMs: CRON_LIVE_INTERVAL_MS },
+    { task: 'config', intervalMs: CRON_CONFIG_INTERVAL_MS },
+    { task: 'metadata', intervalMs: CRON_METADATA_INTERVAL_MS },
+  ].forEach(({ task, intervalMs }, index) => {
+    const initialDelay = CRON_INITIAL_DELAY_MS + index * CRON_START_STAGGER_MS;
+    console.log(
+      `Scheduling ${task} cron in ${initialDelay}ms, interval ${intervalMs}ms`,
+    );
+    setTimeout(() => {
+      executeCronJob(task);
+      setInterval(() => executeCronJob(task), intervalMs);
+    }, initialDelay);
+  });
+}
+
+function executeCronJob(task) {
   const hostname = REQUEST_HOSTNAME;
   const port = process.env.PORT || 3000;
-  const cronUrl = `http://${hostname}:${port}/api/cron`;
+  const cronPath = task ? `/api/cron?task=${task}` : '/api/cron';
+  const cronUrl = `http://${hostname}:${port}${cronPath}`;
   const cronSecret = getCronSecret();
   const requestOptions = {
     hostname,
     port,
-    path: '/api/cron',
+    path: cronPath,
     headers: cronSecret
       ? {
           Authorization: `Bearer ${cronSecret}`,
