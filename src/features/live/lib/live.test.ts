@@ -1,4 +1,6 @@
-﻿import {
+﻿import { gzipSync } from 'node:zlib';
+
+import {
   deleteCachedLiveChannels,
   getCachedLiveChannels,
   parseEpgXmlForChannels,
@@ -31,6 +33,8 @@ describe('refreshLiveChannels', () => {
     'large-playlist',
     'stale-source',
     'atomic-source',
+    'epg-stream',
+    'epg-yield',
     'limited-1',
     'limited-2',
     'limited-3',
@@ -211,6 +215,102 @@ describe('refreshLiveChannels', () => {
     await refreshPromise;
     expect(sources.map((source) => source.channelNumber)).toEqual([1, 1, 1]);
   });
+
+  it('流式解压 EPG 并只保留时间窗口内的节目', async () => {
+    const now = Date.UTC(2026, 6, 24, 12, 0, 0);
+    jest.spyOn(Date, 'now').mockReturnValue(now);
+    const source = {
+      key: 'epg-stream',
+      name: 'EPG Stream',
+      url: 'https://example.com/epg-stream.m3u',
+      epg: 'https://example.com/epg.xml.gz',
+      from: 'custom' as const,
+    };
+    const epgXml = [
+      '<?xml version="1.0" encoding="UTF-8"?>',
+      '<tv>',
+      '<channel id="channel-1"><display-name>CCTV1</display-name></channel>',
+      createProgramme(
+        '过期节目',
+        now - 10 * 60 * 60 * 1000,
+        now - 9 * 60 * 60 * 1000,
+      ),
+      createProgramme('当前节目', now - 60 * 60 * 1000, now + 60 * 60 * 1000),
+      createProgramme(
+        '未来节目',
+        now + 24 * 60 * 60 * 1000,
+        now + 25 * 60 * 60 * 1000,
+      ),
+      createProgramme(
+        '远期节目',
+        now + 72 * 60 * 60 * 1000,
+        now + 73 * 60 * 60 * 1000,
+      ),
+      '</tv>',
+    ].join('');
+    const compressed = gzipSync(Buffer.from(epgXml));
+    const compressedChunks = Array.from(
+      { length: Math.ceil(compressed.length / 7) },
+      (_, index) => compressed.subarray(index * 7, index * 7 + 7),
+    );
+    (global.fetch as jest.Mock)
+      .mockResolvedValueOnce(
+        createTextResponse(
+          '#EXTM3U\n#EXTINF:-1 tvg-id="cctv1",CCTV-1\nhttps://example.com/live.m3u8',
+        ),
+      )
+      .mockResolvedValueOnce(
+        createChunkedResponse(compressedChunks, {
+          'content-encoding': 'gzip',
+        }),
+      );
+
+    await refreshLiveChannels(source);
+    const cached = await getCachedLiveChannels(source.key);
+
+    expect(cached?.epgs.cctv1.map((program) => program.title)).toEqual([
+      '当前节目',
+      '未来节目',
+    ]);
+  });
+
+  it('大块 EPG 解析会主动让出事件循环并限制频道节目数', async () => {
+    const now = Date.UTC(2026, 6, 24, 12, 0, 0);
+    jest.spyOn(Date, 'now').mockReturnValue(now);
+    const source = {
+      key: 'epg-yield',
+      name: 'EPG Yield',
+      url: 'https://example.com/epg-yield.m3u',
+      epg: 'https://example.com/epg.xml',
+      from: 'custom' as const,
+    };
+    const programmes = Array.from({ length: 10_000 }, (_, index) =>
+      createProgramme(
+        `节目${index}`,
+        now + index * 1000,
+        now + index * 1000 + 30 * 60 * 1000,
+      ),
+    ).join('');
+    const epgXml = `<tv><channel id="channel-1"><display-name>CCTV1</display-name></channel>${programmes}</tv>`;
+    (global.fetch as jest.Mock)
+      .mockResolvedValueOnce(
+        createTextResponse(
+          '#EXTM3U\n#EXTINF:-1 tvg-id="cctv1",CCTV-1\nhttps://example.com/live.m3u8',
+        ),
+      )
+      .mockResolvedValueOnce(createChunkedResponse([Buffer.from(epgXml)], {}));
+
+    let refreshSettled = false;
+    const refreshPromise = refreshLiveChannels(source).finally(() => {
+      refreshSettled = true;
+    });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(refreshSettled).toBe(false);
+    await refreshPromise;
+    const cached = await getCachedLiveChannels(source.key);
+    expect(cached?.epgs.cctv1).toHaveLength(240);
+  });
 });
 
 function createTextResponse(body: string): Response {
@@ -261,6 +361,42 @@ function createDeferredTextResponse(
       }),
     },
   } as unknown as Response;
+}
+
+function createChunkedResponse(
+  chunks: Buffer[],
+  headers: Record<string, string>,
+): Response {
+  let index = 0;
+  return {
+    ok: true,
+    status: 200,
+    headers: {
+      get: (name: string) => headers[name.toLowerCase()] || null,
+    },
+    body: {
+      getReader: () => ({
+        read: async () => {
+          if (index >= chunks.length) {
+            return { done: true, value: undefined };
+          }
+          const value = chunks[index];
+          index += 1;
+          return { done: false, value };
+        },
+        releaseLock: () => {},
+      }),
+    },
+  } as unknown as Response;
+}
+
+function createProgramme(title: string, start: number, end: number) {
+  return `<programme start="${formatXmlTvTime(start)}" stop="${formatXmlTvTime(end)}" channel="channel-1"><title>${title}</title></programme>`;
+}
+
+function formatXmlTvTime(timestamp: number) {
+  const date = new Date(timestamp);
+  return `${date.getUTCFullYear()}${String(date.getUTCMonth() + 1).padStart(2, '0')}${String(date.getUTCDate()).padStart(2, '0')}${String(date.getUTCHours()).padStart(2, '0')}${String(date.getUTCMinutes()).padStart(2, '0')}${String(date.getUTCSeconds()).padStart(2, '0')} +0000`;
 }
 
 async function flushAsyncWork() {
@@ -352,6 +488,7 @@ describe('parseEpgXmlForChannels', () => {
         { tvgId: 'CCTV1.cn@HD', name: 'CCTV-1 (1080p)' },
         { tvgId: '', name: 'CCTV1' },
       ],
+      { now: Date.parse('2026-06-27T00:15:00+08:00') },
     );
 
     expect(result['CCTV1.cn@HD']).toEqual([
