@@ -42,6 +42,8 @@
 - [x] 首页图片仍能在滚动前及时加载，无明显白屏
 - [x] 提交第一批改动，不推送
 
+补充验收：Next.js 16 production standalone 无法缓存空的静态 204 响应，会导致 `/api/health` 返回 500。健康端点已改为静态 200 文本响应，Docker HEALTHCHECK 和 `start.js` 就绪探测均按 2xx 成功处理；standalone 实测返回 200、2 字节正文。
+
 ## 第二批：首页首屏和重复请求
 
 - [x] 降低首页首屏卡片挂载数量

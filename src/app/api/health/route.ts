@@ -1,8 +1,8 @@
 export const dynamic = 'force-static';
 
 function createHealthResponse() {
-  return new Response(null, {
-    status: 204,
+  return new Response('ok', {
+    status: 200,
     headers: {
       'Cache-Control': 'no-store',
     },
