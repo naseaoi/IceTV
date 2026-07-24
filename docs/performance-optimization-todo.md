@@ -77,7 +77,7 @@
 
 ## 第三批：后台任务和容器峰值
 
-- [ ] cron 增加执行锁
+- [x] cron 增加执行锁
   - [x] 单进程内禁止重叠执行
   - [x] 多容器部署时具备可配置的文件租约方案
   - [x] 陈旧租约可恢复，租约路径和时长可配置
@@ -172,15 +172,17 @@
 
 ## 最终验收
 
-- [ ] 全量 Jest 测试通过
-- [ ] 全量 lint 通过
-- [ ] typecheck 通过
-- [ ] `git diff --check` 通过
-- [ ] production standalone 固定数据集复测
-  - [ ] 首页 TTFB、LCP、INP
-  - [ ] 首屏请求数、图片字节和主文档体积
-  - [ ] 容器空闲 CPU 和 RSS
-  - [ ] cron 执行时长、外部请求数和峰值 RSS
-  - [ ] 直播每小时容器出口流量
-- [ ] 更新本清单完成状态
-- [ ] 最终提交，不推送
+- [x] 全量 Jest 测试通过
+- [x] 全量 lint 通过
+- [x] typecheck 通过
+- [x] `git diff --check` 通过
+- [x] production standalone 固定数据集复测
+  - [x] 首页 TTFB、LCP、INP
+  - [x] 首屏请求数、图片字节和主文档体积
+  - [x] 容器空闲 CPU 和 RSS
+  - [x] cron 执行时长、外部请求数和峰值 RSS
+  - [x] 直播每小时容器出口流量
+- [x] 更新本清单完成状态
+- [x] 最终提交，不推送
+
+最终验收记录：production standalone 使用空 SQLite 固定数据集，移动端 390×844、DPR 3、Fast 4G、CPU 4 倍降速。首页 TTFB 约 100ms、LCP 约 3.0s、主题切换交互最长事件约 96ms；首屏本地请求 45 个、图片 6 张约 179KB、主文档传输约 26KB。`start.js` 就绪探测成功，空闲 10 秒 CPU 约 0%、RSS 约 91MB；config/live/metadata cron 分别约 94/10/11ms，固定数据集无外部请求，执行后 RSS 约 94MB。该固定数据集未配置直播源，因此直播每小时出口流量为 0；实际配置直播源后的流量取决于源数量、码率和观看并发，需按部署环境单独监测。
