@@ -4,8 +4,10 @@ import { MutableRefObject, useEffect } from 'react';
 import {
   type PlayerShortcutAction,
   type PlayerShortcutMap,
+  type PlayerShortcutMode,
   arePlayerShortcutsSuspended,
   FRAME_STEP_SECONDS,
+  isPlayerShortcutActionEnabled,
   PLAYER_SHORTCUTS_CHANGED_EVENT,
   RATE_MAX,
   RATE_MIN,
@@ -27,6 +29,7 @@ interface EpisodeHandlers {
 interface UsePlayerKeyboardParams {
   artPlayerRef: MutableRefObject<Artplayer | null>;
   episodeHandlers?: EpisodeHandlers;
+  mode?: PlayerShortcutMode;
 }
 
 function clampRate(rate: number): number {
@@ -37,6 +40,7 @@ function clampRate(rate: number): number {
 export function usePlayerKeyboard({
   artPlayerRef,
   episodeHandlers,
+  mode = 'vod',
 }: UsePlayerKeyboardParams) {
   useEffect(() => {
     let shortcuts: PlayerShortcutMap = readPlayerShortcuts();
@@ -170,6 +174,10 @@ export function usePlayerKeyboard({
       const action = resolveShortcutAction(e, shortcuts);
       if (!action) return;
 
+      if (!isPlayerShortcutActionEnabled(mode, action)) {
+        return;
+      }
+
       if (isEpisodeAction(action) && !episodeHandlers) {
         return;
       }
@@ -185,5 +193,5 @@ export function usePlayerKeyboard({
       document.removeEventListener('keydown', handleKeyboardShortcuts);
       window.removeEventListener(PLAYER_SHORTCUTS_CHANGED_EVENT, syncShortcuts);
     };
-  }, [artPlayerRef, episodeHandlers]);
+  }, [artPlayerRef, episodeHandlers, mode]);
 }

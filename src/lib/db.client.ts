@@ -13,6 +13,11 @@ import {
   retryClientRequest,
   triggerGlobalError,
 } from './db.client.internal';
+import {
+  DEFAULT_RECENT_PLAY_RECORD_LIMIT,
+  normalizePlayRecordLimit,
+  selectRecentPlayRecords,
+} from './play-records';
 import { getRuntimeConfig } from './runtime-config';
 import type { Favorite, PlayRecord, SkipConfig } from './types';
 
@@ -109,6 +114,40 @@ const _writeSkipConfigs = createOptimisticWriter<Record<string, SkipConfig>>({
 
 export async function getAllPlayRecords(): Promise<Record<string, PlayRecord>> {
   return _getAllPlayRecords();
+}
+
+export async function getRecentPlayRecords(
+  limit = DEFAULT_RECENT_PLAY_RECORD_LIMIT,
+): Promise<Record<string, PlayRecord>> {
+  const normalizedLimit = normalizePlayRecordLimit(limit);
+  const cachedRecords = cacheManager.getCachedPlayRecords();
+  const requestRecentRecords = () =>
+    fetchFromApi<Record<string, PlayRecord>>(
+      `/api/playrecords?limit=${normalizedLimit}`,
+    );
+
+  if (cachedRecords) {
+    void requestRecentRecords()
+      .then((freshRecords) => {
+        window.dispatchEvent(
+          new CustomEvent('recentPlayRecordsUpdated', {
+            detail: freshRecords,
+          }),
+        );
+      })
+      .catch((error) => {
+        console.warn('后台同步最近播放记录失败:', error);
+      });
+
+    return selectRecentPlayRecords(cachedRecords, normalizedLimit);
+  }
+
+  try {
+    return await requestRecentRecords();
+  } catch (error) {
+    console.error('获取最近播放记录失败:', error);
+    return {};
+  }
 }
 
 export function getCachedPlayRecordsSnapshot(): Record<
@@ -458,6 +497,7 @@ export async function deleteSkipConfig(
 
 export type CacheUpdateEvent =
   | 'playRecordsUpdated'
+  | 'recentPlayRecordsUpdated'
   | 'favoritesUpdated'
   | 'searchHistoryUpdated'
   | 'skipConfigsUpdated';

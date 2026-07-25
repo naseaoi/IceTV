@@ -15,8 +15,8 @@ import { getAuthInfoFromBrowserCookie } from '@/lib/auth.client';
 import type { PlayRecord } from '@/lib/db.client';
 import {
   clearAllPlayRecords,
-  getAllPlayRecords,
   getCachedPlayRecordsSnapshot,
+  getRecentPlayRecords,
   subscribeToDataUpdates,
 } from '@/lib/db.client';
 import { parseStorageKey } from '@/lib/utils';
@@ -104,7 +104,7 @@ export default function ContinueWatching({
   );
   const [showClearConfirm, setShowClearConfirm] = useState(false);
   const isMobile = useIsMobileViewport();
-  const mobileRecords = playRecords.slice(0, 10);
+  const mobileRecords = playRecords.slice(0, continueWatchingLimit);
 
   const updatePlayRecords = useCallback(
     (allRecords: Record<string, PlayRecord>) => {
@@ -141,8 +141,8 @@ export default function ContinueWatching({
 
     const fetchPlayRecords = async () => {
       try {
-        const allRecords = await getAllPlayRecords();
-        updatePlayRecords(allRecords);
+        const recentRecords = await getRecentPlayRecords(continueWatchingLimit);
+        updatePlayRecords(recentRecords);
       } catch (error) {
         console.error('获取播放记录失败:', error);
         setPlayRecords([]);
@@ -159,9 +159,18 @@ export default function ContinueWatching({
         updatePlayRecords(newRecords);
       },
     );
+    const unsubscribeRecent = subscribeToDataUpdates(
+      'recentPlayRecordsUpdated',
+      (newRecords: Record<string, PlayRecord>) => {
+        updatePlayRecords(newRecords);
+      },
+    );
 
-    return unsubscribe;
-  }, [updatePlayRecords]);
+    return () => {
+      unsubscribe();
+      unsubscribeRecent();
+    };
+  }, [continueWatchingLimit, updatePlayRecords]);
 
   if (!loading && playRecords.length === 0) {
     return null;

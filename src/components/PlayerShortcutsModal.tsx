@@ -1,6 +1,6 @@
 'use client';
 
-import { RotateCcw } from 'lucide-react';
+import { X } from 'lucide-react';
 import { useCallback, useEffect, useState } from 'react';
 
 import ConfirmModal from '@/components/modals/ConfirmModal';
@@ -8,9 +8,11 @@ import ModalShell from '@/components/modals/ModalShell';
 import {
   type PlayerShortcutAction,
   type PlayerShortcutMap,
+  type PlayerShortcutMode,
   type ShortcutBinding,
   DEFAULT_PLAYER_SHORTCUTS,
   formatBinding,
+  isPlayerShortcutActionEnabled,
   OPEN_PLAYER_SHORTCUTS_EVENT,
   PLAYER_SHORTCUT_ACTIONS,
   readPlayerShortcuts,
@@ -52,7 +54,13 @@ function findConflict(
   return null;
 }
 
-export default function PlayerShortcutsModal() {
+interface PlayerShortcutsModalProps {
+  mode?: PlayerShortcutMode;
+}
+
+export default function PlayerShortcutsModal({
+  mode = 'vod',
+}: PlayerShortcutsModalProps) {
   const [isOpen, setIsOpen] = useState(false);
   const [draft, setDraft] = useState<PlayerShortcutMap>(
     DEFAULT_PLAYER_SHORTCUTS,
@@ -60,6 +68,9 @@ export default function PlayerShortcutsModal() {
   const [recording, setRecording] = useState<PlayerShortcutAction | null>(null);
   const [conflict, setConflict] = useState<string | null>(null);
   const [showResetConfirm, setShowResetConfirm] = useState(false);
+  const availableActions = PLAYER_SHORTCUT_ACTIONS.filter(({ action }) =>
+    isPlayerShortcutActionEnabled(mode, action),
+  );
 
   useEffect(() => {
     const handleOpen = () => {
@@ -125,11 +136,19 @@ export default function PlayerShortcutsModal() {
   }, [draft]);
 
   const handleReset = useCallback(() => {
-    setDraft({ ...DEFAULT_PLAYER_SHORTCUTS });
+    setDraft((current) => {
+      const next = { ...current };
+      PLAYER_SHORTCUT_ACTIONS.forEach(({ action }) => {
+        if (isPlayerShortcutActionEnabled(mode, action)) {
+          next[action] = { ...DEFAULT_PLAYER_SHORTCUTS[action] };
+        }
+      });
+      return next;
+    });
     setConflict(null);
     setRecording(null);
     setShowResetConfirm(false);
-  }, []);
+  }, [mode]);
 
   return (
     <ModalShell isOpen={isOpen} onClose={handleClose} panelClassName='max-w-lg'>
@@ -144,12 +163,12 @@ export default function PlayerShortcutsModal() {
             </p>
           </div>
           <button
-            onClick={() => setShowResetConfirm(true)}
-            className='flex h-8 w-8 shrink-0 items-center justify-center rounded-full p-1 text-red-500 transition-colors hover:bg-red-50 hover:text-red-600 dark:text-red-400 dark:hover:bg-red-900/20 dark:hover:text-red-300'
-            title='恢复默认快捷键'
-            aria-label='恢复默认快捷键'
+            onClick={handleClose}
+            className='flex h-8 w-8 shrink-0 items-center justify-center rounded-full p-1 text-gray-500 transition-colors hover:bg-gray-100 hover:text-gray-700 dark:text-gray-400 dark:hover:bg-white/10 dark:hover:text-gray-200'
+            title='关闭'
+            aria-label='关闭'
           >
-            <RotateCcw className='h-4 w-4' />
+            <X className='h-4 w-4' />
           </button>
         </div>
 
@@ -159,8 +178,8 @@ export default function PlayerShortcutsModal() {
           </div>
         )}
 
-        <div className='scrollbar-visible max-h-[45vh] space-y-1 overflow-y-scroll pr-2'>
-          {PLAYER_SHORTCUT_ACTIONS.map(({ action, label }) => (
+        <div className='scrollbar-visible max-h-[45vh] space-y-1 overflow-y-auto pr-2'>
+          {availableActions.map(({ action, label }) => (
             <div
               key={action}
               className='flex items-center justify-between rounded-lg px-3 py-2 hover:bg-gray-100/70 dark:hover:bg-white/[0.04]'
@@ -189,10 +208,10 @@ export default function PlayerShortcutsModal() {
 
         <div className='mt-6 flex justify-end gap-3'>
           <button
-            onClick={handleClose}
-            className='rounded-lg border border-gray-200/70 bg-white px-5 py-2 text-sm font-medium text-gray-700 transition-colors hover:bg-gray-100/70 dark:border-white/10 dark:bg-gray-800/70 dark:text-gray-200 dark:hover:bg-white/[0.06]'
+            onClick={() => setShowResetConfirm(true)}
+            className='rounded-lg border border-red-200/70 bg-white px-5 py-2 text-sm font-medium text-red-600 transition-colors hover:bg-red-50 dark:border-red-400/20 dark:bg-gray-800/70 dark:text-red-400 dark:hover:bg-red-900/20'
           >
-            取消
+            重置
           </button>
           <button
             onClick={handleSave}
@@ -206,7 +225,11 @@ export default function PlayerShortcutsModal() {
       <ConfirmModal
         isOpen={showResetConfirm}
         title='确认恢复默认快捷键？'
-        message='该操作会将所有快捷键重置为默认键位，保存后生效。'
+        message={
+          mode === 'live'
+            ? '该操作会将直播页可用的快捷键重置为默认键位，保存后生效。'
+            : '该操作会将所有快捷键重置为默认键位，保存后生效。'
+        }
         danger
         cancelText='取消'
         confirmText='确认恢复'

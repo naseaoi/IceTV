@@ -30,10 +30,23 @@ describe('navigation return', () => {
     expect(parsed.searchParams.get('returnTo')).toBe('/douban?type=tv');
   });
 
+  it('为直播地址写入完整来源页面', () => {
+    const target = withReturnTo(
+      '/live',
+      '/search?q=%E6%96%B0%E9%97%BB#results',
+    );
+    const parsed = new URL(target, 'https://icetv.local');
+
+    expect(parsed.pathname).toBe('/live');
+    expect(parsed.searchParams.get('returnTo')).toBe(
+      '/search?q=%E6%96%B0%E9%97%BB#results',
+    );
+  });
+
   it('为主要返回页面提供稳定回退', () => {
     expect(getBackFallbackPath('/play')).toBe('/');
     expect(getBackFallbackPath('/douban')).toBe('/categories');
-    expect(getBackFallbackPath('/live')).toBe('/categories');
+    expect(getBackFallbackPath('/live')).toBe('/');
     expect(getBackFallbackPath('/me/favorites')).toBe('/me');
   });
 });

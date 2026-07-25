@@ -22,6 +22,7 @@ const recommendsCache = createSwrCache<DoubanResult>({
   freshMs: 30 * 60 * 1000,
   staleMs: 30 * 60 * 1000,
   maxSize: 500,
+  maxWeightBytes: 16 * 1024 * 1024,
 });
 
 export const runtime = 'nodejs';

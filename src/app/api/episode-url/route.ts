@@ -22,6 +22,7 @@ const episodeUrlCache = createSwrCache<string>({
   freshMs: 30 * 60 * 1000,
   staleMs: 2 * 60 * 60 * 1000,
   maxSize: 5000,
+  maxWeightBytes: 8 * 1024 * 1024,
 });
 
 function matchesLazyKind(kind: string, apiSite: ApiSite): boolean {

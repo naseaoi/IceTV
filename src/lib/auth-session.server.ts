@@ -1,10 +1,12 @@
 import 'server-only';
 
+import { cache } from 'react';
+
 import { isGuardFailure, requireActiveUserFromAuthInfo } from '@/lib/api-auth';
 import { parseAuthCookieValue } from '@/lib/auth.server';
 import { ClientAuthSession } from '@/lib/auth-session';
 
-export async function getServerAuthSession(
+const resolveServerAuthSession = cache(async function resolveServerAuthSession(
   authCookieValue?: string,
 ): Promise<ClientAuthSession> {
   if (!authCookieValue) {
@@ -31,4 +33,10 @@ export async function getServerAuthSession(
     console.error('服务端会话恢复失败:', error);
     return { status: 'error' };
   }
+});
+
+export function getServerAuthSession(
+  authCookieValue?: string,
+): Promise<ClientAuthSession> {
+  return resolveServerAuthSession(authCookieValue);
 }

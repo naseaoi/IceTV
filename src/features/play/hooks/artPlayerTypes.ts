@@ -31,6 +31,9 @@ export interface UseArtPlayerParams {
   totalEpisodes: number;
   blockAdEnabled: boolean;
   blockAdEnabledRef: MutableRefObject<boolean>;
+  autoPlayNextEnabled: boolean;
+  autoPlayNextEnabledRef: MutableRefObject<boolean>;
+  setAutoPlayNextEnabled: Dispatch<SetStateAction<boolean>>;
   skipConfigRef: MutableRefObject<SkipConfig>;
   resumeTimeRef: MutableRefObject<number | null>;
   resumeModeRef: MutableRefObject<ResumeMode>;

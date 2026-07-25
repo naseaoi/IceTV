@@ -6,18 +6,25 @@ import {
   useCallback,
   useEffect,
   useRef,
+  useState,
 } from 'react';
 
 import { logHlsError } from '@/lib/hls-error-log';
-import { readLiveDirectConnect } from '@/lib/local-preferences';
+import {
+  LIVE_DIRECT_CONNECT_CHANGE_EVENT,
+  LIVE_DIRECT_CONNECT_STORAGE_KEY,
+  readLiveDirectConnect,
+} from '@/lib/local-preferences';
 import {
   assignManagedVideoCleanup,
   bindPlayerHoverControls,
+  bindPlayerMobileControls,
   createHlsLoaderClass,
   destroyManagedHls,
   getManagedVideo,
   getPlayerModules,
   isManagedVideoExpectedAbort,
+  markManagedVideoExpectedAbort,
   runManagedVideoCleanup,
 } from '@/lib/player-runtime';
 import {
@@ -29,9 +36,21 @@ import {
 } from '@/lib/player-utils';
 
 import { createArtPlayerContextmenus } from '../../play/lib/artPlayerSettings';
+import {
+  readBufferedRanges,
+  resolveLiveRecoveryPosition,
+  shouldTreatLivePauseAsUserPause,
+} from '../lib/livePlaybackRecovery';
+import {
+  type LivePlaybackRoute,
+  buildLiveM3u8ProxyUrl,
+  isLivePlaylistContextType,
+  rewriteLivePlaylistRequestUrl,
+} from '../lib/livePlaybackRoute';
 import type { LiveChannel, LiveSource } from '../types';
 
 const LIVE_PRECHECK_CACHE_TTL_MS = 5 * 60 * 1000;
+const LIVE_STALL_RECOVERY_DELAY_MS = 2500;
 const livePrecheckCache = new Map<
   string,
   { type: string; expiresAt: number }
@@ -116,10 +135,12 @@ function cleanupPlayer(artPlayerRef: MutableRefObject<ArtplayerType | null>) {
       video: HTMLVideoElement;
     };
     player.off('ready');
-    player.off('loadstart');
-    player.off('loadeddata');
-    player.off('canplay');
-    player.off('waiting');
+    player.off('video:loadstart');
+    player.off('video:loadeddata');
+    player.off('video:canplay');
+    player.off('video:waiting');
+    player.off('video:error');
+    player.off('pause');
     player.off('error');
     artPlayerRef.current.destroy();
     artPlayerRef.current = null;
@@ -186,8 +207,13 @@ export function useLivePlayer({
 }: UseLivePlayerParams) {
   const artPlayerRef = useRef<ArtplayerType | null>(null);
   const loadedUrlRef = useRef('');
+  const liveRouteRef = useRef<LivePlaybackRoute>('server');
+  const liveSourceKeyRef = useRef('');
   const mutedAutoplayRequestedRef = useRef(false);
   const userPausedRef = useRef(false);
+  const livePlaybackRecoveryRef = useRef(false);
+  const suppressPlayerPauseIntentRef = useRef(false);
+  const [liveRouteVersion, setLiveRouteVersion] = useState(0);
   const loadingIndicatorTimerRef = useRef<ReturnType<typeof setTimeout> | null>(
     null,
   );
@@ -216,8 +242,12 @@ export function useLivePlayer({
   const doCleanup = () => {
     setUnsupportedType(null);
     loadedUrlRef.current = '';
+    liveRouteRef.current = 'server';
+    liveSourceKeyRef.current = '';
     mutedAutoplayRequestedRef.current = false;
     userPausedRef.current = false;
+    livePlaybackRecoveryRef.current = false;
+    suppressPlayerPauseIntentRef.current = false;
     setLiveVideoLoading(false);
     cleanupPlayer(artPlayerRef);
   };
@@ -232,6 +262,20 @@ export function useLivePlayer({
   useEffect(() => {
     let cancelled = false;
 
+    const beginLivePlaybackRecovery = (video: HTMLVideoElement | null) => {
+      livePlaybackRecoveryRef.current = true;
+      if (!video || userPausedRef.current) return;
+      video.autoplay = true;
+      video.playsInline = true;
+    };
+
+    const applyUserPauseIntent = (video: HTMLVideoElement | null) => {
+      userPausedRef.current = true;
+      if (!video) return;
+      video.autoplay = false;
+      video.removeAttribute('autoplay');
+    };
+
     const preload = async () => {
       if (!videoUrl || !artRef.current || !currentChannel) {
         return;
@@ -243,14 +287,24 @@ export function useLivePlayer({
         if (cancelled || !artRef.current) return;
 
         const sourceKey = currentSourceRef.current?.key || '';
+        liveSourceKeyRef.current = sourceKey;
         const type = await resolveLiveStreamType(videoUrl, sourceKey);
 
         if (cancelled || !artRef.current) return;
 
-        const targetUrl = `/api/proxy/m3u8?url=${encodeURIComponent(videoUrl)}&icetv-source=${sourceKey}&icetv-live=1`;
+        const initialRoute: LivePlaybackRoute = readLiveDirectConnect()
+          ? 'browser'
+          : 'server';
+        liveRouteRef.current = initialRoute;
+        const targetUrl = buildLiveM3u8ProxyUrl({
+          rawUrl: videoUrl,
+          sourceKey,
+          route: initialRoute,
+        });
 
         if (type !== 'm3u8') {
           loadedUrlRef.current = '';
+          liveRouteRef.current = 'server';
           cleanupPlayer(artPlayerRef);
           setUnsupportedType(type);
           setLiveVideoLoading(false);
@@ -264,6 +318,8 @@ export function useLivePlayer({
         }
         mutedAutoplayRequestedRef.current = false;
         userPausedRef.current = false;
+        livePlaybackRecoveryRef.current = false;
+        suppressPlayerPauseIntentRef.current = false;
 
         const LiveHlsLoader = createHlsLoaderClass(
           Hls.DefaultConfig.loader as unknown as new (config: unknown) => {
@@ -272,32 +328,14 @@ export function useLivePlayer({
           {
             rewriteContext: (context) => {
               const currentUrl = context.url;
-              if (!currentUrl) return;
-
-              const isLiveDirectConnect =
-                typeof window !== 'undefined' && readLiveDirectConnect();
-
-              try {
-                const nextUrl = new URL(currentUrl, window.location.origin);
-                nextUrl.searchParams.set('icetv-source', sourceKey);
-                if (
-                  isLiveDirectConnect &&
-                  (context.type === 'manifest' || context.type === 'level')
-                ) {
-                  nextUrl.searchParams.set('allowCORS', 'true');
-                }
-                context.url = nextUrl.toString();
-              } catch {
-                const separator = currentUrl.includes('?') ? '&' : '?';
-                let nextUrl = `${currentUrl}${separator}icetv-source=${encodeURIComponent(sourceKey)}`;
-                if (
-                  isLiveDirectConnect &&
-                  (context.type === 'manifest' || context.type === 'level')
-                ) {
-                  nextUrl = `${nextUrl}&allowCORS=true`;
-                }
-                context.url = nextUrl;
+              if (!currentUrl || !isLivePlaylistContextType(context.type)) {
+                return;
               }
+
+              context.url = rewriteLivePlaylistRequestUrl(currentUrl, {
+                sourceKey: liveSourceKeyRef.current,
+                route: liveRouteRef.current,
+              });
             },
           },
         );
@@ -309,17 +347,17 @@ export function useLivePlayer({
 
           const hls = new Hls({
             ...createHlsConfig({
-              lowLatencyMode: true,
-              maxBufferLength: 45,
-              maxMaxBufferLength: 90,
-              backBufferLength: 15,
-              minBufferLength: 6,
+              lowLatencyMode: false,
+              maxBufferLength: 60,
+              maxMaxBufferLength: 120,
+              backBufferLength: 30,
+              minBufferLength: 12,
               maxBufferHole: 0.8,
               nudgeOffset: 0.2,
               nudgeMaxRetry: 10,
-              liveSyncDurationCount: 3,
-              liveMaxLatencyDurationCount: 7,
-              initialLiveManifestSize: 2,
+              liveSyncDurationCount: 4,
+              liveMaxLatencyDurationCount: 10,
+              initialLiveManifestSize: 3,
               startPosition: -1,
             }),
             manifestLoadingTimeOut: 8000,
@@ -330,7 +368,7 @@ export function useLivePlayer({
             levelLoadingMaxRetry: 5,
             levelLoadingRetryDelay: 500,
             levelLoadingMaxRetryTimeout: 4000,
-            fragLoadingTimeOut: 12000,
+            fragLoadingTimeOut: 15000,
             fragLoadingMaxRetry: 8,
             fragLoadingRetryDelay: 500,
             fragLoadingMaxRetryTimeout: 4000,
@@ -340,8 +378,10 @@ export function useLivePlayer({
           hls.attachMedia(video);
           managedVideo.hls = hls;
 
+          let videoRuntimeCleaned = false;
+
           let alignedToLiveEdge = false;
-          let lastStallRecoveryAt = 0;
+          let stallRecoveryTimer: ReturnType<typeof setTimeout> | null = null;
           const alignToLiveEdge = (force = false) => {
             if (alignedToLiveEdge && !force) return;
             const aligned = seekVideoToLiveEdge(video, hls);
@@ -349,10 +389,29 @@ export function useLivePlayer({
             alignedToLiveEdge = true;
           };
 
+          const clearStallRecoveryTimer = () => {
+            if (!stallRecoveryTimer) return;
+            clearTimeout(stallRecoveryTimer);
+            stallRecoveryTimer = null;
+          };
+
           const handleVideoPause = () => {
-            userPausedRef.current = true;
-            video.autoplay = false;
-            video.removeAttribute('autoplay');
+            const userPause = shouldTreatLivePauseAsUserPause({
+              explicitUserPause: userPausedRef.current,
+              hasMediaError: Boolean(video.error),
+              expectedAbort: isManagedVideoExpectedAbort(video),
+              recoveryInProgress: livePlaybackRecoveryRef.current,
+              runtimeCleaned: videoRuntimeCleaned,
+            });
+            if (!userPause) {
+              if (!userPausedRef.current) {
+                video.autoplay = true;
+                video.playsInline = true;
+              }
+              return;
+            }
+
+            applyUserPauseIntent(video);
           };
 
           const handleVideoPlay = () => {
@@ -363,25 +422,63 @@ export function useLivePlayer({
 
           const recoverLiveStall = () => {
             if (video.paused || video.ended) return;
-            const now = Date.now();
-            if (now - lastStallRecoveryAt < 1500) return;
-            lastStallRecoveryAt = now;
-            alignToLiveEdge(true);
-            hls.startLoad(-1);
             requestLiveAutoplay(video);
+            if (stallRecoveryTimer) return;
+
+            stallRecoveryTimer = setTimeout(() => {
+              stallRecoveryTimer = null;
+              if (
+                video.paused ||
+                video.ended ||
+                video.readyState >= HTMLMediaElement.HAVE_FUTURE_DATA
+              ) {
+                return;
+              }
+
+              const recoveryPosition = resolveLiveRecoveryPosition(
+                video.currentTime,
+                Number(hls.liveSyncPosition),
+                readBufferedRanges(video.buffered),
+              );
+              if (
+                recoveryPosition !== null &&
+                Math.abs(recoveryPosition - video.currentTime) > 0.1
+              ) {
+                video.currentTime = recoveryPosition;
+              }
+              if (!hls.loadingEnabled) {
+                hls.startLoad(-1);
+              }
+              requestLiveAutoplay(video);
+            }, LIVE_STALL_RECOVERY_DELAY_MS);
           };
 
-          let videoRuntimeCleaned = false;
+          const handleLivePlaybackResumed = () => {
+            clearStallRecoveryTimer();
+            livePlaybackRecoveryRef.current = false;
+          };
+
+          const handleLivePlaybackSeeked = () => {
+            clearStallRecoveryTimer();
+          };
+
           video.addEventListener('pause', handleVideoPause);
           video.addEventListener('play', handleVideoPlay);
           video.addEventListener('waiting', recoverLiveStall);
           video.addEventListener('stalled', recoverLiveStall);
+          video.addEventListener('playing', handleLivePlaybackResumed);
+          video.addEventListener('canplay', handleLivePlaybackResumed);
+          video.addEventListener('seeked', handleLivePlaybackSeeked);
           assignManagedVideoCleanup(video, () => {
             videoRuntimeCleaned = true;
+            clearStallRecoveryTimer();
             video.removeEventListener('pause', handleVideoPause);
             video.removeEventListener('play', handleVideoPlay);
             video.removeEventListener('waiting', recoverLiveStall);
             video.removeEventListener('stalled', recoverLiveStall);
+            video.removeEventListener('playing', handleLivePlaybackResumed);
+            video.removeEventListener('canplay', handleLivePlaybackResumed);
+            video.removeEventListener('seeked', handleLivePlaybackSeeked);
           });
 
           hls.on(Hls.Events.MANIFEST_PARSED, function () {
@@ -398,7 +495,7 @@ export function useLivePlayer({
           hls.on(Hls.Events.ERROR, function (_event: any, data: any) {
             const logResult = logHlsError(_event, data, {
               scope: 'live',
-              sourceKey,
+              sourceKey: liveSourceKeyRef.current,
               phase: 'live',
               expectedAbort:
                 videoRuntimeCleaned || isManagedVideoExpectedAbort(video),
@@ -406,13 +503,12 @@ export function useLivePlayer({
             if (logResult.expectedAbort) {
               return;
             }
-            if (
-              data.type === Hls.ErrorTypes.NETWORK_ERROR &&
-              /frag|segment|level|manifest/i.test(String(data.details || ''))
-            ) {
-              hls.startLoad(-1);
-            }
+
             if (data.fatal) {
+              if (data.type === Hls.ErrorTypes.MEDIA_ERROR) {
+                beginLivePlaybackRecovery(video);
+                markManagedVideoExpectedAbort(video);
+              }
               handleHlsFatalError(hls, data.type, Hls.ErrorTypes);
             }
           });
@@ -420,9 +516,17 @@ export function useLivePlayer({
 
         if (artPlayerRef.current) {
           setLiveVideoLoading(true);
-          artPlayerRef.current.switch = targetUrl;
-          if (artPlayerRef.current.video) {
-            ensureVideoSource(artPlayerRef.current.video, targetUrl);
+          const activeVideo = artPlayerRef.current.video;
+          beginLivePlaybackRecovery(activeVideo);
+          markManagedVideoExpectedAbort(activeVideo);
+          suppressPlayerPauseIntentRef.current = true;
+          try {
+            artPlayerRef.current.switch = targetUrl;
+          } finally {
+            suppressPlayerPauseIntentRef.current = false;
+          }
+          if (activeVideo) {
+            ensureVideoSource(activeVideo, targetUrl);
           }
           loadedUrlRef.current = targetUrl;
           return;
@@ -437,6 +541,9 @@ export function useLivePlayer({
           ...createArtPlayerConfig({
             isLive: true,
             muted: true,
+            setting: true,
+            aspectRatio: true,
+            screenshot: true,
             moreVideoAttr: { preload: 'metadata', autoplay: true, muted: true },
           }),
           type,
@@ -444,6 +551,9 @@ export function useLivePlayer({
           contextmenu: createArtPlayerContextmenus(),
         });
         bindPlayerHoverControls(artPlayerRef.current);
+        bindPlayerMobileControls(artPlayerRef.current, {
+          enableLongPressFastForward: false,
+        });
         loadedUrlRef.current = targetUrl;
 
         const ap = artPlayerRef.current as unknown as {
@@ -453,20 +563,31 @@ export function useLivePlayer({
         ap.on('ready', () => {
           setError(null);
           setLiveVideoLoading(false);
+          livePlaybackRecoveryRef.current = false;
           requestInitialLiveAutoplay(ap.video);
         });
-        ap.on('loadstart', () => {
+        ap.on('video:loadstart', () => {
           setLiveVideoLoading(true);
         });
-        ap.on('loadeddata', () => {
+        ap.on('video:loadeddata', () => {
           setLiveVideoLoading(false);
         });
-        ap.on('canplay', () => {
+        ap.on('video:canplay', () => {
           setLiveVideoLoading(false);
+          livePlaybackRecoveryRef.current = false;
           requestInitialLiveAutoplay(ap.video);
         });
-        ap.on('waiting', () => {
+        ap.on('video:waiting', () => {
           setLiveVideoLoading(true, 700);
+        });
+        ap.on('video:error', () => {
+          const activeVideo = ap.video;
+          beginLivePlaybackRecovery(activeVideo);
+          markManagedVideoExpectedAbort(activeVideo);
+        });
+        ap.on('pause', () => {
+          if (suppressPlayerPauseIntentRef.current) return;
+          applyUserPauseIntent(ap.video);
         });
         ap.on('error', (err: unknown) => {
           console.error('Live player error:', err);
@@ -491,6 +612,7 @@ export function useLivePlayer({
     artRef,
     currentChannel,
     currentSourceRef,
+    liveRouteVersion,
     loading,
     setError,
     setLiveVideoLoading,
@@ -502,17 +624,49 @@ export function useLivePlayer({
     return () => {
       clearLiveLoadingTimer();
       loadedUrlRef.current = '';
+      liveRouteRef.current = 'server';
+      liveSourceKeyRef.current = '';
       mutedAutoplayRequestedRef.current = false;
       userPausedRef.current = false;
+      livePlaybackRecoveryRef.current = false;
+      suppressPlayerPauseIntentRef.current = false;
       cleanupPlayer(artPlayerRef);
     };
   }, [clearLiveLoadingTimer]);
 
   useEffect(() => {
+    const handleRoutePreferenceChange = () => {
+      setLiveRouteVersion((version) => version + 1);
+    };
+    const handleStorageChange = (event: StorageEvent) => {
+      if (event.key === LIVE_DIRECT_CONNECT_STORAGE_KEY) {
+        handleRoutePreferenceChange();
+      }
+    };
+
+    window.addEventListener(
+      LIVE_DIRECT_CONNECT_CHANGE_EVENT,
+      handleRoutePreferenceChange,
+    );
+    window.addEventListener('storage', handleStorageChange);
+    return () => {
+      window.removeEventListener(
+        LIVE_DIRECT_CONNECT_CHANGE_EVENT,
+        handleRoutePreferenceChange,
+      );
+      window.removeEventListener('storage', handleStorageChange);
+    };
+  }, []);
+
+  useEffect(() => {
     const handleBeforeUnload = () => {
       clearLiveLoadingTimer();
       loadedUrlRef.current = '';
+      liveRouteRef.current = 'server';
+      liveSourceKeyRef.current = '';
       userPausedRef.current = false;
+      livePlaybackRecoveryRef.current = false;
+      suppressPlayerPauseIntentRef.current = false;
       cleanupPlayer(artPlayerRef);
     };
     window.addEventListener('beforeunload', handleBeforeUnload);
@@ -520,8 +674,12 @@ export function useLivePlayer({
       window.removeEventListener('beforeunload', handleBeforeUnload);
       clearLiveLoadingTimer();
       loadedUrlRef.current = '';
+      liveRouteRef.current = 'server';
+      liveSourceKeyRef.current = '';
       mutedAutoplayRequestedRef.current = false;
       userPausedRef.current = false;
+      livePlaybackRecoveryRef.current = false;
+      suppressPlayerPauseIntentRef.current = false;
       cleanupPlayer(artPlayerRef);
     };
   }, [clearLiveLoadingTimer]);

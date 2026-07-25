@@ -2,7 +2,10 @@ export const DEFAULT_AGGREGATE_SEARCH_STORAGE_KEY = 'defaultAggregateSearch';
 export const ENABLE_OPTIMIZATION_STORAGE_KEY = 'enableOptimization';
 export const FLUID_SEARCH_STORAGE_KEY = 'fluidSearch';
 export const LIVE_DIRECT_CONNECT_STORAGE_KEY = 'liveDirectConnect';
+export const LIVE_DIRECT_CONNECT_CHANGE_EVENT =
+  'icetv:live-direct-connect-change';
 export const BLOCK_AD_STORAGE_KEY = 'enable_blockad';
+export const AUTO_PLAY_NEXT_STORAGE_KEY = 'enable_autoplay_next';
 export const PREFERRED_QUALITY_STORAGE_KEY = 'preferredQuality';
 export const SOURCE_PREFERRED_QUALITY_STORAGE_PREFIX = 'preferredQuality:';
 export const SIDEBAR_COLLAPSED_STORAGE_KEY = 'sidebarCollapsed';
@@ -237,10 +240,20 @@ export function readLiveDirectConnect(): boolean {
 
 export function writeLiveDirectConnect(value: boolean) {
   writeStoredBoolean(LIVE_DIRECT_CONNECT_STORAGE_KEY, value);
+  if (typeof window !== 'undefined') {
+    window.dispatchEvent(
+      new CustomEvent(LIVE_DIRECT_CONNECT_CHANGE_EVENT, {
+        detail: value,
+      }),
+    );
+  }
 }
 
 export function resetLiveDirectConnect() {
   resetStoredBoolean(LIVE_DIRECT_CONNECT_STORAGE_KEY);
+  if (typeof window !== 'undefined') {
+    window.dispatchEvent(new Event(LIVE_DIRECT_CONNECT_CHANGE_EVENT));
+  }
 }
 
 export function readBlockAdEnabled(): boolean {
@@ -249,6 +262,14 @@ export function readBlockAdEnabled(): boolean {
 
 export function writeBlockAdEnabled(value: boolean) {
   writeStoredBoolean(BLOCK_AD_STORAGE_KEY, value);
+}
+
+export function readAutoPlayNextEnabled(): boolean {
+  return readStoredBoolean(AUTO_PLAY_NEXT_STORAGE_KEY) ?? true;
+}
+
+export function writeAutoPlayNextEnabled(value: boolean) {
+  writeStoredBoolean(AUTO_PLAY_NEXT_STORAGE_KEY, value);
 }
 
 export function readSidebarCollapsed(): boolean {

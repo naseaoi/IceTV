@@ -9,6 +9,7 @@ import {
 } from 'react';
 
 import { type AdminTabId } from '@/features/admin/lib/admin-tabs';
+import { getVerticalScrollMaskStyle } from '@/lib/scroll-edge-fade';
 
 interface AdminTabScrollPanelProps {
   activeTab: AdminTabId;
@@ -57,23 +58,7 @@ export function AdminTabScrollPanel({
     };
   }, [activeTab, syncFade]);
 
-  const maskStyle = hasTopFade
-    ? {
-        WebkitMaskImage: hasBottomFade
-          ? 'linear-gradient(to bottom, transparent 0, #000 2rem, #000 calc(100% - 2rem), transparent 100%)'
-          : 'linear-gradient(to bottom, transparent 0, #000 2rem, #000 100%)',
-        maskImage: hasBottomFade
-          ? 'linear-gradient(to bottom, transparent 0, #000 2rem, #000 calc(100% - 2rem), transparent 100%)'
-          : 'linear-gradient(to bottom, transparent 0, #000 2rem, #000 100%)',
-      }
-    : hasBottomFade
-      ? {
-          WebkitMaskImage:
-            'linear-gradient(to bottom, #000 0, #000 calc(100% - 2rem), transparent 100%)',
-          maskImage:
-            'linear-gradient(to bottom, #000 0, #000 calc(100% - 2rem), transparent 100%)',
-        }
-      : undefined;
+  const maskStyle = getVerticalScrollMaskStyle(hasTopFade, hasBottomFade);
 
   return (
     <div

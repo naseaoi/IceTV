@@ -9,6 +9,7 @@ import {
   useState,
 } from 'react';
 
+import { getAuthInfoFromBrowserCookie } from '@/lib/auth.client';
 import {
   applyClientServerConfig,
   fetchClientServerConfig,
@@ -66,6 +67,11 @@ export function SiteProvider({
   });
 
   useEffect(() => {
+    if (!getAuthInfoFromBrowserCookie()?.username) {
+      window.__runtimeConfigReady = true;
+      return;
+    }
+
     let cancelled = false;
 
     fetchClientServerConfig()

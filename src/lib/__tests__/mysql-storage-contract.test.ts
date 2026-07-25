@@ -210,6 +210,18 @@ function createFakePool() {
       return [[], []];
     }
 
+    if (normalized === 'DELETE FROM playback_sessions WHERE updated_at < ?') {
+      const [cutoff] = params as [number];
+      let affectedRows = 0;
+      for (const [id, row] of currentState.playbackSessions.entries()) {
+        if (Number(row.updated_at || 0) < cutoff) {
+          currentState.playbackSessions.delete(id);
+          affectedRows += 1;
+        }
+      }
+      return [{ affectedRows }, []];
+    }
+
     if (normalized === 'DELETE FROM play_records') {
       currentState.playRecords.clear();
       return [[], []];
@@ -981,6 +993,27 @@ describe('mysql storage contract', () => {
         successCount: 3,
         failureCount: 1,
       },
+    ]);
+  });
+
+  it('按最后更新时间清理过期播放统计会话', async () => {
+    const storage = new MySqlStorage('mysql://demo:demo@localhost:3306/icetv');
+
+    await storage.clearAllData();
+    await storage.setPlaybackSession('demo-user', {
+      ...playbackSession,
+      id: 'session_old',
+      updated_at: 1000,
+    });
+    await storage.setPlaybackSession('demo-user', {
+      ...playbackSession,
+      id: 'session_recent',
+      updated_at: 2000,
+    });
+
+    await expect(storage.deletePlaybackSessionsBefore(1500)).resolves.toBe(1);
+    await expect(storage.getAllPlaybackSessions('demo-user')).resolves.toEqual([
+      expect.objectContaining({ id: 'session_recent' }),
     ]);
   });
 

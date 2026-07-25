@@ -3,7 +3,8 @@
 import { Moon, Sun } from 'lucide-react';
 import { usePathname } from 'next/navigation';
 import { useTheme } from 'next-themes';
-import { useEffect, useRef } from 'react';
+import { type MouseEvent, useEffect, useRef } from 'react';
+import { flushSync } from 'react-dom';
 
 import {
   getSidebarItemLabelClass,
@@ -26,7 +27,7 @@ export function ThemeToggle({
 }: ThemeToggleProps) {
   const { setTheme, resolvedTheme } = useTheme();
   const pathname = usePathname();
-  const buttonRef = useRef<HTMLButtonElement | null>(null);
+  const transitionInProgressRef = useRef(false);
 
   const setThemeColor = (theme?: string) => {
     const meta = document.querySelector('meta[name="theme-color"]');
@@ -47,13 +48,13 @@ export function ThemeToggle({
     }
   }, [resolvedTheme, pathname]);
 
-  const toggleTheme = () => {
+  const toggleTheme = (event: MouseEvent<HTMLButtonElement>) => {
+    if (transitionInProgressRef.current) return;
+
     const targetTheme = resolvedTheme === 'dark' ? 'light' : 'dark';
     setThemeColor(targetTheme);
 
-    const startViewTransition = (document as any).startViewTransition as
-      | ((callback: () => void) => { ready: Promise<void> })
-      | undefined;
+    const startViewTransition = document.startViewTransition;
 
     if (
       !startViewTransition ||
@@ -63,26 +64,57 @@ export function ThemeToggle({
       return;
     }
 
-    const rect = buttonRef.current?.getBoundingClientRect();
-    const centerX = rect ? rect.left + rect.width / 2 : window.innerWidth / 2;
-    const centerY = rect ? rect.top + rect.height / 2 : window.innerHeight / 2;
-    const maxRadius = Math.hypot(
-      Math.max(centerX, window.innerWidth - centerX),
-      Math.max(centerY, window.innerHeight - centerY),
+    const iconAnchor = event.currentTarget.querySelector<HTMLElement>(
+      '[data-theme-transition-anchor]',
     );
+    const rect = (iconAnchor ?? event.currentTarget).getBoundingClientRect();
+    const viewportOffsetX = window.visualViewport?.offsetLeft ?? 0;
+    const viewportOffsetY = window.visualViewport?.offsetTop ?? 0;
+    const viewportWidth = document.documentElement.clientWidth;
+    const viewportHeight = document.documentElement.clientHeight;
+    if (viewportWidth <= 0 || viewportHeight <= 0) {
+      setTheme(targetTheme);
+      return;
+    }
+
+    const centerX = rect.left + rect.width / 2 + viewportOffsetX;
+    const centerY = rect.top + rect.height / 2 + viewportOffsetY;
+    const maxRadius = Math.hypot(
+      Math.max(centerX, viewportWidth - centerX),
+      Math.max(centerY, viewportHeight - centerY),
+    );
+    const centerXPercent = (centerX / viewportWidth) * 100;
+    const centerYPercent = (centerY / viewportHeight) * 100;
+    const radiusVmax =
+      (maxRadius / Math.max(viewportWidth, viewportHeight)) * 100;
 
     const root = document.documentElement;
-    root.style.setProperty('--theme-transition-x', `${centerX}px`);
-    root.style.setProperty('--theme-transition-y', `${centerY}px`);
-    root.style.setProperty('--theme-transition-radius', `${maxRadius}px`);
+    root.style.setProperty('--theme-transition-x', `${centerXPercent}%`);
+    root.style.setProperty('--theme-transition-y', `${centerYPercent}%`);
+    root.style.setProperty('--theme-transition-radius', `${radiusVmax}vmax`);
+    const clearTransitionStyles = () => {
+      root.style.removeProperty('--theme-transition-x');
+      root.style.removeProperty('--theme-transition-y');
+      root.style.removeProperty('--theme-transition-radius');
+    };
 
-    const transition = startViewTransition.call(document, () => {
+    transitionInProgressRef.current = true;
+
+    let transition: ViewTransition;
+    try {
+      transition = startViewTransition.call(document, () => {
+        flushSync(() => setTheme(targetTheme));
+      });
+    } catch {
+      transitionInProgressRef.current = false;
+      clearTransitionStyles();
       setTheme(targetTheme);
-    });
+      return;
+    }
 
-    transition.ready
+    void transition.ready
       .then(() => {
-        document.documentElement.animate(
+        const animation = document.documentElement.animate(
           {
             clipPath: [
               'circle(0px at var(--theme-transition-x) var(--theme-transition-y))',
@@ -95,20 +127,30 @@ export function ThemeToggle({
             pseudoElement: '::view-transition-new(root)',
           },
         );
+        return animation.finished.catch(() => undefined);
       })
       .catch(() => undefined);
+
+    void transition.finished
+      .catch(() => undefined)
+      .finally(() => {
+        transitionInProgressRef.current = false;
+        clearTransitionStyles();
+      });
   };
 
   if (variant === 'sidebar') {
     return (
       <button
-        ref={buttonRef}
         onClick={toggleTheme}
         className={`${SIDEBAR_ITEM_LAYOUT_CLASS} w-full ${SIDEBAR_BUTTON_STATE_CLASS}`}
         aria-label='主题'
         title='主题'
       >
-        <div className={SIDEBAR_ITEM_ICON_WRAP_CLASS}>
+        <div
+          data-theme-transition-anchor
+          className={SIDEBAR_ITEM_ICON_WRAP_CLASS}
+        >
           <Sun className={`${SIDEBAR_ITEM_ICON_CLASS} hidden dark:block`} />
           <Moon className={`${SIDEBAR_ITEM_ICON_CLASS} dark:hidden`} />
         </div>
@@ -119,7 +161,6 @@ export function ThemeToggle({
 
   return (
     <button
-      ref={buttonRef}
       onClick={toggleTheme}
       className={
         className ??
@@ -127,8 +168,10 @@ export function ThemeToggle({
       }
       aria-label='切换主题'
     >
-      <Sun className='hidden h-full w-full dark:block' />
-      <Moon className='h-full w-full dark:hidden' />
+      <span data-theme-transition-anchor className='h-full w-full'>
+        <Sun className='hidden h-full w-full dark:block' />
+        <Moon className='h-full w-full dark:hidden' />
+      </span>
     </button>
   );
 }

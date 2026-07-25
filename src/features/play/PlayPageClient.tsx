@@ -81,6 +81,9 @@ function AuthenticatedPlayPageClient() {
     blockAdEnabled,
     setBlockAdEnabled,
     blockAdEnabledRef,
+    autoPlayNextEnabled,
+    setAutoPlayNextEnabled,
+    autoPlayNextEnabledRef,
     videoTitle,
     setVideoTitle,
     videoYear,
@@ -505,6 +508,9 @@ function AuthenticatedPlayPageClient() {
     totalEpisodes,
     blockAdEnabled,
     blockAdEnabledRef,
+    autoPlayNextEnabled,
+    autoPlayNextEnabledRef,
+    setAutoPlayNextEnabled,
     skipConfigRef,
     resumeTimeRef,
     resumeModeRef,
@@ -612,6 +618,7 @@ function AuthenticatedPlayPageClient() {
       videoTitle={videoTitle}
       totalEpisodes={totalEpisodes}
       detail={detail}
+      detailLoading={loading && !detail}
       currentEpisodeIndex={currentEpisodeIndex}
       isEpisodeSelectorCollapsed={isEpisodeSelectorCollapsed}
       setIsEpisodeSelectorCollapsed={setIsEpisodeSelectorCollapsed}

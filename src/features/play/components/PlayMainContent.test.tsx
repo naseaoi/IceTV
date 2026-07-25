@@ -20,7 +20,9 @@ jest.mock('@/components/BackButton', () => ({
 
 jest.mock('@/features/play/components/EpisodeSelector', () => ({
   __esModule: true,
-  default: () => <div>EpisodeSelector</div>,
+  default: ({ detailLoading }: { detailLoading: boolean }) => (
+    <div data-detail-loading={detailLoading}>EpisodeSelector</div>
+  ),
 }));
 
 jest.mock('@/components/LoadingStatePanel', () => ({
@@ -62,6 +64,7 @@ describe('PlayMainContent', () => {
     videoTitle: '测试视频',
     totalEpisodes: 1,
     detail,
+    detailLoading: false,
     currentEpisodeIndex: 0,
     isEpisodeSelectorCollapsed: false,
     setIsEpisodeSelectorCollapsed: jest.fn(),
@@ -133,6 +136,15 @@ describe('PlayMainContent', () => {
   it('uses the configured timeout seconds in loading timeout copy', () => {
     expect(buildLoadingTimeoutMessage(20)).toBe(
       '已等待超过 20 秒，源站响应超时',
+    );
+  });
+
+  it('向详情面板传递详情加载状态', () => {
+    render(<PlayMainContent {...createBaseProps()} detailLoading />);
+
+    expect(screen.getByText('EpisodeSelector')).toHaveAttribute(
+      'data-detail-loading',
+      'true',
     );
   });
 

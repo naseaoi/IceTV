@@ -3,6 +3,10 @@ import { NextRequest, NextResponse } from 'next/server';
 import { isGuardFailure, requireActiveUser } from '@/lib/api-auth';
 import { db } from '@/lib/db';
 import { NO_STORE_HEADERS } from '@/lib/http-cache';
+import {
+  normalizePlayRecordLimit,
+  selectRecentPlayRecords,
+} from '@/lib/play-records';
 import { PlayRecord } from '@/lib/types';
 import { parseStorageKey } from '@/lib/utils';
 
@@ -14,7 +18,16 @@ export async function GET(request: NextRequest) {
     if (isGuardFailure(guardResult)) return guardResult.response;
 
     const records = await db.getAllPlayRecords(guardResult.username);
-    return NextResponse.json(records, {
+    const { searchParams } = new URL(request.url);
+    const limitParam = searchParams.get('limit');
+    const responseRecords =
+      limitParam === null
+        ? records
+        : selectRecentPlayRecords(
+            records,
+            normalizePlayRecordLimit(limitParam),
+          );
+    return NextResponse.json(responseRecords, {
       status: 200,
       headers: NO_STORE_HEADERS,
     });
@@ -59,9 +72,11 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    const now = Date.now();
     const finalRecord = {
       ...record,
-      save_time: record.save_time ?? Date.now(),
+      save_time: record.save_time ?? now,
+      metadata_checked_at: now,
     } as PlayRecord;
 
     await db.savePlayRecord(

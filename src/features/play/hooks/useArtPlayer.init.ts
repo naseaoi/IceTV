@@ -7,6 +7,7 @@ import {
   createArtPlayerControls,
   createArtPlayerSettings,
 } from '@/features/play/lib/artPlayerSettings';
+import { shouldAutoAdvanceEpisode } from '@/features/play/lib/autoAdvanceEpisode';
 import {
   type PlayerLoadingSessionState,
   hasReachedResumeTarget,
@@ -77,6 +78,9 @@ export async function initializeArtPlayer(
     currentEpisodeIndex,
     blockAdEnabled,
     blockAdEnabledRef,
+    autoPlayNextEnabled,
+    autoPlayNextEnabledRef,
+    setAutoPlayNextEnabled,
     skipConfigRef,
     resumeTimeRef,
     resumeModeRef,
@@ -242,10 +246,13 @@ export async function initializeArtPlayer(
       settings: createArtPlayerSettings({
         artPlayerRef,
         blockAdEnabled,
+        autoPlayNextEnabled,
+        autoPlayNextEnabledRef,
         skipConfigRef,
         resumeTimeRef,
         resumeModeRef,
         setBlockAdEnabled,
+        setAutoPlayNextEnabled,
         handleSkipConfigChange,
       }),
       controls: createArtPlayerControls({
@@ -331,14 +338,16 @@ export async function initializeArtPlayer(
     };
 
     const tryAutoAdvanceEpisode = () => {
-      if (!autoAdvanceArmedRef.current || autoAdvancedRef.current) {
-        return false;
-      }
       const currentDetail = detailRef.current;
       const episodeIndex = currentEpisodeIndexRef.current;
       if (
-        !currentDetail?.episodes ||
-        episodeIndex >= currentDetail.episodes.length - 1
+        !shouldAutoAdvanceEpisode({
+          enabled: autoPlayNextEnabledRef.current,
+          armed: autoAdvanceArmedRef.current,
+          alreadyAdvanced: autoAdvancedRef.current,
+          currentEpisodeIndex: episodeIndex,
+          episodeCount: currentDetail?.episodes?.length ?? 0,
+        })
       ) {
         return false;
       }

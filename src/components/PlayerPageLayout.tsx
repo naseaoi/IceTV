@@ -6,6 +6,7 @@ import { ReactNode, RefObject } from 'react';
 import { BackButton } from '@/components/BackButton';
 import PageLayout from '@/components/PageLayout';
 import PlayerShortcutsModal from '@/components/PlayerShortcutsModal';
+import type { PlayerShortcutMode } from '@/lib/player-shortcuts';
 
 export interface PlayerPageAccent {
   icon: string;
@@ -28,6 +29,7 @@ interface PlayerPageLayoutProps {
   playerOverlay?: ReactNode;
   rightPanel: ReactNode;
   mobilePanelAlwaysVisible?: boolean;
+  shortcutMode?: PlayerShortcutMode;
 }
 
 const TogglePanelButton = ({
@@ -99,6 +101,7 @@ export function PlayerPageLayout({
   playerOverlay,
   rightPanel,
   mobilePanelAlwaysVisible = false,
+  shortcutMode = 'vod',
 }: PlayerPageLayoutProps) {
   return (
     <PageLayout
@@ -183,7 +186,7 @@ export function PlayerPageLayout({
           </div>
         </div>
       </div>
-      <PlayerShortcutsModal />
+      <PlayerShortcutsModal mode={shortcutMode} />
     </PageLayout>
   );
 }

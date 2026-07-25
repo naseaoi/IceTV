@@ -4,6 +4,8 @@ import { Home, LayoutGrid, Search, UserRound } from 'lucide-react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 
+import { useIntentPrefetch } from '@/hooks/useIntentPrefetch';
+
 type MobileNavItem = {
   icon: typeof Home;
   label: string;
@@ -43,6 +45,7 @@ const NAV_ITEMS: MobileNavItem[] = [
 
 const MobileBottomNav = () => {
   const pathname = usePathname();
+  const prefetchRoute = useIntentPrefetch();
   const currentActive = pathname ?? '/';
 
   return (
@@ -61,6 +64,10 @@ const MobileBottomNav = () => {
             <li key={item.href} className='min-w-0 flex-1'>
               <Link
                 href={item.href}
+                prefetch={false}
+                onMouseEnter={() => prefetchRoute(item.href)}
+                onFocus={() => prefetchRoute(item.href)}
+                onTouchStart={() => prefetchRoute(item.href)}
                 aria-current={active ? 'page' : undefined}
                 aria-label={item.label}
                 className='flex h-14 w-full items-center justify-center'

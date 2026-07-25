@@ -1,18 +1,28 @@
 import { Buffer } from 'node:buffer';
-import { gunzipSync } from 'node:zlib';
+import { Readable } from 'node:stream';
+import { StringDecoder } from 'node:string_decoder';
+import { setImmediate as scheduleImmediate } from 'node:timers';
+import { createGunzip } from 'node:zlib';
 
+import { runWithConcurrency } from '@/lib/concurrency';
 import { getConfig, getConfigForRead, saveConfig } from '@/lib/config';
 import {
-  fetchResponseThroughProxy,
+  fetchStreamThroughProxy,
   fetchTextThroughProxy,
   getProxyUrlForTarget,
 } from '@/lib/http-proxy-json';
 import { fetchWithUrlGuard, UrlValidationError } from '@/lib/url-guard';
+import type { AdminConfig } from '@/types/admin';
 
 const defaultUA = 'AptvPlayer/1.4.10';
 const MAX_LIVE_PLAYLIST_BYTES = 5 * 1024 * 1024;
 const MAX_EPG_RESPONSE_BYTES = 50 * 1024 * 1024;
 const MAX_EPG_TEXT_BYTES = 100 * 1024 * 1024;
+const MAX_EPG_XML_BLOCK_CHARS = 2 * 1024 * 1024;
+const EPG_PARSE_CHUNK_BYTES = 256 * 1024;
+const DEFAULT_EPG_PAST_HOURS = 6;
+const DEFAULT_EPG_FUTURE_HOURS = 48;
+const DEFAULT_EPG_PROGRAMS_PER_CHANNEL = 240;
 
 export interface LiveChannels {
   channelNumber: number;
@@ -34,15 +44,16 @@ export interface LiveChannels {
   };
 }
 
-// 带 TTL 的缓存条目
 interface CacheEntry {
   data: LiveChannels;
-  expiresAt: number;
+  freshUntil: number;
 }
 
-const CACHE_TTL_MS = 30 * 60 * 1000; // 30 分钟
+type LiveConfigEntry = NonNullable<AdminConfig['LiveConfig']>[number];
+
+const CACHE_FRESH_MS = 30 * 60 * 1000;
+const DEFAULT_LIVE_REFRESH_CONCURRENCY = 2;
 const cachedLiveChannels: { [key: string]: CacheEntry } = {};
-// 并发请求去重：同一 key 的 inflight promise
 const inflightRequests: { [key: string]: Promise<number> } = {};
 
 export function deleteCachedLiveChannels(key: string) {
@@ -65,7 +76,7 @@ export async function getCachedLiveChannels(
   key: string,
 ): Promise<LiveChannels | null> {
   const entry = cachedLiveChannels[key];
-  if (entry && Date.now() < entry.expiresAt) {
+  if (entry && Date.now() < entry.freshUntil) {
     return entry.data;
   }
 
@@ -78,6 +89,14 @@ export async function getCachedLiveChannels(
   if (!liveInfo) {
     return null;
   }
+
+  if (entry) {
+    void refreshLiveChannels(liveInfo).catch((error) => {
+      console.warn(`后台刷新直播源失败 [${liveInfo.name || key}]:`, error);
+    });
+    return entry.data;
+  }
+
   const channelNum = await refreshLiveChannels(liveInfo);
   if (channelNum === 0) {
     return null;
@@ -103,13 +122,11 @@ export async function refreshLiveChannels(liveInfo: {
   channelNumber?: number;
   disabled?: boolean;
 }): Promise<number> {
-  // 并发请求去重：如果已有 inflight 请求，直接复用
   if (liveInfo.key in inflightRequests) {
     return inflightRequests[liveInfo.key];
   }
 
   const doRefresh = async (): Promise<number> => {
-    delete cachedLiveChannels[liveInfo.key];
     const ua = liveInfo.ua?.trim() || defaultUA;
     const sourceUrl = liveInfo.url.trim();
     const data = await fetchLivePlaylistText(sourceUrl, ua);
@@ -130,7 +147,7 @@ export async function refreshLiveChannels(liveInfo: {
         epgUrl: epgUrl,
         epgs: epgs,
       },
-      expiresAt: Date.now() + CACHE_TTL_MS,
+      freshUntil: Date.now() + CACHE_FRESH_MS,
     };
     return result.channels.length;
   };
@@ -139,6 +156,36 @@ export async function refreshLiveChannels(liveInfo: {
     delete inflightRequests[liveInfo.key];
   });
   return inflightRequests[liveInfo.key];
+}
+
+export async function refreshLiveChannelSources(
+  liveInfos: LiveConfigEntry[],
+): Promise<void> {
+  const tasks = liveInfos
+    .filter((liveInfo) => !liveInfo.disabled)
+    .map((liveInfo) => async () => {
+      try {
+        liveInfo.channelNumber = await refreshLiveChannels(liveInfo);
+      } catch (error) {
+        console.error(
+          `刷新直播源失败 [${liveInfo.name || liveInfo.key}]:`,
+          error,
+        );
+      }
+    });
+
+  await runWithConcurrency(tasks, getLiveRefreshConcurrency());
+}
+
+function getLiveRefreshConcurrency() {
+  const parsed = Number.parseInt(
+    process.env.LIVE_REFRESH_CONCURRENCY || '',
+    10,
+  );
+  if (!Number.isFinite(parsed) || parsed <= 0) {
+    return DEFAULT_LIVE_REFRESH_CONCURRENCY;
+  }
+  return Math.min(2, parsed);
 }
 
 async function fetchLivePlaylistText(url: string, ua: string): Promise<string> {
@@ -194,8 +241,7 @@ async function parseEpg(
   }
 
   try {
-    const epgText = await fetchEpgText(epgUrl, ua);
-    return parseEpgXmlForChannels(epgText, channels);
+    return await fetchEpgData(epgUrl, ua, channels);
   } catch (error) {
     console.warn('解析节目单失败:', error);
   }
@@ -203,7 +249,11 @@ async function parseEpg(
   return {};
 }
 
-async function fetchEpgText(url: string, ua: string): Promise<string> {
+async function fetchEpgData(
+  url: string,
+  ua: string,
+  channels: { tvgId: string; name: string }[],
+) {
   const targetUrl = new URL(url);
 
   try {
@@ -217,12 +267,13 @@ async function fetchEpgText(url: string, ua: string): Promise<string> {
     if (!response.ok) {
       throw new Error(`节目单请求失败: ${response.status}`);
     }
-    const buffer = await readResponseBody(
-      response,
+    return parseEpgResponseStream(
+      response.body,
+      response.headers,
+      targetUrl,
+      channels,
       MAX_EPG_RESPONSE_BYTES,
-      '节目单',
     );
-    return decodeEpgBuffer(buffer, response.headers, targetUrl);
   } catch (error) {
     if (error instanceof UrlValidationError || isResponseLimitError(error)) {
       throw error;
@@ -233,14 +284,112 @@ async function fetchEpgText(url: string, ua: string): Promise<string> {
       throw error;
     }
 
-    const response = await fetchResponseThroughProxy(targetUrl, proxyUrl, {
+    const response = await fetchStreamThroughProxy(targetUrl, proxyUrl, {
       timeoutMs: 30_000,
       userAgent: ua,
       maxBytes: MAX_EPG_RESPONSE_BYTES,
       accept: 'application/xml,text/xml,*/*',
     });
-    return decodeEpgBuffer(response.body, response.headers, targetUrl);
+    return parseEpgResponseStream(
+      response.body,
+      response.headers,
+      targetUrl,
+      channels,
+      MAX_EPG_RESPONSE_BYTES,
+    );
   }
+}
+
+async function parseEpgResponseStream(
+  body: ReadableStream<Uint8Array> | null,
+  headers: Headers,
+  url: URL,
+  channels: { tvgId: string; name: string }[],
+  maxResponseBytes: number,
+) {
+  if (!body) {
+    return {};
+  }
+
+  const reader = body.getReader();
+  const firstRead = await reader.read();
+  if (firstRead.done || !firstRead.value) {
+    reader.releaseLock();
+    return {};
+  }
+
+  const firstChunk = Buffer.from(firstRead.value);
+  const shouldGunzip = isGzipEpg(headers, url, firstChunk);
+
+  async function* readChunks() {
+    let totalBytes = firstChunk.length;
+    if (totalBytes > maxResponseBytes) {
+      throw new Error('节目单文件过大');
+    }
+
+    try {
+      yield firstChunk;
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        const chunk = Buffer.from(value);
+        totalBytes += chunk.length;
+        if (totalBytes > maxResponseBytes) {
+          throw new Error('节目单文件过大');
+        }
+        yield chunk;
+      }
+    } finally {
+      reader.releaseLock();
+    }
+  }
+
+  const input = Readable.from(readChunks());
+  const decodedStream = shouldGunzip ? input.pipe(createGunzip()) : input;
+  const decoder = new StringDecoder('utf8');
+  const collector = new EpgXmlCollector(channels);
+  let decodedBytes = 0;
+
+  for await (const rawChunk of decodedStream) {
+    const chunk = Buffer.isBuffer(rawChunk)
+      ? rawChunk
+      : Buffer.from(rawChunk as Uint8Array);
+    decodedBytes += chunk.length;
+    if (decodedBytes > MAX_EPG_TEXT_BYTES) {
+      throw new Error('节目单解压后文件过大');
+    }
+
+    for (
+      let offset = 0;
+      offset < chunk.length;
+      offset += EPG_PARSE_CHUNK_BYTES
+    ) {
+      collector.push(
+        decoder.write(chunk.subarray(offset, offset + EPG_PARSE_CHUNK_BYTES)),
+      );
+      if (offset + EPG_PARSE_CHUNK_BYTES < chunk.length) {
+        await yieldToEventLoop();
+      }
+    }
+  }
+
+  collector.push(decoder.end());
+  return collector.finish();
+}
+
+function isGzipEpg(headers: Headers, url: URL, firstChunk: Buffer) {
+  const contentEncoding = headers.get('content-encoding') || '';
+  const hasGzipHint =
+    contentEncoding.toLowerCase().includes('gzip') ||
+    url.pathname.toLowerCase().endsWith('.gz');
+  if (firstChunk.length < 2) {
+    return hasGzipHint;
+  }
+  return firstChunk[0] === 0x1f && firstChunk[1] === 0x8b;
+}
+
+function yieldToEventLoop() {
+  return new Promise<void>((resolve) => scheduleImmediate(resolve));
 }
 
 async function readResponseBody(
@@ -273,22 +422,10 @@ function isResponseLimitError(error: unknown): boolean {
   return error instanceof Error && error.message.endsWith('文件过大');
 }
 
-function decodeEpgBuffer(buffer: Buffer, headers: Headers, url: URL): string {
-  const contentEncoding = headers.get('content-encoding') || '';
-  const shouldGunzip =
-    contentEncoding.toLowerCase().includes('gzip') ||
-    url.pathname.toLowerCase().endsWith('.gz') ||
-    (buffer[0] === 0x1f && buffer[1] === 0x8b);
-  const decodedBuffer = shouldGunzip ? gunzipSync(buffer) : buffer;
-  if (decodedBuffer.length > MAX_EPG_TEXT_BYTES) {
-    throw new Error('节目单解压后文件过大');
-  }
-  return decodedBuffer.toString('utf8').replace(/^\uFEFF/, '');
-}
-
 export function parseEpgXmlForChannels(
   content: string,
   channels: { tvgId: string; name: string }[],
+  options: EpgParseOptions = {},
 ): {
   [key: string]: {
     start: string;
@@ -296,76 +433,232 @@ export function parseEpgXmlForChannels(
     title: string;
   }[];
 } {
-  const result: {
-    [key: string]: { start: string; end: string; title: string }[];
-  } = {};
-  const aliasToKeys = buildEpgAliasMap(channels);
-  const epgChannelToKeys = new Map<string, Set<string>>();
+  const collector = new EpgXmlCollector(channels, options);
+  collector.push(content);
+  return collector.finish();
+}
 
-  for (const channel of channels) {
-    for (const key of getChannelResultKeys(channel)) {
-      mergeKeySet(epgChannelToKeys, key, new Set([key]));
+type EpgParseOptions = {
+  now?: number;
+  pastHours?: number;
+  futureHours?: number;
+  maxProgramsPerChannel?: number;
+};
+
+type EpgProgram = {
+  start: string;
+  end: string;
+  title: string;
+};
+
+class EpgXmlCollector {
+  private buffer = '';
+  private readonly result: Record<string, EpgProgram[]> = {};
+  private readonly aliasToKeys: Map<string, Set<string>>;
+  private readonly epgChannelToKeys = new Map<string, Set<string>>();
+  private readonly now: number;
+  private readonly pastMs: number;
+  private readonly futureMs: number;
+  private readonly maxProgramsPerChannel: number;
+
+  constructor(
+    channels: { tvgId: string; name: string }[],
+    options: EpgParseOptions = {},
+  ) {
+    this.aliasToKeys = buildEpgAliasMap(channels);
+    this.now = options.now ?? Date.now();
+    this.pastMs =
+      readPositiveNumber(options.pastHours, DEFAULT_EPG_PAST_HOURS) *
+      60 *
+      60 *
+      1000;
+    this.futureMs =
+      readPositiveNumber(options.futureHours, DEFAULT_EPG_FUTURE_HOURS) *
+      60 *
+      60 *
+      1000;
+    this.maxProgramsPerChannel = Math.floor(
+      readPositiveNumber(
+        options.maxProgramsPerChannel,
+        DEFAULT_EPG_PROGRAMS_PER_CHANNEL,
+      ),
+    );
+
+    for (const channel of channels) {
+      for (const key of getChannelResultKeys(channel)) {
+        mergeKeySet(this.epgChannelToKeys, key, new Set([key]));
+      }
     }
   }
 
-  const channelBlockRegex =
-    /<channel\s+[^>]*id="([^"]+)"[^>]*>([\s\S]*?)<\/channel>/g;
-  let channelMatch: RegExpExecArray | null;
-  while ((channelMatch = channelBlockRegex.exec(content))) {
-    const epgChannelId = channelMatch[1];
-    const channelBody = channelMatch[2];
-    const matchedKeys = matchEpgKeys(aliasToKeys, epgChannelId);
-    const displayNameRegex =
-      /<display-name(?:\s+[^>]*)?>([\s\S]*?)<\/display-name>/g;
-    let displayNameMatch: RegExpExecArray | null;
+  push(content: string) {
+    if (!content) return;
+    this.buffer += content;
+    this.consumeBlocks();
+  }
 
-    while ((displayNameMatch = displayNameRegex.exec(channelBody))) {
+  finish() {
+    this.consumeBlocks();
+    this.buffer = '';
+    return this.result;
+  }
+
+  private consumeBlocks() {
+    while (this.buffer) {
+      const startMatch = /<(channel|programme)\b/i.exec(this.buffer);
+      if (!startMatch || startMatch.index === undefined) {
+        this.buffer = this.buffer.slice(-64);
+        return;
+      }
+
+      if (startMatch.index > 0) {
+        this.buffer = this.buffer.slice(startMatch.index);
+      }
+
+      const blockType = startMatch[1].toLowerCase() as 'channel' | 'programme';
+      const closeMatch = new RegExp(`</${blockType}\\s*>`, 'i').exec(
+        this.buffer,
+      );
+      if (!closeMatch || closeMatch.index === undefined) {
+        this.trimOversizedBlock();
+        return;
+      }
+
+      const blockEnd = closeMatch.index + closeMatch[0].length;
+      const block = this.buffer.slice(0, blockEnd);
+      this.buffer = this.buffer.slice(blockEnd);
+
+      if (blockType === 'channel') {
+        this.consumeChannel(block);
+      } else {
+        this.consumeProgramme(block);
+      }
+    }
+  }
+
+  private trimOversizedBlock() {
+    if (this.buffer.length <= MAX_EPG_XML_BLOCK_CHARS) return;
+    const nextStart = /<(channel|programme)\b/i.exec(this.buffer.slice(1));
+    this.buffer = nextStart
+      ? this.buffer.slice((nextStart.index || 0) + 1)
+      : this.buffer.slice(-64);
+  }
+
+  private consumeChannel(block: string) {
+    const openTag = block.match(/^<channel\s+([^>]*)>/i);
+    if (!openTag) return;
+
+    const epgChannelId = getXmlAttr(openTag[1], 'id');
+    if (!epgChannelId) return;
+
+    const matchedKeys = matchEpgKeys(this.aliasToKeys, epgChannelId);
+    const displayNameRegex =
+      /<display-name(?:\s+[^>]*)?>([\s\S]*?)<\/display-name>/gi;
+    let displayNameMatch: RegExpExecArray | null;
+    while ((displayNameMatch = displayNameRegex.exec(block))) {
       const displayName = stripXmlText(displayNameMatch[1]);
-      const keys = matchEpgKeys(aliasToKeys, displayName);
-      for (const key of keys) {
+      for (const key of matchEpgKeys(this.aliasToKeys, displayName)) {
         matchedKeys.add(key);
       }
     }
 
     if (matchedKeys.size > 0) {
-      mergeKeySet(epgChannelToKeys, epgChannelId, matchedKeys);
+      mergeKeySet(this.epgChannelToKeys, epgChannelId, matchedKeys);
     }
   }
 
-  const programmeRegex = /<programme\s+([^>]*)>([\s\S]*?)<\/programme>/g;
-  let programmeMatch: RegExpExecArray | null;
-  while ((programmeMatch = programmeRegex.exec(content))) {
-    const attrs = programmeMatch[1];
-    const body = programmeMatch[2];
+  private consumeProgramme(block: string) {
+    const openTag = block.match(/^<programme\s+([^>]*)>/i);
+    if (!openTag) return;
+
+    const attrs = openTag[1];
     const epgChannelId = getXmlAttr(attrs, 'channel');
     const start = getXmlAttr(attrs, 'start');
     const end = getXmlAttr(attrs, 'stop');
-    if (!epgChannelId || !start || !end) {
-      continue;
+    if (
+      !epgChannelId ||
+      !start ||
+      !end ||
+      !isEpgProgramInWindow(start, end, this.now, this.pastMs, this.futureMs)
+    ) {
+      return;
     }
 
     const keys =
-      epgChannelToKeys.get(epgChannelId) ||
-      matchEpgKeys(aliasToKeys, epgChannelId);
-    if (!keys || keys.size === 0) {
-      continue;
-    }
+      this.epgChannelToKeys.get(epgChannelId) ||
+      matchEpgKeys(this.aliasToKeys, epgChannelId);
+    if (!keys || keys.size === 0) return;
 
-    const titleMatch = body.match(/<title(?:\s+[^>]*)?>([\s\S]*?)<\/title>/);
+    const titleMatch = block.match(/<title(?:\s+[^>]*)?>([\s\S]*?)<\/title>/i);
     const title = titleMatch ? stripXmlText(titleMatch[1]) : '';
-    if (!title) {
-      continue;
-    }
+    if (!title) return;
 
+    const program = { start, end, title };
     for (const key of keys) {
-      if (!result[key]) {
-        result[key] = [];
-      }
-      result[key].push({ start, end, title });
+      const programs = this.result[key] || [];
+      if (programs.length >= this.maxProgramsPerChannel) continue;
+      programs.push(program);
+      this.result[key] = programs;
     }
   }
+}
 
-  return result;
+function isEpgProgramInWindow(
+  start: string,
+  end: string,
+  now: number,
+  pastMs: number,
+  futureMs: number,
+) {
+  const startMs = parseEpgTimestamp(start);
+  const endMs = parseEpgTimestamp(end);
+  if (startMs === null || endMs === null) {
+    return true;
+  }
+  return endMs >= now - pastMs && startMs <= now + futureMs;
+}
+
+function parseEpgTimestamp(value: string): number | null {
+  const trimmed = value.trim();
+  const xmlTvMatch = trimmed.match(
+    /^(\d{4})(\d{2})(\d{2})(\d{2})(\d{2})(\d{2})(?:\s*([+-])(\d{2})(\d{2})|\s*Z)?$/,
+  );
+  if (xmlTvMatch) {
+    const [
+      ,
+      year,
+      month,
+      day,
+      hour,
+      minute,
+      second,
+      sign,
+      zoneHour,
+      zoneMinute,
+    ] = xmlTvMatch;
+    const utc = Date.UTC(
+      Number(year),
+      Number(month) - 1,
+      Number(day),
+      Number(hour),
+      Number(minute),
+      Number(second),
+    );
+    if (!sign) {
+      return utc;
+    }
+    const offsetMs = (Number(zoneHour) * 60 + Number(zoneMinute)) * 60 * 1000;
+    return sign === '+' ? utc - offsetMs : utc + offsetMs;
+  }
+
+  const parsed = Date.parse(trimmed);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function readPositiveNumber(value: number | undefined, fallback: number) {
+  return Number.isFinite(value) && value !== undefined && value > 0
+    ? value
+    : fallback;
 }
 
 function buildEpgAliasMap(channels: { tvgId: string; name: string }[]) {
@@ -447,8 +740,8 @@ function mergeKeySet(
 }
 
 function getXmlAttr(attrs: string, name: string) {
-  const match = attrs.match(new RegExp(`${name}="([^"]*)"`));
-  return match ? stripXmlText(match[1]) : '';
+  const match = attrs.match(new RegExp(`${name}=(['"])(.*?)\\1`, 'i'));
+  return match ? stripXmlText(match[2]) : '';
 }
 
 function stripXmlText(value: string) {

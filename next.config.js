@@ -32,12 +32,6 @@ const nextConfig = {
         : false,
   },
   serverExternalPackages: ['better-sqlite3', 'mysql2'],
-  experimental: {
-    staleTimes: {
-      dynamic: 300,
-      static: 300,
-    },
-  },
   env: {
     NEXT_PUBLIC_APP_VERSION: appVersion,
   },

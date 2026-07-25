@@ -2,7 +2,8 @@
 
 import { useEffect } from 'react';
 
-/** 生产环境注册 SW；开发环境自动注销残留的旧 SW，避免缓存干扰调试 */
+import { cleanupDevelopmentServiceWorker } from '@/lib/service-worker.client';
+
 export function SWRegister() {
   useEffect(() => {
     if (typeof window === 'undefined' || !('serviceWorker' in navigator)) {
@@ -14,12 +15,13 @@ export function SWRegister() {
         console.warn('SW 注册失败:', err);
       });
     } else {
-      // 开发模式：注销所有残留 SW，防止缓存旧页面
-      navigator.serviceWorker.getRegistrations().then((registrations) => {
-        for (const registration of registrations) {
-          registration.unregister();
-        }
-      });
+      void cleanupDevelopmentServiceWorker()
+        .then((shouldReload) => {
+          if (shouldReload) window.location.reload();
+        })
+        .catch((err) => {
+          console.warn('开发环境 SW 清理失败:', err);
+        });
     }
   }, []);
 

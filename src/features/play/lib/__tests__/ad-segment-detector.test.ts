@@ -166,6 +166,83 @@ describe('stripAdSegmentsByPhysicalSignal', () => {
     expect(result).toMatch(/normal_7_5\.ts/);
   });
 
+  test('与正片等长的伪装网格广告段被识别并剔除', async () => {
+    // rycj 第 8 集广告块及相邻正片的时长分布
+    const contentDurations = [
+      [4.170833, 4.170833, 5.755744, 3.420089, 2.836167],
+      [2.460789, 5.296956, 4.212544, 4.295956, 5.171833],
+      [4.004, 2.961289, 2.293967, 4.170833, 3.837167],
+      [7.257244, 4.170833, 4.170833, 4.170833, 4.170833],
+      [2.961289, 4.170833, 3.253256, 4.004, 5.005],
+      [4.170833, 3.712044, 3.962289, 4.170833, 4.170833],
+      [3.628622, 4.587922, 4.170833, 4.170833, 4.170833],
+      [4.170833, 2.669333, 5.046711, 5.422078, 0.834222],
+    ];
+    const adDurations = [4, 5.48, 4, 3.24, 3.28];
+    const lines = ['#EXTM3U', '#EXT-X-VERSION:3', '#EXT-X-TARGETDURATION:8'];
+    contentDurations.slice(0, 4).forEach((durs, segment) => {
+      lines.push('#EXT-X-DISCONTINUITY');
+      durs.forEach((duration, fragment) => {
+        lines.push(`#EXTINF:${duration},`);
+        lines.push(`main_${segment}_${fragment}.ts`);
+      });
+    });
+    lines.push('#EXT-X-DISCONTINUITY');
+    adDurations.forEach((duration, fragment) => {
+      lines.push(`#EXTINF:${duration},`);
+      lines.push(`camouflaged_ad_${fragment}.ts`);
+    });
+    contentDurations.slice(4).forEach((durs, offset) => {
+      const segment = offset + 4;
+      lines.push('#EXT-X-DISCONTINUITY');
+      durs.forEach((duration, fragment) => {
+        lines.push(`#EXTINF:${duration},`);
+        lines.push(`main_${segment}_${fragment}.ts`);
+      });
+    });
+    lines.push('#EXT-X-ENDLIST');
+
+    const result = await stripAdSegmentsByPhysicalSignal(
+      lines.join('\n'),
+      'https://cdn.example.com/x/index.m3u8',
+      'ua',
+    );
+
+    expect(result).not.toMatch(/camouflaged_ad_\d+\.ts/);
+    expect(result.match(/main_\d+_\d+\.ts/g)).toHaveLength(40);
+    contentDurations.forEach((durations, segment) => {
+      durations.forEach((_, fragment) => {
+        expect(result).toContain(`main_${segment}_${fragment}.ts`);
+      });
+    });
+    expect(result).not.toContain('#EXT-X-DISCONTINUITY');
+  });
+
+  test('正片块时长离散时仍建立周期布局并连续化', async () => {
+    const lines = ['#EXTM3U', '#EXT-X-TARGETDURATION:8'];
+    const blockDurations = [
+      17.2, 19.5, 20.1, 18.0, 21.4, 19.8, 22.5, 20.2, 18.6, 19.9,
+    ];
+    blockDurations.forEach((blockDuration, segment) => {
+      lines.push('#EXT-X-DISCONTINUITY');
+      const piece = blockDuration / 5;
+      for (let fragment = 0; fragment < 5; fragment += 1) {
+        lines.push(`#EXTINF:${piece.toFixed(6)},`);
+        lines.push(`main_${segment}_${fragment}.ts`);
+      }
+    });
+    lines.push('#EXT-X-ENDLIST');
+
+    const result = await stripAdSegmentsByPhysicalSignal(
+      lines.join('\n'),
+      'https://cdn.example.com/x/index.m3u8',
+      'ua',
+    );
+
+    expect(result).not.toContain('#EXT-X-DISCONTINUITY');
+    expect(result.match(/main_\d+_\d+\.ts/g)).toHaveLength(50);
+  });
+
   test('主流 5 秒切片中的单个 4 秒区间被识别并剔除', async () => {
     const lines = ['#EXTM3U', '#EXT-X-VERSION:3', '#EXT-X-TARGETDURATION:5'];
     for (let segment = 0; segment < 10; segment++) {
@@ -240,6 +317,29 @@ describe('stripAdSegmentsByPhysicalSignal', () => {
     expect(result).not.toContain('tail_ad_1.ts');
     expect(result).not.toContain('#EXT-X-DISCONTINUITY');
     expect(result.trim().endsWith('#EXT-X-ENDLIST')).toBe(true);
+  });
+
+  test('片尾单浮点短正片段不被删除', async () => {
+    const lines = ['#EXTM3U', '#EXT-X-TARGETDURATION:8'];
+    for (let segment = 0; segment < 10; segment += 1) {
+      lines.push('#EXT-X-DISCONTINUITY');
+      for (let fragment = 0; fragment < 5; fragment += 1) {
+        lines.push(`#EXTINF:${(4.170833 + fragment * 0.01).toFixed(6)},`);
+        lines.push(`main_${segment}_${fragment}.ts`);
+      }
+    }
+    lines.push('#EXT-X-DISCONTINUITY');
+    lines.push('#EXTINF:1.126200,', 'tail_content.ts');
+    lines.push('#EXT-X-ENDLIST');
+
+    const result = await stripAdSegmentsByPhysicalSignal(
+      lines.join('\n'),
+      'https://cdn.example.com/x/index.m3u8',
+      'ua',
+    );
+
+    expect(result).toContain('tail_content.ts');
+    expect(result).toContain('main_9_4.ts');
   });
 
   test('规律正片边界和广告删除边界全部连续化', async () => {

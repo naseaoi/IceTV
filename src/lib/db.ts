@@ -295,6 +295,11 @@ class DbManager {
     await storage.deletePlaybackSession(userName, id);
   }
 
+  async deletePlaybackSessionsBefore(updatedBefore: number): Promise<number> {
+    const storage = await this.getStorage();
+    return storage.deletePlaybackSessionsBefore(updatedBefore);
+  }
+
   async getPlaybackWatchTotals(
     userName: string,
     since: number,

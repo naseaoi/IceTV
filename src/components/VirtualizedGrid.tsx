@@ -46,6 +46,7 @@ export function VirtualizedGrid<T>({
     width: 0,
     height: 0,
     scrollY: 0,
+    containerTop: 0,
   });
 
   useEffect(() => {
@@ -88,17 +89,21 @@ export function VirtualizedGrid<T>({
     let frameId: number | null = null;
 
     const readViewport = () => {
+      const scrollY = getScrollTop();
+      const containerRect = containerRef.current?.getBoundingClientRect();
       const nextViewport = {
         width: window.innerWidth,
         height: window.innerHeight,
-        scrollY: getScrollTop(),
+        scrollY,
+        containerTop: containerRect ? containerRect.top + scrollY : 0,
       };
 
       setViewport((currentViewport) => {
         if (
           currentViewport.width === nextViewport.width &&
           currentViewport.height === nextViewport.height &&
-          currentViewport.scrollY === nextViewport.scrollY
+          currentViewport.scrollY === nextViewport.scrollY &&
+          currentViewport.containerTop === nextViewport.containerTop
         ) {
           return currentViewport;
         }
@@ -112,52 +117,41 @@ export function VirtualizedGrid<T>({
       readViewport();
     };
 
-    const handleScroll = () => {
+    const scheduleViewportUpdate = () => {
       if (frameId !== null) {
         return;
       }
       frameId = window.requestAnimationFrame(updateViewport);
     };
 
-    updateViewport();
-    let pollTimerId: number | null = null;
-    const pollViewport = () => {
-      if (frameId !== null) {
-        window.cancelAnimationFrame(frameId);
-        frameId = null;
-      }
-      readViewport();
-      pollTimerId = window.setTimeout(pollViewport, 120);
-    };
+    const resizeObserver =
+      typeof ResizeObserver === 'undefined'
+        ? null
+        : new ResizeObserver(scheduleViewportUpdate);
 
-    pollTimerId = window.setTimeout(pollViewport, 120);
-
-    const scrollTargets = new Set<EventTarget>([
-      window,
-      document,
-      document.documentElement,
-      document.body,
-    ]);
-
-    if (document.scrollingElement) {
-      scrollTargets.add(document.scrollingElement);
+    resizeObserver?.observe(document.documentElement);
+    resizeObserver?.observe(document.body);
+    if (containerRef.current) {
+      resizeObserver?.observe(containerRef.current);
     }
 
-    scrollTargets.forEach((target) => {
-      target.addEventListener('scroll', handleScroll, { passive: true });
+    document.addEventListener('scroll', scheduleViewportUpdate, {
+      capture: true,
+      passive: true,
     });
-    window.addEventListener('resize', handleScroll);
+    window.addEventListener('scroll', scheduleViewportUpdate, {
+      passive: true,
+    });
+    window.addEventListener('resize', scheduleViewportUpdate);
+    scheduleViewportUpdate();
 
     return () => {
-      scrollTargets.forEach((target) => {
-        target.removeEventListener('scroll', handleScroll);
-      });
-      window.removeEventListener('resize', handleScroll);
+      resizeObserver?.disconnect();
+      document.removeEventListener('scroll', scheduleViewportUpdate, true);
+      window.removeEventListener('scroll', scheduleViewportUpdate);
+      window.removeEventListener('resize', scheduleViewportUpdate);
       if (frameId !== null) {
         window.cancelAnimationFrame(frameId);
-      }
-      if (pollTimerId !== null) {
-        window.clearTimeout(pollTimerId);
       }
     };
   }, []);
@@ -189,10 +183,7 @@ export function VirtualizedGrid<T>({
     0,
     totalRows * computedLayout.rowHeight - computedLayout.rowGap,
   );
-  const containerTop = containerRef.current
-    ? containerRef.current.getBoundingClientRect().top + viewport.scrollY
-    : 0;
-  const viewportStart = Math.max(0, viewport.scrollY - containerTop);
+  const viewportStart = Math.max(0, viewport.scrollY - viewport.containerTop);
   const viewportEnd = viewportStart + viewport.height;
   const startRow = Math.max(
     0,

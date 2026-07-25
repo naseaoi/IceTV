@@ -26,6 +26,7 @@ interface PlayMainContentProps {
   videoTitle: string;
   totalEpisodes: number;
   detail: SearchResult | null;
+  detailLoading: boolean;
   currentEpisodeIndex: number;
   isEpisodeSelectorCollapsed: boolean;
   setIsEpisodeSelectorCollapsed: (collapsed: boolean) => void;
@@ -285,6 +286,7 @@ export function PlayMainContent(props: PlayMainContentProps) {
     videoTitle,
     totalEpisodes,
     detail,
+    detailLoading,
     currentEpisodeIndex,
     isEpisodeSelectorCollapsed,
     setIsEpisodeSelectorCollapsed,
@@ -463,6 +465,7 @@ export function PlayMainContent(props: PlayMainContentProps) {
           sourceSearchError={sourceSearchError}
           precomputedVideoInfo={precomputedVideoInfo}
           detail={detail}
+          detailLoading={detailLoading}
           videoYear={videoYear}
           favorited={favorited}
           onToggleFavorite={onToggleFavorite}

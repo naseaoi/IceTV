@@ -1,13 +1,16 @@
 import {
   ADMIN_TABLE_COLUMN_WIDTHS_STORAGE_KEY,
+  AUTO_PLAY_NEXT_STORAGE_KEY,
   BLOCK_AD_STORAGE_KEY,
   DEFAULT_AGGREGATE_SEARCH_STORAGE_KEY,
   ENABLE_OPTIMIZATION_STORAGE_KEY,
   FLUID_SEARCH_STORAGE_KEY,
+  LIVE_DIRECT_CONNECT_CHANGE_EVENT,
   LIVE_DIRECT_CONNECT_STORAGE_KEY,
   PREFERRED_QUALITY_STORAGE_KEY,
   readAdminTableColumnWidth,
   readAggregateSearch,
+  readAutoPlayNextEnabled,
   readBlockAdEnabled,
   readEnableOptimization,
   readFluidSearch,
@@ -26,6 +29,7 @@ import {
   SOURCE_PREFERRED_QUALITY_STORAGE_PREFIX,
   writeAdminTableColumnWidth,
   writeAggregateSearch,
+  writeAutoPlayNextEnabled,
   writeBlockAdEnabled,
   writeEnableOptimization,
   writeFluidSearch,
@@ -111,6 +115,17 @@ describe('local preferences', () => {
     expect(readLiveDirectConnect()).toBe(true);
   });
 
+  it('notifies the current page when live direct connect changes', () => {
+    const listener = jest.fn();
+    window.addEventListener(LIVE_DIRECT_CONNECT_CHANGE_EVENT, listener);
+
+    writeLiveDirectConnect(true);
+    resetLiveDirectConnect();
+
+    expect(listener).toHaveBeenCalledTimes(2);
+    window.removeEventListener(LIVE_DIRECT_CONNECT_CHANGE_EVENT, listener);
+  });
+
   it('stores block ad preference through the shared helper', () => {
     expect(readBlockAdEnabled()).toBe(true);
 
@@ -118,6 +133,15 @@ describe('local preferences', () => {
 
     expect(localStorage.getItem(BLOCK_AD_STORAGE_KEY)).toBe('false');
     expect(readBlockAdEnabled()).toBe(false);
+  });
+
+  it('stores auto play next preference through the shared helper', () => {
+    expect(readAutoPlayNextEnabled()).toBe(true);
+
+    writeAutoPlayNextEnabled(false);
+
+    expect(localStorage.getItem(AUTO_PLAY_NEXT_STORAGE_KEY)).toBe('false');
+    expect(readAutoPlayNextEnabled()).toBe(false);
   });
 
   it('stores sidebar collapsed preference through the shared helper', () => {

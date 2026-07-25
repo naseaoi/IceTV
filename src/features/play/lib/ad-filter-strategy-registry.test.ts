@@ -12,7 +12,7 @@ describe('ad-filter-strategy-registry', () => {
 
     expect(strategy).toMatchObject({
       id: 'rycj-periodic-blocks',
-      version: 1,
+      version: 3,
       execution: 'server',
     });
     expect(strategy?.server?.timeline).toBe('continuous-periodic');
@@ -30,7 +30,7 @@ describe('ad-filter-strategy-registry', () => {
 
   it('缓存命名空间包含源站、策略和版本', () => {
     expect(getAdFilterCacheNamespace('rycj')).toBe(
-      'rycj:rycj-periodic-blocks@1',
+      'rycj:rycj-periodic-blocks@3',
     );
     expect(getAdFilterCacheNamespace('ffzy')).toBe('ffzy:raw@1');
   });

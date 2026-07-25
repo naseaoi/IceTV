@@ -32,7 +32,10 @@ function EpisodeTabLoading() {
 
 function InfoTabLoading() {
   return (
-    <div className='flex min-h-0 flex-col gap-2 px-5 pb-1 pt-4 sm:px-6 sm:pb-1 sm:pt-5'>
+    <div
+      data-play-detail-skeleton
+      className='flex min-h-0 flex-col gap-2 px-5 pb-1 pt-4 sm:px-6 sm:pb-1 sm:pt-5'
+    >
       <div className='flex flex-shrink-0 gap-4 sm:gap-5'>
         <div className='aspect-[2/3] w-24 flex-shrink-0 animate-pulse rounded-xl bg-gray-200/80 dark:bg-white/[0.08] sm:w-28 xl:w-32' />
         <div className='flex min-w-0 flex-1 flex-col justify-end gap-2.5 pb-0.5'>
@@ -64,7 +67,7 @@ function InfoTabLoading() {
 
 function EpisodesTabLoading() {
   return (
-    <div className='flex min-h-0 flex-1 flex-col'>
+    <div data-play-episodes-skeleton className='flex min-h-0 flex-1 flex-col'>
       <div className='flex flex-shrink-0 gap-1 px-5 pb-2 pt-2 sm:px-6'>
         {Array.from({ length: 4 }, (_, index) => (
           <div
@@ -174,6 +177,7 @@ interface EpisodeSelectorProps {
   sourceSearchError?: string | null;
   precomputedVideoInfo?: Map<string, VideoInfo>;
   detail?: SearchResult | null;
+  detailLoading?: boolean;
   videoYear?: string;
   favorited?: boolean;
   onToggleFavorite?: () => void;
@@ -204,6 +208,7 @@ const EpisodeSelector: React.FC<EpisodeSelectorProps> = ({
   sourceSearchError = null,
   precomputedVideoInfo,
   detail = null,
+  detailLoading = false,
   videoYear = '',
   favorited = false,
   onToggleFavorite,
@@ -241,6 +246,7 @@ const EpisodeSelector: React.FC<EpisodeSelectorProps> = ({
   ]);
 
   const hasEpisodesTab = totalEpisodes > 0 || variantSources.length > 1;
+  const showDesktopEpisodes = detailLoading || hasEpisodesTab;
 
   const [mobileSheet, setMobileSheet] = useState<MobileSheetKey | null>(null);
   const [desktopTab, setDesktopTab] = useState<DesktopTabKey>('main');
@@ -284,19 +290,25 @@ const EpisodeSelector: React.FC<EpisodeSelectorProps> = ({
     />
   );
 
-  const renderInfoTab = (scrollMode: 'panel' | 'desc') => (
-    <InfoTab
-      videoTitle={videoTitle || ''}
-      totalEpisodes={totalEpisodes}
-      detail={detail}
-      videoYear={videoYear}
-      favorited={favorited}
-      onToggleFavorite={onToggleFavorite || (() => {})}
-      videoCover={videoCover}
-      videoDoubanId={resolvedDoubanId}
-      scrollMode={scrollMode}
-    />
-  );
+  const renderInfoTab = (scrollMode: 'panel' | 'desc') => {
+    if (detailLoading) {
+      return <InfoTabLoading />;
+    }
+
+    return (
+      <InfoTab
+        videoTitle={videoTitle || ''}
+        totalEpisodes={totalEpisodes}
+        detail={detail}
+        videoYear={videoYear}
+        favorited={favorited}
+        onToggleFavorite={onToggleFavorite || (() => {})}
+        videoCover={videoCover}
+        videoDoubanId={resolvedDoubanId}
+        scrollMode={scrollMode}
+      />
+    );
+  };
 
   const renderSourcesTab = (afterSelect?: () => void) => (
     <div className='flex min-h-0 flex-1 flex-col'>
@@ -437,7 +449,7 @@ const EpisodeSelector: React.FC<EpisodeSelectorProps> = ({
 
         <PlayerPanelContent>
           {desktopTab === 'main' &&
-            (hasEpisodesTab ? (
+            (showDesktopEpisodes ? (
               <div className='grid min-h-0 min-w-0 flex-1 grid-rows-2 gap-0 overflow-hidden'>
                 <div className='flex min-h-0 min-w-0 flex-col overflow-hidden'>
                   {renderInfoTab('desc')}
@@ -447,7 +459,11 @@ const EpisodeSelector: React.FC<EpisodeSelectorProps> = ({
                     <SectionTitle label='选集' />
                   </div>
                   <div className='flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden'>
-                    {renderEpisodesTab()}
+                    {detailLoading ? (
+                      <EpisodesTabLoading />
+                    ) : (
+                      renderEpisodesTab()
+                    )}
                   </div>
                 </div>
               </div>

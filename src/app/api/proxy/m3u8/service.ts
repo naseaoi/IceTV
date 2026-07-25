@@ -40,6 +40,7 @@ const m3u8Cache = createSwrCache<M3U8CacheEntry>({
   freshMs: 60_000,
   staleMs: 60_000,
   maxSize: 500,
+  maxWeightBytes: 32 * 1024 * 1024,
 });
 
 const SIGNED_URL_PARAM_RE =

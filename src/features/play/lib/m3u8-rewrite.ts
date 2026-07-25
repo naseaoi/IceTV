@@ -12,12 +12,25 @@ export type M3U8RewriteEntry = {
 };
 
 const MAX_REWRITE_CACHE_CONTENT_BYTES = 2 * 1024 * 1024;
+const PLAYLIST_URI_TAG_PREFIXES = [
+  '#EXT-X-MEDIA:',
+  '#EXT-X-I-FRAME-STREAM-INF:',
+  '#EXT-X-IMAGE-STREAM-INF:',
+  '#EXT-X-RENDITION-REPORT:',
+] as const;
+const SEGMENT_URI_TAG_PREFIXES = [
+  '#EXT-X-MAP:',
+  '#EXT-X-PART:',
+  '#EXT-X-PRELOAD-HINT:',
+] as const;
+const KEY_URI_TAG_PREFIXES = ['#EXT-X-KEY:', '#EXT-X-SESSION-KEY:'] as const;
 
 const m3u8RewriteCache = createSwrCache<string>({
   name: 'proxy-m3u8-rewrite',
   freshMs: 30_000,
   staleMs: 30_000,
   maxSize: 200,
+  maxWeightBytes: 16 * 1024 * 1024,
 });
 
 export async function getRewrittenM3U8Content(
@@ -125,8 +138,12 @@ async function rewriteM3U8Content(
   const userSwitch = requestSearchParams.get('icetv-user-switch');
   const corsCapable =
     !isLive && source ? isSourceCorsCapable(source) === true : false;
-  const effectiveAllowCors =
-    !isLive && !forceServer && (allowCORS || corsCapable);
+  const effectiveAllowCors = !forceServer && (allowCORS || corsCapable);
+  const nestedPlaylistRoute: Record<string, string> = forceServer
+    ? { forceServer: 'true' }
+    : allowCORS
+      ? { allowCORS: 'true' }
+      : {};
 
   const lines = content.split('\n');
   const rewrittenLines: Array<string | Promise<string>> = [];
@@ -182,16 +199,73 @@ async function rewriteM3U8Content(
       continue;
     }
 
-    if (line.startsWith('#EXT-X-MAP:')) {
+    if (line.startsWith('#EXT-X-CONTENT-STEERING:')) {
+      if (!effectiveAllowCors) {
+        continue;
+      }
       rewrittenLines.push(
-        rewriteMapUri(line, baseUrl, effectiveAllowCors, buildProxyPath),
+        rewriteUriAttribute(
+          line,
+          'SERVER-URI',
+          baseUrl,
+          true,
+          async (targetUrl) => targetUrl,
+        ),
       );
       continue;
     }
 
-    if (line.startsWith('#EXT-X-KEY:')) {
+    if (line.startsWith('#EXT-X-SESSION-DATA:')) {
+      if (!effectiveAllowCors && hasUriAttribute(line, 'URI')) {
+        continue;
+      }
       rewrittenLines.push(
-        rewriteKeyUri(line, baseUrl, effectiveAllowCors, buildProxyPath),
+        rewriteUriAttribute(
+          line,
+          'URI',
+          baseUrl,
+          effectiveAllowCors,
+          async (targetUrl) => targetUrl,
+        ),
+      );
+      continue;
+    }
+
+    if (startsWithTag(line, SEGMENT_URI_TAG_PREFIXES)) {
+      rewrittenLines.push(
+        rewriteUriAttribute(
+          line,
+          'URI',
+          baseUrl,
+          effectiveAllowCors,
+          (targetUrl) => buildProxyPath('segment', targetUrl),
+        ),
+      );
+      continue;
+    }
+
+    if (startsWithTag(line, KEY_URI_TAG_PREFIXES)) {
+      rewrittenLines.push(
+        rewriteUriAttribute(
+          line,
+          'URI',
+          baseUrl,
+          effectiveAllowCors,
+          (targetUrl) => buildProxyPath('key', targetUrl),
+        ),
+      );
+      continue;
+    }
+
+    if (startsWithTag(line, PLAYLIST_URI_TAG_PREFIXES)) {
+      rewrittenLines.push(
+        rewriteUriAttribute(
+          line,
+          'URI',
+          baseUrl,
+          effectiveAllowCors,
+          (targetUrl) => buildProxyPath('m3u8', targetUrl, nestedPlaylistRoute),
+        ),
       );
       continue;
     }
@@ -204,15 +278,7 @@ async function rewriteM3U8Content(
         if (nextLine && !nextLine.startsWith('#')) {
           const resolvedUrl = resolveUrl(baseUrl, nextLine);
           rewrittenLines.push(
-            buildProxyPath(
-              'm3u8',
-              resolvedUrl,
-              forceServer
-                ? { forceServer: 'true' }
-                : allowCORS
-                  ? { allowCORS: 'true' }
-                  : {},
-            ),
+            buildProxyPath('m3u8', resolvedUrl, nestedPlaylistRoute),
           );
         } else {
           rewrittenLines.push(nextLine);
@@ -228,48 +294,37 @@ async function rewriteM3U8Content(
   return resolvedLines.join('\n');
 }
 
-type ProxyPathBuilder = (
-  path: 'segment' | 'm3u8' | 'key',
-  targetUrl: string,
-  extra?: Record<string, string>,
-) => Promise<string>;
-
-function rewriteMapUri(
-  line: string,
-  baseUrl: string,
-  allowDirect: boolean,
-  buildProxyPath: ProxyPathBuilder,
-): string | Promise<string> {
-  const uriMatch = line.match(/URI="([^"]+)"/);
-  if (uriMatch) {
-    const originalUri = uriMatch[1];
-    const resolvedUrl = resolveUrl(baseUrl, originalUri);
-    if (allowDirect) {
-      return line.replace(uriMatch[0], `URI="${resolvedUrl}"`);
-    }
-    return buildProxyPath('segment', resolvedUrl).then((proxyUrl) =>
-      line.replace(uriMatch[0], `URI="${proxyUrl}"`),
-    );
-  }
-  return line;
+function startsWithTag(line: string, prefixes: readonly string[]): boolean {
+  return prefixes.some((prefix) => line.startsWith(prefix));
 }
 
-function rewriteKeyUri(
+function hasUriAttribute(line: string, attributeName: string): boolean {
+  return createUriAttributePattern(attributeName).test(line);
+}
+
+function rewriteUriAttribute(
   line: string,
+  attributeName: string,
   baseUrl: string,
   allowDirect: boolean,
-  buildProxyPath: ProxyPathBuilder,
+  buildProxyUrl: (targetUrl: string) => Promise<string>,
 ): string | Promise<string> {
-  const uriMatch = line.match(/URI="([^"]+)"/);
-  if (uriMatch) {
-    const originalUri = uriMatch[1];
-    const resolvedUrl = resolveUrl(baseUrl, originalUri);
-    if (allowDirect) {
-      return line.replace(uriMatch[0], `URI="${resolvedUrl}"`);
-    }
-    return buildProxyPath('key', resolvedUrl).then((proxyUrl) =>
-      line.replace(uriMatch[0], `URI="${proxyUrl}"`),
+  const uriMatch = line.match(createUriAttributePattern(attributeName));
+  if (!uriMatch) return line;
+
+  const resolvedUrl = resolveUrl(baseUrl, uriMatch[2]);
+  if (allowDirect) {
+    return line.replace(
+      uriMatch[0],
+      `${uriMatch[1]}${resolvedUrl}${uriMatch[3]}`,
     );
   }
-  return line;
+  return buildProxyUrl(resolvedUrl).then((proxyUrl) =>
+    line.replace(uriMatch[0], `${uriMatch[1]}${proxyUrl}${uriMatch[3]}`),
+  );
+}
+
+function createUriAttributePattern(attributeName: string): RegExp {
+  const escapedName = attributeName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  return new RegExp(`([:,]\\s*${escapedName}=")([^"]+)(")`);
 }
