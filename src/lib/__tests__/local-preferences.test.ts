@@ -5,6 +5,7 @@ import {
   DEFAULT_AGGREGATE_SEARCH_STORAGE_KEY,
   ENABLE_OPTIMIZATION_STORAGE_KEY,
   FLUID_SEARCH_STORAGE_KEY,
+  LIVE_DIRECT_CONNECT_CHANGE_EVENT,
   LIVE_DIRECT_CONNECT_STORAGE_KEY,
   PREFERRED_QUALITY_STORAGE_KEY,
   readAdminTableColumnWidth,
@@ -112,6 +113,17 @@ describe('local preferences', () => {
 
     expect(localStorage.getItem(LIVE_DIRECT_CONNECT_STORAGE_KEY)).toBeNull();
     expect(readLiveDirectConnect()).toBe(true);
+  });
+
+  it('notifies the current page when live direct connect changes', () => {
+    const listener = jest.fn();
+    window.addEventListener(LIVE_DIRECT_CONNECT_CHANGE_EVENT, listener);
+
+    writeLiveDirectConnect(true);
+    resetLiveDirectConnect();
+
+    expect(listener).toHaveBeenCalledTimes(2);
+    window.removeEventListener(LIVE_DIRECT_CONNECT_CHANGE_EVENT, listener);
   });
 
   it('stores block ad preference through the shared helper', () => {

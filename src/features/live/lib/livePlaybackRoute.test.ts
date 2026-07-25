@@ -1,7 +1,6 @@
 import {
   buildLiveM3u8ProxyUrl,
   isLivePlaylistContextType,
-  isLiveRouteNetworkError,
   rewriteLivePlaylistRequestUrl,
 } from './livePlaybackRoute';
 
@@ -69,29 +68,28 @@ describe('live playback route', () => {
     ).toBe(url);
   });
 
-  it('recognizes playlist request types and direct-route network failures', () => {
+  it('wraps an external playlist when server mode is active', () => {
+    const result = rewriteLivePlaylistRequestUrl(
+      'https://stream.example/live/audio.m3u8',
+      {
+        sourceKey: 'source-a',
+        route: 'server',
+        origin: 'http://localhost',
+      },
+    );
+    const resultUrl = new URL(result, 'http://localhost');
+
+    expect(resultUrl.pathname).toBe('/api/proxy/m3u8');
+    expect(resultUrl.searchParams.get('url')).toBe(
+      'https://stream.example/live/audio.m3u8',
+    );
+    expect(resultUrl.searchParams.get('forceServer')).toBe('true');
+    expect(resultUrl.searchParams.get('allowCORS')).toBeNull();
+  });
+
+  it('recognizes playlist request types', () => {
     expect(isLivePlaylistContextType('manifest')).toBe(true);
     expect(isLivePlaylistContextType('level')).toBe(true);
     expect(isLivePlaylistContextType('fragment')).toBe(false);
-
-    const errorTypes = { NETWORK_ERROR: 'networkError' };
-    expect(
-      isLiveRouteNetworkError(
-        { type: 'networkError', details: 'manifestLoadError' },
-        errorTypes,
-      ),
-    ).toBe(true);
-    expect(
-      isLiveRouteNetworkError(
-        { type: 'networkError', details: 'fragLoadError' },
-        errorTypes,
-      ),
-    ).toBe(true);
-    expect(
-      isLiveRouteNetworkError(
-        { type: 'mediaError', details: 'bufferStalledError', fatal: true },
-        errorTypes,
-      ),
-    ).toBe(false);
   });
 });

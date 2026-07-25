@@ -1,7 +1,5 @@
 export type LivePlaybackRoute = 'browser' | 'server';
 
-export const LIVE_DIRECT_ROUTE_FAILURE_THRESHOLD = 2;
-
 const LIVE_PLAYLIST_CONTEXT_TYPES = new Set([
   'manifest',
   'level',
@@ -54,6 +52,13 @@ export function rewriteLivePlaylistRequestUrl(
   try {
     const nextUrl = new URL(currentUrl, origin);
     if (!isM3u8ProxyUrl(nextUrl, origin)) {
+      if (route === 'server') {
+        return buildLiveM3u8ProxyUrl({
+          rawUrl: nextUrl.toString(),
+          sourceKey,
+          route,
+        });
+      }
       return currentUrl;
     }
 
@@ -72,22 +77,6 @@ export function rewriteLivePlaylistRequestUrl(
   } catch {
     return appendLiveRouteQuery(currentUrl, sourceKey, route);
   }
-}
-
-export function isLiveRouteNetworkError(
-  data: any,
-  errorTypes: { NETWORK_ERROR?: string },
-): boolean {
-  if (!data || data.type !== errorTypes.NETWORK_ERROR) {
-    return false;
-  }
-
-  const details = String(data.details || '').toLowerCase();
-  if (/manifest|level|frag|segment|key|audio|subtitle/.test(details)) {
-    return true;
-  }
-
-  return data.fatal === true;
 }
 
 function isM3u8ProxyUrl(url: URL, origin: string): boolean {

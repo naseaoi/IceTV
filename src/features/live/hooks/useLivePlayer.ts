@@ -6,10 +6,15 @@ import {
   useCallback,
   useEffect,
   useRef,
+  useState,
 } from 'react';
 
 import { logHlsError } from '@/lib/hls-error-log';
-import { readLiveDirectConnect } from '@/lib/local-preferences';
+import {
+  LIVE_DIRECT_CONNECT_CHANGE_EVENT,
+  LIVE_DIRECT_CONNECT_STORAGE_KEY,
+  readLiveDirectConnect,
+} from '@/lib/local-preferences';
 import {
   assignManagedVideoCleanup,
   bindPlayerHoverControls,
@@ -34,13 +39,12 @@ import { createArtPlayerContextmenus } from '../../play/lib/artPlayerSettings';
 import {
   readBufferedRanges,
   resolveLiveRecoveryPosition,
+  shouldTreatLivePauseAsUserPause,
 } from '../lib/livePlaybackRecovery';
 import {
   type LivePlaybackRoute,
   buildLiveM3u8ProxyUrl,
   isLivePlaylistContextType,
-  isLiveRouteNetworkError,
-  LIVE_DIRECT_ROUTE_FAILURE_THRESHOLD,
   rewriteLivePlaylistRequestUrl,
 } from '../lib/livePlaybackRoute';
 import type { LiveChannel, LiveSource } from '../types';
@@ -131,10 +135,12 @@ function cleanupPlayer(artPlayerRef: MutableRefObject<ArtplayerType | null>) {
       video: HTMLVideoElement;
     };
     player.off('ready');
-    player.off('loadstart');
-    player.off('loadeddata');
-    player.off('canplay');
-    player.off('waiting');
+    player.off('video:loadstart');
+    player.off('video:loadeddata');
+    player.off('video:canplay');
+    player.off('video:waiting');
+    player.off('video:error');
+    player.off('pause');
     player.off('error');
     artPlayerRef.current.destroy();
     artPlayerRef.current = null;
@@ -203,9 +209,11 @@ export function useLivePlayer({
   const loadedUrlRef = useRef('');
   const liveRouteRef = useRef<LivePlaybackRoute>('server');
   const liveSourceKeyRef = useRef('');
-  const liveVideoUrlRef = useRef('');
   const mutedAutoplayRequestedRef = useRef(false);
   const userPausedRef = useRef(false);
+  const livePlaybackRecoveryRef = useRef(false);
+  const suppressPlayerPauseIntentRef = useRef(false);
+  const [liveRouteVersion, setLiveRouteVersion] = useState(0);
   const loadingIndicatorTimerRef = useRef<ReturnType<typeof setTimeout> | null>(
     null,
   );
@@ -236,9 +244,10 @@ export function useLivePlayer({
     loadedUrlRef.current = '';
     liveRouteRef.current = 'server';
     liveSourceKeyRef.current = '';
-    liveVideoUrlRef.current = '';
     mutedAutoplayRequestedRef.current = false;
     userPausedRef.current = false;
+    livePlaybackRecoveryRef.current = false;
+    suppressPlayerPauseIntentRef.current = false;
     setLiveVideoLoading(false);
     cleanupPlayer(artPlayerRef);
   };
@@ -253,6 +262,20 @@ export function useLivePlayer({
   useEffect(() => {
     let cancelled = false;
 
+    const beginLivePlaybackRecovery = (video: HTMLVideoElement | null) => {
+      livePlaybackRecoveryRef.current = true;
+      if (!video || userPausedRef.current) return;
+      video.autoplay = true;
+      video.playsInline = true;
+    };
+
+    const applyUserPauseIntent = (video: HTMLVideoElement | null) => {
+      userPausedRef.current = true;
+      if (!video) return;
+      video.autoplay = false;
+      video.removeAttribute('autoplay');
+    };
+
     const preload = async () => {
       if (!videoUrl || !artRef.current || !currentChannel) {
         return;
@@ -265,7 +288,6 @@ export function useLivePlayer({
 
         const sourceKey = currentSourceRef.current?.key || '';
         liveSourceKeyRef.current = sourceKey;
-        liveVideoUrlRef.current = videoUrl;
         const type = await resolveLiveStreamType(videoUrl, sourceKey);
 
         if (cancelled || !artRef.current) return;
@@ -296,6 +318,8 @@ export function useLivePlayer({
         }
         mutedAutoplayRequestedRef.current = false;
         userPausedRef.current = false;
+        livePlaybackRecoveryRef.current = false;
+        suppressPlayerPauseIntentRef.current = false;
 
         const LiveHlsLoader = createHlsLoaderClass(
           Hls.DefaultConfig.loader as unknown as new (config: unknown) => {
@@ -355,58 +379,6 @@ export function useLivePlayer({
           managedVideo.hls = hls;
 
           let videoRuntimeCleaned = false;
-          let currentRoute = liveRouteRef.current;
-          let directRouteFailureCount = 0;
-          let fallbackAttempted = false;
-          const resetDirectRouteFailures = () => {
-            directRouteFailureCount = 0;
-          };
-
-          const switchToServerProxy = (reason: string) => {
-            if (
-              fallbackAttempted ||
-              currentRoute !== 'browser' ||
-              videoRuntimeCleaned ||
-              managedVideo.hls !== hls
-            ) {
-              return false;
-            }
-
-            fallbackAttempted = true;
-            currentRoute = 'server';
-            liveRouteRef.current = 'server';
-            managedVideo.__icetvUsingServerProxy = true;
-            directRouteFailureCount = 0;
-            setLiveVideoLoading(true);
-            setError(null);
-
-            const fallbackUrl = buildLiveM3u8ProxyUrl({
-              rawUrl: liveVideoUrlRef.current,
-              sourceKey: liveSourceKeyRef.current,
-              route: 'server',
-            });
-            console.warn('直播浏览器直连失败，切换服务端代理重试', {
-              sourceKey: liveSourceKeyRef.current,
-              reason,
-            });
-
-            try {
-              if (typeof hls.stopLoad === 'function') {
-                markManagedVideoExpectedAbort(video);
-                hls.stopLoad();
-              }
-              hls.loadSource(fallbackUrl);
-              ensureVideoSource(video, fallbackUrl);
-              hls.startLoad?.(-1);
-              return true;
-            } catch (error) {
-              console.error('切换直播服务端代理失败:', error);
-              return false;
-            }
-          };
-
-          managedVideo.__icetvUsingServerProxy = currentRoute === 'server';
-          managedVideo.__icetvSwitchToServerProxy = switchToServerProxy;
 
           let alignedToLiveEdge = false;
           let stallRecoveryTimer: ReturnType<typeof setTimeout> | null = null;
@@ -424,9 +396,22 @@ export function useLivePlayer({
           };
 
           const handleVideoPause = () => {
-            userPausedRef.current = true;
-            video.autoplay = false;
-            video.removeAttribute('autoplay');
+            const userPause = shouldTreatLivePauseAsUserPause({
+              explicitUserPause: userPausedRef.current,
+              hasMediaError: Boolean(video.error),
+              expectedAbort: isManagedVideoExpectedAbort(video),
+              recoveryInProgress: livePlaybackRecoveryRef.current,
+              runtimeCleaned: videoRuntimeCleaned,
+            });
+            if (!userPause) {
+              if (!userPausedRef.current) {
+                video.autoplay = true;
+                video.playsInline = true;
+              }
+              return;
+            }
+
+            applyUserPauseIntent(video);
           };
 
           const handleVideoPlay = () => {
@@ -470,6 +455,11 @@ export function useLivePlayer({
 
           const handleLivePlaybackResumed = () => {
             clearStallRecoveryTimer();
+            livePlaybackRecoveryRef.current = false;
+          };
+
+          const handleLivePlaybackSeeked = () => {
+            clearStallRecoveryTimer();
           };
 
           video.addEventListener('pause', handleVideoPause);
@@ -478,10 +468,9 @@ export function useLivePlayer({
           video.addEventListener('stalled', recoverLiveStall);
           video.addEventListener('playing', handleLivePlaybackResumed);
           video.addEventListener('canplay', handleLivePlaybackResumed);
-          video.addEventListener('seeked', handleLivePlaybackResumed);
+          video.addEventListener('seeked', handleLivePlaybackSeeked);
           assignManagedVideoCleanup(video, () => {
             videoRuntimeCleaned = true;
-            managedVideo.__icetvSwitchToServerProxy = null;
             clearStallRecoveryTimer();
             video.removeEventListener('pause', handleVideoPause);
             video.removeEventListener('play', handleVideoPlay);
@@ -489,27 +478,19 @@ export function useLivePlayer({
             video.removeEventListener('stalled', recoverLiveStall);
             video.removeEventListener('playing', handleLivePlaybackResumed);
             video.removeEventListener('canplay', handleLivePlaybackResumed);
-            video.removeEventListener('seeked', handleLivePlaybackResumed);
+            video.removeEventListener('seeked', handleLivePlaybackSeeked);
           });
 
           hls.on(Hls.Events.MANIFEST_PARSED, function () {
-            resetDirectRouteFailures();
             hls.startLoad(-1);
             alignToLiveEdge();
             requestInitialLiveAutoplay(video);
           });
 
           hls.on(Hls.Events.LEVEL_UPDATED, function () {
-            resetDirectRouteFailures();
             alignToLiveEdge();
             requestInitialLiveAutoplay(video);
           });
-
-          if (Hls.Events.FRAG_LOADED) {
-            hls.on(Hls.Events.FRAG_LOADED, function () {
-              resetDirectRouteFailures();
-            });
-          }
 
           hls.on(Hls.Events.ERROR, function (_event: any, data: any) {
             const logResult = logHlsError(_event, data, {
@@ -523,24 +504,11 @@ export function useLivePlayer({
               return;
             }
 
-            if (
-              currentRoute === 'browser' &&
-              isLiveRouteNetworkError(data, Hls.ErrorTypes)
-            ) {
-              directRouteFailureCount += 1;
-              if (
-                (data.fatal ||
-                  directRouteFailureCount >=
-                    LIVE_DIRECT_ROUTE_FAILURE_THRESHOLD) &&
-                switchToServerProxy(
-                  `${String(data?.type || 'networkError')}:${String(data?.details || 'unknown')}`,
-                )
-              ) {
-                return;
-              }
-            }
-
             if (data.fatal) {
+              if (data.type === Hls.ErrorTypes.MEDIA_ERROR) {
+                beginLivePlaybackRecovery(video);
+                markManagedVideoExpectedAbort(video);
+              }
               handleHlsFatalError(hls, data.type, Hls.ErrorTypes);
             }
           });
@@ -548,9 +516,17 @@ export function useLivePlayer({
 
         if (artPlayerRef.current) {
           setLiveVideoLoading(true);
-          artPlayerRef.current.switch = targetUrl;
-          if (artPlayerRef.current.video) {
-            ensureVideoSource(artPlayerRef.current.video, targetUrl);
+          const activeVideo = artPlayerRef.current.video;
+          beginLivePlaybackRecovery(activeVideo);
+          markManagedVideoExpectedAbort(activeVideo);
+          suppressPlayerPauseIntentRef.current = true;
+          try {
+            artPlayerRef.current.switch = targetUrl;
+          } finally {
+            suppressPlayerPauseIntentRef.current = false;
+          }
+          if (activeVideo) {
+            ensureVideoSource(activeVideo, targetUrl);
           }
           loadedUrlRef.current = targetUrl;
           return;
@@ -587,27 +563,34 @@ export function useLivePlayer({
         ap.on('ready', () => {
           setError(null);
           setLiveVideoLoading(false);
+          livePlaybackRecoveryRef.current = false;
           requestInitialLiveAutoplay(ap.video);
         });
-        ap.on('loadstart', () => {
+        ap.on('video:loadstart', () => {
           setLiveVideoLoading(true);
         });
-        ap.on('loadeddata', () => {
+        ap.on('video:loadeddata', () => {
           setLiveVideoLoading(false);
         });
-        ap.on('canplay', () => {
+        ap.on('video:canplay', () => {
           setLiveVideoLoading(false);
+          livePlaybackRecoveryRef.current = false;
           requestInitialLiveAutoplay(ap.video);
         });
-        ap.on('waiting', () => {
+        ap.on('video:waiting', () => {
           setLiveVideoLoading(true, 700);
+        });
+        ap.on('video:error', () => {
+          const activeVideo = ap.video;
+          beginLivePlaybackRecovery(activeVideo);
+          markManagedVideoExpectedAbort(activeVideo);
+        });
+        ap.on('pause', () => {
+          if (suppressPlayerPauseIntentRef.current) return;
+          applyUserPauseIntent(ap.video);
         });
         ap.on('error', (err: unknown) => {
           console.error('Live player error:', err);
-          const activeVideo = ap.video;
-          getManagedVideo(activeVideo).__icetvSwitchToServerProxy?.(
-            err instanceof Error ? err.message : 'player-error',
-          );
         });
 
         if (artPlayerRef.current?.video) {
@@ -629,6 +612,7 @@ export function useLivePlayer({
     artRef,
     currentChannel,
     currentSourceRef,
+    liveRouteVersion,
     loading,
     setError,
     setLiveVideoLoading,
@@ -642,12 +626,37 @@ export function useLivePlayer({
       loadedUrlRef.current = '';
       liveRouteRef.current = 'server';
       liveSourceKeyRef.current = '';
-      liveVideoUrlRef.current = '';
       mutedAutoplayRequestedRef.current = false;
       userPausedRef.current = false;
+      livePlaybackRecoveryRef.current = false;
+      suppressPlayerPauseIntentRef.current = false;
       cleanupPlayer(artPlayerRef);
     };
   }, [clearLiveLoadingTimer]);
+
+  useEffect(() => {
+    const handleRoutePreferenceChange = () => {
+      setLiveRouteVersion((version) => version + 1);
+    };
+    const handleStorageChange = (event: StorageEvent) => {
+      if (event.key === LIVE_DIRECT_CONNECT_STORAGE_KEY) {
+        handleRoutePreferenceChange();
+      }
+    };
+
+    window.addEventListener(
+      LIVE_DIRECT_CONNECT_CHANGE_EVENT,
+      handleRoutePreferenceChange,
+    );
+    window.addEventListener('storage', handleStorageChange);
+    return () => {
+      window.removeEventListener(
+        LIVE_DIRECT_CONNECT_CHANGE_EVENT,
+        handleRoutePreferenceChange,
+      );
+      window.removeEventListener('storage', handleStorageChange);
+    };
+  }, []);
 
   useEffect(() => {
     const handleBeforeUnload = () => {
@@ -655,8 +664,9 @@ export function useLivePlayer({
       loadedUrlRef.current = '';
       liveRouteRef.current = 'server';
       liveSourceKeyRef.current = '';
-      liveVideoUrlRef.current = '';
       userPausedRef.current = false;
+      livePlaybackRecoveryRef.current = false;
+      suppressPlayerPauseIntentRef.current = false;
       cleanupPlayer(artPlayerRef);
     };
     window.addEventListener('beforeunload', handleBeforeUnload);
@@ -666,9 +676,10 @@ export function useLivePlayer({
       loadedUrlRef.current = '';
       liveRouteRef.current = 'server';
       liveSourceKeyRef.current = '';
-      liveVideoUrlRef.current = '';
       mutedAutoplayRequestedRef.current = false;
       userPausedRef.current = false;
+      livePlaybackRecoveryRef.current = false;
+      suppressPlayerPauseIntentRef.current = false;
       cleanupPlayer(artPlayerRef);
     };
   }, [clearLiveLoadingTimer]);
