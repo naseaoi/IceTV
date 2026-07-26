@@ -502,6 +502,26 @@ function normalizePlayRecord(value: unknown): PlayRecord {
     year: limitString(input.year, '年份', MAX_SHORT_STRING_LENGTH),
     index: assertFiniteNumber(input.index, '集数'),
     total_episodes: assertFiniteNumber(input.total_episodes, '总集数'),
+    ...(input.group_index === undefined
+      ? {}
+      : {
+          group_index: assertBoundedNumber(
+            input.group_index,
+            '组内集数',
+            1,
+            10000,
+          ),
+        }),
+    ...(input.group_total === undefined
+      ? {}
+      : {
+          group_total: assertBoundedNumber(
+            input.group_total,
+            '组内总集数',
+            1,
+            10000,
+          ),
+        }),
     play_time: assertBoundedNumber(input.play_time, '播放进度', 0, MAX_SECONDS),
     total_time: assertBoundedNumber(input.total_time, '总时长', 0, MAX_SECONDS),
     save_time: assertFiniteNumber(input.save_time, '保存时间'),

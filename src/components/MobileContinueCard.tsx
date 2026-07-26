@@ -31,6 +31,8 @@ interface MobileContinueCardProps {
   sourceName?: string;
   currentEpisode: number;
   totalEpisodes: number;
+  /** 播放记录的真实集索引（0-based）；分组源展示集数与真实索引不一致时使用 */
+  resumeEpisodeIndex?: number;
   progress: number;
   resumeTime: number;
   query?: string;
@@ -46,6 +48,7 @@ export default function MobileContinueCard({
   sourceName,
   currentEpisode,
   totalEpisodes,
+  resumeEpisodeIndex,
   progress,
   resumeTime,
   query,
@@ -66,7 +69,7 @@ export default function MobileContinueCard({
         savePlayIntent({
           source,
           id,
-          episodeIndex: Math.max(0, currentEpisode - 1),
+          episodeIndex: resumeEpisodeIndex ?? Math.max(0, currentEpisode - 1),
           resumeTime,
         });
       }
@@ -77,7 +80,17 @@ export default function MobileContinueCard({
     }
 
     router.push(playUrl);
-  }, [router, source, id, title, year, query, currentEpisode, resumeTime]);
+  }, [
+    router,
+    source,
+    id,
+    title,
+    year,
+    query,
+    currentEpisode,
+    resumeEpisodeIndex,
+    resumeTime,
+  ]);
 
   const handleDelete = useCallback(() => {
     showConfirm(interactionId, {

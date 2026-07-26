@@ -185,6 +185,20 @@ export default function ContinueWatching({
     return parseStorageKey(key);
   };
 
+  // 分组源（如 giri 繁中/简中）优先展示组内集数进度
+  const getEpisodeDisplay = (record: PlayRecord) => {
+    if (record.group_index && record.group_total) {
+      return {
+        currentEpisode: record.group_index,
+        totalEpisodes: record.group_total,
+      };
+    }
+    return {
+      currentEpisode: record.index,
+      totalEpisodes: record.total_episodes,
+    };
+  };
+
   return (
     <>
       <section className={`mb-2 ${className || ''}`}>
@@ -215,6 +229,7 @@ export default function ContinueWatching({
                   }
 
                   const { source, id } = parsedKey;
+                  const episodeDisplay = getEpisodeDisplay(record);
                   return (
                     <MobileContinueCard
                       key={record.key}
@@ -224,8 +239,9 @@ export default function ContinueWatching({
                       poster={record.cover}
                       year={record.year}
                       sourceName={record.source_name}
-                      currentEpisode={record.index}
-                      totalEpisodes={record.total_episodes}
+                      currentEpisode={episodeDisplay.currentEpisode}
+                      totalEpisodes={episodeDisplay.totalEpisodes}
+                      resumeEpisodeIndex={Math.max(0, record.index - 1)}
                       progress={getProgress(record)}
                       resumeTime={Math.max(
                         0,
@@ -247,6 +263,7 @@ export default function ContinueWatching({
                   }
 
                   const { source, id } = parsedKey;
+                  const episodeDisplay = getEpisodeDisplay(record);
                   return (
                     <div key={record.key} className={HOME_POSTER_CARD_CLASS}>
                       <VideoCard
@@ -257,8 +274,9 @@ export default function ContinueWatching({
                         source={source}
                         source_name={record.source_name}
                         progress={getProgress(record)}
-                        episodes={record.total_episodes}
-                        currentEpisode={record.index}
+                        episodes={episodeDisplay.totalEpisodes}
+                        currentEpisode={episodeDisplay.currentEpisode}
+                        resumeEpisodeIndex={Math.max(0, record.index - 1)}
                         resumeTime={Math.max(
                           0,
                           Math.floor(record.play_time || 0),
