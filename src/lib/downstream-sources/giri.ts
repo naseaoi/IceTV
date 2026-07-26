@@ -1,7 +1,6 @@
 import { type ApiSite, API_CONFIG } from '@/lib/config';
 import {
   type GiriEpisodeVariant,
-  buildGirigiriVariantId,
   countGirigiriVariantTabs,
   extractGirigiriEpisodeVariants,
   parseGirigiriVariantId,
@@ -294,7 +293,7 @@ export async function getDetailFromGirigiri(
   apiSite: ApiSite,
   id: string,
 ): Promise<SearchResult> {
-  const { videoId, groupId: preferredGroupId } = parseGirigiriVariantId(id);
+  const { videoId } = parseGirigiriVariantId(id);
   const origins = getGirigiriOrigins(apiSite);
   const detailResult = await fetchGiriHtmlFromOrigins(
     origins,
@@ -339,63 +338,34 @@ export async function getDetailFromGirigiri(
     throw new Error('详情页未提取到可播放剧集');
   }
 
-  const selectedVariant =
-    episodeVariants.find((variant) => variant.groupId === preferredGroupId) ||
-    episodeVariants[0];
+  const episodes: string[] = [];
+  const episodesTitles: string[] = [];
+  for (const variant of episodeVariants) {
+    variant.episodes.forEach((entry, index) => {
+      episodes.push(buildLazyEpisodeUrl('giri', entry.playPath));
+      episodesTitles.push(entry.title || `${index + 1}`);
+    });
+  }
 
-  const episodes = selectedVariant.episodes.map((entry) =>
-    buildLazyEpisodeUrl('giri', entry.playPath),
-  );
-  const episodesTitles = selectedVariant.episodes.map(
-    (entry, index) => entry.title || `${index + 1}`,
-  );
-
-  const relatedSources = episodeVariants
-    .filter((variant) => variant.groupId !== selectedVariant.groupId)
-    .map(
-      (variant) =>
-        ({
-          id: buildGirigiriVariantId(
-            videoId,
-            variant.groupId,
-            variant.isDefault,
-          ),
-          title,
-          poster,
-          episodes: [],
-          episodes_titles: variant.episodes.map(
-            (entry, index) => entry.title || `${index + 1}`,
-          ),
-          source: apiSite.key,
-          source_name: apiSite.name,
-          variant_label: variant.label,
-          class: '',
-          year,
-          desc,
-          type_name: '动漫',
-          douban_id: 0,
-        }) satisfies SearchResult,
-    );
+  const episodeGroups = episodeVariants.map((variant) => ({
+    label: variant.label,
+    count: variant.episodes.length,
+  }));
 
   return {
-    id: buildGirigiriVariantId(
-      videoId,
-      selectedVariant.groupId,
-      selectedVariant.isDefault,
-    ),
+    id: videoId,
     title,
     poster,
     episodes,
     episodes_titles: episodesTitles,
     source: apiSite.key,
     source_name: apiSite.name,
-    variant_label: selectedVariant.label,
+    episode_groups: episodeGroups.length > 1 ? episodeGroups : undefined,
     class: '',
     year,
     desc,
     type_name: '动漫',
     douban_id: 0,
-    related_sources: relatedSources,
   };
 }
 

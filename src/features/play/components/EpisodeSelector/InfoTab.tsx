@@ -52,12 +52,13 @@ export const InfoTab: React.FC<InfoTabProps> = ({
   const descOnlyScroll = scrollMode === 'desc';
   const panelRef = useRef<HTMLDivElement>(null);
   const contentRef = useRef<HTMLDivElement>(null);
+  const descRef = useRef<HTMLParagraphElement>(null);
   const [hasTopFade, setHasTopFade] = useState(false);
   const [hasBottomFade, setHasBottomFade] = useState(false);
 
-  const syncPanelFade = useCallback(() => {
-    const panel = panelRef.current;
-    if (!panel || descOnlyScroll) return;
+  const syncScrollFade = useCallback(() => {
+    const panel = descOnlyScroll ? descRef.current : panelRef.current;
+    if (!panel) return;
 
     const maxScrollTop = Math.max(0, panel.scrollHeight - panel.clientHeight);
     setHasTopFade(panel.scrollTop > 4);
@@ -65,38 +66,33 @@ export const InfoTab: React.FC<InfoTabProps> = ({
   }, [descOnlyScroll]);
 
   useEffect(() => {
-    const panel = panelRef.current;
-    const content = contentRef.current;
-    if (!panel || !content || descOnlyScroll) return;
+    const panel = descOnlyScroll ? descRef.current : panelRef.current;
+    const content = descOnlyScroll ? descRef.current : contentRef.current;
+    if (!panel || !content) return;
 
     const observer =
       typeof ResizeObserver === 'undefined'
         ? null
-        : new ResizeObserver(syncPanelFade);
+        : new ResizeObserver(syncScrollFade);
     observer?.observe(panel);
-    observer?.observe(content);
-    const timer = window.setTimeout(syncPanelFade, 0);
-    window.addEventListener('resize', syncPanelFade);
+    if (content !== panel) observer?.observe(content);
+    const timer = window.setTimeout(syncScrollFade, 0);
+    window.addEventListener('resize', syncScrollFade);
 
     return () => {
       observer?.disconnect();
       window.clearTimeout(timer);
-      window.removeEventListener('resize', syncPanelFade);
+      window.removeEventListener('resize', syncScrollFade);
     };
-  }, [descOnlyScroll, formattedDesc, syncPanelFade]);
+  }, [descOnlyScroll, formattedDesc, syncScrollFade]);
 
   const doubanId =
     Number.isFinite(videoDoubanId) && videoDoubanId > 0 ? videoDoubanId : 0;
-  const descStyle = descOnlyScroll
-    ? {
-        whiteSpace: 'pre-line',
-        WebkitMaskImage:
-          'linear-gradient(to bottom, #000 calc(100% - 2rem), transparent 100%)',
-        maskImage:
-          'linear-gradient(to bottom, #000 calc(100% - 2rem), transparent 100%)',
-      }
-    : { whiteSpace: 'pre-line' };
-  const panelMaskStyle = getVerticalScrollMaskStyle(hasTopFade, hasBottomFade);
+  const scrollMaskStyle = getVerticalScrollMaskStyle(hasTopFade, hasBottomFade);
+  const descStyle = {
+    whiteSpace: 'pre-line' as const,
+    ...(descOnlyScroll ? scrollMaskStyle : undefined),
+  };
 
   return (
     <div
@@ -109,8 +105,8 @@ export const InfoTab: React.FC<InfoTabProps> = ({
           ? 'flex min-h-0 min-w-0 flex-col gap-2 overflow-hidden px-5 pb-1 pt-4 sm:px-6 sm:pb-1 sm:pt-5'
           : 'min-w-0 flex-1 overflow-y-auto overflow-x-hidden p-5 sm:p-6'
       }
-      onScroll={!descOnlyScroll ? syncPanelFade : undefined}
-      style={!descOnlyScroll ? panelMaskStyle : undefined}
+      onScroll={!descOnlyScroll ? syncScrollFade : undefined}
+      style={!descOnlyScroll ? scrollMaskStyle : undefined}
     >
       <div
         ref={contentRef}
@@ -204,11 +200,16 @@ export const InfoTab: React.FC<InfoTabProps> = ({
           >
             <div className={descOnlyScroll ? 'relative min-h-0 flex-1' : ''}>
               <p
+                ref={descRef}
+                data-play-detail-desc-scroll={descOnlyScroll ? '' : undefined}
+                data-top-fade={descOnlyScroll ? hasTopFade : undefined}
+                data-bottom-fade={descOnlyScroll ? hasBottomFade : undefined}
                 className={`max-w-full break-words text-[13px] leading-[1.8] text-gray-600 dark:text-gray-400 ${
                   descOnlyScroll
                     ? 'h-full min-h-0 overflow-y-auto overflow-x-hidden pb-5'
                     : ''
                 }`.trim()}
+                onScroll={descOnlyScroll ? syncScrollFade : undefined}
                 style={descStyle}
               >
                 {formattedDesc}
