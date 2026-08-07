@@ -6,60 +6,19 @@ import { readFluidSearch } from '@/lib/local-preferences';
 import { SearchResult } from '@/lib/types';
 
 import { normalizeSearchQueryInput } from '../lib/searchQuery';
+import {
+  getSearchSnapshot,
+  setSearchSnapshot,
+} from '../lib/searchSnapshotCache';
 import { sortBatchForNoOrder } from '../lib/searchUtils';
+
+export { clearSearchSnapshotCache } from '../lib/searchSnapshotCache';
 
 interface UseSearchExecutionParams {
   searchParams: ReadonlyURLSearchParams;
   viewMode: 'agg' | 'all';
   filterAggYearOrder: 'none' | 'asc' | 'desc';
   filterAllYearOrder: 'none' | 'asc' | 'desc';
-}
-
-interface SearchSnapshotCache {
-  expiresAt: number;
-  results: SearchResult[];
-  totalSources: number;
-  completedSources: number;
-  useFluidSearch: boolean;
-}
-
-const SEARCH_SNAPSHOT_TTL_MS = 60 * 60 * 1000;
-const searchSnapshotCache = new Map<string, SearchSnapshotCache>();
-
-function getSearchSnapshotCacheKey(query: string) {
-  return query.trim().toLowerCase();
-}
-
-function getSearchSnapshot(query: string): SearchSnapshotCache | null {
-  const key = getSearchSnapshotCacheKey(query);
-  const snapshot = searchSnapshotCache.get(key);
-  if (!snapshot) {
-    return null;
-  }
-  if (snapshot.expiresAt <= Date.now()) {
-    searchSnapshotCache.delete(key);
-    return null;
-  }
-  return snapshot;
-}
-
-export function clearSearchSnapshotCache(query?: string) {
-  if (query) {
-    searchSnapshotCache.delete(getSearchSnapshotCacheKey(query));
-  } else {
-    searchSnapshotCache.clear();
-  }
-}
-
-function setSearchSnapshot(
-  query: string,
-  snapshot: Omit<SearchSnapshotCache, 'expiresAt'>,
-) {
-  const key = getSearchSnapshotCacheKey(query);
-  searchSnapshotCache.set(key, {
-    ...snapshot,
-    expiresAt: Date.now() + SEARCH_SNAPSHOT_TTL_MS,
-  });
 }
 
 export function useSearchExecution({

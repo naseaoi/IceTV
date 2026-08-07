@@ -268,8 +268,6 @@ const CoverImage: React.FC<CoverImageProps> = memo(function CoverImage({
     if (!image) return;
 
     let cancelled = false;
-    let intervalId: ReturnType<typeof setInterval> | null = null;
-    let timeoutId: ReturnType<typeof setTimeout> | null = null;
 
     const finishFromImageState = () => {
       if (cancelled || !image.complete) return false;
@@ -285,6 +283,8 @@ const CoverImage: React.FC<CoverImageProps> = memo(function CoverImage({
       return;
     }
 
+    queueMicrotask(finishFromImageState);
+
     if (typeof image.decode === 'function') {
       void image
         .decode()
@@ -292,24 +292,13 @@ const CoverImage: React.FC<CoverImageProps> = memo(function CoverImage({
         .catch(finishFromImageState);
     }
 
-    intervalId = setInterval(() => {
-      if (finishFromImageState() && intervalId) {
-        clearInterval(intervalId);
-        intervalId = null;
-      }
-    }, 250);
-
-    timeoutId = setTimeout(() => {
-      if (intervalId) {
-        clearInterval(intervalId);
-        intervalId = null;
-      }
+    const timeoutId = setTimeout(() => {
+      if (!finishFromImageState()) handleError();
     }, 8000);
 
     return () => {
       cancelled = true;
-      if (intervalId) clearInterval(intervalId);
-      if (timeoutId) clearTimeout(timeoutId);
+      clearTimeout(timeoutId);
     };
   }, [handleError, handleLoad, hasError, loaded, processed, slotGranted]);
 

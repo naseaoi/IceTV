@@ -1,11 +1,10 @@
 import type { ApiSite } from '@/lib/config';
+import { createSwrCache } from '@/lib/server-cache';
 import { SearchResult } from '@/lib/types';
 
 export type CachedPageStatus = 'ok' | 'timeout' | 'forbidden';
 
 export interface CachedPageEntry {
-  expiresAt: number;
-  staleUntil: number;
   status: CachedPageStatus;
   data: SearchResult[];
   pageCount?: number;
@@ -19,8 +18,6 @@ export interface SearchAggregateCacheParams {
 }
 
 export interface CachedSearchAggregateEntry {
-  expiresAt: number;
-  staleUntil: number;
   results: SearchResult[];
 }
 
@@ -30,12 +27,33 @@ const SEARCH_EMPTY_CACHE_TTL_MS = 60 * 1000;
 const SEARCH_EMPTY_CACHE_STALE_MS = 60 * 1000;
 const SEARCH_AGGREGATE_CACHE_TTL_MS = 2 * 60 * 1000;
 const SEARCH_AGGREGATE_CACHE_STALE_MS = 3 * 60 * 1000;
-const CACHE_CLEANUP_INTERVAL_MS = 5 * 60 * 1000;
 const MAX_CACHE_SIZE = 1000;
 const MAX_AGGREGATE_CACHE_SIZE = 200;
-const SEARCH_CACHE: Map<string, CachedPageEntry> = new Map();
-const SEARCH_AGGREGATE_CACHE: Map<string, CachedSearchAggregateEntry> =
-  new Map();
+const MAX_EMPTY_CACHE_SIZE = 250;
+const SEARCH_CACHE_MAX_BYTES = 32 * 1024 * 1024;
+const SEARCH_EMPTY_CACHE_MAX_BYTES = 2 * 1024 * 1024;
+const SEARCH_AGGREGATE_CACHE_MAX_BYTES = 48 * 1024 * 1024;
+const SEARCH_CACHE = createSwrCache<CachedPageEntry>({
+  name: 'search-pages',
+  maxSize: MAX_CACHE_SIZE,
+  maxWeightBytes: SEARCH_CACHE_MAX_BYTES,
+  freshMs: SEARCH_CACHE_TTL_MS,
+  staleMs: SEARCH_CACHE_STALE_MS,
+});
+const SEARCH_EMPTY_CACHE = createSwrCache<CachedPageEntry>({
+  name: 'search-empty-pages',
+  maxSize: MAX_EMPTY_CACHE_SIZE,
+  maxWeightBytes: SEARCH_EMPTY_CACHE_MAX_BYTES,
+  freshMs: SEARCH_EMPTY_CACHE_TTL_MS,
+  staleMs: SEARCH_EMPTY_CACHE_STALE_MS,
+});
+const SEARCH_AGGREGATE_CACHE = createSwrCache<CachedSearchAggregateEntry>({
+  name: 'search-aggregates',
+  maxSize: MAX_AGGREGATE_CACHE_SIZE,
+  maxWeightBytes: SEARCH_AGGREGATE_CACHE_MAX_BYTES,
+  freshMs: SEARCH_AGGREGATE_CACHE_TTL_MS,
+  staleMs: SEARCH_AGGREGATE_CACHE_STALE_MS,
+});
 const SEARCH_AGGREGATE_REFRESH_INFLIGHT: Map<string, Promise<void>> = new Map();
 const SEARCH_AGGREGATE_LOAD_INFLIGHT: Map<
   string,
@@ -46,9 +64,6 @@ const SEARCH_INFLIGHT: Map<
   string,
   Promise<{ results: SearchResult[]; pageCount?: number }>
 > = new Map();
-
-let cleanupTimer: NodeJS.Timeout | null = null;
-let lastCleanupTime = 0;
 
 function makeSearchCacheKey(
   sourceKey: string,
@@ -82,14 +97,8 @@ export function peekCachedSearchAggregate(
   params: SearchAggregateCacheParams,
 ): { entry: CachedSearchAggregateEntry; fresh: boolean } | null {
   const key = makeSearchAggregateCacheKey(params);
-  const entry = SEARCH_AGGREGATE_CACHE.get(key);
-  if (!entry) return null;
-
-  const now = Date.now();
-  if (now < entry.expiresAt) return { entry, fresh: true };
-  if (now < entry.staleUntil) return { entry, fresh: false };
-  SEARCH_AGGREGATE_CACHE.delete(key);
-  return null;
+  const cached = SEARCH_AGGREGATE_CACHE.peek(key);
+  return cached ? { entry: cached.value, fresh: cached.fresh } : null;
 }
 
 export function setCachedSearchAggregate(
@@ -98,22 +107,8 @@ export function setCachedSearchAggregate(
 ): void {
   if (results.length === 0) return;
 
-  ensureAutoCleanupStarted();
-
-  const now = Date.now();
-  if (now - lastCleanupTime > CACHE_CLEANUP_INTERVAL_MS) {
-    performCacheCleanup();
-  }
-
   const key = makeSearchAggregateCacheKey(params);
-  SEARCH_AGGREGATE_CACHE.set(key, {
-    expiresAt: now + SEARCH_AGGREGATE_CACHE_TTL_MS,
-    staleUntil:
-      now + SEARCH_AGGREGATE_CACHE_TTL_MS + SEARCH_AGGREGATE_CACHE_STALE_MS,
-    results,
-  });
-
-  trimCacheByStaleUntil(SEARCH_AGGREGATE_CACHE, MAX_AGGREGATE_CACHE_SIZE);
+  SEARCH_AGGREGATE_CACHE.set(key, { results });
 }
 
 export function refreshCachedSearchAggregate(
@@ -163,13 +158,8 @@ export function peekCachedSearchPage(
   page: number,
 ): { entry: CachedPageEntry; fresh: boolean } | null {
   const key = makeSearchCacheKey(sourceKey, query, page);
-  const entry = SEARCH_CACHE.get(key);
-  if (!entry) return null;
-  const now = Date.now();
-  if (now < entry.expiresAt) return { entry, fresh: true };
-  if (now < entry.staleUntil) return { entry, fresh: false };
-  SEARCH_CACHE.delete(key);
-  return null;
+  const cached = SEARCH_CACHE.peek(key) || SEARCH_EMPTY_CACHE.peek(key);
+  return cached ? { entry: cached.value, fresh: cached.fresh } : null;
 }
 
 export function dedupeSearchLoad(
@@ -193,15 +183,8 @@ export function getCachedSearchPage(
   query: string,
   page: number,
 ): CachedPageEntry | null {
-  const key = makeSearchCacheKey(sourceKey, query, page);
-  const entry = SEARCH_CACHE.get(key);
-  if (!entry) return null;
-
-  if (entry.expiresAt <= Date.now()) {
-    return null;
-  }
-
-  return entry;
+  const cached = peekCachedSearchPage(sourceKey, query, page);
+  return cached?.fresh ? cached.entry : null;
 }
 
 export function setCachedSearchPage(
@@ -212,114 +195,34 @@ export function setCachedSearchPage(
   data: SearchResult[],
   pageCount?: number,
 ): void {
-  ensureAutoCleanupStarted();
-
-  const now = Date.now();
-  if (now - lastCleanupTime > CACHE_CLEANUP_INTERVAL_MS) {
-    performCacheCleanup();
-  }
-
-  const cacheWindow = getSearchPageCacheWindow(status, data);
   const key = makeSearchCacheKey(sourceKey, query, page);
-  SEARCH_CACHE.set(key, {
-    expiresAt: now + cacheWindow.ttlMs,
-    staleUntil: now + cacheWindow.ttlMs + cacheWindow.staleMs,
+  const entry = {
     status,
     data,
     pageCount,
-  });
-
-  trimCacheByStaleUntil(SEARCH_CACHE, MAX_CACHE_SIZE);
-}
-
-function getSearchPageCacheWindow(
-  status: CachedPageStatus,
-  data: SearchResult[],
-): { ttlMs: number; staleMs: number } {
+  };
   if (status === 'ok' && data.length === 0) {
-    return {
-      ttlMs: SEARCH_EMPTY_CACHE_TTL_MS,
-      staleMs: SEARCH_EMPTY_CACHE_STALE_MS,
-    };
+    SEARCH_CACHE.invalidate(key);
+    SEARCH_EMPTY_CACHE.set(key, entry);
+  } else {
+    SEARCH_EMPTY_CACHE.invalidate(key);
+    SEARCH_CACHE.set(key, entry);
   }
+}
 
+export function getSearchCacheStats() {
   return {
-    ttlMs: SEARCH_CACHE_TTL_MS,
-    staleMs: SEARCH_CACHE_STALE_MS,
+    pages: SEARCH_CACHE.stats(),
+    emptyPages: SEARCH_EMPTY_CACHE.stats(),
+    aggregates: SEARCH_AGGREGATE_CACHE.stats(),
   };
 }
 
-function ensureAutoCleanupStarted(): void {
-  if (!cleanupTimer) {
-    startAutoCleanup();
-  }
-}
-
-function performCacheCleanup(): {
-  expired: number;
-  total: number;
-  sizeLimited: number;
-} {
-  const now = Date.now();
-  const keysToDelete: string[] = [];
-  const aggregateKeysToDelete: string[] = [];
-  let sizeLimitedDeleted = 0;
-
-  SEARCH_CACHE.forEach((entry, key) => {
-    if (entry.staleUntil <= now) {
-      keysToDelete.push(key);
-    }
-  });
-  SEARCH_AGGREGATE_CACHE.forEach((entry, key) => {
-    if (entry.staleUntil <= now) {
-      aggregateKeysToDelete.push(key);
-    }
-  });
-
-  const expiredCount = keysToDelete.length;
-  keysToDelete.forEach((key) => SEARCH_CACHE.delete(key));
-  aggregateKeysToDelete.forEach((key) => SEARCH_AGGREGATE_CACHE.delete(key));
-
-  sizeLimitedDeleted += trimCacheByStaleUntil(SEARCH_CACHE, MAX_CACHE_SIZE);
-  sizeLimitedDeleted += trimCacheByStaleUntil(
-    SEARCH_AGGREGATE_CACHE,
-    MAX_AGGREGATE_CACHE_SIZE,
-  );
-
-  lastCleanupTime = now;
-
-  return {
-    expired: expiredCount,
-    total: SEARCH_CACHE.size,
-    sizeLimited: sizeLimitedDeleted,
-  };
-}
-
-function trimCacheByStaleUntil<T extends { staleUntil: number }>(
-  cache: Map<string, T>,
-  maxSize: number,
-): number {
-  if (cache.size <= maxSize) return 0;
-
-  const entries = Array.from(cache.entries());
-  entries.sort((a, b) => a[1].staleUntil - b[1].staleUntil);
-
-  const toRemove = cache.size - maxSize;
-  for (let i = 0; i < toRemove; i++) {
-    cache.delete(entries[i][0]);
-  }
-
-  return toRemove;
-}
-
-function startAutoCleanup(): void {
-  if (cleanupTimer) return;
-
-  cleanupTimer = setInterval(() => {
-    performCacheCleanup();
-  }, CACHE_CLEANUP_INTERVAL_MS);
-
-  if (typeof process !== 'undefined' && cleanupTimer.unref) {
-    cleanupTimer.unref();
-  }
+export function clearSearchCachesForTests(): void {
+  SEARCH_CACHE.clear();
+  SEARCH_EMPTY_CACHE.clear();
+  SEARCH_AGGREGATE_CACHE.clear();
+  SEARCH_INFLIGHT.clear();
+  SEARCH_AGGREGATE_REFRESH_INFLIGHT.clear();
+  SEARCH_AGGREGATE_LOAD_INFLIGHT.clear();
 }

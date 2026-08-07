@@ -17,6 +17,7 @@
     "lint:strict": "eslint --max-warnings=0 src",
     "check:encoding": "node scripts/check-encoding.js",
     "typecheck": "tsc --noEmit --incremental false",
+    "perf:baseline": "node scripts/run-performance-baseline.js",
     "test:watch": "jest --watch",
     "test": "jest",
     "format": "prettier -w .",

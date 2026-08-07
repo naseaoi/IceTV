@@ -104,23 +104,16 @@ type PlaybackWatchTotalsRow = {
   period_watch_seconds: number | null;
 };
 
-type PlaybackTopAggregateRow = {
+type PlaybackTopItemRow = {
   source: string;
   video_id: string;
-  watch_seconds: number | null;
-  session_count: number | null;
-  last_watched_at: number | null;
-};
-
-type PlaybackTopMetadataRow = {
   title: string | null;
   source_name: string | null;
   cover: string | null;
   year: string | null;
-};
-
-type PlaybackRangeWatchTotalRow = {
   watch_seconds: number | null;
+  session_count: number | null;
+  last_watched_at: number | null;
 };
 
 type SourceRouteStatsRow = {
@@ -1023,28 +1016,39 @@ export class LocalSqliteStorage implements IStorage {
     const username = normalizeUsername(userName);
     if (ranges.length === 0) return [];
 
-    const stmt = this.db.prepare(
-      `SELECT COALESCE(SUM(CASE WHEN watch_seconds > 0 THEN watch_seconds ELSE 0 END), 0) AS watch_seconds
-      FROM playback_sessions
-      WHERE username = ? AND started_at >= ? AND started_at < ?`,
-    );
-
-    return ranges.map((range) => {
+    const normalizedRanges = ranges.map((range) => {
       const start = Number.isFinite(range.start)
         ? Math.max(0, Math.floor(range.start))
         : 0;
       const end = Number.isFinite(range.end)
         ? Math.max(start, Math.floor(range.end))
         : start;
-      const row = stmt.get(username, start, end) as
-        | PlaybackRangeWatchTotalRow
-        | undefined;
-
-      return {
-        key: range.key,
-        watchSeconds: Number(row?.watch_seconds || 0),
-      };
+      return { key: range.key, start, end };
     });
+    const rangeExpressions = normalizedRanges.map(
+      (_, index) =>
+        `COALESCE(SUM(CASE WHEN started_at >= ? AND started_at < ? AND watch_seconds > 0 THEN watch_seconds ELSE 0 END), 0) AS range_${index}`,
+    );
+    const rangeParams = normalizedRanges.flatMap(({ start, end }) => [
+      start,
+      end,
+    ]);
+    const scanStart = Math.min(...normalizedRanges.map(({ start }) => start));
+    const scanEnd = Math.max(...normalizedRanges.map(({ end }) => end));
+    const row = this.db
+      .prepare(
+        `SELECT ${rangeExpressions.join(', ')}
+        FROM playback_sessions
+        WHERE username = ? AND started_at >= ? AND started_at < ?`,
+      )
+      .get(...rangeParams, username, scanStart, scanEnd) as
+      | Record<string, number | null>
+      | undefined;
+
+    return normalizedRanges.map((range, index) => ({
+      key: range.key,
+      watchSeconds: Number(row?.[`range_${index}`] || 0),
+    }));
   }
 
   async getPlaybackTopItems(
@@ -1058,54 +1062,58 @@ export class LocalSqliteStorage implements IStorage {
       ? Math.max(0, Math.floor(since as number))
       : null;
     const periodCondition = periodStart === null ? '' : ' AND started_at >= ?';
-    const aggregateParams =
+    const queryParams =
       periodStart === null
         ? [username, safeLimit]
         : [username, periodStart, safeLimit];
     const rows = this.db
       .prepare(
-        `SELECT
+        `WITH ranked_sessions AS (
+          SELECT
+            source,
+            video_id,
+            title,
+            source_name,
+            cover,
+            year,
+            started_at,
+            ended_at,
+            watch_seconds,
+            ROW_NUMBER() OVER (
+              PARTITION BY source, video_id
+              ORDER BY started_at DESC, id DESC
+            ) AS metadata_rank
+          FROM playback_sessions
+          WHERE username = ?${periodCondition}
+        )
+        SELECT
           source,
           video_id,
+          MAX(CASE WHEN metadata_rank = 1 THEN title END) AS title,
+          MAX(CASE WHEN metadata_rank = 1 THEN source_name END) AS source_name,
+          MAX(CASE WHEN metadata_rank = 1 THEN cover END) AS cover,
+          MAX(CASE WHEN metadata_rank = 1 THEN year END) AS year,
           COALESCE(SUM(CASE WHEN watch_seconds > 0 THEN watch_seconds ELSE 0 END), 0) AS watch_seconds,
           COUNT(*) AS session_count,
           MAX(CASE WHEN ended_at > started_at THEN ended_at ELSE started_at END) AS last_watched_at
-        FROM playback_sessions
-        WHERE username = ?${periodCondition}
+        FROM ranked_sessions
         GROUP BY source, video_id
         ORDER BY watch_seconds DESC, last_watched_at DESC
         LIMIT ?`,
       )
-      .all(...aggregateParams) as PlaybackTopAggregateRow[];
-    const metadataStmt = this.db.prepare(
-      `SELECT title, source_name, cover, year
-        FROM playback_sessions
-        WHERE username = ? AND source = ? AND video_id = ?${periodCondition}
-        ORDER BY started_at DESC
-        LIMIT 1`,
-    );
+      .all(...queryParams) as PlaybackTopItemRow[];
 
-    return rows.map((row) => {
-      const metadataParams =
-        periodStart === null
-          ? [username, row.source, row.video_id]
-          : [username, row.source, row.video_id, periodStart];
-      const metadata = metadataStmt.get(...metadataParams) as
-        | PlaybackTopMetadataRow
-        | undefined;
-
-      return {
-        source: row.source,
-        videoId: row.video_id,
-        title: metadata?.title || '',
-        sourceName: metadata?.source_name || '',
-        cover: metadata?.cover || '',
-        year: metadata?.year || '',
-        watchSeconds: Number(row.watch_seconds || 0),
-        sessionCount: Number(row.session_count || 0),
-        lastWatchedAt: Number(row.last_watched_at || 0),
-      };
-    });
+    return rows.map((row) => ({
+      source: row.source,
+      videoId: row.video_id,
+      title: row.title || '',
+      sourceName: row.source_name || '',
+      cover: row.cover || '',
+      year: row.year || '',
+      watchSeconds: Number(row.watch_seconds || 0),
+      sessionCount: Number(row.session_count || 0),
+      lastWatchedAt: Number(row.last_watched_at || 0),
+    }));
   }
 
   async recordSourceRouteStat(input: SourceRouteStatInput): Promise<void> {

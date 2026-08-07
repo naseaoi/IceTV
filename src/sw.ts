@@ -8,11 +8,13 @@ import {
   StaleWhileRevalidate,
 } from 'serwist';
 
+import { createCacheBudgetLedger } from './lib/cache-budget';
 import {
   excludeDefaultApiRuntimeCache,
   shouldHandleBangumiCoverCache,
   shouldHandleExternalCoverCache,
   shouldHandleImageProxyCache,
+  shouldHandleJsonApiCache,
   shouldHandleNextImageCache,
   shouldHandleVodSegmentCache,
 } from './lib/sw-cache-rules';
@@ -33,6 +35,11 @@ const VOD_SEGMENT_MAX_TOTAL_BYTES = 384 * 1024 * 1024;
 const VOD_SEGMENT_MAX_SINGLE_BYTES = 32 * 1024 * 1024;
 const VOD_SEGMENT_MIN_FREE_BYTES = 256 * 1024 * 1024;
 const VOD_SEGMENT_STORAGE_PRESSURE_RATIO = 0.8;
+const vodSegmentBudget = createCacheBudgetLedger<string>({
+  maxEntries: VOD_SEGMENT_MAX_ENTRIES,
+  maxBytes: VOD_SEGMENT_MAX_TOTAL_BYTES,
+});
+let vodSegmentBudgetQueue: Promise<void> = Promise.resolve();
 
 function readContentLength(response: Response | undefined): number | null {
   if (!response) {
@@ -64,11 +71,12 @@ async function hasStoragePressure(incomingBytes: number): Promise<boolean> {
   );
 }
 
-async function trimVodSegmentCache(incomingBytes: number) {
+async function initializeVodSegmentBudget(): Promise<Cache> {
   const cache = await caches.open(VOD_SEGMENT_CACHE_NAME);
+  if (vodSegmentBudget.isInitialized()) return cache;
+
   const requests = await cache.keys();
-  let totalBytes = 0;
-  const entries: { request: Request; bytes: number }[] = [];
+  const entries: { key: string; bytes: number }[] = [];
 
   for (const request of requests) {
     const response = await cache.match(request);
@@ -77,18 +85,31 @@ async function trimVodSegmentCache(incomingBytes: number) {
       await cache.delete(request);
       continue;
     }
-    totalBytes += bytes;
-    entries.push({ request, bytes });
+    entries.push({ key: request.url, bytes });
   }
 
-  while (
-    totalBytes + incomingBytes > VOD_SEGMENT_MAX_TOTAL_BYTES &&
-    entries.length > 0
-  ) {
-    const entry = entries.shift()!;
-    await cache.delete(entry.request);
-    totalBytes -= entry.bytes;
-  }
+  vodSegmentBudget.initialize(entries);
+  return cache;
+}
+
+function updateVodSegmentBudget<T>(task: () => Promise<T>): Promise<T> {
+  const result = vodSegmentBudgetQueue.then(task, task);
+  vodSegmentBudgetQueue = result.then(
+    () => undefined,
+    () => undefined,
+  );
+  return result;
+}
+
+async function reserveVodSegmentCache(
+  requestUrl: string,
+  incomingBytes: number,
+): Promise<void> {
+  await updateVodSegmentBudget(async () => {
+    const cache = await initializeVodSegmentBudget();
+    const evictedUrls = vodSegmentBudget.reserve(requestUrl, incomingBytes);
+    await Promise.all(evictedUrls.map((url) => cache.delete(url)));
+  });
 }
 
 const vodSegmentStoragePlugin = {
@@ -112,7 +133,7 @@ const vodSegmentStoragePlugin = {
       return null;
     }
 
-    await trimVodSegmentCache(incomingBytes);
+    await reserveVodSegmentCache(request.url, incomingBytes);
     return response;
   },
 };
@@ -198,11 +219,11 @@ const serwist = new Serwist({
     // 仅缓存 GET，且排除带鉴权语义的管理接口
     {
       matcher: ({ url, request, sameOrigin }) =>
-        sameOrigin &&
-        request.method === 'GET' &&
-        /^\/api\/(detail|search\/suggestions|douban(\/(categories|recommends))?)(\/|$|\?)/.test(
-          url.pathname,
-        ),
+        shouldHandleJsonApiCache({
+          sameOrigin,
+          method: request.method,
+          pathname: url.pathname,
+        }),
       handler: new StaleWhileRevalidate({
         cacheName: 'json-api-cache',
         plugins: [

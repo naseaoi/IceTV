@@ -150,8 +150,8 @@ describe('CoverImage', () => {
       value: 270,
     });
 
-    act(() => {
-      jest.advanceTimersByTime(250);
+    await act(async () => {
+      await Promise.resolve();
     });
 
     await waitFor(() => {
@@ -163,6 +163,25 @@ describe('CoverImage', () => {
     expect(
       document.querySelector('[data-cover-loading-backdrop]'),
     ).toHaveAttribute('data-cover-state', 'revealed');
+  });
+
+  it('在总超时后结束封面等待', () => {
+    jest.useFakeTimers();
+
+    render(
+      <CoverImage
+        src='https://img1.doubanio.com/view/photo/s_ratio_poster/public/p2931173550.jpg'
+        alt='超时封面'
+        priority
+      />,
+    );
+
+    act(() => {
+      jest.advanceTimersByTime(8000);
+    });
+
+    expect(screen.getByText('无封面')).toBeInTheDocument();
+    expect(screen.queryByTestId('cover-image')).not.toBeInTheDocument();
   });
 
   it('缓存命中时立即加载，并在当前图片完成后显示', async () => {

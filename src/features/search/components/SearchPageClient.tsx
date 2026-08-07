@@ -94,6 +94,7 @@ function AuthenticatedSearchPageClient() {
   const [showBackToTop, setShowBackToTop] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [showSuggestions, setShowSuggestions] = useState(false);
+  const [isComposingSearch, setIsComposingSearch] = useState(false);
 
   // 过滤器状态
   const [filterAll, setFilterAll] = useState<FilterState>(() =>
@@ -308,6 +309,8 @@ function AuthenticatedSearchPageClient() {
                   value={searchQuery}
                   onChange={handleInputChange}
                   onFocus={handleInputFocus}
+                  onCompositionStart={() => setIsComposingSearch(true)}
+                  onCompositionEnd={() => setIsComposingSearch(false)}
                   placeholder='搜索电影、电视剧...'
                   autoComplete='off'
                   className='h-12 w-full rounded-lg border border-gray-200/50 bg-gray-50/80 py-3 pl-10 pr-12 text-sm text-gray-700 placeholder-gray-400 shadow-sm focus:bg-white focus:outline-none focus:ring-2 focus:ring-green-400 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-300 dark:placeholder-gray-500 dark:focus:bg-gray-700'
@@ -335,6 +338,7 @@ function AuthenticatedSearchPageClient() {
                 <SearchSuggestions
                   query={searchQuery}
                   isVisible={showSuggestions}
+                  isComposing={isComposingSearch}
                   onSelect={handleSuggestionSelect}
                   onClose={() => setShowSuggestions(false)}
                   onEnterKey={() => {

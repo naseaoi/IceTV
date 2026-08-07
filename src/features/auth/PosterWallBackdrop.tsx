@@ -21,8 +21,8 @@ const POSTER_GRADIENTS = [
   ['#78350f', '#fbbf24'],
 ] as const;
 
-const COVER_COUNT = 22;
-const ROWS = 7;
+const COVER_COUNT = 16;
+const ROWS = 5;
 // 线性格点排列：行间偏移 8、行内步长 5（与封面数互质），同屏重复间距最大化
 const ROW_OFFSET_STEP = 8;
 const COL_STRIDE = 5;
@@ -75,7 +75,7 @@ export function PosterWallBackdrop() {
               {[...covers, ...covers].map((src, col) => (
                 <div
                   key={col}
-                  className='relative mr-3 aspect-[2/3] w-32 shrink-0 overflow-hidden rounded-lg opacity-90 sm:mr-4 sm:w-40 xl:w-48'
+                  className='relative mr-3 aspect-[2/3] w-32 shrink-0 overflow-hidden rounded-lg opacity-90 sm:mr-4 sm:w-40 xl:w-48 2xl:w-64'
                   style={posterStyle(row, col)}
                 >
                   <img

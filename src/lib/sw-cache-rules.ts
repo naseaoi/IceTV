@@ -58,3 +58,17 @@ export function shouldHandleExternalCoverCache(input: {
     input.hostname,
   );
 }
+
+export function shouldHandleJsonApiCache(input: {
+  sameOrigin: boolean;
+  method: string;
+  pathname: string;
+}): boolean {
+  return (
+    input.sameOrigin &&
+    input.method === 'GET' &&
+    /^\/api\/(detail|douban(\/(categories|recommends))?)(\/|$)/.test(
+      input.pathname,
+    )
+  );
+}
