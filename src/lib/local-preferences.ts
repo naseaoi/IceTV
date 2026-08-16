@@ -11,6 +11,7 @@ export const SOURCE_PREFERRED_QUALITY_STORAGE_PREFIX = 'preferredQuality:';
 export const SIDEBAR_COLLAPSED_STORAGE_KEY = 'sidebarCollapsed';
 export const SEEN_ANNOUNCEMENT_STORAGE_KEY = 'hasSeenAnnouncement';
 export const ADMIN_TABLE_COLUMN_WIDTHS_STORAGE_KEY = 'adminTableColumnWidths';
+export const CONTINUE_WATCHING_COUNT_STORAGE_KEY = 'continueWatchingCount';
 
 type AdminTableColumnWidths = Record<string, Record<string, number>>;
 
@@ -286,6 +287,37 @@ export function readSeenAnnouncement(): string | undefined {
 
 export function writeSeenAnnouncement(value: string) {
   writeStoredString(SEEN_ANNOUNCEMENT_STORAGE_KEY, value);
+}
+
+export function readContinueWatchingCount(): number {
+  const raw = readStoredString(CONTINUE_WATCHING_COUNT_STORAGE_KEY);
+  const count = Number.parseInt(raw || '', 10);
+  return Number.isFinite(count) ? Math.max(0, count) : 0;
+}
+
+export function writeContinueWatchingCount(value: number): void {
+  const count = Math.max(0, Math.floor(Number.isFinite(value) ? value : 0));
+  try {
+    writeStoredString(CONTINUE_WATCHING_COUNT_STORAGE_KEY, String(count));
+  } catch {}
+  try {
+    if (typeof document !== 'undefined') {
+      document.cookie = `cw_count=${count};path=/;max-age=${365 * 24 * 60 * 60};samesite=lax`;
+    }
+  } catch {}
+}
+
+export function resetContinueWatchingCount(): void {
+  try {
+    if (typeof window !== 'undefined') {
+      window.localStorage.removeItem(CONTINUE_WATCHING_COUNT_STORAGE_KEY);
+    }
+  } catch {}
+  try {
+    if (typeof document !== 'undefined') {
+      document.cookie = 'cw_count=0;path=/;max-age=0;samesite=lax';
+    }
+  } catch {}
 }
 
 export function readPreferredQualityHeight(): number | null {

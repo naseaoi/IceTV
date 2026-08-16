@@ -19,6 +19,11 @@ import {
   getRecentPlayRecords,
   subscribeToDataUpdates,
 } from '@/lib/db.client';
+import {
+  readContinueWatchingCount,
+  resetContinueWatchingCount,
+  writeContinueWatchingCount,
+} from '@/lib/local-preferences';
 import { parseStorageKey } from '@/lib/utils';
 
 interface ContinueWatchingProps {
@@ -73,7 +78,7 @@ function readInitialState(limit: number, fallbackSkeletonCount = 0) {
 
   const cachedCount = Math.max(
     fallbackSkeletonCount,
-    parseInt(localStorage.getItem('continueWatchingCount') || '0', 10),
+    readContinueWatchingCount(),
   );
   return {
     playRecords: [] as PlayRecordWithKey[],
@@ -114,16 +119,15 @@ export default function ContinueWatching({
       );
 
       setPlayRecords(sortedRecords);
-      const count = String(sortedRecords.length);
-      try {
-        localStorage.setItem('continueWatchingCount', count);
-      } catch {
-        void 0;
-      }
-      document.cookie = `cw_count=${count};path=/;max-age=${365 * 24 * 60 * 60};samesite=lax`;
     },
     [continueWatchingLimit],
   );
+
+  useEffect(() => {
+    if (loading) return;
+
+    writeContinueWatchingCount(playRecords.length);
+  }, [loading, playRecords.length]);
 
   useIsomorphicLayoutEffect(() => {
     const nextState = readInitialState(
@@ -309,10 +313,7 @@ export default function ContinueWatching({
           await clearAllPlayRecords();
           setPlayRecords([]);
           setShowClearConfirm(false);
-          try {
-            localStorage.setItem('continueWatchingCount', '0');
-          } catch {}
-          document.cookie = 'cw_count=0;path=/;max-age=0;samesite=lax';
+          resetContinueWatchingCount();
         }}
       />
     </>
