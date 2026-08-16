@@ -875,8 +875,9 @@ export class MySqlStorage implements IStorage {
         ? [username, safeLimit]
         : [username, periodStart, safeLimit];
     const [rows] = await this.pool.query<JsonRow[]>(
-      `WITH ranked_sessions AS (
+      `WITH normalized_sessions AS (
         SELECT
+          id,
           source,
           video_id,
           title,
@@ -886,16 +887,25 @@ export class MySqlStorage implements IStorage {
           started_at,
           ended_at,
           watch_seconds,
-          ROW_NUMBER() OVER (
-            PARTITION BY source, video_id
-            ORDER BY started_at DESC, id DESC
-          ) AS metadata_rank
+          CASE
+            WHEN TRIM(title) <> '' THEN LOWER(TRIM(title))
+            ELSE CONCAT(source, ':', video_id)
+          END AS title_key
         FROM playback_sessions
         WHERE username = ?${periodCondition}
+      ),
+      ranked_sessions AS (
+        SELECT
+          *,
+          ROW_NUMBER() OVER (
+            PARTITION BY title_key
+            ORDER BY started_at DESC, id DESC
+          ) AS metadata_rank
+        FROM normalized_sessions
       )
       SELECT
-        source,
-        video_id,
+        MAX(CASE WHEN metadata_rank = 1 THEN source END) AS source,
+        MAX(CASE WHEN metadata_rank = 1 THEN video_id END) AS video_id,
         MAX(CASE WHEN metadata_rank = 1 THEN title END) AS title,
         MAX(CASE WHEN metadata_rank = 1 THEN source_name END) AS source_name,
         MAX(CASE WHEN metadata_rank = 1 THEN cover END) AS cover,
@@ -904,7 +914,7 @@ export class MySqlStorage implements IStorage {
         COUNT(*) AS session_count,
         MAX(CASE WHEN ended_at > started_at THEN ended_at ELSE started_at END) AS last_watched_at
       FROM ranked_sessions
-      GROUP BY source, video_id
+      GROUP BY title_key
       ORDER BY watch_seconds DESC, last_watched_at DESC
       LIMIT ?`,
       queryParams,

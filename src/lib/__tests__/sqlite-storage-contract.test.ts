@@ -302,7 +302,7 @@ describe('sqlite storage contract', () => {
     await storage.setPlaybackSession('demo-user', {
       ...playbackSession,
       id: 'show-a-old',
-      title: 'Show A Old',
+      title: 'Show A',
       started_at: 100,
       ended_at: 160,
       watch_seconds: 60,
@@ -310,7 +310,7 @@ describe('sqlite storage contract', () => {
     await storage.setPlaybackSession('demo-user', {
       ...playbackSession,
       id: 'show-a-latest',
-      title: 'Show A Latest',
+      title: ' Show A ',
       started_at: 300,
       ended_at: 360,
       watch_seconds: 120,
@@ -341,22 +341,34 @@ describe('sqlite storage contract', () => {
       { key: 'early', watchSeconds: 60 },
       { key: 'recent', watchSeconds: 320 },
     ]);
+
+    await storage.setPlaybackSession('demo-user', {
+      ...playbackSession,
+      id: 'show-a-other-source',
+      source: 'source-b',
+      video_id: '3',
+      title: 'Show A',
+      started_at: 250,
+      ended_at: 280,
+      watch_seconds: 30,
+    });
+
     await expect(
       storage.getPlaybackTopItems('demo-user', 6, 100),
     ).resolves.toEqual([
+      expect.objectContaining({
+        videoId: '1',
+        title: ' Show A ',
+        watchSeconds: 210,
+        sessionCount: 3,
+        lastWatchedAt: 360,
+      }),
       expect.objectContaining({
         videoId: '2',
         title: 'Show B',
         watchSeconds: 200,
         sessionCount: 1,
         lastWatchedAt: 260,
-      }),
-      expect.objectContaining({
-        videoId: '1',
-        title: 'Show A Latest',
-        watchSeconds: 180,
-        sessionCount: 2,
-        lastWatchedAt: 360,
       }),
     ]);
   });

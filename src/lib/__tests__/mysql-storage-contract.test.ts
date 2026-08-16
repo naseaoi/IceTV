@@ -676,7 +676,7 @@ function createFakePool() {
       return [[totals], []];
     }
 
-    if (normalized.startsWith('WITH ranked_sessions AS (')) {
+    if (normalized.startsWith('WITH normalized_sessions AS (')) {
       const username = params[0] as string;
       const hasPeriodStart = params.length === 3;
       const periodStart = hasPeriodStart ? Number(params[1]) : null;
@@ -688,7 +688,11 @@ function createFakePool() {
         if (periodStart !== null && Number(row.started_at || 0) < periodStart) {
           continue;
         }
-        const key = `${String(row.source)}:${String(row.video_id)}`;
+        const normalizedTitle = String(row.title || '')
+          .trim()
+          .toLocaleLowerCase();
+        const key =
+          normalizedTitle || `${String(row.source)}:${String(row.video_id)}`;
         const sessions = grouped.get(key) || [];
         sessions.push(row);
         grouped.set(key, sessions);
@@ -1119,7 +1123,7 @@ describe('mysql storage contract', () => {
     await storage.setPlaybackSession('demo-user', {
       ...playbackSession,
       id: 'show-a-old',
-      title: 'Show A Old',
+      title: 'Show A',
       started_at: 100,
       ended_at: 160,
       watch_seconds: 60,
@@ -1127,7 +1131,7 @@ describe('mysql storage contract', () => {
     await storage.setPlaybackSession('demo-user', {
       ...playbackSession,
       id: 'show-a-latest',
-      title: 'Show A Latest',
+      title: ' Show A ',
       started_at: 300,
       ended_at: 360,
       watch_seconds: 120,
@@ -1161,23 +1165,34 @@ describe('mysql storage contract', () => {
     ]);
     expect(fakePool.getQueryCount()).toBe(1);
 
+    await storage.setPlaybackSession('demo-user', {
+      ...playbackSession,
+      id: 'show-a-other-source',
+      source: 'source-b',
+      video_id: '3',
+      title: 'Show A',
+      started_at: 250,
+      ended_at: 280,
+      watch_seconds: 30,
+    });
+
     fakePool.resetQueryCount();
     await expect(
       storage.getPlaybackTopItems('demo-user', 6, 100),
     ).resolves.toEqual([
+      expect.objectContaining({
+        videoId: '1',
+        title: ' Show A ',
+        watchSeconds: 210,
+        sessionCount: 3,
+        lastWatchedAt: 360,
+      }),
       expect.objectContaining({
         videoId: '2',
         title: 'Show B',
         watchSeconds: 200,
         sessionCount: 1,
         lastWatchedAt: 260,
-      }),
-      expect.objectContaining({
-        videoId: '1',
-        title: 'Show A Latest',
-        watchSeconds: 180,
-        sessionCount: 2,
-        lastWatchedAt: 360,
       }),
     ]);
     expect(fakePool.getQueryCount()).toBe(1);
