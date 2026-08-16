@@ -1,6 +1,7 @@
 import { probeVodEpisodeUrl } from '@/features/play/lib/vodProbe';
 import { isLazyEpisodeUrl } from '@/lib/lazy-episodes';
 import { getProxyModes, shouldUseServerProxy } from '@/lib/proxy-modes';
+import { reportSourceRouteStat } from '@/lib/source-route-stats.client';
 import { SearchResult } from '@/lib/types';
 
 export interface VideoInfo {
@@ -13,7 +14,7 @@ export interface VideoInfo {
 export interface ProbeEntry {
   info: VideoInfo;
   ts: number;
-  source: 'probe' | 'player' | 'pending';
+  source: 'probe' | 'player' | 'queued' | 'pending';
   previousInfo?: VideoInfo;
 }
 
@@ -149,18 +150,24 @@ async function runProbe(
 ) {
   const existingEntry = state.entries.get(key);
   const previousInfo =
-    existingEntry?.source === 'pending'
+    existingEntry?.source === 'pending' || existingEntry?.source === 'queued'
       ? existingEntry.previousInfo
       : existingEntry?.info;
 
   setEntry(key, {
     info: { quality: '未知', loadSpeed: '测量中...', pingTime: 0 },
     ts: Date.now(),
-    source: 'pending',
+    source: 'queued',
     previousInfo,
   });
 
   const releaseProbeSlot = await acquireProbeSlot();
+  setEntry(key, {
+    info: { quality: '未知', loadSpeed: '测量中...', pingTime: 0 },
+    ts: Date.now(),
+    source: 'pending',
+    previousInfo,
+  });
 
   try {
     let resolved = sourceInput;
@@ -181,7 +188,14 @@ async function runProbe(
       }
     }
 
+    const proxyModes = await getProxyModes();
+    let useProxy = shouldUseServerProxy(resolved.source, undefined, proxyModes);
     if (!resolved.episodes || resolved.episodes.length === 0) {
+      reportSourceRouteStat(
+        resolved.source,
+        useProxy ? 'server' : 'browser',
+        false,
+      );
       setEntry(key, {
         info: {
           quality: '未知',
@@ -196,7 +210,6 @@ async function runProbe(
     }
 
     try {
-      const proxyModes = await getProxyModes();
       let probeEpisodeUrl = resolveRequestedProbeEpisodeUrl(
         resolved,
         options.episodeIndex,
@@ -208,7 +221,7 @@ async function runProbe(
       if (!probeEpisodeUrl) {
         throw new Error('Requested episode is unavailable for probe');
       }
-      const useProxy = shouldUseServerProxy(
+      useProxy = shouldUseServerProxy(
         resolved.source,
         probeEpisodeUrl,
         proxyModes,
@@ -218,8 +231,23 @@ async function runProbe(
         useProxy,
         resolved.source,
       );
+      const finalUseProxy = shouldUseServerProxy(
+        resolved.source,
+        probeEpisodeUrl,
+        proxyModes,
+      );
+      reportSourceRouteStat(
+        resolved.source,
+        finalUseProxy ? 'server' : 'browser',
+        true,
+      );
       setEntry(key, { info, ts: Date.now(), source: 'probe' });
     } catch {
+      reportSourceRouteStat(
+        resolved.source,
+        useProxy ? 'server' : 'browser',
+        false,
+      );
       setEntry(key, {
         info: {
           quality: '错误',
