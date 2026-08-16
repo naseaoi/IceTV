@@ -4,14 +4,11 @@
 
 @layer utilities {
   .home-poster-card {
-    content-visibility: auto;
-    contain-intrinsic-size: 0 174px;
+    content-visibility: visible;
   }
 
-  @media (min-width: 640px) {
-    .home-poster-card {
-      contain-intrinsic-size: 0 298px;
-    }
+  .poster-rounded-clip {
+    clip-path: inset(0 round 0.5rem);
   }
 
   .scrollbar-hide {

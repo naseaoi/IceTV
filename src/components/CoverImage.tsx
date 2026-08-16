@@ -120,13 +120,21 @@ const CoverImage: React.FC<CoverImageProps> = memo(function CoverImage({
     () => Array.from(new Set([src, processed].filter(Boolean))),
     [processed, src],
   );
+  const initiallyKnownCached = useMemo(
+    () => !isEmpty && isCoverImageCached(cacheKeys),
+    [cacheKeys, isEmpty],
+  );
 
   const loadImmediately = !isEmpty && priority;
-  const [isNearViewport, setIsNearViewport] = useState(loadImmediately);
+  const [isNearViewport, setIsNearViewport] = useState(
+    loadImmediately || initiallyKnownCached,
+  );
   const [loaded, setLoaded] = useState(false);
-  const [knownCached, setKnownCached] = useState(false);
+  const [knownCached, setKnownCached] = useState(initiallyKnownCached);
   const [hasError, setHasError] = useState(false);
-  const [slotGranted, setSlotGranted] = useState(loadImmediately);
+  const [slotGranted, setSlotGranted] = useState(
+    loadImmediately || initiallyKnownCached,
+  );
 
   useIsomorphicLayoutEffect(() => {
     shouldAnimateRevealRef.current = true;
@@ -203,6 +211,7 @@ const CoverImage: React.FC<CoverImageProps> = memo(function CoverImage({
   }, [cacheKeys, loaded, hasError, isEmpty]);
 
   const showFallback = isEmpty || hasError;
+  const revealed = loaded || knownCached;
 
   useIsomorphicLayoutEffect(() => {
     if (!loaded || showFallback || !shouldAnimateRevealRef.current) {
@@ -312,11 +321,11 @@ const CoverImage: React.FC<CoverImageProps> = memo(function CoverImage({
     <div ref={containerRef} className='absolute inset-0'>
       <ImageLoadingBackdrop
         ref={loadingBackdropRef}
-        active={!loaded}
+        active={!revealed}
         data-cover-loading-backdrop
-        data-cover-state={loaded ? 'revealed' : 'loading'}
+        data-cover-state={revealed ? 'revealed' : 'loading'}
         className={`pointer-events-none absolute inset-0 z-[100] rounded-lg ${
-          loaded ? 'opacity-0' : 'opacity-100'
+          revealed ? 'opacity-0' : 'opacity-100'
         }`}
       />
       {slotGranted && (
@@ -332,7 +341,7 @@ const CoverImage: React.FC<CoverImageProps> = memo(function CoverImage({
           preload={priority}
           fetchPriority={priority ? 'high' : undefined}
           unoptimized={needsUnoptimized}
-          className={`${fit === 'contain' ? 'object-contain' : 'object-cover'} ${loaded ? 'opacity-100' : 'opacity-0'}`}
+          className={`${fit === 'contain' ? 'object-contain' : 'object-cover'} ${revealed ? 'opacity-100' : 'opacity-0'}`}
           referrerPolicy='no-referrer'
           loading={priority || knownCached || loaded ? 'eager' : 'lazy'}
           onLoad={handleLoad}

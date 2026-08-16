@@ -253,7 +253,7 @@ function PosterCard({
       }}
     >
       <div
-        className='relative aspect-[2/3] overflow-hidden rounded-lg'
+        className='poster-rounded-clip relative aspect-[2/3] overflow-hidden rounded-lg'
         style={noSelectStyle}
         onContextMenu={preventContextMenu}
       >

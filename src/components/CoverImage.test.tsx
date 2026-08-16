@@ -184,7 +184,7 @@ describe('CoverImage', () => {
     expect(screen.queryByTestId('cover-image')).not.toBeInTheDocument();
   });
 
-  it('缓存命中时立即加载，并在当前图片完成后显示', async () => {
+  it('缓存命中时首帧直接显示且不展示加载态', async () => {
     const src =
       'https://img1.doubanio.com/view/photo/s_ratio_poster/public/p2931173550.jpg';
     markCoverImagesLoaded([src]);
@@ -192,10 +192,16 @@ describe('CoverImage', () => {
     render(<CoverImage src={src} alt='已缓存封面' priority />);
 
     const image = screen.getByTestId('cover-image');
-    expect(image).toHaveClass('opacity-0');
+    expect(image).toHaveClass('opacity-100');
     expect(document.querySelector('[data-cover-loading-backdrop]')).toHaveClass(
-      'opacity-100',
+      'opacity-0',
     );
+    expect(
+      document.querySelector('[data-cover-loading-backdrop]'),
+    ).toHaveAttribute('data-cover-state', 'revealed');
+    expect(
+      document.querySelector('[data-cover-loading-backdrop] .animate-shimmer'),
+    ).not.toBeInTheDocument();
 
     fireEvent.load(image);
 

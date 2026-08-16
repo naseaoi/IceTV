@@ -98,6 +98,7 @@ describe('ScrollableRow', () => {
 
     const scroller = container.querySelector('.overflow-x-auto');
     expect(scroller).not.toBeNull();
+    expect(scroller).toHaveClass('py-2', 'pb-4', 'pl-2', 'pr-5');
     expect(scroller?.children).toHaveLength(2);
 
     Object.defineProperty(scroller, 'scrollLeft', {

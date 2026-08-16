@@ -171,7 +171,7 @@ export default function ScrollableRow({
     >
       <div
         ref={containerRef}
-        className='scrollbar-hide flex space-x-3 overflow-x-auto py-1 pb-3 pl-1 pr-4 sm:space-x-7 sm:py-2 sm:pb-6 sm:pr-6'
+        className='scrollbar-hide flex space-x-3 overflow-x-auto py-2 pb-4 pl-2 pr-5 sm:space-x-7 sm:py-2 sm:pb-6 sm:pl-2 sm:pr-6'
         onScroll={scheduleCheckScroll}
       >
         {childItems.slice(0, mountedItemCount)}
