@@ -135,7 +135,7 @@ describe('CoverImage', () => {
     expect(image).toHaveClass('opacity-0');
     expect(document.querySelector('[data-cover-loading-backdrop]')).toHaveClass(
       'z-[100]',
-      'opacity-100',
+      'cover-loading-backdrop-pending',
       'bg-gray-200/70',
       'dark:bg-gray-700/60',
     );
@@ -202,6 +202,9 @@ describe('CoverImage', () => {
     expect(
       document.querySelector('[data-cover-loading-backdrop]'),
     ).toHaveAttribute('data-cover-state', 'revealed');
+    expect(
+      document.querySelector('[data-cover-loading-backdrop]'),
+    ).not.toHaveClass('cover-loading-backdrop-pending');
     expect(
       document.querySelector('[data-cover-loading-backdrop] .animate-shimmer'),
     ).not.toBeInTheDocument();
@@ -293,6 +296,52 @@ describe('CoverImage', () => {
       'https://covers.example.com/poster.jpg',
     );
     expect(screen.queryByText('无封面')).not.toBeInTheDocument();
+  });
+
+  it('短期内不重试已经最终失败的封面', () => {
+    const src = 'https://covers.example.com/missing.jpg';
+    const firstRender = render(
+      <CoverImage
+        src={src}
+        alt='失败封面'
+        priority
+        checkClientCacheBeforeLoad
+      />,
+    );
+
+    fireEvent.error(screen.getByTestId('cover-image'));
+    fireEvent.error(screen.getByTestId('cover-image'));
+    expect(screen.getByText('无封面')).toBeInTheDocument();
+
+    firstRender.unmount();
+    render(
+      <CoverImage
+        src={src}
+        alt='失败封面'
+        priority
+        checkClientCacheBeforeLoad
+      />,
+    );
+
+    expect(screen.getByText('无封面')).toBeInTheDocument();
+    expect(screen.queryByTestId('cover-image')).not.toBeInTheDocument();
+    expect(
+      document.querySelector('[data-cover-loading-backdrop]'),
+    ).not.toBeInTheDocument();
+  });
+
+  it('需要客户端缓存检查时不在服务端输出图片请求', () => {
+    const serverHtml = renderToString(
+      <CoverImage
+        src='https://covers.example.com/deferred.jpg'
+        alt='延迟检查封面'
+        priority
+        checkClientCacheBeforeLoad
+      />,
+    );
+
+    expect(serverHtml).not.toContain('<img');
+    expect(serverHtml).toContain('data-cover-state="loading"');
   });
 
   it('使用较小的横向封面预加载范围', () => {

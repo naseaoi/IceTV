@@ -16,6 +16,8 @@ import NoImageCover from '@/components/NoImageCover';
 import { useRuntimeConfig } from '@/components/RuntimeConfigProvider';
 import {
   isCoverImageCached,
+  isCoverImageFailed,
+  markCoverImagesFailed,
   markCoverImagesLoaded,
   subscribeCoverImageLoaded,
 } from '@/lib/cover-image-cache';
@@ -80,6 +82,7 @@ interface CoverImageProps {
   fit?: 'cover' | 'contain';
   aspectRatio?: string;
   fallbackLabel?: string;
+  checkClientCacheBeforeLoad?: boolean;
 }
 
 const CoverImage: React.FC<CoverImageProps> = memo(function CoverImage({
@@ -90,6 +93,7 @@ const CoverImage: React.FC<CoverImageProps> = memo(function CoverImage({
   quality = 72,
   fit = 'cover',
   fallbackLabel = '无封面',
+  checkClientCacheBeforeLoad = false,
 }) {
   const isEmpty = !src || src.trim() === '';
   const releaseSlotRef = useRef<(() => void) | null>(null);
@@ -120,7 +124,7 @@ const CoverImage: React.FC<CoverImageProps> = memo(function CoverImage({
     () => Array.from(new Set([src, processed].filter(Boolean))),
     [processed, src],
   );
-  const loadImmediately = !isEmpty && priority;
+  const loadImmediately = !isEmpty && priority && !checkClientCacheBeforeLoad;
   const [isNearViewport, setIsNearViewport] = useState(loadImmediately);
   const [loaded, setLoaded] = useState(false);
   const [knownCached, setKnownCached] = useState(false);
@@ -141,17 +145,19 @@ const CoverImage: React.FC<CoverImageProps> = memo(function CoverImage({
     if (isEmpty) return;
 
     const isCached = isCoverImageCached(cacheKeys);
+    const isFailed = !isCached && isCoverImageFailed([processed]);
     setKnownCached(isCached);
-    setLoaded(false);
-    setSlotGranted(isCached || priority);
-    setIsNearViewport(isCached || priority);
+    setLoaded(isFailed);
+    setHasError(isFailed);
+    setSlotGranted(!isFailed && (isCached || priority));
+    setIsNearViewport(!isFailed && (isCached || priority));
 
-    if (isCached) {
+    if (isCached || isFailed) {
       shouldAnimateRevealRef.current = false;
       releaseSlotRef.current?.();
       releaseSlotRef.current = null;
     }
-  }, [cacheKeys, isEmpty, priority]);
+  }, [cacheKeys, isEmpty, priority, processed]);
 
   useEffect(() => {
     if (isEmpty || isNearViewport || priority) return;
@@ -250,6 +256,7 @@ const CoverImage: React.FC<CoverImageProps> = memo(function CoverImage({
       return;
     }
 
+    markCoverImagesFailed([processed]);
     setHasError(true);
     setLoaded(true);
     releaseSlotRef.current?.();
@@ -316,7 +323,7 @@ const CoverImage: React.FC<CoverImageProps> = memo(function CoverImage({
         data-cover-loading-backdrop
         data-cover-state={revealed ? 'revealed' : 'loading'}
         className={`pointer-events-none absolute inset-0 z-[100] rounded-lg ${
-          revealed ? 'opacity-0' : 'opacity-100'
+          revealed ? 'opacity-0' : 'cover-loading-backdrop-pending'
         }`}
       />
       {slotGranted && (

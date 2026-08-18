@@ -171,6 +171,7 @@ export function VideoCardPoster({
         alt={title}
         priority={priority}
         fit={origin === 'live' ? 'contain' : 'cover'}
+        checkClientCacheBeforeLoad={from === 'playrecord'}
       />
 
       <div

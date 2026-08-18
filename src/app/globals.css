@@ -687,6 +687,17 @@ div[data-media-provider] video {
   animation: shimmer 1.5s ease-in-out infinite;
 }
 
+@keyframes cover-loading-backdrop-show {
+  to {
+    opacity: 1;
+  }
+}
+
+.cover-loading-backdrop-pending {
+  opacity: 0;
+  animation: cover-loading-backdrop-show 0s linear 100ms forwards;
+}
+
 /* 搜索结果卡片渐显动画 */
 @keyframes fade-in {
   from {

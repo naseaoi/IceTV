@@ -197,7 +197,12 @@ export default function MobileContinueCard({
     >
       <div className='flex h-full'>
         <div className='relative h-full w-[80px] shrink-0 overflow-hidden'>
-          <CoverImage src={poster} alt={title} sizes='80px' />
+          <CoverImage
+            src={poster}
+            alt={title}
+            sizes='80px'
+            checkClientCacheBeforeLoad
+          />
         </div>
         <div className='flex min-w-0 flex-1 flex-col justify-between p-2.5 pb-3'>
           <div className='min-w-0'>
