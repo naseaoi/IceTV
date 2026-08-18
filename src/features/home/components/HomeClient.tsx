@@ -27,11 +27,16 @@ import {
 } from '@/lib/local-preferences';
 import { DoubanItem } from '@/lib/types';
 
+import {
+  mergeHomeInitialDataWithClientSnapshot,
+  writeHomeClientSnapshot,
+} from '../lib/home-client-cache';
 import { HomeMineSwitch } from './HomeMineSwitch';
 
 interface HomeClientProps {
   initialData: HomeInitialData;
   continueWatchingSkeletonCount?: number;
+  routeFallback?: boolean;
 }
 
 type RecommendationLoadingState = {
@@ -130,14 +135,18 @@ function hasUsableBangumiCalendarData(
 export default function HomeClient({
   initialData,
   continueWatchingSkeletonCount = 0,
+  routeFallback = false,
 }: HomeClientProps) {
-  const [hotMovies, setHotMovies] = useState(initialData.hotMovies);
-  const [hotTvShows, setHotTvShows] = useState(initialData.hotTvShows);
+  const [initialViewData] = useState(() =>
+    mergeHomeInitialDataWithClientSnapshot(initialData),
+  );
+  const [hotMovies, setHotMovies] = useState(initialViewData.hotMovies);
+  const [hotTvShows, setHotTvShows] = useState(initialViewData.hotTvShows);
   const [hotVarietyShows, setHotVarietyShows] = useState(
-    initialData.hotVarietyShows,
+    initialViewData.hotVarietyShows,
   );
   const [bangumiCalendarData, setBangumiCalendarData] = useState(
-    initialData.bangumiCalendarData,
+    initialViewData.bangumiCalendarData,
   );
   const [unavailable, setUnavailable] = useState<RecommendationLoadingState>({
     hotMovies: false,
@@ -335,6 +344,42 @@ export default function HomeClient({
     });
   }, [currentWeekday, hotMovies, hotTvShows, hotVarietyShows, todayAnimes]);
 
+  useEffect(() => {
+    const completeRecommendationData =
+      hotMovies.length > 0 &&
+      hotTvShows.length > 0 &&
+      hotVarietyShows.length > 0 &&
+      hasUsableBangumiCalendarData(bangumiCalendarData);
+
+    if (
+      routeFallback ||
+      !completeRecommendationData ||
+      Object.values(unavailable).some(Boolean) ||
+      Object.values(loading).some(Boolean)
+    ) {
+      return;
+    }
+
+    writeHomeClientSnapshot(
+      {
+        hotMovies,
+        hotTvShows,
+        hotVarietyShows,
+        bangumiCalendarData,
+      },
+      continueWatchingSkeletonCount,
+    );
+  }, [
+    bangumiCalendarData,
+    continueWatchingSkeletonCount,
+    hotMovies,
+    hotTvShows,
+    hotVarietyShows,
+    loading,
+    routeFallback,
+    unavailable,
+  ]);
+
   const handleCloseAnnouncement = (currentAnnouncement: string) => {
     setShowAnnouncement(false);
     writeSeenAnnouncement(currentAnnouncement);
@@ -351,6 +396,7 @@ export default function HomeClient({
           <div className='-mb-3 sm:-mb-6'>
             <ContinueWatching
               initialSkeletonCount={continueWatchingSkeletonCount}
+              refreshOnMount={!routeFallback}
             />
 
             <RecommendationSection

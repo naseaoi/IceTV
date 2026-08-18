@@ -15,6 +15,8 @@ export interface VideoCardProps {
   year?: string;
   from: 'playrecord' | 'favorite' | 'search' | 'douban';
   currentEpisode?: number;
+  /** 播放记录的真实集索引（0-based）；分组源展示集数与真实索引不一致时使用 */
+  resumeEpisodeIndex?: number;
   douban_id?: number;
   onDelete?: () => void;
   rate?: string;

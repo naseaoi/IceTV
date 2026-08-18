@@ -16,6 +16,8 @@ import NoImageCover from '@/components/NoImageCover';
 import { useRuntimeConfig } from '@/components/RuntimeConfigProvider';
 import {
   isCoverImageCached,
+  isCoverImageFailed,
+  markCoverImagesFailed,
   markCoverImagesLoaded,
   subscribeCoverImageLoaded,
 } from '@/lib/cover-image-cache';
@@ -80,6 +82,7 @@ interface CoverImageProps {
   fit?: 'cover' | 'contain';
   aspectRatio?: string;
   fallbackLabel?: string;
+  checkClientCacheBeforeLoad?: boolean;
 }
 
 const CoverImage: React.FC<CoverImageProps> = memo(function CoverImage({
@@ -90,6 +93,7 @@ const CoverImage: React.FC<CoverImageProps> = memo(function CoverImage({
   quality = 72,
   fit = 'cover',
   fallbackLabel = '无封面',
+  checkClientCacheBeforeLoad = false,
 }) {
   const isEmpty = !src || src.trim() === '';
   const releaseSlotRef = useRef<(() => void) | null>(null);
@@ -120,8 +124,7 @@ const CoverImage: React.FC<CoverImageProps> = memo(function CoverImage({
     () => Array.from(new Set([src, processed].filter(Boolean))),
     [processed, src],
   );
-
-  const loadImmediately = !isEmpty && priority;
+  const loadImmediately = !isEmpty && priority && !checkClientCacheBeforeLoad;
   const [isNearViewport, setIsNearViewport] = useState(loadImmediately);
   const [loaded, setLoaded] = useState(false);
   const [knownCached, setKnownCached] = useState(false);
@@ -142,17 +145,19 @@ const CoverImage: React.FC<CoverImageProps> = memo(function CoverImage({
     if (isEmpty) return;
 
     const isCached = isCoverImageCached(cacheKeys);
+    const isFailed = !isCached && isCoverImageFailed([processed]);
     setKnownCached(isCached);
-    setLoaded(false);
-    setSlotGranted(isCached || priority);
-    setIsNearViewport(isCached || priority);
+    setLoaded(isFailed);
+    setHasError(isFailed);
+    setSlotGranted(!isFailed && (isCached || priority));
+    setIsNearViewport(!isFailed && (isCached || priority));
 
-    if (isCached) {
+    if (isCached || isFailed) {
       shouldAnimateRevealRef.current = false;
       releaseSlotRef.current?.();
       releaseSlotRef.current = null;
     }
-  }, [cacheKeys, isEmpty, priority]);
+  }, [cacheKeys, isEmpty, priority, processed]);
 
   useEffect(() => {
     if (isEmpty || isNearViewport || priority) return;
@@ -203,6 +208,7 @@ const CoverImage: React.FC<CoverImageProps> = memo(function CoverImage({
   }, [cacheKeys, loaded, hasError, isEmpty]);
 
   const showFallback = isEmpty || hasError;
+  const revealed = loaded || knownCached;
 
   useIsomorphicLayoutEffect(() => {
     if (!loaded || showFallback || !shouldAnimateRevealRef.current) {
@@ -250,6 +256,7 @@ const CoverImage: React.FC<CoverImageProps> = memo(function CoverImage({
       return;
     }
 
+    markCoverImagesFailed([processed]);
     setHasError(true);
     setLoaded(true);
     releaseSlotRef.current?.();
@@ -268,8 +275,6 @@ const CoverImage: React.FC<CoverImageProps> = memo(function CoverImage({
     if (!image) return;
 
     let cancelled = false;
-    let intervalId: ReturnType<typeof setInterval> | null = null;
-    let timeoutId: ReturnType<typeof setTimeout> | null = null;
 
     const finishFromImageState = () => {
       if (cancelled || !image.complete) return false;
@@ -285,6 +290,8 @@ const CoverImage: React.FC<CoverImageProps> = memo(function CoverImage({
       return;
     }
 
+    queueMicrotask(finishFromImageState);
+
     if (typeof image.decode === 'function') {
       void image
         .decode()
@@ -292,24 +299,13 @@ const CoverImage: React.FC<CoverImageProps> = memo(function CoverImage({
         .catch(finishFromImageState);
     }
 
-    intervalId = setInterval(() => {
-      if (finishFromImageState() && intervalId) {
-        clearInterval(intervalId);
-        intervalId = null;
-      }
-    }, 250);
-
-    timeoutId = setTimeout(() => {
-      if (intervalId) {
-        clearInterval(intervalId);
-        intervalId = null;
-      }
+    const timeoutId = setTimeout(() => {
+      if (!finishFromImageState()) handleError();
     }, 8000);
 
     return () => {
       cancelled = true;
-      if (intervalId) clearInterval(intervalId);
-      if (timeoutId) clearTimeout(timeoutId);
+      clearTimeout(timeoutId);
     };
   }, [handleError, handleLoad, hasError, loaded, processed, slotGranted]);
 
@@ -323,11 +319,11 @@ const CoverImage: React.FC<CoverImageProps> = memo(function CoverImage({
     <div ref={containerRef} className='absolute inset-0'>
       <ImageLoadingBackdrop
         ref={loadingBackdropRef}
-        active={!loaded}
+        active={!revealed}
         data-cover-loading-backdrop
-        data-cover-state={loaded ? 'revealed' : 'loading'}
+        data-cover-state={revealed ? 'revealed' : 'loading'}
         className={`pointer-events-none absolute inset-0 z-[100] rounded-lg ${
-          loaded ? 'opacity-0' : 'opacity-100'
+          revealed ? 'opacity-0' : 'cover-loading-backdrop-pending'
         }`}
       />
       {slotGranted && (
@@ -343,7 +339,7 @@ const CoverImage: React.FC<CoverImageProps> = memo(function CoverImage({
           preload={priority}
           fetchPriority={priority ? 'high' : undefined}
           unoptimized={needsUnoptimized}
-          className={`${fit === 'contain' ? 'object-contain' : 'object-cover'} ${loaded ? 'opacity-100' : 'opacity-0'}`}
+          className={`${fit === 'contain' ? 'object-contain' : 'object-cover'} ${revealed ? 'opacity-100' : 'opacity-0'}`}
           referrerPolicy='no-referrer'
           loading={priority || knownCached || loaded ? 'eager' : 'lazy'}
           onLoad={handleLoad}

@@ -24,6 +24,30 @@ const config: VideoCardDisplayConfig = {
 };
 
 describe('VideoCardPoster', () => {
+  it('封面容器使用显式圆角裁剪以保持缩放后的圆角', () => {
+    render(
+      <VideoCardPoster
+        title='测试影片'
+        poster='/poster.webp'
+        priority={false}
+        origin='vod'
+        from='search'
+        config={config}
+        isBangumi={false}
+        isAggregate={false}
+        visibleFavorited={false}
+        onDeleteRecord={jest.fn()}
+        onToggleFavorite={jest.fn()}
+      />,
+    );
+
+    expect(screen.getByLabelText('测试影片').parentElement).toHaveClass(
+      'poster-rounded-clip',
+      'overflow-hidden',
+      'rounded-lg',
+    );
+  });
+
   it('源站名显示在顶部行内且年份显示在左下角', () => {
     render(
       <VideoCardPoster

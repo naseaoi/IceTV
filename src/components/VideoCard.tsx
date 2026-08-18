@@ -75,6 +75,7 @@ const VideoCard = forwardRef<VideoCardHandle, VideoCardProps>(
       year,
       from,
       currentEpisode,
+      resumeEpisodeIndex,
       douban_id,
       onDelete,
       rate,
@@ -405,7 +406,7 @@ const VideoCard = forwardRef<VideoCardHandle, VideoCardProps>(
           savePlayIntent({
             source: actualSource,
             id: actualId,
-            episodeIndex: Math.max(0, currentEpisode - 1),
+            episodeIndex: resumeEpisodeIndex ?? Math.max(0, currentEpisode - 1),
             resumeTime: resumeTime || 0,
           });
         }
@@ -421,6 +422,7 @@ const VideoCard = forwardRef<VideoCardHandle, VideoCardProps>(
       actualSource,
       actualId,
       currentEpisode,
+      resumeEpisodeIndex,
       resumeTime,
       warmupOnNavigate,
     ]);

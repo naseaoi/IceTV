@@ -2,6 +2,7 @@
 import { Dispatch, MutableRefObject, SetStateAction, useEffect } from 'react';
 import { useCallback, useRef } from 'react';
 
+import { resolveEpisodeGroupPosition } from '@/features/play/lib/episodeGroups';
 import {
   clearPlaybackCheckpointStorage,
   hasMeaningfulPlaybackTime,
@@ -136,6 +137,13 @@ export async function saveCurrentPlayProgress(
     return;
   }
 
+  // 分组源（如 giri 繁中/简中）记录组内集数，供继续观看卡片展示组内进度
+  const groupPosition = resolveEpisodeGroupPosition(
+    detailRef.current?.episode_groups,
+    currentEpisodeIndexRef.current,
+    detailRef.current?.episodes.length || 0,
+  );
+
   const record: PlayRecord = {
     title: videoTitleRef.current,
     source_name: detailRef.current?.source_name || '',
@@ -143,6 +151,12 @@ export async function saveCurrentPlayProgress(
     cover: detailRef.current?.poster || '',
     index: currentEpisodeIndexRef.current + 1,
     total_episodes: detailRef.current?.episodes.length || 1,
+    ...(groupPosition
+      ? {
+          group_index: groupPosition.episodeOffset + 1,
+          group_total: groupPosition.groupCount,
+        }
+      : {}),
     play_time: Math.floor(currentTime),
     total_time: Math.floor(duration),
     save_time: Date.now(),

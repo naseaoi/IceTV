@@ -155,4 +155,5 @@ const { MySqlStorage } = await import('@/lib/mysql.db');
 
 - 本地开发默认使用 `pnpm dev`；仅遇到 Turbopack 兼容问题时使用 `pnpm dev:webpack`
 - 改动后运行 `pnpm lint`、`pnpm typecheck` 和相关测试
+- 非空数据性能回归运行 `pnpm perf:baseline`，采集规则见 `docs/performance-baseline.md`
 - 没有现成测试时明确说明未验证项

@@ -82,4 +82,11 @@ module.exports = withSerwist({
   swSrc: 'src/sw.ts',
   swDest: 'public/sw.js',
   disable: process.env.NODE_ENV === 'development',
+  globPublicPatterns: [
+    'changelog.json',
+    'favicon.ico',
+    'logo.webp',
+    'manifest.json',
+  ],
+  exclude: [/static\/chunks\//, /static\/media\//],
 })(nextConfig);

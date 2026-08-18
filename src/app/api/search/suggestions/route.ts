@@ -1,5 +1,9 @@
 ﻿import { NextRequest, NextResponse } from 'next/server';
 
+import {
+  normalizeSearchQueryInput,
+  shouldRequestSearchSuggestions,
+} from '@/features/search/lib/searchQuery';
 import { isGuardFailure, requireActiveUser } from '@/lib/api-auth';
 import { getAvailableApiSites, getConfigForRead } from '@/lib/config';
 import { searchFirstPageFromApi } from '@/lib/downstream';
@@ -15,9 +19,9 @@ export async function GET(request: NextRequest) {
 
     const config = await getConfigForRead();
     const { searchParams } = new URL(request.url);
-    const query = searchParams.get('q')?.trim();
+    const query = normalizeSearchQueryInput(searchParams.get('q') || '');
 
-    if (!query) {
+    if (!shouldRequestSearchSuggestions(query)) {
       return NextResponse.json(
         { suggestions: [] },
         { headers: { 'Cache-Control': 'private, no-store' } },
@@ -29,6 +33,7 @@ export async function GET(request: NextRequest) {
       config,
       query,
       guardResult.username,
+      request.signal,
     );
 
     return NextResponse.json(
@@ -45,6 +50,7 @@ async function generateSuggestions(
   config: Readonly<AdminConfig>,
   query: string,
   username: string,
+  signal?: AbortSignal,
 ): Promise<
   Array<{
     text: string;
@@ -60,7 +66,7 @@ async function generateSuggestions(
   if (apiSites.length > 0) {
     // 取第一个可用的数据源进行搜索
     const firstSite = apiSites[0];
-    const results = await searchFirstPageFromApi(firstSite, query);
+    const results = await searchFirstPageFromApi(firstSite, query, { signal });
 
     realKeywords = Array.from(
       new Set(

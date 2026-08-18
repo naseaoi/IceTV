@@ -44,7 +44,13 @@ export function getCompletedProbeInfo(
   entry: ProbeEntry | undefined,
 ): VideoInfo | undefined {
   if (!entry) return undefined;
-  return entry.source === 'pending' ? entry.previousInfo : entry.info;
+  return entry.source === 'pending' || entry.source === 'queued'
+    ? entry.previousInfo
+    : entry.info;
+}
+
+export function isActivelyProbing(entry: ProbeEntry | undefined): boolean {
+  return entry?.source === 'pending';
 }
 
 const isSortingReadyVideoInfo = (videoInfo?: VideoInfo): boolean => {
@@ -414,8 +420,11 @@ export const SourcesTab: React.FC<SourcesTabProps> = ({
               source.source?.toString() === currentSource?.toString() &&
               source.id?.toString() === currentId?.toString();
             const sourceKey = `${source.source}-${source.id}`;
-            const videoInfo = probeSnapshot.get(sourceKey)?.info;
-            const isTesting = videoInfo?.loadSpeed === '测量中...';
+            const probeEntry = probeSnapshot.get(sourceKey);
+            const isTesting = isActivelyProbing(probeEntry);
+            const videoInfo = isTesting
+              ? probeEntry?.info
+              : getCompletedProbeInfo(probeEntry);
             const episodeCount = Math.max(
               source.episodes.length,
               source.episodes_titles?.length || 0,

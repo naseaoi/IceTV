@@ -1,10 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 
-import {
-  dedupePlaybackSessionsByTitle,
-  filterPlaybackHistorySessions,
-} from '@/features/playback-stats/lib/history';
-import type { PlaybackHistoryResponse } from '@/features/playback-stats/types';
+import { getPlaybackHistoryPage } from '@/features/playback-stats/lib/historyPagination';
 import { isGuardFailure, requireActiveUser } from '@/lib/api-auth';
 import { getConfigForRead } from '@/lib/config';
 import { db } from '@/lib/db';
@@ -25,6 +21,12 @@ function normalizeSessionId(value: string | null): string | null {
   return /^[a-zA-Z0-9_-]{8,80}$/.test(id) ? id : null;
 }
 
+function parseHistoryOffset(value: string | null, max: number): number {
+  if (!value) return 0;
+  const parsed = Number.parseInt(value, 10);
+  return Number.isFinite(parsed) && parsed >= 0 && parsed < max ? parsed : 0;
+}
+
 export async function GET(request: NextRequest) {
   try {
     const guardResult = await requireActiveUser(request);
@@ -39,29 +41,16 @@ export async function GET(request: NextRequest) {
       parsePositiveInteger(searchParams.get('limit'), pageSize),
       pageSize,
     );
-    const cursor = searchParams.get('cursor');
+    const historyLimit = Math.max(pageSize, runtimeParams.PlaybackHistoryLimit);
+    const offset = parseHistoryOffset(searchParams.get('cursor'), historyLimit);
     const keyword = normalizePlaybackSearchKeyword(searchParams.get('q') ?? '');
-    const fetchLimit = Math.min(Math.max(limit * 5, limit + 1), 500);
-    const sessions = await db.getPlaybackSessions(guardResult.username, {
-      limit: fetchLimit,
-      cursor: cursor ? Number(cursor) : undefined,
-      keyword,
-    });
-    const dedupedSessions = dedupePlaybackSessionsByTitle(
-      filterPlaybackHistorySessions(sessions),
-      {
-        limit: limit + 1,
-        mergeWatchSeconds: true,
-      },
+    const response = await getPlaybackHistoryPage(
+      (query) =>
+        db.getPlaybackSessions(guardResult.username, { ...query, keyword }),
+      offset,
+      limit,
+      historyLimit,
     );
-    const items = dedupedSessions.slice(0, limit);
-    const response: PlaybackHistoryResponse = {
-      items,
-      nextCursor:
-        dedupedSessions.length > limit && items.length > 0
-          ? items[items.length - 1].started_at
-          : null,
-    };
 
     return NextResponse.json(response, {
       status: 200,

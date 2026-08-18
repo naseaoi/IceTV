@@ -154,6 +154,58 @@ describe('downstream giri source', () => {
     );
   });
 
+  it('giri 多版本合并为可切换的选集目录', async () => {
+    const detailHtml = `
+      <html>
+        <h3 class="slide-info-title">Multi Version Anime</h3>
+        <div class="anthology-tab swiper-container">
+          <div class="swiper-wrapper">
+            <a>繁中</a>
+            <a>简中</a>
+          </div>
+        </div>
+        <div class="anthology-list-box none">
+          <a href="/playGV101-1-1/">繁中01</a>
+          <a href="/playGV101-1-2/">繁中02</a>
+        </div>
+        <div class="anthology-list-box none">
+          <a href="/playGV101-2-1/">简中01</a>
+          <a href="/playGV101-2-2/">简中02</a>
+        </div>
+      </html>
+    `;
+    const fetchMock = global.fetch as jest.Mock;
+    fetchMock.mockImplementation(async (input: RequestInfo | URL) => {
+      if (String(input) === 'https://anime.girigirilove.icu/GV101/') {
+        return createTextResponse(detailHtml);
+      }
+      return createTextResponse('', false);
+    });
+
+    const detail = await getDetailFromApi(
+      createGiriSite('https://anime.girigirilove.icu'),
+      '101__giri_2',
+    );
+
+    expect(detail).toEqual(
+      expect.objectContaining({
+        id: '101',
+        episodes: [
+          'icetv-lazy://giri/playGV101-1-1/',
+          'icetv-lazy://giri/playGV101-1-2/',
+          'icetv-lazy://giri/playGV101-2-1/',
+          'icetv-lazy://giri/playGV101-2-2/',
+        ],
+        episodes_titles: ['繁中01', '繁中02', '简中01', '简中02'],
+        episode_groups: [
+          { label: '繁中', count: 2 },
+          { label: '简中', count: 2 },
+        ],
+      }),
+    );
+    expect(detail.related_sources).toBeUndefined();
+  });
+
   it('resolveGirigiriEpisodePlayUrlByPath 解析播放页 m3u8 地址', async () => {
     const playHtml = `
       <html>

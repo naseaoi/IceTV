@@ -561,21 +561,30 @@ export function createOptimisticWriter<TCache>(options: {
   syncToServer: () => Promise<void>;
   eventDetail?: unknown;
   onServerError?: (err: unknown) => Promise<void>;
+  requireExistingCacheForOptimisticUpdate?: boolean;
 }) => Promise<void> {
   const { getCached, setCached, eventName, emptyCacheFactory } = options;
 
   return async (mutation): Promise<void> => {
-    const { mutateCached, syncToServer, eventDetail, onServerError } = mutation;
+    const {
+      mutateCached,
+      syncToServer,
+      eventDetail,
+      onServerError,
+      requireExistingCacheForOptimisticUpdate = false,
+    } = mutation;
 
-    const cached = getCached() || emptyCacheFactory();
-    const updated = mutateCached(cached);
-    setCached(updated);
+    const cached = getCached();
+    if (cached !== null || !requireExistingCacheForOptimisticUpdate) {
+      const updated = mutateCached(cached ?? emptyCacheFactory());
+      setCached(updated);
 
-    window.dispatchEvent(
-      new CustomEvent(eventName, {
-        detail: eventDetail !== undefined ? eventDetail : updated,
-      }),
-    );
+      window.dispatchEvent(
+        new CustomEvent(eventName, {
+          detail: eventDetail !== undefined ? eventDetail : updated,
+        }),
+      );
+    }
 
     try {
       await syncToServer();

@@ -3,6 +3,7 @@ import {
   shouldHandleBangumiCoverCache,
   shouldHandleExternalCoverCache,
   shouldHandleImageProxyCache,
+  shouldHandleJsonApiCache,
   shouldHandleNextImageCache,
   shouldHandleVodSegmentCache,
 } from '../sw-cache-rules';
@@ -21,6 +22,25 @@ describe('excludeDefaultApiRuntimeCache', () => {
     expect(excludeDefaultApiRuntimeCache([apiRule, otherRule])).toEqual([
       otherRule,
     ]);
+  });
+});
+
+describe('shouldHandleJsonApiCache', () => {
+  it('caches reusable read APIs only', () => {
+    expect(
+      shouldHandleJsonApiCache({
+        sameOrigin: true,
+        method: 'GET',
+        pathname: '/api/douban/recommends',
+      }),
+    ).toBe(true);
+    expect(
+      shouldHandleJsonApiCache({
+        sameOrigin: true,
+        method: 'GET',
+        pathname: '/api/search/suggestions',
+      }),
+    ).toBe(false);
   });
 });
 

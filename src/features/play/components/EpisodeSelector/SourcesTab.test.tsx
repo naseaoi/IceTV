@@ -1,5 +1,6 @@
 import {
   getCompletedProbeInfo,
+  isActivelyProbing,
   sortSourcesForDisplay,
   VIDEO_INFO_BATCH_SIZE,
 } from '@/features/play/components/EpisodeSelector/SourcesTab';
@@ -55,6 +56,21 @@ describe('SourcesTab source sorting', () => {
     );
 
     expect(getCompletedProbeInfo(entry)).toBe(previousFailure);
+  });
+
+  it('只有拿到并发槽位的条目才处于检测中', () => {
+    const queued = createEntry(
+      { quality: '未知', loadSpeed: '测量中...', pingTime: 0 },
+      'queued',
+    );
+    const active = createEntry(
+      { quality: '未知', loadSpeed: '测量中...', pingTime: 0 },
+      'pending',
+    );
+
+    expect(isActivelyProbing(queued)).toBe(false);
+    expect(isActivelyProbing(active)).toBe(true);
+    expect(getCompletedProbeInfo(queued)).toBeUndefined();
   });
 
   it('失败源重测时保持在成功源之后', () => {

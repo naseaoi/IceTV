@@ -2,9 +2,15 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 
+import {
+  normalizeSearchQueryInput,
+  shouldRequestSearchSuggestions,
+} from '@/features/search/lib/searchQuery';
+
 interface SearchSuggestionsProps {
   query: string;
   isVisible: boolean;
+  isComposing?: boolean;
   onSelect: (suggestion: string) => void;
   onClose: () => void;
   onEnterKey: () => void; // 新增：处理回车键的回调
@@ -19,6 +25,7 @@ interface SuggestionItem {
 export default function SearchSuggestions({
   query,
   isVisible,
+  isComposing = false,
   onSelect,
   onClose,
   onEnterKey,
@@ -47,7 +54,7 @@ export default function SearchSuggestions({
           signal: controller.signal,
         },
       );
-      if (response.ok) {
+      if (response.ok && !controller.signal.aborted) {
         const data = await response.json();
         const apiSuggestions = data.suggestions.map(
           (item: { text: string }) => ({
@@ -55,7 +62,9 @@ export default function SearchSuggestions({
             type: 'related' as const,
           }),
         );
-        setSuggestions(apiSuggestions);
+        if (!controller.signal.aborted) {
+          setSuggestions(apiSuggestions);
+        }
       }
     } catch (err: unknown) {
       // 类型保护判断 err 是否是 Error 类型
@@ -68,6 +77,10 @@ export default function SearchSuggestions({
         // 如果 err 不是 Error 类型，也清空提示
         setSuggestions([]);
       }
+    } finally {
+      if (abortControllerRef.current === controller) {
+        abortControllerRef.current = null;
+      }
     }
   }, []);
 
@@ -78,18 +91,27 @@ export default function SearchSuggestions({
         clearTimeout(debounceTimer.current);
       }
       debounceTimer.current = setTimeout(() => {
-        if (searchQuery.trim() && isVisible) {
-          fetchSuggestionsFromAPI(searchQuery);
+        if (
+          !isComposing &&
+          isVisible &&
+          shouldRequestSearchSuggestions(searchQuery)
+        ) {
+          fetchSuggestionsFromAPI(normalizeSearchQueryInput(searchQuery));
         } else {
           setSuggestions([]);
         }
       }, 300); //300ms
     },
-    [isVisible, fetchSuggestionsFromAPI],
+    [isComposing, isVisible, fetchSuggestionsFromAPI],
   );
 
   useEffect(() => {
-    if (!query.trim() || !isVisible) {
+    if (isComposing || !isVisible || !shouldRequestSearchSuggestions(query)) {
+      if (debounceTimer.current) {
+        clearTimeout(debounceTimer.current);
+      }
+      abortControllerRef.current?.abort();
+      abortControllerRef.current = null;
       setSuggestions([]);
       return;
     }
@@ -100,8 +122,10 @@ export default function SearchSuggestions({
       if (debounceTimer.current) {
         clearTimeout(debounceTimer.current);
       }
+      abortControllerRef.current?.abort();
+      abortControllerRef.current = null;
     };
-  }, [query, isVisible, debouncedFetchSuggestions]);
+  }, [query, isVisible, isComposing, debouncedFetchSuggestions]);
 
   // 点击外部关闭
   useEffect(() => {

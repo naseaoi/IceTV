@@ -73,4 +73,51 @@ describe('InfoTab', () => {
       expect(panel).toHaveAttribute('data-bottom-fade', 'false'),
     );
   });
+
+  it('桌面端简介滚动时更新上下柔和边缘', async () => {
+    const { container } = render(
+      <InfoTab
+        videoTitle='测试影片'
+        totalEpisodes={12}
+        detail={{ desc: '测试简介' } as never}
+        videoYear='2026'
+        favorited={false}
+        onToggleFavorite={jest.fn()}
+        videoCover='/poster.webp'
+        videoDoubanId={0}
+        scrollMode='desc'
+      />,
+    );
+    const desc = container.querySelector('[data-play-detail-desc-scroll]');
+    expect(desc).not.toBeNull();
+    Object.defineProperties(desc!, {
+      clientHeight: { configurable: true, value: 100 },
+      scrollHeight: { configurable: true, value: 300 },
+      scrollTop: { configurable: true, writable: true, value: 0 },
+    });
+
+    fireEvent.scroll(desc!);
+    await waitFor(() =>
+      expect(desc).toHaveAttribute('data-bottom-fade', 'true'),
+    );
+    expect(desc).toHaveAttribute('data-top-fade', 'false');
+
+    desc!.scrollTop = 80;
+    fireEvent.scroll(desc!);
+    await waitFor(() => expect(desc).toHaveAttribute('data-top-fade', 'true'));
+    expect(desc).toHaveStyle({
+      maskImage:
+        'linear-gradient(to bottom, transparent 0, #000 2rem, #000 calc(100% - 2rem), transparent 100%)',
+    });
+
+    desc!.scrollTop = 200;
+    fireEvent.scroll(desc!);
+    await waitFor(() =>
+      expect(desc).toHaveAttribute('data-bottom-fade', 'false'),
+    );
+    expect(desc).toHaveStyle({
+      maskImage:
+        'linear-gradient(to bottom, transparent 0, #000 2rem, #000 100%)',
+    });
+  });
 });

@@ -2,6 +2,7 @@ import {
   ADMIN_TABLE_COLUMN_WIDTHS_STORAGE_KEY,
   AUTO_PLAY_NEXT_STORAGE_KEY,
   BLOCK_AD_STORAGE_KEY,
+  CONTINUE_WATCHING_COUNT_STORAGE_KEY,
   DEFAULT_AGGREGATE_SEARCH_STORAGE_KEY,
   ENABLE_OPTIMIZATION_STORAGE_KEY,
   FLUID_SEARCH_STORAGE_KEY,
@@ -12,6 +13,7 @@ import {
   readAggregateSearch,
   readAutoPlayNextEnabled,
   readBlockAdEnabled,
+  readContinueWatchingCount,
   readEnableOptimization,
   readFluidSearch,
   readLiveDirectConnect,
@@ -21,6 +23,7 @@ import {
   readSidebarCollapsed,
   readSourcePreferredQualityPreference,
   resetAggregateSearch,
+  resetContinueWatchingCount,
   resetEnableOptimization,
   resetFluidSearch,
   resetLiveDirectConnect,
@@ -31,6 +34,7 @@ import {
   writeAggregateSearch,
   writeAutoPlayNextEnabled,
   writeBlockAdEnabled,
+  writeContinueWatchingCount,
   writeEnableOptimization,
   writeFluidSearch,
   writeLiveDirectConnect,
@@ -160,6 +164,22 @@ describe('local preferences', () => {
       'notice-v1',
     );
     expect(readSeenAnnouncement()).toBe('notice-v1');
+  });
+
+  it('stores and resets the continue watching count through the shared helper', () => {
+    writeContinueWatchingCount(4.8);
+
+    expect(localStorage.getItem(CONTINUE_WATCHING_COUNT_STORAGE_KEY)).toBe('4');
+    expect(readContinueWatchingCount()).toBe(4);
+    expect(document.cookie).toContain('cw_count=4');
+
+    resetContinueWatchingCount();
+
+    expect(
+      localStorage.getItem(CONTINUE_WATCHING_COUNT_STORAGE_KEY),
+    ).toBeNull();
+    expect(readContinueWatchingCount()).toBe(0);
+    expect(document.cookie).not.toContain('cw_count=4');
   });
 
   it('stores admin table column widths independently', () => {

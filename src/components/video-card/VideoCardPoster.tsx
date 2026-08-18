@@ -160,7 +160,7 @@ export function VideoCardPoster({
 
   return (
     <div
-      className={`relative aspect-[2/3] overflow-hidden rounded-lg ${
+      className={`poster-rounded-clip relative aspect-[2/3] overflow-hidden rounded-lg ${
         origin === 'live' ? 'ring-1 ring-gray-300/80 dark:ring-gray-600/80' : ''
       }`}
       style={noSelectStyle}
@@ -171,6 +171,7 @@ export function VideoCardPoster({
         alt={title}
         priority={priority}
         fit={origin === 'live' ? 'contain' : 'cover'}
+        checkClientCacheBeforeLoad={from === 'playrecord'}
       />
 
       <div

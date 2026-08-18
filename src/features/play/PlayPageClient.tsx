@@ -304,6 +304,7 @@ function AuthenticatedPlayPageClient() {
 
   const { handleEpisodeChange, handlePreviousEpisode, handleNextEpisode } =
     useEpisodeSwitch({
+      artPlayerRef,
       detailRef,
       currentEpisodeIndexRef,
       resumeTimeRef,

@@ -10,6 +10,10 @@ describe('cover image cache', () => {
     jest.resetModules();
   });
 
+  afterEach(() => {
+    jest.useRealTimers();
+  });
+
   it('stores raw and processed image keys together', () => {
     const {
       flushCoverImageCacheForTests,
@@ -89,5 +93,57 @@ describe('cover image cache', () => {
     const raw = sessionStorage.getItem('icetv:cover-image-loaded') || '';
     expect(raw).not.toContain('a-processed');
     flushCoverImageCacheForTests();
+  });
+
+  it('persists failed image keys for the current session', () => {
+    const {
+      flushCoverImageCacheForTests,
+      isCoverImageFailed,
+      markCoverImagesFailed,
+    } = loadCacheModule();
+    const src = 'https://covers.example.com/missing.jpg';
+
+    markCoverImagesFailed([src]);
+    expect(isCoverImageFailed([src])).toBe(true);
+    flushCoverImageCacheForTests();
+    jest.resetModules();
+
+    expect(loadCacheModule().isCoverImageFailed([src])).toBe(true);
+  });
+
+  it('expires failed image keys after ten minutes', () => {
+    jest.useFakeTimers();
+    jest.setSystemTime(new Date('2026-08-18T00:00:00Z'));
+    const {
+      COVER_IMAGE_FAILURE_TTL_MS,
+      isCoverImageFailed,
+      markCoverImagesFailed,
+    } = loadCacheModule();
+    const src = 'https://covers.example.com/transient.jpg';
+
+    markCoverImagesFailed([src]);
+    jest.advanceTimersByTime(COVER_IMAGE_FAILURE_TTL_MS - 1);
+    expect(isCoverImageFailed([src])).toBe(true);
+
+    jest.advanceTimersByTime(1);
+    expect(isCoverImageFailed([src])).toBe(false);
+    loadCacheModule().clearCoverImageCacheForTests();
+  });
+
+  it('clears a failed key after the image loads successfully', () => {
+    const {
+      isCoverImageCached,
+      isCoverImageFailed,
+      markCoverImagesFailed,
+      markCoverImagesLoaded,
+    } = loadCacheModule();
+    const src = 'https://covers.example.com/recovered.jpg';
+
+    markCoverImagesFailed([src]);
+    markCoverImagesLoaded([src]);
+
+    expect(isCoverImageFailed([src])).toBe(false);
+    expect(isCoverImageCached([src])).toBe(true);
+    loadCacheModule().clearCoverImageCacheForTests();
   });
 });

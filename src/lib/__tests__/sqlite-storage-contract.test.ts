@@ -296,6 +296,83 @@ describe('sqlite storage contract', () => {
     ]);
   });
 
+  it('aggregates playback ranges and top items in set-based queries', async () => {
+    const storage = new LocalSqliteStorage(':memory:');
+
+    await storage.setPlaybackSession('demo-user', {
+      ...playbackSession,
+      id: 'show-a-old',
+      title: 'Show A',
+      started_at: 100,
+      ended_at: 160,
+      watch_seconds: 60,
+    });
+    await storage.setPlaybackSession('demo-user', {
+      ...playbackSession,
+      id: 'show-a-latest',
+      title: ' Show A ',
+      started_at: 300,
+      ended_at: 360,
+      watch_seconds: 120,
+    });
+    await storage.setPlaybackSession('demo-user', {
+      ...playbackSession,
+      id: 'show-b',
+      video_id: '2',
+      title: 'Show B',
+      started_at: 200,
+      ended_at: 260,
+      watch_seconds: 200,
+    });
+    await storage.setPlaybackSession('other-user', {
+      ...playbackSession,
+      id: 'other-user-show',
+      started_at: 250,
+      ended_at: 350,
+      watch_seconds: 999,
+    });
+
+    await expect(
+      storage.getPlaybackRangeWatchTotals('demo-user', [
+        { key: 'early', start: 0, end: 200 },
+        { key: 'recent', start: 200, end: 400 },
+      ]),
+    ).resolves.toEqual([
+      { key: 'early', watchSeconds: 60 },
+      { key: 'recent', watchSeconds: 320 },
+    ]);
+
+    await storage.setPlaybackSession('demo-user', {
+      ...playbackSession,
+      id: 'show-a-other-source',
+      source: 'source-b',
+      video_id: '3',
+      title: 'Show A',
+      started_at: 250,
+      ended_at: 280,
+      watch_seconds: 30,
+    });
+
+    await expect(
+      storage.getPlaybackTopItems('demo-user', 6, 100),
+    ).resolves.toEqual([
+      expect.objectContaining({
+        videoId: '1',
+        title: ' Show A ',
+        watchSeconds: 210,
+        sessionCount: 3,
+        lastWatchedAt: 360,
+      }),
+      expect.objectContaining({
+        videoId: '2',
+        title: 'Show B',
+        watchSeconds: 200,
+        sessionCount: 1,
+        lastWatchedAt: 260,
+      }),
+    ]);
+  });
+
   it('returns null when admin config is absent', async () => {
     const storage = new LocalSqliteStorage(':memory:');
     await expect(storage.getAdminConfig()).resolves.toBeNull();

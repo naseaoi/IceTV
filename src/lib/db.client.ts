@@ -217,6 +217,7 @@ export async function deletePlayRecord(
     onServerError: async (err) => {
       await handleDatabaseOperationFailure('playRecords', err);
     },
+    requireExistingCacheForOptimisticUpdate: true,
   });
 }
 

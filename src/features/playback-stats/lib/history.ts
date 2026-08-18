@@ -11,7 +11,7 @@ type PlaybackSessionGroup = {
   ids: Set<string>;
 };
 
-function normalizePlaybackTitleKey(title: string): string {
+export function normalizePlaybackTitleKey(title: string): string {
   return title.trim().replace(/\s+/g, ' ').toLocaleLowerCase();
 }
 

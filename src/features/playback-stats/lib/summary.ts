@@ -1,6 +1,7 @@
 import {
   dedupePlaybackSessionsByTitle,
   filterPlaybackHistorySessions,
+  normalizePlaybackTitleKey,
 } from '@/features/playback-stats/lib/history';
 import type {
   PlaybackDailyStat,
@@ -83,7 +84,10 @@ function buildTopItems(sessions: PlaybackSession[]): PlaybackTopItem[] {
   const grouped = new Map<string, PlaybackTopItem>();
 
   for (const session of sessions) {
-    const key = `${session.source}+${session.video_id}`;
+    const key =
+      normalizePlaybackTitleKey(session.title) ||
+      `${session.source}+${session.video_id}`;
+    const lastWatchedAt = session.ended_at || session.started_at;
     const existing = grouped.get(key);
     if (!existing) {
       grouped.set(key, {
@@ -95,17 +99,22 @@ function buildTopItems(sessions: PlaybackSession[]): PlaybackTopItem[] {
         year: session.year,
         watchSeconds: Math.max(0, session.watch_seconds || 0),
         sessionCount: 1,
-        lastWatchedAt: session.ended_at || session.started_at,
+        lastWatchedAt,
       });
       continue;
     }
 
     existing.watchSeconds += Math.max(0, session.watch_seconds || 0);
     existing.sessionCount += 1;
-    existing.lastWatchedAt = Math.max(
-      existing.lastWatchedAt,
-      session.ended_at || session.started_at,
-    );
+    if (lastWatchedAt >= existing.lastWatchedAt) {
+      existing.source = session.source;
+      existing.videoId = session.video_id;
+      existing.title = session.title;
+      existing.sourceName = session.source_name;
+      existing.cover = session.cover;
+      existing.year = session.year;
+      existing.lastWatchedAt = lastWatchedAt;
+    }
   }
 
   return Array.from(grouped.values())

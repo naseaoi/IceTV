@@ -19,11 +19,17 @@ import {
   getRecentPlayRecords,
   subscribeToDataUpdates,
 } from '@/lib/db.client';
+import {
+  readContinueWatchingCount,
+  resetContinueWatchingCount,
+  writeContinueWatchingCount,
+} from '@/lib/local-preferences';
 import { parseStorageKey } from '@/lib/utils';
 
 interface ContinueWatchingProps {
   className?: string;
   initialSkeletonCount?: number;
+  refreshOnMount?: boolean;
 }
 
 const useIsomorphicLayoutEffect =
@@ -73,7 +79,7 @@ function readInitialState(limit: number, fallbackSkeletonCount = 0) {
 
   const cachedCount = Math.max(
     fallbackSkeletonCount,
-    parseInt(localStorage.getItem('continueWatchingCount') || '0', 10),
+    readContinueWatchingCount(),
   );
   return {
     playRecords: [] as PlayRecordWithKey[],
@@ -85,6 +91,7 @@ function readInitialState(limit: number, fallbackSkeletonCount = 0) {
 export default function ContinueWatching({
   className,
   initialSkeletonCount = 0,
+  refreshOnMount = true,
 }: ContinueWatchingProps) {
   const runtimeConfig = useRuntimeConfig();
   const continueWatchingLimit = Math.max(
@@ -114,16 +121,15 @@ export default function ContinueWatching({
       );
 
       setPlayRecords(sortedRecords);
-      const count = String(sortedRecords.length);
-      try {
-        localStorage.setItem('continueWatchingCount', count);
-      } catch {
-        void 0;
-      }
-      document.cookie = `cw_count=${count};path=/;max-age=${365 * 24 * 60 * 60};samesite=lax`;
     },
     [continueWatchingLimit],
   );
+
+  useEffect(() => {
+    if (loading) return;
+
+    writeContinueWatchingCount(playRecords.length);
+  }, [loading, playRecords.length]);
 
   useIsomorphicLayoutEffect(() => {
     const nextState = readInitialState(
@@ -136,6 +142,8 @@ export default function ContinueWatching({
   }, [continueWatchingLimit, normalizedInitialSkeletonCount]);
 
   useEffect(() => {
+    if (!refreshOnMount) return;
+
     const isAuthenticated = !!getAuthInfoFromBrowserCookie()?.username;
     if (!isAuthenticated) return;
 
@@ -170,7 +178,7 @@ export default function ContinueWatching({
       unsubscribe();
       unsubscribeRecent();
     };
-  }, [continueWatchingLimit, updatePlayRecords]);
+  }, [continueWatchingLimit, refreshOnMount, updatePlayRecords]);
 
   if (!loading && playRecords.length === 0) {
     return null;
@@ -183,6 +191,20 @@ export default function ContinueWatching({
 
   const parseKey = (key: string) => {
     return parseStorageKey(key);
+  };
+
+  // 分组源（如 giri 繁中/简中）优先展示组内集数进度
+  const getEpisodeDisplay = (record: PlayRecord) => {
+    if (record.group_index && record.group_total) {
+      return {
+        currentEpisode: record.group_index,
+        totalEpisodes: record.group_total,
+      };
+    }
+    return {
+      currentEpisode: record.index,
+      totalEpisodes: record.total_episodes,
+    };
   };
 
   return (
@@ -215,6 +237,7 @@ export default function ContinueWatching({
                   }
 
                   const { source, id } = parsedKey;
+                  const episodeDisplay = getEpisodeDisplay(record);
                   return (
                     <MobileContinueCard
                       key={record.key}
@@ -224,8 +247,9 @@ export default function ContinueWatching({
                       poster={record.cover}
                       year={record.year}
                       sourceName={record.source_name}
-                      currentEpisode={record.index}
-                      totalEpisodes={record.total_episodes}
+                      currentEpisode={episodeDisplay.currentEpisode}
+                      totalEpisodes={episodeDisplay.totalEpisodes}
+                      resumeEpisodeIndex={Math.max(0, record.index - 1)}
                       progress={getProgress(record)}
                       resumeTime={Math.max(
                         0,
@@ -247,6 +271,7 @@ export default function ContinueWatching({
                   }
 
                   const { source, id } = parsedKey;
+                  const episodeDisplay = getEpisodeDisplay(record);
                   return (
                     <div key={record.key} className={HOME_POSTER_CARD_CLASS}>
                       <VideoCard
@@ -257,8 +282,9 @@ export default function ContinueWatching({
                         source={source}
                         source_name={record.source_name}
                         progress={getProgress(record)}
-                        episodes={record.total_episodes}
-                        currentEpisode={record.index}
+                        episodes={episodeDisplay.totalEpisodes}
+                        currentEpisode={episodeDisplay.currentEpisode}
+                        resumeEpisodeIndex={Math.max(0, record.index - 1)}
                         resumeTime={Math.max(
                           0,
                           Math.floor(record.play_time || 0),
@@ -291,10 +317,7 @@ export default function ContinueWatching({
           await clearAllPlayRecords();
           setPlayRecords([]);
           setShowClearConfirm(false);
-          try {
-            localStorage.setItem('continueWatchingCount', '0');
-          } catch {}
-          document.cookie = 'cw_count=0;path=/;max-age=0;samesite=lax';
+          resetContinueWatchingCount();
         }}
       />
     </>
