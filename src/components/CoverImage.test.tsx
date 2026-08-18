@@ -5,6 +5,9 @@ import {
   screen,
   waitFor,
 } from '@testing-library/react';
+import type { Root } from 'react-dom/client';
+import { hydrateRoot } from 'react-dom/client';
+import { renderToString } from 'react-dom/server';
 
 import CoverImage from '@/components/CoverImage';
 import {
@@ -214,6 +217,49 @@ describe('CoverImage', () => {
     expect(
       document.querySelector('[data-cover-loading-backdrop] .animate-shimmer'),
     ).not.toBeInTheDocument();
+  });
+
+  it('恢复浏览器缓存时保持服务端水合一致', async () => {
+    const src =
+      'https://img1.doubanio.com/view/photo/s_ratio_poster/public/p2931173550.jpg';
+    const serverHtml = renderToString(
+      <CoverImage src={src} alt='水合缓存封面' />,
+    );
+    expect(serverHtml).toContain('data-cover-state="loading"');
+
+    markCoverImagesLoaded([src]);
+
+    const container = document.createElement('div');
+    container.innerHTML = serverHtml;
+    document.body.appendChild(container);
+    const recoverableErrors: unknown[] = [];
+    let root: Root | undefined;
+
+    try {
+      await act(async () => {
+        root = hydrateRoot(
+          container,
+          <CoverImage src={src} alt='水合缓存封面' />,
+          {
+            onRecoverableError: (error) => recoverableErrors.push(error),
+          },
+        );
+        await Promise.resolve();
+      });
+
+      expect(recoverableErrors).toEqual([]);
+      expect(
+        container.querySelector('[data-cover-loading-backdrop]'),
+      ).toHaveAttribute('data-cover-state', 'revealed');
+      expect(
+        container.querySelector('.animate-shimmer'),
+      ).not.toBeInTheDocument();
+    } finally {
+      if (root) {
+        await act(async () => root?.unmount());
+      }
+      container.remove();
+    }
   });
 
   it('普通远程封面通过服务端图片代理加载', () => {

@@ -120,21 +120,12 @@ const CoverImage: React.FC<CoverImageProps> = memo(function CoverImage({
     () => Array.from(new Set([src, processed].filter(Boolean))),
     [processed, src],
   );
-  const initiallyKnownCached = useMemo(
-    () => !isEmpty && isCoverImageCached(cacheKeys),
-    [cacheKeys, isEmpty],
-  );
-
   const loadImmediately = !isEmpty && priority;
-  const [isNearViewport, setIsNearViewport] = useState(
-    loadImmediately || initiallyKnownCached,
-  );
+  const [isNearViewport, setIsNearViewport] = useState(loadImmediately);
   const [loaded, setLoaded] = useState(false);
-  const [knownCached, setKnownCached] = useState(initiallyKnownCached);
+  const [knownCached, setKnownCached] = useState(false);
   const [hasError, setHasError] = useState(false);
-  const [slotGranted, setSlotGranted] = useState(
-    loadImmediately || initiallyKnownCached,
-  );
+  const [slotGranted, setSlotGranted] = useState(loadImmediately);
 
   useIsomorphicLayoutEffect(() => {
     shouldAnimateRevealRef.current = true;
