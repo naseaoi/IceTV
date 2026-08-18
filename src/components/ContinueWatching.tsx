@@ -29,6 +29,7 @@ import { parseStorageKey } from '@/lib/utils';
 interface ContinueWatchingProps {
   className?: string;
   initialSkeletonCount?: number;
+  refreshOnMount?: boolean;
 }
 
 const useIsomorphicLayoutEffect =
@@ -90,6 +91,7 @@ function readInitialState(limit: number, fallbackSkeletonCount = 0) {
 export default function ContinueWatching({
   className,
   initialSkeletonCount = 0,
+  refreshOnMount = true,
 }: ContinueWatchingProps) {
   const runtimeConfig = useRuntimeConfig();
   const continueWatchingLimit = Math.max(
@@ -140,6 +142,8 @@ export default function ContinueWatching({
   }, [continueWatchingLimit, normalizedInitialSkeletonCount]);
 
   useEffect(() => {
+    if (!refreshOnMount) return;
+
     const isAuthenticated = !!getAuthInfoFromBrowserCookie()?.username;
     if (!isAuthenticated) return;
 
@@ -174,7 +178,7 @@ export default function ContinueWatching({
       unsubscribe();
       unsubscribeRecent();
     };
-  }, [continueWatchingLimit, updatePlayRecords]);
+  }, [continueWatchingLimit, refreshOnMount, updatePlayRecords]);
 
   if (!loading && playRecords.length === 0) {
     return null;
