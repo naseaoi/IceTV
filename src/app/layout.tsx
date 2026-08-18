@@ -7,7 +7,10 @@ import { cookies } from 'next/headers';
 import { AuthProvider } from '@/components/AuthProvider';
 import { getServerAuthSession } from '@/lib/auth-session.server';
 import { getPublicConfig } from '@/lib/config';
-import { SIDEBAR_COLLAPSED_STORAGE_KEY } from '@/lib/local-preferences';
+import {
+  SIDEBAR_COLLAPSED_STORAGE_KEY,
+  THEME_STORAGE_KEY,
+} from '@/lib/local-preferences';
 import { serializeForInlineScript } from '@/lib/script-serialization';
 import { DEFAULT_SITE_FOOTER_TEXT } from '@/lib/site-footer';
 import { getStorageType } from '@/lib/storage-type';
@@ -106,6 +109,24 @@ export default async function RootLayout({
   return (
     <html lang='zh-CN' suppressHydrationWarning>
       <head>
+        <script
+          dangerouslySetInnerHTML={{
+            __html: `(() => {
+  try {
+    const saved = localStorage.getItem(${serializeForInlineScript(THEME_STORAGE_KEY)});
+    const theme = saved === 'system'
+      ? (window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light')
+      : saved === 'light' || saved === 'dark'
+        ? saved
+        : 'dark';
+    const root = document.documentElement;
+    root.classList.remove('light', 'dark');
+    root.classList.add(theme);
+    root.style.colorScheme = theme;
+  } catch {}
+})();`,
+          }}
+        />
         <link
           rel='apple-touch-icon'
           href={initialSiteIcon || '/icons/icon-192x192.png'}
@@ -140,6 +161,7 @@ export default async function RootLayout({
           defaultTheme='dark'
           enableSystem
           disableTransitionOnChange
+          storageKey={THEME_STORAGE_KEY}
         >
           <RuntimeConfigProvider initialConfig={runtimeConfig}>
             <SiteProvider
