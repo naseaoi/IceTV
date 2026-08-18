@@ -37,7 +37,7 @@ body {
   color: rgb(var(--foreground-rgb));
 }
 
-html:not(.dark) body {
+html.light body {
   background: linear-gradient(
     180deg,
     #e6f3fb 0%,
@@ -50,7 +50,7 @@ html:not(.dark) body {
   background-attachment: fixed;
 }
 
-html.dark body {
+html:not(.light) body {
   background: linear-gradient(
     180deg,
     #0a0e14 0%,
