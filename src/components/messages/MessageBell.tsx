@@ -1,7 +1,6 @@
 'use client';
 
 import { Bell } from 'lucide-react';
-import { useRef } from 'react';
 
 import { useAuthSession } from '@/components/AuthProvider';
 import {
@@ -34,28 +33,16 @@ export default function MessageBell({
 }: MessageBellProps) {
   const { session } = useAuthSession();
   const { unreadCount, openPanel } = useMessageCenter();
-  const buttonRef = useRef<HTMLButtonElement>(null);
 
   if (session.status !== 'authenticated') return null;
 
   const handleClick = () => {
-    const rect = buttonRef.current?.getBoundingClientRect();
-    openPanel(
-      rect
-        ? {
-            left: rect.left,
-            right: rect.right,
-            top: rect.top,
-            bottom: rect.bottom,
-          }
-        : undefined,
-    );
+    openPanel();
   };
 
   if (variant === 'sidebar') {
     return (
       <button
-        ref={buttonRef}
         type='button'
         onClick={handleClick}
         aria-label={`我的消息${unreadCount ? `，${unreadCount} 条未读` : ''}`}
@@ -78,7 +65,6 @@ export default function MessageBell({
 
   return (
     <button
-      ref={buttonRef}
       type='button'
       onClick={handleClick}
       aria-label={`我的消息${unreadCount ? `，${unreadCount} 条未读` : ''}`}

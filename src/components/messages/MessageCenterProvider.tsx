@@ -32,16 +32,9 @@ import MessageToast from './MessageToast';
 const POLL_INTERVAL_MS = 30_000;
 const TOAST_DURATION_MS = 7_000;
 
-export interface MessagePanelAnchor {
-  left: number;
-  right: number;
-  top: number;
-  bottom: number;
-}
-
 interface MessageCenterContextValue {
   unreadCount: number;
-  openPanel: (anchor?: MessagePanelAnchor) => void;
+  openPanel: () => void;
 }
 
 const MessageCenterContext = createContext<MessageCenterContextValue | null>(
@@ -76,26 +69,38 @@ export function MessageCenterProvider({ children }: { children: ReactNode }) {
     nextCursor: null,
   });
   const [isOpen, setIsOpen] = useState(false);
-  const [anchor, setAnchor] = useState<MessagePanelAnchor | undefined>();
   const [loading, setLoading] = useState(false);
   const [loadingMore, setLoadingMore] = useState(false);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [workingIds, setWorkingIds] = useState<Set<string>>(new Set());
   const [toastText, setToastText] = useState<string | null>(null);
   const summaryRef = useRef<UserMessageSummary | null>(null);
   const openRef = useRef(false);
+  const firstPageRequestRef = useRef(0);
+  const loadingMoreRef = useRef(false);
 
   useEffect(() => {
     openRef.current = isOpen;
   }, [isOpen]);
 
   const loadFirstPage = useCallback(async () => {
+    const requestId = ++firstPageRequestRef.current;
     setLoading(true);
+    setLoadError(null);
     try {
-      setPage(await getMessagePage());
+      const nextPage = await getMessagePage();
+      if (requestId === firstPageRequestRef.current) {
+        setPage(nextPage);
+      }
     } catch (error) {
       console.error('加载消息列表失败:', error);
+      if (requestId === firstPageRequestRef.current) {
+        setLoadError('请检查网络连接后重试');
+      }
     } finally {
-      setLoading(false);
+      if (requestId === firstPageRequestRef.current) {
+        setLoading(false);
+      }
     }
   }, []);
 
@@ -129,8 +134,11 @@ export function MessageCenterProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     if (session.status !== 'authenticated') {
+      firstPageRequestRef.current += 1;
       summaryRef.current = null;
       setSummary(EMPTY_SUMMARY);
+      setPage({ items: [], total: 0, nextCursor: null });
+      setLoadError(null);
       setIsOpen(false);
       return;
     }
@@ -164,15 +172,11 @@ export function MessageCenterProvider({ children }: { children: ReactNode }) {
     return () => window.clearTimeout(timer);
   }, [toastText]);
 
-  const openPanel = useCallback(
-    (nextAnchor?: MessagePanelAnchor) => {
-      setAnchor(nextAnchor);
-      setToastText(null);
-      setIsOpen(true);
-      void loadFirstPage();
-    },
-    [loadFirstPage],
-  );
+  const openPanel = useCallback(() => {
+    setToastText(null);
+    setIsOpen(true);
+    void loadFirstPage();
+  }, [loadFirstPage]);
 
   const handleRead = useCallback(
     async (message: UserMessage, navigate = false) => {
@@ -223,10 +227,13 @@ export function MessageCenterProvider({ children }: { children: ReactNode }) {
   }, [refreshSummary]);
 
   const handleLoadMore = useCallback(async () => {
-    if (!page.nextCursor || loadingMore) return;
+    if (!page.nextCursor || loadingMoreRef.current) return;
+    const requestId = firstPageRequestRef.current;
+    loadingMoreRef.current = true;
     setLoadingMore(true);
     try {
       const nextPage = await getMessagePage(page.nextCursor);
+      if (requestId !== firstPageRequestRef.current) return;
       setPage((current) => ({
         items: [...current.items, ...nextPage.items],
         total: nextPage.total,
@@ -236,9 +243,10 @@ export function MessageCenterProvider({ children }: { children: ReactNode }) {
       console.error('加载更多消息失败:', error);
       triggerGlobalError('加载更多消息失败');
     } finally {
+      loadingMoreRef.current = false;
       setLoadingMore(false);
     }
-  }, [loadingMore, page.nextCursor]);
+  }, [page.nextCursor]);
 
   const contextValue = useMemo(
     () => ({ unreadCount: summary.unreadCount, openPanel }),
@@ -250,15 +258,16 @@ export function MessageCenterProvider({ children }: { children: ReactNode }) {
       {children}
       <MessagePanel
         open={isOpen}
-        anchor={anchor}
         page={page}
         loading={loading}
         loadingMore={loadingMore}
+        loadError={loadError}
         workingIds={workingIds}
         onClose={() => setIsOpen(false)}
         onRead={handleRead}
         onReadAll={handleReadAll}
         onLoadMore={handleLoadMore}
+        onRetry={loadFirstPage}
       />
       <MessageToast
         text={toastText}

@@ -1,25 +1,33 @@
 'use client';
 
-import { Check, Inbox, LoaderCircle, Megaphone, Rss, X } from 'lucide-react';
-import { CSSProperties, useEffect, useId, useMemo, useRef } from 'react';
+import {
+  Check,
+  Inbox,
+  LoaderCircle,
+  Megaphone,
+  RefreshCw,
+  Rss,
+  X,
+} from 'lucide-react';
+import { useEffect, useId } from 'react';
 import { createPortal } from 'react-dom';
 
 import CoverImage from '@/components/CoverImage';
+import { useBodyScrollLock } from '@/components/user-menu/useBodyScrollLock';
 import { UserMessage, UserMessagePage } from '@/lib/message-types';
-
-import type { MessagePanelAnchor } from './MessageCenterProvider';
 
 interface MessagePanelProps {
   open: boolean;
-  anchor?: MessagePanelAnchor;
   page: UserMessagePage;
   loading: boolean;
   loadingMore: boolean;
+  loadError: string | null;
   workingIds: Set<string>;
   onClose: () => void;
   onRead: (message: UserMessage, navigate?: boolean) => Promise<void>;
   onReadAll: () => Promise<void>;
   onLoadMore: () => Promise<void>;
+  onRetry: () => Promise<void>;
 }
 
 function formatMessageTime(timestamp: number): string {
@@ -48,17 +56,23 @@ function MessageRow({
   const isAnnouncement = message.type === 'announcement';
 
   return (
-    <div className='group flex gap-3 border-b border-gray-100 px-4 py-3 last:border-b-0 dark:border-gray-800'>
+    <div
+      className={`group flex gap-3 rounded-lg border p-3 sm:p-4 ${
+        isAnnouncement
+          ? 'border-emerald-200/80 bg-emerald-50/70 dark:border-emerald-800/60 dark:bg-emerald-950/25'
+          : 'border-gray-200/80 bg-white/60 dark:border-gray-700/80 dark:bg-gray-800/40'
+      }`}
+    >
       {isAnnouncement ? (
         <div className='flex h-11 w-11 shrink-0 items-center justify-center rounded-lg bg-emerald-100 text-emerald-700 dark:bg-emerald-900/35 dark:text-emerald-300'>
           <Megaphone className='h-5 w-5' />
         </div>
       ) : (
-        <div className='relative h-[66px] w-11 shrink-0 overflow-hidden rounded-md bg-gray-100 dark:bg-gray-800'>
+        <div className='relative h-[72px] w-12 shrink-0 overflow-hidden rounded-md bg-gray-100 dark:bg-gray-800'>
           <CoverImage
             src={message.cover}
             alt={message.title}
-            sizes='44px'
+            sizes='48px'
             fallbackLabel='无封面'
           />
         </div>
@@ -95,7 +109,7 @@ function MessageRow({
         disabled={working}
         aria-label='标记为已读'
         title='标记为已读'
-        className='flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-gray-400 opacity-100 transition-colors hover:bg-emerald-50 hover:text-emerald-600 disabled:opacity-50 dark:hover:bg-emerald-950/50 dark:hover:text-emerald-300 md:opacity-0 md:focus-visible:opacity-100 md:group-hover:opacity-100'
+        className='flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-gray-400 transition-colors hover:bg-emerald-100/80 hover:text-emerald-700 disabled:opacity-50 dark:hover:bg-emerald-900/50 dark:hover:text-emerald-300'
         onClick={() => void onRead(message)}
       >
         {working ? (
@@ -108,20 +122,53 @@ function MessageRow({
   );
 }
 
+function MessageSection({
+  title,
+  messages,
+  workingIds,
+  readingAll,
+  onRead,
+}: {
+  title: string;
+  messages: UserMessage[];
+  workingIds: Set<string>;
+  readingAll: boolean;
+  onRead: (message: UserMessage, navigate?: boolean) => Promise<void>;
+}) {
+  if (messages.length === 0) return null;
+
+  return (
+    <section className='space-y-2.5'>
+      <h3 className='px-0.5 text-xs font-semibold text-gray-500 dark:text-gray-400'>
+        {title}
+      </h3>
+      {messages.map((message) => (
+        <MessageRow
+          key={message.id}
+          message={message}
+          working={readingAll || workingIds.has(message.id)}
+          onRead={onRead}
+        />
+      ))}
+    </section>
+  );
+}
+
 export default function MessagePanel({
   open,
-  anchor,
   page,
   loading,
   loadingMore,
+  loadError,
   workingIds,
   onClose,
   onRead,
   onReadAll,
   onLoadMore,
+  onRetry,
 }: MessagePanelProps) {
-  const dialogRef = useRef<HTMLDivElement>(null);
   const titleId = useId();
+  useBodyScrollLock(open);
 
   useEffect(() => {
     if (!open) return;
@@ -132,45 +179,33 @@ export default function MessagePanel({
     return () => document.removeEventListener('keydown', handleKeyDown);
   }, [onClose, open]);
 
-  const panelStyle = useMemo(() => {
-    if (typeof window === 'undefined') return undefined;
-    const sidebarCollapsed =
-      document.documentElement.dataset.sidebarCollapsed === 'true';
-    const left = anchor?.right
-      ? Math.min(anchor.right + 10, window.innerWidth - 398)
-      : sidebarCollapsed
-        ? 92
-        : 252;
-    const bottom = anchor?.top
-      ? Math.max(8, window.innerHeight - anchor.top + 8)
-      : 16;
-    return {
-      '--message-panel-left': `${Math.max(8, left)}px`,
-      '--message-panel-bottom': `${bottom}px`,
-    } as CSSProperties;
-  }, [anchor]);
-
   if (!open || typeof document === 'undefined') return null;
   const readingAll = workingIds.has('all');
+  const announcements = page.items.filter(
+    (message) => message.type === 'announcement',
+  );
+  const trackingUpdates = page.items.filter(
+    (message) => message.type === 'tracking-update',
+  );
 
   return createPortal(
-    <div className='fixed inset-0 z-[1250]' style={panelStyle}>
+    <div className='fixed inset-0 z-[1250] flex items-center justify-center p-4 sm:p-6'>
       <button
         type='button'
         aria-label='关闭消息面板'
-        className='absolute inset-0 cursor-default bg-black/45 md:bg-transparent'
+        className='absolute inset-0 cursor-default bg-black/50 backdrop-blur-sm'
         onClick={onClose}
       />
       <div
-        ref={dialogRef}
         role='dialog'
         aria-modal='true'
         aria-labelledby={titleId}
-        className='absolute inset-x-0 bottom-0 flex max-h-[82dvh] flex-col rounded-t-xl border border-gray-200 bg-white shadow-2xl outline-none dark:border-gray-700 dark:bg-gray-900 md:bottom-[var(--message-panel-bottom)] md:left-[var(--message-panel-left)] md:right-auto md:max-h-[70vh] md:w-[390px] md:rounded-lg'
-        style={{ paddingBottom: 'env(safe-area-inset-bottom)' }}
+        className='relative z-10 flex max-h-[90dvh] w-full max-w-2xl flex-col overflow-hidden rounded-2xl border border-gray-200/70 bg-white/90 shadow-2xl outline-none ring-1 ring-black/10 backdrop-blur-xl dark:border-white/10 dark:bg-gray-900/90 dark:ring-white/10'
       >
-        <div className='mx-auto mt-2 h-1 w-10 rounded-full bg-gray-300 dark:bg-gray-600 md:hidden' />
-        <div className='flex min-h-14 shrink-0 items-center gap-3 border-b border-gray-200 px-4 dark:border-gray-700'>
+        <div className='flex shrink-0 items-center gap-3 border-b border-gray-200/80 px-4 py-3.5 dark:border-gray-700/80 sm:px-6 sm:py-4'>
+          <div className='flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300'>
+            <Inbox className='h-5 w-5' />
+          </div>
           <div className='min-w-0 flex-1'>
             <h2
               id={titleId}
@@ -178,17 +213,22 @@ export default function MessagePanel({
             >
               我的消息
             </h2>
-            {page.total > 0 && (
-              <p className='text-xs text-gray-400'>{page.total} 条未读</p>
-            )}
+            <p className='mt-0.5 text-xs text-gray-400 dark:text-gray-500'>
+              {page.total > 0
+                ? `${page.total} 条未读消息`
+                : '公告与追更动态会显示在这里'}
+            </p>
           </div>
           {page.total > 0 && (
             <button
               type='button'
               disabled={readingAll}
-              className='text-sm font-medium text-emerald-600 hover:text-emerald-700 disabled:opacity-50 dark:text-emerald-400 dark:hover:text-emerald-300'
+              className='inline-flex h-9 items-center gap-1.5 rounded-md px-2.5 text-sm font-medium text-emerald-600 transition-colors hover:bg-emerald-50 hover:text-emerald-700 disabled:opacity-50 dark:text-emerald-400 dark:hover:bg-emerald-950/50 dark:hover:text-emerald-300'
               onClick={() => void onReadAll()}
             >
+              {readingAll && (
+                <LoaderCircle className='h-3.5 w-3.5 animate-spin' />
+              )}
               全部已读
             </button>
           )}
@@ -203,39 +243,69 @@ export default function MessagePanel({
           </button>
         </div>
 
-        <div className='min-h-0 flex-1 overflow-y-auto overscroll-contain'>
+        <div className='min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 py-4 sm:px-6 sm:py-5'>
           {loading && page.items.length === 0 ? (
-            <div className='flex min-h-44 items-center justify-center text-gray-400'>
-              <LoaderCircle className='h-5 w-5 animate-spin' />
+            <div className='flex min-h-52 items-center justify-center text-gray-400'>
+              <LoaderCircle className='h-6 w-6 animate-spin' />
+            </div>
+          ) : loadError && page.items.length === 0 ? (
+            <div className='flex min-h-52 flex-col items-center justify-center gap-3 px-4 text-center'>
+              <div className='flex h-11 w-11 items-center justify-center rounded-full bg-gray-100 text-gray-400 dark:bg-gray-800 dark:text-gray-500'>
+                <RefreshCw className='h-5 w-5' />
+              </div>
+              <div>
+                <p className='text-sm font-medium text-gray-700 dark:text-gray-200'>
+                  消息加载失败
+                </p>
+                <p className='mt-1 text-xs text-gray-400 dark:text-gray-500'>
+                  {loadError}
+                </p>
+              </div>
+              <button
+                type='button'
+                className='rounded-md bg-emerald-600 px-3 py-2 text-sm font-medium text-white transition-colors hover:bg-emerald-700'
+                onClick={() => void onRetry()}
+              >
+                重新加载
+              </button>
             </div>
           ) : page.items.length === 0 ? (
-            <div className='flex min-h-44 flex-col items-center justify-center gap-2 px-4 text-center text-gray-400'>
-              <Inbox className='h-9 w-9' />
+            <div className='flex min-h-52 flex-col items-center justify-center gap-2 px-4 text-center text-gray-400'>
+              <Inbox className='h-10 w-10' />
               <p className='text-sm'>暂无新消息</p>
             </div>
           ) : (
-            <>
-              {page.items.map((message) => (
-                <MessageRow
-                  key={message.id}
-                  message={message}
-                  working={readingAll || workingIds.has(message.id)}
-                  onRead={onRead}
-                />
-              ))}
+            <div className='space-y-5'>
+              <MessageSection
+                title='公告'
+                messages={announcements}
+                workingIds={workingIds}
+                readingAll={readingAll}
+                onRead={onRead}
+              />
+              <MessageSection
+                title='追更更新'
+                messages={trackingUpdates}
+                workingIds={workingIds}
+                readingAll={readingAll}
+                onRead={onRead}
+              />
               {page.nextCursor && (
-                <div className='flex justify-center px-4 py-3'>
+                <div className='flex justify-center pt-1'>
                   <button
                     type='button'
                     disabled={loadingMore}
-                    className='text-sm font-medium text-emerald-600 hover:text-emerald-700 disabled:opacity-50 dark:text-emerald-400'
+                    className='inline-flex min-h-9 items-center gap-1.5 rounded-md px-3 text-sm font-medium text-emerald-600 transition-colors hover:bg-emerald-50 hover:text-emerald-700 disabled:opacity-50 dark:text-emerald-400 dark:hover:bg-emerald-950/50'
                     onClick={() => void onLoadMore()}
                   >
-                    {loadingMore ? '加载中…' : '加载更多'}
+                    {loadingMore && (
+                      <LoaderCircle className='h-3.5 w-3.5 animate-spin' />
+                    )}
+                    {loadingMore ? '加载中' : '加载更多'}
                   </button>
                 </div>
               )}
-            </>
+            </div>
           )}
         </div>
       </div>
