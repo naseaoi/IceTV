@@ -14,7 +14,17 @@ export interface PlayRecord {
   total_time: number; // 总进度（秒）
   save_time: number; // 记录保存时间（时间戳）
   metadata_checked_at?: number;
+  update_baseline_episodes?: number;
+  update_baseline_group_total?: number;
+  update_detected_at?: number;
+  tracking_enabled?: boolean;
   search_title?: string; // 搜索时使用的标题
+}
+
+export interface PlayRecordPage {
+  items: Record<string, PlayRecord>;
+  total: number;
+  nextCursor: string | null;
 }
 
 // 收藏数据结构
@@ -28,6 +38,18 @@ export interface Favorite {
   metadata_checked_at?: number;
   search_title?: string; // 搜索时使用的标题
   origin?: 'vod' | 'live';
+}
+
+export interface FavoritePageItem {
+  key: string;
+  favorite: Favorite;
+  playRecord?: PlayRecord;
+}
+
+export interface FavoritePage {
+  items: FavoritePageItem[];
+  total: number;
+  nextCursor: string | null;
 }
 
 export interface PlaybackSession {
@@ -114,6 +136,11 @@ export interface StorageUserImportData {
   searchHistory: string[];
   skipConfigs: { [key: string]: SkipConfig };
   playbackSessions: { [key: string]: PlaybackSession };
+  messageState?: UserMessageState;
+}
+
+export interface UserMessageState {
+  readAnnouncementId?: string;
 }
 
 export interface StorageImportData {
@@ -133,6 +160,12 @@ export interface IStorage {
     record: PlayRecord,
   ): Promise<void>;
   getAllPlayRecords(userName: string): Promise<{ [key: string]: PlayRecord }>;
+  getPlayRecordPage(
+    userName: string,
+    limit: number,
+    cursorTime?: number,
+    cursorKey?: string,
+  ): Promise<PlayRecordPage>;
   deletePlayRecord(userName: string, key: string): Promise<void>;
   deleteAllPlayRecords(userName: string): Promise<void>;
 
@@ -140,6 +173,12 @@ export interface IStorage {
   getFavorite(userName: string, key: string): Promise<Favorite | null>;
   setFavorite(userName: string, key: string, favorite: Favorite): Promise<void>;
   getAllFavorites(userName: string): Promise<{ [key: string]: Favorite }>;
+  getFavoritePage(
+    userName: string,
+    limit: number,
+    cursorTime?: number,
+    cursorKey?: string,
+  ): Promise<FavoritePage>;
   deleteFavorite(userName: string, key: string): Promise<void>;
   deleteAllFavorites(userName: string): Promise<void>;
 
@@ -165,6 +204,9 @@ export interface IStorage {
   // 用户列表
   getAllUsers(): Promise<string[]>;
   getAllUsersWithPasswords(): Promise<{ [username: string]: string }>;
+
+  getUserMessageState(userName: string): Promise<UserMessageState>;
+  setUserMessageState(userName: string, state: UserMessageState): Promise<void>;
 
   // 管理员配置相关
   getAdminConfig(): Promise<AdminConfig | null>;

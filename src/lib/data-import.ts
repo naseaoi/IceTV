@@ -435,7 +435,21 @@ function normalizeUserData(
       input.playbackSessions,
       playbackSessionsLimit || MAX_PLAYBACK_SESSIONS_PER_USER,
     ),
+    messageState: normalizeMessageState(input.messageState),
   };
+}
+
+function normalizeMessageState(value: unknown) {
+  if (value === undefined || value === null) return {};
+  const input = requireObject(value, '消息状态格式无效');
+  const readAnnouncementId = input.readAnnouncementId;
+  if (
+    readAnnouncementId !== undefined &&
+    (typeof readAnnouncementId !== 'string' || readAnnouncementId.length > 128)
+  ) {
+    throw new ImportValidationError('公告已读状态格式无效');
+  }
+  return readAnnouncementId ? { readAnnouncementId } : {};
 }
 
 // 超出上限时保留最新的会话，避免整体导入失败

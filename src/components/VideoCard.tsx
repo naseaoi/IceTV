@@ -1,5 +1,6 @@
 ﻿import {
-  ExternalLink,
+  Bell,
+  BellOff,
   Heart,
   Link,
   PlayCircleIcon,
@@ -37,13 +38,16 @@ import {
   deleteFavorite,
   deletePlayRecord,
   generateStorageKey,
+  markPlayRecordUpdateRead,
   saveFavorite,
+  setPlayRecordTracking,
 } from '@/lib/db.client';
 import {
   getCurrentNavigationPath,
   withReturnTo,
 } from '@/lib/navigation-return';
 import { savePlayIntent } from '@/lib/play-intent';
+import { hasPlayRecordUpdate } from '@/lib/play-records';
 import {
   canUseHoverPrefetch,
   canUseNetworkPrefetch,
@@ -75,6 +79,9 @@ const VideoCard = forwardRef<VideoCardHandle, VideoCardProps>(
       year,
       from,
       currentEpisode,
+      hasUpdate = false,
+      trackingEnabled = true,
+      availableEpisodes,
       resumeEpisodeIndex,
       douban_id,
       onDelete,
@@ -107,6 +114,9 @@ const VideoCard = forwardRef<VideoCardHandle, VideoCardProps>(
     const [searchFavorited, setSearchFavorited] = useState<boolean | null>(
       null,
     ); // 搜索结果的收藏状态
+    const [visibleHasUpdate, setVisibleHasUpdate] = useState(hasUpdate);
+    const [visibleTrackingEnabled, setVisibleTrackingEnabled] =
+      useState(trackingEnabled);
     // 可外部修改的可控字段
     const [dynamicEpisodes, setDynamicEpisodes] = useState<number | undefined>(
       episodes,
@@ -129,6 +139,14 @@ const VideoCard = forwardRef<VideoCardHandle, VideoCardProps>(
     useEffect(() => {
       setDynamicDoubanId(douban_id);
     }, [douban_id]);
+
+    useEffect(() => {
+      setVisibleHasUpdate(hasUpdate);
+    }, [hasUpdate]);
+
+    useEffect(() => {
+      setVisibleTrackingEnabled(trackingEnabled);
+    }, [trackingEnabled]);
 
     useImperativeHandle(ref, () => ({
       setEpisodes: (eps?: number) => setDynamicEpisodes(eps),
@@ -470,13 +488,29 @@ const VideoCard = forwardRef<VideoCardHandle, VideoCardProps>(
 
     useEffect(() => cancelPrefetch, [cancelPrefetch]);
 
-    // 新标签页播放处理函数
-    const handlePlayInNewTab = useCallback(() => {
-      const url = buildPlayUrl();
-      if (url) {
-        window.open(withReturnTo(url, getCurrentNavigationPath()), '_blank');
-      }
-    }, [buildPlayUrl]);
+    const handleMarkUpdateRead = useCallback(
+      async (event: React.MouseEvent) => {
+        event.preventDefault();
+        event.stopPropagation();
+        if (from !== 'playrecord' || !actualSource || !actualId) return;
+
+        await markPlayRecordUpdateRead(actualSource, actualId);
+        setVisibleHasUpdate(false);
+      },
+      [actualId, actualSource, from],
+    );
+
+    const handleToggleTracking = useCallback(async () => {
+      if (from !== 'playrecord' || !actualSource || !actualId) return;
+
+      const record = await setPlayRecordTracking(
+        actualSource,
+        actualId,
+        !visibleTrackingEnabled,
+      );
+      setVisibleTrackingEnabled(record.tracking_enabled !== false);
+      setVisibleHasUpdate(hasPlayRecordUpdate(record));
+    }, [actualId, actualSource, from, visibleTrackingEnabled]);
 
     // 检查搜索结果的收藏状态
     const checkSearchFavoriteStatus = useCallback(async () => {
@@ -599,15 +633,6 @@ const VideoCard = forwardRef<VideoCardHandle, VideoCardProps>(
           onClick: handleClick,
           color: 'primary' as const,
         });
-
-        // 新标签页播放
-        actions.push({
-          id: 'play-new-tab',
-          label: origin === 'live' ? '新标签页观看' : '新标签页播放',
-          icon: <ExternalLink size={20} />,
-          onClick: handlePlayInNewTab,
-          color: 'default' as const,
-        });
       }
 
       // 聚合源信息 - 直接在菜单中展示，不需要单独的操作项
@@ -674,6 +699,20 @@ const VideoCard = forwardRef<VideoCardHandle, VideoCardProps>(
         }
       }
 
+      if (from === 'playrecord' && actualSource && actualId) {
+        actions.push({
+          id: 'tracking',
+          label: visibleTrackingEnabled ? '取消追更' : '追更',
+          icon: visibleTrackingEnabled ? (
+            <BellOff size={20} />
+          ) : (
+            <Bell size={20} />
+          ),
+          onClick: handleToggleTracking,
+          color: 'default' as const,
+        });
+      }
+
       // 删除播放记录操作
       if (
         config.showCheckCircle &&
@@ -723,7 +762,8 @@ const VideoCard = forwardRef<VideoCardHandle, VideoCardProps>(
       actualDoubanId,
       isBangumi,
       handleClick,
-      handlePlayInNewTab,
+      visibleTrackingEnabled,
+      handleToggleTracking,
       handleToggleFavorite,
       handleDeleteRecord,
       origin,
@@ -831,6 +871,8 @@ const VideoCard = forwardRef<VideoCardHandle, VideoCardProps>(
             rate={rate}
             episodes={actualEpisodes}
             currentEpisode={currentEpisode}
+            hasUpdate={visibleHasUpdate}
+            availableEpisodes={availableEpisodes}
             doubanId={actualDoubanId}
             isBangumi={isBangumi}
             isAggregate={isAggregate}
@@ -839,6 +881,7 @@ const VideoCard = forwardRef<VideoCardHandle, VideoCardProps>(
             visibleFavorited={visibleFavorited}
             onDeleteRecord={handleDeleteRecord}
             onToggleFavorite={handleToggleFavorite}
+            onMarkUpdateRead={handleMarkUpdateRead}
           />
 
           <VideoCardTitle title={actualTitle} />

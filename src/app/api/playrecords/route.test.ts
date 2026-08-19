@@ -7,6 +7,8 @@ import { installWebPolyfills } from '@/app/api/test-utils/web-polyfills';
 installWebPolyfills();
 
 const mockGetAllPlayRecords = jest.fn();
+const mockGetPlayRecord = jest.fn();
+const mockGetPlayRecordPage = jest.fn();
 const mockSavePlayRecord = jest.fn();
 
 jest.mock('@/lib/api-auth', () => ({
@@ -19,11 +21,13 @@ jest.mock('@/lib/api-auth', () => ({
 jest.mock('@/lib/db', () => ({
   db: {
     getAllPlayRecords: (...args: unknown[]) => mockGetAllPlayRecords(...args),
+    getPlayRecord: (...args: unknown[]) => mockGetPlayRecord(...args),
+    getPlayRecordPage: (...args: unknown[]) => mockGetPlayRecordPage(...args),
     savePlayRecord: (...args: unknown[]) => mockSavePlayRecord(...args),
   },
 }));
 
-const { GET, POST } = require('./route') as typeof import('./route');
+const { GET, PATCH, POST } = require('./route') as typeof import('./route');
 
 function createRequest(url: string, init?: RequestInit): NextRequest {
   return new Request(url, init) as unknown as NextRequest;
@@ -75,6 +79,15 @@ describe('playrecords route', () => {
   beforeEach(() => {
     jest.clearAllMocks();
     mockGetAllPlayRecords.mockResolvedValue(records);
+    mockGetPlayRecord.mockResolvedValue(null);
+    mockGetPlayRecordPage.mockResolvedValue({
+      items: {
+        'source+new': records['source+new'],
+        'source+middle': records['source+middle'],
+      },
+      total: 3,
+      nextCursor: '200|source+middle',
+    });
     mockSavePlayRecord.mockResolvedValue(undefined);
   });
 
@@ -99,6 +112,28 @@ describe('playrecords route', () => {
     await expect(response.json()).resolves.toEqual(records);
   });
 
+  it('分页格式返回总数和下一页游标', async () => {
+    const response = await GET(
+      createRequest('http://localhost/api/playrecords?format=page&limit=2'),
+    );
+
+    await expect(response.json()).resolves.toEqual({
+      items: {
+        'source+new': records['source+new'],
+        'source+middle': records['source+middle'],
+      },
+      total: 3,
+      nextCursor: '200|source+middle',
+    });
+    expect(mockGetPlayRecordPage).toHaveBeenCalledWith(
+      'demo',
+      2,
+      undefined,
+      undefined,
+    );
+    expect(mockGetAllPlayRecords).not.toHaveBeenCalled();
+  });
+
   it('保存播放进度时由服务端记录元数据检查时间', async () => {
     const nowSpy = jest.spyOn(Date, 'now').mockReturnValue(1234);
 
@@ -120,5 +155,55 @@ describe('playrecords route', () => {
     } finally {
       nowSpy.mockRestore();
     }
+  });
+
+  it('把当前可用集数标记为已读', async () => {
+    mockGetPlayRecord.mockResolvedValue({
+      ...records['source+new'],
+      index: 2,
+      total_episodes: 4,
+      update_baseline_episodes: 3,
+    });
+
+    const response = await PATCH(
+      createJsonRequest({ key: 'source+new', action: 'mark-update-read' }),
+    );
+
+    expect(response.status).toBe(200);
+    expect(mockSavePlayRecord).toHaveBeenCalledWith(
+      'demo',
+      'source',
+      'new',
+      expect.objectContaining({ update_baseline_episodes: 4 }),
+    );
+  });
+
+  it('可以关闭和重新开启追更', async () => {
+    mockGetPlayRecord.mockResolvedValue(records['source+new']);
+
+    const response = await PATCH(
+      createJsonRequest({
+        key: 'source+new',
+        action: 'set-tracking',
+        trackingEnabled: false,
+      }),
+    );
+
+    expect(response.status).toBe(200);
+    expect(mockSavePlayRecord).toHaveBeenCalledWith(
+      'demo',
+      'source',
+      'new',
+      expect.objectContaining({ tracking_enabled: false }),
+    );
+  });
+
+  it('拒绝无效的播放记录状态操作', async () => {
+    mockGetPlayRecord.mockResolvedValue(records['source+new']);
+    const response = await PATCH(
+      createJsonRequest({ key: 'source+new', action: 'unknown' }),
+    );
+    expect(response.status).toBe(400);
+    expect(mockSavePlayRecord).not.toHaveBeenCalled();
   });
 });

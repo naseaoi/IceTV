@@ -125,6 +125,10 @@ async function refreshUserPlayRecords(
         let nextRecord: PlayRecord = {
           ...record,
           metadata_checked_at: checkedAt,
+          update_baseline_episodes:
+            record.update_baseline_episodes ?? record.total_episodes,
+          update_baseline_group_total:
+            record.update_baseline_group_total ?? record.group_total,
         };
         const detail = await getDetail(parsed.source, parsed.id, record.title);
 
@@ -132,12 +136,17 @@ async function refreshUserPlayRecords(
           console.warn(`跳过无法获取详情的播放记录: ${key}`);
         } else {
           const episodeCount = detail.episodes?.length || 0;
+          const refreshedGroupTotal = getRefreshedGroupTotal(record, detail);
           if (episodeCount > 0 && episodeCount !== record.total_episodes) {
             nextRecord = {
               ...nextRecord,
               title: detail.title || record.title,
               cover: detail.poster || record.cover,
               total_episodes: episodeCount,
+              update_detected_at: checkedAt,
+              ...(refreshedGroupTotal
+                ? { group_total: refreshedGroupTotal }
+                : {}),
               year: detail.year || record.year,
             };
             console.log(
@@ -245,6 +254,25 @@ type GetDetail = (
   id: string,
   fallbackTitle: string,
 ) => Promise<SearchResult | null>;
+
+function getRefreshedGroupTotal(
+  record: PlayRecord,
+  detail: SearchResult,
+): number | null {
+  if (!record.group_index || !record.group_total || !detail.episode_groups) {
+    return null;
+  }
+
+  let offset = 0;
+  for (const group of detail.episode_groups) {
+    if (record.index <= offset + group.count) {
+      return group.count;
+    }
+    offset += group.count;
+  }
+
+  return null;
+}
 
 function createMetadataRefreshBudget(): MetadataRefreshBudget {
   return {

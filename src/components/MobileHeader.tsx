@@ -7,6 +7,7 @@ import { ReactNode } from 'react';
 import { useSmartHomeNav } from '@/hooks/useSmartHomeNav';
 
 import { BackButton } from './BackButton';
+import MessageBell from './messages/MessageBell';
 import { SiteIcon } from './Sidebar';
 import { useSite } from './SiteProvider';
 import { ThemeToggle } from './ThemeToggle';
@@ -68,6 +69,7 @@ const MobileHeader = ({ title, showBack, actions }: MobileHeaderProps) => {
             </span>
           </Link>
           <div className='flex items-center gap-1'>
+            <MessageBell />
             <ThemeToggle />
             <UserMenu />
           </div>
@@ -85,6 +87,7 @@ const MobileHeader = ({ title, showBack, actions }: MobileHeaderProps) => {
           <div className='flex shrink-0 items-center gap-1'>
             {actions ?? (
               <>
+                <MessageBell />
                 <ThemeToggle />
                 <UserMenu />
               </>

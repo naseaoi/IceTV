@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 
 import { isGuardFailure, requireActiveUser } from '@/lib/api-auth';
 import { db } from '@/lib/db';
+import { normalizeFavoriteLimit, parseFavoriteCursor } from '@/lib/favorites';
 import { NO_STORE_HEADERS } from '@/lib/http-cache';
 import { Favorite } from '@/lib/types';
 import { parseStorageKey } from '@/lib/utils';
@@ -22,6 +23,20 @@ export async function GET(request: NextRequest) {
 
     const { searchParams } = new URL(request.url);
     const key = searchParams.get('key');
+
+    if (searchParams.get('format') === 'page') {
+      const cursor = parseFavoriteCursor(searchParams.get('cursor'));
+      const page = await db.getFavoritePage(
+        guardResult.username,
+        normalizeFavoriteLimit(searchParams.get('limit')),
+        cursor?.time,
+        cursor?.key,
+      );
+      return NextResponse.json(page, {
+        status: 200,
+        headers: NO_STORE_HEADERS,
+      });
+    }
 
     // 查询单条收藏
     if (key) {

@@ -124,6 +124,8 @@ interface VideoCardPosterProps {
   rate?: string;
   episodes?: number;
   currentEpisode?: number;
+  hasUpdate?: boolean;
+  availableEpisodes?: number;
   doubanId?: number;
   isBangumi: boolean;
   isAggregate: boolean;
@@ -132,6 +134,7 @@ interface VideoCardPosterProps {
   visibleFavorited: boolean;
   onDeleteRecord: React.MouseEventHandler<SVGSVGElement>;
   onToggleFavorite: React.MouseEventHandler<HTMLButtonElement>;
+  onMarkUpdateRead?: React.MouseEventHandler<HTMLButtonElement>;
 }
 
 export function VideoCardPoster({
@@ -146,6 +149,8 @@ export function VideoCardPoster({
   rate,
   episodes,
   currentEpisode,
+  hasUpdate = false,
+  availableEpisodes,
   doubanId,
   isBangumi,
   isAggregate,
@@ -154,6 +159,7 @@ export function VideoCardPoster({
   visibleFavorited,
   onDeleteRecord,
   onToggleFavorite,
+  onMarkUpdateRead,
 }: VideoCardPosterProps) {
   const displayYear = String(year ?? '').trim();
   const showEpisodeBadge = (episodes ?? 0) > 1;
@@ -310,6 +316,28 @@ export function VideoCardPoster({
             />
           </div>
         </a>
+      )}
+
+      {hasUpdate && availableEpisodes && availableEpisodes > 1 && (
+        <button
+          type='button'
+          data-card-update
+          aria-label={`更新至 ${availableEpisodes} 集，点击标记已读`}
+          className='group/update absolute bottom-2 left-2 min-w-[4.75rem] rounded-md bg-amber-500 px-2 py-1 text-xs font-semibold text-white shadow-md'
+          style={noSelectStyle}
+          onContextMenu={preventContextMenu}
+          onClick={onMarkUpdateRead}
+        >
+          <span className='sm:group-hover/update:hidden'>
+            更新至 {availableEpisodes} 集
+          </span>
+          <span
+            className='hidden sm:group-hover/update:inline'
+            aria-hidden='true'
+          >
+            ✅
+          </span>
+        </button>
       )}
 
       {isAggregate && sourceNames && sourceNames.length > 0 && (

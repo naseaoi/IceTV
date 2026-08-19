@@ -72,6 +72,7 @@ export async function POST(req: NextRequest) {
             session,
           ]),
         ),
+        messageState: await db.getUserMessageState(username),
       };
 
       exportData.data.userData[username] = userData;

@@ -13,11 +13,13 @@ import {
   PlaybackTimeRange,
   PlaybackWatchTotals,
   PlayRecord,
+  PlayRecordPage,
   SkipConfig,
   SourceRouteStatInput,
   SourceRouteStatsBucket,
   SourceRouteStatsItem,
   StorageImportData,
+  UserMessageState,
 } from './types';
 
 async function createStorage(): Promise<IStorage> {
@@ -83,6 +85,16 @@ class DbManager {
     return storage.getAllPlayRecords(userName);
   }
 
+  async getPlayRecordPage(
+    userName: string,
+    limit: number,
+    cursorTime?: number,
+    cursorKey?: string,
+  ): Promise<PlayRecordPage> {
+    const storage = await this.getStorage();
+    return storage.getPlayRecordPage(userName, limit, cursorTime, cursorKey);
+  }
+
   async deletePlayRecord(
     userName: string,
     source: string,
@@ -134,6 +146,16 @@ class DbManager {
   ): Promise<{ [key: string]: Favorite }> {
     const storage = await this.getStorage();
     return storage.getAllFavorites(userName);
+  }
+
+  async getFavoritePage(
+    userName: string,
+    limit: number,
+    cursorTime?: number,
+    cursorKey?: string,
+  ) {
+    const storage = await this.getStorage();
+    return storage.getFavoritePage(userName, limit, cursorTime, cursorKey);
   }
 
   async deleteFavorite(
@@ -222,6 +244,19 @@ class DbManager {
   async getAllUsersWithPasswords(): Promise<{ [username: string]: string }> {
     const storage = await this.getStorage();
     return storage.getAllUsersWithPasswords();
+  }
+
+  async getUserMessageState(userName: string): Promise<UserMessageState> {
+    const storage = await this.getStorage();
+    return storage.getUserMessageState(userName);
+  }
+
+  async setUserMessageState(
+    userName: string,
+    state: UserMessageState,
+  ): Promise<void> {
+    const storage = await this.getStorage();
+    await storage.setUserMessageState(userName, state);
   }
 
   async getAdminConfig(): Promise<AdminConfig | null> {

@@ -7,6 +7,7 @@ import { installWebPolyfills } from '@/app/api/test-utils/web-polyfills';
 installWebPolyfills();
 
 const mockSaveFavorite = jest.fn();
+const mockGetFavoritePage = jest.fn();
 
 jest.mock('@/lib/api-auth', () => ({
   requireActiveUser: jest
@@ -17,11 +18,16 @@ jest.mock('@/lib/api-auth', () => ({
 
 jest.mock('@/lib/db', () => ({
   db: {
+    getFavoritePage: (...args: unknown[]) => mockGetFavoritePage(...args),
     saveFavorite: (...args: unknown[]) => mockSaveFavorite(...args),
   },
 }));
 
-const { POST } = require('./route') as typeof import('./route');
+const { GET, POST } = require('./route') as typeof import('./route');
+
+function createRequest(url: string): NextRequest {
+  return new Request(url) as unknown as NextRequest;
+}
 
 function createJsonRequest(body: unknown): NextRequest {
   return {
@@ -33,6 +39,11 @@ describe('favorites route', () => {
   beforeEach(() => {
     jest.clearAllMocks();
     mockSaveFavorite.mockResolvedValue(undefined);
+    mockGetFavoritePage.mockResolvedValue({
+      items: [],
+      total: 25,
+      nextCursor: '1000|source+video-1',
+    });
   });
 
   it('保存收藏时由服务端记录元数据检查时间', async () => {
@@ -64,5 +75,23 @@ describe('favorites route', () => {
     } finally {
       nowSpy.mockRestore();
     }
+  });
+
+  it('分页查询不读取全量收藏', async () => {
+    const response = await GET(
+      createRequest('http://localhost/api/favorites?format=page&limit=24'),
+    );
+
+    await expect(response.json()).resolves.toEqual({
+      items: [],
+      total: 25,
+      nextCursor: '1000|source+video-1',
+    });
+    expect(mockGetFavoritePage).toHaveBeenCalledWith(
+      'demo',
+      24,
+      undefined,
+      undefined,
+    );
   });
 });

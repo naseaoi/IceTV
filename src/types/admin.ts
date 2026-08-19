@@ -9,6 +9,8 @@ export interface AdminConfig {
     SiteName: string;
     SiteIcon: string;
     Announcement: string;
+    AnnouncementVersion?: string;
+    AnnouncementPublishedAt?: number;
     FooterText: string;
     EnableLiveEntry: boolean;
     DefaultAggregateSearch: boolean;

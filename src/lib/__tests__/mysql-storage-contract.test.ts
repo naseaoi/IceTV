@@ -27,6 +27,7 @@ type FakeState = {
   searchHistory: SearchHistoryRow[];
   sourceRouteStats: SourceRouteStatsRow[];
   adminConfig: string | null;
+  messageStates: Map<string, string>;
 };
 
 function cloneNestedMap(source: Map<string, Map<string, string>>) {
@@ -45,6 +46,7 @@ function cloneState(state: FakeState): FakeState {
     searchHistory: state.searchHistory.map((row) => ({ ...row })),
     sourceRouteStats: state.sourceRouteStats.map((row) => ({ ...row })),
     adminConfig: state.adminConfig,
+    messageStates: new Map(state.messageStates),
   };
 }
 
@@ -58,6 +60,7 @@ function createState(): FakeState {
     searchHistory: [],
     sourceRouteStats: [],
     adminConfig: null,
+    messageStates: new Map(),
   };
 }
 
@@ -126,6 +129,28 @@ function createFakePool() {
 
     if (normalized === 'DELETE FROM users') {
       currentState.users.clear();
+      return [[], []];
+    }
+
+    if (normalized === 'DELETE FROM user_message_state WHERE username = ?') {
+      const [username] = params as [string];
+      currentState.messageStates.delete(username);
+      return [[], []];
+    }
+
+    if (normalized === 'DELETE FROM user_message_state') {
+      currentState.messageStates.clear();
+      return [[], []];
+    }
+
+    if (
+      normalized ===
+        'INSERT INTO user_message_state (username, state_json) VALUES (?, ?) ON DUPLICATE KEY UPDATE state_json = VALUES(state_json)' ||
+      normalized ===
+        'INSERT INTO user_message_state (username, state_json) VALUES (?, ?)'
+    ) {
+      const [username, stateJson] = params as [string, string];
+      currentState.messageStates.set(username, stateJson);
       return [[], []];
     }
 
@@ -567,6 +592,75 @@ function createFakePool() {
     }
 
     if (
+      normalized.startsWith(
+        'SELECT record_key, record_json FROM play_records WHERE username = ? ORDER BY',
+      )
+    ) {
+      const [username, limit] = params as [string, number];
+      const rows = getJsonRows(
+        currentState.playRecords,
+        username,
+        'record_key',
+        'record_json',
+      ).sort((left, right) => {
+        const timeDifference =
+          JSON.parse(right.record_json).save_time -
+          JSON.parse(left.record_json).save_time;
+        return (
+          timeDifference || right.record_key.localeCompare(left.record_key)
+        );
+      });
+      return [rows.slice(0, limit), []];
+    }
+
+    if (
+      normalized.startsWith(
+        'SELECT record_key, record_json FROM play_records WHERE username = ? AND (',
+      )
+    ) {
+      const [username, cursorTime, , cursorKey, limit] = params as [
+        string,
+        number,
+        number,
+        string,
+        number,
+      ];
+      const rows = getJsonRows(
+        currentState.playRecords,
+        username,
+        'record_key',
+        'record_json',
+      )
+        .filter((row) => {
+          const saveTime = JSON.parse(row.record_json).save_time;
+          return (
+            saveTime < cursorTime ||
+            (saveTime === cursorTime && row.record_key < cursorKey)
+          );
+        })
+        .sort((left, right) => {
+          const timeDifference =
+            JSON.parse(right.record_json).save_time -
+            JSON.parse(left.record_json).save_time;
+          return (
+            timeDifference || right.record_key.localeCompare(left.record_key)
+          );
+        });
+      return [rows.slice(0, limit), []];
+    }
+
+    if (
+      normalized ===
+      'SELECT COUNT(*) AS count FROM play_records WHERE username = ?'
+    ) {
+      const [username] = params as [string];
+      return [
+        [{ count: currentState.playRecords.get(username)?.size || 0 }],
+        [],
+      ];
+    }
+
+    if (
       normalized ===
       'SELECT favorite_json FROM favorites WHERE username = ? AND favorite_key = ? LIMIT 1'
     ) {
@@ -591,6 +685,68 @@ function createFakePool() {
         ),
         [],
       ];
+    }
+
+    if (
+      normalized.startsWith(
+        'SELECT f.favorite_key, f.favorite_json, p.record_json FROM favorites f LEFT JOIN play_records p',
+      )
+    ) {
+      const [username] = params as [string];
+      const rows = (
+        getJsonRows(
+          currentState.favorites,
+          username,
+          'favorite_key',
+          'favorite_json',
+        ) as Array<{ favorite_key: string; favorite_json: string }>
+      )
+        .map((row) => ({
+          ...row,
+          record_json: currentState.playRecords
+            .get(username)
+            ?.get(row.favorite_key),
+        }))
+        .sort((left, right) => {
+          const timeDifference =
+            JSON.parse(right.favorite_json).save_time -
+            JSON.parse(left.favorite_json).save_time;
+          return (
+            timeDifference ||
+            right.favorite_key.localeCompare(left.favorite_key)
+          );
+        });
+      if (params.length === 5) {
+        const [, cursorTime, , cursorKey, limit] = params as [
+          string,
+          number,
+          number,
+          string,
+          number,
+        ];
+        return [
+          rows
+            .filter((row) => {
+              const saveTime = JSON.parse(row.favorite_json).save_time;
+              return (
+                saveTime < cursorTime ||
+                (saveTime === cursorTime && row.favorite_key < cursorKey)
+              );
+            })
+            .slice(0, limit),
+          [],
+        ];
+      }
+      const [, limit] = params as [string, number];
+      return [rows.slice(0, limit), []];
+    }
+
+    if (
+      normalized ===
+      'SELECT COUNT(*) AS count FROM favorites WHERE username = ?'
+    ) {
+      const [username] = params as [string];
+      return [[{ count: currentState.favorites.get(username)?.size || 0 }], []];
     }
 
     if (
@@ -779,6 +935,15 @@ function createFakePool() {
       normalized === 'SELECT config_json FROM admin_config WHERE id = 1 LIMIT 1'
     ) {
       return [[{ config_json: currentState.adminConfig }], []];
+    }
+
+    if (
+      normalized ===
+      'SELECT state_json FROM user_message_state WHERE username = ? LIMIT 1'
+    ) {
+      const [username] = params as [string];
+      const stateJson = currentState.messageStates.get(username);
+      return [stateJson ? [{ state_json: stateJson }] : [], []];
     }
 
     if (
@@ -999,6 +1164,9 @@ describe('mysql storage contract', () => {
     await storage.setSkipConfig('demo-user', 'source', '1', skipConfig);
     await storage.setPlaybackSession('demo-user', playbackSession);
     await storage.addSearchHistory('demo-user', 'first');
+    await storage.setUserMessageState('demo-user', {
+      readAnnouncementId: 'announcement:v1',
+    });
     await storage.addSearchHistory('demo-user', 'second');
     await storage.addSearchHistory('demo-user', 'first');
 
@@ -1019,6 +1187,9 @@ describe('mysql storage contract', () => {
       'first',
       'second',
     ]);
+    await expect(storage.getUserMessageState('demo-user')).resolves.toEqual({
+      readAnnouncementId: 'announcement:v1',
+    });
 
     await storage.deleteUser('demo-user');
 
@@ -1028,6 +1199,81 @@ describe('mysql storage contract', () => {
     await expect(storage.getAllSkipConfigs('demo-user')).resolves.toEqual({});
     await expect(storage.getPlaybackSessions('demo-user')).resolves.toEqual([]);
     await expect(storage.getSearchHistory('demo-user')).resolves.toEqual([]);
+    await expect(storage.getUserMessageState('demo-user')).resolves.toEqual({});
+  });
+
+  it('paginates play records by save time', async () => {
+    const storage = new MySqlStorage('mysql://demo:demo@localhost:3306/icetv');
+    await storage.setPlayRecord('demo-user', 'source+old', {
+      ...playRecord,
+      save_time: 1000,
+    });
+    await storage.setPlayRecord('demo-user', 'source+middle', {
+      ...playRecord,
+      save_time: 2000,
+    });
+    await storage.setPlayRecord('demo-user', 'source+new', {
+      ...playRecord,
+      save_time: 3000,
+    });
+
+    const firstPage = await storage.getPlayRecordPage('demo-user', 2);
+    const secondPage = await storage.getPlayRecordPage(
+      'demo-user',
+      2,
+      2000,
+      'source+middle',
+    );
+
+    expect(Object.keys(firstPage.items)).toEqual([
+      'source+new',
+      'source+middle',
+    ]);
+    expect(firstPage).toMatchObject({
+      total: 3,
+      nextCursor: '2000|source+middle',
+    });
+    expect(Object.keys(secondPage.items)).toEqual(['source+old']);
+    expect(secondPage.nextCursor).toBeNull();
+  });
+
+  it('paginates favorites with matching play progress', async () => {
+    const storage = new MySqlStorage('mysql://demo:demo@localhost:3306/icetv');
+    for (const [key, saveTime] of [
+      ['source+old', 1000],
+      ['source+middle', 2000],
+      ['source+new', 3000],
+    ] as const) {
+      await storage.setFavorite('demo-user', key, {
+        ...favorite,
+        title: key,
+        save_time: saveTime,
+      });
+    }
+    await storage.setPlayRecord('demo-user', 'source+middle', {
+      ...playRecord,
+      index: 4,
+    });
+
+    const firstPage = await storage.getFavoritePage('demo-user', 2);
+    const secondPage = await storage.getFavoritePage(
+      'demo-user',
+      2,
+      2000,
+      'source+middle',
+    );
+
+    expect(firstPage.items.map((item) => item.key)).toEqual([
+      'source+new',
+      'source+middle',
+    ]);
+    expect(firstPage.items[1]?.playRecord?.index).toBe(4);
+    expect(firstPage).toMatchObject({
+      total: 3,
+      nextCursor: '2000|source+middle',
+    });
+    expect(secondPage.items.map((item) => item.key)).toEqual(['source+old']);
+    expect(secondPage.nextCursor).toBeNull();
   });
 
   it('replaces all data from an import snapshot', async () => {
@@ -1047,6 +1293,7 @@ describe('mysql storage contract', () => {
           searchHistory: ['first', 'second'],
           skipConfigs: { 'source+1': skipConfig },
           playbackSessions: { [playbackSession.id]: playbackSession },
+          messageState: { readAnnouncementId: 'announcement:v1' },
         },
       },
       sourceRouteStats: [
@@ -1084,6 +1331,9 @@ describe('mysql storage contract', () => {
     await expect(storage.getAllPlaybackSessions('demo-user')).resolves.toEqual([
       playbackSession,
     ]);
+    await expect(storage.getUserMessageState('demo-user')).resolves.toEqual({
+      readAnnouncementId: 'announcement:v1',
+    });
     await expect(storage.getAllSourceRouteStatBuckets()).resolves.toEqual([
       {
         source: 'source-a',

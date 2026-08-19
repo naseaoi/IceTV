@@ -65,6 +65,9 @@ export function areVideoCardPropsEqual(
     prev.year === next.year &&
     prev.from === next.from &&
     prev.currentEpisode === next.currentEpisode &&
+    prev.hasUpdate === next.hasUpdate &&
+    prev.trackingEnabled === next.trackingEnabled &&
+    prev.availableEpisodes === next.availableEpisodes &&
     prev.resumeEpisodeIndex === next.resumeEpisodeIndex &&
     prev.douban_id === next.douban_id &&
     prev.rate === next.rate &&

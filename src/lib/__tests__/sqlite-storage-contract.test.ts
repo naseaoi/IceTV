@@ -109,6 +109,9 @@ describe('sqlite storage contract', () => {
     await storage.setSkipConfig('demo-user', 'source', '1', skipConfig);
     await storage.setPlaybackSession('demo-user', playbackSession);
     await storage.addSearchHistory('demo-user', 'first');
+    await storage.setUserMessageState('demo-user', {
+      readAnnouncementId: 'announcement:v1',
+    });
     await storage.addSearchHistory('demo-user', 'second');
     await storage.addSearchHistory('demo-user', 'first');
 
@@ -129,6 +132,9 @@ describe('sqlite storage contract', () => {
       'first',
       'second',
     ]);
+    await expect(storage.getUserMessageState('demo-user')).resolves.toEqual({
+      readAnnouncementId: 'announcement:v1',
+    });
 
     await storage.deleteUser('demo-user');
 
@@ -138,6 +144,7 @@ describe('sqlite storage contract', () => {
     await expect(storage.getAllSkipConfigs('demo-user')).resolves.toEqual({});
     await expect(storage.getPlaybackSessions('demo-user')).resolves.toEqual([]);
     await expect(storage.getSearchHistory('demo-user')).resolves.toEqual([]);
+    await expect(storage.getUserMessageState('demo-user')).resolves.toEqual({});
   });
 
   it('searches playback sessions before applying the page limit', async () => {
@@ -170,6 +177,80 @@ describe('sqlite storage contract', () => {
     ).resolves.toEqual([matchedSession]);
   });
 
+  it('paginates play records by save time', async () => {
+    const storage = new LocalSqliteStorage(':memory:');
+    await storage.setPlayRecord('demo-user', 'source+old', {
+      ...playRecord,
+      save_time: 1000,
+    });
+    await storage.setPlayRecord('demo-user', 'source+middle', {
+      ...playRecord,
+      save_time: 2000,
+    });
+    await storage.setPlayRecord('demo-user', 'source+new', {
+      ...playRecord,
+      save_time: 3000,
+    });
+
+    const firstPage = await storage.getPlayRecordPage('demo-user', 2);
+    const secondPage = await storage.getPlayRecordPage(
+      'demo-user',
+      2,
+      2000,
+      'source+middle',
+    );
+
+    expect(Object.keys(firstPage.items)).toEqual([
+      'source+new',
+      'source+middle',
+    ]);
+    expect(firstPage).toMatchObject({
+      total: 3,
+      nextCursor: '2000|source+middle',
+    });
+    expect(Object.keys(secondPage.items)).toEqual(['source+old']);
+    expect(secondPage.nextCursor).toBeNull();
+  });
+
+  it('paginates favorites with matching play progress', async () => {
+    const storage = new LocalSqliteStorage(':memory:');
+    for (const [key, saveTime] of [
+      ['source+old', 1000],
+      ['source+middle', 2000],
+      ['source+new', 3000],
+    ] as const) {
+      await storage.setFavorite('demo-user', key, {
+        ...favorite,
+        title: key,
+        save_time: saveTime,
+      });
+    }
+    await storage.setPlayRecord('demo-user', 'source+middle', {
+      ...playRecord,
+      index: 4,
+    });
+
+    const firstPage = await storage.getFavoritePage('demo-user', 2);
+    const secondPage = await storage.getFavoritePage(
+      'demo-user',
+      2,
+      2000,
+      'source+middle',
+    );
+
+    expect(firstPage.items.map((item) => item.key)).toEqual([
+      'source+new',
+      'source+middle',
+    ]);
+    expect(firstPage.items[1]?.playRecord?.index).toBe(4);
+    expect(firstPage).toMatchObject({
+      total: 3,
+      nextCursor: '2000|source+middle',
+    });
+    expect(secondPage.items.map((item) => item.key)).toEqual(['source+old']);
+    expect(secondPage.nextCursor).toBeNull();
+  });
+
   it('replaces all data from an import snapshot', async () => {
     const storage = new LocalSqliteStorage(':memory:');
     const passwordHash =
@@ -187,6 +268,7 @@ describe('sqlite storage contract', () => {
           searchHistory: ['first', 'second'],
           skipConfigs: { 'source+1': skipConfig },
           playbackSessions: { [playbackSession.id]: playbackSession },
+          messageState: { readAnnouncementId: 'announcement:v1' },
         },
       },
       sourceRouteStats: [
@@ -221,6 +303,9 @@ describe('sqlite storage contract', () => {
     await expect(storage.getPlaybackSessions('demo-user')).resolves.toEqual([
       playbackSession,
     ]);
+    await expect(storage.getUserMessageState('demo-user')).resolves.toEqual({
+      readAnnouncementId: 'announcement:v1',
+    });
     await expect(storage.getAllSourceRouteStatBuckets()).resolves.toEqual([
       {
         source: 'source-a',

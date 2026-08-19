@@ -13,13 +13,16 @@ import {
   retryClientRequest,
   triggerGlobalError,
 } from './db.client.internal';
+import { normalizeFavoriteLimit } from './favorites';
+import type { PlayRecordPage } from './play-records';
 import {
   DEFAULT_RECENT_PLAY_RECORD_LIMIT,
+  mergePlayRecordUpdateBaseline,
   normalizePlayRecordLimit,
   selectRecentPlayRecords,
 } from './play-records';
 import { getRuntimeConfig } from './runtime-config';
-import type { Favorite, PlayRecord, SkipConfig } from './types';
+import type { Favorite, FavoritePage, PlayRecord, SkipConfig } from './types';
 
 export type { Favorite, PlayRecord, SkipConfig } from './types';
 
@@ -150,6 +153,22 @@ export async function getRecentPlayRecords(
   }
 }
 
+export async function getPlayRecordPage(
+  limit = DEFAULT_RECENT_PLAY_RECORD_LIMIT,
+  cursor?: string | null,
+): Promise<PlayRecordPage> {
+  const normalizedLimit = normalizePlayRecordLimit(limit);
+  const params = new URLSearchParams({
+    format: 'page',
+    limit: String(normalizedLimit),
+  });
+  if (cursor) {
+    params.set('cursor', cursor);
+  }
+
+  return fetchFromApi<PlayRecordPage>(`/api/playrecords?${params.toString()}`);
+}
+
 export function getCachedPlayRecordsSnapshot(): Record<
   string,
   PlayRecord
@@ -167,13 +186,15 @@ export async function savePlayRecord(
   record: PlayRecord,
 ): Promise<void> {
   const key = generateStorageKey(source, id);
+  const cached = cacheManager.getCachedPlayRecords();
+  const normalizedRecord = mergePlayRecordUpdateBaseline(cached?.[key], record);
   return _writePlayRecords({
     mutateCached: (cached) => {
-      cached[key] = record;
+      cached[key] = normalizedRecord;
       return cached;
     },
     mutateLocal: (stored) => {
-      stored[key] = record;
+      stored[key] = normalizedRecord;
       return stored;
     },
     syncToServer: () =>
@@ -182,7 +203,7 @@ export async function savePlayRecord(
           fetchWithAuth('/api/playrecords', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ key, record }),
+            body: JSON.stringify({ key, record: normalizedRecord }),
             keepalive: true,
           }).then(() => {}),
         {
@@ -221,6 +242,60 @@ export async function deletePlayRecord(
   });
 }
 
+async function patchPlayRecordState(
+  source: string,
+  id: string,
+  body: Record<string, unknown>,
+): Promise<PlayRecord> {
+  try {
+    const key = generateStorageKey(source, id);
+    const response = await fetchWithAuth('/api/playrecords', {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ key, ...body }),
+    });
+    const record = (await response.json()) as PlayRecord;
+    const cachedRecords = cacheManager.getCachedPlayRecords();
+
+    if (cachedRecords?.[key]) {
+      const nextRecords = { ...cachedRecords, [key]: record };
+      cacheManager.cachePlayRecords(nextRecords);
+      window.dispatchEvent(
+        new CustomEvent('playRecordsUpdated', { detail: nextRecords }),
+      );
+    }
+
+    return record;
+  } catch (error) {
+    await handleDatabaseOperationFailure('playRecords', error);
+    throw error;
+  }
+}
+
+export async function markPlayRecordUpdateRead(
+  source: string,
+  id: string,
+  readThroughEpisodes?: number,
+): Promise<PlayRecord> {
+  const record = await patchPlayRecordState(source, id, {
+    action: 'mark-update-read',
+    readThroughEpisodes,
+  });
+  window.dispatchEvent(new CustomEvent('messagesUpdated'));
+  return record;
+}
+
+export async function setPlayRecordTracking(
+  source: string,
+  id: string,
+  enabled: boolean,
+): Promise<PlayRecord> {
+  return patchPlayRecordState(source, id, {
+    action: 'set-tracking',
+    trackingEnabled: enabled,
+  });
+}
+
 export async function clearAllPlayRecords(): Promise<void> {
   cacheManager.cachePlayRecords({});
   window.dispatchEvent(new CustomEvent('playRecordsUpdated', { detail: {} }));
@@ -233,6 +308,18 @@ export async function clearAllPlayRecords(): Promise<void> {
     await handleDatabaseOperationFailure('playRecords', err);
     throw err;
   }
+}
+
+export function applyPlayRecordStateUpdates(
+  updates: Record<string, PlayRecord>,
+): void {
+  const cachedRecords = cacheManager.getCachedPlayRecords();
+  if (cachedRecords) {
+    cacheManager.cachePlayRecords({ ...cachedRecords, ...updates });
+  }
+  window.dispatchEvent(
+    new CustomEvent('playRecordStatesUpdated', { detail: updates }),
+  );
 }
 
 // ---- 搜索历史 ----
@@ -310,6 +397,18 @@ export async function deleteSearchHistory(keyword: string): Promise<void> {
 
 export async function getAllFavorites(): Promise<Record<string, Favorite>> {
   return _getAllFavorites();
+}
+
+export async function getFavoritePage(
+  limit: number,
+  cursor?: string | null,
+): Promise<FavoritePage> {
+  const params = new URLSearchParams({
+    format: 'page',
+    limit: String(normalizeFavoriteLimit(limit)),
+  });
+  if (cursor) params.set('cursor', cursor);
+  return fetchFromApi<FavoritePage>(`/api/favorites?${params.toString()}`);
 }
 
 export function getCachedFavoritesSnapshot(): Record<string, Favorite> | null {
@@ -499,6 +598,7 @@ export async function deleteSkipConfig(
 export type CacheUpdateEvent =
   | 'playRecordsUpdated'
   | 'recentPlayRecordsUpdated'
+  | 'playRecordStatesUpdated'
   | 'favoritesUpdated'
   | 'searchHistoryUpdated'
   | 'skipConfigsUpdated';
