@@ -189,6 +189,47 @@ describe('config cache persistence', () => {
     expect(after.SiteConfig.SiteName).toBe('Saved');
   });
 
+  it('reflects a saved site name in the public config immediately', async () => {
+    const { getConfig, saveConfig, getPublicConfig } = await loadConfigModule(
+      jest.fn(),
+    );
+    const current = await getConfig();
+    expect((await getPublicConfig()).SiteName).toBe('IceTV');
+
+    await saveConfig({
+      ...current,
+      SiteConfig: { ...current.SiteConfig, SiteName: 'Next' },
+    });
+
+    expect((await getPublicConfig()).SiteName).toBe('Next');
+  });
+
+  it('reflects a saved custom category in the public config immediately', async () => {
+    const { getConfig, saveConfig, getPublicConfig } = await loadConfigModule(
+      jest.fn(),
+    );
+    const current = await getConfig();
+    expect((await getPublicConfig()).CustomCategories).toHaveLength(0);
+
+    await saveConfig({
+      ...current,
+      CustomCategories: [
+        {
+          name: '新分类',
+          type: 'movie',
+          query: 'fresh',
+          from: 'custom',
+          disabled: false,
+        },
+      ],
+    });
+
+    const publicConfig = await getPublicConfig();
+    expect(publicConfig.CustomCategories).toEqual([
+      { name: '新分类', type: 'movie', query: 'fresh' },
+    ]);
+  });
+
   it('returns detached api site entries from read cache', async () => {
     const adminConfig = cloneBaseConfig();
     adminConfig.SourceConfig = [

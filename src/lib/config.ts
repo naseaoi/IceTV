@@ -86,7 +86,6 @@ let cachedConfigVersion = '';
 let cachedConfigLoadedAt = 0;
 let inflightConfigLoad: Promise<AdminConfig> | null = null;
 let configCacheGeneration = 0;
-const PUBLIC_CONFIG_CACHE_TAG = 'public-config';
 const DEFAULT_CONFIG_CACHE_TTL_MS = 30_000;
 const PUBLIC_DOUBAN_PROXY_TYPES = new Set([
   'direct',
@@ -97,26 +96,6 @@ const PUBLIC_DOUBAN_PROXY_TYPES = new Set([
 ]);
 type ManagedUser = AdminConfig['UserConfig']['Users'][number];
 const configVersionByObject = new WeakMap<AdminConfig, string>();
-
-type NextCacheApi = {
-  revalidateTag?: (tag: string) => void;
-  unstable_cache?: <T extends () => Promise<unknown>>(
-    callback: T,
-    keyParts: string[],
-    options: { revalidate: number; tags: string[] },
-  ) => T;
-};
-
-function loadNextCacheApi(): NextCacheApi | null {
-  try {
-    return require('next/cache') as NextCacheApi;
-  } catch (error) {
-    if (process.env.NODE_ENV !== 'test') {
-      console.warn('加载 Next 缓存接口失败:', error);
-    }
-    return null;
-  }
-}
 
 export function getPublicDoubanProxyType(
   proxyType: string | undefined,
@@ -705,7 +684,6 @@ export async function resetConfig() {
   cachedConfigVersion = getConfigVersion(cachedConfig);
   cachedConfigLoadedAt = Date.now();
   bindConfigVersion(cachedConfig, cachedConfigVersion);
-  invalidatePublicConfigCache();
 
   return;
 }
@@ -724,7 +702,6 @@ export async function saveConfig(config: AdminConfig): Promise<AdminConfig> {
   cachedConfigVersion = getConfigVersion(cachedConfig);
   cachedConfigLoadedAt = Date.now();
   bindConfigVersion(cachedConfig, cachedConfigVersion);
-  invalidatePublicConfigCache();
   return cloneConfig(cachedConfig);
 }
 
@@ -914,7 +891,6 @@ export async function setCachedConfig(config: AdminConfig) {
   cachedConfigVersion = getConfigVersion(cachedConfig);
   cachedConfigLoadedAt = Date.now();
   bindConfigVersion(cachedConfig, cachedConfigVersion);
-  invalidatePublicConfigCache();
 }
 
 function cloneConfig(config: AdminConfig): AdminConfig {
@@ -947,7 +923,7 @@ function getConfigVersion(config: AdminConfig): string {
   return JSON.stringify(config);
 }
 
-async function readPublicConfig() {
+export async function getPublicConfig() {
   const config = await getConfigForRead();
 
   return {
@@ -983,26 +959,4 @@ async function readPublicConfig() {
     })),
     FluidSearch: config.SiteConfig.FluidSearch,
   };
-}
-
-const nextCacheApi = loadNextCacheApi();
-
-export const getPublicConfig: typeof readPublicConfig =
-  nextCacheApi?.unstable_cache
-    ? (nextCacheApi.unstable_cache(
-        readPublicConfig,
-        [PUBLIC_CONFIG_CACHE_TAG],
-        {
-          revalidate: 60,
-          tags: [PUBLIC_CONFIG_CACHE_TAG],
-        },
-      ) as typeof readPublicConfig)
-    : readPublicConfig;
-
-function invalidatePublicConfigCache() {
-  try {
-    nextCacheApi?.revalidateTag?.(PUBLIC_CONFIG_CACHE_TAG);
-  } catch (error) {
-    console.warn('公开配置缓存失效失败:', error);
-  }
 }
