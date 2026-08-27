@@ -788,7 +788,11 @@ export class MySqlStorage implements IStorage {
     const [rows] = await this.pool.query<JsonRow[]>(
       'SELECT username FROM users ORDER BY username ASC',
     );
-    return rows.map((row) => row.username).filter(Boolean) as string[];
+    const usernames = rows
+      .map((row) => row.username)
+      .filter(Boolean)
+      .map((username) => normalizeUsername(username as string));
+    return [...new Set(usernames)];
   }
 
   async getAllUsersWithPasswords(): Promise<{ [username: string]: string }> {
@@ -799,7 +803,7 @@ export class MySqlStorage implements IStorage {
     const result: { [username: string]: string } = {};
     for (const row of rows) {
       if (row.username && row.password) {
-        result[row.username] = row.password;
+        result[normalizeUsername(row.username as string)] = row.password;
       }
     }
     return result;

@@ -31,6 +31,11 @@ import {
   UserMessageState,
 } from './types';
 import { assertValidUsernameFormat, normalizeUsername } from './username';
+import {
+  mergeSearchKeywords,
+  pickNewerJson,
+  planUsernameMigration,
+} from './username-migration';
 
 const SEARCH_HISTORY_LIMIT = 20;
 
@@ -400,6 +405,9 @@ export class LocalSqliteStorage implements IStorage {
     if (!isMemoryDb) {
       runWithBusyRetry('迁移 SQLite 历史数据', () => {
         this.migrateFromLegacyJsonIfNeeded();
+      });
+      runWithBusyRetry('归一化 SQLite 用户名', () => {
+        this.migrateLegacyUsernameCasing();
       });
       this.checkpointWal();
     }
@@ -835,6 +843,176 @@ export class LocalSqliteStorage implements IStorage {
     console.log(`检测到旧 JSON 数据，已迁移到 SQLite: ${this.dbPath}`);
   }
 
+  // 归一化上线前写入的大小写混杂用户名，否则查询侧归一化后永远匹配不到这些行
+  private migrateLegacyUsernameCasing(): void {
+    const usernames = this.collectDistinctUsernames();
+    const plan = planUsernameMigration(usernames);
+    if (plan.length === 0) {
+      return;
+    }
+
+    const migrate = this.db.transaction(() => {
+      for (const { legacy, canonical } of plan) {
+        this.mergeUserRow(legacy, canonical);
+        this.mergeKeyedTable(
+          'play_records',
+          'record_key',
+          'record_json',
+          legacy,
+          canonical,
+        );
+        this.mergeKeyedTable(
+          'favorites',
+          'favorite_key',
+          'favorite_json',
+          legacy,
+          canonical,
+        );
+        this.mergeKeyedTable(
+          'skip_configs',
+          'config_key',
+          'config_json',
+          legacy,
+          canonical,
+        );
+        this.mergeSearchHistory(legacy, canonical);
+        this.mergeSingleRowTable(
+          'user_message_state',
+          'state_json',
+          legacy,
+          canonical,
+        );
+        this.db
+          .prepare(
+            'UPDATE playback_sessions SET username = ? WHERE username = ?',
+          )
+          .run(canonical, legacy);
+      }
+    });
+
+    migrate();
+    const detail = plan
+      .map(({ legacy, canonical }) => `${legacy} -> ${canonical}`)
+      .join(', ');
+    console.log(`已归一化 SQLite 遗留用户名: ${detail}`);
+  }
+
+  private collectDistinctUsernames(): string[] {
+    const tables = [
+      'users',
+      'play_records',
+      'favorites',
+      'search_history',
+      'skip_configs',
+      'playback_sessions',
+      'user_message_state',
+    ];
+    const usernames = new Set<string>();
+    for (const table of tables) {
+      const rows = this.db
+        .prepare(`SELECT DISTINCT username FROM ${table}`)
+        .all() as { username: string }[];
+      for (const row of rows) {
+        if (row.username) {
+          usernames.add(row.username);
+        }
+      }
+    }
+    return [...usernames];
+  }
+
+  // 规范行已存在时保留其密码，避免覆盖用户当前在用的凭据
+  private mergeUserRow(legacy: string, canonical: string): void {
+    this.db
+      .prepare(
+        `INSERT INTO users (username, password)
+         SELECT ?, password FROM users WHERE username = ?
+         ON CONFLICT(username) DO NOTHING`,
+      )
+      .run(canonical, legacy);
+    this.db.prepare('DELETE FROM users WHERE username = ?').run(legacy);
+  }
+
+  private mergeKeyedTable(
+    table: string,
+    keyColumn: string,
+    jsonColumn: string,
+    legacy: string,
+    canonical: string,
+  ): void {
+    const legacyRows = this.db
+      .prepare(
+        `SELECT ${keyColumn} AS key, ${jsonColumn} AS json FROM ${table} WHERE username = ?`,
+      )
+      .all(legacy) as { key: string; json: string }[];
+    if (legacyRows.length === 0) {
+      return;
+    }
+
+    const readCanonical = this.db.prepare(
+      `SELECT ${jsonColumn} AS json FROM ${table} WHERE username = ? AND ${keyColumn} = ?`,
+    );
+    const upsert = this.db.prepare(
+      `INSERT OR REPLACE INTO ${table} (username, ${keyColumn}, ${jsonColumn}) VALUES (?, ?, ?)`,
+    );
+    for (const row of legacyRows) {
+      const canonicalRow = readCanonical.get(canonical, row.key) as
+        | { json: string }
+        | undefined;
+      upsert.run(
+        canonical,
+        row.key,
+        pickNewerJson(canonicalRow?.json, row.json),
+      );
+    }
+    this.db.prepare(`DELETE FROM ${table} WHERE username = ?`).run(legacy);
+  }
+
+  private mergeSearchHistory(legacy: string, canonical: string): void {
+    const readKeywords = this.db.prepare(
+      'SELECT keyword FROM search_history WHERE username = ? ORDER BY sort_index ASC',
+    );
+    const legacyKeywords = (
+      readKeywords.all(legacy) as { keyword: string }[]
+    ).map((row) => row.keyword);
+    if (legacyKeywords.length === 0) {
+      return;
+    }
+
+    const canonicalKeywords = (
+      readKeywords.all(canonical) as { keyword: string }[]
+    ).map((row) => row.keyword);
+    const merged = mergeSearchKeywords(
+      canonicalKeywords,
+      legacyKeywords,
+      SEARCH_HISTORY_LIMIT,
+    );
+
+    this.db
+      .prepare('DELETE FROM search_history WHERE username IN (?, ?)')
+      .run(legacy, canonical);
+    const insert = this.db.prepare(
+      'INSERT INTO search_history (username, keyword, sort_index) VALUES (?, ?, ?)',
+    );
+    merged.forEach((keyword, index) => insert.run(canonical, keyword, index));
+  }
+
+  private mergeSingleRowTable(
+    table: string,
+    jsonColumn: string,
+    legacy: string,
+    canonical: string,
+  ): void {
+    this.db
+      .prepare(
+        `INSERT INTO ${table} (username, ${jsonColumn})
+         SELECT ?, ${jsonColumn} FROM ${table} WHERE username = ?
+         ON CONFLICT(username) DO NOTHING`,
+      )
+      .run(canonical, legacy);
+    this.db.prepare(`DELETE FROM ${table} WHERE username = ?`).run(legacy);
+  }
+
   private checkpointWal(): void {
     try {
       this.db.pragma('wal_checkpoint(TRUNCATE)');
@@ -1122,7 +1300,7 @@ export class LocalSqliteStorage implements IStorage {
 
   async getAllUsers(): Promise<string[]> {
     const rows = this.stmts.getAllUsers.all() as { username: string }[];
-    return rows.map((row) => row.username);
+    return [...new Set(rows.map((row) => normalizeUsername(row.username)))];
   }
 
   async getAllUsersWithPasswords(): Promise<{ [username: string]: string }> {
@@ -1133,7 +1311,7 @@ export class LocalSqliteStorage implements IStorage {
     const result: { [username: string]: string } = {};
     for (const row of rows) {
       if (row.username && row.password) {
-        result[row.username] = row.password;
+        result[normalizeUsername(row.username)] = row.password;
       }
     }
     return result;
