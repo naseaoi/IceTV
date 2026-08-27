@@ -27,6 +27,14 @@ export function installWebPolyfills() {
       get(key: string) {
         return this.store[key.toLowerCase()] ?? null;
       }
+
+      has(key: string) {
+        return key.toLowerCase() in this.store;
+      }
+
+      entries() {
+        return Object.entries(this.store)[Symbol.iterator]();
+      }
     }
 
     (globalThis as { Headers?: unknown }).Headers = MinimalHeaders;

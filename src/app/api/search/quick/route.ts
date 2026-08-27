@@ -3,7 +3,8 @@ import { NextRequest, NextResponse } from 'next/server';
 import { isGuardFailure, requireActiveUser } from '@/lib/api-auth';
 import type { ApiSite } from '@/lib/config';
 import { getAvailableApiSites, getConfigForRead } from '@/lib/config';
-import { getDetailFromApi, searchFirstPageFromApi } from '@/lib/downstream';
+import { getCachedDetail } from '@/lib/detail-cache';
+import { searchFirstPageFromApi } from '@/lib/downstream';
 import { filterSourcesForPlayback } from '@/lib/source-match';
 import type { SearchResult } from '@/lib/types';
 import { yellowWords } from '@/lib/yellow';
@@ -197,7 +198,7 @@ async function fetchPlayableDetail(
   source: SearchResult,
 ): Promise<SearchResult | null> {
   try {
-    const detail = await getDetailFromApi(site, source.id);
+    const detail = await getCachedDetail(site, source.id);
     if (!detail.episodes || detail.episodes.length === 0) return null;
     return {
       ...source,

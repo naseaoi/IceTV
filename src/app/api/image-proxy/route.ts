@@ -6,6 +6,7 @@ import {
   parseCoverImageResizeOptions,
   resizeCoverImage,
 } from '@/lib/cover-image-resize';
+import { loadResizedCoverImage } from '@/lib/cover-image-resize-cache.server';
 import { resolveProxyAuthorization } from '@/lib/proxy-auth';
 import {
   assertContentLength,
@@ -26,6 +27,54 @@ import {
 export const runtime = 'nodejs';
 
 const MAX_IMAGE_BYTES = 10 * 1024 * 1024;
+
+const ORIGIN_FETCH_HEADERS = {
+  Accept: 'image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8',
+  Referer: 'https://movie.douban.com/',
+  'User-Agent':
+    'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36',
+} as const;
+
+class ImageOriginError extends Error {
+  constructor(
+    readonly status: number,
+    readonly reason: string | number,
+    message: string,
+  ) {
+    super(message);
+    this.name = 'ImageOriginError';
+  }
+}
+
+async function fetchImageOrigin(
+  url: string,
+  method: 'GET' | 'HEAD',
+): Promise<{ response: Response; contentType: string }> {
+  const response = await fetchWithUrlGuard(url, {
+    method,
+    headers: ORIGIN_FETCH_HEADERS,
+    skipInitialValidation: true,
+  });
+
+  if (!response.ok) {
+    throw new ImageOriginError(
+      response.status,
+      response.status,
+      response.statusText,
+    );
+  }
+
+  const contentType = response.headers.get('content-type');
+  if (!contentType?.toLowerCase().startsWith('image/')) {
+    throw new ImageOriginError(
+      415,
+      contentType || 'content-type',
+      'Invalid image response',
+    );
+  }
+
+  return { response, contentType };
+}
 
 async function proxyImage(request: NextRequest, method: 'GET' | 'HEAD') {
   const { searchParams } = new URL(request.url);
@@ -67,41 +116,22 @@ async function proxyImage(request: NextRequest, method: 'GET' | 'HEAD') {
   if (quotaFailure) return quotaFailure;
 
   try {
-    const imageResponse = await fetchWithUrlGuard(validation.url, {
-      method,
-      headers: {
-        Accept:
-          'image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8',
-        Referer: 'https://movie.douban.com/',
-        'User-Agent':
-          'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36',
-      },
-      skipInitialValidation: true,
-    });
-
-    if (!imageResponse.ok) {
-      recordServerProxyFailure('douban-image', imageResponse.status);
-      return NextResponse.json(
-        { error: imageResponse.statusText },
-        { status: imageResponse.status },
-      );
-    }
-
-    const contentType = imageResponse.headers.get('content-type');
-    if (!contentType?.toLowerCase().startsWith('image/')) {
-      recordServerProxyFailure('douban-image', contentType || 'content-type');
-      return NextResponse.json(
-        { error: 'Invalid image response' },
-        { status: 415 },
-      );
-    }
-
     if (method === 'GET' && resizeOptions) {
-      const source = await readArrayBufferLimited(
-        imageResponse,
-        MAX_IMAGE_BYTES,
+      const resizeTarget = resizeOptions;
+      const originUrl = validation.url;
+      const resized = await loadResizedCoverImage(
+        originUrl,
+        resizeTarget,
+        async () => {
+          const { response } = await fetchImageOrigin(originUrl, method);
+          const source = await readArrayBufferLimited(
+            response,
+            MAX_IMAGE_BYTES,
+          );
+          return resizeCoverImage(source, resizeTarget);
+        },
       );
-      const resized = await resizeCoverImage(source, resizeOptions);
+
       const headers = createImageProxyCacheHeaders();
       headers.set('Content-Type', 'image/webp');
       headers.set('Content-Length', String(resized.byteLength));
@@ -112,12 +142,15 @@ async function proxyImage(request: NextRequest, method: 'GET' | 'HEAD') {
       });
     }
 
+    const { response: imageResponse, contentType } = await fetchImageOrigin(
+      validation.url,
+      method,
+    );
+
     // 创建响应头
     const headers = createImageProxyCacheHeaders();
 
-    if (contentType) {
-      headers.set('Content-Type', contentType);
-    }
+    headers.set('Content-Type', contentType);
     const contentLength = imageResponse.headers.get('content-length');
     const etag = imageResponse.headers.get('etag');
     const lastModified = imageResponse.headers.get('last-modified');
@@ -149,6 +182,13 @@ async function proxyImage(request: NextRequest, method: 'GET' | 'HEAD') {
       },
     );
   } catch (error) {
+    if (error instanceof ImageOriginError) {
+      recordServerProxyFailure('douban-image', error.reason);
+      return NextResponse.json(
+        { error: error.message },
+        { status: error.status },
+      );
+    }
     if (error instanceof UrlValidationError) {
       return NextResponse.json({ error: 'Invalid URL' }, { status: 403 });
     }
