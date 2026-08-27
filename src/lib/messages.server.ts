@@ -23,6 +23,7 @@ import { parseStorageKey } from '@/lib/utils';
 
 const DEFAULT_MESSAGE_PAGE_LIMIT = 20;
 const MAX_MESSAGE_PAGE_LIMIT = 50;
+const READ_ALL_BATCH_SIZE = 200;
 
 function hashValue(value: string): string {
   return createHash('sha256').update(value).digest('hex').slice(0, 20);
@@ -90,38 +91,30 @@ function sortMessages<T extends UserMessage>(messages: T[]): T[] {
 }
 
 function encodeCursor(message: TrackingUpdateUserMessage): string {
-  return Buffer.from(
-    JSON.stringify({ createdAt: message.createdAt, id: message.id }),
-  ).toString('base64url');
+  return encodeCursorPosition(message.createdAt, message.recordKey);
+}
+
+function encodeCursorPosition(createdAt: number, key: string): string {
+  return Buffer.from(JSON.stringify({ createdAt, key })).toString('base64url');
 }
 
 function decodeCursor(
   cursor?: string | null,
-): { createdAt: number; id: string } | null {
+): { createdAt: number; key: string } | null {
   if (!cursor || cursor.length > 512) return null;
   try {
     const parsed = JSON.parse(Buffer.from(cursor, 'base64url').toString()) as {
       createdAt?: unknown;
-      id?: unknown;
+      key?: unknown;
     };
     return typeof parsed.createdAt === 'number' &&
       Number.isFinite(parsed.createdAt) &&
-      typeof parsed.id === 'string'
-      ? { createdAt: parsed.createdAt, id: parsed.id }
+      typeof parsed.key === 'string'
+      ? { createdAt: parsed.createdAt, key: parsed.key }
       : null;
   } catch {
     return null;
   }
-}
-
-function isAfterCursor(
-  message: TrackingUpdateUserMessage,
-  cursor: { createdAt: number; id: string },
-): boolean {
-  return (
-    message.createdAt < cursor.createdAt ||
-    (message.createdAt === cursor.createdAt && message.id < cursor.id)
-  );
 }
 
 export function normalizeMessageLimit(value: string | number | null): number {
@@ -133,14 +126,12 @@ export function normalizeMessageLimit(value: string | number | null): number {
   return Math.min(MAX_MESSAGE_PAGE_LIMIT, Math.floor(parsed));
 }
 
-async function getUnreadMessages(userName: string): Promise<{
+async function getAnnouncementContext(userName: string): Promise<{
   announcement: AnnouncementUserMessage | null;
-  tracking: TrackingUpdateUserMessage[];
   state: UserMessageState;
 }> {
-  const [config, records, state] = await Promise.all([
+  const [config, state] = await Promise.all([
     getConfigForRead(),
-    db.getAllPlayRecords(userName),
     db.getUserMessageState(userName),
   ]);
   const siteConfig = config.SiteConfig;
@@ -153,13 +144,37 @@ async function getUnreadMessages(userName: string): Promise<{
     currentAnnouncement?.id === state.readAnnouncementId
       ? null
       : currentAnnouncement;
-  const tracking = sortMessages(
-    Object.entries(records).flatMap(([key, record]) => {
-      const message = buildTrackingMessage(key, record);
-      return message ? [message] : [];
-    }),
-  );
-  return { announcement, tracking, state };
+  return { announcement, state };
+}
+
+function buildTrackingMessages(
+  records: Record<string, PlayRecord>,
+): TrackingUpdateUserMessage[] {
+  return Object.entries(records).flatMap(([key, record]) => {
+    const message = buildTrackingMessage(key, record);
+    return message ? [message] : [];
+  });
+}
+
+function parseTrackingMessageId(messageId: string): {
+  recordKey: string;
+  fromEpisodes: number;
+  toEpisodes: number;
+} | null {
+  const match = /^tracking:(.+):(\d+):(\d+)$/.exec(messageId);
+  if (!match) return null;
+  try {
+    const recordKey = decodeURIComponent(match[1]);
+    const fromEpisodes = Number(match[2]);
+    const toEpisodes = Number(match[3]);
+    return recordKey &&
+      Number.isFinite(fromEpisodes) &&
+      Number.isFinite(toEpisodes)
+      ? { recordKey, fromEpisodes, toEpisodes }
+      : null;
+  } catch {
+    return null;
+  }
 }
 
 export async function getUserMessagePage(
@@ -167,41 +182,54 @@ export async function getUserMessagePage(
   limit: number,
   cursor?: string | null,
 ): Promise<UserMessagePage> {
-  const { announcement, tracking } = await getUnreadMessages(userName);
   const decodedCursor = decodeCursor(cursor);
-  const available = decodedCursor
-    ? tracking.filter((message) => isAfterCursor(message, decodedCursor))
-    : tracking;
+  const [{ announcement }, trackingPage] = await Promise.all([
+    getAnnouncementContext(userName),
+    db.getUnreadTrackingPlayRecordPage(
+      userName,
+      limit,
+      decodedCursor?.createdAt,
+      decodedCursor?.key,
+    ),
+  ]);
   const includeAnnouncement = !decodedCursor && !!announcement;
   const trackingLimit = Math.max(0, limit - (includeAnnouncement ? 1 : 0));
-  const pageTracking = available.slice(0, trackingLimit);
+  const tracking = buildTrackingMessages(trackingPage.items);
+  const pageTracking = tracking.slice(0, trackingLimit);
   const items: UserMessage[] = [
     ...(includeAnnouncement && announcement ? [announcement] : []),
     ...pageTracking,
   ];
   const lastTracking = pageTracking.at(-1);
+  const hasMoreTracking =
+    tracking.length > pageTracking.length || !!trackingPage.nextCursor;
 
   return {
     items,
-    total: tracking.length + (announcement ? 1 : 0),
-    nextCursor:
-      lastTracking && available.length > pageTracking.length
+    total: trackingPage.total + (announcement ? 1 : 0),
+    nextCursor: hasMoreTracking
+      ? lastTracking
         ? encodeCursor(lastTracking)
-        : null,
+        : encodeCursorPosition(Number.MAX_SAFE_INTEGER, '\uffff')
+      : null,
   };
 }
 
 export async function getUserMessageSummary(
   userName: string,
 ): Promise<UserMessageSummary> {
-  const { announcement, tracking } = await getUnreadMessages(userName);
+  const [{ announcement }, trackingPage] = await Promise.all([
+    getAnnouncementContext(userName),
+    db.getUnreadTrackingPlayRecordPage(userName, 1),
+  ]);
+  const tracking = buildTrackingMessages(trackingPage.items);
   const messages = sortMessages<UserMessage>([
     ...(announcement ? [announcement] : []),
     ...tracking,
   ]);
   const revision = hashValue(messages.map((message) => message.id).join('|'));
   return {
-    unreadCount: messages.length,
+    unreadCount: trackingPage.total + (announcement ? 1 : 0),
     revision,
     latestMessage: messages[0] || null,
   };
@@ -211,7 +239,7 @@ export async function readUserMessage(
   userName: string,
   messageId: string,
 ): Promise<ReadUserMessageResult | null> {
-  const { announcement, tracking, state } = await getUnreadMessages(userName);
+  const { announcement, state } = await getAnnouncementContext(userName);
   if (announcement?.id === messageId) {
     await db.setUserMessageState(userName, {
       ...state,
@@ -220,14 +248,29 @@ export async function readUserMessage(
     return { message: announcement };
   }
 
-  const message = tracking.find((item) => item.id === messageId);
-  if (!message) return null;
+  const parsedMessage = parseTrackingMessageId(messageId);
+  if (!parsedMessage) return null;
+  const parsedRecordKey = parseStorageKey(parsedMessage.recordKey);
+  if (!parsedRecordKey) return null;
   const currentRecord = await db.getPlayRecord(
     userName,
-    message.source,
-    message.videoId,
+    parsedRecordKey.source,
+    parsedRecordKey.id,
   );
   if (!currentRecord) return null;
+  const currentMessage = buildTrackingMessage(
+    parsedMessage.recordKey,
+    currentRecord,
+  );
+  if (!currentMessage || currentMessage.toEpisodes < parsedMessage.toEpisodes) {
+    return null;
+  }
+  const message: TrackingUpdateUserMessage = {
+    ...currentMessage,
+    id: messageId,
+    fromEpisodes: parsedMessage.fromEpisodes,
+    toEpisodes: parsedMessage.toEpisodes,
+  };
   const updatedRecord = markPlayRecordUpdateRead(
     currentRecord,
     message.toEpisodes,
@@ -247,7 +290,7 @@ export async function readUserMessage(
 export async function readAllUserMessages(
   userName: string,
 ): Promise<ReadAllUserMessagesResult> {
-  const { announcement, tracking, state } = await getUnreadMessages(userName);
+  const { announcement, state } = await getAnnouncementContext(userName);
   if (announcement) {
     await db.setUserMessageState(userName, {
       ...state,
@@ -256,21 +299,20 @@ export async function readAllUserMessages(
   }
 
   const updatedRecords: Record<string, PlayRecord> = {};
-  for (const message of tracking) {
-    const record = await db.getPlayRecord(
+  for (;;) {
+    const page = await db.getUnreadTrackingPlayRecordPage(
       userName,
-      message.source,
-      message.videoId,
+      READ_ALL_BATCH_SIZE,
     );
-    if (!record) continue;
-    const updatedRecord = markPlayRecordUpdateRead(record, message.toEpisodes);
-    await db.savePlayRecord(
-      userName,
-      message.source,
-      message.videoId,
-      updatedRecord,
-    );
-    updatedRecords[message.recordKey] = updatedRecord;
+    const batch: Record<string, PlayRecord> = {};
+    for (const [recordKey, record] of Object.entries(page.items)) {
+      const message = buildTrackingMessage(recordKey, record);
+      if (!message) continue;
+      batch[recordKey] = markPlayRecordUpdateRead(record, message.toEpisodes);
+    }
+    if (Object.keys(batch).length === 0) break;
+    await db.savePlayRecordsByKey(userName, batch);
+    Object.assign(updatedRecords, batch);
   }
 
   return { updatedRecords };

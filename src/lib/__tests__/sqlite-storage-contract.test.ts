@@ -325,6 +325,34 @@ describe('sqlite storage contract', () => {
     ]);
   });
 
+  it('queries unread tracking records in database order without loading all records', async () => {
+    const storage = new LocalSqliteStorage(':memory:');
+    const makeRecord = (index: number, total: number, baseline: number) => ({
+      ...playRecord,
+      index: 1,
+      total_episodes: total,
+      save_time: index,
+      metadata_checked_at: index,
+      update_baseline_episodes: baseline,
+      tracking_enabled: true,
+    });
+
+    await storage.setPlayRecords('demo-user', {
+      'source+new': makeRecord(30, 12, 10),
+      'source+old': makeRecord(20, 10, 10),
+      'source+disabled': {
+        ...makeRecord(40, 20, 10),
+        tracking_enabled: false,
+      },
+    });
+
+    const page = await storage.getUnreadTrackingPlayRecordPage('demo-user', 1);
+
+    expect(page.total).toBe(1);
+    expect(Object.keys(page.items)).toEqual(['source+new']);
+    expect(page.nextCursor).toBeNull();
+  });
+
   it('keeps legacy short usernames when replacing data', async () => {
     const storage = new LocalSqliteStorage(':memory:');
 

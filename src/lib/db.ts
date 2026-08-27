@@ -95,6 +95,29 @@ class DbManager {
     return storage.getPlayRecordPage(userName, limit, cursorTime, cursorKey);
   }
 
+  async getUnreadTrackingPlayRecordPage(
+    userName: string,
+    limit: number,
+    cursorTime?: number,
+    cursorKey?: string,
+  ): Promise<PlayRecordPage> {
+    const storage = await this.getStorage();
+    return storage.getUnreadTrackingPlayRecordPage(
+      userName,
+      limit,
+      cursorTime,
+      cursorKey,
+    );
+  }
+
+  async savePlayRecordsByKey(
+    userName: string,
+    records: Record<string, PlayRecord>,
+  ): Promise<void> {
+    const storage = await this.getStorage();
+    await storage.setPlayRecords(userName, records);
+  }
+
   async deletePlayRecord(
     userName: string,
     source: string,

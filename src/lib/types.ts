@@ -166,6 +166,16 @@ export interface IStorage {
     cursorTime?: number,
     cursorKey?: string,
   ): Promise<PlayRecordPage>;
+  getUnreadTrackingPlayRecordPage(
+    userName: string,
+    limit: number,
+    cursorTime?: number,
+    cursorKey?: string,
+  ): Promise<PlayRecordPage>;
+  setPlayRecords(
+    userName: string,
+    records: Record<string, PlayRecord>,
+  ): Promise<void>;
   deletePlayRecord(userName: string, key: string): Promise<void>;
   deleteAllPlayRecords(userName: string): Promise<void>;
 

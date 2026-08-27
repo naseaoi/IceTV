@@ -4,10 +4,12 @@ import type { AdminConfig } from '@/types/admin';
 
 const mockGetConfigForRead = jest.fn();
 const mockGetAllPlayRecords = jest.fn();
+const mockGetUnreadTrackingPlayRecordPage = jest.fn();
 const mockGetUserMessageState = jest.fn();
 const mockSetUserMessageState = jest.fn();
 const mockGetPlayRecord = jest.fn();
 const mockSavePlayRecord = jest.fn();
+const mockSavePlayRecordsByKey = jest.fn();
 
 jest.mock('@/lib/config', () => ({
   getConfigForRead: (...args: unknown[]) => mockGetConfigForRead(...args),
@@ -16,18 +18,23 @@ jest.mock('@/lib/config', () => ({
 jest.mock('@/lib/db', () => ({
   db: {
     getAllPlayRecords: (...args: unknown[]) => mockGetAllPlayRecords(...args),
+    getUnreadTrackingPlayRecordPage: (...args: unknown[]) =>
+      mockGetUnreadTrackingPlayRecordPage(...args),
     getUserMessageState: (...args: unknown[]) =>
       mockGetUserMessageState(...args),
     setUserMessageState: (...args: unknown[]) =>
       mockSetUserMessageState(...args),
     getPlayRecord: (...args: unknown[]) => mockGetPlayRecord(...args),
     savePlayRecord: (...args: unknown[]) => mockSavePlayRecord(...args),
+    savePlayRecordsByKey: (...args: unknown[]) =>
+      mockSavePlayRecordsByKey(...args),
   },
 }));
 
 import {
   getUserMessagePage,
   getUserMessageSummary,
+  readAllUserMessages,
   readUserMessage,
 } from '@/lib/messages.server';
 import type { PlayRecord } from '@/lib/types';
@@ -68,10 +75,16 @@ describe('messages server', () => {
         tracking_enabled: false,
       },
     });
+    mockGetUnreadTrackingPlayRecordPage.mockResolvedValue({
+      items: { 'source-a+video-1': updatedRecord },
+      total: 1,
+      nextCursor: null,
+    });
     mockGetUserMessageState.mockResolvedValue({});
     mockSetUserMessageState.mockResolvedValue(undefined);
     mockGetPlayRecord.mockResolvedValue(updatedRecord);
     mockSavePlayRecord.mockResolvedValue(undefined);
+    mockSavePlayRecordsByKey.mockResolvedValue(undefined);
   });
 
   it('places the unread announcement first and excludes disabled tracking', async () => {
@@ -102,6 +115,8 @@ describe('messages server', () => {
 
     expect(summary.unreadCount).toBe(1);
     expect(summary.latestMessage?.type).toBe('tracking-update');
+    expect(mockGetUnreadTrackingPlayRecordPage).toHaveBeenCalledWith('demo', 1);
+    expect(mockGetAllPlayRecords).not.toHaveBeenCalled();
   });
 
   it('marks an announcement version as read', async () => {
@@ -134,5 +149,31 @@ describe('messages server', () => {
       'video-1',
       expect.objectContaining({ update_baseline_episodes: 12 }),
     );
+  });
+
+  it('marks tracking updates in batches without reading every record separately', async () => {
+    mockGetUnreadTrackingPlayRecordPage
+      .mockResolvedValueOnce({
+        items: { 'source-a+video-1': updatedRecord },
+        total: 1,
+        nextCursor: null,
+      })
+      .mockResolvedValueOnce({
+        items: {},
+        total: 0,
+        nextCursor: null,
+      });
+
+    const result = await readAllUserMessages('demo');
+
+    expect(result.updatedRecords['source-a+video-1']).toMatchObject({
+      update_baseline_episodes: 12,
+    });
+    expect(mockSavePlayRecordsByKey).toHaveBeenCalledWith('demo', {
+      'source-a+video-1': expect.objectContaining({
+        update_baseline_episodes: 12,
+      }),
+    });
+    expect(mockGetPlayRecord).not.toHaveBeenCalled();
   });
 });

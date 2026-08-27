@@ -26,6 +26,12 @@ import {
   readMessage,
 } from '@/lib/messages.client';
 
+import {
+  getMessagePreviewMode,
+  getMessagePreviewPage,
+  getMessagePreviewSummary,
+  getMessagePreviewToast,
+} from './message-preview';
 import MessagePanel from './MessagePanel';
 import MessageToast from './MessageToast';
 
@@ -78,6 +84,7 @@ export function MessageCenterProvider({ children }: { children: ReactNode }) {
   const openRef = useRef(false);
   const firstPageRequestRef = useRef(0);
   const loadingMoreRef = useRef(false);
+  const previewModeRef = useRef<ReturnType<typeof getMessagePreviewMode>>(null);
 
   useEffect(() => {
     openRef.current = isOpen;
@@ -88,6 +95,11 @@ export function MessageCenterProvider({ children }: { children: ReactNode }) {
     setLoading(true);
     setLoadError(null);
     try {
+      const previewMode = previewModeRef.current;
+      if (previewMode) {
+        setPage(getMessagePreviewPage());
+        return;
+      }
       const nextPage = await getMessagePage();
       if (requestId === firstPageRequestRef.current) {
         setPage(nextPage);
@@ -164,6 +176,22 @@ export function MessageCenterProvider({ children }: { children: ReactNode }) {
   }, [refreshSummary, session.status]);
 
   useEffect(() => {
+    if (session.status !== 'authenticated') return;
+    const previewMode = getMessagePreviewMode();
+    if (!previewMode) return;
+    previewModeRef.current = previewMode;
+    const previewPage = getMessagePreviewPage();
+    setPage(previewPage);
+    setSummary(getMessagePreviewSummary(previewPage));
+    if (previewMode === 'panel' || previewMode === 'all') {
+      setIsOpen(true);
+    }
+    if (previewMode !== 'panel') {
+      setToastText(getMessagePreviewToast(previewMode));
+    }
+  }, [session.status]);
+
+  useEffect(() => {
     if (!toastText) return;
     const timer = window.setTimeout(
       () => setToastText(null),
@@ -180,6 +208,14 @@ export function MessageCenterProvider({ children }: { children: ReactNode }) {
 
   const handleRead = useCallback(
     async (message: UserMessage, navigate = false) => {
+      if (previewModeRef.current) {
+        setPage((current) => ({
+          ...current,
+          items: current.items.filter((item) => item.id !== message.id),
+          total: Math.max(0, current.total - 1),
+        }));
+        return;
+      }
       setWorkingIds((current) => new Set(current).add(message.id));
       try {
         await readMessage(message.id);
@@ -213,6 +249,11 @@ export function MessageCenterProvider({ children }: { children: ReactNode }) {
   );
 
   const handleReadAll = useCallback(async () => {
+    if (previewModeRef.current) {
+      setPage({ items: [], total: 0, nextCursor: null });
+      setSummary(EMPTY_SUMMARY);
+      return;
+    }
     setWorkingIds(new Set(['all']));
     try {
       await readAllMessages();

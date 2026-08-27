@@ -34,6 +34,43 @@ import { assertValidUsernameFormat, normalizeUsername } from './username';
 
 const SEARCH_HISTORY_LIMIT = 20;
 
+const SQLITE_TRACKING_GROUP_TOTAL =
+  "CAST(json_extract(record_json, '$.group_total') AS INTEGER)";
+const SQLITE_TRACKING_GROUP_INDEX =
+  "CAST(json_extract(record_json, '$.group_index') AS INTEGER)";
+const SQLITE_TRACKING_TOTAL_EPISODES =
+  "CAST(json_extract(record_json, '$.total_episodes') AS INTEGER)";
+const SQLITE_TRACKING_INDEX =
+  "CAST(json_extract(record_json, '$.index') AS INTEGER)";
+const SQLITE_TRACKING_TOTAL = `CASE
+  WHEN COALESCE(${SQLITE_TRACKING_GROUP_INDEX}, 0) <> 0
+   AND COALESCE(${SQLITE_TRACKING_GROUP_TOTAL}, 0) <> 0
+  THEN ${SQLITE_TRACKING_GROUP_TOTAL}
+  ELSE ${SQLITE_TRACKING_TOTAL_EPISODES}
+END`;
+const SQLITE_TRACKING_CURRENT = `CASE
+  WHEN COALESCE(${SQLITE_TRACKING_GROUP_INDEX}, 0) <> 0
+   AND COALESCE(${SQLITE_TRACKING_GROUP_TOTAL}, 0) <> 0
+  THEN ${SQLITE_TRACKING_GROUP_INDEX}
+  ELSE ${SQLITE_TRACKING_INDEX}
+END`;
+const SQLITE_TRACKING_BASELINE = `CASE
+  WHEN COALESCE(${SQLITE_TRACKING_GROUP_TOTAL}, 0) <> 0
+  THEN CAST(json_extract(record_json, '$.update_baseline_group_total') AS INTEGER)
+  ELSE CAST(json_extract(record_json, '$.update_baseline_episodes') AS INTEGER)
+END`;
+const SQLITE_TRACKING_CREATED_AT = `COALESCE(
+  CAST(json_extract(record_json, '$.update_detected_at') AS INTEGER),
+  CAST(json_extract(record_json, '$.metadata_checked_at') AS INTEGER),
+  CAST(json_extract(record_json, '$.save_time') AS INTEGER),
+  0
+)`;
+const SQLITE_UNREAD_TRACKING_WHERE = `
+  COALESCE(json_extract(record_json, '$.tracking_enabled'), 1) <> 0
+  AND ${SQLITE_TRACKING_TOTAL} > COALESCE(${SQLITE_TRACKING_BASELINE}, ${SQLITE_TRACKING_TOTAL})
+  AND ${SQLITE_TRACKING_CURRENT} < ${SQLITE_TRACKING_TOTAL}
+`;
+
 function parseBusyTimeoutMs(raw: string | undefined, fallback: number): number {
   if (!raw) {
     return fallback;
@@ -188,6 +225,34 @@ function buildPlayRecordPage(
   };
 }
 
+function buildTrackingPlayRecordPage(
+  rows: Array<{ record_key: string; record_json: string }>,
+  total: number,
+  limit: number,
+): PlayRecordPage {
+  const pageRows = rows.slice(0, limit);
+  const items: Record<string, PlayRecord> = {};
+  for (const row of pageRows) {
+    const parsed = parseJsonValue<PlayRecord>(row.record_json);
+    if (parsed) items[row.record_key] = parsed;
+  }
+  const lastRow = pageRows.at(-1);
+  const lastRecord = lastRow ? items[lastRow.record_key] : null;
+  const lastCreatedAt = lastRecord
+    ? lastRecord.update_detected_at ||
+      lastRecord.metadata_checked_at ||
+      lastRecord.save_time
+    : null;
+  return {
+    items,
+    total,
+    nextCursor:
+      rows.length > limit && lastRow && lastCreatedAt !== null
+        ? `${lastCreatedAt}|${lastRow.record_key}`
+        : null,
+  };
+}
+
 function buildFavoritePage(
   rows: Array<{
     favorite_key: string;
@@ -234,6 +299,9 @@ export class LocalSqliteStorage implements IStorage {
     getPlayRecordPage: Database.Statement;
     getPlayRecordPageAfter: Database.Statement;
     countPlayRecords: Database.Statement;
+    getUnreadTrackingPlayRecordPage: Database.Statement;
+    getUnreadTrackingPlayRecordPageAfter: Database.Statement;
+    countUnreadTrackingPlayRecords: Database.Statement;
     deletePlayRecord: Database.Statement;
     // favorites
     getFavorite: Database.Statement;
@@ -462,6 +530,33 @@ export class LocalSqliteStorage implements IStorage {
       ),
       countPlayRecords: this.db.prepare(
         'SELECT COUNT(*) AS count FROM play_records WHERE username = ?',
+      ),
+      getUnreadTrackingPlayRecordPage: this.db.prepare(
+        `SELECT record_key, record_json
+         FROM play_records
+         WHERE username = ? AND ${SQLITE_UNREAD_TRACKING_WHERE}
+         ORDER BY ${SQLITE_TRACKING_CREATED_AT} DESC, record_key DESC
+         LIMIT ?`,
+      ),
+      getUnreadTrackingPlayRecordPageAfter: this.db.prepare(
+        `SELECT record_key, record_json
+         FROM play_records
+         WHERE username = ?
+           AND ${SQLITE_UNREAD_TRACKING_WHERE}
+           AND (
+             ${SQLITE_TRACKING_CREATED_AT} < ?
+             OR (
+               ${SQLITE_TRACKING_CREATED_AT} = ?
+               AND record_key < ?
+             )
+           )
+         ORDER BY ${SQLITE_TRACKING_CREATED_AT} DESC, record_key DESC
+         LIMIT ?`,
+      ),
+      countUnreadTrackingPlayRecords: this.db.prepare(
+        `SELECT COUNT(*) AS count
+         FROM play_records
+         WHERE username = ? AND ${SQLITE_UNREAD_TRACKING_WHERE}`,
       ),
       deletePlayRecord: this.db.prepare(
         'DELETE FROM play_records WHERE username = ? AND record_key = ?',
@@ -768,6 +863,23 @@ export class LocalSqliteStorage implements IStorage {
     this.stmts.setPlayRecord.run(username, key, JSON.stringify(record));
   }
 
+  async setPlayRecords(
+    userName: string,
+    records: Record<string, PlayRecord>,
+  ): Promise<void> {
+    const username = normalizeUsername(userName);
+    const entries = Object.entries(records);
+    if (entries.length === 0) return;
+    const save = this.db.transaction(
+      (targetUser: string, targetEntries: Array<[string, PlayRecord]>) => {
+        for (const [key, record] of targetEntries) {
+          this.stmts.setPlayRecord.run(targetUser, key, JSON.stringify(record));
+        }
+      },
+    );
+    save(username, entries);
+  }
+
   async getAllPlayRecords(
     userName: string,
   ): Promise<{ [key: string]: PlayRecord }> {
@@ -809,6 +921,30 @@ export class LocalSqliteStorage implements IStorage {
       count: number;
     };
     return buildPlayRecordPage(rows, countRow.count, limit);
+  }
+
+  async getUnreadTrackingPlayRecordPage(
+    userName: string,
+    limit: number,
+    cursorTime?: number,
+    cursorKey?: string,
+  ): Promise<PlayRecordPage> {
+    const username = normalizeUsername(userName);
+    const rows = (
+      cursorTime !== undefined && cursorKey
+        ? this.stmts.getUnreadTrackingPlayRecordPageAfter.all(
+            username,
+            cursorTime,
+            cursorTime,
+            cursorKey,
+            limit + 1,
+          )
+        : this.stmts.getUnreadTrackingPlayRecordPage.all(username, limit + 1)
+    ) as Array<{ record_key: string; record_json: string }>;
+    const countRow = this.stmts.countUnreadTrackingPlayRecords.get(
+      username,
+    ) as { count: number };
+    return buildTrackingPlayRecordPage(rows, countRow.count, limit);
   }
 
   async deletePlayRecord(userName: string, key: string): Promise<void> {

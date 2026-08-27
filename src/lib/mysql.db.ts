@@ -33,6 +33,43 @@ import {
 import { assertValidUsernameFormat, normalizeUsername } from './username';
 
 const SEARCH_HISTORY_LIMIT = 20;
+const MYSQL_TRACKING_GROUP_TOTAL =
+  "CAST(JSON_UNQUOTE(JSON_EXTRACT(record_json, '$.group_total')) AS SIGNED)";
+const MYSQL_TRACKING_GROUP_INDEX =
+  "CAST(JSON_UNQUOTE(JSON_EXTRACT(record_json, '$.group_index')) AS SIGNED)";
+const MYSQL_TRACKING_TOTAL_EPISODES =
+  "CAST(JSON_UNQUOTE(JSON_EXTRACT(record_json, '$.total_episodes')) AS SIGNED)";
+const MYSQL_TRACKING_INDEX =
+  "CAST(JSON_UNQUOTE(JSON_EXTRACT(record_json, '$.index')) AS SIGNED)";
+const MYSQL_TRACKING_TOTAL = `CASE
+  WHEN COALESCE(${MYSQL_TRACKING_GROUP_INDEX}, 0) <> 0
+   AND COALESCE(${MYSQL_TRACKING_GROUP_TOTAL}, 0) <> 0
+  THEN ${MYSQL_TRACKING_GROUP_TOTAL}
+  ELSE ${MYSQL_TRACKING_TOTAL_EPISODES}
+END`;
+const MYSQL_TRACKING_CURRENT = `CASE
+  WHEN COALESCE(${MYSQL_TRACKING_GROUP_INDEX}, 0) <> 0
+   AND COALESCE(${MYSQL_TRACKING_GROUP_TOTAL}, 0) <> 0
+  THEN ${MYSQL_TRACKING_GROUP_INDEX}
+  ELSE ${MYSQL_TRACKING_INDEX}
+END`;
+const MYSQL_TRACKING_BASELINE = `CASE
+  WHEN COALESCE(${MYSQL_TRACKING_GROUP_TOTAL}, 0) <> 0
+  THEN CAST(JSON_UNQUOTE(JSON_EXTRACT(record_json, '$.update_baseline_group_total')) AS SIGNED)
+  ELSE CAST(JSON_UNQUOTE(JSON_EXTRACT(record_json, '$.update_baseline_episodes')) AS SIGNED)
+END`;
+const MYSQL_TRACKING_CREATED_AT = `COALESCE(
+  CAST(JSON_UNQUOTE(JSON_EXTRACT(record_json, '$.update_detected_at')) AS UNSIGNED),
+  CAST(JSON_UNQUOTE(JSON_EXTRACT(record_json, '$.metadata_checked_at')) AS UNSIGNED),
+  CAST(JSON_UNQUOTE(JSON_EXTRACT(record_json, '$.save_time')) AS UNSIGNED),
+  0
+)`;
+const MYSQL_UNREAD_TRACKING_WHERE = `
+  COALESCE(JSON_UNQUOTE(JSON_EXTRACT(record_json, '$.tracking_enabled')), 'true') <> 'false'
+  AND ${MYSQL_TRACKING_TOTAL} > COALESCE(${MYSQL_TRACKING_BASELINE}, ${MYSQL_TRACKING_TOTAL})
+  AND ${MYSQL_TRACKING_CURRENT} < ${MYSQL_TRACKING_TOTAL}
+`;
+const PLAY_RECORD_BATCH_SIZE = 200;
 
 function parseInteger(value: string | undefined, fallback: number): number {
   if (!value) {
@@ -74,6 +111,34 @@ function buildPlayRecordPage(
     nextCursor:
       rows.length > limit && lastRow?.record_key && lastRecord
         ? `${lastRecord.save_time}|${lastRow.record_key}`
+        : null,
+  };
+}
+
+function buildTrackingPlayRecordPage(
+  rows: JsonRow[],
+  total: number,
+  limit: number,
+): PlayRecordPage {
+  const pageRows = rows.slice(0, limit);
+  const items: Record<string, PlayRecord> = {};
+  for (const row of pageRows) {
+    const parsed = parseJsonValue<PlayRecord>(row.record_json);
+    if (parsed && row.record_key) items[row.record_key] = parsed;
+  }
+  const lastRow = pageRows.at(-1);
+  const lastRecord = lastRow?.record_key ? items[lastRow.record_key] : null;
+  const lastCreatedAt = lastRecord
+    ? lastRecord.update_detected_at ||
+      lastRecord.metadata_checked_at ||
+      lastRecord.save_time
+    : null;
+  return {
+    items,
+    total,
+    nextCursor:
+      rows.length > limit && lastRow?.record_key && lastCreatedAt !== null
+        ? `${lastCreatedAt}|${lastRow.record_key}`
         : null,
   };
 }
@@ -331,6 +396,37 @@ export class MySqlStorage implements IStorage {
     );
   }
 
+  async setPlayRecords(
+    userName: string,
+    records: Record<string, PlayRecord>,
+  ): Promise<void> {
+    const username = normalizeUsername(userName);
+    const entries = Object.entries(records);
+    if (entries.length === 0) return;
+
+    await this.withTransaction(async (connection) => {
+      for (
+        let offset = 0;
+        offset < entries.length;
+        offset += PLAY_RECORD_BATCH_SIZE
+      ) {
+        const chunk = entries.slice(offset, offset + PLAY_RECORD_BATCH_SIZE);
+        const placeholders = chunk.map(() => '(?, ?, ?)').join(', ');
+        const params = chunk.flatMap(([key, record]) => [
+          username,
+          key,
+          JSON.stringify(record),
+        ]);
+        await connection.execute(
+          `INSERT INTO play_records (username, record_key, record_json)
+           VALUES ${placeholders}
+           ON DUPLICATE KEY UPDATE record_json = VALUES(record_json)`,
+          params,
+        );
+      }
+    });
+  }
+
   async getAllPlayRecords(
     userName: string,
   ): Promise<{ [key: string]: PlayRecord }> {
@@ -387,6 +483,45 @@ export class MySqlStorage implements IStorage {
       username,
     ]);
     return buildPlayRecordPage(rows, countRows[0]?.count || 0, limit);
+  }
+
+  async getUnreadTrackingPlayRecordPage(
+    userName: string,
+    limit: number,
+    cursorTime?: number,
+    cursorKey?: string,
+  ): Promise<PlayRecordPage> {
+    await this.ensureInitialized();
+    const username = normalizeUsername(userName);
+    const hasCursor = cursorTime !== undefined && !!cursorKey;
+    const [rows] = await this.pool.query<JsonRow[]>(
+      hasCursor
+        ? `SELECT record_key, record_json
+           FROM play_records
+           WHERE username = ?
+             AND ${MYSQL_UNREAD_TRACKING_WHERE}
+             AND (${MYSQL_TRACKING_CREATED_AT} < ?
+               OR (${MYSQL_TRACKING_CREATED_AT} = ? AND record_key < ?))
+           ORDER BY ${MYSQL_TRACKING_CREATED_AT} DESC, record_key DESC
+           LIMIT ?`
+        : `SELECT record_key, record_json
+           FROM play_records
+           WHERE username = ? AND ${MYSQL_UNREAD_TRACKING_WHERE}
+           ORDER BY ${MYSQL_TRACKING_CREATED_AT} DESC, record_key DESC
+           LIMIT ?`,
+      hasCursor
+        ? [username, cursorTime, cursorTime, cursorKey, limit + 1]
+        : [username, limit + 1],
+    );
+    const [countRows] = await this.pool.query<
+      Array<RowDataPacket & { count: number }>
+    >(
+      `SELECT COUNT(*) AS count
+       FROM play_records
+       WHERE username = ? AND ${MYSQL_UNREAD_TRACKING_WHERE}`,
+      [username],
+    );
+    return buildTrackingPlayRecordPage(rows, countRows[0]?.count || 0, limit);
   }
 
   async deletePlayRecord(userName: string, key: string): Promise<void> {
