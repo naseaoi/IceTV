@@ -84,6 +84,17 @@ function parseBusyTimeoutMs(raw: string | undefined, fallback: number): number {
   return Number.isFinite(value) && value > 0 ? value : fallback;
 }
 
+function parseNonNegativeInt(
+  raw: string | undefined,
+  fallback: number,
+): number {
+  if (!raw) {
+    return fallback;
+  }
+  const value = Number.parseInt(raw, 10);
+  return Number.isFinite(value) && value >= 0 ? value : fallback;
+}
+
 function sleepSync(ms: number): void {
   const sab = new SharedArrayBuffer(4);
   const view = new Int32Array(sab);
@@ -397,7 +408,22 @@ export class LocalSqliteStorage implements IStorage {
       if (!isMemoryDb) {
         this.db.pragma('journal_mode = WAL');
         this.db.pragma('synchronous = NORMAL');
+        const mmapBytes = parseNonNegativeInt(
+          process.env.SQLITE_MMAP_SIZE_BYTES,
+          128 * 1024 * 1024,
+        );
+        if (mmapBytes > 0) {
+          this.db.pragma(`mmap_size = ${mmapBytes}`);
+        }
       }
+      const cacheSizeKib = parseNonNegativeInt(
+        process.env.SQLITE_CACHE_SIZE_KIB,
+        16 * 1024,
+      );
+      if (cacheSizeKib > 0) {
+        this.db.pragma(`cache_size = -${cacheSizeKib}`);
+      }
+      this.db.pragma('temp_store = MEMORY');
       this.db.pragma(`busy_timeout = ${busyTimeoutMs}`);
       this.initializeSchema();
     });

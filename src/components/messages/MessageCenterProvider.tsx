@@ -156,19 +156,36 @@ export function MessageCenterProvider({ children }: { children: ReactNode }) {
     }
 
     void refreshSummary(false);
-    const interval = window.setInterval(
-      () => void refreshSummary(true),
-      POLL_INTERVAL_MS,
-    );
+
+    let pollTimer: number | null = null;
+    const stopPolling = () => {
+      if (pollTimer === null) return;
+      window.clearInterval(pollTimer);
+      pollTimer = null;
+    };
+    const startPolling = () => {
+      if (pollTimer !== null || document.visibilityState !== 'visible') return;
+      pollTimer = window.setInterval(
+        () => void refreshSummary(true),
+        POLL_INTERVAL_MS,
+      );
+    };
     const handleVisible = () => {
-      if (document.visibilityState === 'visible') void refreshSummary(true);
+      if (document.visibilityState !== 'visible') {
+        stopPolling();
+        return;
+      }
+      startPolling();
+      void refreshSummary(true);
     };
     const handleMessagesUpdated = () => void refreshSummary(false);
+
+    startPolling();
     document.addEventListener('visibilitychange', handleVisible);
     window.addEventListener('focus', handleVisible);
     window.addEventListener('messagesUpdated', handleMessagesUpdated);
     return () => {
-      window.clearInterval(interval);
+      stopPolling();
       document.removeEventListener('visibilitychange', handleVisible);
       window.removeEventListener('focus', handleVisible);
       window.removeEventListener('messagesUpdated', handleMessagesUpdated);

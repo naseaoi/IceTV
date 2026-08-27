@@ -1,6 +1,10 @@
 import 'server-only';
 
-import type { PoolConnection, RowDataPacket } from 'mysql2/promise';
+import type {
+  ExecuteValues,
+  PoolConnection,
+  RowDataPacket,
+} from 'mysql2/promise';
 import mysql from 'mysql2/promise';
 
 import { AdminConfig } from '@/types/admin';
@@ -195,6 +199,8 @@ function createPoolOptions(databaseUrl: string): mysql.PoolOptions {
     throw new Error('MySQL 连接串缺少数据库名');
   }
 
+  const connectionLimit = parseInteger(process.env.MYSQL_CONNECTION_LIMIT, 10);
+
   return {
     host: parsedUrl.hostname,
     port: parseInteger(parsedUrl.port, 3306),
@@ -203,12 +209,64 @@ function createPoolOptions(databaseUrl: string): mysql.PoolOptions {
     database: decodeURIComponent(databaseName),
     charset: 'utf8mb4',
     waitForConnections: true,
-    connectionLimit: parseInteger(process.env.MYSQL_CONNECTION_LIMIT, 5),
-    maxIdle: parseInteger(process.env.MYSQL_MAX_IDLE, 5),
+    connectionLimit,
+    maxIdle: parseInteger(process.env.MYSQL_MAX_IDLE, connectionLimit),
     idleTimeout: parseInteger(process.env.MYSQL_IDLE_TIMEOUT_MS, 60000),
     queueLimit: 0,
     ssl: buildSslOptions(),
   };
+}
+
+const IMPORT_BATCH_ROWS = 200;
+const MYSQL_MAX_PLACEHOLDERS = 60000;
+
+function createRowBatcher(
+  connection: PoolConnection,
+  table: string,
+  columns: string[],
+) {
+  const buffer: ExecuteValues[][] = [];
+  const columnList = columns.join(', ');
+  const rowPlaceholder = `(${columns.map(() => '?').join(', ')})`;
+  const maxRows = Math.max(
+    1,
+    Math.min(
+      IMPORT_BATCH_ROWS,
+      Math.floor(MYSQL_MAX_PLACEHOLDERS / columns.length),
+    ),
+  );
+
+  async function flush(): Promise<void> {
+    if (buffer.length === 0) return;
+    const chunk = buffer.splice(0, buffer.length);
+    await connection.execute(
+      `INSERT INTO ${table} (${columnList}) VALUES ${chunk
+        .map(() => rowPlaceholder)
+        .join(', ')}`,
+      chunk.flat(),
+    );
+  }
+
+  return {
+    async add(row: ExecuteValues[]): Promise<void> {
+      buffer.push(row);
+      if (buffer.length >= maxRows) await flush();
+    },
+    flush,
+  };
+}
+
+async function insertRowsInBatches(
+  connection: PoolConnection,
+  table: string,
+  columns: string[],
+  rows: Iterable<ExecuteValues[]>,
+): Promise<void> {
+  const batcher = createRowBatcher(connection, table, columns);
+  for (const row of rows) {
+    await batcher.add(row);
+  }
+  await batcher.flush();
 }
 
 type JsonRow = RowDataPacket & {
@@ -459,7 +517,7 @@ export class MySqlStorage implements IStorage {
     const saveTimeExpression =
       "CAST(JSON_UNQUOTE(JSON_EXTRACT(record_json, '$.save_time')) AS UNSIGNED)";
     const hasCursor = cursorTime !== undefined && !!cursorKey;
-    const [rows] = await this.pool.query<JsonRow[]>(
+    const rowsQuery = this.pool.query<JsonRow[]>(
       hasCursor
         ? `SELECT record_key, record_json
            FROM play_records
@@ -477,11 +535,12 @@ export class MySqlStorage implements IStorage {
         ? [username, cursorTime, cursorTime, cursorKey, limit + 1]
         : [username, limit + 1],
     );
-    const [countRows] = await this.pool.query<
+    const countQuery = this.pool.query<
       Array<RowDataPacket & { count: number }>
     >('SELECT COUNT(*) AS count FROM play_records WHERE username = ?', [
       username,
     ]);
+    const [[rows], [countRows]] = await Promise.all([rowsQuery, countQuery]);
     return buildPlayRecordPage(rows, countRows[0]?.count || 0, limit);
   }
 
@@ -494,7 +553,7 @@ export class MySqlStorage implements IStorage {
     await this.ensureInitialized();
     const username = normalizeUsername(userName);
     const hasCursor = cursorTime !== undefined && !!cursorKey;
-    const [rows] = await this.pool.query<JsonRow[]>(
+    const rowsQuery = this.pool.query<JsonRow[]>(
       hasCursor
         ? `SELECT record_key, record_json
            FROM play_records
@@ -513,7 +572,7 @@ export class MySqlStorage implements IStorage {
         ? [username, cursorTime, cursorTime, cursorKey, limit + 1]
         : [username, limit + 1],
     );
-    const [countRows] = await this.pool.query<
+    const countQuery = this.pool.query<
       Array<RowDataPacket & { count: number }>
     >(
       `SELECT COUNT(*) AS count
@@ -521,6 +580,7 @@ export class MySqlStorage implements IStorage {
        WHERE username = ? AND ${MYSQL_UNREAD_TRACKING_WHERE}`,
       [username],
     );
+    const [[rows], [countRows]] = await Promise.all([rowsQuery, countQuery]);
     return buildTrackingPlayRecordPage(rows, countRows[0]?.count || 0, limit);
   }
 
@@ -598,7 +658,7 @@ export class MySqlStorage implements IStorage {
     const saveTimeExpression =
       "CAST(JSON_UNQUOTE(JSON_EXTRACT(f.favorite_json, '$.save_time')) AS UNSIGNED)";
     const hasCursor = cursorTime !== undefined && !!cursorKey;
-    const [rows] = await this.pool.query<JsonRow[]>(
+    const rowsQuery = this.pool.query<JsonRow[]>(
       hasCursor
         ? `SELECT f.favorite_key, f.favorite_json, p.record_json
            FROM favorites f
@@ -620,9 +680,10 @@ export class MySqlStorage implements IStorage {
         ? [username, cursorTime, cursorTime, cursorKey, limit + 1]
         : [username, limit + 1],
     );
-    const [countRows] = await this.pool.query<
+    const countQuery = this.pool.query<
       Array<RowDataPacket & { count: number }>
     >('SELECT COUNT(*) AS count FROM favorites WHERE username = ?', [username]);
+    const [[rows], [countRows]] = await Promise.all([rowsQuery, countQuery]);
     return buildFavoritePage(rows, countRows[0]?.count || 0, limit);
   }
 
@@ -1346,50 +1407,100 @@ export class MySqlStorage implements IStorage {
       );
 
       const routeStatUpdatedAt = Date.now();
-      for (const stat of data.sourceRouteStats) {
-        await connection.execute(
-          `INSERT INTO source_route_stats (
-            source, route_mode, bucket_date, success_count, failure_count, updated_at
-          ) VALUES (?, ?, ?, ?, ?, ?)`,
-          [
-            stat.source,
-            stat.routeMode,
-            stat.bucketDate,
-            stat.successCount,
-            stat.failureCount,
-            routeStatUpdatedAt,
-          ],
-        );
-      }
+      await insertRowsInBatches(
+        connection,
+        'source_route_stats',
+        [
+          'source',
+          'route_mode',
+          'bucket_date',
+          'success_count',
+          'failure_count',
+          'updated_at',
+        ],
+        data.sourceRouteStats.map((stat) => [
+          stat.source,
+          stat.routeMode,
+          stat.bucketDate,
+          stat.successCount,
+          stat.failureCount,
+          routeStatUpdatedAt,
+        ]),
+      );
 
-      for (const [userName, passwordHash] of Object.entries(data.users)) {
-        const username = assertValidUsernameFormat(userName);
-        await connection.execute(
-          'INSERT INTO users (username, password) VALUES (?, ?)',
-          [username, passwordHash],
-        );
-      }
+      await insertRowsInBatches(
+        connection,
+        'users',
+        ['username', 'password'],
+        Object.entries(data.users).map(([userName, passwordHash]) => [
+          assertValidUsernameFormat(userName),
+          passwordHash,
+        ]),
+      );
+
+      const messageStates = createRowBatcher(connection, 'user_message_state', [
+        'username',
+        'state_json',
+      ]);
+      const playRecords = createRowBatcher(connection, 'play_records', [
+        'username',
+        'record_key',
+        'record_json',
+      ]);
+      const favorites = createRowBatcher(connection, 'favorites', [
+        'username',
+        'favorite_key',
+        'favorite_json',
+      ]);
+      const searchHistories = createRowBatcher(connection, 'search_history', [
+        'username',
+        'keyword',
+        'sort_index',
+      ]);
+      const skipConfigs = createRowBatcher(connection, 'skip_configs', [
+        'username',
+        'config_key',
+        'config_json',
+      ]);
+      const playbackSessions = createRowBatcher(
+        connection,
+        'playback_sessions',
+        [
+          'id',
+          'username',
+          'source',
+          'video_id',
+          'episode_index',
+          'title',
+          'source_name',
+          'cover',
+          'year',
+          'started_at',
+          'ended_at',
+          'watch_seconds',
+          'last_position',
+          'total_time',
+          'created_at',
+          'updated_at',
+        ],
+      );
 
       for (const [userName, userData] of Object.entries(data.userData)) {
         const username = assertValidUsernameFormat(userName);
+
         if (userData.messageState) {
-          await connection.execute(
-            'INSERT INTO user_message_state (username, state_json) VALUES (?, ?)',
-            [username, JSON.stringify(userData.messageState)],
-          );
+          await messageStates.add([
+            username,
+            JSON.stringify(userData.messageState),
+          ]);
         }
+
         for (const [key, record] of Object.entries(userData.playRecords)) {
-          await connection.execute(
-            'INSERT INTO play_records (username, record_key, record_json) VALUES (?, ?, ?)',
-            [username, key, JSON.stringify(record)],
-          );
+          await playRecords.add([username, key, JSON.stringify(record)]);
         }
 
         for (const [key, favorite] of Object.entries(userData.favorites)) {
-          await connection.execute(
-            'INSERT INTO favorites (username, favorite_key, favorite_json) VALUES (?, ?, ?)',
-            [username, key, JSON.stringify(favorite)],
-          );
+          await favorites.add([username, key, JSON.stringify(favorite)]);
         }
 
         const searchHistory = userData.searchHistory.slice(
@@ -1397,48 +1508,41 @@ export class MySqlStorage implements IStorage {
           SEARCH_HISTORY_LIMIT,
         );
         for (let index = 0; index < searchHistory.length; index++) {
-          const keyword = searchHistory[index];
-          await connection.execute(
-            'INSERT INTO search_history (username, keyword, sort_index) VALUES (?, ?, ?)',
-            [username, keyword, index],
-          );
+          await searchHistories.add([username, searchHistory[index], index]);
         }
 
         for (const [key, config] of Object.entries(userData.skipConfigs)) {
-          await connection.execute(
-            'INSERT INTO skip_configs (username, config_key, config_json) VALUES (?, ?, ?)',
-            [username, key, JSON.stringify(config)],
-          );
+          await skipConfigs.add([username, key, JSON.stringify(config)]);
         }
 
         for (const session of Object.values(userData.playbackSessions)) {
-          await connection.execute(
-            `INSERT INTO playback_sessions (
-              id, username, source, video_id, episode_index, title, source_name,
-              cover, year, started_at, ended_at, watch_seconds, last_position,
-              total_time, created_at, updated_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-            [
-              session.id,
-              username,
-              session.source,
-              session.video_id,
-              session.episode_index,
-              session.title,
-              session.source_name,
-              session.cover,
-              session.year,
-              session.started_at,
-              session.ended_at,
-              session.watch_seconds,
-              session.last_position,
-              session.total_time,
-              session.created_at,
-              session.updated_at,
-            ],
-          );
+          await playbackSessions.add([
+            session.id,
+            username,
+            session.source,
+            session.video_id,
+            session.episode_index,
+            session.title,
+            session.source_name,
+            session.cover,
+            session.year,
+            session.started_at,
+            session.ended_at,
+            session.watch_seconds,
+            session.last_position,
+            session.total_time,
+            session.created_at,
+            session.updated_at,
+          ]);
         }
       }
+
+      await messageStates.flush();
+      await playRecords.flush();
+      await favorites.flush();
+      await searchHistories.flush();
+      await skipConfigs.flush();
+      await playbackSessions.flush();
     });
   }
 }

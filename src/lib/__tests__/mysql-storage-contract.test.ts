@@ -89,16 +89,59 @@ function getJsonRows(
   );
 }
 
+function normalizeSql(sql: string): string {
+  return sql
+    .replace(/\s+/g, ' ')
+    .replace(/\(\s+/g, '(')
+    .replace(/\s+\)/g, ')')
+    .trim();
+}
+
+function splitMultiRowInsert(
+  sql: string,
+  params: unknown[],
+): { sql: string; rows: unknown[][] } | null {
+  const normalized = normalizeSql(sql);
+  const match =
+    /^(INSERT INTO .+ VALUES )(\((?:\?, )*\?\))((?:, \((?:\?, )*\?\))+)$/.exec(
+      normalized,
+    );
+  if (!match) return null;
+
+  const columnsPerRow = match[2].split('?').length - 1;
+  const rows: unknown[][] = [];
+  for (let offset = 0; offset < params.length; offset += columnsPerRow) {
+    rows.push(params.slice(offset, offset + columnsPerRow));
+  }
+  return { sql: `${match[1]}${match[2]}`, rows };
+}
+
 function createFakePool() {
   let state = createState();
   let queryCount = 0;
+  const insertStatementCounts = new Map<string, number>();
 
   const runExecute = async (
     sql: string,
     params: unknown[] = [],
     currentState: FakeState,
   ) => {
-    const normalized = sql.replace(/\s+/g, ' ').trim();
+    const multiRow = splitMultiRowInsert(sql, params);
+    if (multiRow) {
+      for (const rowParams of multiRow.rows) {
+        await runSingleExecute(multiRow.sql, rowParams, currentState);
+      }
+      return [[], []];
+    }
+    return runSingleExecute(sql, params, currentState);
+  };
+
+  const runSingleExecute = async (
+    sql: string,
+    params: unknown[] = [],
+    currentState: FakeState,
+  ) => {
+    const normalized = normalizeSql(sql);
 
     if (normalized.startsWith('CREATE TABLE IF NOT EXISTS')) {
       return [[], []];
@@ -270,7 +313,7 @@ function createFakePool() {
 
     if (
       normalized ===
-      'INSERT INTO playback_sessions ( id, username, source, video_id, episode_index, title, source_name, cover, year, started_at, ended_at, watch_seconds, last_position, total_time, created_at, updated_at ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON DUPLICATE KEY UPDATE username = VALUES(username), source = VALUES(source), video_id = VALUES(video_id), episode_index = VALUES(episode_index), title = VALUES(title), source_name = VALUES(source_name), cover = VALUES(cover), year = VALUES(year), started_at = VALUES(started_at), ended_at = VALUES(ended_at), watch_seconds = VALUES(watch_seconds), last_position = VALUES(last_position), total_time = VALUES(total_time), created_at = VALUES(created_at), updated_at = VALUES(updated_at)'
+      'INSERT INTO playback_sessions (id, username, source, video_id, episode_index, title, source_name, cover, year, started_at, ended_at, watch_seconds, last_position, total_time, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON DUPLICATE KEY UPDATE username = VALUES(username), source = VALUES(source), video_id = VALUES(video_id), episode_index = VALUES(episode_index), title = VALUES(title), source_name = VALUES(source_name), cover = VALUES(cover), year = VALUES(year), started_at = VALUES(started_at), ended_at = VALUES(ended_at), watch_seconds = VALUES(watch_seconds), last_position = VALUES(last_position), total_time = VALUES(total_time), created_at = VALUES(created_at), updated_at = VALUES(updated_at)'
     ) {
       const [
         id,
@@ -330,7 +373,7 @@ function createFakePool() {
 
     if (
       normalized ===
-      'INSERT INTO playback_sessions ( id, username, source, video_id, episode_index, title, source_name, cover, year, started_at, ended_at, watch_seconds, last_position, total_time, created_at, updated_at ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
+      'INSERT INTO playback_sessions (id, username, source, video_id, episode_index, title, source_name, cover, year, started_at, ended_at, watch_seconds, last_position, total_time, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
     ) {
       const [
         id,
@@ -478,7 +521,7 @@ function createFakePool() {
 
     if (
       normalized.startsWith(
-        'INSERT INTO source_route_stats ( source, route_mode, bucket_date, success_count, failure_count, updated_at ) VALUES (?, ?, ?, ?, ?, ?) ON DUPLICATE KEY UPDATE',
+        'INSERT INTO source_route_stats (source, route_mode, bucket_date, success_count, failure_count, updated_at) VALUES (?, ?, ?, ?, ?, ?) ON DUPLICATE KEY UPDATE',
       )
     ) {
       const [
@@ -521,7 +564,7 @@ function createFakePool() {
 
     if (
       normalized ===
-      'INSERT INTO source_route_stats ( source, route_mode, bucket_date, success_count, failure_count, updated_at ) VALUES (?, ?, ?, ?, ?, ?)'
+      'INSERT INTO source_route_stats (source, route_mode, bucket_date, success_count, failure_count, updated_at) VALUES (?, ?, ?, ?, ?, ?)'
     ) {
       const [
         source,
@@ -562,7 +605,7 @@ function createFakePool() {
     params: unknown[] = [],
     currentState: FakeState,
   ) => {
-    const normalized = sql.replace(/\s+/g, ' ').trim();
+    const normalized = normalizeSql(sql);
 
     if (
       normalized ===
@@ -1029,6 +1072,12 @@ function createFakePool() {
     resetQueryCount() {
       queryCount = 0;
     },
+    getInsertStatementCounts() {
+      return new Map(insertStatementCounts);
+    },
+    resetInsertStatementCounts() {
+      insertStatementCounts.clear();
+    },
     async getConnection() {
       let transactionState = cloneState(state);
 
@@ -1041,6 +1090,13 @@ function createFakePool() {
         },
         async rollback() {},
         async execute(sql: string, params?: unknown[]) {
+          const table = /^INSERT INTO (\w+)/.exec(normalizeSql(sql))?.[1];
+          if (table) {
+            insertStatementCounts.set(
+              table,
+              (insertStatementCounts.get(table) || 0) + 1,
+            );
+          }
           return runExecute(sql, params, transactionState);
         },
         release() {},
@@ -1343,6 +1399,46 @@ describe('mysql storage contract', () => {
         failureCount: 1,
       },
     ]);
+  });
+
+  it('导入时按批次插入而非逐行插入', async () => {
+    const storage = new MySqlStorage('mysql://demo:demo@localhost:3306/icetv');
+    const recordCount = 450;
+    const playRecords: Record<string, PlayRecord> = {};
+    const playbackSessions: Record<string, PlaybackSession> = {};
+    for (let index = 0; index < recordCount; index++) {
+      playRecords[`source+${index}`] = { ...playRecord, index };
+      playbackSessions[`session_${index}`] = {
+        ...playbackSession,
+        id: `session_${index}`,
+      };
+    }
+
+    fakePool.resetInsertStatementCounts();
+    await storage.replaceAllData({
+      adminConfig,
+      users: { 'demo-user': 'hash' },
+      userData: {
+        'demo-user': {
+          playRecords,
+          favorites: {},
+          searchHistory: [],
+          skipConfigs: {},
+          playbackSessions,
+        },
+      },
+      sourceRouteStats: [],
+    });
+
+    const counts = fakePool.getInsertStatementCounts();
+    expect(counts.get('play_records')).toBe(3);
+    expect(counts.get('playback_sessions')).toBe(3);
+    await expect(storage.getAllPlayRecords('demo-user')).resolves.toEqual(
+      playRecords,
+    );
+    await expect(
+      storage.getAllPlaybackSessions('demo-user'),
+    ).resolves.toHaveLength(recordCount);
   });
 
   it('按最后更新时间清理过期播放统计会话', async () => {

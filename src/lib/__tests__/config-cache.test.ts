@@ -71,6 +71,14 @@ function cloneBaseConfig(): AdminConfig {
   return JSON.parse(JSON.stringify(baseConfig)) as AdminConfig;
 }
 
+function createDeferred<T>() {
+  let resolve: (value: T) => void = () => undefined;
+  const promise = new Promise<T>((res) => {
+    resolve = res;
+  });
+  return { promise, resolve };
+}
+
 describe('config cache persistence', () => {
   const originalConfigCacheTtl = process.env.CONFIG_CACHE_TTL_MS;
 
@@ -136,6 +144,49 @@ describe('config cache persistence', () => {
     const third = await getConfigForRead();
     expect(third.SiteConfig.SiteName).toBe('Next');
     expect(getAdminConfig).toHaveBeenCalledTimes(2);
+  });
+
+  it('collapses concurrent reads into a single database load', async () => {
+    const deferred = createDeferred<AdminConfig>();
+    const getAdminConfig = jest.fn().mockReturnValue(deferred.promise);
+    const { getConfigForRead } = await loadConfigModule(jest.fn(), {
+      getAdminConfig,
+    });
+
+    const reads = Promise.all([
+      getConfigForRead(),
+      getConfigForRead(),
+      getConfigForRead(),
+    ]);
+    deferred.resolve(cloneBaseConfig());
+    const [first, second, third] = await reads;
+
+    expect(getAdminConfig).toHaveBeenCalledTimes(1);
+    expect(second).toBe(first);
+    expect(third).toBe(first);
+  });
+
+  it('keeps saved config when a load is still in flight', async () => {
+    const deferred = createDeferred<AdminConfig>();
+    let call = 0;
+    const getAdminConfig = jest.fn().mockImplementation(() => {
+      call += 1;
+      return call === 1 ? deferred.promise : Promise.resolve(cloneBaseConfig());
+    });
+    const { getConfigForRead, saveConfig } = await loadConfigModule(jest.fn(), {
+      getAdminConfig,
+    });
+
+    const pendingRead = getConfigForRead();
+    const saved = cloneBaseConfig();
+    saved.SiteConfig.SiteName = 'Saved';
+    await saveConfig(saved);
+
+    deferred.resolve(cloneBaseConfig());
+    await pendingRead;
+
+    const after = await getConfigForRead();
+    expect(after.SiteConfig.SiteName).toBe('Saved');
   });
 
   it('returns detached api site entries from read cache', async () => {

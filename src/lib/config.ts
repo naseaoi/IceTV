@@ -84,6 +84,8 @@ export const API_CONFIG = {
 let cachedConfig: AdminConfig;
 let cachedConfigVersion = '';
 let cachedConfigLoadedAt = 0;
+let inflightConfigLoad: Promise<AdminConfig> | null = null;
+let configCacheGeneration = 0;
 const PUBLIC_CONFIG_CACHE_TAG = 'public-config';
 const DEFAULT_CONFIG_CACHE_TTL_MS = 30_000;
 const PUBLIC_DOUBAN_PROXY_TYPES = new Set([
@@ -399,7 +401,18 @@ async function loadConfig(): Promise<AdminConfig> {
   if (cachedConfig && isCachedConfigFresh()) {
     return cachedConfig;
   }
+  if (inflightConfigLoad) {
+    return inflightConfigLoad;
+  }
 
+  const generation = configCacheGeneration;
+  inflightConfigLoad = loadConfigUncached(generation).finally(() => {
+    inflightConfigLoad = null;
+  });
+  return inflightConfigLoad;
+}
+
+async function loadConfigUncached(generation: number): Promise<AdminConfig> {
   let adminConfig: AdminConfig | null;
   try {
     adminConfig = await db.getAdminConfig();
@@ -418,6 +431,11 @@ async function loadConfig(): Promise<AdminConfig> {
   }
   const originalConfigJson = JSON.stringify(adminConfig);
   adminConfig = await syncConfigUsersWithDb(configSelfCheck(adminConfig));
+
+  if (generation !== configCacheGeneration) {
+    return cachedConfig;
+  }
+
   cachedConfig = adminConfig;
   cachedConfigVersion = getConfigVersion(cachedConfig);
   cachedConfigLoadedAt = Date.now();
@@ -682,6 +700,7 @@ export async function resetConfig() {
     originConfig.ConfigSubscribtion,
   );
   await db.saveAdminConfig(adminConfig);
+  configCacheGeneration += 1;
   cachedConfig = cloneConfig(adminConfig);
   cachedConfigVersion = getConfigVersion(cachedConfig);
   cachedConfigLoadedAt = Date.now();
@@ -700,6 +719,7 @@ export async function saveConfig(config: AdminConfig): Promise<AdminConfig> {
     await assertConfigVersion(expectedVersion);
   }
   await db.saveAdminConfig(nextConfig);
+  configCacheGeneration += 1;
   cachedConfig = cloneConfig(nextConfig);
   cachedConfigVersion = getConfigVersion(cachedConfig);
   cachedConfigLoadedAt = Date.now();
