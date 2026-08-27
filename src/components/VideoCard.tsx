@@ -83,6 +83,7 @@ const VideoCard = forwardRef<VideoCardHandle, VideoCardProps>(
       trackingEnabled = true,
       availableEpisodes,
       resumeEpisodeIndex,
+      resumeGroup,
       douban_id,
       onDelete,
       rate,
@@ -426,6 +427,9 @@ const VideoCard = forwardRef<VideoCardHandle, VideoCardProps>(
             id: actualId,
             episodeIndex: resumeEpisodeIndex ?? Math.max(0, currentEpisode - 1),
             resumeTime: resumeTime || 0,
+            groupLabel: resumeGroup?.label,
+            groupIndex: resumeGroup?.index,
+            groupTotal: resumeGroup?.total,
           });
         }
 
@@ -441,6 +445,7 @@ const VideoCard = forwardRef<VideoCardHandle, VideoCardProps>(
       actualId,
       currentEpisode,
       resumeEpisodeIndex,
+      resumeGroup,
       resumeTime,
       warmupOnNavigate,
     ]);

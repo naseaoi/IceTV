@@ -1,3 +1,4 @@
+import type { ResumeGroupIdentity } from '@/lib/episode-groups';
 import type { PlayRecord, PlayRecordPage } from '@/lib/types';
 
 export const DEFAULT_RECENT_PLAY_RECORD_LIMIT = 10;
@@ -109,6 +110,18 @@ export function parsePlayRecordCursor(
   const time = Number.parseInt(cursor.slice(0, separatorIndex), 10);
   const key = separatorIndex >= 0 ? cursor.slice(separatorIndex + 1) : '';
   return Number.isFinite(time) && key ? { time, key } : null;
+}
+
+export function getPlayRecordResumeGroup(
+  record: PlayRecord,
+): ResumeGroupIdentity | undefined {
+  if (!record.group_index || !record.group_total) return undefined;
+
+  return {
+    label: record.group_label,
+    index: record.group_index,
+    total: record.group_total,
+  };
 }
 
 export function getPlayRecordEpisodeDisplay(record: PlayRecord): {

@@ -25,6 +25,7 @@ import {
   saveFavorite,
   setPlayRecordTracking,
 } from '@/lib/db.client';
+import type { ResumeGroupIdentity } from '@/lib/episode-groups';
 import {
   getCurrentNavigationPath,
   withReturnTo,
@@ -47,6 +48,8 @@ interface MobileContinueCardProps {
   availableEpisodes?: number;
   /** 播放记录的真实集索引（0-based）；分组源展示集数与真实索引不一致时使用 */
   resumeEpisodeIndex?: number;
+  /** 分组源的分组身份；上游更新后据此重新对齐集索引 */
+  resumeGroup?: ResumeGroupIdentity;
   progress: number;
   resumeTime: number;
   query?: string;
@@ -66,6 +69,7 @@ export default function MobileContinueCard({
   trackingEnabled = true,
   availableEpisodes = totalEpisodes,
   resumeEpisodeIndex,
+  resumeGroup,
   progress,
   resumeTime,
   query,
@@ -97,6 +101,9 @@ export default function MobileContinueCard({
           id,
           episodeIndex: resumeEpisodeIndex ?? Math.max(0, currentEpisode - 1),
           resumeTime,
+          groupLabel: resumeGroup?.label,
+          groupIndex: resumeGroup?.index,
+          groupTotal: resumeGroup?.total,
         });
       }
 
@@ -115,6 +122,7 @@ export default function MobileContinueCard({
     query,
     currentEpisode,
     resumeEpisodeIndex,
+    resumeGroup,
     resumeTime,
   ]);
 

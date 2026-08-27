@@ -143,6 +143,9 @@ export async function saveCurrentPlayProgress(
     currentEpisodeIndexRef.current,
     detailRef.current?.episodes.length || 0,
   );
+  const groupLabel = groupPosition
+    ? detailRef.current?.episode_groups?.[groupPosition.groupIndex]?.label
+    : undefined;
 
   const record: PlayRecord = {
     title: videoTitleRef.current,
@@ -155,6 +158,7 @@ export async function saveCurrentPlayProgress(
       ? {
           group_index: groupPosition.episodeOffset + 1,
           group_total: groupPosition.groupCount,
+          ...(groupLabel ? { group_label: groupLabel } : {}),
         }
       : {}),
     play_time: Math.floor(currentTime),
@@ -243,10 +247,12 @@ export function usePlayProgress({
   searchTitle,
   currentSource,
   currentId,
+  detail,
   setCurrentEpisodeIndex,
   cleanupPlayer,
 }: UsePlayProgressParams) {
   const searchTitleRef = useRef(searchTitle);
+  const restoreAppliedKeyRef = useRef('');
 
   useEffect(() => {
     searchTitleRef.current = searchTitle;
@@ -366,15 +372,20 @@ export function usePlayProgress({
     saveStateRef.current.lastSavedFingerprint = null;
   }, [currentSource, currentId, saveStateRef]);
 
-  // 播放记录处理：source/id 就绪后优先消费显式播放意图，再检查恢复点与播放记录
+  // 播放记录处理：详情就绪后优先消费显式播放意图，再检查恢复点与播放记录
+  // 必须等详情到位，分组源才能按分组标签换算集索引；详情未到时换算会退化成过期绝对索引
   useEffect(() => {
     const requestedSource = currentSource;
     const requestedId = currentId;
     const requestedEpisodeIndex = currentEpisodeIndexRef.current;
+    const restoreKey = `${currentSource}+${currentId}`;
     let disposed = false;
 
     const initFromHistory = async () => {
       if (!currentSource || !currentId) return;
+      if (!detail?.episodes?.length) return;
+      if (restoreAppliedKeyRef.current === restoreKey) return;
+      restoreAppliedKeyRef.current = restoreKey;
 
       const applyRestoreState = ({
         episodeIndex,
@@ -402,6 +413,7 @@ export function usePlayProgress({
         source: currentSource,
         id: currentId,
         episodeCount: detailRef.current?.episodes.length || 0,
+        episodeGroups: detailRef.current?.episode_groups,
       });
       if (playIntent) {
         applyRestoreState(playIntent);
@@ -437,6 +449,7 @@ export function usePlayProgress({
           checkpoint: compatibleCheckpoint,
           record,
           episodeCount: detailRef.current?.episodes.length || 0,
+          episodeGroups: detailRef.current?.episode_groups,
         });
 
         if (checkpoint) {
@@ -526,6 +539,7 @@ export function usePlayProgress({
     detailRef,
     resumeModeRef,
     resumeTimeRef,
+    detail,
     setCurrentEpisodeIndex,
     stableCurrentTimeRef,
   ]);

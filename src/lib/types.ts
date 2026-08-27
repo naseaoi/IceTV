@@ -10,6 +10,7 @@ export interface PlayRecord {
   total_episodes: number; // 总集数
   group_index?: number; // 分组源：组内第几集（1-based）
   group_total?: number; // 分组源：当前组集数
+  group_label?: string; // 分组源：所属分组标签，用于上游更新后重新对齐集索引
   play_time: number; // 播放进度（秒）
   total_time: number; // 总进度（秒）
   save_time: number; // 记录保存时间（时间戳）

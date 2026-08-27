@@ -536,6 +536,15 @@ function normalizePlayRecord(value: unknown): PlayRecord {
             10000,
           ),
         }),
+    ...(input.group_label === undefined
+      ? {}
+      : {
+          group_label: limitString(
+            input.group_label,
+            '分组标签',
+            MAX_SHORT_STRING_LENGTH,
+          ),
+        }),
     play_time: assertBoundedNumber(input.play_time, '播放进度', 0, MAX_SECONDS),
     total_time: assertBoundedNumber(input.total_time, '总时长', 0, MAX_SECONDS),
     save_time: assertFiniteNumber(input.save_time, '保存时间'),

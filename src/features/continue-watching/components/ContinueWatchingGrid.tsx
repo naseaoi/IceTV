@@ -4,6 +4,7 @@ import { POSTER_GRID_BASE_CLASS } from '@/components/poster-grid-layout';
 import VideoCard from '@/components/VideoCard';
 import {
   getPlayRecordEpisodeDisplay,
+  getPlayRecordResumeGroup,
   hasPlayRecordUpdate,
 } from '@/lib/play-records';
 import { parseStorageKey } from '@/lib/utils';
@@ -55,6 +56,7 @@ export function ContinueWatchingGrid({
               trackingEnabled={record.tracking_enabled !== false}
               availableEpisodes={episodeDisplay.totalEpisodes}
               resumeEpisodeIndex={Math.max(0, record.index - 1)}
+              resumeGroup={getPlayRecordResumeGroup(record)}
               resumeTime={Math.max(0, Math.floor(record.play_time || 0))}
               query={record.search_title}
               from='playrecord'

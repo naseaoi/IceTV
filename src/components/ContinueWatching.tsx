@@ -24,6 +24,7 @@ import {
 } from '@/lib/local-preferences';
 import {
   getPlayRecordEpisodeDisplay,
+  getPlayRecordResumeGroup,
   hasPlayRecordUpdate,
 } from '@/lib/play-records';
 import { parseStorageKey } from '@/lib/utils';
@@ -250,6 +251,7 @@ export default function ContinueWatching({
                     currentEpisode={episodeDisplay.currentEpisode}
                     totalEpisodes={episodeDisplay.totalEpisodes}
                     resumeEpisodeIndex={Math.max(0, record.index - 1)}
+                    resumeGroup={getPlayRecordResumeGroup(record)}
                     progress={getProgress(record)}
                     hasUpdate={hasPlayRecordUpdate(record)}
                     trackingEnabled={record.tracking_enabled !== false}
@@ -288,6 +290,7 @@ export default function ContinueWatching({
                       episodes={episodeDisplay.totalEpisodes}
                       currentEpisode={episodeDisplay.currentEpisode}
                       resumeEpisodeIndex={Math.max(0, record.index - 1)}
+                      resumeGroup={getPlayRecordResumeGroup(record)}
                       resumeTime={Math.max(
                         0,
                         Math.floor(record.play_time || 0),

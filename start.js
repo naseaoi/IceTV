@@ -50,7 +50,7 @@ const CRON_LIVE_INTERVAL_MS = readPositiveInteger(
 );
 const CRON_METADATA_INTERVAL_MS = readPositiveInteger(
   process.env.CRON_METADATA_INTERVAL_MS,
-  24 * 60 * 60 * 1000,
+  6 * 60 * 60 * 1000,
 );
 
 // 每 1 秒轮询一次，直到请求成功

@@ -136,6 +136,38 @@ describe('usePlayProgress helpers', () => {
     });
   });
 
+  it('分组源上游新增剧集后按分组标签恢复到原集', () => {
+    expect(
+      resolvePlaybackRestoreCandidate({
+        checkpoint: null,
+        record: {
+          title: '番剧A',
+          source_name: '源A',
+          year: '2024',
+          cover: '',
+          index: 21,
+          total_episodes: 22,
+          group_index: 10,
+          group_total: 11,
+          group_label: '简中',
+          play_time: 180,
+          total_time: 1500,
+          save_time: 2000,
+        },
+        episodeCount: 26,
+        episodeGroups: [
+          { label: '繁中', count: 13 },
+          { label: '简中', count: 13 },
+        ],
+      }),
+    ).toEqual({
+      source: 'history',
+      episodeIndex: 22,
+      resumeTime: 180,
+      resumeMode: 'history',
+    });
+  });
+
   it('checkpoint 更新时比首页记录更新时优先使用 checkpoint', () => {
     expect(
       resolvePlaybackRestoreCandidate({
@@ -220,6 +252,54 @@ describe('usePlayProgress helpers', () => {
     ).toEqual({
       source: 'history',
       episodeIndex: 11,
+      resumeTime: 180,
+      resumeMode: 'history',
+    });
+  });
+
+  it('分组源缺少分组信息时会退化成过期绝对集索引', () => {
+    const staleGroupedRecord = {
+      title: '番剧A',
+      source_name: '源A',
+      year: '2024',
+      cover: '',
+      index: 32,
+      total_episodes: 43,
+      group_index: 10,
+      group_total: 21,
+      group_label: '第2季【全23话】',
+      play_time: 180,
+      total_time: 1500,
+      save_time: 2000,
+    };
+
+    expect(
+      resolvePlaybackRestoreCandidate({
+        checkpoint: null,
+        record: staleGroupedRecord,
+        episodeCount: 59,
+      }),
+    ).toEqual({
+      source: 'history',
+      episodeIndex: 31,
+      resumeTime: 180,
+      resumeMode: 'history',
+    });
+
+    expect(
+      resolvePlaybackRestoreCandidate({
+        checkpoint: null,
+        record: staleGroupedRecord,
+        episodeCount: 59,
+        episodeGroups: [
+          { label: '第1季【全24话】', count: 24 },
+          { label: '第2季【全23话】', count: 23 },
+          { label: '第3季 前篇【全12话】', count: 12 },
+        ],
+      }),
+    ).toEqual({
+      source: 'history',
+      episodeIndex: 33,
       resumeTime: 180,
       resumeMode: 'history',
     });

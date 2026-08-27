@@ -1,3 +1,4 @@
+import type { ResumeGroupIdentity } from '@/lib/episode-groups';
 import type { SearchResult } from '@/lib/types';
 
 export interface VideoCardProps {
@@ -20,6 +21,8 @@ export interface VideoCardProps {
   availableEpisodes?: number;
   /** 播放记录的真实集索引（0-based）；分组源展示集数与真实索引不一致时使用 */
   resumeEpisodeIndex?: number;
+  /** 分组源的分组身份；上游更新后据此重新对齐集索引 */
+  resumeGroup?: ResumeGroupIdentity;
   douban_id?: number;
   onDelete?: () => void;
   rate?: string;

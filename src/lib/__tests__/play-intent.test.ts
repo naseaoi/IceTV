@@ -112,4 +112,32 @@ describe('playIntent', () => {
       resumeMode: null,
     });
   });
+
+  it('分组源上游新增剧集后按分组标签重新对齐目标集', () => {
+    savePlayIntent({
+      source: 'source-a',
+      id: 'id-a',
+      episodeIndex: 20,
+      resumeTime: 180,
+      groupLabel: '简中',
+      groupIndex: 10,
+      groupTotal: 11,
+    });
+
+    expect(
+      consumeMatchingPlayIntent({
+        source: 'source-a',
+        id: 'id-a',
+        episodeCount: 26,
+        episodeGroups: [
+          { label: '繁中', count: 13 },
+          { label: '简中', count: 13 },
+        ],
+      }),
+    ).toEqual({
+      episodeIndex: 22,
+      resumeTime: 180,
+      resumeMode: 'forced',
+    });
+  });
 });

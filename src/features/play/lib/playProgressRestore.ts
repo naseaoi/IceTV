@@ -9,7 +9,11 @@ import {
 } from '@/features/play/lib/playTypes';
 import type { ResumeMode } from '@/features/play/lib/resumePlayback';
 import type { PlayRecord } from '@/lib/db.client';
-import type { SearchResult } from '@/lib/types';
+import {
+  clampEpisodeIndex,
+  resolvePlayRecordEpisode,
+} from '@/lib/episode-groups';
+import type { EpisodeGroup, SearchResult } from '@/lib/types';
 
 export function savePlaybackCheckpoint(
   currentSourceRef: MutableRefObject<string>,
@@ -153,12 +157,7 @@ function clampRestoreEpisodeIndex(
   episodeIndex: number,
   episodeCount: number,
 ): number {
-  const safeIndex = Math.max(0, episodeIndex);
-  if (!Number.isFinite(episodeCount) || episodeCount <= 0) {
-    return safeIndex;
-  }
-
-  return Math.min(safeIndex, episodeCount - 1);
+  return clampEpisodeIndex(episodeIndex, episodeCount);
 }
 
 type PlaybackRestoreSource = 'history' | 'checkpoint';
@@ -174,6 +173,7 @@ interface ResolvePlaybackRestoreCandidateOptions {
   checkpoint: PlayCheckpoint | null;
   record?: PlayRecord;
   episodeCount: number;
+  episodeGroups?: EpisodeGroup[];
 }
 
 function normalizeRestoreIdentityText(value?: string | null): string {
@@ -233,11 +233,16 @@ export function resolvePlaybackRestoreCandidate({
   checkpoint,
   record,
   episodeCount,
+  episodeGroups,
 }: ResolvePlaybackRestoreCandidateOptions): PlaybackRestoreCandidate | null {
   const historyCandidate = record
     ? {
         source: 'history' as const,
-        episodeIndex: clampRestoreEpisodeIndex(record.index - 1, episodeCount),
+        episodeIndex: resolvePlayRecordEpisode(
+          record,
+          episodeGroups,
+          episodeCount,
+        ).episodeIndex,
         resumeTime: Math.max(0, Math.floor(record.play_time || 0)),
         resumeMode: (record.play_time > 0 ? 'history' : null) as ResumeMode,
         updatedAt: record.save_time || 0,
