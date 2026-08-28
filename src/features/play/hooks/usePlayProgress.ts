@@ -563,11 +563,19 @@ export function usePlayProgress({
       }
     };
 
+    // visibilitychange 缺失时兜底持久化
+    const handlePageHide = () => {
+      persistPlaybackState();
+      releaseWakeLock();
+    };
+
     window.addEventListener('beforeunload', handleBeforeUnload);
+    window.addEventListener('pagehide', handlePageHide);
     document.addEventListener('visibilitychange', handleVisibilityChange);
 
     return () => {
       window.removeEventListener('beforeunload', handleBeforeUnload);
+      window.removeEventListener('pagehide', handlePageHide);
       document.removeEventListener('visibilitychange', handleVisibilityChange);
     };
   }, [
