@@ -206,10 +206,6 @@ export async function savePlayRecord(
       cached[key] = normalizedRecord;
       return cached;
     },
-    mutateLocal: (stored) => {
-      stored[key] = normalizedRecord;
-      return stored;
-    },
     syncToServer: () =>
       retryClientRequest(
         () =>
@@ -239,10 +235,6 @@ export async function deletePlayRecord(
     mutateCached: (cached) => {
       delete cached[key];
       return cached;
-    },
-    mutateLocal: (stored) => {
-      delete stored[key];
-      return stored;
     },
     syncToServer: () =>
       fetchWithAuth(`/api/playrecords?key=${encodeURIComponent(key)}`, {
@@ -402,7 +394,6 @@ export async function deleteSearchHistory(keyword: string): Promise<void> {
 
   return _writeSearchHistory({
     mutateCached: (cached) => cached.filter((k) => k !== trimmed),
-    mutateLocal: (stored) => stored.filter((k) => k !== trimmed),
     syncToServer: () =>
       fetchWithAuth(
         `/api/searchhistory?keyword=${encodeURIComponent(trimmed)}`,
@@ -451,10 +442,6 @@ export async function saveFavorite(
       cached[key] = favorite;
       return cached;
     },
-    mutateLocal: (stored) => {
-      stored[key] = favorite;
-      return stored;
-    },
     syncToServer: () =>
       fetchWithAuth('/api/favorites', {
         method: 'POST',
@@ -476,10 +463,6 @@ export async function deleteFavorite(
     mutateCached: (cached) => {
       delete cached[key];
       return cached;
-    },
-    mutateLocal: (stored) => {
-      delete stored[key];
-      return stored;
     },
     syncToServer: () =>
       fetchWithAuth(`/api/favorites?key=${encodeURIComponent(key)}`, {
@@ -572,10 +555,6 @@ export async function saveSkipConfig(
       cached[key] = config;
       return cached;
     },
-    mutateLocal: (stored) => {
-      stored[key] = config;
-      return stored;
-    },
     syncToServer: () =>
       fetchWithAuth('/api/skipconfigs', {
         method: 'POST',
@@ -598,10 +577,6 @@ export async function deleteSkipConfig(
     mutateCached: (cached) => {
       delete cached[key];
       return cached;
-    },
-    mutateLocal: (stored) => {
-      delete stored[key];
-      return stored;
     },
     syncToServer: () =>
       fetchWithAuth(`/api/skipconfigs?key=${encodeURIComponent(key)}`, {

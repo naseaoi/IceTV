@@ -557,7 +557,6 @@ export function createOptimisticWriter<TCache>(options: {
   emptyCacheFactory: () => TCache;
 }): (mutation: {
   mutateCached: (cached: TCache) => TCache;
-  mutateLocal: (stored: TCache) => TCache;
   syncToServer: () => Promise<void>;
   eventDetail?: unknown;
   onServerError?: (err: unknown) => Promise<void>;
