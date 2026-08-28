@@ -15,6 +15,7 @@ import {
   normalizePlaybackSearchKeyword,
 } from './playback-query';
 import { getMySqlConnectionUrl } from './storage-type';
+import { buildTrackingSql, MYSQL_TRACKING_DIALECT } from './tracking-sql';
 import {
   Favorite,
   FavoritePage,
@@ -37,42 +38,10 @@ import {
 import { assertValidUsernameFormat, normalizeUsername } from './username';
 
 const SEARCH_HISTORY_LIMIT = 20;
-const MYSQL_TRACKING_GROUP_TOTAL =
-  "CAST(JSON_UNQUOTE(JSON_EXTRACT(record_json, '$.group_total')) AS SIGNED)";
-const MYSQL_TRACKING_GROUP_INDEX =
-  "CAST(JSON_UNQUOTE(JSON_EXTRACT(record_json, '$.group_index')) AS SIGNED)";
-const MYSQL_TRACKING_TOTAL_EPISODES =
-  "CAST(JSON_UNQUOTE(JSON_EXTRACT(record_json, '$.total_episodes')) AS SIGNED)";
-const MYSQL_TRACKING_INDEX =
-  "CAST(JSON_UNQUOTE(JSON_EXTRACT(record_json, '$.index')) AS SIGNED)";
-const MYSQL_TRACKING_TOTAL = `CASE
-  WHEN COALESCE(${MYSQL_TRACKING_GROUP_INDEX}, 0) <> 0
-   AND COALESCE(${MYSQL_TRACKING_GROUP_TOTAL}, 0) <> 0
-  THEN ${MYSQL_TRACKING_GROUP_TOTAL}
-  ELSE ${MYSQL_TRACKING_TOTAL_EPISODES}
-END`;
-const MYSQL_TRACKING_CURRENT = `CASE
-  WHEN COALESCE(${MYSQL_TRACKING_GROUP_INDEX}, 0) <> 0
-   AND COALESCE(${MYSQL_TRACKING_GROUP_TOTAL}, 0) <> 0
-  THEN ${MYSQL_TRACKING_GROUP_INDEX}
-  ELSE ${MYSQL_TRACKING_INDEX}
-END`;
-const MYSQL_TRACKING_BASELINE = `CASE
-  WHEN COALESCE(${MYSQL_TRACKING_GROUP_TOTAL}, 0) <> 0
-  THEN CAST(JSON_UNQUOTE(JSON_EXTRACT(record_json, '$.update_baseline_group_total')) AS SIGNED)
-  ELSE CAST(JSON_UNQUOTE(JSON_EXTRACT(record_json, '$.update_baseline_episodes')) AS SIGNED)
-END`;
-const MYSQL_TRACKING_CREATED_AT = `COALESCE(
-  CAST(JSON_UNQUOTE(JSON_EXTRACT(record_json, '$.update_detected_at')) AS UNSIGNED),
-  CAST(JSON_UNQUOTE(JSON_EXTRACT(record_json, '$.metadata_checked_at')) AS UNSIGNED),
-  CAST(JSON_UNQUOTE(JSON_EXTRACT(record_json, '$.save_time')) AS UNSIGNED),
-  0
-)`;
-const MYSQL_UNREAD_TRACKING_WHERE = `
-  COALESCE(JSON_UNQUOTE(JSON_EXTRACT(record_json, '$.tracking_enabled')), 'true') <> 'false'
-  AND ${MYSQL_TRACKING_TOTAL} > COALESCE(${MYSQL_TRACKING_BASELINE}, ${MYSQL_TRACKING_TOTAL})
-  AND ${MYSQL_TRACKING_CURRENT} < ${MYSQL_TRACKING_TOTAL}
-`;
+const {
+  createdAt: MYSQL_TRACKING_CREATED_AT,
+  unreadWhere: MYSQL_UNREAD_TRACKING_WHERE,
+} = buildTrackingSql(MYSQL_TRACKING_DIALECT);
 const PLAY_RECORD_BATCH_SIZE = 200;
 
 function parseInteger(value: string | undefined, fallback: number): number {

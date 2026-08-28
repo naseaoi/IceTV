@@ -11,6 +11,7 @@ import {
   buildPlaybackSearchLikePattern,
   normalizePlaybackSearchKeyword,
 } from './playback-query';
+import { buildTrackingSql, SQLITE_TRACKING_DIALECT } from './tracking-sql';
 import {
   Favorite,
   FavoritePage,
@@ -39,42 +40,10 @@ import {
 
 const SEARCH_HISTORY_LIMIT = 20;
 
-const SQLITE_TRACKING_GROUP_TOTAL =
-  "CAST(json_extract(record_json, '$.group_total') AS INTEGER)";
-const SQLITE_TRACKING_GROUP_INDEX =
-  "CAST(json_extract(record_json, '$.group_index') AS INTEGER)";
-const SQLITE_TRACKING_TOTAL_EPISODES =
-  "CAST(json_extract(record_json, '$.total_episodes') AS INTEGER)";
-const SQLITE_TRACKING_INDEX =
-  "CAST(json_extract(record_json, '$.index') AS INTEGER)";
-const SQLITE_TRACKING_TOTAL = `CASE
-  WHEN COALESCE(${SQLITE_TRACKING_GROUP_INDEX}, 0) <> 0
-   AND COALESCE(${SQLITE_TRACKING_GROUP_TOTAL}, 0) <> 0
-  THEN ${SQLITE_TRACKING_GROUP_TOTAL}
-  ELSE ${SQLITE_TRACKING_TOTAL_EPISODES}
-END`;
-const SQLITE_TRACKING_CURRENT = `CASE
-  WHEN COALESCE(${SQLITE_TRACKING_GROUP_INDEX}, 0) <> 0
-   AND COALESCE(${SQLITE_TRACKING_GROUP_TOTAL}, 0) <> 0
-  THEN ${SQLITE_TRACKING_GROUP_INDEX}
-  ELSE ${SQLITE_TRACKING_INDEX}
-END`;
-const SQLITE_TRACKING_BASELINE = `CASE
-  WHEN COALESCE(${SQLITE_TRACKING_GROUP_TOTAL}, 0) <> 0
-  THEN CAST(json_extract(record_json, '$.update_baseline_group_total') AS INTEGER)
-  ELSE CAST(json_extract(record_json, '$.update_baseline_episodes') AS INTEGER)
-END`;
-const SQLITE_TRACKING_CREATED_AT = `COALESCE(
-  CAST(json_extract(record_json, '$.update_detected_at') AS INTEGER),
-  CAST(json_extract(record_json, '$.metadata_checked_at') AS INTEGER),
-  CAST(json_extract(record_json, '$.save_time') AS INTEGER),
-  0
-)`;
-const SQLITE_UNREAD_TRACKING_WHERE = `
-  COALESCE(json_extract(record_json, '$.tracking_enabled'), 1) <> 0
-  AND ${SQLITE_TRACKING_TOTAL} > COALESCE(${SQLITE_TRACKING_BASELINE}, ${SQLITE_TRACKING_TOTAL})
-  AND ${SQLITE_TRACKING_CURRENT} < ${SQLITE_TRACKING_TOTAL}
-`;
+const {
+  createdAt: SQLITE_TRACKING_CREATED_AT,
+  unreadWhere: SQLITE_UNREAD_TRACKING_WHERE,
+} = buildTrackingSql(SQLITE_TRACKING_DIALECT);
 
 function parseBusyTimeoutMs(raw: string | undefined, fallback: number): number {
   if (!raw) {
