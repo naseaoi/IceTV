@@ -505,6 +505,9 @@ function normalizeRecordMap<T>(
 
 function normalizePlayRecord(value: unknown): PlayRecord {
   const input = requireObject(value, '播放记录格式无效');
+  if ((input.group_index === undefined) !== (input.group_total === undefined)) {
+    throw new ImportValidationError('组内集数与组内总集数必须成对出现');
+  }
   return {
     title: limitString(input.title, '标题', MAX_SHORT_STRING_LENGTH),
     source_name: limitString(

@@ -1,48 +1,12 @@
 /** @jest-environment node */
 
-import { DEFAULT_RUNTIME_PARAMS } from '@/lib/runtime-params';
-import type { AdminConfig } from '@/types/admin';
-
 jest.mock('../env.server', () => ({
   getOwnerUsername: () => 'owner',
 }));
 
 import { parseImportData } from '../data-import';
 import type { StorageUserImportData } from '../types';
-
-const adminConfig: AdminConfig = {
-  ConfigSubscribtion: { URL: '', AutoUpdate: false, LastCheck: '' },
-  ConfigFile: '',
-  SiteConfig: {
-    SiteName: 'IceTV',
-    SiteIcon: '',
-    Announcement: '',
-    FooterText: '',
-    EnableLiveEntry: false,
-    DefaultAggregateSearch: true,
-    EnableOptimization: true,
-    LiveDirectConnect: false,
-    ...DEFAULT_RUNTIME_PARAMS,
-    SearchDownstreamMaxPage: 5,
-    SiteInterfaceCacheTime: 300,
-    DoubanProxyType: 'direct',
-    DoubanProxy: '',
-    BangumiDataSource: 'server',
-    BangumiProxy: '',
-    DoubanImageProxyType: 'direct',
-    DoubanImageProxy: '',
-    DisableYellowFilter: false,
-    FluidSearch: true,
-  },
-  UserConfig: {
-    Users: [],
-    OpenRegister: false,
-    Tags: [],
-  },
-  SourceConfig: [],
-  CustomCategories: [],
-  LiveConfig: [],
-};
+import { IMPORT_ADMIN_CONFIG as adminConfig } from './__fixtures__/import-admin-config';
 
 const exportedHash =
   '$2b$10$abcdefghijklmnopqrstuu9dBwFh6R0D4A5gHfHnM6kQ7xS8tT9u';

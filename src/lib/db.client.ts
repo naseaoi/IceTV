@@ -235,7 +235,7 @@ export async function deletePlayRecord(
   id: string,
 ): Promise<void> {
   const key = generateStorageKey(source, id);
-  return _writePlayRecords({
+  await _writePlayRecords({
     mutateCached: (cached) => {
       delete cached[key];
       return cached;
@@ -253,6 +253,7 @@ export async function deletePlayRecord(
     },
     requireExistingCacheForOptimisticUpdate: true,
   });
+  notifyMessagesUpdated();
 }
 
 async function patchPlayRecordState(
@@ -285,6 +286,10 @@ async function patchPlayRecordState(
   }
 }
 
+function notifyMessagesUpdated(): void {
+  window.dispatchEvent(new CustomEvent('messagesUpdated'));
+}
+
 export async function markPlayRecordUpdateRead(
   source: string,
   id: string,
@@ -294,7 +299,7 @@ export async function markPlayRecordUpdateRead(
     action: 'mark-update-read',
     readThroughEpisodes,
   });
-  window.dispatchEvent(new CustomEvent('messagesUpdated'));
+  notifyMessagesUpdated();
   return record;
 }
 
@@ -303,10 +308,12 @@ export async function setPlayRecordTracking(
   id: string,
   enabled: boolean,
 ): Promise<PlayRecord> {
-  return patchPlayRecordState(source, id, {
+  const record = await patchPlayRecordState(source, id, {
     action: 'set-tracking',
     trackingEnabled: enabled,
   });
+  notifyMessagesUpdated();
+  return record;
 }
 
 export async function clearAllPlayRecords(): Promise<void> {
@@ -317,6 +324,7 @@ export async function clearAllPlayRecords(): Promise<void> {
       method: 'DELETE',
       headers: { 'Content-Type': 'application/json' },
     });
+    notifyMessagesUpdated();
   } catch (err) {
     await handleDatabaseOperationFailure('playRecords', err);
     throw err;

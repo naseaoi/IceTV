@@ -2,10 +2,10 @@ import { NextRequest, NextResponse } from 'next/server';
 
 import { isGuardFailure, requireActiveUser } from '@/lib/api-auth';
 import { NO_STORE_HEADERS } from '@/lib/http-cache';
+import { normalizeMessageLimit } from '@/lib/message-page';
 import {
   getUserMessagePage,
   getUserMessageSummary,
-  normalizeMessageLimit,
   readAllUserMessages,
   readUserMessage,
 } from '@/lib/messages.server';

@@ -13,22 +13,7 @@ import {
 } from 'react';
 
 import { useAuthSession } from '@/components/AuthProvider';
-import { triggerGlobalError } from '@/lib/db.client.internal';
-import {
-  readNotifiedMessageRevision,
-  writeNotifiedMessageRevision,
-} from '@/lib/local-preferences';
-import {
-  UserMessage,
-  UserMessagePage,
-  UserMessageSummary,
-} from '@/lib/message-types';
-import {
-  getMessagePage,
-  getMessageSummary,
-  readAllMessages,
-  readMessage,
-} from '@/lib/messages.client';
+import { UserMessage, UserMessageSummary } from '@/lib/message-types';
 
 import {
   getMessagePreviewMode,
@@ -38,11 +23,8 @@ import {
 } from './message-preview';
 import MessagePanel from './MessagePanel';
 import MessageToast from './MessageToast';
-
-const POLL_INTERVAL_MS = 30_000;
-const TOAST_DURATION_MS = 7_000;
-
-type RefreshMode = 'mount' | 'poll' | 'silent';
+import { useMessagePagination } from './useMessagePagination';
+import { useMessageSummaryPolling } from './useMessageSummaryPolling';
 
 interface MessageCenterContextValue {
   unreadCount: number;
@@ -58,160 +40,57 @@ const EMPTY_SUMMARY: UserMessageSummary = {
   unreadCount: 0,
   trackingUnreadCount: 0,
   revision: '',
-  latestMessage: null,
+  announcement: null,
+  latestTracking: null,
 };
-
-function buildToastText(
-  summary: UserMessageSummary,
-  previousCount: number,
-): string {
-  const addedCount = Math.max(1, summary.unreadCount - previousCount);
-  if (addedCount > 1) return `${addedCount} 条新消息`;
-  const latest = summary.latestMessage;
-  if (!latest) return '有新消息';
-  if (latest.type === 'announcement') return '有一条新公告';
-  return `《${latest.title}》已更新至第 ${latest.toEpisodes} 集`;
-}
 
 export function MessageCenterProvider({ children }: { children: ReactNode }) {
   const router = useRouter();
   const { session } = useAuthSession();
-  const sessionStatus = session.status;
+  const authenticated = session.status === 'authenticated';
   const username =
     session.status === 'authenticated' ? session.username : undefined;
-  const [summary, setSummary] = useState<UserMessageSummary | null>(null);
-  const [page, setPage] = useState<UserMessagePage>({
-    items: [],
-    total: 0,
-    nextCursor: null,
-  });
   const [isOpen, setIsOpen] = useState(false);
-  const [loading, setLoading] = useState(false);
-  const [loadingMore, setLoadingMore] = useState(false);
-  const [loadError, setLoadError] = useState<string | null>(null);
-  const [workingIds, setWorkingIds] = useState<Set<string>>(new Set());
-  const [toastText, setToastText] = useState<string | null>(null);
-  const summaryRef = useRef<UserMessageSummary | null>(null);
-  const openRef = useRef(false);
-  const firstPageRequestRef = useRef(0);
-  const loadingMoreRef = useRef(false);
   const previewModeRef = useRef<ReturnType<typeof getMessagePreviewMode>>(null);
+  const panelOpenRef = useRef(false);
+  const loadFirstPageRef = useRef<() => void>(() => {});
 
-  useEffect(() => {
-    openRef.current = isOpen;
-  }, [isOpen]);
-
-  const loadFirstPage = useCallback(async () => {
-    const requestId = ++firstPageRequestRef.current;
-    setLoading(true);
-    setLoadError(null);
-    try {
-      const previewMode = previewModeRef.current;
-      if (previewMode) {
-        setPage(getMessagePreviewPage());
-        return;
-      }
-      const nextPage = await getMessagePage();
-      if (requestId === firstPageRequestRef.current) {
-        setPage(nextPage);
-      }
-    } catch (error) {
-      console.error('加载消息列表失败:', error);
-      if (requestId === firstPageRequestRef.current) {
-        setLoadError('请检查网络连接后重试');
-      }
-    } finally {
-      if (requestId === firstPageRequestRef.current) {
-        setLoading(false);
-      }
-    }
+  const setPanelOpen = useCallback((open: boolean) => {
+    panelOpenRef.current = open;
+    setIsOpen(open);
   }, []);
 
-  const refreshSummary = useCallback(
-    async (mode: RefreshMode) => {
-      if (sessionStatus !== 'authenticated' || !username) return;
-      try {
-        const nextSummary = await getMessageSummary();
-        const previous = summaryRef.current;
-        summaryRef.current = nextSummary;
-        setSummary(nextSummary);
+  const reloadOpenPanel = useCallback(() => {
+    if (!panelOpenRef.current) return;
+    loadFirstPageRef.current();
+  }, []);
 
-        const baselineRevision =
-          mode === 'mount'
-            ? readNotifiedMessageRevision(username)
-            : previous?.revision;
-        const previousUnreadCount =
-          mode === 'mount' ? 0 : (previous?.unreadCount ?? 0);
-        if (
-          mode !== 'silent' &&
-          nextSummary.unreadCount > 0 &&
-          nextSummary.revision !== baselineRevision &&
-          nextSummary.unreadCount >= previousUnreadCount
-        ) {
-          setToastText(buildToastText(nextSummary, previousUnreadCount));
-        }
-        writeNotifiedMessageRevision(username, nextSummary.revision);
+  const { summary, setSummary, toastText, setToastText, refreshSummary } =
+    useMessageSummaryPolling({
+      authenticated,
+      username,
+      onRevisionChanged: reloadOpenPanel,
+    });
 
-        if (openRef.current && previous?.revision !== nextSummary.revision) {
-          void loadFirstPage();
-        }
-      } catch (error) {
-        console.warn('刷新消息摘要失败:', error);
-      }
-    },
-    [loadFirstPage, sessionStatus, username],
+  const onAfterMutate = useCallback(
+    () => refreshSummary('local'),
+    [refreshSummary],
   );
+  const pagination = useMessagePagination({ previewModeRef, onAfterMutate });
+  const { loadFirstPage, readOne, readAll, reset, setPage } = pagination;
 
   useEffect(() => {
-    if (sessionStatus !== 'authenticated') {
-      firstPageRequestRef.current += 1;
-      summaryRef.current = null;
-      setSummary(null);
-      setPage({ items: [], total: 0, nextCursor: null });
-      setLoadError(null);
-      setIsOpen(false);
-      return;
-    }
-
-    void refreshSummary('mount');
-
-    let pollTimer: number | null = null;
-    const stopPolling = () => {
-      if (pollTimer === null) return;
-      window.clearInterval(pollTimer);
-      pollTimer = null;
-    };
-    const startPolling = () => {
-      if (pollTimer !== null || document.visibilityState !== 'visible') return;
-      pollTimer = window.setInterval(
-        () => void refreshSummary('poll'),
-        POLL_INTERVAL_MS,
-      );
-    };
-    const handleVisible = () => {
-      if (document.visibilityState !== 'visible') {
-        stopPolling();
-        return;
-      }
-      startPolling();
-      void refreshSummary('poll');
-    };
-    const handleMessagesUpdated = () => void refreshSummary('silent');
-
-    startPolling();
-    document.addEventListener('visibilitychange', handleVisible);
-    window.addEventListener('focus', handleVisible);
-    window.addEventListener('messagesUpdated', handleMessagesUpdated);
-    return () => {
-      stopPolling();
-      document.removeEventListener('visibilitychange', handleVisible);
-      window.removeEventListener('focus', handleVisible);
-      window.removeEventListener('messagesUpdated', handleMessagesUpdated);
-    };
-  }, [refreshSummary, sessionStatus]);
+    loadFirstPageRef.current = () => void loadFirstPage();
+  }, [loadFirstPage]);
 
   useEffect(() => {
-    if (sessionStatus !== 'authenticated') return;
+    if (authenticated) return;
+    reset();
+    setPanelOpen(false);
+  }, [authenticated, reset, setPanelOpen]);
+
+  useEffect(() => {
+    if (!authenticated) return;
     const previewMode = getMessagePreviewMode();
     if (!previewMode) return;
     previewModeRef.current = previewMode;
@@ -219,110 +98,39 @@ export function MessageCenterProvider({ children }: { children: ReactNode }) {
     setPage(previewPage);
     setSummary(getMessagePreviewSummary(previewPage));
     if (previewMode === 'panel' || previewMode === 'all') {
-      setIsOpen(true);
+      setPanelOpen(true);
     }
     if (previewMode !== 'panel') {
       setToastText(getMessagePreviewToast(previewMode));
     }
-  }, [sessionStatus]);
-
-  useEffect(() => {
-    if (!toastText) return;
-    const timer = window.setTimeout(
-      () => setToastText(null),
-      TOAST_DURATION_MS,
-    );
-    return () => window.clearTimeout(timer);
-  }, [toastText]);
+  }, [authenticated, setPage, setPanelOpen, setSummary, setToastText]);
 
   const openPanel = useCallback(() => {
     setToastText(null);
-    setIsOpen(true);
+    setPanelOpen(true);
     void loadFirstPage();
-  }, [loadFirstPage]);
+  }, [loadFirstPage, setPanelOpen, setToastText]);
 
   const handleRead = useCallback(
     async (message: UserMessage, navigate = false) => {
-      if (previewModeRef.current) {
-        setPage((current) => ({
-          ...current,
-          items: current.items.filter((item) => item.id !== message.id),
-          total: Math.max(0, current.total - 1),
-        }));
-        return;
-      }
-      setWorkingIds((current) => new Set(current).add(message.id));
-      try {
-        await readMessage(message.id);
-        setPage((current) => ({
-          ...current,
-          items: current.items.filter((item) => item.id !== message.id),
-          total: Math.max(0, current.total - 1),
-        }));
-        await refreshSummary('silent');
-        if (navigate && message.type === 'tracking-update') {
-          const params = new URLSearchParams({
-            source: message.source,
-            id: message.videoId,
-            title: message.title,
-          });
-          setIsOpen(false);
-          router.push(`/play?${params.toString()}`);
-        }
-      } catch (error) {
-        console.error('标记消息已读失败:', error);
-        triggerGlobalError('标记消息已读失败');
-      } finally {
-        setWorkingIds((current) => {
-          const next = new Set(current);
-          next.delete(message.id);
-          return next;
-        });
-      }
+      const read = await readOne(message);
+      if (!read || !navigate || message.type !== 'tracking-update') return;
+      const params = new URLSearchParams({
+        source: message.source,
+        id: message.videoId,
+        title: message.title,
+      });
+      setPanelOpen(false);
+      router.push(`/play?${params.toString()}`);
     },
-    [refreshSummary, router],
+    [readOne, router, setPanelOpen],
   );
 
   const handleReadAll = useCallback(async () => {
-    if (previewModeRef.current) {
-      setPage({ items: [], total: 0, nextCursor: null });
-      setSummary(EMPTY_SUMMARY);
-      return;
-    }
-    setWorkingIds(new Set(['all']));
-    try {
-      await readAllMessages();
-      setPage({ items: [], total: 0, nextCursor: null });
-      await refreshSummary('silent');
-    } catch (error) {
-      console.error('全部标记已读失败:', error);
-      triggerGlobalError('全部标记已读失败');
-    } finally {
-      setWorkingIds(new Set());
-    }
-  }, [refreshSummary]);
-
-  const handleLoadMore = useCallback(async () => {
-    if (!page.nextCursor || loadingMoreRef.current) return;
-    const requestId = firstPageRequestRef.current;
-    loadingMoreRef.current = true;
-    setLoadingMore(true);
-    try {
-      const nextPage = await getMessagePage(page.nextCursor);
-      if (requestId !== firstPageRequestRef.current) return;
-      setPage((current) => ({
-        items: [...current.items, ...nextPage.items],
-        total: nextPage.total,
-        nextCursor: nextPage.nextCursor,
-      }));
-    } catch (error) {
-      console.error('加载更多消息失败:', error);
-      triggerGlobalError('加载更多消息失败');
-    } finally {
-      loadingMoreRef.current = false;
-      setLoadingMore(false);
-    }
-  }, [page.nextCursor]);
+    const preview = previewModeRef.current;
+    await readAll();
+    if (preview) setSummary(EMPTY_SUMMARY);
+  }, [readAll, setSummary]);
 
   const contextValue = useMemo(
     () => ({
@@ -338,15 +146,15 @@ export function MessageCenterProvider({ children }: { children: ReactNode }) {
       {children}
       <MessagePanel
         open={isOpen}
-        page={page}
-        loading={loading}
-        loadingMore={loadingMore}
-        loadError={loadError}
-        workingIds={workingIds}
-        onClose={() => setIsOpen(false)}
+        page={pagination.page}
+        loading={pagination.loading}
+        loadingMore={pagination.loadingMore}
+        loadError={pagination.loadError}
+        workingIds={pagination.workingIds}
+        onClose={() => setPanelOpen(false)}
         onRead={handleRead}
         onReadAll={handleReadAll}
-        onLoadMore={handleLoadMore}
+        onLoadMore={pagination.loadMore}
         onRetry={loadFirstPage}
       />
       <MessageToast

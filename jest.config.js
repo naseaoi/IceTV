@@ -13,6 +13,8 @@ const customJestConfig = {
 
   modulePathIgnorePatterns: ['<rootDir>/.next'],
 
+  testPathIgnorePatterns: ['<rootDir>/node_modules/', '__fixtures__/'],
+
   moduleNameMapper: {
     '^@/(.*)$': '<rootDir>/src/$1',
     '^~/(.*)$': '<rootDir>/public/$1',

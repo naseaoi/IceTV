@@ -2,6 +2,7 @@
 
 import { applyPlayRecordStateUpdates } from '@/lib/db.client';
 import { fetchWithAuth } from '@/lib/db.client.internal';
+import { DEFAULT_MESSAGE_PAGE_LIMIT } from '@/lib/message-page';
 import {
   ReadAllUserMessagesResult,
   ReadUserMessageResult,
@@ -19,7 +20,9 @@ export async function getMessageSummary(): Promise<UserMessageSummary> {
 export async function getMessagePage(
   cursor?: string | null,
 ): Promise<UserMessagePage> {
-  const params = new URLSearchParams({ limit: '20' });
+  const params = new URLSearchParams({
+    limit: String(DEFAULT_MESSAGE_PAGE_LIMIT),
+  });
   if (cursor) params.set('cursor', cursor);
   const response = await fetchWithAuth(`/api/messages?${params.toString()}`, {
     cache: 'no-store',

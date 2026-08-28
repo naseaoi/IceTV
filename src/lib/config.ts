@@ -86,7 +86,7 @@ let cachedConfigVersion = '';
 let cachedConfigLoadedAt = 0;
 let inflightConfigLoad: Promise<AdminConfig> | null = null;
 let configCacheGeneration = 0;
-const DEFAULT_CONFIG_CACHE_TTL_MS = 30_000;
+const DEFAULT_CONFIG_CACHE_TTL_MS = 60_000;
 const PUBLIC_DOUBAN_PROXY_TYPES = new Set([
   'direct',
   'cors-proxy-zwei',

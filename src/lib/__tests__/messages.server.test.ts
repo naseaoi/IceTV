@@ -63,6 +63,17 @@ const updatedRecord: PlayRecord = {
   tracking_enabled: true,
 };
 
+function usePersistedUserMessageState(): void {
+  let state: Record<string, unknown> = {};
+  mockGetUserMessageState.mockImplementation(() => Promise.resolve(state));
+  mockSetUserMessageState.mockImplementation(
+    (_userName: string, next: Record<string, unknown>) => {
+      state = next;
+      return Promise.resolve();
+    },
+  );
+}
+
 describe('messages server', () => {
   beforeEach(() => {
     jest.clearAllMocks();
@@ -114,9 +125,48 @@ describe('messages server', () => {
     const summary = await getUserMessageSummary('demo');
 
     expect(summary.unreadCount).toBe(1);
-    expect(summary.latestMessage?.type).toBe('tracking-update');
+    expect(summary.announcement).toBeNull();
+    expect(summary.latestTracking?.type).toBe('tracking-update');
     expect(mockGetUnreadTrackingPlayRecordPage).toHaveBeenCalledWith('demo', 1);
     expect(mockGetAllPlayRecords).not.toHaveBeenCalled();
+  });
+
+  it('exposes the announcement and the latest tracking separately', async () => {
+    const summary = await getUserMessageSummary('demo');
+
+    expect(summary.unreadCount).toBe(2);
+    expect(summary.trackingUnreadCount).toBe(1);
+    expect(summary.announcement?.id).toBe('announcement:v2');
+    expect(summary.latestTracking).toMatchObject({
+      title: '示例剧集',
+      toEpisodes: 12,
+    });
+  });
+
+  it('changes the revision when only the unread count grows', async () => {
+    const before = await getUserMessageSummary('demo');
+
+    mockGetUnreadTrackingPlayRecordPage.mockResolvedValue({
+      items: { 'source-a+video-1': updatedRecord },
+      total: 4,
+      nextCursor: null,
+    });
+    const after = await getUserMessageSummary('demo');
+
+    expect(after.latestTracking?.id).toBe(before.latestTracking?.id);
+    expect(after.revision).not.toBe(before.revision);
+  });
+
+  it('reflects a read announcement in the next summary', async () => {
+    usePersistedUserMessageState();
+    const before = await getUserMessageSummary('demo');
+    expect(before.announcement?.id).toBe('announcement:v2');
+
+    await readUserMessage('demo', 'announcement:v2');
+    const after = await getUserMessageSummary('demo');
+
+    expect(after.announcement).toBeNull();
+    expect(after.unreadCount).toBe(1);
   });
 
   it('marks an announcement version as read', async () => {

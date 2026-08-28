@@ -5,6 +5,11 @@ import { createHash } from 'crypto';
 import { getConfigForRead } from '@/lib/config';
 import { db } from '@/lib/db';
 import {
+  decodeCursor,
+  encodeCursor,
+  encodeCursorPosition,
+} from '@/lib/message-cursor.server';
+import {
   AnnouncementUserMessage,
   ReadAllUserMessagesResult,
   ReadUserMessageResult,
@@ -21,8 +26,6 @@ import {
 import { PlayRecord, UserMessageState } from '@/lib/types';
 import { parseStorageKey } from '@/lib/utils';
 
-const DEFAULT_MESSAGE_PAGE_LIMIT = 20;
-const MAX_MESSAGE_PAGE_LIMIT = 50;
 const READ_ALL_BATCH_SIZE = 200;
 
 function hashValue(value: string): string {
@@ -81,55 +84,6 @@ function buildTrackingMessage(
       record.metadata_checked_at ||
       record.save_time,
   };
-}
-
-function messageSortRank(message: UserMessage): number {
-  return message.type === 'announcement' ? 0 : 1;
-}
-
-function sortMessages<T extends UserMessage>(messages: T[]): T[] {
-  return messages.sort(
-    (left, right) =>
-      messageSortRank(left) - messageSortRank(right) ||
-      right.createdAt - left.createdAt ||
-      right.id.localeCompare(left.id),
-  );
-}
-
-function encodeCursor(message: TrackingUpdateUserMessage): string {
-  return encodeCursorPosition(message.createdAt, message.recordKey);
-}
-
-function encodeCursorPosition(createdAt: number, key: string): string {
-  return Buffer.from(JSON.stringify({ createdAt, key })).toString('base64url');
-}
-
-function decodeCursor(
-  cursor?: string | null,
-): { createdAt: number; key: string } | null {
-  if (!cursor || cursor.length > 512) return null;
-  try {
-    const parsed = JSON.parse(Buffer.from(cursor, 'base64url').toString()) as {
-      createdAt?: unknown;
-      key?: unknown;
-    };
-    return typeof parsed.createdAt === 'number' &&
-      Number.isFinite(parsed.createdAt) &&
-      typeof parsed.key === 'string'
-      ? { createdAt: parsed.createdAt, key: parsed.key }
-      : null;
-  } catch {
-    return null;
-  }
-}
-
-export function normalizeMessageLimit(value: string | number | null): number {
-  const parsed =
-    typeof value === 'number' ? value : Number.parseInt(value || '', 10);
-  if (!Number.isFinite(parsed) || parsed <= 0) {
-    return DEFAULT_MESSAGE_PAGE_LIMIT;
-  }
-  return Math.min(MAX_MESSAGE_PAGE_LIMIT, Math.floor(parsed));
 }
 
 async function getAnnouncementContext(userName: string): Promise<{
@@ -228,20 +182,17 @@ export async function getUserMessageSummary(
     getAnnouncementContext(userName),
     db.getUnreadTrackingPlayRecordPage(userName, 1),
   ]);
-  const tracking = buildTrackingMessages(trackingPage.items);
-  const messages = sortMessages<UserMessage>([
-    ...(announcement ? [announcement] : []),
-    ...tracking,
-  ]);
+  const latestTracking = buildTrackingMessages(trackingPage.items)[0] || null;
   const unreadCount = trackingPage.total + (announcement ? 1 : 0);
   const revision = hashValue(
-    [unreadCount, ...messages.map((message) => message.id)].join('|'),
+    [unreadCount, announcement?.id ?? '', latestTracking?.id ?? ''].join('|'),
   );
   return {
     unreadCount,
     trackingUnreadCount: trackingPage.total,
     revision,
-    latestMessage: messages[0] || null,
+    announcement,
+    latestTracking,
   };
 }
 

@@ -61,13 +61,16 @@ export function getMessagePreviewPage(): UserMessagePage {
 export function getMessagePreviewSummary(
   page: UserMessagePage,
 ): UserMessageSummary {
+  const tracking = page.items.filter(
+    (message) => message.type === 'tracking-update',
+  );
   return {
     unreadCount: page.total,
-    trackingUnreadCount: page.items.filter(
-      (message) => message.type === 'tracking-update',
-    ).length,
+    trackingUnreadCount: tracking.length,
     revision: 'message-preview',
-    latestMessage: page.items[0] || null,
+    announcement:
+      page.items.find((message) => message.type === 'announcement') || null,
+    latestTracking: tracking[0] || null,
   };
 }
 
