@@ -6,11 +6,6 @@ const mockGetMessageSummary = jest.fn();
 const mockGetMessagePage = jest.fn();
 const mockReadMessage = jest.fn();
 const mockReadAllMessages = jest.fn();
-const mockPush = jest.fn();
-
-jest.mock('next/navigation', () => ({
-  useRouter: () => ({ push: mockPush }),
-}));
 
 jest.mock('@/components/AuthProvider', () => ({
   useAuthSession: () => ({
@@ -41,10 +36,7 @@ jest.mock('@/components/messages/MessagePanel', () => ({
   }: {
     open: boolean;
     page: UserMessagePage;
-    onRead: (
-      message: UserMessagePage['items'][number],
-      navigate?: boolean,
-    ) => void;
+    onRead: (message: UserMessagePage['items'][number]) => void;
     onReadAll: () => void;
   }) =>
     open ? (
@@ -54,7 +46,7 @@ jest.mock('@/components/messages/MessagePanel', () => ({
           <button
             key={item.id}
             data-testid={`read-${item.id}`}
-            onClick={() => onRead(item, true)}
+            onClick={() => onRead(item)}
           >
             {item.id}
           </button>
@@ -212,7 +204,7 @@ describe('MessageCenterProvider', () => {
     expect(mockGetMessagePage).toHaveBeenCalledTimes(1);
   });
 
-  it('已读追更消息后跳转播放页', async () => {
+  it('已读追更消息后不跳转播放页', async () => {
     renderProvider();
     await waitFor(() => expect(mockGetMessageSummary).toHaveBeenCalled());
     await act(async () => {
@@ -226,12 +218,11 @@ describe('MessageCenterProvider', () => {
       screen.getByTestId('read-tracking:source:video:1:2').click();
     });
 
-    await waitFor(() => expect(mockPush).toHaveBeenCalledTimes(1));
-    expect(mockPush.mock.calls[0][0]).toContain('/play?');
-    expect(mockPush.mock.calls[0][0]).toContain('source=source');
+    await waitFor(() => expect(mockReadMessage).toHaveBeenCalledTimes(1));
+    expect(screen.getByTestId('panel')).toBeInTheDocument();
   });
 
-  it('标记已读失败时不跳转', async () => {
+  it('标记已读失败时保留未读数', async () => {
     mockReadMessage.mockRejectedValue(new Error('boom'));
     const consoleError = jest
       .spyOn(console, 'error')
@@ -249,7 +240,7 @@ describe('MessageCenterProvider', () => {
       screen.getByTestId('read-tracking:source:video:1:2').click();
     });
 
-    expect(mockPush).not.toHaveBeenCalled();
+    expect(screen.getByTestId('unread').textContent).toBe('1');
     consoleError.mockRestore();
   });
 });

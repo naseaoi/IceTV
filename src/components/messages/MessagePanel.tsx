@@ -24,7 +24,7 @@ interface MessagePanelProps {
   loadError: string | null;
   workingIds: Set<string>;
   onClose: () => void;
-  onRead: (message: UserMessage, navigate?: boolean) => Promise<void>;
+  onRead: (message: UserMessage) => Promise<void>;
   onReadAll: () => Promise<void>;
   onLoadMore: () => Promise<void>;
   onRetry: () => Promise<void>;
@@ -51,7 +51,7 @@ function MessageRow({
 }: {
   message: UserMessage;
   working: boolean;
-  onRead: (message: UserMessage, navigate?: boolean) => Promise<void>;
+  onRead: (message: UserMessage) => Promise<void>;
 }) {
   const isAnnouncement = message.type === 'announcement';
 
@@ -72,18 +72,13 @@ function MessageRow({
           <CoverImage
             src={message.cover}
             alt={message.title}
-            sizes='48px'
             fallbackLabel='无封面'
+            checkClientCacheBeforeLoad
           />
         </div>
       )}
 
-      <button
-        type='button'
-        disabled={working}
-        className='min-w-0 flex-1 text-left disabled:opacity-60'
-        onClick={() => void onRead(message, !isAnnouncement)}
-      >
+      <div className='min-w-0 flex-1'>
         <span className='flex items-center gap-1.5'>
           {!isAnnouncement && (
             <Rss className='h-3.5 w-3.5 shrink-0 text-amber-500' />
@@ -102,7 +97,7 @@ function MessageRow({
           {' · '}
           {formatMessageTime(message.createdAt)}
         </span>
-      </button>
+      </div>
 
       <button
         type='button'
@@ -133,7 +128,7 @@ function MessageSection({
   messages: UserMessage[];
   workingIds: Set<string>;
   readingAll: boolean;
-  onRead: (message: UserMessage, navigate?: boolean) => Promise<void>;
+  onRead: (message: UserMessage) => Promise<void>;
 }) {
   if (messages.length === 0) return null;
 

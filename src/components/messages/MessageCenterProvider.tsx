@@ -1,6 +1,5 @@
 'use client';
 
-import { useRouter } from 'next/navigation';
 import {
   createContext,
   ReactNode,
@@ -45,7 +44,6 @@ const EMPTY_SUMMARY: UserMessageSummary = {
 };
 
 export function MessageCenterProvider({ children }: { children: ReactNode }) {
-  const router = useRouter();
   const { session } = useAuthSession();
   const authenticated = session.status === 'authenticated';
   const username =
@@ -112,18 +110,10 @@ export function MessageCenterProvider({ children }: { children: ReactNode }) {
   }, [loadFirstPage, setPanelOpen, setToastText]);
 
   const handleRead = useCallback(
-    async (message: UserMessage, navigate = false) => {
-      const read = await readOne(message);
-      if (!read || !navigate || message.type !== 'tracking-update') return;
-      const params = new URLSearchParams({
-        source: message.source,
-        id: message.videoId,
-        title: message.title,
-      });
-      setPanelOpen(false);
-      router.push(`/play?${params.toString()}`);
+    async (message: UserMessage) => {
+      await readOne(message);
     },
-    [readOne, router, setPanelOpen],
+    [readOne],
   );
 
   const handleReadAll = useCallback(async () => {

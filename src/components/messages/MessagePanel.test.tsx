@@ -69,11 +69,23 @@ describe('MessagePanel', () => {
     expect(screen.getByText('测试公告内容')).toBeInTheDocument();
     expect(screen.getByText('已从 1 集更新至 2 集')).toBeInTheDocument();
 
-    fireEvent.click(screen.getByText('测试剧集'));
-    expect(props.onRead).toHaveBeenCalledWith(messagePage.items[1], true);
+    const readButtons = screen.getAllByRole('button', { name: '标记为已读' });
+    expect(readButtons).toHaveLength(2);
+    fireEvent.click(readButtons[1]);
+    expect(props.onRead).toHaveBeenCalledWith(messagePage.items[1]);
 
     fireEvent.click(screen.getByRole('button', { name: '全部已读' }));
     expect(props.onReadAll).toHaveBeenCalledTimes(1);
+  });
+
+  it('消息标题与封面不可点击，只保留通知展示', () => {
+    const props = renderPanel();
+
+    fireEvent.click(screen.getByText('测试剧集'));
+    fireEvent.click(screen.getByText('已从 1 集更新至 2 集'));
+    fireEvent.click(screen.getByLabelText('测试剧集'));
+
+    expect(props.onRead).not.toHaveBeenCalled();
   });
 
   it('加载失败时提供重试操作', () => {
