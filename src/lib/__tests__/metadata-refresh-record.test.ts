@@ -1,4 +1,5 @@
 import { buildRefreshedPlayRecord } from '@/lib/cron/metadata-refresh';
+import { hasPlayRecordUpdate } from '@/lib/play-records';
 import type { PlayRecord, SearchResult } from '@/lib/types';
 
 function createRecord(overrides: Partial<PlayRecord> = {}): PlayRecord {
@@ -103,5 +104,60 @@ describe('buildRefreshedPlayRecord', () => {
     expect(next.total_episodes).toBe(12);
     expect(next.update_detected_at).toBe(5000);
     expect(next.update_baseline_episodes).toBe(11);
+  });
+
+  it('上游撤掉分组后清空残留组字段并按集数刻度报更新', () => {
+    const next = buildRefreshedPlayRecord(
+      createRecord({
+        index: 5,
+        total_episodes: 10,
+        group_index: 5,
+        group_total: 10,
+        group_label: '简中',
+        update_baseline_group_total: 10,
+        update_baseline_episodes: 10,
+      }),
+      createDetail({
+        episodes: Array.from({ length: 20 }, (_, index) => `ep-${index}`),
+        episode_groups: undefined,
+      }),
+      5000,
+    );
+
+    expect(next.group_index).toBeUndefined();
+    expect(next.group_total).toBeUndefined();
+    expect(next.group_label).toBeUndefined();
+    expect(next.update_baseline_group_total).toBeUndefined();
+    expect(next.total_episodes).toBe(20);
+    expect(next.update_baseline_episodes).toBe(10);
+    expect(next.update_detected_at).toBe(5000);
+    expect(hasPlayRecordUpdate(next)).toBe(true);
+  });
+
+  it('重新对齐到另一个分组时重建基线而非误报更新', () => {
+    const next = buildRefreshedPlayRecord(
+      createRecord({
+        index: 3,
+        total_episodes: 22,
+        group_index: 3,
+        group_total: 11,
+        group_label: '繁中',
+        update_baseline_group_total: 11,
+      }),
+      createDetail({
+        episodes: Array.from({ length: 26 }, (_, index) => `ep-${index}`),
+        episode_groups: [
+          { label: '国语', count: 13 },
+          { label: '简中', count: 13 },
+        ],
+      }),
+      5000,
+    );
+
+    expect(next.group_label).toBe('国语');
+    expect(next.group_total).toBe(13);
+    expect(next.update_baseline_group_total).toBe(13);
+    expect(next.update_detected_at).toBeUndefined();
+    expect(hasPlayRecordUpdate(next)).toBe(false);
   });
 });

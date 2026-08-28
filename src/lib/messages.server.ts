@@ -20,6 +20,7 @@ import {
 } from '@/lib/message-types';
 import {
   getPlayRecordEpisodeDisplay,
+  getPlayRecordUpdateBaseline,
   hasPlayRecordUpdate,
   markPlayRecordUpdateRead,
 } from '@/lib/play-records';
@@ -60,12 +61,7 @@ function buildTrackingMessage(
   if (!parsed) return null;
 
   const { totalEpisodes } = getPlayRecordEpisodeDisplay(record);
-  const baselineValue = record.group_total
-    ? record.update_baseline_group_total
-    : record.update_baseline_episodes;
-  const fromEpisodes = Number.isFinite(baselineValue)
-    ? Number(baselineValue)
-    : totalEpisodes;
+  const fromEpisodes = getPlayRecordUpdateBaseline(record);
   const encodedKey = encodeURIComponent(recordKey);
 
   return {

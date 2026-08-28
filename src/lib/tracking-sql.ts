@@ -49,7 +49,7 @@ END`;
 END`;
 
   const baseline = `CASE
-  WHEN COALESCE(${groupTotal}, 0) <> 0
+  WHEN ${inGroupScale}
   THEN ${dialect.jsonNumber('update_baseline_group_total')}
   ELSE ${dialect.jsonNumber('update_baseline_episodes')}
 END`;

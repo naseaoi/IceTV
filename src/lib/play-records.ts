@@ -1,4 +1,7 @@
-import type { ResumeGroupIdentity } from '@/lib/episode-groups';
+import {
+  type ResumeGroupIdentity,
+  normalizeGroupLabel,
+} from '@/lib/episode-groups';
 import type { PlayRecord, PlayRecordPage } from '@/lib/types';
 
 export const DEFAULT_RECENT_PLAY_RECORD_LIMIT = 10;
@@ -124,14 +127,22 @@ export function getPlayRecordResumeGroup(
   };
 }
 
+// group_index 与 group_total 同时可用才算分组刻度
+export function isGroupedPlayRecordScale(record: {
+  group_index?: number;
+  group_total?: number;
+}): boolean {
+  return !!record.group_index && !!record.group_total;
+}
+
 export function getPlayRecordEpisodeDisplay(record: PlayRecord): {
   currentEpisode: number;
   totalEpisodes: number;
 } {
-  if (record.group_index && record.group_total) {
+  if (isGroupedPlayRecordScale(record)) {
     return {
-      currentEpisode: record.group_index,
-      totalEpisodes: record.group_total,
+      currentEpisode: record.group_index as number,
+      totalEpisodes: record.group_total as number,
     };
   }
 
@@ -141,16 +152,33 @@ export function getPlayRecordEpisodeDisplay(record: PlayRecord): {
   };
 }
 
+export function getPlayRecordUpdateBaseline(record: PlayRecord): number {
+  const { totalEpisodes } = getPlayRecordEpisodeDisplay(record);
+  const baselineValue = isGroupedPlayRecordScale(record)
+    ? record.update_baseline_group_total
+    : record.update_baseline_episodes;
+  return Number.isFinite(baselineValue) ? Number(baselineValue) : totalEpisodes;
+}
+
+// 两侧标签都存在且不同才算换组
+export function hasPlayRecordGroupChanged(
+  previous: Pick<PlayRecord, 'group_index' | 'group_total' | 'group_label'>,
+  next: Pick<PlayRecord, 'group_index' | 'group_total' | 'group_label'>,
+): boolean {
+  if (!isGroupedPlayRecordScale(previous) || !isGroupedPlayRecordScale(next)) {
+    return false;
+  }
+
+  const previousLabel = normalizeGroupLabel(previous.group_label);
+  const nextLabel = normalizeGroupLabel(next.group_label);
+  return !!previousLabel && !!nextLabel && previousLabel !== nextLabel;
+}
+
 export function hasPlayRecordUpdate(record: PlayRecord): boolean {
   if (record.tracking_enabled === false) return false;
 
   const { currentEpisode, totalEpisodes } = getPlayRecordEpisodeDisplay(record);
-  const baselineValue = record.group_total
-    ? record.update_baseline_group_total
-    : record.update_baseline_episodes;
-  const baseline = Number.isFinite(baselineValue)
-    ? Number(baselineValue)
-    : totalEpisodes;
+  const baseline = getPlayRecordUpdateBaseline(record);
   return totalEpisodes > baseline && currentEpisode < totalEpisodes;
 }
 
@@ -159,12 +187,7 @@ export function markPlayRecordUpdateRead(
   readThroughEpisodes?: number,
 ): PlayRecord {
   const { totalEpisodes } = getPlayRecordEpisodeDisplay(record);
-  const baselineValue = record.group_total
-    ? record.update_baseline_group_total
-    : record.update_baseline_episodes;
-  const baseline = Number.isFinite(baselineValue)
-    ? Number(baselineValue)
-    : totalEpisodes;
+  const baseline = getPlayRecordUpdateBaseline(record);
   const requestedEpisodes = Number.isFinite(readThroughEpisodes)
     ? Number(readThroughEpisodes)
     : totalEpisodes;
@@ -174,7 +197,7 @@ export function markPlayRecordUpdateRead(
   );
   return {
     ...record,
-    ...(record.group_total
+    ...(isGroupedPlayRecordScale(record)
       ? { update_baseline_group_total: nextBaseline }
       : { update_baseline_episodes: nextBaseline }),
   };
@@ -185,7 +208,11 @@ export function mergePlayRecordUpdateBaseline(
   next: PlayRecord,
 ): PlayRecord {
   const { currentEpisode, totalEpisodes } = getPlayRecordEpisodeDisplay(next);
-  const isGrouped = !!next.group_total;
+  const isGrouped = isGroupedPlayRecordScale(next);
+  // 换组时以新组集数重建基线
+  const groupChanged = previous
+    ? hasPlayRecordGroupChanged(previous, next)
+    : false;
   const previousBaselineValue = isGrouped
     ? previous?.update_baseline_group_total
     : previous?.update_baseline_episodes;
@@ -198,7 +225,7 @@ export function mergePlayRecordUpdateBaseline(
       ? Number(previousTotal)
       : totalEpisodes;
   const baseline =
-    currentEpisode >= totalEpisodes
+    groupChanged || currentEpisode >= totalEpisodes
       ? totalEpisodes
       : Math.min(totalEpisodes, previousBaseline);
 

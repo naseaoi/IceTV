@@ -110,4 +110,85 @@ describe('play record selection', () => {
     expect(readRecord.update_baseline_episodes).toBe(4);
     expect(hasPlayRecordUpdate(readRecord)).toBe(false);
   });
+
+  it('rebuilds the baseline when switching to a longer group', () => {
+    const season1 = {
+      index: 10,
+      total_episodes: 34,
+      group_label: '第一季',
+      group_index: 10,
+      group_total: 10,
+      update_baseline_group_total: 10,
+    } as PlayRecord;
+    const merged = mergePlayRecordUpdateBaseline(season1, {
+      index: 11,
+      total_episodes: 34,
+      group_label: '第二季',
+      group_index: 1,
+      group_total: 24,
+    } as PlayRecord);
+
+    expect(merged.update_baseline_group_total).toBe(24);
+    expect(hasPlayRecordUpdate(merged)).toBe(false);
+  });
+
+  it('rebuilds the baseline when switching to a shorter group', () => {
+    const season2 = {
+      index: 34,
+      total_episodes: 34,
+      group_label: '第二季',
+      group_index: 24,
+      group_total: 24,
+      update_baseline_group_total: 24,
+    } as PlayRecord;
+    const merged = mergePlayRecordUpdateBaseline(season2, {
+      index: 3,
+      total_episodes: 34,
+      group_label: '第一季',
+      group_index: 3,
+      group_total: 10,
+    } as PlayRecord);
+
+    expect(merged.update_baseline_group_total).toBe(10);
+
+    const grown = mergePlayRecordUpdateBaseline(merged, {
+      ...merged,
+      group_total: 12,
+      total_episodes: 36,
+    } as PlayRecord);
+    expect(grown.update_baseline_group_total).toBe(10);
+    expect(hasPlayRecordUpdate(grown)).toBe(true);
+  });
+
+  it('keeps the baseline when the group total grows within the same group', () => {
+    const previous = {
+      index: 3,
+      total_episodes: 34,
+      group_label: '第一季',
+      group_index: 3,
+      group_total: 10,
+      update_baseline_group_total: 10,
+    } as PlayRecord;
+    const merged = mergePlayRecordUpdateBaseline(previous, {
+      ...previous,
+      group_total: 12,
+      total_episodes: 36,
+    } as PlayRecord);
+
+    expect(merged.update_baseline_group_total).toBe(10);
+    expect(hasPlayRecordUpdate(merged)).toBe(true);
+  });
+
+  it('falls back to the episode scale when group_index is missing', () => {
+    const record = {
+      index: 5,
+      total_episodes: 20,
+      group_total: 10,
+      update_baseline_group_total: 10,
+      update_baseline_episodes: 10,
+    } as PlayRecord;
+
+    expect(hasPlayRecordUpdate(record)).toBe(true);
+    expect(markPlayRecordUpdateRead(record).update_baseline_episodes).toBe(20);
+  });
 });

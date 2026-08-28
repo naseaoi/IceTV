@@ -24,7 +24,7 @@ function sumGroupCounts(groups: EpisodeGroup[]): number {
   return groups.reduce((sum, group) => sum + group.count, 0);
 }
 
-function normalizeGroupLabel(label: string | undefined): string {
+export function normalizeGroupLabel(label: string | undefined): string {
   return (label || '').replace(/\s+/g, '').trim();
 }
 

@@ -4,8 +4,8 @@ import {
   SQLITE_TRACKING_DIALECT,
 } from '../tracking-sql';
 
-// 下列 LEGACY_* 是重构前 sqlite.db.ts / mysql.db.ts 里手写谓词的原文照抄
-// 作用是钉死生成结果与重构前逐字节一致，改 builder 时若产出变化必须先确认是有意为之
+// LEGACY_* 照抄重构前 sqlite.db.ts / mysql.db.ts 的手写谓词，钉死生成结果逐字节一致
+// baseline 的分组判定除外，已对齐 total/current 的 inGroupScale 条件
 
 const LEGACY_SQLITE_GROUP_TOTAL =
   "CAST(json_extract(record_json, '$.group_total') AS INTEGER)";
@@ -28,7 +28,8 @@ const LEGACY_SQLITE_CURRENT = `CASE
   ELSE ${LEGACY_SQLITE_INDEX}
 END`;
 const LEGACY_SQLITE_BASELINE = `CASE
-  WHEN COALESCE(${LEGACY_SQLITE_GROUP_TOTAL}, 0) <> 0
+  WHEN COALESCE(${LEGACY_SQLITE_GROUP_INDEX}, 0) <> 0
+   AND COALESCE(${LEGACY_SQLITE_GROUP_TOTAL}, 0) <> 0
   THEN CAST(json_extract(record_json, '$.update_baseline_group_total') AS INTEGER)
   ELSE CAST(json_extract(record_json, '$.update_baseline_episodes') AS INTEGER)
 END`;
@@ -65,7 +66,8 @@ const LEGACY_MYSQL_CURRENT = `CASE
   ELSE ${LEGACY_MYSQL_INDEX}
 END`;
 const LEGACY_MYSQL_BASELINE = `CASE
-  WHEN COALESCE(${LEGACY_MYSQL_GROUP_TOTAL}, 0) <> 0
+  WHEN COALESCE(${LEGACY_MYSQL_GROUP_INDEX}, 0) <> 0
+   AND COALESCE(${LEGACY_MYSQL_GROUP_TOTAL}, 0) <> 0
   THEN CAST(JSON_UNQUOTE(JSON_EXTRACT(record_json, '$.update_baseline_group_total')) AS SIGNED)
   ELSE CAST(JSON_UNQUOTE(JSON_EXTRACT(record_json, '$.update_baseline_episodes')) AS SIGNED)
 END`;

@@ -74,6 +74,14 @@ const CASES: Record<string, PlayRecord> = {
     total_episodes: 10,
     update_baseline_episodes: 20,
   }),
+  // 只有 group_total 没有 group_index，回落到集数刻度
+  'k+group-total-only': make(11, {
+    index: 5,
+    total_episodes: 20,
+    group_total: 10,
+    update_baseline_group_total: 10,
+    update_baseline_episodes: 10,
+  }),
   'k+null-total': make(9, {
     total_episodes: null as unknown as number,
     update_baseline_episodes: 1,

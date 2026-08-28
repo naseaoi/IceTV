@@ -11,6 +11,10 @@ import {
   resolvePlayRecordEpisode,
 } from '@/lib/episode-groups';
 import { fetchVideoDetail } from '@/lib/fetchVideoDetail';
+import {
+  hasPlayRecordGroupChanged,
+  isGroupedPlayRecordScale,
+} from '@/lib/play-records';
 import type { Favorite, PlayRecord, SearchResult } from '@/lib/types';
 import { parseStorageKey } from '@/lib/utils';
 
@@ -276,12 +280,34 @@ export function buildRefreshedPlayRecord(
     detail.episode_groups,
     episodeCount,
   );
-  const isGrouped = hasUsableEpisodeGroups(detail.episode_groups, episodeCount);
-  const previousTotal = record.group_total || record.total_episodes;
-  const nextTotal = isGrouped
-    ? aligned.groupTotal || record.group_total || episodeCount
+  const keepsGrouping =
+    hasUsableEpisodeGroups(detail.episode_groups, episodeCount) &&
+    !!aligned.groupIndex &&
+    !!aligned.groupTotal;
+
+  const nextGroupFields = keepsGrouping
+    ? {
+        group_index: aligned.groupIndex,
+        group_total: aligned.groupTotal,
+        ...(aligned.groupLabel ? { group_label: aligned.groupLabel } : {}),
+      }
+    : // 上游撤掉分组时清空残留组字段
+      {
+        group_index: undefined,
+        group_total: undefined,
+        group_label: undefined,
+        update_baseline_group_total: undefined,
+      };
+
+  const groupChanged =
+    keepsGrouping && hasPlayRecordGroupChanged(record, nextGroupFields);
+  const previousTotal = isGroupedPlayRecordScale(record)
+    ? (record.group_total as number)
+    : record.total_episodes;
+  const nextTotal = keepsGrouping
+    ? (aligned.groupTotal as number)
     : episodeCount;
-  const hasNewEpisodes = nextTotal > previousTotal;
+  const hasNewEpisodes = !groupChanged && nextTotal > previousTotal;
 
   const nextRecord: PlayRecord = {
     ...baseRecord,
@@ -290,13 +316,8 @@ export function buildRefreshedPlayRecord(
     year: detail.year || record.year,
     total_episodes: episodeCount,
     index: aligned.episodeIndex + 1,
-    ...(isGrouped && aligned.groupIndex && aligned.groupTotal
-      ? {
-          group_index: aligned.groupIndex,
-          group_total: aligned.groupTotal,
-          ...(aligned.groupLabel ? { group_label: aligned.groupLabel } : {}),
-        }
-      : {}),
+    ...nextGroupFields,
+    ...(groupChanged ? { update_baseline_group_total: nextTotal } : {}),
     ...(hasNewEpisodes ? { update_detected_at: checkedAt } : {}),
   };
 
