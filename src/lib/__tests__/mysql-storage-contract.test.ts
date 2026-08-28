@@ -1,5 +1,6 @@
 /** @jest-environment node */
 
+import { hasPlayRecordUpdate } from '@/lib/play-records';
 import { DEFAULT_RUNTIME_PARAMS } from '@/lib/runtime-params';
 import type { AdminConfig } from '@/types/admin';
 
@@ -103,7 +104,7 @@ function splitMultiRowInsert(
 ): { sql: string; rows: unknown[][] } | null {
   const normalized = normalizeSql(sql);
   const match =
-    /^(INSERT INTO .+ VALUES )(\((?:\?, )*\?\))((?:, \((?:\?, )*\?\))+)$/.exec(
+    /^(INSERT INTO .+ VALUES )(\((?:\?, )*\?\))((?:, \((?:\?, )*\?\))+)( ON DUPLICATE KEY UPDATE .+)?$/.exec(
       normalized,
     );
   if (!match) return null;
@@ -113,7 +114,47 @@ function splitMultiRowInsert(
   for (let offset = 0; offset < params.length; offset += columnsPerRow) {
     rows.push(params.slice(offset, offset + columnsPerRow));
   }
-  return { sql: `${match[1]}${match[2]}`, rows };
+  return { sql: `${match[1]}${match[2]}${match[4] || ''}`, rows };
+}
+
+const TRACKING_SQL_MARKER = "'$.tracking_enabled'";
+
+function trackingCreatedAt(record: PlayRecord): number {
+  return (
+    record.update_detected_at ||
+    record.metadata_checked_at ||
+    record.save_time ||
+    0
+  );
+}
+
+function selectUnreadTrackingRows(
+  state: FakeState,
+  username: string,
+  cursorTime?: number,
+  cursorKey?: string,
+) {
+  return Array.from(state.playRecords.get(username)?.entries() || [])
+    .map(([key, json]) => ({
+      record_key: key,
+      record_json: json,
+      record: JSON.parse(json) as PlayRecord,
+    }))
+    .filter(({ record }) => hasPlayRecordUpdate(record))
+    .filter(({ record, record_key }) => {
+      if (cursorTime === undefined || !cursorKey) return true;
+      const createdAt = trackingCreatedAt(record);
+      return (
+        createdAt < cursorTime ||
+        (createdAt === cursorTime && record_key < cursorKey)
+      );
+    })
+    .sort((left, right) => {
+      const timeDifference =
+        trackingCreatedAt(right.record) - trackingCreatedAt(left.record);
+      return timeDifference || right.record_key.localeCompare(left.record_key);
+    })
+    .map(({ record_key, record_json }) => ({ record_key, record_json }));
 }
 
 function createFakePool() {
@@ -632,6 +673,31 @@ function createFakePool() {
         ),
         [],
       ];
+    }
+
+    if (
+      normalized.startsWith(
+        'SELECT record_key, record_json FROM play_records',
+      ) &&
+      normalized.includes(TRACKING_SQL_MARKER)
+    ) {
+      const hasCursor = params.length === 5;
+      const rows = selectUnreadTrackingRows(
+        currentState,
+        params[0] as string,
+        hasCursor ? (params[1] as number) : undefined,
+        hasCursor ? (params[3] as string) : undefined,
+      );
+      const limit = params.at(-1) as number;
+      return [rows.slice(0, limit), []];
+    }
+
+    if (
+      normalized.startsWith('SELECT COUNT(*) AS count FROM play_records') &&
+      normalized.includes(TRACKING_SQL_MARKER)
+    ) {
+      const rows = selectUnreadTrackingRows(currentState, params[0] as string);
+      return [[{ count: rows.length }], []];
     }
 
     if (
@@ -1291,6 +1357,161 @@ describe('mysql storage contract', () => {
     });
     expect(Object.keys(secondPage.items)).toEqual(['source+old']);
     expect(secondPage.nextCursor).toBeNull();
+  });
+
+  // 以下四个未读追更用例走 fake pool，其筛选复用生产的 hasPlayRecordUpdate
+  // 断言范围是筛选与排序语义，不覆盖真实 SQL 谓词（MySQL 比 'false' 字符串、SQLite 比数字 0 的分歧测不出来）
+  it('只返回未读且未关闭追更的记录', async () => {
+    const storage = new MySqlStorage('mysql://demo:demo@localhost:3306/icetv');
+    const makeRecord = (
+      detectedAt: number,
+      total: number,
+      baseline: number,
+    ) => ({
+      ...playRecord,
+      index: 1,
+      total_episodes: total,
+      save_time: detectedAt,
+      metadata_checked_at: detectedAt,
+      update_baseline_episodes: baseline,
+      tracking_enabled: true,
+    });
+
+    await storage.setPlayRecords('tracking-filter-user', {
+      'source+new': makeRecord(30, 12, 10),
+      'source+read': makeRecord(20, 10, 10),
+      'source+disabled': {
+        ...makeRecord(40, 20, 10),
+        tracking_enabled: false,
+      },
+      'source+finished': {
+        ...makeRecord(50, 12, 10),
+        index: 12,
+      },
+    });
+
+    const page = await storage.getUnreadTrackingPlayRecordPage(
+      'tracking-filter-user',
+      5,
+    );
+
+    expect(Object.keys(page.items)).toEqual(['source+new']);
+    expect(page.total).toBe(1);
+    expect(page.nextCursor).toBeNull();
+  });
+
+  it('按检测时间倒序翻页并保持 total 为总未读数', async () => {
+    const storage = new MySqlStorage('mysql://demo:demo@localhost:3306/icetv');
+    const makeRecord = (detectedAt: number) => ({
+      ...playRecord,
+      index: 1,
+      total_episodes: 12,
+      save_time: detectedAt,
+      update_detected_at: detectedAt,
+      update_baseline_episodes: 10,
+      tracking_enabled: true,
+    });
+
+    await storage.setPlayRecords('tracking-page-user', {
+      'source+old': makeRecord(1000),
+      'source+middle': makeRecord(2000),
+      'source+new': makeRecord(3000),
+    });
+
+    const firstPage = await storage.getUnreadTrackingPlayRecordPage(
+      'tracking-page-user',
+      2,
+    );
+    const secondPage = await storage.getUnreadTrackingPlayRecordPage(
+      'tracking-page-user',
+      2,
+      2000,
+      'source+middle',
+    );
+
+    expect(Object.keys(firstPage.items)).toEqual([
+      'source+new',
+      'source+middle',
+    ]);
+    expect(firstPage).toMatchObject({
+      total: 3,
+      nextCursor: '2000|source+middle',
+    });
+    expect(Object.keys(secondPage.items)).toEqual(['source+old']);
+    expect(secondPage.total).toBe(3);
+    expect(secondPage.nextCursor).toBeNull();
+  });
+
+  it('同一检测时间靠 record_key 决胜不漏不重', async () => {
+    const storage = new MySqlStorage('mysql://demo:demo@localhost:3306/icetv');
+    const sameTime = (key: string) =>
+      [
+        key,
+        {
+          ...playRecord,
+          index: 1,
+          total_episodes: 12,
+          save_time: 2000,
+          update_detected_at: 2000,
+          update_baseline_episodes: 10,
+          tracking_enabled: true,
+        },
+      ] as const;
+
+    await storage.setPlayRecords(
+      'tracking-tie-user',
+      Object.fromEntries(
+        ['source+a', 'source+b', 'source+c'].map((key) => sameTime(key)),
+      ),
+    );
+
+    const firstPage = await storage.getUnreadTrackingPlayRecordPage(
+      'tracking-tie-user',
+      2,
+    );
+    const secondPage = await storage.getUnreadTrackingPlayRecordPage(
+      'tracking-tie-user',
+      2,
+      2000,
+      'source+b',
+    );
+
+    expect(Object.keys(firstPage.items)).toEqual(['source+c', 'source+b']);
+    expect(firstPage.nextCursor).toBe('2000|source+b');
+    expect(Object.keys(secondPage.items)).toEqual(['source+a']);
+    expect(secondPage.nextCursor).toBeNull();
+  });
+
+  it('按分组刻度判定未读', async () => {
+    const storage = new MySqlStorage('mysql://demo:demo@localhost:3306/icetv');
+    const groupRecord = {
+      ...playRecord,
+      index: 1,
+      total_episodes: 100,
+      group_index: 2,
+      group_total: 24,
+      save_time: 2000,
+      update_detected_at: 2000,
+      update_baseline_group_total: 12,
+      update_baseline_episodes: 100,
+      tracking_enabled: true,
+    };
+
+    await storage.setPlayRecords('tracking-group-user', {
+      'source+group-unread': groupRecord,
+      'source+group-read': {
+        ...groupRecord,
+        update_baseline_group_total: 24,
+      },
+    });
+
+    const page = await storage.getUnreadTrackingPlayRecordPage(
+      'tracking-group-user',
+      5,
+    );
+
+    expect(Object.keys(page.items)).toEqual(['source+group-unread']);
+    expect(page.total).toBe(1);
   });
 
   it('paginates favorites with matching play progress', async () => {

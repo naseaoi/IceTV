@@ -20,6 +20,7 @@
     "perf:baseline": "node scripts/run-performance-baseline.js",
     "test:watch": "jest --watch",
     "test": "jest",
+    "test:mysql": "node scripts/run-mysql-tests.js",
     "format": "prettier -w .",
     "format:check": "prettier -c .",
     "gen:manifest": "node scripts/generate-manifest.js",
