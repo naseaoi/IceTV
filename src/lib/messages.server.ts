@@ -83,10 +83,16 @@ function buildTrackingMessage(
   };
 }
 
+function messageSortRank(message: UserMessage): number {
+  return message.type === 'announcement' ? 0 : 1;
+}
+
 function sortMessages<T extends UserMessage>(messages: T[]): T[] {
   return messages.sort(
     (left, right) =>
-      right.createdAt - left.createdAt || right.id.localeCompare(left.id),
+      messageSortRank(left) - messageSortRank(right) ||
+      right.createdAt - left.createdAt ||
+      right.id.localeCompare(left.id),
   );
 }
 
@@ -227,9 +233,13 @@ export async function getUserMessageSummary(
     ...(announcement ? [announcement] : []),
     ...tracking,
   ]);
-  const revision = hashValue(messages.map((message) => message.id).join('|'));
+  const unreadCount = trackingPage.total + (announcement ? 1 : 0);
+  const revision = hashValue(
+    [unreadCount, ...messages.map((message) => message.id)].join('|'),
+  );
   return {
-    unreadCount: trackingPage.total + (announcement ? 1 : 0),
+    unreadCount,
+    trackingUnreadCount: trackingPage.total,
     revision,
     latestMessage: messages[0] || null,
   };

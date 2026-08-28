@@ -63,6 +63,9 @@ export function getMessagePreviewSummary(
 ): UserMessageSummary {
   return {
     unreadCount: page.total,
+    trackingUnreadCount: page.items.filter(
+      (message) => message.type === 'tracking-update',
+    ).length,
     revision: 'message-preview',
     latestMessage: page.items[0] || null,
   };

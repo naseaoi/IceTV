@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { useEffect, useMemo, useState } from 'react';
 
 import ContinueWatching from '@/components/ContinueWatching';
+import GuestAnnouncement from '@/components/GuestAnnouncement';
 import HomePosterCardSkeleton, {
   HOME_POSTER_CARD_CLASS,
 } from '@/components/HomePosterCardSkeleton';
@@ -19,7 +20,7 @@ import {
 } from '@/features/douban/hooks/useDoubanFeed';
 import { HomeInitialData } from '@/features/home/lib/home.types';
 import { getDoubanCategories } from '@/lib/douban.client';
-import { DoubanItem } from '@/lib/types';
+import { DoubanItem, PlayRecord } from '@/lib/types';
 
 import {
   mergeHomeInitialDataWithClientSnapshot,
@@ -30,6 +31,8 @@ import { HomeMineSwitch } from './HomeMineSwitch';
 interface HomeClientProps {
   initialData: HomeInitialData;
   continueWatchingSkeletonCount?: number;
+  continueWatchingRecords?: Record<string, PlayRecord> | null;
+  continueWatchingUpdateCount?: number;
   routeFallback?: boolean;
 }
 
@@ -129,6 +132,8 @@ function hasUsableBangumiCalendarData(
 export default function HomeClient({
   initialData,
   continueWatchingSkeletonCount = 0,
+  continueWatchingRecords = null,
+  continueWatchingUpdateCount,
   routeFallback = false,
 }: HomeClientProps) {
   const [initialViewData] = useState(() =>
@@ -370,6 +375,8 @@ export default function HomeClient({
           <div className='-mb-3 sm:-mb-6'>
             <ContinueWatching
               initialSkeletonCount={continueWatchingSkeletonCount}
+              initialRecords={continueWatchingRecords}
+              initialUpdateCount={continueWatchingUpdateCount}
               refreshOnMount={!routeFallback}
             />
 
@@ -438,6 +445,8 @@ export default function HomeClient({
           </div>
         </div>
       </div>
+
+      <GuestAnnouncement />
     </PageLayout>
   );
 }

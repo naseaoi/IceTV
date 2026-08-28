@@ -2,10 +2,17 @@
 
 import { ChevronRight, History } from 'lucide-react';
 import Link from 'next/link';
-import { useCallback, useEffect, useLayoutEffect, useState } from 'react';
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useState,
+} from 'react';
 
 import ContinueWatchingCardSkeleton from '@/components/ContinueWatchingCardSkeleton';
 import { HOME_POSTER_CARD_CLASS } from '@/components/HomePosterCardSkeleton';
+import { useOptionalMessageCenter } from '@/components/messages/MessageCenterProvider';
 import MobileContinueCard from '@/components/MobileContinueCard';
 import { useRuntimeConfig } from '@/components/RuntimeConfigProvider';
 import ScrollableRow from '@/components/ScrollableRow';
@@ -32,6 +39,8 @@ import { parseStorageKey } from '@/lib/utils';
 interface ContinueWatchingProps {
   className?: string;
   initialSkeletonCount?: number;
+  initialRecords?: Record<string, PlayRecord> | null;
+  initialUpdateCount?: number;
   refreshOnMount?: boolean;
 }
 
@@ -94,6 +103,8 @@ function readInitialState(limit: number, fallbackSkeletonCount = 0) {
 export default function ContinueWatching({
   className,
   initialSkeletonCount = 0,
+  initialRecords = null,
+  initialUpdateCount,
   refreshOnMount = true,
 }: ContinueWatchingProps) {
   const runtimeConfig = useRuntimeConfig();
@@ -107,11 +118,28 @@ export default function ContinueWatching({
     initialSkeletonCount,
     continueWatchingLimit,
   );
-  const [playRecords, setPlayRecords] = useState<PlayRecordWithKey[]>([]);
-  const [loading, setLoading] = useState(normalizedInitialSkeletonCount > 0);
-  const [skeletonCount, setSkeletonCount] = useState(
-    normalizedInitialSkeletonCount,
+  const seededRecords = useMemo(
+    () =>
+      initialRecords
+        ? sortPlayRecords(initialRecords).slice(0, continueWatchingLimit)
+        : null,
+    [initialRecords, continueWatchingLimit],
   );
+  const [playRecords, setPlayRecords] = useState<PlayRecordWithKey[]>(
+    seededRecords ?? [],
+  );
+  const [loading, setLoading] = useState(
+    !seededRecords && normalizedInitialSkeletonCount > 0,
+  );
+  const [skeletonCount, setSkeletonCount] = useState(
+    seededRecords ? 0 : normalizedInitialSkeletonCount,
+  );
+  const messageCenter = useOptionalMessageCenter();
+  const seededUpdateCount =
+    initialUpdateCount === undefined
+      ? 0
+      : Math.max(0, Math.floor(initialUpdateCount));
+  const updateCount = messageCenter?.trackingUnreadCount ?? seededUpdateCount;
   const isMobile = useIsMobileViewport();
   const mobileRecords = playRecords.slice(0, continueWatchingLimit);
 
@@ -134,6 +162,13 @@ export default function ContinueWatching({
   }, [loading, playRecords.length]);
 
   useIsomorphicLayoutEffect(() => {
+    if (seededRecords) {
+      setPlayRecords(seededRecords);
+      setLoading(false);
+      setSkeletonCount(0);
+      return;
+    }
+
     const nextState = readInitialState(
       continueWatchingLimit,
       normalizedInitialSkeletonCount,
@@ -141,7 +176,7 @@ export default function ContinueWatching({
     setPlayRecords(nextState.playRecords);
     setLoading(nextState.loading);
     setSkeletonCount(nextState.skeletonCount);
-  }, [continueWatchingLimit, normalizedInitialSkeletonCount]);
+  }, [continueWatchingLimit, normalizedInitialSkeletonCount, seededRecords]);
 
   useEffect(() => {
     if (!refreshOnMount) return;
@@ -155,7 +190,9 @@ export default function ContinueWatching({
         updatePlayRecords(page.items);
       } catch (error) {
         console.error('获取播放记录失败:', error);
-        setPlayRecords([]);
+        if (!seededRecords) {
+          setPlayRecords([]);
+        }
       } finally {
         setLoading(false);
       }
@@ -193,7 +230,7 @@ export default function ContinueWatching({
       unsubscribeRecent();
       unsubscribeStates();
     };
-  }, [continueWatchingLimit, refreshOnMount, updatePlayRecords]);
+  }, [continueWatchingLimit, refreshOnMount, seededRecords, updatePlayRecords]);
 
   if (!loading && playRecords.length === 0) {
     return null;
@@ -218,9 +255,13 @@ export default function ContinueWatching({
         {!loading && playRecords.length > 0 && (
           <Link
             href='/continue-watching'
-            className='flex items-center text-sm text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200'
+            className={
+              updateCount > 0
+                ? 'flex items-center text-sm font-semibold text-amber-600 hover:text-amber-700 dark:text-amber-400 dark:hover:text-amber-300'
+                : 'flex items-center text-sm text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200'
+            }
           >
-            查看更多
+            {updateCount > 0 ? `${updateCount} 部有更新` : '查看更多'}
             <ChevronRight className='ml-1 h-4 w-4' />
           </Link>
         )}

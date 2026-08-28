@@ -29,6 +29,7 @@ export interface UserMessagePage {
 
 export interface UserMessageSummary {
   unreadCount: number;
+  trackingUnreadCount: number;
   revision: string;
   latestMessage: UserMessage | null;
 }

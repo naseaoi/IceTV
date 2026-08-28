@@ -14,6 +14,8 @@ export const SEEN_ANNOUNCEMENT_STORAGE_KEY = 'hasSeenAnnouncement';
 export const ADMIN_TABLE_COLUMN_WIDTHS_STORAGE_KEY = 'adminTableColumnWidths';
 export const CONTINUE_WATCHING_COUNT_STORAGE_KEY = 'continueWatchingCount';
 export const FAVORITE_ITEMS_COUNT_STORAGE_KEY = 'favoriteItemsCount';
+export const NOTIFIED_MESSAGE_REVISION_STORAGE_PREFIX =
+  'notifiedMessageRevision:';
 
 type AdminTableColumnWidths = Record<string, Record<string, number>>;
 
@@ -289,6 +291,34 @@ export function readSeenAnnouncement(): string | undefined {
 
 export function writeSeenAnnouncement(value: string) {
   writeStoredString(SEEN_ANNOUNCEMENT_STORAGE_KEY, value);
+}
+
+function getNotifiedMessageRevisionStorageKey(username: string): string | null {
+  const normalized = username.trim();
+  if (!normalized) {
+    return null;
+  }
+  return `${NOTIFIED_MESSAGE_REVISION_STORAGE_PREFIX}${normalized}`;
+}
+
+export function readNotifiedMessageRevision(
+  username: string,
+): string | undefined {
+  const storageKey = getNotifiedMessageRevisionStorageKey(username);
+  return storageKey ? readStoredString(storageKey) : undefined;
+}
+
+export function writeNotifiedMessageRevision(
+  username: string,
+  revision: string,
+): void {
+  const storageKey = getNotifiedMessageRevisionStorageKey(username);
+  if (!storageKey) {
+    return;
+  }
+  try {
+    writeStoredString(storageKey, revision);
+  } catch {}
 }
 
 export function readContinueWatchingCount(): number {

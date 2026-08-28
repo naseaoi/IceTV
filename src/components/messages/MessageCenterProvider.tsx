@@ -15,6 +15,10 @@ import {
 import { useAuthSession } from '@/components/AuthProvider';
 import { triggerGlobalError } from '@/lib/db.client.internal';
 import {
+  readNotifiedMessageRevision,
+  writeNotifiedMessageRevision,
+} from '@/lib/local-preferences';
+import {
   UserMessage,
   UserMessagePage,
   UserMessageSummary,
@@ -38,8 +42,11 @@ import MessageToast from './MessageToast';
 const POLL_INTERVAL_MS = 30_000;
 const TOAST_DURATION_MS = 7_000;
 
+type RefreshMode = 'mount' | 'poll' | 'silent';
+
 interface MessageCenterContextValue {
   unreadCount: number;
+  trackingUnreadCount: number | null;
   openPanel: () => void;
 }
 
@@ -49,6 +56,7 @@ const MessageCenterContext = createContext<MessageCenterContextValue | null>(
 
 const EMPTY_SUMMARY: UserMessageSummary = {
   unreadCount: 0,
+  trackingUnreadCount: 0,
   revision: '',
   latestMessage: null,
 };
@@ -68,7 +76,10 @@ function buildToastText(
 export function MessageCenterProvider({ children }: { children: ReactNode }) {
   const router = useRouter();
   const { session } = useAuthSession();
-  const [summary, setSummary] = useState(EMPTY_SUMMARY);
+  const sessionStatus = session.status;
+  const username =
+    session.status === 'authenticated' ? session.username : undefined;
+  const [summary, setSummary] = useState<UserMessageSummary | null>(null);
   const [page, setPage] = useState<UserMessagePage>({
     items: [],
     total: 0,
@@ -117,23 +128,30 @@ export function MessageCenterProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const refreshSummary = useCallback(
-    async (showToast: boolean) => {
-      if (session.status !== 'authenticated') return;
+    async (mode: RefreshMode) => {
+      if (sessionStatus !== 'authenticated' || !username) return;
       try {
         const nextSummary = await getMessageSummary();
         const previous = summaryRef.current;
         summaryRef.current = nextSummary;
         setSummary(nextSummary);
 
+        const baselineRevision =
+          mode === 'mount'
+            ? readNotifiedMessageRevision(username)
+            : previous?.revision;
+        const previousUnreadCount =
+          mode === 'mount' ? 0 : (previous?.unreadCount ?? 0);
         if (
-          showToast &&
-          previous &&
+          mode !== 'silent' &&
           nextSummary.unreadCount > 0 &&
-          nextSummary.revision !== previous.revision &&
-          nextSummary.unreadCount >= previous.unreadCount
+          nextSummary.revision !== baselineRevision &&
+          nextSummary.unreadCount >= previousUnreadCount
         ) {
-          setToastText(buildToastText(nextSummary, previous.unreadCount));
+          setToastText(buildToastText(nextSummary, previousUnreadCount));
         }
+        writeNotifiedMessageRevision(username, nextSummary.revision);
+
         if (openRef.current && previous?.revision !== nextSummary.revision) {
           void loadFirstPage();
         }
@@ -141,21 +159,21 @@ export function MessageCenterProvider({ children }: { children: ReactNode }) {
         console.warn('刷新消息摘要失败:', error);
       }
     },
-    [loadFirstPage, session.status],
+    [loadFirstPage, sessionStatus, username],
   );
 
   useEffect(() => {
-    if (session.status !== 'authenticated') {
+    if (sessionStatus !== 'authenticated') {
       firstPageRequestRef.current += 1;
       summaryRef.current = null;
-      setSummary(EMPTY_SUMMARY);
+      setSummary(null);
       setPage({ items: [], total: 0, nextCursor: null });
       setLoadError(null);
       setIsOpen(false);
       return;
     }
 
-    void refreshSummary(false);
+    void refreshSummary('mount');
 
     let pollTimer: number | null = null;
     const stopPolling = () => {
@@ -166,7 +184,7 @@ export function MessageCenterProvider({ children }: { children: ReactNode }) {
     const startPolling = () => {
       if (pollTimer !== null || document.visibilityState !== 'visible') return;
       pollTimer = window.setInterval(
-        () => void refreshSummary(true),
+        () => void refreshSummary('poll'),
         POLL_INTERVAL_MS,
       );
     };
@@ -176,9 +194,9 @@ export function MessageCenterProvider({ children }: { children: ReactNode }) {
         return;
       }
       startPolling();
-      void refreshSummary(true);
+      void refreshSummary('poll');
     };
-    const handleMessagesUpdated = () => void refreshSummary(false);
+    const handleMessagesUpdated = () => void refreshSummary('silent');
 
     startPolling();
     document.addEventListener('visibilitychange', handleVisible);
@@ -190,10 +208,10 @@ export function MessageCenterProvider({ children }: { children: ReactNode }) {
       window.removeEventListener('focus', handleVisible);
       window.removeEventListener('messagesUpdated', handleMessagesUpdated);
     };
-  }, [refreshSummary, session.status]);
+  }, [refreshSummary, sessionStatus]);
 
   useEffect(() => {
-    if (session.status !== 'authenticated') return;
+    if (sessionStatus !== 'authenticated') return;
     const previewMode = getMessagePreviewMode();
     if (!previewMode) return;
     previewModeRef.current = previewMode;
@@ -206,7 +224,7 @@ export function MessageCenterProvider({ children }: { children: ReactNode }) {
     if (previewMode !== 'panel') {
       setToastText(getMessagePreviewToast(previewMode));
     }
-  }, [session.status]);
+  }, [sessionStatus]);
 
   useEffect(() => {
     if (!toastText) return;
@@ -241,7 +259,7 @@ export function MessageCenterProvider({ children }: { children: ReactNode }) {
           items: current.items.filter((item) => item.id !== message.id),
           total: Math.max(0, current.total - 1),
         }));
-        await refreshSummary(false);
+        await refreshSummary('silent');
         if (navigate && message.type === 'tracking-update') {
           const params = new URLSearchParams({
             source: message.source,
@@ -275,7 +293,7 @@ export function MessageCenterProvider({ children }: { children: ReactNode }) {
     try {
       await readAllMessages();
       setPage({ items: [], total: 0, nextCursor: null });
-      await refreshSummary(false);
+      await refreshSummary('silent');
     } catch (error) {
       console.error('全部标记已读失败:', error);
       triggerGlobalError('全部标记已读失败');
@@ -307,8 +325,12 @@ export function MessageCenterProvider({ children }: { children: ReactNode }) {
   }, [page.nextCursor]);
 
   const contextValue = useMemo(
-    () => ({ unreadCount: summary.unreadCount, openPanel }),
-    [openPanel, summary.unreadCount],
+    () => ({
+      unreadCount: summary?.unreadCount ?? 0,
+      trackingUnreadCount: summary?.trackingUnreadCount ?? null,
+      openPanel,
+    }),
+    [openPanel, summary?.trackingUnreadCount, summary?.unreadCount],
   );
 
   return (
@@ -342,4 +364,8 @@ export function useMessageCenter() {
     throw new Error('useMessageCenter 必须在 MessageCenterProvider 内使用');
   }
   return context;
+}
+
+export function useOptionalMessageCenter() {
+  return useContext(MessageCenterContext);
 }

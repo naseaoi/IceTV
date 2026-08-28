@@ -166,7 +166,20 @@ export async function getPlayRecordPage(
     params.set('cursor', cursor);
   }
 
-  return fetchFromApi<PlayRecordPage>(`/api/playrecords?${params.toString()}`);
+  const page = await fetchFromApi<PlayRecordPage>(
+    `/api/playrecords?${params.toString()}`,
+  );
+  mergePlayRecordsIntoCache(page.items);
+  return page;
+}
+
+function mergePlayRecordsIntoCache(items: Record<string, PlayRecord>): void {
+  if (typeof window === 'undefined') return;
+
+  const cachedRecords = cacheManager.getCachedPlayRecords();
+  if (!cachedRecords) return;
+
+  cacheManager.cachePlayRecords({ ...cachedRecords, ...items });
 }
 
 export function getCachedPlayRecordsSnapshot(): Record<
