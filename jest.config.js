@@ -9,6 +9,9 @@ const customJestConfig = {
 
   moduleDirectories: ['node_modules', '<rootDir>/'],
 
+  // 16 核上默认 15 worker 过订阅，反而更慢且触发 worker 强制退出警告
+  maxWorkers: '50%',
+
   testEnvironment: 'jsdom',
 
   modulePathIgnorePatterns: ['<rootDir>/.next'],
