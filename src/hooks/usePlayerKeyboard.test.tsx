@@ -7,6 +7,15 @@ import { setPlayerShortcutsSuspended } from '@/lib/player-shortcuts';
 
 function createPlayerHarness() {
   const stateElement = document.createElement('div');
+  const listeners = new Map<string, ((...args: unknown[]) => void)[]>();
+  let loadingVisible = false;
+
+  const emit = (name: string, ...args: unknown[]) => {
+    for (const listener of (listeners.get(name) || []).slice()) {
+      listener(...args);
+    }
+  };
+
   const player = {
     currentTime: 50,
     duration: 100,
@@ -16,6 +25,24 @@ function createPlayerHarness() {
     playing: true,
     notice: { show: '' },
     template: { $state: stateElement },
+    loading: {
+      get show() {
+        return loadingVisible;
+      },
+      set show(value: boolean) {
+        loadingVisible = value;
+        emit('loading', value);
+      },
+    },
+    on: jest.fn((name: string, fn: (...args: unknown[]) => void) => {
+      listeners.set(name, [...(listeners.get(name) || []), fn]);
+    }),
+    off: jest.fn((name: string, fn: (...args: unknown[]) => void) => {
+      listeners.set(
+        name,
+        (listeners.get(name) || []).filter((item) => item !== fn),
+      );
+    }),
     toggle: jest.fn(),
     pause: jest.fn(),
     once: jest.fn(),
@@ -24,7 +51,7 @@ function createPlayerHarness() {
     current: player,
   } as MutableRefObject<Artplayer | null>;
 
-  return { artPlayerRef, player };
+  return { artPlayerRef, player, emit };
 }
 
 function dispatchShortcut(
@@ -88,5 +115,37 @@ describe('usePlayerKeyboard', () => {
 
     expect(player.currentTime).toBe(55);
     expect(event.defaultPrevented).toBe(true);
+  });
+
+  it('keeps the loading spinner hidden while stepping frames', () => {
+    const { artPlayerRef, player } = createPlayerHarness();
+    renderHook(() => usePlayerKeyboard({ artPlayerRef }));
+
+    dispatchShortcut('f');
+    act(() => {
+      player.loading.show = true;
+    });
+
+    expect(player.loading.show).toBe(false);
+  });
+
+  it('stops suppressing the loading spinner after the frame-step window', () => {
+    jest.useFakeTimers();
+    try {
+      const { artPlayerRef, player } = createPlayerHarness();
+      renderHook(() => usePlayerKeyboard({ artPlayerRef }));
+
+      dispatchShortcut('f');
+      act(() => {
+        jest.advanceTimersByTime(1000);
+      });
+      act(() => {
+        player.loading.show = true;
+      });
+
+      expect(player.loading.show).toBe(true);
+    } finally {
+      jest.useRealTimers();
+    }
   });
 });
