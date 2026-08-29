@@ -25,7 +25,7 @@ import {
   setCachedSearchPage,
 } from '@/lib/search-cache';
 import { SearchResult } from '@/lib/types';
-import { cleanHtmlTags } from '@/lib/utils';
+import { cleanHtmlTags, normalizeInlineText } from '@/lib/utils';
 
 interface ApiSearchItem {
   vod_id: string;
@@ -80,7 +80,7 @@ function parseVodPlayUrl(vodPlayUrl: string): {
     for (const pair of pairs) {
       const parts = pair.split('$');
       if (parts.length === 2 && isSupportedVodPlaybackUrl(parts[1])) {
-        matchTitles.push(parts[0]);
+        matchTitles.push(normalizeInlineText(parts[0]));
         matchEpisodes.push(parts[1]);
       }
     }
@@ -176,7 +176,7 @@ async function fetchAndCacheSearchPage(
 
       return {
         id: item.vod_id.toString(),
-        title: item.vod_name.trim().replace(/\s+/g, ' '),
+        title: normalizeInlineText(item.vod_name),
         poster: item.vod_pic,
         episodes,
         episodes_titles: titles,
@@ -385,7 +385,7 @@ export async function getDetailFromApi(
 
     return {
       id: id.toString(),
-      title: videoDetail.vod_name,
+      title: normalizeInlineText(videoDetail.vod_name),
       poster: videoDetail.vod_pic,
       episodes,
       episodes_titles: titles,
@@ -451,8 +451,9 @@ async function handleSpecialSourceDetail(
     (i + 1).toString(),
   );
 
-  const titleMatch = html.match(/<h1[^>]*>([^<]+)<\/h1>/);
-  const titleText = titleMatch ? titleMatch[1].trim() : '';
+  const titleText = normalizeInlineText(
+    html.match(/<h1[^>]*>([^<]+)<\/h1>/)?.[1] || '',
+  );
 
   const descMatch = html.match(
     /<div[^>]*class=["']sketch["'][^>]*>([\s\S]*?)<\/div>/,
