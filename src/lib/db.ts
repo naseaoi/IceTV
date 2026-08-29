@@ -269,6 +269,21 @@ class DbManager {
     return storage.getAllUsersWithPasswords();
   }
 
+  async recordUserActivity(userName: string, activeAt: number): Promise<void> {
+    const storage = await this.getStorage();
+    await storage.recordUserLogin(userName, activeAt);
+  }
+
+  async getUserLastActive(userName: string): Promise<number | null> {
+    const storage = await this.getStorage();
+    return storage.getUserLastLogin(userName);
+  }
+
+  async getAllUserLastActive(): Promise<Record<string, number>> {
+    const storage = await this.getStorage();
+    return storage.getAllUserLastLogins();
+  }
+
   async getUserMessageState(userName: string): Promise<UserMessageState> {
     const storage = await this.getStorage();
     return storage.getUserMessageState(userName);

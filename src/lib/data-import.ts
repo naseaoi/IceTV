@@ -32,6 +32,7 @@ const MAX_LONG_STRING_LENGTH = 2000000;
 const MAX_SECONDS = 365 * 24 * 60 * 60;
 const MAX_SOURCE_ROUTE_STATS = 20000;
 const MAX_ROUTE_STAT_COUNT = 1000000000;
+const MAX_TIMESTAMP_MS = 4102444800000;
 
 export class ImportValidationError extends Error {
   constructor(
@@ -436,7 +437,15 @@ function normalizeUserData(
       playbackSessionsLimit || MAX_PLAYBACK_SESSIONS_PER_USER,
     ),
     messageState: normalizeMessageState(input.messageState),
+    lastLoginAt: normalizeLastLoginAt(input.lastLoginAt),
   };
+}
+
+function normalizeLastLoginAt(value: unknown): number | undefined {
+  if (value === undefined || value === null) return undefined;
+  return Math.floor(
+    assertBoundedNumber(value, '最后登录时间', 0, MAX_TIMESTAMP_MS),
+  );
 }
 
 function normalizeMessageState(value: unknown) {

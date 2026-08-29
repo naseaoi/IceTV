@@ -73,6 +73,7 @@ export async function POST(req: NextRequest) {
           ]),
         ),
         messageState: await db.getUserMessageState(username),
+        lastLoginAt: (await db.getUserLastActive(username)) ?? undefined,
       };
 
       exportData.data.userData[username] = userData;

@@ -359,6 +359,10 @@ export class MySqlStorage implements IStorage {
         username VARCHAR(191) NOT NULL PRIMARY KEY,
         state_json LONGTEXT NOT NULL
       ) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci`,
+      `CREATE TABLE IF NOT EXISTS user_login_activity (
+        username VARCHAR(191) NOT NULL PRIMARY KEY,
+        last_login_at BIGINT NOT NULL
+      ) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci`,
       `CREATE TABLE IF NOT EXISTS source_route_stats (
         source VARCHAR(191) NOT NULL,
         route_mode VARCHAR(16) NOT NULL,
@@ -756,7 +760,47 @@ export class MySqlStorage implements IStorage {
         'DELETE FROM user_message_state WHERE username = ?',
         [username],
       );
+      await connection.execute(
+        'DELETE FROM user_login_activity WHERE username = ?',
+        [username],
+      );
     });
+  }
+
+  async recordUserLogin(userName: string, loginAt: number): Promise<void> {
+    await this.ensureInitialized();
+    const username = normalizeUsername(userName);
+    await this.pool.execute(
+      `INSERT INTO user_login_activity (username, last_login_at)
+       VALUES (?, ?)
+       ON DUPLICATE KEY UPDATE last_login_at = VALUES(last_login_at)`,
+      [username, loginAt],
+    );
+  }
+
+  async getUserLastLogin(userName: string): Promise<number | null> {
+    await this.ensureInitialized();
+    const username = normalizeUsername(userName);
+    const [rows] = await this.pool.query<JsonRow[]>(
+      'SELECT last_login_at FROM user_login_activity WHERE username = ? LIMIT 1',
+      [username],
+    );
+    const value = rows[0]?.last_login_at;
+    return value === undefined || value === null ? null : Number(value);
+  }
+
+  async getAllUserLastLogins(): Promise<Record<string, number>> {
+    await this.ensureInitialized();
+    const [rows] = await this.pool.query<JsonRow[]>(
+      'SELECT username, last_login_at FROM user_login_activity',
+    );
+    const result: Record<string, number> = {};
+    for (const row of rows) {
+      if (typeof row.username === 'string') {
+        result[row.username] = Number(row.last_login_at || 0);
+      }
+    }
+    return result;
   }
 
   async getSearchHistory(userName: string): Promise<string[]> {
@@ -1355,6 +1399,7 @@ export class MySqlStorage implements IStorage {
       await connection.execute('DELETE FROM admin_config');
       await connection.execute('DELETE FROM source_route_stats');
       await connection.execute('DELETE FROM user_message_state');
+      await connection.execute('DELETE FROM user_login_activity');
     });
   }
 
@@ -1369,6 +1414,7 @@ export class MySqlStorage implements IStorage {
       await connection.execute('DELETE FROM admin_config');
       await connection.execute('DELETE FROM source_route_stats');
       await connection.execute('DELETE FROM user_message_state');
+      await connection.execute('DELETE FROM user_login_activity');
 
       await connection.execute(
         'INSERT INTO admin_config (id, config_json) VALUES (1, ?)',
@@ -1411,6 +1457,11 @@ export class MySqlStorage implements IStorage {
         'username',
         'state_json',
       ]);
+      const loginActivities = createRowBatcher(
+        connection,
+        'user_login_activity',
+        ['username', 'last_login_at'],
+      );
       const playRecords = createRowBatcher(connection, 'play_records', [
         'username',
         'record_key',
@@ -1464,6 +1515,10 @@ export class MySqlStorage implements IStorage {
           ]);
         }
 
+        if (typeof userData.lastLoginAt === 'number') {
+          await loginActivities.add([username, userData.lastLoginAt]);
+        }
+
         for (const [key, record] of Object.entries(userData.playRecords)) {
           await playRecords.add([username, key, JSON.stringify(record)]);
         }
@@ -1507,6 +1562,7 @@ export class MySqlStorage implements IStorage {
       }
 
       await messageStates.flush();
+      await loginActivities.flush();
       await playRecords.flush();
       await favorites.flush();
       await searchHistories.flush();

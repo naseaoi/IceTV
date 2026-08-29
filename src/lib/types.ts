@@ -138,6 +138,7 @@ export interface StorageUserImportData {
   skipConfigs: { [key: string]: SkipConfig };
   playbackSessions: { [key: string]: PlaybackSession };
   messageState?: UserMessageState;
+  lastLoginAt?: number;
 }
 
 export interface UserMessageState {
@@ -218,6 +219,11 @@ export interface IStorage {
 
   getUserMessageState(userName: string): Promise<UserMessageState>;
   setUserMessageState(userName: string, state: UserMessageState): Promise<void>;
+
+  // 登录活动相关
+  recordUserLogin(userName: string, loginAt: number): Promise<void>;
+  getUserLastLogin(userName: string): Promise<number | null>;
+  getAllUserLastLogins(): Promise<Record<string, number>>;
 
   // 管理员配置相关
   getAdminConfig(): Promise<AdminConfig | null>;

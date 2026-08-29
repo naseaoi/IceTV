@@ -29,6 +29,7 @@ type FakeState = {
   sourceRouteStats: SourceRouteStatsRow[];
   adminConfig: string | null;
   messageStates: Map<string, string>;
+  loginActivities: Map<string, number>;
 };
 
 function cloneNestedMap(source: Map<string, Map<string, string>>) {
@@ -48,6 +49,7 @@ function cloneState(state: FakeState): FakeState {
     sourceRouteStats: state.sourceRouteStats.map((row) => ({ ...row })),
     adminConfig: state.adminConfig,
     messageStates: new Map(state.messageStates),
+    loginActivities: new Map(state.loginActivities),
   };
 }
 
@@ -62,6 +64,7 @@ function createState(): FakeState {
     sourceRouteStats: [],
     adminConfig: null,
     messageStates: new Map(),
+    loginActivities: new Map(),
   };
 }
 
@@ -235,6 +238,28 @@ function createFakePool() {
     ) {
       const [username, stateJson] = params as [string, string];
       currentState.messageStates.set(username, stateJson);
+      return [[], []];
+    }
+
+    if (normalized === 'DELETE FROM user_login_activity WHERE username = ?') {
+      const [username] = params as [string];
+      currentState.loginActivities.delete(username);
+      return [[], []];
+    }
+
+    if (normalized === 'DELETE FROM user_login_activity') {
+      currentState.loginActivities.clear();
+      return [[], []];
+    }
+
+    if (
+      normalized ===
+        'INSERT INTO user_login_activity (username, last_login_at) VALUES (?, ?) ON DUPLICATE KEY UPDATE last_login_at = VALUES(last_login_at)' ||
+      normalized ===
+        'INSERT INTO user_login_activity (username, last_login_at) VALUES (?, ?)'
+    ) {
+      const [username, lastLoginAt] = params as [string, number];
+      currentState.loginActivities.set(username, Number(lastLoginAt));
       return [[], []];
     }
 
@@ -1056,6 +1081,32 @@ function createFakePool() {
     }
 
     if (
+      normalized ===
+      'SELECT last_login_at FROM user_login_activity WHERE username = ? LIMIT 1'
+    ) {
+      const [username] = params as [string];
+      const lastLoginAt = currentState.loginActivities.get(username);
+      return [
+        lastLoginAt === undefined ? [] : [{ last_login_at: lastLoginAt }],
+        [],
+      ];
+    }
+
+    if (
+      normalized === 'SELECT username, last_login_at FROM user_login_activity'
+    ) {
+      return [
+        Array.from(currentState.loginActivities.entries()).map(
+          ([username, lastLoginAt]) => ({
+            username,
+            last_login_at: lastLoginAt,
+          }),
+        ),
+        [],
+      ];
+    }
+
+    if (
       normalized === 'SELECT password FROM users WHERE username = ? LIMIT 1'
     ) {
       const [username] = params as [string];
@@ -1289,6 +1340,7 @@ describe('mysql storage contract', () => {
     await storage.setUserMessageState('demo-user', {
       readAnnouncementId: 'announcement:v1',
     });
+    await storage.recordUserLogin('demo-user', 1700000000000);
     await storage.addSearchHistory('demo-user', 'second');
     await storage.addSearchHistory('demo-user', 'first');
 
@@ -1312,6 +1364,12 @@ describe('mysql storage contract', () => {
     await expect(storage.getUserMessageState('demo-user')).resolves.toEqual({
       readAnnouncementId: 'announcement:v1',
     });
+    await expect(storage.getUserLastLogin('demo-user')).resolves.toBe(
+      1700000000000,
+    );
+    await expect(storage.getAllUserLastLogins()).resolves.toEqual({
+      'demo-user': 1700000000000,
+    });
 
     await storage.deleteUser('demo-user');
 
@@ -1322,6 +1380,8 @@ describe('mysql storage contract', () => {
     await expect(storage.getPlaybackSessions('demo-user')).resolves.toEqual([]);
     await expect(storage.getSearchHistory('demo-user')).resolves.toEqual([]);
     await expect(storage.getUserMessageState('demo-user')).resolves.toEqual({});
+    await expect(storage.getUserLastLogin('demo-user')).resolves.toBeNull();
+    await expect(storage.getAllUserLastLogins()).resolves.toEqual({});
   });
 
   it('paginates play records by save time', async () => {
@@ -1571,6 +1631,7 @@ describe('mysql storage contract', () => {
           skipConfigs: { 'source+1': skipConfig },
           playbackSessions: { [playbackSession.id]: playbackSession },
           messageState: { readAnnouncementId: 'announcement:v1' },
+          lastLoginAt: 1700000000000,
         },
       },
       sourceRouteStats: [
@@ -1611,6 +1672,9 @@ describe('mysql storage contract', () => {
     await expect(storage.getUserMessageState('demo-user')).resolves.toEqual({
       readAnnouncementId: 'announcement:v1',
     });
+    await expect(storage.getUserLastLogin('demo-user')).resolves.toBe(
+      1700000000000,
+    );
     await expect(storage.getAllSourceRouteStatBuckets()).resolves.toEqual([
       {
         source: 'source-a',

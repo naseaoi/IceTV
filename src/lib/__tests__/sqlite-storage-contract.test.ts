@@ -112,6 +112,7 @@ describe('sqlite storage contract', () => {
     await storage.setUserMessageState('demo-user', {
       readAnnouncementId: 'announcement:v1',
     });
+    await storage.recordUserLogin('demo-user', 1700000000000);
     await storage.addSearchHistory('demo-user', 'second');
     await storage.addSearchHistory('demo-user', 'first');
 
@@ -135,6 +136,12 @@ describe('sqlite storage contract', () => {
     await expect(storage.getUserMessageState('demo-user')).resolves.toEqual({
       readAnnouncementId: 'announcement:v1',
     });
+    await expect(storage.getUserLastLogin('demo-user')).resolves.toBe(
+      1700000000000,
+    );
+    await expect(storage.getAllUserLastLogins()).resolves.toEqual({
+      'demo-user': 1700000000000,
+    });
 
     await storage.deleteUser('demo-user');
 
@@ -145,6 +152,8 @@ describe('sqlite storage contract', () => {
     await expect(storage.getPlaybackSessions('demo-user')).resolves.toEqual([]);
     await expect(storage.getSearchHistory('demo-user')).resolves.toEqual([]);
     await expect(storage.getUserMessageState('demo-user')).resolves.toEqual({});
+    await expect(storage.getUserLastLogin('demo-user')).resolves.toBeNull();
+    await expect(storage.getAllUserLastLogins()).resolves.toEqual({});
   });
 
   it('searches playback sessions before applying the page limit', async () => {
@@ -269,6 +278,7 @@ describe('sqlite storage contract', () => {
           skipConfigs: { 'source+1': skipConfig },
           playbackSessions: { [playbackSession.id]: playbackSession },
           messageState: { readAnnouncementId: 'announcement:v1' },
+          lastLoginAt: 1700000000000,
         },
       },
       sourceRouteStats: [
@@ -306,6 +316,9 @@ describe('sqlite storage contract', () => {
     await expect(storage.getUserMessageState('demo-user')).resolves.toEqual({
       readAnnouncementId: 'announcement:v1',
     });
+    await expect(storage.getUserLastLogin('demo-user')).resolves.toBe(
+      1700000000000,
+    );
     await expect(storage.getAllSourceRouteStatBuckets()).resolves.toEqual([
       {
         source: 'source-a',

@@ -332,6 +332,10 @@ export class LocalSqliteStorage implements IStorage {
     getUserMessageState: Database.Statement;
     setUserMessageState: Database.Statement;
     deleteUserMessageStateByUser: Database.Statement;
+    recordUserLogin: Database.Statement;
+    getUserLastLogin: Database.Statement;
+    getAllUserLastLogins: Database.Statement;
+    deleteLoginActivityByUser: Database.Statement;
   };
 
   constructor(dbPath?: string) {
@@ -479,6 +483,11 @@ export class LocalSqliteStorage implements IStorage {
       CREATE TABLE IF NOT EXISTS user_message_state (
         username TEXT PRIMARY KEY,
         state_json TEXT NOT NULL
+      );
+
+      CREATE TABLE IF NOT EXISTS user_login_activity (
+        username TEXT PRIMARY KEY,
+        last_login_at INTEGER NOT NULL
       );
 
       CREATE TABLE IF NOT EXISTS source_route_stats (
@@ -722,6 +731,18 @@ export class LocalSqliteStorage implements IStorage {
       ),
       deleteUserMessageStateByUser: this.db.prepare(
         'DELETE FROM user_message_state WHERE username = ?',
+      ),
+      recordUserLogin: this.db.prepare(
+        'INSERT OR REPLACE INTO user_login_activity (username, last_login_at) VALUES (?, ?)',
+      ),
+      getUserLastLogin: this.db.prepare(
+        'SELECT last_login_at FROM user_login_activity WHERE username = ?',
+      ),
+      getAllUserLastLogins: this.db.prepare(
+        'SELECT username, last_login_at FROM user_login_activity',
+      ),
+      deleteLoginActivityByUser: this.db.prepare(
+        'DELETE FROM user_login_activity WHERE username = ?',
       ),
     };
   }
@@ -1256,8 +1277,34 @@ export class LocalSqliteStorage implements IStorage {
       this.stmts.deleteSkipConfigsByUser.run(targetUser);
       this.stmts.deletePlaybackSessionsByUser.run(targetUser);
       this.stmts.deleteUserMessageStateByUser.run(targetUser);
+      this.stmts.deleteLoginActivityByUser.run(targetUser);
     });
     remove(username);
+  }
+
+  async recordUserLogin(userName: string, loginAt: number): Promise<void> {
+    const username = normalizeUsername(userName);
+    this.stmts.recordUserLogin.run(username, loginAt);
+  }
+
+  async getUserLastLogin(userName: string): Promise<number | null> {
+    const username = normalizeUsername(userName);
+    const row = this.stmts.getUserLastLogin.get(username) as
+      | { last_login_at: number }
+      | undefined;
+    return row ? Number(row.last_login_at) : null;
+  }
+
+  async getAllUserLastLogins(): Promise<Record<string, number>> {
+    const rows = this.stmts.getAllUserLastLogins.all() as {
+      username: string;
+      last_login_at: number;
+    }[];
+    const result: Record<string, number> = {};
+    for (const row of rows) {
+      result[row.username] = Number(row.last_login_at);
+    }
+    return result;
   }
 
   async getSearchHistory(userName: string): Promise<string[]> {
@@ -1732,6 +1779,7 @@ export class LocalSqliteStorage implements IStorage {
         DELETE FROM admin_config;
         DELETE FROM source_route_stats;
         DELETE FROM user_message_state;
+        DELETE FROM user_login_activity;
       `);
     });
 
@@ -1751,6 +1799,7 @@ export class LocalSqliteStorage implements IStorage {
         DELETE FROM admin_config;
         DELETE FROM source_route_stats;
         DELETE FROM user_message_state;
+        DELETE FROM user_login_activity;
       `);
 
       this.stmts.setAdminConfig.run(JSON.stringify(snapshot.adminConfig));
@@ -1784,6 +1833,9 @@ export class LocalSqliteStorage implements IStorage {
             username,
             JSON.stringify(userData.messageState),
           );
+        }
+        if (typeof userData.lastLoginAt === 'number') {
+          this.stmts.recordUserLogin.run(username, userData.lastLoginAt);
         }
         for (const [key, record] of Object.entries(userData.playRecords)) {
           this.stmts.setPlayRecord.run(username, key, JSON.stringify(record));
