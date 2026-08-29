@@ -1,7 +1,6 @@
 import {
   type InviteCode,
   buildInviteCode,
-  consumeInviteCode,
   countActiveInviteCodes,
   CUSTOM_INVITE_CODE_MAX_LENGTH,
   findUsableInviteCode,
@@ -10,6 +9,7 @@ import {
   isInviteCodeUsable,
   isValidCustomInviteCode,
   MAX_INVITE_MAX_USES,
+  mergeInviteCodeUsage,
   normalizeInviteCode,
   parseInviteMaxUses,
   sanitizeInviteCodes,
@@ -148,26 +148,43 @@ describe('buildInviteCode 次数字段', () => {
   });
 });
 
-describe('consumeInviteCode', () => {
-  it('只累加匹配的有限次数码', () => {
-    const codes = [
-      makeCode({ code: 'LIMITED', maxUses: 3, usedCount: 1 }),
-      makeCode({ code: 'OTHER', maxUses: 3, usedCount: 1 }),
-    ];
-    const next = consumeInviteCode(codes, 'LIMITED');
+describe('mergeInviteCodeUsage', () => {
+  it('用数据库用量覆盖配置里的旧值', () => {
+    const codes = [makeCode({ code: 'LIMITED', maxUses: 3, usedCount: 1 })];
+    const next = mergeInviteCodeUsage(codes, { LIMITED: 2 });
     expect(next[0].usedCount).toBe(2);
-    expect(next[1].usedCount).toBe(1);
   });
 
-  it('不限次数的码不记账', () => {
-    const next = consumeInviteCode([makeCode({ code: 'FREE' })], 'FREE');
-    expect(next[0].usedCount).toBeUndefined();
+  it('数据库缺行时回落到配置里的历史值', () => {
+    const codes = [makeCode({ code: 'LIMITED', maxUses: 3, usedCount: 1 })];
+    expect(mergeInviteCodeUsage(codes, {})[0].usedCount).toBe(1);
+  });
+
+  it('数据库和配置都没有时归零', () => {
+    const codes = [makeCode({ code: 'LIMITED', maxUses: 3 })];
+    expect(mergeInviteCodeUsage(codes, {})[0].usedCount).toBe(0);
+  });
+
+  it('用量为 0 时不被历史值顶替', () => {
+    const codes = [makeCode({ code: 'LIMITED', maxUses: 3, usedCount: 5 })];
+    expect(mergeInviteCodeUsage(codes, { LIMITED: 0 })[0].usedCount).toBe(0);
+  });
+
+  it('不限次数的码原样返回', () => {
+    const codes = [makeCode({ code: 'FREE' })];
+    expect(
+      mergeInviteCodeUsage(codes, { FREE: 9 })[0].usedCount,
+    ).toBeUndefined();
   });
 
   it('不修改原数组', () => {
     const codes = [makeCode({ code: 'LIMITED', maxUses: 3, usedCount: 1 })];
-    consumeInviteCode(codes, 'LIMITED');
+    mergeInviteCodeUsage(codes, { LIMITED: 2 });
     expect(codes[0].usedCount).toBe(1);
+  });
+
+  it('无邀请码时返回空数组', () => {
+    expect(mergeInviteCodeUsage(undefined, {})).toEqual([]);
   });
 });
 

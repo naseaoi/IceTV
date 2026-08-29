@@ -336,6 +336,13 @@ export class LocalSqliteStorage implements IStorage {
     getUserLastLogin: Database.Statement;
     getAllUserLastLogins: Database.Statement;
     deleteLoginActivityByUser: Database.Statement;
+    backfillLoginActivity: Database.Statement;
+    ensureInviteCodeUsage: Database.Statement;
+    reserveLimitedInviteCodeUse: Database.Statement;
+    reserveUnlimitedInviteCodeUse: Database.Statement;
+    releaseInviteCodeUse: Database.Statement;
+    getAllInviteCodeUsage: Database.Statement;
+    deleteInviteCodeUsage: Database.Statement;
   };
 
   constructor(dbPath?: string) {
@@ -408,7 +415,18 @@ export class LocalSqliteStorage implements IStorage {
       runWithBusyRetry('归一化 SQLite 用户名', () => {
         this.migrateLegacyUsernameCasing();
       });
+      runWithBusyRetry('补齐 SQLite 用户活跃记录', () => {
+        this.backfillMissingLoginActivity();
+      });
       this.checkpointWal();
+    }
+  }
+
+  // 每个用户都必须有活跃记录行，缺失的按当前时刻补齐
+  private backfillMissingLoginActivity(): void {
+    const result = this.stmts.backfillLoginActivity.run(Date.now());
+    if (result.changes > 0) {
+      console.log(`已补齐 ${result.changes} 个用户的活跃记录`);
     }
   }
 
@@ -488,6 +506,11 @@ export class LocalSqliteStorage implements IStorage {
       CREATE TABLE IF NOT EXISTS user_login_activity (
         username TEXT PRIMARY KEY,
         last_login_at INTEGER NOT NULL
+      );
+
+      CREATE TABLE IF NOT EXISTS invite_code_usage (
+        code TEXT PRIMARY KEY,
+        used_count INTEGER NOT NULL DEFAULT 0
       );
 
       CREATE TABLE IF NOT EXISTS source_route_stats (
@@ -743,6 +766,27 @@ export class LocalSqliteStorage implements IStorage {
       ),
       deleteLoginActivityByUser: this.db.prepare(
         'DELETE FROM user_login_activity WHERE username = ?',
+      ),
+      backfillLoginActivity: this.db.prepare(
+        'INSERT OR IGNORE INTO user_login_activity (username, last_login_at) SELECT username, ? FROM users',
+      ),
+      ensureInviteCodeUsage: this.db.prepare(
+        'INSERT OR IGNORE INTO invite_code_usage (code, used_count) VALUES (?, ?)',
+      ),
+      reserveLimitedInviteCodeUse: this.db.prepare(
+        'UPDATE invite_code_usage SET used_count = used_count + 1 WHERE code = ? AND used_count < ?',
+      ),
+      reserveUnlimitedInviteCodeUse: this.db.prepare(
+        'UPDATE invite_code_usage SET used_count = used_count + 1 WHERE code = ?',
+      ),
+      releaseInviteCodeUse: this.db.prepare(
+        'UPDATE invite_code_usage SET used_count = used_count - 1 WHERE code = ? AND used_count > 0',
+      ),
+      getAllInviteCodeUsage: this.db.prepare(
+        'SELECT code, used_count FROM invite_code_usage',
+      ),
+      deleteInviteCodeUsage: this.db.prepare(
+        'DELETE FROM invite_code_usage WHERE code = ?',
       ),
     };
   }
@@ -1232,13 +1276,25 @@ export class LocalSqliteStorage implements IStorage {
     }
     const hashed = await hashPassword(password);
     try {
-      this.stmts.registerUser.run(username, hashed);
+      this.registerUserWithActivity(username, hashed, Date.now());
     } catch (error) {
       if (isSqliteUniqueConstraintError(error)) {
         throw new Error('用户已存在');
       }
       throw error;
     }
+  }
+
+  // 建号与活跃记录同事务写入
+  private registerUserWithActivity(
+    username: string,
+    hashedPassword: string,
+    now: number,
+  ): void {
+    this.db.transaction(() => {
+      this.stmts.registerUser.run(username, hashedPassword);
+      this.stmts.recordUserLogin.run(username, now);
+    })();
   }
 
   async verifyUser(userName: string, password: string): Promise<boolean> {
@@ -1305,6 +1361,42 @@ export class LocalSqliteStorage implements IStorage {
       result[row.username] = Number(row.last_login_at);
     }
     return result;
+  }
+
+  // maxUses 为 0 表示不限次数，seedCount 用于承接配置里的历史用量
+  async reserveInviteCodeUse(
+    code: string,
+    maxUses: number,
+    seedCount = 0,
+  ): Promise<boolean> {
+    const reserve = this.db.transaction(() => {
+      this.stmts.ensureInviteCodeUsage.run(code, Math.max(0, seedCount));
+      const result = maxUses
+        ? this.stmts.reserveLimitedInviteCodeUse.run(code, maxUses)
+        : this.stmts.reserveUnlimitedInviteCodeUse.run(code);
+      return result.changes > 0;
+    });
+    return reserve();
+  }
+
+  async releaseInviteCodeUse(code: string): Promise<void> {
+    this.stmts.releaseInviteCodeUse.run(code);
+  }
+
+  async getAllInviteCodeUsage(): Promise<Record<string, number>> {
+    const rows = this.stmts.getAllInviteCodeUsage.all() as {
+      code: string;
+      used_count: number;
+    }[];
+    const result: Record<string, number> = {};
+    for (const row of rows) {
+      result[row.code] = Number(row.used_count);
+    }
+    return result;
+  }
+
+  async deleteInviteCodeUsage(code: string): Promise<void> {
+    this.stmts.deleteInviteCodeUsage.run(code);
   }
 
   async getSearchHistory(userName: string): Promise<string[]> {
@@ -1780,6 +1872,7 @@ export class LocalSqliteStorage implements IStorage {
         DELETE FROM source_route_stats;
         DELETE FROM user_message_state;
         DELETE FROM user_login_activity;
+        DELETE FROM invite_code_usage;
       `);
     });
 
@@ -1800,6 +1893,7 @@ export class LocalSqliteStorage implements IStorage {
         DELETE FROM source_route_stats;
         DELETE FROM user_message_state;
         DELETE FROM user_login_activity;
+        DELETE FROM invite_code_usage;
       `);
 
       this.stmts.setAdminConfig.run(JSON.stringify(snapshot.adminConfig));
@@ -1876,6 +1970,8 @@ export class LocalSqliteStorage implements IStorage {
           );
         }
       }
+
+      this.backfillMissingLoginActivity();
     });
 
     replace(data);

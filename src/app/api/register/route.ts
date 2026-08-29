@@ -5,7 +5,7 @@ import {
   INVITE_CODE_UNUSABLE_MESSAGE,
 } from '@/features/admin/services/inviteCodes';
 import { getClientIp } from '@/lib/client-ip';
-import { getConfig, saveConfig } from '@/lib/config';
+import { getConfigForRead, invalidateConfigCache } from '@/lib/config';
 import { db } from '@/lib/db';
 import { getOwnerUsername } from '@/lib/env.server';
 import { FixedWindowRateLimiter } from '@/lib/fixed-window-rate-limit';
@@ -83,7 +83,7 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: '该用户名不可注册' }, { status: 400 });
     }
 
-    const config = await getConfig();
+    const config = await getConfigForRead();
     if (!config.UserConfig.OpenRegister) {
       return NextResponse.json({ error: '当前未开放注册' }, { status: 403 });
     }
@@ -126,16 +126,8 @@ export async function POST(request: NextRequest) {
       throw error;
     }
 
-    // 注册即写活跃记录，避免新账号被当成「从未活跃」清理
-    try {
-      await db.recordUserActivity(username, Date.now());
-    } catch (error) {
-      console.warn('记录注册活跃时间失败:', error);
-    }
-
-    void saveConfig(await getConfig()).catch((error) => {
-      console.warn('注册用户配置同步失败:', error);
-    });
+    // 用户列表每次加载配置时都从库里重建，这里只需让缓存过期
+    invalidateConfigCache();
 
     return NextResponse.json({ ok: true });
   } catch (error) {

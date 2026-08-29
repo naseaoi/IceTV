@@ -30,6 +30,7 @@ type FakeState = {
   adminConfig: string | null;
   messageStates: Map<string, string>;
   loginActivities: Map<string, number>;
+  inviteCodeUsage: Map<string, number>;
 };
 
 function cloneNestedMap(source: Map<string, Map<string, string>>) {
@@ -50,6 +51,7 @@ function cloneState(state: FakeState): FakeState {
     adminConfig: state.adminConfig,
     messageStates: new Map(state.messageStates),
     loginActivities: new Map(state.loginActivities),
+    inviteCodeUsage: new Map(state.inviteCodeUsage),
   };
 }
 
@@ -65,6 +67,7 @@ function createState(): FakeState {
     adminConfig: null,
     messageStates: new Map(),
     loginActivities: new Map(),
+    inviteCodeUsage: new Map(),
   };
 }
 
@@ -241,6 +244,63 @@ function createFakePool() {
       return [[], []];
     }
 
+    if (
+      normalized ===
+      'INSERT IGNORE INTO invite_code_usage (code, used_count) VALUES (?, ?)'
+    ) {
+      const [code, usedCount] = params as [string, number];
+      if (!currentState.inviteCodeUsage.has(code)) {
+        currentState.inviteCodeUsage.set(code, Number(usedCount));
+      }
+      return [{ affectedRows: 1 }, []];
+    }
+
+    if (
+      normalized ===
+      'UPDATE invite_code_usage SET used_count = used_count + 1 WHERE code = ? AND used_count < ?'
+    ) {
+      const [code, maxUses] = params as [string, number];
+      const usedCount = currentState.inviteCodeUsage.get(code);
+      if (usedCount === undefined || usedCount >= Number(maxUses)) {
+        return [{ affectedRows: 0 }, []];
+      }
+      currentState.inviteCodeUsage.set(code, usedCount + 1);
+      return [{ affectedRows: 1 }, []];
+    }
+
+    if (
+      normalized ===
+      'UPDATE invite_code_usage SET used_count = used_count + 1 WHERE code = ?'
+    ) {
+      const [code] = params as [string];
+      const usedCount = currentState.inviteCodeUsage.get(code);
+      if (usedCount === undefined) return [{ affectedRows: 0 }, []];
+      currentState.inviteCodeUsage.set(code, usedCount + 1);
+      return [{ affectedRows: 1 }, []];
+    }
+
+    if (
+      normalized ===
+      'UPDATE invite_code_usage SET used_count = used_count - 1 WHERE code = ? AND used_count > 0'
+    ) {
+      const [code] = params as [string];
+      const usedCount = currentState.inviteCodeUsage.get(code);
+      if (!usedCount) return [{ affectedRows: 0 }, []];
+      currentState.inviteCodeUsage.set(code, usedCount - 1);
+      return [{ affectedRows: 1 }, []];
+    }
+
+    if (normalized === 'DELETE FROM invite_code_usage WHERE code = ?') {
+      const [code] = params as [string];
+      currentState.inviteCodeUsage.delete(code);
+      return [[], []];
+    }
+
+    if (normalized === 'DELETE FROM invite_code_usage') {
+      currentState.inviteCodeUsage.clear();
+      return [[], []];
+    }
+
     if (normalized === 'DELETE FROM user_login_activity WHERE username = ?') {
       const [username] = params as [string];
       currentState.loginActivities.delete(username);
@@ -260,6 +320,19 @@ function createFakePool() {
     ) {
       const [username, lastLoginAt] = params as [string, number];
       currentState.loginActivities.set(username, Number(lastLoginAt));
+      return [[], []];
+    }
+
+    if (
+      normalized ===
+      'INSERT IGNORE INTO user_login_activity (username, last_login_at) SELECT username, ? FROM users'
+    ) {
+      const [lastLoginAt] = params as [number];
+      for (const username of currentState.users.keys()) {
+        if (!currentState.loginActivities.has(username)) {
+          currentState.loginActivities.set(username, Number(lastLoginAt));
+        }
+      }
       return [[], []];
     }
 
@@ -1080,6 +1153,15 @@ function createFakePool() {
       return [stateJson ? [{ state_json: stateJson }] : [], []];
     }
 
+    if (normalized === 'SELECT code, used_count FROM invite_code_usage') {
+      return [
+        Array.from(currentState.inviteCodeUsage.entries()).map(
+          ([code, usedCount]) => ({ code, used_count: usedCount }),
+        ),
+        [],
+      ];
+    }
+
     if (
       normalized ===
       'SELECT last_login_at FROM user_login_activity WHERE username = ? LIMIT 1'
@@ -1328,6 +1410,76 @@ function sortRouteStats(items: SourceRouteStatsItem[]) {
 }
 
 describe('mysql storage contract', () => {
+  it('原子占用邀请码名额，超出上限即失败', async () => {
+    const storage = new MySqlStorage('mysql://demo:demo@localhost:3306/icetv');
+
+    await expect(storage.reserveInviteCodeUse('LIMITED', 2)).resolves.toBe(
+      true,
+    );
+    await expect(storage.reserveInviteCodeUse('LIMITED', 2)).resolves.toBe(
+      true,
+    );
+    await expect(storage.reserveInviteCodeUse('LIMITED', 2)).resolves.toBe(
+      false,
+    );
+    await expect(storage.getAllInviteCodeUsage()).resolves.toMatchObject({
+      LIMITED: 2,
+    });
+  });
+
+  it('maxUses 为 0 表示不限次数', async () => {
+    const storage = new MySqlStorage('mysql://demo:demo@localhost:3306/icetv');
+
+    await expect(storage.reserveInviteCodeUse('FREE', 0)).resolves.toBe(true);
+    await expect(storage.reserveInviteCodeUse('FREE', 0)).resolves.toBe(true);
+    await expect(storage.getAllInviteCodeUsage()).resolves.toMatchObject({
+      FREE: 2,
+    });
+  });
+
+  it('首次占用以配置里的历史用量为种子', async () => {
+    const storage = new MySqlStorage('mysql://demo:demo@localhost:3306/icetv');
+
+    await expect(storage.reserveInviteCodeUse('SEEDED', 3, 2)).resolves.toBe(
+      true,
+    );
+    await expect(storage.reserveInviteCodeUse('SEEDED', 3, 2)).resolves.toBe(
+      false,
+    );
+    await expect(storage.getAllInviteCodeUsage()).resolves.toMatchObject({
+      SEEDED: 3,
+    });
+  });
+
+  it('回滚邀请码次数且不会减到负数', async () => {
+    const storage = new MySqlStorage('mysql://demo:demo@localhost:3306/icetv');
+
+    await storage.reserveInviteCodeUse('ROLLBACK', 2);
+    await storage.releaseInviteCodeUse('ROLLBACK');
+    await expect(storage.getAllInviteCodeUsage()).resolves.toMatchObject({
+      ROLLBACK: 0,
+    });
+
+    await storage.releaseInviteCodeUse('ROLLBACK');
+    await expect(storage.getAllInviteCodeUsage()).resolves.toMatchObject({
+      ROLLBACK: 0,
+    });
+  });
+
+  it('删除邀请码用量后重建从零开始', async () => {
+    const storage = new MySqlStorage('mysql://demo:demo@localhost:3306/icetv');
+
+    await storage.reserveInviteCodeUse('RECREATED', 1);
+    await storage.deleteInviteCodeUsage('RECREATED');
+
+    await expect(
+      (await storage.getAllInviteCodeUsage()).RECREATED,
+    ).toBeUndefined();
+    await expect(storage.reserveInviteCodeUse('RECREATED', 1)).resolves.toBe(
+      true,
+    );
+  });
+
   it('persists user scoped data and deletes it with the user', async () => {
     const storage = new MySqlStorage('mysql://demo:demo@localhost:3306/icetv');
 

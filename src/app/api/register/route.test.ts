@@ -3,7 +3,7 @@
 import type { NextRequest } from 'next/server';
 
 import { installWebPolyfills } from '@/app/api/test-utils/web-polyfills';
-import { getConfig, saveConfig } from '@/lib/config';
+import { getConfigForRead, invalidateConfigCache } from '@/lib/config';
 import { db } from '@/lib/db';
 import { getOwnerUsername } from '@/lib/env.server';
 import {
@@ -12,15 +12,14 @@ import {
 } from '@/lib/invite-code-consumption.server';
 
 jest.mock('@/lib/config', () => ({
-  getConfig: jest.fn(),
-  saveConfig: jest.fn(),
+  getConfigForRead: jest.fn(),
+  invalidateConfigCache: jest.fn(),
 }));
 
 jest.mock('@/lib/db', () => ({
   db: {
     checkUserExist: jest.fn(),
     registerUser: jest.fn(),
-    recordUserActivity: jest.fn(),
   },
 }));
 
@@ -86,11 +85,9 @@ describe('register route', () => {
   beforeEach(() => {
     jest.clearAllMocks();
     (getOwnerUsername as jest.Mock).mockReturnValue('owner');
-    (getConfig as jest.Mock).mockResolvedValue(createConfig());
-    (saveConfig as jest.Mock).mockResolvedValue(undefined);
+    (getConfigForRead as jest.Mock).mockResolvedValue(createConfig());
     (db.checkUserExist as jest.Mock).mockResolvedValue(false);
     (db.registerUser as jest.Mock).mockResolvedValue(undefined);
-    (db.recordUserActivity as jest.Mock).mockResolvedValue(undefined);
     (reserveInviteCode as jest.Mock).mockResolvedValue(true);
     (releaseInviteCode as jest.Mock).mockResolvedValue(undefined);
   });
@@ -107,7 +104,7 @@ describe('register route', () => {
         ...overrides,
       },
     ];
-    (getConfig as jest.Mock).mockResolvedValue(config);
+    (getConfigForRead as jest.Mock).mockResolvedValue(config);
     return config;
   }
 
@@ -124,45 +121,17 @@ describe('register route', () => {
       'demo-user',
       'strong-password',
     );
-    expect(saveConfig).toHaveBeenCalledTimes(1);
   });
 
-  it('注册成功即写入活跃记录', async () => {
-    const { POST } = require('./route');
-
-    await POST(
-      createRequest({ username: 'demo-user', password: 'strong-password' }),
-    );
-
-    expect(db.recordUserActivity).toHaveBeenCalledWith(
-      'demo-user',
-      expect.any(Number),
-    );
-  });
-
-  it('活跃记录写入失败不影响注册结果', async () => {
-    (db.recordUserActivity as jest.Mock).mockRejectedValueOnce(
-      new Error('db down'),
-    );
+  it('注册成功只失效配置缓存，不回写配置', async () => {
     const { POST } = require('./route');
 
     const response = await POST(
       createRequest({ username: 'demo-user', password: 'strong-password' }),
     );
 
-    await expect(response.json()).resolves.toEqual({ ok: true });
     expect(response.status).toBe(200);
-  });
-
-  it('注册失败不写活跃记录', async () => {
-    (db.registerUser as jest.Mock).mockRejectedValueOnce(new Error('db down'));
-    const { POST } = require('./route');
-
-    await POST(
-      createRequest({ username: 'demo-user', password: 'strong-password' }),
-    );
-
-    expect(db.recordUserActivity).not.toHaveBeenCalled();
+    expect(invalidateConfigCache).toHaveBeenCalledTimes(1);
   });
 
   it('rejects weak passwords', async () => {

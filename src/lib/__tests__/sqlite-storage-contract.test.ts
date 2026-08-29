@@ -156,6 +156,112 @@ describe('sqlite storage contract', () => {
     await expect(storage.getAllUserLastLogins()).resolves.toEqual({});
   });
 
+  it('建号即写入活跃记录', async () => {
+    const storage = new LocalSqliteStorage(':memory:');
+    const before = Date.now();
+
+    await storage.registerUser('fresh-user', 'password');
+
+    const activeAt = await storage.getUserLastLogin('fresh-user');
+    expect(activeAt).not.toBeNull();
+    expect(activeAt as number).toBeGreaterThanOrEqual(before);
+  });
+
+  it('导入快照后为缺活跃记录的用户补齐', async () => {
+    const storage = new LocalSqliteStorage(':memory:');
+    const before = Date.now();
+
+    await storage.replaceAllData({
+      adminConfig,
+      users: { 'legacy-user': 'hash' },
+      userData: {},
+      sourceRouteStats: [],
+    });
+
+    const activeAt = await storage.getUserLastLogin('legacy-user');
+    expect(activeAt).not.toBeNull();
+    expect(activeAt as number).toBeGreaterThanOrEqual(before);
+  });
+
+  it('原子占用邀请码名额，超出上限即失败', async () => {
+    const storage = new LocalSqliteStorage(':memory:');
+
+    await expect(storage.reserveInviteCodeUse('CODE', 2)).resolves.toBe(true);
+    await expect(storage.reserveInviteCodeUse('CODE', 2)).resolves.toBe(true);
+    await expect(storage.reserveInviteCodeUse('CODE', 2)).resolves.toBe(false);
+    await expect(storage.getAllInviteCodeUsage()).resolves.toEqual({ CODE: 2 });
+  });
+
+  it('并发占用邀请码不会超发', async () => {
+    const storage = new LocalSqliteStorage(':memory:');
+
+    const results = await Promise.all(
+      Array.from({ length: 20 }, () =>
+        storage.reserveInviteCodeUse('RUSH', 5, 0),
+      ),
+    );
+
+    expect(results.filter(Boolean)).toHaveLength(5);
+    await expect(storage.getAllInviteCodeUsage()).resolves.toEqual({ RUSH: 5 });
+  });
+
+  it('maxUses 为 0 表示不限次数', async () => {
+    const storage = new LocalSqliteStorage(':memory:');
+
+    await expect(storage.reserveInviteCodeUse('FREE', 0)).resolves.toBe(true);
+    await expect(storage.reserveInviteCodeUse('FREE', 0)).resolves.toBe(true);
+    await expect(storage.getAllInviteCodeUsage()).resolves.toEqual({ FREE: 2 });
+  });
+
+  it('首次占用以配置里的历史用量为种子', async () => {
+    const storage = new LocalSqliteStorage(':memory:');
+
+    await expect(storage.reserveInviteCodeUse('OLD', 3, 2)).resolves.toBe(true);
+    await expect(storage.reserveInviteCodeUse('OLD', 3, 2)).resolves.toBe(
+      false,
+    );
+    await expect(storage.getAllInviteCodeUsage()).resolves.toEqual({ OLD: 3 });
+  });
+
+  it('种子值只在建行时生效，不会重复累加', async () => {
+    const storage = new LocalSqliteStorage(':memory:');
+
+    await storage.reserveInviteCodeUse('SEED', 10, 1);
+    await storage.reserveInviteCodeUse('SEED', 10, 1);
+
+    await expect(storage.getAllInviteCodeUsage()).resolves.toEqual({ SEED: 3 });
+  });
+
+  it('回滚邀请码次数且不会减到负数', async () => {
+    const storage = new LocalSqliteStorage(':memory:');
+
+    await storage.reserveInviteCodeUse('CODE', 2);
+    await storage.releaseInviteCodeUse('CODE');
+    await expect(storage.getAllInviteCodeUsage()).resolves.toEqual({ CODE: 0 });
+
+    await storage.releaseInviteCodeUse('CODE');
+    await expect(storage.getAllInviteCodeUsage()).resolves.toEqual({ CODE: 0 });
+  });
+
+  it('回滚不存在的邀请码静默返回', async () => {
+    const storage = new LocalSqliteStorage(':memory:');
+
+    await expect(
+      storage.releaseInviteCodeUse('MISSING'),
+    ).resolves.toBeUndefined();
+    await expect(storage.getAllInviteCodeUsage()).resolves.toEqual({});
+  });
+
+  it('删除邀请码用量后重建从零开始', async () => {
+    const storage = new LocalSqliteStorage(':memory:');
+
+    await storage.reserveInviteCodeUse('CODE', 1);
+    await storage.deleteInviteCodeUsage('CODE');
+
+    await expect(storage.getAllInviteCodeUsage()).resolves.toEqual({});
+    await expect(storage.reserveInviteCodeUse('CODE', 1)).resolves.toBe(true);
+  });
+
   it('searches playback sessions before applying the page limit', async () => {
     const storage = new LocalSqliteStorage(':memory:');
     const recentSession: PlaybackSession = {

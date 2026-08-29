@@ -363,6 +363,10 @@ export class MySqlStorage implements IStorage {
         username VARCHAR(191) NOT NULL PRIMARY KEY,
         last_login_at BIGINT NOT NULL
       ) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci`,
+      `CREATE TABLE IF NOT EXISTS invite_code_usage (
+        code VARCHAR(191) NOT NULL PRIMARY KEY,
+        used_count INT NOT NULL DEFAULT 0
+      ) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci`,
       `CREATE TABLE IF NOT EXISTS source_route_stats (
         source VARCHAR(191) NOT NULL,
         route_mode VARCHAR(16) NOT NULL,
@@ -378,6 +382,19 @@ export class MySqlStorage implements IStorage {
     for (const statement of statements) {
       await this.pool.execute(statement);
     }
+
+    await this.backfillMissingLoginActivity();
+  }
+
+  // 每个用户都必须有活跃记录行，缺失的按当前时刻补齐
+  private async backfillMissingLoginActivity(
+    connection?: PoolConnection,
+  ): Promise<void> {
+    const executor = connection || this.pool;
+    await executor.execute(
+      'INSERT IGNORE INTO user_login_activity (username, last_login_at) SELECT username, ? FROM users',
+      [Date.now()],
+    );
   }
 
   private async withTransaction<T>(
@@ -685,6 +702,10 @@ export class MySqlStorage implements IStorage {
       'INSERT INTO users (username, password) VALUES (?, ?)',
       [username, hashed],
     );
+    await this.pool.execute(
+      'INSERT INTO user_login_activity (username, last_login_at) VALUES (?, ?) ON DUPLICATE KEY UPDATE last_login_at = VALUES(last_login_at)',
+      [username, Date.now()],
+    );
   }
 
   async verifyUser(userName: string, password: string): Promise<boolean> {
@@ -801,6 +822,55 @@ export class MySqlStorage implements IStorage {
       }
     }
     return result;
+  }
+
+  // maxUses 为 0 表示不限次数，seedCount 用于承接配置里的历史用量
+  async reserveInviteCodeUse(
+    code: string,
+    maxUses: number,
+    seedCount = 0,
+  ): Promise<boolean> {
+    await this.ensureInitialized();
+    await this.pool.execute(
+      'INSERT IGNORE INTO invite_code_usage (code, used_count) VALUES (?, ?)',
+      [code, Math.max(0, seedCount)],
+    );
+    const [result] = await this.pool.execute(
+      maxUses
+        ? 'UPDATE invite_code_usage SET used_count = used_count + 1 WHERE code = ? AND used_count < ?'
+        : 'UPDATE invite_code_usage SET used_count = used_count + 1 WHERE code = ?',
+      maxUses ? [code, maxUses] : [code],
+    );
+    return Number((result as { affectedRows?: number }).affectedRows || 0) > 0;
+  }
+
+  async releaseInviteCodeUse(code: string): Promise<void> {
+    await this.ensureInitialized();
+    await this.pool.execute(
+      'UPDATE invite_code_usage SET used_count = used_count - 1 WHERE code = ? AND used_count > 0',
+      [code],
+    );
+  }
+
+  async getAllInviteCodeUsage(): Promise<Record<string, number>> {
+    await this.ensureInitialized();
+    const [rows] = await this.pool.query<JsonRow[]>(
+      'SELECT code, used_count FROM invite_code_usage',
+    );
+    const result: Record<string, number> = {};
+    for (const row of rows) {
+      if (typeof row.code === 'string') {
+        result[row.code] = Number(row.used_count || 0);
+      }
+    }
+    return result;
+  }
+
+  async deleteInviteCodeUsage(code: string): Promise<void> {
+    await this.ensureInitialized();
+    await this.pool.execute('DELETE FROM invite_code_usage WHERE code = ?', [
+      code,
+    ]);
   }
 
   async getSearchHistory(userName: string): Promise<string[]> {
@@ -1400,6 +1470,7 @@ export class MySqlStorage implements IStorage {
       await connection.execute('DELETE FROM source_route_stats');
       await connection.execute('DELETE FROM user_message_state');
       await connection.execute('DELETE FROM user_login_activity');
+      await connection.execute('DELETE FROM invite_code_usage');
     });
   }
 
@@ -1415,6 +1486,7 @@ export class MySqlStorage implements IStorage {
       await connection.execute('DELETE FROM source_route_stats');
       await connection.execute('DELETE FROM user_message_state');
       await connection.execute('DELETE FROM user_login_activity');
+      await connection.execute('DELETE FROM invite_code_usage');
 
       await connection.execute(
         'INSERT INTO admin_config (id, config_json) VALUES (1, ?)',
@@ -1568,6 +1640,8 @@ export class MySqlStorage implements IStorage {
       await searchHistories.flush();
       await skipConfigs.flush();
       await playbackSessions.flush();
+
+      await this.backfillMissingLoginActivity(connection);
     });
   }
 }

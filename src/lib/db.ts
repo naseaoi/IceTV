@@ -284,6 +284,30 @@ class DbManager {
     return storage.getAllUserLastLogins();
   }
 
+  async reserveInviteCodeUse(
+    code: string,
+    maxUses: number,
+    seedCount = 0,
+  ): Promise<boolean> {
+    const storage = await this.getStorage();
+    return storage.reserveInviteCodeUse(code, maxUses, seedCount);
+  }
+
+  async releaseInviteCodeUse(code: string): Promise<void> {
+    const storage = await this.getStorage();
+    await storage.releaseInviteCodeUse(code);
+  }
+
+  async getAllInviteCodeUsage(): Promise<Record<string, number>> {
+    const storage = await this.getStorage();
+    return storage.getAllInviteCodeUsage();
+  }
+
+  async deleteInviteCodeUsage(code: string): Promise<void> {
+    const storage = await this.getStorage();
+    await storage.deleteInviteCodeUsage(code);
+  }
+
   async getUserMessageState(userName: string): Promise<UserMessageState> {
     const storage = await this.getStorage();
     return storage.getUserMessageState(userName);

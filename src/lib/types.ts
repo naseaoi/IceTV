@@ -225,6 +225,16 @@ export interface IStorage {
   getUserLastLogin(userName: string): Promise<number | null>;
   getAllUserLastLogins(): Promise<Record<string, number>>;
 
+  // 邀请码用量相关，与配置分离以支持并发注册
+  reserveInviteCodeUse(
+    code: string,
+    maxUses: number,
+    seedCount?: number,
+  ): Promise<boolean>;
+  releaseInviteCodeUse(code: string): Promise<void>;
+  getAllInviteCodeUsage(): Promise<Record<string, number>>;
+  deleteInviteCodeUsage(code: string): Promise<void>;
+
   // 管理员配置相关
   getAdminConfig(): Promise<AdminConfig | null>;
   setAdminConfig(config: AdminConfig): Promise<void>;

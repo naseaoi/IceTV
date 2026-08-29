@@ -1,74 +1,37 @@
 import 'server-only';
 
 import {
-  consumeInviteCode,
-  findUsableInviteCode,
+  isInviteCodeExpired,
   normalizeInviteCode,
 } from '@/features/admin/services/inviteCodes';
-import {
-  ConfigConflictError,
-  getConfig,
-  invalidateConfigCache,
-  saveConfig,
-} from '@/lib/config';
+import { getConfigForRead } from '@/lib/config';
+import { db } from '@/lib/db';
 
-const MAX_ATTEMPTS = 5;
-
-// 先占用名额再建账号，冲突时重读配置重试
+// 名额占用只走数据库原子自增，不写配置，避免并发注册互相撞版本冲突
 export async function reserveInviteCode(rawCode: unknown): Promise<boolean> {
   const code = normalizeInviteCode(rawCode);
   if (!code) return false;
 
-  for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt += 1) {
-    const config = await getConfig();
-    const inviteCodes = config.UserConfig.InviteCodes || [];
-    if (!findUsableInviteCode(inviteCodes, code)) {
-      return false;
-    }
+  const config = await getConfigForRead();
+  const matched = (config.UserConfig.InviteCodes || []).find(
+    (item) => item.code === code,
+  );
+  if (!matched || isInviteCodeExpired(matched)) return false;
 
-    config.UserConfig.InviteCodes = consumeInviteCode(inviteCodes, code);
-
-    try {
-      await saveConfig(config);
-      return true;
-    } catch (error) {
-      if (!(error instanceof ConfigConflictError)) {
-        throw error;
-      }
-      invalidateConfigCache();
-    }
-  }
-
-  return false;
+  return db.reserveInviteCodeUse(
+    code,
+    matched.maxUses || 0,
+    matched.usedCount || 0,
+  );
 }
 
 export async function releaseInviteCode(rawCode: unknown): Promise<void> {
   const code = normalizeInviteCode(rawCode);
   if (!code) return;
 
-  for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt += 1) {
-    const config = await getConfig();
-    const inviteCodes = config.UserConfig.InviteCodes || [];
-    const matched = inviteCodes.find((item) => item.code === code);
-    if (!matched || !matched.maxUses || !matched.usedCount) {
-      return;
-    }
-
-    config.UserConfig.InviteCodes = inviteCodes.map((item) =>
-      item.code === code
-        ? { ...item, usedCount: (item.usedCount || 0) - 1 }
-        : item,
-    );
-
-    try {
-      await saveConfig(config);
-      return;
-    } catch (error) {
-      if (!(error instanceof ConfigConflictError)) {
-        console.warn('回滚邀请码次数失败:', error);
-        return;
-      }
-      invalidateConfigCache();
-    }
+  try {
+    await db.releaseInviteCodeUse(code);
+  } catch (error) {
+    console.warn('回滚邀请码次数失败:', error);
   }
 }

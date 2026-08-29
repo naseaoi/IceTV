@@ -133,15 +133,17 @@ export function findUsableInviteCode(
   return matched;
 }
 
-export function consumeInviteCode(
-  inviteCodes: InviteCode[],
-  code: string,
+// 数据库用量为准，缺行时回落到配置里的历史值
+export function mergeInviteCodeUsage(
+  inviteCodes: InviteCode[] | undefined,
+  usage: Record<string, number>,
 ): InviteCode[] {
-  return inviteCodes.map((item) =>
-    item.code === code && item.maxUses
-      ? { ...item, usedCount: (item.usedCount || 0) + 1 }
-      : item,
-  );
+  if (!inviteCodes) return [];
+  return inviteCodes.map((item) => {
+    if (!item.maxUses) return item;
+    const usedCount = usage[item.code] ?? item.usedCount ?? 0;
+    return { ...item, usedCount };
+  });
 }
 
 export function sanitizeInviteCodes(value: unknown): InviteCode[] {
