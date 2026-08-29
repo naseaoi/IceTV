@@ -21,6 +21,7 @@ jest.mock('@/lib/config', () => {
   return {
     getConfig: jest.fn(),
     saveConfig: jest.fn(),
+    invalidateConfigCache: jest.fn(),
     ConfigConflictError,
   };
 });

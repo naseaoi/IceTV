@@ -21,7 +21,12 @@ import {
   parseInviteMaxUses,
   parseInviteValidDays,
 } from '@/features/admin/services/inviteCodes';
-import { ConfigConflictError, getConfig, saveConfig } from '@/lib/config';
+import {
+  ConfigConflictError,
+  getConfig,
+  invalidateConfigCache,
+  saveConfig,
+} from '@/lib/config';
 import { db } from '@/lib/db';
 import { validateAccountPassword } from '@/lib/password-policy';
 import { assertValidUsername, normalizeUsername } from '@/lib/username';
@@ -125,6 +130,8 @@ export async function handleAdminUserAction({
       return actionResponse({ error: '无法对自己进行此操作' }, 400);
     }
 
+    // 写操作必须基于最新配置，否则命中 TTL 缓存会误判用户不存在或撞版本冲突
+    invalidateConfigCache();
     const adminConfig = await getConfig();
 
     let targetEntry: any = null;
