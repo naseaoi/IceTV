@@ -133,6 +133,7 @@ describe('UserConfigTab sensitive actions', () => {
       <UserConfigTab config={config} role='owner' refreshConfig={jest.fn()} />,
     );
 
+    fireEvent.click(screen.getByRole('button', { name: '管理' }));
     fireEvent.click(screen.getByRole('button', { name: '切换开放注册' }));
     expect(mockUserAction).not.toHaveBeenCalled();
     fireEvent.click(screen.getByRole('button', { name: '确认开启' }));

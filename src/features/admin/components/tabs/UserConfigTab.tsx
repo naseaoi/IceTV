@@ -7,18 +7,29 @@ import ConfirmModal from '@/components/modals/ConfirmModal';
 import { AddUserForm } from '@/features/admin/components/tabs/user-config/AddUserForm';
 import { BatchUserGroupDialog } from '@/features/admin/components/tabs/user-config/BatchUserGroupDialog';
 import { ChangePasswordForm } from '@/features/admin/components/tabs/user-config/ChangePasswordForm';
+import { CleanupInactiveUsersDialog } from '@/features/admin/components/tabs/user-config/CleanupInactiveUsersDialog';
 import { ConfigureUserApisDialog } from '@/features/admin/components/tabs/user-config/ConfigureUserApisDialog';
 import { ConfigureUserGroupDialog } from '@/features/admin/components/tabs/user-config/ConfigureUserGroupDialog';
 import { DeleteUserConfirm } from '@/features/admin/components/tabs/user-config/DeleteUserConfirm';
 import { DeleteUserGroupConfirm } from '@/features/admin/components/tabs/user-config/DeleteUserGroupConfirm';
+import { RegistrationSettingsDialog } from '@/features/admin/components/tabs/user-config/RegistrationSettingsDialog';
 import { UserGroupFormDialog } from '@/features/admin/components/tabs/user-config/UserGroupFormDialog';
 import { UserGroupTable } from '@/features/admin/components/tabs/user-config/UserGroupTable';
 import { UserTable } from '@/features/admin/components/tabs/user-config/UserTable';
 import { useAdminUserActions } from '@/features/admin/hooks/useAdminUserActions';
 import { useLoadingState } from '@/features/admin/hooks/useLoadingState';
+import { useUserActivity } from '@/features/admin/hooks/useUserActivity';
 import { buttonStyles } from '@/features/admin/lib/buttonStyles';
 import { showError, showSuccess } from '@/features/admin/lib/notifications';
 import { getSelectableUsers } from '@/features/admin/lib/permissions';
+import { type InactiveCandidate } from '@/features/admin/services/inactiveUsers';
+import {
+  countActiveInviteCodes,
+  CUSTOM_INVITE_CODE_RULE_MESSAGE,
+  INVITE_MAX_USES_RULE_MESSAGE,
+  isValidCustomInviteCode,
+  parseInviteMaxUses,
+} from '@/features/admin/services/inviteCodes';
 import { useAlertModal } from '@/hooks/useAlertModal';
 import { useModalState } from '@/hooks/useModalState';
 import { getAuthInfoFromBrowserCookie } from '@/lib/auth.client';
@@ -32,6 +43,9 @@ interface UserConfigProps {
 
 type SensitiveUserAction = 'ban' | 'setAdmin' | 'cancelAdmin';
 
+const DEFAULT_INACTIVE_DAYS = 90;
+const DEFAULT_INVITE_VALID_DAYS = 7;
+
 interface PendingSensitiveUserAction {
   action: SensitiveUserAction;
   username: string;
@@ -43,10 +57,16 @@ interface PendingSensitiveUserAction {
 const UserConfig = ({ config, role, refreshConfig }: UserConfigProps) => {
   const { alertModal, showAlert, hideAlert } = useAlertModal();
   const { isLoading, withLoading } = useLoadingState();
+  const { lastActiveAt, refreshActivity } = useUserActivity();
   const {
     userGroupAction,
     assignUserGroups,
     batchUpdateUserGroups,
+    previewInactiveUsers,
+    deleteInactiveUsers,
+    createInviteCode,
+    deleteInviteCode,
+    setRequireInviteCode,
     updateUserApis,
     userAction,
   } = useAdminUserActions({
@@ -110,6 +130,19 @@ const UserConfig = ({ config, role, refreshConfig }: UserConfigProps) => {
   const [pendingSensitiveUserAction, setPendingSensitiveUserAction] =
     useState<PendingSensitiveUserAction | null>(null);
   const [showOpenRegisterConfirm, setShowOpenRegisterConfirm] = useState(false);
+  const [showCleanupInactiveModal, setShowCleanupInactiveModal] =
+    useModalState(false);
+  const [inactiveDays, setInactiveDays] = useState(DEFAULT_INACTIVE_DAYS);
+  const [inactiveCandidates, setInactiveCandidates] = useState<
+    InactiveCandidate[] | null
+  >(null);
+  const [showRegistrationModal, setShowRegistrationModal] =
+    useModalState(false);
+  const [inviteValidDays, setInviteValidDays] = useState(
+    DEFAULT_INVITE_VALID_DAYS,
+  );
+  const [inviteCustomCode, setInviteCustomCode] = useState('');
+  const [inviteMaxUses, setInviteMaxUses] = useState('');
 
   const currentUsername = getAuthInfoFromBrowserCookie()?.username || null;
   const permissionContext = useMemo(
@@ -123,6 +156,20 @@ const UserConfig = ({ config, role, refreshConfig }: UserConfigProps) => {
         .length,
     [config?.UserConfig?.Users, permissionContext],
   );
+
+  const inviteCodes = useMemo(
+    () => config?.UserConfig?.InviteCodes || [],
+    [config?.UserConfig?.InviteCodes],
+  );
+
+  const openRegister = !!config?.UserConfig?.OpenRegister;
+  const requireInviteCode = !!config?.UserConfig?.RequireInviteCode;
+
+  const registrationStatusText = useMemo(() => {
+    if (!openRegister) return '已关闭';
+    if (!requireInviteCode) return '已开启 · 无需邀请码';
+    return `已开启 · ${countActiveInviteCodes(inviteCodes)} 个有效邀请码`;
+  }, [openRegister, requireInviteCode, inviteCodes]);
 
   const selectAllUsers = useMemo(() => {
     return (
@@ -303,6 +350,60 @@ const UserConfig = ({ config, role, refreshConfig }: UserConfigProps) => {
     setShowOpenRegisterConfirm(true);
   };
 
+  const handleToggleRequireInviteCode = async () => {
+    const next = !config?.UserConfig?.RequireInviteCode;
+    await withLoading('setRequireInviteCode', async () => {
+      try {
+        await setRequireInviteCode(next);
+        showSuccess(
+          next ? '注册已要求邀请码' : '注册已不要求邀请码',
+          showAlert,
+        );
+      } catch {
+        // handled in setRequireInviteCode
+      }
+    });
+  };
+
+  const handleCreateInviteCode = async () => {
+    const customCode = inviteCustomCode.trim();
+    if (customCode && !isValidCustomInviteCode(customCode)) {
+      showError(CUSTOM_INVITE_CODE_RULE_MESSAGE, showAlert);
+      return;
+    }
+
+    const trimmedMaxUses = inviteMaxUses.trim();
+    const maxUses = parseInviteMaxUses(
+      trimmedMaxUses ? Number(trimmedMaxUses) : undefined,
+    );
+    if (maxUses === null) {
+      showError(INVITE_MAX_USES_RULE_MESSAGE, showAlert);
+      return;
+    }
+
+    await withLoading('createInviteCode', async () => {
+      try {
+        await createInviteCode(inviteValidDays, customCode, maxUses);
+        setInviteCustomCode('');
+        setInviteMaxUses('');
+        showSuccess('邀请码已生成', showAlert);
+      } catch {
+        // handled in createInviteCode
+      }
+    });
+  };
+
+  const handleDeleteInviteCode = async (code: string) => {
+    await withLoading(`deleteInviteCode_${code}`, async () => {
+      try {
+        await deleteInviteCode(code);
+      } catch {
+        // 邀请码可能已被其他管理员删除，拉一次最新列表
+        await refreshConfig().catch(() => undefined);
+      }
+    });
+  };
+
   const handleSetAdmin = (username: string) => {
     setPendingSensitiveUserAction({
       action: 'setAdmin',
@@ -445,6 +546,11 @@ const UserConfig = ({ config, role, refreshConfig }: UserConfigProps) => {
     setSelectedUserGroup('');
   };
 
+  const closeCleanupInactiveModal = () => {
+    setShowCleanupInactiveModal(false);
+    setInactiveCandidates(null);
+  };
+
   const handleSelectUser = useCallback((username: string, checked: boolean) => {
     setSelectedUsers((prev) => {
       const next = new Set(prev);
@@ -508,12 +614,52 @@ const UserConfig = ({ config, role, refreshConfig }: UserConfigProps) => {
     });
   };
 
+  const handleOpenCleanupInactive = () => {
+    setInactiveCandidates(null);
+    setShowCleanupInactiveModal(true);
+  };
+
+  const handleScanInactiveUsers = async () => {
+    await withLoading('scanInactiveUsers', async () => {
+      try {
+        setInactiveCandidates(await previewInactiveUsers(inactiveDays));
+      } catch {
+        setInactiveCandidates(null);
+      }
+    });
+  };
+
+  const handleConfirmCleanupInactive = async () => {
+    if (!inactiveCandidates || inactiveCandidates.length === 0) return;
+
+    await withLoading('cleanupInactiveUsers', async () => {
+      try {
+        const result = await deleteInactiveUsers(
+          inactiveDays,
+          inactiveCandidates.map((candidate) => candidate.username),
+        );
+        await refreshActivity();
+        setShowCleanupInactiveModal(false);
+        setInactiveCandidates(null);
+        showSuccess(
+          result.skippedCount > 0
+            ? `已删除 ${result.deletedCount} 个用户，${result.skippedCount} 个因期间有登录被跳过`
+            : `已删除 ${result.deletedCount} 个用户`,
+          showAlert,
+        );
+      } catch {
+        // handled in deleteInactiveUsers
+      }
+    });
+  };
+
   const handleConfirmDeleteUser = async () => {
     if (!deletingUser) return;
 
     await withLoading(`deleteUser_${deletingUser}`, async () => {
       try {
         await handleUserAction('deleteUser', deletingUser);
+        await refreshActivity();
         setShowDeleteUserModal(false);
         setDeletingUser(null);
       } catch {
@@ -556,28 +702,15 @@ const UserConfig = ({ config, role, refreshConfig }: UserConfigProps) => {
                 开放注册
               </p>
               <p className='mt-1 text-xs text-gray-500 dark:text-gray-400'>
-                开启后，未注册用户可通过注册接口自行创建账号。
+                {registrationStatusText}
               </p>
             </div>
             <button
               type='button'
-              onClick={handleToggleOpenRegister}
-              disabled={isLoading('setOpenRegister')}
-              className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
-                config.UserConfig.OpenRegister
-                  ? 'bg-green-500'
-                  : 'bg-gray-300 dark:bg-gray-600'
-              } ${isLoading('setOpenRegister') ? 'cursor-not-allowed opacity-50' : ''}`}
-              aria-label='切换开放注册'
-              aria-pressed={!!config.UserConfig.OpenRegister}
+              onClick={() => setShowRegistrationModal(true)}
+              className={buttonStyles.primary}
             >
-              <span
-                className={`inline-block h-5 w-5 transform rounded-full bg-white transition-transform ${
-                  config.UserConfig.OpenRegister
-                    ? 'translate-x-5'
-                    : 'translate-x-0.5'
-                }`}
-              />
+              管理
             </button>
           </div>
         </div>
@@ -646,6 +779,12 @@ const UserConfig = ({ config, role, refreshConfig }: UserConfigProps) => {
             >
               添加用户
             </button>
+            <button
+              onClick={handleOpenCleanupInactive}
+              className={buttonStyles.warning}
+            >
+              清理不活跃
+            </button>
           </div>
         </div>
 
@@ -681,6 +820,7 @@ const UserConfig = ({ config, role, refreshConfig }: UserConfigProps) => {
 
         <UserTable
           users={config.UserConfig.Users}
+          lastActiveAt={lastActiveAt}
           currentUsername={currentUsername}
           permissionContext={permissionContext}
           selectableUsersCount={selectableUsersCount}
@@ -792,6 +932,46 @@ const UserConfig = ({ config, role, refreshConfig }: UserConfigProps) => {
         onClose={closeBatchUserGroupModal}
         onConfirm={() => handleBatchSetUserGroup(selectedUserGroup)}
         isSaving={isLoading('batchSetUserGroup')}
+      />
+
+      <CleanupInactiveUsersDialog
+        isOpen={showCleanupInactiveModal}
+        inactiveDays={inactiveDays}
+        candidates={inactiveCandidates}
+        isScanning={isLoading('scanInactiveUsers')}
+        isDeleting={isLoading('cleanupInactiveUsers')}
+        onInactiveDaysChange={(next) => {
+          setInactiveDays(next);
+          setInactiveCandidates(null);
+        }}
+        onScan={handleScanInactiveUsers}
+        onConfirm={handleConfirmCleanupInactive}
+        onClose={closeCleanupInactiveModal}
+      />
+
+      <RegistrationSettingsDialog
+        isOpen={showRegistrationModal}
+        openRegister={!!config.UserConfig.OpenRegister}
+        requireInviteCode={!!config.UserConfig.RequireInviteCode}
+        inviteCodes={inviteCodes}
+        validDays={inviteValidDays}
+        customCode={inviteCustomCode}
+        maxUses={inviteMaxUses}
+        isTogglingRegister={isLoading('setOpenRegister')}
+        isTogglingInvite={isLoading('setRequireInviteCode')}
+        isCreatingCode={isLoading('createInviteCode')}
+        deletingCode={
+          inviteCodes.find((item) => isLoading(`deleteInviteCode_${item.code}`))
+            ?.code || null
+        }
+        onToggleOpenRegister={handleToggleOpenRegister}
+        onToggleRequireInviteCode={handleToggleRequireInviteCode}
+        onValidDaysChange={setInviteValidDays}
+        onCustomCodeChange={setInviteCustomCode}
+        onMaxUsesChange={setInviteMaxUses}
+        onCreateCode={handleCreateInviteCode}
+        onDeleteCode={handleDeleteInviteCode}
+        onClose={() => setShowRegistrationModal(false)}
       />
 
       <ConfirmModal

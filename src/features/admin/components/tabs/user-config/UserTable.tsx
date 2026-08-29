@@ -9,6 +9,10 @@ import {
   canDeleteManagedUser,
   canOperateUser,
 } from '@/features/admin/lib/permissions';
+import {
+  formatLastActive,
+  formatLastActiveTooltip,
+} from '@/features/admin/lib/userActivity';
 
 interface User {
   username: string;
@@ -20,6 +24,7 @@ interface User {
 
 interface UserTableProps {
   users: User[];
+  lastActiveAt: Record<string, number>;
   currentUsername: string | null;
   permissionContext: PermissionContext;
   selectableUsersCount: number;
@@ -40,6 +45,7 @@ interface UserTableProps {
 
 export function UserTable({
   users,
+  lastActiveAt,
   currentUsername,
   permissionContext,
   selectableUsersCount,
@@ -71,7 +77,7 @@ export function UserTable({
   return (
     <div
       className='relative overflow-x-auto rounded-lg border border-gray-200 dark:border-gray-700'
-      data-table='user-list'
+      data-table='user-list-v2'
     >
       <table className='w-full table-fixed divide-y divide-gray-200 dark:divide-gray-700'>
         <thead className='sticky top-0 z-10 bg-gray-50 dark:bg-gray-900'>
@@ -97,9 +103,9 @@ export function UserTable({
               )}
             </th>
             <ResizableTableHeader
-              tableId='user-list'
+              tableId='user-list-v2'
               columnId='username'
-              defaultWidth={270}
+              defaultWidth={198}
               minWidth={96}
               scope='col'
               className='px-6 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400'
@@ -107,9 +113,9 @@ export function UserTable({
               用户名
             </ResizableTableHeader>
             <ResizableTableHeader
-              tableId='user-list'
+              tableId='user-list-v2'
               columnId='role'
-              defaultWidth={164}
+              defaultWidth={122}
               minWidth={88}
               scope='col'
               className='px-6 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400'
@@ -117,9 +123,9 @@ export function UserTable({
               角色
             </ResizableTableHeader>
             <ResizableTableHeader
-              tableId='user-list'
+              tableId='user-list-v2'
               columnId='status'
-              defaultWidth={133}
+              defaultWidth={94}
               minWidth={88}
               scope='col'
               className='px-6 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400'
@@ -127,9 +133,19 @@ export function UserTable({
               状态
             </ResizableTableHeader>
             <ResizableTableHeader
-              tableId='user-list'
+              tableId='user-list-v2'
+              columnId='last-login'
+              defaultWidth={290}
+              minWidth={96}
+              scope='col'
+              className='px-6 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400'
+            >
+              最后活跃
+            </ResizableTableHeader>
+            <ResizableTableHeader
+              tableId='user-list-v2'
               columnId='groups'
-              defaultWidth={318}
+              defaultWidth={253}
               minWidth={96}
               scope='col'
               className='px-6 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400'
@@ -137,9 +153,9 @@ export function UserTable({
               用户组
             </ResizableTableHeader>
             <ResizableTableHeader
-              tableId='user-list'
+              tableId='user-list-v2'
               columnId='source-permissions'
-              defaultWidth={289}
+              defaultWidth={217}
               minWidth={120}
               scope='col'
               className='px-6 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400'
@@ -147,7 +163,7 @@ export function UserTable({
               视频源权限
             </ResizableTableHeader>
             <ResizableTableHeader
-              tableId='user-list'
+              tableId='user-list-v2'
               columnId='actions'
               defaultWidth={360}
               minWidth={360}
@@ -217,6 +233,18 @@ export function UserTable({
                     }`}
                   >
                     {!user.banned ? '正常' : '已封禁'}
+                  </span>
+                </td>
+                <td className='whitespace-nowrap px-6 py-4'>
+                  <span
+                    title={formatLastActiveTooltip(lastActiveAt[user.username])}
+                    className={`text-sm ${
+                      lastActiveAt[user.username]
+                        ? 'text-gray-900 dark:text-gray-100'
+                        : 'text-gray-400 dark:text-gray-500'
+                    }`}
+                  >
+                    {formatLastActive(lastActiveAt[user.username])}
                   </span>
                 </td>
                 <td className='whitespace-nowrap px-6 py-4'>
