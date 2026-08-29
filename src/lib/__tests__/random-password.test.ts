@@ -1,16 +1,13 @@
 /** @jest-environment node */
 
-import { webcrypto } from 'crypto';
-
+import { installCryptoPolyfill } from '@/app/api/test-utils/crypto-polyfill';
 import { validateAccountPassword } from '@/lib/password-policy';
 import {
   generateRandomPassword,
   RANDOM_PASSWORD_LENGTH,
 } from '@/lib/random-password';
 
-if (!globalThis.crypto) {
-  Object.defineProperty(globalThis, 'crypto', { value: webcrypto });
-}
+installCryptoPolyfill();
 
 describe('generateRandomPassword', () => {
   it('默认长度符合约定', () => {

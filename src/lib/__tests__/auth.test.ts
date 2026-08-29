@@ -1,5 +1,6 @@
-import { webcrypto } from 'crypto';
 import { TextEncoder } from 'util';
+
+import { installCryptoPolyfill } from '@/app/api/test-utils/crypto-polyfill';
 
 import {
   generateSignature,
@@ -11,9 +12,7 @@ import {
 if (!global.TextEncoder) {
   global.TextEncoder = TextEncoder as typeof global.TextEncoder;
 }
-if (!global.crypto) {
-  global.crypto = webcrypto as typeof global.crypto;
-}
+installCryptoPolyfill();
 
 describe('getSessionExpiresAt', () => {
   const originalTtl = process.env.AUTH_SESSION_TTL_HOURS;

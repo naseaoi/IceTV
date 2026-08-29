@@ -1,7 +1,8 @@
 ﻿/** @jest-environment node */
 
-import { webcrypto } from 'crypto';
 import type { NextRequest, NextResponse } from 'next/server';
+
+import { installCryptoPolyfill } from '@/app/api/test-utils/crypto-polyfill';
 
 import { generateSignature } from '../auth.server';
 import {
@@ -13,9 +14,7 @@ import {
 const AUTH_SECRET = 'auth-secret-with-at-least-32-chars';
 const mockRequireActiveUser = jest.fn();
 
-Object.defineProperty(globalThis, 'crypto', {
-  value: webcrypto,
-});
+installCryptoPolyfill();
 
 jest.mock('../env.server', () => ({
   getOwnerPassword: () => 'owner-secret',
