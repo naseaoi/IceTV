@@ -23,15 +23,7 @@ export function formatLastActive(timestamp: number | undefined): string {
 }
 
 export function formatLastActiveTooltip(
-  timestamp: number | null | undefined,
+  timestamp: number | undefined,
 ): string | undefined {
   return formatDateTime(timestamp);
-}
-
-export function getInactiveDays(
-  timestamp: number | undefined,
-  now = Date.now(),
-): number | null {
-  if (!timestamp) return null;
-  return Math.floor((now - timestamp) / DAY_MS);
 }

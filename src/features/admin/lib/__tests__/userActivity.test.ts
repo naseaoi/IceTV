@@ -1,7 +1,6 @@
 import {
   formatLastActive,
   formatLastActiveTooltip,
-  getInactiveDays,
   NEVER_ACTIVE_TEXT,
 } from '@/features/admin/lib/userActivity';
 
@@ -42,17 +41,5 @@ describe('formatLastActiveTooltip', () => {
 
   it('有记录时包含年份', () => {
     expect(formatLastActiveTooltip(NOW)).toMatch(/2026/);
-  });
-});
-
-describe('getInactiveDays', () => {
-  it('无记录时返回 null', () => {
-    expect(getInactiveDays(undefined, NOW)).toBeNull();
-    expect(getInactiveDays(0, NOW)).toBeNull();
-  });
-
-  it('向下取整未登录天数', () => {
-    expect(getInactiveDays(NOW - 90 * DAY_MS, NOW)).toBe(90);
-    expect(getInactiveDays(NOW - (7 * DAY_MS + 3600_000), NOW)).toBe(7);
   });
 });

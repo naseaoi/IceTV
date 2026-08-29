@@ -1,5 +1,5 @@
 export function formatDateTime(
-  timestamp: number | null | undefined,
+  timestamp: number | undefined,
 ): string | undefined {
   if (!timestamp) return undefined;
   return new Intl.DateTimeFormat('zh-CN', {

@@ -71,6 +71,10 @@ export const inputStyles = {
     'rounded-lg border border-gray-300 bg-white px-3 py-2 text-gray-900 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500',
 };
 
+/** Admin 表单勾选框样式 */
+export const checkboxStyles =
+  'h-4 w-4 rounded border-gray-300 bg-gray-100 text-blue-600 accent-blue-600 checked:border-blue-600 checked:bg-blue-600 focus:ring-2 focus:ring-blue-500 dark:border-gray-600 dark:bg-gray-700 dark:accent-blue-500 dark:ring-offset-gray-800 dark:checked:border-blue-500 dark:checked:bg-blue-500 dark:focus:ring-blue-600';
+
 /** 状态徽章样式（启用/禁用标识） */
 export const statusBadgeStyles = {
   enabled:

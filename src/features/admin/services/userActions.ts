@@ -16,6 +16,7 @@ import {
   isValidCustomInviteCode,
   MAX_INVITE_CODES,
   MAX_INVITE_VALID_DAYS,
+  mergeInviteCodeUsage,
   MIN_INVITE_VALID_DAYS,
   normalizeInviteCode,
   parseInviteMaxUses,
@@ -89,6 +90,17 @@ function toActionResponse(
   return actionResponse(body, init?.status, init?.headers);
 }
 
+// 邀请码从配置里移除后一并清掉用量行，避免重建同名码继承旧次数
+async function dropInviteCodeUsage(codes: string[]): Promise<void> {
+  for (const code of codes) {
+    try {
+      await db.deleteInviteCodeUsage(code);
+    } catch (error) {
+      console.warn('清理邀请码用量失败:', error);
+    }
+  }
+}
+
 export async function handleAdminUserAction({
   body,
   operatorUsername,
@@ -136,6 +148,7 @@ export async function handleAdminUserAction({
 
     let targetEntry: any = null;
     let isTargetAdmin = false;
+    let usageCodesToDrop: string[] = [];
 
     if (!TARGETLESS_ACTIONS.includes(action) && targetUsername) {
       targetEntry = adminConfig.UserConfig.Users.find(
@@ -540,9 +553,6 @@ export async function handleAdminUserAction({
           lastActiveAt: await db.getAllUserLastActive(),
           inactiveDays,
           operatorUsername: username,
-          includeNeverActive:
-            (body as { includeNeverActive?: unknown }).includeNeverActive ===
-            true,
         });
 
         return toActionResponse(
@@ -577,9 +587,6 @@ export async function handleAdminUserAction({
           lastActiveAt: await db.getAllUserLastActive(),
           inactiveDays,
           operatorUsername: username,
-          includeNeverActive:
-            (body as { includeNeverActive?: unknown }).includeNeverActive ===
-            true,
         });
         const deletable = resolveConfirmedDeletions(
           candidates,
@@ -657,7 +664,10 @@ export async function handleAdminUserAction({
           );
         }
 
-        const inviteCodes = adminConfig.UserConfig.InviteCodes || [];
+        const inviteCodes = mergeInviteCodeUsage(
+          adminConfig.UserConfig.InviteCodes,
+          await db.getAllInviteCodeUsage(),
+        );
         const activeCodes = inviteCodes.filter((item) =>
           isInviteCodeUsable(item),
         );
@@ -703,12 +713,15 @@ export async function handleAdminUserAction({
         }
 
         // 顺手清掉过期码和已用尽的码
+        const dropped = inviteCodes.filter((item) => !isInviteCodeUsable(item));
         adminConfig.UserConfig.InviteCodes = [
           ...activeCodes,
           buildInviteCode({ code, validDays, createdBy: username, maxUses }),
         ];
 
+        await dropInviteCodeUsage([code]);
         await saveConfig(adminConfig);
+        await dropInviteCodeUsage(dropped.map((item) => item.code));
 
         return toActionResponse(
           { ok: true, code },
@@ -727,6 +740,7 @@ export async function handleAdminUserAction({
           return toActionResponse({ error: '邀请码不存在' }, { status: 404 });
         }
         adminConfig.UserConfig.InviteCodes = next;
+        usageCodesToDrop = [code];
         break;
       }
       default:
@@ -734,6 +748,7 @@ export async function handleAdminUserAction({
     }
 
     await saveConfig(adminConfig);
+    await dropInviteCodeUsage(usageCodesToDrop);
 
     return toActionResponse(
       { ok: true },

@@ -133,7 +133,6 @@ const UserConfig = ({ config, role, refreshConfig }: UserConfigProps) => {
   const [showCleanupInactiveModal, setShowCleanupInactiveModal] =
     useModalState(false);
   const [inactiveDays, setInactiveDays] = useState(DEFAULT_INACTIVE_DAYS);
-  const [includeNeverActive, setIncludeNeverActive] = useState(false);
   const [inactiveCandidates, setInactiveCandidates] = useState<
     InactiveCandidate[] | null
   >(null);
@@ -550,7 +549,6 @@ const UserConfig = ({ config, role, refreshConfig }: UserConfigProps) => {
   const closeCleanupInactiveModal = () => {
     setShowCleanupInactiveModal(false);
     setInactiveCandidates(null);
-    setIncludeNeverActive(false);
   };
 
   const handleSelectUser = useCallback((username: string, checked: boolean) => {
@@ -618,16 +616,13 @@ const UserConfig = ({ config, role, refreshConfig }: UserConfigProps) => {
 
   const handleOpenCleanupInactive = () => {
     setInactiveCandidates(null);
-    setIncludeNeverActive(false);
     setShowCleanupInactiveModal(true);
   };
 
   const handleScanInactiveUsers = async () => {
     await withLoading('scanInactiveUsers', async () => {
       try {
-        setInactiveCandidates(
-          await previewInactiveUsers(inactiveDays, includeNeverActive),
-        );
+        setInactiveCandidates(await previewInactiveUsers(inactiveDays));
       } catch {
         setInactiveCandidates(null);
       }
@@ -642,12 +637,10 @@ const UserConfig = ({ config, role, refreshConfig }: UserConfigProps) => {
         const result = await deleteInactiveUsers(
           inactiveDays,
           inactiveCandidates.map((candidate) => candidate.username),
-          includeNeverActive,
         );
         await refreshActivity();
         setShowCleanupInactiveModal(false);
         setInactiveCandidates(null);
-        setIncludeNeverActive(false);
         showSuccess(
           result.skippedCount > 0
             ? `已删除 ${result.deletedCount} 个用户，${result.skippedCount} 个因期间有活跃被跳过`
@@ -947,11 +940,6 @@ const UserConfig = ({ config, role, refreshConfig }: UserConfigProps) => {
         candidates={inactiveCandidates}
         isScanning={isLoading('scanInactiveUsers')}
         isDeleting={isLoading('cleanupInactiveUsers')}
-        includeNeverActive={includeNeverActive}
-        onIncludeNeverActiveChange={(next) => {
-          setIncludeNeverActive(next);
-          setInactiveCandidates(null);
-        }}
         onInactiveDaysChange={(next) => {
           setInactiveDays(next);
           setInactiveCandidates(null);

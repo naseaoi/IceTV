@@ -8,11 +8,10 @@ export type InactiveCandidateUser = {
   role: 'user' | 'admin' | 'owner';
 };
 
-// lastActiveAt 为 null 表示从未活跃，此时不活跃天数未知
 export type InactiveCandidate = {
   username: string;
-  lastActiveAt: number | null;
-  inactiveDays: number | null;
+  lastActiveAt: number;
+  inactiveDays: number;
 };
 
 export function parseInactiveDays(value: unknown): number | null {
@@ -22,43 +21,30 @@ export function parseInactiveDays(value: unknown): number | null {
   return days;
 }
 
-// owner / admin 豁免，无活跃记录的仅在 includeNeverActive 时纳入
+// owner / admin 豁免，无活跃记录的用户不纳入
 export function findInactiveUsers({
   users,
   lastActiveAt,
   inactiveDays,
   operatorUsername,
-  includeNeverActive = false,
   now = Date.now(),
 }: {
   users: InactiveCandidateUser[];
   lastActiveAt: Record<string, number>;
   inactiveDays: number;
   operatorUsername: string;
-  includeNeverActive?: boolean;
   now?: number;
 }): InactiveCandidate[] {
   const threshold = now - inactiveDays * DAY_MS;
   const stale: InactiveCandidate[] = [];
-  const neverActive: InactiveCandidate[] = [];
 
   for (const user of users) {
     if (user.role !== 'user') continue;
     if (user.username === operatorUsername) continue;
 
     const activeAt = lastActiveAt[user.username];
-    if (!activeAt) {
-      if (includeNeverActive) {
-        neverActive.push({
-          username: user.username,
-          lastActiveAt: null,
-          inactiveDays: null,
-        });
-      }
-      continue;
-    }
+    if (!activeAt || activeAt > threshold) continue;
 
-    if (activeAt > threshold) continue;
     stale.push({
       username: user.username,
       lastActiveAt: activeAt,
@@ -66,10 +52,7 @@ export function findInactiveUsers({
     });
   }
 
-  stale.sort((a, b) => (a.lastActiveAt as number) - (b.lastActiveAt as number));
-  neverActive.sort((a, b) => a.username.localeCompare(b.username));
-
-  return [...stale, ...neverActive];
+  return stale.sort((a, b) => a.lastActiveAt - b.lastActiveAt);
 }
 
 // 只删既在确认名单又仍然符合阈值的用户

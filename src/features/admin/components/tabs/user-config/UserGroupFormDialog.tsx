@@ -97,7 +97,7 @@ export function UserGroupFormDialog({
           />
         </div>
 
-        <div className='flex justify-end space-x-3 border-t border-gray-200 pt-4 dark:border-gray-700'>
+        <div className='flex justify-end space-x-3 pt-4'>
           <button
             onClick={onClose}
             className={`px-6 py-2.5 text-sm font-medium ${buttonStyles.secondary}`}

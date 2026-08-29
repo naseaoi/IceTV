@@ -46,13 +46,12 @@ describe('findInactiveUsers', () => {
     operator: daysAgo(200),
   };
 
-  const run = (inactiveDays: number, includeNeverActive = false) =>
+  const run = (inactiveDays: number) =>
     findInactiveUsers({
       users,
       lastActiveAt,
       inactiveDays,
       operatorUsername: 'operator',
-      includeNeverActive,
       now: NOW,
     });
 
@@ -62,46 +61,8 @@ describe('findInactiveUsers', () => {
     expect(matched).not.toContain('helper');
   });
 
-  it('默认跳过无活跃记录的用户', () => {
+  it('跳过无活跃记录的用户', () => {
     expect(run(1).map((c) => c.username)).not.toContain('never');
-  });
-
-  it('includeNeverActive 时纳入无活跃记录的用户', () => {
-    const matched = run(90, true);
-    expect(matched.map((c) => c.username)).toEqual(['stale', 'never']);
-  });
-
-  it('从未活跃的用户不带天数，且不受阈值影响', () => {
-    const matched = run(MAX_INACTIVE_DAYS, true);
-    expect(matched).toEqual([
-      { username: 'never', lastActiveAt: null, inactiveDays: null },
-    ]);
-  });
-
-  it('从未活跃的用户排在有记录的用户之后', () => {
-    expect(run(1, true).map((c) => c.username)).toEqual([
-      'stale',
-      'fresh',
-      'never',
-    ]);
-  });
-
-  it('includeNeverActive 不放宽 owner/admin 与操作者豁免', () => {
-    const noRecordUsers = [
-      { username: 'boss2', role: 'owner' as const },
-      { username: 'helper2', role: 'admin' as const },
-      { username: 'operator', role: 'user' as const },
-    ];
-    expect(
-      findInactiveUsers({
-        users: noRecordUsers,
-        lastActiveAt: {},
-        inactiveDays: 90,
-        operatorUsername: 'operator',
-        includeNeverActive: true,
-        now: NOW,
-      }),
-    ).toEqual([]);
   });
 
   it('跳过操作者自己', () => {
@@ -145,14 +106,5 @@ describe('resolveConfirmedDeletions', () => {
 
   it('名单外的陌生用户名被忽略', () => {
     expect(resolveConfirmedDeletions(candidates, ['zzz'])).toEqual([]);
-  });
-
-  it('从未活跃的候选者可以被删除', () => {
-    const neverActive = [
-      { username: 'never', lastActiveAt: null, inactiveDays: null },
-    ];
-    expect(resolveConfirmedDeletions(neverActive, ['never'])).toEqual([
-      'never',
-    ]);
   });
 });

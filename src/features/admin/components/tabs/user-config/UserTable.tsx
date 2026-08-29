@@ -1,7 +1,10 @@
 'use client';
 
 import { ResizableTableHeader } from '@/features/admin/components/ResizableTableHeader';
-import { buttonStyles } from '@/features/admin/lib/buttonStyles';
+import {
+  buttonStyles,
+  checkboxStyles,
+} from '@/features/admin/lib/buttonStyles';
 import {
   type PermissionContext,
   canChangeUserPassword,
@@ -96,7 +99,7 @@ export function UserTable({
                   type='checkbox'
                   checked={selectAllUsers}
                   onChange={(e) => onSelectAllUsers(e.target.checked)}
-                  className='h-4 w-4 rounded border-gray-300 bg-gray-100 text-blue-600 accent-blue-600 checked:border-blue-600 checked:bg-blue-600 focus:ring-2 focus:ring-blue-500 dark:border-gray-600 dark:bg-gray-700 dark:accent-blue-500 dark:ring-offset-gray-800 dark:checked:border-blue-500 dark:checked:bg-blue-500 dark:focus:ring-blue-600'
+                  className={checkboxStyles}
                 />
               ) : (
                 <div className='h-4 w-4' />
@@ -198,7 +201,7 @@ export function UserTable({
                       onChange={(e) =>
                         onSelectUser(user.username, e.target.checked)
                       }
-                      className='h-4 w-4 rounded border-gray-300 bg-gray-100 text-blue-600 accent-blue-600 checked:border-blue-600 checked:bg-blue-600 focus:ring-2 focus:ring-blue-500 dark:border-gray-600 dark:bg-gray-700 dark:accent-blue-500 dark:ring-offset-gray-800 dark:checked:border-blue-500 dark:checked:bg-blue-500 dark:focus:ring-blue-600'
+                      className={checkboxStyles}
                     />
                   ) : (
                     <div className='h-4 w-4' />
