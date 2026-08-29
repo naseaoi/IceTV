@@ -5,7 +5,12 @@ import {
   findUsableInviteCode,
   normalizeInviteCode,
 } from '@/features/admin/services/inviteCodes';
-import { ConfigConflictError, getConfig, saveConfig } from '@/lib/config';
+import {
+  ConfigConflictError,
+  getConfig,
+  invalidateConfigCache,
+  saveConfig,
+} from '@/lib/config';
 
 const MAX_ATTEMPTS = 5;
 
@@ -30,6 +35,7 @@ export async function reserveInviteCode(rawCode: unknown): Promise<boolean> {
       if (!(error instanceof ConfigConflictError)) {
         throw error;
       }
+      invalidateConfigCache();
     }
   }
 
@@ -62,6 +68,7 @@ export async function releaseInviteCode(rawCode: unknown): Promise<void> {
         console.warn('回滚邀请码次数失败:', error);
         return;
       }
+      invalidateConfigCache();
     }
   }
 }

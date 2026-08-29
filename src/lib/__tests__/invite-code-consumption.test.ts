@@ -4,11 +4,14 @@ import type { AdminConfig } from '@/types/admin';
 
 const mockGetConfig = jest.fn();
 const mockSaveConfig = jest.fn();
+const mockInvalidateConfigCache = jest.fn();
 
 jest.mock('@/lib/config', () => ({
   ConfigConflictError: class extends Error {},
   getConfig: (...args: unknown[]) => mockGetConfig(...args),
   saveConfig: (...args: unknown[]) => mockSaveConfig(...args),
+  invalidateConfigCache: (...args: unknown[]) =>
+    mockInvalidateConfigCache(...args),
 }));
 
 import type { InviteCode } from '@/features/admin/services/inviteCodes';
@@ -112,6 +115,16 @@ describe('reserveInviteCode', () => {
     await expect(reserveInviteCode('LIMITED')).resolves.toBe(true);
     expect(mockGetConfig).toHaveBeenCalledTimes(2);
     expect(savedInviteCodes(1)[0].usedCount).toBe(1);
+  });
+
+  it('冲突重试前失效配置缓存，避免重读到同一份旧配置', async () => {
+    alwaysConfig([limitedCode()]);
+    mockSaveConfig
+      .mockRejectedValueOnce(new ConfigConflictError())
+      .mockResolvedValueOnce(undefined);
+
+    await expect(reserveInviteCode('LIMITED')).resolves.toBe(true);
+    expect(mockInvalidateConfigCache).toHaveBeenCalledTimes(1);
   });
 
   it('重试期间码被用尽则失败', async () => {

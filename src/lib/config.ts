@@ -444,10 +444,15 @@ export async function getConfigForRead(): Promise<Readonly<AdminConfig>> {
   return deepFreeze(await loadConfig());
 }
 
-// 绕过 TTL 缓存直读，供后台面板等必须看到最新写入的场景
-export async function getConfigFresh(): Promise<Readonly<AdminConfig>> {
+// 让下一次读取跳过 TTL 缓存
+export function invalidateConfigCache(): void {
   cachedConfigLoadedAt = 0;
   inflightConfigLoad = null;
+}
+
+// 绕过 TTL 缓存直读，供后台面板等必须看到最新写入的场景
+export async function getConfigFresh(): Promise<Readonly<AdminConfig>> {
+  invalidateConfigCache();
   return deepFreeze(await loadConfig());
 }
 
