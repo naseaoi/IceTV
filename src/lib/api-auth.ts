@@ -8,6 +8,7 @@ import {
 import { getConfigForRead } from './config';
 import { getOwnerUsername } from './env.server';
 import { verifyAuthSignature } from './signing-secret.server';
+import { touchUserActivity } from './user-activity.server';
 import { normalizeUsername } from './username';
 
 type RequireActiveUserOptions = {
@@ -125,6 +126,7 @@ export async function requireActiveUserFromAuthInfo(
   const cookieUsername = authInfo.username;
   const isOwner = cookieUsername === getOwnerUsername();
   if (isOwner) {
+    touchUserActivity(normalizeUsername(cookieUsername));
     return {
       username: cookieUsername,
       isOwner,
@@ -159,6 +161,8 @@ export async function requireActiveUserFromAuthInfo(
       ),
     };
   }
+
+  touchUserActivity(username);
 
   return {
     username,
