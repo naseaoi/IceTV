@@ -42,6 +42,11 @@ export const buttonStyles = {
     'inline-flex items-center px-3 py-1.5 rounded-full text-xs font-medium bg-yellow-100 text-yellow-800 hover:bg-yellow-200 dark:bg-yellow-900/40 dark:hover:bg-yellow-900/60 dark:text-yellow-200 transition-colors',
   roundedPurple:
     'inline-flex items-center px-3 py-1.5 rounded-full text-xs font-medium bg-purple-100 text-purple-800 hover:bg-purple-200 dark:bg-purple-900/40 dark:hover:bg-purple-900/60 dark:text-purple-200 transition-colors',
+  // 纯图标按钮，配 h-5 w-5 图标
+  iconSuccess:
+    'inline-flex items-center justify-center rounded-lg border border-transparent p-2 bg-green-600 hover:bg-green-700 dark:bg-green-600 dark:hover:bg-green-700 text-white transition-colors',
+  iconDisabled:
+    'inline-flex items-center justify-center rounded-lg border border-transparent p-2 bg-gray-400 dark:bg-gray-600 cursor-not-allowed text-white transition-colors',
   // 禁用状态
   disabled:
     'px-3 py-1.5 text-sm font-medium bg-gray-400 dark:bg-gray-600 cursor-not-allowed text-white rounded-lg transition-colors',
