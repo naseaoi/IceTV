@@ -54,6 +54,7 @@
 - [配置文件](#配置文件)
 - [订阅](#订阅)
 - [环境变量](#环境变量)
+- [开发](#开发)
 - [客户端](#客户端)
 - [AndroidTV 使用](#androidtv-使用)
 - [安全与隐私提醒](#安全与隐私提醒)
@@ -64,8 +65,9 @@
 
 - **多源聚合搜索** — 一次搜索立刻返回全源结果
 - **丰富详情页** — 支持剧集列表、演员、年份、简介等完整信息展示
-- **流畅在线播放** — 集成 HLS.js & ArtPlayer
-- **收藏 + 继续观看** — 支持本机文件存储，多端同步进度
+- **流畅在线播放** — 集成 HLS.js & ArtPlayer，支持直播源
+- **收藏 + 继续观看 + 追更** — 多端同步进度，剧集更新后消息提醒
+- **多用户与邀请码注册** — 用户组按源分配权限，注册可要求邀请码
 - **PWA** — 离线缓存、安装到桌面/主屏，移动端原生体验
 - **响应式布局** — 桌面侧边栏 + 移动底部导航，自适应各种屏幕尺寸
 - **智能去广告** — 自动跳过视频中的切片广告（实验性）
@@ -261,16 +263,32 @@ IceTV 支持标准的苹果 CMS V10 API 格式。
 | `MYSQL_CONNECTION_LIMIT`             | MySQL 连接池   | 否             | `5`                                              | 正整数                                                    |
 | `MYSQL_MAX_IDLE`                     | MySQL 空闲池   | 否             | 同连接池上限                                     | 正整数                                                    |
 | `MYSQL_IDLE_TIMEOUT_MS`              | MySQL 空闲超时 | 否             | `60000`                                          | 毫秒                                                      |
+| `TRUSTED_PROXY_COUNT`                | 反代层数       | 反代后建议     | `0`                                              | 正整数                                                    |
 | `NEXT_PUBLIC_UPDATE_REPOS`           | 版本检查       | 否             | `naseaoi/IceTV`                                  | `owner/repo,owner/repo...`                                |
 | `NEXT_PUBLIC_UPDATE_BRANCH`          | 版本检查       | 否             | `main`                                           | 分支名                                                    |
 
+变量样例见 [.env.example](.env.example)。
+
+> [!IMPORTANT]
+> 部署在 Nginx、Cloudflare 等反向代理后面时应设置 `TRUSTED_PROXY_COUNT` 为代理层数。默认值 `0` 会取 `x-forwarded-for` 的第一段，而该值由客户端可控，注册限流可被伪造请求头绕过。
+
 站点名称、图标、公告、豆瓣/Bangumi 代理、流式搜索、搜索最大页数等运行选项可在后台配置，不建议优先使用环境变量覆盖。
 
-高级调优变量：`CONFIG_CACHE_TTL_MS`、`PROXY_FETCH_TIMEOUT_MS`、`PROXY_DNS_CACHE_TTL_MS`、`PROXY_DNS_NEGATIVE_CACHE_TTL_MS`、`SEARCH_SOURCE_FAILURE_COOLDOWN_MS`、`SQLITE_BUSY_TIMEOUT_MS`、`SQLITE_INIT_RETRY_COUNT`、`SQLITE_INIT_RETRY_DELAY_MS`、`TRUSTED_PROXY_COUNT`、`DEV_PROXY_ENABLED`。
+高级调优变量：`CONFIG_CACHE_TTL_MS`、`PROXY_FETCH_TIMEOUT_MS`、`PROXY_DNS_CACHE_TTL_MS`、`PROXY_DNS_NEGATIVE_CACHE_TTL_MS`、`SEARCH_SOURCE_FAILURE_COOLDOWN_MS`、`SQLITE_BUSY_TIMEOUT_MS`、`SQLITE_INIT_RETRY_COUNT`、`SQLITE_INIT_RETRY_DELAY_MS`、`SQLITE_CACHE_SIZE_KIB`、`SQLITE_MMAP_SIZE_BYTES`、`CRON_METADATA_*`、`LIVE_REFRESH_CONCURRENCY`。
 
 Docker 默认把 cron 租约写入 `/data/icetv-cron.lock`。多容器部署时，所有实例必须挂载同一个可写 `/data` 卷，租约才能阻止重复维护；没有共享文件系统时请保持单实例 cron 调度，或将 `CRON_LOCK_PATH` 设为空关闭文件租约。
 
 当前配置写入采用应用层乐观锁，推荐单实例部署；多实例部署需让管理操作固定路由到同一实例。
+
+## 开发
+
+```bash
+pnpm install
+cp .env.example .env   # 按注释填写
+pnpm dev
+```
+
+改代码前先看 [AGENTS.md](AGENTS.md)（项目约束与易错点），其余文档见 [docs/](docs/README.md)。
 
 ## 客户端
 
@@ -284,11 +302,13 @@ Docker 默认把 cron 租约写入 `/data/icetv-cron.lock`。多容器部署时�
 
 ## 安全与隐私提醒
 
-为了您的安全和避免潜在的法律风险，部署时**强烈建议关闭公网注册**：
+为了您的安全和避免潜在的法律风险，部署时**建议不要开放公网注册**：
 
-1. **设置环境变量 `ICETV_PASSWORD`**：为您的实例设置一个强密码
-2. **仅供个人使用**：请勿将您的实例链接公开分享或传播
-3. **遵守当地法律**：请确保您的使用行为符合当地法律法规
+1. **设置强密码**：`ICETV_PASSWORD` 与 `AUTH_SECRET` 都使用高熵随机值
+2. **注册默认关闭**：如需放开，在后台「用户配置 - 注册设置」开启并要求邀请码，可设置有效期与可用次数
+3. **反代后设置 `TRUSTED_PROXY_COUNT`**：否则注册限流可被绕过
+4. **仅供个人使用**：请勿将您的实例链接公开分享或传播
+5. **遵守当地法律**：请确保您的使用行为符合当地法律法规
 
 **重要声明**
 
