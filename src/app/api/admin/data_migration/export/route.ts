@@ -4,8 +4,14 @@ import { gzip } from 'zlib';
 
 import { isGuardFailure, requireOwner } from '@/lib/api-auth';
 import { SimpleCrypto } from '@/lib/crypto';
+import {
+  formatBytes,
+  MAX_BACKUP_DECOMPRESSED_BYTES,
+  MAX_BACKUP_FILE_BYTES,
+} from '@/lib/data-migration-limits';
 import { db } from '@/lib/db';
 import { getOwnerUsername } from '@/lib/env.server';
+import { readSiteIconForBackup } from '@/lib/site-icon-storage.server';
 import { CURRENT_VERSION } from '@/lib/version';
 
 export const runtime = 'nodejs';
@@ -28,7 +34,12 @@ export async function POST(req: NextRequest) {
     }
 
     // 解析请求体获取密码
-    const { password } = await req.json();
+    let password: unknown;
+    try {
+      ({ password } = await req.json());
+    } catch {
+      return NextResponse.json({ error: '请求体无效' }, { status: 400 });
+    }
     if (!password || typeof password !== 'string') {
       return NextResponse.json({ error: '请提供加密密码' }, { status: 400 });
     }
@@ -37,6 +48,8 @@ export async function POST(req: NextRequest) {
     const exportData = {
       timestamp: new Date().toISOString(),
       serverVersion: CURRENT_VERSION,
+      // 导入端据此把站长数据改挂到本机站长名下
+      ownerUsername,
       data: {
         // 管理员配置
         adminConfig: config,
@@ -44,6 +57,10 @@ export async function POST(req: NextRequest) {
         users: await db.getAllUsersWithPasswords(),
         // 源站路由统计（按天原始行）
         sourceRouteStats: await db.getAllSourceRouteStatBuckets(),
+        // 邀请码已用次数，真相源是用量表
+        inviteCodeUsage: await db.getAllInviteCodeUsage(),
+        // 本地上传的站点图标，外链图标为 null
+        siteIcon: readSiteIconForBackup(),
         // 所有用户数据
         userData: {} as { [username: string]: any },
       },
@@ -82,6 +99,18 @@ export async function POST(req: NextRequest) {
     // 将数据转换为JSON字符串
     const jsonData = JSON.stringify(exportData);
 
+    const rawBytes = Buffer.byteLength(jsonData);
+    if (rawBytes > MAX_BACKUP_DECOMPRESSED_BYTES) {
+      return NextResponse.json(
+        {
+          error: `数据量 ${formatBytes(rawBytes)} 超过备份上限 ${formatBytes(
+            MAX_BACKUP_DECOMPRESSED_BYTES,
+          )}，请先清理播放记录或观看统计`,
+        },
+        { status: 413 },
+      );
+    }
+
     // 先压缩数据
     const compressedData = await gzipAsync(jsonData);
 
@@ -90,6 +119,19 @@ export async function POST(req: NextRequest) {
       compressedData.toString('base64'),
       password,
     );
+
+    // 导入端校验的是这个成品体积，导出端提前拦住
+    const fileBytes = Buffer.byteLength(encryptedData);
+    if (fileBytes > MAX_BACKUP_FILE_BYTES) {
+      return NextResponse.json(
+        {
+          error: `备份文件 ${formatBytes(fileBytes)} 超过导入上限 ${formatBytes(
+            MAX_BACKUP_FILE_BYTES,
+          )}，请先清理播放记录或观看统计`,
+        },
+        { status: 413 },
+      );
+    }
 
     // 生成文件名
     const now = new Date();
@@ -113,9 +155,6 @@ export async function POST(req: NextRequest) {
     });
   } catch (error) {
     console.error('数据导出失败:', error);
-    return NextResponse.json(
-      { error: error instanceof Error ? error.message : '导出失败' },
-      { status: 500 },
-    );
+    return NextResponse.json({ error: '导出失败' }, { status: 500 });
   }
 }

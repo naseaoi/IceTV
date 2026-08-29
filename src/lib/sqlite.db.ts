@@ -11,6 +11,7 @@ import {
   buildPlaybackSearchLikePattern,
   normalizePlaybackSearchKeyword,
 } from './playback-query';
+import { normalizeRuntimeParam } from './runtime-params';
 import { buildTrackingSql, SQLITE_TRACKING_DIALECT } from './tracking-sql';
 import {
   Favorite,
@@ -1881,6 +1882,10 @@ export class LocalSqliteStorage implements IStorage {
   }
 
   async replaceAllData(data: StorageImportData): Promise<void> {
+    const searchHistoryLimit = normalizeRuntimeParam(
+      'SearchHistoryLimit',
+      data.adminConfig?.SiteConfig?.SearchHistoryLimit,
+    );
     const replace = this.db.transaction((snapshot: StorageImportData) => {
       this.db.exec(`
         DELETE FROM users;
@@ -1897,6 +1902,15 @@ export class LocalSqliteStorage implements IStorage {
       `);
 
       this.stmts.setAdminConfig.run(JSON.stringify(snapshot.adminConfig));
+
+      const insertInviteUsage = this.db.prepare(
+        'INSERT INTO invite_code_usage (code, used_count) VALUES (?, ?)',
+      );
+      for (const [code, usedCount] of Object.entries(
+        snapshot.inviteCodeUsage,
+      )) {
+        insertInviteUsage.run(code, usedCount);
+      }
 
       const insertRouteStat = this.db.prepare(
         `INSERT INTO source_route_stats (
@@ -1940,7 +1954,7 @@ export class LocalSqliteStorage implements IStorage {
         }
 
         userData.searchHistory
-          .slice(0, SEARCH_HISTORY_LIMIT)
+          .slice(0, searchHistoryLimit)
           .forEach((keyword, index) => {
             this.stmts.insertSearchHistory.run(username, keyword, index);
           });

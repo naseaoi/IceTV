@@ -150,6 +150,7 @@ export interface StorageImportData {
   users: { [username: string]: string };
   userData: { [username: string]: StorageUserImportData };
   sourceRouteStats: SourceRouteStatsBucket[];
+  inviteCodeUsage: { [code: string]: number };
 }
 
 // 存储接口

@@ -140,6 +140,49 @@ export function removeSiteIcon(): void {
   removeFilesByPrefix(getSiteIconDir(), SITE_ICON_PREFIX);
 }
 
+const SITE_ICON_EXTENSIONS = Object.values(iconExtensionByContentType);
+
+export type SiteIconBackup = {
+  extension: string;
+  base64: string;
+};
+
+export function readSiteIconForBackup(): SiteIconBackup | null {
+  const filePath = findSiteIconFile();
+  if (!filePath) return null;
+
+  const stat = fs.statSync(filePath);
+  if (stat.size > SITE_ICON_MAX_SIZE) return null;
+
+  return {
+    extension: path.extname(filePath),
+    base64: fs.readFileSync(filePath).toString('base64'),
+  };
+}
+
+export function isSupportedSiteIconExtension(extension: string): boolean {
+  return SITE_ICON_EXTENSIONS.includes(extension);
+}
+
+// 覆盖式写入，导入前先清掉旧图标
+export function restoreSiteIconFromBackup(icon: SiteIconBackup): void {
+  if (!isSupportedSiteIconExtension(icon.extension)) {
+    throw new Error('站点图标格式无效');
+  }
+
+  const data = Buffer.from(icon.base64, 'base64');
+  if (data.byteLength === 0 || data.byteLength > SITE_ICON_MAX_SIZE) {
+    throw new Error('站点图标大小超出限制');
+  }
+
+  const iconDir = ensureSiteIconDir();
+  removeFilesByPrefix(iconDir, SITE_ICON_PREFIX);
+  fs.writeFileSync(
+    path.join(iconDir, `${SITE_ICON_PREFIX}${icon.extension}`),
+    data,
+  );
+}
+
 export function findSiteIconFile(): string | null {
   const iconDir = getSiteIconDir();
   if (!fs.existsSync(iconDir)) return null;

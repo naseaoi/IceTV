@@ -296,6 +296,15 @@ function createFakePool() {
       return [[], []];
     }
 
+    if (
+      normalized ===
+      'INSERT INTO invite_code_usage (code, used_count) VALUES (?, ?)'
+    ) {
+      const [code, usedCount] = params as [string, number];
+      currentState.inviteCodeUsage.set(code, Number(usedCount));
+      return [[], []];
+    }
+
     if (normalized === 'DELETE FROM invite_code_usage') {
       currentState.inviteCodeUsage.clear();
       return [[], []];
@@ -1795,6 +1804,7 @@ describe('mysql storage contract', () => {
           failureCount: 1,
         },
       ],
+      inviteCodeUsage: { 'invite-a': 3 },
     });
 
     await expect(storage.getAdminConfig()).resolves.toEqual(adminConfig);
@@ -1865,6 +1875,7 @@ describe('mysql storage contract', () => {
         },
       },
       sourceRouteStats: [],
+      inviteCodeUsage: {},
     });
 
     const counts = fakePool.getInsertStatementCounts();

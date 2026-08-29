@@ -176,11 +176,40 @@ describe('sqlite storage contract', () => {
       users: { 'legacy-user': 'hash' },
       userData: {},
       sourceRouteStats: [],
+      inviteCodeUsage: {},
     });
 
     const activeAt = await storage.getUserLastLogin('legacy-user');
     expect(activeAt).not.toBeNull();
     expect(activeAt as number).toBeGreaterThanOrEqual(before);
+  });
+
+  it('导入搜索历史按配置上限保留，而非硬编码 20', async () => {
+    const storage = new LocalSqliteStorage(':memory:');
+    const keywords = Array.from({ length: 40 }, (_, i) => `kw-${i}`);
+
+    await storage.replaceAllData({
+      adminConfig: {
+        ...adminConfig,
+        SiteConfig: { ...adminConfig.SiteConfig, SearchHistoryLimit: 30 },
+      },
+      users: { 'demo-user': 'hash' },
+      userData: {
+        'demo-user': {
+          playRecords: {},
+          favorites: {},
+          searchHistory: keywords,
+          skipConfigs: {},
+          playbackSessions: {},
+        },
+      },
+      sourceRouteStats: [],
+      inviteCodeUsage: {},
+    });
+
+    await expect(storage.getSearchHistory('demo-user')).resolves.toEqual(
+      keywords.slice(0, 30),
+    );
   });
 
   it('原子占用邀请码名额，超出上限即失败', async () => {
@@ -396,8 +425,12 @@ describe('sqlite storage contract', () => {
           failureCount: 1,
         },
       ],
+      inviteCodeUsage: { 'invite-a': 3 },
     });
 
+    await expect(storage.getAllInviteCodeUsage()).resolves.toEqual({
+      'invite-a': 3,
+    });
     await expect(storage.getAdminConfig()).resolves.toEqual(adminConfig);
     await expect(storage.getAllUsers()).resolves.toEqual(['demo-user']);
     await expect(storage.getAllUsersWithPasswords()).resolves.toEqual({
@@ -480,6 +513,7 @@ describe('sqlite storage contract', () => {
       users: { abc: 'legacy-password-hash', admin: 'admin-password-hash' },
       userData: {},
       sourceRouteStats: [],
+      inviteCodeUsage: {},
     });
 
     await expect(storage.getAllUsers()).resolves.toEqual(['abc', 'admin']);
@@ -617,6 +651,7 @@ describe('sqlite storage contract', () => {
       users: {},
       userData: {},
       sourceRouteStats: [],
+      inviteCodeUsage: {},
     });
 
     (

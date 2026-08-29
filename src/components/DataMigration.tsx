@@ -15,6 +15,32 @@ const EXPORT_PASSWORD_ID = 'data-export-password';
 const IMPORT_FILE_ID = 'data-import-file';
 const IMPORT_PASSWORD_ID = 'data-import-password';
 
+const TRUNCATION_LABELS: Record<string, string> = {
+  searchHistory: '搜索历史',
+  playbackSessions: '观看统计',
+};
+
+type TruncationReport = {
+  username: string;
+  kind: string;
+  dropped: number;
+};
+
+function summarizeTruncation(reports: TruncationReport[]): string[] {
+  const byKind = new Map<string, { users: number; dropped: number }>();
+  for (const report of reports) {
+    const entry = byKind.get(report.kind) ?? { users: 0, dropped: 0 };
+    entry.users += 1;
+    entry.dropped += report.dropped;
+    byKind.set(report.kind, entry);
+  }
+
+  return [...byKind.entries()].map(
+    ([kind, { users, dropped }]) =>
+      `${TRUNCATION_LABELS[kind] ?? kind}：${users} 个用户共 ${dropped} 条超出上限被丢弃`,
+  );
+}
+
 const DataMigration = ({ onRefreshConfig }: DataMigrationProps) => {
   const [exportPassword, setExportPassword] = useState('');
   const [importPassword, setImportPassword] = useState('');
@@ -179,6 +205,25 @@ const DataMigration = ({ onRefreshConfig }: DataMigrationProps) => {
                 : '未知时间'}
             </p>
             <p>服务器版本: {result.serverVersion || '未知版本'}</p>
+            {result.ownerRemappedFrom && (
+              <p className='mt-2 text-blue-600'>
+                原站站长 {result.ownerRemappedFrom}{' '}
+                的数据已归到本机站长账号下，登录仍使用本机的站长密码。
+              </p>
+            )}
+            {result.siteIconWarning && (
+              <p className='mt-2 text-orange-600'>{result.siteIconWarning}</p>
+            )}
+            {Array.isArray(result.truncated) && result.truncated.length > 0 && (
+              <div className='mt-2 text-orange-600'>
+                <p>部分数据超出上限被截断：</p>
+                <ul className='mt-1 list-inside list-disc'>
+                  {summarizeTruncation(result.truncated).map((line) => (
+                    <li key={line}>{line}</li>
+                  ))}
+                </ul>
+              </div>
+            )}
             <p className='mt-3 text-orange-600'>请刷新页面以查看最新数据。</p>
           </div>
         ),
@@ -274,13 +319,27 @@ const DataMigration = ({ onRefreshConfig }: DataMigrationProps) => {
 
                 <div className='space-y-1 text-xs text-gray-600 dark:text-gray-400'>
                   <p className='mb-2 font-medium text-gray-700 dark:text-gray-300'>
-                    备份内容：
+                    包含：
                   </p>
                   <div className='grid grid-cols-2 gap-1'>
                     <div>• 管理配置</div>
-                    <div>• 用户数据</div>
+                    <div>• 用户与密码</div>
                     <div>• 播放记录</div>
                     <div>• 收藏夹</div>
+                    <div>• 搜索历史</div>
+                    <div>• 跳过片头片尾</div>
+                    <div>• 观看统计</div>
+                    <div>• 邀请码与用量</div>
+                    <div>• 源站路由统计</div>
+                    <div>• 站点图标</div>
+                  </div>
+                  <p className='mb-2 mt-3 font-medium text-gray-700 dark:text-gray-300'>
+                    不包含：
+                  </p>
+                  <div className='space-y-1'>
+                    <div>• 站长账号密码（由环境变量决定）</div>
+                    <div>• 环境变量与部署配置</div>
+                    <div>• 服务端缓存与封面缓存</div>
                   </div>
                 </div>
               </div>

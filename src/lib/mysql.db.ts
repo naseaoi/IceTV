@@ -14,6 +14,7 @@ import {
   buildPlaybackSearchLikePattern,
   normalizePlaybackSearchKeyword,
 } from './playback-query';
+import { normalizeRuntimeParam } from './runtime-params';
 import { getMySqlConnectionUrl } from './storage-type';
 import { buildTrackingSql, MYSQL_TRACKING_DIALECT } from './tracking-sql';
 import {
@@ -1475,6 +1476,10 @@ export class MySqlStorage implements IStorage {
   }
 
   async replaceAllData(data: StorageImportData): Promise<void> {
+    const searchHistoryLimit = normalizeRuntimeParam(
+      'SearchHistoryLimit',
+      data.adminConfig?.SiteConfig?.SearchHistoryLimit,
+    );
     await this.withTransaction(async (connection) => {
       await connection.execute('DELETE FROM users');
       await connection.execute('DELETE FROM play_records');
@@ -1491,6 +1496,16 @@ export class MySqlStorage implements IStorage {
       await connection.execute(
         'INSERT INTO admin_config (id, config_json) VALUES (1, ?)',
         [JSON.stringify(data.adminConfig)],
+      );
+
+      await insertRowsInBatches(
+        connection,
+        'invite_code_usage',
+        ['code', 'used_count'],
+        Object.entries(data.inviteCodeUsage).map(([code, usedCount]) => [
+          code,
+          usedCount,
+        ]),
       );
 
       const routeStatUpdatedAt = Date.now();
@@ -1601,7 +1616,7 @@ export class MySqlStorage implements IStorage {
 
         const searchHistory = userData.searchHistory.slice(
           0,
-          SEARCH_HISTORY_LIMIT,
+          searchHistoryLimit,
         );
         for (let index = 0; index < searchHistory.length; index++) {
           await searchHistories.add([username, searchHistory[index], index]);
