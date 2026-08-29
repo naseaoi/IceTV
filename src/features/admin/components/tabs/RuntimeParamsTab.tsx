@@ -24,6 +24,7 @@ import { AdminConfig } from '@/types/admin';
 type RuntimeParamField = {
   key: keyof RuntimeParamSettings;
   label: string;
+  unit: string;
 };
 
 type RuntimeParamGroup = {
@@ -35,33 +36,40 @@ const runtimeParamGroups: RuntimeParamGroup[] = [
   {
     title: '搜索',
     fields: [
-      { key: 'SearchDownstreamMaxPage', label: '搜索接口可拉取最大页数' },
+      {
+        key: 'SearchDownstreamMaxPage',
+        label: '接口可拉取最大页数',
+        unit: '页',
+      },
       {
         key: 'SearchRequestTimeoutSeconds',
-        label: '搜索接口请求超时时间（秒）',
+        label: '接口请求超时',
+        unit: '秒',
       },
-      { key: 'SearchHistoryLimit', label: '搜索历史条数上限' },
+      { key: 'SearchHistoryLimit', label: '搜索历史条数上限', unit: '条' },
     ],
   },
   {
     title: '播放',
     fields: [
-      { key: 'VodPageTimeoutSeconds', label: '点播页超时时间（秒）' },
+      { key: 'VodPageTimeoutSeconds', label: '点播页超时', unit: '秒' },
       {
         key: 'SourceFailureCooldownSeconds',
-        label: '播放源失败冷却时间（秒）',
+        label: '播放源失败冷却',
+        unit: '秒',
       },
-      { key: 'ContinueWatchingLimit', label: '继续观看首页显示数量' },
+      { key: 'ContinueWatchingLimit', label: '继续观看首页显示', unit: '条' },
     ],
   },
   {
     title: '历史与导入',
     fields: [
-      { key: 'PlaybackHistoryPageSize', label: '历史播放单页数量' },
-      { key: 'PlaybackHistoryLimit', label: '历史播放条数上限' },
+      { key: 'PlaybackHistoryPageSize', label: '历史播放单页数量', unit: '条' },
+      { key: 'PlaybackHistoryLimit', label: '历史播放条数上限', unit: '条' },
       {
         key: 'DataImportPlaybackSessionsLimit',
-        label: '数据导入单用户历史播放上限',
+        label: '导入单用户历史上限',
+        unit: '条',
       },
     ],
   },
@@ -70,16 +78,19 @@ const runtimeParamGroups: RuntimeParamGroup[] = [
     fields: [
       {
         key: 'SiteInterfaceCacheTime',
-        label: '站点接口缓存时间（秒）',
+        label: '站点接口缓存时间',
+        unit: '秒',
       },
-      { key: 'CoverImageCacheSize', label: '图片/封面缓存数量上限' },
+      { key: 'CoverImageCacheSize', label: '图片/封面缓存上限', unit: '张' },
       {
         key: 'LivePrecheckTimeoutSeconds',
-        label: '直播预检查超时时间（秒）',
+        label: '直播预检查超时',
+        unit: '秒',
       },
       {
         key: 'ProxyRequestTimeoutSeconds',
-        label: '代理请求超时时间（秒）',
+        label: '代理请求超时',
+        unit: '秒',
       },
     ],
   },
@@ -176,40 +187,51 @@ const RuntimeParamsTab = ({
       className='space-y-6'
     >
       {runtimeParamGroups.map((group) => (
-        <section
-          key={group.title}
-          className='space-y-4 rounded-lg border border-gray-200 bg-gray-50/70 p-4 dark:border-gray-700 dark:bg-gray-900/35'
-        >
+        <section key={group.title} className='space-y-3'>
           <h3 className='text-sm font-medium text-gray-900 dark:text-gray-100'>
             {group.title}
           </h3>
-          <div className='grid grid-cols-1 gap-6 md:grid-cols-2 xl:grid-cols-3'>
+          <div className='grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4'>
             {group.fields.map((field) => {
               const inputId = getRuntimeParamInputId(field.key);
+              const range = RUNTIME_PARAM_RANGES[field.key];
 
               return (
-                <div key={field.key}>
-                  <label
-                    htmlFor={inputId}
-                    className='mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300'
-                  >
-                    {field.label}
-                  </label>
-                  <input
-                    id={inputId}
-                    name={field.key}
-                    type='number'
-                    min={RUNTIME_PARAM_RANGES[field.key].min}
-                    max={RUNTIME_PARAM_RANGES[field.key].max}
-                    value={runtimeParams[field.key]}
-                    onChange={(event) =>
-                      setRuntimeParams((prev) => ({
-                        ...prev,
-                        [field.key]: Number(event.target.value),
-                      }))
-                    }
-                    className='w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-gray-900 focus:border-transparent focus:ring-2 focus:ring-green-500 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100'
-                  />
+                <div
+                  key={field.key}
+                  className='flex items-center justify-between gap-3 rounded-lg border border-gray-200 bg-white px-3 py-2.5 dark:border-gray-700 dark:bg-gray-800/60'
+                >
+                  <div className='min-w-0'>
+                    <label
+                      htmlFor={inputId}
+                      className='block text-sm font-medium text-gray-700 dark:text-gray-300'
+                    >
+                      {field.label}
+                    </label>
+                    <p className='mt-0.5 text-xs text-gray-400 dark:text-gray-500'>
+                      {range.min} ~ {range.max}
+                    </p>
+                  </div>
+                  <div className='flex shrink-0 items-center gap-1.5'>
+                    <input
+                      id={inputId}
+                      name={field.key}
+                      type='number'
+                      min={range.min}
+                      max={range.max}
+                      value={runtimeParams[field.key]}
+                      onChange={(event) =>
+                        setRuntimeParams((prev) => ({
+                          ...prev,
+                          [field.key]: Number(event.target.value),
+                        }))
+                      }
+                      className='w-20 rounded-lg border border-gray-300 bg-white px-2 py-1.5 text-right text-sm text-gray-900 focus:border-transparent focus:ring-2 focus:ring-green-500 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100'
+                    />
+                    <span className='text-xs text-gray-400 dark:text-gray-500'>
+                      {field.unit}
+                    </span>
+                  </div>
                 </div>
               );
             })}
