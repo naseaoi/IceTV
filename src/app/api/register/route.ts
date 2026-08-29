@@ -1,8 +1,18 @@
 import { NextRequest, NextResponse } from 'next/server';
 
+import {
+  findUsableInviteCode,
+  INVITE_CODE_UNUSABLE_MESSAGE,
+} from '@/features/admin/services/inviteCodes';
+import { getClientIp } from '@/lib/client-ip';
 import { getConfig, saveConfig } from '@/lib/config';
 import { db } from '@/lib/db';
 import { getOwnerUsername } from '@/lib/env.server';
+import { FixedWindowRateLimiter } from '@/lib/fixed-window-rate-limit';
+import {
+  releaseInviteCode,
+  reserveInviteCode,
+} from '@/lib/invite-code-consumption.server';
 import { validateAccountPassword } from '@/lib/password-policy';
 import {
   isValidUsername,
@@ -11,6 +21,11 @@ import {
 } from '@/lib/username';
 
 export const runtime = 'nodejs';
+
+const MAX_REGISTERS_PER_WINDOW = 10;
+const WINDOW_MS = 10 * 60_000;
+
+const limiter = new FixedWindowRateLimiter(MAX_REGISTERS_PER_WINDOW, WINDOW_MS);
 
 function isDuplicateUserError(error: unknown): boolean {
   if (
@@ -29,9 +44,21 @@ function isDuplicateUserError(error: unknown): boolean {
 
 export async function POST(request: NextRequest) {
   try {
+    const verdict = limiter.check(getClientIp(request));
+    if (!verdict.allowed) {
+      return NextResponse.json(
+        { error: '注册过于频繁，请稍后再试' },
+        {
+          status: 429,
+          headers: { 'Retry-After': String(verdict.retryAfterSeconds) },
+        },
+      );
+    }
+
     const body = (await request.json()) as {
       username?: string;
       password?: string;
+      inviteCode?: string;
     };
 
     const username = normalizeUsername(body.username || '');
@@ -61,13 +88,45 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: '当前未开放注册' }, { status: 403 });
     }
 
+    if (config.UserConfig.RequireInviteCode) {
+      const usable = findUsableInviteCode(
+        config.UserConfig.InviteCodes || [],
+        body.inviteCode,
+      );
+      if (!usable) {
+        return NextResponse.json(
+          { error: INVITE_CODE_UNUSABLE_MESSAGE },
+          { status: 403 },
+        );
+      }
+    }
+
     const exists = await db.checkUserExist(username);
     if (exists) {
       return NextResponse.json({ error: '用户名已存在' }, { status: 409 });
     }
 
-    await db.registerUser(username, password);
-    void saveConfig(config).catch((error) => {
+    let reserved = false;
+    if (config.UserConfig.RequireInviteCode) {
+      reserved = await reserveInviteCode(body.inviteCode);
+      if (!reserved) {
+        return NextResponse.json(
+          { error: INVITE_CODE_UNUSABLE_MESSAGE },
+          { status: 403 },
+        );
+      }
+    }
+
+    try {
+      await db.registerUser(username, password);
+    } catch (error) {
+      if (reserved) {
+        await releaseInviteCode(body.inviteCode);
+      }
+      throw error;
+    }
+
+    void saveConfig(await getConfig()).catch((error) => {
       console.warn('注册用户配置同步失败:', error);
     });
 
