@@ -80,11 +80,11 @@ export function useAdminUserActions(options: UseAdminUserActionsOptions) {
   );
 
   const previewInactiveUsers = useCallback(
-    async (inactiveDays: number) => {
+    async (inactiveDays: number, includeNeverActive: boolean) => {
       try {
         const data = await adminPost<{ candidates: InactiveCandidate[] }>(
           '/api/admin/user',
-          { action: 'previewInactiveUsers', inactiveDays },
+          { action: 'previewInactiveUsers', inactiveDays, includeNeverActive },
           '筛选不活跃用户失败',
         );
         return data.candidates || [];
@@ -100,14 +100,23 @@ export function useAdminUserActions(options: UseAdminUserActionsOptions) {
   );
 
   const deleteInactiveUsers = useCallback(
-    async (inactiveDays: number, usernames: string[]) => {
+    async (
+      inactiveDays: number,
+      usernames: string[],
+      includeNeverActive: boolean,
+    ) => {
       try {
         const data = await adminPost<{
           deletedCount: number;
           skippedCount: number;
         }>(
           '/api/admin/user',
-          { action: 'deleteInactiveUsers', inactiveDays, usernames },
+          {
+            action: 'deleteInactiveUsers',
+            inactiveDays,
+            usernames,
+            includeNeverActive,
+          },
           '清理不活跃用户失败',
         );
         await refreshConfig();

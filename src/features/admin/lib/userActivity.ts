@@ -23,7 +23,7 @@ export function formatLastActive(timestamp: number | undefined): string {
 }
 
 export function formatLastActiveTooltip(
-  timestamp: number | undefined,
+  timestamp: number | null | undefined,
 ): string | undefined {
   return formatDateTime(timestamp);
 }

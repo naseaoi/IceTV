@@ -9,13 +9,18 @@ import {
   MIN_INACTIVE_DAYS,
 } from '@/features/admin/services/inactiveUsers';
 
+const CHECKBOX_CLASS =
+  'h-4 w-4 rounded border-gray-300 bg-gray-100 text-blue-600 accent-blue-600 checked:border-blue-600 checked:bg-blue-600 focus:ring-2 focus:ring-blue-500 dark:border-gray-600 dark:bg-gray-700 dark:accent-blue-500 dark:ring-offset-gray-800 dark:checked:border-blue-500 dark:checked:bg-blue-500 dark:focus:ring-blue-600';
+
 interface CleanupInactiveUsersDialogProps {
   isOpen: boolean;
   inactiveDays: number;
+  includeNeverActive: boolean;
   candidates: InactiveCandidate[] | null;
   isScanning: boolean;
   isDeleting: boolean;
   onInactiveDaysChange: (next: number) => void;
+  onIncludeNeverActiveChange: (next: boolean) => void;
   onScan: () => void;
   onConfirm: () => void;
   onClose: () => void;
@@ -24,15 +29,20 @@ interface CleanupInactiveUsersDialogProps {
 export function CleanupInactiveUsersDialog({
   isOpen,
   inactiveDays,
+  includeNeverActive,
   candidates,
   isScanning,
   isDeleting,
   onInactiveDaysChange,
+  onIncludeNeverActiveChange,
   onScan,
   onConfirm,
   onClose,
 }: CleanupInactiveUsersDialogProps) {
   const hasCandidates = !!candidates && candidates.length > 0;
+  const neverActiveCount =
+    candidates?.filter((candidate) => candidate.lastActiveAt === null).length ||
+    0;
 
   return (
     <AdminDialog
@@ -44,7 +54,7 @@ export function CleanupInactiveUsersDialog({
       <div className='mb-6'>
         <div className='mb-4 rounded-lg border border-amber-200 bg-amber-50 p-4 dark:border-amber-800 dark:bg-amber-900/20'>
           <p className='text-sm text-amber-700 dark:text-amber-400'>
-            只清理普通用户，站长与管理员不受影响；从未活跃过的用户会被跳过。
+            只清理普通用户，站长与管理员不受影响。
           </p>
         </div>
 
@@ -76,12 +86,30 @@ export function CleanupInactiveUsersDialog({
           </button>
         </div>
 
+        <label className='mt-4 flex cursor-pointer items-start gap-2'>
+          <input
+            type='checkbox'
+            checked={includeNeverActive}
+            onChange={(e) => onIncludeNeverActiveChange(e.target.checked)}
+            className={`mt-0.5 ${CHECKBOX_CLASS}`}
+          />
+          <span className='text-sm text-gray-700 dark:text-gray-300'>
+            同时删除「从未活跃」的用户
+            <span className='mt-0.5 block text-xs text-gray-500 dark:text-gray-400'>
+              指没有任何活跃记录的旧账号，无法判断注册时长，不受上面的天数限制
+            </span>
+          </span>
+        </label>
+
         {candidates && (
           <div className='mt-4'>
             {hasCandidates ? (
               <>
                 <p className='mb-2 text-sm text-gray-700 dark:text-gray-300'>
-                  匹配到 <strong>{candidates.length}</strong> 个用户，确认后将被
+                  匹配到 <strong>{candidates.length}</strong> 个用户
+                  {neverActiveCount > 0 &&
+                    `（其中 ${neverActiveCount} 个从未活跃）`}
+                  ，确认后将被
                   <strong className='text-red-600 dark:text-red-400'>
                     永久删除
                   </strong>
@@ -111,7 +139,9 @@ export function CleanupInactiveUsersDialog({
                               candidate.lastActiveAt,
                             )}
                           >
-                            {candidate.inactiveDays} 天
+                            {candidate.inactiveDays === null
+                              ? '从未活跃'
+                              : `${candidate.inactiveDays} 天`}
                           </td>
                         </tr>
                       ))}

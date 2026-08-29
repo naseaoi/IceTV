@@ -533,6 +533,9 @@ export async function handleAdminUserAction({
           lastActiveAt: await db.getAllUserLastActive(),
           inactiveDays,
           operatorUsername: username,
+          includeNeverActive:
+            (body as { includeNeverActive?: unknown }).includeNeverActive ===
+            true,
         });
 
         return toActionResponse(
@@ -567,6 +570,9 @@ export async function handleAdminUserAction({
           lastActiveAt: await db.getAllUserLastActive(),
           inactiveDays,
           operatorUsername: username,
+          includeNeverActive:
+            (body as { includeNeverActive?: unknown }).includeNeverActive ===
+            true,
         });
         const deletable = resolveConfirmedDeletions(
           candidates,
