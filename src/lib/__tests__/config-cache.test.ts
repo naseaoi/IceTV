@@ -31,6 +31,8 @@ const baseConfig: AdminConfig = {
   UserConfig: {
     Users: [{ username: 'owner-1', role: 'owner', banned: false }],
     OpenRegister: false,
+    RequireInviteCode: false,
+    InviteCodes: [],
     Tags: [],
   },
   SourceConfig: [],

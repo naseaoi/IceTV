@@ -1,5 +1,6 @@
 import 'server-only';
 
+import { sanitizeInviteCodes } from '@/features/admin/services/inviteCodes';
 import {
   DEFAULT_BANGUMI_DATA_SOURCE,
   normalizeBangumiDataSource,
@@ -443,6 +444,13 @@ export async function getConfigForRead(): Promise<Readonly<AdminConfig>> {
   return deepFreeze(await loadConfig());
 }
 
+// 绕过 TTL 缓存直读，供后台面板等必须看到最新写入的场景
+export async function getConfigFresh(): Promise<Readonly<AdminConfig>> {
+  cachedConfigLoadedAt = 0;
+  inflightConfigLoad = null;
+  return deepFreeze(await loadConfig());
+}
+
 function isCachedConfigFresh(): boolean {
   return Date.now() - cachedConfigLoadedAt < getConfigCacheTtlMs();
 }
@@ -468,6 +476,12 @@ export function configSelfCheck(adminConfig: AdminConfig): AdminConfig {
   if (typeof adminConfig.UserConfig.OpenRegister !== 'boolean') {
     adminConfig.UserConfig.OpenRegister = false;
   }
+  if (typeof adminConfig.UserConfig.RequireInviteCode !== 'boolean') {
+    adminConfig.UserConfig.RequireInviteCode = false;
+  }
+  adminConfig.UserConfig.InviteCodes = sanitizeInviteCodes(
+    adminConfig.UserConfig.InviteCodes,
+  );
   if (!adminConfig.SourceConfig || !Array.isArray(adminConfig.SourceConfig)) {
     adminConfig.SourceConfig = [];
   }
@@ -932,6 +946,7 @@ export async function getPublicConfig() {
     Announcement: config.SiteConfig.Announcement,
     FooterText: normalizeSiteFooterText(config.SiteConfig.FooterText),
     OpenRegister: !!config.UserConfig.OpenRegister,
+    RequireInviteCode: !!config.UserConfig.RequireInviteCode,
     DisableYellowFilter: config.SiteConfig.DisableYellowFilter,
     EnableLiveEntry: config.SiteConfig.EnableLiveEntry,
     DefaultAggregateSearch: config.SiteConfig.DefaultAggregateSearch,

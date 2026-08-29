@@ -77,6 +77,7 @@ export default async function RootLayout({
   const runtimeConfig = {
     STORAGE_TYPE: storageType,
     OPEN_REGISTER: publicConfig.OpenRegister,
+    REQUIRE_INVITE_CODE: publicConfig.RequireInviteCode,
     UPDATE_REPOS: process.env.NEXT_PUBLIC_UPDATE_REPOS || 'naseaoi/IceTV',
     UPDATE_BRANCH: CURRENT_UPDATE_BRANCH,
     DOUBAN_PROXY_TYPE: publicConfig.DoubanProxyType,

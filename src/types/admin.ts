@@ -48,6 +48,15 @@ export interface AdminConfig {
       tags?: string[];
     }[];
     OpenRegister?: boolean;
+    RequireInviteCode?: boolean;
+    InviteCodes?: {
+      code: string;
+      createdAt: number;
+      expiresAt: number;
+      createdBy: string;
+      maxUses?: number;
+      usedCount?: number;
+    }[];
     Tags?: {
       name: string;
       enabledApis: string[];
