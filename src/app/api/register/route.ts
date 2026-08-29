@@ -126,6 +126,13 @@ export async function POST(request: NextRequest) {
       throw error;
     }
 
+    // 注册即写活跃记录，避免新账号被当成「从未活跃」清理
+    try {
+      await db.recordUserActivity(username, Date.now());
+    } catch (error) {
+      console.warn('记录注册活跃时间失败:', error);
+    }
+
     void saveConfig(await getConfig()).catch((error) => {
       console.warn('注册用户配置同步失败:', error);
     });

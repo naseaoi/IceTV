@@ -20,6 +20,7 @@ jest.mock('@/lib/db', () => ({
   db: {
     checkUserExist: jest.fn(),
     registerUser: jest.fn(),
+    recordUserActivity: jest.fn(),
   },
 }));
 
@@ -89,6 +90,7 @@ describe('register route', () => {
     (saveConfig as jest.Mock).mockResolvedValue(undefined);
     (db.checkUserExist as jest.Mock).mockResolvedValue(false);
     (db.registerUser as jest.Mock).mockResolvedValue(undefined);
+    (db.recordUserActivity as jest.Mock).mockResolvedValue(undefined);
     (reserveInviteCode as jest.Mock).mockResolvedValue(true);
     (releaseInviteCode as jest.Mock).mockResolvedValue(undefined);
   });
@@ -123,6 +125,44 @@ describe('register route', () => {
       'strong-password',
     );
     expect(saveConfig).toHaveBeenCalledTimes(1);
+  });
+
+  it('注册成功即写入活跃记录', async () => {
+    const { POST } = require('./route');
+
+    await POST(
+      createRequest({ username: 'demo-user', password: 'strong-password' }),
+    );
+
+    expect(db.recordUserActivity).toHaveBeenCalledWith(
+      'demo-user',
+      expect.any(Number),
+    );
+  });
+
+  it('活跃记录写入失败不影响注册结果', async () => {
+    (db.recordUserActivity as jest.Mock).mockRejectedValueOnce(
+      new Error('db down'),
+    );
+    const { POST } = require('./route');
+
+    const response = await POST(
+      createRequest({ username: 'demo-user', password: 'strong-password' }),
+    );
+
+    await expect(response.json()).resolves.toEqual({ ok: true });
+    expect(response.status).toBe(200);
+  });
+
+  it('注册失败不写活跃记录', async () => {
+    (db.registerUser as jest.Mock).mockRejectedValueOnce(new Error('db down'));
+    const { POST } = require('./route');
+
+    await POST(
+      createRequest({ username: 'demo-user', password: 'strong-password' }),
+    );
+
+    expect(db.recordUserActivity).not.toHaveBeenCalled();
   });
 
   it('rejects weak passwords', async () => {
