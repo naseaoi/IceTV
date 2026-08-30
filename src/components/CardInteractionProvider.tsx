@@ -106,6 +106,7 @@ export function CardInteractionProvider({
 }) {
   const [actionSheetState, setActionSheetState] =
     useState<ActionSheetState>(null);
+  const actionSheetStateRef = useRef<ActionSheetState>(null);
   const [confirmState, setConfirmState] = useState<ConfirmState>(null);
 
   const favoritesRef = useRef<Record<string, Favorite>>({});
@@ -167,33 +168,29 @@ export function CardInteractionProvider({
 
   const showActionSheet = useCallback(
     (ownerId: string, payload: ActionSheetPayload, onClose?: () => void) => {
-      setActionSheetState((current) => {
-        if (current && current.ownerId !== ownerId) {
-          current.onClose?.();
-        }
+      const current = actionSheetStateRef.current;
+      if (current && current.ownerId !== ownerId) {
+        current.onClose?.();
+      }
 
-        return { ownerId, payload, onClose };
-      });
+      const nextState = { ownerId, payload, onClose };
+      actionSheetStateRef.current = nextState;
+      setActionSheetState(nextState);
     },
     [],
   );
 
   const hideActionSheet = useCallback((ownerId?: string) => {
-    setActionSheetState((current) => {
-      if (!current) {
-        return current;
-      }
+    const current = actionSheetStateRef.current;
+    if (!current || (ownerId && current.ownerId !== ownerId)) {
+      return;
+    }
 
-      if (ownerId && current.ownerId !== ownerId) {
-        return current;
-      }
-
-      if (!ownerId) {
-        current.onClose?.();
-      }
-
-      return null;
-    });
+    actionSheetStateRef.current = null;
+    setActionSheetState(null);
+    if (!ownerId) {
+      current.onClose?.();
+    }
   }, []);
 
   const showConfirm = useCallback(

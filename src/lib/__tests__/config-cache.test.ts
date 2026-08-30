@@ -31,6 +31,8 @@ const baseConfig: AdminConfig = {
   UserConfig: {
     Users: [{ username: 'owner-1', role: 'owner', banned: false }],
     OpenRegister: false,
+    RequireInviteCode: false,
+    InviteCodes: [],
     Tags: [],
   },
   SourceConfig: [],
@@ -69,6 +71,14 @@ async function loadConfigModule(
 
 function cloneBaseConfig(): AdminConfig {
   return JSON.parse(JSON.stringify(baseConfig)) as AdminConfig;
+}
+
+function createDeferred<T>() {
+  let resolve: (value: T) => void = () => undefined;
+  const promise = new Promise<T>((res) => {
+    resolve = res;
+  });
+  return { promise, resolve };
 }
 
 describe('config cache persistence', () => {
@@ -136,6 +146,90 @@ describe('config cache persistence', () => {
     const third = await getConfigForRead();
     expect(third.SiteConfig.SiteName).toBe('Next');
     expect(getAdminConfig).toHaveBeenCalledTimes(2);
+  });
+
+  it('collapses concurrent reads into a single database load', async () => {
+    const deferred = createDeferred<AdminConfig>();
+    const getAdminConfig = jest.fn().mockReturnValue(deferred.promise);
+    const { getConfigForRead } = await loadConfigModule(jest.fn(), {
+      getAdminConfig,
+    });
+
+    const reads = Promise.all([
+      getConfigForRead(),
+      getConfigForRead(),
+      getConfigForRead(),
+    ]);
+    deferred.resolve(cloneBaseConfig());
+    const [first, second, third] = await reads;
+
+    expect(getAdminConfig).toHaveBeenCalledTimes(1);
+    expect(second).toBe(first);
+    expect(third).toBe(first);
+  });
+
+  it('keeps saved config when a load is still in flight', async () => {
+    const deferred = createDeferred<AdminConfig>();
+    let call = 0;
+    const getAdminConfig = jest.fn().mockImplementation(() => {
+      call += 1;
+      return call === 1 ? deferred.promise : Promise.resolve(cloneBaseConfig());
+    });
+    const { getConfigForRead, saveConfig } = await loadConfigModule(jest.fn(), {
+      getAdminConfig,
+    });
+
+    const pendingRead = getConfigForRead();
+    const saved = cloneBaseConfig();
+    saved.SiteConfig.SiteName = 'Saved';
+    await saveConfig(saved);
+
+    deferred.resolve(cloneBaseConfig());
+    await pendingRead;
+
+    const after = await getConfigForRead();
+    expect(after.SiteConfig.SiteName).toBe('Saved');
+  });
+
+  it('reflects a saved site name in the public config immediately', async () => {
+    const { getConfig, saveConfig, getPublicConfig } = await loadConfigModule(
+      jest.fn(),
+    );
+    const current = await getConfig();
+    expect((await getPublicConfig()).SiteName).toBe('IceTV');
+
+    await saveConfig({
+      ...current,
+      SiteConfig: { ...current.SiteConfig, SiteName: 'Next' },
+    });
+
+    expect((await getPublicConfig()).SiteName).toBe('Next');
+  });
+
+  it('reflects a saved custom category in the public config immediately', async () => {
+    const { getConfig, saveConfig, getPublicConfig } = await loadConfigModule(
+      jest.fn(),
+    );
+    const current = await getConfig();
+    expect((await getPublicConfig()).CustomCategories).toHaveLength(0);
+
+    await saveConfig({
+      ...current,
+      CustomCategories: [
+        {
+          name: '新分类',
+          type: 'movie',
+          query: 'fresh',
+          from: 'custom',
+          disabled: false,
+        },
+      ],
+    });
+
+    const publicConfig = await getPublicConfig();
+    expect(publicConfig.CustomCategories).toEqual([
+      { name: '新分类', type: 'movie', query: 'fresh' },
+    ]);
   });
 
   it('returns detached api site entries from read cache', async () => {

@@ -19,6 +19,7 @@ import { CURRENT_UPDATE_BRANCH } from '@/lib/version';
 import { CardInteractionProvider } from '../components/CardInteractionProvider';
 import { ClientErrorReporter } from '../components/ClientErrorReporter';
 import { GlobalErrorIndicator } from '../components/GlobalErrorIndicator';
+import { MessageCenterProvider } from '../components/messages/MessageCenterProvider';
 import { RuntimeConfigProvider } from '../components/RuntimeConfigProvider';
 import { SiteProvider } from '../components/SiteProvider';
 import { SWRegister } from '../components/SWRegister';
@@ -76,6 +77,7 @@ export default async function RootLayout({
   const runtimeConfig = {
     STORAGE_TYPE: storageType,
     OPEN_REGISTER: publicConfig.OpenRegister,
+    REQUIRE_INVITE_CODE: publicConfig.RequireInviteCode,
     UPDATE_REPOS: process.env.NEXT_PUBLIC_UPDATE_REPOS || 'naseaoi/IceTV',
     UPDATE_BRANCH: CURRENT_UPDATE_BRANCH,
     DOUBAN_PROXY_TYPE: publicConfig.DoubanProxyType,
@@ -171,12 +173,14 @@ export default async function RootLayout({
               footerText={initialFooterText}
             >
               <AuthProvider initialSession={initialAuthSession}>
-                <CardInteractionProvider>
-                  {children}
-                  <ClientErrorReporter />
-                  <GlobalErrorIndicator />
-                  <SWRegister />
-                </CardInteractionProvider>
+                <MessageCenterProvider>
+                  <CardInteractionProvider>
+                    {children}
+                    <ClientErrorReporter />
+                    <GlobalErrorIndicator />
+                    <SWRegister />
+                  </CardInteractionProvider>
+                </MessageCenterProvider>
               </AuthProvider>
             </SiteProvider>
           </RuntimeConfigProvider>

@@ -31,6 +31,19 @@ type ArtPlayerControlsOptions = {
   handleNextEpisode: () => void;
 };
 
+const AD_BLOCK_ICON =
+  '<svg width="24" height="24" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><text x="12" y="12" font-size="11" font-weight="bold" text-anchor="middle" dominant-baseline="central" fill="#ffffff">AD</text><path d="M4 19L20 5" stroke="#ffffff" stroke-width="2" stroke-linecap="round"/></svg>';
+
+// lucide ListVideo
+const AUTO_PLAY_NEXT_ICON =
+  '<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#ffffff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 12H3"/><path d="M16 6H3"/><path d="M12 18H3"/><path d="m16 12 5 3-5 3v-6Z"/></svg>';
+
+const SKIP_INTRO_ICON =
+  '<svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M5 6L5 18" stroke="#ffffff" stroke-width="2" stroke-linecap="round"/><path d="M9 12L17 12" stroke="#ffffff" stroke-width="2" stroke-linecap="round"/><circle cx="19" cy="12" r="2" fill="#ffffff"/></svg>';
+
+const SKIP_OUTRO_ICON =
+  '<svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><circle cx="5" cy="12" r="2" fill="#ffffff"/><path d="M7 12L15 12" stroke="#ffffff" stroke-width="2" stroke-linecap="round"/><path d="M19 6L19 18" stroke="#ffffff" stroke-width="2" stroke-linecap="round"/></svg>';
+
 export function createArtPlayerSettings({
   artPlayerRef,
   blockAdEnabled,
@@ -45,11 +58,12 @@ export function createArtPlayerSettings({
 }: ArtPlayerSettingsOptions) {
   return [
     {
+      name: '去广告',
       html: '去广告',
-      icon: '<text x="50%" y="50%" font-size="20" font-weight="bold" text-anchor="middle" dominant-baseline="middle" fill="#ffffff">AD</text>',
-      tooltip: blockAdEnabled ? '已开启' : '已关闭',
-      onClick() {
-        const newVal = !blockAdEnabled;
+      icon: AD_BLOCK_ICON,
+      switch: blockAdEnabled,
+      onSwitch: function (item: { switch?: boolean }) {
+        const newVal = !item.switch;
         try {
           writeBlockAdEnabled(newVal);
           if (artPlayerRef.current) {
@@ -63,14 +77,15 @@ export function createArtPlayerSettings({
           }
           setBlockAdEnabled(newVal);
         } catch {
-          return blockAdEnabled ? '当前开启' : '当前关闭';
+          return Boolean(item.switch);
         }
-        return newVal ? '当前开启' : '当前关闭';
+        return newVal;
       },
     },
     {
       name: '自动连播',
       html: '自动连播',
+      icon: AUTO_PLAY_NEXT_ICON,
       switch: autoPlayNextEnabled,
       onSwitch: function (item: { switch?: boolean }) {
         const newVal = !item.switch;
@@ -107,7 +122,7 @@ export function createArtPlayerSettings({
     {
       name: '设置片头',
       html: '设置片头',
-      icon: '<svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><circle cx="5" cy="12" r="2" fill="#ffffff"/><path d="M9 12L17 12" stroke="#ffffff" stroke-width="2"/><path d="M17 6L17 18" stroke="#ffffff" stroke-width="2"/></svg>',
+      icon: SKIP_INTRO_ICON,
       tooltip:
         skipConfigRef.current.intro_time === 0
           ? '设置片头时间'
@@ -127,7 +142,7 @@ export function createArtPlayerSettings({
     {
       name: '设置片尾',
       html: '设置片尾',
-      icon: '<svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M7 6L7 18" stroke="#ffffff" stroke-width="2"/><path d="M7 12L15 12" stroke="#ffffff" stroke-width="2"/><circle cx="19" cy="12" r="2" fill="#ffffff"/></svg>',
+      icon: SKIP_OUTRO_ICON,
       tooltip:
         skipConfigRef.current.outro_time >= 0
           ? '设置片尾时间'

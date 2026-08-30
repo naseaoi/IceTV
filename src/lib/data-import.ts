@@ -7,6 +7,10 @@ import { getOwnerUsername } from './env.server';
 import { hashPassword } from './password';
 import { normalizeRuntimeParams } from './runtime-params';
 import {
+  type SiteIconBackup,
+  isSupportedSiteIconExtension,
+} from './site-icon-storage.server';
+import {
   Favorite,
   PlaybackSession,
   PlayRecord,
@@ -32,6 +36,11 @@ const MAX_LONG_STRING_LENGTH = 2000000;
 const MAX_SECONDS = 365 * 24 * 60 * 60;
 const MAX_SOURCE_ROUTE_STATS = 20000;
 const MAX_ROUTE_STAT_COUNT = 1000000000;
+const MAX_INVITE_CODE_USAGE = 1000;
+const MAX_INVITE_CODE_USED = 1000000;
+// 512KB 原始上限，base64 后约 4/3
+const MAX_SITE_ICON_BASE64 = Math.ceil((512 * 1024 * 4) / 3) + 8;
+const MAX_TIMESTAMP_MS = 4102444800000;
 
 export class ImportValidationError extends Error {
   constructor(
@@ -43,11 +52,44 @@ export class ImportValidationError extends Error {
   }
 }
 
+export type TruncationKind = 'searchHistory' | 'playbackSessions';
+
+export type TruncationReport = {
+  username: string;
+  kind: TruncationKind;
+  dropped: number;
+};
+
+// 导入时被上限裁掉的条目，用于回报给站长而不是静默丢弃
+class TruncationCollector {
+  private readonly items: TruncationReport[] = [];
+
+  add(username: string, kind: TruncationKind, dropped: number): void {
+    if (dropped <= 0) return;
+    this.items.push({ username, kind, dropped });
+  }
+
+  rename(from: string, to: string): void {
+    for (const item of this.items) {
+      if (item.username === from) {
+        item.username = to;
+      }
+    }
+  }
+
+  toArray(): TruncationReport[] {
+    return this.items;
+  }
+}
+
 export type ParsedImportData = {
   snapshot: StorageImportData;
   importedUsers: number;
   timestamp?: string;
   serverVersion: string;
+  ownerRemappedFrom?: string;
+  siteIcon: SiteIconBackup | null;
+  truncated: TruncationReport[];
 };
 
 export async function parseImportData(
@@ -59,16 +101,31 @@ export async function parseImportData(
   const userDataInput = requireObject(data.userData, '备份文件格式无效');
   const importedPasswords = normalizeImportedPasswords(data.users);
   const sourceRouteStats = normalizeSourceRouteStats(data.sourceRouteStats);
+  const inviteCodeUsage = normalizeInviteCodeUsage(data.inviteCodeUsage);
+  const siteIcon = normalizeSiteIcon(data.siteIcon);
   const userEntries = Object.entries(userDataInput);
 
   if (userEntries.length > MAX_USERS) {
     throw new ImportValidationError('用户数量超出限制', 413);
   }
 
+  const localOwner = normalizeUsername(getOwnerUsername() || '');
+  const backupOwner = normalizeBackupOwner(root.ownerUsername);
+  const shouldRemapOwner = Boolean(
+    backupOwner && localOwner && backupOwner !== localOwner,
+  );
+
+  if (shouldRemapOwner && hasUser(userDataInput, localOwner)) {
+    throw new ImportValidationError(
+      `备份中已存在与本机站长同名的用户 ${localOwner}，无法迁移站长 ${backupOwner} 的数据，请先在原站重命名该用户`,
+    );
+  }
+
   let totalItems = 0;
+  let ownerRemappedFrom: string | undefined;
   const users: Record<string, string> = {};
   const userData: Record<string, StorageUserImportData> = {};
-  const ownerUsername = getOwnerUsername();
+  const truncated = new TruncationCollector();
 
   for (const [username, rawUserData] of userEntries) {
     assertKey(username, '用户名', MAX_USERNAME_LENGTH);
@@ -77,6 +134,7 @@ export async function parseImportData(
       username,
       adminConfig.SiteConfig.SearchHistoryLimit,
       adminConfig.SiteConfig.DataImportPlaybackSessionsLimit,
+      truncated,
     );
     totalItems +=
       Object.keys(normalizedUserData.playRecords).length +
@@ -89,13 +147,28 @@ export async function parseImportData(
       throw new ImportValidationError('导入数据量超出限制', 413);
     }
 
-    userData[username] = normalizedUserData;
-    if (username !== ownerUsername) {
-      users[username] =
-        importedPasswords[normalizeUsername(username)] ??
-        (await hashPassword(randomUUID()));
+    const normalizedName = normalizeUsername(username);
+    const isBackupOwner =
+      Boolean(backupOwner) && normalizedName === backupOwner;
+    const targetName =
+      shouldRemapOwner && isBackupOwner ? localOwner : normalizedName;
+    if (shouldRemapOwner && isBackupOwner) {
+      ownerRemappedFrom = backupOwner;
+    }
+
+    if (targetName !== normalizedName) {
+      truncated.rename(username, targetName);
+    }
+
+    userData[targetName] = normalizedUserData;
+    // 站长凭据来自环境变量，不写 users 表
+    if (targetName !== localOwner) {
+      users[targetName] =
+        importedPasswords[normalizedName] ?? (await hashPassword(randomUUID()));
     }
   }
+
+  alignConfigOwner(adminConfig, localOwner, backupOwner);
 
   return {
     snapshot: {
@@ -103,6 +176,7 @@ export async function parseImportData(
       users,
       userData,
       sourceRouteStats,
+      inviteCodeUsage,
     },
     importedUsers: userEntries.length,
     timestamp:
@@ -117,7 +191,103 @@ export async function parseImportData(
             MAX_SHORT_STRING_LENGTH,
           )
         : '未知版本',
+    ...(ownerRemappedFrom ? { ownerRemappedFrom } : {}),
+    siteIcon,
+    truncated: truncated.toArray(),
   };
+}
+
+function normalizeSiteIcon(value: unknown): SiteIconBackup | null {
+  if (value === undefined || value === null) {
+    return null;
+  }
+  const input = requireObject(value, '站点图标格式无效');
+  const extension = limitString(input.extension, '站点图标扩展名', 16);
+  if (!isSupportedSiteIconExtension(extension)) {
+    throw new ImportValidationError('站点图标格式无效');
+  }
+
+  const base64 = limitString(
+    input.base64,
+    '站点图标数据',
+    MAX_SITE_ICON_BASE64,
+  );
+  if (!base64 || !/^[A-Za-z0-9+/]+={0,2}$/.test(base64)) {
+    throw new ImportValidationError('站点图标数据格式无效');
+  }
+
+  return { extension, base64 };
+}
+
+function normalizeBackupOwner(value: unknown): string {
+  if (value === undefined || value === null) return '';
+  return normalizeUsername(
+    limitString(value, '备份站长用户名', MAX_USERNAME_LENGTH),
+  );
+}
+
+function hasUser(userDataInput: Record<string, any>, target: string): boolean {
+  return Object.keys(userDataInput).some(
+    (name) => normalizeUsername(name) === target,
+  );
+}
+
+// 站长条目按本机环境变量重写，避免面板里残留原站站长
+function alignConfigOwner(
+  config: AdminConfig,
+  localOwner: string,
+  backupOwner: string,
+): void {
+  if (!localOwner) return;
+
+  const users = config.UserConfig.Users;
+  const kept = users
+    .filter((user) => {
+      const name = normalizeUsername(user.username);
+      return name !== localOwner && !(backupOwner && name === backupOwner);
+    })
+    // 本机只能有一个站长，原站遗留的 owner 降级
+    .map((user) =>
+      user.role === 'owner' ? { ...user, role: 'user' as const } : user,
+    );
+  const previousOwner = users.find(
+    (user) =>
+      normalizeUsername(user.username) === localOwner ||
+      (backupOwner && normalizeUsername(user.username) === backupOwner),
+  );
+
+  config.UserConfig.Users = [
+    {
+      username: localOwner,
+      role: 'owner',
+      banned: false,
+      ...(previousOwner?.enabledApis
+        ? { enabledApis: [...previousOwner.enabledApis] }
+        : {}),
+      ...(previousOwner?.tags ? { tags: [...previousOwner.tags] } : {}),
+    },
+    ...kept,
+  ];
+}
+
+function normalizeInviteCodeUsage(value: unknown): Record<string, number> {
+  if (value === undefined || value === null) {
+    return {};
+  }
+  const input = requireObject(value, '邀请码用量格式无效');
+  const entries = Object.entries(input);
+  if (entries.length > MAX_INVITE_CODE_USAGE) {
+    throw new ImportValidationError('邀请码用量数量超出限制', 413);
+  }
+
+  const output: Record<string, number> = {};
+  for (const [code, used] of entries) {
+    assertKey(code, '邀请码', MAX_KEY_LENGTH);
+    output[code] = Math.floor(
+      assertBoundedNumber(used, '邀请码已用次数', 0, MAX_INVITE_CODE_USED),
+    );
+  }
+  return output;
 }
 
 function normalizeImportedPasswords(value: unknown): Record<string, string> {
@@ -405,6 +575,7 @@ function normalizeUserData(
   username: string,
   searchHistoryLimit: number,
   playbackSessionsLimit: number,
+  truncated: TruncationCollector,
 ): StorageUserImportData {
   const input = requireObject(value, `用户 ${username} 数据格式无效`);
   return {
@@ -423,6 +594,8 @@ function normalizeUserData(
     searchHistory: normalizeSearchHistory(
       input.searchHistory,
       searchHistoryLimit,
+      username,
+      truncated,
     ),
     skipConfigs: normalizeRecordMap(
       input.skipConfigs,
@@ -434,14 +607,40 @@ function normalizeUserData(
     playbackSessions: normalizePlaybackSessions(
       input.playbackSessions,
       playbackSessionsLimit || MAX_PLAYBACK_SESSIONS_PER_USER,
+      username,
+      truncated,
     ),
+    messageState: normalizeMessageState(input.messageState),
+    lastLoginAt: normalizeLastLoginAt(input.lastLoginAt),
   };
+}
+
+function normalizeLastLoginAt(value: unknown): number | undefined {
+  if (value === undefined || value === null) return undefined;
+  return Math.floor(
+    assertBoundedNumber(value, '最后登录时间', 0, MAX_TIMESTAMP_MS),
+  );
+}
+
+function normalizeMessageState(value: unknown) {
+  if (value === undefined || value === null) return {};
+  const input = requireObject(value, '消息状态格式无效');
+  const readAnnouncementId = input.readAnnouncementId;
+  if (
+    readAnnouncementId !== undefined &&
+    (typeof readAnnouncementId !== 'string' || readAnnouncementId.length > 128)
+  ) {
+    throw new ImportValidationError('公告已读状态格式无效');
+  }
+  return readAnnouncementId ? { readAnnouncementId } : {};
 }
 
 // 超出上限时保留最新的会话，避免整体导入失败
 function normalizePlaybackSessions(
   value: unknown,
   limit: number,
+  username: string,
+  truncated: TruncationCollector,
 ): Record<string, PlaybackSession> {
   if (value === undefined || value === null) {
     return {};
@@ -456,6 +655,7 @@ function normalizePlaybackSessions(
 
   const safeLimit = Math.max(1, Math.floor(limit));
   if (sessions.length > safeLimit) {
+    truncated.add(username, 'playbackSessions', sessions.length - safeLimit);
     sessions.sort(([, a], [, b]) => b.started_at - a.started_at);
     sessions.length = safeLimit;
   }
@@ -491,6 +691,9 @@ function normalizeRecordMap<T>(
 
 function normalizePlayRecord(value: unknown): PlayRecord {
   const input = requireObject(value, '播放记录格式无效');
+  if ((input.group_index === undefined) !== (input.group_total === undefined)) {
+    throw new ImportValidationError('组内集数与组内总集数必须成对出现');
+  }
   return {
     title: limitString(input.title, '标题', MAX_SHORT_STRING_LENGTH),
     source_name: limitString(
@@ -520,6 +723,15 @@ function normalizePlayRecord(value: unknown): PlayRecord {
             '组内总集数',
             1,
             10000,
+          ),
+        }),
+    ...(input.group_label === undefined
+      ? {}
+      : {
+          group_label: limitString(
+            input.group_label,
+            '分组标签',
+            MAX_SHORT_STRING_LENGTH,
           ),
         }),
     play_time: assertBoundedNumber(input.play_time, '播放进度', 0, MAX_SECONDS),
@@ -584,6 +796,8 @@ function normalizeFavorite(value: unknown): Favorite {
 function normalizeSearchHistory(
   value: unknown,
   limit = MAX_SEARCH_HISTORY,
+  username = '',
+  truncated?: TruncationCollector,
 ): string[] {
   if (value === undefined || value === null) {
     return [];
@@ -592,6 +806,9 @@ function normalizeSearchHistory(
     throw new ImportValidationError('搜索历史格式无效');
   }
   const safeLimit = Math.min(Math.max(Math.floor(limit), 1), 200);
+  if (value.length > safeLimit) {
+    truncated?.add(username, 'searchHistory', value.length - safeLimit);
+  }
   return value.slice(0, safeLimit).map((item) => {
     const keyword = limitString(item, '搜索关键词', 191).trim();
     if (!keyword) {

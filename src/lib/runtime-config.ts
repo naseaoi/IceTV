@@ -4,6 +4,7 @@ import { CURRENT_UPDATE_BRANCH } from '@/lib/version';
 export interface RuntimeConfig {
   STORAGE_TYPE: string;
   OPEN_REGISTER: boolean;
+  REQUIRE_INVITE_CODE: boolean;
   UPDATE_REPOS: string;
   UPDATE_BRANCH: string;
   DOUBAN_PROXY_TYPE: string;
@@ -33,6 +34,7 @@ export const DEFAULT_RUNTIME_CONFIG: RuntimeConfig = {
   STORAGE_TYPE:
     process.env.NEXT_PUBLIC_STORAGE_TYPE === 'mysql' ? 'mysql' : 'localdb',
   OPEN_REGISTER: false,
+  REQUIRE_INVITE_CODE: false,
   UPDATE_REPOS: 'naseaoi/IceTV',
   UPDATE_BRANCH: CURRENT_UPDATE_BRANCH,
   DOUBAN_PROXY_TYPE: 'direct',
@@ -73,6 +75,7 @@ export type ServerConfigPayload = {
   FooterText?: string;
   StorageType?: string;
   OpenRegister?: boolean;
+  RequireInviteCode?: boolean;
   UpdateRepos?: string;
   UpdateBranch?: string;
   DoubanProxyType?: string;
@@ -122,6 +125,10 @@ function runtimeConfigFromServerConfig(
       data.OpenRegister === undefined
         ? DEFAULT_RUNTIME_CONFIG.OPEN_REGISTER
         : data.OpenRegister,
+    REQUIRE_INVITE_CODE:
+      data.RequireInviteCode === undefined
+        ? DEFAULT_RUNTIME_CONFIG.REQUIRE_INVITE_CODE
+        : data.RequireInviteCode,
     UPDATE_REPOS: data.UpdateRepos || DEFAULT_RUNTIME_CONFIG.UPDATE_REPOS,
     UPDATE_BRANCH: data.UpdateBranch || DEFAULT_RUNTIME_CONFIG.UPDATE_BRANCH,
     DOUBAN_PROXY_TYPE:
@@ -249,10 +256,12 @@ async function ensureClientRuntimeConfig(): Promise<RuntimeConfig> {
 export async function getClientAuthRuntimeConfig(): Promise<{
   storageType: string;
   openRegister: boolean;
+  requireInviteCode: boolean;
 }> {
   const runtimeConfig = await ensureClientRuntimeConfig();
   return {
     storageType: runtimeConfig.STORAGE_TYPE,
     openRegister: runtimeConfig.OPEN_REGISTER,
+    requireInviteCode: runtimeConfig.REQUIRE_INVITE_CODE,
   };
 }

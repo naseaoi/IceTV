@@ -17,7 +17,6 @@ describe('createOptimisticWriter', () => {
 
     await write({
       mutateCached,
-      mutateLocal: (stored) => stored,
       syncToServer,
       requireExistingCacheForOptimisticUpdate: true,
     });
@@ -49,7 +48,6 @@ describe('createOptimisticWriter', () => {
         delete records.second;
         return records;
       },
-      mutateLocal: (stored) => stored,
       syncToServer,
       requireExistingCacheForOptimisticUpdate: true,
     });

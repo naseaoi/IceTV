@@ -1,4 +1,4 @@
-import { render, screen } from '@testing-library/react';
+import { fireEvent, render, screen } from '@testing-library/react';
 
 import type { VideoCardDisplayConfig } from '@/components/video-card/types';
 import { VideoCardPoster } from '@/components/video-card/VideoCardPoster';
@@ -98,5 +98,44 @@ describe('VideoCardPoster', () => {
     expect(episodeBadge.parentElement).toBe(badge.parentElement);
     expect(badge.parentElement).toHaveClass('flex', 'justify-between');
     expect(episodeBadge).toHaveClass('flex-shrink-0');
+  });
+
+  it('有新集时在左下角显示更新状态', () => {
+    const onMarkUpdateRead = jest.fn();
+    render(
+      <VideoCardPoster
+        title='测试影片'
+        poster='/poster.webp'
+        priority={false}
+        origin='vod'
+        from='playrecord'
+        config={{ ...config, showDoubanLink: false, showYear: false }}
+        episodes={13}
+        currentEpisode={12}
+        hasUpdate
+        availableEpisodes={13}
+        isBangumi={false}
+        isAggregate={false}
+        visibleFavorited={false}
+        onDeleteRecord={jest.fn()}
+        onToggleFavorite={jest.fn()}
+        onMarkUpdateRead={onMarkUpdateRead}
+      />,
+    );
+
+    const updateButton = screen.getByRole('button', {
+      name: '更新至 13 集，点击标记已读',
+    });
+    expect(updateButton).toHaveClass('bottom-2', 'left-2', 'bg-amber-500');
+    expect(screen.getByText('更新至 13 集')).toHaveClass(
+      'sm:group-hover/update:hidden',
+    );
+    expect(screen.getByText('✅')).toHaveClass(
+      'hidden',
+      'sm:group-hover/update:inline',
+    );
+
+    fireEvent.click(updateButton);
+    expect(onMarkUpdateRead).toHaveBeenCalledTimes(1);
   });
 });

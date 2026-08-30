@@ -13,6 +13,9 @@ export const THEME_STORAGE_KEY = 'theme';
 export const SEEN_ANNOUNCEMENT_STORAGE_KEY = 'hasSeenAnnouncement';
 export const ADMIN_TABLE_COLUMN_WIDTHS_STORAGE_KEY = 'adminTableColumnWidths';
 export const CONTINUE_WATCHING_COUNT_STORAGE_KEY = 'continueWatchingCount';
+export const FAVORITE_ITEMS_COUNT_STORAGE_KEY = 'favoriteItemsCount';
+export const NOTIFIED_MESSAGE_REVISION_STORAGE_PREFIX =
+  'notifiedMessageRevision:';
 
 type AdminTableColumnWidths = Record<string, Record<string, number>>;
 
@@ -290,6 +293,34 @@ export function writeSeenAnnouncement(value: string) {
   writeStoredString(SEEN_ANNOUNCEMENT_STORAGE_KEY, value);
 }
 
+function getNotifiedMessageRevisionStorageKey(username: string): string | null {
+  const normalized = username.trim();
+  if (!normalized) {
+    return null;
+  }
+  return `${NOTIFIED_MESSAGE_REVISION_STORAGE_PREFIX}${normalized}`;
+}
+
+export function readNotifiedMessageRevision(
+  username: string,
+): string | undefined {
+  const storageKey = getNotifiedMessageRevisionStorageKey(username);
+  return storageKey ? readStoredString(storageKey) : undefined;
+}
+
+export function writeNotifiedMessageRevision(
+  username: string,
+  revision: string,
+): void {
+  const storageKey = getNotifiedMessageRevisionStorageKey(username);
+  if (!storageKey) {
+    return;
+  }
+  try {
+    writeStoredString(storageKey, revision);
+  } catch {}
+}
+
 export function readContinueWatchingCount(): number {
   const raw = readStoredString(CONTINUE_WATCHING_COUNT_STORAGE_KEY);
   const count = Number.parseInt(raw || '', 10);
@@ -317,6 +348,24 @@ export function resetContinueWatchingCount(): void {
   try {
     if (typeof document !== 'undefined') {
       document.cookie = 'cw_count=0;path=/;max-age=0;samesite=lax';
+    }
+  } catch {}
+}
+
+export function readFavoriteItemsCount(): number {
+  const raw = readStoredString(FAVORITE_ITEMS_COUNT_STORAGE_KEY);
+  const count = Number.parseInt(raw || '', 10);
+  return Number.isFinite(count) ? Math.max(0, count) : 0;
+}
+
+export function writeFavoriteItemsCount(value: number): void {
+  const count = Math.max(0, Math.floor(Number.isFinite(value) ? value : 0));
+  try {
+    writeStoredString(FAVORITE_ITEMS_COUNT_STORAGE_KEY, String(count));
+  } catch {}
+  try {
+    if (typeof document !== 'undefined') {
+      document.cookie = `fav_count=${count};path=/;max-age=${365 * 24 * 60 * 60};samesite=lax`;
     }
   } catch {}
 }

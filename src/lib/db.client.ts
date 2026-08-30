@@ -13,13 +13,16 @@ import {
   retryClientRequest,
   triggerGlobalError,
 } from './db.client.internal';
+import { normalizeFavoriteLimit } from './favorites';
+import type { PlayRecordPage } from './play-records';
 import {
   DEFAULT_RECENT_PLAY_RECORD_LIMIT,
+  mergePlayRecordUpdateBaseline,
   normalizePlayRecordLimit,
   selectRecentPlayRecords,
 } from './play-records';
 import { getRuntimeConfig } from './runtime-config';
-import type { Favorite, PlayRecord, SkipConfig } from './types';
+import type { Favorite, FavoritePage, PlayRecord, SkipConfig } from './types';
 
 export type { Favorite, PlayRecord, SkipConfig } from './types';
 
@@ -150,6 +153,35 @@ export async function getRecentPlayRecords(
   }
 }
 
+export async function getPlayRecordPage(
+  limit = DEFAULT_RECENT_PLAY_RECORD_LIMIT,
+  cursor?: string | null,
+): Promise<PlayRecordPage> {
+  const normalizedLimit = normalizePlayRecordLimit(limit);
+  const params = new URLSearchParams({
+    format: 'page',
+    limit: String(normalizedLimit),
+  });
+  if (cursor) {
+    params.set('cursor', cursor);
+  }
+
+  const page = await fetchFromApi<PlayRecordPage>(
+    `/api/playrecords?${params.toString()}`,
+  );
+  mergePlayRecordsIntoCache(page.items);
+  return page;
+}
+
+function mergePlayRecordsIntoCache(items: Record<string, PlayRecord>): void {
+  if (typeof window === 'undefined') return;
+
+  const cachedRecords = cacheManager.getCachedPlayRecords();
+  if (!cachedRecords) return;
+
+  cacheManager.cachePlayRecords({ ...cachedRecords, ...items });
+}
+
 export function getCachedPlayRecordsSnapshot(): Record<
   string,
   PlayRecord
@@ -167,14 +199,12 @@ export async function savePlayRecord(
   record: PlayRecord,
 ): Promise<void> {
   const key = generateStorageKey(source, id);
+  const cached = cacheManager.getCachedPlayRecords();
+  const normalizedRecord = mergePlayRecordUpdateBaseline(cached?.[key], record);
   return _writePlayRecords({
     mutateCached: (cached) => {
-      cached[key] = record;
+      cached[key] = normalizedRecord;
       return cached;
-    },
-    mutateLocal: (stored) => {
-      stored[key] = record;
-      return stored;
     },
     syncToServer: () =>
       retryClientRequest(
@@ -182,7 +212,7 @@ export async function savePlayRecord(
           fetchWithAuth('/api/playrecords', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ key, record }),
+            body: JSON.stringify({ key, record: normalizedRecord }),
             keepalive: true,
           }).then(() => {}),
         {
@@ -201,14 +231,10 @@ export async function deletePlayRecord(
   id: string,
 ): Promise<void> {
   const key = generateStorageKey(source, id);
-  return _writePlayRecords({
+  await _writePlayRecords({
     mutateCached: (cached) => {
       delete cached[key];
       return cached;
-    },
-    mutateLocal: (stored) => {
-      delete stored[key];
-      return stored;
     },
     syncToServer: () =>
       fetchWithAuth(`/api/playrecords?key=${encodeURIComponent(key)}`, {
@@ -219,6 +245,67 @@ export async function deletePlayRecord(
     },
     requireExistingCacheForOptimisticUpdate: true,
   });
+  notifyMessagesUpdated();
+}
+
+async function patchPlayRecordState(
+  source: string,
+  id: string,
+  body: Record<string, unknown>,
+): Promise<PlayRecord> {
+  try {
+    const key = generateStorageKey(source, id);
+    const response = await fetchWithAuth('/api/playrecords', {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ key, ...body }),
+    });
+    const record = (await response.json()) as PlayRecord;
+    const cachedRecords = cacheManager.getCachedPlayRecords();
+
+    if (cachedRecords?.[key]) {
+      const nextRecords = { ...cachedRecords, [key]: record };
+      cacheManager.cachePlayRecords(nextRecords);
+      window.dispatchEvent(
+        new CustomEvent('playRecordsUpdated', { detail: nextRecords }),
+      );
+    }
+
+    return record;
+  } catch (error) {
+    await handleDatabaseOperationFailure('playRecords', error);
+    throw error;
+  }
+}
+
+function notifyMessagesUpdated(): void {
+  window.dispatchEvent(new CustomEvent('messagesUpdated'));
+}
+
+export async function markPlayRecordUpdateRead(
+  source: string,
+  id: string,
+  readThroughEpisodes?: number,
+): Promise<PlayRecord> {
+  const record = await patchPlayRecordState(source, id, {
+    action: 'mark-update-read',
+    readThroughEpisodes,
+  });
+  notifyMessagesUpdated();
+  return record;
+}
+
+export async function setPlayRecordTracking(
+  source: string,
+  id: string,
+  enabled: boolean,
+): Promise<PlayRecord> {
+  const record = await patchPlayRecordState(source, id, {
+    action: 'set-tracking',
+    trackingEnabled: enabled,
+  });
+  notifyMessagesUpdated();
+  return record;
 }
 
 export async function clearAllPlayRecords(): Promise<void> {
@@ -229,10 +316,23 @@ export async function clearAllPlayRecords(): Promise<void> {
       method: 'DELETE',
       headers: { 'Content-Type': 'application/json' },
     });
+    notifyMessagesUpdated();
   } catch (err) {
     await handleDatabaseOperationFailure('playRecords', err);
     throw err;
   }
+}
+
+export function applyPlayRecordStateUpdates(
+  updates: Record<string, PlayRecord>,
+): void {
+  const cachedRecords = cacheManager.getCachedPlayRecords();
+  if (cachedRecords) {
+    cacheManager.cachePlayRecords({ ...cachedRecords, ...updates });
+  }
+  window.dispatchEvent(
+    new CustomEvent('playRecordStatesUpdated', { detail: updates }),
+  );
 }
 
 // ---- 搜索历史 ----
@@ -294,7 +394,6 @@ export async function deleteSearchHistory(keyword: string): Promise<void> {
 
   return _writeSearchHistory({
     mutateCached: (cached) => cached.filter((k) => k !== trimmed),
-    mutateLocal: (stored) => stored.filter((k) => k !== trimmed),
     syncToServer: () =>
       fetchWithAuth(
         `/api/searchhistory?keyword=${encodeURIComponent(trimmed)}`,
@@ -310,6 +409,18 @@ export async function deleteSearchHistory(keyword: string): Promise<void> {
 
 export async function getAllFavorites(): Promise<Record<string, Favorite>> {
   return _getAllFavorites();
+}
+
+export async function getFavoritePage(
+  limit: number,
+  cursor?: string | null,
+): Promise<FavoritePage> {
+  const params = new URLSearchParams({
+    format: 'page',
+    limit: String(normalizeFavoriteLimit(limit)),
+  });
+  if (cursor) params.set('cursor', cursor);
+  return fetchFromApi<FavoritePage>(`/api/favorites?${params.toString()}`);
 }
 
 export function getCachedFavoritesSnapshot(): Record<string, Favorite> | null {
@@ -330,10 +441,6 @@ export async function saveFavorite(
     mutateCached: (cached) => {
       cached[key] = favorite;
       return cached;
-    },
-    mutateLocal: (stored) => {
-      stored[key] = favorite;
-      return stored;
     },
     syncToServer: () =>
       fetchWithAuth('/api/favorites', {
@@ -356,10 +463,6 @@ export async function deleteFavorite(
     mutateCached: (cached) => {
       delete cached[key];
       return cached;
-    },
-    mutateLocal: (stored) => {
-      delete stored[key];
-      return stored;
     },
     syncToServer: () =>
       fetchWithAuth(`/api/favorites?key=${encodeURIComponent(key)}`, {
@@ -452,10 +555,6 @@ export async function saveSkipConfig(
       cached[key] = config;
       return cached;
     },
-    mutateLocal: (stored) => {
-      stored[key] = config;
-      return stored;
-    },
     syncToServer: () =>
       fetchWithAuth('/api/skipconfigs', {
         method: 'POST',
@@ -479,10 +578,6 @@ export async function deleteSkipConfig(
       delete cached[key];
       return cached;
     },
-    mutateLocal: (stored) => {
-      delete stored[key];
-      return stored;
-    },
     syncToServer: () =>
       fetchWithAuth(`/api/skipconfigs?key=${encodeURIComponent(key)}`, {
         method: 'DELETE',
@@ -499,6 +594,7 @@ export async function deleteSkipConfig(
 export type CacheUpdateEvent =
   | 'playRecordsUpdated'
   | 'recentPlayRecordsUpdated'
+  | 'playRecordStatesUpdated'
   | 'favoritesUpdated'
   | 'searchHistoryUpdated'
   | 'skipConfigsUpdated';

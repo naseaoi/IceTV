@@ -32,6 +32,8 @@ interface UsePlayerKeyboardParams {
   mode?: PlayerShortcutMode;
 }
 
+const FRAME_STEP_LOADING_GUARD_MS = 600;
+
 function clampRate(rate: number): number {
   const rounded = Math.round(rate * 10) / 10;
   return Math.min(RATE_MAX, Math.max(RATE_MIN, rounded));
@@ -44,6 +46,26 @@ export function usePlayerKeyboard({
 }: UsePlayerKeyboardParams) {
   useEffect(() => {
     let shortcuts: PlayerShortcutMap = readPlayerShortcuts();
+    let frameStepLoadingTimer: number | null = null;
+    let frameStepLoadingGuard: {
+      player: Artplayer;
+      handler: (visible: boolean) => void;
+    } | null = null;
+
+    const releaseLoadingSpinnerGuard = () => {
+      if (frameStepLoadingTimer !== null) {
+        window.clearTimeout(frameStepLoadingTimer);
+        frameStepLoadingTimer = null;
+      }
+      if (!frameStepLoadingGuard) return;
+      const { player, handler } = frameStepLoadingGuard;
+      frameStepLoadingGuard = null;
+      (
+        player as unknown as {
+          off: (name: string, fn: (visible: boolean) => void) => void;
+        }
+      ).off('loading', handler);
+    };
 
     const syncShortcuts = () => {
       shortcuts = readPlayerShortcuts();
@@ -96,6 +118,32 @@ export function usePlayerKeyboard({
       });
     };
 
+    const suppressLoadingSpinner = (player: Artplayer) => {
+      if (frameStepLoadingGuard && frameStepLoadingGuard.player !== player) {
+        releaseLoadingSpinnerGuard();
+      }
+      if (frameStepLoadingTimer !== null) {
+        window.clearTimeout(frameStepLoadingTimer);
+        frameStepLoadingTimer = null;
+      }
+      if (!frameStepLoadingGuard) {
+        frameStepLoadingGuard = {
+          player,
+          handler: (visible: boolean) => {
+            if (visible) {
+              player.loading.show = false;
+            }
+          },
+        };
+        player.on('loading', frameStepLoadingGuard.handler);
+      }
+      player.loading.show = false;
+      frameStepLoadingTimer = window.setTimeout(
+        releaseLoadingSpinnerGuard,
+        FRAME_STEP_LOADING_GUARD_MS,
+      );
+    };
+
     const stepFrame = (direction: 1 | -1) => {
       const player = artPlayerRef.current;
       if (!player) return;
@@ -103,6 +151,7 @@ export function usePlayerKeyboard({
         player.pause();
       }
       hidePauseStateIcon(player);
+      suppressLoadingSpinner(player);
       player.notice.show = '';
       const duration = player.duration || 0;
       const next = player.currentTime + direction * FRAME_STEP_SECONDS;
@@ -192,6 +241,7 @@ export function usePlayerKeyboard({
     return () => {
       document.removeEventListener('keydown', handleKeyboardShortcuts);
       window.removeEventListener(PLAYER_SHORTCUTS_CHANGED_EVENT, syncShortcuts);
+      releaseLoadingSpinnerGuard();
     };
   }, [artPlayerRef, episodeHandlers, mode]);
 }

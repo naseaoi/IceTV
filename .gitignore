@@ -57,4 +57,6 @@ public/sw.js.map
 .vscode/
 
 # test fixtures（本地抓取的第三方流媒体样本，不入库）
-src/lib/__tests__/__fixtures__/
+src/lib/__tests__/__fixtures__/*
+# 共享测试数据需入库
+!src/lib/__tests__/__fixtures__/*.ts

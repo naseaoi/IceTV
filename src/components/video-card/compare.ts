@@ -1,3 +1,4 @@
+import type { ResumeGroupIdentity } from '@/lib/episode-groups';
 import type { SearchResult } from '@/lib/types';
 
 import type { VideoCardProps } from './types';
@@ -46,6 +47,24 @@ function isSameAggregateGroup(
   });
 }
 
+function isSameResumeGroup(
+  prev?: ResumeGroupIdentity,
+  next?: ResumeGroupIdentity,
+): boolean {
+  if (prev === next) {
+    return true;
+  }
+  if (!prev || !next) {
+    return !prev && !next;
+  }
+
+  return (
+    prev.label === next.label &&
+    prev.index === next.index &&
+    prev.total === next.total
+  );
+}
+
 export function areVideoCardPropsEqual(
   prev: Readonly<VideoCardProps>,
   next: Readonly<VideoCardProps>,
@@ -65,7 +84,11 @@ export function areVideoCardPropsEqual(
     prev.year === next.year &&
     prev.from === next.from &&
     prev.currentEpisode === next.currentEpisode &&
+    prev.hasUpdate === next.hasUpdate &&
+    prev.trackingEnabled === next.trackingEnabled &&
+    prev.availableEpisodes === next.availableEpisodes &&
     prev.resumeEpisodeIndex === next.resumeEpisodeIndex &&
+    isSameResumeGroup(prev.resumeGroup, next.resumeGroup) &&
     prev.douban_id === next.douban_id &&
     prev.rate === next.rate &&
     prev.type === next.type &&

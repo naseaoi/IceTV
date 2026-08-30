@@ -207,6 +207,14 @@ function clearLoginFailures(buckets: AttemptBucket[]): void {
   buckets.forEach((bucket) => loginAttempts.delete(bucket.key));
 }
 
+async function recordLoginActivity(username: string): Promise<void> {
+  try {
+    await db.recordUserActivity(username, Date.now());
+  } catch (err) {
+    console.error('记录登录时间失败', err);
+  }
+}
+
 function setAuthCookies(
   response: NextResponse,
   req: NextRequest,
@@ -309,6 +317,7 @@ export async function POST(req: NextRequest) {
       const authPayload = await generateAuthCookie('owner', rawUsername);
       setAuthCookies(response, req, authPayload);
       clearLoginFailures(rateLimitState.buckets);
+      await recordLoginActivity(username);
 
       return response;
     } else if (
@@ -345,6 +354,7 @@ export async function POST(req: NextRequest) {
       );
       setAuthCookies(response, req, authPayload);
       clearLoginFailures(rateLimitState.buckets);
+      await recordLoginActivity(username);
 
       return response;
     } catch (err) {

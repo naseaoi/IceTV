@@ -4,6 +4,7 @@ import { getAuthInfoFromCookie } from '@/lib/auth.server';
 import {
   getConfig,
   getConfigForRead,
+  getConfigFresh,
   resetConfig,
   saveConfig,
 } from '@/lib/config';
@@ -87,6 +88,7 @@ jest.mock('@/lib/auth.server', () => ({
 jest.mock('@/lib/config', () => ({
   getConfig: jest.fn(),
   getConfigForRead: jest.fn(),
+  getConfigFresh: jest.fn(),
   resetConfig: jest.fn(),
   saveConfig: jest.fn(),
 }));
@@ -127,6 +129,9 @@ describe('admin api auth guard regression', () => {
   const mockedGetConfig = getConfig as jest.MockedFunction<typeof getConfig>;
   const mockedGetConfigForRead = getConfigForRead as jest.MockedFunction<
     typeof getConfigForRead
+  >;
+  const mockedGetConfigFresh = getConfigFresh as jest.MockedFunction<
+    typeof getConfigFresh
   >;
   const mockedResetConfig = resetConfig as jest.MockedFunction<
     typeof resetConfig
@@ -187,6 +192,7 @@ describe('admin api auth guard regression', () => {
     mockedHasStagedSiteIcon.mockReturnValue(true);
     mockedGetConfig.mockResolvedValue(baseConfig as never);
     mockedGetConfigForRead.mockResolvedValue(baseConfig as never);
+    mockedGetConfigFresh.mockResolvedValue(baseConfig as never);
   });
 
   it('returns 401 when request is unauthenticated', async () => {

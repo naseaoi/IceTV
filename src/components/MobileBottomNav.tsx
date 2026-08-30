@@ -18,7 +18,8 @@ const NAV_ITEMS: MobileNavItem[] = [
     icon: Home,
     label: '首页',
     href: '/',
-    match: (pathname) => pathname === '/',
+    match: (pathname) =>
+      pathname === '/' || pathname.startsWith('/continue-watching'),
   },
   {
     icon: LayoutGrid,

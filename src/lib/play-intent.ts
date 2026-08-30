@@ -1,3 +1,6 @@
+import { resolvePlayRecordEpisode } from '@/lib/episode-groups';
+import type { EpisodeGroup } from '@/lib/types';
+
 export const PLAY_INTENT_KEY = 'icetv_play_intent';
 const PLAY_INTENT_TTL_MS = 5 * 60 * 1000;
 type PlayIntentResumeMode = 'forced' | null;
@@ -8,6 +11,9 @@ interface PlayIntentPayload {
   episodeIndex: number;
   resumeTime: number;
   saveTime: number;
+  groupLabel?: string;
+  groupIndex?: number;
+  groupTotal?: number;
 }
 
 interface SavePlayIntentOptions {
@@ -15,12 +21,16 @@ interface SavePlayIntentOptions {
   id: string;
   episodeIndex: number;
   resumeTime: number;
+  groupLabel?: string;
+  groupIndex?: number;
+  groupTotal?: number;
 }
 
 interface ConsumePlayIntentOptions {
   source: string;
   id: string;
   episodeCount: number;
+  episodeGroups?: EpisodeGroup[];
 }
 
 interface PlayIntentRestoreState {
@@ -46,15 +56,6 @@ function clearPlayIntentStorage() {
   sessionStorage.removeItem(PLAY_INTENT_KEY);
 }
 
-function clampEpisodeIndex(episodeIndex: number, episodeCount: number): number {
-  const safeIndex = Math.max(0, Math.floor(episodeIndex));
-  if (!Number.isFinite(episodeCount) || episodeCount <= 0) {
-    return safeIndex;
-  }
-
-  return Math.min(safeIndex, episodeCount - 1);
-}
-
 /**
  * 首页“继续观看”点击后写入一次性恢复意图，避免播放页再异步猜测该跳到哪里。
  */
@@ -63,6 +64,9 @@ export function savePlayIntent({
   id,
   episodeIndex,
   resumeTime,
+  groupLabel,
+  groupIndex,
+  groupTotal,
 }: SavePlayIntentOptions): void {
   if (typeof window === 'undefined') return;
   if (!source || !id) return;
@@ -74,6 +78,9 @@ export function savePlayIntent({
     episodeIndex: Math.max(0, Math.floor(episodeIndex)),
     resumeTime: normalizedResumeTime,
     saveTime: Date.now(),
+    ...(groupLabel ? { groupLabel } : {}),
+    ...(Number.isFinite(groupIndex) ? { groupIndex: Number(groupIndex) } : {}),
+    ...(Number.isFinite(groupTotal) ? { groupTotal: Number(groupTotal) } : {}),
   };
 
   try {
@@ -90,6 +97,7 @@ export function consumeMatchingPlayIntent({
   source,
   id,
   episodeCount,
+  episodeGroups,
 }: ConsumePlayIntentOptions): PlayIntentRestoreState | null {
   if (typeof window === 'undefined') return null;
 
@@ -121,7 +129,16 @@ export function consumeMatchingPlayIntent({
     const resumeTime = Math.max(0, payloadResumeTime);
 
     const restoreState: PlayIntentRestoreState = {
-      episodeIndex: clampEpisodeIndex(payloadEpisodeIndex, episodeCount),
+      episodeIndex: resolvePlayRecordEpisode(
+        {
+          index: payloadEpisodeIndex + 1,
+          group_index: payload.groupIndex,
+          group_total: payload.groupTotal,
+          group_label: payload.groupLabel,
+        },
+        episodeGroups,
+        episodeCount,
+      ).episodeIndex,
       resumeTime,
       resumeMode: resumeTime > 0 ? 'forced' : null,
     };

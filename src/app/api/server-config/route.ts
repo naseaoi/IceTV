@@ -35,6 +35,7 @@ export async function GET(request: NextRequest) {
     StorageType: getStorageType(),
     Version: CURRENT_VERSION,
     OpenRegister: publicConfig.OpenRegister,
+    RequireInviteCode: publicConfig.RequireInviteCode,
     UpdateRepos: process.env.NEXT_PUBLIC_UPDATE_REPOS || 'naseaoi/IceTV',
     UpdateBranch: CURRENT_UPDATE_BRANCH,
     DoubanProxyType: doubanProxyType,

@@ -9,20 +9,36 @@ import {
   Loader2,
 } from 'lucide-react';
 import Link from 'next/link';
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 
 import { SiteIcon } from '@/components/Sidebar';
 import { useSite } from '@/components/SiteProvider';
 import { ThemeToggle } from '@/components/ThemeToggle';
 import { getClientAuthRuntimeConfig } from '@/lib/runtime-config';
 import { getPrimaryRepoUrl } from '@/lib/update-source';
+import { normalizeUsername } from '@/lib/username';
 import { CURRENT_VERSION } from '@/lib/version';
 import { checkForUpdates, UpdateStatus } from '@/lib/version-check';
 
+import { useUsernameAvailability } from './hooks/useUsernameAvailability';
+import {
+  type RegisterField,
+  type RegisterFieldErrors,
+  validateRegisterForm,
+} from './lib/registerValidation';
 import { PosterWallBackdrop } from './PosterWallBackdrop';
 
 const INPUT_CLASS =
   'block w-full rounded-lg border-0 bg-gray-100/90 px-4 py-3 text-gray-900 ring-1 ring-gray-200/80 transition-shadow placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-green-500 dark:bg-white/[0.07] dark:text-white dark:ring-white/10 dark:placeholder:text-gray-500 sm:text-[15px]';
+
+const INPUT_INVALID_CLASS =
+  'ring-red-500/60 focus:ring-red-500 dark:ring-red-500/60 dark:focus:ring-red-500';
+
+const FIELD_ERROR_CLASS = 'mt-1.5 text-xs text-red-600 dark:text-red-400';
+
+const FIELD_HINT_CLASS = 'mt-1.5 text-xs text-gray-500 dark:text-gray-400';
+
+const FIELD_OK_CLASS = 'mt-1.5 text-xs text-green-600 dark:text-green-400';
 
 const SWITCH_LINK_CLASS =
   'font-semibold text-green-600 transition-colors hover:text-green-500 hover:underline dark:text-green-400 dark:hover:text-green-300';
@@ -95,6 +111,11 @@ export function LoginPageClient() {
   const [loading, setLoading] = useState(false);
   const [shouldAskUsername] = useState(true);
   const [registerEnabled, setRegisterEnabled] = useState<boolean | null>(null);
+  const [inviteCodeRequired, setInviteCodeRequired] = useState(false);
+  const [inviteCode, setInviteCode] = useState('');
+  const [touched, setTouched] = useState<
+    Partial<Record<RegisterField, boolean>>
+  >({});
 
   const { siteName } = useSite();
 
@@ -102,12 +123,14 @@ export function LoginPageClient() {
     let cancelled = false;
 
     const loadRuntimeConfig = async () => {
-      const { openRegister } = await getClientAuthRuntimeConfig();
+      const { openRegister, requireInviteCode } =
+        await getClientAuthRuntimeConfig();
       if (cancelled) {
         return;
       }
 
       setRegisterEnabled(openRegister);
+      setInviteCodeRequired(requireInviteCode);
     };
 
     loadRuntimeConfig();
@@ -117,10 +140,75 @@ export function LoginPageClient() {
     };
   }, []);
 
+  const isRegister = mode === 'register';
+
+  const fieldErrors: RegisterFieldErrors = useMemo(() => {
+    if (!isRegister) return {};
+    return validateRegisterForm({
+      username,
+      password,
+      confirmPassword,
+      inviteCode,
+      inviteCodeRequired,
+    });
+  }, [
+    isRegister,
+    username,
+    password,
+    confirmPassword,
+    inviteCode,
+    inviteCodeRequired,
+  ]);
+
+  const usernameFormatValid = isRegister && !fieldErrors.username;
+
+  const usernameAvailability = useUsernameAvailability({
+    username: normalizeUsername(username),
+    enabled: usernameFormatValid && registerEnabled === true,
+  });
+
+  const visibleError = (field: RegisterField): string | undefined =>
+    touched[field] ? fieldErrors[field] : undefined;
+
+  const markTouched = (field: RegisterField) => {
+    setTouched((prev) => ({ ...prev, [field]: true }));
+  };
+
+  const usernameTaken = usernameAvailability.status === 'taken';
+  const usernameFormatError = visibleError('username');
+  const usernameInvalid = !!usernameFormatError || usernameTaken;
+
+  const usernameHint = ((): { text: string; className: string } | null => {
+    if (usernameFormatError) {
+      return { text: usernameFormatError, className: FIELD_ERROR_CLASS };
+    }
+    if (!usernameFormatValid) {
+      return null;
+    }
+    switch (usernameAvailability.status) {
+      case 'checking':
+        return { text: '正在检测用户名…', className: FIELD_HINT_CLASS };
+      case 'available':
+        return {
+          text: usernameAvailability.message || '该用户名可以使用',
+          className: FIELD_OK_CLASS,
+        };
+      case 'taken':
+      case 'error':
+        return {
+          text: usernameAvailability.message || '用户名检测失败',
+          className: FIELD_ERROR_CLASS,
+        };
+      default:
+        return null;
+    }
+  })();
+
   const switchMode = (nextMode: 'login' | 'register') => {
     setMode(nextMode);
     setError(null);
     setSuccess(null);
+    setTouched({});
   };
 
   const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
@@ -135,12 +223,17 @@ export function LoginPageClient() {
         setError('当前未开放注册');
         return;
       }
-      if (!confirmPassword) {
-        setError('请再次输入密码');
+      if (Object.keys(fieldErrors).length > 0) {
+        setTouched({
+          username: true,
+          password: true,
+          confirmPassword: true,
+          inviteCode: true,
+        });
         return;
       }
-      if (password !== confirmPassword) {
-        setError('两次输入的密码不一致');
+      if (usernameTaken) {
+        setError(usernameAvailability.message || '用户名已被占用');
         return;
       }
     }
@@ -154,6 +247,9 @@ export function LoginPageClient() {
         body: JSON.stringify({
           password,
           ...(shouldAskUsername ? { username } : {}),
+          ...(mode === 'register' && inviteCodeRequired
+            ? { inviteCode: inviteCode.trim() }
+            : {}),
         }),
       });
 
@@ -166,10 +262,14 @@ export function LoginPageClient() {
         setMode('login');
         setPassword('');
         setConfirmPassword('');
+        setInviteCode('');
       } else if (res.status === 401) {
         setError('密码错误');
       } else if (res.status === 403) {
-        setError(mode === 'register' ? '当前未开放注册' : '无访问权限');
+        const data = await res.json().catch(() => ({}));
+        setError(
+          data.error ?? (mode === 'register' ? '当前未开放注册' : '无访问权限'),
+        );
       } else if (res.status === 409) {
         setError('用户名已存在');
       } else {
@@ -244,71 +344,150 @@ export function LoginPageClient() {
                     id='username'
                     type='text'
                     autoComplete='username'
-                    className={INPUT_CLASS}
+                    className={`${INPUT_CLASS} ${
+                      usernameInvalid ? INPUT_INVALID_CLASS : ''
+                    }`}
                     placeholder='输入用户名'
                     value={username}
                     onChange={(e) => setUsername(e.target.value)}
+                    onBlur={() => markTouched('username')}
+                    aria-invalid={usernameInvalid}
+                    aria-describedby={
+                      usernameHint ? 'username-error' : undefined
+                    }
                   />
+                  {usernameHint && (
+                    <p id='username-error' className={usernameHint.className}>
+                      {usernameHint.text}
+                    </p>
+                  )}
                 </div>
               )}
 
-              <div className='relative'>
+              <div>
                 <label htmlFor='password' className='sr-only'>
                   密码
                 </label>
-                <input
-                  id='password'
-                  type={showPassword ? 'text' : 'password'}
-                  autoComplete={
-                    mode === 'register' ? 'new-password' : 'current-password'
-                  }
-                  className={`${INPUT_CLASS} pr-12`}
-                  placeholder='输入密码'
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                />
-                <button
-                  type='button'
-                  onClick={() => setShowPassword((prev) => !prev)}
-                  className='absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 transition-colors hover:text-gray-600 dark:text-gray-500 dark:hover:text-gray-300'
-                  aria-label={showPassword ? '隐藏密码' : '显示密码'}
-                >
-                  {showPassword ? (
-                    <EyeOff className='h-5 w-5' />
-                  ) : (
-                    <Eye className='h-5 w-5' />
-                  )}
-                </button>
-              </div>
-
-              {mode === 'register' && (
                 <div className='relative'>
-                  <label htmlFor='confirm-password' className='sr-only'>
-                    确认密码
-                  </label>
                   <input
-                    id='confirm-password'
-                    type={showConfirmPassword ? 'text' : 'password'}
-                    autoComplete='new-password'
-                    className={`${INPUT_CLASS} pr-12`}
-                    placeholder='再次输入密码'
-                    value={confirmPassword}
-                    onChange={(e) => setConfirmPassword(e.target.value)}
+                    id='password'
+                    type={showPassword ? 'text' : 'password'}
+                    autoComplete={
+                      mode === 'register' ? 'new-password' : 'current-password'
+                    }
+                    className={`${INPUT_CLASS} pr-12 ${
+                      visibleError('password') ? INPUT_INVALID_CLASS : ''
+                    }`}
+                    placeholder='输入密码'
+                    value={password}
+                    onChange={(e) => setPassword(e.target.value)}
+                    onBlur={() => markTouched('password')}
+                    aria-invalid={!!visibleError('password')}
+                    aria-describedby={
+                      visibleError('password') ? 'password-error' : undefined
+                    }
                   />
                   <button
                     type='button'
-                    onClick={() => setShowConfirmPassword((prev) => !prev)}
+                    onClick={() => setShowPassword((prev) => !prev)}
                     className='absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 transition-colors hover:text-gray-600 dark:text-gray-500 dark:hover:text-gray-300'
-                    aria-label={
-                      showConfirmPassword ? '隐藏确认密码' : '显示确认密码'
-                    }
+                    aria-label={showPassword ? '隐藏密码' : '显示密码'}
                   >
-                    {showConfirmPassword ? (
+                    {showPassword ? (
                       <EyeOff className='h-5 w-5' />
                     ) : (
                       <Eye className='h-5 w-5' />
                     )}
                   </button>
+                </div>
+                {visibleError('password') && (
+                  <p id='password-error' className={FIELD_ERROR_CLASS}>
+                    {visibleError('password')}
+                  </p>
+                )}
+              </div>
+
+              {mode === 'register' && (
+                <div>
+                  <label htmlFor='confirm-password' className='sr-only'>
+                    确认密码
+                  </label>
+                  <div className='relative'>
+                    <input
+                      id='confirm-password'
+                      type={showConfirmPassword ? 'text' : 'password'}
+                      autoComplete='new-password'
+                      className={`${INPUT_CLASS} pr-12 ${
+                        visibleError('confirmPassword')
+                          ? INPUT_INVALID_CLASS
+                          : ''
+                      }`}
+                      placeholder='再次输入密码'
+                      value={confirmPassword}
+                      onChange={(e) => setConfirmPassword(e.target.value)}
+                      onBlur={() => markTouched('confirmPassword')}
+                      aria-invalid={!!visibleError('confirmPassword')}
+                      aria-describedby={
+                        visibleError('confirmPassword')
+                          ? 'confirm-password-error'
+                          : undefined
+                      }
+                    />
+                    <button
+                      type='button'
+                      onClick={() => setShowConfirmPassword((prev) => !prev)}
+                      className='absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 transition-colors hover:text-gray-600 dark:text-gray-500 dark:hover:text-gray-300'
+                      aria-label={
+                        showConfirmPassword ? '隐藏确认密码' : '显示确认密码'
+                      }
+                    >
+                      {showConfirmPassword ? (
+                        <EyeOff className='h-5 w-5' />
+                      ) : (
+                        <Eye className='h-5 w-5' />
+                      )}
+                    </button>
+                  </div>
+                  {visibleError('confirmPassword') && (
+                    <p
+                      id='confirm-password-error'
+                      className={FIELD_ERROR_CLASS}
+                    >
+                      {visibleError('confirmPassword')}
+                    </p>
+                  )}
+                </div>
+              )}
+
+              {mode === 'register' && inviteCodeRequired && (
+                <div>
+                  <label htmlFor='invite-code' className='sr-only'>
+                    邀请码
+                  </label>
+                  <input
+                    id='invite-code'
+                    type='text'
+                    autoComplete='off'
+                    autoCapitalize='characters'
+                    className={`${INPUT_CLASS} ${
+                      visibleError('inviteCode') ? INPUT_INVALID_CLASS : ''
+                    }`}
+                    placeholder='邀请码'
+                    value={inviteCode}
+                    onChange={(e) => setInviteCode(e.target.value)}
+                    onBlur={() => markTouched('inviteCode')}
+                    aria-invalid={!!visibleError('inviteCode')}
+                    aria-describedby={
+                      visibleError('inviteCode')
+                        ? 'invite-code-error'
+                        : undefined
+                    }
+                  />
+                  {visibleError('inviteCode') && (
+                    <p id='invite-code-error' className={FIELD_ERROR_CLASS}>
+                      {visibleError('inviteCode')}
+                    </p>
+                  )}
                 </div>
               )}
 
@@ -318,7 +497,8 @@ export function LoginPageClient() {
                   !password ||
                   loading ||
                   (shouldAskUsername && !username) ||
-                  (mode === 'register' && !confirmPassword)
+                  (isRegister &&
+                    (Object.keys(fieldErrors).length > 0 || usernameTaken))
                 }
                 className='!mt-6 inline-flex w-full items-center justify-center gap-2 rounded-lg bg-green-600 py-3 text-base font-semibold text-white shadow-lg shadow-green-600/25 transition-colors hover:bg-green-500 active:bg-green-700 disabled:cursor-not-allowed disabled:opacity-50'
               >

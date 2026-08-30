@@ -1,48 +1,12 @@
 /** @jest-environment node */
 
-import { DEFAULT_RUNTIME_PARAMS } from '@/lib/runtime-params';
-import type { AdminConfig } from '@/types/admin';
-
 jest.mock('../env.server', () => ({
   getOwnerUsername: () => 'owner',
 }));
 
 import { parseImportData } from '../data-import';
 import type { StorageUserImportData } from '../types';
-
-const adminConfig: AdminConfig = {
-  ConfigSubscribtion: { URL: '', AutoUpdate: false, LastCheck: '' },
-  ConfigFile: '',
-  SiteConfig: {
-    SiteName: 'IceTV',
-    SiteIcon: '',
-    Announcement: '',
-    FooterText: '',
-    EnableLiveEntry: false,
-    DefaultAggregateSearch: true,
-    EnableOptimization: true,
-    LiveDirectConnect: false,
-    ...DEFAULT_RUNTIME_PARAMS,
-    SearchDownstreamMaxPage: 5,
-    SiteInterfaceCacheTime: 300,
-    DoubanProxyType: 'direct',
-    DoubanProxy: '',
-    BangumiDataSource: 'server',
-    BangumiProxy: '',
-    DoubanImageProxyType: 'direct',
-    DoubanImageProxy: '',
-    DisableYellowFilter: false,
-    FluidSearch: true,
-  },
-  UserConfig: {
-    Users: [],
-    OpenRegister: false,
-    Tags: [],
-  },
-  SourceConfig: [],
-  CustomCategories: [],
-  LiveConfig: [],
-};
+import { IMPORT_ADMIN_CONFIG as adminConfig } from './__fixtures__/import-admin-config';
 
 const exportedHash =
   '$2b$10$abcdefghijklmnopqrstuu9dBwFh6R0D4A5gHfHnM6kQ7xS8tT9u';
@@ -83,6 +47,10 @@ function createImportData() {
           failureCount: 0,
         },
       ] as unknown[] | undefined,
+      inviteCodeUsage: { 'invite-a': 3, 'invite-b': 0 } as
+        | Record<string, number>
+        | undefined,
+      siteIcon: null as { extension: string; base64: string } | null,
       userData: {
         'demo-user': emptyUserData(),
         'legacy-user': emptyUserData(),
@@ -127,6 +95,107 @@ describe('data import full export fields', () => {
         successCount: 2,
         failureCount: 0,
       },
+    ]);
+  });
+
+  it('keeps invite code usage counts', async () => {
+    const parsed = await parseImportData(createImportData());
+
+    expect(parsed.snapshot.inviteCodeUsage).toEqual({
+      'invite-a': 3,
+      'invite-b': 0,
+    });
+  });
+
+  it('accepts backups without invite code usage', async () => {
+    const importData = createImportData();
+    delete importData.data.inviteCodeUsage;
+
+    const parsed = await parseImportData(importData);
+
+    expect(parsed.snapshot.inviteCodeUsage).toEqual({});
+  });
+
+  it('rejects negative invite code usage', async () => {
+    const importData = createImportData();
+    importData.data.inviteCodeUsage = { 'invite-a': -1 };
+
+    await expect(parseImportData(importData)).rejects.toThrow(
+      '邀请码已用次数超出限制',
+    );
+  });
+
+  it('keeps a valid site icon payload', async () => {
+    const importData = createImportData();
+    importData.data.siteIcon = {
+      extension: '.png',
+      base64: Buffer.from('icon').toString('base64'),
+    };
+
+    const parsed = await parseImportData(importData);
+
+    expect(parsed.siteIcon).toEqual({
+      extension: '.png',
+      base64: Buffer.from('icon').toString('base64'),
+    });
+  });
+
+  it('returns a null site icon for backups without one', async () => {
+    const parsed = await parseImportData(createImportData());
+
+    expect(parsed.siteIcon).toBeNull();
+  });
+
+  it('rejects unsupported site icon extensions', async () => {
+    const importData = createImportData();
+    importData.data.siteIcon = {
+      extension: '.exe',
+      base64: Buffer.from('icon').toString('base64'),
+    };
+
+    await expect(parseImportData(importData)).rejects.toThrow(
+      '站点图标格式无效',
+    );
+  });
+
+  it('rejects non-base64 site icon data', async () => {
+    const importData = createImportData();
+    importData.data.siteIcon = { extension: '.png', base64: 'not base64!!' };
+
+    await expect(parseImportData(importData)).rejects.toThrow(
+      '站点图标数据格式无效',
+    );
+  });
+
+  it('reports nothing when no limits are hit', async () => {
+    const parsed = await parseImportData(createImportData());
+
+    expect(parsed.truncated).toEqual([]);
+  });
+
+  it('reports dropped search history entries', async () => {
+    const importData = createImportData();
+    importData.data.adminConfig = {
+      ...adminConfig,
+      SiteConfig: { ...adminConfig.SiteConfig, SearchHistoryLimit: 3 },
+    };
+    importData.data.userData['demo-user'].searchHistory = [
+      'a',
+      'b',
+      'c',
+      'd',
+      'e',
+    ];
+
+    const parsed = await parseImportData(importData);
+
+    expect(parsed.truncated).toEqual([
+      { username: 'demo-user', kind: 'searchHistory', dropped: 2 },
+    ]);
+    expect(parsed.snapshot.userData['demo-user'].searchHistory).toEqual([
+      'a',
+      'b',
+      'c',
     ]);
   });
 

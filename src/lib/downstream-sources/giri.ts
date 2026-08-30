@@ -7,7 +7,7 @@ import {
 } from '@/lib/giri';
 import { buildLazyEpisodeUrl } from '@/lib/lazy-episodes';
 import type { SearchResult } from '@/lib/types';
-import { cleanHtmlTags } from '@/lib/utils';
+import { cleanHtmlTags, normalizeInlineText } from '@/lib/utils';
 
 import {
   BROWSER_HTML_HEADERS,
@@ -110,10 +110,11 @@ function parseGirigiriEpisodePlayHtml(
   html: string,
   origin: string,
 ): GirigiriPlayExtractResult {
-  const title =
-    html.match(/class="player-title-link"[^>]*>([^<]+)<\/a>/)?.[1]?.trim() ||
-    html.match(/<title>([^<_]+)/)?.[1]?.trim() ||
-    '';
+  const title = normalizeInlineText(
+    html.match(/class="player-title-link"[^>]*>([^<]+)<\/a>/)?.[1] ||
+      html.match(/<title>([^<_]+)/)?.[1] ||
+      '',
+  );
   const desc =
     cleanHtmlTags(
       html.match(/<div class="small-text">([\s\S]*?)<\/div>/)?.[1] ||
@@ -240,7 +241,7 @@ export async function searchFromGirigiri(
     return list
       .map((item) => {
         const id = String(item.id || '').trim();
-        const title = (item.name || '').trim();
+        const title = normalizeInlineText(item.name || '');
         if (!id || !title) return null;
 
         return {
@@ -307,12 +308,11 @@ export async function getDetailFromGirigiri(
   const { origin, html } = detailResult;
   const activeOrigins = origins;
 
-  const title =
-    html
-      .match(/<h3 class="slide-info-title[^"]*">([^<]+)<\/h3>/)?.[1]
-      ?.trim() ||
-    html.match(/<title>([^<_]+)/)?.[1]?.trim() ||
-    '';
+  const title = normalizeInlineText(
+    html.match(/<h3 class="slide-info-title[^"]*">([^<]+)<\/h3>/)?.[1] ||
+      html.match(/<title>([^<_]+)/)?.[1] ||
+      '',
+  );
   const descRaw =
     html.match(/id="height_limit"[^>]*>([\s\S]*?)<\/div>/)?.[1] ||
     html.match(/<meta\s+name="description"\s+content="([^"]*)"/i)?.[1] ||

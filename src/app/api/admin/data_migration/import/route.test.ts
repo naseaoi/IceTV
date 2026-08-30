@@ -32,6 +32,9 @@ async function loadRoute() {
   jest.doMock('@/lib/config', () => ({
     setCachedConfig: jest.fn(),
   }));
+  jest.doMock('@/lib/site-icon-storage.server', () => ({
+    restoreSiteIconFromBackup: jest.fn(),
+  }));
 
   return require('./route') as ImportRouteModule;
 }
@@ -42,6 +45,7 @@ describe('data migration import route', () => {
     jest.dontMock('@/lib/data-import');
     jest.dontMock('@/lib/db');
     jest.dontMock('@/lib/config');
+    jest.dontMock('@/lib/site-icon-storage.server');
     jest.restoreAllMocks();
   });
 

@@ -1,6 +1,10 @@
 import 'server-only';
 
-import type { PoolConnection, RowDataPacket } from 'mysql2/promise';
+import type {
+  ExecuteValues,
+  PoolConnection,
+  RowDataPacket,
+} from 'mysql2/promise';
 import mysql from 'mysql2/promise';
 
 import { AdminConfig } from '@/types/admin';
@@ -10,9 +14,12 @@ import {
   buildPlaybackSearchLikePattern,
   normalizePlaybackSearchKeyword,
 } from './playback-query';
+import { normalizeRuntimeParam } from './runtime-params';
 import { getMySqlConnectionUrl } from './storage-type';
+import { buildTrackingSql, MYSQL_TRACKING_DIALECT } from './tracking-sql';
 import {
   Favorite,
+  FavoritePage,
   IStorage,
   PlaybackRangeWatchTotal,
   PlaybackSession,
@@ -21,15 +28,22 @@ import {
   PlaybackTimeRange,
   PlaybackWatchTotals,
   PlayRecord,
+  PlayRecordPage,
   SkipConfig,
   SourceRouteStatInput,
   SourceRouteStatsBucket,
   SourceRouteStatsItem,
   StorageImportData,
+  UserMessageState,
 } from './types';
 import { assertValidUsernameFormat, normalizeUsername } from './username';
 
 const SEARCH_HISTORY_LIMIT = 20;
+const {
+  createdAt: MYSQL_TRACKING_CREATED_AT,
+  unreadWhere: MYSQL_UNREAD_TRACKING_WHERE,
+} = buildTrackingSql(MYSQL_TRACKING_DIALECT);
+const PLAY_RECORD_BATCH_SIZE = 200;
 
 function parseInteger(value: string | undefined, fallback: number): number {
   if (!value) {
@@ -50,6 +64,86 @@ function parseJsonValue<T>(raw: string | null | undefined): T | null {
   } catch {
     return null;
   }
+}
+
+function buildPlayRecordPage(
+  rows: JsonRow[],
+  total: number,
+  limit: number,
+): PlayRecordPage {
+  const pageRows = rows.slice(0, limit);
+  const items: Record<string, PlayRecord> = {};
+  for (const row of pageRows) {
+    const parsed = parseJsonValue<PlayRecord>(row.record_json);
+    if (parsed && row.record_key) items[row.record_key] = parsed;
+  }
+  const lastRow = pageRows.at(-1);
+  const lastRecord = lastRow?.record_key ? items[lastRow.record_key] : null;
+  return {
+    items,
+    total,
+    nextCursor:
+      rows.length > limit && lastRow?.record_key && lastRecord
+        ? `${lastRecord.save_time}|${lastRow.record_key}`
+        : null,
+  };
+}
+
+function buildTrackingPlayRecordPage(
+  rows: JsonRow[],
+  total: number,
+  limit: number,
+): PlayRecordPage {
+  const pageRows = rows.slice(0, limit);
+  const items: Record<string, PlayRecord> = {};
+  for (const row of pageRows) {
+    const parsed = parseJsonValue<PlayRecord>(row.record_json);
+    if (parsed && row.record_key) items[row.record_key] = parsed;
+  }
+  const lastRow = pageRows.at(-1);
+  const lastRecord = lastRow?.record_key ? items[lastRow.record_key] : null;
+  const lastCreatedAt = lastRecord
+    ? lastRecord.update_detected_at ||
+      lastRecord.metadata_checked_at ||
+      lastRecord.save_time
+    : null;
+  return {
+    items,
+    total,
+    nextCursor:
+      rows.length > limit && lastRow?.record_key && lastCreatedAt !== null
+        ? `${lastCreatedAt}|${lastRow.record_key}`
+        : null,
+  };
+}
+
+function buildFavoritePage(
+  rows: JsonRow[],
+  total: number,
+  limit: number,
+): FavoritePage {
+  const items = rows.slice(0, limit).flatMap((row) => {
+    if (!row.favorite_key || !row.favorite_json) return [];
+    const favorite = parseJsonValue<Favorite>(row.favorite_json);
+    if (!favorite) return [];
+    const playRecord = parseJsonValue<PlayRecord>(row.record_json);
+    return [
+      {
+        key: row.favorite_key,
+        favorite,
+        ...(playRecord ? { playRecord } : {}),
+      },
+    ];
+  });
+  const lastItem = items.at(-1);
+  return {
+    items,
+    total,
+    nextCursor:
+      rows.length > limit && lastItem
+        ? `${lastItem.favorite.save_time}|${lastItem.key}`
+        : null,
+  };
 }
 
 function buildSslOptions() {
@@ -75,6 +169,8 @@ function createPoolOptions(databaseUrl: string): mysql.PoolOptions {
     throw new Error('MySQL 连接串缺少数据库名');
   }
 
+  const connectionLimit = parseInteger(process.env.MYSQL_CONNECTION_LIMIT, 10);
+
   return {
     host: parsedUrl.hostname,
     port: parseInteger(parsedUrl.port, 3306),
@@ -83,18 +179,71 @@ function createPoolOptions(databaseUrl: string): mysql.PoolOptions {
     database: decodeURIComponent(databaseName),
     charset: 'utf8mb4',
     waitForConnections: true,
-    connectionLimit: parseInteger(process.env.MYSQL_CONNECTION_LIMIT, 5),
-    maxIdle: parseInteger(process.env.MYSQL_MAX_IDLE, 5),
+    connectionLimit,
+    maxIdle: parseInteger(process.env.MYSQL_MAX_IDLE, connectionLimit),
     idleTimeout: parseInteger(process.env.MYSQL_IDLE_TIMEOUT_MS, 60000),
     queueLimit: 0,
     ssl: buildSslOptions(),
   };
 }
 
+const IMPORT_BATCH_ROWS = 200;
+const MYSQL_MAX_PLACEHOLDERS = 60000;
+
+function createRowBatcher(
+  connection: PoolConnection,
+  table: string,
+  columns: string[],
+) {
+  const buffer: ExecuteValues[][] = [];
+  const columnList = columns.join(', ');
+  const rowPlaceholder = `(${columns.map(() => '?').join(', ')})`;
+  const maxRows = Math.max(
+    1,
+    Math.min(
+      IMPORT_BATCH_ROWS,
+      Math.floor(MYSQL_MAX_PLACEHOLDERS / columns.length),
+    ),
+  );
+
+  async function flush(): Promise<void> {
+    if (buffer.length === 0) return;
+    const chunk = buffer.splice(0, buffer.length);
+    await connection.execute(
+      `INSERT INTO ${table} (${columnList}) VALUES ${chunk
+        .map(() => rowPlaceholder)
+        .join(', ')}`,
+      chunk.flat(),
+    );
+  }
+
+  return {
+    async add(row: ExecuteValues[]): Promise<void> {
+      buffer.push(row);
+      if (buffer.length >= maxRows) await flush();
+    },
+    flush,
+  };
+}
+
+async function insertRowsInBatches(
+  connection: PoolConnection,
+  table: string,
+  columns: string[],
+  rows: Iterable<ExecuteValues[]>,
+): Promise<void> {
+  const batcher = createRowBatcher(connection, table, columns);
+  for (const row of rows) {
+    await batcher.add(row);
+  }
+  await batcher.flush();
+}
+
 type JsonRow = RowDataPacket & {
   record_json?: string;
   favorite_json?: string;
   config_json?: string;
+  state_json?: string;
   id?: string;
   source?: string;
   video_id?: string;
@@ -207,6 +356,18 @@ export class MySqlStorage implements IStorage {
         id TINYINT NOT NULL PRIMARY KEY,
         config_json LONGTEXT NOT NULL
       ) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci`,
+      `CREATE TABLE IF NOT EXISTS user_message_state (
+        username VARCHAR(191) NOT NULL PRIMARY KEY,
+        state_json LONGTEXT NOT NULL
+      ) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci`,
+      `CREATE TABLE IF NOT EXISTS user_login_activity (
+        username VARCHAR(191) NOT NULL PRIMARY KEY,
+        last_login_at BIGINT NOT NULL
+      ) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci`,
+      `CREATE TABLE IF NOT EXISTS invite_code_usage (
+        code VARCHAR(191) NOT NULL PRIMARY KEY,
+        used_count INT NOT NULL DEFAULT 0
+      ) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci`,
       `CREATE TABLE IF NOT EXISTS source_route_stats (
         source VARCHAR(191) NOT NULL,
         route_mode VARCHAR(16) NOT NULL,
@@ -222,6 +383,19 @@ export class MySqlStorage implements IStorage {
     for (const statement of statements) {
       await this.pool.execute(statement);
     }
+
+    await this.backfillMissingLoginActivity();
+  }
+
+  // 每个用户都必须有活跃记录行，缺失的按当前时刻补齐
+  private async backfillMissingLoginActivity(
+    connection?: PoolConnection,
+  ): Promise<void> {
+    const executor = connection || this.pool;
+    await executor.execute(
+      'INSERT IGNORE INTO user_login_activity (username, last_login_at) SELECT username, ? FROM users',
+      [Date.now()],
+    );
   }
 
   private async withTransaction<T>(
@@ -271,6 +445,37 @@ export class MySqlStorage implements IStorage {
     );
   }
 
+  async setPlayRecords(
+    userName: string,
+    records: Record<string, PlayRecord>,
+  ): Promise<void> {
+    const username = normalizeUsername(userName);
+    const entries = Object.entries(records);
+    if (entries.length === 0) return;
+
+    await this.withTransaction(async (connection) => {
+      for (
+        let offset = 0;
+        offset < entries.length;
+        offset += PLAY_RECORD_BATCH_SIZE
+      ) {
+        const chunk = entries.slice(offset, offset + PLAY_RECORD_BATCH_SIZE);
+        const placeholders = chunk.map(() => '(?, ?, ?)').join(', ');
+        const params = chunk.flatMap(([key, record]) => [
+          username,
+          key,
+          JSON.stringify(record),
+        ]);
+        await connection.execute(
+          `INSERT INTO play_records (username, record_key, record_json)
+           VALUES ${placeholders}
+           ON DUPLICATE KEY UPDATE record_json = VALUES(record_json)`,
+          params,
+        );
+      }
+    });
+  }
+
   async getAllPlayRecords(
     userName: string,
   ): Promise<{ [key: string]: PlayRecord }> {
@@ -290,6 +495,84 @@ export class MySqlStorage implements IStorage {
     }
 
     return result;
+  }
+
+  async getPlayRecordPage(
+    userName: string,
+    limit: number,
+    cursorTime?: number,
+    cursorKey?: string,
+  ): Promise<PlayRecordPage> {
+    await this.ensureInitialized();
+    const username = normalizeUsername(userName);
+    const saveTimeExpression =
+      "CAST(JSON_UNQUOTE(JSON_EXTRACT(record_json, '$.save_time')) AS UNSIGNED)";
+    const hasCursor = cursorTime !== undefined && !!cursorKey;
+    const rowsQuery = this.pool.query<JsonRow[]>(
+      hasCursor
+        ? `SELECT record_key, record_json
+           FROM play_records
+           WHERE username = ?
+             AND (${saveTimeExpression} < ?
+               OR (${saveTimeExpression} = ? AND record_key < ?))
+           ORDER BY ${saveTimeExpression} DESC, record_key DESC
+           LIMIT ?`
+        : `SELECT record_key, record_json
+           FROM play_records
+           WHERE username = ?
+           ORDER BY ${saveTimeExpression} DESC, record_key DESC
+           LIMIT ?`,
+      hasCursor
+        ? [username, cursorTime, cursorTime, cursorKey, limit + 1]
+        : [username, limit + 1],
+    );
+    const countQuery = this.pool.query<
+      Array<RowDataPacket & { count: number }>
+    >('SELECT COUNT(*) AS count FROM play_records WHERE username = ?', [
+      username,
+    ]);
+    const [[rows], [countRows]] = await Promise.all([rowsQuery, countQuery]);
+    return buildPlayRecordPage(rows, countRows[0]?.count || 0, limit);
+  }
+
+  async getUnreadTrackingPlayRecordPage(
+    userName: string,
+    limit: number,
+    cursorTime?: number,
+    cursorKey?: string,
+  ): Promise<PlayRecordPage> {
+    await this.ensureInitialized();
+    const username = normalizeUsername(userName);
+    const hasCursor = cursorTime !== undefined && !!cursorKey;
+    const rowsQuery = this.pool.query<JsonRow[]>(
+      hasCursor
+        ? `SELECT record_key, record_json
+           FROM play_records
+           WHERE username = ?
+             AND ${MYSQL_UNREAD_TRACKING_WHERE}
+             AND (${MYSQL_TRACKING_CREATED_AT} < ?
+               OR (${MYSQL_TRACKING_CREATED_AT} = ? AND record_key < ?))
+           ORDER BY ${MYSQL_TRACKING_CREATED_AT} DESC, record_key DESC
+           LIMIT ?`
+        : `SELECT record_key, record_json
+           FROM play_records
+           WHERE username = ? AND ${MYSQL_UNREAD_TRACKING_WHERE}
+           ORDER BY ${MYSQL_TRACKING_CREATED_AT} DESC, record_key DESC
+           LIMIT ?`,
+      hasCursor
+        ? [username, cursorTime, cursorTime, cursorKey, limit + 1]
+        : [username, limit + 1],
+    );
+    const countQuery = this.pool.query<
+      Array<RowDataPacket & { count: number }>
+    >(
+      `SELECT COUNT(*) AS count
+       FROM play_records
+       WHERE username = ? AND ${MYSQL_UNREAD_TRACKING_WHERE}`,
+      [username],
+    );
+    const [[rows], [countRows]] = await Promise.all([rowsQuery, countQuery]);
+    return buildTrackingPlayRecordPage(rows, countRows[0]?.count || 0, limit);
   }
 
   async deletePlayRecord(userName: string, key: string): Promise<void> {
@@ -355,6 +638,46 @@ export class MySqlStorage implements IStorage {
     return result;
   }
 
+  async getFavoritePage(
+    userName: string,
+    limit: number,
+    cursorTime?: number,
+    cursorKey?: string,
+  ): Promise<FavoritePage> {
+    await this.ensureInitialized();
+    const username = normalizeUsername(userName);
+    const saveTimeExpression =
+      "CAST(JSON_UNQUOTE(JSON_EXTRACT(f.favorite_json, '$.save_time')) AS UNSIGNED)";
+    const hasCursor = cursorTime !== undefined && !!cursorKey;
+    const rowsQuery = this.pool.query<JsonRow[]>(
+      hasCursor
+        ? `SELECT f.favorite_key, f.favorite_json, p.record_json
+           FROM favorites f
+           LEFT JOIN play_records p
+             ON p.username = f.username AND p.record_key = f.favorite_key
+           WHERE f.username = ?
+             AND (${saveTimeExpression} < ?
+               OR (${saveTimeExpression} = ? AND f.favorite_key < ?))
+           ORDER BY ${saveTimeExpression} DESC, f.favorite_key DESC
+           LIMIT ?`
+        : `SELECT f.favorite_key, f.favorite_json, p.record_json
+           FROM favorites f
+           LEFT JOIN play_records p
+             ON p.username = f.username AND p.record_key = f.favorite_key
+           WHERE f.username = ?
+           ORDER BY ${saveTimeExpression} DESC, f.favorite_key DESC
+           LIMIT ?`,
+      hasCursor
+        ? [username, cursorTime, cursorTime, cursorKey, limit + 1]
+        : [username, limit + 1],
+    );
+    const countQuery = this.pool.query<
+      Array<RowDataPacket & { count: number }>
+    >('SELECT COUNT(*) AS count FROM favorites WHERE username = ?', [username]);
+    const [[rows], [countRows]] = await Promise.all([rowsQuery, countQuery]);
+    return buildFavoritePage(rows, countRows[0]?.count || 0, limit);
+  }
+
   async deleteFavorite(userName: string, key: string): Promise<void> {
     await this.ensureInitialized();
     const username = normalizeUsername(userName);
@@ -379,6 +702,10 @@ export class MySqlStorage implements IStorage {
     await this.pool.execute(
       'INSERT INTO users (username, password) VALUES (?, ?)',
       [username, hashed],
+    );
+    await this.pool.execute(
+      'INSERT INTO user_login_activity (username, last_login_at) VALUES (?, ?) ON DUPLICATE KEY UPDATE last_login_at = VALUES(last_login_at)',
+      [username, Date.now()],
     );
   }
 
@@ -451,7 +778,100 @@ export class MySqlStorage implements IStorage {
         'DELETE FROM playback_sessions WHERE username = ?',
         [username],
       );
+      await connection.execute(
+        'DELETE FROM user_message_state WHERE username = ?',
+        [username],
+      );
+      await connection.execute(
+        'DELETE FROM user_login_activity WHERE username = ?',
+        [username],
+      );
     });
+  }
+
+  async recordUserLogin(userName: string, loginAt: number): Promise<void> {
+    await this.ensureInitialized();
+    const username = normalizeUsername(userName);
+    await this.pool.execute(
+      `INSERT INTO user_login_activity (username, last_login_at)
+       VALUES (?, ?)
+       ON DUPLICATE KEY UPDATE last_login_at = VALUES(last_login_at)`,
+      [username, loginAt],
+    );
+  }
+
+  async getUserLastLogin(userName: string): Promise<number | null> {
+    await this.ensureInitialized();
+    const username = normalizeUsername(userName);
+    const [rows] = await this.pool.query<JsonRow[]>(
+      'SELECT last_login_at FROM user_login_activity WHERE username = ? LIMIT 1',
+      [username],
+    );
+    const value = rows[0]?.last_login_at;
+    return value === undefined || value === null ? null : Number(value);
+  }
+
+  async getAllUserLastLogins(): Promise<Record<string, number>> {
+    await this.ensureInitialized();
+    const [rows] = await this.pool.query<JsonRow[]>(
+      'SELECT username, last_login_at FROM user_login_activity',
+    );
+    const result: Record<string, number> = {};
+    for (const row of rows) {
+      if (typeof row.username === 'string') {
+        result[row.username] = Number(row.last_login_at || 0);
+      }
+    }
+    return result;
+  }
+
+  // maxUses 为 0 表示不限次数，seedCount 用于承接配置里的历史用量
+  async reserveInviteCodeUse(
+    code: string,
+    maxUses: number,
+    seedCount = 0,
+  ): Promise<boolean> {
+    await this.ensureInitialized();
+    await this.pool.execute(
+      'INSERT IGNORE INTO invite_code_usage (code, used_count) VALUES (?, ?)',
+      [code, Math.max(0, seedCount)],
+    );
+    const [result] = await this.pool.execute(
+      maxUses
+        ? 'UPDATE invite_code_usage SET used_count = used_count + 1 WHERE code = ? AND used_count < ?'
+        : 'UPDATE invite_code_usage SET used_count = used_count + 1 WHERE code = ?',
+      maxUses ? [code, maxUses] : [code],
+    );
+    return Number((result as { affectedRows?: number }).affectedRows || 0) > 0;
+  }
+
+  async releaseInviteCodeUse(code: string): Promise<void> {
+    await this.ensureInitialized();
+    await this.pool.execute(
+      'UPDATE invite_code_usage SET used_count = used_count - 1 WHERE code = ? AND used_count > 0',
+      [code],
+    );
+  }
+
+  async getAllInviteCodeUsage(): Promise<Record<string, number>> {
+    await this.ensureInitialized();
+    const [rows] = await this.pool.query<JsonRow[]>(
+      'SELECT code, used_count FROM invite_code_usage',
+    );
+    const result: Record<string, number> = {};
+    for (const row of rows) {
+      if (typeof row.code === 'string') {
+        result[row.code] = Number(row.used_count || 0);
+      }
+    }
+    return result;
+  }
+
+  async deleteInviteCodeUsage(code: string): Promise<void> {
+    await this.ensureInitialized();
+    await this.pool.execute('DELETE FROM invite_code_usage WHERE code = ?', [
+      code,
+    ]);
   }
 
   async getSearchHistory(userName: string): Promise<string[]> {
@@ -513,7 +933,11 @@ export class MySqlStorage implements IStorage {
     const [rows] = await this.pool.query<JsonRow[]>(
       'SELECT username FROM users ORDER BY username ASC',
     );
-    return rows.map((row) => row.username).filter(Boolean) as string[];
+    const usernames = rows
+      .map((row) => row.username)
+      .filter(Boolean)
+      .map((username) => normalizeUsername(username as string));
+    return [...new Set(usernames)];
   }
 
   async getAllUsersWithPasswords(): Promise<{ [username: string]: string }> {
@@ -524,10 +948,34 @@ export class MySqlStorage implements IStorage {
     const result: { [username: string]: string } = {};
     for (const row of rows) {
       if (row.username && row.password) {
-        result[row.username] = row.password;
+        result[normalizeUsername(row.username as string)] = row.password;
       }
     }
     return result;
+  }
+
+  async getUserMessageState(userName: string): Promise<UserMessageState> {
+    await this.ensureInitialized();
+    const username = normalizeUsername(userName);
+    const [rows] = await this.pool.query<JsonRow[]>(
+      'SELECT state_json FROM user_message_state WHERE username = ? LIMIT 1',
+      [username],
+    );
+    return parseJsonValue<UserMessageState>(rows[0]?.state_json) || {};
+  }
+
+  async setUserMessageState(
+    userName: string,
+    state: UserMessageState,
+  ): Promise<void> {
+    await this.ensureInitialized();
+    const username = normalizeUsername(userName);
+    await this.pool.execute(
+      `INSERT INTO user_message_state (username, state_json)
+       VALUES (?, ?)
+       ON DUPLICATE KEY UPDATE state_json = VALUES(state_json)`,
+      [username, JSON.stringify(state)],
+    );
   }
 
   async getAdminConfig(): Promise<AdminConfig | null> {
@@ -1021,10 +1469,17 @@ export class MySqlStorage implements IStorage {
       await connection.execute('DELETE FROM playback_sessions');
       await connection.execute('DELETE FROM admin_config');
       await connection.execute('DELETE FROM source_route_stats');
+      await connection.execute('DELETE FROM user_message_state');
+      await connection.execute('DELETE FROM user_login_activity');
+      await connection.execute('DELETE FROM invite_code_usage');
     });
   }
 
   async replaceAllData(data: StorageImportData): Promise<void> {
+    const searchHistoryLimit = normalizeRuntimeParam(
+      'SearchHistoryLimit',
+      data.adminConfig?.SiteConfig?.SearchHistoryLimit,
+    );
     await this.withTransaction(async (connection) => {
       await connection.execute('DELETE FROM users');
       await connection.execute('DELETE FROM play_records');
@@ -1034,100 +1489,174 @@ export class MySqlStorage implements IStorage {
       await connection.execute('DELETE FROM playback_sessions');
       await connection.execute('DELETE FROM admin_config');
       await connection.execute('DELETE FROM source_route_stats');
+      await connection.execute('DELETE FROM user_message_state');
+      await connection.execute('DELETE FROM user_login_activity');
+      await connection.execute('DELETE FROM invite_code_usage');
 
       await connection.execute(
         'INSERT INTO admin_config (id, config_json) VALUES (1, ?)',
         [JSON.stringify(data.adminConfig)],
       );
 
-      const routeStatUpdatedAt = Date.now();
-      for (const stat of data.sourceRouteStats) {
-        await connection.execute(
-          `INSERT INTO source_route_stats (
-            source, route_mode, bucket_date, success_count, failure_count, updated_at
-          ) VALUES (?, ?, ?, ?, ?, ?)`,
-          [
-            stat.source,
-            stat.routeMode,
-            stat.bucketDate,
-            stat.successCount,
-            stat.failureCount,
-            routeStatUpdatedAt,
-          ],
-        );
-      }
+      await insertRowsInBatches(
+        connection,
+        'invite_code_usage',
+        ['code', 'used_count'],
+        Object.entries(data.inviteCodeUsage).map(([code, usedCount]) => [
+          code,
+          usedCount,
+        ]),
+      );
 
-      for (const [userName, passwordHash] of Object.entries(data.users)) {
-        const username = assertValidUsernameFormat(userName);
-        await connection.execute(
-          'INSERT INTO users (username, password) VALUES (?, ?)',
-          [username, passwordHash],
-        );
-      }
+      const routeStatUpdatedAt = Date.now();
+      await insertRowsInBatches(
+        connection,
+        'source_route_stats',
+        [
+          'source',
+          'route_mode',
+          'bucket_date',
+          'success_count',
+          'failure_count',
+          'updated_at',
+        ],
+        data.sourceRouteStats.map((stat) => [
+          stat.source,
+          stat.routeMode,
+          stat.bucketDate,
+          stat.successCount,
+          stat.failureCount,
+          routeStatUpdatedAt,
+        ]),
+      );
+
+      await insertRowsInBatches(
+        connection,
+        'users',
+        ['username', 'password'],
+        Object.entries(data.users).map(([userName, passwordHash]) => [
+          assertValidUsernameFormat(userName),
+          passwordHash,
+        ]),
+      );
+
+      const messageStates = createRowBatcher(connection, 'user_message_state', [
+        'username',
+        'state_json',
+      ]);
+      const loginActivities = createRowBatcher(
+        connection,
+        'user_login_activity',
+        ['username', 'last_login_at'],
+      );
+      const playRecords = createRowBatcher(connection, 'play_records', [
+        'username',
+        'record_key',
+        'record_json',
+      ]);
+      const favorites = createRowBatcher(connection, 'favorites', [
+        'username',
+        'favorite_key',
+        'favorite_json',
+      ]);
+      const searchHistories = createRowBatcher(connection, 'search_history', [
+        'username',
+        'keyword',
+        'sort_index',
+      ]);
+      const skipConfigs = createRowBatcher(connection, 'skip_configs', [
+        'username',
+        'config_key',
+        'config_json',
+      ]);
+      const playbackSessions = createRowBatcher(
+        connection,
+        'playback_sessions',
+        [
+          'id',
+          'username',
+          'source',
+          'video_id',
+          'episode_index',
+          'title',
+          'source_name',
+          'cover',
+          'year',
+          'started_at',
+          'ended_at',
+          'watch_seconds',
+          'last_position',
+          'total_time',
+          'created_at',
+          'updated_at',
+        ],
+      );
 
       for (const [userName, userData] of Object.entries(data.userData)) {
         const username = assertValidUsernameFormat(userName);
+
+        if (userData.messageState) {
+          await messageStates.add([
+            username,
+            JSON.stringify(userData.messageState),
+          ]);
+        }
+
+        if (typeof userData.lastLoginAt === 'number') {
+          await loginActivities.add([username, userData.lastLoginAt]);
+        }
+
         for (const [key, record] of Object.entries(userData.playRecords)) {
-          await connection.execute(
-            'INSERT INTO play_records (username, record_key, record_json) VALUES (?, ?, ?)',
-            [username, key, JSON.stringify(record)],
-          );
+          await playRecords.add([username, key, JSON.stringify(record)]);
         }
 
         for (const [key, favorite] of Object.entries(userData.favorites)) {
-          await connection.execute(
-            'INSERT INTO favorites (username, favorite_key, favorite_json) VALUES (?, ?, ?)',
-            [username, key, JSON.stringify(favorite)],
-          );
+          await favorites.add([username, key, JSON.stringify(favorite)]);
         }
 
         const searchHistory = userData.searchHistory.slice(
           0,
-          SEARCH_HISTORY_LIMIT,
+          searchHistoryLimit,
         );
         for (let index = 0; index < searchHistory.length; index++) {
-          const keyword = searchHistory[index];
-          await connection.execute(
-            'INSERT INTO search_history (username, keyword, sort_index) VALUES (?, ?, ?)',
-            [username, keyword, index],
-          );
+          await searchHistories.add([username, searchHistory[index], index]);
         }
 
         for (const [key, config] of Object.entries(userData.skipConfigs)) {
-          await connection.execute(
-            'INSERT INTO skip_configs (username, config_key, config_json) VALUES (?, ?, ?)',
-            [username, key, JSON.stringify(config)],
-          );
+          await skipConfigs.add([username, key, JSON.stringify(config)]);
         }
 
         for (const session of Object.values(userData.playbackSessions)) {
-          await connection.execute(
-            `INSERT INTO playback_sessions (
-              id, username, source, video_id, episode_index, title, source_name,
-              cover, year, started_at, ended_at, watch_seconds, last_position,
-              total_time, created_at, updated_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-            [
-              session.id,
-              username,
-              session.source,
-              session.video_id,
-              session.episode_index,
-              session.title,
-              session.source_name,
-              session.cover,
-              session.year,
-              session.started_at,
-              session.ended_at,
-              session.watch_seconds,
-              session.last_position,
-              session.total_time,
-              session.created_at,
-              session.updated_at,
-            ],
-          );
+          await playbackSessions.add([
+            session.id,
+            username,
+            session.source,
+            session.video_id,
+            session.episode_index,
+            session.title,
+            session.source_name,
+            session.cover,
+            session.year,
+            session.started_at,
+            session.ended_at,
+            session.watch_seconds,
+            session.last_position,
+            session.total_time,
+            session.created_at,
+            session.updated_at,
+          ]);
         }
       }
+
+      await messageStates.flush();
+      await loginActivities.flush();
+      await playRecords.flush();
+      await favorites.flush();
+      await searchHistories.flush();
+      await skipConfigs.flush();
+      await playbackSessions.flush();
+
+      await this.backfillMissingLoginActivity(connection);
     });
   }
 }

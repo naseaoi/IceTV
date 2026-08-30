@@ -1,8 +1,8 @@
 /** @jest-environment node */
 
-import { webcrypto } from 'crypto';
 import type { NextRequest, NextResponse } from 'next/server';
 
+import { installCryptoPolyfill } from '@/app/api/test-utils/crypto-polyfill';
 import {
   generateSignature,
   getSignatureData,
@@ -12,9 +12,7 @@ import { proxy } from '@/proxy';
 
 const AUTH_SECRET = 'auth-secret-with-at-least-32-chars';
 
-Object.defineProperty(globalThis, 'crypto', {
-  value: webcrypto,
-});
+installCryptoPolyfill();
 
 type CookieCall = {
   name: string;

@@ -1,4 +1,33 @@
-﻿import { ConfigConflictError, getConfig, saveConfig } from '@/lib/config';
+﻿import { randomBytes } from 'crypto';
+
+import {
+  findInactiveUsers,
+  MAX_INACTIVE_DAYS,
+  MIN_INACTIVE_DAYS,
+  parseInactiveDays,
+  resolveConfirmedDeletions,
+} from '@/features/admin/services/inactiveUsers';
+import {
+  buildInviteCode,
+  CUSTOM_INVITE_CODE_RULE_MESSAGE,
+  generateInviteCode,
+  INVITE_MAX_USES_RULE_MESSAGE,
+  isInviteCodeUsable,
+  isValidCustomInviteCode,
+  MAX_INVITE_CODES,
+  MAX_INVITE_VALID_DAYS,
+  mergeInviteCodeUsage,
+  MIN_INVITE_VALID_DAYS,
+  normalizeInviteCode,
+  parseInviteMaxUses,
+  parseInviteValidDays,
+} from '@/features/admin/services/inviteCodes';
+import {
+  ConfigConflictError,
+  getConfig,
+  invalidateConfigCache,
+  saveConfig,
+} from '@/lib/config';
 import { db } from '@/lib/db';
 import { validateAccountPassword } from '@/lib/password-policy';
 import { assertValidUsername, normalizeUsername } from '@/lib/username';
@@ -16,7 +45,23 @@ const ACTIONS = [
   'updateUserGroups',
   'batchUpdateUserGroups',
   'setOpenRegister',
+  'previewInactiveUsers',
+  'deleteInactiveUsers',
+  'setRequireInviteCode',
+  'createInviteCode',
+  'deleteInviteCode',
 ] as const;
+
+const TARGETLESS_ACTIONS = [
+  'userGroup',
+  'batchUpdateUserGroups',
+  'setOpenRegister',
+  'previewInactiveUsers',
+  'deleteInactiveUsers',
+  'setRequireInviteCode',
+  'createInviteCode',
+  'deleteInviteCode',
+];
 
 type AdminUserActionResponse = {
   body: unknown;
@@ -45,6 +90,17 @@ function toActionResponse(
   return actionResponse(body, init?.status, init?.headers);
 }
 
+// 邀请码从配置里移除后一并清掉用量行，避免重建同名码继承旧次数
+async function dropInviteCodeUsage(codes: string[]): Promise<void> {
+  for (const code of codes) {
+    try {
+      await db.deleteInviteCodeUsage(code);
+    } catch (error) {
+      console.warn('清理邀请码用量失败:', error);
+    }
+  }
+}
+
 export async function handleAdminUserAction({
   body,
   operatorUsername,
@@ -71,12 +127,7 @@ export async function handleAdminUserAction({
       return actionResponse({ error: '参数格式错误' }, 400);
     }
 
-    if (
-      !targetUsername &&
-      !['userGroup', 'batchUpdateUserGroups', 'setOpenRegister'].includes(
-        action,
-      )
-    ) {
+    if (!targetUsername && !TARGETLESS_ACTIONS.includes(action)) {
       return actionResponse({ error: '缺少目标用户名' }, 400);
     }
 
@@ -84,26 +135,22 @@ export async function handleAdminUserAction({
       action !== 'changePassword' &&
       action !== 'deleteUser' &&
       action !== 'updateUserApis' &&
-      action !== 'userGroup' &&
       action !== 'updateUserGroups' &&
-      action !== 'batchUpdateUserGroups' &&
-      action !== 'setOpenRegister' &&
+      !TARGETLESS_ACTIONS.includes(action) &&
       username === targetUsername
     ) {
       return actionResponse({ error: '无法对自己进行此操作' }, 400);
     }
 
+    // 写操作必须基于最新配置，否则命中 TTL 缓存会误判用户不存在或撞版本冲突
+    invalidateConfigCache();
     const adminConfig = await getConfig();
 
     let targetEntry: any = null;
     let isTargetAdmin = false;
+    let usageCodesToDrop: string[] = [];
 
-    if (
-      !['userGroup', 'batchUpdateUserGroups', 'setOpenRegister'].includes(
-        action,
-      ) &&
-      targetUsername
-    ) {
+    if (!TARGETLESS_ACTIONS.includes(action) && targetUsername) {
       targetEntry = adminConfig.UserConfig.Users.find(
         (u) => u.username === targetUsername,
       );
@@ -488,6 +535,90 @@ export async function handleAdminUserAction({
 
         break;
       }
+      case 'previewInactiveUsers': {
+        const inactiveDays = parseInactiveDays(
+          (body as { inactiveDays?: unknown }).inactiveDays,
+        );
+        if (inactiveDays === null) {
+          return toActionResponse(
+            {
+              error: `不活跃天数需在 ${MIN_INACTIVE_DAYS}-${MAX_INACTIVE_DAYS} 之间`,
+            },
+            { status: 400 },
+          );
+        }
+
+        const candidates = findInactiveUsers({
+          users: adminConfig.UserConfig.Users,
+          lastActiveAt: await db.getAllUserLastActive(),
+          inactiveDays,
+          operatorUsername: username,
+        });
+
+        return toActionResponse(
+          { candidates },
+          { headers: { 'Cache-Control': 'no-store' } },
+        );
+      }
+      case 'deleteInactiveUsers': {
+        const { usernames: rawUsernames } = body as { usernames?: unknown };
+        const inactiveDays = parseInactiveDays(
+          (body as { inactiveDays?: unknown }).inactiveDays,
+        );
+        if (inactiveDays === null) {
+          return toActionResponse(
+            {
+              error: `不活跃天数需在 ${MIN_INACTIVE_DAYS}-${MAX_INACTIVE_DAYS} 之间`,
+            },
+            { status: 400 },
+          );
+        }
+
+        if (!Array.isArray(rawUsernames) || rawUsernames.length === 0) {
+          return toActionResponse({ error: '缺少用户名列表' }, { status: 400 });
+        }
+
+        const confirmedUsernames = rawUsernames
+          .filter((item): item is string => typeof item === 'string')
+          .map((item) => normalizeUsername(item));
+
+        const candidates = findInactiveUsers({
+          users: adminConfig.UserConfig.Users,
+          lastActiveAt: await db.getAllUserLastActive(),
+          inactiveDays,
+          operatorUsername: username,
+        });
+        const deletable = resolveConfirmedDeletions(
+          candidates,
+          confirmedUsernames,
+        );
+
+        for (const target of deletable) {
+          await db.deleteUser(target);
+        }
+
+        if (deletable.length === 0) {
+          return toActionResponse(
+            {
+              ok: true,
+              deletedCount: 0,
+              skippedCount: confirmedUsernames.length,
+            },
+            { headers: { 'Cache-Control': 'no-store' } },
+          );
+        }
+
+        await saveConfig(adminConfig);
+
+        return toActionResponse(
+          {
+            ok: true,
+            deletedCount: deletable.length,
+            skippedCount: confirmedUsernames.length - deletable.length,
+          },
+          { headers: { 'Cache-Control': 'no-store' } },
+        );
+      }
       case 'setOpenRegister': {
         const { openRegister } = body as { openRegister?: boolean };
         if (typeof openRegister !== 'boolean') {
@@ -499,11 +630,125 @@ export async function handleAdminUserAction({
         adminConfig.UserConfig.OpenRegister = openRegister;
         break;
       }
+      case 'setRequireInviteCode': {
+        const { requireInviteCode } = body as { requireInviteCode?: boolean };
+        if (typeof requireInviteCode !== 'boolean') {
+          return toActionResponse(
+            { error: '邀请码开关参数错误' },
+            { status: 400 },
+          );
+        }
+        adminConfig.UserConfig.RequireInviteCode = requireInviteCode;
+        break;
+      }
+      case 'createInviteCode': {
+        const validDays = parseInviteValidDays(
+          (body as { validDays?: unknown }).validDays,
+        );
+        if (validDays === null) {
+          return toActionResponse(
+            {
+              error: `有效天数需在 ${MIN_INVITE_VALID_DAYS}-${MAX_INVITE_VALID_DAYS} 之间`,
+            },
+            { status: 400 },
+          );
+        }
+
+        const maxUses = parseInviteMaxUses(
+          (body as { maxUses?: unknown }).maxUses,
+        );
+        if (maxUses === null) {
+          return toActionResponse(
+            { error: INVITE_MAX_USES_RULE_MESSAGE },
+            { status: 400 },
+          );
+        }
+
+        const inviteCodes = mergeInviteCodeUsage(
+          adminConfig.UserConfig.InviteCodes,
+          await db.getAllInviteCodeUsage(),
+        );
+        const activeCodes = inviteCodes.filter((item) =>
+          isInviteCodeUsable(item),
+        );
+        if (activeCodes.length >= MAX_INVITE_CODES) {
+          return toActionResponse(
+            { error: `有效邀请码不能超过 ${MAX_INVITE_CODES} 个` },
+            { status: 400 },
+          );
+        }
+
+        const existing = new Set(inviteCodes.map((item) => item.code));
+        const rawCustomCode = (body as { code?: unknown }).code;
+        const hasCustomCode =
+          typeof rawCustomCode === 'string' && rawCustomCode.trim() !== '';
+
+        let code = '';
+        if (hasCustomCode) {
+          if (!isValidCustomInviteCode(rawCustomCode)) {
+            return toActionResponse(
+              { error: CUSTOM_INVITE_CODE_RULE_MESSAGE },
+              { status: 400 },
+            );
+          }
+          code = normalizeInviteCode(rawCustomCode);
+          if (activeCodes.some((item) => item.code === code)) {
+            return toActionResponse(
+              { error: '该邀请码已存在' },
+              { status: 409 },
+            );
+          }
+        } else {
+          for (let attempt = 0; attempt < 10; attempt += 1) {
+            code = generateInviteCode((size) => randomBytes(size));
+            if (!existing.has(code)) break;
+            code = '';
+          }
+          if (!code) {
+            return toActionResponse(
+              { error: '生成邀请码失败，请重试' },
+              { status: 500 },
+            );
+          }
+        }
+
+        // 顺手清掉过期码和已用尽的码
+        const dropped = inviteCodes.filter((item) => !isInviteCodeUsable(item));
+        adminConfig.UserConfig.InviteCodes = [
+          ...activeCodes,
+          buildInviteCode({ code, validDays, createdBy: username, maxUses }),
+        ];
+
+        await dropInviteCodeUsage([code]);
+        await saveConfig(adminConfig);
+        await dropInviteCodeUsage(dropped.map((item) => item.code));
+
+        return toActionResponse(
+          { ok: true, code },
+          { headers: { 'Cache-Control': 'no-store' } },
+        );
+      }
+      case 'deleteInviteCode': {
+        const code = normalizeInviteCode((body as { code?: unknown }).code);
+        if (!code) {
+          return toActionResponse({ error: '缺少邀请码' }, { status: 400 });
+        }
+
+        const inviteCodes = adminConfig.UserConfig.InviteCodes || [];
+        const next = inviteCodes.filter((item) => item.code !== code);
+        if (next.length === inviteCodes.length) {
+          return toActionResponse({ error: '邀请码不存在' }, { status: 404 });
+        }
+        adminConfig.UserConfig.InviteCodes = next;
+        usageCodesToDrop = [code];
+        break;
+      }
       default:
         return toActionResponse({ error: '未知操作' }, { status: 400 });
     }
 
     await saveConfig(adminConfig);
+    await dropInviteCodeUsage(usageCodesToDrop);
 
     return toActionResponse(
       { ok: true },

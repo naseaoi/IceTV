@@ -34,6 +34,7 @@ import {
 } from '@/lib/navigation-return';
 import { getCustomCategoryLabel, RuntimeConfig } from '@/lib/runtime-config';
 
+import MessageBell from './messages/MessageBell';
 import { useRuntimeConfig } from './RuntimeConfigProvider';
 import {
   getSidebarItemLabelClass,
@@ -377,6 +378,7 @@ const Sidebar = ({ onToggle, activePath = '/' }: SidebarProps) => {
             <div className='px-3 pb-4 pt-2'>
               <div className='mx-1 mb-2 h-px bg-gradient-to-r from-transparent via-gray-200 to-transparent dark:via-gray-700' />
               <div className='space-y-1.5'>
+                <MessageBell variant='sidebar' isCollapsed={isCollapsed} />
                 <UserMenu variant='sidebar' isCollapsed={isCollapsed} />
                 <ThemeToggle variant='sidebar' isCollapsed={isCollapsed} />
                 <button

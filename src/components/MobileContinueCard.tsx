@@ -1,8 +1,16 @@
 'use client';
 
-import { Heart, MoreVertical, PlayCircleIcon, Trash2 } from 'lucide-react';
+import {
+  Bell,
+  BellOff,
+  Check,
+  Heart,
+  MoreVertical,
+  PlayCircleIcon,
+  Trash2,
+} from 'lucide-react';
 import { useRouter } from 'next/navigation';
-import { useCallback, useId } from 'react';
+import { useCallback, useEffect, useId, useState } from 'react';
 
 import { useCardInteractionManager } from '@/components/CardInteractionProvider';
 import CoverImage from '@/components/CoverImage';
@@ -13,13 +21,17 @@ import {
   deleteFavorite,
   deletePlayRecord,
   isFavorited,
+  markPlayRecordUpdateRead,
   saveFavorite,
+  setPlayRecordTracking,
 } from '@/lib/db.client';
+import type { ResumeGroupIdentity } from '@/lib/episode-groups';
 import {
   getCurrentNavigationPath,
   withReturnTo,
 } from '@/lib/navigation-return';
 import { savePlayIntent } from '@/lib/play-intent';
+import { hasPlayRecordUpdate } from '@/lib/play-records';
 import { canUseNetworkPrefetch, warmupForPlayback } from '@/lib/video-prefetch';
 
 interface MobileContinueCardProps {
@@ -31,8 +43,13 @@ interface MobileContinueCardProps {
   sourceName?: string;
   currentEpisode: number;
   totalEpisodes: number;
+  hasUpdate?: boolean;
+  trackingEnabled?: boolean;
+  availableEpisodes?: number;
   /** 播放记录的真实集索引（0-based）；分组源展示集数与真实索引不一致时使用 */
   resumeEpisodeIndex?: number;
+  /** 分组源的分组身份；上游更新后据此重新对齐集索引 */
+  resumeGroup?: ResumeGroupIdentity;
   progress: number;
   resumeTime: number;
   query?: string;
@@ -48,7 +65,11 @@ export default function MobileContinueCard({
   sourceName,
   currentEpisode,
   totalEpisodes,
+  hasUpdate = false,
+  trackingEnabled = true,
+  availableEpisodes = totalEpisodes,
   resumeEpisodeIndex,
+  resumeGroup,
   progress,
   resumeTime,
   query,
@@ -57,6 +78,15 @@ export default function MobileContinueCard({
   const router = useRouter();
   const interactionId = useId();
   const { showActionSheet, showConfirm } = useCardInteractionManager();
+  const [visibleHasUpdate, setVisibleHasUpdate] = useState(hasUpdate);
+  const [visibleTrackingEnabled, setVisibleTrackingEnabled] =
+    useState(trackingEnabled);
+
+  useEffect(() => setVisibleHasUpdate(hasUpdate), [hasUpdate]);
+  useEffect(
+    () => setVisibleTrackingEnabled(trackingEnabled),
+    [trackingEnabled],
+  );
 
   const handlePlay = useCallback(() => {
     const playUrl = withReturnTo(
@@ -71,6 +101,9 @@ export default function MobileContinueCard({
           id,
           episodeIndex: resumeEpisodeIndex ?? Math.max(0, currentEpisode - 1),
           resumeTime,
+          groupLabel: resumeGroup?.label,
+          groupIndex: resumeGroup?.index,
+          groupTotal: resumeGroup?.total,
         });
       }
 
@@ -89,6 +122,7 @@ export default function MobileContinueCard({
     query,
     currentEpisode,
     resumeEpisodeIndex,
+    resumeGroup,
     resumeTime,
   ]);
 
@@ -104,6 +138,21 @@ export default function MobileContinueCard({
       },
     });
   }, [showConfirm, interactionId, title, source, id, onDelete]);
+
+  const handleMarkUpdateRead = useCallback(async () => {
+    await markPlayRecordUpdateRead(source, id);
+    setVisibleHasUpdate(false);
+  }, [id, source]);
+
+  const handleToggleTracking = useCallback(async () => {
+    const record = await setPlayRecordTracking(
+      source,
+      id,
+      !visibleTrackingEnabled,
+    );
+    setVisibleTrackingEnabled(record.tracking_enabled !== false);
+    setVisibleHasUpdate(hasPlayRecordUpdate(record));
+  }, [id, source, visibleTrackingEnabled]);
 
   const openActions = useCallback(async () => {
     let favorited = false;
@@ -148,6 +197,26 @@ export default function MobileContinueCard({
             });
           },
         },
+        ...(visibleHasUpdate
+          ? [
+              {
+                id: 'mark-update-read',
+                label: '标记更新已读',
+                icon: <Check size={20} />,
+                onClick: handleMarkUpdateRead,
+              },
+            ]
+          : []),
+        {
+          id: 'tracking',
+          label: visibleTrackingEnabled ? '取消追更' : '追更',
+          icon: visibleTrackingEnabled ? (
+            <BellOff size={20} />
+          ) : (
+            <Bell size={20} />
+          ),
+          onClick: handleToggleTracking,
+        },
         {
           id: 'delete',
           label: '删除记录',
@@ -170,6 +239,10 @@ export default function MobileContinueCard({
     query,
     handlePlay,
     handleDelete,
+    handleMarkUpdateRead,
+    handleToggleTracking,
+    visibleHasUpdate,
+    visibleTrackingEnabled,
   ]);
 
   const longPressProps = useLongPress({
@@ -210,6 +283,11 @@ export default function MobileContinueCard({
               {title}
             </p>
             <div className='mt-1 space-y-0.5 text-[11px] text-gray-500 dark:text-gray-400'>
+              {visibleHasUpdate && availableEpisodes > 1 && (
+                <p className='truncate font-semibold text-amber-600 dark:text-amber-400'>
+                  更新至 {availableEpisodes} 集
+                </p>
+              )}
               {(totalEpisodes > 1 || year) && (
                 <p data-mobile-continue-meta className='truncate'>
                   {totalEpisodes > 1

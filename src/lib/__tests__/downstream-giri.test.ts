@@ -116,6 +116,44 @@ describe('downstream giri source', () => {
     );
   });
 
+  it('giri 搜索标题解码 HTML 实体', async () => {
+    const fetchMock = global.fetch as jest.Mock;
+    fetchMock.mockResolvedValue(
+      createJsonResponse({
+        list: [{ id: 102, name: '丧失篇&amp;夺还篇', pic: '/cover.jpg' }],
+      }),
+    );
+
+    const results = await searchFirstPageFromApi(
+      createGiriSite('https://anime.girigirilove.icu'),
+      'entity',
+    );
+
+    expect(results[0]).toEqual(
+      expect.objectContaining({ title: '丧失篇&夺还篇' }),
+    );
+  });
+
+  it('giri 详情标题解码 HTML 实体', async () => {
+    const detailHtml = `
+      <html>
+        <h3 class="slide-info-title">丧失篇&amp;夺还篇</h3>
+        <div class="anthology-list-box">
+          <a href="/playGV103-1-1/">第1集</a>
+        </div>
+      </html>
+    `;
+    const fetchMock = global.fetch as jest.Mock;
+    fetchMock.mockResolvedValue(createTextResponse(detailHtml));
+
+    const detail = await getDetailFromApi(
+      createGiriSite('https://anime.girigirilove.icu'),
+      '103',
+    );
+
+    expect(detail).toEqual(expect.objectContaining({ title: '丧失篇&夺还篇' }));
+  });
+
   it('giri 详情只抓详情页并返回懒地址', async () => {
     const detailHtml = `
       <html>
@@ -254,6 +292,35 @@ describe('downstream giri source', () => {
         '/playGV200-1-1/',
       ),
     ).resolves.toBe('https://cdn.example/video.mp4?token=abc');
+  });
+
+  it('通用 CMS 搜索解码标题与剧集名的 HTML 实体', async () => {
+    const fetchMock = global.fetch as jest.Mock;
+    fetchMock.mockResolvedValue(
+      createJsonResponse({
+        pagecount: 1,
+        list: [
+          {
+            vod_id: 301,
+            vod_name: '  丧失篇&amp;夺还篇  ',
+            vod_pic: 'https://cdn.example/poster.jpg',
+            vod_play_url:
+              '前篇&amp;后篇$https://cdn.example/video.m3u8#第2集$https://cdn.example/ep2.m3u8',
+            vod_year: '2026',
+            vod_content: '',
+          },
+        ],
+      }),
+    );
+
+    const results = await searchFirstPageFromApi(createGenericSite(), 'entity');
+
+    expect(results[0]).toEqual(
+      expect.objectContaining({
+        title: '丧失篇&夺还篇',
+        episodes_titles: ['前篇&后篇', '第2集'],
+      }),
+    );
   });
 
   it('通用 CMS 搜索会保留 mp4 播放地址', async () => {

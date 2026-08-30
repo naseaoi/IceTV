@@ -5,6 +5,7 @@ import { X } from 'lucide-react';
 import AdminSelect from '@/components/admin/AdminSelect';
 import ModalShell from '@/components/modals/ModalShell';
 import { PasswordInput } from '@/components/PasswordInput';
+import { RandomPasswordButton } from '@/features/admin/components/RandomPasswordButton';
 import { buttonStyles } from '@/features/admin/lib/buttonStyles';
 
 interface UserGroupOption {
@@ -62,12 +63,18 @@ export function AddUserForm({
             onChange={(e) => onChange({ ...value, username: e.target.value })}
             className='w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-gray-900 focus:border-transparent focus:ring-2 focus:ring-green-500 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100'
           />
-          <PasswordInput
-            placeholder='密码'
-            value={value.password}
-            onChange={(e) => onChange({ ...value, password: e.target.value })}
-            className='w-full rounded-lg border border-gray-300 bg-white px-3 py-2 pr-10 text-gray-900 focus:border-transparent focus:ring-2 focus:ring-green-500 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100'
-          />
+          <div className='flex items-center gap-2'>
+            <PasswordInput
+              placeholder='密码'
+              value={value.password}
+              onChange={(e) => onChange({ ...value, password: e.target.value })}
+              wrapperClassName='flex-1'
+              className='w-full rounded-lg border border-gray-300 bg-white px-3 py-2 pr-10 text-gray-900 focus:border-transparent focus:ring-2 focus:ring-green-500 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100'
+            />
+            <RandomPasswordButton
+              onGenerate={(password) => onChange({ ...value, password })}
+            />
+          </div>
         </div>
         <div>
           <label className='mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300'>

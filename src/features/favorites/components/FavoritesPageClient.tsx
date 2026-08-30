@@ -1,6 +1,6 @@
 'use client';
 
-import { Star } from 'lucide-react';
+import { Loader2, Star } from 'lucide-react';
 import { useState } from 'react';
 
 import AuthenticatedRoute from '@/components/AuthenticatedRoute';
@@ -16,15 +16,18 @@ function AuthenticatedFavoritesPageClient({
 }: {
   favoriteSkeletonCount?: number;
 }) {
-  const { favoriteItems, loading, skeletonCount, clearFavorites } =
-    useFavoriteItems(true, favoriteSkeletonCount);
+  const {
+    favoriteItems,
+    total,
+    loading,
+    loadingMore,
+    skeletonCount,
+    hasMore,
+    loadMore,
+    clearFavorites,
+  } = useFavoriteItems(true, favoriteSkeletonCount, 24);
   const [showClearConfirm, setShowClearConfirm] = useState(false);
-  const favoriteCount =
-    favoriteItems.length > 0
-      ? favoriteItems.length
-      : loading
-        ? skeletonCount
-        : 0;
+  const favoriteCount = loading && total === 0 ? skeletonCount : total;
 
   return (
     <PageLayout
@@ -61,6 +64,20 @@ function AuthenticatedFavoritesPageClient({
             <FavoriteGridSkeleton count={skeletonCount} />
           ) : (
             <FavoriteGrid items={favoriteItems} />
+          )}
+
+          {hasMore && (
+            <div className='mt-8 flex justify-center'>
+              <button
+                type='button'
+                className='inline-flex items-center gap-2 rounded-lg border border-gray-200 px-4 py-2 text-sm text-gray-600 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-60 dark:border-gray-700 dark:text-gray-300 dark:hover:bg-gray-800'
+                onClick={() => void loadMore()}
+                disabled={loadingMore}
+              >
+                {loadingMore && <Loader2 className='h-4 w-4 animate-spin' />}
+                {loadingMore ? '加载中...' : '加载更多'}
+              </button>
+            </div>
           )}
         </div>
       </div>

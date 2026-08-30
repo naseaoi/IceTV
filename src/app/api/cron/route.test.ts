@@ -288,7 +288,7 @@ describe('cron route', () => {
     ).toBeGreaterThan(1);
   });
 
-  it('使用全局条目上限截断元数据刷新', async () => {
+  it('播放记录条目上限不影响收藏的独立预算', async () => {
     process.env.CRON_METADATA_MAX_ITEMS = '1';
     mockGetAllUsers.mockResolvedValue(['user']);
     mockGetAllPlayRecords.mockResolvedValue({
@@ -307,9 +307,8 @@ describe('cron route', () => {
 
     await runMetadataTask();
 
-    expect(mockFetchVideoDetail).toHaveBeenCalledTimes(1);
     expect(mockSavePlayRecord).toHaveBeenCalledTimes(1);
-    expect(mockGetAllFavorites).not.toHaveBeenCalled();
+    expect(mockSaveFavorite).toHaveBeenCalledTimes(1);
   });
 
   it('达到时间预算后不再处理后续条目', async () => {
@@ -338,7 +337,7 @@ describe('cron route', () => {
 
       expect(mockFetchVideoDetail).toHaveBeenCalledTimes(1);
       expect(mockSavePlayRecord).toHaveBeenCalledTimes(1);
-      expect(mockGetAllFavorites).not.toHaveBeenCalled();
+      expect(mockSaveFavorite).not.toHaveBeenCalled();
     } finally {
       nowSpy.mockRestore();
     }

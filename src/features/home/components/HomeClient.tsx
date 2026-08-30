@@ -5,14 +5,13 @@ import Link from 'next/link';
 import { useEffect, useMemo, useState } from 'react';
 
 import ContinueWatching from '@/components/ContinueWatching';
+import GuestAnnouncement from '@/components/GuestAnnouncement';
 import HomePosterCardSkeleton, {
   HOME_POSTER_CARD_CLASS,
 } from '@/components/HomePosterCardSkeleton';
-import AnnouncementModal from '@/components/modals/AnnouncementModal';
 import PageLayout from '@/components/PageLayout';
 import PosterCard from '@/components/PosterCard';
 import ScrollableRow from '@/components/ScrollableRow';
-import { useSite } from '@/components/SiteProvider';
 import { GetBangumiCalendarData } from '@/features/bangumi/lib/bangumi.client';
 import { selectBangumiCardCover } from '@/features/bangumi/lib/bangumi-normalize';
 import {
@@ -21,11 +20,7 @@ import {
 } from '@/features/douban/hooks/useDoubanFeed';
 import { HomeInitialData } from '@/features/home/lib/home.types';
 import { getDoubanCategories } from '@/lib/douban.client';
-import {
-  readSeenAnnouncement,
-  writeSeenAnnouncement,
-} from '@/lib/local-preferences';
-import { DoubanItem } from '@/lib/types';
+import { DoubanItem, PlayRecord } from '@/lib/types';
 
 import {
   mergeHomeInitialDataWithClientSnapshot,
@@ -36,6 +31,8 @@ import { HomeMineSwitch } from './HomeMineSwitch';
 interface HomeClientProps {
   initialData: HomeInitialData;
   continueWatchingSkeletonCount?: number;
+  continueWatchingRecords?: Record<string, PlayRecord> | null;
+  continueWatchingUpdateCount?: number;
   routeFallback?: boolean;
 }
 
@@ -135,6 +132,8 @@ function hasUsableBangumiCalendarData(
 export default function HomeClient({
   initialData,
   continueWatchingSkeletonCount = 0,
+  continueWatchingRecords = null,
+  continueWatchingUpdateCount,
   routeFallback = false,
 }: HomeClientProps) {
   const [initialViewData] = useState(() =>
@@ -160,21 +159,6 @@ export default function HomeClient({
     hotVarietyShows: initialData.hotVarietyShows.length === 0,
     bangumiCalendar: initialData.bangumiCalendarData.length === 0,
   }));
-  const { announcement } = useSite();
-
-  const [showAnnouncement, setShowAnnouncement] = useState(false);
-
-  useEffect(() => {
-    if (typeof window !== 'undefined' && announcement) {
-      const hasSeenAnnouncement = readSeenAnnouncement();
-      if (hasSeenAnnouncement !== announcement) {
-        setShowAnnouncement(true);
-      } else {
-        setShowAnnouncement(Boolean(!hasSeenAnnouncement && announcement));
-      }
-    }
-  }, [announcement]);
-
   useEffect(() => {
     const shouldLoadHotMovies = initialData.hotMovies.length === 0;
     const shouldLoadHotTvShows = initialData.hotTvShows.length === 0;
@@ -380,11 +364,6 @@ export default function HomeClient({
     unavailable,
   ]);
 
-  const handleCloseAnnouncement = (currentAnnouncement: string) => {
-    setShowAnnouncement(false);
-    writeSeenAnnouncement(currentAnnouncement);
-  };
-
   return (
     <PageLayout>
       <div className='overflow-visible px-2 pb-2 pt-4 sm:px-10 sm:pt-8'>
@@ -396,6 +375,8 @@ export default function HomeClient({
           <div className='-mb-3 sm:-mb-6'>
             <ContinueWatching
               initialSkeletonCount={continueWatchingSkeletonCount}
+              initialRecords={continueWatchingRecords}
+              initialUpdateCount={continueWatchingUpdateCount}
               refreshOnMount={!routeFallback}
             />
 
@@ -465,13 +446,7 @@ export default function HomeClient({
         </div>
       </div>
 
-      {announcement && (
-        <AnnouncementModal
-          isOpen={showAnnouncement}
-          message={announcement}
-          onClose={() => handleCloseAnnouncement(announcement)}
-        />
-      )}
+      <GuestAnnouncement />
     </PageLayout>
   );
 }

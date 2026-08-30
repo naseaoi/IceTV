@@ -5,14 +5,23 @@ import { gunzip } from 'zlib';
 import { isGuardFailure, requireOwner } from '@/lib/api-auth';
 import { setCachedConfig } from '@/lib/config';
 import { SimpleCrypto } from '@/lib/crypto';
-import { ImportValidationError, parseImportData } from '@/lib/data-import';
+import {
+  type ParsedImportData,
+  ImportValidationError,
+  parseImportData,
+} from '@/lib/data-import';
+import {
+  MAX_BACKUP_DECOMPRESSED_BYTES,
+  MAX_BACKUP_FILE_BYTES,
+} from '@/lib/data-migration-limits';
 import { db } from '@/lib/db';
+import { restoreSiteIconFromBackup } from '@/lib/site-icon-storage.server';
 
 export const runtime = 'nodejs';
 
 const gunzipAsync = promisify(gunzip);
-const MAX_IMPORT_FILE_BYTES = 25 * 1024 * 1024;
-const MAX_DECOMPRESSED_BYTES = 50 * 1024 * 1024;
+const MAX_IMPORT_FILE_BYTES = MAX_BACKUP_FILE_BYTES;
+const MAX_DECOMPRESSED_BYTES = MAX_BACKUP_DECOMPRESSED_BYTES;
 
 export async function POST(req: NextRequest) {
   try {
@@ -103,11 +112,16 @@ export async function POST(req: NextRequest) {
     await db.replaceAllData(parsedImport.snapshot);
     await setCachedConfig(parsedImport.snapshot.adminConfig);
 
+    const siteIconWarning = restoreSiteIcon(parsedImport);
+
     return NextResponse.json({
       message: '数据导入成功',
       importedUsers: parsedImport.importedUsers,
       timestamp: parsedImport.timestamp,
       serverVersion: parsedImport.serverVersion,
+      ownerRemappedFrom: parsedImport.ownerRemappedFrom,
+      truncated: parsedImport.truncated,
+      siteIconWarning,
     });
   } catch (error) {
     if (error instanceof ImportValidationError) {
@@ -119,6 +133,25 @@ export async function POST(req: NextRequest) {
 
     console.error('数据导入失败:', error);
     return NextResponse.json({ error: '导入失败' }, { status: 500 });
+  }
+}
+
+// 图标落盘失败不推翻已提交的数据，只回报给站长
+function restoreSiteIcon(parsed: ParsedImportData): string | undefined {
+  const usesLocalIcon = (
+    parsed.snapshot.adminConfig.SiteConfig.SiteIcon || ''
+  ).startsWith('/api/admin/site-icon');
+
+  if (!parsed.siteIcon) {
+    return usesLocalIcon ? '备份未包含站点图标文件，请重新上传图标' : undefined;
+  }
+
+  try {
+    restoreSiteIconFromBackup(parsed.siteIcon);
+    return undefined;
+  } catch (error) {
+    console.error('恢复站点图标失败:', error);
+    return '站点图标恢复失败，请重新上传图标';
   }
 }
 

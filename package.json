@@ -1,6 +1,6 @@
 {
   "name": "icetv",
-  "version": "0.4.10",
+  "version": "0.5.0",
   "private": true,
   "engines": {
     "node": ">=22.14.0 <25",
@@ -20,6 +20,7 @@
     "perf:baseline": "node scripts/run-performance-baseline.js",
     "test:watch": "jest --watch",
     "test": "jest",
+    "test:mysql": "node scripts/run-mysql-tests.js",
     "format": "prettier -w .",
     "format:check": "prettier -c .",
     "gen:manifest": "node scripts/generate-manifest.js",

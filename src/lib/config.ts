@@ -1,5 +1,6 @@
 import 'server-only';
 
+import { sanitizeInviteCodes } from '@/features/admin/services/inviteCodes';
 import {
   DEFAULT_BANGUMI_DATA_SOURCE,
   normalizeBangumiDataSource,
@@ -84,8 +85,9 @@ export const API_CONFIG = {
 let cachedConfig: AdminConfig;
 let cachedConfigVersion = '';
 let cachedConfigLoadedAt = 0;
-const PUBLIC_CONFIG_CACHE_TAG = 'public-config';
-const DEFAULT_CONFIG_CACHE_TTL_MS = 30_000;
+let inflightConfigLoad: Promise<AdminConfig> | null = null;
+let configCacheGeneration = 0;
+const DEFAULT_CONFIG_CACHE_TTL_MS = 60_000;
 const PUBLIC_DOUBAN_PROXY_TYPES = new Set([
   'direct',
   'cors-proxy-zwei',
@@ -95,26 +97,6 @@ const PUBLIC_DOUBAN_PROXY_TYPES = new Set([
 ]);
 type ManagedUser = AdminConfig['UserConfig']['Users'][number];
 const configVersionByObject = new WeakMap<AdminConfig, string>();
-
-type NextCacheApi = {
-  revalidateTag?: (tag: string) => void;
-  unstable_cache?: <T extends () => Promise<unknown>>(
-    callback: T,
-    keyParts: string[],
-    options: { revalidate: number; tags: string[] },
-  ) => T;
-};
-
-function loadNextCacheApi(): NextCacheApi | null {
-  try {
-    return require('next/cache') as NextCacheApi;
-  } catch (error) {
-    if (process.env.NODE_ENV !== 'test') {
-      console.warn('加载 Next 缓存接口失败:', error);
-    }
-    return null;
-  }
-}
 
 export function getPublicDoubanProxyType(
   proxyType: string | undefined,
@@ -399,7 +381,18 @@ async function loadConfig(): Promise<AdminConfig> {
   if (cachedConfig && isCachedConfigFresh()) {
     return cachedConfig;
   }
+  if (inflightConfigLoad) {
+    return inflightConfigLoad;
+  }
 
+  const generation = configCacheGeneration;
+  inflightConfigLoad = loadConfigUncached(generation).finally(() => {
+    inflightConfigLoad = null;
+  });
+  return inflightConfigLoad;
+}
+
+async function loadConfigUncached(generation: number): Promise<AdminConfig> {
   let adminConfig: AdminConfig | null;
   try {
     adminConfig = await db.getAdminConfig();
@@ -418,6 +411,11 @@ async function loadConfig(): Promise<AdminConfig> {
   }
   const originalConfigJson = JSON.stringify(adminConfig);
   adminConfig = await syncConfigUsersWithDb(configSelfCheck(adminConfig));
+
+  if (generation !== configCacheGeneration) {
+    return cachedConfig;
+  }
+
   cachedConfig = adminConfig;
   cachedConfigVersion = getConfigVersion(cachedConfig);
   cachedConfigLoadedAt = Date.now();
@@ -446,6 +444,18 @@ export async function getConfigForRead(): Promise<Readonly<AdminConfig>> {
   return deepFreeze(await loadConfig());
 }
 
+// 让下一次读取跳过 TTL 缓存
+export function invalidateConfigCache(): void {
+  cachedConfigLoadedAt = 0;
+  inflightConfigLoad = null;
+}
+
+// 绕过 TTL 缓存直读，供后台面板等必须看到最新写入的场景
+export async function getConfigFresh(): Promise<Readonly<AdminConfig>> {
+  invalidateConfigCache();
+  return deepFreeze(await loadConfig());
+}
+
 function isCachedConfigFresh(): boolean {
   return Date.now() - cachedConfigLoadedAt < getConfigCacheTtlMs();
 }
@@ -471,6 +481,12 @@ export function configSelfCheck(adminConfig: AdminConfig): AdminConfig {
   if (typeof adminConfig.UserConfig.OpenRegister !== 'boolean') {
     adminConfig.UserConfig.OpenRegister = false;
   }
+  if (typeof adminConfig.UserConfig.RequireInviteCode !== 'boolean') {
+    adminConfig.UserConfig.RequireInviteCode = false;
+  }
+  adminConfig.UserConfig.InviteCodes = sanitizeInviteCodes(
+    adminConfig.UserConfig.InviteCodes,
+  );
   if (!adminConfig.SourceConfig || !Array.isArray(adminConfig.SourceConfig)) {
     adminConfig.SourceConfig = [];
   }
@@ -682,11 +698,11 @@ export async function resetConfig() {
     originConfig.ConfigSubscribtion,
   );
   await db.saveAdminConfig(adminConfig);
+  configCacheGeneration += 1;
   cachedConfig = cloneConfig(adminConfig);
   cachedConfigVersion = getConfigVersion(cachedConfig);
   cachedConfigLoadedAt = Date.now();
   bindConfigVersion(cachedConfig, cachedConfigVersion);
-  invalidatePublicConfigCache();
 
   return;
 }
@@ -700,11 +716,11 @@ export async function saveConfig(config: AdminConfig): Promise<AdminConfig> {
     await assertConfigVersion(expectedVersion);
   }
   await db.saveAdminConfig(nextConfig);
+  configCacheGeneration += 1;
   cachedConfig = cloneConfig(nextConfig);
   cachedConfigVersion = getConfigVersion(cachedConfig);
   cachedConfigLoadedAt = Date.now();
   bindConfigVersion(cachedConfig, cachedConfigVersion);
-  invalidatePublicConfigCache();
   return cloneConfig(cachedConfig);
 }
 
@@ -894,7 +910,6 @@ export async function setCachedConfig(config: AdminConfig) {
   cachedConfigVersion = getConfigVersion(cachedConfig);
   cachedConfigLoadedAt = Date.now();
   bindConfigVersion(cachedConfig, cachedConfigVersion);
-  invalidatePublicConfigCache();
 }
 
 function cloneConfig(config: AdminConfig): AdminConfig {
@@ -927,7 +942,7 @@ function getConfigVersion(config: AdminConfig): string {
   return JSON.stringify(config);
 }
 
-async function readPublicConfig() {
+export async function getPublicConfig() {
   const config = await getConfigForRead();
 
   return {
@@ -936,6 +951,7 @@ async function readPublicConfig() {
     Announcement: config.SiteConfig.Announcement,
     FooterText: normalizeSiteFooterText(config.SiteConfig.FooterText),
     OpenRegister: !!config.UserConfig.OpenRegister,
+    RequireInviteCode: !!config.UserConfig.RequireInviteCode,
     DisableYellowFilter: config.SiteConfig.DisableYellowFilter,
     EnableLiveEntry: config.SiteConfig.EnableLiveEntry,
     DefaultAggregateSearch: config.SiteConfig.DefaultAggregateSearch,
@@ -963,26 +979,4 @@ async function readPublicConfig() {
     })),
     FluidSearch: config.SiteConfig.FluidSearch,
   };
-}
-
-const nextCacheApi = loadNextCacheApi();
-
-export const getPublicConfig: typeof readPublicConfig =
-  nextCacheApi?.unstable_cache
-    ? (nextCacheApi.unstable_cache(
-        readPublicConfig,
-        [PUBLIC_CONFIG_CACHE_TAG],
-        {
-          revalidate: 60,
-          tags: [PUBLIC_CONFIG_CACHE_TAG],
-        },
-      ) as typeof readPublicConfig)
-    : readPublicConfig;
-
-function invalidatePublicConfigCache() {
-  try {
-    nextCacheApi?.revalidateTag?.(PUBLIC_CONFIG_CACHE_TAG);
-  } catch (error) {
-    console.warn('公开配置缓存失效失败:', error);
-  }
 }

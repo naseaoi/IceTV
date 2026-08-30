@@ -109,6 +109,10 @@ describe('sqlite storage contract', () => {
     await storage.setSkipConfig('demo-user', 'source', '1', skipConfig);
     await storage.setPlaybackSession('demo-user', playbackSession);
     await storage.addSearchHistory('demo-user', 'first');
+    await storage.setUserMessageState('demo-user', {
+      readAnnouncementId: 'announcement:v1',
+    });
+    await storage.recordUserLogin('demo-user', 1700000000000);
     await storage.addSearchHistory('demo-user', 'second');
     await storage.addSearchHistory('demo-user', 'first');
 
@@ -129,6 +133,15 @@ describe('sqlite storage contract', () => {
       'first',
       'second',
     ]);
+    await expect(storage.getUserMessageState('demo-user')).resolves.toEqual({
+      readAnnouncementId: 'announcement:v1',
+    });
+    await expect(storage.getUserLastLogin('demo-user')).resolves.toBe(
+      1700000000000,
+    );
+    await expect(storage.getAllUserLastLogins()).resolves.toEqual({
+      'demo-user': 1700000000000,
+    });
 
     await storage.deleteUser('demo-user');
 
@@ -138,6 +151,144 @@ describe('sqlite storage contract', () => {
     await expect(storage.getAllSkipConfigs('demo-user')).resolves.toEqual({});
     await expect(storage.getPlaybackSessions('demo-user')).resolves.toEqual([]);
     await expect(storage.getSearchHistory('demo-user')).resolves.toEqual([]);
+    await expect(storage.getUserMessageState('demo-user')).resolves.toEqual({});
+    await expect(storage.getUserLastLogin('demo-user')).resolves.toBeNull();
+    await expect(storage.getAllUserLastLogins()).resolves.toEqual({});
+  });
+
+  it('建号即写入活跃记录', async () => {
+    const storage = new LocalSqliteStorage(':memory:');
+    const before = Date.now();
+
+    await storage.registerUser('fresh-user', 'password');
+
+    const activeAt = await storage.getUserLastLogin('fresh-user');
+    expect(activeAt).not.toBeNull();
+    expect(activeAt as number).toBeGreaterThanOrEqual(before);
+  });
+
+  it('导入快照后为缺活跃记录的用户补齐', async () => {
+    const storage = new LocalSqliteStorage(':memory:');
+    const before = Date.now();
+
+    await storage.replaceAllData({
+      adminConfig,
+      users: { 'legacy-user': 'hash' },
+      userData: {},
+      sourceRouteStats: [],
+      inviteCodeUsage: {},
+    });
+
+    const activeAt = await storage.getUserLastLogin('legacy-user');
+    expect(activeAt).not.toBeNull();
+    expect(activeAt as number).toBeGreaterThanOrEqual(before);
+  });
+
+  it('导入搜索历史按配置上限保留，而非硬编码 20', async () => {
+    const storage = new LocalSqliteStorage(':memory:');
+    const keywords = Array.from({ length: 40 }, (_, i) => `kw-${i}`);
+
+    await storage.replaceAllData({
+      adminConfig: {
+        ...adminConfig,
+        SiteConfig: { ...adminConfig.SiteConfig, SearchHistoryLimit: 30 },
+      },
+      users: { 'demo-user': 'hash' },
+      userData: {
+        'demo-user': {
+          playRecords: {},
+          favorites: {},
+          searchHistory: keywords,
+          skipConfigs: {},
+          playbackSessions: {},
+        },
+      },
+      sourceRouteStats: [],
+      inviteCodeUsage: {},
+    });
+
+    await expect(storage.getSearchHistory('demo-user')).resolves.toEqual(
+      keywords.slice(0, 30),
+    );
+  });
+
+  it('原子占用邀请码名额，超出上限即失败', async () => {
+    const storage = new LocalSqliteStorage(':memory:');
+
+    await expect(storage.reserveInviteCodeUse('CODE', 2)).resolves.toBe(true);
+    await expect(storage.reserveInviteCodeUse('CODE', 2)).resolves.toBe(true);
+    await expect(storage.reserveInviteCodeUse('CODE', 2)).resolves.toBe(false);
+    await expect(storage.getAllInviteCodeUsage()).resolves.toEqual({ CODE: 2 });
+  });
+
+  it('并发占用邀请码不会超发', async () => {
+    const storage = new LocalSqliteStorage(':memory:');
+
+    const results = await Promise.all(
+      Array.from({ length: 20 }, () =>
+        storage.reserveInviteCodeUse('RUSH', 5, 0),
+      ),
+    );
+
+    expect(results.filter(Boolean)).toHaveLength(5);
+    await expect(storage.getAllInviteCodeUsage()).resolves.toEqual({ RUSH: 5 });
+  });
+
+  it('maxUses 为 0 表示不限次数', async () => {
+    const storage = new LocalSqliteStorage(':memory:');
+
+    await expect(storage.reserveInviteCodeUse('FREE', 0)).resolves.toBe(true);
+    await expect(storage.reserveInviteCodeUse('FREE', 0)).resolves.toBe(true);
+    await expect(storage.getAllInviteCodeUsage()).resolves.toEqual({ FREE: 2 });
+  });
+
+  it('首次占用以配置里的历史用量为种子', async () => {
+    const storage = new LocalSqliteStorage(':memory:');
+
+    await expect(storage.reserveInviteCodeUse('OLD', 3, 2)).resolves.toBe(true);
+    await expect(storage.reserveInviteCodeUse('OLD', 3, 2)).resolves.toBe(
+      false,
+    );
+    await expect(storage.getAllInviteCodeUsage()).resolves.toEqual({ OLD: 3 });
+  });
+
+  it('种子值只在建行时生效，不会重复累加', async () => {
+    const storage = new LocalSqliteStorage(':memory:');
+
+    await storage.reserveInviteCodeUse('SEED', 10, 1);
+    await storage.reserveInviteCodeUse('SEED', 10, 1);
+
+    await expect(storage.getAllInviteCodeUsage()).resolves.toEqual({ SEED: 3 });
+  });
+
+  it('回滚邀请码次数且不会减到负数', async () => {
+    const storage = new LocalSqliteStorage(':memory:');
+
+    await storage.reserveInviteCodeUse('CODE', 2);
+    await storage.releaseInviteCodeUse('CODE');
+    await expect(storage.getAllInviteCodeUsage()).resolves.toEqual({ CODE: 0 });
+
+    await storage.releaseInviteCodeUse('CODE');
+    await expect(storage.getAllInviteCodeUsage()).resolves.toEqual({ CODE: 0 });
+  });
+
+  it('回滚不存在的邀请码静默返回', async () => {
+    const storage = new LocalSqliteStorage(':memory:');
+
+    await expect(
+      storage.releaseInviteCodeUse('MISSING'),
+    ).resolves.toBeUndefined();
+    await expect(storage.getAllInviteCodeUsage()).resolves.toEqual({});
+  });
+
+  it('删除邀请码用量后重建从零开始', async () => {
+    const storage = new LocalSqliteStorage(':memory:');
+
+    await storage.reserveInviteCodeUse('CODE', 1);
+    await storage.deleteInviteCodeUsage('CODE');
+
+    await expect(storage.getAllInviteCodeUsage()).resolves.toEqual({});
+    await expect(storage.reserveInviteCodeUse('CODE', 1)).resolves.toBe(true);
   });
 
   it('searches playback sessions before applying the page limit', async () => {
@@ -170,6 +321,80 @@ describe('sqlite storage contract', () => {
     ).resolves.toEqual([matchedSession]);
   });
 
+  it('paginates play records by save time', async () => {
+    const storage = new LocalSqliteStorage(':memory:');
+    await storage.setPlayRecord('demo-user', 'source+old', {
+      ...playRecord,
+      save_time: 1000,
+    });
+    await storage.setPlayRecord('demo-user', 'source+middle', {
+      ...playRecord,
+      save_time: 2000,
+    });
+    await storage.setPlayRecord('demo-user', 'source+new', {
+      ...playRecord,
+      save_time: 3000,
+    });
+
+    const firstPage = await storage.getPlayRecordPage('demo-user', 2);
+    const secondPage = await storage.getPlayRecordPage(
+      'demo-user',
+      2,
+      2000,
+      'source+middle',
+    );
+
+    expect(Object.keys(firstPage.items)).toEqual([
+      'source+new',
+      'source+middle',
+    ]);
+    expect(firstPage).toMatchObject({
+      total: 3,
+      nextCursor: '2000|source+middle',
+    });
+    expect(Object.keys(secondPage.items)).toEqual(['source+old']);
+    expect(secondPage.nextCursor).toBeNull();
+  });
+
+  it('paginates favorites with matching play progress', async () => {
+    const storage = new LocalSqliteStorage(':memory:');
+    for (const [key, saveTime] of [
+      ['source+old', 1000],
+      ['source+middle', 2000],
+      ['source+new', 3000],
+    ] as const) {
+      await storage.setFavorite('demo-user', key, {
+        ...favorite,
+        title: key,
+        save_time: saveTime,
+      });
+    }
+    await storage.setPlayRecord('demo-user', 'source+middle', {
+      ...playRecord,
+      index: 4,
+    });
+
+    const firstPage = await storage.getFavoritePage('demo-user', 2);
+    const secondPage = await storage.getFavoritePage(
+      'demo-user',
+      2,
+      2000,
+      'source+middle',
+    );
+
+    expect(firstPage.items.map((item) => item.key)).toEqual([
+      'source+new',
+      'source+middle',
+    ]);
+    expect(firstPage.items[1]?.playRecord?.index).toBe(4);
+    expect(firstPage).toMatchObject({
+      total: 3,
+      nextCursor: '2000|source+middle',
+    });
+    expect(secondPage.items.map((item) => item.key)).toEqual(['source+old']);
+    expect(secondPage.nextCursor).toBeNull();
+  });
+
   it('replaces all data from an import snapshot', async () => {
     const storage = new LocalSqliteStorage(':memory:');
     const passwordHash =
@@ -187,6 +412,8 @@ describe('sqlite storage contract', () => {
           searchHistory: ['first', 'second'],
           skipConfigs: { 'source+1': skipConfig },
           playbackSessions: { [playbackSession.id]: playbackSession },
+          messageState: { readAnnouncementId: 'announcement:v1' },
+          lastLoginAt: 1700000000000,
         },
       },
       sourceRouteStats: [
@@ -198,8 +425,12 @@ describe('sqlite storage contract', () => {
           failureCount: 1,
         },
       ],
+      inviteCodeUsage: { 'invite-a': 3 },
     });
 
+    await expect(storage.getAllInviteCodeUsage()).resolves.toEqual({
+      'invite-a': 3,
+    });
     await expect(storage.getAdminConfig()).resolves.toEqual(adminConfig);
     await expect(storage.getAllUsers()).resolves.toEqual(['demo-user']);
     await expect(storage.getAllUsersWithPasswords()).resolves.toEqual({
@@ -221,6 +452,12 @@ describe('sqlite storage contract', () => {
     await expect(storage.getPlaybackSessions('demo-user')).resolves.toEqual([
       playbackSession,
     ]);
+    await expect(storage.getUserMessageState('demo-user')).resolves.toEqual({
+      readAnnouncementId: 'announcement:v1',
+    });
+    await expect(storage.getUserLastLogin('demo-user')).resolves.toBe(
+      1700000000000,
+    );
     await expect(storage.getAllSourceRouteStatBuckets()).resolves.toEqual([
       {
         source: 'source-a',
@@ -240,6 +477,34 @@ describe('sqlite storage contract', () => {
     ]);
   });
 
+  it('queries unread tracking records in database order without loading all records', async () => {
+    const storage = new LocalSqliteStorage(':memory:');
+    const makeRecord = (index: number, total: number, baseline: number) => ({
+      ...playRecord,
+      index: 1,
+      total_episodes: total,
+      save_time: index,
+      metadata_checked_at: index,
+      update_baseline_episodes: baseline,
+      tracking_enabled: true,
+    });
+
+    await storage.setPlayRecords('demo-user', {
+      'source+new': makeRecord(30, 12, 10),
+      'source+old': makeRecord(20, 10, 10),
+      'source+disabled': {
+        ...makeRecord(40, 20, 10),
+        tracking_enabled: false,
+      },
+    });
+
+    const page = await storage.getUnreadTrackingPlayRecordPage('demo-user', 1);
+
+    expect(page.total).toBe(1);
+    expect(Object.keys(page.items)).toEqual(['source+new']);
+    expect(page.nextCursor).toBeNull();
+  });
+
   it('keeps legacy short usernames when replacing data', async () => {
     const storage = new LocalSqliteStorage(':memory:');
 
@@ -248,6 +513,7 @@ describe('sqlite storage contract', () => {
       users: { abc: 'legacy-password-hash', admin: 'admin-password-hash' },
       userData: {},
       sourceRouteStats: [],
+      inviteCodeUsage: {},
     });
 
     await expect(storage.getAllUsers()).resolves.toEqual(['abc', 'admin']);
@@ -385,6 +651,7 @@ describe('sqlite storage contract', () => {
       users: {},
       userData: {},
       sourceRouteStats: [],
+      inviteCodeUsage: {},
     });
 
     (
