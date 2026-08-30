@@ -12,16 +12,8 @@
   ],
   "crons": [
     {
-      "path": "/api/cron?task=metadata",
-      "schedule": "0 */6 * * *"
-    },
-    {
-      "path": "/api/cron?task=config",
+      "path": "/api/cron",
       "schedule": "0 1 * * *"
-    },
-    {
-      "path": "/api/cron?task=live",
-      "schedule": "30 * * * *"
     }
   ]
 }
