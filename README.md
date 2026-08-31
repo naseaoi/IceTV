@@ -261,7 +261,7 @@ IceTV 支持标准的苹果 CMS V10 API 格式。
 | `MYSQL_SSL_CA`                       | MySQL TLS CA   | 否             | 无                                               | PEM 文本；配置后启用 TLS                                  |
 | `MYSQL_SSL_REJECT_UNAUTHORIZED`      | MySQL TLS 校验 | 否             | `true`                                           | `true` / `false`；仅在配置 `MYSQL_SSL_CA` 时生效          |
 | `MYSQL_CONNECTION_LIMIT`             | MySQL 连接池   | 否             | `5`                                              | 正整数                                                    |
-| `MYSQL_MAX_IDLE`                     | MySQL 空闲池   | 否             | 同连接池上限                                     | 正整数                                                    |
+| `MYSQL_MAX_IDLE`                     | MySQL 空闲池   | 否             | 连接池上限的一半                                 | 正整数                                                    |
 | `MYSQL_IDLE_TIMEOUT_MS`              | MySQL 空闲超时 | 否             | `60000`                                          | 毫秒                                                      |
 | `TRUSTED_PROXY_COUNT`                | 反代层数       | 反代后建议     | `0`                                              | 正整数                                                    |
 | `CACHE_PROFILE`                      | 内存缓存档位   | 否             | `small`                                          | `small`（约 86MB 上限）/ `standard`（约 266MB 上限）      |

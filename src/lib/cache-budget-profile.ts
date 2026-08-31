@@ -91,6 +91,13 @@ export function getUpstreamSearchConcurrency(
   return UPSTREAM_SEARCH_CONCURRENCY[profile];
 }
 
+// 单次搜索的源并发。与闸门齐平：一人搜索时吃满额度，多人时由闸门排队
+export function getSearchSourceConcurrency(
+  profile = resolveCacheProfileName(),
+): number {
+  return getUpstreamSearchConcurrency(profile);
+}
+
 export function getProfileTotalBytes(
   profile = resolveCacheProfileName(),
 ): number {

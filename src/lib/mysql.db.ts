@@ -169,7 +169,7 @@ function createPoolOptions(databaseUrl: string): mysql.PoolOptions {
     throw new Error('MySQL 连接串缺少数据库名');
   }
 
-  const connectionLimit = parseInteger(process.env.MYSQL_CONNECTION_LIMIT, 10);
+  const connectionLimit = parseInteger(process.env.MYSQL_CONNECTION_LIMIT, 5);
 
   return {
     host: parsedUrl.hostname,
@@ -180,7 +180,10 @@ function createPoolOptions(databaseUrl: string): mysql.PoolOptions {
     charset: 'utf8mb4',
     waitForConnections: true,
     connectionLimit,
-    maxIdle: parseInteger(process.env.MYSQL_MAX_IDLE, connectionLimit),
+    maxIdle: parseInteger(
+      process.env.MYSQL_MAX_IDLE,
+      Math.max(1, Math.ceil(connectionLimit / 2)),
+    ),
     idleTimeout: parseInteger(process.env.MYSQL_IDLE_TIMEOUT_MS, 60000),
     queueLimit: 0,
     ssl: buildSslOptions(),

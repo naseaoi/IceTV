@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 
 import { isGuardFailure, requireActiveUser } from '@/lib/api-auth';
+import { getSearchSourceConcurrency } from '@/lib/cache-budget-profile';
 import { getAvailableApiSites, getConfigForRead } from '@/lib/config';
 import { normalizeRuntimeParams } from '@/lib/runtime-params';
 import { runSearchAggregation } from '@/lib/search-aggregate';
@@ -11,8 +12,6 @@ import {
 } from '@/lib/search-cache';
 
 export const runtime = 'nodejs';
-
-const SEARCH_SOURCE_CONCURRENCY = 6;
 
 export async function GET(request: NextRequest) {
   const guardResult = await requireActiveUser(request);
@@ -53,7 +52,7 @@ export async function GET(request: NextRequest) {
           query,
           maxSearchPages,
           disableYellowFilter: config.SiteConfig.DisableYellowFilter,
-          sourceConcurrency: SEARCH_SOURCE_CONCURRENCY,
+          sourceConcurrency: getSearchSourceConcurrency(),
           sourceFailureCooldownMs,
           sourceTimeoutMs,
         }),
@@ -77,7 +76,7 @@ export async function GET(request: NextRequest) {
           query,
           maxSearchPages,
           disableYellowFilter: config.SiteConfig.DisableYellowFilter,
-          sourceConcurrency: SEARCH_SOURCE_CONCURRENCY,
+          sourceConcurrency: getSearchSourceConcurrency(),
           sourceFailureCooldownMs,
           sourceTimeoutMs,
         }),
