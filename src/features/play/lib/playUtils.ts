@@ -106,6 +106,7 @@ type ParsedDiscontinuitySegment = {
   hasAdTag: boolean;
   hasAdUri: boolean;
   tsDurations: number[];
+  assetPrefixes: string[];
 };
 
 type SegmentAnalysis = {
@@ -114,7 +115,86 @@ type SegmentAnalysis = {
   coarseRatios: number[];
   coarseBaseline: number;
   roundedModeShares: number[];
+  divergentAssetFlags: boolean[];
 };
+
+const MIN_DOMINANT_ASSET_SHARE = 0.6;
+const MAX_DIVERGENT_ASSET_SHARE = 0.25;
+
+/**
+ * 取切片 URI 的目录部分，例如
+ * `https://host/20221213/4GFb1YPb/2000kb/hls/500.ts` → `https://host/20221213/4GFb1YPb/2000kb/hls`
+ */
+function extractAssetPrefix(uri: string): string {
+  const withoutQuery = uri.split(/[?#]/)[0];
+  const lastSlash = withoutQuery.lastIndexOf('/');
+  return lastSlash <= 0 ? '' : withoutQuery.slice(0, lastSlash);
+}
+
+function resolveDominantAssetPrefix(
+  segments: ParsedDiscontinuitySegment[],
+): string | null {
+  const durationByPrefix = new Map<string, number>();
+  let totalDuration = 0;
+
+  segments.forEach((segment) => {
+    const prefix = segment.assetPrefixes[0];
+    if (!prefix || segment.duration <= 0) return;
+    durationByPrefix.set(
+      prefix,
+      (durationByPrefix.get(prefix) || 0) + segment.duration,
+    );
+    totalDuration += segment.duration;
+  });
+
+  if (durationByPrefix.size < 2 || totalDuration <= 0) return null;
+
+  let dominantPrefix: string | null = null;
+  let dominantDuration = 0;
+  durationByPrefix.forEach((duration, prefix) => {
+    if (duration > dominantDuration) {
+      dominantDuration = duration;
+      dominantPrefix = prefix;
+    }
+  });
+
+  return dominantDuration / totalDuration >= MIN_DOMINANT_ASSET_SHARE
+    ? dominantPrefix
+    : null;
+}
+
+/**
+ * 广告切片通常来自另一套转码资产（不同日期/哈希/码率目录）。整集被切成很多小区间时，
+ * 相对时长阈值全部失效，此时资产路径分叉是唯一可靠信号。
+ */
+function resolveDivergentAssetFlags(
+  segments: ParsedDiscontinuitySegment[],
+): boolean[] {
+  const flags = segments.map(() => false);
+  const dominantPrefix = resolveDominantAssetPrefix(segments);
+  if (!dominantPrefix) return flags;
+
+  const totalDuration = segments.reduce(
+    (sum, segment) => sum + Math.max(segment.duration, 0),
+    0,
+  );
+  if (totalDuration <= 0) return flags;
+
+  let divergentDuration = 0;
+  segments.forEach((segment, index) => {
+    const prefix = segment.assetPrefixes[0];
+    if (!prefix || prefix === dominantPrefix) return;
+    flags[index] = true;
+    divergentDuration += Math.max(segment.duration, 0);
+  });
+
+  // 分叉区间占比过高说明判断依据不可靠（可能是多码率正片），整体放弃。
+  if (divergentDuration / totalDuration > MAX_DIVERGENT_ASSET_SHARE) {
+    return segments.map(() => false);
+  }
+
+  return flags;
+}
 
 function parseDiscontinuitySegments(
   m3u8Content: string,
@@ -127,6 +207,7 @@ function parseDiscontinuitySegments(
     hasAdTag: false,
     hasAdUri: false,
     tsDurations: [],
+    assetPrefixes: [],
   };
   let pendingDuration = 0;
   let cueOutActive = false;
@@ -144,6 +225,7 @@ function parseDiscontinuitySegments(
           hasAdTag: false,
           hasAdUri: false,
           tsDurations: [],
+          assetPrefixes: [],
         };
       }
       cueOutActive = false;
@@ -177,6 +259,10 @@ function parseDiscontinuitySegments(
     }
     if (isLikelyAdUri(line)) {
       current.hasAdUri = true;
+    }
+    const assetPrefix = extractAssetPrefix(line);
+    if (assetPrefix && !current.assetPrefixes.includes(assetPrefix)) {
+      current.assetPrefixes.push(assetPrefix);
     }
   }
 
@@ -250,6 +336,7 @@ function analyzeSegments(
     roundedModeShares: segments.map((segment) =>
       calculateRoundedModeShare(segment.tsDurations, 2),
     ),
+    divergentAssetFlags: resolveDivergentAssetFlags(segments),
   };
 }
 
@@ -354,6 +441,9 @@ function isAdSegment(
   // 强信号：广告标签或广告 URL，直接判定为广告。
   if (segment.hasAdTag || segment.hasAdUri) return true;
 
+  // 强信号：切片资产路径与正片分叉（不同转码目录/码率）。
+  if (analysis.divergentAssetFlags[index]) return true;
+
   // 量化步进指纹：覆盖 4.00 / 5.48 / 3.24 / 0.28 这类广告切片。
   if (isCoarseFingerprintAdCandidate(segments, analysis, index)) return true;
 
@@ -385,9 +475,10 @@ function isAdSegment(
  *    两侧明显更长，则视为中插广告一并删除
  * 6. 命中 40ms 粗粒度步进指纹（如 4.00 / 5.48 / 3.24 / 0.28），
  *    且显著偏离全局基线时，视为中插广告一并删除
+ * 7. 切片 URI 目录与主资产目录分叉（不同日期/哈希/码率），
+ *    且分叉总时长不超过 25% 时，强判定为广告
  *
- * 返回过滤后的 M3U8 文本。如果无法识别任何广告区间，退化为仅删除
- * DISCONTINUITY 标签（与旧逻辑一致，保证不会比原来更差）。
+ * 返回过滤后的 M3U8 文本。识别不到广告时原样返回，不再删除 DISCONTINUITY。
  */
 export function filterAdsFromM3U8(m3u8Content: string): string {
   if (!m3u8Content) return '';
@@ -406,9 +497,10 @@ export function filterAdsFromM3U8(m3u8Content: string): string {
   );
   const hasAnyAd = adFlags.some(Boolean);
 
-  // 没识别出任何广告 → 退化为旧逻辑（仅删 DISCONTINUITY 标签）
+  // 没识别出任何广告 → 原样返回。删除 DISCONTINUITY 会让 hls.js 在真实不连续点
+  // 不重置解封装器，编码参数变化时 MSE 直接崩掉时长。
   if (!hasAnyAd) {
-    return lines.filter((l) => l.trim() !== '#EXT-X-DISCONTINUITY').join('\n');
+    return m3u8Content;
   }
 
   // --- 第三步：重组 M3U8，只保留非广告区间 ---

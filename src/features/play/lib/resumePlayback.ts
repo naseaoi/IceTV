@@ -84,11 +84,23 @@ export function resolveResumeTimeTarget(
   return safeTarget;
 }
 
+/**
+ * 播放器时长未知时不能下达 seek：Artplayer 的 setter 会把目标 clamp 到
+ * [0, duration]，duration 为 0 时任何进度都会被压成 0。
+ */
+export function hasUsableDuration(duration?: number): boolean {
+  return Number.isFinite(duration) && (duration ?? 0) > 0;
+}
+
 export function applyResumeTime(
   player: ResumePlayerLike | null | undefined,
   targetTime: number,
 ): boolean {
   if (!player) {
+    return false;
+  }
+
+  if (!hasUsableDuration(player.duration)) {
     return false;
   }
 
@@ -98,5 +110,8 @@ export function applyResumeTime(
   }
 
   player.currentTime = safeTarget;
-  return true;
+
+  // 回读确认落点，避免播放器静默改写后上层误判恢复成功。
+  const applied = player.currentTime;
+  return Number.isFinite(applied) && applied >= safeTarget - 1.5;
 }

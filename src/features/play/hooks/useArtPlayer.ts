@@ -29,6 +29,7 @@ export function useArtPlayer(params: UseArtPlayerParams) {
   const autoAdvanceArmedRef = useRef(false);
   const autoAdvancedRef = useRef(false);
   const playerMediaKindRef = useRef<'hls' | 'native' | null>(null);
+  const sessionEpisodeIndexRef = useRef<number | null>(null);
   const paramsRef = useRef(params);
   paramsRef.current = params;
 
@@ -61,6 +62,7 @@ export function useArtPlayer(params: UseArtPlayerParams) {
       autoAdvanceArmedRef,
       autoAdvancedRef,
       playerMediaKindRef,
+      sessionEpisodeIndexRef,
       isCancelled: () => cancelled,
     });
 

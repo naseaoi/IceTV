@@ -406,6 +406,38 @@ describe('usePlayProgress helpers', () => {
     expect(mockedSavePlayRecord).not.toHaveBeenCalled();
   });
 
+  it('起播前的 0 进度不写 checkpoint，避免覆盖真实进度', () => {
+    savePlaybackCheckpoint(
+      { current: 'source-a' },
+      { current: 'id-a' },
+      { current: 0 },
+      { current: '番剧A' },
+      { current: null } as any,
+      { current: 0 },
+      { current: false },
+    );
+
+    expect(sessionStorage.getItem(PLAY_CHECKPOINT_KEY)).toBeNull();
+  });
+
+  it('已起播时正常写入 checkpoint', () => {
+    savePlaybackCheckpoint(
+      { current: 'source-a' },
+      { current: 'id-a' },
+      { current: 4 },
+      { current: '番剧A' },
+      { current: { currentTime: 886.4 } } as any,
+      { current: 886 },
+      { current: false },
+    );
+
+    const stored = JSON.parse(
+      sessionStorage.getItem(PLAY_CHECKPOINT_KEY) || '{}',
+    );
+    expect(stored.episodeIndex).toBe(4);
+    expect(stored.currentTime).toBe(886);
+  });
+
   it('切到目标集但尚未起播前不会写入错误 checkpoint', () => {
     savePlaybackCheckpoint(
       { current: 'source-a' },
