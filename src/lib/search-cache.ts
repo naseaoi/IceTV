@@ -1,3 +1,4 @@
+import { getServerCacheBudget } from '@/lib/cache-budget-profile';
 import type { ApiSite } from '@/lib/config';
 import { createSwrCache } from '@/lib/server-cache';
 import { SearchResult } from '@/lib/types';
@@ -27,30 +28,21 @@ const SEARCH_EMPTY_CACHE_TTL_MS = 60 * 1000;
 const SEARCH_EMPTY_CACHE_STALE_MS = 60 * 1000;
 const SEARCH_AGGREGATE_CACHE_TTL_MS = 2 * 60 * 1000;
 const SEARCH_AGGREGATE_CACHE_STALE_MS = 3 * 60 * 1000;
-const MAX_CACHE_SIZE = 1000;
-const MAX_AGGREGATE_CACHE_SIZE = 200;
-const MAX_EMPTY_CACHE_SIZE = 250;
-const SEARCH_CACHE_MAX_BYTES = 32 * 1024 * 1024;
-const SEARCH_EMPTY_CACHE_MAX_BYTES = 2 * 1024 * 1024;
-const SEARCH_AGGREGATE_CACHE_MAX_BYTES = 48 * 1024 * 1024;
 const SEARCH_CACHE = createSwrCache<CachedPageEntry>({
   name: 'search-pages',
-  maxSize: MAX_CACHE_SIZE,
-  maxWeightBytes: SEARCH_CACHE_MAX_BYTES,
+  ...getServerCacheBudget('search-pages'),
   freshMs: SEARCH_CACHE_TTL_MS,
   staleMs: SEARCH_CACHE_STALE_MS,
 });
 const SEARCH_EMPTY_CACHE = createSwrCache<CachedPageEntry>({
   name: 'search-empty-pages',
-  maxSize: MAX_EMPTY_CACHE_SIZE,
-  maxWeightBytes: SEARCH_EMPTY_CACHE_MAX_BYTES,
+  ...getServerCacheBudget('search-empty-pages'),
   freshMs: SEARCH_EMPTY_CACHE_TTL_MS,
   staleMs: SEARCH_EMPTY_CACHE_STALE_MS,
 });
 const SEARCH_AGGREGATE_CACHE = createSwrCache<CachedSearchAggregateEntry>({
   name: 'search-aggregates',
-  maxSize: MAX_AGGREGATE_CACHE_SIZE,
-  maxWeightBytes: SEARCH_AGGREGATE_CACHE_MAX_BYTES,
+  ...getServerCacheBudget('search-aggregates'),
   freshMs: SEARCH_AGGREGATE_CACHE_TTL_MS,
   staleMs: SEARCH_AGGREGATE_CACHE_STALE_MS,
 });

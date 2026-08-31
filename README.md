@@ -264,6 +264,7 @@ IceTV 支持标准的苹果 CMS V10 API 格式。
 | `MYSQL_MAX_IDLE`                     | MySQL 空闲池   | 否             | 同连接池上限                                     | 正整数                                                    |
 | `MYSQL_IDLE_TIMEOUT_MS`              | MySQL 空闲超时 | 否             | `60000`                                          | 毫秒                                                      |
 | `TRUSTED_PROXY_COUNT`                | 反代层数       | 反代后建议     | `0`                                              | 正整数                                                    |
+| `CACHE_PROFILE`                      | 内存缓存档位   | 否             | `small`                                          | `small`（约 86MB 上限）/ `standard`（约 266MB 上限）      |
 | `NEXT_PUBLIC_UPDATE_REPOS`           | 版本检查       | 否             | `naseaoi/IceTV`                                  | `owner/repo,owner/repo...`                                |
 | `NEXT_PUBLIC_UPDATE_BRANCH`          | 版本检查       | 否             | `main`                                           | 分支名                                                    |
 
@@ -273,6 +274,8 @@ IceTV 支持标准的苹果 CMS V10 API 格式。
 > 部署在 Nginx、Cloudflare 等反向代理后面时应设置 `TRUSTED_PROXY_COUNT` 为代理层数。默认值 `0` 会取 `x-forwarded-for` 的第一段，而该值由客户端可控，注册限流可被伪造请求头绕过。
 
 站点名称、图标、公告、豆瓣/Bangumi 代理、流式搜索、搜索最大页数等运行选项可在后台配置，不建议优先使用环境变量覆盖。
+
+`CACHE_PROFILE` 默认 `small`，服务端各内存缓存的条数与字节上限按 1c1t / 1GB 小鸡收敛。机器有 4GB 以上内存且搜索命中率偏低时可改 `standard` 换取更高命中率。
 
 高级调优变量：`CONFIG_CACHE_TTL_MS`、`PROXY_FETCH_TIMEOUT_MS`、`PROXY_DNS_CACHE_TTL_MS`、`PROXY_DNS_NEGATIVE_CACHE_TTL_MS`、`SEARCH_SOURCE_FAILURE_COOLDOWN_MS`、`SQLITE_BUSY_TIMEOUT_MS`、`SQLITE_INIT_RETRY_COUNT`、`SQLITE_INIT_RETRY_DELAY_MS`、`SQLITE_CACHE_SIZE_KIB`、`SQLITE_MMAP_SIZE_BYTES`、`CRON_METADATA_*`、`LIVE_REFRESH_CONCURRENCY`。
 

@@ -1,5 +1,7 @@
 /**
  * 服务端内存缓存（SWR 软过期 + 请求去重 + LRU）。
+ *
+ * LRU 顺序由 Map 插入序表达：命中时删除重插，首个 key 即最久未访问。
  */
 
 interface Entry<T> {
@@ -7,7 +9,6 @@ interface Entry<T> {
   freshUntil: number;
   staleUntil: number;
   weight: number;
-  lastAccess: number;
 }
 
 export interface SwrCacheOptions<T = unknown> {
@@ -33,6 +34,7 @@ export interface SwrCacheStats {
 }
 
 const DEFAULT_MAX_SIZE = 1000;
+const SWEEP_INTERVAL_MS = 10_000;
 
 function normalizeLimit(value: number | undefined, fallback: number): number {
   if (value === undefined) return fallback;
@@ -79,8 +81,8 @@ export function createSwrCache<T>(opts: SwrCacheOptions<T>) {
   const store = new Map<string, Entry<T>>();
   const inflight = new Map<string, Promise<T>>();
   let estimatedBytes = 0;
-  let accessSequence = 0;
   let cacheGeneration = 0;
+  let lastSweepAt = 0;
   const counters = {
     hits: 0,
     misses: 0,
@@ -91,8 +93,10 @@ export function createSwrCache<T>(opts: SwrCacheOptions<T>) {
     oversizedSkips: 0,
   };
 
-  function touch(entry: Entry<T>): void {
-    entry.lastAccess = ++accessSequence;
+  // 命中后移到 Map 末尾，维持插入序即 LRU 序
+  function touch(key: string, entry: Entry<T>): void {
+    store.delete(key);
+    store.set(key, entry);
   }
 
   function remove(key: string, reason?: 'eviction' | 'expiration'): boolean {
@@ -106,6 +110,8 @@ export function createSwrCache<T>(opts: SwrCacheOptions<T>) {
   }
 
   function cleanupExpired(now: number): void {
+    if (now - lastSweepAt < SWEEP_INTERVAL_MS) return;
+    lastSweepAt = now;
     for (const [key, entry] of store) {
       if (now >= entry.staleUntil) {
         remove(key, 'expiration');
@@ -122,18 +128,14 @@ export function createSwrCache<T>(opts: SwrCacheOptions<T>) {
     }
   }
 
-  function evictIfNeeded(): void {
+  // Map 首个 key 即最久未访问，无需扫表
+  function evictIfNeeded(now: number, protectedKey: string): void {
     while (store.size > maxSize || estimatedBytes > maxWeight) {
-      let oldestKey: string | null = null;
-      let oldestAccess = Number.POSITIVE_INFINITY;
-      for (const [key, entry] of store) {
-        if (entry.lastAccess < oldestAccess) {
-          oldestAccess = entry.lastAccess;
-          oldestKey = key;
-        }
-      }
-      if (oldestKey === null) return;
-      remove(oldestKey, 'eviction');
+      const oldestKey = store.keys().next().value as string | undefined;
+      if (oldestKey === undefined) return;
+      if (oldestKey === protectedKey && store.size <= 1) return;
+      const expired = now >= (store.get(oldestKey)?.staleUntil ?? 0);
+      remove(oldestKey, expired ? 'expiration' : 'eviction');
     }
   }
 
@@ -155,11 +157,10 @@ export function createSwrCache<T>(opts: SwrCacheOptions<T>) {
       freshUntil: now + freshMs,
       staleUntil: now + freshMs + staleMs,
       weight,
-      lastAccess: ++accessSequence,
     };
     store.set(key, entry);
     estimatedBytes += weight;
-    evictIfNeeded();
+    evictIfNeeded(now, key);
     return store.get(key) === entry;
   }
 
@@ -203,13 +204,13 @@ export function createSwrCache<T>(opts: SwrCacheOptions<T>) {
         if (now < hit.freshUntil) {
           counters.hits += 1;
           counters.freshHits += 1;
-          touch(hit);
+          touch(key, hit);
           return hit.value;
         }
         if (now < hit.staleUntil) {
           counters.hits += 1;
           counters.staleHits += 1;
-          touch(hit);
+          touch(key, hit);
           if (!inflight.has(key)) {
             load(key, loader).catch(() => {});
           }
@@ -236,13 +237,13 @@ export function createSwrCache<T>(opts: SwrCacheOptions<T>) {
       if (now < hit.freshUntil) {
         counters.hits += 1;
         counters.freshHits += 1;
-        touch(hit);
+        touch(key, hit);
         return { value: hit.value, fresh: true };
       }
       if (now < hit.staleUntil) {
         counters.hits += 1;
         counters.staleHits += 1;
-        touch(hit);
+        touch(key, hit);
         return { value: hit.value, fresh: false };
       }
       remove(key, 'expiration');
@@ -254,6 +255,7 @@ export function createSwrCache<T>(opts: SwrCacheOptions<T>) {
       store.clear();
       inflight.clear();
       estimatedBytes = 0;
+      lastSweepAt = 0;
     },
     size() {
       cleanupExpired(Date.now());

@@ -1,6 +1,7 @@
 import { getAdFilterCacheNamespace } from '@/features/play/lib/ad-filter-strategy-registry';
 import { filterM3U8AdsForSource } from '@/features/play/lib/ad-segment-detector';
 import { resolveVodM3U8ProxyTimeoutMs } from '@/features/play/lib/vodSourcePlaybackPolicy';
+import { getServerCacheBudget } from '@/lib/cache-budget-profile';
 import { getConfigForRead } from '@/lib/config';
 import {
   fetchResponseThroughProxy,
@@ -39,8 +40,7 @@ const m3u8Cache = createSwrCache<M3U8CacheEntry>({
   name: 'proxy-m3u8',
   freshMs: 60_000,
   staleMs: 60_000,
-  maxSize: 500,
-  maxWeightBytes: 32 * 1024 * 1024,
+  ...getServerCacheBudget('proxy-m3u8'),
 });
 
 const SIGNED_URL_PARAM_RE =

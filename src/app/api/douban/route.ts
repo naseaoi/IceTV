@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 
 import { isGuardFailure, requireActiveUser } from '@/lib/api-auth';
 import { createPublicApiCacheHeaders } from '@/lib/api-cache-headers';
+import { getServerCacheBudget } from '@/lib/cache-budget-profile';
 import { getCacheTime } from '@/lib/config';
 import { fetchDoubanData } from '@/lib/douban';
 import {
@@ -22,8 +23,7 @@ const doubanRouteCache = createSwrCache<DoubanResult>({
   name: 'douban-route',
   freshMs: 30 * 60 * 1000,
   staleMs: 30 * 60 * 1000,
-  maxSize: 500,
-  maxWeightBytes: 16 * 1024 * 1024,
+  ...getServerCacheBudget('douban-route'),
 });
 
 export async function GET(request: NextRequest) {

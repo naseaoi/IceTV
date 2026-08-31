@@ -115,6 +115,44 @@ describe('server cache', () => {
     expect(cache.stats().expirations).toBe(1);
   });
 
+  it('peek 命中也会刷新 LRU 顺序', () => {
+    const cache = createSwrCache<string>({
+      name: 'test',
+      maxSize: 2,
+      freshMs: 1_000,
+      estimateWeight: (value) => value.length,
+    });
+
+    cache.set('a', 'a');
+    cache.set('b', 'b');
+    expect(cache.peek('a')?.value).toBe('a');
+    cache.set('c', 'c');
+
+    expect(cache.peek('a')?.value).toBe('a');
+    expect(cache.peek('b')).toBeNull();
+  });
+
+  it('过期清理按最短间隔节流，不每次写入全表扫描', () => {
+    jest.useFakeTimers();
+    jest.setSystemTime(0);
+    const cache = createSwrCache<string>({
+      name: 'test',
+      maxSize: 100,
+      freshMs: 5,
+      staleMs: 5,
+      estimateWeight: (value) => value.length,
+    });
+
+    cache.set('expired', '1');
+    jest.advanceTimersByTime(11);
+    cache.set('next', '1');
+    expect(cache.stats().expirations).toBe(0);
+
+    jest.advanceTimersByTime(10_000);
+    cache.set('later', '1');
+    expect(cache.stats().expirations).toBeGreaterThan(0);
+  });
+
   it('清空缓存后未完成的回源不会重新写入', async () => {
     let resolveLoader!: (value: string) => void;
     const loader = new Promise<string>((resolve) => {

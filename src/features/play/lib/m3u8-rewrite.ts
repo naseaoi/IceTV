@@ -1,5 +1,6 @@
 import type { NextRequest } from 'next/server';
 
+import { getServerCacheBudget } from '@/lib/cache-budget-profile';
 import { appendProxySignature } from '@/lib/proxy-auth';
 import { createSwrCache } from '@/lib/server-cache';
 import { isSourceCorsCapable } from '@/lib/source-capability';
@@ -29,8 +30,7 @@ const m3u8RewriteCache = createSwrCache<string>({
   name: 'proxy-m3u8-rewrite',
   freshMs: 30_000,
   staleMs: 30_000,
-  maxSize: 200,
-  maxWeightBytes: 16 * 1024 * 1024,
+  ...getServerCacheBudget('proxy-m3u8-rewrite'),
 });
 
 export async function getRewrittenM3U8Content(

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 
 import { isGuardFailure, requireActiveUser } from '@/lib/api-auth';
+import { getServerCacheBudget } from '@/lib/cache-budget-profile';
 import type { ApiSite } from '@/lib/config';
 import { getAvailableApiSites, getConfigForRead } from '@/lib/config';
 import {
@@ -21,8 +22,7 @@ const episodeUrlCache = createSwrCache<string>({
   name: 'episode-url',
   freshMs: 30 * 60 * 1000,
   staleMs: 2 * 60 * 60 * 1000,
-  maxSize: 5000,
-  maxWeightBytes: 8 * 1024 * 1024,
+  ...getServerCacheBudget('episode-url'),
 });
 
 function matchesLazyKind(kind: string, apiSite: ApiSite): boolean {
