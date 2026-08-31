@@ -36,6 +36,9 @@ export async function GET(request: NextRequest) {
   const maxSearchPages = runtimeParams.SearchDownstreamMaxPage;
   const sourceFailureCooldownMs =
     runtimeParams.SourceFailureCooldownSeconds * 1000;
+  // 单源总预算覆盖首页 + 两轮额外分页
+  const sourceTimeoutMs =
+    runtimeParams.SearchRequestTimeoutSeconds * 1000 * 2.5;
   const aggregateCacheParams = {
     query,
     apiSites,
@@ -54,6 +57,7 @@ export async function GET(request: NextRequest) {
           disableYellowFilter: config.SiteConfig.DisableYellowFilter,
           sourceConcurrency: SEARCH_SOURCE_CONCURRENCY,
           sourceFailureCooldownMs,
+          sourceTimeoutMs,
         }),
       ).catch((error) => {
         console.warn('流式搜索聚合后台刷新失败:', error);
@@ -141,6 +145,7 @@ export async function GET(request: NextRequest) {
         disableYellowFilter: config.SiteConfig.DisableYellowFilter,
         sourceConcurrency: SEARCH_SOURCE_CONCURRENCY,
         sourceFailureCooldownMs,
+        sourceTimeoutMs,
         signal: searchAbortController.signal,
         shouldContinue: () =>
           !streamClosed && !searchAbortController.signal.aborted,

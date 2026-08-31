@@ -72,6 +72,25 @@ export function getServerCacheBudget(
   return PROFILES[profile][cache];
 }
 
+// 跨请求共享的上游搜索并发上限。单次搜索内部并发不受此限制影响，多人同时搜索时排队
+const UPSTREAM_SEARCH_CONCURRENCY: Record<CacheProfileName, number> = {
+  small: 12,
+  standard: 24,
+};
+
+export function getUpstreamSearchConcurrency(
+  profile = resolveCacheProfileName(),
+): number {
+  const override = Number.parseInt(
+    process.env.UPSTREAM_SEARCH_CONCURRENCY || '',
+    10,
+  );
+  if (Number.isFinite(override) && override > 0) {
+    return override;
+  }
+  return UPSTREAM_SEARCH_CONCURRENCY[profile];
+}
+
 export function getProfileTotalBytes(
   profile = resolveCacheProfileName(),
 ): number {

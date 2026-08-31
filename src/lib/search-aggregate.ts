@@ -1,3 +1,5 @@
+import { createAsyncSemaphore } from '@/lib/async-semaphore';
+import { getUpstreamSearchConcurrency } from '@/lib/cache-budget-profile';
 import { runWithConcurrency, withAbortableTimeout } from '@/lib/concurrency';
 import type { ApiSite } from '@/lib/config';
 import { searchFromApi } from '@/lib/downstream';
@@ -12,6 +14,7 @@ export interface SearchAggregationOptions {
   sourceConcurrency: number;
   signal?: AbortSignal;
   sourceFailureCooldownMs?: number;
+  sourceTimeoutMs?: number;
   shouldContinue?: () => boolean;
   onSourceResult?: (site: ApiSite, results: SearchResult[]) => void;
   onSourceError?: (site: ApiSite, error: unknown) => void;
@@ -23,7 +26,15 @@ type SourceFailureCooldown = {
 };
 
 const DEFAULT_SOURCE_FAILURE_COOLDOWN_MS = 5 * 60 * 1000;
+const DEFAULT_SOURCE_TIMEOUT_MS = 20_000;
 const sourceFailureCooldowns = new Map<string, SourceFailureCooldown>();
+
+// 跨请求共享：多人同时搜索时上游请求排队而不是叠加
+const upstreamSearchGate = createAsyncSemaphore(getUpstreamSearchConcurrency());
+
+export function getUpstreamSearchGateStats() {
+  return upstreamSearchGate.stats();
+}
 
 export async function runSearchAggregation({
   apiSites,
@@ -33,14 +44,27 @@ export async function runSearchAggregation({
   sourceConcurrency,
   signal,
   sourceFailureCooldownMs,
+  sourceTimeoutMs,
   shouldContinue,
   onSourceResult,
   onSourceError,
 }: SearchAggregationOptions): Promise<SearchResult[]> {
+  const timeoutMs =
+    sourceTimeoutMs && Number.isFinite(sourceTimeoutMs) && sourceTimeoutMs > 0
+      ? sourceTimeoutMs
+      : DEFAULT_SOURCE_TIMEOUT_MS;
+
   const searchTasks = apiSites.map((site) => async () => {
     const cooldown = getSourceFailureCooldown(site, sourceFailureCooldownMs);
     if (cooldown) {
       onSourceError?.(site, cooldown.error);
+      return [];
+    }
+
+    // 先取闸门再起超时，排队时间不占用单源超时预算
+    const releaseGate = await upstreamSearchGate.acquire();
+    if (signal?.aborted || shouldContinue?.() === false) {
+      releaseGate();
       return [];
     }
 
@@ -51,7 +75,7 @@ export async function runSearchAggregation({
             maxSearchPages,
             signal: childSignal,
           }),
-        20000,
+        timeoutMs,
         `${site.name} timeout`,
         signal,
       );
@@ -73,6 +97,8 @@ export async function runSearchAggregation({
       }
       onSourceError?.(site, error);
       return [];
+    } finally {
+      releaseGate();
     }
   });
 

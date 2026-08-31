@@ -1,6 +1,7 @@
 import { searchFromApi } from '@/lib/downstream';
 import {
   clearSearchSourceFailureCooldownsForTests,
+  getUpstreamSearchGateStats,
   runSearchAggregation,
 } from '@/lib/search-aggregate';
 import type { SearchResult } from '@/lib/types';
@@ -122,5 +123,64 @@ describe('runSearchAggregation', () => {
     expect(searchFromApi).toHaveBeenCalledTimes(2);
     expect(results.map((item) => item.title)).toEqual(['恢复']);
     expect(consoleWarnSpy).toHaveBeenCalledWith('搜索失败 失败源:', 'timeout');
+  });
+
+  it('单源超时用传入的预算而非固定值', async () => {
+    jest.useFakeTimers();
+    const onSourceError = jest.fn();
+    const consoleWarnSpy = jest
+      .spyOn(console, 'warn')
+      .mockImplementation(() => undefined);
+    (searchFromApi as jest.Mock).mockImplementation(
+      () => new Promise(() => undefined),
+    );
+
+    const pending = runSearchAggregation({
+      apiSites: [{ key: 'slow', name: '慢源', api: 'https://api.example' }],
+      query: '慢',
+      maxSearchPages: 1,
+      disableYellowFilter: true,
+      sourceConcurrency: 1,
+      sourceTimeoutMs: 500,
+      onSourceError,
+    });
+
+    await Promise.resolve();
+    jest.advanceTimersByTime(499);
+    expect(onSourceError).not.toHaveBeenCalled();
+
+    jest.advanceTimersByTime(2);
+    await expect(pending).resolves.toEqual([]);
+    expect(onSourceError).toHaveBeenCalledTimes(1);
+    expect(consoleWarnSpy).toHaveBeenCalledWith(
+      '搜索失败 慢源:',
+      '慢源 timeout',
+    );
+  });
+
+  it('闸门释放后后续搜索仍可正常发起', async () => {
+    (searchFromApi as jest.Mock).mockResolvedValue([
+      createResult({ title: '闸门' }),
+    ]);
+    const apiSites = Array.from({ length: 20 }, (_, index) => ({
+      key: `s${index}`,
+      name: `源${index}`,
+      api: 'https://api.example',
+    }));
+
+    for (let round = 0; round < 2; round += 1) {
+      const results = await runSearchAggregation({
+        apiSites,
+        query: '闸门',
+        maxSearchPages: 1,
+        disableYellowFilter: true,
+        sourceConcurrency: 6,
+      });
+      expect(results).toHaveLength(20);
+    }
+
+    const stats = getUpstreamSearchGateStats();
+    expect(stats.active).toBe(0);
+    expect(stats.waiting).toBe(0);
   });
 });
