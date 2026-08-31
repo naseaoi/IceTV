@@ -3,7 +3,14 @@ import 'server-only';
 import type { NextRequest } from 'next/server';
 import { NextResponse } from 'next/server';
 
-export type ServerProxyKind = 'douban-data' | 'douban-image' | 'bangumi-data';
+import { getClientIp } from '@/lib/client-ip';
+
+export type ServerProxyKind =
+  | 'douban-data'
+  | 'douban-image'
+  | 'bangumi-data'
+  | 'vod-segment'
+  | 'vod-m3u8';
 
 type RateLimitConfig = {
   maxRequests: number;
@@ -26,6 +33,9 @@ const RATE_LIMITS: Record<ServerProxyKind, RateLimitConfig> = {
   'douban-data': { maxRequests: 120, windowMs: 60_000 },
   'douban-image': { maxRequests: 480, windowMs: 60_000 },
   'bangumi-data': { maxRequests: 60, windowMs: 60_000 },
+  // 分片与清单按正常播放的数倍留量，只拦异常循环与外部盗链
+  'vod-segment': { maxRequests: 1200, windowMs: 60_000 },
+  'vod-m3u8': { maxRequests: 240, windowMs: 60_000 },
 };
 
 const rateLimitBuckets = new Map<string, RateLimitBucket>();
@@ -114,18 +124,6 @@ function getRateLimitKey(
   }
 
   return `${kind}:ip:${getClientIp(request)}`;
-}
-
-function getClientIp(request: NextRequest): string {
-  const forwardedFor = request.headers.get('x-forwarded-for');
-  const firstForwardedIp = forwardedFor?.split(',')[0]?.trim();
-
-  return (
-    firstForwardedIp ||
-    request.headers.get('x-real-ip')?.trim() ||
-    request.headers.get('cf-connecting-ip')?.trim() ||
-    'unknown'
-  );
 }
 
 function pruneRateLimitBuckets(): void {

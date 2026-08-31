@@ -7,7 +7,7 @@ import {
   fetchStreamThroughProxy,
   getProxyUrlForTarget,
 } from '@/lib/http-proxy-json';
-import { authorizeProxyRequest } from '@/lib/proxy-auth';
+import { resolveProxyAuthorization } from '@/lib/proxy-auth';
 import {
   classifyProxyFailure,
   createProxyFailureDiagnostic,
@@ -20,6 +20,7 @@ import {
   createLimitedReadableStream,
 } from '@/lib/proxy-response-limits';
 import { normalizeRuntimeParams } from '@/lib/runtime-params';
+import { requireServerProxyQuota } from '@/lib/server-proxy-guard';
 import { markSourceCors, responseAllowsCors } from '@/lib/source-capability';
 import { fetchWithUrlGuard, validateProxyUrlForRequest } from '@/lib/url-guard';
 
@@ -60,15 +61,19 @@ export async function GET(request: NextRequest) {
     });
   }
 
-  const authFailure = await authorizeProxyRequest(request, 'segment', url);
-  if (authFailure) {
+  const authorization = await resolveProxyAuthorization(
+    request,
+    'segment',
+    url,
+  );
+  if (!authorization.authorized) {
     const diagnostic = createProxyFailureDiagnostic({
       route: 'segment',
       source,
       targetUrl: url,
       stage: 'auth',
       reason: 'auth-failed',
-      status: authFailure.status || 403,
+      status: authorization.response.status || 403,
       elapsedMs: Date.now() - startedAt,
       proxyMode,
       isLive: isLiveStream,
@@ -81,6 +86,13 @@ export async function GET(request: NextRequest) {
       status: diagnostic.status,
     });
   }
+
+  const quotaFailure = requireServerProxyQuota(
+    'vod-segment',
+    request,
+    authorization.via === 'session' ? authorization.username : undefined,
+  );
+  if (quotaFailure) return quotaFailure;
 
   if (isLiveStream && !(await isLiveEntryEnabled())) {
     return NextResponse.json({ error: '直播未开启' }, { status: 404 });

@@ -2,13 +2,14 @@
 
 import { isLiveEntryEnabled } from '@/features/live/lib/live';
 import { getRewrittenM3U8Content } from '@/features/play/lib/m3u8-rewrite';
-import { authorizeProxyRequest } from '@/lib/proxy-auth';
+import { resolveProxyAuthorization } from '@/lib/proxy-auth';
 import {
   classifyProxyFailure,
   createProxyFailureDiagnostic,
   logProxyFailure,
   toProxyFailurePayload,
 } from '@/lib/proxy-diagnostics';
+import { requireServerProxyQuota } from '@/lib/server-proxy-guard';
 import { validateProxyUrlForRequest } from '@/lib/url-guard';
 
 import { getProxySourceKey, resolveProxyUserAgent } from '../utils';
@@ -50,15 +51,15 @@ export async function GET(request: NextRequest) {
     });
   }
 
-  const authFailure = await authorizeProxyRequest(request, 'm3u8', url);
-  if (authFailure) {
+  const authorization = await resolveProxyAuthorization(request, 'm3u8', url);
+  if (!authorization.authorized) {
     const diagnostic = createProxyFailureDiagnostic({
       route: 'm3u8',
       source,
       targetUrl: url,
       stage: 'auth',
       reason: 'auth-failed',
-      status: authFailure.status || 403,
+      status: authorization.response.status || 403,
       elapsedMs: Date.now() - startedAt,
       proxyMode,
       isLive,
@@ -70,6 +71,13 @@ export async function GET(request: NextRequest) {
       status: diagnostic.status,
     });
   }
+
+  const quotaFailure = requireServerProxyQuota(
+    'vod-m3u8',
+    request,
+    authorization.via === 'session' ? authorization.username : undefined,
+  );
+  if (quotaFailure) return quotaFailure;
 
   if (isLive && !(await isLiveEntryEnabled())) {
     return NextResponse.json({ error: '直播未开启' }, { status: 404 });
