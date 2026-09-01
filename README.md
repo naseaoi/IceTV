@@ -265,7 +265,7 @@ IceTV 支持标准的苹果 CMS V10 API 格式。
 | `MYSQL_IDLE_TIMEOUT_MS`              | MySQL 空闲超时 | 否             | `60000`                                          | 毫秒                                                      |
 | `TRUSTED_PROXY_COUNT`                | 反代层数       | 反代后建议     | `0`                                              | 正整数                                                    |
 | `CACHE_PROFILE`                      | 内存缓存档位   | 否             | `small`                                          | `small`（约 86MB 上限）/ `standard`（约 266MB 上限）      |
-| `UPSTREAM_SEARCH_CONCURRENCY`        | 上游搜索并发   | 否             | 按档位（`small` 12）                             | 正整数                                                    |
+| `UPSTREAM_SEARCH_CONCURRENCY`        | 上游搜索并发   | 否             | 按档位（`small` 12）                             | 正整数；后台「运行参数」设为非 0 时以后台为准             |
 | `NEXT_PUBLIC_UPDATE_REPOS`           | 版本检查       | 否             | `naseaoi/IceTV`                                  | `owner/repo,owner/repo...`                                |
 | `NEXT_PUBLIC_UPDATE_BRANCH`          | 版本检查       | 否             | `main`                                           | 分支名                                                    |
 
@@ -278,7 +278,9 @@ IceTV 支持标准的苹果 CMS V10 API 格式。
 
 `CACHE_PROFILE` 默认 `small`，服务端各内存缓存的条数与字节上限按 1c1t / 1GB 小鸡收敛。机器有 4GB 以上内存且搜索命中率偏低时可改 `standard` 换取更高命中率。
 
-`UPSTREAM_SEARCH_CONCURRENCY` 是所有请求共享的上游搜索并发闸门。单次搜索内部并发不受影响，多人同时搜索不同关键词时上游请求排队而不是成倍叠加。
+`UPSTREAM_SEARCH_CONCURRENCY` 是所有请求共享的上游搜索并发闸门。单次搜索内部并发不受影响，多人同时搜索不同关键词时上游请求排队而不是成倍叠加。该闸门也可在后台「运行参数」调整，优先级为后台配置（非 0）> 环境变量 > 档位默认值。
+
+后台「运行参数」的「图片代理超时」覆盖豆瓣、Bangumi 封面回源；`PROXY_FETCH_TIMEOUT_MS` 只作为未显式传入超时的其余回源场景的兜底。
 
 高级调优变量：`CONFIG_CACHE_TTL_MS`、`PROXY_FETCH_TIMEOUT_MS`、`PROXY_DNS_CACHE_TTL_MS`、`PROXY_DNS_NEGATIVE_CACHE_TTL_MS`、`SEARCH_SOURCE_FAILURE_COOLDOWN_MS`、`SQLITE_BUSY_TIMEOUT_MS`、`SQLITE_INIT_RETRY_COUNT`、`SQLITE_INIT_RETRY_DELAY_MS`、`SQLITE_CACHE_SIZE_KIB`、`SQLITE_MMAP_SIZE_BYTES`、`CRON_METADATA_*`、`LIVE_REFRESH_CONCURRENCY`。
 

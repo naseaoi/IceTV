@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 
+import { getConfigForRead } from '@/lib/config';
 import {
   type CoverImageResizeOptions,
   CoverImageResizeParamError,
@@ -14,6 +15,7 @@ import {
   readArrayBufferLimited,
   ResponseSizeLimitError,
 } from '@/lib/proxy-response-limits';
+import { normalizeRuntimeParams } from '@/lib/runtime-params';
 import {
   recordServerProxyFailure,
   requireServerProxyQuota,
@@ -49,11 +51,13 @@ class ImageOriginError extends Error {
 async function fetchImageOrigin(
   url: string,
   method: 'GET' | 'HEAD',
+  timeoutMs: number,
 ): Promise<{ response: Response; contentType: string }> {
   const response = await fetchWithUrlGuard(url, {
     method,
     headers: ORIGIN_FETCH_HEADERS,
     skipInitialValidation: true,
+    timeoutMs,
   });
 
   if (!response.ok) {
@@ -115,6 +119,10 @@ async function proxyImage(request: NextRequest, method: 'GET' | 'HEAD') {
   );
   if (quotaFailure) return quotaFailure;
 
+  const config = await getConfigForRead();
+  const originTimeoutMs =
+    normalizeRuntimeParams(config.SiteConfig).ImageProxyTimeoutSeconds * 1000;
+
   try {
     if (method === 'GET' && resizeOptions) {
       const resizeTarget = resizeOptions;
@@ -123,7 +131,11 @@ async function proxyImage(request: NextRequest, method: 'GET' | 'HEAD') {
         originUrl,
         resizeTarget,
         async () => {
-          const { response } = await fetchImageOrigin(originUrl, method);
+          const { response } = await fetchImageOrigin(
+            originUrl,
+            method,
+            originTimeoutMs,
+          );
           const source = await readArrayBufferLimited(
             response,
             MAX_IMAGE_BYTES,
@@ -145,6 +157,7 @@ async function proxyImage(request: NextRequest, method: 'GET' | 'HEAD') {
     const { response: imageResponse, contentType } = await fetchImageOrigin(
       validation.url,
       method,
+      originTimeoutMs,
     );
 
     // 创建响应头

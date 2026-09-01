@@ -54,6 +54,8 @@ export async function runSearchAggregation({
       ? sourceTimeoutMs
       : DEFAULT_SOURCE_TIMEOUT_MS;
 
+  upstreamSearchGate.setLimit(sourceConcurrency);
+
   const searchTasks = apiSites.map((site) => async () => {
     const cooldown = getSourceFailureCooldown(site, sourceFailureCooldownMs);
     if (cooldown) {

@@ -59,4 +59,61 @@ describe('async semaphore', () => {
     expect(createAsyncSemaphore(0).stats().limit).toBe(1);
     expect(createAsyncSemaphore(-5).stats().limit).toBe(1);
   });
+
+  it('扩容立即放行排队任务', async () => {
+    const gate = createAsyncSemaphore(1);
+    const first = await gate.acquire();
+    let secondReady = false;
+    let thirdReady = false;
+
+    void gate.acquire().then(() => {
+      secondReady = true;
+    });
+    void gate.acquire().then(() => {
+      thirdReady = true;
+    });
+    await Promise.resolve();
+    expect(gate.stats()).toEqual({ limit: 1, active: 1, waiting: 2 });
+
+    gate.setLimit(3);
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(secondReady).toBe(true);
+    expect(thirdReady).toBe(true);
+    expect(gate.stats()).toEqual({ limit: 3, active: 3, waiting: 0 });
+    first();
+  });
+
+  it('缩容后不超发槽位', async () => {
+    const gate = createAsyncSemaphore(4);
+    const releases = await Promise.all([
+      gate.acquire(),
+      gate.acquire(),
+      gate.acquire(),
+      gate.acquire(),
+    ]);
+    let queuedReady = false;
+
+    void gate.acquire().then(() => {
+      queuedReady = true;
+    });
+    await Promise.resolve();
+    expect(gate.stats()).toEqual({ limit: 4, active: 4, waiting: 1 });
+
+    gate.setLimit(2);
+    releases[0]();
+    releases[1]();
+    await Promise.resolve();
+
+    expect(queuedReady).toBe(false);
+    expect(gate.stats()).toEqual({ limit: 2, active: 2, waiting: 1 });
+
+    releases[2]();
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(queuedReady).toBe(true);
+    expect(gate.stats()).toEqual({ limit: 2, active: 2, waiting: 0 });
+  });
 });

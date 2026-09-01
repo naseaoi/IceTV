@@ -25,6 +25,7 @@ type RuntimeParamField = {
   key: keyof RuntimeParamSettings;
   label: string;
   unit: string;
+  hint?: string;
 };
 
 type RuntimeParamGroup = {
@@ -46,6 +47,12 @@ const runtimeParamGroups: RuntimeParamGroup[] = [
         label: '接口请求超时',
         unit: '秒',
       },
+      {
+        key: 'UpstreamSearchConcurrency',
+        label: '上游搜索并发上限',
+        unit: '个',
+        hint: '0 跟随档位',
+      },
       { key: 'SearchHistoryLimit', label: '搜索历史条数上限', unit: '条' },
     ],
   },
@@ -56,6 +63,11 @@ const runtimeParamGroups: RuntimeParamGroup[] = [
       {
         key: 'SourceFailureCooldownSeconds',
         label: '播放源失败冷却',
+        unit: '秒',
+      },
+      {
+        key: 'LivePrecheckTimeoutSeconds',
+        label: '直播预检查超时',
         unit: '秒',
       },
       { key: 'ContinueWatchingLimit', label: '继续观看首页显示', unit: '条' },
@@ -83,13 +95,13 @@ const runtimeParamGroups: RuntimeParamGroup[] = [
       },
       { key: 'CoverImageCacheSize', label: '图片/封面缓存上限', unit: '张' },
       {
-        key: 'LivePrecheckTimeoutSeconds',
-        label: '直播预检查超时',
+        key: 'ProxyRequestTimeoutSeconds',
+        label: '代理请求超时',
         unit: '秒',
       },
       {
-        key: 'ProxyRequestTimeoutSeconds',
-        label: '代理请求超时',
+        key: 'ImageProxyTimeoutSeconds',
+        label: '图片代理超时',
         unit: '秒',
       },
     ],
@@ -181,63 +193,70 @@ const RuntimeParamsTab = ({
   }
 
   return (
-    <form
-      id={RUNTIME_PARAMS_FORM_ID}
-      onSubmit={handleSubmit}
-      className='space-y-6'
-    >
-      {runtimeParamGroups.map((group) => (
-        <section key={group.title} className='space-y-3'>
-          <h3 className='text-sm font-medium text-gray-900 dark:text-gray-100'>
-            {group.title}
-          </h3>
-          <div className='grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4'>
-            {group.fields.map((field) => {
-              const inputId = getRuntimeParamInputId(field.key);
-              const range = RUNTIME_PARAM_RANGES[field.key];
+    <form id={RUNTIME_PARAMS_FORM_ID} onSubmit={handleSubmit}>
+      <div className='grid grid-cols-1 gap-4 lg:grid-cols-2'>
+        {runtimeParamGroups.map((group) => (
+          <section
+            key={group.title}
+            className='self-start overflow-hidden rounded-lg border border-gray-200 bg-white dark:border-gray-700 dark:bg-gray-800/60'
+          >
+            <h3 className='border-b border-gray-200 px-4 py-2.5 text-sm font-medium text-gray-900 dark:border-gray-700 dark:text-gray-100'>
+              {group.title}
+            </h3>
+            <div className='divide-y divide-gray-100 dark:divide-gray-700/60'>
+              {group.fields.map((field) => {
+                const inputId = getRuntimeParamInputId(field.key);
+                const range = RUNTIME_PARAM_RANGES[field.key];
+                const hintId = `${inputId}-hint`;
+                const hintText = field.hint
+                  ? `${range.min}-${range.max} · ${field.hint}`
+                  : `${range.min}-${range.max}`;
 
-              return (
-                <div
-                  key={field.key}
-                  className='flex items-center justify-between gap-3 rounded-lg border border-gray-200 bg-white px-3 py-2.5 dark:border-gray-700 dark:bg-gray-800/60'
-                >
-                  <div className='min-w-0'>
+                return (
+                  <div
+                    key={field.key}
+                    className='flex items-center justify-between gap-4 px-4 py-2.5'
+                  >
                     <label
                       htmlFor={inputId}
-                      className='block text-sm font-medium text-gray-700 dark:text-gray-300'
+                      className='text-sm font-medium text-gray-700 dark:text-gray-300'
                     >
                       {field.label}
                     </label>
-                    <p className='mt-0.5 text-xs text-gray-400 dark:text-gray-500'>
-                      {range.min} ~ {range.max}
-                    </p>
+                    <div className='flex shrink-0 items-center gap-2'>
+                      <span
+                        id={hintId}
+                        className='text-xs text-gray-400 dark:text-gray-500'
+                      >
+                        {hintText}
+                      </span>
+                      <input
+                        id={inputId}
+                        name={field.key}
+                        type='number'
+                        min={range.min}
+                        max={range.max}
+                        aria-describedby={hintId}
+                        value={runtimeParams[field.key]}
+                        onChange={(event) =>
+                          setRuntimeParams((prev) => ({
+                            ...prev,
+                            [field.key]: Number(event.target.value),
+                          }))
+                        }
+                        className='w-20 rounded-lg border border-gray-300 bg-white px-2 py-1.5 text-right text-sm text-gray-900 focus:border-transparent focus:ring-2 focus:ring-green-500 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100'
+                      />
+                      <span className='w-4 text-xs text-gray-400 dark:text-gray-500'>
+                        {field.unit}
+                      </span>
+                    </div>
                   </div>
-                  <div className='flex shrink-0 items-center gap-1.5'>
-                    <input
-                      id={inputId}
-                      name={field.key}
-                      type='number'
-                      min={range.min}
-                      max={range.max}
-                      value={runtimeParams[field.key]}
-                      onChange={(event) =>
-                        setRuntimeParams((prev) => ({
-                          ...prev,
-                          [field.key]: Number(event.target.value),
-                        }))
-                      }
-                      className='w-20 rounded-lg border border-gray-300 bg-white px-2 py-1.5 text-right text-sm text-gray-900 focus:border-transparent focus:ring-2 focus:ring-green-500 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100'
-                    />
-                    <span className='text-xs text-gray-400 dark:text-gray-500'>
-                      {field.unit}
-                    </span>
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        </section>
-      ))}
+                );
+              })}
+            </div>
+          </section>
+        ))}
+      </div>
 
       <AlertModal
         isOpen={alertModal.isOpen}

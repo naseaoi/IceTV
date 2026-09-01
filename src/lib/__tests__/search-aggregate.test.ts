@@ -183,4 +183,29 @@ describe('runSearchAggregation', () => {
     expect(stats.active).toBe(0);
     expect(stats.waiting).toBe(0);
   });
+
+  it('闸门上限跟随传入的源并发', async () => {
+    (searchFromApi as jest.Mock).mockResolvedValue([]);
+    const apiSites = [
+      { key: 'gate', name: '闸门源', api: 'https://api.example' },
+    ];
+
+    await runSearchAggregation({
+      apiSites,
+      query: '并发',
+      maxSearchPages: 1,
+      disableYellowFilter: true,
+      sourceConcurrency: 3,
+    });
+    expect(getUpstreamSearchGateStats().limit).toBe(3);
+
+    await runSearchAggregation({
+      apiSites,
+      query: '并发',
+      maxSearchPages: 1,
+      disableYellowFilter: true,
+      sourceConcurrency: 9,
+    });
+    expect(getUpstreamSearchGateStats().limit).toBe(9);
+  });
 });

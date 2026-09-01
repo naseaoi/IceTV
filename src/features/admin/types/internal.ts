@@ -23,6 +23,8 @@ export interface SiteConfig {
   DataImportPlaybackSessionsLimit: number;
   LivePrecheckTimeoutSeconds: number;
   ProxyRequestTimeoutSeconds: number;
+  ImageProxyTimeoutSeconds: number;
+  UpstreamSearchConcurrency: number;
   DoubanProxyType: string;
   DoubanProxy: string;
   BangumiDataSource: string;

@@ -78,9 +78,14 @@ const UPSTREAM_SEARCH_CONCURRENCY: Record<CacheProfileName, number> = {
   standard: 24,
 };
 
+// 优先级：后台配置 > 环境变量 > 档位默认值
 export function getUpstreamSearchConcurrency(
+  configuredLimit = 0,
   profile = resolveCacheProfileName(),
 ): number {
+  if (Number.isFinite(configuredLimit) && configuredLimit > 0) {
+    return Math.floor(configuredLimit);
+  }
   const override = Number.parseInt(
     process.env.UPSTREAM_SEARCH_CONCURRENCY || '',
     10,
@@ -93,9 +98,10 @@ export function getUpstreamSearchConcurrency(
 
 // 单次搜索的源并发。与闸门齐平：一人搜索时吃满额度，多人时由闸门排队
 export function getSearchSourceConcurrency(
+  configuredLimit = 0,
   profile = resolveCacheProfileName(),
 ): number {
-  return getUpstreamSearchConcurrency(profile);
+  return getUpstreamSearchConcurrency(configuredLimit, profile);
 }
 
 export function getProfileTotalBytes(

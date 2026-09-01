@@ -111,6 +111,8 @@ describe('buildConfigFileFromAdminConfig', () => {
         DataImportPlaybackSessionsLimit: 500,
         LivePrecheckTimeoutSeconds: 15,
         ProxyRequestTimeoutSeconds: 30,
+        ImageProxyTimeoutSeconds: 15,
+        UpstreamSearchConcurrency: 0,
         DoubanProxyType: 'direct',
         DoubanProxy: '',
         BangumiDataSource: 'server',

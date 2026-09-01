@@ -12,10 +12,15 @@ const mockValidateProxyUrlForRequest = jest.fn();
 const mockFetchWithUrlGuard = jest.fn();
 const mockReadArrayBufferLimited = jest.fn();
 const mockResizeCoverImage = jest.fn();
+const mockGetConfigForRead = jest.fn();
 
 jest.mock('@/lib/proxy-auth', () => ({
   resolveProxyAuthorization: (...args: unknown[]) =>
     mockResolveProxyAuthorization(...args),
+}));
+
+jest.mock('@/lib/config', () => ({
+  getConfigForRead: (...args: unknown[]) => mockGetConfigForRead(...args),
 }));
 
 jest.mock('@/lib/server-proxy-guard', () => ({
@@ -53,6 +58,7 @@ describe('image proxy route auth order', () => {
     jest.clearAllMocks();
     clearResizedCoverCacheForTests();
     mockRequireServerProxyQuota.mockReturnValue(null);
+    mockGetConfigForRead.mockResolvedValue({ SiteConfig: {} });
   });
 
   it('authorizes before validating the target URL', async () => {
@@ -171,6 +177,9 @@ describe('image proxy resize cache', () => {
     });
     mockReadArrayBufferLimited.mockResolvedValue(new ArrayBuffer(64));
     mockResizeCoverImage.mockResolvedValue(new ArrayBuffer(16));
+    mockGetConfigForRead.mockResolvedValue({
+      SiteConfig: { ImageProxyTimeoutSeconds: 42 },
+    });
   });
 
   it('第二次相同缩放请求命中缓存且不再回源', async () => {
@@ -211,6 +220,15 @@ describe('image proxy resize cache', () => {
 
     expect(mockFetchWithUrlGuard).toHaveBeenCalledTimes(2);
     expect(mockResizeCoverImage).toHaveBeenCalledTimes(2);
+  });
+
+  it('回源带上配置的图片代理超时', async () => {
+    await GET({ url: RESIZE_URL } as NextRequest);
+
+    expect(mockFetchWithUrlGuard).toHaveBeenCalledWith(
+      'https://example.com/a.jpg',
+      expect.objectContaining({ timeoutMs: 42_000 }),
+    );
   });
 
   it('回源失败不写入缓存', async () => {

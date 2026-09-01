@@ -97,7 +97,6 @@ export default async function RootLayout({
     PLAYBACK_HISTORY_PAGE_SIZE: publicConfig.PlaybackHistoryPageSize,
     PLAYBACK_HISTORY_LIMIT: publicConfig.PlaybackHistoryLimit,
     SEARCH_HISTORY_LIMIT: publicConfig.SearchHistoryLimit,
-    SOURCE_FAILURE_COOLDOWN_SECONDS: publicConfig.SourceFailureCooldownSeconds,
     CONTINUE_WATCHING_LIMIT: publicConfig.ContinueWatchingLimit,
     COVER_IMAGE_CACHE_SIZE: publicConfig.CoverImageCacheSize,
     SOURCE_COVER_PROXY_MODE: publicConfig.SourceCoverProxyMode,

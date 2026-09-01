@@ -36,6 +36,9 @@ export async function GET(request: NextRequest) {
   // 单源总预算覆盖首页 + 两轮额外分页
   const sourceTimeoutMs =
     runtimeParams.SearchRequestTimeoutSeconds * 1000 * 2.5;
+  const sourceConcurrency = getSearchSourceConcurrency(
+    runtimeParams.UpstreamSearchConcurrency,
+  );
   const aggregateCacheParams = {
     query,
     apiSites,
@@ -52,7 +55,7 @@ export async function GET(request: NextRequest) {
           query,
           maxSearchPages,
           disableYellowFilter: config.SiteConfig.DisableYellowFilter,
-          sourceConcurrency: getSearchSourceConcurrency(),
+          sourceConcurrency,
           sourceFailureCooldownMs,
           sourceTimeoutMs,
         }),
@@ -76,7 +79,7 @@ export async function GET(request: NextRequest) {
           query,
           maxSearchPages,
           disableYellowFilter: config.SiteConfig.DisableYellowFilter,
-          sourceConcurrency: getSearchSourceConcurrency(),
+          sourceConcurrency,
           sourceFailureCooldownMs,
           sourceTimeoutMs,
         }),

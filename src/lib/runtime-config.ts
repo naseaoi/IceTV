@@ -24,7 +24,6 @@ export interface RuntimeConfig {
   PLAYBACK_HISTORY_PAGE_SIZE: number;
   PLAYBACK_HISTORY_LIMIT: number;
   SEARCH_HISTORY_LIMIT: number;
-  SOURCE_FAILURE_COOLDOWN_SECONDS: number;
   CONTINUE_WATCHING_LIMIT: number;
   COVER_IMAGE_CACHE_SIZE: number;
   SOURCE_COVER_PROXY_MODE: SourceCoverProxyMode;
@@ -54,7 +53,6 @@ export const DEFAULT_RUNTIME_CONFIG: RuntimeConfig = {
   PLAYBACK_HISTORY_PAGE_SIZE: 10,
   PLAYBACK_HISTORY_LIMIT: 500,
   SEARCH_HISTORY_LIMIT: 20,
-  SOURCE_FAILURE_COOLDOWN_SECONDS: 300,
   CONTINUE_WATCHING_LIMIT: 10,
   COVER_IMAGE_CACHE_SIZE: 500,
   SOURCE_COVER_PROXY_MODE: 'auto',
@@ -95,7 +93,6 @@ export type ServerConfigPayload = {
   PlaybackHistoryPageSize?: number;
   PlaybackHistoryLimit?: number;
   SearchHistoryLimit?: number;
-  SourceFailureCooldownSeconds?: number;
   ContinueWatchingLimit?: number;
   CoverImageCacheSize?: number;
   SourceCoverProxyMode?: SourceCoverProxyMode;
@@ -179,9 +176,6 @@ function runtimeConfigFromServerConfig(
       DEFAULT_RUNTIME_CONFIG.PLAYBACK_HISTORY_LIMIT,
     SEARCH_HISTORY_LIMIT:
       data.SearchHistoryLimit ?? DEFAULT_RUNTIME_CONFIG.SEARCH_HISTORY_LIMIT,
-    SOURCE_FAILURE_COOLDOWN_SECONDS:
-      data.SourceFailureCooldownSeconds ??
-      DEFAULT_RUNTIME_CONFIG.SOURCE_FAILURE_COOLDOWN_SECONDS,
     CONTINUE_WATCHING_LIMIT:
       data.ContinueWatchingLimit ??
       DEFAULT_RUNTIME_CONFIG.CONTINUE_WATCHING_LIMIT,

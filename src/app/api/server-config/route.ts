@@ -55,7 +55,6 @@ export async function GET(request: NextRequest) {
     PlaybackHistoryPageSize: publicConfig.PlaybackHistoryPageSize,
     PlaybackHistoryLimit: publicConfig.PlaybackHistoryLimit,
     SearchHistoryLimit: publicConfig.SearchHistoryLimit,
-    SourceFailureCooldownSeconds: publicConfig.SourceFailureCooldownSeconds,
     ContinueWatchingLimit: publicConfig.ContinueWatchingLimit,
     CoverImageCacheSize: publicConfig.CoverImageCacheSize,
     SourceCoverProxyMode: publicConfig.SourceCoverProxyMode,

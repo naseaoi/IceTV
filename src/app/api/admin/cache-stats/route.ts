@@ -11,9 +11,11 @@ import {
   getUpstreamSearchConcurrency,
   resolveCacheProfileName,
 } from '@/lib/cache-budget-profile';
+import { getConfigForRead } from '@/lib/config';
 import { getResizedCoverCacheStats } from '@/lib/cover-image-resize-cache.server';
 import { getDetailCacheStats } from '@/lib/detail-cache';
 import { NO_STORE_HEADERS } from '@/lib/http-cache';
+import { normalizeRuntimeParams } from '@/lib/runtime-params';
 import { getUpstreamSearchGateStats } from '@/lib/search-aggregate';
 import { getSearchCacheStats } from '@/lib/search-cache';
 import type { SwrCacheStats } from '@/lib/server-cache';
@@ -33,6 +35,8 @@ export async function GET(request: NextRequest) {
   const guardResult = await requireAdmin(request);
   if (isGuardFailure(guardResult)) return guardResult.response;
 
+  const config = await getConfigForRead();
+  const runtimeParams = normalizeRuntimeParams(config.SiteConfig);
   const searchStats = getSearchCacheStats();
   const caches = [
     withHitRate('search-pages', searchStats.pages),
@@ -57,7 +61,9 @@ export async function GET(request: NextRequest) {
       ),
       upstreamSearch: {
         ...getUpstreamSearchGateStats(),
-        configuredLimit: getUpstreamSearchConcurrency(),
+        configuredLimit: getUpstreamSearchConcurrency(
+          runtimeParams.UpstreamSearchConcurrency,
+        ),
       },
       memoryUsage: process.memoryUsage(),
       caches,
