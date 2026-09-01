@@ -34,6 +34,7 @@ export async function POST(request: NextRequest) {
       DefaultAggregateSearch,
       EnableOptimization,
       LiveDirectConnect,
+      EnableDanmaku,
       SearchDownstreamMaxPage,
       SiteInterfaceCacheTime,
       DoubanProxyType,
@@ -53,6 +54,7 @@ export async function POST(request: NextRequest) {
       DefaultAggregateSearch: boolean;
       EnableOptimization: boolean;
       LiveDirectConnect: boolean;
+      EnableDanmaku?: boolean;
       SearchDownstreamMaxPage: number;
       SiteInterfaceCacheTime: number;
       DoubanProxyType: string;
@@ -75,6 +77,7 @@ export async function POST(request: NextRequest) {
       typeof DefaultAggregateSearch !== 'boolean' ||
       typeof EnableOptimization !== 'boolean' ||
       typeof LiveDirectConnect !== 'boolean' ||
+      (EnableDanmaku !== undefined && typeof EnableDanmaku !== 'boolean') ||
       typeof SearchDownstreamMaxPage !== 'number' ||
       typeof SiteInterfaceCacheTime !== 'number' ||
       typeof DoubanProxyType !== 'string' ||
@@ -153,6 +156,7 @@ export async function POST(request: NextRequest) {
       DefaultAggregateSearch,
       EnableOptimization,
       LiveDirectConnect,
+      EnableDanmaku: EnableDanmaku ?? adminConfig.SiteConfig.EnableDanmaku,
       SearchDownstreamMaxPage,
       SiteInterfaceCacheTime,
       DoubanProxyType: normalizeSiteDoubanProxyType(DoubanProxyType),

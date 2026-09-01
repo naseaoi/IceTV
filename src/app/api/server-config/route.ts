@@ -49,6 +49,7 @@ export async function GET(request: NextRequest) {
     DefaultAggregateSearch: publicConfig.DefaultAggregateSearch,
     EnableOptimization: publicConfig.EnableOptimization,
     LiveDirectConnect: publicConfig.LiveDirectConnect,
+    EnableDanmaku: publicConfig.EnableDanmaku,
     CustomCategories: publicConfig.CustomCategories,
     FluidSearch: publicConfig.FluidSearch,
     VodPageTimeoutSeconds: publicConfig.VodPageTimeoutSeconds,

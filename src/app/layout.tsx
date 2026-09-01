@@ -91,6 +91,7 @@ export default async function RootLayout({
     DEFAULT_AGGREGATE_SEARCH: publicConfig.DefaultAggregateSearch,
     ENABLE_OPTIMIZATION: publicConfig.EnableOptimization,
     LIVE_DIRECT_CONNECT: publicConfig.LiveDirectConnect,
+    ENABLE_DANMAKU: publicConfig.EnableDanmaku,
     CUSTOM_CATEGORIES: publicConfig.CustomCategories,
     FLUID_SEARCH: publicConfig.FluidSearch,
     VOD_PAGE_TIMEOUT_SECONDS: publicConfig.VodPageTimeoutSeconds,

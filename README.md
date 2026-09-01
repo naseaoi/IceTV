@@ -266,6 +266,7 @@ IceTV 支持标准的苹果 CMS V10 API 格式。
 | `TRUSTED_PROXY_COUNT`                | 反代层数       | 反代后建议     | `0`                                              | 正整数                                                    |
 | `CACHE_PROFILE`                      | 内存缓存档位   | 否             | `small`                                          | `small`（约 86MB 上限）/ `standard`（约 266MB 上限）      |
 | `UPSTREAM_SEARCH_CONCURRENCY`        | 上游搜索并发   | 否             | 按档位（`small` 12）                             | 正整数；后台「运行参数」设为非 0 时以后台为准             |
+| `DANMAKU_API_BASE_URL`               | 弹幕服务地址   | 启用弹幕时必填 | 空                                               | 自建 danmu_api 地址，含 token 路径段                      |
 | `NEXT_PUBLIC_UPDATE_REPOS`           | 版本检查       | 否             | `naseaoi/IceTV`                                  | `owner/repo,owner/repo...`                                |
 | `NEXT_PUBLIC_UPDATE_BRANCH`          | 版本检查       | 否             | `main`                                           | 分支名                                                    |
 
@@ -277,6 +278,8 @@ IceTV 支持标准的苹果 CMS V10 API 格式。
 站点名称、图标、公告、豆瓣/Bangumi 代理、流式搜索、搜索最大页数等运行选项可在后台配置，不建议优先使用环境变量覆盖。
 
 `CACHE_PROFILE` 默认 `small`，服务端各内存缓存的条数与字节上限按 1c1t / 1GB 小鸡收敛。机器有 4GB 以上内存且搜索命中率偏低时可改 `standard` 换取更高命中率。
+
+弹幕需要后台「站点配置 → 播放器弹幕」开启，并配置 `DANMAKU_API_BASE_URL` 指向自建的 [danmu_api](https://github.com/huangxd-/danmu_api) 服务（地址含 token 路径段，形如 `http://host:9321/yourtoken`）。该服务抓取各视频平台弹幕，务必自建而非指向他人公开实例。弹幕时间轴基于上游片源，与本站源站剪辑不一致时用播放器设置里的偏移调节对齐，偏移量按「源站+视频+集」独立记忆。
 
 `UPSTREAM_SEARCH_CONCURRENCY` 是所有请求共享的上游搜索并发闸门。单次搜索内部并发不受影响，多人同时搜索不同关键词时上游请求排队而不是成倍叠加。该闸门也可在后台「运行参数」调整，优先级为后台配置（非 0）> 环境变量 > 档位默认值。
 

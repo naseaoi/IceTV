@@ -15,6 +15,7 @@ const baseConfig: AdminConfig = {
     DefaultAggregateSearch: true,
     EnableOptimization: true,
     LiveDirectConnect: false,
+    EnableDanmaku: false,
     ...DEFAULT_RUNTIME_PARAMS,
     SourceCoverProxyMode: 'auto',
     SearchDownstreamMaxPage: 5,

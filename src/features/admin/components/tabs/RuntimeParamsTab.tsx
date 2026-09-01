@@ -71,6 +71,12 @@ const runtimeParamGroups: RuntimeParamGroup[] = [
         unit: '秒',
       },
       { key: 'ContinueWatchingLimit', label: '继续观看首页显示', unit: '条' },
+      {
+        key: 'DanmakuEpisodeLimit',
+        label: '单集弹幕条数上限',
+        unit: '条',
+        hint: '超出后按时间抽稀',
+      },
     ],
   },
   {

@@ -40,6 +40,8 @@ export interface AdminConfig {
     DoubanImageProxy: string;
     DisableYellowFilter: boolean;
     FluidSearch: boolean;
+    EnableDanmaku: boolean;
+    DanmakuEpisodeLimit: number;
   };
   UserConfig: {
     Users: {

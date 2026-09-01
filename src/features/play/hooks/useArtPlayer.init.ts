@@ -12,6 +12,11 @@ import {
   shouldAutoAdvanceEpisode,
 } from '@/features/play/lib/autoAdvanceEpisode';
 import {
+  createDanmakuPluginIfEnabled,
+  reloadDanmaku,
+} from '@/features/play/lib/danmaku/attach';
+import { createDanmakuSettings } from '@/features/play/lib/danmaku/settings';
+import {
   type PlayerLoadingSessionState,
   hasReachedResumeTarget,
   markPlayerLoadingSessionStarted,
@@ -132,6 +137,12 @@ export async function initializeArtPlayer(
       id: detailRef.current?.id || detail?.id || '',
       videoUrl,
     };
+    const danmakuContext = {
+      source: playbackInfoContext.source,
+      videoId: playbackInfoContext.id,
+      episodeIndex: currentEpisodeIndex,
+      searchTitle: detailRef.current?.title || detail?.title || videoTitle,
+    };
     const preUseProxy = isServerProxy(preSourceKey, videoUrl);
     const buildProxyUrl = (rawUrl: string) =>
       buildVodProxyUrl({
@@ -215,6 +226,7 @@ export async function initializeArtPlayer(
       if (reusedPlayer.video) {
         ensureVideoSource(reusedPlayer.video as HTMLVideoElement, playbackUrl);
       }
+      void reloadDanmaku(reusedPlayer, danmakuContext);
       return;
     }
 
@@ -254,6 +266,11 @@ export async function initializeArtPlayer(
     configureArtplayerStatics(Artplayer);
     Artplayer.PLAYBACK_RATE = [0.5, 0.75, 1, 1.25, 1.5, 2, 3];
 
+    const danmakuPlugin = await createDanmakuPluginIfEnabled(danmakuContext);
+    if (isCancelled() || !artRef.current) {
+      return;
+    }
+
     artPlayerRef.current = new Artplayer({
       container: artRef.current,
       url: playbackUrl,
@@ -269,22 +286,26 @@ export async function initializeArtPlayer(
       customType: {
         m3u8: m3u8Loader,
       },
-      settings: createArtPlayerSettings({
-        artPlayerRef,
-        blockAdEnabled,
-        autoPlayNextEnabled,
-        autoPlayNextEnabledRef,
-        skipConfigRef,
-        resumeTimeRef,
-        resumeModeRef,
-        setBlockAdEnabled,
-        setAutoPlayNextEnabled,
-        handleSkipConfigChange,
-      }),
+      settings: [
+        ...createArtPlayerSettings({
+          artPlayerRef,
+          blockAdEnabled,
+          autoPlayNextEnabled,
+          autoPlayNextEnabledRef,
+          skipConfigRef,
+          resumeTimeRef,
+          resumeModeRef,
+          setBlockAdEnabled,
+          setAutoPlayNextEnabled,
+          handleSkipConfigChange,
+        }),
+        ...createDanmakuSettings(() => artPlayerRef.current, danmakuContext),
+      ],
       controls: createArtPlayerControls({
         handleNextEpisode,
       }),
       contextmenu: createArtPlayerContextmenus(),
+      ...(danmakuPlugin ? { plugins: [danmakuPlugin] } : {}),
     });
 
     const player = artPlayerRef.current;

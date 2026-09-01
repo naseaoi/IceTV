@@ -1,5 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server';
 
+import {
+  getDanmakuCommentsCacheStats,
+  getDanmakuSearchCacheStats,
+} from '@/app/api/danmaku/cache';
 import { getDoubanRouteCacheStats } from '@/app/api/douban/cache';
 import { getDoubanRecommendsCacheStats } from '@/app/api/douban/recommends/cache';
 import { getEpisodeUrlCacheStats } from '@/app/api/episode-url/cache';
@@ -49,6 +53,8 @@ export async function GET(request: NextRequest) {
     withHitRate('douban-route', getDoubanRouteCacheStats()),
     withHitRate('douban-recommends', getDoubanRecommendsCacheStats()),
     withHitRate('episode-url', getEpisodeUrlCacheStats()),
+    withHitRate('danmaku-comments', getDanmakuCommentsCacheStats()),
+    withHitRate('danmaku-search', getDanmakuSearchCacheStats()),
   ];
 
   return NextResponse.json(

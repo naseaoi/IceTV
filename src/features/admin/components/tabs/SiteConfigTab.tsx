@@ -43,6 +43,7 @@ const DEFAULT_SITE_SETTINGS: SiteConfig = {
   DefaultAggregateSearch: true,
   EnableOptimization: true,
   LiveDirectConnect: false,
+  EnableDanmaku: false,
   ...DEFAULT_RUNTIME_PARAMS,
   DoubanProxyType: 'direct',
   DoubanProxy: '',
@@ -65,6 +66,7 @@ type EditableSiteSettings = Pick<
   | 'DefaultAggregateSearch'
   | 'EnableOptimization'
   | 'LiveDirectConnect'
+  | 'EnableDanmaku'
   | 'DoubanProxyType'
   | 'BangumiDataSource'
   | 'DoubanImageProxyType'
@@ -95,6 +97,7 @@ function buildSiteSettings(config: AdminConfig): SiteConfig {
     DefaultAggregateSearch: config.SiteConfig.DefaultAggregateSearch ?? true,
     EnableOptimization: config.SiteConfig.EnableOptimization ?? true,
     LiveDirectConnect: config.SiteConfig.LiveDirectConnect ?? false,
+    EnableDanmaku: config.SiteConfig.EnableDanmaku ?? false,
     DisableYellowFilter: config.SiteConfig.DisableYellowFilter ?? false,
     FluidSearch: config.SiteConfig.FluidSearch ?? true,
   };
@@ -112,6 +115,7 @@ function normalizeEditableSiteSettings(
     DefaultAggregateSearch: value.DefaultAggregateSearch ?? true,
     EnableOptimization: value.EnableOptimization ?? true,
     LiveDirectConnect: value.LiveDirectConnect ?? false,
+    EnableDanmaku: value.EnableDanmaku ?? false,
     DoubanProxyType: normalizeSiteDoubanProxyType(value.DoubanProxyType),
     BangumiDataSource: normalizeSiteBangumiDataSource(value.BangumiDataSource),
     DoubanImageProxyType: normalizeSiteDoubanImageProxyType(
@@ -669,6 +673,39 @@ const SiteConfigComponent = ({
                 siteSettings.DisableYellowFilter
                   ? 'translate-x-5'
                   : 'translate-x-0.5'
+              }`}
+            />
+          </button>
+        </div>
+
+        <div className='flex min-h-[96px] items-center justify-between gap-4 rounded-lg border border-gray-200 bg-gray-50 p-4 dark:border-gray-700 dark:bg-gray-800/55'>
+          <div>
+            <p className='text-sm font-medium text-gray-900 dark:text-gray-100'>
+              播放器弹幕
+            </p>
+            <p className='mt-1 text-xs text-gray-500 dark:text-gray-400'>
+              需同时配置 DANMAKU_API_BASE_URL 环境变量指向自建弹幕服务。
+            </p>
+          </div>
+          <button
+            type='button'
+            onClick={() =>
+              setSiteSettings((prev) => ({
+                ...prev,
+                EnableDanmaku: !prev.EnableDanmaku,
+              }))
+            }
+            className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
+              siteSettings.EnableDanmaku
+                ? 'bg-green-500'
+                : 'bg-gray-300 dark:bg-gray-600'
+            }`}
+            aria-label='切换播放器弹幕'
+            aria-pressed={siteSettings.EnableDanmaku}
+          >
+            <span
+              className={`inline-block h-5 w-5 transform rounded-full bg-white transition-transform ${
+                siteSettings.EnableDanmaku ? 'translate-x-5' : 'translate-x-0.5'
               }`}
             />
           </button>

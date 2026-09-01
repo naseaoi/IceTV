@@ -48,6 +48,9 @@ importers:
       artplayer:
         specifier: ^5.2.5
         version: 5.2.5
+      artplayer-plugin-danmuku:
+        specifier: ^5.3.0
+        version: 5.3.0
       bcrypt:
         specifier: ^6.0.0
         version: 6.0.0
@@ -1404,6 +1407,9 @@ packages:
   arrify@1.0.1:
     resolution: {integrity: sha512-3CYzex9M9FGQjCGMGyi6/31c8GJbgb0qGyrx5HWxPd0aCwh4cB2YjMb2Xf9UuoogrMrlO9cTqnB5rI5GHZTcUA==}
     engines: {node: '>=0.10.0'}
+
+  artplayer-plugin-danmuku@5.3.0:
+    resolution: {integrity: sha512-a76bU1cWEZr53hD1X8IHfOzS4QawGHn8dQ3fIYyJ5TsyhTSnznhi2WzkS8M7LL3H02ekXRZTUFan9+9EERk12g==}
 
   artplayer@5.2.5:
     resolution: {integrity: sha512-Ogym5rvkAJ4VLncM4Apl3TJ/a/ozM3csvY4IKuuMR++hUmEZgj/HaGsNonwx8r56nsqiZYE7O4vS1HFZl+NBSg==}
@@ -5537,6 +5543,8 @@ snapshots:
       is-array-buffer: 3.0.5
 
   arrify@1.0.1: {}
+
+  artplayer-plugin-danmuku@5.3.0: {}
 
   artplayer@5.2.5:
     dependencies:

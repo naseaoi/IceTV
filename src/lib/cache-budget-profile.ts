@@ -11,7 +11,9 @@ export type ServerCacheName =
   | 'proxy-m3u8-rewrite'
   | 'douban-route'
   | 'douban-recommends'
-  | 'episode-url';
+  | 'episode-url'
+  | 'danmaku-comments'
+  | 'danmaku-search';
 
 export interface ServerCacheBudget {
   maxSize: number;
@@ -31,6 +33,8 @@ const SMALL_PROFILE: Record<ServerCacheName, ServerCacheBudget> = {
   'douban-route': { maxSize: 300, maxWeightBytes: 6 * MB },
   'douban-recommends': { maxSize: 300, maxWeightBytes: 6 * MB },
   'episode-url': { maxSize: 2000, maxWeightBytes: 4 * MB },
+  'danmaku-comments': { maxSize: 40, maxWeightBytes: 12 * MB },
+  'danmaku-search': { maxSize: 200, maxWeightBytes: 2 * MB },
 };
 
 const STANDARD_PROFILE: Record<ServerCacheName, ServerCacheBudget> = {
@@ -44,6 +48,8 @@ const STANDARD_PROFILE: Record<ServerCacheName, ServerCacheBudget> = {
   'douban-route': { maxSize: 500, maxWeightBytes: 16 * MB },
   'douban-recommends': { maxSize: 500, maxWeightBytes: 16 * MB },
   'episode-url': { maxSize: 5000, maxWeightBytes: 8 * MB },
+  'danmaku-comments': { maxSize: 120, maxWeightBytes: 40 * MB },
+  'danmaku-search': { maxSize: 500, maxWeightBytes: 6 * MB },
 };
 
 const PROFILES: Record<

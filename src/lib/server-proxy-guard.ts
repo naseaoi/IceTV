@@ -9,6 +9,7 @@ export type ServerProxyKind =
   | 'douban-data'
   | 'douban-image'
   | 'bangumi-data'
+  | 'danmaku'
   | 'vod-segment'
   | 'vod-m3u8';
 
@@ -33,6 +34,8 @@ const RATE_LIMITS: Record<ServerProxyKind, RateLimitConfig> = {
   'douban-data': { maxRequests: 120, windowMs: 60_000 },
   'douban-image': { maxRequests: 480, windowMs: 60_000 },
   'bangumi-data': { maxRequests: 60, windowMs: 60_000 },
+  // 上游 comment 接口限流严格，本站缓存兜底后按换集频率留量
+  danmaku: { maxRequests: 30, windowMs: 60_000 },
   // 分片与清单按正常播放的数倍留量，只拦异常循环与外部盗链
   'vod-segment': { maxRequests: 1200, windowMs: 60_000 },
   'vod-m3u8': { maxRequests: 240, windowMs: 60_000 },

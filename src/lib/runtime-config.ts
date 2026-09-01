@@ -18,6 +18,7 @@ export interface RuntimeConfig {
   DEFAULT_AGGREGATE_SEARCH: boolean;
   ENABLE_OPTIMIZATION: boolean;
   LIVE_DIRECT_CONNECT: boolean;
+  ENABLE_DANMAKU: boolean;
   CUSTOM_CATEGORIES: { name: string; type: 'movie' | 'tv'; query: string }[];
   FLUID_SEARCH: boolean;
   VOD_PAGE_TIMEOUT_SECONDS: number;
@@ -47,6 +48,7 @@ export const DEFAULT_RUNTIME_CONFIG: RuntimeConfig = {
   DEFAULT_AGGREGATE_SEARCH: true,
   ENABLE_OPTIMIZATION: true,
   LIVE_DIRECT_CONNECT: false,
+  ENABLE_DANMAKU: false,
   CUSTOM_CATEGORIES: [],
   FLUID_SEARCH: true,
   VOD_PAGE_TIMEOUT_SECONDS: 15,
@@ -87,6 +89,7 @@ export type ServerConfigPayload = {
   DefaultAggregateSearch?: boolean;
   EnableOptimization?: boolean;
   LiveDirectConnect?: boolean;
+  EnableDanmaku?: boolean;
   CustomCategories?: RuntimeConfig['CUSTOM_CATEGORIES'];
   FluidSearch?: boolean;
   VodPageTimeoutSeconds?: number;
@@ -159,6 +162,10 @@ function runtimeConfigFromServerConfig(
       data.LiveDirectConnect === undefined
         ? DEFAULT_RUNTIME_CONFIG.LIVE_DIRECT_CONNECT
         : data.LiveDirectConnect,
+    ENABLE_DANMAKU:
+      data.EnableDanmaku === undefined
+        ? DEFAULT_RUNTIME_CONFIG.ENABLE_DANMAKU
+        : data.EnableDanmaku,
     CUSTOM_CATEGORIES:
       data.CustomCategories || DEFAULT_RUNTIME_CONFIG.CUSTOM_CATEGORIES,
     FLUID_SEARCH:

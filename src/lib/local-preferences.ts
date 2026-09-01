@@ -16,6 +16,11 @@ export const CONTINUE_WATCHING_COUNT_STORAGE_KEY = 'continueWatchingCount';
 export const FAVORITE_ITEMS_COUNT_STORAGE_KEY = 'favoriteItemsCount';
 export const NOTIFIED_MESSAGE_REVISION_STORAGE_PREFIX =
   'notifiedMessageRevision:';
+export const DANMAKU_ENABLED_STORAGE_KEY = 'danmakuEnabled';
+export const DANMAKU_OPACITY_STORAGE_KEY = 'danmakuOpacity';
+export const DANMAKU_FONT_SIZE_STORAGE_KEY = 'danmakuFontSize';
+export const DANMAKU_OFFSET_STORAGE_PREFIX = 'danmakuOffset:';
+export const DANMAKU_EPISODE_MAP_STORAGE_PREFIX = 'danmakuEpisode:';
 
 type AdminTableColumnWidths = Record<string, Record<string, number>>;
 
@@ -446,4 +451,113 @@ export function writeSourcePreferredQualityHeight(
     return;
   }
   writeStoredString(storageKey, height && height > 0 ? String(height) : 'auto');
+}
+
+export const DANMAKU_OPACITY_RANGE = { min: 0.1, max: 1 };
+export const DANMAKU_FONT_SIZE_RANGE = { min: 14, max: 40 };
+export const DANMAKU_OFFSET_RANGE = { min: -600, max: 600 };
+
+const DANMAKU_SCOPE_PATTERN = /^[a-zA-Z0-9_.-]{1,96}$/;
+
+export function readDanmakuEnabled(): boolean {
+  return readStoredBoolean(DANMAKU_ENABLED_STORAGE_KEY) ?? false;
+}
+
+export function writeDanmakuEnabled(value: boolean): void {
+  writeStoredBoolean(DANMAKU_ENABLED_STORAGE_KEY, value);
+}
+
+function clamp(value: number, min: number, max: number): number {
+  return Math.min(Math.max(value, min), max);
+}
+
+export function readDanmakuOpacity(): number {
+  const raw = Number.parseFloat(
+    readStoredString(DANMAKU_OPACITY_STORAGE_KEY) || '',
+  );
+  if (!Number.isFinite(raw)) return 1;
+  return clamp(raw, DANMAKU_OPACITY_RANGE.min, DANMAKU_OPACITY_RANGE.max);
+}
+
+export function writeDanmakuOpacity(value: number): void {
+  const next = Number.isFinite(value)
+    ? clamp(value, DANMAKU_OPACITY_RANGE.min, DANMAKU_OPACITY_RANGE.max)
+    : 1;
+  writeStoredString(DANMAKU_OPACITY_STORAGE_KEY, String(next));
+}
+
+export function readDanmakuFontSize(): number {
+  const raw = Number.parseInt(
+    readStoredString(DANMAKU_FONT_SIZE_STORAGE_KEY) || '',
+    10,
+  );
+  if (!Number.isFinite(raw)) return 25;
+  return clamp(raw, DANMAKU_FONT_SIZE_RANGE.min, DANMAKU_FONT_SIZE_RANGE.max);
+}
+
+export function writeDanmakuFontSize(value: number): void {
+  const next = Number.isFinite(value)
+    ? clamp(
+        Math.floor(value),
+        DANMAKU_FONT_SIZE_RANGE.min,
+        DANMAKU_FONT_SIZE_RANGE.max,
+      )
+    : 25;
+  writeStoredString(DANMAKU_FONT_SIZE_STORAGE_KEY, String(next));
+}
+
+// 偏移与弹幕库映射按 源站:视频ID:集索引 维度隔离，换源后各自独立
+export function buildDanmakuScopeKey(
+  source: string,
+  videoId: string,
+  episodeIndex: number,
+): string | null {
+  const normalizedSource = source.trim();
+  const normalizedId = videoId.trim();
+  if (
+    !DANMAKU_SCOPE_PATTERN.test(normalizedSource) ||
+    !DANMAKU_SCOPE_PATTERN.test(normalizedId) ||
+    !Number.isInteger(episodeIndex) ||
+    episodeIndex < 0
+  ) {
+    return null;
+  }
+  return `${normalizedSource}:${normalizedId}:${episodeIndex}`;
+}
+
+export function readDanmakuOffset(scopeKey: string): number {
+  const raw = Number.parseFloat(
+    readStoredString(`${DANMAKU_OFFSET_STORAGE_PREFIX}${scopeKey}`) || '',
+  );
+  if (!Number.isFinite(raw)) return 0;
+  return clamp(raw, DANMAKU_OFFSET_RANGE.min, DANMAKU_OFFSET_RANGE.max);
+}
+
+export function writeDanmakuOffset(scopeKey: string, value: number): void {
+  const next = Number.isFinite(value)
+    ? clamp(value, DANMAKU_OFFSET_RANGE.min, DANMAKU_OFFSET_RANGE.max)
+    : 0;
+  writeStoredString(
+    `${DANMAKU_OFFSET_STORAGE_PREFIX}${scopeKey}`,
+    String(next),
+  );
+}
+
+export function readDanmakuEpisodeId(scopeKey: string): number | null {
+  const raw = Number.parseInt(
+    readStoredString(`${DANMAKU_EPISODE_MAP_STORAGE_PREFIX}${scopeKey}`) || '',
+    10,
+  );
+  return Number.isSafeInteger(raw) && raw > 0 ? raw : null;
+}
+
+export function writeDanmakuEpisodeId(
+  scopeKey: string,
+  episodeId: number,
+): void {
+  if (!Number.isSafeInteger(episodeId) || episodeId <= 0) return;
+  writeStoredString(
+    `${DANMAKU_EPISODE_MAP_STORAGE_PREFIX}${scopeKey}`,
+    String(episodeId),
+  );
 }

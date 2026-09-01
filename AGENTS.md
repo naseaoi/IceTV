@@ -96,6 +96,14 @@ src/
 - 画质 `vodHlsQualityController.ts`、`vodQualityPolicy.ts`
 - 快捷键：定义 `src/lib/player-shortcuts.ts` → 执行 `src/hooks/usePlayerKeyboard.ts` → 弹窗 `src/components/PlayerShortcutsModal.tsx`。新增动作依次补齐三处，不要在页面单独监听 keydown
 
+弹幕（`src/features/play/lib/danmaku/`）：
+
+- 模式值两边不同：dandanplay `1/2/3` 滚动、`5` 顶部、`4` 底部；artplayer 插件 `0` 滚动、`1` 顶部、`2` 底部。颜色上游是十进制整数，插件要 CSS 字符串。**直接透传会让顶部/底部弹幕静默错位**，一律走 `normalize.ts`
+- `p` 字段 4 段时颜色在第 3 位，8/9 段时在第 4 位，取错只是颜色不对不会报错
+- 换集时播放器可能**复用实例**（非 webkit + 前后都是 hls），此时插件不会自行重新调用加载器，必须显式 `reloadDanmaku()`。去广告开关会 `destroy()` 重建，走的是另一条路
+- 加载器在本地开关关闭时返回空数组以免白跑请求，所以**开关打开时必须触发一次 `reloadDanmaku()`**，只调 `api.show()` 显示的是空数据
+- `provider.server.ts` 故意不用 `fetchWithUrlGuard()`：base URL 来自环境变量属可信输入，而 guard 会拦私有 IP，套上会逼站长把自建弹幕服务暴露到公网。用户输入只经 `searchParams` 进 query
+
 去广告：
 
 - 策略注册 `ad-filter-strategy-registry.ts`，清单重建 `ad-filter-manifest.ts`，服务端检测 `ad-segment-detector.ts`
