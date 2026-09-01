@@ -1,8 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 
+import { doubanRouteCache } from '@/app/api/douban/cache';
 import { isGuardFailure, requireActiveUser } from '@/lib/api-auth';
 import { createPublicApiCacheHeaders } from '@/lib/api-cache-headers';
-import { getServerCacheBudget } from '@/lib/cache-budget-profile';
 import { getCacheTime } from '@/lib/config';
 import { fetchDoubanData } from '@/lib/douban';
 import {
@@ -10,7 +10,6 @@ import {
   normalizeDoubanListSubjects,
 } from '@/lib/douban-normalize';
 import { createTimedAbortController } from '@/lib/downstream-sources/shared';
-import { createSwrCache } from '@/lib/server-cache';
 import {
   recordServerProxyFailure,
   requireServerProxyQuota,
@@ -18,13 +17,6 @@ import {
 import { DoubanItem, DoubanResult } from '@/lib/types';
 
 export const runtime = 'nodejs';
-
-const doubanRouteCache = createSwrCache<DoubanResult>({
-  name: 'douban-route',
-  freshMs: 30 * 60 * 1000,
-  staleMs: 30 * 60 * 1000,
-  ...getServerCacheBudget('douban-route'),
-});
 
 export async function GET(request: NextRequest) {
   const guardResult = await requireActiveUser(request, {

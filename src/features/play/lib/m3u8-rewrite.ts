@@ -328,3 +328,7 @@ function createUriAttributePattern(attributeName: string): RegExp {
   const escapedName = attributeName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
   return new RegExp(`([:,]\\s*${escapedName}=")([^"]+)(")`);
 }
+
+export function getM3U8RewriteCacheStats() {
+  return m3u8RewriteCache.stats();
+}

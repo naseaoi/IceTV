@@ -348,3 +348,7 @@ function assertM3U8Content(
     message: `Unexpected m3u8 content type: ${contentType || 'empty'}`,
   });
 }
+
+export function getM3U8CacheStats() {
+  return m3u8Cache.stats();
+}

@@ -1,29 +1,19 @@
 import { NextRequest, NextResponse } from 'next/server';
 
+import { recommendsCache } from '@/app/api/douban/recommends/cache';
 import { isGuardFailure, requireActiveUser } from '@/lib/api-auth';
 import { createPublicApiCacheHeaders } from '@/lib/api-cache-headers';
-import { getServerCacheBudget } from '@/lib/cache-budget-profile';
 import { getCacheTime } from '@/lib/config';
 import { fetchDoubanData } from '@/lib/douban';
 import {
   DoubanRecommendApiResponse,
   normalizeDoubanRecommendItems,
 } from '@/lib/douban-normalize';
-import { createSwrCache } from '@/lib/server-cache';
 import {
   recordServerProxyFailure,
   requireServerProxyQuota,
 } from '@/lib/server-proxy-guard';
 import { DoubanResult } from '@/lib/types';
-
-// 进程内 SWR 缓存：同参数请求合并回源 + 软过期后台刷新
-// 豆瓣推荐变化缓慢，新鲜 30 分钟、软过期再 30 分钟内返回旧值
-const recommendsCache = createSwrCache<DoubanResult>({
-  name: 'douban-recommends',
-  freshMs: 30 * 60 * 1000,
-  staleMs: 30 * 60 * 1000,
-  ...getServerCacheBudget('douban-recommends'),
-});
 
 export const runtime = 'nodejs';
 

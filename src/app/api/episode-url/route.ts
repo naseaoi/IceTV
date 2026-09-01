@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 
+import { episodeUrlCache } from '@/app/api/episode-url/cache';
 import { isGuardFailure, requireActiveUser } from '@/lib/api-auth';
-import { getServerCacheBudget } from '@/lib/cache-budget-profile';
 import type { ApiSite } from '@/lib/config';
 import { getAvailableApiSites, getConfigForRead } from '@/lib/config';
 import {
@@ -13,17 +13,9 @@ import {
   resolveXgcartoonEpisodeUrlByPath,
 } from '@/lib/downstream-sources/xgcartoon';
 import { parseLazyEpisodeUrl } from '@/lib/lazy-episodes';
-import { createSwrCache } from '@/lib/server-cache';
 
 export const runtime = 'nodejs';
 const IS_DEVELOPMENT = process.env.NODE_ENV !== 'production';
-
-const episodeUrlCache = createSwrCache<string>({
-  name: 'episode-url',
-  freshMs: 30 * 60 * 1000,
-  staleMs: 2 * 60 * 60 * 1000,
-  ...getServerCacheBudget('episode-url'),
-});
 
 function matchesLazyKind(kind: string, apiSite: ApiSite): boolean {
   if (kind === 'giri') return isGirigiriSource(apiSite);
