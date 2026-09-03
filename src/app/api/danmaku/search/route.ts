@@ -18,7 +18,7 @@ export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
 const MAX_KEYWORD_LENGTH = 80;
-const MAX_CANDIDATES = 60;
+const MAX_CANDIDATES = 240;
 
 export async function GET(request: NextRequest) {
   const guardResult = await requireActiveUser(request);
