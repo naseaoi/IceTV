@@ -1,4 +1,4 @@
-import { ArrowLeftRight, Heart, LayoutGrid } from 'lucide-react';
+import { ArrowLeftRight, Heart, LayoutGrid, MessageSquare } from 'lucide-react';
 import dynamic from 'next/dynamic';
 import React, { useMemo, useState } from 'react';
 
@@ -153,6 +153,13 @@ const SourcesTab = dynamic(
     ),
   { loading: EpisodeTabLoading },
 );
+const DanmakuTab = dynamic(
+  () =>
+    import('@/features/play/components/EpisodeSelector/DanmakuTab').then(
+      (mod) => mod.DanmakuTab,
+    ),
+  { loading: EpisodeTabLoading },
+);
 
 interface VideoInfo {
   quality: string;
@@ -185,10 +192,12 @@ interface EpisodeSelectorProps {
   videoDoubanId?: number;
   onSourceDetailFetched?: (updated: SearchResult) => void;
   onAddSources?: (newSources: SearchResult[]) => void;
+  onDanmakuReload?: () => void;
+  onDanmakuHeatmapChange?: (enabled: boolean) => void;
 }
 
-type MobileSheetKey = 'episodes' | 'sources';
-type DesktopTabKey = 'main' | 'sources';
+type MobileSheetKey = 'episodes' | 'sources' | 'danmaku';
+type DesktopTabKey = 'main' | 'sources' | 'danmaku';
 
 const MOBILE_EPISODE_STRIP_SIZE = 12;
 
@@ -216,6 +225,8 @@ const EpisodeSelector: React.FC<EpisodeSelectorProps> = ({
   videoDoubanId = 0,
   onSourceDetailFetched,
   onAddSources,
+  onDanmakuReload,
+  onDanmakuHeatmapChange,
 }) => {
   const variantSources = useMemo(() => {
     if (!detail) {
@@ -267,6 +278,7 @@ const EpisodeSelector: React.FC<EpisodeSelectorProps> = ({
   const desktopTabs: { key: DesktopTabKey; label: string }[] = [
     { key: 'main', label: '详情' },
     { key: 'sources', label: '换源' },
+    { key: 'danmaku', label: '弹幕' },
   ];
 
   const renderEpisodesTab = (afterSelect?: () => void) => (
@@ -334,6 +346,17 @@ const EpisodeSelector: React.FC<EpisodeSelectorProps> = ({
     </div>
   );
 
+  const renderDanmakuTab = () => (
+    <DanmakuTab
+      source={currentSource ?? ''}
+      videoId={currentId ?? ''}
+      episodeIndex={Math.max(0, value - 1)}
+      searchTitle={detail?.title || videoTitle || ''}
+      onReload={onDanmakuReload}
+      onHeatmapChange={onDanmakuHeatmapChange}
+    />
+  );
+
   const mobileActionButtonClass =
     'flex h-9 items-center gap-1 rounded-full border border-gray-200 bg-white px-3 text-xs text-gray-700 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-200';
 
@@ -376,6 +399,14 @@ const EpisodeSelector: React.FC<EpisodeSelectorProps> = ({
             >
               <ArrowLeftRight className='h-3.5 w-3.5' />
               换源
+            </button>
+            <button
+              type='button'
+              className={mobileActionButtonClass}
+              onClick={() => setMobileSheet('danmaku')}
+            >
+              <MessageSquare className='h-3.5 w-3.5' />
+              弹幕
             </button>
           </div>
           <span className='ml-auto min-w-0 truncate text-right text-sm text-gray-600 dark:text-gray-300'>
@@ -438,6 +469,16 @@ const EpisodeSelector: React.FC<EpisodeSelectorProps> = ({
             {renderSourcesTab(() => setMobileSheet(null))}
           </div>
         </MobileSheet>
+
+        <MobileSheet
+          open={mobileSheet === 'danmaku'}
+          title='弹幕'
+          onClose={() => setMobileSheet(null)}
+        >
+          <div className='flex h-[60dvh] flex-col overflow-hidden'>
+            {renderDanmakuTab()}
+          </div>
+        </MobileSheet>
       </div>
 
       <div className='hidden min-h-0 flex-1 flex-col md:flex'>
@@ -471,6 +512,7 @@ const EpisodeSelector: React.FC<EpisodeSelectorProps> = ({
               renderInfoTab('panel')
             ))}
           {desktopTab === 'sources' && renderSourcesTab()}
+          {desktopTab === 'danmaku' && renderDanmakuTab()}
         </PlayerPanelContent>
       </div>
     </div>

@@ -61,6 +61,8 @@ interface PlayMainContentProps {
   videoDoubanId: number;
   onSourceDetailFetched?: (updated: SearchResult) => void;
   onAddSources?: (newSources: SearchResult[]) => void;
+  onDanmakuReload?: () => void;
+  onDanmakuHeatmapChange?: (enabled: boolean) => void;
   onLoadingTimeout?: () => void;
   searchType?: string;
   playbackError?: string | null;
@@ -317,6 +319,8 @@ export function PlayMainContent(props: PlayMainContentProps) {
     videoDoubanId,
     onSourceDetailFetched,
     onAddSources,
+    onDanmakuReload,
+    onDanmakuHeatmapChange,
     onLoadingTimeout,
     searchType,
     realtimeLoadSpeed,
@@ -473,6 +477,8 @@ export function PlayMainContent(props: PlayMainContentProps) {
           videoDoubanId={videoDoubanId}
           onSourceDetailFetched={onSourceDetailFetched}
           onAddSources={onAddSources}
+          onDanmakuReload={onDanmakuReload}
+          onDanmakuHeatmapChange={onDanmakuHeatmapChange}
         />
       }
     />

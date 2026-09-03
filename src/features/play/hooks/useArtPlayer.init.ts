@@ -12,10 +12,12 @@ import {
   shouldAutoAdvanceEpisode,
 } from '@/features/play/lib/autoAdvanceEpisode';
 import {
+  applyDanmakuHeatmapVisibility,
+  bindDanmakuSettingPersistence,
   createDanmakuPluginIfEnabled,
   reloadDanmaku,
 } from '@/features/play/lib/danmaku/attach';
-import { createDanmakuSettings } from '@/features/play/lib/danmaku/settings';
+import { bindDanmakuSliderDrag } from '@/features/play/lib/danmaku/slider-drag';
 import {
   type PlayerLoadingSessionState,
   hasReachedResumeTarget,
@@ -39,6 +41,7 @@ import {
   isVodM3u8Url,
   isVodMp4Url,
 } from '@/features/play/lib/vodProxyUrl';
+import { readDanmakuHeatmapEnabled } from '@/lib/local-preferences';
 import {
   bindPlayerHoverControls,
   bindPlayerMobileControls,
@@ -286,21 +289,18 @@ export async function initializeArtPlayer(
       customType: {
         m3u8: m3u8Loader,
       },
-      settings: [
-        ...createArtPlayerSettings({
-          artPlayerRef,
-          blockAdEnabled,
-          autoPlayNextEnabled,
-          autoPlayNextEnabledRef,
-          skipConfigRef,
-          resumeTimeRef,
-          resumeModeRef,
-          setBlockAdEnabled,
-          setAutoPlayNextEnabled,
-          handleSkipConfigChange,
-        }),
-        ...createDanmakuSettings(() => artPlayerRef.current, danmakuContext),
-      ],
+      settings: createArtPlayerSettings({
+        artPlayerRef,
+        blockAdEnabled,
+        autoPlayNextEnabled,
+        autoPlayNextEnabledRef,
+        skipConfigRef,
+        resumeTimeRef,
+        resumeModeRef,
+        setBlockAdEnabled,
+        setAutoPlayNextEnabled,
+        handleSkipConfigChange,
+      }),
       controls: createArtPlayerControls({
         handleNextEpisode,
       }),
@@ -694,8 +694,13 @@ export async function initializeArtPlayer(
       }
     };
 
+    const unbindDanmakuSliderDrag = bindDanmakuSliderDrag(player);
+    player.on('destroy', unbindDanmakuSliderDrag);
+    bindDanmakuSettingPersistence(player);
+
     player.on('ready', () => {
       setError(null);
+      applyDanmakuHeatmapVisibility(player, readDanmakuHeatmapEnabled());
       if (player.playing) {
         void requestWakeLock();
       }
@@ -910,6 +915,10 @@ export async function initializeArtPlayer(
     window.setTimeout(finishInitialLoadingIfMediaReady, 500);
   } catch (error) {
     console.error('创建播放器失败:', error);
+    // 初始化被取代时静默退出
+    if (isCancelled()) {
+      return;
+    }
     setError('播放器初始化失败');
   }
 }

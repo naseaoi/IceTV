@@ -19,6 +19,10 @@ import { usePlayProgress } from '@/features/play/hooks/usePlayProgress';
 import { useSkipConfig } from '@/features/play/hooks/useSkipConfig';
 import { useSourceSwitch } from '@/features/play/hooks/useSourceSwitch';
 import {
+  applyDanmakuHeatmapVisibility,
+  reloadDanmaku,
+} from '@/features/play/lib/danmaku/attach';
+import {
   peekResolvedLazyEpisodeUrl,
   prewarmLazyEpisodeUrl,
   resolveLazyEpisodeUrl,
@@ -496,6 +500,29 @@ function AuthenticatedPlayPageClient() {
     [setAvailableSources],
   );
 
+  const handleDanmakuReload = useCallback(() => {
+    void reloadDanmaku(artPlayerRef.current, {
+      source: currentSourceRef.current,
+      videoId: currentIdRef.current,
+      episodeIndex: currentEpisodeIndexRef.current,
+      searchTitle: detailRef.current?.title || videoTitleRef.current || '',
+    });
+  }, [
+    artPlayerRef,
+    currentSourceRef,
+    currentIdRef,
+    currentEpisodeIndexRef,
+    detailRef,
+    videoTitleRef,
+  ]);
+
+  const handleDanmakuHeatmapChange = useCallback(
+    (enabled: boolean) => {
+      applyDanmakuHeatmapVisibility(artPlayerRef.current, enabled);
+    },
+    [artPlayerRef],
+  );
+
   useArtPlayer({
     artRef,
     artPlayerRef,
@@ -651,6 +678,8 @@ function AuthenticatedPlayPageClient() {
       videoDoubanId={videoDoubanId}
       onSourceDetailFetched={handleSourceDetailFetched}
       onAddSources={handleAddSources}
+      onDanmakuReload={handleDanmakuReload}
+      onDanmakuHeatmapChange={handleDanmakuHeatmapChange}
       onLoadingTimeout={handleLoadingTimeout}
       searchType={searchType}
       playbackError={playbackError}
