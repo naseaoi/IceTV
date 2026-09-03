@@ -3,12 +3,12 @@ import {
   pickCandidateByEpisode,
   searchDanmakuCandidates,
 } from '@/features/play/lib/danmaku/client';
+import { getPersistedEpisodeId } from '@/features/play/lib/danmaku/episode-storage';
 import { applyOffset } from '@/features/play/lib/danmaku/plugin';
 import type { DanmakuItem } from '@/features/play/lib/danmaku/types';
 import {
   buildDanmakuScopeKey,
   readDanmakuEnabled,
-  readDanmakuEpisodeId,
   readDanmakuOffset,
   writeDanmakuEpisodeId,
 } from '@/lib/local-preferences';
@@ -21,11 +21,12 @@ export interface DanmakuLoadContext {
 }
 
 async function resolveEpisodeId(
-  scopeKey: string,
-  searchTitle: string,
+  source: string,
+  videoId: string,
   episodeIndex: number,
+  searchTitle: string,
 ): Promise<number | null> {
-  const stored = readDanmakuEpisodeId(scopeKey);
+  const stored = await getPersistedEpisodeId(source, videoId, episodeIndex);
   if (stored) return stored;
 
   if (!searchTitle) return null;
@@ -34,11 +35,13 @@ async function resolveEpisodeId(
   const picked = pickCandidateByEpisode(candidates, episodeIndex);
   if (!picked) return null;
 
-  writeDanmakuEpisodeId(scopeKey, picked.episodeId);
+  const scopeKey = buildDanmakuScopeKey(source, videoId, episodeIndex);
+  if (scopeKey) {
+    writeDanmakuEpisodeId(scopeKey, picked.episodeId);
+  }
   return picked.episodeId;
 }
 
-// 关闭状态下不发请求，开启时由设置项触发重载
 export async function loadDanmakuForEpisode(
   context: DanmakuLoadContext,
 ): Promise<DanmakuItem[]> {
@@ -53,9 +56,10 @@ export async function loadDanmakuForEpisode(
 
   try {
     const episodeId = await resolveEpisodeId(
-      scopeKey,
-      context.searchTitle,
+      context.source,
+      context.videoId,
       context.episodeIndex,
+      context.searchTitle,
     );
     if (!episodeId) return [];
 

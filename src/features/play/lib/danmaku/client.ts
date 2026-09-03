@@ -38,6 +38,51 @@ export async function fetchDanmakuComments(
   return Array.isArray(payload.items) ? payload.items : [];
 }
 
+export interface DanmakuSourceGroup {
+  animeTitle: string;
+  providerLabel: string | null;
+  displayTitle: string;
+  typeDescription?: string;
+  candidates: DanmakuMatchCandidate[];
+}
+
+// 源标题形如「凡人修仙传(2025)【国产剧】from youku」，尾部提供方单独作标签展示
+const PROVIDER_SUFFIX_PATTERN = /\s*from\s+(\S+)\s*$/i;
+
+export function splitSourceProvider(animeTitle: string): {
+  providerLabel: string | null;
+  displayTitle: string;
+} {
+  const matched = animeTitle.match(PROVIDER_SUFFIX_PATTERN);
+  if (!matched) return { providerLabel: null, displayTitle: animeTitle };
+
+  const displayTitle = animeTitle.replace(PROVIDER_SUFFIX_PATTERN, '').trim();
+  if (!displayTitle) return { providerLabel: null, displayTitle: animeTitle };
+
+  return { providerLabel: matched[1], displayTitle };
+}
+
+// 候选是多源轮转排列的，按源归并后每组内部恢复原始集顺序
+export function groupCandidatesBySource(
+  candidates: DanmakuMatchCandidate[],
+): DanmakuSourceGroup[] {
+  const groups = new Map<string, DanmakuSourceGroup>();
+  for (const candidate of candidates) {
+    const existing = groups.get(candidate.animeTitle);
+    if (existing) {
+      existing.candidates.push(candidate);
+      continue;
+    }
+    groups.set(candidate.animeTitle, {
+      animeTitle: candidate.animeTitle,
+      ...splitSourceProvider(candidate.animeTitle),
+      typeDescription: candidate.typeDescription,
+      candidates: [candidate],
+    });
+  }
+  return Array.from(groups.values());
+}
+
 export function extractEpisodeNumber(title: string): number | null {
   const ordinal = title.match(EPISODE_ORDINAL_PATTERN);
   if (ordinal) {
@@ -67,5 +112,10 @@ export function pickCandidateByEpisode(
   );
   if (byNumber) return byNumber;
 
-  return candidates[episodeIndex] ?? null;
+  // 在首个源内按位置兜底
+  const firstSource = candidates[0].animeTitle;
+  const sameSource = candidates.filter(
+    (candidate) => candidate.animeTitle === firstSource,
+  );
+  return sameSource[episodeIndex] ?? null;
 }

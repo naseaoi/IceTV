@@ -8,6 +8,9 @@ import {
   readDanmakuEnabled,
   readDanmakuFontSize,
   readDanmakuOpacity,
+  writeDanmakuEnabled,
+  writeDanmakuFontSize,
+  writeDanmakuOpacity,
 } from '@/lib/local-preferences';
 import { getRuntimeConfig } from '@/lib/runtime-config';
 
@@ -18,11 +21,31 @@ type DanmakuPluginApi = {
   reset: () => unknown;
   hide: () => unknown;
   show: () => unknown;
+  option?: { danmuku?: unknown };
+};
+
+type DanmakuConfigEvent = {
+  opacity?: unknown;
+  fontSize?: unknown;
+  visible?: unknown;
 };
 
 type PlayerWithPlugins = {
   plugins?: Record<string, unknown>;
+  controls?: Record<string, HTMLElement | undefined>;
+  on?: (event: never, handler: (...args: never[]) => unknown) => unknown;
 };
+
+type DanmakuEventBinder = (
+  event: string,
+  handler: (payload: DanmakuConfigEvent) => void,
+) => unknown;
+
+// Artplayer 的 on 依赖 this.e，摘出方法再调用会抛错，必须绑回播放器
+function bindPlayerEvent(player: PlayerWithPlugins): DanmakuEventBinder | null {
+  if (typeof player.on !== 'function') return null;
+  return player.on.bind(player) as unknown as DanmakuEventBinder;
+}
 
 export function isDanmakuFeatureEnabled(): boolean {
   return getRuntimeConfig()?.ENABLE_DANMAKU === true;
@@ -59,6 +82,7 @@ export async function createDanmakuPluginIfEnabled(
       opacity: readDanmakuOpacity(),
       fontSize: readDanmakuFontSize(),
       visible: readDanmakuEnabled(),
+      heatmap: true,
     });
   } catch (error) {
     console.warn('弹幕插件加载失败:', error);
@@ -66,17 +90,47 @@ export async function createDanmakuPluginIfEnabled(
   }
 }
 
-// 播放器复用与开关/偏移变更时插件都不会自行重新调用加载器，必须显式重载
+// 控制热力图显隐
+export function applyDanmakuHeatmapVisibility(
+  player: PlayerWithPlugins | null,
+  visible: boolean,
+): void {
+  const element = player?.controls?.heatmap;
+  if (!element?.style) return;
+  element.style.display = visible ? '' : 'none';
+}
+
+// 监听配置变更并持久化
+export function bindDanmakuSettingPersistence(
+  player: PlayerWithPlugins | null,
+): void {
+  if (!player) return;
+  const on = bindPlayerEvent(player);
+  if (!on) return;
+
+  on('artplayerPluginDanmuku:config', (option) => {
+    if (typeof option?.opacity === 'number')
+      writeDanmakuOpacity(option.opacity);
+    if (typeof option?.fontSize === 'number') {
+      writeDanmakuFontSize(option.fontSize);
+    }
+  });
+
+  on('artplayerPluginDanmuku:show', () => writeDanmakuEnabled(true));
+  on('artplayerPluginDanmuku:hide', () => writeDanmakuEnabled(false));
+}
+
+// load() 无参时清空旧弹幕，带参时追加；重载前需更新 option.danmuku
 export async function reloadDanmaku(
   player: PlayerWithPlugins | null,
   context: DanmakuLoadContext,
 ): Promise<void> {
   const api = getDanmakuPluginApi(player);
-  if (!api) return;
+  if (!api?.option) return;
 
   try {
-    api.reset();
-    await api.load(buildDanmakuLoader(context));
+    api.option.danmuku = buildDanmakuLoader(context);
+    await api.load();
   } catch (error) {
     console.warn('弹幕重载失败:', error);
   }

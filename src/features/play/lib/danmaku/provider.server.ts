@@ -132,15 +132,16 @@ export async function searchDanmakuCandidates(
     return [];
   }
 
-  const candidates: DanmakuMatchCandidate[] = [];
+  const grouped: DanmakuMatchCandidate[][] = [];
   for (const anime of payload.animes) {
     const animeTitle =
       typeof anime?.animeTitle === 'string' ? anime.animeTitle : '';
     const episodes = Array.isArray(anime?.episodes) ? anime.episodes : [];
+    const group: DanmakuMatchCandidate[] = [];
     for (const episode of episodes) {
       const episodeId = Number(episode?.episodeId);
       if (!Number.isSafeInteger(episodeId) || episodeId <= 0) continue;
-      candidates.push({
+      group.push({
         episodeId,
         animeTitle,
         episodeTitle:
@@ -151,8 +152,27 @@ export async function searchDanmakuCandidates(
             : undefined,
       });
     }
+    if (group.length > 0) grouped.push(group);
   }
-  return candidates;
+
+  return interleaveBySource(grouped);
+}
+
+// 按源轮转展开候选列表
+function interleaveBySource(
+  grouped: DanmakuMatchCandidate[][],
+): DanmakuMatchCandidate[] {
+  const longest = grouped.reduce(
+    (max, group) => Math.max(max, group.length),
+    0,
+  );
+  const result: DanmakuMatchCandidate[] = [];
+  for (let index = 0; index < longest; index += 1) {
+    for (const group of grouped) {
+      if (index < group.length) result.push(group[index]);
+    }
+  }
+  return result;
 }
 
 type CommentResponse = { comments?: unknown };
