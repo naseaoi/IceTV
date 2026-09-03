@@ -280,6 +280,18 @@ export interface IStorage {
   getSourceRouteStats(sinceDate: string): Promise<SourceRouteStatsItem[]>;
   getAllSourceRouteStatBuckets(): Promise<SourceRouteStatsBucket[]>;
 
+  // 弹幕集映射相关
+  getDanmakuEpisodeId(
+    userName: string,
+    scopeKey: string,
+  ): Promise<number | null>;
+  setDanmakuEpisodeId(
+    userName: string,
+    scopeKey: string,
+    episodeId: number,
+  ): Promise<void>;
+  deleteDanmakuEpisodeId(userName: string, scopeKey: string): Promise<void>;
+
   // 数据清理相关
   clearAllData(): Promise<void>;
   replaceAllData(data: StorageImportData): Promise<void>;

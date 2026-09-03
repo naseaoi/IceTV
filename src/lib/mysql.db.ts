@@ -381,6 +381,13 @@ export class MySqlStorage implements IStorage {
         PRIMARY KEY (source, route_mode, bucket_date),
         KEY idx_source_route_stats_bucket (bucket_date)
       ) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci`,
+      `CREATE TABLE IF NOT EXISTS user_danmaku_episodes (
+        username VARCHAR(191) NOT NULL,
+        scope_key VARCHAR(255) NOT NULL,
+        episode_id INT NOT NULL,
+        updated_at BIGINT NOT NULL,
+        PRIMARY KEY (username, scope_key)
+      ) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci`,
     ];
 
     for (const statement of statements) {
@@ -789,6 +796,10 @@ export class MySqlStorage implements IStorage {
         'DELETE FROM user_login_activity WHERE username = ?',
         [username],
       );
+      await connection.execute(
+        'DELETE FROM user_danmaku_episodes WHERE username = ?',
+        [username],
+      );
     });
   }
 
@@ -1072,6 +1083,44 @@ export class MySqlStorage implements IStorage {
     }
 
     return result;
+  }
+
+  async getDanmakuEpisodeId(
+    userName: string,
+    scopeKey: string,
+  ): Promise<number | null> {
+    await this.ensureInitialized();
+    const username = normalizeUsername(userName);
+    const [rows] = await this.pool.query<RowDataPacket[]>(
+      'SELECT episode_id FROM user_danmaku_episodes WHERE username = ? AND scope_key = ?',
+      [username, scopeKey],
+    );
+    return rows.length > 0 ? (rows[0].episode_id as number) : null;
+  }
+
+  async setDanmakuEpisodeId(
+    userName: string,
+    scopeKey: string,
+    episodeId: number,
+  ): Promise<void> {
+    await this.ensureInitialized();
+    const username = normalizeUsername(userName);
+    await this.pool.execute(
+      'INSERT INTO user_danmaku_episodes (username, scope_key, episode_id, updated_at) VALUES (?, ?, ?, ?) ON DUPLICATE KEY UPDATE episode_id = VALUES(episode_id), updated_at = VALUES(updated_at)',
+      [username, scopeKey, episodeId, Date.now()],
+    );
+  }
+
+  async deleteDanmakuEpisodeId(
+    userName: string,
+    scopeKey: string,
+  ): Promise<void> {
+    await this.ensureInitialized();
+    const username = normalizeUsername(userName);
+    await this.pool.execute(
+      'DELETE FROM user_danmaku_episodes WHERE username = ? AND scope_key = ?',
+      [username, scopeKey],
+    );
   }
 
   async setPlaybackSession(
@@ -1475,6 +1524,7 @@ export class MySqlStorage implements IStorage {
       await connection.execute('DELETE FROM user_message_state');
       await connection.execute('DELETE FROM user_login_activity');
       await connection.execute('DELETE FROM invite_code_usage');
+      await connection.execute('DELETE FROM user_danmaku_episodes');
     });
   }
 
@@ -1495,6 +1545,7 @@ export class MySqlStorage implements IStorage {
       await connection.execute('DELETE FROM user_message_state');
       await connection.execute('DELETE FROM user_login_activity');
       await connection.execute('DELETE FROM invite_code_usage');
+      await connection.execute('DELETE FROM user_danmaku_episodes');
 
       await connection.execute(
         'INSERT INTO admin_config (id, config_json) VALUES (1, ?)',

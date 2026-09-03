@@ -344,6 +344,9 @@ export class LocalSqliteStorage implements IStorage {
     releaseInviteCodeUse: Database.Statement;
     getAllInviteCodeUsage: Database.Statement;
     deleteInviteCodeUsage: Database.Statement;
+    getDanmakuEpisodeId: Database.Statement;
+    setDanmakuEpisodeId: Database.Statement;
+    deleteDanmakuEpisodeId: Database.Statement;
   };
 
   constructor(dbPath?: string) {
@@ -526,6 +529,14 @@ export class LocalSqliteStorage implements IStorage {
 
       CREATE INDEX IF NOT EXISTS idx_source_route_stats_bucket
         ON source_route_stats (bucket_date);
+
+      CREATE TABLE IF NOT EXISTS user_danmaku_episodes (
+        username TEXT NOT NULL,
+        scope_key TEXT NOT NULL,
+        episode_id INTEGER NOT NULL,
+        updated_at INTEGER NOT NULL,
+        PRIMARY KEY (username, scope_key)
+      );
     `);
   }
 
@@ -788,6 +799,15 @@ export class LocalSqliteStorage implements IStorage {
       ),
       deleteInviteCodeUsage: this.db.prepare(
         'DELETE FROM invite_code_usage WHERE code = ?',
+      ),
+      getDanmakuEpisodeId: this.db.prepare(
+        'SELECT episode_id FROM user_danmaku_episodes WHERE username = ? AND scope_key = ?',
+      ),
+      setDanmakuEpisodeId: this.db.prepare(
+        'INSERT OR REPLACE INTO user_danmaku_episodes (username, scope_key, episode_id, updated_at) VALUES (?, ?, ?, ?)',
+      ),
+      deleteDanmakuEpisodeId: this.db.prepare(
+        'DELETE FROM user_danmaku_episodes WHERE username = ? AND scope_key = ?',
       ),
     };
   }
@@ -1335,6 +1355,9 @@ export class LocalSqliteStorage implements IStorage {
       this.stmts.deletePlaybackSessionsByUser.run(targetUser);
       this.stmts.deleteUserMessageStateByUser.run(targetUser);
       this.stmts.deleteLoginActivityByUser.run(targetUser);
+      this.db
+        .prepare('DELETE FROM user_danmaku_episodes WHERE username = ?')
+        .run(targetUser);
     });
     remove(username);
   }
@@ -1537,6 +1560,39 @@ export class LocalSqliteStorage implements IStorage {
       }
     }
     return result;
+  }
+
+  async getDanmakuEpisodeId(
+    userName: string,
+    scopeKey: string,
+  ): Promise<number | null> {
+    const username = normalizeUsername(userName);
+    const row = this.stmts.getDanmakuEpisodeId.get(username, scopeKey) as
+      | { episode_id: number }
+      | undefined;
+    return row ? row.episode_id : null;
+  }
+
+  async setDanmakuEpisodeId(
+    userName: string,
+    scopeKey: string,
+    episodeId: number,
+  ): Promise<void> {
+    const username = normalizeUsername(userName);
+    this.stmts.setDanmakuEpisodeId.run(
+      username,
+      scopeKey,
+      episodeId,
+      Date.now(),
+    );
+  }
+
+  async deleteDanmakuEpisodeId(
+    userName: string,
+    scopeKey: string,
+  ): Promise<void> {
+    const username = normalizeUsername(userName);
+    this.stmts.deleteDanmakuEpisodeId.run(username, scopeKey);
   }
 
   async setPlaybackSession(
@@ -1874,6 +1930,7 @@ export class LocalSqliteStorage implements IStorage {
         DELETE FROM user_message_state;
         DELETE FROM user_login_activity;
         DELETE FROM invite_code_usage;
+        DELETE FROM user_danmaku_episodes;
       `);
     });
 
@@ -1899,6 +1956,7 @@ export class LocalSqliteStorage implements IStorage {
         DELETE FROM user_message_state;
         DELETE FROM user_login_activity;
         DELETE FROM invite_code_usage;
+        DELETE FROM user_danmaku_episodes;
       `);
 
       this.stmts.setAdminConfig.run(JSON.stringify(snapshot.adminConfig));

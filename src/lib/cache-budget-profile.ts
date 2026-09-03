@@ -1,4 +1,4 @@
-// 服务端内存缓存的档位预算。small 面向 1c1t / 1GB 小鸡，standard 面向 2C4G 以上
+// 服务端内存缓存的档位预算。small 面向 1C1G 小鸡，standard 面向 2C4G 以上
 export type CacheProfileName = 'small' | 'standard';
 
 export type ServerCacheName =

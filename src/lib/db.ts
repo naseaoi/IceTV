@@ -366,6 +366,31 @@ class DbManager {
     return storage.getAllSkipConfigs(userName);
   }
 
+  async getDanmakuEpisodeId(
+    userName: string,
+    scopeKey: string,
+  ): Promise<number | null> {
+    const storage = await this.getStorage();
+    return storage.getDanmakuEpisodeId(userName, scopeKey);
+  }
+
+  async setDanmakuEpisodeId(
+    userName: string,
+    scopeKey: string,
+    episodeId: number,
+  ): Promise<void> {
+    const storage = await this.getStorage();
+    await storage.setDanmakuEpisodeId(userName, scopeKey, episodeId);
+  }
+
+  async deleteDanmakuEpisodeId(
+    userName: string,
+    scopeKey: string,
+  ): Promise<void> {
+    const storage = await this.getStorage();
+    await storage.deleteDanmakuEpisodeId(userName, scopeKey);
+  }
+
   async savePlaybackSession(
     userName: string,
     session: PlaybackSession,

@@ -19,6 +19,7 @@ export const NOTIFIED_MESSAGE_REVISION_STORAGE_PREFIX =
 export const DANMAKU_ENABLED_STORAGE_KEY = 'danmakuEnabled';
 export const DANMAKU_OPACITY_STORAGE_KEY = 'danmakuOpacity';
 export const DANMAKU_FONT_SIZE_STORAGE_KEY = 'danmakuFontSize';
+export const DANMAKU_HEATMAP_STORAGE_KEY = 'danmakuHeatmap';
 export const DANMAKU_OFFSET_STORAGE_PREFIX = 'danmakuOffset:';
 export const DANMAKU_EPISODE_MAP_STORAGE_PREFIX = 'danmakuEpisode:';
 
@@ -467,22 +468,33 @@ export function writeDanmakuEnabled(value: boolean): void {
   writeStoredBoolean(DANMAKU_ENABLED_STORAGE_KEY, value);
 }
 
+export function readDanmakuHeatmapEnabled(): boolean {
+  return readStoredBoolean(DANMAKU_HEATMAP_STORAGE_KEY) ?? true;
+}
+
+export function writeDanmakuHeatmapEnabled(value: boolean): void {
+  writeStoredBoolean(DANMAKU_HEATMAP_STORAGE_KEY, value);
+}
+
 function clamp(value: number, min: number, max: number): number {
   return Math.min(Math.max(value, min), max);
 }
+
+export const DANMAKU_DEFAULT_OPACITY = 0.7;
+export const DANMAKU_DEFAULT_FONT_SIZE = 24;
 
 export function readDanmakuOpacity(): number {
   const raw = Number.parseFloat(
     readStoredString(DANMAKU_OPACITY_STORAGE_KEY) || '',
   );
-  if (!Number.isFinite(raw)) return 1;
+  if (!Number.isFinite(raw)) return DANMAKU_DEFAULT_OPACITY;
   return clamp(raw, DANMAKU_OPACITY_RANGE.min, DANMAKU_OPACITY_RANGE.max);
 }
 
 export function writeDanmakuOpacity(value: number): void {
   const next = Number.isFinite(value)
     ? clamp(value, DANMAKU_OPACITY_RANGE.min, DANMAKU_OPACITY_RANGE.max)
-    : 1;
+    : DANMAKU_DEFAULT_OPACITY;
   writeStoredString(DANMAKU_OPACITY_STORAGE_KEY, String(next));
 }
 
@@ -491,7 +503,7 @@ export function readDanmakuFontSize(): number {
     readStoredString(DANMAKU_FONT_SIZE_STORAGE_KEY) || '',
     10,
   );
-  if (!Number.isFinite(raw)) return 25;
+  if (!Number.isFinite(raw)) return DANMAKU_DEFAULT_FONT_SIZE;
   return clamp(raw, DANMAKU_FONT_SIZE_RANGE.min, DANMAKU_FONT_SIZE_RANGE.max);
 }
 
@@ -502,7 +514,7 @@ export function writeDanmakuFontSize(value: number): void {
         DANMAKU_FONT_SIZE_RANGE.min,
         DANMAKU_FONT_SIZE_RANGE.max,
       )
-    : 25;
+    : DANMAKU_DEFAULT_FONT_SIZE;
   writeStoredString(DANMAKU_FONT_SIZE_STORAGE_KEY, String(next));
 }
 
@@ -553,11 +565,15 @@ export function readDanmakuEpisodeId(scopeKey: string): number | null {
 
 export function writeDanmakuEpisodeId(
   scopeKey: string,
-  episodeId: number,
+  episodeId: number | null,
 ): void {
+  const key = `${DANMAKU_EPISODE_MAP_STORAGE_PREFIX}${scopeKey}`;
+  if (episodeId === null) {
+    if (typeof window !== 'undefined') {
+      window.localStorage.removeItem(key);
+    }
+    return;
+  }
   if (!Number.isSafeInteger(episodeId) || episodeId <= 0) return;
-  writeStoredString(
-    `${DANMAKU_EPISODE_MAP_STORAGE_PREFIX}${scopeKey}`,
-    String(episodeId),
-  );
+  writeStoredString(key, String(episodeId));
 }

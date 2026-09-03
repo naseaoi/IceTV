@@ -31,6 +31,7 @@ type FakeState = {
   messageStates: Map<string, string>;
   loginActivities: Map<string, number>;
   inviteCodeUsage: Map<string, number>;
+  danmakuEpisodes: Map<string, Map<string, number>>;
 };
 
 function cloneNestedMap(source: Map<string, Map<string, string>>) {
@@ -52,6 +53,12 @@ function cloneState(state: FakeState): FakeState {
     messageStates: new Map(state.messageStates),
     loginActivities: new Map(state.loginActivities),
     inviteCodeUsage: new Map(state.inviteCodeUsage),
+    danmakuEpisodes: new Map(
+      Array.from(state.danmakuEpisodes.entries(), ([key, value]) => [
+        key,
+        new Map(value),
+      ]),
+    ),
   };
 }
 
@@ -68,6 +75,7 @@ function createState(): FakeState {
     messageStates: new Map(),
     loginActivities: new Map(),
     inviteCodeUsage: new Map(),
+    danmakuEpisodes: new Map(),
   };
 }
 
@@ -230,6 +238,42 @@ function createFakePool() {
 
     if (normalized === 'DELETE FROM user_message_state') {
       currentState.messageStates.clear();
+      return [[], []];
+    }
+
+    if (
+      normalized ===
+      'INSERT INTO user_danmaku_episodes (username, scope_key, episode_id, updated_at) VALUES (?, ?, ?, ?) ON DUPLICATE KEY UPDATE episode_id = VALUES(episode_id), updated_at = VALUES(updated_at)'
+    ) {
+      const [username, scopeKey, episodeId] = params as [
+        string,
+        string,
+        number,
+      ];
+      const scopes =
+        currentState.danmakuEpisodes.get(username) ?? new Map<string, number>();
+      scopes.set(scopeKey, episodeId);
+      currentState.danmakuEpisodes.set(username, scopes);
+      return [[], []];
+    }
+
+    if (
+      normalized ===
+      'DELETE FROM user_danmaku_episodes WHERE username = ? AND scope_key = ?'
+    ) {
+      const [username, scopeKey] = params as [string, string];
+      currentState.danmakuEpisodes.get(username)?.delete(scopeKey);
+      return [[], []];
+    }
+
+    if (normalized === 'DELETE FROM user_danmaku_episodes WHERE username = ?') {
+      const [username] = params as [string];
+      currentState.danmakuEpisodes.delete(username);
+      return [[], []];
+    }
+
+    if (normalized === 'DELETE FROM user_danmaku_episodes') {
+      currentState.danmakuEpisodes.clear();
       return [[], []];
     }
 
@@ -1160,6 +1204,17 @@ function createFakePool() {
       const [username] = params as [string];
       const stateJson = currentState.messageStates.get(username);
       return [stateJson ? [{ state_json: stateJson }] : [], []];
+    }
+
+    if (
+      normalized ===
+      'SELECT episode_id FROM user_danmaku_episodes WHERE username = ? AND scope_key = ?'
+    ) {
+      const [username, scopeKey] = params as [string, string];
+      const episodeId = currentState.danmakuEpisodes
+        .get(username)
+        ?.get(scopeKey);
+      return [episodeId === undefined ? [] : [{ episode_id: episodeId }], []];
     }
 
     if (normalized === 'SELECT code, used_count FROM invite_code_usage') {
