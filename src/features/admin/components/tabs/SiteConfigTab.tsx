@@ -1,6 +1,14 @@
 ﻿'use client';
 
-import { ExternalLink, ImagePlus, Trash2, Upload } from 'lucide-react';
+import {
+  CheckCircle2,
+  ExternalLink,
+  ImagePlus,
+  Loader2,
+  Trash2,
+  Upload,
+  XCircle,
+} from 'lucide-react';
 import { type FormEvent, useEffect, useRef, useState } from 'react';
 
 import AdminSelect from '@/components/admin/AdminSelect';
@@ -157,6 +165,11 @@ const SiteConfigComponent = ({
   const iconFileRef = useRef<HTMLInputElement>(null);
   const iconPreviewObjectUrlRef = useRef<string | null>(null);
   const savingRef = useRef(false);
+  const [danmakuTesting, setDanmakuTesting] = useState(false);
+  const [danmakuTestResult, setDanmakuTestResult] = useState<{
+    success: boolean;
+    message: string;
+  } | null>(null);
   const normalizedSiteSettings = normalizeEditableSiteSettings(siteSettings);
   const siteSettingsDirty =
     JSON.stringify(normalizedSiteSettings) !==
@@ -297,6 +310,44 @@ const SiteConfigComponent = ({
   const handleSubmit = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     void handleSave();
+  };
+
+  const handleDanmakuTest = async () => {
+    if (danmakuTesting) return;
+
+    setDanmakuTesting(true);
+    setDanmakuTestResult(null);
+
+    try {
+      const response = await fetch('/api/admin/danmaku/test', {
+        method: 'POST',
+      });
+      const data = (await response.json()) as {
+        success: boolean;
+        error?: string;
+        message?: string;
+        details?: string;
+      };
+
+      if (data.success) {
+        setDanmakuTestResult({
+          success: true,
+          message: data.message || '弹幕服务测试成功',
+        });
+      } else {
+        setDanmakuTestResult({
+          success: false,
+          message: data.details || data.error || '测试失败',
+        });
+      }
+    } catch (error) {
+      setDanmakuTestResult({
+        success: false,
+        message: error instanceof Error ? error.message : '网络请求失败',
+      });
+    } finally {
+      setDanmakuTesting(false);
+    }
   };
 
   if (!config) {
@@ -679,36 +730,74 @@ const SiteConfigComponent = ({
         </div>
 
         <div className='flex min-h-[96px] items-center justify-between gap-4 rounded-lg border border-gray-200 bg-gray-50 p-4 dark:border-gray-700 dark:bg-gray-800/55'>
-          <div>
+          <div className='min-w-0 flex-1'>
             <p className='text-sm font-medium text-gray-900 dark:text-gray-100'>
               播放器弹幕
             </p>
             <p className='mt-1 text-xs text-gray-500 dark:text-gray-400'>
               需同时配置 DANMAKU_API_BASE_URL 环境变量指向自建弹幕服务。
             </p>
+            {danmakuTestResult && (
+              <div
+                className={`mt-2 flex items-start gap-1.5 text-xs ${
+                  danmakuTestResult.success
+                    ? 'text-green-600 dark:text-green-400'
+                    : 'text-red-600 dark:text-red-400'
+                }`}
+              >
+                {danmakuTestResult.success ? (
+                  <CheckCircle2 className='mt-0.5 h-3.5 w-3.5 flex-shrink-0' />
+                ) : (
+                  <XCircle className='mt-0.5 h-3.5 w-3.5 flex-shrink-0' />
+                )}
+                <span className='min-w-0 break-words'>
+                  {danmakuTestResult.message}
+                </span>
+              </div>
+            )}
           </div>
-          <button
-            type='button'
-            onClick={() =>
-              setSiteSettings((prev) => ({
-                ...prev,
-                EnableDanmaku: !prev.EnableDanmaku,
-              }))
-            }
-            className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
-              siteSettings.EnableDanmaku
-                ? 'bg-green-500'
-                : 'bg-gray-300 dark:bg-gray-600'
-            }`}
-            aria-label='切换播放器弹幕'
-            aria-pressed={siteSettings.EnableDanmaku}
-          >
-            <span
-              className={`inline-block h-5 w-5 transform rounded-full bg-white transition-transform ${
-                siteSettings.EnableDanmaku ? 'translate-x-5' : 'translate-x-0.5'
+          <div className='flex flex-shrink-0 items-center gap-2'>
+            <button
+              type='button'
+              onClick={handleDanmakuTest}
+              disabled={danmakuTesting}
+              className='flex items-center gap-1.5 rounded-lg border border-gray-300 bg-white px-3 py-1.5 text-xs font-medium text-gray-700 transition-colors hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-60 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-200 dark:hover:bg-gray-600'
+              aria-label={danmakuTesting ? '测试中' : '测试弹幕连接'}
+            >
+              {danmakuTesting ? (
+                <>
+                  <Loader2 className='h-3.5 w-3.5 animate-spin' />
+                  测试中
+                </>
+              ) : (
+                '测试连接'
+              )}
+            </button>
+            <button
+              type='button'
+              onClick={() =>
+                setSiteSettings((prev) => ({
+                  ...prev,
+                  EnableDanmaku: !prev.EnableDanmaku,
+                }))
+              }
+              className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
+                siteSettings.EnableDanmaku
+                  ? 'bg-green-500'
+                  : 'bg-gray-300 dark:bg-gray-600'
               }`}
-            />
-          </button>
+              aria-label='切换播放器弹幕'
+              aria-pressed={siteSettings.EnableDanmaku}
+            >
+              <span
+                className={`inline-block h-5 w-5 transform rounded-full bg-white transition-transform ${
+                  siteSettings.EnableDanmaku
+                    ? 'translate-x-5'
+                    : 'translate-x-0.5'
+                }`}
+              />
+            </button>
+          </div>
         </div>
       </div>
 

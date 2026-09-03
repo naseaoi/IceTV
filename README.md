@@ -85,7 +85,7 @@
 
 支持 Docker + SQLite、Docker + MySQL、Vercel + MySQL 云数据库。
 
-### Docker + SQLite
+**快速开始（Docker + SQLite）：**
 
 ```yml
 services:
@@ -108,74 +108,7 @@ volumes:
   icetv-data:
 ```
 
-升级前保留 `icetv-data` 卷，建议定期备份。
-
-### Docker + MySQL
-
-```yml
-services:
-  mysql:
-    image: mysql:8.4
-    container_name: icetv-mysql
-    restart: unless-stopped
-    environment:
-      MYSQL_DATABASE: icetv
-      MYSQL_USER: icetv
-      MYSQL_PASSWORD: replace_with_mysql_password
-      MYSQL_ROOT_PASSWORD: replace_with_mysql_root_password
-    volumes:
-      - icetv-mysql:/var/lib/mysql
-    healthcheck:
-      test:
-        [
-          'CMD-SHELL',
-          'mysqladmin ping -h 127.0.0.1 -u root -p"$${MYSQL_ROOT_PASSWORD}" --silent',
-        ]
-      interval: 10s
-      timeout: 5s
-      retries: 10
-      start_period: 30s
-
-  icetv:
-    image: ghcr.io/naseaoi/icetv:latest
-    container_name: icetv
-    restart: unless-stopped
-    depends_on:
-      mysql:
-        condition: service_healthy
-    ports:
-      - '3000:3000'
-    environment:
-      ICETV_USERNAME: admin
-      ICETV_PASSWORD: admin_password
-      AUTH_SECRET: replace_with_random_auth_secret
-      CRON_SECRET: replace_with_random_secret
-      NEXT_PUBLIC_STORAGE_TYPE: mysql
-      DATABASE_URL: mysql://icetv:replace_with_mysql_password@mysql:3306/icetv
-
-volumes:
-  icetv-mysql:
-```
-
-- IceTV 会自动创建数据表，数据库账号需要建表和读写权限
-- 同一 Compose 网络内使用服务名 `mysql`，连接宿主机 MySQL 时 Windows/macOS Docker Desktop 可用 `host.docker.internal`
-- 用户名或密码含特殊字符时需在 `DATABASE_URL` 中 URL 编码
-- 使用已有 MySQL 服务时移除 `mysql` 服务，将 `DATABASE_URL` 指向实际地址
-
-### Vercel + MySQL
-
-至少配置以下环境变量：
-
-```bash
-ICETV_USERNAME=admin
-ICETV_PASSWORD=your_password
-AUTH_SECRET=replace_with_random_auth_secret
-CRON_SECRET=replace_with_random_cron_secret
-NEXT_PUBLIC_STORAGE_TYPE=mysql
-DATABASE_URL=mysql://user:password@host:3306/dbname
-```
-
-云数据库要求 TLS 时，通过 `MYSQL_SSL_CA` 提供 CA PEM 文本。
+**完整部署方案（含弹幕、MySQL 等）见 [部署文档](docs/deployment.md)。**
 
 ## 配置文件
 
@@ -212,6 +145,8 @@ DATABASE_URL=mysql://user:password@host:3306/dbname
 
 ## 环境变量
 
+核心环境变量：
+
 | 变量                       | 说明         | 必填        | 默认值                         |
 | -------------------------- | ------------ | ----------- | ------------------------------ |
 | `ICETV_USERNAME`           | 站长账号     | 是          | 无                             |
@@ -221,20 +156,14 @@ DATABASE_URL=mysql://user:password@host:3306/dbname
 | `NEXT_PUBLIC_STORAGE_TYPE` | 存储类型     | 否          | 有 `DATABASE_URL` 时为 `mysql` |
 | `LOCAL_DB_PATH`            | SQLite 路径  | 否          | `/data/icetv.sqlite`           |
 | `DATABASE_URL`             | MySQL 连接   | MySQL 必填  | 无                             |
-| `TRUSTED_PROXY_COUNT`      | 反代层数     | 反代后建议  | `0`                            |
-| `CACHE_PROFILE`            | 内存缓存档位 | 否          | `small`                        |
 | `DANMAKU_API_BASE_URL`     | 弹幕服务地址 | 启用弹幕时  | 空                             |
 
-完整变量见 [.env.example](.env.example)。
+完整变量列表见 [.env.example](.env.example) 和 [部署文档](docs/deployment.md)。
 
 > [!IMPORTANT]
-> 反代后设置 `TRUSTED_PROXY_COUNT` 为代理层数，否则注册限流可被绕过。
-
-`CACHE_PROFILE` 默认 `small`，按 1C1G 小鸡规格限制内存缓存。4GB 以上内存且搜索命中率低时可改 `standard`。
-
-弹幕需后台「站点配置 → 播放器弹幕」开启，并配置 `DANMAKU_API_BASE_URL` 指向自建 [danmu_api](https://github.com/huangxd-/danmu_api)（地址含 token，形如 `http://host:9321/yourtoken`）。
-
-详细环境变量说明见 [.env.example](.env.example)。
+>
+> - 反代后设置 `TRUSTED_PROXY_COUNT` 为代理层数，否则注册限流可被绕过
+> - 弹幕需后台开启并配置 `DANMAKU_API_BASE_URL` 指向自建 [danmu_api](https://github.com/huangxd-/danmu_api)（地址含 token，形如 `http://host:9321/yourtoken`）
 
 ## 开发
 
