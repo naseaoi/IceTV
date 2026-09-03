@@ -380,6 +380,15 @@ div[data-media-provider] video {
   transition: height 0.15s ease !important;
 }
 
+/* 热力图对齐进度条轨道 */
+.art-control-heatmap {
+  left: 12px !important;
+  right: 12px !important;
+  width: auto !important;
+  height: 28px !important;
+  top: -28px !important;
+}
+
 .art-progress:hover .art-control-progress-inner {
   height: 6px !important;
 }
