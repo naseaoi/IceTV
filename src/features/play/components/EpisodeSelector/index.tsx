@@ -4,6 +4,7 @@ import React, { useMemo, useState } from 'react';
 
 import MobileSheet from '@/components/mobile/MobileSheet';
 import { PlayerPanelContent } from '@/components/PlayerPanelTabBar';
+import { useRuntimeConfig } from '@/components/RuntimeConfigProvider';
 import { SectionTitle } from '@/features/play/components/EpisodeSelector/SectionTitle';
 import { TabBar } from '@/features/play/components/EpisodeSelector/TabBar';
 import { getSourceBundle } from '@/lib/source-bundle';
@@ -228,6 +229,9 @@ const EpisodeSelector: React.FC<EpisodeSelectorProps> = ({
   onDanmakuReload,
   onDanmakuHeatmapChange,
 }) => {
+  const runtimeConfig = useRuntimeConfig();
+  const danmakuEnabled = runtimeConfig.ENABLE_DANMAKU;
+
   const variantSources = useMemo(() => {
     if (!detail) {
       return [];
@@ -278,7 +282,7 @@ const EpisodeSelector: React.FC<EpisodeSelectorProps> = ({
   const desktopTabs: { key: DesktopTabKey; label: string }[] = [
     { key: 'main', label: '详情' },
     { key: 'sources', label: '换源' },
-    { key: 'danmaku', label: '弹幕' },
+    ...(danmakuEnabled ? [{ key: 'danmaku', label: '弹幕' } as const] : []),
   ];
 
   const renderEpisodesTab = (afterSelect?: () => void) => (
@@ -400,20 +404,17 @@ const EpisodeSelector: React.FC<EpisodeSelectorProps> = ({
               <ArrowLeftRight className='h-3.5 w-3.5' />
               换源
             </button>
-            <button
-              type='button'
-              className={mobileActionButtonClass}
-              onClick={() => setMobileSheet('danmaku')}
-            >
-              <MessageSquare className='h-3.5 w-3.5' />
-              弹幕
-            </button>
+            {danmakuEnabled && (
+              <button
+                type='button'
+                className={mobileActionButtonClass}
+                onClick={() => setMobileSheet('danmaku')}
+              >
+                <MessageSquare className='h-3.5 w-3.5' />
+                弹幕
+              </button>
+            )}
           </div>
-          <span className='ml-auto min-w-0 truncate text-right text-sm text-gray-600 dark:text-gray-300'>
-            {totalEpisodes > 1
-              ? `第 ${value} 集 / 共 ${totalEpisodes} 集`
-              : '正片'}
-          </span>
         </div>
 
         {stripEpisodes.length > 0 && (
@@ -470,15 +471,17 @@ const EpisodeSelector: React.FC<EpisodeSelectorProps> = ({
           </div>
         </MobileSheet>
 
-        <MobileSheet
-          open={mobileSheet === 'danmaku'}
-          title='弹幕'
-          onClose={() => setMobileSheet(null)}
-        >
-          <div className='flex h-[60dvh] flex-col overflow-hidden'>
-            {renderDanmakuTab()}
-          </div>
-        </MobileSheet>
+        {danmakuEnabled && (
+          <MobileSheet
+            open={mobileSheet === 'danmaku'}
+            title='弹幕'
+            onClose={() => setMobileSheet(null)}
+          >
+            <div className='flex h-[60dvh] flex-col overflow-hidden'>
+              {renderDanmakuTab()}
+            </div>
+          </MobileSheet>
+        )}
       </div>
 
       <div className='hidden min-h-0 flex-1 flex-col md:flex'>
@@ -512,7 +515,7 @@ const EpisodeSelector: React.FC<EpisodeSelectorProps> = ({
               renderInfoTab('panel')
             ))}
           {desktopTab === 'sources' && renderSourcesTab()}
-          {desktopTab === 'danmaku' && renderDanmakuTab()}
+          {danmakuEnabled && desktopTab === 'danmaku' && renderDanmakuTab()}
         </PlayerPanelContent>
       </div>
     </div>
