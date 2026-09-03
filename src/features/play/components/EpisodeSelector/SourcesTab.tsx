@@ -203,7 +203,7 @@ export const SourcesTab: React.FC<SourcesTabProps> = ({
   > | null>(null);
   const [isCurrentInView, setIsCurrentInView] = useState(true);
 
-  const [optimizationEnabled] = useState<boolean>(() => {
+  const [_optimizationEnabled] = useState<boolean>(() => {
     if (typeof window === 'undefined') {
       return true;
     }
@@ -454,9 +454,6 @@ export const SourcesTab: React.FC<SourcesTabProps> = ({
                 if (!res.ok) throw new Error('搜索失败');
                 const data = await res.json();
                 if (Array.isArray(data.results)) {
-                  const existingKeys = new Set(
-                    availableSources.map((s) => `${s.source}-${s.id}`),
-                  );
                   const normalizedTitle = normalizeTitleForSourceMatch(
                     videoTitle || '',
                   );
@@ -497,7 +494,7 @@ export const SourcesTab: React.FC<SourcesTabProps> = ({
           ref={listContainerRef}
           className='flex min-h-0 flex-1 flex-col gap-2 overflow-y-auto'
         >
-          {sortedSources.map((source, index) => {
+          {sortedSources.map((source) => {
             const isCurrentSource =
               source.source?.toString() === currentSource?.toString() &&
               source.id?.toString() === currentId?.toString();
