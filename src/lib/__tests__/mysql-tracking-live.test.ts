@@ -1,7 +1,7 @@
 /** @jest-environment node */
 
 import { MySqlStorage } from '../mysql.db';
-import type { PlayRecord } from '../types';
+import type { Favorite, PlayRecord } from '../types';
 
 const liveUrl = (process.env.MYSQL_TEST_URL || '').trim();
 const describeLive = liveUrl ? describe : describe.skip;
@@ -15,6 +15,15 @@ const basePlayRecord: PlayRecord = {
   total_episodes: 12,
   play_time: 0,
   total_time: 0,
+  save_time: 1,
+};
+
+const baseFavorite: Favorite = {
+  source_name: '源',
+  total_episodes: 12,
+  title: '剧集',
+  year: '2026',
+  cover: '',
   save_time: 1,
 };
 
@@ -155,5 +164,45 @@ describeLive('MySQL 追更查询（真实实例）', () => {
 
     expect(page.total).toBe(1);
     expect(Object.keys(page.items)).toEqual(['source+no-flag']);
+  });
+
+  it('元数据分页按真实毫秒时间戳识别 TTL', async () => {
+    const user = `live-metadata-${Date.now()}`;
+    const now = Date.now();
+    const ttlMs = 6 * 60 * 60 * 1000;
+    await storage.setPlayRecords(user, {
+      'source+fresh': {
+        ...basePlayRecord,
+        metadata_checked_at: now - 1_000,
+      },
+      'source+stale': {
+        ...basePlayRecord,
+        metadata_checked_at: now - ttlMs,
+      },
+    });
+    await storage.setFavorite(user, 'source+fresh', {
+      ...baseFavorite,
+      metadata_checked_at: now - 1_000,
+    });
+    await storage.setFavorite(user, 'source+stale', {
+      ...baseFavorite,
+      metadata_checked_at: now - ttlMs,
+    });
+
+    const recordPage = await storage.getStalePlayRecordPage(
+      user,
+      now,
+      ttlMs,
+      10,
+    );
+    const favoritePage = await storage.getStaleFavoritePage(
+      user,
+      now,
+      ttlMs,
+      10,
+    );
+
+    expect(recordPage.items.map(({ key }) => key)).toEqual(['source+stale']);
+    expect(favoritePage.items.map(({ key }) => key)).toEqual(['source+stale']);
   });
 });

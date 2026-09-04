@@ -1,8 +1,8 @@
 import {
   type MetadataCandidate,
-  collectFavoriteCandidates,
-  collectPlayRecordCandidates,
-  sortMetadataCandidates,
+  buildFavoriteCandidate,
+  buildPlayRecordCandidate,
+  compareMetadataCandidates,
 } from '@/lib/cron/metadata-candidates';
 import { db } from '@/lib/db';
 import { getOwnerUsername } from '@/lib/env.server';
@@ -15,13 +15,19 @@ import {
   hasPlayRecordGroupChanged,
   isGroupedPlayRecordScale,
 } from '@/lib/play-records';
-import type { Favorite, PlayRecord, SearchResult } from '@/lib/types';
+import type {
+  Favorite,
+  MetadataRecordPage,
+  PlayRecord,
+  SearchResult,
+} from '@/lib/types';
 import { parseStorageKey } from '@/lib/utils';
 
 const DEFAULT_METADATA_REFRESH_TTL_MS = 6 * 60 * 60 * 1000;
 const DEFAULT_METADATA_RECORD_MAX_ITEMS = 80;
 const DEFAULT_METADATA_FAVORITE_MAX_ITEMS = 40;
 const DEFAULT_METADATA_REFRESH_TIME_BUDGET_MS = 5 * 60 * 1000;
+const DEFAULT_METADATA_PAGE_SIZE = 100;
 const RECORD_TIME_BUDGET_RATIO = 0.7;
 
 type MetadataRefreshBudget = {
@@ -36,6 +42,96 @@ type GetDetail = (
   id: string,
   fallbackTitle: string,
 ) => Promise<SearchResult | null>;
+
+type CandidateCollection<T> = {
+  candidates: Array<MetadataCandidate<T>>;
+  total: number;
+};
+
+class TopMetadataCandidates<T> {
+  private readonly items: Array<MetadataCandidate<T>> = [];
+
+  constructor(private readonly maxItems: number) {}
+
+  add(candidate: MetadataCandidate<T>): void {
+    if (this.maxItems <= 0) return;
+
+    let low = 0;
+    let high = this.items.length;
+    while (low < high) {
+      const middle = Math.floor((low + high) / 2);
+      if (compareMetadataCandidates(this.items[middle], candidate) <= 0) {
+        low = middle + 1;
+      } else {
+        high = middle;
+      }
+    }
+
+    this.items.splice(low, 0, candidate);
+    if (this.items.length > this.maxItems) {
+      this.items.pop();
+    }
+  }
+
+  toArray(): Array<MetadataCandidate<T>> {
+    return this.items;
+  }
+}
+
+async function collectPagedCandidates<T>(
+  users: string[],
+  pageSize: number,
+  maxItems: number,
+  fetchPage: (
+    user: string,
+    cursorKey?: string,
+  ) => Promise<MetadataRecordPage<T>>,
+  buildCandidate: (
+    user: string,
+    key: string,
+    item: T,
+  ) => MetadataCandidate<T> | null,
+  errorLabel: string,
+): Promise<CandidateCollection<T>> {
+  const topCandidates = new TopMetadataCandidates<T>(maxItems);
+  let total = 0;
+
+  for (const user of users) {
+    let cursorKey: string | undefined;
+    for (;;) {
+      let page: MetadataRecordPage<T>;
+      try {
+        page = await fetchPage(user, cursorKey);
+      } catch (error) {
+        console.error(`${errorLabel} (${user}):`, error);
+        break;
+      }
+
+      for (const { key, item } of page.items) {
+        let candidate: MetadataCandidate<T> | null;
+        try {
+          candidate = buildCandidate(user, key, item);
+        } catch (error) {
+          console.error(`处理元数据候选失败 (${user}:${key}):`, error);
+          continue;
+        }
+        if (!candidate) continue;
+        total += 1;
+        topCandidates.add(candidate);
+      }
+
+      const nextCursor = page.nextCursor === null ? undefined : page.nextCursor;
+      if (nextCursor === undefined) break;
+      if (nextCursor === cursorKey) {
+        console.warn(`元数据分页游标未前进 (${user}): ${nextCursor}`);
+        break;
+      }
+      cursorKey = nextCursor;
+    }
+  }
+
+  return { candidates: topCandidates.toArray(), total };
+}
 
 export async function refreshRecordAndFavorites(): Promise<void> {
   try {
@@ -52,6 +148,19 @@ export async function refreshRecordAndFavorites(): Promise<void> {
     const totalTimeBudgetMs = readPositiveInteger(
       process.env.CRON_METADATA_TIME_BUDGET_MS,
       DEFAULT_METADATA_REFRESH_TIME_BUDGET_MS,
+    );
+    const recordMaxItems = readPositiveInteger(
+      process.env.CRON_METADATA_RECORD_MAX_ITEMS ||
+        process.env.CRON_METADATA_MAX_ITEMS,
+      DEFAULT_METADATA_RECORD_MAX_ITEMS,
+    );
+    const favoriteMaxItems = readPositiveInteger(
+      process.env.CRON_METADATA_FAVORITE_MAX_ITEMS,
+      DEFAULT_METADATA_FAVORITE_MAX_ITEMS,
+    );
+    const metadataPageSize = readPositiveInteger(
+      process.env.CRON_METADATA_PAGE_SIZE,
+      DEFAULT_METADATA_PAGE_SIZE,
     );
     const startedAt = Date.now();
     const detailCache = new Map<string, Promise<SearchResult | null>>();
@@ -73,19 +182,60 @@ export async function refreshRecordAndFavorites(): Promise<void> {
       return promise;
     };
 
-    const [recordCandidates, favoriteCandidates] = await Promise.all([
-      collectAllPlayRecordCandidates(users, startedAt, metadataRefreshTtlMs),
-      collectAllFavoriteCandidates(users, startedAt, metadataRefreshTtlMs),
+    const [recordCollection, favoriteCollection] = await Promise.all([
+      collectPagedCandidates(
+        users,
+        metadataPageSize,
+        recordMaxItems,
+        (user, cursorKey) =>
+          db.getStalePlayRecordPage(
+            user,
+            startedAt,
+            metadataRefreshTtlMs,
+            metadataPageSize,
+            cursorKey,
+          ),
+        (user, key, record) =>
+          buildPlayRecordCandidate(
+            user,
+            key,
+            record,
+            startedAt,
+            metadataRefreshTtlMs,
+          ),
+        '获取用户播放记录分页失败',
+      ),
+      collectPagedCandidates(
+        users,
+        metadataPageSize,
+        favoriteMaxItems,
+        (user, cursorKey) =>
+          db.getStaleFavoritePage(
+            user,
+            startedAt,
+            metadataRefreshTtlMs,
+            metadataPageSize,
+            cursorKey,
+          ),
+        (user, key, favorite) =>
+          buildFavoriteCandidate(
+            user,
+            key,
+            favorite,
+            startedAt,
+            metadataRefreshTtlMs,
+          ),
+        '获取用户收藏分页失败',
+      ),
     ]);
+
+    const recordCandidates = recordCollection.candidates;
+    const favoriteCandidates = favoriteCollection.candidates;
 
     // 播放记录与收藏各自独立预算，避免其中一方吃满预算导致另一方长期不刷新
     const recordBudget: MetadataRefreshBudget = {
       startedAt,
-      maxItems: readPositiveInteger(
-        process.env.CRON_METADATA_RECORD_MAX_ITEMS ||
-          process.env.CRON_METADATA_MAX_ITEMS,
-        DEFAULT_METADATA_RECORD_MAX_ITEMS,
-      ),
+      maxItems: recordMaxItems,
       timeBudgetMs: Math.floor(totalTimeBudgetMs * RECORD_TIME_BUDGET_RATIO),
       processed: 0,
     };
@@ -97,10 +247,7 @@ export async function refreshRecordAndFavorites(): Promise<void> {
 
     const favoriteBudget: MetadataRefreshBudget = {
       startedAt,
-      maxItems: readPositiveInteger(
-        process.env.CRON_METADATA_FAVORITE_MAX_ITEMS,
-        DEFAULT_METADATA_FAVORITE_MAX_ITEMS,
-      ),
+      maxItems: favoriteMaxItems,
       timeBudgetMs: totalTimeBudgetMs,
       processed: 0,
     };
@@ -111,30 +258,11 @@ export async function refreshRecordAndFavorites(): Promise<void> {
     );
 
     console.log(
-      `刷新播放记录/收藏任务完成: 记录 ${recordBudget.processed}/${recordCandidates.length}，收藏 ${favoriteBudget.processed}/${favoriteCandidates.length}`,
+      `刷新播放记录/收藏任务完成: 记录 ${recordBudget.processed}/${recordCollection.total}，收藏 ${favoriteBudget.processed}/${favoriteCollection.total}`,
     );
   } catch (error) {
     console.error('刷新播放记录/收藏任务启动失败', error);
   }
-}
-
-async function collectAllPlayRecordCandidates(
-  users: string[],
-  now: number,
-  ttlMs: number,
-): Promise<Array<MetadataCandidate<PlayRecord>>> {
-  const collected: Array<MetadataCandidate<PlayRecord>> = [];
-
-  for (const user of users) {
-    try {
-      const records = await db.getAllPlayRecords(user);
-      collected.push(...collectPlayRecordCandidates(user, records, now, ttlMs));
-    } catch (error) {
-      console.error(`获取用户播放记录失败 (${user}):`, error);
-    }
-  }
-
-  return sortMetadataCandidates(collected);
 }
 
 async function refreshPlayRecordCandidates(
@@ -219,25 +347,6 @@ async function refreshFavoriteCandidates(
       console.error(`处理收藏失败 (${key}):`, error);
     }
   }
-}
-
-async function collectAllFavoriteCandidates(
-  users: string[],
-  now: number,
-  ttlMs: number,
-): Promise<Array<MetadataCandidate<Favorite>>> {
-  const collected: Array<MetadataCandidate<Favorite>> = [];
-
-  for (const user of users) {
-    try {
-      const favorites = await db.getAllFavorites(user);
-      collected.push(...collectFavoriteCandidates(user, favorites, now, ttlMs));
-    } catch (error) {
-      console.error(`获取用户收藏失败 (${user}):`, error);
-    }
-  }
-
-  return sortMetadataCandidates(collected);
 }
 
 function canProcessMetadata(budget: MetadataRefreshBudget): boolean {

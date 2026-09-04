@@ -135,6 +135,7 @@ function splitMultiRowInsert(
 }
 
 const TRACKING_SQL_MARKER = "'$.tracking_enabled'";
+const STALE_METADATA_SQL_MARKER = 'JSON_VALID';
 
 function trackingCreatedAt(record: PlayRecord): number {
   return (
@@ -143,6 +144,67 @@ function trackingCreatedAt(record: PlayRecord): number {
     record.save_time ||
     0
   );
+}
+
+function isStaleMetadata(value: unknown, now: number, ttlMs: number): boolean {
+  const checkedAt =
+    value && typeof value === 'object'
+      ? (value as { metadata_checked_at?: unknown }).metadata_checked_at
+      : undefined;
+  return (
+    typeof checkedAt !== 'number' ||
+    !Number.isFinite(checkedAt) ||
+    checkedAt > now ||
+    now - checkedAt >= ttlMs
+  );
+}
+
+function selectStalePlayRecordRows(
+  state: FakeState,
+  username: string,
+  now: number,
+  ttlMs: number,
+  cursorKey?: string,
+) {
+  return Array.from(state.playRecords.get(username)?.entries() || [])
+    .map(([record_key, record_json]) => ({
+      record_key,
+      record_json,
+      record: JSON.parse(record_json) as PlayRecord,
+    }))
+    .filter(
+      ({ record, record_key }) =>
+        isStaleMetadata(record, now, ttlMs) &&
+        (cursorKey === undefined || record_key > cursorKey),
+    )
+    .sort((left, right) => left.record_key.localeCompare(right.record_key))
+    .map(({ record_key, record_json }) => ({ record_key, record_json }));
+}
+
+function selectStaleFavoriteRows(
+  state: FakeState,
+  username: string,
+  now: number,
+  ttlMs: number,
+  cursorKey?: string,
+) {
+  return Array.from(state.favorites.get(username)?.entries() || [])
+    .map(([favorite_key, favorite_json]) => ({
+      favorite_key,
+      favorite_json,
+      favorite: JSON.parse(favorite_json) as Favorite,
+    }))
+    .filter(
+      ({ favorite, favorite_key }) =>
+        favorite.origin !== 'live' &&
+        isStaleMetadata(favorite, now, ttlMs) &&
+        (cursorKey === undefined || favorite_key > cursorKey),
+    )
+    .sort((left, right) => left.favorite_key.localeCompare(right.favorite_key))
+    .map(({ favorite_key, favorite_json }) => ({
+      favorite_key,
+      favorite_json,
+    }));
 }
 
 function selectUnreadTrackingRows(
@@ -853,6 +915,28 @@ function createFakePool() {
 
     if (
       normalized.startsWith(
+        'SELECT record_key, record_json FROM play_records WHERE username = ? AND',
+      ) &&
+      normalized.includes(STALE_METADATA_SQL_MARKER)
+    ) {
+      const hasCursor = params.length === 5;
+      const username = params[0] as string;
+      const cursorKey = hasCursor ? (params[1] as string) : undefined;
+      const staleBefore = params[hasCursor ? 2 : 1] as number;
+      const now = params[hasCursor ? 3 : 2] as number;
+      const limit = params.at(-1) as number;
+      const rows = selectStalePlayRecordRows(
+        currentState,
+        username,
+        now,
+        now - staleBefore,
+        cursorKey,
+      );
+      return [rows.slice(0, limit), []];
+    }
+
+    if (
+      normalized.startsWith(
         'SELECT record_key, record_json FROM play_records',
       ) &&
       normalized.includes(TRACKING_SQL_MARKER)
@@ -970,6 +1054,28 @@ function createFakePool() {
         ),
         [],
       ];
+    }
+
+    if (
+      normalized.startsWith(
+        'SELECT favorite_key, favorite_json FROM favorites WHERE username = ? AND',
+      ) &&
+      normalized.includes(STALE_METADATA_SQL_MARKER)
+    ) {
+      const hasCursor = params.length === 5;
+      const username = params[0] as string;
+      const cursorKey = hasCursor ? (params[1] as string) : undefined;
+      const staleBefore = params[hasCursor ? 2 : 1] as number;
+      const now = params[hasCursor ? 3 : 2] as number;
+      const limit = params.at(-1) as number;
+      const rows = selectStaleFavoriteRows(
+        currentState,
+        username,
+        now,
+        now - staleBefore,
+        cursorKey,
+      );
+      return [rows.slice(0, limit), []];
     }
 
     if (
@@ -1678,6 +1784,66 @@ describe('mysql storage contract', () => {
     });
     expect(Object.keys(secondPage.items)).toEqual(['source+old']);
     expect(secondPage.nextCursor).toBeNull();
+  });
+
+  it('按主键游标分页读取过期元数据并排除新鲜项与直播收藏', async () => {
+    const storage = new MySqlStorage('mysql://demo:demo@localhost:3306/icetv');
+    const now = 10_000;
+    const ttlMs = 1_000;
+
+    await storage.setPlayRecords('metadata-user', {
+      'source+a': { ...playRecord, metadata_checked_at: 9_500 },
+      'source+b': { ...playRecord, metadata_checked_at: 8_000 },
+      'source+c': { ...playRecord },
+      'source+d': { ...playRecord, metadata_checked_at: now + 1 },
+      'source+e': {
+        ...playRecord,
+        metadata_checked_at: 'invalid' as unknown as number,
+      },
+    });
+    await storage.setFavorite('metadata-user', 'source+a', {
+      ...favorite,
+      metadata_checked_at: 9_500,
+    });
+    await storage.setFavorite('metadata-user', 'source+b', {
+      ...favorite,
+      metadata_checked_at: 8_000,
+    });
+    await storage.setFavorite('metadata-user', 'source-live', {
+      ...favorite,
+      origin: 'live',
+    });
+
+    const firstRecords = await storage.getStalePlayRecordPage(
+      'metadata-user',
+      now,
+      ttlMs,
+      2,
+    );
+    const secondRecords = await storage.getStalePlayRecordPage(
+      'metadata-user',
+      now,
+      ttlMs,
+      2,
+      firstRecords.nextCursor || undefined,
+    );
+    const favorites = await storage.getStaleFavoritePage(
+      'metadata-user',
+      now,
+      ttlMs,
+      10,
+    );
+
+    expect(firstRecords.items.map(({ key }) => key)).toEqual([
+      'source+b',
+      'source+c',
+    ]);
+    expect(secondRecords.items.map(({ key }) => key)).toEqual([
+      'source+d',
+      'source+e',
+    ]);
+    expect(secondRecords.nextCursor).toBeNull();
+    expect(favorites.items.map(({ key }) => key)).toEqual(['source+b']);
   });
 
   // 以下四个未读追更用例走 fake pool，其筛选复用生产的 hasPlayRecordUpdate

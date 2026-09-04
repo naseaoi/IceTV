@@ -28,6 +28,11 @@ export interface PlayRecordPage {
   nextCursor: string | null;
 }
 
+export interface MetadataRecordPage<T> {
+  items: Array<{ key: string; item: T }>;
+  nextCursor: string | null;
+}
+
 // 收藏数据结构
 export interface Favorite {
   source_name: string;
@@ -164,6 +169,13 @@ export interface IStorage {
     record: PlayRecord,
   ): Promise<void>;
   getAllPlayRecords(userName: string): Promise<{ [key: string]: PlayRecord }>;
+  getStalePlayRecordPage(
+    userName: string,
+    now: number,
+    ttlMs: number,
+    limit: number,
+    cursorKey?: string,
+  ): Promise<MetadataRecordPage<PlayRecord>>;
   getPlayRecordPage(
     userName: string,
     limit: number,
@@ -187,6 +199,13 @@ export interface IStorage {
   getFavorite(userName: string, key: string): Promise<Favorite | null>;
   setFavorite(userName: string, key: string, favorite: Favorite): Promise<void>;
   getAllFavorites(userName: string): Promise<{ [key: string]: Favorite }>;
+  getStaleFavoritePage(
+    userName: string,
+    now: number,
+    ttlMs: number,
+    limit: number,
+    cursorKey?: string,
+  ): Promise<MetadataRecordPage<Favorite>>;
   getFavoritePage(
     userName: string,
     limit: number,

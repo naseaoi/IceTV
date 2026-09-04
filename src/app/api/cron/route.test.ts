@@ -3,6 +3,7 @@
 import type { NextRequest } from 'next/server';
 
 import { installWebPolyfills } from '@/app/api/test-utils/web-polyfills';
+import type { MetadataRecordPage } from '@/lib/types';
 
 installWebPolyfills();
 
@@ -10,6 +11,8 @@ const mockGetConfig = jest.fn();
 const mockGetAllUsers = jest.fn();
 const mockGetAllPlayRecords = jest.fn();
 const mockGetAllFavorites = jest.fn();
+const mockGetStalePlayRecordPage = jest.fn();
+const mockGetStaleFavoritePage = jest.fn();
 const mockSavePlayRecord = jest.fn();
 const mockSaveFavorite = jest.fn();
 const mockDeletePlaybackSessionsBefore = jest.fn();
@@ -43,6 +46,10 @@ jest.mock('@/lib/db', () => ({
     getAllUsers: (...args: unknown[]) => mockGetAllUsers(...args),
     getAllPlayRecords: (...args: unknown[]) => mockGetAllPlayRecords(...args),
     getAllFavorites: (...args: unknown[]) => mockGetAllFavorites(...args),
+    getStalePlayRecordPage: (...args: unknown[]) =>
+      mockGetStalePlayRecordPage(...args),
+    getStaleFavoritePage: (...args: unknown[]) =>
+      mockGetStaleFavoritePage(...args),
     savePlayRecord: (...args: unknown[]) => mockSavePlayRecord(...args),
     saveFavorite: (...args: unknown[]) => mockSaveFavorite(...args),
     deletePlaybackSessionsBefore: (...args: unknown[]) =>
@@ -101,6 +108,27 @@ function createFavorite(overrides: Record<string, unknown> = {}) {
   };
 }
 
+function buildMockMetadataPage<T>(
+  values: Record<string, T>,
+  limit: number,
+  cursorKey?: string,
+): MetadataRecordPage<T> {
+  const entries = Object.entries(values).sort(([left], [right]) =>
+    left.localeCompare(right),
+  );
+  const start =
+    cursorKey === undefined ? 0 : entries.findIndex(([key]) => key > cursorKey);
+  if (start < 0) {
+    return { items: [], nextCursor: null };
+  }
+
+  const rows = entries.slice(start, start + limit + 1);
+  return {
+    items: rows.slice(0, limit).map(([key, item]) => ({ key, item })),
+    nextCursor: rows.length > limit ? rows[limit - 1][0] : null,
+  };
+}
+
 async function flushBackgroundTask() {
   for (let index = 0; index < 8; index += 1) {
     await new Promise((resolve) => setImmediate(resolve));
@@ -119,6 +147,11 @@ describe('cron route', () => {
   const originalCronSecret = process.env.CRON_SECRET;
   const originalMetadataRefreshTtlMs = process.env.CRON_METADATA_REFRESH_TTL_MS;
   const originalMetadataMaxItems = process.env.CRON_METADATA_MAX_ITEMS;
+  const originalMetadataRecordMaxItems =
+    process.env.CRON_METADATA_RECORD_MAX_ITEMS;
+  const originalMetadataFavoriteMaxItems =
+    process.env.CRON_METADATA_FAVORITE_MAX_ITEMS;
+  const originalMetadataPageSize = process.env.CRON_METADATA_PAGE_SIZE;
   const originalMetadataTimeBudgetMs = process.env.CRON_METADATA_TIME_BUDGET_MS;
   const originalPlaybackStatsRetentionDays =
     process.env.CRON_PLAYBACK_STATS_RETENTION_DAYS;
@@ -127,12 +160,45 @@ describe('cron route', () => {
     process.env.CRON_SECRET = 'test-secret';
     delete process.env.CRON_METADATA_REFRESH_TTL_MS;
     delete process.env.CRON_METADATA_MAX_ITEMS;
+    delete process.env.CRON_METADATA_RECORD_MAX_ITEMS;
+    delete process.env.CRON_METADATA_FAVORITE_MAX_ITEMS;
+    delete process.env.CRON_METADATA_PAGE_SIZE;
     delete process.env.CRON_METADATA_TIME_BUDGET_MS;
     delete process.env.CRON_PLAYBACK_STATS_RETENTION_DAYS;
     jest.clearAllMocks();
     mockGetAllUsers.mockReset().mockResolvedValue([]);
     mockGetAllPlayRecords.mockReset().mockResolvedValue({});
     mockGetAllFavorites.mockReset().mockResolvedValue({});
+    mockGetStalePlayRecordPage.mockReset();
+    mockGetStaleFavoritePage.mockReset();
+    mockGetStalePlayRecordPage.mockImplementation(
+      async (
+        user: string,
+        _now: number,
+        _ttlMs: number,
+        limit: number,
+        cursorKey?: string,
+      ) =>
+        buildMockMetadataPage(
+          await mockGetAllPlayRecords(user),
+          limit,
+          cursorKey,
+        ),
+    );
+    mockGetStaleFavoritePage.mockImplementation(
+      async (
+        user: string,
+        _now: number,
+        _ttlMs: number,
+        limit: number,
+        cursorKey?: string,
+      ) =>
+        buildMockMetadataPage(
+          await mockGetAllFavorites(user),
+          limit,
+          cursorKey,
+        ),
+    );
     mockSavePlayRecord.mockReset().mockResolvedValue(undefined);
     mockSaveFavorite.mockReset().mockResolvedValue(undefined);
     mockDeletePlaybackSessionsBefore.mockReset().mockResolvedValue(0);
@@ -163,6 +229,18 @@ describe('cron route', () => {
     restoreEnvironmentVariable(
       'CRON_METADATA_MAX_ITEMS',
       originalMetadataMaxItems,
+    );
+    restoreEnvironmentVariable(
+      'CRON_METADATA_RECORD_MAX_ITEMS',
+      originalMetadataRecordMaxItems,
+    );
+    restoreEnvironmentVariable(
+      'CRON_METADATA_FAVORITE_MAX_ITEMS',
+      originalMetadataFavoriteMaxItems,
+    );
+    restoreEnvironmentVariable(
+      'CRON_METADATA_PAGE_SIZE',
+      originalMetadataPageSize,
     );
     restoreEnvironmentVariable(
       'CRON_METADATA_TIME_BUDGET_MS',
@@ -309,6 +387,66 @@ describe('cron route', () => {
 
     expect(mockSavePlayRecord).toHaveBeenCalledTimes(1);
     expect(mockSaveFavorite).toHaveBeenCalledTimes(1);
+  });
+
+  it('分页扫描后仍按候选优先级选取前 N 条', async () => {
+    process.env.CRON_METADATA_PAGE_SIZE = '1';
+    process.env.CRON_METADATA_RECORD_MAX_ITEMS = '1';
+    mockGetAllUsers.mockResolvedValue(['user']);
+    mockGetAllPlayRecords.mockResolvedValue({
+      'source+a': createPlayRecord({
+        index: 1,
+        total_episodes: 1,
+        metadata_checked_at: 1,
+      }),
+      'source+z': createPlayRecord({
+        index: 1,
+        total_episodes: 10,
+        metadata_checked_at: 1,
+      }),
+    });
+    mockFetchVideoDetail.mockResolvedValue({
+      title: '测试视频',
+      poster: 'cover.jpg',
+      year: '2026',
+      episodes: ['第 1 集'],
+    });
+
+    await runMetadataTask();
+
+    expect(mockSavePlayRecord).toHaveBeenCalledTimes(1);
+    expect(mockSavePlayRecord).toHaveBeenCalledWith(
+      'user',
+      'source',
+      'z',
+      expect.anything(),
+    );
+    expect(mockGetStalePlayRecordPage).toHaveBeenCalledTimes(2);
+  });
+
+  it('元数据任务不回退到全量读取接口', async () => {
+    mockGetAllUsers.mockResolvedValue(['user']);
+    mockGetAllPlayRecords.mockImplementation(() => {
+      throw new Error('不应调用全量播放记录读取');
+    });
+    mockGetAllFavorites.mockImplementation(() => {
+      throw new Error('不应调用全量收藏读取');
+    });
+    mockGetStalePlayRecordPage.mockResolvedValue({
+      items: [],
+      nextCursor: null,
+    });
+    mockGetStaleFavoritePage.mockResolvedValue({
+      items: [],
+      nextCursor: null,
+    });
+
+    await runMetadataTask();
+
+    expect(mockGetAllPlayRecords).not.toHaveBeenCalled();
+    expect(mockGetAllFavorites).not.toHaveBeenCalled();
+    expect(mockGetStalePlayRecordPage).toHaveBeenCalledTimes(1);
+    expect(mockGetStaleFavoritePage).toHaveBeenCalledTimes(1);
   });
 
   it('达到时间预算后不再处理后续条目', async () => {

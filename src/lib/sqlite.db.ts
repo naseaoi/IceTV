@@ -17,6 +17,7 @@ import {
   Favorite,
   FavoritePage,
   IStorage,
+  MetadataRecordPage,
   PlaybackRangeWatchTotal,
   PlaybackSession,
   PlaybackSessionQuery,
@@ -45,6 +46,33 @@ const {
   createdAt: SQLITE_TRACKING_CREATED_AT,
   unreadWhere: SQLITE_UNREAD_TRACKING_WHERE,
 } = buildTrackingSql(SQLITE_TRACKING_DIALECT);
+
+const SQLITE_STALE_PLAY_RECORD_WHERE = `
+  CASE
+    WHEN json_valid(record_json) = 0 THEN 1
+    WHEN json_type(record_json, '$.metadata_checked_at') IS NULL THEN 1
+    WHEN json_type(record_json, '$.metadata_checked_at') NOT IN ('integer', 'real') THEN 1
+    WHEN CAST(json_extract(record_json, '$.metadata_checked_at') AS REAL) <= ? THEN 1
+    WHEN CAST(json_extract(record_json, '$.metadata_checked_at') AS REAL) > ? THEN 1
+    ELSE 0
+  END = 1`;
+
+const SQLITE_STALE_FAVORITE_WHERE = `
+  CASE
+    WHEN json_valid(favorite_json) = 0 THEN 1
+    WHEN json_type(favorite_json, '$.metadata_checked_at') IS NULL THEN 1
+    WHEN json_type(favorite_json, '$.metadata_checked_at') NOT IN ('integer', 'real') THEN 1
+    WHEN CAST(json_extract(favorite_json, '$.metadata_checked_at') AS REAL) <= ? THEN 1
+    WHEN CAST(json_extract(favorite_json, '$.metadata_checked_at') AS REAL) > ? THEN 1
+    ELSE 0
+  END = 1`;
+
+const SQLITE_NON_LIVE_FAVORITE_WHERE = `
+  CASE
+    WHEN json_valid(favorite_json) = 0 THEN 1
+    WHEN json_extract(favorite_json, '$.origin') = 'live' THEN 0
+    ELSE 1
+  END = 1`;
 
 function parseBusyTimeoutMs(raw: string | undefined, fallback: number): number {
   if (!raw) {
@@ -271,6 +299,40 @@ function buildFavoritePage(
   };
 }
 
+function buildMetadataRecordPage<T>(
+  rows: Array<{ record_key: string; record_json: string }>,
+  limit: number,
+): MetadataRecordPage<T> {
+  const pageRows = rows.slice(0, limit);
+  const items = pageRows.flatMap((row) => {
+    const parsed = parseJsonValue<T>(row.record_json);
+    return !parsed ? [] : [{ key: row.record_key, item: parsed }];
+  });
+  const lastRow = pageRows.at(-1);
+
+  return {
+    items,
+    nextCursor: rows.length > limit && lastRow ? lastRow.record_key : null,
+  };
+}
+
+function buildMetadataFavoritePage(
+  rows: Array<{ favorite_key: string; favorite_json: string }>,
+  limit: number,
+): MetadataRecordPage<Favorite> {
+  const pageRows = rows.slice(0, limit);
+  const items = pageRows.flatMap((row) => {
+    const parsed = parseJsonValue<Favorite>(row.favorite_json);
+    return !parsed ? [] : [{ key: row.favorite_key, item: parsed }];
+  });
+  const lastRow = pageRows.at(-1);
+
+  return {
+    items,
+    nextCursor: rows.length > limit && lastRow ? lastRow.favorite_key : null,
+  };
+}
+
 export class LocalSqliteStorage implements IStorage {
   private readonly dbPath: string;
   private readonly legacyJsonPaths: string[];
@@ -282,6 +344,8 @@ export class LocalSqliteStorage implements IStorage {
     getPlayRecord: Database.Statement;
     setPlayRecord: Database.Statement;
     getAllPlayRecords: Database.Statement;
+    getStalePlayRecordPage: Database.Statement;
+    getStalePlayRecordPageAfter: Database.Statement;
     getPlayRecordPage: Database.Statement;
     getPlayRecordPageAfter: Database.Statement;
     countPlayRecords: Database.Statement;
@@ -293,6 +357,8 @@ export class LocalSqliteStorage implements IStorage {
     getFavorite: Database.Statement;
     setFavorite: Database.Statement;
     getAllFavorites: Database.Statement;
+    getStaleFavoritePage: Database.Statement;
+    getStaleFavoritePageAfter: Database.Statement;
     getFavoritePage: Database.Statement;
     getFavoritePageAfter: Database.Statement;
     countFavorites: Database.Statement;
@@ -560,6 +626,23 @@ export class LocalSqliteStorage implements IStorage {
       getAllPlayRecords: this.db.prepare(
         'SELECT record_key, record_json FROM play_records WHERE username = ?',
       ),
+      getStalePlayRecordPage: this.db.prepare(
+        `SELECT record_key, record_json
+         FROM play_records
+         WHERE username = ?
+           AND ${SQLITE_STALE_PLAY_RECORD_WHERE}
+         ORDER BY record_key ASC
+         LIMIT ?`,
+      ),
+      getStalePlayRecordPageAfter: this.db.prepare(
+        `SELECT record_key, record_json
+         FROM play_records
+         WHERE username = ?
+           AND record_key > ?
+           AND ${SQLITE_STALE_PLAY_RECORD_WHERE}
+         ORDER BY record_key ASC
+         LIMIT ?`,
+      ),
       getPlayRecordPage: this.db.prepare(
         `SELECT record_key, record_json
          FROM play_records
@@ -625,6 +708,25 @@ export class LocalSqliteStorage implements IStorage {
       ),
       getAllFavorites: this.db.prepare(
         'SELECT favorite_key, favorite_json FROM favorites WHERE username = ?',
+      ),
+      getStaleFavoritePage: this.db.prepare(
+        `SELECT favorite_key, favorite_json
+         FROM favorites
+         WHERE username = ?
+           AND ${SQLITE_STALE_FAVORITE_WHERE}
+           AND ${SQLITE_NON_LIVE_FAVORITE_WHERE}
+         ORDER BY favorite_key ASC
+         LIMIT ?`,
+      ),
+      getStaleFavoritePageAfter: this.db.prepare(
+        `SELECT favorite_key, favorite_json
+         FROM favorites
+         WHERE username = ?
+           AND favorite_key > ?
+           AND ${SQLITE_STALE_FAVORITE_WHERE}
+           AND ${SQLITE_NON_LIVE_FAVORITE_WHERE}
+         ORDER BY favorite_key ASC
+         LIMIT ?`,
       ),
       getFavoritePage: this.db.prepare(
         `SELECT f.favorite_key, f.favorite_json, p.record_json
@@ -1183,6 +1285,36 @@ export class LocalSqliteStorage implements IStorage {
     return result;
   }
 
+  async getStalePlayRecordPage(
+    userName: string,
+    now: number,
+    ttlMs: number,
+    limit: number,
+    cursorKey?: string,
+  ): Promise<MetadataRecordPage<PlayRecord>> {
+    const username = normalizeUsername(userName);
+    const pageLimit = Math.max(1, Math.floor(limit));
+    const staleBefore = now - ttlMs;
+    const rows = (
+      cursorKey !== undefined
+        ? this.stmts.getStalePlayRecordPageAfter.all(
+            username,
+            cursorKey,
+            staleBefore,
+            now,
+            pageLimit + 1,
+          )
+        : this.stmts.getStalePlayRecordPage.all(
+            username,
+            staleBefore,
+            now,
+            pageLimit + 1,
+          )
+    ) as Array<{ record_key: string; record_json: string }>;
+
+    return buildMetadataRecordPage<PlayRecord>(rows, pageLimit);
+  }
+
   async getPlayRecordPage(
     userName: string,
     limit: number,
@@ -1275,6 +1407,36 @@ export class LocalSqliteStorage implements IStorage {
       }
     }
     return result;
+  }
+
+  async getStaleFavoritePage(
+    userName: string,
+    now: number,
+    ttlMs: number,
+    limit: number,
+    cursorKey?: string,
+  ): Promise<MetadataRecordPage<Favorite>> {
+    const username = normalizeUsername(userName);
+    const pageLimit = Math.max(1, Math.floor(limit));
+    const staleBefore = now - ttlMs;
+    const rows = (
+      cursorKey !== undefined
+        ? this.stmts.getStaleFavoritePageAfter.all(
+            username,
+            cursorKey,
+            staleBefore,
+            now,
+            pageLimit + 1,
+          )
+        : this.stmts.getStaleFavoritePage.all(
+            username,
+            staleBefore,
+            now,
+            pageLimit + 1,
+          )
+    ) as Array<{ favorite_key: string; favorite_json: string }>;
+
+    return buildMetadataFavoritePage(rows, pageLimit);
   }
 
   async getFavoritePage(

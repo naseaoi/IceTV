@@ -6,6 +6,7 @@ import { getStorageType } from './storage-type';
 import {
   Favorite,
   IStorage,
+  MetadataRecordPage,
   PlaybackRangeWatchTotal,
   PlaybackSession,
   PlaybackSessionQuery,
@@ -83,6 +84,23 @@ class DbManager {
   }> {
     const storage = await this.getStorage();
     return storage.getAllPlayRecords(userName);
+  }
+
+  async getStalePlayRecordPage(
+    userName: string,
+    now: number,
+    ttlMs: number,
+    limit: number,
+    cursorKey?: string,
+  ): Promise<MetadataRecordPage<PlayRecord>> {
+    const storage = await this.getStorage();
+    return storage.getStalePlayRecordPage(
+      userName,
+      now,
+      ttlMs,
+      limit,
+      cursorKey,
+    );
   }
 
   async getPlayRecordPage(
@@ -169,6 +187,17 @@ class DbManager {
   ): Promise<{ [key: string]: Favorite }> {
     const storage = await this.getStorage();
     return storage.getAllFavorites(userName);
+  }
+
+  async getStaleFavoritePage(
+    userName: string,
+    now: number,
+    ttlMs: number,
+    limit: number,
+    cursorKey?: string,
+  ): Promise<MetadataRecordPage<Favorite>> {
+    const storage = await this.getStorage();
+    return storage.getStaleFavoritePage(userName, now, ttlMs, limit, cursorKey);
   }
 
   async getFavoritePage(

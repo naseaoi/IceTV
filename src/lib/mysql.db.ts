@@ -21,6 +21,7 @@ import {
   Favorite,
   FavoritePage,
   IStorage,
+  MetadataRecordPage,
   PlaybackRangeWatchTotal,
   PlaybackSession,
   PlaybackSessionQuery,
@@ -44,6 +45,33 @@ const {
   unreadWhere: MYSQL_UNREAD_TRACKING_WHERE,
 } = buildTrackingSql(MYSQL_TRACKING_DIALECT);
 const PLAY_RECORD_BATCH_SIZE = 200;
+
+const MYSQL_STALE_PLAY_RECORD_WHERE = `
+  CASE
+    WHEN JSON_VALID(record_json) = 0 THEN 1
+    WHEN JSON_TYPE(JSON_EXTRACT(record_json, '$.metadata_checked_at')) IS NULL THEN 1
+    WHEN JSON_TYPE(JSON_EXTRACT(record_json, '$.metadata_checked_at')) NOT IN ('INTEGER', 'UNSIGNED INTEGER', 'DOUBLE', 'DECIMAL') THEN 1
+    WHEN CAST(JSON_UNQUOTE(JSON_EXTRACT(record_json, '$.metadata_checked_at')) AS DECIMAL(30, 6)) <= ? THEN 1
+    WHEN CAST(JSON_UNQUOTE(JSON_EXTRACT(record_json, '$.metadata_checked_at')) AS DECIMAL(30, 6)) > ? THEN 1
+    ELSE 0
+  END = 1`;
+
+const MYSQL_STALE_FAVORITE_WHERE = `
+  CASE
+    WHEN JSON_VALID(favorite_json) = 0 THEN 1
+    WHEN JSON_TYPE(JSON_EXTRACT(favorite_json, '$.metadata_checked_at')) IS NULL THEN 1
+    WHEN JSON_TYPE(JSON_EXTRACT(favorite_json, '$.metadata_checked_at')) NOT IN ('INTEGER', 'UNSIGNED INTEGER', 'DOUBLE', 'DECIMAL') THEN 1
+    WHEN CAST(JSON_UNQUOTE(JSON_EXTRACT(favorite_json, '$.metadata_checked_at')) AS DECIMAL(30, 6)) <= ? THEN 1
+    WHEN CAST(JSON_UNQUOTE(JSON_EXTRACT(favorite_json, '$.metadata_checked_at')) AS DECIMAL(30, 6)) > ? THEN 1
+    ELSE 0
+  END = 1`;
+
+const MYSQL_NON_LIVE_FAVORITE_WHERE = `
+  CASE
+    WHEN JSON_VALID(favorite_json) = 0 THEN 1
+    WHEN JSON_UNQUOTE(JSON_EXTRACT(favorite_json, '$.origin')) = 'live' THEN 0
+    ELSE 1
+  END = 1`;
 
 function parseInteger(value: string | undefined, fallback: number): number {
   if (!value) {
@@ -143,6 +171,44 @@ function buildFavoritePage(
       rows.length > limit && lastItem
         ? `${lastItem.favorite.save_time}|${lastItem.key}`
         : null,
+  };
+}
+
+function buildMetadataRecordPage<T>(
+  rows: JsonRow[],
+  limit: number,
+): MetadataRecordPage<T> {
+  const pageRows = rows.slice(0, limit);
+  const items = pageRows.flatMap((row) => {
+    if (!row.record_key || !row.record_json) return [];
+    const parsed = parseJsonValue<T>(row.record_json);
+    return !parsed ? [] : [{ key: row.record_key, item: parsed }];
+  });
+  const lastRow = pageRows.at(-1);
+
+  return {
+    items,
+    nextCursor:
+      rows.length > limit && lastRow ? (lastRow.record_key ?? '') : null,
+  };
+}
+
+function buildMetadataFavoritePage(
+  rows: JsonRow[],
+  limit: number,
+): MetadataRecordPage<Favorite> {
+  const pageRows = rows.slice(0, limit);
+  const items = pageRows.flatMap((row) => {
+    if (!row.favorite_key || !row.favorite_json) return [];
+    const parsed = parseJsonValue<Favorite>(row.favorite_json);
+    return !parsed ? [] : [{ key: row.favorite_key, item: parsed }];
+  });
+  const lastRow = pageRows.at(-1);
+
+  return {
+    items,
+    nextCursor:
+      rows.length > limit && lastRow ? (lastRow.favorite_key ?? '') : null,
   };
 }
 
@@ -512,6 +578,41 @@ export class MySqlStorage implements IStorage {
     return result;
   }
 
+  async getStalePlayRecordPage(
+    userName: string,
+    now: number,
+    ttlMs: number,
+    limit: number,
+    cursorKey?: string,
+  ): Promise<MetadataRecordPage<PlayRecord>> {
+    await this.ensureInitialized();
+    const username = normalizeUsername(userName);
+    const pageLimit = Math.max(1, Math.floor(limit));
+    const staleBefore = now - ttlMs;
+    const hasCursor = cursorKey !== undefined;
+    const [rows] = await this.pool.query<JsonRow[]>(
+      hasCursor
+        ? `SELECT record_key, record_json
+           FROM play_records
+           WHERE username = ?
+             AND record_key > ?
+             AND ${MYSQL_STALE_PLAY_RECORD_WHERE}
+           ORDER BY record_key ASC
+           LIMIT ?`
+        : `SELECT record_key, record_json
+           FROM play_records
+           WHERE username = ?
+             AND ${MYSQL_STALE_PLAY_RECORD_WHERE}
+           ORDER BY record_key ASC
+           LIMIT ?`,
+      hasCursor
+        ? [username, cursorKey, staleBefore, now, pageLimit + 1]
+        : [username, staleBefore, now, pageLimit + 1],
+    );
+
+    return buildMetadataRecordPage<PlayRecord>(rows, pageLimit);
+  }
+
   async getPlayRecordPage(
     userName: string,
     limit: number,
@@ -651,6 +752,43 @@ export class MySqlStorage implements IStorage {
     }
 
     return result;
+  }
+
+  async getStaleFavoritePage(
+    userName: string,
+    now: number,
+    ttlMs: number,
+    limit: number,
+    cursorKey?: string,
+  ): Promise<MetadataRecordPage<Favorite>> {
+    await this.ensureInitialized();
+    const username = normalizeUsername(userName);
+    const pageLimit = Math.max(1, Math.floor(limit));
+    const staleBefore = now - ttlMs;
+    const hasCursor = cursorKey !== undefined;
+    const [rows] = await this.pool.query<JsonRow[]>(
+      hasCursor
+        ? `SELECT favorite_key, favorite_json
+           FROM favorites
+           WHERE username = ?
+             AND favorite_key > ?
+             AND ${MYSQL_STALE_FAVORITE_WHERE}
+             AND ${MYSQL_NON_LIVE_FAVORITE_WHERE}
+           ORDER BY favorite_key ASC
+           LIMIT ?`
+        : `SELECT favorite_key, favorite_json
+           FROM favorites
+           WHERE username = ?
+             AND ${MYSQL_STALE_FAVORITE_WHERE}
+             AND ${MYSQL_NON_LIVE_FAVORITE_WHERE}
+           ORDER BY favorite_key ASC
+           LIMIT ?`,
+      hasCursor
+        ? [username, cursorKey, staleBefore, now, pageLimit + 1]
+        : [username, staleBefore, now, pageLimit + 1],
+    );
+
+    return buildMetadataFavoritePage(rows, pageLimit);
   }
 
   async getFavoritePage(

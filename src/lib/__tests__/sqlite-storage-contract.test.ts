@@ -406,6 +406,66 @@ describe('sqlite storage contract', () => {
     expect(secondPage.nextCursor).toBeNull();
   });
 
+  it('按主键游标分页读取过期元数据并排除新鲜项与直播收藏', async () => {
+    const storage = new LocalSqliteStorage(':memory:');
+    const now = 10_000;
+    const ttlMs = 1_000;
+
+    await storage.setPlayRecords('metadata-user', {
+      'source+a': { ...playRecord, metadata_checked_at: 9_500 },
+      'source+b': { ...playRecord, metadata_checked_at: 8_000 },
+      'source+c': { ...playRecord },
+      'source+d': { ...playRecord, metadata_checked_at: now + 1 },
+      'source+e': {
+        ...playRecord,
+        metadata_checked_at: 'invalid' as unknown as number,
+      },
+    });
+    await storage.setFavorite('metadata-user', 'source+a', {
+      ...favorite,
+      metadata_checked_at: 9_500,
+    });
+    await storage.setFavorite('metadata-user', 'source+b', {
+      ...favorite,
+      metadata_checked_at: 8_000,
+    });
+    await storage.setFavorite('metadata-user', 'source-live', {
+      ...favorite,
+      origin: 'live',
+    });
+
+    const firstRecords = await storage.getStalePlayRecordPage(
+      'metadata-user',
+      now,
+      ttlMs,
+      2,
+    );
+    const secondRecords = await storage.getStalePlayRecordPage(
+      'metadata-user',
+      now,
+      ttlMs,
+      2,
+      firstRecords.nextCursor || undefined,
+    );
+    const favorites = await storage.getStaleFavoritePage(
+      'metadata-user',
+      now,
+      ttlMs,
+      10,
+    );
+
+    expect(firstRecords.items.map(({ key }) => key)).toEqual([
+      'source+b',
+      'source+c',
+    ]);
+    expect(secondRecords.items.map(({ key }) => key)).toEqual([
+      'source+d',
+      'source+e',
+    ]);
+    expect(secondRecords.nextCursor).toBeNull();
+    expect(favorites.items.map(({ key }) => key)).toEqual(['source+b']);
+  });
+
   it('replaces all data from an import snapshot', async () => {
     const storage = new LocalSqliteStorage(':memory:');
     const passwordHash =
