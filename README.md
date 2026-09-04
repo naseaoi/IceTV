@@ -100,7 +100,7 @@ services:
       - ICETV_PASSWORD=admin_password
       - AUTH_SECRET=replace_with_random_auth_secret
       - CRON_SECRET=replace_with_random_secret
-      - LOCAL_DB_PATH=/data/icetv.sqlite
+      - LOCAL_DB_PATH=/data/icetv-data.sqlite
     volumes:
       - icetv-data:/data
 
@@ -154,11 +154,11 @@ volumes:
 | `AUTH_SECRET`              | 签名密钥     | 是          | 无（至少 32 字符）             |
 | `CRON_SECRET`              | 定时任务密钥 | Docker 必填 | 无                             |
 | `NEXT_PUBLIC_STORAGE_TYPE` | 存储类型     | 否          | 有 `DATABASE_URL` 时为 `mysql` |
-| `LOCAL_DB_PATH`            | SQLite 路径  | 否          | `/data/icetv.sqlite`           |
+| `LOCAL_DB_PATH`            | SQLite 路径  | 否          | `/data/icetv-data.sqlite`      |
 | `DATABASE_URL`             | MySQL 连接   | MySQL 必填  | 无                             |
 | `DANMAKU_API_BASE_URL`     | 弹幕服务地址 | 启用弹幕时  | 空                             |
 
-完整变量列表见 [.env.example](.env.example) 和 [部署文档](docs/deployment.md)。
+完整变量说明以 [.env.example](.env.example) 为准；部署步骤见 [部署文档](docs/deployment.md)。
 
 > [!IMPORTANT]
 >

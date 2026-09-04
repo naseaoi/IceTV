@@ -31,7 +31,7 @@ services:
       - ICETV_PASSWORD=admin_password
       - AUTH_SECRET=replace_with_random_auth_secret
       - CRON_SECRET=replace_with_random_secret
-      - LOCAL_DB_PATH=/data/icetv.sqlite
+      - LOCAL_DB_PATH=/data/icetv-data.sqlite
     volumes:
       - icetv-data:/data
 
@@ -138,7 +138,7 @@ services:
       - ICETV_PASSWORD=admin_password
       - AUTH_SECRET=replace_with_random_auth_secret
       - CRON_SECRET=replace_with_random_secret
-      - LOCAL_DB_PATH=/data/icetv.sqlite
+      - LOCAL_DB_PATH=/data/icetv-data.sqlite
       - DANMAKU_API_BASE_URL=http://danmu-api:9321/replace_with_random_token
     volumes:
       - icetv-data:/data
@@ -269,7 +269,7 @@ DATABASE_URL=mysql://user:password@host:3306/dbname
 | 变量                       | 说明        | 默认值                             |
 | -------------------------- | ----------- | ---------------------------------- |
 | `NEXT_PUBLIC_STORAGE_TYPE` | 存储类型    | 有 `DATABASE_URL` 时自动为 `mysql` |
-| `LOCAL_DB_PATH`            | SQLite 路径 | `/data/icetv.sqlite`               |
+| `LOCAL_DB_PATH`            | SQLite 路径 | `/data/icetv-data.sqlite`          |
 | `DATABASE_URL`             | MySQL 连接  | 无                                 |
 
 ### 弹幕相关
@@ -293,7 +293,7 @@ DATABASE_URL=mysql://user:password@host:3306/dbname
 > [!IMPORTANT]
 > 反代后设置 `TRUSTED_PROXY_COUNT` 为代理层数，否则注册限流可被绕过。
 
-`CACHE_PROFILE` 默认 `small`，按 1C1G 小鸡规格限制内存缓存。4GB 以上内存且搜索命中率低时可改 `standard`。
+`CACHE_PROFILE` 默认 `small`，服务端缓存预算约 100 MiB（不含 Node.js、SQLite、sharp 等其他进程开销），适合 1C1G 小鸡。4GB 以上内存且搜索命中率低时可改 `standard`，其缓存预算约 312 MiB。
 
 ---
 
@@ -319,7 +319,7 @@ docker compose up -d
 **SQLite 备份：**
 
 ```bash
-docker cp icetv:/data/icetv.sqlite ./backup/icetv-$(date +%Y%m%d).sqlite
+docker cp icetv:/data/icetv-data.sqlite ./backup/icetv-$(date +%Y%m%d).sqlite
 ```
 
 **MySQL 备份：**
