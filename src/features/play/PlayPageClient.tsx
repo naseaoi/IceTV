@@ -11,6 +11,7 @@ import {
 } from '@/features/play/components/PlayStateViews';
 import { useArtPlayer } from '@/features/play/hooks/useArtPlayer';
 import { useAuthRecovery } from '@/features/play/hooks/useAuthRecovery';
+import { useDanmakuPreference } from '@/features/play/hooks/useDanmakuPreference';
 import { useEpisodeSwitch } from '@/features/play/hooks/useEpisodeSwitch';
 import { usePlayFavorite } from '@/features/play/hooks/usePlayFavorite';
 import { updateVideoUrl, usePlayInit } from '@/features/play/hooks/usePlayInit';
@@ -56,7 +57,11 @@ function readInitialAggregateGroupLength() {
   }
 }
 
-function AuthenticatedPlayPageClient() {
+function AuthenticatedPlayPageClient({
+  initialDanmakuEnabled,
+}: {
+  initialDanmakuEnabled: boolean | null;
+}) {
   const searchParams = useSearchParams();
   const goBack = useBackNavigation('/');
 
@@ -156,6 +161,11 @@ function AuthenticatedPlayPageClient() {
     artRef,
     wakeLockRef,
   } = state;
+
+  const {
+    enabledRef: danmakuEnabledRef,
+    onEnabledChange: onDanmakuEnabledChange,
+  } = useDanmakuPreference(initialDanmakuEnabled);
 
   const totalEpisodes = detail?.episodes?.length || 0;
   const [isSingleAggregateStartup] = useState(
@@ -501,12 +511,16 @@ function AuthenticatedPlayPageClient() {
   );
 
   const handleDanmakuReload = useCallback(() => {
-    void reloadDanmaku(artPlayerRef.current, {
-      source: currentSourceRef.current,
-      videoId: currentIdRef.current,
-      episodeIndex: currentEpisodeIndexRef.current,
-      searchTitle: detailRef.current?.title || videoTitleRef.current || '',
-    });
+    void reloadDanmaku(
+      artPlayerRef.current,
+      {
+        source: currentSourceRef.current,
+        videoId: currentIdRef.current,
+        episodeIndex: currentEpisodeIndexRef.current,
+        searchTitle: detailRef.current?.title || videoTitleRef.current || '',
+      },
+      danmakuEnabledRef,
+    );
   }, [
     artPlayerRef,
     currentSourceRef,
@@ -514,6 +528,7 @@ function AuthenticatedPlayPageClient() {
     currentEpisodeIndexRef,
     detailRef,
     videoTitleRef,
+    danmakuEnabledRef,
   ]);
 
   const handleDanmakuHeatmapChange = useCallback(
@@ -566,6 +581,9 @@ function AuthenticatedPlayPageClient() {
     requestWakeLock,
     releaseWakeLock,
     cleanupPlayer,
+    danmakuEnabledRef,
+    onDanmakuEnabledChange,
+    onDanmakuReload: handleDanmakuReload,
     onSourceProxyFallbackStarted: useCallback(() => {
       setVideoLoadingAttempt((prev) => prev + 1);
     }, [setVideoLoadingAttempt]),
@@ -718,14 +736,20 @@ function AuthenticatedPlayPageClient() {
   return renderMainContent(null);
 }
 
-export function PlayPageClient() {
+export function PlayPageClient({
+  initialDanmakuEnabled = null,
+}: {
+  initialDanmakuEnabled?: boolean | null;
+} = {}) {
   return (
     <AuthenticatedRoute
       activePath='/play'
       contentMode='player'
       message='请先登录后再播放内容。'
     >
-      <AuthenticatedPlayPageClient />
+      <AuthenticatedPlayPageClient
+        initialDanmakuEnabled={initialDanmakuEnabled}
+      />
     </AuthenticatedRoute>
   );
 }

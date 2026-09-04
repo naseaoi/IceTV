@@ -276,6 +276,7 @@ type JsonRow = RowDataPacket & {
   bucket_date?: string;
   success_count?: number | string;
   failure_count?: number | string;
+  enabled?: number | boolean;
 };
 
 export class MySqlStorage implements IStorage {
@@ -387,6 +388,10 @@ export class MySqlStorage implements IStorage {
         episode_id INT NOT NULL,
         updated_at BIGINT NOT NULL,
         PRIMARY KEY (username, scope_key)
+      ) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci`,
+      `CREATE TABLE IF NOT EXISTS user_danmaku_settings (
+        username VARCHAR(191) NOT NULL PRIMARY KEY,
+        enabled TINYINT(1) NOT NULL
       ) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci`,
     ];
 
@@ -800,6 +805,10 @@ export class MySqlStorage implements IStorage {
         'DELETE FROM user_danmaku_episodes WHERE username = ?',
         [username],
       );
+      await connection.execute(
+        'DELETE FROM user_danmaku_settings WHERE username = ?',
+        [username],
+      );
     });
   }
 
@@ -1120,6 +1129,30 @@ export class MySqlStorage implements IStorage {
     await this.pool.execute(
       'DELETE FROM user_danmaku_episodes WHERE username = ? AND scope_key = ?',
       [username, scopeKey],
+    );
+  }
+
+  async getDanmakuEnabledPreference(userName: string): Promise<boolean | null> {
+    await this.ensureInitialized();
+    const username = normalizeUsername(userName);
+    const [rows] = await this.pool.query<JsonRow[]>(
+      'SELECT enabled FROM user_danmaku_settings WHERE username = ? LIMIT 1',
+      [username],
+    );
+    return rows.length > 0 ? Number(rows[0].enabled) !== 0 : null;
+  }
+
+  async setDanmakuEnabledPreference(
+    userName: string,
+    enabled: boolean,
+  ): Promise<void> {
+    await this.ensureInitialized();
+    const username = normalizeUsername(userName);
+    await this.pool.execute(
+      `INSERT INTO user_danmaku_settings (username, enabled)
+       VALUES (?, ?)
+       ON DUPLICATE KEY UPDATE enabled = VALUES(enabled)`,
+      [username, enabled ? 1 : 0],
     );
   }
 
@@ -1525,6 +1558,7 @@ export class MySqlStorage implements IStorage {
       await connection.execute('DELETE FROM user_login_activity');
       await connection.execute('DELETE FROM invite_code_usage');
       await connection.execute('DELETE FROM user_danmaku_episodes');
+      await connection.execute('DELETE FROM user_danmaku_settings');
     });
   }
 
@@ -1546,6 +1580,7 @@ export class MySqlStorage implements IStorage {
       await connection.execute('DELETE FROM user_login_activity');
       await connection.execute('DELETE FROM invite_code_usage');
       await connection.execute('DELETE FROM user_danmaku_episodes');
+      await connection.execute('DELETE FROM user_danmaku_settings');
 
       await connection.execute(
         'INSERT INTO admin_config (id, config_json) VALUES (1, ?)',
@@ -1598,6 +1633,11 @@ export class MySqlStorage implements IStorage {
         'username',
         'state_json',
       ]);
+      const danmakuSettings = createRowBatcher(
+        connection,
+        'user_danmaku_settings',
+        ['username', 'enabled'],
+      );
       const loginActivities = createRowBatcher(
         connection,
         'user_login_activity',
@@ -1656,6 +1696,13 @@ export class MySqlStorage implements IStorage {
           ]);
         }
 
+        if (typeof userData.danmakuEnabled === 'boolean') {
+          await danmakuSettings.add([
+            username,
+            userData.danmakuEnabled ? 1 : 0,
+          ]);
+        }
+
         if (typeof userData.lastLoginAt === 'number') {
           await loginActivities.add([username, userData.lastLoginAt]);
         }
@@ -1703,6 +1750,7 @@ export class MySqlStorage implements IStorage {
       }
 
       await messageStates.flush();
+      await danmakuSettings.flush();
       await loginActivities.flush();
       await playRecords.flush();
       await favorites.flush();

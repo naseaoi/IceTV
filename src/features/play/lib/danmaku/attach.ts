@@ -1,14 +1,13 @@
 import { createDanmakuPlugin } from '@/features/play/lib/danmaku/plugin';
 import {
+  type DanmakuEnabledReader,
   type DanmakuLoadContext,
   loadDanmakuForEpisode,
 } from '@/features/play/lib/danmaku/resolve';
 import type { DanmakuItem } from '@/features/play/lib/danmaku/types';
 import {
-  readDanmakuEnabled,
   readDanmakuFontSize,
   readDanmakuOpacity,
-  writeDanmakuEnabled,
   writeDanmakuFontSize,
   writeDanmakuOpacity,
 } from '@/lib/local-preferences';
@@ -41,6 +40,14 @@ type DanmakuEventBinder = (
   handler: (payload: DanmakuConfigEvent) => void,
 ) => unknown;
 
+export type DanmakuEnabledRef = { current: boolean };
+
+export interface DanmakuSettingPersistenceOptions {
+  enabledRef: DanmakuEnabledRef;
+  onEnabledChange?: (enabled: boolean) => void;
+  onEnable?: () => void;
+}
+
 // Artplayer 的 on 依赖 this.e，摘出方法再调用会抛错，必须绑回播放器
 function bindPlayerEvent(player: PlayerWithPlugins): DanmakuEventBinder | null {
   if (typeof player.on !== 'function') return null;
@@ -66,22 +73,26 @@ export function getDanmakuPluginApi(
 
 export function buildDanmakuLoader(
   context: DanmakuLoadContext,
+  isEnabled: DanmakuEnabledReader,
 ): () => Promise<DanmakuItem[]> {
-  return () => loadDanmakuForEpisode(context);
+  return () => loadDanmakuForEpisode(context, isEnabled);
 }
 
-// 站点未开启或本地关闭时不构造插件，避免无谓的动态 import
+// 站点未开启时不构造插件，避免无谓的动态 import；账号关闭由加载器返回空数据
 export async function createDanmakuPluginIfEnabled(
   context: DanmakuLoadContext,
+  enabledRef: DanmakuEnabledRef,
 ) {
   if (!isDanmakuFeatureEnabled()) return null;
 
+  const isEnabled = () => enabledRef.current;
+
   try {
     return await createDanmakuPlugin({
-      loadItems: buildDanmakuLoader(context),
+      loadItems: buildDanmakuLoader(context, isEnabled),
       opacity: readDanmakuOpacity(),
       fontSize: readDanmakuFontSize(),
-      visible: readDanmakuEnabled(),
+      visible: enabledRef.current,
       heatmap: true,
     });
   } catch (error) {
@@ -100,9 +111,10 @@ export function applyDanmakuHeatmapVisibility(
   element.style.display = visible ? '' : 'none';
 }
 
-// 监听配置变更并持久化
+// 监听配置变更、持久化，并在开启边沿触发数据重载
 export function bindDanmakuSettingPersistence(
   player: PlayerWithPlugins | null,
+  options: DanmakuSettingPersistenceOptions,
 ): void {
   if (!player) return;
   const on = bindPlayerEvent(player);
@@ -116,20 +128,31 @@ export function bindDanmakuSettingPersistence(
     }
   });
 
-  on('artplayerPluginDanmuku:show', () => writeDanmakuEnabled(true));
-  on('artplayerPluginDanmuku:hide', () => writeDanmakuEnabled(false));
+  on('artplayerPluginDanmuku:show', () => {
+    const wasEnabled = options.enabledRef.current;
+    if (wasEnabled) return;
+    options.enabledRef.current = true;
+    options.onEnabledChange?.(true);
+    options.onEnable?.();
+  });
+  on('artplayerPluginDanmuku:hide', () => {
+    if (!options.enabledRef.current) return;
+    options.enabledRef.current = false;
+    options.onEnabledChange?.(false);
+  });
 }
 
 // load() 无参时清空旧弹幕，带参时追加；重载前需更新 option.danmuku
 export async function reloadDanmaku(
   player: PlayerWithPlugins | null,
   context: DanmakuLoadContext,
+  enabledRef: DanmakuEnabledRef,
 ): Promise<void> {
   const api = getDanmakuPluginApi(player);
   if (!api?.option) return;
 
   try {
-    api.option.danmuku = buildDanmakuLoader(context);
+    api.option.danmuku = buildDanmakuLoader(context, () => enabledRef.current);
     await api.load();
   } catch (error) {
     console.warn('弹幕重载失败:', error);

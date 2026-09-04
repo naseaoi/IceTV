@@ -391,6 +391,19 @@ class DbManager {
     await storage.deleteDanmakuEpisodeId(userName, scopeKey);
   }
 
+  async getDanmakuEnabledPreference(userName: string): Promise<boolean | null> {
+    const storage = await this.getStorage();
+    return storage.getDanmakuEnabledPreference(userName);
+  }
+
+  async setDanmakuEnabledPreference(
+    userName: string,
+    enabled: boolean,
+  ): Promise<void> {
+    const storage = await this.getStorage();
+    await storage.setDanmakuEnabledPreference(userName, enabled);
+  }
+
   async savePlaybackSession(
     userName: string,
     session: PlaybackSession,

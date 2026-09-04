@@ -138,6 +138,7 @@ export interface StorageUserImportData {
   skipConfigs: { [key: string]: SkipConfig };
   playbackSessions: { [key: string]: PlaybackSession };
   messageState?: UserMessageState;
+  danmakuEnabled?: boolean;
   lastLoginAt?: number;
 }
 
@@ -291,6 +292,11 @@ export interface IStorage {
     episodeId: number,
   ): Promise<void>;
   deleteDanmakuEpisodeId(userName: string, scopeKey: string): Promise<void>;
+  getDanmakuEnabledPreference(userName: string): Promise<boolean | null>;
+  setDanmakuEnabledPreference(
+    userName: string,
+    enabled: boolean,
+  ): Promise<void>;
 
   // 数据清理相关
   clearAllData(): Promise<void>;

@@ -32,6 +32,7 @@ type FakeState = {
   loginActivities: Map<string, number>;
   inviteCodeUsage: Map<string, number>;
   danmakuEpisodes: Map<string, Map<string, number>>;
+  danmakuEnabled: Map<string, boolean>;
 };
 
 function cloneNestedMap(source: Map<string, Map<string, string>>) {
@@ -59,6 +60,7 @@ function cloneState(state: FakeState): FakeState {
         new Map(value),
       ]),
     ),
+    danmakuEnabled: new Map(state.danmakuEnabled),
   };
 }
 
@@ -76,6 +78,7 @@ function createState(): FakeState {
     loginActivities: new Map(),
     inviteCodeUsage: new Map(),
     danmakuEpisodes: new Map(),
+    danmakuEnabled: new Map(),
   };
 }
 
@@ -238,6 +241,28 @@ function createFakePool() {
 
     if (normalized === 'DELETE FROM user_message_state') {
       currentState.messageStates.clear();
+      return [[], []];
+    }
+
+    if (normalized === 'DELETE FROM user_danmaku_settings WHERE username = ?') {
+      const [username] = params as [string];
+      currentState.danmakuEnabled.delete(username);
+      return [[], []];
+    }
+
+    if (normalized === 'DELETE FROM user_danmaku_settings') {
+      currentState.danmakuEnabled.clear();
+      return [[], []];
+    }
+
+    if (
+      normalized ===
+        'INSERT INTO user_danmaku_settings (username, enabled) VALUES (?, ?) ON DUPLICATE KEY UPDATE enabled = VALUES(enabled)' ||
+      normalized ===
+        'INSERT INTO user_danmaku_settings (username, enabled) VALUES (?, ?)'
+    ) {
+      const [username, enabled] = params as [string, number | boolean];
+      currentState.danmakuEnabled.set(username, Number(enabled) !== 0);
       return [[], []];
     }
 
@@ -1217,6 +1242,15 @@ function createFakePool() {
       return [episodeId === undefined ? [] : [{ episode_id: episodeId }], []];
     }
 
+    if (
+      normalized ===
+      'SELECT enabled FROM user_danmaku_settings WHERE username = ? LIMIT 1'
+    ) {
+      const [username] = params as [string];
+      const enabled = currentState.danmakuEnabled.get(username);
+      return [enabled === undefined ? [] : [{ enabled: enabled ? 1 : 0 }], []];
+    }
+
     if (normalized === 'SELECT code, used_count FROM invite_code_usage') {
       return [
         Array.from(currentState.inviteCodeUsage.entries()).map(
@@ -1557,6 +1591,7 @@ describe('mysql storage contract', () => {
     await storage.setUserMessageState('demo-user', {
       readAnnouncementId: 'announcement:v1',
     });
+    await storage.setDanmakuEnabledPreference('demo-user', true);
     await storage.recordUserLogin('demo-user', 1700000000000);
     await storage.addSearchHistory('demo-user', 'second');
     await storage.addSearchHistory('demo-user', 'first');
@@ -1581,6 +1616,12 @@ describe('mysql storage contract', () => {
     await expect(storage.getUserMessageState('demo-user')).resolves.toEqual({
       readAnnouncementId: 'announcement:v1',
     });
+    await expect(
+      storage.getDanmakuEnabledPreference('demo-user'),
+    ).resolves.toBe(true);
+    await expect(
+      storage.getDanmakuEnabledPreference('other-user'),
+    ).resolves.toBeNull();
     await expect(storage.getUserLastLogin('demo-user')).resolves.toBe(
       1700000000000,
     );
@@ -1597,6 +1638,9 @@ describe('mysql storage contract', () => {
     await expect(storage.getPlaybackSessions('demo-user')).resolves.toEqual([]);
     await expect(storage.getSearchHistory('demo-user')).resolves.toEqual([]);
     await expect(storage.getUserMessageState('demo-user')).resolves.toEqual({});
+    await expect(
+      storage.getDanmakuEnabledPreference('demo-user'),
+    ).resolves.toBeNull();
     await expect(storage.getUserLastLogin('demo-user')).resolves.toBeNull();
     await expect(storage.getAllUserLastLogins()).resolves.toEqual({});
   });
@@ -1848,6 +1892,7 @@ describe('mysql storage contract', () => {
           skipConfigs: { 'source+1': skipConfig },
           playbackSessions: { [playbackSession.id]: playbackSession },
           messageState: { readAnnouncementId: 'announcement:v1' },
+          danmakuEnabled: false,
           lastLoginAt: 1700000000000,
         },
       },
@@ -1890,6 +1935,9 @@ describe('mysql storage contract', () => {
     await expect(storage.getUserMessageState('demo-user')).resolves.toEqual({
       readAnnouncementId: 'announcement:v1',
     });
+    await expect(
+      storage.getDanmakuEnabledPreference('demo-user'),
+    ).resolves.toBe(false);
     await expect(storage.getUserLastLogin('demo-user')).resolves.toBe(
       1700000000000,
     );

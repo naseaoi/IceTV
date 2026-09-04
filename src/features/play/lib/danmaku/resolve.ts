@@ -8,10 +8,11 @@ import { applyOffset } from '@/features/play/lib/danmaku/plugin';
 import type { DanmakuItem } from '@/features/play/lib/danmaku/types';
 import {
   buildDanmakuScopeKey,
-  readDanmakuEnabled,
   readDanmakuOffset,
   writeDanmakuEpisodeId,
 } from '@/lib/local-preferences';
+
+export type DanmakuEnabledReader = () => boolean;
 
 export interface DanmakuLoadContext {
   source: string;
@@ -44,8 +45,9 @@ async function resolveEpisodeId(
 
 export async function loadDanmakuForEpisode(
   context: DanmakuLoadContext,
+  isEnabled: DanmakuEnabledReader,
 ): Promise<DanmakuItem[]> {
-  if (!readDanmakuEnabled()) return [];
+  if (!isEnabled()) return [];
 
   const scopeKey = buildDanmakuScopeKey(
     context.source,

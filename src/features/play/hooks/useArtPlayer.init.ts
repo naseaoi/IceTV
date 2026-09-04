@@ -119,7 +119,10 @@ export async function initializeArtPlayer(
     requestWakeLock,
     releaseWakeLock,
     cleanupPlayer,
+    danmakuEnabledRef,
+    onDanmakuEnabledChange,
     onPlaybackStarted,
+    onDanmakuReload,
     onSourceProxyFallbackStarted,
     onCurrentSourceVideoInfo,
   } = params;
@@ -229,7 +232,7 @@ export async function initializeArtPlayer(
       if (reusedPlayer.video) {
         ensureVideoSource(reusedPlayer.video as HTMLVideoElement, playbackUrl);
       }
-      void reloadDanmaku(reusedPlayer, danmakuContext);
+      void reloadDanmaku(reusedPlayer, danmakuContext, danmakuEnabledRef);
       return;
     }
 
@@ -269,7 +272,10 @@ export async function initializeArtPlayer(
     configureArtplayerStatics(Artplayer);
     Artplayer.PLAYBACK_RATE = [0.5, 0.75, 1, 1.25, 1.5, 2, 3];
 
-    const danmakuPlugin = await createDanmakuPluginIfEnabled(danmakuContext);
+    const danmakuPlugin = await createDanmakuPluginIfEnabled(
+      danmakuContext,
+      danmakuEnabledRef,
+    );
     if (isCancelled() || !artRef.current) {
       return;
     }
@@ -696,7 +702,11 @@ export async function initializeArtPlayer(
 
     const unbindDanmakuSliderDrag = bindDanmakuSliderDrag(player);
     player.on('destroy', unbindDanmakuSliderDrag);
-    bindDanmakuSettingPersistence(player);
+    bindDanmakuSettingPersistence(player, {
+      enabledRef: danmakuEnabledRef,
+      onEnabledChange: onDanmakuEnabledChange,
+      onEnable: onDanmakuReload,
+    });
 
     player.on('ready', () => {
       setError(null);

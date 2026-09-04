@@ -464,6 +464,16 @@ export function readDanmakuEnabled(): boolean {
   return readStoredBoolean(DANMAKU_ENABLED_STORAGE_KEY) ?? false;
 }
 
+// 仅用于把旧版客户端偏好迁移到账号设置
+export function readStoredDanmakuEnabled(): boolean | undefined {
+  return readStoredBoolean(DANMAKU_ENABLED_STORAGE_KEY);
+}
+
+// 账号设置成功接管后清理旧版客户端偏好
+export function clearStoredDanmakuEnabled(): void {
+  resetStoredBoolean(DANMAKU_ENABLED_STORAGE_KEY);
+}
+
 export function writeDanmakuEnabled(value: boolean): void {
   writeStoredBoolean(DANMAKU_ENABLED_STORAGE_KEY, value);
 }

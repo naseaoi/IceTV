@@ -61,7 +61,10 @@ export interface UseArtPlayerParams {
   requestWakeLock: () => Promise<void>;
   releaseWakeLock: () => Promise<void>;
   cleanupPlayer: () => void;
+  danmakuEnabledRef: MutableRefObject<boolean>;
+  onDanmakuEnabledChange?: (enabled: boolean) => void;
   onPlaybackStarted?: () => void;
+  onDanmakuReload?: () => void;
   onSourceProxyFallbackStarted?: () => void;
   onCurrentSourceVideoInfo?: (
     info: CurrentSourceVideoInfo,

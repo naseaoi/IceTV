@@ -347,6 +347,9 @@ export class LocalSqliteStorage implements IStorage {
     getDanmakuEpisodeId: Database.Statement;
     setDanmakuEpisodeId: Database.Statement;
     deleteDanmakuEpisodeId: Database.Statement;
+    getDanmakuEnabledPreference: Database.Statement;
+    setDanmakuEnabledPreference: Database.Statement;
+    deleteDanmakuEnabledPreferenceByUser: Database.Statement;
   };
 
   constructor(dbPath?: string) {
@@ -536,6 +539,11 @@ export class LocalSqliteStorage implements IStorage {
         episode_id INTEGER NOT NULL,
         updated_at INTEGER NOT NULL,
         PRIMARY KEY (username, scope_key)
+      );
+
+      CREATE TABLE IF NOT EXISTS user_danmaku_settings (
+        username TEXT PRIMARY KEY,
+        enabled INTEGER NOT NULL
       );
     `);
   }
@@ -809,6 +817,15 @@ export class LocalSqliteStorage implements IStorage {
       deleteDanmakuEpisodeId: this.db.prepare(
         'DELETE FROM user_danmaku_episodes WHERE username = ? AND scope_key = ?',
       ),
+      getDanmakuEnabledPreference: this.db.prepare(
+        'SELECT enabled FROM user_danmaku_settings WHERE username = ?',
+      ),
+      setDanmakuEnabledPreference: this.db.prepare(
+        'INSERT OR REPLACE INTO user_danmaku_settings (username, enabled) VALUES (?, ?)',
+      ),
+      deleteDanmakuEnabledPreferenceByUser: this.db.prepare(
+        'DELETE FROM user_danmaku_settings WHERE username = ?',
+      ),
     };
   }
 
@@ -821,6 +838,7 @@ export class LocalSqliteStorage implements IStorage {
       'SELECT 1 AS v FROM skip_configs LIMIT 1',
       'SELECT 1 AS v FROM playback_sessions LIMIT 1',
       'SELECT 1 AS v FROM admin_config LIMIT 1',
+      'SELECT 1 AS v FROM user_danmaku_settings LIMIT 1',
     ];
     return checks.some((sql) => Boolean(this.db.prepare(sql).get()));
   }
@@ -963,6 +981,12 @@ export class LocalSqliteStorage implements IStorage {
           legacy,
           canonical,
         );
+        this.mergeSingleRowTable(
+          'user_danmaku_settings',
+          'enabled',
+          legacy,
+          canonical,
+        );
         this.db
           .prepare(
             'UPDATE playback_sessions SET username = ? WHERE username = ?',
@@ -987,6 +1011,7 @@ export class LocalSqliteStorage implements IStorage {
       'skip_configs',
       'playback_sessions',
       'user_message_state',
+      'user_danmaku_settings',
     ];
     const usernames = new Set<string>();
     for (const table of tables) {
@@ -1358,6 +1383,7 @@ export class LocalSqliteStorage implements IStorage {
       this.db
         .prepare('DELETE FROM user_danmaku_episodes WHERE username = ?')
         .run(targetUser);
+      this.stmts.deleteDanmakuEnabledPreferenceByUser.run(targetUser);
     });
     remove(username);
   }
@@ -1593,6 +1619,22 @@ export class LocalSqliteStorage implements IStorage {
   ): Promise<void> {
     const username = normalizeUsername(userName);
     this.stmts.deleteDanmakuEpisodeId.run(username, scopeKey);
+  }
+
+  async getDanmakuEnabledPreference(userName: string): Promise<boolean | null> {
+    const username = normalizeUsername(userName);
+    const row = this.stmts.getDanmakuEnabledPreference.get(username) as
+      | { enabled: number }
+      | undefined;
+    return row ? row.enabled !== 0 : null;
+  }
+
+  async setDanmakuEnabledPreference(
+    userName: string,
+    enabled: boolean,
+  ): Promise<void> {
+    const username = normalizeUsername(userName);
+    this.stmts.setDanmakuEnabledPreference.run(username, enabled ? 1 : 0);
   }
 
   async setPlaybackSession(
@@ -1931,6 +1973,7 @@ export class LocalSqliteStorage implements IStorage {
         DELETE FROM user_login_activity;
         DELETE FROM invite_code_usage;
         DELETE FROM user_danmaku_episodes;
+        DELETE FROM user_danmaku_settings;
       `);
     });
 
@@ -1957,6 +2000,7 @@ export class LocalSqliteStorage implements IStorage {
         DELETE FROM user_login_activity;
         DELETE FROM invite_code_usage;
         DELETE FROM user_danmaku_episodes;
+        DELETE FROM user_danmaku_settings;
       `);
 
       this.stmts.setAdminConfig.run(JSON.stringify(snapshot.adminConfig));
@@ -1998,6 +2042,12 @@ export class LocalSqliteStorage implements IStorage {
           this.stmts.setUserMessageState.run(
             username,
             JSON.stringify(userData.messageState),
+          );
+        }
+        if (typeof userData.danmakuEnabled === 'boolean') {
+          this.stmts.setDanmakuEnabledPreference.run(
+            username,
+            userData.danmakuEnabled ? 1 : 0,
           );
         }
         if (typeof userData.lastLoginAt === 'number') {

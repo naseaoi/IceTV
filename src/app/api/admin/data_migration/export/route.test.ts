@@ -29,6 +29,7 @@ function makeDb(searchHistory: string[]) {
     getAllSkipConfigs: jest.fn().mockResolvedValue({}),
     getAllPlaybackSessions: jest.fn().mockResolvedValue([]),
     getUserMessageState: jest.fn().mockResolvedValue(null),
+    getDanmakuEnabledPreference: jest.fn().mockResolvedValue(null),
     getUserLastActive: jest.fn().mockResolvedValue(null),
   };
 }
