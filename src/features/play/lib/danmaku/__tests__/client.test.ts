@@ -330,6 +330,24 @@ describe('fetchDanmakuComments', () => {
     expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 
+  it('带信号的显式刷新会把刷新参数传给服务端', async () => {
+    const fetchMock = jest.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ items: [] }),
+    } as Response);
+    globalThis.fetch = fetchMock as unknown as typeof fetch;
+
+    await expect(
+      fetchDanmakuComments(910005, new AbortController().signal, {
+        force: true,
+      }),
+    ).resolves.toEqual([]);
+    expect(fetchMock).toHaveBeenCalledWith(
+      '/api/danmaku/comments?episodeId=910005&refresh=1',
+      expect.objectContaining({ signal: expect.any(AbortSignal) }),
+    );
+  });
+
   it('保留服务端按后台参数返回的完整弹幕队列', async () => {
     const items = Array.from({ length: 2500 }, (_, index) => ({
       text: `弹幕${index}`,

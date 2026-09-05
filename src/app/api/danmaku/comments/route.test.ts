@@ -7,6 +7,7 @@ installWebPolyfills();
 
 const mockFetchDanmaku = jest.fn();
 const mockRecordFailure = jest.fn();
+const mockInvalidate = jest.fn();
 
 jest.mock('@/lib/api-auth', () => ({
   requireActiveUser: jest.fn().mockResolvedValue({ username: 'test-user' }),
@@ -22,6 +23,7 @@ jest.mock('@/lib/runtime-params', () => ({
 }));
 jest.mock('@/app/api/danmaku/cache', () => ({
   danmakuCommentsCache: {
+    invalidate: (...args: unknown[]) => mockInvalidate(...args),
     getOrLoad: (_key: string, load: () => Promise<unknown>) => load(),
   },
 }));
@@ -36,10 +38,11 @@ jest.mock('@/lib/server-proxy-guard', () => ({
 
 const { GET } = require('./route') as typeof import('./route');
 
-function createRequest(episodeId = '13143'): NextRequest {
+function createRequest(episodeId = '13143', refresh?: string): NextRequest {
+  const refreshQuery = refresh ? `&refresh=${refresh}` : '';
   return {
     nextUrl: new URL(
-      `http://localhost/api/danmaku/comments?episodeId=${episodeId}`,
+      `http://localhost/api/danmaku/comments?episodeId=${episodeId}${refreshQuery}`,
     ),
   } as NextRequest;
 }
@@ -47,6 +50,14 @@ function createRequest(episodeId = '13143'): NextRequest {
 describe('danmaku comment errors', () => {
   beforeEach(() => {
     jest.clearAllMocks();
+  });
+
+  it('invalidates only the requested cache entry on explicit refresh', async () => {
+    mockFetchDanmaku.mockResolvedValue({ items: [] });
+    const response = await GET(createRequest('13143', '1'));
+    expect(response.status).toBe(200);
+    expect(mockInvalidate).toHaveBeenCalledWith('13143:1000');
+    expect(mockFetchDanmaku).toHaveBeenCalledWith(13143, 1000);
   });
 
   it('returns an explicit recoverable 404 for expired episode IDs', async () => {

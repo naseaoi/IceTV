@@ -111,7 +111,7 @@ export async function loadDanmakuForEpisode(
       }
 
       if (items.length === 0) {
-        if (!candidate.persistOnSuccess) {
+        if (!candidate.persistOnSuccess && missingEpisode) {
           // 旧映射已失效，清掉后重新搜索并尝试新的候选。
           await clearPersistedEpisodeId(
             context.source,

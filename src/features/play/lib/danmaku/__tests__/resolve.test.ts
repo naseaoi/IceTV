@@ -80,7 +80,8 @@ describe('loadDanmakuForEpisode outcomes', () => {
     await expect(
       loadDanmakuForEpisode(context, () => true, { onError }),
     ).resolves.toEqual([]);
-    expect(clearPersistedEpisodeId).toHaveBeenCalledTimes(1);
+    expect(clearPersistedEpisodeId).not.toHaveBeenCalled();
+    expect(searchDanmakuCandidates).not.toHaveBeenCalled();
     expect(onError).not.toHaveBeenCalled();
   });
 

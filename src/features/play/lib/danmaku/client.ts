@@ -112,10 +112,13 @@ export function warmupDanmakuSearch(keyword: string): void {
 async function requestDanmakuComments(
   episodeId: number,
   signal?: AbortSignal,
+  force = false,
 ): Promise<DanmakuItem[]> {
-  const response = await fetch(`/api/danmaku/comments?episodeId=${episodeId}`, {
-    signal,
-  });
+  const refresh = force ? '&refresh=1' : '';
+  const response = await fetch(
+    `/api/danmaku/comments?episodeId=${episodeId}${refresh}`,
+    { signal },
+  );
   if (!response.ok) {
     if (response.status === 404) {
       const payload = await response.json().catch(() => null);
@@ -137,7 +140,7 @@ export function fetchDanmakuComments(
   options: { force?: boolean } = {},
 ): Promise<DanmakuItem[]> {
   if (signal) {
-    return requestDanmakuComments(episodeId, signal);
+    return requestDanmakuComments(episodeId, signal, options.force);
   }
 
   const now = Date.now();
