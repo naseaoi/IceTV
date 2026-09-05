@@ -466,6 +466,95 @@ describe('sqlite storage contract', () => {
     expect(favorites.items.map(({ key }) => key)).toEqual(['source+b']);
   });
 
+  it('按原始 JSON 快照进行播放记录与收藏 CAS', async () => {
+    const storage = new LocalSqliteStorage(':memory:');
+    const staleRecord = {
+      ...playRecord,
+      metadata_checked_at: 1,
+    };
+    const staleFavorite = {
+      ...favorite,
+      metadata_checked_at: 1,
+    };
+
+    await storage.setPlayRecord('cas-user', 'source+record', staleRecord);
+    await storage.setFavorite('cas-user', 'source+favorite', staleFavorite);
+
+    const recordPage = await storage.getStalePlayRecordPage(
+      'cas-user',
+      10_000,
+      1_000,
+      10,
+    );
+    const favoritePage = await storage.getStaleFavoritePage(
+      'cas-user',
+      10_000,
+      1_000,
+      10,
+    );
+    const recordSnapshot = recordPage.items[0]?.snapshot;
+    const favoriteSnapshot = favoritePage.items[0]?.snapshot;
+    expect(recordSnapshot).toBe(JSON.stringify(staleRecord));
+    expect(favoriteSnapshot).toBe(JSON.stringify(staleFavorite));
+
+    const refreshedRecord = {
+      ...staleRecord,
+      metadata_checked_at: 10_000,
+    };
+    const refreshedFavorite = {
+      ...staleFavorite,
+      metadata_checked_at: 10_000,
+    };
+    await expect(
+      storage.setPlayRecordIfUnchanged(
+        'cas-user',
+        'source+record',
+        refreshedRecord,
+        recordSnapshot as string,
+      ),
+    ).resolves.toBe(true);
+    await expect(
+      storage.setFavoriteIfUnchanged(
+        'cas-user',
+        'source+favorite',
+        refreshedFavorite,
+        favoriteSnapshot as string,
+      ),
+    ).resolves.toBe(true);
+
+    const concurrentRecord = { ...refreshedRecord, play_time: 99 };
+    const concurrentFavorite = { ...refreshedFavorite, title: '用户修改' };
+    await storage.setPlayRecord('cas-user', 'source+record', concurrentRecord);
+    await storage.setFavorite(
+      'cas-user',
+      'source+favorite',
+      concurrentFavorite,
+    );
+
+    await expect(
+      storage.setPlayRecordIfUnchanged(
+        'cas-user',
+        'source+record',
+        { ...refreshedRecord, play_time: 1 },
+        recordSnapshot as string,
+      ),
+    ).resolves.toBe(false);
+    await expect(
+      storage.setFavoriteIfUnchanged(
+        'cas-user',
+        'source+favorite',
+        { ...refreshedFavorite, title: 'cron 覆盖' },
+        favoriteSnapshot as string,
+      ),
+    ).resolves.toBe(false);
+    await expect(
+      storage.getPlayRecord('cas-user', 'source+record'),
+    ).resolves.toEqual(concurrentRecord);
+    await expect(
+      storage.getFavorite('cas-user', 'source+favorite'),
+    ).resolves.toEqual(concurrentFavorite);
+  });
+
   it('replaces all data from an import snapshot', async () => {
     const storage = new LocalSqliteStorage(':memory:');
     const passwordHash =

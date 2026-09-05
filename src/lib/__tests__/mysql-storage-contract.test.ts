@@ -496,6 +496,24 @@ function createFakePool() {
 
     if (
       normalized ===
+      'UPDATE play_records SET record_json = ? WHERE username = ? AND record_key = ? AND BINARY record_json = BINARY ?'
+    ) {
+      const [value, username, key, snapshot] = params as [
+        string,
+        string,
+        string,
+        string,
+      ];
+      const records = currentState.playRecords.get(username);
+      if (!records || records.get(key) !== snapshot) {
+        return [{ affectedRows: 0 }, []];
+      }
+      records.set(key, value);
+      return [{ affectedRows: 1 }, []];
+    }
+
+    if (
+      normalized ===
       'INSERT INTO favorites (username, favorite_key, favorite_json) VALUES (?, ?, ?) ON DUPLICATE KEY UPDATE favorite_json = VALUES(favorite_json)'
     ) {
       const [username, key, value] = params as [string, string, string];
@@ -510,6 +528,24 @@ function createFakePool() {
       const [username, key, value] = params as [string, string, string];
       upsertJsonRecord(currentState.favorites, username, key, value);
       return [[], []];
+    }
+
+    if (
+      normalized ===
+      'UPDATE favorites SET favorite_json = ? WHERE username = ? AND favorite_key = ? AND BINARY favorite_json = BINARY ?'
+    ) {
+      const [value, username, key, snapshot] = params as [
+        string,
+        string,
+        string,
+        string,
+      ];
+      const favorites = currentState.favorites.get(username);
+      if (!favorites || favorites.get(key) !== snapshot) {
+        return [{ affectedRows: 0 }, []];
+      }
+      favorites.set(key, value);
+      return [{ affectedRows: 1 }, []];
     }
 
     if (
@@ -1844,6 +1880,95 @@ describe('mysql storage contract', () => {
     ]);
     expect(secondRecords.nextCursor).toBeNull();
     expect(favorites.items.map(({ key }) => key)).toEqual(['source+b']);
+  });
+
+  it('按原始 JSON 快照进行播放记录与收藏 CAS', async () => {
+    const storage = new MySqlStorage('mysql://demo:demo@localhost:3306/icetv');
+    const staleRecord = {
+      ...playRecord,
+      metadata_checked_at: 1,
+    };
+    const staleFavorite = {
+      ...favorite,
+      metadata_checked_at: 1,
+    };
+
+    await storage.setPlayRecord('cas-user', 'source+record', staleRecord);
+    await storage.setFavorite('cas-user', 'source+favorite', staleFavorite);
+
+    const recordPage = await storage.getStalePlayRecordPage(
+      'cas-user',
+      10_000,
+      1_000,
+      10,
+    );
+    const favoritePage = await storage.getStaleFavoritePage(
+      'cas-user',
+      10_000,
+      1_000,
+      10,
+    );
+    const recordSnapshot = recordPage.items[0]?.snapshot;
+    const favoriteSnapshot = favoritePage.items[0]?.snapshot;
+    expect(recordSnapshot).toBe(JSON.stringify(staleRecord));
+    expect(favoriteSnapshot).toBe(JSON.stringify(staleFavorite));
+
+    const refreshedRecord = {
+      ...staleRecord,
+      metadata_checked_at: 10_000,
+    };
+    const refreshedFavorite = {
+      ...staleFavorite,
+      metadata_checked_at: 10_000,
+    };
+    await expect(
+      storage.setPlayRecordIfUnchanged(
+        'cas-user',
+        'source+record',
+        refreshedRecord,
+        recordSnapshot as string,
+      ),
+    ).resolves.toBe(true);
+    await expect(
+      storage.setFavoriteIfUnchanged(
+        'cas-user',
+        'source+favorite',
+        refreshedFavorite,
+        favoriteSnapshot as string,
+      ),
+    ).resolves.toBe(true);
+
+    const concurrentRecord = { ...refreshedRecord, play_time: 99 };
+    const concurrentFavorite = { ...refreshedFavorite, title: '用户修改' };
+    await storage.setPlayRecord('cas-user', 'source+record', concurrentRecord);
+    await storage.setFavorite(
+      'cas-user',
+      'source+favorite',
+      concurrentFavorite,
+    );
+
+    await expect(
+      storage.setPlayRecordIfUnchanged(
+        'cas-user',
+        'source+record',
+        { ...refreshedRecord, play_time: 1 },
+        recordSnapshot as string,
+      ),
+    ).resolves.toBe(false);
+    await expect(
+      storage.setFavoriteIfUnchanged(
+        'cas-user',
+        'source+favorite',
+        { ...refreshedFavorite, title: 'cron 覆盖' },
+        favoriteSnapshot as string,
+      ),
+    ).resolves.toBe(false);
+    await expect(
+      storage.getPlayRecord('cas-user', 'source+record'),
+    ).resolves.toEqual(concurrentRecord);
+    await expect(
+      storage.getFavorite('cas-user', 'source+favorite'),
+    ).resolves.toEqual(concurrentFavorite);
   });
 
   // 以下四个未读追更用例走 fake pool，其筛选复用生产的 hasPlayRecordUpdate

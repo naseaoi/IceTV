@@ -306,7 +306,9 @@ function buildMetadataRecordPage<T>(
   const pageRows = rows.slice(0, limit);
   const items = pageRows.flatMap((row) => {
     const parsed = parseJsonValue<T>(row.record_json);
-    return !parsed ? [] : [{ key: row.record_key, item: parsed }];
+    return !parsed
+      ? []
+      : [{ key: row.record_key, item: parsed, snapshot: row.record_json }];
   });
   const lastRow = pageRows.at(-1);
 
@@ -323,7 +325,15 @@ function buildMetadataFavoritePage(
   const pageRows = rows.slice(0, limit);
   const items = pageRows.flatMap((row) => {
     const parsed = parseJsonValue<Favorite>(row.favorite_json);
-    return !parsed ? [] : [{ key: row.favorite_key, item: parsed }];
+    return !parsed
+      ? []
+      : [
+          {
+            key: row.favorite_key,
+            item: parsed,
+            snapshot: row.favorite_json,
+          },
+        ];
   });
   const lastRow = pageRows.at(-1);
 
@@ -343,6 +353,7 @@ export class LocalSqliteStorage implements IStorage {
     // play_records
     getPlayRecord: Database.Statement;
     setPlayRecord: Database.Statement;
+    setPlayRecordIfUnchanged: Database.Statement;
     getAllPlayRecords: Database.Statement;
     getStalePlayRecordPage: Database.Statement;
     getStalePlayRecordPageAfter: Database.Statement;
@@ -356,6 +367,7 @@ export class LocalSqliteStorage implements IStorage {
     // favorites
     getFavorite: Database.Statement;
     setFavorite: Database.Statement;
+    setFavoriteIfUnchanged: Database.Statement;
     getAllFavorites: Database.Statement;
     getStaleFavoritePage: Database.Statement;
     getStaleFavoritePageAfter: Database.Statement;
@@ -623,6 +635,11 @@ export class LocalSqliteStorage implements IStorage {
       setPlayRecord: this.db.prepare(
         'INSERT OR REPLACE INTO play_records (username, record_key, record_json) VALUES (?, ?, ?)',
       ),
+      setPlayRecordIfUnchanged: this.db.prepare(
+        `UPDATE play_records
+         SET record_json = ?
+         WHERE username = ? AND record_key = ? AND record_json = ?`,
+      ),
       getAllPlayRecords: this.db.prepare(
         'SELECT record_key, record_json FROM play_records WHERE username = ?',
       ),
@@ -705,6 +722,11 @@ export class LocalSqliteStorage implements IStorage {
       ),
       setFavorite: this.db.prepare(
         'INSERT OR REPLACE INTO favorites (username, favorite_key, favorite_json) VALUES (?, ?, ?)',
+      ),
+      setFavoriteIfUnchanged: this.db.prepare(
+        `UPDATE favorites
+         SET favorite_json = ?
+         WHERE username = ? AND favorite_key = ? AND favorite_json = ?`,
       ),
       getAllFavorites: this.db.prepare(
         'SELECT favorite_key, favorite_json FROM favorites WHERE username = ?',
@@ -1249,6 +1271,22 @@ export class LocalSqliteStorage implements IStorage {
     this.stmts.setPlayRecord.run(username, key, JSON.stringify(record));
   }
 
+  async setPlayRecordIfUnchanged(
+    userName: string,
+    key: string,
+    record: PlayRecord,
+    snapshot: string,
+  ): Promise<boolean> {
+    const username = normalizeUsername(userName);
+    const result = this.stmts.setPlayRecordIfUnchanged.run(
+      JSON.stringify(record),
+      username,
+      key,
+      snapshot,
+    );
+    return result.changes > 0;
+  }
+
   async setPlayRecords(
     userName: string,
     records: Record<string, PlayRecord>,
@@ -1388,6 +1426,22 @@ export class LocalSqliteStorage implements IStorage {
   ): Promise<void> {
     const username = normalizeUsername(userName);
     this.stmts.setFavorite.run(username, key, JSON.stringify(favorite));
+  }
+
+  async setFavoriteIfUnchanged(
+    userName: string,
+    key: string,
+    favorite: Favorite,
+    snapshot: string,
+  ): Promise<boolean> {
+    const username = normalizeUsername(userName);
+    const result = this.stmts.setFavoriteIfUnchanged.run(
+      JSON.stringify(favorite),
+      username,
+      key,
+      snapshot,
+    );
+    return result.changes > 0;
   }
 
   async getAllFavorites(

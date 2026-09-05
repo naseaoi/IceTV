@@ -5,9 +5,18 @@ export interface MetadataCandidate<T> {
   user: string;
   key: string;
   item: T;
+  snapshot: string;
   /** 数值越小越先刷新 */
   priority: number;
   checkedAt: number;
+}
+
+function serializeSnapshot(value: unknown): string {
+  const snapshot = JSON.stringify(value);
+  if (typeof snapshot !== 'string') {
+    throw new Error('元数据快照序列化失败');
+  }
+  return snapshot;
 }
 
 export function shouldRefreshMetadata(
@@ -70,6 +79,7 @@ export function buildPlayRecordCandidate(
   record: PlayRecord,
   now: number,
   ttlMs: number,
+  snapshot?: string,
 ): MetadataCandidate<PlayRecord> | null {
   if (!shouldRefreshMetadata(record.metadata_checked_at, now, ttlMs)) {
     return null;
@@ -79,6 +89,7 @@ export function buildPlayRecordCandidate(
     user,
     key,
     item: record,
+    snapshot: snapshot ?? serializeSnapshot(record),
     priority: getPlayRecordPriority(record),
     checkedAt: toCheckedAt(record.metadata_checked_at),
   };
@@ -90,6 +101,7 @@ export function buildFavoriteCandidate(
   favorite: Favorite,
   now: number,
   ttlMs: number,
+  snapshot?: string,
 ): MetadataCandidate<Favorite> | null {
   if (
     favorite.origin === 'live' ||
@@ -102,6 +114,7 @@ export function buildFavoriteCandidate(
     user,
     key,
     item: favorite,
+    snapshot: snapshot ?? serializeSnapshot(favorite),
     priority: 0,
     checkedAt: toCheckedAt(favorite.metadata_checked_at),
   };

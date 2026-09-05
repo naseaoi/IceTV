@@ -80,7 +80,6 @@ class TopMetadataCandidates<T> {
 
 async function collectPagedCandidates<T>(
   users: string[],
-  pageSize: number,
   maxItems: number,
   fetchPage: (
     user: string,
@@ -90,6 +89,7 @@ async function collectPagedCandidates<T>(
     user: string,
     key: string,
     item: T,
+    snapshot: string,
   ) => MetadataCandidate<T> | null,
   errorLabel: string,
 ): Promise<CandidateCollection<T>> {
@@ -107,10 +107,10 @@ async function collectPagedCandidates<T>(
         break;
       }
 
-      for (const { key, item } of page.items) {
+      for (const { key, item, snapshot } of page.items) {
         let candidate: MetadataCandidate<T> | null;
         try {
-          candidate = buildCandidate(user, key, item);
+          candidate = buildCandidate(user, key, item, snapshot);
         } catch (error) {
           console.error(`处理元数据候选失败 (${user}:${key}):`, error);
           continue;
@@ -185,7 +185,6 @@ export async function refreshRecordAndFavorites(): Promise<void> {
     const [recordCollection, favoriteCollection] = await Promise.all([
       collectPagedCandidates(
         users,
-        metadataPageSize,
         recordMaxItems,
         (user, cursorKey) =>
           db.getStalePlayRecordPage(
@@ -195,19 +194,19 @@ export async function refreshRecordAndFavorites(): Promise<void> {
             metadataPageSize,
             cursorKey,
           ),
-        (user, key, record) =>
+        (user, key, record, snapshot) =>
           buildPlayRecordCandidate(
             user,
             key,
             record,
             startedAt,
             metadataRefreshTtlMs,
+            snapshot,
           ),
         '获取用户播放记录分页失败',
       ),
       collectPagedCandidates(
         users,
-        metadataPageSize,
         favoriteMaxItems,
         (user, cursorKey) =>
           db.getStaleFavoritePage(
@@ -217,13 +216,14 @@ export async function refreshRecordAndFavorites(): Promise<void> {
             metadataPageSize,
             cursorKey,
           ),
-        (user, key, favorite) =>
+        (user, key, favorite, snapshot) =>
           buildFavoriteCandidate(
             user,
             key,
             favorite,
             startedAt,
             metadataRefreshTtlMs,
+            snapshot,
           ),
         '获取用户收藏分页失败',
       ),
@@ -291,7 +291,16 @@ async function refreshPlayRecordCandidates(
       }
 
       const nextRecord = buildRefreshedPlayRecord(record, detail, checkedAt);
-      await db.savePlayRecord(user, parsed.source, parsed.id, nextRecord);
+      const saved = await db.savePlayRecordIfUnchanged(
+        user,
+        parsed.source,
+        parsed.id,
+        nextRecord,
+        candidate.snapshot,
+      );
+      if (!saved) {
+        console.warn(`跳过并发变更的播放记录: ${key}`);
+      }
     } catch (error) {
       console.error(`处理播放记录失败 (${key}):`, error);
     }
@@ -342,7 +351,16 @@ async function refreshFavoriteCandidates(
         }
       }
 
-      await db.saveFavorite(user, parsed.source, parsed.id, nextFavorite);
+      const saved = await db.saveFavoriteIfUnchanged(
+        user,
+        parsed.source,
+        parsed.id,
+        nextFavorite,
+        candidate.snapshot,
+      );
+      if (!saved) {
+        console.warn(`跳过并发变更的收藏: ${key}`);
+      }
     } catch (error) {
       console.error(`处理收藏失败 (${key}):`, error);
     }

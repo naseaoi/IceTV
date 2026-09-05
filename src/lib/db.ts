@@ -79,6 +79,18 @@ class DbManager {
     await storage.setPlayRecord(userName, key, record);
   }
 
+  async savePlayRecordIfUnchanged(
+    userName: string,
+    source: string,
+    id: string,
+    record: PlayRecord,
+    snapshot: string,
+  ): Promise<boolean> {
+    const key = generateStorageKey(source, id);
+    const storage = await this.getStorage();
+    return storage.setPlayRecordIfUnchanged(userName, key, record, snapshot);
+  }
+
   async getAllPlayRecords(userName: string): Promise<{
     [key: string]: PlayRecord;
   }> {
@@ -180,6 +192,18 @@ class DbManager {
     const key = generateStorageKey(source, id);
     const storage = await this.getStorage();
     await storage.setFavorite(userName, key, favorite);
+  }
+
+  async saveFavoriteIfUnchanged(
+    userName: string,
+    source: string,
+    id: string,
+    favorite: Favorite,
+    snapshot: string,
+  ): Promise<boolean> {
+    const key = generateStorageKey(source, id);
+    const storage = await this.getStorage();
+    return storage.setFavoriteIfUnchanged(userName, key, favorite, snapshot);
   }
 
   async getAllFavorites(

@@ -182,7 +182,9 @@ function buildMetadataRecordPage<T>(
   const items = pageRows.flatMap((row) => {
     if (!row.record_key || !row.record_json) return [];
     const parsed = parseJsonValue<T>(row.record_json);
-    return !parsed ? [] : [{ key: row.record_key, item: parsed }];
+    return !parsed
+      ? []
+      : [{ key: row.record_key, item: parsed, snapshot: row.record_json }];
   });
   const lastRow = pageRows.at(-1);
 
@@ -201,7 +203,15 @@ function buildMetadataFavoritePage(
   const items = pageRows.flatMap((row) => {
     if (!row.favorite_key || !row.favorite_json) return [];
     const parsed = parseJsonValue<Favorite>(row.favorite_json);
-    return !parsed ? [] : [{ key: row.favorite_key, item: parsed }];
+    return !parsed
+      ? []
+      : [
+          {
+            key: row.favorite_key,
+            item: parsed,
+            snapshot: row.favorite_json,
+          },
+        ];
   });
   const lastRow = pageRows.at(-1);
 
@@ -526,6 +536,25 @@ export class MySqlStorage implements IStorage {
     );
   }
 
+  async setPlayRecordIfUnchanged(
+    userName: string,
+    key: string,
+    record: PlayRecord,
+    snapshot: string,
+  ): Promise<boolean> {
+    await this.ensureInitialized();
+    const username = normalizeUsername(userName);
+    const [result] = await this.pool.execute(
+      `UPDATE play_records
+       SET record_json = ?
+       WHERE username = ?
+         AND record_key = ?
+         AND BINARY record_json = BINARY ?`,
+      [JSON.stringify(record), username, key, snapshot],
+    );
+    return Number((result as { affectedRows?: number }).affectedRows || 0) > 0;
+  }
+
   async setPlayRecords(
     userName: string,
     records: Record<string, PlayRecord>,
@@ -731,6 +760,25 @@ export class MySqlStorage implements IStorage {
        ON DUPLICATE KEY UPDATE favorite_json = VALUES(favorite_json)`,
       [username, key, JSON.stringify(favorite)],
     );
+  }
+
+  async setFavoriteIfUnchanged(
+    userName: string,
+    key: string,
+    favorite: Favorite,
+    snapshot: string,
+  ): Promise<boolean> {
+    await this.ensureInitialized();
+    const username = normalizeUsername(userName);
+    const [result] = await this.pool.execute(
+      `UPDATE favorites
+       SET favorite_json = ?
+       WHERE username = ?
+         AND favorite_key = ?
+         AND BINARY favorite_json = BINARY ?`,
+      [JSON.stringify(favorite), username, key, snapshot],
+    );
+    return Number((result as { affectedRows?: number }).affectedRows || 0) > 0;
   }
 
   async getAllFavorites(

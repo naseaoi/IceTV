@@ -29,7 +29,12 @@ export interface PlayRecordPage {
 }
 
 export interface MetadataRecordPage<T> {
-  items: Array<{ key: string; item: T }>;
+  items: Array<{
+    key: string;
+    item: T;
+    // 数据库原始 JSON 快照，用于写回时的乐观并发校验
+    snapshot: string;
+  }>;
   nextCursor: string | null;
 }
 
@@ -168,6 +173,12 @@ export interface IStorage {
     key: string,
     record: PlayRecord,
   ): Promise<void>;
+  setPlayRecordIfUnchanged(
+    userName: string,
+    key: string,
+    record: PlayRecord,
+    snapshot: string,
+  ): Promise<boolean>;
   getAllPlayRecords(userName: string): Promise<{ [key: string]: PlayRecord }>;
   getStalePlayRecordPage(
     userName: string,
@@ -198,6 +209,12 @@ export interface IStorage {
   // 收藏相关
   getFavorite(userName: string, key: string): Promise<Favorite | null>;
   setFavorite(userName: string, key: string, favorite: Favorite): Promise<void>;
+  setFavoriteIfUnchanged(
+    userName: string,
+    key: string,
+    favorite: Favorite,
+    snapshot: string,
+  ): Promise<boolean>;
   getAllFavorites(userName: string): Promise<{ [key: string]: Favorite }>;
   getStaleFavoritePage(
     userName: string,

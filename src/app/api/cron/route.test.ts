@@ -13,8 +13,8 @@ const mockGetAllPlayRecords = jest.fn();
 const mockGetAllFavorites = jest.fn();
 const mockGetStalePlayRecordPage = jest.fn();
 const mockGetStaleFavoritePage = jest.fn();
-const mockSavePlayRecord = jest.fn();
-const mockSaveFavorite = jest.fn();
+const mockSavePlayRecordIfUnchanged = jest.fn();
+const mockSaveFavoriteIfUnchanged = jest.fn();
 const mockDeletePlaybackSessionsBefore = jest.fn();
 const mockFetchVideoDetail = jest.fn();
 const mockGetOwnerUsername = jest.fn();
@@ -50,8 +50,10 @@ jest.mock('@/lib/db', () => ({
       mockGetStalePlayRecordPage(...args),
     getStaleFavoritePage: (...args: unknown[]) =>
       mockGetStaleFavoritePage(...args),
-    savePlayRecord: (...args: unknown[]) => mockSavePlayRecord(...args),
-    saveFavorite: (...args: unknown[]) => mockSaveFavorite(...args),
+    savePlayRecordIfUnchanged: (...args: unknown[]) =>
+      mockSavePlayRecordIfUnchanged(...args),
+    saveFavoriteIfUnchanged: (...args: unknown[]) =>
+      mockSaveFavoriteIfUnchanged(...args),
     deletePlaybackSessionsBefore: (...args: unknown[]) =>
       mockDeletePlaybackSessionsBefore(...args),
   },
@@ -124,7 +126,9 @@ function buildMockMetadataPage<T>(
 
   const rows = entries.slice(start, start + limit + 1);
   return {
-    items: rows.slice(0, limit).map(([key, item]) => ({ key, item })),
+    items: rows
+      .slice(0, limit)
+      .map(([key, item]) => ({ key, item, snapshot: JSON.stringify(item) })),
     nextCursor: rows.length > limit ? rows[limit - 1][0] : null,
   };
 }
@@ -199,8 +203,8 @@ describe('cron route', () => {
           cursorKey,
         ),
     );
-    mockSavePlayRecord.mockReset().mockResolvedValue(undefined);
-    mockSaveFavorite.mockReset().mockResolvedValue(undefined);
+    mockSavePlayRecordIfUnchanged.mockReset().mockResolvedValue(true);
+    mockSaveFavoriteIfUnchanged.mockReset().mockResolvedValue(true);
     mockDeletePlaybackSessionsBefore.mockReset().mockResolvedValue(0);
     mockFetchVideoDetail.mockReset().mockResolvedValue(null);
     mockGetOwnerUsername.mockReset().mockReturnValue('');
@@ -335,8 +339,8 @@ describe('cron route', () => {
     await runMetadataTask();
 
     expect(mockFetchVideoDetail).not.toHaveBeenCalled();
-    expect(mockSavePlayRecord).not.toHaveBeenCalled();
-    expect(mockSaveFavorite).not.toHaveBeenCalled();
+    expect(mockSavePlayRecordIfUnchanged).not.toHaveBeenCalled();
+    expect(mockSaveFavoriteIfUnchanged).not.toHaveBeenCalled();
   });
 
   it('为过期条目保存最新元数据检查时间', async () => {
@@ -353,17 +357,53 @@ describe('cron route', () => {
 
     await runMetadataTask();
 
-    expect(mockSavePlayRecord).toHaveBeenCalledWith(
+    expect(mockSavePlayRecordIfUnchanged).toHaveBeenCalledWith(
       'user',
       'source',
       '1',
       expect.objectContaining({
         metadata_checked_at: expect.any(Number),
       }),
+      expect.any(String),
     );
     expect(
-      mockSavePlayRecord.mock.calls[0][3].metadata_checked_at,
+      mockSavePlayRecordIfUnchanged.mock.calls[0][3].metadata_checked_at,
     ).toBeGreaterThan(1);
+  });
+
+  it('CAS 失败时跳过并发变更的记录与收藏', async () => {
+    mockGetAllUsers.mockResolvedValue(['user']);
+    mockGetAllPlayRecords.mockResolvedValue({
+      'source+1': createPlayRecord({ metadata_checked_at: 1 }),
+    });
+    mockGetAllFavorites.mockResolvedValue({
+      'source+2': createFavorite({ metadata_checked_at: 1 }),
+    });
+    mockFetchVideoDetail.mockResolvedValue({
+      title: '测试视频',
+      poster: 'cover.jpg',
+      year: '2026',
+      episodes: ['第 1 集'],
+    });
+    mockSavePlayRecordIfUnchanged.mockResolvedValue(false);
+    mockSaveFavoriteIfUnchanged.mockResolvedValue(false);
+
+    await runMetadataTask();
+
+    expect(mockSavePlayRecordIfUnchanged).toHaveBeenCalledWith(
+      'user',
+      'source',
+      '1',
+      expect.anything(),
+      expect.any(String),
+    );
+    expect(mockSaveFavoriteIfUnchanged).toHaveBeenCalledWith(
+      'user',
+      'source',
+      '2',
+      expect.anything(),
+      expect.any(String),
+    );
   });
 
   it('播放记录条目上限不影响收藏的独立预算', async () => {
@@ -385,8 +425,8 @@ describe('cron route', () => {
 
     await runMetadataTask();
 
-    expect(mockSavePlayRecord).toHaveBeenCalledTimes(1);
-    expect(mockSaveFavorite).toHaveBeenCalledTimes(1);
+    expect(mockSavePlayRecordIfUnchanged).toHaveBeenCalledTimes(1);
+    expect(mockSaveFavoriteIfUnchanged).toHaveBeenCalledTimes(1);
   });
 
   it('分页扫描后仍按候选优先级选取前 N 条', async () => {
@@ -414,12 +454,13 @@ describe('cron route', () => {
 
     await runMetadataTask();
 
-    expect(mockSavePlayRecord).toHaveBeenCalledTimes(1);
-    expect(mockSavePlayRecord).toHaveBeenCalledWith(
+    expect(mockSavePlayRecordIfUnchanged).toHaveBeenCalledTimes(1);
+    expect(mockSavePlayRecordIfUnchanged).toHaveBeenCalledWith(
       'user',
       'source',
       'z',
       expect.anything(),
+      expect.any(String),
     );
     expect(mockGetStalePlayRecordPage).toHaveBeenCalledTimes(2);
   });
@@ -474,8 +515,8 @@ describe('cron route', () => {
       await runMetadataTask();
 
       expect(mockFetchVideoDetail).toHaveBeenCalledTimes(1);
-      expect(mockSavePlayRecord).toHaveBeenCalledTimes(1);
-      expect(mockSaveFavorite).not.toHaveBeenCalled();
+      expect(mockSavePlayRecordIfUnchanged).toHaveBeenCalledTimes(1);
+      expect(mockSaveFavoriteIfUnchanged).not.toHaveBeenCalled();
     } finally {
       nowSpy.mockRestore();
     }
@@ -499,8 +540,8 @@ describe('cron route', () => {
     await runMetadataTask();
 
     expect(mockFetchVideoDetail).toHaveBeenCalledTimes(1);
-    expect(mockSavePlayRecord).toHaveBeenCalledTimes(1);
-    expect(mockSaveFavorite).toHaveBeenCalledTimes(1);
+    expect(mockSavePlayRecordIfUnchanged).toHaveBeenCalledTimes(1);
+    expect(mockSaveFavoriteIfUnchanged).toHaveBeenCalledTimes(1);
   });
 });
 
