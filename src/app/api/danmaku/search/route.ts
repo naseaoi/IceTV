@@ -18,7 +18,18 @@ export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
 const MAX_KEYWORD_LENGTH = 80;
-const MAX_CANDIDATES = 240;
+const MAX_CANDIDATES_PER_PAGE = 240;
+const MAX_CANDIDATE_OFFSET = 10_000;
+
+function parseCandidateOffset(value: string | null): number | null {
+  if (value === null || value === '') return 0;
+  if (!/^\d+$/.test(value)) return null;
+  const offset = Number(value);
+  if (!Number.isSafeInteger(offset) || offset > MAX_CANDIDATE_OFFSET) {
+    return null;
+  }
+  return offset;
+}
 
 export async function GET(request: NextRequest) {
   const guardResult = await requireActiveUser(request);
@@ -47,6 +58,16 @@ export async function GET(request: NextRequest) {
     );
   }
 
+  const offset = parseCandidateOffset(
+    request.nextUrl.searchParams.get('offset'),
+  );
+  if (offset === null) {
+    return NextResponse.json(
+      { error: '候选偏移量无效' },
+      { status: 400, headers: NO_STORE_HEADERS },
+    );
+  }
+
   const quotaFailure = requireServerProxyQuota(
     'danmaku',
     request,
@@ -61,9 +82,14 @@ export async function GET(request: NextRequest) {
     const candidates = await danmakuSearchCache.getOrLoad(keyword, () =>
       searchDanmakuCandidates(keyword),
     );
+    const pageEnd = offset + MAX_CANDIDATES_PER_PAGE;
 
     return NextResponse.json(
-      { candidates: candidates.slice(0, MAX_CANDIDATES) },
+      {
+        candidates: candidates.slice(offset, pageEnd),
+        hasMore: pageEnd < candidates.length,
+        nextOffset: pageEnd < candidates.length ? pageEnd : null,
+      },
       { headers: NO_STORE_HEADERS },
     );
   } catch (error) {

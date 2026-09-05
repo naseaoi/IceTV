@@ -34,9 +34,10 @@ jest.mock('@/lib/server-proxy-guard', () => ({
 
 const { GET } = require('./route') as typeof import('./route');
 
-function createRequest(refresh?: string): NextRequest {
+function createRequest(refresh?: string, offset?: string): NextRequest {
   const nextUrl = new URL('http://localhost/api/danmaku/search?keyword=test');
   if (refresh) nextUrl.searchParams.set('refresh', refresh);
+  if (offset) nextUrl.searchParams.set('offset', offset);
   return { nextUrl } as NextRequest;
 }
 
@@ -64,6 +65,29 @@ describe('danmaku search refresh', () => {
     mockQuota.mockReturnValue(new Response('', { status: 429 }));
     expect((await GET(createRequest('1'))).status).toBe(429);
     expect(mockInvalidate).not.toHaveBeenCalled();
+    expect(mockGetOrLoad).not.toHaveBeenCalled();
+  });
+
+  it('returns a bounded page and exposes the next offset', async () => {
+    const candidates = Array.from({ length: 500 }, (_, index) => ({
+      episodeId: index + 1,
+      animeTitle: '长剧',
+      episodeTitle: `第${index + 1}集`,
+    }));
+    mockGetOrLoad.mockResolvedValue(candidates);
+
+    const response = await GET(createRequest(undefined, '240'));
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({
+      candidates: candidates.slice(240, 480),
+      hasMore: true,
+      nextOffset: 480,
+    });
+  });
+
+  it('rejects offsets outside the bounded pagination range', async () => {
+    const response = await GET(createRequest(undefined, '10001'));
+    expect(response.status).toBe(400);
     expect(mockGetOrLoad).not.toHaveBeenCalled();
   });
 });

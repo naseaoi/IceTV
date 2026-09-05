@@ -27,18 +27,23 @@ interface DanmakuEpisodePickerProps {
 
 async function fetchCandidates(
   keyword: string,
-): Promise<DanmakuMatchCandidate[]> {
+  offset = 0,
+): Promise<{ candidates: DanmakuMatchCandidate[]; hasMore: boolean }> {
   try {
     const response = await fetch(
-      `/api/danmaku/search?keyword=${encodeURIComponent(keyword)}`,
+      `/api/danmaku/search?keyword=${encodeURIComponent(keyword)}&offset=${offset}`,
     );
-    if (!response.ok) return [];
+    if (!response.ok) return { candidates: [], hasMore: false };
     const data = (await response.json()) as {
       candidates?: DanmakuMatchCandidate[];
+      hasMore?: boolean;
     };
-    return data.candidates || [];
+    return {
+      candidates: Array.isArray(data.candidates) ? data.candidates : [],
+      hasMore: data.hasMore === true,
+    };
   } catch {
-    return [];
+    return { candidates: [], hasMore: false };
   }
 }
 
@@ -52,6 +57,7 @@ export const DanmakuEpisodePicker: React.FC<DanmakuEpisodePickerProps> = ({
   const [keyword, setKeyword] = useState(searchTitle);
   const [candidates, setCandidates] = useState<DanmakuMatchCandidate[]>([]);
   const [loading, setLoading] = useState(false);
+  const [hasMoreCandidates, setHasMoreCandidates] = useState(false);
   const [boundEpisodeId, setBoundEpisodeId] = useState<number | null>(null);
   const [openedSource, setOpenedSource] = useState<string | null>(null);
   const autoSearchedRef = useRef('');
@@ -143,11 +149,22 @@ export const DanmakuEpisodePicker: React.FC<DanmakuEpisodePickerProps> = ({
     if (!trimmed) return;
     setLoading(true);
     const results = await fetchCandidates(trimmed);
-    setCandidates(results);
+    setCandidates(results.candidates);
+    setHasMoreCandidates(results.hasMore);
     setOpenedSource(null);
     autoOpenedRef.current = false;
     setLoading(false);
   }, []);
+
+  const loadMore = useCallback(async () => {
+    const trimmed = keyword.trim();
+    if (loading || !hasMoreCandidates || !trimmed) return;
+    setLoading(true);
+    const results = await fetchCandidates(trimmed, candidates.length);
+    setCandidates((current) => [...current, ...results.candidates]);
+    setHasMoreCandidates(results.hasMore);
+    setLoading(false);
+  }, [candidates.length, hasMoreCandidates, keyword, loading]);
 
   // 已绑定的集所在源只在搜索后自动展开一次，否则「返回源列表」会被立刻撤销
   useEffect(() => {
@@ -418,6 +435,17 @@ export const DanmakuEpisodePicker: React.FC<DanmakuEpisodePickerProps> = ({
               </button>
             );
           })}
+
+          {hasMoreCandidates && (
+            <button
+              type='button'
+              disabled={loading}
+              onClick={() => void loadMore()}
+              className='w-full rounded-lg border border-dashed border-gray-300 px-3 py-2 text-sm text-gray-600 transition-colors hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-60 dark:border-gray-600 dark:text-gray-300 dark:hover:bg-gray-800'
+            >
+              {loading ? '加载中…' : '加载更多候选'}
+            </button>
+          )}
         </div>
 
         {!isBoundInView && boundEpisodeId !== null && openedGroup && (
