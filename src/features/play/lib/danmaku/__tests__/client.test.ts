@@ -69,6 +69,11 @@ describe('pickCandidateByEpisode', () => {
     );
   });
 
+  it('集号存在但目标集缺失时不按位置误绑', () => {
+    const candidates = build(['【youku】 第1集', '【youku】 第3集']);
+    expect(pickCandidateByEpisode(candidates, 1)).toBeNull();
+  });
+
   it('候选为空返回 null', () => {
     expect(pickCandidateByEpisode([], 0)).toBeNull();
   });

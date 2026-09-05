@@ -224,6 +224,42 @@ describe('reloadDanmaku', () => {
     );
   });
 
+  it('连续手动重载不复用旧任务并按顺序完成', async () => {
+    const { player, api } = createDanmakuPlayer();
+    const enabledRef = { current: true };
+    let finishFirst: (() => void) | undefined;
+    const firstLoadGate = new Promise<void>((resolve) => {
+      finishFirst = resolve;
+    });
+    let loadCount = 0;
+    api.load.mockImplementation(async () => {
+      const loader = api.option.danmuku;
+      if (typeof loader === 'function') {
+        await (loader as () => Promise<unknown>)();
+      }
+      loadCount += 1;
+      if (loadCount === 1) await firstLoadGate;
+    });
+    markDanmakuContextAttached(player, loadContext, true);
+
+    const first = reloadDanmaku(player, loadContext, enabledRef, {
+      forcePluginReload: true,
+      refreshData: true,
+    });
+    await Promise.resolve();
+    const second = reloadDanmaku(player, loadContext, enabledRef, {
+      forcePluginReload: true,
+      refreshData: true,
+    });
+    await Promise.resolve();
+
+    expect(api.load).toHaveBeenCalledTimes(1);
+    finishFirst?.();
+    await Promise.all([first, second]);
+    expect(api.load).toHaveBeenCalledTimes(2);
+    expect(mockLoadDanmakuForEpisode).toHaveBeenCalledTimes(2);
+  });
+
   it('快速重复开启时共用同一个插件加载任务', async () => {
     const { player, api } = createDanmakuPlayer();
     const enabledRef = { current: true };

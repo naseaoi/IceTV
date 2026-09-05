@@ -298,17 +298,6 @@ export async function reloadDanmaku(
     await attachedContext.task;
     return;
   }
-  if (
-    options.forcePluginReload &&
-    attachedContext?.contextKey === contextKey &&
-    (attachedContext.status === 'scheduled' ||
-      attachedContext.status === 'loading') &&
-    (attachedContext.refreshData || !options.refreshData)
-  ) {
-    await attachedContext.task;
-    return;
-  }
-
   const nextContext: AttachedDanmakuContext = {
     contextKey,
     refreshData: options.refreshData === true,

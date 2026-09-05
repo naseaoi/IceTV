@@ -307,8 +307,12 @@ export function rankCandidatesByEpisode(
     }
 
     for (const { group } of rankedGroups) {
-      const byIndex = group.candidates[episodeIndex];
-      append(byIndex);
+      const hasParseableEpisode = group.candidates.some(
+        (candidate) => extractEpisodeNumber(candidate.episodeTitle) !== null,
+      );
+      if (!hasParseableEpisode) {
+        append(group.candidates[episodeIndex]);
+      }
     }
 
     if (rankedGroups.length > 0) return ranked;
@@ -325,7 +329,13 @@ export function rankCandidatesByEpisode(
   const sameSource = candidates.filter(
     (candidate) => candidate.animeTitle === firstSource,
   );
-  append(sameSource[episodeIndex]);
+  if (
+    sameSource.every(
+      (candidate) => extractEpisodeNumber(candidate.episodeTitle) === null,
+    )
+  ) {
+    append(sameSource[episodeIndex]);
+  }
   return ranked;
 }
 
