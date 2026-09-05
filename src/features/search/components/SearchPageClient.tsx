@@ -9,6 +9,7 @@ import PageLayout from '@/components/PageLayout';
 import SearchResultFilter from '@/components/SearchResultFilter';
 import SearchSuggestions from '@/components/SearchSuggestions';
 import VideoCard from '@/components/VideoCard';
+import { warmupDanmakuSearchForNavigation } from '@/features/play/lib/danmaku/navigation-warmup';
 import MobileSearchFilterControls from '@/features/search/components/MobileSearchFilterControls';
 import SearchHistory from '@/features/search/components/SearchHistory';
 import { VirtualizedSearchGrid } from '@/features/search/components/VirtualizedSearchGrid';
@@ -223,6 +224,7 @@ function AuthenticatedSearchPageClient() {
       return;
     }
 
+    void warmupDanmakuSearchForNavigation(activeSearchQuery);
     setFilterAll(createDefaultFilterState());
     setFilterAgg(createDefaultFilterState());
   }, [activeSearchQuery]);

@@ -55,6 +55,9 @@ export async function GET(request: NextRequest) {
   if (quotaFailure) return quotaFailure;
 
   try {
+    if (request.nextUrl.searchParams.get('refresh') === '1') {
+      danmakuSearchCache.invalidate(keyword);
+    }
     const candidates = await danmakuSearchCache.getOrLoad(keyword, () =>
       searchDanmakuCandidates(keyword),
     );

@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef } from 'react';
 
+import { updateDanmakuWarmupPreference } from '@/features/play/lib/danmaku/navigation-warmup';
 import {
   clearStoredDanmakuEnabled,
   readStoredDanmakuEnabled,
@@ -46,6 +47,7 @@ export function useDanmakuPreference(
 
   const onEnabledChange = useCallback((enabled: boolean) => {
     enabledRef.current = enabled;
+    updateDanmakuWarmupPreference(enabled);
     saveQueueRef.current = saveQueueRef.current
       .catch(() => {})
       .then(async () => {
@@ -60,6 +62,8 @@ export function useDanmakuPreference(
   }, []);
 
   useEffect(() => {
+    updateDanmakuWarmupPreference(enabledRef.current);
+
     if (initialEnabled !== null) {
       clearStoredDanmakuEnabled();
       return;

@@ -10,6 +10,12 @@ export interface DanmakuPluginOptions {
 
 // 插件会把 time=0 改写成当前播放位置
 const MIN_ITEM_TIME = 0.01;
+// 插件默认步长在容器宽度小于 100px 时会变成 0，导致热力图死循环。
+export const DANMAKU_HEATMAP_SAMPLING_PX = 5;
+
+export function resolveDanmakuHeatmapOption(enabled: boolean) {
+  return enabled ? { sampling: DANMAKU_HEATMAP_SAMPLING_PX } : false;
+}
 
 function clampItemTime(time: number): number {
   return time > 0 ? time : MIN_ITEM_TIME;
@@ -58,7 +64,7 @@ export async function createDanmakuPlugin({
     visible,
     // 第一期只读，不渲染发射器
     emitter: false,
-    heatmap,
+    heatmap: resolveDanmakuHeatmapOption(heatmap),
     theme: 'dark',
   });
 }

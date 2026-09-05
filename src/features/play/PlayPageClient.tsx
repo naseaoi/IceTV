@@ -12,6 +12,7 @@ import {
 import { useArtPlayer } from '@/features/play/hooks/useArtPlayer';
 import { useAuthRecovery } from '@/features/play/hooks/useAuthRecovery';
 import { useDanmakuPreference } from '@/features/play/hooks/useDanmakuPreference';
+import { useDanmakuWarmup } from '@/features/play/hooks/useDanmakuWarmup';
 import { useEpisodeSwitch } from '@/features/play/hooks/useEpisodeSwitch';
 import { usePlayFavorite } from '@/features/play/hooks/usePlayFavorite';
 import { updateVideoUrl, usePlayInit } from '@/features/play/hooks/usePlayInit';
@@ -21,6 +22,7 @@ import { useSkipConfig } from '@/features/play/hooks/useSkipConfig';
 import { useSourceSwitch } from '@/features/play/hooks/useSourceSwitch';
 import {
   applyDanmakuHeatmapVisibility,
+  ensureDanmakuLoaded,
   reloadDanmaku,
 } from '@/features/play/lib/danmaku/attach';
 import {
@@ -166,6 +168,10 @@ function AuthenticatedPlayPageClient({
     enabledRef: danmakuEnabledRef,
     onEnabledChange: onDanmakuEnabledChange,
   } = useDanmakuPreference(initialDanmakuEnabled);
+  useDanmakuWarmup({
+    enabledRef: danmakuEnabledRef,
+    title: videoTitle || searchTitle,
+  });
 
   const totalEpisodes = detail?.episodes?.length || 0;
   const [isSingleAggregateStartup] = useState(
@@ -510,26 +516,39 @@ function AuthenticatedPlayPageClient({
     [setAvailableSources],
   );
 
-  const handleDanmakuReload = useCallback(() => {
-    void reloadDanmaku(
-      artPlayerRef.current,
-      {
-        source: currentSourceRef.current,
-        videoId: currentIdRef.current,
-        episodeIndex: currentEpisodeIndexRef.current,
-        searchTitle: detailRef.current?.title || videoTitleRef.current || '',
-      },
-      danmakuEnabledRef,
-    );
+  const getCurrentDanmakuContext = useCallback(() => {
+    return {
+      source: currentSourceRef.current,
+      videoId: currentIdRef.current,
+      episodeIndex: currentEpisodeIndexRef.current,
+      searchTitle: detailRef.current?.title || videoTitleRef.current || '',
+      searchYear: videoYearRef.current || detailRef.current?.year || '',
+    };
   }, [
-    artPlayerRef,
     currentSourceRef,
     currentIdRef,
     currentEpisodeIndexRef,
     detailRef,
     videoTitleRef,
-    danmakuEnabledRef,
+    videoYearRef,
   ]);
+
+  const handleDanmakuEnable = useCallback(() => {
+    void ensureDanmakuLoaded(
+      artPlayerRef.current,
+      getCurrentDanmakuContext(),
+      danmakuEnabledRef,
+    );
+  }, [artPlayerRef, danmakuEnabledRef, getCurrentDanmakuContext]);
+
+  const handleDanmakuReload = useCallback(() => {
+    void reloadDanmaku(
+      artPlayerRef.current,
+      getCurrentDanmakuContext(),
+      danmakuEnabledRef,
+      { forcePluginReload: true, refreshData: true },
+    );
+  }, [artPlayerRef, danmakuEnabledRef, getCurrentDanmakuContext]);
 
   const handleDanmakuHeatmapChange = useCallback(
     (enabled: boolean) => {
@@ -545,6 +564,7 @@ function AuthenticatedPlayPageClient({
     videoCover,
     videoTitle,
     loading,
+    isVideoLoading,
     playbackRetryNonce,
     detail,
     currentEpisodeIndex,
@@ -583,7 +603,7 @@ function AuthenticatedPlayPageClient({
     cleanupPlayer,
     danmakuEnabledRef,
     onDanmakuEnabledChange,
-    onDanmakuReload: handleDanmakuReload,
+    onDanmakuEnable: handleDanmakuEnable,
     onSourceProxyFallbackStarted: useCallback(() => {
       setVideoLoadingAttempt((prev) => prev + 1);
     }, [setVideoLoadingAttempt]),

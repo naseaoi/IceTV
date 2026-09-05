@@ -1,4 +1,8 @@
-import { applyOffset } from '@/features/play/lib/danmaku/plugin';
+import {
+  applyOffset,
+  DANMAKU_HEATMAP_SAMPLING_PX,
+  resolveDanmakuHeatmapOption,
+} from '@/features/play/lib/danmaku/plugin';
 import type { DanmakuItem } from '@/features/play/lib/danmaku/types';
 
 const build = (times: number[]): DanmakuItem[] =>
@@ -36,5 +40,18 @@ describe('applyOffset', () => {
     const items = build([0, 10]);
     applyOffset(items, 5);
     expect(items.map((i) => i.time)).toEqual([0, 10]);
+  });
+});
+
+describe('resolveDanmakuHeatmapOption', () => {
+  it('开启时提供非零采样步长，避免窄容器触发无限循环', () => {
+    expect(resolveDanmakuHeatmapOption(true)).toEqual({
+      sampling: DANMAKU_HEATMAP_SAMPLING_PX,
+    });
+    expect(DANMAKU_HEATMAP_SAMPLING_PX).toBeGreaterThan(0);
+  });
+
+  it('关闭时不创建热力图', () => {
+    expect(resolveDanmakuHeatmapOption(false)).toBe(false);
   });
 });

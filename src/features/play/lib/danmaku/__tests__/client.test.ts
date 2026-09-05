@@ -1,8 +1,12 @@
 import {
   extractEpisodeNumber,
+  fetchDanmakuComments,
   groupCandidatesBySource,
   pickCandidateByEpisode,
+  rankCandidatesByEpisode,
+  searchDanmakuCandidates,
   splitSourceProvider,
+  warmupDanmakuSearch,
 } from '@/features/play/lib/danmaku/client';
 import type { DanmakuMatchCandidate } from '@/features/play/lib/danmaku/types';
 
@@ -92,6 +96,64 @@ describe('pickCandidateByEpisode', () => {
     ];
     expect(pickCandidateByEpisode(candidates, 1)?.episodeId).toBe(3);
   });
+
+  it('优先按标题和年份匹配系列，避免误选其他季度', () => {
+    const candidates: DanmakuMatchCandidate[] = [
+      {
+        episodeId: 10,
+        animeTitle: '鬼灭之刃：游郭篇(2021)【日番】from bilibili',
+        episodeTitle: '【bilibili1】 第1话 音柱',
+      },
+      {
+        episodeId: 20,
+        animeTitle: '鬼灭之刃(2019)【日番】from tencent',
+        episodeTitle: '【qq】 鬼灭之刃_01',
+      },
+    ];
+
+    expect(
+      pickCandidateByEpisode(candidates, 0, '鬼灭之刃', '2019')?.episodeId,
+    ).toBe(20);
+  });
+
+  it('可返回同集的后备候选以绕过空弹幕源', () => {
+    const candidates: DanmakuMatchCandidate[] = [
+      { episodeId: 1, animeTitle: '测试(2026)', episodeTitle: '第1集' },
+      { episodeId: 2, animeTitle: '测试(2026)', episodeTitle: '第1集' },
+    ];
+
+    expect(
+      rankCandidatesByEpisode(candidates, 0, '测试', '2026').map(
+        (candidate) => candidate.episodeId,
+      ),
+    ).toEqual([1, 2]);
+  });
+
+  it('精确标题源存在时不降级到相似电影', () => {
+    const candidates: DanmakuMatchCandidate[] = [
+      {
+        episodeId: 10,
+        animeTitle: '孤独摇滚(上)(2024)【动画电影】from migu',
+        episodeTitle: '孤独摇滚（上）',
+      },
+      {
+        episodeId: 20,
+        animeTitle: '孤独摇滚！(2022)【日番】from bilibili',
+        episodeTitle: '第1话 孤独的转机',
+      },
+      {
+        episodeId: 30,
+        animeTitle: '孤独摇滚！(2022)【动漫】from 360',
+        episodeTitle: '第1集',
+      },
+    ];
+
+    expect(
+      rankCandidatesByEpisode(candidates, 0, '孤独摇滚！', '2022').map(
+        (candidate) => candidate.episodeId,
+      ),
+    ).toEqual([20, 30]);
+  });
 });
 
 describe('groupCandidatesBySource', () => {
@@ -170,5 +232,118 @@ describe('splitSourceProvider', () => {
       providerLabel: null,
       displayTitle: 'from youku',
     });
+  });
+});
+
+describe('warmupDanmakuSearch', () => {
+  it('预热与随后读取复用同一个请求', async () => {
+    const candidate: DanmakuMatchCandidate = {
+      episodeId: 3001,
+      animeTitle: '预热测试',
+      episodeTitle: '第1集',
+    };
+    const originalFetch = globalThis.fetch;
+    const fetchMock = jest.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ candidates: [candidate] }),
+    } as Response);
+    globalThis.fetch = fetchMock as unknown as typeof fetch;
+
+    try {
+      warmupDanmakuSearch('仅用于预热复用测试');
+      await expect(
+        searchDanmakuCandidates('仅用于预热复用测试'),
+      ).resolves.toEqual([candidate]);
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+    } finally {
+      if (originalFetch) {
+        globalThis.fetch = originalFetch;
+      } else {
+        Reflect.deleteProperty(globalThis, 'fetch');
+      }
+    }
+  });
+});
+
+describe('fetchDanmakuComments', () => {
+  const originalFetch = globalThis.fetch;
+
+  afterEach(() => {
+    if (originalFetch) {
+      globalThis.fetch = originalFetch;
+    } else {
+      Reflect.deleteProperty(globalThis, 'fetch');
+    }
+  });
+
+  it('并发预热与正式加载复用同一个请求', async () => {
+    const items = [{ text: '测试弹幕', time: 1, mode: 0, color: '#fff' }];
+    const fetchMock = jest.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ items }),
+    } as Response);
+    globalThis.fetch = fetchMock as unknown as typeof fetch;
+
+    await expect(
+      Promise.all([fetchDanmakuComments(910001), fetchDanmakuComments(910001)]),
+    ).resolves.toEqual([items, items]);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('请求失败不污染缓存', async () => {
+    const fetchMock = jest
+      .fn()
+      .mockResolvedValueOnce({ ok: false, status: 502 } as Response)
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ items: [] }),
+      } as Response);
+    globalThis.fetch = fetchMock as unknown as typeof fetch;
+
+    await expect(fetchDanmakuComments(910002)).rejects.toThrow(
+      '弹幕评论请求失败: 502',
+    );
+    await expect(fetchDanmakuComments(910002)).resolves.toEqual([]);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it('显式刷新绕过已有缓存', async () => {
+    const firstItems = [{ text: '旧弹幕', time: 1, mode: 0, color: '#fff' }];
+    const nextItems = [{ text: '新弹幕', time: 2, mode: 0, color: '#fff' }];
+    const fetchMock = jest
+      .fn()
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ items: firstItems }),
+      } as Response)
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ items: nextItems }),
+      } as Response);
+    globalThis.fetch = fetchMock as unknown as typeof fetch;
+
+    await expect(fetchDanmakuComments(910003)).resolves.toEqual(firstItems);
+    await expect(fetchDanmakuComments(910003)).resolves.toEqual(firstItems);
+    await expect(
+      fetchDanmakuComments(910003, undefined, { force: true }),
+    ).resolves.toEqual(nextItems);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it('保留服务端按后台参数返回的完整弹幕队列', async () => {
+    const items = Array.from({ length: 2500 }, (_, index) => ({
+      text: `弹幕${index}`,
+      time: index,
+      mode: 0 as const,
+      color: '#FFFFFF',
+    }));
+    const fetchMock = jest.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ items, total: items.length, truncated: false }),
+    } as Response);
+    globalThis.fetch = fetchMock as unknown as typeof fetch;
+
+    await expect(fetchDanmakuComments(910004)).resolves.toHaveLength(2500);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 });

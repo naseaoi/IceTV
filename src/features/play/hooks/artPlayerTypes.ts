@@ -25,6 +25,7 @@ export interface UseArtPlayerParams {
   videoCover: string;
   videoTitle: string;
   loading: boolean;
+  isVideoLoading: boolean;
   playbackRetryNonce: number;
   detail: SearchResult | null;
   currentEpisodeIndex: number;
@@ -64,7 +65,7 @@ export interface UseArtPlayerParams {
   danmakuEnabledRef: MutableRefObject<boolean>;
   onDanmakuEnabledChange?: (enabled: boolean) => void;
   onPlaybackStarted?: () => void;
-  onDanmakuReload?: () => void;
+  onDanmakuEnable?: () => void;
   onSourceProxyFallbackStarted?: () => void;
   onCurrentSourceVideoInfo?: (
     info: CurrentSourceVideoInfo,

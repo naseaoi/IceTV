@@ -15,8 +15,13 @@ import {
   applyDanmakuHeatmapVisibility,
   bindDanmakuSettingPersistence,
   createDanmakuPluginIfEnabled,
+  isDanmakuFeatureEnabled,
   reloadDanmaku,
 } from '@/features/play/lib/danmaku/attach';
+import {
+  beginDanmakuLoadNotice,
+  waitForDanmakuPlayerSwitch,
+} from '@/features/play/lib/danmaku/load-notice';
 import { bindDanmakuSliderDrag } from '@/features/play/lib/danmaku/slider-drag';
 import {
   type PlayerLoadingSessionState,
@@ -122,7 +127,7 @@ export async function initializeArtPlayer(
     danmakuEnabledRef,
     onDanmakuEnabledChange,
     onPlaybackStarted,
-    onDanmakuReload,
+    onDanmakuEnable,
     onSourceProxyFallbackStarted,
     onCurrentSourceVideoInfo,
   } = params;
@@ -148,6 +153,7 @@ export async function initializeArtPlayer(
       videoId: playbackInfoContext.id,
       episodeIndex: currentEpisodeIndex,
       searchTitle: detailRef.current?.title || detail?.title || videoTitle,
+      searchYear: detailRef.current?.year || detail?.year || '',
     };
     const preUseProxy = isServerProxy(preSourceKey, videoUrl);
     const buildProxyUrl = (rawUrl: string) =>
@@ -217,7 +223,12 @@ export async function initializeArtPlayer(
         lastPlaybackRateRef.current,
       );
       const reusedPlayer = artPlayerRef.current;
-      reusedPlayer.switch = playbackUrl;
+      if (reusedPlayer.url !== playbackUrl) {
+        waitForDanmakuPlayerSwitch(
+          reusedPlayer,
+          reusedPlayer.switchUrl(playbackUrl),
+        );
+      }
       reusedPlayer.title = `${videoTitle} - 第${currentEpisodeIndex + 1}集`;
       // switch 内部会注册一次性的归零回调，这里紧随其后注册以立即纠正落点，
       // 避免等重试逻辑生效时出现可见的回跳。
@@ -318,6 +329,16 @@ export async function initializeArtPlayer(
     if (!player) {
       return;
     }
+    if (
+      !danmakuPlugin &&
+      isDanmakuFeatureEnabled() &&
+      danmakuEnabledRef.current
+    ) {
+      beginDanmakuLoadNotice(
+        player,
+        () => danmakuEnabledRef.current,
+      )({ status: 'error' });
+    }
 
     playerMediaKindRef.current = mediaKind;
     bindPlayerHoverControls(player);
@@ -375,7 +396,7 @@ export async function initializeArtPlayer(
       onSourceProxyFallbackStarted?.();
 
       try {
-        player.switch = fallbackUrl;
+        waitForDanmakuPlayerSwitch(player, player.switchUrl(fallbackUrl));
         const activeVideo = player.video as HTMLVideoElement | undefined;
         if (activeVideo) {
           const managedVideo = getManagedVideo(activeVideo);
@@ -705,7 +726,7 @@ export async function initializeArtPlayer(
     bindDanmakuSettingPersistence(player, {
       enabledRef: danmakuEnabledRef,
       onEnabledChange: onDanmakuEnabledChange,
-      onEnable: onDanmakuReload,
+      onEnable: onDanmakuEnable,
     });
 
     player.on('ready', () => {

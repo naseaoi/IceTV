@@ -1,11 +1,17 @@
 import {
   fetchDanmakuComments,
-  pickCandidateByEpisode,
+  rankCandidatesByEpisode,
   searchDanmakuCandidates,
 } from '@/features/play/lib/danmaku/client';
-import { getPersistedEpisodeId } from '@/features/play/lib/danmaku/episode-storage';
+import {
+  clearPersistedEpisodeId,
+  getPersistedEpisodeId,
+} from '@/features/play/lib/danmaku/episode-storage';
 import { applyOffset } from '@/features/play/lib/danmaku/plugin';
-import type { DanmakuItem } from '@/features/play/lib/danmaku/types';
+import {
+  type DanmakuItem,
+  DanmakuEpisodeNotFoundError,
+} from '@/features/play/lib/danmaku/types';
 import {
   buildDanmakuScopeKey,
   readDanmakuOffset,
@@ -14,38 +20,58 @@ import {
 
 export type DanmakuEnabledReader = () => boolean;
 
+export interface DanmakuLoadOptions {
+  forceRefresh?: boolean;
+  onError?: () => void;
+}
+
 export interface DanmakuLoadContext {
   source: string;
   videoId: string;
   episodeIndex: number;
   searchTitle: string;
+  searchYear: string;
 }
 
-async function resolveEpisodeId(
+const MAX_CANDIDATE_ATTEMPTS = 6;
+
+interface EpisodeCandidate {
+  episodeId: number;
+  persistOnSuccess: boolean;
+}
+
+async function resolveEpisodeCandidates(
   source: string,
   videoId: string,
   episodeIndex: number,
   searchTitle: string,
-): Promise<number | null> {
+  searchYear: string,
+): Promise<EpisodeCandidate[]> {
   const stored = await getPersistedEpisodeId(source, videoId, episodeIndex);
-  if (stored) return stored;
+  if (stored) {
+    return [{ episodeId: stored, persistOnSuccess: false }];
+  }
 
-  if (!searchTitle) return null;
+  if (!searchTitle) return [];
 
   const candidates = await searchDanmakuCandidates(searchTitle);
-  const picked = pickCandidateByEpisode(candidates, episodeIndex);
-  if (!picked) return null;
-
-  const scopeKey = buildDanmakuScopeKey(source, videoId, episodeIndex);
-  if (scopeKey) {
-    writeDanmakuEpisodeId(scopeKey, picked.episodeId);
-  }
-  return picked.episodeId;
+  return rankCandidatesByEpisode(
+    candidates,
+    episodeIndex,
+    searchTitle,
+    searchYear,
+  )
+    .slice(0, MAX_CANDIDATE_ATTEMPTS)
+    .map((candidate) => ({
+      episodeId: candidate.episodeId,
+      persistOnSuccess: true,
+    }));
 }
 
 export async function loadDanmakuForEpisode(
   context: DanmakuLoadContext,
   isEnabled: DanmakuEnabledReader,
+  options: DanmakuLoadOptions = {},
 ): Promise<DanmakuItem[]> {
   if (!isEnabled()) return [];
 
@@ -57,18 +83,76 @@ export async function loadDanmakuForEpisode(
   if (!scopeKey) return [];
 
   try {
-    const episodeId = await resolveEpisodeId(
+    let candidates = await resolveEpisodeCandidates(
       context.source,
       context.videoId,
       context.episodeIndex,
       context.searchTitle,
+      context.searchYear,
     );
-    if (!episodeId) return [];
 
-    const items = await fetchDanmakuComments(episodeId);
-    return applyOffset(items, readDanmakuOffset(scopeKey));
+    let candidateIndex = 0;
+    while (candidateIndex < candidates.length) {
+      const candidate = candidates[candidateIndex];
+      candidateIndex += 1;
+      let items: DanmakuItem[];
+      let missingEpisode = false;
+      try {
+        items = await fetchDanmakuComments(candidate.episodeId, undefined, {
+          force: options.forceRefresh,
+        });
+      } catch (error) {
+        if (!(error instanceof DanmakuEpisodeNotFoundError)) {
+          options.onError?.();
+          return [];
+        }
+        missingEpisode = true;
+        items = [];
+      }
+
+      if (items.length === 0) {
+        if (!candidate.persistOnSuccess) {
+          // 旧映射已失效，清掉后重新搜索并尝试新的候选。
+          await clearPersistedEpisodeId(
+            context.source,
+            context.videoId,
+            context.episodeIndex,
+          );
+          if (!context.searchTitle) return [];
+          const searched = await searchDanmakuCandidates(
+            context.searchTitle,
+            undefined,
+            {
+              force: missingEpisode,
+            },
+          );
+          candidates = rankCandidatesByEpisode(
+            searched,
+            context.episodeIndex,
+            context.searchTitle,
+            context.searchYear,
+          )
+            .filter((item) => item.episodeId !== candidate.episodeId)
+            .slice(0, MAX_CANDIDATE_ATTEMPTS)
+            .map((item) => ({
+              episodeId: item.episodeId,
+              persistOnSuccess: true,
+            }));
+          candidateIndex = 0;
+        }
+        continue;
+      }
+
+      if (candidate.persistOnSuccess) {
+        writeDanmakuEpisodeId(scopeKey, candidate.episodeId);
+      }
+      return applyOffset(items, readDanmakuOffset(scopeKey));
+    }
+
+    return [];
   } catch (error) {
     console.warn('弹幕加载失败:', error);
+    options.onError?.();
     return [];
   }
 }

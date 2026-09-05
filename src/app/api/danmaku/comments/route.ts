@@ -62,6 +62,15 @@ export async function GET(request: NextRequest) {
 
     return NextResponse.json(result, { headers: NO_STORE_HEADERS });
   } catch (error) {
+    if (
+      error instanceof DanmakuProviderError &&
+      error.kind === 'episode-not-found'
+    ) {
+      return NextResponse.json(
+        { error: '弹幕集数映射已失效', code: 'DANMAKU_EPISODE_NOT_FOUND' },
+        { status: 404, headers: NO_STORE_HEADERS },
+      );
+    }
     recordServerProxyFailure('danmaku', error);
     console.error('弹幕拉取失败:', error);
 

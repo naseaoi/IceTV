@@ -26,6 +26,7 @@ export interface DanmakuSearchResult {
 
 export type DanmakuProviderErrorKind =
   | 'not-configured'
+  | 'episode-not-found'
   | 'upstream-unavailable'
   | 'upstream-rejected'
   | 'invalid-response';
@@ -37,5 +38,12 @@ export class DanmakuProviderError extends Error {
   ) {
     super(message);
     this.name = 'DanmakuProviderError';
+  }
+}
+
+export class DanmakuEpisodeNotFoundError extends Error {
+  constructor() {
+    super('弹幕集数映射已失效');
+    this.name = 'DanmakuEpisodeNotFoundError';
   }
 }

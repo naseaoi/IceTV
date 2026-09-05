@@ -69,7 +69,11 @@ async function requestUpstream(
   return fetchWithUrlGuard(url, { ...init, timeoutMs });
 }
 
-async function readJson(url: string, timeoutMs: number): Promise<unknown> {
+async function readJson(
+  url: string,
+  timeoutMs: number,
+  notFoundKind: 'upstream-rejected' | 'episode-not-found' = 'upstream-rejected',
+): Promise<unknown> {
   let response: Response;
   try {
     response = await requestUpstream(url, timeoutMs);
@@ -88,7 +92,7 @@ async function readJson(url: string, timeoutMs: number): Promise<unknown> {
 
   if (!response.ok) {
     throw new DanmakuProviderError(
-      'upstream-rejected',
+      response.status === 404 ? notFoundKind : 'upstream-rejected',
       `弹幕服务返回 ${response.status}`,
     );
   }
@@ -185,6 +189,7 @@ export async function fetchDanmakuByEpisodeId(
   const payload = (await readJson(
     buildUrl(`/api/v2/comment/${episodeId}`, { format: 'json' }),
     timeoutMs,
+    'episode-not-found',
   )) as CommentResponse;
 
   return normalizeComments(payload?.comments, limit);
