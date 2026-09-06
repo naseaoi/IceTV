@@ -87,6 +87,7 @@ src/
 
 - 复用 `authorizeProxyRequest()`、`fetchWithUrlGuard()`、`validateProxyUrlForRequest()`。签名 `src/lib/proxy-auth.ts`，校验 `src/lib/url-guard.ts`。
 - **不要直接 `fetch` 未经校验的外部输入 URL**。
+- 普通服务端回源复用 `fetchUpstream()` / `fetchWithUrlGuard()`，它们会申请数据库共享资源额度。得到的响应体必须消费或取消，连接租约不会在响应头到达时释放。
 
 ## 播放
 
@@ -141,6 +142,7 @@ src/
 - 需要 `Headers` / `Request` / `Response` 的路由测试调 `installWebPolyfills()`（同目录），它不含 crypto。
 - `jest.setup.js` 把 `LOCAL_DB_PATH` 固定为 `:memory:`，防止测试写进开发库。新增测试不要覆盖成真实路径。
 - `jest.mock` 工厂必须列出被测模块导入的每个符号，**漏一个会让路由静默 500**。
+- `jest.setup.js` 默认 mock 回源与资源保护边界以隔离普通单测；资源限额集成测试必须 `jest.unmock('@/lib/upstream-resource-guard.server')`，并用 `installStreamPolyfills()` 安装真实流响应实现。
 - `mysql-storage-contract.test.ts` 走 fake pool（JS 模拟谓词），验的是接线，不执行真 SQL，证明不了两侧谓词等价。真 SQL 覆盖靠 `pnpm test:mysql`（需 Docker，未配 `MYSQL_TEST_URL` 时整体 skip）。
 
 ## 验证

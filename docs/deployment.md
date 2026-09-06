@@ -325,7 +325,13 @@ DATABASE_URL=mysql://user:password@host:3306/dbname
 
 预算表是运行时状态，不参与用户数据导入导出；清空业务数据不会重置正在生效的限流。应用层每次准入仍需数据库操作，不代替网关抗压和连接池容量规划。
 
-### 共享回源缓存范围
+### Next Data Cache 边界
+
+仓库的 `next.config.js` 未配置跨实例 `cacheHandler`，Docker镜像也没有配置共享Next缓存目录。单容器的进程缓存/本地磁盘缓存不能当成多个容器的统一结果或限额；多实例部署仍需同一个MySQL库。Vercel的平台Data Cache可能有平台级持久化和共享，其具体范围由平台与项目部署决定，仓库配置不能证明其跨区域行为，本次也未测远端Vercel环境。
+
+本次检查以安装的Next版本和配置为准：`force-dynamic`不代表任何显式fetch缓存策略都相同；还要检查fetch的`cache`、`next.revalidate`及路由`fetchCache`。当前首页上游fetch显式使用`cache: 'no-store'`，12小时推荐复用由IceTV数据库共享缓存负责，因此不依赖Next隐式缓存是否命中。开发模式/HMR下观察到的重复请求也不能直接推算生产多实例行为。
+
+### 业务缓存范围
 
 首页推荐、详情、搜索分页与聚合、调整后的封面和可缓存 VOD 清单使用本地 SWR 加数据库共享缓存。共用同一个 MySQL 数据库的实例复用结果与回源租约；SQLite 只覆盖访问同一数据库文件的本机进程，不支持跨主机挂载 SQLite 文件。
 
