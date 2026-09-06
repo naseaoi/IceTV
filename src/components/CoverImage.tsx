@@ -323,7 +323,7 @@ const CoverImage: React.FC<CoverImageProps> = memo(function CoverImage({
         data-cover-loading-backdrop
         data-cover-state={revealed ? 'revealed' : 'loading'}
         className={`pointer-events-none absolute inset-0 z-[100] rounded-lg ${
-          revealed ? 'opacity-0' : 'cover-loading-backdrop-pending'
+          revealed ? 'opacity-0' : 'opacity-100'
         }`}
       />
       {slotGranted && (

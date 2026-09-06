@@ -135,7 +135,7 @@ describe('CoverImage', () => {
     expect(image).toHaveClass('opacity-0');
     expect(document.querySelector('[data-cover-loading-backdrop]')).toHaveClass(
       'z-[100]',
-      'cover-loading-backdrop-pending',
+      'opacity-100',
       'bg-gray-200/70',
       'dark:bg-gray-700/60',
     );
