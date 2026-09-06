@@ -30,6 +30,7 @@ import {
   PlaybackWatchTotals,
   PlayRecord,
   PlayRecordPage,
+  SharedCacheRecord,
   SkipConfig,
   SourceRouteStatInput,
   SourceRouteStatsBucket,
@@ -469,6 +470,17 @@ export class MySqlStorage implements IStorage {
         username VARCHAR(191) NOT NULL PRIMARY KEY,
         enabled TINYINT(1) NOT NULL
       ) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci`,
+      `CREATE TABLE IF NOT EXISTS shared_cache (
+        cache_key VARCHAR(191) NOT NULL PRIMARY KEY,
+        value_text LONGTEXT NOT NULL,
+        fresh_until BIGINT NOT NULL,
+        stale_until BIGINT NOT NULL,
+        lease_token VARCHAR(64) NULL,
+        lease_until BIGINT NOT NULL DEFAULT 0,
+        updated_at BIGINT NOT NULL,
+        KEY idx_shared_cache_expiry (stale_until, lease_until),
+        KEY idx_shared_cache_updated_at (updated_at)
+      ) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin`,
     ];
 
     for (const statement of statements) {
@@ -1342,6 +1354,115 @@ export class MySqlStorage implements IStorage {
     );
   }
 
+  async getSharedCache(key: string): Promise<SharedCacheRecord | null> {
+    await this.ensureInitialized();
+    const [rows] = await this.pool.query<JsonRow[]>(
+      `SELECT value_text, fresh_until, stale_until, lease_until
+       FROM shared_cache WHERE cache_key = ? LIMIT 1`,
+      [key],
+    );
+    const row = rows[0];
+    if (!row) return null;
+    return {
+      value: String(row.value_text || ''),
+      freshUntil: Number(row.fresh_until),
+      staleUntil: Number(row.stale_until),
+      leaseUntil: Number(row.lease_until),
+    };
+  }
+
+  async acquireSharedCacheLease(
+    key: string,
+    token: string,
+    now: number,
+    leaseUntil: number,
+  ): Promise<boolean> {
+    await this.ensureInitialized();
+    const [updated] = await this.pool.execute(
+      `UPDATE shared_cache
+       SET lease_token = ?, lease_until = ?, updated_at = ?
+       WHERE cache_key = ? AND lease_until <= ?`,
+      [token, leaseUntil, now, key, now],
+    );
+    if ('affectedRows' in updated && updated.affectedRows > 0) {
+      return true;
+    }
+
+    const [inserted] = await this.pool.execute(
+      `INSERT IGNORE INTO shared_cache (
+         cache_key, value_text, fresh_until, stale_until,
+         lease_token, lease_until, updated_at
+       ) VALUES (?, '', 0, 0, ?, ?, ?)`,
+      [key, token, leaseUntil, now],
+    );
+    return 'affectedRows' in inserted && inserted.affectedRows > 0;
+  }
+
+  async setSharedCache(
+    key: string,
+    token: string,
+    value: string,
+    freshUntil: number,
+    staleUntil: number,
+    now: number,
+  ): Promise<boolean> {
+    await this.ensureInitialized();
+    const [result] = await this.pool.execute(
+      `UPDATE shared_cache
+       SET value_text = ?, fresh_until = ?, stale_until = ?,
+           lease_token = NULL, lease_until = 0, updated_at = ?
+       WHERE cache_key = ? AND lease_token = ?`,
+      [value, freshUntil, staleUntil, now, key, token],
+    );
+    return 'affectedRows' in result && result.affectedRows > 0;
+  }
+
+  async releaseSharedCacheLease(key: string, token: string): Promise<void> {
+    await this.ensureInitialized();
+    await this.pool.execute(
+      `UPDATE shared_cache
+       SET lease_token = NULL, lease_until = 0
+       WHERE cache_key = ? AND lease_token = ?`,
+      [key, token],
+    );
+  }
+
+  async renewSharedCacheLease(
+    key: string,
+    token: string,
+    now: number,
+    leaseUntil: number,
+  ): Promise<boolean> {
+    await this.ensureInitialized();
+    const [result] = await this.pool.execute(
+      'UPDATE shared_cache SET lease_until = ? WHERE cache_key = ? AND lease_token = ? AND lease_until > ?',
+      [leaseUntil, key, token, now],
+    );
+    return 'affectedRows' in result && result.affectedRows > 0;
+  }
+
+  async pruneSharedCache(now: number, limit: number): Promise<void> {
+    await this.ensureInitialized();
+    const safeLimit = Math.max(1, Math.min(1000, Math.floor(limit)));
+    await this.pool.query(
+      `DELETE FROM shared_cache
+       WHERE stale_until <= ? AND lease_until <= ?
+       ORDER BY updated_at ASC LIMIT ${safeLimit}`,
+      [now, now],
+    );
+    await this.pool.query(
+      `DELETE FROM shared_cache WHERE cache_key IN (
+      SELECT cache_key FROM (
+        SELECT cache_key,
+          ROW_NUMBER() OVER (ORDER BY updated_at DESC, cache_key DESC) AS entry_rank,
+          SUM(OCTET_LENGTH(value_text)) OVER (ORDER BY updated_at DESC, cache_key DESC) AS cache_bytes
+        FROM shared_cache WHERE lease_until <= ?
+      ) AS budget WHERE entry_rank > 4096 OR cache_bytes > 134217728
+    )`,
+      [now],
+    );
+  }
+
   async setPlaybackSession(
     userName: string,
     session: PlaybackSession,
@@ -1745,6 +1866,7 @@ export class MySqlStorage implements IStorage {
       await connection.execute('DELETE FROM invite_code_usage');
       await connection.execute('DELETE FROM user_danmaku_episodes');
       await connection.execute('DELETE FROM user_danmaku_settings');
+      await connection.execute('DELETE FROM shared_cache');
     });
   }
 
@@ -1767,6 +1889,7 @@ export class MySqlStorage implements IStorage {
       await connection.execute('DELETE FROM invite_code_usage');
       await connection.execute('DELETE FROM user_danmaku_episodes');
       await connection.execute('DELETE FROM user_danmaku_settings');
+      await connection.execute('DELETE FROM shared_cache');
 
       await connection.execute(
         'INSERT INTO admin_config (id, config_json) VALUES (1, ?)',

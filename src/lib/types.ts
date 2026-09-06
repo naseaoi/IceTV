@@ -164,6 +164,13 @@ export interface StorageImportData {
   inviteCodeUsage: { [code: string]: number };
 }
 
+export interface SharedCacheRecord {
+  value: string;
+  freshUntil: number;
+  staleUntil: number;
+  leaseUntil: number;
+}
+
 // 存储接口
 export interface IStorage {
   // 播放记录相关
@@ -316,6 +323,30 @@ export interface IStorage {
   recordSourceRouteStat(input: SourceRouteStatInput): Promise<void>;
   getSourceRouteStats(sinceDate: string): Promise<SourceRouteStatsItem[]>;
   getAllSourceRouteStatBuckets(): Promise<SourceRouteStatsBucket[]>;
+
+  getSharedCache(key: string): Promise<SharedCacheRecord | null>;
+  acquireSharedCacheLease(
+    key: string,
+    token: string,
+    now: number,
+    leaseUntil: number,
+  ): Promise<boolean>;
+  setSharedCache(
+    key: string,
+    token: string,
+    value: string,
+    freshUntil: number,
+    staleUntil: number,
+    now: number,
+  ): Promise<boolean>;
+  releaseSharedCacheLease(key: string, token: string): Promise<void>;
+  renewSharedCacheLease(
+    key: string,
+    token: string,
+    now: number,
+    leaseUntil: number,
+  ): Promise<boolean>;
+  pruneSharedCache(now: number, limit: number): Promise<void>;
 
   // 弹幕集映射相关
   getDanmakuEpisodeId(

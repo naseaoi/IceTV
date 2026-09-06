@@ -10,6 +10,7 @@ import {
   toProxyFailurePayload,
 } from '@/lib/proxy-diagnostics';
 import { requireServerProxyQuota } from '@/lib/server-proxy-guard';
+import { resourceLimitResponse } from '@/lib/server-resource-errors';
 import { validateProxyUrlForRequest } from '@/lib/url-guard';
 
 import { getProxySourceKey, resolveProxyUserAgent } from '../utils';
@@ -106,7 +107,7 @@ export async function GET(request: NextRequest) {
   }
 
   const ua = await resolveProxyUserAgent(source);
-  const skipCache = isSignedM3U8Url(validation.url);
+  const skipCache = isLive || isSignedM3U8Url(validation.url);
 
   try {
     // 查询 VOD 清单缓存（fresh/stale 皆命中；stale 命中时触发后台刷新）
@@ -115,7 +116,7 @@ export async function GET(request: NextRequest) {
       const { value, fresh } = cached;
       if (!fresh) {
         // 软过期：后台刷新，不阻塞当前响应
-        void refreshM3U8Cache(validation.url, ua, source);
+        void refreshM3U8Cache(validation.url, ua, source, isLive);
       }
       const modifiedContent = await getRewrittenM3U8Content(
         value,
@@ -187,6 +188,8 @@ export async function GET(request: NextRequest) {
       headers,
     });
   } catch (error) {
+    const busy = resourceLimitResponse(error);
+    if (busy) return busy;
     const diagnostic = classifyProxyFailure(error, {
       route: 'm3u8',
       source,

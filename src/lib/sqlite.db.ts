@@ -26,6 +26,7 @@ import {
   PlaybackWatchTotals,
   PlayRecord,
   PlayRecordPage,
+  SharedCacheRecord,
   SkipConfig,
   SourceRouteStatInput,
   SourceRouteStatsBucket,
@@ -428,6 +429,11 @@ export class LocalSqliteStorage implements IStorage {
     getDanmakuEnabledPreference: Database.Statement;
     setDanmakuEnabledPreference: Database.Statement;
     deleteDanmakuEnabledPreferenceByUser: Database.Statement;
+    getSharedCache: Database.Statement;
+    acquireSharedCacheLease: Database.Statement;
+    setSharedCache: Database.Statement;
+    releaseSharedCacheLease: Database.Statement;
+    pruneSharedCache: Database.Statement;
   };
 
   constructor(dbPath?: string) {
@@ -623,6 +629,22 @@ export class LocalSqliteStorage implements IStorage {
         username TEXT PRIMARY KEY,
         enabled INTEGER NOT NULL
       );
+
+      CREATE TABLE IF NOT EXISTS shared_cache (
+        cache_key TEXT PRIMARY KEY,
+        value_text TEXT NOT NULL,
+        fresh_until INTEGER NOT NULL,
+        stale_until INTEGER NOT NULL,
+        lease_token TEXT,
+        lease_until INTEGER NOT NULL DEFAULT 0,
+        updated_at INTEGER NOT NULL
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_shared_cache_expiry
+        ON shared_cache (stale_until, lease_until);
+
+      CREATE INDEX IF NOT EXISTS idx_shared_cache_updated_at
+        ON shared_cache (updated_at);
     `);
   }
 
@@ -949,6 +971,40 @@ export class LocalSqliteStorage implements IStorage {
       ),
       deleteDanmakuEnabledPreferenceByUser: this.db.prepare(
         'DELETE FROM user_danmaku_settings WHERE username = ?',
+      ),
+      getSharedCache: this.db.prepare(
+        `SELECT value_text, fresh_until, stale_until, lease_until
+         FROM shared_cache WHERE cache_key = ? LIMIT 1`,
+      ),
+      acquireSharedCacheLease: this.db.prepare(
+        `INSERT INTO shared_cache (
+           cache_key, value_text, fresh_until, stale_until,
+           lease_token, lease_until, updated_at
+         ) VALUES (?, '', 0, 0, ?, ?, ?)
+         ON CONFLICT(cache_key) DO UPDATE SET
+           lease_token = excluded.lease_token,
+           lease_until = excluded.lease_until,
+           updated_at = excluded.updated_at
+         WHERE shared_cache.lease_until <= excluded.updated_at`,
+      ),
+      setSharedCache: this.db.prepare(
+        `UPDATE shared_cache
+         SET value_text = ?, fresh_until = ?, stale_until = ?,
+             lease_token = NULL, lease_until = 0, updated_at = ?
+         WHERE cache_key = ? AND lease_token = ?`,
+      ),
+      releaseSharedCacheLease: this.db.prepare(
+        `UPDATE shared_cache
+         SET lease_token = NULL, lease_until = 0
+         WHERE cache_key = ? AND lease_token = ?`,
+      ),
+      pruneSharedCache: this.db.prepare(
+        `DELETE FROM shared_cache
+         WHERE cache_key IN (
+           SELECT cache_key FROM shared_cache
+           WHERE stale_until <= ? AND lease_until <= ?
+           ORDER BY updated_at ASC LIMIT ?
+         )`,
       ),
     };
   }
@@ -1853,6 +1909,95 @@ export class LocalSqliteStorage implements IStorage {
     this.stmts.setDanmakuEnabledPreference.run(username, enabled ? 1 : 0);
   }
 
+  async getSharedCache(key: string): Promise<SharedCacheRecord | null> {
+    const row = this.stmts.getSharedCache.get(key) as
+      | {
+          value_text: string;
+          fresh_until: number;
+          stale_until: number;
+          lease_until: number;
+        }
+      | undefined;
+    if (!row) return null;
+    return {
+      value: row.value_text,
+      freshUntil: row.fresh_until,
+      staleUntil: row.stale_until,
+      leaseUntil: row.lease_until,
+    };
+  }
+
+  async acquireSharedCacheLease(
+    key: string,
+    token: string,
+    now: number,
+    leaseUntil: number,
+  ): Promise<boolean> {
+    return (
+      this.stmts.acquireSharedCacheLease.run(key, token, leaseUntil, now)
+        .changes > 0
+    );
+  }
+
+  async setSharedCache(
+    key: string,
+    token: string,
+    value: string,
+    freshUntil: number,
+    staleUntil: number,
+    now: number,
+  ): Promise<boolean> {
+    return (
+      this.stmts.setSharedCache.run(
+        value,
+        freshUntil,
+        staleUntil,
+        now,
+        key,
+        token,
+      ).changes > 0
+    );
+  }
+
+  async releaseSharedCacheLease(key: string, token: string): Promise<void> {
+    this.stmts.releaseSharedCacheLease.run(key, token);
+  }
+
+  async pruneSharedCache(now: number, limit: number): Promise<void> {
+    this.stmts.pruneSharedCache.run(
+      now,
+      now,
+      Math.max(1, Math.min(1000, Math.floor(limit))),
+    );
+    this.db
+      .prepare(
+        `DELETE FROM shared_cache WHERE cache_key IN (
+      SELECT cache_key FROM (
+        SELECT cache_key,
+          ROW_NUMBER() OVER (ORDER BY updated_at DESC, cache_key DESC) AS entry_rank,
+          SUM(length(CAST(value_text AS BLOB))) OVER (ORDER BY updated_at DESC, cache_key DESC) AS cache_bytes
+        FROM shared_cache WHERE lease_until <= ?
+      ) AS budget WHERE entry_rank > 4096 OR cache_bytes > 134217728
+    )`,
+      )
+      .run(now);
+  }
+
+  async renewSharedCacheLease(
+    key: string,
+    token: string,
+    now: number,
+    leaseUntil: number,
+  ): Promise<boolean> {
+    return (
+      this.db
+        .prepare(
+          'UPDATE shared_cache SET lease_until = ? WHERE cache_key = ? AND lease_token = ? AND lease_until > ?',
+        )
+        .run(leaseUntil, key, token, now).changes > 0
+    );
+  }
+
   async setPlaybackSession(
     userName: string,
     session: PlaybackSession,
@@ -2190,6 +2335,7 @@ export class LocalSqliteStorage implements IStorage {
         DELETE FROM invite_code_usage;
         DELETE FROM user_danmaku_episodes;
         DELETE FROM user_danmaku_settings;
+        DELETE FROM shared_cache;
       `);
     });
 
@@ -2217,6 +2363,7 @@ export class LocalSqliteStorage implements IStorage {
         DELETE FROM invite_code_usage;
         DELETE FROM user_danmaku_episodes;
         DELETE FROM user_danmaku_settings;
+        DELETE FROM shared_cache;
       `);
 
       this.stmts.setAdminConfig.run(JSON.stringify(snapshot.adminConfig));

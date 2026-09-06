@@ -10,6 +10,7 @@ import {
   peekCachedSearchAggregate,
   refreshCachedSearchAggregate,
 } from '@/lib/search-cache';
+import { resourceLimitResponse } from '@/lib/server-resource-errors';
 
 export const runtime = 'nodejs';
 
@@ -89,6 +90,8 @@ export async function GET(request: NextRequest) {
       { headers: { 'Cache-Control': 'private, no-store' } },
     );
   } catch (error) {
+    const busy = resourceLimitResponse(error);
+    if (busy) return busy;
     console.error('搜索聚合失败:', error);
     return NextResponse.json({ error: '搜索失败' }, { status: 500 });
   }

@@ -20,6 +20,7 @@ import {
   recordServerProxyFailure,
   requireServerProxyQuota,
 } from '@/lib/server-proxy-guard';
+import { resourceLimitResponse } from '@/lib/server-resource-errors';
 import {
   fetchWithUrlGuard,
   UrlValidationError,
@@ -195,6 +196,8 @@ async function proxyImage(request: NextRequest, method: 'GET' | 'HEAD') {
       },
     );
   } catch (error) {
+    const busy = resourceLimitResponse(error);
+    if (busy) return busy;
     if (error instanceof ImageOriginError) {
       recordServerProxyFailure('douban-image', error.reason);
       return NextResponse.json(

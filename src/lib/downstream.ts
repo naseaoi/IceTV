@@ -24,6 +24,7 @@ import {
   peekCachedSearchPage,
   setCachedSearchPage,
 } from '@/lib/search-cache';
+import { getSourceCacheKey } from '@/lib/source-cache-key';
 import { SearchResult } from '@/lib/types';
 import { cleanHtmlTags, normalizeInlineText } from '@/lib/utils';
 
@@ -105,7 +106,8 @@ async function searchWithCache(
     return { results: [] };
   }
 
-  const cached = getCachedSearchPage(apiSite.key, query, page);
+  const cacheSource = getSourceCacheKey(apiSite);
+  const cached = getCachedSearchPage(cacheSource, query, page);
   if (cached) {
     if (cached.status === 'ok') {
       return { results: cached.data, pageCount: cached.pageCount };
@@ -114,9 +116,9 @@ async function searchWithCache(
     }
   }
 
-  const stale = peekCachedSearchPage(apiSite.key, query, page);
+  const stale = peekCachedSearchPage(cacheSource, query, page);
   if (stale && !stale.fresh) {
-    dedupeSearchLoad(apiSite.key, query, page, () =>
+    dedupeSearchLoad(cacheSource, query, page, () =>
       fetchAndCacheSearchPage(apiSite, query, page, url, timeoutMs),
     ).catch(() => {});
     if (stale.entry.status === 'ok') {
@@ -125,7 +127,7 @@ async function searchWithCache(
     return { results: [] };
   }
 
-  return dedupeSearchLoad(apiSite.key, query, page, () =>
+  return dedupeSearchLoad(cacheSource, query, page, () =>
     fetchAndCacheSearchPage(apiSite, query, page, url, timeoutMs, signal),
   );
 }
@@ -152,7 +154,13 @@ async function fetchAndCacheSearchPage(
 
     if (!response.ok) {
       if (response.status === 403) {
-        setCachedSearchPage(apiSite.key, query, page, 'forbidden', []);
+        setCachedSearchPage(
+          getSourceCacheKey(apiSite),
+          query,
+          page,
+          'forbidden',
+          [],
+        );
       }
       return { results: [] };
     }
@@ -165,7 +173,14 @@ async function fetchAndCacheSearchPage(
       data.list.length === 0
     ) {
       const pageCount = page === 1 ? data?.pagecount || 1 : undefined;
-      setCachedSearchPage(apiSite.key, query, page, 'ok', [], pageCount);
+      setCachedSearchPage(
+        getSourceCacheKey(apiSite),
+        query,
+        page,
+        'ok',
+        [],
+        pageCount,
+      );
       return { results: [], pageCount };
     }
 
@@ -197,13 +212,26 @@ async function fetchAndCacheSearchPage(
     );
 
     const pageCount = page === 1 ? data.pagecount || 1 : undefined;
-    setCachedSearchPage(apiSite.key, query, page, 'ok', results, pageCount);
+    setCachedSearchPage(
+      getSourceCacheKey(apiSite),
+      query,
+      page,
+      'ok',
+      results,
+      pageCount,
+    );
     return { results, pageCount };
   } catch (error: any) {
     abortState.cleanup();
     const abortedByParent = Boolean(signal?.aborted && !abortState.isTimeout());
     if (isAbortError(error) && !abortedByParent) {
-      setCachedSearchPage(apiSite.key, query, page, 'timeout', []);
+      setCachedSearchPage(
+        getSourceCacheKey(apiSite),
+        query,
+        page,
+        'timeout',
+        [],
+      );
     }
     return { results: [] };
   } finally {
@@ -243,7 +271,7 @@ export async function searchFromApi(
       searchTimeoutMs,
       options.signal,
     );
-    const results = firstPageResult.results;
+    const results = [...firstPageResult.results];
     const pageCountFromFirst = firstPageResult.pageCount;
 
     const MAX_SEARCH_PAGES =

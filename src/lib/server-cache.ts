@@ -139,7 +139,12 @@ export function createSwrCache<T>(opts: SwrCacheOptions<T>) {
     }
   }
 
-  function write(key: string, value: T, now: number): boolean {
+  function write(
+    key: string,
+    value: T,
+    now: number,
+    expiry?: { freshUntil: number; staleUntil: number },
+  ): boolean {
     cleanupExpired(now);
     const weight = resolveWeight(value);
 
@@ -154,8 +159,8 @@ export function createSwrCache<T>(opts: SwrCacheOptions<T>) {
     remove(key);
     const entry: Entry<T> = {
       value,
-      freshUntil: now + freshMs,
-      staleUntil: now + freshMs + staleMs,
+      freshUntil: expiry?.freshUntil ?? now + freshMs,
+      staleUntil: expiry?.staleUntil ?? now + freshMs + staleMs,
       weight,
     };
     store.set(key, entry);
@@ -226,6 +231,9 @@ export function createSwrCache<T>(opts: SwrCacheOptions<T>) {
     },
     set(key: string, value: T) {
       write(key, value, Date.now());
+    },
+    hydrate(key: string, value: T, freshUntil: number, staleUntil: number) {
+      write(key, value, Date.now(), { freshUntil, staleUntil });
     },
     peek(key: string): { value: T; fresh: boolean } | null {
       const now = Date.now();

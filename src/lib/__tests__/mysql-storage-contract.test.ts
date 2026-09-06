@@ -912,6 +912,10 @@ function createFakePool() {
       return [[], []];
     }
 
+    if (normalized === 'DELETE FROM shared_cache') {
+      return [{ affectedRows: 0 }, []];
+    }
+
     throw new Error(`Unhandled execute SQL: ${normalized}`);
   };
 

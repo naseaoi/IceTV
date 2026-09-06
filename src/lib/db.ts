@@ -15,6 +15,7 @@ import {
   PlaybackWatchTotals,
   PlayRecord,
   PlayRecordPage,
+  SharedCacheRecord,
   SkipConfig,
   SourceRouteStatInput,
   SourceRouteStatsBucket,
@@ -528,6 +529,60 @@ class DbManager {
   async getAllSourceRouteStatBuckets(): Promise<SourceRouteStatsBucket[]> {
     const storage = await this.getStorage();
     return storage.getAllSourceRouteStatBuckets();
+  }
+
+  async getSharedCache(key: string): Promise<SharedCacheRecord | null> {
+    const storage = await this.getStorage();
+    return storage.getSharedCache(key);
+  }
+
+  async acquireSharedCacheLease(
+    key: string,
+    token: string,
+    now: number,
+    leaseUntil: number,
+  ): Promise<boolean> {
+    const storage = await this.getStorage();
+    return storage.acquireSharedCacheLease(key, token, now, leaseUntil);
+  }
+
+  async setSharedCache(
+    key: string,
+    token: string,
+    value: string,
+    freshUntil: number,
+    staleUntil: number,
+    now: number,
+  ): Promise<boolean> {
+    const storage = await this.getStorage();
+    return storage.setSharedCache(
+      key,
+      token,
+      value,
+      freshUntil,
+      staleUntil,
+      now,
+    );
+  }
+
+  async releaseSharedCacheLease(key: string, token: string): Promise<void> {
+    const storage = await this.getStorage();
+    await storage.releaseSharedCacheLease(key, token);
+  }
+
+  async renewSharedCacheLease(
+    key: string,
+    token: string,
+    now: number,
+    leaseUntil: number,
+  ): Promise<boolean> {
+    const storage = await this.getStorage();
+    return storage.renewSharedCacheLease(key, token, now, leaseUntil);
+  }
+
+  async pruneSharedCache(now: number, limit: number): Promise<void> {
+    const storage = await this.getStorage();
+    await storage.pruneSharedCache(now, limit);
   }
 
   async clearAllData(): Promise<void> {
