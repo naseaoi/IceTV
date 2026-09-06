@@ -12,6 +12,7 @@ const TEST_PATTERNS = [
   'mysql-tracking-live',
   'tracking-backend-parity',
   'shared-cache-storage',
+  'shared-resource-store',
 ];
 
 function docker(args, options = {}) {

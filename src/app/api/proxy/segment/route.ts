@@ -2,6 +2,7 @@
 
 import { isLiveEntryEnabled } from '@/features/live/lib/live';
 import { resolveVodSegmentProxyTimeoutMs } from '@/features/play/lib/vodSourcePlaybackPolicy';
+import { getClientIp } from '@/lib/client-ip';
 import { getConfigForRead } from '@/lib/config';
 import {
   fetchStreamThroughProxy,
@@ -21,6 +22,7 @@ import {
 } from '@/lib/proxy-response-limits';
 import { normalizeRuntimeParams } from '@/lib/runtime-params';
 import { requireServerProxyQuota } from '@/lib/server-proxy-guard';
+import { resourceLimitResponse } from '@/lib/server-resource-errors';
 import { markSourceCors, responseAllowsCors } from '@/lib/source-capability';
 import { fetchWithUrlGuard, validateProxyUrlForRequest } from '@/lib/url-guard';
 
@@ -87,12 +89,20 @@ export async function GET(request: NextRequest) {
     });
   }
 
-  const quotaFailure = requireServerProxyQuota(
+  const quotaFailure = await requireServerProxyQuota(
     'vod-segment',
     request,
     authorization.via === 'session' ? authorization.username : undefined,
   );
   if (quotaFailure) return quotaFailure;
+
+  const resourceContext = {
+    kind: isLiveStream ? ('live' as const) : ('vod' as const),
+    identity:
+      authorization.via === 'session'
+        ? `user:${authorization.username}`
+        : `ip:${getClientIp(request)}`,
+  };
 
   if (isLiveStream && !(await isLiveEntryEnabled())) {
     return NextResponse.json({ error: '直播未开启' }, { status: 404 });
@@ -130,6 +140,7 @@ export async function GET(request: NextRequest) {
     runtimeParams.ProxyRequestTimeoutSeconds * 1000,
   );
 
+  let pendingBody: ReadableStream<Uint8Array> | null = null;
   try {
     const headers: Record<string, string> = {
       'User-Agent': ua,
@@ -151,8 +162,11 @@ export async function GET(request: NextRequest) {
               maxBytes: MAX_SEGMENT_BYTES,
               accept: '*/*',
               headers,
+              resourceContext,
+              signal: request.signal,
             },
           );
+          pendingBody = response.body;
           assertContentLength(response.headers, MAX_SEGMENT_BYTES);
           assertSegmentContentType(response.headers, {
             route: 'segment',
@@ -181,6 +195,10 @@ export async function GET(request: NextRequest) {
             headers: buildSegmentResponseHeaders(response.headers, true),
           });
         } catch (error) {
+          await pendingBody?.cancel().catch(() => {});
+          pendingBody = null;
+          const busy = resourceLimitResponse(error);
+          if (busy) return busy;
           logProxyFailure(
             classifyProxyFailure(error, {
               route: 'segment',
@@ -206,8 +224,12 @@ export async function GET(request: NextRequest) {
       headers,
       skipInitialValidation: true,
       timeoutMs,
+      resourceContext,
+      signal: request.signal,
     });
+    pendingBody = response.body;
     if (!response.ok) {
+      await response.body?.cancel().catch(() => {});
       const diagnostic = createProxyFailureDiagnostic({
         route: 'segment',
         source,
@@ -265,6 +287,9 @@ export async function GET(request: NextRequest) {
       },
     );
   } catch (error) {
+    await pendingBody?.cancel().catch(() => {});
+    const busy = resourceLimitResponse(error);
+    if (busy) return busy;
     const diagnostic = classifyProxyFailure(error, {
       route: 'segment',
       source,

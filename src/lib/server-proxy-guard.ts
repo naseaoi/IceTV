@@ -4,6 +4,12 @@ import type { NextRequest } from 'next/server';
 import { NextResponse } from 'next/server';
 
 import { getClientIp } from '@/lib/client-ip';
+import { resourceLimitResponse } from '@/lib/server-resource-errors';
+import {
+  consumeSharedQuota,
+  resourceKey,
+  sharedResourceStore,
+} from '@/lib/shared-resource-quota.server';
 
 export type ServerProxyKind =
   | 'douban-data'
@@ -16,11 +22,6 @@ export type ServerProxyKind =
 type RateLimitConfig = {
   maxRequests: number;
   windowMs: number;
-};
-
-type RateLimitBucket = {
-  count: number;
-  resetAt: number;
 };
 
 type FailureStats = {
@@ -41,49 +42,33 @@ const RATE_LIMITS: Record<ServerProxyKind, RateLimitConfig> = {
   'vod-m3u8': { maxRequests: 240, windowMs: 60_000 },
 };
 
-const rateLimitBuckets = new Map<string, RateLimitBucket>();
 const failureStats = new Map<string, FailureStats>();
-const MAX_BUCKETS = 5000;
 
-export function requireServerProxyQuota(
+export async function requireServerProxyQuota(
   kind: ServerProxyKind,
   request: NextRequest,
   username?: string,
-): NextResponse | null {
-  pruneRateLimitBuckets();
-
+): Promise<Response | null> {
   const config = RATE_LIMITS[kind];
   const key = getRateLimitKey(kind, request, username);
-  const now = Date.now();
-  const bucket = rateLimitBuckets.get(key);
-
-  if (!bucket || bucket.resetAt <= now) {
-    rateLimitBuckets.set(key, {
-      count: 1,
-      resetAt: now + config.windowMs,
-    });
+  try {
+    await consumeSharedQuota(
+      await sharedResourceStore(),
+      resourceKey('proxy', key),
+      1,
+      config.maxRequests,
+      429,
+    );
     return null;
+  } catch (error) {
+    return (
+      resourceLimitResponse(error) ??
+      NextResponse.json(
+        { error: '服务繁忙，请稍后重试' },
+        { status: 503, headers: { 'Retry-After': '1' } },
+      )
+    );
   }
-
-  bucket.count += 1;
-  if (bucket.count <= config.maxRequests) {
-    return null;
-  }
-
-  const retryAfterSeconds = Math.max(
-    1,
-    Math.ceil((bucket.resetAt - now) / 1000),
-  );
-  return NextResponse.json(
-    { error: '请求过于频繁，请稍后再试' },
-    {
-      status: 429,
-      headers: {
-        'Cache-Control': 'no-store',
-        'Retry-After': retryAfterSeconds.toString(),
-      },
-    },
-  );
 }
 
 export function recordServerProxyFailure(
@@ -127,28 +112,6 @@ function getRateLimitKey(
   }
 
   return `${kind}:ip:${getClientIp(request)}`;
-}
-
-function pruneRateLimitBuckets(): void {
-  if (rateLimitBuckets.size <= MAX_BUCKETS) {
-    return;
-  }
-
-  const now = Date.now();
-  for (const [key, bucket] of rateLimitBuckets) {
-    if (bucket.resetAt <= now) {
-      rateLimitBuckets.delete(key);
-    }
-  }
-
-  if (rateLimitBuckets.size <= MAX_BUCKETS) {
-    return;
-  }
-
-  const overflow = rateLimitBuckets.size - MAX_BUCKETS;
-  for (const key of Array.from(rateLimitBuckets.keys()).slice(0, overflow)) {
-    rateLimitBuckets.delete(key);
-  }
 }
 
 function normalizeFailureReason(reason: unknown): string {

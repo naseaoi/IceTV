@@ -13,6 +13,7 @@ import {
   recordServerProxyFailure,
   requireServerProxyQuota,
 } from '@/lib/server-proxy-guard';
+import { resourceLimitResponse } from '@/lib/server-resource-errors';
 import { DoubanResult } from '@/lib/types';
 
 export const runtime = 'nodejs';
@@ -24,7 +25,7 @@ export async function GET(request: NextRequest) {
   });
   if (isGuardFailure(guardResult)) return guardResult.response;
 
-  const quotaFailure = requireServerProxyQuota(
+  const quotaFailure = await requireServerProxyQuota(
     'douban-data',
     request,
     guardResult.username,
@@ -137,6 +138,8 @@ export async function GET(request: NextRequest) {
       headers: createPublicApiCacheHeaders(cacheTime),
     });
   } catch (error) {
+    const busy = resourceLimitResponse(error);
+    if (busy) return busy;
     recordServerProxyFailure('douban-data', error);
     return NextResponse.json({ error: '获取豆瓣数据失败' }, { status: 500 });
   }

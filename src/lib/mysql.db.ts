@@ -7,6 +7,7 @@ import type {
 } from 'mysql2/promise';
 import mysql from 'mysql2/promise';
 
+import { MySqlResourceStore } from '@/lib/mysql-resource-store';
 import { AdminConfig } from '@/types/admin';
 
 import { hashPassword, verifyPassword } from './password';
@@ -357,6 +358,9 @@ type JsonRow = RowDataPacket & {
 };
 
 export class MySqlStorage implements IStorage {
+  get resources() {
+    return new MySqlResourceStore(this.pool, () => this.ensureInitialized());
+  }
   private readonly pool: ReturnType<typeof mysql.createPool>;
   private initPromise: Promise<void> | null = null;
 
@@ -470,6 +474,19 @@ export class MySqlStorage implements IStorage {
         username VARCHAR(191) NOT NULL PRIMARY KEY,
         enabled TINYINT(1) NOT NULL
       ) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci`,
+      `CREATE TABLE IF NOT EXISTS shared_resource_usage (
+        resource_key VARCHAR(191) NOT NULL PRIMARY KEY,
+        used BIGINT NOT NULL,
+        reset_at BIGINT NOT NULL,
+        KEY idx_resource_usage_expiry (reset_at)
+      ) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin`,
+      `CREATE TABLE IF NOT EXISTS shared_resource_leases (
+        resource_key VARCHAR(191) NOT NULL,
+        token VARCHAR(64) NOT NULL,
+        expires_at BIGINT NOT NULL,
+        PRIMARY KEY (resource_key, token),
+        KEY idx_resource_lease_expiry (expires_at)
+      ) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin`,
       `CREATE TABLE IF NOT EXISTS shared_cache (
         cache_key VARCHAR(191) NOT NULL PRIMARY KEY,
         value_text LONGTEXT NOT NULL,

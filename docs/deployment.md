@@ -299,7 +299,33 @@ DATABASE_URL=mysql://user:password@host:3306/dbname
 
 ## 升级与备份
 
-### 共享回源缓存
+### 多人在线资源预算
+
+代理的用户/IP请求额度、服务端实际回源的速率与连接租约均放在数据库，多个实例必须连接同一个 MySQL 库。SQLite 仅支持本机进程共享同一文件；每个容器各用一个 SQLite 文件不能共享预算。缓存命中只消耗入口额度，不消耗回源额度。
+
+| 环境变量                                                                         | 默认值       | 作用                               |
+| -------------------------------------------------------------------------------- | ------------ | ---------------------------------- |
+| `UPSTREAM_METADATA_CONCURRENCY`                                                  | 64           | 元数据回源总连接数                 |
+| `UPSTREAM_METADATA_HOST_CONCURRENCY`                                             | 12           | 同一上游主机的元数据连接数         |
+| `UPSTREAM_METADATA_RPM` / `UPSTREAM_METADATA_HOST_RPM`                           | 1800 / 300   | 元数据全局/主机每分钟请求额度      |
+| `UPSTREAM_MEDIA_CONCURRENCY` / `UPSTREAM_MEDIA_HOST_CONCURRENCY`                 | 96 / 32      | VOD与直播合计的全局/主机分片连接数 |
+| `UPSTREAM_MEDIA_USER_CONCURRENCY`                                                | 6            | 单用户分片连接数，VOD与直播共用    |
+| `UPSTREAM_LIVE_CONCURRENCY`                                                      | 32           | 直播分片额外总连接数上限           |
+| `UPSTREAM_MEDIA_RPM` / `UPSTREAM_MEDIA_HOST_RPM`                                 | 12000 / 6000 | 分片全局/主机每分钟请求额度        |
+| `UPSTREAM_MEDIA_MIB_PER_MINUTE`                                                  | 1536         | 分片全局每分钟预留流量（MiB）      |
+| `UPSTREAM_MEDIA_HOST_MIB_PER_MINUTE`                                             | 768          | 分片单主机每分钟预留流量（MiB）    |
+| `UPSTREAM_MEDIA_USER_MIB_PER_MINUTE`                                             | 192          | 分片单用户每分钟预留流量（MiB）    |
+| `UPSTREAM_METADATA_MAX_DURATION_SECONDS` / `UPSTREAM_MEDIA_MAX_DURATION_SECONDS` | 60 / 120     | 包含响应体消费在内的最长请求时间   |
+
+主机维度按真实目标 URL 的 hostname 合并，不以用户可修改的 source 参数或端口拆分额度。分片 session 鉴权按用户名分组，仅有播放签名时按客户端 IP 分组；同一出口 IP 的签名播放共享额度。正确设置 `TRUSTED_PROXY_COUNT`，不能信任客户端伪造的转发头。
+
+连接租约持有至响应体 EOF、取消或出错，每 10 秒续租；实例崩溃后 30 秒过期。上游拒绝、错误内容、用户中断均释放连接。额度不足时不绕过保护回源，用户额度返回 429，共享资源繁忙或数据库故障返回 503，并带 `Retry-After`。已开始发送的流无法再修改 HTTP 状态，超预算或续租失败会中断流。
+
+流量预算以 256 KiB 为单位预留、按 60 秒固定窗口计数，未用完的预留不退还。这是保护性流量额度，不是平滑限速；窗口边界允许突发，实际已从上游读入但未转发的数据及协议开销也不等于预算值。单分片仍有 256 MiB 大小上限。VOD分片不做本站内容缓存，不保证几十人并发能全部放行；需按源站额度、码率与服务器出口容量调参，并由反向代理/CDN负责带宽整形和分片复用。前端直连上游不经过这些服务端预算。
+
+预算表是运行时状态，不参与用户数据导入导出；清空业务数据不会重置正在生效的限流。应用层每次准入仍需数据库操作，不代替网关抗压和连接池容量规划。
+
+### 共享回源缓存范围
 
 首页推荐、详情、搜索分页与聚合、调整后的封面和可缓存 VOD 清单使用本地 SWR 加数据库共享缓存。共用同一个 MySQL 数据库的实例复用结果与回源租约；SQLite 只覆盖访问同一数据库文件的本机进程，不支持跨主机挂载 SQLite 文件。
 

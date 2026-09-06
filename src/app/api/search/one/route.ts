@@ -4,6 +4,7 @@ import { isGuardFailure, requireActiveUser } from '@/lib/api-auth';
 import { getAvailableApiSites, getConfigForRead } from '@/lib/config';
 import { searchFromApi } from '@/lib/downstream';
 import { normalizeRuntimeParams } from '@/lib/runtime-params';
+import { resourceLimitResponse } from '@/lib/server-resource-errors';
 import { yellowWords } from '@/lib/yellow';
 
 export const runtime = 'nodejs';
@@ -65,7 +66,9 @@ export async function GET(request: NextRequest) {
         { headers: { 'Cache-Control': 'private, no-store' } },
       );
     }
-  } catch {
+  } catch (error) {
+    const busy = resourceLimitResponse(error);
+    if (busy) return busy;
     return NextResponse.json(
       {
         error: '搜索失败',

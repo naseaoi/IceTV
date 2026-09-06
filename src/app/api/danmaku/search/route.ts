@@ -13,6 +13,7 @@ import {
   recordServerProxyFailure,
   requireServerProxyQuota,
 } from '@/lib/server-proxy-guard';
+import { resourceLimitResponse } from '@/lib/server-resource-errors';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -68,7 +69,7 @@ export async function GET(request: NextRequest) {
     );
   }
 
-  const quotaFailure = requireServerProxyQuota(
+  const quotaFailure = await requireServerProxyQuota(
     'danmaku',
     request,
     guardResult.username,
@@ -93,6 +94,8 @@ export async function GET(request: NextRequest) {
       { headers: NO_STORE_HEADERS },
     );
   } catch (error) {
+    const busy = resourceLimitResponse(error);
+    if (busy) return busy;
     recordServerProxyFailure('danmaku', error);
     console.error('弹幕搜索失败:', error);
 

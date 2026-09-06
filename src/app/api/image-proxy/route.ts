@@ -62,6 +62,7 @@ async function fetchImageOrigin(
   });
 
   if (!response.ok) {
+    await response.body?.cancel().catch(() => {});
     throw new ImageOriginError(
       response.status,
       response.status,
@@ -71,6 +72,7 @@ async function fetchImageOrigin(
 
   const contentType = response.headers.get('content-type');
   if (!contentType?.toLowerCase().startsWith('image/')) {
+    await response.body?.cancel().catch(() => {});
     throw new ImageOriginError(
       415,
       contentType || 'content-type',
@@ -113,7 +115,7 @@ async function proxyImage(request: NextRequest, method: 'GET' | 'HEAD') {
     return NextResponse.json({ error: 'Invalid URL' }, { status: 403 });
   }
 
-  const quotaFailure = requireServerProxyQuota(
+  const quotaFailure = await requireServerProxyQuota(
     'douban-image',
     request,
     authorization.via === 'session' ? authorization.username : undefined,

@@ -594,6 +594,10 @@ class DbManager {
     const storage = await this.getStorage();
     await storage.replaceAllData(data);
   }
+
+  async getSharedResourceStore() {
+    return (await this.getStorage()).resources;
+  }
 }
 
 export const db = new DbManager();

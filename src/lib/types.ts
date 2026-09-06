@@ -173,6 +173,7 @@ export interface SharedCacheRecord {
 
 // 存储接口
 export interface IStorage {
+  readonly resources: import('@/lib/shared-resource-store').SharedResourceStore;
   // 播放记录相关
   getPlayRecord(userName: string, key: string): Promise<PlayRecord | null>;
   setPlayRecord(

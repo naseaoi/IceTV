@@ -1,4 +1,5 @@
 import { createTimedAbortController } from '@/lib/downstream-sources/shared';
+import { fetchUpstream } from '@/lib/upstream-fetch.server';
 
 type DoubanFetchInit = RequestInit & {
   next?: {
@@ -39,7 +40,7 @@ export async function fetchDoubanData<T>(
   };
 
   try {
-    const response = await fetch(url, fetchOptions);
+    const response = await fetchUpstream(url, fetchOptions);
 
     if (!response.ok) {
       throw new Error(`HTTP error! Status: ${response.status}`);

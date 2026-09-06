@@ -14,6 +14,7 @@ import {
   recordServerProxyFailure,
   requireServerProxyQuota,
 } from '@/lib/server-proxy-guard';
+import { resourceLimitResponse } from '@/lib/server-resource-errors';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -45,7 +46,7 @@ export async function GET(request: NextRequest) {
     );
   }
 
-  const quotaFailure = requireServerProxyQuota(
+  const quotaFailure = await requireServerProxyQuota(
     'danmaku',
     request,
     guardResult.username,
@@ -65,6 +66,8 @@ export async function GET(request: NextRequest) {
 
     return NextResponse.json(result, { headers: NO_STORE_HEADERS });
   } catch (error) {
+    const busy = resourceLimitResponse(error);
+    if (busy) return busy;
     if (
       error instanceof DanmakuProviderError &&
       error.kind === 'episode-not-found'

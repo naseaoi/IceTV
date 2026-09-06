@@ -73,7 +73,7 @@ export async function GET(request: NextRequest) {
     });
   }
 
-  const quotaFailure = requireServerProxyQuota(
+  const quotaFailure = await requireServerProxyQuota(
     'vod-m3u8',
     request,
     authorization.via === 'session' ? authorization.username : undefined,

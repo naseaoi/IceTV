@@ -8,6 +8,8 @@ import {
   fetchJsonThroughProxy,
   getProxyUrlForTarget,
 } from '@/lib/http-proxy-json';
+import { ResourceLimitError } from '@/lib/server-resource-errors';
+import { withUpstreamTask } from '@/lib/upstream-resource-guard.server';
 
 export type BangumiFetchInit = RequestInit & {
   timeoutMs?: number;
@@ -40,26 +42,37 @@ async function fetchBangumiCalendarJsonWithFallback(
       return await fetchJsonThroughProxy(targetUrl, proxyUrl, {
         timeoutMs: init.timeoutMs ?? BANGUMI_DEFAULT_TIMEOUT_MS,
         userAgent: 'IceTV',
+        signal: init.signal,
       });
     } catch (error) {
+      if (error instanceof ResourceLimitError) throw error;
       console.warn('Bangumi HTTP 代理请求失败:', error);
     }
   }
 
   for (const socksProxyUrl of getSocksProxyUrls()) {
     try {
-      return await fetchBangumiCalendarThroughSocksProxy(
-        targetUrl,
-        socksProxyUrl,
-        init,
+      return await withUpstreamTask(
+        targetUrl.toString(),
+        (signal) =>
+          fetchBangumiCalendarThroughSocksProxy(targetUrl, socksProxyUrl, {
+            ...init,
+            signal,
+          }),
+        init.signal,
       );
     } catch (error) {
+      if (error instanceof ResourceLimitError) throw error;
       console.warn('Bangumi SOCKS 代理请求失败:', error);
       continue;
     }
   }
 
-  return await fetchBangumiCalendarDirect(targetUrl, init);
+  return await withUpstreamTask(
+    targetUrl.toString(),
+    (signal) => fetchBangumiCalendarDirect(targetUrl, { ...init, signal }),
+    init.signal,
+  );
 }
 
 async function fetchBangumiCalendarDirect(
@@ -164,6 +177,7 @@ async function fetchBangumiCalendarThroughSocksProxy(
 
       settled = true;
       clearTimeout(timer);
+      init.signal?.removeEventListener('abort', abortRequest);
       resolve(data);
     };
 
@@ -174,10 +188,18 @@ async function fetchBangumiCalendarThroughSocksProxy(
 
       settled = true;
       clearTimeout(timer);
+      init.signal?.removeEventListener('abort', abortRequest);
       secureSocket?.destroy();
       proxySocket?.destroy();
       reject(error);
     };
+
+    const abortRequest = () => fail(new Error('Bangumi request aborted'));
+    if (init.signal?.aborted) {
+      abortRequest();
+      return;
+    }
+    init.signal?.addEventListener('abort', abortRequest, { once: true });
 
     proxySocket = netConnect({
       host: proxyUrl.hostname,

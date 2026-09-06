@@ -24,8 +24,10 @@ import {
   peekCachedSearchPage,
   setCachedSearchPage,
 } from '@/lib/search-cache';
+import { ResourceLimitError } from '@/lib/server-resource-errors';
 import { getSourceCacheKey } from '@/lib/source-cache-key';
 import { SearchResult } from '@/lib/types';
+import { fetchUpstream } from '@/lib/upstream-fetch.server';
 import { cleanHtmlTags, normalizeInlineText } from '@/lib/utils';
 
 interface ApiSearchItem {
@@ -147,7 +149,7 @@ async function fetchAndCacheSearchPage(
   const abortState = createTimedAbortController(signal, timeoutMs);
 
   try {
-    const response = await fetch(url, {
+    const response = await fetchUpstream(url, {
       headers: API_CONFIG.search.headers,
       signal: abortState.signal,
     });
@@ -222,6 +224,7 @@ async function fetchAndCacheSearchPage(
     );
     return { results, pageCount };
   } catch (error: any) {
+    if (error instanceof ResourceLimitError) throw error;
     abortState.cleanup();
     const abortedByParent = Boolean(signal?.aborted && !abortState.isTimeout());
     if (isAbortError(error) && !abortedByParent) {
@@ -321,7 +324,8 @@ export async function searchFromApi(
     }
 
     return results;
-  } catch {
+  } catch (error) {
+    if (error instanceof ResourceLimitError) throw error;
     return [];
   }
 }
@@ -352,7 +356,8 @@ export async function searchFirstPageFromApi(
       options.signal,
     );
     return firstPageResult.results;
-  } catch {
+  } catch (error) {
+    if (error instanceof ResourceLimitError) throw error;
     return [];
   }
 }
@@ -380,7 +385,7 @@ export async function getDetailFromApi(
 
   const abortState = createTimedAbortController(undefined, 10000);
   try {
-    const response = await fetch(detailUrl, {
+    const response = await fetchUpstream(detailUrl, {
       headers: API_CONFIG.detail.headers,
       signal: abortState.signal,
     });
@@ -441,7 +446,7 @@ async function handleSpecialSourceDetail(
   const abortState = createTimedAbortController(undefined, 10000);
   let html = '';
   try {
-    const response = await fetch(detailUrl, {
+    const response = await fetchUpstream(detailUrl, {
       headers: API_CONFIG.detail.headers,
       signal: abortState.signal,
     });

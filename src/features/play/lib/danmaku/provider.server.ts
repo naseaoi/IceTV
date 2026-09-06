@@ -6,6 +6,8 @@ import {
   type DanmakuMatchCandidate,
   DanmakuProviderError,
 } from '@/features/play/lib/danmaku/types';
+import { ResourceLimitError } from '@/lib/server-resource-errors';
+import { fetchPrivateUpstream } from '@/lib/upstream-fetch.server';
 import { fetchWithUrlGuard, UrlValidationError } from '@/lib/url-guard';
 
 const DEFAULT_TIMEOUT_MS = 12000;
@@ -60,7 +62,10 @@ async function requestUpstream(
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), timeoutMs);
     try {
-      return await fetch(url, { ...init, signal: controller.signal });
+      return await fetchPrivateUpstream(url, {
+        ...init,
+        signal: controller.signal,
+      });
     } finally {
       clearTimeout(timer);
     }
@@ -78,6 +83,7 @@ async function readJson(
   try {
     response = await requestUpstream(url, timeoutMs);
   } catch (error) {
+    if (error instanceof ResourceLimitError) throw error;
     if (error instanceof UrlValidationError) {
       throw new DanmakuProviderError(
         'upstream-rejected',
@@ -91,6 +97,7 @@ async function readJson(
   }
 
   if (!response.ok) {
+    await response.body?.cancel().catch(() => {});
     throw new DanmakuProviderError(
       response.status === 404 ? notFoundKind : 'upstream-rejected',
       `弹幕服务返回 ${response.status}`,
@@ -99,6 +106,7 @@ async function readJson(
 
   const declaredLength = Number(response.headers.get('content-length'));
   if (Number.isFinite(declaredLength) && declaredLength > MAX_RESPONSE_BYTES) {
+    await response.body?.cancel().catch(() => {});
     throw new DanmakuProviderError('invalid-response', '弹幕数据超出体积上限');
   }
 

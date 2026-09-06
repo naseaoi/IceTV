@@ -4,7 +4,15 @@ import { request as httpsRequest } from 'node:https';
 import type { Socket } from 'node:net';
 import { connect as tlsConnect, TLSSocket } from 'node:tls';
 
+import {
+  withUpstreamResponse,
+  withUpstreamTask,
+} from '@/lib/upstream-resource-guard.server';
+import type { UpstreamResourceContext } from '@/lib/upstream-resource-policy';
+
 interface ProxyJsonOptions {
+  signal?: AbortSignal | null;
+  resourceContext?: UpstreamResourceContext;
   timeoutMs: number;
   userAgent: string;
 }
@@ -89,21 +97,47 @@ export function fetchResponseThroughProxy(
   proxyUrl: URL,
   options: ProxyTextOptions & { accept: string },
 ): Promise<ProxyFetchResult> {
-  return fetchThroughProxy(targetUrl, proxyUrl, options).then((buffer) => {
+  return withUpstreamTask(
+    targetUrl.toString(),
+    (signal) => fetchThroughProxy(targetUrl, proxyUrl, { ...options, signal }),
+    options.signal,
+  ).then((buffer) => {
     return parseProxyResponse(buffer);
   });
 }
 
-export function fetchStreamThroughProxy(
+export async function fetchStreamThroughProxy(
   targetUrl: URL,
   proxyUrl: URL,
   options: ProxyTextOptions & { accept: string },
 ): Promise<ProxyStreamResult> {
-  if (targetUrl.protocol === 'http:') {
-    return fetchHttpStreamThroughProxy(targetUrl, proxyUrl, options);
-  }
-
-  return fetchHttpsStreamThroughProxy(targetUrl, proxyUrl, options);
+  const response = await withUpstreamResponse(
+    targetUrl.toString(),
+    async (signal) => {
+      const upstream =
+        targetUrl.protocol === 'http:'
+          ? await fetchHttpStreamThroughProxy(targetUrl, proxyUrl, {
+              ...options,
+              signal,
+            })
+          : await fetchHttpsStreamThroughProxy(targetUrl, proxyUrl, {
+              ...options,
+              signal,
+            });
+      return new Response(upstream.body, {
+        status: upstream.status,
+        statusText: upstream.statusText,
+        headers: upstream.headers,
+      });
+    },
+    { ...options.resourceContext, signal: options.signal },
+  );
+  return {
+    status: response.status,
+    statusText: response.statusText,
+    headers: response.headers,
+    body: response.body!,
+  };
 }
 
 function fetchHttpStreamThroughProxy(
@@ -118,6 +152,7 @@ function fetchHttpStreamThroughProxy(
 
   return new Promise((resolve, reject) => {
     const request = proxyRequest({
+      signal: options.signal ?? undefined,
       hostname: proxyUrl.hostname,
       port: proxyPort,
       method: 'GET',
@@ -204,6 +239,7 @@ function fetchHttpsStreamThroughProxy(
     });
 
     const connectRequest = proxyRequest({
+      signal: options.signal ?? undefined,
       hostname: proxyUrl.hostname,
       port: proxyPort,
       method: 'CONNECT',
@@ -223,6 +259,16 @@ function fetchHttpsStreamThroughProxy(
       }
 
       secureSocket = tlsConnect({ socket, servername: targetUrl.hostname });
+      const abortSocket = () =>
+        secureSocket?.destroy(new Error('Proxy request aborted'));
+      options.signal?.addEventListener('abort', abortSocket, { once: true });
+      secureSocket.once('close', () =>
+        options.signal?.removeEventListener('abort', abortSocket),
+      );
+      if (options.signal?.aborted) {
+        abortSocket();
+        return;
+      }
       secureSocket.setTimeout(options.timeoutMs);
       secureSocket.once('secureConnect', () => {
         secureSocket?.write(
@@ -343,6 +389,7 @@ function fetchThroughProxy(
 
       settled = true;
       clearTimeout(timer);
+      options.signal?.removeEventListener('abort', abortRequest);
       resolve(data);
     };
 
@@ -353,11 +400,19 @@ function fetchThroughProxy(
 
       settled = true;
       clearTimeout(timer);
+      options.signal?.removeEventListener('abort', abortRequest);
       secureSocket?.destroy();
       proxySocket?.destroy();
       activeRequest?.destroy();
       reject(error);
     };
+
+    const abortRequest = () => fail(new Error('Proxy request aborted'));
+    if (options.signal?.aborted) {
+      abortRequest();
+      return;
+    }
+    options.signal?.addEventListener('abort', abortRequest, { once: true });
 
     const collectChunk = (chunk: Buffer) => {
       responseBytes += chunk.length;

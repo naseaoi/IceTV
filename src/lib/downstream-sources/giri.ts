@@ -6,7 +6,9 @@ import {
   parseGirigiriVariantId,
 } from '@/lib/giri';
 import { buildLazyEpisodeUrl } from '@/lib/lazy-episodes';
+import { ResourceLimitError } from '@/lib/server-resource-errors';
 import type { SearchResult } from '@/lib/types';
+import { fetchUpstream } from '@/lib/upstream-fetch.server';
 import { cleanHtmlTags, normalizeInlineText } from '@/lib/utils';
 
 import {
@@ -47,7 +49,7 @@ async function fetchGiriHtml(url: string): Promise<string | null> {
   for (let attempt = 0; attempt < 2; attempt++) {
     const abortState = createTimedAbortController(undefined, 10000);
     try {
-      const res = await fetch(url, {
+      const res = await fetchUpstream(url, {
         headers: BROWSER_HTML_HEADERS,
         signal: abortState.signal,
       });
@@ -55,8 +57,8 @@ async function fetchGiriHtml(url: string): Promise<string | null> {
         const html = await res.text();
         if (!isCfChallenge(html)) return html;
       }
-    } catch {
-      // 重试
+    } catch (error) {
+      if (error instanceof ResourceLimitError) throw error;
     } finally {
       abortState.cleanup();
     }
@@ -204,7 +206,7 @@ async function fetchGirigiriSuggestList(
   const abortState = createTimedAbortController(signal, 8000);
 
   try {
-    const response = await fetch(searchUrl, {
+    const response = await fetchUpstream(searchUrl, {
       headers: API_CONFIG.search.headers,
       signal: abortState.signal,
     });
@@ -214,7 +216,8 @@ async function fetchGirigiriSuggestList(
     return Array.isArray(data?.list)
       ? (data.list as GirigiriSuggestItem[])
       : null;
-  } catch {
+  } catch (error) {
+    if (error instanceof ResourceLimitError) throw error;
     return null;
   } finally {
     abortState.cleanup();

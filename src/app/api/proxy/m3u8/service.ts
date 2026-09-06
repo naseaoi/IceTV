@@ -14,6 +14,7 @@ import {
 } from '@/lib/proxy-diagnostics';
 import { readTextLimited } from '@/lib/proxy-response-limits';
 import { normalizeRuntimeParams } from '@/lib/runtime-params';
+import { ResourceLimitError } from '@/lib/server-resource-errors';
 import { createSharedServerCache } from '@/lib/shared-server-cache';
 import { fetchWithUrlGuard } from '@/lib/url-guard';
 
@@ -207,6 +208,7 @@ async function fetchM3U8Data(
           statusText: response.statusText,
         };
       } catch (error) {
+        if (error instanceof ResourceLimitError) throw error;
         logProxyFailure(
           classifyProxyFailure(error, {
             route: 'm3u8',
@@ -239,6 +241,7 @@ async function fetchM3U8Data(
   });
 
   if (!response.ok) {
+    await response.body?.cancel().catch(() => {});
     throw new ProxyRouteError({
       route: 'm3u8',
       source,

@@ -14,7 +14,9 @@ import {
   recordServerProxyFailure,
   requireServerProxyQuota,
 } from '@/lib/server-proxy-guard';
+import { resourceLimitResponse } from '@/lib/server-resource-errors';
 import { DoubanItem, DoubanResult } from '@/lib/types';
+import { fetchUpstream } from '@/lib/upstream-fetch.server';
 
 export const runtime = 'nodejs';
 
@@ -25,7 +27,7 @@ export async function GET(request: NextRequest) {
   });
   if (isGuardFailure(guardResult)) return guardResult.response;
 
-  const quotaFailure = requireServerProxyQuota(
+  const quotaFailure = await requireServerProxyQuota(
     'douban-data',
     request,
     guardResult.username,
@@ -87,6 +89,8 @@ export async function GET(request: NextRequest) {
 
     return createDoubanJsonResponse(response);
   } catch (error) {
+    const busy = resourceLimitResponse(error);
+    if (busy) return busy;
     recordServerProxyFailure('douban-data', error);
     return NextResponse.json({ error: '获取豆瓣数据失败' }, { status: 500 });
   }
@@ -101,6 +105,8 @@ async function handleTop250(pageStart: number) {
     );
     return createDoubanJsonResponse(response);
   } catch (error) {
+    const busy = resourceLimitResponse(error);
+    if (busy) return busy;
     recordServerProxyFailure('douban-data', error);
     return NextResponse.json(
       { error: '获取豆瓣 Top250 数据失败' },
@@ -124,7 +130,7 @@ async function fetchTop250Result(target: string): Promise<DoubanResult> {
   };
 
   try {
-    const fetchResponse = await fetch(target, fetchOptions);
+    const fetchResponse = await fetchUpstream(target, fetchOptions);
 
     if (!fetchResponse.ok) {
       throw new Error(`HTTP error! Status: ${fetchResponse.status}`);

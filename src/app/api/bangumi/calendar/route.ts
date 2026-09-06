@@ -10,6 +10,7 @@ import {
   recordServerProxyFailure,
   requireServerProxyQuota,
 } from '@/lib/server-proxy-guard';
+import { resourceLimitResponse } from '@/lib/server-resource-errors';
 
 const MIN_TIMEOUT_MS = 1000;
 const MAX_TIMEOUT_MS = 30000;
@@ -26,7 +27,7 @@ export async function GET(request: NextRequest) {
     });
     if (isGuardFailure(guardResult)) return guardResult.response;
 
-    const quotaFailure = requireServerProxyQuota(
+    const quotaFailure = await requireServerProxyQuota(
       'bangumi-data',
       request,
       guardResult.username,
@@ -60,6 +61,8 @@ export async function GET(request: NextRequest) {
       },
     });
   } catch (error) {
+    const busy = resourceLimitResponse(error);
+    if (busy) return busy;
     recordServerProxyFailure('bangumi-data', error);
     console.error('Bangumi 日历接口失败:', error);
     return NextResponse.json(

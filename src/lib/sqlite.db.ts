@@ -4,6 +4,7 @@ import Database from 'better-sqlite3';
 import { existsSync, mkdirSync, readFileSync } from 'fs';
 import path from 'path';
 
+import { SqliteResourceStore } from '@/lib/sqlite-resource-store';
 import { AdminConfig } from '@/types/admin';
 
 import { hashPassword, verifyPassword } from './password';
@@ -345,6 +346,9 @@ function buildMetadataFavoritePage(
 }
 
 export class LocalSqliteStorage implements IStorage {
+  get resources() {
+    return new SqliteResourceStore(this.db);
+  }
   private readonly dbPath: string;
   private readonly legacyJsonPaths: string[];
   private readonly db: Database.Database;
@@ -629,6 +633,20 @@ export class LocalSqliteStorage implements IStorage {
         username TEXT PRIMARY KEY,
         enabled INTEGER NOT NULL
       );
+
+      CREATE TABLE IF NOT EXISTS shared_resource_usage (
+        resource_key TEXT PRIMARY KEY,
+        used INTEGER NOT NULL,
+        reset_at INTEGER NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS idx_resource_usage_expiry ON shared_resource_usage (reset_at);
+      CREATE TABLE IF NOT EXISTS shared_resource_leases (
+        resource_key TEXT NOT NULL,
+        token TEXT NOT NULL,
+        expires_at INTEGER NOT NULL,
+        PRIMARY KEY (resource_key, token)
+      );
+      CREATE INDEX IF NOT EXISTS idx_resource_lease_expiry ON shared_resource_leases (expires_at);
 
       CREATE TABLE IF NOT EXISTS shared_cache (
         cache_key TEXT PRIMARY KEY,
