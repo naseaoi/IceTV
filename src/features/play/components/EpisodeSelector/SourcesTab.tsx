@@ -504,6 +504,13 @@ export const SourcesTab: React.FC<SourcesTabProps> = ({
             const videoInfo = isTesting
               ? probeEntry?.info
               : getCompletedProbeInfo(probeEntry);
+            const quality = videoInfo?.hasError
+              ? ''
+              : videoInfo?.quality?.trim();
+            const resolution =
+              quality && quality !== '错误' && quality !== 'MP4'
+                ? quality
+                : '未知';
             const episodeCount = Math.max(
               source.episodes.length,
               source.episodes_titles?.length || 0,
@@ -533,13 +540,16 @@ export const SourcesTab: React.FC<SourcesTabProps> = ({
                     <div className='mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-gray-500 dark:text-gray-400'>
                       <span>{source.source_name}</span>
                       {episodeCount > 1 && <span>{episodeCount} 集</span>}
-                      {videoInfo &&
-                        !videoInfo.hasError &&
-                        videoInfo.quality !== '未知' && (
-                          <span className='text-green-600 dark:text-green-400'>
-                            {videoInfo.quality}
-                          </span>
-                        )}
+                      <span
+                        title='分辨率'
+                        className={
+                          resolution === '未知'
+                            ? 'text-gray-500 dark:text-gray-400'
+                            : 'text-green-600 dark:text-green-400'
+                        }
+                      >
+                        {resolution}
+                      </span>
                       {videoInfo &&
                         !videoInfo.hasError &&
                         videoInfo.loadSpeed !== '未知' &&
@@ -549,16 +559,22 @@ export const SourcesTab: React.FC<SourcesTabProps> = ({
                           </span>
                         )}
                       {videoInfo &&
+                        !isTesting &&
                         !videoInfo.hasError &&
                         Number.isFinite(videoInfo.pingTime) && (
                           <span className='text-orange-500 dark:text-orange-400'>
-                            {videoInfo.pingTime}ms
+                            {(videoInfo.pingTime / 1000).toFixed(2)}s
                           </span>
                         )}
                       {isTesting && (
                         <span className='flex items-center gap-1'>
                           <span className='inline-block h-2.5 w-2.5 animate-spin rounded-full border-2 border-gray-300 border-t-green-500 dark:border-gray-600 dark:border-t-green-400' />
                           检测中
+                        </span>
+                      )}
+                      {videoInfo && videoInfo.hasError && (
+                        <span className='text-red-600 dark:text-red-400'>
+                          检测失败
                         </span>
                       )}
                       {videoInfo && videoInfo.hasError && (

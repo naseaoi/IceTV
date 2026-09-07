@@ -51,6 +51,12 @@ dev tag 阶段不改：
 - `package.json`
 - `public/changelog.json`
 
+### 本地开发版本显示
+
+`pnpm dev` / `pnpm dev:webpack` 启动时，从当前提交可达的本地 `vX.Y.Z-dev.N` 标签中按版本排序取最新值，账户面板与版本面板共用该版本。显式设置的 `NEXT_PUBLIC_APP_VERSION` 始终优先。
+
+同步远端标签后重启开发服务即可更新显示；启动时不联网查询标签。没有 Git 或没有可用 dev 标签时，回退到更新日志及 `package.json`。生产构建仍使用显式注入版本或正式版本，不自动使用 dev 标签。
+
 ## 发布说明规则
 
 提交记录只作为整理素材，不逐条搬进版本说明。
