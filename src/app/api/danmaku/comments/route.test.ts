@@ -1,13 +1,16 @@
 import type { NextRequest } from 'next/server';
 
 import { installWebPolyfills } from '@/app/api/test-utils/web-polyfills';
-import { DanmakuProviderError } from '@/features/play/lib/danmaku/types';
+import {
+  DanmakuProviderError,
+  DanmakuRateLimitError,
+} from '@/features/play/lib/danmaku/types';
 
 installWebPolyfills();
 
 const mockFetchDanmaku = jest.fn();
 const mockRecordFailure = jest.fn();
-const mockInvalidate = jest.fn();
+jest.mock('server-only', () => ({}));
 
 jest.mock('@/lib/api-auth', () => ({
   requireActiveUser: jest.fn().mockResolvedValue({ username: 'test-user' }),
@@ -21,14 +24,10 @@ jest.mock('@/lib/config', () => ({
 jest.mock('@/lib/runtime-params', () => ({
   normalizeRuntimeParams: () => ({ DanmakuEpisodeLimit: 1000 }),
 }));
-jest.mock('@/app/api/danmaku/cache', () => ({
-  danmakuCommentsCache: {
-    invalidate: (...args: unknown[]) => mockInvalidate(...args),
-    getOrLoad: (_key: string, load: () => Promise<unknown>) => load(),
-  },
+jest.mock('@/features/play/lib/danmaku/cache.server', () => ({
+  getCachedDanmakuComments: (...args: unknown[]) => mockFetchDanmaku(...args),
 }));
 jest.mock('@/features/play/lib/danmaku/provider.server', () => ({
-  fetchDanmakuByEpisodeId: (...args: unknown[]) => mockFetchDanmaku(...args),
   isDanmakuProviderConfigured: () => true,
 }));
 jest.mock('@/lib/server-proxy-guard', () => ({
@@ -52,12 +51,24 @@ describe('danmaku comment errors', () => {
     jest.clearAllMocks();
   });
 
-  it('invalidates only the requested cache entry on explicit refresh', async () => {
+  it('passes explicit refresh to the cache without destructive invalidation', async () => {
     mockFetchDanmaku.mockResolvedValue({ items: [] });
     const response = await GET(createRequest('13143', '1'));
     expect(response.status).toBe(200);
-    expect(mockInvalidate).toHaveBeenCalledWith('13143:1000');
-    expect(mockFetchDanmaku).toHaveBeenCalledWith(13143, 1000);
+    expect(mockFetchDanmaku).toHaveBeenCalledWith(13143, 1000, true, '');
+  });
+
+  it('returns actionable rate limiting with a bounded retry delay', async () => {
+    mockFetchDanmaku.mockRejectedValue(new DanmakuRateLimitError(45));
+    const response = await GET(createRequest());
+    expect(response.status).toBe(429);
+    expect(response.headers.get('Retry-After')).toBe('45');
+    expect(response.headers.get('Cache-Control')).toBe('no-store');
+    await expect(response.json()).resolves.toMatchObject({
+      code: 'DANMAKU_RATE_LIMITED',
+      retryAfterSeconds: 45,
+    });
+    expect(mockRecordFailure).not.toHaveBeenCalled();
   });
 
   it('returns an explicit recoverable 404 for expired episode IDs', async () => {
@@ -91,6 +102,26 @@ describe('danmaku comment errors', () => {
   it('rejects invalid episode identifiers before loading comments', async () => {
     const response = await GET(createRequest('-1'));
     expect(response.status).toBe(400);
+    expect(mockFetchDanmaku).not.toHaveBeenCalled();
+  });
+
+  it('passes the expected title to binding validation', async () => {
+    mockFetchDanmaku.mockResolvedValue({ items: [] });
+    const request = createRequest();
+    request.nextUrl.searchParams.set('keyword', ' 鬼灭之刃 ');
+    expect((await GET(request)).status).toBe(200);
+    expect(mockFetchDanmaku).toHaveBeenCalledWith(
+      13143,
+      1000,
+      false,
+      '鬼灭之刃',
+    );
+  });
+
+  it('rejects oversized binding titles before loading comments', async () => {
+    const request = createRequest();
+    request.nextUrl.searchParams.set('keyword', '长'.repeat(81));
+    expect((await GET(request)).status).toBe(400);
     expect(mockFetchDanmaku).not.toHaveBeenCalled();
   });
 });

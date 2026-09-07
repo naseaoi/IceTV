@@ -6,7 +6,10 @@ import React, { memo, useCallback, useEffect, useId, useRef } from 'react';
 
 import { useOptionalCardInteractionManager } from '@/components/CardInteractionProvider';
 import CoverImage from '@/components/CoverImage';
-import { warmupDanmakuForNavigation } from '@/features/play/lib/danmaku/navigation-warmup';
+import {
+  warmupDanmakuForNavigation,
+  warmupDanmakuSearchForNavigation,
+} from '@/features/play/lib/danmaku/navigation-warmup';
 import { useLongPress } from '@/hooks/useLongPress';
 import { getAuthInfoFromBrowserCookie } from '@/lib/auth.client';
 import {
@@ -143,10 +146,10 @@ function PosterCard({
     }
     prefetchTimerRef.current = window.setTimeout(() => {
       prefetchTimerRef.current = null;
-      warmupDanmaku();
+      void warmupDanmakuSearchForNavigation(title);
       warmupSearchForTitle(title);
     }, PREFETCH_INTENT_DELAY_MS);
-  }, [router, title, warmupDanmaku]);
+  }, [router, title]);
 
   const cancelPrefetch = useCallback(() => {
     if (!prefetchTimerRef.current) return;

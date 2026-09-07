@@ -4,6 +4,7 @@ import {
   buildDanmakuScopeKey,
   readDanmakuEpisodeId,
   writeDanmakuEpisodeId,
+  writeDanmakuEpisodeSearchTitle,
 } from '@/lib/local-preferences';
 
 async function fetchEpisodeIdFromServer(
@@ -76,11 +77,14 @@ export async function persistEpisodeId(
   videoId: string,
   episodeIndex: number,
   episodeId: number,
+  searchTitle?: string,
 ): Promise<void> {
   const scopeKey = buildDanmakuScopeKey(source, videoId, episodeIndex);
   if (!scopeKey) return;
 
   writeDanmakuEpisodeId(scopeKey, episodeId);
+  if (searchTitle !== undefined)
+    writeDanmakuEpisodeSearchTitle(scopeKey, searchTitle);
   await saveEpisodeIdToServer(scopeKey, episodeId);
 }
 

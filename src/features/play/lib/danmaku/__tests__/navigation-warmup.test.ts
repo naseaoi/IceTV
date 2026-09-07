@@ -12,6 +12,7 @@ import {
   warmupDanmakuSearchForNavigation,
 } from '@/features/play/lib/danmaku/navigation-warmup';
 import type { DanmakuLoadContext } from '@/features/play/lib/danmaku/resolve';
+import { DanmakuEpisodeNotFoundError } from '@/features/play/lib/danmaku/types';
 
 jest.mock('@/features/play/lib/danmaku/client', () => ({
   fetchDanmakuComments: jest.fn(),
@@ -72,7 +73,9 @@ describe('danmaku navigation warmup', () => {
 
     await warmupDanmakuData(buildContext('mapped'));
 
-    expect(mockFetchComments).toHaveBeenCalledWith(82001);
+    expect(mockFetchComments).toHaveBeenCalledWith(82001, undefined, {
+      keyword: '标题-mapped',
+    });
     expect(mockSearchCandidates).not.toHaveBeenCalled();
     expect(hasDanmakuNavigationWarmup('标题-mapped')).toBe(false);
   });
@@ -97,6 +100,27 @@ describe('danmaku navigation warmup', () => {
       mockFetchComments.mock.calls.map(([episodeId]) => episodeId),
     ).toEqual([82002, 82003]);
     expect(hasDanmakuNavigationWarmup('标题-search')).toBe(true);
+  });
+
+  it('旧 ID 错绑时重新搜索而不是继续加载不相关评论', async () => {
+    const candidates = [
+      { episodeId: 82005, animeTitle: 'A', episodeTitle: '第1集' },
+    ];
+    mockGetPersistedEpisodeId.mockResolvedValue(82006);
+    mockSearchCandidates.mockResolvedValue(candidates);
+    mockRankCandidates.mockReturnValue(candidates);
+    mockFetchComments
+      .mockRejectedValueOnce(new DanmakuEpisodeNotFoundError())
+      .mockResolvedValueOnce([
+        { text: '正确影片', time: 1, mode: 0, color: '#fff' },
+      ]);
+    await warmupDanmakuData(buildContext('recycled'));
+    expect(
+      mockFetchComments.mock.calls.map(([episodeId]) => episodeId),
+    ).toEqual([82006, 82005]);
+    expect(mockFetchComments).toHaveBeenLastCalledWith(82005, undefined, {
+      keyword: '标题-recycled',
+    });
   });
 
   it('账号关闭时不触发数据请求', async () => {

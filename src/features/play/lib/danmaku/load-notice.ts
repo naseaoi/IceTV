@@ -1,8 +1,10 @@
+import { DanmakuRateLimitError } from '@/features/play/lib/danmaku/types';
 import { showTimedArtNotice } from '@/lib/player-utils';
 
 export type DanmakuLoadResult =
   | { status: 'loaded'; count: number }
   | { status: 'empty' }
+  | { status: 'rate-limited'; retryAfterSeconds: number }
   | { status: 'error' };
 
 type NoticePlayer = NonNullable<Parameters<typeof showTimedArtNotice>[0]> & {
@@ -59,8 +61,10 @@ function flushNotice(player: NoticePlayer, state: DanmakuNoticeState) {
     result.status === 'loaded'
       ? `已装载${result.count}条弹幕`
       : result.status === 'empty'
-        ? '本集暂无弹幕'
-        : '弹幕加载失败，请尝试重新加载';
+        ? '暂未获取到弹幕，可稍后重新加载'
+        : result.status === 'rate-limited'
+          ? new DanmakuRateLimitError(result.retryAfterSeconds).message
+          : '弹幕加载失败，请尝试重新加载';
   state.pending = null;
   state.displayedMessage = message;
   showTimedArtNotice(player, message, DANMAKU_NOTICE_DURATION_MS);

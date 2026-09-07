@@ -186,11 +186,11 @@ export const DanmakuEpisodePicker: React.FC<DanmakuEpisodePickerProps> = ({
 
   const handleSelect = useCallback(
     async (episodeId: number) => {
-      await persistEpisodeId(source, videoId, episodeIndex, episodeId);
+      await persistEpisodeId(source, videoId, episodeIndex, episodeId, keyword);
       setBoundEpisodeId(episodeId);
       onBindingChange?.();
     },
-    [source, videoId, episodeIndex, onBindingChange],
+    [source, videoId, episodeIndex, keyword, onBindingChange],
   );
 
   const handleClear = useCallback(async () => {

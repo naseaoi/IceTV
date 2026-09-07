@@ -14,6 +14,7 @@ import {
   readAutoPlayNextEnabled,
   readBlockAdEnabled,
   readContinueWatchingCount,
+  readDanmakuEpisodeSearchTitle,
   readEnableOptimization,
   readFluidSearch,
   readLiveDirectConnect,
@@ -35,6 +36,8 @@ import {
   writeAutoPlayNextEnabled,
   writeBlockAdEnabled,
   writeContinueWatchingCount,
+  writeDanmakuEpisodeId,
+  writeDanmakuEpisodeSearchTitle,
   writeEnableOptimization,
   writeFluidSearch,
   writeLiveDirectConnect,
@@ -45,6 +48,15 @@ import {
 } from '../local-preferences';
 
 describe('local preferences', () => {
+  it('保存手动弹幕搜索词并随清除绑定重置', () => {
+    const scopeKey = 'test:video:0';
+    writeDanmakuEpisodeSearchTitle(scopeKey, ' 手动标题 ');
+    expect(readDanmakuEpisodeSearchTitle(scopeKey)).toBe('手动标题');
+    writeDanmakuEpisodeSearchTitle(scopeKey, '长'.repeat(81));
+    expect(readDanmakuEpisodeSearchTitle(scopeKey)).toBe('手动标题');
+    writeDanmakuEpisodeId(scopeKey, null);
+    expect(readDanmakuEpisodeSearchTitle(scopeKey)).toBe('');
+  });
   beforeEach(() => {
     localStorage.clear();
     delete window.RUNTIME_CONFIG;

@@ -541,14 +541,20 @@ function AuthenticatedPlayPageClient({
     );
   }, [artPlayerRef, danmakuEnabledRef, getCurrentDanmakuContext]);
 
-  const handleDanmakuReload = useCallback(() => {
-    void reloadDanmaku(
-      artPlayerRef.current,
-      getCurrentDanmakuContext(),
-      danmakuEnabledRef,
-      { forcePluginReload: true, refreshData: true },
-    );
-  }, [artPlayerRef, danmakuEnabledRef, getCurrentDanmakuContext]);
+  const handleDanmakuReload = useCallback(
+    (options?: { refreshData?: boolean }) => {
+      return reloadDanmaku(
+        artPlayerRef.current,
+        getCurrentDanmakuContext(),
+        danmakuEnabledRef,
+        {
+          forcePluginReload: true,
+          refreshData: options?.refreshData !== false,
+        },
+      );
+    },
+    [artPlayerRef, danmakuEnabledRef, getCurrentDanmakuContext],
+  );
 
   const handleDanmakuHeatmapChange = useCallback(
     (enabled: boolean) => {

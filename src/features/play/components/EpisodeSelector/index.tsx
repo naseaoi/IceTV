@@ -7,6 +7,7 @@ import { PlayerPanelContent } from '@/components/PlayerPanelTabBar';
 import { useRuntimeConfig } from '@/components/RuntimeConfigProvider';
 import { SectionTitle } from '@/features/play/components/EpisodeSelector/SectionTitle';
 import { TabBar } from '@/features/play/components/EpisodeSelector/TabBar';
+import type { DanmakuReloadHandler } from '@/features/play/lib/danmaku/types';
 import { getSourceBundle } from '@/lib/source-bundle';
 import { normalizeTitleForSourceMatch } from '@/lib/source-match';
 import { SearchResult } from '@/lib/types';
@@ -193,7 +194,7 @@ interface EpisodeSelectorProps {
   videoDoubanId?: number;
   onSourceDetailFetched?: (updated: SearchResult) => void;
   onAddSources?: (newSources: SearchResult[]) => void;
-  onDanmakuReload?: () => void;
+  onDanmakuReload?: DanmakuReloadHandler;
   onDanmakuHeatmapChange?: (enabled: boolean) => void;
 }
 

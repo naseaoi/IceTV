@@ -1,6 +1,9 @@
 import type { NextRequest } from 'next/server';
 
 import { installWebPolyfills } from '@/app/api/test-utils/web-polyfills';
+import { DanmakuRateLimitError } from '@/features/play/lib/danmaku/types';
+
+jest.mock('server-only', () => ({}));
 
 installWebPolyfills();
 
@@ -50,6 +53,16 @@ describe('danmaku search refresh', () => {
   it('preserves the cache during normal searches', async () => {
     expect((await GET(createRequest())).status).toBe(200);
     expect(mockInvalidate).not.toHaveBeenCalled();
+  });
+
+  it('reports the provider cooldown instead of a generic gateway failure', async () => {
+    mockGetOrLoad.mockRejectedValueOnce(new DanmakuRateLimitError(20));
+    const response = await GET(createRequest());
+    expect(response.status).toBe(429);
+    expect(response.headers.get('Retry-After')).toBe('20');
+    await expect(response.json()).resolves.toMatchObject({
+      code: 'DANMAKU_RATE_LIMITED',
+    });
   });
 
   it('invalidates only the requested keyword on explicit recovery', async () => {

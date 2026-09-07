@@ -22,6 +22,7 @@ export const DANMAKU_FONT_SIZE_STORAGE_KEY = 'danmakuFontSize';
 export const DANMAKU_HEATMAP_STORAGE_KEY = 'danmakuHeatmap';
 export const DANMAKU_OFFSET_STORAGE_PREFIX = 'danmakuOffset:';
 export const DANMAKU_EPISODE_MAP_STORAGE_PREFIX = 'danmakuEpisode:';
+export const DANMAKU_EPISODE_SEARCH_STORAGE_PREFIX = 'danmakuEpisodeSearch:';
 
 type AdminTableColumnWidths = Record<string, Record<string, number>>;
 
@@ -573,12 +574,33 @@ export function readDanmakuEpisodeId(scopeKey: string): number | null {
   return Number.isSafeInteger(raw) && raw > 0 ? raw : null;
 }
 
+export function readDanmakuEpisodeSearchTitle(scopeKey: string): string {
+  const title =
+    readStoredString(
+      `${DANMAKU_EPISODE_SEARCH_STORAGE_PREFIX}${scopeKey}`,
+    )?.trim() || '';
+  return title.length <= 80 ? title : '';
+}
+
+export function writeDanmakuEpisodeSearchTitle(
+  scopeKey: string,
+  title: string,
+): void {
+  const normalized = title.trim();
+  if (normalized.length > 80) return;
+  writeStoredString(
+    `${DANMAKU_EPISODE_SEARCH_STORAGE_PREFIX}${scopeKey}`,
+    normalized,
+  );
+}
+
 export function writeDanmakuEpisodeId(
   scopeKey: string,
   episodeId: number | null,
 ): void {
   const key = `${DANMAKU_EPISODE_MAP_STORAGE_PREFIX}${scopeKey}`;
   if (episodeId === null) {
+    writeDanmakuEpisodeSearchTitle(scopeKey, '');
     if (typeof window !== 'undefined') {
       window.localStorage.removeItem(key);
     }

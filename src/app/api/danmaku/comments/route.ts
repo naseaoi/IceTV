@@ -1,10 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 
-import { danmakuCommentsCache } from '@/app/api/danmaku/cache';
-import {
-  fetchDanmakuByEpisodeId,
-  isDanmakuProviderConfigured,
-} from '@/features/play/lib/danmaku/provider.server';
+import { getCachedDanmakuComments } from '@/features/play/lib/danmaku/cache.server';
+import { isDanmakuProviderConfigured } from '@/features/play/lib/danmaku/provider.server';
+import { danmakuRateLimitResponse } from '@/features/play/lib/danmaku/rate-limit-response.server';
 import { DanmakuProviderError } from '@/features/play/lib/danmaku/types';
 import { isGuardFailure, requireActiveUser } from '@/lib/api-auth';
 import { getConfigForRead } from '@/lib/config';
@@ -46,6 +44,14 @@ export async function GET(request: NextRequest) {
     );
   }
 
+  const keyword = (request.nextUrl.searchParams.get('keyword') || '').trim();
+  if (keyword.length > 80) {
+    return NextResponse.json(
+      { error: '关键词无效' },
+      { status: 400, headers: NO_STORE_HEADERS },
+    );
+  }
+
   const quotaFailure = await requireServerProxyQuota(
     'danmaku',
     request,
@@ -54,18 +60,18 @@ export async function GET(request: NextRequest) {
   if (quotaFailure) return quotaFailure;
 
   const limit = normalizeRuntimeParams(config.SiteConfig).DanmakuEpisodeLimit;
-  const cacheKey = `${episodeId}:${limit}`;
-
   try {
-    if (request.nextUrl.searchParams.get('refresh') === '1') {
-      danmakuCommentsCache.invalidate(cacheKey);
-    }
-    const result = await danmakuCommentsCache.getOrLoad(cacheKey, () =>
-      fetchDanmakuByEpisodeId(episodeId, limit),
+    const result = await getCachedDanmakuComments(
+      episodeId,
+      limit,
+      request.nextUrl.searchParams.get('refresh') === '1',
+      keyword,
     );
 
     return NextResponse.json(result, { headers: NO_STORE_HEADERS });
   } catch (error) {
+    const rateLimited = danmakuRateLimitResponse(error);
+    if (rateLimited) return rateLimited;
     const busy = resourceLimitResponse(error);
     if (busy) return busy;
     if (

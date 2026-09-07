@@ -1,8 +1,14 @@
 import {
+  DANMAKU_EMPTY_CACHE_MS,
+  DANMAKU_SEARCH_FRESH_MS,
+  parseDanmakuRetryAfter,
+} from '@/features/play/lib/danmaku/cache-policy';
+import {
   type DanmakuFetchResult,
   type DanmakuItem,
   type DanmakuMatchCandidate,
   DanmakuEpisodeNotFoundError,
+  DanmakuRateLimitError,
 } from '@/features/play/lib/danmaku/types';
 
 // 标题形如「【bilibili1】 第22话 魔道争锋1」，来源标签和尾缀都带数字
@@ -14,7 +20,6 @@ const YEAR_PATTERN = /(?:19|20)\d{2}/g;
 const YEAR_TOKEN_PATTERN = /(?:19|20)\d{2}/;
 const TITLE_PUNCTUATION_PATTERN =
   /[\s\u3000:：·・,，。.!！？?、'"“”‘’「」『』《》〈〉()（）[\]{}\-—_]/g;
-const SEARCH_WARMUP_TTL_MS = 30 * 60 * 1000;
 const SEARCH_WARMUP_MAX = 12;
 const COMMENTS_WARMUP_TTL_MS = 60 * 1000;
 const COMMENTS_WARMUP_MAX = 4;
@@ -30,7 +35,7 @@ interface DanmakuCommentsCacheEntry {
 }
 
 const danmakuSearchCache = new Map<string, DanmakuSearchCacheEntry>();
-const danmakuCommentsCache = new Map<number, DanmakuCommentsCacheEntry>();
+const danmakuCommentsCache = new Map<string, DanmakuCommentsCacheEntry>();
 
 function normalizeSearchCacheKey(keyword: string): string {
   return keyword.trim().replace(/\s+/g, ' ').toLowerCase();
@@ -62,6 +67,11 @@ async function requestDanmakuCandidates(
     { signal },
   );
   if (!response.ok) {
+    if (response.status === 429) {
+      throw new DanmakuRateLimitError(
+        parseDanmakuRetryAfter(response.headers?.get('retry-after')),
+      );
+    }
     throw new Error(`弹幕搜索请求失败: ${response.status}`);
   }
 
@@ -91,14 +101,26 @@ export function searchDanmakuCandidates(
     normalizedKeyword,
     undefined,
     options.force,
-  ).catch((error) => {
-    if (danmakuSearchCache.get(key)?.promise === promise) {
-      danmakuSearchCache.delete(key);
-    }
-    throw error;
-  });
+  )
+    .then((candidates) => {
+      const entry = danmakuSearchCache.get(key);
+      if (entry?.promise === promise) {
+        entry.expiresAt =
+          Date.now() +
+          (candidates.length === 0
+            ? DANMAKU_EMPTY_CACHE_MS
+            : DANMAKU_SEARCH_FRESH_MS);
+      }
+      return candidates;
+    })
+    .catch((error) => {
+      if (danmakuSearchCache.get(key)?.promise === promise) {
+        danmakuSearchCache.delete(key);
+      }
+      throw error;
+    });
   danmakuSearchCache.set(key, {
-    expiresAt: now + SEARCH_WARMUP_TTL_MS,
+    expiresAt: now + DANMAKU_SEARCH_FRESH_MS,
     promise,
   });
   trimSearchCache();
@@ -113,10 +135,12 @@ async function requestDanmakuComments(
   episodeId: number,
   signal?: AbortSignal,
   force = false,
+  keyword = '',
 ): Promise<DanmakuItem[]> {
   const refresh = force ? '&refresh=1' : '';
+  const title = keyword ? `&keyword=${encodeURIComponent(keyword)}` : '';
   const response = await fetch(
-    `/api/danmaku/comments?episodeId=${episodeId}${refresh}`,
+    `/api/danmaku/comments?episodeId=${episodeId}${refresh}${title}`,
     { signal },
   );
   if (!response.ok) {
@@ -125,6 +149,11 @@ async function requestDanmakuComments(
       if (payload?.code === 'DANMAKU_EPISODE_NOT_FOUND') {
         throw new DanmakuEpisodeNotFoundError();
       }
+    }
+    if (response.status === 429) {
+      throw new DanmakuRateLimitError(
+        parseDanmakuRetryAfter(response.headers?.get('retry-after')),
+      );
     }
     throw new Error(`弹幕评论请求失败: ${response.status}`);
   }
@@ -137,26 +166,45 @@ async function requestDanmakuComments(
 export function fetchDanmakuComments(
   episodeId: number,
   signal?: AbortSignal,
-  options: { force?: boolean } = {},
+  options: { force?: boolean; keyword?: string } = {},
 ): Promise<DanmakuItem[]> {
+  const keyword = options.keyword?.trim() || '';
   if (signal) {
-    return requestDanmakuComments(episodeId, signal, options.force);
+    return requestDanmakuComments(episodeId, signal, options.force, keyword);
   }
 
+  const key = JSON.stringify([episodeId, keyword]);
   const now = Date.now();
-  const cached = danmakuCommentsCache.get(episodeId);
+  const cached = danmakuCommentsCache.get(key);
   if (!options.force && cached && cached.expiresAt > now) {
     return cached.promise;
   }
-  if (cached) danmakuCommentsCache.delete(episodeId);
+  if (cached) danmakuCommentsCache.delete(key);
 
-  const promise = requestDanmakuComments(episodeId).catch((error) => {
-    if (danmakuCommentsCache.get(episodeId)?.promise === promise) {
-      danmakuCommentsCache.delete(episodeId);
-    }
-    throw error;
-  });
-  danmakuCommentsCache.set(episodeId, {
+  const promise = requestDanmakuComments(
+    episodeId,
+    undefined,
+    options.force,
+    keyword,
+  )
+    .then((items) => {
+      const entry = danmakuCommentsCache.get(key);
+      if (entry?.promise === promise) {
+        entry.expiresAt =
+          Date.now() +
+          (items.length === 0
+            ? DANMAKU_EMPTY_CACHE_MS
+            : COMMENTS_WARMUP_TTL_MS);
+      }
+      return items;
+    })
+    .catch((error) => {
+      if (danmakuCommentsCache.get(key)?.promise === promise) {
+        danmakuCommentsCache.delete(key);
+      }
+      throw error;
+    });
+  danmakuCommentsCache.set(key, {
     expiresAt: now + COMMENTS_WARMUP_TTL_MS,
     promise,
   });

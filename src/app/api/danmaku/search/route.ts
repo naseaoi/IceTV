@@ -5,6 +5,7 @@ import {
   isDanmakuProviderConfigured,
   searchDanmakuCandidates,
 } from '@/features/play/lib/danmaku/provider.server';
+import { danmakuRateLimitResponse } from '@/features/play/lib/danmaku/rate-limit-response.server';
 import { DanmakuProviderError } from '@/features/play/lib/danmaku/types';
 import { isGuardFailure, requireActiveUser } from '@/lib/api-auth';
 import { getConfigForRead } from '@/lib/config';
@@ -94,6 +95,8 @@ export async function GET(request: NextRequest) {
       { headers: NO_STORE_HEADERS },
     );
   } catch (error) {
+    const rateLimited = danmakuRateLimitResponse(error);
+    if (rateLimited) return rateLimited;
     const busy = resourceLimitResponse(error);
     if (busy) return busy;
     recordServerProxyFailure('danmaku', error);

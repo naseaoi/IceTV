@@ -1,3 +1,5 @@
+import { normalizeDanmakuRetrySeconds } from '@/features/play/lib/danmaku/cache-policy';
+
 export type DanmakuMode = 0 | 1 | 2;
 
 export interface DanmakuItem {
@@ -27,6 +29,7 @@ export interface DanmakuSearchResult {
 export type DanmakuProviderErrorKind =
   | 'not-configured'
   | 'episode-not-found'
+  | 'rate-limited'
   | 'upstream-unavailable'
   | 'upstream-rejected'
   | 'invalid-response';
@@ -47,3 +50,18 @@ export class DanmakuEpisodeNotFoundError extends Error {
     this.name = 'DanmakuEpisodeNotFoundError';
   }
 }
+
+export class DanmakuRateLimitError extends DanmakuProviderError {
+  readonly retryAfterSeconds: number;
+
+  constructor(retryAfterSeconds: number) {
+    const seconds = normalizeDanmakuRetrySeconds(retryAfterSeconds);
+    super('rate-limited', `弹幕服务请求频繁，请 ${seconds} 秒后重试`);
+    this.name = 'DanmakuRateLimitError';
+    this.retryAfterSeconds = seconds;
+  }
+}
+
+export type DanmakuReloadHandler = (options?: {
+  refreshData?: boolean;
+}) => void | Promise<void>;

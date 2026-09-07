@@ -7,8 +7,13 @@ import {
 } from '@/features/play/lib/danmaku/client';
 import { getPersistedEpisodeId } from '@/features/play/lib/danmaku/episode-storage';
 import type { DanmakuLoadContext } from '@/features/play/lib/danmaku/resolve';
+import { DanmakuEpisodeNotFoundError } from '@/features/play/lib/danmaku/types';
 import { getAuthInfoFromBrowserCookie } from '@/lib/auth.client';
-import { readStoredDanmakuEnabled } from '@/lib/local-preferences';
+import {
+  buildDanmakuScopeKey,
+  readDanmakuEpisodeSearchTitle,
+  readStoredDanmakuEnabled,
+} from '@/lib/local-preferences';
 import { getRuntimeConfig } from '@/lib/runtime-config';
 
 const WARMUP_TTL_MS = 60 * 1000;
@@ -84,7 +89,10 @@ function buildWarmupKey(context: DanmakuLoadContext): string {
 async function runWarmup(context: DanmakuLoadContext): Promise<void> {
   const source = context.source.trim();
   const videoId = context.videoId.trim();
-  const searchTitle = context.searchTitle.trim();
+  const scopeKey = buildDanmakuScopeKey(source, videoId, context.episodeIndex);
+  const searchTitle =
+    (scopeKey && readDanmakuEpisodeSearchTitle(scopeKey)) ||
+    context.searchTitle.trim();
   let storedEpisodeId: number | null = null;
 
   if (source && videoId) {
@@ -94,8 +102,16 @@ async function runWarmup(context: DanmakuLoadContext): Promise<void> {
       context.episodeIndex,
     );
     if (storedEpisodeId !== null) {
-      const storedItems = await fetchDanmakuComments(storedEpisodeId);
-      if (storedItems.length > 0) return;
+      try {
+        const storedItems = await fetchDanmakuComments(
+          storedEpisodeId,
+          undefined,
+          { keyword: searchTitle },
+        );
+        if (storedItems.length > 0) return;
+      } catch (error) {
+        if (!(error instanceof DanmakuEpisodeNotFoundError)) throw error;
+      }
     }
   }
 
@@ -112,7 +128,9 @@ async function runWarmup(context: DanmakuLoadContext): Promise<void> {
     .slice(0, WARMUP_CANDIDATE_LIMIT);
 
   for (const candidate of ranked) {
-    const items = await fetchDanmakuComments(candidate.episodeId);
+    const items = await fetchDanmakuComments(candidate.episodeId, undefined, {
+      keyword: searchTitle,
+    });
     if (items.length > 0) return;
   }
 }

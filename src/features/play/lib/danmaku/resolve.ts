@@ -14,15 +14,17 @@ import {
 } from '@/features/play/lib/danmaku/types';
 import {
   buildDanmakuScopeKey,
+  readDanmakuEpisodeSearchTitle,
   readDanmakuOffset,
   writeDanmakuEpisodeId,
+  writeDanmakuEpisodeSearchTitle,
 } from '@/lib/local-preferences';
 
 export type DanmakuEnabledReader = () => boolean;
 
 export interface DanmakuLoadOptions {
   forceRefresh?: boolean;
-  onError?: () => void;
+  onError?: (error?: unknown) => void;
 }
 
 export interface DanmakuLoadContext {
@@ -38,6 +40,7 @@ const MAX_CANDIDATE_ATTEMPTS = 6;
 interface EpisodeCandidate {
   episodeId: number;
   persistOnSuccess: boolean;
+  keyword: string;
 }
 
 async function resolveEpisodeCandidates(
@@ -46,15 +49,21 @@ async function resolveEpisodeCandidates(
   episodeIndex: number,
   searchTitle: string,
   searchYear: string,
+  forceRefresh = false,
 ): Promise<EpisodeCandidate[]> {
   const stored = await getPersistedEpisodeId(source, videoId, episodeIndex);
   if (stored) {
-    return [{ episodeId: stored, persistOnSuccess: false }];
+    const scopeKey = buildDanmakuScopeKey(source, videoId, episodeIndex);
+    const keyword =
+      (scopeKey && readDanmakuEpisodeSearchTitle(scopeKey)) || searchTitle;
+    return [{ episodeId: stored, persistOnSuccess: false, keyword }];
   }
 
   if (!searchTitle) return [];
 
-  const candidates = await searchDanmakuCandidates(searchTitle);
+  const candidates = forceRefresh
+    ? await searchDanmakuCandidates(searchTitle, undefined, { force: true })
+    : await searchDanmakuCandidates(searchTitle);
   return rankCandidatesByEpisode(
     candidates,
     episodeIndex,
@@ -65,6 +74,7 @@ async function resolveEpisodeCandidates(
     .map((candidate) => ({
       episodeId: candidate.episodeId,
       persistOnSuccess: true,
+      keyword: searchTitle,
     }));
 }
 
@@ -89,6 +99,7 @@ export async function loadDanmakuForEpisode(
       context.episodeIndex,
       context.searchTitle,
       context.searchYear,
+      options.forceRefresh,
     );
 
     let candidateIndex = 0;
@@ -100,10 +111,11 @@ export async function loadDanmakuForEpisode(
       try {
         items = await fetchDanmakuComments(candidate.episodeId, undefined, {
           force: options.forceRefresh,
+          keyword: candidate.keyword,
         });
       } catch (error) {
         if (!(error instanceof DanmakuEpisodeNotFoundError)) {
-          options.onError?.();
+          options.onError?.(error);
           return [];
         }
         missingEpisode = true;
@@ -118,18 +130,15 @@ export async function loadDanmakuForEpisode(
             context.videoId,
             context.episodeIndex,
           );
-          if (!context.searchTitle) return [];
-          const searched = await searchDanmakuCandidates(
-            context.searchTitle,
-            undefined,
-            {
-              force: missingEpisode,
-            },
-          );
+          const keyword = candidate.keyword || context.searchTitle;
+          if (!keyword) return [];
+          const searched = await searchDanmakuCandidates(keyword, undefined, {
+            force: missingEpisode,
+          });
           candidates = rankCandidatesByEpisode(
             searched,
             context.episodeIndex,
-            context.searchTitle,
+            keyword,
             context.searchYear,
           )
             .filter((item) => item.episodeId !== candidate.episodeId)
@@ -137,6 +146,7 @@ export async function loadDanmakuForEpisode(
             .map((item) => ({
               episodeId: item.episodeId,
               persistOnSuccess: true,
+              keyword,
             }));
           candidateIndex = 0;
         }
@@ -145,6 +155,7 @@ export async function loadDanmakuForEpisode(
 
       if (candidate.persistOnSuccess) {
         writeDanmakuEpisodeId(scopeKey, candidate.episodeId);
+        writeDanmakuEpisodeSearchTitle(scopeKey, candidate.keyword);
       }
       return applyOffset(items, readDanmakuOffset(scopeKey));
     }
@@ -152,7 +163,7 @@ export async function loadDanmakuForEpisode(
     return [];
   } catch (error) {
     console.warn('弹幕加载失败:', error);
-    options.onError?.();
+    options.onError?.(error);
     return [];
   }
 }

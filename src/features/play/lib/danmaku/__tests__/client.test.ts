@@ -1,3 +1,4 @@
+import { DANMAKU_EMPTY_CACHE_MS } from '@/features/play/lib/danmaku/cache-policy';
 import {
   extractEpisodeNumber,
   fetchDanmakuComments,
@@ -273,6 +274,22 @@ describe('warmupDanmakuSearch', () => {
 describe('fetchDanmakuComments', () => {
   const originalFetch = globalThis.fetch;
 
+  it('隔离同 ID 的不同标题并传递校验关键词', async () => {
+    const fetchMock = jest.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ items: [] }),
+    } as Response);
+    globalThis.fetch = fetchMock as unknown as typeof fetch;
+    await fetchDanmakuComments(910099, undefined, { keyword: '旧影片' });
+    await fetchDanmakuComments(910099, undefined, { keyword: '新影片' });
+    await fetchDanmakuComments(910099, undefined, { keyword: '新影片' });
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(fetchMock).toHaveBeenLastCalledWith(
+      `/api/danmaku/comments?episodeId=910099&keyword=${encodeURIComponent('新影片')}`,
+      { signal: undefined },
+    );
+  });
+
   afterEach(() => {
     if (originalFetch) {
       globalThis.fetch = originalFetch;
@@ -333,6 +350,43 @@ describe('fetchDanmakuComments', () => {
       fetchDanmakuComments(910003, undefined, { force: true }),
     ).resolves.toEqual(nextItems);
     expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(fetchMock).toHaveBeenLastCalledWith(
+      '/api/danmaku/comments?episodeId=910003&refresh=1',
+      expect.any(Object),
+    );
+  });
+
+  it('空评论短缓存到期后重新请求，不延长到非空缓存期限', async () => {
+    const clock = jest.spyOn(Date, 'now').mockReturnValue(1000);
+    const items = [{ text: '恢复的弹幕', time: 2, mode: 0, color: '#fff' }];
+    const fetchMock = jest
+      .fn()
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ items: [] }) })
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ items }) });
+    globalThis.fetch = fetchMock as unknown as typeof fetch;
+    try {
+      await expect(fetchDanmakuComments(910006)).resolves.toEqual([]);
+      clock.mockReturnValue(1000 + DANMAKU_EMPTY_CACHE_MS - 1);
+      await expect(fetchDanmakuComments(910006)).resolves.toEqual([]);
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+      clock.mockReturnValue(1000 + DANMAKU_EMPTY_CACHE_MS);
+      await expect(fetchDanmakuComments(910006)).resolves.toEqual(items);
+      expect(fetchMock).toHaveBeenCalledTimes(2);
+    } finally {
+      clock.mockRestore();
+    }
+  });
+
+  it('保留上游限流类型与等待时间', async () => {
+    globalThis.fetch = jest.fn().mockResolvedValue({
+      ok: false,
+      status: 429,
+      headers: { get: () => '17' },
+    });
+    await expect(fetchDanmakuComments(910007)).rejects.toMatchObject({
+      kind: 'rate-limited',
+      retryAfterSeconds: 17,
+    });
   });
 
   it('带信号的显式刷新会把刷新参数传给服务端', async () => {

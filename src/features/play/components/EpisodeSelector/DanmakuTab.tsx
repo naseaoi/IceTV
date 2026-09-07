@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from 'react';
 
 import { DanmakuEpisodePicker } from '@/features/play/components/EpisodeSelector/DanmakuEpisodePicker';
+import type { DanmakuReloadHandler } from '@/features/play/lib/danmaku/types';
 import {
   buildDanmakuScopeKey,
   DANMAKU_OFFSET_RANGE,
@@ -19,7 +20,7 @@ interface DanmakuTabProps {
   videoId: string;
   episodeIndex: number;
   searchTitle: string;
-  onReload?: () => void;
+  onReload?: DanmakuReloadHandler;
   onHeatmapChange?: (enabled: boolean) => void;
 }
 
@@ -41,6 +42,8 @@ export const DanmakuTab: React.FC<DanmakuTabProps> = ({
 }) => {
   const [offset, setOffset] = useState(0);
   const [heatmapEnabled, setHeatmapEnabled] = useState(true);
+  const [reloading, setReloading] = useState(false);
+  const [reloadError, setReloadError] = useState('');
 
   const scopeKey = buildDanmakuScopeKey(source, videoId, episodeIndex);
 
@@ -60,7 +63,7 @@ export const DanmakuTab: React.FC<DanmakuTabProps> = ({
       }
       writeDanmakuOffset(scopeKey, next);
       setOffset(next);
-      onReload?.();
+      void onReload?.({ refreshData: false });
     },
     [scopeKey, onReload],
   );
@@ -71,6 +74,19 @@ export const DanmakuTab: React.FC<DanmakuTabProps> = ({
     setHeatmapEnabled(next);
     onHeatmapChange?.(next);
   }, [heatmapEnabled, onHeatmapChange]);
+
+  const reload = async () => {
+    if (!onReload || reloading) return;
+    setReloading(true);
+    setReloadError('');
+    try {
+      await onReload({ refreshData: true });
+    } catch {
+      setReloadError('重新加载失败，请稍后再试');
+    } finally {
+      setReloading(false);
+    }
+  };
 
   if (!scopeKey) {
     return (
@@ -147,9 +163,25 @@ export const DanmakuTab: React.FC<DanmakuTabProps> = ({
       </div>
 
       <div className='flex min-h-0 flex-1 flex-col gap-2'>
-        <h3 className='flex-shrink-0 text-sm font-semibold text-gray-900 dark:text-gray-100'>
-          弹幕选集
-        </h3>
+        <div className='flex flex-shrink-0 items-center justify-between gap-2'>
+          <h3 className='text-sm font-semibold text-gray-900 dark:text-gray-100'>
+            弹幕选集
+          </h3>
+          <button
+            type='button'
+            aria-label='重新加载弹幕'
+            className={actionButtonClass}
+            disabled={!onReload || reloading}
+            onClick={() => void reload()}
+          >
+            {reloading ? '正在加载…' : '重新加载'}
+          </button>
+        </div>
+        {reloadError && (
+          <p role='alert' className='text-sm text-red-500'>
+            {reloadError}
+          </p>
+        )}
         <DanmakuEpisodePicker
           source={source}
           videoId={videoId}

@@ -13,14 +13,16 @@ describe('danmaku provider missing episodes', () => {
   const originalFetch = global.fetch;
   const originalBase = process.env.DANMAKU_API_BASE_URL;
   const originalAllowPrivate = process.env.DANMAKU_API_ALLOW_PRIVATE;
+  let testNumber = 0;
 
   beforeEach(() => {
-    process.env.DANMAKU_API_BASE_URL = 'http://127.0.0.1:9321';
+    process.env.DANMAKU_API_BASE_URL = `http://127.0.0.1:9321/${++testNumber}`;
     process.env.DANMAKU_API_ALLOW_PRIVATE = 'true';
     global.fetch = jest.fn().mockResolvedValue({ ok: false, status: 404 });
   });
 
   afterEach(() => {
+    jest.useRealTimers();
     global.fetch = originalFetch;
     if (originalBase === undefined) delete process.env.DANMAKU_API_BASE_URL;
     else process.env.DANMAKU_API_BASE_URL = originalBase;
@@ -45,6 +47,56 @@ describe('danmaku provider missing episodes', () => {
     (global.fetch as jest.Mock).mockResolvedValue({ ok: false, status: 502 });
     await expect(fetchDanmakuByEpisodeId(123, 100)).rejects.toMatchObject({
       kind: 'upstream-rejected',
+    });
+  });
+
+  it('honors upstream rate limits without repeatedly calling the service', async () => {
+    jest.useFakeTimers();
+    jest.setSystemTime(0);
+    const cancel = jest.fn().mockResolvedValue(undefined);
+    (global.fetch as jest.Mock)
+      .mockResolvedValueOnce({
+        ok: false,
+        status: 429,
+        headers: { get: () => '30' },
+        body: { cancel },
+      })
+      .mockResolvedValue({
+        ok: true,
+        status: 200,
+        headers: { get: () => null },
+        text: async () => JSON.stringify({ comments: [] }),
+      });
+    await expect(fetchDanmakuByEpisodeId(123, 100)).rejects.toMatchObject({
+      kind: 'rate-limited',
+      retryAfterSeconds: 30,
+    });
+    expect(cancel).toHaveBeenCalledTimes(1);
+    jest.advanceTimersByTime(10_000);
+    await expect(fetchDanmakuByEpisodeId(456, 100)).rejects.toMatchObject({
+      kind: 'rate-limited',
+      retryAfterSeconds: 20,
+    });
+    expect(global.fetch).toHaveBeenCalledTimes(1);
+    jest.advanceTimersByTime(20_000);
+    await expect(fetchDanmakuByEpisodeId(456, 100)).resolves.toEqual({
+      items: [],
+      total: 0,
+      truncated: false,
+    });
+    expect(global.fetch).toHaveBeenCalledTimes(2);
+  });
+
+  it('rejects malformed success payloads rather than caching them as empty', async () => {
+    (global.fetch as jest.Mock).mockResolvedValue({
+      ok: true,
+      status: 200,
+      headers: { get: () => null },
+      text: async () =>
+        JSON.stringify({ success: false, errorMessage: 'private details' }),
+    });
+    await expect(fetchDanmakuByEpisodeId(123, 100)).rejects.toMatchObject({
+      kind: 'invalid-response',
     });
   });
 });

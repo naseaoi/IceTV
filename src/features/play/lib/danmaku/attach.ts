@@ -10,7 +10,10 @@ import {
   type DanmakuLoadOptions,
   loadDanmakuForEpisode,
 } from '@/features/play/lib/danmaku/resolve';
-import type { DanmakuItem } from '@/features/play/lib/danmaku/types';
+import {
+  type DanmakuItem,
+  DanmakuRateLimitError,
+} from '@/features/play/lib/danmaku/types';
 import {
   readDanmakuFontSize,
   readDanmakuOpacity,
@@ -29,6 +32,7 @@ interface AttachedDanmakuContext {
   status: DanmakuLoadStatus;
   task?: Promise<void>;
   failed?: boolean;
+  retryAfterSeconds?: number;
   loadEnabled?: boolean;
   reportResult?: (result: DanmakuLoadResult) => void;
   finishInitialLoad?: () => void;
@@ -146,8 +150,13 @@ export async function createDanmakuPluginIfEnabled(
   try {
     const plugin = await createDanmakuPlugin({
       loadItems: buildDanmakuLoader(context, isEnabled, {
-        onError: () => {
-          if (initialContext) initialContext.failed = true;
+        onError: (error) => {
+          if (initialContext) {
+            initialContext.failed = true;
+            if (error instanceof DanmakuRateLimitError) {
+              initialContext.retryAfterSeconds = error.retryAfterSeconds;
+            }
+          }
         },
       }),
       opacity: readDanmakuOpacity(),
@@ -210,7 +219,12 @@ function finishDanmakuLoad(
   ) {
     context.reportResult?.(
       context.failed
-        ? { status: 'error' }
+        ? context.retryAfterSeconds
+          ? {
+              status: 'rate-limited',
+              retryAfterSeconds: context.retryAfterSeconds,
+            }
+          : { status: 'error' }
         : count > 0
           ? { status: 'loaded', count }
           : { status: 'empty' },
@@ -317,8 +331,11 @@ export async function reloadDanmaku(
     activeDanmakuContexts.set(player, nextContext);
     option.danmuku = buildDanmakuLoader(context, () => loadEnabled, {
       forceRefresh: nextContext.refreshData,
-      onError: () => {
+      onError: (error) => {
         nextContext.failed = true;
+        if (error instanceof DanmakuRateLimitError) {
+          nextContext.retryAfterSeconds = error.retryAfterSeconds;
+        }
       },
     });
 

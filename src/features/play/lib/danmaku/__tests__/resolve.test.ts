@@ -9,6 +9,7 @@ import {
 } from '@/features/play/lib/danmaku/episode-storage';
 import { loadDanmakuForEpisode } from '@/features/play/lib/danmaku/resolve';
 import { DanmakuEpisodeNotFoundError } from '@/features/play/lib/danmaku/types';
+import { writeDanmakuEpisodeSearchTitle } from '@/lib/local-preferences';
 
 jest.mock('@/features/play/lib/danmaku/client', () => ({
   fetchDanmakuComments: jest.fn(),
@@ -50,6 +51,16 @@ describe('loadDanmakuForEpisode outcomes', () => {
     expect(onError).toHaveBeenCalledTimes(1);
     expect(clearPersistedEpisodeId).not.toHaveBeenCalled();
     expect(searchDanmakuCandidates).not.toHaveBeenCalled();
+  });
+
+  it('refreshes candidates as well when reloading an unbound episode', async () => {
+    (getPersistedEpisodeId as jest.Mock).mockResolvedValue(null);
+    await loadDanmakuForEpisode(context, () => true, { forceRefresh: true });
+    expect(searchDanmakuCandidates).toHaveBeenCalledWith(
+      '测试影片',
+      undefined,
+      { force: true },
+    );
   });
 
   it('reports search failures as errors instead of empty success', async () => {
@@ -97,6 +108,7 @@ describe('loadDanmakuForEpisode outcomes', () => {
     ).resolves.toEqual(items);
     expect(fetchDanmakuComments).toHaveBeenCalledWith(123, undefined, {
       force: true,
+      keyword: context.searchTitle,
     });
     expect(onError).not.toHaveBeenCalled();
   });
@@ -138,7 +150,17 @@ describe('loadDanmakuForEpisode outcomes', () => {
     );
     expect(fetchDanmakuComments).toHaveBeenLastCalledWith(456, undefined, {
       force: undefined,
+      keyword: context.searchTitle,
     });
     expect(onError).not.toHaveBeenCalled();
+  });
+
+  it('validates manually bound titles using the saved search keyword', async () => {
+    writeDanmakuEpisodeSearchTitle('source-a:video-a:0', '手动搜索标题');
+    await loadDanmakuForEpisode(context, () => true);
+    expect(fetchDanmakuComments).toHaveBeenCalledWith(123, undefined, {
+      force: undefined,
+      keyword: '手动搜索标题',
+    });
   });
 });

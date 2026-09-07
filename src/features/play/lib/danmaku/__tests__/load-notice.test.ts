@@ -44,8 +44,12 @@ describe('danmaku load notices', () => {
   });
 
   it.each([
-    [{ status: 'empty' } as const, '本集暂无弹幕'],
+    [{ status: 'empty' } as const, '暂未获取到弹幕，可稍后重新加载'],
     [{ status: 'error' } as const, '弹幕加载失败，请尝试重新加载'],
+    [
+      { status: 'rate-limited', retryAfterSeconds: 23 } as const,
+      '弹幕服务请求频繁，请 23 秒后重试',
+    ],
   ])(
     'shows the outcome when loading finishes after playback starts',
     (result, message) => {
@@ -92,8 +96,8 @@ describe('danmaku load notices', () => {
     const player = createPlayer();
     setDanmakuLoadNoticeVisibility(player, true);
     beginDanmakuLoadNotice(player)({ status: 'empty' });
-    player.template.$noticeInner.textContent = '本集暂无弹幕';
-    player.notice.show = '本集暂无弹幕';
+    player.template.$noticeInner.textContent = '暂未获取到弹幕，可稍后重新加载';
+    player.notice.show = '暂未获取到弹幕，可稍后重新加载';
     setDanmakuLoadNoticeVisibility(player, false);
     expect(player.notice.show).toBe('');
   });

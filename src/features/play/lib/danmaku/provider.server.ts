@@ -1,10 +1,12 @@
 import 'server-only';
 
+import { parseDanmakuRetryAfter } from '@/features/play/lib/danmaku/cache-policy';
 import { normalizeComments } from '@/features/play/lib/danmaku/normalize';
 import {
   type DanmakuFetchResult,
   type DanmakuMatchCandidate,
   DanmakuProviderError,
+  DanmakuRateLimitError,
 } from '@/features/play/lib/danmaku/types';
 import { ResourceLimitError } from '@/lib/server-resource-errors';
 import { fetchPrivateUpstream } from '@/lib/upstream-fetch.server';
@@ -12,6 +14,7 @@ import { fetchWithUrlGuard, UrlValidationError } from '@/lib/url-guard';
 
 const DEFAULT_TIMEOUT_MS = 12000;
 const MAX_RESPONSE_BYTES = 12 * 1024 * 1024;
+let upstreamBackoff: { baseUrl: string; retryAt: number } | null = null;
 
 // danmu_api 的 base 形如 https://host/{token}，token 在路径里
 function readBaseUrl(): string | null {
@@ -79,6 +82,12 @@ async function readJson(
   timeoutMs: number,
   notFoundKind: 'upstream-rejected' | 'episode-not-found' = 'upstream-rejected',
 ): Promise<unknown> {
+  const baseUrl = requireBaseUrl();
+  if (upstreamBackoff?.baseUrl === baseUrl) {
+    const remaining = upstreamBackoff.retryAt - Date.now();
+    if (remaining > 0) throw new DanmakuRateLimitError(remaining / 1000);
+    upstreamBackoff = null;
+  }
   let response: Response;
   try {
     response = await requestUpstream(url, timeoutMs);
@@ -98,6 +107,16 @@ async function readJson(
 
   if (!response.ok) {
     await response.body?.cancel().catch(() => {});
+    if (response.status === 429) {
+      const retryAfterSeconds = parseDanmakuRetryAfter(
+        response.headers?.get('retry-after'),
+      );
+      upstreamBackoff = {
+        baseUrl,
+        retryAt: Date.now() + retryAfterSeconds * 1000,
+      };
+      throw new DanmakuRateLimitError(retryAfterSeconds);
+    }
     throw new DanmakuProviderError(
       response.status === 404 ? notFoundKind : 'upstream-rejected',
       `弹幕服务返回 ${response.status}`,
@@ -200,5 +219,8 @@ export async function fetchDanmakuByEpisodeId(
     'episode-not-found',
   )) as CommentResponse;
 
-  return normalizeComments(payload?.comments, limit);
+  if (!Array.isArray(payload?.comments)) {
+    throw new DanmakuProviderError('invalid-response', '弹幕服务返回格式异常');
+  }
+  return normalizeComments(payload.comments, limit);
 }

@@ -32,7 +32,10 @@ import type {
 } from '@/components/video-card/types';
 import { VideoCardPoster } from '@/components/video-card/VideoCardPoster';
 import { VideoCardTitle } from '@/components/video-card/VideoCardTitle';
-import { warmupDanmakuForNavigation } from '@/features/play/lib/danmaku/navigation-warmup';
+import {
+  warmupDanmakuForNavigation,
+  warmupDanmakuSearchForNavigation,
+} from '@/features/play/lib/danmaku/navigation-warmup';
 import { useLongPress } from '@/hooks/useLongPress';
 import { getAuthInfoFromBrowserCookie } from '@/lib/auth.client';
 import {
@@ -481,7 +484,7 @@ const VideoCard = forwardRef<VideoCardHandle, VideoCardProps>(
       warmupOnNavigate,
     ]);
 
-    // hover / focus 预热：带 source+id 的卡片预取 detail，并提前准备弹幕数据
+    // hover / focus 预热：带 source+id 的卡片预取 detail，并提前准备弹幕候选
     const handlePrefetch = useCallback(() => {
       if (shouldTrackFavoriteStatus) {
         void loadFavoriteStatus();
@@ -496,7 +499,7 @@ const VideoCard = forwardRef<VideoCardHandle, VideoCardProps>(
       }
       prefetchTimerRef.current = window.setTimeout(() => {
         prefetchTimerRef.current = null;
-        warmupDanmaku();
+        void warmupDanmakuSearchForNavigation(actualTitle);
         if (isAggregate) return;
         if (from === 'douban' || !actualSource || !actualId) {
           warmupSearchForTitle(actualQuery || actualTitle);
@@ -515,7 +518,6 @@ const VideoCard = forwardRef<VideoCardHandle, VideoCardProps>(
       origin,
       router,
       shouldTrackFavoriteStatus,
-      warmupDanmaku,
     ]);
 
     const cancelPrefetch = useCallback(() => {
