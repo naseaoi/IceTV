@@ -18,6 +18,7 @@ export interface SwrCacheOptions<T = unknown> {
   estimateWeight?: (value: T) => number;
   freshMs: number;
   staleMs?: number;
+  getTtl?: (value: T) => { freshMs: number; staleMs?: number };
 }
 
 export interface SwrCacheStats {
@@ -157,10 +158,13 @@ export function createSwrCache<T>(opts: SwrCacheOptions<T>) {
     }
 
     remove(key);
+    const ttl = opts.getTtl?.(value);
+    const entryFreshMs = ttl ? normalizeLimit(ttl.freshMs, freshMs) : freshMs;
+    const entryStaleMs = ttl ? normalizeLimit(ttl.staleMs, staleMs) : staleMs;
     const entry: Entry<T> = {
       value,
-      freshUntil: expiry?.freshUntil ?? now + freshMs,
-      staleUntil: expiry?.staleUntil ?? now + freshMs + staleMs,
+      freshUntil: expiry?.freshUntil ?? now + entryFreshMs,
+      staleUntil: expiry?.staleUntil ?? now + entryFreshMs + entryStaleMs,
       weight,
     };
     store.set(key, entry);
@@ -224,6 +228,9 @@ export function createSwrCache<T>(opts: SwrCacheOptions<T>) {
         remove(key, 'expiration');
       }
       counters.misses += 1;
+      return load(key, loader);
+    },
+    refresh(key: string, loader: () => Promise<T>): Promise<T> {
       return load(key, loader);
     },
     invalidate(key: string) {
