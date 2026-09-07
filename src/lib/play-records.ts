@@ -1,5 +1,6 @@
 import {
   type ResumeGroupIdentity,
+  areEpisodeGroupLabelsEquivalent,
   normalizeGroupLabel,
 } from '@/lib/episode-groups';
 import type { PlayRecord, PlayRecordPage } from '@/lib/types';
@@ -171,7 +172,14 @@ export function hasPlayRecordGroupChanged(
 
   const previousLabel = normalizeGroupLabel(previous.group_label);
   const nextLabel = normalizeGroupLabel(next.group_label);
-  return !!previousLabel && !!nextLabel && previousLabel !== nextLabel;
+  return (
+    !!previousLabel &&
+    !!nextLabel &&
+    !areEpisodeGroupLabelsEquivalent(
+      { label: previous.group_label, count: previous.group_total },
+      { label: next.group_label, count: next.group_total },
+    )
+  );
 }
 
 export function hasPlayRecordUpdate(record: PlayRecord): boolean {

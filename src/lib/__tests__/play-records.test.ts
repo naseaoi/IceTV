@@ -191,4 +191,28 @@ describe('play record selection', () => {
     expect(hasPlayRecordUpdate(record)).toBe(true);
     expect(markPlayRecordUpdateRead(record).update_baseline_episodes).toBe(20);
   });
+
+  it.each(['简中 8', '简中8'])(
+    '保存播放进度时兼容旧分组标签 %s，不吞掉新增集数',
+    (label) => {
+      const previous = {
+        index: 16,
+        total_episodes: 16,
+        group_label: label,
+        group_index: 8,
+        group_total: 8,
+        update_baseline_group_total: 8,
+      } as PlayRecord;
+      const merged = mergePlayRecordUpdateBaseline(previous, {
+        ...previous,
+        index: 17,
+        total_episodes: 18,
+        group_label: '简中',
+        group_total: 9,
+      });
+
+      expect(merged.update_baseline_group_total).toBe(8);
+      expect(hasPlayRecordUpdate(merged)).toBe(true);
+    },
+  );
 });
