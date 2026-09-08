@@ -75,6 +75,21 @@ describe('danmaku comment cache recovery', () => {
     expect(searchCandidates).toHaveBeenCalledTimes(1);
   });
 
+  it('passes the request timeout to both title validation and comment loading', async () => {
+    searchCandidates.mockResolvedValue([
+      { episodeId: 123, animeTitle: 'test', episodeTitle: 'Episode 1' },
+    ]);
+    fetchComments.mockResolvedValue(populated);
+
+    await getCachedDanmakuComments(123, 1000, false, 'test', 4500);
+
+    expect(searchCandidates).toHaveBeenCalledWith('test', 4500);
+    expect(fetchComments).toHaveBeenCalledWith(123, 1000, 4500);
+    await getCachedDanmakuComments(123, 1000, false, 'test', 8000);
+    expect(searchCandidates).toHaveBeenCalledTimes(1);
+    expect(fetchComments).toHaveBeenCalledTimes(1);
+  });
+
   it('does not trust a cached positive binding when loading new comments', async () => {
     danmakuSearchCache.set('影片', [
       { episodeId: 123, animeTitle: '影片', episodeTitle: '第1集' },

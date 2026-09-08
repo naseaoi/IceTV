@@ -18,6 +18,7 @@ export type RuntimeParamSettings = Pick<
   | 'ImageProxyTimeoutSeconds'
   | 'UpstreamSearchConcurrency'
   | 'DanmakuEpisodeLimit'
+  | 'DanmakuRequestTimeoutSeconds'
 >;
 
 // 0 表示跟随 CACHE_PROFILE 档位或 UPSTREAM_SEARCH_CONCURRENCY 环境变量
@@ -40,6 +41,7 @@ export const DEFAULT_RUNTIME_PARAMS: RuntimeParamSettings = {
   ImageProxyTimeoutSeconds: 15,
   UpstreamSearchConcurrency: UPSTREAM_SEARCH_CONCURRENCY_AUTO,
   DanmakuEpisodeLimit: 8000,
+  DanmakuRequestTimeoutSeconds: 12,
 };
 
 export const RUNTIME_PARAM_RANGES: Record<
@@ -62,6 +64,7 @@ export const RUNTIME_PARAM_RANGES: Record<
   ImageProxyTimeoutSeconds: { min: 1, max: 120 },
   UpstreamSearchConcurrency: { min: 0, max: 64 },
   DanmakuEpisodeLimit: { min: 200, max: 20000 },
+  DanmakuRequestTimeoutSeconds: { min: 1, max: 60 },
 };
 
 const RUNTIME_PARAM_KEYS = Object.keys(

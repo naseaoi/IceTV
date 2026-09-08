@@ -1,6 +1,7 @@
 import type { NextRequest } from 'next/server';
 
 import { installWebPolyfills } from '@/app/api/test-utils/web-polyfills';
+import { searchDanmakuCandidates } from '@/features/play/lib/danmaku/provider.server';
 import { DanmakuRateLimitError } from '@/features/play/lib/danmaku/types';
 
 jest.mock('server-only', () => ({}));
@@ -16,9 +17,9 @@ jest.mock('@/lib/api-auth', () => ({
   isGuardFailure: () => false,
 }));
 jest.mock('@/lib/config', () => ({
-  getConfigForRead: jest
-    .fn()
-    .mockResolvedValue({ SiteConfig: { EnableDanmaku: true } }),
+  getConfigForRead: jest.fn().mockResolvedValue({
+    SiteConfig: { EnableDanmaku: true, DanmakuRequestTimeoutSeconds: 7 },
+  }),
 }));
 jest.mock('@/app/api/danmaku/cache', () => ({
   danmakuSearchCache: {
@@ -53,6 +54,13 @@ describe('danmaku search refresh', () => {
   it('preserves the cache during normal searches', async () => {
     expect((await GET(createRequest())).status).toBe(200);
     expect(mockInvalidate).not.toHaveBeenCalled();
+  });
+
+  it('uses the configured timeout when loading candidates', async () => {
+    await GET(createRequest());
+    const load = mockGetOrLoad.mock.calls[0][1] as () => Promise<unknown>;
+    await load();
+    expect(searchDanmakuCandidates).toHaveBeenCalledWith('test', 7000);
   });
 
   it('reports the provider cooldown instead of a generic gateway failure', async () => {

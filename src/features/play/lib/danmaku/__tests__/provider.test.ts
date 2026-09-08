@@ -2,6 +2,8 @@ import {
   fetchDanmakuByEpisodeId,
   searchDanmakuCandidates,
 } from '@/features/play/lib/danmaku/provider.server';
+import { DEFAULT_RUNTIME_PARAMS } from '@/lib/runtime-params';
+import { fetchWithUrlGuard } from '@/lib/url-guard';
 
 jest.mock('server-only', () => ({}));
 jest.mock('@/lib/url-guard', () => ({
@@ -98,5 +100,52 @@ describe('danmaku provider missing episodes', () => {
     await expect(fetchDanmakuByEpisodeId(123, 100)).rejects.toMatchObject({
       kind: 'invalid-response',
     });
+  });
+
+  it('passes custom and default request deadlines to guarded upstream requests', async () => {
+    process.env.DANMAKU_API_ALLOW_PRIVATE = 'false';
+    const guardedFetch = fetchWithUrlGuard as jest.Mock;
+    guardedFetch.mockReset().mockResolvedValue({
+      ok: true,
+      headers: { get: () => null },
+      text: async () => JSON.stringify({ animes: [], comments: [] }),
+    });
+
+    await searchDanmakuCandidates('test');
+    expect(guardedFetch).toHaveBeenLastCalledWith(
+      expect.any(String),
+      expect.objectContaining({
+        timeoutMs: DEFAULT_RUNTIME_PARAMS.DanmakuRequestTimeoutSeconds * 1000,
+      }),
+    );
+    await fetchDanmakuByEpisodeId(123, 100, 2500);
+    expect(guardedFetch).toHaveBeenLastCalledWith(
+      expect.any(String),
+      expect.objectContaining({ timeoutMs: 2500 }),
+    );
+  });
+
+  it('aborts a private upstream request at the configured deadline', async () => {
+    jest.useFakeTimers();
+    let signal: AbortSignal | undefined;
+    (global.fetch as jest.Mock).mockImplementation(
+      (_url, init: RequestInit) => {
+        signal = init.signal ?? undefined;
+        return new Promise((_resolve, reject) => {
+          signal?.addEventListener('abort', () => reject(new Error('aborted')));
+        });
+      },
+    );
+
+    const pending = fetchDanmakuByEpisodeId(123, 100, 2500);
+    const rejected = expect(pending).rejects.toMatchObject({
+      kind: 'upstream-unavailable',
+    });
+    await Promise.resolve();
+    jest.advanceTimersByTime(2499);
+    expect(signal?.aborted).toBe(false);
+    jest.advanceTimersByTime(1);
+    expect(signal?.aborted).toBe(true);
+    await rejected;
   });
 });

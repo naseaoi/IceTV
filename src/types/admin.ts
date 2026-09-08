@@ -42,6 +42,7 @@ export interface AdminConfig {
     FluidSearch: boolean;
     EnableDanmaku: boolean;
     DanmakuEpisodeLimit: number;
+    DanmakuRequestTimeoutSeconds: number;
   };
   UserConfig: {
     Users: {

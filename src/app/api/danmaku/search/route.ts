@@ -10,6 +10,7 @@ import { DanmakuProviderError } from '@/features/play/lib/danmaku/types';
 import { isGuardFailure, requireActiveUser } from '@/lib/api-auth';
 import { getConfigForRead } from '@/lib/config';
 import { NO_STORE_HEADERS } from '@/lib/http-cache';
+import { normalizeRuntimeParams } from '@/lib/runtime-params';
 import {
   recordServerProxyFailure,
   requireServerProxyQuota,
@@ -81,8 +82,11 @@ export async function GET(request: NextRequest) {
     if (request.nextUrl.searchParams.get('refresh') === '1') {
       danmakuSearchCache.invalidate(keyword);
     }
+    const timeoutMs =
+      normalizeRuntimeParams(config.SiteConfig).DanmakuRequestTimeoutSeconds *
+      1000;
     const candidates = await danmakuSearchCache.getOrLoad(keyword, () =>
-      searchDanmakuCandidates(keyword),
+      searchDanmakuCandidates(keyword, timeoutMs),
     );
     const pageEnd = offset + MAX_CANDIDATES_PER_PAGE;
 

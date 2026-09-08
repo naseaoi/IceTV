@@ -22,7 +22,10 @@ jest.mock('@/lib/config', () => ({
     .mockResolvedValue({ SiteConfig: { EnableDanmaku: true } }),
 }));
 jest.mock('@/lib/runtime-params', () => ({
-  normalizeRuntimeParams: () => ({ DanmakuEpisodeLimit: 1000 }),
+  normalizeRuntimeParams: () => ({
+    DanmakuEpisodeLimit: 1000,
+    DanmakuRequestTimeoutSeconds: 9,
+  }),
 }));
 jest.mock('@/features/play/lib/danmaku/cache.server', () => ({
   getCachedDanmakuComments: (...args: unknown[]) => mockFetchDanmaku(...args),
@@ -55,7 +58,7 @@ describe('danmaku comment errors', () => {
     mockFetchDanmaku.mockResolvedValue({ items: [] });
     const response = await GET(createRequest('13143', '1'));
     expect(response.status).toBe(200);
-    expect(mockFetchDanmaku).toHaveBeenCalledWith(13143, 1000, true, '');
+    expect(mockFetchDanmaku).toHaveBeenCalledWith(13143, 1000, true, '', 9000);
   });
 
   it('returns actionable rate limiting with a bounded retry delay', async () => {
@@ -115,6 +118,7 @@ describe('danmaku comment errors', () => {
       1000,
       false,
       '鬼灭之刃',
+      9000,
     );
   });
 

@@ -99,6 +99,7 @@ describe('buildConfigFileFromAdminConfig', () => {
         EnableOptimization: true,
         LiveDirectConnect: false,
         EnableDanmaku: false,
+        DanmakuRequestTimeoutSeconds: 12,
         DanmakuEpisodeLimit: 8000,
         SearchDownstreamMaxPage: 5,
         SiteInterfaceCacheTime: 7200,

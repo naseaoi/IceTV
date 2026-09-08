@@ -49,9 +49,10 @@ export const danmakuSearchCache = createSwrCache<DanmakuMatchCandidate[]>({
 async function validateEpisodeTitle(
   episodeId: number,
   keyword: string,
+  timeoutMs?: number,
 ): Promise<void> {
   const candidates = await danmakuSearchCache.refresh(keyword, () =>
-    searchDanmakuCandidates(keyword),
+    searchDanmakuCandidates(keyword, timeoutMs),
   );
   if (candidates.length === 0) {
     throw new DanmakuProviderError(
@@ -72,14 +73,15 @@ export async function getCachedDanmakuComments(
   limit: number,
   refresh = false,
   keyword = '',
+  timeoutMs?: number,
 ): Promise<DanmakuFetchResult> {
   const key = keyword
     ? JSON.stringify([episodeId, limit, keyword])
     : `${episodeId}:${limit}`;
   const load = async () => {
     try {
-      if (keyword) await validateEpisodeTitle(episodeId, keyword);
-      const result = await fetchDanmakuByEpisodeId(episodeId, limit);
+      if (keyword) await validateEpisodeTitle(episodeId, keyword, timeoutMs);
+      const result = await fetchDanmakuByEpisodeId(episodeId, limit, timeoutMs);
       if (
         result.items.length === 0 &&
         danmakuCommentsCache.peek(key)?.value.items.length

@@ -8,11 +8,13 @@ import {
   DanmakuProviderError,
   DanmakuRateLimitError,
 } from '@/features/play/lib/danmaku/types';
+import { DEFAULT_RUNTIME_PARAMS } from '@/lib/runtime-params';
 import { ResourceLimitError } from '@/lib/server-resource-errors';
 import { fetchPrivateUpstream } from '@/lib/upstream-fetch.server';
 import { fetchWithUrlGuard, UrlValidationError } from '@/lib/url-guard';
 
-const DEFAULT_TIMEOUT_MS = 12000;
+const DEFAULT_TIMEOUT_MS =
+  DEFAULT_RUNTIME_PARAMS.DanmakuRequestTimeoutSeconds * 1000;
 const MAX_RESPONSE_BYTES = 12 * 1024 * 1024;
 let upstreamBackoff: { baseUrl: string; retryAt: number } | null = null;
 

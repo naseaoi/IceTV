@@ -6,10 +6,10 @@ import {
 } from '@/features/play/lib/danmaku/provider.server';
 import { isGuardFailure, requireAdmin } from '@/lib/api-auth';
 import { getConfigFresh } from '@/lib/config';
+import { normalizeRuntimeParams } from '@/lib/runtime-params';
 
 export const runtime = 'nodejs';
 
-const TEST_TIMEOUT_MS = 15000;
 const TEST_KEYWORD = '葬送的芙莉莲';
 
 type TestResult =
@@ -49,7 +49,8 @@ export async function POST(request: NextRequest): Promise<Response> {
 
     const candidates = await searchDanmakuCandidates(
       TEST_KEYWORD,
-      TEST_TIMEOUT_MS,
+      normalizeRuntimeParams(config.SiteConfig).DanmakuRequestTimeoutSeconds *
+        1000,
     );
 
     if (candidates.length === 0) {

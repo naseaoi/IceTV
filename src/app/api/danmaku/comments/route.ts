@@ -59,13 +59,14 @@ export async function GET(request: NextRequest) {
   );
   if (quotaFailure) return quotaFailure;
 
-  const limit = normalizeRuntimeParams(config.SiteConfig).DanmakuEpisodeLimit;
+  const runtimeParams = normalizeRuntimeParams(config.SiteConfig);
   try {
     const result = await getCachedDanmakuComments(
       episodeId,
-      limit,
+      runtimeParams.DanmakuEpisodeLimit,
       request.nextUrl.searchParams.get('refresh') === '1',
       keyword,
+      runtimeParams.DanmakuRequestTimeoutSeconds * 1000,
     );
 
     return NextResponse.json(result, { headers: NO_STORE_HEADERS });

@@ -120,6 +120,7 @@ docker compose -f compose.yml -f compose.danmaku.yml up -d
 - 服务只通过容器内网访问，无需把 9321 端口暴露到公网。
 - `DANMAKU_API_BASE_URL` 包含 token 路径；内网地址须显式设置 `DANMAKU_API_ALLOW_PRIVATE=true`。
 - 后台「站点配置 → 播放器弹幕」仍须开启；「测试连接」用于验证地址。
+- 「运行参数 → 弹幕」管理单集条数上限和单次上游请求超时；超时同时用于搜索、绑定校验、评论拉取和连接测试。字号、透明度、速度在播放器调整，缓存与限流退避仍由系统管理。
 - 启动、升级等操作须沿用相同的 Compose `-f` 文件组合。
 
 ## Vercel + MySQL

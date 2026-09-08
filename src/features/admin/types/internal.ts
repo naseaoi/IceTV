@@ -11,6 +11,7 @@ export interface SiteConfig {
   LiveDirectConnect: boolean;
   EnableDanmaku: boolean;
   DanmakuEpisodeLimit: number;
+  DanmakuRequestTimeoutSeconds: number;
   SearchDownstreamMaxPage: number;
   SiteInterfaceCacheTime: number;
   VodPageTimeoutSeconds: number;
