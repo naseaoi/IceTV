@@ -1,4 +1,4 @@
-export type UpstreamResourceKind = 'metadata' | 'vod' | 'live';
+export type UpstreamResourceKind = 'metadata' | 'vod' | 'live' | 'probe';
 
 export interface UpstreamResourceContext {
   kind?: UpstreamResourceKind;
@@ -17,22 +17,38 @@ export function resourceLimitSetting(
 }
 
 export function upstreamResourcePolicy(kind: UpstreamResourceKind) {
-  const media = kind !== 'metadata';
-  const prefix = media ? 'UPSTREAM_MEDIA' : 'UPSTREAM_METADATA';
+  const probe = kind === 'probe';
+  const media = kind === 'vod' || kind === 'live';
+  const prefix = probe
+    ? 'SOURCE_PROBE'
+    : media
+      ? 'UPSTREAM_MEDIA'
+      : 'UPSTREAM_METADATA';
   const mib = 1024 * 1024;
+  const globalConcurrency = resourceLimitSetting(
+    `${prefix}_CONCURRENCY`,
+    probe ? 8 : media ? 96 : 64,
+  );
+  const globalRpm = resourceLimitSetting(
+    `${prefix}_RPM`,
+    probe ? 480 : media ? 12000 : 1800,
+  );
   return {
-    globalConcurrency: resourceLimitSetting(
-      `${prefix}_CONCURRENCY`,
-      media ? 96 : 64,
+    globalConcurrency,
+    hostConcurrency: probe
+      ? globalConcurrency
+      : resourceLimitSetting(`${prefix}_HOST_CONCURRENCY`, media ? 32 : 12),
+    userConcurrency: resourceLimitSetting(
+      probe
+        ? 'SOURCE_PROBE_USER_CONCURRENCY'
+        : 'UPSTREAM_MEDIA_USER_CONCURRENCY',
+      probe ? 2 : 6,
     ),
-    hostConcurrency: resourceLimitSetting(
-      `${prefix}_HOST_CONCURRENCY`,
-      media ? 32 : 12,
-    ),
-    userConcurrency: resourceLimitSetting('UPSTREAM_MEDIA_USER_CONCURRENCY', 6),
     liveConcurrency: resourceLimitSetting('UPSTREAM_LIVE_CONCURRENCY', 32),
-    globalRpm: resourceLimitSetting(`${prefix}_RPM`, media ? 12000 : 1800),
-    hostRpm: resourceLimitSetting(`${prefix}_HOST_RPM`, media ? 6000 : 300),
+    globalRpm,
+    hostRpm: probe
+      ? globalRpm
+      : resourceLimitSetting(`${prefix}_HOST_RPM`, media ? 6000 : 300),
     globalBytes: media
       ? resourceLimitSetting('UPSTREAM_MEDIA_MIB_PER_MINUTE', 1536) * mib
       : 0,
@@ -45,7 +61,7 @@ export function upstreamResourcePolicy(kind: UpstreamResourceKind) {
     maxDurationMs:
       resourceLimitSetting(
         `${prefix}_MAX_DURATION_SECONDS`,
-        media ? 120 : 60,
+        probe ? 20 : media ? 120 : 60,
         600,
       ) * 1000,
   };

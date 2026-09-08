@@ -2,6 +2,7 @@
 
 import { isLiveEntryEnabled } from '@/features/live/lib/live';
 import { getRewrittenM3U8Content } from '@/features/play/lib/m3u8-rewrite';
+import { withSourceProbeBudget } from '@/features/play/lib/sourceProbeGuard.server';
 import { resolveProxyAuthorization } from '@/lib/proxy-auth';
 import {
   classifyProxyFailure,
@@ -24,6 +25,10 @@ import {
 export const runtime = 'nodejs';
 
 export async function GET(request: NextRequest) {
+  return withSourceProbeBudget(request, handleGet);
+}
+
+async function handleGet(request: NextRequest) {
   const startedAt = Date.now();
   const { searchParams } = new URL(request.url);
   const url = searchParams.get('url');

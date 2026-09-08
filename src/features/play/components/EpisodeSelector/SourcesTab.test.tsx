@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from '@testing-library/react';
+import { act, fireEvent, render, screen } from '@testing-library/react';
 
 import {
   getCompletedProbeInfo,
@@ -51,8 +51,8 @@ function createEntry(
 }
 
 describe('SourcesTab source sorting', () => {
-  it('换源测速一次并发 4 个源站', () => {
-    expect(VIDEO_INFO_BATCH_SIZE).toBe(4);
+  it('换源测速一次并发 2 个源站', () => {
+    expect(VIDEO_INFO_BATCH_SIZE).toBe(2);
   });
 
   it('pending 条目使用上一次完成结果参与排序', () => {
@@ -143,6 +143,46 @@ describe('SourcesTab probe status', () => {
     mockGetOrProbe.mockReset().mockResolvedValue(undefined);
   });
 
+  it('标题栏操作统一为小号按钮，检测时原位转圈且保留名称', async () => {
+    mockProbeSnapshot.set('source-a-1', createEntry(failure));
+    let finish!: () => void;
+    mockGetOrProbe.mockImplementationOnce(
+      () =>
+        new Promise<void>((resolve) => {
+          finish = resolve;
+        }),
+    );
+    render(
+      <SourcesTab
+        availableSources={[source]}
+        sourceSearchLoading={false}
+        sourceSearchError={null}
+        isActive
+      />,
+    );
+    const detectButton = screen.getByRole('button', { name: '检测全部' });
+    expect(
+      screen.getByRole('heading', { name: '源站列表', level: 3 })
+        .firstElementChild,
+    ).toHaveClass('w-[3px]', 'h-3.5');
+    const searchButton = screen.getByRole('button', { name: '搜索更多源站' });
+    expect(detectButton.className).toBe(searchButton.className);
+    expect(detectButton).toHaveClass('h-7', 'text-xs', 'bg-transparent');
+    fireEvent.click(detectButton);
+    expect(detectButton).toBeDisabled();
+    expect(detectButton).toHaveAttribute('aria-busy', 'true');
+    expect(detectButton.querySelector('span')).toHaveClass('opacity-0');
+    expect(detectButton.querySelector('svg')).toHaveClass('animate-spin');
+    expect(screen.getByRole('button', { name: '检测全部' })).toBe(detectButton);
+    fireEvent.click(detectButton);
+    expect(mockGetOrProbe).toHaveBeenCalledTimes(1);
+    await act(async () => {
+      finish();
+    });
+    expect(detectButton).toBeEnabled();
+    expect(detectButton).toHaveAttribute('aria-busy', 'false');
+  });
+
   it('检测失败时显示红字，并保留不会触发换源的重试入口', () => {
     mockProbeSnapshot.set('source-a-1', createEntry(failure));
     const onSourceChange = jest.fn();
@@ -167,6 +207,55 @@ describe('SourcesTab probe status', () => {
       expect.objectContaining({ force: true }),
     );
     expect(onSourceChange).not.toHaveBeenCalled();
+  });
+
+  it('繁忙显示检测暂缓而非失败，并允许稍后重试', () => {
+    mockProbeSnapshot.set(
+      'source-a-1',
+      createEntry(
+        { quality: '未知', loadSpeed: '未知', pingTime: 0 },
+        'deferred',
+      ),
+    );
+    const onSourceChange = jest.fn();
+    render(
+      <SourcesTab
+        availableSources={[source]}
+        sourceSearchLoading={false}
+        sourceSearchError={null}
+        onSourceChange={onSourceChange}
+      />,
+    );
+    expect(screen.getByText('检测暂缓')).toBeInTheDocument();
+    expect(screen.queryByText('检测失败')).not.toBeInTheDocument();
+    expect(screen.queryByText('0.00s')).not.toBeInTheDocument();
+    fireEvent.click(screen.getByText('重试'));
+    expect(mockGetOrProbe).toHaveBeenCalledWith(
+      source,
+      expect.objectContaining({ force: true }),
+    );
+    expect(onSourceChange).not.toHaveBeenCalled();
+  });
+
+  it('换源标签不可见时不自动启动检测', () => {
+    const { rerender } = render(
+      <SourcesTab
+        availableSources={[source]}
+        sourceSearchLoading={false}
+        sourceSearchError={null}
+        isActive={false}
+      />,
+    );
+    expect(mockGetOrProbe).not.toHaveBeenCalled();
+    rerender(
+      <SourcesTab
+        availableSources={[source]}
+        sourceSearchLoading={false}
+        sourceSearchError={null}
+        isActive
+      />,
+    );
+    expect(mockGetOrProbe).toHaveBeenCalledTimes(1);
   });
 
   it.each([

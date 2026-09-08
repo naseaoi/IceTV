@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 
 import { episodeUrlCache } from '@/app/api/episode-url/cache';
+import { withSourceProbeBudget } from '@/features/play/lib/sourceProbeGuard.server';
 import { isGuardFailure, requireActiveUser } from '@/lib/api-auth';
 import type { ApiSite } from '@/lib/config';
 import { getAvailableApiSites, getConfigForRead } from '@/lib/config';
@@ -39,6 +40,10 @@ async function resolveEpisodeUrl(
 }
 
 export async function GET(request: NextRequest) {
+  return withSourceProbeBudget(request, handleGet);
+}
+
+async function handleGet(request: NextRequest) {
   const guardResult = await requireActiveUser(request);
   if (isGuardFailure(guardResult)) return guardResult.response;
 

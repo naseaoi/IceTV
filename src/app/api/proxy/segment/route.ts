@@ -1,6 +1,7 @@
 ﻿import { NextRequest, NextResponse } from 'next/server';
 
 import { isLiveEntryEnabled } from '@/features/live/lib/live';
+import { withSourceProbeBudget } from '@/features/play/lib/sourceProbeGuard.server';
 import { resolveVodSegmentProxyTimeoutMs } from '@/features/play/lib/vodSourcePlaybackPolicy';
 import { getClientIp } from '@/lib/client-ip';
 import { getConfigForRead } from '@/lib/config';
@@ -33,6 +34,10 @@ export const runtime = 'nodejs';
 const MAX_SEGMENT_BYTES = 256 * 1024 * 1024;
 
 export async function GET(request: NextRequest) {
+  return withSourceProbeBudget(request, handleGet);
+}
+
+async function handleGet(request: NextRequest) {
   const startedAt = Date.now();
   const { searchParams } = new URL(request.url);
   const url = searchParams.get('url');

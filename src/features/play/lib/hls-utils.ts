@@ -1,3 +1,6 @@
+import { fetchSourceProbe } from '@/features/play/lib/sourceProbeRequest';
+import { SourceProbeDeferredError } from '@/features/play/lib/sourceProbeRequestPolicy';
+import { createTimedAbortController } from '@/lib/downstream-sources/shared';
 import { formatBytesPerSecond } from '@/lib/player-utils';
 import {
   clearSourceProxyOverride,
@@ -42,25 +45,23 @@ class ProbeError extends Error {
   }
 }
 
-function withTimeout<T>(
-  promise: Promise<T>,
-  timeoutMs: number,
-  message: string,
-) {
-  return new Promise<T>((resolve, reject) => {
-    const timer = setTimeout(() => reject(new Error(message)), timeoutMs);
-
-    promise.then(
-      (value) => {
-        clearTimeout(timer);
-        resolve(value);
-      },
-      (error) => {
-        clearTimeout(timer);
-        reject(error);
-      },
-    );
-  });
+async function loadProbePlaylist(url: string) {
+  const abortState = createTimedAbortController(undefined, 8000);
+  const startedAt = performance.now();
+  try {
+    const response = await fetchSourceProbe(url, {
+      cache: 'no-store',
+      signal: abortState.signal,
+    });
+    const pingTime = Math.round(performance.now() - startedAt);
+    if (!response.ok) {
+      await response.body?.cancel();
+      throw new ProbeError('Failed to load playlist');
+    }
+    return { content: await response.text(), pingTime };
+  } finally {
+    abortState.cleanup();
+  }
 }
 
 function mapWidthToQuality(width: number): string {
@@ -442,7 +443,7 @@ async function measureSegmentBandwidth(
     BANDWIDTH_PROBE_TIMEOUT_MS,
   );
   try {
-    const response = await fetch(segmentUrl, {
+    const response = await fetchSourceProbe(segmentUrl, {
       cache: 'no-store',
       signal: controller.signal,
       headers: {
@@ -570,24 +571,11 @@ async function probeWithMode(
 ): Promise<VideoProbeResult> {
   const proxyUrl = buildProxyUrl(m3u8Url, useProxy, sourceKey);
 
-  const pingStart = performance.now();
-  const pingPromise = fetch(proxyUrl, { method: 'HEAD' })
-    .catch(() => null)
-    .then(() => Math.round(performance.now() - pingStart));
-
   let partial: PartialProbeResult | undefined;
 
   try {
-    const playlistResponse = await withTimeout(
-      fetch(proxyUrl, { cache: 'no-store' }),
-      8000,
-      'Timeout loading playlist',
-    );
-    if (!playlistResponse.ok) {
-      throw new ProbeError('Failed to load playlist', partial);
-    }
-
-    const playlistContent = await playlistResponse.text();
+    const { content: playlistContent, pingTime } =
+      await loadProbePlaylist(proxyUrl);
     ensureCodecsPlayable(playlistContent);
     const variants = parseMasterVariants(playlistContent);
     const pickedVariant = pickProbeVariant(variants);
@@ -599,15 +587,10 @@ async function probeWithMode(
     let mediaPlaylistContent = playlistContent;
 
     if (pickedVariant?.probePlaylistUrl) {
-      const mediaPlaylistResponse = await withTimeout(
-        fetch(pickedVariant.probePlaylistUrl, { cache: 'no-store' }),
-        8000,
-        'Timeout loading media playlist',
+      const mediaPlaylist = await loadProbePlaylist(
+        pickedVariant.probePlaylistUrl,
       );
-      if (!mediaPlaylistResponse.ok) {
-        throw new ProbeError('Failed to load media playlist');
-      }
-      mediaPlaylistContent = await mediaPlaylistResponse.text();
+      mediaPlaylistContent = mediaPlaylist.content;
     }
 
     const firstSegmentUrl = getFirstSegmentUrl(mediaPlaylistContent);
@@ -624,7 +607,6 @@ async function probeWithMode(
     const segmentProbe = await measureSegmentBandwidth(firstSegmentUrl);
     const loadSpeed = segmentProbe.loadSpeed;
 
-    const pingTime = await pingPromise;
     const detectedQuality = segmentProbe.dimensions
       ? mapDimensionsToQuality(segmentProbe.dimensions)
       : quality;
@@ -636,18 +618,11 @@ async function probeWithMode(
       pingTime,
     };
   } catch (error) {
+    if (error instanceof SourceProbeDeferredError) throw error;
     throw normalizeProbeError(error, partial);
   }
 }
 
-/**
- * 从 m3u8 地址获取视频质量等级和网络信息。
- * 改为直接请求 playlist 与首个分片，避免为每个源创建隐藏 video+hls 实例。
- *
- * 优化：variant playlist 与 first segment range 尝试并行发起，
- *      将原 3 段串行（HEAD+playlist → variant playlist → first segment）
- *      压缩到 ~2 轮 RTT。若 master 无 variants，退回单 playlist 链路。
- */
 export async function getVideoResolutionFromM3u8(
   m3u8Url: string,
   useProxy = true,
@@ -660,6 +635,7 @@ export async function getVideoResolutionFromM3u8(
     }
     return result;
   } catch (error) {
+    if (error instanceof SourceProbeDeferredError) throw error;
     const firstError = normalizeProbeError(error);
 
     if (!useProxy && sourceKey && shouldAutoFallbackToServer(sourceKey)) {
@@ -670,6 +646,8 @@ export async function getVideoResolutionFromM3u8(
         }
         return fallbackResult;
       } catch (fallbackError) {
+        if (fallbackError instanceof SourceProbeDeferredError)
+          throw fallbackError;
         const normalizedFallbackError = normalizeProbeError(fallbackError);
         const partial = pickBestPartial(
           normalizedFallbackError.partial,

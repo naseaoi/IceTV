@@ -29,13 +29,95 @@ describe('upstream resources', () => {
     jest.restoreAllMocks();
     jest.useRealTimers();
     for (const key of Object.keys(process.env))
-      if (key.startsWith('UPSTREAM_')) delete process.env[key];
+      if (key.startsWith('UPSTREAM_') || key.startsWith('SOURCE_PROBE_'))
+        delete process.env[key];
     for (const [key, value] of Object.entries(initialEnv))
-      if (key.startsWith('UPSTREAM_')) process.env[key] = value;
+      if (key.startsWith('UPSTREAM_') || key.startsWith('SOURCE_PROBE_'))
+        process.env[key] = value;
     (storage as unknown as { db: Database.Database }).db.close();
   });
 
   const loader = () => Promise.resolve(new Response(new Uint8Array(16)));
+
+  it('caps fifteen concurrent probe users at eight without consuming playback slots', async () => {
+    const probeLoader = jest.fn(loader);
+    const results = await Promise.allSettled(
+      Array.from({ length: 15 }, (_, index) =>
+        withUpstreamResponse(
+          'http://localhost/api/proxy/segment',
+          probeLoader,
+          {
+            store,
+            kind: 'probe',
+            identity: `user:${index}`,
+          },
+        ),
+      ),
+    );
+    const responses = results.flatMap((result) =>
+      result.status === 'fulfilled' ? [result.value] : [],
+    );
+    expect(responses).toHaveLength(8);
+    expect(probeLoader).toHaveBeenCalledTimes(8);
+    for (const result of results) {
+      if (result.status === 'rejected')
+        expect(result.reason).toMatchObject({
+          status: 503,
+          retryAfterSeconds: 2,
+        });
+    }
+    const playback = await withUpstreamResponse(
+      'https://up.example/segment',
+      loader,
+      { store, kind: 'vod', identity: 'user:0' },
+    );
+    await playback.body!.cancel();
+    await responses[0].body!.cancel();
+    const replacement = await withUpstreamResponse(
+      'http://localhost/api/detail',
+      loader,
+      { store, kind: 'probe', identity: 'user:new' },
+    );
+    await replacement.arrayBuffer();
+    await Promise.all(
+      responses.slice(1).map((response) => response.body!.cancel()),
+    );
+  });
+
+  it('caps one probe user at two and rolls back refused global leases', async () => {
+    const options = { store, kind: 'probe' as const, identity: 'user:one' };
+    const first = await withUpstreamResponse(
+      'http://localhost/api/detail',
+      loader,
+      options,
+    );
+    const second = await withUpstreamResponse(
+      'http://localhost/api/detail',
+      loader,
+      options,
+    );
+    await expect(
+      withUpstreamResponse('http://localhost/api/detail', loader, options),
+    ).rejects.toMatchObject({ status: 429 });
+    await first.body!.cancel();
+    const replacement = await withUpstreamResponse(
+      'http://localhost/api/detail',
+      loader,
+      options,
+    );
+    await Promise.all([second.body!.cancel(), replacement.body!.cancel()]);
+  });
+
+  it('applies a separate shared probe request rate', async () => {
+    process.env.SOURCE_PROBE_RPM = '1';
+    const options = { store, kind: 'probe' as const, identity: 'user:one' };
+    await (
+      await withUpstreamResponse('http://localhost/api/detail', loader, options)
+    ).arrayBuffer();
+    await expect(
+      withUpstreamResponse('http://localhost/api/detail', loader, options),
+    ).rejects.toMatchObject({ status: 503 });
+  });
 
   it('holds shared host slots until the response body ends or is canceled', async () => {
     process.env.UPSTREAM_METADATA_HOST_CONCURRENCY = '2';

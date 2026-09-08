@@ -8,7 +8,10 @@ import React, {
 } from 'react';
 
 import { AddSourcesModal } from '@/features/play/components/EpisodeSelector/AddSourcesModal';
+import { PanelActionButton } from '@/features/play/components/EpisodeSelector/PanelActionButton';
+import { SectionTitle } from '@/features/play/components/EpisodeSelector/SectionTitle';
 import { resolveSourceProbeEpisodeIndex } from '@/features/play/lib/sourceProbePolicy';
+import { SOURCE_PROBE_CONCURRENCY } from '@/features/play/lib/sourceProbeRequestPolicy';
 import {
   type ProbeEntry,
   type VideoInfo,
@@ -22,7 +25,7 @@ import { collapseSourcesForDisplay } from '@/lib/source-bundle';
 import { normalizeTitleForSourceMatch } from '@/lib/source-match';
 import { SearchResult } from '@/lib/types';
 
-export const VIDEO_INFO_BATCH_SIZE = 4;
+export const VIDEO_INFO_BATCH_SIZE = SOURCE_PROBE_CONCURRENCY;
 
 interface SourcesTabProps {
   availableSources: SearchResult[];
@@ -45,7 +48,9 @@ export function getCompletedProbeInfo(
   entry: ProbeEntry | undefined,
 ): VideoInfo | undefined {
   if (!entry) return undefined;
-  return entry.source === 'pending' || entry.source === 'queued'
+  return entry.source === 'pending' ||
+    entry.source === 'queued' ||
+    entry.source === 'deferred'
     ? entry.previousInfo
     : entry.info;
 }
@@ -219,6 +224,10 @@ export const SourcesTab: React.FC<SourcesTabProps> = ({
   const [isSearchingMore, setIsSearchingMore] = useState(false);
   const [searchMoreDone, setSearchMoreDone] = useState(false);
   const [isRetestingAll, setIsRetestingAll] = useState(false);
+  const isActiveRef = useRef(isActive);
+  useEffect(() => {
+    isActiveRef.current = isActive;
+  }, [isActive]);
   const [showAddSourcesModal, setShowAddSourcesModal] = useState(false);
   const [searchCandidates, setSearchCandidates] = useState<SearchResult[]>([]);
 
@@ -234,6 +243,7 @@ export const SourcesTab: React.FC<SourcesTabProps> = ({
         start < sources.length;
         start += VIDEO_INFO_BATCH_SIZE
       ) {
+        if (!isActiveRef.current) break;
         const batch = sources.slice(start, start + VIDEO_INFO_BATCH_SIZE);
         await Promise.all(
           batch.map((source) =>
@@ -254,7 +264,7 @@ export const SourcesTab: React.FC<SourcesTabProps> = ({
   );
 
   useEffect(() => {
-    if (displaySources.length === 0) return;
+    if (!isActive || displaySources.length === 0) return;
     const currentKey =
       currentSource && currentId ? `${currentSource}-${currentId}` : '';
     const pending = displaySources.filter((s) => {
@@ -273,6 +283,7 @@ export const SourcesTab: React.FC<SourcesTabProps> = ({
     currentId,
     probeSnapshot,
     probeSourcesInBatches,
+    isActive,
   ]);
 
   const handleSourceClick = useCallback(
@@ -414,14 +425,11 @@ export const SourcesTab: React.FC<SourcesTabProps> = ({
 
   return (
     <div className='flex min-h-0 flex-1 flex-col gap-4 overflow-hidden px-5 py-4 sm:px-6'>
-      <div className='flex flex-shrink-0 items-center justify-between'>
-        <h3 className='text-sm font-semibold text-gray-900 dark:text-gray-100'>
-          源站列表
-        </h3>
-        <div className='flex gap-2'>
-          <button
-            type='button'
-            disabled={isRetestingAll}
+      <div className='flex flex-shrink-0 items-center justify-between gap-2'>
+        <SectionTitle as='h3' label='源站列表' />
+        <div className='flex items-center gap-1'>
+          <PanelActionButton
+            busy={isRetestingAll}
             onClick={async () => {
               setIsRetestingAll(true);
               const curKey =
@@ -435,13 +443,11 @@ export const SourcesTab: React.FC<SourcesTabProps> = ({
               await probeSourcesInBatches(toTest, { force: true });
               setIsRetestingAll(false);
             }}
-            className='rounded-lg border border-gray-200 bg-white px-3 py-1.5 text-xs font-medium text-gray-700 transition-colors hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-200 dark:hover:bg-gray-700'
           >
-            {isRetestingAll ? '检测中...' : '检测全部'}
-          </button>
-          <button
-            type='button'
-            disabled={isSearchingMore}
+            检测全部
+          </PanelActionButton>
+          <PanelActionButton
+            busy={isSearchingMore}
             onClick={async () => {
               if (!videoTitle) return;
               setIsSearchingMore(true);
@@ -478,14 +484,9 @@ export const SourcesTab: React.FC<SourcesTabProps> = ({
                 setIsSearchingMore(false);
               }
             }}
-            className='rounded-lg border border-gray-200 bg-white px-3 py-1.5 text-xs font-medium text-gray-700 transition-colors hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-200 dark:hover:bg-gray-700'
           >
-            {isSearchingMore
-              ? '搜索中...'
-              : searchMoreDone
-                ? '搜索完成'
-                : '搜索更多源站'}
-          </button>
+            {searchMoreDone ? '搜索完成' : '搜索更多源站'}
+          </PanelActionButton>
         </div>
       </div>
 
@@ -572,12 +573,21 @@ export const SourcesTab: React.FC<SourcesTabProps> = ({
                           检测中
                         </span>
                       )}
+                      {probeEntry?.source === 'deferred' && (
+                        <span
+                          className='text-amber-600 dark:text-amber-400'
+                          title='服务器检测额度已满，不代表播放源失效'
+                        >
+                          检测暂缓
+                        </span>
+                      )}
                       {videoInfo && videoInfo.hasError && (
                         <span className='text-red-600 dark:text-red-400'>
                           检测失败
                         </span>
                       )}
-                      {videoInfo && videoInfo.hasError && (
+                      {(videoInfo?.hasError ||
+                        probeEntry?.source === 'deferred') && (
                         <span
                           className='cursor-pointer text-blue-500 hover:underline dark:text-blue-400'
                           onClick={(e) => {

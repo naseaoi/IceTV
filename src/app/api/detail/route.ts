@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 
+import { withSourceProbeBudget } from '@/features/play/lib/sourceProbeGuard.server';
 import { isGuardFailure, requireActiveUser } from '@/lib/api-auth';
 import { getAvailableApiSites, getConfigForRead } from '@/lib/config';
 import { getCachedDetail } from '@/lib/detail-cache';
@@ -8,6 +9,10 @@ import { resourceLimitResponse } from '@/lib/server-resource-errors';
 export const runtime = 'nodejs';
 
 export async function GET(request: NextRequest) {
+  return withSourceProbeBudget(request, handleGet);
+}
+
+async function handleGet(request: NextRequest) {
   const guardResult = await requireActiveUser(request);
   if (isGuardFailure(guardResult)) return guardResult.response;
 

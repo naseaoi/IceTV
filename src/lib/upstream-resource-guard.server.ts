@@ -47,7 +47,8 @@ export async function withUpstreamResponse(
   const host = new URL(url).hostname.toLowerCase().replace(/\.$/, '');
   const kind = options.kind ?? 'metadata';
   const policy = upstreamResourcePolicy(kind);
-  const scope = kind === 'metadata' ? 'metadata' : 'media';
+  const scope =
+    kind === 'probe' ? 'probe' : kind === 'metadata' ? 'metadata' : 'media';
   const store = options.store ?? (await sharedResourceStore());
   const token = randomUUID();
   const leases: string[] = [];
@@ -103,7 +104,10 @@ export async function withUpstreamResponse(
         throw new ResourceLimitError();
       });
     if (!admission.allowed)
-      throw new ResourceLimitError(status, admission.retryAfterMs / 1000);
+      throw new ResourceLimitError(
+        status,
+        kind === 'probe' ? 2 : admission.retryAfterMs / 1000,
+      );
     leases.push(key);
   }
 
