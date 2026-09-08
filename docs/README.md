@@ -1,13 +1,13 @@
 # 文档索引
 
-| 文档                                                             | 面向            | 内容                                                 |
-| ---------------------------------------------------------------- | --------------- | ---------------------------------------------------- |
-| [../AGENTS.md](../AGENTS.md)                                     | AI / 接手开发者 | 编码约束与易错点。**改代码前先看这个**               |
-| [deployment.md](deployment.md)                                   | 部署者          | Docker、Vercel 部署方案，含弹幕服务配置              |
-| [release.md](release.md)                                         | 维护者          | 分支模型、版本号规则、发布与打 tag 的完整流程        |
-| [performance-baseline.md](performance-baseline.md)               | 做性能优化时    | 基线采集方法与固定场景，保证优化前后可比             |
-| [messages-tracking-decisions.md](messages-tracking-decisions.md) | 动消息/追更时   | 该模块被否决的方案、被数据推翻的判断、故意不修的边界 |
+| 文档                                         | 保留内容                                  |
+| -------------------------------------------- | ----------------------------------------- |
+| [AGENTS.md](../AGENTS.md)                    | 项目易错约束、按风险分级的验证要求        |
+| [部署](deployment.md)                        | 可复用配置、环境变量与缓存/资源边界、备份 |
+| [发布](release.md)                           | 分支与版本规则、必要命令、发布完成条件    |
+| [性能验证](performance-baseline.md)          | 固定场景、指标口径与能力边界              |
+| [消息与追更](messages-tracking-decisions.md) | 数据基线、查询与刷新边界                  |
+| [环境变量](../.env.example)                  | 配置项和默认值                            |
+| [版本说明](../CHANGELOG.md)                  | 用户可见的版本变化，不作开发日志          |
 
-部署快速上手看 [deployment.md](deployment.md)，环境变量样例看 [.env.example](../.env.example)。
-
-各文档职责不重叠：`AGENTS.md` 记**约束**，`deployment.md` 记**部署**，`messages-tracking-decisions.md` 记**决策依据**，`release.md` 记**流程**，`performance-baseline.md` 记**方法**。实现细节看代码，改动历史看 git log。
+同一事实只保留一个维护入口；实现细节看代码，变更过程看 git log。不在维护文档累积排查经过、一次性测试数字或过期结论。

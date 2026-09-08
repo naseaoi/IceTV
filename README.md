@@ -83,32 +83,13 @@
 
 ## 部署
 
-支持 Docker + SQLite、Docker + MySQL、Vercel + MySQL 云数据库。
+| 方案                                                 | 适用范围                     |
+| ---------------------------------------------------- | ---------------------------- |
+| [Docker + SQLite](docs/deployment.md#docker--sqlite) | 单机部署，数据库保存在数据卷 |
+| [Docker + MySQL](docs/deployment.md#docker--mysql)   | 多实例共用数据库             |
+| [Vercel + MySQL](docs/deployment.md#vercel--mysql)   | 云部署，依赖外部 MySQL       |
 
-**快速开始（Docker + SQLite）：**
-
-```yml
-services:
-  icetv:
-    image: ghcr.io/naseaoi/icetv:latest
-    container_name: icetv
-    restart: unless-stopped
-    ports:
-      - '3000:3000'
-    environment:
-      - ICETV_USERNAME=admin
-      - ICETV_PASSWORD=admin_password
-      - AUTH_SECRET=replace_with_random_auth_secret
-      - CRON_SECRET=replace_with_random_secret
-      - LOCAL_DB_PATH=/data/icetv-data.sqlite
-    volumes:
-      - icetv-data:/data
-
-volumes:
-  icetv-data:
-```
-
-**完整部署方案（含弹幕、MySQL 等）见 [部署文档](docs/deployment.md)。**
+弹幕服务可独立接入以上方案，见 [接入弹幕服务](docs/deployment.md#接入弹幕服务)。
 
 ## 配置文件
 
@@ -145,25 +126,7 @@ volumes:
 
 ## 环境变量
 
-核心环境变量：
-
-| 变量                       | 说明         | 必填        | 默认值                         |
-| -------------------------- | ------------ | ----------- | ------------------------------ |
-| `ICETV_USERNAME`           | 站长账号     | 是          | 无                             |
-| `ICETV_PASSWORD`           | 站长密码     | 是          | 无                             |
-| `AUTH_SECRET`              | 签名密钥     | 是          | 无（至少 32 字符）             |
-| `CRON_SECRET`              | 定时任务密钥 | Docker 必填 | 无                             |
-| `NEXT_PUBLIC_STORAGE_TYPE` | 存储类型     | 否          | 有 `DATABASE_URL` 时为 `mysql` |
-| `LOCAL_DB_PATH`            | SQLite 路径  | 否          | `/data/icetv-data.sqlite`      |
-| `DATABASE_URL`             | MySQL 连接   | MySQL 必填  | 无                             |
-| `DANMAKU_API_BASE_URL`     | 弹幕服务地址 | 启用弹幕时  | 空                             |
-
-完整变量说明以 [.env.example](.env.example) 为准；部署步骤见 [部署文档](docs/deployment.md)。
-
-> [!IMPORTANT]
->
-> - 反代后设置 `TRUSTED_PROXY_COUNT` 为代理层数，否则注册限流可被绕过
-> - 弹幕需后台开启并配置 `DANMAKU_API_BASE_URL` 指向自建 [danmu_api](https://github.com/huangxd-/danmu_api)（地址含 token，形如 `http://host:9321/yourtoken`）
+变量与默认值以 [.env.example](.env.example) 为准；签名密钥、反代层数、内网弹幕等易错配置见 [环境变量边界](docs/deployment.md#环境变量边界)。
 
 ## 开发
 
@@ -174,6 +137,8 @@ pnpm dev
 ```
 
 改代码前看 [AGENTS.md](AGENTS.md)，其余文档见 [docs/](docs/README.md)。
+
+本地默认 Turbopack；遇兼容问题用 `pnpm dev:webpack`。验证范围按 [AGENTS.md](AGENTS.md#验证) 选择，不必每次编辑都全量跑。
 
 ## 客户端
 
