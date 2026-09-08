@@ -21,11 +21,10 @@ import {
   clearSearchSnapshotCache,
   useSearchExecution,
 } from '@/features/search/hooks/useSearchExecution';
+import { useSearchViewMode } from '@/features/search/hooks/useSearchViewMode';
 import { normalizeSearchQueryInput } from '@/features/search/lib/searchQuery';
 import { getSearchHistory, subscribeToDataUpdates } from '@/lib/db.client';
-import { readAggregateSearch } from '@/lib/local-preferences';
 
-const SEARCH_VIEW_MODE_STORAGE_KEY = 'searchViewModeByQuery';
 const DEFAULT_FILTER_STATE: FilterState = {
   source: 'all',
   title: 'all',
@@ -35,49 +34,6 @@ const DEFAULT_FILTER_STATE: FilterState = {
 
 function createDefaultFilterState(): FilterState {
   return { ...DEFAULT_FILTER_STATE };
-}
-
-function getSearchViewModeByQuery(query: string): 'agg' | 'all' | null {
-  if (typeof window === 'undefined') {
-    return null;
-  }
-
-  const normalizedQuery = query.trim().toLowerCase();
-  if (!normalizedQuery) {
-    return null;
-  }
-
-  try {
-    const raw = sessionStorage.getItem(SEARCH_VIEW_MODE_STORAGE_KEY);
-    if (!raw) {
-      return null;
-    }
-    const map = JSON.parse(raw) as Record<string, 'agg' | 'all'>;
-    const mode = map[normalizedQuery];
-    return mode === 'agg' || mode === 'all' ? mode : null;
-  } catch {
-    return null;
-  }
-}
-
-function setSearchViewModeByQuery(query: string, mode: 'agg' | 'all') {
-  if (typeof window === 'undefined') {
-    return;
-  }
-
-  const normalizedQuery = query.trim().toLowerCase();
-  if (!normalizedQuery) {
-    return;
-  }
-
-  try {
-    const raw = sessionStorage.getItem(SEARCH_VIEW_MODE_STORAGE_KEY);
-    const map = raw
-      ? (JSON.parse(raw) as Record<string, 'agg' | 'all'>)
-      : ({} as Record<string, 'agg' | 'all'>);
-    map[normalizedQuery] = mode;
-    sessionStorage.setItem(SEARCH_VIEW_MODE_STORAGE_KEY, JSON.stringify(map));
-  } catch {}
 }
 
 function AuthenticatedSearchPageClient() {
@@ -93,7 +49,7 @@ function AuthenticatedSearchPageClient() {
   const [searchHistory, setSearchHistory] = useState<string[]>([]);
   const [searchHistoryLoading, setSearchHistoryLoading] = useState(true);
   const [showBackToTop, setShowBackToTop] = useState(false);
-  const [searchQuery, setSearchQuery] = useState('');
+  const [searchQuery, setSearchQuery] = useState(activeSearchQuery);
   const [showSuggestions, setShowSuggestions] = useState(false);
   const [isComposingSearch, setIsComposingSearch] = useState(false);
 
@@ -105,18 +61,7 @@ function AuthenticatedSearchPageClient() {
     createDefaultFilterState(),
   );
 
-  // 聚合开关
-  const getDefaultAggregate = () => {
-    if (typeof window === 'undefined') {
-      return true;
-    }
-
-    return readAggregateSearch();
-  };
-
-  const [viewMode, setViewMode] = useState<'agg' | 'all'>(() => {
-    return getDefaultAggregate() ? 'agg' : 'all';
-  });
+  const [viewMode, setViewMode] = useSearchViewMode(activeSearchQuery);
 
   // 搜索执行
   const {
@@ -228,30 +173,6 @@ function AuthenticatedSearchPageClient() {
     setFilterAll(createDefaultFilterState());
     setFilterAgg(createDefaultFilterState());
   }, [activeSearchQuery]);
-
-  // 恢复视图模式
-  useEffect(() => {
-    const trimmed = activeSearchQuery;
-    if (!trimmed) {
-      return;
-    }
-
-    const cachedMode = getSearchViewModeByQuery(trimmed);
-    if (cachedMode) {
-      setViewMode((currentMode) =>
-        cachedMode !== currentMode ? cachedMode : currentMode,
-      );
-    }
-  }, [activeSearchQuery]);
-
-  // 保存视图模式
-  useEffect(() => {
-    const trimmed = activeSearchQuery;
-    if (!trimmed) {
-      return;
-    }
-    setSearchViewModeByQuery(trimmed, viewMode);
-  }, [activeSearchQuery, viewMode]);
 
   const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const value = e.target.value;

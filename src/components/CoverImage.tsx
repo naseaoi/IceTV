@@ -14,6 +14,7 @@ import React, {
 import { ImageLoadingBackdrop } from '@/components/ImagePlaceholder';
 import NoImageCover from '@/components/NoImageCover';
 import { useRuntimeConfig } from '@/components/RuntimeConfigProvider';
+import { useClientHydrated } from '@/hooks/useClientHydrated';
 import {
   isCoverImageCached,
   isCoverImageFailed,
@@ -124,10 +125,16 @@ const CoverImage: React.FC<CoverImageProps> = memo(function CoverImage({
     () => Array.from(new Set([src, processed].filter(Boolean))),
     [processed, src],
   );
-  const loadImmediately = !isEmpty && priority && !checkClientCacheBeforeLoad;
+  const clientHydrated = useClientHydrated();
+  const [initiallyKnownCached] = useState(
+    () => clientHydrated && isCoverImageCached(cacheKeys),
+  );
+  const loadImmediately =
+    !isEmpty &&
+    (initiallyKnownCached || (priority && !checkClientCacheBeforeLoad));
   const [isNearViewport, setIsNearViewport] = useState(loadImmediately);
   const [loaded, setLoaded] = useState(false);
-  const [knownCached, setKnownCached] = useState(false);
+  const [knownCached, setKnownCached] = useState(initiallyKnownCached);
   const [hasError, setHasError] = useState(false);
   const [slotGranted, setSlotGranted] = useState(loadImmediately);
 
@@ -342,6 +349,7 @@ const CoverImage: React.FC<CoverImageProps> = memo(function CoverImage({
           className={`${fit === 'contain' ? 'object-contain' : 'object-cover'} ${revealed ? 'opacity-100' : 'opacity-0'}`}
           referrerPolicy='no-referrer'
           loading={priority || knownCached || loaded ? 'eager' : 'lazy'}
+          decoding={knownCached ? 'sync' : 'async'}
           onLoad={handleLoad}
           onError={handleError}
           style={

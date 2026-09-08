@@ -1,6 +1,7 @@
 import { ReadonlyURLSearchParams } from 'next/navigation';
 import { startTransition, useEffect, useRef, useState } from 'react';
 
+import { useClientHydrated } from '@/hooks/useClientHydrated';
 import { addSearchHistory } from '@/lib/db.client';
 import { readFluidSearch } from '@/lib/local-preferences';
 import { SearchResult } from '@/lib/types';
@@ -27,12 +28,28 @@ export function useSearchExecution({
   filterAggYearOrder,
   filterAllYearOrder,
 }: UseSearchExecutionParams) {
+  const query = normalizeSearchQueryInput(searchParams.get('q') || '');
+  const clientHydrated = useClientHydrated();
+  const [initialSnapshot] = useState(() =>
+    clientHydrated ? getSearchSnapshot(query) : null,
+  );
   const [isLoading, setIsLoading] = useState(false);
-  const [showResults, setShowResults] = useState(false);
-  const [searchResults, setSearchResults] = useState<SearchResult[]>([]);
-  const [totalSources, setTotalSources] = useState(0);
-  const [completedSources, setCompletedSources] = useState(0);
-  const [useFluidSearch, setUseFluidSearch] = useState(true);
+  const [showResults, setShowResults] = useState(!!initialSnapshot);
+  const [searchResults, setSearchResults] = useState<SearchResult[]>(
+    initialSnapshot?.results ?? [],
+  );
+  const [totalSources, setTotalSources] = useState(
+    initialSnapshot?.totalSources ?? 0,
+  );
+  const [completedSources, setCompletedSources] = useState(
+    initialSnapshot?.completedSources ?? 0,
+  );
+  const [useFluidSearch, setUseFluidSearch] = useState(
+    initialSnapshot?.useFluidSearch ?? true,
+  );
+  const [resultsQuery, setResultsQuery] = useState(
+    initialSnapshot ? query : '',
+  );
 
   const currentQueryRef = useRef<string>('');
   const eventSourceRef = useRef<EventSource | null>(null);
@@ -53,11 +70,10 @@ export function useSearchExecution({
     };
   }, [filterAggYearOrder, filterAllYearOrder, viewMode]);
 
-  const query = normalizeSearchQueryInput(searchParams.get('q') || '');
-
   useEffect(() => {
     if (query === currentQueryRef.current) return;
     currentQueryRef.current = query;
+    setResultsQuery(query);
 
     if (eventSourceRef.current) {
       try {
@@ -258,7 +274,7 @@ export function useSearchExecution({
 
   useEffect(() => {
     const query = currentQueryRef.current;
-    if (!query || !showResults || isLoading) {
+    if (!query || query !== resultsQuery || !showResults || isLoading) {
       return;
     }
 
@@ -269,6 +285,7 @@ export function useSearchExecution({
       useFluidSearch,
     });
   }, [
+    resultsQuery,
     searchResults,
     totalSources,
     completedSources,
