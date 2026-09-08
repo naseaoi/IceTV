@@ -12,10 +12,12 @@ import {
 } from '@/features/play/lib/danmaku/resolve';
 import {
   type DanmakuItem,
+  type DanmakuReloadResult,
   DanmakuRateLimitError,
 } from '@/features/play/lib/danmaku/types';
 import {
   readDanmakuFontSize,
+  readDanmakuHeatmapEnabled,
   readDanmakuOpacity,
   writeDanmakuFontSize,
   writeDanmakuOpacity,
@@ -35,6 +37,7 @@ interface AttachedDanmakuContext {
   retryAfterSeconds?: number;
   loadEnabled?: boolean;
   reportResult?: (result: DanmakuLoadResult) => void;
+  result?: DanmakuReloadResult;
   finishInitialLoad?: () => void;
 }
 
@@ -212,23 +215,20 @@ function finishDanmakuLoad(
   activeDanmakuContexts.delete(player);
   context.status =
     context.loadEnabled && !context.failed ? 'loaded' : 'unloaded';
+  const result: DanmakuLoadResult = context.failed
+    ? context.retryAfterSeconds
+      ? { status: 'rate-limited', retryAfterSeconds: context.retryAfterSeconds }
+      : { status: 'error' }
+    : count > 0
+      ? { status: 'loaded', count }
+      : { status: 'empty' };
+  context.result = context.loadEnabled ? result : { status: 'disabled' };
   if (
     attachedDanmakuContexts.get(player) === context &&
     context.loadEnabled &&
     enabledRef.current
   ) {
-    context.reportResult?.(
-      context.failed
-        ? context.retryAfterSeconds
-          ? {
-              status: 'rate-limited',
-              retryAfterSeconds: context.retryAfterSeconds,
-            }
-          : { status: 'error' }
-        : count > 0
-          ? { status: 'loaded', count }
-          : { status: 'empty' },
-    );
+    context.reportResult?.(result);
   }
   context.finishInitialLoad?.();
 }
@@ -236,13 +236,14 @@ function finishDanmakuLoad(
 // 控制热力图显隐
 export function applyDanmakuHeatmapVisibility(
   player: PlayerWithPlugins | null,
-  visible: boolean,
+  danmakuEnabled: boolean,
+  heatmapEnabled = readDanmakuHeatmapEnabled(),
 ): void {
   const element = player?.controls?.heatmap;
   if (!element?.style) return;
   // 保留容器宽度，避免第三方热力图在隐藏时用 0 宽度生成无效路径。
   element.style.display = '';
-  element.style.visibility = visible ? '' : 'hidden';
+  element.style.visibility = danmakuEnabled && heatmapEnabled ? '' : 'hidden';
 }
 
 // 监听配置变更、持久化，并在开启边沿触发数据重载
@@ -254,6 +255,13 @@ export function bindDanmakuSettingPersistence(
   const on = bindPlayerEvent(player);
   if (!on) return;
 
+  const syncHeatmapVisibility = () => {
+    applyDanmakuHeatmapVisibility(player, options.enabledRef.current);
+  };
+  syncHeatmapVisibility();
+  on('ready', syncHeatmapVisibility);
+  on('artplayerPluginDanmuku:loaded', syncHeatmapVisibility);
+
   on('artplayerPluginDanmuku:config', (option) => {
     if (typeof option?.opacity === 'number')
       writeDanmakuOpacity(option.opacity);
@@ -263,6 +271,7 @@ export function bindDanmakuSettingPersistence(
   });
 
   on('artplayerPluginDanmuku:show', () => {
+    applyDanmakuHeatmapVisibility(player, true);
     const wasEnabled = options.enabledRef.current;
     if (wasEnabled) return;
     options.enabledRef.current = true;
@@ -270,6 +279,7 @@ export function bindDanmakuSettingPersistence(
     options.onEnable?.();
   });
   on('artplayerPluginDanmuku:hide', () => {
+    applyDanmakuHeatmapVisibility(player, false);
     clearDanmakuLoadNotice(player);
     if (!options.enabledRef.current) return;
     options.enabledRef.current = false;
@@ -297,10 +307,10 @@ export async function reloadDanmaku(
   context: DanmakuLoadContext,
   enabledRef: DanmakuEnabledRef,
   options: ReloadDanmakuOptions = {},
-): Promise<void> {
-  if (!player) return;
+): Promise<DanmakuReloadResult> {
+  if (!player) return { status: 'unavailable' };
   const api = getDanmakuPluginApi(player);
-  if (!api?.option) return;
+  if (!api?.option) return { status: 'unavailable' };
   const option = api.option;
 
   const contextKey = buildAttachedContextKey(context);
@@ -310,13 +320,17 @@ export async function reloadDanmaku(
     attachedContext?.contextKey === contextKey
   ) {
     await attachedContext.task;
-    return;
+    return attachedContext.result ?? { status: 'unavailable' };
   }
   const nextContext: AttachedDanmakuContext = {
     contextKey,
     refreshData: options.refreshData === true,
     status: 'scheduled',
-    reportResult: beginDanmakuLoadNotice(player, () => enabledRef.current),
+    reportResult: beginDanmakuLoadNotice(
+      player,
+      () => enabledRef.current,
+      options.refreshData === true,
+    ),
   };
   attachedDanmakuContexts.set(player, nextContext);
 
@@ -329,7 +343,8 @@ export async function reloadDanmaku(
     nextContext.loadEnabled = loadEnabled;
     nextContext.status = loadEnabled ? 'loading' : 'unloaded';
     activeDanmakuContexts.set(player, nextContext);
-    option.danmuku = buildDanmakuLoader(context, () => loadEnabled, {
+    let loadedCount = 0;
+    const loader = buildDanmakuLoader(context, () => loadEnabled, {
       forceRefresh: nextContext.refreshData,
       onError: (error) => {
         nextContext.failed = true;
@@ -338,9 +353,17 @@ export async function reloadDanmaku(
         }
       },
     });
+    option.danmuku = async () => {
+      const items = await loader();
+      loadedCount = items.length;
+      return items;
+    };
 
     try {
       await api.load();
+      if (activeDanmakuContexts.get(player) === nextContext) {
+        finishDanmakuLoad(player, enabledRef, loadedCount);
+      }
       if (attachedDanmakuContexts.get(player) === nextContext) {
         nextContext.status =
           loadEnabled && !nextContext.failed ? 'loaded' : 'unloaded';
@@ -362,6 +385,9 @@ export async function reloadDanmaku(
   if (danmakuReloadChains.get(player) === task) {
     danmakuReloadChains.delete(player);
   }
+  return attachedDanmakuContexts.get(player) === nextContext
+    ? (nextContext.result ?? { status: 'error' })
+    : { status: 'superseded' };
 }
 
 export async function ensureDanmakuLoaded(

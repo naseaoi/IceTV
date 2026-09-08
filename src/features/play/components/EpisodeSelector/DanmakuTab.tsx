@@ -1,8 +1,11 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 
 import { DanmakuEpisodePicker } from '@/features/play/components/EpisodeSelector/DanmakuEpisodePicker';
+import { PanelActionButton } from '@/features/play/components/EpisodeSelector/PanelActionButton';
+import { SectionTitle } from '@/features/play/components/EpisodeSelector/SectionTitle';
+import { getDanmakuReloadFeedback } from '@/features/play/lib/danmaku/reload-feedback';
 import type { DanmakuReloadHandler } from '@/features/play/lib/danmaku/types';
 import {
   buildDanmakuScopeKey,
@@ -43,12 +46,20 @@ export const DanmakuTab: React.FC<DanmakuTabProps> = ({
   const [offset, setOffset] = useState(0);
   const [heatmapEnabled, setHeatmapEnabled] = useState(true);
   const [reloading, setReloading] = useState(false);
-  const [reloadError, setReloadError] = useState('');
+  const [reloadFeedback, setReloadFeedback] = useState<ReturnType<
+    typeof getDanmakuReloadFeedback
+  > | null>(null);
+  const reloadRequestRef = useRef(0);
 
   const scopeKey = buildDanmakuScopeKey(source, videoId, episodeIndex);
 
   useEffect(() => {
     setOffset(scopeKey ? readDanmakuOffset(scopeKey) : 0);
+    setReloading(false);
+    setReloadFeedback(null);
+    return () => {
+      reloadRequestRef.current += 1;
+    };
   }, [scopeKey]);
 
   useEffect(() => {
@@ -77,14 +88,20 @@ export const DanmakuTab: React.FC<DanmakuTabProps> = ({
 
   const reload = async () => {
     if (!onReload || reloading) return;
+    const requestId = ++reloadRequestRef.current;
     setReloading(true);
-    setReloadError('');
+    setReloadFeedback(null);
     try {
-      await onReload({ refreshData: true });
+      const result = await onReload({ refreshData: true });
+      if (reloadRequestRef.current === requestId) {
+        setReloadFeedback(getDanmakuReloadFeedback(result));
+      }
     } catch {
-      setReloadError('重新加载失败，请稍后再试');
+      if (reloadRequestRef.current === requestId) {
+        setReloadFeedback(getDanmakuReloadFeedback({ status: 'error' }));
+      }
     } finally {
-      setReloading(false);
+      if (reloadRequestRef.current === requestId) setReloading(false);
     }
   };
 
@@ -100,9 +117,7 @@ export const DanmakuTab: React.FC<DanmakuTabProps> = ({
     <div className='flex min-h-0 flex-1 flex-col gap-4 overflow-hidden px-5 py-4 sm:px-6'>
       <div className='flex flex-shrink-0 flex-col gap-2'>
         <div className='flex items-center justify-between'>
-          <h3 className='text-sm font-semibold text-gray-900 dark:text-gray-100'>
-            弹幕偏移
-          </h3>
+          <SectionTitle as='h3' label='弹幕偏移' />
           <span className='text-xs text-gray-500 dark:text-gray-400'>
             {formatOffset(offset)}
           </span>
@@ -164,22 +179,22 @@ export const DanmakuTab: React.FC<DanmakuTabProps> = ({
 
       <div className='flex min-h-0 flex-1 flex-col gap-2'>
         <div className='flex flex-shrink-0 items-center justify-between gap-2'>
-          <h3 className='text-sm font-semibold text-gray-900 dark:text-gray-100'>
-            弹幕选集
-          </h3>
-          <button
-            type='button'
-            aria-label='重新加载弹幕'
-            className={actionButtonClass}
-            disabled={!onReload || reloading}
+          <SectionTitle as='h3' label='弹幕选集' />
+          <PanelActionButton
+            aria-label='重载弹幕'
+            busy={reloading}
+            disabled={!onReload}
             onClick={() => void reload()}
           >
-            {reloading ? '正在加载…' : '重新加载'}
-          </button>
+            重载
+          </PanelActionButton>
         </div>
-        {reloadError && (
-          <p role='alert' className='text-sm text-red-500'>
-            {reloadError}
+        {reloadFeedback && (
+          <p
+            role={reloadFeedback.failed ? 'alert' : 'status'}
+            className={`text-sm ${reloadFeedback.failed ? 'text-red-500' : 'text-gray-600 dark:text-gray-300'}`}
+          >
+            {reloadFeedback.message}
           </p>
         )}
         <DanmakuEpisodePicker

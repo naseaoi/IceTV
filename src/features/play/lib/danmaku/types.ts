@@ -62,6 +62,16 @@ export class DanmakuRateLimitError extends DanmakuProviderError {
   }
 }
 
+export type DanmakuLoadResult =
+  | { status: 'loaded'; count: number }
+  | { status: 'empty' }
+  | { status: 'rate-limited'; retryAfterSeconds: number }
+  | { status: 'error' };
+
+export type DanmakuReloadResult =
+  | DanmakuLoadResult
+  | { status: 'disabled' | 'unavailable' | 'superseded' };
+
 export type DanmakuReloadHandler = (options?: {
   refreshData?: boolean;
-}) => void | Promise<void>;
+}) => void | Promise<DanmakuReloadResult | void>;

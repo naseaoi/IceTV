@@ -12,7 +12,6 @@ import {
   shouldAutoAdvanceEpisode,
 } from '@/features/play/lib/autoAdvanceEpisode';
 import {
-  applyDanmakuHeatmapVisibility,
   bindDanmakuSettingPersistence,
   createDanmakuPluginIfEnabled,
   isDanmakuFeatureEnabled,
@@ -46,7 +45,6 @@ import {
   isVodM3u8Url,
   isVodMp4Url,
 } from '@/features/play/lib/vodProxyUrl';
-import { readDanmakuHeatmapEnabled } from '@/lib/local-preferences';
 import {
   bindPlayerHoverControls,
   bindPlayerMobileControls,
@@ -731,7 +729,6 @@ export async function initializeArtPlayer(
 
     player.on('ready', () => {
       setError(null);
-      applyDanmakuHeatmapVisibility(player, readDanmakuHeatmapEnabled());
       if (player.playing) {
         void requestWakeLock();
       }

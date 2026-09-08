@@ -1,11 +1,11 @@
-import { DanmakuRateLimitError } from '@/features/play/lib/danmaku/types';
+import { getDanmakuReloadFeedback } from '@/features/play/lib/danmaku/reload-feedback';
+import {
+  type DanmakuLoadResult,
+  DanmakuRateLimitError,
+} from '@/features/play/lib/danmaku/types';
 import { showTimedArtNotice } from '@/lib/player-utils';
 
-export type DanmakuLoadResult =
-  | { status: 'loaded'; count: number }
-  | { status: 'empty' }
-  | { status: 'rate-limited'; retryAfterSeconds: number }
-  | { status: 'error' };
+export type { DanmakuLoadResult } from '@/features/play/lib/danmaku/types';
 
 type NoticePlayer = NonNullable<Parameters<typeof showTimedArtNotice>[0]> & {
   template?: { $noticeInner?: HTMLElement };
@@ -15,6 +15,7 @@ interface DanmakuNoticeState {
   visible: boolean;
   isEnabled: () => boolean;
   loadId: symbol;
+  reload: boolean;
   pending: DanmakuLoadResult | null;
   displayedMessage: string | null;
   switchTasks: Set<Promise<unknown>>;
@@ -31,6 +32,7 @@ function getNoticeState(player: NoticePlayer): DanmakuNoticeState {
       visible: false,
       isEnabled: () => true,
       loadId: Symbol(),
+      reload: false,
       pending: null,
       displayedMessage: null,
       switchTasks: new Set(),
@@ -57,8 +59,9 @@ function flushNotice(player: NoticePlayer, state: DanmakuNoticeState) {
   if (!state.visible || state.switchTasks.size > 0 || !state.pending) return;
 
   const result = state.pending;
-  const message =
-    result.status === 'loaded'
+  const message = state.reload
+    ? getDanmakuReloadFeedback(result).message
+    : result.status === 'loaded'
       ? `已装载${result.count}条弹幕`
       : result.status === 'empty'
         ? '暂未获取到弹幕，可稍后重新加载'
@@ -79,11 +82,13 @@ export function clearDanmakuLoadNotice(player: NoticePlayer): void {
 export function beginDanmakuLoadNotice(
   player: NoticePlayer,
   isEnabled: () => boolean = () => true,
+  reload = false,
 ): (result: DanmakuLoadResult) => void {
   const state = getNoticeState(player);
   const loadId = Symbol();
   state.loadId = loadId;
   state.isEnabled = isEnabled;
+  state.reload = reload;
   clearDanmakuLoadNotice(player);
 
   return (result) => {

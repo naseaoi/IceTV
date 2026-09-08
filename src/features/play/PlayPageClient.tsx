@@ -558,9 +558,13 @@ function AuthenticatedPlayPageClient({
 
   const handleDanmakuHeatmapChange = useCallback(
     (enabled: boolean) => {
-      applyDanmakuHeatmapVisibility(artPlayerRef.current, enabled);
+      applyDanmakuHeatmapVisibility(
+        artPlayerRef.current,
+        danmakuEnabledRef.current,
+        enabled,
+      );
     },
-    [artPlayerRef],
+    [artPlayerRef, danmakuEnabledRef],
   );
 
   useArtPlayer({

@@ -10,6 +10,10 @@ import {
   type DanmakuLoadContext,
   loadDanmakuForEpisode,
 } from '@/features/play/lib/danmaku/resolve';
+import {
+  readDanmakuHeatmapEnabled,
+  writeDanmakuHeatmapEnabled,
+} from '@/lib/local-preferences';
 
 jest.mock('@/features/play/lib/danmaku/resolve', () => ({
   loadDanmakuForEpisode: jest.fn(),
@@ -24,6 +28,7 @@ type Handler = (...args: never[]) => unknown;
 function createPlayerWithHandlers() {
   const handlers = new Map<string, Handler>();
   const player = {
+    controls: { heatmap: document.createElement('div') },
     on(event: never, handler: Handler) {
       handlers.set(String(event), handler);
     },
@@ -68,9 +73,77 @@ describe('bindDanmakuSettingPersistence', () => {
     expect(enabledRef.current).toBe(false);
     expect(onEnabledChange).toHaveBeenCalledWith(false);
   });
+
+  it.each([true, false])(
+    '弹幕开关联动热力图并保留热力图偏好 %s',
+    (heatmapEnabled) => {
+      writeDanmakuHeatmapEnabled(heatmapEnabled);
+      const enabledRef = { current: true };
+      const { player, handlers } = createPlayerWithHandlers();
+
+      bindDanmakuSettingPersistence(player, { enabledRef });
+      expect(player.controls.heatmap.style.visibility).toBe(
+        heatmapEnabled ? '' : 'hidden',
+      );
+
+      void handlers.get('artplayerPluginDanmuku:hide')?.();
+      expect(player.controls.heatmap.style.visibility).toBe('hidden');
+      expect(readDanmakuHeatmapEnabled()).toBe(heatmapEnabled);
+
+      void handlers.get('artplayerPluginDanmuku:show')?.();
+      expect(player.controls.heatmap.style.visibility).toBe(
+        heatmapEnabled ? '' : 'hidden',
+      );
+      expect(readDanmakuHeatmapEnabled()).toBe(heatmapEnabled);
+    },
+  );
+
+  it.each(['ready', 'artplayerPluginDanmuku:loaded'])(
+    '%s 时按最新的弹幕状态与热力图偏好同步显隐',
+    (event) => {
+      const enabledRef = { current: false };
+      const { player, handlers } = createPlayerWithHandlers();
+
+      bindDanmakuSettingPersistence(player, { enabledRef });
+      expect(player.controls.heatmap.style.visibility).toBe('hidden');
+
+      player.controls.heatmap = document.createElement('div');
+      void handlers.get(event)?.();
+      expect(player.controls.heatmap.style.visibility).toBe('hidden');
+
+      enabledRef.current = true;
+      void handlers.get(event)?.();
+      expect(player.controls.heatmap.style.visibility).toBe('');
+
+      writeDanmakuHeatmapEnabled(false);
+      void handlers.get(event)?.();
+      expect(player.controls.heatmap.style.visibility).toBe('hidden');
+    },
+  );
 });
 
 describe('applyDanmakuHeatmapVisibility', () => {
+  beforeEach(() => {
+    window.localStorage.clear();
+  });
+
+  it.each([
+    { danmakuEnabled: true, heatmapEnabled: true, visibility: '' },
+    { danmakuEnabled: false, heatmapEnabled: true, visibility: 'hidden' },
+    { danmakuEnabled: true, heatmapEnabled: false, visibility: 'hidden' },
+    { danmakuEnabled: false, heatmapEnabled: false, visibility: 'hidden' },
+  ])(
+    '弹幕 $danmakuEnabled、热力图 $heatmapEnabled 时显隐正确',
+    ({ danmakuEnabled, heatmapEnabled, visibility }) => {
+      const { player } = createPlayerWithHandlers();
+
+      applyDanmakuHeatmapVisibility(player, danmakuEnabled, heatmapEnabled);
+
+      expect(player.controls.heatmap.style.visibility).toBe(visibility);
+      expect(player.controls.heatmap.style.display).toBe('');
+    },
+  );
+
   it('隐藏时保留容器尺寸，重新开启时恢复可见', () => {
     const heatmap = document.createElement('div');
     heatmap.style.display = 'none';

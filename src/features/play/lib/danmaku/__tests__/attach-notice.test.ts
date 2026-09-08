@@ -88,6 +88,53 @@ describe('attached danmaku result notices', () => {
     );
   });
 
+  it('returns the loaded queue count and announces a manual reload', async () => {
+    const { player, initialTask, enabledRef } = await createPlayer();
+    await initialTask;
+    setDanmakuLoadNoticeVisibility(player, true);
+    await expect(
+      reloadDanmaku(player, context, enabledRef, {
+        forcePluginReload: true,
+        refreshData: true,
+      }),
+    ).resolves.toEqual({ status: 'loaded', count: 1 });
+    expect(showTimedArtNotice).toHaveBeenLastCalledWith(
+      player,
+      '弹幕重载成功，已装载 1 条弹幕',
+      4000,
+    );
+  });
+
+  it('returns resolver errors instead of reporting an empty successful reload', async () => {
+    const { player, initialTask, enabledRef } = await createPlayer();
+    await initialTask;
+    mockLoad.mockImplementationOnce(async (_context, _enabled, options) => {
+      options?.onError?.(new Error('upstream failed'));
+      return [];
+    });
+    await expect(
+      reloadDanmaku(player, context, enabledRef, {
+        forcePluginReload: true,
+        refreshData: true,
+      }),
+    ).resolves.toEqual({ status: 'error' });
+  });
+
+  it('reports disabled and unavailable reloads explicitly', async () => {
+    const { player, initialTask, enabledRef } = await createPlayer();
+    await initialTask;
+    enabledRef.current = false;
+    await expect(
+      reloadDanmaku(player, context, enabledRef, {
+        forcePluginReload: true,
+        refreshData: true,
+      }),
+    ).resolves.toEqual({ status: 'disabled' });
+    await expect(reloadDanmaku(null, context, enabledRef)).resolves.toEqual({
+      status: 'unavailable',
+    });
+  });
+
   it('reports resolver failure rather than the empty queue emitted by the plugin', async () => {
     mockLoad.mockImplementationOnce(async (_context, _isEnabled, options) => {
       options?.onError?.();
