@@ -1,12 +1,19 @@
 import React from 'react';
 
-export function SectionTitle({ label }: { label: string }) {
+export function SectionTitle({
+  label,
+  as: Heading = 'h4',
+}: {
+  label: string;
+  as?: 'h3' | 'h4';
+}) {
   return (
-    <div className='flex w-full flex-col items-center justify-center gap-0.5 py-1'>
-      <h4 className='text-sm font-semibold text-gray-700 dark:text-gray-300'>
-        {label}
-      </h4>
-      <span className='h-0.5 w-7 rounded-full bg-emerald-500/75 dark:bg-emerald-400/75' />
-    </div>
+    <Heading className='flex min-h-7 shrink-0 items-center gap-2 text-sm font-semibold text-gray-900 dark:text-gray-100'>
+      <span
+        aria-hidden='true'
+        className='h-3.5 w-[3px] shrink-0 rounded-full bg-green-500 dark:bg-green-400'
+      />
+      {label}
+    </Heading>
   );
 }

@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
+import { PanelActionButton } from '@/features/play/components/EpisodeSelector/PanelActionButton';
 import {
   type DanmakuSourceGroup,
   groupCandidatesBySource,
@@ -292,22 +293,17 @@ export const DanmakuEpisodePicker: React.FC<DanmakuEpisodePickerProps> = ({
           <span className='min-w-0 truncate text-xs text-green-600 dark:text-green-400'>
             已绑定集 ID: {boundEpisodeId}
           </span>
-          <button
-            type='button'
-            onClick={() => void handleClear()}
-            className='flex-shrink-0 rounded-md border border-gray-200 bg-white px-3 py-1 text-xs text-gray-700 transition-colors hover:bg-gray-50 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-200 dark:hover:bg-gray-700'
-          >
+          <PanelActionButton onClick={() => void handleClear()}>
             清除绑定
-          </button>
+          </PanelActionButton>
         </div>
       )}
 
       {sourceGroups.length > 0 &&
         (openedGroup ? (
-          <button
-            type='button'
+          <PanelActionButton
             onClick={() => setOpenedSource(null)}
-            className='flex items-center gap-1.5 self-start rounded-md px-1 py-0.5 text-xs text-gray-500 transition-colors hover:text-green-600 dark:text-gray-400 dark:hover:text-green-400'
+            className='self-start'
           >
             <svg
               xmlns='http://www.w3.org/2000/svg'
@@ -325,7 +321,7 @@ export const DanmakuEpisodePicker: React.FC<DanmakuEpisodePickerProps> = ({
             <span className='min-w-0 truncate' title={openedGroup.animeTitle}>
               返回源列表
             </span>
-          </button>
+          </PanelActionButton>
         ) : (
           <div className='self-start px-1 py-0.5 text-xs text-gray-500 dark:text-gray-400'>
             弹幕源列表
