@@ -73,6 +73,18 @@ export const DanmakuEpisodePicker: React.FC<DanmakuEpisodePickerProps> = ({
       sourceGroups.find((group) => group.animeTitle === openedSource) ?? null,
     [sourceGroups, openedSource],
   );
+  const boundSourceTitle = useMemo(
+    () =>
+      candidates.find((candidate) => candidate.episodeId === boundEpisodeId)
+        ?.animeTitle ?? null,
+    [boundEpisodeId, candidates],
+  );
+  const boundItemKey = openedGroup
+    ? openedGroup.animeTitle === boundSourceTitle
+      ? `episode:${boundEpisodeId}`
+      : null
+    : boundSourceTitle;
+  const locateLabel = openedGroup ? '回到已绑定弹幕集' : '回到当前弹幕源';
 
   const listContainerRef = useRef<HTMLDivElement | null>(null);
   const boundItemRef = useRef<HTMLButtonElement | null>(null);
@@ -105,6 +117,11 @@ export const DanmakuEpisodePicker: React.FC<DanmakuEpisodePickerProps> = ({
     if (!listContainer || !boundItem) return;
 
     requestAnimationFrame(() => {
+      if (
+        listContainerRef.current !== listContainer ||
+        boundItemRef.current !== boundItem
+      )
+        return;
       const containerRect = listContainer.getBoundingClientRect();
       const itemRect = boundItem.getBoundingClientRect();
       const targetScrollTop =
@@ -169,14 +186,10 @@ export const DanmakuEpisodePicker: React.FC<DanmakuEpisodePickerProps> = ({
 
   // 已绑定的集所在源只在搜索后自动展开一次，否则「返回源列表」会被立刻撤销
   useEffect(() => {
-    if (autoOpenedRef.current || boundEpisodeId === null) return;
-    const owner = candidates.find(
-      (candidate) => candidate.episodeId === boundEpisodeId,
-    );
-    if (!owner) return;
+    if (autoOpenedRef.current || boundSourceTitle === null) return;
     autoOpenedRef.current = true;
-    setOpenedSource(owner.animeTitle);
-  }, [boundEpisodeId, candidates]);
+    setOpenedSource(boundSourceTitle);
+  }, [boundSourceTitle, candidates]);
 
   useEffect(() => {
     if (!searchTitle || autoSearchedRef.current === searchTitle) return;
@@ -201,13 +214,13 @@ export const DanmakuEpisodePicker: React.FC<DanmakuEpisodePickerProps> = ({
   }, [source, videoId, episodeIndex, onBindingChange]);
 
   useEffect(() => {
-    if (boundEpisodeId === null || !openedGroup) {
+    if (boundItemKey === null) {
       listContainerRef.current?.scrollTo({ top: 0 });
       syncScrollFade();
       return;
     }
     scrollBoundIntoView(false);
-  }, [boundEpisodeId, openedGroup, scrollBoundIntoView, syncScrollFade]);
+  }, [boundItemKey, openedSource, scrollBoundIntoView, syncScrollFade]);
 
   useEffect(() => {
     const listContainer = listContainerRef.current;
@@ -238,18 +251,18 @@ export const DanmakuEpisodePicker: React.FC<DanmakuEpisodePickerProps> = ({
     };
 
     listContainer.addEventListener('scroll', handleScroll, { passive: true });
-    window.addEventListener('resize', syncScrollFade);
-    syncScrollFade();
+    window.addEventListener('resize', handleScroll);
+    handleScroll();
 
-    const observer = new ResizeObserver(syncScrollFade);
+    const observer = new ResizeObserver(handleScroll);
     observer.observe(listContainer);
 
     return () => {
       listContainer.removeEventListener('scroll', handleScroll);
-      window.removeEventListener('resize', syncScrollFade);
+      window.removeEventListener('resize', handleScroll);
       observer.disconnect();
     };
-  }, [openedGroup, sourceGroups, syncScrollFade]);
+  }, [boundItemKey, openedGroup, sourceGroups, syncScrollFade]);
 
   useEffect(() => {
     return () => {
@@ -344,15 +357,13 @@ export const DanmakuEpisodePicker: React.FC<DanmakuEpisodePickerProps> = ({
 
           {!openedGroup &&
             sourceGroups.map((group) => {
-              const hasBound =
-                boundEpisodeId !== null &&
-                group.candidates.some(
-                  (candidate) => candidate.episodeId === boundEpisodeId,
-                );
+              const hasBound = group.animeTitle === boundSourceTitle;
               return (
                 <button
                   key={group.animeTitle}
+                  ref={hasBound ? boundItemRef : null}
                   type='button'
+                  aria-current={hasBound ? 'true' : undefined}
                   onClick={() => setOpenedSource(group.animeTitle)}
                   className={`flex w-full items-center gap-3 rounded-lg border px-3 py-2 text-left transition-colors ${
                     hasBound
@@ -444,7 +455,7 @@ export const DanmakuEpisodePicker: React.FC<DanmakuEpisodePickerProps> = ({
           )}
         </div>
 
-        {!isBoundInView && boundEpisodeId !== null && openedGroup && (
+        {!isBoundInView && boundItemKey !== null && (
           <button
             type='button'
             onClick={() => {
@@ -455,8 +466,8 @@ export const DanmakuEpisodePicker: React.FC<DanmakuEpisodePickerProps> = ({
               scrollBoundIntoView(true);
             }}
             className='absolute bottom-4 right-4 z-10 flex h-9 w-9 items-center justify-center rounded-full bg-green-500 text-white shadow-lg transition-all hover:bg-green-600 dark:bg-green-600 dark:hover:bg-green-500'
-            aria-label='回到已绑定弹幕集'
-            title='回到已绑定弹幕集'
+            aria-label={locateLabel}
+            title={locateLabel}
           >
             <svg
               xmlns='http://www.w3.org/2000/svg'
