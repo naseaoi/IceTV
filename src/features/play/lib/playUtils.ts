@@ -74,6 +74,20 @@ function parseExtinfDuration(line: string): number {
   return duration;
 }
 
+function resolveSegmentAssetUri(uri: string): string {
+  try {
+    const base =
+      typeof window !== 'undefined'
+        ? window.location.origin
+        : 'http://localhost';
+    const parsed = new URL(uri, base);
+    const proxiedUrl = parsed.searchParams.get('url');
+    return proxiedUrl || uri;
+  } catch {
+    return uri;
+  }
+}
+
 function isLikelyAdUri(uri: string): boolean {
   if (!uri) return false;
   const normalized = uri.toLowerCase();
@@ -260,7 +274,7 @@ function parseDiscontinuitySegments(
     if (isLikelyAdUri(line)) {
       current.hasAdUri = true;
     }
-    const assetPrefix = extractAssetPrefix(line);
+    const assetPrefix = extractAssetPrefix(resolveSegmentAssetUri(line));
     if (assetPrefix && !current.assetPrefixes.includes(assetPrefix)) {
       current.assetPrefixes.push(assetPrefix);
     }

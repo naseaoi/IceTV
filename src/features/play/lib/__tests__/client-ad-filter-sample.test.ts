@@ -43,6 +43,28 @@ describe('filterAdsFromM3U8 — ikun 银魂第5集真实清单', () => {
     expect(countLines(filtered, (l) => l.startsWith(AD_PREFIX))).toBe(0);
   });
 
+  it('服务端代理改写切片 URL 后仍能在客户端识别资产分叉', () => {
+    const proxied = original
+      .split('\n')
+      .map((line) =>
+        line.startsWith('https://')
+          ? `/api/proxy/segment?url=${encodeURIComponent(line)}`
+          : line,
+      )
+      .join('\n');
+    const filteredProxied = filterAdsFromM3U8(proxied);
+
+    expect(
+      countLines(filteredProxied, (line) =>
+        line.includes(encodeURIComponent(AD_PREFIX)),
+      ),
+    ).toBe(0);
+    expect(filteredProxied).not.toContain(encodeURIComponent(AD_PREFIX));
+    expect(
+      countLines(filteredProxied, (line) => line.includes('/segment?url=')),
+    ).toBe(748);
+  });
+
   it('完整保留正片切片', () => {
     expect(countLines(filtered, (l) => l.startsWith(CONTENT_PREFIX))).toBe(748);
   });
