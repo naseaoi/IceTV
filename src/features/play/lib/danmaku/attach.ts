@@ -62,7 +62,7 @@ type DanmakuConfigEvent = {
 type PlayerWithPlugins = {
   constructor?: Function & { NOTICE_TIME?: number };
   notice?: { show: string };
-  template?: { $noticeInner?: HTMLElement };
+  template?: { $noticeInner?: HTMLElement; $danmuku?: HTMLElement };
   plugins?: Record<string, unknown>;
   controls?: Record<string, HTMLElement | undefined>;
   on?: (event: never, handler: (...args: never[]) => unknown) => unknown;
@@ -233,6 +233,19 @@ function finishDanmakuLoad(
   context.finishInitialLoad?.();
 }
 
+function resetDanmakuQueue(
+  player: PlayerWithPlugins,
+  api: DanmakuPluginApi,
+): void {
+  const container = player.template?.$danmuku;
+  if (container) container.style.display = 'none';
+  try {
+    api.reset();
+  } catch (error) {
+    console.warn('清空弹幕队列失败:', error);
+  }
+}
+
 // 控制热力图显隐
 export function applyDanmakuHeatmapVisibility(
   player: PlayerWithPlugins | null,
@@ -335,9 +348,11 @@ export async function reloadDanmaku(
   attachedDanmakuContexts.set(player, nextContext);
 
   const previousTask = danmakuReloadChains.get(player);
+  resetDanmakuQueue(player, api);
   const task = (async () => {
     await previousTask?.catch(() => {});
     if (attachedDanmakuContexts.get(player) !== nextContext) return;
+    if (previousTask) resetDanmakuQueue(player, api);
 
     const loadEnabled = enabledRef.current;
     nextContext.loadEnabled = loadEnabled;
@@ -367,6 +382,8 @@ export async function reloadDanmaku(
       if (attachedDanmakuContexts.get(player) === nextContext) {
         nextContext.status =
           loadEnabled && !nextContext.failed ? 'loaded' : 'unloaded';
+        const container = player.template?.$danmuku;
+        if (container) container.style.display = '';
       }
     } catch (error) {
       nextContext.failed = true;

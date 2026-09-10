@@ -210,7 +210,10 @@ function createDanmakuPlayer() {
   };
   return {
     api,
-    player: { plugins: { artplayerPluginDanmuku: api } },
+    player: {
+      plugins: { artplayerPluginDanmuku: api },
+      template: { $danmuku: document.createElement('div') },
+    },
   };
 }
 
@@ -271,12 +274,14 @@ describe('reloadDanmaku', () => {
     expect(api.load).toHaveBeenCalledTimes(2);
     expect(mockLoadDanmakuForEpisode).toHaveBeenCalledTimes(2);
     expect(mockLoadDanmakuForEpisode.mock.calls[0][1]()).toBe(false);
+    expect(player.template.$danmuku.style.display).toBe('');
     expect(mockLoadDanmakuForEpisode.mock.calls[1][1]()).toBe(true);
     expect(mockLoadDanmakuForEpisode.mock.calls[1][0]).toEqual(nextContext);
     expect(mockLoadDanmakuForEpisode.mock.calls[1][2]).toEqual({
       forceRefresh: false,
       onError: expect.any(Function),
     });
+    expect(api.reset).toHaveBeenCalledTimes(2);
   });
 
   it('手动更换弹幕源时同时强制插件和数据刷新', async () => {
@@ -290,11 +295,32 @@ describe('reloadDanmaku', () => {
     });
 
     expect(api.load).toHaveBeenCalledTimes(1);
+    expect(api.reset).toHaveBeenCalledTimes(1);
     expect(mockLoadDanmakuForEpisode).toHaveBeenCalledWith(
       loadContext,
       expect.any(Function),
       { forceRefresh: true, onError: expect.any(Function) },
     );
+  });
+
+  it('加载新集弹幕前隐藏旧弹幕层，加载完成后恢复', async () => {
+    const { player, api } = createDanmakuPlayer();
+    const enabledRef = { current: true };
+    markDanmakuContextAttached(player, loadContext, true);
+    player.template.$danmuku.style.display = '';
+    mockLoadDanmakuForEpisode.mockImplementation(async () => {
+      expect(player.template.$danmuku.style.display).toBe('none');
+      return [];
+    });
+
+    await reloadDanmaku(
+      player,
+      { ...loadContext, episodeIndex: 1 },
+      enabledRef,
+    );
+
+    expect(api.reset).toHaveBeenCalled();
+    expect(player.template.$danmuku.style.display).toBe('');
   });
 
   it('连续手动重载不复用旧任务并按顺序完成', async () => {
@@ -330,6 +356,7 @@ describe('reloadDanmaku', () => {
     finishFirst?.();
     await Promise.all([first, second]);
     expect(api.load).toHaveBeenCalledTimes(2);
+    expect(api.reset).toHaveBeenCalledTimes(3);
     expect(mockLoadDanmakuForEpisode).toHaveBeenCalledTimes(2);
   });
 
