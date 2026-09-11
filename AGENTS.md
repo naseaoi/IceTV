@@ -59,15 +59,6 @@
 
 ## 目录归属
 
-```text
-src/
-├── app/                    # 路由入口，只做装配
-├── components/             # 跨 feature 通用 UI
-├── hooks/                  # 跨 feature 通用 hooks
-├── lib/                    # 跨 feature 通用工具
-└── features/<domain>/      # 业务域实现
-```
-
 - 只被一个业务域使用的代码放 `src/features/<domain>/`，被两个及以上复用才上提。
 - `page.tsx`、`route.ts` 优先做装配，不堆业务细节。
 - 跨目录导入统一走 `@/...`，同目录内可用相对路径。
@@ -87,6 +78,7 @@ src/
 
 - 复用 `authorizeProxyRequest()`、`fetchWithUrlGuard()`、`validateProxyUrlForRequest()`。签名 `src/lib/proxy-auth.ts`，校验 `src/lib/url-guard.ts`。
 - **不要直接 `fetch` 未经校验的外部输入 URL**。
+- 普通服务端回源复用 `fetchUpstream()` / `fetchWithUrlGuard()`，它们会申请数据库共享资源额度。得到的响应体必须消费或取消，连接租约不会在响应头到达时释放。
 
 ## 播放
 
@@ -95,6 +87,14 @@ src/
 - 编排 `src/features/play/lib/vodHlsRuntime.ts`，自动路由 `vodAutoRoutePolicy.ts`，代理模式 `src/lib/proxy-modes.ts`
 - 画质 `vodHlsQualityController.ts`、`vodQualityPolicy.ts`
 - 快捷键：定义 `src/lib/player-shortcuts.ts` → 执行 `src/hooks/usePlayerKeyboard.ts` → 弹窗 `src/components/PlayerShortcutsModal.tsx`。新增动作依次补齐三处，不要在页面单独监听 keydown
+
+弹幕（`src/features/play/lib/danmaku/`）：
+
+- 模式值两边不同：dandanplay `1/2/3` 滚动、`5` 顶部、`4` 底部；artplayer 插件 `0` 滚动、`1` 顶部、`2` 底部。颜色上游是十进制整数，插件要 CSS 字符串。**直接透传会让顶部/底部弹幕静默错位**，一律走 `normalize.ts`
+- `p` 字段 4 段时颜色在第 3 位，8/9 段时在第 4 位，取错只是颜色不对不会报错
+- 换集时播放器可能**复用实例**（非 webkit + 前后都是 hls），此时插件不会自行重新调用加载器，必须显式 `reloadDanmaku()`。去广告开关会 `destroy()` 重建，走的是另一条路
+- 加载器在本地开关关闭时返回空数组以免白跑请求，所以**开关打开时必须触发一次 `reloadDanmaku()`**，只调 `api.show()` 显示的是空数据
+- `provider.server.ts` 的 base URL 只来自环境变量，用户输入只经 `searchParams` 进 query。默认走 URL guard；内网自建服务须显式设置 `DANMAKU_API_ALLOW_PRIVATE=true`，经 `fetchPrivateUpstream()` 回源，仍受共享资源额度保护。
 
 去广告：
 
@@ -133,19 +133,26 @@ src/
 - 需要 `Headers` / `Request` / `Response` 的路由测试调 `installWebPolyfills()`（同目录），它不含 crypto。
 - `jest.setup.js` 把 `LOCAL_DB_PATH` 固定为 `:memory:`，防止测试写进开发库。新增测试不要覆盖成真实路径。
 - `jest.mock` 工厂必须列出被测模块导入的每个符号，**漏一个会让路由静默 500**。
-- `mysql-storage-contract.test.ts` 走 fake pool（JS 模拟谓词），验的是接线，不执行真 SQL，证明不了两侧谓词等价。真 SQL 覆盖靠 `pnpm test:mysql`（需 Docker，未配 `MYSQL_TEST_URL` 时整体 skip）。
+- `jest.setup.js` 默认 mock 回源与资源保护边界以隔离普通单测；资源限额集成测试必须 `jest.unmock('@/lib/upstream-resource-guard.server')`，并用 `installStreamPolyfills()` 安装真实流响应实现。
+- `mysql-storage-contract.test.ts` 走 fake pool，不执行真 SQL，证明不了两侧谓词等价。`pnpm test:mysql` 启动一次性 MySQL 容器；普通 Jest 未配 `MYSQL_TEST_URL` 时会跳过真实 MySQL 用例。
 
 ## 验证
 
-改完依次跑：
+按**完整改动单元和风险**验证，不在每次编辑后重复全量执行。
 
-```bash
-pnpm lint
-pnpm typecheck
-pnpm test
-```
+| 改动范围                               | 验证要求                                                                                |
+| -------------------------------------- | --------------------------------------------------------------------------------------- |
+| 纯文档                                 | 检查链接、命令与当前实现；无需跑应用测试或构建                                          |
+| 单一模块代码                           | 改动文件 ESLint、相关 Jest；TypeScript 改动加 `pnpm typecheck`；UI 交互加浏览器实际操作 |
+| 跨模块、鉴权、数据写入、共享缓存或并发 | `pnpm lint` → `pnpm typecheck` → `pnpm test --runInBand`                                |
+| 发布、依赖或构建配置                   | 上述全量检查，加 `pnpm build`                                                           |
 
-- 本地开发默认 `pnpm dev`，遇 Turbopack 兼容问题用 `pnpm dev:webpack`
-- 改过中文文案跑 `pnpm check:encoding`，拦截乱码字节
-- 非空数据性能回归跑 `pnpm perf:baseline`，方法见 [docs/performance-baseline.md](docs/performance-baseline.md)
-- 没有现成测试时明确说明未验证项
+- 影响范围不明确时按全量处理；相关测试可用 `pnpm test --runInBand --runTestsByPath <文件>`。仅后续文档变化时可复用代码验证结果。
+- 中文变更加 `pnpm check:encoding`；MySQL 查询、事务或共享存储变更加 `pnpm test:mysql`；性能改动按 [性能基线](docs/performance-baseline.md) 选择场景。
+- 提交钩子只检查暂存文件的 lint / 格式；CI 的全量检查不代替本地功能验证。说明实际检查及未覆盖项，不把 skip 当通过。
+
+## 文档边界
+
+- 维护文档只保留当前约束、易误读边界与必要操作。实现细节看代码，不重复通用工程规范。
+- 不保留审查经过、试错记录、一次性测试数字或过期结论。改动历史看 git log；`CHANGELOG.md` 专门保留用户可见的版本变化。
+- 同一事实只在一处维护，其余用链接。部署参数见 `.env.example`，发布规则见 `docs/release.md`。

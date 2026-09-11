@@ -18,13 +18,13 @@ export interface RuntimeConfig {
   DEFAULT_AGGREGATE_SEARCH: boolean;
   ENABLE_OPTIMIZATION: boolean;
   LIVE_DIRECT_CONNECT: boolean;
+  ENABLE_DANMAKU: boolean;
   CUSTOM_CATEGORIES: { name: string; type: 'movie' | 'tv'; query: string }[];
   FLUID_SEARCH: boolean;
   VOD_PAGE_TIMEOUT_SECONDS: number;
   PLAYBACK_HISTORY_PAGE_SIZE: number;
   PLAYBACK_HISTORY_LIMIT: number;
   SEARCH_HISTORY_LIMIT: number;
-  SOURCE_FAILURE_COOLDOWN_SECONDS: number;
   CONTINUE_WATCHING_LIMIT: number;
   COVER_IMAGE_CACHE_SIZE: number;
   SOURCE_COVER_PROXY_MODE: SourceCoverProxyMode;
@@ -48,13 +48,13 @@ export const DEFAULT_RUNTIME_CONFIG: RuntimeConfig = {
   DEFAULT_AGGREGATE_SEARCH: true,
   ENABLE_OPTIMIZATION: true,
   LIVE_DIRECT_CONNECT: false,
+  ENABLE_DANMAKU: false,
   CUSTOM_CATEGORIES: [],
   FLUID_SEARCH: true,
   VOD_PAGE_TIMEOUT_SECONDS: 15,
   PLAYBACK_HISTORY_PAGE_SIZE: 10,
   PLAYBACK_HISTORY_LIMIT: 500,
   SEARCH_HISTORY_LIMIT: 20,
-  SOURCE_FAILURE_COOLDOWN_SECONDS: 300,
   CONTINUE_WATCHING_LIMIT: 10,
   COVER_IMAGE_CACHE_SIZE: 500,
   SOURCE_COVER_PROXY_MODE: 'auto',
@@ -89,13 +89,13 @@ export type ServerConfigPayload = {
   DefaultAggregateSearch?: boolean;
   EnableOptimization?: boolean;
   LiveDirectConnect?: boolean;
+  EnableDanmaku?: boolean;
   CustomCategories?: RuntimeConfig['CUSTOM_CATEGORIES'];
   FluidSearch?: boolean;
   VodPageTimeoutSeconds?: number;
   PlaybackHistoryPageSize?: number;
   PlaybackHistoryLimit?: number;
   SearchHistoryLimit?: number;
-  SourceFailureCooldownSeconds?: number;
   ContinueWatchingLimit?: number;
   CoverImageCacheSize?: number;
   SourceCoverProxyMode?: SourceCoverProxyMode;
@@ -162,6 +162,10 @@ function runtimeConfigFromServerConfig(
       data.LiveDirectConnect === undefined
         ? DEFAULT_RUNTIME_CONFIG.LIVE_DIRECT_CONNECT
         : data.LiveDirectConnect,
+    ENABLE_DANMAKU:
+      data.EnableDanmaku === undefined
+        ? DEFAULT_RUNTIME_CONFIG.ENABLE_DANMAKU
+        : data.EnableDanmaku,
     CUSTOM_CATEGORIES:
       data.CustomCategories || DEFAULT_RUNTIME_CONFIG.CUSTOM_CATEGORIES,
     FLUID_SEARCH:
@@ -179,9 +183,6 @@ function runtimeConfigFromServerConfig(
       DEFAULT_RUNTIME_CONFIG.PLAYBACK_HISTORY_LIMIT,
     SEARCH_HISTORY_LIMIT:
       data.SearchHistoryLimit ?? DEFAULT_RUNTIME_CONFIG.SEARCH_HISTORY_LIMIT,
-    SOURCE_FAILURE_COOLDOWN_SECONDS:
-      data.SourceFailureCooldownSeconds ??
-      DEFAULT_RUNTIME_CONFIG.SOURCE_FAILURE_COOLDOWN_SECONDS,
     CONTINUE_WATCHING_LIMIT:
       data.ContinueWatchingLimit ??
       DEFAULT_RUNTIME_CONFIG.CONTINUE_WATCHING_LIMIT,

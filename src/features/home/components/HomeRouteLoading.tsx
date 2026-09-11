@@ -6,6 +6,7 @@ import ContinueWatchingCardSkeleton from '@/components/ContinueWatchingCardSkele
 import HomePosterCardSkeleton from '@/components/HomePosterCardSkeleton';
 import PageLayout from '@/components/PageLayout';
 import ScrollableRow from '@/components/ScrollableRow';
+import { useClientHydrated } from '@/hooks/useClientHydrated';
 
 import {
   type HomeClientSnapshot,
@@ -112,7 +113,10 @@ export default function HomeRouteLoading({
 }: {
   continueWatchingCount: number;
 }) {
-  const [snapshot, setSnapshot] = useState<HomeClientSnapshot | null>(null);
+  const clientHydrated = useClientHydrated();
+  const [snapshot, setSnapshot] = useState<HomeClientSnapshot | null>(() =>
+    clientHydrated ? getHomeClientSnapshot() : null,
+  );
 
   useIsomorphicLayoutEffect(() => {
     setSnapshot(getHomeClientSnapshot());

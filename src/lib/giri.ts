@@ -63,7 +63,13 @@ function extractVariantLabels(html: string): string[] {
   }
 
   return Array.from(tabContent.matchAll(/<a[^>]*>([\s\S]*?)<\/a>/g)).map(
-    (match, index) => cleanText(match[1] || '') || `版本${index + 1}`,
+    (match, index) => {
+      const label = (match[1] || '').replace(
+        /<span\b[^>]*\bclass\s*=\s*["'][^"']*\bbadge\b[^"']*["'][^>]*>\s*\d+\s*<\/span>/gi,
+        '',
+      );
+      return cleanText(label) || `版本${index + 1}`;
+    },
   );
 }
 

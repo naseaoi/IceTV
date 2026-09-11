@@ -24,6 +24,7 @@ const adminConfig: AdminConfig = {
     DefaultAggregateSearch: true,
     EnableOptimization: true,
     LiveDirectConnect: false,
+    EnableDanmaku: false,
     ...DEFAULT_RUNTIME_PARAMS,
     SearchDownstreamMaxPage: 5,
     SiteInterfaceCacheTime: 300,
@@ -112,6 +113,7 @@ describe('sqlite storage contract', () => {
     await storage.setUserMessageState('demo-user', {
       readAnnouncementId: 'announcement:v1',
     });
+    await storage.setDanmakuEnabledPreference('demo-user', true);
     await storage.recordUserLogin('demo-user', 1700000000000);
     await storage.addSearchHistory('demo-user', 'second');
     await storage.addSearchHistory('demo-user', 'first');
@@ -136,6 +138,12 @@ describe('sqlite storage contract', () => {
     await expect(storage.getUserMessageState('demo-user')).resolves.toEqual({
       readAnnouncementId: 'announcement:v1',
     });
+    await expect(
+      storage.getDanmakuEnabledPreference('demo-user'),
+    ).resolves.toBe(true);
+    await expect(
+      storage.getDanmakuEnabledPreference('other-user'),
+    ).resolves.toBeNull();
     await expect(storage.getUserLastLogin('demo-user')).resolves.toBe(
       1700000000000,
     );
@@ -152,6 +160,9 @@ describe('sqlite storage contract', () => {
     await expect(storage.getPlaybackSessions('demo-user')).resolves.toEqual([]);
     await expect(storage.getSearchHistory('demo-user')).resolves.toEqual([]);
     await expect(storage.getUserMessageState('demo-user')).resolves.toEqual({});
+    await expect(
+      storage.getDanmakuEnabledPreference('demo-user'),
+    ).resolves.toBeNull();
     await expect(storage.getUserLastLogin('demo-user')).resolves.toBeNull();
     await expect(storage.getAllUserLastLogins()).resolves.toEqual({});
   });
@@ -395,6 +406,155 @@ describe('sqlite storage contract', () => {
     expect(secondPage.nextCursor).toBeNull();
   });
 
+  it('按主键游标分页读取过期元数据并排除新鲜项与直播收藏', async () => {
+    const storage = new LocalSqliteStorage(':memory:');
+    const now = 10_000;
+    const ttlMs = 1_000;
+
+    await storage.setPlayRecords('metadata-user', {
+      'source+a': { ...playRecord, metadata_checked_at: 9_500 },
+      'source+b': { ...playRecord, metadata_checked_at: 8_000 },
+      'source+c': { ...playRecord },
+      'source+d': { ...playRecord, metadata_checked_at: now + 1 },
+      'source+e': {
+        ...playRecord,
+        metadata_checked_at: 'invalid' as unknown as number,
+      },
+    });
+    await storage.setFavorite('metadata-user', 'source+a', {
+      ...favorite,
+      metadata_checked_at: 9_500,
+    });
+    await storage.setFavorite('metadata-user', 'source+b', {
+      ...favorite,
+      metadata_checked_at: 8_000,
+    });
+    await storage.setFavorite('metadata-user', 'source-live', {
+      ...favorite,
+      origin: 'live',
+    });
+
+    const firstRecords = await storage.getStalePlayRecordPage(
+      'metadata-user',
+      now,
+      ttlMs,
+      2,
+    );
+    const secondRecords = await storage.getStalePlayRecordPage(
+      'metadata-user',
+      now,
+      ttlMs,
+      2,
+      firstRecords.nextCursor || undefined,
+    );
+    const favorites = await storage.getStaleFavoritePage(
+      'metadata-user',
+      now,
+      ttlMs,
+      10,
+    );
+
+    expect(firstRecords.items.map(({ key }) => key)).toEqual([
+      'source+b',
+      'source+c',
+    ]);
+    expect(secondRecords.items.map(({ key }) => key)).toEqual([
+      'source+d',
+      'source+e',
+    ]);
+    expect(secondRecords.nextCursor).toBeNull();
+    expect(favorites.items.map(({ key }) => key)).toEqual(['source+b']);
+  });
+
+  it('按原始 JSON 快照进行播放记录与收藏 CAS', async () => {
+    const storage = new LocalSqliteStorage(':memory:');
+    const staleRecord = {
+      ...playRecord,
+      metadata_checked_at: 1,
+    };
+    const staleFavorite = {
+      ...favorite,
+      metadata_checked_at: 1,
+    };
+
+    await storage.setPlayRecord('cas-user', 'source+record', staleRecord);
+    await storage.setFavorite('cas-user', 'source+favorite', staleFavorite);
+
+    const recordPage = await storage.getStalePlayRecordPage(
+      'cas-user',
+      10_000,
+      1_000,
+      10,
+    );
+    const favoritePage = await storage.getStaleFavoritePage(
+      'cas-user',
+      10_000,
+      1_000,
+      10,
+    );
+    const recordSnapshot = recordPage.items[0]?.snapshot;
+    const favoriteSnapshot = favoritePage.items[0]?.snapshot;
+    expect(recordSnapshot).toBe(JSON.stringify(staleRecord));
+    expect(favoriteSnapshot).toBe(JSON.stringify(staleFavorite));
+
+    const refreshedRecord = {
+      ...staleRecord,
+      metadata_checked_at: 10_000,
+    };
+    const refreshedFavorite = {
+      ...staleFavorite,
+      metadata_checked_at: 10_000,
+    };
+    await expect(
+      storage.setPlayRecordIfUnchanged(
+        'cas-user',
+        'source+record',
+        refreshedRecord,
+        recordSnapshot as string,
+      ),
+    ).resolves.toBe(true);
+    await expect(
+      storage.setFavoriteIfUnchanged(
+        'cas-user',
+        'source+favorite',
+        refreshedFavorite,
+        favoriteSnapshot as string,
+      ),
+    ).resolves.toBe(true);
+
+    const concurrentRecord = { ...refreshedRecord, play_time: 99 };
+    const concurrentFavorite = { ...refreshedFavorite, title: '用户修改' };
+    await storage.setPlayRecord('cas-user', 'source+record', concurrentRecord);
+    await storage.setFavorite(
+      'cas-user',
+      'source+favorite',
+      concurrentFavorite,
+    );
+
+    await expect(
+      storage.setPlayRecordIfUnchanged(
+        'cas-user',
+        'source+record',
+        { ...refreshedRecord, play_time: 1 },
+        recordSnapshot as string,
+      ),
+    ).resolves.toBe(false);
+    await expect(
+      storage.setFavoriteIfUnchanged(
+        'cas-user',
+        'source+favorite',
+        { ...refreshedFavorite, title: 'cron 覆盖' },
+        favoriteSnapshot as string,
+      ),
+    ).resolves.toBe(false);
+    await expect(
+      storage.getPlayRecord('cas-user', 'source+record'),
+    ).resolves.toEqual(concurrentRecord);
+    await expect(
+      storage.getFavorite('cas-user', 'source+favorite'),
+    ).resolves.toEqual(concurrentFavorite);
+  });
+
   it('replaces all data from an import snapshot', async () => {
     const storage = new LocalSqliteStorage(':memory:');
     const passwordHash =
@@ -413,6 +573,7 @@ describe('sqlite storage contract', () => {
           skipConfigs: { 'source+1': skipConfig },
           playbackSessions: { [playbackSession.id]: playbackSession },
           messageState: { readAnnouncementId: 'announcement:v1' },
+          danmakuEnabled: false,
           lastLoginAt: 1700000000000,
         },
       },
@@ -455,6 +616,9 @@ describe('sqlite storage contract', () => {
     await expect(storage.getUserMessageState('demo-user')).resolves.toEqual({
       readAnnouncementId: 'announcement:v1',
     });
+    await expect(
+      storage.getDanmakuEnabledPreference('demo-user'),
+    ).resolves.toBe(false);
     await expect(storage.getUserLastLogin('demo-user')).resolves.toBe(
       1700000000000,
     );

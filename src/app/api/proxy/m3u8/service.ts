@@ -1,6 +1,7 @@
 import { getAdFilterCacheNamespace } from '@/features/play/lib/ad-filter-strategy-registry';
 import { filterM3U8AdsForSource } from '@/features/play/lib/ad-segment-detector';
 import { resolveVodM3U8ProxyTimeoutMs } from '@/features/play/lib/vodSourcePlaybackPolicy';
+import { getServerCacheBudget } from '@/lib/cache-budget-profile';
 import { getConfigForRead } from '@/lib/config';
 import {
   fetchResponseThroughProxy,
@@ -13,7 +14,8 @@ import {
 } from '@/lib/proxy-diagnostics';
 import { readTextLimited } from '@/lib/proxy-response-limits';
 import { normalizeRuntimeParams } from '@/lib/runtime-params';
-import { createSwrCache } from '@/lib/server-cache';
+import { ResourceLimitError } from '@/lib/server-resource-errors';
+import { createSharedServerCache } from '@/lib/shared-server-cache';
 import { fetchWithUrlGuard } from '@/lib/url-guard';
 
 type M3U8CacheEntry = {
@@ -35,12 +37,16 @@ export type M3U8ProxyRequestContext = {
   userInitiated: boolean;
 };
 
-const m3u8Cache = createSwrCache<M3U8CacheEntry>({
+const m3u8Cache = createSharedServerCache<M3U8CacheEntry>({
   name: 'proxy-m3u8',
   freshMs: 60_000,
   staleMs: 60_000,
-  maxSize: 500,
-  maxWeightBytes: 32 * 1024 * 1024,
+  ...getServerCacheBudget('proxy-m3u8'),
+  maxWaitMs: 10_000,
+  shouldCache: (entry) =>
+    !isSignedM3U8Url(entry.finalUrl) &&
+    (entry.content.includes('#EXT-X-ENDLIST') ||
+      entry.content.includes('#EXT-X-STREAM-INF')),
 });
 
 const SIGNED_URL_PARAM_RE =
@@ -77,59 +83,28 @@ export function refreshM3U8Cache(
   url: string,
   ua: string,
   source: string | null,
+  isLive = false,
 ): Promise<void> {
   const cacheKey = getM3U8CacheKey(url, source);
   const existing = m3u8RefreshInflight.get(cacheKey);
   if (existing) return existing;
 
-  const task = (async () => {
-    try {
-      const timeoutMs = await getProxyRequestTimeoutMs(source);
-      const response = await fetchWithUrlGuard(url, {
-        cache: 'no-cache',
-        redirect: 'follow',
-        credentials: 'same-origin',
-        headers: { 'User-Agent': ua },
-        skipInitialValidation: true,
-        timeoutMs,
+  const task = m3u8Cache
+    .refresh(cacheKey, async () => {
+      const loaded = await fetchM3U8Data(url, ua, source, isLive, {
+        startedAt: Date.now(),
+        proxyMode: 'server-proxy',
+        userAction: null,
+        userInitiated: false,
       });
-      if (!response.ok) return;
-      const contentType = response.headers.get('Content-Type') || '';
-      if (
-        !contentType.toLowerCase().includes('mpegurl') &&
-        !contentType.toLowerCase().includes('octet-stream')
-      ) {
-        return;
-      }
-      let content = await readTextLimited(response, MAX_M3U8_BYTES);
-      if (
-        !content.includes('#EXT-X-ENDLIST') &&
-        !content.includes('#EXT-X-STREAM-INF')
-      ) {
-        return;
-      }
-      try {
-        content = await filterM3U8AdsForSource(
-          content,
-          response.url,
-          ua,
-          source,
-        );
-      } catch (error) {
-        console.warn('m3u8 后台广告段检测失败:', error);
-      }
-      m3u8Cache.set(cacheKey, {
-        content,
-        contentType,
-        finalUrl: response.url,
-        loadedAt: Date.now(),
-      });
-    } catch (error) {
+      return toM3U8CacheEntry(loaded);
+    })
+    .catch((error) => {
       console.warn('m3u8 后台刷新失败:', error);
-    } finally {
+    })
+    .finally(() => {
       m3u8RefreshInflight.delete(cacheKey);
-    }
-  })();
+    });
 
   m3u8RefreshInflight.set(cacheKey, task);
   return task;
@@ -143,17 +118,25 @@ export function loadM3U8Data(
   skipCache: boolean,
   context: M3U8ProxyRequestContext,
 ): Promise<M3U8LoadResult> {
+  skipCache = skipCache || isLive || isSignedM3U8Url(url);
   const key = getM3U8LoadInflightKey(url, ua, source, isLive, skipCache);
   const existing = m3u8LoadInflight.get(key);
   if (existing) return existing;
 
-  const task = fetchM3U8Data(
-    url,
-    ua,
-    source,
-    isLive,
-    skipCache,
-    context,
+  const task = (
+    skipCache
+      ? fetchM3U8Data(url, ua, source, isLive, context)
+      : m3u8Cache
+          .getOrLoad(getM3U8CacheKey(url, source), async () =>
+            toM3U8CacheEntry(
+              await fetchM3U8Data(url, ua, source, isLive, context),
+            ),
+          )
+          .then((entry) => ({
+            ...entry,
+            status: 200,
+            statusText: 'OK',
+          }))
   ).finally(() => {
     m3u8LoadInflight.delete(key);
   });
@@ -182,7 +165,6 @@ async function fetchM3U8Data(
   ua: string,
   source: string | null,
   isLive: boolean,
-  skipCache: boolean,
   context: M3U8ProxyRequestContext,
 ): Promise<M3U8LoadResult> {
   const timeoutMs = await getProxyRequestTimeoutMs(source);
@@ -226,6 +208,7 @@ async function fetchM3U8Data(
           statusText: response.statusText,
         };
       } catch (error) {
+        if (error instanceof ResourceLimitError) throw error;
         logProxyFailure(
           classifyProxyFailure(error, {
             route: 'm3u8',
@@ -258,6 +241,7 @@ async function fetchM3U8Data(
   });
 
   if (!response.ok) {
+    await response.body?.cancel().catch(() => {});
     throw new ProxyRouteError({
       route: 'm3u8',
       source,
@@ -302,19 +286,6 @@ async function fetchM3U8Data(
     }
   }
 
-  if (
-    !skipCache &&
-    (content.includes('#EXT-X-ENDLIST') ||
-      content.includes('#EXT-X-STREAM-INF'))
-  ) {
-    m3u8Cache.set(getM3U8CacheKey(url, source), {
-      content,
-      contentType: contentType || 'application/vnd.apple.mpegurl',
-      finalUrl,
-      loadedAt,
-    });
-  }
-
   return {
     content,
     contentType: contentType || 'application/vnd.apple.mpegurl',
@@ -322,6 +293,15 @@ async function fetchM3U8Data(
     loadedAt,
     status: response.status,
     statusText: response.statusText,
+  };
+}
+
+function toM3U8CacheEntry(result: M3U8LoadResult): M3U8CacheEntry {
+  return {
+    content: result.content,
+    contentType: result.contentType,
+    finalUrl: result.finalUrl,
+    loadedAt: result.loadedAt,
   };
 }
 
@@ -347,4 +327,8 @@ function assertM3U8Content(
     ...context,
     message: `Unexpected m3u8 content type: ${contentType || 'empty'}`,
   });
+}
+
+export function getM3U8CacheStats() {
+  return m3u8Cache.stats();
 }

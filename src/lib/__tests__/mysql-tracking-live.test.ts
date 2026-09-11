@@ -1,7 +1,7 @@
 /** @jest-environment node */
 
 import { MySqlStorage } from '../mysql.db';
-import type { PlayRecord } from '../types';
+import type { Favorite, PlayRecord } from '../types';
 
 const liveUrl = (process.env.MYSQL_TEST_URL || '').trim();
 const describeLive = liveUrl ? describe : describe.skip;
@@ -15,6 +15,15 @@ const basePlayRecord: PlayRecord = {
   total_episodes: 12,
   play_time: 0,
   total_time: 0,
+  save_time: 1,
+};
+
+const baseFavorite: Favorite = {
+  source_name: '源',
+  total_episodes: 12,
+  title: '剧集',
+  year: '2026',
+  cover: '',
   save_time: 1,
 };
 
@@ -155,5 +164,123 @@ describeLive('MySQL 追更查询（真实实例）', () => {
 
     expect(page.total).toBe(1);
     expect(Object.keys(page.items)).toEqual(['source+no-flag']);
+  });
+
+  it('元数据分页按真实毫秒时间戳识别 TTL', async () => {
+    const user = `live-metadata-${Date.now()}`;
+    const now = Date.now();
+    const ttlMs = 6 * 60 * 60 * 1000;
+    await storage.setPlayRecords(user, {
+      'source+fresh': {
+        ...basePlayRecord,
+        metadata_checked_at: now - 1_000,
+      },
+      'source+stale': {
+        ...basePlayRecord,
+        metadata_checked_at: now - ttlMs,
+      },
+    });
+    await storage.setFavorite(user, 'source+fresh', {
+      ...baseFavorite,
+      metadata_checked_at: now - 1_000,
+    });
+    await storage.setFavorite(user, 'source+stale', {
+      ...baseFavorite,
+      metadata_checked_at: now - ttlMs,
+    });
+
+    const recordPage = await storage.getStalePlayRecordPage(
+      user,
+      now,
+      ttlMs,
+      10,
+    );
+    const favoritePage = await storage.getStaleFavoritePage(
+      user,
+      now,
+      ttlMs,
+      10,
+    );
+
+    expect(recordPage.items.map(({ key }) => key)).toEqual(['source+stale']);
+    expect(favoritePage.items.map(({ key }) => key)).toEqual(['source+stale']);
+  });
+
+  it('元数据 CAS 使用原始 JSON 二进制比较', async () => {
+    const user = `live-cas-${Date.now()}`;
+    const staleRecord: PlayRecord = {
+      ...basePlayRecord,
+      title: 'Demo',
+      metadata_checked_at: 1,
+    };
+    const staleFavorite: Favorite = {
+      ...baseFavorite,
+      title: 'Demo',
+      metadata_checked_at: 1,
+    };
+
+    await storage.setPlayRecord(user, 'source+record', staleRecord);
+    await storage.setFavorite(user, 'source+favorite', staleFavorite);
+
+    const recordPage = await storage.getStalePlayRecordPage(
+      user,
+      Date.now(),
+      1_000,
+      10,
+    );
+    const favoritePage = await storage.getStaleFavoritePage(
+      user,
+      Date.now(),
+      1_000,
+      10,
+    );
+    const recordSnapshot = recordPage.items[0]?.snapshot;
+    const favoriteSnapshot = favoritePage.items[0]?.snapshot;
+    expect(recordSnapshot).toBe(JSON.stringify(staleRecord));
+    expect(favoriteSnapshot).toBe(JSON.stringify(staleFavorite));
+
+    await expect(
+      storage.setPlayRecordIfUnchanged(
+        user,
+        'source+record',
+        { ...staleRecord, metadata_checked_at: Date.now() },
+        recordSnapshot as string,
+      ),
+    ).resolves.toBe(true);
+    await expect(
+      storage.setFavoriteIfUnchanged(
+        user,
+        'source+favorite',
+        { ...staleFavorite, metadata_checked_at: Date.now() },
+        favoriteSnapshot as string,
+      ),
+    ).resolves.toBe(true);
+
+    // 仅大小写变化也必须被 CAS 识别为并发修改，避免受连接排序规则影响。
+    await storage.setPlayRecord(user, 'source+record', {
+      ...staleRecord,
+      title: 'demo',
+    });
+    await storage.setFavorite(user, 'source+favorite', {
+      ...staleFavorite,
+      title: 'demo',
+    });
+
+    await expect(
+      storage.setPlayRecordIfUnchanged(
+        user,
+        'source+record',
+        { ...staleRecord, title: 'cron 覆盖' },
+        recordSnapshot as string,
+      ),
+    ).resolves.toBe(false);
+    await expect(
+      storage.setFavoriteIfUnchanged(
+        user,
+        'source+favorite',
+        { ...staleFavorite, title: 'cron 覆盖' },
+        favoriteSnapshot as string,
+      ),
+    ).resolves.toBe(false);
   });
 });

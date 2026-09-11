@@ -28,6 +28,55 @@ export function normalizeGroupLabel(label: string | undefined): string {
   return (label || '').replace(/\s+/g, '').trim();
 }
 
+interface EpisodeGroupLabelIdentity {
+  label?: string;
+  count?: number;
+}
+
+function getLabelWithoutEpisodeCount({
+  label,
+  count,
+}: EpisodeGroupLabelIdentity): string | null {
+  if (!label || !Number.isSafeInteger(count) || Number(count) <= 0) {
+    return null;
+  }
+
+  const match =
+    label.trim().match(/^(.+?)\s+(\d+)$/) ||
+    normalizeGroupLabel(label).match(/^(.*\D)(\d+)$/);
+  return match && Number(match[2]) === count
+    ? normalizeGroupLabel(match[1]) || null
+    : null;
+}
+
+export function areEpisodeGroupLabelsEquivalent(
+  previous: EpisodeGroupLabelIdentity,
+  next: EpisodeGroupLabelIdentity,
+): boolean {
+  const previousLabel = normalizeGroupLabel(previous.label);
+  const nextLabel = normalizeGroupLabel(next.label);
+  if (!previousLabel || !nextLabel) return false;
+  if (previousLabel === nextLabel) return true;
+
+  const previousWithoutCount = getLabelWithoutEpisodeCount(previous);
+  const nextWithoutCount = getLabelWithoutEpisodeCount(next);
+  if (
+    previousWithoutCount === nextLabel ||
+    nextWithoutCount === previousLabel
+  ) {
+    return true;
+  }
+
+  const hasSeparatedCount =
+    /\s+\d+\s*$/.test(previous.label || '') ||
+    /\s+\d+\s*$/.test(next.label || '');
+  return (
+    hasSeparatedCount &&
+    !!previousWithoutCount &&
+    previousWithoutCount === nextWithoutCount
+  );
+}
+
 // 分组可换算的前提：至少两组且组集数之和等于实际集数
 export function hasUsableEpisodeGroups(
   groups: EpisodeGroup[] | undefined,
@@ -94,7 +143,7 @@ function locateEpisodeGroups(groups: EpisodeGroup[]): LocatedEpisodeGroup[] {
       groupIndex,
       start,
       count: group.count,
-      label: normalizeGroupLabel(group.label),
+      label: group.label,
     };
     start += group.count;
     return located;
@@ -103,14 +152,24 @@ function locateEpisodeGroups(groups: EpisodeGroup[]): LocatedEpisodeGroup[] {
 
 function findGroupByLabel(
   located: LocatedEpisodeGroup[],
-  label: string | undefined,
+  record: PlayRecordEpisodeIdentity,
 ): LocatedEpisodeGroup | null {
-  const normalized = normalizeGroupLabel(label);
+  const normalized = normalizeGroupLabel(record.group_label);
   if (!normalized) {
     return null;
   }
 
-  const matched = located.filter((group) => group.label === normalized);
+  const exact = located.filter(
+    (group) => normalizeGroupLabel(group.label) === normalized,
+  );
+  if (exact.length > 0) return exact.length === 1 ? exact[0] : null;
+
+  const matched = located.filter((group) =>
+    areEpisodeGroupLabelsEquivalent(
+      { label: record.group_label, count: record.group_total },
+      group,
+    ),
+  );
   return matched.length === 1 ? matched[0] : null;
 }
 
@@ -178,7 +237,7 @@ export function resolvePlayRecordEpisode(
 
   const located = locateEpisodeGroups(groups);
   const group =
-    findGroupByLabel(located, record.group_label) ||
+    findGroupByLabel(located, record) ||
     inferGroupWithoutLabel(located, record);
 
   if (!group) {

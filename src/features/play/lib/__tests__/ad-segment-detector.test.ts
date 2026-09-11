@@ -12,6 +12,7 @@ import {
 describe('shouldRunAdDetection', () => {
   test('仅对 rycj 源站启用', () => {
     expect(shouldRunAdDetection('rycj')).toBe(true);
+    expect(shouldRunAdDetection('ikun')).toBe(false);
     expect(shouldRunAdDetection('other')).toBe(false);
     expect(shouldRunAdDetection(null)).toBe(false);
     expect(shouldRunAdDetection('')).toBe(false);

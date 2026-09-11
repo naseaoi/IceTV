@@ -1,3 +1,4 @@
+import { fetchSourceProbe } from '@/features/play/lib/sourceProbeRequest';
 import { isLazyEpisodeUrl } from '@/lib/lazy-episodes';
 
 const RESOLVED_CACHE_TTL_MS = 30 * 60 * 1000;
@@ -27,8 +28,9 @@ export function peekResolvedLazyEpisodeUrl(
 async function requestEpisodeUrl(
   source: string,
   lazyUrl: string,
+  probe: boolean,
 ): Promise<string> {
-  const response = await fetch(
+  const response = await (probe ? fetchSourceProbe : fetch)(
     `/api/episode-url?source=${encodeURIComponent(source)}&url=${encodeURIComponent(lazyUrl)}`,
   );
   if (!response.ok) {
@@ -48,6 +50,7 @@ async function requestEpisodeUrl(
 export function resolveLazyEpisodeUrl(
   source: string,
   lazyUrl: string,
+  options: { probe?: boolean } = {},
 ): Promise<string> {
   if (!isLazyEpisodeUrl(lazyUrl)) {
     return Promise.resolve(lazyUrl);
@@ -57,10 +60,11 @@ export function resolveLazyEpisodeUrl(
   const cached = peekResolvedLazyEpisodeUrl(source, lazyUrl);
   if (cached) return Promise.resolve(cached);
 
-  const pending = inflight.get(key);
+  const inflightKey = `${key}:${options.probe ? 'probe' : 'playback'}`;
+  const pending = inflight.get(inflightKey);
   if (pending) return pending;
 
-  const task = requestEpisodeUrl(source, lazyUrl)
+  const task = requestEpisodeUrl(source, lazyUrl, options.probe === true)
     .then((url) => {
       resolvedCache.set(key, {
         url,
@@ -73,9 +77,9 @@ export function resolveLazyEpisodeUrl(
       return url;
     })
     .finally(() => {
-      inflight.delete(key);
+      inflight.delete(inflightKey);
     });
-  inflight.set(key, task);
+  inflight.set(inflightKey, task);
   return task;
 }
 

@@ -6,6 +6,10 @@ import React, { memo, useCallback, useEffect, useId, useRef } from 'react';
 
 import { useOptionalCardInteractionManager } from '@/components/CardInteractionProvider';
 import CoverImage from '@/components/CoverImage';
+import {
+  warmupDanmakuForNavigation,
+  warmupDanmakuSearchForNavigation,
+} from '@/features/play/lib/danmaku/navigation-warmup';
 import { useLongPress } from '@/hooks/useLongPress';
 import { getAuthInfoFromBrowserCookie } from '@/lib/auth.client';
 import {
@@ -105,18 +109,32 @@ function PosterCard({
     }${type ? `&stype=${type}` : ''}`;
   }, [title, type, year]);
 
+  const warmupDanmaku = useCallback(() => {
+    const localTarget = findLocalPlaybackTargetByTitle(title, year);
+    void warmupDanmakuForNavigation({
+      source: localTarget?.source ?? '',
+      videoId: localTarget?.id ?? '',
+      episodeIndex: 0,
+      searchTitle: title,
+      searchYear: year || '',
+    });
+  }, [title, year]);
+
   const handlePlay = useCallback(() => {
     const playUrl = withReturnTo(buildPlayUrl(), getCurrentNavigationPath());
     const authInfo = getAuthInfoFromBrowserCookie();
     if (authInfo?.username) {
       const hasLocalTarget = !!findLocalPlaybackTargetByTitle(title, year);
-      if (canUseNetworkPrefetch() && !hasLocalTarget) {
-        transferWarmedSearchToAggregateGroup(title);
-        warmupSearchForTitle(title);
+      if (canUseNetworkPrefetch()) {
+        warmupDanmaku();
+        if (!hasLocalTarget) {
+          transferWarmedSearchToAggregateGroup(title);
+          warmupSearchForTitle(title);
+        }
       }
     }
     router.push(playUrl);
-  }, [buildPlayUrl, router, title, year]);
+  }, [buildPlayUrl, router, title, warmupDanmaku, year]);
 
   // hover / focus 预热：提前触发标题聚合搜索并预取播放页路由
   const handlePrefetch = useCallback(() => {
@@ -128,6 +146,7 @@ function PosterCard({
     }
     prefetchTimerRef.current = window.setTimeout(() => {
       prefetchTimerRef.current = null;
+      void warmupDanmakuSearchForNavigation(title);
       warmupSearchForTitle(title);
     }, PREFETCH_INTENT_DELAY_MS);
   }, [router, title]);

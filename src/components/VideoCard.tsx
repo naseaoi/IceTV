@@ -32,6 +32,10 @@ import type {
 } from '@/components/video-card/types';
 import { VideoCardPoster } from '@/components/video-card/VideoCardPoster';
 import { VideoCardTitle } from '@/components/video-card/VideoCardTitle';
+import {
+  warmupDanmakuForNavigation,
+  warmupDanmakuSearchForNavigation,
+} from '@/features/play/lib/danmaku/navigation-warmup';
 import { useLongPress } from '@/hooks/useLongPress';
 import { getAuthInfoFromBrowserCookie } from '@/lib/auth.client';
 import {
@@ -384,10 +388,39 @@ const VideoCard = forwardRef<VideoCardHandle, VideoCardProps>(
       saveAggregateGroup,
     ]);
 
-    // 点击时预热：聚合卡数据经 sessionStorage 传递，跳过
+    const warmupDanmaku = useCallback(() => {
+      const localTarget =
+        from === 'douban'
+          ? findLocalPlaybackTargetByTitle(actualTitle, actualYear)
+          : null;
+      void warmupDanmakuForNavigation({
+        source: isAggregate ? '' : (localTarget?.source ?? actualSource ?? ''),
+        videoId: isAggregate ? '' : (localTarget?.id ?? actualId ?? ''),
+        episodeIndex:
+          from === 'playrecord'
+            ? (resumeEpisodeIndex ?? Math.max(0, (currentEpisode || 1) - 1))
+            : 0,
+        searchTitle: actualTitle,
+        searchYear: actualYear || '',
+      });
+    }, [
+      actualId,
+      actualSource,
+      actualTitle,
+      actualYear,
+      currentEpisode,
+      from,
+      isAggregate,
+      resumeEpisodeIndex,
+    ]);
+
+    // 点击时同时预热播放详情、聚合搜索和弹幕数据
     const warmupOnNavigate = useCallback(() => {
-      if (origin === 'live' || isAggregate) return;
+      if (origin === 'live') return;
       if (!canUseNetworkPrefetch()) return;
+
+      warmupDanmaku();
+      if (isAggregate) return;
 
       if (from === 'douban' || !actualSource || !actualId) {
         if (!findLocalPlaybackTargetByTitle(actualTitle, actualYear)) {
@@ -406,6 +439,7 @@ const VideoCard = forwardRef<VideoCardHandle, VideoCardProps>(
       actualQuery,
       actualTitle,
       actualYear,
+      warmupDanmaku,
     ]);
 
     const handleClick = useCallback(() => {
@@ -450,14 +484,13 @@ const VideoCard = forwardRef<VideoCardHandle, VideoCardProps>(
       warmupOnNavigate,
     ]);
 
-    // hover / focus 预热：带 source+id 的卡片预取 detail，豆瓣卡预热标题搜索
+    // hover / focus 预热：带 source+id 的卡片预取 detail，并提前准备弹幕候选
     const handlePrefetch = useCallback(() => {
       if (shouldTrackFavoriteStatus) {
         void loadFavoriteStatus();
       }
 
       if (origin === 'live') return;
-      if (isAggregate) return;
       if (!canUseHoverPrefetch()) return;
 
       router.prefetch('/play');
@@ -466,6 +499,8 @@ const VideoCard = forwardRef<VideoCardHandle, VideoCardProps>(
       }
       prefetchTimerRef.current = window.setTimeout(() => {
         prefetchTimerRef.current = null;
+        void warmupDanmakuSearchForNavigation(actualTitle);
+        if (isAggregate) return;
         if (from === 'douban' || !actualSource || !actualId) {
           warmupSearchForTitle(actualQuery || actualTitle);
           return;

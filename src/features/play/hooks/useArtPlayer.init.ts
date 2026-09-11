@@ -7,7 +7,21 @@ import {
   createArtPlayerControls,
   createArtPlayerSettings,
 } from '@/features/play/lib/artPlayerSettings';
-import { shouldAutoAdvanceEpisode } from '@/features/play/lib/autoAdvanceEpisode';
+import {
+  isTrustworthyPlaybackEnd,
+  shouldAutoAdvanceEpisode,
+} from '@/features/play/lib/autoAdvanceEpisode';
+import {
+  bindDanmakuSettingPersistence,
+  createDanmakuPluginIfEnabled,
+  isDanmakuFeatureEnabled,
+  reloadDanmaku,
+} from '@/features/play/lib/danmaku/attach';
+import {
+  beginDanmakuLoadNotice,
+  waitForDanmakuPlayerSwitch,
+} from '@/features/play/lib/danmaku/load-notice';
+import { bindDanmakuSliderDrag } from '@/features/play/lib/danmaku/slider-drag';
 import {
   type PlayerLoadingSessionState,
   hasReachedResumeTarget,
@@ -62,6 +76,7 @@ interface UseArtPlayerInitState {
   autoAdvanceArmedRef: MutableRefObject<boolean>;
   autoAdvancedRef: MutableRefObject<boolean>;
   playerMediaKindRef: MutableRefObject<'hls' | 'native' | null>;
+  sessionEpisodeIndexRef: MutableRefObject<number | null>;
   isCancelled: () => boolean;
 }
 
@@ -107,7 +122,10 @@ export async function initializeArtPlayer(
     requestWakeLock,
     releaseWakeLock,
     cleanupPlayer,
+    danmakuEnabledRef,
+    onDanmakuEnabledChange,
     onPlaybackStarted,
+    onDanmakuEnable,
     onSourceProxyFallbackStarted,
     onCurrentSourceVideoInfo,
   } = params;
@@ -116,6 +134,7 @@ export async function initializeArtPlayer(
     autoAdvanceArmedRef,
     autoAdvancedRef,
     playerMediaKindRef,
+    sessionEpisodeIndexRef,
     isCancelled,
   } = state;
 
@@ -126,6 +145,13 @@ export async function initializeArtPlayer(
       source: detailRef.current?.source || detail?.source || '',
       id: detailRef.current?.id || detail?.id || '',
       videoUrl,
+    };
+    const danmakuContext = {
+      source: playbackInfoContext.source,
+      videoId: playbackInfoContext.id,
+      episodeIndex: currentEpisodeIndex,
+      searchTitle: detailRef.current?.title || detail?.title || videoTitle,
+      searchYear: detailRef.current?.year || detail?.year || '',
     };
     const preUseProxy = isServerProxy(preSourceKey, videoUrl);
     const buildProxyUrl = (rawUrl: string) =>
@@ -165,6 +191,8 @@ export async function initializeArtPlayer(
       return;
     }
 
+    sessionEpisodeIndexRef.current = currentEpisodeIndex;
+
     const isWebkit =
       typeof window !== 'undefined' &&
       typeof (window as unknown as Record<string, unknown>)
@@ -176,19 +204,44 @@ export async function initializeArtPlayer(
       mediaKind === 'hls' &&
       playerMediaKindRef.current === mediaKind
     ) {
+      const carriedResumeTarget = resolvePendingResumeTime({
+        resumeTime: resumeTimeRef.current,
+        resumeMode: resumeModeRef.current,
+        allowAutoResume: allowAutoResumeRef.current,
+      });
       resetPlayerLoadingSessionState(loadingSessionRef.current);
+      // 复用播放器时 Artplayer 会在 loadedmetadata 把进度归零，这里保留未落地的
+      // 恢复点，交给 timeupdate/progress 重试逻辑再次 seek。
+      if (carriedResumeTarget !== null) {
+        loadingSessionRef.current.pendingInitialResumeTarget =
+          carriedResumeTarget;
+      }
       restorePlayerPlaybackRate(
         artPlayerRef.current,
         lastPlaybackRateRef.current,
       );
-      artPlayerRef.current.switch = playbackUrl;
-      artPlayerRef.current.title = `${videoTitle} - 第${currentEpisodeIndex + 1}集`;
-      if (artPlayerRef.current.video) {
-        ensureVideoSource(
-          artPlayerRef.current.video as HTMLVideoElement,
-          playbackUrl,
+      const reusedPlayer = artPlayerRef.current;
+      if (reusedPlayer.url !== playbackUrl) {
+        waitForDanmakuPlayerSwitch(
+          reusedPlayer,
+          reusedPlayer.switchUrl(playbackUrl),
         );
       }
+      reusedPlayer.title = `${videoTitle} - 第${currentEpisodeIndex + 1}集`;
+      // switch 内部会注册一次性的归零回调，这里紧随其后注册以立即纠正落点，
+      // 避免等重试逻辑生效时出现可见的回跳。
+      if (carriedResumeTarget !== null) {
+        reusedPlayer.once?.('video:loadedmetadata', () => {
+          if (artPlayerRef.current !== reusedPlayer) {
+            return;
+          }
+          applyResumeTime(reusedPlayer, carriedResumeTarget);
+        });
+      }
+      if (reusedPlayer.video) {
+        ensureVideoSource(reusedPlayer.video as HTMLVideoElement, playbackUrl);
+      }
+      void reloadDanmaku(reusedPlayer, danmakuContext, danmakuEnabledRef);
       return;
     }
 
@@ -228,6 +281,14 @@ export async function initializeArtPlayer(
     configureArtplayerStatics(Artplayer);
     Artplayer.PLAYBACK_RATE = [0.5, 0.75, 1, 1.25, 1.5, 2, 3];
 
+    const danmakuPlugin = await createDanmakuPluginIfEnabled(
+      danmakuContext,
+      danmakuEnabledRef,
+    );
+    if (isCancelled() || !artRef.current) {
+      return;
+    }
+
     artPlayerRef.current = new Artplayer({
       container: artRef.current,
       url: playbackUrl,
@@ -259,11 +320,22 @@ export async function initializeArtPlayer(
         handleNextEpisode,
       }),
       contextmenu: createArtPlayerContextmenus(),
+      ...(danmakuPlugin ? { plugins: [danmakuPlugin] } : {}),
     });
 
     const player = artPlayerRef.current;
     if (!player) {
       return;
+    }
+    if (
+      !danmakuPlugin &&
+      isDanmakuFeatureEnabled() &&
+      danmakuEnabledRef.current
+    ) {
+      beginDanmakuLoadNotice(
+        player,
+        () => danmakuEnabledRef.current,
+      )({ status: 'error' });
     }
 
     playerMediaKindRef.current = mediaKind;
@@ -322,7 +394,7 @@ export async function initializeArtPlayer(
       onSourceProxyFallbackStarted?.();
 
       try {
-        player.switch = fallbackUrl;
+        waitForDanmakuPlayerSwitch(player, player.switchUrl(fallbackUrl));
         const activeVideo = player.video as HTMLVideoElement | undefined;
         if (activeVideo) {
           const managedVideo = getManagedVideo(activeVideo);
@@ -335,6 +407,17 @@ export async function initializeArtPlayer(
         console.error('切换原生视频服务端代理失败:', error);
         return false;
       }
+    };
+
+    const resolveDeclaredDuration = (): number | null => {
+      const activeVideo = player.video as HTMLVideoElement | null;
+      if (!activeVideo) return null;
+      const hls = getManagedVideo(activeVideo).hls;
+      const level = hls?.levels?.[hls.currentLevel];
+      const total = level?.details?.totalduration;
+      return Number.isFinite(total) && (total ?? 0) > 0
+        ? (total as number)
+        : null;
     };
 
     const tryAutoAdvanceEpisode = () => {
@@ -435,7 +518,20 @@ export async function initializeArtPlayer(
       playbackRequestModeRef.current = 'initial';
     };
 
+    /**
+     * 被新一轮初始化取代的播放会话不得消费恢复点：复用播放器时旧回调仍绑定在
+     * 同一个实例上，若不识别会把下一集的进度当成本集的用掉。
+     */
+    const isStalePlayerSession = () =>
+      artPlayerRef.current !== player ||
+      (sessionEpisodeIndexRef.current !== null &&
+        sessionEpisodeIndexRef.current !== currentEpisodeIndexRef.current);
+
     const finishInitialLoading = () => {
+      if (isStalePlayerSession()) {
+        return;
+      }
+
       if (!markPlayerLoadingSessionStarted(loadingSessionRef.current)) {
         return;
       }
@@ -536,6 +632,10 @@ export async function initializeArtPlayer(
     };
 
     const ensureInitialPlaybackPosition = () => {
+      if (isStalePlayerSession()) {
+        return null;
+      }
+
       if (loadingSessionRef.current.pendingInitialResumeTarget !== null) {
         return loadingSessionRef.current.pendingInitialResumeTarget;
       }
@@ -573,19 +673,25 @@ export async function initializeArtPlayer(
         intendedResumeTarget = 0;
       }
 
+      // 记录“想去的位置”而不是“已落地的位置”：时长未知导致 seek 失败时，
+      // 仍需保留目标供后续重试，否则恢复点会被永久丢弃。
+      const trackedResumeTarget =
+        appliedResumeTarget !== null
+          ? appliedResumeTarget
+          : intendedResumeTarget;
       loadingSessionRef.current.pendingInitialResumeTarget =
-        appliedResumeTarget;
+        trackedResumeTarget;
       const fallbackTime =
         intendedResumeTarget !== null
           ? intendedResumeTarget
           : player.currentTime || 0;
       updateStableCurrentTime(fallbackTime);
 
-      return appliedResumeTarget;
+      return trackedResumeTarget;
     };
 
     const finishInitialLoadingIfMediaReady = () => {
-      if (isCancelled()) {
+      if (isStalePlayerSession()) {
         return;
       }
 
@@ -612,6 +718,14 @@ export async function initializeArtPlayer(
         requestInitialPlayback(activeVideo);
       }
     };
+
+    const unbindDanmakuSliderDrag = bindDanmakuSliderDrag(player);
+    player.on('destroy', unbindDanmakuSliderDrag);
+    bindDanmakuSettingPersistence(player, {
+      enabledRef: danmakuEnabledRef,
+      onEnabledChange: onDanmakuEnabledChange,
+      onEnable: onDanmakuEnable,
+    });
 
     player.on('ready', () => {
       setError(null);
@@ -649,6 +763,15 @@ export async function initializeArtPlayer(
       reportPlaybackStats?.(true);
       setIsPlaying(false);
       restorePlayerPlaybackRate(player, lastPlaybackRateRef.current);
+      if (
+        !isTrustworthyPlaybackEnd(
+          player.currentTime || 0,
+          resolveDeclaredDuration(),
+        )
+      ) {
+        console.warn('忽略异常提前触发的播放结束事件');
+        return;
+      }
       tryAutoAdvanceEpisode();
     });
 
@@ -820,6 +943,10 @@ export async function initializeArtPlayer(
     window.setTimeout(finishInitialLoadingIfMediaReady, 500);
   } catch (error) {
     console.error('创建播放器失败:', error);
+    // 初始化被取代时静默退出
+    if (isCancelled()) {
+      return;
+    }
     setError('播放器初始化失败');
   }
 }

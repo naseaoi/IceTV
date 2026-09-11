@@ -1,25 +1,10 @@
-const path = require('path');
-
-const { extractLatestVersion } = require('./src/lib/changelog-utils');
+const { resolveAppVersion } = require('./src/lib/build-version');
 const packageJson = require('./package.json');
 
-const explicitAppVersion = process.env.NEXT_PUBLIC_APP_VERSION?.trim();
-let appVersion = explicitAppVersion || packageJson.version || '0.0.0';
-
-try {
-  const fs = require('fs');
-  const changelogPath = path.join(__dirname, 'CHANGELOG.md');
-
-  if (!explicitAppVersion && fs.existsSync(changelogPath)) {
-    const content = fs.readFileSync(changelogPath, 'utf8');
-    const latestVersion = extractLatestVersion(content);
-    if (latestVersion) {
-      appVersion = latestVersion;
-    }
-  }
-} catch (error) {
-  console.warn('读取版本号失败:', error);
-}
+const appVersion = resolveAppVersion({
+  rootDir: __dirname,
+  packageVersion: packageJson.version,
+});
 
 const nextConfig = {
   output: 'standalone',

@@ -6,6 +6,8 @@ import {
   parseGirigiriVariantId,
 } from '@/lib/giri';
 
+import { createGiriTrackingHtml } from './__fixtures__/giri-tracking';
+
 describe('extractGirigiriEpisodeEntries', () => {
   it('只保留源站默认的第一组播放列表，避免不同版本混在一起', () => {
     const html = `
@@ -70,6 +72,28 @@ describe('girigiri variant helpers', () => {
 });
 
 describe('extractGirigiriEpisodeVariants', () => {
+  it.each([8, 9])('集数角标为 %i 时仍使用稳定的分组标签', (count) => {
+    const variants = extractGirigiriEpisodeVariants(
+      createGiriTrackingHtml(count, count),
+    );
+
+    expect(variants.map((variant) => variant.label)).toEqual(['繁中', '简中']);
+    expect(variants.map((variant) => variant.episodes.length)).toEqual([
+      count,
+      count,
+    ]);
+  });
+
+  it('只移除角标，不移除版本名称中的数字', () => {
+    const html = createGiriTrackingHtml(2, 2)
+      .replace('繁中', '线路 2')
+      .replace('简中', '1080P');
+
+    expect(
+      extractGirigiriEpisodeVariants(html).map((variant) => variant.label),
+    ).toEqual(['线路 2', '1080P']);
+  });
+
   it('按 group 提取多个版本并保留 tab 标签', () => {
     const html = `
       <div class="anthology-tab swiper-container"><div class="swiper-wrapper">

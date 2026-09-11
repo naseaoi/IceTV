@@ -15,6 +15,7 @@ import { useCallback, useEffect, useId, useState } from 'react';
 import { useCardInteractionManager } from '@/components/CardInteractionProvider';
 import CoverImage from '@/components/CoverImage';
 import { buildMobileContinuePlayUrl } from '@/components/mobile-continue-card/play-url';
+import { warmupDanmakuForNavigation } from '@/features/play/lib/danmaku/navigation-warmup';
 import { useLongPress } from '@/hooks/useLongPress';
 import { getAuthInfoFromBrowserCookie } from '@/lib/auth.client';
 import {
@@ -109,6 +110,13 @@ export default function MobileContinueCard({
 
       if (canUseNetworkPrefetch()) {
         warmupForPlayback(source, id);
+        void warmupDanmakuForNavigation({
+          source,
+          videoId: id,
+          episodeIndex: resumeEpisodeIndex ?? Math.max(0, currentEpisode - 1),
+          searchTitle: title,
+          searchYear: year || '',
+        });
       }
     }
 

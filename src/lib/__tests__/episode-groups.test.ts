@@ -1,4 +1,5 @@
 import {
+  areEpisodeGroupLabelsEquivalent,
   hasUsableEpisodeGroups,
   resolvePlayRecordEpisode,
 } from '@/lib/episode-groups';
@@ -25,6 +26,72 @@ describe('hasUsableEpisodeGroups', () => {
 });
 
 describe('resolvePlayRecordEpisode', () => {
+  it.each(['简中 8', '简中8'])(
+    '按旧标签 %s 恢复分组重排后的组内第 8 集',
+    (label) => {
+      expect(
+        resolvePlayRecordEpisode(
+          { index: 16, group_index: 8, group_total: 8, group_label: label },
+          [
+            { label: '简中', count: 9 },
+            { label: '繁中', count: 9 },
+          ],
+          18,
+        ),
+      ).toMatchObject({
+        episodeIndex: 7,
+        groupLabel: '简中',
+        groupIndex: 8,
+        trusted: true,
+      });
+    },
+  );
+
+  it('标签中的集数不匹配旧记录时不猜测身份', () => {
+    expect(
+      resolvePlayRecordEpisode(
+        { index: 16, group_index: 8, group_total: 8, group_label: '简中 7' },
+        [
+          { label: '繁中', count: 9 },
+          { label: '简中', count: 9 },
+        ],
+        18,
+      ).trusted,
+    ).toBe(false);
+  });
+
+  it('去角标后匹配多个分组时不猜测身份', () => {
+    expect(
+      resolvePlayRecordEpisode(
+        { index: 16, group_index: 8, group_total: 8, group_label: '简中 8' },
+        [
+          { label: '简中', count: 9 },
+          { label: '简中 9', count: 9 },
+        ],
+        18,
+      ).trusted,
+    ).toBe(false);
+  });
+
+  it('数字版本名优先精确匹配，不被集数兼容规则覆盖', () => {
+    expect(
+      resolvePlayRecordEpisode(
+        { index: 1, group_index: 1, group_total: 2, group_label: '版本2' },
+        [
+          { label: '版本', count: 3 },
+          { label: '版本2', count: 3 },
+        ],
+        6,
+      ),
+    ).toMatchObject({ episodeIndex: 3, groupLabel: '版本2', trusted: true });
+    expect(
+      areEpisodeGroupLabelsEquivalent(
+        { label: '版本1', count: 1 },
+        { label: '版本2', count: 2 },
+      ),
+    ).toBe(false);
+  });
+
   it('靠前分组新增剧集后按标签重新对齐绝对索引', () => {
     // 记录：简中第 10 集，旧结构下绝对索引 21（0-based 20）
     const resolved = resolvePlayRecordEpisode(

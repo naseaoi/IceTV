@@ -1,5 +1,7 @@
 ﻿import { getVideoResolutionFromM3u8 } from '@/features/play/lib/hls-utils';
 import { resolveLazyEpisodeUrl } from '@/features/play/lib/lazyEpisode';
+import { fetchSourceProbe } from '@/features/play/lib/sourceProbeRequest';
+import { SourceProbeDeferredError } from '@/features/play/lib/sourceProbeRequestPolicy';
 import {
   buildVodSegmentProxyUrl,
   isVodM3u8Url,
@@ -86,7 +88,7 @@ async function probeMp4WithMode(
   const startedAt = performance.now();
 
   try {
-    const response = await fetch(url, {
+    const response = await fetchSourceProbe(url, {
       cache: 'no-store',
       headers: { Range: `bytes=0-${MP4_PROBE_MAX_BYTES - 1}` },
       signal: abortState.signal,
@@ -132,7 +134,12 @@ async function probeMp4(
     }
     return result;
   } catch (error) {
-    if (useProxy || !sourceKey || !shouldAutoFallbackToServer(sourceKey)) {
+    if (
+      error instanceof SourceProbeDeferredError ||
+      useProxy ||
+      !sourceKey ||
+      !shouldAutoFallbackToServer(sourceKey)
+    ) {
       throw error;
     }
 
@@ -150,7 +157,7 @@ export async function probeVodEpisodeUrl(
   sourceKey: string,
 ): Promise<VodProbeResult> {
   const targetUrl = isLazyEpisodeUrl(rawUrl)
-    ? await resolveLazyEpisodeUrl(sourceKey, rawUrl)
+    ? await resolveLazyEpisodeUrl(sourceKey, rawUrl, { probe: true })
     : rawUrl;
 
   if (isVodM3u8Url(targetUrl)) {

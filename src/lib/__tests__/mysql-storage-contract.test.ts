@@ -31,6 +31,8 @@ type FakeState = {
   messageStates: Map<string, string>;
   loginActivities: Map<string, number>;
   inviteCodeUsage: Map<string, number>;
+  danmakuEpisodes: Map<string, Map<string, number>>;
+  danmakuEnabled: Map<string, boolean>;
 };
 
 function cloneNestedMap(source: Map<string, Map<string, string>>) {
@@ -52,6 +54,13 @@ function cloneState(state: FakeState): FakeState {
     messageStates: new Map(state.messageStates),
     loginActivities: new Map(state.loginActivities),
     inviteCodeUsage: new Map(state.inviteCodeUsage),
+    danmakuEpisodes: new Map(
+      Array.from(state.danmakuEpisodes.entries(), ([key, value]) => [
+        key,
+        new Map(value),
+      ]),
+    ),
+    danmakuEnabled: new Map(state.danmakuEnabled),
   };
 }
 
@@ -68,6 +77,8 @@ function createState(): FakeState {
     messageStates: new Map(),
     loginActivities: new Map(),
     inviteCodeUsage: new Map(),
+    danmakuEpisodes: new Map(),
+    danmakuEnabled: new Map(),
   };
 }
 
@@ -124,6 +135,7 @@ function splitMultiRowInsert(
 }
 
 const TRACKING_SQL_MARKER = "'$.tracking_enabled'";
+const STALE_METADATA_SQL_MARKER = 'JSON_VALID';
 
 function trackingCreatedAt(record: PlayRecord): number {
   return (
@@ -132,6 +144,67 @@ function trackingCreatedAt(record: PlayRecord): number {
     record.save_time ||
     0
   );
+}
+
+function isStaleMetadata(value: unknown, now: number, ttlMs: number): boolean {
+  const checkedAt =
+    value && typeof value === 'object'
+      ? (value as { metadata_checked_at?: unknown }).metadata_checked_at
+      : undefined;
+  return (
+    typeof checkedAt !== 'number' ||
+    !Number.isFinite(checkedAt) ||
+    checkedAt > now ||
+    now - checkedAt >= ttlMs
+  );
+}
+
+function selectStalePlayRecordRows(
+  state: FakeState,
+  username: string,
+  now: number,
+  ttlMs: number,
+  cursorKey?: string,
+) {
+  return Array.from(state.playRecords.get(username)?.entries() || [])
+    .map(([record_key, record_json]) => ({
+      record_key,
+      record_json,
+      record: JSON.parse(record_json) as PlayRecord,
+    }))
+    .filter(
+      ({ record, record_key }) =>
+        isStaleMetadata(record, now, ttlMs) &&
+        (cursorKey === undefined || record_key > cursorKey),
+    )
+    .sort((left, right) => left.record_key.localeCompare(right.record_key))
+    .map(({ record_key, record_json }) => ({ record_key, record_json }));
+}
+
+function selectStaleFavoriteRows(
+  state: FakeState,
+  username: string,
+  now: number,
+  ttlMs: number,
+  cursorKey?: string,
+) {
+  return Array.from(state.favorites.get(username)?.entries() || [])
+    .map(([favorite_key, favorite_json]) => ({
+      favorite_key,
+      favorite_json,
+      favorite: JSON.parse(favorite_json) as Favorite,
+    }))
+    .filter(
+      ({ favorite, favorite_key }) =>
+        favorite.origin !== 'live' &&
+        isStaleMetadata(favorite, now, ttlMs) &&
+        (cursorKey === undefined || favorite_key > cursorKey),
+    )
+    .sort((left, right) => left.favorite_key.localeCompare(right.favorite_key))
+    .map(({ favorite_key, favorite_json }) => ({
+      favorite_key,
+      favorite_json,
+    }));
 }
 
 function selectUnreadTrackingRows(
@@ -230,6 +303,64 @@ function createFakePool() {
 
     if (normalized === 'DELETE FROM user_message_state') {
       currentState.messageStates.clear();
+      return [[], []];
+    }
+
+    if (normalized === 'DELETE FROM user_danmaku_settings WHERE username = ?') {
+      const [username] = params as [string];
+      currentState.danmakuEnabled.delete(username);
+      return [[], []];
+    }
+
+    if (normalized === 'DELETE FROM user_danmaku_settings') {
+      currentState.danmakuEnabled.clear();
+      return [[], []];
+    }
+
+    if (
+      normalized ===
+        'INSERT INTO user_danmaku_settings (username, enabled) VALUES (?, ?) ON DUPLICATE KEY UPDATE enabled = VALUES(enabled)' ||
+      normalized ===
+        'INSERT INTO user_danmaku_settings (username, enabled) VALUES (?, ?)'
+    ) {
+      const [username, enabled] = params as [string, number | boolean];
+      currentState.danmakuEnabled.set(username, Number(enabled) !== 0);
+      return [[], []];
+    }
+
+    if (
+      normalized ===
+      'INSERT INTO user_danmaku_episodes (username, scope_key, episode_id, updated_at) VALUES (?, ?, ?, ?) ON DUPLICATE KEY UPDATE episode_id = VALUES(episode_id), updated_at = VALUES(updated_at)'
+    ) {
+      const [username, scopeKey, episodeId] = params as [
+        string,
+        string,
+        number,
+      ];
+      const scopes =
+        currentState.danmakuEpisodes.get(username) ?? new Map<string, number>();
+      scopes.set(scopeKey, episodeId);
+      currentState.danmakuEpisodes.set(username, scopes);
+      return [[], []];
+    }
+
+    if (
+      normalized ===
+      'DELETE FROM user_danmaku_episodes WHERE username = ? AND scope_key = ?'
+    ) {
+      const [username, scopeKey] = params as [string, string];
+      currentState.danmakuEpisodes.get(username)?.delete(scopeKey);
+      return [[], []];
+    }
+
+    if (normalized === 'DELETE FROM user_danmaku_episodes WHERE username = ?') {
+      const [username] = params as [string];
+      currentState.danmakuEpisodes.delete(username);
+      return [[], []];
+    }
+
+    if (normalized === 'DELETE FROM user_danmaku_episodes') {
+      currentState.danmakuEpisodes.clear();
       return [[], []];
     }
 
@@ -365,6 +496,24 @@ function createFakePool() {
 
     if (
       normalized ===
+      'UPDATE play_records SET record_json = ? WHERE username = ? AND record_key = ? AND BINARY record_json = BINARY ?'
+    ) {
+      const [value, username, key, snapshot] = params as [
+        string,
+        string,
+        string,
+        string,
+      ];
+      const records = currentState.playRecords.get(username);
+      if (!records || records.get(key) !== snapshot) {
+        return [{ affectedRows: 0 }, []];
+      }
+      records.set(key, value);
+      return [{ affectedRows: 1 }, []];
+    }
+
+    if (
+      normalized ===
       'INSERT INTO favorites (username, favorite_key, favorite_json) VALUES (?, ?, ?) ON DUPLICATE KEY UPDATE favorite_json = VALUES(favorite_json)'
     ) {
       const [username, key, value] = params as [string, string, string];
@@ -379,6 +528,24 @@ function createFakePool() {
       const [username, key, value] = params as [string, string, string];
       upsertJsonRecord(currentState.favorites, username, key, value);
       return [[], []];
+    }
+
+    if (
+      normalized ===
+      'UPDATE favorites SET favorite_json = ? WHERE username = ? AND favorite_key = ? AND BINARY favorite_json = BINARY ?'
+    ) {
+      const [value, username, key, snapshot] = params as [
+        string,
+        string,
+        string,
+        string,
+      ];
+      const favorites = currentState.favorites.get(username);
+      if (!favorites || favorites.get(key) !== snapshot) {
+        return [{ affectedRows: 0 }, []];
+      }
+      favorites.set(key, value);
+      return [{ affectedRows: 1 }, []];
     }
 
     if (
@@ -745,6 +912,10 @@ function createFakePool() {
       return [[], []];
     }
 
+    if (normalized === 'DELETE FROM shared_cache') {
+      return [{ affectedRows: 0 }, []];
+    }
+
     throw new Error(`Unhandled execute SQL: ${normalized}`);
   };
 
@@ -780,6 +951,28 @@ function createFakePool() {
         ),
         [],
       ];
+    }
+
+    if (
+      normalized.startsWith(
+        'SELECT record_key, record_json FROM play_records WHERE username = ? AND',
+      ) &&
+      normalized.includes(STALE_METADATA_SQL_MARKER)
+    ) {
+      const hasCursor = params.length === 5;
+      const username = params[0] as string;
+      const cursorKey = hasCursor ? (params[1] as string) : undefined;
+      const staleBefore = params[hasCursor ? 2 : 1] as number;
+      const now = params[hasCursor ? 3 : 2] as number;
+      const limit = params.at(-1) as number;
+      const rows = selectStalePlayRecordRows(
+        currentState,
+        username,
+        now,
+        now - staleBefore,
+        cursorKey,
+      );
+      return [rows.slice(0, limit), []];
     }
 
     if (
@@ -901,6 +1094,28 @@ function createFakePool() {
         ),
         [],
       ];
+    }
+
+    if (
+      normalized.startsWith(
+        'SELECT favorite_key, favorite_json FROM favorites WHERE username = ? AND',
+      ) &&
+      normalized.includes(STALE_METADATA_SQL_MARKER)
+    ) {
+      const hasCursor = params.length === 5;
+      const username = params[0] as string;
+      const cursorKey = hasCursor ? (params[1] as string) : undefined;
+      const staleBefore = params[hasCursor ? 2 : 1] as number;
+      const now = params[hasCursor ? 3 : 2] as number;
+      const limit = params.at(-1) as number;
+      const rows = selectStaleFavoriteRows(
+        currentState,
+        username,
+        now,
+        now - staleBefore,
+        cursorKey,
+      );
+      return [rows.slice(0, limit), []];
     }
 
     if (
@@ -1162,6 +1377,26 @@ function createFakePool() {
       return [stateJson ? [{ state_json: stateJson }] : [], []];
     }
 
+    if (
+      normalized ===
+      'SELECT episode_id FROM user_danmaku_episodes WHERE username = ? AND scope_key = ?'
+    ) {
+      const [username, scopeKey] = params as [string, string];
+      const episodeId = currentState.danmakuEpisodes
+        .get(username)
+        ?.get(scopeKey);
+      return [episodeId === undefined ? [] : [{ episode_id: episodeId }], []];
+    }
+
+    if (
+      normalized ===
+      'SELECT enabled FROM user_danmaku_settings WHERE username = ? LIMIT 1'
+    ) {
+      const [username] = params as [string];
+      const enabled = currentState.danmakuEnabled.get(username);
+      return [enabled === undefined ? [] : [{ enabled: enabled ? 1 : 0 }], []];
+    }
+
     if (normalized === 'SELECT code, used_count FROM invite_code_usage') {
       return [
         Array.from(currentState.inviteCodeUsage.entries()).map(
@@ -1343,6 +1578,7 @@ const adminConfig: AdminConfig = {
     DefaultAggregateSearch: true,
     EnableOptimization: true,
     LiveDirectConnect: false,
+    EnableDanmaku: false,
     ...DEFAULT_RUNTIME_PARAMS,
     SearchDownstreamMaxPage: 5,
     SiteInterfaceCacheTime: 300,
@@ -1501,6 +1737,7 @@ describe('mysql storage contract', () => {
     await storage.setUserMessageState('demo-user', {
       readAnnouncementId: 'announcement:v1',
     });
+    await storage.setDanmakuEnabledPreference('demo-user', true);
     await storage.recordUserLogin('demo-user', 1700000000000);
     await storage.addSearchHistory('demo-user', 'second');
     await storage.addSearchHistory('demo-user', 'first');
@@ -1525,6 +1762,12 @@ describe('mysql storage contract', () => {
     await expect(storage.getUserMessageState('demo-user')).resolves.toEqual({
       readAnnouncementId: 'announcement:v1',
     });
+    await expect(
+      storage.getDanmakuEnabledPreference('demo-user'),
+    ).resolves.toBe(true);
+    await expect(
+      storage.getDanmakuEnabledPreference('other-user'),
+    ).resolves.toBeNull();
     await expect(storage.getUserLastLogin('demo-user')).resolves.toBe(
       1700000000000,
     );
@@ -1541,6 +1784,9 @@ describe('mysql storage contract', () => {
     await expect(storage.getPlaybackSessions('demo-user')).resolves.toEqual([]);
     await expect(storage.getSearchHistory('demo-user')).resolves.toEqual([]);
     await expect(storage.getUserMessageState('demo-user')).resolves.toEqual({});
+    await expect(
+      storage.getDanmakuEnabledPreference('demo-user'),
+    ).resolves.toBeNull();
     await expect(storage.getUserLastLogin('demo-user')).resolves.toBeNull();
     await expect(storage.getAllUserLastLogins()).resolves.toEqual({});
   });
@@ -1578,6 +1824,155 @@ describe('mysql storage contract', () => {
     });
     expect(Object.keys(secondPage.items)).toEqual(['source+old']);
     expect(secondPage.nextCursor).toBeNull();
+  });
+
+  it('按主键游标分页读取过期元数据并排除新鲜项与直播收藏', async () => {
+    const storage = new MySqlStorage('mysql://demo:demo@localhost:3306/icetv');
+    const now = 10_000;
+    const ttlMs = 1_000;
+
+    await storage.setPlayRecords('metadata-user', {
+      'source+a': { ...playRecord, metadata_checked_at: 9_500 },
+      'source+b': { ...playRecord, metadata_checked_at: 8_000 },
+      'source+c': { ...playRecord },
+      'source+d': { ...playRecord, metadata_checked_at: now + 1 },
+      'source+e': {
+        ...playRecord,
+        metadata_checked_at: 'invalid' as unknown as number,
+      },
+    });
+    await storage.setFavorite('metadata-user', 'source+a', {
+      ...favorite,
+      metadata_checked_at: 9_500,
+    });
+    await storage.setFavorite('metadata-user', 'source+b', {
+      ...favorite,
+      metadata_checked_at: 8_000,
+    });
+    await storage.setFavorite('metadata-user', 'source-live', {
+      ...favorite,
+      origin: 'live',
+    });
+
+    const firstRecords = await storage.getStalePlayRecordPage(
+      'metadata-user',
+      now,
+      ttlMs,
+      2,
+    );
+    const secondRecords = await storage.getStalePlayRecordPage(
+      'metadata-user',
+      now,
+      ttlMs,
+      2,
+      firstRecords.nextCursor || undefined,
+    );
+    const favorites = await storage.getStaleFavoritePage(
+      'metadata-user',
+      now,
+      ttlMs,
+      10,
+    );
+
+    expect(firstRecords.items.map(({ key }) => key)).toEqual([
+      'source+b',
+      'source+c',
+    ]);
+    expect(secondRecords.items.map(({ key }) => key)).toEqual([
+      'source+d',
+      'source+e',
+    ]);
+    expect(secondRecords.nextCursor).toBeNull();
+    expect(favorites.items.map(({ key }) => key)).toEqual(['source+b']);
+  });
+
+  it('按原始 JSON 快照进行播放记录与收藏 CAS', async () => {
+    const storage = new MySqlStorage('mysql://demo:demo@localhost:3306/icetv');
+    const staleRecord = {
+      ...playRecord,
+      metadata_checked_at: 1,
+    };
+    const staleFavorite = {
+      ...favorite,
+      metadata_checked_at: 1,
+    };
+
+    await storage.setPlayRecord('cas-user', 'source+record', staleRecord);
+    await storage.setFavorite('cas-user', 'source+favorite', staleFavorite);
+
+    const recordPage = await storage.getStalePlayRecordPage(
+      'cas-user',
+      10_000,
+      1_000,
+      10,
+    );
+    const favoritePage = await storage.getStaleFavoritePage(
+      'cas-user',
+      10_000,
+      1_000,
+      10,
+    );
+    const recordSnapshot = recordPage.items[0]?.snapshot;
+    const favoriteSnapshot = favoritePage.items[0]?.snapshot;
+    expect(recordSnapshot).toBe(JSON.stringify(staleRecord));
+    expect(favoriteSnapshot).toBe(JSON.stringify(staleFavorite));
+
+    const refreshedRecord = {
+      ...staleRecord,
+      metadata_checked_at: 10_000,
+    };
+    const refreshedFavorite = {
+      ...staleFavorite,
+      metadata_checked_at: 10_000,
+    };
+    await expect(
+      storage.setPlayRecordIfUnchanged(
+        'cas-user',
+        'source+record',
+        refreshedRecord,
+        recordSnapshot as string,
+      ),
+    ).resolves.toBe(true);
+    await expect(
+      storage.setFavoriteIfUnchanged(
+        'cas-user',
+        'source+favorite',
+        refreshedFavorite,
+        favoriteSnapshot as string,
+      ),
+    ).resolves.toBe(true);
+
+    const concurrentRecord = { ...refreshedRecord, play_time: 99 };
+    const concurrentFavorite = { ...refreshedFavorite, title: '用户修改' };
+    await storage.setPlayRecord('cas-user', 'source+record', concurrentRecord);
+    await storage.setFavorite(
+      'cas-user',
+      'source+favorite',
+      concurrentFavorite,
+    );
+
+    await expect(
+      storage.setPlayRecordIfUnchanged(
+        'cas-user',
+        'source+record',
+        { ...refreshedRecord, play_time: 1 },
+        recordSnapshot as string,
+      ),
+    ).resolves.toBe(false);
+    await expect(
+      storage.setFavoriteIfUnchanged(
+        'cas-user',
+        'source+favorite',
+        { ...refreshedFavorite, title: 'cron 覆盖' },
+        favoriteSnapshot as string,
+      ),
+    ).resolves.toBe(false);
+    await expect(
+      storage.getPlayRecord('cas-user', 'source+record'),
+    ).resolves.toEqual(concurrentRecord);
+    await expect(
+      storage.getFavorite('cas-user', 'source+favorite'),
+    ).resolves.toEqual(concurrentFavorite);
   });
 
   // 以下四个未读追更用例走 fake pool，其筛选复用生产的 hasPlayRecordUpdate
@@ -1792,6 +2187,7 @@ describe('mysql storage contract', () => {
           skipConfigs: { 'source+1': skipConfig },
           playbackSessions: { [playbackSession.id]: playbackSession },
           messageState: { readAnnouncementId: 'announcement:v1' },
+          danmakuEnabled: false,
           lastLoginAt: 1700000000000,
         },
       },
@@ -1834,6 +2230,9 @@ describe('mysql storage contract', () => {
     await expect(storage.getUserMessageState('demo-user')).resolves.toEqual({
       readAnnouncementId: 'announcement:v1',
     });
+    await expect(
+      storage.getDanmakuEnabledPreference('demo-user'),
+    ).resolves.toBe(false);
     await expect(storage.getUserLastLogin('demo-user')).resolves.toBe(
       1700000000000,
     );

@@ -8,7 +8,12 @@ const DATABASE = 'icetv_test';
 const PORT = process.env.MYSQL_TEST_PORT || '33061';
 const IMAGE = 'mysql:8.4';
 const READY_TIMEOUT_MS = 180_000;
-const TEST_PATTERNS = ['mysql-tracking-live', 'tracking-backend-parity'];
+const TEST_PATTERNS = [
+  'mysql-tracking-live',
+  'tracking-backend-parity',
+  'shared-cache-storage',
+  'shared-resource-store',
+];
 
 function docker(args, options = {}) {
   return execFileSync('docker', args, { encoding: 'utf8', ...options });

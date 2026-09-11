@@ -9,6 +9,9 @@ export interface SiteConfig {
   DefaultAggregateSearch: boolean;
   EnableOptimization: boolean;
   LiveDirectConnect: boolean;
+  EnableDanmaku: boolean;
+  DanmakuEpisodeLimit: number;
+  DanmakuRequestTimeoutSeconds: number;
   SearchDownstreamMaxPage: number;
   SiteInterfaceCacheTime: number;
   VodPageTimeoutSeconds: number;
@@ -23,6 +26,8 @@ export interface SiteConfig {
   DataImportPlaybackSessionsLimit: number;
   LivePrecheckTimeoutSeconds: number;
   ProxyRequestTimeoutSeconds: number;
+  ImageProxyTimeoutSeconds: number;
+  UpstreamSearchConcurrency: number;
   DoubanProxyType: string;
   DoubanProxy: string;
   BangumiDataSource: string;

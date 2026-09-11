@@ -11,6 +11,8 @@ import {
 } from '@/features/play/components/PlayStateViews';
 import { useArtPlayer } from '@/features/play/hooks/useArtPlayer';
 import { useAuthRecovery } from '@/features/play/hooks/useAuthRecovery';
+import { useDanmakuPreference } from '@/features/play/hooks/useDanmakuPreference';
+import { useDanmakuWarmup } from '@/features/play/hooks/useDanmakuWarmup';
 import { useEpisodeSwitch } from '@/features/play/hooks/useEpisodeSwitch';
 import { usePlayFavorite } from '@/features/play/hooks/usePlayFavorite';
 import { updateVideoUrl, usePlayInit } from '@/features/play/hooks/usePlayInit';
@@ -18,6 +20,11 @@ import { usePlayPageState } from '@/features/play/hooks/usePlayPageState';
 import { usePlayProgress } from '@/features/play/hooks/usePlayProgress';
 import { useSkipConfig } from '@/features/play/hooks/useSkipConfig';
 import { useSourceSwitch } from '@/features/play/hooks/useSourceSwitch';
+import {
+  applyDanmakuHeatmapVisibility,
+  ensureDanmakuLoaded,
+  reloadDanmaku,
+} from '@/features/play/lib/danmaku/attach';
 import {
   peekResolvedLazyEpisodeUrl,
   prewarmLazyEpisodeUrl,
@@ -52,7 +59,11 @@ function readInitialAggregateGroupLength() {
   }
 }
 
-function AuthenticatedPlayPageClient() {
+function AuthenticatedPlayPageClient({
+  initialDanmakuEnabled,
+}: {
+  initialDanmakuEnabled: boolean | null;
+}) {
   const searchParams = useSearchParams();
   const goBack = useBackNavigation('/');
 
@@ -152,6 +163,15 @@ function AuthenticatedPlayPageClient() {
     artRef,
     wakeLockRef,
   } = state;
+
+  const {
+    enabledRef: danmakuEnabledRef,
+    onEnabledChange: onDanmakuEnabledChange,
+  } = useDanmakuPreference(initialDanmakuEnabled);
+  useDanmakuWarmup({
+    enabledRef: danmakuEnabledRef,
+    title: videoTitle || searchTitle,
+  });
 
   const totalEpisodes = detail?.episodes?.length || 0;
   const [isSingleAggregateStartup] = useState(
@@ -496,6 +516,57 @@ function AuthenticatedPlayPageClient() {
     [setAvailableSources],
   );
 
+  const getCurrentDanmakuContext = useCallback(() => {
+    return {
+      source: currentSourceRef.current,
+      videoId: currentIdRef.current,
+      episodeIndex: currentEpisodeIndexRef.current,
+      searchTitle: detailRef.current?.title || videoTitleRef.current || '',
+      searchYear: videoYearRef.current || detailRef.current?.year || '',
+    };
+  }, [
+    currentSourceRef,
+    currentIdRef,
+    currentEpisodeIndexRef,
+    detailRef,
+    videoTitleRef,
+    videoYearRef,
+  ]);
+
+  const handleDanmakuEnable = useCallback(() => {
+    void ensureDanmakuLoaded(
+      artPlayerRef.current,
+      getCurrentDanmakuContext(),
+      danmakuEnabledRef,
+    );
+  }, [artPlayerRef, danmakuEnabledRef, getCurrentDanmakuContext]);
+
+  const handleDanmakuReload = useCallback(
+    (options?: { refreshData?: boolean }) => {
+      return reloadDanmaku(
+        artPlayerRef.current,
+        getCurrentDanmakuContext(),
+        danmakuEnabledRef,
+        {
+          forcePluginReload: true,
+          refreshData: options?.refreshData !== false,
+        },
+      );
+    },
+    [artPlayerRef, danmakuEnabledRef, getCurrentDanmakuContext],
+  );
+
+  const handleDanmakuHeatmapChange = useCallback(
+    (enabled: boolean) => {
+      applyDanmakuHeatmapVisibility(
+        artPlayerRef.current,
+        danmakuEnabledRef.current,
+        enabled,
+      );
+    },
+    [artPlayerRef, danmakuEnabledRef],
+  );
+
   useArtPlayer({
     artRef,
     artPlayerRef,
@@ -503,6 +574,7 @@ function AuthenticatedPlayPageClient() {
     videoCover,
     videoTitle,
     loading,
+    isVideoLoading,
     playbackRetryNonce,
     detail,
     currentEpisodeIndex,
@@ -539,6 +611,9 @@ function AuthenticatedPlayPageClient() {
     requestWakeLock,
     releaseWakeLock,
     cleanupPlayer,
+    danmakuEnabledRef,
+    onDanmakuEnabledChange,
+    onDanmakuEnable: handleDanmakuEnable,
     onSourceProxyFallbackStarted: useCallback(() => {
       setVideoLoadingAttempt((prev) => prev + 1);
     }, [setVideoLoadingAttempt]),
@@ -651,6 +726,8 @@ function AuthenticatedPlayPageClient() {
       videoDoubanId={videoDoubanId}
       onSourceDetailFetched={handleSourceDetailFetched}
       onAddSources={handleAddSources}
+      onDanmakuReload={handleDanmakuReload}
+      onDanmakuHeatmapChange={handleDanmakuHeatmapChange}
       onLoadingTimeout={handleLoadingTimeout}
       searchType={searchType}
       playbackError={playbackError}
@@ -689,14 +766,20 @@ function AuthenticatedPlayPageClient() {
   return renderMainContent(null);
 }
 
-export function PlayPageClient() {
+export function PlayPageClient({
+  initialDanmakuEnabled = null,
+}: {
+  initialDanmakuEnabled?: boolean | null;
+} = {}) {
   return (
     <AuthenticatedRoute
       activePath='/play'
       contentMode='player'
       message='请先登录后再播放内容。'
     >
-      <AuthenticatedPlayPageClient />
+      <AuthenticatedPlayPageClient
+        initialDanmakuEnabled={initialDanmakuEnabled}
+      />
     </AuthenticatedRoute>
   );
 }

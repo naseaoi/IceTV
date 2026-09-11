@@ -49,7 +49,6 @@ import {
   ensureVideoSource,
   formatBytesPerSecond,
   handleHlsFatalError,
-  showTimedArtNotice,
 } from '@/lib/player-utils';
 import {
   clearSourceProxyOverride,
@@ -558,12 +557,6 @@ export function createVodM3u8Loader({
         }
 
         setRealtimeLoadSpeed('源站响应较慢，正在继续加载');
-        try {
-          const activePlayer = artPlayerRef.current;
-          if (activePlayer) {
-            showTimedArtNotice(activePlayer, '源站响应较慢，正在继续加载');
-          }
-        } catch {}
         hls.startLoad();
       }, PLAYBACK_STALL_CONFIRMATION_DELAY_MS);
     };

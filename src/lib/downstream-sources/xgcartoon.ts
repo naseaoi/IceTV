@@ -1,6 +1,8 @@
 import type { ApiSite } from '@/lib/config';
 import { buildLazyEpisodeUrl } from '@/lib/lazy-episodes';
+import { ResourceLimitError } from '@/lib/server-resource-errors';
 import type { SearchResult } from '@/lib/types';
+import { fetchUpstream } from '@/lib/upstream-fetch.server';
 import { cleanHtmlTags } from '@/lib/utils';
 import {
   buildXgcartoonPlaylistUrl,
@@ -67,7 +69,7 @@ async function fetchXgcartoonHtml(
     const headers = referer
       ? { ...BROWSER_HTML_HEADERS, Referer: referer }
       : BROWSER_HTML_HEADERS;
-    const res = await fetch(url, {
+    const res = await fetchUpstream(url, {
       headers,
       redirect: 'follow',
       signal: abortState.signal,
@@ -79,7 +81,8 @@ async function fetchXgcartoonHtml(
       html: await res.text(),
       finalUrl: res.url || url,
     };
-  } catch {
+  } catch (error) {
+    if (error instanceof ResourceLimitError) throw error;
     return null;
   } finally {
     abortState.cleanup();
@@ -162,6 +165,7 @@ export async function searchFromXgcartoon(
     if (isAbortError(error)) {
       return [];
     }
+    if (error instanceof ResourceLimitError) throw error;
     return [];
   }
 }

@@ -1,6 +1,7 @@
 ﻿import { NextRequest, NextResponse } from 'next/server';
 
 import { getBangumiCoverTargetUrl } from '@/features/bangumi/lib/bangumi-cover-url';
+import { getConfigForRead } from '@/lib/config';
 import {
   type ProxyStreamResult,
   fetchStreamThroughProxy,
@@ -11,12 +12,12 @@ import {
   createLimitedReadableStream,
   ResponseSizeLimitError,
 } from '@/lib/proxy-response-limits';
+import { normalizeRuntimeParams } from '@/lib/runtime-params';
 import { fetchWithUrlGuard, UrlValidationError } from '@/lib/url-guard';
 
 export const runtime = 'nodejs';
 
 const BANGUMI_COVER_MAX_BYTES = 8 * 1024 * 1024;
-const BANGUMI_COVER_TIMEOUT_MS = 15_000;
 const BANGUMI_COVER_ACCEPT =
   'image/avif,image/webp,image/apng,image/*,*/*;q=0.8';
 const BANGUMI_COVER_USER_AGENT =
@@ -40,8 +41,12 @@ async function handleBangumiCover(
     );
   }
 
+  const config = await getConfigForRead();
+  const timeoutMs =
+    normalizeRuntimeParams(config.SiteConfig).ImageProxyTimeoutSeconds * 1000;
+
   try {
-    const imageResponse = await fetchBangumiCover(targetUrl, method);
+    const imageResponse = await fetchBangumiCover(targetUrl, method, timeoutMs);
     const responseHeaders = createBangumiCoverHeaders(imageResponse.headers);
 
     if (!responseHeaders) {
@@ -87,11 +92,12 @@ async function handleBangumiCover(
 async function fetchBangumiCover(
   targetUrl: URL,
   method: 'GET' | 'HEAD',
+  timeoutMs: number,
 ): Promise<ProxyStreamResult> {
   const proxyUrl = getProxyUrlForTarget(targetUrl);
   if (proxyUrl) {
     return fetchStreamThroughProxy(targetUrl, proxyUrl, {
-      timeoutMs: BANGUMI_COVER_TIMEOUT_MS,
+      timeoutMs,
       userAgent: BANGUMI_COVER_USER_AGENT,
       maxBytes: BANGUMI_COVER_MAX_BYTES,
       accept: BANGUMI_COVER_ACCEPT,
@@ -108,6 +114,7 @@ async function fetchBangumiCover(
       Referer: 'https://bgm.tv/',
       'User-Agent': BANGUMI_COVER_USER_AGENT,
     },
+    timeoutMs,
   });
 
   if (!response.ok) {

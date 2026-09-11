@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 
+import { getConfigForRead } from '@/lib/config';
 import {
   type CoverImageResizeOptions,
   CoverImageResizeParamError,
@@ -14,10 +15,12 @@ import {
   readArrayBufferLimited,
   ResponseSizeLimitError,
 } from '@/lib/proxy-response-limits';
+import { normalizeRuntimeParams } from '@/lib/runtime-params';
 import {
   recordServerProxyFailure,
   requireServerProxyQuota,
 } from '@/lib/server-proxy-guard';
+import { resourceLimitResponse } from '@/lib/server-resource-errors';
 import {
   fetchWithUrlGuard,
   UrlValidationError,
@@ -49,14 +52,17 @@ class ImageOriginError extends Error {
 async function fetchImageOrigin(
   url: string,
   method: 'GET' | 'HEAD',
+  timeoutMs: number,
 ): Promise<{ response: Response; contentType: string }> {
   const response = await fetchWithUrlGuard(url, {
     method,
     headers: ORIGIN_FETCH_HEADERS,
     skipInitialValidation: true,
+    timeoutMs,
   });
 
   if (!response.ok) {
+    await response.body?.cancel().catch(() => {});
     throw new ImageOriginError(
       response.status,
       response.status,
@@ -66,6 +72,7 @@ async function fetchImageOrigin(
 
   const contentType = response.headers.get('content-type');
   if (!contentType?.toLowerCase().startsWith('image/')) {
+    await response.body?.cancel().catch(() => {});
     throw new ImageOriginError(
       415,
       contentType || 'content-type',
@@ -108,12 +115,16 @@ async function proxyImage(request: NextRequest, method: 'GET' | 'HEAD') {
     return NextResponse.json({ error: 'Invalid URL' }, { status: 403 });
   }
 
-  const quotaFailure = requireServerProxyQuota(
+  const quotaFailure = await requireServerProxyQuota(
     'douban-image',
     request,
     authorization.via === 'session' ? authorization.username : undefined,
   );
   if (quotaFailure) return quotaFailure;
+
+  const config = await getConfigForRead();
+  const originTimeoutMs =
+    normalizeRuntimeParams(config.SiteConfig).ImageProxyTimeoutSeconds * 1000;
 
   try {
     if (method === 'GET' && resizeOptions) {
@@ -123,7 +134,11 @@ async function proxyImage(request: NextRequest, method: 'GET' | 'HEAD') {
         originUrl,
         resizeTarget,
         async () => {
-          const { response } = await fetchImageOrigin(originUrl, method);
+          const { response } = await fetchImageOrigin(
+            originUrl,
+            method,
+            originTimeoutMs,
+          );
           const source = await readArrayBufferLimited(
             response,
             MAX_IMAGE_BYTES,
@@ -145,6 +160,7 @@ async function proxyImage(request: NextRequest, method: 'GET' | 'HEAD') {
     const { response: imageResponse, contentType } = await fetchImageOrigin(
       validation.url,
       method,
+      originTimeoutMs,
     );
 
     // 创建响应头
@@ -182,6 +198,8 @@ async function proxyImage(request: NextRequest, method: 'GET' | 'HEAD') {
       },
     );
   } catch (error) {
+    const busy = resourceLimitResponse(error);
+    if (busy) return busy;
     if (error instanceof ImageOriginError) {
       recordServerProxyFailure('douban-image', error.reason);
       return NextResponse.json(

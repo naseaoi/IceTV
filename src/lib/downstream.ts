@@ -24,7 +24,10 @@ import {
   peekCachedSearchPage,
   setCachedSearchPage,
 } from '@/lib/search-cache';
+import { ResourceLimitError } from '@/lib/server-resource-errors';
+import { getSourceCacheKey } from '@/lib/source-cache-key';
 import { SearchResult } from '@/lib/types';
+import { fetchUpstream } from '@/lib/upstream-fetch.server';
 import { cleanHtmlTags, normalizeInlineText } from '@/lib/utils';
 
 interface ApiSearchItem {
@@ -105,7 +108,8 @@ async function searchWithCache(
     return { results: [] };
   }
 
-  const cached = getCachedSearchPage(apiSite.key, query, page);
+  const cacheSource = getSourceCacheKey(apiSite);
+  const cached = getCachedSearchPage(cacheSource, query, page);
   if (cached) {
     if (cached.status === 'ok') {
       return { results: cached.data, pageCount: cached.pageCount };
@@ -114,9 +118,9 @@ async function searchWithCache(
     }
   }
 
-  const stale = peekCachedSearchPage(apiSite.key, query, page);
+  const stale = peekCachedSearchPage(cacheSource, query, page);
   if (stale && !stale.fresh) {
-    dedupeSearchLoad(apiSite.key, query, page, () =>
+    dedupeSearchLoad(cacheSource, query, page, () =>
       fetchAndCacheSearchPage(apiSite, query, page, url, timeoutMs),
     ).catch(() => {});
     if (stale.entry.status === 'ok') {
@@ -125,7 +129,7 @@ async function searchWithCache(
     return { results: [] };
   }
 
-  return dedupeSearchLoad(apiSite.key, query, page, () =>
+  return dedupeSearchLoad(cacheSource, query, page, () =>
     fetchAndCacheSearchPage(apiSite, query, page, url, timeoutMs, signal),
   );
 }
@@ -145,14 +149,20 @@ async function fetchAndCacheSearchPage(
   const abortState = createTimedAbortController(signal, timeoutMs);
 
   try {
-    const response = await fetch(url, {
+    const response = await fetchUpstream(url, {
       headers: API_CONFIG.search.headers,
       signal: abortState.signal,
     });
 
     if (!response.ok) {
       if (response.status === 403) {
-        setCachedSearchPage(apiSite.key, query, page, 'forbidden', []);
+        setCachedSearchPage(
+          getSourceCacheKey(apiSite),
+          query,
+          page,
+          'forbidden',
+          [],
+        );
       }
       return { results: [] };
     }
@@ -165,7 +175,14 @@ async function fetchAndCacheSearchPage(
       data.list.length === 0
     ) {
       const pageCount = page === 1 ? data?.pagecount || 1 : undefined;
-      setCachedSearchPage(apiSite.key, query, page, 'ok', [], pageCount);
+      setCachedSearchPage(
+        getSourceCacheKey(apiSite),
+        query,
+        page,
+        'ok',
+        [],
+        pageCount,
+      );
       return { results: [], pageCount };
     }
 
@@ -197,13 +214,27 @@ async function fetchAndCacheSearchPage(
     );
 
     const pageCount = page === 1 ? data.pagecount || 1 : undefined;
-    setCachedSearchPage(apiSite.key, query, page, 'ok', results, pageCount);
+    setCachedSearchPage(
+      getSourceCacheKey(apiSite),
+      query,
+      page,
+      'ok',
+      results,
+      pageCount,
+    );
     return { results, pageCount };
   } catch (error: any) {
+    if (error instanceof ResourceLimitError) throw error;
     abortState.cleanup();
     const abortedByParent = Boolean(signal?.aborted && !abortState.isTimeout());
     if (isAbortError(error) && !abortedByParent) {
-      setCachedSearchPage(apiSite.key, query, page, 'timeout', []);
+      setCachedSearchPage(
+        getSourceCacheKey(apiSite),
+        query,
+        page,
+        'timeout',
+        [],
+      );
     }
     return { results: [] };
   } finally {
@@ -243,7 +274,7 @@ export async function searchFromApi(
       searchTimeoutMs,
       options.signal,
     );
-    const results = firstPageResult.results;
+    const results = [...firstPageResult.results];
     const pageCountFromFirst = firstPageResult.pageCount;
 
     const MAX_SEARCH_PAGES =
@@ -293,7 +324,8 @@ export async function searchFromApi(
     }
 
     return results;
-  } catch {
+  } catch (error) {
+    if (error instanceof ResourceLimitError) throw error;
     return [];
   }
 }
@@ -324,7 +356,8 @@ export async function searchFirstPageFromApi(
       options.signal,
     );
     return firstPageResult.results;
-  } catch {
+  } catch (error) {
+    if (error instanceof ResourceLimitError) throw error;
     return [];
   }
 }
@@ -352,7 +385,7 @@ export async function getDetailFromApi(
 
   const abortState = createTimedAbortController(undefined, 10000);
   try {
-    const response = await fetch(detailUrl, {
+    const response = await fetchUpstream(detailUrl, {
       headers: API_CONFIG.detail.headers,
       signal: abortState.signal,
     });
@@ -413,7 +446,7 @@ async function handleSpecialSourceDetail(
   const abortState = createTimedAbortController(undefined, 10000);
   let html = '';
   try {
-    const response = await fetch(detailUrl, {
+    const response = await fetchUpstream(detailUrl, {
       headers: API_CONFIG.detail.headers,
       signal: abortState.signal,
     });

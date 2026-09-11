@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 
+import { recommendsCache } from '@/app/api/douban/recommends/cache';
 import { isGuardFailure, requireActiveUser } from '@/lib/api-auth';
 import { createPublicApiCacheHeaders } from '@/lib/api-cache-headers';
 import { getCacheTime } from '@/lib/config';
@@ -8,22 +9,12 @@ import {
   DoubanRecommendApiResponse,
   normalizeDoubanRecommendItems,
 } from '@/lib/douban-normalize';
-import { createSwrCache } from '@/lib/server-cache';
 import {
   recordServerProxyFailure,
   requireServerProxyQuota,
 } from '@/lib/server-proxy-guard';
+import { resourceLimitResponse } from '@/lib/server-resource-errors';
 import { DoubanResult } from '@/lib/types';
-
-// 进程内 SWR 缓存：同参数请求合并回源 + 软过期后台刷新
-// 豆瓣推荐变化缓慢，新鲜 30 分钟、软过期再 30 分钟内返回旧值
-const recommendsCache = createSwrCache<DoubanResult>({
-  name: 'douban-recommends',
-  freshMs: 30 * 60 * 1000,
-  staleMs: 30 * 60 * 1000,
-  maxSize: 500,
-  maxWeightBytes: 16 * 1024 * 1024,
-});
 
 export const runtime = 'nodejs';
 
@@ -34,7 +25,7 @@ export async function GET(request: NextRequest) {
   });
   if (isGuardFailure(guardResult)) return guardResult.response;
 
-  const quotaFailure = requireServerProxyQuota(
+  const quotaFailure = await requireServerProxyQuota(
     'douban-data',
     request,
     guardResult.username,
@@ -147,6 +138,8 @@ export async function GET(request: NextRequest) {
       headers: createPublicApiCacheHeaders(cacheTime),
     });
   } catch (error) {
+    const busy = resourceLimitResponse(error);
+    if (busy) return busy;
     recordServerProxyFailure('douban-data', error);
     return NextResponse.json({ error: '获取豆瓣数据失败' }, { status: 500 });
   }

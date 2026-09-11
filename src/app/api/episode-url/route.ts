@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 
+import { episodeUrlCache } from '@/app/api/episode-url/cache';
+import { withSourceProbeBudget } from '@/features/play/lib/sourceProbeGuard.server';
 import { isGuardFailure, requireActiveUser } from '@/lib/api-auth';
 import type { ApiSite } from '@/lib/config';
 import { getAvailableApiSites, getConfigForRead } from '@/lib/config';
@@ -12,18 +14,9 @@ import {
   resolveXgcartoonEpisodeUrlByPath,
 } from '@/lib/downstream-sources/xgcartoon';
 import { parseLazyEpisodeUrl } from '@/lib/lazy-episodes';
-import { createSwrCache } from '@/lib/server-cache';
 
 export const runtime = 'nodejs';
 const IS_DEVELOPMENT = process.env.NODE_ENV !== 'production';
-
-const episodeUrlCache = createSwrCache<string>({
-  name: 'episode-url',
-  freshMs: 30 * 60 * 1000,
-  staleMs: 2 * 60 * 60 * 1000,
-  maxSize: 5000,
-  maxWeightBytes: 8 * 1024 * 1024,
-});
 
 function matchesLazyKind(kind: string, apiSite: ApiSite): boolean {
   if (kind === 'giri') return isGirigiriSource(apiSite);
@@ -47,6 +40,10 @@ async function resolveEpisodeUrl(
 }
 
 export async function GET(request: NextRequest) {
+  return withSourceProbeBudget(request, handleGet);
+}
+
+async function handleGet(request: NextRequest) {
   const guardResult = await requireActiveUser(request);
   if (isGuardFailure(guardResult)) return guardResult.response;
 

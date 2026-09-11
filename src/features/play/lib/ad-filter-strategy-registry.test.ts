@@ -19,6 +19,7 @@ describe('ad-filter-strategy-registry', () => {
     expect(strategy?.server?.signals).toContain('periodic-duration-profile');
     expect(shouldRunServerAdFilter('rycj')).toBe(true);
     expect(shouldFilterAdsOnClient('rycj')).toBe(false);
+    expect(shouldFilterAdsOnClient('ikun')).toBe(true);
   });
 
   it('未注册源沿用客户端通用过滤', () => {

@@ -1,3 +1,8 @@
+import { fetchSourceProbe } from '@/features/play/lib/sourceProbeRequest';
+import {
+  SOURCE_PROBE_CONCURRENCY,
+  SourceProbeDeferredError,
+} from '@/features/play/lib/sourceProbeRequestPolicy';
 import { probeVodEpisodeUrl } from '@/features/play/lib/vodProbe';
 import { isLazyEpisodeUrl } from '@/lib/lazy-episodes';
 import { getProxyModes, shouldUseServerProxy } from '@/lib/proxy-modes';
@@ -14,12 +19,12 @@ export interface VideoInfo {
 export interface ProbeEntry {
   info: VideoInfo;
   ts: number;
-  source: 'probe' | 'player' | 'queued' | 'pending';
+  source: 'probe' | 'player' | 'queued' | 'pending' | 'deferred';
   previousInfo?: VideoInfo;
+  retryAt?: number;
 }
 
 const PROBE_TTL_MS = 10 * 60_000;
-const PROBE_CONCURRENCY_LIMIT = 4;
 
 interface StoreState {
   entries: Map<string, ProbeEntry>;
@@ -96,6 +101,8 @@ export async function getOrProbe(
 ) {
   const key = `${sourceInput.source}-${sourceInput.id}`;
   const now = Date.now();
+  const deferred = state.entries.get(key);
+  if (deferred?.source === 'deferred' && (deferred.retryAt ?? 0) > now) return;
 
   if (!options.force) {
     const existed = state.entries.get(key);
@@ -134,7 +141,7 @@ function acquireProbeSlot(): Promise<() => void> {
       });
     };
 
-    if (activeProbeCount < PROBE_CONCURRENCY_LIMIT) {
+    if (activeProbeCount < SOURCE_PROBE_CONCURRENCY) {
       grant();
       return;
     }
@@ -150,7 +157,9 @@ async function runProbe(
 ) {
   const existingEntry = state.entries.get(key);
   const previousInfo =
-    existingEntry?.source === 'pending' || existingEntry?.source === 'queued'
+    existingEntry?.source === 'pending' ||
+    existingEntry?.source === 'queued' ||
+    existingEntry?.source === 'deferred'
       ? existingEntry.previousInfo
       : existingEntry?.info;
 
@@ -173,7 +182,7 @@ async function runProbe(
     let resolved = sourceInput;
     if (!resolved.episodes || resolved.episodes.length === 0) {
       try {
-        const res = await fetch(
+        const res = await fetchSourceProbe(
           `/api/detail?source=${resolved.source}&id=${resolved.id}`,
         );
         if (res.ok) {
@@ -183,8 +192,8 @@ async function runProbe(
             options.onDetailFetched?.(full);
           }
         }
-      } catch {
-        /* 忽略 */
+      } catch (error) {
+        if (error instanceof SourceProbeDeferredError) throw error;
       }
     }
 
@@ -242,7 +251,8 @@ async function runProbe(
         true,
       );
       setEntry(key, { info, ts: Date.now(), source: 'probe' });
-    } catch {
+    } catch (error) {
+      if (error instanceof SourceProbeDeferredError) throw error;
       reportSourceRouteStat(
         resolved.source,
         useProxy ? 'server' : 'browser',
@@ -259,6 +269,16 @@ async function runProbe(
         source: 'probe',
       });
     }
+  } catch (error) {
+    if (!(error instanceof SourceProbeDeferredError)) throw error;
+    const retainedInfo = previousInfo?.hasError ? undefined : previousInfo;
+    setEntry(key, {
+      info: retainedInfo ?? { quality: '未知', loadSpeed: '未知', pingTime: 0 },
+      ts: Date.now(),
+      source: 'deferred',
+      previousInfo: retainedInfo,
+      retryAt: Date.now() + error.retryAfterSeconds * 1000,
+    });
   } finally {
     releaseProbeSlot();
   }

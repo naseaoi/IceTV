@@ -2,6 +2,8 @@ import { buildRefreshedPlayRecord } from '@/lib/cron/metadata-refresh';
 import { hasPlayRecordUpdate } from '@/lib/play-records';
 import type { PlayRecord, SearchResult } from '@/lib/types';
 
+import { giriTrackingRecord } from './__fixtures__/giri-tracking';
+
 function createRecord(overrides: Partial<PlayRecord> = {}): PlayRecord {
   return {
     title: '测试番剧',
@@ -43,6 +45,55 @@ function createDetail(overrides: Partial<SearchResult> = {}): SearchResult {
 }
 
 describe('buildRefreshedPlayRecord', () => {
+  it.each([
+    ['简中 8', '简中'],
+    ['简中8', '简中'],
+    ['简中 8', '简中 9'],
+    ['简中8', '简中 9'],
+  ])(
+    '旧标签 %s 刷新为 %s 时保留 8/9 的更新提醒',
+    (previousLabel, nextLabel) => {
+      const next = buildRefreshedPlayRecord(
+        { ...giriTrackingRecord, group_label: previousLabel },
+        createDetail({
+          episodes: Array.from({ length: 18 }, (_, index) => `ep-${index}`),
+          episode_groups: [
+            { label: '繁中', count: 9 },
+            { label: nextLabel, count: 9 },
+          ],
+        }),
+        5000,
+      );
+
+      expect(next).toMatchObject({
+        index: 17,
+        group_index: 8,
+        group_total: 9,
+        update_baseline_group_total: 8,
+        update_detected_at: 5000,
+      });
+      expect(hasPlayRecordUpdate(next)).toBe(true);
+    },
+  );
+
+  it('只有其他分组更新时不提醒，也不改变简中组内播放进度', () => {
+    const next = buildRefreshedPlayRecord(
+      giriTrackingRecord,
+      createDetail({
+        episodes: Array.from({ length: 17 }, (_, index) => `ep-${index}`),
+        episode_groups: [
+          { label: '繁中', count: 9 },
+          { label: '简中', count: 8 },
+        ],
+      }),
+      5000,
+    );
+
+    expect(next).toMatchObject({ index: 17, group_index: 8, group_total: 8 });
+    expect(next.update_detected_at).toBeUndefined();
+    expect(hasPlayRecordUpdate(next)).toBe(false);
+  });
+
   it('靠前分组新增剧集后修正绝对索引并标记更新', () => {
     const next = buildRefreshedPlayRecord(createRecord(), createDetail(), 5000);
 

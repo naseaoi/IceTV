@@ -2,6 +2,9 @@ import { lookup } from 'dns/promises';
 import net from 'net';
 
 import { isDevProxyActive } from '@/lib/dev-proxy';
+import { createTimedAbortController } from '@/lib/downstream-sources/shared';
+import { withUpstreamResponse } from '@/lib/upstream-resource-guard.server';
+import type { UpstreamResourceContext } from '@/lib/upstream-resource-policy';
 
 const BLOCKED_HOSTNAMES = new Set([
   'localhost',
@@ -19,6 +22,7 @@ type DnsLookup = typeof lookup;
 type GuardedFetchInit = RequestInit & {
   skipInitialValidation?: boolean;
   timeoutMs?: number;
+  resourceContext?: UpstreamResourceContext;
 };
 
 type DnsCacheEntry = {
@@ -91,7 +95,12 @@ export async function fetchWithUrlGuard(
   raw: string,
   init: GuardedFetchInit = {},
 ): Promise<Response> {
-  const { skipInitialValidation = false, timeoutMs, ...fetchInit } = init;
+  const {
+    skipInitialValidation = false,
+    timeoutMs,
+    resourceContext,
+    ...fetchInit
+  } = init;
   let currentUrl = raw;
   const requestedRedirect = fetchInit.redirect;
   const fetchTimeoutMs =
@@ -108,20 +117,24 @@ export async function fetchWithUrlGuard(
       throw new UrlValidationError(validation.reason);
     }
 
-    const controller = new AbortController();
-    const timeout = windowLikeSetTimeout(
-      () => controller.abort(),
+    const abortState = createTimedAbortController(
+      fetchInit.signal ?? undefined,
       fetchTimeoutMs,
     );
     let response: Response;
     try {
-      response = await fetch(validation.url, {
-        ...fetchInit,
-        redirect: 'manual',
-        signal: fetchInit.signal || controller.signal,
-      });
+      response = await withUpstreamResponse(
+        validation.url,
+        (signal) =>
+          fetch(validation.url, {
+            ...fetchInit,
+            redirect: 'manual',
+            signal,
+          }),
+        { ...resourceContext, signal: abortState.signal },
+      );
     } finally {
-      windowLikeClearTimeout(timeout);
+      abortState.cleanup();
     }
 
     if (!isRedirectResponse(response.status)) {
@@ -187,17 +200,6 @@ function getDnsNegativeCacheTtlMs(): number {
   return Number.isFinite(configured) && configured >= 0
     ? configured
     : DEFAULT_DNS_NEGATIVE_CACHE_TTL_MS;
-}
-
-function windowLikeSetTimeout(
-  callback: () => void,
-  timeoutMs: number,
-): ReturnType<typeof setTimeout> {
-  return setTimeout(callback, timeoutMs);
-}
-
-function windowLikeClearTimeout(timeout: ReturnType<typeof setTimeout>): void {
-  clearTimeout(timeout);
 }
 
 function normalizeHostname(hostname: string): string {

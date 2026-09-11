@@ -28,6 +28,16 @@ export interface PlayRecordPage {
   nextCursor: string | null;
 }
 
+export interface MetadataRecordPage<T> {
+  items: Array<{
+    key: string;
+    item: T;
+    // 数据库原始 JSON 快照，用于写回时的乐观并发校验
+    snapshot: string;
+  }>;
+  nextCursor: string | null;
+}
+
 // 收藏数据结构
 export interface Favorite {
   source_name: string;
@@ -138,6 +148,7 @@ export interface StorageUserImportData {
   skipConfigs: { [key: string]: SkipConfig };
   playbackSessions: { [key: string]: PlaybackSession };
   messageState?: UserMessageState;
+  danmakuEnabled?: boolean;
   lastLoginAt?: number;
 }
 
@@ -153,8 +164,16 @@ export interface StorageImportData {
   inviteCodeUsage: { [code: string]: number };
 }
 
+export interface SharedCacheRecord {
+  value: string;
+  freshUntil: number;
+  staleUntil: number;
+  leaseUntil: number;
+}
+
 // 存储接口
 export interface IStorage {
+  readonly resources: import('@/lib/shared-resource-store').SharedResourceStore;
   // 播放记录相关
   getPlayRecord(userName: string, key: string): Promise<PlayRecord | null>;
   setPlayRecord(
@@ -162,7 +181,20 @@ export interface IStorage {
     key: string,
     record: PlayRecord,
   ): Promise<void>;
+  setPlayRecordIfUnchanged(
+    userName: string,
+    key: string,
+    record: PlayRecord,
+    snapshot: string,
+  ): Promise<boolean>;
   getAllPlayRecords(userName: string): Promise<{ [key: string]: PlayRecord }>;
+  getStalePlayRecordPage(
+    userName: string,
+    now: number,
+    ttlMs: number,
+    limit: number,
+    cursorKey?: string,
+  ): Promise<MetadataRecordPage<PlayRecord>>;
   getPlayRecordPage(
     userName: string,
     limit: number,
@@ -185,7 +217,20 @@ export interface IStorage {
   // 收藏相关
   getFavorite(userName: string, key: string): Promise<Favorite | null>;
   setFavorite(userName: string, key: string, favorite: Favorite): Promise<void>;
+  setFavoriteIfUnchanged(
+    userName: string,
+    key: string,
+    favorite: Favorite,
+    snapshot: string,
+  ): Promise<boolean>;
   getAllFavorites(userName: string): Promise<{ [key: string]: Favorite }>;
+  getStaleFavoritePage(
+    userName: string,
+    now: number,
+    ttlMs: number,
+    limit: number,
+    cursorKey?: string,
+  ): Promise<MetadataRecordPage<Favorite>>;
   getFavoritePage(
     userName: string,
     limit: number,
@@ -279,6 +324,47 @@ export interface IStorage {
   recordSourceRouteStat(input: SourceRouteStatInput): Promise<void>;
   getSourceRouteStats(sinceDate: string): Promise<SourceRouteStatsItem[]>;
   getAllSourceRouteStatBuckets(): Promise<SourceRouteStatsBucket[]>;
+
+  getSharedCache(key: string): Promise<SharedCacheRecord | null>;
+  acquireSharedCacheLease(
+    key: string,
+    token: string,
+    now: number,
+    leaseUntil: number,
+  ): Promise<boolean>;
+  setSharedCache(
+    key: string,
+    token: string,
+    value: string,
+    freshUntil: number,
+    staleUntil: number,
+    now: number,
+  ): Promise<boolean>;
+  releaseSharedCacheLease(key: string, token: string): Promise<void>;
+  renewSharedCacheLease(
+    key: string,
+    token: string,
+    now: number,
+    leaseUntil: number,
+  ): Promise<boolean>;
+  pruneSharedCache(now: number, limit: number): Promise<void>;
+
+  // 弹幕集映射相关
+  getDanmakuEpisodeId(
+    userName: string,
+    scopeKey: string,
+  ): Promise<number | null>;
+  setDanmakuEpisodeId(
+    userName: string,
+    scopeKey: string,
+    episodeId: number,
+  ): Promise<void>;
+  deleteDanmakuEpisodeId(userName: string, scopeKey: string): Promise<void>;
+  getDanmakuEnabledPreference(userName: string): Promise<boolean | null>;
+  setDanmakuEnabledPreference(
+    userName: string,
+    enabled: boolean,
+  ): Promise<void>;
 
   // 数据清理相关
   clearAllData(): Promise<void>;

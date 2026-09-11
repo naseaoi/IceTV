@@ -26,7 +26,12 @@ export async function readArrayBufferLimited(
   response: Response,
   maxBytes: number,
 ): Promise<ArrayBuffer> {
-  assertContentLength(response.headers, maxBytes);
+  try {
+    assertContentLength(response.headers, maxBytes);
+  } catch (error) {
+    await response.body?.cancel().catch(() => {});
+    throw error;
+  }
 
   if (!response.body) {
     return response.arrayBuffer();

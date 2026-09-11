@@ -28,6 +28,33 @@ describe('resumePlayback', () => {
     expect(player.currentTime).toBe(115);
   });
 
+  it('时长未知时拒绝下达 seek，避免被 clamp 成 0 后误判成功', () => {
+    const zeroDuration = { currentTime: 0, duration: 0 };
+    expect(applyResumeTime(zeroDuration, 1064)).toBe(false);
+    expect(zeroDuration.currentTime).toBe(0);
+
+    const noDuration = { currentTime: 0 };
+    expect(applyResumeTime(noDuration, 1064)).toBe(false);
+
+    const infiniteDuration = { currentTime: 0, duration: Infinity };
+    expect(applyResumeTime(infiniteDuration, 1064)).toBe(false);
+  });
+
+  it('播放器把进度改写到别处时返回 false', () => {
+    const clampingPlayer = {
+      duration: 1500,
+      _time: 0,
+      get currentTime() {
+        return this._time;
+      },
+      set currentTime(_value: number) {
+        this._time = 0;
+      },
+    };
+
+    expect(applyResumeTime(clampingPlayer, 1064)).toBe(false);
+  });
+
   it('起播时只允许使用显式恢复点', () => {
     expect(
       resolvePendingResumeTime({

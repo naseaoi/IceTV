@@ -115,6 +115,85 @@ describe('server cache', () => {
     expect(cache.stats().expirations).toBe(1);
   });
 
+  it('peek 命中也会刷新 LRU 顺序', () => {
+    const cache = createSwrCache<string>({
+      name: 'test',
+      maxSize: 2,
+      freshMs: 1_000,
+      estimateWeight: (value) => value.length,
+    });
+
+    cache.set('a', 'a');
+    cache.set('b', 'b');
+    expect(cache.peek('a')?.value).toBe('a');
+    cache.set('c', 'c');
+
+    expect(cache.peek('a')?.value).toBe('a');
+    expect(cache.peek('b')).toBeNull();
+  });
+
+  it('过期清理按最短间隔节流，不每次写入全表扫描', () => {
+    jest.useFakeTimers();
+    jest.setSystemTime(0);
+    const cache = createSwrCache<string>({
+      name: 'test',
+      maxSize: 100,
+      freshMs: 5,
+      staleMs: 5,
+      estimateWeight: (value) => value.length,
+    });
+
+    cache.set('expired', '1');
+    jest.advanceTimersByTime(11);
+    cache.set('next', '1');
+    expect(cache.stats().expirations).toBe(0);
+
+    jest.advanceTimersByTime(10_000);
+    cache.set('later', '1');
+    expect(cache.stats().expirations).toBeGreaterThan(0);
+  });
+
+  it('支持按结果决定新鲜与陈旧期限', async () => {
+    jest.useFakeTimers();
+    jest.setSystemTime(0);
+    const cache = createSwrCache<string[]>({
+      name: 'value-ttl',
+      freshMs: 1000,
+      staleMs: 1000,
+      getTtl: (value) =>
+        value.length
+          ? { freshMs: 1000, staleMs: 1000 }
+          : { freshMs: 30, staleMs: 0 },
+    });
+    cache.set('empty', []);
+    cache.set('full', ['value']);
+    jest.advanceTimersByTime(30);
+    expect(cache.peek('empty')).toBeNull();
+    expect(cache.peek('full')).toEqual({ value: ['value'], fresh: true });
+    const loader = jest.fn(async () => ['new']);
+    await expect(cache.getOrLoad('empty', loader)).resolves.toEqual(['new']);
+  });
+
+  it('显式刷新去重且失败不先删除已有缓存', async () => {
+    const cache = createSwrCache<string>({ name: 'refresh', freshMs: 1000 });
+    cache.set('key', 'old');
+    let rejectLoad!: (error: Error) => void;
+    const loader = jest.fn(
+      () =>
+        new Promise<string>((_resolve, reject) => {
+          rejectLoad = reject;
+        }),
+    );
+    const first = cache.refresh('key', loader);
+    const second = cache.refresh('key', loader);
+    expect(first).toBe(second);
+    expect(cache.peek('key')?.value).toBe('old');
+    rejectLoad(new Error('unavailable'));
+    await expect(first).rejects.toThrow('unavailable');
+    expect(cache.peek('key')?.value).toBe('old');
+    expect(loader).toHaveBeenCalledTimes(1);
+  });
+
   it('清空缓存后未完成的回源不会重新写入', async () => {
     let resolveLoader!: (value: string) => void;
     const loader = new Promise<string>((resolve) => {

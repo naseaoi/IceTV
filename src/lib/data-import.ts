@@ -611,6 +611,11 @@ function normalizeUserData(
       truncated,
     ),
     messageState: normalizeMessageState(input.messageState),
+    ...(input.danmakuEnabled === undefined
+      ? {}
+      : {
+          danmakuEnabled: assertBoolean(input.danmakuEnabled, '弹幕开关'),
+        }),
     lastLoginAt: normalizeLastLoginAt(input.lastLoginAt),
   };
 }

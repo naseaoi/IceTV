@@ -73,6 +73,7 @@ describe('probeVodEpisodeUrl', () => {
     });
     expect(fetchMock).toHaveBeenCalledWith(
       `/api/episode-url?source=giri&url=${encodeURIComponent(lazyUrl)}`,
+      { headers: { 'X-IceTV-Probe': '1' } },
     );
     expect(getVideoResolutionFromM3u8).toHaveBeenCalledWith(
       'https://cdn.example/lazy.m3u8',
@@ -120,5 +121,14 @@ describe('probeVodEpisodeUrl', () => {
     });
     expect(String(fetchMock.mock.calls[1][0])).toContain('/api/proxy/segment?');
     expect(String(fetchMock.mock.calls[1][0])).toContain('icetv-source=giri');
+  });
+
+  it('服务端额度繁忙时返回暂缓而非普通播放错误', async () => {
+    const fetchMock = jest.fn().mockResolvedValue({ status: 503 });
+    global.fetch = fetchMock as unknown as typeof fetch;
+    await expect(
+      probeVodEpisodeUrl('https://example.test/busy.mp4', true, 'giri'),
+    ).rejects.toMatchObject({ name: 'SourceProbeDeferredError' });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 });

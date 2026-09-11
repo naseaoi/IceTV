@@ -1,9 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server';
 
+import {
+  InvalidRuntimeParamsError,
+  saveRuntimeParams,
+} from '@/features/admin/services/runtimeParams';
 import { isGuardFailure, requireAdmin } from '@/lib/api-auth';
 import { configConflictResponse } from '@/lib/api-config-error';
-import { getConfig, saveConfig } from '@/lib/config';
-import { normalizeRuntimeParams } from '@/lib/runtime-params';
 
 export const runtime = 'nodejs';
 
@@ -12,16 +14,16 @@ export async function POST(request: NextRequest) {
     const guardResult = await requireAdmin(request);
     if (isGuardFailure(guardResult)) return guardResult.response;
 
-    const body = (await request.json()) as Record<string, unknown>;
-    const runtimeParams = normalizeRuntimeParams(body);
-    const adminConfig = await getConfig();
-
-    adminConfig.SiteConfig = {
-      ...adminConfig.SiteConfig,
-      ...runtimeParams,
-    };
-
-    await saveConfig(adminConfig);
+    let body: unknown;
+    try {
+      body = await request.json();
+    } catch {
+      return NextResponse.json(
+        { error: '无效的 JSON' },
+        { status: 400, headers: { 'Cache-Control': 'no-store' } },
+      );
+    }
+    await saveRuntimeParams(body);
 
     return NextResponse.json(
       { ok: true },
@@ -32,6 +34,12 @@ export async function POST(request: NextRequest) {
       },
     );
   } catch (error) {
+    if (error instanceof InvalidRuntimeParamsError) {
+      return NextResponse.json(
+        { error: error.message },
+        { status: 400, headers: { 'Cache-Control': 'no-store' } },
+      );
+    }
     const conflict = configConflictResponse(error);
     if (conflict) return conflict;
     console.error('更新运行参数失败:', error);

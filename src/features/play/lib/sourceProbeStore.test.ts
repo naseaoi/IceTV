@@ -1,3 +1,4 @@
+import { SourceProbeDeferredError } from '@/features/play/lib/sourceProbeRequestPolicy';
 import {
   getOrProbe,
   getSnapshot,
@@ -62,7 +63,7 @@ describe('sourceProbeStore helpers', () => {
     expect(resolveRequestedProbeEpisodeUrl(source, 3)).toBeNull();
   });
 
-  it('同时最多执行 4 个测速任务', async () => {
+  it('同时最多执行 2 个测速任务', async () => {
     let activeCount = 0;
     let maxActiveCount = 0;
     const releases: Array<() => void> = [];
@@ -95,31 +96,31 @@ describe('sourceProbeStore helpers', () => {
     );
     const tasks = sources.map((source) => getOrProbe(source, { force: true }));
 
-    for (let index = 0; index < 10 && releases.length < 4; index += 1) {
-      await Promise.resolve();
-    }
-
-    expect(releases).toHaveLength(4);
-    expect(maxActiveCount).toBe(4);
-    expect(
-      Array.from(getSnapshot().values()).filter(
-        (entry) => entry.source === 'pending',
-      ),
-    ).toHaveLength(4);
-    expect(
-      Array.from(getSnapshot().values()).filter(
-        (entry) => entry.source === 'queued',
-      ),
-    ).toHaveLength(2);
-
-    releases.splice(0).forEach((release) => release());
-
     for (let index = 0; index < 10 && releases.length < 2; index += 1) {
       await Promise.resolve();
     }
 
-    expect(maxActiveCount).toBe(4);
-    releases.splice(0).forEach((release) => release());
+    expect(releases).toHaveLength(2);
+    expect(maxActiveCount).toBe(2);
+    expect(
+      Array.from(getSnapshot().values()).filter(
+        (entry) => entry.source === 'pending',
+      ),
+    ).toHaveLength(2);
+    expect(
+      Array.from(getSnapshot().values()).filter(
+        (entry) => entry.source === 'queued',
+      ),
+    ).toHaveLength(4);
+
+    for (let batch = 0; batch < 3; batch += 1) {
+      releases.splice(0).forEach((release) => release());
+      for (let index = 0; index < 20 && releases.length < 2; index += 1) {
+        await Promise.resolve();
+      }
+    }
+
+    expect(maxActiveCount).toBe(2);
     await Promise.all(tasks);
     expect(probeMock).toHaveBeenCalledTimes(6);
     expect(reportSourceRouteStat).toHaveBeenCalledTimes(6);
@@ -128,6 +129,22 @@ describe('sourceProbeStore helpers', () => {
       'browser',
       true,
     );
+  });
+
+  it('繁忙时保留暂缓状态且不污染源站失败统计', async () => {
+    const probeMock = probeVodEpisodeUrl as jest.Mock;
+    probeMock.mockRejectedValue(new SourceProbeDeferredError(2));
+    const source = createSearchResult({
+      episodes: ['https://example.test/video.m3u8'],
+    });
+    await getOrProbe(source, { force: true });
+    expect(getSnapshot().get('source-a-1')).toMatchObject({
+      source: 'deferred',
+    });
+    expect(getSnapshot().get('source-a-1')?.info.hasError).toBeUndefined();
+    expect(reportSourceRouteStat).not.toHaveBeenCalled();
+    await getOrProbe(source, { force: true });
+    expect(probeMock).toHaveBeenCalledTimes(1);
   });
 
   it('把检测失败写入源站路由统计', async () => {

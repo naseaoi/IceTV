@@ -16,6 +16,8 @@ import {
 } from '@/lib/cover-image-cache';
 import { DOUBAN_IMAGE_PROXY_TYPE_STORAGE_KEY } from '@/lib/douban-source';
 
+const mockImageRender = jest.fn();
+
 jest.mock('next/image', () => {
   const React = jest.requireActual('react') as typeof import('react');
   return {
@@ -28,6 +30,8 @@ jest.mock('next/image', () => {
         onLoad?: () => void;
         onError?: () => void;
         className?: string;
+        decoding?: 'async' | 'sync' | 'auto';
+        loading?: 'eager' | 'lazy';
         loader?: (input: {
           src: string;
           width: number;
@@ -35,17 +39,23 @@ jest.mock('next/image', () => {
         }) => string;
         quality?: number;
       }
-    >(({ src, alt, onLoad, onError, className, loader, quality }, ref) => (
-      <img
-        ref={ref}
-        data-testid='cover-image'
-        src={loader ? loader({ src, width: 128, quality }) : src}
-        alt={alt}
-        className={className}
-        onLoad={onLoad}
-        onError={onError}
-      />
-    )),
+    >((props, ref) => {
+      mockImageRender(props);
+      const { src, alt, onLoad, onError, className, loader, quality } = props;
+      return (
+        <img
+          ref={ref}
+          data-testid='cover-image'
+          src={loader ? loader({ src, width: 128, quality }) : src}
+          alt={alt}
+          className={className}
+          decoding={props.decoding}
+          loading={props.loading}
+          onLoad={onLoad}
+          onError={onError}
+        />
+      );
+    }),
   };
 });
 
@@ -58,6 +68,7 @@ describe('CoverImage', () => {
   let intersectionOptions: IntersectionObserverInit | undefined;
 
   beforeEach(() => {
+    mockImageRender.mockClear();
     clearCoverImageCacheForTests();
     localStorage.clear();
     sessionStorage.clear();
@@ -135,7 +146,7 @@ describe('CoverImage', () => {
     expect(image).toHaveClass('opacity-0');
     expect(document.querySelector('[data-cover-loading-backdrop]')).toHaveClass(
       'z-[100]',
-      'cover-loading-backdrop-pending',
+      'opacity-100',
       'bg-gray-200/70',
       'dark:bg-gray-700/60',
     );
@@ -194,6 +205,11 @@ describe('CoverImage', () => {
 
     render(<CoverImage src={src} alt='已缓存封面' priority />);
 
+    expect(mockImageRender.mock.calls[0][0]).toMatchObject({
+      className: expect.stringContaining('opacity-100'),
+      decoding: 'sync',
+      loading: 'eager',
+    });
     const image = screen.getByTestId('cover-image');
     expect(image).toHaveClass('opacity-100');
     expect(document.querySelector('[data-cover-loading-backdrop]')).toHaveClass(
@@ -263,6 +279,19 @@ describe('CoverImage', () => {
       }
       container.remove();
     }
+  });
+
+  it('客户端已渲染过缓存封面也不改变后续服务端输出', () => {
+    const src = 'https://covers.example.com/hydration.jpg';
+    markCoverImagesLoaded([src]);
+    render(<CoverImage src={src} alt='客户端缓存封面' priority />);
+
+    const serverHtml = renderToString(
+      <CoverImage src={src} alt='服务端封面' priority />,
+    );
+
+    expect(serverHtml).toContain('data-cover-state="loading"');
+    expect(serverHtml).toContain('decoding="async"');
   });
 
   it('普通远程封面通过服务端图片代理加载', () => {

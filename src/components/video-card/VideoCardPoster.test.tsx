@@ -130,10 +130,13 @@ describe('VideoCardPoster', () => {
     expect(screen.getByText('更新至 13 集')).toHaveClass(
       'sm:group-hover/update:hidden',
     );
-    expect(screen.getByText('✅')).toHaveClass(
+    const updateCheck = updateButton.querySelector('svg');
+    expect(updateCheck).toBeInTheDocument();
+    expect(updateCheck?.parentElement).toHaveClass(
       'hidden',
       'sm:group-hover/update:inline',
     );
+    expect(screen.queryByText('✅')).not.toBeInTheDocument();
 
     fireEvent.click(updateButton);
     expect(onMarkUpdateRead).toHaveBeenCalledTimes(1);

@@ -33,6 +33,13 @@ export function savePlaybackCheckpoint(
     artPlayerRef.current?.currentTime || 0,
     stableCurrentTimeRef.current,
   );
+
+  // 起播前的 0 进度不是有效恢复点：写进去只会用一个从未出现过的位置
+  // 覆盖掉真实进度，并让集索引停留在挂载时的默认值。
+  if (!hasMeaningfulPlaybackTime(currentTime)) {
+    return;
+  }
+
   const checkpoint: PlayCheckpoint = {
     source: currentSourceRef.current,
     id: currentIdRef.current,

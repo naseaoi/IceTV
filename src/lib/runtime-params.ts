@@ -15,7 +15,14 @@ export type RuntimeParamSettings = Pick<
   | 'DataImportPlaybackSessionsLimit'
   | 'LivePrecheckTimeoutSeconds'
   | 'ProxyRequestTimeoutSeconds'
+  | 'ImageProxyTimeoutSeconds'
+  | 'UpstreamSearchConcurrency'
+  | 'DanmakuEpisodeLimit'
+  | 'DanmakuRequestTimeoutSeconds'
 >;
+
+// 0 表示跟随 CACHE_PROFILE 档位或 UPSTREAM_SEARCH_CONCURRENCY 环境变量
+const UPSTREAM_SEARCH_CONCURRENCY_AUTO = 0;
 
 export const DEFAULT_RUNTIME_PARAMS: RuntimeParamSettings = {
   SearchDownstreamMaxPage: Number(process.env.NEXT_PUBLIC_SEARCH_MAX_PAGE) || 5,
@@ -31,6 +38,10 @@ export const DEFAULT_RUNTIME_PARAMS: RuntimeParamSettings = {
   DataImportPlaybackSessionsLimit: 500,
   LivePrecheckTimeoutSeconds: 15,
   ProxyRequestTimeoutSeconds: 30,
+  ImageProxyTimeoutSeconds: 15,
+  UpstreamSearchConcurrency: UPSTREAM_SEARCH_CONCURRENCY_AUTO,
+  DanmakuEpisodeLimit: 8000,
+  DanmakuRequestTimeoutSeconds: 12,
 };
 
 export const RUNTIME_PARAM_RANGES: Record<
@@ -50,7 +61,15 @@ export const RUNTIME_PARAM_RANGES: Record<
   DataImportPlaybackSessionsLimit: { min: 1, max: 20000 },
   LivePrecheckTimeoutSeconds: { min: 1, max: 60 },
   ProxyRequestTimeoutSeconds: { min: 1, max: 120 },
+  ImageProxyTimeoutSeconds: { min: 1, max: 120 },
+  UpstreamSearchConcurrency: { min: 0, max: 64 },
+  DanmakuEpisodeLimit: { min: 200, max: 20000 },
+  DanmakuRequestTimeoutSeconds: { min: 1, max: 60 },
 };
+
+const RUNTIME_PARAM_KEYS = Object.keys(
+  DEFAULT_RUNTIME_PARAMS,
+) as (keyof RuntimeParamSettings)[];
 
 export function normalizeRuntimeParam<K extends keyof RuntimeParamSettings>(
   key: K,
@@ -69,60 +88,11 @@ export function normalizeRuntimeParam<K extends keyof RuntimeParamSettings>(
 export function normalizeRuntimeParams(
   value: Partial<RuntimeParamSettings>,
 ): RuntimeParamSettings {
-  return {
-    SearchDownstreamMaxPage: normalizeRuntimeParam(
-      'SearchDownstreamMaxPage',
-      value.SearchDownstreamMaxPage,
-    ),
-    SiteInterfaceCacheTime: normalizeRuntimeParam(
-      'SiteInterfaceCacheTime',
-      value.SiteInterfaceCacheTime,
-    ),
-    VodPageTimeoutSeconds: normalizeRuntimeParam(
-      'VodPageTimeoutSeconds',
-      value.VodPageTimeoutSeconds,
-    ),
-    PlaybackHistoryPageSize: normalizeRuntimeParam(
-      'PlaybackHistoryPageSize',
-      value.PlaybackHistoryPageSize,
-    ),
-    PlaybackHistoryLimit: normalizeRuntimeParam(
-      'PlaybackHistoryLimit',
-      value.PlaybackHistoryLimit,
-    ),
-    SearchHistoryLimit: normalizeRuntimeParam(
-      'SearchHistoryLimit',
-      value.SearchHistoryLimit,
-    ),
-    SearchRequestTimeoutSeconds: normalizeRuntimeParam(
-      'SearchRequestTimeoutSeconds',
-      value.SearchRequestTimeoutSeconds,
-    ),
-    SourceFailureCooldownSeconds: normalizeRuntimeParam(
-      'SourceFailureCooldownSeconds',
-      value.SourceFailureCooldownSeconds,
-    ),
-    ContinueWatchingLimit: normalizeRuntimeParam(
-      'ContinueWatchingLimit',
-      value.ContinueWatchingLimit,
-    ),
-    CoverImageCacheSize: normalizeRuntimeParam(
-      'CoverImageCacheSize',
-      value.CoverImageCacheSize,
-    ),
-    DataImportPlaybackSessionsLimit: normalizeRuntimeParam(
-      'DataImportPlaybackSessionsLimit',
-      value.DataImportPlaybackSessionsLimit,
-    ),
-    LivePrecheckTimeoutSeconds: normalizeRuntimeParam(
-      'LivePrecheckTimeoutSeconds',
-      value.LivePrecheckTimeoutSeconds,
-    ),
-    ProxyRequestTimeoutSeconds: normalizeRuntimeParam(
-      'ProxyRequestTimeoutSeconds',
-      value.ProxyRequestTimeoutSeconds,
-    ),
-  };
+  const result = {} as RuntimeParamSettings;
+  for (const key of RUNTIME_PARAM_KEYS) {
+    result[key] = normalizeRuntimeParam(key, value[key]);
+  }
+  return result;
 }
 
 export function runtimeParamsFromConfig(

@@ -7,6 +7,7 @@ import type {
 } from 'mysql2/promise';
 import mysql from 'mysql2/promise';
 
+import { MySqlResourceStore } from '@/lib/mysql-resource-store';
 import { AdminConfig } from '@/types/admin';
 
 import { hashPassword, verifyPassword } from './password';
@@ -21,6 +22,7 @@ import {
   Favorite,
   FavoritePage,
   IStorage,
+  MetadataRecordPage,
   PlaybackRangeWatchTotal,
   PlaybackSession,
   PlaybackSessionQuery,
@@ -29,6 +31,7 @@ import {
   PlaybackWatchTotals,
   PlayRecord,
   PlayRecordPage,
+  SharedCacheRecord,
   SkipConfig,
   SourceRouteStatInput,
   SourceRouteStatsBucket,
@@ -44,6 +47,33 @@ const {
   unreadWhere: MYSQL_UNREAD_TRACKING_WHERE,
 } = buildTrackingSql(MYSQL_TRACKING_DIALECT);
 const PLAY_RECORD_BATCH_SIZE = 200;
+
+const MYSQL_STALE_PLAY_RECORD_WHERE = `
+  CASE
+    WHEN JSON_VALID(record_json) = 0 THEN 1
+    WHEN JSON_TYPE(JSON_EXTRACT(record_json, '$.metadata_checked_at')) IS NULL THEN 1
+    WHEN JSON_TYPE(JSON_EXTRACT(record_json, '$.metadata_checked_at')) NOT IN ('INTEGER', 'UNSIGNED INTEGER', 'DOUBLE', 'DECIMAL') THEN 1
+    WHEN CAST(JSON_UNQUOTE(JSON_EXTRACT(record_json, '$.metadata_checked_at')) AS DECIMAL(30, 6)) <= ? THEN 1
+    WHEN CAST(JSON_UNQUOTE(JSON_EXTRACT(record_json, '$.metadata_checked_at')) AS DECIMAL(30, 6)) > ? THEN 1
+    ELSE 0
+  END = 1`;
+
+const MYSQL_STALE_FAVORITE_WHERE = `
+  CASE
+    WHEN JSON_VALID(favorite_json) = 0 THEN 1
+    WHEN JSON_TYPE(JSON_EXTRACT(favorite_json, '$.metadata_checked_at')) IS NULL THEN 1
+    WHEN JSON_TYPE(JSON_EXTRACT(favorite_json, '$.metadata_checked_at')) NOT IN ('INTEGER', 'UNSIGNED INTEGER', 'DOUBLE', 'DECIMAL') THEN 1
+    WHEN CAST(JSON_UNQUOTE(JSON_EXTRACT(favorite_json, '$.metadata_checked_at')) AS DECIMAL(30, 6)) <= ? THEN 1
+    WHEN CAST(JSON_UNQUOTE(JSON_EXTRACT(favorite_json, '$.metadata_checked_at')) AS DECIMAL(30, 6)) > ? THEN 1
+    ELSE 0
+  END = 1`;
+
+const MYSQL_NON_LIVE_FAVORITE_WHERE = `
+  CASE
+    WHEN JSON_VALID(favorite_json) = 0 THEN 1
+    WHEN JSON_UNQUOTE(JSON_EXTRACT(favorite_json, '$.origin')) = 'live' THEN 0
+    ELSE 1
+  END = 1`;
 
 function parseInteger(value: string | undefined, fallback: number): number {
   if (!value) {
@@ -146,6 +176,54 @@ function buildFavoritePage(
   };
 }
 
+function buildMetadataRecordPage<T>(
+  rows: JsonRow[],
+  limit: number,
+): MetadataRecordPage<T> {
+  const pageRows = rows.slice(0, limit);
+  const items = pageRows.flatMap((row) => {
+    if (!row.record_key || !row.record_json) return [];
+    const parsed = parseJsonValue<T>(row.record_json);
+    return !parsed
+      ? []
+      : [{ key: row.record_key, item: parsed, snapshot: row.record_json }];
+  });
+  const lastRow = pageRows.at(-1);
+
+  return {
+    items,
+    nextCursor:
+      rows.length > limit && lastRow ? (lastRow.record_key ?? '') : null,
+  };
+}
+
+function buildMetadataFavoritePage(
+  rows: JsonRow[],
+  limit: number,
+): MetadataRecordPage<Favorite> {
+  const pageRows = rows.slice(0, limit);
+  const items = pageRows.flatMap((row) => {
+    if (!row.favorite_key || !row.favorite_json) return [];
+    const parsed = parseJsonValue<Favorite>(row.favorite_json);
+    return !parsed
+      ? []
+      : [
+          {
+            key: row.favorite_key,
+            item: parsed,
+            snapshot: row.favorite_json,
+          },
+        ];
+  });
+  const lastRow = pageRows.at(-1);
+
+  return {
+    items,
+    nextCursor:
+      rows.length > limit && lastRow ? (lastRow.favorite_key ?? '') : null,
+  };
+}
+
 function buildSslOptions() {
   if (!process.env.MYSQL_SSL_CA) {
     return undefined;
@@ -169,7 +247,7 @@ function createPoolOptions(databaseUrl: string): mysql.PoolOptions {
     throw new Error('MySQL 连接串缺少数据库名');
   }
 
-  const connectionLimit = parseInteger(process.env.MYSQL_CONNECTION_LIMIT, 10);
+  const connectionLimit = parseInteger(process.env.MYSQL_CONNECTION_LIMIT, 5);
 
   return {
     host: parsedUrl.hostname,
@@ -180,7 +258,10 @@ function createPoolOptions(databaseUrl: string): mysql.PoolOptions {
     charset: 'utf8mb4',
     waitForConnections: true,
     connectionLimit,
-    maxIdle: parseInteger(process.env.MYSQL_MAX_IDLE, connectionLimit),
+    maxIdle: parseInteger(
+      process.env.MYSQL_MAX_IDLE,
+      Math.max(1, Math.ceil(connectionLimit / 2)),
+    ),
     idleTimeout: parseInteger(process.env.MYSQL_IDLE_TIMEOUT_MS, 60000),
     queueLimit: 0,
     ssl: buildSslOptions(),
@@ -273,9 +354,13 @@ type JsonRow = RowDataPacket & {
   bucket_date?: string;
   success_count?: number | string;
   failure_count?: number | string;
+  enabled?: number | boolean;
 };
 
 export class MySqlStorage implements IStorage {
+  get resources() {
+    return new MySqlResourceStore(this.pool, () => this.ensureInitialized());
+  }
   private readonly pool: ReturnType<typeof mysql.createPool>;
   private initPromise: Promise<void> | null = null;
 
@@ -378,6 +463,41 @@ export class MySqlStorage implements IStorage {
         PRIMARY KEY (source, route_mode, bucket_date),
         KEY idx_source_route_stats_bucket (bucket_date)
       ) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci`,
+      `CREATE TABLE IF NOT EXISTS user_danmaku_episodes (
+        username VARCHAR(191) NOT NULL,
+        scope_key VARCHAR(255) NOT NULL,
+        episode_id INT NOT NULL,
+        updated_at BIGINT NOT NULL,
+        PRIMARY KEY (username, scope_key)
+      ) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci`,
+      `CREATE TABLE IF NOT EXISTS user_danmaku_settings (
+        username VARCHAR(191) NOT NULL PRIMARY KEY,
+        enabled TINYINT(1) NOT NULL
+      ) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci`,
+      `CREATE TABLE IF NOT EXISTS shared_resource_usage (
+        resource_key VARCHAR(191) NOT NULL PRIMARY KEY,
+        used BIGINT NOT NULL,
+        reset_at BIGINT NOT NULL,
+        KEY idx_resource_usage_expiry (reset_at)
+      ) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin`,
+      `CREATE TABLE IF NOT EXISTS shared_resource_leases (
+        resource_key VARCHAR(191) NOT NULL,
+        token VARCHAR(64) NOT NULL,
+        expires_at BIGINT NOT NULL,
+        PRIMARY KEY (resource_key, token),
+        KEY idx_resource_lease_expiry (expires_at)
+      ) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin`,
+      `CREATE TABLE IF NOT EXISTS shared_cache (
+        cache_key VARCHAR(191) NOT NULL PRIMARY KEY,
+        value_text LONGTEXT NOT NULL,
+        fresh_until BIGINT NOT NULL,
+        stale_until BIGINT NOT NULL,
+        lease_token VARCHAR(64) NULL,
+        lease_until BIGINT NOT NULL DEFAULT 0,
+        updated_at BIGINT NOT NULL,
+        KEY idx_shared_cache_expiry (stale_until, lease_until),
+        KEY idx_shared_cache_updated_at (updated_at)
+      ) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin`,
     ];
 
     for (const statement of statements) {
@@ -445,6 +565,25 @@ export class MySqlStorage implements IStorage {
     );
   }
 
+  async setPlayRecordIfUnchanged(
+    userName: string,
+    key: string,
+    record: PlayRecord,
+    snapshot: string,
+  ): Promise<boolean> {
+    await this.ensureInitialized();
+    const username = normalizeUsername(userName);
+    const [result] = await this.pool.execute(
+      `UPDATE play_records
+       SET record_json = ?
+       WHERE username = ?
+         AND record_key = ?
+         AND BINARY record_json = BINARY ?`,
+      [JSON.stringify(record), username, key, snapshot],
+    );
+    return Number((result as { affectedRows?: number }).affectedRows || 0) > 0;
+  }
+
   async setPlayRecords(
     userName: string,
     records: Record<string, PlayRecord>,
@@ -495,6 +634,41 @@ export class MySqlStorage implements IStorage {
     }
 
     return result;
+  }
+
+  async getStalePlayRecordPage(
+    userName: string,
+    now: number,
+    ttlMs: number,
+    limit: number,
+    cursorKey?: string,
+  ): Promise<MetadataRecordPage<PlayRecord>> {
+    await this.ensureInitialized();
+    const username = normalizeUsername(userName);
+    const pageLimit = Math.max(1, Math.floor(limit));
+    const staleBefore = now - ttlMs;
+    const hasCursor = cursorKey !== undefined;
+    const [rows] = await this.pool.query<JsonRow[]>(
+      hasCursor
+        ? `SELECT record_key, record_json
+           FROM play_records
+           WHERE username = ?
+             AND record_key > ?
+             AND ${MYSQL_STALE_PLAY_RECORD_WHERE}
+           ORDER BY record_key ASC
+           LIMIT ?`
+        : `SELECT record_key, record_json
+           FROM play_records
+           WHERE username = ?
+             AND ${MYSQL_STALE_PLAY_RECORD_WHERE}
+           ORDER BY record_key ASC
+           LIMIT ?`,
+      hasCursor
+        ? [username, cursorKey, staleBefore, now, pageLimit + 1]
+        : [username, staleBefore, now, pageLimit + 1],
+    );
+
+    return buildMetadataRecordPage<PlayRecord>(rows, pageLimit);
   }
 
   async getPlayRecordPage(
@@ -617,6 +791,25 @@ export class MySqlStorage implements IStorage {
     );
   }
 
+  async setFavoriteIfUnchanged(
+    userName: string,
+    key: string,
+    favorite: Favorite,
+    snapshot: string,
+  ): Promise<boolean> {
+    await this.ensureInitialized();
+    const username = normalizeUsername(userName);
+    const [result] = await this.pool.execute(
+      `UPDATE favorites
+       SET favorite_json = ?
+       WHERE username = ?
+         AND favorite_key = ?
+         AND BINARY favorite_json = BINARY ?`,
+      [JSON.stringify(favorite), username, key, snapshot],
+    );
+    return Number((result as { affectedRows?: number }).affectedRows || 0) > 0;
+  }
+
   async getAllFavorites(
     userName: string,
   ): Promise<{ [key: string]: Favorite }> {
@@ -636,6 +829,43 @@ export class MySqlStorage implements IStorage {
     }
 
     return result;
+  }
+
+  async getStaleFavoritePage(
+    userName: string,
+    now: number,
+    ttlMs: number,
+    limit: number,
+    cursorKey?: string,
+  ): Promise<MetadataRecordPage<Favorite>> {
+    await this.ensureInitialized();
+    const username = normalizeUsername(userName);
+    const pageLimit = Math.max(1, Math.floor(limit));
+    const staleBefore = now - ttlMs;
+    const hasCursor = cursorKey !== undefined;
+    const [rows] = await this.pool.query<JsonRow[]>(
+      hasCursor
+        ? `SELECT favorite_key, favorite_json
+           FROM favorites
+           WHERE username = ?
+             AND favorite_key > ?
+             AND ${MYSQL_STALE_FAVORITE_WHERE}
+             AND ${MYSQL_NON_LIVE_FAVORITE_WHERE}
+           ORDER BY favorite_key ASC
+           LIMIT ?`
+        : `SELECT favorite_key, favorite_json
+           FROM favorites
+           WHERE username = ?
+             AND ${MYSQL_STALE_FAVORITE_WHERE}
+             AND ${MYSQL_NON_LIVE_FAVORITE_WHERE}
+           ORDER BY favorite_key ASC
+           LIMIT ?`,
+      hasCursor
+        ? [username, cursorKey, staleBefore, now, pageLimit + 1]
+        : [username, staleBefore, now, pageLimit + 1],
+    );
+
+    return buildMetadataFavoritePage(rows, pageLimit);
   }
 
   async getFavoritePage(
@@ -784,6 +1014,14 @@ export class MySqlStorage implements IStorage {
       );
       await connection.execute(
         'DELETE FROM user_login_activity WHERE username = ?',
+        [username],
+      );
+      await connection.execute(
+        'DELETE FROM user_danmaku_episodes WHERE username = ?',
+        [username],
+      );
+      await connection.execute(
+        'DELETE FROM user_danmaku_settings WHERE username = ?',
         [username],
       );
     });
@@ -1069,6 +1307,177 @@ export class MySqlStorage implements IStorage {
     }
 
     return result;
+  }
+
+  async getDanmakuEpisodeId(
+    userName: string,
+    scopeKey: string,
+  ): Promise<number | null> {
+    await this.ensureInitialized();
+    const username = normalizeUsername(userName);
+    const [rows] = await this.pool.query<RowDataPacket[]>(
+      'SELECT episode_id FROM user_danmaku_episodes WHERE username = ? AND scope_key = ?',
+      [username, scopeKey],
+    );
+    return rows.length > 0 ? (rows[0].episode_id as number) : null;
+  }
+
+  async setDanmakuEpisodeId(
+    userName: string,
+    scopeKey: string,
+    episodeId: number,
+  ): Promise<void> {
+    await this.ensureInitialized();
+    const username = normalizeUsername(userName);
+    await this.pool.execute(
+      'INSERT INTO user_danmaku_episodes (username, scope_key, episode_id, updated_at) VALUES (?, ?, ?, ?) ON DUPLICATE KEY UPDATE episode_id = VALUES(episode_id), updated_at = VALUES(updated_at)',
+      [username, scopeKey, episodeId, Date.now()],
+    );
+  }
+
+  async deleteDanmakuEpisodeId(
+    userName: string,
+    scopeKey: string,
+  ): Promise<void> {
+    await this.ensureInitialized();
+    const username = normalizeUsername(userName);
+    await this.pool.execute(
+      'DELETE FROM user_danmaku_episodes WHERE username = ? AND scope_key = ?',
+      [username, scopeKey],
+    );
+  }
+
+  async getDanmakuEnabledPreference(userName: string): Promise<boolean | null> {
+    await this.ensureInitialized();
+    const username = normalizeUsername(userName);
+    const [rows] = await this.pool.query<JsonRow[]>(
+      'SELECT enabled FROM user_danmaku_settings WHERE username = ? LIMIT 1',
+      [username],
+    );
+    return rows.length > 0 ? Number(rows[0].enabled) !== 0 : null;
+  }
+
+  async setDanmakuEnabledPreference(
+    userName: string,
+    enabled: boolean,
+  ): Promise<void> {
+    await this.ensureInitialized();
+    const username = normalizeUsername(userName);
+    await this.pool.execute(
+      `INSERT INTO user_danmaku_settings (username, enabled)
+       VALUES (?, ?)
+       ON DUPLICATE KEY UPDATE enabled = VALUES(enabled)`,
+      [username, enabled ? 1 : 0],
+    );
+  }
+
+  async getSharedCache(key: string): Promise<SharedCacheRecord | null> {
+    await this.ensureInitialized();
+    const [rows] = await this.pool.query<JsonRow[]>(
+      `SELECT value_text, fresh_until, stale_until, lease_until
+       FROM shared_cache WHERE cache_key = ? LIMIT 1`,
+      [key],
+    );
+    const row = rows[0];
+    if (!row) return null;
+    return {
+      value: String(row.value_text || ''),
+      freshUntil: Number(row.fresh_until),
+      staleUntil: Number(row.stale_until),
+      leaseUntil: Number(row.lease_until),
+    };
+  }
+
+  async acquireSharedCacheLease(
+    key: string,
+    token: string,
+    now: number,
+    leaseUntil: number,
+  ): Promise<boolean> {
+    await this.ensureInitialized();
+    const [updated] = await this.pool.execute(
+      `UPDATE shared_cache
+       SET lease_token = ?, lease_until = ?, updated_at = ?
+       WHERE cache_key = ? AND lease_until <= ?`,
+      [token, leaseUntil, now, key, now],
+    );
+    if ('affectedRows' in updated && updated.affectedRows > 0) {
+      return true;
+    }
+
+    const [inserted] = await this.pool.execute(
+      `INSERT IGNORE INTO shared_cache (
+         cache_key, value_text, fresh_until, stale_until,
+         lease_token, lease_until, updated_at
+       ) VALUES (?, '', 0, 0, ?, ?, ?)`,
+      [key, token, leaseUntil, now],
+    );
+    return 'affectedRows' in inserted && inserted.affectedRows > 0;
+  }
+
+  async setSharedCache(
+    key: string,
+    token: string,
+    value: string,
+    freshUntil: number,
+    staleUntil: number,
+    now: number,
+  ): Promise<boolean> {
+    await this.ensureInitialized();
+    const [result] = await this.pool.execute(
+      `UPDATE shared_cache
+       SET value_text = ?, fresh_until = ?, stale_until = ?,
+           lease_token = NULL, lease_until = 0, updated_at = ?
+       WHERE cache_key = ? AND lease_token = ?`,
+      [value, freshUntil, staleUntil, now, key, token],
+    );
+    return 'affectedRows' in result && result.affectedRows > 0;
+  }
+
+  async releaseSharedCacheLease(key: string, token: string): Promise<void> {
+    await this.ensureInitialized();
+    await this.pool.execute(
+      `UPDATE shared_cache
+       SET lease_token = NULL, lease_until = 0
+       WHERE cache_key = ? AND lease_token = ?`,
+      [key, token],
+    );
+  }
+
+  async renewSharedCacheLease(
+    key: string,
+    token: string,
+    now: number,
+    leaseUntil: number,
+  ): Promise<boolean> {
+    await this.ensureInitialized();
+    const [result] = await this.pool.execute(
+      'UPDATE shared_cache SET lease_until = ? WHERE cache_key = ? AND lease_token = ? AND lease_until > ?',
+      [leaseUntil, key, token, now],
+    );
+    return 'affectedRows' in result && result.affectedRows > 0;
+  }
+
+  async pruneSharedCache(now: number, limit: number): Promise<void> {
+    await this.ensureInitialized();
+    const safeLimit = Math.max(1, Math.min(1000, Math.floor(limit)));
+    await this.pool.query(
+      `DELETE FROM shared_cache
+       WHERE stale_until <= ? AND lease_until <= ?
+       ORDER BY updated_at ASC LIMIT ${safeLimit}`,
+      [now, now],
+    );
+    await this.pool.query(
+      `DELETE FROM shared_cache WHERE cache_key IN (
+      SELECT cache_key FROM (
+        SELECT cache_key,
+          ROW_NUMBER() OVER (ORDER BY updated_at DESC, cache_key DESC) AS entry_rank,
+          SUM(OCTET_LENGTH(value_text)) OVER (ORDER BY updated_at DESC, cache_key DESC) AS cache_bytes
+        FROM shared_cache WHERE lease_until <= ?
+      ) AS budget WHERE entry_rank > 4096 OR cache_bytes > 134217728
+    )`,
+      [now],
+    );
   }
 
   async setPlaybackSession(
@@ -1472,6 +1881,9 @@ export class MySqlStorage implements IStorage {
       await connection.execute('DELETE FROM user_message_state');
       await connection.execute('DELETE FROM user_login_activity');
       await connection.execute('DELETE FROM invite_code_usage');
+      await connection.execute('DELETE FROM user_danmaku_episodes');
+      await connection.execute('DELETE FROM user_danmaku_settings');
+      await connection.execute('DELETE FROM shared_cache');
     });
   }
 
@@ -1492,6 +1904,9 @@ export class MySqlStorage implements IStorage {
       await connection.execute('DELETE FROM user_message_state');
       await connection.execute('DELETE FROM user_login_activity');
       await connection.execute('DELETE FROM invite_code_usage');
+      await connection.execute('DELETE FROM user_danmaku_episodes');
+      await connection.execute('DELETE FROM user_danmaku_settings');
+      await connection.execute('DELETE FROM shared_cache');
 
       await connection.execute(
         'INSERT INTO admin_config (id, config_json) VALUES (1, ?)',
@@ -1544,6 +1959,11 @@ export class MySqlStorage implements IStorage {
         'username',
         'state_json',
       ]);
+      const danmakuSettings = createRowBatcher(
+        connection,
+        'user_danmaku_settings',
+        ['username', 'enabled'],
+      );
       const loginActivities = createRowBatcher(
         connection,
         'user_login_activity',
@@ -1602,6 +2022,13 @@ export class MySqlStorage implements IStorage {
           ]);
         }
 
+        if (typeof userData.danmakuEnabled === 'boolean') {
+          await danmakuSettings.add([
+            username,
+            userData.danmakuEnabled ? 1 : 0,
+          ]);
+        }
+
         if (typeof userData.lastLoginAt === 'number') {
           await loginActivities.add([username, userData.lastLoginAt]);
         }
@@ -1649,6 +2076,7 @@ export class MySqlStorage implements IStorage {
       }
 
       await messageStates.flush();
+      await danmakuSettings.flush();
       await loginActivities.flush();
       await playRecords.flush();
       await favorites.flush();

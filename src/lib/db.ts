@@ -6,6 +6,7 @@ import { getStorageType } from './storage-type';
 import {
   Favorite,
   IStorage,
+  MetadataRecordPage,
   PlaybackRangeWatchTotal,
   PlaybackSession,
   PlaybackSessionQuery,
@@ -14,6 +15,7 @@ import {
   PlaybackWatchTotals,
   PlayRecord,
   PlayRecordPage,
+  SharedCacheRecord,
   SkipConfig,
   SourceRouteStatInput,
   SourceRouteStatsBucket,
@@ -78,11 +80,40 @@ class DbManager {
     await storage.setPlayRecord(userName, key, record);
   }
 
+  async savePlayRecordIfUnchanged(
+    userName: string,
+    source: string,
+    id: string,
+    record: PlayRecord,
+    snapshot: string,
+  ): Promise<boolean> {
+    const key = generateStorageKey(source, id);
+    const storage = await this.getStorage();
+    return storage.setPlayRecordIfUnchanged(userName, key, record, snapshot);
+  }
+
   async getAllPlayRecords(userName: string): Promise<{
     [key: string]: PlayRecord;
   }> {
     const storage = await this.getStorage();
     return storage.getAllPlayRecords(userName);
+  }
+
+  async getStalePlayRecordPage(
+    userName: string,
+    now: number,
+    ttlMs: number,
+    limit: number,
+    cursorKey?: string,
+  ): Promise<MetadataRecordPage<PlayRecord>> {
+    const storage = await this.getStorage();
+    return storage.getStalePlayRecordPage(
+      userName,
+      now,
+      ttlMs,
+      limit,
+      cursorKey,
+    );
   }
 
   async getPlayRecordPage(
@@ -164,11 +195,34 @@ class DbManager {
     await storage.setFavorite(userName, key, favorite);
   }
 
+  async saveFavoriteIfUnchanged(
+    userName: string,
+    source: string,
+    id: string,
+    favorite: Favorite,
+    snapshot: string,
+  ): Promise<boolean> {
+    const key = generateStorageKey(source, id);
+    const storage = await this.getStorage();
+    return storage.setFavoriteIfUnchanged(userName, key, favorite, snapshot);
+  }
+
   async getAllFavorites(
     userName: string,
   ): Promise<{ [key: string]: Favorite }> {
     const storage = await this.getStorage();
     return storage.getAllFavorites(userName);
+  }
+
+  async getStaleFavoritePage(
+    userName: string,
+    now: number,
+    ttlMs: number,
+    limit: number,
+    cursorKey?: string,
+  ): Promise<MetadataRecordPage<Favorite>> {
+    const storage = await this.getStorage();
+    return storage.getStaleFavoritePage(userName, now, ttlMs, limit, cursorKey);
   }
 
   async getFavoritePage(
@@ -366,6 +420,44 @@ class DbManager {
     return storage.getAllSkipConfigs(userName);
   }
 
+  async getDanmakuEpisodeId(
+    userName: string,
+    scopeKey: string,
+  ): Promise<number | null> {
+    const storage = await this.getStorage();
+    return storage.getDanmakuEpisodeId(userName, scopeKey);
+  }
+
+  async setDanmakuEpisodeId(
+    userName: string,
+    scopeKey: string,
+    episodeId: number,
+  ): Promise<void> {
+    const storage = await this.getStorage();
+    await storage.setDanmakuEpisodeId(userName, scopeKey, episodeId);
+  }
+
+  async deleteDanmakuEpisodeId(
+    userName: string,
+    scopeKey: string,
+  ): Promise<void> {
+    const storage = await this.getStorage();
+    await storage.deleteDanmakuEpisodeId(userName, scopeKey);
+  }
+
+  async getDanmakuEnabledPreference(userName: string): Promise<boolean | null> {
+    const storage = await this.getStorage();
+    return storage.getDanmakuEnabledPreference(userName);
+  }
+
+  async setDanmakuEnabledPreference(
+    userName: string,
+    enabled: boolean,
+  ): Promise<void> {
+    const storage = await this.getStorage();
+    await storage.setDanmakuEnabledPreference(userName, enabled);
+  }
+
   async savePlaybackSession(
     userName: string,
     session: PlaybackSession,
@@ -439,6 +531,60 @@ class DbManager {
     return storage.getAllSourceRouteStatBuckets();
   }
 
+  async getSharedCache(key: string): Promise<SharedCacheRecord | null> {
+    const storage = await this.getStorage();
+    return storage.getSharedCache(key);
+  }
+
+  async acquireSharedCacheLease(
+    key: string,
+    token: string,
+    now: number,
+    leaseUntil: number,
+  ): Promise<boolean> {
+    const storage = await this.getStorage();
+    return storage.acquireSharedCacheLease(key, token, now, leaseUntil);
+  }
+
+  async setSharedCache(
+    key: string,
+    token: string,
+    value: string,
+    freshUntil: number,
+    staleUntil: number,
+    now: number,
+  ): Promise<boolean> {
+    const storage = await this.getStorage();
+    return storage.setSharedCache(
+      key,
+      token,
+      value,
+      freshUntil,
+      staleUntil,
+      now,
+    );
+  }
+
+  async releaseSharedCacheLease(key: string, token: string): Promise<void> {
+    const storage = await this.getStorage();
+    await storage.releaseSharedCacheLease(key, token);
+  }
+
+  async renewSharedCacheLease(
+    key: string,
+    token: string,
+    now: number,
+    leaseUntil: number,
+  ): Promise<boolean> {
+    const storage = await this.getStorage();
+    return storage.renewSharedCacheLease(key, token, now, leaseUntil);
+  }
+
+  async pruneSharedCache(now: number, limit: number): Promise<void> {
+    const storage = await this.getStorage();
+    await storage.pruneSharedCache(now, limit);
+  }
+
   async clearAllData(): Promise<void> {
     const storage = await this.getStorage();
     await storage.clearAllData();
@@ -447,6 +593,10 @@ class DbManager {
   async replaceAllData(data: StorageImportData): Promise<void> {
     const storage = await this.getStorage();
     await storage.replaceAllData(data);
+  }
+
+  async getSharedResourceStore() {
+    return (await this.getStorage()).resources;
   }
 }
 

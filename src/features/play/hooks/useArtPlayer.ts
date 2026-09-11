@@ -2,6 +2,7 @@ import { useEffect, useRef } from 'react';
 
 import type { UseArtPlayerParams } from '@/features/play/hooks/artPlayerTypes';
 import { initializeArtPlayer } from '@/features/play/hooks/useArtPlayer.init';
+import { setDanmakuLoadNoticeVisibility } from '@/features/play/lib/danmaku/load-notice';
 import { PlayerLoadingSessionState } from '@/features/play/lib/playerLoading';
 
 export type { UseArtPlayerParams } from '@/features/play/hooks/artPlayerTypes';
@@ -29,8 +30,16 @@ export function useArtPlayer(params: UseArtPlayerParams) {
   const autoAdvanceArmedRef = useRef(false);
   const autoAdvancedRef = useRef(false);
   const playerMediaKindRef = useRef<'hls' | 'native' | null>(null);
+  const sessionEpisodeIndexRef = useRef<number | null>(null);
   const paramsRef = useRef(params);
   paramsRef.current = params;
+
+  useEffect(() => {
+    setDanmakuLoadNoticeVisibility(
+      params.artPlayerRef.current,
+      !params.isVideoLoading,
+    );
+  });
 
   useEffect(() => {
     if (
@@ -61,6 +70,7 @@ export function useArtPlayer(params: UseArtPlayerParams) {
       autoAdvanceArmedRef,
       autoAdvancedRef,
       playerMediaKindRef,
+      sessionEpisodeIndexRef,
       isCancelled: () => cancelled,
     });
 

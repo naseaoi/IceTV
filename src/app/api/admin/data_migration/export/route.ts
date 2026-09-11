@@ -74,6 +74,7 @@ export async function POST(req: NextRequest) {
 
     // 为每个用户收集数据
     for (const username of allUsers) {
+      const danmakuEnabled = await db.getDanmakuEnabledPreference(username);
       const userData = {
         // 播放记录
         playRecords: await db.getAllPlayRecords(username),
@@ -90,6 +91,7 @@ export async function POST(req: NextRequest) {
           ]),
         ),
         messageState: await db.getUserMessageState(username),
+        ...(typeof danmakuEnabled === 'boolean' ? { danmakuEnabled } : {}),
         lastLoginAt: (await db.getUserLastActive(username)) ?? undefined,
       };
 

@@ -4,6 +4,7 @@ import Database from 'better-sqlite3';
 import { existsSync, mkdirSync, readFileSync } from 'fs';
 import path from 'path';
 
+import { SqliteResourceStore } from '@/lib/sqlite-resource-store';
 import { AdminConfig } from '@/types/admin';
 
 import { hashPassword, verifyPassword } from './password';
@@ -17,6 +18,7 @@ import {
   Favorite,
   FavoritePage,
   IStorage,
+  MetadataRecordPage,
   PlaybackRangeWatchTotal,
   PlaybackSession,
   PlaybackSessionQuery,
@@ -25,6 +27,7 @@ import {
   PlaybackWatchTotals,
   PlayRecord,
   PlayRecordPage,
+  SharedCacheRecord,
   SkipConfig,
   SourceRouteStatInput,
   SourceRouteStatsBucket,
@@ -45,6 +48,33 @@ const {
   createdAt: SQLITE_TRACKING_CREATED_AT,
   unreadWhere: SQLITE_UNREAD_TRACKING_WHERE,
 } = buildTrackingSql(SQLITE_TRACKING_DIALECT);
+
+const SQLITE_STALE_PLAY_RECORD_WHERE = `
+  CASE
+    WHEN json_valid(record_json) = 0 THEN 1
+    WHEN json_type(record_json, '$.metadata_checked_at') IS NULL THEN 1
+    WHEN json_type(record_json, '$.metadata_checked_at') NOT IN ('integer', 'real') THEN 1
+    WHEN CAST(json_extract(record_json, '$.metadata_checked_at') AS REAL) <= ? THEN 1
+    WHEN CAST(json_extract(record_json, '$.metadata_checked_at') AS REAL) > ? THEN 1
+    ELSE 0
+  END = 1`;
+
+const SQLITE_STALE_FAVORITE_WHERE = `
+  CASE
+    WHEN json_valid(favorite_json) = 0 THEN 1
+    WHEN json_type(favorite_json, '$.metadata_checked_at') IS NULL THEN 1
+    WHEN json_type(favorite_json, '$.metadata_checked_at') NOT IN ('integer', 'real') THEN 1
+    WHEN CAST(json_extract(favorite_json, '$.metadata_checked_at') AS REAL) <= ? THEN 1
+    WHEN CAST(json_extract(favorite_json, '$.metadata_checked_at') AS REAL) > ? THEN 1
+    ELSE 0
+  END = 1`;
+
+const SQLITE_NON_LIVE_FAVORITE_WHERE = `
+  CASE
+    WHEN json_valid(favorite_json) = 0 THEN 1
+    WHEN json_extract(favorite_json, '$.origin') = 'live' THEN 0
+    ELSE 1
+  END = 1`;
 
 function parseBusyTimeoutMs(raw: string | undefined, fallback: number): number {
   if (!raw) {
@@ -271,7 +301,54 @@ function buildFavoritePage(
   };
 }
 
+function buildMetadataRecordPage<T>(
+  rows: Array<{ record_key: string; record_json: string }>,
+  limit: number,
+): MetadataRecordPage<T> {
+  const pageRows = rows.slice(0, limit);
+  const items = pageRows.flatMap((row) => {
+    const parsed = parseJsonValue<T>(row.record_json);
+    return !parsed
+      ? []
+      : [{ key: row.record_key, item: parsed, snapshot: row.record_json }];
+  });
+  const lastRow = pageRows.at(-1);
+
+  return {
+    items,
+    nextCursor: rows.length > limit && lastRow ? lastRow.record_key : null,
+  };
+}
+
+function buildMetadataFavoritePage(
+  rows: Array<{ favorite_key: string; favorite_json: string }>,
+  limit: number,
+): MetadataRecordPage<Favorite> {
+  const pageRows = rows.slice(0, limit);
+  const items = pageRows.flatMap((row) => {
+    const parsed = parseJsonValue<Favorite>(row.favorite_json);
+    return !parsed
+      ? []
+      : [
+          {
+            key: row.favorite_key,
+            item: parsed,
+            snapshot: row.favorite_json,
+          },
+        ];
+  });
+  const lastRow = pageRows.at(-1);
+
+  return {
+    items,
+    nextCursor: rows.length > limit && lastRow ? lastRow.favorite_key : null,
+  };
+}
+
 export class LocalSqliteStorage implements IStorage {
+  get resources() {
+    return new SqliteResourceStore(this.db);
+  }
   private readonly dbPath: string;
   private readonly legacyJsonPaths: string[];
   private readonly db: Database.Database;
@@ -281,7 +358,10 @@ export class LocalSqliteStorage implements IStorage {
     // play_records
     getPlayRecord: Database.Statement;
     setPlayRecord: Database.Statement;
+    setPlayRecordIfUnchanged: Database.Statement;
     getAllPlayRecords: Database.Statement;
+    getStalePlayRecordPage: Database.Statement;
+    getStalePlayRecordPageAfter: Database.Statement;
     getPlayRecordPage: Database.Statement;
     getPlayRecordPageAfter: Database.Statement;
     countPlayRecords: Database.Statement;
@@ -292,7 +372,10 @@ export class LocalSqliteStorage implements IStorage {
     // favorites
     getFavorite: Database.Statement;
     setFavorite: Database.Statement;
+    setFavoriteIfUnchanged: Database.Statement;
     getAllFavorites: Database.Statement;
+    getStaleFavoritePage: Database.Statement;
+    getStaleFavoritePageAfter: Database.Statement;
     getFavoritePage: Database.Statement;
     getFavoritePageAfter: Database.Statement;
     countFavorites: Database.Statement;
@@ -344,6 +427,17 @@ export class LocalSqliteStorage implements IStorage {
     releaseInviteCodeUse: Database.Statement;
     getAllInviteCodeUsage: Database.Statement;
     deleteInviteCodeUsage: Database.Statement;
+    getDanmakuEpisodeId: Database.Statement;
+    setDanmakuEpisodeId: Database.Statement;
+    deleteDanmakuEpisodeId: Database.Statement;
+    getDanmakuEnabledPreference: Database.Statement;
+    setDanmakuEnabledPreference: Database.Statement;
+    deleteDanmakuEnabledPreferenceByUser: Database.Statement;
+    getSharedCache: Database.Statement;
+    acquireSharedCacheLease: Database.Statement;
+    setSharedCache: Database.Statement;
+    releaseSharedCacheLease: Database.Statement;
+    pruneSharedCache: Database.Statement;
   };
 
   constructor(dbPath?: string) {
@@ -526,6 +620,49 @@ export class LocalSqliteStorage implements IStorage {
 
       CREATE INDEX IF NOT EXISTS idx_source_route_stats_bucket
         ON source_route_stats (bucket_date);
+
+      CREATE TABLE IF NOT EXISTS user_danmaku_episodes (
+        username TEXT NOT NULL,
+        scope_key TEXT NOT NULL,
+        episode_id INTEGER NOT NULL,
+        updated_at INTEGER NOT NULL,
+        PRIMARY KEY (username, scope_key)
+      );
+
+      CREATE TABLE IF NOT EXISTS user_danmaku_settings (
+        username TEXT PRIMARY KEY,
+        enabled INTEGER NOT NULL
+      );
+
+      CREATE TABLE IF NOT EXISTS shared_resource_usage (
+        resource_key TEXT PRIMARY KEY,
+        used INTEGER NOT NULL,
+        reset_at INTEGER NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS idx_resource_usage_expiry ON shared_resource_usage (reset_at);
+      CREATE TABLE IF NOT EXISTS shared_resource_leases (
+        resource_key TEXT NOT NULL,
+        token TEXT NOT NULL,
+        expires_at INTEGER NOT NULL,
+        PRIMARY KEY (resource_key, token)
+      );
+      CREATE INDEX IF NOT EXISTS idx_resource_lease_expiry ON shared_resource_leases (expires_at);
+
+      CREATE TABLE IF NOT EXISTS shared_cache (
+        cache_key TEXT PRIMARY KEY,
+        value_text TEXT NOT NULL,
+        fresh_until INTEGER NOT NULL,
+        stale_until INTEGER NOT NULL,
+        lease_token TEXT,
+        lease_until INTEGER NOT NULL DEFAULT 0,
+        updated_at INTEGER NOT NULL
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_shared_cache_expiry
+        ON shared_cache (stale_until, lease_until);
+
+      CREATE INDEX IF NOT EXISTS idx_shared_cache_updated_at
+        ON shared_cache (updated_at);
     `);
   }
 
@@ -538,8 +675,30 @@ export class LocalSqliteStorage implements IStorage {
       setPlayRecord: this.db.prepare(
         'INSERT OR REPLACE INTO play_records (username, record_key, record_json) VALUES (?, ?, ?)',
       ),
+      setPlayRecordIfUnchanged: this.db.prepare(
+        `UPDATE play_records
+         SET record_json = ?
+         WHERE username = ? AND record_key = ? AND record_json = ?`,
+      ),
       getAllPlayRecords: this.db.prepare(
         'SELECT record_key, record_json FROM play_records WHERE username = ?',
+      ),
+      getStalePlayRecordPage: this.db.prepare(
+        `SELECT record_key, record_json
+         FROM play_records
+         WHERE username = ?
+           AND ${SQLITE_STALE_PLAY_RECORD_WHERE}
+         ORDER BY record_key ASC
+         LIMIT ?`,
+      ),
+      getStalePlayRecordPageAfter: this.db.prepare(
+        `SELECT record_key, record_json
+         FROM play_records
+         WHERE username = ?
+           AND record_key > ?
+           AND ${SQLITE_STALE_PLAY_RECORD_WHERE}
+         ORDER BY record_key ASC
+         LIMIT ?`,
       ),
       getPlayRecordPage: this.db.prepare(
         `SELECT record_key, record_json
@@ -604,8 +763,32 @@ export class LocalSqliteStorage implements IStorage {
       setFavorite: this.db.prepare(
         'INSERT OR REPLACE INTO favorites (username, favorite_key, favorite_json) VALUES (?, ?, ?)',
       ),
+      setFavoriteIfUnchanged: this.db.prepare(
+        `UPDATE favorites
+         SET favorite_json = ?
+         WHERE username = ? AND favorite_key = ? AND favorite_json = ?`,
+      ),
       getAllFavorites: this.db.prepare(
         'SELECT favorite_key, favorite_json FROM favorites WHERE username = ?',
+      ),
+      getStaleFavoritePage: this.db.prepare(
+        `SELECT favorite_key, favorite_json
+         FROM favorites
+         WHERE username = ?
+           AND ${SQLITE_STALE_FAVORITE_WHERE}
+           AND ${SQLITE_NON_LIVE_FAVORITE_WHERE}
+         ORDER BY favorite_key ASC
+         LIMIT ?`,
+      ),
+      getStaleFavoritePageAfter: this.db.prepare(
+        `SELECT favorite_key, favorite_json
+         FROM favorites
+         WHERE username = ?
+           AND favorite_key > ?
+           AND ${SQLITE_STALE_FAVORITE_WHERE}
+           AND ${SQLITE_NON_LIVE_FAVORITE_WHERE}
+         ORDER BY favorite_key ASC
+         LIMIT ?`,
       ),
       getFavoritePage: this.db.prepare(
         `SELECT f.favorite_key, f.favorite_json, p.record_json
@@ -789,6 +972,58 @@ export class LocalSqliteStorage implements IStorage {
       deleteInviteCodeUsage: this.db.prepare(
         'DELETE FROM invite_code_usage WHERE code = ?',
       ),
+      getDanmakuEpisodeId: this.db.prepare(
+        'SELECT episode_id FROM user_danmaku_episodes WHERE username = ? AND scope_key = ?',
+      ),
+      setDanmakuEpisodeId: this.db.prepare(
+        'INSERT OR REPLACE INTO user_danmaku_episodes (username, scope_key, episode_id, updated_at) VALUES (?, ?, ?, ?)',
+      ),
+      deleteDanmakuEpisodeId: this.db.prepare(
+        'DELETE FROM user_danmaku_episodes WHERE username = ? AND scope_key = ?',
+      ),
+      getDanmakuEnabledPreference: this.db.prepare(
+        'SELECT enabled FROM user_danmaku_settings WHERE username = ?',
+      ),
+      setDanmakuEnabledPreference: this.db.prepare(
+        'INSERT OR REPLACE INTO user_danmaku_settings (username, enabled) VALUES (?, ?)',
+      ),
+      deleteDanmakuEnabledPreferenceByUser: this.db.prepare(
+        'DELETE FROM user_danmaku_settings WHERE username = ?',
+      ),
+      getSharedCache: this.db.prepare(
+        `SELECT value_text, fresh_until, stale_until, lease_until
+         FROM shared_cache WHERE cache_key = ? LIMIT 1`,
+      ),
+      acquireSharedCacheLease: this.db.prepare(
+        `INSERT INTO shared_cache (
+           cache_key, value_text, fresh_until, stale_until,
+           lease_token, lease_until, updated_at
+         ) VALUES (?, '', 0, 0, ?, ?, ?)
+         ON CONFLICT(cache_key) DO UPDATE SET
+           lease_token = excluded.lease_token,
+           lease_until = excluded.lease_until,
+           updated_at = excluded.updated_at
+         WHERE shared_cache.lease_until <= excluded.updated_at`,
+      ),
+      setSharedCache: this.db.prepare(
+        `UPDATE shared_cache
+         SET value_text = ?, fresh_until = ?, stale_until = ?,
+             lease_token = NULL, lease_until = 0, updated_at = ?
+         WHERE cache_key = ? AND lease_token = ?`,
+      ),
+      releaseSharedCacheLease: this.db.prepare(
+        `UPDATE shared_cache
+         SET lease_token = NULL, lease_until = 0
+         WHERE cache_key = ? AND lease_token = ?`,
+      ),
+      pruneSharedCache: this.db.prepare(
+        `DELETE FROM shared_cache
+         WHERE cache_key IN (
+           SELECT cache_key FROM shared_cache
+           WHERE stale_until <= ? AND lease_until <= ?
+           ORDER BY updated_at ASC LIMIT ?
+         )`,
+      ),
     };
   }
 
@@ -801,6 +1036,7 @@ export class LocalSqliteStorage implements IStorage {
       'SELECT 1 AS v FROM skip_configs LIMIT 1',
       'SELECT 1 AS v FROM playback_sessions LIMIT 1',
       'SELECT 1 AS v FROM admin_config LIMIT 1',
+      'SELECT 1 AS v FROM user_danmaku_settings LIMIT 1',
     ];
     return checks.some((sql) => Boolean(this.db.prepare(sql).get()));
   }
@@ -943,6 +1179,12 @@ export class LocalSqliteStorage implements IStorage {
           legacy,
           canonical,
         );
+        this.mergeSingleRowTable(
+          'user_danmaku_settings',
+          'enabled',
+          legacy,
+          canonical,
+        );
         this.db
           .prepare(
             'UPDATE playback_sessions SET username = ? WHERE username = ?',
@@ -967,6 +1209,7 @@ export class LocalSqliteStorage implements IStorage {
       'skip_configs',
       'playback_sessions',
       'user_message_state',
+      'user_danmaku_settings',
     ];
     const usernames = new Set<string>();
     for (const table of tables) {
@@ -1102,6 +1345,22 @@ export class LocalSqliteStorage implements IStorage {
     this.stmts.setPlayRecord.run(username, key, JSON.stringify(record));
   }
 
+  async setPlayRecordIfUnchanged(
+    userName: string,
+    key: string,
+    record: PlayRecord,
+    snapshot: string,
+  ): Promise<boolean> {
+    const username = normalizeUsername(userName);
+    const result = this.stmts.setPlayRecordIfUnchanged.run(
+      JSON.stringify(record),
+      username,
+      key,
+      snapshot,
+    );
+    return result.changes > 0;
+  }
+
   async setPlayRecords(
     userName: string,
     records: Record<string, PlayRecord>,
@@ -1136,6 +1395,36 @@ export class LocalSqliteStorage implements IStorage {
       }
     }
     return result;
+  }
+
+  async getStalePlayRecordPage(
+    userName: string,
+    now: number,
+    ttlMs: number,
+    limit: number,
+    cursorKey?: string,
+  ): Promise<MetadataRecordPage<PlayRecord>> {
+    const username = normalizeUsername(userName);
+    const pageLimit = Math.max(1, Math.floor(limit));
+    const staleBefore = now - ttlMs;
+    const rows = (
+      cursorKey !== undefined
+        ? this.stmts.getStalePlayRecordPageAfter.all(
+            username,
+            cursorKey,
+            staleBefore,
+            now,
+            pageLimit + 1,
+          )
+        : this.stmts.getStalePlayRecordPage.all(
+            username,
+            staleBefore,
+            now,
+            pageLimit + 1,
+          )
+    ) as Array<{ record_key: string; record_json: string }>;
+
+    return buildMetadataRecordPage<PlayRecord>(rows, pageLimit);
   }
 
   async getPlayRecordPage(
@@ -1213,6 +1502,22 @@ export class LocalSqliteStorage implements IStorage {
     this.stmts.setFavorite.run(username, key, JSON.stringify(favorite));
   }
 
+  async setFavoriteIfUnchanged(
+    userName: string,
+    key: string,
+    favorite: Favorite,
+    snapshot: string,
+  ): Promise<boolean> {
+    const username = normalizeUsername(userName);
+    const result = this.stmts.setFavoriteIfUnchanged.run(
+      JSON.stringify(favorite),
+      username,
+      key,
+      snapshot,
+    );
+    return result.changes > 0;
+  }
+
   async getAllFavorites(
     userName: string,
   ): Promise<{ [key: string]: Favorite }> {
@@ -1230,6 +1535,36 @@ export class LocalSqliteStorage implements IStorage {
       }
     }
     return result;
+  }
+
+  async getStaleFavoritePage(
+    userName: string,
+    now: number,
+    ttlMs: number,
+    limit: number,
+    cursorKey?: string,
+  ): Promise<MetadataRecordPage<Favorite>> {
+    const username = normalizeUsername(userName);
+    const pageLimit = Math.max(1, Math.floor(limit));
+    const staleBefore = now - ttlMs;
+    const rows = (
+      cursorKey !== undefined
+        ? this.stmts.getStaleFavoritePageAfter.all(
+            username,
+            cursorKey,
+            staleBefore,
+            now,
+            pageLimit + 1,
+          )
+        : this.stmts.getStaleFavoritePage.all(
+            username,
+            staleBefore,
+            now,
+            pageLimit + 1,
+          )
+    ) as Array<{ favorite_key: string; favorite_json: string }>;
+
+    return buildMetadataFavoritePage(rows, pageLimit);
   }
 
   async getFavoritePage(
@@ -1335,6 +1670,10 @@ export class LocalSqliteStorage implements IStorage {
       this.stmts.deletePlaybackSessionsByUser.run(targetUser);
       this.stmts.deleteUserMessageStateByUser.run(targetUser);
       this.stmts.deleteLoginActivityByUser.run(targetUser);
+      this.db
+        .prepare('DELETE FROM user_danmaku_episodes WHERE username = ?')
+        .run(targetUser);
+      this.stmts.deleteDanmakuEnabledPreferenceByUser.run(targetUser);
     });
     remove(username);
   }
@@ -1537,6 +1876,144 @@ export class LocalSqliteStorage implements IStorage {
       }
     }
     return result;
+  }
+
+  async getDanmakuEpisodeId(
+    userName: string,
+    scopeKey: string,
+  ): Promise<number | null> {
+    const username = normalizeUsername(userName);
+    const row = this.stmts.getDanmakuEpisodeId.get(username, scopeKey) as
+      | { episode_id: number }
+      | undefined;
+    return row ? row.episode_id : null;
+  }
+
+  async setDanmakuEpisodeId(
+    userName: string,
+    scopeKey: string,
+    episodeId: number,
+  ): Promise<void> {
+    const username = normalizeUsername(userName);
+    this.stmts.setDanmakuEpisodeId.run(
+      username,
+      scopeKey,
+      episodeId,
+      Date.now(),
+    );
+  }
+
+  async deleteDanmakuEpisodeId(
+    userName: string,
+    scopeKey: string,
+  ): Promise<void> {
+    const username = normalizeUsername(userName);
+    this.stmts.deleteDanmakuEpisodeId.run(username, scopeKey);
+  }
+
+  async getDanmakuEnabledPreference(userName: string): Promise<boolean | null> {
+    const username = normalizeUsername(userName);
+    const row = this.stmts.getDanmakuEnabledPreference.get(username) as
+      | { enabled: number }
+      | undefined;
+    return row ? row.enabled !== 0 : null;
+  }
+
+  async setDanmakuEnabledPreference(
+    userName: string,
+    enabled: boolean,
+  ): Promise<void> {
+    const username = normalizeUsername(userName);
+    this.stmts.setDanmakuEnabledPreference.run(username, enabled ? 1 : 0);
+  }
+
+  async getSharedCache(key: string): Promise<SharedCacheRecord | null> {
+    const row = this.stmts.getSharedCache.get(key) as
+      | {
+          value_text: string;
+          fresh_until: number;
+          stale_until: number;
+          lease_until: number;
+        }
+      | undefined;
+    if (!row) return null;
+    return {
+      value: row.value_text,
+      freshUntil: row.fresh_until,
+      staleUntil: row.stale_until,
+      leaseUntil: row.lease_until,
+    };
+  }
+
+  async acquireSharedCacheLease(
+    key: string,
+    token: string,
+    now: number,
+    leaseUntil: number,
+  ): Promise<boolean> {
+    return (
+      this.stmts.acquireSharedCacheLease.run(key, token, leaseUntil, now)
+        .changes > 0
+    );
+  }
+
+  async setSharedCache(
+    key: string,
+    token: string,
+    value: string,
+    freshUntil: number,
+    staleUntil: number,
+    now: number,
+  ): Promise<boolean> {
+    return (
+      this.stmts.setSharedCache.run(
+        value,
+        freshUntil,
+        staleUntil,
+        now,
+        key,
+        token,
+      ).changes > 0
+    );
+  }
+
+  async releaseSharedCacheLease(key: string, token: string): Promise<void> {
+    this.stmts.releaseSharedCacheLease.run(key, token);
+  }
+
+  async pruneSharedCache(now: number, limit: number): Promise<void> {
+    this.stmts.pruneSharedCache.run(
+      now,
+      now,
+      Math.max(1, Math.min(1000, Math.floor(limit))),
+    );
+    this.db
+      .prepare(
+        `DELETE FROM shared_cache WHERE cache_key IN (
+      SELECT cache_key FROM (
+        SELECT cache_key,
+          ROW_NUMBER() OVER (ORDER BY updated_at DESC, cache_key DESC) AS entry_rank,
+          SUM(length(CAST(value_text AS BLOB))) OVER (ORDER BY updated_at DESC, cache_key DESC) AS cache_bytes
+        FROM shared_cache WHERE lease_until <= ?
+      ) AS budget WHERE entry_rank > 4096 OR cache_bytes > 134217728
+    )`,
+      )
+      .run(now);
+  }
+
+  async renewSharedCacheLease(
+    key: string,
+    token: string,
+    now: number,
+    leaseUntil: number,
+  ): Promise<boolean> {
+    return (
+      this.db
+        .prepare(
+          'UPDATE shared_cache SET lease_until = ? WHERE cache_key = ? AND lease_token = ? AND lease_until > ?',
+        )
+        .run(leaseUntil, key, token, now).changes > 0
+    );
   }
 
   async setPlaybackSession(
@@ -1874,6 +2351,9 @@ export class LocalSqliteStorage implements IStorage {
         DELETE FROM user_message_state;
         DELETE FROM user_login_activity;
         DELETE FROM invite_code_usage;
+        DELETE FROM user_danmaku_episodes;
+        DELETE FROM user_danmaku_settings;
+        DELETE FROM shared_cache;
       `);
     });
 
@@ -1899,6 +2379,9 @@ export class LocalSqliteStorage implements IStorage {
         DELETE FROM user_message_state;
         DELETE FROM user_login_activity;
         DELETE FROM invite_code_usage;
+        DELETE FROM user_danmaku_episodes;
+        DELETE FROM user_danmaku_settings;
+        DELETE FROM shared_cache;
       `);
 
       this.stmts.setAdminConfig.run(JSON.stringify(snapshot.adminConfig));
@@ -1940,6 +2423,12 @@ export class LocalSqliteStorage implements IStorage {
           this.stmts.setUserMessageState.run(
             username,
             JSON.stringify(userData.messageState),
+          );
+        }
+        if (typeof userData.danmakuEnabled === 'boolean') {
+          this.stmts.setDanmakuEnabledPreference.run(
+            username,
+            userData.danmakuEnabled ? 1 : 0,
           );
         }
         if (typeof userData.lastLoginAt === 'number') {

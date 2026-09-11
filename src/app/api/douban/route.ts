@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 
+import { doubanRouteCache } from '@/app/api/douban/cache';
 import { isGuardFailure, requireActiveUser } from '@/lib/api-auth';
 import { createPublicApiCacheHeaders } from '@/lib/api-cache-headers';
 import { getCacheTime } from '@/lib/config';
@@ -9,22 +10,15 @@ import {
   normalizeDoubanListSubjects,
 } from '@/lib/douban-normalize';
 import { createTimedAbortController } from '@/lib/downstream-sources/shared';
-import { createSwrCache } from '@/lib/server-cache';
 import {
   recordServerProxyFailure,
   requireServerProxyQuota,
 } from '@/lib/server-proxy-guard';
+import { resourceLimitResponse } from '@/lib/server-resource-errors';
 import { DoubanItem, DoubanResult } from '@/lib/types';
+import { fetchUpstream } from '@/lib/upstream-fetch.server';
 
 export const runtime = 'nodejs';
-
-const doubanRouteCache = createSwrCache<DoubanResult>({
-  name: 'douban-route',
-  freshMs: 30 * 60 * 1000,
-  staleMs: 30 * 60 * 1000,
-  maxSize: 500,
-  maxWeightBytes: 16 * 1024 * 1024,
-});
 
 export async function GET(request: NextRequest) {
   const guardResult = await requireActiveUser(request, {
@@ -33,7 +27,7 @@ export async function GET(request: NextRequest) {
   });
   if (isGuardFailure(guardResult)) return guardResult.response;
 
-  const quotaFailure = requireServerProxyQuota(
+  const quotaFailure = await requireServerProxyQuota(
     'douban-data',
     request,
     guardResult.username,
@@ -95,6 +89,8 @@ export async function GET(request: NextRequest) {
 
     return createDoubanJsonResponse(response);
   } catch (error) {
+    const busy = resourceLimitResponse(error);
+    if (busy) return busy;
     recordServerProxyFailure('douban-data', error);
     return NextResponse.json({ error: '获取豆瓣数据失败' }, { status: 500 });
   }
@@ -109,6 +105,8 @@ async function handleTop250(pageStart: number) {
     );
     return createDoubanJsonResponse(response);
   } catch (error) {
+    const busy = resourceLimitResponse(error);
+    if (busy) return busy;
     recordServerProxyFailure('douban-data', error);
     return NextResponse.json(
       { error: '获取豆瓣 Top250 数据失败' },
@@ -132,7 +130,7 @@ async function fetchTop250Result(target: string): Promise<DoubanResult> {
   };
 
   try {
-    const fetchResponse = await fetch(target, fetchOptions);
+    const fetchResponse = await fetchUpstream(target, fetchOptions);
 
     if (!fetchResponse.ok) {
       throw new Error(`HTTP error! Status: ${fetchResponse.status}`);

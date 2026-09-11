@@ -1,4 +1,4 @@
-import { Link, PlayCircleIcon, Trash2 } from 'lucide-react';
+import { Check, Link, PlayCircleIcon, Trash2 } from 'lucide-react';
 import type React from 'react';
 
 import CoverImage from '@/components/CoverImage';
@@ -335,7 +335,7 @@ export function VideoCardPoster({
             className='hidden sm:group-hover/update:inline'
             aria-hidden='true'
           >
-            ✅
+            <Check size={16} strokeWidth={3} />
           </span>
         </button>
       )}

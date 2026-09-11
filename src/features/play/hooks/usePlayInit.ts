@@ -15,6 +15,10 @@ import {
   saveDetailSnapshot,
 } from '@/features/play/lib/detailSnapshot';
 import { calculateSourceScore } from '@/features/play/lib/playUtils';
+import {
+  SOURCE_PROBE_CONCURRENCY,
+  SourceProbeDeferredError,
+} from '@/features/play/lib/sourceProbeRequestPolicy';
 import { probeVodEpisodeUrl } from '@/features/play/lib/vodProbe';
 import { isVodM3u8Url } from '@/features/play/lib/vodProxyUrl';
 import { PLAYER_EXIT_EVENT } from '@/lib/navigation-return';
@@ -26,7 +30,7 @@ import { SearchResult } from '@/lib/types';
 
 const DETAIL_CACHE_TTL_MS = 3 * 60 * 1000;
 const IS_DEVELOPMENT = process.env.NODE_ENV !== 'production';
-const SOURCE_PROBE_FOREGROUND_LIMIT = 4;
+const SOURCE_PROBE_FOREGROUND_LIMIT = SOURCE_PROBE_CONCURRENCY;
 const detailCache = new Map<
   string,
   { data: SearchResult; expiresAt: number }
@@ -185,8 +189,8 @@ async function preferBestSource(
       writeProbeInfo(source, testResult);
       notifyBetterSource();
       return result;
-    } catch {
-      if (!signal?.aborted) {
+    } catch (error) {
+      if (!signal?.aborted && !(error instanceof SourceProbeDeferredError)) {
         writeProbeInfo(source, {
           quality: '错误',
           loadSpeed: '未知',

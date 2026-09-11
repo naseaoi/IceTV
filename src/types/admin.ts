@@ -30,6 +30,8 @@ export interface AdminConfig {
     DataImportPlaybackSessionsLimit: number;
     LivePrecheckTimeoutSeconds: number;
     ProxyRequestTimeoutSeconds: number;
+    ImageProxyTimeoutSeconds: number;
+    UpstreamSearchConcurrency: number;
     DoubanProxyType: string;
     DoubanProxy: string;
     BangumiDataSource: string;
@@ -38,6 +40,9 @@ export interface AdminConfig {
     DoubanImageProxy: string;
     DisableYellowFilter: boolean;
     FluidSearch: boolean;
+    EnableDanmaku: boolean;
+    DanmakuEpisodeLimit: number;
+    DanmakuRequestTimeoutSeconds: number;
   };
   UserConfig: {
     Users: {

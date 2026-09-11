@@ -107,6 +107,24 @@ describe('data import full export fields', () => {
     });
   });
 
+  it('保留账号级弹幕开关', async () => {
+    const importData = createImportData();
+    importData.data.userData['demo-user'].danmakuEnabled = true;
+
+    const parsed = await parseImportData(importData);
+
+    expect(parsed.snapshot.userData['demo-user'].danmakuEnabled).toBe(true);
+  });
+
+  it('拒绝非布尔的账号级弹幕开关', async () => {
+    const importData = createImportData();
+    importData.data.userData['demo-user'].danmakuEnabled = 'true' as never;
+
+    await expect(parseImportData(importData)).rejects.toThrow(
+      '弹幕开关格式无效',
+    );
+  });
+
   it('accepts backups without invite code usage', async () => {
     const importData = createImportData();
     delete importData.data.inviteCodeUsage;

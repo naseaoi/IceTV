@@ -1,5 +1,7 @@
+import { getServerCacheBudget } from '@/lib/cache-budget-profile';
 import type { ApiSite } from '@/lib/config';
 import { createSwrCache } from '@/lib/server-cache';
+import { createSharedServerCache } from '@/lib/shared-server-cache';
 import { SearchResult } from '@/lib/types';
 
 export type CachedPageStatus = 'ok' | 'timeout' | 'forbidden';
@@ -27,34 +29,37 @@ const SEARCH_EMPTY_CACHE_TTL_MS = 60 * 1000;
 const SEARCH_EMPTY_CACHE_STALE_MS = 60 * 1000;
 const SEARCH_AGGREGATE_CACHE_TTL_MS = 2 * 60 * 1000;
 const SEARCH_AGGREGATE_CACHE_STALE_MS = 3 * 60 * 1000;
-const MAX_CACHE_SIZE = 1000;
-const MAX_AGGREGATE_CACHE_SIZE = 200;
-const MAX_EMPTY_CACHE_SIZE = 250;
-const SEARCH_CACHE_MAX_BYTES = 32 * 1024 * 1024;
-const SEARCH_EMPTY_CACHE_MAX_BYTES = 2 * 1024 * 1024;
-const SEARCH_AGGREGATE_CACHE_MAX_BYTES = 48 * 1024 * 1024;
 const SEARCH_CACHE = createSwrCache<CachedPageEntry>({
   name: 'search-pages',
-  maxSize: MAX_CACHE_SIZE,
-  maxWeightBytes: SEARCH_CACHE_MAX_BYTES,
+  ...getServerCacheBudget('search-pages'),
   freshMs: SEARCH_CACHE_TTL_MS,
   staleMs: SEARCH_CACHE_STALE_MS,
 });
 const SEARCH_EMPTY_CACHE = createSwrCache<CachedPageEntry>({
   name: 'search-empty-pages',
-  maxSize: MAX_EMPTY_CACHE_SIZE,
-  maxWeightBytes: SEARCH_EMPTY_CACHE_MAX_BYTES,
+  ...getServerCacheBudget('search-empty-pages'),
   freshMs: SEARCH_EMPTY_CACHE_TTL_MS,
   staleMs: SEARCH_EMPTY_CACHE_STALE_MS,
 });
-const SEARCH_AGGREGATE_CACHE = createSwrCache<CachedSearchAggregateEntry>({
-  name: 'search-aggregates',
-  maxSize: MAX_AGGREGATE_CACHE_SIZE,
-  maxWeightBytes: SEARCH_AGGREGATE_CACHE_MAX_BYTES,
-  freshMs: SEARCH_AGGREGATE_CACHE_TTL_MS,
-  staleMs: SEARCH_AGGREGATE_CACHE_STALE_MS,
-});
+const SEARCH_AGGREGATE_CACHE =
+  createSharedServerCache<CachedSearchAggregateEntry>({
+    name: 'search-aggregates',
+    ...getServerCacheBudget('search-aggregates'),
+    freshMs: SEARCH_AGGREGATE_CACHE_TTL_MS,
+    staleMs: SEARCH_AGGREGATE_CACHE_STALE_MS,
+    maxWaitMs: 20_000,
+    shouldCache: (entry) => entry.results.length > 0,
+  });
 const SEARCH_AGGREGATE_REFRESH_INFLIGHT: Map<string, Promise<void>> = new Map();
+const SHARED_SEARCH_PAGES = createSharedServerCache<{
+  results: SearchResult[];
+  pageCount?: number;
+}>({
+  name: 'search-page-shared-v1',
+  ...getServerCacheBudget('search-empty-pages'),
+  freshMs: 60_000,
+  staleMs: 0,
+});
 const SEARCH_AGGREGATE_LOAD_INFLIGHT: Map<
   string,
   Promise<SearchResult[]>
@@ -119,13 +124,13 @@ export function refreshCachedSearchAggregate(
   const existing = SEARCH_AGGREGATE_REFRESH_INFLIGHT.get(key);
   if (existing) return existing;
 
-  const task = loader()
-    .then((results) => {
-      setCachedSearchAggregate(params, results);
-    })
-    .finally(() => {
-      SEARCH_AGGREGATE_REFRESH_INFLIGHT.delete(key);
-    });
+  const task = SEARCH_AGGREGATE_CACHE.refresh(key, async () => {
+    const results = await loader();
+    setCachedSearchAggregate(params, results);
+    return { results };
+  }).finally(() => {
+    SEARCH_AGGREGATE_REFRESH_INFLIGHT.delete(key);
+  });
 
   SEARCH_AGGREGATE_REFRESH_INFLIGHT.set(key, task);
   return task;
@@ -139,11 +144,12 @@ export function loadCachedSearchAggregate(
   const existing = SEARCH_AGGREGATE_LOAD_INFLIGHT.get(key);
   if (existing) return existing;
 
-  const task = loader()
-    .then((results) => {
-      setCachedSearchAggregate(params, results);
-      return results;
-    })
+  const task = SEARCH_AGGREGATE_CACHE.getOrLoad(key, async () => {
+    const results = await loader();
+    setCachedSearchAggregate(params, results);
+    return { results };
+  })
+    .then((entry) => entry.results)
     .finally(() => {
       SEARCH_AGGREGATE_LOAD_INFLIGHT.delete(key);
     });
@@ -171,7 +177,7 @@ export function dedupeSearchLoad(
   const key = makeSearchCacheKey(sourceKey, query, page);
   const existing = SEARCH_INFLIGHT.get(key);
   if (existing) return existing;
-  const p = loader().finally(() => {
+  const p = SHARED_SEARCH_PAGES.getOrLoad(key, loader).finally(() => {
     SEARCH_INFLIGHT.delete(key);
   });
   SEARCH_INFLIGHT.set(key, p);
@@ -222,6 +228,7 @@ export function clearSearchCachesForTests(): void {
   SEARCH_CACHE.clear();
   SEARCH_EMPTY_CACHE.clear();
   SEARCH_AGGREGATE_CACHE.clear();
+  SHARED_SEARCH_PAGES.clear();
   SEARCH_INFLIGHT.clear();
   SEARCH_AGGREGATE_REFRESH_INFLIGHT.clear();
   SEARCH_AGGREGATE_LOAD_INFLIGHT.clear();

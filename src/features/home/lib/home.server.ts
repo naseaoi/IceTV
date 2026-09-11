@@ -1,8 +1,10 @@
 import { getCachedBangumiCalendarData } from '@/features/bangumi/lib/bangumi';
+import { getServerCacheBudget } from '@/lib/cache-budget-profile';
 import { getPublicConfig } from '@/lib/config';
 import { fetchDoubanData } from '@/lib/douban';
 import { processDoubanImageUrl } from '@/lib/douban-image-url';
 import { readServerDoubanImageProxyType } from '@/lib/douban-image-url.server';
+import { createSharedServerCache } from '@/lib/shared-server-cache';
 import { DoubanItem } from '@/lib/types';
 
 import { HomeInitialData } from './home.types';
@@ -23,6 +25,13 @@ interface DoubanCategoryApiResponse {
   }>;
 }
 
+const homeRecommendations = createSharedServerCache<DoubanCategoryApiResponse>({
+  name: 'home-douban-v1',
+  ...getServerCacheBudget('douban-route'),
+  freshMs: HOME_RECOMMENDATION_REVALIDATE_SECONDS * 1000,
+  staleMs: HOME_RECOMMENDATION_REVALIDATE_SECONDS * 1000,
+});
+
 async function getServerDoubanRecentHot(params: {
   kind: 'movie' | 'tv';
   category: string;
@@ -40,9 +49,9 @@ async function getServerDoubanRecentHot(params: {
     start = 0,
   } = params;
   const target = `https://m.douban.com/rexxar/api/v2/subject/recent_hot/${kind}?start=${start}&limit=${limit}&category=${category}&type=${type}`;
-  const doubanData = await fetchDoubanData<DoubanCategoryApiResponse>(target, {
-    next: { revalidate: HOME_RECOMMENDATION_REVALIDATE_SECONDS },
-  });
+  const doubanData = await homeRecommendations.getOrLoad(target, () =>
+    fetchDoubanData<DoubanCategoryApiResponse>(target, { cache: 'no-store' }),
+  );
 
   return doubanData.items.map((item) => ({
     id: item.id,
