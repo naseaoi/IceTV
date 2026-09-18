@@ -140,4 +140,32 @@ describe('playIntent', () => {
       resumeMode: 'forced',
     });
   });
+
+  it('繁中和简中同时从 10 集增到 11 集时仍恢复简中第 10 集', () => {
+    savePlayIntent({
+      source: 'giri',
+      id: 'blue-grand',
+      episodeIndex: 19,
+      resumeTime: 180,
+      groupLabel: '简中 10',
+      groupIndex: 10,
+      groupTotal: 10,
+    });
+
+    expect(
+      consumeMatchingPlayIntent({
+        source: 'giri',
+        id: 'blue-grand',
+        episodeCount: 22,
+        episodeGroups: [
+          { label: '繁中 11', count: 11 },
+          { label: '简中 11', count: 11 },
+        ],
+      }),
+    ).toEqual({
+      episodeIndex: 20,
+      resumeTime: 180,
+      resumeMode: 'forced',
+    });
+  });
 });
