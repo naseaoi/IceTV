@@ -122,7 +122,10 @@
       "better-sqlite3",
       "sharp",
       "unrs-resolver"
-    ]
+    ],
+    "patchedDependencies": {
+      "artplayer-plugin-danmuku@5.3.0": "patches/artplayer-plugin-danmuku@5.3.0.patch"
+    }
   },
   "packageManager": "pnpm@10.14.0"
 }

@@ -1,0 +1,13 @@
+diff --git a/dist/artplayer-plugin-danmuku.mjs b/dist/artplayer-plugin-danmuku.mjs
+index fac426cd821bbde03114f0bbc509d68ea403d7a4..0d208027b6ccf5077cf555ff1d8af8f326c44329 100644
+--- a/dist/artplayer-plugin-danmuku.mjs
++++ b/dist/artplayer-plugin-danmuku.mjs
+@@ -428,7 +428,7 @@ class Danmuku {
+       $lastStartTime: 0
+       // 弹幕上次开始时间
+     };
+-    this.setState(item, "wait");
++    this.states.wait.push(item);
+     this.queue.push(item);
+     return this;
+   }
