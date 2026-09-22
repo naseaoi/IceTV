@@ -28,7 +28,7 @@ overrides:
 
 patchedDependencies:
   artplayer-plugin-danmuku@5.3.0:
-    hash: f63d3c5220bbc248cbf024024501f9d20554e857595bcb62018a2ccee19c02f4
+    hash: 59914e6377406073daddeed36b442f5c23a06e52b0d26873ae2f5af4ba538c2c
     path: patches/artplayer-plugin-danmuku@5.3.0.patch
 
 importers:
@@ -55,7 +55,7 @@ importers:
         version: 5.2.5
       artplayer-plugin-danmuku:
         specifier: ^5.3.0
-        version: 5.3.0(patch_hash=f63d3c5220bbc248cbf024024501f9d20554e857595bcb62018a2ccee19c02f4)
+        version: 5.3.0(patch_hash=59914e6377406073daddeed36b442f5c23a06e52b0d26873ae2f5af4ba538c2c)
       bcrypt:
         specifier: ^6.0.0
         version: 6.0.0
@@ -5549,7 +5549,7 @@ snapshots:
 
   arrify@1.0.1: {}
 
-  artplayer-plugin-danmuku@5.3.0(patch_hash=f63d3c5220bbc248cbf024024501f9d20554e857595bcb62018a2ccee19c02f4): {}
+  artplayer-plugin-danmuku@5.3.0(patch_hash=59914e6377406073daddeed36b442f5c23a06e52b0d26873ae2f5af4ba538c2c): {}
 
   artplayer@5.2.5:
     dependencies:

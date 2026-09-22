@@ -29,6 +29,7 @@ function createPlayerWithHandlers() {
   const handlers = new Map<string, Handler>();
   const player = {
     controls: { heatmap: document.createElement('div') },
+    emit: jest.fn(),
     on(event: never, handler: Handler) {
       handlers.set(String(event), handler);
     },
@@ -147,14 +148,30 @@ describe('applyDanmakuHeatmapVisibility', () => {
   it('隐藏时保留容器尺寸，重新开启时恢复可见', () => {
     const heatmap = document.createElement('div');
     heatmap.style.display = 'none';
-    const player = { controls: { heatmap } };
+    const player = { controls: { heatmap }, emit: jest.fn() };
 
     applyDanmakuHeatmapVisibility(player, false);
     expect(heatmap.style.display).toBe('');
     expect(heatmap.style.visibility).toBe('hidden');
+    expect(player.emit).toHaveBeenLastCalledWith(
+      'artplayerPluginDanmuku:points',
+    );
 
     applyDanmakuHeatmapVisibility(player, true);
     expect(heatmap.style.visibility).toBe('');
+    expect(player.emit).toHaveBeenLastCalledWith(
+      'artplayerPluginDanmuku:points',
+    );
+    expect(player.emit).toHaveBeenCalledTimes(2);
+  });
+
+  it('显隐状态未变化时不重复计算热力图', () => {
+    const { player } = createPlayerWithHandlers();
+
+    applyDanmakuHeatmapVisibility(player, true, true);
+    applyDanmakuHeatmapVisibility(player, true, true);
+
+    expect(player.emit).not.toHaveBeenCalled();
   });
 });
 

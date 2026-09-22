@@ -1,13 +1,193 @@
 diff --git a/dist/artplayer-plugin-danmuku.mjs b/dist/artplayer-plugin-danmuku.mjs
-index fac426cd821bbde03114f0bbc509d68ea403d7a4..0d208027b6ccf5077cf555ff1d8af8f326c44329 100644
+index fac426cd821bbde03114f0bbc509d68ea403d7a4..9c06dc6353b7555bfe380141e71c22d0331f1e1e 100644
 --- a/dist/artplayer-plugin-danmuku.mjs
 +++ b/dist/artplayer-plugin-danmuku.mjs
-@@ -428,7 +428,7 @@ class Danmuku {
+@@ -114,6 +114,8 @@ class Danmuku {
+     this.$player = template.$player;
+     this.art = art;
+     this.queue = [];
++    this.timeline = [];
++    this.timelineSorted = true;
+     this.$refs = [];
+     this.isStop = false;
+     this.isHide = false;
+@@ -304,11 +306,34 @@ class Danmuku {
+     const { currentTime } = this.art;
+     const result = [];
+     this.filter("ready", (danmu) => result.push(danmu));
+-    this.filter("wait", (danmu) => {
+-      if (currentTime + 0.1 >= danmu.time && danmu.time >= currentTime - 0.1) {
++    const startTime = currentTime - 0.1;
++    const endTime = currentTime + 0.1;
++    if (!this.timelineSorted) {
++      this.filter("wait", (danmu) => {
++        if (endTime >= danmu.time && danmu.time >= startTime) {
++          result.push(danmu);
++        }
++      });
++      return result;
++    }
++    let left = 0;
++    let right = this.timeline.length;
++    while (left < right) {
++      const middle = left + right >> 1;
++      if (this.timeline[middle].time < startTime) {
++        left = middle + 1;
++      } else {
++        right = middle;
++      }
++    }
++    for (let index = left; index < this.timeline.length; index++) {
++      const danmu = this.timeline[index];
++      if (danmu.time > endTime)
++        break;
++      if (danmu.$state === "wait") {
+         result.push(danmu);
+       }
+-    });
++    }
+     return result;
+   }
+   // 可见的弹幕的数据，用于计算下一个弹幕的top值
+@@ -361,16 +386,25 @@ class Danmuku {
+       if (danmuku === void 0) {
+         this.reset();
+         this.queue = [];
++        this.timeline = [];
+         this.states = { wait: [], ready: [], emit: [], stop: [] };
+         this.$refs = [];
+         this.$danmuku.textContent = "";
+       }
++      this.timelineSorted = false;
+       for (let index = 0; index < danmus.length; index++) {
+         const danmu = danmus[index];
+         await this.emit(danmu);
++        if ((index + 1) % 200 === 0 && index + 1 < danmus.length) {
++          await new Promise((resolve) => setTimeout(resolve, 0));
++        }
+       }
++      this.timeline.sort((a, b) => a.time - b.time || a.$index - b.$index);
++      this.timelineSorted = true;
+       this.art.emit("artplayerPluginDanmuku:loaded", this.queue);
+     } catch (error) {
++      this.timeline.sort((a, b) => a.time - b.time || a.$index - b.$index);
++      this.timelineSorted = true;
+       this.art.emit("artplayerPluginDanmuku:error", error);
+       throw error;
+     }
+@@ -428,8 +462,24 @@ class Danmuku {
        $lastStartTime: 0
        // 弹幕上次开始时间
      };
 -    this.setState(item, "wait");
 +    this.states.wait.push(item);
      this.queue.push(item);
++    if (this.timelineSorted) {
++      let left = 0;
++      let right = this.timeline.length;
++      while (left < right) {
++        const middle = left + right >> 1;
++        const current = this.timeline[middle];
++        if (current.time < item.time || current.time === item.time && current.$index < item.$index) {
++          left = middle + 1;
++        } else {
++          right = middle;
++        }
++      }
++      this.timeline.splice(left, 0, item);
++    } else {
++      this.timeline.push(item);
++    }
      return this;
    }
+   // 动态配置
+@@ -669,7 +719,21 @@ class Danmuku {
+     return this;
+   }
+   reset() {
+-    this.queue.forEach((danmu) => this.makeWait(danmu));
++    for (let index = 0; index < this.queue.length; index++) {
++      const danmu = this.queue[index];
++      danmu.$state = "wait";
++      if (danmu.$ref) {
++        danmu.$ref.dataset.state = "wait";
++        danmu.$ref.style.cssText = Danmuku.cssText;
++        danmu.$ref.style.visibility = "hidden";
++        danmu.$ref.style.marginLeft = "0px";
++        danmu.$ref.style.transform = "translateX(0px)";
++        danmu.$ref.style.transition = "transform 0s linear 0s";
++        this.$refs.push(danmu.$ref);
++        danmu.$ref = null;
++      }
++    }
++    this.states = { wait: [...this.queue], ready: [], emit: [], stop: [] };
+     this.art.emit("artplayerPluginDanmuku:reset");
+     return this;
+   }
+@@ -741,11 +805,18 @@ function heatmap(art, danmuku, option) {
+     mounted($heatmap) {
+       let $start = null;
+       let $stop = null;
++      const setProgress = (percentage) => {
++        if (!$start || !$stop)
++          return;
++        const value = Number.isFinite(percentage) ? Math.min(1, Math.max(0, percentage)) : 0;
++        $start.setAttribute("offset", `${value * 100}%`);
++        $stop.setAttribute("offset", `${value * 100}%`);
++      };
+       function update(arg = []) {
+         $start = null;
+         $stop = null;
+         $heatmap.innerHTML = "";
+-        if (!art.duration || art.option.isLive)
++        if ($heatmap.style.visibility === "hidden" || !art.duration || art.option.isLive)
+           return;
+         const svg = {
+           w: $heatmap.offsetWidth,
+@@ -771,11 +842,16 @@ function heatmap(art, danmuku, option) {
+           points = [...arg];
+         } else {
+           const gap = art.duration / svg.w;
+-          for (let x = 0; x <= svg.w; x += options.sampling) {
+-            const y = danmuku.queue.filter(
+-              ({ time }) => time > x * gap && time <= (x + options.sampling) * gap
+-            ).length;
+-            points.push([x, y]);
++          const sampling = Math.max(1, options.sampling);
++          for (let x = 0; x <= svg.w; x += sampling) {
++            points.push([x, 0]);
++          }
++          for (let index = 0; index < danmuku.queue.length; index++) {
++            const x = danmuku.queue[index].time / gap;
++            const pointIndex = Math.ceil(x / sampling) - 1;
++            if (pointIndex >= 0 && pointIndex < points.length) {
++              points[pointIndex][1] += 1;
++            }
+           }
+         }
+         if (points.length === 0)
+@@ -836,20 +912,14 @@ function heatmap(art, danmuku, option) {
+                 `;
+         $start = query("#heatmap-start", $heatmap);
+         $stop = query("#heatmap-stop", $heatmap);
+-        $start.setAttribute("offset", `${art.played * 100}%`);
+-        $stop.setAttribute("offset", `${art.played * 100}%`);
++        setProgress(art.played);
+       }
+       art.on("video:timeupdate", () => {
+-        if ($start && $stop) {
+-          $start.setAttribute("offset", `${art.played * 100}%`);
+-          $stop.setAttribute("offset", `${art.played * 100}%`);
+-        }
++        setProgress(art.played);
+       });
+       art.on("setBar", (type, percentage) => {
+-        if ($start && $stop && type === "played") {
+-          $start.setAttribute("offset", `${percentage * 100}%`);
+-          $stop.setAttribute("offset", `${percentage * 100}%`);
+-        }
++        if (type === "played")
++          setProgress(percentage);
+       });
+       art.on("ready", () => update());
+       art.on("resize", () => update());

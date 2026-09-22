@@ -40,7 +40,7 @@ export const DEFAULT_RUNTIME_PARAMS: RuntimeParamSettings = {
   ProxyRequestTimeoutSeconds: 30,
   ImageProxyTimeoutSeconds: 15,
   UpstreamSearchConcurrency: UPSTREAM_SEARCH_CONCURRENCY_AUTO,
-  DanmakuEpisodeLimit: 8000,
+  DanmakuEpisodeLimit: 3000,
   DanmakuRequestTimeoutSeconds: 12,
 };
 

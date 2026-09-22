@@ -59,7 +59,7 @@ describe('RuntimeParamsTab', () => {
     const { container } = setup();
     const danmaku = screen.getByRole('region', { name: '弹幕' });
     expect(within(danmaku).getByLabelText('单集弹幕条数上限')).toHaveValue(
-      8000,
+      3000,
     );
     expect(within(danmaku).getByLabelText('弹幕上游请求超时')).toHaveValue(12);
     expect(within(danmaku).getByText('站点未开启')).toBeInTheDocument();
@@ -142,7 +142,7 @@ describe('RuntimeParamsTab', () => {
     expect(adminPost).toHaveBeenCalledWith(
       '/api/admin/runtime',
       expect.objectContaining({
-        DanmakuEpisodeLimit: 8000,
+        DanmakuEpisodeLimit: 3000,
         DanmakuRequestTimeoutSeconds: 25,
         CoverImageCacheSize: 750,
         SearchDownstreamMaxPage:
