@@ -23,7 +23,7 @@ const SOURCE_AD_FILTER_STRATEGIES: Readonly<
 > = {
   rycj: {
     id: 'rycj-periodic-blocks',
-    version: 3,
+    version: 4,
     execution: 'server',
     server: {
       signals: [

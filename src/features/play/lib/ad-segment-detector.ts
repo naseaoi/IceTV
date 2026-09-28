@@ -28,10 +28,21 @@ function isNearInteger(d: number): boolean {
   return Math.abs(d - Math.round(d)) < 0.01;
 }
 
-function isNearGrid(d: number, step: number): boolean {
+const FRAME_GRID_STEP = 0.04;
+const EXACT_GRID_TOLERANCE = 0.0005;
+
+function isNearGrid(d: number, step: number, tolerance = 0.01): boolean {
   if (d <= 0 || step <= 0) return false;
   const snapped = Math.round(d / step) * step;
-  return Math.abs(d - snapped) < 0.01;
+  return Math.abs(d - snapped) < tolerance;
+}
+
+function exactFrameGridRatioOfSegment(seg: DiscontSegment): number {
+  if (seg.tsDurations.length === 0) return 0;
+  const hits = seg.tsDurations.filter((d) =>
+    isNearGrid(d, FRAME_GRID_STEP, EXACT_GRID_TOLERANCE),
+  ).length;
+  return hits / seg.tsDurations.length;
 }
 
 function integerRatioOfSegment(seg: DiscontSegment): number {
@@ -42,7 +53,9 @@ function integerRatioOfSegment(seg: DiscontSegment): number {
 
 function coarseGridRatioOfSegment(seg: DiscontSegment): number {
   if (seg.tsDurations.length === 0) return 0;
-  const hits = seg.tsDurations.filter((d) => isNearGrid(d, 0.04)).length;
+  const hits = seg.tsDurations.filter((d) =>
+    isNearGrid(d, FRAME_GRID_STEP),
+  ).length;
   return hits / seg.tsDurations.length;
 }
 
@@ -139,12 +152,23 @@ function detectShortEdgeBlocks(
 ): Set<number> {
   const result = new Set<number>();
   const durationLimit = layout.duration * 0.25;
+  // 广告素材按 25fps 切片，EXTINF 是 0.04 的精确倍数；23.976fps 正片几乎落不到该网格上。
+  // 正片本身在网格上时（25fps 源）该特征失去区分度，只保留短块规则。
+  const contentOffFrameGrid =
+    median(segments.map(exactFrameGridRatioOfSegment)) < 0.2;
+
+  const looksLikeFrameGridClip = (segment: DiscontSegment) =>
+    contentOffFrameGrid &&
+    segment.tsDurations.length >= 2 &&
+    segment.duration < layout.duration &&
+    exactFrameGridRatioOfSegment(segment) === 1 &&
+    segment.tsDurations.some((d) => isNearGrid(d, 1, EXACT_GRID_TOLERANCE));
 
   const isCandidate = (segment: DiscontSegment) =>
     segment.duration > 0 &&
-    segment.duration < durationLimit &&
     segment.tsDurations.length < layout.fragmentCount &&
-    looksLikeAdEdgeBlock(segment);
+    ((segment.duration < durationLimit && looksLikeAdEdgeBlock(segment)) ||
+      looksLikeFrameGridClip(segment));
 
   for (let index = 0; index < segments.length; index += 1) {
     if (!isCandidate(segments[index])) break;
