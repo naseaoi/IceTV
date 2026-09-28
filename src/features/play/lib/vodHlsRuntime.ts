@@ -25,6 +25,7 @@ import {
   resolveVodFragmentTimeoutMs,
   SERVER_ROUTE_FAILURE_THRESHOLD,
 } from '@/features/play/lib/vodAutoRoutePolicy';
+import { createVodBufferBudgetController } from '@/features/play/lib/vodBufferBudgetController';
 import {
   createVodFragmentCacheRecoveryLoader,
   shouldRecoverVodFragmentHttpCache,
@@ -327,6 +328,11 @@ export function createVodM3u8Loader({
       video,
       artPlayerRef,
       setRealtimeLoadSpeed,
+    });
+    const bufferBudgetController = createVodBufferBudgetController({
+      hls,
+      video,
+      bufferFullErrorDetail: Hls.ErrorDetails?.BUFFER_FULL_ERROR,
     });
     const failCurrentSource = (reason: string) => {
       if (typeof hls.stopLoad === 'function') {
@@ -717,6 +723,8 @@ export function createVodM3u8Loader({
       if (logResult.expectedAbort || videoRuntimeCleaned) {
         return;
       }
+      // bufferFullError 非致命，hls.js 已自行降低上限并安排重下失败分片；这里只把上限压到当前前向缓冲以内，不计失败也不拉流
+      bufferBudgetController.handleError(data);
 
       const isFragOrLevelNetworkError =
         data.type === Hls.ErrorTypes.NETWORK_ERROR &&
@@ -827,6 +835,7 @@ export function createVodM3u8Loader({
     };
 
     const onHlsFragLoaded = function (_: unknown, data: any) {
+      bufferBudgetController.handleFragmentLoaded(data?.frag);
       qualityController.handleFragmentLoaded();
       segmentPrebufferController.handlePlaybackProgress();
       // 恢复时重下的失败位置之前的分片可能命中浏览器缓存，不能当作线路恢复，否则直连失败永远凑不满回退阈值
@@ -866,6 +875,7 @@ export function createVodM3u8Loader({
       const levelIndex = Number.isInteger(data?.frag?.level)
         ? Number(data.frag.level)
         : null;
+      bufferBudgetController.handleFragmentLoading(data?.frag);
       qualityController.handleFragmentLoading(levelIndex);
     };
 

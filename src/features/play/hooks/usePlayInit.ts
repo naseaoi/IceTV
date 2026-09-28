@@ -29,6 +29,7 @@ import {
   peekResolvedLazyEpisodeUrl,
   resolveLazyEpisodeUrl,
 } from '@/features/play/lib/lazyEpisode';
+import { replacePlayPageUrl } from '@/features/play/lib/playPageUrl';
 import { calculateSourceScore } from '@/features/play/lib/playUtils';
 import {
   SOURCE_PROBE_CONCURRENCY,
@@ -44,6 +45,7 @@ import {
   getAllPlayRecords,
   getCachedPlayRecordsSnapshot,
 } from '@/lib/db.client';
+import { remapEpisodeIndexToDetail } from '@/lib/episode-groups';
 import { isLazyEpisodeUrl } from '@/lib/lazy-episodes';
 import { PLAYER_EXIT_EVENT } from '@/lib/navigation-return';
 import { hasMatchingPlayIntent } from '@/lib/play-intent';
@@ -489,12 +491,19 @@ export function updateVideoUrl(
   }
 }
 
+function getEpisodeGroupsSignature(detail: SearchResult): string {
+  return (detail.episode_groups || [])
+    .map((group) => `${group.label}:${group.count}`)
+    .join('|');
+}
+
 function hasDetailContentChange(
   prev: SearchResult,
   next: SearchResult,
 ): boolean {
   return (
     next.episodes.length !== prev.episodes.length ||
+    getEpisodeGroupsSignature(next) !== getEpisodeGroupsSignature(prev) ||
     (!!next.title && next.title !== prev.title)
   );
 }
@@ -719,6 +728,15 @@ export function usePlayInit({
           if (signal.aborted) return;
           if (!fresh.episodes || fresh.episodes.length === 0) return;
           if (!hasDetailContentChange(snapshot, fresh)) return;
+          // 历史恢复可能已按快照的分组结构定下集索引，换成新详情时须同步换算，否则分组源会退到上一集
+          if (
+            currentSourceRef.current === source &&
+            currentIdRef.current === id
+          ) {
+            setCurrentEpisodeIndex((index) =>
+              remapEpisodeIndexToDetail(snapshot, fresh, index),
+            );
+          }
           setDetail((prev) =>
             prev && prev.source === source && prev.id === id
               ? mergeSourceResult(fresh, prev)
@@ -891,18 +909,9 @@ export function usePlayInit({
         setCurrentEpisodeIndex(0);
       }
 
-      const newUrl = new URL(window.location.href);
-      newUrl.searchParams.set('source', detailData.source);
-      newUrl.searchParams.set('id', detailData.id);
-      newUrl.searchParams.set('year', resolvedYear);
-      newUrl.searchParams.set('title', detailData.title);
-      newUrl.searchParams.delete('prefer');
-      newUrl.searchParams.delete('singleSource');
-      newUrl.searchParams.delete('directStart');
-      if (signal.aborted || window.location.pathname !== '/play') {
+      if (signal.aborted || !replacePlayPageUrl(detailData, resolvedYear)) {
         return;
       }
-      window.history.replaceState(window.history.state, '', newUrl.toString());
       clearAggregateGroup();
 
       setLoadingStage('ready');

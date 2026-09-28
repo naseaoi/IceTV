@@ -22,6 +22,7 @@ import {
   rankAutoSwitchCandidates,
   selectAutoSwitchCandidates,
 } from '@/features/play/lib/autoSourceSwitchPolicy';
+import { carryOverDanmakuEpisodeMapping } from '@/features/play/lib/danmaku/episode-storage';
 import { saveDetailSnapshot } from '@/features/play/lib/detailSnapshot';
 import { resolveEpisodeTargetIndex } from '@/features/play/lib/episodeMapping';
 import {
@@ -30,6 +31,7 @@ import {
   resolveSourceSwitchEpisodeAnchor,
   resolveSourceSwitchResumeState,
 } from '@/features/play/lib/episodeResumePolicy';
+import { replacePlayPageUrl } from '@/features/play/lib/playPageUrl';
 import type { ResumeMode } from '@/features/play/lib/resumePlayback';
 import {
   type SourceSwitchCleanupTask,
@@ -323,6 +325,8 @@ export function useSourceSwitch(options: UseSourceSwitchOptions) {
         if (artPlayerRef.current) {
           try {
             artPlayerRef.current.pause();
+            // Artplayer 的 pause() 会弹出「暂停」提示，程序性暂停不是用户操作
+            artPlayerRef.current.notice.show = '';
           } catch (err) {
             console.warn('换源时暂停当前视频失败:', err);
           }
@@ -432,6 +436,31 @@ export function useSourceSwitch(options: UseSourceSwitchOptions) {
           recordSourceManualSelection(newSource);
         }
         sourceSwitchEpisodeAnchorRef.current = episodeAnchor;
+        if (preserveProgress) {
+          carryOverDanmakuEpisodeMapping(
+            [
+              {
+                source: previousSource,
+                videoId: previousId,
+                episodeIndex: latestEpisodeIndex,
+              },
+              ...(episodeAnchor.detail
+                ? [
+                    {
+                      source: episodeAnchor.detail.source,
+                      videoId: episodeAnchor.detail.id,
+                      episodeIndex: episodeAnchor.episodeIndex,
+                    },
+                  ]
+                : []),
+            ],
+            {
+              source: newDetail.source,
+              videoId: newDetail.id,
+              episodeIndex: targetIndex,
+            },
+          );
+        }
         setVideoUrl('');
         cleanupPlayer();
 
@@ -451,14 +480,13 @@ export function useSourceSwitch(options: UseSourceSwitchOptions) {
         resumeTimeRef.current = nextResumeState.resumeTime;
         resumeModeRef.current = nextResumeState.resumeMode;
 
-        setVideoTitle(
-          newDetail.title || newTitle || previousDetail?.title || '',
-        );
-        setVideoYear(
-          hasDisplayText(newDetail.year)
-            ? newDetail.year
-            : previousDetail?.year || '',
-        );
+        const nextYear = hasDisplayText(newDetail.year)
+          ? newDetail.year
+          : previousDetail?.year || '';
+        const nextTitle =
+          newDetail.title || newTitle || previousDetail?.title || '';
+        setVideoTitle(nextTitle);
+        setVideoYear(nextYear);
         setVideoCover(newDetail.poster);
         setVideoDoubanId(newDetail.douban_id || 0);
         setCurrentSource(newDetail.source);
@@ -466,6 +494,11 @@ export function useSourceSwitch(options: UseSourceSwitchOptions) {
         setDetail(newDetail);
         currentEpisodeIndexRef.current = targetIndex;
         setCurrentEpisodeIndex(targetIndex);
+        // 刷新和分享要落到新源；init 只在挂载时读一次地址参数，替换地址不会重新搜索起播
+        replacePlayPageUrl(
+          { source: newDetail.source, id: newDetail.id, title: nextTitle },
+          nextYear,
+        );
         setRealtimeLoadSpeed('正在加载新源...');
         // 换源等待期间页面超时被压下，新源从这里重新计时
         setVideoLoadingAttempt((prev) => prev + 1);

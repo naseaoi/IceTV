@@ -238,9 +238,12 @@ function setupHook(
     setSourceRecommendation: jest.fn(),
     ...overrides,
   };
-  renderHook(() => usePlayInit(params));
+  const { rerender } = renderHook(() => usePlayInit(params));
+  rerenderLatestHook = rerender;
   return params;
 }
+
+let rerenderLatestHook: () => void = () => undefined;
 
 // 模拟页面提交当前源后同步 ref，起播和换源都走这一步
 function setPageCurrentSource(params: UsePlayInitParams, source: SearchResult) {
@@ -694,6 +697,50 @@ describe('usePlayInit 直达入口读取播放记录', () => {
       params.historyRestoreGateRef.current.playRecords,
     ).resolves.toEqual(records);
     expect(apiRequests('/api/playrecords')).toHaveLength(1);
+  });
+
+  it('起播后换源同步了地址和当前源，页面重渲染不会重新初始化', async () => {
+    const series = createSeries('direct-c', 3);
+    signIn();
+    installFetch(
+      {},
+      {},
+      {
+        '/api/detail': Promise.resolve(series),
+        '/api/search': Promise.resolve({ results: [] }),
+      },
+    );
+
+    const params = setupDirectHook(series);
+    await waitFor(() => expect(params.setDetail).toHaveBeenCalledWith(series));
+    await act(async () => {
+      jest.advanceTimersByTime(1_000);
+    });
+    expect(params.setLoading).toHaveBeenLastCalledWith(false);
+    expect(new URLSearchParams(window.location.search).get('source')).toBe(
+      series.source,
+    );
+    const detailRequestCount = apiRequests('/api/detail').length;
+    const searchRequestCount = apiRequests('/api/search').length;
+
+    window.history.replaceState(
+      window.history.state,
+      '',
+      '/play?source=other&id=other-id',
+    );
+    params.currentSource = 'other';
+    params.currentId = 'other-id';
+    params.currentSourceRef.current = 'other';
+    params.currentIdRef.current = 'other-id';
+    rerenderLatestHook();
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    expect(apiRequests('/api/detail')).toHaveLength(detailRequestCount);
+    expect(apiRequests('/api/search')).toHaveLength(searchRequestCount);
+    expect(params.setLoading).not.toHaveBeenLastCalledWith(true);
+    expect(params.setCurrentSource).toHaveBeenCalledTimes(1);
   });
 
   it('带匹配的播放意图时不读播放记录，也不消费意图', async () => {

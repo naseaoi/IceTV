@@ -86,6 +86,7 @@
 
 - 编排 `src/features/play/lib/vodHlsRuntime.ts`，自动路由 `vodAutoRoutePolicy.ts`，代理模式 `src/lib/proxy-modes.ts`
 - 画质 `vodHlsQualityController.ts`、`vodQualityPolicy.ts`
+- 前向缓冲按码率封顶到 `vodBufferBudgetPolicy.ts` 的字节预算，由 `vodBufferBudgetController.ts` 改写 `hls.config.maxMaxBufferLength`。hls.js 的 `maxBufferSize` 是「至少缓冲到 `maxBufferLength`」的下限，不是字节上限，调它压不住 SourceBuffer 配额。`bufferFullError` 非致命，hls.js 已自行降低上限并重下该分片，**不计失败、不 `startLoad`，也不把上限抬回 hls.js 降低前的值**，否则同一分片反复重下再撞配额
 - 快捷键：定义 `src/lib/player-shortcuts.ts` → 执行 `src/hooks/usePlayerKeyboard.ts` → 弹窗 `src/components/PlayerShortcutsModal.tsx`。新增动作依次补齐三处，不要在页面单独监听 keydown
 
 容错与换源：
@@ -96,6 +97,7 @@
 - `hls.startLoad()` 会中止在途分片并重新请求，不是幂等的「确保在加载」。起播和 play 只在 `hls.loadingEnabled` 为 false 时补拉，卡顿恢复在有分片在途或缓冲仍在增长时不介入，**否则首片会被中止后整段重下**
 - 自动换源是用户本地开关，站点默认值 `SiteConfig.AutoSwitchSource`（默认关）。触发集中在 `useSourceSwitch.ts`：页面超时、恢复次数耗尽、懒解析失败，前两种先试服务端回落。换集、重试等新播放意图先调 `resetAutoSourceSwitch()`，否则失败记录和次数上限跨集累积，自动换源静默停摆
 - 旧源的迟到回调（超时、错误、起播、统计）先确认运行时仍属于当前加载（`vodHlsRuntime.ts` 的 `getVodRuntimeSourceUrl()` / `pauseIfVodRuntimeReleased()`），换源流程内再看 `sourceSwitchInFlightRef`。漏判时旧源失败会触发回退或换源、覆盖用户刚选的源，旧集进度也会带进新集
+- 换源提交后经 `replacePlayPageUrl()`（`window.history.replaceState`）把地址改成新源。Next 会把它同步进 `useSearchParams()`，所以页面状态和 `usePlayInit` 只在挂载时读一次地址参数，**不要让它们随 searchParams 变化重跑**，否则每次换源都重新搜索起播；也不要用 `router.replace`，同路由软导航会重新请求服务端组件
 
 分片缓存与起播：
 
@@ -104,6 +106,7 @@
 - 预取清单（换源候选、下一集预载）用 `buildVodProxyUrl()` 带上与播放器相同的线路和源标识。服务端清单缓存按源分区、分片地址随线路改写，任一不一致都静默不命中
 - 源播放统计 `source-playback-stats.ts` 按站点 key（`SearchResult.source`）读写，不是测速和自动换源用的 `{source}-{id}` 组合键，混用会让常用源判定静默落空
 - 首次起播放行（`setLoading(false)`）前须经 `waitForHistoryRestore()`（`usePlayProgress.ts`）等历史恢复定下集数和续播时间，`loading` 期间页面不派生 `videoUrl`。提前放行会先按第 1 集建播放器再换集，白发清单与逐集解析请求
+- 播放页详情先取本地快照（`detailSnapshot.ts`）再后台回源，历史恢复可能已按快照定下集索引。回源详情替换快照时当前集须经 `remapEpisodeIndexToDetail()`（`src/lib/episode-groups.ts`）按分组身份换算，**直接沿用绝对索引会让分组源在靠前分组新增剧集后退到上一集**
 
 弹幕（`src/features/play/lib/danmaku/`）：
 
@@ -111,6 +114,7 @@
 - `p` 字段 4 段时颜色在第 3 位，8/9 段时在第 4 位，取错只是颜色不对不会报错
 - 换集时播放器可能**复用实例**（非 webkit + 前后都是 hls），此时插件不会自行重新调用加载器，必须显式 `reloadDanmaku()`。去广告开关会 `destroy()` 重建，走的是另一条路
 - 加载器在本地开关关闭时返回空数组以免白跑请求，所以**开关打开时必须触发一次 `reloadDanmaku()`**，只调 `api.show()` 显示的是空数据
+- 弹幕剧集映射按 `源:ID:集` 隔离。换源提交时经 `carryOverDanmakuEpisodeMapping()` 把同一集已匹配的映射带到新源，否则新源按自己的标题重搜，标题格式不同就静默落空成「暂未获取到弹幕」
 - `provider.server.ts` 的 base URL 只来自环境变量，用户输入只经 `searchParams` 进 query。默认走 URL guard；内网自建服务须显式设置 `DANMAKU_API_ALLOW_PRIVATE=true`，经 `fetchPrivateUpstream()` 回源，仍受共享资源额度保护。
 
 去广告：

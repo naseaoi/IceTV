@@ -269,3 +269,38 @@ export function resolvePlayRecordEpisode(
     trusted: true,
   };
 }
+
+interface EpisodeListShape {
+  episodes: string[];
+  episode_groups?: EpisodeGroup[];
+}
+
+/**
+ * 同一视频的详情被刷新（本地快照过期后后台回源）时，把当前全局集索引按原分组身份换算到新详情。
+ * 分组源在靠前分组新增剧集后，同一绝对索引会落到后一组的上一集。
+ */
+export function remapEpisodeIndexToDetail(
+  previous: EpisodeListShape,
+  next: EpisodeListShape,
+  episodeIndex: number,
+): number {
+  const position = resolveEpisodeGroupPosition(
+    previous.episode_groups,
+    episodeIndex,
+    previous.episodes.length,
+  );
+  if (!position) {
+    return episodeIndex;
+  }
+
+  return resolvePlayRecordEpisode(
+    {
+      index: episodeIndex + 1,
+      group_index: position.episodeOffset + 1,
+      group_total: position.groupCount,
+      group_label: previous.episode_groups?.[position.groupIndex]?.label,
+    },
+    next.episode_groups,
+    next.episodes.length,
+  ).episodeIndex;
+}

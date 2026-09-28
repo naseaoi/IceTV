@@ -7,7 +7,13 @@ import type {
   VideoQualityInfo,
 } from '@/features/play/hooks/usePlayPageState';
 import { useSourceSwitch } from '@/features/play/hooks/useSourceSwitch';
-import { AUTO_SWITCH_SOURCE_STORAGE_KEY } from '@/lib/local-preferences';
+import {
+  AUTO_SWITCH_SOURCE_STORAGE_KEY,
+  readDanmakuEpisodeId,
+  readDanmakuEpisodeSearchTitle,
+  writeDanmakuEpisodeId,
+  writeDanmakuEpisodeSearchTitle,
+} from '@/lib/local-preferences';
 import type { ManagedVideoElement } from '@/lib/player-runtime';
 import {
   readSourcePlaybackStats,
@@ -699,5 +705,120 @@ describe('useSourceSwitch 重新拉起当前源', () => {
     expect(options.resumeTimeRef.current).toBe(0);
     expect(options.resumeModeRef.current).toBeNull();
     expect(options.setPlaybackRetryNonce).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe('useSourceSwitch 提交新源后的页面同步', () => {
+  const originalFetch = global.fetch;
+
+  beforeEach(() => {
+    localStorage.clear();
+    mockGetVodRuntimeSourceUrl.mockReset();
+    mockGetVodRuntimeSourceUrl.mockReturnValue(null);
+    jest.spyOn(console, 'warn').mockImplementation(() => undefined);
+    window.history.replaceState(
+      { marker: 'next-router-state' },
+      '',
+      '/play?source=a&id=a-id&title=%E6%B5%8B%E8%AF%95%E5%89%A7&year=2024&stitle=%E6%B5%8B%E8%AF%95&prefer=true',
+    );
+  });
+
+  afterEach(() => {
+    global.fetch = originalFetch;
+    jest.restoreAllMocks();
+  });
+
+  it('地址栏改为新源，保留搜索参数和路由状态，去掉起播专用参数', async () => {
+    const { result } = setupHook({
+      availableSources: [
+        createSource('a', THREE_EPISODES),
+        { ...createSource('b', THREE_EPISODES), title: '测试剧 国语' },
+      ],
+    });
+
+    await result.current.handleSourceChange('b', 'b-id', '测试剧 国语');
+
+    const params = new URLSearchParams(window.location.search);
+    expect(window.location.pathname).toBe('/play');
+    expect(params.get('source')).toBe('b');
+    expect(params.get('id')).toBe('b-id');
+    expect(params.get('title')).toBe('测试剧 国语');
+    expect(params.get('year')).toBe('2024');
+    expect(params.get('stitle')).toBe('测试');
+    expect(params.has('prefer')).toBe(false);
+    expect(window.history.state).toEqual({ marker: 'next-router-state' });
+  });
+
+  it('自动换源同样同步地址，拒绝换源时地址保持当前源', async () => {
+    localStorage.setItem(AUTO_SWITCH_SOURCE_STORAGE_KEY, 'true');
+    const { result, options } = setupHook({
+      availableSources: [
+        createSource('a', THREE_EPISODES),
+        createSource('b', THREE_EPISODES),
+        createSource('short', ['第1集']),
+      ],
+    });
+
+    await result.current.handleSourceChange('short', 'short-id', '测试剧');
+    expect(options.setCurrentSource).not.toHaveBeenCalled();
+    expect(new URLSearchParams(window.location.search).get('source')).toBe('a');
+
+    expect(result.current.handleLoadingTimeout()).toBe(true);
+    await waitFor(() => expect(options.currentSourceRef.current).toBe('b'));
+    expect(new URLSearchParams(window.location.search).get('id')).toBe('b-id');
+  });
+
+  it('换源的程序性暂停不留下 Artplayer 的暂停提示', async () => {
+    const { video } = createLoadingVideo();
+    const { result, player } = setupHook({
+      availableSources: [
+        createSource('a', THREE_EPISODES),
+        createSource('b', THREE_EPISODES),
+      ],
+      video,
+    });
+    // 与 Artplayer 的 pause() 一致：暂停时同步弹出提示
+    player?.pause.mockImplementation(() => {
+      player.notice.show = '暂停';
+    });
+
+    await result.current.handleSourceChange('b', 'b-id', '测试剧');
+
+    expect(player?.pause).toHaveBeenCalled();
+    expect(player?.notice.show).toBe('');
+  });
+
+  it('换到同一集的其他源时沿用已匹配的弹幕剧集，目标源已有映射时不覆盖', async () => {
+    writeDanmakuEpisodeId('a:a-id:2', 4242);
+    writeDanmakuEpisodeSearchTitle('a:a-id:2', '测试剧 第二季');
+    writeDanmakuEpisodeId('c:c-id:2', 777);
+    const { result } = setupHook({
+      availableSources: ['a', 'b', 'c'].map((source) =>
+        createSource(source, THREE_EPISODES),
+      ),
+    });
+
+    await result.current.handleSourceChange('b', 'b-id', '测试剧');
+    expect(readDanmakuEpisodeId('b:b-id:2')).toBe(4242);
+    expect(readDanmakuEpisodeSearchTitle('b:b-id:2')).toBe('测试剧 第二季');
+
+    await result.current.handleSourceChange('c', 'c-id', '测试剧');
+    expect(readDanmakuEpisodeId('c:c-id:2')).toBe(777);
+  });
+
+  it('新源对应的不是同一集时不沿用弹幕剧集', async () => {
+    writeDanmakuEpisodeId('a:a-id:2', 4242);
+    const { result, options } = setupHook({
+      availableSources: [
+        createSource('a', THREE_EPISODES),
+        createSource('b', ['第1集', '第2集', '第5集']),
+      ],
+    });
+    options.clearTargetEpisodeProgressRef.current = true;
+
+    await result.current.handleSourceChange('b', 'b-id', '测试剧');
+    expect(options.setCurrentSource).toHaveBeenCalledWith('b');
+    expect(options.setCurrentEpisodeIndex).toHaveBeenCalledWith(2);
+    expect(readDanmakuEpisodeId('b:b-id:2')).toBeNull();
   });
 });

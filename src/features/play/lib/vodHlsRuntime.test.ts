@@ -57,6 +57,10 @@ class FakeHls {
     OTHER_ERROR: 'otherError',
   };
 
+  static ErrorDetails = {
+    BUFFER_FULL_ERROR: 'bufferFullError',
+  };
+
   static DefaultConfig = { loader: FakeLoader };
 
   static created = 0;
@@ -625,5 +629,97 @@ describe('vodHlsRuntime 卡顿恢复', () => {
     expect(runtime.setRealtimeLoadSpeed).not.toHaveBeenCalledWith(
       '源站响应较慢，正在继续加载',
     );
+  });
+});
+
+describe('vodHlsRuntime 缓冲配额', () => {
+  beforeEach(() => {
+    mockIsServerProxy.mockReset().mockReturnValue(false);
+    mockShouldAutoFallbackToServer.mockReset().mockReturnValue(true);
+    mockClearSourceProxyOverride.mockReset();
+    mockReportSourceRouteStat.mockReset();
+    jest.spyOn(console, 'error').mockImplementation(() => undefined);
+    jest.spyOn(console, 'debug').mockImplementation(() => undefined);
+    jest.spyOn(console, 'warn').mockImplementation(() => undefined);
+  });
+
+  afterEach(() => {
+    createdVideos.splice(0).forEach((video) => runManagedVideoCleanup(video));
+    jest.restoreAllMocks();
+  });
+
+  // 10 秒 12.5MB，即 10Mbps
+  const HIGH_BITRATE_FRAG = {
+    ...mainFragment(71),
+    duration: 10,
+    stats: {
+      loaded: 12_500_000,
+      total: 12_500_000,
+      loading: { first: 0, end: 1000 },
+    },
+  };
+
+  it('高码率分片加载后把前向上限封到字节预算以内', () => {
+    const { load } = setupRuntime();
+    const video = createVideo();
+    load(video, EPISODE_1);
+    const hls = getFakeHls(video);
+
+    hls.emit(FakeHls.Events.FRAG_LOADED, { frag: HIGH_BITRATE_FRAG });
+
+    expect(hls.config.maxMaxBufferLength).toBe(80);
+    expect(hls.config.maxBufferLength).toBe(80);
+  });
+
+  it('bufferFullError 只收紧前向上限，不拉流、不走恢复也不计失败', () => {
+    const { load, setError } = setupRuntime();
+    const video = createVideo();
+    Object.defineProperties(video, {
+      currentTime: { configurable: true, get: () => 100 },
+      buffered: {
+        configurable: true,
+        get: () => ({ length: 1, start: () => 90, end: () => 130 }),
+      },
+    });
+    load(video, EPISODE_1);
+    const hls = getFakeHls(video);
+    hls.emit(FakeHls.Events.FRAG_LOADED, { frag: HIGH_BITRATE_FRAG });
+    hls.config.maxMaxBufferLength = 40;
+
+    hls.emit(FakeHls.Events.ERROR, {
+      type: FakeHls.ErrorTypes.MEDIA_ERROR,
+      details: FakeHls.ErrorDetails.BUFFER_FULL_ERROR,
+      parent: 'main',
+      fatal: false,
+      frag: HIGH_BITRATE_FRAG,
+    });
+
+    expect(hls.config.maxMaxBufferLength).toBe(24);
+    expect(hls.startLoad).not.toHaveBeenCalled();
+    expect(hls.stopLoad).not.toHaveBeenCalled();
+    expect(hls.recoverMediaError).not.toHaveBeenCalled();
+    expect(setError).not.toHaveBeenCalled();
+    expect(mockReportSourceRouteStat).not.toHaveBeenCalledWith(
+      DETAIL.source,
+      'browser',
+      false,
+    );
+  });
+
+  it('复用实例加载下一集时恢复本次加载的原始缓冲配置', () => {
+    const { load } = setupRuntime();
+    const video = createVideo();
+    load(video, EPISODE_1);
+    const hls = getFakeHls(video);
+    const originalMaxMax = hls.config.maxMaxBufferLength;
+    hls.emit(FakeHls.Events.FRAG_LOADED, { frag: HIGH_BITRATE_FRAG });
+    expect(hls.config.maxMaxBufferLength).toBe(80);
+
+    hls.stopLoad();
+    runManagedVideoCleanup(video);
+    load(video, EPISODE_2);
+
+    expect(getFakeHls(video)).toBe(hls);
+    expect(hls.config.maxMaxBufferLength).toBe(originalMaxMax);
   });
 });
