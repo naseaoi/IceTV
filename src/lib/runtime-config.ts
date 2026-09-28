@@ -18,10 +18,12 @@ export interface RuntimeConfig {
   DEFAULT_AGGREGATE_SEARCH: boolean;
   ENABLE_OPTIMIZATION: boolean;
   LIVE_DIRECT_CONNECT: boolean;
+  AUTO_SWITCH_SOURCE: boolean;
   ENABLE_DANMAKU: boolean;
   CUSTOM_CATEGORIES: { name: string; type: 'movie' | 'tv'; query: string }[];
   FLUID_SEARCH: boolean;
   VOD_PAGE_TIMEOUT_SECONDS: number;
+  VOD_FRAGMENT_TIMEOUT_SECONDS: number;
   PLAYBACK_HISTORY_PAGE_SIZE: number;
   PLAYBACK_HISTORY_LIMIT: number;
   SEARCH_HISTORY_LIMIT: number;
@@ -48,10 +50,12 @@ export const DEFAULT_RUNTIME_CONFIG: RuntimeConfig = {
   DEFAULT_AGGREGATE_SEARCH: true,
   ENABLE_OPTIMIZATION: true,
   LIVE_DIRECT_CONNECT: false,
+  AUTO_SWITCH_SOURCE: false,
   ENABLE_DANMAKU: false,
   CUSTOM_CATEGORIES: [],
   FLUID_SEARCH: true,
   VOD_PAGE_TIMEOUT_SECONDS: 15,
+  VOD_FRAGMENT_TIMEOUT_SECONDS: 10,
   PLAYBACK_HISTORY_PAGE_SIZE: 10,
   PLAYBACK_HISTORY_LIMIT: 500,
   SEARCH_HISTORY_LIMIT: 20,
@@ -89,10 +93,12 @@ export type ServerConfigPayload = {
   DefaultAggregateSearch?: boolean;
   EnableOptimization?: boolean;
   LiveDirectConnect?: boolean;
+  AutoSwitchSource?: boolean;
   EnableDanmaku?: boolean;
   CustomCategories?: RuntimeConfig['CUSTOM_CATEGORIES'];
   FluidSearch?: boolean;
   VodPageTimeoutSeconds?: number;
+  VodFragmentTimeoutSeconds?: number;
   PlaybackHistoryPageSize?: number;
   PlaybackHistoryLimit?: number;
   SearchHistoryLimit?: number;
@@ -162,6 +168,10 @@ function runtimeConfigFromServerConfig(
       data.LiveDirectConnect === undefined
         ? DEFAULT_RUNTIME_CONFIG.LIVE_DIRECT_CONNECT
         : data.LiveDirectConnect,
+    AUTO_SWITCH_SOURCE:
+      data.AutoSwitchSource === undefined
+        ? DEFAULT_RUNTIME_CONFIG.AUTO_SWITCH_SOURCE
+        : data.AutoSwitchSource,
     ENABLE_DANMAKU:
       data.EnableDanmaku === undefined
         ? DEFAULT_RUNTIME_CONFIG.ENABLE_DANMAKU
@@ -175,6 +185,9 @@ function runtimeConfigFromServerConfig(
     VOD_PAGE_TIMEOUT_SECONDS:
       data.VodPageTimeoutSeconds ??
       DEFAULT_RUNTIME_CONFIG.VOD_PAGE_TIMEOUT_SECONDS,
+    VOD_FRAGMENT_TIMEOUT_SECONDS:
+      data.VodFragmentTimeoutSeconds ??
+      DEFAULT_RUNTIME_CONFIG.VOD_FRAGMENT_TIMEOUT_SECONDS,
     PLAYBACK_HISTORY_PAGE_SIZE:
       data.PlaybackHistoryPageSize ??
       DEFAULT_RUNTIME_CONFIG.PLAYBACK_HISTORY_PAGE_SIZE,

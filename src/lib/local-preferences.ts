@@ -4,6 +4,7 @@ export const FLUID_SEARCH_STORAGE_KEY = 'fluidSearch';
 export const LIVE_DIRECT_CONNECT_STORAGE_KEY = 'liveDirectConnect';
 export const LIVE_DIRECT_CONNECT_CHANGE_EVENT =
   'icetv:live-direct-connect-change';
+export const AUTO_SWITCH_SOURCE_STORAGE_KEY = 'autoSwitchSource';
 export const BLOCK_AD_STORAGE_KEY = 'enable_blockad';
 export const AUTO_PLAY_NEXT_STORAGE_KEY = 'enable_autoplay_next';
 export const PREFERRED_QUALITY_STORAGE_KEY = 'preferredQuality';
@@ -266,6 +267,29 @@ export function resetLiveDirectConnect() {
   if (typeof window !== 'undefined') {
     window.dispatchEvent(new Event(LIVE_DIRECT_CONNECT_CHANGE_EVENT));
   }
+}
+
+export function readDefaultAutoSwitchSource(): boolean {
+  if (typeof window === 'undefined') {
+    return false;
+  }
+
+  return window.RUNTIME_CONFIG?.AUTO_SWITCH_SOURCE === true;
+}
+
+export function readAutoSwitchSource(): boolean {
+  return (
+    readStoredBoolean(AUTO_SWITCH_SOURCE_STORAGE_KEY) ??
+    readDefaultAutoSwitchSource()
+  );
+}
+
+export function writeAutoSwitchSource(value: boolean) {
+  writeStoredBoolean(AUTO_SWITCH_SOURCE_STORAGE_KEY, value);
+}
+
+export function resetAutoSwitchSource() {
+  resetStoredBoolean(AUTO_SWITCH_SOURCE_STORAGE_KEY);
 }
 
 export function readBlockAdEnabled(): boolean {

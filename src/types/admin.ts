@@ -16,9 +16,11 @@ export interface AdminConfig {
     DefaultAggregateSearch: boolean;
     EnableOptimization: boolean;
     LiveDirectConnect: boolean;
+    AutoSwitchSource: boolean;
     SearchDownstreamMaxPage: number;
     SiteInterfaceCacheTime: number;
     VodPageTimeoutSeconds: number;
+    VodFragmentTimeoutSeconds: number;
     PlaybackHistoryPageSize: number;
     PlaybackHistoryLimit: number;
     SearchHistoryLimit: number;

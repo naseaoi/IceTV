@@ -74,6 +74,21 @@ describe('runtime parameter updates', () => {
     expect(DEFAULT_RUNTIME_PARAMS.DanmakuEpisodeLimit).toBe(3000);
   });
 
+  it('saves the fragment timeout within its range', async () => {
+    const response = await POST(request({ VodFragmentTimeoutSeconds: 20 }));
+
+    expect(response.status).toBe(200);
+    expect(saveConfig).toHaveBeenCalledWith(
+      expect.objectContaining({
+        SiteConfig: expect.objectContaining({
+          VodFragmentTimeoutSeconds: 20,
+          VodPageTimeoutSeconds: 45,
+        }),
+      }),
+    );
+    expect(normalizeRuntimeParams({}).VodFragmentTimeoutSeconds).toBe(10);
+  });
+
   it.each([
     null,
     [],
@@ -86,6 +101,8 @@ describe('runtime parameter updates', () => {
     { DanmakuRequestTimeoutSeconds: '12' },
     { DanmakuRequestTimeoutSeconds: Number.NaN },
     { DanmakuRequestTimeoutSeconds: Infinity },
+    { VodFragmentTimeoutSeconds: 2 },
+    { VodFragmentTimeoutSeconds: 61 },
   ])(
     'rejects invalid updates before reading or saving config: %p',
     async (body) => {

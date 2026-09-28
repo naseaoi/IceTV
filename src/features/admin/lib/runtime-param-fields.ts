@@ -49,6 +49,12 @@ export const COMMON_RUNTIME_PARAM_GROUPS: RuntimeParamGroup[] = [
     fields: [
       { key: 'VodPageTimeoutSeconds', label: '点播页等待超时', unit: '秒' },
       {
+        key: 'VodFragmentTimeoutSeconds',
+        label: '分片请求超时',
+        unit: '秒',
+        hint: '单个分片等待首字节的秒数；超时计入线路失败，用于触发直连与代理之间的切换。',
+      },
+      {
         key: 'LivePrecheckTimeoutSeconds',
         label: '直播预检查超时',
         unit: '秒',

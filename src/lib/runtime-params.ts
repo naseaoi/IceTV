@@ -5,6 +5,7 @@ export type RuntimeParamSettings = Pick<
   | 'SearchDownstreamMaxPage'
   | 'SiteInterfaceCacheTime'
   | 'VodPageTimeoutSeconds'
+  | 'VodFragmentTimeoutSeconds'
   | 'PlaybackHistoryPageSize'
   | 'PlaybackHistoryLimit'
   | 'SearchHistoryLimit'
@@ -28,6 +29,7 @@ export const DEFAULT_RUNTIME_PARAMS: RuntimeParamSettings = {
   SearchDownstreamMaxPage: Number(process.env.NEXT_PUBLIC_SEARCH_MAX_PAGE) || 5,
   SiteInterfaceCacheTime: 7200,
   VodPageTimeoutSeconds: 15,
+  VodFragmentTimeoutSeconds: 10,
   PlaybackHistoryPageSize: 10,
   PlaybackHistoryLimit: 500,
   SearchHistoryLimit: 20,
@@ -51,6 +53,7 @@ export const RUNTIME_PARAM_RANGES: Record<
   SearchDownstreamMaxPage: { min: 1, max: 20 },
   SiteInterfaceCacheTime: { min: 1, max: 86400 },
   VodPageTimeoutSeconds: { min: 5, max: 120 },
+  VodFragmentTimeoutSeconds: { min: 3, max: 60 },
   PlaybackHistoryPageSize: { min: 1, max: 100 },
   PlaybackHistoryLimit: { min: 1, max: 10000 },
   SearchHistoryLimit: { min: 1, max: 200 },

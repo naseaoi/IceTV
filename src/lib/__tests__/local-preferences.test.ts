@@ -1,6 +1,7 @@
 import {
   ADMIN_TABLE_COLUMN_WIDTHS_STORAGE_KEY,
   AUTO_PLAY_NEXT_STORAGE_KEY,
+  AUTO_SWITCH_SOURCE_STORAGE_KEY,
   BLOCK_AD_STORAGE_KEY,
   CONTINUE_WATCHING_COUNT_STORAGE_KEY,
   DEFAULT_AGGREGATE_SEARCH_STORAGE_KEY,
@@ -12,6 +13,7 @@ import {
   readAdminTableColumnWidth,
   readAggregateSearch,
   readAutoPlayNextEnabled,
+  readAutoSwitchSource,
   readBlockAdEnabled,
   readContinueWatchingCount,
   readDanmakuEpisodeSearchTitle,
@@ -24,6 +26,7 @@ import {
   readSidebarCollapsed,
   readSourcePreferredQualityPreference,
   resetAggregateSearch,
+  resetAutoSwitchSource,
   resetContinueWatchingCount,
   resetEnableOptimization,
   resetFluidSearch,
@@ -34,6 +37,7 @@ import {
   writeAdminTableColumnWidth,
   writeAggregateSearch,
   writeAutoPlayNextEnabled,
+  writeAutoSwitchSource,
   writeBlockAdEnabled,
   writeContinueWatchingCount,
   writeDanmakuEpisodeId,
@@ -140,6 +144,34 @@ describe('local preferences', () => {
 
     expect(listener).toHaveBeenCalledTimes(2);
     window.removeEventListener(LIVE_DIRECT_CONNECT_CHANGE_EVENT, listener);
+  });
+
+  it('keeps auto source switch off without a site default', () => {
+    expect(readAutoSwitchSource()).toBe(false);
+  });
+
+  it('uses the site default for auto source switch until overridden', () => {
+    window.RUNTIME_CONFIG = {
+      AUTO_SWITCH_SOURCE: true,
+    } as typeof window.RUNTIME_CONFIG;
+    expect(readAutoSwitchSource()).toBe(true);
+
+    writeAutoSwitchSource(false);
+    expect(localStorage.getItem(AUTO_SWITCH_SOURCE_STORAGE_KEY)).toBe('false');
+    expect(readAutoSwitchSource()).toBe(false);
+
+    resetAutoSwitchSource();
+    expect(localStorage.getItem(AUTO_SWITCH_SOURCE_STORAGE_KEY)).toBeNull();
+    expect(readAutoSwitchSource()).toBe(true);
+  });
+
+  it('ignores the retired auto switch on timeout key', () => {
+    localStorage.setItem('autoSwitchSourceOnTimeout', 'true');
+
+    expect(AUTO_SWITCH_SOURCE_STORAGE_KEY).not.toBe(
+      'autoSwitchSourceOnTimeout',
+    );
+    expect(readAutoSwitchSource()).toBe(false);
   });
 
   it('stores block ad preference through the shared helper', () => {
