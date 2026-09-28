@@ -15,7 +15,6 @@ import {
 } from '@/lib/upstream-resource-policy';
 
 const LEASE_MS = 30_000;
-const BYTE_RESERVATION = 256 * 1024;
 
 export async function withUpstreamTask<T>(
   url: string,
@@ -60,8 +59,20 @@ export async function withUpstreamResponse(
   let deadline: ReturnType<typeof setTimeout> | undefined;
   let renewing = false;
   let terminated = false;
-  let credit = 0;
-  let creditExpiresAt = 0;
+  let prepaidBytes = 0;
+  const byteQuotas: Array<[string, number, 429 | 503]> = [];
+  if (policy.globalBytes) {
+    byteQuotas.push(
+      [resourceKey('bytes:media:global', 'all'), policy.globalBytes, 503],
+      [resourceKey('bytes:media:host', host), policy.hostBytes, 503],
+    );
+    if (options.identity)
+      byteQuotas.push([
+        resourceKey('bytes:media:user', options.identity),
+        policy.userBytes,
+        429,
+      ]);
+  }
 
   function release(): Promise<void> {
     if (!releasePromise) {
@@ -83,6 +94,9 @@ export async function withUpstreamResponse(
       await reader.cancel(reason).catch(() => {});
       await release();
       streamController?.error(reason);
+    } else if (heartbeat) {
+      // 准入完成才启动心跳，此后不再新增租约，上游未响应也可直接释放；准入中途的中止由主流程 catch 统一释放
+      await release();
     }
   }
 
@@ -112,37 +126,18 @@ export async function withUpstreamResponse(
   }
 
   async function reserveBytes(bytes: number) {
-    if (!policy.globalBytes) return;
-    const now = Date.now();
-    if (now >= creditExpiresAt) credit = 0;
-    if (credit < bytes) {
-      const amount =
-        Math.ceil((bytes - credit) / BYTE_RESERVATION) * BYTE_RESERVATION;
-      const dimensions: Array<[string, number, 429 | 503]> = [
-        [resourceKey('bytes:media:global', 'all'), policy.globalBytes, 503],
-        [resourceKey('bytes:media:host', host), policy.hostBytes, 503],
-      ];
-      if (options.identity)
-        dimensions.push([
-          resourceKey('bytes:media:user', options.identity),
-          policy.userBytes,
-          429,
-        ]);
-      let expiresAt = now + 60_000;
-      for (const [key, limit, status] of dimensions) {
-        const result = await store
-          .consume(key, amount, limit, 60_000, now)
-          .catch(() => {
-            throw new ResourceLimitError();
-          });
-        if (!result.allowed)
-          throw new ResourceLimitError(status, result.retryAfterMs / 1000);
-        expiresAt = Math.min(expiresAt, now + result.retryAfterMs);
-      }
-      credit += amount;
-      creditExpiresAt = expiresAt;
-    }
-    credit -= bytes;
+    const prepaid = Math.min(prepaidBytes, bytes);
+    prepaidBytes -= prepaid;
+    if (bytes === prepaid) return;
+    for (const [key, limit, status] of byteQuotas)
+      await consumeSharedQuota(
+        store,
+        key,
+        bytes - prepaid,
+        limit,
+        status,
+        'bytes',
+      );
   }
 
   try {
@@ -187,8 +182,9 @@ export async function withUpstreamResponse(
       void abort(new ResourceLimitError());
     }, policy.maxDurationMs);
     deadline.unref?.();
+    // 准入预扣正文首字节，无流量额度时不建立上游连接；首个数据块抵扣这 1 字节
     await reserveBytes(1);
-    credit += policy.globalBytes ? 1 : 0;
+    prepaidBytes = 1;
     if (abortController.signal.aborted) throw abortController.signal.reason;
     const response = await loader(abortController.signal);
     if (abortController.signal.aborted) {

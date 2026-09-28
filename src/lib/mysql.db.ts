@@ -358,8 +358,12 @@ type JsonRow = RowDataPacket & {
 };
 
 export class MySqlStorage implements IStorage {
+  // 额度池按 store 实例区分，必须复用同一个实例
+  private resourceStore?: MySqlResourceStore;
   get resources() {
-    return new MySqlResourceStore(this.pool, () => this.ensureInitialized());
+    return (this.resourceStore ??= new MySqlResourceStore(this.pool, () =>
+      this.ensureInitialized(),
+    ));
   }
   private readonly pool: ReturnType<typeof mysql.createPool>;
   private initPromise: Promise<void> | null = null;

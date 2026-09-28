@@ -38,6 +38,12 @@ describe('upstream resources', () => {
   });
 
   const loader = () => Promise.resolve(new Response(new Uint8Array(16)));
+  const leaseCount = () =>
+    (
+      (storage as unknown as { db: Database.Database }).db
+        .prepare('SELECT COUNT(*) AS total FROM shared_resource_leases')
+        .get() as { total: number }
+    ).total;
 
   it('caps fifteen concurrent probe users at eight without consuming playback slots', async () => {
     const probeLoader = jest.fn(loader);
@@ -198,6 +204,7 @@ describe('upstream resources', () => {
 
   it('cancels upstream on byte exhaustion and does not open a new connection without credit', async () => {
     process.env.UPSTREAM_MEDIA_USER_MIB_PER_MINUTE = '1';
+    const options = { store, kind: 'vod' as const, identity: 'user:one' };
     const cancel = jest.fn();
     const response = await withUpstreamResponse(
       'https://up.example/a',
@@ -210,26 +217,57 @@ describe('upstream resources', () => {
             cancel,
           }),
         ),
-      { store, kind: 'vod', identity: 'user:one' },
+      options,
     );
     await expect(response.arrayBuffer()).rejects.toMatchObject({ status: 429 });
     expect(cancel).toHaveBeenCalled();
-    await (
-      await withUpstreamResponse('https://up.example/remainder', loader, {
-        store,
-        kind: 'vod',
-        identity: 'user:one',
-      })
-    ).arrayBuffer();
+    // 本实例已预约未用完的余额仍可用：连同被拒前送出的 600 KiB 恰好用满 1 MiB
+    const remainder = await withUpstreamResponse(
+      'https://up.example/remainder',
+      () => Promise.resolve(new Response(new Uint8Array(424 * 1024))),
+      options,
+    );
+    expect((await remainder.arrayBuffer()).byteLength).toBe(424 * 1024);
+    // 本地余额与数据库额度都用尽后，准入即被拒，不建立上游连接
     const nextLoader = jest.fn(loader);
     await expect(
-      withUpstreamResponse('https://up.example/b', nextLoader, {
-        store,
-        kind: 'vod',
-        identity: 'user:one',
-      }),
+      withUpstreamResponse('https://up.example/b', nextLoader, options),
     ).rejects.toMatchObject({ status: 429 });
     expect(nextLoader).not.toHaveBeenCalled();
+  });
+
+  it('reserves request and byte quotas in blocks instead of every 256 KiB', async () => {
+    const consume = jest.spyOn(store, 'consume');
+    const options = { store, kind: 'vod' as const, identity: 'user:one' };
+    const segment = async () => {
+      let sent = 0;
+      return new Response(
+        new ReadableStream<Uint8Array>({
+          pull(controller) {
+            if (sent === 2 * 1024 * 1024) return controller.close();
+            controller.enqueue(new Uint8Array(64 * 1024));
+            sent += 64 * 1024;
+          },
+        }),
+      );
+    };
+    const first = await withUpstreamResponse(
+      'https://up.example/1.ts',
+      segment,
+      options,
+    );
+    expect((await first.arrayBuffer()).byteLength).toBe(2 * 1024 * 1024);
+    // 2 个请求数键与 3 个流量键各预约一块；逐 256 KiB 预约需要 2 + 8 × 3 = 26 次
+    expect(consume).toHaveBeenCalledTimes(5);
+    consume.mockClear();
+    const second = await withUpstreamResponse(
+      'https://up.example/2.ts',
+      segment,
+      options,
+    );
+    expect((await second.arrayBuffer()).byteLength).toBe(2 * 1024 * 1024);
+    // 全局与主机的 8 MiB 块仍有余额，只有 3 MiB 的单用户块需要补一次
+    expect(consume).toHaveBeenCalledTimes(1);
   });
 
   it('releases partial admissions and fails closed on database errors', async () => {
@@ -299,6 +337,63 @@ describe('upstream resources', () => {
     await (
       await withUpstreamResponse('https://up.example/b', loader, { store })
     ).body!.cancel();
+  });
+
+  it('releases leases once when aborted before the origin responds', async () => {
+    const release = jest.spyOn(store, 'release');
+    const parent = new AbortController();
+    let started!: () => void;
+    const originStarted = new Promise<void>((resolve) => {
+      started = resolve;
+    });
+    let respond!: (response: Response) => void;
+    // 上游不理会中止信号，读取器迟迟不能创建
+    const pending = withUpstreamResponse(
+      'https://up.example/a',
+      () => {
+        started();
+        return new Promise<Response>((resolve) => {
+          respond = resolve;
+        });
+      },
+      { store, signal: parent.signal },
+    );
+    await originStarted;
+    expect(leaseCount()).toBe(2);
+    parent.abort(new Error('disconnected'));
+    await new Promise((resolve) => setImmediate(resolve));
+    expect(leaseCount()).toBe(0);
+    expect(release).toHaveBeenCalledTimes(2);
+    const cancel = jest.fn();
+    respond(new Response(new ReadableStream({ cancel })));
+    await expect(pending).rejects.toThrow('disconnected');
+    expect(cancel).toHaveBeenCalled();
+    expect(release).toHaveBeenCalledTimes(2);
+  });
+
+  it('still releases leases acquired after an abort during admission', async () => {
+    const parent = new AbortController();
+    const acquire = store.acquire.bind(store);
+    let admitHost!: () => void;
+    const hostTurn = new Promise<void>((resolve) => {
+      admitHost = resolve;
+    });
+    jest.spyOn(store, 'acquire').mockImplementation(async (key, ...rest) => {
+      if (key.startsWith('connections:metadata:host:')) await hostTurn;
+      return acquire(key, ...rest);
+    });
+    const origin = jest.fn(loader);
+    const pending = withUpstreamResponse('https://up.example/a', origin, {
+      store,
+      signal: parent.signal,
+    });
+    await new Promise((resolve) => setImmediate(resolve));
+    expect(leaseCount()).toBe(1);
+    parent.abort(new Error('disconnected'));
+    admitHost();
+    await expect(pending).rejects.toThrow('disconnected');
+    expect(origin).not.toHaveBeenCalled();
+    expect(leaseCount()).toBe(0);
   });
 
   it('renews long responses and aborts if ownership is lost', async () => {
