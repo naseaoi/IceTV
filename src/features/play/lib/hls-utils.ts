@@ -1,3 +1,8 @@
+import {
+  type FragmentMemoryEntry,
+  createFragmentEntryFromResponse,
+  isCacheableFragmentUrl,
+} from '@/features/play/lib/fragmentMemoryCache';
 import { fetchSourceProbe } from '@/features/play/lib/sourceProbeRequest';
 import { SourceProbeDeferredError } from '@/features/play/lib/sourceProbeRequestPolicy';
 import { createTimedAbortController } from '@/lib/downstream-sources/shared';
@@ -12,6 +17,11 @@ type VideoProbeResult = {
   quality: string;
   loadSpeed: string;
   pingTime: number;
+};
+
+export type ProbeSegmentSample = {
+  url: string;
+  entry: FragmentMemoryEntry;
 };
 
 type MasterVariant = {
@@ -33,6 +43,7 @@ type VideoDimensions = {
 type SegmentProbeResult = {
   loadSpeed: string;
   dimensions: VideoDimensions | null;
+  sample: FragmentMemoryEntry | null;
 };
 
 class ProbeError extends Error {
@@ -45,8 +56,8 @@ class ProbeError extends Error {
   }
 }
 
-async function loadProbePlaylist(url: string) {
-  const abortState = createTimedAbortController(undefined, 8000);
+async function loadProbePlaylist(url: string, timeoutMs = 8000) {
+  const abortState = createTimedAbortController(undefined, timeoutMs);
   const startedAt = performance.now();
   try {
     const response = await fetchSourceProbe(url, {
@@ -61,6 +72,19 @@ async function loadProbePlaylist(url: string) {
     return { content: await response.text(), pingTime };
   } finally {
     abortState.cleanup();
+  }
+}
+
+// 只回答清单能否确认可用：检测暂缓与源站失败都返回 false，调用方无需区分原因
+export async function checkM3u8PlaylistAvailable(
+  playlistUrl: string,
+  timeoutMs: number,
+): Promise<boolean> {
+  try {
+    const { content } = await loadProbePlaylist(playlistUrl, timeoutMs);
+    return content.includes('#EXTM3U');
+  } catch {
+    return false;
   }
 }
 
@@ -425,14 +449,54 @@ function detectSegmentDimensions(sample: Uint8Array): VideoDimensions | null {
 const BANDWIDTH_SAMPLE_TARGET_BYTES = 512 * 1024;
 /** 带宽测量请求的 Range 上限（字节）。1MB 够大，单次 TS 切片通常也不会超过。 */
 const BANDWIDTH_SAMPLE_MAX_BYTES = 1024 * 1024;
-/** 带宽测量整体超时（毫秒），超过则视为失败。外层还有 15s 兜底。 */
+/** 带宽测量整体超时（毫秒），超时视为失败。 */
 const BANDWIDTH_PROBE_TIMEOUT_MS = 12_000;
 /** 低于该样本量的测速视为可信度不足，统一返回"未知"。 */
 const BANDWIDTH_MIN_VALID_BYTES = 64 * 1024;
+const PROBE_SAMPLE_REGISTRY_LIMIT = 4;
+const PROBE_SAMPLE_TTL_MS = 60_000;
+
+// 以测速结果对象为键暂存首分片样本，调用方拿到结果后立即取走；上限与过期兜底未被取走的样本占用内存
+const probeSegmentSamples = new Map<
+  object,
+  { sample: ProbeSegmentSample; storedAt: number }
+>();
+
+function rememberProbeSegmentSample(
+  result: object,
+  sample: ProbeSegmentSample,
+): void {
+  const now = Date.now();
+  probeSegmentSamples.forEach((record, key) => {
+    if (now - record.storedAt >= PROBE_SAMPLE_TTL_MS) {
+      probeSegmentSamples.delete(key);
+    }
+  });
+  probeSegmentSamples.set(result, { sample, storedAt: now });
+  while (probeSegmentSamples.size > PROBE_SAMPLE_REGISTRY_LIMIT) {
+    const oldestKey = probeSegmentSamples.keys().next().value;
+    if (!oldestKey) break;
+    probeSegmentSamples.delete(oldestKey);
+  }
+}
+
+/** 取走测速时读到的首分片样本（仅单码率清单且样本可复用时存在），取后即删除。 */
+export function takeProbeSegmentSample(
+  result: unknown,
+): ProbeSegmentSample | null {
+  if (!result || typeof result !== 'object') return null;
+  const record = probeSegmentSamples.get(result);
+  if (!record) return null;
+  probeSegmentSamples.delete(result);
+  return Date.now() - record.storedAt < PROBE_SAMPLE_TTL_MS
+    ? record.sample
+    : null;
+}
 
 /**
  * 下载首个 segment 样本并基于"首字节到达 → 达标字节"的时间窗计算带宽。
  * 忽略 TCP/TLS 握手阶段，避免把连接建立开销摊到速度里。
+ * 读到的字节与首字节、传输耗时一并返回，供起播时复用。
  */
 async function measureSegmentBandwidth(
   segmentUrl: string,
@@ -443,6 +507,7 @@ async function measureSegmentBandwidth(
     BANDWIDTH_PROBE_TIMEOUT_MS,
   );
   try {
+    const requestStartedAt = performance.now();
     const response = await fetchSourceProbe(segmentUrl, {
       cache: 'no-store',
       signal: controller.signal,
@@ -450,34 +515,53 @@ async function measureSegmentBandwidth(
         Range: `bytes=0-${BANDWIDTH_SAMPLE_MAX_BYTES - 1}`,
       },
     });
+    const responseAt = performance.now();
     if (!response.ok && response.status !== 206) {
       throw new Error('Failed to load first segment');
     }
+    const createSample = (
+      data: Uint8Array,
+      streamEnded: boolean,
+      transferEndAt: number,
+    ) =>
+      createFragmentEntryFromResponse(response, data, {
+        streamEnded,
+        requestedBytes: BANDWIDTH_SAMPLE_MAX_BYTES,
+        ttfbMs: responseAt - requestStartedAt,
+        transferMs: transferEndAt - responseAt,
+      });
 
     const reader = response.body?.getReader();
     if (!reader) {
       // 老浏览器无 ReadableStream，退回到一次性下载（精度会差但能跑）
       const buf = await response.arrayBuffer();
       const sample = new Uint8Array(buf);
+      const sampleEntry = createSample(sample, true, performance.now());
       if (buf.byteLength < BANDWIDTH_MIN_VALID_BYTES) {
         return {
           loadSpeed: '未知',
           dimensions: detectSegmentDimensions(sample),
+          sample: sampleEntry,
         };
       }
       // 没有首字节时间，只能用响应总耗时粗算，偏保守
       return {
         loadSpeed: formatBytesPerSecond(buf.byteLength / 0.5),
         dimensions: detectSegmentDimensions(sample),
+        sample: sampleEntry,
       };
     }
 
     let bytes = 0;
     let firstByteAt = 0;
+    let streamEnded = false;
     const chunks: Uint8Array[] = [];
     while (true) {
       const { done, value } = await reader.read();
-      if (done) break;
+      if (done) {
+        streamEnded = true;
+        break;
+      }
       if (!value) continue;
       if (firstByteAt === 0) {
         firstByteAt = performance.now();
@@ -495,19 +579,24 @@ async function measureSegmentBandwidth(
       }
     }
 
+    const transferEndAt = performance.now();
     const sample = concatChunks(chunks, bytes);
+    const sampleEntry = createSample(sample, streamEnded, transferEndAt);
     const dimensions = detectSegmentDimensions(sample);
 
     if (bytes < BANDWIDTH_MIN_VALID_BYTES || firstByteAt === 0) {
-      return { loadSpeed: '未知', dimensions };
+      return { loadSpeed: '未知', dimensions, sample: sampleEntry };
     }
 
-    const elapsed = performance.now() - firstByteAt;
-    if (elapsed <= 0) return { loadSpeed: '未知', dimensions };
+    const elapsed = transferEndAt - firstByteAt;
+    if (elapsed <= 0) {
+      return { loadSpeed: '未知', dimensions, sample: sampleEntry };
+    }
 
     return {
       loadSpeed: formatBytesPerSecond(bytes / (elapsed / 1000)),
       dimensions,
+      sample: sampleEntry,
     };
   } catch (err) {
     if ((err as Error)?.name === 'AbortError') {
@@ -612,11 +701,23 @@ async function probeWithMode(
       : quality;
     partial = { quality: detectedQuality, pingTime };
 
-    return {
+    const result: VideoProbeResult = {
       quality: detectedQuality,
       loadSpeed,
       pingTime,
     };
+    // 多码率清单起播时档位不确定，只有单码率时首分片才必然被播放器请求
+    if (
+      segmentProbe.sample &&
+      variants.length <= 1 &&
+      isCacheableFragmentUrl(firstSegmentUrl)
+    ) {
+      rememberProbeSegmentSample(result, {
+        url: firstSegmentUrl,
+        entry: segmentProbe.sample,
+      });
+    }
+    return result;
   } catch (error) {
     if (error instanceof SourceProbeDeferredError) throw error;
     throw normalizeProbeError(error, partial);

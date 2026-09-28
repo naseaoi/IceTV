@@ -56,6 +56,28 @@ function clearPlayIntentStorage() {
   sessionStorage.removeItem(PLAY_INTENT_KEY);
 }
 
+// 无效或过期的意图顺手清掉；匹配的保留，由调用方决定是否消费
+function readMatchingPlayIntent(
+  source: string,
+  id: string,
+): PlayIntentPayload | null {
+  const raw = sessionStorage.getItem(PLAY_INTENT_KEY);
+  if (!raw) {
+    return null;
+  }
+
+  const payload = JSON.parse(raw) as Partial<PlayIntentPayload>;
+  if (
+    !isValidPlayIntentPayload(payload) ||
+    Date.now() - payload.saveTime > PLAY_INTENT_TTL_MS
+  ) {
+    clearPlayIntentStorage();
+    return null;
+  }
+
+  return payload.source === source && payload.id === id ? payload : null;
+}
+
 /**
  * 首页“继续观看”点击后写入一次性恢复意图，避免播放页再异步猜测该跳到哪里。
  */
@@ -102,36 +124,17 @@ export function consumeMatchingPlayIntent({
   if (typeof window === 'undefined') return null;
 
   try {
-    const raw = sessionStorage.getItem(PLAY_INTENT_KEY);
-    if (!raw) {
+    const payload = readMatchingPlayIntent(source, id);
+    if (!payload) {
       return null;
     }
 
-    const payload = JSON.parse(raw) as Partial<PlayIntentPayload>;
-    if (!isValidPlayIntentPayload(payload)) {
-      clearPlayIntentStorage();
-      return null;
-    }
-
-    const payloadEpisodeIndex = Math.floor(payload.episodeIndex);
-    const payloadResumeTime = Math.floor(payload.resumeTime);
-    const payloadSaveTime = payload.saveTime;
-
-    if (Date.now() - payloadSaveTime > PLAY_INTENT_TTL_MS) {
-      clearPlayIntentStorage();
-      return null;
-    }
-
-    if (payload.source !== source || payload.id !== id) {
-      return null;
-    }
-
-    const resumeTime = Math.max(0, payloadResumeTime);
+    const resumeTime = Math.max(0, Math.floor(payload.resumeTime));
 
     const restoreState: PlayIntentRestoreState = {
       episodeIndex: resolvePlayRecordEpisode(
         {
-          index: payloadEpisodeIndex + 1,
+          index: Math.floor(payload.episodeIndex) + 1,
           group_index: payload.groupIndex,
           group_total: payload.groupTotal,
           group_label: payload.groupLabel,
@@ -149,5 +152,24 @@ export function consumeMatchingPlayIntent({
     console.warn('读取播放意图失败:', error);
     clearPlayIntentStorage();
     return null;
+  }
+}
+
+/**
+ * 只判断是否有与当前播放目标匹配的有效意图，不消费；播放页据此决定起播前是否需要读播放记录。
+ */
+export function hasMatchingPlayIntent({
+  source,
+  id,
+}: {
+  source: string;
+  id: string;
+}): boolean {
+  if (typeof window === 'undefined') return false;
+
+  try {
+    return readMatchingPlayIntent(source, id) !== null;
+  } catch {
+    return false;
   }
 }

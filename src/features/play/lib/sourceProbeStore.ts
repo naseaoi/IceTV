@@ -1,3 +1,4 @@
+import { takeProbeSegmentSample } from '@/features/play/lib/hls-utils';
 import { fetchSourceProbe } from '@/features/play/lib/sourceProbeRequest';
 import {
   SOURCE_PROBE_CONCURRENCY,
@@ -240,6 +241,8 @@ async function runProbe(
         useProxy,
         resolved.source,
       );
+      // 换源面板的测速不用于起播，首分片样本立即释放
+      takeProbeSegmentSample(info);
       const finalUseProxy = shouldUseServerProxy(
         resolved.source,
         probeEpisodeUrl,

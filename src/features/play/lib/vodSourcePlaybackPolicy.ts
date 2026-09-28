@@ -88,6 +88,16 @@ export function resolveVodM3U8ProxyTimeoutMs(
   return Math.max(configuredTimeoutMs, XIGUA_M3U8_PROXY_TIMEOUT_MS);
 }
 
+export function resolveVodSourceFragmentTimeoutMs(
+  sourceKey: string | null | undefined,
+  configuredTimeoutMs: number,
+): number {
+  if (sourceKey !== 'xigua') {
+    return configuredTimeoutMs;
+  }
+  return Math.max(configuredTimeoutMs, XIGUA_HLS_LOADING_TIMEOUT_MS);
+}
+
 export function resolveVodPlayerLoadingTimeoutSeconds(
   sourceKey: string,
   configuredTimeoutSeconds: number,

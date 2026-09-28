@@ -199,6 +199,75 @@ export async function saveCurrentPlayProgress(
   }
 }
 
+// 起播前凭恢复点和已拿到的播放记录预判续播的集，取舍规则与 initFromHistory 一致
+// 不看播放意图：它读取即删除，且带意图的入口都已指定源，不经过测速选源
+export function peekHistoryRestoreEpisodeIndex(
+  detail: SearchResult,
+  playRecords: Record<string, PlayRecord> | null,
+): number | null {
+  const checkpoint = readMatchingPlaybackCheckpoint(
+    { current: detail.source },
+    { current: detail.id },
+  );
+  const record = playRecords?.[generateStorageKey(detail.source, detail.id)];
+  const restoreCandidate = resolvePlaybackRestoreCandidate({
+    checkpoint: isPlaybackCheckpointCompatibleWithDetail(checkpoint, detail)
+      ? checkpoint
+      : null,
+    record: isPlayRecordCompatibleWithDetail(record, detail)
+      ? record
+      : undefined,
+    episodeCount: detail.episodes?.length || 0,
+    episodeGroups: detail.episode_groups,
+  });
+  return restoreCandidate ? restoreCandidate.episodeIndex : null;
+}
+
+// ---------------------------------------------------------------------------
+// 起播与历史恢复的握手
+// ---------------------------------------------------------------------------
+
+// 起播等历史恢复写好续播的集与时间再放行；起播前提前发起的播放记录读取交给这次恢复复用
+export interface HistoryRestoreGate {
+  playRecords: Promise<Record<string, PlayRecord>> | null;
+  settledKey: string;
+  listeners: Set<(key: string) => void>;
+}
+
+function getHistoryRestoreKey(source: string, id: string): string {
+  return `${source}+${id}`;
+}
+
+function settleHistoryRestore(gate: HistoryRestoreGate, key: string) {
+  gate.settledKey = key;
+  gate.listeners.forEach((listener) => listener(key));
+}
+
+export function waitForHistoryRestore(
+  gate: HistoryRestoreGate,
+  target: Pick<SearchResult, 'source' | 'id'>,
+  timeoutMs: number,
+  signal?: AbortSignal,
+): Promise<void> {
+  const key = getHistoryRestoreKey(target.source, target.id);
+  if (gate.settledKey === key) return Promise.resolve();
+
+  return new Promise((resolve) => {
+    const finish = () => {
+      clearTimeout(timer);
+      gate.listeners.delete(onSettled);
+      signal?.removeEventListener('abort', finish);
+      resolve();
+    };
+    const onSettled = (settledKey: string) => {
+      if (settledKey === key) finish();
+    };
+    const timer = setTimeout(finish, timeoutMs);
+    gate.listeners.add(onSettled);
+    signal?.addEventListener('abort', finish, { once: true });
+  });
+}
+
 // ---------------------------------------------------------------------------
 // usePlayProgress hook — 组合所有进度管理相关 effect
 // ---------------------------------------------------------------------------
@@ -219,6 +288,7 @@ interface UsePlayProgressParams {
   lastSaveTimeRef: MutableRefObject<number>;
   saveIntervalRef: MutableRefObject<NodeJS.Timeout | null>;
   wakeLockRef: MutableRefObject<WakeLockSentinel | null>;
+  historyRestoreGateRef: MutableRefObject<HistoryRestoreGate>;
   searchTitle: string;
   currentSource: string;
   currentId: string;
@@ -244,6 +314,7 @@ export function usePlayProgress({
   lastSaveTimeRef,
   saveIntervalRef,
   wakeLockRef,
+  historyRestoreGateRef,
   searchTitle,
   currentSource,
   currentId,
@@ -378,8 +449,10 @@ export function usePlayProgress({
     const requestedSource = currentSource;
     const requestedId = currentId;
     const requestedEpisodeIndex = currentEpisodeIndexRef.current;
-    const restoreKey = `${currentSource}+${currentId}`;
+    const restoreKey = getHistoryRestoreKey(currentSource, currentId);
+    const historyRestoreGate = historyRestoreGateRef.current;
     let disposed = false;
+    let recordsPending = false;
 
     const initFromHistory = async () => {
       if (!currentSource || !currentId) return;
@@ -417,6 +490,7 @@ export function usePlayProgress({
       });
       if (playIntent) {
         applyRestoreState(playIntent);
+        settleHistoryRestore(historyRestoreGate, restoreKey);
         return;
       }
 
@@ -426,8 +500,10 @@ export function usePlayProgress({
         currentIdRef,
       );
 
+      recordsPending = true;
       try {
-        const allRecords = await getAllPlayRecords();
+        const allRecords = await (historyRestoreGate.playRecords ??
+          getAllPlayRecords());
         if (disposed) {
           return;
         }
@@ -519,6 +595,10 @@ export function usePlayProgress({
         });
       } catch (err) {
         console.error('读取播放记录失败:', err);
+      } finally {
+        recordsPending = false;
+        // 放弃、失败与已写好集和时间都算已决定；被打断的这轮交给重跑放行
+        if (!disposed) settleHistoryRestore(historyRestoreGate, restoreKey);
       }
     };
 
@@ -526,6 +606,10 @@ export function usePlayProgress({
 
     return () => {
       disposed = true;
+      // 读取记录期间详情刷新会重跑本 effect，不让出恢复键的话重跑直接跳过，这次恢复就静默丢了
+      if (recordsPending && restoreAppliedKeyRef.current === restoreKey) {
+        restoreAppliedKeyRef.current = '';
+      }
     };
   }, [
     allowAutoResumeRef,
@@ -537,6 +621,7 @@ export function usePlayProgress({
     currentSource,
     currentSourceRef,
     detailRef,
+    historyRestoreGateRef,
     resumeModeRef,
     resumeTimeRef,
     detail,

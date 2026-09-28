@@ -5,6 +5,7 @@ import {
   resolveVodPlayerLoadingTimeoutSeconds,
   resolveVodSegmentPrebufferPolicy,
   resolveVodSegmentProxyTimeoutMs,
+  resolveVodSourceFragmentTimeoutMs,
 } from '@/features/play/lib/vodSourcePlaybackPolicy';
 
 describe('VOD source playback policy', () => {
@@ -48,5 +49,12 @@ describe('VOD source playback policy', () => {
     expect(resolveVodM3U8ProxyTimeoutMs('other', 15_000)).toBe(15_000);
     expect(resolveVodPlayerLoadingTimeoutSeconds('xigua', 15)).toBe(35);
     expect(resolveVodPlayerLoadingTimeoutSeconds('other', 15)).toBe(15);
+  });
+
+  it('keeps xigua fragment requests on a 30 second first byte floor', () => {
+    expect(resolveVodSourceFragmentTimeoutMs('xigua', 10_000)).toBe(30_000);
+    expect(resolveVodSourceFragmentTimeoutMs('xigua', 45_000)).toBe(45_000);
+    expect(resolveVodSourceFragmentTimeoutMs('other', 10_000)).toBe(10_000);
+    expect(resolveVodSourceFragmentTimeoutMs(undefined, 10_000)).toBe(10_000);
   });
 });

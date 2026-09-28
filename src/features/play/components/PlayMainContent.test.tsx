@@ -269,4 +269,51 @@ describe('PlayMainContent', () => {
 
     expect(onRetryPlayback).toHaveBeenCalledTimes(1);
   });
+
+  it('超时回调已接手（切线路或自动换源）时保持加载层', () => {
+    const onLoadingTimeout = jest.fn(() => true);
+
+    render(
+      <PlayMainContent
+        {...createBaseProps()}
+        isVideoLoading
+        videoLoadingStage='initing'
+        onLoadingTimeout={onLoadingTimeout}
+      />,
+    );
+
+    act(() => {
+      jest.advanceTimersByTime(PLAYER_LOADING_TIMEOUT_MS);
+    });
+
+    expect(onLoadingTimeout).toHaveBeenCalledTimes(1);
+    expect(screen.queryByText('加载视频超时')).not.toBeInTheDocument();
+    expect(screen.getByText('正在加载视频')).toBeInTheDocument();
+  });
+
+  it('加载超时层支持继续尝试', () => {
+    const onLoadingTimeout = jest.fn(() => false);
+    const onRetryPlayback = jest.fn();
+
+    render(
+      <PlayMainContent
+        {...createBaseProps()}
+        isVideoLoading
+        videoLoadingStage='initing'
+        onLoadingTimeout={onLoadingTimeout}
+        onRetryPlayback={onRetryPlayback}
+      />,
+    );
+
+    act(() => {
+      jest.advanceTimersByTime(PLAYER_LOADING_TIMEOUT_MS);
+    });
+
+    expect(onLoadingTimeout).toHaveBeenCalledTimes(1);
+    expect(screen.getByText('加载视频超时')).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: '继续尝试' }));
+
+    expect(onRetryPlayback).toHaveBeenCalledTimes(1);
+  });
 });

@@ -1,5 +1,6 @@
 ﻿import {
   consumeMatchingPlayIntent,
+  hasMatchingPlayIntent,
   PLAY_INTENT_KEY,
   savePlayIntent,
 } from '@/lib/play-intent';
@@ -167,5 +168,54 @@ describe('playIntent', () => {
       resumeTime: 180,
       resumeMode: 'forced',
     });
+  });
+});
+
+describe('hasMatchingPlayIntent', () => {
+  beforeEach(() => {
+    sessionStorage.clear();
+    jest.restoreAllMocks();
+  });
+
+  it('只判断匹配的有效意图，不消费', () => {
+    savePlayIntent({
+      source: 'source-a',
+      id: 'id-a',
+      episodeIndex: 7,
+      resumeTime: 180,
+    });
+
+    expect(hasMatchingPlayIntent({ source: 'source-b', id: 'id-a' })).toBe(
+      false,
+    );
+    expect(hasMatchingPlayIntent({ source: 'source-a', id: 'id-a' })).toBe(
+      true,
+    );
+    expect(
+      consumeMatchingPlayIntent({
+        source: 'source-a',
+        id: 'id-a',
+        episodeCount: 12,
+      }),
+    ).toMatchObject({ episodeIndex: 7, resumeTime: 180 });
+    expect(hasMatchingPlayIntent({ source: 'source-a', id: 'id-a' })).toBe(
+      false,
+    );
+  });
+
+  it('过期的意图不算匹配并被清理', () => {
+    jest.spyOn(Date, 'now').mockReturnValue(10_000);
+    savePlayIntent({
+      source: 'source-a',
+      id: 'id-a',
+      episodeIndex: 7,
+      resumeTime: 180,
+    });
+    jest.spyOn(Date, 'now').mockReturnValue(10_000 + 5 * 60 * 1000 + 1);
+
+    expect(hasMatchingPlayIntent({ source: 'source-a', id: 'id-a' })).toBe(
+      false,
+    );
+    expect(sessionStorage.getItem(PLAY_INTENT_KEY)).toBeNull();
   });
 });

@@ -11,7 +11,7 @@ import {
   runManagedVideoCleanup,
 } from '@/lib/player-runtime';
 import { OPEN_PLAYER_SHORTCUTS_EVENT } from '@/lib/player-shortcuts';
-import { formatTime } from '@/lib/player-utils';
+import { destroyArtPlayer, formatTime } from '@/lib/player-utils';
 import type { SkipConfig } from '@/lib/types';
 
 type ArtPlayerSettingsOptions = {
@@ -72,7 +72,7 @@ export function createArtPlayerSettings({
             const managedVideo = artPlayerRef.current.video;
             runManagedVideoCleanup(managedVideo);
             destroyManagedHls(managedVideo);
-            artPlayerRef.current.destroy();
+            destroyArtPlayer(artPlayerRef.current);
             artPlayerRef.current = null;
           }
           setBlockAdEnabled(newVal);

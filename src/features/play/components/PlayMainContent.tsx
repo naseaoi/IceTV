@@ -64,7 +64,8 @@ interface PlayMainContentProps {
   onAddSources?: (newSources: SearchResult[]) => void;
   onDanmakuReload?: DanmakuReloadHandler;
   onDanmakuHeatmapChange?: (enabled: boolean) => void;
-  onLoadingTimeout?: () => void;
+  // 返回 true 表示已切换线路或自动换源，继续显示加载而不进入超时状态
+  onLoadingTimeout?: () => boolean | void;
   searchType?: string;
   playbackError?: string | null;
 }
@@ -165,16 +166,31 @@ const LOADING_STAGE_CONFIG: Record<
   },
 };
 
+function RetryPlaybackButton({ onRetry }: { onRetry: () => void }) {
+  return (
+    <button
+      type='button'
+      onClick={onRetry}
+      className='mx-auto inline-flex h-10 items-center justify-center gap-2 rounded-lg bg-white px-4 text-sm font-medium text-zinc-950 transition-colors hover:bg-zinc-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/70'
+    >
+      <RefreshCw className='h-4 w-4' />
+      <span>继续尝试</span>
+    </button>
+  );
+}
+
 function PlayLoadingOverlay({
   loadingTimedOut,
   videoLoadingStage,
   realtimeLoadSpeed,
   timeoutSeconds,
+  onRetry,
 }: {
   loadingTimedOut: boolean;
   videoLoadingStage: VideoLoadingStage;
   realtimeLoadSpeed: string;
   timeoutSeconds: number;
+  onRetry: () => void;
 }) {
   const stageConfig = LOADING_STAGE_CONFIG[videoLoadingStage];
   const statusText = realtimeLoadSpeed || stageConfig.status;
@@ -185,7 +201,9 @@ function PlayLoadingOverlay({
         zClassName='z-[500]'
         title={stageConfig.timeoutTitle}
         message={buildLoadingTimeoutMessage(timeoutSeconds)}
-      />
+      >
+        <RetryPlaybackButton onRetry={onRetry} />
+      </PlayerOverlayPanel>
     );
   }
 
@@ -214,14 +232,7 @@ function PlaybackErrorOverlay({
       title={message}
       message='请从右侧面板手动切换其他源站。'
     >
-      <button
-        type='button'
-        onClick={onRetry}
-        className='mx-auto inline-flex h-10 items-center justify-center gap-2 rounded-lg bg-white px-4 text-sm font-medium text-zinc-950 transition-colors hover:bg-zinc-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/70'
-      >
-        <RefreshCw className='h-4 w-4' />
-        <span>继续尝试</span>
-      </button>
+      <RetryPlaybackButton onRetry={onRetry} />
     </PlayerOverlayPanel>
   );
 }
@@ -368,8 +379,10 @@ export function PlayMainContent(props: PlayMainContentProps) {
     }
     setLoadingTimedOut(false);
     const timer = setTimeout(() => {
+      if (onLoadingTimeoutRef.current?.() === true) {
+        return;
+      }
       setLoadingTimedOut(true);
-      onLoadingTimeoutRef.current?.();
     }, loadingTimeoutMs);
     return () => clearTimeout(timer);
   }, [
@@ -419,6 +432,7 @@ export function PlayMainContent(props: PlayMainContentProps) {
               videoLoadingStage={videoLoadingStage}
               realtimeLoadSpeed={loadingStatusText}
               timeoutSeconds={loadingTimeoutSeconds}
+              onRetry={onRetryPlayback}
             />
           )}
           {playbackError && (

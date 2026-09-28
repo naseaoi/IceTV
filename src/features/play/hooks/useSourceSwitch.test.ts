@@ -1,0 +1,703 @@
+import { renderHook, waitFor } from '@testing-library/react';
+import type Artplayer from 'artplayer';
+import type { SetStateAction } from 'react';
+
+import type {
+  PlaybackRequestMode,
+  VideoQualityInfo,
+} from '@/features/play/hooks/usePlayPageState';
+import { useSourceSwitch } from '@/features/play/hooks/useSourceSwitch';
+import { AUTO_SWITCH_SOURCE_STORAGE_KEY } from '@/lib/local-preferences';
+import type { ManagedVideoElement } from '@/lib/player-runtime';
+import {
+  readSourcePlaybackStats,
+  recordSourcePlaybackSuccess,
+} from '@/lib/source-playback-stats';
+import type { SearchResult } from '@/lib/types';
+
+jest.mock('@/lib/db.client', () => ({
+  deletePlayRecord: jest.fn(),
+  deleteSkipConfig: jest.fn(),
+  saveSkipConfig: jest.fn(),
+}));
+
+jest.mock('@/lib/play-intent', () => ({
+  savePlayIntent: jest.fn(),
+}));
+
+const mockGetVodRuntimeSourceUrl = jest.fn<string | null, [HTMLVideoElement]>(
+  () => null,
+);
+
+jest.mock('@/features/play/lib/vodHlsRuntime', () => ({
+  getVodRuntimeSourceUrl: (video: HTMLVideoElement) =>
+    mockGetVodRuntimeSourceUrl(video),
+}));
+
+type UseSourceSwitchOptions = Parameters<typeof useSourceSwitch>[0];
+
+const THREE_EPISODES = ['第1集', '第2集', '第3集'];
+
+function createSource(source: string, episodeTitles: string[]): SearchResult {
+  return {
+    id: `${source}-id`,
+    title: '测试剧',
+    poster: '',
+    episodes: episodeTitles.map(
+      (_, index) => `https://${source}.example/${index}.m3u8`,
+    ),
+    episodes_titles: episodeTitles,
+    source,
+    source_name: source.toUpperCase(),
+    year: '2024',
+  };
+}
+
+function info(loadSpeed: string): VideoQualityInfo {
+  return { quality: '1080p', loadSpeed, pingTime: 100 };
+}
+
+function createLoadingVideo() {
+  const video = document.createElement('video') as ManagedVideoElement;
+  const pause = jest.fn();
+  const runtimeCleanup = jest.fn();
+  const stopLoad = jest.fn();
+  video.pause = pause;
+  video.__icetvHlsCleanup = runtimeCleanup;
+  video.hls = { stopLoad } as unknown as ManagedVideoElement['hls'];
+  return { video, pause, runtimeCleanup, stopLoad };
+}
+
+function setupHook({
+  availableSources,
+  fullDetails = {},
+  videoInfo = new Map(),
+  video = null,
+  playerCurrentTime = 0,
+  videoUrl = '',
+}: {
+  availableSources: SearchResult[];
+  fullDetails?: Record<string, SearchResult>;
+  videoInfo?: ReadonlyMap<string, VideoQualityInfo>;
+  video?: HTMLVideoElement | null;
+  playerCurrentTime?: number;
+  videoUrl?: string;
+}) {
+  const [current] = availableSources;
+  const currentSourceRef = { current: current.source };
+  const currentIdRef = { current: current.id };
+  const detailRef = { current: current as SearchResult | null };
+  const player = video
+    ? {
+        video,
+        currentTime: playerCurrentTime,
+        notice: { show: '' },
+        pause: jest.fn(),
+      }
+    : null;
+
+  global.fetch = jest.fn(async (input: RequestInfo | URL) => {
+    const url = new URL(String(input), 'http://localhost');
+    const key = `${url.searchParams.get('source')}-${url.searchParams.get('id')}`;
+    const detail =
+      fullDetails[key] ??
+      availableSources.find((item) => `${item.source}-${item.id}` === key);
+    return { ok: true, json: async () => detail } as Response;
+  });
+
+  const options: UseSourceSwitchOptions = {
+    availableSources,
+    precomputedVideoInfo: videoInfo,
+    currentEpisodeIndex: 2,
+    artPlayerRef: { current: player as unknown as Artplayer | null },
+    currentSourceRef,
+    currentIdRef,
+    detailRef,
+    currentEpisodeIndexRef: { current: 2 },
+    skipConfigRef: {
+      current: { enable: false, intro_time: 0, outro_time: 0 },
+    },
+    resumeTimeRef: { current: null },
+    resumeModeRef: { current: null },
+    stableCurrentTimeRef: { current: 0 },
+    clearTargetEpisodeProgressRef: { current: false },
+    sourceSwitchEpisodeAnchorRef: { current: null },
+    playbackRequestModeRef: { current: 'initial' as PlaybackRequestMode },
+    pendingSourceSwitchCleanupRef: { current: null },
+    sourceChangeRequestIdRef: { current: 0 },
+    videoUrlRef: { current: videoUrl },
+    setError: jest.fn(),
+    setVideoUrl: jest.fn(),
+    setVideoTitle: jest.fn(),
+    setVideoYear: jest.fn(),
+    setVideoCover: jest.fn(),
+    setVideoDoubanId: jest.fn(),
+    setCurrentSource: jest.fn((value: SetStateAction<string>) => {
+      if (typeof value === 'string') currentSourceRef.current = value;
+    }),
+    setCurrentId: jest.fn((value: SetStateAction<string>) => {
+      if (typeof value === 'string') currentIdRef.current = value;
+    }),
+    setDetail: jest.fn((value: SetStateAction<SearchResult | null>) => {
+      if (typeof value !== 'function') detailRef.current = value;
+    }),
+    setCurrentEpisodeIndex: jest.fn(),
+    setAvailableSources: jest.fn(),
+    setIsVideoLoading: jest.fn(),
+    setVideoLoadingStage: jest.fn(),
+    setVideoLoadingAttempt: jest.fn(),
+    setPlaybackRetryNonce: jest.fn(),
+    setRealtimeLoadSpeed: jest.fn(),
+    setSourceSearchError: jest.fn(),
+    cleanupPlayer: jest.fn(),
+    onPlaybackStartFailed: jest.fn(),
+  };
+
+  const { result } = renderHook(() => useSourceSwitch(options));
+  return { result, options, player };
+}
+
+function fetchedDetailUrls(): string[] {
+  return (global.fetch as jest.Mock).mock.calls.map(([url]) => String(url));
+}
+
+// 挂起下一次详情请求，模拟等待新源详情的窗口；返回值用于放行
+function holdNextDetailFetch(): () => void {
+  const fetchMock = global.fetch as jest.Mock;
+  const respond = fetchMock.getMockImplementation();
+  let release: () => void = () => undefined;
+  fetchMock.mockImplementationOnce(
+    (...args: unknown[]) =>
+      new Promise((resolve) => {
+        release = () => resolve(respond?.(...args));
+      }),
+  );
+  return () => release();
+}
+
+// 下一次详情请求一直不返回，直到被中止；返回值读取请求收到的中止信号
+function hangNextDetailFetch(): () => AbortSignal | undefined {
+  const fetchMock = global.fetch as jest.Mock;
+  let signal: AbortSignal | undefined;
+  fetchMock.mockImplementationOnce(
+    (_input: RequestInfo | URL, init?: RequestInit) =>
+      new Promise((_resolve, reject) => {
+        signal = init?.signal ?? undefined;
+        signal?.addEventListener('abort', () =>
+          reject(new DOMException('The operation was aborted.', 'AbortError')),
+        );
+      }),
+  );
+  return () => signal;
+}
+
+describe('useSourceSwitch 自动换源', () => {
+  const originalFetch = global.fetch;
+
+  beforeEach(() => {
+    localStorage.clear();
+    mockGetVodRuntimeSourceUrl.mockReset();
+    mockGetVodRuntimeSourceUrl.mockReturnValue(null);
+    jest.spyOn(console, 'warn').mockImplementation(() => undefined);
+  });
+
+  afterEach(() => {
+    global.fetch = originalFetch;
+    jest.restoreAllMocks();
+  });
+
+  it('未开启时页面超时和地址解析失败只停止加载并提示', () => {
+    const { result, options } = setupHook({
+      availableSources: [
+        createSource('a', THREE_EPISODES),
+        createSource('b', THREE_EPISODES),
+      ],
+    });
+
+    expect(result.current.handleLoadingTimeout()).toBe(false);
+    expect(options.setRealtimeLoadSpeed).toHaveBeenLastCalledWith(
+      '当前源加载超时',
+    );
+
+    result.current.handleEpisodeUrlResolveFailed();
+    expect(options.setRealtimeLoadSpeed).toHaveBeenLastCalledWith(
+      '播放地址解析失败',
+    );
+    expect(result.current.handlePlaybackRecoveryExhausted('fatal')).toBe(false);
+    expect(global.fetch).not.toHaveBeenCalled();
+    // 未开启自动换源也要把三处触发点报给起播统计
+    expect(options.onPlaybackStartFailed).toHaveBeenCalledTimes(3);
+  });
+
+  it('页面超时优先切到服务端代理，不急于换源', () => {
+    localStorage.setItem(AUTO_SWITCH_SOURCE_STORAGE_KEY, 'true');
+    const video = document.createElement('video') as ManagedVideoElement;
+    const switchToServerProxy = jest.fn(() => true);
+    video.__icetvSwitchToServerProxy = switchToServerProxy;
+    mockGetVodRuntimeSourceUrl.mockReturnValue('https://a.example/2.m3u8');
+
+    const { result, options } = setupHook({
+      availableSources: [
+        createSource('a', THREE_EPISODES),
+        createSource('b', THREE_EPISODES),
+      ],
+      video,
+      videoUrl: 'https://a.example/2.m3u8',
+    });
+
+    expect(result.current.handleLoadingTimeout()).toBe(true);
+    expect(switchToServerProxy).toHaveBeenCalledWith('page-loading-timeout');
+    expect(global.fetch).not.toHaveBeenCalled();
+    expect(options.onPlaybackStartFailed).not.toHaveBeenCalled();
+  });
+
+  it('播放器上的运行时不属于当前地址时不回退代理，按当前源超时处理', () => {
+    const { video } = createLoadingVideo();
+    const switchToServerProxy = jest.fn(() => true);
+    video.__icetvSwitchToServerProxy = switchToServerProxy;
+    mockGetVodRuntimeSourceUrl.mockReturnValue('https://a.example/1.m3u8');
+
+    // 懒解析换集已清空地址，播放器上挂的仍是上一集的运行时
+    const { result, options } = setupHook({
+      availableSources: [
+        createSource('a', THREE_EPISODES),
+        createSource('b', THREE_EPISODES),
+      ],
+      video,
+    });
+    expect(result.current.handleLoadingTimeout()).toBe(false);
+
+    options.videoUrlRef.current = 'https://a.example/2.m3u8';
+    expect(result.current.handleLoadingTimeout()).toBe(false);
+
+    expect(switchToServerProxy).not.toHaveBeenCalled();
+    expect(options.onPlaybackStartFailed).toHaveBeenCalledTimes(2);
+    expect(options.setRealtimeLoadSpeed).toHaveBeenLastCalledWith(
+      '当前源加载超时',
+    );
+  });
+
+  it('开启后切到测速最快且有目标集的源', async () => {
+    localStorage.setItem(AUTO_SWITCH_SOURCE_STORAGE_KEY, 'true');
+    const { result, options } = setupHook({
+      availableSources: [
+        createSource('a', THREE_EPISODES),
+        createSource('slow', THREE_EPISODES),
+        createSource('short', ['第1集', '第2集']),
+        createSource('fast', THREE_EPISODES),
+      ],
+      videoInfo: new Map([
+        ['slow-slow-id', info('200.0 KB/s')],
+        ['short-short-id', info('9.0 MB/s')],
+        ['fast-fast-id', info('2.0 MB/s')],
+      ]),
+    });
+
+    expect(result.current.handleLoadingTimeout()).toBe(true);
+
+    await waitFor(() =>
+      expect(options.setCurrentSource).toHaveBeenCalledWith('fast'),
+    );
+    expect(fetchedDetailUrls()).toEqual(['/api/detail?source=fast&id=fast-id']);
+    expect(options.playbackRequestModeRef.current).toBe('auto-source');
+    expect(options.setRealtimeLoadSpeed).toHaveBeenCalledWith(
+      '正在尝试其他源...',
+    );
+    expect(options.setCurrentEpisodeIndex).toHaveBeenCalledWith(2);
+  });
+
+  it('同一意图内不回到失败源且最多换 3 次，手动换源后重新计数', async () => {
+    localStorage.setItem(AUTO_SWITCH_SOURCE_STORAGE_KEY, 'true');
+    const { result, options } = setupHook({
+      availableSources: ['a', 'b', 'c', 'd', 'e'].map((source) =>
+        createSource(source, THREE_EPISODES),
+      ),
+    });
+
+    for (const expected of ['b', 'c', 'd']) {
+      expect(result.current.handleLoadingTimeout()).toBe(true);
+      await waitFor(() =>
+        expect(options.currentSourceRef.current).toBe(expected),
+      );
+    }
+
+    expect(result.current.handleLoadingTimeout()).toBe(false);
+    expect(options.setRealtimeLoadSpeed).toHaveBeenLastCalledWith(
+      '当前源加载超时',
+    );
+
+    await result.current.handleSourceChange('e', 'e-id', '测试剧');
+    expect(options.currentSourceRef.current).toBe('e');
+    expect(options.playbackRequestModeRef.current).toBe('manual-source');
+
+    expect(result.current.handleLoadingTimeout()).toBe(true);
+    await waitFor(() => expect(options.currentSourceRef.current).toBe('a'));
+  });
+
+  it('完整详情缺目标集时跳过该源继续尝试下一个', async () => {
+    localStorage.setItem(AUTO_SWITCH_SOURCE_STORAGE_KEY, 'true');
+    const { result, options } = setupHook({
+      availableSources: [
+        createSource('a', THREE_EPISODES),
+        createSource('b', THREE_EPISODES),
+        createSource('c', THREE_EPISODES),
+      ],
+      fullDetails: { 'b-b-id': createSource('b', ['第1集', '第2集']) },
+    });
+
+    expect(result.current.handlePlaybackRecoveryExhausted('fatal')).toBe(true);
+
+    await waitFor(() => expect(options.currentSourceRef.current).toBe('c'));
+    expect(fetchedDetailUrls()).toEqual([
+      '/api/detail?source=b&id=b-id',
+      '/api/detail?source=c&id=c-id',
+    ]);
+    expect(options.setCurrentSource).not.toHaveBeenCalledWith('b');
+    expect(options.setError).not.toHaveBeenCalledWith('当前源加载失败');
+  });
+
+  it('候选全部缺目标集时报告当前源失败', async () => {
+    localStorage.setItem(AUTO_SWITCH_SOURCE_STORAGE_KEY, 'true');
+    const { result, options } = setupHook({
+      availableSources: [
+        createSource('a', THREE_EPISODES),
+        createSource('b', THREE_EPISODES),
+      ],
+      fullDetails: { 'b-b-id': createSource('b', ['第1集', '第2集']) },
+    });
+
+    expect(result.current.handlePlaybackRecoveryExhausted('fatal')).toBe(true);
+
+    await waitFor(() =>
+      expect(options.setError).toHaveBeenCalledWith('当前源加载失败'),
+    );
+    expect(options.setIsVideoLoading).toHaveBeenLastCalledWith(false);
+    expect(options.playbackRequestModeRef.current).toBe('initial');
+    expect(options.currentSourceRef.current).toBe('a');
+  });
+
+  it('自动换源优先选历史起播稳定的源', async () => {
+    localStorage.setItem(AUTO_SWITCH_SOURCE_STORAGE_KEY, 'true');
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      recordSourcePlaybackSuccess('slow', 1200);
+    }
+    const { result, options } = setupHook({
+      availableSources: [
+        createSource('a', THREE_EPISODES),
+        createSource('fast', THREE_EPISODES),
+        createSource('slow', THREE_EPISODES),
+      ],
+      videoInfo: new Map([
+        ['fast-fast-id', info('2.0 MB/s')],
+        ['slow-slow-id', info('200.0 KB/s')],
+      ]),
+    });
+
+    expect(result.current.handleLoadingTimeout()).toBe(true);
+
+    await waitFor(() =>
+      expect(options.setCurrentSource).toHaveBeenCalledWith('slow'),
+    );
+    expect(fetchedDetailUrls()).toEqual(['/api/detail?source=slow&id=slow-id']);
+  });
+
+  it('手动换到其他站点才计入手动选择，自动换源和同站点切换版本不计入', async () => {
+    localStorage.setItem(AUTO_SWITCH_SOURCE_STORAGE_KEY, 'true');
+    const { result, options } = setupHook({
+      availableSources: [
+        createSource('a', THREE_EPISODES),
+        createSource('b', THREE_EPISODES),
+        createSource('c', THREE_EPISODES),
+        { ...createSource('c', THREE_EPISODES), id: 'c-variant' },
+      ],
+    });
+
+    expect(result.current.handleLoadingTimeout()).toBe(true);
+    await waitFor(() => expect(options.currentSourceRef.current).toBe('b'));
+    expect(readSourcePlaybackStats().has('b')).toBe(false);
+
+    await result.current.handleSourceChange('c', 'c-id', '测试剧');
+    expect(options.currentSourceRef.current).toBe('c');
+    expect(readSourcePlaybackStats().get('c')?.manualSelections).toBe(1);
+
+    await result.current.handleSourceChange('c', 'c-variant', '测试剧');
+    expect(options.currentIdRef.current).toBe('c-variant');
+    expect(readSourcePlaybackStats().get('c')?.manualSelections).toBe(1);
+    expect(readSourcePlaybackStats().has('b')).toBe(false);
+  });
+
+  it('手动换源立即停掉旧源，等待新源详情期间旧源的超时和失败不再换源或改动页面', async () => {
+    localStorage.setItem(AUTO_SWITCH_SOURCE_STORAGE_KEY, 'true');
+    const { video, pause, runtimeCleanup, stopLoad } = createLoadingVideo();
+    const { result, options } = setupHook({
+      availableSources: ['a', 'b', 'c'].map((source) =>
+        createSource(source, THREE_EPISODES),
+      ),
+      video,
+    });
+    const releaseDetail = holdNextDetailFetch();
+
+    const switching = result.current.handleSourceChange('b', 'b-id', '测试剧');
+    expect(runtimeCleanup).toHaveBeenCalledTimes(1);
+    expect(stopLoad).toHaveBeenCalledTimes(1);
+    expect(pause).toHaveBeenCalled();
+
+    expect(result.current.handleLoadingTimeout()).toBe(true);
+    expect(result.current.handlePlaybackRecoveryExhausted('fatal')).toBe(true);
+    result.current.handleEpisodeUrlResolveFailed();
+    expect(fetchedDetailUrls()).toEqual(['/api/detail?source=b&id=b-id']);
+    expect(options.onPlaybackStartFailed).not.toHaveBeenCalled();
+    expect(options.setRealtimeLoadSpeed).not.toHaveBeenCalledWith(
+      '当前源加载超时',
+    );
+    expect(options.setRealtimeLoadSpeed).not.toHaveBeenCalledWith(
+      '播放地址解析失败',
+    );
+    expect(options.setVideoLoadingAttempt).toHaveBeenCalledTimes(1);
+
+    releaseDetail();
+    await switching;
+    expect(options.currentSourceRef.current).toBe('b');
+    // 提交新源重新计时并解除进行中标记，之后的超时按新源处理
+    expect(options.setVideoLoadingAttempt).toHaveBeenCalledTimes(2);
+    expect(result.current.handleLoadingTimeout()).toBe(true);
+    expect(options.onPlaybackStartFailed).toHaveBeenCalledTimes(1);
+    await waitFor(() => expect(options.currentSourceRef.current).toBe('a'));
+  });
+
+  it('手动换源等不到详情时，页面超时中止请求并按详情获取失败继续换源，不会一直停在切换中', async () => {
+    jest.spyOn(console, 'error').mockImplementation(() => undefined);
+    const { video } = createLoadingVideo();
+    const { result, options } = setupHook({
+      availableSources: ['a', 'b'].map((source) =>
+        createSource(source, THREE_EPISODES),
+      ),
+      video,
+    });
+    const detailSignal = hangNextDetailFetch();
+
+    const switching = result.current.handleSourceChange('b', 'b-id', '测试剧');
+    expect(detailSignal()?.aborted).toBe(false);
+
+    expect(result.current.handleLoadingTimeout()).toBe(true);
+    expect(detailSignal()?.aborted).toBe(true);
+    expect(options.onPlaybackStartFailed).not.toHaveBeenCalled();
+
+    await switching;
+    // 退回搜索结果里的详情提交新源，重新计时并解除进行中标记
+    expect(options.currentSourceRef.current).toBe('b');
+    expect(options.setVideoLoadingAttempt).toHaveBeenCalledTimes(2);
+    expect(options.setError).not.toHaveBeenCalledWith(expect.any(String));
+    expect(result.current.handleLoadingTimeout()).toBe(false);
+    expect(options.onPlaybackStartFailed).toHaveBeenCalledTimes(1);
+    expect(options.setRealtimeLoadSpeed).toHaveBeenLastCalledWith(
+      '当前源加载超时',
+    );
+  });
+
+  it('自动换源等不到详情时同样中止请求继续换源，之后的失败照常换下一个候选', async () => {
+    localStorage.setItem(AUTO_SWITCH_SOURCE_STORAGE_KEY, 'true');
+    jest.spyOn(console, 'error').mockImplementation(() => undefined);
+    const { result, options } = setupHook({
+      availableSources: ['a', 'b', 'c'].map((source) =>
+        createSource(source, THREE_EPISODES),
+      ),
+    });
+    const detailSignal = hangNextDetailFetch();
+
+    expect(result.current.handleLoadingTimeout()).toBe(true);
+    expect(fetchedDetailUrls()).toEqual(['/api/detail?source=b&id=b-id']);
+    expect(result.current.handleLoadingTimeout()).toBe(true);
+    expect(detailSignal()?.aborted).toBe(true);
+    await waitFor(() => expect(options.currentSourceRef.current).toBe('b'));
+
+    expect(result.current.handleLoadingTimeout()).toBe(true);
+    await waitFor(() => expect(options.currentSourceRef.current).toBe('c'));
+    expect(fetchedDetailUrls()).toEqual([
+      '/api/detail?source=b&id=b-id',
+      '/api/detail?source=c&id=c-id',
+    ]);
+    expect(options.onPlaybackStartFailed).toHaveBeenCalledTimes(2);
+  });
+
+  it('新的换源开始时中止上一次还在等待的详情请求，结果以新的换源为准', async () => {
+    const consoleError = jest
+      .spyOn(console, 'error')
+      .mockImplementation(() => undefined);
+    const { video } = createLoadingVideo();
+    const { result, options } = setupHook({
+      availableSources: ['a', 'b', 'c'].map((source) =>
+        createSource(source, THREE_EPISODES),
+      ),
+      video,
+    });
+    const firstDetailSignal = hangNextDetailFetch();
+
+    const firstSwitch = result.current.handleSourceChange(
+      'b',
+      'b-id',
+      '测试剧',
+    );
+    await result.current.handleSourceChange('c', 'c-id', '测试剧');
+    expect(firstDetailSignal()?.aborted).toBe(true);
+    await firstSwitch;
+
+    expect(options.currentSourceRef.current).toBe('c');
+    expect(options.setCurrentSource).not.toHaveBeenCalledWith('b');
+    expect(consoleError).not.toHaveBeenCalled();
+    expect(result.current.handleLoadingTimeout()).toBe(false);
+  });
+
+  it('自动换源进行中再次失败不重复发起，已发起的目标不会再被选中', async () => {
+    localStorage.setItem(AUTO_SWITCH_SOURCE_STORAGE_KEY, 'true');
+    const { result, options } = setupHook({
+      availableSources: ['a', 'b', 'c'].map((source) =>
+        createSource(source, THREE_EPISODES),
+      ),
+    });
+    const releaseDetail = holdNextDetailFetch();
+
+    expect(result.current.handleLoadingTimeout()).toBe(true);
+    expect(result.current.handlePlaybackRecoveryExhausted('fatal')).toBe(true);
+    expect(result.current.handleLoadingTimeout()).toBe(true);
+    expect(fetchedDetailUrls()).toEqual(['/api/detail?source=b&id=b-id']);
+    expect(options.onPlaybackStartFailed).toHaveBeenCalledTimes(1);
+
+    releaseDetail();
+    await waitFor(() => expect(options.currentSourceRef.current).toBe('b'));
+
+    expect(result.current.handlePlaybackRecoveryExhausted('fatal')).toBe(true);
+    await waitFor(() => expect(options.currentSourceRef.current).toBe('c'));
+    expect(fetchedDetailUrls()).toEqual([
+      '/api/detail?source=b&id=b-id',
+      '/api/detail?source=c&id=c-id',
+    ]);
+  });
+
+  it('自动换源没能提交就异常结束时，下一次自动换源不再选同一目标', async () => {
+    localStorage.setItem(AUTO_SWITCH_SOURCE_STORAGE_KEY, 'true');
+    const { result, options } = setupHook({
+      availableSources: ['a', 'b', 'c'].map((source) =>
+        createSource(source, THREE_EPISODES),
+      ),
+    });
+    (options.setCurrentSource as jest.Mock).mockImplementationOnce(() => {
+      throw new Error('提交新源失败');
+    });
+
+    expect(result.current.handlePlaybackRecoveryExhausted('fatal')).toBe(true);
+    await waitFor(() =>
+      expect(options.setError).toHaveBeenCalledWith('提交新源失败'),
+    );
+    expect(options.currentSourceRef.current).toBe('a');
+
+    expect(result.current.handlePlaybackRecoveryExhausted('fatal')).toBe(true);
+    await waitFor(() => expect(options.currentSourceRef.current).toBe('c'));
+    expect(fetchedDetailUrls()).toEqual([
+      '/api/detail?source=b&id=b-id',
+      '/api/detail?source=c&id=c-id',
+    ]);
+  });
+
+  it('手动换到缺目标集的源时按原进度重载当前源，重新起播后再提示', async () => {
+    const { video } = createLoadingVideo();
+    const { result, options, player } = setupHook({
+      availableSources: [
+        createSource('a', THREE_EPISODES),
+        createSource('b', THREE_EPISODES),
+      ],
+      fullDetails: { 'b-b-id': createSource('b', ['第1集', '第2集']) },
+      video,
+      playerCurrentTime: 200,
+    });
+
+    await result.current.handleSourceChange('b', 'b-id', '测试剧');
+
+    expect(options.setCurrentSource).not.toHaveBeenCalled();
+    expect(options.resumeTimeRef.current).toBe(200);
+    expect(options.resumeModeRef.current).toBe('forced');
+    expect(options.setPlaybackRetryNonce).toHaveBeenCalledTimes(1);
+    expect(options.setIsVideoLoading).toHaveBeenLastCalledWith(true);
+    expect(options.setSourceSearchError).not.toHaveBeenCalled();
+    expect(player?.notice.show).toBe('');
+
+    result.current.showPendingPlaybackNotice();
+    expect(player?.notice.show).toBe('该源没有第 3 集，已保留当前播放');
+
+    // 提示只显示一次，之后的起播不再重复
+    if (player) player.notice.show = '';
+    result.current.showPendingPlaybackNotice();
+    expect(player?.notice.show).toBe('');
+  });
+});
+
+describe('useSourceSwitch 重新拉起当前源', () => {
+  const originalFetch = global.fetch;
+
+  beforeEach(() => {
+    localStorage.clear();
+  });
+
+  afterEach(() => {
+    global.fetch = originalFetch;
+  });
+
+  it('已起播时按播放器当前进度强制续播，不清进度标记也不动稳定进度', () => {
+    const { video } = createLoadingVideo();
+    const { result, options } = setupHook({
+      availableSources: [createSource('a', THREE_EPISODES)],
+      video,
+      playerCurrentTime: 125,
+    });
+    options.stableCurrentTimeRef.current = 120;
+    options.resumeModeRef.current = 'history';
+
+    result.current.restartCurrentPlayback();
+
+    expect(options.resumeTimeRef.current).toBe(125);
+    expect(options.resumeModeRef.current).toBe('forced');
+    expect(options.clearTargetEpisodeProgressRef.current).toBe(false);
+    expect(options.stableCurrentTimeRef.current).toBe(120);
+    expect(options.setError).toHaveBeenCalledWith(null);
+    expect(options.setIsVideoLoading).toHaveBeenLastCalledWith(true);
+    expect(options.setVideoLoadingAttempt).toHaveBeenCalledTimes(1);
+    expect(options.setPlaybackRetryNonce).toHaveBeenCalledTimes(1);
+  });
+
+  it('播放器已销毁时退回最近的稳定进度', () => {
+    const { result, options } = setupHook({
+      availableSources: [createSource('a', THREE_EPISODES)],
+    });
+    options.stableCurrentTimeRef.current = 80;
+
+    result.current.restartCurrentPlayback();
+
+    expect(options.resumeTimeRef.current).toBe(80);
+    expect(options.resumeModeRef.current).toBe('forced');
+  });
+
+  it('目标集尚未起播时沿用原恢复点，不取上一集留在播放器上的时间', () => {
+    const { video } = createLoadingVideo();
+    const { result, options } = setupHook({
+      availableSources: [createSource('a', THREE_EPISODES)],
+      video,
+      playerCurrentTime: 900,
+    });
+    options.clearTargetEpisodeProgressRef.current = true;
+    options.resumeTimeRef.current = 300;
+    options.resumeModeRef.current = 'forced';
+
+    result.current.restartCurrentPlayback();
+    expect(options.resumeTimeRef.current).toBe(300);
+    expect(options.resumeModeRef.current).toBe('forced');
+    expect(options.clearTargetEpisodeProgressRef.current).toBe(true);
+
+    // 从头播放的目标集重试后仍从头播放
+    options.resumeTimeRef.current = 0;
+    options.resumeModeRef.current = null;
+    result.current.restartCurrentPlayback();
+    expect(options.resumeTimeRef.current).toBe(0);
+    expect(options.resumeModeRef.current).toBeNull();
+    expect(options.setPlaybackRetryNonce).toHaveBeenCalledTimes(2);
+  });
+});

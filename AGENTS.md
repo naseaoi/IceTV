@@ -66,7 +66,7 @@
 
 ## 本地设置
 
-不要在页面或组件里分散读写 `localStorage`，各有 helper：布尔开关 `local-preference-toggles.ts`、其他偏好 `local-preferences.ts`、Bangumi `bangumi-source.ts`、Douban `douban-source.ts`、播放器快捷键 `player-shortcuts.ts`（均在 `src/lib/`）。
+不要在页面或组件里分散读写 `localStorage`，各有 helper：布尔开关 `local-preference-toggles.ts`、其他偏好 `local-preferences.ts`、Bangumi `bangumi-source.ts`、Douban `douban-source.ts`、播放器快捷键 `player-shortcuts.ts`、源播放统计 `source-playback-stats.ts`（均在 `src/lib/`）。
 
 新增设置先补 helper，再让设置面板和消费方接入，不要各自手写 key 和默认值。
 
@@ -87,6 +87,23 @@
 - 编排 `src/features/play/lib/vodHlsRuntime.ts`，自动路由 `vodAutoRoutePolicy.ts`，代理模式 `src/lib/proxy-modes.ts`
 - 画质 `vodHlsQualityController.ts`、`vodQualityPolicy.ts`
 - 快捷键：定义 `src/lib/player-shortcuts.ts` → 执行 `src/hooks/usePlayerKeyboard.ts` → 弹窗 `src/components/PlayerShortcutsModal.tsx`。新增动作依次补齐三处，不要在页面单独监听 keydown
+
+容错与换源：
+
+- 分片首字节超时只来自运行参数 `VodFragmentTimeoutSeconds`（源站下限在 `vodSourcePlaybackPolicy.ts`），自动路由的失败窗口和探测超时由它派生。**不要另设分片超时**，与派生值脱节后失败窗口可能短于相邻两次失败的间隔，计数凑不满阈值，`auto` 静默不切线路
+- HLS 致命错误恢复统一走 `createHlsFatalRecoveryController()`（`src/lib/player-utils.ts`，点播直播共用）。直接 `startLoad()` 会绕过次数上限，坏流无限重试且不触发回落和换源。停止当前源用 `runManagedVideoCleanup()`，只调 `stopLoad()` 会被待执行的恢复重试或代理探测重新拉流
+- 分片加载成功是否算恢复以 `handleFragmentLoaded()` 的返回值为准（同类型分片到达失败位置才算），直连与服务端的线路失败计数也随它清零。恢复拉流会先重下失败位置之前的分片，这些请求常命中浏览器缓存，**任意分片成功就清零会让坏流永远凑不满上限**，不回落也不换源
+- `hls.startLoad()` 会中止在途分片并重新请求，不是幂等的「确保在加载」。起播和 play 只在 `hls.loadingEnabled` 为 false 时补拉，卡顿恢复在有分片在途或缓冲仍在增长时不介入，**否则首片会被中止后整段重下**
+- 自动换源是用户本地开关，站点默认值 `SiteConfig.AutoSwitchSource`（默认关）。触发集中在 `useSourceSwitch.ts`：页面超时、恢复次数耗尽、懒解析失败，前两种先试服务端回落。换集、重试等新播放意图先调 `resetAutoSourceSwitch()`，否则失败记录和次数上限跨集累积，自动换源静默停摆
+- 旧源的迟到回调（超时、错误、起播、统计）先确认运行时仍属于当前加载（`vodHlsRuntime.ts` 的 `getVodRuntimeSourceUrl()` / `pauseIfVodRuntimeReleased()`），换源流程内再看 `sourceSwitchInFlightRef`。漏判时旧源失败会触发回退或换源、覆盖用户刚选的源，旧集进度也会带进新集
+
+分片缓存与起播：
+
+- 每次改写清单都会变的分片参数（签名、切换标记等）必须登记到 `src/lib/segment-cache-key.ts` 的 `VOLATILE_SEGMENT_PARAMS`。SW 分片缓存和页面分片内存缓存都按它归一化缓存键，**漏登记只会静默不命中**
+- 分片内存缓存 `fragmentMemoryCache.ts` 命中时按条目记录的原始首字节与传输耗时回填加载统计，写入方必须记真实下载耗时。**否则 ABR 把内存交付当成超高带宽**，静默升到撑不住的画质
+- 预取清单（换源候选、下一集预载）用 `buildVodProxyUrl()` 带上与播放器相同的线路和源标识。服务端清单缓存按源分区、分片地址随线路改写，任一不一致都静默不命中
+- 源播放统计 `source-playback-stats.ts` 按站点 key（`SearchResult.source`）读写，不是测速和自动换源用的 `{source}-{id}` 组合键，混用会让常用源判定静默落空
+- 首次起播放行（`setLoading(false)`）前须经 `waitForHistoryRestore()`（`usePlayProgress.ts`）等历史恢复定下集数和续播时间，`loading` 期间页面不派生 `videoUrl`。提前放行会先按第 1 集建播放器再换集，白发清单与逐集解析请求
 
 弹幕（`src/features/play/lib/danmaku/`）：
 

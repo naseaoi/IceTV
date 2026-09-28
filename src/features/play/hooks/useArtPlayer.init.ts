@@ -22,6 +22,7 @@ import {
   waitForDanmakuPlayerSwitch,
 } from '@/features/play/lib/danmaku/load-notice';
 import { bindDanmakuSliderDrag } from '@/features/play/lib/danmaku/slider-drag';
+import { scheduleNextEpisodePreload } from '@/features/play/lib/nextEpisodePreload';
 import {
   type PlayerLoadingSessionState,
   hasReachedResumeTarget,
@@ -38,7 +39,12 @@ import {
   resolveResumeTimeTarget,
   shouldForcePlaybackStartFromHead,
 } from '@/features/play/lib/resumePlayback';
-import { createVodM3u8Loader } from '@/features/play/lib/vodHlsRuntime';
+import {
+  createVodM3u8Loader,
+  getVodRuntimeSourceUrl,
+  pauseIfVodRuntimeReleased,
+  registerVodNativeRuntime,
+} from '@/features/play/lib/vodHlsRuntime';
 import {
   buildVodProxyUrl,
   buildVodSegmentProxyUrl,
@@ -127,6 +133,7 @@ export async function initializeArtPlayer(
     onPlaybackStarted,
     onDanmakuEnable,
     onSourceProxyFallbackStarted,
+    onPlaybackRecoveryExhausted,
     onCurrentSourceVideoInfo,
   } = params;
   const {
@@ -185,6 +192,18 @@ export async function initializeArtPlayer(
       }
       preconnectForUrl(nextEpisodeUrl);
     }
+    scheduleNextEpisodePreload({
+      sourceKey: preSourceKey,
+      videoId: playbackInfoContext.id,
+      episodeIndex: currentEpisodeIndex,
+      nextEpisodeUrl,
+      getVideo: () => artPlayerRef.current?.video,
+      detailRef,
+      currentEpisodeIndexRef,
+      autoPlayNextEnabledRef,
+      blockAdEnabledRef,
+      skipConfigRef,
+    });
 
     const { Artplayer, Hls } = await getPlayerModules();
     if (isCancelled() || !artRef.current) {
@@ -275,6 +294,7 @@ export async function initializeArtPlayer(
       setIsVideoLoading,
       setRealtimeLoadSpeed,
       onSourceProxyFallbackStarted,
+      onPlaybackRecoveryExhausted,
       onCurrentSourceVideoInfo,
     });
 
@@ -365,6 +385,8 @@ export async function initializeArtPlayer(
       getManagedVideo(
         player.video as HTMLVideoElement,
       ).__icetvUsingServerProxy = nativeUseServerProxy;
+      // 必须在创建后同步登记：未登记的播放器按已释放处理，起播和出错回退都不会再响应
+      registerVodNativeRuntime(player.video as HTMLVideoElement, videoUrl);
     }
 
     const switchNativeToServerProxy = (reason: string) => {
@@ -473,7 +495,7 @@ export async function initializeArtPlayer(
 
     const showSourceSwitchSuccessNotice = () => {
       const mode = playbackRequestModeRef.current;
-      if (mode !== 'manual-source') {
+      if (mode !== 'manual-source' && mode !== 'auto-source') {
         return;
       }
 
@@ -487,7 +509,7 @@ export async function initializeArtPlayer(
         stableCurrentTimeRef.current || 0,
       );
       const progressText = playTime > 1 ? '已保留进度' : '从头播放';
-      const prefix = '已切换到';
+      const prefix = mode === 'auto-source' ? '已自动切换到' : '已切换到';
       const notice = `${prefix} ${sourceName} · ${progressText}`;
 
       window.setTimeout(() => {
@@ -525,7 +547,9 @@ export async function initializeArtPlayer(
     const isStalePlayerSession = () =>
       artPlayerRef.current !== player ||
       (sessionEpisodeIndexRef.current !== null &&
-        sessionEpisodeIndexRef.current !== currentEpisodeIndexRef.current);
+        sessionEpisodeIndexRef.current !== currentEpisodeIndexRef.current) ||
+      // 换源开始或逐集解析停旧集时运行时已释放，视频上仍是被放弃的旧地址，它的就绪和起播不能当作本次加载完成
+      getVodRuntimeSourceUrl(player.video as HTMLVideoElement) === null;
 
     const finishInitialLoading = () => {
       if (isStalePlayerSession()) {
@@ -545,6 +569,11 @@ export async function initializeArtPlayer(
     };
 
     let initialPlaybackRequestInFlight = false;
+    // hls 仍在加载时再 startLoad 会中止在途分片并从头重下，只在加载被停掉时补拉
+    const resumeHlsLoadingIfStopped = (video: HTMLVideoElement) => {
+      const hls = getManagedVideo(video).hls;
+      if (hls && !hls.loadingEnabled) hls.startLoad();
+    };
     const requestInitialPlayback = (
       video: HTMLVideoElement | null | undefined,
     ) => {
@@ -553,7 +582,7 @@ export async function initializeArtPlayer(
       }
 
       initialPlaybackRequestInFlight = true;
-      getManagedVideo(video).hls?.startLoad?.();
+      resumeHlsLoadingIfStopped(video);
       void video
         .play()
         .then(() => {
@@ -737,7 +766,9 @@ export async function initializeArtPlayer(
     player.on('play', () => {
       const activeVideo = player.video as HTMLVideoElement | undefined;
       if (activeVideo) {
-        getManagedVideo(activeVideo).hls?.startLoad?.();
+        // 运行时已释放时拉流会重新加载被放弃的旧地址，保持暂停等新地址接管
+        if (pauseIfVodRuntimeReleased(activeVideo)) return;
+        resumeHlsLoadingIfStopped(activeVideo);
       }
       void requestWakeLock();
       setIsPlaying(true);
@@ -892,6 +923,11 @@ export async function initializeArtPlayer(
 
     player.on('error', (error: Error) => {
       console.error('播放器错误:', error);
+      const activeVideo = player.video as HTMLVideoElement | undefined;
+      // 运行时已释放时出错的是被放弃的旧地址，Artplayer 重连会把它重新挂上：保持暂停，不上报也不切线路
+      if (activeVideo && pauseIfVodRuntimeReleased(activeVideo)) {
+        return;
+      }
       if (player.currentTime > 0) {
         return;
       }
@@ -903,7 +939,6 @@ export async function initializeArtPlayer(
       ) {
         return;
       }
-      const activeVideo = player.video as HTMLVideoElement | undefined;
       const activeManagedVideo = activeVideo
         ? getManagedVideo(activeVideo)
         : null;
