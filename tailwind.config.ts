@@ -17,6 +17,11 @@ const config: Config = {
   theme: {
     screens: {
       xs: '480px',
+      // 播放页左右分栏：竖屏平板宽度不足以并排播放器与面板，改为上下排列。
+      // 排在默认断点前，使 xl: 等宽度断点能覆盖它
+      split: {
+        raw: '(min-width: 768px) and (orientation: landscape), (min-width: 1280px)',
+      },
       ...defaultTheme.screens,
     },
     extend: {

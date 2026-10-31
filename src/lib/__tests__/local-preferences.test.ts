@@ -32,6 +32,7 @@ import {
   resetFluidSearch,
   resetLiveDirectConnect,
   SEEN_ANNOUNCEMENT_STORAGE_KEY,
+  SIDEBAR_AUTO_COLLAPSE_BELOW_WIDTH,
   SIDEBAR_COLLAPSED_STORAGE_KEY,
   SOURCE_PREFERRED_QUALITY_STORAGE_PREFIX,
   writeAdminTableColumnWidth,
@@ -192,7 +193,30 @@ describe('local preferences', () => {
     expect(readAutoPlayNextEnabled()).toBe(false);
   });
 
+  it('defaults sidebar collapsed by viewport width without a stored preference', () => {
+    const originalWidth = window.innerWidth;
+    try {
+      Object.defineProperty(window, 'innerWidth', {
+        configurable: true,
+        value: SIDEBAR_AUTO_COLLAPSE_BELOW_WIDTH - 1,
+      });
+      expect(readSidebarCollapsed()).toBe(true);
+
+      Object.defineProperty(window, 'innerWidth', {
+        configurable: true,
+        value: SIDEBAR_AUTO_COLLAPSE_BELOW_WIDTH,
+      });
+      expect(readSidebarCollapsed()).toBe(false);
+    } finally {
+      Object.defineProperty(window, 'innerWidth', {
+        configurable: true,
+        value: originalWidth,
+      });
+    }
+  });
+
   it('stores sidebar collapsed preference through the shared helper', () => {
+    writeSidebarCollapsed(false);
     expect(readSidebarCollapsed()).toBe(false);
 
     writeSidebarCollapsed(true);

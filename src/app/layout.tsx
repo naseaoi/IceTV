@@ -8,6 +8,7 @@ import { AuthProvider } from '@/components/AuthProvider';
 import { getServerAuthSession } from '@/lib/auth-session.server';
 import { getPublicConfig } from '@/lib/config';
 import {
+  SIDEBAR_AUTO_COLLAPSE_BELOW_WIDTH,
   SIDEBAR_COLLAPSED_STORAGE_KEY,
   THEME_STORAGE_KEY,
 } from '@/lib/local-preferences';
@@ -141,8 +142,9 @@ export default async function RootLayout({
             __html: `(() => {
   try {
     const saved = localStorage.getItem(${serializedSidebarCollapsedStorageKey});
-    if (saved === null) return;
-    const collapsed = JSON.parse(saved) === true;
+    const collapsed = saved === null
+      ? window.innerWidth < ${SIDEBAR_AUTO_COLLAPSE_BELOW_WIDTH}
+      : JSON.parse(saved) === true;
     window.__sidebarCollapsed = collapsed;
     if (collapsed) {
       document.documentElement.dataset.sidebarCollapsed = 'true';
