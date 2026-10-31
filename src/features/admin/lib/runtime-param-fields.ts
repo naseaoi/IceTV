@@ -47,7 +47,12 @@ export const COMMON_RUNTIME_PARAM_GROUPS: RuntimeParamGroup[] = [
     id: 'playback',
     title: '播放与记录',
     fields: [
-      { key: 'VodPageTimeoutSeconds', label: '点播页等待超时', unit: '秒' },
+      {
+        key: 'VodPageTimeoutSeconds',
+        label: '点播起播无进展超时',
+        unit: '秒',
+        hint: '从媒体开始加载计时，清单成功或分片下载进展会续期；实际窗口取此值、源站下限与分片首字节超时的最大值，总等待上限为窗口的 4 倍。',
+      },
       {
         key: 'VodFragmentTimeoutSeconds',
         label: '分片请求超时',

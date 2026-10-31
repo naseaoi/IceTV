@@ -1,6 +1,11 @@
+import { act, renderHook } from '@testing-library/react';
+
 import type { UseArtPlayerParams } from '@/features/play/hooks/artPlayerTypes';
+import { useArtPlayer } from '@/features/play/hooks/useArtPlayer';
 import { initializeArtPlayer } from '@/features/play/hooks/useArtPlayer.init';
+import { reloadDanmaku } from '@/features/play/lib/danmaku/attach';
 import { getManagedVideo, runManagedVideoCleanup } from '@/lib/player-runtime';
+import { resolveSourcePlaybackRoute } from '@/lib/proxy-modes';
 import type { SearchResult } from '@/lib/types';
 
 type Listener = (...args: unknown[]) => void;
@@ -83,6 +88,11 @@ class MockArtplayer {
   fullscreenWeb = false;
   destroy = jest.fn();
   pause = jest.fn();
+  switchUrl = jest.fn((url: string) => {
+    this.url = url;
+    this.option.customType.m3u8(this.video, url);
+    return Promise.resolve();
+  });
   private readonly listeners = new Map<string, Listener[]>();
 
   constructor(public option: MockArtplayerOption) {
@@ -134,6 +144,7 @@ jest.mock('@/features/play/lib/danmaku/attach', () => ({
 jest.mock('@/features/play/lib/danmaku/load-notice', () => ({
   beginDanmakuLoadNotice: jest.fn(() => jest.fn()),
   waitForDanmakuPlayerSwitch: jest.fn(),
+  setDanmakuLoadNoticeVisibility: jest.fn(),
 }));
 
 jest.mock('@/features/play/lib/danmaku/slider-drag', () => ({
@@ -149,6 +160,7 @@ jest.mock('@/lib/proxy-modes', () => ({
   isServerProxy: () => false,
   rememberSourceServerProxy: jest.fn(),
   shouldAutoFallbackToServer: () => false,
+  resolveSourcePlaybackRoute: jest.fn(),
 }));
 
 jest.mock('@/lib/source-route-stats.client', () => ({
@@ -232,6 +244,7 @@ async function setupPlayer() {
     autoAdvancedRef: { current: false },
     playerMediaKindRef: { current: null },
     sessionEpisodeIndexRef: { current: null },
+    playbackRouteRef: { current: null },
     isCancelled: () => false,
   });
   expect(params.setError).not.toHaveBeenCalledWith('播放器初始化失败');
@@ -267,6 +280,11 @@ describe('initializeArtPlayer 拉流控制', () => {
   beforeEach(() => {
     jest.useFakeTimers();
     MockArtplayer.instances = [];
+    jest.mocked(resolveSourcePlaybackRoute).mockReset().mockResolvedValue({
+      useServerProxy: false,
+      allowAutoFallback: false,
+    });
+    jest.mocked(reloadDanmaku).mockClear();
     jest.spyOn(console, 'error').mockImplementation(() => undefined);
     jest.spyOn(console, 'debug').mockImplementation(() => undefined);
     jest.spyOn(console, 'warn').mockImplementation(() => undefined);
@@ -276,6 +294,184 @@ describe('initializeArtPlayer 拉流控制', () => {
     createdVideos.splice(0).forEach((video) => runManagedVideoCleanup(video));
     jest.restoreAllMocks();
     jest.useRealTimers();
+  });
+
+  describe('routing and detail refresh', () => {
+    async function mountHook(params = createParams()) {
+      const hook = renderHook((value) => useArtPlayer(value), {
+        initialProps: params,
+      });
+      await act(flushMicrotasks);
+      const player = MockArtplayer.instances[0];
+      if (player) {
+        createdVideos.push(player.video);
+        player.video.pause = jest.fn();
+        player.option.customType.m3u8(player.video, player.url);
+      }
+      return { ...hook, params, player };
+    }
+
+    it('waits for the route and uses the same snapshot for HLS', async () => {
+      let resolve!: (route: {
+        useServerProxy: boolean;
+        allowAutoFallback: boolean;
+      }) => void;
+      jest.mocked(resolveSourcePlaybackRoute).mockReturnValueOnce(
+        new Promise((done) => {
+          resolve = done;
+        }),
+      );
+      const params = createParams();
+      const hook = renderHook(() => useArtPlayer(params));
+      await act(flushMicrotasks);
+      expect(MockArtplayer.instances).toHaveLength(0);
+      await act(async () => {
+        resolve({ useServerProxy: true, allowAutoFallback: false });
+        await flushMicrotasks();
+      });
+      const player = MockArtplayer.instances[0];
+      createdVideos.push(player.video);
+      player.option.customType.m3u8(player.video, player.url);
+      expect(getManagedVideo(player.video).__icetvUsingServerProxy).toBe(true);
+      hook.unmount();
+    });
+
+    it('discards initialization when the route arrives after unmount', async () => {
+      let resolve!: (route: {
+        useServerProxy: boolean;
+        allowAutoFallback: boolean;
+      }) => void;
+      jest.mocked(resolveSourcePlaybackRoute).mockReturnValueOnce(
+        new Promise((done) => {
+          resolve = done;
+        }),
+      );
+      const hook = renderHook(() => useArtPlayer(createParams()));
+      hook.unmount();
+      await act(async () => {
+        resolve({ useServerProxy: true, allowAutoFallback: false });
+        await flushMicrotasks();
+      });
+      expect(MockArtplayer.instances).toHaveLength(0);
+    });
+
+    it('keeps automatic fallback enabled for the lifetime of the HLS load', async () => {
+      jest.mocked(resolveSourcePlaybackRoute).mockResolvedValueOnce({
+        useServerProxy: false,
+        allowAutoFallback: true,
+      });
+      const { player } = await mountHook();
+      const managed = getManagedVideo(player.video);
+      expect(managed.__icetvSwitchToServerProxy?.('timeout')).toBe(true);
+      expect(managed.__icetvUsingServerProxy).toBe(true);
+    });
+
+    it('discards an old route response after switching episodes', async () => {
+      let resolve!: (route: {
+        useServerProxy: boolean;
+        allowAutoFallback: boolean;
+      }) => void;
+      jest.mocked(resolveSourcePlaybackRoute).mockReturnValueOnce(
+        new Promise((done) => {
+          resolve = done;
+        }),
+      );
+      const params = createParams();
+      const hook = renderHook((value) => useArtPlayer(value), {
+        initialProps: params,
+      });
+      params.currentEpisodeIndexRef.current = 1;
+      hook.rerender({ ...params, videoUrl: EPISODE_2, currentEpisodeIndex: 1 });
+      await act(flushMicrotasks);
+      await act(async () => {
+        resolve({ useServerProxy: true, allowAutoFallback: false });
+        await flushMicrotasks();
+      });
+      expect(MockArtplayer.instances).toHaveLength(1);
+      expect(MockArtplayer.instances[0].url).toBe(EPISODE_2);
+    });
+
+    it('keeps in-flight HLS on metadata refresh and consumes latest callbacks', async () => {
+      const { params, player, rerender } = await mountHook();
+      const hls = getManagedVideo(player.video).hls as unknown as MockHls;
+      const started = jest.fn();
+      const fresh = {
+        ...DETAIL,
+        title: 'Updated title',
+        episodes: [...DETAIL.episodes, 'https://cdn.example/ep3.m3u8'],
+      };
+      params.detailRef.current = fresh;
+      rerender({
+        ...params,
+        detail: fresh,
+        totalEpisodes: 3,
+        onPlaybackStarted: started,
+      });
+      await act(flushMicrotasks);
+      expect(resolveSourcePlaybackRoute).toHaveBeenCalledTimes(1);
+      expect(player.switchUrl).not.toHaveBeenCalled();
+      expect(hls.stopLoad).not.toHaveBeenCalled();
+      expect(player.title).toContain('Updated title');
+      expect(reloadDanmaku).not.toHaveBeenCalled();
+      player.emit('video:playing');
+      expect(started).toHaveBeenCalledTimes(1);
+    });
+
+    it('updates remapped episode identity without restarting the same URL', async () => {
+      const { params, player, rerender } = await mountHook();
+      const fresh = { ...DETAIL, episodes: [EPISODE_2, ...DETAIL.episodes] };
+      params.detailRef.current = fresh;
+      params.currentEpisodeIndexRef.current = 1;
+      rerender({
+        ...params,
+        detail: fresh,
+        currentEpisodeIndex: 1,
+        totalEpisodes: 3,
+      });
+      await act(flushMicrotasks);
+      expect(resolveSourcePlaybackRoute).toHaveBeenCalledTimes(1);
+      expect(player.switchUrl).not.toHaveBeenCalled();
+      expect(reloadDanmaku).toHaveBeenCalledWith(
+        player,
+        expect.objectContaining({ episodeIndex: 1 }),
+        params.danmakuEnabledRef,
+      );
+    });
+
+    it('reuses HLS and reloads danmaku when the actual episode URL changes', async () => {
+      const { params, player, rerender } = await mountHook();
+      params.currentEpisodeIndexRef.current = 1;
+      rerender({ ...params, videoUrl: EPISODE_2, currentEpisodeIndex: 1 });
+      await act(flushMicrotasks);
+      expect(MockArtplayer.instances).toHaveLength(1);
+      expect(player.switchUrl).toHaveBeenCalledWith(EPISODE_2);
+      expect(reloadDanmaku).toHaveBeenCalledWith(
+        player,
+        expect.objectContaining({ episodeIndex: 1 }),
+        params.danmakuEnabledRef,
+      );
+    });
+
+    it.each(['source', 'id', 'retry', 'ad'] as const)(
+      'reinitializes when %s changes',
+      async (field) => {
+        const { params, rerender } = await mountHook();
+        const updated = { ...params };
+        if (field === 'source' || field === 'id') {
+          updated.detail = { ...DETAIL, [field]: 'changed' };
+          updated.detailRef.current = updated.detail;
+        } else if (field === 'retry') {
+          updated.playbackRetryNonce = 1;
+        } else {
+          updated.blockAdEnabled = true;
+        }
+        rerender(updated);
+        await act(flushMicrotasks);
+        expect(resolveSourcePlaybackRoute).toHaveBeenCalledTimes(2);
+        expect(params.cleanupPlayer).toHaveBeenCalledTimes(1);
+        expect(MockArtplayer.instances).toHaveLength(2);
+      },
+    );
   });
 
   describe('play 事件', () => {

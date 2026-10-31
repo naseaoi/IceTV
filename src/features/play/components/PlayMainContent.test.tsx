@@ -5,7 +5,36 @@ import {
   buildLoadingTimeoutMessage,
   PlayMainContent,
 } from '@/features/play/components/PlayMainContent';
+import {
+  beginVodStartupProgress,
+  clearVodStartupProgress,
+  getVodStartupProgress,
+} from '@/features/play/lib/playerLoading';
 import type { SearchResult } from '@/lib/types';
+
+jest.mock('@/components/PlayerPageLayout', () => ({
+  PlayerPageLayout: ({
+    artRef,
+    playerOverlay,
+    rightPanel,
+  }: {
+    artRef: RefObject<HTMLDivElement | null>;
+    playerOverlay: ReactNode;
+    rightPanel: ReactNode;
+  }) => (
+    <>
+      <div ref={artRef}>
+        <video />
+      </div>
+      {playerOverlay}
+      {rightPanel}
+    </>
+  ),
+}));
+
+function startMedia(sourceKey = '') {
+  return beginVodStartupProgress(document.querySelector('video')!, sourceKey);
+}
 
 const PLAYER_LOADING_TIMEOUT_MS = 15_000;
 
@@ -135,7 +164,7 @@ describe('PlayMainContent', () => {
 
   it('uses the configured timeout seconds in loading timeout copy', () => {
     expect(buildLoadingTimeoutMessage(20)).toBe(
-      '已等待超过 20 秒，源站响应超时',
+      '媒体加载已连续 20 秒无进展，源站响应超时',
     );
   });
 
@@ -159,6 +188,7 @@ describe('PlayMainContent', () => {
 
     const { rerender } = render(<PlayMainContent {...baseProps} />);
 
+    startMedia();
     act(() => {
       jest.advanceTimersByTime(PLAYER_LOADING_TIMEOUT_MS);
     });
@@ -188,6 +218,7 @@ describe('PlayMainContent', () => {
       />,
     );
 
+    startMedia();
     act(() => {
       jest.advanceTimersByTime(PLAYER_LOADING_TIMEOUT_MS);
     });
@@ -200,7 +231,7 @@ describe('PlayMainContent', () => {
 
     expect(screen.getByText('切换剧集超时')).toBeInTheDocument();
     expect(
-      screen.getByText('已等待超过 35 秒，源站响应超时'),
+      screen.getByText('媒体加载已连续 35 秒无进展，源站响应超时'),
     ).toBeInTheDocument();
   });
 
@@ -282,6 +313,7 @@ describe('PlayMainContent', () => {
       />,
     );
 
+    startMedia();
     act(() => {
       jest.advanceTimersByTime(PLAYER_LOADING_TIMEOUT_MS);
     });
@@ -289,6 +321,116 @@ describe('PlayMainContent', () => {
     expect(onLoadingTimeout).toHaveBeenCalledTimes(1);
     expect(screen.queryByText('加载视频超时')).not.toBeInTheDocument();
     expect(screen.getByText('正在加载视频')).toBeInTheDocument();
+  });
+
+  it('没有媒体运行时进度时按总上限兜底超时', () => {
+    const onLoadingTimeout = jest.fn(() => false);
+    render(
+      <PlayMainContent
+        {...createBaseProps()}
+        isVideoLoading
+        onLoadingTimeout={onLoadingTimeout}
+      />,
+    );
+    act(() => {
+      jest.advanceTimersByTime(59_000);
+    });
+    expect(onLoadingTimeout).not.toHaveBeenCalled();
+    act(() => {
+      jest.advanceTimersByTime(1_000);
+    });
+    expect(onLoadingTimeout).toHaveBeenCalledTimes(1);
+    expect(
+      screen.getByText('媒体加载已达 60 秒，仍未能起播'),
+    ).toBeInTheDocument();
+  });
+
+  it('等待详情和模块期间只受总上限约束，媒体进展续期且受总上限约束', () => {
+    const onLoadingTimeout = jest.fn(() => false);
+    render(
+      <PlayMainContent
+        {...createBaseProps()}
+        isVideoLoading
+        onLoadingTimeout={onLoadingTimeout}
+      />,
+    );
+    act(() => {
+      jest.advanceTimersByTime(50_000);
+    });
+    expect(onLoadingTimeout).not.toHaveBeenCalled();
+    const progress = startMedia('source-a');
+    for (let i = 0; i < 5; i += 1) {
+      act(() => {
+        jest.advanceTimersByTime(10_000);
+      });
+      progress.lastProgressAt = performance.now();
+    }
+    expect(onLoadingTimeout).not.toHaveBeenCalled();
+    act(() => {
+      jest.advanceTimersByTime(10_000);
+    });
+    expect(onLoadingTimeout).toHaveBeenCalledTimes(1);
+    expect(
+      screen.getByText('媒体加载已达 60 秒，仍未能起播'),
+    ).toBeInTheDocument();
+  });
+
+  it('运行时释放后旧进度不触发超时，回落后的新运行时独立计时', () => {
+    const onLoadingTimeout = jest.fn(() => true);
+    render(
+      <PlayMainContent
+        {...createBaseProps()}
+        isVideoLoading
+        onLoadingTimeout={onLoadingTimeout}
+      />,
+    );
+    startMedia('source-a');
+    act(() => {
+      jest.advanceTimersByTime(10_000);
+    });
+    clearVodStartupProgress(document.querySelector('video')!);
+    act(() => {
+      jest.advanceTimersByTime(30_000);
+    });
+    expect(onLoadingTimeout).not.toHaveBeenCalled();
+    startMedia('source-a');
+    act(() => {
+      jest.advanceTimersByTime(15_000);
+    });
+    expect(onLoadingTimeout).toHaveBeenCalledTimes(1);
+    const progress = getVodStartupProgress(document.querySelector('video')!);
+    startMedia('source-a');
+    expect(getVodStartupProgress(document.querySelector('video')!)).not.toBe(
+      progress,
+    );
+    act(() => {
+      jest.advanceTimersByTime(15_000);
+    });
+    expect(onLoadingTimeout).toHaveBeenCalledTimes(2);
+  });
+
+  it('无进展窗口从最后一次真实进展计算', () => {
+    const onLoadingTimeout = jest.fn(() => false);
+    render(
+      <PlayMainContent
+        {...createBaseProps()}
+        isVideoLoading
+        onLoadingTimeout={onLoadingTimeout}
+      />,
+    );
+    const progress = startMedia();
+    act(() => {
+      jest.advanceTimersByTime(10_000);
+    });
+    progress.lastProgressAt = performance.now();
+    act(() => {
+      jest.advanceTimersByTime(14_750);
+    });
+    expect(onLoadingTimeout).not.toHaveBeenCalled();
+    act(() => {
+      jest.advanceTimersByTime(250);
+    });
+    expect(onLoadingTimeout).toHaveBeenCalledTimes(1);
   });
 
   it('加载超时层支持继续尝试', () => {
@@ -305,6 +447,7 @@ describe('PlayMainContent', () => {
       />,
     );
 
+    startMedia();
     act(() => {
       jest.advanceTimersByTime(PLAYER_LOADING_TIMEOUT_MS);
     });

@@ -6,6 +6,7 @@ import {
   resolveVodSegmentPrebufferPolicy,
   resolveVodSegmentProxyTimeoutMs,
   resolveVodSourceFragmentTimeoutMs,
+  resolveVodStartupTimeouts,
 } from '@/features/play/lib/vodSourcePlaybackPolicy';
 
 describe('VOD source playback policy', () => {
@@ -49,6 +50,21 @@ describe('VOD source playback policy', () => {
     expect(resolveVodM3U8ProxyTimeoutMs('other', 15_000)).toBe(15_000);
     expect(resolveVodPlayerLoadingTimeoutSeconds('xigua', 15)).toBe(35);
     expect(resolveVodPlayerLoadingTimeoutSeconds('other', 15)).toBe(15);
+  });
+
+  it('无进展窗口遵守源站和分片超时下限，总上限为四倍窗口', () => {
+    expect(resolveVodStartupTimeouts('other', 15, 10)).toEqual({
+      idleMs: 15_000,
+      totalMs: 60_000,
+    });
+    expect(resolveVodStartupTimeouts('other', 15, 45)).toEqual({
+      idleMs: 45_000,
+      totalMs: 180_000,
+    });
+    expect(resolveVodStartupTimeouts('xigua', 15, 10)).toEqual({
+      idleMs: 35_000,
+      totalMs: 140_000,
+    });
   });
 
   it('keeps xigua fragment requests on a 30 second first byte floor', () => {

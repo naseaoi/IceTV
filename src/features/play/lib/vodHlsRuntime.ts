@@ -13,8 +13,15 @@ import {
   PLAYBACK_STALL_CONFIRMATION_DELAY_MS,
   resolvePlaybackStallDecision,
 } from '@/features/play/lib/playbackStallRecovery';
-import type { PlayerLoadingSessionState } from '@/features/play/lib/playerLoading';
-import type { ResumeMode } from '@/features/play/lib/resumePlayback';
+import {
+  type PlayerLoadingSessionState,
+  beginVodStartupProgress,
+  clearVodStartupProgress,
+} from '@/features/play/lib/playerLoading';
+import {
+  type ResumeMode,
+  resolvePendingResumeTime,
+} from '@/features/play/lib/resumePlayback';
 import {
   AUTO_ROUTE_PROXY_COOLDOWN_MS,
   BROWSER_ROUTE_FAILURE_THRESHOLD,
@@ -57,6 +64,7 @@ import {
   formatBytesPerSecond,
 } from '@/lib/player-utils';
 import {
+  type SourcePlaybackRoute,
   clearSourceProxyOverride,
   isServerProxy,
   rememberSourceServerProxy,
@@ -77,9 +85,11 @@ type CreateVodM3u8LoaderOptions = {
   blockAdEnabledRef: MutableRefObject<boolean>;
   detailRef: MutableRefObject<SearchResult | null>;
   playbackInfoContext: CurrentSourceVideoInfoContext;
+  playbackRouteRef?: MutableRefObject<SourcePlaybackRoute | null>;
   playbackRequestModeRef: MutableRefObject<PlaybackRequestMode>;
   resumeTimeRef: MutableRefObject<number | null>;
   resumeModeRef: MutableRefObject<ResumeMode>;
+  allowAutoResumeRef: MutableRefObject<boolean>;
   stableCurrentTimeRef: MutableRefObject<number>;
   loadingSessionRef: MutableRefObject<PlayerLoadingSessionState>;
   setError: Dispatch<SetStateAction<string | null>>;
@@ -123,8 +133,33 @@ export function getVodRuntimeSourceUrl(video: HTMLVideoElement): string | null {
 // 原生播放没有 hls 运行时，同样登记本次加载的地址并挂上释放入口，换源和逐集解析停旧集时随之释放
 export function registerVodNativeRuntime(video: HTMLVideoElement, url: string) {
   vodRuntimeSourceUrls.set(video, url);
+  let progress = beginVodStartupProgress(video, '');
+  let bufferedEnd = 0;
+  const onLoadStart = () => {
+    bufferedEnd = 0;
+    progress = beginVodStartupProgress(video, '');
+  };
+  const onProgress = () => {
+    const end = video.buffered.length
+      ? video.buffered.end(video.buffered.length - 1)
+      : 0;
+    if (end > bufferedEnd) {
+      bufferedEnd = end;
+      progress.lastProgressAt = performance.now();
+    }
+  };
+  const onLoadedMetadata = () => {
+    progress.lastProgressAt = performance.now();
+  };
+  video.addEventListener('loadstart', onLoadStart);
+  video.addEventListener('progress', onProgress);
+  video.addEventListener('loadedmetadata', onLoadedMetadata);
   assignManagedVideoCleanup(video, () => {
     vodRuntimeSourceUrls.delete(video);
+    clearVodStartupProgress(video);
+    video.removeEventListener('loadstart', onLoadStart);
+    video.removeEventListener('progress', onProgress);
+    video.removeEventListener('loadedmetadata', onLoadedMetadata);
   });
 }
 
@@ -142,9 +177,11 @@ export function createVodM3u8Loader({
   blockAdEnabledRef,
   detailRef,
   playbackInfoContext,
+  playbackRouteRef,
   playbackRequestModeRef,
   resumeTimeRef,
   resumeModeRef,
+  allowAutoResumeRef,
   stableCurrentTimeRef,
   loadingSessionRef,
   setError,
@@ -250,6 +287,39 @@ export function createVodM3u8Loader({
     managedVideo.__icetvClientAdFilter = useClientAdFilter;
     managedVideo.__icetvFragmentHttpCacheRecovery = fragmentHttpCacheRecovery;
 
+    const beginMediaLoad = () => {
+      const resumeTarget =
+        loadingSessionRef.current.pendingInitialResumeTarget ??
+        resolvePendingResumeTime({
+          resumeTime: resumeTimeRef.current,
+          resumeMode: resumeModeRef.current,
+          allowAutoResume: allowAutoResumeRef.current,
+        });
+      // 每次 loadSource（含实例复用和线路回落）都显式设置，避免带入上一集的位置。
+      hls.config.startPosition = resumeTarget ?? 0;
+      const observedBytes = new WeakMap<object, number>();
+      const progress = beginVodStartupProgress(video, sourceKey, () => {
+        if (videoRuntimeCleaned || managedVideo.hls !== hls) return;
+        for (const entry of Object.values<{
+          frag?: { stats?: { loaded?: number } };
+          part?: { stats?: { loaded?: number } };
+        }>(hls.inFlightFragments ?? {})) {
+          const stats = entry?.part?.stats ?? entry?.frag?.stats;
+          if (!stats) continue;
+          const loaded = stats.loaded ?? 0;
+          if (loaded > (observedBytes.get(stats) ?? 0)) {
+            observedBytes.set(stats, loaded);
+            progress.lastProgressAt = performance.now();
+          }
+        }
+      });
+      return progress;
+    };
+    let startupProgress: ReturnType<typeof beginMediaLoad> | null = null;
+    const markStartupProgress = () => {
+      if (startupProgress) startupProgress.lastProgressAt = performance.now();
+    };
+
     const buildTargetUrl = (rawUrl: string, useServerProxy: boolean) =>
       buildVodProxyUrl({
         rawUrl,
@@ -258,7 +328,11 @@ export function createVodM3u8Loader({
         playbackRequestMode: playbackRequestModeRef.current || 'initial',
       });
 
-    let currentUseServerProxy = isServerProxy(sourceKey, url);
+    const playbackRoute = playbackRouteRef?.current;
+    const allowAutoFallback =
+      playbackRoute?.allowAutoFallback ?? shouldAutoFallbackToServer(sourceKey);
+    let currentUseServerProxy =
+      playbackRoute?.useServerProxy ?? isServerProxy(sourceKey, url);
     let targetUrl = buildTargetUrl(url, currentUseServerProxy);
     managedVideo.__icetvUsingServerProxy = currentUseServerProxy;
     const segmentPrebufferController = createVodSegmentPrebufferController({
@@ -384,7 +458,7 @@ export function createVodM3u8Loader({
         managedVideo.hls !== hls ||
         currentUseServerProxy ||
         !sourceKey ||
-        !shouldAutoFallbackToServer(sourceKey)
+        !allowAutoFallback
       ) {
         return false;
       }
@@ -421,6 +495,7 @@ export function createVodM3u8Loader({
           markManagedVideoExpectedAbort(video);
           hls.stopLoad();
         }
+        startupProgress = beginMediaLoad();
         hls.loadSource(fallbackTargetUrl);
         ensureVideoSource(video, fallbackTargetUrl);
         return true;
@@ -436,7 +511,7 @@ export function createVodM3u8Loader({
         managedVideo.hls !== hls ||
         !currentUseServerProxy ||
         !sourceKey ||
-        !shouldAutoFallbackToServer(sourceKey)
+        !allowAutoFallback
       ) {
         return false;
       }
@@ -467,6 +542,7 @@ export function createVodM3u8Loader({
         markManagedVideoExpectedAbort(video);
         hls.stopLoad();
       }
+      startupProgress = beginMediaLoad();
       hls.loadSource(directTargetUrl);
       ensureVideoSource(video, directTargetUrl);
       return true;
@@ -481,7 +557,7 @@ export function createVodM3u8Loader({
         managedVideo.hls !== hls ||
         currentUseServerProxy ||
         !sourceKey ||
-        !shouldAutoFallbackToServer(sourceKey) ||
+        !allowAutoFallback ||
         Date.now() < proxyRetryBlockedUntil
       ) {
         return false;
@@ -689,6 +765,7 @@ export function createVodM3u8Loader({
       cancelProxyProbe();
       managedVideo.__icetvSwitchToServerProxy = null;
       vodRuntimeSourceUrls.delete(video);
+      clearVodStartupProgress(video);
       qualityController.dispose();
       segmentPrebufferController.dispose();
       recoveryController.dispose();
@@ -835,6 +912,7 @@ export function createVodM3u8Loader({
     };
 
     const onHlsFragLoaded = function (_: unknown, data: any) {
+      markStartupProgress();
       bufferBudgetController.handleFragmentLoaded(data?.frag);
       qualityController.handleFragmentLoaded();
       segmentPrebufferController.handlePlaybackProgress();
@@ -884,6 +962,7 @@ export function createVodM3u8Loader({
     };
 
     const onHlsLevelLoaded = function (_: unknown, data: any) {
+      markStartupProgress();
       const levelIndex = Number.isInteger(data?.level)
         ? Number(data.level)
         : -1;
@@ -907,6 +986,7 @@ export function createVodM3u8Loader({
       onFragBuffered: whileRuntimeActive(onHlsFragBuffered),
       onLevelLoaded: whileRuntimeActive(onHlsLevelLoaded),
       onManifestParsed: whileRuntimeActive(() => {
+        markStartupProgress();
         qualityController.handleManifestParsed();
       }),
     };
@@ -920,11 +1000,12 @@ export function createVodM3u8Loader({
 
     video.addEventListener('loadeddata', tryReportVideoInfo);
 
+    managedVideo.hls = hls;
+    startupProgress = beginMediaLoad();
     hls.loadSource(targetUrl);
     if (!canReuseHls) {
       hls.attachMedia(video);
     }
-    managedVideo.hls = hls;
     ensureVideoSource(video, targetUrl);
   };
 }

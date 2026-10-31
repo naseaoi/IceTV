@@ -70,10 +70,10 @@ import {
 } from '@/lib/player-utils';
 import { preconnectForUrl } from '@/lib/preconnect';
 import {
+  type SourcePlaybackRoute,
   clearSourceProxyOverride,
-  isServerProxy,
   rememberSourceServerProxy,
-  shouldAutoFallbackToServer,
+  resolveSourcePlaybackRoute,
 } from '@/lib/proxy-modes';
 import { reportSourceRouteStat } from '@/lib/source-route-stats.client';
 
@@ -83,6 +83,7 @@ interface UseArtPlayerInitState {
   autoAdvancedRef: MutableRefObject<boolean>;
   playerMediaKindRef: MutableRefObject<'hls' | 'native' | null>;
   sessionEpisodeIndexRef: MutableRefObject<number | null>;
+  playbackRouteRef: MutableRefObject<SourcePlaybackRoute | null>;
   isCancelled: () => boolean;
 }
 
@@ -96,7 +97,6 @@ export async function initializeArtPlayer(
     videoUrl,
     videoTitle,
     detail,
-    currentEpisodeIndex,
     blockAdEnabled,
     blockAdEnabledRef,
     autoPlayNextEnabled,
@@ -142,6 +142,7 @@ export async function initializeArtPlayer(
     autoAdvancedRef,
     playerMediaKindRef,
     sessionEpisodeIndexRef,
+    playbackRouteRef,
     isCancelled,
   } = state;
 
@@ -153,6 +154,12 @@ export async function initializeArtPlayer(
       id: detailRef.current?.id || detail?.id || '',
       videoUrl,
     };
+    const playbackRoute = await resolveSourcePlaybackRoute(
+      preSourceKey,
+      videoUrl,
+    );
+    if (isCancelled() || !artRef.current) return;
+    let currentEpisodeIndex = currentEpisodeIndexRef.current;
     const danmakuContext = {
       source: playbackInfoContext.source,
       videoId: playbackInfoContext.id,
@@ -160,7 +167,7 @@ export async function initializeArtPlayer(
       searchTitle: detailRef.current?.title || detail?.title || videoTitle,
       searchYear: detailRef.current?.year || detail?.year || '',
     };
-    const preUseProxy = isServerProxy(preSourceKey, videoUrl);
+    const preUseProxy = playbackRoute.useServerProxy;
     const buildProxyUrl = (rawUrl: string) =>
       buildVodProxyUrl({
         rawUrl,
@@ -185,7 +192,8 @@ export async function initializeArtPlayer(
     }
     preconnectForUrl(videoUrl);
 
-    const nextEpisodeUrl = detail?.episodes?.[currentEpisodeIndex + 1] ?? null;
+    const nextEpisodeUrl =
+      detailRef.current?.episodes?.[currentEpisodeIndex + 1] ?? null;
     if (nextEpisodeUrl) {
       if (isVodM3u8Url(nextEpisodeUrl)) {
         prefetchM3U8(buildProxyUrl(nextEpisodeUrl));
@@ -210,6 +218,9 @@ export async function initializeArtPlayer(
       return;
     }
 
+    currentEpisodeIndex = currentEpisodeIndexRef.current;
+    danmakuContext.episodeIndex = currentEpisodeIndex;
+    playbackRouteRef.current = playbackRoute;
     sessionEpisodeIndexRef.current = currentEpisodeIndex;
 
     const isWebkit =
@@ -220,6 +231,7 @@ export async function initializeArtPlayer(
     if (
       !isWebkit &&
       artPlayerRef.current &&
+      artPlayerRef.current.url !== playbackUrl &&
       mediaKind === 'hls' &&
       playerMediaKindRef.current === mediaKind
     ) {
@@ -240,12 +252,10 @@ export async function initializeArtPlayer(
         lastPlaybackRateRef.current,
       );
       const reusedPlayer = artPlayerRef.current;
-      if (reusedPlayer.url !== playbackUrl) {
-        waitForDanmakuPlayerSwitch(
-          reusedPlayer,
-          reusedPlayer.switchUrl(playbackUrl),
-        );
-      }
+      waitForDanmakuPlayerSwitch(
+        reusedPlayer,
+        reusedPlayer.switchUrl(playbackUrl),
+      );
       reusedPlayer.title = `${videoTitle} - 第${currentEpisodeIndex + 1}集`;
       // switch 内部会注册一次性的归零回调，这里紧随其后注册以立即纠正落点，
       // 避免等重试逻辑生效时出现可见的回跳。
@@ -285,9 +295,11 @@ export async function initializeArtPlayer(
       blockAdEnabledRef,
       detailRef,
       playbackInfoContext,
+      playbackRouteRef,
       playbackRequestModeRef,
       resumeTimeRef,
       resumeModeRef,
+      allowAutoResumeRef,
       stableCurrentTimeRef,
       loadingSessionRef,
       setError,
@@ -309,6 +321,8 @@ export async function initializeArtPlayer(
       return;
     }
 
+    sessionEpisodeIndexRef.current = currentEpisodeIndexRef.current;
+    danmakuContext.episodeIndex = currentEpisodeIndexRef.current;
     artPlayerRef.current = new Artplayer({
       container: artRef.current,
       url: playbackUrl,
@@ -394,7 +408,7 @@ export async function initializeArtPlayer(
         mediaKind !== 'native' ||
         nativeUseServerProxy ||
         !preSourceKey ||
-        !shouldAutoFallbackToServer(preSourceKey)
+        !playbackRoute.allowAutoFallback
       ) {
         return false;
       }

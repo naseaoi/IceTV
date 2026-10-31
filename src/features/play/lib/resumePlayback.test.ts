@@ -40,6 +40,22 @@ describe('resumePlayback', () => {
     expect(applyResumeTime(infiniteDuration, 1064)).toBe(false);
   });
 
+  it('HLS 已到达续播目标时保留当前位置，后续事件不重复 seek', () => {
+    const seek = jest.fn();
+    const player = {
+      duration: 1500,
+      get currentTime() {
+        return 1064.5;
+      },
+      set currentTime(value: number) {
+        seek(value);
+      },
+    };
+    expect(applyResumeTime(player, 1064)).toBe(true);
+    expect(applyResumeTime(player, 1064)).toBe(true);
+    expect(seek).not.toHaveBeenCalled();
+  });
+
   it('播放器把进度改写到别处时返回 false', () => {
     const clampingPlayer = {
       duration: 1500,

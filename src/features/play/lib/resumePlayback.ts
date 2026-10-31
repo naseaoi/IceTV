@@ -109,6 +109,14 @@ export function applyResumeTime(
     return false;
   }
 
+  // HLS 初始加载位置已落地时复用该进度，避免再次 seek 中断正在加载的分片。
+  if (
+    Number.isFinite(player.currentTime) &&
+    Math.abs(player.currentTime - safeTarget) <= 1
+  ) {
+    return true;
+  }
+
   player.currentTime = safeTarget;
 
   // 回读确认落点，避免播放器静默改写后上层误判恢复成功。

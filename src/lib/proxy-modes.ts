@@ -1,4 +1,5 @@
 import { getAuthInfoFromBrowserCookie } from '@/lib/auth.client';
+import { withAbortableTimeout } from '@/lib/concurrency';
 
 let cachedModes: Record<string, string> | null = null;
 let cacheExpiry = 0;
@@ -102,9 +103,15 @@ async function fetchProxyModes(): Promise<Record<string, string>> {
   }
 
   try {
-    const res = await fetch('/api/proxy-modes');
-    if (res.ok) {
-      const data = (await res.json()) as Record<string, string>;
+    const data = await withAbortableTimeout(
+      async (signal) => {
+        const res = await fetch('/api/proxy-modes', { signal });
+        return res.ok ? ((await res.json()) as Record<string, string>) : null;
+      },
+      2_000,
+      'Proxy modes request timed out',
+    );
+    if (data) {
       cachedModes = data;
       cacheExpiry = Date.now() + CACHE_TTL_MS;
       return data;
@@ -148,8 +155,27 @@ export function isServerProxy(sourceKey: string, rawUrl?: string): boolean {
   return shouldUseServerProxy(sourceKey, rawUrl);
 }
 
-export function shouldAutoFallbackToServer(sourceKey: string): boolean {
-  return getConfiguredProxyMode(sourceKey) === 'auto';
+export function shouldAutoFallbackToServer(
+  sourceKey: string,
+  modes?: Record<string, string>,
+): boolean {
+  return getConfiguredProxyMode(sourceKey, modes) === 'auto';
+}
+
+export interface SourcePlaybackRoute {
+  useServerProxy: boolean;
+  allowAutoFallback: boolean;
+}
+
+export async function resolveSourcePlaybackRoute(
+  sourceKey: string,
+  rawUrl: string,
+): Promise<SourcePlaybackRoute> {
+  const modes = await getProxyModes();
+  return {
+    useServerProxy: shouldUseServerProxy(sourceKey, rawUrl, modes),
+    allowAutoFallback: shouldAutoFallbackToServer(sourceKey, modes),
+  };
 }
 
 export function rememberSourceServerProxy(

@@ -1,5 +1,6 @@
 import type { PlaybackRequestMode } from '@/features/play/hooks/usePlayPageState';
 import { PLAYBACK_STALL_CONFIRMATION_DELAY_MS } from '@/features/play/lib/playbackStallRecovery';
+import { getVodStartupProgress } from '@/features/play/lib/playerLoading';
 import {
   createVodM3u8Loader,
   getVodRuntimeSourceUrl,
@@ -195,6 +196,7 @@ function setupRuntime() {
     playbackRequestModeRef: { current: 'episode' as PlaybackRequestMode },
     resumeTimeRef: { current: null },
     resumeModeRef: { current: null },
+    allowAutoResumeRef: { current: true },
     stableCurrentTimeRef: { current: 0 },
     loadingSessionRef: {
       current: {
@@ -209,6 +211,7 @@ function setupRuntime() {
     onPlaybackRecoveryExhausted,
   };
   return {
+    options,
     load: createVodM3u8Loader(options),
     setError,
     setIsVideoLoading,
@@ -231,6 +234,87 @@ describe('vodHlsRuntime 运行时释放', () => {
   afterEach(() => {
     createdVideos.splice(0).forEach((video) => runManagedVideoCleanup(video));
     jest.restoreAllMocks();
+  });
+
+  it('续播目标在拉清单前写入 HLS，复用换集重设目标且不额外 startLoad', () => {
+    const { load, options } = setupRuntime();
+    options.resumeTimeRef.current = 1064;
+    options.resumeModeRef.current = 'history';
+    const video = createVideo();
+    load(video, EPISODE_1);
+    const hls = getFakeHls(video);
+    expect(hls.config.startPosition).toBe(1064);
+    hls.loadSource.mockImplementation(() => {
+      expect(hls.config.startPosition).toBe(0);
+    });
+    options.resumeTimeRef.current = null;
+    options.resumeModeRef.current = 'forced';
+    load(video, EPISODE_2);
+    expect(getFakeHls(video)).toBe(hls);
+    expect(hls.config.startPosition).toBe(0);
+    expect(hls.startLoad).not.toHaveBeenCalled();
+  });
+
+  it('禁用历史恢复时不采用历史目标，强制恢复仍采用目标', () => {
+    const { load, options } = setupRuntime();
+    options.resumeTimeRef.current = 500;
+    options.resumeModeRef.current = 'history';
+    options.allowAutoResumeRef.current = false;
+    const video = createVideo();
+    load(video, EPISODE_1);
+    expect(getFakeHls(video).config.startPosition).toBe(0);
+    options.resumeModeRef.current = 'forced';
+    load(video, EPISODE_2);
+    expect(getFakeHls(video).config.startPosition).toBe(500);
+  });
+
+  it('字节增长和清单完成续期，重复采样与释放后迟到事件不续期', () => {
+    let now = 0;
+    jest.spyOn(performance, 'now').mockImplementation(() => now);
+    const { load } = setupRuntime();
+    const video = createVideo();
+    load(video, EPISODE_1);
+    const hls = getFakeHls(video);
+    const progress = getVodStartupProgress(video)!;
+    expect(progress.startedAt).toBe(0);
+    now = 1000;
+    hls.emit(FakeHls.Events.MANIFEST_PARSED, { levels: [] });
+    expect(progress.lastProgressAt).toBe(1000);
+    const frag = { stats: { loaded: 1 } };
+    hls.inFlightFragments.main = { frag, state: 'FRAG_LOADING' };
+    now = 2000;
+    expect(getVodStartupProgress(video)?.lastProgressAt).toBe(2000);
+    now = 3000;
+    expect(getVodStartupProgress(video)?.lastProgressAt).toBe(2000);
+    frag.stats.loaded = 50;
+    expect(getVodStartupProgress(video)?.lastProgressAt).toBe(3000);
+    now = 4000;
+    hls.emit(FakeHls.Events.FRAG_LOADED, FRAG_LOADED);
+    expect(progress.lastProgressAt).toBe(4000);
+    runManagedVideoCleanup(video);
+    now = 5000;
+    hls.emit(FakeHls.Events.FRAG_LOADED, FRAG_LOADED);
+    expect(progress.lastProgressAt).toBe(4000);
+    expect(getVodStartupProgress(video)).toBeNull();
+  });
+
+  it('服务端回落重新计时并保留续播初始加载位置', () => {
+    let now = 0;
+    jest.spyOn(performance, 'now').mockImplementation(() => now);
+    const { load, options } = setupRuntime();
+    options.resumeTimeRef.current = 1064;
+    options.resumeModeRef.current = 'history';
+    const video = createVideo();
+    load(video, EPISODE_1);
+    const first = getVodStartupProgress(video);
+    now = 15_000;
+    expect(getManagedVideo(video).__icetvSwitchToServerProxy?.('timeout')).toBe(
+      true,
+    );
+    expect(getVodStartupProgress(video)).not.toBe(first);
+    expect(getVodStartupProgress(video)?.startedAt).toBe(15_000);
+    expect(getFakeHls(video).config.startPosition).toBe(1064);
+    expect(getFakeHls(video).startLoad).not.toHaveBeenCalled();
   });
 
   it('加载后登记运行时对应的地址，释放后清除登记和服务端回退入口', () => {

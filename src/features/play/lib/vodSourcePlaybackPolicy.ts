@@ -1,3 +1,27 @@
+import { resolveVodFragmentTimeoutMs } from '@/features/play/lib/vodAutoRoutePolicy';
+import { normalizeRuntimeParam } from '@/lib/runtime-params';
+
+export const VOD_STARTUP_PROGRESS_POLL_MS = 250;
+const VOD_STARTUP_TOTAL_WINDOW_MULTIPLIER = 4;
+
+export function resolveVodStartupTimeouts(
+  sourceKey: string,
+  configuredPageSeconds: unknown,
+  configuredFragmentSeconds: unknown,
+): { idleMs: number; totalMs: number } {
+  const idleMs = Math.max(
+    resolveVodPlayerLoadingTimeoutSeconds(
+      sourceKey,
+      normalizeRuntimeParam('VodPageTimeoutSeconds', configuredPageSeconds),
+    ) * 1000,
+    resolveVodSourceFragmentTimeoutMs(
+      sourceKey,
+      resolveVodFragmentTimeoutMs(configuredFragmentSeconds),
+    ),
+  );
+  return { idleMs, totalMs: idleMs * VOD_STARTUP_TOTAL_WINDOW_MULTIPLIER };
+}
+
 export type VodHlsBufferOverrides = {
   maxBufferLength: number;
   maxMaxBufferLength: number;

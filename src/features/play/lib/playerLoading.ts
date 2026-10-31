@@ -1,3 +1,40 @@
+export interface VodStartupProgress {
+  sourceKey: string;
+  startedAt: number;
+  lastProgressAt: number;
+  sampleProgress?: () => void;
+}
+
+const vodStartupProgress = new WeakMap<HTMLVideoElement, VodStartupProgress>();
+
+export function beginVodStartupProgress(
+  video: HTMLVideoElement,
+  sourceKey: string,
+  sampleProgress?: () => void,
+): VodStartupProgress {
+  const now = performance.now();
+  const progress = {
+    sourceKey,
+    startedAt: now,
+    lastProgressAt: now,
+    sampleProgress,
+  };
+  vodStartupProgress.set(video, progress);
+  return progress;
+}
+
+export function getVodStartupProgress(
+  video: HTMLVideoElement,
+): VodStartupProgress | null {
+  const progress = vodStartupProgress.get(video);
+  progress?.sampleProgress?.();
+  return progress ?? null;
+}
+
+export function clearVodStartupProgress(video: HTMLVideoElement): void {
+  vodStartupProgress.delete(video);
+}
+
 export interface PlayerLoadingSessionState {
   pendingInitialResumeTarget: number | null;
   playbackStartNotified: boolean;
