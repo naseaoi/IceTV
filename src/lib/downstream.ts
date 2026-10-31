@@ -378,9 +378,46 @@ export async function getDetailFromApi(
   }
 
   if (apiSite.detail) {
-    return handleSpecialSourceDetail(id, apiSite);
+    return getDetailWithPageFallback(apiSite, id);
   }
 
+  return getDetailFromVodApi(apiSite, id);
+}
+
+// 配了详情页的源仍以 JSON 接口为准，接口失败或没有可播放剧集时才抓详情页；
+// 详情页只能可靠解析出剧集，元数据缺失时沿用接口返回的字段
+async function getDetailWithPageFallback(
+  apiSite: ApiSite,
+  id: string,
+): Promise<SearchResult> {
+  let apiDetail: SearchResult | null = null;
+  try {
+    apiDetail = await getDetailFromVodApi(apiSite, id);
+    if (apiDetail.episodes.length > 0) {
+      return apiDetail;
+    }
+  } catch (error) {
+    if (error instanceof ResourceLimitError) throw error;
+  }
+
+  const pageDetail = await handleSpecialSourceDetail(id, apiSite);
+  if (!apiDetail) {
+    return pageDetail;
+  }
+  return {
+    ...apiDetail,
+    title: pageDetail.title || apiDetail.title,
+    poster: pageDetail.poster || apiDetail.poster,
+    episodes: pageDetail.episodes,
+    episodes_titles: pageDetail.episodes_titles,
+    desc: pageDetail.desc || apiDetail.desc,
+  };
+}
+
+async function getDetailFromVodApi(
+  apiSite: ApiSite,
+  id: string,
+): Promise<SearchResult> {
   const detailUrl = `${apiSite.api}${API_CONFIG.detail.path}${id}`;
 
   const abortState = createTimedAbortController(undefined, 10000);
