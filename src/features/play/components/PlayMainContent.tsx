@@ -20,7 +20,10 @@ import type {
   VideoLoadingStage,
 } from '@/features/play/hooks/usePlayPageState';
 import type { DanmakuReloadHandler } from '@/features/play/lib/danmaku/types';
-import { getVodStartupProgress } from '@/features/play/lib/playerLoading';
+import {
+  describeVodStartupState,
+  getVodStartupProgress,
+} from '@/features/play/lib/playerLoading';
 import {
   resolveVodStartupTimeouts,
   VOD_STARTUP_PROGRESS_POLL_MS,
@@ -412,6 +415,15 @@ export function PlayMainContent(props: PlayMainContentProps) {
       if (!totalLimit && now - progress.lastProgressAt < loadingTimeoutMs)
         return;
       expiredProgress = progress;
+      console.warn('点播起播超时', {
+        totalLimit,
+        progressSource:
+          progress === fallbackProgress ? 'fallback' : 'media-runtime',
+        elapsedMs: Math.round(now - progress.startedAt),
+        idleMs: Math.round(now - progress.lastProgressAt),
+        videoLoadingStage,
+        ...describeVodStartupState(video),
+      });
       if (onLoadingTimeoutRef.current?.() === true) {
         return;
       }

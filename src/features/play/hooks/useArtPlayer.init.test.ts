@@ -89,14 +89,15 @@ class MockArtplayer {
   destroy = jest.fn();
   pause = jest.fn();
   switchUrl = jest.fn((url: string) => {
-    this.url = url;
+    this.option.url = url;
     this.option.customType.m3u8(this.video, url);
     return Promise.resolve();
   });
   private readonly listeners = new Map<string, Listener[]>();
 
   constructor(public option: MockArtplayerOption) {
-    this.url = option.url;
+    // 与真实 Artplayer 一致：MSE 播放时 url 读到的是 blob 地址而非清单地址
+    this.url = 'blob:http://localhost/mock-media-source';
     MockArtplayer.instances.push(this);
   }
 
@@ -306,7 +307,7 @@ describe('initializeArtPlayer 拉流控制', () => {
       if (player) {
         createdVideos.push(player.video);
         player.video.pause = jest.fn();
-        player.option.customType.m3u8(player.video, player.url);
+        player.option.customType.m3u8(player.video, player.option.url);
       }
       return { ...hook, params, player };
     }
@@ -331,7 +332,7 @@ describe('initializeArtPlayer 拉流控制', () => {
       });
       const player = MockArtplayer.instances[0];
       createdVideos.push(player.video);
-      player.option.customType.m3u8(player.video, player.url);
+      player.option.customType.m3u8(player.video, player.option.url);
       expect(getManagedVideo(player.video).__icetvUsingServerProxy).toBe(true);
       hook.unmount();
     });
@@ -388,7 +389,7 @@ describe('initializeArtPlayer 拉流控制', () => {
         await flushMicrotasks();
       });
       expect(MockArtplayer.instances).toHaveLength(1);
-      expect(MockArtplayer.instances[0].url).toBe(EPISODE_2);
+      expect(MockArtplayer.instances[0].option.url).toBe(EPISODE_2);
     });
 
     it('keeps in-flight HLS on metadata refresh and consumes latest callbacks', async () => {

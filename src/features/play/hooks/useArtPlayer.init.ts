@@ -27,6 +27,7 @@ import {
   type PlayerLoadingSessionState,
   hasReachedResumeTarget,
   markPlayerLoadingSessionStarted,
+  registerStartupStateDescriber,
   resetPlayerLoadingSessionState,
   shouldDismissLoadingFromCanPlay,
   shouldDismissLoadingFromReadyFrame,
@@ -223,6 +224,30 @@ export async function initializeArtPlayer(
     playbackRouteRef.current = playbackRoute;
     sessionEpisodeIndexRef.current = currentEpisodeIndex;
 
+    const registerStartupDiagnostics = (
+      targetPlayer: NonNullable<typeof artPlayerRef.current>,
+      extra?: () => Record<string, unknown>,
+    ) => {
+      const targetVideo = targetPlayer.video as HTMLVideoElement | undefined;
+      if (!targetVideo) return;
+      registerStartupStateDescriber(targetVideo, 'session', () => ({
+        playerActive: targetPlayer === artPlayerRef.current,
+        pendingInitialResumeTarget:
+          loadingSessionRef.current.pendingInitialResumeTarget,
+        playbackStartNotified: loadingSessionRef.current.playbackStartNotified,
+        sessionEpisodeIndex: sessionEpisodeIndexRef.current,
+        currentEpisodeIndex: currentEpisodeIndexRef.current,
+        runtimeUrlMatches: getVodRuntimeSourceUrl(targetVideo) === videoUrl,
+        runtimeRegistered: getVodRuntimeSourceUrl(targetVideo) !== null,
+        resumeTime: resumeTimeRef.current,
+        resumeMode: resumeModeRef.current,
+        allowAutoResume: allowAutoResumeRef.current,
+        usingServerProxy: getManagedVideo(targetVideo).__icetvUsingServerProxy,
+        mediaKind,
+        ...extra?.(),
+      }));
+    };
+
     const isWebkit =
       typeof window !== 'undefined' &&
       typeof (window as unknown as Record<string, unknown>)
@@ -231,7 +256,8 @@ export async function initializeArtPlayer(
     if (
       !isWebkit &&
       artPlayerRef.current &&
-      artPlayerRef.current.url !== playbackUrl &&
+      // art.url 读的是 video.src，MSE 下是 blob: 地址；option.url 才是上次交给播放器的地址
+      artPlayerRef.current.option.url !== playbackUrl &&
       mediaKind === 'hls' &&
       playerMediaKindRef.current === mediaKind
     ) {
@@ -252,6 +278,10 @@ export async function initializeArtPlayer(
         lastPlaybackRateRef.current,
       );
       const reusedPlayer = artPlayerRef.current;
+      registerStartupDiagnostics(reusedPlayer, () => ({
+        initPath: 'reused',
+        carriedResumeTarget,
+      }));
       waitForDanmakuPlayerSwitch(
         reusedPlayer,
         reusedPlayer.switchUrl(playbackUrl),
@@ -618,6 +648,14 @@ export async function initializeArtPlayer(
     };
 
     let lastPendingResumeSeekAt = 0;
+    registerStartupDiagnostics(player, () => ({
+      initPath: 'created',
+      staleSession: isStalePlayerSession(),
+      initialPlaybackRequestInFlight,
+      msSinceResumeSeek: lastPendingResumeSeekAt
+        ? Math.round(performance.now() - lastPendingResumeSeekAt)
+        : null,
+    }));
 
     const completePendingResumeIfReady = () => {
       if (

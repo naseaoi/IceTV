@@ -507,7 +507,7 @@ describe('vodHlsRuntime 致命网络错误恢复', () => {
     const runtime = setupRuntime();
     const video = createVideo();
     runtime.load(video, EPISODE_1);
-    return { runtime, hls: getFakeHls(video) };
+    return { runtime, video, hls: getFakeHls(video) };
   }
 
   // 恢复拉流先重下失败位置之前已部分缓冲的分片并命中浏览器缓存，随后失败分片再次致命失败
@@ -610,6 +610,31 @@ describe('vodHlsRuntime 致命网络错误恢复', () => {
       hls.emit(FakeHls.Events.ERROR, fatalFragError(13));
 
       expect(global.fetch).not.toHaveBeenCalled();
+    });
+
+    it('代理探测失败进入冷却后，页面超时仍直接切到服务端代理', async () => {
+      (global.fetch as jest.Mock).mockResolvedValue({ ok: false });
+      const { hls, video } = loadEpisode();
+
+      failAfterCachedReload(hls, HLS_FATAL_NETWORK_RECOVERY_DELAYS_MS[0]);
+      failAfterCachedReload(hls, HLS_FATAL_NETWORK_RECOVERY_DELAYS_MS[1]);
+      hls.emit(FakeHls.Events.ERROR, fatalFragError(11));
+      await flushMicrotasks();
+      expect(hls.loadSource).toHaveBeenCalledTimes(1);
+
+      expect(
+        getManagedVideo(video).__icetvSwitchToServerProxy?.(
+          'page-loading-timeout',
+        ),
+      ).toBe(true);
+      expect(hls.loadSource).toHaveBeenLastCalledWith(
+        buildVodProxyUrl({
+          rawUrl: EPISODE_1,
+          useServerProxy: true,
+          sourceKey: DETAIL.source,
+          playbackRequestMode: 'episode',
+        }),
+      );
     });
   });
 });

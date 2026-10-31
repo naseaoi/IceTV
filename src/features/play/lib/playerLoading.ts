@@ -35,6 +35,87 @@ export function clearVodStartupProgress(video: HTMLVideoElement): void {
   vodStartupProgress.delete(video);
 }
 
+type StartupStateDescriber = () => Record<string, unknown>;
+type StartupStateSection = 'session' | 'route';
+
+const startupStateDescribers = new WeakMap<
+  HTMLVideoElement,
+  Partial<Record<StartupStateSection, StartupStateDescriber>>
+>();
+
+// 播放器会话与 hls 线路各自登记快照入口，起播超时时与媒体、hls 状态一起输出，用于定位卡住的环节
+export function registerStartupStateDescriber(
+  video: HTMLVideoElement,
+  section: StartupStateSection,
+  describe: StartupStateDescriber,
+): void {
+  startupStateDescribers.set(video, {
+    ...startupStateDescribers.get(video),
+    [section]: describe,
+  });
+}
+
+const roundTime = (value: number) =>
+  Number.isFinite(value) ? Number(value.toFixed(2)) : value;
+
+export function describeVodStartupState(
+  video: HTMLVideoElement | null | undefined,
+): Record<string, unknown> {
+  if (!video) return { video: null };
+  const buffered: Array<[number, number]> = [];
+  for (let i = 0; i < video.buffered.length; i += 1) {
+    buffered.push([
+      roundTime(video.buffered.start(i)),
+      roundTime(video.buffered.end(i)),
+    ]);
+  }
+  const hls = (video as HTMLVideoElement & { hls?: any }).hls;
+  const describers = startupStateDescribers.get(video) ?? {};
+  const describe = (section: StartupStateSection) => {
+    try {
+      return describers[section]?.() ?? null;
+    } catch (error) {
+      return { error: String(error) };
+    }
+  };
+  return {
+    video: {
+      currentTime: roundTime(video.currentTime),
+      duration: roundTime(video.duration),
+      paused: video.paused,
+      seeking: video.seeking,
+      ended: video.ended,
+      readyState: video.readyState,
+      networkState: video.networkState,
+      videoWidth: video.videoWidth,
+      buffered,
+      errorCode: video.error?.code ?? null,
+    },
+    hls: hls
+      ? {
+          loadingEnabled: hls.loadingEnabled,
+          startPosition: hls.startPosition,
+          configStartPosition: hls.config?.startPosition,
+          levels: hls.levels?.length ?? 0,
+          currentLevel: hls.currentLevel,
+          loadLevel: hls.loadLevel,
+          mediaAttached: hls.media === video,
+          inFlight: Object.values<{
+            state?: string;
+            frag?: { sn?: unknown; start?: number; duration?: number };
+          } | null>(hls.inFlightFragments ?? {}).map((entry) => ({
+            state: entry?.state,
+            sn: entry?.frag?.sn,
+            start: roundTime(entry?.frag?.start ?? NaN),
+            duration: roundTime(entry?.frag?.duration ?? NaN),
+          })),
+        }
+      : null,
+    session: describe('session'),
+    route: describe('route'),
+  };
+}
+
 export interface PlayerLoadingSessionState {
   pendingInitialResumeTarget: number | null;
   playbackStartNotified: boolean;

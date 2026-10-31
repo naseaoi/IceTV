@@ -17,6 +17,7 @@ import {
   type PlayerLoadingSessionState,
   beginVodStartupProgress,
   clearVodStartupProgress,
+  registerStartupStateDescriber,
 } from '@/features/play/lib/playerLoading';
 import {
   type ResumeMode,
@@ -639,15 +640,27 @@ export function createVodM3u8Loader({
         });
       return true;
     };
-    // 页面超时与恢复耗尽时直接切服务端不再探测，每次加载只试一次；成功时 onSourceProxyFallbackStarted 会重置页面超时计时
+    // 页面超时与恢复耗尽时直接切服务端不再探测，每次加载只试一次；成功时 onSourceProxyFallbackStarted 会重置页面超时计时。
+    // 不受探测冷却限制：探测慢只说明代理慢，此时直连已确定走不通，慢代理也好过停在超时
     const startServerFallbackNow = (reason: string) => {
-      if (serverFallbackAttempted || Date.now() < proxyRetryBlockedUntil) {
+      if (serverFallbackAttempted) {
         return false;
       }
       cancelProxyProbe();
       return switchToServerProxy(reason);
     };
     managedVideo.__icetvSwitchToServerProxy = startServerFallbackNow;
+    registerStartupStateDescriber(video, 'route', () => ({
+      allowAutoFallback,
+      currentUseServerProxy,
+      serverFallbackAttempted,
+      proxyProbeInFlight,
+      proxyCooldownRemainingMs: Math.max(
+        0,
+        proxyRetryBlockedUntil - Date.now(),
+      ),
+      fragmentTimeoutMs,
+    }));
     vodRuntimeSourceUrls.set(video, url);
 
     const getBufferedRanges = () => {
