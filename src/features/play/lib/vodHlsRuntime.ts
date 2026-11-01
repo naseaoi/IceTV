@@ -549,6 +549,15 @@ export function createVodM3u8Loader({
       return true;
     };
 
+    // 清单从未加载成功时 hls 没有 level，startLoad 不会重新请求清单，只能按当前线路重新 loadSource
+    const resumeLoading = () => {
+      if (hls.levels?.length) {
+        hls.startLoad();
+        return;
+      }
+      hls.loadSource(targetUrl);
+    };
+
     const requestServerProxyFallback = (
       reason: string,
       segmentUrl: string | null,
@@ -627,9 +636,7 @@ export function createVodM3u8Loader({
           browserFailureTracker.reset();
           proxyRetryBlockedUntil = Date.now() + AUTO_ROUTE_PROXY_COOLDOWN_MS;
           setRealtimeLoadSpeed('代理响应较慢，继续浏览器直连');
-          if (typeof hls.startLoad === 'function') {
-            hls.startLoad();
-          }
+          resumeLoading();
         })
         .finally(() => {
           if (probeSequence !== proxyProbeSequence) {
@@ -889,7 +896,7 @@ export function createVodM3u8Loader({
 
         const recovery = recoveryController.recover(
           {
-            startLoad: () => hls.startLoad(),
+            startLoad: resumeLoading,
             recoverMediaError: () => hls.recoverMediaError(),
             swapAudioCodec: () => hls.swapAudioCodec(),
           },

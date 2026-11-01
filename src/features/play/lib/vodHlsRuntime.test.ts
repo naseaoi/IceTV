@@ -503,11 +503,13 @@ describe('vodHlsRuntime 致命网络错误恢复', () => {
     global.fetch = originalFetch;
   });
 
-  function loadEpisode() {
+  function loadEpisode({ manifestParsed = true } = {}) {
     const runtime = setupRuntime();
     const video = createVideo();
     runtime.load(video, EPISODE_1);
-    return { runtime, video, hls: getFakeHls(video) };
+    const hls = getFakeHls(video);
+    if (manifestParsed) hls.levels = [{}];
+    return { runtime, video, hls };
   }
 
   // 恢复拉流先重下失败位置之前已部分缓冲的分片并命中浏览器缓存，随后失败分片再次致命失败
@@ -552,6 +554,27 @@ describe('vodHlsRuntime 致命网络错误恢复', () => {
     );
     expect(runtime.onPlaybackRecoveryExhausted).not.toHaveBeenCalled();
     expect(runtime.setError).not.toHaveBeenCalled();
+  });
+
+  it('清单从未加载成功时按当前线路重新拉清单，耗尽后按当前源失败处理', () => {
+    const { runtime, hls } = loadEpisode({ manifestParsed: false });
+    const directUrl = hls.loadSource.mock.calls[0][0];
+
+    HLS_FATAL_NETWORK_RECOVERY_DELAYS_MS.forEach((delayMs) => {
+      hls.emit(FakeHls.Events.ERROR, FATAL_MANIFEST_ERROR);
+      jest.advanceTimersByTime(delayMs);
+    });
+    expect(hls.startLoad).not.toHaveBeenCalled();
+    expect(hls.loadSource).toHaveBeenCalledTimes(
+      HLS_FATAL_NETWORK_RECOVERY_DELAYS_MS.length + 1,
+    );
+    expect(hls.loadSource).toHaveBeenLastCalledWith(directUrl);
+
+    hls.emit(FakeHls.Events.ERROR, FATAL_MANIFEST_ERROR);
+    expect(runtime.onPlaybackRecoveryExhausted).toHaveBeenCalledWith(
+      'networkError:manifestLoadError',
+    );
+    expect(runtime.setError).toHaveBeenCalledWith('当前源加载失败');
   });
 
   describe('直连自动回退', () => {
@@ -610,6 +633,19 @@ describe('vodHlsRuntime 致命网络错误恢复', () => {
       hls.emit(FakeHls.Events.ERROR, fatalFragError(13));
 
       expect(global.fetch).not.toHaveBeenCalled();
+    });
+
+    it('清单加载失败且代理探测失败时继续直连并重新拉清单', async () => {
+      (global.fetch as jest.Mock).mockResolvedValue({ ok: false });
+      const { hls } = loadEpisode({ manifestParsed: false });
+      const directUrl = hls.loadSource.mock.calls[0][0];
+
+      hls.emit(FakeHls.Events.ERROR, FATAL_MANIFEST_ERROR);
+      await flushMicrotasks();
+
+      expect(hls.startLoad).not.toHaveBeenCalled();
+      expect(hls.loadSource).toHaveBeenCalledTimes(2);
+      expect(hls.loadSource).toHaveBeenLastCalledWith(directUrl);
     });
 
     it('代理探测失败进入冷却后，页面超时仍直接切到服务端代理', async () => {
