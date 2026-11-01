@@ -30,7 +30,8 @@ jest.mock('@/lib/http-proxy-json', () => ({
   fetchStreamThroughProxy: jest.fn(),
 }));
 jest.mock('@/lib/url-guard', () => ({
-  validateProxyUrlForRequest: async (url: string) => ({ ok: true, url }),
+  UrlValidationError: jest.requireActual('@/lib/url-guard').UrlValidationError,
+  validateProxyUrlForRequest: (url: string) => mockValidateProxyUrl(url),
   fetchWithUrlGuard: (
     url: string,
     init: { signal: AbortSignal; resourceContext: object },
@@ -43,6 +44,7 @@ jest.mock('@/lib/url-guard', () => ({
 }));
 
 const mockOrigin = jest.fn();
+const mockValidateProxyUrl = jest.fn();
 installStreamPolyfills();
 const { GET } =
   require('@/app/api/proxy/segment/route') as typeof import('@/app/api/proxy/segment/route');
@@ -70,6 +72,9 @@ describe('segment shared resource integration', () => {
           headers: { 'Content-Type': 'video/mp2t' },
         }),
     );
+    mockValidateProxyUrl
+      .mockReset()
+      .mockImplementation(async (url: string) => ({ ok: true, url }));
     jest.spyOn(console, 'warn').mockImplementation(() => {});
   });
   afterEach(() => {
@@ -91,6 +96,24 @@ describe('segment shared resource integration', () => {
     const next = await GET(request());
     expect(next.status).toBe(200);
     await next.body!.cancel();
+  });
+
+  it('logs the url validation reason without exposing it to the client', async () => {
+    mockValidateProxyUrl.mockResolvedValueOnce({
+      ok: false,
+      reason: 'DNS lookup failed',
+    });
+    const response = await GET(request());
+    expect(response.status).toBe(403);
+    expect(JSON.stringify(await response.json())).not.toContain('DNS');
+    expect(console.warn).toHaveBeenCalledWith(
+      '[proxy.failure]',
+      expect.objectContaining({
+        stage: 'validation',
+        error: expect.objectContaining({ message: 'DNS lookup failed' }),
+      }),
+    );
+    expect(mockOrigin).not.toHaveBeenCalled();
   });
 
   it('cancels rejected content and frees the slot', async () => {
