@@ -95,11 +95,14 @@ function createPublicConfig() {
     DefaultAggregateSearch: true,
     EnableOptimization: true,
     LiveDirectConnect: false,
+    AutoSwitchSource: true,
     DoubanProxyType: 'direct',
     BangumiDataSource: 'direct',
     DoubanImageProxyType: 'direct',
     CustomCategories: [],
     FluidSearch: true,
+    VodPageTimeoutSeconds: 15,
+    VodFragmentTimeoutSeconds: 12,
   };
 }
 
@@ -139,6 +142,19 @@ describe('server config route', () => {
       BangumiProxy: '',
       DoubanImageProxyType: 'direct',
       DoubanImageProxy: '',
+    });
+  });
+
+  it('exposes playback fault tolerance settings', async () => {
+    const { GET } = require('./route');
+
+    const response = await GET({} as NextRequest);
+    const body = await response.json();
+
+    expect(body).toMatchObject({
+      AutoSwitchSource: true,
+      VodPageTimeoutSeconds: 15,
+      VodFragmentTimeoutSeconds: 12,
     });
   });
 });

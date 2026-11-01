@@ -1,4 +1,226 @@
-﻿import { getVideoResolutionFromM3u8 } from '@/features/play/lib/hls-utils';
+﻿import {
+  checkM3u8PlaylistAvailable,
+  getVideoResolutionFromM3u8,
+  takeProbeSegmentSample,
+} from '@/features/play/lib/hls-utils';
+
+function createHeaders(values: Record<string, string>) {
+  return {
+    get: (name: string) => values[name.toLowerCase()] ?? null,
+  };
+}
+
+function createStreamBody(chunks: Uint8Array[]) {
+  let index = 0;
+  return {
+    getReader: () => ({
+      read: async () =>
+        index < chunks.length
+          ? { done: false, value: chunks[index++] }
+          : { done: true, value: undefined },
+      cancel: async () => undefined,
+    }),
+  };
+}
+
+function playlistResponse(lines: string[]) {
+  return { ok: true, status: 200, text: async () => lines.join('\n') };
+}
+
+function segmentResponse(
+  chunks: Uint8Array[],
+  headers: Record<string, string>,
+  status = 206,
+) {
+  return {
+    ok: true,
+    status,
+    headers: createHeaders(headers),
+    body: createStreamBody(chunks),
+  };
+}
+
+describe('takeProbeSegmentSample', () => {
+  const originalFetch = global.fetch;
+  const segmentUrl = 'https://cdn.example.test/video/seg-0.ts';
+
+  afterEach(() => {
+    global.fetch = originalFetch;
+  });
+
+  it('单码率清单保留测速读到的完整首分片', async () => {
+    const chunks = [new Uint8Array(60_000), new Uint8Array(40_000)];
+    global.fetch = jest
+      .fn()
+      .mockResolvedValueOnce(
+        playlistResponse(['#EXTM3U', '#EXTINF:4.000000,', segmentUrl]),
+      )
+      .mockResolvedValueOnce(
+        segmentResponse(chunks, { 'content-range': 'bytes 0-99999/100000' }),
+      ) as unknown as typeof fetch;
+
+    const result = await getVideoResolutionFromM3u8(
+      'https://example.test/single.m3u8',
+      false,
+      'demo',
+    );
+    const sample = takeProbeSegmentSample(result);
+
+    expect(sample?.url).toBe(segmentUrl);
+    expect(sample?.entry).toMatchObject({
+      complete: true,
+      totalBytes: 100_000,
+    });
+    expect(sample?.entry.data.byteLength).toBe(100_000);
+    expect(takeProbeSegmentSample(result)).toBeNull();
+  });
+
+  it('提前中断的样本按前缀保留并记录总长', async () => {
+    const chunks = Array.from({ length: 3 }, () => new Uint8Array(200_000));
+    global.fetch = jest
+      .fn()
+      .mockResolvedValueOnce(
+        playlistResponse(['#EXTM3U', '#EXTINF:4.000000,', segmentUrl]),
+      )
+      .mockResolvedValueOnce(
+        segmentResponse(chunks, {
+          'content-range': 'bytes 0-1048575/3000000',
+        }),
+      ) as unknown as typeof fetch;
+
+    const result = await getVideoResolutionFromM3u8(
+      'https://example.test/prefix.m3u8',
+      false,
+      'demo',
+    );
+
+    expect(takeProbeSegmentSample(result)?.entry).toMatchObject({
+      complete: false,
+      totalBytes: 3_000_000,
+    });
+  });
+
+  it.each([
+    [
+      '多码率清单',
+      [
+        '#EXTM3U',
+        '#EXT-X-STREAM-INF:BANDWIDTH=800000,RESOLUTION=1280x720',
+        'https://example.test/720.m3u8',
+        '#EXT-X-STREAM-INF:BANDWIDTH=2000000,RESOLUTION=1920x1080',
+        'https://example.test/1080.m3u8',
+      ],
+      segmentUrl,
+    ],
+    [
+      '相对分片地址',
+      ['#EXTM3U', '#EXTINF:4.000000,', '/segment.ts'],
+      '/segment.ts',
+    ],
+  ])('%s不保留样本', async (_label, playlistLines, firstSegment) => {
+    const fetchMock = jest
+      .fn()
+      .mockResolvedValueOnce(playlistResponse(playlistLines));
+    if (playlistLines.length > 3) {
+      fetchMock.mockResolvedValueOnce(
+        playlistResponse(['#EXTM3U', '#EXTINF:4.000000,', firstSegment]),
+      );
+    }
+    fetchMock.mockResolvedValueOnce(
+      segmentResponse([new Uint8Array(1_000)], {
+        'content-range': 'bytes 0-999/1000',
+      }),
+    );
+    global.fetch = fetchMock as unknown as typeof fetch;
+
+    const result = await getVideoResolutionFromM3u8(
+      'https://example.test/other.m3u8',
+      false,
+      'demo',
+    );
+
+    expect(takeProbeSegmentSample(result)).toBeNull();
+  });
+});
+
+describe('checkM3u8PlaylistAvailable', () => {
+  const originalFetch = global.fetch;
+  const playlistUrl =
+    '/api/proxy/m3u8?url=https%3A%2F%2Fexample.test%2Findex.m3u8&icetv-source=demo';
+
+  afterEach(() => {
+    global.fetch = originalFetch;
+    jest.useRealTimers();
+  });
+
+  it('只取一次清单，内容是 m3u8 即判可用', async () => {
+    const fetchMock = jest
+      .fn()
+      .mockResolvedValue(
+        playlistResponse(['#EXTM3U', '#EXTINF:4.000000,', '/segment.ts']),
+      );
+    global.fetch = fetchMock as unknown as typeof fetch;
+
+    await expect(checkM3u8PlaylistAvailable(playlistUrl, 3000)).resolves.toBe(
+      true,
+    );
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock).toHaveBeenCalledWith(
+      playlistUrl,
+      expect.objectContaining({ cache: 'no-store' }),
+    );
+  });
+
+  it('非 2xx 判不可用并释放响应体', async () => {
+    const cancel = jest.fn(async () => undefined);
+    global.fetch = jest.fn().mockResolvedValue({
+      ok: false,
+      status: 404,
+      body: { cancel },
+    }) as unknown as typeof fetch;
+
+    await expect(checkM3u8PlaylistAvailable(playlistUrl, 3000)).resolves.toBe(
+      false,
+    );
+    expect(cancel).toHaveBeenCalledTimes(1);
+  });
+
+  it('返回内容不是 m3u8 判不可用', async () => {
+    global.fetch = jest
+      .fn()
+      .mockResolvedValue(
+        playlistResponse(['<html>', 'blocked', '</html>']),
+      ) as unknown as typeof fetch;
+
+    await expect(checkM3u8PlaylistAvailable(playlistUrl, 3000)).resolves.toBe(
+      false,
+    );
+  });
+
+  it('到时限即判不可用并取消请求', async () => {
+    jest.useFakeTimers();
+    let requestSignal: AbortSignal | undefined;
+    global.fetch = jest.fn(
+      (_url, init) =>
+        new Promise((_resolve, reject) => {
+          requestSignal = init?.signal ?? undefined;
+          requestSignal?.addEventListener(
+            'abort',
+            () => reject(new Error('aborted')),
+            { once: true },
+          );
+        }),
+    ) as typeof fetch;
+
+    const available = checkM3u8PlaylistAvailable(playlistUrl, 3000);
+    jest.advanceTimersByTime(2999);
+    expect(requestSignal?.aborted).toBe(false);
+    jest.advanceTimersByTime(1);
+
+    await expect(available).resolves.toBe(false);
+    expect(requestSignal?.aborted).toBe(true);
+  });
+});
 
 describe('getVideoResolutionFromM3u8', () => {
   const originalFetch = global.fetch;

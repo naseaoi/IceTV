@@ -346,8 +346,10 @@ function buildMetadataFavoritePage(
 }
 
 export class LocalSqliteStorage implements IStorage {
+  // 额度池按 store 实例区分，必须复用同一个实例
+  private resourceStore?: SqliteResourceStore;
   get resources() {
-    return new SqliteResourceStore(this.db);
+    return (this.resourceStore ??= new SqliteResourceStore(this.db));
   }
   private readonly dbPath: string;
   private readonly legacyJsonPaths: string[];

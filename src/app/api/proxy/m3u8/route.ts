@@ -12,7 +12,10 @@ import {
 } from '@/lib/proxy-diagnostics';
 import { requireServerProxyQuota } from '@/lib/server-proxy-guard';
 import { resourceLimitResponse } from '@/lib/server-resource-errors';
-import { validateProxyUrlForRequest } from '@/lib/url-guard';
+import {
+  UrlValidationError,
+  validateProxyUrlForRequest,
+} from '@/lib/url-guard';
 
 import { getProxySourceKey, resolveProxyUserAgent } from '../utils';
 import {
@@ -99,6 +102,8 @@ async function handleGet(request: NextRequest) {
       reason: 'invalid-url',
       status: 403,
       message: 'Invalid URL',
+      // 只进服务端日志，区分 DNS 解析失败与解析到内网等被拦截地址
+      error: new UrlValidationError(validation.reason),
       elapsedMs: Date.now() - startedAt,
       proxyMode,
       isLive,

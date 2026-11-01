@@ -19,18 +19,22 @@ import { updateVideoUrl, usePlayInit } from '@/features/play/hooks/usePlayInit';
 import { usePlayPageState } from '@/features/play/hooks/usePlayPageState';
 import { usePlayProgress } from '@/features/play/hooks/usePlayProgress';
 import { useSkipConfig } from '@/features/play/hooks/useSkipConfig';
+import { useSourcePlaybackStatsRecorder } from '@/features/play/hooks/useSourcePlaybackStatsRecorder';
 import { useSourceSwitch } from '@/features/play/hooks/useSourceSwitch';
 import {
   applyDanmakuHeatmapVisibility,
   ensureDanmakuLoaded,
   reloadDanmaku,
 } from '@/features/play/lib/danmaku/attach';
+import { fragmentMemoryCache } from '@/features/play/lib/fragmentMemoryCache';
 import {
   peekResolvedLazyEpisodeUrl,
   prewarmLazyEpisodeUrl,
   resolveLazyEpisodeUrl,
 } from '@/features/play/lib/lazyEpisode';
+import { cancelNextEpisodePreload } from '@/features/play/lib/nextEpisodePreload';
 import { writePlayerInfo } from '@/features/play/lib/sourceProbeStore';
+import { getVodRuntimeSourceUrl } from '@/features/play/lib/vodHlsRuntime';
 import { usePlaybackStatsReporter } from '@/features/playback-stats/hooks/usePlaybackStatsReporter';
 import { useBackNavigation } from '@/hooks/useBackNavigation';
 import { usePlayerKeyboard } from '@/hooks/usePlayerKeyboard';
@@ -40,6 +44,7 @@ import {
   preloadPlayerModules,
   runManagedVideoCleanup,
 } from '@/lib/player-runtime';
+import { destroyArtPlayer } from '@/lib/player-utils';
 import { preloadProxyModes } from '@/lib/proxy-modes';
 import { mergeSourceBundle } from '@/lib/source-bundle';
 import { SearchResult } from '@/lib/types';
@@ -159,6 +164,7 @@ function AuthenticatedPlayPageClient({
     saveIntervalRef,
     lastSaveTimeRef,
     playProgressSaveStateRef,
+    historyRestoreGateRef,
     artPlayerRef,
     artRef,
     wakeLockRef,
@@ -227,7 +233,7 @@ function AuthenticatedPlayPageClient({
           player.video.load();
           destroyManagedHls(player.video);
         }
-        player.destroy();
+        destroyArtPlayer(player);
       } catch (err) {
         console.warn('清理播放器资源时出错:', err);
       }
@@ -250,9 +256,17 @@ function AuthenticatedPlayPageClient({
     }
   }, [isVideoLoading, videoLoadingStage, setVideoLoadingStage]);
 
+  const playbackStartedSourceRef = useRef<Pick<
+    SearchResult,
+    'source' | 'id'
+  > | null>(null);
+
   usePlayInit({
     currentSource,
     currentId,
+    currentSourceRef,
+    currentIdRef,
+    playbackStartedSourceRef,
     videoTitle,
     searchTitle,
     searchType,
@@ -261,6 +275,7 @@ function AuthenticatedPlayPageClient({
     videoYearRef,
     currentEpisodeIndex,
     optimizationEnabled,
+    historyRestoreGateRef,
     setLoading,
     setLoadingStage,
     setLoadingMessage,
@@ -302,6 +317,7 @@ function AuthenticatedPlayPageClient({
     lastSaveTimeRef,
     saveIntervalRef,
     wakeLockRef,
+    historyRestoreGateRef,
     searchTitle,
     currentSource,
     currentId,
@@ -342,16 +358,6 @@ function AuthenticatedPlayPageClient({
       setCurrentEpisodeIndex,
     });
 
-  usePlayerKeyboard({
-    artPlayerRef,
-    episodeHandlers: {
-      detailRef,
-      currentEpisodeIndexRef,
-      handlePreviousEpisode,
-      handleNextEpisode,
-    },
-  });
-
   const { handleToggleFavorite } = usePlayFavorite({
     currentSource,
     currentId,
@@ -375,12 +381,33 @@ function AuthenticatedPlayPageClient({
     setRealtimeLoadSpeed,
   });
 
+  const { recordPlaybackStarted, recordPlaybackFailed } =
+    useSourcePlaybackStatsRecorder({
+      sourceKey: currentSource,
+      videoId: currentId,
+      episodeIndex: currentEpisodeIndex,
+      videoUrl,
+    });
+
+  const videoUrlRef = useRef(videoUrl);
+
+  useEffect(() => {
+    videoUrlRef.current = videoUrl;
+  }, [videoUrl]);
+
   const {
     handleSourceChange,
     handleLoadingTimeout,
+    handlePlaybackRecoveryExhausted,
+    handleEpisodeUrlResolveFailed,
+    resetAutoSourceSwitch,
     finalizePendingSourceSwitchCleanup,
+    stopActiveHlsLoading,
+    restartCurrentPlayback,
+    showPendingPlaybackNotice,
   } = useSourceSwitch({
     availableSources,
+    precomputedVideoInfo,
     currentEpisodeIndex,
     artPlayerRef,
     currentSourceRef,
@@ -396,6 +423,7 @@ function AuthenticatedPlayPageClient({
     playbackRequestModeRef,
     pendingSourceSwitchCleanupRef,
     sourceChangeRequestIdRef,
+    videoUrlRef,
     setError,
     setVideoUrl,
     setVideoTitle,
@@ -410,22 +438,49 @@ function AuthenticatedPlayPageClient({
     setIsVideoLoading,
     setVideoLoadingStage,
     setVideoLoadingAttempt,
+    setPlaybackRetryNonce,
     setRealtimeLoadSpeed,
     setSourceSearchError,
     cleanupPlayer,
+    onPlaybackStartFailed: recordPlaybackFailed,
+  });
+
+  // 换集开启新的播放意图，自动换源的失败记录和次数随之清零
+  const handleEpisodeChangeRequest = useCallback(
+    (episodeNumber: number) => {
+      resetAutoSourceSwitch();
+      handleEpisodeChange(episodeNumber);
+    },
+    [handleEpisodeChange, resetAutoSourceSwitch],
+  );
+  const handlePreviousEpisodeRequest = useCallback(() => {
+    resetAutoSourceSwitch();
+    handlePreviousEpisode();
+  }, [handlePreviousEpisode, resetAutoSourceSwitch]);
+  const handleNextEpisodeRequest = useCallback(() => {
+    resetAutoSourceSwitch();
+    handleNextEpisode();
+  }, [handleNextEpisode, resetAutoSourceSwitch]);
+
+  usePlayerKeyboard({
+    artPlayerRef,
+    episodeHandlers: {
+      detailRef,
+      currentEpisodeIndexRef,
+      handlePreviousEpisode: handlePreviousEpisodeRequest,
+      handleNextEpisode: handleNextEpisodeRequest,
+    },
   });
 
   const lastResolvedLazyEpisodeRef = useRef<{
     lazyUrl: string;
     url: string;
   } | null>(null);
-  const videoUrlRef = useRef(videoUrl);
 
   useEffect(() => {
-    videoUrlRef.current = videoUrl;
-  }, [videoUrl]);
+    // 起播放行前不派生地址：历史恢复可能还要改集，提前派生会让播放器和逐集解析先按当前集白跑一遍
+    if (loading) return;
 
-  useEffect(() => {
     const episodes = detail?.episodes || [];
     const targetUrl =
       currentEpisodeIndex < episodes.length
@@ -467,10 +522,16 @@ function AuthenticatedPlayPageClient({
     }
 
     let cancelled = false;
+    // 换源开始即作废本次解析，新源的地址由提交后的详情重新触发
+    const sourceChangeRequestId = sourceChangeRequestIdRef.current;
+    const isStale = () =>
+      cancelled || sourceChangeRequestId !== sourceChangeRequestIdRef.current;
+    // 清空地址前停掉上一集的运行时，否则等待解析期间它的超时回退和恢复逻辑仍会作用到新集
+    stopActiveHlsLoading();
     setVideoUrl('');
     resolveLazyEpisodeUrl(source, targetUrl)
       .then((resolvedUrl) => {
-        if (cancelled) return;
+        if (isStale()) return;
         lastResolvedLazyEpisodeRef.current = {
           lazyUrl: targetUrl,
           url: resolvedUrl,
@@ -479,9 +540,8 @@ function AuthenticatedPlayPageClient({
         prewarmNext();
       })
       .catch(() => {
-        if (cancelled) return;
-        handleLoadingTimeout();
-        setRealtimeLoadSpeed('播放地址解析失败');
+        if (isStale()) return;
+        handleEpisodeUrlResolveFailed();
       });
 
     return () => {
@@ -490,10 +550,12 @@ function AuthenticatedPlayPageClient({
   }, [
     currentEpisodeIndex,
     detail,
-    handleLoadingTimeout,
+    handleEpisodeUrlResolveFailed,
+    loading,
     playbackRetryNonce,
-    setRealtimeLoadSpeed,
     setVideoUrl,
+    sourceChangeRequestIdRef,
+    stopActiveHlsLoading,
   ]);
 
   const handleSourceDetailFetched = useCallback(
@@ -603,7 +665,7 @@ function AuthenticatedPlayPageClient({
     setIsPlaying,
     setRealtimeLoadSpeed,
     setBlockAdEnabled,
-    handleNextEpisode,
+    handleNextEpisode: handleNextEpisodeRequest,
     handleSkipConfigChange,
     saveCurrentPlayProgress: doSaveCurrentProgress,
     reportPlaybackStats,
@@ -617,6 +679,7 @@ function AuthenticatedPlayPageClient({
     onSourceProxyFallbackStarted: useCallback(() => {
       setVideoLoadingAttempt((prev) => prev + 1);
     }, [setVideoLoadingAttempt]),
+    onPlaybackRecoveryExhausted: handlePlaybackRecoveryExhausted,
     onPlaybackStarted: useCallback(() => {
       const activeSource = currentSourceRef.current;
       const activeId = currentIdRef.current;
@@ -624,14 +687,34 @@ function AuthenticatedPlayPageClient({
         return;
       }
 
+      // 只把当前地址的起播记为该源成功并登记为已起播：运行时已释放或登记的是别的地址时，起播来自被放弃的旧地址
+      const activeVideo = artPlayerRef.current?.video;
+      const activeVideoUrl = videoUrlRef.current;
+      if (
+        activeVideoUrl &&
+        activeVideo &&
+        getVodRuntimeSourceUrl(activeVideo) === activeVideoUrl
+      ) {
+        playbackStartedSourceRef.current = {
+          source: activeSource,
+          id: activeId,
+        };
+        recordPlaybackStarted();
+      }
       sourceSwitchEpisodeAnchorRef.current = null;
       clearTargetEpisodeProgressRef.current = false;
+      showPendingPlaybackNotice();
 
       void finalizePendingSourceSwitchCleanup(activeSource, activeId);
     }, [
       finalizePendingSourceSwitchCleanup,
+      recordPlaybackStarted,
+      showPendingPlaybackNotice,
+      artPlayerRef,
       currentSourceRef,
       currentIdRef,
+      videoUrlRef,
+      playbackStartedSourceRef,
       sourceSwitchEpisodeAnchorRef,
       clearTargetEpisodeProgressRef,
     ]),
@@ -663,30 +746,26 @@ function AuthenticatedPlayPageClient({
     };
   }, [reportPlaybackStats, doSaveCheckpoint, doSaveCurrentProgress]);
 
+  // 下一集预载和分片缓存是模块级单例，页面内换集、换源和播放器重建都要沿用，只在离开播放页时释放
+  useEffect(() => {
+    return () => {
+      cancelNextEpisodePreload();
+      fragmentMemoryCache.clear();
+    };
+  }, []);
+
   const handleRetryPlayback = useCallback(() => {
+    resetAutoSourceSwitch();
     playbackRequestModeRef.current = 'episode';
-    clearTargetEpisodeProgressRef.current = true;
-    stableCurrentTimeRef.current = 0;
-    resumeTimeRef.current = 0;
-    resumeModeRef.current = null;
-    setError(null);
-    setIsVideoLoading(true);
     setVideoLoadingStage('episodeChanging');
-    setVideoLoadingAttempt((prev) => prev + 1);
     setRealtimeLoadSpeed('正在切换剧集...');
-    setPlaybackRetryNonce((prev) => prev + 1);
+    restartCurrentPlayback();
   }, [
+    resetAutoSourceSwitch,
     playbackRequestModeRef,
-    clearTargetEpisodeProgressRef,
-    stableCurrentTimeRef,
-    resumeTimeRef,
-    resumeModeRef,
-    setError,
-    setIsVideoLoading,
     setVideoLoadingStage,
-    setVideoLoadingAttempt,
     setRealtimeLoadSpeed,
-    setPlaybackRetryNonce,
+    restartCurrentPlayback,
   ]);
 
   const renderMainContent = (playbackError: string | null) => (
@@ -707,7 +786,7 @@ function AuthenticatedPlayPageClient({
       authRecoveryReasonMessage={authRecoveryReasonMessage}
       onReloginAndRecover={handleReloginAndRecover}
       onDismissAuthRecovery={dismissAuthRecovery}
-      onEpisodeChange={handleEpisodeChange}
+      onEpisodeChange={handleEpisodeChangeRequest}
       onRetryPlayback={handleRetryPlayback}
       onSourceChange={handleSourceChange}
       currentSource={currentSource}

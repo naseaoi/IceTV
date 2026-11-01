@@ -1,6 +1,8 @@
 import {
   readAggregateSearch,
+  readAutoSwitchSource,
   readDefaultAggregateSearch,
+  readDefaultAutoSwitchSource,
   readDefaultEnableOptimization,
   readDefaultFluidSearch,
   readDefaultLiveDirectConnect,
@@ -8,10 +10,12 @@ import {
   readFluidSearch,
   readLiveDirectConnect,
   resetAggregateSearch,
+  resetAutoSwitchSource,
   resetEnableOptimization,
   resetFluidSearch,
   resetLiveDirectConnect,
   writeAggregateSearch,
+  writeAutoSwitchSource,
   writeEnableOptimization,
   writeFluidSearch,
   writeLiveDirectConnect,
@@ -21,13 +25,15 @@ export type LocalPreferenceToggleId =
   | 'defaultAggregateSearch'
   | 'enableOptimization'
   | 'fluidSearch'
-  | 'liveDirectConnect';
+  | 'liveDirectConnect'
+  | 'autoSwitchSource';
 
 export type LocalPreferenceToggleSiteConfigKey =
   | 'DefaultAggregateSearch'
   | 'EnableOptimization'
   | 'FluidSearch'
-  | 'LiveDirectConnect';
+  | 'LiveDirectConnect'
+  | 'AutoSwitchSource';
 
 export type LocalPreferenceToggleState = Record<
   LocalPreferenceToggleId,
@@ -86,6 +92,16 @@ export const localPreferenceToggleDefinitions: LocalPreferenceToggleDefinition[]
       readDefaultValue: readDefaultLiveDirectConnect,
       writeValue: writeLiveDirectConnect,
       resetValue: resetLiveDirectConnect,
+    },
+    {
+      id: 'autoSwitchSource',
+      siteConfigKey: 'AutoSwitchSource',
+      title: '播放失败自动换源',
+      description: '当前源加载超时或反复出错时，自动切换到其他有该集的源',
+      readValue: readAutoSwitchSource,
+      readDefaultValue: readDefaultAutoSwitchSource,
+      writeValue: writeAutoSwitchSource,
+      resetValue: resetAutoSwitchSource,
     },
   ];
 

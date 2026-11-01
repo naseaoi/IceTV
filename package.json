@@ -1,6 +1,6 @@
 {
   "name": "icetv",
-  "version": "0.5.1",
+  "version": "0.5.2",
   "private": true,
   "engines": {
     "node": ">=22.14.0 <25",
@@ -122,7 +122,10 @@
       "better-sqlite3",
       "sharp",
       "unrs-resolver"
-    ]
+    ],
+    "patchedDependencies": {
+      "artplayer-plugin-danmuku@5.3.0": "patches/artplayer-plugin-danmuku@5.3.0.patch"
+    }
   },
   "packageManager": "pnpm@10.14.0"
 }

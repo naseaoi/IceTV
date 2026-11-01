@@ -254,7 +254,7 @@ const Sidebar = ({ onToggle, activePath = '/' }: SidebarProps) => {
       <div className='hidden md:flex'>
         <aside
           data-sidebar
-          className={`fixed left-0 top-0 z-10 h-screen border-r border-gray-200/50 bg-white/40 shadow-lg backdrop-blur-xl transition-[width] duration-300 ease-[cubic-bezier(0.25,0.1,0.25,1)] dark:border-gray-700/50 dark:bg-gray-900/70 ${
+          className={`fixed left-0 top-0 z-10 h-dvh border-r border-gray-200/50 bg-white/40 shadow-lg backdrop-blur-xl transition-[width] duration-300 ease-[cubic-bezier(0.25,0.1,0.25,1)] dark:border-gray-700/50 dark:bg-gray-900/70 ${
             isCollapsed ? 'w-20' : 'w-60'
           }`}
           style={{
@@ -333,7 +333,7 @@ const Sidebar = ({ onToggle, activePath = '/' }: SidebarProps) => {
               </Link>
             </nav>
 
-            <div className='flex-1 overflow-y-auto px-3 pt-5'>
+            <div className='min-h-0 flex-1 overflow-y-auto px-3 pt-5'>
               <div className='space-y-1.5'>
                 {menuItems.map((item) => {
                   const typeMatch = item.href.match(/type=([^&]+)/)?.[1];
@@ -375,7 +375,7 @@ const Sidebar = ({ onToggle, activePath = '/' }: SidebarProps) => {
               </div>
             </div>
 
-            <div className='px-3 pb-4 pt-2'>
+            <div className='px-3 pb-[calc(1rem+env(safe-area-inset-bottom))] pt-2'>
               <div className='mx-1 mb-2 h-px bg-gradient-to-r from-transparent via-gray-200 to-transparent dark:via-gray-700' />
               <div className='space-y-1.5'>
                 <MessageBell variant='sidebar' isCollapsed={isCollapsed} />

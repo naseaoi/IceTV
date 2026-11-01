@@ -1,6 +1,7 @@
 import {
   areEpisodeGroupLabelsEquivalent,
   hasUsableEpisodeGroups,
+  remapEpisodeIndexToDetail,
   resolvePlayRecordEpisode,
 } from '@/lib/episode-groups';
 import type { EpisodeGroup } from '@/lib/types';
@@ -185,5 +186,54 @@ describe('resolvePlayRecordEpisode', () => {
     );
 
     expect(resolved.trusted).toBe(false);
+  });
+});
+
+describe('remapEpisodeIndexToDetail', () => {
+  const listOf = (groups?: EpisodeGroup[], count?: number) => ({
+    episodes: Array.from(
+      { length: count ?? groups?.reduce((sum, g) => sum + g.count, 0) ?? 0 },
+      (_, index) => `${index}`,
+    ),
+    episode_groups: groups,
+  });
+  const GROUPS_10_10: EpisodeGroup[] = [
+    { label: '繁中', count: 10 },
+    { label: '简中', count: 10 },
+  ];
+
+  it('靠前分组新增剧集后按原分组与组内位置换算', () => {
+    expect(
+      remapEpisodeIndexToDetail(listOf(GROUPS_10_10), listOf(GROUPS_11_11), 19),
+    ).toBe(20);
+    expect(
+      remapEpisodeIndexToDetail(listOf(GROUPS_10_10), listOf(GROUPS_11_11), 9),
+    ).toBe(9);
+  });
+
+  it('总集数不变但分组集数变化时同样换算', () => {
+    expect(
+      remapEpisodeIndexToDetail(
+        listOf([
+          { label: '繁中', count: 11 },
+          { label: '简中', count: 10 },
+        ]),
+        listOf([
+          { label: '繁中', count: 10 },
+          { label: '简中', count: 11 },
+        ]),
+        19,
+      ),
+    ).toBe(18);
+  });
+
+  it('不分组的源保持原索引', () => {
+    expect(
+      remapEpisodeIndexToDetail(
+        listOf(undefined, 10),
+        listOf(undefined, 11),
+        9,
+      ),
+    ).toBe(9);
   });
 });

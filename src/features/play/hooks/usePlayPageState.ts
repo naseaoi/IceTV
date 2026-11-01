@@ -4,7 +4,10 @@ import type Artplayer from 'artplayer';
 import type { ReadonlyURLSearchParams } from 'next/navigation';
 import { useEffect, useRef, useState } from 'react';
 
-import type { PlayProgressSaveState } from '@/features/play/hooks/usePlayProgress';
+import type {
+  HistoryRestoreGate,
+  PlayProgressSaveState,
+} from '@/features/play/hooks/usePlayProgress';
 import type { SourceSwitchEpisodeAnchor } from '@/features/play/lib/episodeResumePolicy';
 import type { WakeLockSentinel } from '@/features/play/lib/playTypes';
 import type { ResumeMode } from '@/features/play/lib/resumePlayback';
@@ -27,7 +30,11 @@ export type VideoLoadingStage =
   | 'initing'
   | 'sourceChanging'
   | 'episodeChanging';
-export type PlaybackRequestMode = 'initial' | 'episode' | 'manual-source';
+export type PlaybackRequestMode =
+  | 'initial'
+  | 'episode'
+  | 'manual-source'
+  | 'auto-source';
 export type VideoQualityInfo = {
   quality: string;
   loadSpeed: string;
@@ -188,6 +195,11 @@ export function usePlayPageState(searchParams: ReadonlyURLSearchParams) {
     pending: null,
     lastSavedFingerprint: null,
   });
+  const historyRestoreGateRef = useRef<HistoryRestoreGate>({
+    playRecords: null,
+    settledKey: '',
+    listeners: new Set(),
+  });
 
   const artPlayerRef = useRef<Artplayer | null>(null);
   const artRef = useRef<HTMLDivElement | null>(null);
@@ -283,6 +295,7 @@ export function usePlayPageState(searchParams: ReadonlyURLSearchParams) {
     saveIntervalRef,
     lastSaveTimeRef,
     playProgressSaveStateRef,
+    historyRestoreGateRef,
     artPlayerRef,
     artRef,
     wakeLockRef,

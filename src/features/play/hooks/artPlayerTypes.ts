@@ -67,6 +67,8 @@ export interface UseArtPlayerParams {
   onPlaybackStarted?: () => void;
   onDanmakuEnable?: () => void;
   onSourceProxyFallbackStarted?: () => void;
+  // 返回 true 表示已自动换源接手，播放器不再展示当前源失败
+  onPlaybackRecoveryExhausted?: (reason: string) => boolean;
   onCurrentSourceVideoInfo?: (
     info: CurrentSourceVideoInfo,
     context: CurrentSourceVideoInfoContext,

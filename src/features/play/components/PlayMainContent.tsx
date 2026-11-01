@@ -20,7 +20,14 @@ import type {
   VideoLoadingStage,
 } from '@/features/play/hooks/usePlayPageState';
 import type { DanmakuReloadHandler } from '@/features/play/lib/danmaku/types';
-import { resolveVodPlayerLoadingTimeoutSeconds } from '@/features/play/lib/vodSourcePlaybackPolicy';
+import {
+  describeVodStartupState,
+  getVodStartupProgress,
+} from '@/features/play/lib/playerLoading';
+import {
+  resolveVodStartupTimeouts,
+  VOD_STARTUP_PROGRESS_POLL_MS,
+} from '@/features/play/lib/vodSourcePlaybackPolicy';
 import { SearchResult } from '@/lib/types';
 
 interface PlayMainContentProps {
@@ -64,16 +71,21 @@ interface PlayMainContentProps {
   onAddSources?: (newSources: SearchResult[]) => void;
   onDanmakuReload?: DanmakuReloadHandler;
   onDanmakuHeatmapChange?: (enabled: boolean) => void;
-  onLoadingTimeout?: () => void;
+  // 返回 true 表示已切换线路或自动换源，继续显示加载而不进入超时状态
+  onLoadingTimeout?: () => boolean | void;
   searchType?: string;
   playbackError?: string | null;
 }
 
-const DEFAULT_PLAYER_LOADING_TIMEOUT_SECONDS = 15;
 const SOURCE_RECOMMENDATION_AUTO_DISMISS_MS = 5000;
 
-export function buildLoadingTimeoutMessage(timeoutSeconds: number): string {
-  return `已等待超过 ${timeoutSeconds} 秒，源站响应超时`;
+export function buildLoadingTimeoutMessage(
+  timeoutSeconds: number,
+  totalLimit = false,
+): string {
+  return totalLimit
+    ? `媒体加载已达 ${timeoutSeconds} 秒，仍未能起播`
+    : `媒体加载已连续 ${timeoutSeconds} 秒无进展，源站响应超时`;
 }
 
 const playAccents: Record<string, PlayerPageAccent> = {
@@ -165,16 +177,33 @@ const LOADING_STAGE_CONFIG: Record<
   },
 };
 
+function RetryPlaybackButton({ onRetry }: { onRetry: () => void }) {
+  return (
+    <button
+      type='button'
+      onClick={onRetry}
+      className='mx-auto inline-flex h-10 items-center justify-center gap-2 rounded-lg bg-white px-4 text-sm font-medium text-zinc-950 transition-colors hover:bg-zinc-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/70'
+    >
+      <RefreshCw className='h-4 w-4' />
+      <span>继续尝试</span>
+    </button>
+  );
+}
+
 function PlayLoadingOverlay({
   loadingTimedOut,
   videoLoadingStage,
   realtimeLoadSpeed,
   timeoutSeconds,
+  totalLimit,
+  onRetry,
 }: {
   loadingTimedOut: boolean;
   videoLoadingStage: VideoLoadingStage;
   realtimeLoadSpeed: string;
   timeoutSeconds: number;
+  totalLimit: boolean;
+  onRetry: () => void;
 }) {
   const stageConfig = LOADING_STAGE_CONFIG[videoLoadingStage];
   const statusText = realtimeLoadSpeed || stageConfig.status;
@@ -184,8 +213,10 @@ function PlayLoadingOverlay({
       <PlayerOverlayPanel
         zClassName='z-[500]'
         title={stageConfig.timeoutTitle}
-        message={buildLoadingTimeoutMessage(timeoutSeconds)}
-      />
+        message={buildLoadingTimeoutMessage(timeoutSeconds, totalLimit)}
+      >
+        <RetryPlaybackButton onRetry={onRetry} />
+      </PlayerOverlayPanel>
     );
   }
 
@@ -214,14 +245,7 @@ function PlaybackErrorOverlay({
       title={message}
       message='请从右侧面板手动切换其他源站。'
     >
-      <button
-        type='button'
-        onClick={onRetry}
-        className='mx-auto inline-flex h-10 items-center justify-center gap-2 rounded-lg bg-white px-4 text-sm font-medium text-zinc-950 transition-colors hover:bg-zinc-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/70'
-      >
-        <RefreshCw className='h-4 w-4' />
-        <span>继续尝试</span>
-      </button>
+      <RetryPlaybackButton onRetry={onRetry} />
     </PlayerOverlayPanel>
   );
 }
@@ -334,19 +358,14 @@ export function PlayMainContent(props: PlayMainContentProps) {
   );
 
   const [loadingTimedOut, setLoadingTimedOut] = useState(false);
+  const [totalLimitReached, setTotalLimitReached] = useState(false);
   const runtimeConfig = useRuntimeConfig();
-  const configuredLoadingTimeoutSeconds = Math.max(
-    1,
-    Math.floor(
-      runtimeConfig.VOD_PAGE_TIMEOUT_SECONDS ||
-        DEFAULT_PLAYER_LOADING_TIMEOUT_SECONDS,
-    ),
-  );
-  const loadingTimeoutSeconds = resolveVodPlayerLoadingTimeoutSeconds(
-    currentSource,
-    configuredLoadingTimeoutSeconds,
-  );
-  const loadingTimeoutMs = loadingTimeoutSeconds * 1000;
+  const { idleMs: loadingTimeoutMs, totalMs: totalLoadingTimeoutMs } =
+    resolveVodStartupTimeouts(
+      currentSource,
+      runtimeConfig.VOD_PAGE_TIMEOUT_SECONDS,
+      runtimeConfig.VOD_FRAGMENT_TIMEOUT_SECONDS,
+    );
   const onLoadingTimeoutRef = useRef(onLoadingTimeout);
   const onDismissSourceRecommendationRef = useRef(
     onDismissSourceRecommendation,
@@ -367,17 +386,60 @@ export function PlayMainContent(props: PlayMainContentProps) {
       return;
     }
     setLoadingTimedOut(false);
-    const timer = setTimeout(() => {
+    setTotalLimitReached(false);
+    // 原生播放与详情、懒解析阶段没有 hls 运行时登记进度，按总上限兜底，避免无限加载。
+    const effectStartedAt = performance.now();
+    const fallbackProgress = {
+      sourceKey: '',
+      startedAt: effectStartedAt,
+      lastProgressAt: effectStartedAt,
+    };
+    let expiredProgress: ReturnType<typeof getVodStartupProgress> = null;
+    const timer = setInterval(() => {
+      const video = artRef.current?.querySelector('video');
+      const runtimeProgress = video ? getVodStartupProgress(video) : null;
+      const progress =
+        runtimeProgress &&
+        (!runtimeProgress.sourceKey ||
+          runtimeProgress.sourceKey === currentSource)
+          ? runtimeProgress
+          : fallbackProgress;
+      if (progress === expiredProgress) return;
+      const now = performance.now();
+      if (
+        progress === fallbackProgress &&
+        now - progress.startedAt < totalLoadingTimeoutMs
+      )
+        return;
+      const totalLimit = now - progress.startedAt >= totalLoadingTimeoutMs;
+      if (!totalLimit && now - progress.lastProgressAt < loadingTimeoutMs)
+        return;
+      expiredProgress = progress;
+      console.warn('点播起播超时', {
+        totalLimit,
+        progressSource:
+          progress === fallbackProgress ? 'fallback' : 'media-runtime',
+        elapsedMs: Math.round(now - progress.startedAt),
+        idleMs: Math.round(now - progress.lastProgressAt),
+        videoLoadingStage,
+        ...describeVodStartupState(video),
+      });
+      if (onLoadingTimeoutRef.current?.() === true) {
+        return;
+      }
+      setTotalLimitReached(totalLimit);
       setLoadingTimedOut(true);
-      onLoadingTimeoutRef.current?.();
-    }, loadingTimeoutMs);
-    return () => clearTimeout(timer);
+    }, VOD_STARTUP_PROGRESS_POLL_MS);
+    return () => clearInterval(timer);
   }, [
+    artRef,
+    currentSource,
     isVideoLoading,
     videoLoadingStage,
     videoLoadingAttempt,
     playbackError,
     loadingTimeoutMs,
+    totalLoadingTimeoutMs,
   ]);
 
   useEffect(() => {
@@ -418,7 +480,12 @@ export function PlayMainContent(props: PlayMainContentProps) {
               loadingTimedOut={loadingTimedOut}
               videoLoadingStage={videoLoadingStage}
               realtimeLoadSpeed={loadingStatusText}
-              timeoutSeconds={loadingTimeoutSeconds}
+              timeoutSeconds={
+                (totalLimitReached ? totalLoadingTimeoutMs : loadingTimeoutMs) /
+                1000
+              }
+              totalLimit={totalLimitReached}
+              onRetry={onRetryPlayback}
             />
           )}
           {playbackError && (

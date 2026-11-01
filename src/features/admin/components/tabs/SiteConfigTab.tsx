@@ -32,7 +32,10 @@ import {
   siteDoubanImageProxyTypeOptions,
 } from '@/lib/douban-options';
 import { DEFAULT_DOUBAN_IMAGE_PROXY_TYPE } from '@/lib/douban-source';
-import { localPreferenceToggleDefinitions } from '@/lib/local-preference-toggles';
+import {
+  type LocalPreferenceToggleSiteConfigKey,
+  localPreferenceToggleDefinitions,
+} from '@/lib/local-preference-toggles';
 import { DEFAULT_RUNTIME_PARAMS } from '@/lib/runtime-params';
 import { DEFAULT_SITE_FOOTER_TEXT } from '@/lib/site-footer';
 import {
@@ -51,6 +54,7 @@ const DEFAULT_SITE_SETTINGS: SiteConfig = {
   DefaultAggregateSearch: true,
   EnableOptimization: true,
   LiveDirectConnect: false,
+  AutoSwitchSource: false,
   EnableDanmaku: false,
   ...DEFAULT_RUNTIME_PARAMS,
   DoubanProxyType: 'direct',
@@ -74,6 +78,7 @@ type EditableSiteSettings = Pick<
   | 'DefaultAggregateSearch'
   | 'EnableOptimization'
   | 'LiveDirectConnect'
+  | 'AutoSwitchSource'
   | 'EnableDanmaku'
   | 'DoubanProxyType'
   | 'BangumiDataSource'
@@ -105,6 +110,7 @@ function buildSiteSettings(config: AdminConfig): SiteConfig {
     DefaultAggregateSearch: config.SiteConfig.DefaultAggregateSearch ?? true,
     EnableOptimization: config.SiteConfig.EnableOptimization ?? true,
     LiveDirectConnect: config.SiteConfig.LiveDirectConnect ?? false,
+    AutoSwitchSource: config.SiteConfig.AutoSwitchSource ?? false,
     EnableDanmaku: config.SiteConfig.EnableDanmaku ?? false,
     DisableYellowFilter: config.SiteConfig.DisableYellowFilter ?? false,
     FluidSearch: config.SiteConfig.FluidSearch ?? true,
@@ -123,6 +129,7 @@ function normalizeEditableSiteSettings(
     DefaultAggregateSearch: value.DefaultAggregateSearch ?? true,
     EnableOptimization: value.EnableOptimization ?? true,
     LiveDirectConnect: value.LiveDirectConnect ?? false,
+    AutoSwitchSource: value.AutoSwitchSource ?? false,
     EnableDanmaku: value.EnableDanmaku ?? false,
     DoubanProxyType: normalizeSiteDoubanProxyType(value.DoubanProxyType),
     BangumiDataSource: normalizeSiteBangumiDataSource(value.BangumiDataSource),
@@ -235,11 +242,7 @@ const SiteConfigComponent = ({
   };
 
   const handleLocalPreferenceDefaultToggle = (
-    siteConfigKey:
-      | 'DefaultAggregateSearch'
-      | 'EnableOptimization'
-      | 'FluidSearch'
-      | 'LiveDirectConnect',
+    siteConfigKey: LocalPreferenceToggleSiteConfigKey,
   ) => {
     setSiteSettings(
       (prev) =>

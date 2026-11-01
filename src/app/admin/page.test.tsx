@@ -109,6 +109,7 @@ describe('AdminPage role visibility', () => {
       DefaultAggregateSearch: true,
       EnableOptimization: true,
       LiveDirectConnect: false,
+      AutoSwitchSource: false,
       SearchDownstreamMaxPage: 1,
       SiteInterfaceCacheTime: 300,
       DoubanProxyType: '',

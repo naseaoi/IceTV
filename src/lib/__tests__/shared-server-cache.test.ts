@@ -113,6 +113,109 @@ describe('shared server cache', () => {
     expect(second.peek('same')).toBeNull();
   });
 
+  it('writes shared expiry from getTtl so other instances hydrate the same window', async () => {
+    const clock = jest.spyOn(Date, 'now').mockReturnValue(1000);
+    const options = {
+      name: 'ttl-test',
+      freshMs: 1000,
+      staleMs: 1000,
+      enabled: true,
+      getTtl: () => ({ freshMs: 60_000, staleMs: 5000 }),
+    };
+    await createSharedServerCache<string>(options).getOrLoad(
+      'same',
+      async () => 'long',
+    );
+    expect(db.setSharedCache).toHaveBeenCalledWith(
+      expect.any(String),
+      expect.any(String),
+      '"long"',
+      61_000,
+      66_000,
+      1000,
+    );
+
+    clock.mockReturnValue(30_000);
+    const second = createSharedServerCache<string>(options);
+    const loader = jest.fn(async () => 'unused');
+    await expect(second.getOrLoad('same', loader)).resolves.toBe('long');
+    expect(loader).not.toHaveBeenCalled();
+    clock.mockReturnValue(62_000);
+    expect(second.peek('same')).toEqual({ value: 'long', fresh: false });
+    clock.mockReturnValue(66_000);
+    expect(second.peek('same')).toBeNull();
+  });
+
+  it('falls back like the local cache when getTtl omits the stale window', async () => {
+    jest.spyOn(Date, 'now').mockReturnValue(1000);
+    await createSharedServerCache<string>({
+      name: 'ttl-cache-stale',
+      freshMs: 1000,
+      staleMs: 3000,
+      enabled: true,
+      getTtl: () => ({ freshMs: 60_000 }),
+    }).getOrLoad('same', async () => 'cache-stale');
+    await createSharedServerCache<string>({
+      name: 'ttl-cache-fresh',
+      freshMs: 1000,
+      enabled: true,
+      getTtl: () => ({ freshMs: 60_000 }),
+    }).getOrLoad('same', async () => 'cache-fresh');
+
+    expect(db.setSharedCache).toHaveBeenNthCalledWith(
+      1,
+      expect.any(String),
+      expect.any(String),
+      '"cache-stale"',
+      61_000,
+      64_000,
+      1000,
+    );
+    expect(db.setSharedCache).toHaveBeenNthCalledWith(
+      2,
+      expect.any(String),
+      expect.any(String),
+      '"cache-fresh"',
+      61_000,
+      62_000,
+      1000,
+    );
+  });
+
+  it('keeps the cache-level expiry when getTtl is absent', async () => {
+    jest.spyOn(Date, 'now').mockReturnValue(1000);
+    await createSharedServerCache<string>({
+      name: 'no-ttl-stale',
+      freshMs: 1000,
+      staleMs: 500,
+      enabled: true,
+    }).getOrLoad('same', async () => 'with-stale');
+    await createSharedServerCache<string>({
+      name: 'no-ttl-fresh',
+      freshMs: 1000,
+      enabled: true,
+    }).getOrLoad('same', async () => 'fresh-only');
+
+    expect(db.setSharedCache).toHaveBeenNthCalledWith(
+      1,
+      expect.any(String),
+      expect.any(String),
+      '"with-stale"',
+      2000,
+      2500,
+      1000,
+    );
+    expect(db.setSharedCache).toHaveBeenNthCalledWith(
+      2,
+      expect.any(String),
+      expect.any(String),
+      '"fresh-only"',
+      2000,
+      3000,
+      1000,
+    );
+  });
+
   it('round-trips binary cover data with an explicit codec', async () => {
     const options = {
       name: 'binary-test',

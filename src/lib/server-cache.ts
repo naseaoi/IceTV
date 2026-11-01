@@ -43,6 +43,19 @@ function normalizeLimit(value: number | undefined, fallback: number): number {
   return Math.max(0, Math.floor(value));
 }
 
+export function resolveCacheEntryTtl<T>(
+  opts: Pick<SwrCacheOptions<T>, 'freshMs' | 'staleMs' | 'getTtl'>,
+  value: T,
+): { freshMs: number; staleMs: number } {
+  const staleMs = opts.staleMs ?? opts.freshMs;
+  const ttl = opts.getTtl?.(value);
+  if (!ttl) return { freshMs: opts.freshMs, staleMs };
+  return {
+    freshMs: normalizeLimit(ttl.freshMs, opts.freshMs),
+    staleMs: normalizeLimit(ttl.staleMs, staleMs),
+  };
+}
+
 function estimateUtf8Bytes(value: string): number {
   if (typeof TextEncoder !== 'undefined') {
     return new TextEncoder().encode(value).byteLength;
@@ -67,13 +80,7 @@ function normalizeWeight(value: number): number {
 }
 
 export function createSwrCache<T>(opts: SwrCacheOptions<T>) {
-  const {
-    name,
-    freshMs,
-    staleMs = freshMs,
-    maxWeightBytes,
-    estimateWeight,
-  } = opts;
+  const { name, maxWeightBytes, estimateWeight } = opts;
   const maxSize = normalizeLimit(opts.maxSize, DEFAULT_MAX_SIZE);
   const maxWeight =
     maxWeightBytes === undefined
@@ -158,13 +165,11 @@ export function createSwrCache<T>(opts: SwrCacheOptions<T>) {
     }
 
     remove(key);
-    const ttl = opts.getTtl?.(value);
-    const entryFreshMs = ttl ? normalizeLimit(ttl.freshMs, freshMs) : freshMs;
-    const entryStaleMs = ttl ? normalizeLimit(ttl.staleMs, staleMs) : staleMs;
+    const ttl = resolveCacheEntryTtl(opts, value);
     const entry: Entry<T> = {
       value,
-      freshUntil: expiry?.freshUntil ?? now + entryFreshMs,
-      staleUntil: expiry?.staleUntil ?? now + entryFreshMs + entryStaleMs,
+      freshUntil: expiry?.freshUntil ?? now + ttl.freshMs,
+      staleUntil: expiry?.staleUntil ?? now + ttl.freshMs + ttl.staleMs,
       weight,
     };
     store.set(key, entry);

@@ -9,12 +9,14 @@ export interface SiteConfig {
   DefaultAggregateSearch: boolean;
   EnableOptimization: boolean;
   LiveDirectConnect: boolean;
+  AutoSwitchSource: boolean;
   EnableDanmaku: boolean;
   DanmakuEpisodeLimit: number;
   DanmakuRequestTimeoutSeconds: number;
   SearchDownstreamMaxPage: number;
   SiteInterfaceCacheTime: number;
   VodPageTimeoutSeconds: number;
+  VodFragmentTimeoutSeconds: number;
   PlaybackHistoryPageSize: number;
   PlaybackHistoryLimit: number;
   SearchHistoryLimit: number;

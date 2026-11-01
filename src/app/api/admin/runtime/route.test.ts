@@ -59,7 +59,7 @@ describe('runtime parameter updates', () => {
       expect.objectContaining({
         SiteConfig: expect.objectContaining({
           DanmakuRequestTimeoutSeconds: 25,
-          DanmakuEpisodeLimit: 8000,
+          DanmakuEpisodeLimit: 3000,
           VodPageTimeoutSeconds: 45,
           SiteName: 'IceTV',
         }),
@@ -67,9 +67,26 @@ describe('runtime parameter updates', () => {
     );
   });
 
-  it('fills the timeout default when reading an older configuration', () => {
+  it('fills danmaku defaults when reading an older configuration', () => {
     expect(normalizeRuntimeParams({}).DanmakuRequestTimeoutSeconds).toBe(12);
     expect(DEFAULT_RUNTIME_PARAMS.DanmakuRequestTimeoutSeconds).toBe(12);
+    expect(normalizeRuntimeParams({}).DanmakuEpisodeLimit).toBe(3000);
+    expect(DEFAULT_RUNTIME_PARAMS.DanmakuEpisodeLimit).toBe(3000);
+  });
+
+  it('saves the fragment timeout within its range', async () => {
+    const response = await POST(request({ VodFragmentTimeoutSeconds: 20 }));
+
+    expect(response.status).toBe(200);
+    expect(saveConfig).toHaveBeenCalledWith(
+      expect.objectContaining({
+        SiteConfig: expect.objectContaining({
+          VodFragmentTimeoutSeconds: 20,
+          VodPageTimeoutSeconds: 45,
+        }),
+      }),
+    );
+    expect(normalizeRuntimeParams({}).VodFragmentTimeoutSeconds).toBe(10);
   });
 
   it.each([
@@ -84,6 +101,8 @@ describe('runtime parameter updates', () => {
     { DanmakuRequestTimeoutSeconds: '12' },
     { DanmakuRequestTimeoutSeconds: Number.NaN },
     { DanmakuRequestTimeoutSeconds: Infinity },
+    { VodFragmentTimeoutSeconds: 2 },
+    { VodFragmentTimeoutSeconds: 61 },
   ])(
     'rejects invalid updates before reading or saving config: %p',
     async (body) => {

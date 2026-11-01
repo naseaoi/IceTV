@@ -128,7 +128,7 @@ export function PlayerPageLayout({
               </span>
             </>
           )}
-          <div className='ml-auto hidden flex-shrink-0 lg:block'>
+          <div className='ml-auto hidden flex-shrink-0 split:block'>
             <TogglePanelButton
               collapsed={isPanelCollapsed}
               onClick={onTogglePanel}
@@ -137,20 +137,20 @@ export function PlayerPageLayout({
           </div>
         </div>
 
-        {/* 内容区：移动端上下排列，桌面端播放器吃满剩余宽高 + 固定宽右面板 */}
-        <div className='flex min-h-0 flex-1 flex-col md:flex-row'>
-          <div className='relative aspect-video max-h-[38dvh] w-full flex-shrink-0 md:aspect-auto md:h-full md:max-h-none md:min-w-0 md:flex-1 max-md:landscape:aspect-auto max-md:landscape:max-h-none max-md:landscape:min-h-0 max-md:landscape:flex-1'>
+        {/* 内容区：移动端与竖屏平板上下排列，分栏时播放器吃满剩余宽高 + 固定宽右面板 */}
+        <div className='flex min-h-0 flex-1 flex-col split:flex-row'>
+          <div className='max-md:landscape:aspect-auto max-md:landscape:max-h-none max-md:landscape:min-h-0 max-md:landscape:flex-1 relative aspect-video max-h-[38dvh] w-full flex-shrink-0 split:aspect-auto split:h-full split:max-h-none split:min-w-0 split:flex-1'>
             <div className='absolute inset-0'>
               <div
                 ref={artRef}
-                className='h-full w-full overflow-hidden rounded-xl bg-black shadow-lg ring-1 ring-black/10 dark:ring-white/10 max-md:rounded-none max-md:shadow-none max-md:ring-0'
+                className='max-md:rounded-none max-md:shadow-none max-md:ring-0 h-full w-full overflow-hidden rounded-xl bg-black shadow-lg ring-1 ring-black/10 dark:ring-white/10'
               />
               {playerOverlay}
             </div>
           </div>
 
           {/* 移动端播放信息：标题 + 标签 */}
-          <div className='flex-shrink-0 px-4 pt-3 md:hidden max-md:landscape:hidden'>
+          <div className='max-md:landscape:hidden flex-shrink-0 px-4 pt-3 md:hidden'>
             <div className='flex min-w-0 items-center gap-2'>
               <TitleIconBadge icon={TitleIcon} accent={accent} />
               <h1 className='min-w-0 truncate text-lg font-semibold text-gray-900 dark:text-gray-100'>
@@ -174,12 +174,12 @@ export function PlayerPageLayout({
           </div>
 
           <div
-            className={`min-h-0 overflow-hidden transition-[max-width,margin,opacity] duration-300 ease-[cubic-bezier(0.25,0.1,0.25,1)] max-md:px-4 md:mt-0 md:h-full md:w-[21rem] md:flex-none xl:w-[24rem] max-md:landscape:hidden ${
+            className={`max-md:px-4 max-md:landscape:hidden min-h-0 overflow-hidden transition-[max-width,margin,opacity] duration-300 ease-[cubic-bezier(0.25,0.1,0.25,1)] split:mt-0 split:h-full split:w-[21rem] split:flex-none xl:w-[24rem] ${
               isPanelCollapsed
                 ? `${
                     mobilePanelAlwaysVisible ? 'mt-3 flex-1' : 'hidden'
-                  } md:pointer-events-none md:ml-0 md:mt-0 md:block md:max-w-0 md:flex-none md:opacity-0`
-                : 'mt-3 flex-1 md:ml-3 md:max-w-[24rem] md:opacity-100'
+                  } split:pointer-events-none split:ml-0 split:mt-0 split:block split:max-w-0 split:flex-none split:opacity-0`
+                : 'mt-3 flex-1 split:ml-3 split:max-w-[24rem] split:opacity-100'
             }`}
           >
             {rightPanel}

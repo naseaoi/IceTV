@@ -281,6 +281,7 @@ async function getInitConfig(
       DefaultAggregateSearch: true,
       EnableOptimization: true,
       LiveDirectConnect: false,
+      AutoSwitchSource: false,
       EnableDanmaku: false,
       ...normalizeRuntimeParams({
         ...DEFAULT_RUNTIME_PARAMS,
@@ -512,6 +513,7 @@ export function configSelfCheck(adminConfig: AdminConfig): AdminConfig {
       DefaultAggregateSearch: true,
       EnableOptimization: true,
       LiveDirectConnect: false,
+      AutoSwitchSource: false,
       EnableDanmaku: false,
       ...normalizeRuntimeParams({
         ...DEFAULT_RUNTIME_PARAMS,
@@ -553,6 +555,9 @@ export function configSelfCheck(adminConfig: AdminConfig): AdminConfig {
   }
   if (typeof adminConfig.SiteConfig.LiveDirectConnect !== 'boolean') {
     adminConfig.SiteConfig.LiveDirectConnect = false;
+  }
+  if (typeof adminConfig.SiteConfig.AutoSwitchSource !== 'boolean') {
+    adminConfig.SiteConfig.AutoSwitchSource = false;
   }
   if (typeof adminConfig.SiteConfig.EnableDanmaku !== 'boolean') {
     adminConfig.SiteConfig.EnableDanmaku = false;
@@ -962,6 +967,7 @@ export async function getPublicConfig() {
     DefaultAggregateSearch: config.SiteConfig.DefaultAggregateSearch,
     EnableOptimization: config.SiteConfig.EnableOptimization,
     LiveDirectConnect: config.SiteConfig.LiveDirectConnect,
+    AutoSwitchSource: config.SiteConfig.AutoSwitchSource,
     EnableDanmaku: config.SiteConfig.EnableDanmaku,
     ...normalizeRuntimeParams(config.SiteConfig),
     DoubanProxyType: getPublicDoubanProxyType(

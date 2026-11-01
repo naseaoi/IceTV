@@ -27,8 +27,9 @@ WORKDIR /app
 # Docker build 环境不需要安装 git hooks；避免 husky 在无 .git / 无 git 时失败
 ENV HUSKY=0
 
-# 仅复制依赖清单，提高构建缓存利用率
+# 仅复制依赖清单与 pnpm 补丁，提高构建缓存利用率
 COPY package.json pnpm-lock.yaml ./
+COPY patches ./patches
 
 # 安装所有依赖（含 devDependencies，后续会裁剪）
 # npmjs.org 对 CI runner IP 偶发 403，使用镜像源规避

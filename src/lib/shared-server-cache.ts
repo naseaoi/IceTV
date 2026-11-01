@@ -3,7 +3,11 @@ import 'server-only';
 import { createHash, randomUUID } from 'node:crypto';
 
 import { db } from '@/lib/db';
-import { type SwrCacheOptions, createSwrCache } from '@/lib/server-cache';
+import {
+  type SwrCacheOptions,
+  createSwrCache,
+  resolveCacheEntryTtl,
+} from '@/lib/server-cache';
 import { ResourceLimitError } from '@/lib/server-resource-errors';
 import type { SharedCacheRecord } from '@/lib/types';
 
@@ -96,12 +100,13 @@ export function createSharedServerCache<T>(
       )
         return value;
       const now = Date.now();
+      const ttl = resolveCacheEntryTtl(options, value);
       await db.setSharedCache(
         sharedKey,
         token,
         serialized,
-        now + options.freshMs,
-        now + options.freshMs + (options.staleMs ?? options.freshMs),
+        now + ttl.freshMs,
+        now + ttl.freshMs + ttl.staleMs,
         now,
       );
       if (now - lastPruneAt >= 60_000) {

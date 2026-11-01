@@ -121,7 +121,6 @@ interface UseLiveSourcesReturn {
   loadingMessage: string;
   loadingProgress: number;
   error: string | null;
-  setError: Dispatch<SetStateAction<string | null>>;
   liveSources: LiveSource[];
   currentSource: LiveSource | null;
   currentSourceRef: MutableRefObject<LiveSource | null>;
@@ -457,7 +456,7 @@ export function useLiveSources({
       }
     } catch (error) {
       if (epgRequestIdRef.current === requestId) {
-        console.error('鑾峰彇鑺傜洰鍗曚俊鎭け璐?', error);
+        console.error('获取节目单信息失败:', error);
       }
     } finally {
       if (epgRequestIdRef.current === requestId) {
@@ -467,7 +466,8 @@ export function useLiveSources({
   };
 
   const handleChannelChange = async (channel: LiveChannel) => {
-    if (isSwitchingSource) return;
+    // 点当前频道直接忽略：频道与地址不变时加载 effect 不会重跑，清理掉的播放器不会重建
+    if (isSwitchingSource || channel.id === currentChannel?.id) return;
 
     cleanupPlayer();
     setUnsupportedType(null);
@@ -506,7 +506,6 @@ export function useLiveSources({
     loadingMessage,
     loadingProgress,
     error,
-    setError,
     liveSources,
     currentSource,
     currentSourceRef,

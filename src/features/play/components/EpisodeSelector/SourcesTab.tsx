@@ -23,6 +23,11 @@ import {
 import { readEnableOptimization } from '@/lib/local-preferences';
 import { collapseSourcesForDisplay } from '@/lib/source-bundle';
 import { normalizeTitleForSourceMatch } from '@/lib/source-match';
+import {
+  type SourcePlaybackStat,
+  compareSourcePlaybackPreference,
+  readSourcePlaybackStats,
+} from '@/lib/source-playback-stats';
 import { SearchResult } from '@/lib/types';
 
 export const VIDEO_INFO_BATCH_SIZE = SOURCE_PROBE_CONCURRENCY;
@@ -130,7 +135,9 @@ const getQualityRank = (quality?: string): number => {
 export function sortSourcesForDisplay(
   displaySources: SearchResult[],
   probeSnapshot: ReadonlyMap<string, ProbeEntry>,
+  playbackStats: ReadonlyMap<string, SourcePlaybackStat> = new Map(),
 ): SearchResult[] {
+  const now = Date.now();
   return displaySources
     .map((source, index) => {
       const sourceKey = `${source.source}-${source.id}`;
@@ -142,6 +149,7 @@ export function sortSourcesForDisplay(
       return {
         source,
         index,
+        playbackStat: playbackStats.get(source.source),
         sortStatusRank: getSortStatusRank(videoInfo),
         qualityRank: measuredVideoInfo
           ? getQualityRank(measuredVideoInfo.quality)
@@ -171,7 +179,11 @@ export function sortSourcesForDisplay(
           return b.qualityRank - a.qualityRank;
         }
       }
-      return a.index - b.index;
+      // 测速结果分不出先后时，按历史起播表现把常用可靠源排在前面
+      return (
+        compareSourcePlaybackPreference(a.playbackStat, b.playbackStat, now) ||
+        a.index - b.index
+      );
     })
     .map((item) => item.source);
 }
@@ -294,7 +306,11 @@ export const SourcesTab: React.FC<SourcesTabProps> = ({
   );
 
   const sortedSources = useMemo(() => {
-    return sortSourcesForDisplay(displaySources, probeSnapshot);
+    return sortSourcesForDisplay(
+      displaySources,
+      probeSnapshot,
+      readSourcePlaybackStats(),
+    );
   }, [displaySources, probeSnapshot]);
 
   const scrollCurrentIntoView = useCallback((smooth = true) => {

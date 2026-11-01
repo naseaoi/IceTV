@@ -19,6 +19,77 @@ describe('proxy modes', () => {
     sessionStorage.clear();
   });
 
+  it('coalesces pending preload and playback route resolution', async () => {
+    await loadModule({});
+    jest.resetModules();
+    let respond!: (value: unknown) => void;
+    global.fetch = jest.fn(
+      () =>
+        new Promise((resolve) => {
+          respond = resolve;
+        }),
+    ) as jest.Mock;
+    const mod = require('../proxy-modes') as typeof import('../proxy-modes.js');
+    mod.preloadProxyModes();
+    const route = mod.resolveSourcePlaybackRoute(
+      'demo',
+      'https://cdn.example/a.m3u8',
+    );
+    expect(fetch).toHaveBeenCalledTimes(1);
+    respond({ ok: true, json: async () => ({ demo: 'server' }) });
+    await expect(route).resolves.toEqual({
+      useServerProxy: true,
+      allowAutoFallback: false,
+    });
+  });
+
+  it('bounds a stalled request, preserves the fallback snapshot and allows retries', async () => {
+    await loadModule({});
+    jest.resetModules();
+    jest.useFakeTimers();
+    try {
+      let respond!: (value: unknown) => void;
+      global.fetch = jest.fn(
+        () =>
+          new Promise((resolve) => {
+            respond = resolve;
+          }),
+      ) as jest.Mock;
+      const mod =
+        require('../proxy-modes') as typeof import('../proxy-modes.js');
+      const pending = mod.resolveSourcePlaybackRoute(
+        'demo',
+        'https://cdn.example/a.m3u8',
+      );
+      jest.advanceTimersByTime(2_000);
+      const route = await pending;
+      expect(route).toEqual({ useServerProxy: false, allowAutoFallback: true });
+      expect((fetch as jest.Mock).mock.calls[0][1].signal.aborted).toBe(true);
+      respond({ ok: true, json: async () => ({ demo: 'browser' }) });
+      (fetch as jest.Mock).mockResolvedValue({
+        ok: true,
+        json: async () => ({ demo: 'server' }),
+      });
+      await expect(
+        mod.resolveSourcePlaybackRoute('demo', 'https://cdn.example/a.m3u8'),
+      ).resolves.toEqual({ useServerProxy: true, allowAutoFallback: false });
+      expect(route.allowAutoFallback).toBe(true);
+      expect(fetch).toHaveBeenCalledTimes(2);
+    } finally {
+      jest.useRealTimers();
+    }
+  });
+
+  it('falls back immediately on request failure', async () => {
+    await loadModule({});
+    jest.resetModules();
+    global.fetch = jest.fn().mockRejectedValue(new Error('offline'));
+    const mod = require('../proxy-modes') as typeof import('../proxy-modes.js');
+    await expect(
+      mod.resolveSourcePlaybackRoute('demo', 'https://cdn.example/a.m3u8'),
+    ).resolves.toEqual({ useServerProxy: false, allowAutoFallback: true });
+  });
+
   it('uses configured fixed routes', async () => {
     const mod = await loadModule({
       browserSource: 'browser',

@@ -37,10 +37,19 @@ export type M3U8ProxyRequestContext = {
   userInitiated: boolean;
 };
 
+const SIGNED_URL_PARAM_RE =
+  /[?&](sign|signature|auth_key|auth|token|expires?|expire|hmac|x-amz-signature|security_token|oss_expires|wssecret|wstime|ccode|ksign)=/i;
+const M3U8_TTL = { freshMs: 60_000, staleMs: 60_000 };
+// 详情缓存最长 30 分钟，剧集地址的有效期只按这个量级假设；路径里带令牌的分片地址无法识别，不能缓存更久
+const ENDED_MEDIA_M3U8_TTL = {
+  freshMs: 20 * 60 * 1000,
+  staleMs: 10 * 60 * 1000,
+};
+
 const m3u8Cache = createSharedServerCache<M3U8CacheEntry>({
   name: 'proxy-m3u8',
-  freshMs: 60_000,
-  staleMs: 60_000,
+  ...M3U8_TTL,
+  getTtl: getM3U8CacheTtl,
   ...getServerCacheBudget('proxy-m3u8'),
   maxWaitMs: 10_000,
   shouldCache: (entry) =>
@@ -49,8 +58,6 @@ const m3u8Cache = createSharedServerCache<M3U8CacheEntry>({
       entry.content.includes('#EXT-X-STREAM-INF')),
 });
 
-const SIGNED_URL_PARAM_RE =
-  /[?&](sign|signature|auth_key|auth|token|expires?|expire|hmac|x-amz-signature|security_token|oss_expires|wssecret|wstime|ccode|ksign)=/i;
 const MAX_M3U8_BYTES = 2 * 1024 * 1024;
 const m3u8RefreshInflight = new Map<string, Promise<void>>();
 const m3u8LoadInflight = new Map<string, Promise<M3U8LoadResult>>();
@@ -69,6 +76,17 @@ export function isSignedM3U8Url(rawUrl: string): boolean {
   if (!rawUrl) return false;
   if (!rawUrl.includes('?')) return false;
   return SIGNED_URL_PARAM_RE.test(rawUrl);
+}
+
+// 完结的媒体清单内容不再变化，但内嵌的签名分片或密钥地址会过期，只有不含签名参数时才长缓存
+function getM3U8CacheTtl(entry: M3U8CacheEntry) {
+  const { content } = entry;
+  const endedMediaPlaylist =
+    content.includes('#EXT-X-ENDLIST') &&
+    !content.includes('#EXT-X-STREAM-INF');
+  return endedMediaPlaylist && !SIGNED_URL_PARAM_RE.test(content)
+    ? ENDED_MEDIA_M3U8_TTL
+    : M3U8_TTL;
 }
 
 function getM3U8CacheKey(url: string, source: string | null): string {

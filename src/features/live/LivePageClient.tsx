@@ -144,12 +144,39 @@ function buildLiveHeaderTags({
 export function LivePlayerOverlay({
   unsupportedType,
   isVideoLoading,
+  playbackFailed,
+  onRetry,
 }: {
   unsupportedType: string | null;
   isVideoLoading: boolean;
+  playbackFailed: boolean;
+  onRetry: () => void;
 }) {
   return (
     <>
+      {playbackFailed && (
+        <div className='absolute inset-0 z-[600] flex items-center justify-center overflow-hidden rounded-xl bg-black/90 shadow-lg backdrop-blur-sm transition-all duration-300'>
+          <LoadingStatePanel
+            compact
+            icon={<AlertTriangle className='h-9 w-9' />}
+            tone='red'
+            title='直播流加载失败'
+            titleClassName='text-white'
+            description='可以重试，或切换其他频道。'
+            descriptionClassName='text-gray-300'
+          >
+            <button
+              type='button'
+              onClick={onRetry}
+              className='inline-flex items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-blue-500 to-cyan-600 px-5 py-2 text-sm font-medium text-white shadow-lg transition-all duration-200 hover:from-blue-600 hover:to-cyan-700 hover:shadow-xl'
+            >
+              <RefreshCw className='h-4 w-4' />
+              重试
+            </button>
+          </LoadingStatePanel>
+        </div>
+      )}
+
       {unsupportedType && (
         <div className='pointer-events-none absolute inset-0 z-[600] flex items-center justify-center overflow-hidden rounded-xl bg-black/90 shadow-lg backdrop-blur-sm transition-all duration-300'>
           <LoadingStatePanel
@@ -192,16 +219,16 @@ function AuthenticatedLivePageClient() {
     groupContainerRef,
   });
 
-  const { artPlayerRef, cleanupPlayer } = useLivePlayer({
-    videoUrl: sources.videoUrl,
-    currentChannel: sources.currentChannel,
-    currentSourceRef: sources.currentSourceRef,
-    loading: sources.loading,
-    artRef,
-    setError: sources.setError,
-    setIsVideoLoading: sources.setIsVideoLoading,
-    setUnsupportedType: sources.setUnsupportedType,
-  });
+  const { artPlayerRef, cleanupPlayer, playbackFailed, retryPlayback } =
+    useLivePlayer({
+      videoUrl: sources.videoUrl,
+      currentChannel: sources.currentChannel,
+      currentSourceRef: sources.currentSourceRef,
+      loading: sources.loading,
+      artRef,
+      setIsVideoLoading: sources.setIsVideoLoading,
+      setUnsupportedType: sources.setUnsupportedType,
+    });
 
   cleanupPlayerRef.current = cleanupPlayer;
   usePlayerKeyboard({ artPlayerRef, mode: 'live' });
@@ -268,6 +295,8 @@ function AuthenticatedLivePageClient() {
         <LivePlayerOverlay
           unsupportedType={sources.unsupportedType}
           isVideoLoading={sources.isVideoLoading}
+          playbackFailed={playbackFailed}
+          onRetry={retryPlayback}
         />
       }
       rightPanel={

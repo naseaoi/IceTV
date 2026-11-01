@@ -46,6 +46,7 @@ function createConfig() {
       DefaultAggregateSearch: true,
       EnableOptimization: true,
       LiveDirectConnect: false,
+      AutoSwitchSource: false,
       SearchDownstreamMaxPage: 5,
       SiteInterfaceCacheTime: 300,
       DoubanProxyType: 'direct',

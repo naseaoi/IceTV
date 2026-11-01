@@ -11,26 +11,63 @@ import type {
   VideoQualityInfo,
 } from '@/features/play/hooks/usePlayPageState';
 import {
+  type HistoryRestoreGate,
+  peekHistoryRestoreEpisodeIndex,
+  waitForHistoryRestore,
+} from '@/features/play/hooks/usePlayProgress';
+import {
   readDetailSnapshot,
   saveDetailSnapshot,
 } from '@/features/play/lib/detailSnapshot';
+import { fragmentMemoryCache } from '@/features/play/lib/fragmentMemoryCache';
+import {
+  type ProbeSegmentSample,
+  checkM3u8PlaylistAvailable,
+  takeProbeSegmentSample,
+} from '@/features/play/lib/hls-utils';
+import {
+  peekResolvedLazyEpisodeUrl,
+  resolveLazyEpisodeUrl,
+} from '@/features/play/lib/lazyEpisode';
+import { replacePlayPageUrl } from '@/features/play/lib/playPageUrl';
 import { calculateSourceScore } from '@/features/play/lib/playUtils';
 import {
   SOURCE_PROBE_CONCURRENCY,
   SourceProbeDeferredError,
 } from '@/features/play/lib/sourceProbeRequestPolicy';
 import { probeVodEpisodeUrl } from '@/features/play/lib/vodProbe';
-import { isVodM3u8Url } from '@/features/play/lib/vodProxyUrl';
+import {
+  buildVodProxyUrl,
+  isVodM3u8Url,
+} from '@/features/play/lib/vodProxyUrl';
+import { withTimeout } from '@/lib/concurrency';
+import {
+  getAllPlayRecords,
+  getCachedPlayRecordsSnapshot,
+} from '@/lib/db.client';
+import { remapEpisodeIndexToDetail } from '@/lib/episode-groups';
+import { isLazyEpisodeUrl } from '@/lib/lazy-episodes';
 import { PLAYER_EXIT_EVENT } from '@/lib/navigation-return';
+import { hasMatchingPlayIntent } from '@/lib/play-intent';
 import { prefetchM3U8 } from '@/lib/player-runtime';
 import { getProxyModes, shouldUseServerProxy } from '@/lib/proxy-modes';
 import { mergeSourceBundle } from '@/lib/source-bundle';
 import { filterSourcesForPlayback } from '@/lib/source-match';
-import { SearchResult } from '@/lib/types';
+import {
+  isTrustedSourcePlaybackStat,
+  readSourcePlaybackStats,
+  sortSourcesByPlaybackStats,
+} from '@/lib/source-playback-stats';
+import { PlayRecord, SearchResult } from '@/lib/types';
 
 const DETAIL_CACHE_TTL_MS = 3 * 60 * 1000;
 const IS_DEVELOPMENT = process.env.NODE_ENV !== 'production';
 const SOURCE_PROBE_FOREGROUND_LIMIT = SOURCE_PROBE_CONCURRENCY;
+// 可信源直接起播后推迟后台测速，避免与起播争抢带宽
+const TRUSTED_SOURCE_BACKGROUND_PROBE_DELAY_MS = 5_000;
+const TRUSTED_SOURCE_PLAYLIST_CHECK_TIMEOUT_MS = 3_000;
+// 起播等历史恢复的上限：播放记录接口正常远在此内返回；超时按当前集起播，记录迟到时照旧由历史恢复换集
+const HISTORY_RESTORE_WAIT_TIMEOUT_MS = 1_000;
 const detailCache = new Map<
   string,
   { data: SearchResult; expiresAt: number }
@@ -69,8 +106,32 @@ type SourceProbeResult = {
   testResult: VideoQualityInfo;
 };
 
-function getSourceKey(source: SearchResult) {
+function getSourceKey(source: Pick<SearchResult, 'source' | 'id'>) {
   return `${source.source}-${source.id}`;
+}
+
+// 与 finalizePlaybackDetail 的越界回退一致：请求的集不存在时从第 1 集起播
+function resolveTargetEpisodeIndex(
+  episodeCount: number,
+  requestedEpisodeIndex: number,
+): number {
+  return Number.isInteger(requestedEpisodeIndex) &&
+    requestedEpisodeIndex >= 0 &&
+    requestedEpisodeIndex < episodeCount
+    ? requestedEpisodeIndex
+    : 0;
+}
+
+function waitForDelay(ms: number, signal?: AbortSignal): Promise<void> {
+  return new Promise((resolve) => {
+    const finish = () => {
+      clearTimeout(timer);
+      signal?.removeEventListener('abort', finish);
+      resolve();
+    };
+    const timer = setTimeout(finish, ms);
+    signal?.addEventListener('abort', finish, { once: true });
+  });
 }
 
 function scoreProbeResults(results: SourceProbeResult[]) {
@@ -108,6 +169,9 @@ function scoreProbeResults(results: SourceProbeResult[]) {
 
 async function preferBestSource(
   sources: SearchResult[],
+  getRequestedEpisodeIndex: (source: SearchResult) => number,
+  getActiveSourceKey: () => string,
+  getPlayingSourceKey: () => string,
   setPrecomputedVideoInfo: Dispatch<
     SetStateAction<Map<string, VideoQualityInfo>>
   >,
@@ -122,9 +186,50 @@ async function preferBestSource(
   const proxyModes = await getProxyModes();
   if (signal?.aborted) return sources[0];
 
+  const playbackStats = readSourcePlaybackStats();
+  const candidates = sortSourcesByPlaybackStats(
+    sources,
+    (source) => source.source,
+    playbackStats,
+  );
   const collectedResults: SourceProbeResult[] = [];
-  let selectedResult: SourceProbeResult | null = null;
+  const failedSourceKeys = new Set<string>();
+  let selectedKey = '';
+  // 选中前各源按自己续播的集测；选中后换源沿用选中源的集，备选预取和后台测速都按这一集
+  let selectedEpisodeIndex: number | null = null;
   let recommendedKey = '';
+  // 首分片样本只留给最终选中的源起播复用：决策前暂存，决策后到达的样本直接丢弃
+  const pendingSamples = new Map<string, ProbeSegmentSample>();
+  let samplesSettled = false;
+
+  const settleProbeSamples = (target: SearchResult | null) => {
+    samplesSettled = true;
+    const sample = target
+      ? pendingSamples.get(getSourceKey(target))
+      : undefined;
+    pendingSamples.clear();
+    if (sample) {
+      fragmentMemoryCache.put(sample.url, sample.entry);
+    }
+  };
+
+  const getTargetEpisodeUrl = (source: SearchResult): string | undefined => {
+    const episodes = source.episodes || [];
+    return episodes[
+      resolveTargetEpisodeIndex(
+        episodes.length,
+        selectedEpisodeIndex ?? getRequestedEpisodeIndex(source),
+      )
+    ];
+  };
+
+  const selectSource = (source: SearchResult) => {
+    selectedKey = getSourceKey(source);
+    selectedEpisodeIndex = resolveTargetEpisodeIndex(
+      (source.episodes || []).length,
+      getRequestedEpisodeIndex(source),
+    );
+  };
 
   const writeProbeInfo = (source: SearchResult, info: VideoQualityInfo) => {
     const key = getSourceKey(source);
@@ -136,18 +241,23 @@ async function preferBestSource(
   };
 
   const notifyBetterSource = () => {
-    if (!selectedResult || collectedResults.length < 2) return;
-    const selectedKey = getSourceKey(selectedResult.source);
+    if (!selectedKey) return;
+    // 起播后页面可能已手动或自动换源，按页面当前的源判断；页面还没有当前源时以选中源为准
+    const activeKey = getActiveSourceKey() || selectedKey;
     const scored = scoreProbeResults(collectedResults);
     const best = scored[0];
-    const selected = scored.find(
-      (item) => getSourceKey(item.source) === selectedKey,
-    );
-    if (!best || !selected) return;
+    if (!best) return;
     const bestKey = getSourceKey(best.source);
-    if (bestKey === selectedKey) return;
+    // 选中源同样不推荐：页面从它换走后不推荐换回，页面提交选中源之前当前源也可能还是链接里带的源
+    if (bestKey === activeKey || bestKey === selectedKey) return;
     if (bestKey === recommendedKey) return;
-    if (best.score <= selected.score) return;
+    // 当前源测出失败时不必比分，直接推荐测通的最优源
+    if (!failedSourceKeys.has(activeKey)) {
+      const active = scored.find(
+        (item) => getSourceKey(item.source) === activeKey,
+      );
+      if (!active || best.score <= active.score) return;
+    }
 
     recommendedKey = bestKey;
     setSourceRecommendation({
@@ -161,8 +271,11 @@ async function preferBestSource(
     source: SearchResult,
   ): Promise<SourceProbeResult | null> => {
     if (signal?.aborted) return null;
-    const episodeUrl = source.episodes?.[0];
+    // 已真实起播的当前源不再下载样本测速：面板沿用播放器上报的实测信息，也不会因此记失败并推荐换源
+    if (getSourceKey(source) === getPlayingSourceKey()) return null;
+    const episodeUrl = getTargetEpisodeUrl(source);
     if (!episodeUrl) {
+      failedSourceKeys.add(getSourceKey(source));
       writeProbeInfo(source, {
         quality: '未知',
         loadSpeed: '未知',
@@ -183,7 +296,11 @@ async function preferBestSource(
         useProxy,
         source.source,
       );
+      const sample = takeProbeSegmentSample(testResult);
       if (signal?.aborted) return null;
+      if (sample && !samplesSettled) {
+        pendingSamples.set(getSourceKey(source), sample);
+      }
       const result = { source, testResult };
       collectedResults.push(result);
       writeProbeInfo(source, testResult);
@@ -191,6 +308,7 @@ async function preferBestSource(
       return result;
     } catch (error) {
       if (!signal?.aborted && !(error instanceof SourceProbeDeferredError)) {
+        failedSourceKeys.add(getSourceKey(source));
         writeProbeInfo(source, {
           quality: '错误',
           loadSpeed: '未知',
@@ -200,6 +318,67 @@ async function preferBestSource(
       }
       return null;
     }
+  };
+
+  // 与播放器同样携带线路与源标识，服务端清单缓存按源分区，缺参数会落到另一份缓存
+  const buildPlaybackPlaylistUrl = (source: SearchResult, episodeUrl: string) =>
+    buildVodProxyUrl({
+      rawUrl: episodeUrl,
+      useServerProxy: shouldUseServerProxy(
+        source.source,
+        episodeUrl,
+        proxyModes,
+      ),
+      sourceKey: source.source,
+      playbackRequestMode: 'initial',
+    });
+
+  // 可信按站点统计，这部片在该站仍可能是死链：直接起播前限时只取一次清单，不通就回到常规测速
+  const isTargetPlaylistAvailable = async (
+    source: SearchResult,
+  ): Promise<boolean> => {
+    const rawUrl = getTargetEpisodeUrl(source);
+    if (!rawUrl) return false;
+    const deadline = Date.now() + TRUSTED_SOURCE_PLAYLIST_CHECK_TIMEOUT_MS;
+    try {
+      const episodeUrl = isLazyEpisodeUrl(rawUrl)
+        ? await withTimeout(
+            resolveLazyEpisodeUrl(source.source, rawUrl, { probe: true }),
+            TRUSTED_SOURCE_PLAYLIST_CHECK_TIMEOUT_MS,
+            'Episode url resolve timeout',
+          )
+        : rawUrl;
+      const remainingMs = deadline - Date.now();
+      return (
+        remainingMs > 0 &&
+        isVodM3u8Url(episodeUrl) &&
+        (await checkM3u8PlaylistAvailable(
+          buildPlaybackPlaylistUrl(source, episodeUrl),
+          remainingMs,
+        ))
+      );
+    } catch {
+      return false;
+    }
+  };
+
+  const prefetchRunnerUp = (winner: SearchResult) => {
+    const winnerKey = getSourceKey(winner);
+    const runnerUp = candidates.find((source) => {
+      const key = getSourceKey(source);
+      return (
+        key !== winnerKey &&
+        !failedSourceKeys.has(key) &&
+        !!getTargetEpisodeUrl(source)
+      );
+    });
+    const rawUrl = runnerUp ? getTargetEpisodeUrl(runnerUp) : undefined;
+    if (!runnerUp || !rawUrl) return;
+    const episodeUrl = isLazyEpisodeUrl(rawUrl)
+      ? peekResolvedLazyEpisodeUrl(runnerUp.source, rawUrl)
+      : rawUrl;
+    if (!episodeUrl || !isVodM3u8Url(episodeUrl)) return;
+    prefetchM3U8(buildPlaybackPlaylistUrl(runnerUp, episodeUrl));
   };
 
   const probeBatchUntilSuccess = async (
@@ -216,7 +395,7 @@ async function preferBestSource(
           .then((result) => {
             if (result && !resolved) {
               resolved = true;
-              selectedResult = result;
+              selectSource(result.source);
               resolve(result);
             }
           })
@@ -244,29 +423,53 @@ async function preferBestSource(
     }
   };
 
+  // 近期稳定起播过且有目标集的常用源，目标集清单可用时直接起播，测速推迟到后台只用于换源推荐
+  const trustedSource = candidates.find(
+    (source) =>
+      isTrustedSourcePlaybackStat(playbackStats.get(source.source)) &&
+      !!source.episodes?.[getRequestedEpisodeIndex(source)],
+  );
+  if (
+    trustedSource &&
+    (await isTargetPlaylistAvailable(trustedSource)) &&
+    !signal?.aborted
+  ) {
+    selectSource(trustedSource);
+    settleProbeSamples(null);
+    prefetchRunnerUp(trustedSource);
+    void (async () => {
+      await waitForDelay(TRUSTED_SOURCE_BACKGROUND_PROBE_DELAY_MS, signal);
+      if (signal?.aborted) return;
+      await probeSource(trustedSource);
+      await probeRemainingSources(
+        candidates.filter((source) => source !== trustedSource),
+      );
+    })();
+    return trustedSource;
+  }
+
   for (
     let start = 0;
-    start < sources.length && !signal?.aborted;
+    start < candidates.length && !signal?.aborted;
     start += SOURCE_PROBE_FOREGROUND_LIMIT
   ) {
-    const batch = sources.slice(start, start + SOURCE_PROBE_FOREGROUND_LIMIT);
+    const batch = candidates.slice(
+      start,
+      start + SOURCE_PROBE_FOREGROUND_LIMIT,
+    );
     const result = await probeBatchUntilSuccess(batch);
     if (result) {
-      const remaining = sources.slice(start + SOURCE_PROBE_FOREGROUND_LIMIT);
-      void probeRemainingSources(remaining);
-      const runnerUpEpisode = batch.find(
-        (source) => getSourceKey(source) !== getSourceKey(result.source),
-      )?.episodes?.[0];
-      if (runnerUpEpisode && isVodM3u8Url(runnerUpEpisode)) {
-        prefetchM3U8(
-          `/api/proxy/m3u8?url=${encodeURIComponent(runnerUpEpisode)}`,
-        );
-      }
+      settleProbeSamples(result.source);
+      void probeRemainingSources(
+        candidates.slice(start + SOURCE_PROBE_FOREGROUND_LIMIT),
+      );
+      prefetchRunnerUp(result.source);
       return result.source;
     }
   }
 
-  return sources[0];
+  settleProbeSamples(null);
+  return candidates[0];
 }
 export function updateVideoUrl(
   detailData: SearchResult | null,
@@ -288,12 +491,19 @@ export function updateVideoUrl(
   }
 }
 
+function getEpisodeGroupsSignature(detail: SearchResult): string {
+  return (detail.episode_groups || [])
+    .map((group) => `${group.label}:${group.count}`)
+    .join('|');
+}
+
 function hasDetailContentChange(
   prev: SearchResult,
   next: SearchResult,
 ): boolean {
   return (
     next.episodes.length !== prev.episodes.length ||
+    getEpisodeGroupsSignature(next) !== getEpisodeGroupsSignature(prev) ||
     (!!next.title && next.title !== prev.title)
   );
 }
@@ -334,6 +544,13 @@ function mergeSourceResult(
 interface UsePlayInitParams {
   currentSource: string;
   currentId: string;
+  currentSourceRef: MutableRefObject<string>;
+  currentIdRef: MutableRefObject<string>;
+  // 页面最近一次真实起播的源，后台测速据此跳过正在播放的当前源
+  playbackStartedSourceRef: MutableRefObject<Pick<
+    SearchResult,
+    'source' | 'id'
+  > | null>;
   videoTitle: string;
   searchTitle: string;
   searchType: string;
@@ -342,6 +559,7 @@ interface UsePlayInitParams {
   videoYearRef: MutableRefObject<string>;
   currentEpisodeIndex: number;
   optimizationEnabled: boolean;
+  historyRestoreGateRef: MutableRefObject<HistoryRestoreGate>;
   setLoading: Dispatch<SetStateAction<boolean>>;
   setLoadingStage: Dispatch<
     SetStateAction<'searching' | 'preferring' | 'fetching' | 'ready'>
@@ -376,6 +594,9 @@ interface QuickSearchResponse {
 export function usePlayInit({
   currentSource,
   currentId,
+  currentSourceRef,
+  currentIdRef,
+  playbackStartedSourceRef,
   videoTitle,
   searchTitle,
   searchType,
@@ -384,6 +605,7 @@ export function usePlayInit({
   videoYearRef,
   currentEpisodeIndex,
   optimizationEnabled,
+  historyRestoreGateRef,
   setLoading,
   setLoadingStage,
   setLoadingMessage,
@@ -406,9 +628,13 @@ export function usePlayInit({
   const initialParamsRef = useRef({
     currentEpisodeIndex,
     currentId,
+    currentIdRef,
     currentSource,
+    currentSourceRef,
+    historyRestoreGateRef,
     needPreferRef,
     optimizationEnabled,
+    playbackStartedSourceRef,
     searchTitle,
     searchType,
     setAvailableSources,
@@ -442,9 +668,13 @@ export function usePlayInit({
     const {
       currentEpisodeIndex,
       currentId,
+      currentIdRef,
       currentSource,
+      currentSourceRef,
+      historyRestoreGateRef,
       needPreferRef,
       optimizationEnabled,
+      playbackStartedSourceRef,
       searchTitle,
       searchType,
       setAvailableSources,
@@ -498,6 +728,15 @@ export function usePlayInit({
           if (signal.aborted) return;
           if (!fresh.episodes || fresh.episodes.length === 0) return;
           if (!hasDetailContentChange(snapshot, fresh)) return;
+          // 历史恢复可能已按快照的分组结构定下集索引，换成新详情时须同步换算，否则分组源会退到上一集
+          if (
+            currentSourceRef.current === source &&
+            currentIdRef.current === id
+          ) {
+            setCurrentEpisodeIndex((index) =>
+              remapEpisodeIndexToDetail(snapshot, fresh, index),
+            );
+          }
           setDetail((prev) =>
             prev && prev.source === source && prev.id === id
               ? mergeSourceResult(fresh, prev)
@@ -593,6 +832,10 @@ export function usePlayInit({
     };
 
     let aggregateGroupRawToClear = '';
+    // 除了带播放意图的直达入口（意图已定下集和时间，不读记录），都与搜索、详情并行读取播放记录：到达后供测速预判续播的集，起播时交给历史恢复复用这次请求
+    let startupPlayRecordsRequest: Promise<Record<string, PlayRecord>> | null =
+      null;
+    let startupPlayRecords: Record<string, PlayRecord> | null = null;
 
     const clearAggregateGroup = () => {
       const rawToClear = aggregateGroupRawToClear;
@@ -645,10 +888,7 @@ export function usePlayInit({
       return null;
     };
 
-    const finalizePlaybackDetail = async (
-      detailData: SearchResult,
-      options?: { skipTransitionDelay?: boolean },
-    ) => {
+    const finalizePlaybackDetail = async (detailData: SearchResult) => {
       if (signal.aborted || window.location.pathname !== '/play') {
         return;
       }
@@ -669,29 +909,40 @@ export function usePlayInit({
         setCurrentEpisodeIndex(0);
       }
 
-      const newUrl = new URL(window.location.href);
-      newUrl.searchParams.set('source', detailData.source);
-      newUrl.searchParams.set('id', detailData.id);
-      newUrl.searchParams.set('year', resolvedYear);
-      newUrl.searchParams.set('title', detailData.title);
-      newUrl.searchParams.delete('prefer');
-      newUrl.searchParams.delete('singleSource');
-      newUrl.searchParams.delete('directStart');
-      if (signal.aborted || window.location.pathname !== '/play') {
+      if (signal.aborted || !replacePlayPageUrl(detailData, resolvedYear)) {
         return;
       }
-      window.history.replaceState(window.history.state, '', newUrl.toString());
       clearAggregateGroup();
 
       setLoadingStage('ready');
       setLoadingMessage('准备就绪，即将开始播放...');
-      if (!options?.skipTransitionDelay) {
-        await new Promise((r) => setTimeout(r, 200));
-      }
-      if (signal.aborted) {
-        return;
+      // 播放器在放行后才创建：历史恢复还没定下续播的集和时间就放行，会先按当前集起播再被换集
+      if (detailData.episodes.length > 0) {
+        const historyRestoreGate = historyRestoreGateRef.current;
+        historyRestoreGate.playRecords = startupPlayRecordsRequest;
+        await waitForHistoryRestore(
+          historyRestoreGate,
+          detailData,
+          HISTORY_RESTORE_WAIT_TIMEOUT_MS,
+          signal,
+        );
+        historyRestoreGate.playRecords = null;
+        if (signal.aborted) return;
       }
       setLoading(false);
+    };
+
+    const getActiveSourceKey = () => {
+      const source = currentSourceRef.current;
+      const id = currentIdRef.current;
+      return source && id ? getSourceKey({ source, id }) : '';
+    };
+
+    // 起播登记的源必须仍是当前源：页面换源后登记的是旧源，新的当前源还没起播
+    const getPlayingSourceKey = () => {
+      const started = playbackStartedSourceRef.current;
+      const activeKey = getActiveSourceKey();
+      return started && getSourceKey(started) === activeKey ? activeKey : '';
     };
 
     const initAll = async () => {
@@ -709,6 +960,21 @@ export function usePlayInit({
           : '正在搜索播放源...',
       );
 
+      if (
+        !currentSource ||
+        !currentId ||
+        needPreferRef.current ||
+        !hasMatchingPlayIntent({ source: currentSource, id: currentId })
+      ) {
+        startupPlayRecordsRequest = getAllPlayRecords();
+        void startupPlayRecordsRequest.then(
+          (records) => {
+            startupPlayRecords = records;
+          },
+          () => undefined,
+        );
+      }
+
       const cachedGroup = loadAggregateGroup();
 
       if (currentSource && currentId && !needPreferRef.current) {
@@ -717,9 +983,7 @@ export function usePlayInit({
         if (fastDetail?.episodes && fastDetail.episodes.length > 0) {
           setAvailableSources(mergeSourceBundle([], fastDetail));
           void fetchSourcesData(searchTitle || videoTitle);
-          await finalizePlaybackDetail(fastDetail, {
-            skipTransitionDelay: true,
-          });
+          await finalizePlaybackDetail(fastDetail);
           return;
         }
       }
@@ -743,9 +1007,7 @@ export function usePlayInit({
           );
           setSourceSearchLoading(true);
           void fetchSourcesData(quickQuery);
-          await finalizePlaybackDetail(quickDetail, {
-            skipTransitionDelay: true,
-          });
+          await finalizePlaybackDetail(quickDetail);
           return;
         }
       }
@@ -814,8 +1076,17 @@ export function usePlayInit({
         setLoadingStage('preferring');
         setLoadingMessage('正在优选最佳播放源...');
 
+        // 续播的集按已到的播放记录预判，未到时退回本地缓存，不为测速等待记录请求
+        const cachedPlayRecords = getCachedPlayRecordsSnapshot();
         detailData = await preferBestSource(
           sourcesInfo,
+          (source) =>
+            peekHistoryRestoreEpisodeIndex(
+              source,
+              startupPlayRecords ?? cachedPlayRecords,
+            ) ?? currentEpisodeIndex,
+          getActiveSourceKey,
+          getPlayingSourceKey,
           setPrecomputedVideoInfo,
           setSourceRecommendation,
           signal,

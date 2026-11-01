@@ -9,6 +9,7 @@ import {
 } from 'serwist';
 
 import { createCacheBudgetLedger } from './lib/cache-budget';
+import { normalizeSegmentCacheKey } from './lib/segment-cache-key';
 import {
   excludeDefaultApiRuntimeCache,
   shouldHandleBangumiCoverCache,
@@ -102,17 +103,21 @@ function updateVodSegmentBudget<T>(task: () => Promise<T>): Promise<T> {
 }
 
 async function reserveVodSegmentCache(
-  requestUrl: string,
+  cacheKey: string,
   incomingBytes: number,
 ): Promise<void> {
   await updateVodSegmentBudget(async () => {
     const cache = await initializeVodSegmentBudget();
-    const evictedUrls = vodSegmentBudget.reserve(requestUrl, incomingBytes);
+    const evictedUrls = vodSegmentBudget.reserve(cacheKey, incomingBytes);
     await Promise.all(evictedUrls.map((url) => cache.delete(url)));
   });
 }
 
 const vodSegmentStoragePlugin = {
+  // 返回字符串让 Serwist 生成不带请求头的键，读、写与账本 cache.delete(url) 三处匹配一致，不受响应 Vary 影响
+  cacheKeyWillBeUsed({ request }: { request: Request }) {
+    return normalizeSegmentCacheKey(request.url);
+  },
   async cacheWillUpdate({
     request,
     response,
@@ -133,7 +138,11 @@ const vodSegmentStoragePlugin = {
       return null;
     }
 
-    await reserveVodSegmentCache(request.url, incomingBytes);
+    // Serwist 传给 cacheWillUpdate 的是原始请求而非 cacheKeyWillBeUsed 的结果，账本须自行归一化，淘汰时才删得到真实条目
+    await reserveVodSegmentCache(
+      normalizeSegmentCacheKey(request.url),
+      incomingBytes,
+    );
     return response;
   },
 };
@@ -237,8 +246,9 @@ const serwist = new Serwist({
       }),
     },
     // VOD 分片缓存：跨会话复用点播片段
-    // - 仅 GET；显式带 icetv-live=1 的（直播分片）不缓存
-    // - 分片文件较大，maxEntries 保守限定 512，按 LRU 淘汰；7 天过期
+    // - 仅 GET；直播分片（icetv-live=1）与 Range 请求不缓存
+    // - 缓存键剔除签名与切换标记，同一分片换清单后仍能命中
+    // - 条目数、总字节、单片大小与过期时间见 VOD_SEGMENT_* 常量，超额时按写入先后淘汰
     {
       matcher: ({ url, request, sameOrigin }) =>
         shouldHandleVodSegmentCache({

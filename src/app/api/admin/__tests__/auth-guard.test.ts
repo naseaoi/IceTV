@@ -5,6 +5,7 @@ import {
   getConfig,
   getConfigForRead,
   getConfigFresh,
+  invalidateConfigCache,
   resetConfig,
   saveConfig,
 } from '@/lib/config';
@@ -89,6 +90,7 @@ jest.mock('@/lib/config', () => ({
   getConfig: jest.fn(),
   getConfigForRead: jest.fn(),
   getConfigFresh: jest.fn(),
+  invalidateConfigCache: jest.fn(),
   resetConfig: jest.fn(),
   saveConfig: jest.fn(),
 }));
@@ -160,6 +162,7 @@ describe('admin api auth guard regression', () => {
       DefaultAggregateSearch: true,
       EnableOptimization: true,
       LiveDirectConnect: false,
+      AutoSwitchSource: false,
       SearchDownstreamMaxPage: 5,
       SiteInterfaceCacheTime: 300,
       DoubanProxyType: 'direct',
@@ -275,6 +278,7 @@ describe('admin api auth guard regression', () => {
         DefaultAggregateSearch: true,
         EnableOptimization: true,
         LiveDirectConnect: false,
+        AutoSwitchSource: true,
         SearchDownstreamMaxPage: 5,
         SiteInterfaceCacheTime: 300,
         DoubanProxyType: 'direct',
@@ -294,6 +298,62 @@ describe('admin api auth guard regression', () => {
     expect(response.status).toBe(200);
     expect(payload).toEqual({ ok: true });
     expect(mockedSaveConfig).toHaveBeenCalledTimes(1);
+    expect(
+      jest.mocked(invalidateConfigCache).mock.invocationCallOrder[0],
+    ).toBeLessThan(mockedGetConfig.mock.invocationCallOrder[0]);
+    expect(mockedSaveConfig).toHaveBeenCalledWith(
+      expect.objectContaining({
+        SiteConfig: expect.objectContaining({ AutoSwitchSource: true }),
+      }),
+    );
+  });
+
+  it('keeps the stored auto source switch default when older clients omit it', async () => {
+    const { updateSiteConfig } = getHandlers();
+    mockedGetAuthInfoFromCookie.mockReturnValue({
+      username: 'owner-1',
+      expiresAt: Date.now() + 60_000,
+      signature: 'mock-signature',
+      sessionType: 'account',
+    });
+    mockedGetConfig.mockResolvedValue({
+      ...baseConfig,
+      SiteConfig: { ...baseConfig.SiteConfig, AutoSwitchSource: true },
+    } as never);
+    const { AutoSwitchSource: _omitted, ...olderClientBody } =
+      baseConfig.SiteConfig;
+
+    const response = await updateSiteConfig({
+      json: async () => ({ ...olderClientBody, FooterText: '' }),
+    } as any);
+
+    expect(response.status).toBe(200);
+    expect(mockedSaveConfig).toHaveBeenCalledWith(
+      expect.objectContaining({
+        SiteConfig: expect.objectContaining({ AutoSwitchSource: true }),
+      }),
+    );
+  });
+
+  it('rejects a non-boolean auto source switch default', async () => {
+    const { updateSiteConfig } = getHandlers();
+    mockedGetAuthInfoFromCookie.mockReturnValue({
+      username: 'owner-1',
+      expiresAt: Date.now() + 60_000,
+      signature: 'mock-signature',
+      sessionType: 'account',
+    });
+
+    const response = await updateSiteConfig({
+      json: async () => ({
+        ...baseConfig.SiteConfig,
+        FooterText: '',
+        AutoSwitchSource: 'yes',
+      }),
+    } as any);
+
+    expect(response.status).toBe(400);
+    expect(mockedSaveConfig).not.toHaveBeenCalled();
   });
 
   it('commits a staged icon only after saving site config', async () => {

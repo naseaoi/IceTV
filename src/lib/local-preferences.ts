@@ -4,11 +4,14 @@ export const FLUID_SEARCH_STORAGE_KEY = 'fluidSearch';
 export const LIVE_DIRECT_CONNECT_STORAGE_KEY = 'liveDirectConnect';
 export const LIVE_DIRECT_CONNECT_CHANGE_EVENT =
   'icetv:live-direct-connect-change';
+export const AUTO_SWITCH_SOURCE_STORAGE_KEY = 'autoSwitchSource';
 export const BLOCK_AD_STORAGE_KEY = 'enable_blockad';
 export const AUTO_PLAY_NEXT_STORAGE_KEY = 'enable_autoplay_next';
 export const PREFERRED_QUALITY_STORAGE_KEY = 'preferredQuality';
 export const SOURCE_PREFERRED_QUALITY_STORAGE_PREFIX = 'preferredQuality:';
 export const SIDEBAR_COLLAPSED_STORAGE_KEY = 'sidebarCollapsed';
+// 无本地偏好时，窄于该宽度的视口（如 iPad）默认折叠侧栏；根布局内联脚本共用此值
+export const SIDEBAR_AUTO_COLLAPSE_BELOW_WIDTH = 1280;
 export const THEME_STORAGE_KEY = 'theme';
 export const SEEN_ANNOUNCEMENT_STORAGE_KEY = 'hasSeenAnnouncement';
 export const ADMIN_TABLE_COLUMN_WIDTHS_STORAGE_KEY = 'adminTableColumnWidths';
@@ -268,6 +271,29 @@ export function resetLiveDirectConnect() {
   }
 }
 
+export function readDefaultAutoSwitchSource(): boolean {
+  if (typeof window === 'undefined') {
+    return false;
+  }
+
+  return window.RUNTIME_CONFIG?.AUTO_SWITCH_SOURCE === true;
+}
+
+export function readAutoSwitchSource(): boolean {
+  return (
+    readStoredBoolean(AUTO_SWITCH_SOURCE_STORAGE_KEY) ??
+    readDefaultAutoSwitchSource()
+  );
+}
+
+export function writeAutoSwitchSource(value: boolean) {
+  writeStoredBoolean(AUTO_SWITCH_SOURCE_STORAGE_KEY, value);
+}
+
+export function resetAutoSwitchSource() {
+  resetStoredBoolean(AUTO_SWITCH_SOURCE_STORAGE_KEY);
+}
+
 export function readBlockAdEnabled(): boolean {
   return readStoredBoolean(BLOCK_AD_STORAGE_KEY) ?? true;
 }
@@ -285,7 +311,11 @@ export function writeAutoPlayNextEnabled(value: boolean) {
 }
 
 export function readSidebarCollapsed(): boolean {
-  return readStoredBoolean(SIDEBAR_COLLAPSED_STORAGE_KEY) ?? false;
+  return (
+    readStoredBoolean(SIDEBAR_COLLAPSED_STORAGE_KEY) ??
+    (typeof window !== 'undefined' &&
+      window.innerWidth < SIDEBAR_AUTO_COLLAPSE_BELOW_WIDTH)
+  );
 }
 
 export function writeSidebarCollapsed(value: boolean) {

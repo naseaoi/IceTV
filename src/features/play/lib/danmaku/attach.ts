@@ -254,9 +254,16 @@ export function applyDanmakuHeatmapVisibility(
 ): void {
   const element = player?.controls?.heatmap;
   if (!element?.style) return;
+  const previousVisibility = element.style.visibility;
+  const nextVisibility = danmakuEnabled && heatmapEnabled ? '' : 'hidden';
   // 保留容器宽度，避免第三方热力图在隐藏时用 0 宽度生成无效路径。
   element.style.display = '';
-  element.style.visibility = danmakuEnabled && heatmapEnabled ? '' : 'hidden';
+  element.style.visibility = nextVisibility;
+  if (previousVisibility !== nextVisibility) {
+    const emit = (player as unknown as { emit?: (event: string) => unknown })
+      ?.emit;
+    emit?.call(player, 'artplayerPluginDanmuku:points');
+  }
 }
 
 // 监听配置变更、持久化，并在开启边沿触发数据重载

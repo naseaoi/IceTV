@@ -15,6 +15,7 @@ const baseConfig: AdminConfig = {
     DefaultAggregateSearch: true,
     EnableOptimization: true,
     LiveDirectConnect: false,
+    AutoSwitchSource: false,
     EnableDanmaku: false,
     ...DEFAULT_RUNTIME_PARAMS,
     SourceCoverProxyMode: 'auto',
@@ -371,6 +372,33 @@ describe('config cache persistence', () => {
     delete (config.SiteConfig as Partial<typeof config.SiteConfig>).FluidSearch;
 
     expect(configSelfCheck(config).SiteConfig.FluidSearch).toBe(true);
+  });
+
+  it('fills playback fault tolerance defaults for older site config', async () => {
+    const { configSelfCheck } = await loadConfigModule(jest.fn());
+    const config = cloneBaseConfig();
+    const siteConfig = config.SiteConfig as Partial<typeof config.SiteConfig>;
+    delete siteConfig.AutoSwitchSource;
+    delete siteConfig.VodFragmentTimeoutSeconds;
+
+    const checked = configSelfCheck(config);
+
+    expect(checked.SiteConfig.AutoSwitchSource).toBe(false);
+    expect(checked.SiteConfig.VodFragmentTimeoutSeconds).toBe(10);
+  });
+
+  it('exposes playback fault tolerance settings in public config', async () => {
+    const adminConfig = cloneBaseConfig();
+    adminConfig.SiteConfig.AutoSwitchSource = true;
+    adminConfig.SiteConfig.VodFragmentTimeoutSeconds = 99;
+    const { getPublicConfig } = await loadConfigModule(jest.fn(), {
+      adminConfig,
+    });
+
+    await expect(getPublicConfig()).resolves.toMatchObject({
+      AutoSwitchSource: true,
+      VodFragmentTimeoutSeconds: 60,
+    });
   });
 
   it('exposes public-safe proxy defaults in public config', async () => {

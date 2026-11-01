@@ -343,6 +343,50 @@ describe('stripAdSegmentsByPhysicalSignal', () => {
     expect(result).toContain('main_9_4.ts');
   });
 
+  function buildPeriodicPlaylist(
+    blockDurations: number[],
+    tailDurations: number[],
+  ): string {
+    const lines = ['#EXTM3U', '#EXT-X-TARGETDURATION:8'];
+    for (let segment = 0; segment < 10; segment += 1) {
+      lines.push('#EXT-X-DISCONTINUITY');
+      blockDurations.forEach((duration, fragment) => {
+        lines.push(`#EXTINF:${duration.toFixed(6)},`);
+        lines.push(`main_${segment}_${fragment}.ts`);
+      });
+    }
+    lines.push('#EXT-X-DISCONTINUITY');
+    tailDurations.forEach((duration, fragment) => {
+      lines.push(`#EXTINF:${duration.toFixed(6)},`);
+      lines.push(`tail_${fragment}.ts`);
+    });
+    lines.push('#EXT-X-ENDLIST');
+    return lines.join('\n');
+  }
+
+  test('片尾 23.976fps 整秒附近正片块不被当成网格广告', async () => {
+    const result = await stripAdSegmentsByPhysicalSignal(
+      buildPeriodicPlaylist(
+        [4.170833, 3.628622, 5.130122, 4.504, 3.378],
+        [4.004, 3.003, 2.002],
+      ),
+      'https://cdn.example.com/x/index.m3u8',
+      'ua',
+    );
+
+    expect(result).toMatch(/tail_0\.ts[\s\S]*tail_2\.ts/);
+  });
+
+  test('正片本身是 25fps 网格时不按网格删除片尾块', async () => {
+    const result = await stripAdSegmentsByPhysicalSignal(
+      buildPeriodicPlaylist([4.2, 3.84, 5.08, 4.36, 2.96], [4, 5.48, 2.68]),
+      'https://cdn.example.com/x/index.m3u8',
+      'ua',
+    );
+
+    expect(result).toMatch(/tail_0\.ts[\s\S]*tail_2\.ts/);
+  });
+
   test('规律正片边界和广告删除边界全部连续化', async () => {
     const lines = ['#EXTM3U', '#EXT-X-TARGETDURATION:6'];
     for (let segment = 0; segment < 10; segment += 1) {

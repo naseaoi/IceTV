@@ -4,7 +4,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { isGuardFailure, requireAdmin } from '@/lib/api-auth';
 import { configConflictResponse } from '@/lib/api-config-error';
 import { normalizeSiteBangumiDataSource } from '@/lib/bangumi-source';
-import { getConfig, saveConfig } from '@/lib/config';
+import { getConfig, invalidateConfigCache, saveConfig } from '@/lib/config';
 import {
   normalizeSiteDoubanImageProxyType,
   normalizeSiteDoubanProxyType,
@@ -34,6 +34,7 @@ export async function POST(request: NextRequest) {
       DefaultAggregateSearch,
       EnableOptimization,
       LiveDirectConnect,
+      AutoSwitchSource,
       EnableDanmaku,
       SearchDownstreamMaxPage,
       SiteInterfaceCacheTime,
@@ -54,6 +55,7 @@ export async function POST(request: NextRequest) {
       DefaultAggregateSearch: boolean;
       EnableOptimization: boolean;
       LiveDirectConnect: boolean;
+      AutoSwitchSource?: boolean;
       EnableDanmaku?: boolean;
       SearchDownstreamMaxPage: number;
       SiteInterfaceCacheTime: number;
@@ -77,6 +79,8 @@ export async function POST(request: NextRequest) {
       typeof DefaultAggregateSearch !== 'boolean' ||
       typeof EnableOptimization !== 'boolean' ||
       typeof LiveDirectConnect !== 'boolean' ||
+      (AutoSwitchSource !== undefined &&
+        typeof AutoSwitchSource !== 'boolean') ||
       (EnableDanmaku !== undefined && typeof EnableDanmaku !== 'boolean') ||
       typeof SearchDownstreamMaxPage !== 'number' ||
       typeof SiteInterfaceCacheTime !== 'number' ||
@@ -132,6 +136,7 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    invalidateConfigCache();
     const adminConfig = await getConfig();
     const announcementChanged =
       adminConfig.SiteConfig.Announcement !== Announcement;
@@ -156,6 +161,8 @@ export async function POST(request: NextRequest) {
       DefaultAggregateSearch,
       EnableOptimization,
       LiveDirectConnect,
+      AutoSwitchSource:
+        AutoSwitchSource ?? adminConfig.SiteConfig.AutoSwitchSource,
       EnableDanmaku: EnableDanmaku ?? adminConfig.SiteConfig.EnableDanmaku,
       SearchDownstreamMaxPage,
       SiteInterfaceCacheTime,

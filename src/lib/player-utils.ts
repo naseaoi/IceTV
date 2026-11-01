@@ -284,28 +284,184 @@ export function configureArtplayerStatics(Artplayer: {
 }
 
 // ---------------------------------------------------------------------------
-// HLS 错误统一处理
+// Artplayer 销毁（点播与直播共用）
 // ---------------------------------------------------------------------------
 
-/** HLS 致命错误标准处理：网络错误重载、媒体错误恢复、其他销毁 */
-export function handleHlsFatalError(
-  hls: {
-    startLoad: () => void;
-    recoverMediaError: () => void;
-    destroy: () => void;
-  },
-  errorType: string,
-  ErrorTypes: { NETWORK_ERROR: string; MEDIA_ERROR: string },
-) {
-  switch (errorType) {
-    case ErrorTypes.NETWORK_ERROR:
-      hls.startLoad();
-      break;
-    case ErrorTypes.MEDIA_ERROR:
-      hls.recoverMediaError();
-      break;
-    default:
-      hls.destroy();
-      break;
+// FULLSCREEN_WEB_IN_BODY 下网页全屏会把播放器节点移到 body，destroy 只清空原容器，不先退出会留下盖住整页的黑层
+export function destroyArtPlayer(player: {
+  fullscreenWeb: boolean;
+  destroy: () => void;
+}) {
+  try {
+    if (player.fullscreenWeb) player.fullscreenWeb = false;
+  } catch (err) {
+    console.warn('退出网页全屏失败:', err);
   }
+  player.destroy();
+}
+
+// ---------------------------------------------------------------------------
+// HLS 致命错误恢复（点播与直播共用）
+// ---------------------------------------------------------------------------
+
+export const HLS_FATAL_NETWORK_RECOVERY_DELAYS_MS: readonly number[] = [
+  1_000, 2_000, 4_000,
+];
+export const HLS_FATAL_MEDIA_RECOVERY_LIMIT = 2;
+// 恢复后要连续播放这么久才清零全部计数，否则“恢复一下又坏”的流会无限重试
+export const HLS_FATAL_RECOVERY_RESET_PLAYBACK_SECONDS = 10;
+// timeupdate 约 250ms 触发一次，相邻进度跨度超过它视为跳转（续播定位、拖动），不算连续播放
+const HLS_FATAL_RECOVERY_MAX_PROGRESS_STEP_SECONDS = 2;
+
+export type HlsFatalRecoveryResult =
+  | 'recovering'
+  | 'exhausted'
+  | 'unrecoverable';
+
+export type HlsFatalRecoveryTarget = {
+  startLoad: () => void;
+  recoverMediaError: () => void;
+  swapAudioCodec?: () => void;
+};
+
+export type HlsFragmentRef =
+  | { sn?: unknown; type?: unknown }
+  | null
+  | undefined;
+
+export type HlsFatalRecoveryController = {
+  recover: (
+    target: HlsFatalRecoveryTarget,
+    errorType: string,
+    ErrorTypes: { NETWORK_ERROR: string; MEDIA_ERROR: string },
+    failedFragment?: HlsFragmentRef,
+  ) => HlsFatalRecoveryResult;
+  // 返回 true 表示这次加载算作网络已恢复，调用方的线路失败计数也按它清零
+  handleFragmentLoaded: (fragment?: HlsFragmentRef) => boolean;
+  handlePlaybackProgress: (currentTime: number) => void;
+  reset: () => void;
+  dispose: () => void;
+};
+
+type HlsFragmentPosition = { type: unknown; sn: number };
+
+// init 分片的 sn 是 'initSegment'，与媒体分片分不出先后，按没有位置处理
+function resolveFragmentPosition(
+  fragment: HlsFragmentRef,
+): HlsFragmentPosition | null {
+  const sn = fragment?.sn;
+  if (typeof sn !== 'number' || !Number.isFinite(sn)) return null;
+  return { type: fragment?.type, sn };
+}
+
+export function createHlsFatalRecoveryController(): HlsFatalRecoveryController {
+  let networkAttempts = 0;
+  let mediaAttempts = 0;
+  let networkRetryTimer: ReturnType<typeof setTimeout> | null = null;
+  let playbackAnchor: number | null = null;
+  let lastPlaybackTime = 0;
+  let failedFragment: HlsFragmentPosition | null = null;
+  let disposed = false;
+
+  const clearNetworkRetryTimer = () => {
+    if (networkRetryTimer === null) return;
+    clearTimeout(networkRetryTimer);
+    networkRetryTimer = null;
+  };
+
+  const reset = () => {
+    clearNetworkRetryTimer();
+    networkAttempts = 0;
+    mediaAttempts = 0;
+    playbackAnchor = null;
+    failedFragment = null;
+  };
+
+  return {
+    recover(target, errorType, ErrorTypes, fragment) {
+      // 释放后到达的迟到错误既不恢复，也不能让调用方当成失败处理
+      if (disposed) return 'recovering';
+
+      if (errorType === ErrorTypes.NETWORK_ERROR) {
+        // 清单或 level 失败不带分片，沿用已记下的失败位置
+        failedFragment = resolveFragmentPosition(fragment) ?? failedFragment;
+        if (networkRetryTimer !== null) return 'recovering';
+        if (networkAttempts >= HLS_FATAL_NETWORK_RECOVERY_DELAYS_MS.length) {
+          return 'exhausted';
+        }
+        const delayMs = HLS_FATAL_NETWORK_RECOVERY_DELAYS_MS[networkAttempts];
+        networkAttempts += 1;
+        playbackAnchor = null;
+        networkRetryTimer = setTimeout(() => {
+          networkRetryTimer = null;
+          if (!disposed) target.startLoad();
+        }, delayMs);
+        return 'recovering';
+      }
+
+      if (errorType === ErrorTypes.MEDIA_ERROR) {
+        if (mediaAttempts >= HLS_FATAL_MEDIA_RECOVERY_LIMIT) {
+          return 'exhausted';
+        }
+        mediaAttempts += 1;
+        playbackAnchor = null;
+        if (mediaAttempts > 1) {
+          target.swapAudioCodec?.();
+        }
+        target.recoverMediaError();
+        return 'recovering';
+      }
+
+      return 'unrecoverable';
+    },
+    // 媒体错误恢复后分片照常能加载，只清网络计数，避免媒体错误借此无限循环
+    // 恢复拉流会先重下失败位置之前已部分缓冲的分片，它常直接命中浏览器缓存；只有同类型分片到达失败位置才算恢复，否则坏流每轮清零，永远凑不满上限
+    handleFragmentLoaded(fragment) {
+      if (failedFragment) {
+        const loaded = resolveFragmentPosition(fragment);
+        if (
+          !loaded ||
+          loaded.type !== failedFragment.type ||
+          loaded.sn < failedFragment.sn
+        ) {
+          return false;
+        }
+        failedFragment = null;
+      }
+      networkAttempts = 0;
+      return true;
+    },
+    handlePlaybackProgress(currentTime) {
+      if (
+        (networkAttempts === 0 && mediaAttempts === 0) ||
+        !Number.isFinite(currentTime)
+      ) {
+        return;
+      }
+      const step = currentTime - lastPlaybackTime;
+      lastPlaybackTime = currentTime;
+      if (
+        playbackAnchor === null ||
+        step < 0 ||
+        step > HLS_FATAL_RECOVERY_MAX_PROGRESS_STEP_SECONDS
+      ) {
+        playbackAnchor = currentTime;
+        return;
+      }
+      if (
+        currentTime - playbackAnchor >=
+        HLS_FATAL_RECOVERY_RESET_PLAYBACK_SECONDS
+      ) {
+        networkAttempts = 0;
+        mediaAttempts = 0;
+        playbackAnchor = null;
+        failedFragment = null;
+      }
+    },
+    reset,
+    dispose() {
+      disposed = true;
+      reset();
+    },
+  };
 }
