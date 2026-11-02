@@ -21,6 +21,7 @@ import type {
 } from '@/features/play/hooks/usePlayPageState';
 import type { DanmakuReloadHandler } from '@/features/play/lib/danmaku/types';
 import {
+  type VodStartupProgress,
   describeVodStartupState,
   getVodStartupProgress,
 } from '@/features/play/lib/playerLoading';
@@ -366,6 +367,7 @@ export function PlayMainContent(props: PlayMainContentProps) {
       runtimeConfig.VOD_PAGE_TIMEOUT_SECONDS,
       runtimeConfig.VOD_FRAGMENT_TIMEOUT_SECONDS,
     );
+  const settledStartupProgressRef = useRef<VodStartupProgress | null>(null);
   const onLoadingTimeoutRef = useRef(onLoadingTimeout);
   const onDismissSourceRecommendationRef = useRef(
     onDismissSourceRecommendation,
@@ -382,6 +384,11 @@ export function PlayMainContent(props: PlayMainContentProps) {
 
   useEffect(() => {
     if (!isVideoLoading || playbackError) {
+      // 换集、重试后到新运行时登记进度前，video 上仍挂着上一轮的进度，按它计时会把已播时长算成起播耗时
+      const video = artRef.current?.querySelector('video');
+      settledStartupProgressRef.current = video
+        ? getVodStartupProgress(video)
+        : null;
       setLoadingTimedOut(false);
       return;
     }
@@ -400,6 +407,7 @@ export function PlayMainContent(props: PlayMainContentProps) {
       const runtimeProgress = video ? getVodStartupProgress(video) : null;
       const progress =
         runtimeProgress &&
+        runtimeProgress !== settledStartupProgressRef.current &&
         (!runtimeProgress.sourceKey ||
           runtimeProgress.sourceKey === currentSource)
           ? runtimeProgress

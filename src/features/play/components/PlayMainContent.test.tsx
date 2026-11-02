@@ -409,6 +409,30 @@ describe('PlayMainContent', () => {
     expect(onLoadingTimeout).toHaveBeenCalledTimes(2);
   });
 
+  it('换集时上一集遗留的起播进度不计入新一轮加载', () => {
+    const onLoadingTimeout = jest.fn(() => false);
+    const props = { ...createBaseProps(), onLoadingTimeout };
+    const { rerender } = render(<PlayMainContent {...props} isVideoLoading />);
+    startMedia('source-a');
+    rerender(<PlayMainContent {...props} isVideoLoading={false} />);
+    act(() => {
+      jest.advanceTimersByTime(20 * 60_000);
+    });
+    rerender(
+      <PlayMainContent {...props} isVideoLoading videoLoadingAttempt={1} />,
+    );
+    act(() => {
+      jest.advanceTimersByTime(30_000);
+    });
+    expect(onLoadingTimeout).not.toHaveBeenCalled();
+    expect(screen.queryByText('加载视频超时')).not.toBeInTheDocument();
+    startMedia('source-a');
+    act(() => {
+      jest.advanceTimersByTime(PLAYER_LOADING_TIMEOUT_MS);
+    });
+    expect(onLoadingTimeout).toHaveBeenCalledTimes(1);
+  });
+
   it('无进展窗口从最后一次真实进展计算', () => {
     const onLoadingTimeout = jest.fn(() => false);
     render(
