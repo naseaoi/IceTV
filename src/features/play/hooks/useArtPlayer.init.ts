@@ -391,6 +391,16 @@ export async function initializeArtPlayer(
     if (!player) {
       return;
     }
+    // 内置倍速设置在 ratechange 时按当前倍速查选项，快捷键 0.1 步进的倍速不在列表里会查到 null 并直接 check 崩溃
+    const setting = player.setting as
+      | { check?: (target: unknown) => void }
+      | undefined;
+    const checkSetting = setting?.check?.bind(setting);
+    if (setting && checkSetting) {
+      setting.check = (target) => {
+        if (target) checkSetting(target);
+      };
+    }
     if (
       !danmakuPlugin &&
       isDanmakuFeatureEnabled() &&
