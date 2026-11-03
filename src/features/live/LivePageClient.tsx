@@ -2,35 +2,19 @@
 
 import '@/features/live/types';
 
-import {
-  AlertTriangle,
-  CheckCircle2,
-  Radio,
-  RefreshCw,
-  Tv,
-  X,
-} from 'lucide-react';
+import { AlertTriangle, CheckCircle2, RefreshCw, Tv, X } from 'lucide-react';
 import { ReactNode, Suspense, useMemo, useRef } from 'react';
 
 import AuthenticatedRoute from '@/components/AuthenticatedRoute';
 import LoadingStatePanel from '@/components/LoadingStatePanel';
 import PageLayout from '@/components/PageLayout';
-import {
-  PlayerPageAccent,
-  PlayerPageLayout,
-} from '@/components/PlayerPageLayout';
+import { PlayerPageLayout } from '@/components/PlayerPageLayout';
 import { LiveChannelSidebar } from '@/features/live/components/LiveChannelSidebar';
 import { useLiveFavorite } from '@/features/live/hooks/useLiveFavorite';
 import { useLivePlayer } from '@/features/live/hooks/useLivePlayer';
 import { useLiveSources } from '@/features/live/hooks/useLiveSources';
 import { useBackNavigation } from '@/hooks/useBackNavigation';
 import { usePlayerKeyboard } from '@/hooks/usePlayerKeyboard';
-
-const liveAccent: PlayerPageAccent = {
-  icon: 'text-sky-500 dark:text-sky-400',
-  glow: 'bg-sky-400/10 dark:bg-sky-400/20',
-  sub: 'text-sky-600/80 dark:text-sky-400/70',
-};
 
 function LiveLoadingView({
   stage,
@@ -91,7 +75,7 @@ function LiveErrorView({ error }: { error: string }) {
           {isAuthError ? null : (
             <button
               onClick={() => window.location.reload()}
-              className='flex w-full transform items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-blue-500 to-cyan-600 px-6 py-3 font-medium text-white shadow-lg transition-all duration-200 hover:scale-105 hover:from-blue-600 hover:to-cyan-700 hover:shadow-xl'
+              className='flex w-full transform items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-brand-500 to-cyan-600 px-6 py-3 font-medium text-white shadow-lg transition-all duration-200 hover:scale-105 hover:from-brand-600 hover:to-cyan-700 hover:shadow-xl'
             >
               <RefreshCw className='h-4 w-4' />
               重新尝试
@@ -116,7 +100,7 @@ function buildLiveHeaderTags({
 
   if (sourceName) {
     tags.push(
-      <span className='inline-flex items-center rounded-full bg-emerald-50 px-2.5 py-0.5 text-emerald-700 ring-1 ring-emerald-200/60 dark:bg-emerald-900/30 dark:text-emerald-300 dark:ring-emerald-500/20'>
+      <span className='inline-flex items-center rounded-full bg-brand-50 px-2.5 py-0.5 text-brand-700 ring-1 ring-brand-200/60 dark:bg-brand-900/30 dark:text-brand-300 dark:ring-brand-500/20'>
         {sourceName}
       </span>,
     );
@@ -132,7 +116,7 @@ function buildLiveHeaderTags({
 
   if (channelCount > 0) {
     tags.push(
-      <span className='inline-flex items-center rounded-full bg-sky-50 px-2.5 py-0.5 text-sky-700 ring-1 ring-sky-200/60 dark:bg-sky-900/30 dark:text-sky-300 dark:ring-sky-500/20'>
+      <span className='inline-flex items-center rounded-full bg-brand-50 px-2.5 py-0.5 text-brand-700 ring-1 ring-brand-200/60 dark:bg-brand-900/30 dark:text-brand-300 dark:ring-brand-500/20'>
         共 {channelCount} 个频道
       </span>,
     );
@@ -168,7 +152,7 @@ export function LivePlayerOverlay({
             <button
               type='button'
               onClick={onRetry}
-              className='inline-flex items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-blue-500 to-cyan-600 px-5 py-2 text-sm font-medium text-white shadow-lg transition-all duration-200 hover:from-blue-600 hover:to-cyan-700 hover:shadow-xl'
+              className='inline-flex items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-brand-500 to-cyan-600 px-5 py-2 text-sm font-medium text-white shadow-lg transition-all duration-200 hover:from-brand-600 hover:to-cyan-700 hover:shadow-xl'
             >
               <RefreshCw className='h-4 w-4' />
               重试
@@ -278,8 +262,6 @@ function AuthenticatedLivePageClient() {
       activePath='/live'
       title={sources.currentChannel?.name || sources.currentSource?.name || ''}
       titleFallback='直播'
-      titleIcon={Radio}
-      accent={liveAccent}
       isPanelCollapsed={sources.isChannelListCollapsed}
       onTogglePanel={() =>
         sources.setIsChannelListCollapsed(!sources.isChannelListCollapsed)

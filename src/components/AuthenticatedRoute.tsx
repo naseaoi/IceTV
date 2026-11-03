@@ -105,7 +105,7 @@ export default function AuthenticatedRoute({
                 <button
                   type='button'
                   onClick={() => void refreshSession()}
-                  className='inline-flex items-center gap-2 rounded-lg bg-green-600 px-4 py-2.5 text-sm font-medium text-white transition-colors hover:bg-green-700'
+                  className='inline-flex items-center gap-2 rounded-lg bg-brand-600 px-4 py-2.5 text-sm font-medium text-white transition-colors hover:bg-brand-700'
                 >
                   <RefreshCw className='h-4 w-4' />
                   重新验证
@@ -113,7 +113,7 @@ export default function AuthenticatedRoute({
               ) : (
                 <Link
                   href={`/login?redirect=${encodeURIComponent(redirectPath)}`}
-                  className='inline-flex items-center rounded-lg bg-green-600 px-4 py-2.5 text-sm font-medium text-white transition-colors hover:bg-green-700'
+                  className='inline-flex items-center rounded-lg bg-brand-600 px-4 py-2.5 text-sm font-medium text-white transition-colors hover:bg-brand-700'
                 >
                   前往登录
                 </Link>

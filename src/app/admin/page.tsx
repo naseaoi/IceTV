@@ -220,7 +220,7 @@ function AdminPageClient() {
 
             <section className='flex min-w-0 items-center justify-center rounded-xl rounded-tl-none border border-gray-200 bg-white/80 p-4 shadow-sm backdrop-blur-md dark:border-gray-700 dark:bg-gray-800/50 sm:p-6 md:min-h-0 md:flex-1'>
               <div className='flex flex-col items-center gap-4 text-center'>
-                <Loader2 className='h-10 w-10 animate-spin text-green-500' />
+                <Loader2 className='h-10 w-10 animate-spin text-brand-500' />
                 <div>
                   <p className='text-base font-medium text-gray-900 dark:text-gray-100'>
                     正在加载后台配置
@@ -255,7 +255,7 @@ function AdminPageClient() {
             </p>
             <a
               href={errorView.actionHref}
-              className='mt-6 inline-flex h-10 items-center justify-center rounded-lg bg-green-600 px-4 text-sm font-medium text-white transition-colors hover:bg-green-700'
+              className='mt-6 inline-flex h-10 items-center justify-center rounded-lg bg-brand-600 px-4 text-sm font-medium text-white transition-colors hover:bg-brand-700'
             >
               {errorView.actionText}
             </a>
@@ -300,7 +300,7 @@ function AdminPageClient() {
                   activeSaveAction.saving
                     ? 'cursor-not-allowed bg-gray-400 dark:bg-gray-600'
                     : activeSaveAction.dirty
-                      ? 'bg-green-600 hover:bg-green-700 dark:bg-green-600 dark:hover:bg-green-700'
+                      ? 'bg-brand-600 hover:bg-brand-700 dark:bg-brand-600 dark:hover:bg-brand-700'
                       : 'cursor-not-allowed bg-gray-200 text-gray-400 dark:bg-gray-700 dark:text-gray-500'
                 }`}
               >

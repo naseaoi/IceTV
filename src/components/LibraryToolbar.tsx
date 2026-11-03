@@ -64,10 +64,10 @@ export function LibraryToolbar<F extends string, S extends string>({
 
   return (
     <div className='flex flex-col gap-3 lg:flex-row lg:items-center lg:gap-4'>
-      <label className='group relative flex h-10 items-center rounded-xl bg-white/75 shadow-sm ring-1 ring-inset ring-black/[0.06] backdrop-blur transition focus-within:bg-white focus-within:ring-green-500/50 dark:bg-white/[0.06] dark:shadow-none dark:ring-white/[0.06] dark:focus-within:bg-gray-900 lg:w-80'>
+      <label className='group relative flex h-10 items-center rounded-xl bg-white/75 shadow-sm ring-1 ring-inset ring-black/[0.06] backdrop-blur transition focus-within:bg-white focus-within:ring-brand-500/50 dark:bg-white/[0.06] dark:shadow-none dark:ring-white/[0.06] dark:focus-within:bg-gray-900 lg:w-80'>
         <Search
           aria-hidden='true'
-          className='pointer-events-none absolute left-3 h-4 w-4 text-gray-400 transition group-focus-within:text-green-500'
+          className='pointer-events-none absolute left-3 h-4 w-4 text-gray-400 transition group-focus-within:text-brand-500'
         />
         <input
           ref={inputRef}

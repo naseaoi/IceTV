@@ -5,6 +5,7 @@ import { useRouter, useSearchParams } from 'next/navigation';
 import React, { useEffect, useMemo, useState } from 'react';
 
 import AuthenticatedRoute from '@/components/AuthenticatedRoute';
+import { PAGE_CONTAINER_CLASS } from '@/components/page-container';
 import PageLayout from '@/components/PageLayout';
 import SearchResultFilter from '@/components/SearchResultFilter';
 import SearchSuggestions from '@/components/SearchSuggestions';
@@ -217,10 +218,12 @@ function AuthenticatedSearchPageClient() {
 
   return (
     <PageLayout activePath='/search'>
-      <div className='overflow-visible px-4 pb-4 pt-0 sm:px-10 sm:py-8'>
+      <div
+        className={`${PAGE_CONTAINER_CLASS} overflow-visible pb-4 pt-0 md:py-8`}
+      >
         <div className={`${showResults ? 'mb-8 pt-0' : 'pt-0 md:pt-[20vh]'}`}>
           <div
-            className='sticky top-0 z-[550] -mx-4 border-b border-gray-200/50 bg-white/80 px-4 py-2 backdrop-blur-xl dark:border-gray-700/50 dark:bg-gray-900/80 md:static md:mx-0 md:border-0 md:bg-transparent md:px-0 md:py-0 md:backdrop-blur-none md:dark:bg-transparent'
+            className='sticky top-0 z-[550] -mx-4 border-b border-gray-200/70 bg-gray-50/85 px-4 py-2 backdrop-blur-xl dark:border-white/[0.06] dark:bg-gray-950/80 md:static md:mx-0 md:border-0 md:bg-transparent md:px-0 md:py-0 md:backdrop-blur-none md:dark:bg-transparent'
             style={{ paddingTop: 'max(0.5rem, env(safe-area-inset-top))' }}
           >
             <form onSubmit={handleSearch} className='mx-auto w-full max-w-2xl'>
@@ -236,7 +239,7 @@ function AuthenticatedSearchPageClient() {
                   onCompositionEnd={() => setIsComposingSearch(false)}
                   placeholder='搜索电影、电视剧...'
                   autoComplete='off'
-                  className='h-12 w-full rounded-lg border border-gray-200/50 bg-gray-50/80 py-3 pl-10 pr-12 text-sm text-gray-700 placeholder-gray-400 shadow-sm focus:bg-white focus:outline-none focus:ring-2 focus:ring-green-400 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-300 dark:placeholder-gray-500 dark:focus:bg-gray-700'
+                  className='h-12 w-full rounded-lg border border-gray-200/50 bg-gray-50/80 py-3 pl-10 pr-12 text-sm text-gray-700 placeholder-gray-400 shadow-sm focus:bg-white focus:outline-none focus:ring-2 focus:ring-brand-400 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-300 dark:placeholder-gray-500 dark:focus:bg-gray-700'
                 />
 
                 {searchQuery && (
@@ -292,7 +295,7 @@ function AuthenticatedSearchPageClient() {
         </div>
 
         {showResults && (
-          <div className='mx-auto mt-12 max-w-[95%] overflow-visible'>
+          <div className='mt-12 overflow-visible'>
             <section className='mb-12'>
               <div className='mb-4'>
                 <h2 className='text-xl font-bold text-gray-800 dark:text-gray-200'>
@@ -304,7 +307,7 @@ function AuthenticatedSearchPageClient() {
                   )}
                   {isLoading && useFluidSearch && (
                     <span className='ml-2 inline-block align-middle'>
-                      <span className='inline-block h-3 w-3 animate-spin rounded-full border-2 border-gray-300 border-t-green-500'></span>
+                      <span className='inline-block h-3 w-3 animate-spin rounded-full border-2 border-gray-300 border-t-brand-500'></span>
                     </span>
                   )}
                 </h2>
@@ -362,7 +365,7 @@ function AuthenticatedSearchPageClient() {
                         setViewMode(viewMode === 'agg' ? 'all' : 'agg')
                       }
                     />
-                    <div className='h-5 w-9 rounded-full bg-gray-300 transition-colors peer-checked:bg-green-500 dark:bg-gray-600'></div>
+                    <div className='h-5 w-9 rounded-full bg-gray-300 transition-colors peer-checked:bg-brand-500 dark:bg-gray-600'></div>
                     <div className='absolute left-0.5 top-0.5 h-4 w-4 rounded-full bg-white transition-transform peer-checked:translate-x-4'></div>
                   </div>
                 </label>
@@ -370,7 +373,7 @@ function AuthenticatedSearchPageClient() {
               {searchResults.length === 0 ? (
                 isLoading ? (
                   <div className='flex h-40 items-center justify-center'>
-                    <div className='h-8 w-8 animate-spin rounded-full border-b-2 border-green-500'></div>
+                    <div className='h-8 w-8 animate-spin rounded-full border-b-2 border-brand-500'></div>
                   </div>
                 ) : (
                   <div className='py-8 text-center text-gray-500 dark:text-gray-400'>
@@ -452,7 +455,7 @@ function AuthenticatedSearchPageClient() {
 
       <button
         onClick={scrollToTop}
-        className={`group fixed bottom-20 right-6 z-[500] flex h-12 w-12 items-center justify-center rounded-full bg-green-500/90 text-white shadow-lg backdrop-blur-sm transition-all duration-300 ease-in-out hover:bg-green-500 md:bottom-6 ${
+        className={`group fixed bottom-20 right-6 z-[500] flex h-12 w-12 items-center justify-center rounded-full bg-brand-500/90 text-white shadow-lg backdrop-blur-sm transition-all duration-300 ease-in-out hover:bg-brand-500 md:bottom-6 ${
           showBackToTop
             ? 'pointer-events-auto translate-y-0 opacity-100'
             : 'pointer-events-none translate-y-4 opacity-0'

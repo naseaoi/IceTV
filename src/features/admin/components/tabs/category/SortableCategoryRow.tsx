@@ -55,7 +55,7 @@ export function SortableCategoryRow({
         <span
           className={`rounded-full px-2 py-1 text-xs ${
             category.type === 'movie'
-              ? 'bg-blue-100 text-blue-800 dark:bg-blue-900/20 dark:text-blue-300'
+              ? 'bg-brand-100 text-brand-800 dark:bg-brand-900/20 dark:text-brand-300'
               : 'bg-purple-100 text-purple-800 dark:bg-purple-900/20 dark:text-purple-300'
           }`}
         >

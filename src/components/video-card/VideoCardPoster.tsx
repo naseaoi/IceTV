@@ -74,7 +74,7 @@ function AggregateSourcesIndicator({
           onContextMenu={preventContextMenu}
         >
           <div
-            className='w-[7em] overflow-hidden rounded-lg border border-white/10 bg-gray-800/90 p-1.5 text-xs text-white shadow-xl backdrop-blur-sm sm:w-[7.5em] sm:p-2 sm:text-xs'
+            className='w-[7em] overflow-hidden rounded-lg bg-gray-900 p-1.5 text-xs text-white shadow-xl ring-1 ring-white/[0.08] sm:w-[7.5em] sm:p-2 sm:text-xs'
             style={noSelectStyle}
             onContextMenu={preventContextMenu}
           >
@@ -84,7 +84,7 @@ function AggregateSourcesIndicator({
                   key={sourceName}
                   className='flex min-w-0 items-center gap-1 sm:gap-1.5'
                 >
-                  <div className='h-0.5 w-0.5 flex-shrink-0 rounded-full bg-blue-400 sm:h-1 sm:w-1'></div>
+                  <div className='h-0.5 w-0.5 flex-shrink-0 rounded-full bg-brand-400 sm:h-1 sm:w-1'></div>
                   <span
                     className='block w-[4em] shrink-0 truncate text-[10px] leading-tight sm:text-xs'
                     title={sourceName}
@@ -206,7 +206,7 @@ export function VideoCardPoster({
           )}
           {showEpisodeBadge && (
             <div
-              className='max-sm:px-1.5 max-sm:py-0.5 max-sm:text-[10px] ml-auto flex-shrink-0 whitespace-nowrap rounded-md bg-green-500 px-2 py-1 text-xs font-semibold text-white shadow-md transition-all duration-300 ease-out group-hover:scale-110'
+              className='ml-auto flex-shrink-0 whitespace-nowrap rounded-md bg-brand-500 px-1.5 py-0.5 text-[10px] font-semibold text-white shadow-md transition-all duration-300 ease-out group-hover:scale-110 sm:px-2 sm:py-1 sm:text-xs'
               style={noSelectStyle}
               onContextMenu={preventContextMenu}
             >
@@ -226,7 +226,7 @@ export function VideoCardPoster({
           <PlayCircleIcon
             size={50}
             strokeWidth={0.8}
-            className='fill-transparent text-white transition-all duration-300 ease-out hover:scale-[1.1] hover:fill-green-500'
+            className='fill-transparent text-white transition-all duration-300 ease-out hover:scale-[1.1] hover:fill-brand-500'
             style={noSelectStyle}
             onContextMenu={preventContextMenu}
           />
@@ -313,7 +313,7 @@ export function VideoCardPoster({
           onContextMenu={preventContextMenu}
         >
           <div
-            className='flex h-7 w-7 items-center justify-center rounded-full bg-green-500 text-xs font-bold text-white shadow-md transition-all duration-300 ease-out hover:scale-[1.1] hover:bg-green-600'
+            className='flex h-7 w-7 items-center justify-center rounded-full bg-brand-500 text-xs font-bold text-white shadow-md transition-all duration-300 ease-out hover:scale-[1.1] hover:bg-brand-600'
             style={noSelectStyle}
             onContextMenu={preventContextMenu}
           >
@@ -363,7 +363,7 @@ export function VideoCardPoster({
           onContextMenu={preventContextMenu}
         >
           <div
-            className='h-full bg-green-500 transition-all duration-500 ease-out'
+            className='h-full bg-brand-500 transition-all duration-500 ease-out'
             style={
               {
                 width: `${progress}%`,

@@ -23,7 +23,6 @@ import {
   readPreferredQualityHeight,
   readPreferredQualityPreference,
   readSeenAnnouncement,
-  readSidebarCollapsed,
   readSourcePreferredQualityPreference,
   resetAggregateSearch,
   resetAutoSwitchSource,
@@ -32,8 +31,6 @@ import {
   resetFluidSearch,
   resetLiveDirectConnect,
   SEEN_ANNOUNCEMENT_STORAGE_KEY,
-  SIDEBAR_AUTO_COLLAPSE_BELOW_WIDTH,
-  SIDEBAR_COLLAPSED_STORAGE_KEY,
   SOURCE_PREFERRED_QUALITY_STORAGE_PREFIX,
   writeAdminTableColumnWidth,
   writeAggregateSearch,
@@ -48,7 +45,6 @@ import {
   writeLiveDirectConnect,
   writePreferredQualityHeight,
   writeSeenAnnouncement,
-  writeSidebarCollapsed,
   writeSourcePreferredQualityHeight,
 } from '../local-preferences';
 
@@ -191,38 +187,6 @@ describe('local preferences', () => {
 
     expect(localStorage.getItem(AUTO_PLAY_NEXT_STORAGE_KEY)).toBe('false');
     expect(readAutoPlayNextEnabled()).toBe(false);
-  });
-
-  it('defaults sidebar collapsed by viewport width without a stored preference', () => {
-    const originalWidth = window.innerWidth;
-    try {
-      Object.defineProperty(window, 'innerWidth', {
-        configurable: true,
-        value: SIDEBAR_AUTO_COLLAPSE_BELOW_WIDTH - 1,
-      });
-      expect(readSidebarCollapsed()).toBe(true);
-
-      Object.defineProperty(window, 'innerWidth', {
-        configurable: true,
-        value: SIDEBAR_AUTO_COLLAPSE_BELOW_WIDTH,
-      });
-      expect(readSidebarCollapsed()).toBe(false);
-    } finally {
-      Object.defineProperty(window, 'innerWidth', {
-        configurable: true,
-        value: originalWidth,
-      });
-    }
-  });
-
-  it('stores sidebar collapsed preference through the shared helper', () => {
-    writeSidebarCollapsed(false);
-    expect(readSidebarCollapsed()).toBe(false);
-
-    writeSidebarCollapsed(true);
-
-    expect(localStorage.getItem(SIDEBAR_COLLAPSED_STORAGE_KEY)).toBe('true');
-    expect(readSidebarCollapsed()).toBe(true);
   });
 
   it('stores seen announcement through the shared helper', () => {

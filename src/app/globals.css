@@ -38,29 +38,11 @@ body {
 }
 
 html.light body {
-  background: linear-gradient(
-    180deg,
-    #e6f3fb 0%,
-    #eaf3f7 18%,
-    #f7f7f3 38%,
-    #e9ecef 60%,
-    #dbe3ea 80%,
-    #d3dde6 100%
-  );
-  background-attachment: fixed;
+  background: #f6f7f9;
 }
 
 html:not(.light) body {
-  background: linear-gradient(
-    180deg,
-    #0a0e14 0%,
-    #0d1117 18%,
-    #111820 38%,
-    #0f1419 60%,
-    #0c1015 80%,
-    #0a0d12 100%
-  );
-  background-attachment: fixed;
+  background: #0d0e11;
 }
 
 /* 自定义滚动条样式 */
@@ -98,34 +80,6 @@ html:not(.light) body {
     rgba(0, 0, 0, 0) 0%,
     rgba(0, 0, 0, 0.8) 100%
   );
-}
-
-/* 防止侧栏折叠状态在刷新时闪烁：CSS 在 React 水合前即生效 */
-@media (min-width: 768px) {
-  html[data-sidebar-collapsed='true'] [data-sidebar] {
-    width: 5rem;
-  }
-  html[data-sidebar-collapsed='true'] .sidebar-offset {
-    width: 5rem;
-  }
-  /* 折叠态品牌链接内边距和间距，消除图标位置偏移 */
-  html[data-sidebar-collapsed='true'] [data-sidebar] [data-brand-link] {
-    padding-left: 0.25rem;
-    padding-right: 0.25rem;
-    gap: 0;
-  }
-  /* 折叠态隐藏文字标签 */
-  html[data-sidebar-collapsed='true'] [data-sidebar] [data-sidebar-label] {
-    max-width: 0;
-    opacity: 0;
-  }
-}
-
-/* 首次挂载前禁止侧栏过渡动画，消除 SSR→客户端折叠状态差异导致的视觉抖动 */
-[data-sidebar]:not([data-ready]),
-[data-sidebar]:not([data-ready]) *,
-[data-sidebar-offset]:not([data-ready]) {
-  transition-duration: 0s !important;
 }
 
 /* 隐藏移动端（<768px）垂直滚动条 */

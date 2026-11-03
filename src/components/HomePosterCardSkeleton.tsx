@@ -1,5 +1,5 @@
 export const HOME_POSTER_CARD_CLASS =
-  'home-poster-card w-[25vw] min-w-[25vw] sm:w-44 sm:min-w-[180px]';
+  'home-poster-card w-[25vw] min-w-[25vw] sm:w-40 sm:min-w-[160px]';
 
 interface HomePosterCardSkeletonProps {
   className?: string;
@@ -14,8 +14,8 @@ export default function HomePosterCardSkeleton({
         <div className='relative aspect-[2/3] overflow-hidden rounded-lg bg-gray-200 dark:bg-gray-800'>
           <div className='absolute inset-0 animate-pulse bg-gray-300 dark:bg-gray-700' />
         </div>
-        <div className='mt-2 text-center'>
-          <div className='mx-auto h-5 w-4/5 animate-pulse rounded bg-gray-200 dark:bg-gray-800' />
+        <div className='mt-2 flex h-5 items-center'>
+          <div className='h-3.5 w-3/4 animate-pulse rounded bg-gray-200 dark:bg-gray-800' />
         </div>
       </div>
     </div>

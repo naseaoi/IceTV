@@ -5,6 +5,13 @@ import Link from 'next/link';
 import { useEffect, useState } from 'react';
 
 import { useAuthSession } from '@/components/AuthProvider';
+import {
+  MODAL_CLOSE_BUTTON_CLASS,
+  MODAL_INPUT_CLASS,
+  MODAL_LABEL_CLASS,
+  MODAL_PRIMARY_BUTTON_CLASS,
+  MODAL_TITLE_CLASS,
+} from '@/components/modals/modal-styles';
 import ModalShell from '@/components/modals/ModalShell';
 import { useNicknameAvailability } from '@/hooks/useNicknameAvailability';
 import { getMyProfile, updateProfile } from '@/lib/profile.client';
@@ -13,9 +20,11 @@ import { NICKNAME_RULE_MESSAGE, validateNickname } from '@/lib/user-profile';
 export function ProfileForm({
   required = false,
   onSaved,
+  onClose,
 }: {
   required?: boolean;
   onSaved?: () => void;
+  onClose?: () => void;
 }) {
   const { session, refreshSession } = useAuthSession();
   const [nickname, setNickname] = useState(
@@ -64,17 +73,29 @@ export function ProfileForm({
     }
   }
   return (
-    <form onSubmit={save} className='space-y-5'>
-      <div>
-        <h2 className='text-xl font-semibold text-gray-900 dark:text-gray-100'>
+    <form onSubmit={save}>
+      <div className='flex items-center justify-between gap-3'>
+        <h2 className={MODAL_TITLE_CLASS}>
           {required ? '设置你的昵称' : '个人资料'}
         </h2>
-        <p className='mt-2 text-sm leading-6 text-gray-500 dark:text-gray-400'>
+        {onClose && (
+          <button
+            type='button'
+            aria-label='关闭资料面板'
+            onClick={onClose}
+            className={`${MODAL_CLOSE_BUTTON_CLASS} -mr-1.5`}
+          >
+            <X className='h-4 w-4' />
+          </button>
+        )}
+      </div>
+      {required && (
+        <p className='mt-1.5 text-sm leading-6 text-gray-500 dark:text-gray-400'>
           昵称会公开显示在评价和个人主页，登录名不会公开
         </p>
-      </div>
-      <div>
-        <label htmlFor='profile-nickname' className='text-sm font-medium'>
+      )}
+      <div className='mt-5'>
+        <label htmlFor='profile-nickname' className={MODAL_LABEL_CLASS}>
           昵称
         </label>
         <input
@@ -83,14 +104,19 @@ export function ProfileForm({
           value={nickname}
           disabled={saving || !loaded}
           onChange={(event) => setNickname(event.target.value)}
-          className='mt-2 w-full rounded-xl border-0 bg-gray-100 px-3 py-2.5 text-gray-900 focus:ring-2 focus:ring-green-500 dark:bg-white/10 dark:text-gray-100'
+          className={MODAL_INPUT_CLASS}
         />
-        <p className='mt-2 text-xs text-gray-500'>{NICKNAME_RULE_MESSAGE}</p>
         <p
           role='status'
-          className={`mt-1 text-xs ${availability.status === 'error' ? 'text-red-500' : 'text-green-600 dark:text-green-400'}`}
+          className={`mt-1.5 min-h-[1rem] text-xs ${
+            availability.status === 'error'
+              ? 'text-rose-600 dark:text-rose-400'
+              : availability.status === 'available'
+                ? 'text-brand-600 dark:text-brand-400'
+                : 'text-gray-400 dark:text-gray-500'
+          }`}
         >
-          {availability.message}
+          {availability.message || NICKNAME_RULE_MESSAGE}
         </p>
       </div>
       {!required && (
@@ -100,38 +126,52 @@ export function ProfileForm({
           aria-checked={favoritesPublic}
           disabled={!loaded || saving}
           onClick={() => setFavoritesPublic(!favoritesPublic)}
-          className='flex w-full items-center justify-between rounded-xl bg-gray-50 p-3 text-sm dark:bg-white/5'
+          className='mt-4 flex w-full items-center justify-between gap-4 border-t border-gray-200/70 pt-4 text-left text-sm text-gray-900 disabled:opacity-60 dark:border-white/[0.06] dark:text-gray-100'
         >
           <span>公开我的收藏</span>
           <span
-            className={`rounded-full px-3 py-1 ${favoritesPublic ? 'bg-green-600 text-white' : 'bg-gray-200 text-gray-600 dark:bg-gray-700 dark:text-gray-300'}`}
+            aria-hidden='true'
+            className={`relative h-6 w-10 shrink-0 rounded-full transition-colors ${
+              favoritesPublic
+                ? 'bg-brand-500'
+                : 'bg-gray-200 dark:bg-white/[0.12]'
+            }`}
           >
-            {favoritesPublic ? '已开启' : '已关闭'}
+            <span
+              className={`absolute left-0.5 top-0.5 h-5 w-5 rounded-full bg-white shadow-sm transition-transform ${
+                favoritesPublic ? 'translate-x-4' : ''
+              }`}
+            />
           </span>
         </button>
       )}
       {error && (
-        <p role='alert' className='text-sm text-red-500'>
+        <p
+          role='alert'
+          className='mt-4 text-sm text-rose-600 dark:text-rose-400'
+        >
           {error}
         </p>
       )}
-      <div className='flex items-center justify-between gap-3'>
-        <button
-          type='submit'
-          disabled={saving || !loaded || availability.status !== 'available'}
-          className='rounded-xl bg-green-600 px-5 py-2.5 text-sm font-medium text-white hover:bg-green-700 disabled:opacity-50'
-        >
-          {saving ? '保存中…' : '保存资料'}
-        </button>
-        {!required && session.status === 'authenticated' && (
+      <div className='mt-6 flex items-center justify-between gap-3'>
+        {!required && session.status === 'authenticated' ? (
           <Link
             href={`/u/${session.profileId}`}
             onClick={onSaved}
-            className='text-sm text-green-600 dark:text-green-400'
+            className='text-sm text-gray-500 transition-colors hover:text-gray-900 dark:text-gray-400 dark:hover:text-white'
           >
             查看我的主页
           </Link>
+        ) : (
+          <span />
         )}
+        <button
+          type='submit'
+          disabled={saving || !loaded || availability.status !== 'available'}
+          className={MODAL_PRIMARY_BUTTON_CLASS}
+        >
+          {saving ? '保存中…' : '保存资料'}
+        </button>
       </div>
     </form>
   );
@@ -139,17 +179,9 @@ export function ProfileForm({
 
 export function ProfilePanel({ onClose }: { onClose: () => void }) {
   return (
-    <ModalShell isOpen onClose={onClose} panelClassName='max-w-md p-6'>
+    <ModalShell isOpen onClose={onClose} panelClassName='max-w-sm p-5 sm:p-6'>
       <div role='dialog' aria-label='个人资料' aria-modal='true'>
-        <button
-          type='button'
-          aria-label='关闭资料面板'
-          onClick={onClose}
-          className='float-right rounded-lg p-1 text-gray-500 hover:bg-gray-100 dark:hover:bg-white/10'
-        >
-          <X className='h-5 w-5' />
-        </button>
-        <ProfileForm onSaved={onClose} />
+        <ProfileForm onSaved={onClose} onClose={onClose} />
       </div>
     </ModalShell>
   );

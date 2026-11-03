@@ -284,13 +284,13 @@ export const DanmakuEpisodePicker: React.FC<DanmakuEpisodePickerProps> = ({
             if (event.key === 'Enter') void runSearch(keyword);
           }}
           placeholder='搜索番剧名称'
-          className='min-w-0 flex-1 rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm text-gray-900 outline-none focus:border-green-500/60 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-100 dark:placeholder:text-gray-500'
+          className='min-w-0 flex-1 rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm text-gray-900 outline-none focus:border-brand-500/60 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-100 dark:placeholder:text-gray-500'
         />
         <button
           type='button'
           onClick={() => void runSearch(keyword)}
           disabled={loading || !keyword.trim()}
-          className='relative flex flex-shrink-0 items-center justify-center rounded-lg bg-green-600 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-green-700 disabled:cursor-not-allowed disabled:opacity-50'
+          className='relative flex flex-shrink-0 items-center justify-center rounded-lg bg-brand-600 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-brand-700 disabled:cursor-not-allowed disabled:opacity-50'
           aria-busy={loading}
           aria-label={loading ? '搜索中' : undefined}
         >
@@ -302,8 +302,8 @@ export const DanmakuEpisodePicker: React.FC<DanmakuEpisodePickerProps> = ({
       </div>
 
       {boundEpisodeId !== null && (
-        <div className='flex items-center justify-between gap-2 rounded-lg border border-green-500/40 bg-green-500/5 px-3 py-2'>
-          <span className='min-w-0 truncate text-xs text-green-600 dark:text-green-400'>
+        <div className='flex items-center justify-between gap-2 rounded-lg border border-brand-500/40 bg-brand-500/5 px-3 py-2'>
+          <span className='min-w-0 truncate text-xs text-brand-600 dark:text-brand-400'>
             已绑定集 ID: {boundEpisodeId}
           </span>
           <PanelActionButton onClick={() => void handleClear()}>
@@ -367,7 +367,7 @@ export const DanmakuEpisodePicker: React.FC<DanmakuEpisodePickerProps> = ({
                   onClick={() => setOpenedSource(group.animeTitle)}
                   className={`flex w-full items-center gap-3 rounded-lg border px-3 py-2 text-left transition-colors ${
                     hasBound
-                      ? 'border-green-500/60 bg-green-500/10'
+                      ? 'border-brand-500/60 bg-brand-500/10'
                       : 'border-gray-200 bg-white hover:bg-gray-50 dark:border-gray-700 dark:bg-gray-800 dark:hover:bg-gray-700'
                   }`}
                 >
@@ -377,7 +377,7 @@ export const DanmakuEpisodePicker: React.FC<DanmakuEpisodePickerProps> = ({
                       title={group.animeTitle}
                     >
                       {group.providerLabel && (
-                        <span className='flex-shrink-0 rounded bg-green-500/10 px-1.5 py-0.5 text-[11px] font-medium uppercase leading-none tracking-wide text-green-600 dark:bg-green-500/15 dark:text-green-400'>
+                        <span className='flex-shrink-0 rounded bg-brand-500/10 px-1.5 py-0.5 text-[11px] font-medium uppercase leading-none tracking-wide text-brand-600 dark:bg-brand-500/15 dark:text-brand-400'>
                           {group.providerLabel}
                         </span>
                       )}
@@ -391,7 +391,7 @@ export const DanmakuEpisodePicker: React.FC<DanmakuEpisodePickerProps> = ({
                         <span>{group.typeDescription}</span>
                       )}
                       {hasBound && (
-                        <span className='text-green-600 dark:text-green-400'>
+                        <span className='text-brand-600 dark:text-brand-400'>
                           当前绑定
                         </span>
                       )}
@@ -426,7 +426,7 @@ export const DanmakuEpisodePicker: React.FC<DanmakuEpisodePickerProps> = ({
                 onClick={() => void handleSelect(candidate.episodeId)}
                 className={`w-full rounded-lg border px-3 py-2 text-left transition-colors ${
                   selected
-                    ? 'border-green-500/60 bg-green-500/10'
+                    ? 'border-brand-500/60 bg-brand-500/10'
                     : 'border-gray-200 bg-white hover:bg-gray-50 dark:border-gray-700 dark:bg-gray-800 dark:hover:bg-gray-700'
                 }`}
               >
@@ -465,7 +465,7 @@ export const DanmakuEpisodePicker: React.FC<DanmakuEpisodePickerProps> = ({
               }
               scrollBoundIntoView(true);
             }}
-            className='absolute bottom-4 right-4 z-10 flex h-9 w-9 items-center justify-center rounded-full bg-green-500 text-white shadow-lg transition-all hover:bg-green-600 dark:bg-green-600 dark:hover:bg-green-500'
+            className='absolute bottom-4 right-4 z-10 flex h-9 w-9 items-center justify-center rounded-full bg-brand-500 text-white shadow-lg transition-all hover:bg-brand-600 dark:bg-brand-600 dark:hover:bg-brand-500'
             aria-label={locateLabel}
             title={locateLabel}
           >

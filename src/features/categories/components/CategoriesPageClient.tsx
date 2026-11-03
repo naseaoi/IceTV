@@ -4,6 +4,7 @@ import { Cat, Clover, Film, Radio, Star, Tv } from 'lucide-react';
 import Link from 'next/link';
 import { useMemo } from 'react';
 
+import { PAGE_CONTAINER_CLASS } from '@/components/page-container';
 import PageLayout from '@/components/PageLayout';
 import { useRuntimeConfig } from '@/components/RuntimeConfigProvider';
 import { withReturnTo } from '@/lib/navigation-return';
@@ -25,14 +26,14 @@ export default function CategoriesPageClient() {
     const entries: ChannelEntry[] = [
       {
         icon: Film,
-        iconClassName: 'text-blue-500',
+        iconClassName: 'text-brand-500',
         label: '电影',
         description: '热门与分类电影',
         href: '/douban?type=movie',
       },
       {
         icon: Tv,
-        iconClassName: 'text-emerald-500',
+        iconClassName: 'text-brand-500',
         label: '剧集',
         description: '热门剧集与榜单',
         href: '/douban?type=tv',
@@ -79,8 +80,8 @@ export default function CategoriesPageClient() {
 
   return (
     <PageLayout activePath='/categories'>
-      <div className='px-4 pb-4 pt-4 sm:px-10 sm:pt-8'>
-        <div className='mx-auto max-w-[95%]'>
+      <div className='pb-4 pt-4 md:pt-8'>
+        <div className={PAGE_CONTAINER_CLASS}>
           <h1 className='mb-4 hidden text-xl font-bold text-gray-900 dark:text-gray-100 sm:block sm:text-2xl'>
             分类
           </h1>

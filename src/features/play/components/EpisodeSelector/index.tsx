@@ -9,7 +9,10 @@ import dynamic from 'next/dynamic';
 import React, { useCallback, useMemo, useState } from 'react';
 
 import MobileSheet from '@/components/mobile/MobileSheet';
-import { PlayerPanelContent } from '@/components/PlayerPanelTabBar';
+import {
+  PLAYER_PANEL_SURFACE_CLASS,
+  PlayerPanelContent,
+} from '@/components/PlayerPanelTabBar';
 import { useRuntimeConfig } from '@/components/RuntimeConfigProvider';
 import { SectionTitle } from '@/features/play/components/EpisodeSelector/SectionTitle';
 import { TabBar } from '@/features/play/components/EpisodeSelector/TabBar';
@@ -50,13 +53,13 @@ function InfoTabLoading() {
         <div className='flex min-w-0 flex-1 flex-col justify-end gap-2.5 pb-0.5'>
           <div className='h-5 w-2/3 animate-pulse rounded-md bg-gray-200/80 dark:bg-white/[0.08]' />
           <div className='h-4 w-12 animate-pulse rounded-md bg-gray-200/80 dark:bg-white/[0.08]' />
-          <div className='h-5 w-20 animate-pulse rounded-full bg-emerald-100/80 dark:bg-emerald-900/25' />
+          <div className='h-5 w-20 animate-pulse rounded-full bg-gray-200 dark:bg-white/[0.06]' />
           <div className='flex gap-1.5'>
             <div className='h-5 w-14 animate-pulse rounded-full bg-gray-200/80 dark:bg-white/[0.08]' />
-            <div className='h-5 w-20 animate-pulse rounded-full bg-violet-100/80 dark:bg-violet-900/25' />
+            <div className='h-5 w-20 animate-pulse rounded-full bg-gray-200/80 dark:bg-white/[0.08]' />
           </div>
           <div className='flex gap-1.5'>
-            <div className='h-5 w-16 animate-pulse rounded-full bg-blue-100/80 dark:bg-blue-900/25' />
+            <div className='h-5 w-16 animate-pulse rounded-full bg-gray-200 dark:bg-white/[0.06]' />
           </div>
         </div>
       </div>
@@ -417,10 +420,10 @@ const EpisodeSelector: React.FC<EpisodeSelectorProps> = ({
   );
 
   const mobileActionButtonClass =
-    'flex h-9 items-center gap-1 rounded-full border border-gray-200 bg-white px-3 text-xs text-gray-700 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-200';
+    'flex h-9 items-center gap-1 rounded-full bg-gray-900/[0.05] px-3 text-xs text-gray-700 transition-colors active:bg-gray-900/[0.09] dark:bg-white/[0.06] dark:text-gray-200 dark:active:bg-white/[0.1]';
 
   return (
-    <div className='flex h-full flex-col overflow-hidden md:ml-1'>
+    <div className='-mx-4 flex h-full flex-col overflow-hidden px-4 md:mx-0 md:ml-1 md:px-0'>
       <div className='flex min-h-0 flex-1 flex-col md:hidden'>
         <div className='flex items-center justify-between gap-2 py-1'>
           <div className='flex shrink-0 items-center gap-1.5'>
@@ -481,7 +484,7 @@ const EpisodeSelector: React.FC<EpisodeSelectorProps> = ({
         </div>
 
         {stripEpisodes.length > 0 && (
-          <div className='scrollbar-hide -mx-1 mt-2 flex gap-2 overflow-x-auto px-1 pb-1'>
+          <div className='scrollbar-hide -mx-4 mt-2 flex scroll-px-4 gap-2 overflow-x-auto px-4 pb-1'>
             {stripEpisodes.map((episodeNumber) => {
               const active = episodeNumber === value;
               return (
@@ -489,10 +492,10 @@ const EpisodeSelector: React.FC<EpisodeSelectorProps> = ({
                   key={episodeNumber}
                   type='button'
                   aria-current={active ? 'true' : undefined}
-                  className={`h-11 min-w-[44px] shrink-0 rounded-lg border px-2 text-sm font-medium ${
+                  className={`h-10 min-w-[44px] shrink-0 rounded-lg px-2 text-sm font-medium tabular-nums transition-colors ${
                     active
-                      ? 'border-green-500/60 bg-green-500/10 text-green-600 dark:text-green-400'
-                      : 'border-gray-200 bg-white text-gray-700 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-200'
+                      ? 'bg-brand-600 text-white'
+                      : 'bg-gray-900/[0.05] text-gray-700 dark:bg-white/[0.06] dark:text-gray-200'
                   }`}
                   onClick={() => onChange?.(episodeNumber)}
                 >
@@ -502,7 +505,7 @@ const EpisodeSelector: React.FC<EpisodeSelectorProps> = ({
             })}
             <button
               type='button'
-              className='h-11 shrink-0 rounded-lg border border-gray-200 bg-white px-3 text-sm text-gray-500 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-400'
+              className='h-10 shrink-0 rounded-lg bg-gray-900/[0.05] px-3 text-sm text-gray-500 dark:bg-white/[0.06] dark:text-gray-400'
               onClick={() => setMobileSheet('episodes')}
             >
               全部
@@ -510,7 +513,9 @@ const EpisodeSelector: React.FC<EpisodeSelectorProps> = ({
           </div>
         )}
 
-        <div className='mt-3 flex min-h-0 flex-1 flex-col overflow-hidden rounded-xl border border-gray-200/60 bg-white/60 dark:border-gray-700/60 dark:bg-gray-800/40'>
+        <div
+          className={`mt-3 flex min-h-0 flex-1 flex-col ${PLAYER_PANEL_SURFACE_CLASS}`}
+        >
           {renderInfoTab('panel', openMobileReviewEditor)}
         </div>
 
@@ -557,7 +562,9 @@ const EpisodeSelector: React.FC<EpisodeSelectorProps> = ({
         </MobileSheet>
       </div>
 
-      <div className='hidden min-h-0 flex-1 flex-col md:flex'>
+      <div
+        className={`hidden min-h-0 flex-1 flex-col md:flex ${PLAYER_PANEL_SURFACE_CLASS}`}
+      >
         <TabBar
           tabs={desktopTabs}
           active={desktopTab}

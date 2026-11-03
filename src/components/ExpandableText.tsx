@@ -48,7 +48,7 @@ export default function ExpandableText({
           onClick={() => setExpanded((previous) => !previous)}
           className={
             buttonClassName ||
-            'mt-1 text-xs font-medium text-green-600 hover:text-green-700 dark:text-green-400 dark:hover:text-green-300'
+            'mt-1 text-xs font-medium text-brand-600 hover:text-brand-700 dark:text-brand-400 dark:hover:text-brand-300'
           }
         >
           {expanded ? collapseLabel : '展开全文'}

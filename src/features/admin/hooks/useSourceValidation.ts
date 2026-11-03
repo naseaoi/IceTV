@@ -192,7 +192,7 @@ export function useSourceValidation({
         return {
           text: '检测中',
           className:
-            'bg-blue-100 dark:bg-blue-900/20 text-blue-800 dark:text-blue-300',
+            'bg-brand-100 dark:bg-brand-900/20 text-brand-800 dark:text-brand-300',
           icon: '⟳',
           message: result.message,
         };
@@ -200,7 +200,7 @@ export function useSourceValidation({
         return {
           text: '有效',
           className:
-            'bg-green-100 dark:bg-green-900/20 text-green-800 dark:text-green-300',
+            'bg-brand-100 dark:bg-brand-900/20 text-brand-800 dark:text-brand-300',
           icon: '✓',
           message: result.message,
         };

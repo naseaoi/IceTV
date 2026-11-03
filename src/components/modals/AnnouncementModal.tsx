@@ -22,7 +22,7 @@ export default function AnnouncementModal({
       <div className='p-6 sm:p-7'>
         <div className='mb-5 flex items-start justify-between'>
           <div className='flex items-center gap-3'>
-            <span className='inline-flex h-10 w-10 items-center justify-center rounded-xl bg-emerald-50 text-emerald-600 dark:bg-emerald-500/10 dark:text-emerald-300'>
+            <span className='inline-flex h-10 w-10 items-center justify-center rounded-xl bg-brand-50 text-brand-600 dark:bg-brand-500/10 dark:text-brand-300'>
               <Megaphone className='h-5 w-5' />
             </span>
             <h3 className='text-xl font-semibold text-gray-900 dark:text-gray-100'>
@@ -38,13 +38,13 @@ export default function AnnouncementModal({
           </button>
         </div>
 
-        <div className='max-h-[40vh] overflow-y-auto whitespace-pre-line break-words rounded-xl border border-emerald-200/70 bg-gradient-to-r from-emerald-50 to-teal-50 px-4 py-3 text-sm leading-7 text-gray-700 dark:border-emerald-500/30 dark:from-emerald-500/10 dark:to-teal-500/10 dark:text-gray-200'>
+        <div className='max-h-[40vh] overflow-y-auto whitespace-pre-line break-words rounded-xl border border-brand-200/70 bg-gradient-to-r from-brand-50 to-teal-50 px-4 py-3 text-sm leading-7 text-gray-700 dark:border-brand-500/30 dark:from-brand-500/10 dark:to-teal-500/10 dark:text-gray-200'>
           {message}
         </div>
 
         <button
           onClick={onClose}
-          className='mt-6 w-full rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 px-4 py-3 text-sm font-medium text-white shadow-md transition-all hover:-translate-y-0.5 hover:from-emerald-500 hover:to-teal-500 hover:shadow-lg'
+          className='mt-6 w-full rounded-xl bg-gradient-to-r from-brand-600 to-teal-600 px-4 py-3 text-sm font-medium text-white shadow-md transition-all hover:-translate-y-0.5 hover:from-brand-500 hover:to-teal-500 hover:shadow-lg'
         >
           {confirmText}
         </button>

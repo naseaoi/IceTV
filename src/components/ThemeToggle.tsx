@@ -6,25 +6,11 @@ import { useTheme } from 'next-themes';
 import { type MouseEvent, useEffect, useRef } from 'react';
 import { flushSync } from 'react-dom';
 
-import {
-  getSidebarItemLabelClass,
-  SIDEBAR_BUTTON_STATE_CLASS,
-  SIDEBAR_ITEM_ICON_CLASS,
-  SIDEBAR_ITEM_ICON_WRAP_CLASS,
-  SIDEBAR_ITEM_LAYOUT_CLASS,
-} from './SidebarItem';
-
 interface ThemeToggleProps {
-  variant?: 'icon' | 'sidebar';
-  isCollapsed?: boolean;
   className?: string;
 }
 
-export function ThemeToggle({
-  variant = 'icon',
-  isCollapsed = false,
-  className,
-}: ThemeToggleProps) {
+export function ThemeToggle({ className }: ThemeToggleProps) {
   const { setTheme, resolvedTheme } = useTheme();
   const pathname = usePathname();
   const transitionInProgressRef = useRef(false);
@@ -138,26 +124,6 @@ export function ThemeToggle({
         clearTransitionStyles();
       });
   };
-
-  if (variant === 'sidebar') {
-    return (
-      <button
-        onClick={toggleTheme}
-        className={`${SIDEBAR_ITEM_LAYOUT_CLASS} w-full ${SIDEBAR_BUTTON_STATE_CLASS}`}
-        aria-label='主题'
-        title='主题'
-      >
-        <div
-          data-theme-transition-anchor
-          className={SIDEBAR_ITEM_ICON_WRAP_CLASS}
-        >
-          <Sun className={`${SIDEBAR_ITEM_ICON_CLASS} hidden dark:block`} />
-          <Moon className={`${SIDEBAR_ITEM_ICON_CLASS} dark:hidden`} />
-        </div>
-        <span className={getSidebarItemLabelClass(isCollapsed)}>主题</span>
-      </button>
-    );
-  }
 
   return (
     <button

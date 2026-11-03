@@ -52,6 +52,7 @@ const snapshot: HomeClientSnapshot = {
     hotTvShows: [],
     hotVarietyShows: [],
     bangumiCalendarData: [],
+    heroItems: [],
   },
   continueWatchingSkeletonCount: 3,
   updatedAt: Date.now(),

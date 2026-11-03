@@ -1,8 +1,8 @@
-import { buildMobileContinuePlayUrl } from '@/components/mobile-continue-card/play-url';
+import { buildContinuePlayUrl } from '@/components/continue-card/play-url';
 
-describe('buildMobileContinuePlayUrl', () => {
+describe('buildContinuePlayUrl', () => {
   it('编码播放参数中的特殊字符', () => {
-    const url = buildMobileContinuePlayUrl({
+    const url = buildContinuePlayUrl({
       source: '源&一',
       id: 'video?id=1',
       title: '测试 标题',
@@ -19,7 +19,7 @@ describe('buildMobileContinuePlayUrl', () => {
   });
 
   it('省略空白可选参数', () => {
-    const url = buildMobileContinuePlayUrl({
+    const url = buildContinuePlayUrl({
       source: 'source',
       id: 'id',
       title: 'title',

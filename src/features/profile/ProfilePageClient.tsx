@@ -59,7 +59,7 @@ function ProfileReviews({
             <h2 className='mb-1.5 truncate'>
               <Link
                 href={playUrl(review)}
-                className='font-semibold text-gray-900 transition hover:text-green-600 dark:text-gray-100 dark:hover:text-green-400'
+                className='font-semibold text-gray-900 transition hover:text-brand-600 dark:text-gray-100 dark:hover:text-brand-400'
               >
                 {review.title}
               </Link>
@@ -279,7 +279,7 @@ export default function ProfilePageClient({
                     className={
                       profile.isFollowing
                         ? `inline-flex items-center gap-2 ${buttonClass}`
-                        : 'inline-flex items-center gap-2 rounded-xl bg-green-600 px-4 py-2 text-sm text-white hover:bg-green-700 disabled:opacity-50'
+                        : 'inline-flex items-center gap-2 rounded-xl bg-brand-600 px-4 py-2 text-sm text-white hover:bg-brand-700 disabled:opacity-50'
                     }
                   >
                     {profile.isFollowing ? (
@@ -304,7 +304,7 @@ export default function ProfilePageClient({
                   role='tab'
                   aria-selected={tab === value}
                   onClick={() => setTab(value)}
-                  className={`border-b-2 px-5 py-3 text-sm ${tab === value ? 'border-green-600 font-semibold text-green-600 dark:text-green-400' : 'border-transparent text-gray-500'}`}
+                  className={`border-b-2 px-5 py-3 text-sm ${tab === value ? 'border-brand-600 font-semibold text-brand-600 dark:text-brand-400' : 'border-transparent text-gray-500'}`}
                 >
                   {value === 'reviews' ? '评价' : '收藏'}
                 </button>

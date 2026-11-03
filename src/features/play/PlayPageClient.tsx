@@ -808,7 +808,6 @@ function AuthenticatedPlayPageClient({
       onDanmakuReload={handleDanmakuReload}
       onDanmakuHeatmapChange={handleDanmakuHeatmapChange}
       onLoadingTimeout={handleLoadingTimeout}
-      searchType={searchType}
       playbackError={playbackError}
     />
   );

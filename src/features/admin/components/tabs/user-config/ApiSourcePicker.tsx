@@ -28,7 +28,7 @@ export function ApiSourcePicker({
   const colorClass =
     variant === 'purple'
       ? 'text-purple-600 accent-purple-600 checked:border-purple-600 checked:bg-purple-600 focus:ring-purple-500 dark:accent-purple-500 dark:checked:border-purple-500 dark:checked:bg-purple-500'
-      : 'text-blue-600 accent-blue-600 checked:border-blue-600 checked:bg-blue-600 focus:ring-blue-500 dark:accent-blue-500 dark:checked:border-blue-500 dark:checked:bg-blue-500';
+      : 'text-brand-600 accent-brand-600 checked:border-brand-600 checked:bg-brand-600 focus:ring-brand-500 dark:accent-brand-500 dark:checked:border-brand-500 dark:checked:bg-brand-500';
 
   const handleToggle = (key: string, checked: boolean) => {
     if (checked) {

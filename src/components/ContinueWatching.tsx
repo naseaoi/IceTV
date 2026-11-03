@@ -1,6 +1,6 @@
 ﻿'use client';
 
-import { ChevronRight, History } from 'lucide-react';
+import { ChevronRight } from 'lucide-react';
 import Link from 'next/link';
 import {
   useCallback,
@@ -10,14 +10,11 @@ import {
   useState,
 } from 'react';
 
+import ContinueCard from '@/components/ContinueCard';
 import ContinueWatchingCardSkeleton from '@/components/ContinueWatchingCardSkeleton';
-import { HOME_POSTER_CARD_CLASS } from '@/components/HomePosterCardSkeleton';
 import { useOptionalMessageCenter } from '@/components/messages/MessageCenterProvider';
-import MobileContinueCard from '@/components/MobileContinueCard';
 import { useRuntimeConfig } from '@/components/RuntimeConfigProvider';
 import ScrollableRow from '@/components/ScrollableRow';
-import VideoCard from '@/components/VideoCard';
-import { useIsMobileViewport } from '@/hooks/useIsMobileViewport';
 import { getAuthInfoFromBrowserCookie } from '@/lib/auth.client';
 import type { PlayRecord } from '@/lib/db.client';
 import {
@@ -140,8 +137,6 @@ export default function ContinueWatching({
       ? 0
       : Math.max(0, Math.floor(initialUpdateCount));
   const updateCount = messageCenter?.trackingUnreadCount ?? seededUpdateCount;
-  const isMobile = useIsMobileViewport();
-  const mobileRecords = playRecords.slice(0, continueWatchingLimit);
 
   const updatePlayRecords = useCallback(
     (allRecords: Record<string, PlayRecord>) => {
@@ -241,15 +236,10 @@ export default function ContinueWatching({
     return (record.play_time / record.total_time) * 100;
   };
 
-  const parseKey = (key: string) => {
-    return parseStorageKey(key);
-  };
-
   return (
     <section className={`mb-2 ${className || ''}`}>
-      <div className='mb-4 flex items-center justify-between'>
-        <h2 className='flex items-center gap-2 text-lg font-bold text-gray-800 dark:text-gray-200 sm:text-xl'>
-          <History className='h-5 w-5 text-orange-500' />
+      <div className='mb-1 flex items-baseline justify-between sm:mb-2'>
+        <h2 className='text-lg font-semibold tracking-tight text-gray-900 dark:text-gray-100 sm:text-xl'>
           继续观看
         </h2>
         {!loading && playRecords.length > 0 && (
@@ -258,11 +248,11 @@ export default function ContinueWatching({
             className={
               updateCount > 0
                 ? 'flex items-center text-sm font-semibold text-amber-600 hover:text-amber-700 dark:text-amber-400 dark:hover:text-amber-300'
-                : 'flex items-center text-sm text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200'
+                : 'flex items-center text-sm text-gray-500 transition-colors hover:text-gray-900 dark:text-gray-400 dark:hover:text-white'
             }
           >
-            {updateCount > 0 ? `${updateCount} 部有更新` : '查看更多'}
-            <ChevronRight className='ml-1 h-4 w-4' />
+            {updateCount > 0 ? `${updateCount} 部有更新` : '更多'}
+            <ChevronRight className='h-4 w-4' />
           </Link>
         )}
       </div>
@@ -271,84 +261,41 @@ export default function ContinueWatching({
           ? Array.from({ length: skeletonCount }).map((_, index) => (
               <ContinueWatchingCardSkeleton key={index} />
             ))
-          : isMobile
-            ? mobileRecords.map((record) => {
-                const parsedKey = parseKey(record.key);
-                if (!parsedKey) {
-                  return null;
-                }
+          : playRecords.map((record) => {
+              const parsedKey = parseStorageKey(record.key);
+              if (!parsedKey) {
+                return null;
+              }
 
-                const { source, id } = parsedKey;
-                const episodeDisplay = getPlayRecordEpisodeDisplay(record);
-                return (
-                  <MobileContinueCard
-                    key={record.key}
-                    source={source}
-                    id={id}
-                    title={record.title}
-                    poster={record.cover}
-                    year={record.year}
-                    sourceName={record.source_name}
-                    currentEpisode={episodeDisplay.currentEpisode}
-                    totalEpisodes={episodeDisplay.totalEpisodes}
-                    resumeEpisodeIndex={Math.max(0, record.index - 1)}
-                    resumeGroup={getPlayRecordResumeGroup(record)}
-                    progress={getProgress(record)}
-                    hasUpdate={hasPlayRecordUpdate(record)}
-                    trackingEnabled={record.tracking_enabled !== false}
-                    availableEpisodes={episodeDisplay.totalEpisodes}
-                    resumeTime={Math.max(0, Math.floor(record.play_time || 0))}
-                    query={record.search_title}
-                    onDelete={() =>
-                      setPlayRecords((prev) =>
-                        prev.filter((r) => r.key !== record.key),
-                      )
-                    }
-                  />
-                );
-              })
-            : playRecords.map((record, index) => {
-                const parsedKey = parseKey(record.key);
-                if (!parsedKey) {
-                  return null;
-                }
-
-                const { source, id } = parsedKey;
-                const episodeDisplay = getPlayRecordEpisodeDisplay(record);
-                return (
-                  <div key={record.key} className={HOME_POSTER_CARD_CLASS}>
-                    <VideoCard
-                      id={id}
-                      title={record.title}
-                      poster={record.cover}
-                      year={record.year}
-                      source={source}
-                      source_name={record.source_name}
-                      progress={getProgress(record)}
-                      hasUpdate={hasPlayRecordUpdate(record)}
-                      trackingEnabled={record.tracking_enabled !== false}
-                      availableEpisodes={episodeDisplay.totalEpisodes}
-                      episodes={episodeDisplay.totalEpisodes}
-                      currentEpisode={episodeDisplay.currentEpisode}
-                      resumeEpisodeIndex={Math.max(0, record.index - 1)}
-                      resumeGroup={getPlayRecordResumeGroup(record)}
-                      resumeTime={Math.max(
-                        0,
-                        Math.floor(record.play_time || 0),
-                      )}
-                      query={record.search_title}
-                      from='playrecord'
-                      onDelete={() =>
-                        setPlayRecords((prev) =>
-                          prev.filter((r) => r.key !== record.key),
-                        )
-                      }
-                      priority={index < 4}
-                      type={record.total_episodes > 1 ? 'tv' : ''}
-                    />
-                  </div>
-                );
-              })}
+              const { source, id } = parsedKey;
+              const episodeDisplay = getPlayRecordEpisodeDisplay(record);
+              return (
+                <ContinueCard
+                  key={record.key}
+                  source={source}
+                  id={id}
+                  title={record.title}
+                  poster={record.cover}
+                  year={record.year}
+                  sourceName={record.source_name}
+                  currentEpisode={episodeDisplay.currentEpisode}
+                  totalEpisodes={episodeDisplay.totalEpisodes}
+                  resumeEpisodeIndex={Math.max(0, record.index - 1)}
+                  resumeGroup={getPlayRecordResumeGroup(record)}
+                  progress={getProgress(record)}
+                  hasUpdate={hasPlayRecordUpdate(record)}
+                  trackingEnabled={record.tracking_enabled !== false}
+                  availableEpisodes={episodeDisplay.totalEpisodes}
+                  resumeTime={Math.max(0, Math.floor(record.play_time || 0))}
+                  query={record.search_title}
+                  onDelete={() =>
+                    setPlayRecords((prev) =>
+                      prev.filter((r) => r.key !== record.key),
+                    )
+                  }
+                />
+              );
+            })}
       </ScrollableRow>
     </section>
   );

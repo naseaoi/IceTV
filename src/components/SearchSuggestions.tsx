@@ -172,13 +172,13 @@ export default function SearchSuggestions({
   return (
     <div
       ref={containerRef}
-      className='absolute left-0 right-0 top-full z-[600] mt-1 max-h-80 overflow-y-auto rounded-lg border border-gray-200 bg-white shadow-lg dark:border-gray-700 dark:bg-gray-800'
+      className='absolute left-0 right-0 top-full z-[600] mt-1 max-h-80 overflow-y-auto rounded-xl bg-white p-1 shadow-2xl shadow-black/10 ring-1 ring-gray-900/[0.08] dark:bg-gray-900 dark:shadow-black/50 dark:ring-white/[0.08]'
     >
       {suggestions.map((suggestion) => (
         <button
           key={`related-${suggestion.text}`}
           onClick={() => onSelect(suggestion.text)}
-          className='flex w-full items-center gap-3 px-4 py-3 text-left transition-colors duration-150 hover:bg-gray-50 dark:hover:bg-gray-700'
+          className='flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-left transition-colors duration-150 hover:bg-gray-900/[0.05] dark:hover:bg-white/[0.06]'
         >
           <span className='flex-1 truncate text-sm text-gray-700 dark:text-gray-300'>
             {suggestion.text}

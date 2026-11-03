@@ -273,7 +273,7 @@ export const EpisodesTab: React.FC<EpisodesTabProps> = ({
                     className={`inline-flex max-w-full items-center gap-2 rounded-lg px-3 py-2 text-xs font-medium transition-all duration-150
                       ${
                         isActive
-                          ? 'bg-green-500 text-white shadow-sm shadow-green-500/20'
+                          ? 'bg-brand-500 text-white shadow-sm shadow-brand-500/20'
                           : 'bg-gray-100 text-gray-700 hover:bg-gray-200 dark:bg-white/[0.06] dark:text-gray-300 dark:hover:bg-white/[0.12]'
                       }
                     `.trim()}
@@ -321,7 +321,7 @@ export const EpisodesTab: React.FC<EpisodesTabProps> = ({
                       className={`whitespace-nowrap rounded-md px-3 py-1.5 text-xs font-medium transition-all duration-150
                         ${
                           isActive
-                            ? 'bg-green-500 text-white shadow-sm'
+                            ? 'bg-brand-500 text-white shadow-sm'
                             : 'text-gray-600 hover:bg-gray-100 hover:text-gray-900 dark:text-gray-400 dark:hover:bg-white/10 dark:hover:text-gray-200'
                         }
                       `.trim()}
@@ -382,7 +382,7 @@ export const EpisodesTab: React.FC<EpisodesTabProps> = ({
               className={`h-11 ${dynamicSpan > 1 ? 'px-2' : 'px-1'} flex shrink-0 items-center justify-center rounded-lg text-[13px] font-medium transition-all duration-150
                 ${
                   isActive
-                    ? 'bg-green-500 text-white shadow-md shadow-green-500/20'
+                    ? 'bg-brand-500 text-white shadow-md shadow-brand-500/20'
                     : 'bg-gray-100 text-gray-700 hover:scale-105 hover:bg-gray-200 dark:bg-white/[0.06] dark:text-gray-300 dark:hover:bg-white/[0.12]'
                 }`.trim()}
               title={

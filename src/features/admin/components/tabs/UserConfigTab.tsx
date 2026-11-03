@@ -683,11 +683,11 @@ const UserConfig = ({ config, role, refreshConfig }: UserConfigProps) => {
           <h4 className='mb-3 text-sm font-medium text-gray-700 dark:text-gray-300'>
             用户统计
           </h4>
-          <div className='min-h-[96px] rounded-lg border border-green-200 bg-green-50 p-4 dark:border-green-800 dark:bg-green-900/20'>
-            <div className='text-2xl font-bold text-green-800 dark:text-green-300'>
+          <div className='min-h-[96px] rounded-lg border border-brand-200 bg-brand-50 p-4 dark:border-brand-800 dark:bg-brand-900/20'>
+            <div className='text-2xl font-bold text-brand-800 dark:text-brand-300'>
               {config.UserConfig.Users.length}
             </div>
-            <div className='text-sm text-green-600 dark:text-green-400'>
+            <div className='text-sm text-brand-600 dark:text-brand-400'>
               总用户数
             </div>
           </div>

@@ -1,10 +1,35 @@
 import type { Config } from 'tailwindcss';
-import colors from 'tailwindcss/colors';
 import defaultTheme from 'tailwindcss/defaultTheme';
 
-// 品牌主色与辅助色,整体换色只改这两行(原版绿色主题为 colors.green / colors.emerald)
-const brand = colors.blue;
-const brandAccent = colors.sky;
+// 全站唯一强调色（冰蓝），只用于选中态、进度和主操作
+const brand = {
+  50: '#f0f7fc',
+  100: '#dcedf8',
+  200: '#bddcf1',
+  300: '#8fc4e6',
+  400: '#5fa8d8',
+  500: '#3d8dc6',
+  600: '#2d73a9',
+  700: '#265d89',
+  800: '#234f72',
+  900: '#21435f',
+  950: '#152b3f',
+};
+
+// 冷调中性灰，覆盖默认 gray，深色模式各层表面由它派生
+const gray = {
+  50: '#f6f7f9',
+  100: '#eceef1',
+  200: '#dadde3',
+  300: '#babfc8',
+  400: '#8c929c',
+  500: '#6b717b',
+  600: '#535861',
+  700: '#3d4149',
+  800: '#272a31',
+  900: '#181a1f',
+  950: '#0d0e11',
+};
 
 const config: Config = {
   darkMode: 'class',
@@ -21,6 +46,10 @@ const config: Config = {
       // 排在默认断点前，使 xl: 等宽度断点能覆盖它
       split: {
         raw: '(min-width: 768px) and (orientation: landscape), (min-width: 1280px)',
+      },
+      // 含 raw 断点后 Tailwind 不再生成 max-* 变体，窄屏条件需单独声明
+      'phone-landscape': {
+        raw: '(max-width: 767px) and (orientation: landscape)',
       },
       ...defaultTheme.screens,
     },
@@ -39,9 +68,8 @@ const config: Config = {
         ],
       },
       colors: {
-        green: brand,
-        emerald: brandAccent,
-        primary: brandAccent,
+        brand,
+        gray,
         dark: '#222222',
       },
       keyframes: {

@@ -6,6 +6,7 @@ import {
   Check,
   Heart,
   MoreVertical,
+  Play,
   PlayCircleIcon,
   Trash2,
 } from 'lucide-react';
@@ -13,8 +14,9 @@ import { useRouter } from 'next/navigation';
 import { useCallback, useEffect, useId, useState } from 'react';
 
 import { useCardInteractionManager } from '@/components/CardInteractionProvider';
+import { buildContinuePlayUrl } from '@/components/continue-card/play-url';
 import CoverImage from '@/components/CoverImage';
-import { buildMobileContinuePlayUrl } from '@/components/mobile-continue-card/play-url';
+import type { ActionSheetAnchorRect } from '@/components/MobileActionSheet';
 import { warmupDanmakuForNavigation } from '@/features/play/lib/danmaku/navigation-warmup';
 import { useLongPress } from '@/hooks/useLongPress';
 import { getAuthInfoFromBrowserCookie } from '@/lib/auth.client';
@@ -35,7 +37,7 @@ import { savePlayIntent } from '@/lib/play-intent';
 import { hasPlayRecordUpdate } from '@/lib/play-records';
 import { canUseNetworkPrefetch, warmupForPlayback } from '@/lib/video-prefetch';
 
-interface MobileContinueCardProps {
+interface ContinueCardProps {
   source: string;
   id: string;
   title: string;
@@ -57,7 +59,7 @@ interface MobileContinueCardProps {
   onDelete?: () => void;
 }
 
-export default function MobileContinueCard({
+export default function ContinueCard({
   source,
   id,
   title,
@@ -75,7 +77,7 @@ export default function MobileContinueCard({
   resumeTime,
   query,
   onDelete,
-}: MobileContinueCardProps) {
+}: ContinueCardProps) {
   const router = useRouter();
   const interactionId = useId();
   const { showActionSheet, showConfirm } = useCardInteractionManager();
@@ -91,7 +93,7 @@ export default function MobileContinueCard({
 
   const handlePlay = useCallback(() => {
     const playUrl = withReturnTo(
-      buildMobileContinuePlayUrl({ source, id, title, year, query }),
+      buildContinuePlayUrl({ source, id, title, year, query }),
       getCurrentNavigationPath(),
     );
     const authInfo = getAuthInfoFromBrowserCookie();
@@ -162,112 +164,121 @@ export default function MobileContinueCard({
     setVisibleHasUpdate(hasPlayRecordUpdate(record));
   }, [id, source, visibleTrackingEnabled]);
 
-  const openActions = useCallback(async () => {
-    let favorited = false;
-    try {
-      favorited = await isFavorited(source, id);
-    } catch {
-      favorited = false;
-    }
+  const openActions = useCallback(
+    async (anchorRect?: ActionSheetAnchorRect) => {
+      let favorited = false;
+      try {
+        favorited = await isFavorited(source, id);
+      } catch {
+        favorited = false;
+      }
 
-    showActionSheet(interactionId, {
+      showActionSheet(interactionId, {
+        title,
+        poster,
+        actions: [
+          {
+            id: 'play',
+            label: '播放',
+            icon: <PlayCircleIcon size={20} />,
+            onClick: handlePlay,
+          },
+          {
+            id: 'favorite',
+            label: favorited ? '取消收藏' : '收藏',
+            icon: (
+              <Heart
+                size={20}
+                className={favorited ? 'fill-red-500 text-red-500' : undefined}
+              />
+            ),
+            onClick: async () => {
+              if (favorited) {
+                await deleteFavorite(source, id);
+                return;
+              }
+              await saveFavorite(source, id, {
+                title,
+                source_name: sourceName || '',
+                year: year || '',
+                cover: poster,
+                total_episodes: totalEpisodes,
+                save_time: Date.now(),
+                search_title: query || '',
+              });
+            },
+          },
+          ...(visibleHasUpdate
+            ? [
+                {
+                  id: 'mark-update-read',
+                  label: '标记更新已读',
+                  icon: <Check size={20} />,
+                  onClick: handleMarkUpdateRead,
+                },
+              ]
+            : []),
+          {
+            id: 'tracking',
+            label: visibleTrackingEnabled ? '取消追更' : '追更',
+            icon: visibleTrackingEnabled ? (
+              <BellOff size={20} />
+            ) : (
+              <Bell size={20} />
+            ),
+            onClick: handleToggleTracking,
+          },
+          {
+            id: 'delete',
+            label: '删除记录',
+            icon: <Trash2 size={20} />,
+            onClick: handleDelete,
+            color: 'danger' as const,
+          },
+        ],
+        anchorRect: anchorRect ?? null,
+      });
+    },
+    [
+      showActionSheet,
+      interactionId,
       title,
       poster,
-      actions: [
-        {
-          id: 'play',
-          label: '播放',
-          icon: <PlayCircleIcon size={20} />,
-          onClick: handlePlay,
-        },
-        {
-          id: 'favorite',
-          label: favorited ? '取消收藏' : '收藏',
-          icon: (
-            <Heart
-              size={20}
-              className={favorited ? 'fill-red-500 text-red-500' : undefined}
-            />
-          ),
-          onClick: async () => {
-            if (favorited) {
-              await deleteFavorite(source, id);
-              return;
-            }
-            await saveFavorite(source, id, {
-              title,
-              source_name: sourceName || '',
-              year: year || '',
-              cover: poster,
-              total_episodes: totalEpisodes,
-              save_time: Date.now(),
-              search_title: query || '',
-            });
-          },
-        },
-        ...(visibleHasUpdate
-          ? [
-              {
-                id: 'mark-update-read',
-                label: '标记更新已读',
-                icon: <Check size={20} />,
-                onClick: handleMarkUpdateRead,
-              },
-            ]
-          : []),
-        {
-          id: 'tracking',
-          label: visibleTrackingEnabled ? '取消追更' : '追更',
-          icon: visibleTrackingEnabled ? (
-            <BellOff size={20} />
-          ) : (
-            <Bell size={20} />
-          ),
-          onClick: handleToggleTracking,
-        },
-        {
-          id: 'delete',
-          label: '删除记录',
-          icon: <Trash2 size={20} />,
-          onClick: handleDelete,
-          color: 'danger' as const,
-        },
-      ],
-    });
-  }, [
-    showActionSheet,
-    interactionId,
-    title,
-    poster,
-    source,
-    id,
-    sourceName,
-    year,
-    totalEpisodes,
-    query,
-    handlePlay,
-    handleDelete,
-    handleMarkUpdateRead,
-    handleToggleTracking,
-    visibleHasUpdate,
-    visibleTrackingEnabled,
-  ]);
+      source,
+      id,
+      sourceName,
+      year,
+      totalEpisodes,
+      query,
+      handlePlay,
+      handleDelete,
+      handleMarkUpdateRead,
+      handleToggleTracking,
+      visibleHasUpdate,
+      visibleTrackingEnabled,
+    ],
+  );
 
   const longPressProps = useLongPress({
-    onLongPress: openActions,
+    onLongPress: () => void openActions(),
     onClick: handlePlay,
   });
 
   const progressPercent = Math.min(100, Math.max(0, progress));
   const displaySourceName = sourceName?.trim() || source;
 
+  const metaText =
+    totalEpisodes > 1
+      ? `第 ${currentEpisode} 集 / 共 ${totalEpisodes} 集`
+      : year;
+
   return (
     <div
       role='link'
-      data-mobile-continue-card
+      data-continue-card
       tabIndex={0}
       aria-label={`继续播放 ${title}`}
-      className='relative h-[120px] w-[232px] shrink-0 select-none overflow-hidden rounded-xl border border-gray-200/60 bg-white outline-none focus-visible:ring-2 focus-visible:ring-green-500 dark:border-gray-700/60 dark:bg-gray-800/60'
+      className='group relative h-[120px] w-[232px] shrink-0 cursor-pointer select-none overflow-hidden rounded-xl bg-white outline-none ring-1 ring-gray-200/80 transition hover:ring-gray-300 focus-visible:ring-2 focus-visible:ring-brand-500 dark:bg-white/[0.04] dark:ring-white/10 dark:hover:bg-white/[0.06] dark:hover:ring-white/20 md:h-[136px] md:w-[340px]'
       onClick={handlePlay}
       onKeyDown={(event) => {
         if (event.target === event.currentTarget && event.key === 'Enter') {
@@ -277,57 +288,70 @@ export default function MobileContinueCard({
       {...longPressProps}
     >
       <div className='flex h-full'>
-        <div className='relative h-full w-[80px] shrink-0 overflow-hidden'>
+        <div className='relative h-full w-[80px] shrink-0 overflow-hidden md:w-[91px]'>
           <CoverImage
             src={poster}
             alt={title}
-            sizes='80px'
+            sizes='(min-width: 768px) 91px, 80px'
             checkClientCacheBeforeLoad
           />
         </div>
-        <div className='flex min-w-0 flex-1 flex-col justify-between p-2.5 pb-3'>
+        <div className='flex min-w-0 flex-1 flex-col justify-between p-2.5 pb-3 md:p-3.5 md:pb-4'>
           <div className='min-w-0'>
-            <p className='line-clamp-2 text-[13px] font-semibold leading-snug text-gray-900 dark:text-gray-100'>
+            <p className='line-clamp-2 text-[13px] font-semibold leading-snug text-gray-900 dark:text-gray-100 md:line-clamp-1 md:text-[15px]'>
               {title}
             </p>
-            <div className='mt-1 space-y-0.5 text-[11px] text-gray-500 dark:text-gray-400'>
+            <div className='mt-1 space-y-0.5 text-[11px] text-gray-500 dark:text-gray-400 md:text-xs'>
               {visibleHasUpdate && availableEpisodes > 1 && (
                 <p className='truncate font-semibold text-amber-600 dark:text-amber-400'>
                   更新至 {availableEpisodes} 集
                 </p>
               )}
-              {(totalEpisodes > 1 || year) && (
-                <p data-mobile-continue-meta className='truncate'>
-                  {totalEpisodes > 1
-                    ? `第 ${currentEpisode} 集 / 共 ${totalEpisodes} 集`
-                    : year}
+              {metaText && (
+                <p data-continue-meta className='truncate'>
+                  {metaText}
                 </p>
               )}
-              <p data-mobile-continue-source className='truncate'>
+              <p data-continue-source className='truncate'>
                 {displaySourceName}
               </p>
             </div>
           </div>
-          <p className='truncate text-[11px] text-gray-400 dark:text-gray-500'>
+          <p className='truncate text-[11px] text-gray-400 dark:text-gray-500 md:hidden'>
             已观看 {Math.round(progressPercent)}%
           </p>
+          <div className='hidden items-center gap-3 md:flex'>
+            <span className='inline-flex h-7 items-center gap-1 rounded-full bg-brand-500 pl-2.5 pr-3 text-xs font-medium text-white transition-colors group-hover:bg-brand-600'>
+              <Play aria-hidden='true' className='h-3 w-3 fill-current' />
+              {totalEpisodes > 1 ? `继续第 ${currentEpisode} 集` : '继续播放'}
+            </span>
+            <span className='text-xs tabular-nums text-gray-400 dark:text-gray-500'>
+              {Math.round(progressPercent)}%
+            </span>
+          </div>
         </div>
         <button
           type='button'
           data-button
           aria-label='更多操作'
-          className='flex h-10 w-8 shrink-0 items-start justify-center pt-2 text-gray-400 dark:text-gray-500'
-          onClick={(e) => {
-            e.stopPropagation();
-            openActions();
+          className='flex h-10 w-8 shrink-0 items-start justify-center pt-2 text-gray-400 transition-colors hover:text-gray-700 dark:text-gray-500 dark:hover:text-gray-200 md:pt-3'
+          onClick={(event) => {
+            event.stopPropagation();
+            const rect = event.currentTarget.getBoundingClientRect();
+            void openActions({
+              top: rect.top,
+              left: rect.left,
+              width: rect.width,
+              height: rect.height,
+            });
           }}
         >
           <MoreVertical className='h-4 w-4' />
         </button>
       </div>
-      <div className='absolute bottom-0 left-[80px] right-0 h-[3px] bg-gray-200 dark:bg-gray-700'>
+      <div className='absolute bottom-0 left-[80px] right-0 h-[3px] bg-gray-200 dark:bg-white/10 md:left-[91px]'>
         <div
-          className='h-full bg-green-500'
+          className='h-full bg-brand-500'
           style={{ width: `${progressPercent}%` }}
         />
       </div>

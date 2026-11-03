@@ -5,8 +5,8 @@ import { useState } from 'react';
 
 import AuthenticatedRoute from '@/components/AuthenticatedRoute';
 import ConfirmModal from '@/components/modals/ConfirmModal';
+import { PAGE_CONTAINER_CLASS } from '@/components/page-container';
 import PageLayout from '@/components/PageLayout';
-import { HomeMineSwitch } from '@/features/home/components/HomeMineSwitch';
 
 import { useContinueWatchingItems } from '../hooks/useContinueWatchingItems';
 import { ContinueWatchingGrid } from './ContinueWatchingGrid';
@@ -34,12 +34,8 @@ function AuthenticatedContinueWatchingPage({
       activePath='/'
       mobileHeader={{ title: '继续观看', showBack: true }}
     >
-      <div className='overflow-visible px-2 pb-2 pt-4 sm:px-10 sm:pt-8'>
-        <div className='mb-4 hidden justify-center md:flex'>
-          <HomeMineSwitch active='home' />
-        </div>
-
-        <div className='mx-auto max-w-[95%]'>
+      <div className='overflow-visible pb-2 pt-4 md:pt-8'>
+        <div className={PAGE_CONTAINER_CLASS}>
           <div className='mb-6 flex items-center justify-between'>
             <h1 className='hidden items-center gap-2 text-2xl font-bold text-gray-900 dark:text-gray-100 sm:flex'>
               <History className='h-6 w-6 text-orange-500' />

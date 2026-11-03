@@ -17,7 +17,7 @@ const ROLE_AVATAR_CLASS: Record<UserAvatarRole, string> = {
     'bg-gradient-to-br from-yellow-200 to-amber-100 text-amber-700 dark:from-yellow-500/25 dark:to-amber-500/10 dark:text-yellow-200',
   admin:
     'bg-gradient-to-br from-purple-200 to-purple-100 text-purple-700 dark:from-purple-500/25 dark:to-purple-500/10 dark:text-purple-200',
-  user: 'bg-gradient-to-br from-green-200 to-green-100 text-green-700 dark:from-green-500/25 dark:to-green-500/10 dark:text-green-200',
+  user: 'bg-gradient-to-br from-brand-200 to-brand-100 text-brand-700 dark:from-brand-500/25 dark:to-brand-500/10 dark:text-brand-200',
 };
 
 interface UserAvatarProps {

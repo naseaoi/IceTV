@@ -8,7 +8,7 @@ import { useSmartHomeNav } from '@/hooks/useSmartHomeNav';
 
 import { BackButton } from './BackButton';
 import MessageBell from './messages/MessageBell';
-import { SiteIcon } from './Sidebar';
+import { SiteIcon } from './SiteIcon';
 import { useSite } from './SiteProvider';
 import { ThemeToggle } from './ThemeToggle';
 import { UserMenu } from './UserMenu';
@@ -48,7 +48,7 @@ const MobileHeader = ({ title, showBack, actions }: MobileHeaderProps) => {
 
   return (
     <header
-      className='fixed left-0 right-0 top-0 z-[999] w-full border-b border-gray-200/50 bg-white/70 shadow-sm backdrop-blur-xl dark:border-gray-700/50 dark:bg-gray-900/70 md:hidden'
+      className='fixed left-0 right-0 top-0 z-[999] w-full border-b border-gray-200/70 bg-gray-50/85 backdrop-blur-xl dark:border-white/[0.06] dark:bg-gray-950/80 md:hidden'
       style={{ paddingTop: 'env(safe-area-inset-top)' }}
     >
       {variant === 'home' && (

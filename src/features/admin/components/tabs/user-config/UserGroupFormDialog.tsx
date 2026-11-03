@@ -60,7 +60,7 @@ export function UserGroupFormDialog({
               placeholder='请输入用户组名称'
               value={value.name}
               onChange={(e) => onChange({ ...value, name: e.target.value })}
-              className='w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-gray-900 focus:border-transparent focus:ring-2 focus:ring-blue-500 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100'
+              className='w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-gray-900 focus:border-transparent focus:ring-2 focus:ring-brand-500 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100'
             />
           </div>
         )}
@@ -82,7 +82,7 @@ export function UserGroupFormDialog({
                 }
                 className={`rounded border-gray-300 dark:border-gray-600 dark:bg-gray-700 ${
                   isAdd
-                    ? 'text-blue-600 focus:ring-blue-500 dark:text-blue-500'
+                    ? 'text-brand-600 focus:ring-brand-500 dark:text-brand-500'
                     : 'text-purple-600 focus:ring-purple-500 dark:text-purple-500'
                 }`}
               />

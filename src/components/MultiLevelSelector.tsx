@@ -505,7 +505,7 @@ const MultiLevelSelector: React.FC<MultiLevelSelectorProps> = ({
   return (
     <>
       {/* 胶囊样式筛选栏 */}
-      <div className='relative inline-flex gap-1 rounded-lg bg-transparent p-0.5 sm:gap-2 sm:p-1'>
+      <div className='relative inline-flex gap-1'>
         {categories.map((category) => (
           <div
             key={category.key}
@@ -516,14 +516,14 @@ const MultiLevelSelector: React.FC<MultiLevelSelectorProps> = ({
           >
             <button
               onClick={() => handleCategoryClick(category.key)}
-              className={`relative z-10 whitespace-nowrap rounded-lg px-1.5 py-0.5 text-xs font-medium transition-all duration-200 sm:px-2 sm:py-1 sm:text-sm md:px-4 md:py-2 ${
+              className={`relative z-10 whitespace-nowrap rounded-full px-3 py-1 text-[13px] transition-colors duration-200 hover:bg-gray-900/[0.05] dark:hover:bg-white/[0.06] sm:px-3.5 sm:py-1.5 sm:text-sm ${
                 activeCategory === category.key
                   ? isDefaultValue(category.key)
                     ? 'cursor-default text-gray-900 dark:text-gray-100'
-                    : 'cursor-default text-green-600 dark:text-green-400'
+                    : 'cursor-default text-brand-600 dark:text-brand-400'
                   : isDefaultValue(category.key)
                     ? 'cursor-pointer text-gray-700 hover:text-gray-900 dark:text-gray-400 dark:hover:text-gray-100'
-                    : 'cursor-pointer text-green-600 hover:text-green-700 dark:text-green-400 dark:hover:text-green-300'
+                    : 'cursor-pointer text-brand-600 hover:text-brand-700 dark:text-brand-400 dark:hover:text-brand-300'
               }`}
             >
               <span>{getDisplayText(category.key)}</span>
@@ -552,7 +552,7 @@ const MultiLevelSelector: React.FC<MultiLevelSelectorProps> = ({
         createPortal(
           <div
             ref={dropdownRef}
-            className='fixed z-[9999] rounded-2xl border border-gray-200/70 bg-white/80 shadow-2xl ring-1 ring-black/10 backdrop-blur-xl dark:border-white/10 dark:bg-gray-900/70 dark:ring-white/10'
+            className='fixed z-[9999] rounded-2xl bg-white shadow-2xl shadow-black/10 ring-1 ring-gray-900/[0.08] dark:bg-gray-900 dark:shadow-black/50 dark:ring-white/[0.08]'
             style={{
               left: `${dropdownPosition.x}px`,
               top: `${dropdownPosition.y}px`,
@@ -575,7 +575,7 @@ const MultiLevelSelector: React.FC<MultiLevelSelectorProps> = ({
                       }
                       className={`rounded-lg px-2 py-1.5 text-left text-xs transition-all duration-200 sm:px-3 sm:py-2 sm:text-sm ${
                         isOptionSelected(activeCategory, option.value)
-                          ? 'border border-green-200 bg-green-100 text-green-700 dark:border-green-700 dark:bg-green-900/30 dark:text-green-400'
+                          ? 'border border-brand-200 bg-brand-100 text-brand-700 dark:border-brand-700 dark:bg-brand-900/30 dark:text-brand-400'
                           : 'text-gray-700 hover:bg-gray-100/80 dark:text-gray-300 dark:hover:bg-gray-700/80'
                       }`}
                     >

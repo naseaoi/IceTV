@@ -12,6 +12,7 @@ import { FavoriteHeartButton } from '@/components/FavoriteHeartButton';
 import RatingStars from '@/components/RatingStars';
 import { formatRating } from '@/lib/rating';
 import { getVerticalScrollMaskStyle } from '@/lib/scroll-edge-fade';
+import { normalizeWorkYear } from '@/lib/source-match';
 import { SearchResult, VideoReview } from '@/lib/types';
 
 interface InfoTabProps {
@@ -146,51 +147,43 @@ export const InfoTab: React.FC<InfoTabProps> = ({
               {videoTitle || '影片标题'}
             </h3>
 
-            {doubanId > 0 && (
-              <a
-                href={`https://movie.douban.com/subject/${doubanId}`}
-                target='_blank'
-                rel='noopener noreferrer'
-                className='inline-flex w-fit items-center gap-1 text-[11px] font-medium text-emerald-600 transition-colors hover:text-emerald-700 hover:underline dark:text-emerald-400 dark:hover:text-emerald-300'
-              >
-                <ExternalLink className='h-3 w-3' />
-                豆瓣
-              </a>
-            )}
-
-            <div className='flex flex-wrap gap-1.5'>
-              {detail?.source_name && (
-                <span className='inline-flex items-center rounded-full bg-emerald-50 px-2 py-0.5 text-[11px] font-semibold text-emerald-700 ring-1 ring-emerald-200/60 dark:bg-emerald-900/30 dark:text-emerald-300 dark:ring-emerald-500/20'>
-                  {detail.source_name}
-                </span>
+            <div className='flex flex-wrap items-center gap-x-1.5 gap-y-1 text-xs text-gray-500 dark:text-gray-400'>
+              {[
+                detail?.source_name,
+                normalizeWorkYear(detail?.year || videoYear),
+                totalEpisodes > 1 ? `共 ${totalEpisodes} 集` : '',
+                detail?.type_name,
+              ]
+                .filter(Boolean)
+                .map((item, index) => (
+                  <span
+                    key={index}
+                    className='inline-flex items-center gap-1.5'
+                  >
+                    {index > 0 && (
+                      <span className='text-gray-300 dark:text-gray-600'>
+                        ·
+                      </span>
+                    )}
+                    {item}
+                  </span>
+                ))}
+              {doubanId > 0 && (
+                <a
+                  href={`https://movie.douban.com/subject/${doubanId}`}
+                  target='_blank'
+                  rel='noopener noreferrer'
+                  className='ml-1 inline-flex items-center gap-0.5 text-gray-500 transition-colors hover:text-gray-900 dark:text-gray-400 dark:hover:text-white'
+                >
+                  豆瓣
+                  <ExternalLink className='h-3 w-3' />
+                </a>
               )}
             </div>
 
-            <div className='flex flex-wrap gap-1.5'>
-              {(detail?.year || videoYear) && (
-                <span className='inline-flex items-center rounded-full bg-gray-100 px-2 py-0.5 text-[11px] font-medium text-gray-600 dark:bg-gray-800 dark:text-gray-400'>
-                  {detail?.year || videoYear}
-                </span>
-              )}
-              {totalEpisodes > 1 && (
-                <span className='inline-flex items-center rounded-full bg-violet-50 px-2 py-0.5 text-[11px] font-medium text-violet-600 dark:bg-violet-900/30 dark:text-violet-400'>
-                  共 {totalEpisodes} 集
-                </span>
-              )}
-            </div>
-
-            {(detail?.class || detail?.type_name) && (
-              <div className='flex flex-wrap gap-1.5'>
-                {detail?.class && (
-                  <span className='inline-flex items-center rounded-full bg-blue-50 px-2 py-0.5 text-[11px] font-semibold text-blue-600 dark:bg-blue-900/30 dark:text-blue-400'>
-                    {detail.class}
-                  </span>
-                )}
-                {detail?.type_name && (
-                  <span className='inline-flex items-center rounded-full bg-amber-50 px-2 py-0.5 text-[11px] font-medium text-amber-600 dark:bg-amber-900/30 dark:text-amber-400'>
-                    {detail.type_name}
-                  </span>
-                )}
+            {detail?.class && (
+              <div className='line-clamp-1 text-xs text-gray-400 dark:text-gray-500'>
+                {detail.class}
               </div>
             )}
 
@@ -198,7 +191,7 @@ export const InfoTab: React.FC<InfoTabProps> = ({
               <button
                 type='button'
                 aria-label={myReview ? '编辑我的评价' : '评分'}
-                className='inline-flex w-fit items-center gap-1.5 rounded-full border border-amber-200/70 bg-amber-50/70 px-2.5 py-1 text-[11px] font-medium text-amber-700 transition-colors hover:bg-amber-100 dark:border-amber-500/20 dark:bg-amber-900/20 dark:text-amber-300 dark:hover:bg-amber-900/40'
+                className='inline-flex h-7 w-fit items-center gap-1.5 rounded-full bg-gray-900/[0.05] px-3 text-xs font-medium text-gray-700 transition-colors hover:bg-gray-900/[0.09] dark:bg-white/[0.08] dark:text-gray-200 dark:hover:bg-white/[0.12] [&_svg]:text-amber-500'
                 onClick={onOpenReview}
               >
                 {myReview?.rating ? (

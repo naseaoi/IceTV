@@ -194,8 +194,8 @@ export default function PlayerShortcutsModal({
                 }}
                 className={`min-w-[92px] rounded-md border px-3 py-1.5 text-xs font-medium transition-colors ${
                   recording === action
-                    ? 'border-blue-500 bg-blue-500/10 text-blue-600 dark:text-blue-400'
-                    : 'border-gray-200 bg-white text-gray-700 hover:border-blue-400 dark:border-white/10 dark:bg-gray-800/70 dark:text-gray-200'
+                    ? 'border-brand-500 bg-brand-500/10 text-brand-600 dark:text-brand-400'
+                    : 'border-gray-200 bg-white text-gray-700 hover:border-brand-400 dark:border-white/10 dark:bg-gray-800/70 dark:text-gray-200'
                 }`}
               >
                 {recording === action
@@ -215,7 +215,7 @@ export default function PlayerShortcutsModal({
           </button>
           <button
             onClick={handleSave}
-            className='rounded-lg bg-blue-600 px-5 py-2 text-sm font-medium text-white transition-colors hover:bg-blue-700'
+            className='rounded-lg bg-brand-600 px-5 py-2 text-sm font-medium text-white transition-colors hover:bg-brand-700'
           >
             保存
           </button>

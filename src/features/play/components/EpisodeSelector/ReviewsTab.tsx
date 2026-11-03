@@ -93,7 +93,7 @@ function VisibilityToggle({
       disabled={disabled}
       className={`inline-flex h-8 shrink-0 items-center gap-1.5 rounded-full px-3 text-xs font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-50 ${
         isPublic
-          ? 'bg-green-500/10 text-green-700 ring-1 ring-inset ring-green-500/25 dark:text-green-300'
+          ? 'bg-brand-500/10 text-brand-700 ring-1 ring-inset ring-brand-500/25 dark:text-brand-300'
           : 'bg-gray-100 text-gray-600 hover:bg-gray-200/80 dark:bg-white/[0.06] dark:text-gray-300 dark:hover:bg-white/10'
       }`}
       onClick={() => onChange(!isPublic)}
@@ -139,7 +139,7 @@ function SaveButton({
       type={onClick ? 'button' : 'submit'}
       disabled={disabled}
       onClick={onClick}
-      className={`inline-flex shrink-0 items-center gap-1.5 rounded-lg bg-green-600 font-semibold text-white shadow-sm transition-colors hover:bg-green-700 disabled:cursor-not-allowed disabled:bg-gray-200 disabled:text-gray-400 disabled:shadow-none dark:hover:bg-green-500 dark:disabled:bg-white/[0.06] dark:disabled:text-gray-500 ${
+      className={`inline-flex shrink-0 items-center gap-1.5 rounded-lg bg-brand-600 font-semibold text-white shadow-sm transition-colors hover:bg-brand-700 disabled:cursor-not-allowed disabled:bg-gray-200 disabled:text-gray-400 disabled:shadow-none dark:hover:bg-brand-500 dark:disabled:bg-white/[0.06] dark:disabled:text-gray-500 ${
         large ? 'h-9 px-5 text-sm' : 'h-8 px-3.5 text-xs'
       }`}
     >
@@ -227,7 +227,7 @@ function ReviewEditor({
       className='space-y-2'
     >
       <div
-        className={`${surfaceClass} transition-shadow focus-within:ring-2 focus-within:ring-green-500/40`}
+        className={`${surfaceClass} transition-shadow focus-within:ring-2 focus-within:ring-brand-500/40`}
       >
         <div className='flex items-center justify-between gap-2 px-3.5 pt-3.5'>
           <RatingInput value={rating} onChange={setRating} disabled={saving} />
@@ -308,7 +308,7 @@ function ReviewEditor({
         onClose={() => setExpanded(false)}
         closeOnBackdrop={false}
         initialFocusRef={fullTextareaRef}
-        backdropClassName='bg-black/40 backdrop-blur-[2px]'
+        backdropClassName='bg-black/50'
         panelClassName='flex h-[min(88dvh,820px)] max-w-3xl flex-col overflow-hidden !bg-white dark:!bg-gray-900'
       >
         <div

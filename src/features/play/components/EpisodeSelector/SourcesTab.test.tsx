@@ -162,9 +162,8 @@ describe('SourcesTab probe status', () => {
     );
     const detectButton = screen.getByRole('button', { name: '检测全部' });
     expect(
-      screen.getByRole('heading', { name: '源站列表', level: 3 })
-        .firstElementChild,
-    ).toHaveClass('w-[3px]', 'h-3.5');
+      screen.getByRole('heading', { name: '源站列表', level: 3 }),
+    ).toHaveClass('min-h-7');
     const searchButton = screen.getByRole('button', { name: '搜索更多源站' });
     expect(detectButton.className).toBe(searchButton.className);
     expect(detectButton).toHaveClass('h-7', 'text-xs', 'bg-transparent');
@@ -353,8 +352,8 @@ describe('SourcesTab probe status', () => {
 
     expect(screen.getByTitle('分辨率')).toHaveTextContent('1080p');
     expect(screen.getByTitle('分辨率')).toHaveClass(
-      'text-green-600',
-      'dark:text-green-400',
+      'text-brand-600',
+      'dark:text-brand-400',
     );
     expect(screen.getByText(expected)).toBeInTheDocument();
     expect(screen.queryByText(`${pingTime}ms`)).not.toBeInTheDocument();

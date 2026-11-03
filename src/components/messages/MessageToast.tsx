@@ -16,9 +16,9 @@ export default function MessageToast({
   return (
     <div
       role='status'
-      className='fixed inset-x-3 top-[calc(3.5rem+env(safe-area-inset-top))] z-[1300] mx-auto flex max-w-sm items-center gap-3 rounded-lg border border-emerald-200 bg-white px-3 py-2.5 shadow-xl dark:border-emerald-800/70 dark:bg-gray-900 md:inset-x-auto md:right-5 md:top-5 md:mx-0 md:w-[360px]'
+      className='fixed inset-x-3 top-[calc(3.5rem+env(safe-area-inset-top))] z-[1300] mx-auto flex max-w-sm items-center gap-3 rounded-lg border border-brand-200 bg-white px-3 py-2.5 shadow-xl dark:border-brand-800/70 dark:bg-gray-900 md:inset-x-auto md:right-5 md:top-5 md:mx-0 md:w-[360px]'
     >
-      <span className='flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300'>
+      <span className='flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-brand-100 text-brand-700 dark:bg-brand-900/40 dark:text-brand-300'>
         <Bell className='h-[18px] w-[18px]' />
       </span>
       <button

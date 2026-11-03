@@ -109,10 +109,10 @@ const DoubanCustomSelector: React.FC<DoubanCustomSelectorProps> = ({
   }
 
   return (
-    <div className='space-y-4 sm:space-y-6'>
-      <div className='space-y-3 sm:space-y-4'>
+    <div>
+      <div className='flex flex-col items-start gap-3 md:flex-row md:flex-wrap md:items-center md:gap-2'>
         {/* 一级选择器 */}
-        <div className='overflow-x-auto'>
+        <div className='max-w-full overflow-x-auto'>
           <CapsuleSelector
             options={primaryOptions}
             activeValue={primarySelection || primaryOptions[0]?.value}
@@ -125,7 +125,10 @@ const DoubanCustomSelector: React.FC<DoubanCustomSelectorProps> = ({
 
         {/* 二级选择器 */}
         {secondaryOptions.length > 0 && (
-          <div ref={secondaryScrollContainerRef} className='overflow-x-auto'>
+          <div
+            ref={secondaryScrollContainerRef}
+            className='max-w-full overflow-x-auto'
+          >
             <CapsuleSelector
               options={secondaryOptions}
               activeValue={secondarySelection || secondaryOptions[0]?.value}

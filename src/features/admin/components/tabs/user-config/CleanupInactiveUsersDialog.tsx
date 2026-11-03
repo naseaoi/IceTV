@@ -73,7 +73,7 @@ export function CleanupInactiveUsersDialog({
         </div>
 
         <p className='flex items-center gap-2 text-xs text-gray-500 dark:text-gray-400'>
-          <ShieldCheck className='h-4 w-4 shrink-0 text-green-600 dark:text-green-500' />
+          <ShieldCheck className='h-4 w-4 shrink-0 text-brand-600 dark:text-brand-500' />
           只清理普通用户，站长与管理员不受影响
         </p>
 

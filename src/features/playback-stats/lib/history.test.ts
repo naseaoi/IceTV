@@ -1,6 +1,7 @@
 import {
   dedupePlaybackSessionsByTitle,
   filterPlaybackHistorySessions,
+  groupPlaybackSessionsByDay,
 } from '@/features/playback-stats/lib/history';
 import { buildPlaybackStatsSummary } from '@/features/playback-stats/lib/summary';
 import type { PlaybackSession } from '@/lib/types';
@@ -185,5 +186,44 @@ describe('playback history dedupe', () => {
       }),
     ]);
     expect(summary.recentItems).toEqual([sourceB, sourceA]);
+  });
+});
+
+describe('groupPlaybackSessionsByDay', () => {
+  it('按本地日期分组并生成相对标签', () => {
+    const now = new Date(2026, 10, 3, 20).getTime();
+    const groups = groupPlaybackSessionsByDay(
+      [
+        createSession({
+          id: 'a',
+          started_at: new Date(2026, 10, 3, 9).getTime(),
+        }),
+        createSession({
+          id: 'b',
+          started_at: new Date(2026, 10, 3, 1).getTime(),
+        }),
+        createSession({
+          id: 'c',
+          started_at: new Date(2026, 10, 2, 23).getTime(),
+        }),
+        createSession({
+          id: 'd',
+          started_at: new Date(2026, 9, 28, 12).getTime(),
+        }),
+        createSession({
+          id: 'e',
+          started_at: new Date(2025, 11, 31, 12).getTime(),
+        }),
+      ],
+      now,
+    );
+
+    expect(groups.map((group) => group.label)).toEqual([
+      '今天',
+      '昨天',
+      '10月28日',
+      '2025年12月31日',
+    ]);
+    expect(groups[0].sessions.map((session) => session.id)).toEqual(['a', 'b']);
   });
 });

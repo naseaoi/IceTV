@@ -163,7 +163,7 @@ export function PlayErrorView({ error, onBack, onRetry }: PlayErrorViewProps) {
           <div className='flex items-center justify-center gap-3'>
             <button
               onClick={onBack}
-              className='inline-flex transform items-center gap-1.5 rounded-lg bg-gradient-to-r from-green-500 to-emerald-600 px-3.5 py-2 text-sm font-medium text-white shadow-lg transition-all duration-200 hover:scale-105 hover:from-green-600 hover:to-emerald-700 hover:shadow-xl'
+              className='inline-flex transform items-center gap-1.5 rounded-lg bg-gradient-to-r from-brand-500 to-brand-600 px-3.5 py-2 text-sm font-medium text-white shadow-lg transition-all duration-200 hover:scale-105 hover:from-brand-600 hover:to-brand-700 hover:shadow-xl'
             >
               <ArrowLeft className='h-4 w-4' />
               返回前页

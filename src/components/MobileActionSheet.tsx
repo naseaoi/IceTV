@@ -333,7 +333,7 @@ const MobileActionSheet: React.FC<MobileActionSheetProps> = ({
       case 'danger':
         return 'text-red-600 dark:text-red-400';
       case 'primary':
-        return 'text-green-600 dark:text-green-400';
+        return 'text-brand-600 dark:text-brand-400';
       default:
         return 'text-gray-700 dark:text-gray-300';
     }
@@ -357,7 +357,7 @@ const MobileActionSheet: React.FC<MobileActionSheetProps> = ({
       case 'danger':
         return 'hover:bg-red-50/50 dark:hover:bg-red-900/10';
       case 'primary':
-        return 'hover:bg-green-50/50 dark:hover:bg-green-900/10';
+        return 'hover:bg-brand-50/50 dark:hover:bg-brand-900/10';
       default:
         return 'hover:bg-gray-50/50 dark:hover:bg-gray-800/20';
     }
@@ -575,7 +575,7 @@ const MobileActionSheet: React.FC<MobileActionSheetProps> = ({
       <div className='pointer-events-none fixed inset-0 z-[9999]'>
         <div
           ref={panelRef}
-          className={`pointer-events-auto absolute w-64 max-w-[calc(100vw-16px)] origin-top select-none rounded-2xl border border-gray-200/70 bg-white/80 shadow-2xl ring-1 ring-black/10 backdrop-blur-xl transition-[opacity,transform] duration-150 ease-out dark:border-white/10 dark:bg-gray-900/70 dark:ring-white/10 ${
+          className={`pointer-events-auto absolute w-64 max-w-[calc(100vw-16px)] origin-top select-none rounded-2xl bg-white shadow-2xl shadow-black/10 ring-1 ring-gray-900/[0.08] transition-[opacity,transform] duration-150 ease-out dark:bg-gray-900 dark:shadow-black/50 dark:ring-white/[0.08] ${
             isAnimating
               ? 'translate-y-0 scale-100 opacity-100'
               : 'translate-y-1 scale-95 opacity-0'
@@ -600,11 +600,11 @@ const MobileActionSheet: React.FC<MobileActionSheetProps> = ({
                   </div>
                   <div className='flex items-center gap-2'>
                     {visibleSourceName && (
-                      <span className='inline-flex items-center rounded-full bg-green-100 px-2 py-0.5 text-[11px] font-medium text-green-800 dark:bg-green-900/30 dark:text-green-200'>
+                      <span className='inline-flex items-center rounded-full bg-brand-100 px-2 py-0.5 text-[11px] font-medium text-brand-800 dark:bg-brand-900/30 dark:text-brand-200'>
                         {visibleOrigin === 'live' && (
                           <Radio
                             size={10}
-                            className='mr-1 inline-block text-green-600 dark:text-green-300'
+                            className='mr-1 inline-block text-brand-600 dark:text-brand-300'
                           />
                         )}
                         {visibleSourceName}
@@ -660,7 +660,6 @@ const MobileActionSheet: React.FC<MobileActionSheetProps> = ({
           e.preventDefault();
         }}
         style={{
-          backdropFilter: 'blur(4px)',
           willChange: 'opacity',
           touchAction: 'none', // 禁用所有触摸操作
         }}
@@ -668,7 +667,7 @@ const MobileActionSheet: React.FC<MobileActionSheetProps> = ({
 
       {/* 操作表单 */}
       <div
-        className='relative mx-4 mb-4 w-full max-w-lg rounded-2xl border border-gray-200/70 bg-white/80 shadow-2xl ring-1 ring-black/10 backdrop-blur-xl transition-all duration-200 ease-out dark:border-white/10 dark:bg-gray-900/70 dark:ring-white/10'
+        className='relative mx-4 mb-4 w-full max-w-lg rounded-2xl bg-white shadow-2xl shadow-black/10 ring-1 ring-gray-900/[0.08] transition-all duration-200 ease-out dark:bg-gray-900 dark:shadow-black/50 dark:ring-white/[0.08]'
         onTouchMove={(e) => {
           // 允许操作表单内部滚动，阻止事件冒泡到外层
           e.stopPropagation();

@@ -83,12 +83,12 @@ export function VideoCardTitle({ title }: VideoCardTitleProps) {
   return (
     <div
       data-video-card-title
-      className='mt-2 text-center'
+      className='mt-2'
       style={noSelectStyle}
       onContextMenu={preventContextMenu}
     >
       <span
-        className='block truncate text-sm font-semibold text-gray-900 transition-colors duration-300 ease-in-out group-hover:text-green-600 dark:text-gray-100 dark:group-hover:text-green-400'
+        className='block truncate text-[13px] font-medium text-gray-800 transition-colors duration-200 group-hover:text-brand-600 dark:text-gray-200 dark:group-hover:text-brand-300'
         style={noSelectStyle}
         onContextMenu={preventContextMenu}
         onMouseEnter={showTooltip}

@@ -1,14 +1,17 @@
 import { Search } from 'lucide-react';
 
+import { PAGE_CONTAINER_CLASS } from '@/components/page-container';
 import PageLayout from '@/components/PageLayout';
 
 export function SearchPageSkeleton() {
   return (
     <PageLayout activePath='/search'>
-      <div className='overflow-visible px-4 pb-4 pt-0 sm:px-10 sm:py-8'>
+      <div
+        className={`${PAGE_CONTAINER_CLASS} overflow-visible pb-4 pt-0 md:py-8`}
+      >
         <div className='pt-0 md:pt-[20vh]'>
           <div
-            className='sticky top-0 z-[550] -mx-4 border-b border-gray-200/50 bg-white/80 px-4 py-2 backdrop-blur-xl dark:border-gray-700/50 dark:bg-gray-900/80 md:static md:mx-0 md:border-0 md:bg-transparent md:px-0 md:py-0 md:backdrop-blur-none md:dark:bg-transparent'
+            className='sticky top-0 z-[550] -mx-4 border-b border-gray-200/70 bg-gray-50/85 px-4 py-2 backdrop-blur-xl dark:border-white/[0.06] dark:bg-gray-950/80 md:static md:mx-0 md:border-0 md:bg-transparent md:px-0 md:py-0 md:backdrop-blur-none md:dark:bg-transparent'
             style={{ paddingTop: 'max(0.5rem, env(safe-area-inset-top))' }}
           >
             <div className='mx-auto w-full max-w-2xl'>

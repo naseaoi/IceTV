@@ -1,10 +1,10 @@
 export const buttonStyles = {
   // 主要操作按钮（蓝色）- 用于配置、设置、确认等
   primary:
-    'px-3 py-1.5 text-sm font-medium bg-blue-600 hover:bg-blue-700 dark:bg-blue-600 dark:hover:bg-blue-700 text-white rounded-lg transition-colors',
+    'px-3 py-1.5 text-sm font-medium bg-brand-600 hover:bg-brand-700 dark:bg-brand-600 dark:hover:bg-brand-700 text-white rounded-lg transition-colors',
   // 成功操作按钮（绿色）- 用于添加、启用、保存等
   success:
-    'px-3 py-1.5 text-sm font-medium bg-green-600 hover:bg-green-700 dark:bg-green-600 dark:hover:bg-green-700 text-white rounded-lg transition-colors',
+    'px-3 py-1.5 text-sm font-medium bg-brand-600 hover:bg-brand-700 dark:bg-brand-600 dark:hover:bg-brand-700 text-white rounded-lg transition-colors',
   // 危险操作按钮（红色）- 用于删除、禁用、重置等
   danger:
     'px-3 py-1.5 text-sm font-medium bg-red-600 hover:bg-red-700 dark:bg-red-600 dark:hover:bg-red-700 text-white rounded-lg transition-colors',
@@ -16,10 +16,10 @@ export const buttonStyles = {
     'px-3 py-1.5 text-sm font-medium bg-yellow-600 hover:bg-yellow-700 dark:bg-yellow-600 dark:hover:bg-yellow-700 text-white rounded-lg transition-colors',
   // 小尺寸主要按钮
   primarySmall:
-    'px-2 py-1 text-xs font-medium bg-blue-600 hover:bg-blue-700 dark:bg-blue-600 dark:hover:bg-blue-700 text-white rounded-md transition-colors',
+    'px-2 py-1 text-xs font-medium bg-brand-600 hover:bg-brand-700 dark:bg-brand-600 dark:hover:bg-brand-700 text-white rounded-md transition-colors',
   // 小尺寸成功按钮
   successSmall:
-    'px-2 py-1 text-xs font-medium bg-green-600 hover:bg-green-700 dark:bg-green-600 dark:hover:bg-green-700 text-white rounded-md transition-colors',
+    'px-2 py-1 text-xs font-medium bg-brand-600 hover:bg-brand-700 dark:bg-brand-600 dark:hover:bg-brand-700 text-white rounded-md transition-colors',
   // 小尺寸危险按钮
   dangerSmall:
     'px-2 py-1 text-xs font-medium bg-red-600 hover:bg-red-700 dark:bg-red-600 dark:hover:bg-red-700 text-white rounded-md transition-colors',
@@ -31,9 +31,9 @@ export const buttonStyles = {
     'px-2 py-1 text-xs font-medium bg-yellow-600 hover:bg-yellow-700 dark:bg-yellow-600 dark:hover:bg-yellow-700 text-white rounded-md transition-colors',
   // 圆角小按钮（用于表格操作）
   roundedPrimary:
-    'inline-flex items-center px-3 py-1.5 rounded-full text-xs font-medium bg-blue-100 text-blue-800 hover:bg-blue-200 dark:bg-blue-900/40 dark:hover:bg-blue-900/60 dark:text-blue-200 transition-colors',
+    'inline-flex items-center px-3 py-1.5 rounded-full text-xs font-medium bg-brand-100 text-brand-800 hover:bg-brand-200 dark:bg-brand-900/40 dark:hover:bg-brand-900/60 dark:text-brand-200 transition-colors',
   roundedSuccess:
-    'inline-flex items-center px-3 py-1.5 rounded-full text-xs font-medium bg-green-100 text-green-800 hover:bg-green-200 dark:bg-green-900/40 dark:hover:bg-green-900/60 dark:text-green-200 transition-colors',
+    'inline-flex items-center px-3 py-1.5 rounded-full text-xs font-medium bg-brand-100 text-brand-800 hover:bg-brand-200 dark:bg-brand-900/40 dark:hover:bg-brand-900/60 dark:text-brand-200 transition-colors',
   roundedDanger:
     'inline-flex items-center px-3 py-1.5 rounded-full text-xs font-medium bg-red-100 text-red-800 hover:bg-red-200 dark:bg-red-900/40 dark:hover:bg-red-900/60 dark:text-red-200 transition-colors',
   roundedSecondary:
@@ -44,7 +44,7 @@ export const buttonStyles = {
     'inline-flex items-center px-3 py-1.5 rounded-full text-xs font-medium bg-purple-100 text-purple-800 hover:bg-purple-200 dark:bg-purple-900/40 dark:hover:bg-purple-900/60 dark:text-purple-200 transition-colors',
   // 纯图标按钮，配 h-5 w-5 图标
   iconSuccess:
-    'inline-flex items-center justify-center rounded-lg border border-transparent p-2 bg-green-600 hover:bg-green-700 dark:bg-green-600 dark:hover:bg-green-700 text-white transition-colors',
+    'inline-flex items-center justify-center rounded-lg border border-transparent p-2 bg-brand-600 hover:bg-brand-700 dark:bg-brand-600 dark:hover:bg-brand-700 text-white transition-colors',
   iconDisabled:
     'inline-flex items-center justify-center rounded-lg border border-transparent p-2 bg-gray-400 dark:bg-gray-600 cursor-not-allowed text-white transition-colors',
   // 禁用状态
@@ -53,7 +53,7 @@ export const buttonStyles = {
   disabledSmall:
     'px-2 py-1 text-xs font-medium bg-gray-400 dark:bg-gray-600 cursor-not-allowed text-white rounded-md transition-colors',
   // 开关按钮样式
-  toggleOn: 'bg-green-600 dark:bg-green-600',
+  toggleOn: 'bg-brand-600 dark:bg-brand-600',
   toggleOff: 'bg-gray-200 dark:bg-gray-700',
   toggleThumb: 'bg-white',
   toggleThumbOn: 'translate-x-6',
@@ -68,17 +68,17 @@ export const inputStyles = {
   base: 'rounded-lg border border-gray-300 bg-white px-3 py-2 text-gray-900 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100',
   /** 带 focus 效果 */
   withFocus:
-    'rounded-lg border border-gray-300 bg-white px-3 py-2 text-gray-900 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500',
+    'rounded-lg border border-gray-300 bg-white px-3 py-2 text-gray-900 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100 focus:border-brand-500 focus:outline-none focus:ring-1 focus:ring-brand-500',
 };
 
 /** Admin 表单勾选框样式 */
 export const checkboxStyles =
-  'h-4 w-4 rounded border-gray-300 bg-gray-100 text-blue-600 accent-blue-600 checked:border-blue-600 checked:bg-blue-600 focus:ring-2 focus:ring-blue-500 dark:border-gray-600 dark:bg-gray-700 dark:accent-blue-500 dark:ring-offset-gray-800 dark:checked:border-blue-500 dark:checked:bg-blue-500 dark:focus:ring-blue-600';
+  'h-4 w-4 rounded border-gray-300 bg-gray-100 text-brand-600 accent-brand-600 checked:border-brand-600 checked:bg-brand-600 focus:ring-2 focus:ring-brand-500 dark:border-gray-600 dark:bg-gray-700 dark:accent-brand-500 dark:ring-offset-gray-800 dark:checked:border-brand-500 dark:checked:bg-brand-500 dark:focus:ring-brand-600';
 
 /** 状态徽章样式（启用/禁用标识） */
 export const statusBadgeStyles = {
   enabled:
-    'rounded-full px-2 py-1 text-xs bg-green-100 text-green-800 dark:bg-green-900/20 dark:text-green-300',
+    'rounded-full px-2 py-1 text-xs bg-brand-100 text-brand-800 dark:bg-brand-900/20 dark:text-brand-300',
   disabled:
     'rounded-full px-2 py-1 text-xs bg-red-100 text-red-800 dark:bg-red-900/20 dark:text-red-300',
 };

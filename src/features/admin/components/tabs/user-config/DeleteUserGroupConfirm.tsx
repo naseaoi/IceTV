@@ -98,10 +98,10 @@ export function DeleteUserGroupConfirm({
           </p>
         </div>
       ) : (
-        <div className='rounded-lg border border-green-200 bg-green-50 p-4 dark:border-green-800 dark:bg-green-900/20'>
+        <div className='rounded-lg border border-brand-200 bg-brand-50 p-4 dark:border-brand-800 dark:bg-brand-900/20'>
           <div className='flex items-center space-x-2'>
             <svg
-              className='h-5 w-5 text-green-600 dark:text-green-400'
+              className='h-5 w-5 text-brand-600 dark:text-brand-400'
               fill='none'
               stroke='currentColor'
               viewBox='0 0 24 24'
@@ -113,7 +113,7 @@ export function DeleteUserGroupConfirm({
                 d='M5 13l4 4L19 7'
               />
             </svg>
-            <span className='text-sm font-medium text-green-800 dark:text-green-300'>
+            <span className='text-sm font-medium text-brand-800 dark:text-brand-300'>
               ✅ 当前没有用户使用此用户组
             </span>
           </div>

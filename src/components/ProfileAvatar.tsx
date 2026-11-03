@@ -1,10 +1,10 @@
 const AVATAR_GRADIENTS = [
-  'from-sky-400 to-blue-600',
+  'from-brand-400 to-brand-600',
   'from-violet-400 to-purple-600',
   'from-rose-400 to-pink-600',
   'from-amber-400 to-orange-600',
   'from-teal-400 to-cyan-600',
-  'from-lime-400 to-green-600',
+  'from-lime-400 to-brand-600',
 ];
 
 export function avatarGradient(profileId: string): string {

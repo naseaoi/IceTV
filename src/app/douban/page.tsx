@@ -1,8 +1,10 @@
 import { SlidersHorizontal } from 'lucide-react';
 import { Suspense } from 'react';
 
+import { PAGE_CONTAINER_CLASS } from '@/components/page-container';
 import PageLayout from '@/components/PageLayout';
 import { DoubanFeedLoading } from '@/features/douban/components/DoubanFeedLoading';
+import { DoubanFilterBar } from '@/features/douban/components/DoubanFilterBar';
 import { DoubanPageClient } from '@/features/douban/components/DoubanPageClient';
 import {
   getDoubanActivePath,
@@ -30,19 +32,20 @@ function DoubanPageFallback({ type }: { type: string }) {
         ),
       }}
     >
-      <div className='overflow-visible px-4 py-4 sm:px-10 sm:py-8'>
-        <div className='mx-auto max-w-[95%]'>
-          <div className='mb-4 space-y-3 sm:mb-8 sm:space-y-6'>
-            <div className='hidden h-9 w-28 rounded bg-gray-200/70 dark:bg-gray-800/70 sm:block' />
-            <div className='hidden h-5 w-40 rounded bg-gray-200/60 dark:bg-gray-800/60 sm:block' />
-            <div className='h-5 w-40 rounded bg-gray-200/60 dark:bg-gray-800/60 sm:hidden' />
-            <div className='hidden h-[154px] rounded-2xl border border-gray-200/30 bg-white/60 p-4 backdrop-blur-sm dark:border-gray-700/30 dark:bg-gray-800/40 sm:block sm:p-6' />
-          </div>
-
-          <div className='mt-8 overflow-visible'>
-            <DoubanFeedLoading />
-          </div>
+      <DoubanFilterBar>
+        <div className='flex gap-2'>
+          {[64, 220, 180].map((width) => (
+            <div
+              key={width}
+              style={{ width }}
+              className='h-9 rounded-full bg-gray-900/[0.05] dark:bg-white/[0.06]'
+            />
+          ))}
         </div>
+      </DoubanFilterBar>
+      <div className={`${PAGE_CONTAINER_CLASS} pb-8 pt-3 md:pt-6`}>
+        <div className='mb-3 h-5 w-40 rounded bg-gray-200/60 dark:bg-gray-800/60 md:hidden' />
+        <DoubanFeedLoading />
       </div>
     </PageLayout>
   );

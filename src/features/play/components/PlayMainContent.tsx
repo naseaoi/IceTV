@@ -1,18 +1,8 @@
-import { AlertTriangle, Cat, Clover, Film, RefreshCw, Tv } from 'lucide-react';
-import {
-  ReactNode,
-  RefObject,
-  useEffect,
-  useMemo,
-  useRef,
-  useState,
-} from 'react';
+import { AlertTriangle, RefreshCw, Tv } from 'lucide-react';
+import { ReactNode, RefObject, useEffect, useRef, useState } from 'react';
 
 import LoadingStatePanel from '@/components/LoadingStatePanel';
-import {
-  PlayerPageAccent,
-  PlayerPageLayout,
-} from '@/components/PlayerPageLayout';
+import { PlayerPageLayout } from '@/components/PlayerPageLayout';
 import { useRuntimeConfig } from '@/components/RuntimeConfigProvider';
 import EpisodeSelector from '@/features/play/components/EpisodeSelector';
 import type {
@@ -74,7 +64,6 @@ interface PlayMainContentProps {
   onDanmakuHeatmapChange?: (enabled: boolean) => void;
   // 返回 true 表示已切换线路或自动换源，继续显示加载而不进入超时状态
   onLoadingTimeout?: () => boolean | void;
-  searchType?: string;
   playbackError?: string | null;
 }
 
@@ -88,29 +77,6 @@ export function buildLoadingTimeoutMessage(
     ? `媒体加载已达 ${timeoutSeconds} 秒，仍未能起播`
     : `媒体加载已连续 ${timeoutSeconds} 秒无进展，源站响应超时`;
 }
-
-const playAccents: Record<string, PlayerPageAccent> = {
-  film: {
-    icon: 'text-blue-500 dark:text-blue-400',
-    glow: 'bg-blue-400/10 dark:bg-blue-400/20',
-    sub: 'text-blue-600/80 dark:text-blue-400/70',
-  },
-  tv: {
-    icon: 'text-emerald-500 dark:text-emerald-400',
-    glow: 'bg-emerald-400/10 dark:bg-emerald-400/20',
-    sub: 'text-emerald-600/80 dark:text-emerald-400/70',
-  },
-  anime: {
-    icon: 'text-pink-500 dark:text-pink-400',
-    glow: 'bg-pink-400/10 dark:bg-pink-400/20',
-    sub: 'text-pink-600/80 dark:text-pink-400/70',
-  },
-  variety: {
-    icon: 'text-violet-500 dark:text-violet-400',
-    glow: 'bg-violet-400/10 dark:bg-violet-400/20',
-    sub: 'text-violet-600/80 dark:text-violet-400/70',
-  },
-};
 
 function PlayerOverlayPanel({
   title,
@@ -269,7 +235,7 @@ function AuthRecoveryOverlay({
         <div className='space-y-2'>
           <button
             onClick={onReloginAndRecover}
-            className='w-full rounded-lg bg-green-600 px-4 py-2.5 font-medium text-white transition-colors hover:bg-green-500'
+            className='w-full rounded-lg bg-brand-600 px-4 py-2.5 font-medium text-white transition-colors hover:bg-brand-500'
           >
             去登录并恢复播放
           </button>
@@ -283,30 +249,6 @@ function AuthRecoveryOverlay({
       </div>
     </div>
   );
-}
-
-function getPlayCategory(
-  typeName: string,
-  totalEpisodes: number,
-  searchType?: string,
-) {
-  if (searchType === 'movie')
-    return { TitleIcon: Film, accent: playAccents.film };
-  if (searchType === 'anime')
-    return { TitleIcon: Cat, accent: playAccents.anime };
-  if (/电影|Movie/i.test(typeName))
-    return { TitleIcon: Film, accent: playAccents.film };
-  if (/电视|连续剧|剧集|[国韩美日泰港台]剧|TV|Drama/i.test(typeName)) {
-    return { TitleIcon: Tv, accent: playAccents.tv };
-  }
-  if (/动[漫画]|番[剧组]|Anime|OVA/i.test(typeName)) {
-    return { TitleIcon: Cat, accent: playAccents.anime };
-  }
-  if (/综艺|娱乐|Variety|Show/i.test(typeName)) {
-    return { TitleIcon: Clover, accent: playAccents.variety };
-  }
-  if (totalEpisodes <= 1) return { TitleIcon: Film, accent: playAccents.film };
-  return { TitleIcon: Tv, accent: playAccents.tv };
 }
 
 export function PlayMainContent(props: PlayMainContentProps) {
@@ -348,15 +290,9 @@ export function PlayMainContent(props: PlayMainContentProps) {
     onDanmakuReload,
     onDanmakuHeatmapChange,
     onLoadingTimeout,
-    searchType,
     realtimeLoadSpeed,
     playbackError,
   } = props;
-
-  const { TitleIcon, accent } = useMemo(
-    () => getPlayCategory(detail?.type_name || '', totalEpisodes, searchType),
-    [detail?.type_name, totalEpisodes, searchType],
-  );
 
   const [loadingTimedOut, setLoadingTimedOut] = useState(false);
   const [totalLimitReached, setTotalLimitReached] = useState(false);
@@ -464,8 +400,6 @@ export function PlayMainContent(props: PlayMainContentProps) {
       activePath='/play'
       title={videoTitle}
       titleFallback='影片标题'
-      titleIcon={TitleIcon}
-      accent={accent}
       isPanelCollapsed={isEpisodeSelectorCollapsed}
       onTogglePanel={() =>
         setIsEpisodeSelectorCollapsed(!isEpisodeSelectorCollapsed)

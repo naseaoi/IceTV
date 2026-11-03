@@ -162,7 +162,7 @@ export default function ScrollableRow({
 
   return (
     <div
-      className='relative'
+      className='relative -ml-2'
       onMouseEnter={() => {
         setIsHovered(true);
         scheduleCheckScroll();
@@ -171,14 +171,14 @@ export default function ScrollableRow({
     >
       <div
         ref={containerRef}
-        className='scrollbar-hide flex space-x-3 overflow-x-auto py-2 pb-4 pl-2 pr-5 sm:space-x-7 sm:py-2 sm:pb-6 sm:pl-2 sm:pr-6'
+        className='scrollbar-hide flex space-x-3 overflow-x-auto py-2 pb-4 pl-2 pr-5 sm:space-x-4 sm:py-2 sm:pb-6 sm:pl-2 sm:pr-6'
         onScroll={scheduleCheckScroll}
       >
         {childItems.slice(0, mountedItemCount)}
       </div>
       {showLeftScroll && (
         <div
-          className={`absolute bottom-0 left-0 top-0 z-[600] hidden w-16 items-center justify-center transition-opacity duration-200 sm:flex ${
+          className={`absolute bottom-0 left-0 top-0 z-20 hidden w-16 items-center justify-center transition-opacity duration-200 sm:flex ${
             isHovered ? 'opacity-100' : 'opacity-0'
           }`}
           style={{
@@ -212,7 +212,7 @@ export default function ScrollableRow({
 
       {showRightScroll && (
         <div
-          className={`absolute bottom-0 right-0 top-0 z-[600] hidden w-16 items-center justify-center transition-opacity duration-200 sm:flex ${
+          className={`absolute bottom-0 right-0 top-0 z-20 hidden w-16 items-center justify-center transition-opacity duration-200 sm:flex ${
             isHovered ? 'opacity-100' : 'opacity-0'
           }`}
           style={{

@@ -99,9 +99,8 @@ export function useFavoriteItems(
   const [favoriteItems, setFavoriteItems] = useState<FavoriteItem[]>([]);
   const [total, setTotal] = useState(0);
   const [nextCursor, setNextCursor] = useState<string | null>(null);
-  const [loading, setLoading] = useState(
-    () => enabled && normalizedInitialSkeletonCount > 0,
-  );
+  // 首次请求返回前一律视为加载中，避免先闪出空态
+  const [loading, setLoading] = useState(enabled);
   const [loadingMore, setLoadingMore] = useState(false);
   const [skeletonCount, setSkeletonCount] = useState(
     normalizedInitialSkeletonCount,
@@ -126,7 +125,7 @@ export function useFavoriteItems(
       MAX_FAVORITE_SKELETON_COUNT,
     );
     setSkeletonCount(nextSkeletonCount);
-    setLoading(nextSkeletonCount > 0);
+    setLoading(true);
   }, [enabled, limit, normalizedInitialSkeletonCount]);
 
   useEffect(() => {

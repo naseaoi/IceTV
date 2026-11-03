@@ -405,7 +405,7 @@ export const SourcesTab: React.FC<SourcesTabProps> = ({
   if (sourceSearchLoading) {
     return (
       <div className='flex min-h-0 flex-1 items-center justify-center p-6 text-sm text-gray-500 dark:text-gray-400'>
-        <div className='h-5 w-5 animate-spin rounded-full border-2 border-green-500 border-t-transparent' />
+        <div className='h-5 w-5 animate-spin rounded-full border-2 border-brand-500 border-t-transparent' />
         <span className='ml-2.5'>搜索中...</span>
       </div>
     );
@@ -543,7 +543,7 @@ export const SourcesTab: React.FC<SourcesTabProps> = ({
                 }}
                 className={`w-full rounded-lg border px-3 py-2 text-left transition-colors ${
                   isCurrentSource
-                    ? 'border-green-500/60 bg-green-500/10'
+                    ? 'border-brand-500/60 bg-brand-500/10'
                     : 'border-gray-200 bg-white hover:bg-gray-50 dark:border-gray-700 dark:bg-gray-800 dark:hover:bg-gray-700'
                 }`}
               >
@@ -560,7 +560,7 @@ export const SourcesTab: React.FC<SourcesTabProps> = ({
                         className={
                           resolution === '未知'
                             ? 'text-gray-500 dark:text-gray-400'
-                            : 'text-green-600 dark:text-green-400'
+                            : 'text-brand-600 dark:text-brand-400'
                         }
                       >
                         {resolution}
@@ -569,7 +569,7 @@ export const SourcesTab: React.FC<SourcesTabProps> = ({
                         !videoInfo.hasError &&
                         videoInfo.loadSpeed !== '未知' &&
                         videoInfo.loadSpeed !== '测量中...' && (
-                          <span className='text-green-600 dark:text-green-400'>
+                          <span className='text-brand-600 dark:text-brand-400'>
                             {videoInfo.loadSpeed}
                           </span>
                         )}
@@ -583,7 +583,7 @@ export const SourcesTab: React.FC<SourcesTabProps> = ({
                         )}
                       {isTesting && (
                         <span className='flex items-center gap-1'>
-                          <span className='inline-block h-2.5 w-2.5 animate-spin rounded-full border-2 border-gray-300 border-t-green-500 dark:border-gray-600 dark:border-t-green-400' />
+                          <span className='inline-block h-2.5 w-2.5 animate-spin rounded-full border-2 border-gray-300 border-t-brand-500 dark:border-gray-600 dark:border-t-brand-400' />
                           检测中
                         </span>
                       )}
@@ -603,7 +603,7 @@ export const SourcesTab: React.FC<SourcesTabProps> = ({
                       {(videoInfo?.hasError ||
                         probeEntry?.source === 'deferred') && (
                         <span
-                          className='cursor-pointer text-blue-500 hover:underline dark:text-blue-400'
+                          className='cursor-pointer text-brand-500 hover:underline dark:text-brand-400'
                           onClick={(e) => {
                             e.stopPropagation();
                             void getOrProbe(source, {
@@ -624,7 +624,7 @@ export const SourcesTab: React.FC<SourcesTabProps> = ({
                   </div>
                   {isCurrentSource && (
                     <div className='flex-shrink-0 pt-0.5'>
-                      <div className='h-2 w-2 rounded-full bg-green-500' />
+                      <div className='h-2 w-2 rounded-full bg-brand-500' />
                     </div>
                   )}
                 </div>
@@ -644,7 +644,7 @@ export const SourcesTab: React.FC<SourcesTabProps> = ({
               }
               scrollCurrentIntoView(true);
             }}
-            className='absolute bottom-4 right-4 z-10 flex h-9 w-9 items-center justify-center rounded-full bg-green-500 text-white shadow-lg transition-all hover:bg-green-600 dark:bg-green-600 dark:hover:bg-green-500'
+            className='absolute bottom-4 right-4 z-10 flex h-9 w-9 items-center justify-center rounded-full bg-brand-500 text-white shadow-lg transition-all hover:bg-brand-600 dark:bg-brand-600 dark:hover:bg-brand-500'
             aria-label='回到当前源'
             title='回到当前源'
           >

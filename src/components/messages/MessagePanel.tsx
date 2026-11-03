@@ -76,7 +76,7 @@ function MessageRow({
           aria-label='标记为已读'
           disabled={working}
           onClick={() => void onRead(message)}
-          className='rounded-full p-2 text-gray-400 hover:bg-green-50 dark:hover:bg-green-900/30'
+          className='rounded-full p-2 text-gray-400 hover:bg-brand-50 dark:hover:bg-brand-900/30'
         >
           {working ? (
             <LoaderCircle className='h-4 w-4 animate-spin' />
@@ -92,12 +92,12 @@ function MessageRow({
     <div
       className={`group flex gap-3 rounded-lg border p-3 sm:p-4 ${
         isAnnouncement
-          ? 'border-emerald-200/80 bg-emerald-50/70 dark:border-emerald-800/60 dark:bg-emerald-950/25'
+          ? 'border-brand-200/80 bg-brand-50/70 dark:border-brand-800/60 dark:bg-brand-950/25'
           : 'border-gray-200/80 bg-white/60 dark:border-gray-700/80 dark:bg-gray-800/40'
       }`}
     >
       {isAnnouncement ? (
-        <div className='flex h-11 w-11 shrink-0 items-center justify-center rounded-lg bg-emerald-100 text-emerald-700 dark:bg-emerald-900/35 dark:text-emerald-300'>
+        <div className='flex h-11 w-11 shrink-0 items-center justify-center rounded-lg bg-brand-100 text-brand-700 dark:bg-brand-900/35 dark:text-brand-300'>
           <Megaphone className='h-5 w-5' />
         </div>
       ) : (
@@ -137,7 +137,7 @@ function MessageRow({
         disabled={working}
         aria-label='标记为已读'
         title='标记为已读'
-        className='flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-gray-400 transition-colors hover:bg-emerald-100/80 hover:text-emerald-700 disabled:opacity-50 dark:hover:bg-emerald-900/50 dark:hover:text-emerald-300'
+        className='flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-gray-400 transition-colors hover:bg-brand-100/80 hover:text-brand-700 disabled:opacity-50 dark:hover:bg-brand-900/50 dark:hover:text-brand-300'
         onClick={() => void onRead(message)}
       >
         {working ? (
@@ -224,17 +224,17 @@ export default function MessagePanel({
       <button
         type='button'
         aria-label='关闭消息面板'
-        className='absolute inset-0 cursor-default bg-black/50 backdrop-blur-sm'
+        className='absolute inset-0 cursor-default bg-black/50'
         onClick={onClose}
       />
       <div
         role='dialog'
         aria-modal='true'
         aria-labelledby={titleId}
-        className='relative z-10 flex max-h-[90dvh] w-full max-w-2xl flex-col overflow-hidden rounded-2xl border border-gray-200/70 bg-white/90 shadow-2xl outline-none ring-1 ring-black/10 backdrop-blur-xl dark:border-white/10 dark:bg-gray-900/90 dark:ring-white/10'
+        className='relative z-10 flex max-h-[90dvh] w-full max-w-2xl flex-col overflow-hidden rounded-2xl bg-white shadow-2xl shadow-black/10 outline-none ring-1 ring-gray-900/[0.08] dark:bg-gray-900 dark:shadow-black/50 dark:ring-white/[0.08]'
       >
         <div className='flex shrink-0 items-center gap-3 border-b border-gray-200/80 px-4 py-3.5 dark:border-gray-700/80 sm:px-6 sm:py-4'>
-          <div className='flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300'>
+          <div className='flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-brand-100 text-brand-700 dark:bg-brand-900/40 dark:text-brand-300'>
             <Inbox className='h-5 w-5' />
           </div>
           <div className='min-w-0 flex-1'>
@@ -254,7 +254,7 @@ export default function MessagePanel({
             <button
               type='button'
               disabled={readingAll}
-              className='inline-flex h-9 items-center gap-1.5 rounded-md px-2.5 text-sm font-medium text-emerald-600 transition-colors hover:bg-emerald-50 hover:text-emerald-700 disabled:opacity-50 dark:text-emerald-400 dark:hover:bg-emerald-950/50 dark:hover:text-emerald-300'
+              className='inline-flex h-9 items-center gap-1.5 rounded-md px-2.5 text-sm font-medium text-brand-600 transition-colors hover:bg-brand-50 hover:text-brand-700 disabled:opacity-50 dark:text-brand-400 dark:hover:bg-brand-950/50 dark:hover:text-brand-300'
               onClick={() => void onReadAll()}
             >
               {readingAll && (
@@ -294,7 +294,7 @@ export default function MessagePanel({
               </div>
               <button
                 type='button'
-                className='rounded-md bg-emerald-600 px-3 py-2 text-sm font-medium text-white transition-colors hover:bg-emerald-700'
+                className='rounded-md bg-brand-600 px-3 py-2 text-sm font-medium text-white transition-colors hover:bg-brand-700'
                 onClick={() => void onRetry()}
               >
                 重新加载
@@ -334,7 +334,7 @@ export default function MessagePanel({
                   <button
                     type='button'
                     disabled={loadingMore}
-                    className='inline-flex min-h-9 items-center gap-1.5 rounded-md px-3 text-sm font-medium text-emerald-600 transition-colors hover:bg-emerald-50 hover:text-emerald-700 disabled:opacity-50 dark:text-emerald-400 dark:hover:bg-emerald-950/50'
+                    className='inline-flex min-h-9 items-center gap-1.5 rounded-md px-3 text-sm font-medium text-brand-600 transition-colors hover:bg-brand-50 hover:text-brand-700 disabled:opacity-50 dark:text-brand-400 dark:hover:bg-brand-950/50'
                     onClick={() => void onLoadMore()}
                   >
                     {loadingMore && (

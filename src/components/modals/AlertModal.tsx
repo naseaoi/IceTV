@@ -3,6 +3,11 @@
 import { AlertCircle, AlertTriangle, CheckCircle } from 'lucide-react';
 import { type ReactNode, useEffect } from 'react';
 
+import {
+  MODAL_PRIMARY_BUTTON_CLASS,
+  MODAL_SECONDARY_BUTTON_CLASS,
+  MODAL_TITLE_CLASS,
+} from '@/components/modals/modal-styles';
 import ModalShell from '@/components/modals/ModalShell';
 import { type AlertType } from '@/hooks/useAlertModal';
 
@@ -49,37 +54,35 @@ export default function AlertModal({
 
   const toneClassName =
     type === 'success'
-      ? 'border-emerald-200/80 bg-emerald-50/80 text-emerald-700 dark:border-emerald-500/30 dark:bg-emerald-500/10 dark:text-emerald-300'
+      ? 'bg-brand-50 text-brand-600 dark:bg-brand-500/10 dark:text-brand-300'
       : type === 'error'
-        ? 'border-rose-200/80 bg-rose-50/80 text-rose-700 dark:border-rose-500/30 dark:bg-rose-500/10 dark:text-rose-300'
-        : 'border-amber-200/80 bg-amber-50/80 text-amber-700 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-300';
+        ? 'bg-rose-50 text-rose-600 dark:bg-rose-500/10 dark:text-rose-300'
+        : 'bg-amber-50 text-amber-600 dark:bg-amber-500/10 dark:text-amber-300';
 
   const icon =
     type === 'success' ? (
-      <CheckCircle className='h-6 w-6' />
+      <CheckCircle className='h-5 w-5' />
     ) : type === 'error' ? (
-      <AlertCircle className='h-6 w-6' />
+      <AlertCircle className='h-5 w-5' />
     ) : (
-      <AlertTriangle className='h-6 w-6' />
+      <AlertTriangle className='h-5 w-5' />
     );
 
   const shouldShowSingleCloseButton = showConfirm && !onConfirm;
 
   return (
-    <ModalShell isOpen={isOpen} onClose={onClose} panelClassName='max-w-md'>
-      <div className='p-6 sm:p-7'>
-        <div className='mb-5 flex items-start gap-3'>
+    <ModalShell isOpen={isOpen} onClose={onClose} panelClassName='max-w-sm'>
+      <div className='p-5 sm:p-6'>
+        <div className='flex items-start gap-3'>
           <span
-            className={`inline-flex h-10 w-10 items-center justify-center rounded-xl border ${toneClassName}`}
+            className={`inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full ${toneClassName}`}
           >
             {icon}
           </span>
-          <div>
-            <h3 className='text-lg font-semibold text-gray-900 dark:text-gray-100'>
-              {title}
-            </h3>
+          <div className='min-w-0 pt-1.5'>
+            <h3 className={MODAL_TITLE_CLASS}>{title}</h3>
             {message && (
-              <p className='mt-2 text-sm leading-6 text-gray-600 dark:text-gray-300'>
+              <p className='mt-1.5 text-sm leading-6 text-gray-500 dark:text-gray-400'>
                 {message}
               </p>
             )}
@@ -87,17 +90,17 @@ export default function AlertModal({
         </div>
 
         {children && (
-          <div className='mb-5 rounded-xl border border-gray-200/70 bg-gray-50 p-3 text-sm leading-6 text-gray-700 dark:border-white/10 dark:bg-gray-800/70 dark:text-gray-200'>
+          <div className='mt-4 rounded-xl bg-gray-900/[0.04] p-3 text-sm leading-6 text-gray-700 dark:bg-white/[0.05] dark:text-gray-200'>
             {children}
           </div>
         )}
 
         {(shouldShowSingleCloseButton || (showConfirm && onConfirm)) && (
-          <div className='mt-6 flex justify-end gap-3'>
+          <div className='mt-6 flex justify-end gap-2'>
             {showConfirm && onConfirm && (
               <button
                 onClick={onClose}
-                className='rounded-lg border border-gray-200/70 bg-white px-4 py-2.5 text-sm font-medium text-gray-700 transition-colors hover:bg-gray-100/70 dark:border-white/10 dark:bg-gray-800/70 dark:text-gray-200 dark:hover:bg-white/[0.06]'
+                className={MODAL_SECONDARY_BUTTON_CLASS}
               >
                 {cancelText}
               </button>
@@ -109,7 +112,7 @@ export default function AlertModal({
                 }
                 onClose();
               }}
-              className='rounded-lg bg-blue-600 px-4 py-2.5 text-sm font-medium text-white transition-colors hover:bg-blue-500'
+              className={MODAL_PRIMARY_BUTTON_CLASS}
             >
               {confirmText}
             </button>

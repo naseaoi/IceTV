@@ -38,10 +38,10 @@ export function BatchUserGroupDialog({
       panelClassName='max-w-2xl'
     >
       <div className='mb-6'>
-        <div className='mb-4 rounded-lg border border-blue-200 bg-blue-50 p-4 dark:border-blue-800 dark:bg-blue-900/20'>
+        <div className='mb-4 rounded-lg border border-brand-200 bg-brand-50 p-4 dark:border-brand-800 dark:bg-brand-900/20'>
           <div className='mb-2 flex items-center space-x-2'>
             <svg
-              className='h-5 w-5 text-blue-600 dark:text-blue-400'
+              className='h-5 w-5 text-brand-600 dark:text-brand-400'
               fill='none'
               stroke='currentColor'
               viewBox='0 0 24 24'
@@ -53,11 +53,11 @@ export function BatchUserGroupDialog({
                 d='M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z'
               />
             </svg>
-            <span className='text-sm font-medium text-blue-800 dark:text-blue-300'>
+            <span className='text-sm font-medium text-brand-800 dark:text-brand-300'>
               批量操作说明
             </span>
           </div>
-          <p className='text-sm text-blue-700 dark:text-blue-400'>
+          <p className='text-sm text-brand-700 dark:text-brand-400'>
             将为选中的 <strong>{selectedUserCount} 个用户</strong>{' '}
             设置用户组，选择&ldquo;无用户组&rdquo;为无限制
           </p>

@@ -61,7 +61,7 @@ export function AddUserForm({
             placeholder='用户名'
             value={value.username}
             onChange={(e) => onChange({ ...value, username: e.target.value })}
-            className='w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-gray-900 focus:border-transparent focus:ring-2 focus:ring-green-500 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100'
+            className='w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-gray-900 focus:border-transparent focus:ring-2 focus:ring-brand-500 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100'
           />
           <div className='flex items-center gap-2'>
             <PasswordInput
@@ -69,7 +69,7 @@ export function AddUserForm({
               value={value.password}
               onChange={(e) => onChange({ ...value, password: e.target.value })}
               wrapperClassName='flex-1'
-              className='w-full rounded-lg border border-gray-300 bg-white px-3 py-2 pr-10 text-gray-900 focus:border-transparent focus:ring-2 focus:ring-green-500 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100'
+              className='w-full rounded-lg border border-gray-300 bg-white px-3 py-2 pr-10 text-gray-900 focus:border-transparent focus:ring-2 focus:ring-brand-500 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100'
             />
             <RandomPasswordButton
               onGenerate={(password) => onChange({ ...value, password })}

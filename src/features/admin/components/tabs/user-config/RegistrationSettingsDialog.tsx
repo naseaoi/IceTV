@@ -71,7 +71,7 @@ function ToggleRow({
         onClick={onToggle}
         disabled={disabled}
         className={`relative inline-flex h-6 w-11 shrink-0 items-center rounded-full transition-colors ${
-          checked ? 'bg-green-500' : 'bg-gray-300 dark:bg-gray-600'
+          checked ? 'bg-brand-500' : 'bg-gray-300 dark:bg-gray-600'
         } ${disabled ? 'cursor-not-allowed opacity-50' : ''}`}
         aria-label={label}
         aria-pressed={checked}
@@ -105,7 +105,7 @@ function CopyCodeButton({ code }: { code: string }) {
       className='rounded p-1 text-gray-400 transition-colors hover:bg-gray-100 hover:text-gray-600 dark:hover:bg-gray-700 dark:hover:text-gray-200'
     >
       {copied ? (
-        <Check className='h-4 w-4 text-green-500' />
+        <Check className='h-4 w-4 text-brand-500' />
       ) : (
         <Copy className='h-4 w-4' />
       )}
@@ -295,7 +295,7 @@ export function RegistrationSettingsDialog({
                             className={`rounded-full px-2 py-1 text-xs ${
                               expired || exhausted
                                 ? 'bg-gray-100 text-gray-600 dark:bg-gray-700 dark:text-gray-300'
-                                : 'bg-green-100 text-green-800 dark:bg-green-900/20 dark:text-green-300'
+                                : 'bg-brand-100 text-brand-800 dark:bg-brand-900/20 dark:text-brand-300'
                             }`}
                           >
                             {expired ? '已过期' : exhausted ? '已用尽' : '有效'}

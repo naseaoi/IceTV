@@ -4,7 +4,6 @@ import { Heart, SearchX, Trash2 } from 'lucide-react';
 import Link from 'next/link';
 import { useDeferredValue, useEffect, useMemo, useRef, useState } from 'react';
 
-import AuthenticatedRoute from '@/components/AuthenticatedRoute';
 import {
   LIBRARY_PILL_BUTTON_CLASS,
   LibraryEmptyState,
@@ -57,7 +56,7 @@ export function FavoritesPageSkeleton({
 
 function noop() {}
 
-function AuthenticatedFavoritesPageClient({
+export function FavoritesPageClient({
   favoriteSkeletonCount = 0,
 }: {
   favoriteSkeletonCount?: number;
@@ -121,7 +120,6 @@ function AuthenticatedFavoritesPageClient({
       <LibraryEmptyState
         icon={Heart}
         title='还没有收藏'
-        description='点亮卡片或播放页上的爱心，作品就会出现在这里'
         action={
           <Link href='/' className={LIBRARY_PILL_BUTTON_CLASS}>
             去首页逛逛
@@ -240,22 +238,5 @@ function AuthenticatedFavoritesPageClient({
         }}
       />
     </LibraryPageFrame>
-  );
-}
-
-export function FavoritesPageClient({
-  favoriteSkeletonCount = 0,
-}: {
-  favoriteSkeletonCount?: number;
-}) {
-  return (
-    <AuthenticatedRoute
-      activePath='/me/favorites'
-      message='请先登录后再查看收藏内容。'
-    >
-      <AuthenticatedFavoritesPageClient
-        favoriteSkeletonCount={favoriteSkeletonCount}
-      />
-    </AuthenticatedRoute>
   );
 }

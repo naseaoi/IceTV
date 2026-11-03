@@ -327,7 +327,7 @@ export function ResizableTableHeader({
         <button
           type='button'
           aria-label={`调整${typeof children === 'string' ? children : '当前列'}宽度`}
-          className='absolute inset-y-0 right-0 z-20 w-2 cursor-col-resize touch-none select-none before:absolute before:inset-y-1 before:left-1/2 before:w-px before:bg-gradient-to-b before:from-transparent before:via-gray-300 before:to-transparent focus-visible:outline-none focus-visible:before:w-0.5 focus-visible:before:via-blue-500 dark:before:via-gray-600'
+          className='absolute inset-y-0 right-0 z-20 w-2 cursor-col-resize touch-none select-none before:absolute before:inset-y-1 before:left-1/2 before:w-px before:bg-gradient-to-b before:from-transparent before:via-gray-300 before:to-transparent focus-visible:outline-none focus-visible:before:w-0.5 focus-visible:before:via-brand-500 dark:before:via-gray-600'
           onPointerDown={handlePointerDown}
           onPointerMove={handlePointerMove}
           onPointerUp={finishResize}

@@ -9,7 +9,7 @@ import { type AdminConfig } from '@/types/admin';
 function AdminTabLoading() {
   return (
     <div className='flex min-h-32 items-center justify-center text-sm text-gray-500 dark:text-gray-400'>
-      <Loader2 className='mr-2 h-4 w-4 animate-spin text-green-500' />
+      <Loader2 className='mr-2 h-4 w-4 animate-spin text-brand-500' />
       加载中...
     </div>
   );

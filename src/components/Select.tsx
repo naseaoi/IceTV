@@ -29,8 +29,8 @@ interface SelectProps {
 
 const TRIGGER_CLASS = {
   field:
-    'w-full rounded-lg border border-gray-300 bg-white px-3 py-2.5 pr-10 text-left text-sm text-gray-900 shadow-sm transition-all duration-200 focus:border-green-500 focus:outline-none focus:ring-2 focus:ring-green-500 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100',
-  pill: 'inline-flex h-8 items-center gap-1.5 rounded-full pl-2.5 pr-2 text-[13px] font-medium text-gray-600 transition-colors hover:bg-white/75 hover:text-gray-900 focus:outline-none focus-visible:ring-2 focus-visible:ring-green-500/40 aria-expanded:bg-white/75 aria-expanded:text-gray-900 dark:text-gray-300 dark:hover:bg-white/[0.06] dark:hover:text-white dark:aria-expanded:bg-white/[0.06] dark:aria-expanded:text-white',
+    'w-full rounded-lg border border-gray-300 bg-white px-3 py-2.5 pr-10 text-left text-sm text-gray-900 shadow-sm transition-all duration-200 focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100',
+  pill: 'inline-flex h-8 items-center gap-1.5 rounded-full pl-2.5 pr-2 text-[13px] font-medium text-gray-600 transition-colors hover:bg-white/75 hover:text-gray-900 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-500/40 aria-expanded:bg-white/75 aria-expanded:text-gray-900 dark:text-gray-300 dark:hover:bg-white/[0.06] dark:hover:text-white dark:aria-expanded:bg-white/[0.06] dark:aria-expanded:text-white',
 } as const;
 
 const TRIGGER_STATE_CLASS = {
@@ -218,7 +218,7 @@ export default function Select({
                   opt.disabled
                     ? 'cursor-not-allowed text-gray-400 dark:text-gray-500'
                     : isSelected
-                      ? 'font-medium text-green-600 hover:bg-green-500/10 focus-visible:bg-green-500/10 dark:text-green-400'
+                      ? 'font-medium text-brand-600 hover:bg-brand-500/10 focus-visible:bg-brand-500/10 dark:text-brand-400'
                       : 'text-gray-700 hover:bg-gray-100 focus-visible:bg-gray-100 dark:text-gray-200 dark:hover:bg-white/[0.06] dark:focus-visible:bg-white/[0.06]'
                 }`}
               >

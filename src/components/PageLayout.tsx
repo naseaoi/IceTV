@@ -3,9 +3,10 @@ import { ReactNode } from 'react';
 import { BackButton } from './BackButton';
 import MobileBottomNav from './MobileBottomNav';
 import MobileHeader from './MobileHeader';
+import { PAGE_CONTAINER_CLASS } from './page-container';
 import { ScrollToTopButton } from './ScrollToTopButton';
-import Sidebar from './Sidebar';
 import { SiteFooter } from './SiteFooter';
+import TopNav from './TopNav';
 
 interface MobileHeaderConfig {
   title?: string;
@@ -19,6 +20,7 @@ interface PageLayoutProps {
   contentMode?: 'default' | 'player';
   showDesktopBack?: boolean;
   mobileHeader?: MobileHeaderConfig;
+  transparentTopNav?: boolean;
 }
 
 const PageLayout = ({
@@ -27,12 +29,14 @@ const PageLayout = ({
   contentMode = 'default',
   showDesktopBack: showDesktopBackOverride,
   mobileHeader,
+  transparentTopNav = false,
 }: PageLayoutProps) => {
   const showMobileBack = ['/play', '/live'].includes(activePath);
   const showDesktopBack = showDesktopBackOverride ?? activePath === '/live';
   const isPlayerPage = contentMode === 'player' || activePath === '/play';
   const showBottomNav = !['/play', '/live'].includes(activePath);
-  const showFooter = ['/', '/play', '/live'].includes(activePath);
+  // 免责声明只放在首页底部，播放页保持沉浸
+  const showFooter = !isPlayerPage && activePath === '/';
   const showScrollToTop =
     !isPlayerPage && (activePath === '/' || activePath.startsWith('/douban'));
 
@@ -46,22 +50,23 @@ const PageLayout = ({
       />
 
       {/* 主要布局容器 */}
-      <div className='flex min-h-screen w-full md:grid md:grid-cols-[auto_1fr]'>
-        {/* 侧边栏 - 桌面端显示，移动端隐藏 */}
-        <div className='hidden md:block'>
-          <Sidebar activePath={activePath} />
-        </div>
-
-        {/* 主内容区域 */}
+      <div className='flex min-h-screen w-full'>
         <div
-          className={`flex min-w-0 flex-1 flex-col transition-[margin] duration-300 ease-[cubic-bezier(0.25,0.1,0.25,1)] ${
+          className={`flex min-w-0 flex-1 flex-col ${
             isPlayerPage ? 'h-dvh min-h-0' : ''
           }`}
         >
+          <TopNav
+            activePath={activePath}
+            transparentAtTop={transparentTopNav}
+          />
+
           {/* 桌面端顶部工具栏 */}
           {showDesktopBack && (
-            <div className='hidden items-center gap-1 px-4 py-2 sm:px-10 md:flex'>
-              <div className='mx-auto flex w-full max-w-[95%] items-center gap-1'>
+            <div className='hidden py-2 md:block'>
+              <div
+                className={`${PAGE_CONTAINER_CLASS} flex items-center gap-1`}
+              >
                 <BackButton />
               </div>
             </div>
@@ -83,18 +88,15 @@ const PageLayout = ({
                   }`
             }`}
           >
-            {isPlayerPage && showFooter ? (
+            {showFooter ? (
               <>
-                <div className='min-h-0 flex-1 overflow-hidden'>{children}</div>
-                <SiteFooter compact />
+                <div className='flex-1'>{children}</div>
+                <SiteFooter />
               </>
+            ) : isPlayerPage ? (
+              <div className='min-h-0 flex-1 overflow-hidden'>{children}</div>
             ) : (
-              <>
-                <div className={showFooter ? 'flex-1' : undefined}>
-                  {children}
-                </div>
-                {showFooter && <SiteFooter />}
-              </>
+              children
             )}
           </main>
         </div>

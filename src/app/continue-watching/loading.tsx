@@ -1,8 +1,8 @@
 import { History } from 'lucide-react';
 
+import { PAGE_CONTAINER_CLASS } from '@/components/page-container';
 import PageLayout from '@/components/PageLayout';
 import { POSTER_GRID_BASE_CLASS } from '@/components/poster-grid-layout';
-import { HomeMineSwitch } from '@/features/home/components/HomeMineSwitch';
 import { getContinueWatchingSkeletonCount } from '@/lib/continue-watching.server';
 
 export default async function ContinueWatchingLoading() {
@@ -13,11 +13,8 @@ export default async function ContinueWatchingLoading() {
       activePath='/'
       mobileHeader={{ title: '继续观看', showBack: true }}
     >
-      <div className='overflow-visible px-2 pb-2 pt-4 sm:px-10 sm:pt-8'>
-        <div className='mb-4 hidden justify-center md:flex'>
-          <HomeMineSwitch active='home' />
-        </div>
-        <div className='mx-auto max-w-[95%]'>
+      <div className='overflow-visible pb-2 pt-4 md:pt-8'>
+        <div className={PAGE_CONTAINER_CLASS}>
           <div className='mb-6 flex items-center justify-between'>
             <h1 className='hidden items-center gap-2 text-2xl font-bold text-gray-900 dark:text-gray-100 sm:flex'>
               <History className='h-6 w-6 text-orange-500' />

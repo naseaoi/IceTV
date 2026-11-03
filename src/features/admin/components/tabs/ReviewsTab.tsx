@@ -248,7 +248,7 @@ function AllReviews() {
           >
             <Loader2
               aria-hidden='true'
-              className='mr-2 h-4 w-4 animate-spin text-green-500'
+              className='mr-2 h-4 w-4 animate-spin text-brand-500'
             />
             加载中...
           </div>

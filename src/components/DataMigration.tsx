@@ -206,7 +206,7 @@ const DataMigration = ({ onRefreshConfig }: DataMigrationProps) => {
             </p>
             <p>服务器版本: {result.serverVersion || '未知版本'}</p>
             {result.ownerRemappedFrom && (
-              <p className='mt-2 text-blue-600'>
+              <p className='mt-2 text-brand-600'>
                 原站站长 {result.ownerRemappedFrom}{' '}
                 的数据已归到本机站长账号下，登录仍使用本机的站长密码。
               </p>
@@ -277,8 +277,8 @@ const DataMigration = ({ onRefreshConfig }: DataMigrationProps) => {
         <div className='grid grid-cols-1 gap-6 lg:grid-cols-2'>
           <div className='flex flex-col rounded-lg border border-gray-200 bg-white p-6 transition-shadow hover:shadow-sm dark:border-gray-700 dark:bg-gray-800'>
             <div className='mb-6 flex items-center gap-3'>
-              <div className='flex h-8 w-8 items-center justify-center rounded-lg bg-blue-50 dark:bg-blue-900/20'>
-                <Upload className='h-4 w-4 text-blue-600 dark:text-blue-400' />
+              <div className='flex h-8 w-8 items-center justify-center rounded-lg bg-brand-50 dark:bg-brand-900/20'>
+                <Upload className='h-4 w-4 text-brand-600 dark:text-brand-400' />
               </div>
               <div>
                 <h3 className='font-semibold text-gray-900 dark:text-gray-100'>
@@ -309,7 +309,7 @@ const DataMigration = ({ onRefreshConfig }: DataMigrationProps) => {
                     value={exportPassword}
                     onChange={(e) => setExportPassword(e.target.value)}
                     placeholder='设置强密码保护备份文件'
-                    className='w-full rounded-lg border border-gray-300 bg-white px-3 py-2.5 pr-10 text-gray-900 transition-colors focus:border-blue-500 focus:ring-2 focus:ring-blue-500 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-100'
+                    className='w-full rounded-lg border border-gray-300 bg-white px-3 py-2.5 pr-10 text-gray-900 transition-colors focus:border-brand-500 focus:ring-2 focus:ring-brand-500 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-100'
                     disabled={isExporting}
                   />
                   <p className='mt-1 text-xs text-gray-500 dark:text-gray-400'>
@@ -350,7 +350,7 @@ const DataMigration = ({ onRefreshConfig }: DataMigrationProps) => {
                 className={`mt-10 w-full rounded-lg px-4 py-2.5 font-medium transition-colors ${
                   isExporting || !exportPassword.trim()
                     ? 'cursor-not-allowed bg-gray-100 text-gray-500 dark:bg-gray-700 dark:text-gray-400'
-                    : 'bg-blue-600 text-white hover:bg-blue-700'
+                    : 'bg-brand-600 text-white hover:bg-brand-700'
                 }`}
               >
                 {isExporting ? (
@@ -396,7 +396,7 @@ const DataMigration = ({ onRefreshConfig }: DataMigrationProps) => {
                     <FileCheck className='h-4 w-4' />
                     备份文件
                     {selectedFile && (
-                      <span className='ml-auto text-xs font-normal text-green-600 dark:text-green-400'>
+                      <span className='ml-auto text-xs font-normal text-brand-600 dark:text-brand-400'>
                         {selectedFile.name} (
                         {(selectedFile.size / 1024).toFixed(1)} KB)
                       </span>

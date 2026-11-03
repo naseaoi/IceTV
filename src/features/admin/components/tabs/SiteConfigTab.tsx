@@ -384,7 +384,7 @@ const SiteConfigComponent = ({
             onChange={(e) =>
               setSiteSettings((prev) => ({ ...prev, SiteName: e.target.value }))
             }
-            className='w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-gray-900 focus:border-transparent focus:ring-2 focus:ring-green-500 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100'
+            className='w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-gray-900 focus:border-transparent focus:ring-2 focus:ring-brand-500 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100'
           />
         </div>
 
@@ -430,7 +430,7 @@ const SiteConfigComponent = ({
                     setIconPreview(url);
                   }}
                   placeholder='输入图标 URL 或上传文件'
-                  className='min-w-0 flex-1 rounded-lg border border-gray-300 bg-white px-3 py-2 text-gray-900 focus:border-transparent focus:ring-2 focus:ring-green-500 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100'
+                  className='min-w-0 flex-1 rounded-lg border border-gray-300 bg-white px-3 py-2 text-gray-900 focus:border-transparent focus:ring-2 focus:ring-brand-500 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100'
                 />
                 <div className='flex shrink-0 items-center gap-2'>
                   <button
@@ -516,7 +516,7 @@ const SiteConfigComponent = ({
               }))
             }
             rows={3}
-            className='w-full resize-y rounded-lg border border-gray-300 bg-white px-3 py-2 text-gray-900 focus:border-transparent focus:ring-2 focus:ring-green-500 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100'
+            className='w-full resize-y rounded-lg border border-gray-300 bg-white px-3 py-2 text-gray-900 focus:border-transparent focus:ring-2 focus:ring-brand-500 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100'
           />
         </div>
 
@@ -543,7 +543,7 @@ const SiteConfigComponent = ({
               }))
             }
             rows={3}
-            className='w-full resize-y rounded-lg border border-gray-300 bg-white px-3 py-2 text-gray-900 focus:border-transparent focus:ring-2 focus:ring-green-500 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100'
+            className='w-full resize-y rounded-lg border border-gray-300 bg-white px-3 py-2 text-gray-900 focus:border-transparent focus:ring-2 focus:ring-brand-500 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100'
           />
         </div>
 
@@ -668,7 +668,7 @@ const SiteConfigComponent = ({
               显示直播入口
             </p>
             <p className='mt-1 text-xs text-gray-500 dark:text-gray-400'>
-              开启后，侧栏和底部导航会显示“直播”分类入口。
+              开启后，顶部导航和底部导航会显示“直播”分类入口。
             </p>
           </div>
           <button
@@ -681,7 +681,7 @@ const SiteConfigComponent = ({
             }
             className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
               siteSettings.EnableLiveEntry
-                ? 'bg-green-500'
+                ? 'bg-brand-500'
                 : 'bg-gray-300 dark:bg-gray-600'
             }`}
             aria-label='切换直播入口显示'
@@ -716,7 +716,7 @@ const SiteConfigComponent = ({
             }
             className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
               siteSettings.DisableYellowFilter
-                ? 'bg-green-500'
+                ? 'bg-brand-500'
                 : 'bg-gray-300 dark:bg-gray-600'
             }`}
             aria-label='切换NSFW模式'
@@ -744,7 +744,7 @@ const SiteConfigComponent = ({
               <div
                 className={`mt-2 flex items-start gap-1.5 text-xs ${
                   danmakuTestResult.success
-                    ? 'text-green-600 dark:text-green-400'
+                    ? 'text-brand-600 dark:text-brand-400'
                     : 'text-red-600 dark:text-red-400'
                 }`}
               >
@@ -786,7 +786,7 @@ const SiteConfigComponent = ({
               }
               className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
                 siteSettings.EnableDanmaku
-                  ? 'bg-green-500'
+                  ? 'bg-brand-500'
                   : 'bg-gray-300 dark:bg-gray-600'
               }`}
               aria-label='切换播放器弹幕'
@@ -837,7 +837,7 @@ const SiteConfigComponent = ({
                     handleLocalPreferenceDefaultToggle(definition.siteConfigKey)
                   }
                   className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
-                    enabled ? 'bg-green-500' : 'bg-gray-300 dark:bg-gray-600'
+                    enabled ? 'bg-brand-500' : 'bg-gray-300 dark:bg-gray-600'
                   }`}
                   aria-label={`切换${definition.title}`}
                   aria-pressed={enabled}

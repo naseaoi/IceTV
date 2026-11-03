@@ -111,7 +111,6 @@ declare global {
   interface Window {
     RUNTIME_CONFIG?: RuntimeConfig;
     __runtimeConfigReady?: boolean;
-    __sidebarCollapsed?: boolean;
   }
 }
 

@@ -166,7 +166,7 @@ export const DanmakuTab: React.FC<DanmakuTabProps> = ({
           aria-label='弹幕热力图'
           onClick={toggleHeatmap}
           className={`relative h-6 w-11 flex-shrink-0 rounded-full transition-colors ${
-            heatmapEnabled ? 'bg-green-600' : 'bg-gray-300 dark:bg-gray-600'
+            heatmapEnabled ? 'bg-brand-600' : 'bg-gray-300 dark:bg-gray-600'
           }`}
         >
           <span

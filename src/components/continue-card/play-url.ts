@@ -1,4 +1,4 @@
-interface MobileContinuePlayUrlParams {
+interface ContinuePlayUrlParams {
   source: string;
   id: string;
   title: string;
@@ -6,13 +6,13 @@ interface MobileContinuePlayUrlParams {
   query?: string;
 }
 
-export function buildMobileContinuePlayUrl({
+export function buildContinuePlayUrl({
   source,
   id,
   title,
   year,
   query,
-}: MobileContinuePlayUrlParams): string {
+}: ContinuePlayUrlParams): string {
   const params = new URLSearchParams({ source, id, title });
   const normalizedYear = year?.trim();
   const normalizedQuery = query?.trim();

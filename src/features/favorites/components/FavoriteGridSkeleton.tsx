@@ -1,11 +1,11 @@
 import HomePosterCardSkeleton from '@/components/HomePosterCardSkeleton';
-import { FAVORITE_GRID_CLASS } from '@/features/favorites/components/FavoriteGrid';
+import { POSTER_GRID_CLASS } from '@/components/poster-grid-layout';
 
 export function FavoriteGridSkeleton({ count = 12 }: { count?: number }) {
   return (
-    <div className={FAVORITE_GRID_CLASS}>
+    <div className={POSTER_GRID_CLASS}>
       {Array.from({ length: count }).map((_, index) => (
-        <div key={index} className='w-full sm:w-[180px]'>
+        <div key={index} className='w-full'>
           <HomePosterCardSkeleton className='w-full' />
         </div>
       ))}

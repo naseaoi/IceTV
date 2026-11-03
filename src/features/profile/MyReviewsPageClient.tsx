@@ -142,7 +142,7 @@ function ReviewCard({
         <div className='flex items-start gap-2'>
           <Link
             href={playUrl}
-            className='min-w-0 flex-1 truncate font-semibold text-gray-900 transition hover:text-green-600 dark:text-gray-100 dark:hover:text-green-400'
+            className='min-w-0 flex-1 truncate font-semibold text-gray-900 transition hover:text-brand-600 dark:text-gray-100 dark:hover:text-brand-400'
           >
             {review.title}
             {review.year && (
@@ -166,7 +166,7 @@ function ReviewCard({
           <span
             className={`rounded px-1.5 py-0.5 ${
               review.is_public
-                ? 'bg-green-500/10 text-green-700 dark:text-green-400'
+                ? 'bg-brand-500/10 text-brand-700 dark:text-brand-400'
                 : 'bg-gray-100 dark:bg-white/[0.06]'
             }`}
           >
@@ -332,7 +332,7 @@ export default function MyReviewsPageClient() {
             <span className='font-medium tabular-nums text-gray-900 dark:text-gray-100'>
               {reviews.length}
             </span>{' '}
-            条评价 · 私密评价仅自己可见
+            条评价
             {narrowed && (
               <span aria-live='polite'>
                 <span className='mx-1.5 text-gray-300 dark:text-gray-600'>

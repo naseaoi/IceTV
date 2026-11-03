@@ -83,7 +83,12 @@
 
 - 下拉统一用 `src/components/Select.tsx`（`field` 表单整宽、`pill` 工具栏胶囊），`AdminSelect` 只是 `field` 的包装。不要再写原生 `<select>`。
 - `@tailwindcss/forms` 会给所有原生 input / select / textarea 加边框、内边距和背景箭头。自定义样式的控件须显式 `border-0`、重置 padding、`focus:ring-0`（select 再加 `bg-none`），否则在浅色模式出现灰框或文字被裁切。
+- `tailwind.config.ts` 含 raw 断点（`split`），Tailwind 因此**不生成 `max-sm:` / `max-md:` 等 `max-*` 变体**，写了也静默无效。窄屏样式写成基础类加 `sm:` / `md:` 覆盖，窄屏横屏用 `phone-landscape:`。
+- 强调色统一用 `brand-*`（`tailwind.config.ts` 定义的冰蓝色阶），`gray` 已覆盖为冷调中性灰；分区标题等装饰统一用中性灰，主色只出现在选中态、进度和主操作上。
+- 桌面端导航是 `src/components/TopNav.tsx`（由 `PageLayout` 挂载），页面水平容器统一用 `PAGE_CONTAINER_CLASS`（`src/components/page-container.ts`），否则内容与导航左边缘错位。
+- `/me` 下各标签页的外壳（`PageLayout`、个人横幅、标签栏）由 `app/me/layout.tsx` 的 `MeShell` 提供，子页面与其 `loading.tsx` 只渲染内容区，**再套 `PageLayout` 会出现双层导航**。海报网格统一用 `POSTER_GRID_CLASS`（`src/components/poster-grid-layout.ts`）
 - 长文本折叠用 `src/components/ExpandableText.tsx`；弹窗外壳 `ModalShell` 支持 `backdropClassName`（遮罩底色）与 `initialFocusRef`（打开后聚焦的元素）。
+- 弹窗、下拉、浮层用实底（`bg-white` / `dark:bg-gray-900` + 细 ring），遮罩只压暗不模糊；毛玻璃只留给吸顶导航与筛选栏。弹窗标题、关闭与按钮复用 `src/components/modals/modal-styles.ts`。
 
 ## 本地设置
 

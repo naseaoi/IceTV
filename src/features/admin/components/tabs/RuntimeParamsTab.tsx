@@ -142,7 +142,7 @@ const RuntimeParamsTab = ({
       </div>
 
       <details className='group mt-4 rounded-lg border border-gray-200 bg-gray-50/60 dark:border-gray-700 dark:bg-gray-900/30'>
-        <summary className='flex cursor-pointer list-none items-center justify-between gap-3 rounded-lg px-4 py-3 text-sm font-medium text-gray-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 dark:text-gray-200 [&::-webkit-details-marker]:hidden'>
+        <summary className='flex cursor-pointer list-none items-center justify-between gap-3 rounded-lg px-4 py-3 text-sm font-medium text-gray-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-500 dark:text-gray-200 [&::-webkit-details-marker]:hidden'>
           <span>高级参数</span>
           <ChevronDown
             aria-hidden

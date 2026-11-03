@@ -1,25 +1,16 @@
 'use client';
 
-import { LucideIcon } from 'lucide-react';
+import { PanelRightClose, PanelRightOpen } from 'lucide-react';
 import { ReactNode, RefObject } from 'react';
 
-import { BackButton } from '@/components/BackButton';
 import PageLayout from '@/components/PageLayout';
 import PlayerShortcutsModal from '@/components/PlayerShortcutsModal';
 import type { PlayerShortcutMode } from '@/lib/player-shortcuts';
-
-export interface PlayerPageAccent {
-  icon: string;
-  glow: string;
-  sub: string;
-}
 
 interface PlayerPageLayoutProps {
   activePath: string;
   title: string;
   titleFallback: string;
-  titleIcon: LucideIcon;
-  accent: PlayerPageAccent;
   isPanelCollapsed: boolean;
   onTogglePanel: () => void;
   panelToggleTitle: string;
@@ -40,58 +31,26 @@ const TogglePanelButton = ({
   collapsed: boolean;
   onClick: () => void;
   title: string;
-}) => (
-  <button
-    onClick={onClick}
-    className='flex items-center gap-2 rounded-full p-2.5 text-gray-600 transition-colors hover:bg-gray-200/50 dark:text-gray-300 dark:hover:bg-gray-700/50'
-    title={title}
-  >
-    <svg
-      className={`h-5 w-5 transition-transform duration-200 ${
-        collapsed ? 'rotate-180' : 'rotate-0'
-      }`}
-      fill='none'
-      stroke='currentColor'
-      viewBox='0 0 24 24'
+}) => {
+  const Icon = collapsed ? PanelRightOpen : PanelRightClose;
+  return (
+    <button
+      type='button'
+      onClick={onClick}
+      className='inline-flex h-8 items-center gap-1.5 rounded-full px-3 text-[13px] text-gray-500 transition-colors hover:bg-gray-900/[0.05] hover:text-gray-900 dark:text-gray-400 dark:hover:bg-white/[0.06] dark:hover:text-white'
+      title={title}
+      aria-label={title}
     >
-      <path
-        strokeLinecap='round'
-        strokeLinejoin='round'
-        strokeWidth='2'
-        d='M9 5l7 7-7 7'
-      />
-    </svg>
-    <span className='text-sm font-medium'>{collapsed ? '显示' : '隐藏'}</span>
-  </button>
-);
-
-const TitleIconBadge = ({
-  icon: Icon,
-  accent,
-  size = 'md',
-}: {
-  icon: LucideIcon;
-  accent: PlayerPageAccent;
-  size?: 'md' | 'lg';
-}) => (
-  <span className='relative flex-shrink-0'>
-    <Icon
-      className={`${size === 'lg' ? 'h-8 w-8' : 'h-6 w-6'} ${accent.icon}`}
-    />
-    <span
-      className={`absolute ${
-        size === 'lg' ? '-inset-2' : '-inset-1.5'
-      } rounded-full ${accent.glow} blur-sm`}
-    />
-  </span>
-);
+      <Icon className='h-4 w-4' />
+      {collapsed ? '显示面板' : '收起面板'}
+    </button>
+  );
+};
 
 export function PlayerPageLayout({
   activePath,
   title,
   titleFallback,
-  titleIcon: TitleIcon,
-  accent,
   isPanelCollapsed,
   onTogglePanel,
   panelToggleTitle,
@@ -110,23 +69,15 @@ export function PlayerPageLayout({
       showDesktopBack={false}
       mobileHeader={{ title: title || titleFallback }}
     >
-      <div className='relative flex h-full min-h-0 flex-col overflow-hidden pb-2 md:px-6 md:pt-2'>
-        {/* 桌面端单行顶栏 */}
-        <div className='relative hidden h-[5.5rem] flex-shrink-0 items-center gap-4 md:flex'>
-          <BackButton variant='icon' />
-          <TitleIconBadge icon={TitleIcon} accent={accent} size='lg' />
-          <h1 className='min-w-0 truncate text-2xl font-bold text-gray-900 dark:text-gray-100'>
+      <div className='relative flex h-full min-h-0 flex-col overflow-hidden pb-2 md:mx-auto md:w-full md:max-w-[1680px] md:px-8 md:pb-6 xl:px-12'>
+        <div className='hidden h-16 flex-shrink-0 items-center gap-3 md:flex'>
+          <h1 className='min-w-0 truncate text-lg font-semibold text-gray-900 dark:text-gray-100'>
             {title || titleFallback}
           </h1>
           {titleSuffix && (
-            <>
-              <span className='h-5 w-px flex-shrink-0 bg-gray-300 dark:bg-gray-600' />
-              <span
-                className={`text-lg font-semibold ${accent.sub} flex-shrink-0 whitespace-nowrap`}
-              >
-                {titleSuffix}
-              </span>
-            </>
+            <span className='max-w-[40%] flex-shrink-0 truncate text-sm text-gray-500 dark:text-gray-400'>
+              {titleSuffix}
+            </span>
           )}
           <div className='ml-auto hidden flex-shrink-0 split:block'>
             <TogglePanelButton
@@ -139,27 +90,24 @@ export function PlayerPageLayout({
 
         {/* 内容区：移动端与竖屏平板上下排列，分栏时播放器吃满剩余宽高 + 固定宽右面板 */}
         <div className='flex min-h-0 flex-1 flex-col split:flex-row'>
-          <div className='max-md:landscape:aspect-auto max-md:landscape:max-h-none max-md:landscape:min-h-0 max-md:landscape:flex-1 relative aspect-video max-h-[38dvh] w-full flex-shrink-0 split:aspect-auto split:h-full split:max-h-none split:min-w-0 split:flex-1'>
+          <div className='relative aspect-video max-h-[38dvh] w-full flex-shrink-0 split:aspect-auto split:h-full split:max-h-none split:min-w-0 split:flex-1 phone-landscape:aspect-auto phone-landscape:max-h-none phone-landscape:min-h-0 phone-landscape:flex-1'>
             <div className='absolute inset-0'>
               <div
                 ref={artRef}
-                className='max-md:rounded-none max-md:shadow-none max-md:ring-0 h-full w-full overflow-hidden rounded-xl bg-black shadow-lg ring-1 ring-black/10 dark:ring-white/10'
+                className='h-full w-full overflow-hidden bg-black md:rounded-xl'
               />
               {playerOverlay}
             </div>
           </div>
 
           {/* 移动端播放信息：标题 + 标签 */}
-          <div className='max-md:landscape:hidden flex-shrink-0 px-4 pt-3 md:hidden'>
-            <div className='flex min-w-0 items-center gap-2'>
-              <TitleIconBadge icon={TitleIcon} accent={accent} />
-              <h1 className='min-w-0 truncate text-lg font-semibold text-gray-900 dark:text-gray-100'>
+          <div className='flex-shrink-0 px-4 pt-3 phone-landscape:hidden md:hidden'>
+            <div className='flex min-w-0 items-baseline gap-2'>
+              <h1 className='min-w-0 truncate text-base font-semibold text-gray-900 dark:text-gray-100'>
                 {title || titleFallback}
               </h1>
               {titleSuffix && (
-                <span
-                  className={`text-sm font-semibold ${accent.sub} flex-shrink-0 whitespace-nowrap`}
-                >
+                <span className='max-w-[45%] flex-shrink-0 truncate text-[13px] text-gray-500 dark:text-gray-400'>
                   {titleSuffix}
                 </span>
               )}
@@ -174,12 +122,12 @@ export function PlayerPageLayout({
           </div>
 
           <div
-            className={`max-md:px-4 max-md:landscape:hidden min-h-0 overflow-hidden transition-[max-width,margin,opacity] duration-300 ease-[cubic-bezier(0.25,0.1,0.25,1)] split:mt-0 split:h-full split:w-[21rem] split:flex-none xl:w-[24rem] ${
+            className={`min-h-0 overflow-hidden px-4 transition-[max-width,margin,opacity] duration-300 ease-[cubic-bezier(0.25,0.1,0.25,1)] split:mt-0 split:h-full split:w-[21rem] split:flex-none phone-landscape:hidden md:px-0 xl:w-[24rem] ${
               isPanelCollapsed
                 ? `${
                     mobilePanelAlwaysVisible ? 'mt-3 flex-1' : 'hidden'
                   } split:pointer-events-none split:ml-0 split:mt-0 split:block split:max-w-0 split:flex-none split:opacity-0`
-                : 'mt-3 flex-1 split:ml-3 split:max-w-[24rem] split:opacity-100'
+                : 'mt-3 flex-1 split:ml-6 split:max-w-[24rem] split:opacity-100'
             }`}
           >
             {rightPanel}

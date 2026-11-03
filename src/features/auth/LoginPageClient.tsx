@@ -11,7 +11,7 @@ import {
 import Link from 'next/link';
 import { useEffect, useMemo, useState } from 'react';
 
-import { SiteIcon } from '@/components/Sidebar';
+import { SiteIcon } from '@/components/SiteIcon';
 import { useSite } from '@/components/SiteProvider';
 import { ThemeToggle } from '@/components/ThemeToggle';
 import { useNicknameAvailability } from '@/hooks/useNicknameAvailability';
@@ -31,7 +31,7 @@ import {
 import { PosterWallBackdrop } from './PosterWallBackdrop';
 
 const INPUT_CLASS =
-  'block w-full rounded-lg border-0 bg-gray-100/90 px-4 py-3 text-gray-900 ring-1 ring-gray-200/80 transition-shadow placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-green-500 dark:bg-white/[0.07] dark:text-white dark:ring-white/10 dark:placeholder:text-gray-500 sm:text-[15px]';
+  'block w-full rounded-lg border-0 bg-gray-100/90 px-4 py-3 text-gray-900 ring-1 ring-gray-200/80 transition-shadow placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-brand-500 dark:bg-white/[0.07] dark:text-white dark:ring-white/10 dark:placeholder:text-gray-500 sm:text-[15px]';
 
 const INPUT_INVALID_CLASS =
   'ring-red-500/60 focus:ring-red-500 dark:ring-red-500/60 dark:focus:ring-red-500';
@@ -40,10 +40,10 @@ const FIELD_ERROR_CLASS = 'mt-1.5 text-xs text-red-600 dark:text-red-400';
 
 const FIELD_HINT_CLASS = 'mt-1.5 text-xs text-gray-500 dark:text-gray-400';
 
-const FIELD_OK_CLASS = 'mt-1.5 text-xs text-green-600 dark:text-green-400';
+const FIELD_OK_CLASS = 'mt-1.5 text-xs text-brand-600 dark:text-brand-400';
 
 const SWITCH_LINK_CLASS =
-  'font-semibold text-green-600 transition-colors hover:text-green-500 hover:underline dark:text-green-400 dark:hover:text-green-300';
+  'font-semibold text-brand-600 transition-colors hover:text-brand-500 hover:underline dark:text-brand-400 dark:hover:text-brand-300';
 
 const HEADER_ICON_BUTTON_CLASS =
   'flex h-10 w-10 items-center justify-center rounded-full text-white/80 transition-colors hover:bg-white/15 lg:text-gray-600 lg:hover:bg-gray-200/50 dark:lg:text-gray-300 dark:lg:hover:bg-gray-700/50';
@@ -79,7 +79,7 @@ function VersionDisplay() {
             updateStatus === UpdateStatus.HAS_UPDATE
               ? 'text-yellow-400'
               : updateStatus === UpdateStatus.NO_UPDATE
-                ? 'text-green-400'
+                ? 'text-brand-400'
                 : ''
           }`}
         >
@@ -346,7 +346,7 @@ export function LoginPageClient() {
               </div>
             )}
             {success && (
-              <div className='mt-5 flex items-start gap-2.5 rounded-lg bg-green-500/10 px-3.5 py-2.5 text-sm text-green-600 ring-1 ring-green-500/20 dark:bg-green-500/15 dark:text-green-400'>
+              <div className='mt-5 flex items-start gap-2.5 rounded-lg bg-brand-500/10 px-3.5 py-2.5 text-sm text-brand-600 ring-1 ring-brand-500/20 dark:bg-brand-500/15 dark:text-brand-400'>
                 <CheckCircle className='mt-0.5 h-4 w-4 shrink-0' />
                 <span>{success}</span>
               </div>
@@ -544,7 +544,7 @@ export function LoginPageClient() {
                   (isRegister &&
                     (Object.keys(fieldErrors).length > 0 || usernameTaken))
                 }
-                className='!mt-6 inline-flex w-full items-center justify-center gap-2 rounded-lg bg-green-600 py-3 text-base font-semibold text-white shadow-lg shadow-green-600/25 transition-colors hover:bg-green-500 active:bg-green-700 disabled:cursor-not-allowed disabled:opacity-50'
+                className='!mt-6 inline-flex w-full items-center justify-center gap-2 rounded-lg bg-brand-600 py-3 text-base font-semibold text-white shadow-lg shadow-brand-600/25 transition-colors hover:bg-brand-500 active:bg-brand-700 disabled:cursor-not-allowed disabled:opacity-50'
               >
                 {loading && <Loader2 className='h-4 w-4 animate-spin' />}
                 {loading

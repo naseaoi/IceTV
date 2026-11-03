@@ -1,29 +1,16 @@
 ﻿'use client';
 
 import { Link as LinkIcon, PlayCircleIcon } from 'lucide-react';
-import { useRouter } from 'next/navigation';
-import React, { memo, useCallback, useEffect, useId, useRef } from 'react';
+import React, { memo, useCallback, useEffect, useId } from 'react';
 
 import { useOptionalCardInteractionManager } from '@/components/CardInteractionProvider';
 import CoverImage from '@/components/CoverImage';
-import {
-  warmupDanmakuForNavigation,
-  warmupDanmakuSearchForNavigation,
-} from '@/features/play/lib/danmaku/navigation-warmup';
 import { useLongPress } from '@/hooks/useLongPress';
-import { getAuthInfoFromBrowserCookie } from '@/lib/auth.client';
 import {
-  getCurrentNavigationPath,
-  withReturnTo,
-} from '@/lib/navigation-return';
-import {
-  canUseHoverPrefetch,
-  canUseNetworkPrefetch,
-  findLocalPlaybackTargetByTitle,
-  PREFETCH_INTENT_DELAY_MS,
-  transferWarmedSearchToAggregateGroup,
-  warmupSearchForTitle,
-} from '@/lib/video-prefetch';
+  buildExternalSubjectUrl,
+  hasDisplayableRate,
+  usePosterPlay,
+} from '@/hooks/usePosterPlay';
 
 const noSelectStyle = {
   WebkitUserSelect: 'none',
@@ -45,16 +32,6 @@ interface PosterCardProps {
   type?: string;
   isBangumi?: boolean;
   priority?: boolean;
-}
-
-function buildExternalUrl(doubanId?: number, isBangumi = false) {
-  if (!doubanId || doubanId === 0) {
-    return null;
-  }
-
-  return isBangumi
-    ? `https://bgm.tv/subject/${doubanId.toString()}`
-    : `https://movie.douban.com/subject/${doubanId.toString()}`;
 }
 
 function arePosterCardPropsEqual(
@@ -83,81 +60,19 @@ function PosterCard({
   isBangumi = false,
   priority = false,
 }: PosterCardProps) {
-  const router = useRouter();
   const interactionId = useId();
-  const prefetchTimerRef = useRef<number | null>(null);
   const interactionManager = useOptionalCardInteractionManager();
   const showActionSheet = interactionManager?.showActionSheet;
   const hideActionSheet = interactionManager?.hideActionSheet;
-  const externalUrl = buildExternalUrl(doubanId, isBangumi);
+  const externalUrl = buildExternalSubjectUrl(doubanId, isBangumi);
   const externalLinkLabel = isBangumi
     ? `打开${title}的 Bangumi 页面`
     : `打开${title}的豆瓣页面`;
-
-  const buildPlayUrl = useCallback(() => {
-    const localTarget = findLocalPlaybackTargetByTitle(title, year);
-    if (localTarget) {
-      return `/play?source=${encodeURIComponent(localTarget.source)}&id=${encodeURIComponent(
-        localTarget.id,
-      )}&title=${encodeURIComponent(title.trim())}${
-        year ? `&year=${year}` : ''
-      }${type ? `&stype=${type}` : ''}`;
-    }
-
-    return `/play?title=${encodeURIComponent(title.trim())}${
-      year ? `&year=${year}` : ''
-    }${type ? `&stype=${type}` : ''}`;
-  }, [title, type, year]);
-
-  const warmupDanmaku = useCallback(() => {
-    const localTarget = findLocalPlaybackTargetByTitle(title, year);
-    void warmupDanmakuForNavigation({
-      source: localTarget?.source ?? '',
-      videoId: localTarget?.id ?? '',
-      episodeIndex: 0,
-      searchTitle: title,
-      searchYear: year || '',
-    });
-  }, [title, year]);
-
-  const handlePlay = useCallback(() => {
-    const playUrl = withReturnTo(buildPlayUrl(), getCurrentNavigationPath());
-    const authInfo = getAuthInfoFromBrowserCookie();
-    if (authInfo?.username) {
-      const hasLocalTarget = !!findLocalPlaybackTargetByTitle(title, year);
-      if (canUseNetworkPrefetch()) {
-        warmupDanmaku();
-        if (!hasLocalTarget) {
-          transferWarmedSearchToAggregateGroup(title);
-          warmupSearchForTitle(title);
-        }
-      }
-    }
-    router.push(playUrl);
-  }, [buildPlayUrl, router, title, warmupDanmaku, year]);
-
-  // hover / focus 预热：提前触发标题聚合搜索并预取播放页路由
-  const handlePrefetch = useCallback(() => {
-    if (!canUseHoverPrefetch()) return;
-
-    router.prefetch('/play');
-    if (prefetchTimerRef.current) {
-      window.clearTimeout(prefetchTimerRef.current);
-    }
-    prefetchTimerRef.current = window.setTimeout(() => {
-      prefetchTimerRef.current = null;
-      void warmupDanmakuSearchForNavigation(title);
-      warmupSearchForTitle(title);
-    }, PREFETCH_INTENT_DELAY_MS);
-  }, [router, title]);
-
-  const cancelPrefetch = useCallback(() => {
-    if (!prefetchTimerRef.current) return;
-    window.clearTimeout(prefetchTimerRef.current);
-    prefetchTimerRef.current = null;
-  }, []);
-
-  useEffect(() => cancelPrefetch, [cancelPrefetch]);
+  const {
+    play: handlePlay,
+    prefetch: handlePrefetch,
+    cancelPrefetch,
+  } = usePosterPlay({ title, year, type });
 
   const handleExternalOpen = useCallback(() => {
     if (!externalUrl) {
@@ -237,7 +152,7 @@ function PosterCard({
 
   return (
     <div
-      className='group relative w-full cursor-pointer rounded-lg bg-transparent transition-[transform,opacity] duration-300 ease-in-out hover:z-[500] hover:scale-[1.025] active:scale-[0.97] active:opacity-80'
+      className='group relative w-full cursor-pointer rounded-lg bg-transparent transition-[transform,opacity] duration-300 ease-in-out hover:z-10 hover:scale-[1.025] active:scale-[0.97] active:opacity-80'
       onClick={handlePlay}
       onMouseEnter={handlePrefetch}
       onMouseLeave={cancelPrefetch}
@@ -293,15 +208,15 @@ function PosterCard({
           <PlayCircleIcon
             size={50}
             strokeWidth={0.8}
-            className='fill-transparent text-white transition-all duration-300 ease-out hover:scale-[1.1] hover:fill-green-500'
+            className='fill-transparent text-white transition-all duration-300 ease-out hover:scale-[1.1] hover:fill-brand-500'
             style={noSelectStyle}
             onContextMenu={preventContextMenu}
           />
         </div>
 
-        {rate && (
+        {hasDisplayableRate(rate) && (
           <div
-            className='absolute right-2 top-2 flex h-7 w-7 items-center justify-center rounded-full bg-pink-700 text-xs font-bold text-white shadow-md transition-all duration-300 ease-out group-hover:scale-110'
+            className='absolute right-1.5 top-1.5 rounded-md bg-black/60 px-1.5 py-0.5 text-[11px] font-semibold tabular-nums leading-4 text-amber-300 backdrop-blur-sm'
             style={noSelectStyle}
             onContextMenu={preventContextMenu}
           >
@@ -322,7 +237,7 @@ function PosterCard({
             title={externalLinkLabel}
           >
             <div
-              className='flex h-7 w-7 items-center justify-center rounded-full bg-green-500 text-xs font-bold text-white shadow-md transition-all duration-300 ease-out hover:scale-[1.1] hover:bg-green-600'
+              className='flex h-7 w-7 items-center justify-center rounded-full bg-black/60 text-white backdrop-blur-sm transition-colors duration-200 hover:bg-brand-500'
               style={noSelectStyle}
               onContextMenu={preventContextMenu}
             >
@@ -342,13 +257,13 @@ function PosterCard({
       </div>
 
       <div
-        className='mt-2 h-5 text-center'
+        className='mt-2 h-5'
         style={noSelectStyle}
         onContextMenu={preventContextMenu}
       >
         <div className='relative' style={noSelectStyle}>
           <span
-            className='peer block truncate text-sm font-semibold text-gray-900 transition-colors duration-300 ease-in-out group-hover:text-green-600 dark:text-gray-100 dark:group-hover:text-green-400'
+            className='peer block truncate text-[13px] font-medium text-gray-800 transition-colors duration-200 group-hover:text-brand-600 dark:text-gray-200 dark:group-hover:text-brand-300'
             style={noSelectStyle}
             onContextMenu={preventContextMenu}
           >

@@ -12,9 +12,6 @@ jest.mock('@/components/PageLayout', () => ({
   __esModule: true,
   default: ({ children }: { children: ReactNode }) => <div>{children}</div>,
 }));
-jest.mock('@/features/home/components/HomeMineSwitch', () => ({
-  HomeMineSwitch: () => null,
-}));
 jest.mock('@/components/CoverImage', () => ({
   __esModule: true,
   default: ({ alt }: { alt: string }) => <span role='img' aria-label={alt} />,

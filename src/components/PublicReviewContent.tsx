@@ -132,13 +132,13 @@ export default function PublicReviewContent({
           {!hideAuthor && (
             <Link
               href={`/u/${review.author.profileId}`}
-              className='min-w-0 truncate text-[13px] font-medium text-gray-900 hover:text-green-600 dark:text-gray-100'
+              className='min-w-0 truncate text-[13px] font-medium text-gray-900 hover:text-brand-600 dark:text-gray-100'
             >
               {review.author.nickname ?? '未设置昵称'}
             </Link>
           )}
           {isMine && !hideAuthor && (
-            <span className='shrink-0 text-xs text-green-600 dark:text-green-400'>
+            <span className='shrink-0 text-xs text-brand-600 dark:text-brand-400'>
               我
             </span>
           )}
@@ -167,7 +167,7 @@ export default function PublicReviewContent({
                   aria-pressed={like.liked}
                   disabled={busy}
                   onClick={() => void toggleLike()}
-                  className={`inline-flex h-7 items-center gap-1 rounded-full px-2 transition hover:bg-gray-100 disabled:opacity-50 dark:hover:bg-white/10 ${like.liked ? 'text-green-600 dark:text-green-400' : 'hover:text-gray-700 dark:hover:text-gray-200'}`}
+                  className={`inline-flex h-7 items-center gap-1 rounded-full px-2 transition hover:bg-gray-100 disabled:opacity-50 dark:hover:bg-white/10 ${like.liked ? 'text-brand-600 dark:text-brand-400' : 'hover:text-gray-700 dark:hover:text-gray-200'}`}
                 >
                   <ThumbsUp
                     aria-hidden='true'
@@ -213,7 +213,7 @@ export default function PublicReviewContent({
           </p>
         )}
         {message && (
-          <p role='status' className='text-xs text-green-600'>
+          <p role='status' className='text-xs text-brand-600'>
             {message}
           </p>
         )}
@@ -251,7 +251,7 @@ export default function PublicReviewContent({
                   name='report-reason'
                   checked={reason === value}
                   onChange={() => setReason(value)}
-                  className='border-0 p-0 text-green-600 ring-1 ring-gray-300 focus:ring-0'
+                  className='border-0 p-0 text-brand-600 ring-1 ring-gray-300 focus:ring-0'
                 />
                 {REPORT_REASON_LABELS[value]}
               </label>
@@ -277,7 +277,7 @@ export default function PublicReviewContent({
           <button
             type='submit'
             disabled={sending}
-            className='mt-4 rounded-lg bg-green-600 px-4 py-2 text-sm text-white disabled:opacity-50'
+            className='mt-4 rounded-lg bg-brand-600 px-4 py-2 text-sm text-white disabled:opacity-50'
           >
             {sending ? '提交中…' : '提交举报'}
           </button>

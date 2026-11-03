@@ -1,6 +1,6 @@
 ﻿'use client';
 
-import { Cat, ChevronRight, Clover, Film, Tv } from 'lucide-react';
+import { ChevronRight } from 'lucide-react';
 import Link from 'next/link';
 import { useEffect, useMemo, useState } from 'react';
 
@@ -9,6 +9,7 @@ import GuestAnnouncement from '@/components/GuestAnnouncement';
 import HomePosterCardSkeleton, {
   HOME_POSTER_CARD_CLASS,
 } from '@/components/HomePosterCardSkeleton';
+import { PAGE_CONTAINER_CLASS } from '@/components/page-container';
 import PageLayout from '@/components/PageLayout';
 import PosterCard from '@/components/PosterCard';
 import ScrollableRow from '@/components/ScrollableRow';
@@ -26,7 +27,8 @@ import {
   mergeHomeInitialDataWithClientSnapshot,
   writeHomeClientSnapshot,
 } from '../lib/home-client-cache';
-import { HomeMineSwitch } from './HomeMineSwitch';
+import { pickHomeHeroItems } from '../lib/home-hero';
+import { HomeHero } from './HomeHero';
 
 interface HomeClientProps {
   initialData: HomeInitialData;
@@ -62,8 +64,6 @@ function RecommendationEmptyRow({ message }: { message: string }) {
 function RecommendationSection({
   title,
   href,
-  icon: Icon,
-  iconClassName,
   items,
   loading,
   type,
@@ -73,8 +73,6 @@ function RecommendationSection({
 }: {
   title: string;
   href: string;
-  icon: typeof Film;
-  iconClassName: string;
   items: DoubanItem[];
   loading: boolean;
   type?: string;
@@ -84,17 +82,16 @@ function RecommendationSection({
 }) {
   return (
     <section className='mb-2'>
-      <div className='mb-4 flex items-center justify-between'>
-        <h2 className='flex items-center gap-2 text-lg font-bold text-gray-800 dark:text-gray-200 sm:text-xl'>
-          <Icon className={iconClassName} />
+      <div className='mb-1 flex items-baseline justify-between sm:mb-2'>
+        <h2 className='text-lg font-semibold tracking-tight text-gray-900 dark:text-gray-100 sm:text-xl'>
           {title}
         </h2>
         <Link
           href={href}
-          className='flex items-center text-sm text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200'
+          className='flex items-center text-sm text-gray-500 transition-colors hover:text-gray-900 dark:text-gray-400 dark:hover:text-white'
         >
-          查看更多
-          <ChevronRight className='ml-1 h-4 w-4' />
+          更多
+          <ChevronRight className='h-4 w-4' />
         </Link>
       </div>
       <ScrollableRow initialItemCount={8} mountBatchSize={8}>
@@ -305,6 +302,14 @@ export default function HomeClient({
 
   const currentWeekday = useMemo(() => getCurrentWeekday(), []);
 
+  const heroItems = useMemo(
+    () =>
+      initialViewData.heroItems.length > 0
+        ? initialViewData.heroItems
+        : pickHomeHeroItems(hotMovies, hotTvShows),
+    [initialViewData.heroItems, hotMovies, hotTvShows],
+  );
+
   const todayAnimes = useMemo(() => {
     const items =
       bangumiCalendarData.find((item) => item.weekday.en === currentWeekday)
@@ -350,12 +355,14 @@ export default function HomeClient({
         hotTvShows,
         hotVarietyShows,
         bangumiCalendarData,
+        heroItems,
       },
       continueWatchingSkeletonCount,
     );
   }, [
     bangumiCalendarData,
     continueWatchingSkeletonCount,
+    heroItems,
     hotMovies,
     hotTvShows,
     hotVarietyShows,
@@ -365,14 +372,11 @@ export default function HomeClient({
   ]);
 
   return (
-    <PageLayout>
-      <div className='overflow-visible px-2 pb-2 pt-4 sm:px-10 sm:pt-8'>
-        <div className='mb-4 hidden justify-center md:flex'>
-          <HomeMineSwitch active='home' />
-        </div>
-
-        <div className='mx-auto max-w-[95%]'>
-          <div className='-mb-3 sm:-mb-6'>
+    <PageLayout transparentTopNav={heroItems.length > 0}>
+      <HomeHero items={heroItems} />
+      <div className='overflow-visible pb-2 pt-4 md:pt-2'>
+        <div className={PAGE_CONTAINER_CLASS}>
+          <div className='-mb-3 space-y-2 sm:-mb-6 sm:space-y-4'>
             <ContinueWatching
               initialSkeletonCount={continueWatchingSkeletonCount}
               initialRecords={continueWatchingRecords}
@@ -383,8 +387,6 @@ export default function HomeClient({
             <RecommendationSection
               title='热门电影'
               href='/douban?type=movie'
-              icon={Film}
-              iconClassName='h-5 w-5 text-blue-500'
               items={hotMovies}
               loading={loading.hotMovies && hotMovies.length === 0}
               type='movie'
@@ -399,8 +401,6 @@ export default function HomeClient({
             <RecommendationSection
               title='热门剧集'
               href='/douban?type=tv'
-              icon={Tv}
-              iconClassName='h-5 w-5 text-emerald-500'
               items={hotTvShows}
               loading={loading.hotTvShows && hotTvShows.length === 0}
               emptyMessage={
@@ -413,8 +413,6 @@ export default function HomeClient({
             <RecommendationSection
               title='新番放送'
               href='/douban?type=anime'
-              icon={Cat}
-              iconClassName='h-5 w-5 text-pink-500'
               items={todayAnimes}
               loading={
                 loading.bangumiCalendar &&
@@ -432,8 +430,6 @@ export default function HomeClient({
             <RecommendationSection
               title='热门综艺'
               href='/douban?type=show'
-              icon={Clover}
-              iconClassName='h-5 w-5 text-violet-500'
               items={hotVarietyShows}
               loading={loading.hotVarietyShows && hotVarietyShows.length === 0}
               emptyMessage={

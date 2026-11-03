@@ -29,16 +29,6 @@ export function getDoubanPageTitle(type: DoubanType): string {
           : '自定义';
 }
 
-export function getDoubanPageDescription(
-  type: DoubanType,
-  primarySelection: string,
-): string {
-  if (type === 'anime' && primarySelection === '每日放送') {
-    return '来自 Bangumi 番组计划的精选内容';
-  }
-  return '来自豆瓣的精选内容';
-}
-
 export function getDoubanActivePath(type: DoubanType): string {
   const params = new URLSearchParams();
   if (type) params.set('type', type);

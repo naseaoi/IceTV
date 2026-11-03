@@ -228,7 +228,7 @@ const LiveSourceConfig = ({
             className={`flex items-center space-x-2 px-3 py-1.5 text-sm font-medium ${
               isRefreshing || isLoading('refreshLiveSources')
                 ? 'cursor-not-allowed rounded-lg bg-gray-400 text-white dark:bg-gray-600'
-                : 'rounded-lg bg-blue-600 text-white transition-colors hover:bg-blue-700 dark:bg-blue-600 dark:hover:bg-blue-700'
+                : 'rounded-lg bg-brand-600 text-white transition-colors hover:bg-brand-700 dark:bg-brand-600 dark:hover:bg-brand-700'
             }`}
           >
             <span>

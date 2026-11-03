@@ -19,9 +19,9 @@ export function AdminStatusSwitch({
       aria-label={ariaLabel}
       onClick={onToggle}
       disabled={isLoading}
-      className={`relative inline-flex h-6 w-11 shrink-0 rounded-full transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-green-500 focus-visible:ring-offset-2 dark:focus-visible:ring-offset-gray-900 ${
+      className={`relative inline-flex h-6 w-11 shrink-0 rounded-full transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-500 focus-visible:ring-offset-2 dark:focus-visible:ring-offset-gray-900 ${
         enabled
-          ? 'bg-green-500 dark:bg-green-600'
+          ? 'bg-brand-500 dark:bg-brand-600'
           : 'bg-gray-300 dark:bg-gray-600'
       } ${isLoading ? 'cursor-not-allowed opacity-50' : 'cursor-pointer'}`}
       title={enabled ? '点击禁用' : '点击启用'}

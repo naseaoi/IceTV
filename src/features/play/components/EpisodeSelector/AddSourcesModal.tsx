@@ -142,7 +142,7 @@ export const AddSourcesModal: React.FC<AddSourcesModalProps> = ({
 
         {currentEpisodeCount && currentEpisodeCount > 0 && (
           <div className='flex-shrink-0 border-b border-gray-200 px-6 py-3 dark:border-gray-700'>
-            <div className='rounded-lg border border-blue-500/40 bg-blue-500/5 px-3 py-2 text-xs text-blue-600 dark:text-blue-400'>
+            <div className='rounded-lg border border-brand-500/40 bg-brand-500/5 px-3 py-2 text-xs text-brand-600 dark:text-brand-400'>
               当前片源共 {currentEpisodeCount} 集，集数差异过大的源站已高亮标记
             </div>
           </div>
@@ -171,7 +171,7 @@ export const AddSourcesModal: React.FC<AddSourcesModalProps> = ({
                     item.isExisting
                       ? 'cursor-not-allowed border-gray-200 bg-gray-50 opacity-60 dark:border-gray-700 dark:bg-gray-800'
                       : selectedKeys.has(item.key)
-                        ? 'border-green-500/60 bg-green-500/10'
+                        ? 'border-brand-500/60 bg-brand-500/10'
                         : item.hasMismatch
                           ? 'border-amber-500/40 bg-amber-500/5 hover:bg-amber-500/10'
                           : 'border-gray-200 bg-white hover:bg-gray-50 dark:border-gray-700 dark:bg-gray-800 dark:hover:bg-gray-700'
@@ -182,7 +182,7 @@ export const AddSourcesModal: React.FC<AddSourcesModalProps> = ({
                       item.isExisting
                         ? 'border-gray-300 dark:border-gray-600'
                         : selectedKeys.has(item.key)
-                          ? 'border-green-600 bg-green-600'
+                          ? 'border-brand-600 bg-brand-600'
                           : 'border-gray-300 dark:border-gray-600'
                     }`}
                   >
@@ -248,7 +248,7 @@ export const AddSourcesModal: React.FC<AddSourcesModalProps> = ({
             type='button'
             onClick={handleConfirm}
             disabled={selectedKeys.size === 0}
-            className='flex-1 rounded-lg bg-green-600 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-green-700 disabled:cursor-not-allowed disabled:opacity-50'
+            className='flex-1 rounded-lg bg-brand-600 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-brand-700 disabled:cursor-not-allowed disabled:opacity-50'
           >
             {selectedKeys.size > 0
               ? `添加 ${selectedKeys.size} 个源站`

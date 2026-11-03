@@ -51,7 +51,7 @@ const MobileBottomNav = () => {
 
   return (
     <nav
-      className='fixed left-0 right-0 z-[600] overflow-hidden border-t border-gray-200/50 bg-white/90 backdrop-blur-xl dark:border-gray-700/50 dark:bg-gray-900/80 md:hidden'
+      className='fixed left-0 right-0 z-[600] overflow-hidden border-t border-gray-200/70 bg-gray-50/85 backdrop-blur-xl dark:border-white/[0.06] dark:bg-gray-950/80 md:hidden'
       style={{
         bottom: 0,
         paddingBottom: 'env(safe-area-inset-bottom)',
@@ -75,13 +75,13 @@ const MobileBottomNav = () => {
               >
                 <span
                   className={`flex items-center justify-center rounded-full px-4 py-1.5 ${
-                    active ? 'bg-green-500/10 dark:bg-green-400/10' : ''
+                    active ? 'bg-brand-500/10 dark:bg-brand-400/10' : ''
                   }`}
                 >
                   <item.icon
                     className={`h-6 w-6 ${
                       active
-                        ? 'text-green-600 dark:text-green-400'
+                        ? 'text-brand-600 dark:text-brand-400'
                         : 'text-gray-500 dark:text-gray-400'
                     }`}
                   />

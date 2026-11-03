@@ -3,20 +3,8 @@
 import { Bell } from 'lucide-react';
 
 import { useAuthSession } from '@/components/AuthProvider';
-import {
-  getSidebarItemLabelClass,
-  SIDEBAR_BUTTON_STATE_CLASS,
-  SIDEBAR_ITEM_ICON_CLASS,
-  SIDEBAR_ITEM_ICON_WRAP_CLASS,
-  SIDEBAR_ITEM_LAYOUT_CLASS,
-} from '@/components/SidebarItem';
 
 import { useMessageCenter } from './MessageCenterProvider';
-
-interface MessageBellProps {
-  variant?: 'icon' | 'sidebar';
-  isCollapsed?: boolean;
-}
 
 function UnreadBadge({ count }: { count: number }) {
   if (count <= 0) return null;
@@ -27,10 +15,7 @@ function UnreadBadge({ count }: { count: number }) {
   );
 }
 
-export default function MessageBell({
-  variant = 'icon',
-  isCollapsed = false,
-}: MessageBellProps) {
+export default function MessageBell() {
   const { session } = useAuthSession();
   const { unreadCount, openPanel } = useMessageCenter();
 
@@ -39,29 +24,6 @@ export default function MessageBell({
   const handleClick = () => {
     openPanel();
   };
-
-  if (variant === 'sidebar') {
-    return (
-      <button
-        type='button'
-        onClick={handleClick}
-        aria-label={`我的消息${unreadCount ? `，${unreadCount} 条未读` : ''}`}
-        className={`${SIDEBAR_ITEM_LAYOUT_CLASS} w-full ${SIDEBAR_BUTTON_STATE_CLASS}`}
-        title={isCollapsed ? '我的消息' : undefined}
-      >
-        <div className={`${SIDEBAR_ITEM_ICON_WRAP_CLASS} relative`}>
-          <Bell className={SIDEBAR_ITEM_ICON_CLASS} />
-          <UnreadBadge count={unreadCount} />
-        </div>
-        <span
-          data-sidebar-label
-          className={getSidebarItemLabelClass(isCollapsed)}
-        >
-          消息
-        </span>
-      </button>
-    );
-  }
 
   return (
     <button

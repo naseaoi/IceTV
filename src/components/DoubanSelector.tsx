@@ -149,11 +149,11 @@ const DoubanSelector: React.FC<DoubanSelectorProps> = ({
   };
 
   return (
-    <div className='space-y-4 sm:space-y-6'>
+    <div>
       {/* 电影类型 */}
       {type === 'movie' && (
-        <div className='space-y-3 sm:space-y-4'>
-          <div className='overflow-x-auto'>
+        <div className='flex flex-col items-start gap-3 md:flex-row md:flex-wrap md:items-center md:gap-2'>
+          <div className='max-w-full overflow-x-auto'>
             <CapsuleSelector
               options={moviePrimaryOptions}
               activeValue={primarySelection || moviePrimaryOptions[0].value}
@@ -164,7 +164,7 @@ const DoubanSelector: React.FC<DoubanSelectorProps> = ({
             />
           </div>
           {primarySelection !== '全部' ? (
-            <div className='overflow-x-auto'>
+            <div className='max-w-full overflow-x-auto'>
               <CapsuleSelector
                 options={movieSecondaryOptions}
                 activeValue={
@@ -177,7 +177,7 @@ const DoubanSelector: React.FC<DoubanSelectorProps> = ({
               />
             </div>
           ) : (
-            <div className='overflow-x-auto'>
+            <div className='max-w-full overflow-x-auto'>
               <MultiLevelSelector
                 key={`${type}-${primarySelection}`}
                 onChange={handleMultiLevelChange}
@@ -190,8 +190,8 @@ const DoubanSelector: React.FC<DoubanSelectorProps> = ({
 
       {/* 电视剧类型 */}
       {type === 'tv' && (
-        <div className='space-y-3 sm:space-y-4'>
-          <div className='overflow-x-auto'>
+        <div className='flex flex-col items-start gap-3 md:flex-row md:flex-wrap md:items-center md:gap-2'>
+          <div className='max-w-full overflow-x-auto'>
             <CapsuleSelector
               options={tvPrimaryOptions}
               activeValue={primarySelection || tvPrimaryOptions[1].value}
@@ -202,7 +202,7 @@ const DoubanSelector: React.FC<DoubanSelectorProps> = ({
             />
           </div>
           {(primarySelection || tvPrimaryOptions[1].value) === '最近热门' ? (
-            <div className='overflow-x-auto'>
+            <div className='max-w-full overflow-x-auto'>
               <CapsuleSelector
                 options={tvSecondaryOptions}
                 activeValue={secondarySelection || tvSecondaryOptions[0].value}
@@ -213,7 +213,7 @@ const DoubanSelector: React.FC<DoubanSelectorProps> = ({
               />
             </div>
           ) : (primarySelection || tvPrimaryOptions[1].value) === '全部' ? (
-            <div className='overflow-x-auto'>
+            <div className='max-w-full overflow-x-auto'>
               <MultiLevelSelector
                 key={`${type}-${primarySelection}`}
                 onChange={handleMultiLevelChange}
@@ -226,8 +226,8 @@ const DoubanSelector: React.FC<DoubanSelectorProps> = ({
 
       {/* 动漫类型 */}
       {type === 'anime' && (
-        <div className='space-y-3 sm:space-y-4'>
-          <div className='overflow-x-auto'>
+        <div className='flex flex-col items-start gap-3 md:flex-row md:flex-wrap md:items-center md:gap-2'>
+          <div className='max-w-full overflow-x-auto'>
             <CapsuleSelector
               options={animePrimaryOptions}
               activeValue={primarySelection || animePrimaryOptions[0].value}
@@ -238,11 +238,11 @@ const DoubanSelector: React.FC<DoubanSelectorProps> = ({
             />
           </div>
           {(primarySelection || animePrimaryOptions[0].value) === '每日放送' ? (
-            <div className='overflow-x-auto'>
+            <div className='max-w-full overflow-x-auto'>
               <WeekdaySelector onWeekdayChange={onWeekdayChange} />
             </div>
           ) : (
-            <div className='overflow-x-auto'>
+            <div className='max-w-full overflow-x-auto'>
               {(primarySelection || animePrimaryOptions[0].value) === '番剧' ? (
                 <MultiLevelSelector
                   key={`anime-tv-${primarySelection}`}
@@ -263,8 +263,8 @@ const DoubanSelector: React.FC<DoubanSelectorProps> = ({
 
       {/* 综艺类型 */}
       {type === 'show' && (
-        <div className='space-y-3 sm:space-y-4'>
-          <div className='overflow-x-auto'>
+        <div className='flex flex-col items-start gap-3 md:flex-row md:flex-wrap md:items-center md:gap-2'>
+          <div className='max-w-full overflow-x-auto'>
             <CapsuleSelector
               options={showPrimaryOptions}
               activeValue={primarySelection || showPrimaryOptions[1].value}
@@ -275,7 +275,7 @@ const DoubanSelector: React.FC<DoubanSelectorProps> = ({
             />
           </div>
           {(primarySelection || showPrimaryOptions[1].value) === '最近热门' ? (
-            <div className='overflow-x-auto'>
+            <div className='max-w-full overflow-x-auto'>
               <CapsuleSelector
                 options={showSecondaryOptions}
                 activeValue={
@@ -288,7 +288,7 @@ const DoubanSelector: React.FC<DoubanSelectorProps> = ({
               />
             </div>
           ) : (primarySelection || showPrimaryOptions[1].value) === '全部' ? (
-            <div className='overflow-x-auto'>
+            <div className='max-w-full overflow-x-auto'>
               <MultiLevelSelector
                 key={`${type}-${primarySelection}`}
                 onChange={handleMultiLevelChange}

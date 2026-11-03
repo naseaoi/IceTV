@@ -29,7 +29,7 @@ export default function ModalShell({
   children,
   panelClassName,
   closeOnBackdrop = true,
-  backdropClassName = '',
+  backdropClassName = 'bg-black/50',
   initialFocusRef,
 }: ModalShellProps) {
   const [mounted, setMounted] = useState(false);
@@ -123,7 +123,7 @@ export default function ModalShell({
       role='presentation'
     >
       <div
-        className={`w-full transform rounded-2xl border border-gray-200/70 bg-white/80 shadow-2xl ring-1 ring-black/10 backdrop-blur-xl transition-[opacity,transform] duration-200 dark:border-white/10 dark:bg-gray-900/70 dark:ring-white/10 ${
+        className={`w-full transform rounded-2xl bg-white shadow-2xl shadow-black/10 ring-1 ring-gray-900/[0.08] transition-[opacity,transform] duration-200 dark:bg-gray-900 dark:shadow-black/50 dark:ring-white/[0.08] ${
           visible
             ? 'translate-y-0 scale-100 opacity-100'
             : 'translate-y-2 scale-95 opacity-0'

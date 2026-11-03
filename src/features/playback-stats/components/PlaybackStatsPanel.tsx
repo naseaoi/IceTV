@@ -73,9 +73,9 @@ function StatTile({
   value: string;
 }) {
   return (
-    <div className='h-full rounded-lg border border-gray-200 bg-white/70 p-4 dark:border-gray-700 dark:bg-gray-900/50'>
+    <div className='h-full rounded-xl bg-white p-4 ring-1 ring-gray-200/80 dark:bg-white/[0.04] dark:ring-white/10'>
       <div className='mb-3 flex items-center gap-2 text-sm text-gray-500 dark:text-gray-400'>
-        <Icon className='h-4 w-4 text-green-500' />
+        <Icon className='h-4 w-4 text-gray-400 dark:text-gray-500' />
         {label}
       </div>
       <div className='truncate text-2xl font-semibold text-gray-900 dark:text-gray-100'>
@@ -151,23 +151,23 @@ function TopContentTile({
   const isLoading = loadingRange === activeRange;
 
   return (
-    <div className='flex h-36 min-w-0 flex-col overflow-hidden rounded-lg border border-gray-200 bg-white/70 p-4 dark:border-gray-700 dark:bg-gray-900/50'>
+    <div className='flex h-36 min-w-0 flex-col overflow-hidden rounded-xl bg-white p-4 ring-1 ring-gray-200/80 dark:bg-white/[0.04] dark:ring-white/10'>
       <div className='mb-3 flex min-w-0 items-center justify-between gap-2 text-sm text-gray-500 dark:text-gray-400'>
         <div className='flex min-w-0 items-center gap-2'>
-          <TrendingUp className='h-4 w-4 shrink-0 text-pink-500' />
+          <TrendingUp className='h-4 w-4 shrink-0 text-gray-400 dark:text-gray-500' />
           <span className='truncate'>常看内容</span>
         </div>
-        <div className='flex h-6 shrink-0 rounded border border-gray-200 bg-gray-50 p-0.5 dark:border-gray-700 dark:bg-gray-800'>
+        <div className='flex h-6 shrink-0 rounded-full bg-gray-900/[0.05] p-0.5 dark:bg-white/[0.06]'>
           {TOP_RANGE_OPTIONS.map((option) => {
             const selected = activeRange === option.value;
             return (
               <button
                 key={option.value}
                 type='button'
-                className={`min-w-7 rounded px-2 text-xs transition-colors focus:outline-none focus:ring-2 focus:ring-green-500/30 ${
+                className={`min-w-7 rounded-full px-2 text-xs transition-colors focus:outline-none focus:ring-2 focus:ring-brand-500/30 ${
                   selected
-                    ? 'bg-green-600 text-white'
-                    : 'text-gray-500 hover:bg-white hover:text-gray-800 dark:text-gray-400 dark:hover:bg-gray-700 dark:hover:text-gray-100'
+                    ? 'bg-white text-gray-900 shadow-sm dark:bg-white/[0.14] dark:text-white'
+                    : 'text-gray-500 hover:text-gray-800 dark:text-gray-400 dark:hover:text-gray-100'
                 }`}
                 aria-pressed={selected}
                 onClick={() => setActiveRange(option.value)}
@@ -198,7 +198,7 @@ function TopContentTile({
           ))}
         </div>
       ) : (
-        <div className='flex min-h-0 flex-1 items-center justify-center rounded-lg border border-dashed border-gray-200 bg-gray-50 text-sm text-gray-500 dark:border-gray-700 dark:bg-gray-900/40 dark:text-gray-400'>
+        <div className='flex min-h-0 flex-1 items-center justify-center text-sm text-gray-400 dark:text-gray-500'>
           {isLoading ? '加载中...' : '暂无常看内容'}
         </div>
       )}
@@ -272,12 +272,7 @@ export function PlaybackStatsPanel() {
   }
 
   return (
-    <section className='mb-2'>
-      <h2 className='mb-4 flex items-center gap-2 text-xl font-bold text-gray-800 dark:text-gray-200'>
-        <BarChart3 className='h-5 w-5 text-green-500' />
-        观看统计
-      </h2>
-
+    <div>
       <div className='grid min-w-0 gap-3 sm:grid-cols-2'>
         <StatTile
           icon={Clock3}
@@ -292,14 +287,14 @@ export function PlaybackStatsPanel() {
       </div>
 
       <div className='mt-3 grid min-w-0 items-stretch gap-3 md:grid-cols-2'>
-        <div className='h-36 rounded-lg border border-gray-200 bg-white/70 p-4 dark:border-gray-700 dark:bg-gray-900/50'>
+        <div className='h-36 rounded-xl bg-white p-4 ring-1 ring-gray-200/80 dark:bg-white/[0.04] dark:ring-white/10'>
           <div className='mb-3 flex items-center justify-between gap-3 text-sm'>
             <div className='flex items-center gap-2 font-medium text-gray-700 dark:text-gray-200'>
-              <BarChart3 className='h-4 w-4 text-blue-500' />
+              <BarChart3 className='h-4 w-4 text-gray-400 dark:text-gray-500' />
               最近一周
             </div>
             {activeDailyItem && (
-              <div className='shrink-0 text-xs text-green-600 dark:text-green-400'>
+              <div className='shrink-0 text-xs tabular-nums text-gray-500 dark:text-gray-400'>
                 {formatShortDate(activeDailyItem.date)} ·{' '}
                 {formatDuration(activeDailyItem.watchSeconds)}
               </div>
@@ -320,10 +315,10 @@ export function PlaybackStatsPanel() {
                   <div className='flex h-14 items-end'>
                     <button
                       type='button'
-                      className={`w-full rounded-t transition-colors focus:outline-none focus:ring-2 focus:ring-green-500/40 ${
+                      className={`w-full rounded-t transition-colors focus:outline-none focus:ring-2 focus:ring-brand-500/40 ${
                         isActive
-                          ? 'bg-green-600'
-                          : 'bg-green-500/80 hover:bg-green-500'
+                          ? 'bg-brand-500 dark:bg-brand-400'
+                          : 'bg-gray-200 hover:bg-gray-300 dark:bg-white/[0.12] dark:hover:bg-white/20'
                       }`}
                       style={{ height }}
                       title={formatDuration(item.watchSeconds)}
@@ -345,6 +340,6 @@ export function PlaybackStatsPanel() {
         </div>
         <TopContentTile items={displaySummary.topItems} />
       </div>
-    </section>
+    </div>
   );
 }
