@@ -20,9 +20,9 @@ describe('FavoritePreviewSkeleton', () => {
 
   it('没有收藏计数时保持空态布局高度', () => {
     const { container } = render(<FavoritePreviewSkeleton count={0} />);
-    const emptyPlaceholder = container.querySelector('.min-h-\\[176px\\]');
+    const emptyPlaceholder = container.firstElementChild;
 
     expect(container.querySelectorAll('.aspect-\\[2\\/3\\]')).toHaveLength(0);
-    expect(emptyPlaceholder).toHaveClass('sm:min-h-[306px]');
+    expect(emptyPlaceholder).toHaveClass('h-[68px]');
   });
 });

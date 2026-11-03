@@ -1,6 +1,6 @@
 'use client';
 
-import { LoaderCircle, SearchX } from 'lucide-react';
+import { SearchX } from 'lucide-react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { useEffect, useMemo, useState } from 'react';
 
@@ -11,6 +11,7 @@ import PageLayout from '@/components/PageLayout';
 import { POSTER_GRID_CLASS } from '@/components/poster-grid-layout';
 import SearchBox from '@/components/SearchBox';
 import SearchResultFilter from '@/components/SearchResultFilter';
+import Spinner from '@/components/Spinner';
 import VideoCard from '@/components/VideoCard';
 import { warmupDanmakuSearchForNavigation } from '@/features/play/lib/danmaku/navigation-warmup';
 import MobileSearchFilterControls from '@/features/search/components/MobileSearchFilterControls';
@@ -60,10 +61,7 @@ function SearchStatus({
     <span className='flex shrink-0 items-center gap-2 text-[13px] tabular-nums text-gray-500 dark:text-gray-400'>
       {searching && totalSources > 0 && (
         <span className='flex items-center gap-1.5'>
-          <LoaderCircle
-            aria-hidden='true'
-            className='h-3.5 w-3.5 animate-spin text-brand-500'
-          />
+          <Spinner className='h-3.5 w-3.5 text-brand-500' />
           {completedSources}/{totalSources}
         </span>
       )}
@@ -76,7 +74,7 @@ function SearchResultsLoading() {
   return (
     <div className={POSTER_GRID_CLASS} role='status' aria-label='正在搜索'>
       {Array.from({ length: LOADING_CARD_COUNT }, (_, index) => (
-        <DoubanCardSkeleton key={index} />
+        <DoubanCardSkeleton key={index} video />
       ))}
     </div>
   );

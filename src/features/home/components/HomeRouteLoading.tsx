@@ -32,7 +32,7 @@ function SkeletonRow({
         mobileContinue ? (
           <ContinueWatchingCardSkeleton key={index} />
         ) : (
-          <HomePosterCardSkeleton key={index} />
+          <HomePosterCardSkeleton key={index} variant='poster' />
         ),
       )}
     </ScrollableRow>
@@ -41,9 +41,9 @@ function SkeletonRow({
 
 function SkeletonSectionHeader() {
   return (
-    <div className='mb-4 flex items-center justify-between'>
-      <div className='h-7 w-28 animate-pulse rounded bg-gray-200 dark:bg-gray-800' />
-      <div className='h-5 w-16 animate-pulse rounded bg-gray-200 dark:bg-gray-800' />
+    <div className='mb-1 flex items-baseline justify-between sm:mb-2'>
+      <div className='skeleton h-7 w-28 rounded' />
+      <div className='skeleton h-5 w-16 rounded' />
     </div>
   );
 }
@@ -58,32 +58,34 @@ function HomeLoadingSkeleton({
       <HomeHeroSkeleton />
       <div className='overflow-visible pb-2 pt-4 md:pt-2'>
         <div className={PAGE_CONTAINER_CLASS}>
-          {continueWatchingCount > 0 && (
+          <div className='-mb-3 space-y-2 sm:-mb-6 sm:space-y-4'>
+            {continueWatchingCount > 0 && (
+              <section className='mb-2'>
+                <SkeletonSectionHeader />
+                <SkeletonRow count={continueWatchingCount} mobileContinue />
+              </section>
+            )}
+
             <section className='mb-2'>
               <SkeletonSectionHeader />
-              <SkeletonRow count={continueWatchingCount} mobileContinue />
+              <SkeletonRow count={8} />
             </section>
-          )}
 
-          <section className='mb-2'>
-            <SkeletonSectionHeader />
-            <SkeletonRow count={12} />
-          </section>
+            <section className='mb-2'>
+              <SkeletonSectionHeader />
+              <SkeletonRow count={8} />
+            </section>
 
-          <section className='mb-2'>
-            <SkeletonSectionHeader />
-            <SkeletonRow count={12} />
-          </section>
+            <section className='mb-2'>
+              <SkeletonSectionHeader />
+              <SkeletonRow count={8} />
+            </section>
 
-          <section className='mb-2'>
-            <SkeletonSectionHeader />
-            <SkeletonRow count={12} />
-          </section>
-
-          <section className='mb-2'>
-            <SkeletonSectionHeader />
-            <SkeletonRow count={12} />
-          </section>
+            <section className='mb-2'>
+              <SkeletonSectionHeader />
+              <SkeletonRow count={8} />
+            </section>
+          </div>
         </div>
       </div>
     </PageLayout>

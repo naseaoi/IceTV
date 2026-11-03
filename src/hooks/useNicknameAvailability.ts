@@ -62,6 +62,9 @@ export function useNicknameAvailability(nickname: string, enabled = true) {
       controller.abort();
     };
   }, [nickname, enabled]);
+  if (!enabled || !nickname) {
+    return { value: nickname, status: 'idle' as const, message: '' };
+  }
   return state.value === nickname
     ? state
     : {

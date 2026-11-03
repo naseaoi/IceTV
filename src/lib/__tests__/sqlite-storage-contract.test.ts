@@ -1,5 +1,6 @@
 /** @jest-environment node */
 
+import { assertPlaybackPeriodRange } from '@/lib/__tests__/__fixtures__/playback-period-contract';
 import { DEFAULT_RUNTIME_PARAMS } from '@/lib/runtime-params';
 import type { AdminConfig } from '@/types/admin';
 
@@ -728,81 +729,9 @@ describe('sqlite storage contract', () => {
     ]);
   });
 
-  it('aggregates playback ranges and top items in set-based queries', async () => {
+  it('reads positive playback sessions in a half-open user-scoped range', async () => {
     const storage = new LocalSqliteStorage(':memory:');
-
-    await storage.setPlaybackSession('demo-user', {
-      ...playbackSession,
-      id: 'show-a-old',
-      title: 'Show A',
-      started_at: 100,
-      ended_at: 160,
-      watch_seconds: 60,
-    });
-    await storage.setPlaybackSession('demo-user', {
-      ...playbackSession,
-      id: 'show-a-latest',
-      title: ' Show A ',
-      started_at: 300,
-      ended_at: 360,
-      watch_seconds: 120,
-    });
-    await storage.setPlaybackSession('demo-user', {
-      ...playbackSession,
-      id: 'show-b',
-      video_id: '2',
-      title: 'Show B',
-      started_at: 200,
-      ended_at: 260,
-      watch_seconds: 200,
-    });
-    await storage.setPlaybackSession('other-user', {
-      ...playbackSession,
-      id: 'other-user-show',
-      started_at: 250,
-      ended_at: 350,
-      watch_seconds: 999,
-    });
-
-    await expect(
-      storage.getPlaybackRangeWatchTotals('demo-user', [
-        { key: 'early', start: 0, end: 200 },
-        { key: 'recent', start: 200, end: 400 },
-      ]),
-    ).resolves.toEqual([
-      { key: 'early', watchSeconds: 60 },
-      { key: 'recent', watchSeconds: 320 },
-    ]);
-
-    await storage.setPlaybackSession('demo-user', {
-      ...playbackSession,
-      id: 'show-a-other-source',
-      source: 'source-b',
-      video_id: '3',
-      title: 'Show A',
-      started_at: 250,
-      ended_at: 280,
-      watch_seconds: 30,
-    });
-
-    await expect(
-      storage.getPlaybackTopItems('demo-user', 6, 100),
-    ).resolves.toEqual([
-      expect.objectContaining({
-        videoId: '1',
-        title: ' Show A ',
-        watchSeconds: 210,
-        sessionCount: 3,
-        lastWatchedAt: 360,
-      }),
-      expect.objectContaining({
-        videoId: '2',
-        title: 'Show B',
-        watchSeconds: 200,
-        sessionCount: 1,
-        lastWatchedAt: 260,
-      }),
-    ]);
+    await assertPlaybackPeriodRange(storage);
   });
 
   it('returns null when admin config is absent', async () => {
@@ -891,6 +820,34 @@ describe('sqlite storage contract', () => {
 });
 
 describe('sqlite social username migration', () => {
+  it('adds avatar_seed to legacy profiles idempotently without changing identity', async () => {
+    const storage = new LocalSqliteStorage(':memory:');
+    const internal = storage as unknown as {
+      db: import('better-sqlite3').Database;
+      migrateUserProfileAvatarSeed(): void;
+    };
+    try {
+      internal.db.exec(`DROP TABLE user_profiles;
+        CREATE TABLE user_profiles (username TEXT PRIMARY KEY, profile_id VARCHAR(12) UNIQUE, nickname VARCHAR(64), nickname_norm VARCHAR(64) UNIQUE, favorites_public INTEGER DEFAULT 0, updated_at INTEGER);
+        INSERT INTO user_profiles VALUES ('alice', 'Alice0123456', 'Alice', 'alice', 1, 123);`);
+      internal.migrateUserProfileAvatarSeed();
+      expect(await storage.getUserProfile('alice')).toEqual({
+        username: 'alice',
+        profile_id: 'Alice0123456',
+        nickname: 'Alice',
+        avatar_seed: null,
+        favorites_public: true,
+        updated_at: 123,
+      });
+      await storage.updateUserProfile('alice', { avatarSeed: 'Avatar012345' });
+      internal.migrateUserProfileAvatarSeed();
+      expect((await storage.getUserProfile('alice'))?.avatar_seed).toBe(
+        'Avatar012345',
+      );
+    } finally {
+      internal.db.close();
+    }
+  });
   it('merges every username column while retaining canonical profile identity', async () => {
     const storage = new LocalSqliteStorage(':memory:');
     const internal = storage as unknown as {
@@ -900,16 +857,28 @@ describe('sqlite social username migration', () => {
     };
     await storage.ensureUserProfile('alice');
     await storage.ensureUserProfile('bob');
+    await storage.updateUserProfile('alice', { avatarSeed: 'Canon0123456' });
     const canonical = await storage.getUserProfile('alice');
     internal.db
       .prepare(
-        'INSERT INTO user_profiles (username, profile_id, nickname, nickname_norm, favorites_public, updated_at) VALUES (?, ?, ?, ?, 0, 1)',
+        'INSERT INTO user_profiles (username, profile_id, nickname, nickname_norm, avatar_seed, favorites_public, updated_at) VALUES (?, ?, ?, ?, ?, 0, 1)',
       )
-      .run('Alice', 'Legacy012345', 'Legacy', 'legacy');
+      .run('Alice', 'Legacy012345', 'Legacy', 'legacy', 'LegacyAvatar');
+    internal.db
+      .prepare(
+        'INSERT INTO user_profiles (username, profile_id, avatar_seed, updated_at) VALUES (?, ?, ?, ?)',
+      )
+      .run('Carol', 'Carol0123456', 'CarolAvatar1', 1);
     internal.db.exec(
       "INSERT INTO user_follows VALUES ('Alice', 'Bob', 1); INSERT INTO video_review_likes VALUES ('Bob', 'work', '2026', 'Alice', 1); INSERT INTO video_review_reports VALUES ('Alice', 'work', '2026', 'Bob', 'spam', '', 1);",
     );
     internal.migrateLegacyUsernameCasing();
+    expect((await storage.getUserProfile('alice'))?.avatar_seed).toBe(
+      'Canon0123456',
+    );
+    expect((await storage.getUserProfile('carol'))?.avatar_seed).toBe(
+      'CarolAvatar1',
+    );
     expect((await storage.getUserProfile('alice'))?.profile_id).toBe(
       canonical?.profile_id,
     );

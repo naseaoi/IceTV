@@ -18,7 +18,7 @@ export function PlaybackHistoryPreview() {
     return (
       <ScrollableRow>
         {Array.from({ length: skeletonCount }).map((_, index) => (
-          <HomePosterCardSkeleton key={index} />
+          <HomePosterCardSkeleton key={index} subtitle />
         ))}
       </ScrollableRow>
     );

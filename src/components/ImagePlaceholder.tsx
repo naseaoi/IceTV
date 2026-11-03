@@ -10,12 +10,10 @@ const ImageLoadingBackdrop = forwardRef<
   return (
     <div
       ref={ref}
-      className={`overflow-hidden bg-gray-200/70 dark:bg-gray-700/60 ${className}`}
+      className={`skeleton-surface overflow-hidden ${className}`}
       {...props}
     >
-      {active && (
-        <div className='dark:via-white/12 absolute inset-0 animate-shimmer bg-gradient-to-r from-white/0 via-white/20 to-white/0' />
-      )}
+      {active && <div className='skeleton-sweep' />}
     </div>
   );
 });

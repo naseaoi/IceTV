@@ -3,6 +3,7 @@ import { Download, Upload } from 'lucide-react';
 import { type FormEvent, useEffect, useRef, useState } from 'react';
 
 import AlertModal from '@/components/modals/AlertModal';
+import Spinner from '@/components/Spinner';
 import { useLoadingState } from '@/features/admin/hooks/useLoadingState';
 import { CONFIG_FILE_FORM_ID } from '@/features/admin/lib/admin-form-ids';
 import { adminPost } from '@/features/admin/lib/api';
@@ -265,7 +266,7 @@ const ConfigFileComponent = ({
               >
                 {isLoading('fetchConfig') ? (
                   <div className='flex items-center justify-center gap-2'>
-                    <div className='h-4 w-4 animate-spin rounded-full border-2 border-white border-t-transparent'></div>
+                    <Spinner className='h-4 w-4 text-white' />
                     拉取中…
                   </div>
                 ) : (

@@ -1,11 +1,12 @@
 'use client';
 
-import { LoaderCircle, X } from 'lucide-react';
+import { X } from 'lucide-react';
 import Link from 'next/link';
 import { useCallback } from 'react';
 
 import ModalShell from '@/components/modals/ModalShell';
 import ProfileAvatar from '@/components/ProfileAvatar';
+import Spinner from '@/components/Spinner';
 import { useProfilePage } from '@/features/profile/hooks/useProfilePage';
 import { getUserFollows } from '@/lib/profile.client';
 
@@ -30,10 +31,7 @@ export function PageFooter({
         </p>
       )}
       {loading ? (
-        <LoaderCircle
-          aria-label='加载中'
-          className='mx-auto h-5 w-5 animate-spin text-gray-400'
-        />
+        <Spinner label='加载中' className='mx-auto h-5 w-5 text-gray-400' />
       ) : (
         (cursor || error) && (
           <button
@@ -85,7 +83,7 @@ export function FollowList({
               onClick={onClose}
               className='flex items-center gap-3 rounded-xl p-3 hover:bg-gray-100 dark:hover:bg-white/5'
             >
-              <ProfileAvatar {...item} />
+              <ProfileAvatar user={item} />
               <span>{item.nickname ?? '未设置昵称'}</span>
             </Link>
           ))}

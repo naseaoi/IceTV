@@ -126,6 +126,7 @@ export type VideoReviewRow = {
   review_json: string;
   profile_id?: string;
   nickname?: string | null;
+  avatar_seed?: string | null;
   like_count?: number;
   liked_by_me?: boolean;
 };
@@ -133,7 +134,11 @@ export type VideoReviewRow = {
 export function publicReview(row: VideoReviewRow): PublicVideoReview {
   const review = JSON.parse(row.review_json) as VideoReview;
   return {
-    author: { profileId: row.profile_id ?? '', nickname: row.nickname ?? null },
+    author: {
+      profileId: row.profile_id ?? '',
+      nickname: row.nickname ?? null,
+      avatarSeed: row.avatar_seed ?? null,
+    },
     title_norm: review.title_norm,
     spoiler: review.spoiler === true,
     likeCount: row.like_count ?? 0,

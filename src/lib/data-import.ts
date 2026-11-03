@@ -1,5 +1,6 @@
 import { randomUUID } from 'crypto';
 
+import { importedAvatarSeed } from '@/lib/review-social-storage';
 import { AdminConfig } from '@/types/admin';
 
 import { configSelfCheck } from './config';
@@ -706,6 +707,7 @@ function normalizeSocialData(
       username: normalizeUsername(username),
       profile_id: typeof p.profile_id === 'string' ? p.profile_id : '',
       nickname: p.nickname as string | null,
+      avatar_seed: importedAvatarSeed(p.avatar_seed),
       favorites_public: assertBoolean(p.favorites_public, '收藏公开状态'),
       updated_at: timestamp(p.updated_at),
     };

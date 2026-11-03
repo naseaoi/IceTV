@@ -4,7 +4,6 @@ import {
   CheckCircle2,
   ExternalLink,
   ImagePlus,
-  Loader2,
   Trash2,
   Upload,
   XCircle,
@@ -13,6 +12,7 @@ import { type FormEvent, useEffect, useRef, useState } from 'react';
 
 import AdminSelect from '@/components/admin/AdminSelect';
 import AlertModal from '@/components/modals/AlertModal';
+import Spinner from '@/components/Spinner';
 import { useLoadingState } from '@/features/admin/hooks/useLoadingState';
 import { SITE_CONFIG_FORM_ID } from '@/features/admin/lib/admin-form-ids';
 import { adminPost } from '@/features/admin/lib/api';
@@ -769,7 +769,7 @@ const SiteConfigComponent = ({
             >
               {danmakuTesting ? (
                 <>
-                  <Loader2 className='h-3.5 w-3.5 animate-spin' />
+                  <Spinner className='h-3.5 w-3.5' />
                   测试中
                 </>
               ) : (

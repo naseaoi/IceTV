@@ -4,11 +4,12 @@ import {
   Check,
   ExternalLink,
   Heart,
-  Loader2,
   Play,
   Trash2,
 } from 'lucide-react';
 import type { ReactNode } from 'react';
+
+import Spinner from '@/components/Spinner';
 
 // 相邻两项分组不同时画分隔线
 export type CardActionGroup = 'play' | 'manage' | 'link' | 'danger';
@@ -67,7 +68,7 @@ export function favoriteAction(
     return {
       id: 'favorite',
       label: '收藏',
-      icon: <Loader2 className='animate-spin' />,
+      icon: <Spinner className='h-4 w-4' />,
       group: 'manage',
       disabled: true,
       onClick,

@@ -49,3 +49,13 @@ it('输入变化立即禁止旧结果提交并忽略迟到的可用性响应', a
   expect(result.current.status).toBe('error');
   expect(result.current.message).toBe('昵称已被使用');
 });
+it('未启用时直接空闲，不进入检测态也不请求接口', async () => {
+  const { result } = renderHook(() =>
+    useNicknameAvailability('光影旅人', false),
+  );
+  expect(result.current.status).toBe('idle');
+  await act(async () => {
+    jest.advanceTimersByTime(400);
+  });
+  expect(global.fetch).not.toHaveBeenCalled();
+});

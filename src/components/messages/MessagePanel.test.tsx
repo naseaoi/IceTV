@@ -139,7 +139,11 @@ it('关注评价显示昵称和评分并链接作者主页', () => {
         {
           id: 'follow:1',
           type: 'follow-review',
-          author: { profileId: 'profileAlice', nickname: '爱丽丝' },
+          author: {
+            profileId: 'profileAlice',
+            avatarSeed: null,
+            nickname: '爱丽丝',
+          },
           title: '三体',
           year: '2023',
           cover: '',

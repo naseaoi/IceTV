@@ -1,33 +1,23 @@
-const AVATAR_GRADIENTS = [
-  'from-brand-400 to-brand-600',
-  'from-violet-400 to-purple-600',
-  'from-rose-400 to-pink-600',
-  'from-amber-400 to-orange-600',
-  'from-teal-400 to-cyan-600',
-  'from-lime-400 to-brand-600',
-];
+import Avatar from 'boring-avatars';
 
-export function avatarGradient(profileId: string): string {
-  let hash = 0;
-  for (const char of profileId) hash = (hash * 31 + char.charCodeAt(0)) | 0;
-  return AVATAR_GRADIENTS[Math.abs(hash) % AVATAR_GRADIENTS.length];
-}
+import type { PublicUserRef } from '@/lib/types';
+
+const AVATAR_COLORS = ['#8fc4e6', '#3d8dc6', '#21435f', '#f5c6a5', '#a8d8c8'];
 
 export default function ProfileAvatar({
-  profileId,
-  nickname,
-  className = 'h-8 w-8 text-sm',
+  user,
+  className = 'h-8 w-8',
 }: {
-  profileId: string;
-  nickname: string | null;
+  user: Pick<PublicUserRef, 'profileId' | 'avatarSeed'>;
   className?: string;
 }) {
   return (
-    <span
+    <Avatar
       aria-hidden='true'
-      className={`inline-flex shrink-0 items-center justify-center rounded-full bg-gradient-to-br font-semibold text-white ${avatarGradient(profileId)} ${className}`}
-    >
-      {Array.from(nickname ?? '未')[0]?.toUpperCase()}
-    </span>
+      name={user.avatarSeed ?? user.profileId}
+      variant='beam'
+      colors={AVATAR_COLORS}
+      className={`shrink-0 ${className}`}
+    />
   );
 }

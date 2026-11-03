@@ -1,5 +1,6 @@
 import { History } from 'lucide-react';
 
+import HomePosterCardSkeleton from '@/components/HomePosterCardSkeleton';
 import { PAGE_CONTAINER_CLASS } from '@/components/page-container';
 import PageLayout from '@/components/PageLayout';
 import { POSTER_GRID_BASE_CLASS } from '@/components/poster-grid-layout';
@@ -20,15 +21,15 @@ export default async function ContinueWatchingLoading() {
               <History className='h-6 w-6 text-orange-500' />
               继续观看
             </h1>
-            <div className='h-5 w-16 animate-pulse rounded bg-gray-200 dark:bg-gray-800' />
+            <div className='skeleton h-5 w-16 rounded' />
           </div>
           <div
             className={`${POSTER_GRID_BASE_CLASS} px-0 sm:grid-cols-[repeat(auto-fill,_180px)] sm:gap-x-6 sm:px-2`}
           >
             {Array.from({ length: count || 8 }).map((_, index) => (
-              <div
+              <HomePosterCardSkeleton
                 key={index}
-                className='aspect-[2/3] w-full animate-pulse rounded-lg bg-gray-200 dark:bg-gray-800 sm:w-[180px]'
+                className='w-full sm:w-[180px]'
               />
             ))}
           </div>

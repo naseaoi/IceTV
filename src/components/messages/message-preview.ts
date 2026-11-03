@@ -60,7 +60,11 @@ export function getMessagePreviewPage(): UserMessagePage {
       {
         id: 'follow-review:preview',
         type: 'follow-review',
-        author: { profileId: 'previewUser1', nickname: '光影旅人' },
+        author: {
+          profileId: 'previewUser1',
+          nickname: '光影旅人',
+          avatarSeed: null,
+        },
         title: '漫长的季节',
         year: '2023',
         cover: '',

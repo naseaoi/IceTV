@@ -16,14 +16,27 @@ export function getPageScrollTop(): number {
   );
 }
 
+export function subscribePageScroll(listener: () => void): () => void {
+  const targets = getScrollTargets();
+  targets.forEach((target) =>
+    target.addEventListener('scroll', listener, { passive: true }),
+  );
+  return () =>
+    targets.forEach((target) => target.removeEventListener('scroll', listener));
+}
+
 export function scrollPageToTop(behavior: ScrollBehavior = 'smooth') {
-  const options: ScrollToOptions = { top: 0, behavior };
+  scrollPageTo(0, behavior);
+}
+
+export function scrollPageTo(top: number, behavior: ScrollBehavior = 'auto') {
+  const options: ScrollToOptions = { top, behavior };
   window.scrollTo(options);
   for (const element of [document.documentElement, document.body]) {
     if (element.scrollTo) {
       element.scrollTo(options);
     } else {
-      element.scrollTop = 0;
+      element.scrollTop = top;
     }
   }
 }
@@ -33,13 +46,8 @@ export function usePageScrolled(threshold: number): boolean {
 
   useEffect(() => {
     const update = () => setScrolled(getPageScrollTop() > threshold);
-    const targets = getScrollTargets();
     update();
-    targets.forEach((target) =>
-      target.addEventListener('scroll', update, { passive: true }),
-    );
-    return () =>
-      targets.forEach((target) => target.removeEventListener('scroll', update));
+    return subscribePageScroll(update);
   }, [threshold]);
 
   return scrolled;
@@ -72,12 +80,7 @@ export function useHideOnScrollDown(enabled: boolean): boolean {
         last = top;
       }
     };
-    const targets = getScrollTargets();
-    targets.forEach((target) =>
-      target.addEventListener('scroll', update, { passive: true }),
-    );
-    return () =>
-      targets.forEach((target) => target.removeEventListener('scroll', update));
+    return subscribePageScroll(update);
   }, [enabled]);
 
   return hidden;

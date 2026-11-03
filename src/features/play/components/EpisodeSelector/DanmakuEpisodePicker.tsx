@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
+import Spinner from '@/components/Spinner';
 import { PanelActionButton } from '@/features/play/components/EpisodeSelector/PanelActionButton';
 import {
   type DanmakuSourceGroup,
@@ -295,9 +296,7 @@ export const DanmakuEpisodePicker: React.FC<DanmakuEpisodePickerProps> = ({
           aria-label={loading ? '搜索中' : undefined}
         >
           <span className={loading ? 'invisible' : undefined}>搜索</span>
-          {loading && (
-            <span className='absolute h-4 w-4 animate-spin rounded-full border-2 border-white border-t-transparent' />
-          )}
+          {loading && <Spinner className='absolute h-4 w-4 text-white' />}
         </button>
       </div>
 

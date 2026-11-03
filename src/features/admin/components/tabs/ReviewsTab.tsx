@@ -1,6 +1,6 @@
 'use client';
 
-import { Loader2, Search, Trash2 } from 'lucide-react';
+import { Search, Trash2 } from 'lucide-react';
 import { useCallback, useEffect, useRef, useState } from 'react';
 
 import CoverImage from '@/components/CoverImage';
@@ -8,6 +8,7 @@ import ExpandableText from '@/components/ExpandableText';
 import AlertModal from '@/components/modals/AlertModal';
 import ConfirmModal from '@/components/modals/ConfirmModal';
 import RatingStars from '@/components/RatingStars';
+import Spinner from '@/components/Spinner';
 import ReviewReports from '@/features/admin/components/tabs/ReviewReports';
 import {
   adminDelete,
@@ -246,10 +247,7 @@ function AllReviews() {
             role='status'
             className='flex min-h-32 items-center justify-center text-sm text-gray-500 dark:text-gray-400'
           >
-            <Loader2
-              aria-hidden='true'
-              className='mr-2 h-4 w-4 animate-spin text-brand-500'
-            />
+            <Spinner className='mr-2 h-4 w-4 text-brand-500' />
             加载中...
           </div>
         )}

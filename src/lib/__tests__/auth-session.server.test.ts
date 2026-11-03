@@ -6,9 +6,11 @@ import { getServerAuthSession } from '@/lib/auth-session.server';
 
 jest.mock('@/lib/db', () => ({
   db: {
-    ensureUserProfile: jest
-      .fn()
-      .mockResolvedValue({ profile_id: 'AbCdEf012345', nickname: 'Alice' }),
+    ensureUserProfile: jest.fn().mockResolvedValue({
+      profile_id: 'AbCdEf012345',
+      avatar_seed: 'Avatar012345',
+      nickname: 'Alice',
+    }),
   },
 }));
 
@@ -62,6 +64,7 @@ describe('getServerAuthSession', () => {
     await expect(getServerAuthSession('cookie')).resolves.toEqual({
       status: 'authenticated',
       profileId: 'AbCdEf012345',
+      avatarSeed: 'Avatar012345',
       nickname: 'Alice',
       username: 'alice',
       role: 'user',

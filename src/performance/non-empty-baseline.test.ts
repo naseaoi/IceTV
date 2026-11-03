@@ -3,6 +3,10 @@
 import type Database from 'better-sqlite3';
 import { performance } from 'perf_hooks';
 
+import {
+  aggregatePlaybackPeriod,
+  buildPlaybackPeriod,
+} from '@/features/playback-stats/lib/period';
 import { createCacheBudgetLedger } from '@/lib/cache-budget';
 import {
   clearSearchCachesForTests,
@@ -59,16 +63,22 @@ runBaseline('non-empty performance baseline', () => {
     const playbackSeedStartedAt = performance.now();
     seed(100_000);
     const playbackSeedMs = elapsedMs(playbackSeedStartedAt);
-    const ranges = Array.from({ length: 7 }, (_, index) => ({
-      key: `range-${index}`,
-      start: index * 15_000_000,
-      end: (index + 1) * 15_000_000,
-    }));
+    const period = buildPlaybackPeriod({ type: 'week', date: '1970-01-01' });
     const playbackQueryStartedAt = performance.now();
-    const [totals, topItems] = await Promise.all([
-      storage.getPlaybackRangeWatchTotals('baseline-user', ranges),
-      storage.getPlaybackTopItems('baseline-user', 6),
-    ]);
+    const sessions = await storage.getPlaybackPeriodSessions(
+      'baseline-user',
+      period.start,
+      period.end,
+    );
+    const totals = await storage.getPlaybackWatchTotals(
+      'baseline-user',
+      period.start,
+    );
+    const stats = aggregatePlaybackPeriod(
+      period,
+      sessions,
+      totals.totalWatchSeconds,
+    );
     const playbackQueryMs = elapsedMs(playbackQueryStartedAt);
 
     clearSearchCachesForTests();
@@ -116,7 +126,7 @@ runBaseline('non-empty performance baseline', () => {
           playback: {
             rows: 100_000,
             seedMs: playbackSeedMs,
-            rangeAndTopQueryMs: playbackQueryMs,
+            periodQueryAndAggregationMs: playbackQueryMs,
           },
           searchCache: {
             writes: 1500,
@@ -137,8 +147,9 @@ runBaseline('non-empty performance baseline', () => {
       ),
     );
 
-    expect(totals).toHaveLength(7);
-    expect(topItems).toHaveLength(6);
+    expect(stats.buckets).toHaveLength(7);
+    expect(stats.topWorks).toHaveLength(10);
+    expect(stats.watchSeconds).toBe(6_000_000);
     expect(searchCacheStats.size).toBeLessThanOrEqual(1000);
     expect(searchCacheStats.estimatedBytes).toBeLessThanOrEqual(
       32 * 1024 * 1024,

@@ -164,11 +164,7 @@ export function SettingsPageClient() {
               onClick={() => setPanel('profile')}
               className={`${PRESSABLE_ROW_CLASS} py-3`}
             >
-              <ProfileAvatar
-                profileId={account.profileId}
-                nickname={account.nickname}
-                className='h-12 w-12 text-lg'
-              />
+              <ProfileAvatar user={account} className='h-12 w-12' />
               <span className='min-w-0 flex-1'>
                 <span className='block truncate text-base font-semibold'>
                   {account.nickname ?? account.username}

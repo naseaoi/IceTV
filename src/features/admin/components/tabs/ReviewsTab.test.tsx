@@ -16,7 +16,7 @@ jest.mock('@/components/CoverImage', () => ({
 
 const review: AdminVideoReview = {
   username: 'alice',
-  author: { profileId: 'profileAlice', nickname: '爱丽丝' },
+  author: { profileId: 'profileAlice', avatarSeed: null, nickname: '爱丽丝' },
   spoiler: false,
   likeCount: 0,
   likedByMe: false,
@@ -284,7 +284,11 @@ describe('ReviewsTab', () => {
             reasons: { spam: 2 },
             reports: [
               {
-                reporter: { profileId: 'profileBob00', nickname: '鲍勃' },
+                reporter: {
+                  profileId: 'profileBob00',
+                  avatarSeed: null,
+                  nickname: '鲍勃',
+                },
                 reason: 'spam',
                 detail: '重复广告',
                 created_at: 1,

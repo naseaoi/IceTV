@@ -9,6 +9,7 @@ type SessionResponse = {
   role?: AuthSessionRole | null;
   profileId?: string;
   nickname?: string | null;
+  avatarSeed?: string | null;
 };
 
 function isAuthSessionRole(value: unknown): value is AuthSessionRole {
@@ -43,7 +44,8 @@ export async function getClientAuthSession(): Promise<ClientAuthSession> {
     if (
       typeof session.profileId !== 'string' ||
       !session.profileId ||
-      (session.nickname !== null && typeof session.nickname !== 'string')
+      (session.nickname !== null && typeof session.nickname !== 'string') ||
+      (session.avatarSeed !== null && typeof session.avatarSeed !== 'string')
     ) {
       return { status: 'error' };
     }
@@ -53,6 +55,7 @@ export async function getClientAuthSession(): Promise<ClientAuthSession> {
       username: session.username,
       profileId: session.profileId,
       nickname: session.nickname,
+      avatarSeed: session.avatarSeed,
       role: session.role,
     };
   } catch {

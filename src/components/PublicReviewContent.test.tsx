@@ -9,7 +9,7 @@ jest.mock('@/lib/video-reviews.client', () => ({
   reportVideoReview: jest.fn(),
 }));
 const review: PublicVideoReview = {
-  author: { profileId: 'profileAlice', nickname: '爱丽丝' },
+  author: { profileId: 'profileAlice', avatarSeed: null, nickname: '爱丽丝' },
   title_norm: '三体',
   title: '三体',
   year: '2023',
@@ -84,7 +84,11 @@ it('选择举报原因与说明后提交作品身份，不发送登录名', asyn
     fireEvent.click(screen.getByRole('button', { name: '提交举报' }));
   });
   expect(reportVideoReview).toHaveBeenCalledWith(
-    { profileId: 'profileAlice', title_norm: '三体', year: '2023' },
+    {
+      profileId: 'profileAlice',
+      title_norm: '三体',
+      year: '2023',
+    },
     'spam',
     '重复广告',
   );

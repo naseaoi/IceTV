@@ -45,6 +45,17 @@ describe('ContinueCard', () => {
     );
   });
 
+  it('有更新时并入集数行，不额外占行', () => {
+    const { container } = render(
+      <ContinueCard {...baseProps} hasUpdate availableEpisodes={14} />,
+    );
+
+    expect(screen.getByText('更新至 14 集').parentElement).toHaveAttribute(
+      'data-continue-meta',
+    );
+    expect(container.querySelectorAll('p')).toHaveLength(3);
+  });
+
   it('没有多集信息时显示年份和源站名', () => {
     render(
       <ContinueCard

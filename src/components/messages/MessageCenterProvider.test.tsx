@@ -6,6 +6,19 @@ const mockGetMessageSummary = jest.fn();
 const mockGetMessagePage = jest.fn();
 const mockReadMessage = jest.fn();
 const mockReadAllMessages = jest.fn();
+const mockLoadPanel = jest.fn();
+
+jest.mock('next/dynamic', () => {
+  const dynamic = jest.requireActual('next/dynamic').default;
+  return {
+    __esModule: true,
+    default: (loader: () => Promise<unknown>, options: unknown) =>
+      dynamic(() => {
+        mockLoadPanel();
+        return loader();
+      }, options),
+  };
+});
 
 jest.mock('@/components/AuthProvider', () => ({
   useAuthSession: () => ({
@@ -33,14 +46,19 @@ jest.mock('@/components/messages/MessagePanel', () => ({
     page,
     onRead,
     onReadAll,
+    onClose,
   }: {
     open: boolean;
     page: UserMessagePage;
     onRead: (message: UserMessagePage['items'][number]) => void;
     onReadAll: () => void;
+    onClose: () => void;
   }) =>
     open ? (
       <div data-testid='panel'>
+        <button data-testid='close-panel' onClick={onClose}>
+          close
+        </button>
         <span data-testid='panel-total'>{page.total}</span>
         {page.items.map((item) => (
           <button
@@ -137,6 +155,22 @@ describe('MessageCenterProvider', () => {
     mockGetMessagePage.mockResolvedValue(pageOf(1));
     mockReadMessage.mockResolvedValue({});
     mockReadAllMessages.mockResolvedValue({ updatedRecords: {} });
+  });
+
+  it('loads the panel only on first open and reuses it after closing', async () => {
+    renderProvider();
+    await waitFor(() => expect(mockGetMessageSummary).toHaveBeenCalled());
+    expect(mockLoadPanel).not.toHaveBeenCalled();
+
+    await act(async () => screen.getByTestId('open').click());
+    await screen.findByTestId('panel');
+    expect(mockLoadPanel).toHaveBeenCalledTimes(1);
+
+    await act(async () => screen.getByTestId('close-panel').click());
+    expect(screen.queryByTestId('panel')).not.toBeInTheDocument();
+    await act(async () => screen.getByTestId('open').click());
+    await screen.findByTestId('panel');
+    expect(mockLoadPanel).toHaveBeenCalledTimes(1);
   });
 
   it('挂载后暴露未读数并弹出提示', async () => {

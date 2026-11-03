@@ -8,7 +8,7 @@ export const LIBRARY_PILL_BUTTON_CLASS =
 
 export function LibrarySubtitleSkeleton() {
   return (
-    <span className='inline-block h-4 w-32 animate-pulse rounded bg-gray-200 align-middle dark:bg-white/10' />
+    <span className='skeleton inline-block h-4 w-32 rounded align-middle' />
   );
 }
 

@@ -10,6 +10,7 @@ jest.mock('@/components/AuthProvider', () => ({
       status: 'authenticated',
       username: 'alice',
       profileId: 'profileAlice',
+      avatarSeed: null,
       nickname: '爱丽丝',
       role: 'user',
     },
@@ -198,7 +199,11 @@ describe('ReviewsTab', () => {
             count: 2,
             reviews: [
               {
-                author: { profileId: 'profileAlice', nickname: '爱丽丝' },
+                author: {
+                  profileId: 'profileAlice',
+                  avatarSeed: null,
+                  nickname: '爱丽丝',
+                },
                 title_norm: '三体',
                 spoiler: false,
                 likedByMe: false,
@@ -212,7 +217,11 @@ describe('ReviewsTab', () => {
                 updated_at: 1,
               },
               {
-                author: { profileId: 'profileBob00', nickname: '鲍勃' },
+                author: {
+                  profileId: 'profileBob00',
+                  avatarSeed: null,
+                  nickname: '鲍勃',
+                },
                 title_norm: '三体',
                 spoiler: false,
                 likedByMe: false,

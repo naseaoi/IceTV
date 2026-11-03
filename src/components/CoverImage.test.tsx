@@ -147,13 +147,11 @@ describe('CoverImage', () => {
     expect(document.querySelector('[data-cover-loading-backdrop]')).toHaveClass(
       'z-[100]',
       'opacity-100',
-      'bg-gray-200/70',
-      'dark:bg-gray-700/60',
+      'skeleton-surface',
     );
-    expect(document.querySelector('.animate-shimmer')).toHaveClass(
-      'via-white/20',
-      'dark:via-white/12',
-    );
+    expect(
+      document.querySelector('[data-cover-loading-backdrop] .skeleton-sweep'),
+    ).toBeInTheDocument();
 
     Object.defineProperty(image, 'complete', {
       configurable: true,
@@ -222,7 +220,7 @@ describe('CoverImage', () => {
       document.querySelector('[data-cover-loading-backdrop]'),
     ).not.toHaveClass('cover-loading-backdrop-pending');
     expect(
-      document.querySelector('[data-cover-loading-backdrop] .animate-shimmer'),
+      document.querySelector('[data-cover-loading-backdrop] .skeleton-sweep'),
     ).not.toBeInTheDocument();
 
     fireEvent.load(image);
@@ -234,7 +232,7 @@ describe('CoverImage', () => {
       'opacity-0',
     );
     expect(
-      document.querySelector('[data-cover-loading-backdrop] .animate-shimmer'),
+      document.querySelector('[data-cover-loading-backdrop] .skeleton-sweep'),
     ).not.toBeInTheDocument();
   });
 
@@ -271,7 +269,7 @@ describe('CoverImage', () => {
         container.querySelector('[data-cover-loading-backdrop]'),
       ).toHaveAttribute('data-cover-state', 'revealed');
       expect(
-        container.querySelector('.animate-shimmer'),
+        container.querySelector('.skeleton-sweep'),
       ).not.toBeInTheDocument();
     } finally {
       if (root) {

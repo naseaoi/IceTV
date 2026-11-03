@@ -5,3 +5,16 @@ export const POSTER_GRID_BASE_CLASS =
 export const POSTER_GRID_CLASS = `${POSTER_GRID_BASE_CLASS} sm:grid-cols-[repeat(auto-fill,minmax(156px,1fr))] sm:gap-x-5`;
 
 export const POSTER_GRID_ROW_GAP = 24;
+
+export const POSTER_VIRTUAL_GRID_LAYOUT = {
+  mobileColumnCount: 3,
+  mobileWideBreakpoint: 480,
+  mobileWideColumnCount: 4,
+  mobileColumnGap: 12,
+  mobileRowGap: POSTER_GRID_ROW_GAP,
+  mobileContentHeight: 28,
+  desktopColumnGap: 20,
+  desktopRowGap: POSTER_GRID_ROW_GAP,
+  desktopMinColumnWidth: 156,
+  desktopContentHeight: 28,
+};

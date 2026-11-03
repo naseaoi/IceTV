@@ -10,6 +10,8 @@ const nextConfig = {
   output: 'standalone',
   reactStrictMode: true,
   allowedDevOrigins: ['127.0.0.1', 'localhost'],
+  // 纯 ESM 包，next/jest 只转译此处列出的依赖
+  transpilePackages: ['boring-avatars'],
   compiler: {
     removeConsole:
       process.env.NODE_ENV === 'production'

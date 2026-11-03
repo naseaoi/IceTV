@@ -8,7 +8,6 @@ import { useAuthSession } from '@/components/AuthProvider';
 import MessageBell from '@/components/messages/MessageBell';
 import { PAGE_CONTAINER_CLASS } from '@/components/page-container';
 import PageLayout from '@/components/PageLayout';
-import { avatarGradient } from '@/components/ProfileAvatar';
 import { SettingsLink } from '@/components/SettingsLink';
 
 import { MineProfileHeader } from './MineProfileHeader';
@@ -41,7 +40,7 @@ export function MeShell({ children }: { children: ReactNode }) {
         {profileId && (
           <div
             aria-hidden='true'
-            className={`pointer-events-none absolute inset-0 bg-gradient-to-br opacity-25 [mask-image:linear-gradient(to_bottom,black,transparent)] dark:opacity-20 md:hidden ${avatarGradient(profileId)}`}
+            className='pointer-events-none absolute inset-0 bg-gradient-to-br from-brand-300 to-brand-600 opacity-25 [mask-image:linear-gradient(to_bottom,black,transparent)] dark:opacity-20 md:hidden'
           />
         )}
         <div

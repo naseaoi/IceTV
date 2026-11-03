@@ -36,6 +36,7 @@ interface HomeClientProps {
   continueWatchingRecords?: Record<string, PlayRecord> | null;
   continueWatchingUpdateCount?: number;
   routeFallback?: boolean;
+  likelyMobile?: boolean;
 }
 
 type RecommendationLoadingState = {
@@ -49,7 +50,7 @@ const RECOMMENDATION_UNAVAILABLE_MESSAGE = '暂时无法获取数据';
 
 function RecommendationSkeletonRow() {
   return Array.from({ length: 8 }).map((_, index) => (
-    <HomePosterCardSkeleton key={index} />
+    <HomePosterCardSkeleton key={index} variant='poster' />
   ));
 }
 
@@ -132,6 +133,7 @@ export default function HomeClient({
   continueWatchingRecords = null,
   continueWatchingUpdateCount,
   routeFallback = false,
+  likelyMobile = false,
 }: HomeClientProps) {
   const [initialViewData] = useState(() =>
     mergeHomeInitialDataWithClientSnapshot(initialData),
@@ -373,7 +375,7 @@ export default function HomeClient({
 
   return (
     <PageLayout transparentTopNav={heroItems.length > 0}>
-      <HomeHero items={heroItems} />
+      <HomeHero items={heroItems} likelyMobile={likelyMobile} />
       <div className='overflow-visible pb-2 pt-4 md:pt-2'>
         <div className={PAGE_CONTAINER_CLASS}>
           <div className='-mb-3 space-y-2 sm:-mb-6 sm:space-y-4'>

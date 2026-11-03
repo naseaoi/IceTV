@@ -1,6 +1,7 @@
 import { fireEvent, render, screen } from '@testing-library/react';
 import type { ReactNode } from 'react';
 
+import { installCryptoPolyfill } from '@/app/api/test-utils/crypto-polyfill';
 import AuthenticatedRoute from '@/components/AuthenticatedRoute';
 import { useAuthSession } from '@/components/AuthProvider';
 
@@ -31,6 +32,8 @@ jest.mock('@/components/LoadingStatePanel', () => ({
 jest.mock('@/components/AuthProvider', () => ({
   useAuthSession: jest.fn(),
 }));
+
+installCryptoPolyfill();
 
 const mockUseAuthSession = useAuthSession as jest.MockedFunction<
   typeof useAuthSession
@@ -64,6 +67,7 @@ describe('AuthenticatedRoute', () => {
       session: {
         status: 'authenticated',
         profileId: 'profileAlice',
+        avatarSeed: null,
         nickname: '爱丽丝',
         username: 'alice',
         role: 'user',
@@ -87,6 +91,7 @@ describe('AuthenticatedRoute', () => {
       session: {
         status: 'authenticated',
         profileId: 'profileAlice',
+        avatarSeed: null,
         nickname: '爱丽丝',
         username: 'alice',
         role: 'user',
@@ -119,6 +124,7 @@ describe('AuthenticatedRoute', () => {
       session: {
         status: 'authenticated',
         profileId: 'profileAlice',
+        avatarSeed: null,
         nickname: '爱丽丝',
         username: 'alice',
         role,
@@ -182,6 +188,7 @@ it('昵称未设置时先展示资料门禁，业务内容保持未挂载', () =
       username: 'private-login',
       role: 'user',
       profileId: 'profileAlice',
+      avatarSeed: null,
       nickname: null,
     },
     isRefreshing: false,

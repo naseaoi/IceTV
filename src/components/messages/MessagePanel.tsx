@@ -1,14 +1,6 @@
 'use client';
 
-import {
-  Check,
-  Inbox,
-  LoaderCircle,
-  Megaphone,
-  RefreshCw,
-  Rss,
-  X,
-} from 'lucide-react';
+import { Check, Inbox, Megaphone, RefreshCw, Rss, X } from 'lucide-react';
 import Link from 'next/link';
 import { useEffect, useId } from 'react';
 import { createPortal } from 'react-dom';
@@ -16,6 +8,7 @@ import { createPortal } from 'react-dom';
 import CoverImage from '@/components/CoverImage';
 import ProfileAvatar from '@/components/ProfileAvatar';
 import RatingBadge from '@/components/RatingBadge';
+import Spinner from '@/components/Spinner';
 import { useBodyScrollLock } from '@/components/user-menu/useBodyScrollLock';
 import { UserMessage, UserMessagePage } from '@/lib/message-types';
 import { formatRelativeTime } from '@/lib/relative-time';
@@ -53,7 +46,7 @@ function MessageRow({
           onClick={onNavigate}
           className='flex min-w-0 flex-1 gap-3'
         >
-          <ProfileAvatar {...message.author} />
+          <ProfileAvatar user={message.author} />
           <div className='min-w-0'>
             <p className='text-sm font-semibold text-gray-900 dark:text-gray-100'>
               {message.author.nickname ?? '未设置昵称'}
@@ -79,7 +72,7 @@ function MessageRow({
           className='rounded-full p-2 text-gray-400 hover:bg-brand-50 dark:hover:bg-brand-900/30'
         >
           {working ? (
-            <LoaderCircle className='h-4 w-4 animate-spin' />
+            <Spinner className='h-4 w-4' />
           ) : (
             <Check className='h-4 w-4' />
           )}
@@ -141,7 +134,7 @@ function MessageRow({
         onClick={() => void onRead(message)}
       >
         {working ? (
-          <LoaderCircle className='h-4 w-4 animate-spin' />
+          <Spinner className='h-4 w-4' />
         ) : (
           <Check className='h-4 w-4' />
         )}
@@ -257,9 +250,7 @@ export default function MessagePanel({
               className='inline-flex h-9 items-center gap-1.5 rounded-md px-2.5 text-sm font-medium text-brand-600 transition-colors hover:bg-brand-50 hover:text-brand-700 disabled:opacity-50 dark:text-brand-400 dark:hover:bg-brand-950/50 dark:hover:text-brand-300'
               onClick={() => void onReadAll()}
             >
-              {readingAll && (
-                <LoaderCircle className='h-3.5 w-3.5 animate-spin' />
-              )}
+              {readingAll && <Spinner className='h-3.5 w-3.5' />}
               全部已读
             </button>
           )}
@@ -277,7 +268,7 @@ export default function MessagePanel({
         <div className='min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 py-4 sm:px-6 sm:py-5'>
           {loading && page.items.length === 0 ? (
             <div className='flex min-h-52 items-center justify-center text-gray-400'>
-              <LoaderCircle className='h-6 w-6 animate-spin' />
+              <Spinner className='h-6 w-6' />
             </div>
           ) : loadError && page.items.length === 0 ? (
             <div className='flex min-h-52 flex-col items-center justify-center gap-3 px-4 text-center'>
@@ -337,9 +328,7 @@ export default function MessagePanel({
                     className='inline-flex min-h-9 items-center gap-1.5 rounded-md px-3 text-sm font-medium text-brand-600 transition-colors hover:bg-brand-50 hover:text-brand-700 disabled:opacity-50 dark:text-brand-400 dark:hover:bg-brand-950/50'
                     onClick={() => void onLoadMore()}
                   >
-                    {loadingMore && (
-                      <LoaderCircle className='h-3.5 w-3.5 animate-spin' />
-                    )}
+                    {loadingMore && <Spinner className='h-3.5 w-3.5' />}
                     {loadingMore ? '加载中' : '加载更多'}
                   </button>
                 </div>

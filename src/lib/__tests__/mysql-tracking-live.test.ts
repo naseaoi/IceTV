@@ -1,5 +1,7 @@
 /** @jest-environment node */
 
+import { assertPlaybackPeriodRange } from '@/lib/__tests__/__fixtures__/playback-period-contract';
+
 import { MySqlStorage } from '../mysql.db';
 import type { Favorite, PlayRecord } from '../types';
 import { videoReview } from './__fixtures__/video-review-contract';
@@ -57,6 +59,10 @@ describeLive('MySQL 追更查询（真实实例）', () => {
     ...extra,
   });
 
+  it('reads period sessions with real SQL range and user predicates', async () => {
+    await assertPlaybackPeriodRange(storage);
+  });
+
   it('serializes concurrent message-state updates on a missing row', async () => {
     const username = `atomic-read-${Date.now()}`;
     try {
@@ -107,7 +113,12 @@ describeLive('MySQL 追更查询（真实实例）', () => {
       const profile = await storage.ensureUserProfile(author);
       expect(profile.profile_id).toMatch(/^[A-Za-z0-9]{12}$/);
       const nickname = `N${String(suffix).slice(-12)}`;
+      expect(profile.avatar_seed).toBeNull();
+      await storage.updateUserProfile(author, { avatarSeed: 'Avatar012345' });
       await storage.updateUserProfile(author, { nickname });
+      expect(
+        (await storage.getUserProfileById(profile.profile_id))?.avatar_seed,
+      ).toBe('Avatar012345');
       await expect(
         storage.updateUserProfile(reader, { nickname: nickname.toLowerCase() }),
       ).rejects.toThrow('昵称已被使用');
@@ -156,7 +167,7 @@ describeLive('MySQL 追更查询（真实实例）', () => {
       expect(work.distribution[7]).toBe(1);
       expect(work.distribution[8]).toBe(0);
       expect(work.reviews[0]).toMatchObject({
-        author: { profileId: profile.profile_id },
+        author: { profileId: profile.profile_id, avatarSeed: 'Avatar012345' },
         likedByMe: true,
         likeCount: 1,
       });

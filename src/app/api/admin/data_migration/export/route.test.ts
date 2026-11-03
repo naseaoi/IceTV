@@ -34,6 +34,7 @@ function makeDb(searchHistory: string[]) {
       profile: {
         username: 'owner-1',
         profile_id: 'AbCdEf012345',
+        avatar_seed: 'Avatar012345',
         nickname: null,
         favorites_public: false,
         updated_at: 1,
@@ -114,6 +115,9 @@ describe('data migration export route', () => {
     expect(backup.data.userData['owner-1'].videoReviews).toEqual([videoReview]);
     expect(backup.data.userData['owner-1'].profile.profile_id).toBe(
       'AbCdEf012345',
+    );
+    expect(backup.data.userData['owner-1'].profile.avatar_seed).toBe(
+      'Avatar012345',
     );
     expect(backup.data.userData['owner-1'].follows).toEqual([]);
     expect(backup.data.userData['owner-1'].likes).toEqual([]);

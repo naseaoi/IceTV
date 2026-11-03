@@ -3,20 +3,29 @@ export const HOME_POSTER_CARD_CLASS =
 
 interface HomePosterCardSkeletonProps {
   className?: string;
+  subtitle?: boolean;
+  variant?: 'poster' | 'video';
 }
 
 export default function HomePosterCardSkeleton({
   className = HOME_POSTER_CARD_CLASS,
+  subtitle = false,
+  variant = 'video',
 }: HomePosterCardSkeletonProps) {
   return (
     <div className={className}>
       <div className='group relative w-full rounded-lg bg-transparent'>
-        <div className='relative aspect-[2/3] overflow-hidden rounded-lg bg-gray-200 dark:bg-gray-800'>
-          <div className='absolute inset-0 animate-pulse bg-gray-300 dark:bg-gray-700' />
+        <div className='skeleton relative aspect-[2/3] overflow-hidden rounded-lg' />
+        <div
+          className={`mt-2 flex items-center text-[13px] ${variant === 'poster' && !subtitle ? 'h-5' : 'h-[1.5em]'}`}
+        >
+          <div className='skeleton h-3.5 w-3/4 rounded' />
         </div>
-        <div className='mt-2 flex h-5 items-center'>
-          <div className='h-3.5 w-3/4 animate-pulse rounded bg-gray-200 dark:bg-gray-800' />
-        </div>
+        {subtitle && (
+          <div className='mt-0.5 flex h-4 items-center'>
+            <div className='skeleton h-3 w-1/2 rounded' />
+          </div>
+        )}
       </div>
     </div>
   );

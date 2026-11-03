@@ -84,12 +84,22 @@ function ReviewListSkeleton() {
     >
       {Array.from({ length: SKELETON_COUNT }, (_, index) => (
         <li key={index} className={CARD_CLASS}>
-          <div className='aspect-[2/3] w-16 shrink-0 animate-pulse rounded-lg bg-gray-200 dark:bg-white/10 sm:w-20' />
-          <div className='min-w-0 flex-1 space-y-3 py-1'>
-            <div className='h-4 w-2/5 animate-pulse rounded bg-gray-200 dark:bg-white/10' />
-            <div className='h-3 w-1/4 animate-pulse rounded bg-gray-200 dark:bg-white/10' />
-            <div className='h-3 w-full animate-pulse rounded bg-gray-200 dark:bg-white/10' />
-            <div className='h-3 w-3/4 animate-pulse rounded bg-gray-200 dark:bg-white/10' />
+          <div className='skeleton aspect-[2/3] w-16 shrink-0 self-start rounded-lg sm:w-20' />
+          <div className='min-w-0 flex-1'>
+            <div className='flex h-6 items-center'>
+              <div className='skeleton h-4 w-2/5 rounded' />
+            </div>
+            <div className='mt-1.5 flex h-5 items-center'>
+              <div className='skeleton h-3 w-1/4 rounded' />
+            </div>
+            <div className='mt-2'>
+              <div className='flex h-6 items-center'>
+                <div className='skeleton h-3 w-full rounded' />
+              </div>
+              <div className='flex h-6 items-center'>
+                <div className='skeleton h-3 w-3/4 rounded' />
+              </div>
+            </div>
           </div>
         </li>
       ))}

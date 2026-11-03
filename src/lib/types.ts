@@ -72,6 +72,7 @@ export interface UserProfile {
   username: string;
   profile_id: string;
   nickname: string | null;
+  avatar_seed: string | null;
   favorites_public: boolean;
   updated_at: number;
 }
@@ -79,6 +80,8 @@ export interface UserProfile {
 export interface PublicUserRef {
   profileId: string;
   nickname: string | null;
+  // null 时头像按 profileId 生成
+  avatarSeed: string | null;
 }
 
 export interface UserProfileView extends PublicUserRef {
@@ -222,28 +225,17 @@ export interface PlaybackWatchTotals {
   periodWatchSeconds: number;
 }
 
-export interface PlaybackTimeRange {
-  key: string;
-  start: number;
-  end: number;
-}
-
-export interface PlaybackRangeWatchTotal {
-  key: string;
-  watchSeconds: number;
-}
-
-export interface PlaybackStatsTopItem {
-  source: string;
-  videoId: string;
-  title: string;
-  sourceName: string;
-  cover: string;
-  year: string;
-  watchSeconds: number;
-  sessionCount: number;
-  lastWatchedAt: number;
-}
+export type PlaybackPeriodSession = Pick<
+  PlaybackSession,
+  | 'source'
+  | 'video_id'
+  | 'title'
+  | 'cover'
+  | 'year'
+  | 'started_at'
+  | 'ended_at'
+  | 'watch_seconds'
+>;
 
 export type SourceRouteMode = 'browser' | 'server';
 
@@ -423,7 +415,11 @@ export interface IStorage {
   ensureUserProfile(username: string): Promise<UserProfile>;
   updateUserProfile(
     username: string,
-    patch: { nickname?: string; favoritesPublic?: boolean },
+    patch: {
+      nickname?: string;
+      avatarSeed?: string | null;
+      favoritesPublic?: boolean;
+    },
   ): Promise<UserProfile>;
   isNicknameAvailable(
     nickname: string,
@@ -562,15 +558,11 @@ export interface IStorage {
     userName: string,
     since: number,
   ): Promise<PlaybackWatchTotals>;
-  getPlaybackRangeWatchTotals(
+  getPlaybackPeriodSessions(
     userName: string,
-    ranges: PlaybackTimeRange[],
-  ): Promise<PlaybackRangeWatchTotal[]>;
-  getPlaybackTopItems(
-    userName: string,
-    limit?: number,
-    since?: number,
-  ): Promise<PlaybackStatsTopItem[]>;
+    start: number,
+    end: number,
+  ): Promise<PlaybackPeriodSession[]>;
   recordSourceRouteStat(input: SourceRouteStatInput): Promise<void>;
   getSourceRouteStats(sinceDate: string): Promise<SourceRouteStatsItem[]>;
   getAllSourceRouteStatBuckets(): Promise<SourceRouteStatsBucket[]>;

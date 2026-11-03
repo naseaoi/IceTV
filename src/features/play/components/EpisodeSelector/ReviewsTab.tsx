@@ -3,7 +3,6 @@
 import {
   ChevronDown,
   Globe,
-  LoaderCircle,
   Lock,
   Maximize2,
   Minimize2,
@@ -19,6 +18,7 @@ import ExpandableText from '@/components/ExpandableText';
 import ModalShell from '@/components/modals/ModalShell';
 import PublicReviewContent from '@/components/PublicReviewContent';
 import RatingStars from '@/components/RatingStars';
+import Spinner from '@/components/Spinner';
 import { RatingInput } from '@/features/play/components/EpisodeSelector/RatingInput';
 import ReviewDistribution from '@/features/play/components/EpisodeSelector/ReviewDistribution';
 import type { VideoReviewsState } from '@/features/play/hooks/useVideoReviews';
@@ -248,7 +248,7 @@ function SaveButton({
         large ? 'h-9 px-5 text-sm' : 'h-8 px-3.5 text-xs'
       }`}
     >
-      {saving && <LoaderCircle className='h-3.5 w-3.5 animate-spin' />}
+      {saving && <Spinner className='h-3.5 w-3.5' />}
       保存
     </button>
   );
@@ -551,7 +551,7 @@ function MyReviewCard({
             onBlur={() => setConfirming(false)}
           >
             {deleting ? (
-              <LoaderCircle className='h-3.5 w-3.5 animate-spin' />
+              <Spinner className='h-3.5 w-3.5' />
             ) : (
               <Trash2 className='h-3.5 w-3.5' />
             )}
@@ -636,7 +636,7 @@ export const ReviewsTab: React.FC<ReviewsTabProps> = ({
         className='flex items-center gap-4 border-b border-gray-100 pb-5 dark:border-white/[0.06]'
       >
         {summaryLoading && !summary ? (
-          <LoaderCircle className='h-5 w-5 animate-spin text-gray-400' />
+          <Spinner className='h-5 w-5 text-gray-400' />
         ) : (
           <>
             <span
@@ -667,7 +667,7 @@ export const ReviewsTab: React.FC<ReviewsTabProps> = ({
         <SectionHeader title='我的评价' />
         {myReviewLoading && !myReview ? (
           <div className='flex justify-center py-6'>
-            <LoaderCircle className='h-5 w-5 animate-spin text-gray-400' />
+            <Spinner className='h-5 w-5 text-gray-400' />
           </div>
         ) : showEditor ? (
           <ReviewEditor

@@ -1,6 +1,5 @@
 'use client';
 
-import { LoaderCircle } from 'lucide-react';
 import { useSearchParams } from 'next/navigation';
 
 import DoubanCustomSelector from '@/components/DoubanCustomSelector';
@@ -9,6 +8,7 @@ import AlertModal from '@/components/modals/AlertModal';
 import { PAGE_CONTAINER_CLASS } from '@/components/page-container';
 import PageLayout from '@/components/PageLayout';
 import PosterCard from '@/components/PosterCard';
+import Spinner from '@/components/Spinner';
 import { VirtualizedGrid } from '@/components/VirtualizedGrid';
 import { DoubanFeedLoading } from '@/features/douban/components/DoubanFeedLoading';
 import { DoubanFilterBar } from '@/features/douban/components/DoubanFilterBar';
@@ -116,9 +116,9 @@ export function DoubanPageClient() {
             data-can-load-more={canLoadMore ? 'true' : 'false'}
           >
             {isLoadingMore && (
-              <LoaderCircle
-                className='h-5 w-5 animate-spin text-gray-400 dark:text-gray-500'
-                aria-label='加载中'
+              <Spinner
+                className='h-5 w-5 text-gray-400 dark:text-gray-500'
+                label='加载中'
               />
             )}
           </div>

@@ -11,7 +11,7 @@ import type {
   UserProfileView,
   VideoReview,
 } from '@/lib/types';
-import { validateNickname } from '@/lib/user-profile';
+import { validateAvatarSeed, validateNickname } from '@/lib/user-profile';
 import { normalizeUsername } from '@/lib/username';
 import {
   type VideoReviewRow,
@@ -43,7 +43,7 @@ export function socialSchema(dialect: 'sqlite' | 'mysql'): string[] {
   const suffix =
     dialect === 'mysql' ? ' CHARACTER SET utf8mb4 COLLATE utf8mb4_bin' : '';
   return [
-    `CREATE TABLE IF NOT EXISTS user_profiles (username ${text} NOT NULL PRIMARY KEY, profile_id VARCHAR(12) NOT NULL UNIQUE, nickname VARCHAR(64), nickname_norm VARCHAR(64) UNIQUE, favorites_public INTEGER NOT NULL DEFAULT 0, updated_at ${time} NOT NULL)${suffix}`,
+    `CREATE TABLE IF NOT EXISTS user_profiles (username ${text} NOT NULL PRIMARY KEY, profile_id VARCHAR(12) NOT NULL UNIQUE, nickname VARCHAR(64), nickname_norm VARCHAR(64) UNIQUE, avatar_seed VARCHAR(24), favorites_public INTEGER NOT NULL DEFAULT 0, updated_at ${time} NOT NULL)${suffix}`,
     `CREATE TABLE IF NOT EXISTS user_follows (follower ${text} NOT NULL, followee ${text} NOT NULL, created_at ${time} NOT NULL, PRIMARY KEY (follower, followee)${dialect === 'mysql' ? ', KEY idx_user_follows_followee (followee)' : ''})${suffix}`,
     ...['likes', 'reports'].map((kind) => {
       const actor = kind === 'likes' ? 'liker' : 'reporter';
@@ -71,6 +71,7 @@ export function profileFromRow(row: UserProfile): UserProfile {
     username: row.username,
     profile_id: row.profile_id,
     nickname: row.nickname,
+    avatar_seed: row.avatar_seed,
     favorites_public: Boolean(row.favorites_public),
     updated_at: Number(row.updated_at),
   };
@@ -152,7 +153,7 @@ export class ReviewSocialStorage {
       const insert =
         this.sql.dialect === 'sqlite' ? 'INSERT OR IGNORE' : 'INSERT IGNORE';
       await this.sql.run(
-        `${insert} INTO user_profiles (username, profile_id, nickname, nickname_norm, favorites_public, updated_at) VALUES (?, ?, NULL, NULL, 0, ?)`,
+        `${insert} INTO user_profiles (username, profile_id, nickname, nickname_norm, avatar_seed, favorites_public, updated_at) VALUES (?, ?, NULL, NULL, NULL, 0, ?)`,
         [username, id, Date.now()],
       );
     }
@@ -171,7 +172,11 @@ export class ReviewSocialStorage {
   }
   async updateUserProfile(
     username: string,
-    patch: { nickname?: string; favoritesPublic?: boolean },
+    patch: {
+      nickname?: string;
+      avatarSeed?: string | null;
+      favoritesPublic?: boolean;
+    },
   ): Promise<UserProfile> {
     username = normalizeUsername(username);
     await this.ensureUserProfile(username);
@@ -181,6 +186,10 @@ export class ReviewSocialStorage {
       const validated = validateNickname(patch.nickname);
       columns.push('nickname = ?', 'nickname_norm = ?');
       params.push(validated.nickname, validated.nicknameNorm);
+    }
+    if (patch.avatarSeed !== undefined) {
+      columns.push('avatar_seed = ?');
+      params.push(validateAvatarSeed(patch.avatarSeed));
     }
     if (patch.favoritesPublic !== undefined) {
       columns.push('favorites_public = ?');
@@ -223,6 +232,7 @@ export class ReviewSocialStorage {
     return {
       profileId: profile.profile_id,
       nickname: profile.nickname,
+      avatarSeed: profile.avatar_seed,
       favoritesPublic: profile.favorites_public,
       isSelf: username === viewer,
       isFollowing: Number(counts.followed) > 0,
@@ -267,15 +277,17 @@ export class ReviewSocialStorage {
     const rows = await this.sql.rows<{
       profile_id: string;
       nickname: string | null;
+      avatar_seed: string | null;
       created_at: number;
     }>(
-      `SELECT p.profile_id, p.nickname, f.created_at FROM user_follows f JOIN user_profiles p ON p.username = f.${target} WHERE f.${column} = ?`,
+      `SELECT p.profile_id, p.nickname, p.avatar_seed, f.created_at FROM user_follows f JOIN user_profiles p ON p.username = f.${target} WHERE f.${column} = ?`,
       [normalizeUsername(username)],
     );
     return socialPage(
       rows.map((row) => ({
         profileId: row.profile_id,
         nickname: row.nickname,
+        avatarSeed: row.avatar_seed,
         followedAt: Number(row.created_at),
       })),
       30,
@@ -304,6 +316,7 @@ export class ReviewSocialStorage {
           ...row,
           profile_id: profile.profile_id,
           nickname: profile.nickname,
+          avatar_seed: profile.avatar_seed,
           like_count: Number(likes.count),
           liked_by_me: Number(likes.liked) > 0,
         };
@@ -425,7 +438,11 @@ export class ReviewSocialStorage {
       if (group.reports.length < 5) {
         const p = await this.ensureUserProfile(row.reporter);
         group.reports.push({
-          reporter: { profileId: p.profile_id, nickname: p.nickname },
+          reporter: {
+            profileId: p.profile_id,
+            nickname: p.nickname,
+            avatarSeed: p.avatar_seed,
+          },
           reason: row.reason,
           detail: row.detail,
           created_at: Number(row.created_at),
@@ -453,7 +470,7 @@ export class ReviewSocialStorage {
     const rows = await this.sql.rows<
       VideoReviewRow & { profile_id: string; nickname: string | null }
     >(
-      'SELECT v.username, v.review_json, p.profile_id, p.nickname FROM user_follows f JOIN video_reviews v ON v.username = f.followee JOIN user_profiles p ON p.username = v.username WHERE f.follower = ? AND v.is_public = 1 AND v.updated_at > f.created_at AND v.updated_at > ? ORDER BY v.updated_at DESC',
+      'SELECT v.username, v.review_json, p.profile_id, p.nickname, p.avatar_seed FROM user_follows f JOIN video_reviews v ON v.username = f.followee JOIN user_profiles p ON p.username = v.username WHERE f.follower = ? AND v.is_public = 1 AND v.updated_at > f.created_at AND v.updated_at > ? ORDER BY v.updated_at DESC',
       [normalizeUsername(username), Math.max(readAt, now - 30 * 86400000)],
     );
     const read = new Set(readIds);
@@ -466,7 +483,11 @@ export class ReviewSocialStorage {
             {
               id,
               type: 'follow-review' as const,
-              author: { profileId: row.profile_id, nickname: row.nickname },
+              author: {
+                profileId: row.profile_id,
+                nickname: row.nickname,
+                avatarSeed: row.avatar_seed ?? null,
+              },
               title: r.title,
               year: r.year,
               cover: r.cover,
@@ -517,6 +538,14 @@ export function isUniqueError(error: unknown): boolean {
   );
 }
 
+export function importedAvatarSeed(value: unknown): string | null {
+  try {
+    return validateAvatarSeed(value);
+  } catch {
+    return null;
+  }
+}
+
 export function importedProfileValues(
   username: string,
   profile: UserProfile | undefined,
@@ -546,6 +575,7 @@ export function importedProfileValues(
     id,
     nickname,
     norm,
+    importedAvatarSeed(profile?.avatar_seed),
     profile?.favorites_public ? 1 : 0,
     profile?.updated_at ?? Date.now(),
   ];

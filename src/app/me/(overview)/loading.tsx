@@ -13,18 +13,14 @@ export default async function MeLoading() {
       <MineSection title='最近观看'>
         <ScrollableRow>
           {Array.from({ length: 6 }, (_, index) => (
-            <HomePosterCardSkeleton key={index} />
+            <HomePosterCardSkeleton key={index} subtitle />
           ))}
         </ScrollableRow>
       </MineSection>
       <MineSection title='我的收藏'>
         <FavoritePreviewSkeleton count={favoriteSkeletonCount} />
       </MineSection>
-      <MineSection title='观看统计'>
-        <div className='pt-2'>
-          <PlaybackStatsSkeleton />
-        </div>
-      </MineSection>
+      <PlaybackStatsSkeleton />
     </div>
   );
 }

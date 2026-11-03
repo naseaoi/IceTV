@@ -171,7 +171,7 @@ describe('SourcesTab probe status', () => {
     expect(detectButton).toBeDisabled();
     expect(detectButton).toHaveAttribute('aria-busy', 'true');
     expect(detectButton.querySelector('span')).toHaveClass('opacity-0');
-    expect(detectButton.querySelector('svg')).toHaveClass('animate-spin');
+    expect(detectButton.querySelector('svg')).toHaveClass('ice-spinner');
     expect(screen.getByRole('button', { name: '检测全部' })).toBe(detectButton);
     fireEvent.click(detectButton);
     expect(mockGetOrProbe).toHaveBeenCalledTimes(1);

@@ -15,7 +15,7 @@ import {
 } from '@/lib/invite-code-consumption.server';
 import { validateAccountPassword } from '@/lib/password-policy';
 import { NicknameTakenError } from '@/lib/review-social-storage';
-import { NicknameValidationError, validateNickname } from '@/lib/user-profile';
+import { ProfileValidationError, validateNickname } from '@/lib/user-profile';
 import {
   isValidUsername,
   normalizeUsername,
@@ -135,7 +135,7 @@ export async function handleRegister(request: NextRequest) {
   } catch (error) {
     if (error instanceof NicknameTakenError)
       return NextResponse.json({ error: '昵称已被使用' }, { status: 409 });
-    if (error instanceof NicknameValidationError)
+    if (error instanceof ProfileValidationError)
       return NextResponse.json({ error: error.message }, { status: 400 });
     if (isDuplicateUserError(error)) {
       return NextResponse.json({ error: '用户名已存在' }, { status: 409 });

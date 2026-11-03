@@ -15,7 +15,7 @@ const RESERVED_NICKNAMES = [
   '系统',
 ];
 
-export class NicknameValidationError extends Error {}
+export class ProfileValidationError extends Error {}
 
 export function normalizeNickname(value: string): string {
   return value.normalize('NFKC').trim().toLowerCase();
@@ -26,7 +26,7 @@ export function validateNickname(value: unknown): {
   nicknameNorm: string;
 } {
   if (typeof value !== 'string') {
-    throw new NicknameValidationError(NICKNAME_RULE_MESSAGE);
+    throw new ProfileValidationError(NICKNAME_RULE_MESSAGE);
   }
   const nickname = value.normalize('NFKC').trim();
   const length = Array.from(nickname).length;
@@ -35,11 +35,29 @@ export function validateNickname(value: unknown): {
     length > NICKNAME_MAX_LENGTH ||
     !NICKNAME_PATTERN.test(nickname)
   ) {
-    throw new NicknameValidationError(NICKNAME_RULE_MESSAGE);
+    throw new ProfileValidationError(NICKNAME_RULE_MESSAGE);
   }
   const nicknameNorm = normalizeNickname(nickname);
   if (RESERVED_NICKNAMES.includes(nicknameNorm)) {
-    throw new NicknameValidationError('该昵称为保留名，请换一个');
+    throw new ProfileValidationError('该昵称为保留名，请换一个');
   }
   return { nickname, nicknameNorm };
+}
+
+const AVATAR_SEED_PATTERN = /^[A-Za-z0-9]{8,24}$/;
+
+// 头像种子：null 表示恢复按 profileId 生成的默认头像
+export function validateAvatarSeed(value: unknown): string | null {
+  if (value === null) return null;
+  if (typeof value !== 'string' || !AVATAR_SEED_PATTERN.test(value)) {
+    throw new ProfileValidationError('头像参数无效');
+  }
+  return value;
+}
+
+export function createAvatarSeed(): string {
+  const bytes = crypto.getRandomValues(new Uint8Array(12));
+  return Array.from(bytes, (byte) => byte.toString(36).padStart(2, '0'))
+    .join('')
+    .slice(0, 16);
 }

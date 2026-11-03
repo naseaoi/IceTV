@@ -1,53 +1,26 @@
-'use client';
-
 import { CircleUserRound } from 'lucide-react';
-
-export type UserAvatarRole = 'owner' | 'admin' | 'user';
 
 type UserAvatarSize = 'sm' | 'md' | 'lg';
 
 const SIZE_CLASS: Record<UserAvatarSize, string> = {
-  sm: 'h-6 w-6 text-[11px]',
-  md: 'h-7 w-7 text-xs',
-  lg: 'h-10 w-10 text-base',
+  sm: 'h-6 w-6',
+  md: 'h-7 w-7',
+  lg: 'h-10 w-10',
 };
 
-const ROLE_AVATAR_CLASS: Record<UserAvatarRole, string> = {
-  owner:
-    'bg-gradient-to-br from-yellow-200 to-amber-100 text-amber-700 dark:from-yellow-500/25 dark:to-amber-500/10 dark:text-yellow-200',
-  admin:
-    'bg-gradient-to-br from-purple-200 to-purple-100 text-purple-700 dark:from-purple-500/25 dark:to-purple-500/10 dark:text-purple-200',
-  user: 'bg-gradient-to-br from-brand-200 to-brand-100 text-brand-700 dark:from-brand-500/25 dark:to-brand-500/10 dark:text-brand-200',
-};
-
-interface UserAvatarProps {
-  username?: string;
-  role?: UserAvatarRole;
-  size?: UserAvatarSize;
-  className?: string;
-}
-
+// 游客占位头像；登录用户统一用 ProfileAvatar
 export function UserAvatar({
-  username,
-  role = 'user',
   size = 'md',
   className = '',
-}: UserAvatarProps) {
-  const baseClass = `flex flex-shrink-0 select-none items-center justify-center rounded-full ${SIZE_CLASS[size]} ${className}`;
-
-  if (!username) {
-    return (
-      <span
-        className={`${baseClass} bg-gray-200/80 text-gray-500 dark:bg-gray-700/80 dark:text-gray-400`}
-      >
-        <CircleUserRound className='h-[70%] w-[70%]' />
-      </span>
-    );
-  }
-
+}: {
+  size?: UserAvatarSize;
+  className?: string;
+}) {
   return (
-    <span className={`${baseClass} font-semibold ${ROLE_AVATAR_CLASS[role]}`}>
-      {username.charAt(0).toUpperCase()}
+    <span
+      className={`flex flex-shrink-0 select-none items-center justify-center rounded-full bg-gray-200/80 text-gray-500 dark:bg-gray-700/80 dark:text-gray-400 ${SIZE_CLASS[size]} ${className}`}
+    >
+      <CircleUserRound className='h-[70%] w-[70%]' />
     </span>
   );
 }

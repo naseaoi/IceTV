@@ -84,14 +84,6 @@ const config: Config = {
             filter: 'none',
           },
         },
-        shimmer: {
-          '0%': {
-            backgroundPosition: '-700px 0',
-          },
-          '100%': {
-            backgroundPosition: '700px 0',
-          },
-        },
         fadeIn: {
           '0%': { opacity: '0' },
           '100%': { opacity: '1' },
@@ -103,6 +95,10 @@ const config: Config = {
         slideDown: {
           '0%': { transform: 'translateY(-10px)', opacity: '0' },
           '100%': { transform: 'translateY(0)', opacity: '1' },
+        },
+        statusIconIn: {
+          '0%': { transform: 'scale(0.6)', opacity: '0' },
+          '100%': { transform: 'scale(1)', opacity: '1' },
         },
         slideInFromRight: {
           '0%': { transform: 'translateX(100%)', opacity: '0' },
@@ -128,11 +124,13 @@ const config: Config = {
       },
       animation: {
         flicker: 'flicker 3s linear infinite',
-        shimmer: 'shimmer 1.3s linear infinite',
         'fade-in': 'fadeIn 0.3s ease-in-out',
         'slide-up': 'slideUp 0.3s ease-in-out',
         'slide-down': 'slideDown 0.3s ease-in-out',
         'slide-in-from-right': 'slideInFromRight 0.3s ease-out',
+        'overlay-in': 'fadeIn 0.2s ease-out',
+        'status-icon-in':
+          'statusIconIn 0.4s cubic-bezier(0.34, 1.56, 0.64, 1) both',
         'menu-in-up': 'slideUp 0.18s cubic-bezier(0.16, 1, 0.3, 1)',
         'menu-in-down': 'slideDown 0.18s cubic-bezier(0.16, 1, 0.3, 1)',
         'hero-slide-in':

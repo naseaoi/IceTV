@@ -2,13 +2,20 @@
 
 import '@/features/live/types';
 
-import { AlertTriangle, CheckCircle2, RefreshCw, Tv, X } from 'lucide-react';
+import { AlertTriangle, CheckCircle2, RefreshCw, Tv } from 'lucide-react';
 import { ReactNode, Suspense, useMemo, useRef } from 'react';
 
 import AuthenticatedRoute from '@/components/AuthenticatedRoute';
 import LoadingStatePanel from '@/components/LoadingStatePanel';
+import {
+  MODAL_PRIMARY_BUTTON_CLASS,
+  MODAL_SECONDARY_BUTTON_CLASS,
+} from '@/components/modals/modal-styles';
 import PageLayout from '@/components/PageLayout';
 import { PlayerPageLayout } from '@/components/PlayerPageLayout';
+import PlayerStateOverlay, {
+  PLAYER_OVERLAY_PRIMARY_BUTTON_CLASS,
+} from '@/components/PlayerStateOverlay';
 import { LiveChannelSidebar } from '@/features/live/components/LiveChannelSidebar';
 import { useLiveFavorite } from '@/features/live/hooks/useLiveFavorite';
 import { useLivePlayer } from '@/features/live/hooks/useLivePlayer';
@@ -30,30 +37,22 @@ function LiveLoadingView({
   return (
     <PageLayout activePath='/live' contentMode='player' showDesktopBack={false}>
       <div className='flex h-full items-center justify-center'>
-        <div className='flex w-full max-w-2xl flex-col items-center gap-4 px-4'>
-          <LoadingStatePanel
-            icon={
-              stage === 'ready' ? (
-                <CheckCircle2 className='h-10 w-10' />
-              ) : (
-                <Tv className='h-10 w-10' />
-              )
-            }
-            tone='blue'
-            glow
-            title='正在加载'
-            message={message}
-            progress={progress}
-          />
+        <LoadingStatePanel
+          icon={stage === 'ready' ? <CheckCircle2 /> : <Tv />}
+          iconKey={stage === 'ready' ? 'ready' : 'loading'}
+          loading={stage !== 'ready'}
+          message={message}
+          progress={progress}
+        >
           <button
+            type='button'
             onClick={onBack}
             aria-label='取消加载'
-            title='取消加载'
-            className='inline-flex h-9 w-9 items-center justify-center rounded-full bg-gray-100 text-gray-700 transition-colors hover:bg-gray-200 dark:bg-gray-800 dark:text-gray-200 dark:hover:bg-gray-700'
+            className={MODAL_SECONDARY_BUTTON_CLASS}
           >
-            <X className='h-5 w-5' />
+            取消
           </button>
-        </div>
+        </LoadingStatePanel>
       </div>
     </PageLayout>
   );
@@ -64,18 +63,19 @@ function LiveErrorView({ error }: { error: string }) {
 
   return (
     <PageLayout activePath='/live' contentMode='player' showDesktopBack={false}>
-      <div className='flex h-full items-center justify-center bg-transparent'>
+      <div className='flex h-full items-center justify-center'>
         <LoadingStatePanel
-          icon={<AlertTriangle className='h-10 w-10' />}
+          icon={<AlertTriangle />}
           tone='red'
-          title='哎呀，出现了一些问题'
+          title='直播加载失败'
           message={error}
           description={isAuthError ? undefined : '请检查网络连接或稍后重试。'}
         >
           {isAuthError ? null : (
             <button
+              type='button'
               onClick={() => window.location.reload()}
-              className='flex w-full transform items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-brand-500 to-cyan-600 px-6 py-3 font-medium text-white shadow-lg transition-all duration-200 hover:scale-105 hover:from-brand-600 hover:to-cyan-700 hover:shadow-xl'
+              className={`gap-1.5 ${MODAL_PRIMARY_BUTTON_CLASS}`}
             >
               <RefreshCw className='h-4 w-4' />
               重新尝试
@@ -139,53 +139,41 @@ export function LivePlayerOverlay({
   return (
     <>
       {playbackFailed && (
-        <div className='absolute inset-0 z-[600] flex items-center justify-center overflow-hidden rounded-xl bg-black/90 shadow-lg backdrop-blur-sm transition-all duration-300'>
-          <LoadingStatePanel
-            compact
-            icon={<AlertTriangle className='h-9 w-9' />}
-            tone='red'
-            title='直播流加载失败'
-            titleClassName='text-white'
-            description='可以重试，或切换其他频道。'
-            descriptionClassName='text-gray-300'
+        <PlayerStateOverlay
+          zClassName='z-[600]'
+          icon={<AlertTriangle />}
+          title='直播流加载失败'
+          message='可以重试，或切换其他频道。'
+        >
+          <button
+            type='button'
+            onClick={onRetry}
+            className={PLAYER_OVERLAY_PRIMARY_BUTTON_CLASS}
           >
-            <button
-              type='button'
-              onClick={onRetry}
-              className='inline-flex items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-brand-500 to-cyan-600 px-5 py-2 text-sm font-medium text-white shadow-lg transition-all duration-200 hover:from-brand-600 hover:to-cyan-700 hover:shadow-xl'
-            >
-              <RefreshCw className='h-4 w-4' />
-              重试
-            </button>
-          </LoadingStatePanel>
-        </div>
+            <RefreshCw className='h-3.5 w-3.5 sm:h-4 sm:w-4' />
+            重试
+          </button>
+        </PlayerStateOverlay>
       )}
 
       {unsupportedType && (
-        <div className='pointer-events-none absolute inset-0 z-[600] flex items-center justify-center overflow-hidden rounded-xl bg-black/90 shadow-lg backdrop-blur-sm transition-all duration-300'>
-          <LoadingStatePanel
-            compact
-            icon={<AlertTriangle className='h-9 w-9' />}
-            tone='amber'
-            title='暂不支持的直播流类型'
-            message={unsupportedType.toUpperCase()}
-            description='目前仅支持 M3U8 格式，请尝试其他频道。'
-          />
-        </div>
+        <PlayerStateOverlay
+          zClassName='z-[600]'
+          passThrough
+          icon={<AlertTriangle />}
+          tone='amber'
+          title='暂不支持的直播流类型'
+          message={`${unsupportedType.toUpperCase()}，目前仅支持 M3U8 格式，请尝试其他频道。`}
+        />
       )}
 
-      {isVideoLoading && (
-        <div className='pointer-events-none absolute inset-0 z-[500] flex items-center justify-center overflow-hidden rounded-xl bg-black/85 shadow-lg backdrop-blur-sm transition-all duration-300'>
-          <LoadingStatePanel
-            compact
-            glow
-            icon={<Tv className='h-9 w-9' />}
-            tone='blue'
-            title='IPTV 加载中...'
-            description='正在拉取频道流并初始化播放器缓冲。'
-          />
-        </div>
-      )}
+      <PlayerStateOverlay
+        visible={isVideoLoading}
+        zClassName='z-[500]'
+        passThrough
+        loading
+        title='正在连接直播流'
+      />
     </>
   );
 }

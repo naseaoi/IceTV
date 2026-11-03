@@ -151,7 +151,10 @@ export function FavoritesPageClient({
   } else {
     content = (
       <>
-        <FavoriteGrid items={visibleItems} />
+        <FavoriteGrid
+          items={visibleItems}
+          virtualized={selected.length > RENDER_CHUNK}
+        />
         {hasMore && (
           <div ref={sentinelRef} className='mt-8 flex justify-center'>
             <button

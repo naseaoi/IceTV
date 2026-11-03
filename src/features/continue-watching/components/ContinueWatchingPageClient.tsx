@@ -1,12 +1,14 @@
 'use client';
 
-import { History, Loader2 } from 'lucide-react';
+import { History } from 'lucide-react';
 import { useState } from 'react';
 
 import AuthenticatedRoute from '@/components/AuthenticatedRoute';
+import HomePosterCardSkeleton from '@/components/HomePosterCardSkeleton';
 import ConfirmModal from '@/components/modals/ConfirmModal';
 import { PAGE_CONTAINER_CLASS } from '@/components/page-container';
 import PageLayout from '@/components/PageLayout';
+import Spinner from '@/components/Spinner';
 
 import { useContinueWatchingItems } from '../hooks/useContinueWatchingItems';
 import { ContinueWatchingGrid } from './ContinueWatchingGrid';
@@ -59,9 +61,9 @@ function AuthenticatedContinueWatchingPage({
           {loading && items.length === 0 ? (
             <div className='grid grid-cols-3 justify-start gap-x-3 gap-y-6 xs:grid-cols-4 sm:grid-cols-[repeat(auto-fill,_180px)] sm:gap-x-6 sm:px-2'>
               {Array.from({ length: skeletonCount || 8 }).map((_, index) => (
-                <div
+                <HomePosterCardSkeleton
                   key={index}
-                  className='aspect-[2/3] w-full animate-pulse rounded-lg bg-gray-200 dark:bg-gray-800 sm:w-[180px]'
+                  className='w-full sm:w-[180px]'
                 />
               ))}
             </div>
@@ -77,7 +79,7 @@ function AuthenticatedContinueWatchingPage({
                 onClick={() => void loadMore()}
                 disabled={loadingMore}
               >
-                {loadingMore && <Loader2 className='h-4 w-4 animate-spin' />}
+                {loadingMore && <Spinner className='h-4 w-4' />}
                 {loadingMore ? '加载中...' : '加载更多'}
               </button>
             </div>

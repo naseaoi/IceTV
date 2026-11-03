@@ -240,6 +240,86 @@ export function videoReviewContract(
     expect(await storage.getUserProfile('author')).toBeNull();
   });
 
+  it('round trips avatar updates through every public profile reference', async () => {
+    const storage = createStorage();
+    await storage.clearAllData();
+    const initial = await storage.ensureUserProfile('author');
+    expect(initial.avatar_seed).toBeNull();
+    const avatarSeed = 'Avatar012345';
+    const author = await storage.updateUserProfile('AUTHOR', { avatarSeed });
+    expect(author).toMatchObject({
+      profile_id: initial.profile_id,
+      nickname: null,
+      avatar_seed: avatarSeed,
+    });
+    await storage.updateUserProfile('author', {
+      nickname: 'Author',
+      favoritesPublic: true,
+    });
+    expect(
+      (await storage.getUserProfileById(author.profile_id))?.avatar_seed,
+    ).toBe(avatarSeed);
+    await storage.updateUserProfile('reader', { avatarSeed: 'Reader012345' });
+    await storage.setUserFollow('reader', 'author', true);
+    const now = Date.now() + 1000;
+    await storage.setVideoReview('author', { ...videoReview, updated_at: now });
+    const publicAuthor = {
+      profileId: author.profile_id,
+      nickname: 'Author',
+      avatarSeed,
+    };
+    expect(await storage.getUserProfileView('author', 'reader')).toMatchObject(
+      publicAuthor,
+    );
+    expect(
+      (await storage.getUserFollowPage('reader', 'following')).items[0],
+    ).toMatchObject(publicAuthor);
+    expect(
+      (await storage.getUserFollowPage('author', 'followers')).items[0]
+        .avatarSeed,
+    ).toBe('Reader012345');
+    expect(
+      (await storage.getUserPublicReviewPage('author', 'reader')).items[0]
+        .author,
+    ).toEqual(publicAuthor);
+    expect(
+      (
+        await storage.getPublicVideoReviewsForWork(
+          'reviewdemo',
+          '2026',
+          'reader',
+        )
+      ).reviews[0].author,
+    ).toEqual(publicAuthor);
+    expect(
+      (await storage.getFollowReviewMessages('reader', 0, [], now))[0].author,
+    ).toEqual(publicAuthor);
+    await storage.reportVideoReview(
+      'author',
+      'reviewdemo',
+      '2026',
+      'reader',
+      'spam',
+      '',
+    );
+    const reports = await storage.getReviewReportPage();
+    expect(reports.items[0].review.author).toEqual(publicAuthor);
+    expect(reports.items[0].reports[0].reporter.avatarSeed).toBe(
+      'Reader012345',
+    );
+    expect(
+      (await storage.getUserSocialData('author')).profile?.avatar_seed,
+    ).toBe(avatarSeed);
+    await expect(
+      storage.updateUserProfile('author', { avatarSeed: 'bad' }),
+    ).rejects.toThrow('头像参数无效');
+    expect((await storage.getUserProfile('author'))?.avatar_seed).toBe(
+      avatarSeed,
+    );
+    await storage.updateUserProfile('author', { avatarSeed: null });
+    expect((await storage.getUserProfile('author'))?.avatar_seed).toBeNull();
+  });
+
   it('round trips all social tables and repairs imported profile collisions', async () => {
     const storage = createStorage();
     await storage.clearAllData();
@@ -253,6 +333,7 @@ export function videoReviewContract(
     const profile = {
       username: 'author',
       profile_id: 'AbCdEf012345',
+      avatar_seed: 'Avatar012345',
       nickname: 'Alice',
       favorites_public: true,
       updated_at: 1000,
@@ -294,6 +375,9 @@ export function videoReviewContract(
     const reader = await storage.getUserProfile('reader');
     expect(reader?.profile_id).not.toBe(author?.profile_id);
     expect(reader?.nickname).toBeNull();
+    expect(author?.avatar_seed).toBe(profile.avatar_seed);
+    expect((await storage.getUserSocialData('author')).profile).toEqual(author);
+    expect(reader?.avatar_seed).toBe(profile.avatar_seed);
     expect(await storage.getUserProfile('missing')).not.toBeNull();
     const social = await storage.getUserSocialData('reader');
     expect(social.follows).toHaveLength(1);
@@ -302,7 +386,9 @@ export function videoReviewContract(
     await storage.replaceAllData({ ...snapshot, users: {}, userData: {} });
     expect(await storage.getUserProfile('reader')).toBeNull();
     expect((await storage.getUserSocialData('reader')).likes).toEqual([]);
+    snapshot.userData.author.profile.avatar_seed = 'bad';
     await storage.replaceAllData(snapshot);
+    expect((await storage.getUserProfile('author'))?.avatar_seed).toBeNull();
     await storage.clearAllData();
     expect(await storage.getUserProfile('author')).toBeNull();
     expect((await storage.getUserSocialData('reader')).reports).toEqual([]);

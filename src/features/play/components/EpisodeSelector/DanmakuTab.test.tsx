@@ -45,7 +45,7 @@ describe('DanmakuTab reload controls', () => {
     expect(onReload).toHaveBeenCalledWith({ refreshData: true });
     expect(button).toBeDisabled();
     expect(button).toHaveAttribute('aria-busy', 'true');
-    expect(button.querySelector('svg')).toHaveClass('animate-spin');
+    expect(button.querySelector('svg')).toHaveClass('ice-spinner');
     expect(button.querySelector('span')).toHaveClass('opacity-0');
     expect(button).toHaveTextContent('重载');
     fireEvent.click(button);

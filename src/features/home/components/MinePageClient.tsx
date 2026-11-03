@@ -64,11 +64,7 @@ export function MinePageClient({
           skeletonCount={favoriteLoadingSkeletonCount}
         />
       </MineSection>
-      <MineSection title='观看统计'>
-        <div className='pt-2'>
-          <PlaybackStatsPanel />
-        </div>
-      </MineSection>
+      <PlaybackStatsPanel />
     </div>
   );
 }

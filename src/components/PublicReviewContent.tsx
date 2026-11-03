@@ -124,7 +124,7 @@ export default function PublicReviewContent({
           href={`/u/${review.author.profileId}`}
           aria-label={`查看${review.author.nickname ?? '未设置昵称'}的主页`}
         >
-          <ProfileAvatar {...review.author} />
+          <ProfileAvatar user={review.author} />
         </Link>
       )}
       <div className='min-w-0 flex-1'>

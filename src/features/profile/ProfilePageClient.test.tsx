@@ -38,6 +38,7 @@ jest.mock('@/lib/profile.client', () => ({
 }));
 const profile: UserProfileView = {
   profileId: 'profileAlice',
+  avatarSeed: null,
   nickname: '爱丽丝',
   isSelf: false,
   isFollowing: false,
@@ -54,7 +55,14 @@ beforeEach(() => {
     .mockResolvedValue({ items: [], nextCursor: null });
   jest.mocked(getUserFavorites).mockResolvedValue({ hidden: true });
   jest.mocked(getUserFollows).mockResolvedValue({
-    items: [{ profileId: 'profileBob00', nickname: '鲍勃', followedAt: 1 }],
+    items: [
+      {
+        profileId: 'profileBob00',
+        avatarSeed: null,
+        nickname: '鲍勃',
+        followedAt: 1,
+      },
+    ],
     nextCursor: null,
   });
 });

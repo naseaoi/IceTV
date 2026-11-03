@@ -42,34 +42,44 @@ function EpisodeTabLoading() {
   );
 }
 
-function InfoTabLoading() {
+function InfoTabLoading({
+  scrollMode = 'desc',
+}: {
+  scrollMode?: 'panel' | 'desc';
+}) {
   return (
     <div
       data-play-detail-skeleton
-      className='flex min-h-0 flex-col gap-2 px-5 pb-1 pt-4 sm:px-6 sm:pb-1 sm:pt-5'
+      className={
+        scrollMode === 'desc'
+          ? 'flex min-h-0 min-w-0 flex-col gap-2 overflow-hidden px-5 pb-1 pt-4 sm:px-6 sm:pb-1 sm:pt-5'
+          : 'flex min-h-0 min-w-0 flex-1 flex-col gap-3 overflow-hidden p-5 sm:p-6'
+      }
     >
       <div className='flex flex-shrink-0 gap-4 sm:gap-5'>
-        <div className='aspect-[2/3] w-24 flex-shrink-0 animate-pulse rounded-xl bg-gray-200/80 dark:bg-white/[0.08] sm:w-28 xl:w-32' />
+        <div className='skeleton aspect-[2/3] w-24 flex-shrink-0 self-start rounded-xl sm:w-28 xl:w-32' />
         <div className='flex min-w-0 flex-1 flex-col justify-end gap-2.5 pb-0.5'>
-          <div className='h-5 w-2/3 animate-pulse rounded-md bg-gray-200/80 dark:bg-white/[0.08]' />
-          <div className='h-4 w-12 animate-pulse rounded-md bg-gray-200/80 dark:bg-white/[0.08]' />
-          <div className='h-5 w-20 animate-pulse rounded-full bg-gray-200 dark:bg-white/[0.06]' />
-          <div className='flex gap-1.5'>
-            <div className='h-5 w-14 animate-pulse rounded-full bg-gray-200/80 dark:bg-white/[0.08]' />
-            <div className='h-5 w-20 animate-pulse rounded-full bg-gray-200/80 dark:bg-white/[0.08]' />
+          <div className='flex h-[22px] items-center'>
+            <div className='skeleton h-4 w-2/3 rounded-md' />
           </div>
-          <div className='flex gap-1.5'>
-            <div className='h-5 w-16 animate-pulse rounded-full bg-gray-200 dark:bg-white/[0.06]' />
+          <div className='flex h-4 items-center'>
+            <div className='skeleton h-3 w-12 rounded-md' />
           </div>
+          <div className='flex h-4 items-center'>
+            <div className='skeleton h-3 w-20 rounded-md' />
+          </div>
+          <div className='skeleton h-7 w-20 rounded-full' />
         </div>
       </div>
       <div className='flex min-h-0 flex-1 flex-col overflow-hidden'>
-        <div className='flex min-h-0 flex-1 flex-col gap-2.5 overflow-hidden'>
+        <div className='flex min-h-0 flex-1 flex-col overflow-hidden'>
           {infoSkeletonLineWidths.map((widthClass, index) => (
             <div
               key={index}
-              className={`h-[18px] flex-shrink-0 animate-pulse rounded bg-gray-200/70 dark:bg-white/[0.07] ${widthClass}`}
-            />
+              className='flex h-[1.8em] shrink-0 items-center text-[13px]'
+            >
+              <div className={`skeleton h-3.5 rounded ${widthClass}`} />
+            </div>
           ))}
         </div>
       </div>
@@ -82,18 +92,12 @@ function EpisodesTabLoading() {
     <div data-play-episodes-skeleton className='flex min-h-0 flex-1 flex-col'>
       <div className='flex flex-shrink-0 gap-1 px-5 pb-2 pt-2 sm:px-6'>
         {Array.from({ length: 4 }, (_, index) => (
-          <div
-            key={index}
-            className='h-7 flex-1 animate-pulse rounded-md bg-gray-200/70 dark:bg-white/[0.07]'
-          />
+          <div key={index} className='skeleton h-7 flex-1 rounded-md' />
         ))}
       </div>
       <div className='flex flex-1 flex-wrap content-start justify-center gap-2 overflow-hidden px-5 pb-5 pt-2 sm:px-6 sm:pb-6'>
         {Array.from({ length: 24 }, (_, index) => (
-          <div
-            key={index}
-            className='h-11 w-12 animate-pulse rounded-lg bg-gray-200/70 dark:bg-white/[0.07]'
-          />
+          <div key={index} className='skeleton h-11 w-12 rounded-lg' />
         ))}
       </div>
     </div>
@@ -155,7 +159,7 @@ const InfoTab = dynamic(
       (mod) => mod.InfoTab,
     ),
   {
-    loading: InfoTabLoading,
+    loading: () => <InfoTabLoading />,
   },
 );
 const SourcesTab = dynamic(
@@ -353,7 +357,7 @@ const EpisodeSelector: React.FC<EpisodeSelectorProps> = ({
     onOpenReview: () => void,
   ) => {
     if (detailLoading) {
-      return <InfoTabLoading />;
+      return <InfoTabLoading scrollMode={scrollMode} />;
     }
 
     return (

@@ -69,6 +69,7 @@ describe('data import full export fields', () => {
     user.profile = {
       username: 'untrusted',
       profile_id: 'AbCdEf012345',
+      avatar_seed: 'Avatar012345',
       nickname: 'Demo',
       favorites_public: true,
       updated_at: 100,
@@ -101,6 +102,36 @@ describe('data import full export fields', () => {
     user.reports[0].detail = 'x'.repeat(201);
     await expect(parseImportData(data)).rejects.toThrow('举报记录无效');
   });
+
+  it.each([
+    undefined,
+    null,
+    '',
+    'short',
+    'x'.repeat(25),
+    'invalid-seed',
+    123,
+    {},
+  ])(
+    'normalizes absent or invalid imported avatar seeds to null: %j',
+    async (avatar_seed) => {
+      const data = createImportData();
+      Object.assign(data.data.userData['demo-user'], {
+        profile: {
+          username: 'demo-user',
+          profile_id: 'AbCdEf012345',
+          nickname: 'Demo',
+          avatar_seed,
+          favorites_public: false,
+          updated_at: 100,
+        },
+      });
+      const parsed = await parseImportData(data);
+      expect(
+        parsed.snapshot.userData['demo-user'].profile?.avatar_seed,
+      ).toBeNull();
+    },
+  );
 
   it('normalizes review identity, preserves private fields and supports old backups', async () => {
     const data = createImportData();

@@ -235,6 +235,7 @@ export default function ContinueCard({
   const progressPercent = Math.min(100, Math.max(0, progress));
   const displaySourceName = sourceName?.trim() || source;
 
+  const showUpdate = visibleHasUpdate && availableEpisodes > 1;
   const metaText =
     totalEpisodes > 1
       ? `第 ${currentEpisode} 集 / 共 ${totalEpisodes} 集`
@@ -263,7 +264,7 @@ export default function ContinueCard({
       }}
       {...longPressProps}
     >
-      <div className='poster-rounded-clip relative aspect-[2/3] w-[76px] shrink-0 overflow-hidden rounded-lg bg-gray-100 ring-1 ring-gray-900/[0.06] dark:bg-gray-800 dark:ring-white/[0.06] md:w-[88px]'>
+      <div className='poster-rounded-clip relative aspect-[2/3] w-[76px] shrink-0 self-start overflow-hidden rounded-lg bg-gray-100 ring-1 ring-gray-900/[0.06] dark:bg-gray-800 dark:ring-white/[0.06] md:w-[88px]'>
         <CoverImage
           src={poster}
           alt={title}
@@ -281,18 +282,26 @@ export default function ContinueCard({
           {title}
         </p>
         <div className='mt-1 space-y-0.5 text-xs'>
-          {metaText && (
+          {/* 更新信息并入集数行，多占一行会撑高整排卡片 */}
+          {showUpdate ? (
             <p
               data-continue-meta
               className='truncate text-gray-500 dark:text-gray-400'
             >
-              {metaText}
+              第 {currentEpisode} 集 /{' '}
+              <span className='font-medium text-amber-600 dark:text-amber-400'>
+                更新至 {availableEpisodes} 集
+              </span>
             </p>
-          )}
-          {visibleHasUpdate && availableEpisodes > 1 && (
-            <p className='truncate font-medium text-amber-600 dark:text-amber-400'>
-              更新至 {availableEpisodes} 集
-            </p>
+          ) : (
+            metaText && (
+              <p
+                data-continue-meta
+                className='truncate text-gray-500 dark:text-gray-400'
+              >
+                {metaText}
+              </p>
+            )
           )}
           <p
             data-continue-source

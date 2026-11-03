@@ -1,8 +1,9 @@
 'use client';
 
-import { Check, Copy, Loader2, Plus } from 'lucide-react';
+import { Check, Copy, Plus } from 'lucide-react';
 import { useState } from 'react';
 
+import Spinner from '@/components/Spinner';
 import AdminDialog from '@/features/admin/components/AdminDialog';
 import { buttonStyles, inputStyles } from '@/features/admin/lib/buttonStyles';
 import { formatDateTime } from '@/features/admin/lib/formatDateTime';
@@ -239,7 +240,7 @@ export function RegistrationSettingsDialog({
               }
             >
               {isCreatingCode ? (
-                <Loader2 className='h-5 w-5 animate-spin' />
+                <Spinner className='h-5 w-5' />
               ) : (
                 <Plus className='h-5 w-5' />
               )}

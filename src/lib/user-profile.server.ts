@@ -8,7 +8,11 @@ import { db } from '@/lib/db';
 import { FixedWindowRateLimiter } from '@/lib/fixed-window-rate-limit';
 import { NicknameTakenError, socialPage } from '@/lib/review-social-storage';
 import type { PublicFavoriteItem, UserProfile } from '@/lib/types';
-import { NicknameValidationError, validateNickname } from '@/lib/user-profile';
+import {
+  ProfileValidationError,
+  validateAvatarSeed,
+  validateNickname,
+} from '@/lib/user-profile';
 import { normalizeUsername } from '@/lib/username';
 import { ReviewValidationError } from '@/lib/video-reviews';
 
@@ -26,7 +30,7 @@ export function socialFailure(error: unknown) {
     return socialJson({ error: '昵称已被使用' }, 409);
   if (
     error instanceof ReviewValidationError ||
-    error instanceof NicknameValidationError
+    error instanceof ProfileValidationError
   )
     return socialJson({ error: error.message }, 400);
   console.error('用户社交操作失败', error);
@@ -59,6 +63,7 @@ function ownProfile(profile: UserProfile) {
   return {
     profileId: profile.profile_id,
     nickname: profile.nickname,
+    avatarSeed: profile.avatar_seed,
     favoritesPublic: profile.favorites_public,
   };
 }
@@ -70,11 +75,21 @@ export async function handleProfile(request: NextRequest) {
     if (request.method === 'GET')
       return socialJson(ownProfile(await db.ensureUserProfile(guard.username)));
     const body = await socialBody(request);
-    if (body.nickname === undefined && body.favoritesPublic === undefined)
+    if (
+      body.nickname === undefined &&
+      body.favoritesPublic === undefined &&
+      body.avatarSeed === undefined
+    )
       throw new ReviewValidationError('请提供要修改的资料');
-    const patch: { nickname?: string; favoritesPublic?: boolean } = {};
+    const patch: {
+      nickname?: string;
+      avatarSeed?: string | null;
+      favoritesPublic?: boolean;
+    } = {};
     if (body.nickname !== undefined)
       patch.nickname = validateNickname(body.nickname).nickname;
+    if (body.avatarSeed !== undefined)
+      patch.avatarSeed = validateAvatarSeed(body.avatarSeed);
     if (body.favoritesPublic !== undefined) {
       if (typeof body.favoritesPublic !== 'boolean')
         throw new ReviewValidationError('收藏公开状态必须为布尔值');
@@ -108,7 +123,7 @@ export async function handleNicknameAvailability(request: NextRequest) {
         request.nextUrl.searchParams.get('nickname'),
       ).nickname;
     } catch (error) {
-      if (error instanceof NicknameValidationError)
+      if (error instanceof ProfileValidationError)
         return socialJson({ available: false, error: error.message });
       throw error;
     }

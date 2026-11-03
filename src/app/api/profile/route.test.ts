@@ -66,6 +66,7 @@ beforeEach(() => {
     username: 'reader',
     profile_id: 'Reader012345',
     nickname: 'Reader',
+    avatar_seed: null,
     favorites_public: false,
   });
   db.getUserProfileById.mockResolvedValue({
@@ -83,6 +84,7 @@ it('returns only public profile fields and validates updates', async () => {
   expect(await (await profile.GET(request())).json()).toEqual({
     profileId: 'Reader012345',
     nickname: 'Reader',
+    avatarSeed: null,
     favoritesPublic: false,
   });
   db.updateUserProfile.mockResolvedValue({
@@ -111,6 +113,43 @@ it('returns only public profile fields and validates updates', async () => {
   const duplicate = await profile.PUT(request('PUT', { nickname: 'NewName' }));
   expect(duplicate.status).toBe(409);
   expect(await duplicate.json()).toEqual({ error: '昵称已被使用' });
+});
+
+it.each(['Avatar012345', 'a'.repeat(8), 'Z'.repeat(24), null])(
+  'accepts avatar-only updates including reset: %s',
+  async (avatarSeed) => {
+    db.updateUserProfile.mockResolvedValue({
+      profile_id: 'Reader012345',
+      nickname: null,
+      avatar_seed: avatarSeed,
+      favorites_public: false,
+    });
+    const response = await profile.PUT(request('PUT', { avatarSeed }));
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({
+      profileId: 'Reader012345',
+      nickname: null,
+      avatarSeed,
+      favoritesPublic: false,
+    });
+    expect(db.updateUserProfile).toHaveBeenCalledWith('reader', { avatarSeed });
+  },
+);
+
+it.each([
+  '',
+  'a'.repeat(7),
+  'a'.repeat(25),
+  'invalid-seed',
+  '中文头像种子',
+  123,
+  {},
+  [],
+])('rejects invalid avatar seeds without writing: %j', async (avatarSeed) => {
+  const response = await profile.PUT(request('PUT', { avatarSeed }));
+  expect(response.status).toBe(400);
+  expect(await response.json()).toEqual({ error: '头像参数无效' });
+  expect(db.updateUserProfile).not.toHaveBeenCalled();
 });
 
 it('checks public nickname availability while excluding the current user', async () => {

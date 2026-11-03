@@ -1,26 +1,18 @@
 'use client';
 
-import {
-  AlertCircle,
-  CheckCircle,
-  Eye,
-  EyeOff,
-  Home,
-  Loader2,
-} from 'lucide-react';
+import { AlertCircle, CheckCircle, Eye, EyeOff } from 'lucide-react';
 import Link from 'next/link';
-import { useEffect, useMemo, useState } from 'react';
+import { type ReactNode, useEffect, useMemo, useState } from 'react';
 
+import { MODAL_LABEL_CLASS } from '@/components/modals/modal-styles';
 import { SiteIcon } from '@/components/SiteIcon';
 import { useSite } from '@/components/SiteProvider';
+import Spinner from '@/components/Spinner';
 import { ThemeToggle } from '@/components/ThemeToggle';
 import { useNicknameAvailability } from '@/hooks/useNicknameAvailability';
 import { getClientAuthRuntimeConfig } from '@/lib/runtime-config';
-import { getPrimaryRepoUrl } from '@/lib/update-source';
 import { validateNickname } from '@/lib/user-profile';
 import { normalizeUsername } from '@/lib/username';
-import { CURRENT_VERSION } from '@/lib/version';
-import { checkForUpdates, UpdateStatus } from '@/lib/version-check';
 
 import { useUsernameAvailability } from './hooks/useUsernameAvailability';
 import {
@@ -30,74 +22,53 @@ import {
 } from './lib/registerValidation';
 import { PosterWallBackdrop } from './PosterWallBackdrop';
 
-const INPUT_CLASS =
-  'block w-full rounded-lg border-0 bg-gray-100/90 px-4 py-3 text-gray-900 ring-1 ring-gray-200/80 transition-shadow placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-brand-500 dark:bg-white/[0.07] dark:text-white dark:ring-white/10 dark:placeholder:text-gray-500 sm:text-[15px]';
+// 与 MODAL_INPUT_CLASS 同风格；移动端保持 16px 字号，避免 iOS 聚焦时放大页面
+const INPUT_BASE_CLASS =
+  'block h-11 w-full rounded-lg border-0 bg-gray-900/[0.04] px-3.5 text-base text-gray-900 ring-1 ring-inset transition-colors placeholder:text-gray-400 focus:bg-white focus:ring-2 dark:bg-white/[0.06] dark:text-gray-100 dark:placeholder:text-gray-500 dark:focus:bg-gray-950 sm:text-sm';
 
-const INPUT_INVALID_CLASS =
-  'ring-red-500/60 focus:ring-red-500 dark:ring-red-500/60 dark:focus:ring-red-500';
+const INPUT_VALID_RING_CLASS =
+  'ring-gray-900/[0.08] focus:ring-brand-500 dark:ring-white/[0.08]';
 
-const FIELD_ERROR_CLASS = 'mt-1.5 text-xs text-red-600 dark:text-red-400';
+const INPUT_INVALID_RING_CLASS =
+  'ring-rose-500/60 focus:ring-rose-500 dark:ring-rose-500/60';
+
+const inputClass = (invalid = false) =>
+  `${INPUT_BASE_CLASS} ${
+    invalid ? INPUT_INVALID_RING_CLASS : INPUT_VALID_RING_CLASS
+  }`;
+
+const FIELD_ERROR_CLASS = 'mt-1.5 text-xs text-rose-600 dark:text-rose-400';
 
 const FIELD_HINT_CLASS = 'mt-1.5 text-xs text-gray-500 dark:text-gray-400';
 
 const FIELD_OK_CLASS = 'mt-1.5 text-xs text-brand-600 dark:text-brand-400';
 
+const PASSWORD_TOGGLE_CLASS =
+  'absolute inset-y-0 right-0 flex w-11 items-center justify-center text-gray-400 transition-colors hover:text-gray-600 dark:text-gray-500 dark:hover:text-gray-300';
+
 const SWITCH_LINK_CLASS =
-  'font-semibold text-brand-600 transition-colors hover:text-brand-500 hover:underline dark:text-brand-400 dark:hover:text-brand-300';
+  'font-medium text-brand-600 transition-colors hover:text-brand-500 dark:text-brand-400 dark:hover:text-brand-300';
 
-const HEADER_ICON_BUTTON_CLASS =
-  'flex h-10 w-10 items-center justify-center rounded-full text-white/80 transition-colors hover:bg-white/15 lg:text-gray-600 lg:hover:bg-gray-200/50 dark:lg:text-gray-300 dark:lg:hover:bg-gray-700/50';
-
-function VersionDisplay() {
-  const [updateStatus, setUpdateStatus] = useState<UpdateStatus | null>(null);
-  const [isChecking, setIsChecking] = useState(true);
-  const repoUrl = getPrimaryRepoUrl();
-
-  useEffect(() => {
-    const checkUpdate = async () => {
-      try {
-        const status = await checkForUpdates();
-        setUpdateStatus(status);
-      } catch {
-      } finally {
-        setIsChecking(false);
-      }
-    };
-
-    checkUpdate();
-  }, []);
-
+function FormNotice({
+  tone,
+  children,
+}: {
+  tone: 'error' | 'success';
+  children: ReactNode;
+}) {
+  const Icon = tone === 'error' ? AlertCircle : CheckCircle;
   return (
-    <button
-      onClick={() => window.open(repoUrl, '_blank')}
-      className='flex cursor-pointer items-center gap-2 text-xs text-gray-400 transition-colors lg:text-gray-500 dark:lg:text-gray-400'
+    <div
+      role={tone === 'error' ? 'alert' : 'status'}
+      className={`mb-5 flex items-start gap-2 rounded-lg px-3 py-2.5 text-[13px] leading-5 ${
+        tone === 'error'
+          ? 'bg-rose-500/10 text-rose-600 dark:text-rose-300'
+          : 'bg-brand-500/10 text-brand-700 dark:text-brand-300'
+      }`}
     >
-      <span className='font-mono'>v{CURRENT_VERSION}</span>
-      {!isChecking && updateStatus !== UpdateStatus.FETCH_FAILED && (
-        <div
-          className={`flex items-center gap-1.5 ${
-            updateStatus === UpdateStatus.HAS_UPDATE
-              ? 'text-yellow-400'
-              : updateStatus === UpdateStatus.NO_UPDATE
-                ? 'text-brand-400'
-                : ''
-          }`}
-        >
-          {updateStatus === UpdateStatus.HAS_UPDATE && (
-            <>
-              <AlertCircle className='h-3.5 w-3.5' />
-              <span className='text-xs font-semibold'>有新版本</span>
-            </>
-          )}
-          {updateStatus === UpdateStatus.NO_UPDATE && (
-            <>
-              <CheckCircle className='h-3.5 w-3.5' />
-              <span className='text-xs font-semibold'>已是最新</span>
-            </>
-          )}
-        </div>
-      )}
-    </button>
+      <Icon className='mt-0.5 h-4 w-4 shrink-0' />
+      <span>{children}</span>
+    </div>
   );
 }
 
@@ -302,70 +273,48 @@ export function LoginPageClient() {
   };
 
   return (
-    <div className='relative flex min-h-screen overflow-hidden'>
-      <div className='absolute inset-0 lg:relative lg:flex-1'>
+    <div className='flex min-h-[100dvh] flex-col bg-white dark:bg-gray-950 lg:flex-row'>
+      <section className='relative isolate h-[40svh] min-h-[260px] shrink-0 overflow-hidden bg-gray-950 lg:h-auto lg:min-h-0 lg:flex-1 [@media(max-height:500px)_and_(max-width:1023px)]:h-36 [@media(max-height:500px)_and_(max-width:1023px)]:min-h-0'>
         <PosterWallBackdrop />
-        <div className='pointer-events-none absolute left-4 top-4 z-10 flex select-none items-center gap-3 sm:left-8 sm:top-5'>
-          <div className='h-10 w-10 overflow-hidden rounded-xl bg-white/10 p-1.5 shadow-sm ring-1 ring-white/15 backdrop-blur sm:h-11 sm:w-11'>
+        <div className='absolute inset-0 bg-[radial-gradient(120%_90%_at_30%_40%,transparent_20%,rgba(0,0,0,0.55)_100%)]' />
+        <div className='absolute inset-x-0 bottom-0 h-3/4 bg-gradient-to-t from-black/90 via-black/45 to-transparent' />
+        <div className='absolute inset-y-0 right-0 hidden w-1/3 bg-gradient-to-r from-transparent to-black/60 lg:block' />
+        <Link
+          href='/'
+          className='absolute bottom-12 left-6 flex items-center gap-3 transition-opacity hover:opacity-80 sm:left-8 lg:bottom-14 lg:left-14 lg:gap-4'
+        >
+          <span className='h-10 w-10 lg:h-14 lg:w-14'>
             <SiteIcon />
-          </div>
-          <span className='text-xl font-bold tracking-tight text-white drop-shadow-sm sm:text-2xl'>
+          </span>
+          <span className='text-2xl font-semibold tracking-tight text-white lg:text-5xl'>
             {siteName}
           </span>
-        </div>
-      </div>
+        </Link>
+      </section>
 
-      <div className='relative z-10 flex min-h-screen w-full flex-col px-4 sm:px-8 lg:w-[460px] lg:shrink-0 lg:border-l lg:border-black/5 lg:bg-white lg:px-10 lg:shadow-2xl dark:lg:border-white/10 dark:lg:bg-zinc-950'>
-        <header className='flex items-center justify-end gap-1 py-4 sm:py-5'>
-          <ThemeToggle className={`${HEADER_ICON_BUTTON_CLASS} p-2.5`} />
-          <Link
-            href='/'
-            aria-label='返回首页'
-            title='返回首页'
-            className={HEADER_ICON_BUTTON_CLASS}
-          >
-            <Home className='h-5 w-5' />
-          </Link>
-        </header>
+      <div className='relative z-10 -mt-6 flex flex-1 flex-col rounded-t-[28px] bg-white dark:bg-gray-950 dark:ring-1 dark:ring-white/[0.06] lg:mt-0 lg:w-[480px] lg:flex-none lg:rounded-none xl:w-[520px]'>
+        <ThemeToggle className='absolute right-4 top-5 flex h-10 w-10 items-center justify-center rounded-full p-2 text-gray-500 transition-colors hover:bg-gray-900/[0.05] hover:text-gray-700 dark:text-gray-400 dark:hover:bg-white/[0.08] dark:hover:text-gray-200 lg:right-6 lg:top-6' />
 
-        <main className='flex flex-1 items-center justify-center py-8'>
-          <div className='w-full max-w-[420px] rounded-2xl bg-white/85 p-6 shadow-2xl ring-1 ring-black/5 backdrop-blur-2xl dark:bg-zinc-950/70 dark:ring-white/10 sm:p-10 lg:max-w-none lg:rounded-none lg:bg-transparent lg:p-0 lg:shadow-none lg:ring-0 lg:backdrop-blur-none dark:lg:bg-transparent dark:lg:ring-0'>
-            <h1 className='text-2xl font-bold tracking-tight text-gray-900 dark:text-white sm:text-[28px]'>
-              {mode === 'register' ? '创建账号' : '登录'}
+        <main className='flex flex-1 justify-center px-6 pb-[calc(2.5rem+env(safe-area-inset-bottom))] pt-7 sm:px-8 lg:items-center lg:px-14 lg:pb-16 lg:pt-16'>
+          <div className='w-full max-w-[360px] animate-slide-up'>
+            <h1 className='mb-7 text-2xl font-semibold tracking-tight text-gray-900 dark:text-white lg:mb-8 lg:text-[28px]'>
+              {isRegister ? '注册账号' : '登录'}
             </h1>
-            <p className='mt-2 text-sm text-gray-500 dark:text-gray-400'>
-              {mode === 'register'
-                ? `注册 ${siteName} 账号，开启观影之旅`
-                : `欢迎回来，登录后继续观影`}
-            </p>
 
-            {error && (
-              <div className='mt-5 flex items-start gap-2.5 rounded-lg bg-red-500/10 px-3.5 py-2.5 text-sm text-red-600 ring-1 ring-red-500/20 dark:bg-red-500/15 dark:text-red-400'>
-                <AlertCircle className='mt-0.5 h-4 w-4 shrink-0' />
-                <span>{error}</span>
-              </div>
-            )}
-            {success && (
-              <div className='mt-5 flex items-start gap-2.5 rounded-lg bg-brand-500/10 px-3.5 py-2.5 text-sm text-brand-600 ring-1 ring-brand-500/20 dark:bg-brand-500/15 dark:text-brand-400'>
-                <CheckCircle className='mt-0.5 h-4 w-4 shrink-0' />
-                <span>{success}</span>
-              </div>
-            )}
+            {error && <FormNotice tone='error'>{error}</FormNotice>}
+            {success && <FormNotice tone='success'>{success}</FormNotice>}
 
-            <form onSubmit={handleSubmit} className='mt-6 space-y-4'>
+            <form onSubmit={handleSubmit} className='space-y-4'>
               {shouldAskUsername && (
                 <div>
-                  <label htmlFor='username' className='sr-only'>
+                  <label htmlFor='username' className={MODAL_LABEL_CLASS}>
                     用户名
                   </label>
                   <input
                     id='username'
                     type='text'
                     autoComplete='username'
-                    className={`${INPUT_CLASS} ${
-                      usernameInvalid ? INPUT_INVALID_CLASS : ''
-                    }`}
-                    placeholder='输入用户名'
+                    className={inputClass(usernameInvalid)}
                     value={username}
                     onChange={(e) => setUsername(e.target.value)}
                     onBlur={() => markTouched('username')}
@@ -384,32 +333,34 @@ export function LoginPageClient() {
 
               {isRegister && (
                 <div>
-                  <label htmlFor='nickname' className='sr-only'>
+                  <label htmlFor='nickname' className={MODAL_LABEL_CLASS}>
                     昵称
                   </label>
                   <input
                     id='nickname'
                     autoComplete='nickname'
-                    placeholder='昵称（公开显示）'
                     value={nickname}
                     onChange={(event) => setNickname(event.target.value)}
                     required
-                    className={INPUT_CLASS}
+                    className={inputClass(
+                      nicknameAvailability.status === 'error',
+                    )}
                   />
-                  <p
-                    className={
-                      nicknameAvailability.status === 'error'
-                        ? FIELD_ERROR_CLASS
-                        : FIELD_HINT_CLASS
-                    }
-                  >
-                    {nicknameAvailability.message ||
-                      '昵称会公开显示，登录名不会公开'}
-                  </p>
+                  {nicknameAvailability.message && (
+                    <p
+                      className={
+                        nicknameAvailability.status === 'error'
+                          ? FIELD_ERROR_CLASS
+                          : FIELD_HINT_CLASS
+                      }
+                    >
+                      {nicknameAvailability.message}
+                    </p>
+                  )}
                 </div>
               )}
               <div>
-                <label htmlFor='password' className='sr-only'>
+                <label htmlFor='password' className={MODAL_LABEL_CLASS}>
                   密码
                 </label>
                 <div className='relative'>
@@ -419,10 +370,7 @@ export function LoginPageClient() {
                     autoComplete={
                       mode === 'register' ? 'new-password' : 'current-password'
                     }
-                    className={`${INPUT_CLASS} pr-12 ${
-                      visibleError('password') ? INPUT_INVALID_CLASS : ''
-                    }`}
-                    placeholder='输入密码'
+                    className={`${inputClass(!!visibleError('password'))} pr-11`}
                     value={password}
                     onChange={(e) => setPassword(e.target.value)}
                     onBlur={() => markTouched('password')}
@@ -434,13 +382,13 @@ export function LoginPageClient() {
                   <button
                     type='button'
                     onClick={() => setShowPassword((prev) => !prev)}
-                    className='absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 transition-colors hover:text-gray-600 dark:text-gray-500 dark:hover:text-gray-300'
+                    className={PASSWORD_TOGGLE_CLASS}
                     aria-label={showPassword ? '隐藏密码' : '显示密码'}
                   >
                     {showPassword ? (
-                      <EyeOff className='h-5 w-5' />
+                      <EyeOff className='h-[18px] w-[18px]' />
                     ) : (
-                      <Eye className='h-5 w-5' />
+                      <Eye className='h-[18px] w-[18px]' />
                     )}
                   </button>
                 </div>
@@ -453,7 +401,10 @@ export function LoginPageClient() {
 
               {mode === 'register' && (
                 <div>
-                  <label htmlFor='confirm-password' className='sr-only'>
+                  <label
+                    htmlFor='confirm-password'
+                    className={MODAL_LABEL_CLASS}
+                  >
                     确认密码
                   </label>
                   <div className='relative'>
@@ -461,12 +412,9 @@ export function LoginPageClient() {
                       id='confirm-password'
                       type={showConfirmPassword ? 'text' : 'password'}
                       autoComplete='new-password'
-                      className={`${INPUT_CLASS} pr-12 ${
-                        visibleError('confirmPassword')
-                          ? INPUT_INVALID_CLASS
-                          : ''
-                      }`}
-                      placeholder='再次输入密码'
+                      className={`${inputClass(
+                        !!visibleError('confirmPassword'),
+                      )} pr-11`}
                       value={confirmPassword}
                       onChange={(e) => setConfirmPassword(e.target.value)}
                       onBlur={() => markTouched('confirmPassword')}
@@ -480,15 +428,15 @@ export function LoginPageClient() {
                     <button
                       type='button'
                       onClick={() => setShowConfirmPassword((prev) => !prev)}
-                      className='absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 transition-colors hover:text-gray-600 dark:text-gray-500 dark:hover:text-gray-300'
+                      className={PASSWORD_TOGGLE_CLASS}
                       aria-label={
                         showConfirmPassword ? '隐藏确认密码' : '显示确认密码'
                       }
                     >
                       {showConfirmPassword ? (
-                        <EyeOff className='h-5 w-5' />
+                        <EyeOff className='h-[18px] w-[18px]' />
                       ) : (
-                        <Eye className='h-5 w-5' />
+                        <Eye className='h-[18px] w-[18px]' />
                       )}
                     </button>
                   </div>
@@ -505,7 +453,7 @@ export function LoginPageClient() {
 
               {mode === 'register' && inviteCodeRequired && (
                 <div>
-                  <label htmlFor='invite-code' className='sr-only'>
+                  <label htmlFor='invite-code' className={MODAL_LABEL_CLASS}>
                     邀请码
                   </label>
                   <input
@@ -513,10 +461,7 @@ export function LoginPageClient() {
                     type='text'
                     autoComplete='off'
                     autoCapitalize='characters'
-                    className={`${INPUT_CLASS} ${
-                      visibleError('inviteCode') ? INPUT_INVALID_CLASS : ''
-                    }`}
-                    placeholder='邀请码'
+                    className={inputClass(!!visibleError('inviteCode'))}
                     value={inviteCode}
                     onChange={(e) => setInviteCode(e.target.value)}
                     onBlur={() => markTouched('inviteCode')}
@@ -544,9 +489,9 @@ export function LoginPageClient() {
                   (isRegister &&
                     (Object.keys(fieldErrors).length > 0 || usernameTaken))
                 }
-                className='!mt-6 inline-flex w-full items-center justify-center gap-2 rounded-lg bg-brand-600 py-3 text-base font-semibold text-white shadow-lg shadow-brand-600/25 transition-colors hover:bg-brand-500 active:bg-brand-700 disabled:cursor-not-allowed disabled:opacity-50'
+                className='!mt-6 inline-flex h-11 w-full items-center justify-center gap-2 rounded-full bg-brand-600 text-[15px] font-medium text-white transition-colors hover:bg-brand-500 active:bg-brand-700 disabled:cursor-not-allowed disabled:opacity-50'
               >
-                {loading && <Loader2 className='h-4 w-4 animate-spin' />}
+                {loading && <Spinner className='h-4 w-4' />}
                 {loading
                   ? mode === 'register'
                     ? '注册中...'
@@ -557,41 +502,20 @@ export function LoginPageClient() {
               </button>
             </form>
 
-            <div className='mt-8 min-h-5 text-center text-sm text-gray-500 dark:text-gray-400'>
-              {mode === 'login' ? (
-                registerEnabled === true ? (
-                  <span>
-                    还没有账号？{' '}
-                    <button
-                      type='button'
-                      onClick={() => switchMode('register')}
-                      className={SWITCH_LINK_CLASS}
-                    >
-                      立即注册
-                    </button>
-                  </span>
-                ) : registerEnabled === false ? (
-                  <span>暂未开放注册</span>
-                ) : null
-              ) : (
-                <span>
-                  已有账号？{' '}
-                  <button
-                    type='button'
-                    onClick={() => switchMode('login')}
-                    className={SWITCH_LINK_CLASS}
-                  >
-                    直接登录
-                  </button>
-                </span>
-              )}
-            </div>
+            {(isRegister || registerEnabled === true) && (
+              <p className='mt-6 text-center text-sm text-gray-500 dark:text-gray-400'>
+                {isRegister ? '已有账号？' : '还没有账号？'}
+                <button
+                  type='button'
+                  onClick={() => switchMode(isRegister ? 'login' : 'register')}
+                  className={SWITCH_LINK_CLASS}
+                >
+                  {isRegister ? '去登录' : '注册'}
+                </button>
+              </p>
+            )}
           </div>
         </main>
-
-        <footer className='flex justify-center pb-4 lg:pb-6'>
-          <VersionDisplay />
-        </footer>
       </div>
     </div>
   );

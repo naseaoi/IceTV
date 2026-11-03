@@ -1,5 +1,6 @@
 'use client';
 
+import dynamic from 'next/dynamic';
 import {
   createContext,
   ReactNode,
@@ -20,10 +21,14 @@ import {
   getMessagePreviewSummary,
   getMessagePreviewToast,
 } from './message-preview';
-import MessagePanel from './MessagePanel';
 import MessageToast from './MessageToast';
 import { useMessagePagination } from './useMessagePagination';
 import { useMessageSummaryPolling } from './useMessageSummaryPolling';
+
+const MessagePanel = dynamic(
+  () => import('@/components/messages/MessagePanel'),
+  { ssr: false },
+);
 
 interface MessageCenterContextValue {
   unreadCount: number;
@@ -142,19 +147,21 @@ export function MessageCenterProvider({ children }: { children: ReactNode }) {
   return (
     <MessageCenterContext.Provider value={contextValue}>
       {children}
-      <MessagePanel
-        open={isOpen}
-        page={pagination.page}
-        loading={pagination.loading}
-        loadingMore={pagination.loadingMore}
-        loadError={pagination.loadError}
-        workingIds={pagination.workingIds}
-        onClose={() => setPanelOpen(false)}
-        onRead={handleRead}
-        onReadAll={handleReadAll}
-        onLoadMore={pagination.loadMore}
-        onRetry={loadFirstPage}
-      />
+      {isOpen && (
+        <MessagePanel
+          open={isOpen}
+          page={pagination.page}
+          loading={pagination.loading}
+          loadingMore={pagination.loadingMore}
+          loadError={pagination.loadError}
+          workingIds={pagination.workingIds}
+          onClose={() => setPanelOpen(false)}
+          onRead={handleRead}
+          onReadAll={handleReadAll}
+          onLoadMore={pagination.loadMore}
+          onRetry={loadFirstPage}
+        />
+      )}
       <MessageToast
         text={toastText}
         onClose={() => setToastText(null)}

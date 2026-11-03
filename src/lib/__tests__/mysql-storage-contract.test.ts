@@ -1,5 +1,6 @@
 /** @jest-environment node */
 
+import { assertPlaybackPeriodRange } from '@/lib/__tests__/__fixtures__/playback-period-contract';
 import { hasPlayRecordUpdate } from '@/lib/play-records';
 import { DEFAULT_RUNTIME_PARAMS } from '@/lib/runtime-params';
 import type { AdminConfig } from '@/types/admin';
@@ -668,6 +669,17 @@ function createFakePool() {
         if (row.username === username) {
           currentState.playbackSessions.delete(id);
         }
+      }
+      return [[], []];
+    }
+
+    if (
+      normalized ===
+      'DELETE FROM playback_sessions WHERE username = ? AND id = ?'
+    ) {
+      const [username, id] = params as [string, string];
+      if (currentState.playbackSessions.get(id)?.username === username) {
+        currentState.playbackSessions.delete(id);
       }
       return [[], []];
     }
@@ -1427,94 +1439,20 @@ function createFakePool() {
     }
 
     if (
-      normalized.startsWith('SELECT COALESCE(SUM(CASE WHEN started_at >= ?') &&
-      normalized.includes('AS range_0')
+      normalized ===
+      'SELECT source, video_id, title, cover, year, started_at, ended_at, watch_seconds FROM playback_sessions WHERE username = ? AND started_at >= ? AND started_at < ? AND watch_seconds > 0'
     ) {
-      const rangeMatches = Array.from(normalized.matchAll(/AS range_(\d+)/g));
-      const rangeCount = rangeMatches.length;
-      const username = params[rangeCount * 2] as string;
-      const sessions = Array.from(
-        currentState.playbackSessions.values(),
-      ).filter((row) => row.username === username);
-      const totals = Object.fromEntries(
-        Array.from({ length: rangeCount }, (_, index) => {
-          const start = Number(params[index * 2]);
-          const end = Number(params[index * 2 + 1]);
-          const total = sessions.reduce((sum, row) => {
-            const startedAt = Number(row.started_at || 0);
-            const watchSeconds = Number(row.watch_seconds || 0);
-            return startedAt >= start && startedAt < end && watchSeconds > 0
-              ? sum + watchSeconds
-              : sum;
-          }, 0);
-          return [`range_${index}`, total];
-        }),
-      );
-      return [[totals], []];
-    }
-
-    if (normalized.startsWith('WITH normalized_sessions AS (')) {
-      const username = params[0] as string;
-      const hasPeriodStart = params.length === 3;
-      const periodStart = hasPeriodStart ? Number(params[1]) : null;
-      const limit = Number(params[params.length - 1]);
-      const grouped = new Map<string, Record<string, unknown>[]>();
-
-      for (const row of currentState.playbackSessions.values()) {
-        if (row.username !== username) continue;
-        if (periodStart !== null && Number(row.started_at || 0) < periodStart) {
-          continue;
-        }
-        const normalizedTitle = String(row.title || '')
-          .trim()
-          .toLocaleLowerCase();
-        const key =
-          normalizedTitle || `${String(row.source)}:${String(row.video_id)}`;
-        const sessions = grouped.get(key) || [];
-        sessions.push(row);
-        grouped.set(key, sessions);
-      }
-
-      const rows = Array.from(grouped.values())
-        .map((sessions) => {
-          const latest = [...sessions].sort((a, b) => {
-            const startedAtDifference =
-              Number(b.started_at || 0) - Number(a.started_at || 0);
-            return (
-              startedAtDifference ||
-              String(b.id || '').localeCompare(String(a.id || ''))
-            );
-          })[0];
-          return {
-            source: latest.source,
-            video_id: latest.video_id,
-            title: latest.title,
-            source_name: latest.source_name,
-            cover: latest.cover,
-            year: latest.year,
-            watch_seconds: sessions.reduce(
-              (sum, row) => sum + Math.max(0, Number(row.watch_seconds || 0)),
-              0,
-            ),
-            session_count: sessions.length,
-            last_watched_at: Math.max(
-              ...sessions.map((row) =>
-                Math.max(
-                  Number(row.started_at || 0),
-                  Number(row.ended_at || 0),
-                ),
-              ),
-            ),
-          };
-        })
-        .sort(
-          (a, b) =>
-            b.watch_seconds - a.watch_seconds ||
-            b.last_watched_at - a.last_watched_at,
-        )
-        .slice(0, limit);
-
-      return [rows, []];
+      const [username, start, end] = params as [string, number, number];
+      return [
+        Array.from(currentState.playbackSessions.values()).filter(
+          (row) =>
+            row.username === username &&
+            Number(row.started_at) >= start &&
+            Number(row.started_at) < end &&
+            Number(row.watch_seconds) > 0,
+        ),
+        [],
+      ];
     }
 
     if (
@@ -2514,86 +2452,9 @@ describe('mysql storage contract', () => {
     ]);
   });
 
-  it('aggregates playback ranges and top items with one query each', async () => {
+  it('reads positive playback sessions in a half-open user-scoped range', async () => {
     const storage = new MySqlStorage('mysql://demo:demo@localhost:3306/icetv');
-
-    await storage.clearAllData();
-    await storage.setPlaybackSession('demo-user', {
-      ...playbackSession,
-      id: 'show-a-old',
-      title: 'Show A',
-      started_at: 100,
-      ended_at: 160,
-      watch_seconds: 60,
-    });
-    await storage.setPlaybackSession('demo-user', {
-      ...playbackSession,
-      id: 'show-a-latest',
-      title: ' Show A ',
-      started_at: 300,
-      ended_at: 360,
-      watch_seconds: 120,
-    });
-    await storage.setPlaybackSession('demo-user', {
-      ...playbackSession,
-      id: 'show-b',
-      video_id: '2',
-      title: 'Show B',
-      started_at: 200,
-      ended_at: 260,
-      watch_seconds: 200,
-    });
-    await storage.setPlaybackSession('other-user', {
-      ...playbackSession,
-      id: 'other-user-show',
-      started_at: 250,
-      ended_at: 350,
-      watch_seconds: 999,
-    });
-
-    fakePool.resetQueryCount();
-    await expect(
-      storage.getPlaybackRangeWatchTotals('demo-user', [
-        { key: 'early', start: 0, end: 200 },
-        { key: 'recent', start: 200, end: 400 },
-      ]),
-    ).resolves.toEqual([
-      { key: 'early', watchSeconds: 60 },
-      { key: 'recent', watchSeconds: 320 },
-    ]);
-    expect(fakePool.getQueryCount()).toBe(1);
-
-    await storage.setPlaybackSession('demo-user', {
-      ...playbackSession,
-      id: 'show-a-other-source',
-      source: 'source-b',
-      video_id: '3',
-      title: 'Show A',
-      started_at: 250,
-      ended_at: 280,
-      watch_seconds: 30,
-    });
-
-    fakePool.resetQueryCount();
-    await expect(
-      storage.getPlaybackTopItems('demo-user', 6, 100),
-    ).resolves.toEqual([
-      expect.objectContaining({
-        videoId: '1',
-        title: ' Show A ',
-        watchSeconds: 210,
-        sessionCount: 3,
-        lastWatchedAt: 360,
-      }),
-      expect.objectContaining({
-        videoId: '2',
-        title: 'Show B',
-        watchSeconds: 200,
-        sessionCount: 1,
-        lastWatchedAt: 260,
-      }),
-    ]);
-    expect(fakePool.getQueryCount()).toBe(1);
+    await assertPlaybackPeriodRange(storage);
   });
 
   it('normalizes usernames before storing and looking them up', async () => {

@@ -28,10 +28,15 @@ export function PlaybackHistoryGridSkeleton({
   count?: number;
 }) {
   return (
-    <div className={POSTER_GRID_CLASS} aria-hidden='true'>
-      {Array.from({ length: count }).map((_, index) => (
-        <HomePosterCardSkeleton key={index} className='w-full' />
-      ))}
+    <div aria-hidden='true'>
+      <div className='mb-3 flex h-5 items-center'>
+        <div className='skeleton h-3.5 w-16 rounded' />
+      </div>
+      <div className={POSTER_GRID_CLASS}>
+        {Array.from({ length: count }).map((_, index) => (
+          <HomePosterCardSkeleton key={index} className='w-full' subtitle />
+        ))}
+      </div>
     </div>
   );
 }

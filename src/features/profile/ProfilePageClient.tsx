@@ -125,14 +125,19 @@ function ProfileFavorites({ profileId }: { profileId: string }) {
 function ProfileHeaderSkeleton() {
   return (
     <div aria-label='加载中' role='status'>
-      <div className='mb-6 flex items-center gap-4 rounded-2xl bg-white p-5 ring-1 ring-gray-200/80 dark:bg-white/[0.03] dark:ring-white/10'>
-        <div className='h-16 w-16 shrink-0 animate-pulse rounded-full bg-gray-200 dark:bg-white/10' />
-        <div className='flex-1 space-y-3'>
-          <div className='h-6 w-36 animate-pulse rounded bg-gray-200 dark:bg-white/10' />
-          <div className='h-4 w-48 animate-pulse rounded bg-gray-200 dark:bg-white/10' />
+      <div className='mb-6 flex flex-wrap items-center gap-4 rounded-2xl bg-white p-5 ring-1 ring-gray-200/80 dark:bg-white/[0.03] dark:ring-white/10'>
+        <div className='skeleton h-16 w-16 shrink-0 rounded-full' />
+        <div className='min-w-0 flex-1'>
+          <div className='flex h-8 items-center'>
+            <div className='skeleton h-6 w-36 max-w-full rounded' />
+          </div>
+          <div className='mt-2 flex h-5 items-center'>
+            <div className='skeleton h-4 w-48 max-w-full rounded' />
+          </div>
         </div>
+        <div className='skeleton h-9 w-[88px] rounded-xl' />
       </div>
-      <div className='mb-6 h-[45px] border-b border-gray-200 dark:border-white/10' />
+      <div className='mb-6 h-[47px] border-b border-gray-200 dark:border-white/10' />
     </div>
   );
 }
@@ -223,7 +228,7 @@ export default function ProfilePageClient({
           <>
             <header className='mb-6 rounded-2xl bg-white p-5 ring-1 ring-gray-200/80 dark:bg-white/[0.03] dark:ring-white/10'>
               <div className='flex flex-wrap items-center gap-4'>
-                <ProfileAvatar {...profile} className='h-16 w-16 text-2xl' />
+                <ProfileAvatar user={profile} className='h-16 w-16' />
                 <div className='min-w-0 flex-1'>
                   <h1 className='break-words text-2xl font-semibold text-gray-900 dark:text-gray-100'>
                     {profile.nickname ?? '未设置昵称'}

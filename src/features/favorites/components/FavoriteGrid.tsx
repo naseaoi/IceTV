@@ -3,18 +3,24 @@
 import Link from 'next/link';
 
 import CoverImage from '@/components/CoverImage';
-import { POSTER_GRID_CLASS } from '@/components/poster-grid-layout';
+import {
+  POSTER_GRID_CLASS,
+  POSTER_VIRTUAL_GRID_LAYOUT,
+} from '@/components/poster-grid-layout';
 import VideoCard from '@/components/VideoCard';
+import { VirtualizedGrid } from '@/components/VirtualizedGrid';
 import type { FavoriteItem } from '@/features/favorites/types';
 
 export function FavoriteGrid({
   items,
   emptyText = '暂无收藏内容',
   readOnly = false,
+  virtualized = false,
 }: {
   items: FavoriteItem[];
   emptyText?: string;
   readOnly?: boolean;
+  virtualized?: boolean;
 }) {
   if (items.length === 0) {
     return (
@@ -24,6 +30,19 @@ export function FavoriteGrid({
       >
         {emptyText}
       </div>
+    );
+  }
+
+  if (virtualized && !readOnly) {
+    return (
+      <VirtualizedGrid
+        items={items}
+        getKey={(item) => `${item.source}+${item.id}`}
+        renderItem={(item) => <FavoriteVideoCard item={item} />}
+        layout={POSTER_VIRTUAL_GRID_LAYOUT}
+        fallbackClassName={POSTER_GRID_CLASS}
+        fallbackCount={48}
+      />
     );
   }
 
@@ -49,15 +68,21 @@ export function FavoriteGrid({
               </p>
             </Link>
           ) : (
-            <VideoCard
-              query={item.search_title}
-              {...item}
-              from='favorite'
-              type={item.episodes > 1 ? 'tv' : ''}
-            />
+            <FavoriteVideoCard item={item} />
           )}
         </div>
       ))}
     </div>
+  );
+}
+
+function FavoriteVideoCard({ item }: { item: FavoriteItem }) {
+  return (
+    <VideoCard
+      query={item.search_title}
+      {...item}
+      from='favorite'
+      type={item.episodes > 1 ? 'tv' : ''}
+    />
   );
 }

@@ -6,6 +6,7 @@ import {
   PlayerPanelContent,
   PlayerPanelTabBar,
 } from '@/components/PlayerPanelTabBar';
+import Spinner from '@/components/Spinner';
 import { useVerticalScrollEdgeFade } from '@/features/live/hooks/useVerticalScrollEdgeFade';
 import {
   formatTimeToHHMM,
@@ -196,7 +197,7 @@ function EpgTab({
 
       {isEpgLoading ? (
         <div className='flex min-h-0 flex-1 items-center justify-center text-sm text-gray-500 dark:text-gray-400'>
-          <div className='mr-3 h-5 w-5 animate-spin rounded-full border-2 border-gray-300 border-t-brand-500' />
+          <Spinner className='mr-3 h-5 w-5 text-brand-500' />
           加载节目单...
         </div>
       ) : programs.length === 0 ? (

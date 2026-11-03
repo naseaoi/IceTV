@@ -18,7 +18,7 @@ interface MineStats {
 }
 
 const BANNER_CLASS = 'flex items-center gap-4 pb-6 pt-4 sm:gap-5 md:pt-10';
-const AVATAR_CLASS = 'h-16 w-16 shrink-0 text-2xl sm:h-20 sm:w-20 sm:text-3xl';
+const AVATAR_CLASS = 'h-16 w-16 sm:h-20 sm:w-20';
 const STAT_CLASS =
   'inline-flex items-baseline gap-1 text-gray-500 transition hover:text-gray-900 dark:text-gray-400 dark:hover:text-gray-100';
 const ACTION_CLASS =
@@ -27,7 +27,7 @@ const ACTION_CLASS =
 function StatValue({ value }: { value: number | null | undefined }) {
   if (value === undefined) {
     return (
-      <span className='inline-block h-3.5 w-5 animate-pulse self-center rounded bg-gray-200 dark:bg-white/10' />
+      <span className='skeleton inline-block h-3.5 w-5 self-center rounded' />
     );
   }
   return (
@@ -40,12 +40,14 @@ function StatValue({ value }: { value: number | null | undefined }) {
 export function MineProfileHeaderSkeleton() {
   return (
     <div aria-hidden='true' className={BANNER_CLASS}>
-      <div
-        className={`${AVATAR_CLASS} animate-pulse rounded-full bg-gray-200 dark:bg-white/10`}
-      />
-      <div className='min-w-0 flex-1 space-y-2.5'>
-        <div className='h-7 w-36 animate-pulse rounded bg-gray-200 dark:bg-white/10' />
-        <div className='h-4 w-44 animate-pulse rounded bg-gray-200 dark:bg-white/10' />
+      <div className={`${AVATAR_CLASS} skeleton shrink-0 rounded-full`} />
+      <div className='min-w-0 flex-1'>
+        <div className='flex h-8 items-center'>
+          <div className='skeleton h-6 w-36 max-w-full rounded' />
+        </div>
+        <div className='mt-1.5 flex h-5 items-center'>
+          <div className='skeleton h-3.5 w-44 max-w-full rounded' />
+        </div>
       </div>
     </div>
   );
@@ -97,11 +99,7 @@ export function MineProfileHeader({ actions }: { actions?: ReactNode }) {
         aria-label={`查看${nickname}的主页`}
         className='shrink-0'
       >
-        <ProfileAvatar
-          profileId={profileId}
-          nickname={session.nickname}
-          className={AVATAR_CLASS}
-        />
+        <ProfileAvatar user={session} className={AVATAR_CLASS} />
       </Link>
 
       <div className='min-w-0 flex-1'>

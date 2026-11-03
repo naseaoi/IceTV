@@ -160,11 +160,7 @@ export const UserMenu: React.FC = () => {
   const isAuthenticated = session.status === 'authenticated';
   const renderAvatar = (className: string) =>
     session.status === 'authenticated' ? (
-      <ProfileAvatar
-        profileId={session.profileId}
-        nickname={session.nickname}
-        className={className}
-      />
+      <ProfileAvatar user={session} className={className} />
     ) : null;
   const role = isAuthenticated ? session.role : 'user';
   const showAdminPanel =
@@ -222,7 +218,7 @@ export const UserMenu: React.FC = () => {
               onClick={() => navigateTo('/me')}
               className='group flex w-full items-center gap-3 rounded-xl px-2.5 py-2.5 text-left transition-colors hover:bg-gray-900/[0.05] dark:hover:bg-white/[0.06]'
             >
-              {renderAvatar('h-10 w-10 text-base')}
+              {renderAvatar('h-10 w-10')}
               <div className='min-w-0 flex-1'>
                 <div className='truncate text-sm font-semibold text-gray-900 dark:text-gray-100'>
                   {displayName}
@@ -324,7 +320,7 @@ export const UserMenu: React.FC = () => {
           aria-label={isAuthenticated ? '账户菜单' : '登录'}
         >
           {isAuthenticated ? (
-            renderAvatar('h-7 w-7 text-xs')
+            renderAvatar('h-7 w-7')
           ) : (
             <CircleUserRound className='h-6 w-6' />
           )}

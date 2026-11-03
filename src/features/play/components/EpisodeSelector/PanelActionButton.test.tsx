@@ -52,7 +52,7 @@ describe('PanelActionButton', () => {
       'absolute',
       'h-3.5',
       'w-3.5',
-      'animate-spin',
+      'ice-spinner',
     );
     expect(button.querySelector('svg')).toHaveAttribute('aria-hidden', 'true');
     fireEvent.click(button);

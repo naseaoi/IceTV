@@ -7,6 +7,7 @@ import React, {
   useSyncExternalStore,
 } from 'react';
 
+import Spinner from '@/components/Spinner';
 import { AddSourcesModal } from '@/features/play/components/EpisodeSelector/AddSourcesModal';
 import { PanelActionButton } from '@/features/play/components/EpisodeSelector/PanelActionButton';
 import { SectionTitle } from '@/features/play/components/EpisodeSelector/SectionTitle';
@@ -405,7 +406,7 @@ export const SourcesTab: React.FC<SourcesTabProps> = ({
   if (sourceSearchLoading) {
     return (
       <div className='flex min-h-0 flex-1 items-center justify-center p-6 text-sm text-gray-500 dark:text-gray-400'>
-        <div className='h-5 w-5 animate-spin rounded-full border-2 border-brand-500 border-t-transparent' />
+        <Spinner className='h-5 w-5 text-brand-500' />
         <span className='ml-2.5'>搜索中...</span>
       </div>
     );
@@ -583,7 +584,7 @@ export const SourcesTab: React.FC<SourcesTabProps> = ({
                         )}
                       {isTesting && (
                         <span className='flex items-center gap-1'>
-                          <span className='inline-block h-2.5 w-2.5 animate-spin rounded-full border-2 border-gray-300 border-t-brand-500 dark:border-gray-600 dark:border-t-brand-400' />
+                          <Spinner className='inline-block h-2.5 w-2.5 text-brand-500 dark:text-brand-400' />
                           检测中
                         </span>
                       )}

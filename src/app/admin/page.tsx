@@ -1,12 +1,13 @@
 ﻿'use client';
 
-import { AlertTriangle, Loader2, RotateCcw, Save } from 'lucide-react';
+import { AlertTriangle, RotateCcw, Save } from 'lucide-react';
 import { Suspense, useEffect, useState } from 'react';
 
 import AuthenticatedRoute from '@/components/AuthenticatedRoute';
 import AlertModal from '@/components/modals/AlertModal';
 import ConfirmModal from '@/components/modals/ConfirmModal';
 import PageLayout from '@/components/PageLayout';
+import Spinner from '@/components/Spinner';
 import AdminNav from '@/features/admin/components/AdminNav';
 import AdminTabContent from '@/features/admin/components/AdminTabContent';
 import { AdminTabScrollPanel } from '@/features/admin/components/AdminTabScrollPanel';
@@ -212,15 +213,15 @@ function AdminPageClient() {
         <div className='px-2 py-4 sm:px-10 sm:py-8 md:-mb-14 md:flex md:h-dvh md:min-h-0 md:flex-col'>
           <div className='mx-auto w-full max-w-[95%] md:flex md:min-h-0 md:flex-1 md:flex-col'>
             <div className='flex h-[52px] shrink-0 items-end gap-1.5 pr-1'>
-              <div className='h-11 w-28 animate-pulse rounded-t-lg bg-gray-200 dark:bg-gray-700' />
-              <div className='h-9 w-24 animate-pulse rounded-t-lg bg-gray-100 dark:bg-gray-800' />
-              <div className='h-9 w-24 animate-pulse rounded-t-lg bg-gray-100 dark:bg-gray-800' />
-              <div className='h-9 w-28 animate-pulse rounded-t-lg bg-gray-100 dark:bg-gray-800' />
+              <div className='skeleton h-11 w-28 rounded-t-lg' />
+              <div className='skeleton h-9 w-24 rounded-t-lg' />
+              <div className='skeleton h-9 w-24 rounded-t-lg' />
+              <div className='skeleton h-9 w-28 rounded-t-lg' />
             </div>
 
             <section className='flex min-w-0 items-center justify-center rounded-xl rounded-tl-none border border-gray-200 bg-white/80 p-4 shadow-sm backdrop-blur-md dark:border-gray-700 dark:bg-gray-800/50 sm:p-6 md:min-h-0 md:flex-1'>
               <div className='flex flex-col items-center gap-4 text-center'>
-                <Loader2 className='h-10 w-10 animate-spin text-brand-500' />
+                <Spinner className='h-10 w-10 text-brand-500' />
                 <div>
                   <p className='text-base font-medium text-gray-900 dark:text-gray-100'>
                     正在加载后台配置
@@ -305,7 +306,7 @@ function AdminPageClient() {
                 }`}
               >
                 {activeSaveAction.saving ? (
-                  <Loader2 size={18} className='animate-spin' />
+                  <Spinner className='h-[18px] w-[18px]' />
                 ) : (
                   <Save size={18} />
                 )}

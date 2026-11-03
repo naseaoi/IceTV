@@ -38,6 +38,7 @@ describe('AuthProvider', () => {
         initialSession={{
           status: 'authenticated',
           profileId: 'profileAlice',
+          avatarSeed: null,
           nickname: '爱丽丝',
           username: 'alice',
           role: 'user',
@@ -57,6 +58,7 @@ describe('AuthProvider', () => {
         initialSession={{
           status: 'authenticated',
           profileId: 'profileAlice',
+          avatarSeed: null,
           nickname: '爱丽丝',
           username: 'alice',
           role: 'user',
@@ -77,6 +79,7 @@ describe('AuthProvider', () => {
     mockGetClientAuthSession.mockResolvedValue({
       status: 'authenticated',
       profileId: 'profileAlice',
+      avatarSeed: null,
       nickname: '爱丽丝',
       username: 'alice',
       role: 'user',
@@ -102,6 +105,7 @@ it('昵称缺失事件触发显式会话刷新', async () => {
     status: 'authenticated',
     username: 'alice',
     profileId: 'profileAlice',
+    avatarSeed: null,
     nickname: null,
     role: 'user',
   });
@@ -111,6 +115,7 @@ it('昵称缺失事件触发显式会话刷新', async () => {
         status: 'authenticated',
         username: 'alice',
         profileId: 'profileAlice',
+        avatarSeed: null,
         nickname: '爱丽丝',
         role: 'user',
       }}

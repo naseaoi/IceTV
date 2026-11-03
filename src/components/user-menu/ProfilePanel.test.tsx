@@ -1,5 +1,6 @@
 import { act, fireEvent, render, screen } from '@testing-library/react';
 
+import { installCryptoPolyfill } from '@/app/api/test-utils/crypto-polyfill';
 import { useAuthSession } from '@/components/AuthProvider';
 import { ProfileForm } from '@/components/user-menu/ProfilePanel';
 import { getMyProfile, updateProfile } from '@/lib/profile.client';
@@ -9,22 +10,40 @@ jest.mock('@/lib/profile.client', () => ({
   getMyProfile: jest.fn(),
   updateProfile: jest.fn(),
 }));
+installCryptoPolyfill();
 const refresh = jest.fn().mockResolvedValue(undefined);
 const originalFetch = global.fetch;
-beforeEach(() => {
-  jest.useFakeTimers();
-  jest.clearAllMocks();
+const savedProfile = {
+  profileId: 'profileAlice',
+  nickname: '光影旅人',
+  avatarSeed: null,
+  favoritesPublic: true,
+};
+function mockSession(nickname: string | null) {
   jest.mocked(useAuthSession).mockReturnValue({
     session: {
       status: 'authenticated',
       username: 'private-login',
       role: 'user',
       profileId: 'profileAlice',
-      nickname: null,
+      nickname,
+      avatarSeed: null,
     },
     refreshSession: refresh,
     isRefreshing: false,
   });
+}
+async function renderLoadedForm() {
+  mockSession('光影旅人');
+  jest.mocked(getMyProfile).mockResolvedValue(savedProfile);
+  await act(async () => {
+    render(<ProfileForm />);
+  });
+}
+const saveButton = () => screen.getByRole('button', { name: '保存' });
+beforeEach(() => {
+  jest.useFakeTimers();
+  jest.clearAllMocks();
   global.fetch = jest
     .fn()
     .mockResolvedValue({ ok: true, json: async () => ({ available: true }) });
@@ -33,17 +52,11 @@ afterEach(() => {
   jest.useRealTimers();
   global.fetch = originalFetch;
 });
-it('校验昵称并在保存成功后刷新会话', async () => {
-  jest.mocked(updateProfile).mockResolvedValue({
-    profileId: 'profileAlice',
-    nickname: '光影旅人',
-    favoritesPublic: false,
-  });
+it('首次设置昵称：检测可用后保存并刷新会话', async () => {
+  mockSession(null);
+  jest.mocked(updateProfile).mockResolvedValue(savedProfile);
   render(<ProfileForm required />);
-  expect(
-    screen.getByText('昵称会公开显示在评价和个人主页，登录名不会公开'),
-  ).toBeInTheDocument();
-  expect(screen.getByRole('button', { name: '保存资料' })).toBeDisabled();
+  expect(saveButton()).toBeDisabled();
   fireEvent.change(screen.getByLabelText('昵称'), {
     target: { value: '光影旅人' },
   });
@@ -55,34 +68,56 @@ it('校验昵称并在保存成功后刷新会话', async () => {
     expect.anything(),
   );
   await act(async () => {
-    fireEvent.click(screen.getByRole('button', { name: '保存资料' }));
+    fireEvent.click(saveButton());
   });
   expect(updateProfile).toHaveBeenCalledWith({ nickname: '光影旅人' });
   expect(refresh).toHaveBeenCalledTimes(1);
 });
-it('加载真实收藏开关并一起保存，昵称冲突保持表单', async () => {
-  jest.mocked(getMyProfile).mockResolvedValue({
-    profileId: 'profileAlice',
-    nickname: '光影旅人',
-    favoritesPublic: true,
-  });
-  jest.mocked(updateProfile).mockRejectedValue(new Error('昵称已被使用'));
-  await act(async () => {
-    render(<ProfileForm />);
-  });
+it('打开时不检测当前昵称，未改动不可保存', async () => {
+  await renderLoadedForm();
   await act(async () => {
     jest.advanceTimersByTime(400);
   });
+  expect(global.fetch).not.toHaveBeenCalled();
+  expect(screen.getByRole('status')).toHaveTextContent('');
+  expect(saveButton()).toBeDisabled();
+});
+it('只提交改动的字段，保存失败保留表单', async () => {
+  await renderLoadedForm();
+  jest.mocked(updateProfile).mockRejectedValue(new Error('保存失败'));
   const toggle = screen.getByRole('switch', { name: /公开我的收藏/ });
   expect(toggle).toHaveAttribute('aria-checked', 'true');
   fireEvent.click(toggle);
   await act(async () => {
-    fireEvent.click(screen.getByRole('button', { name: '保存资料' }));
+    fireEvent.click(saveButton());
+  });
+  expect(updateProfile).toHaveBeenCalledWith({ favoritesPublic: false });
+  expect(global.fetch).not.toHaveBeenCalled();
+  expect(screen.getByRole('alert')).toHaveTextContent('保存失败');
+  expect(refresh).not.toHaveBeenCalled();
+});
+it('选择候选头像后保存头像种子，选回当前头像则无改动', async () => {
+  await renderLoadedForm();
+  jest.mocked(updateProfile).mockResolvedValue(savedProfile);
+  fireEvent.click(screen.getByRole('radio', { name: '候选头像 1' }));
+  expect(saveButton()).toBeEnabled();
+  fireEvent.click(screen.getByRole('radio', { name: '当前头像' }));
+  expect(saveButton()).toBeDisabled();
+  fireEvent.click(screen.getByRole('radio', { name: '候选头像 2' }));
+  await act(async () => {
+    fireEvent.click(saveButton());
   });
   expect(updateProfile).toHaveBeenCalledWith({
-    nickname: '光影旅人',
-    favoritesPublic: false,
+    avatarSeed: expect.stringMatching(/^[a-z0-9]{16}$/),
   });
-  expect(screen.getByRole('alert')).toHaveTextContent('昵称已被使用');
-  expect(refresh).not.toHaveBeenCalled();
+});
+it('换一批保留已选中的候选头像', async () => {
+  await renderLoadedForm();
+  const picked = screen.getByRole('radio', { name: '候选头像 3' });
+  fireEvent.click(picked);
+  const before = picked.innerHTML;
+  fireEvent.click(screen.getByRole('button', { name: '换一批头像' }));
+  const after = screen.getByRole('radio', { name: '候选头像 3' });
+  expect(after).toHaveAttribute('aria-checked', 'true');
+  expect(after.innerHTML).toBe(before);
 });

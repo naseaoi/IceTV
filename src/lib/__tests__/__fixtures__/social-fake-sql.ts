@@ -52,6 +52,7 @@ export function executeSocial(
     for (const column of [
       'nickname',
       'nickname_norm',
+      'avatar_seed',
       'favorites_public',
       'updated_at',
     ]) {
@@ -77,7 +78,8 @@ export function executeSocial(
         profile_id: params[1],
         nickname: params.length === 3 ? null : params[2],
         nickname_norm: params.length === 3 ? null : params[3],
-        favorites_public: params.length === 3 ? 0 : params[4],
+        avatar_seed: params.length === 3 ? null : params[4],
+        favorites_public: params.length === 3 ? 0 : params[5],
         updated_at: params[params.length - 1],
       };
       if (
@@ -150,6 +152,8 @@ export function querySocial(
   params: unknown[],
   state: SocialFakeState,
 ): Row[] | undefined {
+  if (sql.startsWith('SHOW COLUMNS FROM user_profiles'))
+    return [{ Field: 'avatar_seed' }];
   const profiles = state.social.user_profiles;
   const follows = state.social.user_follows;
   const likes = state.social.video_review_likes;
@@ -205,6 +209,7 @@ export function querySocial(
                     review_json: JSON.stringify(row.review),
                     profile_id: p.profile_id,
                     nickname: p.nickname,
+                    avatar_seed: p.avatar_seed,
                   },
                 ]
               : [];

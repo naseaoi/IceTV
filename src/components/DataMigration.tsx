@@ -6,6 +6,7 @@ import { type FormEvent, type ReactNode, useRef, useState } from 'react';
 import AlertModal from '@/components/modals/AlertModal';
 import ConfirmModal from '@/components/modals/ConfirmModal';
 import { PasswordInput } from '@/components/PasswordInput';
+import Spinner from '@/components/Spinner';
 
 interface DataMigrationProps {
   onRefreshConfig?: () => Promise<void>;
@@ -355,7 +356,7 @@ const DataMigration = ({ onRefreshConfig }: DataMigrationProps) => {
               >
                 {isExporting ? (
                   <div className='flex items-center justify-center gap-2'>
-                    <div className='h-4 w-4 animate-spin rounded-full border-2 border-white border-t-transparent'></div>
+                    <Spinner className='h-4 w-4 text-white' />
                     导出中...
                   </div>
                 ) : (
@@ -447,7 +448,7 @@ const DataMigration = ({ onRefreshConfig }: DataMigrationProps) => {
               >
                 {isImporting ? (
                   <div className='flex items-center justify-center gap-2'>
-                    <div className='h-4 w-4 animate-spin rounded-full border-2 border-white border-t-transparent'></div>
+                    <Spinner className='h-4 w-4 text-white' />
                     导入中...
                   </div>
                 ) : (

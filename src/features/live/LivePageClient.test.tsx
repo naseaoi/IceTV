@@ -6,16 +6,6 @@ import LivePage, { LivePlayerOverlay } from '@/features/live/LivePageClient';
 const mockUseLiveSources = jest.fn();
 const mockUseLivePlayer = jest.fn();
 
-jest.mock('@/components/LoadingStatePanel', () => ({
-  __esModule: true,
-  default: ({ title, children }: { title: string; children?: ReactNode }) => (
-    <>
-      <div>{title}</div>
-      {children}
-    </>
-  ),
-}));
-
 jest.mock('@/components/AuthenticatedRoute', () => ({
   __esModule: true,
   default: ({ children }: { children: ReactNode }) => <>{children}</>,
@@ -74,9 +64,9 @@ describe('LivePlayerOverlay', () => {
       />,
     );
 
-    expect(screen.getByText('IPTV 加载中...').parentElement).toHaveClass(
-      'pointer-events-none',
-    );
+    expect(
+      screen.getByText('正在连接直播流').closest('[data-player-overlay]'),
+    ).toHaveClass('pointer-events-none');
 
     rerender(
       <LivePlayerOverlay
@@ -87,9 +77,9 @@ describe('LivePlayerOverlay', () => {
       />,
     );
 
-    expect(screen.getByText('暂不支持的直播流类型').parentElement).toHaveClass(
-      'pointer-events-none',
-    );
+    expect(
+      screen.getByText('暂不支持的直播流类型').closest('[data-player-overlay]'),
+    ).toHaveClass('pointer-events-none');
   });
 
   it('lets the playback failure overlay receive the retry click', () => {
@@ -103,9 +93,9 @@ describe('LivePlayerOverlay', () => {
       />,
     );
 
-    expect(screen.getByText('直播流加载失败').parentElement).not.toHaveClass(
-      'pointer-events-none',
-    );
+    expect(
+      screen.getByText('直播流加载失败').closest('[data-player-overlay]'),
+    ).not.toHaveClass('pointer-events-none');
     fireEvent.click(screen.getByRole('button', { name: '重试' }));
     expect(onRetry).toHaveBeenCalledTimes(1);
   });
@@ -145,7 +135,7 @@ describe('LivePage', () => {
     render(<LivePage />);
 
     expect(screen.getByTestId('live-channel-sidebar')).toBeInTheDocument();
-    expect(screen.queryByText('哎呀，出现了一些问题')).not.toBeInTheDocument();
+    expect(screen.queryByText('直播加载失败')).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: '重试' }));
     expect(retryPlayback).toHaveBeenCalledTimes(1);
   });

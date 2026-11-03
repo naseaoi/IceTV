@@ -1,7 +1,8 @@
 'use client';
 
-import { LoaderCircle } from 'lucide-react';
 import type { ButtonHTMLAttributes } from 'react';
+
+import Spinner from '@/components/Spinner';
 
 type PanelActionButtonProps = ButtonHTMLAttributes<HTMLButtonElement> & {
   busy?: boolean;
@@ -28,12 +29,7 @@ export function PanelActionButton({
       >
         {children}
       </span>
-      {busy && (
-        <LoaderCircle
-          aria-hidden='true'
-          className='absolute inset-0 m-auto h-3.5 w-3.5 animate-spin'
-        />
-      )}
+      {busy && <Spinner className='absolute inset-0 m-auto h-3.5 w-3.5' />}
     </button>
   );
 }

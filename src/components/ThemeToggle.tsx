@@ -130,11 +130,11 @@ export function ThemeToggle({ className }: ThemeToggleProps) {
       onClick={toggleTheme}
       className={
         className ??
-        'flex h-10 w-10 items-center justify-center rounded-full p-2 text-gray-600 transition-colors hover:bg-gray-200/50 dark:text-gray-300 dark:hover:bg-gray-700/50'
+        'flex h-10 w-10 items-center justify-center rounded-full text-gray-600 transition-colors hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-800'
       }
       aria-label='切换主题'
     >
-      <span data-theme-transition-anchor className='h-full w-full'>
+      <span data-theme-transition-anchor className='h-5 w-5'>
         <Sun className='hidden h-full w-full dark:block' />
         <Moon className='h-full w-full dark:hidden' />
       </span>

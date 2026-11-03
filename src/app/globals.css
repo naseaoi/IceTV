@@ -183,94 +183,194 @@ div[data-media-provider] video {
   }
 }
 
-/* 首页 Tab 切换滑入动画 */
-@keyframes slide-in-left {
-  from {
-    transform: translateX(-30px);
-    opacity: 0;
-  }
-  to {
-    transform: translateX(0);
-    opacity: 1;
-  }
-}
-@keyframes slide-in-right {
-  from {
-    transform: translateX(30px);
-    opacity: 0;
-  }
-  to {
-    transform: translateX(0);
-    opacity: 1;
-  }
-}
-
-/* ImagePlaceholder 骨架屏动画 */
-@keyframes shine {
-  0% {
-    background-position: -200% 0;
-  }
-  100% {
-    background-position: 200% 0;
-  }
-}
-
 /* 登录页海报墙横向循环滚动 */
-@keyframes poster-marquee {
+.poster-wall {
+  transform: translate(-50%, -50%) perspective(1600px) rotateX(20deg)
+    rotateY(-10deg) rotateZ(12deg);
+}
+
+/* 列内容为两份相同封面且居中摆放，对称位移一份高度才能首尾衔接且两端不露空 */
+@keyframes poster-column {
   from {
-    transform: translateX(0);
+    transform: translateY(25%);
   }
   to {
-    transform: translateX(-50%);
+    transform: translateY(-25%);
   }
 }
 
-.poster-marquee {
-  animation: poster-marquee 240s linear infinite;
+.poster-column {
+  animation: poster-column 120s linear infinite;
 }
 
-.poster-marquee-reverse {
+.poster-column-reverse {
   animation-direction: reverse;
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .poster-marquee {
+  .poster-column {
     animation: none;
   }
 }
 
-:root {
-  --skeleton-color: #f0f0f0;
-  --skeleton-highlight: #e0e0e0;
-}
+/* ==========================================================================
+   加载反馈：骨架块、环形指示器、进度条，全站与播放器共用
+   ========================================================================== */
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --skeleton-color: #2d2d2d;
-    --skeleton-highlight: #3d3d3d;
-  }
+:root {
+  --skeleton-base: rgba(24, 26, 31, 0.07);
+  --skeleton-shine: rgba(255, 255, 255, 0.65);
 }
 
 .dark {
-  --skeleton-color: #2d2d2d;
-  --skeleton-highlight: #3d3d3d;
+  --skeleton-base: rgba(255, 255, 255, 0.065);
+  --skeleton-shine: rgba(255, 255, 255, 0.07);
+}
+
+@layer components {
+  /* 放在 components 层，absolute 等定位工具类仍能覆盖 relative */
+  .skeleton {
+    position: relative;
+    overflow: hidden;
+    background-color: var(--skeleton-base);
+  }
+
+  .skeleton-surface {
+    background-color: var(--skeleton-base);
+  }
+
+  .skeleton::after,
+  .skeleton-sweep {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background-image: linear-gradient(
+      100deg,
+      transparent 20%,
+      var(--skeleton-shine) 50%,
+      transparent 80%
+    );
+    transform: translateX(-100%);
+    animation: skeleton-sweep 1.9s cubic-bezier(0.4, 0, 0.2, 1) infinite;
+  }
+}
+
+/* 扫过后停顿，整页骨架同步呼吸而不是持续闪动 */
+@keyframes skeleton-sweep {
+  0% {
+    transform: translateX(-100%);
+  }
+  60%,
+  100% {
+    transform: translateX(100%);
+  }
+}
+
+.ice-spinner {
+  animation: ice-spinner-rotate 1.6s linear infinite;
+}
+
+.ice-spinner-track {
+  stroke: currentColor;
+  opacity: 0.16;
+}
+
+.ice-spinner-arc {
+  stroke: currentColor;
+  stroke-linecap: round;
+  stroke-dasharray: 1 126;
+  stroke-dashoffset: 0;
+  animation: ice-spinner-dash 1.4s ease-in-out infinite;
+}
+
+@keyframes ice-spinner-rotate {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@keyframes ice-spinner-dash {
+  0% {
+    stroke-dasharray: 1 126;
+    stroke-dashoffset: 0;
+  }
+  50% {
+    stroke-dasharray: 78 126;
+    stroke-dashoffset: -22;
+  }
+  100% {
+    stroke-dasharray: 78 126;
+    stroke-dashoffset: -124;
+  }
+}
+
+.loading-bar-fill {
+  position: relative;
+  overflow: hidden;
+}
+
+.loading-bar-fill::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background-image: linear-gradient(
+    90deg,
+    transparent,
+    rgba(255, 255, 255, 0.45),
+    transparent
+  );
+  transform: translateX(-100%);
+  animation: skeleton-sweep 1.6s ease-in-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .skeleton::after,
+  .skeleton-sweep,
+  .loading-bar-fill::after {
+    animation: none;
+    opacity: 0;
+  }
+
+  .ice-spinner-arc {
+    animation: none;
+    stroke-dasharray: 60 126;
+  }
 }
 
 /* ==========================================================================
    ArtPlayer 现代化玻璃拟态风格 — 与项目 ModalShell 风格统一
    ========================================================================== */
 
-/* --- 播放器容器圆角 --- */
+/* --- 播放器容器圆角：跟随外层容器（移动端通栏无圆角，桌面 rounded-xl） --- */
 .art-video-player {
-  border-radius: 8px !important;
+  border-radius: inherit !important;
   overflow: hidden !important;
 }
 
-/* --- 移动端播放器全宽通栏，去除圆角 --- */
-@media (max-width: 767.98px) {
-  .art-video-player {
-    border-radius: 0 !important;
-  }
+/* --- 缓冲指示与中央播放按钮：与站内 Spinner 同款，移动端缩小 --- */
+.art-video-player {
+  --art-state-size: 64px !important;
+}
+
+.art-video-player.art-mobile {
+  --art-state-size: 48px !important;
+}
+
+.art-video-player .art-loading .ice-spinner {
+  width: 44px;
+  height: 44px;
+  color: #8fc4e6;
+  filter: drop-shadow(0 1px 6px rgba(0, 0, 0, 0.45));
+}
+
+.art-video-player.art-mobile .art-loading .ice-spinner {
+  width: 32px;
+  height: 32px;
+}
+
+/* 站内状态遮罩（PlayerStateOverlay）与播放器同级，显示期间隐藏内置缓冲指示，避免叠出两个转圈 */
+div:has(> [data-player-overlay]) .art-loading {
+  visibility: hidden !important;
 }
 
 /* --- 右键菜单 --- */
@@ -295,8 +395,8 @@ div[data-media-provider] video {
 }
 
 .art-contextmenu:hover {
-  background: rgba(59, 130, 246, 0.18) !important;
-  color: #60a5fa !important;
+  background: rgba(95, 168, 216, 0.16) !important;
+  color: #8fc4e6 !important;
 }
 
 .art-contextmenu a {
@@ -354,15 +454,15 @@ div[data-media-provider] video {
 
 .art-progress .art-progress-played {
   border-radius: 4px !important;
-  background: #3b82f6 !important;
+  background: #5fa8d8 !important;
 }
 
 /* 进度条拖拽手柄 */
 .art-progress .art-progress-indicator {
   border-radius: 50% !important;
   background: #fff !important;
-  box-shadow: 0 0 6px rgba(59, 130, 246, 0.5) !important;
-  border: 2px solid #3b82f6 !important;
+  box-shadow: 0 0 6px rgba(95, 168, 216, 0.5) !important;
+  border: 2px solid #5fa8d8 !important;
   transition: transform 0.1s ease !important;
 }
 
@@ -412,7 +512,7 @@ div[data-media-provider] video {
 }
 
 .art-setting-item:hover {
-  background: rgba(59, 130, 246, 0.18) !important;
+  background: rgba(95, 168, 216, 0.16) !important;
 }
 
 /* 设置面板内部项 */
@@ -426,7 +526,7 @@ div[data-media-provider] video {
 
 /* 设置面板开关 */
 .art-setting-item .art-setting-item-right-tooltip {
-  color: #60a5fa !important;
+  color: #8fc4e6 !important;
   font-weight: 500 !important;
 }
 
@@ -438,13 +538,13 @@ div[data-media-provider] video {
 }
 
 .art-volume-panel .art-volume-slider-handle {
-  background: #3b82f6 !important;
+  background: #5fa8d8 !important;
 }
 
 .art-volume-panel .art-volume-slider-handle::before {
   background: #fff !important;
-  border: 2px solid #3b82f6 !important;
-  box-shadow: 0 0 4px rgba(59, 130, 246, 0.4) !important;
+  border: 2px solid #5fa8d8 !important;
+  box-shadow: 0 0 4px rgba(95, 168, 216, 0.4) !important;
 }
 
 /* --- 提示文字（notice） --- */
@@ -544,8 +644,8 @@ div[data-media-provider] video {
 
 .art-video-player .art-selector-item:hover,
 .art-video-player .art-selector-item.art-current {
-  background: rgba(59, 130, 246, 0.18) !important;
-  color: #60a5fa !important;
+  background: rgba(95, 168, 216, 0.16) !important;
+  color: #8fc4e6 !important;
 }
 
 /* --- Tooltip --- */
@@ -576,78 +676,6 @@ div[data-media-provider] video {
 
 .art-video-player[data-fullscreen-web] {
   border-radius: 0 !important;
-}
-
-/* ==========================================================================
-   LoadingStatePanel 动画（改为全局样式，避免在 Server Component 中引入 styled-jsx）
-   ========================================================================== */
-
-.ls-glow-ring {
-  background: conic-gradient(
-    from 0deg,
-    transparent 0deg,
-    transparent 200deg,
-    currentColor 320deg,
-    transparent 360deg
-  );
-  mask: radial-gradient(circle, transparent 62%, black 64%);
-  -webkit-mask: radial-gradient(circle, transparent 62%, black 64%);
-  animation: ls-rotate 1.4s linear infinite;
-}
-
-.ls-shimmer {
-  position: relative;
-  overflow: hidden;
-  background-size: 100% 100%;
-  background-position: 0 0;
-}
-
-.ls-shimmer::after {
-  content: '';
-  position: absolute;
-  inset: 0;
-  background: linear-gradient(
-    90deg,
-    rgba(255, 255, 255, 0) 0%,
-    rgba(255, 255, 255, 0.16) 40%,
-    rgba(255, 255, 255, 0.34) 50%,
-    rgba(255, 255, 255, 0.16) 60%,
-    rgba(255, 255, 255, 0) 100%
-  );
-  transform: translateX(-100%);
-  animation: ls-shimmer-sweep 1.8s linear infinite;
-}
-
-@keyframes ls-rotate {
-  0% {
-    transform: rotate(0deg);
-  }
-  100% {
-    transform: rotate(360deg);
-  }
-}
-
-@keyframes ls-shimmer-sweep {
-  0% {
-    transform: translateX(-100%);
-  }
-  100% {
-    transform: translateX(100%);
-  }
-}
-
-/* 卡片封面扫光动画 */
-@keyframes shimmer {
-  0% {
-    transform: translateX(-100%);
-  }
-  100% {
-    transform: translateX(100%);
-  }
-}
-
-.animate-shimmer {
-  animation: shimmer 1.5s ease-in-out infinite;
 }
 
 /* 搜索结果卡片渐显动画 */

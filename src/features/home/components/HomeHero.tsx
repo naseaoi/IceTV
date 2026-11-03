@@ -11,6 +11,7 @@ import {
 
 import CoverImage from '@/components/CoverImage';
 import { PAGE_CONTAINER_CLASS } from '@/components/page-container';
+import { useIsMobileViewport } from '@/hooks/useIsMobileViewport';
 import {
   buildExternalSubjectUrl,
   hasDisplayableRate,
@@ -164,7 +165,13 @@ interface HeroSlideState {
 const SLIDE_CLASS =
   'absolute inset-0 flex items-end gap-10 pb-10 pt-24 motion-reduce:animate-none';
 
-function DesktopHero({ items }: { items: HomeHeroItem[] }) {
+function DesktopHero({
+  items,
+  priority,
+}: {
+  items: HomeHeroItem[];
+  priority: boolean;
+}) {
   const [slide, setSlide] = useState<HeroSlideState>({
     index: 0,
     previous: null,
@@ -263,7 +270,7 @@ function DesktopHero({ items }: { items: HomeHeroItem[] }) {
           >
             <HeroSlideContent
               item={items[activeIndex]}
-              priority={activeIndex === 0}
+              priority={priority && activeIndex === 0}
             />
           </div>
         </div>
@@ -363,7 +370,13 @@ function MobileHeroSlide({
   );
 }
 
-function MobileHero({ items }: { items: HomeHeroItem[] }) {
+function MobileHero({
+  items,
+  priority,
+}: {
+  items: HomeHeroItem[];
+  priority: boolean;
+}) {
   const trackRef = useRef<HTMLDivElement>(null);
   const [activeIndex, setActiveIndex] = useState(0);
   const [touching, setTouching] = useState(false);
@@ -402,7 +415,11 @@ function MobileHero({ items }: { items: HomeHeroItem[] }) {
         className='scrollbar-hide flex snap-x snap-mandatory overflow-x-auto overscroll-x-contain'
       >
         {items.map((item, index) => (
-          <MobileHeroSlide key={item.id} item={item} priority={index === 0} />
+          <MobileHeroSlide
+            key={item.id}
+            item={item}
+            priority={priority && index === 0}
+          />
         ))}
       </div>
       {count > 1 && (
@@ -426,13 +443,27 @@ function MobileHero({ items }: { items: HomeHeroItem[] }) {
   );
 }
 
-export function HomeHero({ items }: { items: HomeHeroItem[] }) {
+export function HomeHero({
+  items,
+  likelyMobile,
+}: {
+  items: HomeHeroItem[];
+  likelyMobile: boolean;
+}) {
+  const isMobile = useIsMobileViewport();
   if (items.length === 0) return null;
 
+  // 视口未知（服务端与水合）时两套都输出由 CSS 断点切换，只按请求头推测给一套首图预加载；
+  // 水合后只保留当前一套，隐藏侧的海报加载和轮播计时随之消失
+  const mobileFirst = isMobile ?? likelyMobile;
   return (
     <>
-      <DesktopHero items={items} />
-      <MobileHero items={items} />
+      {isMobile !== true && (
+        <DesktopHero items={items} priority={!mobileFirst} />
+      )}
+      {isMobile !== false && (
+        <MobileHero items={items} priority={mobileFirst} />
+      )}
     </>
   );
 }
@@ -444,33 +475,33 @@ export function HomeHeroSkeleton() {
         <div
           className={`${PAGE_CONTAINER_CLASS} flex h-[clamp(440px,58vh,560px)] items-end gap-10 pb-10 pt-24`}
         >
-          <div className='aspect-[2/3] w-48 shrink-0 animate-pulse rounded-xl bg-gray-200 dark:bg-gray-800 lg:w-56' />
+          <div className='skeleton aspect-[2/3] w-48 shrink-0 rounded-xl lg:w-56' />
           <div className='w-full max-w-2xl flex-1 pb-1'>
-            <div className='h-3 w-10 animate-pulse rounded bg-gray-200 dark:bg-gray-800' />
-            <div className='mt-3 h-11 w-2/3 animate-pulse rounded-lg bg-gray-200 dark:bg-gray-800 lg:h-14' />
-            <div className='mt-4 h-4 w-1/2 animate-pulse rounded bg-gray-200 dark:bg-gray-800' />
+            <div className='skeleton h-3 w-10 rounded' />
+            <div className='skeleton mt-3 h-11 w-2/3 rounded-lg lg:h-14' />
+            <div className='skeleton mt-4 h-4 w-1/2 rounded' />
             <div className='mt-5 space-y-2.5'>
-              <div className='h-4 w-full animate-pulse rounded bg-gray-200 dark:bg-gray-800' />
-              <div className='h-4 w-11/12 animate-pulse rounded bg-gray-200 dark:bg-gray-800' />
-              <div className='h-4 w-3/5 animate-pulse rounded bg-gray-200 dark:bg-gray-800' />
+              <div className='skeleton h-4 w-full rounded' />
+              <div className='skeleton h-4 w-11/12 rounded' />
+              <div className='skeleton h-4 w-3/5 rounded' />
             </div>
             <div className='mt-8 flex gap-3'>
-              <div className='h-11 w-32 animate-pulse rounded-full bg-gray-200 dark:bg-gray-800' />
-              <div className='h-11 w-24 animate-pulse rounded-full bg-gray-200 dark:bg-gray-800' />
+              <div className='skeleton h-11 w-32 rounded-full' />
+              <div className='skeleton h-11 w-24 rounded-full' />
             </div>
           </div>
         </div>
       </section>
       <section
         aria-hidden='true'
-        className={`relative animate-pulse bg-gray-200 dark:bg-gray-900 md:hidden ${MOBILE_HERO_HEIGHT_CLASS}`}
+        className={`skeleton-surface relative md:hidden ${MOBILE_HERO_HEIGHT_CLASS}`}
       >
         <div className='absolute inset-x-0 bottom-0 h-3/5 bg-gradient-to-t from-gray-50 to-transparent dark:from-gray-950' />
         <div className='absolute inset-x-0 bottom-0 space-y-2.5 px-4 pb-4'>
-          <div className='h-4 w-8 rounded bg-gray-300 dark:bg-gray-800' />
-          <div className='h-8 w-2/3 rounded-lg bg-gray-300 dark:bg-gray-800' />
-          <div className='h-3.5 w-1/2 rounded bg-gray-300 dark:bg-gray-800' />
-          <div className='!mt-4 h-10 w-28 rounded-full bg-gray-300 dark:bg-gray-800' />
+          <div className='skeleton h-4 w-8 rounded' />
+          <div className='skeleton h-8 w-2/3 rounded-lg' />
+          <div className='skeleton h-3.5 w-1/2 rounded' />
+          <div className='skeleton !mt-4 h-10 w-28 rounded-full' />
         </div>
       </section>
     </>

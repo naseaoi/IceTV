@@ -17,6 +17,7 @@ import { CardInteractionProvider } from '../components/CardInteractionProvider';
 import { ClientErrorReporter } from '../components/ClientErrorReporter';
 import { GlobalErrorIndicator } from '../components/GlobalErrorIndicator';
 import { MessageCenterProvider } from '../components/messages/MessageCenterProvider';
+import { PageScrollRestorer } from '../components/PageScrollRestorer';
 import { RuntimeConfigProvider } from '../components/RuntimeConfigProvider';
 import { SiteProvider } from '../components/SiteProvider';
 import { SWRegister } from '../components/SWRegister';
@@ -157,6 +158,7 @@ export default async function RootLayout({
                 <MessageCenterProvider>
                   <CardInteractionProvider>
                     {children}
+                    <PageScrollRestorer />
                     <ClientErrorReporter />
                     <GlobalErrorIndicator />
                     <SWRegister />

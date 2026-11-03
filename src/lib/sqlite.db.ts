@@ -36,11 +36,9 @@ import {
   FavoritePage,
   IStorage,
   MetadataRecordPage,
-  PlaybackRangeWatchTotal,
+  PlaybackPeriodSession,
   PlaybackSession,
   PlaybackSessionQuery,
-  PlaybackStatsTopItem,
-  PlaybackTimeRange,
   PlaybackWatchTotals,
   PlayRecord,
   PlayRecordPage,
@@ -176,18 +174,6 @@ type LocalDbSchema = {
 type PlaybackWatchTotalsRow = {
   total_watch_seconds: number | null;
   period_watch_seconds: number | null;
-};
-
-type PlaybackTopItemRow = {
-  source: string;
-  video_id: string;
-  title: string | null;
-  source_name: string | null;
-  cover: string | null;
-  year: string | null;
-  watch_seconds: number | null;
-  session_count: number | null;
-  last_watched_at: number | null;
 };
 
 type SourceRouteStatsRow = {
@@ -532,6 +518,9 @@ export class LocalSqliteStorage implements IStorage {
       this.initializeSchema();
     });
     for (const statement of socialSchema('sqlite')) this.db.exec(statement);
+    runWithBusyRetry('迁移 SQLite 用户头像', () => {
+      this.migrateUserProfileAvatarSeed();
+    });
     this.stmts = this.prepareStatements();
     if (!isMemoryDb) {
       runWithBusyRetry('迁移 SQLite 历史数据', () => {
@@ -548,6 +537,20 @@ export class LocalSqliteStorage implements IStorage {
     this.backfillUserProfiles();
   }
 
+  private migrateUserProfileAvatarSeed(): void {
+    this.db
+      .transaction(() => {
+        const columns = this.db.pragma('table_info(user_profiles)') as {
+          name: string;
+        }[];
+        if (!columns.some((column) => column.name === 'avatar_seed'))
+          this.db.exec(
+            'ALTER TABLE user_profiles ADD COLUMN avatar_seed VARCHAR(24)',
+          );
+      })
+      .immediate();
+  }
+
   private insertUserProfile(username: string, nickname?: string): void {
     const validated =
       nickname === undefined ? null : validateNickname(nickname);
@@ -555,7 +558,7 @@ export class LocalSqliteStorage implements IStorage {
       try {
         this.db
           .prepare(
-            'INSERT INTO user_profiles (username, profile_id, nickname, nickname_norm, favorites_public, updated_at) VALUES (?, ?, ?, ?, 0, ?)',
+            'INSERT INTO user_profiles (username, profile_id, nickname, nickname_norm, avatar_seed, favorites_public, updated_at) VALUES (?, ?, ?, ?, NULL, 0, ?)',
           )
           .run(
             username,
@@ -1350,7 +1353,7 @@ export class LocalSqliteStorage implements IStorage {
     for (const [username, data] of Object.entries(snapshot.userData)) {
       this.db
         .prepare(
-          'INSERT INTO user_profiles (username, profile_id, nickname, nickname_norm, favorites_public, updated_at) VALUES (?, ?, ?, ?, ?, ?)',
+          'INSERT INTO user_profiles (username, profile_id, nickname, nickname_norm, avatar_seed, favorites_public, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)',
         )
         .run(...importedProfileValues(username, data.profile, ids, names));
       for (const row of data.follows ?? [])
@@ -2634,121 +2637,21 @@ export class LocalSqliteStorage implements IStorage {
     };
   }
 
-  async getPlaybackRangeWatchTotals(
+  async getPlaybackPeriodSessions(
     userName: string,
-    ranges: PlaybackTimeRange[],
-  ): Promise<PlaybackRangeWatchTotal[]> {
+    start: number,
+    end: number,
+  ): Promise<PlaybackPeriodSession[]> {
     const username = normalizeUsername(userName);
-    if (ranges.length === 0) return [];
-
-    const normalizedRanges = ranges.map((range) => {
-      const start = Number.isFinite(range.start)
-        ? Math.max(0, Math.floor(range.start))
-        : 0;
-      const end = Number.isFinite(range.end)
-        ? Math.max(start, Math.floor(range.end))
-        : start;
-      return { key: range.key, start, end };
-    });
-    const rangeExpressions = normalizedRanges.map(
-      (_, index) =>
-        `COALESCE(SUM(CASE WHEN started_at >= ? AND started_at < ? AND watch_seconds > 0 THEN watch_seconds ELSE 0 END), 0) AS range_${index}`,
-    );
-    const rangeParams = normalizedRanges.flatMap(({ start, end }) => [
-      start,
-      end,
-    ]);
-    const scanStart = Math.min(...normalizedRanges.map(({ start }) => start));
-    const scanEnd = Math.max(...normalizedRanges.map(({ end }) => end));
-    const row = this.db
+    if (!Number.isFinite(start) || !Number.isFinite(end) || end <= start)
+      return [];
+    return this.db
       .prepare(
-        `SELECT ${rangeExpressions.join(', ')}
+        `SELECT source, video_id, title, cover, year, started_at, ended_at, watch_seconds
         FROM playback_sessions
-        WHERE username = ? AND started_at >= ? AND started_at < ?`,
+        WHERE username = ? AND started_at >= ? AND started_at < ? AND watch_seconds > 0`,
       )
-      .get(...rangeParams, username, scanStart, scanEnd) as
-      | Record<string, number | null>
-      | undefined;
-
-    return normalizedRanges.map((range, index) => ({
-      key: range.key,
-      watchSeconds: Number(row?.[`range_${index}`] || 0),
-    }));
-  }
-
-  async getPlaybackTopItems(
-    userName: string,
-    limit = 6,
-    since?: number,
-  ): Promise<PlaybackStatsTopItem[]> {
-    const username = normalizeUsername(userName);
-    const safeLimit = Math.min(Math.max(Math.floor(limit), 1), 20);
-    const periodStart = Number.isFinite(since)
-      ? Math.max(0, Math.floor(since as number))
-      : null;
-    const periodCondition = periodStart === null ? '' : ' AND started_at >= ?';
-    const queryParams =
-      periodStart === null
-        ? [username, safeLimit]
-        : [username, periodStart, safeLimit];
-    const rows = this.db
-      .prepare(
-        `WITH normalized_sessions AS (
-          SELECT
-            id,
-            source,
-            video_id,
-            title,
-            source_name,
-            cover,
-            year,
-            started_at,
-            ended_at,
-            watch_seconds,
-            CASE
-              WHEN TRIM(title) <> '' THEN LOWER(TRIM(title))
-              ELSE source || ':' || video_id
-            END AS title_key
-          FROM playback_sessions
-          WHERE username = ?${periodCondition}
-        ),
-        ranked_sessions AS (
-          SELECT
-            *,
-            ROW_NUMBER() OVER (
-              PARTITION BY title_key
-              ORDER BY started_at DESC, id DESC
-            ) AS metadata_rank
-          FROM normalized_sessions
-        )
-        SELECT
-          MAX(CASE WHEN metadata_rank = 1 THEN source END) AS source,
-          MAX(CASE WHEN metadata_rank = 1 THEN video_id END) AS video_id,
-          MAX(CASE WHEN metadata_rank = 1 THEN title END) AS title,
-          MAX(CASE WHEN metadata_rank = 1 THEN source_name END) AS source_name,
-          MAX(CASE WHEN metadata_rank = 1 THEN cover END) AS cover,
-          MAX(CASE WHEN metadata_rank = 1 THEN year END) AS year,
-          COALESCE(SUM(CASE WHEN watch_seconds > 0 THEN watch_seconds ELSE 0 END), 0) AS watch_seconds,
-          COUNT(*) AS session_count,
-          MAX(CASE WHEN ended_at > started_at THEN ended_at ELSE started_at END) AS last_watched_at
-        FROM ranked_sessions
-        GROUP BY title_key
-        ORDER BY watch_seconds DESC, last_watched_at DESC
-        LIMIT ?`,
-      )
-      .all(...queryParams) as PlaybackTopItemRow[];
-
-    return rows.map((row) => ({
-      source: row.source,
-      videoId: row.video_id,
-      title: row.title || '',
-      sourceName: row.source_name || '',
-      cover: row.cover || '',
-      year: row.year || '',
-      watchSeconds: Number(row.watch_seconds || 0),
-      sessionCount: Number(row.session_count || 0),
-      lastWatchedAt: Number(row.last_watched_at || 0),
-    }));
+      .all(username, start, end) as PlaybackPeriodSession[];
   }
 
   async recordSourceRouteStat(input: SourceRouteStatInput): Promise<void> {

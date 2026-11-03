@@ -8,11 +8,9 @@ import {
   Favorite,
   IStorage,
   MetadataRecordPage,
-  PlaybackRangeWatchTotal,
+  PlaybackPeriodSession,
   PlaybackSession,
   PlaybackSessionQuery,
-  PlaybackStatsTopItem,
-  PlaybackTimeRange,
   PlaybackWatchTotals,
   PlayRecord,
   PlayRecordPage,
@@ -649,21 +647,13 @@ class DbManager {
     return storage.getPlaybackWatchTotals(userName, since);
   }
 
-  async getPlaybackRangeWatchTotals(
+  async getPlaybackPeriodSessions(
     userName: string,
-    ranges: PlaybackTimeRange[],
-  ): Promise<PlaybackRangeWatchTotal[]> {
+    start: number,
+    end: number,
+  ): Promise<PlaybackPeriodSession[]> {
     const storage = await this.getStorage();
-    return storage.getPlaybackRangeWatchTotals(userName, ranges);
-  }
-
-  async getPlaybackTopItems(
-    userName: string,
-    limit?: number,
-    since?: number,
-  ): Promise<PlaybackStatsTopItem[]> {
-    const storage = await this.getStorage();
-    return storage.getPlaybackTopItems(userName, limit, since);
+    return storage.getPlaybackPeriodSessions(userName, start, end);
   }
 
   async recordSourceRouteStat(input: SourceRouteStatInput): Promise<void> {
