@@ -1,13 +1,9 @@
 'use client';
 
-import {
-  type ReactNode,
-  type RefObject,
-  useEffect,
-  useRef,
-  useState,
-} from 'react';
+import { type ReactNode, type RefObject, useEffect, useRef } from 'react';
 import { createPortal } from 'react-dom';
+
+import { usePresence } from '@/hooks/usePresence';
 
 interface ModalShellProps {
   isOpen: boolean;
@@ -32,8 +28,7 @@ export default function ModalShell({
   backdropClassName = 'bg-black/50',
   initialFocusRef,
 }: ModalShellProps) {
-  const [mounted, setMounted] = useState(false);
-  const [visible, setVisible] = useState(false);
+  const { mounted, visible } = usePresence(isOpen, CLOSE_ANIMATION_MS);
   const overlayRef = useRef<HTMLDivElement>(null);
   // 冻结 children 快照：关闭动画期间仍显示关闭前的内容，
   // 避免调用方同步清空数据导致"文字先消失、面板后淡出"的视觉割裂。
@@ -41,32 +36,6 @@ export default function ModalShell({
   if (isOpen) {
     childrenSnapshot.current = children;
   }
-
-  useEffect(() => {
-    if (isOpen) {
-      setMounted(true);
-      // 双重 rAF：等 opacity-0 完成首帧绘制后再触发入场过渡
-      let secondFrame = 0;
-      const firstFrame = requestAnimationFrame(() => {
-        secondFrame = requestAnimationFrame(() => {
-          setVisible(true);
-        });
-      });
-      return () => {
-        cancelAnimationFrame(firstFrame);
-        cancelAnimationFrame(secondFrame);
-      };
-    }
-
-    setVisible(false);
-    const timeout = window.setTimeout(() => {
-      setMounted(false);
-    }, CLOSE_ANIMATION_MS);
-
-    return () => {
-      window.clearTimeout(timeout);
-    };
-  }, [isOpen]);
 
   useEffect(() => {
     if (!mounted) return;

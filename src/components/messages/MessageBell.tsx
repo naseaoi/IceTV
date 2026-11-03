@@ -15,7 +15,11 @@ function UnreadBadge({ count }: { count: number }) {
   );
 }
 
-export default function MessageBell() {
+export default function MessageBell({
+  className = 'text-gray-600 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-800',
+}: {
+  className?: string;
+}) {
   const { session } = useAuthSession();
   const { unreadCount, openPanel } = useMessageCenter();
 
@@ -31,7 +35,7 @@ export default function MessageBell() {
       onClick={handleClick}
       aria-label={`我的消息${unreadCount ? `，${unreadCount} 条未读` : ''}`}
       title='我的消息'
-      className='relative flex h-10 w-10 items-center justify-center rounded-full text-gray-600 transition-colors hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-800'
+      className={`relative flex h-10 w-10 items-center justify-center rounded-full transition-colors ${className}`}
     >
       <Bell className='h-5 w-5' />
       <UnreadBadge count={unreadCount} />

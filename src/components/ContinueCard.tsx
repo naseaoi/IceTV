@@ -1,22 +1,21 @@
 'use client';
 
-import {
-  Bell,
-  BellOff,
-  Check,
-  Heart,
-  MoreVertical,
-  Play,
-  PlayCircleIcon,
-  Trash2,
-} from 'lucide-react';
+import { MoreVertical, Play } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import { useCallback, useEffect, useId, useState } from 'react';
 
+import {
+  type CardActionAnchor,
+  deleteRecordAction,
+  favoriteAction,
+  getEpisodeMeta,
+  markUpdateReadAction,
+  playAction,
+  trackingAction,
+} from '@/components/card-actions/actions';
 import { useCardInteractionManager } from '@/components/CardInteractionProvider';
 import { buildContinuePlayUrl } from '@/components/continue-card/play-url';
 import CoverImage from '@/components/CoverImage';
-import type { ActionSheetAnchorRect } from '@/components/MobileActionSheet';
 import { warmupDanmakuForNavigation } from '@/features/play/lib/danmaku/navigation-warmup';
 import { useLongPress } from '@/hooks/useLongPress';
 import { getAuthInfoFromBrowserCookie } from '@/lib/auth.client';
@@ -35,6 +34,7 @@ import {
 } from '@/lib/navigation-return';
 import { savePlayIntent } from '@/lib/play-intent';
 import { hasPlayRecordUpdate } from '@/lib/play-records';
+import { formatTime } from '@/lib/player-utils';
 import { canUseNetworkPrefetch, warmupForPlayback } from '@/lib/video-prefetch';
 
 interface ContinueCardProps {
@@ -165,7 +165,7 @@ export default function ContinueCard({
   }, [id, source, visibleTrackingEnabled]);
 
   const openActions = useCallback(
-    async (anchorRect?: ActionSheetAnchorRect) => {
+    async (anchorRect?: CardActionAnchor) => {
       let favorited = false;
       try {
         favorited = await isFavorited(source, id);
@@ -177,65 +177,32 @@ export default function ContinueCard({
         title,
         poster,
         actions: [
-          {
-            id: 'play',
-            label: '播放',
-            icon: <PlayCircleIcon size={20} />,
+          playAction({
+            meta: getEpisodeMeta(currentEpisode, totalEpisodes),
             onClick: handlePlay,
-          },
-          {
-            id: 'favorite',
-            label: favorited ? '取消收藏' : '收藏',
-            icon: (
-              <Heart
-                size={20}
-                className={favorited ? 'fill-red-500 text-red-500' : undefined}
-              />
-            ),
-            onClick: async () => {
-              if (favorited) {
-                await deleteFavorite(source, id);
-                return;
-              }
-              await saveFavorite(source, id, {
-                title,
-                source_name: sourceName || '',
-                year: year || '',
-                cover: poster,
-                total_episodes: totalEpisodes,
-                save_time: Date.now(),
-                search_title: query || '',
-              });
-            },
-          },
+          }),
+          favoriteAction(favorited, async () => {
+            if (favorited) {
+              await deleteFavorite(source, id);
+              return;
+            }
+            await saveFavorite(source, id, {
+              title,
+              source_name: sourceName || '',
+              year: year || '',
+              cover: poster,
+              total_episodes: totalEpisodes,
+              save_time: Date.now(),
+              search_title: query || '',
+            });
+          }),
           ...(visibleHasUpdate
-            ? [
-                {
-                  id: 'mark-update-read',
-                  label: '标记更新已读',
-                  icon: <Check size={20} />,
-                  onClick: handleMarkUpdateRead,
-                },
-              ]
+            ? [markUpdateReadAction(handleMarkUpdateRead)]
             : []),
-          {
-            id: 'tracking',
-            label: visibleTrackingEnabled ? '取消追更' : '追更',
-            icon: visibleTrackingEnabled ? (
-              <BellOff size={20} />
-            ) : (
-              <Bell size={20} />
-            ),
-            onClick: handleToggleTracking,
-          },
-          {
-            id: 'delete',
-            label: '删除记录',
-            icon: <Trash2 size={20} />,
-            onClick: handleDelete,
-            color: 'danger' as const,
-          },
+          trackingAction(visibleTrackingEnabled, handleToggleTracking),
+          deleteRecordAction(handleDelete),
         ],
+        sourceName: sourceName?.trim() || source,
         anchorRect: anchorRect ?? null,
       });
     },
@@ -248,6 +215,7 @@ export default function ContinueCard({
       id,
       sourceName,
       year,
+      currentEpisode,
       totalEpisodes,
       query,
       handlePlay,
@@ -271,15 +239,23 @@ export default function ContinueCard({
     totalEpisodes > 1
       ? `第 ${currentEpisode} 集 / 共 ${totalEpisodes} 集`
       : year;
-
   return (
     <div
       role='link'
       data-continue-card
       tabIndex={0}
       aria-label={`继续播放 ${title}`}
-      className='group relative h-[120px] w-[232px] shrink-0 cursor-pointer select-none overflow-hidden rounded-xl bg-white outline-none ring-1 ring-gray-200/80 transition hover:ring-gray-300 focus-visible:ring-2 focus-visible:ring-brand-500 dark:bg-white/[0.04] dark:ring-white/10 dark:hover:bg-white/[0.06] dark:hover:ring-white/20 md:h-[136px] md:w-[340px]'
+      className='group relative flex w-[236px] shrink-0 cursor-pointer select-none gap-3 rounded-lg outline-none focus-visible:ring-2 focus-visible:ring-brand-500 focus-visible:ring-offset-4 focus-visible:ring-offset-white dark:focus-visible:ring-offset-gray-950 md:w-[288px]'
       onClick={handlePlay}
+      onContextMenu={(event) => {
+        event.preventDefault();
+        void openActions({
+          top: event.clientY,
+          left: event.clientX,
+          width: 0,
+          height: 0,
+        });
+      }}
       onKeyDown={(event) => {
         if (event.target === event.currentTarget && event.key === 'Enter') {
           handlePlay();
@@ -287,74 +263,77 @@ export default function ContinueCard({
       }}
       {...longPressProps}
     >
-      <div className='flex h-full'>
-        <div className='relative h-full w-[80px] shrink-0 overflow-hidden md:w-[91px]'>
-          <CoverImage
-            src={poster}
-            alt={title}
-            sizes='(min-width: 768px) 91px, 80px'
-            checkClientCacheBeforeLoad
-          />
-        </div>
-        <div className='flex min-w-0 flex-1 flex-col justify-between p-2.5 pb-3 md:p-3.5 md:pb-4'>
-          <div className='min-w-0'>
-            <p className='line-clamp-2 text-[13px] font-semibold leading-snug text-gray-900 dark:text-gray-100 md:line-clamp-1 md:text-[15px]'>
-              {title}
-            </p>
-            <div className='mt-1 space-y-0.5 text-[11px] text-gray-500 dark:text-gray-400 md:text-xs'>
-              {visibleHasUpdate && availableEpisodes > 1 && (
-                <p className='truncate font-semibold text-amber-600 dark:text-amber-400'>
-                  更新至 {availableEpisodes} 集
-                </p>
-              )}
-              {metaText && (
-                <p data-continue-meta className='truncate'>
-                  {metaText}
-                </p>
-              )}
-              <p data-continue-source className='truncate'>
-                {displaySourceName}
-              </p>
-            </div>
-          </div>
-          <p className='truncate text-[11px] text-gray-400 dark:text-gray-500 md:hidden'>
-            已观看 {Math.round(progressPercent)}%
-          </p>
-          <div className='hidden items-center gap-3 md:flex'>
-            <span className='inline-flex h-7 items-center gap-1 rounded-full bg-brand-500 pl-2.5 pr-3 text-xs font-medium text-white transition-colors group-hover:bg-brand-600'>
-              <Play aria-hidden='true' className='h-3 w-3 fill-current' />
-              {totalEpisodes > 1 ? `继续第 ${currentEpisode} 集` : '继续播放'}
-            </span>
-            <span className='text-xs tabular-nums text-gray-400 dark:text-gray-500'>
-              {Math.round(progressPercent)}%
-            </span>
-          </div>
-        </div>
-        <button
-          type='button'
-          data-button
-          aria-label='更多操作'
-          className='flex h-10 w-8 shrink-0 items-start justify-center pt-2 text-gray-400 transition-colors hover:text-gray-700 dark:text-gray-500 dark:hover:text-gray-200 md:pt-3'
-          onClick={(event) => {
-            event.stopPropagation();
-            const rect = event.currentTarget.getBoundingClientRect();
-            void openActions({
-              top: rect.top,
-              left: rect.left,
-              width: rect.width,
-              height: rect.height,
-            });
-          }}
-        >
-          <MoreVertical className='h-4 w-4' />
-        </button>
-      </div>
-      <div className='absolute bottom-0 left-[80px] right-0 h-[3px] bg-gray-200 dark:bg-white/10 md:left-[91px]'>
-        <div
-          className='h-full bg-brand-500'
-          style={{ width: `${progressPercent}%` }}
+      <div className='poster-rounded-clip relative aspect-[2/3] w-[76px] shrink-0 overflow-hidden rounded-lg bg-gray-100 ring-1 ring-gray-900/[0.06] dark:bg-gray-800 dark:ring-white/[0.06] md:w-[88px]'>
+        <CoverImage
+          src={poster}
+          alt={title}
+          sizes='(min-width: 768px) 88px, 76px'
+          checkClientCacheBeforeLoad
         />
+        <div className='absolute inset-0 flex items-center justify-center bg-black/40 opacity-0 transition-opacity duration-200 group-hover:opacity-100'>
+          <span className='flex h-9 w-9 items-center justify-center rounded-full bg-white/95 text-gray-900 shadow-lg'>
+            <Play aria-hidden='true' className='ml-0.5 h-4 w-4 fill-current' />
+          </span>
+        </div>
       </div>
+      <div className='flex min-w-0 flex-1 flex-col py-1'>
+        <p className='line-clamp-2 pr-6 text-[13px] font-semibold leading-snug text-gray-900 transition-colors duration-200 group-hover:text-brand-600 dark:text-gray-100 dark:group-hover:text-brand-300 md:text-sm'>
+          {title}
+        </p>
+        <div className='mt-1 space-y-0.5 text-xs'>
+          {metaText && (
+            <p
+              data-continue-meta
+              className='truncate text-gray-500 dark:text-gray-400'
+            >
+              {metaText}
+            </p>
+          )}
+          {visibleHasUpdate && availableEpisodes > 1 && (
+            <p className='truncate font-medium text-amber-600 dark:text-amber-400'>
+              更新至 {availableEpisodes} 集
+            </p>
+          )}
+          <p
+            data-continue-source
+            className='truncate text-gray-400 dark:text-gray-500'
+          >
+            {displaySourceName}
+          </p>
+        </div>
+        <div className='mt-auto pt-2'>
+          <div className='flex items-center justify-between gap-2 text-[11px] tabular-nums text-gray-400 dark:text-gray-500'>
+            <span className='truncate'>
+              {resumeTime > 0 ? `看到 ${formatTime(resumeTime)}` : '未开始'}
+            </span>
+            <span className='shrink-0'>{Math.round(progressPercent)}%</span>
+          </div>
+          <div className='mt-1 h-1 overflow-hidden rounded-full bg-gray-200 dark:bg-white/10'>
+            <div
+              className='h-full rounded-full bg-brand-500 dark:bg-brand-400'
+              style={{ width: `${progressPercent}%` }}
+            />
+          </div>
+        </div>
+      </div>
+      <button
+        type='button'
+        data-button
+        aria-label='更多操作'
+        className='absolute -right-1 top-0 flex h-8 w-8 items-center justify-center rounded-full text-gray-400 transition-[color,background-color,opacity] hover:bg-gray-900/[0.06] hover:text-gray-700 focus-visible:opacity-100 group-hover:opacity-100 dark:text-gray-500 dark:hover:bg-white/[0.08] dark:hover:text-gray-200 [@media(pointer:fine)]:opacity-0'
+        onClick={(event) => {
+          event.stopPropagation();
+          const rect = event.currentTarget.getBoundingClientRect();
+          void openActions({
+            top: rect.top,
+            left: rect.left,
+            width: rect.width,
+            height: rect.height,
+          });
+        }}
+      >
+        <MoreVertical className='h-4 w-4' />
+      </button>
     </div>
   );
 }

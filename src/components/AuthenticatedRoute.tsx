@@ -6,7 +6,7 @@ import { ReactNode } from 'react';
 
 import { useAuthSession } from '@/components/AuthProvider';
 import LoadingStatePanel from '@/components/LoadingStatePanel';
-import PageLayout from '@/components/PageLayout';
+import PageLayout, { type MobileHeaderConfig } from '@/components/PageLayout';
 import { ProfileForm } from '@/components/user-menu/ProfilePanel';
 import { AuthSessionRole } from '@/lib/auth-session';
 
@@ -16,6 +16,7 @@ interface AuthenticatedRouteProps {
   message: string;
   contentMode?: 'default' | 'player';
   showDesktopBack?: boolean;
+  mobileHeader?: MobileHeaderConfig;
   requiredRole?: AuthSessionRole;
   forbiddenMessage?: string;
 }
@@ -32,6 +33,7 @@ export default function AuthenticatedRoute({
   message,
   contentMode = 'default',
   showDesktopBack,
+  mobileHeader,
   requiredRole = 'user',
   forbiddenMessage = '当前账号没有访问该页面的权限。',
 }: AuthenticatedRouteProps) {
@@ -48,6 +50,7 @@ export default function AuthenticatedRoute({
           activePath={activePath}
           contentMode={contentMode}
           showDesktopBack={showDesktopBack}
+          mobileHeader={mobileHeader}
         >
           <div className='mx-auto my-16 w-full max-w-md rounded-2xl bg-white p-6 shadow-sm ring-1 ring-gray-200 dark:bg-gray-900 dark:ring-white/10'>
             <ProfileForm required />
@@ -69,6 +72,7 @@ export default function AuthenticatedRoute({
       activePath={activePath}
       contentMode={contentMode}
       showDesktopBack={showDesktopBack}
+      mobileHeader={mobileHeader}
     >
       <div className='flex min-h-[calc(100dvh-6.5rem-env(safe-area-inset-top)-env(safe-area-inset-bottom))] flex-1 items-center justify-center px-4 py-12 md:min-h-[calc(100dvh-3.5rem-env(safe-area-inset-bottom))]'>
         <LoadingStatePanel

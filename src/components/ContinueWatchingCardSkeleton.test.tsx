@@ -7,11 +7,11 @@ describe('ContinueWatchingCardSkeleton', () => {
     const { container } = render(<ContinueWatchingCardSkeleton />);
     const skeleton = container.querySelector('[data-continue-skeleton]');
 
-    expect(skeleton).toHaveClass(
-      'h-[120px]',
-      'w-[232px]',
-      'md:h-[136px]',
-      'md:w-[340px]',
+    expect(skeleton).toHaveClass('w-[236px]', 'md:w-[288px]');
+    expect(skeleton?.firstElementChild).toHaveClass(
+      'aspect-[2/3]',
+      'w-[76px]',
+      'md:w-[88px]',
     );
   });
 });

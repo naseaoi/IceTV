@@ -87,11 +87,13 @@ describe('ReviewsTab', () => {
     fireEvent.change(screen.getByLabelText('评价内容'), {
       target: { value: '  值得一看  ' },
     });
+    const options = screen.getByRole('button', { name: '评价设置' });
+    expect(options).toHaveTextContent('仅自己可见');
+    fireEvent.click(options);
     const visibility = screen.getByRole('switch', { name: '公开评价' });
-    expect(visibility).toHaveTextContent('仅自己可见');
     fireEvent.click(visibility);
     expect(visibility).toHaveAttribute('aria-checked', 'true');
-    expect(visibility).toHaveTextContent(/^公开$/);
+    expect(options).toHaveTextContent(/^公开$/);
 
     await act(async () => {
       fireEvent.click(screen.getByRole('button', { name: '保存' }));
@@ -258,7 +260,10 @@ it('编辑器保存剧透标记并提供评分分布', async () => {
   fireEvent.change(screen.getByLabelText('评价内容'), {
     target: { value: '结局讨论' },
   });
+  const options = screen.getByRole('button', { name: '评价设置' });
+  fireEvent.click(options);
   fireEvent.click(screen.getByRole('switch', { name: '包含剧透' }));
+  expect(options).toHaveTextContent('含剧透');
   await act(async () => {
     fireEvent.click(screen.getByRole('button', { name: '保存' }));
   });

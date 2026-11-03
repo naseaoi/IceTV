@@ -53,7 +53,7 @@ export const InfoTab: React.FC<InfoTabProps> = ({
       .map((p) => p.trim())
       .filter(Boolean);
 
-    return paragraphs.map((p) => `　　${p}`).join('\n');
+    return paragraphs.join('\n');
   }, [detail?.desc]);
 
   const descOnlyScroll = scrollMode === 'desc';

@@ -3,6 +3,10 @@
 import { Link as LinkIcon, PlayCircleIcon } from 'lucide-react';
 import React, { memo, useCallback, useEffect, useId } from 'react';
 
+import {
+  externalDetailAction,
+  playAction,
+} from '@/components/card-actions/actions';
 import { useOptionalCardInteractionManager } from '@/components/CardInteractionProvider';
 import CoverImage from '@/components/CoverImage';
 import { useLongPress } from '@/hooks/useLongPress';
@@ -74,72 +78,32 @@ function PosterCard({
     cancelPrefetch,
   } = usePosterPlay({ title, year, type });
 
-  const handleExternalOpen = useCallback(() => {
-    if (!externalUrl) {
+  // 桌面端点击即播放、悬停可跳外链，只为触屏长按提供操作面板
+  const openActionSheet = useCallback(() => {
+    if (!showActionSheet) {
       return;
     }
 
-    window.open(externalUrl, '_blank', 'noopener,noreferrer');
-  }, [externalUrl]);
-
-  const openActionSheet = useCallback(
-    (anchorRect?: {
-      top: number;
-      left: number;
-      width: number;
-      height: number;
-    }) => {
-      if (!showActionSheet) {
-        return;
-      }
-
-      showActionSheet(interactionId, {
-        title,
-        poster,
-        actions: [
-          {
-            id: 'play',
-            label: '播放',
-            icon: <PlayCircleIcon size={20} />,
-            onClick: () => {
-              hideActionSheet?.(interactionId);
-              handlePlay();
-            },
-            color: 'primary' as const,
-          },
-          ...(externalUrl
-            ? [
-                {
-                  id: 'douban',
-                  label: isBangumi ? 'Bangumi 详情' : '豆瓣详情',
-                  icon: <LinkIcon size={20} />,
-                  onClick: () => {
-                    hideActionSheet?.(interactionId);
-                    handleExternalOpen();
-                  },
-                  color: 'default' as const,
-                },
-              ]
-            : []),
-        ],
-        anchorRect: anchorRect || null,
-      });
-    },
-    [
-      externalUrl,
-      handleExternalOpen,
-      handlePlay,
-      hideActionSheet,
-      interactionId,
-      isBangumi,
-      poster,
-      showActionSheet,
+    showActionSheet(interactionId, {
       title,
-    ],
-  );
+      poster,
+      actions: [
+        playAction({ onClick: handlePlay }),
+        ...(externalUrl ? [externalDetailAction(externalUrl, isBangumi)] : []),
+      ],
+    });
+  }, [
+    externalUrl,
+    handlePlay,
+    interactionId,
+    isBangumi,
+    poster,
+    showActionSheet,
+    title,
+  ]);
 
   const longPressProps = useLongPress({
-    onLongPress: () => openActionSheet(),
+    onLongPress: openActionSheet,
     onClick: handlePlay,
     longPressDelay: 500,
   });
@@ -167,20 +131,7 @@ function PosterCard({
           pointerEvents: 'auto',
         } as React.CSSProperties
       }
-      onContextMenu={(event) => {
-        event.preventDefault();
-        event.stopPropagation();
-
-        const rect = event.currentTarget.getBoundingClientRect();
-        openActionSheet({
-          top: rect.top,
-          left: rect.left,
-          width: rect.width,
-          height: rect.height,
-        });
-
-        return false;
-      }}
+      onContextMenu={preventContextMenu}
       onDragStart={(event) => {
         event.preventDefault();
         return false;

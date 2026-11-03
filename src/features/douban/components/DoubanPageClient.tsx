@@ -1,12 +1,10 @@
 'use client';
 
-import { LoaderCircle, SlidersHorizontal } from 'lucide-react';
+import { LoaderCircle } from 'lucide-react';
 import { useSearchParams } from 'next/navigation';
-import { useState } from 'react';
 
 import DoubanCustomSelector from '@/components/DoubanCustomSelector';
 import DoubanSelector from '@/components/DoubanSelector';
-import MobileFilterSheet from '@/components/mobile/MobileFilterSheet';
 import AlertModal from '@/components/modals/AlertModal';
 import { PAGE_CONTAINER_CLASS } from '@/components/page-container';
 import PageLayout from '@/components/PageLayout';
@@ -16,7 +14,6 @@ import { DoubanFeedLoading } from '@/features/douban/components/DoubanFeedLoadin
 import { DoubanFilterBar } from '@/features/douban/components/DoubanFilterBar';
 import { useDoubanFeed } from '@/features/douban/hooks/useDoubanFeed';
 import { useInfiniteScroll } from '@/features/douban/hooks/useInfiniteScroll';
-import { getDoubanFilterSummary } from '@/features/douban/lib/filter-summary';
 import {
   DOUBAN_GRID_CLASS,
   DOUBAN_GRID_ITEM_CLASS,
@@ -41,7 +38,6 @@ export function DoubanPageClient() {
     isLoadingMore,
     primarySelection,
     secondarySelection,
-    selectedWeekday,
     customCategories,
     handlePrimaryChange,
     handleSecondaryChange,
@@ -53,15 +49,6 @@ export function DoubanPageClient() {
   } = useDoubanFeed(type);
 
   const canLoadMore = hasMore && !isLoadingMore && !loading && selectorsReady;
-  const [filterSheetOpen, setFilterSheetOpen] = useState(false);
-
-  const filterSummary = getDoubanFilterSummary({
-    type,
-    primarySelection,
-    secondarySelection,
-    selectedWeekday,
-    customCategories,
-  });
 
   const selectorNode =
     type !== 'custom' ? (
@@ -90,38 +77,11 @@ export function DoubanPageClient() {
   });
 
   return (
-    <PageLayout
-      activePath={getDoubanActivePath(type)}
-      mobileHeader={{
-        title: getDoubanPageTitle(type),
-        showBack: true,
-        actions: (
-          <button
-            type='button'
-            aria-label='打开筛选'
-            className='flex h-9 items-center gap-1.5 rounded-full px-3 text-sm text-gray-700 hover:bg-gray-200/50 dark:text-gray-200 dark:hover:bg-gray-700/50'
-            onClick={() => setFilterSheetOpen(true)}
-          >
-            <SlidersHorizontal className='h-4 w-4' />
-            筛选
-          </button>
-        ),
-      }}
-    >
+    <PageLayout activePath={getDoubanActivePath(type)}>
       <h1 className='sr-only'>{getDoubanPageTitle(type)}</h1>
       <DoubanFilterBar>{selectorNode}</DoubanFilterBar>
 
-      <div className={`${PAGE_CONTAINER_CLASS} pb-8 pt-3 md:pt-6`}>
-        {filterSummary && (
-          <button
-            type='button'
-            className='mb-3 block max-w-full truncate text-left text-sm text-gray-500 dark:text-gray-400 md:hidden'
-            onClick={() => setFilterSheetOpen(true)}
-          >
-            {filterSummary}
-          </button>
-        )}
-
+      <div className={`${PAGE_CONTAINER_CLASS} pb-8 pt-1 md:pt-6`}>
         <div className={DOUBAN_GRID_WRAPPER_CLASS}>
           {loading || !selectorsReady ? (
             <DoubanFeedLoading />
@@ -178,13 +138,6 @@ export function DoubanPageClient() {
           </div>
         )}
       </div>
-
-      <MobileFilterSheet
-        open={filterSheetOpen}
-        onClose={() => setFilterSheetOpen(false)}
-      >
-        {selectorNode}
-      </MobileFilterSheet>
 
       <AlertModal
         isOpen={Boolean(bangumiCalendarError)}

@@ -21,7 +21,8 @@ const SORT_OPTIONS = [
 ];
 
 interface MobileSearchFilterControlsProps {
-  resultCount: number;
+  // 搜索中尚无结果时传 null，不显示计数
+  resultCount: number | null;
   categories: SearchFilterCategory[];
   values: FilterValues;
   onChange: (values: FilterValues) => void;
@@ -57,7 +58,7 @@ export default function MobileSearchFilterControls({
     <>
       <div className='flex items-center justify-between gap-2'>
         <span className='truncate text-sm text-gray-500 dark:text-gray-400'>
-          {resultCount} 个结果
+          {resultCount !== null && `${resultCount} 个结果`}
         </span>
         <div className='flex shrink-0 items-center gap-2'>
           <button

@@ -70,21 +70,10 @@ export function useSearchExecution({
     };
   }, [filterAggYearOrder, filterAllYearOrder, viewMode]);
 
+  // 连接随 effect 清理关闭；StrictMode 重跑时会重新建立，不能按 query 去重跳过
   useEffect(() => {
-    if (query === currentQueryRef.current) return;
     currentQueryRef.current = query;
     setResultsQuery(query);
-
-    if (eventSourceRef.current) {
-      try {
-        eventSourceRef.current.close();
-      } catch {}
-      eventSourceRef.current = null;
-    }
-    if (flushTimerRef.current) {
-      clearTimeout(flushTimerRef.current);
-      flushTimerRef.current = null;
-    }
     pendingResultsRef.current = [];
     hasFirstBatchRef.current = false;
 
@@ -270,6 +259,20 @@ export function useSearchExecution({
       setIsLoading(false);
       setShowResults(false);
     }
+
+    return () => {
+      if (eventSourceRef.current) {
+        try {
+          eventSourceRef.current.close();
+        } catch {}
+        eventSourceRef.current = null;
+      }
+      if (flushTimerRef.current) {
+        clearTimeout(flushTimerRef.current);
+        flushTimerRef.current = null;
+      }
+      pendingResultsRef.current = [];
+    };
   }, [query]);
 
   useEffect(() => {
@@ -293,23 +296,6 @@ export function useSearchExecution({
     useFluidSearch,
     isLoading,
   ]);
-
-  // 连接清理
-  useEffect(() => {
-    return () => {
-      if (eventSourceRef.current) {
-        try {
-          eventSourceRef.current.close();
-        } catch {}
-        eventSourceRef.current = null;
-      }
-      if (flushTimerRef.current) {
-        clearTimeout(flushTimerRef.current);
-        flushTimerRef.current = null;
-      }
-      pendingResultsRef.current = [];
-    };
-  }, []);
 
   return {
     isLoading,

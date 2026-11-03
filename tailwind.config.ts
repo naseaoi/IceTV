@@ -108,6 +108,23 @@ const config: Config = {
           '0%': { transform: 'translateX(100%)', opacity: '0' },
           '100%': { transform: 'translateX(0)', opacity: '1' },
         },
+        // --hero-dir 为 1 时新内容从右侧进入，-1 时从左侧进入
+        heroSlideIn: {
+          '0%': {
+            transform: 'translateX(calc(var(--hero-dir, 1) * 32%))',
+            opacity: '0',
+          },
+          '30%': { opacity: '0' },
+          '100%': { transform: 'translateX(0)', opacity: '1' },
+        },
+        heroSlideOut: {
+          '0%': { transform: 'translateX(0)', opacity: '1' },
+          '55%': { opacity: '0' },
+          '100%': {
+            transform: 'translateX(calc(var(--hero-dir, 1) * -32%))',
+            opacity: '0',
+          },
+        },
       },
       animation: {
         flicker: 'flicker 3s linear infinite',
@@ -118,6 +135,10 @@ const config: Config = {
         'slide-in-from-right': 'slideInFromRight 0.3s ease-out',
         'menu-in-up': 'slideUp 0.18s cubic-bezier(0.16, 1, 0.3, 1)',
         'menu-in-down': 'slideDown 0.18s cubic-bezier(0.16, 1, 0.3, 1)',
+        'hero-slide-in':
+          'heroSlideIn 0.65s cubic-bezier(0.22, 1, 0.36, 1) both',
+        'hero-slide-out':
+          'heroSlideOut 0.65s cubic-bezier(0.22, 1, 0.36, 1) both',
       },
       backgroundImage: {
         'gradient-radial': 'radial-gradient(var(--tw-gradient-stops))',

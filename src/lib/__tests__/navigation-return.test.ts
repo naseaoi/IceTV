@@ -45,8 +45,10 @@ describe('navigation return', () => {
 
   it('为主要返回页面提供稳定回退', () => {
     expect(getBackFallbackPath('/play')).toBe('/');
-    expect(getBackFallbackPath('/douban')).toBe('/categories');
+    expect(getBackFallbackPath('/douban')).toBe('/');
     expect(getBackFallbackPath('/live')).toBe('/');
     expect(getBackFallbackPath('/me/favorites')).toBe('/me');
+    expect(getBackFallbackPath('/settings')).toBe('/me');
+    expect(getBackFallbackPath('/u/abc')).toBe('/me');
   });
 });

@@ -1,14 +1,16 @@
 'use client';
 
-import { ChevronUp, Search, X } from 'lucide-react';
+import { LoaderCircle, SearchX } from 'lucide-react';
 import { useRouter, useSearchParams } from 'next/navigation';
-import React, { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 
 import AuthenticatedRoute from '@/components/AuthenticatedRoute';
+import DoubanCardSkeleton from '@/components/DoubanCardSkeleton';
 import { PAGE_CONTAINER_CLASS } from '@/components/page-container';
 import PageLayout from '@/components/PageLayout';
+import { POSTER_GRID_CLASS } from '@/components/poster-grid-layout';
+import SearchBox from '@/components/SearchBox';
 import SearchResultFilter from '@/components/SearchResultFilter';
-import SearchSuggestions from '@/components/SearchSuggestions';
 import VideoCard from '@/components/VideoCard';
 import { warmupDanmakuSearchForNavigation } from '@/features/play/lib/danmaku/navigation-warmup';
 import MobileSearchFilterControls from '@/features/search/components/MobileSearchFilterControls';
@@ -22,9 +24,9 @@ import {
   clearSearchSnapshotCache,
   useSearchExecution,
 } from '@/features/search/hooks/useSearchExecution';
+import { useSearchHistory } from '@/features/search/hooks/useSearchHistory';
 import { useSearchViewMode } from '@/features/search/hooks/useSearchViewMode';
 import { normalizeSearchQueryInput } from '@/features/search/lib/searchQuery';
-import { getSearchHistory, subscribeToDataUpdates } from '@/lib/db.client';
 
 const DEFAULT_FILTER_STATE: FilterState = {
   source: 'all',
@@ -37,6 +39,58 @@ function createDefaultFilterState(): FilterState {
   return { ...DEFAULT_FILTER_STATE };
 }
 
+const LOADING_CARD_COUNT = 14;
+
+// 吸顶栏底色与顶栏实底态一致
+const STICKY_BAR_CLASS =
+  'border-b border-gray-200/70 bg-gray-50/85 backdrop-blur-xl dark:border-white/[0.06] dark:bg-gray-950/80';
+
+function SearchStatus({
+  resultCount,
+  searching,
+  completedSources,
+  totalSources,
+}: {
+  resultCount: number;
+  searching: boolean;
+  completedSources: number;
+  totalSources: number;
+}) {
+  return (
+    <span className='flex shrink-0 items-center gap-2 text-[13px] tabular-nums text-gray-500 dark:text-gray-400'>
+      {searching && totalSources > 0 && (
+        <span className='flex items-center gap-1.5'>
+          <LoaderCircle
+            aria-hidden='true'
+            className='h-3.5 w-3.5 animate-spin text-brand-500'
+          />
+          {completedSources}/{totalSources}
+        </span>
+      )}
+      {(!searching || resultCount > 0) && `${resultCount} 个结果`}
+    </span>
+  );
+}
+
+function SearchResultsLoading() {
+  return (
+    <div className={POSTER_GRID_CLASS} role='status' aria-label='正在搜索'>
+      {Array.from({ length: LOADING_CARD_COUNT }, (_, index) => (
+        <DoubanCardSkeleton key={index} />
+      ))}
+    </div>
+  );
+}
+
+function SearchEmptyState({ text }: { text: string }) {
+  return (
+    <div className='flex flex-col items-center justify-center gap-3 py-24 text-gray-400 dark:text-gray-500'>
+      <SearchX aria-hidden='true' className='h-10 w-10 stroke-[1.5]' />
+      <p className='text-sm'>{text}</p>
+    </div>
+  );
+}
+
 function AuthenticatedSearchPageClient() {
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -46,15 +100,11 @@ function AuthenticatedSearchPageClient() {
     [urlQuery],
   );
 
-  // 搜索历史 & UI 状态
-  const [searchHistory, setSearchHistory] = useState<string[]>([]);
-  const [searchHistoryLoading, setSearchHistoryLoading] = useState(true);
-  const [showBackToTop, setShowBackToTop] = useState(false);
+  const { history: searchHistory, loading: searchHistoryLoading } =
+    useSearchHistory();
   const [searchQuery, setSearchQuery] = useState(activeSearchQuery);
-  const [showSuggestions, setShowSuggestions] = useState(false);
-  const [isComposingSearch, setIsComposingSearch] = useState(false);
+  const [searchFocused, setSearchFocused] = useState(false);
 
-  // 过滤器状态
   const [filterAll, setFilterAll] = useState<FilterState>(() =>
     createDefaultFilterState(),
   );
@@ -64,7 +114,6 @@ function AuthenticatedSearchPageClient() {
 
   const [viewMode, setViewMode] = useSearchViewMode(activeSearchQuery);
 
-  // 搜索执行
   const {
     isLoading,
     setIsLoading,
@@ -81,7 +130,6 @@ function AuthenticatedSearchPageClient() {
     filterAllYearOrder: filterAll.yearOrder,
   });
 
-  // 聚合、筛选、排序
   const { filterOptions, filteredAllResults, filteredAggResults, getGroupRef } =
     useSearchAggregation({
       searchResults,
@@ -89,80 +137,14 @@ function AuthenticatedSearchPageClient() {
       filterAgg,
       searchQuery: activeSearchQuery,
     });
-  const hasVisibleResults =
-    viewMode === 'agg'
-      ? filteredAggResults.length > 0
-      : filteredAllResults.length > 0;
 
-  // 初始化：搜索历史、滚动监听、流式搜索设置
   useEffect(() => {
+    // 宽屏下页面输入框隐藏，聚焦由顶栏输入框的 autoFocus 负责
     !urlQuery && document.getElementById('searchInput')?.focus();
-
-    let historyCancelled = false;
-    setSearchHistoryLoading(true);
-    getSearchHistory()
-      .then((history) => {
-        if (!historyCancelled) {
-          setSearchHistory(history);
-        }
-      })
-      .catch((error) => {
-        console.error('获取搜索历史失败:', error);
-      })
-      .finally(() => {
-        if (!historyCancelled) {
-          setSearchHistoryLoading(false);
-        }
-      });
-
-    const unsubscribe = subscribeToDataUpdates(
-      'searchHistoryUpdated',
-      (newHistory: string[]) => {
-        setSearchHistory(newHistory);
-      },
-    );
-
-    const getScrollTop = () =>
-      window.scrollY ||
-      document.documentElement.scrollTop ||
-      document.body.scrollTop ||
-      0;
-
-    let frameId: number | null = null;
-    const checkScrollPosition = () => {
-      frameId = null;
-      setShowBackToTop(getScrollTop() > 300);
-    };
-
-    const handleScroll = () => {
-      if (frameId !== null) {
-        return;
-      }
-      frameId = window.requestAnimationFrame(checkScrollPosition);
-    };
-
-    checkScrollPosition();
-
-    window.addEventListener('scroll', handleScroll, { passive: true });
-
-    return () => {
-      historyCancelled = true;
-      unsubscribe();
-      window.removeEventListener('scroll', handleScroll);
-      if (frameId !== null) {
-        window.cancelAnimationFrame(frameId);
-      }
-    };
   }, [urlQuery]);
 
-  // 同步搜索参数
   useEffect(() => {
-    if (activeSearchQuery) {
-      setSearchQuery(activeSearchQuery);
-      setShowSuggestions(false);
-    } else {
-      setShowSuggestions(false);
-    }
+    if (activeSearchQuery) setSearchQuery(activeSearchQuery);
   }, [activeSearchQuery]);
 
   useEffect(() => {
@@ -175,295 +157,190 @@ function AuthenticatedSearchPageClient() {
     setFilterAgg(createDefaultFilterState());
   }, [activeSearchQuery]);
 
-  const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const value = e.target.value;
-    setSearchQuery(value);
-    setShowSuggestions(value.trim() ? true : false);
+  const aggregate = viewMode === 'agg';
+  const resultCount = aggregate
+    ? filteredAggResults.length
+    : filteredAllResults.length;
+  const categories = aggregate
+    ? filterOptions.categoriesAgg
+    : filterOptions.categoriesAll;
+  const filterValues = aggregate ? filterAgg : filterAll;
+  const setFilterValues = (values: FilterState) =>
+    aggregate ? setFilterAgg(values) : setFilterAll(values);
+
+  const resetSearch = () => {
+    clearSearchSnapshotCache(searchQuery);
+    setSearchQuery('');
+    setShowResults(false);
+    setIsLoading(false);
+    router.replace('/search');
   };
 
-  const handleInputFocus = () => {
-    if (searchQuery.trim()) {
-      setShowSuggestions(true);
-    }
-  };
-
-  const handleSearch = (e: React.FormEvent) => {
-    e.preventDefault();
-    const trimmed = normalizeSearchQueryInput(searchQuery);
-    if (!trimmed) return;
-
-    setSearchQuery(trimmed);
-    setShowSuggestions(false);
-
-    router.push(`/search?q=${encodeURIComponent(trimmed)}`);
-  };
-
-  const handleSuggestionSelect = (suggestion: string) => {
-    const trimmed = normalizeSearchQueryInput(suggestion);
-    if (!trimmed) return;
-
-    setSearchQuery(trimmed);
-    setShowSuggestions(false);
-
-    router.push(`/search?q=${encodeURIComponent(trimmed)}`);
-  };
-
-  const scrollToTop = () => {
-    try {
-      document.body.scrollTo({ top: 0, behavior: 'smooth' });
-    } catch {
-      document.body.scrollTop = 0;
-    }
+  const cancelSearch = () => {
+    (document.activeElement as HTMLElement | null)?.blur();
+    if (searchQuery || activeSearchQuery) resetSearch();
   };
 
   return (
-    <PageLayout activePath='/search'>
+    <PageLayout activePath='/search' mobileHeader={false}>
+      {/* 顶栏放不下输入框时由页面提供吸顶搜索栏 */}
       <div
-        className={`${PAGE_CONTAINER_CLASS} overflow-visible pb-4 pt-0 md:py-8`}
+        className={`sticky top-0 z-30 md:top-16 lg:hidden ${STICKY_BAR_CLASS}`}
+        style={{ paddingTop: 'env(safe-area-inset-top)' }}
       >
-        <div className={`${showResults ? 'mb-8 pt-0' : 'pt-0 md:pt-[20vh]'}`}>
-          <div
-            className='sticky top-0 z-[550] -mx-4 border-b border-gray-200/70 bg-gray-50/85 px-4 py-2 backdrop-blur-xl dark:border-white/[0.06] dark:bg-gray-950/80 md:static md:mx-0 md:border-0 md:bg-transparent md:px-0 md:py-0 md:backdrop-blur-none md:dark:bg-transparent'
-            style={{ paddingTop: 'max(0.5rem, env(safe-area-inset-top))' }}
-          >
-            <form onSubmit={handleSearch} className='mx-auto w-full max-w-2xl'>
-              <div className='relative'>
-                <Search className='absolute left-3 top-1/2 h-5 w-5 -translate-y-1/2 text-gray-400 dark:text-gray-500' />
-                <input
-                  id='searchInput'
-                  type='text'
-                  value={searchQuery}
-                  onChange={handleInputChange}
-                  onFocus={handleInputFocus}
-                  onCompositionStart={() => setIsComposingSearch(true)}
-                  onCompositionEnd={() => setIsComposingSearch(false)}
-                  placeholder='搜索电影、电视剧...'
-                  autoComplete='off'
-                  className='h-12 w-full rounded-lg border border-gray-200/50 bg-gray-50/80 py-3 pl-10 pr-12 text-sm text-gray-700 placeholder-gray-400 shadow-sm focus:bg-white focus:outline-none focus:ring-2 focus:ring-brand-400 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-300 dark:placeholder-gray-500 dark:focus:bg-gray-700'
-                />
-
-                {searchQuery && (
-                  <button
-                    type='button'
-                    onClick={() => {
-                      clearSearchSnapshotCache(searchQuery);
-                      setSearchQuery('');
-                      setShowSuggestions(false);
-                      setShowResults(false);
-                      setIsLoading(false);
-                      router.replace('/search');
-                      document.getElementById('searchInput')?.focus();
-                    }}
-                    className='absolute right-3 top-1/2 h-5 w-5 -translate-y-1/2 text-gray-400 transition-colors hover:text-gray-600 dark:text-gray-500 dark:hover:text-gray-300'
-                    aria-label='清除搜索内容'
-                  >
-                    <X className='h-5 w-5' />
-                  </button>
-                )}
-
-                <SearchSuggestions
-                  query={searchQuery}
-                  isVisible={showSuggestions}
-                  isComposing={isComposingSearch}
-                  onSelect={handleSuggestionSelect}
-                  onClose={() => setShowSuggestions(false)}
-                  onEnterKey={() => {
-                    const trimmed = normalizeSearchQueryInput(searchQuery);
-                    if (!trimmed) return;
-
-                    setSearchQuery(trimmed);
-                    setShowSuggestions(false);
-
-                    router.push(`/search?q=${encodeURIComponent(trimmed)}`);
-                  }}
-                />
-              </div>
-            </form>
-          </div>
-
-          {!showResults && (
-            <div className='mx-auto mt-8 w-full max-w-2xl'>
-              <div className='mx-auto h-[120px] w-full'>
-                <SearchHistory
-                  searchHistory={searchHistory}
-                  setSearchQuery={setSearchQuery}
-                  loading={searchHistoryLoading}
-                />
-              </div>
-            </div>
+        <div className={`${PAGE_CONTAINER_CLASS} flex items-center py-2.5`}>
+          <SearchBox
+            variant='page'
+            inputId='searchInput'
+            value={searchQuery}
+            onValueChange={setSearchQuery}
+            showHistory={Boolean(activeSearchQuery)}
+            onClear={resetSearch}
+            onFocus={() => setSearchFocused(true)}
+            onBlur={() => setSearchFocused(false)}
+            className='min-w-0 flex-1'
+          />
+          {(searchFocused || searchQuery || activeSearchQuery) && (
+            <button
+              type='button'
+              // 保持输入框焦点，避免失焦后按钮先消失吞掉点击
+              onMouseDown={(event) => event.preventDefault()}
+              onClick={cancelSearch}
+              className='-mr-1 shrink-0 pl-3 pr-1 text-[15px] text-gray-700 active:opacity-60 dark:text-gray-200 md:hidden'
+            >
+              取消
+            </button>
           )}
         </div>
-
         {showResults && (
-          <div className='mt-12 overflow-visible'>
-            <section className='mb-12'>
-              <div className='mb-4'>
-                <h2 className='text-xl font-bold text-gray-800 dark:text-gray-200'>
-                  搜索结果
-                  {totalSources > 0 && useFluidSearch && (
-                    <span className='ml-2 text-sm font-normal text-gray-500 dark:text-gray-400'>
-                      {completedSources}/{totalSources}
-                    </span>
-                  )}
-                  {isLoading && useFluidSearch && (
-                    <span className='ml-2 inline-block align-middle'>
-                      <span className='inline-block h-3 w-3 animate-spin rounded-full border-2 border-gray-300 border-t-brand-500'></span>
-                    </span>
-                  )}
-                </h2>
-              </div>
-              <div className='mb-4 sm:hidden'>
-                <MobileSearchFilterControls
-                  resultCount={
-                    viewMode === 'agg'
-                      ? filteredAggResults.length
-                      : filteredAllResults.length
-                  }
-                  categories={
-                    viewMode === 'agg'
-                      ? filterOptions.categoriesAgg
-                      : filterOptions.categoriesAll
-                  }
-                  values={viewMode === 'agg' ? filterAgg : filterAll}
-                  onChange={(v) =>
-                    viewMode === 'agg'
-                      ? setFilterAgg(v as FilterState)
-                      : setFilterAll(v as FilterState)
-                  }
-                  aggregate={viewMode === 'agg'}
-                  onAggregateChange={(aggregate) =>
-                    setViewMode(aggregate ? 'agg' : 'all')
-                  }
-                />
-              </div>
-              <div className='mb-8 hidden items-center justify-between gap-3 sm:flex'>
-                <div className='min-w-0 flex-1'>
-                  {viewMode === 'agg' ? (
-                    <SearchResultFilter
-                      categories={filterOptions.categoriesAgg}
-                      values={filterAgg}
-                      onChange={(v) => setFilterAgg(v as FilterState)}
-                    />
-                  ) : (
-                    <SearchResultFilter
-                      categories={filterOptions.categoriesAll}
-                      values={filterAll}
-                      onChange={(v) => setFilterAll(v as FilterState)}
-                    />
-                  )}
-                </div>
-                <label className='flex shrink-0 cursor-pointer select-none items-center gap-2'>
-                  <span className='text-xs text-gray-700 dark:text-gray-300 sm:text-sm'>
-                    聚合
-                  </span>
-                  <div className='relative'>
-                    <input
-                      type='checkbox'
-                      className='peer sr-only'
-                      checked={viewMode === 'agg'}
-                      onChange={() =>
-                        setViewMode(viewMode === 'agg' ? 'all' : 'agg')
-                      }
-                    />
-                    <div className='h-5 w-9 rounded-full bg-gray-300 transition-colors peer-checked:bg-brand-500 dark:bg-gray-600'></div>
-                    <div className='absolute left-0.5 top-0.5 h-4 w-4 rounded-full bg-white transition-transform peer-checked:translate-x-4'></div>
-                  </div>
-                </label>
-              </div>
-              {searchResults.length === 0 ? (
-                isLoading ? (
-                  <div className='flex h-40 items-center justify-center'>
-                    <div className='h-8 w-8 animate-spin rounded-full border-b-2 border-brand-500'></div>
-                  </div>
-                ) : (
-                  <div className='py-8 text-center text-gray-500 dark:text-gray-400'>
-                    未找到相关结果
-                  </div>
-                )
-              ) : !hasVisibleResults ? (
-                <div className='py-8 text-center text-gray-500 dark:text-gray-400'>
-                  当前筛选无结果
-                </div>
-              ) : (
-                <>
-                  {viewMode === 'agg' ? (
-                    <VirtualizedSearchGrid
-                      key='search-results-agg'
-                      items={filteredAggResults}
-                      getKey={(item) => `agg-${item.mapKey}`}
-                      renderItem={(item) => {
-                        const singleSourceItem =
-                          item.group.length === 1 ? item.group[0] : null;
-
-                        return (
-                          <VideoCard
-                            ref={getGroupRef(item.mapKey)}
-                            id={singleSourceItem?.id}
-                            source={singleSourceItem?.source}
-                            source_name={singleSourceItem?.source_name}
-                            from='search'
-                            isAggregate={true}
-                            title={item.title}
-                            poster={item.poster}
-                            year={item.year}
-                            episodes={item.stats.episodes}
-                            source_names={item.stats.source_names}
-                            douban_id={item.stats.douban_id}
-                            query={
-                              activeSearchQuery !== item.title
-                                ? activeSearchQuery
-                                : ''
-                            }
-                            type={item.type}
-                            aggregateGroup={item.group}
-                          />
-                        );
-                      }}
-                    />
-                  ) : (
-                    <VirtualizedSearchGrid
-                      key='search-results-all'
-                      items={filteredAllResults}
-                      getKey={(item) => `all-${item.source}-${item.id}`}
-                      renderItem={(item) => (
-                        <VideoCard
-                          id={item.id}
-                          title={item.title}
-                          poster={item.poster}
-                          episodes={item.episodes.length}
-                          source={item.source}
-                          source_name={item.source_name}
-                          douban_id={item.douban_id}
-                          query={
-                            activeSearchQuery !== item.title
-                              ? activeSearchQuery
-                              : ''
-                          }
-                          year={item.year}
-                          from='search'
-                          type={item.episodes.length > 1 ? 'tv' : 'movie'}
-                        />
-                      )}
-                    />
-                  )}
-                </>
-              )}
-            </section>
+          <div className={`${PAGE_CONTAINER_CLASS} pb-2.5 sm:hidden`}>
+            <MobileSearchFilterControls
+              resultCount={isLoading && resultCount === 0 ? null : resultCount}
+              categories={categories}
+              values={filterValues}
+              onChange={(v) => setFilterValues(v as FilterState)}
+              aggregate={aggregate}
+              onAggregateChange={(next) => setViewMode(next ? 'agg' : 'all')}
+            />
           </div>
         )}
       </div>
 
-      <button
-        onClick={scrollToTop}
-        className={`group fixed bottom-20 right-6 z-[500] flex h-12 w-12 items-center justify-center rounded-full bg-brand-500/90 text-white shadow-lg backdrop-blur-sm transition-all duration-300 ease-in-out hover:bg-brand-500 md:bottom-6 ${
-          showBackToTop
-            ? 'pointer-events-auto translate-y-0 opacity-100'
-            : 'pointer-events-none translate-y-4 opacity-0'
-        }`}
-        aria-label='返回顶部'
-      >
-        <ChevronUp className='h-6 w-6 transition-transform group-hover:scale-110' />
-      </button>
+      {showResults ? (
+        <>
+          <div
+            className={`hidden sm:block lg:sticky lg:top-16 lg:z-30 ${STICKY_BAR_CLASS}`}
+          >
+            <div
+              className={`${PAGE_CONTAINER_CLASS} flex min-h-[60px] items-center gap-4 py-3`}
+            >
+              <div className='min-w-0 flex-1'>
+                <SearchResultFilter
+                  categories={categories}
+                  values={filterValues}
+                  onChange={(v) => setFilterValues(v as FilterState)}
+                />
+              </div>
+              <SearchStatus
+                resultCount={resultCount}
+                searching={isLoading && useFluidSearch}
+                completedSources={completedSources}
+                totalSources={totalSources}
+              />
+              <label className='flex shrink-0 cursor-pointer select-none items-center gap-2 text-[13px] text-gray-600 dark:text-gray-300'>
+                聚合
+                <span className='relative'>
+                  <input
+                    type='checkbox'
+                    className='peer sr-only'
+                    checked={aggregate}
+                    onChange={() => setViewMode(aggregate ? 'all' : 'agg')}
+                  />
+                  <span className='block h-5 w-9 rounded-full bg-gray-300 transition-colors peer-checked:bg-brand-500 peer-focus-visible:ring-2 peer-focus-visible:ring-brand-500/40 dark:bg-gray-600' />
+                  <span className='absolute left-0.5 top-0.5 h-4 w-4 rounded-full bg-white shadow-sm transition-transform peer-checked:translate-x-4' />
+                </span>
+              </label>
+            </div>
+          </div>
+
+          <div className={`${PAGE_CONTAINER_CLASS} pb-8 pt-4 sm:pt-6`}>
+            {searchResults.length === 0 ? (
+              isLoading ? (
+                <SearchResultsLoading />
+              ) : (
+                <SearchEmptyState text='未找到相关结果' />
+              )
+            ) : resultCount === 0 ? (
+              <SearchEmptyState text='当前筛选无结果' />
+            ) : aggregate ? (
+              <VirtualizedSearchGrid
+                key='search-results-agg'
+                items={filteredAggResults}
+                getKey={(item) => `agg-${item.mapKey}`}
+                renderItem={(item) => {
+                  const singleSourceItem =
+                    item.group.length === 1 ? item.group[0] : null;
+
+                  return (
+                    <VideoCard
+                      ref={getGroupRef(item.mapKey)}
+                      id={singleSourceItem?.id}
+                      source={singleSourceItem?.source}
+                      source_name={singleSourceItem?.source_name}
+                      from='search'
+                      isAggregate={true}
+                      title={item.title}
+                      poster={item.poster}
+                      year={item.year}
+                      episodes={item.stats.episodes}
+                      source_names={item.stats.source_names}
+                      douban_id={item.stats.douban_id}
+                      query={
+                        activeSearchQuery !== item.title
+                          ? activeSearchQuery
+                          : ''
+                      }
+                      type={item.type}
+                      aggregateGroup={item.group}
+                    />
+                  );
+                }}
+              />
+            ) : (
+              <VirtualizedSearchGrid
+                key='search-results-all'
+                items={filteredAllResults}
+                getKey={(item) => `all-${item.source}-${item.id}`}
+                renderItem={(item) => (
+                  <VideoCard
+                    id={item.id}
+                    title={item.title}
+                    poster={item.poster}
+                    episodes={item.episodes.length}
+                    source={item.source}
+                    source_name={item.source_name}
+                    douban_id={item.douban_id}
+                    query={
+                      activeSearchQuery !== item.title ? activeSearchQuery : ''
+                    }
+                    year={item.year}
+                    from='search'
+                    type={item.episodes.length > 1 ? 'tv' : 'movie'}
+                  />
+                )}
+              />
+            )}
+          </div>
+        </>
+      ) : (
+        <div className={`${PAGE_CONTAINER_CLASS} pb-8 pt-5 md:pt-8`}>
+          <SearchHistory
+            searchHistory={searchHistory}
+            setSearchQuery={setSearchQuery}
+            loading={searchHistoryLoading}
+          />
+        </div>
+      )}
     </PageLayout>
   );
 }
@@ -473,6 +350,7 @@ export default function SearchPageClient() {
     <AuthenticatedRoute
       activePath='/search'
       message='请先登录后再使用搜索功能。'
+      mobileHeader={{ title: '搜索', showBack: false }}
     >
       <AuthenticatedSearchPageClient />
     </AuthenticatedRoute>

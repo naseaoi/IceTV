@@ -1,10 +1,13 @@
 'use client';
 
-import { Home, LayoutGrid, Search, UserRound } from 'lucide-react';
+import { Home, Search, UserRound } from 'lucide-react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 
 import { useIntentPrefetch } from '@/hooks/useIntentPrefetch';
+import { scrollPageToTop } from '@/hooks/usePageScroll';
+
+import { useHasUpdate } from './user-menu/account';
 
 type MobileNavItem = {
   icon: typeof Home;
@@ -19,16 +22,10 @@ const NAV_ITEMS: MobileNavItem[] = [
     label: '首页',
     href: '/',
     match: (pathname) =>
-      pathname === '/' || pathname.startsWith('/continue-watching'),
-  },
-  {
-    icon: LayoutGrid,
-    label: '分类',
-    href: '/categories',
-    match: (pathname) =>
-      pathname.startsWith('/categories') ||
-      pathname.startsWith('/douban') ||
-      pathname.startsWith('/live'),
+      pathname === '/' ||
+      ['/continue-watching', '/douban', '/live'].some((path) =>
+        pathname.startsWith(path),
+      ),
   },
   {
     icon: Search,
@@ -40,51 +37,64 @@ const NAV_ITEMS: MobileNavItem[] = [
     icon: UserRound,
     label: '我的',
     href: '/me',
-    match: (pathname) => pathname.startsWith('/me'),
+    match: (pathname) =>
+      ['/me', '/u/', '/settings'].some((path) => pathname.startsWith(path)),
   },
 ];
 
 const MobileBottomNav = () => {
-  const pathname = usePathname();
+  const pathname = usePathname() ?? '/';
   const prefetchRoute = useIntentPrefetch();
-  const currentActive = pathname ?? '/';
+  const hasUpdate = useHasUpdate();
 
   return (
     <nav
-      className='fixed left-0 right-0 z-[600] overflow-hidden border-t border-gray-200/70 bg-gray-50/85 backdrop-blur-xl dark:border-white/[0.06] dark:bg-gray-950/80 md:hidden'
-      style={{
-        bottom: 0,
-        paddingBottom: 'env(safe-area-inset-bottom)',
-        minHeight: 'calc(3.5rem + env(safe-area-inset-bottom))',
-      }}
+      aria-label='主导航'
+      className='fixed inset-x-0 bottom-0 z-[600] border-t border-gray-200/70 bg-gray-50/90 backdrop-blur-xl dark:border-white/[0.06] dark:bg-gray-950/85 md:hidden'
+      style={{ paddingBottom: 'env(safe-area-inset-bottom)' }}
     >
-      <ul className='flex items-center'>
+      <ul className='flex h-14 items-stretch'>
         {NAV_ITEMS.map((item) => {
-          const active = item.match(currentActive);
+          const active = item.match(pathname);
+          const showDot = item.href === '/me' && hasUpdate;
           return (
             <li key={item.href} className='min-w-0 flex-1'>
               <Link
                 href={item.href}
                 prefetch={false}
-                onMouseEnter={() => prefetchRoute(item.href)}
+                onClick={(event) => {
+                  // 再次点击当前标签回到顶部，与原生应用一致
+                  if (pathname === item.href) {
+                    event.preventDefault();
+                    scrollPageToTop();
+                  }
+                }}
                 onFocus={() => prefetchRoute(item.href)}
                 onTouchStart={() => prefetchRoute(item.href)}
                 aria-current={active ? 'page' : undefined}
                 aria-label={item.label}
-                className='flex h-14 w-full items-center justify-center'
+                className={`flex h-full w-full select-none flex-col items-center justify-center gap-0.5 transition-[color,transform] duration-150 active:scale-90 ${
+                  active
+                    ? 'text-brand-600 dark:text-brand-400'
+                    : 'text-gray-500 dark:text-gray-400'
+                }`}
               >
-                <span
-                  className={`flex items-center justify-center rounded-full px-4 py-1.5 ${
-                    active ? 'bg-brand-500/10 dark:bg-brand-400/10' : ''
-                  }`}
-                >
+                <span className='relative'>
                   <item.icon
-                    className={`h-6 w-6 ${
-                      active
-                        ? 'text-brand-600 dark:text-brand-400'
-                        : 'text-gray-500 dark:text-gray-400'
-                    }`}
+                    aria-hidden='true'
+                    className='h-[22px] w-[22px]'
+                    strokeWidth={active ? 2.25 : 1.75}
+                    fill={active ? 'currentColor' : 'none'}
+                    fillOpacity={active ? 0.16 : 0}
                   />
+                  {showDot && (
+                    <span className='absolute -right-1 -top-0.5 h-2 w-2 rounded-full bg-brand-500 ring-2 ring-gray-50 dark:ring-gray-950' />
+                  )}
+                </span>
+                <span
+                  className={`text-[10px] leading-none ${active ? 'font-semibold' : 'font-medium'}`}
+                >
+                  {item.label}
                 </span>
               </Link>
             </li>

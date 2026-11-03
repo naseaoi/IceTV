@@ -1,4 +1,3 @@
-import { SlidersHorizontal } from 'lucide-react';
 import { Suspense } from 'react';
 
 import { PAGE_CONTAINER_CLASS } from '@/components/page-container';
@@ -8,30 +7,12 @@ import { DoubanFilterBar } from '@/features/douban/components/DoubanFilterBar';
 import { DoubanPageClient } from '@/features/douban/components/DoubanPageClient';
 import {
   getDoubanActivePath,
-  getDoubanPageTitle,
   normalizeDoubanType,
 } from '@/features/douban/lib/pageMeta';
 
 function DoubanPageFallback({ type }: { type: string }) {
   return (
-    <PageLayout
-      activePath={getDoubanActivePath(type)}
-      mobileHeader={{
-        title: getDoubanPageTitle(type),
-        showBack: true,
-        actions: (
-          <button
-            type='button'
-            aria-label='筛选加载中'
-            disabled
-            className='flex h-9 items-center gap-1.5 rounded-full px-3 text-sm text-gray-700 dark:text-gray-200'
-          >
-            <SlidersHorizontal className='h-4 w-4' />
-            筛选
-          </button>
-        ),
-      }}
-    >
+    <PageLayout activePath={getDoubanActivePath(type)}>
       <DoubanFilterBar>
         <div className='flex gap-2'>
           {[64, 220, 180].map((width) => (
@@ -43,8 +24,7 @@ function DoubanPageFallback({ type }: { type: string }) {
           ))}
         </div>
       </DoubanFilterBar>
-      <div className={`${PAGE_CONTAINER_CLASS} pb-8 pt-3 md:pt-6`}>
-        <div className='mb-3 h-5 w-40 rounded bg-gray-200/60 dark:bg-gray-800/60 md:hidden' />
+      <div className={`${PAGE_CONTAINER_CLASS} pb-8 pt-1 md:pt-6`}>
         <DoubanFeedLoading />
       </div>
     </PageLayout>

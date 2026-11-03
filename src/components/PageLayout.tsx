@@ -1,6 +1,8 @@
 import { ReactNode } from 'react';
 
 import { BackButton } from './BackButton';
+import { isChannelPath } from './channel-nav';
+import MobileChannelHeader from './mobile/MobileChannelHeader';
 import MobileBottomNav from './MobileBottomNav';
 import MobileHeader from './MobileHeader';
 import { PAGE_CONTAINER_CLASS } from './page-container';
@@ -8,7 +10,7 @@ import { ScrollToTopButton } from './ScrollToTopButton';
 import { SiteFooter } from './SiteFooter';
 import TopNav from './TopNav';
 
-interface MobileHeaderConfig {
+export interface MobileHeaderConfig {
   title?: string;
   showBack?: boolean;
   actions?: ReactNode;
@@ -19,7 +21,8 @@ interface PageLayoutProps {
   activePath?: string;
   contentMode?: 'default' | 'player';
   showDesktopBack?: boolean;
-  mobileHeader?: MobileHeaderConfig;
+  // false 表示页面自带移动端顶部区域，不渲染通用顶栏
+  mobileHeader?: MobileHeaderConfig | false;
   transparentTopNav?: boolean;
 }
 
@@ -31,23 +34,32 @@ const PageLayout = ({
   mobileHeader,
   transparentTopNav = false,
 }: PageLayoutProps) => {
-  const showMobileBack = ['/play', '/live'].includes(activePath);
+  const hasChannelHeader = mobileHeader !== false && isChannelPath(activePath);
   const showDesktopBack = showDesktopBackOverride ?? activePath === '/live';
   const isPlayerPage = contentMode === 'player' || activePath === '/play';
   const showBottomNav = !['/play', '/live'].includes(activePath);
   // 免责声明只放在首页底部，播放页保持沉浸
   const showFooter = !isPlayerPage && activePath === '/';
   const showScrollToTop =
-    !isPlayerPage && (activePath === '/' || activePath.startsWith('/douban'));
+    !isPlayerPage &&
+    (activePath === '/' ||
+      activePath.startsWith('/douban') ||
+      activePath === '/search');
 
   return (
     <div className='min-h-screen w-full'>
-      {/* 移动端头部 */}
-      <MobileHeader
-        title={mobileHeader?.title}
-        showBack={mobileHeader?.showBack ?? showMobileBack}
-        actions={mobileHeader?.actions}
-      />
+      {mobileHeader === false ? null : hasChannelHeader ? (
+        <MobileChannelHeader
+          activePath={activePath}
+          transparentAtTop={transparentTopNav}
+        />
+      ) : (
+        <MobileHeader
+          title={mobileHeader?.title}
+          showBack={mobileHeader?.showBack}
+          actions={mobileHeader?.actions}
+        />
+      )}
 
       {/* 主要布局容器 */}
       <div className='flex min-h-screen w-full'>
@@ -78,9 +90,12 @@ const PageLayout = ({
               isPlayerPage
                 ? 'mb-0 mt-[calc(3rem+env(safe-area-inset-top))] flex h-[calc(100dvh-3rem-env(safe-area-inset-top)-env(safe-area-inset-bottom)-4px)] flex-col overflow-hidden md:h-auto'
                 : `${
-                    activePath === '/search'
+                    mobileHeader === false ||
+                    (hasChannelHeader && transparentTopNav)
                       ? 'mt-0'
-                      : 'mt-[calc(3rem+env(safe-area-inset-top))]'
+                      : hasChannelHeader
+                        ? 'mt-[calc(5.5rem+env(safe-area-inset-top))]'
+                        : 'mt-[calc(3rem+env(safe-area-inset-top))]'
                   } mb-0 ${showFooter ? 'flex flex-col' : ''} ${
                     showBottomNav
                       ? 'pb-[calc(3.5rem+env(safe-area-inset-bottom))] md:pb-[env(safe-area-inset-bottom)]'

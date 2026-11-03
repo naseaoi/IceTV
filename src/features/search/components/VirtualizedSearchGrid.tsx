@@ -3,7 +3,7 @@
 import { ReactNode } from 'react';
 
 import {
-  POSTER_GRID_BASE_CLASS,
+  POSTER_GRID_CLASS,
   POSTER_GRID_ROW_GAP,
 } from '@/components/poster-grid-layout';
 import {
@@ -19,8 +19,6 @@ interface VirtualizedSearchGridProps<T> {
   overscanRows?: number;
 }
 
-const SEARCH_GRID_FALLBACK_CLASS = `${POSTER_GRID_BASE_CLASS} px-0 sm:grid-cols-[repeat(auto-fill,_minmax(11rem,_1fr))] sm:gap-x-8 sm:px-2`;
-
 const SEARCH_GRID_LAYOUT = {
   mobileColumnCount: 3,
   mobileWideBreakpoint: 480,
@@ -28,9 +26,9 @@ const SEARCH_GRID_LAYOUT = {
   mobileColumnGap: 12,
   mobileRowGap: POSTER_GRID_ROW_GAP,
   mobileContentHeight: 28,
-  desktopColumnGap: 32,
+  desktopColumnGap: 20,
   desktopRowGap: POSTER_GRID_ROW_GAP,
-  desktopMinColumnWidth: 176,
+  desktopMinColumnWidth: 156,
   desktopContentHeight: 28,
 };
 
@@ -48,7 +46,7 @@ export function VirtualizedSearchGrid<T>({
       renderItem={renderItem}
       layout={{ ...SEARCH_GRID_LAYOUT, ...layout }}
       overscanRows={overscanRows}
-      fallbackClassName={SEARCH_GRID_FALLBACK_CLASS}
+      fallbackClassName={POSTER_GRID_CLASS}
       fallbackItemClassName='w-full'
     />
   );

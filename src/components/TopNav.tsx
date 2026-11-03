@@ -2,94 +2,62 @@
 
 import { Search } from 'lucide-react';
 import Link from 'next/link';
-import { usePathname, useRouter } from 'next/navigation';
-import type { FormEvent, MouseEvent } from 'react';
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { usePathname, useSearchParams } from 'next/navigation';
+import { Suspense, useMemo, useState } from 'react';
 
-import { useIntentPrefetch } from '@/hooks/useIntentPrefetch';
+import { normalizeSearchQueryInput } from '@/features/search/lib/searchQuery';
+import { useChannelNavigation } from '@/hooks/useChannelNavigation';
+import { usePageScrolled } from '@/hooks/usePageScroll';
+import type { RuntimeConfig } from '@/lib/runtime-config';
+
 import {
-  getCurrentNavigationPath,
-  withReturnTo,
-} from '@/lib/navigation-return';
-import { getCustomCategoryLabel, RuntimeConfig } from '@/lib/runtime-config';
-
+  type ChannelItem,
+  getChannelItems,
+  isNavItemActive,
+} from './channel-nav';
 import MessageBell from './messages/MessageBell';
 import { PAGE_CONTAINER_CLASS } from './page-container';
 import { useRuntimeConfig } from './RuntimeConfigProvider';
+import SearchBox from './SearchBox';
 import { SiteIcon } from './SiteIcon';
 import { useSite } from './SiteProvider';
 import { ThemeToggle } from './ThemeToggle';
 import { UserMenu } from './UserMenu';
 
-const LIVE_ROUTE = '/live';
-
-type NavItem = { label: string; href: string };
-
-function getNavItems(runtimeConfig?: RuntimeConfig): NavItem[] {
-  const items: NavItem[] = [
-    { label: '首页', href: '/' },
-    { label: '电影', href: '/douban?type=movie' },
-    { label: '剧集', href: '/douban?type=tv' },
-    { label: '动漫', href: '/douban?type=anime' },
-    { label: '综艺', href: '/douban?type=show' },
-  ];
-
-  if ((runtimeConfig?.CUSTOM_CATEGORIES?.length ?? 0) > 0) {
-    items.push({
-      label: getCustomCategoryLabel(runtimeConfig),
-      href: '/douban?type=custom',
-    });
-  }
-  if (runtimeConfig?.ENABLE_LIVE_ENTRY) {
-    items.push({ label: '直播', href: LIVE_ROUTE });
-  }
-  items.push({ label: '我的', href: '/me' });
-
-  return items;
+function getNavItems(runtimeConfig?: RuntimeConfig): ChannelItem[] {
+  return [...getChannelItems(runtimeConfig), { label: '我的', href: '/me' }];
 }
 
-// 分类页的筛选参数不在 pathname 中，靠页面传入的 activePath 区分类型
-function isNavItemActive(
-  href: string,
-  pathname: string,
-  activePath: string,
-): boolean {
-  if (href === '/')
-    return pathname === '/' || pathname === '/continue-watching';
-  if (href.startsWith('/douban')) {
-    const type = href.split('type=')[1];
-    return pathname === '/douban' && activePath.includes(`type=${type}`);
-  }
-  if (href === '/me') {
-    return pathname.startsWith('/me') || pathname.startsWith('/u/');
-  }
-  return pathname.startsWith(href);
-}
+function NavSearch({
+  initialQuery,
+  onSearchPage,
+  onFocus,
+}: {
+  initialQuery: string;
+  onSearchPage: boolean;
+  onFocus?: () => void;
+}) {
+  const [query, setQuery] = useState(initialQuery);
 
-function getPageScrollTop(): number {
   return (
-    window.scrollY ||
-    document.documentElement.scrollTop ||
-    document.body.scrollTop ||
-    0
+    <SearchBox
+      variant='nav'
+      value={query}
+      onValueChange={setQuery}
+      onFocus={onFocus}
+      autoFocus={onSearchPage && !initialQuery}
+      // 搜索页无关键词时页面正文就是历史列表
+      showHistory={!onSearchPage || Boolean(initialQuery)}
+      className='mr-2 hidden lg:block'
+      inputClassName='w-64 xl:w-80'
+    />
   );
 }
 
-function usePageScrolled(threshold: number): boolean {
-  const [scrolled, setScrolled] = useState(false);
-
-  useEffect(() => {
-    const update = () => setScrolled(getPageScrollTop() > threshold);
-    const targets = [window, document.documentElement, document.body];
-    update();
-    targets.forEach((target) =>
-      target.addEventListener('scroll', update, { passive: true }),
-    );
-    return () =>
-      targets.forEach((target) => target.removeEventListener('scroll', update));
-  }, [threshold]);
-
-  return scrolled;
+// 搜索页的顶栏输入框承接地址里的关键词；key 随关键词变化重置草稿
+function SearchPageNavSearch() {
+  const query = normalizeSearchQueryInput(useSearchParams().get('q') ?? '');
+  return <NavSearch key={query} initialQuery={query} onSearchPage />;
 }
 
 interface TopNavProps {
@@ -102,53 +70,15 @@ export default function TopNav({
   activePath,
   transparentAtTop = false,
 }: TopNavProps) {
-  const router = useRouter();
   const pathname = usePathname() ?? '/';
   const runtimeConfig = useRuntimeConfig();
   const { siteName } = useSite();
-  const prefetchIntent = useIntentPrefetch();
+  const { prefetchRoute, handleNavClick } = useChannelNavigation();
   const scrolled = usePageScrolled(8);
-  const [query, setQuery] = useState('');
 
   const navItems = useMemo(() => getNavItems(runtimeConfig), [runtimeConfig]);
-  const showSearch = !pathname.startsWith('/search');
+  const onSearchPage = pathname.startsWith('/search');
   const solid = !transparentAtTop || scrolled;
-
-  const prefetchRoute = useCallback(
-    (href: string) => {
-      if (href !== LIVE_ROUTE) prefetchIntent(href);
-    },
-    [prefetchIntent],
-  );
-
-  const handleNavClick = useCallback(
-    (event: MouseEvent<HTMLAnchorElement>, href: string) => {
-      if (
-        href !== LIVE_ROUTE ||
-        event.metaKey ||
-        event.ctrlKey ||
-        event.shiftKey ||
-        event.altKey
-      ) {
-        return;
-      }
-
-      const returnTo = getCurrentNavigationPath();
-      if (returnTo.startsWith(LIVE_ROUTE)) return;
-
-      event.preventDefault();
-      router.push(withReturnTo(href, returnTo));
-    },
-    [router],
-  );
-
-  const handleSearch = (event: FormEvent<HTMLFormElement>) => {
-    event.preventDefault();
-    const trimmed = query.trim();
-    if (!trimmed) return;
-    router.push(`/search?q=${encodeURIComponent(trimmed)}`);
-    setQuery('');
-  };
 
   return (
     <header
@@ -195,7 +125,7 @@ export default function TopNav({
         </nav>
 
         <div className='ml-auto flex shrink-0 items-center gap-1'>
-          {showSearch && (
+          {!onSearchPage && (
             <Link
               href='/search'
               aria-label='搜索'
@@ -204,25 +134,18 @@ export default function TopNav({
               <Search className='h-5 w-5' />
             </Link>
           )}
-          {showSearch && (
-            <form
-              onSubmit={handleSearch}
-              role='search'
-              className='mr-2 hidden lg:block'
+          {onSearchPage ? (
+            <Suspense
+              fallback={<NavSearch initialQuery='' onSearchPage={true} />}
             >
-              <label className='group relative flex items-center'>
-                <Search className='pointer-events-none absolute left-3 h-4 w-4 text-gray-400 dark:text-gray-500' />
-                <input
-                  type='search'
-                  value={query}
-                  onChange={(event) => setQuery(event.target.value)}
-                  onFocus={() => prefetchRoute('/search')}
-                  placeholder='搜索影片'
-                  aria-label='搜索影片'
-                  className='h-9 w-52 rounded-full border-0 bg-gray-900/[0.06] py-0 pl-9 pr-3 text-sm text-gray-900 transition-[width,background-color] duration-300 placeholder:text-gray-400 focus:w-72 focus:bg-gray-900/[0.09] focus:ring-0 dark:bg-white/[0.07] dark:text-gray-100 dark:placeholder:text-gray-500 dark:focus:bg-white/[0.11]'
-                />
-              </label>
-            </form>
+              <SearchPageNavSearch />
+            </Suspense>
+          ) : (
+            <NavSearch
+              initialQuery=''
+              onSearchPage={false}
+              onFocus={() => prefetchRoute('/search')}
+            />
           )}
           <MessageBell />
           <ThemeToggle />

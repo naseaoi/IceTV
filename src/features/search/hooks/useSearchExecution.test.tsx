@@ -1,5 +1,6 @@
 import { act, renderHook } from '@testing-library/react';
 import type { ReadonlyURLSearchParams } from 'next/navigation';
+import { StrictMode } from 'react';
 import { hydrateRoot } from 'react-dom/client';
 import { renderToString } from 'react-dom/server';
 
@@ -126,6 +127,23 @@ describe('useSearchExecution cached navigation', () => {
     expect(result.current.isLoading).toBe(true);
     expect(createEventSource).toHaveBeenCalledWith('/api/search/ws?q=new');
     expect(getSearchSnapshot('new')).toBeNull();
+  });
+
+  it('reopens the stream after StrictMode replays the effect', () => {
+    const sources: { close: jest.Mock }[] = [];
+    createEventSource.mockImplementation(() => {
+      const source = { close: jest.fn() };
+      sources.push(source);
+      return source;
+    });
+
+    const { result } = renderHook(() => useExecution('fresh'), {
+      wrapper: StrictMode,
+    });
+
+    expect(result.current.isLoading).toBe(true);
+    expect(sources.length).toBeGreaterThan(0);
+    expect(sources[sources.length - 1].close).not.toHaveBeenCalled();
   });
 
   it('hydrates without a mismatch even when the browser already has a snapshot', async () => {

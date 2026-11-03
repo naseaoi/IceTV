@@ -1,7 +1,13 @@
 'use client';
 
 import { ExternalLink, Play, Star } from 'lucide-react';
-import { useEffect, useState } from 'react';
+import {
+  type CSSProperties,
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+} from 'react';
 
 import CoverImage from '@/components/CoverImage';
 import { PAGE_CONTAINER_CLASS } from '@/components/page-container';
@@ -102,23 +108,110 @@ function HeroActions({ item }: { item: HomeHeroItem }) {
   );
 }
 
+function HeroSlideContent({
+  item,
+  priority,
+}: {
+  item: HomeHeroItem;
+  priority: boolean;
+}) {
+  const credits = heroCredits(item);
+
+  return (
+    <>
+      <div className='relative aspect-[2/3] w-48 shrink-0 overflow-hidden rounded-xl shadow-2xl shadow-black/30 ring-1 ring-black/5 dark:ring-white/10 lg:w-56'>
+        <CoverImage
+          src={item.poster}
+          alt={item.title}
+          sizes='(min-width: 1024px) 224px, 192px'
+          priority={priority}
+        />
+      </div>
+
+      <div className='min-w-0 max-w-2xl flex-1 pb-1'>
+        <p className='text-xs font-medium tracking-wider text-brand-600 dark:text-brand-300'>
+          {item.label}
+        </p>
+        <h2 className='mt-2 line-clamp-2 text-4xl font-bold tracking-tight text-gray-900 dark:text-white lg:text-5xl lg:leading-tight'>
+          {item.title}
+        </h2>
+        <HeroMetaLine item={item} className='mt-3 text-[15px]' />
+        {item.intro && (
+          <p className='mt-4 line-clamp-3 text-[15px] leading-7 text-gray-700 dark:text-gray-300'>
+            {item.intro}
+          </p>
+        )}
+        {credits && (
+          <p className='mt-3 truncate text-sm text-gray-500 dark:text-gray-400'>
+            {credits}
+          </p>
+        )}
+        <HeroActions item={item} />
+      </div>
+    </>
+  );
+}
+
+interface HeroSlideState {
+  index: number;
+  // 正在滑出的上一张，动画结束后清空
+  previous: number | null;
+  direction: 1 | -1;
+  // 每次切换递增；当前张 key 为 seq、上一张为 seq - 1，切换时复用同一节点改播滑出动画
+  seq: number;
+}
+
+const SLIDE_CLASS =
+  'absolute inset-0 flex items-end gap-10 pb-10 pt-24 motion-reduce:animate-none';
+
 function DesktopHero({ items }: { items: HomeHeroItem[] }) {
-  const [activeIndex, setActiveIndex] = useState(0);
+  const [slide, setSlide] = useState<HeroSlideState>({
+    index: 0,
+    previous: null,
+    direction: 1,
+    seq: 0,
+  });
   const [paused, setPaused] = useState(false);
   const count = items.length;
+  const activeIndex = Math.min(slide.index, count - 1);
 
+  const goTo = useCallback((target: number, direction: 1 | -1) => {
+    setSlide((state) =>
+      target === state.index
+        ? state
+        : {
+            index: target,
+            previous: state.index,
+            direction,
+            seq: state.seq + 1,
+          },
+    );
+  }, []);
+
+  // 依赖 seq：手动切换后重新计时，避免刚点完就被自动轮播带走
   useEffect(() => {
     if (paused || count < 2) return;
     const timer = window.setInterval(() => {
       if (document.visibilityState === 'visible') {
-        setActiveIndex((index) => (index + 1) % count);
+        goTo((activeIndex + 1) % count, 1);
       }
     }, ROTATE_INTERVAL_MS);
     return () => window.clearInterval(timer);
-  }, [count, paused]);
+  }, [activeIndex, count, goTo, paused, slide.seq]);
 
-  const current = items[Math.min(activeIndex, count - 1)];
-  const credits = heroCredits(current);
+  const finishLeaving = (seq: number) => {
+    setSlide((state) =>
+      state.seq === seq && state.previous !== null
+        ? { ...state, previous: null }
+        : state,
+    );
+  };
+
+  const slideStyle = { '--hero-dir': slide.direction } as CSSProperties;
+  const previousItem =
+    slide.previous !== null && slide.previous < count
+      ? items[slide.previous]
+      : null;
 
   return (
     <section
@@ -144,47 +237,40 @@ function DesktopHero({ items }: { items: HomeHeroItem[] }) {
       </div>
 
       <div
-        className={`${PAGE_CONTAINER_CLASS} relative flex h-[clamp(440px,58vh,560px)] items-end gap-10 pb-10 pt-24`}
+        className={`${PAGE_CONTAINER_CLASS} relative flex h-[clamp(440px,58vh,560px)] items-end gap-10`}
       >
-        <div
-          key={current.id}
-          className='relative aspect-[2/3] w-48 shrink-0 animate-fade-in overflow-hidden rounded-xl shadow-2xl shadow-black/30 ring-1 ring-black/5 dark:ring-white/10 lg:w-56'
-        >
-          <CoverImage
-            src={current.poster}
-            alt={current.title}
-            sizes='(min-width: 1024px) 224px, 192px'
-            priority
-          />
-        </div>
-
-        <div
-          key={`${current.id}-info`}
-          className='min-w-0 max-w-2xl flex-1 animate-slide-up pb-1'
-        >
-          <p className='text-xs font-medium tracking-wider text-brand-600 dark:text-brand-300'>
-            {current.label}
-          </p>
-          <h2 className='mt-2 line-clamp-2 text-4xl font-bold tracking-tight text-gray-900 dark:text-white lg:text-5xl lg:leading-tight'>
-            {current.title}
-          </h2>
-          <HeroMetaLine item={current} className='mt-3 text-[15px]' />
-          {current.intro && (
-            <p className='mt-4 line-clamp-3 text-[15px] leading-7 text-gray-700 dark:text-gray-300'>
-              {current.intro}
-            </p>
+        <div className='relative h-full min-w-0 flex-1'>
+          {previousItem && (
+            <div
+              key={slide.seq - 1}
+              aria-hidden='true'
+              inert
+              style={slideStyle}
+              className={`${SLIDE_CLASS} pointer-events-none animate-hero-slide-out motion-reduce:hidden`}
+              onAnimationEnd={() => finishLeaving(slide.seq)}
+            >
+              <HeroSlideContent item={previousItem} priority={false} />
+            </div>
           )}
-          {credits && (
-            <p className='mt-3 truncate text-sm text-gray-500 dark:text-gray-400'>
-              {credits}
-            </p>
-          )}
-          <HeroActions item={current} />
+          <div
+            key={slide.seq}
+            aria-roledescription='slide'
+            aria-label={`${activeIndex + 1} / ${count}`}
+            style={slideStyle}
+            className={`${SLIDE_CLASS} ${
+              slide.seq > 0 ? 'animate-hero-slide-in' : ''
+            }`}
+          >
+            <HeroSlideContent
+              item={items[activeIndex]}
+              priority={activeIndex === 0}
+            />
+          </div>
         </div>
 
         {count > 1 && (
           <div
-            className='ml-auto hidden shrink-0 items-end gap-2 self-end lg:flex'
+            className='relative z-10 hidden shrink-0 items-end gap-2 self-end pb-10 lg:flex'
             role='tablist'
             aria-label='切换精选'
           >
@@ -195,7 +281,7 @@ function DesktopHero({ items }: { items: HomeHeroItem[] }) {
                 role='tab'
                 aria-selected={index === activeIndex}
                 aria-label={item.title}
-                onClick={() => setActiveIndex(index)}
+                onClick={() => goTo(index, index > activeIndex ? 1 : -1)}
                 className={`relative aspect-[2/3] overflow-hidden rounded-md transition-all duration-300 ${
                   index === activeIndex
                     ? 'w-14 opacity-100 ring-2 ring-brand-400 ring-offset-2 ring-offset-gray-50 dark:ring-offset-gray-950'
@@ -212,7 +298,16 @@ function DesktopHero({ items }: { items: HomeHeroItem[] }) {
   );
 }
 
-function MobileHeroCard({ item }: { item: HomeHeroItem }) {
+const MOBILE_HERO_HEIGHT_CLASS = 'h-[min(125vw,72vh)]';
+const MOBILE_ROTATE_INTERVAL_MS = 6000;
+
+function MobileHeroSlide({
+  item,
+  priority,
+}: {
+  item: HomeHeroItem;
+  priority: boolean;
+}) {
   const { play } = usePosterPlay({
     title: item.title,
     year: item.year,
@@ -220,55 +315,113 @@ function MobileHeroCard({ item }: { item: HomeHeroItem }) {
   });
 
   return (
-    <button
-      type='button'
-      onClick={play}
-      aria-label={`播放 ${item.title}`}
-      className='relative w-[88%] shrink-0 snap-center overflow-hidden rounded-2xl bg-white text-left ring-1 ring-gray-900/[0.06] active:scale-[0.99] dark:bg-gray-900 dark:ring-white/[0.06]'
+    <div
+      aria-roledescription='slide'
+      className={`relative w-full shrink-0 snap-center snap-always ${MOBILE_HERO_HEIGHT_CLASS}`}
     >
-      <div
-        className='absolute inset-0 scale-150 opacity-30 blur-2xl dark:opacity-40'
+      <button
+        type='button'
+        tabIndex={-1}
         aria-hidden='true'
+        onClick={play}
+        className='absolute inset-0'
       >
-        <CoverImage src={item.poster} alt='' sizes='128px' />
-      </div>
-      <div className='relative flex h-full gap-4 p-3'>
-        <div className='relative aspect-[2/3] w-[6.5rem] shrink-0 overflow-hidden rounded-lg shadow-lg shadow-black/20'>
-          <CoverImage src={item.poster} alt={item.title} sizes='104px' />
-        </div>
-        <div className='flex min-w-0 flex-1 flex-col py-1'>
-          <p className='text-[11px] font-medium text-brand-600 dark:text-brand-300'>
-            {item.label}
+        <CoverImage
+          src={item.poster}
+          alt=''
+          sizes='100vw'
+          priority={priority}
+        />
+      </button>
+      {/* 顶部压暗保证透明顶栏上的白字在浅色海报上也可读 */}
+      <div className='pointer-events-none absolute inset-x-0 top-0 h-44 bg-gradient-to-b from-black/60 via-black/25 to-transparent' />
+      <div className='pointer-events-none absolute inset-x-0 bottom-0 h-3/5 bg-gradient-to-t from-gray-50 via-gray-50/80 to-transparent dark:from-gray-950 dark:via-gray-950/80' />
+
+      <div className='pointer-events-none absolute inset-x-0 bottom-0 px-4 pb-4'>
+        <p className='inline-flex rounded bg-brand-500 px-1.5 py-0.5 text-[11px] font-medium leading-4 text-white'>
+          {item.label}
+        </p>
+        <h2 className='mt-2 line-clamp-2 text-[28px] font-bold leading-tight tracking-tight text-gray-900 dark:text-white'>
+          {item.title}
+        </h2>
+        <HeroMetaLine item={item} className='mt-1.5 text-[13px]' />
+        {item.intro && (
+          <p className='mt-2 line-clamp-2 text-[13px] leading-5 text-gray-600 dark:text-gray-300'>
+            {item.intro}
           </p>
-          <h2 className='mt-1 line-clamp-1 text-lg font-semibold text-gray-900 dark:text-white'>
-            {item.title}
-          </h2>
-          <HeroMetaLine item={item} className='mt-1 text-xs' />
-          {item.intro && (
-            <p className='mt-2 line-clamp-3 text-[13px] leading-5 text-gray-600 dark:text-gray-300'>
-              {item.intro}
-            </p>
-          )}
-          <div className='mt-auto pt-3'>
-            <span className='inline-flex h-8 items-center gap-1.5 rounded-full bg-brand-500 pl-3 pr-3.5 text-[13px] font-medium text-white'>
-              <Play className='h-3.5 w-3.5 fill-current' />
-              播放
-            </span>
-          </div>
-        </div>
+        )}
+        <button
+          type='button'
+          onClick={play}
+          className='pointer-events-auto mt-4 inline-flex h-10 items-center gap-1.5 rounded-full bg-brand-500 pl-4 pr-5 text-sm font-medium text-white shadow-lg shadow-brand-500/25 transition-transform active:scale-95'
+        >
+          <Play className='h-4 w-4 fill-current' />
+          立即播放
+        </button>
       </div>
-    </button>
+    </div>
   );
 }
 
 function MobileHero({ items }: { items: HomeHeroItem[] }) {
+  const trackRef = useRef<HTMLDivElement>(null);
+  const [activeIndex, setActiveIndex] = useState(0);
+  const [touching, setTouching] = useState(false);
+  const count = items.length;
+
+  const handleScroll = () => {
+    const track = trackRef.current;
+    if (!track || track.clientWidth === 0) return;
+    setActiveIndex(Math.round(track.scrollLeft / track.clientWidth));
+  };
+
+  // 依赖 activeIndex：手动滑动后重新计时
+  useEffect(() => {
+    if (touching || count < 2) return;
+    const timer = window.setTimeout(() => {
+      const track = trackRef.current;
+      if (!track || document.visibilityState !== 'visible') return;
+      const next = (activeIndex + 1) % count;
+      track.scrollTo({ left: next * track.clientWidth, behavior: 'smooth' });
+    }, MOBILE_ROTATE_INTERVAL_MS);
+    return () => window.clearTimeout(timer);
+  }, [activeIndex, count, touching]);
+
   return (
-    <section aria-label='精选' className='pt-3 md:hidden'>
-      <div className='scrollbar-hide flex snap-x snap-mandatory scroll-px-4 gap-3 overflow-x-auto px-4'>
-        {items.map((item) => (
-          <MobileHeroCard key={item.id} item={item} />
+    <section
+      aria-roledescription='carousel'
+      aria-label='精选'
+      className='relative md:hidden'
+    >
+      <div
+        ref={trackRef}
+        onScroll={handleScroll}
+        onTouchStart={() => setTouching(true)}
+        onTouchEnd={() => setTouching(false)}
+        onTouchCancel={() => setTouching(false)}
+        className='scrollbar-hide flex snap-x snap-mandatory overflow-x-auto overscroll-x-contain'
+      >
+        {items.map((item, index) => (
+          <MobileHeroSlide key={item.id} item={item} priority={index === 0} />
         ))}
       </div>
+      {count > 1 && (
+        <div
+          aria-hidden='true'
+          className='pointer-events-none absolute bottom-7 right-4 flex items-center gap-1.5'
+        >
+          {items.map((item, index) => (
+            <span
+              key={item.id}
+              className={`h-1.5 rounded-full transition-all duration-300 ${
+                index === activeIndex
+                  ? 'w-4 bg-brand-500 dark:bg-brand-400'
+                  : 'w-1.5 bg-gray-900/20 dark:bg-white/30'
+              }`}
+            />
+          ))}
+        </div>
+      )}
     </section>
   );
 }
@@ -308,23 +461,16 @@ export function HomeHeroSkeleton() {
           </div>
         </div>
       </section>
-      <section aria-hidden='true' className='overflow-hidden pt-3 md:hidden'>
-        <div className='flex gap-3 px-4'>
-          {[0, 1].map((index) => (
-            <div
-              key={index}
-              className='flex w-[88%] shrink-0 gap-4 rounded-2xl bg-white p-3 ring-1 ring-gray-900/[0.06] dark:bg-gray-900 dark:ring-white/[0.06]'
-            >
-              <div className='aspect-[2/3] w-[6.5rem] shrink-0 animate-pulse rounded-lg bg-gray-200 dark:bg-gray-800' />
-              <div className='flex-1 space-y-2 py-1'>
-                <div className='h-3 w-8 animate-pulse rounded bg-gray-200 dark:bg-gray-800' />
-                <div className='h-5 w-3/4 animate-pulse rounded bg-gray-200 dark:bg-gray-800' />
-                <div className='h-3 w-1/2 animate-pulse rounded bg-gray-200 dark:bg-gray-800' />
-                <div className='h-3 w-full animate-pulse rounded bg-gray-200 dark:bg-gray-800' />
-                <div className='h-3 w-5/6 animate-pulse rounded bg-gray-200 dark:bg-gray-800' />
-              </div>
-            </div>
-          ))}
+      <section
+        aria-hidden='true'
+        className={`relative animate-pulse bg-gray-200 dark:bg-gray-900 md:hidden ${MOBILE_HERO_HEIGHT_CLASS}`}
+      >
+        <div className='absolute inset-x-0 bottom-0 h-3/5 bg-gradient-to-t from-gray-50 to-transparent dark:from-gray-950' />
+        <div className='absolute inset-x-0 bottom-0 space-y-2.5 px-4 pb-4'>
+          <div className='h-4 w-8 rounded bg-gray-300 dark:bg-gray-800' />
+          <div className='h-8 w-2/3 rounded-lg bg-gray-300 dark:bg-gray-800' />
+          <div className='h-3.5 w-1/2 rounded bg-gray-300 dark:bg-gray-800' />
+          <div className='!mt-4 h-10 w-28 rounded-full bg-gray-300 dark:bg-gray-800' />
         </div>
       </section>
     </>

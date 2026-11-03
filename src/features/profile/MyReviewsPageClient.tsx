@@ -78,7 +78,10 @@ function noop() {}
 
 function ReviewListSkeleton() {
   return (
-    <ul aria-hidden='true' className='grid items-start gap-3 xl:grid-cols-2'>
+    <ul
+      aria-hidden='true'
+      className='grid grid-cols-1 items-start gap-3 xl:grid-cols-2'
+    >
       {Array.from({ length: SKELETON_COUNT }, (_, index) => (
         <li key={index} className={CARD_CLASS}>
           <div className='aspect-[2/3] w-16 shrink-0 animate-pulse rounded-lg bg-gray-200 dark:bg-white/10 sm:w-20' />
@@ -308,7 +311,7 @@ export default function MyReviewsPageClient() {
     );
   } else {
     content = (
-      <ul className='grid items-start gap-3 xl:grid-cols-2'>
+      <ul className='grid grid-cols-1 items-start gap-3 xl:grid-cols-2'>
         {selected.map((review) => (
           <ReviewCard
             key={`${review.title_norm}:${review.year}`}

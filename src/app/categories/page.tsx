@@ -1,9 +1,6 @@
-import CategoriesPageClient from '@/features/categories/components/CategoriesPageClient';
+import { redirect } from 'next/navigation';
 
-export const metadata = {
-  title: '分类',
-};
-
+// 分类入口已并入首页频道条，保留路由兼容旧链接
 export default function CategoriesPage() {
-  return <CategoriesPageClient />;
+  redirect('/');
 }

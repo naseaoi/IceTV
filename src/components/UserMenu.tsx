@@ -12,7 +12,6 @@ import {
   Settings,
   Shield,
 } from 'lucide-react';
-import dynamic from 'next/dynamic';
 import { useRouter } from 'next/navigation';
 import {
   type CSSProperties,
@@ -25,52 +24,22 @@ import { createPortal } from 'react-dom';
 
 import { getClientAuthRuntimeConfig } from '@/lib/runtime-config';
 import { CURRENT_VERSION } from '@/lib/version';
-import { checkForUpdates, UpdateStatus } from '@/lib/version-check';
 
 import { useAuthSession } from './AuthProvider';
+import ProfileAvatar from './ProfileAvatar';
+import {
+  buildLoginHref,
+  logout,
+  ROLE_TEXT,
+  useHasUpdate,
+} from './user-menu/account';
+import {
+  ChangePasswordPanel,
+  SettingsPanel,
+  VersionPanel,
+} from './user-menu/lazy-panels';
 import { ProfilePanel } from './user-menu/ProfilePanel';
 import { UserAvatar } from './user-menu/UserAvatar';
-
-interface SettingsPanelProps {
-  onClose: () => void;
-}
-
-interface ChangePasswordPanelProps {
-  onClose: () => void;
-  onLogout: () => Promise<void>;
-}
-
-interface VersionPanelProps {
-  isOpen: boolean;
-  onClose: () => void;
-}
-
-const SettingsPanel = dynamic<SettingsPanelProps>(
-  () =>
-    import('@/components/user-menu/SettingsPanel').then(
-      (mod) => mod.SettingsPanel,
-    ),
-  { ssr: false },
-);
-
-const ChangePasswordPanel = dynamic<ChangePasswordPanelProps>(
-  () =>
-    import('@/components/user-menu/ChangePasswordPanel').then(
-      (mod) => mod.ChangePasswordPanel,
-    ),
-  { ssr: false },
-);
-
-const VersionPanel = dynamic<VersionPanelProps>(
-  () => import('@/components/VersionPanel').then((mod) => mod.VersionPanel),
-  { ssr: false },
-);
-
-const ROLE_TEXT: Record<string, string> = {
-  owner: '站长',
-  admin: '管理员',
-  user: '用户',
-};
 
 const MENU_DIVIDER_CLASS =
   'mx-1.5 my-1 h-px bg-gray-200/70 dark:bg-white/[0.06]';
@@ -99,8 +68,7 @@ export const UserMenu: React.FC = () => {
   const [isVersionPanelOpen, setIsVersionPanelOpen] = useState(false);
   const [storageType, setStorageType] = useState<string>('localdb');
   const [mounted, setMounted] = useState(false);
-  const [updateStatus, setUpdateStatus] = useState<UpdateStatus | null>(null);
-  const [isChecking, setIsChecking] = useState(true);
+  const hasUpdate = useHasUpdate();
 
   useEffect(() => {
     let cancelled = false;
@@ -116,19 +84,7 @@ export const UserMenu: React.FC = () => {
       setStorageType(storageType);
     };
 
-    const checkUpdate = async () => {
-      try {
-        const status = await checkForUpdates();
-        setUpdateStatus(status);
-      } catch (error) {
-        console.warn('版本检查失败:', error);
-      } finally {
-        setIsChecking(false);
-      }
-    };
-
     loadClientState();
-    checkUpdate();
 
     return () => {
       cancelled = true;
@@ -176,24 +132,10 @@ export const UserMenu: React.FC = () => {
 
   const handleLogin = () => {
     setIsOpen(false);
-    const redirect =
-      typeof window !== 'undefined'
-        ? `${window.location.pathname}${window.location.search}`
-        : '/';
-    router.push(`/login?redirect=${encodeURIComponent(redirect)}`);
+    router.push(buildLoginHref());
   };
 
-  const handleLogout = async () => {
-    try {
-      await fetch('/api/logout', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-      });
-    } catch (error) {
-      console.error('注销请求失败:', error);
-    }
-    window.location.href = '/';
-  };
+  const handleLogout = logout;
 
   const navigateTo = (href: string) => {
     setIsOpen(false);
@@ -216,12 +158,18 @@ export const UserMenu: React.FC = () => {
   };
 
   const isAuthenticated = session.status === 'authenticated';
-  const username = isAuthenticated ? session.username : undefined;
+  const renderAvatar = (className: string) =>
+    session.status === 'authenticated' ? (
+      <ProfileAvatar
+        profileId={session.profileId}
+        nickname={session.nickname}
+        className={className}
+      />
+    ) : null;
   const role = isAuthenticated ? session.role : 'user';
   const showAdminPanel =
     isAuthenticated && (role === 'owner' || role === 'admin');
   const showChangePassword = isAuthenticated && role !== 'owner';
-  const hasUpdate = !isChecking && updateStatus === UpdateStatus.HAS_UPDATE;
 
   const listActions = [
     {
@@ -274,7 +222,7 @@ export const UserMenu: React.FC = () => {
               onClick={() => navigateTo('/me')}
               className='group flex w-full items-center gap-3 rounded-xl px-2.5 py-2.5 text-left transition-colors hover:bg-gray-900/[0.05] dark:hover:bg-white/[0.06]'
             >
-              <UserAvatar username={username} role={role} size='lg' />
+              {renderAvatar('h-10 w-10 text-base')}
               <div className='min-w-0 flex-1'>
                 <div className='truncate text-sm font-semibold text-gray-900 dark:text-gray-100'>
                   {displayName}
@@ -376,7 +324,7 @@ export const UserMenu: React.FC = () => {
           aria-label={isAuthenticated ? '账户菜单' : '登录'}
         >
           {isAuthenticated ? (
-            <UserAvatar username={username} role={role} size='md' />
+            renderAvatar('h-7 w-7 text-xs')
           ) : (
             <CircleUserRound className='h-6 w-6' />
           )}

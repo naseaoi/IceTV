@@ -1,12 +1,4 @@
-﻿import {
-  Bell,
-  BellOff,
-  Heart,
-  Link,
-  PlayCircleIcon,
-  Trash2,
-} from 'lucide-react';
-import { useRouter } from 'next/navigation';
+﻿import { useRouter } from 'next/navigation';
 import React, {
   forwardRef,
   memo,
@@ -19,6 +11,17 @@ import React, {
   useState,
 } from 'react';
 
+import {
+  type CardAction,
+  type CardActionAnchor,
+  deleteRecordAction,
+  externalDetailAction,
+  favoriteAction,
+  getEpisodeMeta,
+  markUpdateReadAction,
+  playAction,
+  trackingAction,
+} from '@/components/card-actions/actions';
 import {
   useCardInteractionManager,
   useFavoriteStatus,
@@ -37,6 +40,7 @@ import {
   warmupDanmakuSearchForNavigation,
 } from '@/features/play/lib/danmaku/navigation-warmup';
 import { useLongPress } from '@/hooks/useLongPress';
+import { buildExternalSubjectUrl } from '@/hooks/usePosterPlay';
 import { getAuthInfoFromBrowserCookie } from '@/lib/auth.client';
 import {
   deleteFavorite,
@@ -111,12 +115,8 @@ const VideoCard = forwardRef<VideoCardHandle, VideoCardProps>(
       getFavoriteStatus,
     } = useCardInteractionManager();
     const [showMobileActions, setShowMobileActions] = useState(false);
-    const [actionSheetAnchorRect, setActionSheetAnchorRect] = useState<{
-      top: number;
-      left: number;
-      width: number;
-      height: number;
-    } | null>(null);
+    const [actionSheetAnchorRect, setActionSheetAnchorRect] =
+      useState<CardActionAnchor | null>(null);
     const [searchFavorited, setSearchFavorited] = useState<boolean | null>(
       null,
     ); // 搜索结果的收藏状态
@@ -555,25 +555,14 @@ const VideoCard = forwardRef<VideoCardHandle, VideoCardProps>(
 
     // 检查搜索结果的收藏状态
     const checkSearchFavoriteStatus = useCallback(async () => {
-      if (
-        from === 'search' &&
-        !isAggregate &&
-        favoriteStorageKey &&
-        searchFavorited === null
-      ) {
+      if (from === 'search' && favoriteStorageKey && searchFavorited === null) {
         try {
           await loadFavoriteStatus();
         } catch {
           setSearchFavorited(false);
         }
       }
-    }, [
-      from,
-      isAggregate,
-      favoriteStorageKey,
-      searchFavorited,
-      loadFavoriteStatus,
-    ]);
+    }, [from, favoriteStorageKey, searchFavorited, loadFavoriteStatus]);
 
     const requestVisibleFavoriteStatus = useCallback(() => {
       if (from === 'search') {
@@ -663,133 +652,53 @@ const VideoCard = forwardRef<VideoCardHandle, VideoCardProps>(
 
     // 菜单操作项
     const buildMobileActions = useCallback(() => {
-      const actions = [];
+      const actions: CardAction[] = [];
+      // 菜单回调没有原生事件，复用卡片按钮的事件处理函数
+      const noopEvent = {
+        preventDefault: () => {},
+        stopPropagation: () => {},
+      } as React.MouseEvent;
+      const hasRecordTarget = Boolean(actualSource && actualId);
 
-      // 播放操作
       if (config.showPlayButton) {
-        actions.push({
-          id: 'play',
-          label: origin === 'live' ? '观看直播' : '播放',
-          icon: <PlayCircleIcon size={20} />,
-          onClick: handleClick,
-          color: 'primary' as const,
-        });
+        actions.push(
+          playAction({
+            live: origin === 'live',
+            meta: getEpisodeMeta(currentEpisode, actualEpisodes),
+            onClick: handleClick,
+          }),
+        );
       }
 
-      // 聚合源信息 - 直接在菜单中展示，不需要单独的操作项
-
-      // 收藏/取消收藏操作
-      if (config.showHeart && from !== 'douban' && actualSource && actualId) {
-        const currentFavorited =
-          from === 'search' ? searchFavorited : visibleFavorited;
-
-        if (from === 'search') {
-          // 搜索结果：根据加载状态显示不同的选项
-          if (searchFavorited !== null) {
-            // 已加载完成，显示实际的收藏状态
-            actions.push({
-              id: 'favorite',
-              label: currentFavorited ? '取消收藏' : '添加收藏',
-              icon: currentFavorited ? (
-                <Heart size={20} className='fill-red-600 stroke-red-600' />
-              ) : (
-                <Heart size={20} className='fill-transparent stroke-red-500' />
-              ),
-              onClick: () => {
-                const mockEvent = {
-                  preventDefault: () => {},
-                  stopPropagation: () => {},
-                } as React.MouseEvent;
-                handleToggleFavorite(mockEvent);
-              },
-              color: currentFavorited
-                ? ('danger' as const)
-                : ('default' as const),
-            });
-          } else {
-            // 正在加载中，显示占位项
-            actions.push({
-              id: 'favorite-loading',
-              label: '收藏加载中...',
-              icon: <Heart size={20} />,
-              onClick: () => {},
-              disabled: true,
-            });
-          }
-        } else {
-          // 非搜索结果：直接显示收藏选项
-          actions.push({
-            id: 'favorite',
-            label: currentFavorited ? '取消收藏' : '添加收藏',
-            icon: currentFavorited ? (
-              <Heart size={20} className='fill-red-600 stroke-red-600' />
-            ) : (
-              <Heart size={20} className='fill-transparent stroke-red-500' />
-            ),
-            onClick: () => {
-              const mockEvent = {
-                preventDefault: () => {},
-                stopPropagation: () => {},
-              } as React.MouseEvent;
-              handleToggleFavorite(mockEvent);
-            },
-            color: currentFavorited
-              ? ('danger' as const)
-              : ('default' as const),
-          });
-        }
-      }
-
-      if (from === 'playrecord' && actualSource && actualId) {
-        actions.push({
-          id: 'tracking',
-          label: visibleTrackingEnabled ? '取消追更' : '追更',
-          icon: visibleTrackingEnabled ? (
-            <BellOff size={20} />
-          ) : (
-            <Bell size={20} />
+      if (config.showHeart && from !== 'douban' && hasRecordTarget) {
+        actions.push(
+          favoriteAction(
+            from === 'search' ? searchFavorited : visibleFavorited,
+            () => handleToggleFavorite(noopEvent),
           ),
-          onClick: handleToggleTracking,
-          color: 'default' as const,
-        });
+        );
       }
 
-      // 删除播放记录操作
-      if (
-        config.showCheckCircle &&
-        from === 'playrecord' &&
-        actualSource &&
-        actualId
-      ) {
-        actions.push({
-          id: 'delete',
-          label: '删除记录',
-          icon: <Trash2 size={20} />,
-          onClick: () => {
-            const mockEvent = {
-              preventDefault: () => {},
-              stopPropagation: () => {},
-            } as React.MouseEvent;
-            handleDeleteRecord(mockEvent);
-          },
-          color: 'danger' as const,
-        });
+      if (from === 'playrecord' && hasRecordTarget) {
+        if (visibleHasUpdate) {
+          actions.push(
+            markUpdateReadAction(() => handleMarkUpdateRead(noopEvent)),
+          );
+        }
+        actions.push(
+          trackingAction(visibleTrackingEnabled, handleToggleTracking),
+        );
       }
 
-      // 豆瓣链接操作
-      if (config.showDoubanLink && actualDoubanId && actualDoubanId !== 0) {
-        actions.push({
-          id: 'douban',
-          label: isBangumi ? 'Bangumi 详情' : '豆瓣详情',
-          icon: <Link size={20} />,
-          onClick: () => {
-            const url = isBangumi
-              ? `https://bgm.tv/subject/${actualDoubanId.toString()}`
-              : `https://movie.douban.com/subject/${actualDoubanId.toString()}`;
-            window.open(url, '_blank', 'noopener,noreferrer');
-          },
-          color: 'default' as const,
-        });
+      const externalUrl = config.showDoubanLink
+        ? buildExternalSubjectUrl(actualDoubanId, isBangumi)
+        : null;
+      if (externalUrl) {
+        actions.push(externalDetailAction(externalUrl, isBangumi));
+      }
+
+      if (config.showCheckCircle && from === 'playrecord' && hasRecordTarget) {
+        actions.push(deleteRecordAction(() => handleDeleteRecord(noopEvent)));
       }
 
       return actions;
@@ -798,14 +707,18 @@ const VideoCard = forwardRef<VideoCardHandle, VideoCardProps>(
       from,
       actualSource,
       actualId,
+      actualEpisodes,
+      currentEpisode,
       visibleFavorited,
       searchFavorited,
+      visibleHasUpdate,
       actualDoubanId,
       isBangumi,
       handleClick,
       visibleTrackingEnabled,
       handleToggleTracking,
       handleToggleFavorite,
+      handleMarkUpdateRead,
       handleDeleteRecord,
       origin,
     ]);
@@ -822,14 +735,8 @@ const VideoCard = forwardRef<VideoCardHandle, VideoCardProps>(
           title: actualTitle,
           poster: actualPoster,
           actions: buildMobileActions(),
-          sources:
-            isAggregate && dynamicSourceNames
-              ? Array.from(new Set(dynamicSourceNames))
-              : undefined,
-          isAggregate,
+          sources: isAggregate ? dynamicSourceNames : undefined,
           sourceName: source_name,
-          currentEpisode,
-          totalEpisodes: actualEpisodes,
           origin,
           anchorRect: actionSheetAnchorRect,
         },
@@ -841,12 +748,10 @@ const VideoCard = forwardRef<VideoCardHandle, VideoCardProps>(
       };
     }, [
       actionSheetAnchorRect,
-      actualEpisodes,
       actualPoster,
       actualTitle,
       buildMobileActions,
       closeActionSheet,
-      currentEpisode,
       dynamicSourceNames,
       hideActionSheet,
       interactionId,
@@ -880,13 +785,12 @@ const VideoCard = forwardRef<VideoCardHandle, VideoCardProps>(
             e.preventDefault();
             e.stopPropagation();
 
-            // 右键弹出操作菜单
-            const rect = e.currentTarget.getBoundingClientRect();
+            // 右键菜单在光标处展开
             setActionSheetAnchorRect({
-              top: rect.top,
-              left: rect.left,
-              width: rect.width,
-              height: rect.height,
+              top: e.clientY,
+              left: e.clientX,
+              width: 0,
+              height: 0,
             });
             setShowMobileActions(true);
 

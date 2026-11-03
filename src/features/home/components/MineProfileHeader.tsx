@@ -2,7 +2,7 @@
 
 import { ChevronRight, PenLine } from 'lucide-react';
 import Link from 'next/link';
-import { useEffect, useState } from 'react';
+import { type ReactNode, useEffect, useState } from 'react';
 
 import { useAuthSession } from '@/components/AuthProvider';
 import ProfileAvatar from '@/components/ProfileAvatar';
@@ -17,7 +17,7 @@ interface MineStats {
   followers: number;
 }
 
-const BANNER_CLASS = 'flex items-center gap-4 pb-6 pt-5 sm:gap-5 md:pt-10';
+const BANNER_CLASS = 'flex items-center gap-4 pb-6 pt-4 sm:gap-5 md:pt-10';
 const AVATAR_CLASS = 'h-16 w-16 shrink-0 text-2xl sm:h-20 sm:w-20 sm:text-3xl';
 const STAT_CLASS =
   'inline-flex items-baseline gap-1 text-gray-500 transition hover:text-gray-900 dark:text-gray-400 dark:hover:text-gray-100';
@@ -51,7 +51,8 @@ export function MineProfileHeaderSkeleton() {
   );
 }
 
-export function MineProfileHeader() {
+// actions 只在窄屏渲染在昵称行末尾，宽屏由顶栏提供同类入口
+export function MineProfileHeader({ actions }: { actions?: ReactNode }) {
   const { session } = useAuthSession();
   const profileId =
     session.status === 'authenticated' ? session.profileId : null;
@@ -104,9 +105,24 @@ export function MineProfileHeader() {
       </Link>
 
       <div className='min-w-0 flex-1'>
-        <h1 className='truncate text-xl font-semibold tracking-tight text-gray-900 dark:text-gray-50 sm:text-2xl'>
-          {nickname}
-        </h1>
+        <div className='flex items-center gap-1'>
+          <h1 className='min-w-0 truncate text-xl font-semibold tracking-tight text-gray-900 dark:text-gray-50 sm:text-2xl'>
+            <Link href={profileHref}>{nickname}</Link>
+          </h1>
+          <button
+            type='button'
+            aria-label='编辑资料'
+            onClick={() => setEditing(true)}
+            className='flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-gray-400 transition active:scale-90 dark:text-gray-500 md:hidden'
+          >
+            <PenLine aria-hidden='true' className='h-4 w-4' />
+          </button>
+          {actions && (
+            <div className='-my-1 -mr-2 ml-auto flex shrink-0 items-center text-gray-700 dark:text-gray-200 md:hidden'>
+              {actions}
+            </div>
+          )}
+        </div>
         <div className='mt-1.5 flex flex-wrap gap-x-5 gap-y-1 text-sm'>
           <Link href='/me/reviews' className={STAT_CLASS}>
             <StatValue value={value('reviews')} />
@@ -131,20 +147,16 @@ export function MineProfileHeader() {
         </div>
       </div>
 
-      <div className='flex shrink-0 items-center gap-2'>
+      <div className='hidden shrink-0 items-center gap-2 md:flex'>
         <button
           type='button'
-          aria-label='编辑资料'
           onClick={() => setEditing(true)}
           className={ACTION_CLASS}
         >
           <PenLine aria-hidden='true' className='h-3.5 w-3.5' />
-          <span className='hidden sm:inline'>编辑资料</span>
+          编辑资料
         </button>
-        <Link
-          href={profileHref}
-          className={`${ACTION_CLASS} hidden sm:inline-flex`}
-        >
+        <Link href={profileHref} className={ACTION_CLASS}>
           个人主页
           <ChevronRight aria-hidden='true' className='-mr-1 h-4 w-4' />
         </Link>

@@ -7,6 +7,7 @@ export default function SearchLayout({ children }: { children: ReactNode }) {
     <AuthenticatedRoute
       activePath='/search'
       message='请先登录后再使用搜索功能。'
+      mobileHeader={{ title: '搜索', showBack: false }}
     >
       {children}
     </AuthenticatedRoute>

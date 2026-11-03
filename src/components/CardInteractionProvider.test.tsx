@@ -6,7 +6,7 @@ import {
   useCardInteractionManager,
 } from '@/components/CardInteractionProvider';
 
-jest.mock('@/components/MobileActionSheet', () => ({
+jest.mock('@/components/card-actions/CardActionOverlay', () => ({
   __esModule: true,
   default: ({
     isOpen,

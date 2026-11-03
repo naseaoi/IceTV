@@ -1,6 +1,7 @@
 'use client';
 
 import {
+  ChevronDown,
   Globe,
   LoaderCircle,
   Lock,
@@ -11,7 +12,7 @@ import {
   Trash2,
   X,
 } from 'lucide-react';
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useId, useRef, useState } from 'react';
 
 import { useAuthSession } from '@/components/AuthProvider';
 import ExpandableText from '@/components/ExpandableText';
@@ -75,36 +76,140 @@ function SectionHeader({
   );
 }
 
-function VisibilityToggle({
-  isPublic,
-  disabled,
+function OptionSwitchRow({
+  label,
+  checked,
   onChange,
 }: {
-  isPublic: boolean;
-  disabled: boolean;
+  label: string;
+  checked: boolean;
   onChange: (next: boolean) => void;
 }) {
   return (
     <button
       type='button'
       role='switch'
-      aria-checked={isPublic}
-      aria-label='公开评价'
-      disabled={disabled}
-      className={`inline-flex h-8 shrink-0 items-center gap-1.5 rounded-full px-3 text-xs font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-50 ${
-        isPublic
-          ? 'bg-brand-500/10 text-brand-700 ring-1 ring-inset ring-brand-500/25 dark:text-brand-300'
-          : 'bg-gray-100 text-gray-600 hover:bg-gray-200/80 dark:bg-white/[0.06] dark:text-gray-300 dark:hover:bg-white/10'
-      }`}
-      onClick={() => onChange(!isPublic)}
+      aria-checked={checked}
+      aria-label={label}
+      className='flex w-full items-center justify-between gap-3 rounded-lg px-3 py-2.5 text-left text-[13px] text-gray-700 transition-colors hover:bg-gray-100 dark:text-gray-200 dark:hover:bg-white/[0.06]'
+      onClick={() => onChange(!checked)}
     >
-      {isPublic ? (
-        <Globe aria-hidden='true' className='h-3.5 w-3.5' />
-      ) : (
-        <Lock aria-hidden='true' className='h-3.5 w-3.5' />
-      )}
-      {isPublic ? '公开' : '仅自己可见'}
+      {label}
+      <span
+        aria-hidden='true'
+        className={`relative h-5 w-9 shrink-0 rounded-full transition-colors ${
+          checked ? 'bg-brand-500' : 'bg-gray-300 dark:bg-gray-600'
+        }`}
+      >
+        <span
+          className={`absolute left-0.5 top-0.5 h-4 w-4 rounded-full bg-white shadow-sm transition-transform ${
+            checked ? 'translate-x-4' : ''
+          }`}
+        />
+      </span>
     </button>
+  );
+}
+
+// 可见性与剧透收在同一入口，触发器直接显示当前状态
+function ReviewOptionsMenu({
+  isPublic,
+  spoiler,
+  disabled,
+  onPublicChange,
+  onSpoilerChange,
+}: {
+  isPublic: boolean;
+  spoiler: boolean;
+  disabled: boolean;
+  onPublicChange: (next: boolean) => void;
+  onSpoilerChange: (next: boolean) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const containerRef = useRef<HTMLDivElement>(null);
+  const menuId = useId();
+
+  useEffect(() => {
+    if (!open) return;
+    const handlePointerDown = (event: PointerEvent) => {
+      if (!containerRef.current?.contains(event.target as Node)) {
+        setOpen(false);
+      }
+    };
+    document.addEventListener('pointerdown', handlePointerDown);
+    return () => document.removeEventListener('pointerdown', handlePointerDown);
+  }, [open]);
+
+  useEffect(() => {
+    if (disabled) setOpen(false);
+  }, [disabled]);
+
+  return (
+    <div
+      ref={containerRef}
+      className='relative'
+      onKeyDown={(event) => {
+        if (event.key !== 'Escape' || !open) return;
+        // 阻止冒泡到展开编辑器的 Esc 关闭
+        event.stopPropagation();
+        setOpen(false);
+      }}
+    >
+      <button
+        type='button'
+        aria-label='评价设置'
+        aria-haspopup='true'
+        aria-expanded={open}
+        aria-controls={open ? menuId : undefined}
+        disabled={disabled}
+        className={`inline-flex h-8 shrink-0 items-center gap-1.5 rounded-full pl-3 pr-2 text-xs font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-50 ${
+          isPublic
+            ? 'bg-brand-500/10 text-brand-700 ring-1 ring-inset ring-brand-500/25 dark:text-brand-300'
+            : 'bg-gray-100 text-gray-600 hover:bg-gray-200/80 dark:bg-white/[0.06] dark:text-gray-300 dark:hover:bg-white/10'
+        }`}
+        onClick={() => setOpen((value) => !value)}
+      >
+        {isPublic ? (
+          <Globe aria-hidden='true' className='h-3.5 w-3.5' />
+        ) : (
+          <Lock aria-hidden='true' className='h-3.5 w-3.5' />
+        )}
+        {isPublic ? '公开' : '仅自己可见'}
+        {spoiler && (
+          <>
+            <span aria-hidden='true' className='opacity-50'>
+              ·
+            </span>
+            含剧透
+          </>
+        )}
+        <ChevronDown
+          aria-hidden='true'
+          className={`h-3.5 w-3.5 opacity-60 transition-transform ${
+            open ? 'rotate-180' : ''
+          }`}
+        />
+      </button>
+      {open && (
+        <div
+          id={menuId}
+          role='group'
+          aria-label='评价设置'
+          className='absolute bottom-full left-0 z-20 mb-2 w-52 rounded-xl bg-white p-1 shadow-lg shadow-black/10 ring-1 ring-gray-900/[0.08] dark:bg-gray-900 dark:shadow-black/40 dark:ring-white/10'
+        >
+          <OptionSwitchRow
+            label='公开评价'
+            checked={isPublic}
+            onChange={onPublicChange}
+          />
+          <OptionSwitchRow
+            label='包含剧透'
+            checked={spoiler}
+            onChange={onSpoilerChange}
+          />
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -255,22 +360,13 @@ function ReviewEditor({
           onKeyDown={handleShortcut}
         />
 
-        <button
-          type='button'
-          role='switch'
-          aria-label='包含剧透'
-          aria-checked={spoiler}
-          disabled={saving}
-          onClick={() => setSpoiler(!spoiler)}
-          className='mx-3 mb-2 rounded-full bg-gray-100 px-3 py-1.5 text-xs text-gray-600 dark:bg-white/10 dark:text-gray-300'
-        >
-          包含剧透：{spoiler ? '是' : '否'}
-        </button>
         <div className='flex flex-wrap items-center gap-1.5 border-t border-gray-100 px-2.5 py-2 dark:border-white/[0.06]'>
-          <VisibilityToggle
+          <ReviewOptionsMenu
             isPublic={isPublic}
+            spoiler={spoiler}
             disabled={saving}
-            onChange={setIsPublic}
+            onPublicChange={setIsPublic}
+            onSpoilerChange={setSpoiler}
           />
           <button
             type='button'
@@ -363,22 +459,13 @@ function ReviewEditor({
           />
 
           <div className='flex flex-wrap items-center gap-2 border-t border-gray-100 px-4 py-3 dark:border-white/[0.06] sm:px-6'>
-            <VisibilityToggle
+            <ReviewOptionsMenu
               isPublic={isPublic}
+              spoiler={spoiler}
               disabled={saving}
-              onChange={setIsPublic}
+              onPublicChange={setIsPublic}
+              onSpoilerChange={setSpoiler}
             />
-            <button
-              type='button'
-              role='switch'
-              aria-label='包含剧透'
-              aria-checked={spoiler}
-              disabled={saving}
-              onClick={() => setSpoiler(!spoiler)}
-              className='rounded-full bg-gray-100 px-3 py-1.5 text-xs text-gray-600 dark:bg-white/10 dark:text-gray-300'
-            >
-              包含剧透：{spoiler ? '是' : '否'}
-            </button>
             {hintNode}
             <span className='ml-auto' />
             <ContentCounter length={trimmedLength} />
