@@ -1,4 +1,4 @@
-﻿import { randomUUID } from 'crypto';
+import { randomUUID } from 'crypto';
 
 import { AdminConfig } from '@/types/admin';
 
@@ -14,10 +14,13 @@ import {
   Favorite,
   PlaybackSession,
   PlayRecord,
+  REVIEW_REPORT_REASONS,
+  ReviewReportReason,
   SkipConfig,
   SourceRouteStatsBucket,
   StorageImportData,
   StorageUserImportData,
+  UserMessageState,
   VideoReview,
 } from './types';
 import { normalizeUsername } from './username';
@@ -142,6 +145,9 @@ export async function parseImportData(
       Object.keys(normalizedUserData.playRecords).length +
       Object.keys(normalizedUserData.favorites).length +
       (normalizedUserData.videoReviews?.length ?? 0) +
+      (normalizedUserData.follows?.length ?? 0) +
+      (normalizedUserData.likes?.length ?? 0) +
+      (normalizedUserData.reports?.length ?? 0) +
       normalizedUserData.searchHistory.length +
       Object.keys(normalizedUserData.skipConfigs).length +
       Object.keys(normalizedUserData.playbackSessions).length;
@@ -171,6 +177,36 @@ export async function parseImportData(
     }
   }
 
+  const remap = (name: string) =>
+    shouldRemapOwner && normalizeUsername(name) === backupOwner
+      ? localOwner
+      : normalizeUsername(name);
+  for (const [username, data] of Object.entries(userData)) {
+    if (data.profile) data.profile.username = username;
+    data.follows = data.follows
+      ?.map((row) => ({ ...row, followee: remap(row.followee) }))
+      .filter((row) => row.followee !== username && !!userData[row.followee]);
+    data.likes = data.likes
+      ?.map((row) => ({ ...row, author: remap(row.author) }))
+      .filter(
+        (row) =>
+          row.author !== username &&
+          userData[row.author]?.videoReviews?.some(
+            (review) =>
+              review.title_norm === row.title_norm && review.year === row.year,
+          ),
+      );
+    data.reports = data.reports
+      ?.map((row) => ({ ...row, author: remap(row.author) }))
+      .filter(
+        (row) =>
+          row.author !== username &&
+          userData[row.author]?.videoReviews?.some(
+            (review) =>
+              review.title_norm === row.title_norm && review.year === row.year,
+          ),
+      );
+  }
   alignConfigOwner(adminConfig, localOwner, backupOwner);
 
   return {
@@ -596,6 +632,7 @@ function normalizeUserData(
       normalizeFavorite,
     ),
     videoReviews: normalizeVideoReviews(input.videoReviews),
+    ...normalizeSocialData(input, username),
     searchHistory: normalizeSearchHistory(
       input.searchHistory,
       searchHistoryLimit,
@@ -622,6 +659,77 @@ function normalizeUserData(
           danmakuEnabled: assertBoolean(input.danmakuEnabled, '弹幕开关'),
         }),
     lastLoginAt: normalizeLastLoginAt(input.lastLoginAt),
+  };
+}
+
+function normalizeSocialData(
+  input: Record<string, unknown>,
+  username: string,
+): Pick<StorageUserImportData, 'profile' | 'follows' | 'likes' | 'reports'> {
+  const timestamp = (value: unknown) =>
+    Math.floor(
+      assertBoundedNumber(value, '社交记录时间', 0, Number.MAX_SAFE_INTEGER),
+    );
+  const name = (value: unknown) => {
+    if (typeof value !== 'string' || !value.trim() || value.length > 191)
+      throw new ImportValidationError('社交记录用户名无效');
+    return normalizeUsername(value);
+  };
+  const rows = (value: unknown): Record<string, unknown>[] => {
+    if (value === undefined) return [];
+    if (!Array.isArray(value) || value.length > MAX_FAVORITES_PER_USER)
+      throw new ImportValidationError('社交记录格式或数量无效');
+    return value.map((row) => requireObject(row, '社交记录格式无效'));
+  };
+  const identity = (row: Record<string, unknown>) => {
+    if (
+      typeof row.title_norm !== 'string' ||
+      !row.title_norm ||
+      row.title_norm.length > 191 ||
+      typeof row.year !== 'string' ||
+      row.year.length > 16
+    )
+      throw new ImportValidationError('评价引用无效');
+    return {
+      author: name(row.author),
+      title_norm: row.title_norm,
+      year: row.year,
+      created_at: timestamp(row.created_at),
+    };
+  };
+  let profile: StorageUserImportData['profile'];
+  if (input.profile !== undefined && input.profile !== null) {
+    const p = requireObject(input.profile, '用户资料格式无效');
+    if (p.nickname !== null && typeof p.nickname !== 'string')
+      throw new ImportValidationError('昵称格式无效');
+    profile = {
+      username: normalizeUsername(username),
+      profile_id: typeof p.profile_id === 'string' ? p.profile_id : '',
+      nickname: p.nickname as string | null,
+      favorites_public: assertBoolean(p.favorites_public, '收藏公开状态'),
+      updated_at: timestamp(p.updated_at),
+    };
+  }
+  return {
+    profile,
+    follows: rows(input.follows).map((row) => ({
+      followee: name(row.followee),
+      created_at: timestamp(row.created_at),
+    })),
+    likes: rows(input.likes).map(identity),
+    reports: rows(input.reports).map((row) => {
+      if (
+        !REVIEW_REPORT_REASONS.includes(row.reason as ReviewReportReason) ||
+        typeof row.detail !== 'string' ||
+        row.detail.length > 200
+      )
+        throw new ImportValidationError('举报记录无效');
+      return {
+        ...identity(row),
+        reason: row.reason as ReviewReportReason,
+        detail: row.detail,
+      };
+    }),
   };
 }
 
@@ -675,7 +783,7 @@ function normalizeLastLoginAt(value: unknown): number | undefined {
   );
 }
 
-function normalizeMessageState(value: unknown) {
+function normalizeMessageState(value: unknown): UserMessageState {
   if (value === undefined || value === null) return {};
   const input = requireObject(value, '消息状态格式无效');
   const readAnnouncementId = input.readAnnouncementId;
@@ -685,7 +793,34 @@ function normalizeMessageState(value: unknown) {
   ) {
     throw new ImportValidationError('公告已读状态格式无效');
   }
-  return readAnnouncementId ? { readAnnouncementId } : {};
+  const result: UserMessageState = readAnnouncementId
+    ? { readAnnouncementId }
+    : {};
+  if (input.followReviewReadAt !== undefined)
+    result.followReviewReadAt = Math.floor(
+      assertBoundedNumber(
+        input.followReviewReadAt,
+        '关注动态已读时间',
+        0,
+        Number.MAX_SAFE_INTEGER,
+      ),
+    );
+  if (input.followReviewReadIds !== undefined) {
+    if (
+      !Array.isArray(input.followReviewReadIds) ||
+      input.followReviewReadIds.some(
+        (id) =>
+          typeof id !== 'string' ||
+          !id.startsWith('follow-review:') ||
+          id.length > 4000,
+      )
+    )
+      throw new ImportValidationError('关注动态已读标识无效');
+    result.followReviewReadIds = [
+      ...new Set(input.followReviewReadIds as string[]),
+    ].slice(-200);
+  }
+  return result;
 }
 
 // 超出上限时保留最新的会话，避免整体导入失败

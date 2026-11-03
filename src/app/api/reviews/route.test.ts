@@ -12,6 +12,7 @@ jest.mock('@/lib/api-auth', () => ({
 }));
 jest.mock('@/lib/db', () => ({
   db: {
+    ensureUserProfile: jest.fn().mockResolvedValue({ nickname: 'Author' }),
     getVideoReview: jest.fn(),
     setVideoReview: jest.fn(),
     deleteVideoReview: jest.fn(),
@@ -164,6 +165,30 @@ describe('/api/reviews', () => {
     expect((await own.PUT(req)).status).toBe(400);
   });
 
+  it('deletes the exact unknown-year record without selecting the newer known year', async () => {
+    const records = new Map([
+      ['', { ...videoReview, year: '', updated_at: 1000 }],
+      ['2026', { ...videoReview, year: '2026', updated_at: 2000 }],
+    ]);
+    db.getVideoReview.mockResolvedValue(records.get('2026'));
+    db.deleteVideoReview.mockImplementationOnce(
+      async (_username: string, _title: string, year: string) => {
+        records.delete(year);
+      },
+    );
+    const response = await own.DELETE(
+      request('DELETE', '?exact=1&title_norm=reviewdemo&year='),
+    );
+    expect(await response.json()).toEqual({ ok: true });
+    expect(db.getVideoReview).not.toHaveBeenCalled();
+    expect(db.deleteVideoReview).toHaveBeenCalledWith(
+      'author',
+      'reviewdemo',
+      '',
+    );
+    expect([...records.keys()]).toEqual(['2026']);
+  });
+
   it('deletes the matched own record and is idempotent when absent', async () => {
     db.getVideoReview.mockResolvedValueOnce({ ...videoReview, year: '' });
     expect(await (await own.DELETE(request('DELETE'))).json()).toEqual({
@@ -260,6 +285,7 @@ describe('/api/reviews/work', () => {
     expect(db.getPublicVideoReviewsForWork).toHaveBeenCalledWith(
       'reviewdemo',
       '2026',
+      'author',
     );
   });
   it('requires login and rejects missing titles', async () => {

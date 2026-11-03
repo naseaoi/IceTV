@@ -27,6 +27,18 @@ function makeDb(searchHistory: string[]) {
     getAllUsers: jest.fn().mockResolvedValue([]),
     getAllPlayRecords: jest.fn().mockResolvedValue({}),
     getAllFavorites: jest.fn().mockResolvedValue({}),
+    getUserSocialData: jest.fn().mockResolvedValue({
+      follows: [],
+      likes: [],
+      reports: [],
+      profile: {
+        username: 'owner-1',
+        profile_id: 'AbCdEf012345',
+        nickname: null,
+        favorites_public: false,
+        updated_at: 1,
+      },
+    }),
     getAllVideoReviews: jest.fn().mockResolvedValue([videoReview]),
     getSearchHistory: jest.fn().mockResolvedValue(searchHistory),
     getAllSkipConfigs: jest.fn().mockResolvedValue({}),
@@ -100,6 +112,12 @@ describe('data migration export route', () => {
       gunzipSync(Buffer.from(compressed, 'base64')).toString('utf8'),
     );
     expect(backup.data.userData['owner-1'].videoReviews).toEqual([videoReview]);
+    expect(backup.data.userData['owner-1'].profile.profile_id).toBe(
+      'AbCdEf012345',
+    );
+    expect(backup.data.userData['owner-1'].follows).toEqual([]);
+    expect(backup.data.userData['owner-1'].likes).toEqual([]);
+    expect(backup.data.userData['owner-1'].reports).toEqual([]);
   });
 
   it('原始数据超过解压上限时拒绝导出', async () => {

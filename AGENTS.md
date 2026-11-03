@@ -46,6 +46,10 @@
 - 私密评价只对作者可见；作品汇总、后台列表与后台删除都带 `is_public = 1`。新增读取路径须同样过滤。
 - 收藏仍按 `source+id`，评价与收藏相互独立：保存评价时由前端补收藏，取消收藏不删评价。
 - 新增按用户分表的数据时，`deleteUser`、`clearAllData`、`replaceAllData`、导入导出与 SQLite 用户名大小写合并都要覆盖，`video_reviews` 是现成参照。
+- 公开评价、个人主页、关注列表与关注动态只返回 `profileId` 和昵称，登录名仅用于服务端身份和后台接口。
+- 每个 `users` 行必须有 `user_profiles` 行；建号同事务写入，初始化与 `replaceAllData()` 结尾补齐，站长无 `users` 行，在会话恢复时按需 `ensureUserProfile()`。用户名比较先归一化。
+- `user_profiles`、`user_follows`、`video_review_likes`、`video_review_reports` 的删除、清空、替换、导入导出与 SQLite 大小写合并必须覆盖所有用户名列；删除评价同事务清理点赞与举报。导入昵称冲突置空、资料标识冲突重生成。
+- 保存评价、点赞、举报和关注的服务端写入口必须校验昵称，缺失返回 403 `NICKNAME_REQUIRED`；注册昵称与账号同事务保存，失败释放邀请码名额。
 
 ## 客户端 IP 与限流
 

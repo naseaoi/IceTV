@@ -4,6 +4,7 @@ import { hasPlayRecordUpdate } from '@/lib/play-records';
 import { DEFAULT_RUNTIME_PARAMS } from '@/lib/runtime-params';
 import type { AdminConfig } from '@/types/admin';
 
+import { executeSocial, querySocial } from './__fixtures__/social-fake-sql';
 import { videoReviewContract } from './__fixtures__/video-review-contract';
 
 type SearchHistoryRow = {
@@ -22,6 +23,7 @@ type SourceRouteStatsRow = {
 };
 
 type FakeState = {
+  social: Record<string, Record<string, any>[]>;
   users: Map<string, string>;
   playRecords: Map<string, Map<string, string>>;
   favorites: Map<string, Map<string, string>>;
@@ -46,6 +48,12 @@ function cloneNestedMap(source: Map<string, Map<string, string>>) {
 
 function cloneState(state: FakeState): FakeState {
   return {
+    social: Object.fromEntries(
+      Object.entries(state.social).map(([key, rows]) => [
+        key,
+        rows.map((row) => ({ ...row })),
+      ]),
+    ),
     users: new Map(state.users),
     playRecords: cloneNestedMap(state.playRecords),
     favorites: cloneNestedMap(state.favorites),
@@ -70,6 +78,12 @@ function cloneState(state: FakeState): FakeState {
 
 function createState(): FakeState {
   return {
+    social: {
+      user_profiles: [],
+      user_follows: [],
+      video_review_likes: [],
+      video_review_reports: [],
+    },
     users: new Map(),
     playRecords: new Map(),
     favorites: new Map(),
@@ -243,6 +257,7 @@ function selectUnreadTrackingRows(
 
 function createFakePool() {
   let state = createState();
+  let transactionQueue = Promise.resolve();
   let queryCount = 0;
   const insertStatementCounts = new Map<string, number>();
 
@@ -268,6 +283,16 @@ function createFakePool() {
   ) => {
     const normalized = normalizeSql(sql);
 
+    const socialResult = executeSocial(normalized, params, currentState);
+    if (socialResult !== undefined) return [{ affectedRows: socialResult }, []];
+    if (
+      normalized.startsWith('UPDATE video_reviews SET review_json = JSON_SET')
+    ) {
+      const row = currentState.videoReviews.get(JSON.stringify(params));
+      if (row?.review.is_public) row.review = { ...row.review, spoiler: true };
+      return [{ affectedRows: row ? 1 : 0 }, []];
+    }
+
     if (normalized.startsWith('INSERT INTO video_reviews')) {
       const [username, title, year, raw] = params as [
         string,
@@ -283,6 +308,7 @@ function createFakePool() {
       return [[], []];
     }
     if (normalized.startsWith('DELETE FROM video_reviews')) {
+      let affectedRows = 0;
       for (const [key, row] of currentState.videoReviews) {
         if (
           !params.length ||
@@ -293,9 +319,10 @@ function createFakePool() {
                 (!params[3] || row.review.is_public))))
         ) {
           currentState.videoReviews.delete(key);
+          affectedRows++;
         }
       }
-      return [[], []];
+      return [{ affectedRows }, []];
     }
 
     if (normalized.startsWith('CREATE TABLE IF NOT EXISTS')) {
@@ -397,6 +424,22 @@ function createFakePool() {
     if (normalized === 'DELETE FROM user_danmaku_episodes') {
       currentState.danmakuEpisodes.clear();
       return [[], []];
+    }
+
+    if (
+      normalized ===
+      'INSERT INTO user_message_state (username, state_json) VALUES (?, ?) ON DUPLICATE KEY UPDATE username = VALUES(username)'
+    ) {
+      if (!currentState.messageStates.has(String(params[0])))
+        currentState.messageStates.set(String(params[0]), String(params[1]));
+      return [{ affectedRows: 1 }, []];
+    }
+    if (
+      normalized ===
+      'UPDATE user_message_state SET state_json = ? WHERE username = ?'
+    ) {
+      currentState.messageStates.set(String(params[1]), String(params[0]));
+      return [{ affectedRows: 1 }, []];
     }
 
     if (
@@ -961,6 +1004,9 @@ function createFakePool() {
   ) => {
     const normalized = normalizeSql(sql);
 
+    const socialRows = querySocial(normalized, params, currentState);
+    if (socialRows !== undefined) return [socialRows, []];
+
     if (normalized.includes('FROM video_reviews')) {
       let rows = [...currentState.videoReviews.values()];
       const compareText = (a: string, b: string) =>
@@ -988,6 +1034,13 @@ function createFakePool() {
                 Number(a.review.year === params[2])
               : 0) || sortRows(a, b),
         );
+        if (normalized.includes('is_public = 1'))
+          rows = rows.filter(
+            (row) =>
+              row.review.is_public &&
+              (!normalized.includes('year = ?') ||
+                row.review.year === params[2]),
+          );
         if (normalized.includes('LIMIT 1')) rows = rows.slice(0, 1);
       } else {
         rows = rows.filter((row) => row.review.is_public);
@@ -999,6 +1052,18 @@ function createFakePool() {
                 row.review.year === params[1] ||
                 row.review.year === ''),
           );
+          if (normalized.includes(' AS bucket')) {
+            const counts = new Map<number, number>();
+            for (const row of rows)
+              if (row.review.rating !== null) {
+                const bucket = Math.floor(row.review.rating);
+                counts.set(bucket, (counts.get(bucket) ?? 0) + 1);
+              }
+            return [
+              [...counts].map(([bucket, count]) => ({ bucket, count })),
+              [],
+            ];
+          }
           if (normalized.startsWith('SELECT AVG(')) {
             const rated = rows.filter((row) => row.review.rating !== null);
             return [
@@ -1495,7 +1560,9 @@ function createFakePool() {
 
     if (
       normalized ===
-      'SELECT state_json FROM user_message_state WHERE username = ? LIMIT 1'
+        'SELECT state_json FROM user_message_state WHERE username = ? LIMIT 1' ||
+      normalized ===
+        'SELECT state_json FROM user_message_state WHERE username = ? FOR UPDATE'
     ) {
       const [username] = params as [string];
       const stateJson = currentState.messageStates.get(username);
@@ -1648,9 +1715,14 @@ function createFakePool() {
     },
     async getConnection() {
       let transactionState = cloneState(state);
-
+      let unlock = () => {};
       return {
         async beginTransaction() {
+          const previous = transactionQueue;
+          transactionQueue = new Promise<void>((resolve) => {
+            unlock = resolve;
+          });
+          await previous;
           transactionState = cloneState(state);
         },
         async query(sql: string, params?: unknown[]) {
@@ -1658,8 +1730,11 @@ function createFakePool() {
         },
         async commit() {
           state = cloneState(transactionState);
+          unlock();
         },
-        async rollback() {},
+        async rollback() {
+          unlock();
+        },
         async execute(sql: string, params?: unknown[]) {
           const table = /^INSERT INTO (\w+)/.exec(normalizeSql(sql))?.[1];
           if (table) {

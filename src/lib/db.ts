@@ -62,6 +62,96 @@ class DbManager {
     return getStorage();
   }
 
+  async getUserProfile(
+    ...args: Parameters<IStorage['getUserProfile']>
+  ): ReturnType<IStorage['getUserProfile']> {
+    return (await this.getStorage()).getUserProfile(...args);
+  }
+
+  async getUserProfileById(
+    ...args: Parameters<IStorage['getUserProfileById']>
+  ): ReturnType<IStorage['getUserProfileById']> {
+    return (await this.getStorage()).getUserProfileById(...args);
+  }
+
+  async ensureUserProfile(
+    ...args: Parameters<IStorage['ensureUserProfile']>
+  ): ReturnType<IStorage['ensureUserProfile']> {
+    return (await this.getStorage()).ensureUserProfile(...args);
+  }
+
+  async updateUserProfile(
+    ...args: Parameters<IStorage['updateUserProfile']>
+  ): ReturnType<IStorage['updateUserProfile']> {
+    return (await this.getStorage()).updateUserProfile(...args);
+  }
+
+  async isNicknameAvailable(
+    ...args: Parameters<IStorage['isNicknameAvailable']>
+  ): ReturnType<IStorage['isNicknameAvailable']> {
+    return (await this.getStorage()).isNicknameAvailable(...args);
+  }
+
+  async getUserProfileView(
+    ...args: Parameters<IStorage['getUserProfileView']>
+  ): ReturnType<IStorage['getUserProfileView']> {
+    return (await this.getStorage()).getUserProfileView(...args);
+  }
+
+  async setUserFollow(
+    ...args: Parameters<IStorage['setUserFollow']>
+  ): ReturnType<IStorage['setUserFollow']> {
+    return (await this.getStorage()).setUserFollow(...args);
+  }
+
+  async getUserFollowPage(
+    ...args: Parameters<IStorage['getUserFollowPage']>
+  ): ReturnType<IStorage['getUserFollowPage']> {
+    return (await this.getStorage()).getUserFollowPage(...args);
+  }
+
+  async getUserPublicReviewPage(
+    ...args: Parameters<IStorage['getUserPublicReviewPage']>
+  ): ReturnType<IStorage['getUserPublicReviewPage']> {
+    return (await this.getStorage()).getUserPublicReviewPage(...args);
+  }
+
+  async setVideoReviewLike(
+    ...args: Parameters<IStorage['setVideoReviewLike']>
+  ): ReturnType<IStorage['setVideoReviewLike']> {
+    return (await this.getStorage()).setVideoReviewLike(...args);
+  }
+
+  async reportVideoReview(
+    ...args: Parameters<IStorage['reportVideoReview']>
+  ): ReturnType<IStorage['reportVideoReview']> {
+    return (await this.getStorage()).reportVideoReview(...args);
+  }
+
+  async getReviewReportPage(
+    ...args: Parameters<IStorage['getReviewReportPage']>
+  ): ReturnType<IStorage['getReviewReportPage']> {
+    return (await this.getStorage()).getReviewReportPage(...args);
+  }
+
+  async getFollowReviewMessages(
+    ...args: Parameters<IStorage['getFollowReviewMessages']>
+  ): ReturnType<IStorage['getFollowReviewMessages']> {
+    return (await this.getStorage()).getFollowReviewMessages(...args);
+  }
+
+  async getUserSocialData(
+    ...args: Parameters<IStorage['getUserSocialData']>
+  ): ReturnType<IStorage['getUserSocialData']> {
+    return (await this.getStorage()).getUserSocialData(...args);
+  }
+
+  async moderateReviewReports(
+    ...args: Parameters<IStorage['moderateReviewReports']>
+  ): ReturnType<IStorage['moderateReviewReports']> {
+    return (await this.getStorage()).moderateReviewReports(...args);
+  }
+
   async getVideoReview(
     userName: string,
     titleNorm: string,
@@ -95,10 +185,12 @@ class DbManager {
   async getPublicVideoReviewsForWork(
     titleNorm: string,
     year: string,
+    viewer = '',
   ): Promise<WorkReviewSummary> {
     return (await this.getStorage()).getPublicVideoReviewsForWork(
       titleNorm,
       year,
+      viewer,
     );
   }
 
@@ -319,9 +411,13 @@ class DbManager {
     return favorite !== null;
   }
 
-  async registerUser(userName: string, password: string): Promise<void> {
+  async registerUser(
+    userName: string,
+    password: string,
+    nickname?: string,
+  ): Promise<void> {
     const storage = await this.getStorage();
-    await storage.registerUser(userName, password);
+    await storage.registerUser(userName, password, nickname);
   }
 
   async verifyUser(userName: string, password: string): Promise<boolean> {
@@ -415,6 +511,12 @@ class DbManager {
   async getUserMessageState(userName: string): Promise<UserMessageState> {
     const storage = await this.getStorage();
     return storage.getUserMessageState(userName);
+  }
+
+  async updateUserMessageState(
+    ...args: Parameters<IStorage['updateUserMessageState']>
+  ): ReturnType<IStorage['updateUserMessageState']> {
+    return (await this.getStorage()).updateUserMessageState(...args);
   }
 
   async setUserMessageState(

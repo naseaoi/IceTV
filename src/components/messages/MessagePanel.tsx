@@ -9,10 +9,13 @@ import {
   Rss,
   X,
 } from 'lucide-react';
+import Link from 'next/link';
 import { useEffect, useId } from 'react';
 import { createPortal } from 'react-dom';
 
 import CoverImage from '@/components/CoverImage';
+import ProfileAvatar from '@/components/ProfileAvatar';
+import RatingBadge from '@/components/RatingBadge';
 import { useBodyScrollLock } from '@/components/user-menu/useBodyScrollLock';
 import { UserMessage, UserMessagePage } from '@/lib/message-types';
 import { formatRelativeTime } from '@/lib/relative-time';
@@ -35,11 +38,54 @@ function MessageRow({
   message,
   working,
   onRead,
+  onNavigate,
 }: {
   message: UserMessage;
   working: boolean;
   onRead: (message: UserMessage) => Promise<void>;
+  onNavigate: () => void;
 }) {
+  if (message.type === 'follow-review')
+    return (
+      <div className='flex items-start gap-3 rounded-lg border border-gray-200/80 bg-white/60 p-4 dark:border-gray-700/80 dark:bg-gray-800/40'>
+        <Link
+          href={`/u/${message.author.profileId}`}
+          onClick={onNavigate}
+          className='flex min-w-0 flex-1 gap-3'
+        >
+          <ProfileAvatar {...message.author} />
+          <div className='min-w-0'>
+            <p className='text-sm font-semibold text-gray-900 dark:text-gray-100'>
+              {message.author.nickname ?? '未设置昵称'}
+            </p>
+            <p className='mt-1 text-sm text-gray-600 dark:text-gray-300'>
+              评价了《{message.title}》
+            </p>
+            <div className='mt-2 flex items-center gap-2'>
+              {message.rating !== null && (
+                <RatingBadge value={message.rating} />
+              )}
+              <span className='text-xs text-gray-400'>
+                {formatRelativeTime(message.createdAt)}
+              </span>
+            </div>
+          </div>
+        </Link>
+        <button
+          type='button'
+          aria-label='标记为已读'
+          disabled={working}
+          onClick={() => void onRead(message)}
+          className='rounded-full p-2 text-gray-400 hover:bg-green-50 dark:hover:bg-green-900/30'
+        >
+          {working ? (
+            <LoaderCircle className='h-4 w-4 animate-spin' />
+          ) : (
+            <Check className='h-4 w-4' />
+          )}
+        </button>
+      </div>
+    );
   const isAnnouncement = message.type === 'announcement';
 
   return (
@@ -110,12 +156,14 @@ function MessageSection({
   workingIds,
   readingAll,
   onRead,
+  onNavigate,
 }: {
   title: string;
   messages: UserMessage[];
   workingIds: Set<string>;
   readingAll: boolean;
   onRead: (message: UserMessage) => Promise<void>;
+  onNavigate: () => void;
 }) {
   if (messages.length === 0) return null;
 
@@ -130,6 +178,7 @@ function MessageSection({
           message={message}
           working={readingAll || workingIds.has(message.id)}
           onRead={onRead}
+          onNavigate={onNavigate}
         />
       ))}
     </section>
@@ -167,7 +216,7 @@ export default function MessagePanel({
     (message) => message.type === 'announcement',
   );
   const trackingUpdates = page.items.filter(
-    (message) => message.type === 'tracking-update',
+    (message) => message.type !== 'announcement',
   );
 
   return createPortal(
@@ -198,7 +247,7 @@ export default function MessagePanel({
             <p className='mt-0.5 text-xs text-gray-400 dark:text-gray-500'>
               {page.total > 0
                 ? `${page.total} 条未读消息`
-                : '公告与追更动态会显示在这里'}
+                : '公告、追更与关注动态会显示在这里'}
             </p>
           </div>
           {page.total > 0 && (
@@ -264,13 +313,21 @@ export default function MessagePanel({
                 workingIds={workingIds}
                 readingAll={readingAll}
                 onRead={onRead}
+                onNavigate={onClose}
               />
               <MessageSection
-                title='追更更新'
+                title={
+                  trackingUpdates.some(
+                    (message) => message.type === 'follow-review',
+                  )
+                    ? '追更与关注动态'
+                    : '追更更新'
+                }
                 messages={trackingUpdates}
                 workingIds={workingIds}
                 readingAll={readingAll}
                 onRead={onRead}
+                onNavigate={onClose}
               />
               {page.nextCursor && (
                 <div className='flex justify-center pt-1'>

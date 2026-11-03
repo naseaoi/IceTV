@@ -7,6 +7,8 @@ type SessionResponse = {
   authenticated?: boolean;
   username?: string | null;
   role?: AuthSessionRole | null;
+  profileId?: string;
+  nickname?: string | null;
 };
 
 function isAuthSessionRole(value: unknown): value is AuthSessionRole {
@@ -38,9 +40,19 @@ export async function getClientAuthSession(): Promise<ClientAuthSession> {
       return { status: 'guest' };
     }
 
+    if (
+      typeof session.profileId !== 'string' ||
+      !session.profileId ||
+      (session.nickname !== null && typeof session.nickname !== 'string')
+    ) {
+      return { status: 'error' };
+    }
+
     return {
       status: 'authenticated',
       username: session.username,
+      profileId: session.profileId,
+      nickname: session.nickname,
       role: session.role,
     };
   } catch {

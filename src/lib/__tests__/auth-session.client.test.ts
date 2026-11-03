@@ -28,6 +28,8 @@ describe('getClientAuthSession', () => {
       ok: true,
       json: async () => ({
         authenticated: true,
+        profileId: 'profileAlice',
+        nickname: '爱丽丝',
         username: 'alice',
         role: 'user',
       }),
@@ -35,6 +37,8 @@ describe('getClientAuthSession', () => {
 
     await expect(getClientAuthSession()).resolves.toEqual({
       status: 'authenticated',
+      profileId: 'profileAlice',
+      nickname: '爱丽丝',
       username: 'alice',
       role: 'user',
     });

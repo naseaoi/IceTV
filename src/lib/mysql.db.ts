@@ -9,6 +9,13 @@ import mysql from 'mysql2/promise';
 
 import { MySqlResourceStore } from '@/lib/mysql-resource-store';
 import {
+  importedProfileValues,
+  ReviewSocialStorage,
+  SOCIAL_TABLES,
+  socialSchema,
+} from '@/lib/review-social-storage';
+import { mergeUserMessageState } from '@/lib/user-message-state';
+import {
   publicReview,
   reviewPage,
   reviewPageParams,
@@ -46,6 +53,7 @@ import {
   SourceRouteStatsItem,
   StorageImportData,
   UserMessageState,
+  UserMessageStateUpdate,
   VideoReview,
   WorkReviewSummary,
 } from './types';
@@ -402,6 +410,7 @@ export class MySqlStorage implements IStorage {
 
   private async initializeSchema(): Promise<void> {
     const statements = [
+      ...socialSchema('mysql'),
       `CREATE TABLE IF NOT EXISTS users (
         username VARCHAR(191) NOT NULL PRIMARY KEY,
         password TEXT NOT NULL
@@ -531,6 +540,17 @@ export class MySqlStorage implements IStorage {
     }
 
     await this.backfillMissingLoginActivity();
+    await this.backfillUserProfiles();
+  }
+
+  private async backfillUserProfiles(
+    executor: Pick<PoolConnection, 'query' | 'execute'> = this.pool,
+  ): Promise<void> {
+    const [rows] = await executor.query<RowDataPacket[]>(
+      'SELECT u.username FROM users u LEFT JOIN user_profiles p ON p.username = u.username WHERE p.username IS NULL',
+    );
+    for (const row of rows)
+      await this.socialFor(executor).ensureUserProfile(String(row.username));
   }
 
   // 每个用户都必须有活跃记录行，缺失的按当前时刻补齐
@@ -951,6 +971,132 @@ export class MySqlStorage implements IStorage {
     ]);
   }
 
+  private socialFor(
+    executor: Pick<PoolConnection, 'query' | 'execute'> = this.pool,
+  ) {
+    return new ReviewSocialStorage({
+      dialect: 'mysql',
+      rows: async <T>(sql: string, params: unknown[] = []) =>
+        (await executor.query(sql, params as ExecuteValues))[0] as T[],
+      run: async (sql, params = []) =>
+        (
+          (
+            await executor.execute(sql, params as ExecuteValues)
+          )[0] as import('mysql2/promise').ResultSetHeader
+        ).affectedRows,
+    });
+  }
+
+  async getUserProfile(
+    ...args: Parameters<IStorage['getUserProfile']>
+  ): ReturnType<IStorage['getUserProfile']> {
+    await this.ensureInitialized();
+    return this.socialFor().getUserProfile(...args);
+  }
+
+  async getUserProfileById(
+    ...args: Parameters<IStorage['getUserProfileById']>
+  ): ReturnType<IStorage['getUserProfileById']> {
+    await this.ensureInitialized();
+    return this.socialFor().getUserProfileById(...args);
+  }
+
+  async ensureUserProfile(
+    ...args: Parameters<IStorage['ensureUserProfile']>
+  ): ReturnType<IStorage['ensureUserProfile']> {
+    await this.ensureInitialized();
+    return this.socialFor().ensureUserProfile(...args);
+  }
+
+  async updateUserProfile(
+    ...args: Parameters<IStorage['updateUserProfile']>
+  ): ReturnType<IStorage['updateUserProfile']> {
+    await this.ensureInitialized();
+    return this.socialFor().updateUserProfile(...args);
+  }
+
+  async isNicknameAvailable(
+    ...args: Parameters<IStorage['isNicknameAvailable']>
+  ): ReturnType<IStorage['isNicknameAvailable']> {
+    await this.ensureInitialized();
+    return this.socialFor().isNicknameAvailable(...args);
+  }
+
+  async getUserProfileView(
+    ...args: Parameters<IStorage['getUserProfileView']>
+  ): ReturnType<IStorage['getUserProfileView']> {
+    await this.ensureInitialized();
+    return this.socialFor().getUserProfileView(...args);
+  }
+
+  async setUserFollow(
+    ...args: Parameters<IStorage['setUserFollow']>
+  ): ReturnType<IStorage['setUserFollow']> {
+    await this.ensureInitialized();
+    return this.socialFor().setUserFollow(...args);
+  }
+
+  async getUserFollowPage(
+    ...args: Parameters<IStorage['getUserFollowPage']>
+  ): ReturnType<IStorage['getUserFollowPage']> {
+    await this.ensureInitialized();
+    return this.socialFor().getUserFollowPage(...args);
+  }
+
+  async getUserPublicReviewPage(
+    ...args: Parameters<IStorage['getUserPublicReviewPage']>
+  ): ReturnType<IStorage['getUserPublicReviewPage']> {
+    await this.ensureInitialized();
+    return this.socialFor().getUserPublicReviewPage(...args);
+  }
+
+  async setVideoReviewLike(
+    ...args: Parameters<IStorage['setVideoReviewLike']>
+  ): ReturnType<IStorage['setVideoReviewLike']> {
+    await this.ensureInitialized();
+    return this.withTransaction(async (connection) => {
+      await connection.query(
+        'SELECT username FROM video_reviews WHERE username = ? AND title_norm = ? AND year = ? AND is_public = 1 FOR UPDATE',
+        [normalizeUsername(args[0]), args[1], args[2]],
+      );
+      return this.socialFor(connection).setVideoReviewLike(...args);
+    });
+  }
+
+  async reportVideoReview(
+    ...args: Parameters<IStorage['reportVideoReview']>
+  ): ReturnType<IStorage['reportVideoReview']> {
+    await this.ensureInitialized();
+    return this.withTransaction(async (connection) => {
+      await connection.query(
+        'SELECT username FROM video_reviews WHERE username = ? AND title_norm = ? AND year = ? AND is_public = 1 FOR UPDATE',
+        [normalizeUsername(args[0]), args[1], args[2]],
+      );
+      return this.socialFor(connection).reportVideoReview(...args);
+    });
+  }
+
+  async getReviewReportPage(
+    ...args: Parameters<IStorage['getReviewReportPage']>
+  ): ReturnType<IStorage['getReviewReportPage']> {
+    await this.ensureInitialized();
+    return this.socialFor().getReviewReportPage(...args);
+  }
+
+  async getFollowReviewMessages(
+    ...args: Parameters<IStorage['getFollowReviewMessages']>
+  ): ReturnType<IStorage['getFollowReviewMessages']> {
+    await this.ensureInitialized();
+    return this.socialFor().getFollowReviewMessages(...args);
+  }
+
+  async getUserSocialData(
+    ...args: Parameters<IStorage['getUserSocialData']>
+  ): ReturnType<IStorage['getUserSocialData']> {
+    await this.ensureInitialized();
+    return this.socialFor().getUserSocialData(...args);
+  }
+
   async getVideoReview(
     userName: string,
     titleNorm: string,
@@ -989,13 +1135,49 @@ export class MySqlStorage implements IStorage {
     year: string,
     publicOnly = false,
   ): Promise<void> {
-    await this.ensureInitialized();
-    await this.pool.execute(REVIEW_SQL.delete, [
-      normalizeUsername(userName),
-      titleNorm,
-      year,
-      publicOnly ? 1 : 0,
-    ]);
+    await this.withTransaction(async (connection) => {
+      const target = [normalizeUsername(userName), titleNorm, year];
+      const [result] = await connection.execute<
+        import('mysql2/promise').ResultSetHeader
+      >(REVIEW_SQL.delete, [...target, publicOnly ? 1 : 0]);
+      if (result.affectedRows)
+        for (const table of ['video_review_likes', 'video_review_reports'])
+          await connection.execute(
+            `DELETE FROM ${table} WHERE author = ? AND title_norm = ? AND year = ?`,
+            target,
+          );
+    });
+  }
+
+  async moderateReviewReports(
+    author: string,
+    title: string,
+    year: string,
+    action: 'dismiss' | 'mark-spoiler' | 'delete-review',
+  ): Promise<void> {
+    await this.withTransaction(async (connection) => {
+      const target = [normalizeUsername(author), title, year];
+      const [rows] = await connection.query<RowDataPacket[]>(
+        'SELECT username FROM video_reviews WHERE username = ? AND title_norm = ? AND year = ? AND is_public = 1 FOR UPDATE',
+        target,
+      );
+      if (!rows.length) return;
+      if (action === 'delete-review') {
+        await connection.execute(REVIEW_SQL.delete, [...target, 1]);
+        await connection.execute(
+          'DELETE FROM video_review_likes WHERE author = ? AND title_norm = ? AND year = ?',
+          target,
+        );
+      } else if (action === 'mark-spoiler')
+        await connection.execute(
+          "UPDATE video_reviews SET review_json = JSON_SET(review_json, '$.spoiler', CAST('true' AS JSON)) WHERE username = ? AND title_norm = ? AND year = ? AND is_public = 1",
+          target,
+        );
+      await connection.execute(
+        'DELETE FROM video_review_reports WHERE author = ? AND title_norm = ? AND year = ?',
+        target,
+      );
+    });
   }
 
   async getAllVideoReviews(userName: string): Promise<VideoReview[]> {
@@ -1010,6 +1192,7 @@ export class MySqlStorage implements IStorage {
   async getPublicVideoReviewsForWork(
     titleNorm: string,
     year: string,
+    viewer = '',
   ): Promise<WorkReviewSummary> {
     return this.withTransaction(async (connection) => {
       const [summaries] = await connection.query<
@@ -1023,7 +1206,20 @@ export class MySqlStorage implements IStorage {
         average:
           summaries[0].average === null ? null : Number(summaries[0].average),
         count: Number(summaries[0].count),
-        reviews: rows.map(publicReview),
+        reviews: (
+          await this.socialFor(connection).enrichReviews(rows, viewer)
+        ).map(publicReview),
+        distribution: await (async () => {
+          const [buckets] = await connection.query<RowDataPacket[]>(
+            REVIEW_SQL.distribution,
+            [titleNorm, year, year],
+          );
+          const distribution = Array<number>(10).fill(0);
+          for (const row of buckets)
+            distribution[Math.min(9, Math.max(0, Number(row.bucket) - 1))] +=
+              Number(row.count);
+          return distribution;
+        })(),
       };
     });
   }
@@ -1037,21 +1233,32 @@ export class MySqlStorage implements IStorage {
       REVIEW_SQL.page,
       reviewPageParams(cursor, q),
     );
-    return reviewPage(rows);
+    return reviewPage(await this.socialFor().enrichReviews(rows));
   }
 
-  async registerUser(userName: string, password: string): Promise<void> {
+  async registerUser(
+    userName: string,
+    password: string,
+    nickname?: string,
+  ): Promise<void> {
     await this.ensureInitialized();
     const username = assertValidUsernameFormat(userName);
     const hashed = await hashPassword(password);
-    await this.pool.execute(
-      'INSERT INTO users (username, password) VALUES (?, ?)',
-      [username, hashed],
-    );
-    await this.pool.execute(
-      'INSERT INTO user_login_activity (username, last_login_at) VALUES (?, ?) ON DUPLICATE KEY UPDATE last_login_at = VALUES(last_login_at)',
-      [username, Date.now()],
-    );
+    await this.withTransaction(async (connection) => {
+      await connection.execute(
+        'INSERT INTO users (username, password) VALUES (?, ?)',
+        [username, hashed],
+      );
+      await connection.execute(
+        'INSERT INTO user_login_activity (username, last_login_at) VALUES (?, ?) ON DUPLICATE KEY UPDATE last_login_at = VALUES(last_login_at)',
+        [username, Date.now()],
+      );
+      await this.socialFor(connection).ensureUserProfile(username);
+      if (nickname !== undefined)
+        await this.socialFor(connection).updateUserProfile(username, {
+          nickname,
+        });
+    });
   }
 
   async verifyUser(userName: string, password: string): Promise<boolean> {
@@ -1103,6 +1310,21 @@ export class MySqlStorage implements IStorage {
   async deleteUser(userName: string): Promise<void> {
     const username = normalizeUsername(userName);
     await this.withTransaction(async (connection) => {
+      await connection.execute('DELETE FROM user_profiles WHERE username = ?', [
+        username,
+      ]);
+      await connection.execute(
+        'DELETE FROM user_follows WHERE follower = ? OR followee = ?',
+        [username, username],
+      );
+      await connection.execute(
+        'DELETE FROM video_review_likes WHERE author = ? OR liker = ?',
+        [username, username],
+      );
+      await connection.execute(
+        'DELETE FROM video_review_reports WHERE author = ? OR reporter = ?',
+        [username, username],
+      );
       await connection.execute('DELETE FROM users WHERE username = ?', [
         username,
       ]);
@@ -1318,6 +1540,33 @@ export class MySqlStorage implements IStorage {
       [username],
     );
     return parseJsonValue<UserMessageState>(rows[0]?.state_json) || {};
+  }
+
+  async updateUserMessageState(
+    userName: string,
+    update: UserMessageStateUpdate,
+  ): Promise<UserMessageState> {
+    const username = normalizeUsername(userName);
+    return this.withTransaction(async (connection) => {
+      // 先建占位行，使首次并发已读也能锁住同一主键。
+      await connection.execute(
+        'INSERT INTO user_message_state (username, state_json) VALUES (?, ?) ON DUPLICATE KEY UPDATE username = VALUES(username)',
+        [username, '{}'],
+      );
+      const [rows] = await connection.query<JsonRow[]>(
+        'SELECT state_json FROM user_message_state WHERE username = ? FOR UPDATE',
+        [username],
+      );
+      const next = mergeUserMessageState(
+        parseJsonValue<UserMessageState>(rows[0]?.state_json) || {},
+        update,
+      );
+      await connection.execute(
+        'UPDATE user_message_state SET state_json = ? WHERE username = ?',
+        [JSON.stringify(next), username],
+      );
+      return next;
+    });
   }
 
   async setUserMessageState(
@@ -1992,6 +2241,8 @@ export class MySqlStorage implements IStorage {
       await connection.execute('DELETE FROM play_records');
       await connection.execute('DELETE FROM favorites');
       await connection.execute('DELETE FROM video_reviews');
+      for (const table of SOCIAL_TABLES)
+        await connection.execute(`DELETE FROM ${table}`);
       await connection.execute('DELETE FROM search_history');
       await connection.execute('DELETE FROM skip_configs');
       await connection.execute('DELETE FROM playback_sessions');
@@ -2006,6 +2257,58 @@ export class MySqlStorage implements IStorage {
     });
   }
 
+  private async importSocialData(
+    connection: PoolConnection,
+    snapshot: StorageImportData,
+  ): Promise<void> {
+    const ids = new Set<string>();
+    const names = new Set<string>();
+    for (const [username, data] of Object.entries(snapshot.userData)) {
+      await connection.execute(
+        'INSERT INTO user_profiles (username, profile_id, nickname, nickname_norm, favorites_public, updated_at) VALUES (?, ?, ?, ?, ?, ?)',
+        importedProfileValues(
+          username,
+          data.profile,
+          ids,
+          names,
+        ) as ExecuteValues,
+      );
+      for (const row of data.follows ?? [])
+        await connection.execute(
+          'INSERT IGNORE INTO user_follows (follower, followee, created_at) VALUES (?, ?, ?)',
+          [
+            normalizeUsername(username),
+            normalizeUsername(row.followee),
+            row.created_at,
+          ],
+        );
+      for (const row of data.likes ?? [])
+        await connection.execute(
+          'INSERT IGNORE INTO video_review_likes (author, title_norm, year, liker, created_at) VALUES (?, ?, ?, ?, ?)',
+          [
+            normalizeUsername(row.author),
+            row.title_norm,
+            row.year,
+            normalizeUsername(username),
+            row.created_at,
+          ],
+        );
+      for (const row of data.reports ?? [])
+        await connection.execute(
+          'INSERT INTO video_review_reports (author, title_norm, year, reporter, reason, detail, created_at) VALUES (?, ?, ?, ?, ?, ?, ?) ON DUPLICATE KEY UPDATE reason = VALUES(reason), detail = VALUES(detail), created_at = VALUES(created_at)',
+          [
+            normalizeUsername(row.author),
+            row.title_norm,
+            row.year,
+            normalizeUsername(username),
+            row.reason,
+            row.detail,
+            row.created_at,
+          ],
+        );
+    }
+  }
+
   async replaceAllData(data: StorageImportData): Promise<void> {
     const searchHistoryLimit = normalizeRuntimeParam(
       'SearchHistoryLimit',
@@ -2016,6 +2319,8 @@ export class MySqlStorage implements IStorage {
       await connection.execute('DELETE FROM play_records');
       await connection.execute('DELETE FROM favorites');
       await connection.execute('DELETE FROM video_reviews');
+      for (const table of SOCIAL_TABLES)
+        await connection.execute(`DELETE FROM ${table}`);
       await connection.execute('DELETE FROM search_history');
       await connection.execute('DELETE FROM skip_configs');
       await connection.execute('DELETE FROM playback_sessions');
@@ -2223,7 +2528,9 @@ export class MySqlStorage implements IStorage {
       await skipConfigs.flush();
       await playbackSessions.flush();
 
+      await this.importSocialData(connection, data);
       await this.backfillMissingLoginActivity(connection);
+      await this.backfillUserProfiles(connection);
     });
   }
 }

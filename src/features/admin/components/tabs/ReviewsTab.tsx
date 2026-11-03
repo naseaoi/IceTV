@@ -8,7 +8,12 @@ import ExpandableText from '@/components/ExpandableText';
 import AlertModal from '@/components/modals/AlertModal';
 import ConfirmModal from '@/components/modals/ConfirmModal';
 import RatingStars from '@/components/RatingStars';
-import { adminDelete, adminGet } from '@/features/admin/lib/api';
+import ReviewReports from '@/features/admin/components/tabs/ReviewReports';
+import {
+  adminDelete,
+  adminGet,
+  getAdminReviewReports,
+} from '@/features/admin/lib/api';
 import { buttonStyles, inputStyles } from '@/features/admin/lib/buttonStyles';
 import { showError } from '@/features/admin/lib/notifications';
 import { useAlertModal } from '@/hooks/useAlertModal';
@@ -35,7 +40,7 @@ function ReviewContent({ content }: { content: string }) {
   );
 }
 
-export default function ReviewsTab() {
+function AllReviews() {
   const [search, setSearch] = useState('');
   const [items, setItems] = useState<AdminVideoReview[]>([]);
   const [nextCursor, setNextCursor] = useState<string | null>(null);
@@ -197,7 +202,8 @@ export default function ReviewsTab() {
                         )}
                       </h3>
                       <p className='mt-1 break-all text-sm text-gray-500 dark:text-gray-400'>
-                        {review.username}
+                        {review.author.nickname ?? '未设置昵称'}（
+                        {review.username}）
                       </p>
                     </div>
                     <button
@@ -279,6 +285,61 @@ export default function ReviewsTab() {
         onConfirm={() => void deleteReview()}
       />
       <AlertModal {...alertModal} onClose={hideAlert} />
+    </div>
+  );
+}
+
+export default function ReviewsTab() {
+  const [tab, setTab] = useState<'all' | 'reports'>('all');
+  const [pendingTotal, setPendingTotal] = useState<number | null>(null);
+  useEffect(() => {
+    let active = true;
+    getAdminReviewReports()
+      .then((page) => {
+        if (active) setPendingTotal(page.pendingTotal);
+      })
+      .catch(() => {
+        if (active) setPendingTotal(null);
+      });
+    return () => {
+      active = false;
+    };
+  }, [tab]);
+  return (
+    <div className='space-y-5'>
+      <div
+        role='tablist'
+        aria-label='评价管理视图'
+        className='flex flex-wrap gap-2'
+      >
+        <button
+          type='button'
+          role='tab'
+          aria-selected={tab === 'all'}
+          className={
+            tab === 'all' ? buttonStyles.primary : buttonStyles.secondary
+          }
+          onClick={() => setTab('all')}
+        >
+          全部评价
+        </button>
+        <button
+          type='button'
+          role='tab'
+          aria-selected={tab === 'reports'}
+          className={
+            tab === 'reports' ? buttonStyles.primary : buttonStyles.secondary
+          }
+          onClick={() => setTab('reports')}
+        >
+          举报待处理 ({pendingTotal ?? '—'})
+        </button>
+      </div>
+      {tab === 'all' ? (
+        <AllReviews />
+      ) : (
+        <ReviewReports onCountChanged={setPendingTotal} />
+      )}
     </div>
   );
 }

@@ -13,6 +13,7 @@ import {
 import { AUTH_SESSION_LOST_EVENT } from '@/lib/auth.client';
 import { ClientAuthSession } from '@/lib/auth-session';
 import { getClientAuthSession } from '@/lib/auth-session.client';
+import { PROFILE_REQUIRED_EVENT } from '@/lib/profile.client';
 
 type AuthContextValue = {
   session: ClientAuthSession;
@@ -56,6 +57,15 @@ export function AuthProvider({
       window.removeEventListener(AUTH_SESSION_LOST_EVENT, handleSessionLost);
     };
   }, []);
+
+  useEffect(() => {
+    const handleProfileRequired = () => {
+      void refreshSession();
+    };
+    window.addEventListener(PROFILE_REQUIRED_EVENT, handleProfileRequired);
+    return () =>
+      window.removeEventListener(PROFILE_REQUIRED_EVENT, handleProfileRequired);
+  }, [refreshSession]);
 
   const value = useMemo(
     () => ({ session, isRefreshing, refreshSession }),

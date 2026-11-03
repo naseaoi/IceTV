@@ -6,7 +6,13 @@ import type { VideoReview } from '@/lib/types';
 
 jest.mock('@/components/AuthProvider', () => ({
   useAuthSession: () => ({
-    session: { status: 'authenticated', username: 'alice', role: 'user' },
+    session: {
+      status: 'authenticated',
+      username: 'alice',
+      profileId: 'profileAlice',
+      nickname: '爱丽丝',
+      role: 'user',
+    },
   }),
 }));
 
@@ -30,7 +36,12 @@ function buildState(
   return {
     myReview: null,
     myReviewLoading: false,
-    summary: { average: null, count: 0, reviews: [] },
+    summary: {
+      distribution: Array(10).fill(0),
+      average: null,
+      count: 0,
+      reviews: [],
+    },
     summaryLoading: false,
     summaryError: false,
     save: jest.fn().mockResolvedValue(undefined),
@@ -91,6 +102,7 @@ describe('ReviewsTab', () => {
       rating: null,
       content: '值得一看',
       is_public: true,
+      spoiler: false,
     });
 
     rerender(
@@ -130,6 +142,7 @@ describe('ReviewsTab', () => {
       rating: null,
       content: '第一段\n\n第二段',
       is_public: false,
+      spoiler: false,
     });
   });
 
@@ -178,11 +191,16 @@ describe('ReviewsTab', () => {
         reviews={buildState({
           myReview,
           summary: {
+            distribution: Array(10).fill(0),
             average: 7.5,
             count: 2,
             reviews: [
               {
-                username: 'alice',
+                author: { profileId: 'profileAlice', nickname: '爱丽丝' },
+                title_norm: '三体',
+                spoiler: false,
+                likedByMe: false,
+                likeCount: 0,
                 title: '三体',
                 year: '2023',
                 cover: '',
@@ -192,7 +210,11 @@ describe('ReviewsTab', () => {
                 updated_at: 1,
               },
               {
-                username: 'bob',
+                author: { profileId: 'profileBob00', nickname: '鲍勃' },
+                title_norm: '三体',
+                spoiler: false,
+                likedByMe: false,
+                likeCount: 0,
                 title: '三体',
                 year: '2023',
                 cover: '',
@@ -215,4 +237,31 @@ describe('ReviewsTab', () => {
     expect(screen.getByText('我')).toBeInTheDocument();
     expect(screen.getByText('一般')).toBeInTheDocument();
   });
+});
+
+it('编辑器保存剧透标记并提供评分分布', async () => {
+  const save = jest.fn().mockResolvedValue(undefined);
+  render(
+    <ReviewsTab
+      {...baseProps}
+      reviews={buildState({
+        save,
+        summary: {
+          average: 8,
+          count: 2,
+          distribution: [0, 0, 0, 0, 0, 0, 0, 2, 0, 0],
+          reviews: [],
+        },
+      })}
+    />,
+  );
+  fireEvent.change(screen.getByLabelText('评价内容'), {
+    target: { value: '结局讨论' },
+  });
+  fireEvent.click(screen.getByRole('switch', { name: '包含剧透' }));
+  await act(async () => {
+    fireEvent.click(screen.getByRole('button', { name: '保存' }));
+  });
+  expect(save).toHaveBeenCalledWith(expect.objectContaining({ spoiler: true }));
+  expect(screen.getByText(/8–8\.9 分，\d+ 人/)).toBeInTheDocument();
 });

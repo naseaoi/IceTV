@@ -8,6 +8,7 @@ import {
   decodeCursor,
   encodeCursor,
   encodeCursorPosition,
+  messageSortKey,
 } from '@/lib/message-cursor.server';
 import {
   AnnouncementUserMessage,
@@ -139,34 +140,56 @@ export async function getUserMessagePage(
   cursor?: string | null,
 ): Promise<UserMessagePage> {
   const decodedCursor = decodeCursor(cursor);
-  const [{ announcement }, trackingPage] = await Promise.all([
-    getAnnouncementContext(userName),
+  const { announcement, state } = await getAnnouncementContext(userName);
+  const [trackingPage, followed] = await Promise.all([
     db.getUnreadTrackingPlayRecordPage(
       userName,
-      limit,
+      limit + 1,
       decodedCursor?.createdAt,
-      decodedCursor?.key,
+      // 非追更游标排除同毫秒追更；空串会被存储层当成没有游标。
+      decodedCursor
+        ? decodedCursor.key.startsWith('tracking:')
+          ? decodedCursor.key.slice(9)
+          : '\u0001'
+        : undefined,
+    ),
+    db.getFollowReviewMessages(
+      userName,
+      state.followReviewReadAt ?? 0,
+      state.followReviewReadIds ?? [],
+      Date.now(),
     ),
   ]);
   const includeAnnouncement = !decodedCursor && !!announcement;
-  const trackingLimit = Math.max(0, limit - (includeAnnouncement ? 1 : 0));
-  const tracking = buildTrackingMessages(trackingPage.items);
-  const pageTracking = tracking.slice(0, trackingLimit);
-  const items: UserMessage[] = [
-    ...(includeAnnouncement && announcement ? [announcement] : []),
-    ...pageTracking,
+  const pageLimit = Math.max(0, limit - (includeAnnouncement ? 1 : 0));
+  const merged: UserMessage[] = [
+    ...buildTrackingMessages(trackingPage.items),
+    ...followed,
   ];
-  const lastTracking = pageTracking.at(-1);
-  const hasMoreTracking =
-    tracking.length > pageTracking.length || !!trackingPage.nextCursor;
-
+  const remaining = merged.filter(
+    (message) =>
+      !decodedCursor ||
+      message.createdAt < decodedCursor.createdAt ||
+      (message.createdAt === decodedCursor.createdAt &&
+        messageSortKey(message) < decodedCursor.key),
+  );
+  remaining.sort(
+    (a, b) =>
+      b.createdAt - a.createdAt ||
+      (messageSortKey(a) < messageSortKey(b) ? 1 : -1),
+  );
+  const page = remaining.slice(0, pageLimit);
+  const hasMore = remaining.length > page.length || !!trackingPage.nextCursor;
   return {
-    items,
-    total: trackingPage.total + (announcement ? 1 : 0),
-    nextCursor: hasMoreTracking
-      ? lastTracking
-        ? encodeCursor(lastTracking)
-        : encodeCursorPosition(Number.MAX_SAFE_INTEGER, '\uffff')
+    items: [
+      ...(includeAnnouncement && announcement ? [announcement] : []),
+      ...page,
+    ],
+    total: trackingPage.total + followed.length + (announcement ? 1 : 0),
+    nextCursor: hasMore
+      ? page.length
+        ? encodeCursor(page[page.length - 1])
+        : encodeCursorPosition(Number.MAX_SAFE_INTEGER, '￿')
       : null,
   };
 }
@@ -174,18 +197,31 @@ export async function getUserMessagePage(
 export async function getUserMessageSummary(
   userName: string,
 ): Promise<UserMessageSummary> {
-  const [{ announcement }, trackingPage] = await Promise.all([
+  const [{ announcement, state }, trackingPage] = await Promise.all([
     getAnnouncementContext(userName),
     db.getUnreadTrackingPlayRecordPage(userName, 1),
   ]);
   const latestTracking = buildTrackingMessages(trackingPage.items)[0] || null;
-  const unreadCount = trackingPage.total + (announcement ? 1 : 0);
+  const followed = await db.getFollowReviewMessages(
+    userName,
+    state.followReviewReadAt ?? 0,
+    state.followReviewReadIds ?? [],
+    Date.now(),
+  );
+  const unreadCount =
+    trackingPage.total + followed.length + (announcement ? 1 : 0);
   const revision = hashValue(
-    [unreadCount, announcement?.id ?? '', latestTracking?.id ?? ''].join('|'),
+    [
+      unreadCount,
+      announcement?.id ?? '',
+      latestTracking?.id ?? '',
+      ...followed.map((message) => message.id).sort(),
+    ].join('|'),
   );
   return {
     unreadCount,
     trackingUnreadCount: trackingPage.total,
+    followReviewUnreadCount: followed.length,
     revision,
     announcement,
     latestTracking,
@@ -198,11 +234,28 @@ export async function readUserMessage(
 ): Promise<ReadUserMessageResult | null> {
   const { announcement, state } = await getAnnouncementContext(userName);
   if (announcement?.id === messageId) {
-    await db.setUserMessageState(userName, {
-      ...state,
-      readAnnouncementId: announcement.id,
+    await db.updateUserMessageState(userName, {
+      announcement: {
+        id: announcement.id,
+        previousId: state.readAnnouncementId,
+      },
     });
     return { message: announcement };
+  }
+
+  if (messageId.startsWith('follow-review:')) {
+    const messages = await db.getFollowReviewMessages(
+      userName,
+      state.followReviewReadAt ?? 0,
+      state.followReviewReadIds ?? [],
+      Date.now(),
+    );
+    const message = messages.find((item) => item.id === messageId);
+    if (!message) return null;
+    await db.updateUserMessageState(userName, {
+      followReview: { id: messageId, createdAt: message.createdAt },
+    });
+    return { message };
   }
 
   const parsedMessage = parseTrackingMessageId(messageId);
@@ -248,12 +301,17 @@ export async function readAllUserMessages(
   userName: string,
 ): Promise<ReadAllUserMessagesResult> {
   const { announcement, state } = await getAnnouncementContext(userName);
-  if (announcement) {
-    await db.setUserMessageState(userName, {
-      ...state,
-      readAnnouncementId: announcement.id,
-    });
-  }
+  await db.updateUserMessageState(userName, {
+    ...(announcement
+      ? {
+          announcement: {
+            id: announcement.id,
+            previousId: state.readAnnouncementId,
+          },
+        }
+      : {}),
+    followReviewReadAt: Date.now(),
+  });
 
   const updatedRecords: Record<string, PlayRecord> = {};
   for (;;) {

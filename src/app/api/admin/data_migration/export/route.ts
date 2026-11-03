@@ -76,6 +76,7 @@ export async function POST(req: NextRequest) {
     for (const username of allUsers) {
       const danmakuEnabled = await db.getDanmakuEnabledPreference(username);
       const userData = {
+        ...(await db.getUserSocialData(username)),
         // 播放记录
         playRecords: await db.getAllPlayRecords(username),
         // 收藏夹

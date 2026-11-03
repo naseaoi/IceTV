@@ -1,6 +1,6 @@
 'use client';
 
-import { BarChart3, History, Star } from 'lucide-react';
+import { BarChart3, History, MessageSquare, Star } from 'lucide-react';
 import Link from 'next/link';
 
 import AuthenticatedRoute from '@/components/AuthenticatedRoute';
@@ -11,6 +11,7 @@ import { PlaybackHistorySection } from '@/features/playback-stats/components/Pla
 import { PlaybackStatsPanel } from '@/features/playback-stats/components/PlaybackStatsPanel';
 
 import { HomeMineSwitch } from './HomeMineSwitch';
+import { MineProfileHeader } from './MineProfileHeader';
 
 function QuickEntry({
   icon: Icon,
@@ -69,8 +70,10 @@ function AuthenticatedMinePageClient({
         </div>
 
         <div className='mx-auto max-w-[95%]'>
+          <MineProfileHeader />
           <div className='mb-4 flex gap-3 md:hidden'>
             <QuickEntry icon={Star} label='收藏' href='/me/favorites' />
+            <QuickEntry icon={MessageSquare} label='评价' href='/me/reviews' />
             <QuickEntry
               icon={BarChart3}
               label='统计'

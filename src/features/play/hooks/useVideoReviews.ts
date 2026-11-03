@@ -12,7 +12,7 @@ import {
 
 export type VideoReviewDraft = Pick<
   VideoReviewInput,
-  'rating' | 'content' | 'is_public'
+  'rating' | 'content' | 'is_public' | 'spoiler'
 >;
 
 interface UseVideoReviewsOptions {

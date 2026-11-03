@@ -16,13 +16,14 @@ import React, { useEffect, useRef, useState } from 'react';
 import { useAuthSession } from '@/components/AuthProvider';
 import ExpandableText from '@/components/ExpandableText';
 import ModalShell from '@/components/modals/ModalShell';
-import RatingBadge from '@/components/RatingBadge';
+import PublicReviewContent from '@/components/PublicReviewContent';
 import RatingStars from '@/components/RatingStars';
 import { RatingInput } from '@/features/play/components/EpisodeSelector/RatingInput';
+import ReviewDistribution from '@/features/play/components/EpisodeSelector/ReviewDistribution';
 import type { VideoReviewsState } from '@/features/play/hooks/useVideoReviews';
 import { formatRating } from '@/lib/rating';
 import { formatRelativeTime } from '@/lib/relative-time';
-import type { PublicVideoReview, VideoReview } from '@/lib/types';
+import type { VideoReview } from '@/lib/types';
 import { REVIEW_CONTENT_MAX_LENGTH } from '@/lib/video-reviews.client';
 
 interface ReviewsTabProps {
@@ -39,6 +40,7 @@ interface ReviewDraft {
   rating: number | null;
   content: string;
   is_public: boolean;
+  spoiler: boolean;
 }
 
 const surfaceClass =
@@ -46,21 +48,6 @@ const surfaceClass =
 
 const iconButtonClass =
   'inline-flex h-8 items-center justify-center gap-1 rounded-lg px-2 text-xs font-medium text-gray-500 transition-colors hover:bg-gray-100 hover:text-gray-800 disabled:cursor-not-allowed disabled:opacity-50 dark:text-gray-400 dark:hover:bg-white/10 dark:hover:text-gray-100';
-
-const AVATAR_GRADIENTS = [
-  'from-sky-400 to-blue-600',
-  'from-violet-400 to-purple-600',
-  'from-rose-400 to-pink-600',
-  'from-amber-400 to-orange-600',
-  'from-teal-400 to-cyan-600',
-  'from-lime-400 to-green-600',
-];
-
-function avatarGradient(username: string): string {
-  let hash = 0;
-  for (const char of username) hash = (hash * 31 + char.charCodeAt(0)) | 0;
-  return AVATAR_GRADIENTS[Math.abs(hash) % AVATAR_GRADIENTS.length];
-}
 
 function SectionHeader({
   title,
@@ -182,6 +169,7 @@ function ReviewEditor({
   const [rating, setRating] = useState<number | null>(initial?.rating ?? null);
   const [content, setContent] = useState(initial?.content ?? '');
   const [isPublic, setIsPublic] = useState(initial?.is_public ?? false);
+  const [spoiler, setSpoiler] = useState(initial?.spoiler ?? false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
   const [expanded, setExpanded] = useState(false);
@@ -200,7 +188,12 @@ function ReviewEditor({
     setSaving(true);
     setError('');
     try {
-      await onSubmit({ rating, content: content.trim(), is_public: isPublic });
+      await onSubmit({
+        rating,
+        content: content.trim(),
+        is_public: isPublic,
+        spoiler,
+      });
     } catch {
       setError('保存失败，请稍后重试');
       setSaving(false);
@@ -262,7 +255,18 @@ function ReviewEditor({
           onKeyDown={handleShortcut}
         />
 
-        <div className='flex items-center gap-1.5 border-t border-gray-100 px-2.5 py-2 dark:border-white/[0.06]'>
+        <button
+          type='button'
+          role='switch'
+          aria-label='包含剧透'
+          aria-checked={spoiler}
+          disabled={saving}
+          onClick={() => setSpoiler(!spoiler)}
+          className='mx-3 mb-2 rounded-full bg-gray-100 px-3 py-1.5 text-xs text-gray-600 dark:bg-white/10 dark:text-gray-300'
+        >
+          包含剧透：{spoiler ? '是' : '否'}
+        </button>
+        <div className='flex flex-wrap items-center gap-1.5 border-t border-gray-100 px-2.5 py-2 dark:border-white/[0.06]'>
           <VisibilityToggle
             isPublic={isPublic}
             disabled={saving}
@@ -364,6 +368,17 @@ function ReviewEditor({
               disabled={saving}
               onChange={setIsPublic}
             />
+            <button
+              type='button'
+              role='switch'
+              aria-label='包含剧透'
+              aria-checked={spoiler}
+              disabled={saving}
+              onClick={() => setSpoiler(!spoiler)}
+              className='rounded-full bg-gray-100 px-3 py-1.5 text-xs text-gray-600 dark:bg-white/10 dark:text-gray-300'
+            >
+              包含剧透：{spoiler ? '是' : '否'}
+            </button>
             {hintNode}
             <span className='ml-auto' />
             <ContentCounter length={trimmedLength} />
@@ -489,53 +504,6 @@ function MyReviewCard({
   );
 }
 
-function PublicReviewItem({
-  review,
-  isMine,
-}: {
-  review: PublicVideoReview;
-  isMine: boolean;
-}) {
-  return (
-    <li className='flex gap-3 py-3.5 first:pt-0 last:pb-0'>
-      <span
-        aria-hidden='true'
-        className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-gradient-to-br text-[13px] font-semibold text-white ${avatarGradient(
-          review.username,
-        )}`}
-      >
-        {review.username.slice(0, 1).toUpperCase()}
-      </span>
-      <div className='min-w-0 flex-1'>
-        <div className='flex items-center gap-2'>
-          <span className='min-w-0 truncate text-[13px] font-medium text-gray-900 dark:text-gray-100'>
-            {review.username}
-          </span>
-          {isMine && (
-            <span className='shrink-0 rounded px-1 text-[10px] font-medium text-green-700 ring-1 ring-inset ring-green-500/30 dark:text-green-300'>
-              我
-            </span>
-          )}
-          <span className='shrink-0 text-[11px] text-gray-400 dark:text-gray-500'>
-            {formatRelativeTime(review.updated_at)}
-          </span>
-          {review.rating !== null && (
-            <RatingBadge value={review.rating} className='ml-auto shrink-0' />
-          )}
-        </div>
-        {review.content && (
-          <div className='mt-1'>
-            <ExpandableText
-              text={review.content}
-              className='text-[13px] leading-[1.7] text-gray-600 dark:text-gray-400'
-            />
-          </div>
-        )}
-      </div>
-    </li>
-  );
-}
-
 export const ReviewsTab: React.FC<ReviewsTabProps> = ({
   workTitle,
   reviews,
@@ -556,7 +524,8 @@ export const ReviewsTab: React.FC<ReviewsTabProps> = ({
   } = reviews;
   const [editing, setEditing] = useState(false);
   const { session } = useAuthSession();
-  const username = session.status === 'authenticated' ? session.username : null;
+  const profileId =
+    session.status === 'authenticated' ? session.profileId : null;
 
   useEffect(() => {
     if (!editRequested) return;
@@ -605,6 +574,7 @@ export const ReviewsTab: React.FC<ReviewsTabProps> = ({
           </>
         )}
       </section>
+      {summary && <ReviewDistribution distribution={summary.distribution} />}
 
       <section className='space-y-2'>
         <SectionHeader title='我的评价' />
@@ -648,11 +618,15 @@ export const ReviewsTab: React.FC<ReviewsTabProps> = ({
         {summary && summary.reviews.length > 0 ? (
           <ul className='divide-y divide-gray-100 dark:divide-white/[0.06]'>
             {summary.reviews.map((review) => (
-              <PublicReviewItem
-                key={review.username}
-                review={review}
-                isMine={review.username === username}
-              />
+              <li
+                key={`${review.author.profileId}:${review.year}`}
+                className='py-3.5 first:pt-0 last:pb-0'
+              >
+                <PublicReviewContent
+                  review={review}
+                  isMine={review.author.profileId === profileId}
+                />
+              </li>
             ))}
           </ul>
         ) : (

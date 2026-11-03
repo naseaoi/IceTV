@@ -61,24 +61,81 @@ export interface VideoReview {
   rating: number | null; // 1.0–10.0，最多一位小数；null 表示未评分
   content: string;
   is_public: boolean;
+  spoiler?: boolean;
   source_key: string; // 最后编辑时的 source+id
   created_at: number;
   updated_at: number;
 }
 
-export interface PublicVideoReview {
+// 用户资料：登录名只在服务端使用，对外一律用 profile_id + 昵称
+export interface UserProfile {
   username: string;
+  profile_id: string;
+  nickname: string | null;
+  favorites_public: boolean;
+  updated_at: number;
+}
+
+export interface PublicUserRef {
+  profileId: string;
+  nickname: string | null;
+}
+
+export interface UserProfileView extends PublicUserRef {
+  isSelf: boolean;
+  isFollowing: boolean;
+  followerCount: number;
+  followingCount: number;
+  publicReviewCount: number;
+  favoritesPublic: boolean;
+}
+
+export interface FollowListItem extends PublicUserRef {
+  followedAt: number;
+}
+
+export interface FollowListPage {
+  items: FollowListItem[];
+  nextCursor: string | null;
+}
+
+export interface PublicFavoriteItem {
+  key: string;
+  title: string;
+  year: string;
+  cover: string;
+  source_name: string;
+  total_episodes: number;
+  search_title?: string;
+  save_time: number;
+}
+
+export type PublicFavoritePage =
+  | { hidden: true }
+  | { hidden: false; items: PublicFavoriteItem[]; nextCursor: string | null };
+
+export interface PublicVideoReview {
+  author: PublicUserRef;
+  title_norm: string;
   title: string;
   year: string;
   cover: string;
   rating: number | null;
   content: string;
+  spoiler: boolean;
+  likeCount: number;
+  likedByMe: boolean;
   created_at: number;
   updated_at: number;
 }
 
+export interface PublicVideoReviewPage {
+  items: PublicVideoReview[];
+  nextCursor: string | null;
+}
+
 export interface AdminVideoReview extends PublicVideoReview {
-  title_norm: string;
+  username: string;
 }
 
 export interface AdminVideoReviewPage {
@@ -89,7 +146,38 @@ export interface AdminVideoReviewPage {
 export interface WorkReviewSummary {
   average: number | null;
   count: number;
+  // 长度 10，下标 i 统计评分落在 [i+1, i+2) 的人数，10.0 计入下标 9
+  distribution: number[];
   reviews: PublicVideoReview[];
+}
+
+export const REVIEW_REPORT_REASONS = [
+  'spoiler',
+  'abuse',
+  'spam',
+  'illegal',
+  'other',
+] as const;
+export type ReviewReportReason = (typeof REVIEW_REPORT_REASONS)[number];
+
+export interface AdminReviewReportItem {
+  review: AdminVideoReview;
+  reportCount: number;
+  reasons: Partial<Record<ReviewReportReason, number>>;
+  // 最近 5 条举报
+  reports: {
+    reporter: PublicUserRef;
+    reason: ReviewReportReason;
+    detail: string;
+    created_at: number;
+  }[];
+  latestReportedAt: number;
+}
+
+export interface AdminReviewReportPage {
+  items: AdminReviewReportItem[];
+  nextCursor: string | null;
+  pendingTotal: number;
 }
 
 export interface FavoritePageItem {
@@ -186,6 +274,22 @@ export interface StorageUserImportData {
   playRecords: { [key: string]: PlayRecord };
   favorites: { [key: string]: Favorite };
   videoReviews?: VideoReview[];
+  profile?: UserProfile;
+  follows?: { followee: string; created_at: number }[];
+  likes?: {
+    author: string;
+    title_norm: string;
+    year: string;
+    created_at: number;
+  }[];
+  reports?: {
+    author: string;
+    title_norm: string;
+    year: string;
+    reason: ReviewReportReason;
+    detail: string;
+    created_at: number;
+  }[];
   searchHistory: string[];
   skipConfigs: { [key: string]: SkipConfig };
   playbackSessions: { [key: string]: PlaybackSession };
@@ -194,8 +298,17 @@ export interface StorageUserImportData {
   lastLoginAt?: number;
 }
 
+export interface UserMessageStateUpdate {
+  announcement?: { id: string; previousId?: string };
+  followReview?: { id: string; createdAt: number };
+  followReviewReadAt?: number;
+}
+
 export interface UserMessageState {
   readAnnouncementId?: string;
+  // 关注动态已读水位，之前的视为已读；水位之后单独已读的消息 id 记在列表里
+  followReviewReadAt?: number;
+  followReviewReadIds?: string[];
 }
 
 export interface StorageImportData {
@@ -298,14 +411,83 @@ export interface IStorage {
   getPublicVideoReviewsForWork(
     titleNorm: string,
     year: string,
+    viewer?: string,
   ): Promise<WorkReviewSummary>;
   getPublicVideoReviewPage(
     cursor?: string,
     q?: string,
   ): Promise<AdminVideoReviewPage>;
 
+  getUserProfile(username: string): Promise<UserProfile | null>;
+  getUserProfileById(profileId: string): Promise<UserProfile | null>;
+  ensureUserProfile(username: string): Promise<UserProfile>;
+  updateUserProfile(
+    username: string,
+    patch: { nickname?: string; favoritesPublic?: boolean },
+  ): Promise<UserProfile>;
+  isNicknameAvailable(
+    nickname: string,
+    exceptUsername?: string,
+  ): Promise<boolean>;
+  getUserProfileView(
+    username: string,
+    viewer: string,
+  ): Promise<UserProfileView | null>;
+  setUserFollow(
+    follower: string,
+    followee: string,
+    following: boolean,
+  ): Promise<{ following: boolean; followerCount: number }>;
+  getUserFollowPage(
+    username: string,
+    type: 'followers' | 'following',
+    cursor?: string,
+  ): Promise<FollowListPage>;
+  getUserPublicReviewPage(
+    username: string,
+    viewer: string,
+    cursor?: string,
+  ): Promise<PublicVideoReviewPage>;
+  setVideoReviewLike(
+    author: string,
+    titleNorm: string,
+    year: string,
+    liker: string,
+    liked: boolean,
+  ): Promise<{ liked: boolean; likeCount: number } | null>;
+  reportVideoReview(
+    author: string,
+    titleNorm: string,
+    year: string,
+    reporter: string,
+    reason: ReviewReportReason,
+    detail: string,
+  ): Promise<boolean>;
+  getReviewReportPage(cursor?: string): Promise<AdminReviewReportPage>;
+  moderateReviewReports(
+    author: string,
+    titleNorm: string,
+    year: string,
+    action: 'dismiss' | 'mark-spoiler' | 'delete-review',
+  ): Promise<void>;
+  getFollowReviewMessages(
+    username: string,
+    readAt: number,
+    readIds: string[],
+    now: number,
+  ): Promise<import('@/lib/message-types').FollowReviewUserMessage[]>;
+  getUserSocialData(
+    username: string,
+  ): Promise<
+    Pick<StorageUserImportData, 'profile' | 'follows' | 'likes' | 'reports'>
+  >;
+
   // 用户相关
-  registerUser(userName: string, password: string): Promise<void>;
+  registerUser(
+    userName: string,
+    password: string,
+    nickname?: string,
+  ): Promise<void>;
   verifyUser(userName: string, password: string): Promise<boolean>;
   // 检查用户是否存在（无需密码）
   checkUserExist(userName: string): Promise<boolean>;
@@ -329,6 +511,10 @@ export interface IStorage {
 
   getUserMessageState(userName: string): Promise<UserMessageState>;
   setUserMessageState(userName: string, state: UserMessageState): Promise<void>;
+  updateUserMessageState(
+    userName: string,
+    update: UserMessageStateUpdate,
+  ): Promise<UserMessageState>;
 
   // 登录活动相关
   recordUserLogin(userName: string, loginAt: number): Promise<void>;

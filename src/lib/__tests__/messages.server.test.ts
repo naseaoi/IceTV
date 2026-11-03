@@ -2,11 +2,12 @@
 
 import type { AdminConfig } from '@/types/admin';
 
+const mockGetFollowReviewMessages = jest.fn();
 const mockGetConfigForRead = jest.fn();
 const mockGetAllPlayRecords = jest.fn();
 const mockGetUnreadTrackingPlayRecordPage = jest.fn();
 const mockGetUserMessageState = jest.fn();
-const mockSetUserMessageState = jest.fn();
+const mockUpdateUserMessageState = jest.fn();
 const mockGetPlayRecord = jest.fn();
 const mockSavePlayRecord = jest.fn();
 const mockSavePlayRecordsByKey = jest.fn();
@@ -17,13 +18,15 @@ jest.mock('@/lib/config', () => ({
 
 jest.mock('@/lib/db', () => ({
   db: {
+    getFollowReviewMessages: (...args: unknown[]) =>
+      mockGetFollowReviewMessages(...args),
     getAllPlayRecords: (...args: unknown[]) => mockGetAllPlayRecords(...args),
     getUnreadTrackingPlayRecordPage: (...args: unknown[]) =>
       mockGetUnreadTrackingPlayRecordPage(...args),
     getUserMessageState: (...args: unknown[]) =>
       mockGetUserMessageState(...args),
-    setUserMessageState: (...args: unknown[]) =>
-      mockSetUserMessageState(...args),
+    updateUserMessageState: (...args: unknown[]) =>
+      mockUpdateUserMessageState(...args),
     getPlayRecord: (...args: unknown[]) => mockGetPlayRecord(...args),
     savePlayRecord: (...args: unknown[]) => mockSavePlayRecord(...args),
     savePlayRecordsByKey: (...args: unknown[]) =>
@@ -37,7 +40,12 @@ import {
   readAllUserMessages,
   readUserMessage,
 } from '@/lib/messages.server';
-import type { PlayRecord } from '@/lib/types';
+import type {
+  PlayRecord,
+  UserMessageState,
+  UserMessageStateUpdate,
+} from '@/lib/types';
+import { mergeUserMessageState } from '@/lib/user-message-state';
 
 const config = {
   SiteConfig: {
@@ -64,11 +72,11 @@ const updatedRecord: PlayRecord = {
 };
 
 function usePersistedUserMessageState(): void {
-  let state: Record<string, unknown> = {};
+  let state: UserMessageState = {};
   mockGetUserMessageState.mockImplementation(() => Promise.resolve(state));
-  mockSetUserMessageState.mockImplementation(
-    (_userName: string, next: Record<string, unknown>) => {
-      state = next;
+  mockUpdateUserMessageState.mockImplementation(
+    (_userName: string, update: UserMessageStateUpdate) => {
+      state = mergeUserMessageState(state, update);
       return Promise.resolve();
     },
   );
@@ -77,6 +85,7 @@ function usePersistedUserMessageState(): void {
 describe('messages server', () => {
   beforeEach(() => {
     jest.clearAllMocks();
+    mockGetFollowReviewMessages.mockResolvedValue([]);
     mockGetConfigForRead.mockResolvedValue(config);
     mockGetAllPlayRecords.mockResolvedValue({
       'source-a+video-1': updatedRecord,
@@ -92,10 +101,131 @@ describe('messages server', () => {
       nextCursor: null,
     });
     mockGetUserMessageState.mockResolvedValue({});
-    mockSetUserMessageState.mockResolvedValue(undefined);
+    mockUpdateUserMessageState.mockResolvedValue(undefined);
     mockGetPlayRecord.mockResolvedValue(updatedRecord);
     mockSavePlayRecord.mockResolvedValue(undefined);
     mockSavePlayRecordsByKey.mockResolvedValue(undefined);
+  });
+
+  it('merges followed reviews with tracking, counts them and reads individual activity', async () => {
+    const followed = {
+      id: 'follow-review:encoded',
+      type: 'follow-review',
+      author: { profileId: 'AbCdEf012345', nickname: 'Alice' },
+      title: 'Work',
+      year: '2026',
+      cover: '',
+      rating: 8,
+      createdAt: 6000,
+    };
+    mockGetFollowReviewMessages.mockResolvedValue([followed]);
+    const page = await getUserMessagePage('reader', 2);
+    expect(page.items.map((item) => item.type)).toEqual([
+      'announcement',
+      'follow-review',
+    ]);
+    expect(page.nextCursor).not.toBeNull();
+    const next = await getUserMessagePage('reader', 2, page.nextCursor);
+    expect(next.items.map((item) => item.type)).toEqual(['tracking-update']);
+    const summary = await getUserMessageSummary('reader');
+    expect(summary).toMatchObject({
+      unreadCount: 3,
+      followReviewUnreadCount: 1,
+    });
+    expect(await readUserMessage('reader', followed.id)).toEqual({
+      message: followed,
+    });
+    expect(mockUpdateUserMessageState).toHaveBeenCalledWith(
+      'reader',
+      expect.objectContaining({
+        followReview: { id: followed.id, createdAt: followed.createdAt },
+      }),
+    );
+    mockGetFollowReviewMessages.mockResolvedValue([
+      { ...followed, id: 'follow-review:changed' },
+    ]);
+    expect((await getUserMessageSummary('reader')).revision).not.toBe(
+      summary.revision,
+    );
+  });
+
+  it('bounds individual activity read ids and advances the read-all watermark', async () => {
+    const followed = {
+      id: 'follow-review:latest',
+      type: 'follow-review',
+      author: { profileId: 'AbCdEf012345', nickname: null },
+      title: 'Work',
+      year: '',
+      cover: '',
+      rating: null,
+      createdAt: 6000,
+    };
+    mockGetFollowReviewMessages.mockResolvedValue([followed]);
+    mockGetUserMessageState.mockResolvedValue({
+      followReviewReadIds: Array.from(
+        { length: 200 },
+        (_, i) => `follow-review:${i}`,
+      ),
+    });
+    await readUserMessage('reader', followed.id);
+    const saved = mockUpdateUserMessageState.mock.calls[0][1];
+    expect(saved).toEqual({
+      followReview: { id: followed.id, createdAt: followed.createdAt },
+    });
+    mockGetUnreadTrackingPlayRecordPage.mockResolvedValue({
+      items: {},
+      total: 0,
+      nextCursor: null,
+    });
+    await readAllUserMessages('reader');
+    expect(mockUpdateUserMessageState).toHaveBeenLastCalledWith(
+      'reader',
+      expect.objectContaining({
+        followReviewReadAt: expect.any(Number),
+      }),
+    );
+  });
+
+  it('continues tracking after a follow cursor even when newer tracking fills the query limit', async () => {
+    mockGetConfigForRead.mockResolvedValue({
+      SiteConfig: { Announcement: '' },
+    });
+    const followed = {
+      id: 'follow-review:cursor',
+      type: 'follow-review',
+      author: { profileId: 'AbCdEf012345', nickname: null },
+      title: 'Work',
+      year: '',
+      cover: '',
+      rating: null,
+      createdAt: 3000,
+    };
+    mockGetFollowReviewMessages.mockResolvedValue([followed]);
+    const records = [5000, 4000, 2000, 1000].map((time) => ({
+      ...updatedRecord,
+      update_detected_at: time,
+    }));
+    mockGetUnreadTrackingPlayRecordPage.mockImplementation(
+      (_user, limit, time, key) => {
+        const remaining =
+          time !== undefined && key
+            ? records.filter((record) => record.update_detected_at! < time)
+            : records;
+        return Promise.resolve({
+          items: Object.fromEntries(
+            remaining
+              .slice(0, limit)
+              .map((record) => [`source+${record.update_detected_at}`, record]),
+          ),
+          total: 4,
+          nextCursor: remaining.length > limit ? 'more' : null,
+        });
+      },
+    );
+    const { encodeCursor } = require('@/lib/message-cursor.server');
+    const page = await getUserMessagePage('reader', 1, encodeCursor(followed));
+    expect(page.items).toHaveLength(1);
+    expect(page.items[0].createdAt).toBe(2000);
   });
 
   it('places the unread announcement first and excludes disabled tracking', async () => {
@@ -173,8 +303,8 @@ describe('messages server', () => {
     const result = await readUserMessage('demo', 'announcement:v2');
 
     expect(result?.message.type).toBe('announcement');
-    expect(mockSetUserMessageState).toHaveBeenCalledWith('demo', {
-      readAnnouncementId: 'announcement:v2',
+    expect(mockUpdateUserMessageState).toHaveBeenCalledWith('demo', {
+      announcement: { id: 'announcement:v2', previousId: undefined },
     });
   });
 

@@ -14,8 +14,10 @@ import { useEffect, useMemo, useState } from 'react';
 import { SiteIcon } from '@/components/Sidebar';
 import { useSite } from '@/components/SiteProvider';
 import { ThemeToggle } from '@/components/ThemeToggle';
+import { useNicknameAvailability } from '@/hooks/useNicknameAvailability';
 import { getClientAuthRuntimeConfig } from '@/lib/runtime-config';
 import { getPrimaryRepoUrl } from '@/lib/update-source';
+import { validateNickname } from '@/lib/user-profile';
 import { normalizeUsername } from '@/lib/username';
 import { CURRENT_VERSION } from '@/lib/version';
 import { checkForUpdates, UpdateStatus } from '@/lib/version-check';
@@ -102,6 +104,7 @@ function VersionDisplay() {
 export function LoginPageClient() {
   const [password, setPassword] = useState('');
   const [username, setUsername] = useState('');
+  const [nickname, setNickname] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
@@ -141,6 +144,7 @@ export function LoginPageClient() {
   }, []);
 
   const isRegister = mode === 'register';
+  const nicknameAvailability = useNicknameAvailability(nickname, isRegister);
 
   const fieldErrors: RegisterFieldErrors = useMemo(() => {
     if (!isRegister) return {};
@@ -219,6 +223,16 @@ export function LoginPageClient() {
     if (!password || (shouldAskUsername && !username)) return;
 
     if (mode === 'register') {
+      try {
+        validateNickname(nickname);
+      } catch (error) {
+        setError((error as Error).message);
+        return;
+      }
+      if (nicknameAvailability.status !== 'available') {
+        setError(nicknameAvailability.message || '请等待昵称检测完成');
+        return;
+      }
       if (registerEnabled !== true) {
         setError('当前未开放注册');
         return;
@@ -246,6 +260,9 @@ export function LoginPageClient() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           password,
+          ...(mode === 'register'
+            ? { nickname: validateNickname(nickname).nickname }
+            : {}),
           ...(shouldAskUsername ? { username } : {}),
           ...(mode === 'register' && inviteCodeRequired
             ? { inviteCode: inviteCode.trim() }
@@ -271,7 +288,8 @@ export function LoginPageClient() {
           data.error ?? (mode === 'register' ? '当前未开放注册' : '无访问权限'),
         );
       } else if (res.status === 409) {
-        setError('用户名已存在');
+        const data = await res.json().catch(() => ({}));
+        setError(data.error || '用户名或昵称已存在');
       } else {
         const data = await res.json().catch(() => ({}));
         setError(data.error ?? '服务器错误');
@@ -364,6 +382,32 @@ export function LoginPageClient() {
                 </div>
               )}
 
+              {isRegister && (
+                <div>
+                  <label htmlFor='nickname' className='sr-only'>
+                    昵称
+                  </label>
+                  <input
+                    id='nickname'
+                    autoComplete='nickname'
+                    placeholder='昵称（公开显示）'
+                    value={nickname}
+                    onChange={(event) => setNickname(event.target.value)}
+                    required
+                    className={INPUT_CLASS}
+                  />
+                  <p
+                    className={
+                      nicknameAvailability.status === 'error'
+                        ? FIELD_ERROR_CLASS
+                        : FIELD_HINT_CLASS
+                    }
+                  >
+                    {nicknameAvailability.message ||
+                      '昵称会公开显示，登录名不会公开'}
+                  </p>
+                </div>
+              )}
               <div>
                 <label htmlFor='password' className='sr-only'>
                   密码

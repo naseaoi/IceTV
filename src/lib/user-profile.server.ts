@@ -1,0 +1,215 @@
+import 'server-only';
+
+import { NextRequest, NextResponse } from 'next/server';
+
+import { isGuardFailure, requireActiveUser } from '@/lib/api-auth';
+import { getClientIp } from '@/lib/client-ip';
+import { db } from '@/lib/db';
+import { FixedWindowRateLimiter } from '@/lib/fixed-window-rate-limit';
+import { NicknameTakenError, socialPage } from '@/lib/review-social-storage';
+import type { PublicFavoriteItem, UserProfile } from '@/lib/types';
+import { NicknameValidationError, validateNickname } from '@/lib/user-profile';
+import { normalizeUsername } from '@/lib/username';
+import { ReviewValidationError } from '@/lib/video-reviews';
+
+const nicknameLimiter = new FixedWindowRateLimiter(30, 60_000);
+
+export function socialJson(value: unknown, status = 200) {
+  return NextResponse.json(value, {
+    status,
+    headers: { 'Cache-Control': 'no-store' },
+  });
+}
+
+export function socialFailure(error: unknown) {
+  if (error instanceof NicknameTakenError)
+    return socialJson({ error: '昵称已被使用' }, 409);
+  if (
+    error instanceof ReviewValidationError ||
+    error instanceof NicknameValidationError
+  )
+    return socialJson({ error: error.message }, 400);
+  console.error('用户社交操作失败', error);
+  return socialJson({ error: '操作失败，请稍后重试' }, 500);
+}
+
+export async function socialBody(
+  request: NextRequest,
+): Promise<Record<string, unknown>> {
+  try {
+    const value: unknown = await request.json();
+    if (!value || typeof value !== 'object' || Array.isArray(value))
+      throw new Error();
+    return value as Record<string, unknown>;
+  } catch {
+    throw new ReviewValidationError('请求体必须为有效 JSON 对象');
+  }
+}
+
+export async function requireNickname(
+  username: string,
+): Promise<NextResponse | null> {
+  const profile = await db.ensureUserProfile(normalizeUsername(username));
+  return profile.nickname
+    ? null
+    : socialJson({ error: '请先设置昵称', code: 'NICKNAME_REQUIRED' }, 403);
+}
+
+function ownProfile(profile: UserProfile) {
+  return {
+    profileId: profile.profile_id,
+    nickname: profile.nickname,
+    favoritesPublic: profile.favorites_public,
+  };
+}
+
+export async function handleProfile(request: NextRequest) {
+  try {
+    const guard = await requireActiveUser(request);
+    if (isGuardFailure(guard)) return guard.response;
+    if (request.method === 'GET')
+      return socialJson(ownProfile(await db.ensureUserProfile(guard.username)));
+    const body = await socialBody(request);
+    if (body.nickname === undefined && body.favoritesPublic === undefined)
+      throw new ReviewValidationError('请提供要修改的资料');
+    const patch: { nickname?: string; favoritesPublic?: boolean } = {};
+    if (body.nickname !== undefined)
+      patch.nickname = validateNickname(body.nickname).nickname;
+    if (body.favoritesPublic !== undefined) {
+      if (typeof body.favoritesPublic !== 'boolean')
+        throw new ReviewValidationError('收藏公开状态必须为布尔值');
+      patch.favoritesPublic = body.favoritesPublic;
+    }
+    return socialJson(
+      ownProfile(await db.updateUserProfile(guard.username, patch)),
+    );
+  } catch (error) {
+    return socialFailure(error);
+  }
+}
+
+export async function handleNicknameAvailability(request: NextRequest) {
+  try {
+    const verdict = nicknameLimiter.check(getClientIp(request));
+    if (!verdict.allowed)
+      return NextResponse.json(
+        { error: '检测过于频繁，请稍后再试' },
+        {
+          status: 429,
+          headers: {
+            'Cache-Control': 'no-store',
+            'Retry-After': String(verdict.retryAfterSeconds),
+          },
+        },
+      );
+    let nickname: string;
+    try {
+      nickname = validateNickname(
+        request.nextUrl.searchParams.get('nickname'),
+      ).nickname;
+    } catch (error) {
+      if (error instanceof NicknameValidationError)
+        return socialJson({ available: false, error: error.message });
+      throw error;
+    }
+    const guard = await requireActiveUser(request);
+    const available = await db.isNicknameAvailable(
+      nickname,
+      isGuardFailure(guard) ? undefined : guard.username,
+    );
+    return socialJson(
+      available
+        ? { available: true }
+        : { available: false, error: '昵称已被使用' },
+    );
+  } catch (error) {
+    return socialFailure(error);
+  }
+}
+
+export type ProfileRouteContext = { params: Promise<{ profileId: string }> };
+
+export async function handlePublicUser(
+  request: NextRequest,
+  context: ProfileRouteContext,
+  section: 'profile' | 'reviews' | 'favorites' | 'follows' = 'profile',
+) {
+  try {
+    const guard = await requireActiveUser(request);
+    if (isGuardFailure(guard)) return guard.response;
+    const { profileId } = await context.params;
+    const profile = await db.getUserProfileById(profileId);
+    if (!profile) return socialJson({ error: '用户不存在' }, 404);
+    const cursor = request.nextUrl.searchParams.get('cursor') || undefined;
+    if (section === 'profile')
+      return socialJson(
+        await db.getUserProfileView(profile.username, guard.username),
+      );
+    if (section === 'reviews')
+      return socialJson(
+        await db.getUserPublicReviewPage(
+          profile.username,
+          guard.username,
+          cursor,
+        ),
+      );
+    if (section === 'follows') {
+      const type = request.nextUrl.searchParams.get('type');
+      if (type !== 'followers' && type !== 'following')
+        throw new ReviewValidationError('关注列表类型无效');
+      return socialJson(
+        await db.getUserFollowPage(profile.username, type, cursor),
+      );
+    }
+    if (
+      !profile.favorites_public &&
+      profile.username !== normalizeUsername(guard.username)
+    )
+      return socialJson({ hidden: true });
+    const favorites = await db.getAllFavorites(profile.username);
+    const items: PublicFavoriteItem[] = Object.entries(favorites)
+      .filter(([, favorite]) => favorite.origin !== 'live')
+      .map(([key, f]) => ({
+        key,
+        title: f.title,
+        year: f.year,
+        cover: f.cover,
+        source_name: f.source_name,
+        total_episodes: f.total_episodes,
+        search_title: f.search_title,
+        save_time: f.save_time,
+      }));
+    return socialJson({
+      hidden: false,
+      ...socialPage(items, 30, cursor, (item) => [item.save_time, item.key]),
+    });
+  } catch (error) {
+    return socialFailure(error);
+  }
+}
+
+export async function handleFollows(request: NextRequest) {
+  try {
+    const guard = await requireActiveUser(request);
+    if (isGuardFailure(guard)) return guard.response;
+    const nicknameFailure = await requireNickname(guard.username);
+    if (nicknameFailure) return nicknameFailure;
+    const profileId =
+      request.method === 'DELETE'
+        ? request.nextUrl.searchParams.get('profileId')
+        : (await socialBody(request)).profileId;
+    if (typeof profileId !== 'string' || !/^[A-Za-z0-9]{12}$/.test(profileId))
+      throw new ReviewValidationError('用户标识无效');
+    const profile = await db.getUserProfileById(profileId);
+    if (!profile) return socialJson({ error: '用户不存在' }, 404);
+    return socialJson(
+      await db.setUserFollow(
+        guard.username,
+        profile.username,
+        request.method === 'PUT',
+      ),
+    );
+  } catch (error) {
+    return socialFailure(error);
+  }
+}

@@ -4,7 +4,16 @@ import Database from 'better-sqlite3';
 import { existsSync, mkdirSync, readFileSync } from 'fs';
 import path from 'path';
 
+import {
+  importedProfileValues,
+  newProfileId,
+  NicknameTakenError,
+  ReviewSocialStorage,
+  socialSchema,
+} from '@/lib/review-social-storage';
 import { SqliteResourceStore } from '@/lib/sqlite-resource-store';
+import { mergeUserMessageState } from '@/lib/user-message-state';
+import { validateNickname } from '@/lib/user-profile';
 import {
   publicReview,
   reviewPage,
@@ -42,6 +51,7 @@ import {
   SourceRouteStatsItem,
   StorageImportData,
   UserMessageState,
+  UserMessageStateUpdate,
   VideoReview,
   WorkReviewSummary,
 } from './types';
@@ -122,15 +132,12 @@ function isSqliteBusyError(error: unknown): boolean {
 }
 
 function isSqliteUniqueConstraintError(error: unknown): boolean {
-  if (!(error instanceof Error)) {
-    return false;
-  }
-
-  const code = (error as Error & { code?: string }).code;
+  if (!error || typeof error !== 'object') return false;
+  const { code, message } = error as { code?: unknown; message?: unknown };
   return (
     code === 'SQLITE_CONSTRAINT_PRIMARYKEY' ||
     code === 'SQLITE_CONSTRAINT_UNIQUE' ||
-    /unique constraint failed/i.test(error.message)
+    (typeof message === 'string' && /unique constraint failed/i.test(message))
   );
 }
 
@@ -524,6 +531,7 @@ export class LocalSqliteStorage implements IStorage {
       this.db.pragma(`busy_timeout = ${busyTimeoutMs}`);
       this.initializeSchema();
     });
+    for (const statement of socialSchema('sqlite')) this.db.exec(statement);
     this.stmts = this.prepareStatements();
     if (!isMemoryDb) {
       runWithBusyRetry('迁移 SQLite 历史数据', () => {
@@ -537,6 +545,50 @@ export class LocalSqliteStorage implements IStorage {
       });
       this.checkpointWal();
     }
+    this.backfillUserProfiles();
+  }
+
+  private insertUserProfile(username: string, nickname?: string): void {
+    const validated =
+      nickname === undefined ? null : validateNickname(nickname);
+    for (let attempt = 0; attempt < 8; attempt++) {
+      try {
+        this.db
+          .prepare(
+            'INSERT INTO user_profiles (username, profile_id, nickname, nickname_norm, favorites_public, updated_at) VALUES (?, ?, ?, ?, 0, ?)',
+          )
+          .run(
+            username,
+            newProfileId(),
+            validated?.nickname ?? null,
+            validated?.nicknameNorm ?? null,
+            Date.now(),
+          );
+        return;
+      } catch (error) {
+        if (!isSqliteUniqueConstraintError(error)) throw error;
+        if (
+          validated &&
+          this.db
+            .prepare(
+              'SELECT username FROM user_profiles WHERE nickname_norm = ?',
+            )
+            .get(validated.nicknameNorm)
+        )
+          throw new NicknameTakenError();
+      }
+    }
+    throw new Error('无法分配用户资料标识');
+  }
+
+  private backfillUserProfiles(): void {
+    const rows = this.db
+      .prepare(
+        'SELECT u.username FROM users u LEFT JOIN user_profiles p ON p.username = u.username WHERE p.username IS NULL',
+      )
+      .all() as { username: string }[];
+    for (const row of rows)
+      this.insertUserProfile(normalizeUsername(row.username));
   }
 
   // 每个用户都必须有活跃记录行，缺失的按当前时刻补齐
@@ -1200,6 +1252,7 @@ export class LocalSqliteStorage implements IStorage {
     const migrate = this.db.transaction(() => {
       for (const { legacy, canonical } of plan) {
         this.mergeUserRow(legacy, canonical);
+        this.mergeSocialUsername(legacy, canonical);
         this.mergeKeyedTable(
           'play_records',
           'record_key',
@@ -1260,12 +1313,92 @@ export class LocalSqliteStorage implements IStorage {
     console.log(`已归一化 SQLite 遗留用户名: ${detail}`);
   }
 
+  private mergeSocialUsername(legacy: string, canonical: string): void {
+    const existing = this.db
+      .prepare('SELECT username FROM user_profiles WHERE username = ?')
+      .get(canonical);
+    if (existing)
+      this.db
+        .prepare('DELETE FROM user_profiles WHERE username = ?')
+        .run(legacy);
+    else
+      this.db
+        .prepare('UPDATE user_profiles SET username = ? WHERE username = ?')
+        .run(canonical, legacy);
+    for (const [table, columns] of [
+      ['user_follows', ['follower', 'followee']],
+      ['video_review_likes', ['author', 'liker']],
+      ['video_review_reports', ['author', 'reporter']],
+    ] as const) {
+      for (const column of columns) {
+        this.db
+          .prepare(
+            `UPDATE OR IGNORE ${table} SET ${column} = ? WHERE ${column} = ?`,
+          )
+          .run(canonical, legacy);
+        this.db.prepare(`DELETE FROM ${table} WHERE ${column} = ?`).run(legacy);
+      }
+    }
+    this.db.exec(
+      'DELETE FROM user_follows WHERE follower = followee; DELETE FROM video_review_likes WHERE author = liker; DELETE FROM video_review_reports WHERE author = reporter;',
+    );
+  }
+
+  private importSocialData(snapshot: StorageImportData): void {
+    const ids = new Set<string>();
+    const names = new Set<string>();
+    for (const [username, data] of Object.entries(snapshot.userData)) {
+      this.db
+        .prepare(
+          'INSERT INTO user_profiles (username, profile_id, nickname, nickname_norm, favorites_public, updated_at) VALUES (?, ?, ?, ?, ?, ?)',
+        )
+        .run(...importedProfileValues(username, data.profile, ids, names));
+      for (const row of data.follows ?? [])
+        this.db
+          .prepare(
+            'INSERT OR IGNORE INTO user_follows (follower, followee, created_at) VALUES (?, ?, ?)',
+          )
+          .run(
+            normalizeUsername(username),
+            normalizeUsername(row.followee),
+            row.created_at,
+          );
+      for (const row of data.likes ?? [])
+        this.db
+          .prepare(
+            'INSERT OR IGNORE INTO video_review_likes (author, title_norm, year, liker, created_at) VALUES (?, ?, ?, ?, ?)',
+          )
+          .run(
+            normalizeUsername(row.author),
+            row.title_norm,
+            row.year,
+            normalizeUsername(username),
+            row.created_at,
+          );
+      for (const row of data.reports ?? [])
+        this.db
+          .prepare(
+            'INSERT OR REPLACE INTO video_review_reports (author, title_norm, year, reporter, reason, detail, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)',
+          )
+          .run(
+            normalizeUsername(row.author),
+            row.title_norm,
+            row.year,
+            normalizeUsername(username),
+            row.reason,
+            row.detail,
+            row.created_at,
+          );
+    }
+  }
+
   private collectDistinctUsernames(): string[] {
     const tables = [
       'users',
       'play_records',
       'favorites',
       'video_reviews',
+      'user_profiles',
       'search_history',
       'skip_configs',
       'playback_sessions',
@@ -1282,6 +1415,17 @@ export class LocalSqliteStorage implements IStorage {
           usernames.add(row.username);
         }
       }
+    }
+    for (const [table, columns] of [
+      ['user_follows', ['follower', 'followee']],
+      ['video_review_likes', ['author', 'liker']],
+      ['video_review_reports', ['author', 'reporter']],
+    ] as const) {
+      for (const column of columns)
+        for (const row of this.db
+          .prepare(`SELECT DISTINCT ${column} AS username FROM ${table}`)
+          .all() as { username: string }[])
+          usernames.add(row.username);
     }
     return [...usernames];
   }
@@ -1666,6 +1810,100 @@ export class LocalSqliteStorage implements IStorage {
     this.stmts.deleteFavoritesByUser.run(username);
   }
 
+  private get social() {
+    return new ReviewSocialStorage({
+      dialect: 'sqlite',
+      rows: async <T>(sql: string, params: unknown[] = []) =>
+        this.db.prepare(sql).all(...params) as T[],
+      run: async (sql, params = []) =>
+        this.db.prepare(sql).run(...params).changes,
+    });
+  }
+
+  async getUserProfile(
+    ...args: Parameters<IStorage['getUserProfile']>
+  ): ReturnType<IStorage['getUserProfile']> {
+    return this.social.getUserProfile(...args);
+  }
+
+  async getUserProfileById(
+    ...args: Parameters<IStorage['getUserProfileById']>
+  ): ReturnType<IStorage['getUserProfileById']> {
+    return this.social.getUserProfileById(...args);
+  }
+
+  async ensureUserProfile(
+    ...args: Parameters<IStorage['ensureUserProfile']>
+  ): ReturnType<IStorage['ensureUserProfile']> {
+    return this.social.ensureUserProfile(...args);
+  }
+
+  async updateUserProfile(
+    ...args: Parameters<IStorage['updateUserProfile']>
+  ): ReturnType<IStorage['updateUserProfile']> {
+    return this.social.updateUserProfile(...args);
+  }
+
+  async isNicknameAvailable(
+    ...args: Parameters<IStorage['isNicknameAvailable']>
+  ): ReturnType<IStorage['isNicknameAvailable']> {
+    return this.social.isNicknameAvailable(...args);
+  }
+
+  async getUserProfileView(
+    ...args: Parameters<IStorage['getUserProfileView']>
+  ): ReturnType<IStorage['getUserProfileView']> {
+    return this.social.getUserProfileView(...args);
+  }
+
+  async setUserFollow(
+    ...args: Parameters<IStorage['setUserFollow']>
+  ): ReturnType<IStorage['setUserFollow']> {
+    return this.social.setUserFollow(...args);
+  }
+
+  async getUserFollowPage(
+    ...args: Parameters<IStorage['getUserFollowPage']>
+  ): ReturnType<IStorage['getUserFollowPage']> {
+    return this.social.getUserFollowPage(...args);
+  }
+
+  async getUserPublicReviewPage(
+    ...args: Parameters<IStorage['getUserPublicReviewPage']>
+  ): ReturnType<IStorage['getUserPublicReviewPage']> {
+    return this.social.getUserPublicReviewPage(...args);
+  }
+
+  async setVideoReviewLike(
+    ...args: Parameters<IStorage['setVideoReviewLike']>
+  ): ReturnType<IStorage['setVideoReviewLike']> {
+    return this.social.setVideoReviewLike(...args);
+  }
+
+  async reportVideoReview(
+    ...args: Parameters<IStorage['reportVideoReview']>
+  ): ReturnType<IStorage['reportVideoReview']> {
+    return this.social.reportVideoReview(...args);
+  }
+
+  async getReviewReportPage(
+    ...args: Parameters<IStorage['getReviewReportPage']>
+  ): ReturnType<IStorage['getReviewReportPage']> {
+    return this.social.getReviewReportPage(...args);
+  }
+
+  async getFollowReviewMessages(
+    ...args: Parameters<IStorage['getFollowReviewMessages']>
+  ): ReturnType<IStorage['getFollowReviewMessages']> {
+    return this.social.getFollowReviewMessages(...args);
+  }
+
+  async getUserSocialData(
+    ...args: Parameters<IStorage['getUserSocialData']>
+  ): ReturnType<IStorage['getUserSocialData']> {
+    return this.social.getUserSocialData(...args);
+  }
+
   async getVideoReview(
     userName: string,
     titleNorm: string,
@@ -1697,12 +1935,69 @@ export class LocalSqliteStorage implements IStorage {
     year: string,
     publicOnly = false,
   ): Promise<void> {
-    this.stmts.deleteVideoReview.run(
-      normalizeUsername(userName),
-      titleNorm,
-      year,
-      publicOnly ? 1 : 0,
-    );
+    this.db.transaction(() => {
+      const result = this.stmts.deleteVideoReview.run(
+        normalizeUsername(userName),
+        titleNorm,
+        year,
+        publicOnly ? 1 : 0,
+      );
+      if (result.changes)
+        this.deleteReviewSocialRows(
+          normalizeUsername(userName),
+          titleNorm,
+          year,
+        );
+    })();
+  }
+
+  private deleteReviewSocialRows(
+    author: string,
+    title: string,
+    year: string,
+  ): void {
+    for (const table of ['video_review_likes', 'video_review_reports'])
+      this.db
+        .prepare(
+          `DELETE FROM ${table} WHERE author = ? AND title_norm = ? AND year = ?`,
+        )
+        .run(author, title, year);
+  }
+
+  async moderateReviewReports(
+    author: string,
+    title: string,
+    year: string,
+    action: 'dismiss' | 'mark-spoiler' | 'delete-review',
+  ): Promise<void> {
+    author = normalizeUsername(author);
+    this.db.transaction(() => {
+      const target = [author, title, year];
+      if (
+        !this.db
+          .prepare(
+            'SELECT username FROM video_reviews WHERE username = ? AND title_norm = ? AND year = ? AND is_public = 1',
+          )
+          .get(...target)
+      )
+        return;
+      if (action === 'delete-review') {
+        this.stmts.deleteVideoReview.run(...target, 1);
+        this.deleteReviewSocialRows(author, title, year);
+      } else {
+        if (action === 'mark-spoiler')
+          this.db
+            .prepare(
+              "UPDATE video_reviews SET review_json = json_set(review_json, '$.spoiler', json('true')) WHERE username = ? AND title_norm = ? AND year = ? AND is_public = 1",
+            )
+            .run(...target);
+        this.db
+          .prepare(
+            'DELETE FROM video_review_reports WHERE author = ? AND title_norm = ? AND year = ?',
+          )
+          .run(...target);
+      }
+    })();
   }
 
   async getAllVideoReviews(userName: string): Promise<VideoReview[]> {
@@ -1715,8 +2010,9 @@ export class LocalSqliteStorage implements IStorage {
   async getPublicVideoReviewsForWork(
     titleNorm: string,
     year: string,
+    viewer = '',
   ): Promise<WorkReviewSummary> {
-    return this.db.transaction(() => {
+    const result = this.db.transaction(() => {
       const summary = this.stmts.getVideoReviewSummary.get(
         titleNorm,
         year,
@@ -1730,9 +2026,25 @@ export class LocalSqliteStorage implements IStorage {
       return {
         average: summary.average,
         count: summary.count,
-        reviews: rows.map(publicReview),
+        rows,
+        distribution: this.db
+          .prepare(REVIEW_SQL.distribution)
+          .all(titleNorm, year, year) as { bucket: number; count: number }[],
       };
     })();
+    const distribution = Array<number>(10).fill(0);
+    for (const row of result.distribution)
+      distribution[Math.min(9, Math.max(0, Number(row.bucket) - 1))] += Number(
+        row.count,
+      );
+    return {
+      average: result.average,
+      count: result.count,
+      distribution,
+      reviews: (await this.social.enrichReviews(result.rows, viewer)).map(
+        publicReview,
+      ),
+    };
   }
 
   async getPublicVideoReviewPage(
@@ -1742,17 +2054,21 @@ export class LocalSqliteStorage implements IStorage {
     const rows = this.stmts.getPublicVideoReviewPage.all(
       ...reviewPageParams(cursor, q),
     ) as VideoReviewRow[];
-    return reviewPage(rows);
+    return reviewPage(await this.social.enrichReviews(rows));
   }
 
-  async registerUser(userName: string, password: string): Promise<void> {
+  async registerUser(
+    userName: string,
+    password: string,
+    nickname?: string,
+  ): Promise<void> {
     const username = assertValidUsernameFormat(userName);
     if (this.stmts.checkUserExist.get(username)) {
       throw new Error('用户已存在');
     }
     const hashed = await hashPassword(password);
     try {
-      this.registerUserWithActivity(username, hashed, Date.now());
+      this.registerUserWithActivity(username, hashed, Date.now(), nickname);
     } catch (error) {
       if (isSqliteUniqueConstraintError(error)) {
         throw new Error('用户已存在');
@@ -1766,10 +2082,12 @@ export class LocalSqliteStorage implements IStorage {
     username: string,
     hashedPassword: string,
     now: number,
+    nickname?: string,
   ): void {
     this.db.transaction(() => {
       this.stmts.registerUser.run(username, hashedPassword);
       this.stmts.recordUserLogin.run(username, now);
+      this.insertUserProfile(username, nickname);
     })();
   }
 
@@ -1802,6 +2120,20 @@ export class LocalSqliteStorage implements IStorage {
   async deleteUser(userName: string): Promise<void> {
     const username = normalizeUsername(userName);
     const remove = this.db.transaction((targetUser: string) => {
+      this.db
+        .prepare('DELETE FROM user_profiles WHERE username = ?')
+        .run(targetUser);
+      this.db
+        .prepare('DELETE FROM user_follows WHERE follower = ? OR followee = ?')
+        .run(targetUser, targetUser);
+      this.db
+        .prepare('DELETE FROM video_review_likes WHERE author = ? OR liker = ?')
+        .run(targetUser, targetUser);
+      this.db
+        .prepare(
+          'DELETE FROM video_review_reports WHERE author = ? OR reporter = ?',
+        )
+        .run(targetUser, targetUser);
       this.stmts.deleteUserRow.run(targetUser);
       this.stmts.deletePlayRecordsByUser.run(targetUser);
       this.stmts.deleteFavoritesByUser.run(targetUser);
@@ -1938,6 +2270,26 @@ export class LocalSqliteStorage implements IStorage {
       | { state_json: string }
       | undefined;
     return parseJsonValue<UserMessageState>(row?.state_json) || {};
+  }
+
+  async updateUserMessageState(
+    userName: string,
+    update: UserMessageStateUpdate,
+  ): Promise<UserMessageState> {
+    const username = normalizeUsername(userName);
+    return this.db
+      .transaction(() => {
+        const row = this.stmts.getUserMessageState.get(username) as
+          | { state_json: string }
+          | undefined;
+        const next = mergeUserMessageState(
+          parseJsonValue<UserMessageState>(row?.state_json) || {},
+          update,
+        );
+        this.stmts.setUserMessageState.run(username, JSON.stringify(next));
+        return next;
+      })
+      .immediate();
   }
 
   async setUserMessageState(
@@ -2485,6 +2837,10 @@ export class LocalSqliteStorage implements IStorage {
         DELETE FROM play_records;
         DELETE FROM favorites;
         DELETE FROM video_reviews;
+        DELETE FROM user_profiles;
+        DELETE FROM user_follows;
+        DELETE FROM video_review_likes;
+        DELETE FROM video_review_reports;
         DELETE FROM search_history;
         DELETE FROM skip_configs;
         DELETE FROM playback_sessions;
@@ -2514,6 +2870,10 @@ export class LocalSqliteStorage implements IStorage {
         DELETE FROM play_records;
         DELETE FROM favorites;
         DELETE FROM video_reviews;
+        DELETE FROM user_profiles;
+        DELETE FROM user_follows;
+        DELETE FROM video_review_likes;
+        DELETE FROM video_review_reports;
         DELETE FROM search_history;
         DELETE FROM skip_configs;
         DELETE FROM playback_sessions;
@@ -2628,7 +2988,9 @@ export class LocalSqliteStorage implements IStorage {
         }
       }
 
+      this.importSocialData(snapshot);
       this.backfillMissingLoginActivity();
+      this.backfillUserProfiles();
     });
 
     replace(data);

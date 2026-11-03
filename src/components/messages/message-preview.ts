@@ -1,6 +1,11 @@
 import { UserMessagePage, UserMessageSummary } from '@/lib/message-types';
 
-export type MessagePreviewMode = 'panel' | 'announcement' | 'tracking' | 'all';
+export type MessagePreviewMode =
+  | 'panel'
+  | 'announcement'
+  | 'tracking'
+  | 'follow-review'
+  | 'all';
 
 const previewTrackingTitles = [
   '测试剧集：最新一集',
@@ -22,6 +27,7 @@ export function getMessagePreviewMode(): MessagePreviewMode | null {
   return value === 'panel' ||
     value === 'announcement' ||
     value === 'tracking' ||
+    value === 'follow-review' ||
     value === 'all'
     ? value
     : null;
@@ -51,9 +57,19 @@ export function getMessagePreviewPage(): UserMessagePage {
         content: '这是开发环境的消息面板预览公告，不会写入真实消息状态。',
         createdAt: now,
       },
+      {
+        id: 'follow-review:preview',
+        type: 'follow-review',
+        author: { profileId: 'previewUser1', nickname: '光影旅人' },
+        title: '漫长的季节',
+        year: '2023',
+        cover: '',
+        rating: 9,
+        createdAt: now,
+      },
       ...tracking,
     ],
-    total: tracking.length + 1,
+    total: tracking.length + 2,
     nextCursor: null,
   };
 }
@@ -67,6 +83,9 @@ export function getMessagePreviewSummary(
   return {
     unreadCount: page.total,
     trackingUnreadCount: tracking.length,
+    followReviewUnreadCount: page.items.filter(
+      (message) => message.type === 'follow-review',
+    ).length,
     revision: 'message-preview',
     announcement:
       page.items.find((message) => message.type === 'announcement') || null,
@@ -77,5 +96,6 @@ export function getMessagePreviewSummary(
 export function getMessagePreviewToast(mode: MessagePreviewMode): string {
   if (mode === 'announcement') return '有一条新公告';
   if (mode === 'tracking') return '《测试剧集：最新一集》已更新至第 3 集';
-  return '8 条新消息';
+  if (mode === 'follow-review') return '关注的人发布了新评价';
+  return '9 条新消息';
 }

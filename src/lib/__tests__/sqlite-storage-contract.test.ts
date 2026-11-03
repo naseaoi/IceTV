@@ -890,6 +890,49 @@ describe('sqlite storage contract', () => {
   });
 });
 
+describe('sqlite social username migration', () => {
+  it('merges every username column while retaining canonical profile identity', async () => {
+    const storage = new LocalSqliteStorage(':memory:');
+    const internal = storage as unknown as {
+      db: import('better-sqlite3').Database;
+      migrateLegacyUsernameCasing(): void;
+      backfillUserProfiles(): void;
+    };
+    await storage.ensureUserProfile('alice');
+    await storage.ensureUserProfile('bob');
+    const canonical = await storage.getUserProfile('alice');
+    internal.db
+      .prepare(
+        'INSERT INTO user_profiles (username, profile_id, nickname, nickname_norm, favorites_public, updated_at) VALUES (?, ?, ?, ?, 0, 1)',
+      )
+      .run('Alice', 'Legacy012345', 'Legacy', 'legacy');
+    internal.db.exec(
+      "INSERT INTO user_follows VALUES ('Alice', 'Bob', 1); INSERT INTO video_review_likes VALUES ('Bob', 'work', '2026', 'Alice', 1); INSERT INTO video_review_reports VALUES ('Alice', 'work', '2026', 'Bob', 'spam', '', 1);",
+    );
+    internal.migrateLegacyUsernameCasing();
+    expect((await storage.getUserProfile('alice'))?.profile_id).toBe(
+      canonical?.profile_id,
+    );
+    expect(
+      internal.db.prepare('SELECT follower, followee FROM user_follows').all(),
+    ).toEqual([{ follower: 'alice', followee: 'bob' }]);
+    expect(
+      internal.db.prepare('SELECT author, liker FROM video_review_likes').all(),
+    ).toEqual([{ author: 'bob', liker: 'alice' }]);
+    expect(
+      internal.db
+        .prepare('SELECT author, reporter FROM video_review_reports')
+        .all(),
+    ).toEqual([{ author: 'alice', reporter: 'bob' }]);
+    internal.db
+      .prepare('INSERT INTO users (username, password) VALUES (?, ?)')
+      .run('missing', 'hash');
+    internal.backfillUserProfiles();
+    expect(await storage.getUserProfile('missing')).not.toBeNull();
+    internal.db.close();
+  });
+});
+
 describe('sqlite video review contract', () => {
   videoReviewContract(() => new LocalSqliteStorage(':memory:'), adminConfig);
 });

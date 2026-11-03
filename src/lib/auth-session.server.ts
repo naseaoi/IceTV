@@ -5,6 +5,7 @@ import { cache } from 'react';
 import { isGuardFailure, requireActiveUserFromAuthInfo } from '@/lib/api-auth';
 import { parseAuthCookieValue } from '@/lib/auth.server';
 import { ClientAuthSession } from '@/lib/auth-session';
+import { db } from '@/lib/db';
 
 const resolveServerAuthSession = cache(async function resolveServerAuthSession(
   authCookieValue?: string,
@@ -24,8 +25,11 @@ const resolveServerAuthSession = cache(async function resolveServerAuthSession(
       return { status: 'guest' };
     }
 
+    const profile = await db.ensureUserProfile(result.username);
     return {
       status: 'authenticated',
+      profileId: profile.profile_id,
+      nickname: profile.nickname,
       username: result.username,
       role: result.role,
     };

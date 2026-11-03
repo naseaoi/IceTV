@@ -47,6 +47,7 @@ describe('useVideoReviews', () => {
     jest.clearAllMocks();
     mockedFetchMy.mockResolvedValue(review);
     mockedFetchSummary.mockResolvedValue({
+      distribution: Array(10).fill(0),
       average: 8,
       count: 1,
       reviews: [],

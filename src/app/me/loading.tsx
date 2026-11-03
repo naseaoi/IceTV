@@ -1,5 +1,6 @@
 import PageLayout from '@/components/PageLayout';
 import { FavoritePreviewSkeleton } from '@/features/favorites/components/FavoritePreviewSkeleton';
+import { MineProfileHeaderSkeleton } from '@/features/home/components/MineProfileHeader';
 import { PlaybackHistorySkeleton } from '@/features/playback-stats/components/PlaybackHistorySkeleton';
 import { PlaybackStatsSkeleton } from '@/features/playback-stats/components/PlaybackStatsSkeleton';
 import { getFavoriteSkeletonCount } from '@/lib/favorites.server';
@@ -31,8 +32,9 @@ export default async function MeLoading() {
         </div>
 
         <div className='mx-auto max-w-[95%]'>
+          <MineProfileHeaderSkeleton />
           <div className='mb-4 flex gap-3 md:hidden'>
-            {Array.from({ length: 3 }).map((_, index) => (
+            {Array.from({ length: 4 }).map((_, index) => (
               <div
                 key={index}
                 className='min-h-[64px] flex-1 animate-pulse rounded-xl bg-gray-200 dark:bg-gray-800'

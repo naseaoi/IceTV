@@ -6,6 +6,7 @@ import {
   requireAdmin,
 } from '@/lib/api-auth';
 import { db } from '@/lib/db';
+import { requireNickname } from '@/lib/user-profile.server';
 import { normalizeUsername } from '@/lib/username';
 import {
   decodeReviewCursor,
@@ -50,6 +51,8 @@ export async function handleOwnReview(request: NextRequest) {
     });
     if (isGuardFailure(guard)) return guard.response;
     if (request.method === 'PUT') {
+      const nicknameFailure = await requireNickname(guard.username);
+      if (nicknameFailure) return nicknameFailure;
       const input = reviewInput(await jsonBody(request));
       const existing = await db.getVideoReview(
         guard.username,
@@ -72,6 +75,22 @@ export async function handleOwnReview(request: NextRequest) {
           review.year,
         ),
       });
+    }
+    if (
+      request.method === 'DELETE' &&
+      request.nextUrl.searchParams.get('exact') === '1'
+    ) {
+      const titleNorm = request.nextUrl.searchParams.get('title_norm');
+      const year = request.nextUrl.searchParams.get('year');
+      if (
+        !titleNorm ||
+        titleNorm.length > 191 ||
+        year === null ||
+        year.length > 16
+      )
+        throw new ReviewValidationError('评价标识无效');
+      await db.deleteVideoReview(guard.username, titleNorm, year);
+      return json({ ok: true });
     }
     const { title_norm, year } = queryIdentity(request);
     const review = await db.getVideoReview(guard.username, title_norm, year);
@@ -111,7 +130,9 @@ export async function handleWorkReviews(request: NextRequest) {
     });
     if (isGuardFailure(guard)) return guard.response;
     const { title_norm, year } = queryIdentity(request);
-    return json(await db.getPublicVideoReviewsForWork(title_norm, year));
+    return json(
+      await db.getPublicVideoReviewsForWork(title_norm, year, guard.username),
+    );
   } catch (error) {
     return failure(error);
   }

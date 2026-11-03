@@ -7,6 +7,7 @@ import { ReactNode } from 'react';
 import { useAuthSession } from '@/components/AuthProvider';
 import LoadingStatePanel from '@/components/LoadingStatePanel';
 import PageLayout from '@/components/PageLayout';
+import { ProfileForm } from '@/components/user-menu/ProfilePanel';
 import { AuthSessionRole } from '@/lib/auth-session';
 
 interface AuthenticatedRouteProps {
@@ -41,6 +42,19 @@ export default function AuthenticatedRoute({
     isAuthenticated && ROLE_LEVEL[session.role] < ROLE_LEVEL[requiredRole];
 
   if (isAuthenticated && !isForbidden) {
+    if (session.nickname === null) {
+      return (
+        <PageLayout
+          activePath={activePath}
+          contentMode={contentMode}
+          showDesktopBack={showDesktopBack}
+        >
+          <div className='mx-auto my-16 w-full max-w-md rounded-2xl bg-white p-6 shadow-sm ring-1 ring-gray-200 dark:bg-gray-900 dark:ring-white/10'>
+            <ProfileForm required />
+          </div>
+        </PageLayout>
+      );
+    }
     return children;
   }
 

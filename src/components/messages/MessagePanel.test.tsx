@@ -131,3 +131,29 @@ describe('MessagePanel', () => {
     expect(document.documentElement.style.overflow).toBe('');
   });
 });
+
+it('关注评价显示昵称和评分并链接作者主页', () => {
+  renderPanel({
+    page: {
+      items: [
+        {
+          id: 'follow:1',
+          type: 'follow-review',
+          author: { profileId: 'profileAlice', nickname: '爱丽丝' },
+          title: '三体',
+          year: '2023',
+          cover: '',
+          rating: 8,
+          createdAt: 1,
+        },
+      ],
+      total: 1,
+      nextCursor: null,
+    },
+  });
+  expect(screen.getByRole('link', { name: /爱丽丝/ })).toHaveAttribute(
+    'href',
+    '/u/profileAlice',
+  );
+  expect(screen.getByText('评价了《三体》')).toBeInTheDocument();
+});

@@ -32,6 +32,7 @@ import {
   SIDEBAR_ITEM_ICON_WRAP_CLASS,
   SIDEBAR_ITEM_LAYOUT_CLASS,
 } from './SidebarItem';
+import { ProfilePanel } from './user-menu/ProfilePanel';
 import { UserAvatar } from './user-menu/UserAvatar';
 
 interface UserMenuProps {
@@ -106,6 +107,7 @@ export const UserMenu: React.FC<UserMenuProps> = ({
   const [menuPlacement, setMenuPlacement] = useState<'up' | 'down'>('down');
   const [menuPos, setMenuPos] = useState<CSSProperties>({});
   const [isOpen, setIsOpen] = useState(false);
+  const [isProfileOpen, setIsProfileOpen] = useState(false);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [isChangePasswordOpen, setIsChangePasswordOpen] = useState(false);
   const [isVersionPanelOpen, setIsVersionPanelOpen] = useState(false);
@@ -269,6 +271,15 @@ export const UserMenu: React.FC<UserMenuProps> = ({
   const hasUpdate = !isChecking && updateStatus === UpdateStatus.HAS_UPDATE;
 
   const listActions = [
+    {
+      icon: CircleUserRound,
+      label: '个人资料',
+      onClick: () => {
+        setIsOpen(false);
+        setIsProfileOpen(true);
+      },
+      show: isAuthenticated,
+    },
     { icon: Settings, label: '本地设置', onClick: handleSettings, show: true },
     {
       icon: Shield,
@@ -461,6 +472,9 @@ export const UserMenu: React.FC<UserMenuProps> = ({
           document.body,
         )}
 
+      {isProfileOpen && (
+        <ProfilePanel onClose={() => setIsProfileOpen(false)} />
+      )}
       {isVersionPanelOpen && (
         <VersionPanel
           isOpen={isVersionPanelOpen}

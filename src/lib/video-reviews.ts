@@ -48,6 +48,8 @@ export function reviewInput(value: unknown) {
     throw new ReviewValidationError('评分与评价内容至少填写一项');
   if (typeof input.is_public !== 'boolean')
     throw new ReviewValidationError('公开状态必须为布尔值');
+  if (input.spoiler !== undefined && typeof input.spoiler !== 'boolean')
+    throw new ReviewValidationError('剧透状态必须为布尔值');
   const douban_id = input.douban_id ?? 0;
   if (
     typeof douban_id !== 'number' ||
@@ -61,6 +63,7 @@ export function reviewInput(value: unknown) {
     rating: rating === null ? null : Math.round(rating * 10) / 10,
     content,
     is_public: input.is_public,
+    spoiler: input.spoiler === true,
     cover: text(input.cover, '封面地址', 1000),
     source_key: text(input.source_key, '来源标识', 300),
     douban_id,
@@ -118,12 +121,23 @@ export function reviewPageParams(cursor?: string, q = '') {
   ];
 }
 
-export type VideoReviewRow = { username: string; review_json: string };
+export type VideoReviewRow = {
+  username: string;
+  review_json: string;
+  profile_id?: string;
+  nickname?: string | null;
+  like_count?: number;
+  liked_by_me?: boolean;
+};
 
 export function publicReview(row: VideoReviewRow): PublicVideoReview {
   const review = JSON.parse(row.review_json) as VideoReview;
   return {
-    username: row.username,
+    author: { profileId: row.profile_id ?? '', nickname: row.nickname ?? null },
+    title_norm: review.title_norm,
+    spoiler: review.spoiler === true,
+    likeCount: row.like_count ?? 0,
+    likedByMe: row.liked_by_me ?? false,
     title: review.title,
     year: review.year,
     cover: review.cover,
@@ -137,6 +151,7 @@ export function publicReview(row: VideoReviewRow): PublicVideoReview {
 export function reviewPage(rows: VideoReviewRow[]): AdminVideoReviewPage {
   const items = rows.slice(0, 30).map((row) => ({
     ...publicReview(row),
+    username: row.username,
     title_norm: (JSON.parse(row.review_json) as VideoReview).title_norm,
   }));
   const last = items.at(-1);
@@ -175,6 +190,7 @@ export function reviewSql(dialect: 'sqlite' | 'mysql') {
     delete:
       'DELETE FROM video_reviews WHERE username = ? AND title_norm = ? AND year = ? AND (? = 0 OR is_public = 1)',
     work: `SELECT username, review_json FROM video_reviews WHERE ${workWhere} ORDER BY updated_at DESC, username DESC, year DESC LIMIT 50`,
+    distribution: `SELECT ${dialect === 'sqlite' ? `CAST(${rating} AS INTEGER)` : `FLOOR(${rating})`} AS bucket, COUNT(*) AS count FROM video_reviews WHERE ${workWhere} AND ${rating} IS NOT NULL GROUP BY bucket`,
     summary: `SELECT AVG(${rating}) AS average, COUNT(${rating}) AS count FROM video_reviews WHERE ${workWhere}`,
     page: `SELECT username, review_json FROM video_reviews WHERE is_public = 1
       AND (? = '' OR LOWER(${title}) LIKE LOWER(?) ESCAPE '!' OR LOWER(username) LIKE LOWER(?) ESCAPE '!')

@@ -28,6 +28,7 @@ import { useMessageSummaryPolling } from './useMessageSummaryPolling';
 interface MessageCenterContextValue {
   unreadCount: number;
   trackingUnreadCount: number | null;
+  followReviewUnreadCount: number | null;
   openPanel: () => void;
 }
 
@@ -38,6 +39,7 @@ const MessageCenterContext = createContext<MessageCenterContextValue | null>(
 const EMPTY_SUMMARY: UserMessageSummary = {
   unreadCount: 0,
   trackingUnreadCount: 0,
+  followReviewUnreadCount: 0,
   revision: '',
   announcement: null,
   latestTracking: null,
@@ -126,9 +128,15 @@ export function MessageCenterProvider({ children }: { children: ReactNode }) {
     () => ({
       unreadCount: summary?.unreadCount ?? 0,
       trackingUnreadCount: summary?.trackingUnreadCount ?? null,
+      followReviewUnreadCount: summary?.followReviewUnreadCount ?? null,
       openPanel,
     }),
-    [openPanel, summary?.trackingUnreadCount, summary?.unreadCount],
+    [
+      openPanel,
+      summary?.trackingUnreadCount,
+      summary?.followReviewUnreadCount,
+      summary?.unreadCount,
+    ],
   );
 
   return (

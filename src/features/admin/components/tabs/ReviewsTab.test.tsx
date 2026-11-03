@@ -1,7 +1,13 @@
 import { act, fireEvent, render, screen, within } from '@testing-library/react';
 
 import ReviewsTab from '@/features/admin/components/tabs/ReviewsTab';
+import { getAdminReviewReports } from '@/features/admin/lib/api';
 import { type AdminVideoReview } from '@/lib/types';
+
+jest.mock('@/features/admin/lib/api', () => ({
+  ...jest.requireActual('@/features/admin/lib/api'),
+  getAdminReviewReports: jest.fn(),
+}));
 
 jest.mock('@/components/CoverImage', () => ({
   __esModule: true,
@@ -10,6 +16,10 @@ jest.mock('@/components/CoverImage', () => ({
 
 const review: AdminVideoReview = {
   username: 'alice',
+  author: { profileId: 'profileAlice', nickname: '爱丽丝' },
+  spoiler: false,
+  likeCount: 0,
+  likedByMe: false,
   title_norm: '测试电影',
   title: '测试电影',
   year: '2026',
@@ -42,6 +52,9 @@ describe('ReviewsTab', () => {
   beforeEach(() => {
     jest.useFakeTimers();
     jest.clearAllMocks();
+    jest
+      .mocked(getAdminReviewReports)
+      .mockResolvedValue({ items: [], nextCursor: null, pendingTotal: 0 });
     global.fetch = fetchMock;
     fetchMock.mockResolvedValue(
       response({ items: [review], nextCursor: null }),
@@ -74,7 +87,7 @@ describe('ReviewsTab', () => {
       cache: 'no-store',
     });
     expect(screen.getAllByText('(2026)')).toHaveLength(2);
-    expect(screen.getByText('alice')).toBeInTheDocument();
+    expect(screen.getByText('爱丽丝（alice）')).toBeInTheDocument();
     expect(
       screen.getByRole('img', { name: '9.0 分（满分 10 分）' }),
     ).toBeInTheDocument();
@@ -136,8 +149,8 @@ describe('ReviewsTab', () => {
     await act(async () => {
       resolveOld(response({ items: [review], nextCursor: 'old' }));
     });
-    expect(screen.getByText('bob')).toBeInTheDocument();
-    expect(screen.queryByText('alice')).not.toBeInTheDocument();
+    expect(screen.getByText('爱丽丝（bob）')).toBeInTheDocument();
+    expect(screen.queryByText('爱丽丝（alice）')).not.toBeInTheDocument();
     expect(
       screen.queryByRole('button', { name: '加载更多' }),
     ).not.toBeInTheDocument();
@@ -212,8 +225,8 @@ describe('ReviewsTab', () => {
         }),
       );
     });
-    expect(screen.queryByText('alice')).not.toBeInTheDocument();
-    expect(screen.getByText('bob')).toBeInTheDocument();
+    expect(screen.queryByText('爱丽丝（alice）')).not.toBeInTheDocument();
+    expect(screen.getByText('爱丽丝（bob）')).toBeInTheDocument();
   });
 
   it('retries the same search cursor without discarding existing rows', async () => {
@@ -260,4 +273,57 @@ describe('ReviewsTab', () => {
     await tick(300);
     expect(screen.getByText('暂无匹配的公开评价')).toBeInTheDocument();
   });
+  it.each(['驳回举报', '标为剧透', '删除评价'])(
+    '举报操作 %s 先确认再处理',
+    async (label) => {
+      jest.mocked(getAdminReviewReports).mockResolvedValue({
+        items: [
+          {
+            review,
+            reportCount: 2,
+            reasons: { spam: 2 },
+            reports: [
+              {
+                reporter: { profileId: 'profileBob00', nickname: '鲍勃' },
+                reason: 'spam',
+                detail: '重复广告',
+                created_at: 1,
+              },
+            ],
+            latestReportedAt: 1,
+          },
+        ],
+        nextCursor: null,
+        pendingTotal: 1,
+      });
+      render(<ReviewsTab />);
+      await tick();
+      fireEvent.click(screen.getByRole('tab', { name: '举报待处理 (1)' }));
+      await tick();
+      expect(screen.getByText('重复广告')).toBeInTheDocument();
+      fireEvent.click(screen.getByRole('button', { name: label }));
+      expect(
+        fetchMock.mock.calls.filter((call) => call[1]?.method === 'POST'),
+      ).toHaveLength(0);
+      fireEvent.click(screen.getByRole('button', { name: '确认处理' }));
+      await tick();
+      expect(fetchMock).toHaveBeenCalledWith(
+        '/api/admin/reviews/reports',
+        expect.objectContaining({
+          method: 'POST',
+          body: JSON.stringify({
+            action:
+              label === '驳回举报'
+                ? 'dismiss'
+                : label === '标为剧透'
+                  ? 'mark-spoiler'
+                  : 'delete-review',
+            username: 'alice',
+            title_norm: '测试电影',
+            year: '2026',
+          }),
+        }),
+      );
+    },
+  );
 });

@@ -1,7 +1,8 @@
-﻿import { NextRequest, NextResponse } from 'next/server';
+import { NextRequest, NextResponse } from 'next/server';
 
 import { getAuthInfoFromCookie, getSignatureData } from '@/lib/auth.server';
 import { getConfigForRead } from '@/lib/config';
+import { db } from '@/lib/db';
 import { getOwnerUsername } from '@/lib/env.server';
 import { NO_STORE_HEADERS } from '@/lib/http-cache';
 import { verifyAuthSignature } from '@/lib/signing-secret.server';
@@ -20,14 +21,18 @@ type SessionReason =
   | 'user_banned'
   | 'server_error';
 
-function sessionResponse(
+async function sessionResponse(
   authenticated: boolean,
   reason: SessionReason,
   username?: string,
   role?: 'owner' | 'admin' | 'user',
 ) {
+  const profile =
+    authenticated && username ? await db.ensureUserProfile(username) : null;
   return NextResponse.json(
     {
+      profileId: profile?.profile_id ?? null,
+      nickname: profile?.nickname ?? null,
       authenticated,
       reason,
       username: username || null,
@@ -43,18 +48,22 @@ export async function GET(request: NextRequest) {
     const authInfo = getAuthInfoFromCookie(request);
 
     if (!authInfo) {
-      return sessionResponse(false, 'missing_cookie');
+      return await sessionResponse(false, 'missing_cookie');
     }
     if (!authInfo.username) {
-      return sessionResponse(false, 'missing_username');
+      return await sessionResponse(false, 'missing_username');
     }
 
     if (!authInfo.signature) {
-      return sessionResponse(false, 'missing_signature', authInfo.username);
+      return await sessionResponse(
+        false,
+        'missing_signature',
+        authInfo.username,
+      );
     }
 
     if (!authInfo.expiresAt || Date.now() > authInfo.expiresAt) {
-      return sessionResponse(false, 'session_expired', authInfo.username);
+      return await sessionResponse(false, 'session_expired', authInfo.username);
     }
 
     const isValidSignature = await verifyAuthSignature(
@@ -64,11 +73,15 @@ export async function GET(request: NextRequest) {
     );
 
     if (!isValidSignature) {
-      return sessionResponse(false, 'invalid_signature', authInfo.username);
+      return await sessionResponse(
+        false,
+        'invalid_signature',
+        authInfo.username,
+      );
     }
 
     if (authInfo.username === ownerUsername) {
-      return sessionResponse(true, 'ok', authInfo.username, 'owner');
+      return await sessionResponse(true, 'ok', authInfo.username, 'owner');
     }
 
     const username = normalizeUsername(authInfo.username);
@@ -76,14 +89,14 @@ export async function GET(request: NextRequest) {
     const user = config.UserConfig.Users.find((u) => u.username === username);
 
     if (!user) {
-      return sessionResponse(false, 'user_not_found', username);
+      return await sessionResponse(false, 'user_not_found', username);
     }
 
     if (user.banned) {
-      return sessionResponse(false, 'user_banned', username);
+      return await sessionResponse(false, 'user_banned', username);
     }
 
-    return sessionResponse(
+    return await sessionResponse(
       true,
       'ok',
       username,

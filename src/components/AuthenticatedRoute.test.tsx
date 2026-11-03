@@ -61,7 +61,13 @@ describe('AuthenticatedRoute', () => {
 
   it('服务端确认的有效会话首次渲染就挂载受保护内容', () => {
     mockUseAuthSession.mockReturnValue({
-      session: { status: 'authenticated', username: 'alice', role: 'user' },
+      session: {
+        status: 'authenticated',
+        profileId: 'profileAlice',
+        nickname: '爱丽丝',
+        username: 'alice',
+        role: 'user',
+      },
       isRefreshing: false,
       refreshSession: mockRefreshSession,
     });
@@ -78,7 +84,13 @@ describe('AuthenticatedRoute', () => {
 
   it('普通用户不能挂载管理员页面', () => {
     mockUseAuthSession.mockReturnValue({
-      session: { status: 'authenticated', username: 'alice', role: 'user' },
+      session: {
+        status: 'authenticated',
+        profileId: 'profileAlice',
+        nickname: '爱丽丝',
+        username: 'alice',
+        role: 'user',
+      },
       isRefreshing: false,
       refreshSession: mockRefreshSession,
     });
@@ -104,7 +116,13 @@ describe('AuthenticatedRoute', () => {
 
   it.each(['admin', 'owner'] as const)('%s 可以挂载管理员页面', (role) => {
     mockUseAuthSession.mockReturnValue({
-      session: { status: 'authenticated', username: 'alice', role },
+      session: {
+        status: 'authenticated',
+        profileId: 'profileAlice',
+        nickname: '爱丽丝',
+        username: 'alice',
+        role,
+      },
       isRefreshing: false,
       refreshSession: mockRefreshSession,
     });
@@ -155,4 +173,25 @@ describe('AuthenticatedRoute', () => {
     fireEvent.click(screen.getByRole('button', { name: '重新验证' }));
     expect(mockRefreshSession).toHaveBeenCalledTimes(1);
   });
+});
+
+it('昵称未设置时先展示资料门禁，业务内容保持未挂载', () => {
+  mockUseAuthSession.mockReturnValue({
+    session: {
+      status: 'authenticated',
+      username: 'private-login',
+      role: 'user',
+      profileId: 'profileAlice',
+      nickname: null,
+    },
+    isRefreshing: false,
+    refreshSession: mockRefreshSession,
+  });
+  render(
+    <AuthenticatedRoute activePath='/me' message='请登录'>
+      <div>受保护业务</div>
+    </AuthenticatedRoute>,
+  );
+  expect(screen.getByText('设置你的昵称')).toBeInTheDocument();
+  expect(screen.queryByText('受保护业务')).not.toBeInTheDocument();
 });

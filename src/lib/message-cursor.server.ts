@@ -1,16 +1,22 @@
 import 'server-only';
 
-import type { TrackingUpdateUserMessage } from '@/lib/message-types';
+import type { UserMessage } from '@/lib/message-types';
 
-const MAX_CURSOR_LENGTH = 512;
+const MAX_CURSOR_LENGTH = 4000;
 
 export interface MessageCursor {
   createdAt: number;
   key: string;
 }
 
-export function encodeCursor(message: TrackingUpdateUserMessage): string {
-  return encodeCursorPosition(message.createdAt, message.recordKey);
+export function messageSortKey(message: UserMessage): string {
+  return message.type === 'tracking-update'
+    ? `tracking:${message.recordKey}`
+    : message.id;
+}
+
+export function encodeCursor(message: UserMessage): string {
+  return encodeCursorPosition(message.createdAt, messageSortKey(message));
 }
 
 export function encodeCursorPosition(createdAt: number, key: string): string {

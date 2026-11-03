@@ -19,7 +19,21 @@ export interface TrackingUpdateUserMessage {
   createdAt: number;
 }
 
-export type UserMessage = AnnouncementUserMessage | TrackingUpdateUserMessage;
+export interface FollowReviewUserMessage {
+  id: string;
+  type: 'follow-review';
+  author: import('./types').PublicUserRef;
+  title: string;
+  year: string;
+  cover: string;
+  rating: number | null;
+  createdAt: number;
+}
+
+export type UserMessage =
+  | AnnouncementUserMessage
+  | TrackingUpdateUserMessage
+  | FollowReviewUserMessage;
 
 export interface UserMessagePage {
   items: UserMessage[];
@@ -30,6 +44,7 @@ export interface UserMessagePage {
 export interface UserMessageSummary {
   unreadCount: number;
   trackingUnreadCount: number;
+  followReviewUnreadCount: number;
   revision: string;
   announcement: AnnouncementUserMessage | null;
   latestTracking: TrackingUpdateUserMessage | null;

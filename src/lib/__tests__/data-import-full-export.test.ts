@@ -62,6 +62,46 @@ function createImportData() {
 }
 
 describe('data import full export fields', () => {
+  it('preserves social backups and validates cross-user references', async () => {
+    const data = createImportData();
+    data.data.userData.owner.videoReviews = [videoReview];
+    const user = data.data.userData['demo-user'];
+    user.profile = {
+      username: 'untrusted',
+      profile_id: 'AbCdEf012345',
+      nickname: 'Demo',
+      favorites_public: true,
+      updated_at: 100,
+    };
+    user.follows = [
+      { followee: 'OWNER', created_at: 1 },
+      { followee: 'missing', created_at: 1 },
+    ];
+    user.likes = [
+      {
+        author: 'OWNER',
+        title_norm: videoReview.title_norm,
+        year: videoReview.year,
+        created_at: 2,
+      },
+    ];
+    user.reports = [
+      { ...user.likes[0], reason: 'spoiler', detail: 'description' },
+    ];
+    user.messageState = {
+      followReviewReadAt: 100,
+      followReviewReadIds: ['follow-review:encoded'],
+    };
+    const parsed = (await parseImportData(data)).snapshot.userData['demo-user'];
+    expect(parsed.profile).toEqual({ ...user.profile, username: 'demo-user' });
+    expect(parsed.follows).toEqual([{ followee: 'owner', created_at: 1 }]);
+    expect(parsed.likes?.[0].author).toBe('owner');
+    expect(parsed.reports?.[0].reason).toBe('spoiler');
+    expect(parsed.messageState).toEqual(user.messageState);
+    user.reports[0].detail = 'x'.repeat(201);
+    await expect(parseImportData(data)).rejects.toThrow('举报记录无效');
+  });
+
   it('normalizes review identity, preserves private fields and supports old backups', async () => {
     const data = createImportData();
     data.data.userData['demo-user'].videoReviews = [

@@ -57,6 +57,132 @@ describeLive('MySQL 追更查询（真实实例）', () => {
     ...extra,
   });
 
+  it('serializes concurrent message-state updates on a missing row', async () => {
+    const username = `atomic-read-${Date.now()}`;
+    try {
+      await Promise.all(
+        Array.from({ length: 12 }, (_, index) =>
+          storage.updateUserMessageState(username, {
+            followReview: {
+              id: `follow-review:${index}`,
+              createdAt: index + 1,
+            },
+          }),
+        ),
+      );
+      expect(
+        (await storage.getUserMessageState(username)).followReviewReadIds,
+      ).toHaveLength(12);
+      await storage.updateUserMessageState(username, {
+        followReviewReadAt: 100,
+        announcement: { id: 'new' },
+      });
+      await Promise.all([
+        storage.updateUserMessageState(username, {
+          followReview: { id: 'late', createdAt: 1 },
+        }),
+        storage.updateUserMessageState(username, {
+          followReviewReadAt: 50,
+          announcement: { id: 'old' },
+        }),
+      ]);
+      expect(await storage.getUserMessageState(username)).toEqual({
+        followReviewReadAt: 100,
+        followReviewReadIds: [],
+        readAnnouncementId: 'new',
+      });
+    } finally {
+      await storage.deleteUser(username);
+    }
+  });
+
+  it('social SQL enforces profile uniqueness, reactions, moderation and deletion', async () => {
+    const suffix = Date.now();
+    const author = `social-author-${suffix}`;
+    const reader = `social-reader-${suffix}`;
+    const title = `social${suffix}`;
+    try {
+      await storage.registerUser(author, 'test-password');
+      await storage.registerUser(reader, 'test-password');
+      const profile = await storage.ensureUserProfile(author);
+      expect(profile.profile_id).toMatch(/^[A-Za-z0-9]{12}$/);
+      const nickname = `N${String(suffix).slice(-12)}`;
+      await storage.updateUserProfile(author, { nickname });
+      await expect(
+        storage.updateUserProfile(reader, { nickname: nickname.toLowerCase() }),
+      ).rejects.toThrow('昵称已被使用');
+      await storage.setUserFollow(reader, author, true);
+      await storage.setVideoReview(author, {
+        ...videoReview,
+        title_norm: title,
+        rating: 8.7,
+        updated_at: Date.now() + 1000,
+      });
+      expect(
+        await storage.setVideoReviewLike(author, title, '2026', reader, true),
+      ).toEqual({ liked: true, likeCount: 1 });
+      expect(
+        await storage.setVideoReviewLike(author, title, '2026', reader, true),
+      ).toEqual({ liked: true, likeCount: 1 });
+      expect(
+        await storage.reportVideoReview(
+          author,
+          title,
+          '2026',
+          reader,
+          'spam',
+          '',
+        ),
+      ).toBe(true);
+      expect(
+        await storage.reportVideoReview(
+          author,
+          title,
+          '2026',
+          reader,
+          'spoiler',
+          'detail',
+        ),
+      ).toBe(true);
+      const reports = await storage.getReviewReportPage();
+      expect(
+        reports.items.find((item) => item.review.username === author),
+      ).toMatchObject({ reportCount: 1, reasons: { spoiler: 1 } });
+      const work = await storage.getPublicVideoReviewsForWork(
+        title,
+        '2026',
+        reader,
+      );
+      expect(work.distribution[7]).toBe(1);
+      expect(work.distribution[8]).toBe(0);
+      expect(work.reviews[0]).toMatchObject({
+        author: { profileId: profile.profile_id },
+        likedByMe: true,
+        likeCount: 1,
+      });
+      expect(
+        await storage.getFollowReviewMessages(reader, 0, [], Date.now() + 2000),
+      ).toHaveLength(1);
+      await storage.moderateReviewReports(
+        author,
+        title,
+        '2026',
+        'mark-spoiler',
+      );
+      expect(
+        (await storage.getVideoReview(author, title, '2026'))?.spoiler,
+      ).toBe(true);
+      await storage.deleteVideoReview(author, title, '2026');
+      expect((await storage.getUserSocialData(reader)).likes).toEqual([]);
+      expect((await storage.getUserSocialData(reader)).reports).toEqual([]);
+      await storage.deleteUser(author);
+      expect((await storage.getUserSocialData(reader)).follows).toEqual([]);
+    } finally {
+      await storage.deleteUser(author);
+      await storage.deleteUser(reader);
+    }
+  });
+
   it('review SQL preserves identity, privacy, nullable ratings and literal cursor search', async () => {
     const user = `live-review-${Date.now()}`;
     const title = `review${Date.now()}`;
