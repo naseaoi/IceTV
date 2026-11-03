@@ -1,8 +1,10 @@
 /** @jest-environment node */
 
 import type { NextRequest } from 'next/server';
+import { gunzipSync } from 'zlib';
 
 import { installWebPolyfills } from '@/app/api/test-utils/web-polyfills';
+import { videoReview } from '@/lib/__tests__/__fixtures__/video-review-contract';
 
 type ExportRouteModule = typeof import('./route');
 
@@ -25,6 +27,7 @@ function makeDb(searchHistory: string[]) {
     getAllUsers: jest.fn().mockResolvedValue([]),
     getAllPlayRecords: jest.fn().mockResolvedValue({}),
     getAllFavorites: jest.fn().mockResolvedValue({}),
+    getAllVideoReviews: jest.fn().mockResolvedValue([videoReview]),
     getSearchHistory: jest.fn().mockResolvedValue(searchHistory),
     getAllSkipConfigs: jest.fn().mockResolvedValue({}),
     getAllPlaybackSessions: jest.fn().mockResolvedValue([]),
@@ -88,7 +91,15 @@ describe('data migration export route', () => {
     expect(response.headers.get('Content-Disposition')).toMatch(
       /icetv-backup-\d{8}-\d{6}\.dat/,
     );
-    expect((await response.text()).length).toBeGreaterThan(0);
+    const { SimpleCrypto } = require('@/lib/crypto');
+    const compressed = SimpleCrypto.decrypt(
+      await response.text(),
+      'strong-password',
+    );
+    const backup = JSON.parse(
+      gunzipSync(Buffer.from(compressed, 'base64')).toString('utf8'),
+    );
+    expect(backup.data.userData['owner-1'].videoReviews).toEqual([videoReview]);
   });
 
   it('原始数据超过解压上限时拒绝导出', async () => {

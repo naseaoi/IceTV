@@ -51,6 +51,47 @@ export interface Favorite {
   origin?: 'vod' | 'live';
 }
 
+// 评价按作品身份（normalizeWorkTitle + normalizeWorkYear）存储，与源站无关
+export interface VideoReview {
+  title_norm: string;
+  year: string;
+  title: string;
+  cover: string;
+  douban_id: number;
+  rating: number | null; // 1.0–10.0，最多一位小数；null 表示未评分
+  content: string;
+  is_public: boolean;
+  source_key: string; // 最后编辑时的 source+id
+  created_at: number;
+  updated_at: number;
+}
+
+export interface PublicVideoReview {
+  username: string;
+  title: string;
+  year: string;
+  cover: string;
+  rating: number | null;
+  content: string;
+  created_at: number;
+  updated_at: number;
+}
+
+export interface AdminVideoReview extends PublicVideoReview {
+  title_norm: string;
+}
+
+export interface AdminVideoReviewPage {
+  items: AdminVideoReview[];
+  nextCursor: string | null;
+}
+
+export interface WorkReviewSummary {
+  average: number | null;
+  count: number;
+  reviews: PublicVideoReview[];
+}
+
 export interface FavoritePageItem {
   key: string;
   favorite: Favorite;
@@ -144,6 +185,7 @@ export interface SourceRouteStatsBucket {
 export interface StorageUserImportData {
   playRecords: { [key: string]: PlayRecord };
   favorites: { [key: string]: Favorite };
+  videoReviews?: VideoReview[];
   searchHistory: string[];
   skipConfigs: { [key: string]: SkipConfig };
   playbackSessions: { [key: string]: PlaybackSession };
@@ -239,6 +281,28 @@ export interface IStorage {
   ): Promise<FavoritePage>;
   deleteFavorite(userName: string, key: string): Promise<void>;
   deleteAllFavorites(userName: string): Promise<void>;
+
+  getVideoReview(
+    userName: string,
+    titleNorm: string,
+    year: string,
+  ): Promise<VideoReview | null>;
+  setVideoReview(userName: string, review: VideoReview): Promise<void>;
+  deleteVideoReview(
+    userName: string,
+    titleNorm: string,
+    year: string,
+    publicOnly?: boolean,
+  ): Promise<void>;
+  getAllVideoReviews(userName: string): Promise<VideoReview[]>;
+  getPublicVideoReviewsForWork(
+    titleNorm: string,
+    year: string,
+  ): Promise<WorkReviewSummary>;
+  getPublicVideoReviewPage(
+    cursor?: string,
+    q?: string,
+  ): Promise<AdminVideoReviewPage>;
 
   // 用户相关
   registerUser(userName: string, password: string): Promise<void>;

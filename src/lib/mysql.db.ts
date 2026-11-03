@@ -8,6 +8,13 @@ import type {
 import mysql from 'mysql2/promise';
 
 import { MySqlResourceStore } from '@/lib/mysql-resource-store';
+import {
+  publicReview,
+  reviewPage,
+  reviewPageParams,
+  reviewSql,
+  VideoReviewRow,
+} from '@/lib/video-reviews';
 import { AdminConfig } from '@/types/admin';
 
 import { hashPassword, verifyPassword } from './password';
@@ -19,6 +26,7 @@ import { normalizeRuntimeParam } from './runtime-params';
 import { getMySqlConnectionUrl } from './storage-type';
 import { buildTrackingSql, MYSQL_TRACKING_DIALECT } from './tracking-sql';
 import {
+  AdminVideoReviewPage,
   Favorite,
   FavoritePage,
   IStorage,
@@ -38,10 +46,13 @@ import {
   SourceRouteStatsItem,
   StorageImportData,
   UserMessageState,
+  VideoReview,
+  WorkReviewSummary,
 } from './types';
 import { assertValidUsernameFormat, normalizeUsername } from './username';
 
 const SEARCH_HISTORY_LIMIT = 20;
+const REVIEW_SQL = reviewSql('mysql');
 const {
   createdAt: MYSQL_TRACKING_CREATED_AT,
   unreadWhere: MYSQL_UNREAD_TRACKING_WHERE,
@@ -407,6 +418,17 @@ export class MySqlStorage implements IStorage {
         favorite_json LONGTEXT NOT NULL,
         PRIMARY KEY (username, favorite_key)
       ) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci`,
+      `CREATE TABLE IF NOT EXISTS video_reviews (
+        username VARCHAR(191) NOT NULL,
+        title_norm VARCHAR(191) COLLATE utf8mb4_bin NOT NULL,
+        year VARCHAR(16) NOT NULL,
+        review_json MEDIUMTEXT NOT NULL,
+        is_public TINYINT NOT NULL,
+        updated_at BIGINT NOT NULL,
+        PRIMARY KEY (username, title_norm, year),
+        KEY idx_video_reviews_work (title_norm, is_public, updated_at),
+        KEY idx_video_reviews_public (is_public, updated_at)
+      ) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin`,
       `CREATE TABLE IF NOT EXISTS search_history (
         username VARCHAR(191) NOT NULL,
         keyword VARCHAR(191) NOT NULL,
@@ -929,6 +951,95 @@ export class MySqlStorage implements IStorage {
     ]);
   }
 
+  async getVideoReview(
+    userName: string,
+    titleNorm: string,
+    year: string,
+  ): Promise<VideoReview | null> {
+    await this.ensureInitialized();
+    const username = normalizeUsername(userName);
+    const [rows] = await this.pool.query<(VideoReviewRow & RowDataPacket)[]>(
+      year ? REVIEW_SQL.own : REVIEW_SQL.latest,
+      year ? [username, titleNorm, year, year, year] : [username, titleNorm],
+    );
+    return parseJsonValue<VideoReview>(rows[0]?.review_json);
+  }
+
+  async setVideoReview(userName: string, review: VideoReview): Promise<void> {
+    await this.ensureInitialized();
+    await this.pool.execute(
+      `INSERT INTO video_reviews
+      (username, title_norm, year, review_json, is_public, updated_at) VALUES (?, ?, ?, ?, ?, ?)
+      ON DUPLICATE KEY UPDATE review_json = JSON_SET(VALUES(review_json), '$.created_at', JSON_EXTRACT(review_json, '$.created_at')),
+      is_public = VALUES(is_public), updated_at = VALUES(updated_at)`,
+      [
+        normalizeUsername(userName),
+        review.title_norm,
+        review.year,
+        JSON.stringify(review),
+        review.is_public ? 1 : 0,
+        review.updated_at,
+      ],
+    );
+  }
+
+  async deleteVideoReview(
+    userName: string,
+    titleNorm: string,
+    year: string,
+    publicOnly = false,
+  ): Promise<void> {
+    await this.ensureInitialized();
+    await this.pool.execute(REVIEW_SQL.delete, [
+      normalizeUsername(userName),
+      titleNorm,
+      year,
+      publicOnly ? 1 : 0,
+    ]);
+  }
+
+  async getAllVideoReviews(userName: string): Promise<VideoReview[]> {
+    await this.ensureInitialized();
+    const [rows] = await this.pool.query<(VideoReviewRow & RowDataPacket)[]>(
+      REVIEW_SQL.all,
+      [normalizeUsername(userName)],
+    );
+    return rows.map((row) => JSON.parse(row.review_json) as VideoReview);
+  }
+
+  async getPublicVideoReviewsForWork(
+    titleNorm: string,
+    year: string,
+  ): Promise<WorkReviewSummary> {
+    return this.withTransaction(async (connection) => {
+      const [summaries] = await connection.query<
+        (RowDataPacket & { average: string | number | null; count: number })[]
+      >(REVIEW_SQL.summary, [titleNorm, year, year]);
+      const [rows] = await connection.query<(VideoReviewRow & RowDataPacket)[]>(
+        REVIEW_SQL.work,
+        [titleNorm, year, year],
+      );
+      return {
+        average:
+          summaries[0].average === null ? null : Number(summaries[0].average),
+        count: Number(summaries[0].count),
+        reviews: rows.map(publicReview),
+      };
+    });
+  }
+
+  async getPublicVideoReviewPage(
+    cursor?: string,
+    q?: string,
+  ): Promise<AdminVideoReviewPage> {
+    await this.ensureInitialized();
+    const [rows] = await this.pool.query<(VideoReviewRow & RowDataPacket)[]>(
+      REVIEW_SQL.page,
+      reviewPageParams(cursor, q),
+    );
+    return reviewPage(rows);
+  }
+
   async registerUser(userName: string, password: string): Promise<void> {
     await this.ensureInitialized();
     const username = assertValidUsernameFormat(userName);
@@ -999,6 +1110,9 @@ export class MySqlStorage implements IStorage {
         username,
       ]);
       await connection.execute('DELETE FROM favorites WHERE username = ?', [
+        username,
+      ]);
+      await connection.execute('DELETE FROM video_reviews WHERE username = ?', [
         username,
       ]);
       await connection.execute(
@@ -1877,6 +1991,7 @@ export class MySqlStorage implements IStorage {
       await connection.execute('DELETE FROM users');
       await connection.execute('DELETE FROM play_records');
       await connection.execute('DELETE FROM favorites');
+      await connection.execute('DELETE FROM video_reviews');
       await connection.execute('DELETE FROM search_history');
       await connection.execute('DELETE FROM skip_configs');
       await connection.execute('DELETE FROM playback_sessions');
@@ -1900,6 +2015,7 @@ export class MySqlStorage implements IStorage {
       await connection.execute('DELETE FROM users');
       await connection.execute('DELETE FROM play_records');
       await connection.execute('DELETE FROM favorites');
+      await connection.execute('DELETE FROM video_reviews');
       await connection.execute('DELETE FROM search_history');
       await connection.execute('DELETE FROM skip_configs');
       await connection.execute('DELETE FROM playback_sessions');
@@ -1983,6 +2099,14 @@ export class MySqlStorage implements IStorage {
         'favorite_key',
         'favorite_json',
       ]);
+      const videoReviews = createRowBatcher(connection, 'video_reviews', [
+        'username',
+        'title_norm',
+        'year',
+        'review_json',
+        'is_public',
+        'updated_at',
+      ]);
       const searchHistories = createRowBatcher(connection, 'search_history', [
         'username',
         'keyword',
@@ -2045,6 +2169,16 @@ export class MySqlStorage implements IStorage {
           await favorites.add([username, key, JSON.stringify(favorite)]);
         }
 
+        for (const review of userData.videoReviews ?? []) {
+          await videoReviews.add([
+            username,
+            review.title_norm,
+            review.year,
+            JSON.stringify(review),
+            review.is_public ? 1 : 0,
+            review.updated_at,
+          ]);
+        }
         const searchHistory = userData.searchHistory.slice(
           0,
           searchHistoryLimit,
@@ -2084,6 +2218,7 @@ export class MySqlStorage implements IStorage {
       await loginActivities.flush();
       await playRecords.flush();
       await favorites.flush();
+      await videoReviews.flush();
       await searchHistories.flush();
       await skipConfigs.flush();
       await playbackSessions.flush();

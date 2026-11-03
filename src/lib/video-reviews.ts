@@ -1,0 +1,184 @@
+import { normalizeWorkTitle, normalizeWorkYear } from '@/lib/source-match';
+import type {
+  AdminVideoReviewPage,
+  PublicVideoReview,
+  VideoReview,
+} from '@/lib/types';
+
+// 前后端共用；存储列为 MEDIUMTEXT，放宽上限无需迁移
+export const REVIEW_CONTENT_MAX_LENGTH = 5000;
+
+export class ReviewValidationError extends Error {}
+
+function text(value: unknown, label: string, max: number): string {
+  if (typeof value !== 'string' || value.trim().length > max) {
+    throw new ReviewValidationError(`${label}格式无效，最多 ${max} 字`);
+  }
+  return value.trim();
+}
+
+export function reviewIdentity(title: unknown, year: unknown) {
+  const displayTitle = text(title, '标题', 200);
+  const title_norm = normalizeWorkTitle(displayTitle);
+  if (!title_norm || title_norm.length > 191) {
+    throw new ReviewValidationError('标题不能为空，归一化后最多 191 字');
+  }
+  const normalizedYear = normalizeWorkYear(text(year ?? '', '年份', 16));
+  return { title: displayTitle, title_norm, year: normalizedYear };
+}
+
+export function reviewInput(value: unknown) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    throw new ReviewValidationError('评价格式无效');
+  }
+  const input = value as Record<string, unknown>;
+  const identity = reviewIdentity(input.title, input.year);
+  const rating = input.rating;
+  if (
+    rating !== null &&
+    (typeof rating !== 'number' ||
+      !Number.isFinite(rating) ||
+      rating < 1 ||
+      rating > 10)
+  ) {
+    throw new ReviewValidationError('评分必须为 1–10 的有限数或 null');
+  }
+  const content = text(input.content, '评价内容', REVIEW_CONTENT_MAX_LENGTH);
+  if (rating === null && !content)
+    throw new ReviewValidationError('评分与评价内容至少填写一项');
+  if (typeof input.is_public !== 'boolean')
+    throw new ReviewValidationError('公开状态必须为布尔值');
+  const douban_id = input.douban_id ?? 0;
+  if (
+    typeof douban_id !== 'number' ||
+    !Number.isSafeInteger(douban_id) ||
+    douban_id < 0
+  ) {
+    throw new ReviewValidationError('豆瓣 ID 格式无效');
+  }
+  return {
+    ...identity,
+    rating: rating === null ? null : Math.round(rating * 10) / 10,
+    content,
+    is_public: input.is_public,
+    cover: text(input.cover, '封面地址', 1000),
+    source_key: text(input.source_key, '来源标识', 300),
+    douban_id,
+  };
+}
+
+export type ReviewCursor = [number, string, string, string];
+
+export function decodeReviewCursor(cursor?: string): ReviewCursor | null {
+  if (!cursor) return null;
+  try {
+    if (cursor.length > 3000 || !/^[A-Za-z0-9_-]+$/.test(cursor))
+      throw new Error();
+    const value: unknown = JSON.parse(
+      Buffer.from(cursor, 'base64url').toString('utf8'),
+    );
+    if (
+      !Array.isArray(value) ||
+      value.length !== 4 ||
+      !Number.isSafeInteger(value[0]) ||
+      value[0] < 0 ||
+      typeof value[1] !== 'string' ||
+      !value[1] ||
+      value[1].length > 191 ||
+      typeof value[2] !== 'string' ||
+      !value[2] ||
+      value[2].length > 191 ||
+      typeof value[3] !== 'string' ||
+      value[3].length > 16
+    )
+      throw new Error();
+    return value as ReviewCursor;
+  } catch {
+    throw new ReviewValidationError('分页游标无效');
+  }
+}
+
+export function reviewPageParams(cursor?: string, q = '') {
+  const keyword = text(q, '搜索关键词', 200);
+  const after = decodeReviewCursor(cursor);
+  const [time, username, title, year] = after ?? [0, '', '', ''];
+  const pattern = `%${keyword.replace(/[!%_]/g, '!$&')}%`;
+  return [
+    keyword,
+    pattern,
+    pattern,
+    after ? 1 : 0,
+    time,
+    time,
+    username,
+    username,
+    title,
+    title,
+    year,
+  ];
+}
+
+export type VideoReviewRow = { username: string; review_json: string };
+
+export function publicReview(row: VideoReviewRow): PublicVideoReview {
+  const review = JSON.parse(row.review_json) as VideoReview;
+  return {
+    username: row.username,
+    title: review.title,
+    year: review.year,
+    cover: review.cover,
+    rating: review.rating,
+    content: review.content,
+    created_at: review.created_at,
+    updated_at: review.updated_at,
+  };
+}
+
+export function reviewPage(rows: VideoReviewRow[]): AdminVideoReviewPage {
+  const items = rows.slice(0, 30).map((row) => ({
+    ...publicReview(row),
+    title_norm: (JSON.parse(row.review_json) as VideoReview).title_norm,
+  }));
+  const last = items.at(-1);
+  return {
+    items,
+    nextCursor:
+      rows.length > 30 && last
+        ? Buffer.from(
+            JSON.stringify([
+              last.updated_at,
+              last.username,
+              last.title_norm,
+              last.year,
+            ]),
+          ).toString('base64url')
+        : null,
+  };
+}
+
+export function reviewSql(dialect: 'sqlite' | 'mysql') {
+  const title =
+    dialect === 'sqlite'
+      ? "json_extract(review_json, '$.title')"
+      : "JSON_UNQUOTE(JSON_EXTRACT(review_json, '$.title'))";
+  const rating =
+    dialect === 'sqlite'
+      ? "json_extract(review_json, '$.rating')"
+      : "CASE WHEN JSON_TYPE(JSON_EXTRACT(review_json, '$.rating')) = 'NULL' THEN NULL ELSE CAST(JSON_UNQUOTE(JSON_EXTRACT(review_json, '$.rating')) AS DECIMAL(10, 2)) END";
+  const workWhere =
+    "title_norm = ? AND is_public = 1 AND (? = '' OR year IN (?, ''))";
+  return {
+    own: `SELECT review_json FROM video_reviews WHERE username = ? AND title_norm = ? AND (? = '' OR year IN (?, '')) ORDER BY CASE WHEN year = ? THEN 1 ELSE 0 END DESC, updated_at DESC, year DESC LIMIT 1`,
+    latest:
+      'SELECT review_json FROM video_reviews WHERE username = ? AND title_norm = ? ORDER BY updated_at DESC, year DESC LIMIT 1',
+    all: 'SELECT review_json FROM video_reviews WHERE username = ? ORDER BY updated_at DESC, title_norm DESC, year DESC',
+    delete:
+      'DELETE FROM video_reviews WHERE username = ? AND title_norm = ? AND year = ? AND (? = 0 OR is_public = 1)',
+    work: `SELECT username, review_json FROM video_reviews WHERE ${workWhere} ORDER BY updated_at DESC, username DESC, year DESC LIMIT 50`,
+    summary: `SELECT AVG(${rating}) AS average, COUNT(${rating}) AS count FROM video_reviews WHERE ${workWhere}`,
+    page: `SELECT username, review_json FROM video_reviews WHERE is_public = 1
+      AND (? = '' OR LOWER(${title}) LIKE LOWER(?) ESCAPE '!' OR LOWER(username) LIKE LOWER(?) ESCAPE '!')
+      AND (? = 0 OR updated_at < ? OR (updated_at = ? AND (username < ? OR (username = ? AND (title_norm < ? OR (title_norm = ? AND year < ?))))))
+      ORDER BY updated_at DESC, username DESC, title_norm DESC, year DESC LIMIT 31`,
+  };
+}

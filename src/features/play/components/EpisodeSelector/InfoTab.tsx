@@ -1,4 +1,4 @@
-import { ExternalLink } from 'lucide-react';
+import { ExternalLink, Star } from 'lucide-react';
 import React, {
   useCallback,
   useEffect,
@@ -9,8 +9,10 @@ import React, {
 
 import CoverImage from '@/components/CoverImage';
 import { FavoriteHeartButton } from '@/components/FavoriteHeartButton';
+import RatingStars from '@/components/RatingStars';
+import { formatRating } from '@/lib/rating';
 import { getVerticalScrollMaskStyle } from '@/lib/scroll-edge-fade';
-import { SearchResult } from '@/lib/types';
+import { SearchResult, VideoReview } from '@/lib/types';
 
 interface InfoTabProps {
   videoTitle: string;
@@ -22,6 +24,8 @@ interface InfoTabProps {
   videoCover: string;
   videoDoubanId: number;
   scrollMode?: 'panel' | 'desc';
+  myReview?: VideoReview | null;
+  onOpenReview?: () => void;
 }
 
 const DESC_PARAGRAPH_SEPARATOR = /(?:\r?\n)+|[^\S\r\n]{2,}/;
@@ -36,6 +40,8 @@ export const InfoTab: React.FC<InfoTabProps> = ({
   videoCover,
   videoDoubanId,
   scrollMode = 'panel',
+  myReview = null,
+  onOpenReview,
 }) => {
   const formattedDesc = useMemo(() => {
     const raw = detail?.desc;
@@ -186,6 +192,29 @@ export const InfoTab: React.FC<InfoTabProps> = ({
                   </span>
                 )}
               </div>
+            )}
+
+            {onOpenReview && (
+              <button
+                type='button'
+                aria-label={myReview ? '编辑我的评价' : '评分'}
+                className='inline-flex w-fit items-center gap-1.5 rounded-full border border-amber-200/70 bg-amber-50/70 px-2.5 py-1 text-[11px] font-medium text-amber-700 transition-colors hover:bg-amber-100 dark:border-amber-500/20 dark:bg-amber-900/20 dark:text-amber-300 dark:hover:bg-amber-900/40'
+                onClick={onOpenReview}
+              >
+                {myReview?.rating ? (
+                  <>
+                    <RatingStars value={myReview.rating} size='sm' decorative />
+                    <span className='font-semibold tabular-nums'>
+                      {formatRating(myReview.rating)}
+                    </span>
+                  </>
+                ) : (
+                  <>
+                    <Star className='h-3.5 w-3.5' />
+                    {myReview ? '已评价' : '评分'}
+                  </>
+                )}
+              </button>
             )}
           </div>
         </div>

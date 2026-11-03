@@ -1,6 +1,12 @@
 'use client';
 
-import { type ReactNode, useEffect, useRef, useState } from 'react';
+import {
+  type ReactNode,
+  type RefObject,
+  useEffect,
+  useRef,
+  useState,
+} from 'react';
 import { createPortal } from 'react-dom';
 
 interface ModalShellProps {
@@ -9,6 +15,10 @@ interface ModalShellProps {
   children: ReactNode;
   panelClassName?: string;
   closeOnBackdrop?: boolean;
+  // 遮罩层底色，如编辑类弹窗需要压暗背景；默认透明
+  backdropClassName?: string;
+  // 打开后聚焦的元素，默认聚焦遮罩层
+  initialFocusRef?: RefObject<HTMLElement | null>;
 }
 
 const CLOSE_ANIMATION_MS = 220;
@@ -19,6 +29,8 @@ export default function ModalShell({
   children,
   panelClassName,
   closeOnBackdrop = true,
+  backdropClassName = '',
+  initialFocusRef,
 }: ModalShellProps) {
   const [mounted, setMounted] = useState(false);
   const [visible, setVisible] = useState(false);
@@ -57,10 +69,9 @@ export default function ModalShell({
   }, [isOpen]);
 
   useEffect(() => {
-    if (mounted && overlayRef.current) {
-      overlayRef.current.focus();
-    }
-  }, [mounted]);
+    if (!mounted) return;
+    (initialFocusRef?.current ?? overlayRef.current)?.focus();
+  }, [mounted, initialFocusRef]);
 
   useEffect(() => {
     if (!mounted) {
@@ -101,7 +112,9 @@ export default function ModalShell({
     <div
       ref={overlayRef}
       tabIndex={-1}
-      className='fixed inset-0 z-[9999] flex items-center justify-center p-4 outline-none'
+      className={`fixed inset-0 z-[9999] flex items-center justify-center p-4 outline-none transition-colors duration-200 ${
+        visible ? backdropClassName : ''
+      }`}
       onClick={() => {
         if (closeOnBackdrop) {
           onClose();

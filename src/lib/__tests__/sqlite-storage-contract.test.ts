@@ -11,6 +11,7 @@ import type {
   SkipConfig,
   SourceRouteStatsItem,
 } from '../types';
+import { videoReviewContract } from './__fixtures__/video-review-contract';
 
 const adminConfig: AdminConfig = {
   ConfigSubscribtion: { URL: '', AutoUpdate: false, LastCheck: '' },
@@ -887,4 +888,8 @@ describe('sqlite storage contract', () => {
       },
     ]);
   });
+});
+
+describe('sqlite video review contract', () => {
+  videoReviewContract(() => new LocalSqliteStorage(':memory:'), adminConfig);
 });

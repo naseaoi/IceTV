@@ -61,6 +61,10 @@ const UserConfig = dynamic(
     ),
   { loading: AdminTabLoading },
 );
+const ReviewsTab = dynamic(
+  () => import('@/features/admin/components/tabs/ReviewsTab'),
+  { loading: AdminTabLoading },
+);
 const VideoSourceConfig = dynamic(
   () =>
     import('@/features/admin/components/tabs/VideoSourceConfigTab').then(
@@ -126,6 +130,8 @@ const AdminTabContent = ({
       return (
         <UserConfig config={config} role={role} refreshConfig={refreshConfig} />
       );
+    case 'reviews':
+      return <ReviewsTab />;
     case 'video-source':
       return (
         <VideoSourceConfig config={config} refreshConfig={refreshConfig} />

@@ -4,6 +4,8 @@ import { hasPlayRecordUpdate } from '@/lib/play-records';
 import { DEFAULT_RUNTIME_PARAMS } from '@/lib/runtime-params';
 import type { AdminConfig } from '@/types/admin';
 
+import { videoReviewContract } from './__fixtures__/video-review-contract';
+
 type SearchHistoryRow = {
   username: string;
   keyword: string;
@@ -23,6 +25,7 @@ type FakeState = {
   users: Map<string, string>;
   playRecords: Map<string, Map<string, string>>;
   favorites: Map<string, Map<string, string>>;
+  videoReviews: Map<string, { username: string; review: VideoReview }>;
   skipConfigs: Map<string, Map<string, string>>;
   playbackSessions: Map<string, Record<string, unknown>>;
   searchHistory: SearchHistoryRow[];
@@ -46,6 +49,7 @@ function cloneState(state: FakeState): FakeState {
     users: new Map(state.users),
     playRecords: cloneNestedMap(state.playRecords),
     favorites: cloneNestedMap(state.favorites),
+    videoReviews: new Map(state.videoReviews),
     skipConfigs: cloneNestedMap(state.skipConfigs),
     playbackSessions: new Map(state.playbackSessions),
     searchHistory: state.searchHistory.map((row) => ({ ...row })),
@@ -69,6 +73,7 @@ function createState(): FakeState {
     users: new Map(),
     playRecords: new Map(),
     favorites: new Map(),
+    videoReviews: new Map(),
     skipConfigs: new Map(),
     playbackSessions: new Map(),
     searchHistory: [],
@@ -262,6 +267,36 @@ function createFakePool() {
     currentState: FakeState,
   ) => {
     const normalized = normalizeSql(sql);
+
+    if (normalized.startsWith('INSERT INTO video_reviews')) {
+      const [username, title, year, raw] = params as [
+        string,
+        string,
+        string,
+        string,
+      ];
+      const key = JSON.stringify([username, title, year]);
+      const review = JSON.parse(raw) as VideoReview;
+      const existing = currentState.videoReviews.get(key);
+      if (existing) review.created_at = existing.review.created_at;
+      currentState.videoReviews.set(key, { username, review });
+      return [[], []];
+    }
+    if (normalized.startsWith('DELETE FROM video_reviews')) {
+      for (const [key, row] of currentState.videoReviews) {
+        if (
+          !params.length ||
+          (row.username === params[0] &&
+            (params.length === 1 ||
+              (row.review.title_norm === params[1] &&
+                row.review.year === params[2] &&
+                (!params[3] || row.review.is_public))))
+        ) {
+          currentState.videoReviews.delete(key);
+        }
+      }
+      return [[], []];
+    }
 
     if (normalized.startsWith('CREATE TABLE IF NOT EXISTS')) {
       return [[], []];
@@ -926,6 +961,96 @@ function createFakePool() {
   ) => {
     const normalized = normalizeSql(sql);
 
+    if (normalized.includes('FROM video_reviews')) {
+      let rows = [...currentState.videoReviews.values()];
+      const compareText = (a: string, b: string) =>
+        a === b ? 0 : a < b ? -1 : 1;
+      const sortRows = (a: (typeof rows)[number], b: (typeof rows)[number]) =>
+        b.review.updated_at - a.review.updated_at ||
+        compareText(b.username, a.username) ||
+        compareText(b.review.title_norm, a.review.title_norm) ||
+        compareText(b.review.year, a.review.year);
+      if (normalized.includes('WHERE username = ?')) {
+        rows = rows.filter((row) => row.username === params[0]);
+        if (normalized.includes('title_norm = ?')) {
+          rows = rows.filter(
+            (row) =>
+              row.review.title_norm === params[1] &&
+              (params.length === 2 ||
+                row.review.year === params[2] ||
+                row.review.year === ''),
+          );
+        }
+        rows.sort(
+          (a, b) =>
+            (params.length > 2
+              ? Number(b.review.year === params[2]) -
+                Number(a.review.year === params[2])
+              : 0) || sortRows(a, b),
+        );
+        if (normalized.includes('LIMIT 1')) rows = rows.slice(0, 1);
+      } else {
+        rows = rows.filter((row) => row.review.is_public);
+        if (normalized.includes('WHERE title_norm = ?')) {
+          rows = rows.filter(
+            (row) =>
+              row.review.title_norm === params[0] &&
+              (!params[1] ||
+                row.review.year === params[1] ||
+                row.review.year === ''),
+          );
+          if (normalized.startsWith('SELECT AVG(')) {
+            const rated = rows.filter((row) => row.review.rating !== null);
+            return [
+              [
+                {
+                  average: rated.length
+                    ? String(
+                        rated.reduce(
+                          (sum, row) => sum + row.review.rating!,
+                          0,
+                        ) / rated.length,
+                      )
+                    : null,
+                  count: rated.length,
+                },
+              ],
+              [],
+            ];
+          }
+          rows.sort(sortRows);
+          rows = rows.slice(0, 50);
+        } else {
+          const q = String(params[0]).toLowerCase();
+          rows = rows.filter(
+            (row) =>
+              row.review.title.toLowerCase().includes(q) ||
+              row.username.toLowerCase().includes(q),
+          );
+          rows.sort(sortRows);
+          if (params[3]) {
+            const after = {
+              username: String(params[6]),
+              review: {
+                updated_at: Number(params[4]),
+                title_norm: String(params[8]),
+                year: String(params[10]),
+              } as VideoReview,
+            };
+            rows = rows.filter((row) => sortRows(row, after) > 0);
+          }
+          rows = rows.slice(0, 31);
+        }
+      }
+      return [
+        rows.map((row) => ({
+          username: row.username,
+          review_json: JSON.stringify(row.review),
+        })),
+        [],
+      ];
+    }
+
     if (
       normalized ===
       'SELECT record_json FROM play_records WHERE username = ? AND record_key = ? LIMIT 1'
@@ -1528,6 +1653,9 @@ function createFakePool() {
         async beginTransaction() {
           transactionState = cloneState(state);
         },
+        async query(sql: string, params?: unknown[]) {
+          return runQuery(sql, params, transactionState);
+        },
         async commit() {
           state = cloneState(transactionState);
         },
@@ -1564,6 +1692,7 @@ import type {
   PlayRecord,
   SkipConfig,
   SourceRouteStatsItem,
+  VideoReview,
 } from '../types';
 
 const adminConfig: AdminConfig = {
@@ -2464,4 +2593,11 @@ describe('mysql storage contract', () => {
       },
     ]);
   });
+});
+
+describe('mysql video review contract', () => {
+  videoReviewContract(
+    () => new MySqlStorage('mysql://demo:demo@localhost:3306/icetv'),
+    adminConfig,
+  );
 });

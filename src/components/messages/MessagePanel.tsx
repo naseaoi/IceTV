@@ -15,6 +15,7 @@ import { createPortal } from 'react-dom';
 import CoverImage from '@/components/CoverImage';
 import { useBodyScrollLock } from '@/components/user-menu/useBodyScrollLock';
 import { UserMessage, UserMessagePage } from '@/lib/message-types';
+import { formatRelativeTime } from '@/lib/relative-time';
 
 interface MessagePanelProps {
   open: boolean;
@@ -28,20 +29,6 @@ interface MessagePanelProps {
   onReadAll: () => Promise<void>;
   onLoadMore: () => Promise<void>;
   onRetry: () => Promise<void>;
-}
-
-function formatMessageTime(timestamp: number): string {
-  if (!timestamp) return '最近';
-  const elapsed = Date.now() - timestamp;
-  if (elapsed < 60_000) return '刚刚';
-  if (elapsed < 60 * 60_000) return `${Math.floor(elapsed / 60_000)} 分钟前`;
-  if (elapsed < 24 * 60 * 60_000) {
-    return `${Math.floor(elapsed / (60 * 60_000))} 小时前`;
-  }
-  return new Intl.DateTimeFormat('zh-CN', {
-    month: 'numeric',
-    day: 'numeric',
-  }).format(timestamp);
 }
 
 function MessageRow({
@@ -95,7 +82,7 @@ function MessageRow({
         <span className='mt-1 block text-xs text-gray-400 dark:text-gray-500'>
           {isAnnouncement ? '公告' : message.sourceName}
           {' · '}
-          {formatMessageTime(message.createdAt)}
+          {formatRelativeTime(message.createdAt)}
         </span>
       </div>
 

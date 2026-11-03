@@ -1,15 +1,6 @@
 import { filterSourcesForPlayback, SearchType } from '@/lib/source-match';
 import { SearchResult } from '@/lib/types';
 
-/** 聚合用标题归一化：去除空格、标点、统一大小写 */
-export const normalizeTitleForAggregation = (title: string) => {
-  return title
-    .normalize('NFKC')
-    .toLowerCase()
-    .replace(/[\s\u00A0\u3000]+/g, '')
-    .replace(/[·•・.。:：,，!！?？'"`~～_\-—]/g, '');
-};
-
 /**
  * "无排序"场景的批次预排序：完全匹配标题优先，其次年份倒序，未知年份最后
  */

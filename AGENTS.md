@@ -36,6 +36,17 @@
 - 站长账号来自环境变量，没有 `users` 行但可能有活跃记录行。按 `users` 反查孤儿记录会误伤它。
 - 清理时 owner / admin 与操作者本人豁免，无活跃记录的用户不纳入候选。
 
+## 视频评价
+
+- 评价按作品身份存储：`normalizeWorkTitle()` + `normalizeWorkYear()`（`src/lib/source-match.ts`），与换源候选、搜索聚合共用同一归一化。**改归一化规则会让已存评价静默匹配不到**，换源后也不再继承。
+- `title_norm` 与 `year` 由服务端计算，不信任客户端。MySQL 列须保持 `utf8mb4_bin`，换成 `_ci` 排序规则会让两种存储的匹配结果不一致。
+- 年份为空视为通配：查询用 `year IN (?, '')`，PUT 命中空年份记录时沿用其年份，避免同一作品出现两份评价。收藏页在客户端按同一规则（精确年份优先、空年份兜底）把评分映射到卡片，见 `src/features/favorites/lib/favorite-library.ts`。
+- 评分为 1.0–10.0 的一位小数：服务端先校验范围再 `Math.round(r * 10) / 10`，前端换算与展示统一走 `src/lib/rating.ts`，不要各处手写 `toFixed` 或步进精度。
+- 正文上限是前后端共用的 `REVIEW_CONTENT_MAX_LENGTH`（`src/lib/video-reviews.ts`），前端计数与服务端校验都引用它，不要另写数字。
+- 私密评价只对作者可见；作品汇总、后台列表与后台删除都带 `is_public = 1`。新增读取路径须同样过滤。
+- 收藏仍按 `source+id`，评价与收藏相互独立：保存评价时由前端补收藏，取消收藏不删评价。
+- 新增按用户分表的数据时，`deleteUser`、`clearAllData`、`replaceAllData`、导入导出与 SQLite 用户名大小写合并都要覆盖，`video_reviews` 是现成参照。
+
 ## 客户端 IP 与限流
 
 - `TRUSTED_PROXY_COUNT` 默认 0，此时 `getClientIp()` 回落到 `x-forwarded-for` 第一段，该值客户端可控。反代后不设它，注册限流可被伪造头绕过。
@@ -63,6 +74,12 @@
 - `page.tsx`、`route.ts` 优先做装配，不堆业务细节。
 - 跨目录导入统一走 `@/...`，同目录内可用相对路径。
 - 动态 import 也用 `@/` 路径（`moduleResolution: bundler`，裸相对路径在 Turbopack 与 Webpack 下行为不一致）。
+
+## 界面组件
+
+- 下拉统一用 `src/components/Select.tsx`（`field` 表单整宽、`pill` 工具栏胶囊），`AdminSelect` 只是 `field` 的包装。不要再写原生 `<select>`。
+- `@tailwindcss/forms` 会给所有原生 input / select / textarea 加边框、内边距和背景箭头。自定义样式的控件须显式 `border-0`、重置 padding、`focus:ring-0`（select 再加 `bg-none`），否则在浅色模式出现灰框或文字被裁切。
+- 长文本折叠用 `src/components/ExpandableText.tsx`；弹窗外壳 `ModalShell` 支持 `backdropClassName`（遮罩底色）与 `initialFocusRef`（打开后聚焦的元素）。
 
 ## 本地设置
 

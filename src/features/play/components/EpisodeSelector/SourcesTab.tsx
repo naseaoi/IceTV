@@ -22,7 +22,7 @@ import {
 } from '@/features/play/lib/sourceProbeStore';
 import { readEnableOptimization } from '@/lib/local-preferences';
 import { collapseSourcesForDisplay } from '@/lib/source-bundle';
-import { normalizeTitleForSourceMatch } from '@/lib/source-match';
+import { normalizeWorkTitle } from '@/lib/source-match';
 import {
   type SourcePlaybackStat,
   compareSourcePlaybackPreference,
@@ -476,13 +476,11 @@ export const SourcesTab: React.FC<SourcesTabProps> = ({
                 if (!res.ok) throw new Error('搜索失败');
                 const data = await res.json();
                 if (Array.isArray(data.results)) {
-                  const normalizedTitle = normalizeTitleForSourceMatch(
-                    videoTitle || '',
-                  );
+                  const normalizedTitle = normalizeWorkTitle(videoTitle || '');
                   const filtered = (data.results as SearchResult[]).filter(
                     (s) => {
                       if (!normalizedTitle) return true;
-                      const t = normalizeTitleForSourceMatch(s.title);
+                      const t = normalizeWorkTitle(s.title);
                       return t.length > 0 && t === normalizedTitle;
                     },
                   );

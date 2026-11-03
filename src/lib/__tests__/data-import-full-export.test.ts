@@ -7,6 +7,7 @@ jest.mock('../env.server', () => ({
 import { parseImportData } from '../data-import';
 import type { StorageUserImportData } from '../types';
 import { IMPORT_ADMIN_CONFIG as adminConfig } from './__fixtures__/import-admin-config';
+import { videoReview } from './__fixtures__/video-review-contract';
 
 const exportedHash =
   '$2b$10$abcdefghijklmnopqrstuu9dBwFh6R0D4A5gHfHnM6kQ7xS8tT9u';
@@ -61,6 +62,77 @@ function createImportData() {
 }
 
 describe('data import full export fields', () => {
+  it('normalizes review identity, preserves private fields and supports old backups', async () => {
+    const data = createImportData();
+    data.data.userData['demo-user'].videoReviews = [
+      {
+        ...videoReview,
+        title: ' Review Demo! ',
+        title_norm: 'untrusted',
+        year: 'unknown',
+        content: ' Good ',
+        is_public: false,
+      },
+    ];
+    const parsed = await parseImportData(data);
+    expect(parsed.snapshot.userData['demo-user'].videoReviews).toEqual([
+      {
+        ...videoReview,
+        title: 'Review Demo!',
+        title_norm: 'reviewdemo',
+        year: '',
+        content: 'Good',
+        is_public: false,
+      },
+    ]);
+    expect(parsed.snapshot.userData.owner.videoReviews).toEqual([]);
+  });
+
+  it.each([
+    [1, 1],
+    [10, 10],
+    [8.6, 8.6],
+    [8.65, 8.7],
+    [8.64, 8.6],
+    [null, null],
+  ])('normalizes imported rating %s to %s', async (rating, expected) => {
+    const data = createImportData();
+    data.data.userData['demo-user'].videoReviews = [{ ...videoReview, rating }];
+    const parsed = await parseImportData(data);
+    expect(parsed.snapshot.userData['demo-user'].videoReviews).toEqual([
+      { ...videoReview, rating: expected },
+    ]);
+  });
+
+  it.each([
+    { rating: 11 },
+    { rating: 0.9 },
+    { rating: 10.1 },
+    { rating: 0.99 },
+    { rating: 10.01 },
+    { rating: NaN },
+    { rating: Infinity },
+    { rating: -Infinity },
+    { rating: '8.6' },
+    { rating: null, content: ' ' },
+    { is_public: 'true' },
+    { content: 'x'.repeat(5001) },
+    { created_at: -1 },
+  ])('rejects invalid review imports %j', async (extra) => {
+    const data = createImportData();
+    data.data.userData['demo-user'].videoReviews = [
+      { ...videoReview, ...extra } as never,
+    ];
+    await expect(parseImportData(data)).rejects.toThrow();
+  });
+
+  it('enforces review import count limits', async () => {
+    const data = createImportData();
+    data.data.userData['demo-user'].videoReviews =
+      Array(20001).fill(videoReview);
+    await expect(parseImportData(data)).rejects.toMatchObject({ status: 413 });
+  });
+
   it('restores exported password hashes and skips the owner', async () => {
     const parsed = await parseImportData(createImportData());
 

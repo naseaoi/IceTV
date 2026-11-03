@@ -26,6 +26,8 @@ export interface VideoCardProps {
   douban_id?: number;
   onDelete?: () => void;
   rate?: string;
+  /** 当前用户对该作品的评分（1.0–10.0） */
+  myRating?: number;
   type?: string;
   isBangumi?: boolean;
   isAggregate?: boolean;

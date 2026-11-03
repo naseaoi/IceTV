@@ -44,6 +44,22 @@ export async function adminGet<T>(
   return (payload ?? ({} as T)) as T;
 }
 
+export async function adminDelete(
+  endpoint: string,
+  body: Record<string, unknown>,
+  fallbackPrefix = '删除失败',
+): Promise<void> {
+  const response = await fetch(endpoint, {
+    method: 'DELETE',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+
+  if (!response.ok) {
+    throw new Error(await resolveErrorMessage(response, fallbackPrefix));
+  }
+}
+
 export async function adminPost<T = Record<string, unknown>>(
   endpoint: string,
   body?: Record<string, unknown>,

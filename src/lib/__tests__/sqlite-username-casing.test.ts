@@ -7,6 +7,7 @@ import path from 'path';
 
 import { LocalSqliteStorage } from '../sqlite.db';
 import type { PlayRecord } from '../types';
+import { videoReview } from './__fixtures__/video-review-contract';
 
 function makeRecord(overrides: Partial<PlayRecord> = {}): PlayRecord {
   return {
@@ -54,6 +55,53 @@ describe('SQLite 遗留用户名大小写归一化', () => {
     run(db);
     db.close();
   }
+
+  it('merges legacy reviews by composite identity and newest update', async () => {
+    seed((db) => {
+      const insert = db.prepare(
+        'INSERT INTO video_reviews (username, title_norm, year, review_json, is_public, updated_at) VALUES (?, ?, ?, ?, ?, ?)',
+      );
+      insert.run(
+        'TAT',
+        videoReview.title_norm,
+        '2026',
+        JSON.stringify({ ...videoReview, updated_at: 5000, is_public: false }),
+        0,
+        5000,
+      );
+      insert.run(
+        'tat',
+        videoReview.title_norm,
+        '2026',
+        JSON.stringify(videoReview),
+        1,
+        2000,
+      );
+      insert.run(
+        'TAT',
+        videoReview.title_norm,
+        '',
+        JSON.stringify({ ...videoReview, year: '' }),
+        1,
+        2000,
+      );
+    });
+    const migrated = openStorage();
+    expect(await migrated.getAllVideoReviews('tat')).toHaveLength(2);
+    expect(
+      await migrated.getVideoReview('tat', videoReview.title_norm, '2026'),
+    ).toMatchObject({ updated_at: 5000, is_public: false });
+    expect(
+      (
+        await migrated.getPublicVideoReviewsForWork(
+          videoReview.title_norm,
+          '2026',
+        )
+      ).count,
+    ).toBe(1);
+    const again = openStorage();
+    expect(await again.getAllVideoReviews('tat')).toHaveLength(2);
+  });
 
   it('迁移后遗留大写用户名的播放记录可被读取', async () => {
     seed((db) => {

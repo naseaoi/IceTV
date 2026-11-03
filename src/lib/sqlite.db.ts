@@ -5,6 +5,13 @@ import { existsSync, mkdirSync, readFileSync } from 'fs';
 import path from 'path';
 
 import { SqliteResourceStore } from '@/lib/sqlite-resource-store';
+import {
+  publicReview,
+  reviewPage,
+  reviewPageParams,
+  reviewSql,
+  VideoReviewRow,
+} from '@/lib/video-reviews';
 import { AdminConfig } from '@/types/admin';
 
 import { hashPassword, verifyPassword } from './password';
@@ -15,6 +22,7 @@ import {
 import { normalizeRuntimeParam } from './runtime-params';
 import { buildTrackingSql, SQLITE_TRACKING_DIALECT } from './tracking-sql';
 import {
+  AdminVideoReviewPage,
   Favorite,
   FavoritePage,
   IStorage,
@@ -34,6 +42,8 @@ import {
   SourceRouteStatsItem,
   StorageImportData,
   UserMessageState,
+  VideoReview,
+  WorkReviewSummary,
 } from './types';
 import { assertValidUsernameFormat, normalizeUsername } from './username';
 import {
@@ -43,6 +53,7 @@ import {
 } from './username-migration';
 
 const SEARCH_HISTORY_LIMIT = 20;
+const REVIEW_SQL = reviewSql('sqlite');
 
 const {
   createdAt: SQLITE_TRACKING_CREATED_AT,
@@ -371,6 +382,15 @@ export class LocalSqliteStorage implements IStorage {
     getUnreadTrackingPlayRecordPageAfter: Database.Statement;
     countUnreadTrackingPlayRecords: Database.Statement;
     deletePlayRecord: Database.Statement;
+    getVideoReview: Database.Statement;
+    getLatestVideoReview: Database.Statement;
+    setVideoReview: Database.Statement;
+    deleteVideoReview: Database.Statement;
+    deleteVideoReviewsByUser: Database.Statement;
+    getAllVideoReviews: Database.Statement;
+    getPublicVideoReviewsForWork: Database.Statement;
+    getVideoReviewSummary: Database.Statement;
+    getPublicVideoReviewPage: Database.Statement;
     // favorites
     getFavorite: Database.Statement;
     setFavorite: Database.Statement;
@@ -547,6 +567,18 @@ export class LocalSqliteStorage implements IStorage {
         favorite_json TEXT NOT NULL,
         PRIMARY KEY (username, favorite_key)
       );
+
+      CREATE TABLE IF NOT EXISTS video_reviews (
+        username TEXT NOT NULL,
+        title_norm TEXT NOT NULL,
+        year TEXT NOT NULL,
+        review_json TEXT NOT NULL,
+        is_public INTEGER NOT NULL,
+        updated_at INTEGER NOT NULL,
+        PRIMARY KEY (username, title_norm, year)
+      );
+      CREATE INDEX IF NOT EXISTS idx_video_reviews_work ON video_reviews (title_norm, is_public, updated_at);
+      CREATE INDEX IF NOT EXISTS idx_video_reviews_public ON video_reviews (is_public, updated_at);
 
       CREATE TABLE IF NOT EXISTS search_history (
         username TEXT NOT NULL,
@@ -758,6 +790,21 @@ export class LocalSqliteStorage implements IStorage {
       deletePlayRecord: this.db.prepare(
         'DELETE FROM play_records WHERE username = ? AND record_key = ?',
       ),
+      getVideoReview: this.db.prepare(REVIEW_SQL.own),
+      getLatestVideoReview: this.db.prepare(REVIEW_SQL.latest),
+      setVideoReview: this.db.prepare(`INSERT INTO video_reviews
+        (username, title_norm, year, review_json, is_public, updated_at) VALUES (?, ?, ?, ?, ?, ?)
+        ON CONFLICT(username, title_norm, year) DO UPDATE SET
+        review_json = json_set(excluded.review_json, '$.created_at', json_extract(video_reviews.review_json, '$.created_at')),
+        is_public = excluded.is_public, updated_at = excluded.updated_at`),
+      deleteVideoReview: this.db.prepare(REVIEW_SQL.delete),
+      deleteVideoReviewsByUser: this.db.prepare(
+        'DELETE FROM video_reviews WHERE username = ?',
+      ),
+      getAllVideoReviews: this.db.prepare(REVIEW_SQL.all),
+      getPublicVideoReviewsForWork: this.db.prepare(REVIEW_SQL.work),
+      getVideoReviewSummary: this.db.prepare(REVIEW_SQL.summary),
+      getPublicVideoReviewPage: this.db.prepare(REVIEW_SQL.page),
       // favorites
       getFavorite: this.db.prepare(
         'SELECT favorite_json FROM favorites WHERE username = ? AND favorite_key = ?',
@@ -1174,6 +1221,17 @@ export class LocalSqliteStorage implements IStorage {
           legacy,
           canonical,
         );
+        this.db
+          .prepare(
+            `INSERT INTO video_reviews
+          (username, title_norm, year, review_json, is_public, updated_at)
+          SELECT ?, title_norm, year, review_json, is_public, updated_at FROM video_reviews WHERE username = ?
+          ON CONFLICT(username, title_norm, year) DO UPDATE SET
+            review_json = excluded.review_json, is_public = excluded.is_public, updated_at = excluded.updated_at
+          WHERE excluded.updated_at > video_reviews.updated_at`,
+          )
+          .run(canonical, legacy);
+        this.stmts.deleteVideoReviewsByUser.run(legacy);
         this.mergeSearchHistory(legacy, canonical);
         this.mergeSingleRowTable(
           'user_message_state',
@@ -1207,6 +1265,7 @@ export class LocalSqliteStorage implements IStorage {
       'users',
       'play_records',
       'favorites',
+      'video_reviews',
       'search_history',
       'skip_configs',
       'playback_sessions',
@@ -1607,6 +1666,85 @@ export class LocalSqliteStorage implements IStorage {
     this.stmts.deleteFavoritesByUser.run(username);
   }
 
+  async getVideoReview(
+    userName: string,
+    titleNorm: string,
+    year: string,
+  ): Promise<VideoReview | null> {
+    const username = normalizeUsername(userName);
+    const row = (
+      year
+        ? this.stmts.getVideoReview.get(username, titleNorm, year, year, year)
+        : this.stmts.getLatestVideoReview.get(username, titleNorm)
+    ) as VideoReviewRow | undefined;
+    return row ? (JSON.parse(row.review_json) as VideoReview) : null;
+  }
+
+  async setVideoReview(userName: string, review: VideoReview): Promise<void> {
+    this.stmts.setVideoReview.run(
+      normalizeUsername(userName),
+      review.title_norm,
+      review.year,
+      JSON.stringify(review),
+      review.is_public ? 1 : 0,
+      review.updated_at,
+    );
+  }
+
+  async deleteVideoReview(
+    userName: string,
+    titleNorm: string,
+    year: string,
+    publicOnly = false,
+  ): Promise<void> {
+    this.stmts.deleteVideoReview.run(
+      normalizeUsername(userName),
+      titleNorm,
+      year,
+      publicOnly ? 1 : 0,
+    );
+  }
+
+  async getAllVideoReviews(userName: string): Promise<VideoReview[]> {
+    const rows = this.stmts.getAllVideoReviews.all(
+      normalizeUsername(userName),
+    ) as VideoReviewRow[];
+    return rows.map((row) => JSON.parse(row.review_json) as VideoReview);
+  }
+
+  async getPublicVideoReviewsForWork(
+    titleNorm: string,
+    year: string,
+  ): Promise<WorkReviewSummary> {
+    return this.db.transaction(() => {
+      const summary = this.stmts.getVideoReviewSummary.get(
+        titleNorm,
+        year,
+        year,
+      ) as { average: number | null; count: number };
+      const rows = this.stmts.getPublicVideoReviewsForWork.all(
+        titleNorm,
+        year,
+        year,
+      ) as VideoReviewRow[];
+      return {
+        average: summary.average,
+        count: summary.count,
+        reviews: rows.map(publicReview),
+      };
+    })();
+  }
+
+  async getPublicVideoReviewPage(
+    cursor?: string,
+    q?: string,
+  ): Promise<AdminVideoReviewPage> {
+    const rows = this.stmts.getPublicVideoReviewPage.all(
+      ...reviewPageParams(cursor, q),
+    ) as VideoReviewRow[];
+    return reviewPage(rows);
+  }
+
   async registerUser(userName: string, password: string): Promise<void> {
     const username = assertValidUsernameFormat(userName);
     if (this.stmts.checkUserExist.get(username)) {
@@ -1667,6 +1805,7 @@ export class LocalSqliteStorage implements IStorage {
       this.stmts.deleteUserRow.run(targetUser);
       this.stmts.deletePlayRecordsByUser.run(targetUser);
       this.stmts.deleteFavoritesByUser.run(targetUser);
+      this.stmts.deleteVideoReviewsByUser.run(targetUser);
       this.stmts.deleteSearchHistoryByUser.run(targetUser);
       this.stmts.deleteSkipConfigsByUser.run(targetUser);
       this.stmts.deletePlaybackSessionsByUser.run(targetUser);
@@ -2345,6 +2484,7 @@ export class LocalSqliteStorage implements IStorage {
         DELETE FROM users;
         DELETE FROM play_records;
         DELETE FROM favorites;
+        DELETE FROM video_reviews;
         DELETE FROM search_history;
         DELETE FROM skip_configs;
         DELETE FROM playback_sessions;
@@ -2373,6 +2513,7 @@ export class LocalSqliteStorage implements IStorage {
         DELETE FROM users;
         DELETE FROM play_records;
         DELETE FROM favorites;
+        DELETE FROM video_reviews;
         DELETE FROM search_history;
         DELETE FROM skip_configs;
         DELETE FROM playback_sessions;
@@ -2442,6 +2583,17 @@ export class LocalSqliteStorage implements IStorage {
 
         for (const [key, favorite] of Object.entries(userData.favorites)) {
           this.stmts.setFavorite.run(username, key, JSON.stringify(favorite));
+        }
+
+        for (const review of userData.videoReviews ?? []) {
+          this.stmts.setVideoReview.run(
+            username,
+            review.title_norm,
+            review.year,
+            JSON.stringify(review),
+            review.is_public ? 1 : 0,
+            review.updated_at,
+          );
         }
 
         userData.searchHistory

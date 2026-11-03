@@ -3,6 +3,7 @@ import type React from 'react';
 
 import CoverImage from '@/components/CoverImage';
 import { FavoriteHeartButton } from '@/components/FavoriteHeartButton';
+import RatingBadge from '@/components/RatingBadge';
 import SourceNameBadge from '@/components/SourceNameBadge';
 import type {
   VideoCardDisplayConfig,
@@ -122,6 +123,7 @@ interface VideoCardPosterProps {
   sourceName?: string;
   year?: string;
   rate?: string;
+  myRating?: number;
   episodes?: number;
   currentEpisode?: number;
   hasUpdate?: boolean;
@@ -147,6 +149,7 @@ export function VideoCardPoster({
   sourceName,
   year,
   rate,
+  myRating,
   episodes,
   currentEpisode,
   hasUpdate = false,
@@ -203,7 +206,7 @@ export function VideoCardPoster({
           )}
           {showEpisodeBadge && (
             <div
-              className='ml-auto flex-shrink-0 whitespace-nowrap rounded-md bg-green-500 px-2 py-1 text-xs font-semibold text-white shadow-md transition-all duration-300 ease-out group-hover:scale-110 max-sm:px-1.5 max-sm:py-0.5 max-sm:text-[10px]'
+              className='max-sm:px-1.5 max-sm:py-0.5 max-sm:text-[10px] ml-auto flex-shrink-0 whitespace-nowrap rounded-md bg-green-500 px-2 py-1 text-xs font-semibold text-white shadow-md transition-all duration-300 ease-out group-hover:scale-110'
               style={noSelectStyle}
               onContextMenu={preventContextMenu}
             >
@@ -284,6 +287,15 @@ export function VideoCardPoster({
         >
           {rate}
         </div>
+      )}
+
+      {myRating !== undefined && !hasUpdate && (
+        <RatingBadge
+          value={myRating}
+          variant='overlay'
+          label='我的评分'
+          className='absolute bottom-2 left-2 px-2 py-1'
+        />
       )}
 
       {config.showDoubanLink && doubanId && doubanId !== 0 && (

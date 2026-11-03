@@ -1,0 +1,36 @@
+import { Star } from 'lucide-react';
+
+import { formatRating } from '@/lib/rating';
+
+interface RatingBadgeProps {
+  value: number;
+  // soft 用于普通背景，overlay 用于压在封面图上
+  variant?: 'soft' | 'overlay';
+  // 读屏前缀，如「我的评分」
+  label?: string;
+  className?: string;
+}
+
+const VARIANT_CLASS = {
+  soft: 'bg-amber-500/10 text-amber-700 ring-1 ring-inset ring-amber-500/20 dark:text-amber-300',
+  overlay:
+    'bg-black/55 text-amber-300 shadow-sm ring-1 ring-inset ring-white/10 backdrop-blur-md',
+} as const;
+
+export default function RatingBadge({
+  value,
+  variant = 'soft',
+  label,
+  className = '',
+}: RatingBadgeProps) {
+  return (
+    <span
+      role='img'
+      aria-label={`${label ? `${label} ` : ''}${formatRating(value)} 分`}
+      className={`inline-flex items-center gap-0.5 rounded-md px-1.5 py-0.5 text-xs font-semibold tabular-nums leading-none ${VARIANT_CLASS[variant]} ${className}`}
+    >
+      <Star aria-hidden='true' className='h-3 w-3' fill='currentColor' />
+      {formatRating(value)}
+    </span>
+  );
+}

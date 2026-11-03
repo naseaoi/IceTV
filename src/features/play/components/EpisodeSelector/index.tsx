@@ -1,15 +1,22 @@
-import { ArrowLeftRight, Heart, LayoutGrid, MessageSquare } from 'lucide-react';
+import {
+  ArrowLeftRight,
+  Heart,
+  LayoutGrid,
+  MessageSquare,
+  Star,
+} from 'lucide-react';
 import dynamic from 'next/dynamic';
-import React, { useMemo, useState } from 'react';
+import React, { useCallback, useMemo, useState } from 'react';
 
 import MobileSheet from '@/components/mobile/MobileSheet';
 import { PlayerPanelContent } from '@/components/PlayerPanelTabBar';
 import { useRuntimeConfig } from '@/components/RuntimeConfigProvider';
 import { SectionTitle } from '@/features/play/components/EpisodeSelector/SectionTitle';
 import { TabBar } from '@/features/play/components/EpisodeSelector/TabBar';
+import { useVideoReviews } from '@/features/play/hooks/useVideoReviews';
 import type { DanmakuReloadHandler } from '@/features/play/lib/danmaku/types';
 import { getSourceBundle } from '@/lib/source-bundle';
-import { normalizeTitleForSourceMatch } from '@/lib/source-match';
+import { normalizeWorkTitle } from '@/lib/source-match';
 import { SearchResult } from '@/lib/types';
 
 const infoSkeletonLineWidths = [
@@ -95,14 +102,14 @@ function pickDoubanId(
   targetTitle: string,
   totalEpisodes: number,
 ) {
-  const normalizedTarget = normalizeTitleForSourceMatch(targetTitle);
+  const normalizedTarget = normalizeWorkTitle(targetTitle);
   if (!normalizedTarget) return 0;
 
   const counts = new Map<number, number>();
   for (const candidate of candidates) {
     const doubanId = candidate.douban_id || 0;
     if (doubanId <= 0) continue;
-    if (normalizeTitleForSourceMatch(candidate.title) !== normalizedTarget) {
+    if (normalizeWorkTitle(candidate.title) !== normalizedTarget) {
       continue;
     }
 
@@ -162,6 +169,13 @@ const DanmakuTab = dynamic(
     ),
   { loading: EpisodeTabLoading },
 );
+const ReviewsTab = dynamic(
+  () =>
+    import('@/features/play/components/EpisodeSelector/ReviewsTab').then(
+      (mod) => mod.ReviewsTab,
+    ),
+  { loading: EpisodeTabLoading },
+);
 
 interface VideoInfo {
   quality: string;
@@ -198,8 +212,8 @@ interface EpisodeSelectorProps {
   onDanmakuHeatmapChange?: (enabled: boolean) => void;
 }
 
-type MobileSheetKey = 'episodes' | 'sources' | 'danmaku';
-type DesktopTabKey = 'main' | 'sources' | 'danmaku';
+type MobileSheetKey = 'episodes' | 'sources' | 'danmaku' | 'reviews';
+type DesktopTabKey = 'main' | 'sources' | 'danmaku' | 'reviews';
 
 const MOBILE_EPISODE_STRIP_SIZE = 12;
 
@@ -266,6 +280,29 @@ const EpisodeSelector: React.FC<EpisodeSelectorProps> = ({
 
   const [mobileSheet, setMobileSheet] = useState<MobileSheetKey | null>(null);
   const [desktopTab, setDesktopTab] = useState<DesktopTabKey>('main');
+  const [reviewEditRequested, setReviewEditRequested] = useState(false);
+
+  const reviews = useVideoReviews({
+    title: detail?.title || videoTitle || '',
+    year: detail?.year || videoYear,
+    cover: videoCover || detail?.poster || '',
+    doubanId: resolvedDoubanId,
+    sourceKey:
+      currentSource && currentId ? `${currentSource}+${currentId}` : '',
+    summaryEnabled: desktopTab === 'reviews' || mobileSheet === 'reviews',
+  });
+
+  const openDesktopReviewEditor = useCallback(() => {
+    setDesktopTab('reviews');
+    setReviewEditRequested(true);
+  }, []);
+  const handleReviewEditRequestHandled = useCallback(() => {
+    setReviewEditRequested(false);
+  }, []);
+  const openMobileReviewEditor = useCallback(() => {
+    setMobileSheet('reviews');
+    setReviewEditRequested(true);
+  }, []);
 
   const stripEpisodes = useMemo(() => {
     if (totalEpisodes <= 1) {
@@ -284,6 +321,7 @@ const EpisodeSelector: React.FC<EpisodeSelectorProps> = ({
     { key: 'main', label: '详情' },
     { key: 'sources', label: '换源' },
     ...(danmakuEnabled ? [{ key: 'danmaku', label: '弹幕' } as const] : []),
+    { key: 'reviews', label: '评价' },
   ];
 
   const renderEpisodesTab = (afterSelect?: () => void) => (
@@ -307,7 +345,10 @@ const EpisodeSelector: React.FC<EpisodeSelectorProps> = ({
     />
   );
 
-  const renderInfoTab = (scrollMode: 'panel' | 'desc') => {
+  const renderInfoTab = (
+    scrollMode: 'panel' | 'desc',
+    onOpenReview: () => void,
+  ) => {
     if (detailLoading) {
       return <InfoTabLoading />;
     }
@@ -323,6 +364,8 @@ const EpisodeSelector: React.FC<EpisodeSelectorProps> = ({
         videoCover={videoCover}
         videoDoubanId={resolvedDoubanId}
         scrollMode={scrollMode}
+        myReview={reviews.myReview}
+        onOpenReview={onOpenReview}
       />
     );
   };
@@ -359,6 +402,17 @@ const EpisodeSelector: React.FC<EpisodeSelectorProps> = ({
       searchTitle={detail?.title || videoTitle || ''}
       onReload={onDanmakuReload}
       onHeatmapChange={onDanmakuHeatmapChange}
+    />
+  );
+
+  const renderReviewsTab = () => (
+    <ReviewsTab
+      workTitle={detail?.title || videoTitle || ''}
+      reviews={reviews}
+      favorited={favorited}
+      onAddFavorite={onToggleFavorite}
+      editRequested={reviewEditRequested}
+      onEditRequestHandled={handleReviewEditRequestHandled}
     />
   );
 
@@ -415,6 +469,14 @@ const EpisodeSelector: React.FC<EpisodeSelectorProps> = ({
                 弹幕
               </button>
             )}
+            <button
+              type='button'
+              className={mobileActionButtonClass}
+              onClick={() => setMobileSheet('reviews')}
+            >
+              <Star className='h-3.5 w-3.5' />
+              评价
+            </button>
           </div>
         </div>
 
@@ -449,7 +511,7 @@ const EpisodeSelector: React.FC<EpisodeSelectorProps> = ({
         )}
 
         <div className='mt-3 flex min-h-0 flex-1 flex-col overflow-hidden rounded-xl border border-gray-200/60 bg-white/60 dark:border-gray-700/60 dark:bg-gray-800/40'>
-          {renderInfoTab('panel')}
+          {renderInfoTab('panel', openMobileReviewEditor)}
         </div>
 
         <MobileSheet
@@ -483,6 +545,16 @@ const EpisodeSelector: React.FC<EpisodeSelectorProps> = ({
             </div>
           </MobileSheet>
         )}
+
+        <MobileSheet
+          open={mobileSheet === 'reviews'}
+          title='评价'
+          onClose={() => setMobileSheet(null)}
+        >
+          <div className='flex h-[70dvh] flex-col overflow-hidden'>
+            {renderReviewsTab()}
+          </div>
+        </MobileSheet>
       </div>
 
       <div className='hidden min-h-0 flex-1 flex-col md:flex'>
@@ -497,7 +569,7 @@ const EpisodeSelector: React.FC<EpisodeSelectorProps> = ({
             (showDesktopEpisodes ? (
               <div className='grid min-h-0 min-w-0 flex-1 grid-rows-2 gap-0 overflow-hidden'>
                 <div className='flex min-h-0 min-w-0 flex-col overflow-hidden'>
-                  {renderInfoTab('desc')}
+                  {renderInfoTab('desc', openDesktopReviewEditor)}
                 </div>
                 <div className='flex min-h-0 min-w-0 flex-col overflow-hidden'>
                   <div className='flex-shrink-0 px-5 pt-0 sm:px-6'>
@@ -513,10 +585,11 @@ const EpisodeSelector: React.FC<EpisodeSelectorProps> = ({
                 </div>
               </div>
             ) : (
-              renderInfoTab('panel')
+              renderInfoTab('panel', openDesktopReviewEditor)
             ))}
           {desktopTab === 'sources' && renderSourcesTab()}
           {danmakuEnabled && desktopTab === 'danmaku' && renderDanmakuTab()}
+          {desktopTab === 'reviews' && renderReviewsTab()}
         </PlayerPanelContent>
       </div>
     </div>

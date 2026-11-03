@@ -18,9 +18,11 @@ import {
   SourceRouteStatsBucket,
   StorageImportData,
   StorageUserImportData,
+  VideoReview,
 } from './types';
 import { normalizeUsername } from './username';
 import { parseStorageKey } from './utils';
+import { reviewInput, ReviewValidationError } from './video-reviews';
 
 const MAX_USERS = 1000;
 const MAX_RECORDS_PER_USER = 20000;
@@ -139,6 +141,7 @@ export async function parseImportData(
     totalItems +=
       Object.keys(normalizedUserData.playRecords).length +
       Object.keys(normalizedUserData.favorites).length +
+      (normalizedUserData.videoReviews?.length ?? 0) +
       normalizedUserData.searchHistory.length +
       Object.keys(normalizedUserData.skipConfigs).length +
       Object.keys(normalizedUserData.playbackSessions).length;
@@ -592,6 +595,7 @@ function normalizeUserData(
       MAX_FAVORITES_PER_USER,
       normalizeFavorite,
     ),
+    videoReviews: normalizeVideoReviews(input.videoReviews),
     searchHistory: normalizeSearchHistory(
       input.searchHistory,
       searchHistoryLimit,
@@ -619,6 +623,49 @@ function normalizeUserData(
         }),
     lastLoginAt: normalizeLastLoginAt(input.lastLoginAt),
   };
+}
+
+function normalizeVideoReviews(value: unknown): VideoReview[] {
+  if (value === undefined) return [];
+  if (!Array.isArray(value)) throw new ImportValidationError('评价格式无效');
+  if (value.length > MAX_FAVORITES_PER_USER)
+    throw new ImportValidationError('评价数量超出限制', 413);
+  const reviews = new Map<string, VideoReview>();
+  for (const item of value) {
+    try {
+      const input = requireObject(item, '评价格式无效');
+      const review: VideoReview = {
+        ...reviewInput(input),
+        created_at: Math.floor(
+          assertBoundedNumber(
+            input.created_at,
+            '评价创建时间',
+            0,
+            MAX_TIMESTAMP_MS,
+          ),
+        ),
+        updated_at: Math.floor(
+          assertBoundedNumber(
+            input.updated_at,
+            '评价更新时间',
+            0,
+            MAX_TIMESTAMP_MS,
+          ),
+        ),
+      };
+      if (review.updated_at < review.created_at)
+        throw new ImportValidationError('评价更新时间必须晚于创建时间');
+      const key = JSON.stringify([review.title_norm, review.year]);
+      const existing = reviews.get(key);
+      if (!existing || review.updated_at > existing.updated_at)
+        reviews.set(key, review);
+    } catch (error) {
+      if (error instanceof ReviewValidationError)
+        throw new ImportValidationError(error.message);
+      throw error;
+    }
+  }
+  return [...reviews.values()];
 }
 
 function normalizeLastLoginAt(value: unknown): number | undefined {

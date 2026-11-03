@@ -4,6 +4,7 @@ import { AdminConfig } from '@/types/admin';
 
 import { getStorageType } from './storage-type';
 import {
+  AdminVideoReviewPage,
   Favorite,
   IStorage,
   MetadataRecordPage,
@@ -22,6 +23,8 @@ import {
   SourceRouteStatsItem,
   StorageImportData,
   UserMessageState,
+  VideoReview,
+  WorkReviewSummary,
 } from './types';
 
 async function createStorage(): Promise<IStorage> {
@@ -57,6 +60,53 @@ function generateStorageKey(source: string, id: string): string {
 class DbManager {
   private async getStorage(): Promise<IStorage> {
     return getStorage();
+  }
+
+  async getVideoReview(
+    userName: string,
+    titleNorm: string,
+    year: string,
+  ): Promise<VideoReview | null> {
+    return (await this.getStorage()).getVideoReview(userName, titleNorm, year);
+  }
+
+  async setVideoReview(userName: string, review: VideoReview): Promise<void> {
+    return (await this.getStorage()).setVideoReview(userName, review);
+  }
+
+  async deleteVideoReview(
+    userName: string,
+    titleNorm: string,
+    year: string,
+    publicOnly = false,
+  ): Promise<void> {
+    return (await this.getStorage()).deleteVideoReview(
+      userName,
+      titleNorm,
+      year,
+      publicOnly,
+    );
+  }
+
+  async getAllVideoReviews(userName: string): Promise<VideoReview[]> {
+    return (await this.getStorage()).getAllVideoReviews(userName);
+  }
+
+  async getPublicVideoReviewsForWork(
+    titleNorm: string,
+    year: string,
+  ): Promise<WorkReviewSummary> {
+    return (await this.getStorage()).getPublicVideoReviewsForWork(
+      titleNorm,
+      year,
+    );
+  }
+
+  async getPublicVideoReviewPage(
+    cursor?: string,
+    q?: string,
+  ): Promise<AdminVideoReviewPage> {
+    return (await this.getStorage()).getPublicVideoReviewPage(cursor, q);
   }
 
   async getPlayRecord(

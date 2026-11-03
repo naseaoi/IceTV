@@ -2,6 +2,7 @@
 
 import { MySqlStorage } from '../mysql.db';
 import type { Favorite, PlayRecord } from '../types';
+import { videoReview } from './__fixtures__/video-review-contract';
 
 const liveUrl = (process.env.MYSQL_TEST_URL || '').trim();
 const describeLive = liveUrl ? describe : describe.skip;
@@ -54,6 +55,110 @@ describeLive('MySQL 追更查询（真实实例）', () => {
     update_baseline_episodes: baseline,
     tracking_enabled: true,
     ...extra,
+  });
+
+  it('review SQL preserves identity, privacy, nullable ratings and literal cursor search', async () => {
+    const user = `live-review-${Date.now()}`;
+    const title = `review${Date.now()}`;
+    const review = { ...videoReview, title_norm: title, title: `${title} %_!` };
+    try {
+      await storage.setVideoReview(user, { ...review, year: '', rating: null });
+      await storage.setVideoReview(user, review);
+      await storage.setVideoReview(user, {
+        ...review,
+        created_at: 3000,
+        updated_at: 4000,
+      });
+      expect(await storage.getVideoReview(user, title, '2026')).toMatchObject({
+        year: '2026',
+        created_at: 1000,
+      });
+      expect(await storage.getVideoReview(user, title, '2025')).toMatchObject({
+        year: '',
+        rating: null,
+      });
+      expect(
+        await storage.getVideoReview(user, title.toUpperCase(), '2026'),
+      ).toBeNull();
+      expect(
+        await storage.getPublicVideoReviewsForWork(title, '2026'),
+      ).toMatchObject({ average: 8, count: 1 });
+      for (let index = 0; index < 32; index++) {
+        await storage.setVideoReview(user, {
+          ...review,
+          title_norm: `${title}-${index}`,
+        });
+      }
+      const first = await storage.getPublicVideoReviewPage(
+        undefined,
+        `${title} %_!`,
+      );
+      expect(first.items).toHaveLength(30);
+      const second = await storage.getPublicVideoReviewPage(
+        first.nextCursor!,
+        `${title} %_!`,
+      );
+      expect(second.items).toHaveLength(4);
+      expect(second.nextCursor).toBeNull();
+      expect(
+        new Set(
+          [...first.items, ...second.items].map((row) =>
+            JSON.stringify([row.title_norm, row.year]),
+          ),
+        ).size,
+      ).toBe(34);
+      await storage.setVideoReview(user, { ...review, is_public: false });
+      await storage.deleteVideoReview(user, title, '2026', true);
+      expect(await storage.getVideoReview(user, title, '2026')).toMatchObject({
+        is_public: false,
+      });
+      expect(
+        await storage.getPublicVideoReviewsForWork(title, '2026'),
+      ).toMatchObject({ average: null, count: 0 });
+    } finally {
+      await storage.deleteUser(user);
+    }
+  });
+
+  it('round trips decimal reviews and aggregates decimal ratings as numbers', async () => {
+    const user = `live-decimal-${Date.now()}`;
+    const otherUser = `${user}-other`;
+    const title = `decimal${Date.now()}`;
+    const older = { ...videoReview, title_norm: title, rating: 8.6 };
+    const newer = {
+      ...older,
+      title_norm: `${title}-private`,
+      rating: 9.1,
+      is_public: false,
+      updated_at: 3000,
+    };
+    try {
+      await storage.setVideoReview(user, newer);
+      await storage.setVideoReview(user, older);
+      await storage.setVideoReview(otherUser, { ...older, rating: 8.7 });
+      await storage.setVideoReview(user, { ...older, year: '', rating: null });
+      await storage.setVideoReview(user, {
+        ...older,
+        year: '2025',
+        rating: 1.1,
+        is_public: false,
+      });
+      expect(await storage.getVideoReview(user, title, '2026')).toEqual(older);
+      const ownReviews = await storage.getAllVideoReviews(user);
+      expect(ownReviews).toHaveLength(4);
+      expect(ownReviews[0]).toEqual(newer);
+      expect(ownReviews).toContainEqual(older);
+      const summary = await storage.getPublicVideoReviewsForWork(title, '');
+      expect(summary.count).toBe(2);
+      expect(typeof summary.average).toBe('number');
+      expect(summary.average).toBeCloseTo(8.65, 8);
+      expect(summary.reviews.map((review) => review.rating)).toEqual(
+        expect.arrayContaining([8.6, 8.7, null]),
+      );
+    } finally {
+      await storage.deleteUser(user);
+      await storage.deleteUser(otherUser);
+    }
   });
 
   it('只返回未读且未关闭追更的记录', async () => {

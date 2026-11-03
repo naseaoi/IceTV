@@ -71,7 +71,7 @@ describe('SortableSourceRow', () => {
     expect(routeSelect).toHaveTextContent('自动');
     fireEvent.click(routeSelect);
     const selectedOption = screen.getByRole('option', { name: '自动' });
-    expect(selectedOption).toHaveClass('bg-green-50');
+    expect(selectedOption).toHaveAttribute('aria-selected', 'true');
     expect(selectedOption.querySelector('svg')).toBeNull();
     fireEvent.click(screen.getByRole('option', { name: '代理' }));
 

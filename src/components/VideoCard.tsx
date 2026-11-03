@@ -91,6 +91,7 @@ const VideoCard = forwardRef<VideoCardHandle, VideoCardProps>(
       douban_id,
       onDelete,
       rate,
+      myRating,
       type = '',
       isBangumi = false,
       isAggregate = false,
@@ -909,6 +910,7 @@ const VideoCard = forwardRef<VideoCardHandle, VideoCardProps>(
             sourceName={source_name}
             year={actualYear}
             rate={rate}
+            myRating={myRating}
             episodes={actualEpisodes}
             currentEpisode={currentEpisode}
             hasUpdate={visibleHasUpdate}

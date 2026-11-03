@@ -10,4 +10,5 @@ export type FavoriteItem = {
   progress?: number;
   search_title?: string;
   origin?: 'vod' | 'live';
+  myRating?: number;
 };

@@ -2,12 +2,18 @@ import { SearchResult } from '@/lib/types';
 
 export type SearchType = 'tv' | 'movie' | '';
 
-export const normalizeTitleForSourceMatch = (title: string): string => {
+// 作品身份：换源候选、搜索聚合与评价共用，改规则会让已存评价匹配不到
+export const normalizeWorkTitle = (title: string): string => {
   return title
     .normalize('NFKC')
     .toLowerCase()
     .replace(/[\s\u00A0\u3000]+/g, '')
     .replace(/[·•・.。:：,，!！?？'"`~～_\-—]/g, '');
+};
+
+export const normalizeWorkYear = (year: string | undefined): string => {
+  const trimmed = (year || '').trim();
+  return trimmed.toLowerCase() === 'unknown' ? '' : trimmed;
 };
 
 const isYearMatched = (resultYear: string, targetYear: string): boolean => {
@@ -50,13 +56,13 @@ export const filterSourcesForPlayback = (
     searchType: SearchType;
   },
 ): SearchResult[] => {
-  const normalizedTitle = normalizeTitleForSourceMatch(options.title);
+  const normalizedTitle = normalizeWorkTitle(options.title);
   if (!normalizedTitle) {
     return [];
   }
 
   return results.filter((result) => {
-    const normalizedResultTitle = normalizeTitleForSourceMatch(result.title);
+    const normalizedResultTitle = normalizeWorkTitle(result.title);
     const isTitleMatched =
       normalizedResultTitle.length > 0 &&
       normalizedResultTitle === normalizedTitle;
