@@ -6,6 +6,7 @@ import React, {
   useState,
 } from 'react';
 
+import { PLAYER_PANEL_INSET_CLASS } from '@/components/PlayerPanelTabBar';
 import { getVerticalScrollMaskStyle } from '@/lib/scroll-edge-fade';
 import { EpisodeGroup, SearchResult } from '@/lib/types';
 import { normalizeInlineText } from '@/lib/utils';
@@ -250,9 +251,11 @@ export const EpisodesTab: React.FC<EpisodesTabProps> = ({
       className='contents'
     >
       {(variantSources.length > 1 || showPagination) && (
-        <div className='flex min-w-0 flex-shrink-0 flex-col gap-2 px-5 pb-2 pt-2 sm:px-6'>
+        <div
+          className={`flex min-w-0 flex-shrink-0 flex-col gap-2 pb-1 pt-1 ${PLAYER_PANEL_INSET_CLASS}`}
+        >
           {variantSources.length > 1 && (
-            <div className='flex min-w-0 flex-wrap justify-center gap-2'>
+            <div className='flex min-w-0 flex-wrap gap-1.5'>
               {variantSources.map((variant, index) => {
                 const isActive =
                   variant.source === currentSource && variant.id === currentId;
@@ -277,13 +280,13 @@ export const EpisodesTab: React.FC<EpisodesTabProps> = ({
                         );
                       }
                     }}
-                    className={`inline-flex max-w-full items-center gap-2 rounded-lg px-3 py-2 text-xs font-medium transition-all duration-150
+                    className={`inline-flex h-8 max-w-full items-center gap-1.5 rounded-lg px-3 text-xs font-medium transition-colors
                       ${
                         loading
                           ? 'skeleton'
                           : isActive
-                            ? 'bg-brand-500 text-white shadow-sm shadow-brand-500/20'
-                            : 'bg-gray-100 text-gray-700 hover:bg-gray-200 dark:bg-white/[0.06] dark:text-gray-300 dark:hover:bg-white/[0.12]'
+                            ? 'bg-brand-500 text-white'
+                            : 'bg-gray-900/[0.04] text-gray-700 hover:bg-gray-900/[0.08] dark:bg-white/[0.05] dark:text-gray-300 dark:hover:bg-white/[0.1]'
                       }
                     `.trim()}
                     title={variantLabel}
@@ -295,15 +298,13 @@ export const EpisodesTab: React.FC<EpisodesTabProps> = ({
                     </span>
                     {episodeCount > 0 && (
                       <span
-                        className={`${loading ? 'invisible' : ''} rounded-full px-1.5 py-0.5 text-[10px]
-                          ${
-                            isActive
-                              ? 'bg-white/20 text-white'
-                              : 'bg-black/5 text-gray-500 dark:bg-white/10 dark:text-gray-400'
-                          }
-                        `.trim()}
+                        className={`${loading ? 'invisible' : ''} text-[11px] tabular-nums ${
+                          isActive
+                            ? 'text-white/70'
+                            : 'text-gray-400 dark:text-gray-500'
+                        }`}
                       >
-                        {episodeCount}集
+                        {episodeCount}
                       </span>
                     )}
                   </button>
@@ -319,7 +320,7 @@ export const EpisodesTab: React.FC<EpisodesTabProps> = ({
               onMouseEnter={() => setIsCategoryHovered(true)}
               onMouseLeave={() => setIsCategoryHovered(false)}
             >
-              <div className='flex w-max min-w-full justify-center gap-1'>
+              <div className='-ml-2.5 flex w-max min-w-full gap-1'>
                 {pages.map((page, idx) => {
                   const isActive = idx === currentPage;
                   return (
@@ -330,13 +331,13 @@ export const EpisodesTab: React.FC<EpisodesTabProps> = ({
                       }}
                       disabled={loading}
                       onClick={() => handleCategoryClick(idx)}
-                      className={`whitespace-nowrap rounded-md px-3 py-1.5 text-xs font-medium transition-all duration-150
+                      className={`h-7 whitespace-nowrap rounded-md px-2.5 text-xs font-medium tabular-nums transition-colors
                         ${
                           loading
                             ? 'skeleton'
                             : isActive
-                              ? 'bg-brand-500 text-white shadow-sm'
-                              : 'text-gray-600 hover:bg-gray-100 hover:text-gray-900 dark:text-gray-400 dark:hover:bg-white/10 dark:hover:text-gray-200'
+                              ? 'bg-gray-900/[0.06] text-gray-900 dark:bg-white/[0.08] dark:text-white'
+                              : 'text-gray-500 hover:text-gray-900 dark:text-gray-400 dark:hover:text-gray-200'
                         }
                       `.trim()}
                     >
@@ -354,7 +355,7 @@ export const EpisodesTab: React.FC<EpisodesTabProps> = ({
 
       <div
         ref={episodeContainerRef}
-        className='flex min-w-0 flex-1 flex-wrap content-start justify-center gap-2 overflow-y-auto overflow-x-hidden px-5 pb-5 pt-2 sm:px-6 sm:pb-6'
+        className={`grid min-h-0 min-w-0 flex-auto grid-cols-[repeat(auto-fill,minmax(2.75rem,1fr))] content-start gap-2 overflow-y-auto overflow-x-hidden pb-5 pt-1 ${PLAYER_PANEL_INSET_CLASS}`}
         onScroll={syncEpisodeFade}
         style={episodeContainerStyle}
       >
@@ -393,16 +394,18 @@ export const EpisodesTab: React.FC<EpisodesTabProps> = ({
               }}
               disabled={loading}
               onClick={() => onChange?.(episodeNumber - 1)}
-              style={{
-                width: `calc(${dynamicSpan} * 3rem + ${dynamicSpan - 1} * 0.5rem)`,
-              }}
-              className={`h-11 ${dynamicSpan > 1 ? 'px-2' : 'px-1'} flex shrink-0 items-center justify-center rounded-lg text-[13px] font-medium transition-all duration-150
+              style={
+                dynamicSpan > 1
+                  ? { gridColumn: `span ${dynamicSpan} / span ${dynamicSpan}` }
+                  : undefined
+              }
+              className={`h-10 min-w-0 ${dynamicSpan > 1 ? 'px-2' : 'px-1'} flex items-center justify-center rounded-lg text-[13px] font-medium tabular-nums transition-colors
                 ${
                   loading
                     ? 'skeleton'
                     : isActive
-                      ? 'bg-brand-500 text-white shadow-md shadow-brand-500/20'
-                      : 'bg-gray-100 text-gray-700 hover:scale-105 hover:bg-gray-200 dark:bg-white/[0.06] dark:text-gray-300 dark:hover:bg-white/[0.12]'
+                      ? 'bg-brand-500 text-white'
+                      : 'bg-gray-900/[0.04] text-gray-700 hover:bg-gray-900/[0.08] dark:bg-white/[0.05] dark:text-gray-300 dark:hover:bg-white/[0.1]'
                 }`.trim()}
               title={
                 rawTitle ||

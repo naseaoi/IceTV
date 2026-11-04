@@ -10,7 +10,7 @@ describe('EpisodesTab', () => {
     });
   });
 
-  it('keeps group counts and title-dependent widths identical while loading', () => {
+  it('keeps group counts and title-dependent column spans identical while loading', () => {
     const props = {
       totalEpisodes: 4,
       episodes_titles: ['简中01', '简中02', '特别篇漫长的剧集标题', '繁中02'],
@@ -25,11 +25,13 @@ describe('EpisodesTab', () => {
     const loadingButtons = Array.from(container.querySelectorAll('button'));
     expect(loadingButtons).toHaveLength(4);
     expect(loadingButtons.every((button) => button.disabled)).toBe(true);
-    const widths = loadingButtons.map((button) => button.style.width);
+    const widths = loadingButtons.map((button) => button.getAttribute('style'));
     rerender(<EpisodesTab {...props} />);
     const readyButtons = Array.from(container.querySelectorAll('button'));
     expect(readyButtons).toHaveLength(loadingButtons.length);
-    expect(readyButtons.map((button) => button.style.width)).toEqual(widths);
+    expect(readyButtons.map((button) => button.getAttribute('style'))).toEqual(
+      widths,
+    );
     expect(container.querySelector('[data-play-episodes-skeleton]')).toBeNull();
   });
 

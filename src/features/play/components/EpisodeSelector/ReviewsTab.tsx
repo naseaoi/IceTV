@@ -16,11 +16,14 @@ import React, { useEffect, useId, useRef, useState } from 'react';
 import { useAuthSession } from '@/components/AuthProvider';
 import ExpandableText from '@/components/ExpandableText';
 import ModalShell from '@/components/modals/ModalShell';
+import { PLAYER_PANEL_INSET_CLASS } from '@/components/PlayerPanelTabBar';
 import PublicReviewContent from '@/components/PublicReviewContent';
 import RatingStars from '@/components/RatingStars';
 import Spinner from '@/components/Spinner';
+import { OptionSwitchRow } from '@/features/play/components/EpisodeSelector/OptionSwitchRow';
 import { RatingInput } from '@/features/play/components/EpisodeSelector/RatingInput';
 import ReviewDistribution from '@/features/play/components/EpisodeSelector/ReviewDistribution';
+import { SectionTitle } from '@/features/play/components/EpisodeSelector/SectionTitle';
 import type { VideoReviewsState } from '@/features/play/hooks/useVideoReviews';
 import { formatRating } from '@/lib/rating';
 import { formatRelativeTime } from '@/lib/relative-time';
@@ -45,71 +48,10 @@ interface ReviewDraft {
 }
 
 const surfaceClass =
-  'rounded-2xl bg-white ring-1 ring-gray-200/80 dark:bg-white/[0.03] dark:ring-white/10';
+  'rounded-xl bg-white ring-1 ring-gray-200/80 dark:bg-white/[0.03] dark:ring-white/10';
 
 const iconButtonClass =
   'inline-flex h-8 items-center justify-center gap-1 rounded-lg px-2 text-xs font-medium text-gray-500 transition-colors hover:bg-gray-100 hover:text-gray-800 disabled:cursor-not-allowed disabled:opacity-50 dark:text-gray-400 dark:hover:bg-white/10 dark:hover:text-gray-100';
-
-function SectionHeader({
-  title,
-  count,
-  children,
-}: {
-  title: string;
-  count?: number;
-  children?: React.ReactNode;
-}) {
-  return (
-    <div className='flex min-h-8 items-center gap-2'>
-      <h4 className='text-[13px] font-semibold text-gray-900 dark:text-gray-100'>
-        {title}
-      </h4>
-      {count !== undefined && count > 0 && (
-        <span className='text-xs tabular-nums text-gray-400 dark:text-gray-500'>
-          {count}
-        </span>
-      )}
-      {children && (
-        <div className='ml-auto flex items-center gap-1'>{children}</div>
-      )}
-    </div>
-  );
-}
-
-function OptionSwitchRow({
-  label,
-  checked,
-  onChange,
-}: {
-  label: string;
-  checked: boolean;
-  onChange: (next: boolean) => void;
-}) {
-  return (
-    <button
-      type='button'
-      role='switch'
-      aria-checked={checked}
-      aria-label={label}
-      className='flex w-full items-center justify-between gap-3 rounded-lg px-3 py-2.5 text-left text-[13px] text-gray-700 transition-colors hover:bg-gray-100 dark:text-gray-200 dark:hover:bg-white/[0.06]'
-      onClick={() => onChange(!checked)}
-    >
-      {label}
-      <span
-        aria-hidden='true'
-        className={`relative h-5 w-9 shrink-0 rounded-full transition-colors ${
-          checked ? 'bg-brand-500' : 'bg-gray-300 dark:bg-gray-600'
-        }`}
-      >
-        <span
-          className={`absolute left-0.5 top-0.5 h-4 w-4 rounded-full bg-white shadow-sm transition-transform ${
-            checked ? 'translate-x-4' : ''
-          }`}
-        />
-      </span>
-    </button>
-  );
-}
 
 // 可见性与剧透收在同一入口，触发器直接显示当前状态
 function ReviewOptionsMenu({
@@ -260,13 +202,11 @@ function isSubmitShortcut(event: React.KeyboardEvent): boolean {
 
 function ReviewEditor({
   initial,
-  favorited,
   workTitle,
   onCancel,
   onSubmit,
 }: {
   initial: VideoReview | null;
-  favorited: boolean;
   workTitle: string;
   onCancel?: () => void;
   onSubmit: (draft: ReviewDraft) => Promise<void>;
@@ -311,15 +251,9 @@ function ReviewEditor({
     void submit();
   };
 
-  const hint = error || (!favorited && !initial ? '保存后将同时加入收藏' : '');
-  const hintNode = hint ? (
-    <p
-      role={error ? 'alert' : undefined}
-      className={`text-[11px] ${
-        error ? 'text-red-500' : 'text-gray-400 dark:text-gray-500'
-      }`}
-    >
-      {hint}
+  const hintNode = error ? (
+    <p role='alert' className='text-[11px] text-red-500'>
+      {error}
     </p>
   ) : null;
 
@@ -632,41 +566,33 @@ export const ReviewsTab: React.FC<ReviewsTabProps> = ({
   const average = summary?.average ?? null;
 
   return (
-    <div className='min-w-0 flex-1 space-y-5 overflow-y-auto overflow-x-hidden p-4 sm:p-5'>
-      <section
-        aria-label='评分概览'
-        className='flex items-center gap-4 border-b border-gray-100 pb-5 dark:border-white/[0.06]'
-      >
-        {summaryLoading && !summary ? (
+    <div
+      className={`min-w-0 flex-1 space-y-6 overflow-y-auto overflow-x-hidden pb-5 pt-4 ${PLAYER_PANEL_INSET_CLASS}`}
+    >
+      {summaryLoading && !summary ? (
+        <div className='flex justify-center py-4'>
           <Spinner className='h-5 w-5 text-gray-400' />
-        ) : (
-          <>
-            <span
-              className={`text-[2.5rem] font-semibold tabular-nums leading-none tracking-tight ${
-                average !== null
-                  ? 'text-gray-900 dark:text-gray-50'
-                  : 'text-gray-300 dark:text-gray-600'
-              }`}
-            >
-              {average !== null ? formatRating(average) : '—'}
-            </span>
-            <div className='space-y-1'>
-              <RatingStars value={average} size='md' decorative />
-              <p className='text-xs text-gray-500 dark:text-gray-400'>
-                {summaryError
-                  ? '评分加载失败'
-                  : average !== null
-                    ? `${summary?.count ?? 0} 人公开评分`
-                    : '暂无公开评分'}
+        </div>
+      ) : (
+        summary &&
+        average !== null && (
+          <section aria-label='评分概览' className='flex items-end gap-5'>
+            <div className='shrink-0 space-y-1.5'>
+              <span className='block text-[2.25rem] font-semibold tabular-nums leading-none tracking-tight text-gray-900 dark:text-gray-50'>
+                {formatRating(average)}
+              </span>
+              <RatingStars value={average} size='sm' decorative />
+              <p className='text-[11px] text-gray-500 dark:text-gray-400'>
+                {summary.count} 人公开评分
               </p>
             </div>
-          </>
-        )}
-      </section>
-      {summary && <ReviewDistribution distribution={summary.distribution} />}
+            <ReviewDistribution distribution={summary.distribution} />
+          </section>
+        )
+      )}
 
       <section className='space-y-2'>
-        <SectionHeader title='我的评价' />
+        <SectionTitle label='我的评价' />
         {myReviewLoading && !myReview ? (
           <div className='flex justify-center py-6'>
             <Spinner className='h-5 w-5 text-gray-400' />
@@ -675,7 +601,6 @@ export const ReviewsTab: React.FC<ReviewsTabProps> = ({
           <ReviewEditor
             key={myReview?.updated_at ?? 'new'}
             initial={myReview}
-            favorited={favorited}
             workTitle={workTitle}
             onCancel={myReview ? () => setEditing(false) : undefined}
             onSubmit={handleSubmit}
@@ -692,8 +617,8 @@ export const ReviewsTab: React.FC<ReviewsTabProps> = ({
       </section>
 
       <section className='space-y-2'>
-        <SectionHeader
-          title='大家的评价'
+        <SectionTitle
+          label='大家的评价'
           count={summary?.reviewCount ?? summary?.reviews.length}
         >
           {summaryError && (
@@ -706,7 +631,7 @@ export const ReviewsTab: React.FC<ReviewsTabProps> = ({
               重试
             </button>
           )}
-        </SectionHeader>
+        </SectionTitle>
         {summary && summary.reviews.length > 0 ? (
           <ul className='divide-y divide-gray-100 dark:divide-white/[0.06]'>
             {summary.reviews.map((review) => (
@@ -724,7 +649,7 @@ export const ReviewsTab: React.FC<ReviewsTabProps> = ({
         ) : (
           !summaryLoading &&
           !summaryError && (
-            <p className='py-3 text-center text-xs text-gray-400 dark:text-gray-500'>
+            <p className='py-1 text-[13px] text-gray-500 dark:text-gray-400'>
               还没有公开评价，来写第一条吧
             </p>
           )

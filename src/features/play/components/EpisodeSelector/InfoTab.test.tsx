@@ -18,7 +18,6 @@ describe('InfoTab', () => {
     render(
       <InfoTab
         videoTitle='测试影片'
-        totalEpisodes={12}
         detail={null}
         videoYear='2026'
         favorited={false}
@@ -31,11 +30,37 @@ describe('InfoTab', () => {
     expect(screen.getByTestId('detail-cover')).toBeInTheDocument();
   });
 
+  it('头部按站内、豆瓣、暂无的顺序展示评分', () => {
+    const props = {
+      videoTitle: '测试影片',
+      detail: null,
+      videoYear: '2026',
+      favorited: false,
+      onToggleFavorite: jest.fn(),
+      videoCover: '/poster.webp',
+      videoDoubanId: 0,
+    };
+    const { rerender } = render(
+      <InfoTab {...props} rating={{ kind: 'site', average: 8.6, count: 12 }} />,
+    );
+    expect(screen.getByText('8.6')).toBeInTheDocument();
+    expect(screen.getByText('12 人评分')).toBeInTheDocument();
+
+    rerender(<InfoTab {...props} rating={{ kind: 'douban', average: 9.4 }} />);
+    expect(screen.getByText('9.4')).toBeInTheDocument();
+    expect(screen.getByText('豆瓣评分')).toBeInTheDocument();
+
+    rerender(<InfoTab {...props} rating={{ kind: 'none' }} />);
+    expect(screen.getByText('暂无评分')).toBeInTheDocument();
+
+    rerender(<InfoTab {...props} rating={null} />);
+    expect(screen.queryByText('暂无评分')).not.toBeInTheDocument();
+  });
+
   it('移动端详情滚动时更新上下柔和边缘', async () => {
     const { container } = render(
       <InfoTab
         videoTitle='测试影片'
-        totalEpisodes={12}
         detail={{ desc: '测试简介' } as never}
         videoYear='2026'
         favorited={false}
@@ -78,7 +103,6 @@ describe('InfoTab', () => {
     const { container } = render(
       <InfoTab
         videoTitle='测试影片'
-        totalEpisodes={12}
         detail={{ desc: '测试简介' } as never}
         videoYear='2026'
         favorited={false}

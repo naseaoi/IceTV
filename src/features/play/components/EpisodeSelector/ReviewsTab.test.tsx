@@ -65,7 +65,7 @@ describe('ReviewsTab', () => {
 
     const saveButton = screen.getByRole('button', { name: '保存' });
     expect(saveButton).toBeDisabled();
-    expect(screen.getByText('保存后将同时加入收藏')).toBeInTheDocument();
+    expect(screen.queryByText('保存后将同时加入收藏')).not.toBeInTheDocument();
 
     fireEvent.keyDown(screen.getByRole('slider', { name: '评分' }), {
       key: 'End',

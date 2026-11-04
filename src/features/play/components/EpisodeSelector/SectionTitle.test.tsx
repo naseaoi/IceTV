@@ -3,17 +3,25 @@ import { render, screen } from '@testing-library/react';
 import { SectionTitle } from '@/features/play/components/EpisodeSelector/SectionTitle';
 
 describe('SectionTitle', () => {
-  it('renders a plain muted heading without decorative children', () => {
-    render(<SectionTitle label='选集' />);
-    const heading = screen.getByRole('heading', { name: '选集', level: 4 });
-    expect(heading).toHaveClass('min-h-7', 'items-center', 'font-medium');
-    expect(heading.firstElementChild).toBeNull();
+  it('renders the heading at the requested level', () => {
+    render(<SectionTitle as='h3' label='我的评价' />);
+    expect(
+      screen.getByRole('heading', { name: '我的评价', level: 3 }),
+    ).toBeInTheDocument();
   });
 
-  it('supports the same styling for top-level panel sections', () => {
-    render(<SectionTitle as='h3' label='源站列表' />);
-    expect(
-      screen.getByRole('heading', { name: '源站列表', level: 3 }),
-    ).toHaveClass('min-h-7', 'font-medium');
+  it('shows a positive count and trailing actions', () => {
+    render(
+      <SectionTitle label='大家的评价' count={3}>
+        <button type='button'>刷新</button>
+      </SectionTitle>,
+    );
+    expect(screen.getByText('3')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '刷新' })).toBeInTheDocument();
+  });
+
+  it('hides a zero count', () => {
+    const { container } = render(<SectionTitle label='选集' count={0} />);
+    expect(container).toHaveTextContent(/^选集$/);
   });
 });

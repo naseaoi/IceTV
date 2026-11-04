@@ -90,27 +90,6 @@ export function RatingInput({ value, onChange, disabled }: RatingInputProps) {
 
   return (
     <div className='flex items-center gap-3'>
-      <label className='group relative flex h-12 w-[4.5rem] shrink-0 items-baseline justify-center rounded-xl bg-amber-500/10 px-2 pt-2.5 ring-1 ring-inset ring-amber-500/25 transition focus-within:ring-2 focus-within:ring-amber-500/60'>
-        <span className='sr-only'>分数（1.0–10.0）</span>
-        <input
-          type='text'
-          inputMode='decimal'
-          value={text}
-          disabled={disabled}
-          placeholder='—'
-          maxLength={4}
-          className='w-full border-0 bg-transparent p-0 text-center text-2xl font-semibold tabular-nums leading-none text-amber-600 outline-none placeholder:text-amber-600/40 focus:ring-0 disabled:opacity-60 dark:text-amber-400 dark:placeholder:text-amber-400/40'
-          onChange={(event) => setText(event.target.value)}
-          onBlur={commitText}
-          onKeyDown={(event) => {
-            if (event.key === 'Enter') {
-              event.preventDefault();
-              commitText();
-            }
-          }}
-        />
-      </label>
-
       <div
         role='slider'
         tabIndex={disabled ? -1 : 0}
@@ -151,6 +130,26 @@ export function RatingInput({ value, onChange, disabled }: RatingInputProps) {
       >
         <RatingStars value={shown} size='lg' decorative />
       </div>
+      <label className='flex h-9 w-14 shrink-0 items-center rounded-lg bg-gray-900/[0.04] px-1.5 transition focus-within:ring-2 focus-within:ring-amber-500/50 dark:bg-white/[0.06]'>
+        <span className='sr-only'>分数（1.0–10.0）</span>
+        <input
+          type='text'
+          inputMode='decimal'
+          value={text}
+          disabled={disabled}
+          placeholder='—'
+          maxLength={4}
+          className='w-full border-0 bg-transparent p-0 text-center text-lg font-semibold tabular-nums leading-none text-amber-600 outline-none placeholder:text-gray-300 focus:ring-0 disabled:opacity-60 dark:text-amber-400 dark:placeholder:text-gray-600'
+          onChange={(event) => setText(event.target.value)}
+          onBlur={commitText}
+          onKeyDown={(event) => {
+            if (event.key === 'Enter') {
+              event.preventDefault();
+              commitText();
+            }
+          }}
+        />
+      </label>
     </div>
   );
 }

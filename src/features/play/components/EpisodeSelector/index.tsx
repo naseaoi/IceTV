@@ -10,16 +10,28 @@ import React, { lazy, Suspense, useCallback, useMemo, useState } from 'react';
 
 import MobileSheet from '@/components/mobile/MobileSheet';
 import {
+  PLAYER_PANEL_INSET_CLASS,
   PLAYER_PANEL_SURFACE_CLASS,
   PlayerPanelContent,
 } from '@/components/PlayerPanelTabBar';
 import { useRuntimeConfig } from '@/components/RuntimeConfigProvider';
+import SkeletonText from '@/components/SkeletonText';
 import { EpisodesTab } from '@/features/play/components/EpisodeSelector/EpisodesTab';
+import type { InfoRating } from '@/features/play/components/EpisodeSelector/InfoTab';
+import {
+  DESKTOP_MAIN_GRID_CLASS,
+  INFO_COVER_CLASS,
+  INFO_RATING_LINE_CLASS,
+} from '@/features/play/components/EpisodeSelector/layout';
 import { SectionTitle } from '@/features/play/components/EpisodeSelector/SectionTitle';
 import { TabBar } from '@/features/play/components/EpisodeSelector/TabBar';
+import { useDoubanRating } from '@/features/play/hooks/useDoubanRating';
 import { useVideoReviews } from '@/features/play/hooks/useVideoReviews';
 import type { DanmakuReloadHandler } from '@/features/play/lib/danmaku/types';
-import { getSourceBundle } from '@/lib/source-bundle';
+import {
+  collapseSourcesForDisplay,
+  getSourceBundle,
+} from '@/lib/source-bundle';
 import { normalizeWorkTitle } from '@/lib/source-match';
 import { SearchResult } from '@/lib/types';
 
@@ -48,42 +60,67 @@ function InfoTabLoading({
 }: {
   scrollMode?: 'panel' | 'desc';
 }) {
+  const desc = scrollMode === 'desc';
+  const header = (
+    <div
+      className={`flex flex-shrink-0 gap-4 ${
+        desc ? `${PLAYER_PANEL_INSET_CLASS} pb-3 pt-5` : ''
+      }`.trim()}
+    >
+      <div
+        className={`skeleton flex-shrink-0 self-start rounded-lg ${INFO_COVER_CLASS}`}
+      />
+      <div className='flex min-w-0 flex-1 flex-col justify-between gap-2'>
+        <div className='space-y-1.5'>
+          <SkeletonText
+            className='text-lg leading-snug'
+            barClassName='h-4 w-2/3 rounded-md'
+          />
+          <SkeletonText
+            className='text-[13px]'
+            barClassName='h-3 w-1/3 rounded'
+          />
+          <div className='skeleton h-5 w-1/2 rounded' />
+          <div className={INFO_RATING_LINE_CLASS}>
+            <div className='skeleton h-3.5 w-24 rounded' />
+          </div>
+        </div>
+        <div className='skeleton h-7 w-16 rounded-full' />
+      </div>
+    </div>
+  );
+  const lines = (
+    <div
+      className={`flex min-h-0 flex-col overflow-hidden ${
+        desc ? `${PLAYER_PANEL_INSET_CLASS} pb-4` : ''
+      }`.trim()}
+    >
+      {infoSkeletonLineWidths.map((widthClass, index) => (
+        <SkeletonText
+          key={index}
+          className='shrink-0 text-[13px] leading-[1.8]'
+          barClassName={`h-3.5 rounded ${widthClass}`}
+        />
+      ))}
+    </div>
+  );
+
+  if (desc) {
+    return (
+      <div data-play-detail-skeleton className='contents'>
+        {header}
+        {lines}
+      </div>
+    );
+  }
+
   return (
     <div
       data-play-detail-skeleton
-      className={
-        scrollMode === 'desc'
-          ? 'flex min-h-0 min-w-0 flex-col gap-2 overflow-hidden px-5 pb-1 pt-4 sm:px-6 sm:pb-1 sm:pt-5'
-          : 'flex min-h-0 min-w-0 flex-1 flex-col gap-3 overflow-hidden p-5 sm:p-6'
-      }
+      className={`flex min-h-0 min-w-0 flex-1 flex-col gap-4 overflow-hidden py-5 ${PLAYER_PANEL_INSET_CLASS}`}
     >
-      <div className='flex flex-shrink-0 gap-4 sm:gap-5'>
-        <div className='skeleton aspect-[2/3] w-24 flex-shrink-0 self-start rounded-xl sm:w-28 xl:w-32' />
-        <div className='flex min-w-0 flex-1 flex-col justify-end gap-2.5 pb-0.5'>
-          <div className='flex h-[22px] items-center'>
-            <div className='skeleton h-4 w-2/3 rounded-md' />
-          </div>
-          <div className='flex h-4 items-center'>
-            <div className='skeleton h-3 w-12 rounded-md' />
-          </div>
-          <div className='flex h-4 items-center'>
-            <div className='skeleton h-3 w-20 rounded-md' />
-          </div>
-          <div className='skeleton h-7 w-20 rounded-full' />
-        </div>
-      </div>
-      <div className='flex min-h-0 flex-1 flex-col overflow-hidden pt-1'>
-        <div className='flex min-h-0 flex-1 flex-col overflow-hidden'>
-          {infoSkeletonLineWidths.map((widthClass, index) => (
-            <div
-              key={index}
-              className='flex h-[1.8em] shrink-0 items-center text-[13px]'
-            >
-              <div className={`skeleton h-3.5 rounded ${widthClass}`} />
-            </div>
-          ))}
-        </div>
-      </div>
+      {header}
+      {lines}
     </div>
   );
 }
@@ -255,7 +292,8 @@ const EpisodeSelector: React.FC<EpisodeSelectorProps> = ({
     videoTitle,
   ]);
 
-  const hasEpisodesTab = totalEpisodes > 0 || variantSources.length > 1;
+  // 单集且无其他版本时只有一个「正片」按钮，不提供选择意义
+  const hasEpisodesTab = totalEpisodes > 1 || variantSources.length > 1;
   const showDesktopEpisodes = detailLoading || hasEpisodesTab;
 
   const [mobileSheet, setMobileSheet] = useState<MobileSheetKey | null>(null);
@@ -269,8 +307,27 @@ const EpisodeSelector: React.FC<EpisodeSelectorProps> = ({
     doubanId: resolvedDoubanId,
     sourceKey:
       currentSource && currentId ? `${currentSource}+${currentId}` : '',
-    summaryEnabled: desktopTab === 'reviews' || mobileSheet === 'reviews',
+    // 详情头部展示站内评分，移动端详情常驻，桌面默认停在详情
+    summaryEnabled: true,
   });
+
+  const siteSummary = reviews.summary;
+  const siteAverage =
+    siteSummary && siteSummary.count > 0 ? siteSummary.average : null;
+  // 站内无人评分或汇总失败时以豆瓣评分兜底
+  const needsDoubanRating =
+    siteAverage === null && (!!siteSummary || reviews.summaryError);
+  const doubanRating = useDoubanRating(
+    needsDoubanRating ? resolvedDoubanId : 0,
+  );
+  const infoRating: InfoRating | null =
+    siteSummary && siteAverage !== null
+      ? { kind: 'site', average: siteAverage, count: siteSummary.count }
+      : !needsDoubanRating || doubanRating === undefined
+        ? null
+        : doubanRating !== null
+          ? { kind: 'douban', average: doubanRating }
+          : { kind: 'none' };
 
   const openDesktopReviewEditor = useCallback(() => {
     setDesktopTab('reviews');
@@ -297,9 +354,18 @@ const EpisodeSelector: React.FC<EpisodeSelectorProps> = ({
     return Array.from({ length: end - start + 1 }, (_, i) => start + i);
   }, [totalEpisodes, value]);
 
-  const desktopTabs: { key: DesktopTabKey; label: string }[] = [
+  const sourceCount = useMemo(
+    () =>
+      sourceSearchLoading
+        ? 0
+        : collapseSourcesForDisplay(availableSources, currentSource, currentId)
+            .length,
+    [availableSources, currentId, currentSource, sourceSearchLoading],
+  );
+
+  const desktopTabs: { key: DesktopTabKey; label: string; count?: number }[] = [
     { key: 'main', label: '详情' },
-    { key: 'sources', label: '换源' },
+    { key: 'sources', label: '换源', count: sourceCount },
     ...(danmakuEnabled ? [{ key: 'danmaku', label: '弹幕' } as const] : []),
     { key: 'reviews', label: '评价' },
   ];
@@ -337,7 +403,6 @@ const EpisodeSelector: React.FC<EpisodeSelectorProps> = ({
       <Suspense fallback={<InfoTabLoading scrollMode={scrollMode} />}>
         <InfoTab
           videoTitle={videoTitle || ''}
-          totalEpisodes={totalEpisodes}
           detail={detail}
           videoYear={videoYear}
           favorited={favorited}
@@ -347,6 +412,7 @@ const EpisodeSelector: React.FC<EpisodeSelectorProps> = ({
           scrollMode={scrollMode}
           myReview={reviews.myReview}
           onOpenReview={onOpenReview}
+          rating={infoRating}
         />
       </Suspense>
     );
@@ -553,32 +619,34 @@ const EpisodeSelector: React.FC<EpisodeSelectorProps> = ({
         <PlayerPanelContent>
           {desktopTab === 'main' &&
             (showDesktopEpisodes ? (
-              <div className='grid min-h-0 min-w-0 flex-1 grid-rows-2 gap-0 overflow-hidden'>
-                <div className='flex min-h-0 min-w-0 flex-col overflow-hidden'>
-                  {renderInfoTab('desc', openDesktopReviewEditor)}
-                </div>
-                <div className='flex min-h-0 min-w-0 flex-col overflow-hidden'>
-                  <div className='flex-shrink-0 px-5 pt-0 sm:px-6'>
-                    <SectionTitle label='选集' />
+              <div className={DESKTOP_MAIN_GRID_CLASS}>
+                {renderInfoTab('desc', openDesktopReviewEditor)}
+                <section
+                  aria-label='选集'
+                  className='flex min-h-0 min-w-0 flex-col overflow-hidden border-t border-gray-100 pt-3 dark:border-white/[0.06]'
+                >
+                  <div className={`flex-shrink-0 ${PLAYER_PANEL_INSET_CLASS}`}>
+                    <SectionTitle
+                      label='选集'
+                      count={totalEpisodes > 1 ? totalEpisodes : undefined}
+                    />
                   </div>
-                  <div className='flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden'>
-                    {detailLoading ? (
-                      <EpisodesTab
-                        loading
-                        totalEpisodes={totalEpisodes || 24}
-                        episodes_titles={episodes_titles}
-                        episodesPerPage={episodesPerPage}
-                        value={value}
-                        episodeGroups={detail?.episode_groups}
-                        variantSources={variantSources}
-                        currentSource={currentSource}
-                        currentId={currentId}
-                      />
-                    ) : (
-                      renderEpisodesTab()
-                    )}
-                  </div>
-                </div>
+                  {detailLoading ? (
+                    <EpisodesTab
+                      loading
+                      totalEpisodes={totalEpisodes || 24}
+                      episodes_titles={episodes_titles}
+                      episodesPerPage={episodesPerPage}
+                      value={value}
+                      episodeGroups={detail?.episode_groups}
+                      variantSources={variantSources}
+                      currentSource={currentSource}
+                      currentId={currentId}
+                    />
+                  ) : (
+                    renderEpisodesTab()
+                  )}
+                </section>
               </div>
             ) : (
               renderInfoTab('panel', openDesktopReviewEditor)

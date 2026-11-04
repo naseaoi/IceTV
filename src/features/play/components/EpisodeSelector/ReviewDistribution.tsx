@@ -15,10 +15,7 @@ export default function ReviewDistribution({
   );
   const max = Math.max(1, ...counts);
   return (
-    <section aria-label='评分分布'>
-      <h4 className='mb-2 text-xs text-gray-500 dark:text-gray-400'>
-        评分分布
-      </h4>
+    <section aria-label='评分分布' className='min-w-0 flex-1'>
       <ul className='flex items-end gap-1'>
         {counts.map((count, index) => (
           <li
@@ -31,7 +28,7 @@ export default function ReviewDistribution({
             </span>
             <span
               aria-hidden='true'
-              className='flex h-10 w-full items-end overflow-hidden rounded-sm bg-gray-100 dark:bg-white/5'
+              className='flex h-14 w-full items-end overflow-hidden rounded-sm bg-gray-900/[0.04] dark:bg-white/[0.04]'
             >
               <span
                 style={{ height: `${(count / max) * 100}%` }}

@@ -36,9 +36,9 @@ describe('DanmakuTab reload controls', () => {
     render(<DanmakuTab {...props} onReload={onReload} />);
     const button = screen.getByRole('button', { name: '重载弹幕' });
     for (const name of ['弹幕偏移', '弹幕选集']) {
-      expect(screen.getByRole('heading', { name, level: 3 })).toHaveClass(
-        'min-h-7',
-      );
+      expect(
+        screen.getByRole('heading', { name, level: 3 }),
+      ).toBeInTheDocument();
     }
     expect(button).toHaveClass('h-7', 'text-xs', 'bg-transparent');
     fireEvent.click(button);

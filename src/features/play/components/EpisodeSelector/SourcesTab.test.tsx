@@ -162,8 +162,8 @@ describe('SourcesTab probe status', () => {
     );
     const detectButton = screen.getByRole('button', { name: '检测全部' });
     expect(
-      screen.getByRole('heading', { name: '源站列表', level: 3 }),
-    ).toHaveClass('min-h-7');
+      screen.queryByRole('heading', { name: '源站列表' }),
+    ).not.toBeInTheDocument();
     const searchButton = screen.getByRole('button', { name: '搜索更多源站' });
     expect(detectButton.className).toBe(searchButton.className);
     expect(detectButton).toHaveClass('h-7', 'text-xs', 'bg-transparent');
@@ -171,7 +171,7 @@ describe('SourcesTab probe status', () => {
     expect(detectButton).toBeDisabled();
     expect(detectButton).toHaveAttribute('aria-busy', 'true');
     expect(detectButton.querySelector('span')).toHaveClass('opacity-0');
-    expect(detectButton.querySelector('svg')).toHaveClass('ice-spinner');
+    expect(detectButton.querySelector('svg.ice-spinner')).not.toBeNull();
     expect(screen.getByRole('button', { name: '检测全部' })).toBe(detectButton);
     fireEvent.click(detectButton);
     expect(mockGetOrProbe).toHaveBeenCalledTimes(1);
@@ -198,7 +198,7 @@ describe('SourcesTab probe status', () => {
       'text-red-600',
       'dark:text-red-400',
     );
-    expect(screen.getByTitle('分辨率')).toHaveTextContent('未知');
+    expect(screen.queryByTitle('分辨率')).not.toBeInTheDocument();
     expect(screen.queryByText('0.00s')).not.toBeInTheDocument();
     fireEvent.click(screen.getByText('重试'));
     expect(mockGetOrProbe).toHaveBeenCalledWith(
@@ -296,11 +296,11 @@ describe('SourcesTab probe status', () => {
 
     expect(screen.queryByText('检测失败')).not.toBeInTheDocument();
     expect(screen.queryByText('重试')).not.toBeInTheDocument();
-    expect(screen.getByTitle('分辨率')).toHaveTextContent('未知');
+    expect(screen.queryByTitle('分辨率')).not.toBeInTheDocument();
   });
 
   it.each(['未知', '', '  ', '错误', 'MP4'])(
-    '检测结果 %s 没有分辨率时显示未知，保留速度和耗时',
+    '检测结果 %s 没有分辨率时隐藏分辨率，保留速度和耗时',
     (quality) => {
       mockProbeSnapshot.set(
         'source-a-1',
@@ -318,11 +318,7 @@ describe('SourcesTab probe status', () => {
         />,
       );
 
-      expect(screen.getByTitle('分辨率')).toHaveTextContent('未知');
-      expect(screen.getByTitle('分辨率')).toHaveClass(
-        'text-gray-500',
-        'dark:text-gray-400',
-      );
+      expect(screen.queryByTitle('分辨率')).not.toBeInTheDocument();
       expect(screen.getByText('1 MB/s')).toBeInTheDocument();
       expect(screen.getByText('1.42s')).toBeInTheDocument();
       expect(screen.queryByText('检测失败')).not.toBeInTheDocument();
@@ -351,10 +347,6 @@ describe('SourcesTab probe status', () => {
     );
 
     expect(screen.getByTitle('分辨率')).toHaveTextContent('1080p');
-    expect(screen.getByTitle('分辨率')).toHaveClass(
-      'text-brand-600',
-      'dark:text-brand-400',
-    );
     expect(screen.getByText(expected)).toBeInTheDocument();
     expect(screen.queryByText(`${pingTime}ms`)).not.toBeInTheDocument();
     expect(mockProbeSnapshot.get('source-a-1')?.info.pingTime).toBe(pingTime);
@@ -376,7 +368,7 @@ describe('SourcesTab probe status', () => {
       />,
     );
 
-    expect(screen.getByTitle('分辨率')).toHaveTextContent('未知');
+    expect(screen.queryByTitle('分辨率')).not.toBeInTheDocument();
     expect(screen.getByText('检测中')).toBeInTheDocument();
     expect(screen.queryByText('0.00s')).not.toBeInTheDocument();
   });

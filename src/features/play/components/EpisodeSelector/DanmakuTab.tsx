@@ -2,7 +2,9 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 
+import { PLAYER_PANEL_INSET_CLASS } from '@/components/PlayerPanelTabBar';
 import { DanmakuEpisodePicker } from '@/features/play/components/EpisodeSelector/DanmakuEpisodePicker';
+import { OptionSwitchRow } from '@/features/play/components/EpisodeSelector/OptionSwitchRow';
 import { PanelActionButton } from '@/features/play/components/EpisodeSelector/PanelActionButton';
 import { SectionTitle } from '@/features/play/components/EpisodeSelector/SectionTitle';
 import { getDanmakuReloadFeedback } from '@/features/play/lib/danmaku/reload-feedback';
@@ -28,12 +30,11 @@ interface DanmakuTabProps {
 }
 
 function formatOffset(offset: number): string {
-  if (offset === 0) return '未偏移';
-  return offset > 0 ? `延后 ${offset} 秒` : `提前 ${-offset} 秒`;
+  return offset > 0 ? `+${offset}s` : `${offset}s`;
 }
 
-const actionButtonClass =
-  'rounded-lg border border-gray-200 bg-white px-4 py-2 text-sm font-medium text-gray-700 transition-colors hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-200 dark:hover:bg-gray-700';
+const segmentButtonClass =
+  'flex-1 rounded-md py-1.5 text-xs font-medium text-gray-600 transition-colors hover:bg-white hover:text-gray-900 hover:shadow-sm disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-transparent disabled:hover:shadow-none dark:text-gray-300 dark:hover:bg-white/[0.08] dark:hover:text-white';
 
 export const DanmakuTab: React.FC<DanmakuTabProps> = ({
   source,
@@ -114,72 +115,58 @@ export const DanmakuTab: React.FC<DanmakuTabProps> = ({
   }
 
   return (
-    <div className='flex min-h-0 flex-1 flex-col gap-4 overflow-hidden px-5 py-4 sm:px-6'>
-      <div className='flex flex-shrink-0 flex-col gap-2'>
-        <div className='flex items-center justify-between'>
-          <SectionTitle as='h3' label='弹幕偏移' />
-          <span className='text-xs text-gray-500 dark:text-gray-400'>
-            {formatOffset(offset)}
-          </span>
-        </div>
-        <div className='flex gap-2'>
+    <div
+      className={`flex min-h-0 flex-1 flex-col gap-5 overflow-hidden pb-4 pt-3 ${PLAYER_PANEL_INSET_CLASS}`}
+    >
+      <section className='flex flex-shrink-0 flex-col gap-2'>
+        <SectionTitle as='h3' label='弹幕偏移'>
+          <PanelActionButton
+            disabled={offset === 0}
+            onClick={() => applyOffset(0)}
+          >
+            重置
+          </PanelActionButton>
+        </SectionTitle>
+        <div className='flex items-center gap-0.5 rounded-lg bg-gray-900/[0.04] p-0.5 dark:bg-white/[0.05]'>
           <button
             type='button'
-            className={`flex-1 ${actionButtonClass}`}
+            className={segmentButtonClass}
             disabled={offset - OFFSET_STEP_SECONDS < DANMAKU_OFFSET_RANGE.min}
             onClick={() => applyOffset(offset - OFFSET_STEP_SECONDS)}
           >
             提前 1 秒
           </button>
+          <span
+            aria-live='polite'
+            className={`w-14 shrink-0 text-center text-xs font-semibold tabular-nums ${
+              offset === 0
+                ? 'text-gray-400 dark:text-gray-500'
+                : 'text-gray-900 dark:text-white'
+            }`}
+          >
+            {formatOffset(offset)}
+          </span>
           <button
             type='button'
-            className={`flex-1 ${actionButtonClass}`}
+            className={segmentButtonClass}
             disabled={offset + OFFSET_STEP_SECONDS > DANMAKU_OFFSET_RANGE.max}
             onClick={() => applyOffset(offset + OFFSET_STEP_SECONDS)}
           >
             延后 1 秒
           </button>
-          <button
-            type='button'
-            className={actionButtonClass}
-            disabled={offset === 0}
-            onClick={() => applyOffset(0)}
-          >
-            重置
-          </button>
         </div>
-      </div>
+      </section>
 
-      <div className='flex flex-shrink-0 items-center justify-between gap-3 rounded-lg border border-gray-200 bg-gray-50/60 px-4 py-2.5 dark:border-gray-700 dark:bg-gray-800/50'>
-        <div className='min-w-0'>
-          <div className='text-sm font-medium text-gray-900 dark:text-gray-100'>
-            弹幕热力图
-          </div>
-          <div className='mt-0.5 text-xs text-gray-500 dark:text-gray-400'>
-            进度条上方的弹幕密度曲线
-          </div>
-        </div>
-        <button
-          type='button'
-          role='switch'
-          aria-checked={heatmapEnabled}
-          aria-label='弹幕热力图'
-          onClick={toggleHeatmap}
-          className={`relative h-6 w-11 flex-shrink-0 rounded-full transition-colors ${
-            heatmapEnabled ? 'bg-brand-600' : 'bg-gray-300 dark:bg-gray-600'
-          }`}
-        >
-          <span
-            className={`absolute top-0.5 h-5 w-5 rounded-full bg-white transition-all ${
-              heatmapEnabled ? 'left-[22px]' : 'left-0.5'
-            }`}
-          />
-        </button>
-      </div>
+      <OptionSwitchRow
+        label='弹幕热力图'
+        description='进度条上方的弹幕密度曲线'
+        checked={heatmapEnabled}
+        onChange={toggleHeatmap}
+        className='-mx-2 -my-1 shrink-0 px-2'
+      />
 
-      <div className='flex min-h-0 flex-1 flex-col gap-2'>
-        <div className='flex flex-shrink-0 items-center justify-between gap-2'>
-          <SectionTitle as='h3' label='弹幕选集' />
+      <section className='flex min-h-0 flex-1 flex-col gap-2'>
+        <SectionTitle as='h3' label='弹幕选集'>
           <PanelActionButton
             aria-label='重载弹幕'
             busy={reloading}
@@ -188,11 +175,11 @@ export const DanmakuTab: React.FC<DanmakuTabProps> = ({
           >
             重载
           </PanelActionButton>
-        </div>
+        </SectionTitle>
         {reloadFeedback && (
           <p
             role={reloadFeedback.failed ? 'alert' : 'status'}
-            className={`text-sm ${reloadFeedback.failed ? 'text-red-500' : 'text-gray-600 dark:text-gray-300'}`}
+            className={`text-xs ${reloadFeedback.failed ? 'text-red-500' : 'text-gray-500 dark:text-gray-400'}`}
           >
             {reloadFeedback.message}
           </p>
@@ -204,7 +191,7 @@ export const DanmakuTab: React.FC<DanmakuTabProps> = ({
           searchTitle={searchTitle}
           onBindingChange={onReload}
         />
-      </div>
+      </section>
     </div>
   );
 };
