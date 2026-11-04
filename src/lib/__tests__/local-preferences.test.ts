@@ -3,6 +3,7 @@ import {
   AUTO_SWITCH_SOURCE_STORAGE_KEY,
   BLOCK_AD_STORAGE_KEY,
   CONTINUE_WATCHING_COUNT_STORAGE_KEY,
+  CONTINUE_WATCHING_PAGE_COUNT_STORAGE_KEY,
   DEFAULT_AGGREGATE_SEARCH_STORAGE_KEY,
   ENABLE_OPTIMIZATION_STORAGE_KEY,
   FLUID_SEARCH_STORAGE_KEY,
@@ -14,6 +15,7 @@ import {
   readAutoSwitchSource,
   readBlockAdEnabled,
   readContinueWatchingCount,
+  readContinueWatchingPageCount,
   readDanmakuEpisodeSearchTitle,
   readEnableOptimization,
   readFluidSearch,
@@ -35,6 +37,7 @@ import {
   writeAutoSwitchSource,
   writeBlockAdEnabled,
   writeContinueWatchingCount,
+  writeContinueWatchingPageCount,
   writeDanmakuEpisodeId,
   writeDanmakuEpisodeSearchTitle,
   writeEnableOptimization,
@@ -46,6 +49,22 @@ import {
 } from '../local-preferences';
 
 describe('local preferences', () => {
+  it('keeps full-page record counts separate and clears both counts on logout', () => {
+    writeContinueWatchingCount(10);
+    writeContinueWatchingPageCount(24);
+    expect(readContinueWatchingCount()).toBe(10);
+    expect(readContinueWatchingPageCount()).toBe(24);
+    expect(document.cookie).toContain('cw_page_count=24');
+    expect(document.cookie).toContain('cw_count=10');
+    resetContinueWatchingCount();
+    expect(readContinueWatchingCount()).toBe(0);
+    expect(readContinueWatchingPageCount()).toBe(0);
+    expect(
+      localStorage.getItem(CONTINUE_WATCHING_PAGE_COUNT_STORAGE_KEY),
+    ).toBeNull();
+    expect(document.cookie).not.toContain('cw_page_count=');
+  });
+
   it('保存手动弹幕搜索词并随清除绑定重置', () => {
     const scopeKey = 'test:video:0';
     writeDanmakuEpisodeSearchTitle(scopeKey, ' 手动标题 ');

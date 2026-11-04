@@ -2,18 +2,18 @@
 
 import { useEffect, useState } from 'react';
 
+import { CONTINUE_WATCHING_PAGE_SIZE } from '@/features/continue-watching/lib/layout';
 import {
   clearAllPlayRecords,
   getCachedPlayRecordsSnapshot,
   getPlayRecordPage,
   subscribeToDataUpdates,
 } from '@/lib/db.client';
+import { writeContinueWatchingPageCount } from '@/lib/local-preferences';
 import { selectPlayRecordPage } from '@/lib/play-records';
 import type { PlayRecord } from '@/lib/types';
 
 export type ContinueWatchingItem = PlayRecord & { key: string };
-
-const PAGE_SIZE = 24;
 
 function toItems(records: Record<string, PlayRecord>): ContinueWatchingItem[] {
   return Object.entries(records)
@@ -25,18 +25,25 @@ export function useContinueWatchingItems(initialSkeletonCount = 0) {
   const [items, setItems] = useState<ContinueWatchingItem[]>([]);
   const [total, setTotal] = useState(0);
   const [nextCursor, setNextCursor] = useState<string | null>(null);
-  const [loading, setLoading] = useState(initialSkeletonCount > 0);
+  const [loading, setLoading] = useState(true);
+  const [hasLoaded, setHasLoaded] = useState(false);
   const [loadingMore, setLoadingMore] = useState(false);
-  const [skeletonCount, setSkeletonCount] = useState(initialSkeletonCount);
+  const [skeletonCount, setSkeletonCount] = useState(
+    Math.min(initialSkeletonCount, CONTINUE_WATCHING_PAGE_SIZE),
+  );
 
   useEffect(() => {
     const cachedRecords = getCachedPlayRecordsSnapshot();
     if (cachedRecords) {
-      const cachedPage = selectPlayRecordPage(cachedRecords, PAGE_SIZE);
+      const cachedPage = selectPlayRecordPage(
+        cachedRecords,
+        CONTINUE_WATCHING_PAGE_SIZE,
+      );
       setItems(toItems(cachedPage.items));
+      setHasLoaded(true);
       setTotal(cachedPage.total);
       setNextCursor(cachedPage.nextCursor);
-      setSkeletonCount(Math.min(cachedPage.total, 8));
+      setSkeletonCount(Math.min(cachedPage.total, CONTINUE_WATCHING_PAGE_SIZE));
       setLoading(false);
     }
 
@@ -44,12 +51,13 @@ export function useContinueWatchingItems(initialSkeletonCount = 0) {
 
     const loadInitial = async () => {
       try {
-        const page = await getPlayRecordPage(PAGE_SIZE);
+        const page = await getPlayRecordPage(CONTINUE_WATCHING_PAGE_SIZE);
         if (cancelled) return;
         setItems(toItems(page.items));
+        setHasLoaded(true);
         setTotal(page.total);
         setNextCursor(page.nextCursor);
-        setSkeletonCount(Math.min(page.total, 8));
+        setSkeletonCount(Math.min(page.total, CONTINUE_WATCHING_PAGE_SIZE));
       } catch (error) {
         console.error('获取继续观看记录失败:', error);
       } finally {
@@ -60,11 +68,12 @@ export function useContinueWatchingItems(initialSkeletonCount = 0) {
     void loadInitial();
 
     const handleRecordsUpdate = (records: Record<string, PlayRecord>) => {
-      const page = selectPlayRecordPage(records, PAGE_SIZE);
+      const page = selectPlayRecordPage(records, CONTINUE_WATCHING_PAGE_SIZE);
       setItems(toItems(page.items));
+      setHasLoaded(true);
       setTotal(page.total);
       setNextCursor(page.nextCursor);
-      setSkeletonCount(Math.min(page.total, 8));
+      setSkeletonCount(Math.min(page.total, CONTINUE_WATCHING_PAGE_SIZE));
       setLoading(false);
     };
 
@@ -95,12 +104,22 @@ export function useContinueWatchingItems(initialSkeletonCount = 0) {
     };
   }, [initialSkeletonCount]);
 
+  useEffect(() => {
+    if (hasLoaded && !loading)
+      writeContinueWatchingPageCount(
+        Math.min(items.length, CONTINUE_WATCHING_PAGE_SIZE),
+      );
+  }, [hasLoaded, items.length, loading]);
+
   const loadMore = async () => {
     if (!nextCursor || loadingMore) return;
 
     setLoadingMore(true);
     try {
-      const page = await getPlayRecordPage(PAGE_SIZE, nextCursor);
+      const page = await getPlayRecordPage(
+        CONTINUE_WATCHING_PAGE_SIZE,
+        nextCursor,
+      );
       setItems((current) => {
         const merged = new Map(
           [...current, ...toItems(page.items)].map((item) => [item.key, item]),

@@ -3,6 +3,8 @@ import {
   POSTER_GRID_ROW_GAP,
 } from '@/components/poster-grid-layout';
 
+export const DOUBAN_PAGE_SIZE = 25;
+
 export const DOUBAN_GRID_WRAPPER_CLASS = 'px-0';
 
 export const DOUBAN_GRID_CLASS = POSTER_GRID_CLASS;

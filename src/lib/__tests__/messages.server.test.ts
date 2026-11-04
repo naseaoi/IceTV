@@ -3,6 +3,7 @@
 import type { AdminConfig } from '@/types/admin';
 
 const mockGetFollowReviewMessages = jest.fn();
+const mockGetFollowReviewMessageCount = jest.fn();
 const mockGetConfigForRead = jest.fn();
 const mockGetAllPlayRecords = jest.fn();
 const mockGetUnreadTrackingPlayRecordPage = jest.fn();
@@ -18,6 +19,8 @@ jest.mock('@/lib/config', () => ({
 
 jest.mock('@/lib/db', () => ({
   db: {
+    getFollowReviewMessageCount: (...args: unknown[]) =>
+      mockGetFollowReviewMessageCount(...args),
     getFollowReviewMessages: (...args: unknown[]) =>
       mockGetFollowReviewMessages(...args),
     getAllPlayRecords: (...args: unknown[]) => mockGetAllPlayRecords(...args),
@@ -86,6 +89,7 @@ describe('messages server', () => {
   beforeEach(() => {
     jest.clearAllMocks();
     mockGetFollowReviewMessages.mockResolvedValue([]);
+    mockGetFollowReviewMessageCount.mockResolvedValue(0);
     mockGetConfigForRead.mockResolvedValue(config);
     mockGetAllPlayRecords.mockResolvedValue({
       'source-a+video-1': updatedRecord,
@@ -119,6 +123,7 @@ describe('messages server', () => {
       createdAt: 6000,
     };
     mockGetFollowReviewMessages.mockResolvedValue([followed]);
+    mockGetFollowReviewMessageCount.mockResolvedValue(1);
     const page = await getUserMessagePage('reader', 2);
     expect(page.items.map((item) => item.type)).toEqual([
       'announcement',
@@ -161,6 +166,7 @@ describe('messages server', () => {
       createdAt: 6000,
     };
     mockGetFollowReviewMessages.mockResolvedValue([followed]);
+    mockGetFollowReviewMessageCount.mockResolvedValue(1);
     mockGetUserMessageState.mockResolvedValue({
       followReviewReadIds: Array.from(
         { length: 200 },
@@ -201,6 +207,7 @@ describe('messages server', () => {
       createdAt: 3000,
     };
     mockGetFollowReviewMessages.mockResolvedValue([followed]);
+    mockGetFollowReviewMessageCount.mockResolvedValue(1);
     const records = [5000, 4000, 2000, 1000].map((time) => ({
       ...updatedRecord,
       update_detected_at: time,
@@ -226,6 +233,69 @@ describe('messages server', () => {
     const page = await getUserMessagePage('reader', 1, encodeCursor(followed));
     expect(page.items).toHaveLength(1);
     expect(page.items[0].createdAt).toBe(2000);
+  });
+
+  it('uses a bounded latest query and independent count for follow revisions', async () => {
+    mockGetFollowReviewMessageCount.mockResolvedValue(300);
+    const before = await getUserMessageSummary('reader');
+    expect(before.followReviewUnreadCount).toBe(300);
+    expect(mockGetFollowReviewMessages).toHaveBeenLastCalledWith(
+      'reader',
+      0,
+      [],
+      expect.any(Number),
+      { limit: 1 },
+    );
+    mockGetFollowReviewMessageCount.mockResolvedValue(301);
+    const after = await getUserMessageSummary('reader');
+    expect(after.revision).not.toBe(before.revision);
+    const page = await getUserMessagePage('reader', 20);
+    expect(page.total).toBe(303);
+    expect(mockGetFollowReviewMessages).toHaveBeenLastCalledWith(
+      'reader',
+      0,
+      [],
+      expect.any(Number),
+      { limit: 21, before: null },
+    );
+  });
+
+  it('rejects old follow cursors explicitly and keeps tracking cursors compatible', async () => {
+    const cursor = (key: string) =>
+      Buffer.from(JSON.stringify({ createdAt: 3000, key })).toString(
+        'base64url',
+      );
+    await expect(
+      getUserMessagePage('reader', 20, cursor('follow-review:old')),
+    ).rejects.toThrow('消息分页已更新');
+    await expect(
+      getUserMessagePage('reader', 20, cursor('tracking:source+id')),
+    ).resolves.toHaveProperty('items');
+  });
+
+  it('bounds read IDs by a monotonic watermark including timestamp ties', () => {
+    const id = (time: number, title = 'work') =>
+      `follow-review:${Buffer.from(JSON.stringify(['AbCdEf012345', title, '', time])).toString('base64url')}`;
+    let state: UserMessageState = {};
+    for (let time = 1; time <= 205; time++)
+      state = mergeUserMessageState(state, {
+        followReview: { id: id(time), createdAt: time },
+      });
+    expect(state.followReviewReadAt).toBe(5);
+    expect(state.followReviewReadIds).toHaveLength(200);
+    state = mergeUserMessageState(state, {
+      followReview: { id: id(1), createdAt: 1 },
+    });
+    expect(state.followReviewReadIds).not.toContain(id(1));
+    state = {};
+    for (let i = 0; i <= 200; i++)
+      state = mergeUserMessageState(state, {
+        followReview: { id: id(1000, `work-${i}`), createdAt: 1000 },
+      });
+    expect(state).toMatchObject({
+      followReviewReadAt: 1000,
+      followReviewReadIds: [],
+    });
   });
 
   it('places the unread announcement first and excludes disabled tracking', async () => {

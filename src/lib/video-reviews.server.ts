@@ -9,10 +9,13 @@ import { db } from '@/lib/db';
 import { requireNickname } from '@/lib/user-profile.server';
 import { normalizeUsername } from '@/lib/username';
 import {
+  type MyReviewFilter,
+  type MyReviewSort,
   decodeReviewCursor,
   reviewIdentity,
   reviewInput,
   ReviewValidationError,
+  validateMyReviewQuery,
 } from '@/lib/video-reviews';
 
 async function jsonBody(request: NextRequest): Promise<unknown> {
@@ -116,7 +119,21 @@ export async function handleMyReviews(request: NextRequest) {
       includeUserStateCode: false,
     });
     if (isGuardFailure(guard)) return guard.response;
-    return json({ reviews: await db.getAllVideoReviews(guard.username) });
+    const params = request.nextUrl.searchParams;
+    if (params.get('view') === 'count')
+      return json({ count: await db.getMyVideoReviewCount(guard.username) });
+    if (params.get('view') === 'ratings')
+      return json({
+        ratings: await db.getMyVideoReviewRatings(guard.username),
+      });
+    const query = {
+      cursor: params.get('cursor') || undefined,
+      q: params.get('q') || '',
+      filter: (params.get('filter') || 'all') as MyReviewFilter,
+      sort: (params.get('sort') || 'updated') as MyReviewSort,
+    };
+    validateMyReviewQuery(query);
+    return json(await db.getMyVideoReviewPage(guard.username, query));
   } catch (error) {
     return failure(error);
   }
@@ -130,8 +147,10 @@ export async function handleWorkReviews(request: NextRequest) {
     });
     if (isGuardFailure(guard)) return guard.response;
     const { title_norm, year } = queryIdentity(request);
+    const cursor = request.nextUrl.searchParams.get('cursor') || undefined;
+    decodeReviewCursor(cursor);
     return json(
-      await db.getPublicVideoReviewsForWork(title_norm, year, guard.username),
+      await db.getWorkVideoReviewPage(title_norm, year, guard.username, cursor),
     );
   } catch (error) {
     return failure(error);

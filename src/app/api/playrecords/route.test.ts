@@ -101,7 +101,8 @@ describe('playrecords route', () => {
       'source+middle': records['source+middle'],
     });
     expect(response.status).toBe(200);
-    expect(mockGetAllPlayRecords).toHaveBeenCalledWith('demo');
+    expect(mockGetPlayRecordPage).toHaveBeenCalledWith('demo', 2);
+    expect(mockGetAllPlayRecords).not.toHaveBeenCalled();
   });
 
   it('不带 limit 时保持返回完整记录', async () => {

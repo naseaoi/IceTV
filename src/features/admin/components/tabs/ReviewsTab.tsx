@@ -9,6 +9,7 @@ import AlertModal from '@/components/modals/AlertModal';
 import ConfirmModal from '@/components/modals/ConfirmModal';
 import RatingStars from '@/components/RatingStars';
 import Spinner from '@/components/Spinner';
+import { AdminReviewRowsSkeleton } from '@/features/admin/components/AdminContentSkeleton';
 import AdminSearchField from '@/features/admin/components/AdminSearchField';
 import ReviewReports from '@/features/admin/components/tabs/ReviewReports';
 import {
@@ -217,7 +218,8 @@ function AllReviews({ search }: { search: string }) {
             ))}
           </ul>
         )}
-        {loading && (
+        {loading && items.length === 0 && <AdminReviewRowsSkeleton />}
+        {loading && items.length > 0 && (
           <div
             role='status'
             className='flex min-h-32 items-center justify-center text-sm text-gray-500 dark:text-gray-400'

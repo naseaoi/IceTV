@@ -8,11 +8,13 @@ import {
   useState,
 } from 'react';
 
+import { useRuntimeConfig } from '@/components/RuntimeConfigProvider';
 import {
   type BangumiCalendarData,
   GetBangumiCalendarDataWithMeta,
 } from '@/features/bangumi/lib/bangumi.client';
 import { selectBangumiCardCover } from '@/features/bangumi/lib/bangumi-normalize';
+import { DOUBAN_PAGE_SIZE } from '@/features/douban/lib/grid-layout';
 import {
   getDoubanCategories,
   getDoubanList,
@@ -219,6 +221,7 @@ export function primeDefaultDoubanFeedViewCache(
 }
 
 export function useDoubanFeed(type: string) {
+  const runtimeConfig = useRuntimeConfig();
   const [doubanData, setDoubanData] = useState<DoubanItem[]>([]);
   const [loading, setLoading] = useState(false);
   const [bangumiCalendarError, setBangumiCalendarError] = useState<
@@ -233,14 +236,24 @@ export function useDoubanFeed(type: string) {
   const bangumiCalendarDataRef = useRef<BangumiCalendarData[] | null>(null);
 
   const [customCategories, setCustomCategories] = useState<CustomCategory[]>(
-    [],
+    runtimeConfig.CUSTOM_CATEGORIES,
   );
 
   const [primarySelection, setPrimarySelection] = useState<string>(() =>
-    computeInitialPrimary(type),
+    type === 'custom'
+      ? runtimeConfig.CUSTOM_CATEGORIES.some(
+          (category) => category.type === 'movie',
+        )
+        ? 'movie'
+        : 'tv'
+      : computeInitialPrimary(type),
   );
   const [secondarySelection, setSecondarySelection] = useState<string>(() =>
-    computeInitialSecondary(type),
+    type === 'custom'
+      ? runtimeConfig.CUSTOM_CATEGORIES.find(
+          (category) => category.type === primarySelection,
+        )?.query || ''
+      : computeInitialSecondary(type),
   );
   const [multiLevelValues, setMultiLevelValues] = useState<
     Record<string, string>
@@ -386,7 +399,7 @@ export function useDoubanFeed(type: string) {
           kind: 'tv' as const,
           category: type,
           type: secondarySelection,
-          pageLimit: 25,
+          pageLimit: DOUBAN_PAGE_SIZE,
           pageStart,
         };
       }
@@ -394,7 +407,7 @@ export function useDoubanFeed(type: string) {
         kind: type as 'tv' | 'movie',
         category: primarySelection,
         type: secondarySelection,
-        pageLimit: 25,
+        pageLimit: DOUBAN_PAGE_SIZE,
         pageStart,
       };
     },
@@ -441,7 +454,7 @@ export function useDoubanFeed(type: string) {
           data = await getDoubanList({
             tag: selectedCategory.query,
             type: selectedCategory.type,
-            pageLimit: 25,
+            pageLimit: DOUBAN_PAGE_SIZE,
             pageStart: 0,
           });
         } else {
@@ -474,7 +487,7 @@ export function useDoubanFeed(type: string) {
       } else if (type === 'anime') {
         data = await getDoubanRecommends({
           kind: primarySelection === '番剧' ? 'tv' : 'movie',
-          pageLimit: 25,
+          pageLimit: DOUBAN_PAGE_SIZE,
           pageStart: 0,
           category: '动画',
           format: primarySelection === '番剧' ? '电视剧' : '',
@@ -487,7 +500,7 @@ export function useDoubanFeed(type: string) {
       } else if (primarySelection === '全部') {
         data = await getDoubanRecommends({
           kind: type === 'show' ? 'tv' : (type as 'tv' | 'movie'),
-          pageLimit: 25,
+          pageLimit: DOUBAN_PAGE_SIZE,
           pageStart: 0,
           category: multiLevelValues.type || '',
           format: type === 'show' ? '综艺' : type === 'tv' ? '电视剧' : '',
@@ -596,8 +609,8 @@ export function useDoubanFeed(type: string) {
             data = await getDoubanList({
               tag: selectedCategory.query,
               type: selectedCategory.type,
-              pageLimit: 25,
-              pageStart: currentPage * 25,
+              pageLimit: DOUBAN_PAGE_SIZE,
+              pageStart: currentPage * DOUBAN_PAGE_SIZE,
             });
           } else {
             throw new Error('没有找到对应的分类');
@@ -611,8 +624,8 @@ export function useDoubanFeed(type: string) {
         } else if (type === 'anime') {
           data = await getDoubanRecommends({
             kind: primarySelection === '番剧' ? 'tv' : 'movie',
-            pageLimit: 25,
-            pageStart: currentPage * 25,
+            pageLimit: DOUBAN_PAGE_SIZE,
+            pageStart: currentPage * DOUBAN_PAGE_SIZE,
             category: '动画',
             format: primarySelection === '番剧' ? '电视剧' : '',
             region: multiLevelValues.region || '',
@@ -624,8 +637,8 @@ export function useDoubanFeed(type: string) {
         } else if (primarySelection === '全部') {
           data = await getDoubanRecommends({
             kind: type === 'show' ? 'tv' : (type as 'tv' | 'movie'),
-            pageLimit: 25,
-            pageStart: currentPage * 25,
+            pageLimit: DOUBAN_PAGE_SIZE,
+            pageStart: currentPage * DOUBAN_PAGE_SIZE,
             category: multiLevelValues.type || '',
             format: type === 'show' ? '综艺' : type === 'tv' ? '电视剧' : '',
             region: multiLevelValues.region || '',
@@ -635,7 +648,9 @@ export function useDoubanFeed(type: string) {
             label: multiLevelValues.label || '',
           });
         } else {
-          data = await getDoubanCategories(getRequestParams(currentPage * 25));
+          data = await getDoubanCategories(
+            getRequestParams(currentPage * DOUBAN_PAGE_SIZE),
+          );
         }
 
         if (data.code === 200) {

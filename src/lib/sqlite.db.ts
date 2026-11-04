@@ -4,6 +4,27 @@ import Database from 'better-sqlite3';
 import { existsSync, mkdirSync, readFileSync } from 'fs';
 import path from 'path';
 
+import type { InviteCode } from '@/features/admin/services/inviteCodes';
+import {
+  type AdminUserRow,
+  type AdminUserStorageQuery,
+  adminUserPage,
+  adminUserStatements,
+} from '@/features/admin/services/userQueryStorage';
+import type { FavoriteLibraryQuery } from '@/features/favorites/lib/library-query';
+import {
+  type LibraryCountsRow,
+  type LibraryRow,
+  buildLibraryPage,
+  favoriteProjection,
+  libraryStatements,
+} from '@/features/favorites/lib/library-storage';
+import {
+  type InviteCodeQuery,
+  importedInviteCodes,
+  INVITE_INSERT_SQL,
+  inviteValues,
+} from '@/lib/invite-code-storage';
 import {
   importedProfileValues,
   newProfileId,
@@ -11,7 +32,14 @@ import {
   ReviewSocialStorage,
   socialSchema,
 } from '@/lib/review-social-storage';
+import { SqliteInviteCodeStore } from '@/lib/sqlite-invite-code-store';
 import { SqliteResourceStore } from '@/lib/sqlite-resource-store';
+import { SqliteUserAccessStore } from '@/lib/sqlite-user-access';
+import {
+  canManageUserAccess,
+  removedAccessReferences,
+  userAccessSchema,
+} from '@/lib/user-access';
 import { mergeUserMessageState } from '@/lib/user-message-state';
 import { validateNickname } from '@/lib/user-profile';
 import {
@@ -436,12 +464,6 @@ export class LocalSqliteStorage implements IStorage {
     getAllUserLastLogins: Database.Statement;
     deleteLoginActivityByUser: Database.Statement;
     backfillLoginActivity: Database.Statement;
-    ensureInviteCodeUsage: Database.Statement;
-    reserveLimitedInviteCodeUse: Database.Statement;
-    reserveUnlimitedInviteCodeUse: Database.Statement;
-    releaseInviteCodeUse: Database.Statement;
-    getAllInviteCodeUsage: Database.Statement;
-    deleteInviteCodeUsage: Database.Statement;
     getDanmakuEpisodeId: Database.Statement;
     setDanmakuEpisodeId: Database.Statement;
     deleteDanmakuEpisodeId: Database.Statement;
@@ -518,9 +540,11 @@ export class LocalSqliteStorage implements IStorage {
       this.initializeSchema();
     });
     for (const statement of socialSchema('sqlite')) this.db.exec(statement);
+    for (const statement of userAccessSchema('sqlite')) this.db.exec(statement);
     runWithBusyRetry('迁移 SQLite 用户头像', () => {
       this.migrateUserProfileAvatarSeed();
     });
+    this.migrateFavoriteProjection();
     this.stmts = this.prepareStatements();
     if (!isMemoryDb) {
       runWithBusyRetry('迁移 SQLite 历史数据', () => {
@@ -534,7 +558,62 @@ export class LocalSqliteStorage implements IStorage {
       });
       this.checkpointWal();
     }
+    this.backfillFavoriteProjection();
     this.backfillUserProfiles();
+    new SqliteUserAccessStore(this.db).migrate();
+    this.invites.migrate();
+  }
+
+  private migrateFavoriteProjection(): void {
+    this.db
+      .transaction(() => {
+        const columns = this.db.pragma('table_info(favorites)') as {
+          name: string;
+        }[];
+        for (const [name, type] of Object.entries({
+          title_norm: 'TEXT',
+          year_norm: 'TEXT',
+          year_number: 'REAL',
+          search_text: 'TEXT',
+          saved_at: 'REAL',
+          library_valid: 'INTEGER NOT NULL DEFAULT 0',
+          projection_version: 'INTEGER NOT NULL DEFAULT 0',
+        })) {
+          if (!columns.some((column) => column.name === name))
+            this.db.exec(`ALTER TABLE favorites ADD COLUMN ${name} ${type}`);
+        }
+        this.db
+          .exec(`CREATE INDEX IF NOT EXISTS idx_favorites_saved ON favorites(username, saved_at, favorite_key);
+        CREATE INDEX IF NOT EXISTS idx_favorites_work ON favorites(username, title_norm, year_norm);
+        CREATE INDEX IF NOT EXISTS idx_favorites_projection ON favorites(projection_version);`);
+      })
+      .immediate();
+  }
+
+  private backfillFavoriteProjection(): void {
+    const read = this.db.prepare(
+      'SELECT username, favorite_key, favorite_json FROM favorites WHERE projection_version = 0 LIMIT 250',
+    );
+    const update = this.db.prepare(
+      'UPDATE favorites SET title_norm = ?, year_norm = ?, year_number = ?, search_text = ?, saved_at = ?, library_valid = ?, projection_version = ? WHERE username = ? AND favorite_key = ?',
+    );
+    const batch = this.db.transaction(() => {
+      const rows = read.all() as {
+        username: string;
+        favorite_key: string;
+        favorite_json: string;
+      }[];
+      for (const row of rows)
+        update.run(
+          ...favoriteProjection(row.favorite_key, row.favorite_json),
+          row.username,
+          row.favorite_key,
+        );
+      return rows.length;
+    });
+    while (batch.immediate() > 0) {
+      /* 每批提交，进程中断后从剩余行继续 */
+    }
   }
 
   private migrateUserProfileAvatarSeed(): void {
@@ -693,6 +772,17 @@ export class LocalSqliteStorage implements IStorage {
         username TEXT PRIMARY KEY,
         last_login_at INTEGER NOT NULL
       );
+
+      CREATE TABLE IF NOT EXISTS invite_codes (
+        code TEXT PRIMARY KEY COLLATE BINARY,
+        created_at INTEGER NOT NULL,
+        expires_at INTEGER NOT NULL,
+        created_by TEXT NOT NULL,
+        max_uses INTEGER,
+        used_count INTEGER NOT NULL DEFAULT 0
+      );
+      CREATE INDEX IF NOT EXISTS idx_invite_codes_created ON invite_codes(created_at, code);
+      CREATE INDEX IF NOT EXISTS idx_invite_codes_active ON invite_codes(expires_at, max_uses, used_count);
 
       CREATE TABLE IF NOT EXISTS invite_code_usage (
         code TEXT PRIMARY KEY,
@@ -867,11 +957,11 @@ export class LocalSqliteStorage implements IStorage {
         'SELECT favorite_json FROM favorites WHERE username = ? AND favorite_key = ?',
       ),
       setFavorite: this.db.prepare(
-        'INSERT OR REPLACE INTO favorites (username, favorite_key, favorite_json) VALUES (?, ?, ?)',
+        'INSERT OR REPLACE INTO favorites (username, favorite_key, favorite_json, title_norm, year_norm, year_number, search_text, saved_at, library_valid, projection_version) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
       ),
       setFavoriteIfUnchanged: this.db.prepare(
         `UPDATE favorites
-         SET favorite_json = ?
+         SET favorite_json = ?, title_norm = ?, year_norm = ?, year_number = ?, search_text = ?, saved_at = ?, library_valid = ?, projection_version = ?
          WHERE username = ? AND favorite_key = ? AND favorite_json = ?`,
       ),
       getAllFavorites: this.db.prepare(
@@ -902,6 +992,7 @@ export class LocalSqliteStorage implements IStorage {
          LEFT JOIN play_records p
            ON p.username = f.username AND p.record_key = f.favorite_key
          WHERE f.username = ?
+           AND (? = 1 OR ${SQLITE_NON_LIVE_FAVORITE_WHERE})
          ORDER BY CAST(json_extract(f.favorite_json, '$.save_time') AS INTEGER) DESC,
                   f.favorite_key DESC
          LIMIT ?`,
@@ -912,6 +1003,7 @@ export class LocalSqliteStorage implements IStorage {
          LEFT JOIN play_records p
            ON p.username = f.username AND p.record_key = f.favorite_key
          WHERE f.username = ?
+           AND (? = 1 OR ${SQLITE_NON_LIVE_FAVORITE_WHERE})
            AND (
              CAST(json_extract(f.favorite_json, '$.save_time') AS INTEGER) < ?
              OR (
@@ -924,7 +1016,8 @@ export class LocalSqliteStorage implements IStorage {
          LIMIT ?`,
       ),
       countFavorites: this.db.prepare(
-        'SELECT COUNT(*) AS count FROM favorites WHERE username = ?',
+        `SELECT COUNT(*) AS count FROM favorites
+         WHERE username = ? AND (? = 1 OR ${SQLITE_NON_LIVE_FAVORITE_WHERE})`,
       ),
       deleteFavorite: this.db.prepare(
         'DELETE FROM favorites WHERE username = ? AND favorite_key = ?',
@@ -1060,24 +1153,6 @@ export class LocalSqliteStorage implements IStorage {
       backfillLoginActivity: this.db.prepare(
         'INSERT OR IGNORE INTO user_login_activity (username, last_login_at) SELECT username, ? FROM users',
       ),
-      ensureInviteCodeUsage: this.db.prepare(
-        'INSERT OR IGNORE INTO invite_code_usage (code, used_count) VALUES (?, ?)',
-      ),
-      reserveLimitedInviteCodeUse: this.db.prepare(
-        'UPDATE invite_code_usage SET used_count = used_count + 1 WHERE code = ? AND used_count < ?',
-      ),
-      reserveUnlimitedInviteCodeUse: this.db.prepare(
-        'UPDATE invite_code_usage SET used_count = used_count + 1 WHERE code = ?',
-      ),
-      releaseInviteCodeUse: this.db.prepare(
-        'UPDATE invite_code_usage SET used_count = used_count - 1 WHERE code = ? AND used_count > 0',
-      ),
-      getAllInviteCodeUsage: this.db.prepare(
-        'SELECT code, used_count FROM invite_code_usage',
-      ),
-      deleteInviteCodeUsage: this.db.prepare(
-        'DELETE FROM invite_code_usage WHERE code = ?',
-      ),
       getDanmakuEpisodeId: this.db.prepare(
         'SELECT episode_id FROM user_danmaku_episodes WHERE username = ? AND scope_key = ?',
       ),
@@ -1181,7 +1256,7 @@ export class LocalSqliteStorage implements IStorage {
         'INSERT OR REPLACE INTO play_records (username, record_key, record_json) VALUES (?, ?, ?)',
       );
       const insertFavorite = this.db.prepare(
-        'INSERT OR REPLACE INTO favorites (username, favorite_key, favorite_json) VALUES (?, ?, ?)',
+        'INSERT OR REPLACE INTO favorites (username, favorite_key, favorite_json, title_norm, year_norm, year_number, search_text, saved_at, library_valid, projection_version) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
       );
       const insertHistory = this.db.prepare(
         'INSERT OR REPLACE INTO search_history (username, keyword, sort_index) VALUES (?, ?, ?)',
@@ -1212,7 +1287,12 @@ export class LocalSqliteStorage implements IStorage {
       )) {
         const username = assertValidUsernameFormat(userName);
         for (const [key, favorite] of Object.entries(favorites)) {
-          insertFavorite.run(username, key, JSON.stringify(favorite));
+          insertFavorite.run(
+            username,
+            key,
+            JSON.stringify(favorite),
+            ...favoriteProjection(key, JSON.stringify(favorite)),
+          );
         }
       }
 
@@ -1258,6 +1338,22 @@ export class LocalSqliteStorage implements IStorage {
       for (const { legacy, canonical } of plan) {
         this.mergeUserRow(legacy, canonical);
         this.mergeSocialUsername(legacy, canonical);
+        this.db
+          .prepare(
+            'UPDATE OR IGNORE user_access SET username = ? WHERE username = ?',
+          )
+          .run(canonical, legacy);
+        this.db
+          .prepare('DELETE FROM user_access WHERE username = ?')
+          .run(legacy);
+        this.db
+          .prepare(
+            'UPDATE OR IGNORE user_group_members SET username = ? WHERE username = ?',
+          )
+          .run(canonical, legacy);
+        this.db
+          .prepare('DELETE FROM user_group_members WHERE username = ?')
+          .run(legacy);
         this.mergeKeyedTable(
           'play_records',
           'record_key',
@@ -1404,6 +1500,8 @@ export class LocalSqliteStorage implements IStorage {
       'favorites',
       'video_reviews',
       'user_profiles',
+      'user_access',
+      'user_group_members',
       'search_history',
       'skip_configs',
       'playback_sessions',
@@ -1473,11 +1571,17 @@ export class LocalSqliteStorage implements IStorage {
       const canonicalRow = readCanonical.get(canonical, row.key) as
         | { json: string }
         | undefined;
-      upsert.run(
-        canonical,
-        row.key,
-        pickNewerJson(canonicalRow?.json, row.json),
-      );
+      const json = pickNewerJson(canonicalRow?.json, row.json);
+      if (table === 'favorites') {
+        this.stmts.setFavorite.run(
+          canonical,
+          row.key,
+          json,
+          ...favoriteProjection(row.key, json),
+        );
+      } else {
+        upsert.run(canonical, row.key, json);
+      }
     }
     this.db.prepare(`DELETE FROM ${table} WHERE username = ?`).run(legacy);
   }
@@ -1709,7 +1813,12 @@ export class LocalSqliteStorage implements IStorage {
     favorite: Favorite,
   ): Promise<void> {
     const username = normalizeUsername(userName);
-    this.stmts.setFavorite.run(username, key, JSON.stringify(favorite));
+    this.stmts.setFavorite.run(
+      username,
+      key,
+      JSON.stringify(favorite),
+      ...favoriteProjection(key, JSON.stringify(favorite)),
+    );
   }
 
   async setFavoriteIfUnchanged(
@@ -1721,6 +1830,7 @@ export class LocalSqliteStorage implements IStorage {
     const username = normalizeUsername(userName);
     const result = this.stmts.setFavoriteIfUnchanged.run(
       JSON.stringify(favorite),
+      ...favoriteProjection(key, JSON.stringify(favorite)),
       username,
       key,
       snapshot,
@@ -1782,27 +1892,50 @@ export class LocalSqliteStorage implements IStorage {
     limit: number,
     cursorTime?: number,
     cursorKey?: string,
+    includeLive = true,
   ): Promise<FavoritePage> {
     const username = normalizeUsername(userName);
     const rows = (
       cursorTime !== undefined && cursorKey
         ? this.stmts.getFavoritePageAfter.all(
             username,
+            Number(includeLive),
             cursorTime,
             cursorTime,
             cursorKey,
             limit + 1,
           )
-        : this.stmts.getFavoritePage.all(username, limit + 1)
+        : this.stmts.getFavoritePage.all(
+            username,
+            Number(includeLive),
+            limit + 1,
+          )
     ) as Array<{
       favorite_key: string;
       favorite_json: string;
       record_json?: string | null;
     }>;
-    const countRow = this.stmts.countFavorites.get(username) as {
+    const countRow = this.stmts.countFavorites.get(
+      username,
+      Number(includeLive),
+    ) as {
       count: number;
     };
     return buildFavoritePage(rows, countRow.count, limit);
+  }
+
+  async getFavoriteLibraryPage(userName: string, query: FavoriteLibraryQuery) {
+    const username = normalizeUsername(userName);
+    const sql = libraryStatements('sqlite', username, query);
+    return this.db.transaction(() => {
+      const counts = this.db
+        .prepare(sql.counts)
+        .get(...sql.countParams) as LibraryCountsRow;
+      const rows = this.db
+        .prepare(sql.page)
+        .all(...sql.pageParams) as LibraryRow[];
+      return buildLibraryPage(username, query, rows, counts);
+    })();
   }
 
   async deleteFavorite(userName: string, key: string): Promise<void> {
@@ -1895,6 +2028,12 @@ export class LocalSqliteStorage implements IStorage {
     ...args: Parameters<IStorage['getReviewReportPage']>
   ): ReturnType<IStorage['getReviewReportPage']> {
     return this.social.getReviewReportPage(...args);
+  }
+
+  async getFollowReviewMessageCount(
+    ...args: Parameters<IStorage['getFollowReviewMessageCount']>
+  ): Promise<number> {
+    return this.social.getFollowReviewMessageCount(...args);
   }
 
   async getFollowReviewMessages(
@@ -2005,6 +2144,27 @@ export class LocalSqliteStorage implements IStorage {
     })();
   }
 
+  async getMyVideoReviewPage(
+    ...args: Parameters<IStorage['getMyVideoReviewPage']>
+  ): ReturnType<IStorage['getMyVideoReviewPage']> {
+    return this.social.getMyVideoReviewPage(...args);
+  }
+  async getMyVideoReviewCount(
+    ...args: Parameters<IStorage['getMyVideoReviewCount']>
+  ): ReturnType<IStorage['getMyVideoReviewCount']> {
+    return this.social.getMyVideoReviewCount(...args);
+  }
+  async getMyVideoReviewRatings(
+    ...args: Parameters<IStorage['getMyVideoReviewRatings']>
+  ): ReturnType<IStorage['getMyVideoReviewRatings']> {
+    return this.social.getMyVideoReviewRatings(...args);
+  }
+  async getWorkVideoReviewPage(
+    ...args: Parameters<IStorage['getWorkVideoReviewPage']>
+  ): ReturnType<IStorage['getWorkVideoReviewPage']> {
+    return this.social.getWorkVideoReviewPage(...args);
+  }
+
   async getAllVideoReviews(userName: string): Promise<VideoReview[]> {
     const rows = this.stmts.getAllVideoReviews.all(
       normalizeUsername(userName),
@@ -2093,6 +2253,7 @@ export class LocalSqliteStorage implements IStorage {
       this.stmts.registerUser.run(username, hashedPassword);
       this.stmts.recordUserLogin.run(username, now);
       this.insertUserProfile(username, nickname);
+      new SqliteUserAccessStore(this.db).put({ username, role: 'user' });
     })();
   }
 
@@ -2122,9 +2283,71 @@ export class LocalSqliteStorage implements IStorage {
     this.stmts.updatePassword.run(hashed, username);
   }
 
-  async deleteUser(userName: string): Promise<void> {
+  async deleteUser(
+    userName: string,
+    permissions?: Parameters<IStorage['deleteUser']>[1],
+  ): Promise<void> {
+    if (!this.deleteManagedUser(userName, undefined, permissions))
+      throw new Error('用户权限已变化，请刷新后重试');
+  }
+
+  async getUserAccess(username: string) {
+    return new SqliteUserAccessStore(this.db).get(username);
+  }
+
+  async getAllUserAccess() {
+    return new SqliteUserAccessStore(this.db).all();
+  }
+
+  async updateUserAccess(...args: Parameters<IStorage['updateUserAccess']>) {
+    return new SqliteUserAccessStore(this.db).update(...args);
+  }
+
+  async removeUserGroup(group: string) {
+    new SqliteUserAccessStore(this.db).removeGroup(group);
+  }
+
+  async removeUserSource(source: string) {
+    new SqliteUserAccessStore(this.db).removeSource(source);
+  }
+
+  async deleteUserIfInactive(
+    userName: string,
+    before: number,
+    operatorUsername: string,
+  ): Promise<boolean> {
+    return this.deleteManagedUser(userName, { before, operatorUsername });
+  }
+
+  private deleteManagedUser(
+    userName: string,
+    guard?: { before: number; operatorUsername: string },
+    permissions?: Parameters<IStorage['deleteUser']>[1],
+  ): boolean {
     const username = normalizeUsername(userName);
     const remove = this.db.transaction((targetUser: string) => {
+      if (permissions) {
+        const access = new SqliteUserAccessStore(this.db).get(targetUser);
+        if (
+          !access ||
+          !canManageUserAccess(access, { ...permissions, excludeSelf: true })
+        )
+          return false;
+      }
+      if (guard) {
+        const access = new SqliteUserAccessStore(this.db).get(targetUser);
+        const activity = this.stmts.getUserLastLogin.get(targetUser) as
+          | { last_login_at: number }
+          | undefined;
+        if (
+          access?.role !== 'user' ||
+          targetUser === normalizeUsername(guard.operatorUsername) ||
+          !activity?.last_login_at ||
+          activity.last_login_at > guard.before ||
+          !this.stmts.checkUserExist.get(targetUser)
+        )
+          return false;
+      }
       this.db
         .prepare('DELETE FROM user_profiles WHERE username = ?')
         .run(targetUser);
@@ -2139,6 +2362,12 @@ export class LocalSqliteStorage implements IStorage {
           'DELETE FROM video_review_reports WHERE author = ? OR reporter = ?',
         )
         .run(targetUser, targetUser);
+      this.db
+        .prepare('DELETE FROM user_group_members WHERE username = ?')
+        .run(targetUser);
+      this.db
+        .prepare('DELETE FROM user_access WHERE username = ?')
+        .run(targetUser);
       this.stmts.deleteUserRow.run(targetUser);
       this.stmts.deletePlayRecordsByUser.run(targetUser);
       this.stmts.deleteFavoritesByUser.run(targetUser);
@@ -2152,8 +2381,9 @@ export class LocalSqliteStorage implements IStorage {
         .prepare('DELETE FROM user_danmaku_episodes WHERE username = ?')
         .run(targetUser);
       this.stmts.deleteDanmakuEnabledPreferenceByUser.run(targetUser);
+      return true;
     });
-    remove(username);
+    return remove.immediate(username);
   }
 
   async recordUserLogin(userName: string, loginAt: number): Promise<void> {
@@ -2181,40 +2411,40 @@ export class LocalSqliteStorage implements IStorage {
     return result;
   }
 
-  // maxUses 为 0 表示不限次数，seedCount 用于承接配置里的历史用量
-  async reserveInviteCodeUse(
-    code: string,
-    maxUses: number,
-    seedCount = 0,
-  ): Promise<boolean> {
-    const reserve = this.db.transaction(() => {
-      this.stmts.ensureInviteCodeUsage.run(code, Math.max(0, seedCount));
-      const result = maxUses
-        ? this.stmts.reserveLimitedInviteCodeUse.run(code, maxUses)
-        : this.stmts.reserveUnlimitedInviteCodeUse.run(code);
-      return result.changes > 0;
-    });
-    return reserve();
+  private get invites() {
+    return new SqliteInviteCodeStore(this.db);
   }
 
+  async getAllInviteCodes() {
+    return this.invites.all();
+  }
+  async queryInviteCodes(query: InviteCodeQuery) {
+    return this.invites.page(query);
+  }
+  async countActiveInviteCodes() {
+    return this.invites.countActive();
+  }
+  async createInviteCode(item: InviteCode) {
+    return this.invites.create(item);
+  }
+  async deleteInviteCode(code: string) {
+    return this.invites.delete(code);
+  }
+  async reserveInviteCodeUse(code: string): Promise<boolean> {
+    return this.invites.reserve(code);
+  }
   async releaseInviteCodeUse(code: string): Promise<void> {
-    this.stmts.releaseInviteCodeUse.run(code);
+    this.invites.release(code);
   }
 
   async getAllInviteCodeUsage(): Promise<Record<string, number>> {
-    const rows = this.stmts.getAllInviteCodeUsage.all() as {
-      code: string;
-      used_count: number;
-    }[];
-    const result: Record<string, number> = {};
-    for (const row of rows) {
-      result[row.code] = Number(row.used_count);
-    }
-    return result;
+    return Object.fromEntries(
+      this.invites.all().map((item) => [item.code, item.usedCount || 0]),
+    );
   }
 
   async deleteInviteCodeUsage(code: string): Promise<void> {
-    this.stmts.deleteInviteCodeUsage.run(code);
+    this.invites.delete(code);
   }
 
   async getSearchHistory(userName: string): Promise<string[]> {
@@ -2248,6 +2478,40 @@ export class LocalSqliteStorage implements IStorage {
       return;
     }
     this.stmts.deleteSearchHistoryOne.run(username, keyword);
+  }
+
+  async getAdminUserPage(query: AdminUserStorageQuery) {
+    const sql = adminUserStatements('sqlite', query);
+    return this.db.transaction(() => {
+      const { total } = this.db.prepare(sql.count).get(...sql.countParams) as {
+        total: number;
+      };
+      const rows = this.db
+        .prepare(sql.rows)
+        .all(...sql.params) as AdminUserRow[];
+      return adminUserPage(rows, Number(total), sql.scope, sql.limit);
+    })();
+  }
+
+  async compareAndSetAdminConfig(
+    expected: AdminConfig | null,
+    config: AdminConfig,
+  ): Promise<boolean> {
+    return this.db
+      .transaction(() => {
+        const row = this.stmts.getAdminConfig.get() as
+          | { config_json: string }
+          | undefined;
+        const current = row ? JSON.parse(row.config_json) : null;
+        if (JSON.stringify(current) !== JSON.stringify(expected)) return false;
+        const removed = removedAccessReferences(current, config);
+        const access = new SqliteUserAccessStore(this.db);
+        for (const group of removed.groups) access.removeGroup(group);
+        for (const source of removed.sources) access.removeSource(source);
+        this.stmts.setAdminConfig.run(JSON.stringify(config));
+        return true;
+      })
+      .immediate();
   }
 
   async getAllUsers(): Promise<string[]> {
@@ -2738,6 +3002,8 @@ export class LocalSqliteStorage implements IStorage {
   async clearAllData(): Promise<void> {
     const clear = this.db.transaction(() => {
       this.db.exec(`
+        DELETE FROM user_group_members;
+        DELETE FROM user_access;
         DELETE FROM users;
         DELETE FROM play_records;
         DELETE FROM favorites;
@@ -2754,6 +3020,7 @@ export class LocalSqliteStorage implements IStorage {
         DELETE FROM user_message_state;
         DELETE FROM user_login_activity;
         DELETE FROM invite_code_usage;
+        DELETE FROM invite_codes;
         DELETE FROM user_danmaku_episodes;
         DELETE FROM user_danmaku_settings;
         DELETE FROM shared_cache;
@@ -2771,6 +3038,8 @@ export class LocalSqliteStorage implements IStorage {
     );
     const replace = this.db.transaction((snapshot: StorageImportData) => {
       this.db.exec(`
+        DELETE FROM user_group_members;
+        DELETE FROM user_access;
         DELETE FROM users;
         DELETE FROM play_records;
         DELETE FROM favorites;
@@ -2787,21 +3056,23 @@ export class LocalSqliteStorage implements IStorage {
         DELETE FROM user_message_state;
         DELETE FROM user_login_activity;
         DELETE FROM invite_code_usage;
+        DELETE FROM invite_codes;
         DELETE FROM user_danmaku_episodes;
         DELETE FROM user_danmaku_settings;
         DELETE FROM shared_cache;
       `);
 
-      this.stmts.setAdminConfig.run(JSON.stringify(snapshot.adminConfig));
-
-      const insertInviteUsage = this.db.prepare(
-        'INSERT INTO invite_code_usage (code, used_count) VALUES (?, ?)',
-      );
-      for (const [code, usedCount] of Object.entries(
+      const inviteCodes = importedInviteCodes(
+        snapshot.adminConfig.UserConfig?.InviteCodes,
         snapshot.inviteCodeUsage,
-      )) {
-        insertInviteUsage.run(code, usedCount);
-      }
+      );
+      const storedConfig = JSON.parse(
+        JSON.stringify(snapshot.adminConfig),
+      ) as AdminConfig;
+      if (storedConfig.UserConfig) delete storedConfig.UserConfig.InviteCodes;
+      this.stmts.setAdminConfig.run(JSON.stringify(storedConfig));
+      const insertInvite = this.db.prepare(INVITE_INSERT_SQL);
+      for (const item of inviteCodes) insertInvite.run(...inviteValues(item));
 
       const insertRouteStat = this.db.prepare(
         `INSERT INTO source_route_stats (
@@ -2847,7 +3118,12 @@ export class LocalSqliteStorage implements IStorage {
         }
 
         for (const [key, favorite] of Object.entries(userData.favorites)) {
-          this.stmts.setFavorite.run(username, key, JSON.stringify(favorite));
+          this.stmts.setFavorite.run(
+            username,
+            key,
+            JSON.stringify(favorite),
+            ...favoriteProjection(key, JSON.stringify(favorite)),
+          );
         }
 
         for (const review of userData.videoReviews ?? []) {
@@ -2894,6 +3170,7 @@ export class LocalSqliteStorage implements IStorage {
       }
 
       this.importSocialData(snapshot);
+      new SqliteUserAccessStore(this.db).migrate();
       this.backfillMissingLoginActivity();
       this.backfillUserProfiles();
     });

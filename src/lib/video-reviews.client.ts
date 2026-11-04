@@ -1,7 +1,16 @@
 import { fetchWithAuth } from '@/lib/db.client.internal';
 import { socialRequest } from '@/lib/profile.client';
 import type { ReviewReportReason } from '@/lib/types';
-import type { VideoReview, WorkReviewSummary } from '@/lib/types';
+import type {
+  MyVideoReviewPage,
+  VideoReview,
+  VideoReviewRating,
+  WorkReviewSummary,
+} from '@/lib/types';
+import {
+  type MyReviewQuery,
+  VIDEO_REVIEWS_UPDATED_EVENT,
+} from '@/lib/video-reviews';
 
 export { REVIEW_CONTENT_MAX_LENGTH } from '@/lib/video-reviews';
 
@@ -35,9 +44,10 @@ export async function fetchMyVideoReview(
 export async function fetchWorkReviewSummary(
   title: string,
   year: string,
+  cursor?: string,
 ): Promise<WorkReviewSummary> {
   const res = await fetchWithAuth(
-    `/api/reviews/work?${buildWorkQuery(title, year)}`,
+    `/api/reviews/work?${buildWorkQuery(title, year)}${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ''}`,
   );
   const data = (await res.json()) as Partial<WorkReviewSummary>;
   return {
@@ -45,6 +55,8 @@ export async function fetchWorkReviewSummary(
     count: typeof data.count === 'number' ? data.count : 0,
     distribution: data.distribution ?? Array(10).fill(0),
     reviews: Array.isArray(data.reviews) ? data.reviews : [],
+    nextCursor: data.nextCursor ?? null,
+    reviewCount: data.reviewCount ?? 0,
   };
 }
 
@@ -56,6 +68,7 @@ export async function saveVideoReview(
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(input),
   });
+  window.dispatchEvent(new Event(VIDEO_REVIEWS_UPDATED_EVENT));
   return data.review;
 }
 
@@ -75,12 +88,31 @@ export async function deleteVideoReview(
   await fetchWithAuth(`/api/reviews?${query}`, {
     method: 'DELETE',
   });
+  window.dispatchEvent(new Event(VIDEO_REVIEWS_UPDATED_EVENT));
 }
 
-export async function fetchMyVideoReviews(): Promise<VideoReview[]> {
-  const res = await fetchWithAuth('/api/reviews/mine');
-  const data = (await res.json()) as { reviews?: VideoReview[] };
-  return Array.isArray(data.reviews) ? data.reviews : [];
+export async function fetchMyVideoReviews(
+  query: MyReviewQuery = {},
+): Promise<MyVideoReviewPage> {
+  const params = new URLSearchParams();
+  for (const [key, value] of Object.entries(query))
+    if (value) params.set(key, value);
+  const res = await fetchWithAuth(`/api/reviews/mine?${params}`);
+  return res.json();
+}
+
+export async function fetchMyVideoReviewCount(): Promise<number> {
+  const res = await fetchWithAuth('/api/reviews/mine?view=count');
+  const data = await res.json();
+  return data.count;
+}
+
+export async function fetchMyVideoReviewRatings(): Promise<
+  VideoReviewRating[]
+> {
+  const res = await fetchWithAuth('/api/reviews/mine?view=ratings');
+  const data = await res.json();
+  return data.ratings;
 }
 
 export interface ReviewTarget {

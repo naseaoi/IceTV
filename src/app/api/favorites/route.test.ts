@@ -8,6 +8,8 @@ installWebPolyfills();
 
 const mockSaveFavorite = jest.fn();
 const mockGetFavoritePage = jest.fn();
+const mockGetFavoriteLibraryPage = jest.fn();
+const mockGetAllFavorites = jest.fn();
 
 jest.mock('@/lib/api-auth', () => ({
   requireActiveUser: jest
@@ -19,6 +21,9 @@ jest.mock('@/lib/api-auth', () => ({
 jest.mock('@/lib/db', () => ({
   db: {
     getFavoritePage: (...args: unknown[]) => mockGetFavoritePage(...args),
+    getFavoriteLibraryPage: (...args: unknown[]) =>
+      mockGetFavoriteLibraryPage(...args),
+    getAllFavorites: (...args: unknown[]) => mockGetAllFavorites(...args),
     saveFavorite: (...args: unknown[]) => mockSaveFavorite(...args),
   },
 }));
@@ -75,6 +80,46 @@ describe('favorites route', () => {
     } finally {
       nowSpy.mockRestore();
     }
+  });
+
+  it('收藏库模式返回服务端计数与评分，并保留无参数全量协议', async () => {
+    const page = {
+      items: [],
+      counts: { all: 9, watched: 2, unwatched: 7, reviewed: 1 },
+      total: 1,
+      libraryTotal: 30,
+      nextCursor: null,
+    };
+    mockGetFavoriteLibraryPage.mockResolvedValue(page);
+    const response = await GET(
+      createRequest(
+        'http://localhost/api/favorites?format=library&q=test&filter=reviewed&sort=rating&cursor=token',
+      ),
+    );
+    expect(await response.json()).toEqual(page);
+    expect(mockGetFavoriteLibraryPage).toHaveBeenCalledWith('demo', {
+      query: 'test',
+      filter: 'reviewed',
+      sort: 'rating',
+      cursor: 'token',
+    });
+    expect(mockGetAllFavorites).not.toHaveBeenCalled();
+    mockGetAllFavorites.mockResolvedValue({ 'source+1': { title: 'Demo' } });
+    expect(
+      await (await GET(createRequest('http://localhost/api/favorites'))).json(),
+    ).toEqual({ 'source+1': { title: 'Demo' } });
+  });
+
+  it('条件绑定不匹配的游标返回 400', async () => {
+    const { InvalidFavoriteLibraryQuery } =
+      await import('@/features/favorites/lib/library-storage');
+    mockGetFavoriteLibraryPage.mockRejectedValue(
+      new InvalidFavoriteLibraryQuery('收藏分页游标已失效，请重新加载'),
+    );
+    const response = await GET(
+      createRequest('http://localhost/api/favorites?format=library&cursor=bad'),
+    );
+    expect(response.status).toBe(400);
   });
 
   it('分页查询不读取全量收藏', async () => {

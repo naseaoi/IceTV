@@ -1,5 +1,7 @@
 import type { PlaybackSession } from '@/lib/types';
 
+export const PLAYBACK_TOP_WORKS_LIMIT = 10;
+
 export type PlaybackHistoryResponse = {
   items: PlaybackSession[];
   nextCursor: number | null;

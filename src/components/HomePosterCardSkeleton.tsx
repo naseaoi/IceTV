@@ -1,3 +1,6 @@
+// 覆盖 1680px 容器内的首屏与右侧露出的下一张，和真实横排共用挂载批量。
+export const HOME_RECOMMENDATION_INITIAL_COUNT = 10;
+
 export const HOME_POSTER_CARD_CLASS =
   'home-poster-card w-[25vw] min-w-[25vw] sm:w-40 sm:min-w-[160px]';
 

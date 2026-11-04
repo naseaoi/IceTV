@@ -10,6 +10,7 @@ import {
 import VideoCard from '@/components/VideoCard';
 import { VirtualizedGrid } from '@/components/VirtualizedGrid';
 import type { FavoriteItem } from '@/features/favorites/types';
+import { FAVORITE_RENDER_CHUNK } from '@/lib/favorites-count';
 
 export function FavoriteGrid({
   items,
@@ -41,7 +42,7 @@ export function FavoriteGrid({
         renderItem={(item) => <FavoriteVideoCard item={item} />}
         layout={POSTER_VIRTUAL_GRID_LAYOUT}
         fallbackClassName={POSTER_GRID_CLASS}
-        fallbackCount={48}
+        fallbackCount={FAVORITE_RENDER_CHUNK}
       />
     );
   }

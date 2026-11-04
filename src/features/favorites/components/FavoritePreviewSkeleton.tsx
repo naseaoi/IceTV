@@ -1,9 +1,20 @@
 import HomePosterCardSkeleton from '@/components/HomePosterCardSkeleton';
 import ScrollableRow from '@/components/ScrollableRow';
 import { FAVORITE_PREVIEW_EMPTY_HEIGHT_CLASS } from '@/features/favorites/lib/card-layout';
+import {
+  clampFavoriteSkeletonCount,
+  FAVORITE_PREVIEW_LIMIT,
+} from '@/lib/favorites-count';
 
-export function FavoritePreviewSkeleton({ count = 6 }: { count?: number }) {
-  const skeletonCount = Math.max(0, Math.floor(count));
+export function FavoritePreviewSkeleton({
+  count = FAVORITE_PREVIEW_LIMIT,
+}: {
+  count?: number;
+}) {
+  const skeletonCount = clampFavoriteSkeletonCount(
+    count,
+    FAVORITE_PREVIEW_LIMIT,
+  );
 
   return (
     <>

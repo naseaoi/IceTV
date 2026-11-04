@@ -1,18 +1,15 @@
 import { cookies } from 'next/headers';
 
-import { FAVORITE_ITEMS_COUNT_COOKIE } from '@/lib/favorites-count';
+import {
+  clampFavoriteSkeletonCount,
+  FAVORITE_ITEMS_COUNT_COOKIE,
+  FAVORITE_PREVIEW_LIMIT,
+} from '@/lib/favorites-count';
 
-const MAX_FAVORITE_SKELETON_COUNT = 8;
-
-export async function getFavoriteSkeletonCount() {
+export async function getFavoriteSkeletonCount(limit = FAVORITE_PREVIEW_LIMIT) {
   const cookieStore = await cookies();
-  const rawCount = Number(
-    cookieStore.get(FAVORITE_ITEMS_COUNT_COOKIE)?.value || 0,
+  return clampFavoriteSkeletonCount(
+    Number(cookieStore.get(FAVORITE_ITEMS_COUNT_COOKIE)?.value || 0),
+    limit,
   );
-
-  if (!Number.isFinite(rawCount) || rawCount <= 0) {
-    return 0;
-  }
-
-  return Math.min(Math.floor(rawCount), MAX_FAVORITE_SKELETON_COUNT);
 }

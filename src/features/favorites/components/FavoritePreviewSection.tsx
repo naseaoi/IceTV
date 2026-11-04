@@ -8,8 +8,7 @@ import ScrollableRow from '@/components/ScrollableRow';
 import VideoCard from '@/components/VideoCard';
 import { FavoritePreviewSkeleton } from '@/features/favorites/components/FavoritePreviewSkeleton';
 import type { FavoriteItem } from '@/features/favorites/types';
-
-const FAVORITE_PREVIEW_LIMIT = 20;
+import { FAVORITE_PREVIEW_LIMIT } from '@/lib/favorites-count';
 
 function FavoriteShelfEnd({ total }: { total: number }) {
   return (

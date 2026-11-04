@@ -33,8 +33,10 @@ export function useSearchExecution({
   const [initialSnapshot] = useState(() =>
     clientHydrated ? getSearchSnapshot(query) : null,
   );
-  const [isLoading, setIsLoading] = useState(false);
-  const [showResults, setShowResults] = useState(!!initialSnapshot);
+  const [isLoading, setIsLoading] = useState(
+    Boolean(query) && !initialSnapshot,
+  );
+  const [showResults, setShowResults] = useState(Boolean(query));
   const [searchResults, setSearchResults] = useState<SearchResult[]>(
     initialSnapshot?.results ?? [],
   );

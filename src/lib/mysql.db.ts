@@ -7,13 +7,42 @@ import type {
 } from 'mysql2/promise';
 import mysql from 'mysql2/promise';
 
+import type { InviteCode } from '@/features/admin/services/inviteCodes';
+import {
+  type AdminUserRow,
+  type AdminUserStorageQuery,
+  adminUserPage,
+  adminUserStatements,
+} from '@/features/admin/services/userQueryStorage';
+import type { FavoriteLibraryQuery } from '@/features/favorites/lib/library-query';
+import {
+  type LibraryCountsRow,
+  type LibraryRow,
+  buildLibraryPage,
+  FAVORITE_PROJECTION_COLUMNS,
+  favoriteProjection,
+  libraryStatements,
+} from '@/features/favorites/lib/library-storage';
+import {
+  type InviteCodeQuery,
+  importedInviteCodes,
+  INVITE_INSERT_SQL,
+  inviteValues,
+} from '@/lib/invite-code-storage';
+import { MysqlInviteCodeStore } from '@/lib/mysql-invite-code-store';
 import { MySqlResourceStore } from '@/lib/mysql-resource-store';
+import { MysqlUserAccessStore } from '@/lib/mysql-user-access';
 import {
   importedProfileValues,
   ReviewSocialStorage,
   SOCIAL_TABLES,
   socialSchema,
 } from '@/lib/review-social-storage';
+import {
+  canManageUserAccess,
+  removedAccessReferences,
+  userAccessSchema,
+} from '@/lib/user-access';
 import { mergeUserMessageState } from '@/lib/user-message-state';
 import {
   publicReview,
@@ -409,6 +438,7 @@ export class MySqlStorage implements IStorage {
   private async initializeSchema(): Promise<void> {
     const statements = [
       ...socialSchema('mysql'),
+      ...userAccessSchema('mysql'),
       `CREATE TABLE IF NOT EXISTS users (
         username VARCHAR(191) NOT NULL PRIMARY KEY,
         password TEXT NOT NULL
@@ -482,6 +512,16 @@ export class MySqlStorage implements IStorage {
         username VARCHAR(191) NOT NULL PRIMARY KEY,
         last_login_at BIGINT NOT NULL
       ) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci`,
+      `CREATE TABLE IF NOT EXISTS invite_codes (
+        code VARCHAR(191) NOT NULL PRIMARY KEY,
+        created_at BIGINT NOT NULL,
+        expires_at BIGINT NOT NULL,
+        created_by VARCHAR(191) NOT NULL,
+        max_uses INT NULL,
+        used_count INT NOT NULL DEFAULT 0,
+        KEY idx_invite_codes_created (created_at, code),
+        KEY idx_invite_codes_active (expires_at, max_uses, used_count)
+      ) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin`,
       `CREATE TABLE IF NOT EXISTS invite_code_usage (
         code VARCHAR(191) NOT NULL PRIMARY KEY,
         used_count INT NOT NULL DEFAULT 0
@@ -551,8 +591,81 @@ export class MySqlStorage implements IStorage {
           throw error;
       }
     }
+    await this.migrateFavoriteProjection();
     await this.backfillMissingLoginActivity();
     await this.backfillUserProfiles();
+    const accessConnection = await this.pool.getConnection();
+    try {
+      await accessConnection.beginTransaction();
+      await new MysqlUserAccessStore(accessConnection, true).migrate();
+      await accessConnection.commit();
+    } catch (error) {
+      await accessConnection.rollback();
+      throw error;
+    } finally {
+      accessConnection.release();
+    }
+    await this.invites.migrate();
+  }
+
+  private async migrateFavoriteProjection(): Promise<void> {
+    const [columns] = await this.pool.query<RowDataPacket[]>(
+      'SHOW COLUMNS FROM favorites',
+    );
+    for (const [name, type] of Object.entries({
+      title_norm: 'TEXT COLLATE utf8mb4_bin',
+      year_norm: 'TEXT COLLATE utf8mb4_bin',
+      year_number: 'DOUBLE',
+      search_text: 'LONGTEXT COLLATE utf8mb4_bin',
+      saved_at: 'DOUBLE',
+      library_valid: 'TINYINT NOT NULL DEFAULT 0',
+      projection_version: 'INT NOT NULL DEFAULT 0',
+    })) {
+      if (columns.some((column) => column.Field === name)) continue;
+      try {
+        await this.pool.execute(
+          `ALTER TABLE favorites ADD COLUMN ${name} ${type}`,
+        );
+      } catch (error) {
+        if ((error as { code?: string }).code !== 'ER_DUP_FIELDNAME')
+          throw error;
+      }
+    }
+    const [indexes] = await this.pool.query<RowDataPacket[]>(
+      'SHOW INDEX FROM favorites',
+    );
+    for (const [name, columns] of Object.entries({
+      idx_favorites_saved: 'username, saved_at, favorite_key',
+      idx_favorites_work: 'username, title_norm(191), year_norm(16)',
+      idx_favorites_projection: 'projection_version',
+    })) {
+      if (indexes.some((index) => index.Key_name === name)) continue;
+      try {
+        await this.pool.execute(
+          `CREATE INDEX ${name} ON favorites (${columns})`,
+        );
+      } catch (error) {
+        if ((error as { code?: string }).code !== 'ER_DUP_KEYNAME') throw error;
+      }
+    }
+    for (;;) {
+      const [rows] = await this.pool.query<RowDataPacket[]>(
+        'SELECT username, favorite_key, favorite_json FROM favorites WHERE projection_version = 0 LIMIT 250',
+      );
+      if (rows.length === 0) break;
+      for (const row of rows) {
+        // CAS 防止回填覆盖同时发生的收藏更新；另一实例已经完成的行同样跳过。
+        await this.pool.execute(
+          `UPDATE favorites SET ${FAVORITE_PROJECTION_COLUMNS.map((column) => `${column} = ?`).join(', ')} WHERE username = ? AND favorite_key = ? AND projection_version = 0 AND BINARY favorite_json = BINARY ?`,
+          [
+            ...favoriteProjection(row.favorite_key, row.favorite_json),
+            row.username,
+            row.favorite_key,
+            row.favorite_json,
+          ],
+        );
+      }
+    }
   }
 
   private async backfillUserProfiles(
@@ -842,10 +955,15 @@ export class MySqlStorage implements IStorage {
     await this.ensureInitialized();
     const username = normalizeUsername(userName);
     await this.pool.execute(
-      `INSERT INTO favorites (username, favorite_key, favorite_json)
-       VALUES (?, ?, ?)
-       ON DUPLICATE KEY UPDATE favorite_json = VALUES(favorite_json)`,
-      [username, key, JSON.stringify(favorite)],
+      `INSERT INTO favorites (username, favorite_key, favorite_json, ${FAVORITE_PROJECTION_COLUMNS.join(', ')})
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+       ON DUPLICATE KEY UPDATE favorite_json = VALUES(favorite_json), ${FAVORITE_PROJECTION_COLUMNS.map((column) => `${column} = VALUES(${column})`).join(', ')}`,
+      [
+        username,
+        key,
+        JSON.stringify(favorite),
+        ...favoriteProjection(key, JSON.stringify(favorite)),
+      ],
     );
   }
 
@@ -859,11 +977,17 @@ export class MySqlStorage implements IStorage {
     const username = normalizeUsername(userName);
     const [result] = await this.pool.execute(
       `UPDATE favorites
-       SET favorite_json = ?
+       SET favorite_json = ?, ${FAVORITE_PROJECTION_COLUMNS.map((column) => `${column} = ?`).join(', ')}
        WHERE username = ?
          AND favorite_key = ?
          AND BINARY favorite_json = BINARY ?`,
-      [JSON.stringify(favorite), username, key, snapshot],
+      [
+        JSON.stringify(favorite),
+        ...favoriteProjection(key, JSON.stringify(favorite)),
+        username,
+        key,
+        snapshot,
+      ],
     );
     return Number((result as { affectedRows?: number }).affectedRows || 0) > 0;
   }
@@ -931,6 +1055,7 @@ export class MySqlStorage implements IStorage {
     limit: number,
     cursorTime?: number,
     cursorKey?: string,
+    includeLive = true,
   ): Promise<FavoritePage> {
     await this.ensureInitialized();
     const username = normalizeUsername(userName);
@@ -944,6 +1069,7 @@ export class MySqlStorage implements IStorage {
            LEFT JOIN play_records p
              ON p.username = f.username AND p.record_key = f.favorite_key
            WHERE f.username = ?
+             AND (? = 1 OR ${MYSQL_NON_LIVE_FAVORITE_WHERE})
              AND (${saveTimeExpression} < ?
                OR (${saveTimeExpression} = ? AND f.favorite_key < ?))
            ORDER BY ${saveTimeExpression} DESC, f.favorite_key DESC
@@ -953,17 +1079,54 @@ export class MySqlStorage implements IStorage {
            LEFT JOIN play_records p
              ON p.username = f.username AND p.record_key = f.favorite_key
            WHERE f.username = ?
+             AND (? = 1 OR ${MYSQL_NON_LIVE_FAVORITE_WHERE})
            ORDER BY ${saveTimeExpression} DESC, f.favorite_key DESC
            LIMIT ?`,
       hasCursor
-        ? [username, cursorTime, cursorTime, cursorKey, limit + 1]
-        : [username, limit + 1],
+        ? [
+            username,
+            Number(includeLive),
+            cursorTime,
+            cursorTime,
+            cursorKey,
+            limit + 1,
+          ]
+        : [username, Number(includeLive), limit + 1],
     );
     const countQuery = this.pool.query<
       Array<RowDataPacket & { count: number }>
-    >('SELECT COUNT(*) AS count FROM favorites WHERE username = ?', [username]);
+    >(
+      `SELECT COUNT(*) AS count FROM favorites
+       WHERE username = ? AND (? = 1 OR ${MYSQL_NON_LIVE_FAVORITE_WHERE})`,
+      [username, Number(includeLive)],
+    );
     const [[rows], [countRows]] = await Promise.all([rowsQuery, countQuery]);
     return buildFavoritePage(rows, countRows[0]?.count || 0, limit);
+  }
+
+  async getFavoriteLibraryPage(userName: string, query: FavoriteLibraryQuery) {
+    await this.ensureInitialized();
+    const username = normalizeUsername(userName);
+    const sql = libraryStatements('mysql', username, query);
+    const connection = await this.pool.getConnection();
+    try {
+      await connection.query('SET TRANSACTION ISOLATION LEVEL REPEATABLE READ');
+      await connection.beginTransaction();
+      const [counts] = await connection.query<
+        (LibraryCountsRow & RowDataPacket)[]
+      >(sql.counts, sql.countParams);
+      const [rows] = await connection.query<(LibraryRow & RowDataPacket)[]>(
+        sql.page,
+        sql.pageParams,
+      );
+      await connection.commit();
+      return buildLibraryPage(username, query, rows, counts[0]);
+    } catch (error) {
+      await connection.rollback();
+      throw error;
+    } finally {
+      connection.release();
+    }
   }
 
   async deleteFavorite(userName: string, key: string): Promise<void> {
@@ -1092,7 +1255,16 @@ export class MySqlStorage implements IStorage {
     ...args: Parameters<IStorage['getReviewReportPage']>
   ): ReturnType<IStorage['getReviewReportPage']> {
     await this.ensureInitialized();
-    return this.socialFor().getReviewReportPage(...args);
+    return this.withTransaction((connection) =>
+      this.socialFor(connection).getReviewReportPage(...args),
+    );
+  }
+
+  async getFollowReviewMessageCount(
+    ...args: Parameters<IStorage['getFollowReviewMessageCount']>
+  ): Promise<number> {
+    await this.ensureInitialized();
+    return this.socialFor().getFollowReviewMessageCount(...args);
   }
 
   async getFollowReviewMessages(
@@ -1192,6 +1364,32 @@ export class MySqlStorage implements IStorage {
     });
   }
 
+  async getMyVideoReviewPage(
+    ...args: Parameters<IStorage['getMyVideoReviewPage']>
+  ): ReturnType<IStorage['getMyVideoReviewPage']> {
+    await this.ensureInitialized();
+    return this.socialFor().getMyVideoReviewPage(...args);
+  }
+  async getMyVideoReviewCount(
+    ...args: Parameters<IStorage['getMyVideoReviewCount']>
+  ): ReturnType<IStorage['getMyVideoReviewCount']> {
+    await this.ensureInitialized();
+    return this.socialFor().getMyVideoReviewCount(...args);
+  }
+  async getMyVideoReviewRatings(
+    ...args: Parameters<IStorage['getMyVideoReviewRatings']>
+  ): ReturnType<IStorage['getMyVideoReviewRatings']> {
+    await this.ensureInitialized();
+    return this.socialFor().getMyVideoReviewRatings(...args);
+  }
+  async getWorkVideoReviewPage(
+    ...args: Parameters<IStorage['getWorkVideoReviewPage']>
+  ): ReturnType<IStorage['getWorkVideoReviewPage']> {
+    return this.withTransaction((connection) =>
+      this.socialFor(connection).getWorkVideoReviewPage(...args),
+    );
+  }
+
   async getAllVideoReviews(userName: string): Promise<VideoReview[]> {
     await this.ensureInitialized();
     const [rows] = await this.pool.query<(VideoReviewRow & RowDataPacket)[]>(
@@ -1266,6 +1464,10 @@ export class MySqlStorage implements IStorage {
         [username, Date.now()],
       );
       await this.socialFor(connection).ensureUserProfile(username);
+      await new MysqlUserAccessStore(connection, true).put({
+        username,
+        role: 'user',
+      });
       if (nickname !== undefined)
         await this.socialFor(connection).updateUserProfile(username, {
           nickname,
@@ -1319,9 +1521,88 @@ export class MySqlStorage implements IStorage {
     );
   }
 
-  async deleteUser(userName: string): Promise<void> {
+  async deleteUser(
+    userName: string,
+    permissions?: Parameters<IStorage['deleteUser']>[1],
+  ): Promise<void> {
+    if (!(await this.deleteManagedUser(userName, undefined, permissions)))
+      throw new Error('用户权限已变化，请刷新后重试');
+  }
+
+  async getUserAccess(username: string) {
+    await this.ensureInitialized();
+    return new MysqlUserAccessStore(this.pool).get(username);
+  }
+
+  async getAllUserAccess() {
+    await this.ensureInitialized();
+    return new MysqlUserAccessStore(this.pool).all();
+  }
+
+  async updateUserAccess(...args: Parameters<IStorage['updateUserAccess']>) {
+    return this.withTransaction((connection) =>
+      new MysqlUserAccessStore(connection, true).update(...args),
+    );
+  }
+
+  async removeUserGroup(group: string) {
+    return this.withTransaction((connection) =>
+      new MysqlUserAccessStore(connection, true).removeGroup(group),
+    );
+  }
+
+  async removeUserSource(source: string) {
+    return this.withTransaction((connection) =>
+      new MysqlUserAccessStore(connection, true).removeSource(source),
+    );
+  }
+
+  async deleteUserIfInactive(
+    userName: string,
+    before: number,
+    operatorUsername: string,
+  ): Promise<boolean> {
+    return this.deleteManagedUser(userName, { before, operatorUsername });
+  }
+
+  private async deleteManagedUser(
+    userName: string,
+    guard?: { before: number; operatorUsername: string },
+    permissions?: Parameters<IStorage['deleteUser']>[1],
+  ): Promise<boolean> {
     const username = normalizeUsername(userName);
-    await this.withTransaction(async (connection) => {
+    return this.withTransaction(async (connection) => {
+      if (permissions) {
+        const access = await new MysqlUserAccessStore(connection, true).get(
+          username,
+        );
+        if (
+          !access ||
+          !canManageUserAccess(access, { ...permissions, excludeSelf: true })
+        )
+          return false;
+      }
+      if (guard) {
+        const access = await new MysqlUserAccessStore(connection, true).get(
+          username,
+        );
+        const [activity] = await connection.query<RowDataPacket[]>(
+          'SELECT last_login_at FROM user_login_activity WHERE username = ? FOR UPDATE',
+          [username],
+        );
+        const [users] = await connection.query<RowDataPacket[]>(
+          'SELECT username FROM users WHERE username = ? FOR UPDATE',
+          [username],
+        );
+        if (
+          access?.role !== 'user' ||
+          username === normalizeUsername(guard.operatorUsername) ||
+          !activity[0]?.last_login_at ||
+          Number(activity[0].last_login_at) > guard.before ||
+          !users.length
+        )
+          return false;
+      }
       await connection.execute('DELETE FROM user_profiles WHERE username = ?', [
         username,
       ]);
@@ -1337,6 +1618,13 @@ export class MySqlStorage implements IStorage {
         'DELETE FROM video_review_reports WHERE author = ? OR reporter = ?',
         [username, username],
       );
+      await connection.execute(
+        'DELETE FROM user_group_members WHERE username = ?',
+        [username],
+      );
+      await connection.execute('DELETE FROM user_access WHERE username = ?', [
+        username,
+      ]);
       await connection.execute('DELETE FROM users WHERE username = ?', [
         username,
       ]);
@@ -1376,6 +1664,7 @@ export class MySqlStorage implements IStorage {
         'DELETE FROM user_danmaku_settings WHERE username = ?',
         [username],
       );
+      return true;
     });
   }
 
@@ -1415,53 +1704,50 @@ export class MySqlStorage implements IStorage {
     return result;
   }
 
-  // maxUses 为 0 表示不限次数，seedCount 用于承接配置里的历史用量
-  async reserveInviteCodeUse(
-    code: string,
-    maxUses: number,
-    seedCount = 0,
-  ): Promise<boolean> {
-    await this.ensureInitialized();
-    await this.pool.execute(
-      'INSERT IGNORE INTO invite_code_usage (code, used_count) VALUES (?, ?)',
-      [code, Math.max(0, seedCount)],
-    );
-    const [result] = await this.pool.execute(
-      maxUses
-        ? 'UPDATE invite_code_usage SET used_count = used_count + 1 WHERE code = ? AND used_count < ?'
-        : 'UPDATE invite_code_usage SET used_count = used_count + 1 WHERE code = ?',
-      maxUses ? [code, maxUses] : [code],
-    );
-    return Number((result as { affectedRows?: number }).affectedRows || 0) > 0;
+  private get invites() {
+    return new MysqlInviteCodeStore(this.pool);
   }
 
+  async getAllInviteCodes() {
+    await this.ensureInitialized();
+    return this.invites.all();
+  }
+  async queryInviteCodes(query: InviteCodeQuery) {
+    await this.ensureInitialized();
+    return this.invites.page(query);
+  }
+  async countActiveInviteCodes() {
+    await this.ensureInitialized();
+    return this.invites.countActive();
+  }
+  async createInviteCode(item: InviteCode) {
+    await this.ensureInitialized();
+    return this.invites.create(item);
+  }
+  async deleteInviteCode(code: string) {
+    await this.ensureInitialized();
+    return this.invites.delete(code);
+  }
+  async reserveInviteCodeUse(code: string): Promise<boolean> {
+    await this.ensureInitialized();
+    return this.invites.reserve(code);
+  }
   async releaseInviteCodeUse(code: string): Promise<void> {
     await this.ensureInitialized();
-    await this.pool.execute(
-      'UPDATE invite_code_usage SET used_count = used_count - 1 WHERE code = ? AND used_count > 0',
-      [code],
-    );
+    await this.invites.release(code);
   }
 
   async getAllInviteCodeUsage(): Promise<Record<string, number>> {
-    await this.ensureInitialized();
-    const [rows] = await this.pool.query<JsonRow[]>(
-      'SELECT code, used_count FROM invite_code_usage',
+    return Object.fromEntries(
+      (await this.getAllInviteCodes()).map((item) => [
+        item.code,
+        item.usedCount || 0,
+      ]),
     );
-    const result: Record<string, number> = {};
-    for (const row of rows) {
-      if (typeof row.code === 'string') {
-        result[row.code] = Number(row.used_count || 0);
-      }
-    }
-    return result;
   }
 
   async deleteInviteCodeUsage(code: string): Promise<void> {
-    await this.ensureInitialized();
-    await this.pool.execute('DELETE FROM invite_code_usage WHERE code = ?', [
-      code,
-    ]);
+    await this.deleteInviteCode(code);
   }
 
   async getSearchHistory(userName: string): Promise<string[]> {
@@ -1516,6 +1802,45 @@ export class MySqlStorage implements IStorage {
       'DELETE FROM search_history WHERE username = ? AND keyword = ?',
       [username, keyword],
     );
+  }
+
+  async getAdminUserPage(query: AdminUserStorageQuery) {
+    const sql = adminUserStatements('mysql', query);
+    return this.withTransaction(async (connection) => {
+      const [counts] = await connection.query<RowDataPacket[]>(
+        sql.count,
+        sql.countParams,
+      );
+      const [rows] = await connection.query<(RowDataPacket & AdminUserRow)[]>(
+        sql.rows,
+        sql.params,
+      );
+      return adminUserPage(rows, Number(counts[0].total), sql.scope, sql.limit);
+    });
+  }
+
+  async compareAndSetAdminConfig(
+    expected: AdminConfig | null,
+    config: AdminConfig,
+  ): Promise<boolean> {
+    return this.withTransaction(async (connection) => {
+      const [rows] = await connection.query<RowDataPacket[]>(
+        'SELECT config_json FROM admin_config WHERE id = 1 FOR UPDATE',
+      );
+      const current = rows[0]
+        ? parseJsonValue<AdminConfig>(rows[0].config_json)
+        : null;
+      if (JSON.stringify(current) !== JSON.stringify(expected)) return false;
+      const removed = removedAccessReferences(current, config);
+      const access = new MysqlUserAccessStore(connection, true);
+      for (const group of removed.groups) await access.removeGroup(group);
+      for (const source of removed.sources) await access.removeSource(source);
+      await connection.execute(
+        'INSERT INTO admin_config (id, config_json) VALUES (1, ?) ON DUPLICATE KEY UPDATE config_json = VALUES(config_json)',
+        [JSON.stringify(config)],
+      );
+      return true;
+    });
   }
 
   async getAllUsers(): Promise<string[]> {
@@ -2160,6 +2485,8 @@ export class MySqlStorage implements IStorage {
 
   async clearAllData(): Promise<void> {
     await this.withTransaction(async (connection) => {
+      await connection.execute('DELETE FROM user_group_members');
+      await connection.execute('DELETE FROM user_access');
       await connection.execute('DELETE FROM users');
       await connection.execute('DELETE FROM play_records');
       await connection.execute('DELETE FROM favorites');
@@ -2174,6 +2501,7 @@ export class MySqlStorage implements IStorage {
       await connection.execute('DELETE FROM user_message_state');
       await connection.execute('DELETE FROM user_login_activity');
       await connection.execute('DELETE FROM invite_code_usage');
+      await connection.execute('DELETE FROM invite_codes');
       await connection.execute('DELETE FROM user_danmaku_episodes');
       await connection.execute('DELETE FROM user_danmaku_settings');
       await connection.execute('DELETE FROM shared_cache');
@@ -2238,6 +2566,8 @@ export class MySqlStorage implements IStorage {
       data.adminConfig?.SiteConfig?.SearchHistoryLimit,
     );
     await this.withTransaction(async (connection) => {
+      await connection.execute('DELETE FROM user_group_members');
+      await connection.execute('DELETE FROM user_access');
       await connection.execute('DELETE FROM users');
       await connection.execute('DELETE FROM play_records');
       await connection.execute('DELETE FROM favorites');
@@ -2252,24 +2582,25 @@ export class MySqlStorage implements IStorage {
       await connection.execute('DELETE FROM user_message_state');
       await connection.execute('DELETE FROM user_login_activity');
       await connection.execute('DELETE FROM invite_code_usage');
+      await connection.execute('DELETE FROM invite_codes');
       await connection.execute('DELETE FROM user_danmaku_episodes');
       await connection.execute('DELETE FROM user_danmaku_settings');
       await connection.execute('DELETE FROM shared_cache');
 
+      const inviteCodes = importedInviteCodes(
+        data.adminConfig.UserConfig?.InviteCodes,
+        data.inviteCodeUsage,
+      );
+      const storedConfig = JSON.parse(
+        JSON.stringify(data.adminConfig),
+      ) as AdminConfig;
+      if (storedConfig.UserConfig) delete storedConfig.UserConfig.InviteCodes;
       await connection.execute(
         'INSERT INTO admin_config (id, config_json) VALUES (1, ?)',
-        [JSON.stringify(data.adminConfig)],
+        [JSON.stringify(storedConfig)],
       );
-
-      await insertRowsInBatches(
-        connection,
-        'invite_code_usage',
-        ['code', 'used_count'],
-        Object.entries(data.inviteCodeUsage).map(([code, usedCount]) => [
-          code,
-          usedCount,
-        ]),
-      );
+      for (const item of inviteCodes)
+        await connection.execute(INVITE_INSERT_SQL, inviteValues(item));
 
       const routeStatUpdatedAt = Date.now();
       await insertRowsInBatches(
@@ -2326,6 +2657,7 @@ export class MySqlStorage implements IStorage {
         'username',
         'favorite_key',
         'favorite_json',
+        ...FAVORITE_PROJECTION_COLUMNS,
       ]);
       const videoReviews = createRowBatcher(connection, 'video_reviews', [
         'username',
@@ -2394,7 +2726,12 @@ export class MySqlStorage implements IStorage {
         }
 
         for (const [key, favorite] of Object.entries(userData.favorites)) {
-          await favorites.add([username, key, JSON.stringify(favorite)]);
+          await favorites.add([
+            username,
+            key,
+            JSON.stringify(favorite),
+            ...favoriteProjection(key, JSON.stringify(favorite)),
+          ]);
         }
 
         for (const review of userData.videoReviews ?? []) {
@@ -2452,6 +2789,7 @@ export class MySqlStorage implements IStorage {
       await playbackSessions.flush();
 
       await this.importSocialData(connection, data);
+      await new MysqlUserAccessStore(connection, true).migrate();
       await this.backfillMissingLoginActivity(connection);
       await this.backfillUserProfiles(connection);
     });

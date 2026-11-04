@@ -14,7 +14,7 @@ export interface HomeHeroItem extends DoubanItem, HomeHeroMeta {
   intro?: string;
 }
 
-const HERO_ITEM_LIMIT = 5;
+export const HERO_ITEM_LIMIT = 5;
 const HERO_MIN_RATE = 7;
 
 function rateOf(item: DoubanItem): number {

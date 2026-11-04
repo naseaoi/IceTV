@@ -9,7 +9,8 @@ import ProfileAvatar from '@/components/ProfileAvatar';
 import { ProfilePanel } from '@/components/user-menu/ProfilePanel';
 import { FollowList } from '@/features/profile/FollowList';
 import { getUserProfile } from '@/lib/profile.client';
-import { fetchMyVideoReviews } from '@/lib/video-reviews.client';
+import { VIDEO_REVIEWS_UPDATED_EVENT } from '@/lib/video-reviews';
+import { fetchMyVideoReviewCount } from '@/lib/video-reviews.client';
 
 interface MineStats {
   reviews: number;
@@ -45,9 +46,18 @@ export function MineProfileHeaderSkeleton() {
         <div className='flex h-8 items-center'>
           <div className='skeleton h-6 w-36 max-w-full rounded' />
         </div>
-        <div className='mt-1.5 flex h-5 items-center'>
-          <div className='skeleton h-3.5 w-44 max-w-full rounded' />
+        <div className='mt-1.5 flex flex-wrap gap-x-5 gap-y-1 text-sm'>
+          {['评价', '关注', '粉丝'].map((label) => (
+            <span key={label} className={STAT_CLASS}>
+              <StatValue value={undefined} />
+              {label}
+            </span>
+          ))}
         </div>
+      </div>
+      <div className='hidden shrink-0 items-center gap-2 md:flex'>
+        <div className='skeleton h-9 w-[106px] rounded-full' />
+        <div className='skeleton h-9 w-[108px] rounded-full' />
       </div>
     </div>
   );
@@ -66,20 +76,28 @@ export function MineProfileHeader({ actions }: { actions?: ReactNode }) {
   useEffect(() => {
     if (!profileId) return;
     let active = true;
-    Promise.all([getUserProfile(profileId), fetchMyVideoReviews()])
-      .then(([profile, reviews]) => {
-        if (!active) return;
-        setStats({
-          reviews: reviews.length,
-          following: profile.followingCount,
-          followers: profile.followerCount,
+    let generation = 0;
+    const refresh = () => {
+      const current = ++generation;
+      Promise.all([getUserProfile(profileId), fetchMyVideoReviewCount()])
+        .then(([profile, count]) => {
+          if (!active || current !== generation) return;
+          setStats({
+            reviews: count,
+            following: profile.followingCount,
+            followers: profile.followerCount,
+          });
+        })
+        .catch(() => {
+          if (active && current === generation) setStats(null);
         });
-      })
-      .catch(() => {
-        if (active) setStats(null);
-      });
+    };
+    setStats(undefined);
+    refresh();
+    window.addEventListener(VIDEO_REVIEWS_UPDATED_EVENT, refresh);
     return () => {
       active = false;
+      window.removeEventListener(VIDEO_REVIEWS_UPDATED_EVENT, refresh);
     };
   }, [profileId]);
 

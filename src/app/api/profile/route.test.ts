@@ -18,7 +18,7 @@ jest.mock('@/lib/db', () => ({
     getUserProfileView: jest.fn(),
     getUserPublicReviewPage: jest.fn(),
     getUserFollowPage: jest.fn(),
-    getAllFavorites: jest.fn(),
+    getFavoritePage: jest.fn(),
     setUserFollow: jest.fn(),
     setVideoReviewLike: jest.fn(),
     reportVideoReview: jest.fn(),
@@ -77,7 +77,11 @@ beforeEach(() => {
   });
   db.getUserPublicReviewPage.mockResolvedValue({ items: [], nextCursor: null });
   db.getUserFollowPage.mockResolvedValue({ items: [], nextCursor: null });
-  db.getAllFavorites.mockResolvedValue({});
+  db.getFavoritePage.mockResolvedValue({
+    items: [],
+    total: 0,
+    nextCursor: null,
+  });
 });
 
 it('returns only public profile fields and validates updates', async () => {
@@ -276,25 +280,40 @@ it('respects favorite privacy and excludes live and private fields', async () =>
   expect(await (await favorites.GET(request(), context)).json()).toEqual({
     hidden: true,
   });
-  expect(db.getAllFavorites).not.toHaveBeenCalled();
+  expect(db.getFavoritePage).not.toHaveBeenCalled();
   requireActiveUser.mockResolvedValue({ username: 'AUTHOR', role: 'user' });
-  db.getAllFavorites.mockResolvedValue({
-    'vod+1': {
-      title: 'Work',
-      year: '2026',
-      cover: '',
-      source_name: 'Source',
-      total_episodes: 1,
-      save_time: 10,
-      origin: 'vod',
-      secret: 'private',
-    },
-    'live+1': { title: 'Live', origin: 'live', save_time: 20 },
+  db.getFavoritePage.mockResolvedValue({
+    items: [
+      {
+        key: 'vod+1',
+        favorite: {
+          title: 'Work',
+          year: '2026',
+          cover: '',
+          source_name: 'Source',
+          total_episodes: 1,
+          save_time: 10,
+          origin: 'vod',
+          secret: 'private',
+        },
+        playRecord: { index: 2 },
+      },
+    ],
+    total: 1,
+    nextCursor: null,
   });
   const response = await (await favorites.GET(request(), context)).json();
   expect(response.hidden).toBe(false);
   expect(response.items).toHaveLength(1);
   expect(response.items[0]).not.toHaveProperty('secret');
+  expect(response.items[0]).not.toHaveProperty('playRecord');
+  expect(db.getFavoritePage).toHaveBeenCalledWith(
+    'author',
+    30,
+    undefined,
+    undefined,
+    false,
+  );
   expect((await reviews.GET(request(), context)).status).toBe(200);
   expect(
     (
@@ -310,6 +329,42 @@ it('respects favorite privacy and excludes live and private fields', async () =>
   ).toBe(400);
   db.getUserProfileById.mockResolvedValue(null);
   expect((await user.GET(request(), context)).status).toBe(404);
+});
+
+it('keeps public favorite cursors compatible and rejects malformed cursors', async () => {
+  db.getUserProfileById.mockResolvedValue({
+    username: 'author',
+    favorites_public: true,
+  });
+  const cursor = Buffer.from(JSON.stringify([10, 'vod+2'])).toString(
+    'base64url',
+  );
+  const nextCursor = Buffer.from(JSON.stringify([10, 'vod+1'])).toString(
+    'base64url',
+  );
+  db.getFavoritePage.mockResolvedValue({
+    items: [{ key: 'vod+1', favorite: { title: 'Work', save_time: 10 } }],
+    total: 3,
+    nextCursor: '10|vod+1',
+  });
+  const response = await favorites.GET(
+    request('GET', undefined, `?cursor=${cursor}`),
+    context,
+  );
+  expect((await response.json()).nextCursor).toBe(nextCursor);
+  expect(db.getFavoritePage).toHaveBeenCalledWith(
+    'author',
+    30,
+    10,
+    'vod+2',
+    false,
+  );
+  db.getFavoritePage.mockClear();
+  expect(
+    (await favorites.GET(request('GET', undefined, '?cursor=invalid'), context))
+      .status,
+  ).toBe(400);
+  expect(db.getFavoritePage).not.toHaveBeenCalled();
 });
 
 it('returns follow status and grouped admin reports and applies moderation', async () => {

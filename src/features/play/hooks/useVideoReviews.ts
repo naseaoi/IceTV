@@ -34,6 +34,8 @@ export interface VideoReviewsState {
   save: (draft: VideoReviewDraft) => Promise<void>;
   remove: () => Promise<void>;
   reloadSummary: () => void;
+  loadMoreReviews?: () => void;
+  reviewsLoadingMore?: boolean;
 }
 
 // 以作品身份为 key：换源后归一化标题与年份不变时沿用已加载的数据，不重复请求
@@ -54,6 +56,9 @@ export function useVideoReviews({
   const [summaryLoading, setSummaryLoading] = useState(false);
   const [summaryError, setSummaryError] = useState(false);
   const [summaryVersion, setSummaryVersion] = useState(0);
+  const [reviewsLoadingMore, setReviewsLoadingMore] = useState(false);
+  const moreInFlight = useRef(false);
+  const summaryGeneration = useRef(0);
 
   const latestRef = useRef({ title, year, cover, doubanId, sourceKey });
   latestRef.current = { title, year, cover, doubanId, sourceKey };
@@ -83,6 +88,15 @@ export function useVideoReviews({
   }, [hasWork, workKey]);
 
   useEffect(() => {
+    summaryGeneration.current += 1;
+    moreInFlight.current = false;
+    setReviewsLoadingMore(false);
+    return () => {
+      summaryGeneration.current += 1;
+    };
+  }, [summaryEnabled, summaryVersion, workKey]);
+
+  useEffect(() => {
     if (!hasWork || !summaryEnabled) return;
     const loadKey = `${workKey}\u0000${summaryVersion}`;
     if (summaryLoadedKeyRef.current === loadKey) return;
@@ -107,6 +121,47 @@ export function useVideoReviews({
       cancelled = true;
     };
   }, [hasWork, summaryEnabled, summaryVersion, workKey]);
+
+  const loadMoreReviews = useCallback(async () => {
+    if (!summary?.nextCursor || moreInFlight.current || summaryLoading) return;
+    const generation = summaryGeneration.current;
+    moreInFlight.current = true;
+    setReviewsLoadingMore(true);
+    setSummaryError(false);
+    try {
+      const page = await fetchWorkReviewSummary(
+        latestRef.current.title,
+        latestRef.current.year,
+        summary.nextCursor,
+      );
+      if (generation !== summaryGeneration.current) return;
+      setSummary((previous) =>
+        previous
+          ? {
+              ...page,
+              reviews: [
+                ...previous.reviews,
+                ...page.reviews.filter(
+                  (item) =>
+                    !previous.reviews.some(
+                      (existing) =>
+                        existing.author.profileId === item.author.profileId &&
+                        existing.year === item.year,
+                    ),
+                ),
+              ],
+            }
+          : page,
+      );
+    } catch {
+      if (generation === summaryGeneration.current) setSummaryError(true);
+    } finally {
+      if (generation === summaryGeneration.current) {
+        moreInFlight.current = false;
+        setReviewsLoadingMore(false);
+      }
+    }
+  }, [summary, summaryLoading]);
 
   const reloadSummary = useCallback(() => {
     setSummaryVersion((version) => version + 1);
@@ -145,5 +200,7 @@ export function useVideoReviews({
     save,
     remove,
     reloadSummary,
+    loadMoreReviews,
+    reviewsLoadingMore,
   };
 }

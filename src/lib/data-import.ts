@@ -1,6 +1,8 @@
 import { randomUUID } from 'crypto';
 
+import { importedInviteCodes } from '@/lib/invite-code-storage';
 import { importedAvatarSeed } from '@/lib/review-social-storage';
+import { mergeUserMessageState } from '@/lib/user-message-state';
 import { AdminConfig } from '@/types/admin';
 
 import { configSelfCheck } from './config';
@@ -280,7 +282,7 @@ function alignConfigOwner(
 ): void {
   if (!localOwner) return;
 
-  const users = config.UserConfig.Users;
+  const users = config.UserConfig.Users || [];
   const kept = users
     .filter((user) => {
       const name = normalizeUsername(user.username);
@@ -414,7 +416,12 @@ function normalizeSourceRouteStats(value: unknown): SourceRouteStatsBucket[] {
 
 function normalizeAdminConfig(value: unknown): AdminConfig {
   const cloned = cloneJson(requireObject(value, '管理员配置格式无效'));
+  const legacyInvites = (cloned as unknown as AdminConfig).UserConfig
+    ?.InviteCodes;
+  const legacyUsers = (cloned as unknown as AdminConfig).UserConfig?.Users;
   const config = configSelfCheck(cloned as AdminConfig);
+  config.UserConfig.Users = legacyUsers ?? [];
+  config.UserConfig.InviteCodes = importedInviteCodes(legacyInvites, {});
 
   requireObject(config.ConfigSubscribtion, '订阅配置格式无效');
   limitString(
@@ -820,9 +827,11 @@ function normalizeMessageState(value: unknown): UserMessageState {
       throw new ImportValidationError('关注动态已读标识无效');
     result.followReviewReadIds = [
       ...new Set(input.followReviewReadIds as string[]),
-    ].slice(-200);
+    ];
   }
-  return result;
+  return mergeUserMessageState(result, {
+    followReviewReadAt: result.followReviewReadAt ?? 0,
+  });
 }
 
 // 超出上限时保留最新的会话，避免整体导入失败

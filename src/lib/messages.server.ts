@@ -141,7 +141,14 @@ export async function getUserMessagePage(
 ): Promise<UserMessagePage> {
   const decodedCursor = decodeCursor(cursor);
   const { announcement, state } = await getAnnouncementContext(userName);
-  const [trackingPage, followed] = await Promise.all([
+  const now = Date.now();
+  const followArgs = [
+    userName,
+    state.followReviewReadAt ?? 0,
+    state.followReviewReadIds ?? [],
+    now,
+  ] as const;
+  const [trackingPage, followed, followCount] = await Promise.all([
     db.getUnreadTrackingPlayRecordPage(
       userName,
       limit + 1,
@@ -153,12 +160,11 @@ export async function getUserMessagePage(
           : '\u0001'
         : undefined,
     ),
-    db.getFollowReviewMessages(
-      userName,
-      state.followReviewReadAt ?? 0,
-      state.followReviewReadIds ?? [],
-      Date.now(),
-    ),
+    db.getFollowReviewMessages(...followArgs, {
+      limit: limit + 1,
+      before: decodedCursor,
+    }),
+    db.getFollowReviewMessageCount(...followArgs),
   ]);
   const includeAnnouncement = !decodedCursor && !!announcement;
   const pageLimit = Math.max(0, limit - (includeAnnouncement ? 1 : 0));
@@ -185,7 +191,7 @@ export async function getUserMessagePage(
       ...(includeAnnouncement && announcement ? [announcement] : []),
       ...page,
     ],
-    total: trackingPage.total + followed.length + (announcement ? 1 : 0),
+    total: trackingPage.total + followCount + (announcement ? 1 : 0),
     nextCursor: hasMore
       ? page.length
         ? encodeCursor(page[page.length - 1])
@@ -202,17 +208,22 @@ export async function getUserMessageSummary(
     db.getUnreadTrackingPlayRecordPage(userName, 1),
   ]);
   const latestTracking = buildTrackingMessages(trackingPage.items)[0] || null;
-  const followed = await db.getFollowReviewMessages(
+  const followArgs = [
     userName,
     state.followReviewReadAt ?? 0,
     state.followReviewReadIds ?? [],
     Date.now(),
-  );
-  const unreadCount =
-    trackingPage.total + followed.length + (announcement ? 1 : 0);
+  ] as const;
+  const [followed, followCount] = await Promise.all([
+    db.getFollowReviewMessages(...followArgs, { limit: 1 }),
+    db.getFollowReviewMessageCount(...followArgs),
+  ]);
+  const unreadCount = trackingPage.total + followCount + (announcement ? 1 : 0);
   const revision = hashValue(
     [
       unreadCount,
+      trackingPage.total,
+      followCount,
       announcement?.id ?? '',
       latestTracking?.id ?? '',
       ...followed.map((message) => message.id).sort(),
@@ -221,7 +232,7 @@ export async function getUserMessageSummary(
   return {
     unreadCount,
     trackingUnreadCount: trackingPage.total,
-    followReviewUnreadCount: followed.length,
+    followReviewUnreadCount: followCount,
     revision,
     announcement,
     latestTracking,
@@ -249,6 +260,7 @@ export async function readUserMessage(
       state.followReviewReadAt ?? 0,
       state.followReviewReadIds ?? [],
       Date.now(),
+      { id: messageId, limit: 1 },
     );
     const message = messages.find((item) => item.id === messageId);
     if (!message) return null;

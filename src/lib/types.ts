@@ -146,7 +146,20 @@ export interface AdminVideoReviewPage {
   nextCursor: string | null;
 }
 
+export type VideoReviewRating = Pick<
+  VideoReview,
+  'title_norm' | 'year' | 'rating'
+>;
+export interface MyVideoReviewPage {
+  items: VideoReview[];
+  nextCursor: string | null;
+  total: number;
+  counts: Record<import('@/lib/video-reviews').MyReviewFilter, number>;
+}
+
 export interface WorkReviewSummary {
+  nextCursor?: string | null;
+  reviewCount?: number;
   average: number | null;
   count: number;
   // 长度 10，下标 i 统计评分落在 [i+1, i+2) 的人数，10.0 计入下标 9
@@ -383,7 +396,14 @@ export interface IStorage {
     limit: number,
     cursorTime?: number,
     cursorKey?: string,
+    includeLive?: boolean,
   ): Promise<FavoritePage>;
+  getFavoriteLibraryPage(
+    userName: string,
+    query: import('@/features/favorites/lib/library-query').FavoriteLibraryQuery,
+  ): Promise<
+    import('@/features/favorites/lib/library-query').FavoriteLibraryPage
+  >;
   deleteFavorite(userName: string, key: string): Promise<void>;
   deleteAllFavorites(userName: string): Promise<void>;
 
@@ -400,6 +420,18 @@ export interface IStorage {
     publicOnly?: boolean,
   ): Promise<void>;
   getAllVideoReviews(userName: string): Promise<VideoReview[]>;
+  getMyVideoReviewPage(
+    userName: string,
+    query?: import('@/lib/video-reviews').MyReviewQuery,
+  ): Promise<MyVideoReviewPage>;
+  getMyVideoReviewCount(userName: string): Promise<number>;
+  getMyVideoReviewRatings(userName: string): Promise<VideoReviewRating[]>;
+  getWorkVideoReviewPage(
+    titleNorm: string,
+    year: string,
+    viewer: string,
+    cursor?: string,
+  ): Promise<WorkReviewSummary>;
   getPublicVideoReviewsForWork(
     titleNorm: string,
     year: string,
@@ -471,7 +503,14 @@ export interface IStorage {
     readAt: number,
     readIds: string[],
     now: number,
+    query?: import('@/lib/follow-review-identity').FollowReviewQuery,
   ): Promise<import('@/lib/message-types').FollowReviewUserMessage[]>;
+  getFollowReviewMessageCount(
+    username: string,
+    readAt: number,
+    readIds: string[],
+    now: number,
+  ): Promise<number>;
   getUserSocialData(
     username: string,
   ): Promise<
@@ -490,7 +529,26 @@ export interface IStorage {
   // 修改用户密码
   changePassword(userName: string, newPassword: string): Promise<void>;
   // 删除用户（包括密码、搜索历史、播放记录、收藏夹）
-  deleteUser(userName: string): Promise<void>;
+  deleteUser(
+    userName: string,
+    guard?: import('@/lib/user-access').UserAccessGuard,
+  ): Promise<void>;
+  getUserAccess(
+    username: string,
+  ): Promise<import('@/lib/user-access').UserAccess | null>;
+  getAllUserAccess(): Promise<import('@/lib/user-access').UserAccess[]>;
+  updateUserAccess(
+    usernames: string[],
+    patch: import('@/lib/user-access').UserAccessPatch,
+    guard?: import('@/lib/user-access').UserAccessGuard,
+  ): Promise<number>;
+  removeUserGroup(group: string): Promise<void>;
+  removeUserSource(source: string): Promise<void>;
+  deleteUserIfInactive(
+    userName: string,
+    before: number,
+    operatorUsername: string,
+  ): Promise<boolean>;
 
   // 搜索历史相关
   getSearchHistory(userName: string): Promise<string[]>;
@@ -502,6 +560,13 @@ export interface IStorage {
   deleteSearchHistory(userName: string, keyword?: string): Promise<void>;
 
   // 用户列表
+  getAdminUserPage(
+    query: import('@/features/admin/services/userQueryStorage').AdminUserStorageQuery,
+  ): Promise<import('@/features/admin/lib/user-query').AdminUserPage>;
+  compareAndSetAdminConfig(
+    expected: AdminConfig | null,
+    config: AdminConfig,
+  ): Promise<boolean>;
   getAllUsers(): Promise<string[]>;
   getAllUsersWithPasswords(): Promise<{ [username: string]: string }>;
 
@@ -517,12 +582,18 @@ export interface IStorage {
   getUserLastLogin(userName: string): Promise<number | null>;
   getAllUserLastLogins(): Promise<Record<string, number>>;
 
-  // 邀请码用量相关，与配置分离以支持并发注册
-  reserveInviteCodeUse(
-    code: string,
-    maxUses: number,
-    seedCount?: number,
-  ): Promise<boolean>;
+  getAllInviteCodes(): Promise<
+    import('@/features/admin/services/inviteCodes').InviteCode[]
+  >;
+  queryInviteCodes(
+    query: import('@/lib/invite-code-storage').InviteCodeQuery,
+  ): Promise<import('@/lib/invite-code-storage').InviteCodePage>;
+  countActiveInviteCodes(): Promise<number>;
+  createInviteCode(
+    item: import('@/features/admin/services/inviteCodes').InviteCode,
+  ): Promise<import('@/lib/invite-code-storage').InviteCodeCreateResult>;
+  deleteInviteCode(code: string): Promise<boolean>;
+  reserveInviteCodeUse(code: string): Promise<boolean>;
   releaseInviteCodeUse(code: string): Promise<void>;
   getAllInviteCodeUsage(): Promise<Record<string, number>>;
   deleteInviteCodeUsage(code: string): Promise<void>;

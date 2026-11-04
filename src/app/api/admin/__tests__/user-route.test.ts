@@ -28,6 +28,8 @@ jest.mock('@/lib/config', () => {
 
 jest.mock('@/lib/db', () => ({
   db: {
+    getUserAccess: jest.fn(),
+    updateUserAccess: jest.fn(),
     checkUserExist: jest.fn(),
     registerUser: jest.fn(),
   },
@@ -158,6 +160,13 @@ describe('admin user route', () => {
     });
     (getConfig as jest.Mock).mockResolvedValue(createAdminConfig());
     (saveConfig as jest.Mock).mockResolvedValue(createAdminConfig());
+    (db.getUserAccess as jest.Mock).mockImplementation(
+      async (username) =>
+        (await getConfig()).UserConfig.Users?.find(
+          (user) => user.username === username,
+        ) || null,
+    );
+    (db.updateUserAccess as jest.Mock).mockResolvedValue(1);
   });
 
   it('rejects add when the user exists only in the database', async () => {
@@ -197,19 +206,12 @@ describe('admin user route', () => {
 
     expect(response.status).toBe(200);
     expect(db.registerUser).toHaveBeenCalledWith('new-user', 'new-password');
-    expect(saveConfig).toHaveBeenCalledWith({
-      ...adminConfig,
-      UserConfig: {
-        ...adminConfig.UserConfig,
-        Users: [
-          {
-            username: 'new-user',
-            role: 'user',
-            tags: ['vip'],
-          },
-        ],
-      },
+    expect(db.updateUserAccess).toHaveBeenCalledWith(['new-user'], {
+      username: 'new-user',
+      role: 'user',
+      tags: ['vip'],
     });
+    expect(saveConfig).not.toHaveBeenCalled();
   });
 
   it('returns 409 when persisting hits a config conflict', async () => {
@@ -220,9 +222,8 @@ describe('admin user route', () => {
 
     const response = await POST(
       createRequest({
-        action: 'add',
-        targetUsername: 'new-user',
-        targetPassword: 'new-password',
+        action: 'setOpenRegister',
+        openRegister: true,
       }),
     );
 

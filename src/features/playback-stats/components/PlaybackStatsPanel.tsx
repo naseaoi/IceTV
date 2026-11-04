@@ -1,7 +1,7 @@
 'use client';
 
 import { useRouter } from 'next/navigation';
-import { type ReactNode, useEffect, useState } from 'react';
+import { type ReactNode, useEffect, useLayoutEffect, useState } from 'react';
 
 import CoverImage from '@/components/CoverImage';
 import { HOME_POSTER_CARD_CLASS } from '@/components/HomePosterCardSkeleton';
@@ -316,10 +316,14 @@ function TopWorks({ week }: { week: PlaybackPeriodStats }) {
   );
 }
 
+const useIsomorphicLayoutEffect =
+  typeof window !== 'undefined' ? useLayoutEffect : useEffect;
+
 export function PlaybackStatsPanel() {
-  const [stats, setStats] = useState<PlaybackPeriodStats | null>(() =>
-    getCachedPlaybackPeriodSnapshot('week'),
-  );
+  const [stats, setStats] = useState<PlaybackPeriodStats | null>(null);
+  useIsomorphicLayoutEffect(() => {
+    setStats(getCachedPlaybackPeriodSnapshot('week'));
+  }, []);
   const [failed, setFailed] = useState(false);
   const [selectedKey, setSelectedKey] = useState<string | null>(null);
 

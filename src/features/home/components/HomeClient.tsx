@@ -8,6 +8,7 @@ import ContinueWatching from '@/components/ContinueWatching';
 import GuestAnnouncement from '@/components/GuestAnnouncement';
 import HomePosterCardSkeleton, {
   HOME_POSTER_CARD_CLASS,
+  HOME_RECOMMENDATION_INITIAL_COUNT,
 } from '@/components/HomePosterCardSkeleton';
 import { PAGE_CONTAINER_CLASS } from '@/components/page-container';
 import PageLayout from '@/components/PageLayout';
@@ -28,7 +29,7 @@ import {
   writeHomeClientSnapshot,
 } from '../lib/home-client-cache';
 import { pickHomeHeroItems } from '../lib/home-hero';
-import { HomeHero } from './HomeHero';
+import { HomeHero, HomeHeroSkeleton } from './HomeHero';
 
 interface HomeClientProps {
   initialData: HomeInitialData;
@@ -49,9 +50,9 @@ type RecommendationLoadingState = {
 const RECOMMENDATION_UNAVAILABLE_MESSAGE = '暂时无法获取数据';
 
 function RecommendationSkeletonRow() {
-  return Array.from({ length: 8 }).map((_, index) => (
-    <HomePosterCardSkeleton key={index} variant='poster' />
-  ));
+  return Array.from({ length: HOME_RECOMMENDATION_INITIAL_COUNT }).map(
+    (_, index) => <HomePosterCardSkeleton key={index} variant='poster' />,
+  );
 }
 
 function RecommendationEmptyRow({ message }: { message: string }) {
@@ -95,7 +96,10 @@ function RecommendationSection({
           <ChevronRight className='h-4 w-4' />
         </Link>
       </div>
-      <ScrollableRow initialItemCount={8} mountBatchSize={8}>
+      <ScrollableRow
+        initialItemCount={HOME_RECOMMENDATION_INITIAL_COUNT}
+        mountBatchSize={HOME_RECOMMENDATION_INITIAL_COUNT}
+      >
         {loading ? (
           RecommendationSkeletonRow()
         ) : items.length > 0 ? (
@@ -373,9 +377,16 @@ export default function HomeClient({
     unavailable,
   ]);
 
+  const heroLoading =
+    heroItems.length === 0 && (loading.hotMovies || loading.hotTvShows);
+
   return (
-    <PageLayout transparentTopNav={heroItems.length > 0}>
-      <HomeHero items={heroItems} likelyMobile={likelyMobile} />
+    <PageLayout transparentTopNav={heroLoading || heroItems.length > 0}>
+      {heroLoading ? (
+        <HomeHeroSkeleton />
+      ) : (
+        <HomeHero items={heroItems} likelyMobile={likelyMobile} />
+      )}
       <div className='overflow-visible pb-2 pt-4 md:pt-2'>
         <div className={PAGE_CONTAINER_CLASS}>
           <div className='-mb-3 space-y-2 sm:-mb-6 sm:space-y-4'>

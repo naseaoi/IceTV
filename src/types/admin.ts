@@ -47,7 +47,8 @@ export interface AdminConfig {
     DanmakuRequestTimeoutSeconds: number;
   };
   UserConfig: {
-    Users: {
+    TotalUsers?: number;
+    Users?: {
       username: string;
       role: 'user' | 'admin' | 'owner';
       banned?: boolean;
@@ -56,6 +57,7 @@ export interface AdminConfig {
     }[];
     OpenRegister?: boolean;
     RequireInviteCode?: boolean;
+    activeInviteCodeCount?: number;
     InviteCodes?: {
       code: string;
       createdAt: number;

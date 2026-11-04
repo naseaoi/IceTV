@@ -132,6 +132,12 @@ class DbManager {
     return (await this.getStorage()).getReviewReportPage(...args);
   }
 
+  async getFollowReviewMessageCount(
+    ...args: Parameters<IStorage['getFollowReviewMessageCount']>
+  ): Promise<number> {
+    return (await this.getStorage()).getFollowReviewMessageCount(...args);
+  }
+
   async getFollowReviewMessages(
     ...args: Parameters<IStorage['getFollowReviewMessages']>
   ): ReturnType<IStorage['getFollowReviewMessages']> {
@@ -174,6 +180,27 @@ class DbManager {
       year,
       publicOnly,
     );
+  }
+
+  async getMyVideoReviewPage(
+    ...args: Parameters<IStorage['getMyVideoReviewPage']>
+  ): ReturnType<IStorage['getMyVideoReviewPage']> {
+    return (await this.getStorage()).getMyVideoReviewPage(...args);
+  }
+  async getMyVideoReviewCount(
+    ...args: Parameters<IStorage['getMyVideoReviewCount']>
+  ): ReturnType<IStorage['getMyVideoReviewCount']> {
+    return (await this.getStorage()).getMyVideoReviewCount(...args);
+  }
+  async getMyVideoReviewRatings(
+    ...args: Parameters<IStorage['getMyVideoReviewRatings']>
+  ): ReturnType<IStorage['getMyVideoReviewRatings']> {
+    return (await this.getStorage()).getMyVideoReviewRatings(...args);
+  }
+  async getWorkVideoReviewPage(
+    ...args: Parameters<IStorage['getWorkVideoReviewPage']>
+  ): ReturnType<IStorage['getWorkVideoReviewPage']> {
+    return (await this.getStorage()).getWorkVideoReviewPage(...args);
   }
 
   async getAllVideoReviews(userName: string): Promise<VideoReview[]> {
@@ -370,9 +397,23 @@ class DbManager {
     limit: number,
     cursorTime?: number,
     cursorKey?: string,
+    includeLive = true,
   ) {
     const storage = await this.getStorage();
-    return storage.getFavoritePage(userName, limit, cursorTime, cursorKey);
+    return storage.getFavoritePage(
+      userName,
+      limit,
+      cursorTime,
+      cursorKey,
+      includeLive,
+    );
+  }
+
+  async getFavoriteLibraryPage(
+    ...args: Parameters<IStorage['getFavoriteLibraryPage']>
+  ) {
+    const storage = await this.getStorage();
+    return storage.getFavoriteLibraryPage(...args);
   }
 
   async deleteFavorite(
@@ -433,9 +474,35 @@ class DbManager {
     await storage.changePassword(userName, newPassword);
   }
 
-  async deleteUser(userName: string): Promise<void> {
+  async getUserAccess(...args: Parameters<IStorage['getUserAccess']>) {
+    return (await this.getStorage()).getUserAccess(...args);
+  }
+
+  async getAllUserAccess() {
+    return (await this.getStorage()).getAllUserAccess();
+  }
+
+  async updateUserAccess(...args: Parameters<IStorage['updateUserAccess']>) {
+    return (await this.getStorage()).updateUserAccess(...args);
+  }
+
+  async removeUserGroup(group: string) {
+    return (await this.getStorage()).removeUserGroup(group);
+  }
+
+  async removeUserSource(source: string) {
+    return (await this.getStorage()).removeUserSource(source);
+  }
+
+  async deleteUserIfInactive(
+    ...args: Parameters<IStorage['deleteUserIfInactive']>
+  ): Promise<boolean> {
+    return (await this.getStorage()).deleteUserIfInactive(...args);
+  }
+
+  async deleteUser(...args: Parameters<IStorage['deleteUser']>): Promise<void> {
     const storage = await this.getStorage();
-    await storage.deleteUser(userName);
+    await storage.deleteUser(...args);
   }
 
   async getSearchHistory(userName: string): Promise<string[]> {
@@ -455,6 +522,18 @@ class DbManager {
   async deleteSearchHistory(userName: string, keyword?: string): Promise<void> {
     const storage = await this.getStorage();
     await storage.deleteSearchHistory(userName, keyword);
+  }
+
+  async getAdminUserPage(
+    ...args: Parameters<IStorage['getAdminUserPage']>
+  ): ReturnType<IStorage['getAdminUserPage']> {
+    return (await this.getStorage()).getAdminUserPage(...args);
+  }
+
+  async compareAndSetAdminConfig(
+    ...args: Parameters<IStorage['compareAndSetAdminConfig']>
+  ): Promise<boolean> {
+    return (await this.getStorage()).compareAndSetAdminConfig(...args);
   }
 
   async getAllUsers(): Promise<string[]> {
@@ -482,13 +561,32 @@ class DbManager {
     return storage.getAllUserLastLogins();
   }
 
-  async reserveInviteCodeUse(
-    code: string,
-    maxUses: number,
-    seedCount = 0,
-  ): Promise<boolean> {
-    const storage = await this.getStorage();
-    return storage.reserveInviteCodeUse(code, maxUses, seedCount);
+  async getAllInviteCodes(): ReturnType<IStorage['getAllInviteCodes']> {
+    return (await this.getStorage()).getAllInviteCodes();
+  }
+
+  async queryInviteCodes(
+    ...args: Parameters<IStorage['queryInviteCodes']>
+  ): ReturnType<IStorage['queryInviteCodes']> {
+    return (await this.getStorage()).queryInviteCodes(...args);
+  }
+
+  async countActiveInviteCodes(): Promise<number> {
+    return (await this.getStorage()).countActiveInviteCodes();
+  }
+
+  async createInviteCode(
+    ...args: Parameters<IStorage['createInviteCode']>
+  ): ReturnType<IStorage['createInviteCode']> {
+    return (await this.getStorage()).createInviteCode(...args);
+  }
+
+  async deleteInviteCode(code: string): Promise<boolean> {
+    return (await this.getStorage()).deleteInviteCode(code);
+  }
+
+  async reserveInviteCodeUse(code: string): Promise<boolean> {
+    return (await this.getStorage()).reserveInviteCodeUse(code);
   }
 
   async releaseInviteCodeUse(code: string): Promise<void> {

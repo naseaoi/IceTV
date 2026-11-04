@@ -16,8 +16,10 @@ jest.mock('@/lib/db', () => ({
     getVideoReview: jest.fn(),
     setVideoReview: jest.fn(),
     deleteVideoReview: jest.fn(),
-    getAllVideoReviews: jest.fn(),
-    getPublicVideoReviewsForWork: jest.fn(),
+    getMyVideoReviewPage: jest.fn(),
+    getMyVideoReviewCount: jest.fn(),
+    getMyVideoReviewRatings: jest.fn(),
+    getWorkVideoReviewPage: jest.fn(),
     getPublicVideoReviewPage: jest.fn(),
   },
 }));
@@ -51,7 +53,7 @@ beforeEach(() => {
   db.getVideoReview.mockResolvedValue(videoReview);
   db.setVideoReview.mockResolvedValue(undefined);
   db.deleteVideoReview.mockResolvedValue(undefined);
-  db.getPublicVideoReviewsForWork.mockResolvedValue({
+  db.getWorkVideoReviewPage.mockResolvedValue({
     average: 8,
     count: 1,
     reviews: [],
@@ -222,24 +224,68 @@ describe('/api/reviews/mine', () => {
       { ...videoReview, rating: 8.7, is_public: false, updated_at: 3000 },
       { ...videoReview, title_norm: 'anotherwork', updated_at: 2000 },
     ];
-    db.getAllVideoReviews.mockResolvedValueOnce(reviews);
+    const page = {
+      items: reviews,
+      nextCursor: null,
+      total: 2,
+      counts: { all: 2, public: 1, private: 1, text: 0 },
+    };
+    db.getMyVideoReviewPage.mockResolvedValueOnce(page);
     const req = request('GET', '/mine?username=other');
     const response = await mine.GET(req);
     expect(response.status).toBe(200);
-    expect(await response.json()).toEqual({ reviews });
+    expect(await response.json()).toEqual(page);
     expect(response.headers.get('Cache-Control')).toBe('no-store');
     expect(requireActiveUser).toHaveBeenCalledWith(req, {
       unauthorizedMessage: '请先登录',
       includeUserStateCode: false,
     });
-    expect(db.getAllVideoReviews).toHaveBeenCalledWith('author');
+    expect(db.getMyVideoReviewPage).toHaveBeenCalledWith('author', {
+      cursor: undefined,
+      q: '',
+      filter: 'all',
+      sort: 'updated',
+    });
   });
 
   it('returns an empty list when the user has no reviews', async () => {
-    db.getAllVideoReviews.mockResolvedValueOnce([]);
-    expect(await (await mine.GET(request('GET', '/mine'))).json()).toEqual({
-      reviews: [],
+    const page = {
+      items: [],
+      nextCursor: null,
+      total: 0,
+      counts: { all: 0, public: 0, private: 0, text: 0 },
+    };
+    db.getMyVideoReviewPage.mockResolvedValueOnce(page);
+    expect(await (await mine.GET(request('GET', '/mine'))).json()).toEqual(
+      page,
+    );
+  });
+
+  it('uses dedicated own count and lightweight rating reads', async () => {
+    db.getMyVideoReviewCount.mockResolvedValueOnce(17);
+    db.getMyVideoReviewRatings.mockResolvedValueOnce([
+      { title_norm: 'reviewdemo', year: '', rating: null },
+    ]);
+    expect(
+      await (await mine.GET(request('GET', '/mine?view=count'))).json(),
+    ).toEqual({ count: 17 });
+    expect(
+      await (await mine.GET(request('GET', '/mine?view=ratings'))).json(),
+    ).toEqual({
+      ratings: [{ title_norm: 'reviewdemo', year: '', rating: null }],
     });
+    expect(db.getMyVideoReviewPage).not.toHaveBeenCalled();
+    expect(db.getMyVideoReviewRatings).toHaveBeenCalledWith('author');
+  });
+
+  it.each([
+    '?cursor=broken',
+    '?filter=invalid',
+    '?sort=invalid',
+    `?q=${'x'.repeat(201)}`,
+  ])('rejects invalid own page parameters %s', async (query) => {
+    expect((await mine.GET(request('GET', `/mine${query}`))).status).toBe(400);
+    expect(db.getMyVideoReviewPage).not.toHaveBeenCalled();
   });
 
   it.each([401, 403])('enforces the active-user guard (%s)', async (status) => {
@@ -247,12 +293,14 @@ describe('/api/reviews/mine', () => {
       response: NextResponse.json({ error: '访问受限' }, { status }),
     });
     expect((await mine.GET(request('GET', '/mine'))).status).toBe(status);
-    expect(db.getAllVideoReviews).not.toHaveBeenCalled();
+    expect(db.getMyVideoReviewPage).not.toHaveBeenCalled();
   });
 
   it('hides storage errors', async () => {
     const spy = jest.spyOn(console, 'error').mockImplementation(() => {});
-    db.getAllVideoReviews.mockRejectedValueOnce(new Error('database-password'));
+    db.getMyVideoReviewPage.mockRejectedValueOnce(
+      new Error('database-password'),
+    );
     try {
       const response = await mine.GET(request('GET', '/mine'));
       expect(response.status).toBe(500);
@@ -265,7 +313,7 @@ describe('/api/reviews/mine', () => {
 
 describe('/api/reviews/work', () => {
   it('preserves the numeric average precision', async () => {
-    db.getPublicVideoReviewsForWork.mockResolvedValueOnce({
+    db.getWorkVideoReviewPage.mockResolvedValueOnce({
       average: 8.65,
       count: 2,
       reviews: [],
@@ -282,10 +330,11 @@ describe('/api/reviews/work', () => {
       count: 1,
       reviews: [],
     });
-    expect(db.getPublicVideoReviewsForWork).toHaveBeenCalledWith(
+    expect(db.getWorkVideoReviewPage).toHaveBeenCalledWith(
       'reviewdemo',
       '2026',
       'author',
+      undefined,
     );
   });
   it('requires login and rejects missing titles', async () => {
@@ -294,7 +343,7 @@ describe('/api/reviews/work', () => {
       response: NextResponse.json({ error: '用户已被封禁' }, { status: 403 }),
     });
     expect((await work.GET(request())).status).toBe(403);
-    expect(db.getPublicVideoReviewsForWork).not.toHaveBeenCalled();
+    expect(db.getWorkVideoReviewPage).not.toHaveBeenCalled();
   });
 });
 

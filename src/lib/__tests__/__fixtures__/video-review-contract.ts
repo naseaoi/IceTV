@@ -1,3 +1,4 @@
+import { followReviewSortKey } from '@/lib/follow-review-identity';
 import type { AdminConfig } from '@/types/admin';
 
 import type { IStorage, VideoReview } from '../../types';
@@ -17,10 +18,339 @@ export const videoReview: VideoReview = {
   updated_at: 2000,
 };
 
+export async function assertFollowPagination(
+  storage: IStorage,
+  username: string,
+) {
+  const profileIds: string[] = [];
+  await storage.ensureUserProfile(username);
+  const clock = jest.spyOn(Date, 'now').mockReturnValue(5000);
+  try {
+    for (let index = 0; index < 35; index++) {
+      const peer = `${username}-${index}`;
+      profileIds.push((await storage.ensureUserProfile(peer)).profile_id);
+      await storage.setUserFollow(username, peer, true);
+      await storage.setUserFollow(peer, username, true);
+    }
+  } finally {
+    clock.mockRestore();
+  }
+  const expected = profileIds.sort().reverse();
+  for (const type of ['followers', 'following'] as const) {
+    const first = await storage.getUserFollowPage(username, type);
+    expect(first.items).toHaveLength(30);
+    expect(first.nextCursor).toBe(
+      Buffer.from(JSON.stringify([5000, expected[29]])).toString('base64url'),
+    );
+    const second = await storage.getUserFollowPage(
+      username,
+      type,
+      first.nextCursor!,
+    );
+    expect(
+      [...first.items, ...second.items].map((item) => item.profileId),
+    ).toEqual(expected);
+    expect(second.nextCursor).toBeNull();
+  }
+}
+
+export async function assertActivityAndReportPagination(
+  storage: IStorage,
+  prefix: string,
+) {
+  const author = `${prefix}-author`;
+  const reader = `${prefix}-reader`;
+  const reporters = Array.from(
+    { length: 7 },
+    (_, i) => `${prefix}-reporter${i}`,
+  );
+  const clock = jest.spyOn(Date, 'now').mockReturnValue(1000);
+  try {
+    await storage.ensureUserProfile(author);
+    await storage.ensureUserProfile(reader);
+    for (const reporter of reporters) await storage.ensureUserProfile(reporter);
+    await storage.setUserFollow(reader, author, true);
+    const titles = [
+      '中文',
+      'quote"',
+      'slash\\',
+      'line\n',
+      'space a',
+      'space',
+      '  ',
+      'long'.repeat(45),
+      ...Array.from({ length: 28 }, (_, i) => `work-${i}`),
+    ];
+    for (const title of titles) {
+      await storage.setVideoReview(author, {
+        ...videoReview,
+        title_norm: title,
+        updated_at: 2000,
+      });
+      await storage.reportVideoReview(
+        author,
+        title,
+        '2026',
+        reporters[0],
+        'spam',
+        'first',
+      );
+    }
+    await storage.setVideoReview(author, {
+      ...videoReview,
+      title_norm: 'at-follow',
+      updated_at: 1000,
+    });
+    await storage.setVideoReview(author, {
+      ...videoReview,
+      title_norm: 'private',
+      updated_at: 2000,
+      is_public: false,
+    });
+    const ids: string[] = [];
+    let before: { createdAt: number; key: string } | undefined;
+    for (;;) {
+      const page = await storage.getFollowReviewMessages(reader, 0, [], 3000, {
+        limit: 7,
+        before,
+      });
+      if (!page.length) break;
+      ids.push(...page.map((item) => item.id));
+      const last = page.at(-1)!;
+      before = { createdAt: last.createdAt, key: followReviewSortKey(last.id) };
+    }
+    expect(ids).toHaveLength(titles.length);
+    expect(new Set(ids).size).toBe(titles.length);
+    expect(await storage.getFollowReviewMessageCount(reader, 0, [], 3000)).toBe(
+      titles.length,
+    );
+    const seen = ids.slice(0, 5);
+    expect(
+      await storage.getFollowReviewMessageCount(reader, 0, seen, 3000),
+    ).toBe(titles.length - seen.length);
+    expect(
+      await storage.getFollowReviewMessages(reader, 0, seen, 3000, {
+        id: seen[0],
+      }),
+    ).toEqual([]);
+    expect(
+      await storage.getFollowReviewMessages(reader, 0, [], 3000, {
+        id: ids.at(-1)!,
+      }),
+    ).toHaveLength(1);
+    expect(
+      await storage.getFollowReviewMessageCount(reader, 2000, [], 3000),
+    ).toBe(0);
+    expect(
+      await storage.getFollowReviewMessageCount(
+        reader,
+        0,
+        [],
+        2000 + 30 * 86400000,
+      ),
+    ).toBe(0);
+    expect(
+      await storage.getFollowReviewMessageCount(
+        reader,
+        0,
+        [],
+        1999 + 30 * 86400000,
+      ),
+    ).toBe(titles.length);
+    for (const reporter of reporters.slice(1))
+      await storage.reportVideoReview(
+        author,
+        titles[0],
+        '2026',
+        reporter,
+        'spoiler',
+        reporter,
+      );
+    await storage.setVideoReviewLike(author, titles[0], '2026', reader, true);
+    const first = await storage.getReviewReportPage();
+    const next = await storage.getReviewReportPage(first.nextCursor!);
+    const items = [...first.items, ...next.items];
+    expect(items).toHaveLength(titles.length);
+    expect(new Set(items.map((item) => item.review.title_norm)).size).toBe(
+      titles.length,
+    );
+    expect(first.pendingTotal).toBe(titles.length);
+    expect(next.nextCursor).toBeNull();
+    const group = items.find((item) => item.review.title_norm === titles[0])!;
+    expect(group).toMatchObject({
+      reportCount: 7,
+      reasons: { spam: 1, spoiler: 6 },
+      review: { likeCount: 1 },
+    });
+    expect(group.reports).toHaveLength(5);
+    await storage.moderateReviewReports(author, titles[0], '2026', 'dismiss');
+    expect((await storage.getReviewReportPage()).pendingTotal).toBe(
+      titles.length - 1,
+    );
+    await storage.moderateReviewReports(
+      author,
+      titles[1],
+      '2026',
+      'delete-review',
+    );
+    expect((await storage.getReviewReportPage()).pendingTotal).toBe(
+      titles.length - 2,
+    );
+    const oldCursor = Buffer.from(
+      JSON.stringify([1000, JSON.stringify([author, titles[0], '2026'])]),
+    ).toString('base64url');
+    await expect(storage.getReviewReportPage(oldCursor)).rejects.toThrow(
+      '举报分页已更新',
+    );
+  } finally {
+    clock.mockRestore();
+    for (const username of [author, reader, ...reporters])
+      await storage.deleteUser(username);
+  }
+}
+
 export function videoReviewContract(
   createStorage: () => IStorage,
   adminConfig: AdminConfig,
 ) {
+  it('paginates activity and report groups with tied times, SQL counts and read exclusion', async () => {
+    await assertActivityAndReportPagination(createStorage(), 'activity-page');
+  });
+
+  it('paginates own reviews with stable ties, server filters and private counts', async () => {
+    const storage = createStorage();
+    for (let i = 0; i < 45; i++)
+      await storage.setVideoReview('page-author', {
+        ...videoReview,
+        title_norm: `page-${String(i).padStart(2, '0')}`,
+        title: `Page ${i}`,
+        rating: i % 3 ? 8 : null,
+        is_public: i % 2 === 0,
+      });
+    for (const sort of ['updated', 'high', 'low'] as const) {
+      let cursor: string | undefined;
+      const seen: VideoReview[] = [];
+      do {
+        const page = await storage.getMyVideoReviewPage('PAGE-AUTHOR', {
+          sort,
+          cursor,
+        });
+        expect(page.items.length).toBeLessThanOrEqual(20);
+        expect(page.total).toBe(45);
+        expect(page.counts).toEqual({
+          all: 45,
+          public: 23,
+          private: 22,
+          text: 15,
+        });
+        seen.push(...page.items);
+        cursor = page.nextCursor ?? undefined;
+      } while (cursor);
+      expect(seen).toHaveLength(45);
+      expect(new Set(seen.map((item) => item.title_norm)).size).toBe(45);
+      if (sort !== 'updated')
+        expect(seen.slice(-15).every((item) => item.rating === null)).toBe(
+          true,
+        );
+    }
+    const page = await storage.getMyVideoReviewPage('page-author', {
+      q: 'Page 1',
+      filter: 'private',
+    });
+    expect(
+      page.items.every(
+        (item) => !item.is_public && item.title.includes('Page 1'),
+      ),
+    ).toBe(true);
+    expect(await storage.getMyVideoReviewCount('page-author')).toBe(45);
+    const ratings = await storage.getMyVideoReviewRatings('page-author');
+    expect(ratings).toHaveLength(45);
+    expect(Object.keys(ratings[0]).sort()).toEqual([
+      'rating',
+      'title_norm',
+      'year',
+    ]);
+    await expect(
+      storage.getMyVideoReviewPage('page-author', { cursor: 'broken' }),
+    ).rejects.toThrow();
+  });
+
+  it('paginates public work and profile reviews with wildcard years and no private leakage', async () => {
+    const storage = createStorage();
+    for (let i = 0; i < 25; i++) {
+      await storage.ensureUserProfile(`work-author-${i}`);
+      await storage.setVideoReview(`work-author-${i}`, {
+        ...videoReview,
+        year: i % 2 ? '' : '2026',
+      });
+      await storage.setVideoReview('profile-page-author', {
+        ...videoReview,
+        title_norm: `profile-${String(i).padStart(2, '0')}`,
+      });
+    }
+    await storage.setVideoReview('hidden-author', {
+      ...videoReview,
+      is_public: false,
+    });
+    await storage.setVideoReview('different-year', {
+      ...videoReview,
+      year: '2025',
+    });
+    await storage.setVideoReview('profile-page-author', {
+      ...videoReview,
+      title_norm: 'hidden',
+      is_public: false,
+    });
+    const first = await storage.getWorkVideoReviewPage(
+      'reviewdemo',
+      '2026',
+      'viewer',
+    );
+    expect(first.reviews).toHaveLength(20);
+    expect(first.reviewCount).toBe(25);
+    expect(first.count).toBe(25);
+    expect(first.average).toBe(8);
+    const second = await storage.getWorkVideoReviewPage(
+      'reviewdemo',
+      '2026',
+      'viewer',
+      first.nextCursor!,
+    );
+    expect(second.reviews).toHaveLength(5);
+    expect(second.nextCursor).toBeNull();
+    expect(
+      new Set(
+        [...first.reviews, ...second.reviews].map(
+          (item) => item.author.profileId,
+        ),
+      ).size,
+    ).toBe(25);
+    expect(JSON.stringify(first)).not.toContain('work-author');
+    const profileFirst = await storage.getUserPublicReviewPage(
+      'profile-page-author',
+      'viewer',
+    );
+    const profileSecond = await storage.getUserPublicReviewPage(
+      'profile-page-author',
+      'viewer',
+      profileFirst.nextCursor!,
+    );
+    expect(profileFirst.items).toHaveLength(20);
+    expect(profileSecond.items).toHaveLength(5);
+    expect(
+      new Set(
+        [...profileFirst.items, ...profileSecond.items].map(
+          (item) => item.title_norm,
+        ),
+      ).size,
+    ).toBe(25);
+    expect(profileSecond.nextCursor).toBeNull();
+  });
+
+  it('paginates both follow directions with stable tied-time cursors', async () => {
+    await assertFollowPagination(createStorage(), 'follow-pagination');
+  });
+
   it('atomically merges read ids and never restores stale watermarks or announcements', async () => {
     const storage = createStorage();
     await storage.clearAllData();

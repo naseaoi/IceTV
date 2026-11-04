@@ -147,6 +147,14 @@ export function executeSocial(
   return undefined;
 }
 
+function compareTuple(a: string[], b: string[]): number {
+  for (let i = 0; i < a.length; i++) {
+    const compared = Buffer.compare(Buffer.from(a[i]), Buffer.from(b[i]));
+    if (compared) return compared;
+  }
+  return 0;
+}
+
 export function querySocial(
   sql: string,
   params: unknown[],
@@ -158,6 +166,96 @@ export function querySocial(
   const follows = state.social.user_follows;
   const likes = state.social.video_review_likes;
   const reports = state.social.video_review_reports;
+  const identity = (row: Row): string[] => [
+    row.author,
+    row.title_norm,
+    row.year,
+  ];
+  const targetMatches = (row: Row) => {
+    for (let i = 0; i < params.length; i += 3)
+      if (compareTuple(identity(row), params.slice(i, i + 3).map(String)) === 0)
+        return true;
+    return false;
+  };
+  if (sql.includes('latest_reported_at') || sql.includes(') pending')) {
+    const grouped = new Map<string, Row>();
+    for (const report of reports) {
+      const review = state.videoReviews.get(JSON.stringify(identity(report)));
+      if (!review?.review.is_public) continue;
+      const key = JSON.stringify(identity(report));
+      let row = grouped.get(key);
+      if (!row) {
+        row = {
+          ...report,
+          username: review.username,
+          review_json: JSON.stringify(review.review),
+          ...profiles.find((profile) => profile.username === review.username),
+          report_count: 0,
+          latest_reported_at: 0,
+          spoiler: 0,
+          abuse: 0,
+          spam: 0,
+          illegal: 0,
+          other: 0,
+        };
+        grouped.set(key, row);
+      }
+      row.report_count++;
+      row[report.reason]++;
+      row.latest_reported_at = Math.max(
+        row.latest_reported_at,
+        report.created_at,
+      );
+    }
+    if (sql.includes(') pending')) return [{ count: grouped.size }];
+    return [...grouped.values()]
+      .filter(
+        (row) =>
+          !params.length ||
+          row.latest_reported_at < Number(params[0]) ||
+          (row.latest_reported_at === Number(params[0]) &&
+            compareTuple(identity(row), params.slice(2).map(String)) < 0),
+      )
+      .sort(
+        (a, b) =>
+          b.latest_reported_at - a.latest_reported_at ||
+          -compareTuple(identity(a), identity(b)),
+      )
+      .slice(0, 31);
+  }
+  if (sql.includes('ROW_NUMBER()')) {
+    const counts = new Map<string, number>();
+    return reports
+      .filter(targetMatches)
+      .sort(
+        (a, b) =>
+          b.created_at - a.created_at ||
+          -compareTuple([a.reporter], [b.reporter]),
+      )
+      .filter((row) => {
+        const key = JSON.stringify(identity(row));
+        const count = (counts.get(key) ?? 0) + 1;
+        counts.set(key, count);
+        return count <= 5;
+      })
+      .map((row) => ({
+        ...row,
+        ...profiles.find((profile) => profile.username === row.reporter),
+      }));
+  }
+  if (
+    sql.includes('FROM video_review_likes') &&
+    sql.includes('GROUP BY author')
+  ) {
+    const counts = new Map<string, Row>();
+    for (const row of likes.filter(targetMatches)) {
+      const key = JSON.stringify(identity(row));
+      const group = counts.get(key) ?? { ...row, count: 0 };
+      group.count++;
+      counts.set(key, group);
+    }
+    return [...counts.values()];
+  }
   if (sql.includes('LEFT JOIN user_profiles'))
     return [...state.users.keys()]
       .filter((username) => !profiles.some((row) => row.username === username))
@@ -188,8 +286,8 @@ export function querySocial(
         params[0],
     );
   }
-  if (sql.includes('FROM user_follows f JOIN video_reviews'))
-    return follows
+  if (sql.includes('FROM user_follows f JOIN video_reviews')) {
+    let rows = follows
       .filter((row) => row.follower === params[0])
       .flatMap((f) =>
         [...state.videoReviews.values()]
@@ -205,6 +303,7 @@ export function querySocial(
             return p
               ? [
                   {
+                    ...row.review,
                     username: row.username,
                     review_json: JSON.stringify(row.review),
                     profile_id: p.profile_id,
@@ -215,17 +314,76 @@ export function querySocial(
               : [];
           }),
       );
+    let offset = 2;
+    for (let i = 0; i < (sql.match(/AND NOT/g) ?? []).length; i++) {
+      const target = params.slice(offset, offset + 4);
+      rows = rows.filter(
+        (row) =>
+          ![row.profile_id, row.title_norm, row.year, row.updated_at].every(
+            (part, index) => part === target[index],
+          ),
+      );
+      offset += 4;
+    }
+    if (sql.includes(' AND p.profile_id = ?')) {
+      const target = params.slice(offset, offset + 4);
+      rows = rows.filter((row) =>
+        [row.profile_id, row.title_norm, row.year, row.updated_at].every(
+          (part, index) => part === target[index],
+        ),
+      );
+      offset += 4;
+    }
+    if (sql.includes('AND (v.updated_at < ?')) {
+      const time = Number(params[offset]);
+      const target = params.slice(offset + 2, offset + 5).map(String);
+      rows = rows.filter(
+        (row) =>
+          row.updated_at < time ||
+          (row.updated_at === time &&
+            compareTuple([row.profile_id, row.title_norm, row.year], target) <
+              0),
+      );
+    } else if (sql.includes(' AND v.updated_at <= ?'))
+      rows = rows.filter((row) => row.updated_at <= Number(params[offset]));
+    else if (sql.includes(' AND v.updated_at < ?'))
+      rows = rows.filter((row) => row.updated_at < Number(params[offset]));
+    if (sql.startsWith('SELECT COUNT(*)')) return [{ count: rows.length }];
+    return rows
+      .sort(
+        (a, b) =>
+          b.updated_at - a.updated_at ||
+          -compareTuple(
+            [a.profile_id, a.title_norm, a.year],
+            [b.profile_id, b.title_norm, b.year],
+          ),
+      )
+      .slice(0, Number(params.at(-1)));
+  }
   if (sql.includes('FROM user_follows')) {
     if (sql.includes('JOIN user_profiles')) {
       const followers = sql.includes('f.followee = ?');
       return follows
         .filter((row) => row[followers ? 'followee' : 'follower'] === params[0])
-        .flatMap((row) => {
+        .flatMap((row): Row[] => {
           const p = profiles.find(
             (p) => p.username === row[followers ? 'follower' : 'followee'],
           );
           return p ? [{ ...p, created_at: row.created_at }] : [];
-        });
+        })
+        .filter(
+          (row) =>
+            params.length === 2 ||
+            row.created_at < Number(params[1]) ||
+            (row.created_at === Number(params[1]) &&
+              row.profile_id < String(params[3])),
+        )
+        .sort(
+          (a, b) =>
+            b.created_at - a.created_at ||
+            (a.profile_id < b.profile_id ? 1 : -1),
+        )
+        .slice(0, Number(params.at(-1)));
     }
     const rows = follows.filter(
       (row) =>

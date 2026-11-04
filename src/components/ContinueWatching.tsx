@@ -242,7 +242,7 @@ export default function ContinueWatching({
         <h2 className='text-lg font-semibold tracking-tight text-gray-900 dark:text-gray-100 sm:text-xl'>
           继续观看
         </h2>
-        {!loading && playRecords.length > 0 && (
+        {(loading || playRecords.length > 0) && (
           <Link
             href='/continue-watching'
             className={

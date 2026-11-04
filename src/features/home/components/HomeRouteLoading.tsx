@@ -3,7 +3,9 @@
 import { useEffect, useLayoutEffect, useState } from 'react';
 
 import ContinueWatchingCardSkeleton from '@/components/ContinueWatchingCardSkeleton';
-import HomePosterCardSkeleton from '@/components/HomePosterCardSkeleton';
+import HomePosterCardSkeleton, {
+  HOME_RECOMMENDATION_INITIAL_COUNT,
+} from '@/components/HomePosterCardSkeleton';
 import { PAGE_CONTAINER_CLASS } from '@/components/page-container';
 import PageLayout from '@/components/PageLayout';
 import ScrollableRow from '@/components/ScrollableRow';
@@ -68,22 +70,22 @@ function HomeLoadingSkeleton({
 
             <section className='mb-2'>
               <SkeletonSectionHeader />
-              <SkeletonRow count={8} />
+              <SkeletonRow count={HOME_RECOMMENDATION_INITIAL_COUNT} />
             </section>
 
             <section className='mb-2'>
               <SkeletonSectionHeader />
-              <SkeletonRow count={8} />
+              <SkeletonRow count={HOME_RECOMMENDATION_INITIAL_COUNT} />
             </section>
 
             <section className='mb-2'>
               <SkeletonSectionHeader />
-              <SkeletonRow count={8} />
+              <SkeletonRow count={HOME_RECOMMENDATION_INITIAL_COUNT} />
             </section>
 
             <section className='mb-2'>
               <SkeletonSectionHeader />
-              <SkeletonRow count={8} />
+              <SkeletonRow count={HOME_RECOMMENDATION_INITIAL_COUNT} />
             </section>
           </div>
         </div>

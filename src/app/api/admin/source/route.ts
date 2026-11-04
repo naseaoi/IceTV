@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 
 import { isGuardFailure, requireAdmin } from '@/lib/api-auth';
 import { configConflictResponse } from '@/lib/api-config-error';
-import { getConfig, saveConfig } from '@/lib/config';
+import { getConfig, invalidateConfigCache, saveConfig } from '@/lib/config';
 import {
   buildConfigFileFromAdminConfig,
   removeConfigFileEntries,
@@ -80,7 +80,7 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: '参数格式错误' }, { status: 400 });
     }
 
-    // 获取配置与存储
+    invalidateConfigCache();
     const adminConfig = await getConfig();
 
     switch (action) {
@@ -191,13 +191,6 @@ export async function POST(request: NextRequest) {
           });
         }
 
-        adminConfig.UserConfig.Users.forEach((user) => {
-          if (user.enabledApis) {
-            user.enabledApis = user.enabledApis.filter(
-              (api) => api !== cleanKey,
-            );
-          }
-        });
         break;
       }
       case 'batch_disable': {
@@ -272,14 +265,6 @@ export async function POST(request: NextRequest) {
               }
             });
           }
-
-          adminConfig.UserConfig.Users.forEach((user) => {
-            if (user.enabledApis) {
-              user.enabledApis = user.enabledApis.filter(
-                (api) => !keysToDelete.includes(api),
-              );
-            }
-          });
         }
         break;
       }

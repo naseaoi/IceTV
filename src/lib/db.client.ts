@@ -320,6 +320,8 @@ export async function clearAllPlayRecords(): Promise<void> {
   } catch (err) {
     await handleDatabaseOperationFailure('playRecords', err);
     throw err;
+  } finally {
+    window.dispatchEvent(new Event('userLibraryUpdated'));
   }
 }
 
@@ -529,6 +531,8 @@ export async function clearAllFavorites(): Promise<void> {
   } catch (err) {
     await handleDatabaseOperationFailure('favorites', err);
     throw err;
+  } finally {
+    window.dispatchEvent(new Event('userLibraryUpdated'));
   }
 }
 

@@ -1,7 +1,10 @@
 'use client';
 
-import { POSTER_GRID_BASE_CLASS } from '@/components/poster-grid-layout';
 import VideoCard from '@/components/VideoCard';
+import {
+  CONTINUE_WATCHING_GRID_CLASS,
+  CONTINUE_WATCHING_GRID_ITEM_CLASS,
+} from '@/features/continue-watching/lib/layout';
 import {
   getPlayRecordEpisodeDisplay,
   getPlayRecordResumeGroup,
@@ -32,16 +35,14 @@ export function ContinueWatchingGrid({
   }
 
   return (
-    <div
-      className={`${POSTER_GRID_BASE_CLASS} px-0 sm:grid-cols-[repeat(auto-fill,_180px)] sm:gap-x-6 sm:px-2`}
-    >
+    <div className={CONTINUE_WATCHING_GRID_CLASS}>
       {items.map((record) => {
         const parsedKey = parseStorageKey(record.key);
         if (!parsedKey) return null;
 
         const episodeDisplay = getPlayRecordEpisodeDisplay(record);
         return (
-          <div key={record.key} className='w-full sm:w-[180px]'>
+          <div key={record.key} className={CONTINUE_WATCHING_GRID_ITEM_CLASS}>
             <VideoCard
               id={parsedKey.id}
               title={record.title}

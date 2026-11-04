@@ -21,6 +21,7 @@ import {
 
 interface User {
   username: string;
+  nickname?: string | null;
   role: 'user' | 'admin' | 'owner';
   banned?: boolean;
   enabledApis?: string[];
@@ -29,6 +30,8 @@ interface User {
 
 interface UserTableProps {
   users: User[];
+  total?: number;
+  selectedCount?: number;
   lastActiveAt: Record<string, number>;
   currentUsername: string | null;
   permissionContext: PermissionContext;
@@ -51,6 +54,8 @@ interface UserTableProps {
 
 export function UserTable({
   users,
+  total = users.length,
+  selectedCount,
   lastActiveAt,
   currentUsername,
   permissionContext,
@@ -70,16 +75,7 @@ export function UserTable({
   onUnbanUser,
   onDeleteUser,
 }: UserTableProps) {
-  // 按规则排序用户：自己 -> 站长(若非自己) -> 管理员 -> 其他
-  const sortedUsers = [...users].sort((a, b) => {
-    const priority = (u: User) => {
-      if (u.username === currentUsername) return 0;
-      if (u.role === 'owner') return 1;
-      if (u.role === 'admin') return 2;
-      return 3;
-    };
-    return priority(a) - priority(b);
-  });
+  const selectionCount = selectedCount ?? selectedUsers.size;
 
   return (
     <div className='overflow-hidden rounded-xl ring-1 ring-gray-200 dark:ring-white/[0.06]'>
@@ -96,11 +92,10 @@ export function UserTable({
           <span className='h-4 w-4 shrink-0' />
         )}
         <span className='text-xs text-gray-500 dark:text-gray-400'>
-          {selectedUsers.size > 0
-            ? `已选 ${selectedUsers.size} 人`
-            : `共 ${users.length} 人`}
+          共 {total} 人
+          {selectionCount > 0 ? ` · 已选 ${selectionCount} 人` : ''}
         </span>
-        {selectedUsers.size > 0 && (
+        {selectionCount > 0 && (
           <button
             type='button'
             onClick={onBatchUserGroup}
@@ -110,7 +105,7 @@ export function UserTable({
           </button>
         )}
       </div>
-      {sortedUsers.length === 0 ? (
+      {users.length === 0 ? (
         <p className='bg-white px-3 py-12 text-center text-sm text-gray-500 dark:bg-gray-900 dark:text-gray-400'>
           没有匹配的用户
         </p>
@@ -119,7 +114,7 @@ export function UserTable({
           aria-label='用户列表'
           className='divide-y divide-gray-200 dark:divide-white/[0.06]'
         >
-          {sortedUsers.map((user) => {
+          {users.map((user) => {
             const canConfigure = canConfigureUser(user, permissionContext);
             const items: AdminRowMenuItem[] = [];
             if (canConfigure) {
@@ -187,7 +182,9 @@ export function UserTable({
                 key={user.username}
                 className='flex items-center gap-3 bg-white px-3 py-3 transition-colors hover:bg-gray-50 dark:bg-gray-900 dark:hover:bg-white/[0.02]'
               >
-                {canConfigure ? (
+                {canConfigure &&
+                user.role !== 'owner' &&
+                user.username !== currentUsername ? (
                   <input
                     type='checkbox'
                     aria-label={`选择用户 ${user.username}`}
@@ -207,6 +204,11 @@ export function UserTable({
                       className='truncate text-sm font-medium text-gray-900 dark:text-gray-100'
                     >
                       {user.username}
+                      {user.nickname && (
+                        <span className='ml-2 font-normal text-gray-500'>
+                          {user.nickname}
+                        </span>
+                      )}
                     </span>
                     <span
                       className={`shrink-0 rounded-full px-2 py-0.5 text-xs ${

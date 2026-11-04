@@ -13,6 +13,19 @@ jest.mock('@/components/AuthenticatedRoute', () => ({
   default: ({ children }: { children: ReactNode }) => <>{children}</>,
 }));
 
+let mockSessionRole: 'owner' | 'admin' = 'admin';
+jest.mock('@/components/AuthProvider', () => ({
+  useAuthSession: () => ({
+    session: {
+      status: 'authenticated',
+      username: 'tester',
+      role: mockSessionRole,
+    },
+    isRefreshing: false,
+    refreshSession: async () => {},
+  }),
+}));
+
 jest.mock('@/components/DataMigration', () => ({
   __esModule: true,
   default: () => <div>DataMigration</div>,
@@ -131,9 +144,11 @@ describe('AdminPage role visibility', () => {
   beforeEach(() => {
     jest.clearAllMocks();
     mockSearch = '';
+    mockSessionRole = 'admin';
   });
 
   function setupRole(role: 'owner' | 'admin') {
+    mockSessionRole = role;
     mockUseAdminPageActions.mockImplementation(
       (options: UseAdminPageActionsOptions) => ({
         fetchConfig: async () => {
@@ -148,6 +163,7 @@ describe('AdminPage role visibility', () => {
   }
 
   function setupOwnerWithResetSpy(resetConfig: jest.Mock) {
+    mockSessionRole = 'owner';
     mockUseAdminPageActions.mockImplementation(
       (options: UseAdminPageActionsOptions) => ({
         fetchConfig: async () => {

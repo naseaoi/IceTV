@@ -2,10 +2,11 @@
 
 import { Heart, SearchX, Trash2 } from 'lucide-react';
 import Link from 'next/link';
-import { useDeferredValue, useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 
 import {
   LIBRARY_PILL_BUTTON_CLASS,
+  LibraryEmptySkeleton,
   LibraryEmptyState,
   LibraryPageFrame,
   LibrarySubtitleSkeleton,
@@ -21,11 +22,8 @@ import { useFavoriteLibrary } from '@/features/favorites/hooks/useFavoriteLibrar
 import {
   type FavoriteFilter,
   type FavoriteSort,
-  countFavoriteFilters,
-  selectFavoriteEntries,
 } from '@/features/favorites/lib/favorite-library';
-
-const RENDER_CHUNK = 48;
+import { FAVORITE_RENDER_CHUNK as RENDER_CHUNK } from '@/lib/favorites-count';
 
 export function FavoritesPageSkeleton({
   skeletonCount,
@@ -37,19 +35,21 @@ export function FavoritesPageSkeleton({
       title='我的收藏'
       subtitle={<LibrarySubtitleSkeleton />}
       toolbar={
-        <FavoriteLibraryToolbar
-          query=''
-          onQueryChange={noop}
-          filter='all'
-          onFilterChange={noop}
-          sort='saved'
-          onSortChange={noop}
-          counts={EMPTY_FAVORITE_COUNTS}
-          loading
-        />
+        skeletonCount > 0 && (
+          <FavoriteLibraryToolbar
+            query=''
+            onQueryChange={noop}
+            filter='all'
+            onFilterChange={noop}
+            sort='saved'
+            onSortChange={noop}
+            counts={EMPTY_FAVORITE_COUNTS}
+            loading
+          />
+        )
       }
     >
-      {skeletonCount > 0 && <FavoriteGridSkeleton count={skeletonCount} />}
+      <FavoriteGridSkeleton count={skeletonCount} />
     </LibraryPageFrame>
   );
 }
@@ -61,50 +61,39 @@ export function FavoritesPageClient({
 }: {
   favoriteSkeletonCount?: number;
 }) {
-  const { entries, loading, skeletonCount, clearFavorites } =
-    useFavoriteLibrary(favoriteSkeletonCount);
   const [query, setQuery] = useState('');
   const [filter, setFilter] = useState<FavoriteFilter>('all');
   const [sort, setSort] = useState<FavoriteSort>('saved');
-  const [visibleCount, setVisibleCount] = useState(RENDER_CHUNK);
+  const {
+    items,
+    loading,
+    loadingMore,
+    error,
+    retry,
+    skeletonCount,
+    clearFavorites,
+    counts,
+    total: resultTotal,
+    libraryTotal,
+    hasMore,
+    loadMore,
+  } = useFavoriteLibrary(favoriteSkeletonCount, { query, filter, sort });
   const [showClearConfirm, setShowClearConfirm] = useState(false);
   const sentinelRef = useRef<HTMLDivElement>(null);
-  const deferredQuery = useDeferredValue(query);
-
-  const counts = useMemo(
-    () => countFavoriteFilters(entries, deferredQuery),
-    [entries, deferredQuery],
-  );
-  const selected = useMemo(
-    () =>
-      selectFavoriteEntries(entries, { query: deferredQuery, filter, sort }),
-    [entries, deferredQuery, filter, sort],
-  );
-  const visibleItems = useMemo(
-    () => selected.slice(0, visibleCount).map((entry) => entry.item),
-    [selected, visibleCount],
-  );
-  const hasMore = selected.length > visibleCount;
-  const narrowed = deferredQuery.trim() !== '' || filter !== 'all';
-
-  useEffect(() => {
-    setVisibleCount(RENDER_CHUNK);
-  }, [deferredQuery, filter, sort]);
+  const narrowed = query.trim() !== '' || filter !== 'all';
 
   useEffect(() => {
     const sentinel = sentinelRef.current;
-    if (!hasMore || !sentinel) return;
+    if (!hasMore || !sentinel || loading || loadingMore || error) return;
     const observer = new IntersectionObserver(
       ([entry]) => {
-        if (entry?.isIntersecting) {
-          setVisibleCount((current) => current + RENDER_CHUNK);
-        }
+        if (entry?.isIntersecting) loadMore();
       },
       { rootMargin: '600px 0px' },
     );
     observer.observe(sentinel);
     return () => observer.disconnect();
-  }, [hasMore, visibleCount]);
+  }, [hasMore, loadMore, loading, loadingMore, error]);
 
   const resetNarrowing = () => {
     setQuery('');
@@ -114,8 +103,28 @@ export function FavoritesPageClient({
   let content: React.ReactNode;
   if (loading) {
     content =
-      skeletonCount > 0 ? <FavoriteGridSkeleton count={skeletonCount} /> : null;
-  } else if (entries.length === 0) {
+      skeletonCount > 0 ? (
+        <FavoriteGridSkeleton count={skeletonCount} />
+      ) : (
+        <LibraryEmptySkeleton />
+      );
+  } else if (error && items.length === 0) {
+    content = (
+      <LibraryEmptyState
+        icon={SearchX}
+        title={error}
+        action={
+          <button
+            type='button'
+            onClick={retry}
+            className={LIBRARY_PILL_BUTTON_CLASS}
+          >
+            重试
+          </button>
+        }
+      />
+    );
+  } else if (libraryTotal === 0 && !narrowed) {
     content = (
       <LibraryEmptyState
         icon={Heart}
@@ -127,14 +136,14 @@ export function FavoritesPageClient({
         }
       />
     );
-  } else if (selected.length === 0) {
+  } else if (resultTotal === 0) {
     content = (
       <LibraryEmptyState
         icon={SearchX}
         title='没有匹配的收藏'
         description={
-          deferredQuery.trim()
-            ? `找不到与「${deferredQuery.trim()}」相关的作品`
+          query.trim()
+            ? `找不到与「${query.trim()}」相关的作品`
             : '当前筛选下没有作品'
         }
         action={
@@ -151,20 +160,20 @@ export function FavoritesPageClient({
   } else {
     content = (
       <>
-        <FavoriteGrid
-          items={visibleItems}
-          virtualized={selected.length > RENDER_CHUNK}
-        />
+        <FavoriteGrid items={items} virtualized={resultTotal > RENDER_CHUNK} />
         {hasMore && (
           <div ref={sentinelRef} className='mt-8 flex justify-center'>
             <button
               type='button'
-              onClick={() =>
-                setVisibleCount((current) => current + RENDER_CHUNK)
-              }
+              onClick={loadMore}
+              disabled={loadingMore}
               className='inline-flex h-9 items-center rounded-full px-4 text-sm text-gray-500 transition hover:bg-gray-100 hover:text-gray-900 dark:text-gray-400 dark:hover:bg-white/[0.06] dark:hover:text-gray-100'
             >
-              显示更多 · 还有 {selected.length - visibleCount} 部
+              {error
+                ? '加载失败，点击重试'
+                : loadingMore
+                  ? '加载中'
+                  : `显示更多 · 还有 ${Math.max(0, resultTotal - items.length)} 部`}
             </button>
           </div>
         )}
@@ -172,7 +181,7 @@ export function FavoritesPageClient({
     );
   }
 
-  const total = loading ? null : entries.length;
+  const total = loading ? null : libraryTotal;
 
   return (
     <LibraryPageFrame
@@ -191,15 +200,14 @@ export function FavoritesPageClient({
                 <span className='mx-1.5 text-gray-300 dark:text-gray-600'>
                   /
                 </span>
-                当前显示 <span className='tabular-nums'>{selected.length}</span>{' '}
-                部
+                当前显示 <span className='tabular-nums'>{resultTotal}</span> 部
               </span>
             )}
           </>
         )
       }
       action={
-        entries.length > 0 && (
+        libraryTotal > 0 && (
           <button
             type='button'
             aria-label='清空收藏'
@@ -212,7 +220,7 @@ export function FavoritesPageClient({
         )
       }
       toolbar={
-        (loading || entries.length > 0) && (
+        ((loading && skeletonCount > 0) || libraryTotal > 0 || narrowed) && (
           <FavoriteLibraryToolbar
             query={query}
             onQueryChange={setQuery}

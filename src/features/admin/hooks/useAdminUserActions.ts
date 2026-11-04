@@ -4,7 +4,6 @@ import { useCallback } from 'react';
 
 import { adminPost } from '@/features/admin/lib/api';
 import { showError } from '@/features/admin/lib/notifications';
-import { type InactiveCandidate } from '@/features/admin/services/inactiveUsers';
 import { type ShowAlertFn } from '@/hooks/useAlertModal';
 
 type UserAction =
@@ -82,12 +81,12 @@ export function useAdminUserActions(options: UseAdminUserActionsOptions) {
   const previewInactiveUsers = useCallback(
     async (inactiveDays: number) => {
       try {
-        const data = await adminPost<{ candidates: InactiveCandidate[] }>(
+        const data = await adminPost<{ count: number; confirmation: string }>(
           '/api/admin/user',
-          { action: 'previewInactiveUsers', inactiveDays },
+          { action: 'previewInactiveUsers', inactiveDays, countOnly: true },
           '筛选不活跃用户失败',
         );
-        return data.candidates || [];
+        return data;
       } catch (err) {
         showError(
           err instanceof Error ? err.message : '筛选不活跃用户失败',
@@ -100,14 +99,14 @@ export function useAdminUserActions(options: UseAdminUserActionsOptions) {
   );
 
   const deleteInactiveUsers = useCallback(
-    async (inactiveDays: number, usernames: string[]) => {
+    async (inactiveDays: number, confirmation: string) => {
       try {
         const data = await adminPost<{
           deletedCount: number;
           skippedCount: number;
         }>(
           '/api/admin/user',
-          { action: 'deleteInactiveUsers', inactiveDays, usernames },
+          { action: 'deleteInactiveUsers', inactiveDays, confirmation },
           '清理不活跃用户失败',
         );
         await refreshConfig();

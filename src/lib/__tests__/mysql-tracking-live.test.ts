@@ -4,7 +4,11 @@ import { assertPlaybackPeriodRange } from '@/lib/__tests__/__fixtures__/playback
 
 import { MySqlStorage } from '../mysql.db';
 import type { Favorite, PlayRecord } from '../types';
-import { videoReview } from './__fixtures__/video-review-contract';
+import {
+  assertActivityAndReportPagination,
+  assertFollowPagination,
+  videoReview,
+} from './__fixtures__/video-review-contract';
 
 const liveUrl = (process.env.MYSQL_TEST_URL || '').trim();
 const describeLive = liveUrl ? describe : describe.skip;
@@ -43,6 +47,113 @@ describeLive('MySQL 追更查询（真实实例）', () => {
     ).pool.end();
   });
 
+  it('邀请码真实 SQL 分页、并发占用与过期过滤一致', async () => {
+    await storage.setAdminConfig({
+      UserConfig: {},
+    } as import('@/types/admin').AdminConfig);
+    const prefix = `INVITE-${Date.now()}`;
+    const codes = ['A', 'B', 'C'].map((suffix) => `${prefix}-${suffix}`);
+    try {
+      for (const code of codes)
+        await storage.createInviteCode({
+          code,
+          createdAt: Date.now(),
+          expiresAt: Date.now() + 86400000,
+          createdBy: 'owner',
+          maxUses: 2,
+        });
+      const results = await Promise.all(
+        Array.from({ length: 15 }, () =>
+          storage.reserveInviteCodeUse(codes[0]),
+        ),
+      );
+      expect(results.filter(Boolean)).toHaveLength(2);
+      const exhausted = await storage.queryInviteCodes({ filter: 'exhausted' });
+      expect(exhausted.items.some((item) => item.code === codes[0])).toBe(true);
+      const first = await storage.queryInviteCodes({
+        filter: 'active',
+        limit: 1,
+      });
+      expect(first.nextCursor).toBeTruthy();
+      const second = await storage.queryInviteCodes({
+        filter: 'active',
+        limit: 1,
+        cursor: first.nextCursor!,
+      });
+      expect(second.items[0].code).not.toBe(first.items[0].code);
+      await expect(
+        storage.queryInviteCodes({ filter: 'all', cursor: first.nextCursor! }),
+      ).rejects.toThrow('邀请码游标无效');
+      await storage.releaseInviteCodeUse(codes[0]);
+      expect(await storage.reserveInviteCodeUse(codes[0])).toBe(true);
+      await storage.deleteInviteCode(codes[2]);
+      await storage.createInviteCode({
+        code: codes[2],
+        createdAt: 1,
+        expiresAt: 1,
+        createdBy: 'owner',
+      });
+      expect(await storage.reserveInviteCodeUse(codes[2])).toBe(false);
+    } finally {
+      for (const code of codes) await storage.deleteInviteCode(code);
+    }
+  });
+
+  it('邀请码真实 SQL 迁移在并发实例下保持用量并剥离配置', async () => {
+    const { MysqlInviteCodeStore } =
+      await import('@/lib/mysql-invite-code-store');
+    const pool = (storage as unknown as { pool: import('mysql2/promise').Pool })
+      .pool;
+    const code = `MIGRATE-${Date.now()}`;
+    await storage.setAdminConfig({
+      UserConfig: {
+        InviteCodes: [
+          {
+            code,
+            createdAt: 1,
+            expiresAt: Date.now() + 86400000,
+            createdBy: 'owner',
+            maxUses: 10,
+            usedCount: 2,
+          },
+        ],
+      },
+    } as import('@/types/admin').AdminConfig);
+    await pool.execute(
+      'INSERT INTO invite_code_usage (code, used_count) VALUES (?, ?)',
+      [code, 4],
+    );
+    try {
+      await Promise.all([
+        new MysqlInviteCodeStore(pool).migrate(),
+        new MysqlInviteCodeStore(pool).migrate(),
+      ]);
+      expect(
+        (await storage.getAllInviteCodes()).find((item) => item.code === code)
+          ?.usedCount,
+      ).toBe(4);
+      expect(
+        (await storage.getAdminConfig())?.UserConfig.InviteCodes,
+      ).toBeUndefined();
+      const [rows] = await pool.query(
+        'SELECT code FROM invite_code_usage WHERE code = ?',
+        [code],
+      );
+      expect(rows).toEqual([]);
+      await storage.deleteInviteCode(code);
+      await new MysqlInviteCodeStore(pool).migrate();
+      expect(
+        (await storage.getAllInviteCodes()).some((item) => item.code === code),
+      ).toBe(false);
+    } finally {
+      await storage.deleteInviteCode(code);
+    }
+  });
+
+  it('paginates activity and report groups in real SQL', async () => {
+    await assertActivityAndReportPagination(storage, `activity-${Date.now()}`);
+  });
+
   const makeRecord = (
     total: number,
     baseline: number,
@@ -57,6 +168,126 @@ describeLive('MySQL 追更查询（真实实例）', () => {
     update_baseline_episodes: baseline,
     tracking_enabled: true,
     ...extra,
+  });
+
+  it('paginates own and work reviews in real SQL with tied timestamps and wildcard years', async () => {
+    const prefix = `review-page-${Date.now()}`;
+    const titleNorm = prefix;
+    const authors = Array.from({ length: 25 }, (_, i) => `${prefix}-${i}`);
+    try {
+      for (const [index, author] of authors.entries()) {
+        await storage.ensureUserProfile(author);
+        await storage.setVideoReview(author, {
+          ...videoReview,
+          title_norm: titleNorm,
+          year: index % 2 ? '' : '2026',
+        });
+        await storage.setVideoReview(prefix, {
+          ...videoReview,
+          title_norm: `${prefix}-${String(index).padStart(2, '0')}`,
+          rating: index % 3 ? 8.6 : null,
+          is_public: index % 2 === 0,
+        });
+      }
+      for (const sort of ['updated', 'high', 'low'] as const) {
+        const first = await storage.getMyVideoReviewPage(prefix, { sort });
+        const next = await storage.getMyVideoReviewPage(prefix, {
+          sort,
+          cursor: first.nextCursor!,
+        });
+        expect(first.items).toHaveLength(20);
+        expect(next.items).toHaveLength(5);
+        expect(
+          new Set(
+            [...first.items, ...next.items].map((item) => item.title_norm),
+          ).size,
+        ).toBe(25);
+        expect(first.counts.private).toBe(12);
+        if (sort !== 'updated')
+          expect(next.items.every((item) => item.rating === null)).toBe(true);
+      }
+      const work = await storage.getWorkVideoReviewPage(
+        titleNorm,
+        '2026',
+        prefix,
+      );
+      const next = await storage.getWorkVideoReviewPage(
+        titleNorm,
+        '2026',
+        prefix,
+        work.nextCursor!,
+      );
+      expect(work.reviews).toHaveLength(20);
+      expect(next.reviews).toHaveLength(5);
+      expect(work.count).toBe(25);
+      expect(
+        new Set(
+          [...work.reviews, ...next.reviews].map(
+            (item) => item.author.profileId,
+          ),
+        ).size,
+      ).toBe(25);
+    } finally {
+      for (const author of [...authors, prefix])
+        await storage.deleteUser(author);
+    }
+  });
+
+  it('filters live favorites in SQL before applying a tied-time cursor', async () => {
+    const username = `public-favorites-${Date.now()}`;
+    try {
+      for (const [key, origin] of [
+        ['source+z', 'live'],
+        ['source+e', 'vod'],
+        ['source+d', 'live'],
+        ['source+c', undefined],
+        ['source+b', 'vod'],
+        ['source+a', 'live'],
+      ] as const) {
+        await storage.setFavorite(username, key, {
+          ...baseFavorite,
+          origin,
+          save_time: 1000,
+        });
+      }
+      const first = await storage.getFavoritePage(
+        username,
+        2,
+        undefined,
+        undefined,
+        false,
+      );
+      const second = await storage.getFavoritePage(
+        username,
+        2,
+        1000,
+        'source+c',
+        false,
+      );
+      expect(first.items.map((item) => item.key)).toEqual([
+        'source+e',
+        'source+c',
+      ]);
+      expect(first.total).toBe(3);
+      expect(first.nextCursor).toBe('1000|source+c');
+      expect(second.items.map((item) => item.key)).toEqual(['source+b']);
+      expect(second.nextCursor).toBeNull();
+      expect((await storage.getFavoritePage(username, 10)).total).toBe(6);
+    } finally {
+      await storage.deleteAllFavorites(username);
+    }
+  });
+
+  it('paginates follows with real SQL predicates', async () => {
+    const username = `follow-page-${Date.now()}`;
+    try {
+      await assertFollowPagination(storage, username);
+    } finally {
+      await storage.deleteUser(username);
+      for (let index = 0; index < 35; index++) {
+        await storage.deleteUser(`${username}-${index}`);
+      }
+    }
   });
 
   it('reads period sessions with real SQL range and user predicates', async () => {

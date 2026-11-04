@@ -1,8 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 
 import {
-  findUsableInviteCode,
   INVITE_CODE_UNUSABLE_MESSAGE,
+  normalizeInviteCode,
 } from '@/features/admin/services/inviteCodes';
 import { getClientIp } from '@/lib/client-ip';
 import { getConfigForRead, invalidateConfigCache } from '@/lib/config';
@@ -90,17 +90,14 @@ export async function handleRegister(request: NextRequest) {
       return NextResponse.json({ error: '当前未开放注册' }, { status: 403 });
     }
 
-    if (config.UserConfig.RequireInviteCode) {
-      const usable = findUsableInviteCode(
-        config.UserConfig.InviteCodes || [],
-        body.inviteCode,
+    if (
+      config.UserConfig.RequireInviteCode &&
+      !normalizeInviteCode(body.inviteCode)
+    ) {
+      return NextResponse.json(
+        { error: INVITE_CODE_UNUSABLE_MESSAGE },
+        { status: 403 },
       );
-      if (!usable) {
-        return NextResponse.json(
-          { error: INVITE_CODE_UNUSABLE_MESSAGE },
-          { status: 403 },
-        );
-      }
     }
 
     const exists = await db.checkUserExist(username);

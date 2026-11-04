@@ -53,6 +53,18 @@ it('returns a social-aware summary and merged page without caching', async () =>
   );
 });
 
+it('returns an actionable 400 for expired follow pagination', async () => {
+  const { ReviewValidationError } = require('@/lib/video-reviews');
+  messages.getUserMessagePage.mockRejectedValueOnce(
+    new ReviewValidationError('消息分页已更新，请重新打开消息列表'),
+  );
+  const response = await GET(request(undefined, '?cursor=old'));
+  expect(response.status).toBe(400);
+  expect(await response.json()).toEqual({
+    error: '消息分页已更新，请重新打开消息列表',
+  });
+});
+
 it('accepts followed-review identifiers and routes read-all', async () => {
   const messageId = `follow-review:${'a'.repeat(1200)}`;
   messages.readUserMessage.mockResolvedValue({

@@ -608,6 +608,8 @@ export const ReviewsTab: React.FC<ReviewsTabProps> = ({
     save,
     remove,
     reloadSummary,
+    loadMoreReviews,
+    reviewsLoadingMore,
   } = reviews;
   const [editing, setEditing] = useState(false);
   const { session } = useAuthSession();
@@ -690,7 +692,10 @@ export const ReviewsTab: React.FC<ReviewsTabProps> = ({
       </section>
 
       <section className='space-y-2'>
-        <SectionHeader title='大家的评价' count={summary?.reviews.length}>
+        <SectionHeader
+          title='大家的评价'
+          count={summary?.reviewCount ?? summary?.reviews.length}
+        >
           {summaryError && (
             <button
               type='button'
@@ -723,6 +728,19 @@ export const ReviewsTab: React.FC<ReviewsTabProps> = ({
               还没有公开评价，来写第一条吧
             </p>
           )
+        )}
+        {summary?.nextCursor && (
+          <div className='flex justify-center py-3'>
+            <button
+              type='button'
+              className={iconButtonClass}
+              disabled={summaryLoading || reviewsLoadingMore}
+              onClick={loadMoreReviews}
+            >
+              {reviewsLoadingMore && <Spinner className='h-4 w-4' />}
+              加载更多
+            </button>
+          </div>
         )}
       </section>
     </div>

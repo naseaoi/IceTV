@@ -12,6 +12,18 @@ export function LibrarySubtitleSkeleton() {
   );
 }
 
+export function LibraryEmptySkeleton() {
+  return (
+    <div aria-hidden='true' className='flex flex-col items-center px-6 py-20'>
+      <div className='skeleton h-14 w-14 rounded-2xl' />
+      <div className='mt-4 flex h-6 items-center'>
+        <div className='skeleton h-4 w-28 rounded' />
+      </div>
+      <div className='skeleton mt-5 h-9 w-28 rounded-full' />
+    </div>
+  );
+}
+
 export function LibraryEmptyState({
   icon: Icon,
   title,

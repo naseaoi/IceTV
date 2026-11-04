@@ -2,12 +2,22 @@
 
 import { MessageSquareText, SearchX, Trash2 } from 'lucide-react';
 import Link from 'next/link';
-import { useDeferredValue, useEffect, useMemo, useRef, useState } from 'react';
+import {
+  useCallback,
+  useDeferredValue,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react';
 
+import { useAuthSession } from '@/components/AuthProvider';
 import CoverImage from '@/components/CoverImage';
 import ExpandableText from '@/components/ExpandableText';
 import {
   LIBRARY_PILL_BUTTON_CLASS,
+  LibraryEmptySkeleton,
   LibraryEmptyState,
   LibraryPageFrame,
   LibrarySubtitleSkeleton,
@@ -15,9 +25,14 @@ import {
 import { LibraryToolbar } from '@/components/LibraryToolbar';
 import ConfirmModal from '@/components/modals/ConfirmModal';
 import RatingBadge from '@/components/RatingBadge';
+import { useInfiniteScroll } from '@/features/douban/hooks/useInfiniteScroll';
 import { formatRelativeTime } from '@/lib/relative-time';
 import type { VideoReview } from '@/lib/types';
 import { parseStorageKey } from '@/lib/utils';
+import {
+  MY_REVIEWS_PAGE_SIZE,
+  VIDEO_REVIEWS_UPDATED_EVENT,
+} from '@/lib/video-reviews';
 import {
   deleteVideoReview,
   fetchMyVideoReviews,
@@ -39,50 +54,52 @@ const SORT_OPTIONS: { value: ReviewSort; label: string }[] = [
   { value: 'low', label: '评分从低到高' },
 ];
 
-const SKELETON_COUNT = 4;
+const SKELETON_COUNT = MY_REVIEWS_PAGE_SIZE;
+const reviewCounts = new Map<string, number>();
+const useIsomorphicLayoutEffect =
+  typeof window !== 'undefined' ? useLayoutEffect : useEffect;
+function useReviewSkeletonCount() {
+  const { session } = useAuthSession();
+  const profileId =
+    session.status === 'authenticated' ? session.profileId : null;
+  const [count, setCount] = useState(SKELETON_COUNT);
+  useIsomorphicLayoutEffect(() => {
+    setCount(
+      profileId
+        ? Math.min(
+            reviewCounts.get(profileId) ?? SKELETON_COUNT,
+            MY_REVIEWS_PAGE_SIZE,
+          )
+        : SKELETON_COUNT,
+    );
+  }, [profileId]);
+  return { count, profileId, setCount };
+}
 const CARD_CLASS =
   'flex gap-4 rounded-2xl bg-white p-4 ring-1 ring-gray-200 dark:bg-white/[0.03] dark:ring-white/10';
-
-function matchesFilter(review: VideoReview, filter: ReviewFilter) {
-  if (filter === 'public') return review.is_public;
-  if (filter === 'private') return !review.is_public;
-  if (filter === 'text') return review.rating === null;
-  return true;
-}
-
-// 无评分的排在评分排序末尾
-function compareReviews(a: VideoReview, b: VideoReview, sort: ReviewSort) {
-  if (sort === 'updated' || a.rating === b.rating) {
-    return b.updated_at - a.updated_at;
-  }
-  if (a.rating === null) return 1;
-  if (b.rating === null) return -1;
-  return sort === 'high' ? b.rating - a.rating : a.rating - b.rating;
-}
 
 function reviewPlayUrl(review: VideoReview) {
   const target = parseStorageKey(review.source_key);
   return `/play?${new URLSearchParams({ title: review.title, year: review.year, ...(target ? { source: target.source, id: target.id } : {}) })}`;
 }
 
-function buildFilterOptions(reviews: VideoReview[] | null) {
+function buildFilterOptions(counts: Record<ReviewFilter, number> | null) {
   return FILTERS.map((option) => ({
     ...option,
-    count: reviews
-      ? reviews.filter((review) => matchesFilter(review, option.value)).length
-      : 0,
+    count: counts?.[option.value] ?? 0,
   }));
 }
 
 function noop() {}
 
-function ReviewListSkeleton() {
+function ReviewListSkeleton({ count = SKELETON_COUNT }: { count?: number }) {
+  if (count === 0) return <LibraryEmptySkeleton />;
   return (
     <ul
       aria-hidden='true'
       className='grid grid-cols-1 items-start gap-3 xl:grid-cols-2'
     >
-      {Array.from({ length: SKELETON_COUNT }, (_, index) => (
+      {Array.from({ length: count }, (_, index) => (
         <li key={index} className={CARD_CLASS}>
           <div className='skeleton aspect-[2/3] w-16 shrink-0 self-start rounded-lg sm:w-20' />
           <div className='min-w-0 flex-1'>
@@ -108,26 +125,29 @@ function ReviewListSkeleton() {
 }
 
 export function MyReviewsPageSkeleton() {
+  const { count } = useReviewSkeletonCount();
   return (
     <LibraryPageFrame
       title='我的评价'
       subtitle={<LibrarySubtitleSkeleton />}
       toolbar={
-        <LibraryToolbar
-          searchLabel='搜索我的评价'
-          query=''
-          onQueryChange={noop}
-          filterOptions={buildFilterOptions(null)}
-          filter='all'
-          onFilterChange={noop}
-          sortOptions={SORT_OPTIONS}
-          sort='updated'
-          onSortChange={noop}
-          loading
-        />
+        count > 0 && (
+          <LibraryToolbar
+            searchLabel='搜索我的评价'
+            query=''
+            onQueryChange={noop}
+            filterOptions={buildFilterOptions(null)}
+            filter='all'
+            onFilterChange={noop}
+            sortOptions={SORT_OPTIONS}
+            sort='updated'
+            onSortChange={noop}
+            loading
+          />
+        )
       }
     >
-      <ReviewListSkeleton />
+      <ReviewListSkeleton count={count} />
     </LibraryPageFrame>
   );
 }
@@ -208,6 +228,11 @@ function ReviewCard({
 }
 
 export default function MyReviewsPageClient() {
+  const {
+    count: skeletonCount,
+    profileId,
+    setCount,
+  } = useReviewSkeletonCount();
   const [reviews, setReviews] = useState<VideoReview[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -220,40 +245,87 @@ export default function MyReviewsPageClient() {
   const inFlight = useRef(false);
   const deferredQuery = useDeferredValue(query);
 
-  useEffect(() => {
-    let active = true;
-    setLoading(true);
-    setError('');
-    fetchMyVideoReviews()
-      .then((items) => {
-        if (active) setReviews(items);
-      })
-      .catch(() => {
-        if (active) setError('评价加载失败，请重试');
-      })
-      .finally(() => {
-        if (active) setLoading(false);
-      });
-    return () => {
-      active = false;
-    };
-  }, [version]);
-
-  const searched = useMemo(() => {
-    const keyword = deferredQuery.trim().toLocaleLowerCase();
-    if (!keyword) return reviews;
-    return reviews.filter((review) =>
-      `${review.title} ${review.content}`.toLocaleLowerCase().includes(keyword),
-    );
-  }, [reviews, deferredQuery]);
-  const filterOptions = useMemo(() => buildFilterOptions(searched), [searched]);
-  const selected = useMemo(
-    () =>
-      searched
-        .filter((review) => matchesFilter(review, filter))
-        .sort((a, b) => compareReviews(a, b, sort)),
-    [searched, filter, sort],
+  const [total, setTotal] = useState(0);
+  const [counts, setCounts] = useState<Record<ReviewFilter, number> | null>(
+    null,
   );
+  const [cursor, setCursor] = useState<string | null>(null);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const generation = useRef(0);
+  const pageInFlight = useRef(false);
+  const requestPage = useCallback(
+    async (next?: string) => {
+      if (next && pageInFlight.current) return;
+      const current = next ? generation.current : ++generation.current;
+      pageInFlight.current = true;
+      if (next) setLoadingMore(true);
+      else {
+        setLoading(true);
+        setLoadingMore(false);
+        setCursor(null);
+      }
+      setError('');
+      try {
+        const page = await fetchMyVideoReviews({
+          cursor: next,
+          q: deferredQuery.trim(),
+          filter,
+          sort,
+        });
+        if (current !== generation.current) return;
+        setReviews((previous) =>
+          next
+            ? [
+                ...previous,
+                ...page.items.filter(
+                  (item) =>
+                    !previous.some(
+                      (existing) =>
+                        existing.title_norm === item.title_norm &&
+                        existing.year === item.year,
+                    ),
+                ),
+              ]
+            : page.items,
+        );
+        setCursor(page.nextCursor);
+        setTotal(page.total);
+        setCounts(page.counts);
+        setCount(Math.min(page.total, MY_REVIEWS_PAGE_SIZE));
+        if (profileId) reviewCounts.set(profileId, page.total);
+      } catch {
+        if (current === generation.current) setError('评价加载失败，请重试');
+      } finally {
+        if (current === generation.current) {
+          pageInFlight.current = false;
+          setLoading(false);
+          setLoadingMore(false);
+        }
+      }
+    },
+    [deferredQuery, filter, sort, profileId, setCount],
+  );
+
+  useEffect(() => {
+    void requestPage();
+    return () => {
+      generation.current += 1;
+    };
+  }, [version, requestPage]);
+  useEffect(() => {
+    const update = () => setVersion((value) => value + 1);
+    window.addEventListener(VIDEO_REVIEWS_UPDATED_EVENT, update);
+    return () =>
+      window.removeEventListener(VIDEO_REVIEWS_UPDATED_EVENT, update);
+  }, []);
+  const sentinelRef = useInfiniteScroll<HTMLDivElement>({
+    enabled: !!cursor && !loading && !loadingMore && !error,
+    onLoadMore: () => {
+      if (cursor) void requestPage(cursor);
+    },
+  });
+  const filterOptions = useMemo(() => buildFilterOptions(counts), [counts]);
+  const selected = reviews;
   const narrowed = deferredQuery.trim() !== '' || filter !== 'all';
 
   async function remove() {
@@ -264,12 +336,7 @@ export default function MyReviewsPageClient() {
     setError('');
     try {
       await deleteVideoReview(target.title, target.year, target.title_norm);
-      setReviews((items) =>
-        items.filter(
-          (item) =>
-            item.title_norm !== target.title_norm || item.year !== target.year,
-        ),
-      );
+      setVersion((value) => value + 1);
       setPending(null);
     } catch {
       setError('删除失败，请重试');
@@ -281,8 +348,8 @@ export default function MyReviewsPageClient() {
 
   let content: React.ReactNode;
   if (loading) {
-    content = <ReviewListSkeleton />;
-  } else if (reviews.length === 0) {
+    content = <ReviewListSkeleton count={skeletonCount} />;
+  } else if (total === 0 && !narrowed) {
     content = error ? null : (
       <LibraryEmptyState
         icon={MessageSquareText}
@@ -343,7 +410,7 @@ export default function MyReviewsPageClient() {
         ) : (
           <>
             <span className='font-medium tabular-nums text-gray-900 dark:text-gray-100'>
-              {reviews.length}
+              {total}
             </span>{' '}
             条评价
             {narrowed && (
@@ -351,15 +418,15 @@ export default function MyReviewsPageClient() {
                 <span className='mx-1.5 text-gray-300 dark:text-gray-600'>
                   /
                 </span>
-                当前显示 <span className='tabular-nums'>{selected.length}</span>{' '}
-                条
+                当前匹配{' '}
+                <span className='tabular-nums'>{counts?.[filter] ?? 0}</span> 条
               </span>
             )}
           </>
         )
       }
       toolbar={
-        (loading || reviews.length > 0) && (
+        ((loading && skeletonCount > 0) || total > 0 || narrowed) && (
           <LibraryToolbar
             searchLabel='搜索我的评价'
             query={query}
@@ -388,6 +455,21 @@ export default function MyReviewsPageClient() {
         </p>
       )}
       {content}
+      {!loading && cursor && (
+        <div ref={sentinelRef} className='mt-3'>
+          {loadingMore ? (
+            <ReviewListSkeleton />
+          ) : (
+            <button
+              type='button'
+              className={LIBRARY_PILL_BUTTON_CLASS}
+              onClick={() => void requestPage(cursor)}
+            >
+              加载更多
+            </button>
+          )}
+        </div>
+      )}
       <ConfirmModal
         isOpen={pending !== null}
         title='删除评价'

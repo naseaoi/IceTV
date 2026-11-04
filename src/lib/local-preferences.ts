@@ -12,6 +12,8 @@ export const SOURCE_PREFERRED_QUALITY_STORAGE_PREFIX = 'preferredQuality:';
 export const THEME_STORAGE_KEY = 'theme';
 export const SEEN_ANNOUNCEMENT_STORAGE_KEY = 'hasSeenAnnouncement';
 export const CONTINUE_WATCHING_COUNT_STORAGE_KEY = 'continueWatchingCount';
+export const CONTINUE_WATCHING_PAGE_COUNT_STORAGE_KEY =
+  'continueWatchingPageCount';
 export const FAVORITE_ITEMS_COUNT_STORAGE_KEY = 'favoriteItemsCount';
 export const NOTIFIED_MESSAGE_REVISION_STORAGE_PREFIX =
   'notifiedMessageRevision:';
@@ -267,7 +269,40 @@ export function writeContinueWatchingCount(value: number): void {
   } catch {}
 }
 
+export function readContinueWatchingPageCount(): number {
+  const count = Number(
+    readStoredString(CONTINUE_WATCHING_PAGE_COUNT_STORAGE_KEY),
+  );
+  return Number.isFinite(count) ? Math.max(0, Math.floor(count)) : 0;
+}
+
+export function writeContinueWatchingPageCount(value: number): void {
+  const count = Math.max(0, Math.floor(Number.isFinite(value) ? value : 0));
+  try {
+    writeStoredString(CONTINUE_WATCHING_PAGE_COUNT_STORAGE_KEY, String(count));
+  } catch {}
+  try {
+    if (typeof document !== 'undefined') {
+      document.cookie = `cw_page_count=${count};path=/;max-age=${365 * 24 * 60 * 60};samesite=lax`;
+    }
+  } catch {}
+}
+
+export function resetContinueWatchingPageCount(): void {
+  try {
+    if (typeof window !== 'undefined') {
+      window.localStorage.removeItem(CONTINUE_WATCHING_PAGE_COUNT_STORAGE_KEY);
+    }
+  } catch {}
+  try {
+    if (typeof document !== 'undefined') {
+      document.cookie = 'cw_page_count=0;path=/;max-age=0;samesite=lax';
+    }
+  } catch {}
+}
+
 export function resetContinueWatchingCount(): void {
+  resetContinueWatchingPageCount();
   try {
     if (typeof window !== 'undefined') {
       window.localStorage.removeItem(CONTINUE_WATCHING_COUNT_STORAGE_KEY);

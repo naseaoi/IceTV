@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 
+import type { FavoriteLibraryQuery } from '@/features/favorites/lib/library-query';
+import { InvalidFavoriteLibraryQuery } from '@/features/favorites/lib/library-storage';
 import { isGuardFailure, requireActiveUser } from '@/lib/api-auth';
 import { db } from '@/lib/db';
 import { normalizeFavoriteLimit, parseFavoriteCursor } from '@/lib/favorites';
@@ -23,6 +25,18 @@ export async function GET(request: NextRequest) {
 
     const { searchParams } = new URL(request.url);
     const key = searchParams.get('key');
+
+    if (searchParams.get('format') === 'library') {
+      const page = await db.getFavoriteLibraryPage(guardResult.username, {
+        query: searchParams.get('q') ?? '',
+        filter: (searchParams.get('filter') ??
+          'all') as FavoriteLibraryQuery['filter'],
+        sort: (searchParams.get('sort') ??
+          'saved') as FavoriteLibraryQuery['sort'],
+        cursor: searchParams.get('cursor'),
+      });
+      return NextResponse.json(page, { headers: NO_STORE_HEADERS });
+    }
 
     if (searchParams.get('format') === 'page') {
       const cursor = parseFavoriteCursor(searchParams.get('cursor'));
@@ -65,6 +79,12 @@ export async function GET(request: NextRequest) {
       headers: NO_STORE_HEADERS,
     });
   } catch (err) {
+    if (err instanceof InvalidFavoriteLibraryQuery) {
+      return NextResponse.json(
+        { error: err.message },
+        { status: 400, headers: NO_STORE_HEADERS },
+      );
+    }
     console.error('获取收藏失败', err);
     return NextResponse.json(
       { error: 'Internal Server Error' },

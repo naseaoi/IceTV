@@ -1,10 +1,8 @@
-import { ImagePlaceholder } from '@/components/ImagePlaceholder';
-
 const DoubanCardSkeleton = ({ video = false }: { video?: boolean }) => {
   return (
     <div className='w-full'>
       <div className='group relative flex w-full flex-col rounded-lg bg-transparent shadow-none'>
-        <ImagePlaceholder aspectRatio='aspect-[2/3]' />
+        <div className='skeleton aspect-[2/3] w-full rounded-lg' />
 
         <div
           className={`mt-2 flex items-center text-[13px] ${video ? 'h-[1.5em]' : 'h-5'}`}

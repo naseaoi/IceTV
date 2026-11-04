@@ -7,6 +7,36 @@ import type {
 
 // 前后端共用；存储列为 MEDIUMTEXT，放宽上限无需迁移
 export const REVIEW_CONTENT_MAX_LENGTH = 5000;
+export const MY_REVIEWS_PAGE_SIZE = 20;
+export const WORK_REVIEWS_PAGE_SIZE = 20;
+export const VIDEO_REVIEWS_UPDATED_EVENT = 'videoReviewsUpdated';
+
+export type MyReviewFilter = 'all' | 'public' | 'private' | 'text';
+export type MyReviewSort = 'updated' | 'high' | 'low';
+export interface MyReviewQuery {
+  cursor?: string;
+  q?: string;
+  filter?: MyReviewFilter;
+  sort?: MyReviewSort;
+}
+
+export function validateMyReviewQuery(query: MyReviewQuery) {
+  const q = text(query.q ?? '', '搜索关键词', 200);
+  const filter = query.filter ?? 'all';
+  const sort = query.sort ?? 'updated';
+  if (
+    !['all', 'public', 'private', 'text'].includes(filter) ||
+    !['updated', 'high', 'low'].includes(sort)
+  )
+    throw new ReviewValidationError('评价筛选或排序无效');
+  const after = decodeReviewCursor(query.cursor);
+  if (
+    after &&
+    (!/^\d+$/.test(after[1]) || !Number.isSafeInteger(Number(after[1])))
+  )
+    throw new ReviewValidationError('分页游标无效');
+  return { q, filter, sort, after };
+}
 
 export class ReviewValidationError extends Error {}
 
@@ -188,6 +218,8 @@ export function reviewSql(dialect: 'sqlite' | 'mysql') {
   const workWhere =
     "title_norm = ? AND is_public = 1 AND (? = '' OR year IN (?, ''))";
   return {
+    rating,
+    title,
     own: `SELECT review_json FROM video_reviews WHERE username = ? AND title_norm = ? AND (? = '' OR year IN (?, '')) ORDER BY CASE WHEN year = ? THEN 1 ELSE 0 END DESC, updated_at DESC, year DESC LIMIT 1`,
     latest:
       'SELECT review_json FROM video_reviews WHERE username = ? AND title_norm = ? ORDER BY updated_at DESC, year DESC LIMIT 1',

@@ -9,7 +9,42 @@ import {
 import { UserGroupTable } from '@/features/admin/components/tabs/user-config/UserGroupTable';
 import UserConfigTab from '@/features/admin/components/tabs/UserConfigTab';
 
+const mockBatchPost = jest.fn();
+jest.mock('@/features/admin/lib/api', () => ({
+  adminPost: (...args: unknown[]) => mockBatchPost(...args),
+  adminGet: jest.fn(),
+}));
 const mockUserAction = jest.fn();
+let mockRows: Array<{
+  username: string;
+  role: string;
+  banned?: boolean;
+  tags?: string[];
+  nickname?: string;
+}> = [];
+let mockNextCursor: string | null = null;
+jest.mock('@/features/admin/hooks/useAdminUsers', () => ({
+  useAdminUsers: (query: { q: string; filter: string }) => {
+    const q = query.q.trim().toLowerCase();
+    const items = mockRows.filter(
+      (row) =>
+        (!q ||
+          row.username.toLowerCase().includes(q) ||
+          row.nickname?.toLowerCase().includes(q)) &&
+        (query.filter === 'all' ||
+          (query.filter === 'banned' ? row.banned : row.role === query.filter)),
+    );
+    return {
+      items,
+      total: items.length,
+      nextCursor: mockNextCursor,
+      loading: false,
+      error: '',
+      refresh: jest.fn(),
+      loadMore: jest.fn(),
+    };
+  },
+}));
 const mockIsLoading = jest.fn((_key: string) => false);
 const mockGetAuthInfo = jest.fn(() => ({ username: 'owner' }));
 
@@ -30,7 +65,15 @@ jest.mock('@/features/admin/components/tabs/user-config/AddUserForm', () => ({
 }));
 jest.mock(
   '@/features/admin/components/tabs/user-config/BatchUserGroupDialog',
-  () => ({ BatchUserGroupDialog: () => null }),
+  () => ({
+    BatchUserGroupDialog: ({
+      isOpen,
+      onConfirm,
+    }: {
+      isOpen: boolean;
+      onConfirm: () => void;
+    }) => (isOpen ? <button onClick={onConfirm}>预估批量操作</button> : null),
+  }),
 );
 jest.mock(
   '@/features/admin/components/tabs/user-config/ChangePasswordForm',
@@ -99,7 +142,9 @@ describe('UserConfigTab sensitive actions', () => {
 
   beforeEach(() => {
     jest.clearAllMocks();
+    mockNextCursor = null;
     mockUserAction.mockResolvedValue(undefined);
+    mockRows = [{ username: 'demo', role: 'user' }];
   });
 
   it('confirms administrator authorization before executing it', async () => {
@@ -163,14 +208,19 @@ describe('UserConfigTab user search and selection', () => {
     SourceConfig: [],
   } as never;
 
+  beforeEach(() => {
+    mockNextCursor = null;
+  });
+
   function setup(role: 'owner' | 'admin' = 'owner') {
+    mockRows = users.map((user) => ({ ...user, nickname: user.tags?.[0] }));
     mockGetAuthInfo.mockReturnValue({
       username: role === 'owner' ? 'owner' : 'current-admin',
     });
     render(
       <UserConfigTab config={config} role={role} refreshConfig={jest.fn()} />,
     );
-    return screen.getByRole('searchbox', { name: '搜索用户名或用户组' });
+    return screen.getByRole('searchbox', { name: '搜索用户名或昵称' });
   }
 
   function filterUsers(label: string) {
@@ -237,31 +287,30 @@ describe('UserConfigTab user search and selection', () => {
     expect(screen.queryByRole('checkbox')).not.toBeInTheDocument();
   });
 
-  it('selects and deselects only visible rows while preserving hidden selections', () => {
+  it('resets selections when conditions change and offers all matching users', () => {
+    mockNextCursor = 'next-page';
     const search = setup();
     fireEvent.click(screen.getByRole('checkbox', { name: '选择用户 Bob' }));
     fireEvent.change(search, { target: { value: 'VIP' } });
     const selectAll = screen.getByRole('checkbox', { name: '全选当前用户' });
     expect(selectAll).not.toBeChecked();
     fireEvent.click(selectAll);
-    expect(selectAll).toBeChecked();
-    expect(screen.getByText('已选 3 人')).toBeInTheDocument();
-    fireEvent.click(selectAll);
-    expect(selectAll).not.toBeChecked();
-    expect(screen.getByText('已选 1 人')).toBeInTheDocument();
+    expect(
+      screen.getByRole('button', { name: '选择全部 2 个匹配用户' }),
+    ).toBeInTheDocument();
+    fireEvent.click(
+      screen.getByRole('button', { name: '选择全部 2 个匹配用户' }),
+    );
+    expect(screen.getByText('已选择全部 2 个匹配用户')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('checkbox', { name: '选择用户 Alice' }));
+    expect(screen.getByText('已选择全部 1 个匹配用户')).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: '清除搜索' }));
     expect(
       screen.getByRole('checkbox', { name: '选择用户 Bob' }),
-    ).toBeChecked();
-    expect(
-      screen.getByRole('checkbox', { name: '选择用户 Alice' }),
     ).not.toBeChecked();
     expect(
-      screen.getByRole('checkbox', { name: '选择用户 Blocked' }),
-    ).not.toBeChecked();
-    expect(
-      screen.getByRole('checkbox', { name: '选择用户 manager' }),
-    ).not.toBeChecked();
+      screen.queryByText(/已选择全部 \d+ 个匹配用户/),
+    ).not.toBeInTheDocument();
   });
 
   it('does not mistake equally sized hidden selections for all visible users being selected', () => {
@@ -272,7 +321,41 @@ describe('UserConfigTab user search and selection', () => {
       screen.getByRole('checkbox', { name: '全选当前用户' }),
     ).not.toBeChecked();
     fireEvent.click(screen.getByRole('checkbox', { name: '全选当前用户' }));
-    expect(screen.getByText('已选 2 人')).toBeInTheDocument();
+    expect(screen.getByText('共 1 人 · 已选 1 人')).toBeInTheDocument();
+    expect(
+      screen.queryByRole('button', { name: /选择全部 \d+ 个匹配用户/ }),
+    ).not.toBeInTheDocument();
+  });
+
+  it('uses server preview counts and submits filters with exclusions', async () => {
+    mockBatchPost
+      .mockResolvedValueOnce({ affectedCount: 2, skippedCount: 1 })
+      .mockResolvedValueOnce({ processedCount: 2, skippedCount: 1 });
+    mockNextCursor = 'next-page';
+    setup();
+    fireEvent.click(screen.getByRole('checkbox', { name: '全选当前用户' }));
+    fireEvent.click(
+      screen.getByRole('button', { name: '选择全部 5 个匹配用户' }),
+    );
+    fireEvent.click(screen.getByRole('checkbox', { name: '选择用户 Bob' }));
+    fireEvent.click(screen.getByRole('button', { name: '批量设置用户组' }));
+    fireEvent.click(screen.getByRole('button', { name: '预估批量操作' }));
+    expect(
+      await screen.findByText('预计处理 2 个用户，跳过 1 个。'),
+    ).toBeInTheDocument();
+    expect(mockBatchPost).toHaveBeenLastCalledWith(
+      '/api/admin/user',
+      expect.objectContaining({
+        dryRun: true,
+        selection: {
+          mode: 'all',
+          filter: { q: '', filter: 'all', group: '' },
+          excluded: ['Bob'],
+        },
+      }),
+    );
+    fireEvent.click(screen.getByRole('button', { name: '确认' }));
+    await waitFor(() => expect(mockBatchPost).toHaveBeenCalledTimes(2));
   });
 
   it('shows owner actions in a portal menu with destructive deletion last', () => {
@@ -330,7 +413,7 @@ describe('UserConfigTab user search and selection', () => {
     expect(screen.queryByRole('checkbox')).not.toBeInTheDocument();
     filterUsers('全部');
     fireEvent.click(screen.getByRole('checkbox', { name: '全选当前用户' }));
-    expect(screen.getByText('已选 3 人')).toBeInTheDocument();
+    expect(screen.getByText('共 5 人 · 已选 3 人')).toBeInTheDocument();
     expect(
       screen.queryByRole('checkbox', { name: '选择用户 owner' }),
     ).not.toBeInTheDocument();

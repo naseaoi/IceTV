@@ -18,9 +18,10 @@ import {
   usePosterPlay,
 } from '@/hooks/usePosterPlay';
 
-import type { HomeHeroItem } from '../lib/home-hero';
+import { type HomeHeroItem, HERO_ITEM_LIMIT } from '../lib/home-hero';
 
 const ROTATE_INTERVAL_MS = 8000;
+const DESKTOP_HERO_CONTAINER_CLASS = `${PAGE_CONTAINER_CLASS} relative flex h-[clamp(440px,58vh,560px)] items-end gap-10`;
 
 function heroMetaParts(item: HomeHeroItem): string[] {
   return [
@@ -243,9 +244,7 @@ function DesktopHero({
         <div className='absolute inset-x-0 bottom-0 h-40 bg-gradient-to-t from-gray-50 to-transparent dark:from-gray-950' />
       </div>
 
-      <div
-        className={`${PAGE_CONTAINER_CLASS} relative flex h-[clamp(440px,58vh,560px)] items-end gap-10`}
-      >
+      <div className={DESKTOP_HERO_CONTAINER_CLASS}>
         <div className='relative h-full min-w-0 flex-1'>
           {previousItem && (
             <div
@@ -471,37 +470,78 @@ export function HomeHero({
 export function HomeHeroSkeleton() {
   return (
     <>
-      <section aria-hidden='true' className='relative -mt-16 hidden md:block'>
-        <div
-          className={`${PAGE_CONTAINER_CLASS} flex h-[clamp(440px,58vh,560px)] items-end gap-10 pb-10 pt-24`}
-        >
-          <div className='skeleton aspect-[2/3] w-48 shrink-0 rounded-xl lg:w-56' />
-          <div className='w-full max-w-2xl flex-1 pb-1'>
-            <div className='skeleton h-3 w-10 rounded' />
-            <div className='skeleton mt-3 h-11 w-2/3 rounded-lg lg:h-14' />
-            <div className='skeleton mt-4 h-4 w-1/2 rounded' />
-            <div className='mt-5 space-y-2.5'>
-              <div className='skeleton h-4 w-full rounded' />
-              <div className='skeleton h-4 w-11/12 rounded' />
-              <div className='skeleton h-4 w-3/5 rounded' />
+      <section
+        aria-hidden='true'
+        className='relative -mt-16 hidden overflow-hidden md:block'
+      >
+        <div className={DESKTOP_HERO_CONTAINER_CLASS}>
+          <div className='relative h-full min-w-0 flex-1'>
+            <div className={SLIDE_CLASS}>
+              <div className='skeleton aspect-[2/3] w-48 shrink-0 rounded-xl lg:w-56' />
+              <div className='min-w-0 max-w-2xl flex-1 pb-1'>
+                <div className='flex h-4 items-center'>
+                  <div className='skeleton h-3 w-10 rounded' />
+                </div>
+                <div className='skeleton mt-2 h-10 w-2/3 rounded-lg lg:h-[60px]' />
+                <div className='mt-3 flex h-[22.5px] items-center'>
+                  <div className='skeleton h-4 w-1/2 rounded' />
+                </div>
+                <div className='mt-4'>
+                  {['w-full', 'w-11/12', 'w-3/5'].map((width) => (
+                    <div key={width} className='flex h-7 items-center'>
+                      <div className={`skeleton h-4 rounded ${width}`} />
+                    </div>
+                  ))}
+                </div>
+                <div className='mt-3 flex h-5 items-center'>
+                  <div className='skeleton h-3.5 w-2/3 rounded' />
+                </div>
+                <div className='mt-7 flex gap-3'>
+                  <div className='skeleton h-11 w-32 rounded-full' />
+                  <div className='skeleton h-11 w-24 rounded-full' />
+                </div>
+              </div>
             </div>
-            <div className='mt-8 flex gap-3'>
-              <div className='skeleton h-11 w-32 rounded-full' />
-              <div className='skeleton h-11 w-24 rounded-full' />
-            </div>
+          </div>
+          <div className='relative hidden shrink-0 items-end gap-2 self-end pb-10 lg:flex'>
+            {Array.from({ length: HERO_ITEM_LIMIT }, (_, index) => (
+              <div
+                key={index}
+                className={`skeleton aspect-[2/3] rounded-md ${index === 0 ? 'w-14' : 'w-11'}`}
+              />
+            ))}
           </div>
         </div>
       </section>
       <section
         aria-hidden='true'
-        className={`skeleton-surface relative md:hidden ${MOBILE_HERO_HEIGHT_CLASS}`}
+        className={`relative md:hidden ${MOBILE_HERO_HEIGHT_CLASS}`}
       >
+        <div className='skeleton absolute inset-0' />
         <div className='absolute inset-x-0 bottom-0 h-3/5 bg-gradient-to-t from-gray-50 to-transparent dark:from-gray-950' />
-        <div className='absolute inset-x-0 bottom-0 space-y-2.5 px-4 pb-4'>
-          <div className='skeleton h-4 w-8 rounded' />
-          <div className='skeleton h-8 w-2/3 rounded-lg' />
-          <div className='skeleton h-3.5 w-1/2 rounded' />
-          <div className='skeleton !mt-4 h-10 w-28 rounded-full' />
+        <div className='absolute inset-x-0 bottom-0 px-4 pb-4'>
+          <div className='skeleton h-5 w-8 rounded' />
+          <div className='skeleton mt-2 h-[35px] w-2/3 rounded-lg' />
+          <div className='mt-1.5 flex h-[19.5px] items-center'>
+            <div className='skeleton h-3.5 w-1/2 rounded' />
+          </div>
+          <div className='mt-2'>
+            <div className='flex h-5 items-center'>
+              <div className='skeleton h-3 w-full rounded' />
+            </div>
+            <div className='flex h-5 items-center'>
+              <div className='skeleton h-3 w-3/4 rounded' />
+            </div>
+          </div>
+          <div className='skeleton mt-4 h-10 w-28 rounded-full' />
+        </div>
+        <div className='absolute bottom-7 right-4 flex items-center gap-1.5'>
+          {Array.from({ length: HERO_ITEM_LIMIT }, (_, index) => (
+            <div
+              key={index}
+              className={`skeleton h-1.5 rounded-full ${index === 0 ? 'w-4' : 'w-1.5'}`}
+            />
+          ))}
         </div>
       </section>
     </>

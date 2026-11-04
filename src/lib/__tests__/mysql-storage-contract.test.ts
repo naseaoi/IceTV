@@ -25,6 +25,8 @@ type SourceRouteStatsRow = {
 
 type FakeState = {
   social: Record<string, Record<string, any>[]>;
+  userAccess: Map<string, Record<string, any>>;
+  userGroups: Record<string, any>[];
   users: Map<string, string>;
   playRecords: Map<string, Map<string, string>>;
   favorites: Map<string, Map<string, string>>;
@@ -37,6 +39,7 @@ type FakeState = {
   messageStates: Map<string, string>;
   loginActivities: Map<string, number>;
   inviteCodeUsage: Map<string, number>;
+  inviteCodes: Map<string, Record<string, any>>;
   danmakuEpisodes: Map<string, Map<string, number>>;
   danmakuEnabled: Map<string, boolean>;
 };
@@ -55,6 +58,10 @@ function cloneState(state: FakeState): FakeState {
         rows.map((row) => ({ ...row })),
       ]),
     ),
+    userAccess: new Map(
+      [...state.userAccess].map(([key, row]) => [key, { ...row }]),
+    ),
+    userGroups: state.userGroups.map((row) => ({ ...row })),
     users: new Map(state.users),
     playRecords: cloneNestedMap(state.playRecords),
     favorites: cloneNestedMap(state.favorites),
@@ -67,6 +74,9 @@ function cloneState(state: FakeState): FakeState {
     messageStates: new Map(state.messageStates),
     loginActivities: new Map(state.loginActivities),
     inviteCodeUsage: new Map(state.inviteCodeUsage),
+    inviteCodes: new Map(
+      [...state.inviteCodes].map(([code, item]) => [code, { ...item }]),
+    ),
     danmakuEpisodes: new Map(
       Array.from(state.danmakuEpisodes.entries(), ([key, value]) => [
         key,
@@ -85,6 +95,8 @@ function createState(): FakeState {
       video_review_likes: [],
       video_review_reports: [],
     },
+    userAccess: new Map(),
+    userGroups: [],
     users: new Map(),
     playRecords: new Map(),
     favorites: new Map(),
@@ -97,6 +109,7 @@ function createState(): FakeState {
     messageStates: new Map(),
     loginActivities: new Map(),
     inviteCodeUsage: new Map(),
+    inviteCodes: new Map(),
     danmakuEpisodes: new Map(),
     danmakuEnabled: new Map(),
   };
@@ -284,6 +297,59 @@ function createFakePool() {
   ) => {
     const normalized = normalizeSql(sql);
 
+    if (normalized.startsWith('INSERT IGNORE INTO user_access')) {
+      for (const username of currentState.users.keys())
+        if (!currentState.userAccess.has(username))
+          currentState.userAccess.set(username, {
+            username,
+            role: 'user',
+            banned: 0,
+            enabled_apis: null,
+            updated_at: params[0],
+          });
+      return [{ affectedRows: 1 }, []];
+    }
+    if (normalized.startsWith('INSERT INTO user_access')) {
+      const [username, role, banned, enabled_apis, updated_at] = params;
+      currentState.userAccess.set(String(username), {
+        username,
+        role,
+        banned,
+        enabled_apis,
+        updated_at,
+      });
+      return [{ affectedRows: 1 }, []];
+    }
+    if (normalized.startsWith('INSERT INTO user_group_members')) {
+      const [username, group_name, position] = params;
+      currentState.userGroups.push({ username, group_name, position });
+      return [{ affectedRows: 1 }, []];
+    }
+    if (normalized.startsWith('DELETE FROM user_access')) {
+      if (params.length) currentState.userAccess.delete(String(params[0]));
+      else currentState.userAccess.clear();
+      return [{ affectedRows: 1 }, []];
+    }
+    if (normalized.startsWith('DELETE FROM user_group_members')) {
+      currentState.userGroups = params.length
+        ? currentState.userGroups.filter(
+            (row) =>
+              row[
+                normalized.includes('group_name =') ? 'group_name' : 'username'
+              ] !== params[0],
+          )
+        : [];
+      return [{ affectedRows: 1 }, []];
+    }
+    if (
+      normalized.startsWith(
+        'UPDATE admin_config SET config_json = ? WHERE id = 1 AND CAST(config_json AS CHAR)',
+      )
+    ) {
+      const matches = currentState.adminConfig === params[1];
+      if (matches) currentState.adminConfig = String(params[0]);
+      return [{ affectedRows: matches ? 1 : 0 }, []];
+    }
     const socialResult = executeSocial(normalized, params, currentState);
     if (socialResult !== undefined) return [{ affectedRows: socialResult }, []];
     if (
@@ -454,6 +520,62 @@ function createFakePool() {
       return [[], []];
     }
 
+    if (/^INSERT(?: IGNORE)? INTO invite_codes /.test(normalized)) {
+      const [code, created_at, expires_at, created_by, max_uses, used_count] =
+        params;
+      if (
+        !normalized.startsWith('INSERT IGNORE') ||
+        !currentState.inviteCodes.has(String(code))
+      )
+        currentState.inviteCodes.set(String(code), {
+          code,
+          created_at,
+          expires_at,
+          created_by,
+          max_uses,
+          used_count,
+        });
+      return [{ affectedRows: 1 }, []];
+    }
+    if (
+      normalized.startsWith(
+        'UPDATE invite_codes SET used_count = used_count + 1',
+      )
+    ) {
+      const item = currentState.inviteCodes.get(String(params[0]));
+      if (
+        !item ||
+        item.expires_at <= Number(params[1]) ||
+        (item.max_uses !== null && item.used_count >= item.max_uses)
+      )
+        return [{ affectedRows: 0 }, []];
+      item.used_count += 1;
+      return [{ affectedRows: 1 }, []];
+    }
+    if (
+      normalized.startsWith(
+        'UPDATE invite_codes SET used_count = used_count - 1',
+      )
+    ) {
+      const item = currentState.inviteCodes.get(String(params[0]));
+      if (item && item.used_count > 0) item.used_count -= 1;
+      return [{ affectedRows: 1 }, []];
+    }
+    if (normalized === 'DELETE FROM invite_codes WHERE code = ?') {
+      return [
+        {
+          affectedRows: Number(
+            currentState.inviteCodes.delete(String(params[0])),
+          ),
+        },
+        [],
+      ];
+    }
+    if (normalized === 'DELETE FROM invite_codes') {
+      currentState.inviteCodes.clear();
+      return [{ affectedRows: 1 }, []];
+    }
+
     if (
       normalized ===
       'INSERT IGNORE INTO invite_code_usage (code, used_count) VALUES (?, ?)'
@@ -592,8 +714,9 @@ function createFakePool() {
     }
 
     if (
-      normalized ===
-      'INSERT INTO favorites (username, favorite_key, favorite_json) VALUES (?, ?, ?) ON DUPLICATE KEY UPDATE favorite_json = VALUES(favorite_json)'
+      normalized.startsWith(
+        'INSERT INTO favorites (username, favorite_key, favorite_json,',
+      )
     ) {
       const [username, key, value] = params as [string, string, string];
       upsertJsonRecord(currentState.favorites, username, key, value);
@@ -609,12 +732,9 @@ function createFakePool() {
       return [[], []];
     }
 
-    if (
-      normalized ===
-      'UPDATE favorites SET favorite_json = ? WHERE username = ? AND favorite_key = ? AND BINARY favorite_json = BINARY ?'
-    ) {
-      const [value, username, key, snapshot] = params as [
-        string,
+    if (normalized.startsWith('UPDATE favorites SET favorite_json = ?,')) {
+      const value = params[0] as string;
+      const [username, key, snapshot] = params.slice(-3) as [
         string,
         string,
         string,
@@ -1016,6 +1136,56 @@ function createFakePool() {
   ) => {
     const normalized = normalizeSql(sql);
 
+    if (normalized === 'SHOW COLUMNS FROM favorites')
+      return [
+        [
+          'title_norm',
+          'year_norm',
+          'year_number',
+          'search_text',
+          'saved_at',
+          'library_valid',
+          'projection_version',
+        ].map((Field) => ({ Field })),
+        [],
+      ];
+    if (normalized === 'SHOW INDEX FROM favorites')
+      return [
+        [
+          'idx_favorites_saved',
+          'idx_favorites_work',
+          'idx_favorites_projection',
+        ].map((Key_name) => ({ Key_name })),
+        [],
+      ];
+    if (
+      normalized ===
+      'SELECT username, favorite_key, favorite_json FROM favorites WHERE projection_version = 0 LIMIT 250'
+    )
+      return [[], []];
+    if (
+      normalized.startsWith(
+        'SELECT username, role, banned, enabled_apis FROM user_access',
+      )
+    ) {
+      const row = currentState.userAccess.get(String(params[0]));
+      return [row ? [{ ...row }] : [], []];
+    }
+    if (normalized === 'SELECT username FROM user_access ORDER BY username')
+      return [
+        [...currentState.userAccess.keys()]
+          .sort()
+          .map((username) => ({ username })),
+        [],
+      ];
+    if (normalized.startsWith('SELECT group_name FROM user_group_members'))
+      return [
+        currentState.userGroups
+          .filter((row) => row.username === params[0])
+          .sort((a, b) => a.position - b.position)
+          .map((row) => ({ group_name: row.group_name })),
+        [],
+      ];
     const socialRows = querySocial(normalized, params, currentState);
     if (socialRows !== undefined) return [socialRows, []];
 
@@ -1028,6 +1198,150 @@ function createFakePool() {
         compareText(b.username, a.username) ||
         compareText(b.review.title_norm, a.review.title_norm) ||
         compareText(b.review.year, a.review.year);
+      if (
+        normalized.startsWith('SELECT COUNT(*) AS count FROM video_reviews')
+      ) {
+        const matching = normalized.includes('WHERE username = ?')
+          ? rows.filter((row) => row.username === params[0])
+          : rows.filter(
+              (row) =>
+                row.review.is_public &&
+                row.review.title_norm === params[0] &&
+                (!params[1] ||
+                  row.review.year === params[1] ||
+                  row.review.year === ''),
+            );
+        return [[{ count: matching.length }], []];
+      }
+      if (normalized.startsWith('SELECT title_norm, year,')) {
+        return [
+          rows
+            .filter((row) => row.username === params[0])
+            .map(({ review }) => ({
+              title_norm: review.title_norm,
+              year: review.year,
+              rating: review.rating,
+            })),
+          [],
+        ];
+      }
+      if (normalized.includes('LOWER(CONCAT(')) {
+        rows = rows.filter(
+          (row) =>
+            row.username === params[0] &&
+            `${row.review.title} ${row.review.content}`
+              .toLowerCase()
+              .includes(String(params[1]).toLowerCase()),
+        );
+        if (normalized.includes('AS `all`'))
+          return [
+            [
+              {
+                all: rows.length,
+                public: rows.filter((row) => row.review.is_public).length,
+                private: rows.filter((row) => !row.review.is_public).length,
+                text: rows.filter((row) => row.review.rating === null).length,
+              },
+            ],
+            [],
+          ];
+        const rank = (review: VideoReview) =>
+          normalized.includes('101 - ROUND')
+            ? review.rating === null
+              ? 0
+              : 101 - Math.round(review.rating * 10)
+            : normalized.includes('COALESCE(ROUND')
+              ? review.rating === null
+                ? 0
+                : Math.round(review.rating * 10)
+              : review.updated_at;
+        if (normalized.includes('AND is_public = 1'))
+          rows = rows.filter((row) => row.review.is_public);
+        if (normalized.includes('AND is_public = 0'))
+          rows = rows.filter((row) => !row.review.is_public);
+        if (normalized.includes('END IS NULL'))
+          rows = rows.filter((row) => row.review.rating === null);
+        rows.sort((a, b) => rank(b.review) - rank(a.review) || sortRows(a, b));
+        if (params.length > 3)
+          rows = rows.filter(
+            ({ review }) =>
+              rank(review) < Number(params[3]) ||
+              (rank(review) === Number(params[3]) &&
+                (review.updated_at < Number(params[5]) ||
+                  (review.updated_at === Number(params[5]) &&
+                    (review.title_norm < String(params[7]) ||
+                      (review.title_norm === params[7] &&
+                        review.year < String(params[9])))))),
+          );
+        return [
+          rows
+            .slice(0, 21)
+            .map((row) => ({ review_json: JSON.stringify(row.review) })),
+          [],
+        ];
+      }
+      if (
+        normalized.includes('JOIN user_profiles p ON p.username = r.username')
+      ) {
+        const profileId = (username: string) =>
+          currentState.social.user_profiles.find((p) => p.username === username)
+            ?.profile_id ?? '';
+        rows = rows.filter(
+          (row) =>
+            row.review.is_public &&
+            row.review.title_norm === params[0] &&
+            (!params[1] ||
+              row.review.year === params[1] ||
+              row.review.year === ''),
+        );
+        rows.sort(
+          (a, b) =>
+            b.review.updated_at - a.review.updated_at ||
+            compareText(profileId(b.username), profileId(a.username)) ||
+            compareText(b.review.year, a.review.year),
+        );
+        if (params.length > 3)
+          rows = rows.filter(
+            (row) =>
+              row.review.updated_at < Number(params[3]) ||
+              (row.review.updated_at === Number(params[3]) &&
+                (profileId(row.username) < String(params[5]) ||
+                  (profileId(row.username) === params[5] &&
+                    row.review.year < String(params[7])))),
+          );
+        return [
+          rows.slice(0, 21).map((row) => ({
+            username: row.username,
+            profile_id: profileId(row.username),
+            review_json: JSON.stringify(row.review),
+          })),
+          [],
+        ];
+      }
+      if (
+        normalized.includes('WHERE username = ? AND is_public = 1') &&
+        normalized.includes('LIMIT 21')
+      ) {
+        rows = rows
+          .filter((row) => row.username === params[0] && row.review.is_public)
+          .sort(sortRows);
+        if (params.length > 1)
+          rows = rows.filter(
+            ({ review }) =>
+              review.updated_at < Number(params[1]) ||
+              (review.updated_at === Number(params[1]) &&
+                (review.title_norm < String(params[3]) ||
+                  (review.title_norm === params[3] &&
+                    review.year < String(params[5])))),
+          );
+        return [
+          rows.slice(0, 21).map((row) => ({
+            username: row.username,
+            review_json: JSON.stringify(row.review),
+          })),
+          [],
+        ];
+      }
       if (normalized.includes('WHERE username = ?')) {
         rows = rows.filter((row) => row.username === params[0]);
         if (normalized.includes('title_norm = ?')) {
@@ -1325,7 +1639,7 @@ function createFakePool() {
         'SELECT f.favorite_key, f.favorite_json, p.record_json FROM favorites f LEFT JOIN play_records p',
       )
     ) {
-      const [username] = params as [string];
+      const [username, includeLive] = params as [string, number];
       const rows = (
         getJsonRows(
           currentState.favorites,
@@ -1334,6 +1648,10 @@ function createFakePool() {
           'favorite_json',
         ) as Array<{ favorite_key: string; favorite_json: string }>
       )
+        .filter(
+          (row) =>
+            includeLive || JSON.parse(row.favorite_json).origin !== 'live',
+        )
         .map((row) => ({
           ...row,
           record_json: currentState.playRecords
@@ -1349,9 +1667,10 @@ function createFakePool() {
             right.favorite_key.localeCompare(left.favorite_key)
           );
         });
-      if (params.length === 5) {
-        const [, cursorTime, , cursorKey, limit] = params as [
+      if (params.length === 6) {
+        const [, , cursorTime, , cursorKey, limit] = params as [
           string,
+          number,
           number,
           number,
           string,
@@ -1370,16 +1689,22 @@ function createFakePool() {
           [],
         ];
       }
-      const [, limit] = params as [string, number];
+      const [, , limit] = params as [string, number, number];
       return [rows.slice(0, limit), []];
     }
 
     if (
-      normalized ===
-      'SELECT COUNT(*) AS count FROM favorites WHERE username = ?'
+      normalized.startsWith(
+        'SELECT COUNT(*) AS count FROM favorites WHERE username = ?',
+      )
     ) {
-      const [username] = params as [string];
-      return [[{ count: currentState.favorites.get(username)?.size || 0 }], []];
+      const [username, includeLive] = params as [string, number];
+      const count = [
+        ...(currentState.favorites.get(username)?.values() ?? []),
+      ].filter(
+        (json) => includeLive || JSON.parse(json).origin !== 'live',
+      ).length;
+      return [[{ count }], []];
     }
 
     if (
@@ -1525,6 +1850,53 @@ function createFakePool() {
       const [username] = params as [string];
       const enabled = currentState.danmakuEnabled.get(username);
       return [enabled === undefined ? [] : [{ enabled: enabled ? 1 : 0 }], []];
+    }
+
+    if (
+      normalized ===
+      'SELECT config_json FROM admin_config WHERE id = 1 FOR UPDATE'
+    ) {
+      return [
+        currentState.adminConfig
+          ? [{ config_json: currentState.adminConfig }]
+          : [],
+        [],
+      ];
+    }
+    if (
+      normalized ===
+      'SELECT * FROM invite_codes ORDER BY created_at DESC, code DESC'
+    ) {
+      return [[...currentState.inviteCodes.values()], []];
+    }
+    if (normalized.startsWith('SELECT code FROM invite_codes WHERE code = ?')) {
+      const item = currentState.inviteCodes.get(String(params[0]));
+      return [
+        item &&
+        item.expires_at > Number(params[1]) &&
+        (item.max_uses === null || item.used_count < item.max_uses)
+          ? [item]
+          : [],
+        [],
+      ];
+    }
+    if (
+      normalized.startsWith(
+        'SELECT COUNT(*) AS total FROM invite_codes WHERE expires_at > ?',
+      )
+    ) {
+      return [
+        [
+          {
+            total: [...currentState.inviteCodes.values()].filter(
+              (item) =>
+                item.expires_at > Number(params[0]) &&
+                (item.max_uses === null || item.used_count < item.max_uses),
+            ).length,
+          },
+        ],
+        [],
+      ];
     }
 
     if (normalized === 'SELECT code, used_count FROM invite_code_usage') {
@@ -1800,16 +2172,19 @@ function sortRouteStats(items: SourceRouteStatsItem[]) {
 describe('mysql storage contract', () => {
   it('原子占用邀请码名额，超出上限即失败', async () => {
     const storage = new MySqlStorage('mysql://demo:demo@localhost:3306/icetv');
+    await storage.setAdminConfig({ UserConfig: {} } as AdminConfig);
+    await storage.createInviteCode({
+      code: 'LIMITED',
+      createdAt: 1,
+      expiresAt: Date.now() + 86400000,
+      createdBy: 'owner',
+      maxUses: 2,
+      usedCount: 0,
+    });
 
-    await expect(storage.reserveInviteCodeUse('LIMITED', 2)).resolves.toBe(
-      true,
-    );
-    await expect(storage.reserveInviteCodeUse('LIMITED', 2)).resolves.toBe(
-      true,
-    );
-    await expect(storage.reserveInviteCodeUse('LIMITED', 2)).resolves.toBe(
-      false,
-    );
+    await expect(storage.reserveInviteCodeUse('LIMITED')).resolves.toBe(true);
+    await expect(storage.reserveInviteCodeUse('LIMITED')).resolves.toBe(true);
+    await expect(storage.reserveInviteCodeUse('LIMITED')).resolves.toBe(false);
     await expect(storage.getAllInviteCodeUsage()).resolves.toMatchObject({
       LIMITED: 2,
     });
@@ -1817,9 +2192,18 @@ describe('mysql storage contract', () => {
 
   it('maxUses 为 0 表示不限次数', async () => {
     const storage = new MySqlStorage('mysql://demo:demo@localhost:3306/icetv');
+    await storage.setAdminConfig({ UserConfig: {} } as AdminConfig);
+    await storage.createInviteCode({
+      code: 'FREE',
+      createdAt: 1,
+      expiresAt: Date.now() + 86400000,
+      createdBy: 'owner',
+      maxUses: 0,
+      usedCount: 0,
+    });
 
-    await expect(storage.reserveInviteCodeUse('FREE', 0)).resolves.toBe(true);
-    await expect(storage.reserveInviteCodeUse('FREE', 0)).resolves.toBe(true);
+    await expect(storage.reserveInviteCodeUse('FREE')).resolves.toBe(true);
+    await expect(storage.reserveInviteCodeUse('FREE')).resolves.toBe(true);
     await expect(storage.getAllInviteCodeUsage()).resolves.toMatchObject({
       FREE: 2,
     });
@@ -1827,13 +2211,18 @@ describe('mysql storage contract', () => {
 
   it('首次占用以配置里的历史用量为种子', async () => {
     const storage = new MySqlStorage('mysql://demo:demo@localhost:3306/icetv');
+    await storage.setAdminConfig({ UserConfig: {} } as AdminConfig);
+    await storage.createInviteCode({
+      code: 'SEEDED',
+      createdAt: 1,
+      expiresAt: Date.now() + 86400000,
+      createdBy: 'owner',
+      maxUses: 3,
+      usedCount: 2,
+    });
 
-    await expect(storage.reserveInviteCodeUse('SEEDED', 3, 2)).resolves.toBe(
-      true,
-    );
-    await expect(storage.reserveInviteCodeUse('SEEDED', 3, 2)).resolves.toBe(
-      false,
-    );
+    await expect(storage.reserveInviteCodeUse('SEEDED')).resolves.toBe(true);
+    await expect(storage.reserveInviteCodeUse('SEEDED')).resolves.toBe(false);
     await expect(storage.getAllInviteCodeUsage()).resolves.toMatchObject({
       SEEDED: 3,
     });
@@ -1841,8 +2230,17 @@ describe('mysql storage contract', () => {
 
   it('回滚邀请码次数且不会减到负数', async () => {
     const storage = new MySqlStorage('mysql://demo:demo@localhost:3306/icetv');
+    await storage.setAdminConfig({ UserConfig: {} } as AdminConfig);
+    await storage.createInviteCode({
+      code: 'ROLLBACK',
+      createdAt: 1,
+      expiresAt: Date.now() + 86400000,
+      createdBy: 'owner',
+      maxUses: 2,
+      usedCount: 0,
+    });
 
-    await storage.reserveInviteCodeUse('ROLLBACK', 2);
+    await storage.reserveInviteCodeUse('ROLLBACK');
     await storage.releaseInviteCodeUse('ROLLBACK');
     await expect(storage.getAllInviteCodeUsage()).resolves.toMatchObject({
       ROLLBACK: 0,
@@ -1856,16 +2254,30 @@ describe('mysql storage contract', () => {
 
   it('删除邀请码用量后重建从零开始', async () => {
     const storage = new MySqlStorage('mysql://demo:demo@localhost:3306/icetv');
+    await storage.setAdminConfig({ UserConfig: {} } as AdminConfig);
+    await storage.createInviteCode({
+      code: 'RECREATED',
+      createdAt: 1,
+      expiresAt: Date.now() + 86400000,
+      createdBy: 'owner',
+      maxUses: 1,
+      usedCount: 0,
+    });
 
-    await storage.reserveInviteCodeUse('RECREATED', 1);
+    await storage.reserveInviteCodeUse('RECREATED');
     await storage.deleteInviteCodeUsage('RECREATED');
 
     await expect(
       (await storage.getAllInviteCodeUsage()).RECREATED,
     ).toBeUndefined();
-    await expect(storage.reserveInviteCodeUse('RECREATED', 1)).resolves.toBe(
-      true,
-    );
+    await storage.createInviteCode({
+      code: 'RECREATED',
+      createdAt: 2,
+      expiresAt: Date.now() + 86400000,
+      createdBy: 'owner',
+      maxUses: 1,
+    });
+    await expect(storage.reserveInviteCodeUse('RECREATED')).resolves.toBe(true);
   });
 
   it('persists user scoped data and deletes it with the user', async () => {
@@ -2312,6 +2724,47 @@ describe('mysql storage contract', () => {
     expect(secondPage.nextCursor).toBeNull();
   });
 
+  it('filters live favorites before paging and traverses tied timestamps without gaps', async () => {
+    const storage = new MySqlStorage('mysql://demo:demo@localhost:3306/icetv');
+    for (const [key, origin] of [
+      ['source+z', 'live'],
+      ['source+e', 'vod'],
+      ['source+d', 'live'],
+      ['source+c', undefined],
+      ['source+b', 'vod'],
+      ['source+a', 'live'],
+    ] as const) {
+      await storage.setFavorite('public-user', key, {
+        ...favorite,
+        origin,
+        save_time: 1000,
+      });
+    }
+    const first = await storage.getFavoritePage(
+      'public-user',
+      2,
+      undefined,
+      undefined,
+      false,
+    );
+    const second = await storage.getFavoritePage(
+      'public-user',
+      2,
+      1000,
+      'source+c',
+      false,
+    );
+    expect(first.items.map((item) => item.key)).toEqual([
+      'source+e',
+      'source+c',
+    ]);
+    expect(first.total).toBe(3);
+    expect(first.nextCursor).toBe('1000|source+c');
+    expect(second.items.map((item) => item.key)).toEqual(['source+b']);
+    expect(second.nextCursor).toBeNull();
+    expect((await storage.getFavoritePage('public-user', 10)).total).toBe(6);
+  });
+
   it('replaces all data from an import snapshot', async () => {
     const storage = new MySqlStorage('mysql://demo:demo@localhost:3306/icetv');
     const passwordHash =
@@ -2346,7 +2799,9 @@ describe('mysql storage contract', () => {
       inviteCodeUsage: { 'invite-a': 3 },
     });
 
-    await expect(storage.getAdminConfig()).resolves.toEqual(adminConfig);
+    const expectedConfig = JSON.parse(JSON.stringify(adminConfig));
+    delete expectedConfig.UserConfig.Users;
+    await expect(storage.getAdminConfig()).resolves.toEqual(expectedConfig);
     await expect(storage.getAllUsers()).resolves.toEqual(['demo-user']);
     await expect(storage.getAllUsersWithPasswords()).resolves.toEqual({
       'demo-user': passwordHash,

@@ -592,6 +592,13 @@ export function createOptimisticWriter<TCache>(options: {
         await onServerError(err);
       }
       throw err;
+    } finally {
+      if (
+        eventName === 'favoritesUpdated' ||
+        eventName === 'playRecordsUpdated'
+      ) {
+        window.dispatchEvent(new Event('userLibraryUpdated'));
+      }
     }
   };
 }

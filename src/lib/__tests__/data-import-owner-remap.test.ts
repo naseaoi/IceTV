@@ -85,7 +85,7 @@ describe('data import owner remap', () => {
 
   it('rewrites the config owner entry to the local owner', async () => {
     const parsed = await parseImportData(createBackup());
-    const users = parsed.snapshot.adminConfig.UserConfig.Users;
+    const users = parsed.snapshot.adminConfig.UserConfig.Users!;
 
     expect(users[0]).toMatchObject({ username: 'owner-b', role: 'owner' });
     expect(users.some((user) => user.username === 'owner-a')).toBe(false);
@@ -94,7 +94,7 @@ describe('data import owner remap', () => {
 
   it('keeps other roles untouched while remapping', async () => {
     const parsed = await parseImportData(createBackup());
-    const demo = parsed.snapshot.adminConfig.UserConfig.Users.find(
+    const demo = parsed.snapshot.adminConfig.UserConfig.Users!.find(
       (user) => user.username === 'demo-user',
     );
 
@@ -151,7 +151,7 @@ describe('data import owner remap', () => {
     delete (backup as { ownerUsername?: string }).ownerUsername;
 
     const parsed = await parseImportData(backup);
-    const users = parsed.snapshot.adminConfig.UserConfig.Users;
+    const users = parsed.snapshot.adminConfig.UserConfig.Users!;
     const owners = users.filter((user) => user.role === 'owner');
 
     expect(owners).toHaveLength(1);

@@ -1,6 +1,5 @@
 import 'server-only';
 
-import { sanitizeInviteCodes } from '@/features/admin/services/inviteCodes';
 import {
   DEFAULT_BANGUMI_DATA_SOURCE,
   normalizeBangumiDataSource,
@@ -17,7 +16,6 @@ import {
   DEFAULT_DOUBAN_IMAGE_PROXY_TYPE,
   DEFAULT_DOUBAN_PROXY_TYPE,
 } from '@/lib/douban-source';
-import { getOwnerUsername } from '@/lib/env.server';
 import {
   DEFAULT_RUNTIME_PARAMS,
   normalizeRuntimeParams,
@@ -95,7 +93,6 @@ const PUBLIC_DOUBAN_PROXY_TYPES = new Set([
   'cmliussss-cdn-ali',
   'cors-anywhere',
 ]);
-type ManagedUser = AdminConfig['UserConfig']['Users'][number];
 const configVersionByObject = new WeakMap<AdminConfig, string>();
 
 export function getPublicDoubanProxyType(
@@ -260,7 +257,6 @@ async function getInitConfig(
   },
 ): Promise<AdminConfig> {
   let cfgFile: ConfigFileStruct;
-  const ownerUsername = getOwnerUsername();
   try {
     cfgFile = JSON.parse(configFile) as ConfigFileStruct;
   } catch (e) {
@@ -307,34 +303,12 @@ async function getInitConfig(
       FluidSearch: process.env.NEXT_PUBLIC_FLUID_SEARCH !== 'false',
     },
     UserConfig: {
-      Users: [],
       OpenRegister: false,
     },
     SourceConfig: [],
     CustomCategories: [],
     LiveConfig: [],
   };
-
-  // 补充用户信息
-  let userNames: string[] = [];
-  try {
-    userNames = await db.getAllUsers();
-  } catch (e) {
-    console.error('获取用户列表失败:', e);
-  }
-  const allUsers = userNames
-    .filter((u) => u !== ownerUsername)
-    .map((u) => ({
-      username: u,
-      role: 'user',
-      banned: false,
-    }));
-  allUsers.unshift({
-    username: ownerUsername,
-    role: 'owner',
-    banned: false,
-  });
-  adminConfig.UserConfig.Users = allUsers as any;
 
   // 从配置文件中补充源信息
   Object.entries(cfgFile.api_site || []).forEach(([key, site]) => {
@@ -394,7 +368,12 @@ async function loadConfig(): Promise<AdminConfig> {
   return inflightConfigLoad;
 }
 
-async function loadConfigUncached(generation: number): Promise<AdminConfig> {
+const CONFIG_PERSIST_MAX_ATTEMPTS = 3;
+
+async function loadConfigUncached(
+  generation: number,
+  attempt = 1,
+): Promise<AdminConfig> {
   let adminConfig: AdminConfig | null;
   try {
     adminConfig = await db.getAdminConfig();
@@ -406,13 +385,14 @@ async function loadConfigUncached(generation: number): Promise<AdminConfig> {
     throw e;
   }
 
+  const wasMissing = !adminConfig;
   let shouldPersist = false;
   if (!adminConfig) {
     adminConfig = await getInitConfig('');
     shouldPersist = true;
   }
   const originalConfigJson = JSON.stringify(adminConfig);
-  adminConfig = await syncConfigUsersWithDb(configSelfCheck(adminConfig));
+  adminConfig = configSelfCheck(adminConfig);
 
   if (generation !== configCacheGeneration) {
     return cachedConfig;
@@ -429,7 +409,15 @@ async function loadConfigUncached(generation: number): Promise<AdminConfig> {
 
   if (shouldPersist) {
     try {
-      await db.saveAdminConfig(cachedConfig);
+      const original = wasMissing
+        ? null
+        : (JSON.parse(originalConfigJson) as AdminConfig);
+      if (!(await db.compareAndSetAdminConfig(original, cachedConfig))) {
+        // 补写期间配置被并发改写：重读后再补，超过上限沿用本次结果，下次加载继续补齐。
+        if (attempt >= CONFIG_PERSIST_MAX_ATTEMPTS) return cachedConfig;
+        invalidateConfigCache();
+        return loadConfigUncached(configCacheGeneration, attempt + 1);
+      }
     } catch (e) {
       console.error('保存管理员配置失败:', e);
     }
@@ -472,23 +460,16 @@ function getConfigCacheTtlMs(): number {
 export function configSelfCheck(adminConfig: AdminConfig): AdminConfig {
   // 初始化必要属性
   if (!adminConfig.UserConfig) {
-    adminConfig.UserConfig = { Users: [] };
+    adminConfig.UserConfig = {};
   }
-  if (
-    !adminConfig.UserConfig.Users ||
-    !Array.isArray(adminConfig.UserConfig.Users)
-  ) {
-    adminConfig.UserConfig.Users = [];
-  }
+  delete adminConfig.UserConfig.Users;
   if (typeof adminConfig.UserConfig.OpenRegister !== 'boolean') {
     adminConfig.UserConfig.OpenRegister = false;
   }
   if (typeof adminConfig.UserConfig.RequireInviteCode !== 'boolean') {
     adminConfig.UserConfig.RequireInviteCode = false;
   }
-  adminConfig.UserConfig.InviteCodes = sanitizeInviteCodes(
-    adminConfig.UserConfig.InviteCodes,
-  );
+  delete adminConfig.UserConfig.InviteCodes;
   if (!adminConfig.SourceConfig || !Array.isArray(adminConfig.SourceConfig)) {
     adminConfig.SourceConfig = [];
   }
@@ -591,50 +572,6 @@ export function configSelfCheck(adminConfig: AdminConfig): AdminConfig {
     adminConfig.SiteConfig.SourceCoverProxyMode,
   );
 
-  // 站长变更自检
-  const ownerUser = getOwnerUsername();
-  const normalizedOwnerUser = normalizeUsername(ownerUser || '');
-
-  adminConfig.UserConfig.Users = adminConfig.UserConfig.Users.map((user) => {
-    const normalized = normalizeUsername(user.username || '');
-    return {
-      ...user,
-      username: normalized === normalizedOwnerUser ? ownerUser! : normalized,
-    };
-  }).filter((user) => Boolean(user.username));
-
-  // 去重
-  const seenUsernames = new Set<string>();
-  adminConfig.UserConfig.Users = adminConfig.UserConfig.Users.filter((user) => {
-    const dedupeKey = normalizeUsername(user.username);
-    if (seenUsernames.has(dedupeKey)) {
-      return false;
-    }
-    seenUsernames.add(dedupeKey);
-    return true;
-  });
-  // 过滤站长
-  const originOwnerCfg = adminConfig.UserConfig.Users.find(
-    (u) => normalizeUsername(u.username) === normalizedOwnerUser,
-  );
-  adminConfig.UserConfig.Users = adminConfig.UserConfig.Users.filter(
-    (user) => normalizeUsername(user.username) !== normalizedOwnerUser,
-  );
-  // 其他用户不得拥有 owner 权限
-  adminConfig.UserConfig.Users.forEach((user) => {
-    if (user.role === 'owner') {
-      user.role = 'user';
-    }
-  });
-  // 重新添加回站长
-  adminConfig.UserConfig.Users.unshift({
-    username: ownerUser!,
-    role: 'owner',
-    banned: false,
-    enabledApis: originOwnerCfg?.enabledApis || undefined,
-    tags: originOwnerCfg?.tags || undefined,
-  });
-
   // 视频源去重
   const seenSourceKeys = new Set<string>();
   adminConfig.SourceConfig = adminConfig.SourceConfig.filter((source) => {
@@ -719,13 +656,19 @@ export async function resetConfig() {
 
 export async function saveConfig(config: AdminConfig): Promise<AdminConfig> {
   const expectedVersion = configVersionByObject.get(config);
-  const nextConfig = await syncConfigUsersWithDb(
-    configSelfCheck(cloneConfig(config)),
-  );
-  if (expectedVersion) {
-    await assertConfigVersion(expectedVersion);
+  const nextConfig = configSelfCheck(cloneConfig(config));
+  const current = await db.getAdminConfig();
+  if (
+    expectedVersion &&
+    (!current ||
+      getConfigVersion(configSelfCheck(cloneConfig(current))) !==
+        expectedVersion)
+  ) {
+    throw new ConfigConflictError();
   }
-  await db.saveAdminConfig(nextConfig);
+  if (!(await db.compareAndSetAdminConfig(current, nextConfig))) {
+    throw new ConfigConflictError();
+  }
   configCacheGeneration += 1;
   cachedConfig = cloneConfig(nextConfig);
   cachedConfigVersion = getConfigVersion(cachedConfig);
@@ -739,82 +682,6 @@ export class ConfigConflictError extends Error {
     super('配置已被其他操作更新，请刷新后重试');
     this.name = 'ConfigConflictError';
   }
-}
-
-async function assertConfigVersion(expectedVersion: string): Promise<void> {
-  const currentConfig = await db.getAdminConfig();
-  if (!currentConfig) {
-    if (expectedVersion !== '') {
-      throw new ConfigConflictError();
-    }
-    return;
-  }
-
-  if (getConfigVersion(configSelfCheck(currentConfig)) !== expectedVersion) {
-    throw new ConfigConflictError();
-  }
-}
-
-async function syncConfigUsersWithDb(
-  adminConfig: AdminConfig,
-): Promise<AdminConfig> {
-  let userNames: string[];
-  try {
-    userNames = await db.getAllUsers();
-  } catch (error) {
-    console.error('获取用户列表失败:', error);
-    return adminConfig;
-  }
-
-  const ownerUsername = getOwnerUsername();
-  const existingUsers = new Map(
-    adminConfig.UserConfig.Users.map((user) => [
-      normalizeUsername(user.username),
-      user,
-    ]),
-  );
-  const nextUsers: ManagedUser[] = [];
-  const seenUsernames = new Set<string>();
-
-  const normalizedOwnerUsername = normalizeUsername(ownerUsername || '');
-
-  if (ownerUsername) {
-    const ownerEntry =
-      existingUsers.get(ownerUsername) ||
-      existingUsers.get(normalizedOwnerUsername);
-    nextUsers.push({
-      username: ownerUsername,
-      role: 'owner',
-      banned: false,
-      enabledApis: cloneStringList(ownerEntry?.enabledApis),
-      tags: cloneStringList(ownerEntry?.tags),
-    });
-    seenUsernames.add(normalizedOwnerUsername);
-  }
-
-  for (const userName of userNames) {
-    const normalizedUserName = normalizeUsername(userName);
-    if (!normalizedUserName || seenUsernames.has(normalizedUserName)) {
-      continue;
-    }
-
-    const existingUser = existingUsers.get(normalizedUserName);
-    nextUsers.push({
-      username: normalizedUserName,
-      role: existingUser?.role === 'admin' ? 'admin' : 'user',
-      banned: !!existingUser?.banned,
-      enabledApis: cloneStringList(existingUser?.enabledApis),
-      tags: cloneStringList(existingUser?.tags),
-    });
-    seenUsernames.add(normalizedUserName);
-  }
-
-  adminConfig.UserConfig.Users = nextUsers;
-  return adminConfig;
-}
-
-function cloneStringList(value?: string[]): string[] | undefined {
-  return Array.isArray(value) ? [...value] : undefined;
 }
 
 export function getCacheTime(config: Readonly<AdminConfig>): number;
@@ -851,9 +718,7 @@ export async function getAvailableApiSites(
   }
 
   const lookupUsername = normalizeUsername(user);
-  const userConfig = currentConfig.UserConfig.Users.find(
-    (u) => u.username === lookupUsername,
-  );
+  const userConfig = await db.getUserAccess(lookupUsername);
   if (!userConfig) {
     return allApiSites;
   }

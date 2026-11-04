@@ -220,6 +220,7 @@ describe('register route', () => {
 
   it('邀请码已用尽时拒绝', async () => {
     withInviteCode({ maxUses: 1, usedCount: 1 });
+    (reserveInviteCode as jest.Mock).mockResolvedValue(false);
     const { POST } = require('./route');
 
     const response = await POST(

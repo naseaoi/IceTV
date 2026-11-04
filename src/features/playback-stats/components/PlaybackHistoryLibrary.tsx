@@ -7,6 +7,7 @@ import { useMemo, useState } from 'react';
 import HomePosterCardSkeleton from '@/components/HomePosterCardSkeleton';
 import {
   LIBRARY_PILL_BUTTON_CLASS,
+  LibraryEmptySkeleton,
   LibraryEmptyState,
 } from '@/components/LibraryPage';
 import ConfirmModal from '@/components/modals/ConfirmModal';
@@ -14,6 +15,7 @@ import { POSTER_GRID_CLASS } from '@/components/poster-grid-layout';
 import { HistoryPosterCard } from '@/features/playback-stats/components/HistoryPosterCard';
 import {
   usePlaybackHistory,
+  usePlaybackHistoryPlaceholder,
   usePlayHistorySession,
 } from '@/features/playback-stats/hooks/usePlaybackHistory';
 import { groupPlaybackSessionsByDay } from '@/features/playback-stats/lib/history';
@@ -22,22 +24,45 @@ import type { PlaybackSession } from '@/lib/types';
 const TOOLBAR_BUTTON_CLASS =
   'inline-flex h-9 shrink-0 items-center rounded-full px-4 text-sm text-gray-600 transition hover:bg-gray-900/[0.05] hover:text-gray-900 disabled:pointer-events-none disabled:opacity-40 dark:text-gray-300 dark:hover:bg-white/[0.06] dark:hover:text-white';
 
-export function PlaybackHistoryGridSkeleton({
-  count = 12,
-}: {
-  count?: number;
-}) {
+export function PlaybackHistoryGridSkeleton({ count }: { count?: number }) {
+  const placeholder = usePlaybackHistoryPlaceholder();
+  const groups = placeholder.snapshot
+    ? groupPlaybackSessionsByDay(placeholder.snapshot.items).map(
+        (group) => group.sessions.length,
+      )
+    : [count ?? placeholder.count];
+  if (groups.length === 0 || groups.every((size) => size === 0))
+    return <LibraryEmptySkeleton />;
   return (
-    <div aria-hidden='true'>
-      <div className='mb-3 flex h-5 items-center'>
-        <div className='skeleton h-3.5 w-16 rounded' />
-      </div>
-      <div className={POSTER_GRID_CLASS}>
-        {Array.from({ length: count }).map((_, index) => (
-          <HomePosterCardSkeleton key={index} className='w-full' subtitle />
-        ))}
-      </div>
+    <div aria-hidden='true' className='space-y-8'>
+      {groups.map((size, groupIndex) => (
+        <div key={groupIndex}>
+          <div className='mb-3 flex h-5 items-center'>
+            <div className='skeleton h-3.5 w-16 rounded' />
+          </div>
+          <div className={POSTER_GRID_CLASS}>
+            {Array.from({ length: size }, (_, index) => (
+              <HomePosterCardSkeleton key={index} className='w-full' subtitle />
+            ))}
+          </div>
+        </div>
+      ))}
     </div>
+  );
+}
+
+export function PlaybackHistoryPageSkeleton() {
+  const { snapshot } = usePlaybackHistoryPlaceholder();
+  return (
+    <>
+      <div className='mb-4 flex items-center gap-2 py-3'>
+        <div className='skeleton h-9 w-full rounded-full sm:w-72' />
+        {(!snapshot || snapshot.items.length > 0) && (
+          <div className='skeleton ml-auto h-9 w-[60px] shrink-0 rounded-full' />
+        )}
+      </div>
+      <PlaybackHistoryGridSkeleton />
+    </>
   );
 }
 
@@ -45,6 +70,7 @@ export function PlaybackHistoryLibrary() {
   const {
     items,
     loading,
+    skeletonCount,
     loadingMore,
     refreshing,
     searchText,
@@ -90,7 +116,7 @@ export function PlaybackHistoryLibrary() {
 
   let content: React.ReactNode;
   if (loading) {
-    content = <PlaybackHistoryGridSkeleton />;
+    content = <PlaybackHistoryGridSkeleton count={skeletonCount} />;
   } else if (items.length === 0) {
     content = searchKeyword ? (
       <LibraryEmptyState
@@ -222,14 +248,21 @@ export function PlaybackHistoryLibrary() {
                 </button>
               )}
             </label>
-            {items.length > 0 && (
-              <button
-                type='button'
-                onClick={() => setEditing(true)}
-                className={`${TOOLBAR_BUTTON_CLASS} ml-auto`}
-              >
-                编辑
-              </button>
+            {loading ? (
+              <div
+                aria-hidden='true'
+                className='skeleton ml-auto h-9 w-[60px] shrink-0 rounded-full'
+              />
+            ) : (
+              items.length > 0 && (
+                <button
+                  type='button'
+                  onClick={() => setEditing(true)}
+                  className={`${TOOLBAR_BUTTON_CLASS} ml-auto`}
+                >
+                  编辑
+                </button>
+              )
             )}
           </>
         )}

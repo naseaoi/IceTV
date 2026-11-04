@@ -5,10 +5,8 @@ import { useRouter, useSearchParams } from 'next/navigation';
 import { useEffect, useMemo, useState } from 'react';
 
 import AuthenticatedRoute from '@/components/AuthenticatedRoute';
-import DoubanCardSkeleton from '@/components/DoubanCardSkeleton';
 import { PAGE_CONTAINER_CLASS } from '@/components/page-container';
 import PageLayout from '@/components/PageLayout';
-import { POSTER_GRID_CLASS } from '@/components/poster-grid-layout';
 import SearchBox from '@/components/SearchBox';
 import SearchResultFilter from '@/components/SearchResultFilter';
 import Spinner from '@/components/Spinner';
@@ -16,6 +14,10 @@ import VideoCard from '@/components/VideoCard';
 import { warmupDanmakuSearchForNavigation } from '@/features/play/lib/danmaku/navigation-warmup';
 import MobileSearchFilterControls from '@/features/search/components/MobileSearchFilterControls';
 import SearchHistory from '@/features/search/components/SearchHistory';
+import {
+  SEARCH_STICKY_BAR_CLASS as STICKY_BAR_CLASS,
+  SearchResultsLoading,
+} from '@/features/search/components/SearchPageSkeleton';
 import { VirtualizedSearchGrid } from '@/features/search/components/VirtualizedSearchGrid';
 import {
   FilterState,
@@ -40,12 +42,6 @@ function createDefaultFilterState(): FilterState {
   return { ...DEFAULT_FILTER_STATE };
 }
 
-const LOADING_CARD_COUNT = 14;
-
-// 吸顶栏底色与顶栏实底态一致
-const STICKY_BAR_CLASS =
-  'border-b border-gray-200/70 bg-gray-50/85 backdrop-blur-xl dark:border-white/[0.06] dark:bg-gray-950/80';
-
 function SearchStatus({
   resultCount,
   searching,
@@ -67,16 +63,6 @@ function SearchStatus({
       )}
       {(!searching || resultCount > 0) && `${resultCount} 个结果`}
     </span>
-  );
-}
-
-function SearchResultsLoading() {
-  return (
-    <div className={POSTER_GRID_CLASS} role='status' aria-label='正在搜索'>
-      {Array.from({ length: LOADING_CARD_COUNT }, (_, index) => (
-        <DoubanCardSkeleton key={index} video />
-      ))}
-    </div>
   );
 }
 

@@ -1,9 +1,9 @@
 ﻿import { NextRequest, NextResponse } from 'next/server';
 
-import { mergeInviteCodeUsage } from '@/features/admin/services/inviteCodes';
 import { isGuardFailure, requireAdmin } from '@/lib/api-auth';
 import { getConfigFresh } from '@/lib/config';
 import { db } from '@/lib/db';
+import { getOwnerUsername } from '@/lib/env.server';
 import { AdminConfigResult } from '@/types/admin';
 
 export const runtime = 'nodejs';
@@ -22,10 +22,15 @@ export async function GET(request: NextRequest) {
         ...config,
         UserConfig: {
           ...config.UserConfig,
-          InviteCodes: mergeInviteCodeUsage(
-            config.UserConfig.InviteCodes,
-            await db.getAllInviteCodeUsage(),
-          ),
+          Users: [],
+          TotalUsers: (
+            await db.getAdminUserPage({
+              ownerUsername: getOwnerUsername() || '',
+              operatorUsername: guardResult.username,
+              limit: 1,
+            })
+          ).total,
+          activeInviteCodeCount: await db.countActiveInviteCodes(),
         },
       },
     };

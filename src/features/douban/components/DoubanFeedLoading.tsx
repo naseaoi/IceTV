@@ -1,7 +1,8 @@
 import DoubanCardSkeleton from '@/components/DoubanCardSkeleton';
-import { DOUBAN_GRID_CLASS } from '@/features/douban/lib/grid-layout';
-
-const SKELETON_COUNT = 18;
+import {
+  DOUBAN_GRID_CLASS,
+  DOUBAN_PAGE_SIZE,
+} from '@/features/douban/lib/grid-layout';
 
 export function DoubanFeedLoading() {
   return (
@@ -11,7 +12,7 @@ export function DoubanFeedLoading() {
       role='status'
       aria-label='正在加载'
     >
-      {Array.from({ length: SKELETON_COUNT }, (_, index) => (
+      {Array.from({ length: DOUBAN_PAGE_SIZE }, (_, index) => (
         <DoubanCardSkeleton key={index} />
       ))}
     </div>

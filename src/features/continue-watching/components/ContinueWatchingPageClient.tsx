@@ -9,6 +9,10 @@ import ConfirmModal from '@/components/modals/ConfirmModal';
 import { PAGE_CONTAINER_CLASS } from '@/components/page-container';
 import PageLayout from '@/components/PageLayout';
 import Spinner from '@/components/Spinner';
+import {
+  CONTINUE_WATCHING_GRID_CLASS,
+  CONTINUE_WATCHING_GRID_ITEM_CLASS,
+} from '@/features/continue-watching/lib/layout';
 
 import { useContinueWatchingItems } from '../hooks/useContinueWatchingItems';
 import { ContinueWatchingGrid } from './ContinueWatchingGrid';
@@ -45,11 +49,16 @@ function AuthenticatedContinueWatchingPage({
             </h1>
             <div className='flex flex-1 items-center justify-between gap-4 sm:flex-none sm:justify-end'>
               <span className='text-sm text-gray-500 dark:text-gray-400'>
-                {loading ? skeletonCount : total} 部记录
+                {loading ? (
+                  <span className='skeleton block h-5 w-16 rounded' />
+                ) : (
+                  `${total} 部记录`
+                )}
               </span>
-              {items.length > 0 && (
+              {(loading || items.length > 0) && (
                 <button
                   className='text-sm text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200'
+                  disabled={loading}
                   onClick={() => setShowClearConfirm(true)}
                 >
                   清空
@@ -59,11 +68,11 @@ function AuthenticatedContinueWatchingPage({
           </div>
 
           {loading && items.length === 0 ? (
-            <div className='grid grid-cols-3 justify-start gap-x-3 gap-y-6 xs:grid-cols-4 sm:grid-cols-[repeat(auto-fill,_180px)] sm:gap-x-6 sm:px-2'>
+            <div className={CONTINUE_WATCHING_GRID_CLASS}>
               {Array.from({ length: skeletonCount || 8 }).map((_, index) => (
                 <HomePosterCardSkeleton
                   key={index}
-                  className='w-full sm:w-[180px]'
+                  className={CONTINUE_WATCHING_GRID_ITEM_CLASS}
                 />
               ))}
             </div>

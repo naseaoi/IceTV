@@ -1,7 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 
 import { getAuthInfoFromCookie, getSignatureData } from '@/lib/auth.server';
-import { getConfigForRead } from '@/lib/config';
 import { db } from '@/lib/db';
 import { getOwnerUsername } from '@/lib/env.server';
 import { NO_STORE_HEADERS } from '@/lib/http-cache';
@@ -86,8 +85,7 @@ export async function GET(request: NextRequest) {
     }
 
     const username = normalizeUsername(authInfo.username);
-    const config = await getConfigForRead();
-    const user = config.UserConfig.Users.find((u) => u.username === username);
+    const user = await db.getUserAccess(username);
 
     if (!user) {
       return await sessionResponse(false, 'user_not_found', username);

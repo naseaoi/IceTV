@@ -39,8 +39,9 @@ async function resolveErrorMessage(
 export async function adminGet<T>(
   endpoint: string,
   fallbackPrefix = '请求失败',
+  signal?: AbortSignal,
 ): Promise<T> {
-  const response = await fetch(endpoint, { cache: 'no-store' });
+  const response = await fetch(endpoint, { cache: 'no-store', signal });
 
   if (!response.ok) {
     throw new Error(await resolveErrorMessage(response, fallbackPrefix));

@@ -61,6 +61,20 @@ describe('useSearchExecution cached navigation', () => {
     clearSearchSnapshotCache();
   });
 
+  it('renders the result skeleton immediately for an uncached query', () => {
+    const renders: ReturnType<typeof useExecution>[] = [];
+    renderHook(() => {
+      const state = useExecution('uncached');
+      renders.push(state);
+      return state;
+    });
+    expect(renders[0]).toMatchObject({
+      showResults: true,
+      isLoading: true,
+      searchResults: [],
+    });
+  });
+
   it('restores cached results during the first client render without searching again', () => {
     const snapshot = createSnapshot('cached');
     setSearchSnapshot('cached', snapshot);
@@ -151,7 +165,9 @@ describe('useSearchExecution cached navigation', () => {
       const state = useExecution('cached');
       return (
         <div>
-          {state.showResults ? state.searchResults[0]?.title : 'pending'}
+          {state.showResults && !state.isLoading
+            ? state.searchResults[0]?.title
+            : 'pending'}
         </div>
       );
     }

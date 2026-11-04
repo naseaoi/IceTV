@@ -11,6 +11,7 @@ import {
   readAllUserMessages,
   readUserMessage,
 } from '@/lib/messages.server';
+import { ReviewValidationError } from '@/lib/video-reviews';
 
 export async function handleGetMessages(request: NextRequest) {
   try {
@@ -28,6 +29,8 @@ export async function handleGetMessages(request: NextRequest) {
           );
     return NextResponse.json(result, { headers: NO_STORE_HEADERS });
   } catch (error) {
+    if (error instanceof ReviewValidationError)
+      return NextResponse.json({ error: error.message }, { status: 400 });
     console.error('获取用户消息失败', error);
     return NextResponse.json({ error: '获取消息失败' }, { status: 500 });
   }

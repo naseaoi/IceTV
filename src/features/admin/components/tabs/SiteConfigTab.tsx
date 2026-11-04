@@ -489,7 +489,7 @@ const SiteConfigComponent = ({
               }))
             }
             rows={3}
-            className={`${inputStyles.withFocus} w-full resize-y`}
+            className={`${inputStyles.withFocus} block w-full resize-y`}
           />
         </AdminSettingRow>
         <AdminSettingRow
@@ -509,7 +509,7 @@ const SiteConfigComponent = ({
               }))
             }
             rows={3}
-            className={`${inputStyles.withFocus} w-full resize-y`}
+            className={`${inputStyles.withFocus} block w-full resize-y`}
           />
         </AdminSettingRow>
       </AdminSettingsGroup>

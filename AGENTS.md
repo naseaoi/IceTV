@@ -17,14 +17,16 @@
 - 写路径**必须先 `invalidateConfigCache()` 再 `getConfig()`**。否则命中 60 秒 TTL 缓存，会误判用户不存在或撞版本冲突。
 - `getConfigFresh()` 的结果**绝不能喂给写路径**。它 `deepFreeze` 的是共享缓存对象本身，不是副本。
 - `saveConfig()` 可能抛 `ConfigConflictError`（应用层乐观锁）。捕获后重试前要重新失效缓存。
-- 配置里的用户列表每次加载都会和数据库同步重建，不要维护第二套真相源。
+- 用户权限以 `user_access` 和 `user_group_members` 为唯一真相源；鉴权按归一化用户名查主键，运行时配置不携带 `Users`。该字段只用于旧数据迁移与备份兼容，用户组定义 `Tags` 留在配置。
+- 每个 `users` 行必须有 `user_access` 行；建号同事务写入，初始化与 `replaceAllData()` 结尾补齐。站长角色和封禁豁免由环境变量决定，表仅保存其源权限和用户组。
+- 用户权限更新与批量操作在存储事务内复核角色；配置 CAS 同事务清理被删除组和源的用户引用，避免配置冲突后留下部分写入。
 - 后台用户操作复用 `src/features/admin/services/userActions.ts`，不在 `route.ts` 里重新展开权限与用户组逻辑。
 
 ## 邀请码用量
 
-- 真相源是 `invite_code_usage` 表，**不是配置 JSON 里的 `usedCount`**。配置里那个字段只在数据库缺行时作首次播种回落，读取时由 `mergeInviteCodeUsage()` 合并。改用量不要写配置。
-- 名额占用走 `reserveInviteCodeUse()` 的带条件 `UPDATE ... WHERE used_count < ?`，以受影响行数判成败，并发注册才不争抢配置写入。
-- 注册后续步骤失败必须 `releaseInviteCode()` 回滚。
+- 邀请码定义与用量的唯一真相源是 `invite_codes`，配置 JSON 仅保留注册开关。后台列表走 `/api/admin/invite-codes` 的 SQL 游标分页，注册摘要走 COUNT；完整列表仅用于备份导出。
+- 名额占用走 `reserveInviteCodeUse()`，以数据库内的有效期与次数上限做条件 UPDATE，按受影响行数判成败；注册后续步骤失败调用 `releaseInviteCode()` 回滚。
+- 存储初始化在事务内迁移旧配置与用量、CAS 移除配置中的邀请码；导出把表数据组装到 `UserConfig.InviteCodes`，导入在同一替换事务还原表并剥离该配置字段。
 
 ## 用户活跃记录
 
@@ -40,8 +42,10 @@
 
 - 评价按作品身份存储：`normalizeWorkTitle()` + `normalizeWorkYear()`（`src/lib/source-match.ts`），与换源候选、搜索聚合共用同一归一化。**改归一化规则会让已存评价静默匹配不到**，换源后也不再继承。
 - `title_norm` 与 `year` 由服务端计算，不信任客户端。MySQL 列须保持 `utf8mb4_bin`，换成 `_ci` 排序规则会让两种存储的匹配结果不一致。
-- 年份为空视为通配：查询用 `year IN (?, '')`，PUT 命中空年份记录时沿用其年份，避免同一作品出现两份评价。收藏页在客户端按同一规则（精确年份优先、空年份兜底）把评分映射到卡片，见 `src/features/favorites/lib/favorite-library.ts`。
+- 年份为空视为通配：查询用 `year IN (?, '')`，PUT 命中空年份记录时沿用其年份，避免同一作品出现两份评价。收藏库在 SQL 中按精确年份优先、空年份兜底关联评价；精确记录存在且评分为空时保留空值。
+- 收藏查询投影与 JSON 同次写入，导入、替换与用户名合并都经 `favoriteProjection()` 重建；启动按 `projection_version` 分批补齐，投影规则改变须升级版本并回填。
 - 评分为 1.0–10.0 的一位小数：服务端先校验范围再 `Math.round(r * 10) / 10`，前端换算与展示统一走 `src/lib/rating.ts`，不要各处手写 `toFixed` 或步进精度。
+- 评价、关注、公开收藏等随用户数据增长的列表在 SQL 层按游标分页（排序键 + 唯一键打破平局），不要全量查询后在内存切页。本人评价数与轻量评分索引走 `/api/reviews/mine?view=count|ratings`，收藏库页走 `/api/favorites?format=library`，不要为此翻取完整列表。
 - 正文上限是前后端共用的 `REVIEW_CONTENT_MAX_LENGTH`（`src/lib/video-reviews.ts`），前端计数与服务端校验都引用它，不要另写数字。
 - 私密评价只对作者可见；作品汇总、后台列表与后台删除都带 `is_public = 1`。新增读取路径须同样过滤。
 - 收藏仍按 `source+id`，评价与收藏相互独立：保存评价时由前端补收藏，取消收藏不删评价。
@@ -167,6 +171,7 @@
 
 ## Admin
 
+- 后台用户列表走 `/api/admin/user` 的 SQL 游标分页，全部匹配批量操作提交筛选与排除项；`/api/admin/config` 仅返回用户总数，配置写入以数据库原子比较写入检测冲突。
 - 新增 tab 依次补：注册 `src/features/admin/lib/admin-tabs.ts` → 切换 `useAdminTab.ts` → 挂载 `AdminTabContent.tsx`
 - 弹窗复用 `ConfirmModal` / `AlertModal`
 - 表单样式复用 `src/features/admin/lib/buttonStyles.ts`（`buttonStyles` / `inputStyles` / `checkboxStyles`）

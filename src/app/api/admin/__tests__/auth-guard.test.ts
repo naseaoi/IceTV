@@ -9,6 +9,7 @@ import {
   resetConfig,
   saveConfig,
 } from '@/lib/config';
+import { db } from '@/lib/db';
 import { getOwnerPassword, getOwnerUsername } from '@/lib/env.server';
 import { verifyAuthSignature } from '@/lib/signing-secret.server';
 import {
@@ -80,6 +81,16 @@ if (!(globalThis as any).Response) {
 
   (globalThis as any).Response = MinimalResponse;
 }
+
+jest.mock('@/lib/db', () => ({
+  db: {
+    getUserAccess: jest.fn(),
+    getAdminUserPage: jest.fn(),
+    countActiveInviteCodes: jest.fn().mockResolvedValue(0),
+    recordUserLogin: jest.fn(),
+    recordUserActivity: jest.fn().mockResolvedValue(undefined),
+  },
+}));
 
 jest.mock('@/lib/auth.server', () => ({
   getAuthInfoFromCookie: jest.fn(),
@@ -196,13 +207,26 @@ describe('admin api auth guard regression', () => {
     mockedGetConfig.mockResolvedValue(baseConfig as never);
     mockedGetConfigForRead.mockResolvedValue(baseConfig as never);
     mockedGetConfigFresh.mockResolvedValue(baseConfig as never);
+    (db.getUserAccess as jest.Mock).mockImplementation(
+      async (username) =>
+        baseConfig.UserConfig.Users.find(
+          (user) => user.username === username,
+        ) || null,
+    );
+    (db.getAdminUserPage as jest.Mock).mockResolvedValue({
+      total: baseConfig.UserConfig.Users.length,
+      items: [],
+      nextCursor: null,
+    });
   });
 
   it('returns 401 when request is unauthenticated', async () => {
     const { getAdminConfig } = getHandlers();
     mockedGetAuthInfoFromCookie.mockReturnValue(null);
 
-    const response = await getAdminConfig({} as any);
+    const response = await getAdminConfig({
+      url: 'http://localhost/api/admin/config',
+    } as any);
     const payload = await response.json();
 
     expect(response.status).toBe(401);
@@ -218,7 +242,9 @@ describe('admin api auth guard regression', () => {
       sessionType: 'account',
     });
 
-    const response = await getAdminConfig({} as any);
+    const response = await getAdminConfig({
+      url: 'http://localhost/api/admin/config',
+    } as any);
     const payload = await response.json();
 
     expect(response.status).toBe(403);
@@ -234,12 +260,18 @@ describe('admin api auth guard regression', () => {
       sessionType: 'account',
     });
 
-    const response = await getAdminConfig({} as any);
+    const response = await getAdminConfig({
+      url: 'http://localhost/api/admin/config',
+    } as any);
     const payload = await response.json();
 
     expect(response.status).toBe(200);
     expect(payload.Role).toBe('admin');
     expect(payload.Config).toBeDefined();
+    expect(payload.Config.UserConfig.Users).toEqual([]);
+    expect(payload.Config.UserConfig.TotalUsers).toBe(
+      baseConfig.UserConfig.Users.length,
+    );
   });
 
   it('returns 403 when non-owner tries to reset config', async () => {

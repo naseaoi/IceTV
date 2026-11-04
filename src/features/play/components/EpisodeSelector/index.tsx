@@ -6,7 +6,7 @@ import {
   Star,
 } from 'lucide-react';
 import dynamic from 'next/dynamic';
-import React, { useCallback, useMemo, useState } from 'react';
+import React, { lazy, Suspense, useCallback, useMemo, useState } from 'react';
 
 import MobileSheet from '@/components/mobile/MobileSheet';
 import {
@@ -14,6 +14,7 @@ import {
   PlayerPanelContent,
 } from '@/components/PlayerPanelTabBar';
 import { useRuntimeConfig } from '@/components/RuntimeConfigProvider';
+import { EpisodesTab } from '@/features/play/components/EpisodeSelector/EpisodesTab';
 import { SectionTitle } from '@/features/play/components/EpisodeSelector/SectionTitle';
 import { TabBar } from '@/features/play/components/EpisodeSelector/TabBar';
 import { useVideoReviews } from '@/features/play/hooks/useVideoReviews';
@@ -71,7 +72,7 @@ function InfoTabLoading({
           <div className='skeleton h-7 w-20 rounded-full' />
         </div>
       </div>
-      <div className='flex min-h-0 flex-1 flex-col overflow-hidden'>
+      <div className='flex min-h-0 flex-1 flex-col overflow-hidden pt-1'>
         <div className='flex min-h-0 flex-1 flex-col overflow-hidden'>
           {infoSkeletonLineWidths.map((widthClass, index) => (
             <div
@@ -82,23 +83,6 @@ function InfoTabLoading({
             </div>
           ))}
         </div>
-      </div>
-    </div>
-  );
-}
-
-function EpisodesTabLoading() {
-  return (
-    <div data-play-episodes-skeleton className='flex min-h-0 flex-1 flex-col'>
-      <div className='flex flex-shrink-0 gap-1 px-5 pb-2 pt-2 sm:px-6'>
-        {Array.from({ length: 4 }, (_, index) => (
-          <div key={index} className='skeleton h-7 flex-1 rounded-md' />
-        ))}
-      </div>
-      <div className='flex flex-1 flex-wrap content-start justify-center gap-2 overflow-hidden px-5 pb-5 pt-2 sm:px-6 sm:pb-6'>
-        {Array.from({ length: 24 }, (_, index) => (
-          <div key={index} className='skeleton h-11 w-12 rounded-lg' />
-        ))}
       </div>
     </div>
   );
@@ -146,21 +130,10 @@ function pickDoubanId(
   return selected;
 }
 
-const EpisodesTab = dynamic(
-  () =>
-    import('@/features/play/components/EpisodeSelector/EpisodesTab').then(
-      (mod) => mod.EpisodesTab,
-    ),
-  { loading: EpisodesTabLoading },
-);
-const InfoTab = dynamic(
-  () =>
-    import('@/features/play/components/EpisodeSelector/InfoTab').then(
-      (mod) => mod.InfoTab,
-    ),
-  {
-    loading: () => <InfoTabLoading />,
-  },
+const InfoTab = lazy(() =>
+  import('@/features/play/components/EpisodeSelector/InfoTab').then((mod) => ({
+    default: mod.InfoTab,
+  })),
 );
 const SourcesTab = dynamic(
   () =>
@@ -361,19 +334,21 @@ const EpisodeSelector: React.FC<EpisodeSelectorProps> = ({
     }
 
     return (
-      <InfoTab
-        videoTitle={videoTitle || ''}
-        totalEpisodes={totalEpisodes}
-        detail={detail}
-        videoYear={videoYear}
-        favorited={favorited}
-        onToggleFavorite={onToggleFavorite || (() => {})}
-        videoCover={videoCover}
-        videoDoubanId={resolvedDoubanId}
-        scrollMode={scrollMode}
-        myReview={reviews.myReview}
-        onOpenReview={onOpenReview}
-      />
+      <Suspense fallback={<InfoTabLoading scrollMode={scrollMode} />}>
+        <InfoTab
+          videoTitle={videoTitle || ''}
+          totalEpisodes={totalEpisodes}
+          detail={detail}
+          videoYear={videoYear}
+          favorited={favorited}
+          onToggleFavorite={onToggleFavorite || (() => {})}
+          videoCover={videoCover}
+          videoDoubanId={resolvedDoubanId}
+          scrollMode={scrollMode}
+          myReview={reviews.myReview}
+          onOpenReview={onOpenReview}
+        />
+      </Suspense>
     );
   };
 
@@ -588,7 +563,17 @@ const EpisodeSelector: React.FC<EpisodeSelectorProps> = ({
                   </div>
                   <div className='flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden'>
                     {detailLoading ? (
-                      <EpisodesTabLoading />
+                      <EpisodesTab
+                        loading
+                        totalEpisodes={totalEpisodes || 24}
+                        episodes_titles={episodes_titles}
+                        episodesPerPage={episodesPerPage}
+                        value={value}
+                        episodeGroups={detail?.episode_groups}
+                        variantSources={variantSources}
+                        currentSource={currentSource}
+                        currentId={currentId}
+                      />
                     ) : (
                       renderEpisodesTab()
                     )}

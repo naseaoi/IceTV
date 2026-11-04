@@ -1,6 +1,6 @@
 import type { FavoriteItem } from '@/features/favorites/types';
 import { normalizeWorkTitle, normalizeWorkYear } from '@/lib/source-match';
-import type { Favorite, PlayRecord, VideoReview } from '@/lib/types';
+import type { Favorite, PlayRecord, VideoReviewRating } from '@/lib/types';
 import { parseStorageKey } from '@/lib/utils';
 
 export type FavoriteFilter = 'all' | 'watched' | 'unwatched' | 'reviewed';
@@ -11,14 +11,14 @@ export interface FavoriteLibraryEntry {
   searchText: string;
   savedAt: number;
   playedAt: number | null;
-  review: VideoReview | null;
+  review: VideoReviewRating | null;
 }
 
 export type FavoriteFilterCounts = Record<FavoriteFilter, number>;
 
-type ReviewIndex = Map<string, VideoReview[]>;
+type ReviewIndex = Map<string, VideoReviewRating[]>;
 
-function indexReviews(reviews: VideoReview[]): ReviewIndex {
+function indexReviews(reviews: VideoReviewRating[]): ReviewIndex {
   const index: ReviewIndex = new Map();
   for (const review of reviews) {
     const bucket = index.get(review.title_norm);
@@ -33,7 +33,7 @@ function findReview(
   index: ReviewIndex,
   title: string,
   year: string | undefined,
-): VideoReview | null {
+): VideoReviewRating | null {
   const bucket = index.get(normalizeWorkTitle(title));
   if (!bucket) return null;
   const normalizedYear = normalizeWorkYear(year);
@@ -47,7 +47,7 @@ function findReview(
 export function buildFavoriteLibrary(
   favorites: Record<string, Favorite>,
   playRecords: Record<string, PlayRecord>,
-  reviews: VideoReview[],
+  reviews: VideoReviewRating[],
 ): FavoriteLibraryEntry[] {
   const reviewIndex = indexReviews(reviews);
 

@@ -1,3 +1,5 @@
+export const INVITE_CODE_PAGE_SIZE = 50;
+export const INVITE_CODE_MAX_PAGE_SIZE = 100;
 export const INVITE_CODE_LENGTH = 12;
 export const MAX_INVITE_CODES = 200;
 export const MIN_INVITE_VALID_DAYS = 1;
@@ -178,9 +180,9 @@ export function sanitizeInviteCodes(value: unknown): InviteCode[] {
       createdAt: raw.createdAt,
       expiresAt: raw.expiresAt,
       createdBy: typeof raw.createdBy === 'string' ? raw.createdBy : '',
-      ...(maxUses ? { maxUses, usedCount } : {}),
+      usedCount,
+      ...(maxUses ? { maxUses } : {}),
     });
-    if (result.length >= MAX_INVITE_CODES) break;
   }
 
   return result;

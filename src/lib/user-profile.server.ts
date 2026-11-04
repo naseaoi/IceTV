@@ -6,7 +6,11 @@ import { isGuardFailure, requireActiveUser } from '@/lib/api-auth';
 import { getClientIp } from '@/lib/client-ip';
 import { db } from '@/lib/db';
 import { FixedWindowRateLimiter } from '@/lib/fixed-window-rate-limit';
-import { NicknameTakenError, socialPage } from '@/lib/review-social-storage';
+import {
+  NicknameTakenError,
+  parseSocialCursor,
+  socialCursor,
+} from '@/lib/review-social-storage';
 import type { PublicFavoriteItem, UserProfile } from '@/lib/types';
 import {
   ProfileValidationError,
@@ -17,6 +21,7 @@ import { normalizeUsername } from '@/lib/username';
 import { ReviewValidationError } from '@/lib/video-reviews';
 
 const nicknameLimiter = new FixedWindowRateLimiter(30, 60_000);
+const PUBLIC_FAVORITES_PAGE_SIZE = 30;
 
 export function socialJson(value: unknown, status = 200) {
   return NextResponse.json(value, {
@@ -185,10 +190,16 @@ export async function handlePublicUser(
       profile.username !== normalizeUsername(guard.username)
     )
       return socialJson({ hidden: true });
-    const favorites = await db.getAllFavorites(profile.username);
-    const items: PublicFavoriteItem[] = Object.entries(favorites)
-      .filter(([, favorite]) => favorite.origin !== 'live')
-      .map(([key, f]) => ({
+    const after = parseSocialCursor(cursor);
+    const page = await db.getFavoritePage(
+      profile.username,
+      PUBLIC_FAVORITES_PAGE_SIZE,
+      after?.[0],
+      after?.[1],
+      false,
+    );
+    const items: PublicFavoriteItem[] = page.items.map(
+      ({ key, favorite: f }) => ({
         key,
         title: f.title,
         year: f.year,
@@ -197,10 +208,16 @@ export async function handlePublicUser(
         total_episodes: f.total_episodes,
         search_title: f.search_title,
         save_time: f.save_time,
-      }));
+      }),
+    );
+    const lastItem = items.at(-1);
     return socialJson({
       hidden: false,
-      ...socialPage(items, 30, cursor, (item) => [item.save_time, item.key]),
+      items,
+      nextCursor:
+        page.nextCursor && lastItem
+          ? socialCursor([lastItem.save_time, lastItem.key])
+          : null,
     });
   } catch (error) {
     return socialFailure(error);

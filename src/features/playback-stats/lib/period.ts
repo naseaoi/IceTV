@@ -2,6 +2,7 @@ import type {
   PlaybackPeriodStats,
   PlaybackTopWork,
 } from '@/features/playback-stats/types';
+import { PLAYBACK_TOP_WORKS_LIMIT } from '@/features/playback-stats/types';
 import { normalizeWorkTitle, normalizeWorkYear } from '@/lib/source-match';
 import type { PlaybackPeriodSession } from '@/lib/types';
 
@@ -69,7 +70,7 @@ export function buildPlaybackPeriod(
   if (
     !/^\d{4}-\d{2}-\d{2}$/.test(date) ||
     !Number.isFinite(anchor.getTime()) ||
-    anchor.toISOString().slice(0, 10) !== date
+    anchor.toISOString().slice(0, PLAYBACK_TOP_WORKS_LIMIT) !== date
   ) {
     throw new PlaybackPeriodValidationError('日期无效');
   }
@@ -179,6 +180,6 @@ export function aggregatePlaybackPeriod(
         (a, b) =>
           b.watchSeconds - a.watchSeconds || b.lastWatchedAt - a.lastWatchedAt,
       )
-      .slice(0, 10),
+      .slice(0, PLAYBACK_TOP_WORKS_LIMIT),
   };
 }

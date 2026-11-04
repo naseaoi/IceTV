@@ -5,7 +5,7 @@ import {
   getAuthInfoFromCookie,
   getSignatureData,
 } from './auth.server';
-import { getConfigForRead } from './config';
+import { db } from './db';
 import { getOwnerUsername } from './env.server';
 import { verifyAuthSignature } from './signing-secret.server';
 import { touchUserActivity } from './user-activity.server';
@@ -135,10 +135,7 @@ export async function requireActiveUserFromAuthInfo(
   }
 
   const username = normalizeUsername(cookieUsername);
-  const config = await getConfigForRead();
-  const user = config.UserConfig.Users.find(
-    (entry) => entry.username === username,
-  );
+  const user = await db.getUserAccess(username);
 
   if (!user) {
     return {

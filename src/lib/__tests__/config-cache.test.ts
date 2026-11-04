@@ -45,6 +45,7 @@ const baseConfig: AdminConfig = {
 type LoadConfigOptions = {
   adminConfig?: AdminConfig;
   getAdminConfig?: jest.Mock;
+  compareAndSetAdminConfig?: jest.Mock;
   userNames?: string[];
 };
 
@@ -63,6 +64,12 @@ async function loadConfigModule(
       getAdminConfig,
       getAllUsers: jest.fn().mockResolvedValue(userNames),
       saveAdminConfig,
+      compareAndSetAdminConfig:
+        options.compareAndSetAdminConfig ||
+        (async (_expected: unknown, next: AdminConfig) => {
+          await saveAdminConfig(next);
+          return true;
+        }),
     },
   }));
   jest.doMock('@/lib/env.server', () => ({
@@ -104,6 +111,17 @@ describe('config cache persistence', () => {
 
     const second = await getConfig();
     expect(second.SiteConfig.SiteName).toBe('IceTV');
+  });
+
+  it('stops retrying persistence after repeated compare-and-set conflicts', async () => {
+    const compareAndSetAdminConfig = jest.fn().mockResolvedValue(false);
+    const { getConfig } = await loadConfigModule(jest.fn(), {
+      getAdminConfig: jest.fn().mockResolvedValue(null),
+      compareAndSetAdminConfig,
+    });
+
+    await expect(getConfig()).resolves.toBeTruthy();
+    expect(compareAndSetAdminConfig).toHaveBeenCalledTimes(3);
   });
 
   it('keeps cached config unchanged when save fails', async () => {
@@ -276,29 +294,7 @@ describe('config cache persistence', () => {
 
     const config = await getConfig();
 
-    expect(config.UserConfig.Users).toEqual([
-      {
-        username: 'owner-1',
-        role: 'owner',
-        banned: false,
-        enabledApis: undefined,
-        tags: undefined,
-      },
-      {
-        username: 'db-user',
-        role: 'admin',
-        banned: true,
-        enabledApis: undefined,
-        tags: ['vip'],
-      },
-      {
-        username: 'new-user',
-        role: 'user',
-        banned: false,
-        enabledApis: undefined,
-        tags: undefined,
-      },
-    ]);
+    expect(config.UserConfig.Users).toBeUndefined();
   });
 
   it('rejects stale config writes', async () => {
@@ -314,6 +310,7 @@ describe('config cache persistence', () => {
 
     const config = await getConfig();
     config.SiteConfig.Announcement = 'local change';
+    saveAdminConfig.mockClear();
 
     await expect(saveConfig(config)).rejects.toThrow(ConfigConflictError);
     expect(saveAdminConfig).not.toHaveBeenCalled();

@@ -8,7 +8,6 @@ import {
   getSignatureData,
   isSecureRequest,
 } from '@/lib/auth.server';
-import { getConfig } from '@/lib/config';
 import { db } from '@/lib/db';
 import { getOwnerPassword, getOwnerUsername } from '@/lib/env.server';
 import { verifyPassword } from '@/lib/password';
@@ -341,8 +340,7 @@ export async function POST(req: NextRequest) {
         );
       }
 
-      const config = await getConfig();
-      const user = config.UserConfig.Users.find((u) => u.username === username);
+      const user = await db.getUserAccess(username);
       if (user && user.banned) {
         return NextResponse.json({ error: '用户被封禁' }, { status: 401 });
       }

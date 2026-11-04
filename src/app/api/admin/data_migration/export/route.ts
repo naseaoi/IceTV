@@ -44,6 +44,9 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: '请提供加密密码' }, { status: 400 });
     }
 
+    config.UserConfig.Users = await db.getAllUserAccess();
+    config.UserConfig.InviteCodes = await db.getAllInviteCodes();
+
     // 收集所有数据
     const exportData = {
       timestamp: new Date().toISOString(),
@@ -57,8 +60,6 @@ export async function POST(req: NextRequest) {
         users: await db.getAllUsersWithPasswords(),
         // 源站路由统计（按天原始行）
         sourceRouteStats: await db.getAllSourceRouteStatBuckets(),
-        // 邀请码已用次数，真相源是用量表
-        inviteCodeUsage: await db.getAllInviteCodeUsage(),
         // 本地上传的站点图标，外链图标为 null
         siteIcon: readSiteIconForBackup(),
         // 所有用户数据

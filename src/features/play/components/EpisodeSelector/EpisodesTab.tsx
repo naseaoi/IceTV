@@ -27,6 +27,7 @@ interface EpisodesTabProps {
   currentSource?: string;
   currentId?: string;
   onSourceChange?: (source: string, id: string, title: string) => void;
+  loading?: boolean;
 }
 
 function buildNumericPages(
@@ -83,6 +84,7 @@ export const EpisodesTab: React.FC<EpisodesTabProps> = ({
   currentSource,
   currentId,
   onSourceChange,
+  loading = false,
 }) => {
   const pages = useMemo(() => {
     const groupTotal = (episodeGroups || []).reduce(
@@ -242,7 +244,11 @@ export const EpisodesTab: React.FC<EpisodesTabProps> = ({
   );
 
   return (
-    <>
+    <div
+      data-play-episodes-skeleton={loading ? '' : undefined}
+      aria-hidden={loading || undefined}
+      className='contents'
+    >
       {(variantSources.length > 1 || showPagination) && (
         <div className='flex min-w-0 flex-shrink-0 flex-col gap-2 px-5 pb-2 pt-2 sm:px-6'>
           {variantSources.length > 1 && (
@@ -261,6 +267,7 @@ export const EpisodesTab: React.FC<EpisodesTabProps> = ({
                 return (
                   <button
                     key={`${variant.source}-${variant.id}`}
+                    disabled={loading}
                     onClick={() => {
                       if (!isActive) {
                         onSourceChange?.(
@@ -272,19 +279,23 @@ export const EpisodesTab: React.FC<EpisodesTabProps> = ({
                     }}
                     className={`inline-flex max-w-full items-center gap-2 rounded-lg px-3 py-2 text-xs font-medium transition-all duration-150
                       ${
-                        isActive
-                          ? 'bg-brand-500 text-white shadow-sm shadow-brand-500/20'
-                          : 'bg-gray-100 text-gray-700 hover:bg-gray-200 dark:bg-white/[0.06] dark:text-gray-300 dark:hover:bg-white/[0.12]'
+                        loading
+                          ? 'skeleton'
+                          : isActive
+                            ? 'bg-brand-500 text-white shadow-sm shadow-brand-500/20'
+                            : 'bg-gray-100 text-gray-700 hover:bg-gray-200 dark:bg-white/[0.06] dark:text-gray-300 dark:hover:bg-white/[0.12]'
                       }
                     `.trim()}
                     title={variantLabel}
                   >
-                    <span className='max-w-[10rem] truncate'>
+                    <span
+                      className={`max-w-[10rem] truncate ${loading ? 'invisible' : ''}`}
+                    >
                       {variantLabel}
                     </span>
                     {episodeCount > 0 && (
                       <span
-                        className={`rounded-full px-1.5 py-0.5 text-[10px]
+                        className={`${loading ? 'invisible' : ''} rounded-full px-1.5 py-0.5 text-[10px]
                           ${
                             isActive
                               ? 'bg-white/20 text-white'
@@ -317,16 +328,21 @@ export const EpisodesTab: React.FC<EpisodesTabProps> = ({
                       ref={(el) => {
                         buttonRefs.current[idx] = el;
                       }}
+                      disabled={loading}
                       onClick={() => handleCategoryClick(idx)}
                       className={`whitespace-nowrap rounded-md px-3 py-1.5 text-xs font-medium transition-all duration-150
                         ${
-                          isActive
-                            ? 'bg-brand-500 text-white shadow-sm'
-                            : 'text-gray-600 hover:bg-gray-100 hover:text-gray-900 dark:text-gray-400 dark:hover:bg-white/10 dark:hover:text-gray-200'
+                          loading
+                            ? 'skeleton'
+                            : isActive
+                              ? 'bg-brand-500 text-white shadow-sm'
+                              : 'text-gray-600 hover:bg-gray-100 hover:text-gray-900 dark:text-gray-400 dark:hover:bg-white/10 dark:hover:text-gray-200'
                         }
                       `.trim()}
                     >
-                      {page.label}
+                      <span className={loading ? 'invisible' : undefined}>
+                        {page.label}
+                      </span>
                     </button>
                   );
                 })}
@@ -375,26 +391,31 @@ export const EpisodesTab: React.FC<EpisodesTabProps> = ({
               ref={(el) => {
                 episodeButtonRefs.current[episodeNumber] = el;
               }}
+              disabled={loading}
               onClick={() => onChange?.(episodeNumber - 1)}
               style={{
                 width: `calc(${dynamicSpan} * 3rem + ${dynamicSpan - 1} * 0.5rem)`,
               }}
               className={`h-11 ${dynamicSpan > 1 ? 'px-2' : 'px-1'} flex shrink-0 items-center justify-center rounded-lg text-[13px] font-medium transition-all duration-150
                 ${
-                  isActive
-                    ? 'bg-brand-500 text-white shadow-md shadow-brand-500/20'
-                    : 'bg-gray-100 text-gray-700 hover:scale-105 hover:bg-gray-200 dark:bg-white/[0.06] dark:text-gray-300 dark:hover:bg-white/[0.12]'
+                  loading
+                    ? 'skeleton'
+                    : isActive
+                      ? 'bg-brand-500 text-white shadow-md shadow-brand-500/20'
+                      : 'bg-gray-100 text-gray-700 hover:scale-105 hover:bg-gray-200 dark:bg-white/[0.06] dark:text-gray-300 dark:hover:bg-white/[0.12]'
                 }`.trim()}
               title={
                 rawTitle ||
                 (totalEpisodes === 1 ? '正片' : `第 ${episodeNumber} 集`)
               }
             >
-              <span className='truncate'>{displayTitle}</span>
+              <span className={`truncate ${loading ? 'invisible' : ''}`}>
+                {displayTitle}
+              </span>
             </button>
           );
         })}
       </div>
-    </>
+    </div>
   );
 };

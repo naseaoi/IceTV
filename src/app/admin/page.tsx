@@ -4,11 +4,13 @@ import { AlertTriangle, RotateCcw } from 'lucide-react';
 import { Suspense, useEffect, useState } from 'react';
 
 import AuthenticatedRoute from '@/components/AuthenticatedRoute';
+import { useAuthSession } from '@/components/AuthProvider';
 import LoadingStatePanel from '@/components/LoadingStatePanel';
 import AlertModal from '@/components/modals/AlertModal';
 import ConfirmModal from '@/components/modals/ConfirmModal';
 import { PAGE_CONTAINER_CLASS } from '@/components/page-container';
 import PageLayout from '@/components/PageLayout';
+import AdminContentSkeleton from '@/features/admin/components/AdminContentSkeleton';
 import AdminNav from '@/features/admin/components/AdminNav';
 import AdminSaveBar from '@/features/admin/components/AdminSaveBar';
 import {
@@ -54,25 +56,28 @@ function AdminShell({
   );
 }
 
-function AdminLoadingSkeleton() {
+function AdminLoadingSkeleton({
+  activeTab = 'site',
+}: {
+  activeTab?: AdminTabId;
+}) {
+  const { session } = useAuthSession();
+  const tabs = getVisibleTabs(
+    session.status === 'authenticated' && session.role === 'owner',
+  );
   return (
     <AdminShell
       nav={
-        <div className='flex gap-2 md:w-52 md:shrink-0 md:flex-col md:gap-1.5 lg:w-56'>
-          {Array.from({ length: 6 }, (_, index) => (
-            <div
-              key={index}
-              className='skeleton h-8 w-20 rounded-full md:h-9 md:w-full md:rounded-lg'
-            />
-          ))}
+        <div className='contents' inert>
+          <AdminNav
+            tabs={tabs}
+            activeTab={activeTab}
+            onSelect={() => undefined}
+          />
         </div>
       }
     >
-      <div className='space-y-4'>
-        <div className='skeleton h-10 w-full rounded-lg' />
-        <div className='skeleton h-10 w-2/3 rounded-lg' />
-        <div className='skeleton h-24 w-full rounded-lg' />
-      </div>
+      <AdminContentSkeleton activeTab={activeTab} />
     </AdminShell>
   );
 }
@@ -116,6 +121,7 @@ function getAdminErrorView(error: string) {
 }
 
 function AdminPageClient() {
+  const { session } = useAuthSession();
   const { alertModal, showAlert, hideAlert } = useAlertModal();
   const { isLoading, withLoading } = useLoadingState();
   const [config, setConfig] = useState<AdminConfig | null>(null);
@@ -133,7 +139,12 @@ function AdminPageClient() {
   // 放弃改动时递增，让表单按当前配置重新挂载
   const [formRevision, setFormRevision] = useState(0);
 
-  const isOwnerRole = isOwner(role);
+  const isOwnerRole = isOwner(
+    role ??
+      (session.status === 'authenticated' && session.role === 'owner'
+        ? 'owner'
+        : null),
+  );
   const visibleTabs = getVisibleTabs(isOwnerRole);
   const { activeTab, setActiveTab } = useAdminTab(isOwnerRole);
   const activeSaveAction =
@@ -165,7 +176,7 @@ function AdminPageClient() {
         'video-source': config.SourceConfig.length,
         'live-source': config.LiveConfig?.length ?? 0,
         category: config.CustomCategories.length,
-        user: config.UserConfig.Users.length,
+        user: config.UserConfig.TotalUsers ?? 0,
       }
     : undefined;
 
@@ -290,7 +301,7 @@ function AdminPageClient() {
     });
   };
 
-  if (loading) return <AdminLoadingSkeleton />;
+  if (loading) return <AdminLoadingSkeleton activeTab={activeTab} />;
 
   if (error) {
     const errorView = getAdminErrorView(error);

@@ -1,22 +1,38 @@
 import { randomInt } from 'crypto';
 
+import {
+  type FollowReviewQuery,
+  followReviewMessageId,
+  parseFollowReviewMessageId,
+  parseFollowReviewSortKey,
+} from '@/lib/follow-review-identity';
 import type { FollowReviewUserMessage } from '@/lib/message-types';
 import type {
   AdminReviewReportPage,
   FollowListPage,
+  MyVideoReviewPage,
   PublicVideoReviewPage,
   ReviewReportReason,
   StorageUserImportData,
   UserProfile,
   UserProfileView,
   VideoReview,
+  VideoReviewRating,
+  WorkReviewSummary,
 } from '@/lib/types';
+import { REVIEW_REPORT_REASONS } from '@/lib/types';
 import { validateAvatarSeed, validateNickname } from '@/lib/user-profile';
 import { normalizeUsername } from '@/lib/username';
 import {
+  type MyReviewQuery,
   type VideoReviewRow,
+  decodeReviewCursor,
+  MY_REVIEWS_PAGE_SIZE,
   publicReview,
+  reviewSql,
   ReviewValidationError,
+  validateMyReviewQuery,
+  WORK_REVIEWS_PAGE_SIZE,
 } from '@/lib/video-reviews';
 
 export const SOCIAL_TABLES = [
@@ -276,6 +292,8 @@ export class ReviewSocialStorage {
     type: 'followers' | 'following',
     cursor?: string,
   ): Promise<FollowListPage> {
+    const pageSize = 30;
+    const after = parseSocialCursor(cursor);
     const column = type === 'followers' ? 'followee' : 'follower';
     const target = type === 'followers' ? 'follower' : 'followee';
     const rows = await this.sql.rows<{
@@ -284,8 +302,16 @@ export class ReviewSocialStorage {
       avatar_seed: string | null;
       created_at: number;
     }>(
-      `SELECT p.profile_id, p.nickname, p.avatar_seed, f.created_at FROM user_follows f JOIN user_profiles p ON p.username = f.${target} WHERE f.${column} = ?`,
-      [normalizeUsername(username)],
+      `SELECT p.profile_id, p.nickname, p.avatar_seed, f.created_at
+       FROM user_follows f JOIN user_profiles p ON p.username = f.${target}
+       WHERE f.${column} = ?
+       ${after ? 'AND (f.created_at < ? OR (f.created_at = ? AND p.profile_id < ?))' : ''}
+       ORDER BY f.created_at DESC, p.profile_id DESC LIMIT ?`,
+      [
+        normalizeUsername(username),
+        ...(after ? [after[0], after[0], after[1]] : []),
+        pageSize + 1,
+      ],
     );
     return socialPage(
       rows.map((row) => ({
@@ -294,8 +320,8 @@ export class ReviewSocialStorage {
         avatarSeed: row.avatar_seed,
         followedAt: Number(row.created_at),
       })),
-      30,
-      cursor,
+      pageSize,
+      undefined,
       (row) => [row.followedAt, row.profileId],
     );
   }
@@ -327,25 +353,227 @@ export class ReviewSocialStorage {
       }),
     );
   }
+  async getMyVideoReviewCount(username: string): Promise<number> {
+    const [row] = await this.sql.rows<{ count: number }>(
+      'SELECT COUNT(*) AS count FROM video_reviews WHERE username = ?',
+      [normalizeUsername(username)],
+    );
+    return Number(row.count);
+  }
+
+  async getMyVideoReviewRatings(
+    username: string,
+  ): Promise<VideoReviewRating[]> {
+    const { rating } = reviewSql(this.sql.dialect);
+    const rows = await this.sql.rows<VideoReviewRating>(
+      `SELECT title_norm, year, ${rating} AS rating FROM video_reviews WHERE username = ?`,
+      [normalizeUsername(username)],
+    );
+    return rows.map((row) => ({
+      ...row,
+      rating: row.rating === null ? null : Number(row.rating),
+    }));
+  }
+
+  async getMyVideoReviewPage(
+    username: string,
+    query: MyReviewQuery = {},
+  ): Promise<MyVideoReviewPage> {
+    const { q, filter, sort, after } = validateMyReviewQuery(query);
+    const { rating, title } = reviewSql(this.sql.dialect);
+    const content =
+      this.sql.dialect === 'sqlite'
+        ? "json_extract(review_json, '$.content')"
+        : "JSON_UNQUOTE(JSON_EXTRACT(review_json, '$.content'))";
+    const haystack =
+      this.sql.dialect === 'sqlite'
+        ? `${title} || ' ' || ${content}`
+        : `CONCAT(${title}, ' ', ${content})`;
+    const where = `username = ? AND (? = '' OR LOWER(${haystack}) LIKE LOWER(?) ESCAPE '!')`;
+    const params = [
+      normalizeUsername(username),
+      q,
+      `%${q.replace(/[!%_]/g, '!$&')}%`,
+    ];
+    const [counts] = await this.sql.rows<{
+      all: number;
+      public: number;
+      private: number;
+      text: number;
+    }>(
+      `SELECT COUNT(*) AS \`all\`, COALESCE(SUM(is_public), 0) AS \`public\`, COALESCE(SUM(1-is_public), 0) AS \`private\`, COALESCE(SUM(CASE WHEN ${rating} IS NULL THEN 1 ELSE 0 END), 0) AS \`text\` FROM video_reviews WHERE ${where}`,
+      params,
+    );
+    // 整数排名统一降序；无评分在高低分两种排序下都沉底。
+    const rank =
+      sort === 'updated'
+        ? 'updated_at'
+        : `COALESCE(${sort === 'high' ? `ROUND(${rating} * 10)` : `101 - ROUND(${rating} * 10)`}, 0)`;
+    const filtered =
+      filter === 'public'
+        ? ' AND is_public = 1'
+        : filter === 'private'
+          ? ' AND is_public = 0'
+          : filter === 'text'
+            ? ` AND ${rating} IS NULL`
+            : '';
+    const rows = await this.sql.rows<VideoReviewRow>(
+      `SELECT review_json FROM video_reviews WHERE ${where}${filtered}
+       ${after ? `AND (${rank} < ? OR (${rank} = ? AND (updated_at < ? OR (updated_at = ? AND (title_norm < ? OR (title_norm = ? AND year < ?))))))` : ''}
+       ORDER BY ${rank} DESC, updated_at DESC, title_norm DESC, year DESC LIMIT ${MY_REVIEWS_PAGE_SIZE + 1}`,
+      [
+        ...params,
+        ...(after
+          ? [
+              after[0],
+              after[0],
+              Number(after[1]),
+              Number(after[1]),
+              after[2],
+              after[2],
+              after[3],
+            ]
+          : []),
+      ],
+    );
+    const items = rows
+      .slice(0, MY_REVIEWS_PAGE_SIZE)
+      .map((row) => JSON.parse(row.review_json) as VideoReview);
+    const last = items.at(-1);
+    return {
+      items,
+      nextCursor:
+        rows.length > MY_REVIEWS_PAGE_SIZE && last
+          ? socialCursor([
+              sort === 'updated'
+                ? last.updated_at
+                : last.rating === null
+                  ? 0
+                  : sort === 'high'
+                    ? Math.round(last.rating * 10)
+                    : 101 - Math.round(last.rating * 10),
+              String(last.updated_at),
+              last.title_norm,
+              last.year,
+            ])
+          : null,
+      total: await this.getMyVideoReviewCount(username),
+      counts: {
+        all: Number(counts.all),
+        public: Number(counts.public),
+        private: Number(counts.private),
+        text: Number(counts.text),
+      },
+    };
+  }
+
+  async getWorkVideoReviewPage(
+    titleNorm: string,
+    year: string,
+    viewer: string,
+    cursor?: string,
+  ): Promise<WorkReviewSummary> {
+    const after = decodeReviewCursor(cursor);
+    const queries = reviewSql(this.sql.dialect);
+    const params = [titleNorm, year, year];
+    // 公开游标使用 profileId，登录名只在存储边界内用于关联。
+    const rows = await this.sql.rows<VideoReviewRow>(
+      `SELECT r.username, r.review_json, p.profile_id FROM video_reviews r JOIN user_profiles p ON p.username = r.username
+       WHERE r.title_norm = ? AND r.is_public = 1 AND (? = '' OR r.year IN (?, ''))
+       ${after ? 'AND (r.updated_at < ? OR (r.updated_at = ? AND (p.profile_id < ? OR (p.profile_id = ? AND r.year < ?))))' : ''}
+       ORDER BY r.updated_at DESC, p.profile_id DESC, r.year DESC LIMIT ${WORK_REVIEWS_PAGE_SIZE + 1}`,
+      [
+        ...params,
+        ...(after ? [after[0], after[0], after[1], after[1], after[3]] : []),
+      ],
+    );
+    const [summary] = await this.sql.rows<{
+      average: number | null;
+      count: number;
+    }>(queries.summary, params);
+    const [total] = await this.sql.rows<{ count: number }>(
+      "SELECT COUNT(*) AS count FROM video_reviews WHERE title_norm = ? AND is_public = 1 AND (? = '' OR year IN (?, ''))",
+      params,
+    );
+    const buckets = await this.sql.rows<{ bucket: number; count: number }>(
+      queries.distribution,
+      params,
+    );
+    const distribution = Array<number>(10).fill(0);
+    for (const row of buckets)
+      distribution[Math.min(9, Math.max(0, Number(row.bucket) - 1))] += Number(
+        row.count,
+      );
+    const items = rows.slice(0, WORK_REVIEWS_PAGE_SIZE);
+    const reviews = (await this.enrichReviews(items, viewer)).map(publicReview);
+    const last = reviews.at(-1);
+    return {
+      reviews,
+      average: summary.average === null ? null : Number(summary.average),
+      count: Number(summary.count),
+      reviewCount: Number(total.count),
+      distribution,
+      nextCursor:
+        rows.length > WORK_REVIEWS_PAGE_SIZE && last
+          ? socialCursor([
+              last.updated_at,
+              last.author.profileId,
+              last.title_norm,
+              last.year,
+            ])
+          : null,
+    };
+  }
+
   async getUserPublicReviewPage(
     username: string,
     viewer: string,
     cursor?: string,
   ): Promise<PublicVideoReviewPage> {
+    const after = parseSocialCursor(cursor);
+    let identity: [string, string] | null = null;
+    if (after) {
+      try {
+        const value = JSON.parse(after[1]);
+        if (
+          !Array.isArray(value) ||
+          value.length !== 2 ||
+          typeof value[0] !== 'string' ||
+          !value[0] ||
+          value[0].length > 191 ||
+          typeof value[1] !== 'string' ||
+          value[1].length > 16
+        )
+          throw new Error();
+        identity = value as [string, string];
+      } catch {
+        throw new ReviewValidationError('分页游标无效');
+      }
+    }
     const rows = await this.sql.rows<VideoReviewRow>(
-      'SELECT username, review_json FROM video_reviews WHERE username = ? AND is_public = 1 ORDER BY updated_at DESC, title_norm DESC, year DESC',
-      [normalizeUsername(username)],
+      `SELECT username, review_json FROM video_reviews WHERE username = ? AND is_public = 1
+       ${after ? 'AND (updated_at < ? OR (updated_at = ? AND (title_norm < ? OR (title_norm = ? AND year < ?))))' : ''}
+       ORDER BY updated_at DESC, title_norm DESC, year DESC LIMIT ${MY_REVIEWS_PAGE_SIZE + 1}`,
+      [
+        normalizeUsername(username),
+        ...(after && identity
+          ? [after[0], after[0], identity[0], identity[0], identity[1]]
+          : []),
+      ],
     );
-    const page = socialPage(rows, 20, cursor, (row) => {
-      const review = JSON.parse(row.review_json) as VideoReview;
-      return [
-        review.updated_at,
-        JSON.stringify([review.title_norm, review.year]),
-      ];
-    });
+    const items = (
+      await this.enrichReviews(rows.slice(0, MY_REVIEWS_PAGE_SIZE), viewer)
+    ).map(publicReview);
+    const last = items.at(-1);
     return {
-      items: (await this.enrichReviews(page.items, viewer)).map(publicReview),
-      nextCursor: page.nextCursor,
+      items,
+      nextCursor:
+        rows.length > MY_REVIEWS_PAGE_SIZE && last
+          ? socialCursor([
+              last.updated_at,
+              JSON.stringify([last.title_norm, last.year]),
+            ])
+          : null,
     };
   }
   async setVideoReviewLike(
@@ -405,100 +633,234 @@ export class ReviewSocialStorage {
     );
   }
   async getReviewReportPage(cursor?: string): Promise<AdminReviewReportPage> {
-    const rows = await this.sql.rows<
-      VideoReviewRow & {
-        reporter: string;
+    const after = parseSocialCursor(cursor);
+    let identity: string[] | null = null;
+    if (after) {
+      try {
+        const value = JSON.parse(after[1]);
+        if (
+          !Array.isArray(value) ||
+          value.length !== 4 ||
+          value[0] !== 'reports-v2' ||
+          value.slice(1).some((part: unknown) => typeof part !== 'string')
+        )
+          throw new Error();
+        identity = value.slice(1);
+      } catch {
+        throw new ReviewValidationError('举报分页已更新，请刷新列表');
+      }
+    }
+    const from =
+      'FROM video_review_reports r JOIN video_reviews v ON v.username = r.author AND v.title_norm = r.title_norm AND v.year = r.year WHERE v.is_public = 1';
+    const grouped = `SELECT r.author, r.title_norm, r.year, COUNT(*) AS report_count, MAX(r.created_at) AS latest_reported_at,
+      ${REVIEW_REPORT_REASONS.map((reason) => `SUM(CASE WHEN r.reason = '${reason}' THEN 1 ELSE 0 END) AS ${reason}`).join(', ')}
+      ${from} GROUP BY r.author, r.title_norm, r.year`;
+    const [total] = await this.sql.rows<{ count: number }>(
+      `SELECT COUNT(*) AS count FROM (SELECT r.author, r.title_norm, r.year ${from} GROUP BY r.author, r.title_norm, r.year) pending`,
+    );
+    type GroupRow = VideoReviewRow & {
+      author: string;
+      title_norm: string;
+      year: string;
+      report_count: number;
+      latest_reported_at: number;
+    } & Record<ReviewReportReason, number>;
+    const groups = await this.sql.rows<GroupRow>(
+      `SELECT g.*, v.username, v.review_json, p.profile_id, p.nickname, p.avatar_seed
+       FROM (${grouped}) g JOIN video_reviews v ON v.username = g.author AND v.title_norm = g.title_norm AND v.year = g.year
+       JOIN user_profiles p ON p.username = g.author
+       WHERE v.is_public = 1 ${after ? 'AND (g.latest_reported_at < ? OR (g.latest_reported_at = ? AND (g.author, g.title_norm, g.year) < (?, ?, ?)))' : ''}
+       ORDER BY g.latest_reported_at DESC, g.author DESC, g.title_norm DESC, g.year DESC LIMIT 31`,
+      after && identity ? [after[0], after[0], ...identity] : [],
+    );
+    const page = groups.slice(0, 30);
+    const key = (row: { author: string; title_norm: string; year: string }) =>
+      JSON.stringify([row.author, row.title_norm, row.year]);
+    const items: AdminReviewReportPage['items'] = page.map((row) => ({
+      review: { ...publicReview(row), username: row.username },
+      reportCount: Number(row.report_count),
+      reasons: Object.fromEntries(
+        REVIEW_REPORT_REASONS.filter((reason) => Number(row[reason]) > 0).map(
+          (reason) => [reason, Number(row[reason])],
+        ),
+      ),
+      reports: [],
+      latestReportedAt: Number(row.latest_reported_at),
+    }));
+    if (page.length) {
+      const targets = page
+        .map(() => '(author = ? AND title_norm = ? AND year = ?)')
+        .join(' OR ');
+      const params = page.flatMap((row) => [
+        row.author,
+        row.title_norm,
+        row.year,
+      ]);
+      const likes = await this.sql.rows<{
+        author: string;
+        title_norm: string;
+        year: string;
+        count: number;
+      }>(
+        `SELECT author, title_norm, year, COUNT(*) AS count FROM video_review_likes WHERE ${targets} GROUP BY author, title_norm, year`,
+        params,
+      );
+      const reports = await this.sql.rows<{
+        author: string;
+        title_norm: string;
+        year: string;
         reason: ReviewReportReason;
         detail: string;
         created_at: number;
-      }
-    >(
-      'SELECT v.username, v.review_json, r.reporter, r.reason, r.detail, r.created_at FROM video_review_reports r JOIN video_reviews v ON v.username = r.author AND v.title_norm = r.title_norm AND v.year = r.year WHERE v.is_public = 1 ORDER BY r.created_at DESC',
-    );
-    const groups = new Map<string, AdminReviewReportPage['items'][number]>();
-    for (const row of rows) {
-      const parsed = JSON.parse(row.review_json) as VideoReview;
-      const key = JSON.stringify([
-        row.username,
-        parsed.title_norm,
-        parsed.year,
-      ]);
-      let group = groups.get(key);
-      if (!group) {
-        group = {
-          review: {
-            ...publicReview((await this.enrichReviews([row]))[0]),
-            username: row.username,
-          },
-          reportCount: 0,
-          reasons: {},
-          reports: [],
-          latestReportedAt: Number(row.created_at),
-        };
-        groups.set(key, group);
-      }
-      group.reportCount++;
-      group.reasons[row.reason] = (group.reasons[row.reason] ?? 0) + 1;
-      if (group.reports.length < 5) {
-        const p = await this.ensureUserProfile(row.reporter);
-        group.reports.push({
+        profile_id: string;
+        nickname: string | null;
+        avatar_seed: string | null;
+      }>(
+        `SELECT ranked.*, p.profile_id, p.nickname, p.avatar_seed FROM (
+          SELECT r.*, ROW_NUMBER() OVER (PARTITION BY author, title_norm, year ORDER BY created_at DESC, reporter DESC) AS report_rank
+          FROM video_review_reports r WHERE ${targets}
+        ) ranked JOIN user_profiles p ON p.username = ranked.reporter WHERE report_rank <= 5
+        ORDER BY created_at DESC, reporter DESC`,
+        params,
+      );
+      const indexes = new Map(page.map((row, index) => [key(row), index]));
+      for (const row of likes)
+        items[indexes.get(key(row))!].review.likeCount = Number(row.count);
+      for (const row of reports)
+        items[indexes.get(key(row))!].reports.push({
           reporter: {
-            profileId: p.profile_id,
-            nickname: p.nickname,
-            avatarSeed: p.avatar_seed,
+            profileId: row.profile_id,
+            nickname: row.nickname,
+            avatarSeed: row.avatar_seed,
           },
           reason: row.reason,
           detail: row.detail,
           created_at: Number(row.created_at),
         });
-      }
     }
+    const last = page.at(-1);
     return {
-      ...socialPage([...groups.values()], 30, cursor, (item) => [
-        item.latestReportedAt,
-        JSON.stringify([
-          item.review.username,
-          item.review.title_norm,
-          item.review.year,
-        ]),
-      ]),
-      pendingTotal: groups.size,
+      items,
+      pendingTotal: Number(total.count),
+      nextCursor:
+        groups.length > 30 && last
+          ? socialCursor([
+              Number(last.latest_reported_at),
+              JSON.stringify([
+                'reports-v2',
+                last.author,
+                last.title_norm,
+                last.year,
+              ]),
+            ])
+          : null,
     };
   }
+  private followReviewWhere(
+    username: string,
+    readAt: number,
+    readIds: string[],
+    now: number,
+  ) {
+    const ids = readIds
+      .map(parseFollowReviewMessageId)
+      .filter((id) => id !== null);
+    return {
+      from: `FROM user_follows f JOIN video_reviews v ON v.username = f.followee JOIN user_profiles p ON p.username = v.username
+        WHERE f.follower = ? AND v.is_public = 1 AND v.updated_at > f.created_at AND v.updated_at > ?
+        ${ids.map(() => 'AND NOT (p.profile_id = ? AND v.title_norm = ? AND v.year = ? AND v.updated_at = ?)').join(' ')}`,
+      params: [
+        normalizeUsername(username),
+        Math.max(readAt, now - 30 * 86400000),
+        ...ids.flat(),
+      ],
+    };
+  }
+
+  async getFollowReviewMessageCount(
+    username: string,
+    readAt: number,
+    readIds: string[],
+    now: number,
+  ): Promise<number> {
+    const { from, params } = this.followReviewWhere(
+      username,
+      readAt,
+      readIds,
+      now,
+    );
+    const [row] = await this.sql.rows<{ count: number }>(
+      `SELECT COUNT(*) AS count ${from}`,
+      params,
+    );
+    return Number(row.count);
+  }
+
   async getFollowReviewMessages(
     username: string,
     readAt: number,
     readIds: string[],
     now: number,
+    query: FollowReviewQuery = {},
   ): Promise<FollowReviewUserMessage[]> {
+    const { from, params } = this.followReviewWhere(
+      username,
+      readAt,
+      readIds,
+      now,
+    );
+    let filter = '';
+    if (query.id) {
+      const identity = parseFollowReviewMessageId(query.id);
+      if (!identity) return [];
+      filter +=
+        ' AND p.profile_id = ? AND v.title_norm = ? AND v.year = ? AND v.updated_at = ?';
+      params.push(...identity);
+    }
+    if (query.before) {
+      const { createdAt, key } = query.before;
+      const identity = parseFollowReviewSortKey(key);
+      if (identity) {
+        filter +=
+          ' AND (v.updated_at < ? OR (v.updated_at = ? AND (p.profile_id, v.title_norm, v.year) < (?, ?, ?)))';
+        params.push(createdAt, createdAt, ...identity);
+      } else {
+        filter +=
+          key > 'follow-review:'
+            ? ' AND v.updated_at <= ?'
+            : ' AND v.updated_at < ?';
+        params.push(createdAt);
+      }
+    }
+    const limit = Math.max(1, Math.min(201, Math.floor(query.limit ?? 30)));
     const rows = await this.sql.rows<
       VideoReviewRow & { profile_id: string; nickname: string | null }
     >(
-      'SELECT v.username, v.review_json, p.profile_id, p.nickname, p.avatar_seed FROM user_follows f JOIN video_reviews v ON v.username = f.followee JOIN user_profiles p ON p.username = v.username WHERE f.follower = ? AND v.is_public = 1 AND v.updated_at > f.created_at AND v.updated_at > ? ORDER BY v.updated_at DESC',
-      [normalizeUsername(username), Math.max(readAt, now - 30 * 86400000)],
+      `SELECT v.username, v.review_json, p.profile_id, p.nickname, p.avatar_seed ${from}${filter}
+       ORDER BY v.updated_at DESC, p.profile_id DESC, v.title_norm DESC, v.year DESC LIMIT ?`,
+      [...params, limit],
     );
-    const read = new Set(readIds);
-    return rows.flatMap((row) => {
+    return rows.map((row) => {
       const r = JSON.parse(row.review_json) as VideoReview;
-      const id = `follow-review:${socialCursor([row.profile_id, r.title_norm, r.year, r.updated_at])}`;
-      return read.has(id)
-        ? []
-        : [
-            {
-              id,
-              type: 'follow-review' as const,
-              author: {
-                profileId: row.profile_id,
-                nickname: row.nickname,
-                avatarSeed: row.avatar_seed ?? null,
-              },
-              title: r.title,
-              year: r.year,
-              cover: r.cover,
-              rating: r.rating,
-              createdAt: r.updated_at,
-            },
-          ];
+      return {
+        id: followReviewMessageId(
+          row.profile_id,
+          r.title_norm,
+          r.year,
+          r.updated_at,
+        ),
+        type: 'follow-review' as const,
+        author: {
+          profileId: row.profile_id,
+          nickname: row.nickname,
+          avatarSeed: row.avatar_seed ?? null,
+        },
+        title: r.title,
+        year: r.year,
+        cover: r.cover,
+        rating: r.rating,
+        createdAt: r.updated_at,
+      };
     });
   }
   async getUserSocialData(

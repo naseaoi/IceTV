@@ -1,3 +1,4 @@
+import { parseFollowReviewMessageId } from '@/lib/follow-review-identity';
 import type { UserMessageState, UserMessageStateUpdate } from '@/lib/types';
 
 export function mergeUserMessageState(
@@ -42,7 +43,18 @@ export function mergeUserMessageState(
     !ids.includes(update.followReview.id)
   )
     ids.push(update.followReview.id);
+  if (ids.length > 200) {
+    const times = ids
+      .map((id) => parseFollowReviewMessageId(id)?.[3] ?? 0)
+      .sort((a, b) => a - b);
+    // 有界已读集压缩为时间水位；同毫秒的整批一并确认，旧已读项不会复活。
+    next.followReviewReadAt = Math.max(watermark, times[times.length - 201]);
+    ids = ids.filter(
+      (id) =>
+        (parseFollowReviewMessageId(id)?.[3] ?? 0) > next.followReviewReadAt!,
+    );
+  }
   if (update.followReview || update.followReviewReadAt !== undefined)
-    next.followReviewReadIds = ids.slice(-200);
+    next.followReviewReadIds = ids;
   return next;
 }

@@ -1,7 +1,7 @@
 'use client';
 
 import { useRouter } from 'next/navigation';
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useState } from 'react';
 
 import { useRuntimeConfig } from '@/components/RuntimeConfigProvider';
 import {
@@ -24,6 +24,27 @@ import { savePlayIntent } from '@/lib/play-intent';
 import type { PlaybackSession } from '@/lib/types';
 import { canUseNetworkPrefetch, warmupForPlayback } from '@/lib/video-prefetch';
 
+const useIsomorphicLayoutEffect =
+  typeof window !== 'undefined' ? useLayoutEffect : useEffect;
+
+// 只读已有快照；路由 loading 与客户端占位共用，不为占位发起请求。
+export function usePlaybackHistoryPlaceholder() {
+  const runtimeConfig = useRuntimeConfig();
+  const [snapshot, setSnapshot] = useState<PlaybackHistoryResponse | null>(
+    null,
+  );
+  useIsomorphicLayoutEffect(() => {
+    setSnapshot(getCachedPlaybackHistorySnapshot());
+  }, []);
+  return {
+    snapshot,
+    count: Math.max(
+      1,
+      Math.floor(runtimeConfig.PLAYBACK_HISTORY_PAGE_SIZE || 10),
+    ),
+  };
+}
+
 export function usePlaybackHistory() {
   const runtimeConfig = useRuntimeConfig();
   const historyPageSize = Math.max(
@@ -34,24 +55,21 @@ export function usePlaybackHistory() {
     historyPageSize,
     Math.floor(runtimeConfig.PLAYBACK_HISTORY_LIMIT || 500),
   );
-  const cachedHistory = getCachedPlaybackHistorySnapshot();
-  const [items, setItems] = useState<PlaybackSession[]>(() =>
-    dedupePlaybackSessionsByTitle(
-      filterPlaybackHistorySessions(cachedHistory?.items || []),
-      {
-        mergeWatchSeconds: true,
-      },
-    ),
-  );
-  const [nextCursor, setNextCursor] = useState<number | null>(
-    () => cachedHistory?.nextCursor || null,
-  );
-  const [loading, setLoading] = useState(() => !cachedHistory);
+  const [items, setItems] = useState<PlaybackSession[]>([]);
+  const [nextCursor, setNextCursor] = useState<number | null>(null);
+  const [loading, setLoading] = useState(true);
+  useIsomorphicLayoutEffect(() => {
+    const cachedHistory = getCachedPlaybackHistorySnapshot();
+    if (!cachedHistory) return;
+    setItems(cachedHistory.items);
+    setNextCursor(cachedHistory.nextCursor);
+    setLoading(false);
+  }, []);
   const [loadingMore, setLoadingMore] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [searchText, setSearchText] = useState('');
   const [searchKeyword, setSearchKeyword] = useState('');
-  const skeletonCount = Math.min(6, historyPageSize, historyLimit);
+  const skeletonCount = Math.min(historyPageSize, historyLimit);
 
   useEffect(() => {
     const timeoutId = window.setTimeout(() => {

@@ -228,20 +228,36 @@ describe('sqlite storage contract', () => {
 
   it('原子占用邀请码名额，超出上限即失败', async () => {
     const storage = new LocalSqliteStorage(':memory:');
+    await storage.setAdminConfig({ UserConfig: {} } as AdminConfig);
+    await storage.createInviteCode({
+      code: 'CODE',
+      createdAt: 1,
+      expiresAt: Date.now() + 86400000,
+      createdBy: 'owner',
+      maxUses: 2,
+      usedCount: 0,
+    });
 
-    await expect(storage.reserveInviteCodeUse('CODE', 2)).resolves.toBe(true);
-    await expect(storage.reserveInviteCodeUse('CODE', 2)).resolves.toBe(true);
-    await expect(storage.reserveInviteCodeUse('CODE', 2)).resolves.toBe(false);
+    await expect(storage.reserveInviteCodeUse('CODE')).resolves.toBe(true);
+    await expect(storage.reserveInviteCodeUse('CODE')).resolves.toBe(true);
+    await expect(storage.reserveInviteCodeUse('CODE')).resolves.toBe(false);
     await expect(storage.getAllInviteCodeUsage()).resolves.toEqual({ CODE: 2 });
   });
 
   it('并发占用邀请码不会超发', async () => {
     const storage = new LocalSqliteStorage(':memory:');
+    await storage.setAdminConfig({ UserConfig: {} } as AdminConfig);
+    await storage.createInviteCode({
+      code: 'RUSH',
+      createdAt: 1,
+      expiresAt: Date.now() + 86400000,
+      createdBy: 'owner',
+      maxUses: 5,
+      usedCount: 0,
+    });
 
     const results = await Promise.all(
-      Array.from({ length: 20 }, () =>
-        storage.reserveInviteCodeUse('RUSH', 5, 0),
-      ),
+      Array.from({ length: 20 }, () => storage.reserveInviteCodeUse('RUSH')),
     );
 
     expect(results.filter(Boolean)).toHaveLength(5);
@@ -250,35 +266,69 @@ describe('sqlite storage contract', () => {
 
   it('maxUses 为 0 表示不限次数', async () => {
     const storage = new LocalSqliteStorage(':memory:');
+    await storage.setAdminConfig({ UserConfig: {} } as AdminConfig);
+    await storage.createInviteCode({
+      code: 'FREE',
+      createdAt: 1,
+      expiresAt: Date.now() + 86400000,
+      createdBy: 'owner',
+      maxUses: 0,
+      usedCount: 0,
+    });
 
-    await expect(storage.reserveInviteCodeUse('FREE', 0)).resolves.toBe(true);
-    await expect(storage.reserveInviteCodeUse('FREE', 0)).resolves.toBe(true);
+    await expect(storage.reserveInviteCodeUse('FREE')).resolves.toBe(true);
+    await expect(storage.reserveInviteCodeUse('FREE')).resolves.toBe(true);
     await expect(storage.getAllInviteCodeUsage()).resolves.toEqual({ FREE: 2 });
   });
 
   it('首次占用以配置里的历史用量为种子', async () => {
     const storage = new LocalSqliteStorage(':memory:');
+    await storage.setAdminConfig({ UserConfig: {} } as AdminConfig);
+    await storage.createInviteCode({
+      code: 'OLD',
+      createdAt: 1,
+      expiresAt: Date.now() + 86400000,
+      createdBy: 'owner',
+      maxUses: 3,
+      usedCount: 2,
+    });
 
-    await expect(storage.reserveInviteCodeUse('OLD', 3, 2)).resolves.toBe(true);
-    await expect(storage.reserveInviteCodeUse('OLD', 3, 2)).resolves.toBe(
-      false,
-    );
+    await expect(storage.reserveInviteCodeUse('OLD')).resolves.toBe(true);
+    await expect(storage.reserveInviteCodeUse('OLD')).resolves.toBe(false);
     await expect(storage.getAllInviteCodeUsage()).resolves.toEqual({ OLD: 3 });
   });
 
   it('种子值只在建行时生效，不会重复累加', async () => {
     const storage = new LocalSqliteStorage(':memory:');
+    await storage.setAdminConfig({ UserConfig: {} } as AdminConfig);
+    await storage.createInviteCode({
+      code: 'SEED',
+      createdAt: 1,
+      expiresAt: Date.now() + 86400000,
+      createdBy: 'owner',
+      maxUses: 10,
+      usedCount: 1,
+    });
 
-    await storage.reserveInviteCodeUse('SEED', 10, 1);
-    await storage.reserveInviteCodeUse('SEED', 10, 1);
+    await storage.reserveInviteCodeUse('SEED');
+    await storage.reserveInviteCodeUse('SEED');
 
     await expect(storage.getAllInviteCodeUsage()).resolves.toEqual({ SEED: 3 });
   });
 
   it('回滚邀请码次数且不会减到负数', async () => {
     const storage = new LocalSqliteStorage(':memory:');
+    await storage.setAdminConfig({ UserConfig: {} } as AdminConfig);
+    await storage.createInviteCode({
+      code: 'CODE',
+      createdAt: 1,
+      expiresAt: Date.now() + 86400000,
+      createdBy: 'owner',
+      maxUses: 2,
+      usedCount: 0,
+    });
 
-    await storage.reserveInviteCodeUse('CODE', 2);
+    await storage.reserveInviteCodeUse('CODE');
     await storage.releaseInviteCodeUse('CODE');
     await expect(storage.getAllInviteCodeUsage()).resolves.toEqual({ CODE: 0 });
 
@@ -297,12 +347,28 @@ describe('sqlite storage contract', () => {
 
   it('删除邀请码用量后重建从零开始', async () => {
     const storage = new LocalSqliteStorage(':memory:');
+    await storage.setAdminConfig({ UserConfig: {} } as AdminConfig);
+    await storage.createInviteCode({
+      code: 'CODE',
+      createdAt: 1,
+      expiresAt: Date.now() + 86400000,
+      createdBy: 'owner',
+      maxUses: 1,
+      usedCount: 0,
+    });
 
-    await storage.reserveInviteCodeUse('CODE', 1);
+    await storage.reserveInviteCodeUse('CODE');
     await storage.deleteInviteCodeUsage('CODE');
 
     await expect(storage.getAllInviteCodeUsage()).resolves.toEqual({});
-    await expect(storage.reserveInviteCodeUse('CODE', 1)).resolves.toBe(true);
+    await storage.createInviteCode({
+      code: 'CODE',
+      createdAt: 2,
+      expiresAt: Date.now() + 86400000,
+      createdBy: 'owner',
+      maxUses: 1,
+    });
+    await expect(storage.reserveInviteCodeUse('CODE')).resolves.toBe(true);
   });
 
   it('searches playback sessions before applying the page limit', async () => {
@@ -407,6 +473,47 @@ describe('sqlite storage contract', () => {
     });
     expect(secondPage.items.map((item) => item.key)).toEqual(['source+old']);
     expect(secondPage.nextCursor).toBeNull();
+  });
+
+  it('filters live favorites before paging and traverses tied timestamps without gaps', async () => {
+    const storage = new LocalSqliteStorage(':memory:');
+    for (const [key, origin] of [
+      ['source+z', 'live'],
+      ['source+e', 'vod'],
+      ['source+d', 'live'],
+      ['source+c', undefined],
+      ['source+b', 'vod'],
+      ['source+a', 'live'],
+    ] as const) {
+      await storage.setFavorite('public-user', key, {
+        ...favorite,
+        origin,
+        save_time: 1000,
+      });
+    }
+    const first = await storage.getFavoritePage(
+      'public-user',
+      2,
+      undefined,
+      undefined,
+      false,
+    );
+    const second = await storage.getFavoritePage(
+      'public-user',
+      2,
+      1000,
+      'source+c',
+      false,
+    );
+    expect(first.items.map((item) => item.key)).toEqual([
+      'source+e',
+      'source+c',
+    ]);
+    expect(first.total).toBe(3);
+    expect(first.nextCursor).toBe('1000|source+c');
+    expect(second.items.map((item) => item.key)).toEqual(['source+b']);
+    expect(second.nextCursor).toBeNull();
+    expect((await storage.getFavoritePage('public-user', 10)).total).toBe(6);
   });
 
   it('按主键游标分页读取过期元数据并排除新鲜项与直播收藏', async () => {
@@ -592,10 +699,11 @@ describe('sqlite storage contract', () => {
       inviteCodeUsage: { 'invite-a': 3 },
     });
 
-    await expect(storage.getAllInviteCodeUsage()).resolves.toEqual({
-      'invite-a': 3,
-    });
-    await expect(storage.getAdminConfig()).resolves.toEqual(adminConfig);
+    // 没有对应邀请码定义的旧用量行不导入。
+    await expect(storage.getAllInviteCodeUsage()).resolves.toEqual({});
+    const expectedConfig = JSON.parse(JSON.stringify(adminConfig));
+    delete expectedConfig.UserConfig.Users;
+    await expect(storage.getAdminConfig()).resolves.toEqual(expectedConfig);
     await expect(storage.getAllUsers()).resolves.toEqual(['demo-user']);
     await expect(storage.getAllUsersWithPasswords()).resolves.toEqual({
       'demo-user': passwordHash,

@@ -1,7 +1,11 @@
-import type { ReactNode } from 'react';
+'use client';
+
+import { type ReactNode, useEffect, useLayoutEffect, useState } from 'react';
 
 import HomePosterCardSkeleton from '@/components/HomePosterCardSkeleton';
 import ScrollableRow from '@/components/ScrollableRow';
+import { getCachedPlaybackPeriodSnapshot } from '@/features/playback-stats/lib/client';
+import { PLAYBACK_TOP_WORKS_LIMIT } from '@/features/playback-stats/types';
 
 // 桌面端观看统计与常看并排，统计卡拉伸到与海报区同高
 export const STATS_LAYOUT_CLASS =
@@ -52,7 +56,15 @@ function MetricSkeleton() {
   );
 }
 
+const useIsomorphicLayoutEffect =
+  typeof window !== 'undefined' ? useLayoutEffect : useEffect;
+
 export function PlaybackStatsSkeleton() {
+  const [count, setCount] = useState(PLAYBACK_TOP_WORKS_LIMIT);
+  useIsomorphicLayoutEffect(() => {
+    const cached = getCachedPlaybackPeriodSnapshot('week');
+    if (cached) setCount(cached.topWorks.length);
+  }, []);
   return (
     <div className={STATS_LAYOUT_CLASS}>
       <section className={STATS_COLUMN_CLASS}>
@@ -83,11 +95,13 @@ export function PlaybackStatsSkeleton() {
         <StatsHeading title='常看'>
           <div className='skeleton h-7 w-28 rounded-full' />
         </StatsHeading>
-        <ScrollableRow>
-          {Array.from({ length: 4 }, (_, index) => (
-            <HomePosterCardSkeleton key={index} subtitle />
-          ))}
-        </ScrollableRow>
+        <div className={count === 0 ? 'invisible' : undefined}>
+          <ScrollableRow>
+            {Array.from({ length: Math.max(1, count) }, (_, index) => (
+              <HomePosterCardSkeleton key={index} subtitle />
+            ))}
+          </ScrollableRow>
+        </div>
       </section>
     </div>
   );

@@ -8,7 +8,6 @@ import {
   mergePlayRecordUpdateBaseline,
   normalizePlayRecordLimit,
   parsePlayRecordCursor,
-  selectRecentPlayRecords,
 } from '@/lib/play-records';
 import { PlayRecord } from '@/lib/types';
 import { parseStorageKey } from '@/lib/utils';
@@ -34,15 +33,16 @@ export async function GET(request: NextRequest) {
         headers: NO_STORE_HEADERS,
       });
     }
-    const records = await db.getAllPlayRecords(guardResult.username);
     const limitParam = searchParams.get('limit');
     const responseRecords =
       limitParam === null
-        ? records
-        : selectRecentPlayRecords(
-            records,
-            normalizePlayRecordLimit(limitParam),
-          );
+        ? await db.getAllPlayRecords(guardResult.username)
+        : (
+            await db.getPlayRecordPage(
+              guardResult.username,
+              normalizePlayRecordLimit(limitParam),
+            )
+          ).items;
     return NextResponse.json(responseRecords, {
       status: 200,
       headers: NO_STORE_HEADERS,
