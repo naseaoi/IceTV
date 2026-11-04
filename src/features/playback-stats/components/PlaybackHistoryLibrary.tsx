@@ -164,6 +164,9 @@ export function PlaybackHistoryLibrary() {
                   selected={selectedIds.has(session.id)}
                   onActivate={editing ? toggleSelected : playHistoryItem}
                   onPrefetch={prefetchPlayPage}
+                  onDelete={async (item) => {
+                    await removeSessions([item.id]);
+                  }}
                 />
               ))}
             </div>

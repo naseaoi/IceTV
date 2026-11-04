@@ -25,6 +25,17 @@ jest.mock('@/components/CoverImage', () => ({
   __esModule: true,
   default: () => null,
 }));
+const showActionSheet = jest.fn();
+jest.mock('@/components/CardInteractionProvider', () => ({
+  useCardInteractionManager: () => ({
+    showActionSheet,
+    hideActionSheet: jest.fn(),
+    showConfirm: jest.fn(),
+    ensureFavoritesLoaded: () => Promise.resolve(),
+    getFavoriteStatus: () => false,
+  }),
+  useFavoriteStatus: () => false,
+}));
 jest.mock('@/components/ScrollableRow', () => ({
   __esModule: true,
   default: ({ children }: { children: React.ReactNode }) => <>{children}</>,
@@ -158,4 +169,33 @@ it('无缓存且加载失败时给出提示', async () => {
     render(<PlaybackStatsPanel />);
   });
   expect(screen.getByText('统计加载失败，请稍后重试')).toBeInTheDocument();
+});
+
+it('常看海报右键在光标处打开操作菜单', async () => {
+  jest
+    .mocked(getPlaybackPeriodStats)
+    .mockResolvedValue(stats('week', [work('碧蓝之海', 3000)]));
+  await act(async () => {
+    render(<PlaybackStatsPanel />);
+  });
+
+  await act(async () => {
+    fireEvent.contextMenu(
+      screen.getByRole('button', { name: '播放 碧蓝之海' }),
+      {
+        clientX: 40,
+        clientY: 60,
+      },
+    );
+  });
+  const [, payload] = showActionSheet.mock.calls[0];
+  expect(payload.anchorRect).toEqual({
+    top: 60,
+    left: 40,
+    width: 0,
+    height: 0,
+  });
+  expect(
+    payload.actions.map((action: { label: string }) => action.label),
+  ).toEqual(['播放', '收藏']);
 });

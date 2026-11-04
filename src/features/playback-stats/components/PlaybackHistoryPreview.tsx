@@ -34,7 +34,8 @@ export function PlaybackHistoryPreviewSkeleton({ count }: { count?: number }) {
 }
 
 export function PlaybackHistoryPreview() {
-  const { items, loading, skeletonCount } = usePlaybackHistory();
+  const { items, loading, skeletonCount, removeSessions } =
+    usePlaybackHistory();
   const { playHistoryItem, prefetchPlayPage } = usePlayHistorySession();
 
   if (loading) {
@@ -57,6 +58,9 @@ export function PlaybackHistoryPreview() {
             session={session}
             onActivate={playHistoryItem}
             onPrefetch={prefetchPlayPage}
+            onDelete={async (item) => {
+              await removeSessions([item.id]);
+            }}
           />
         </div>
       ))}

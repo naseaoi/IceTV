@@ -3,7 +3,6 @@
 import { useRouter } from 'next/navigation';
 import { type ReactNode, useEffect, useLayoutEffect, useState } from 'react';
 
-import CoverImage from '@/components/CoverImage';
 import {
   HOME_POSTER_CARD_CLASS,
   POSTER_CARD_COVER_CLASS,
@@ -11,6 +10,7 @@ import {
   POSTER_CARD_TITLE_ROW_CLASS,
 } from '@/components/poster-card-layout';
 import ScrollableRow from '@/components/ScrollableRow';
+import { PlaybackPosterCard } from '@/features/playback-stats/components/PlaybackPosterCard';
 import {
   PlaybackStatsSkeleton,
   STATS_CARD_CLASS,
@@ -169,35 +169,18 @@ function TopWorkCard({
   onOpen: (work: PlaybackTopWork) => void;
 }) {
   return (
-    <button
-      type='button'
-      onClick={() => onOpen(work)}
-      aria-label={`播放 ${work.title}`}
-      className='group block w-full text-left focus:outline-none'
-    >
-      <div
-        className={`${POSTER_CARD_COVER_CLASS} relative overflow-hidden bg-gray-200 ring-offset-2 ring-offset-gray-50 group-focus-visible:ring-2 group-focus-visible:ring-brand-400 dark:bg-gray-800 dark:ring-offset-gray-950`}
-      >
-        <CoverImage
-          src={work.cover || ''}
-          alt={work.title}
-          sizes='(min-width: 640px) 160px, 25vw'
-        />
-        <span className='absolute left-0 top-0 flex h-6 min-w-6 items-center justify-center rounded-br-lg bg-black/55 px-1.5 text-xs font-semibold tabular-nums text-white backdrop-blur-sm'>
-          {rank}
-        </span>
-      </div>
-      <p
-        className={`${POSTER_CARD_TITLE_ROW_CLASS} truncate font-medium text-gray-800 dark:text-gray-200`}
-      >
-        {work.title}
-      </p>
-      <p
-        className={`${POSTER_CARD_SUBTITLE_ROW_CLASS} truncate text-gray-500 dark:text-gray-400`}
-      >
-        {formatDuration(work.watchSeconds)}
-      </p>
-    </button>
+    <PlaybackPosterCard
+      title={work.title}
+      cover={work.cover || ''}
+      coverSizes='(min-width: 640px) 160px, 25vw'
+      source={work.source}
+      videoId={work.videoId}
+      year={work.year}
+      rank={rank}
+      subtitle={formatDuration(work.watchSeconds)}
+      ariaLabel={`播放 ${work.title}`}
+      onPlay={() => onOpen(work)}
+    />
   );
 }
 
