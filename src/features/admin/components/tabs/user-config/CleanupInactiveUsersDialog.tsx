@@ -1,7 +1,5 @@
 'use client';
 
-import { ShieldCheck } from 'lucide-react';
-
 import AdminDialog from '@/features/admin/components/AdminDialog';
 import { buttonStyles, inputStyles } from '@/features/admin/lib/buttonStyles';
 import { formatLastActiveTooltip } from '@/features/admin/lib/userActivity';
@@ -41,13 +39,13 @@ export function CleanupInactiveUsersDialog({
       isOpen={isOpen}
       title='清理不活跃用户'
       onClose={onClose}
-      panelClassName='max-w-2xl'
+      panelClassName='max-w-2xl max-h-[80vh] overflow-y-auto'
     >
       <div className='space-y-5'>
-        <div className='flex flex-wrap items-center gap-x-3 gap-y-3 rounded-xl border border-gray-200 bg-gray-50 p-4 dark:border-gray-700 dark:bg-gray-800/50'>
+        <div className='flex flex-wrap items-center gap-3'>
           <label
             htmlFor='cleanup-inactive-days'
-            className='text-sm text-gray-700 dark:text-gray-300'
+            className='text-sm font-medium text-gray-900 dark:text-gray-100'
           >
             不活跃天数超过
           </label>
@@ -64,18 +62,11 @@ export function CleanupInactiveUsersDialog({
           <button
             onClick={onScan}
             disabled={isScanning}
-            className={`ml-auto px-5 py-2 text-sm font-medium ${
-              isScanning ? buttonStyles.disabled : buttonStyles.primary
-            }`}
+            className={`${buttonStyles.primary} disabled:cursor-not-allowed disabled:opacity-50`}
           >
             {isScanning ? '筛选中...' : '筛选'}
           </button>
         </div>
-
-        <p className='flex items-center gap-2 text-xs text-gray-500 dark:text-gray-400'>
-          <ShieldCheck className='h-4 w-4 shrink-0 text-brand-600 dark:text-brand-500' />
-          只清理普通用户，站长与管理员不受影响
-        </p>
 
         {candidates &&
           (hasCandidates ? (
@@ -87,7 +78,7 @@ export function CleanupInactiveUsersDialog({
                 </strong>{' '}
                 个用户，确认后永久删除
               </p>
-              <div className='max-h-64 overflow-y-auto rounded-xl border border-gray-200 dark:border-gray-700'>
+              <div className='max-h-64 overflow-auto rounded-xl ring-1 ring-gray-200 dark:ring-white/[0.06]'>
                 <table className='w-full text-sm'>
                   <thead className='sticky top-0 bg-gray-50 dark:bg-gray-900'>
                     <tr>
@@ -127,20 +118,13 @@ export function CleanupInactiveUsersDialog({
       </div>
 
       <div className='mt-6 flex justify-end gap-3'>
-        <button
-          onClick={onClose}
-          className={`px-6 py-2.5 text-sm font-medium ${buttonStyles.secondary}`}
-        >
+        <button onClick={onClose} className={buttonStyles.outline}>
           取消
         </button>
         <button
           onClick={onConfirm}
           disabled={!hasCandidates || isDeleting}
-          className={`px-6 py-2.5 text-sm font-medium ${
-            !hasCandidates || isDeleting
-              ? buttonStyles.disabled
-              : buttonStyles.danger
-          }`}
+          className={`${buttonStyles.danger} disabled:cursor-not-allowed disabled:opacity-50`}
         >
           {isDeleting
             ? '删除中...'

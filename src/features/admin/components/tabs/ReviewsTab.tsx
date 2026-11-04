@@ -1,6 +1,6 @@
 'use client';
 
-import { Search, Trash2 } from 'lucide-react';
+import { Trash2 } from 'lucide-react';
 import { useCallback, useEffect, useRef, useState } from 'react';
 
 import CoverImage from '@/components/CoverImage';
@@ -9,13 +9,14 @@ import AlertModal from '@/components/modals/AlertModal';
 import ConfirmModal from '@/components/modals/ConfirmModal';
 import RatingStars from '@/components/RatingStars';
 import Spinner from '@/components/Spinner';
+import AdminSearchField from '@/features/admin/components/AdminSearchField';
 import ReviewReports from '@/features/admin/components/tabs/ReviewReports';
 import {
   adminDelete,
   adminGet,
   getAdminReviewReports,
 } from '@/features/admin/lib/api';
-import { buttonStyles, inputStyles } from '@/features/admin/lib/buttonStyles';
+import { buttonStyles } from '@/features/admin/lib/buttonStyles';
 import { showError } from '@/features/admin/lib/notifications';
 import { useAlertModal } from '@/hooks/useAlertModal';
 import { formatRating } from '@/lib/rating';
@@ -41,8 +42,7 @@ function ReviewContent({ content }: { content: string }) {
   );
 }
 
-function AllReviews() {
-  const [search, setSearch] = useState('');
+function AllReviews({ search }: { search: string }) {
   const [items, setItems] = useState<AdminVideoReview[]>([]);
   const [nextCursor, setNextCursor] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
@@ -148,31 +148,6 @@ function AllReviews() {
 
   return (
     <div className='space-y-6'>
-      <div className='flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between'>
-        <div>
-          <h2 className='text-lg font-semibold text-gray-900 dark:text-gray-100'>
-            评价管理
-          </h2>
-          <p className='mt-1 text-sm text-gray-500 dark:text-gray-400'>
-            管理用户公开的评分与评价
-          </p>
-        </div>
-        <div className='relative w-full sm:max-w-xs'>
-          <Search
-            aria-hidden='true'
-            className='pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400'
-          />
-          <input
-            type='search'
-            aria-label='搜索标题或用户名'
-            placeholder='搜索标题或用户名'
-            value={search}
-            onChange={(event) => setSearch(event.target.value)}
-            className={`w-full pl-9 text-sm ${inputStyles.withFocus}`}
-          />
-        </div>
-      </div>
-
       <div
         aria-busy={loading}
         className='overflow-hidden rounded-lg border border-gray-200 dark:border-gray-700'
@@ -289,6 +264,7 @@ function AllReviews() {
 
 export default function ReviewsTab() {
   const [tab, setTab] = useState<'all' | 'reports'>('all');
+  const [search, setSearch] = useState('');
   const [pendingTotal, setPendingTotal] = useState<number | null>(null);
   useEffect(() => {
     let active = true;
@@ -305,36 +281,45 @@ export default function ReviewsTab() {
   }, [tab]);
   return (
     <div className='space-y-5'>
-      <div
-        role='tablist'
-        aria-label='评价管理视图'
-        className='flex flex-wrap gap-2'
-      >
-        <button
-          type='button'
-          role='tab'
-          aria-selected={tab === 'all'}
-          className={
-            tab === 'all' ? buttonStyles.primary : buttonStyles.secondary
-          }
-          onClick={() => setTab('all')}
+      <div className='flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between'>
+        <div
+          role='tablist'
+          aria-label='评价管理视图'
+          className='inline-flex w-fit rounded-lg bg-gray-100 p-1 dark:bg-white/[0.06]'
         >
-          全部评价
-        </button>
-        <button
-          type='button'
-          role='tab'
-          aria-selected={tab === 'reports'}
-          className={
-            tab === 'reports' ? buttonStyles.primary : buttonStyles.secondary
-          }
-          onClick={() => setTab('reports')}
-        >
-          举报待处理 ({pendingTotal ?? '—'})
-        </button>
+          {(
+            [
+              ['all', '全部评价'],
+              ['reports', `举报待处理 (${pendingTotal ?? '—'})`],
+            ] as const
+          ).map(([id, label]) => (
+            <button
+              key={id}
+              type='button'
+              role='tab'
+              aria-selected={tab === id}
+              onClick={() => setTab(id)}
+              className={`h-7 rounded-md px-3 text-sm transition-colors ${
+                tab === id
+                  ? 'bg-white font-medium text-gray-900 shadow-sm dark:bg-gray-700 dark:text-gray-100'
+                  : 'text-gray-500 hover:text-gray-900 dark:text-gray-400 dark:hover:text-gray-100'
+              }`}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+        {tab === 'all' && (
+          <AdminSearchField
+            value={search}
+            onChange={setSearch}
+            label='搜索标题或用户名'
+            className='w-full sm:w-72'
+          />
+        )}
       </div>
       {tab === 'all' ? (
-        <AllReviews />
+        <AllReviews search={search} />
       ) : (
         <ReviewReports onCountChanged={setPendingTotal} />
       )}

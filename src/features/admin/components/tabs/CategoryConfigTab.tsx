@@ -18,11 +18,11 @@ import {
   SortableContext,
   verticalListSortingStrategy,
 } from '@dnd-kit/sortable';
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 
 import AlertModal from '@/components/modals/AlertModal';
 import ConfirmModal from '@/components/modals/ConfirmModal';
-import { ResizableTableHeader } from '@/features/admin/components/ResizableTableHeader';
+import AdminSearchField from '@/features/admin/components/AdminSearchField';
 import { CategoryAddForm } from '@/features/admin/components/tabs/category/CategoryAddForm';
 import { CategoryEditForm } from '@/features/admin/components/tabs/category/CategoryEditForm';
 import { SortableCategoryRow } from '@/features/admin/components/tabs/category/SortableCategoryRow';
@@ -56,6 +56,18 @@ const CategoryConfig = ({
     showAlert,
   });
   const [categories, setCategories] = useState<CustomCategory[]>([]);
+  const [filterQuery, setFilterQuery] = useState('');
+  const normalizedQuery = filterQuery.trim().toLowerCase();
+  const isFiltering = normalizedQuery.length > 0;
+  const visibleRows = useMemo(
+    () =>
+      categories.filter((item) =>
+        [item.name, item.query].some((value) =>
+          value?.toLowerCase().includes(normalizedQuery),
+        ),
+      ),
+    [categories, normalizedQuery],
+  );
   const [showAddForm, setShowAddForm] = useState(false);
   const [editingCategory, setEditingCategory] = useState<CustomCategory | null>(
     null,
@@ -187,7 +199,7 @@ const CategoryConfig = ({
 
   const handleDragEnd = (event: DragEndEvent) => {
     const { active, over } = event;
-    if (!over || active.id === over.id) return;
+    if (isFiltering || !over || active.id === over.id) return;
     const oldIndex = categories.findIndex(
       (c) => `${c.query}:${c.type}` === active.id,
     );
@@ -219,20 +231,24 @@ const CategoryConfig = ({
 
   return (
     <div className='space-y-6'>
-      {/* 添加分类表单 */}
-      <div className='flex items-center justify-between'>
-        <h4 className='text-sm font-medium text-gray-700 dark:text-gray-300'>
-          自定义分类列表
-        </h4>
-        <button
-          onClick={() => {
-            setShowAddForm(true);
-            handleCancelEdit();
-          }}
-          className={`rounded-lg px-3 py-1 text-sm transition-colors ${buttonStyles.success}`}
-        >
-          添加分类
-        </button>
+      <div className='flex items-center justify-between gap-3'>
+        <AdminSearchField
+          value={filterQuery}
+          onChange={setFilterQuery}
+          label='搜索分类'
+          className='min-w-0 flex-1 sm:w-72 sm:flex-none'
+        />
+        <div className='flex shrink-0 items-center'>
+          <button
+            onClick={() => {
+              setShowAddForm(true);
+              handleCancelEdit();
+            }}
+            className={buttonStyles.primary}
+          >
+            添加分类
+          </button>
+        </div>
       </div>
 
       <CategoryAddForm
@@ -255,11 +271,13 @@ const CategoryConfig = ({
         isSubmitting={isLoading('editCategory')}
       />
 
-      {/* 分类表格 */}
       <div
-        className='relative overflow-x-auto rounded-lg border border-gray-200 dark:border-gray-700'
-        data-table='category-list'
+        className='overflow-hidden rounded-xl ring-1 ring-gray-200 dark:ring-white/[0.06] [&:has([role=listbox])]:overflow-visible [&:has([role=menu])]:overflow-visible'
+        data-list='category-list'
       >
+        <div className='flex h-10 items-center gap-3 rounded-t-xl bg-gray-50 px-3 text-xs text-gray-500 dark:bg-white/[0.03] dark:text-gray-400'>
+          <span className='tabular-nums'>{`共 ${visibleRows.length} 个`}</span>
+        </div>
         <DndContext
           sensors={sensors}
           collisionDetection={closestCenter}
@@ -267,84 +285,37 @@ const CategoryConfig = ({
           autoScroll={true}
           modifiers={[restrictToVerticalAxis, restrictToParentElement]}
         >
-          <table className='w-full table-fixed divide-y divide-gray-200 dark:divide-gray-700'>
-            <thead className='sticky top-0 z-10 bg-gray-50 dark:bg-gray-900'>
-              <tr>
-                <th
-                  data-column-width='32'
-                  style={{ width: 32, minWidth: 32, maxWidth: 32 }}
-                />
-                <ResizableTableHeader
-                  tableId='category-list'
-                  columnId='name'
-                  defaultWidth={280}
-                  minWidth={112}
-                  className='px-6 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400'
-                >
-                  分类名称
-                </ResizableTableHeader>
-                <ResizableTableHeader
-                  tableId='category-list'
-                  columnId='type'
-                  defaultWidth={162}
-                  minWidth={88}
-                  className='px-6 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400'
-                >
-                  类型
-                </ResizableTableHeader>
-                <ResizableTableHeader
-                  tableId='category-list'
-                  columnId='query'
-                  defaultWidth={808}
-                  minWidth={120}
-                  className='px-6 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400'
-                >
-                  搜索关键词
-                </ResizableTableHeader>
-                <ResizableTableHeader
-                  tableId='category-list'
-                  columnId='status'
-                  defaultWidth={107}
-                  minWidth={88}
-                  className='px-6 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400'
-                >
-                  状态
-                </ResizableTableHeader>
-                <ResizableTableHeader
-                  tableId='category-list'
-                  columnId='actions'
-                  defaultWidth={160}
-                  minWidth={160}
-                  hideDivider
-                  className='px-6 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400'
-                >
-                  操作
-                </ResizableTableHeader>
-              </tr>
-            </thead>
-            <SortableContext
-              items={categories.map((c) => `${c.query}:${c.type}`)}
-              strategy={verticalListSortingStrategy}
+          <SortableContext
+            items={visibleRows.map((c) => `${c.query}:${c.type}`)}
+            strategy={verticalListSortingStrategy}
+          >
+            <ul
+              aria-label='分类列表'
+              className='divide-y divide-gray-200 dark:divide-white/[0.06]'
             >
-              <tbody className='divide-y divide-gray-200 dark:divide-gray-700'>
-                {categories.map((category) => (
-                  <SortableCategoryRow
-                    key={`${category.query}:${category.type}`}
-                    category={category}
-                    isToggleLoading={isLoading(
-                      `toggleCategory_${category.query}_${category.type}`,
-                    )}
-                    isDeleteLoading={isLoading(
-                      `deleteCategory_${category.query}_${category.type}`,
-                    )}
-                    onToggleEnable={handleToggleEnable}
-                    onEdit={handleOpenEdit}
-                    onDelete={setDeleteTarget}
-                  />
-                ))}
-              </tbody>
-            </SortableContext>
-          </table>
+              {visibleRows.length === 0 && (
+                <li className='rounded-b-xl bg-white px-6 py-12 text-center text-sm text-gray-500 dark:bg-gray-900 dark:text-gray-400'>
+                  {isFiltering ? '没有匹配的分类' : '暂无分类'}
+                </li>
+              )}
+              {visibleRows.map((category) => (
+                <SortableCategoryRow
+                  isSortingDisabled={isFiltering}
+                  key={`${category.query}:${category.type}`}
+                  category={category}
+                  isToggleLoading={isLoading(
+                    `toggleCategory_${category.query}_${category.type}`,
+                  )}
+                  isDeleteLoading={isLoading(
+                    `deleteCategory_${category.query}_${category.type}`,
+                  )}
+                  onToggleEnable={handleToggleEnable}
+                  onEdit={handleOpenEdit}
+                  onDelete={setDeleteTarget}
+                />
+              ))}
+            </ul>
+          </SortableContext>
         </DndContext>
       </div>
 

@@ -23,35 +23,25 @@ export function SourceValidationModal({
       isOpen={isOpen}
       title='视频源有效性检测'
       onClose={onClose}
-      panelClassName='max-w-md'
+      panelClassName='max-w-md max-h-[80vh] overflow-y-auto'
     >
-      <p className='mb-4 text-sm text-gray-600 dark:text-gray-400'>
-        请输入检测用的搜索关键词
-      </p>
       <div className='space-y-4'>
         <input
           type='text'
           placeholder='请输入搜索关键词'
           value={searchKeyword}
           onChange={(e) => onSearchKeywordChange(e.target.value)}
-          className={`w-full ${inputStyles.base}`}
+          className={`w-full ${inputStyles.withFocus}`}
           onKeyPress={(e) => e.key === 'Enter' && onStart()}
         />
         <div className='flex justify-end space-x-3'>
-          <button
-            onClick={onClose}
-            className='px-4 py-2 text-gray-600 transition-colors hover:text-gray-800 dark:text-gray-400 dark:hover:text-gray-200'
-          >
+          <button onClick={onClose} className={buttonStyles.outline}>
             取消
           </button>
           <button
             onClick={onStart}
             disabled={!searchKeyword.trim()}
-            className={`px-4 py-2 ${
-              !searchKeyword.trim()
-                ? buttonStyles.disabled
-                : buttonStyles.primary
-            }`}
+            className={`${buttonStyles.primary} disabled:cursor-not-allowed disabled:opacity-50`}
           >
             开始检测
           </button>

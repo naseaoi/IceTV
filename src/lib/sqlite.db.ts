@@ -553,7 +553,9 @@ export class LocalSqliteStorage implements IStorage {
 
   private insertUserProfile(username: string, nickname?: string): void {
     const validated =
-      nickname === undefined ? null : validateNickname(nickname);
+      nickname === undefined
+        ? null
+        : validateNickname(nickname, { allowReserved: true });
     for (let attempt = 0; attempt < 8; attempt++) {
       try {
         this.db

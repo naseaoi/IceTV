@@ -4,6 +4,8 @@ import { useCallback, useMemo, useState } from 'react';
 
 import AlertModal from '@/components/modals/AlertModal';
 import ConfirmModal from '@/components/modals/ConfirmModal';
+import Select from '@/components/Select';
+import AdminSearchField from '@/features/admin/components/AdminSearchField';
 import { AddUserForm } from '@/features/admin/components/tabs/user-config/AddUserForm';
 import { BatchUserGroupDialog } from '@/features/admin/components/tabs/user-config/BatchUserGroupDialog';
 import { ChangePasswordForm } from '@/features/admin/components/tabs/user-config/ChangePasswordForm';
@@ -113,6 +115,8 @@ const UserConfig = ({ config, role, refreshConfig }: UserConfigProps) => {
   } | null>(null);
   const [selectedUserGroups, setSelectedUserGroups] = useState<string[]>([]);
   const [selectedUsers, setSelectedUsers] = useState<Set<string>>(new Set());
+  const [userSearch, setUserSearch] = useState('');
+  const [userFilter, setUserFilter] = useState('all');
   const [showBatchUserGroupModal, setShowBatchUserGroupModal] =
     useModalState(false);
   const [selectedUserGroup, setSelectedUserGroup] = useState<string>('');
@@ -150,11 +154,22 @@ const UserConfig = ({ config, role, refreshConfig }: UserConfigProps) => {
     [role, currentUsername],
   );
 
-  const selectableUsersCount = useMemo(
-    () =>
-      getSelectableUsers(config?.UserConfig?.Users || [], permissionContext)
-        .length,
-    [config?.UserConfig?.Users, permissionContext],
+  const visibleUsers = useMemo(() => {
+    const query = userSearch.trim().toLowerCase();
+    return (config?.UserConfig?.Users || []).filter((user) => {
+      const matchesFilter =
+        userFilter === 'all' ||
+        (userFilter === 'banned' ? user.banned : user.role === userFilter);
+      const matchesSearch = [user.username, ...(user.tags || [])].some(
+        (value) => value.toLowerCase().includes(query),
+      );
+      return matchesFilter && matchesSearch;
+    });
+  }, [config?.UserConfig?.Users, userSearch, userFilter]);
+
+  const selectableVisibleUsers = useMemo(
+    () => getSelectableUsers(visibleUsers, permissionContext),
+    [visibleUsers, permissionContext],
   );
 
   const inviteCodes = useMemo(
@@ -171,11 +186,9 @@ const UserConfig = ({ config, role, refreshConfig }: UserConfigProps) => {
     return `已开启 · ${countActiveInviteCodes(inviteCodes)} 个有效邀请码`;
   }, [openRegister, requireInviteCode, inviteCodes]);
 
-  const selectAllUsers = useMemo(() => {
-    return (
-      selectedUsers.size === selectableUsersCount && selectedUsers.size > 0
-    );
-  }, [selectedUsers.size, selectableUsersCount]);
+  const selectAllUsers =
+    selectableVisibleUsers.length > 0 &&
+    selectableVisibleUsers.every((user) => selectedUsers.has(user.username));
 
   const userGroups = config?.UserConfig?.Tags || [];
 
@@ -565,17 +578,16 @@ const UserConfig = ({ config, role, refreshConfig }: UserConfigProps) => {
 
   const handleSelectAllUsers = useCallback(
     (checked: boolean) => {
-      if (checked) {
-        const selectableUsernames = getSelectableUsers(
-          config?.UserConfig?.Users || [],
-          permissionContext,
-        ).map((u) => u.username);
-        setSelectedUsers(new Set(selectableUsernames));
-      } else {
-        setSelectedUsers(new Set());
-      }
+      setSelectedUsers((previous) => {
+        const next = new Set(previous);
+        selectableVisibleUsers.forEach(({ username }) => {
+          if (checked) next.add(username);
+          else next.delete(username);
+        });
+        return next;
+      });
     },
-    [config?.UserConfig?.Users, permissionContext],
+    [selectableVisibleUsers],
   );
 
   const handleBatchSetUserGroup = async (userGroup: string) => {
@@ -678,95 +690,53 @@ const UserConfig = ({ config, role, refreshConfig }: UserConfigProps) => {
 
   return (
     <div className='space-y-6'>
-      <div className='mb-1 grid grid-cols-1 gap-4 lg:grid-cols-2'>
-        <div>
-          <h4 className='mb-3 text-sm font-medium text-gray-700 dark:text-gray-300'>
-            用户统计
-          </h4>
-          <div className='min-h-[96px] rounded-lg border border-brand-200 bg-brand-50 p-4 dark:border-brand-800 dark:bg-brand-900/20'>
-            <div className='text-2xl font-bold text-brand-800 dark:text-brand-300'>
-              {config.UserConfig.Users.length}
-            </div>
-            <div className='text-sm text-brand-600 dark:text-brand-400'>
-              总用户数
-            </div>
+      <div className='flex items-center justify-between gap-3 rounded-lg bg-gray-50 px-4 py-3 dark:bg-gray-800/50'>
+        <p className='text-sm text-gray-600 dark:text-gray-400'>
+          开放注册 · {registrationStatusText}
+        </p>
+        <button
+          type='button'
+          onClick={() => setShowRegistrationModal(true)}
+          className={buttonStyles.outline}
+        >
+          管理
+        </button>
+      </div>
+
+      <div>
+        <h2 className='mb-3 text-base font-semibold text-gray-900 dark:text-gray-100'>
+          用户列表
+        </h2>
+        <div className='mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between'>
+          <div className='flex min-w-0 items-center gap-2'>
+            <AdminSearchField
+              value={userSearch}
+              onChange={setUserSearch}
+              label='搜索用户名或用户组'
+              className='min-w-0 flex-1 sm:w-64 sm:flex-none'
+            />
+            <Select
+              value={userFilter}
+              onChange={setUserFilter}
+              ariaLabel='筛选用户角色或状态'
+              variant='pill'
+              className='shrink-0'
+              options={[
+                { value: 'all', label: '全部' },
+                { value: 'owner', label: '站长' },
+                { value: 'admin', label: '管理员' },
+                { value: 'user', label: '普通用户' },
+                { value: 'banned', label: '已封禁' },
+              ]}
+            />
           </div>
-        </div>
-        <div>
-          <h4 className='mb-3 text-sm font-medium text-gray-700 dark:text-gray-300'>
-            注册设置
-          </h4>
-          <div className='flex min-h-[96px] items-center justify-between gap-4 rounded-lg border border-gray-200 bg-gray-50 p-4 dark:border-gray-700 dark:bg-gray-900'>
-            <div>
-              <p className='text-sm font-medium text-gray-900 dark:text-gray-100'>
-                开放注册
-              </p>
-              <p className='mt-1 text-xs text-gray-500 dark:text-gray-400'>
-                {registrationStatusText}
-              </p>
-            </div>
+          <div className='flex flex-wrap items-center gap-2'>
             <button
-              type='button'
-              onClick={() => setShowRegistrationModal(true)}
-              className={buttonStyles.primary}
+              onClick={handleOpenCleanupInactive}
+              className={buttonStyles.outline}
             >
-              管理
+              清理不活跃
             </button>
-          </div>
-        </div>
-      </div>
-
-      <div>
-        <div className='mb-3 flex items-center justify-between'>
-          <h4 className='text-sm font-medium text-gray-700 dark:text-gray-300'>
-            用户组管理
-          </h4>
-          <button
-            onClick={() => {
-              setShowAddUserGroupForm(true);
-              if (showEditUserGroupForm) {
-                setShowEditUserGroupForm(false);
-                setEditingUserGroup(null);
-              }
-            }}
-            className={buttonStyles.primary}
-          >
-            添加用户组
-          </button>
-        </div>
-
-        <UserGroupTable
-          userGroups={userGroups}
-          isEditLoading={(groupName) =>
-            isLoading(`userGroup_edit_${groupName}`)
-          }
-          onEdit={handleStartEditUserGroup}
-          onDelete={handleDeleteUserGroup}
-        />
-      </div>
-
-      <div>
-        <div className='mb-3 flex items-center justify-between'>
-          <h4 className='text-sm font-medium text-gray-700 dark:text-gray-300'>
-            用户列表
-          </h4>
-          <div className='flex items-center space-x-2'>
-            {selectedUsers.size > 0 && (
-              <>
-                <div className='flex items-center space-x-3'>
-                  <span className='text-sm text-gray-600 dark:text-gray-400'>
-                    已选择 {selectedUsers.size} 个用户
-                  </span>
-                  <button
-                    onClick={() => setShowBatchUserGroupModal(true)}
-                    className={buttonStyles.primary}
-                  >
-                    批量设置用户组
-                  </button>
-                </div>
-                <div className='h-6 w-px bg-gray-300 dark:bg-gray-600'></div>
-              </>
-            )}
             <button
               onClick={() => {
                 setShowAddUserForm(true);
@@ -775,15 +745,9 @@ const UserConfig = ({ config, role, refreshConfig }: UserConfigProps) => {
                   setChangePasswordUser({ username: '', password: '' });
                 }
               }}
-              className={buttonStyles.success}
+              className={buttonStyles.primary}
             >
               添加用户
-            </button>
-            <button
-              onClick={handleOpenCleanupInactive}
-              className={buttonStyles.warning}
-            >
-              清理不活跃
             </button>
           </div>
         </div>
@@ -819,14 +783,15 @@ const UserConfig = ({ config, role, refreshConfig }: UserConfigProps) => {
         />
 
         <UserTable
-          users={config.UserConfig.Users}
+          users={visibleUsers}
           lastActiveAt={lastActiveAt}
           currentUsername={currentUsername}
           permissionContext={permissionContext}
-          selectableUsersCount={selectableUsersCount}
+          selectableUsersCount={selectableVisibleUsers.length}
           selectedUsers={selectedUsers}
           selectAllUsers={selectAllUsers}
           isLoading={isLoading}
+          onBatchUserGroup={() => setShowBatchUserGroupModal(true)}
           onSelectAllUsers={handleSelectAllUsers}
           onSelectUser={handleSelectUser}
           onConfigureUserGroup={handleConfigureUserGroup}
@@ -837,6 +802,35 @@ const UserConfig = ({ config, role, refreshConfig }: UserConfigProps) => {
           onBanUser={handleBanUser}
           onUnbanUser={handleUnbanUser}
           onDeleteUser={handleDeleteUser}
+        />
+      </div>
+
+      <div>
+        <div className='mb-3 flex items-center justify-between'>
+          <h2 className='text-base font-semibold text-gray-900 dark:text-gray-100'>
+            用户组
+          </h2>
+          <button
+            onClick={() => {
+              setShowAddUserGroupForm(true);
+              if (showEditUserGroupForm) {
+                setShowEditUserGroupForm(false);
+                setEditingUserGroup(null);
+              }
+            }}
+            className={buttonStyles.primary}
+          >
+            添加用户组
+          </button>
+        </div>
+
+        <UserGroupTable
+          userGroups={userGroups}
+          isEditLoading={(groupName) =>
+            isLoading(`userGroup_edit_${groupName}`)
+          }
+          onEdit={handleStartEditUserGroup}
+          onDelete={handleDeleteUserGroup}
         />
       </div>
 

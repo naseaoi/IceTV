@@ -1,13 +1,12 @@
 'use client';
 
+import { checkboxStyles } from '@/features/admin/lib/buttonStyles';
 import { DataSource } from '@/features/admin/types/internal';
 
 interface ApiSourcePickerProps {
   sources: DataSource[];
   selected: string[];
   onChange: (next: string[]) => void;
-  /** 复选框颜色变体 */
-  variant?: 'blue' | 'purple';
 }
 
 function extractDomain(url: string): string {
@@ -23,13 +22,7 @@ export function ApiSourcePicker({
   sources,
   selected,
   onChange,
-  variant = 'blue',
 }: ApiSourcePickerProps) {
-  const colorClass =
-    variant === 'purple'
-      ? 'text-purple-600 accent-purple-600 checked:border-purple-600 checked:bg-purple-600 focus:ring-purple-500 dark:accent-purple-500 dark:checked:border-purple-500 dark:checked:bg-purple-500'
-      : 'text-brand-600 accent-brand-600 checked:border-brand-600 checked:bg-brand-600 focus:ring-brand-500 dark:accent-brand-500 dark:checked:border-brand-500 dark:checked:bg-brand-500';
-
   const handleToggle = (key: string, checked: boolean) => {
     if (checked) {
       onChange([...selected, key]);
@@ -39,17 +32,17 @@ export function ApiSourcePicker({
   };
 
   return (
-    <div className='grid grid-cols-1 gap-3 md:grid-cols-2 lg:grid-cols-3'>
+    <div className='grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3'>
       {sources.map((source) => (
         <label
           key={source.key}
-          className='flex cursor-pointer items-center space-x-3 rounded-lg border border-gray-200 p-3 transition-colors hover:bg-gray-50 dark:border-gray-700 dark:hover:bg-gray-800'
+          className='flex min-w-0 cursor-pointer items-center space-x-3 rounded-lg bg-white p-3 ring-1 ring-inset ring-gray-200 transition-colors hover:bg-gray-50 dark:bg-gray-900 dark:ring-white/[0.06] dark:hover:bg-gray-800'
         >
           <input
             type='checkbox'
             checked={selected.includes(source.key)}
             onChange={(e) => handleToggle(source.key, e.target.checked)}
-            className={`rounded border-gray-300 dark:border-gray-600 dark:bg-gray-700 ${colorClass}`}
+            className={checkboxStyles}
           />
           <div className='min-w-0 flex-1'>
             <div className='truncate text-sm font-medium text-gray-900 dark:text-gray-100'>

@@ -25,23 +25,23 @@ describe('SortableCategoryRow', () => {
     const onEdit = jest.fn();
     const onDelete = jest.fn();
     render(
-      <table>
-        <tbody>
-          <SortableCategoryRow
-            category={category}
-            isToggleLoading={false}
-            isDeleteLoading={false}
-            onToggleEnable={onToggleEnable}
-            onEdit={onEdit}
-            onDelete={onDelete}
-          />
-        </tbody>
-      </table>,
+      <ul>
+        <SortableCategoryRow
+          category={category}
+          isToggleLoading={false}
+          isDeleteLoading={false}
+          onToggleEnable={onToggleEnable}
+          onEdit={onEdit}
+          onDelete={onDelete}
+        />
+      </ul>,
     );
 
     fireEvent.click(screen.getByRole('switch', { name: '热门电影状态' }));
-    fireEvent.click(screen.getByRole('button', { name: '编辑' }));
-    fireEvent.click(screen.getByRole('button', { name: '删除' }));
+    fireEvent.click(screen.getByRole('button', { name: '热门电影 的操作' }));
+    fireEvent.click(screen.getByRole('menuitem', { name: '编辑' }));
+    fireEvent.click(screen.getByRole('button', { name: '热门电影 的操作' }));
+    fireEvent.click(screen.getByRole('menuitem', { name: '删除' }));
 
     expect(onToggleEnable).toHaveBeenCalledWith(category);
     expect(onEdit).toHaveBeenCalledWith(category);
@@ -50,27 +50,26 @@ describe('SortableCategoryRow', () => {
 
   it('disables edit and delete while status is changing', () => {
     render(
-      <table>
-        <tbody>
-          <SortableCategoryRow
-            category={{
-              name: '热门电影',
-              type: 'movie',
-              query: '热门',
-              disabled: false,
-              from: 'custom',
-            }}
-            isToggleLoading
-            isDeleteLoading={false}
-            onToggleEnable={jest.fn()}
-            onEdit={jest.fn()}
-            onDelete={jest.fn()}
-          />
-        </tbody>
-      </table>,
+      <ul>
+        <SortableCategoryRow
+          category={{
+            name: '热门电影',
+            type: 'movie',
+            query: '热门',
+            disabled: false,
+            from: 'custom',
+          }}
+          isToggleLoading
+          isDeleteLoading={false}
+          onToggleEnable={jest.fn()}
+          onEdit={jest.fn()}
+          onDelete={jest.fn()}
+        />
+      </ul>,
     );
 
-    expect(screen.getByRole('button', { name: '编辑' })).toBeDisabled();
-    expect(screen.getByRole('button', { name: '删除' })).toBeDisabled();
+    fireEvent.click(screen.getByRole('button', { name: '热门电影 的操作' }));
+    expect(screen.getByRole('menuitem', { name: '编辑' })).toBeDisabled();
+    expect(screen.getByRole('menuitem', { name: '删除' })).toBeDisabled();
   });
 });

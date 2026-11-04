@@ -163,7 +163,9 @@ export class ReviewSocialStorage {
     nickname: string,
     exceptUsername = '',
   ): Promise<boolean> {
-    const { nicknameNorm } = validateNickname(nickname);
+    const { nicknameNorm } = validateNickname(nickname, {
+      allowReserved: true,
+    });
     const rows = await this.sql.rows(
       'SELECT username FROM user_profiles WHERE nickname_norm = ? AND username <> ?',
       [nicknameNorm, normalizeUsername(exceptUsername)],
@@ -183,7 +185,9 @@ export class ReviewSocialStorage {
     const columns: string[] = [];
     const params: unknown[] = [];
     if (patch.nickname !== undefined) {
-      const validated = validateNickname(patch.nickname);
+      const validated = validateNickname(patch.nickname, {
+        allowReserved: true,
+      });
       columns.push('nickname = ?', 'nickname_norm = ?');
       params.push(validated.nickname, validated.nicknameNorm);
     }
@@ -560,7 +564,7 @@ export function importedProfileValues(
   let norm: string | null = null;
   if (profile?.nickname) {
     try {
-      const v = validateNickname(profile.nickname);
+      const v = validateNickname(profile.nickname, { allowReserved: true });
       if (!usedNames.has(v.nicknameNorm)) {
         nickname = v.nickname;
         norm = v.nicknameNorm;

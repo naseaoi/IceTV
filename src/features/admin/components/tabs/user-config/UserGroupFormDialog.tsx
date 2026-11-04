@@ -2,7 +2,11 @@
 
 import AdminDialog from '@/features/admin/components/AdminDialog';
 import { ApiSourcePicker } from '@/features/admin/components/tabs/user-config/ApiSourcePicker';
-import { buttonStyles } from '@/features/admin/lib/buttonStyles';
+import {
+  buttonStyles,
+  checkboxStyles,
+  inputStyles,
+} from '@/features/admin/lib/buttonStyles';
 import { DataSource } from '@/features/admin/types/internal';
 
 interface UserGroupDraft {
@@ -52,7 +56,7 @@ export function UserGroupFormDialog({
       <div className='space-y-6'>
         {isAdd && (
           <div>
-            <label className='mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300'>
+            <label className='mb-2 block text-sm font-medium text-gray-900 dark:text-gray-100'>
               用户组名称
             </label>
             <input
@@ -60,14 +64,14 @@ export function UserGroupFormDialog({
               placeholder='请输入用户组名称'
               value={value.name}
               onChange={(e) => onChange({ ...value, name: e.target.value })}
-              className='w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-gray-900 focus:border-transparent focus:ring-2 focus:ring-brand-500 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100'
+              className={`w-full ${inputStyles.withFocus}`}
             />
           </div>
         )}
 
         <div>
           <div className='mb-4 flex items-center justify-between gap-3'>
-            <label className='block text-sm font-medium text-gray-700 dark:text-gray-300'>
+            <label className='block text-sm font-medium text-gray-900 dark:text-gray-100'>
               可用视频源
             </label>
             <label className='flex items-center gap-2 text-sm text-gray-600 dark:text-gray-400'>
@@ -80,11 +84,7 @@ export function UserGroupFormDialog({
                     enabledApis: event.target.checked ? selectableApiKeys : [],
                   })
                 }
-                className={`rounded border-gray-300 dark:border-gray-600 dark:bg-gray-700 ${
-                  isAdd
-                    ? 'text-brand-600 focus:ring-brand-500 dark:text-brand-500'
-                    : 'text-purple-600 focus:ring-purple-500 dark:text-purple-500'
-                }`}
+                className={checkboxStyles}
               />
               全选
             </label>
@@ -93,25 +93,17 @@ export function UserGroupFormDialog({
             sources={sources}
             selected={value.enabledApis}
             onChange={(next) => onChange({ ...value, enabledApis: next })}
-            variant={isAdd ? 'blue' : 'purple'}
           />
         </div>
 
         <div className='flex justify-end space-x-3 pt-4'>
-          <button
-            onClick={onClose}
-            className={`px-6 py-2.5 text-sm font-medium ${buttonStyles.secondary}`}
-          >
+          <button onClick={onClose} className={buttonStyles.outline}>
             取消
           </button>
           <button
             onClick={onSubmit}
             disabled={isSubmitting || (isAdd && !value.name.trim())}
-            className={`px-6 py-2.5 text-sm font-medium ${
-              isSubmitting || (isAdd && !value.name.trim())
-                ? buttonStyles.disabled
-                : buttonStyles.primary
-            }`}
+            className={`${buttonStyles.primary} disabled:cursor-not-allowed disabled:opacity-50`}
           >
             {isSubmitting ? loadingText : submitText}
           </button>

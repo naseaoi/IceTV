@@ -21,7 +21,11 @@ export function normalizeNickname(value: string): string {
   return value.normalize('NFKC').trim().toLowerCase();
 }
 
-export function validateNickname(value: unknown): {
+// 保留名只对站长开放；存储层只校验格式，保留名由各入口按角色判定
+export function validateNickname(
+  value: unknown,
+  { allowReserved = false }: { allowReserved?: boolean } = {},
+): {
   nickname: string;
   nicknameNorm: string;
 } {
@@ -38,7 +42,7 @@ export function validateNickname(value: unknown): {
     throw new ProfileValidationError(NICKNAME_RULE_MESSAGE);
   }
   const nicknameNorm = normalizeNickname(nickname);
-  if (RESERVED_NICKNAMES.includes(nicknameNorm)) {
+  if (!allowReserved && RESERVED_NICKNAMES.includes(nicknameNorm)) {
     throw new ProfileValidationError('该昵称为保留名，请换一个');
   }
   return { nickname, nicknameNorm };

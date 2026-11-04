@@ -5,12 +5,13 @@ import { CSS } from '@dnd-kit/utilities';
 import { GripVertical } from 'lucide-react';
 import type { CSSProperties } from 'react';
 
+import AdminRowMenu from '@/features/admin/components/AdminRowMenu';
 import { AdminStatusSwitch } from '@/features/admin/components/AdminStatusSwitch';
-import { buttonStyles } from '@/features/admin/lib/buttonStyles';
 import { CustomCategory } from '@/features/admin/types/internal';
 
 interface SortableCategoryRowProps {
   category: CustomCategory;
+  isSortingDisabled?: boolean;
   isToggleLoading: boolean;
   isDeleteLoading: boolean;
   onToggleEnable: (category: CustomCategory) => void;
@@ -20,6 +21,7 @@ interface SortableCategoryRowProps {
 
 export function SortableCategoryRow({
   category,
+  isSortingDisabled = false,
   isToggleLoading,
   isDeleteLoading,
   onToggleEnable,
@@ -27,77 +29,86 @@ export function SortableCategoryRow({
   onDelete,
 }: SortableCategoryRowProps) {
   const { attributes, listeners, setNodeRef, transform, transition } =
-    useSortable({ id: `${category.query}:${category.type}` });
+    useSortable({
+      id: `${category.query}:${category.type}`,
+      disabled: isSortingDisabled,
+    });
   const style = {
     transform: CSS.Transform.toString(transform),
     transition,
   } as CSSProperties;
   const operationsDisabled = isToggleLoading || isDeleteLoading;
 
+  const description = category.query;
   return (
-    <tr
+    <li
       ref={setNodeRef}
       style={style}
-      className='select-none transition-colors hover:bg-gray-50 dark:hover:bg-gray-800'
+      className='flex flex-wrap items-center gap-3 bg-white px-3 py-3 transition-colors last:rounded-b-xl hover:bg-gray-50 dark:bg-gray-900 dark:hover:bg-white/[0.02]'
     >
-      <td
-        className='cursor-grab px-2 py-4 text-gray-400'
-        style={{ touchAction: 'none' }}
+      <button
+        type='button'
+        className={`shrink-0 text-gray-400 ${isSortingDisabled ? 'cursor-not-allowed opacity-40' : 'cursor-grab'}`}
+        style={{ touchAction: isSortingDisabled ? 'auto' : 'none' }}
         {...attributes}
-        {...listeners}
+        {...(isSortingDisabled ? {} : listeners)}
+        aria-label={`拖动排序 ${category.name || category.query}`}
+        aria-disabled={isSortingDisabled}
+        disabled={isSortingDisabled}
+        tabIndex={isSortingDisabled ? -1 : attributes.tabIndex}
       >
         <GripVertical size={16} />
-      </td>
-      <td className='whitespace-nowrap px-6 py-4 text-sm text-gray-900 dark:text-gray-100'>
-        {category.name || '-'}
-      </td>
-      <td className='whitespace-nowrap px-6 py-4 text-sm text-gray-900 dark:text-gray-100'>
-        <span
-          className={`rounded-full px-2 py-1 text-xs ${
-            category.type === 'movie'
-              ? 'bg-brand-100 text-brand-800 dark:bg-brand-900/20 dark:text-brand-300'
-              : 'bg-purple-100 text-purple-800 dark:bg-purple-900/20 dark:text-purple-300'
-          }`}
-        >
-          {category.type === 'movie' ? '电影' : '电视剧'}
-        </span>
-      </td>
-      <td
-        className='truncate whitespace-nowrap px-6 py-4 text-sm text-gray-900 dark:text-gray-100'
-        title={category.query}
+      </button>
+      <div
+        className={`min-w-0 flex-1 ${category.disabled ? 'opacity-50' : ''}`}
       >
-        {category.query}
-      </td>
-      <td className='whitespace-nowrap px-6 py-4'>
+        <div className='flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1'>
+          <span
+            className='truncate text-sm font-medium text-gray-900 dark:text-gray-100'
+            title={category.name || '未命名分类'}
+          >
+            {category.name || '未命名分类'}
+          </span>
+          <span className='rounded bg-gray-100 px-1.5 text-xs text-gray-500 dark:bg-white/[0.06] dark:text-gray-400'>
+            {category.type === 'movie' ? '电影' : '电视剧'}
+          </span>
+          {category.disabled && (
+            <span className='text-xs text-gray-500 dark:text-gray-400'>
+              已停用
+            </span>
+          )}
+        </div>
+        <p
+          className='mt-1 truncate text-xs text-gray-500 dark:text-gray-400'
+          title={description}
+        >
+          {description}
+        </p>
+      </div>
+      <div className='flex w-full shrink-0 items-center justify-end gap-3 sm:w-auto'>
         <AdminStatusSwitch
           enabled={!category.disabled}
           isLoading={isToggleLoading}
           ariaLabel={`${category.name || category.query}状态`}
           onToggle={() => onToggleEnable(category)}
         />
-      </td>
-      <td className='space-x-2 whitespace-nowrap px-6 py-4 text-left text-sm font-medium'>
-        <button
-          type='button'
-          onClick={() => onEdit(category)}
-          disabled={operationsDisabled}
-          className={`${buttonStyles.roundedPrimary} ${
-            operationsDisabled ? 'cursor-not-allowed opacity-50' : ''
-          }`}
-        >
-          编辑
-        </button>
-        <button
-          type='button'
-          onClick={() => onDelete(category)}
-          disabled={operationsDisabled}
-          className={`${buttonStyles.roundedSecondary} ${
-            operationsDisabled ? 'cursor-not-allowed opacity-50' : ''
-          }`}
-        >
-          删除
-        </button>
-      </td>
-    </tr>
+        <AdminRowMenu
+          label={`${category.name || category.query} 的操作`}
+          items={[
+            {
+              label: '编辑',
+              onSelect: () => onEdit(category),
+              disabled: operationsDisabled,
+            },
+            {
+              label: '删除',
+              onSelect: () => onDelete(category),
+              danger: true,
+              disabled: operationsDisabled,
+            },
+          ]}
+        />
+      </div>
+    </li>
   );
 }

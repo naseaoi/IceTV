@@ -5,6 +5,7 @@ import { useState } from 'react';
 
 import Spinner from '@/components/Spinner';
 import AdminDialog from '@/features/admin/components/AdminDialog';
+import { AdminStatusSwitch } from '@/features/admin/components/AdminStatusSwitch';
 import { buttonStyles, inputStyles } from '@/features/admin/lib/buttonStyles';
 import { formatDateTime } from '@/features/admin/lib/formatDateTime';
 import {
@@ -44,45 +45,30 @@ interface RegistrationSettingsDialogProps {
 
 function ToggleRow({
   title,
-  description,
   checked,
   disabled,
   label,
   onToggle,
 }: {
   title: string;
-  description: string;
   checked: boolean;
   disabled: boolean;
   label: string;
   onToggle: () => void;
 }) {
   return (
-    <div className='flex items-center justify-between gap-4 rounded-lg border border-gray-200 bg-gray-50 p-4 dark:border-gray-700 dark:bg-gray-900'>
+    <div className='flex items-center justify-between gap-4 py-2'>
       <div>
         <p className='text-sm font-medium text-gray-900 dark:text-gray-100'>
           {title}
         </p>
-        <p className='mt-1 text-xs text-gray-500 dark:text-gray-400'>
-          {description}
-        </p>
       </div>
-      <button
-        type='button'
-        onClick={onToggle}
-        disabled={disabled}
-        className={`relative inline-flex h-6 w-11 shrink-0 items-center rounded-full transition-colors ${
-          checked ? 'bg-brand-500' : 'bg-gray-300 dark:bg-gray-600'
-        } ${disabled ? 'cursor-not-allowed opacity-50' : ''}`}
-        aria-label={label}
-        aria-pressed={checked}
-      >
-        <span
-          className={`inline-block h-5 w-5 transform rounded-full bg-white transition-transform ${
-            checked ? 'translate-x-5' : 'translate-x-0.5'
-          }`}
-        />
-      </button>
+      <AdminStatusSwitch
+        enabled={checked}
+        isLoading={disabled}
+        ariaLabel={label}
+        onToggle={onToggle}
+      />
     </div>
   );
 }
@@ -140,12 +126,11 @@ export function RegistrationSettingsDialog({
       isOpen={isOpen}
       title='注册管理'
       onClose={onClose}
-      panelClassName='max-w-2xl'
+      panelClassName='max-w-2xl max-h-[80vh] overflow-y-auto'
     >
       <div className='space-y-4'>
         <ToggleRow
           title='开放注册'
-          description='开启后，未注册用户可通过注册接口自行创建账号。'
           checked={openRegister}
           disabled={isTogglingRegister}
           label='切换开放注册'
@@ -154,29 +139,22 @@ export function RegistrationSettingsDialog({
 
         <ToggleRow
           title='需要邀请码'
-          description='开启后，注册时必须填写未过期的邀请码。'
           checked={requireInviteCode}
           disabled={isTogglingInvite || !openRegister}
           label='切换邀请码要求'
           onToggle={onToggleRequireInviteCode}
         />
 
-        {!openRegister && (
-          <p className='text-xs text-gray-500 dark:text-gray-400'>
-            注册已关闭，邀请码设置暂不生效。
-          </p>
-        )}
-
         <div>
-          <h4 className='mb-3 text-sm font-medium text-gray-700 dark:text-gray-300'>
+          <h4 className='mb-3 text-sm font-medium text-gray-900 dark:text-gray-100'>
             邀请码
           </h4>
 
-          <div className='mb-3 flex flex-wrap items-end gap-3'>
-            <div className='min-w-[180px] flex-1'>
+          <div className='mb-3 grid grid-cols-1 items-end gap-3 sm:grid-cols-2'>
+            <div className='min-w-0'>
               <label
                 htmlFor='invite-custom-code'
-                className='mb-1 block text-xs text-gray-500 dark:text-gray-400'
+                className='mb-1 block text-sm font-medium text-gray-900 dark:text-gray-100'
               >
                 自定义邀请码（留空则随机生成）
               </label>
@@ -190,13 +168,13 @@ export function RegistrationSettingsDialog({
                 placeholder='字母数字、下划线、连字符'
                 value={customCode}
                 onChange={(e) => onCustomCodeChange(e.target.value)}
-                className={`w-full text-sm uppercase ${inputStyles.withFocus}`}
+                className={`w-full uppercase ${inputStyles.withFocus}`}
               />
             </div>
             <div>
               <label
                 htmlFor='invite-valid-days'
-                className='mb-1 block text-xs text-gray-500 dark:text-gray-400'
+                className='mb-1 block text-sm font-medium text-gray-900 dark:text-gray-100'
               >
                 有效期（天）
               </label>
@@ -207,13 +185,13 @@ export function RegistrationSettingsDialog({
                 max={MAX_INVITE_VALID_DAYS}
                 value={validDays}
                 onChange={(e) => onValidDaysChange(Number(e.target.value))}
-                className={`w-24 text-sm ${inputStyles.withFocus}`}
+                className={`w-full ${inputStyles.withFocus}`}
               />
             </div>
             <div>
               <label
                 htmlFor='invite-max-uses'
-                className='mb-1 block text-xs text-gray-500 dark:text-gray-400'
+                className='mb-1 block text-sm font-medium text-gray-900 dark:text-gray-100'
               >
                 可用次数（留空不限）
               </label>
@@ -225,7 +203,7 @@ export function RegistrationSettingsDialog({
                 placeholder='不限'
                 value={maxUses}
                 onChange={(e) => onMaxUsesChange(e.target.value)}
-                className={`w-28 text-sm ${inputStyles.withFocus}`}
+                className={`w-full ${inputStyles.withFocus}`}
               />
             </div>
             <button
@@ -233,27 +211,24 @@ export function RegistrationSettingsDialog({
               disabled={isCreatingCode}
               title={isCreatingCode ? '生成中...' : '生成邀请码'}
               aria-label='生成邀请码'
-              className={
-                isCreatingCode
-                  ? buttonStyles.iconDisabled
-                  : buttonStyles.iconSuccess
-              }
+              className={`${buttonStyles.primary} flex h-9 items-center justify-center gap-2 justify-self-end disabled:cursor-not-allowed disabled:opacity-50`}
             >
               {isCreatingCode ? (
                 <Spinner className='h-5 w-5' />
               ) : (
                 <Plus className='h-5 w-5' />
               )}
+              生成邀请码
             </button>
           </div>
 
           {inviteCodes.length === 0 ? (
-            <p className='rounded-lg border border-gray-200 p-4 text-sm text-gray-500 dark:border-gray-700 dark:text-gray-400'>
+            <p className='rounded-xl p-4 text-sm text-gray-500 ring-1 ring-gray-200 dark:text-gray-400 dark:ring-white/[0.06]'>
               还没有邀请码。
             </p>
           ) : (
-            <div className='max-h-64 overflow-y-auto rounded-lg border border-gray-200 dark:border-gray-700'>
-              <table className='w-full text-sm'>
+            <div className='max-h-64 overflow-auto rounded-xl ring-1 ring-gray-200 dark:ring-white/[0.06]'>
+              <table className='w-full whitespace-nowrap text-sm'>
                 <thead className='sticky top-0 bg-gray-50 dark:bg-gray-900'>
                   <tr>
                     <th className='px-4 py-2 text-left font-medium text-gray-500 dark:text-gray-400'>
@@ -306,7 +281,7 @@ export function RegistrationSettingsDialog({
                           <button
                             onClick={() => onDeleteCode(item.code)}
                             disabled={deletingCode === item.code}
-                            className={`${buttonStyles.roundedDanger} ${
+                            className={`${buttonStyles.danger} ${
                               deletingCode === item.code
                                 ? 'cursor-not-allowed opacity-50'
                                 : ''

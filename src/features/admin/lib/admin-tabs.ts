@@ -22,34 +22,115 @@ export type AdminTabId =
   | 'category'
   | 'data-migration';
 
+export type AdminTabGroupId = 'site' | 'content' | 'community' | 'maintenance';
+
 export interface AdminTabMeta {
   id: AdminTabId;
   label: string;
   icon: LucideIcon;
+  group: AdminTabGroupId;
   ownerOnly: boolean;
 }
 
+export interface AdminTabGroup {
+  id: AdminTabGroupId;
+  label: string;
+  tabs: AdminTabMeta[];
+}
+
+const ADMIN_TAB_GROUP_LABELS: Record<AdminTabGroupId, string> = {
+  site: '站点',
+  content: '内容',
+  community: '社区',
+  maintenance: '维护',
+};
+
+// 顺序即导航顺序，同组相邻
 export const ADMIN_TABS: AdminTabMeta[] = [
-  { id: 'config-file', label: '配置文件', icon: FileText, ownerOnly: true },
-  { id: 'site', label: '站点配置', icon: Settings, ownerOnly: false },
+  {
+    id: 'site',
+    label: '站点设置',
+    icon: Settings,
+    group: 'site',
+    ownerOnly: false,
+  },
   {
     id: 'runtime',
     label: '运行参数',
     icon: SlidersHorizontal,
+    group: 'site',
     ownerOnly: false,
   },
-  { id: 'user', label: '用户配置', icon: Users, ownerOnly: false },
-  { id: 'reviews', label: '评价管理', icon: MessageSquare, ownerOnly: false },
-  { id: 'video-source', label: '视频源配置', icon: Video, ownerOnly: false },
-  { id: 'live-source', label: '直播源配置', icon: Tv, ownerOnly: false },
-  { id: 'category', label: '分类配置', icon: FolderOpen, ownerOnly: false },
-  { id: 'data-migration', label: '数据迁移', icon: Database, ownerOnly: true },
+  {
+    id: 'video-source',
+    label: '视频源',
+    icon: Video,
+    group: 'content',
+    ownerOnly: false,
+  },
+  {
+    id: 'live-source',
+    label: '直播源',
+    icon: Tv,
+    group: 'content',
+    ownerOnly: false,
+  },
+  {
+    id: 'category',
+    label: '分类',
+    icon: FolderOpen,
+    group: 'content',
+    ownerOnly: false,
+  },
+  {
+    id: 'user',
+    label: '用户',
+    icon: Users,
+    group: 'community',
+    ownerOnly: false,
+  },
+  {
+    id: 'reviews',
+    label: '评价管理',
+    icon: MessageSquare,
+    group: 'community',
+    ownerOnly: false,
+  },
+  {
+    id: 'config-file',
+    label: '配置文件',
+    icon: FileText,
+    group: 'maintenance',
+    ownerOnly: true,
+  },
+  {
+    id: 'data-migration',
+    label: '数据迁移',
+    icon: Database,
+    group: 'maintenance',
+    ownerOnly: true,
+  },
 ];
 
 export const DEFAULT_ADMIN_TAB: AdminTabId = 'site';
 
 export function getVisibleTabs(isOwnerRole: boolean): AdminTabMeta[] {
   return ADMIN_TABS.filter((tab) => isOwnerRole || !tab.ownerOnly);
+}
+
+export function groupAdminTabs(tabs: AdminTabMeta[]): AdminTabGroup[] {
+  const groups: AdminTabGroup[] = [];
+  for (const tab of tabs) {
+    const last = groups[groups.length - 1];
+    if (last?.id === tab.group) last.tabs.push(tab);
+    else
+      groups.push({
+        id: tab.group,
+        label: ADMIN_TAB_GROUP_LABELS[tab.group],
+        tabs: [tab],
+      });
+  }
+  return groups;
 }
 
 export function resolveTabId(

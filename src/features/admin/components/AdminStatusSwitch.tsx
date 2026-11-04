@@ -1,13 +1,13 @@
 interface AdminStatusSwitchProps {
   enabled: boolean;
-  isLoading: boolean;
+  isLoading?: boolean;
   ariaLabel: string;
   onToggle: () => void;
 }
 
 export function AdminStatusSwitch({
   enabled,
-  isLoading,
+  isLoading = false,
   ariaLabel,
   onToggle,
 }: AdminStatusSwitchProps) {

@@ -1,16 +1,21 @@
-﻿'use client';
+'use client';
 
-import { AlertTriangle, RotateCcw, Save } from 'lucide-react';
+import { AlertTriangle, RotateCcw } from 'lucide-react';
 import { Suspense, useEffect, useState } from 'react';
 
 import AuthenticatedRoute from '@/components/AuthenticatedRoute';
+import LoadingStatePanel from '@/components/LoadingStatePanel';
 import AlertModal from '@/components/modals/AlertModal';
 import ConfirmModal from '@/components/modals/ConfirmModal';
+import { PAGE_CONTAINER_CLASS } from '@/components/page-container';
 import PageLayout from '@/components/PageLayout';
-import Spinner from '@/components/Spinner';
 import AdminNav from '@/features/admin/components/AdminNav';
+import AdminSaveBar from '@/features/admin/components/AdminSaveBar';
+import {
+  AdminSettingRow,
+  AdminSettingsGroup,
+} from '@/features/admin/components/AdminSettings';
 import AdminTabContent from '@/features/admin/components/AdminTabContent';
-import { AdminTabScrollPanel } from '@/features/admin/components/AdminTabScrollPanel';
 import { useAdminPageActions } from '@/features/admin/hooks/useAdminPageActions';
 import { useAdminTab } from '@/features/admin/hooks/useAdminTab';
 import { useLoadingState } from '@/features/admin/hooks/useLoadingState';
@@ -23,14 +28,54 @@ import {
   type AdminTabId,
   getVisibleTabs,
 } from '@/features/admin/lib/admin-tabs';
-import { buttonStyles } from '@/features/admin/lib/buttonStyles';
 import { showError } from '@/features/admin/lib/notifications';
 import { isOwner } from '@/features/admin/lib/permissions';
 import { useAlertModal } from '@/hooks/useAlertModal';
+import { scrollPageTo } from '@/hooks/usePageScroll';
 import { AdminConfig } from '@/types/admin';
 
-const headerActionButtonClassName =
-  'mb-2 flex h-9 w-10 shrink-0 items-center justify-center rounded-lg text-white transition-colors';
+const ADMIN_MOBILE_HEADER = { title: '管理后台' };
+function AdminShell({
+  nav,
+  children,
+}: {
+  nav: React.ReactNode;
+  children: React.ReactNode;
+}) {
+  return (
+    <PageLayout activePath='/admin' mobileHeader={ADMIN_MOBILE_HEADER}>
+      <div
+        className={`${PAGE_CONTAINER_CLASS} flex flex-col gap-4 py-4 sm:py-6 md:flex-row md:gap-8 md:py-8`}
+      >
+        {nav}
+        <div className='min-w-0 flex-1'>{children}</div>
+      </div>
+    </PageLayout>
+  );
+}
+
+function AdminLoadingSkeleton() {
+  return (
+    <AdminShell
+      nav={
+        <div className='flex gap-2 md:w-52 md:shrink-0 md:flex-col md:gap-1.5 lg:w-56'>
+          {Array.from({ length: 6 }, (_, index) => (
+            <div
+              key={index}
+              className='skeleton h-8 w-20 rounded-full md:h-9 md:w-full md:rounded-lg'
+            />
+          ))}
+        </div>
+      }
+    >
+      <div className='space-y-4'>
+        <div className='skeleton h-10 w-full rounded-lg' />
+        <div className='skeleton h-10 w-2/3 rounded-lg' />
+        <div className='skeleton h-24 w-full rounded-lg' />
+      </div>
+    </AdminShell>
+  );
+}
 
 function getAdminErrorView(error: string) {
   const normalizedError = error.toLowerCase();
@@ -85,6 +130,8 @@ function AdminPageClient() {
   const [runtimeParamsDirty, setRuntimeParamsDirty] = useState(false);
   const [configFileDirty, setConfigFileDirty] = useState(false);
   const [pendingTab, setPendingTab] = useState<AdminTabId | null>(null);
+  // 放弃改动时递增，让表单按当前配置重新挂载
+  const [formRevision, setFormRevision] = useState(0);
 
   const isOwnerRole = isOwner(role);
   const visibleTabs = getVisibleTabs(isOwnerRole);
@@ -95,25 +142,32 @@ function AdminPageClient() {
           formId: CONFIG_FILE_FORM_ID,
           saving: configFileSaving,
           dirty: configFileDirty,
-          title: '保存配置文件',
         }
       : activeTab === 'site'
         ? {
             formId: SITE_CONFIG_FORM_ID,
             saving: siteConfigSaving,
             dirty: siteConfigDirty,
-            title: '保存站点配置',
           }
         : activeTab === 'runtime'
           ? {
               formId: RUNTIME_PARAMS_FORM_ID,
               saving: runtimeParamsSaving,
               dirty: runtimeParamsDirty,
-              title: '保存运行参数',
             }
           : null;
+  const activeFormDirty = Boolean(activeSaveAction?.dirty);
+  const activeFormId = activeSaveAction?.formId;
   const hasUnsavedChanges =
     configFileDirty || siteConfigDirty || runtimeParamsDirty;
+  const navCounts = config
+    ? {
+        'video-source': config.SourceConfig.length,
+        'live-source': config.LiveConfig?.length ?? 0,
+        category: config.CustomCategories.length,
+        user: config.UserConfig.Users.length,
+      }
+    : undefined;
 
   useEffect(() => {
     const handleBeforeUnload = (event: BeforeUnloadEvent) => {
@@ -171,27 +225,56 @@ function AdminPageClient() {
     fetchConfig(true);
   }, [fetchConfig]);
 
-  const handleResetConfig = () => {
-    setShowResetConfigModal(true);
+  useEffect(() => {
+    if (!activeFormId || !activeFormDirty) return;
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (
+        event.key.toLowerCase() !== 's' ||
+        !(event.ctrlKey || event.metaKey) ||
+        event.altKey ||
+        event.shiftKey
+      ) {
+        return;
+      }
+      event.preventDefault();
+      const form = document.getElementById(activeFormId);
+      if (form instanceof HTMLFormElement) form.requestSubmit();
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [activeFormDirty, activeFormId]);
+
+  const clearActiveFormDirty = () => {
+    if (activeTab === 'config-file') setConfigFileDirty(false);
+    if (activeTab === 'site') setSiteConfigDirty(false);
+    if (activeTab === 'runtime') setRuntimeParamsDirty(false);
+  };
+
+  const switchTab = (tab: AdminTabId) => {
+    setActiveTab(tab);
+    scrollPageTo(0);
   };
 
   const handleSelectTab = (tab: AdminTabId) => {
     if (tab === activeTab) return;
-    if (activeSaveAction?.dirty) {
+    if (activeFormDirty) {
       setPendingTab(tab);
       return;
     }
-    setActiveTab(tab);
+    switchTab(tab);
   };
 
   const handleDiscardAndSwitchTab = () => {
     if (!pendingTab) return;
-    if (activeTab === 'config-file') setConfigFileDirty(false);
-    if (activeTab === 'site') setSiteConfigDirty(false);
-    if (activeTab === 'runtime') setRuntimeParamsDirty(false);
+    clearActiveFormDirty();
     const nextTab = pendingTab;
     setPendingTab(null);
-    setActiveTab(nextTab);
+    switchTab(nextTab);
+  };
+
+  const handleDiscardChanges = () => {
+    clearActiveFormDirty();
+    setFormRevision((revision) => revision + 1);
   };
 
   const handleConfirmResetConfig = async () => {
@@ -207,142 +290,81 @@ function AdminPageClient() {
     });
   };
 
-  if (loading) {
-    return (
-      <PageLayout activePath='/admin'>
-        <div className='px-2 py-4 sm:px-10 sm:py-8 md:-mb-14 md:flex md:h-dvh md:min-h-0 md:flex-col'>
-          <div className='mx-auto w-full max-w-[95%] md:flex md:min-h-0 md:flex-1 md:flex-col'>
-            <div className='flex h-[52px] shrink-0 items-end gap-1.5 pr-1'>
-              <div className='skeleton h-11 w-28 rounded-t-lg' />
-              <div className='skeleton h-9 w-24 rounded-t-lg' />
-              <div className='skeleton h-9 w-24 rounded-t-lg' />
-              <div className='skeleton h-9 w-28 rounded-t-lg' />
-            </div>
-
-            <section className='flex min-w-0 items-center justify-center rounded-xl rounded-tl-none border border-gray-200 bg-white/80 p-4 shadow-sm backdrop-blur-md dark:border-gray-700 dark:bg-gray-800/50 sm:p-6 md:min-h-0 md:flex-1'>
-              <div className='flex flex-col items-center gap-4 text-center'>
-                <Spinner className='h-10 w-10 text-brand-500' />
-                <div>
-                  <p className='text-base font-medium text-gray-900 dark:text-gray-100'>
-                    正在加载后台配置
-                  </p>
-                  <p className='mt-1 text-sm text-gray-500 dark:text-gray-400'>
-                    请稍候片刻...
-                  </p>
-                </div>
-              </div>
-            </section>
-          </div>
-        </div>
-      </PageLayout>
-    );
-  }
+  if (loading) return <AdminLoadingSkeleton />;
 
   if (error) {
     const errorView = getAdminErrorView(error);
 
     return (
-      <PageLayout activePath='/admin'>
-        <div className='flex min-h-[60vh] items-center justify-center px-4 py-12'>
-          <section className='w-full max-w-md rounded-xl border border-gray-200 bg-white p-6 text-center shadow-sm dark:border-gray-700 dark:bg-gray-800'>
-            <div className='mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-full bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300'>
-              <AlertTriangle className='h-6 w-6' aria-hidden='true' />
-            </div>
-            <h1 className='text-xl font-semibold text-gray-900 dark:text-gray-100'>
-              {errorView.title}
-            </h1>
-            <p className='mt-2 text-sm leading-6 text-gray-600 dark:text-gray-300'>
-              {errorView.message}
-            </p>
+      <PageLayout activePath='/admin' mobileHeader={ADMIN_MOBILE_HEADER}>
+        <div className='flex min-h-[60vh] items-center justify-center py-12'>
+          <LoadingStatePanel
+            icon={<AlertTriangle className='h-7 w-7' aria-hidden='true' />}
+            tone='amber'
+            title={errorView.title}
+            message={errorView.message}
+          >
             <a
               href={errorView.actionHref}
               className='mt-6 inline-flex h-10 items-center justify-center rounded-lg bg-brand-600 px-4 text-sm font-medium text-white transition-colors hover:bg-brand-700'
             >
               {errorView.actionText}
             </a>
-          </section>
+          </LoadingStatePanel>
         </div>
       </PageLayout>
     );
   }
 
   return (
-    <PageLayout activePath='/admin'>
-      <div className='px-2 py-4 sm:px-10 sm:py-8 md:-mb-14 md:flex md:h-dvh md:min-h-0 md:flex-col'>
-        <div className='mx-auto w-full max-w-[95%] md:flex md:min-h-0 md:flex-1 md:flex-col'>
-          <div className='flex shrink-0 items-end gap-3'>
-            <div className='min-w-0 flex-1'>
-              <AdminNav
-                tabs={visibleTabs}
-                activeTab={activeTab}
-                onSelect={handleSelectTab}
-              />
-            </div>
-            {config && activeSaveAction && (
-              <button
-                type='submit'
-                form={activeSaveAction.formId}
-                disabled={activeSaveAction.saving || !activeSaveAction.dirty}
-                title={
-                  activeSaveAction.saving
-                    ? '保存中...'
-                    : activeSaveAction.dirty
-                      ? activeSaveAction.title
-                      : '没有改动'
-                }
-                aria-label={
-                  activeSaveAction.saving
-                    ? '保存中'
-                    : activeSaveAction.dirty
-                      ? activeSaveAction.title
-                      : '没有改动'
-                }
-                className={`${headerActionButtonClassName} ${
-                  activeSaveAction.saving
-                    ? 'cursor-not-allowed bg-gray-400 dark:bg-gray-600'
-                    : activeSaveAction.dirty
-                      ? 'bg-brand-600 hover:bg-brand-700 dark:bg-brand-600 dark:hover:bg-brand-700'
-                      : 'cursor-not-allowed bg-gray-200 text-gray-400 dark:bg-gray-700 dark:text-gray-500'
-                }`}
-              >
-                {activeSaveAction.saving ? (
-                  <Spinner className='h-[18px] w-[18px]' />
-                ) : (
-                  <Save size={18} />
-                )}
-              </button>
-            )}
-            {config && isOwnerRole && (
-              <button
-                type='button'
-                onClick={handleResetConfig}
-                title='重置配置'
-                aria-label='重置配置'
-                className={`${headerActionButtonClassName} bg-red-600 hover:bg-red-700 dark:bg-red-600 dark:hover:bg-red-700`}
-              >
-                <RotateCcw size={18} />
-              </button>
-            )}
-          </div>
+    <AdminShell
+      nav={
+        <AdminNav
+          tabs={visibleTabs}
+          activeTab={activeTab}
+          onSelect={handleSelectTab}
+          counts={navCounts}
+          dirtyTab={activeFormDirty ? activeTab : null}
+        />
+      }
+    >
+      <AdminTabContent
+        key={`${activeTab}:${formRevision}`}
+        activeTab={activeTab}
+        config={config}
+        role={role}
+        refreshConfig={fetchConfig}
+        onSiteConfigSavingChange={setSiteConfigSaving}
+        onRuntimeParamsSavingChange={setRuntimeParamsSaving}
+        onConfigFileSavingChange={setConfigFileSaving}
+        onSiteConfigDirtyChange={setSiteConfigDirty}
+        onRuntimeParamsDirtyChange={setRuntimeParamsDirty}
+        onConfigFileDirtyChange={setConfigFileDirty}
+      />
 
-          <section className='min-w-0 overflow-hidden rounded-xl rounded-tl-none border border-gray-200 bg-white/80 shadow-sm backdrop-blur-md dark:border-gray-700 dark:bg-gray-800/50 md:min-h-0 md:flex-1'>
-            <AdminTabScrollPanel activeTab={activeTab}>
-              <AdminTabContent
-                activeTab={activeTab}
-                config={config}
-                role={role}
-                refreshConfig={fetchConfig}
-                onSiteConfigSavingChange={setSiteConfigSaving}
-                onRuntimeParamsSavingChange={setRuntimeParamsSaving}
-                onConfigFileSavingChange={setConfigFileSaving}
-                onSiteConfigDirtyChange={setSiteConfigDirty}
-                onRuntimeParamsDirtyChange={setRuntimeParamsDirty}
-                onConfigFileDirtyChange={setConfigFileDirty}
-              />
-            </AdminTabScrollPanel>
-          </section>
-        </div>
-      </div>
+      {config && isOwnerRole && activeTab === 'config-file' && (
+        <AdminSettingsGroup title='危险操作' className='mt-8'>
+          <AdminSettingRow label='重置配置' layout='inline'>
+            <button
+              type='button'
+              onClick={() => setShowResetConfigModal(true)}
+              aria-label='重置配置'
+              className='flex h-9 items-center gap-1.5 rounded-lg px-3 text-sm font-medium text-red-600 ring-1 ring-inset ring-red-200 transition-colors hover:bg-red-50 dark:text-red-400 dark:ring-red-500/30 dark:hover:bg-red-500/10'
+            >
+              <RotateCcw aria-hidden='true' className='h-4 w-4' />
+              重置
+            </button>
+          </AdminSettingRow>
+        </AdminSettingsGroup>
+      )}
+
+      {config && activeSaveAction?.dirty && (
+        <AdminSaveBar
+          formId={activeSaveAction.formId}
+          saving={activeSaveAction.saving}
+          onDiscard={handleDiscardChanges}
+        />
+      )}
 
       <AlertModal
         isOpen={alertModal.isOpen}
@@ -368,40 +390,14 @@ function AdminPageClient() {
       <ConfirmModal
         isOpen={showResetConfigModal}
         title='确认重置配置'
+        message='用户封禁与管理员设置、自定义视频源将被清除，站点配置恢复默认值。'
         onClose={() => setShowResetConfigModal(false)}
         onConfirm={handleConfirmResetConfig}
         confirmDisabled={isLoading('resetConfig')}
         confirmText={isLoading('resetConfig') ? '重置中...' : '确认重置'}
-        confirmClassName={`px-6 py-2.5 text-sm font-medium ${
-          isLoading('resetConfig') ? buttonStyles.disabled : buttonStyles.danger
-        }`}
-        cancelClassName={`px-6 py-2.5 text-sm font-medium ${buttonStyles.secondary}`}
-      >
-        <div className='mb-4 rounded-lg border border-yellow-200 bg-yellow-50 p-4 dark:border-yellow-800 dark:bg-yellow-900/20'>
-          <div className='mb-2 flex items-center space-x-2'>
-            <svg
-              className='h-5 w-5 text-yellow-600 dark:text-yellow-400'
-              fill='none'
-              stroke='currentColor'
-              viewBox='0 0 24 24'
-            >
-              <path
-                strokeLinecap='round'
-                strokeLinejoin='round'
-                strokeWidth={2}
-                d='M12 9v2m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z'
-              />
-            </svg>
-            <span className='text-sm font-medium text-yellow-800 dark:text-yellow-300'>
-              危险操作警告
-            </span>
-          </div>
-          <p className='text-sm text-yellow-700 dark:text-yellow-400'>
-            此操作将重置用户封禁和管理员设置、自定义视频源，站点配置将重置为默认值，是否继续？
-          </p>
-        </div>
-      </ConfirmModal>
-    </PageLayout>
+        danger
+      />
+    </AdminShell>
   );
 }
 

@@ -1,16 +1,16 @@
-﻿'use client';
+'use client';
 
 import dynamic from 'next/dynamic';
 
-import Spinner from '@/components/Spinner';
 import { type AdminTabId } from '@/features/admin/lib/admin-tabs';
 import { type AdminConfig } from '@/types/admin';
 
 function AdminTabLoading() {
   return (
-    <div className='flex min-h-32 items-center justify-center text-sm text-gray-500 dark:text-gray-400'>
-      <Spinner className='mr-2 h-4 w-4 text-brand-500' />
-      加载中...
+    <div aria-busy='true' className='space-y-4'>
+      <div className='skeleton h-9 w-full rounded-lg' />
+      <div className='skeleton h-9 w-3/4 rounded-lg' />
+      <div className='skeleton h-32 w-full rounded-lg' />
     </div>
   );
 }

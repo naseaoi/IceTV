@@ -25,30 +25,31 @@ describe('SortableSourceRow', () => {
   function renderRow({
     onToggleEnable = jest.fn(),
     onChangeProxyMode = jest.fn(),
+    onEdit = jest.fn(),
+    onValidate = jest.fn(),
+    onDelete = jest.fn(),
   } = {}) {
     render(
-      <table>
-        <tbody>
-          <SortableSourceRow
-            source={source}
-            isSelected={false}
-            validationStatus={null}
-            sourceRouteStats={null}
-            isProxyModeLoading={false}
-            isToggleLoading={false}
-            isDeleteLoading={false}
-            isValidationLoading={false}
-            onSelectSource={jest.fn()}
-            onChangeProxyMode={onChangeProxyMode}
-            onToggleEnable={onToggleEnable}
-            onValidate={jest.fn()}
-            onEdit={jest.fn()}
-            onDelete={jest.fn()}
-          />
-        </tbody>
-      </table>,
+      <ul>
+        <SortableSourceRow
+          source={source}
+          isSelected={false}
+          validationStatus={null}
+          sourceRouteStats={null}
+          isProxyModeLoading={false}
+          isToggleLoading={false}
+          isDeleteLoading={false}
+          isValidationLoading={false}
+          onSelectSource={jest.fn()}
+          onChangeProxyMode={onChangeProxyMode}
+          onToggleEnable={onToggleEnable}
+          onValidate={onValidate}
+          onEdit={onEdit}
+          onDelete={onDelete}
+        />
+      </ul>,
     );
-    return { onToggleEnable, onChangeProxyMode };
+    return { onToggleEnable, onChangeProxyMode, onEdit, onValidate, onDelete };
   }
 
   it('renders status as an explicit switch', () => {
@@ -60,6 +61,22 @@ describe('SortableSourceRow', () => {
 
     fireEvent.click(statusSwitch);
     expect(onToggleEnable).toHaveBeenCalledWith('test-source');
+  });
+
+  it('opens edit, validation and delete from the row menu', () => {
+    const { onEdit, onValidate, onDelete } = renderRow();
+    const trigger = screen.getByRole('button', { name: '测试源 的操作' });
+    for (const label of ['编辑', '检测', '删除']) {
+      fireEvent.click(trigger);
+      fireEvent.click(screen.getByRole('menuitem', { name: label }));
+      expect(screen.queryByRole('menu')).not.toBeInTheDocument();
+    }
+    expect(onEdit).toHaveBeenCalledWith(source);
+    expect(onValidate).toHaveBeenCalledWith(source.key);
+    expect(onDelete).toHaveBeenCalledWith(source.key);
+    expect(screen.getByTitle('7天成功率 · 直连 — · 代理 —')).toHaveTextContent(
+      '直连 — · 代理 —',
+    );
   });
 
   it('selects a proxy mode directly', () => {

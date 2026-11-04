@@ -87,7 +87,9 @@ export async function handleProfile(request: NextRequest) {
       favoritesPublic?: boolean;
     } = {};
     if (body.nickname !== undefined)
-      patch.nickname = validateNickname(body.nickname).nickname;
+      patch.nickname = validateNickname(body.nickname, {
+        allowReserved: guard.role === 'owner',
+      }).nickname;
     if (body.avatarSeed !== undefined)
       patch.avatarSeed = validateAvatarSeed(body.avatarSeed);
     if (body.favoritesPublic !== undefined) {
@@ -117,20 +119,22 @@ export async function handleNicknameAvailability(request: NextRequest) {
           },
         },
       );
+    const guard = await requireActiveUser(request);
+    const signedIn = !isGuardFailure(guard);
     let nickname: string;
     try {
       nickname = validateNickname(
         request.nextUrl.searchParams.get('nickname'),
+        { allowReserved: signedIn && guard.role === 'owner' },
       ).nickname;
     } catch (error) {
       if (error instanceof ProfileValidationError)
         return socialJson({ available: false, error: error.message });
       throw error;
     }
-    const guard = await requireActiveUser(request);
     const available = await db.isNicknameAvailable(
       nickname,
-      isGuardFailure(guard) ? undefined : guard.username,
+      signedIn ? guard.username : undefined,
     );
     return socialJson(
       available

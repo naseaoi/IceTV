@@ -9,7 +9,11 @@ type Availability = {
   status: 'idle' | 'checking' | 'available' | 'error';
   message: string;
 };
-export function useNicknameAvailability(nickname: string, enabled = true) {
+export function useNicknameAvailability(
+  nickname: string,
+  enabled = true,
+  allowReserved = false,
+) {
   const [state, setState] = useState<Availability>({
     value: '',
     status: 'idle',
@@ -21,7 +25,7 @@ export function useNicknameAvailability(nickname: string, enabled = true) {
       return;
     }
     try {
-      validateNickname(nickname);
+      validateNickname(nickname, { allowReserved });
     } catch (error) {
       setState({
         value: nickname,
@@ -61,7 +65,7 @@ export function useNicknameAvailability(nickname: string, enabled = true) {
       window.clearTimeout(timer);
       controller.abort();
     };
-  }, [nickname, enabled]);
+  }, [nickname, enabled, allowReserved]);
   if (!enabled || !nickname) {
     return { value: nickname, status: 'idle' as const, message: '' };
   }

@@ -3,6 +3,10 @@
 import { X } from 'lucide-react';
 import { type ReactNode } from 'react';
 
+import {
+  MODAL_CLOSE_BUTTON_CLASS,
+  MODAL_TITLE_CLASS,
+} from '@/components/modals/modal-styles';
 import ModalShell from '@/components/modals/ModalShell';
 
 interface AdminDialogProps {
@@ -28,17 +32,15 @@ export default function AdminDialog({
       onClose={onClose}
       panelClassName={panelClassName}
     >
-      <div className='p-6'>
-        <div className='mb-6 flex items-center justify-between'>
-          <h3 className='text-xl font-semibold text-gray-900 dark:text-gray-100'>
-            {title}
-          </h3>
+      <div className='p-4 sm:p-6'>
+        <div className='mb-4 flex items-start justify-between gap-3'>
+          <h3 className={MODAL_TITLE_CLASS}>{title}</h3>
           <button
             onClick={onClose}
-            className='text-gray-400 transition-colors hover:text-gray-600 dark:hover:text-gray-300'
+            className={MODAL_CLOSE_BUTTON_CLASS}
             aria-label='关闭弹窗'
           >
-            <X className='h-6 w-6' />
+            <X className='h-5 w-5' />
           </button>
         </div>
 

@@ -45,6 +45,8 @@ export function ProfileForm({
 }) {
   const { session, refreshSession } = useAuthSession();
   const profileId = session.status === 'authenticated' ? session.profileId : '';
+  const allowReserved =
+    session.status === 'authenticated' && session.role === 'owner';
   const [saved, setSaved] = useState<SavedProfile>(() => ({
     nickname:
       session.status === 'authenticated' ? (session.nickname ?? '') : '',
@@ -61,7 +63,11 @@ export function ProfileForm({
 
   const trimmedNickname = nickname.normalize('NFKC').trim();
   const nicknameChanged = trimmedNickname !== saved.nickname;
-  const availability = useNicknameAvailability(nickname, nicknameChanged);
+  const availability = useNicknameAvailability(
+    nickname,
+    nicknameChanged,
+    allowReserved,
+  );
   const nicknameReady = nicknameChanged
     ? availability.status === 'available'
     : trimmedNickname !== '';
@@ -109,7 +115,9 @@ export function ProfileForm({
     try {
       await updateProfile({
         ...(nicknameChanged
-          ? { nickname: validateNickname(nickname).nickname }
+          ? {
+              nickname: validateNickname(nickname, { allowReserved }).nickname,
+            }
           : {}),
         ...(avatarSeed !== saved.avatarSeed ? { avatarSeed } : {}),
         ...(!required && favoritesPublic !== saved.favoritesPublic

@@ -10,11 +10,7 @@ import RuntimeParamsTab from '@/features/admin/components/tabs/RuntimeParamsTab'
 import { RUNTIME_PARAMS_FORM_ID } from '@/features/admin/lib/admin-form-ids';
 import { adminPost } from '@/features/admin/lib/api';
 import { IMPORT_ADMIN_CONFIG } from '@/lib/__tests__/__fixtures__/import-admin-config';
-import {
-  type RuntimeParamSettings,
-  DEFAULT_RUNTIME_PARAMS,
-  RUNTIME_PARAM_RANGES,
-} from '@/lib/runtime-params';
+import { DEFAULT_RUNTIME_PARAMS } from '@/lib/runtime-params';
 
 jest.mock('@/components/modals/AlertModal', () => ({
   __esModule: true,
@@ -89,32 +85,25 @@ describe('RuntimeParamsTab', () => {
     expect(adminPost).not.toHaveBeenCalled();
   });
 
-  it('places ranges immediately before the inputs instead of below labels', () => {
-    const { container } = setup();
-    const inputs = container.querySelectorAll<HTMLInputElement>('input[name]');
+  it('describes inputs with their hint and restores defaults', () => {
+    const { onDirtyChange } = setup();
+    const input = screen.getByLabelText('弹幕上游请求超时');
 
-    inputs.forEach((input) => {
-      const key = input.name as keyof RuntimeParamSettings;
-      const range = RUNTIME_PARAM_RANGES[key];
-      const rangeDescription = document.getElementById(`${input.id}-range`);
-      const label = container.querySelector(`label[for="${input.id}"]`);
-
-      expect(input.previousElementSibling).toBe(rangeDescription);
-      expect(rangeDescription).toHaveTextContent(`${range.min}–${range.max}`);
-      expect(rangeDescription).toHaveTextContent(
-        `默认 ${DEFAULT_RUNTIME_PARAMS[key]}`,
-      );
-      expect(label?.parentElement).not.toContainElement(rangeDescription);
-      expect(input.getAttribute('aria-describedby')?.split(' ')).toContain(
-        rangeDescription?.id,
-      );
-    });
-
-    expect(
-      screen.getByLabelText('弹幕上游请求超时'),
-    ).toHaveAccessibleDescription(
-      '1–60 默认 12 用于弹幕搜索、绑定校验、内容拉取和连接测试的单次回源请求。',
+    expect(input).toHaveAccessibleDescription(
+      '用于弹幕搜索、绑定校验、内容拉取和连接测试的单次回源请求。',
     );
+    const reset = screen.getByRole('button', {
+      name: '弹幕上游请求超时恢复默认值 12',
+    });
+    expect(reset).toHaveClass('invisible');
+
+    fireEvent.change(input, { target: { value: '25' } });
+    expect(reset).not.toHaveClass('invisible');
+    expect(onDirtyChange).toHaveBeenLastCalledWith(true);
+
+    fireEvent.click(reset);
+    expect(input).toHaveValue(12);
+    expect(onDirtyChange).toHaveBeenLastCalledWith(false);
   });
 
   it('omits the introductory note above the parameter groups', () => {

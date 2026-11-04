@@ -22,7 +22,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 
 import AlertModal from '@/components/modals/AlertModal';
 import ConfirmModal from '@/components/modals/ConfirmModal';
-import { ResizableTableHeader } from '@/features/admin/components/ResizableTableHeader';
+import AdminSearchField from '@/features/admin/components/AdminSearchField';
 import { BatchSourceMenu } from '@/features/admin/components/tabs/video-source/BatchSourceMenu';
 import {
   type RouteModeStats,
@@ -92,6 +92,18 @@ const VideoSourceConfig = ({
   const [sources, setSources] = useState<DataSource[]>([]);
   const [sourceRouteStats, setSourceRouteStats] =
     useState<SourceRouteStatsBySource>({});
+  const [filterQuery, setFilterQuery] = useState('');
+  const normalizedQuery = filterQuery.trim().toLowerCase();
+  const isFiltering = normalizedQuery.length > 0;
+  const visibleRows = useMemo(
+    () =>
+      sources.filter((item) =>
+        [item.name, item.key, item.api, item.detail].some((value) =>
+          value?.toLowerCase().includes(normalizedQuery),
+        ),
+      ),
+    [sources, normalizedQuery],
+  );
   const [showAddForm, setShowAddForm] = useState(false);
   const [editingSource, setEditingSource] = useState<DataSource | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<DataSource | null>(null);
@@ -109,9 +121,9 @@ const VideoSourceConfig = ({
     new Set(),
   );
 
-  const selectAll = useMemo(() => {
-    return selectedSources.size === sources.length && selectedSources.size > 0;
-  }, [selectedSources.size, sources.length]);
+  const selectAll =
+    visibleRows.length > 0 &&
+    visibleRows.every((source) => selectedSources.has(source.key));
 
   const [showValidationModal, setShowValidationModal, openValidationModal] =
     useModalState(false);
@@ -270,7 +282,7 @@ const VideoSourceConfig = ({
 
   const handleDragEnd = (event: DragEndEvent) => {
     const { active, over } = event;
-    if (!over || active.id === over.id) return;
+    if (isFiltering || !over || active.id === over.id) return;
     const oldIndex = sources.findIndex((s) => s.key === active.id);
     const newIndex = sources.findIndex((s) => s.key === over.id);
     setSources((prev) => arrayMove(prev, oldIndex, newIndex));
@@ -332,14 +344,16 @@ const VideoSourceConfig = ({
 
   const handleSelectAll = useCallback(
     (checked: boolean) => {
-      if (checked) {
-        const allKeys = sources.map((s) => s.key);
-        setSelectedSources(new Set(allKeys));
-      } else {
-        setSelectedSources(new Set());
-      }
+      setSelectedSources((previous) => {
+        const next = new Set(previous);
+        visibleRows.forEach((source) => {
+          if (checked) next.add(source.key);
+          else next.delete(source.key);
+        });
+        return next;
+      });
     },
-    [sources],
+    [visibleRows],
   );
 
   const handleSelectSource = useCallback((key: string, checked: boolean) => {
@@ -382,21 +396,64 @@ const VideoSourceConfig = ({
 
   return (
     <div className='space-y-6'>
-      <div className='flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between'>
-        <h4 className='text-sm font-medium text-gray-700 dark:text-gray-300'>
-          视频源列表
-        </h4>
-        <div className='flex flex-col gap-3 sm:flex-row sm:items-center sm:gap-2'>
-          <div
-            className={`${selectedSources.size > 0 ? '' : 'invisible'} contents`}
+      <div className='flex items-center justify-between gap-3'>
+        <AdminSearchField
+          value={filterQuery}
+          onChange={setFilterQuery}
+          label='搜索视频源'
+          className='min-w-0 flex-1 sm:w-72 sm:flex-none'
+        />
+        <div className='flex shrink-0 items-center gap-2'>
+          <button
+            onClick={() => {
+              setShowAddForm(true);
+              setEditingSource(null);
+            }}
+            className={buttonStyles.primary}
           >
-            <div className='order-2 flex flex-wrap items-center gap-3 sm:order-1'>
-              <span className='text-sm text-gray-600 dark:text-gray-400'>
-                <span className='sm:hidden'>已选 {selectedSources.size}</span>
-                <span className='hidden sm:inline'>
-                  已选择 {selectedSources.size} 个视频源
-                </span>
-              </span>
+            添加视频源
+          </button>
+        </div>
+      </div>
+
+      <VideoSourceAddForm
+        newSource={newSource}
+        isOpen={showAddForm}
+        onChange={setNewSource}
+        onSubmit={handleAddSource}
+        onCancel={() => setShowAddForm(false)}
+        isSubmitting={isLoading('addSource')}
+      />
+
+      <VideoSourceEditForm
+        editingSource={editingSource}
+        isOpen={!!editingSource}
+        onChange={setEditingSource}
+        onSubmit={handleEditSource}
+        onCancel={() => setEditingSource(null)}
+        isSubmitting={isLoading('editSource')}
+      />
+
+      <div
+        className='overflow-hidden rounded-xl ring-1 ring-gray-200 dark:ring-white/[0.06] [&:has([role=listbox])]:overflow-visible [&:has([role=menu])]:overflow-visible'
+        data-list='source-list'
+      >
+        <div className='flex h-10 items-center gap-3 rounded-t-xl bg-gray-50 px-3 text-xs text-gray-500 dark:bg-white/[0.03] dark:text-gray-400'>
+          <input
+            type='checkbox'
+            aria-label='全选当前视频源'
+            disabled={visibleRows.length === 0}
+            checked={selectAll}
+            onChange={(e) => handleSelectAll(e.target.checked)}
+            className={checkboxStyles}
+          />
+          <span className='tabular-nums'>
+            {selectedSources.size > 0
+              ? `已选 ${selectedSources.size} 个`
+              : `共 ${visibleRows.length} 个`}
+          </span>
+          <div className='ml-auto'>
+            {selectedSources.size > 0 && (
               <BatchSourceMenu
                 selectedCount={selectedSources.size}
                 isEnableLoading={isLoading('batchSource_batch_enable')}
@@ -420,45 +477,9 @@ const VideoSourceConfig = ({
                   requestBatchOperation('batch_set_proxy_mode', { proxyMode })
                 }
               />
-            </div>
-            <div className='order-2 hidden h-6 w-px bg-gray-300 dark:bg-gray-600 sm:block'></div>
-          </div>
-          <div className='order-1 flex items-center gap-2 sm:order-2'>
-            <button
-              onClick={() => {
-                setShowAddForm(true);
-                setEditingSource(null);
-              }}
-              className={buttonStyles.success}
-            >
-              添加视频源
-            </button>
+            )}
           </div>
         </div>
-      </div>
-
-      <VideoSourceAddForm
-        newSource={newSource}
-        isOpen={showAddForm}
-        onChange={setNewSource}
-        onSubmit={handleAddSource}
-        onCancel={() => setShowAddForm(false)}
-        isSubmitting={isLoading('addSource')}
-      />
-
-      <VideoSourceEditForm
-        editingSource={editingSource}
-        isOpen={!!editingSource}
-        onChange={setEditingSource}
-        onSubmit={handleEditSource}
-        onCancel={() => setEditingSource(null)}
-        isSubmitting={isLoading('editSource')}
-      />
-
-      <div
-        className='relative overflow-x-auto rounded-lg border border-gray-200 dark:border-gray-700'
-        data-table='source-list'
-      >
         <DndContext
           sensors={sensors}
           collisionDetection={closestCenter}
@@ -466,139 +487,44 @@ const VideoSourceConfig = ({
           autoScroll={true}
           modifiers={[restrictToVerticalAxis, restrictToParentElement]}
         >
-          <table className='w-full table-fixed divide-y divide-gray-200 dark:divide-gray-700'>
-            <thead className='sticky top-0 z-10 bg-gray-50 dark:bg-gray-900'>
-              <tr>
-                <th
-                  data-column-width='32'
-                  style={{ width: 32, minWidth: 32, maxWidth: 32 }}
-                />
-                <th
-                  data-column-width='48'
-                  style={{ width: 48, minWidth: 48, maxWidth: 48 }}
-                  className='px-2 py-3 text-center'
-                >
-                  <input
-                    type='checkbox'
-                    checked={selectAll}
-                    onChange={(e) => handleSelectAll(e.target.checked)}
-                    className={checkboxStyles}
-                  />
-                </th>
-                <ResizableTableHeader
-                  tableId='source-list'
-                  columnId='name'
-                  defaultWidth={124}
-                  minWidth={96}
-                  className='px-6 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400'
-                >
-                  名称
-                </ResizableTableHeader>
-                <ResizableTableHeader
-                  tableId='source-list'
-                  columnId='key'
-                  defaultWidth={93}
-                  minWidth={72}
-                  className='px-6 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400'
-                >
-                  Key
-                </ResizableTableHeader>
-                <ResizableTableHeader
-                  tableId='source-list'
-                  columnId='api'
-                  defaultWidth={332}
-                  minWidth={112}
-                  className='px-6 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400'
-                >
-                  API 地址
-                </ResizableTableHeader>
-                <ResizableTableHeader
-                  tableId='source-list'
-                  columnId='detail'
-                  defaultWidth={209}
-                  minWidth={128}
-                  className='px-6 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400'
-                >
-                  Detail 地址
-                </ResizableTableHeader>
-                <ResizableTableHeader
-                  tableId='source-list'
-                  columnId='status'
-                  defaultWidth={88}
-                  minWidth={88}
-                  className='px-6 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400'
-                >
-                  状态
-                </ResizableTableHeader>
-                <ResizableTableHeader
-                  tableId='source-list'
-                  columnId='proxy-mode'
-                  defaultWidth={181}
-                  minWidth={112}
-                  className='px-6 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400'
-                >
-                  流量路由
-                </ResizableTableHeader>
-                <ResizableTableHeader
-                  tableId='source-list'
-                  columnId='success-rate'
-                  defaultWidth={206}
-                  minWidth={120}
-                  className='px-6 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400'
-                >
-                  7天成功率
-                </ResizableTableHeader>
-                <ResizableTableHeader
-                  tableId='source-list'
-                  columnId='validity'
-                  defaultWidth={116}
-                  minWidth={88}
-                  className='px-6 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400'
-                >
-                  有效性
-                </ResizableTableHeader>
-                <ResizableTableHeader
-                  tableId='source-list'
-                  columnId='actions'
-                  defaultWidth={160}
-                  minWidth={160}
-                  hideDivider
-                  className='px-6 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400'
-                >
-                  操作
-                </ResizableTableHeader>
-              </tr>
-            </thead>
-            <SortableContext
-              items={sources.map((s) => s.key)}
-              strategy={verticalListSortingStrategy}
+          <SortableContext
+            items={visibleRows.map((s) => s.key)}
+            strategy={verticalListSortingStrategy}
+          >
+            <ul
+              aria-label='视频源列表'
+              className='divide-y divide-gray-200 dark:divide-white/[0.06]'
             >
-              <tbody className='divide-y divide-gray-200 dark:divide-gray-700'>
-                {sources.map((source) => (
-                  <SortableSourceRow
-                    key={source.key}
-                    source={source}
-                    isSelected={selectedSources.has(source.key)}
-                    validationStatus={getValidationStatus(source.key)}
-                    sourceRouteStats={sourceRouteStats[source.key] || null}
-                    isProxyModeLoading={isLoading(`proxyMode_${source.key}`)}
-                    isToggleLoading={isLoading(`toggleSource_${source.key}`)}
-                    isDeleteLoading={isLoading(`deleteSource_${source.key}`)}
-                    isValidationLoading={isValidating}
-                    onSelectSource={handleSelectSource}
-                    onChangeProxyMode={handleChangeProxyMode}
-                    onToggleEnable={handleToggleEnable}
-                    onValidate={handleValidateSource}
-                    onEdit={(source) => {
-                      setEditingSource(source);
-                      setShowAddForm(false);
-                    }}
-                    onDelete={handleDelete}
-                  />
-                ))}
-              </tbody>
-            </SortableContext>
-          </table>
+              {visibleRows.length === 0 && (
+                <li className='rounded-b-xl bg-white px-6 py-12 text-center text-sm text-gray-500 dark:bg-gray-900 dark:text-gray-400'>
+                  {isFiltering ? '没有匹配的视频源' : '暂无视频源'}
+                </li>
+              )}
+              {visibleRows.map((source) => (
+                <SortableSourceRow
+                  isSortingDisabled={isFiltering}
+                  key={source.key}
+                  source={source}
+                  isSelected={selectedSources.has(source.key)}
+                  validationStatus={getValidationStatus(source.key)}
+                  sourceRouteStats={sourceRouteStats[source.key] || null}
+                  isProxyModeLoading={isLoading(`proxyMode_${source.key}`)}
+                  isToggleLoading={isLoading(`toggleSource_${source.key}`)}
+                  isDeleteLoading={isLoading(`deleteSource_${source.key}`)}
+                  isValidationLoading={isValidating}
+                  onSelectSource={handleSelectSource}
+                  onChangeProxyMode={handleChangeProxyMode}
+                  onToggleEnable={handleToggleEnable}
+                  onValidate={handleValidateSource}
+                  onEdit={(source) => {
+                    setEditingSource(source);
+                    setShowAddForm(false);
+                  }}
+                  onDelete={handleDelete}
+                />
+              ))}
+            </ul>
+          </SortableContext>
         </DndContext>
       </div>
 

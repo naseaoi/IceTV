@@ -1,7 +1,6 @@
 'use client';
 
-import { ResizableTableHeader } from '@/features/admin/components/ResizableTableHeader';
-import { buttonStyles } from '@/features/admin/lib/buttonStyles';
+import AdminRowMenu from '@/features/admin/components/AdminRowMenu';
 
 interface UserGroup {
   name: string;
@@ -22,94 +21,56 @@ export function UserGroupTable({
   onDelete,
 }: UserGroupTableProps) {
   return (
-    <div
-      className='relative max-h-[20rem] overflow-x-auto overflow-y-auto rounded-lg border border-gray-200 dark:border-gray-700'
-      data-table='user-group-list'
-    >
-      <table className='w-full table-fixed divide-y divide-gray-200 dark:divide-gray-700'>
-        <thead className='sticky top-0 z-10 bg-gray-50 dark:bg-gray-900'>
-          <tr>
-            <ResizableTableHeader
-              tableId='user-group-list'
-              columnId='name'
-              defaultWidth={359}
-              minWidth={120}
-              className='px-6 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400'
-            >
-              用户组名称
-            </ResizableTableHeader>
-            <ResizableTableHeader
-              tableId='user-group-list'
-              columnId='source-permissions'
-              defaultWidth={867}
-              minWidth={120}
-              className='px-6 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400'
-            >
-              可用视频源
-            </ResizableTableHeader>
-            <ResizableTableHeader
-              tableId='user-group-list'
-              columnId='actions'
-              defaultWidth={364}
-              minWidth={160}
-              hideDivider
-              className='px-6 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400'
-            >
-              操作
-            </ResizableTableHeader>
-          </tr>
-        </thead>
-        <tbody className='divide-y divide-gray-200 dark:divide-gray-700'>
+    <div className='overflow-hidden rounded-xl ring-1 ring-gray-200 dark:ring-white/[0.06]'>
+      {userGroups.length === 0 ? (
+        <p className='bg-white px-3 py-8 text-center text-sm text-gray-500 dark:bg-gray-900 dark:text-gray-400'>
+          暂无用户组
+        </p>
+      ) : (
+        <ul
+          aria-label='用户组'
+          className='divide-y divide-gray-200 dark:divide-white/[0.06]'
+        >
           {userGroups.map((group) => (
-            <tr
+            <li
               key={group.name}
-              className='transition-colors hover:bg-gray-50 dark:hover:bg-gray-800'
+              className='flex items-center gap-3 bg-white px-3 py-3 transition-colors hover:bg-gray-50 dark:bg-gray-900 dark:hover:bg-white/[0.02]'
             >
-              <td className='whitespace-nowrap px-6 py-4 text-sm font-medium text-gray-900 dark:text-gray-100'>
-                {group.name}
-              </td>
-              <td className='whitespace-nowrap px-6 py-4'>
-                <div className='flex items-center space-x-2'>
-                  <span className='text-sm text-gray-900 dark:text-gray-100'>
-                    {group.enabledApis && group.enabledApis.length > 0
-                      ? `${group.enabledApis.length} 个源`
-                      : '无限制'}
-                  </span>
-                </div>
-              </td>
-              <td className='space-x-2 whitespace-nowrap px-6 py-4 text-left text-sm font-medium'>
-                <button
-                  onClick={() => onEdit(group)}
-                  disabled={isEditLoading(group.name)}
-                  className={`${buttonStyles.roundedPrimary} ${
-                    isEditLoading(group.name)
-                      ? 'cursor-not-allowed opacity-50'
-                      : ''
-                  }`}
+              <div className='min-w-0 flex-1'>
+                <p
+                  title={group.name}
+                  className='truncate text-sm font-medium text-gray-900 dark:text-gray-100'
                 >
-                  编辑
-                </button>
-                <button
-                  onClick={() => onDelete(group.name)}
-                  className={buttonStyles.roundedDanger}
-                >
-                  删除
-                </button>
-              </td>
-            </tr>
+                  {group.name}
+                </p>
+                <p className='mt-1 truncate text-xs text-gray-500 dark:text-gray-400'>
+                  可用视频源:{' '}
+                  {group.enabledApis?.length
+                    ? `${group.enabledApis.length} 个`
+                    : '无限制'}
+                </p>
+              </div>
+              <div className='shrink-0'>
+                <AdminRowMenu
+                  label={`${group.name} 的操作`}
+                  items={[
+                    {
+                      label: '编辑',
+                      onSelect: () => onEdit(group),
+                      disabled: isEditLoading(group.name),
+                    },
+                    {
+                      label: '删除',
+                      onSelect: () => onDelete(group.name),
+                      danger: true,
+                    },
+                  ]}
+                />
+              </div>
+            </li>
           ))}
-          {userGroups.length === 0 && (
-            <tr>
-              <td
-                colSpan={3}
-                className='px-6 py-8 text-center text-sm text-gray-500 dark:text-gray-400'
-              >
-                暂无用户组，请添加用户组来管理用户权限
-              </td>
-            </tr>
-          )}
-        </tbody>
-      </table>
+        </ul>
+      )}
     </div>
   );
 }

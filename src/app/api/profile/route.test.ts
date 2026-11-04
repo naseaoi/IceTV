@@ -115,6 +115,34 @@ it('returns only public profile fields and validates updates', async () => {
   expect(await duplicate.json()).toEqual({ error: '昵称已被使用' });
 });
 
+it('allows reserved nicknames only for the owner', async () => {
+  db.updateUserProfile.mockResolvedValue({
+    profile_id: 'Owner0123456',
+    nickname: '站长',
+    favorites_public: false,
+  });
+  expect((await profile.PUT(request('PUT', { nickname: '站长' }))).status).toBe(
+    400,
+  );
+  requireActiveUser.mockResolvedValue({ username: 'boss', role: 'owner' });
+  expect((await profile.PUT(request('PUT', { nickname: '站长' }))).status).toBe(
+    200,
+  );
+  expect(db.updateUserProfile).toHaveBeenCalledWith('boss', {
+    nickname: '站长',
+  });
+  db.isNicknameAvailable.mockResolvedValue(true);
+  const query = `?${new URLSearchParams({ nickname: '管理员' })}`;
+  expect(
+    await (await availability.GET(request('GET', undefined, query))).json(),
+  ).toEqual({ available: true });
+  requireActiveUser.mockResolvedValue({ username: 'reader', role: 'user' });
+  expect(
+    (await (await availability.GET(request('GET', undefined, query))).json())
+      .available,
+  ).toBe(false);
+});
+
 it.each(['Avatar012345', 'a'.repeat(8), 'Z'.repeat(24), null])(
   'accepts avatar-only updates including reset: %s',
   async (avatarSeed) => {

@@ -18,11 +18,11 @@ import {
   SortableContext,
   verticalListSortingStrategy,
 } from '@dnd-kit/sortable';
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 
 import AlertModal from '@/components/modals/AlertModal';
 import ConfirmModal from '@/components/modals/ConfirmModal';
-import { ResizableTableHeader } from '@/features/admin/components/ResizableTableHeader';
+import AdminSearchField from '@/features/admin/components/AdminSearchField';
 import { LiveSourceAddForm } from '@/features/admin/components/tabs/live-source/LiveSourceAddForm';
 import { LiveSourceEditForm } from '@/features/admin/components/tabs/live-source/LiveSourceEditForm';
 import { SortableLiveSourceRow } from '@/features/admin/components/tabs/live-source/SortableLiveSourceRow';
@@ -50,6 +50,18 @@ const LiveSourceConfig = ({
     showAlert,
   });
   const [liveSources, setLiveSources] = useState<LiveDataSource[]>([]);
+  const [filterQuery, setFilterQuery] = useState('');
+  const normalizedQuery = filterQuery.trim().toLowerCase();
+  const isFiltering = normalizedQuery.length > 0;
+  const visibleRows = useMemo(
+    () =>
+      liveSources.filter((item) =>
+        [item.name, item.key, item.url].some((value) =>
+          value?.toLowerCase().includes(normalizedQuery),
+        ),
+      ),
+    [liveSources, normalizedQuery],
+  );
   const [showAddForm, setShowAddForm] = useState(false);
   const [editingLiveSource, setEditingLiveSource] =
     useState<LiveDataSource | null>(null);
@@ -189,7 +201,7 @@ const LiveSourceConfig = ({
 
   const handleDragEnd = (event: DragEndEvent) => {
     const { active, over } = event;
-    if (!over || active.id === over.id) return;
+    if (isFiltering || !over || active.id === over.id) return;
     const oldIndex = liveSources.findIndex((s) => s.key === active.id);
     const newIndex = liveSources.findIndex((s) => s.key === over.id);
     setLiveSources((prev) => arrayMove(prev, oldIndex, newIndex));
@@ -217,32 +229,20 @@ const LiveSourceConfig = ({
 
   return (
     <div className='space-y-6'>
-      <div className='flex items-center justify-between'>
-        <h4 className='text-sm font-medium text-gray-700 dark:text-gray-300'>
-          直播源列表
-        </h4>
-        <div className='flex items-center space-x-2'>
-          <button
-            onClick={handleRefreshLiveSources}
-            disabled={isRefreshing || isLoading('refreshLiveSources')}
-            className={`flex items-center space-x-2 px-3 py-1.5 text-sm font-medium ${
-              isRefreshing || isLoading('refreshLiveSources')
-                ? 'cursor-not-allowed rounded-lg bg-gray-400 text-white dark:bg-gray-600'
-                : 'rounded-lg bg-brand-600 text-white transition-colors hover:bg-brand-700 dark:bg-brand-600 dark:hover:bg-brand-700'
-            }`}
-          >
-            <span>
-              {isRefreshing || isLoading('refreshLiveSources')
-                ? '刷新中...'
-                : '刷新直播源'}
-            </span>
-          </button>
+      <div className='flex items-center justify-between gap-3'>
+        <AdminSearchField
+          value={filterQuery}
+          onChange={setFilterQuery}
+          label='搜索直播源'
+          className='min-w-0 flex-1 sm:w-72 sm:flex-none'
+        />
+        <div className='flex shrink-0 items-center gap-2'>
           <button
             onClick={() => {
               setShowAddForm(true);
               setEditingLiveSource(null);
             }}
-            className={buttonStyles.success}
+            className={buttonStyles.primary}
           >
             添加直播源
           </button>
@@ -268,9 +268,21 @@ const LiveSourceConfig = ({
       />
 
       <div
-        className='relative overflow-x-auto rounded-lg border border-gray-200 dark:border-gray-700'
-        data-table='live-source-list'
+        className='overflow-hidden rounded-xl ring-1 ring-gray-200 dark:ring-white/[0.06] [&:has([role=listbox])]:overflow-visible [&:has([role=menu])]:overflow-visible'
+        data-list='live-source-list'
       >
+        <div className='flex h-10 items-center gap-3 rounded-t-xl bg-gray-50 px-3 text-xs text-gray-500 dark:bg-white/[0.03] dark:text-gray-400'>
+          <span className='tabular-nums'>{`共 ${visibleRows.length} 个`}</span>
+          <button
+            onClick={handleRefreshLiveSources}
+            disabled={isRefreshing || isLoading('refreshLiveSources')}
+            className={`ml-auto ${buttonStyles.outline}`}
+          >
+            {isRefreshing || isLoading('refreshLiveSources')
+              ? '刷新中...'
+              : '刷新直播源'}
+          </button>
+        </div>
         <DndContext
           sensors={sensors}
           collisionDetection={closestCenter}
@@ -278,112 +290,38 @@ const LiveSourceConfig = ({
           autoScroll={true}
           modifiers={[restrictToVerticalAxis, restrictToParentElement]}
         >
-          <table className='w-full table-fixed divide-y divide-gray-200 dark:divide-gray-700'>
-            <thead className='sticky top-0 z-10 bg-gray-50 dark:bg-gray-900'>
-              <tr>
-                <th
-                  data-column-width='32'
-                  style={{ width: 32, minWidth: 32, maxWidth: 32 }}
-                />
-                <ResizableTableHeader
-                  tableId='live-source-list'
-                  columnId='name'
-                  defaultWidth={214}
-                  minWidth={96}
-                  className='px-6 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400'
-                >
-                  名称
-                </ResizableTableHeader>
-                <ResizableTableHeader
-                  tableId='live-source-list'
-                  columnId='key'
-                  defaultWidth={129}
-                  minWidth={72}
-                  className='px-6 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400'
-                >
-                  Key
-                </ResizableTableHeader>
-                <ResizableTableHeader
-                  tableId='live-source-list'
-                  columnId='m3u-url'
-                  defaultWidth={363}
-                  minWidth={112}
-                  className='px-6 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400'
-                >
-                  M3U 地址
-                </ResizableTableHeader>
-                <ResizableTableHeader
-                  tableId='live-source-list'
-                  columnId='epg-url'
-                  defaultWidth={282}
-                  minWidth={120}
-                  className='px-6 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400'
-                >
-                  节目单地址
-                </ResizableTableHeader>
-                <ResizableTableHeader
-                  tableId='live-source-list'
-                  columnId='user-agent'
-                  defaultWidth={189}
-                  minWidth={112}
-                  className='px-6 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400'
-                >
-                  自定义 UA
-                </ResizableTableHeader>
-                <ResizableTableHeader
-                  tableId='live-source-list'
-                  columnId='channel-count'
-                  defaultWidth={128}
-                  minWidth={96}
-                  className='px-6 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400'
-                >
-                  频道数
-                </ResizableTableHeader>
-                <ResizableTableHeader
-                  tableId='live-source-list'
-                  columnId='status'
-                  defaultWidth={92}
-                  minWidth={88}
-                  className='px-6 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400'
-                >
-                  状态
-                </ResizableTableHeader>
-                <ResizableTableHeader
-                  tableId='live-source-list'
-                  columnId='actions'
-                  defaultWidth={160}
-                  minWidth={160}
-                  hideDivider
-                  className='px-6 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400'
-                >
-                  操作
-                </ResizableTableHeader>
-              </tr>
-            </thead>
-            <SortableContext
-              items={liveSources.map((s) => s.key)}
-              strategy={verticalListSortingStrategy}
+          <SortableContext
+            items={visibleRows.map((s) => s.key)}
+            strategy={verticalListSortingStrategy}
+          >
+            <ul
+              aria-label='直播源列表'
+              className='divide-y divide-gray-200 dark:divide-white/[0.06]'
             >
-              <tbody className='divide-y divide-gray-200 dark:divide-gray-700'>
-                {liveSources.map((liveSource) => (
-                  <SortableLiveSourceRow
-                    key={liveSource.key}
-                    liveSource={liveSource}
-                    isToggleLoading={isLoading(
-                      `toggleLiveSource_${liveSource.key}`,
-                    )}
-                    isEditLoading={isLoading('editLiveSource')}
-                    isDeleteLoading={isLoading(
-                      `deleteLiveSource_${liveSource.key}`,
-                    )}
-                    onToggleEnable={handleToggleEnable}
-                    onEdit={setEditingLiveSource}
-                    onDelete={handleDelete}
-                  />
-                ))}
-              </tbody>
-            </SortableContext>
-          </table>
+              {visibleRows.length === 0 && (
+                <li className='rounded-b-xl bg-white px-6 py-12 text-center text-sm text-gray-500 dark:bg-gray-900 dark:text-gray-400'>
+                  {isFiltering ? '没有匹配的直播源' : '暂无直播源'}
+                </li>
+              )}
+              {visibleRows.map((liveSource) => (
+                <SortableLiveSourceRow
+                  isSortingDisabled={isFiltering}
+                  key={liveSource.key}
+                  liveSource={liveSource}
+                  isToggleLoading={isLoading(
+                    `toggleLiveSource_${liveSource.key}`,
+                  )}
+                  isEditLoading={isLoading('editLiveSource')}
+                  isDeleteLoading={isLoading(
+                    `deleteLiveSource_${liveSource.key}`,
+                  )}
+                  onToggleEnable={handleToggleEnable}
+                  onEdit={setEditingLiveSource}
+                  onDelete={handleDelete}
+                />
+              ))}
+            </ul>
+          </SortableContext>
         </DndContext>
       </div>
 

@@ -3,6 +3,10 @@
 import { X } from 'lucide-react';
 
 import AdminSelect from '@/components/admin/AdminSelect';
+import {
+  MODAL_CLOSE_BUTTON_CLASS,
+  MODAL_TITLE_CLASS,
+} from '@/components/modals/modal-styles';
 import ModalShell from '@/components/modals/ModalShell';
 import { buttonStyles, inputStyles } from '@/features/admin/lib/buttonStyles';
 import { CustomCategory } from '@/features/admin/types/internal';
@@ -29,25 +33,27 @@ export function CategoryEditForm({
   const disabled = !category?.name || !category.query || isSubmitting;
 
   return (
-    <ModalShell isOpen={isOpen} onClose={onCancel} panelClassName='max-w-2xl'>
+    <ModalShell
+      isOpen={isOpen}
+      onClose={onCancel}
+      panelClassName='max-w-2xl max-h-[80vh] overflow-y-auto'
+    >
       {category && (
-        <div className='space-y-4 p-6'>
-          <div className='flex items-center justify-between'>
-            <h5 className='text-base font-semibold text-gray-900 dark:text-gray-100'>
-              编辑分类：{category.name}
-            </h5>
+        <div className='space-y-4 p-4 sm:p-6'>
+          <div className='flex items-start justify-between gap-3'>
+            <h5 className={MODAL_TITLE_CLASS}>编辑分类：{category.name}</h5>
             <button
               type='button'
               onClick={onCancel}
               aria-label='关闭'
-              className='text-gray-400 transition-colors hover:text-gray-600 dark:hover:text-gray-300'
+              className={MODAL_CLOSE_BUTTON_CLASS}
             >
               <X className='h-5 w-5' />
             </button>
           </div>
           <div className='grid grid-cols-1 gap-4 sm:grid-cols-2'>
             <div>
-              <label className='mb-1 block text-xs font-medium text-gray-700 dark:text-gray-300'>
+              <label className='mb-1 block text-sm font-medium text-gray-900 dark:text-gray-100'>
                 分类名称
               </label>
               <input
@@ -57,11 +63,11 @@ export function CategoryEditForm({
                 onChange={(event) =>
                   onChange({ ...category, name: event.target.value })
                 }
-                className={`w-full ${inputStyles.base}`}
+                className={`w-full ${inputStyles.withFocus}`}
               />
             </div>
             <div>
-              <label className='mb-1 block text-xs font-medium text-gray-700 dark:text-gray-300'>
+              <label className='mb-1 block text-sm font-medium text-gray-900 dark:text-gray-100'>
                 类型
               </label>
               <AdminSelect
@@ -75,7 +81,7 @@ export function CategoryEditForm({
               />
             </div>
             <div className='sm:col-span-2'>
-              <label className='mb-1 block text-xs font-medium text-gray-700 dark:text-gray-300'>
+              <label className='mb-1 block text-sm font-medium text-gray-900 dark:text-gray-100'>
                 搜索关键词
               </label>
               <input
@@ -85,7 +91,7 @@ export function CategoryEditForm({
                 onChange={(event) =>
                   onChange({ ...category, query: event.target.value })
                 }
-                className={`w-full ${inputStyles.base}`}
+                className={`w-full ${inputStyles.withFocus}`}
               />
             </div>
           </div>
@@ -93,7 +99,7 @@ export function CategoryEditForm({
             <button
               type='button'
               onClick={onCancel}
-              className={buttonStyles.secondary}
+              className={buttonStyles.outline}
             >
               取消
             </button>
@@ -101,9 +107,7 @@ export function CategoryEditForm({
               type='button'
               onClick={onSubmit}
               disabled={disabled}
-              className={
-                disabled ? buttonStyles.disabled : buttonStyles.success
-              }
+              className={`${buttonStyles.primary} disabled:cursor-not-allowed disabled:opacity-50`}
             >
               {isSubmitting ? '保存中...' : '保存'}
             </button>
