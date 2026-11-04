@@ -161,7 +161,9 @@ describe('buildConfigFileFromAdminConfig', () => {
       ],
     };
 
-    const result = JSON.parse(buildConfigFileFromAdminConfig(config));
+    const result = JSON.parse(
+      buildConfigFileFromAdminConfig(config, config.ConfigFile),
+    );
 
     expect(result.api_site).toEqual({
       giri: {

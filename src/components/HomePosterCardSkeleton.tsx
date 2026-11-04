@@ -1,12 +1,19 @@
+import {
+  HOME_POSTER_CARD_CLASS,
+  POSTER_CARD_COVER_CLASS,
+  POSTER_CARD_FIXED_TITLE_ROW_CLASS,
+  POSTER_CARD_SUBTITLE_ROW_CLASS,
+  POSTER_CARD_TITLE_ROW_CLASS,
+} from '@/components/poster-card-layout';
+import SkeletonText from '@/components/SkeletonText';
+
 // 覆盖 1680px 容器内的首屏与右侧露出的下一张，和真实横排共用挂载批量。
 export const HOME_RECOMMENDATION_INITIAL_COUNT = 10;
-
-export const HOME_POSTER_CARD_CLASS =
-  'home-poster-card w-[25vw] min-w-[25vw] sm:w-40 sm:min-w-[160px]';
 
 interface HomePosterCardSkeletonProps {
   className?: string;
   subtitle?: boolean;
+  // poster 对应 PosterCard 的固定标题行，video 对应 VideoCard 等自然行高
   variant?: 'poster' | 'video';
 }
 
@@ -18,16 +25,21 @@ export default function HomePosterCardSkeleton({
   return (
     <div className={className}>
       <div className='group relative w-full rounded-lg bg-transparent'>
-        <div className='skeleton relative aspect-[2/3] overflow-hidden rounded-lg' />
         <div
-          className={`mt-2 flex items-center text-[13px] ${variant === 'poster' && !subtitle ? 'h-5' : 'h-[1.5em]'}`}
-        >
-          <div className='skeleton h-3.5 w-3/4 rounded' />
-        </div>
+          className={`skeleton relative overflow-hidden ${POSTER_CARD_COVER_CLASS}`}
+        />
+        <SkeletonText
+          className={
+            variant === 'poster' && !subtitle
+              ? POSTER_CARD_FIXED_TITLE_ROW_CLASS
+              : POSTER_CARD_TITLE_ROW_CLASS
+          }
+        />
         {subtitle && (
-          <div className='mt-0.5 flex h-4 items-center'>
-            <div className='skeleton h-3 w-1/2 rounded' />
-          </div>
+          <SkeletonText
+            className={POSTER_CARD_SUBTITLE_ROW_CLASS}
+            barClassName='h-3 w-1/2 rounded'
+          />
         )}
       </div>
     </div>

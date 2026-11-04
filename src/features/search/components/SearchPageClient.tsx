@@ -5,7 +5,6 @@ import { useRouter, useSearchParams } from 'next/navigation';
 import { useEffect, useMemo, useState } from 'react';
 
 import AuthenticatedRoute from '@/components/AuthenticatedRoute';
-import { PAGE_CONTAINER_CLASS } from '@/components/page-container';
 import PageLayout from '@/components/PageLayout';
 import SearchBox from '@/components/SearchBox';
 import SearchResultFilter from '@/components/SearchResultFilter';
@@ -14,10 +13,7 @@ import VideoCard from '@/components/VideoCard';
 import { warmupDanmakuSearchForNavigation } from '@/features/play/lib/danmaku/navigation-warmup';
 import MobileSearchFilterControls from '@/features/search/components/MobileSearchFilterControls';
 import SearchHistory from '@/features/search/components/SearchHistory';
-import {
-  SEARCH_STICKY_BAR_CLASS as STICKY_BAR_CLASS,
-  SearchResultsLoading,
-} from '@/features/search/components/SearchPageSkeleton';
+import { SearchResultsLoading } from '@/features/search/components/SearchPageSkeleton';
 import { VirtualizedSearchGrid } from '@/features/search/components/VirtualizedSearchGrid';
 import {
   FilterState,
@@ -29,6 +25,16 @@ import {
 } from '@/features/search/hooks/useSearchExecution';
 import { useSearchHistory } from '@/features/search/hooks/useSearchHistory';
 import { useSearchViewMode } from '@/features/search/hooks/useSearchViewMode';
+import {
+  SEARCH_CANCEL_BUTTON_CLASS,
+  SEARCH_DESKTOP_BAR_CLASS,
+  SEARCH_DESKTOP_BAR_ROW_CLASS,
+  SEARCH_HISTORY_CONTAINER_CLASS,
+  SEARCH_MOBILE_BAR_CLASS,
+  SEARCH_MOBILE_BAR_ROW_CLASS,
+  SEARCH_MOBILE_FILTER_ROW_CLASS,
+  SEARCH_RESULTS_CONTAINER_CLASS,
+} from '@/features/search/lib/search-layout';
 import { normalizeSearchQueryInput } from '@/features/search/lib/searchQuery';
 
 const DEFAULT_FILTER_STATE: FilterState = {
@@ -169,10 +175,10 @@ function AuthenticatedSearchPageClient() {
     <PageLayout activePath='/search' mobileHeader={false}>
       {/* 顶栏放不下输入框时由页面提供吸顶搜索栏 */}
       <div
-        className={`sticky top-0 z-30 md:top-16 lg:hidden ${STICKY_BAR_CLASS}`}
+        className={SEARCH_MOBILE_BAR_CLASS}
         style={{ paddingTop: 'env(safe-area-inset-top)' }}
       >
-        <div className={`${PAGE_CONTAINER_CLASS} flex items-center py-2.5`}>
+        <div className={SEARCH_MOBILE_BAR_ROW_CLASS}>
           <SearchBox
             variant='page'
             inputId='searchInput'
@@ -190,14 +196,14 @@ function AuthenticatedSearchPageClient() {
               // 保持输入框焦点，避免失焦后按钮先消失吞掉点击
               onMouseDown={(event) => event.preventDefault()}
               onClick={cancelSearch}
-              className='-mr-1 shrink-0 pl-3 pr-1 text-[15px] text-gray-700 active:opacity-60 dark:text-gray-200 md:hidden'
+              className={`${SEARCH_CANCEL_BUTTON_CLASS} active:opacity-60`}
             >
               取消
             </button>
           )}
         </div>
         {showResults && (
-          <div className={`${PAGE_CONTAINER_CLASS} pb-2.5 sm:hidden`}>
+          <div className={SEARCH_MOBILE_FILTER_ROW_CLASS}>
             <MobileSearchFilterControls
               resultCount={isLoading && resultCount === 0 ? null : resultCount}
               categories={categories}
@@ -212,12 +218,8 @@ function AuthenticatedSearchPageClient() {
 
       {showResults ? (
         <>
-          <div
-            className={`hidden sm:block lg:sticky lg:top-16 lg:z-30 ${STICKY_BAR_CLASS}`}
-          >
-            <div
-              className={`${PAGE_CONTAINER_CLASS} flex min-h-[60px] items-center gap-4 py-3`}
-            >
+          <div className={SEARCH_DESKTOP_BAR_CLASS}>
+            <div className={SEARCH_DESKTOP_BAR_ROW_CLASS}>
               <div className='min-w-0 flex-1'>
                 <SearchResultFilter
                   categories={categories}
@@ -247,7 +249,7 @@ function AuthenticatedSearchPageClient() {
             </div>
           </div>
 
-          <div className={`${PAGE_CONTAINER_CLASS} pb-8 pt-4 sm:pt-6`}>
+          <div className={SEARCH_RESULTS_CONTAINER_CLASS}>
             {searchResults.length === 0 ? (
               isLoading ? (
                 <SearchResultsLoading />
@@ -317,7 +319,7 @@ function AuthenticatedSearchPageClient() {
           </div>
         </>
       ) : (
-        <div className={`${PAGE_CONTAINER_CLASS} pb-8 pt-5 md:pt-8`}>
+        <div className={SEARCH_HISTORY_CONTAINER_CLASS}>
           <SearchHistory
             searchHistory={searchHistory}
             setSearchQuery={setSearchQuery}

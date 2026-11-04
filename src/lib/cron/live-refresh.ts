@@ -2,14 +2,13 @@ import {
   isLiveEntryEnabledInConfig,
   refreshLiveChannelSources,
 } from '@/features/live/lib/live';
-import { getConfig, saveConfig } from '@/lib/config';
+import { getConfigForRead } from '@/lib/config';
 
 export async function refreshConfiguredLiveChannels(): Promise<void> {
-  const config = await getConfig();
+  const config = await getConfigForRead();
   if (!isLiveEntryEnabledInConfig(config)) {
     return;
   }
 
   await refreshLiveChannelSources(config.LiveConfig || []);
-  await saveConfig(config);
 }

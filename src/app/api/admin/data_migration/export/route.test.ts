@@ -21,6 +21,14 @@ const adminConfig = {
 function makeDb(searchHistory: string[]) {
   return {
     getAdminConfig: jest.fn().mockResolvedValue(adminConfig),
+    getConfigSubscription: jest.fn().mockResolvedValue({
+      ConfigFile: '{}',
+      ConfigSubscribtion: {
+        URL: 'https://example.com/sub',
+        AutoUpdate: true,
+        LastCheck: 'checked',
+      },
+    }),
     getAllUsersWithPasswords: jest.fn().mockResolvedValue({}),
     getAllSourceRouteStatBuckets: jest.fn().mockResolvedValue([]),
     getAllInviteCodes: jest.fn().mockResolvedValue([]),
@@ -112,6 +120,10 @@ describe('data migration export route', () => {
     );
     const backup = JSON.parse(
       gunzipSync(Buffer.from(compressed, 'base64')).toString('utf8'),
+    );
+    expect(backup.data.adminConfig.ConfigFile).toBe('{}');
+    expect(backup.data.adminConfig.ConfigSubscribtion.URL).toBe(
+      'https://example.com/sub',
     );
     expect(backup.data.userData['owner-1'].videoReviews).toEqual([videoReview]);
     expect(backup.data.userData['owner-1'].profile.profile_id).toBe(

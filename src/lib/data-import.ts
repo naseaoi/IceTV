@@ -1,5 +1,6 @@
 import { randomUUID } from 'crypto';
 
+import { CONFIG_SUBSCRIPTION_MAX_BYTES } from '@/lib/config-state';
 import { importedInviteCodes } from '@/lib/invite-code-storage';
 import { importedAvatarSeed } from '@/lib/review-social-storage';
 import { mergeUserMessageState } from '@/lib/user-message-state';
@@ -419,7 +420,16 @@ function normalizeAdminConfig(value: unknown): AdminConfig {
   const legacyInvites = (cloned as unknown as AdminConfig).UserConfig
     ?.InviteCodes;
   const legacyUsers = (cloned as unknown as AdminConfig).UserConfig?.Users;
+  const subscription = {
+    ConfigFile: cloned.ConfigFile ?? '',
+    ConfigSubscribtion: cloned.ConfigSubscribtion ?? {
+      URL: '',
+      AutoUpdate: false,
+      LastCheck: '',
+    },
+  };
   const config = configSelfCheck(cloned as AdminConfig);
+  Object.assign(config, subscription);
   config.UserConfig.Users = legacyUsers ?? [];
   config.UserConfig.InviteCodes = importedInviteCodes(legacyInvites, {});
 
@@ -436,7 +446,11 @@ function normalizeAdminConfig(value: unknown): AdminConfig {
     MAX_SHORT_STRING_LENGTH,
   );
 
-  limitString(config.ConfigFile, '配置文件', MAX_LONG_STRING_LENGTH);
+  limitString(config.ConfigFile, '配置文件', CONFIG_SUBSCRIPTION_MAX_BYTES);
+  if (
+    Buffer.byteLength(config.ConfigFile, 'utf8') > CONFIG_SUBSCRIPTION_MAX_BYTES
+  )
+    throw new ImportValidationError('配置文件超过 2MB 上限', 413);
   requireObject(config.SiteConfig, '站点配置格式无效');
   limitString(config.SiteConfig.SiteName, '站点名称', MAX_SHORT_STRING_LENGTH);
   limitString(config.SiteConfig.SiteIcon, '站点图标', MAX_LONG_STRING_LENGTH);

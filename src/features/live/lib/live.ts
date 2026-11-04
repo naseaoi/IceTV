@@ -5,7 +5,8 @@ import { setImmediate as scheduleImmediate } from 'node:timers';
 import { createGunzip } from 'node:zlib';
 
 import { runWithConcurrency } from '@/lib/concurrency';
-import { getConfig, getConfigForRead, saveConfig } from '@/lib/config';
+import { getConfigForRead } from '@/lib/config';
+import { db } from '@/lib/db';
 import {
   fetchStreamThroughProxy,
   fetchTextThroughProxy,
@@ -101,28 +102,23 @@ export async function getCachedLiveChannels(
   if (channelNum === 0) {
     return null;
   }
-  const writableConfig = await getConfig();
-  const writableLiveInfo = writableConfig.LiveConfig?.find(
-    (live) => live.key === key,
-  );
-  if (writableLiveInfo) {
-    writableLiveInfo.channelNumber = channelNum;
-    await saveConfig(writableConfig);
-  }
   return cachedLiveChannels[key]?.data || null;
 }
 
-export async function refreshLiveChannels(liveInfo: {
-  key: string;
-  name: string;
-  url: string;
-  ua?: string;
-  epg?: string;
-  from: 'config' | 'custom';
-  channelNumber?: number;
-  disabled?: boolean;
-}): Promise<number> {
-  if (liveInfo.key in inflightRequests) {
+export async function refreshLiveChannels(
+  liveInfo: {
+    key: string;
+    name: string;
+    url: string;
+    ua?: string;
+    epg?: string;
+    from: 'config' | 'custom';
+    channelNumber?: number;
+    disabled?: boolean;
+  },
+  persistCount = true,
+): Promise<number> {
+  if (persistCount && liveInfo.key in inflightRequests) {
     return inflightRequests[liveInfo.key];
   }
 
@@ -140,18 +136,22 @@ export async function refreshLiveChannels(liveInfo: {
         name: channel.name,
       })),
     );
-    cachedLiveChannels[liveInfo.key] = {
-      data: {
-        channelNumber: result.channels.length,
-        channels: result.channels,
-        epgUrl: epgUrl,
-        epgs: epgs,
-      },
-      freshUntil: Date.now() + CACHE_FRESH_MS,
-    };
+    if (persistCount)
+      cachedLiveChannels[liveInfo.key] = {
+        data: {
+          channelNumber: result.channels.length,
+          channels: result.channels,
+          epgUrl: epgUrl,
+          epgs: epgs,
+        },
+        freshUntil: Date.now() + CACHE_FRESH_MS,
+      };
+    if (persistCount)
+      await db.setLiveSourceChannelCount(liveInfo, result.channels.length);
     return result.channels.length;
   };
 
+  if (!persistCount) return doRefresh();
   inflightRequests[liveInfo.key] = doRefresh().finally(() => {
     delete inflightRequests[liveInfo.key];
   });
@@ -165,7 +165,7 @@ export async function refreshLiveChannelSources(
     .filter((liveInfo) => !liveInfo.disabled)
     .map((liveInfo) => async () => {
       try {
-        liveInfo.channelNumber = await refreshLiveChannels(liveInfo);
+        await refreshLiveChannels(liveInfo);
       } catch (error) {
         console.error(
           `刷新直播源失败 [${liveInfo.name || liveInfo.key}]:`,

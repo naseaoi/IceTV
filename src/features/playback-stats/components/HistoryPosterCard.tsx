@@ -3,6 +3,11 @@
 import { Check, Play } from 'lucide-react';
 
 import CoverImage from '@/components/CoverImage';
+import {
+  POSTER_CARD_COVER_CLASS,
+  POSTER_CARD_SUBTITLE_ROW_CLASS,
+  POSTER_CARD_TITLE_ROW_CLASS,
+} from '@/components/poster-card-layout';
 import type { PlaybackSession } from '@/lib/types';
 
 function formatWatchedMinutes(seconds: number): string {
@@ -48,7 +53,7 @@ export function HistoryPosterCard({
       className='group block w-full text-left focus:outline-none'
     >
       <div
-        className={`relative aspect-[2/3] overflow-hidden rounded-lg bg-gray-200 ring-offset-2 ring-offset-gray-50 transition dark:bg-gray-800 dark:ring-offset-gray-950 ${
+        className={`${POSTER_CARD_COVER_CLASS} relative overflow-hidden bg-gray-200 ring-offset-2 ring-offset-gray-50 transition dark:bg-gray-800 dark:ring-offset-gray-950 ${
           selected ? 'ring-2 ring-brand-500' : ''
         } group-focus-visible:ring-2 group-focus-visible:ring-brand-400`}
       >
@@ -94,10 +99,14 @@ export function HistoryPosterCard({
         )}
       </div>
 
-      <p className='mt-2 truncate text-[13px] font-medium text-gray-800 dark:text-gray-200'>
+      <p
+        className={`${POSTER_CARD_TITLE_ROW_CLASS} truncate font-medium text-gray-800 dark:text-gray-200`}
+      >
         {session.title}
       </p>
-      <p className='mt-0.5 truncate text-xs text-gray-500 dark:text-gray-400'>
+      <p
+        className={`${POSTER_CARD_SUBTITLE_ROW_CLASS} truncate text-gray-500 dark:text-gray-400`}
+      >
         第 {session.episode_index} 集 · 看了{' '}
         {formatWatchedMinutes(session.watch_seconds)}
       </p>

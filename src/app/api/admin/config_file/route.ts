@@ -2,7 +2,14 @@ import { NextRequest, NextResponse } from 'next/server';
 
 import { isGuardFailure, requireOwner } from '@/lib/api-auth';
 import { configConflictResponse } from '@/lib/api-config-error';
-import { getConfig, refineConfig, saveConfig } from '@/lib/config';
+import {
+  getConfig,
+  invalidateConfigCache,
+  refineConfig,
+  saveConfig,
+} from '@/lib/config';
+import { CONFIG_SUBSCRIPTION_MAX_BYTES } from '@/lib/config-state';
+import { db } from '@/lib/db';
 
 export const runtime = 'nodejs';
 
@@ -13,23 +20,34 @@ export async function POST(request: NextRequest) {
   if (isGuardFailure(guardResult)) return guardResult.response;
 
   try {
-    // 检查用户权限
-    let adminConfig = await getConfig();
-
-    // 获取请求体
-    const body = await request.json();
-    const { configFile, subscriptionUrl, autoUpdate, lastCheckTime } = body;
-
+    const { configFile, subscriptionUrl, autoUpdate, lastCheckTime } =
+      await request.json();
     if (!configFile || typeof configFile !== 'string') {
       return NextResponse.json(
         { error: '配置文件内容不能为空' },
         { status: 400 },
       );
     }
-
-    // 验证 JSON 格式
+    if (Buffer.byteLength(configFile, 'utf8') > CONFIG_SUBSCRIPTION_MAX_BYTES) {
+      return NextResponse.json(
+        { error: '配置文件超过 2MB 上限' },
+        { status: 413 },
+      );
+    }
+    if (
+      (subscriptionUrl !== undefined &&
+        (typeof subscriptionUrl !== 'string' ||
+          subscriptionUrl.length > 8192)) ||
+      (autoUpdate !== undefined && typeof autoUpdate !== 'boolean') ||
+      (lastCheckTime !== undefined &&
+        (typeof lastCheckTime !== 'string' || lastCheckTime.length > 255))
+    ) {
+      return NextResponse.json({ error: '订阅参数格式错误' }, { status: 400 });
+    }
     try {
-      JSON.parse(configFile);
+      const parsed = JSON.parse(configFile);
+      if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed))
+        throw new Error();
     } catch {
       return NextResponse.json(
         { error: '配置文件格式错误，请检查 JSON 语法' },
@@ -37,31 +55,22 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    adminConfig.ConfigFile = configFile;
-    if (!adminConfig.ConfigSubscribtion) {
-      adminConfig.ConfigSubscribtion = {
-        URL: '',
-        AutoUpdate: false,
-        LastCheck: '',
-      };
-    }
-
-    // 更新订阅配置
-    if (subscriptionUrl !== undefined) {
-      adminConfig.ConfigSubscribtion.URL = subscriptionUrl;
-    }
-    if (autoUpdate !== undefined) {
-      adminConfig.ConfigSubscribtion.AutoUpdate = autoUpdate;
-    }
-    adminConfig.ConfigSubscribtion.LastCheck = lastCheckTime || '';
-
-    adminConfig = refineConfig(adminConfig);
-    // 更新配置文件
-    await saveConfig(adminConfig);
-    return NextResponse.json({
-      success: true,
-      message: '配置文件更新成功',
+    invalidateConfigCache();
+    const adminConfig = await getConfig();
+    const subscription = await db.getConfigSubscription();
+    const next = {
+      ConfigFile: configFile,
+      ConfigSubscribtion: {
+        URL: subscriptionUrl ?? subscription.ConfigSubscribtion.URL,
+        AutoUpdate: autoUpdate ?? subscription.ConfigSubscribtion.AutoUpdate,
+        LastCheck: lastCheckTime || '',
+      },
+    };
+    refineConfig(adminConfig, configFile);
+    await saveConfig(adminConfig, {
+      subscription: { expected: subscription, next },
     });
+    return NextResponse.json({ success: true, message: '配置文件更新成功' });
   } catch (error) {
     const conflict = configConflictResponse(error);
     if (conflict) return conflict;

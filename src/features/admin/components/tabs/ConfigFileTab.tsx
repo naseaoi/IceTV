@@ -68,7 +68,10 @@ const ConfigFileComponent = ({
   useEffect(() => {
     if (config) {
       const nextDraft = {
-        configContent: buildConfigFileFromAdminConfig(config),
+        configContent: buildConfigFileFromAdminConfig(
+          config,
+          config.ConfigFile,
+        ),
         subscriptionUrl: config.ConfigSubscribtion?.URL || '',
         autoUpdate: config.ConfigSubscribtion?.AutoUpdate || false,
         lastCheckTime: config.ConfigSubscribtion?.LastCheck || '',

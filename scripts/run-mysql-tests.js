@@ -9,6 +9,7 @@ const PORT = process.env.MYSQL_TEST_PORT || '33061';
 const IMAGE = 'mysql:8.4';
 const READY_TIMEOUT_MS = 180_000;
 const TEST_PATTERNS = [
+  'config-state-storage',
   'admin-user-storage',
   'mysql-tracking-live',
   'library-storage',

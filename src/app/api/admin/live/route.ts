@@ -1,4 +1,4 @@
-﻿import { NextRequest, NextResponse } from 'next/server';
+import { NextRequest, NextResponse } from 'next/server';
 
 import {
   deleteCachedLiveChannels,
@@ -6,11 +6,12 @@ import {
 } from '@/features/live/lib/live';
 import { isGuardFailure, requireAdmin } from '@/lib/api-auth';
 import { configConflictResponse } from '@/lib/api-config-error';
-import { getConfig, saveConfig } from '@/lib/config';
+import { getConfig, invalidateConfigCache, saveConfig } from '@/lib/config';
 import {
   buildConfigFileFromAdminConfig,
   removeConfigFileEntries,
 } from '@/lib/config-file-json';
+import { db } from '@/lib/db';
 import { validateProxyUrlForRequest } from '@/lib/url-guard';
 
 export const runtime = 'nodejs';
@@ -22,14 +23,13 @@ type EditableLiveInfo = {
   ua: string;
   epg: string;
   from: 'custom' | 'config';
-  channelNumber: number;
   disabled: boolean;
 };
 
 async function refreshOrRejectLiveSource(liveInfo: EditableLiveInfo) {
   await validateLiveSourceUrls(liveInfo);
 
-  const channelNumber = await refreshLiveChannels(liveInfo);
+  const channelNumber = await refreshLiveChannels(liveInfo, false);
   if (channelNumber <= 0) {
     throw new Error('未获取到频道列表，请检查直播源地址');
   }
@@ -58,7 +58,11 @@ export async function POST(request: NextRequest) {
     const guardResult = await requireAdmin(request);
     if (isGuardFailure(guardResult)) return guardResult.response;
 
+    invalidateConfigCache();
     const config = await getConfig();
+    const subscription = await db.getConfigSubscription();
+    let configFile = subscription.ConfigFile;
+    const liveCounts: Record<string, number> = {};
 
     const body = await request.json();
     const { action, key, name, url, ua, epg } = body;
@@ -79,7 +83,7 @@ export async function POST(request: NextRequest) {
 
     switch (action) {
       case 'add':
-        if (!cleanKey || !cleanName || !cleanUrl) {
+        if (!cleanKey || cleanKey.length > 255 || !cleanName || !cleanUrl) {
           return NextResponse.json(
             { error: '直播源参数不完整' },
             { status: 400 },
@@ -101,12 +105,11 @@ export async function POST(request: NextRequest) {
           ua: cleanUa,
           epg: cleanEpg,
           from: 'custom' as 'custom' | 'config',
-          channelNumber: 0,
           disabled: false,
         };
 
         try {
-          liveInfo.channelNumber = await refreshOrRejectLiveSource(liveInfo);
+          liveCounts[cleanKey] = await refreshOrRejectLiveSource(liveInfo);
         } catch (error) {
           console.error('刷新直播源失败:', error);
           return NextResponse.json(
@@ -139,11 +142,7 @@ export async function POST(request: NextRequest) {
         deleteCachedLiveChannels(cleanKey);
 
         config.LiveConfig.splice(deleteIndex, 1);
-        config.ConfigFile = removeConfigFileEntries(
-          config.ConfigFile,
-          'lives',
-          [cleanKey],
-        );
+        configFile = removeConfigFileEntries(configFile, 'lives', [cleanKey]);
         break;
 
       case 'enable':
@@ -185,11 +184,10 @@ export async function POST(request: NextRequest) {
           ua: cleanUa,
           epg: cleanEpg,
           disabled: editSource.disabled === true,
-          channelNumber: editSource.channelNumber || 0,
         };
 
         try {
-          nextEditSource.channelNumber =
+          liveCounts[cleanKey] =
             await refreshOrRejectLiveSource(nextEditSource);
         } catch (error) {
           console.error('刷新直播源失败:', error);
@@ -209,7 +207,6 @@ export async function POST(request: NextRequest) {
         editSource.url = nextEditSource.url;
         editSource.ua = nextEditSource.ua;
         editSource.epg = nextEditSource.epg;
-        editSource.channelNumber = nextEditSource.channelNumber;
         break;
 
       case 'sort':
@@ -245,11 +242,19 @@ export async function POST(request: NextRequest) {
         return NextResponse.json({ error: '未知操作' }, { status: 400 });
     }
 
-    config.ConfigFile = buildConfigFileFromAdminConfig(config);
+    configFile = buildConfigFileFromAdminConfig(config, configFile);
 
     // 保存配置
-    await saveConfig(config);
+    await saveConfig(config, {
+      subscription: {
+        expected: subscription,
+        next: { ...subscription, ConfigFile: configFile },
+      },
+      liveCounts,
+    });
 
+    if (action === 'edit' || action === 'add')
+      deleteCachedLiveChannels(cleanKey);
     return NextResponse.json({ success: true });
   } catch (error) {
     const conflict = configConflictResponse(error);

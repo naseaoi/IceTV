@@ -3,6 +3,7 @@ import type React from 'react';
 
 import CoverImage from '@/components/CoverImage';
 import { FavoriteHeartButton } from '@/components/FavoriteHeartButton';
+import { POSTER_CARD_COVER_CLASS } from '@/components/poster-card-layout';
 import RatingBadge from '@/components/RatingBadge';
 import SourceNameBadge from '@/components/SourceNameBadge';
 import type {
@@ -169,7 +170,7 @@ export function VideoCardPoster({
 
   return (
     <div
-      className={`poster-rounded-clip relative aspect-[2/3] overflow-hidden rounded-lg ${
+      className={`${POSTER_CARD_COVER_CLASS} poster-rounded-clip relative overflow-hidden ${
         origin === 'live' ? 'ring-1 ring-gray-300/80 dark:ring-gray-600/80' : ''
       }`}
       style={noSelectStyle}

@@ -1,4 +1,4 @@
-﻿import { NextRequest, NextResponse } from 'next/server';
+import { NextRequest, NextResponse } from 'next/server';
 
 import {
   isLiveEntryEnabledInConfig,
@@ -6,7 +6,7 @@ import {
 } from '@/features/live/lib/live';
 import { isGuardFailure, requireAdmin } from '@/lib/api-auth';
 import { configConflictResponse } from '@/lib/api-config-error';
-import { getConfig, saveConfig } from '@/lib/config';
+import { getConfigForRead } from '@/lib/config';
 
 export const runtime = 'nodejs';
 
@@ -15,7 +15,7 @@ export async function POST(request: NextRequest) {
     const guardResult = await requireAdmin(request);
     if (isGuardFailure(guardResult)) return guardResult.response;
 
-    const config = await getConfig();
+    const config = await getConfigForRead();
 
     if (!isLiveEntryEnabledInConfig(config)) {
       return NextResponse.json({
@@ -25,8 +25,6 @@ export async function POST(request: NextRequest) {
     }
 
     await refreshLiveChannelSources(config.LiveConfig || []);
-
-    await saveConfig(config);
 
     return NextResponse.json({
       success: true,

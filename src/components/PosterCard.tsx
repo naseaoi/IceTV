@@ -9,6 +9,10 @@ import {
 } from '@/components/card-actions/actions';
 import { useOptionalCardInteractionManager } from '@/components/CardInteractionProvider';
 import CoverImage from '@/components/CoverImage';
+import {
+  POSTER_CARD_COVER_CLASS,
+  POSTER_CARD_FIXED_TITLE_ROW_CLASS,
+} from '@/components/poster-card-layout';
 import { useLongPress } from '@/hooks/useLongPress';
 import {
   buildExternalSubjectUrl,
@@ -138,7 +142,7 @@ function PosterCard({
       }}
     >
       <div
-        className='poster-rounded-clip relative aspect-[2/3] overflow-hidden rounded-lg'
+        className={`${POSTER_CARD_COVER_CLASS} poster-rounded-clip relative overflow-hidden`}
         style={noSelectStyle}
         onContextMenu={preventContextMenu}
       >
@@ -208,13 +212,13 @@ function PosterCard({
       </div>
 
       <div
-        className='mt-2 h-5'
+        className={POSTER_CARD_FIXED_TITLE_ROW_CLASS}
         style={noSelectStyle}
         onContextMenu={preventContextMenu}
       >
         <div className='relative' style={noSelectStyle}>
           <span
-            className='peer block truncate text-[13px] font-medium text-gray-800 transition-colors duration-200 group-hover:text-brand-600 dark:text-gray-200 dark:group-hover:text-brand-300'
+            className='peer block truncate font-medium text-gray-800 transition-colors duration-200 group-hover:text-brand-600 dark:text-gray-200 dark:group-hover:text-brand-300'
             style={noSelectStyle}
             onContextMenu={preventContextMenu}
           >

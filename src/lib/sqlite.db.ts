@@ -20,6 +20,13 @@ import {
   libraryStatements,
 } from '@/features/favorites/lib/library-storage';
 import {
+  type ConfigStateUpdate,
+  type ConfigSubscription,
+  sameSubscription,
+  stripConfigState,
+  subscriptionFromConfig,
+} from '@/lib/config-state';
+import {
   type InviteCodeQuery,
   importedInviteCodes,
   INVITE_INSERT_SQL,
@@ -32,6 +39,7 @@ import {
   ReviewSocialStorage,
   socialSchema,
 } from '@/lib/review-social-storage';
+import { SqliteConfigStateStore } from '@/lib/sqlite-config-state-store';
 import { SqliteInviteCodeStore } from '@/lib/sqlite-invite-code-store';
 import { SqliteResourceStore } from '@/lib/sqlite-resource-store';
 import { SqliteUserAccessStore } from '@/lib/sqlite-user-access';
@@ -562,6 +570,7 @@ export class LocalSqliteStorage implements IStorage {
     this.backfillUserProfiles();
     new SqliteUserAccessStore(this.db).migrate();
     this.invites.migrate();
+    new SqliteConfigStateStore(this.db).migrate();
   }
 
   private migrateFavoriteProjection(): void {
@@ -773,6 +782,13 @@ export class LocalSqliteStorage implements IStorage {
         last_login_at INTEGER NOT NULL
       );
 
+      CREATE TABLE IF NOT EXISTS config_subscription (
+        id INTEGER PRIMARY KEY CHECK (id = 1), url TEXT NOT NULL,
+        auto_update INTEGER NOT NULL, last_check TEXT NOT NULL, config_file TEXT NOT NULL
+      );
+      CREATE TABLE IF NOT EXISTS live_source_state (
+        source_key TEXT PRIMARY KEY, channel_number INTEGER NOT NULL, updated_at INTEGER NOT NULL
+      );
       CREATE TABLE IF NOT EXISTS invite_codes (
         code TEXT PRIMARY KEY COLLATE BINARY,
         created_at INTEGER NOT NULL,
@@ -2493,9 +2509,42 @@ export class LocalSqliteStorage implements IStorage {
     })();
   }
 
+  async getConfigSubscription(): Promise<ConfigSubscription> {
+    return new SqliteConfigStateStore(this.db).subscription();
+  }
+  async getLiveSourceChannelCounts(): Promise<Record<string, number>> {
+    return new SqliteConfigStateStore(this.db).counts();
+  }
+  async setLiveSourceChannelCount(
+    source: NonNullable<AdminConfig['LiveConfig']>[number],
+    count: number,
+  ): Promise<void> {
+    this.db
+      .transaction(() => {
+        const row = this.stmts.getAdminConfig.get() as
+          | { config_json: string }
+          | undefined;
+        const config = row
+          ? (JSON.parse(row.config_json) as AdminConfig)
+          : null;
+        const live = config?.LiveConfig?.find(
+          (item) => item.key === source.key,
+        );
+        if (
+          live &&
+          live.url === source.url &&
+          live.ua === source.ua &&
+          live.epg === source.epg
+        )
+          new SqliteConfigStateStore(this.db).setCount(source.key, count);
+      })
+      .immediate();
+  }
+
   async compareAndSetAdminConfig(
     expected: AdminConfig | null,
     config: AdminConfig,
+    state?: ConfigStateUpdate,
   ): Promise<boolean> {
     return this.db
       .transaction(() => {
@@ -2504,11 +2553,28 @@ export class LocalSqliteStorage implements IStorage {
           | undefined;
         const current = row ? JSON.parse(row.config_json) : null;
         if (JSON.stringify(current) !== JSON.stringify(expected)) return false;
+        const stateStore = new SqliteConfigStateStore(this.db);
+        if (
+          state?.subscription &&
+          !sameSubscription(
+            stateStore.subscription(),
+            state.subscription.expected,
+          )
+        )
+          return false;
         const removed = removedAccessReferences(current, config);
         const access = new SqliteUserAccessStore(this.db);
         for (const group of removed.groups) access.removeGroup(group);
         for (const source of removed.sources) access.removeSource(source);
-        this.stmts.setAdminConfig.run(JSON.stringify(config));
+        stateStore.prune(current, config);
+        for (const [key, count] of Object.entries(state?.liveCounts || {})) {
+          if (config.LiveConfig?.some((live) => live.key === key))
+            stateStore.setCount(key, count);
+        }
+        if (state?.subscription)
+          stateStore.saveSubscription(state.subscription.next);
+        if (JSON.stringify(current) !== JSON.stringify(config))
+          this.stmts.setAdminConfig.run(JSON.stringify(config));
         return true;
       })
       .immediate();
@@ -3021,6 +3087,8 @@ export class LocalSqliteStorage implements IStorage {
         DELETE FROM user_login_activity;
         DELETE FROM invite_code_usage;
         DELETE FROM invite_codes;
+        DELETE FROM config_subscription;
+        DELETE FROM live_source_state;
         DELETE FROM user_danmaku_episodes;
         DELETE FROM user_danmaku_settings;
         DELETE FROM shared_cache;
@@ -3057,6 +3125,8 @@ export class LocalSqliteStorage implements IStorage {
         DELETE FROM user_login_activity;
         DELETE FROM invite_code_usage;
         DELETE FROM invite_codes;
+        DELETE FROM config_subscription;
+        DELETE FROM live_source_state;
         DELETE FROM user_danmaku_episodes;
         DELETE FROM user_danmaku_settings;
         DELETE FROM shared_cache;
@@ -3070,6 +3140,10 @@ export class LocalSqliteStorage implements IStorage {
         JSON.stringify(snapshot.adminConfig),
       ) as AdminConfig;
       if (storedConfig.UserConfig) delete storedConfig.UserConfig.InviteCodes;
+      new SqliteConfigStateStore(this.db).saveSubscription(
+        subscriptionFromConfig(storedConfig),
+      );
+      stripConfigState(storedConfig);
       this.stmts.setAdminConfig.run(JSON.stringify(storedConfig));
       const insertInvite = this.db.prepare(INVITE_INSERT_SQL);
       for (const item of inviteCodes) insertInvite.run(...inviteValues(item));

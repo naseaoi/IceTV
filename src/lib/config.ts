@@ -5,6 +5,7 @@ import {
   normalizeBangumiDataSource,
   normalizeSiteBangumiDataSource,
 } from '@/lib/bangumi-source';
+import { type ConfigStateUpdate, stripConfigState } from '@/lib/config-state';
 import { db } from '@/lib/db';
 import { PUBLIC_DOUBAN_IMAGE_PROXY_TYPES } from '@/lib/douban-image-url';
 import {
@@ -119,10 +120,13 @@ export function getPublicDoubanImageProxyType(
 }
 
 // 从配置文件补充管理员配置
-export function refineConfig(adminConfig: AdminConfig): AdminConfig {
+export function refineConfig(
+  adminConfig: AdminConfig,
+  configFile: string,
+): AdminConfig {
   let fileConfig: ConfigFileStruct;
   try {
-    fileConfig = JSON.parse(adminConfig.ConfigFile) as ConfigFileStruct;
+    fileConfig = JSON.parse(configFile) as ConfigFileStruct;
   } catch (e) {
     console.warn('解析配置文件失败:', e);
     fileConfig = {} as ConfigFileStruct;
@@ -223,7 +227,6 @@ export function refineConfig(adminConfig: AdminConfig): AdminConfig {
         url: site.url,
         ua: site.ua,
         epg: site.epg,
-        channelNumber: 0,
         from: 'config',
         disabled: false,
       });
@@ -241,7 +244,7 @@ export function refineConfig(adminConfig: AdminConfig): AdminConfig {
   // 将 Map 转换回数组
   adminConfig.LiveConfig = Array.from(currentLives.values());
 
-  return adminConfig;
+  return stripConfigState(adminConfig);
 }
 
 async function getInitConfig(
@@ -344,13 +347,12 @@ async function getInitConfig(
       url: live.url,
       ua: live.ua,
       epg: live.epg,
-      channelNumber: 0,
       from: 'config',
       disabled: false,
     });
   });
 
-  return adminConfig;
+  return stripConfigState(adminConfig);
 }
 
 async function loadConfig(): Promise<AdminConfig> {
@@ -614,7 +616,7 @@ export function configSelfCheck(adminConfig: AdminConfig): AdminConfig {
     return true;
   });
 
-  return adminConfig;
+  return stripConfigState(adminConfig);
 }
 
 function trimConfigString(value: unknown): string {
@@ -631,18 +633,8 @@ function trimOptionalConfigString(value: unknown): string | undefined {
 }
 
 export async function resetConfig() {
-  let originConfig: AdminConfig | null = null;
-  try {
-    originConfig = await db.getAdminConfig();
-  } catch (e) {
-    console.error('获取管理员配置失败:', e);
-  }
-  if (!originConfig) {
-    originConfig = {} as AdminConfig;
-  }
   const adminConfig = await getInitConfig(
-    originConfig.ConfigFile,
-    originConfig.ConfigSubscribtion,
+    (await db.getConfigSubscription()).ConfigFile,
   );
   await db.saveAdminConfig(adminConfig);
   configCacheGeneration += 1;
@@ -654,7 +646,10 @@ export async function resetConfig() {
   return;
 }
 
-export async function saveConfig(config: AdminConfig): Promise<AdminConfig> {
+export async function saveConfig(
+  config: AdminConfig,
+  state?: ConfigStateUpdate,
+): Promise<AdminConfig> {
   const expectedVersion = configVersionByObject.get(config);
   const nextConfig = configSelfCheck(cloneConfig(config));
   const current = await db.getAdminConfig();
@@ -666,7 +661,7 @@ export async function saveConfig(config: AdminConfig): Promise<AdminConfig> {
   ) {
     throw new ConfigConflictError();
   }
-  if (!(await db.compareAndSetAdminConfig(current, nextConfig))) {
+  if (!(await db.compareAndSetAdminConfig(current, nextConfig, state))) {
     throw new ConfigConflictError();
   }
   configCacheGeneration += 1;

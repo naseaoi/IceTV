@@ -1,17 +1,10 @@
-const DoubanCardSkeleton = ({ video = false }: { video?: boolean }) => {
-  return (
-    <div className='w-full'>
-      <div className='group relative flex w-full flex-col rounded-lg bg-transparent shadow-none'>
-        <div className='skeleton aspect-[2/3] w-full rounded-lg' />
+import HomePosterCardSkeleton from '@/components/HomePosterCardSkeleton';
 
-        <div
-          className={`mt-2 flex items-center text-[13px] ${video ? 'h-[1.5em]' : 'h-5'}`}
-        >
-          <div className='skeleton h-3.5 w-3/4 rounded'></div>
-        </div>
-      </div>
-    </div>
-  );
-};
+const DoubanCardSkeleton = ({ video = false }: { video?: boolean }) => (
+  <HomePosterCardSkeleton
+    className='w-full'
+    variant={video ? 'video' : 'poster'}
+  />
+);
 
 export default DoubanCardSkeleton;

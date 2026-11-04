@@ -1,4 +1,4 @@
-﻿/** @jest-environment node */
+/** @jest-environment node */
 
 import { getAuthInfoFromCookie } from '@/lib/auth.server';
 import {
@@ -84,6 +84,11 @@ if (!(globalThis as any).Response) {
 
 jest.mock('@/lib/db', () => ({
   db: {
+    getConfigSubscription: jest.fn().mockResolvedValue({
+      ConfigFile: '',
+      ConfigSubscribtion: { URL: '', AutoUpdate: false, LastCheck: '' },
+    }),
+    getLiveSourceChannelCounts: jest.fn().mockResolvedValue({}),
     getUserAccess: jest.fn(),
     getAdminUserPage: jest.fn(),
     countActiveInviteCodes: jest.fn().mockResolvedValue(0),

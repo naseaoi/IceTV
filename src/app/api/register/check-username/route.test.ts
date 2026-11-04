@@ -3,12 +3,12 @@
 import type { NextRequest } from 'next/server';
 
 import { installWebPolyfills } from '@/app/api/test-utils/web-polyfills';
-import { getConfig } from '@/lib/config';
+import { getConfigForRead } from '@/lib/config';
 import { db } from '@/lib/db';
 import { getOwnerUsername } from '@/lib/env.server';
 
 jest.mock('@/lib/config', () => ({
-  getConfig: jest.fn(),
+  getConfigForRead: jest.fn(),
 }));
 
 jest.mock('@/lib/db', () => ({
@@ -45,7 +45,7 @@ describe('check-username route', () => {
   beforeEach(() => {
     jest.clearAllMocks();
     (getOwnerUsername as jest.Mock).mockReturnValue('owner');
-    (getConfig as jest.Mock).mockResolvedValue({
+    (getConfigForRead as jest.Mock).mockResolvedValue({
       UserConfig: { OpenRegister: true },
     });
     (db.checkUserExist as jest.Mock).mockResolvedValue(false);
@@ -82,7 +82,7 @@ describe('check-username route', () => {
 
     expect(response.status).toBe(400);
     expect(db.checkUserExist).not.toHaveBeenCalled();
-    expect(getConfig).not.toHaveBeenCalled();
+    expect(getConfigForRead).not.toHaveBeenCalled();
   });
 
   it('rejects an empty username', async () => {
@@ -98,7 +98,7 @@ describe('check-username route', () => {
   });
 
   it('returns 403 when registration is closed', async () => {
-    (getConfig as jest.Mock).mockResolvedValue({
+    (getConfigForRead as jest.Mock).mockResolvedValue({
       UserConfig: { OpenRegister: false },
     });
     const { GET } = loadRoute();

@@ -14,6 +14,17 @@ import {
   trackingAction,
 } from '@/components/card-actions/actions';
 import { useCardInteractionManager } from '@/components/CardInteractionProvider';
+import {
+  CONTINUE_CARD_BODY_CLASS,
+  CONTINUE_CARD_CLASS,
+  CONTINUE_CARD_COVER_CLASS,
+  CONTINUE_CARD_COVER_SIZES,
+  CONTINUE_CARD_FOOTER_CLASS,
+  CONTINUE_CARD_META_CLASS,
+  CONTINUE_CARD_PROGRESS_BAR_CLASS,
+  CONTINUE_CARD_PROGRESS_TEXT_CLASS,
+  CONTINUE_CARD_TITLE_TEXT_CLASS,
+} from '@/components/continue-card/layout';
 import { buildContinuePlayUrl } from '@/components/continue-card/play-url';
 import CoverImage from '@/components/CoverImage';
 import { warmupDanmakuForNavigation } from '@/features/play/lib/danmaku/navigation-warmup';
@@ -246,7 +257,7 @@ export default function ContinueCard({
       data-continue-card
       tabIndex={0}
       aria-label={`继续播放 ${title}`}
-      className='group relative flex w-[236px] shrink-0 cursor-pointer select-none gap-3 rounded-lg outline-none focus-visible:ring-2 focus-visible:ring-brand-500 focus-visible:ring-offset-4 focus-visible:ring-offset-white dark:focus-visible:ring-offset-gray-950 md:w-[288px]'
+      className={`${CONTINUE_CARD_CLASS} group relative cursor-pointer select-none rounded-lg outline-none focus-visible:ring-2 focus-visible:ring-brand-500 focus-visible:ring-offset-4 focus-visible:ring-offset-white dark:focus-visible:ring-offset-gray-950`}
       onClick={handlePlay}
       onContextMenu={(event) => {
         event.preventDefault();
@@ -264,11 +275,13 @@ export default function ContinueCard({
       }}
       {...longPressProps}
     >
-      <div className='poster-rounded-clip relative aspect-[2/3] w-[76px] shrink-0 self-start overflow-hidden rounded-lg bg-gray-100 ring-1 ring-gray-900/[0.06] dark:bg-gray-800 dark:ring-white/[0.06] md:w-[88px]'>
+      <div
+        className={`${CONTINUE_CARD_COVER_CLASS} poster-rounded-clip relative overflow-hidden bg-gray-100 ring-1 ring-gray-900/[0.06] dark:bg-gray-800 dark:ring-white/[0.06]`}
+      >
         <CoverImage
           src={poster}
           alt={title}
-          sizes='(min-width: 768px) 88px, 76px'
+          sizes={CONTINUE_CARD_COVER_SIZES}
           checkClientCacheBeforeLoad
         />
         <div className='absolute inset-0 flex items-center justify-center bg-black/40 opacity-0 transition-opacity duration-200 group-hover:opacity-100'>
@@ -277,11 +290,13 @@ export default function ContinueCard({
           </span>
         </div>
       </div>
-      <div className='flex min-w-0 flex-1 flex-col py-1'>
-        <p className='line-clamp-2 pr-6 text-[13px] font-semibold leading-snug text-gray-900 transition-colors duration-200 group-hover:text-brand-600 dark:text-gray-100 dark:group-hover:text-brand-300 md:text-sm'>
+      <div className={CONTINUE_CARD_BODY_CLASS}>
+        <p
+          className={`${CONTINUE_CARD_TITLE_TEXT_CLASS} line-clamp-2 pr-6 font-semibold text-gray-900 transition-colors duration-200 group-hover:text-brand-600 dark:text-gray-100 dark:group-hover:text-brand-300`}
+        >
           {title}
         </p>
-        <div className='mt-1 space-y-0.5 text-xs'>
+        <div className={CONTINUE_CARD_META_CLASS}>
           {/* 更新信息并入集数行，多占一行会撑高整排卡片 */}
           {showUpdate ? (
             <p
@@ -310,14 +325,18 @@ export default function ContinueCard({
             {displaySourceName}
           </p>
         </div>
-        <div className='mt-auto pt-2'>
-          <div className='flex items-center justify-between gap-2 text-[11px] tabular-nums text-gray-400 dark:text-gray-500'>
+        <div className={CONTINUE_CARD_FOOTER_CLASS}>
+          <div
+            className={`${CONTINUE_CARD_PROGRESS_TEXT_CLASS} flex items-center justify-between gap-2 tabular-nums text-gray-400 dark:text-gray-500`}
+          >
             <span className='truncate'>
               {resumeTime > 0 ? `看到 ${formatTime(resumeTime)}` : '未开始'}
             </span>
             <span className='shrink-0'>{Math.round(progressPercent)}%</span>
           </div>
-          <div className='mt-1 h-1 overflow-hidden rounded-full bg-gray-200 dark:bg-white/10'>
+          <div
+            className={`${CONTINUE_CARD_PROGRESS_BAR_CLASS} overflow-hidden bg-gray-200 dark:bg-white/10`}
+          >
             <div
               className='h-full rounded-full bg-brand-500 dark:bg-brand-400'
               style={{ width: `${progressPercent}%` }}

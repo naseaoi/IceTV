@@ -3,6 +3,8 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 
+import { POSTER_CARD_TITLE_ROW_CLASS } from '@/components/poster-card-layout';
+
 import { noSelectStyle, preventContextMenu } from './constants';
 
 interface VideoCardTitleProps {
@@ -83,12 +85,12 @@ export function VideoCardTitle({ title }: VideoCardTitleProps) {
   return (
     <div
       data-video-card-title
-      className='mt-2'
+      className={POSTER_CARD_TITLE_ROW_CLASS}
       style={noSelectStyle}
       onContextMenu={preventContextMenu}
     >
       <span
-        className='block truncate text-[13px] font-medium text-gray-800 transition-colors duration-200 group-hover:text-brand-600 dark:text-gray-200 dark:group-hover:text-brand-300'
+        className='block truncate font-medium text-gray-800 transition-colors duration-200 group-hover:text-brand-600 dark:text-gray-200 dark:group-hover:text-brand-300'
         style={noSelectStyle}
         onContextMenu={preventContextMenu}
         onMouseEnter={showTooltip}

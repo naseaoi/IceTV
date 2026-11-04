@@ -6,6 +6,12 @@ import ConfirmModal from '@/components/modals/ConfirmModal';
 import { buildSearchHref } from '@/components/SearchBox';
 import { SearchHistorySkeleton } from '@/features/search/components/SearchPageSkeleton';
 import { clearSearchSnapshotCache } from '@/features/search/hooks/useSearchExecution';
+import {
+  SEARCH_HISTORY_CHIP_SHAPE_CLASS,
+  SEARCH_HISTORY_HEADER_BUTTON_SHAPE_CLASS,
+  SEARCH_HISTORY_HEADER_CLASS,
+  SEARCH_HISTORY_TITLE_TEXT_CLASS,
+} from '@/features/search/lib/search-layout';
 import { normalizeSearchQueryInput } from '@/features/search/lib/searchQuery';
 import { useLongPress } from '@/hooks/useLongPress';
 import { clearSearchHistory, deleteSearchHistory } from '@/lib/db.client';
@@ -16,8 +22,7 @@ interface SearchHistoryProps {
   loading?: boolean;
 }
 
-const HEADER_BUTTON_CLASS =
-  'rounded-full px-2.5 py-1 text-[13px] text-gray-500 transition-colors hover:bg-gray-900/[0.05] dark:text-gray-400 dark:hover:bg-white/[0.06]';
+const HEADER_BUTTON_CLASS = `${SEARCH_HISTORY_HEADER_BUTTON_SHAPE_CLASS} text-gray-500 transition-colors hover:bg-gray-900/[0.05] dark:text-gray-400 dark:hover:bg-white/[0.06]`;
 
 function HistoryChip({
   item,
@@ -46,7 +51,7 @@ function HistoryChip({
         onClick={activate}
         onContextMenu={(event) => event.preventDefault()}
         {...longPressProps}
-        className={`flex max-w-[16rem] select-none items-center gap-1.5 rounded-full px-4 py-2 text-sm transition-colors [-webkit-touch-callout:none] ${
+        className={`${SEARCH_HISTORY_CHIP_SHAPE_CLASS} flex max-w-[16rem] select-none items-center gap-1.5 transition-colors [-webkit-touch-callout:none] ${
           editing
             ? 'bg-gray-900/[0.05] pr-3 text-gray-700 ring-1 ring-inset ring-gray-900/10 dark:bg-white/[0.06] dark:text-gray-300 dark:ring-white/10'
             : 'bg-gray-900/[0.05] text-gray-700 hover:bg-gray-900/[0.09] hover:text-gray-900 dark:bg-white/[0.06] dark:text-gray-300 dark:hover:bg-white/10 dark:hover:text-white'
@@ -97,10 +102,10 @@ export default function SearchHistory({
 
   return (
     <section aria-labelledby='search-history-title'>
-      <div className='mb-3 flex items-center justify-between'>
+      <div className={SEARCH_HISTORY_HEADER_CLASS}>
         <h2
           id='search-history-title'
-          className='text-[15px] font-semibold text-gray-900 dark:text-gray-100'
+          className={`${SEARCH_HISTORY_TITLE_TEXT_CLASS} font-semibold text-gray-900 dark:text-gray-100`}
         >
           搜索历史
         </h2>

@@ -7,13 +7,18 @@ import { useEffect, useMemo, useState } from 'react';
 import ContinueWatching from '@/components/ContinueWatching';
 import GuestAnnouncement from '@/components/GuestAnnouncement';
 import HomePosterCardSkeleton, {
-  HOME_POSTER_CARD_CLASS,
   HOME_RECOMMENDATION_INITIAL_COUNT,
 } from '@/components/HomePosterCardSkeleton';
 import { PAGE_CONTAINER_CLASS } from '@/components/page-container';
 import PageLayout from '@/components/PageLayout';
+import { HOME_POSTER_CARD_CLASS } from '@/components/poster-card-layout';
 import PosterCard from '@/components/PosterCard';
 import ScrollableRow from '@/components/ScrollableRow';
+import {
+  SECTION_HEADER_CLASS,
+  SECTION_LINK_TEXT_CLASS,
+  SECTION_TITLE_TEXT_CLASS,
+} from '@/components/section-header';
 import { GetBangumiCalendarData } from '@/features/bangumi/lib/bangumi.client';
 import { selectBangumiCardCover } from '@/features/bangumi/lib/bangumi-normalize';
 import {
@@ -29,6 +34,11 @@ import {
   writeHomeClientSnapshot,
 } from '../lib/home-client-cache';
 import { pickHomeHeroItems } from '../lib/home-hero';
+import {
+  HOME_BODY_CLASS,
+  HOME_SECTION_CLASS,
+  HOME_SECTIONS_CLASS,
+} from '../lib/home-layout';
 import { HomeHero, HomeHeroSkeleton } from './HomeHero';
 
 interface HomeClientProps {
@@ -83,14 +93,16 @@ function RecommendationSection({
   emptyMessage?: string;
 }) {
   return (
-    <section className='mb-2'>
-      <div className='mb-1 flex items-baseline justify-between sm:mb-2'>
-        <h2 className='text-lg font-semibold tracking-tight text-gray-900 dark:text-gray-100 sm:text-xl'>
+    <section className={HOME_SECTION_CLASS}>
+      <div className={SECTION_HEADER_CLASS}>
+        <h2
+          className={`${SECTION_TITLE_TEXT_CLASS} font-semibold tracking-tight text-gray-900 dark:text-gray-100`}
+        >
           {title}
         </h2>
         <Link
           href={href}
-          className='flex items-center text-sm text-gray-500 transition-colors hover:text-gray-900 dark:text-gray-400 dark:hover:text-white'
+          className={`${SECTION_LINK_TEXT_CLASS} flex items-center text-gray-500 transition-colors hover:text-gray-900 dark:text-gray-400 dark:hover:text-white`}
         >
           更多
           <ChevronRight className='h-4 w-4' />
@@ -387,9 +399,9 @@ export default function HomeClient({
       ) : (
         <HomeHero items={heroItems} likelyMobile={likelyMobile} />
       )}
-      <div className='overflow-visible pb-2 pt-4 md:pt-2'>
+      <div className={HOME_BODY_CLASS}>
         <div className={PAGE_CONTAINER_CLASS}>
-          <div className='-mb-3 space-y-2 sm:-mb-6 sm:space-y-4'>
+          <div className={HOME_SECTIONS_CLASS}>
             <ContinueWatching
               initialSkeletonCount={continueWatchingSkeletonCount}
               initialRecords={continueWatchingRecords}

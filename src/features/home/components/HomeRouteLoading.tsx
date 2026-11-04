@@ -9,12 +9,23 @@ import HomePosterCardSkeleton, {
 import { PAGE_CONTAINER_CLASS } from '@/components/page-container';
 import PageLayout from '@/components/PageLayout';
 import ScrollableRow from '@/components/ScrollableRow';
+import {
+  SECTION_HEADER_CLASS,
+  SECTION_LINK_TEXT_CLASS,
+  SECTION_TITLE_TEXT_CLASS,
+} from '@/components/section-header';
+import SkeletonText from '@/components/SkeletonText';
 import { useClientHydrated } from '@/hooks/useClientHydrated';
 
 import {
   type HomeClientSnapshot,
   getHomeClientSnapshot,
 } from '../lib/home-client-cache';
+import {
+  HOME_BODY_CLASS,
+  HOME_SECTION_CLASS,
+  HOME_SECTIONS_CLASS,
+} from '../lib/home-layout';
 import HomeClient from './HomeClient';
 import { HomeHeroSkeleton } from './HomeHero';
 
@@ -43,9 +54,15 @@ function SkeletonRow({
 
 function SkeletonSectionHeader() {
   return (
-    <div className='mb-1 flex items-baseline justify-between sm:mb-2'>
-      <div className='skeleton h-7 w-28 rounded' />
-      <div className='skeleton h-5 w-16 rounded' />
+    <div className={SECTION_HEADER_CLASS}>
+      <SkeletonText
+        className={SECTION_TITLE_TEXT_CLASS}
+        barClassName='h-6 w-28 rounded'
+      />
+      <SkeletonText
+        className={SECTION_LINK_TEXT_CLASS}
+        barClassName='h-4 w-16 rounded'
+      />
     </div>
   );
 }
@@ -58,32 +75,32 @@ function HomeLoadingSkeleton({
   return (
     <PageLayout transparentTopNav>
       <HomeHeroSkeleton />
-      <div className='overflow-visible pb-2 pt-4 md:pt-2'>
+      <div className={HOME_BODY_CLASS}>
         <div className={PAGE_CONTAINER_CLASS}>
-          <div className='-mb-3 space-y-2 sm:-mb-6 sm:space-y-4'>
+          <div className={HOME_SECTIONS_CLASS}>
             {continueWatchingCount > 0 && (
-              <section className='mb-2'>
+              <section className={HOME_SECTION_CLASS}>
                 <SkeletonSectionHeader />
                 <SkeletonRow count={continueWatchingCount} mobileContinue />
               </section>
             )}
 
-            <section className='mb-2'>
+            <section className={HOME_SECTION_CLASS}>
               <SkeletonSectionHeader />
               <SkeletonRow count={HOME_RECOMMENDATION_INITIAL_COUNT} />
             </section>
 
-            <section className='mb-2'>
+            <section className={HOME_SECTION_CLASS}>
               <SkeletonSectionHeader />
               <SkeletonRow count={HOME_RECOMMENDATION_INITIAL_COUNT} />
             </section>
 
-            <section className='mb-2'>
+            <section className={HOME_SECTION_CLASS}>
               <SkeletonSectionHeader />
               <SkeletonRow count={HOME_RECOMMENDATION_INITIAL_COUNT} />
             </section>
 
-            <section className='mb-2'>
+            <section className={HOME_SECTION_CLASS}>
               <SkeletonSectionHeader />
               <SkeletonRow count={HOME_RECOMMENDATION_INITIAL_COUNT} />
             </section>

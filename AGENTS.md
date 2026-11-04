@@ -17,6 +17,8 @@
 - 写路径**必须先 `invalidateConfigCache()` 再 `getConfig()`**。否则命中 60 秒 TTL 缓存，会误判用户不存在或撞版本冲突。
 - `getConfigFresh()` 的结果**绝不能喂给写路径**。它 `deepFreeze` 的是共享缓存对象本身，不是副本。
 - `saveConfig()` 可能抛 `ConfigConflictError`（应用层乐观锁）。捕获后重试前要重新失效缓存。
+- 订阅地址、自动更新、检查时间与原文的真相源是 `config_subscription`；直播频道数的真相源是 `live_source_state`。运行时配置 JSON 不保存这些字段，后台响应和备份按需组装；频道数不导出，导入后刷新重建。
+- 订阅更新与源配置修改经同一配置 CAS 事务提交，并复核订阅快照；直播刷新仅更新状态表，按当前源地址复核，删除源同事务清理状态。
 - 用户权限以 `user_access` 和 `user_group_members` 为唯一真相源；鉴权按归一化用户名查主键，运行时配置不携带 `Users`。该字段只用于旧数据迁移与备份兼容，用户组定义 `Tags` 留在配置。
 - 每个 `users` 行必须有 `user_access` 行；建号同事务写入，初始化与 `replaceAllData()` 结尾补齐。站长角色和封禁豁免由环境变量决定，表仅保存其源权限和用户组。
 - 用户权限更新与批量操作在存储事务内复核角色；配置 CAS 同事务清理被删除组和源的用户引用，避免配置冲突后留下部分写入。
@@ -95,6 +97,7 @@
 - 账号相关能力（退出、登录跳转、版本更新标记、设置/改密/版本面板）在 `src/components/user-menu/`，桌面 `UserMenu` 与移动端 `/settings` 共用
 - `/me` 下各标签页的外壳（`PageLayout`、个人横幅、标签栏）由 `app/me/layout.tsx` 的 `MeShell` 提供，子页面与其 `loading.tsx` 只渲染内容区，**再套 `PageLayout` 会出现双层导航**。概览页及其骨架放在路由组 `app/me/(overview)/`，`app/me/` 根目录不放 `loading.tsx`，否则冷加载其他标签会先闪出概览骨架。海报网格统一用 `POSTER_GRID_CLASS`（`src/components/poster-grid-layout.ts`）
 - 加载反馈统一入口：骨架块用 `globals.css` 的 `skeleton` 类（自带底色与扫光，只加在叶子块上，父子叠加会出现两层动画），转圈用 `src/components/Spinner.tsx`（ArtPlayer 缓冲图标复用其 `SPINNER_MARKUP`），整页加载/错误用 `LoadingStatePanel`，播放器内遮罩用 `PlayerStateOverlay`。不要再手写 `animate-pulse` 灰块或 `animate-spin` 图标。`PlayerStateOverlay` 须与播放器容器同级挂在 `playerOverlay` 位置，`globals.css` 靠 `:has()` 在遮罩显示时隐藏内置缓冲指示
+- 骨架与真实组件共用布局常量（`poster-card-layout.ts`、`continue-card/layout.ts`、`section-header.ts`、`src/features/home/lib/home-layout.ts`、`src/features/search/lib/search-layout.ts`），文字行用 `SkeletonText` 传入与真实文字相同的字号、行高与间距类，**不要手写像素高度**。改卡片、标题或间距时改共享常量，骨架随之同步；只改真实组件一侧会让骨架换成内容时跳动
 - 长文本折叠用 `src/components/ExpandableText.tsx`；弹窗外壳 `ModalShell` 支持 `backdropClassName`（遮罩底色）与 `initialFocusRef`（打开后聚焦的元素）。
 - 弹窗、下拉、浮层用实底（`bg-white` / `dark:bg-gray-900` + 细 ring），遮罩只压暗不模糊；毛玻璃只留给吸顶导航与筛选栏。弹窗标题、关闭与按钮复用 `src/components/modals/modal-styles.ts`。
 

@@ -1,8 +1,7 @@
 'use client';
 
-import HomePosterCardSkeleton, {
-  HOME_POSTER_CARD_CLASS,
-} from '@/components/HomePosterCardSkeleton';
+import HomePosterCardSkeleton from '@/components/HomePosterCardSkeleton';
+import { HOME_POSTER_CARD_CLASS } from '@/components/poster-card-layout';
 import ScrollableRow from '@/components/ScrollableRow';
 import { HistoryPosterCard } from '@/features/playback-stats/components/HistoryPosterCard';
 import {

@@ -530,6 +530,24 @@ class DbManager {
     return (await this.getStorage()).getAdminUserPage(...args);
   }
 
+  async getConfigSubscription(
+    ...args: Parameters<IStorage['getConfigSubscription']>
+  ): ReturnType<IStorage['getConfigSubscription']> {
+    return (await this.getStorage()).getConfigSubscription(...args);
+  }
+
+  async getLiveSourceChannelCounts(
+    ...args: Parameters<IStorage['getLiveSourceChannelCounts']>
+  ): ReturnType<IStorage['getLiveSourceChannelCounts']> {
+    return (await this.getStorage()).getLiveSourceChannelCounts(...args);
+  }
+
+  async setLiveSourceChannelCount(
+    ...args: Parameters<IStorage['setLiveSourceChannelCount']>
+  ): ReturnType<IStorage['setLiveSourceChannelCount']> {
+    return (await this.getStorage()).setLiveSourceChannelCount(...args);
+  }
+
   async compareAndSetAdminConfig(
     ...args: Parameters<IStorage['compareAndSetAdminConfig']>
   ): Promise<boolean> {

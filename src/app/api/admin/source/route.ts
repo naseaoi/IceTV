@@ -7,6 +7,7 @@ import {
   buildConfigFileFromAdminConfig,
   removeConfigFileEntries,
 } from '@/lib/config-file-json';
+import { db } from '@/lib/db';
 import { validateProxyUrlForRequest } from '@/lib/url-guard';
 
 export const runtime = 'nodejs';
@@ -82,6 +83,8 @@ export async function POST(request: NextRequest) {
 
     invalidateConfigCache();
     const adminConfig = await getConfig();
+    const subscription = await db.getConfigSubscription();
+    let configFile = subscription.ConfigFile;
 
     switch (action) {
       case 'add': {
@@ -175,11 +178,9 @@ export async function POST(request: NextRequest) {
         if (idx === -1)
           return NextResponse.json({ error: '源不存在' }, { status: 404 });
         adminConfig.SourceConfig.splice(idx, 1);
-        adminConfig.ConfigFile = removeConfigFileEntries(
-          adminConfig.ConfigFile,
-          'api_site',
-          [cleanKey],
-        );
+        configFile = removeConfigFileEntries(configFile, 'api_site', [
+          cleanKey,
+        ]);
 
         if (adminConfig.UserConfig.Tags) {
           adminConfig.UserConfig.Tags.forEach((tag) => {
@@ -249,8 +250,8 @@ export async function POST(request: NextRequest) {
             adminConfig.SourceConfig.splice(idx, 1);
           }
         });
-        adminConfig.ConfigFile = removeConfigFileEntries(
-          adminConfig.ConfigFile,
+        configFile = removeConfigFileEntries(
+          configFile,
           'api_site',
           keysToDelete,
         );
@@ -353,10 +354,15 @@ export async function POST(request: NextRequest) {
         return NextResponse.json({ error: '未知操作' }, { status: 400 });
     }
 
-    adminConfig.ConfigFile = buildConfigFileFromAdminConfig(adminConfig);
+    configFile = buildConfigFileFromAdminConfig(adminConfig, configFile);
 
     // 持久化到存储
-    await saveConfig(adminConfig);
+    await saveConfig(adminConfig, {
+      subscription: {
+        expected: subscription,
+        next: { ...subscription, ConfigFile: configFile },
+      },
+    });
 
     return NextResponse.json(
       { ok: true },

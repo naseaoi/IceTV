@@ -3,7 +3,7 @@
 import { LibraryBig } from 'lucide-react';
 import Link from 'next/link';
 
-import { HOME_POSTER_CARD_CLASS } from '@/components/HomePosterCardSkeleton';
+import { HOME_POSTER_CARD_CLASS } from '@/components/poster-card-layout';
 import ScrollableRow from '@/components/ScrollableRow';
 import VideoCard from '@/components/VideoCard';
 import { FavoritePreviewSkeleton } from '@/features/favorites/components/FavoritePreviewSkeleton';

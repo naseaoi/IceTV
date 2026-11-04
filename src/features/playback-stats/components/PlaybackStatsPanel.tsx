@@ -4,7 +4,12 @@ import { useRouter } from 'next/navigation';
 import { type ReactNode, useEffect, useLayoutEffect, useState } from 'react';
 
 import CoverImage from '@/components/CoverImage';
-import { HOME_POSTER_CARD_CLASS } from '@/components/HomePosterCardSkeleton';
+import {
+  HOME_POSTER_CARD_CLASS,
+  POSTER_CARD_COVER_CLASS,
+  POSTER_CARD_SUBTITLE_ROW_CLASS,
+  POSTER_CARD_TITLE_ROW_CLASS,
+} from '@/components/poster-card-layout';
 import ScrollableRow from '@/components/ScrollableRow';
 import {
   PlaybackStatsSkeleton,
@@ -170,7 +175,9 @@ function TopWorkCard({
       aria-label={`播放 ${work.title}`}
       className='group block w-full text-left focus:outline-none'
     >
-      <div className='relative aspect-[2/3] overflow-hidden rounded-lg bg-gray-200 ring-offset-2 ring-offset-gray-50 group-focus-visible:ring-2 group-focus-visible:ring-brand-400 dark:bg-gray-800 dark:ring-offset-gray-950'>
+      <div
+        className={`${POSTER_CARD_COVER_CLASS} relative overflow-hidden bg-gray-200 ring-offset-2 ring-offset-gray-50 group-focus-visible:ring-2 group-focus-visible:ring-brand-400 dark:bg-gray-800 dark:ring-offset-gray-950`}
+      >
         <CoverImage
           src={work.cover || ''}
           alt={work.title}
@@ -180,10 +187,14 @@ function TopWorkCard({
           {rank}
         </span>
       </div>
-      <p className='mt-2 truncate text-[13px] font-medium text-gray-800 dark:text-gray-200'>
+      <p
+        className={`${POSTER_CARD_TITLE_ROW_CLASS} truncate font-medium text-gray-800 dark:text-gray-200`}
+      >
         {work.title}
       </p>
-      <p className='mt-0.5 truncate text-xs text-gray-500 dark:text-gray-400'>
+      <p
+        className={`${POSTER_CARD_SUBTITLE_ROW_CLASS} truncate text-gray-500 dark:text-gray-400`}
+      >
         {formatDuration(work.watchSeconds)}
       </p>
     </button>
@@ -199,9 +210,9 @@ function TopWorksMessage({ children }: { children: ReactNode }) {
           aria-hidden='true'
           className={`invisible ${HOME_POSTER_CARD_CLASS}`}
         >
-          <div className='aspect-[2/3]' />
-          <p className='mt-2 text-[13px]'>&nbsp;</p>
-          <p className='mt-0.5 text-xs'>&nbsp;</p>
+          <div className={POSTER_CARD_COVER_CLASS} />
+          <p className={POSTER_CARD_TITLE_ROW_CLASS}>&nbsp;</p>
+          <p className={POSTER_CARD_SUBTITLE_ROW_CLASS}>&nbsp;</p>
         </div>
       </ScrollableRow>
       <p className='absolute inset-0 flex items-center justify-center text-sm text-gray-400 dark:text-gray-500'>

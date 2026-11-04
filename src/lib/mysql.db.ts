@@ -24,11 +24,19 @@ import {
   libraryStatements,
 } from '@/features/favorites/lib/library-storage';
 import {
+  type ConfigStateUpdate,
+  type ConfigSubscription,
+  sameSubscription,
+  stripConfigState,
+  subscriptionFromConfig,
+} from '@/lib/config-state';
+import {
   type InviteCodeQuery,
   importedInviteCodes,
   INVITE_INSERT_SQL,
   inviteValues,
 } from '@/lib/invite-code-storage';
+import { MysqlConfigStateStore } from '@/lib/mysql-config-state-store';
 import { MysqlInviteCodeStore } from '@/lib/mysql-invite-code-store';
 import { MySqlResourceStore } from '@/lib/mysql-resource-store';
 import { MysqlUserAccessStore } from '@/lib/mysql-user-access';
@@ -512,6 +520,14 @@ export class MySqlStorage implements IStorage {
         username VARCHAR(191) NOT NULL PRIMARY KEY,
         last_login_at BIGINT NOT NULL
       ) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci`,
+      `CREATE TABLE IF NOT EXISTS config_subscription (
+        id TINYINT PRIMARY KEY, url TEXT NOT NULL, auto_update TINYINT NOT NULL,
+        last_check TEXT NOT NULL, config_file LONGTEXT NOT NULL
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_bin`,
+      `CREATE TABLE IF NOT EXISTS live_source_state (
+        source_key VARCHAR(255) COLLATE utf8mb4_bin PRIMARY KEY,
+        channel_number BIGINT NOT NULL, updated_at BIGINT NOT NULL
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_bin`,
       `CREATE TABLE IF NOT EXISTS invite_codes (
         code VARCHAR(191) NOT NULL PRIMARY KEY,
         created_at BIGINT NOT NULL,
@@ -598,6 +614,7 @@ export class MySqlStorage implements IStorage {
     try {
       await accessConnection.beginTransaction();
       await new MysqlUserAccessStore(accessConnection, true).migrate();
+      await new MysqlConfigStateStore(accessConnection).migrate();
       await accessConnection.commit();
     } catch (error) {
       await accessConnection.rollback();
@@ -1819,9 +1836,40 @@ export class MySqlStorage implements IStorage {
     });
   }
 
+  async getConfigSubscription(): Promise<ConfigSubscription> {
+    await this.ensureInitialized();
+    return new MysqlConfigStateStore(this.pool).subscription();
+  }
+  async getLiveSourceChannelCounts(): Promise<Record<string, number>> {
+    await this.ensureInitialized();
+    return new MysqlConfigStateStore(this.pool).counts();
+  }
+  async setLiveSourceChannelCount(
+    source: NonNullable<AdminConfig['LiveConfig']>[number],
+    count: number,
+  ): Promise<void> {
+    await this.withTransaction(async (connection) => {
+      const [rows] = await connection.query<RowDataPacket[]>(
+        'SELECT config_json FROM admin_config WHERE id = 1 FOR UPDATE',
+      );
+      const config = rows[0]
+        ? parseJsonValue<AdminConfig>(rows[0].config_json)
+        : null;
+      const live = config?.LiveConfig?.find((item) => item.key === source.key);
+      if (
+        live &&
+        live.url === source.url &&
+        live.ua === source.ua &&
+        live.epg === source.epg
+      )
+        await new MysqlConfigStateStore(connection).setCount(source.key, count);
+    });
+  }
+
   async compareAndSetAdminConfig(
     expected: AdminConfig | null,
     config: AdminConfig,
+    state?: ConfigStateUpdate,
   ): Promise<boolean> {
     return this.withTransaction(async (connection) => {
       const [rows] = await connection.query<RowDataPacket[]>(
@@ -1831,14 +1879,31 @@ export class MySqlStorage implements IStorage {
         ? parseJsonValue<AdminConfig>(rows[0].config_json)
         : null;
       if (JSON.stringify(current) !== JSON.stringify(expected)) return false;
+      const stateStore = new MysqlConfigStateStore(connection);
+      if (
+        state?.subscription &&
+        !sameSubscription(
+          await stateStore.subscription(true),
+          state.subscription.expected,
+        )
+      )
+        return false;
       const removed = removedAccessReferences(current, config);
       const access = new MysqlUserAccessStore(connection, true);
       for (const group of removed.groups) await access.removeGroup(group);
       for (const source of removed.sources) await access.removeSource(source);
-      await connection.execute(
-        'INSERT INTO admin_config (id, config_json) VALUES (1, ?) ON DUPLICATE KEY UPDATE config_json = VALUES(config_json)',
-        [JSON.stringify(config)],
-      );
+      await stateStore.prune(current, config);
+      for (const [key, count] of Object.entries(state?.liveCounts || {})) {
+        if (config.LiveConfig?.some((live) => live.key === key))
+          await stateStore.setCount(key, count);
+      }
+      if (state?.subscription)
+        await stateStore.saveSubscription(state.subscription.next);
+      if (JSON.stringify(current) !== JSON.stringify(config))
+        await connection.execute(
+          'INSERT INTO admin_config (id, config_json) VALUES (1, ?) ON DUPLICATE KEY UPDATE config_json = VALUES(config_json)',
+          [JSON.stringify(config)],
+        );
       return true;
     });
   }
@@ -2502,6 +2567,8 @@ export class MySqlStorage implements IStorage {
       await connection.execute('DELETE FROM user_login_activity');
       await connection.execute('DELETE FROM invite_code_usage');
       await connection.execute('DELETE FROM invite_codes');
+      await connection.execute('DELETE FROM config_subscription');
+      await connection.execute('DELETE FROM live_source_state');
       await connection.execute('DELETE FROM user_danmaku_episodes');
       await connection.execute('DELETE FROM user_danmaku_settings');
       await connection.execute('DELETE FROM shared_cache');
@@ -2583,6 +2650,8 @@ export class MySqlStorage implements IStorage {
       await connection.execute('DELETE FROM user_login_activity');
       await connection.execute('DELETE FROM invite_code_usage');
       await connection.execute('DELETE FROM invite_codes');
+      await connection.execute('DELETE FROM config_subscription');
+      await connection.execute('DELETE FROM live_source_state');
       await connection.execute('DELETE FROM user_danmaku_episodes');
       await connection.execute('DELETE FROM user_danmaku_settings');
       await connection.execute('DELETE FROM shared_cache');
@@ -2595,6 +2664,10 @@ export class MySqlStorage implements IStorage {
         JSON.stringify(data.adminConfig),
       ) as AdminConfig;
       if (storedConfig.UserConfig) delete storedConfig.UserConfig.InviteCodes;
+      await new MysqlConfigStateStore(connection).saveSubscription(
+        subscriptionFromConfig(storedConfig),
+      );
+      stripConfigState(storedConfig);
       await connection.execute(
         'INSERT INTO admin_config (id, config_json) VALUES (1, ?)',
         [JSON.stringify(storedConfig)],

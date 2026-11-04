@@ -703,6 +703,8 @@ describe('sqlite storage contract', () => {
     await expect(storage.getAllInviteCodeUsage()).resolves.toEqual({});
     const expectedConfig = JSON.parse(JSON.stringify(adminConfig));
     delete expectedConfig.UserConfig.Users;
+    delete expectedConfig.ConfigFile;
+    delete expectedConfig.ConfigSubscribtion;
     await expect(storage.getAdminConfig()).resolves.toEqual(expectedConfig);
     await expect(storage.getAllUsers()).resolves.toEqual(['demo-user']);
     await expect(storage.getAllUsersWithPasswords()).resolves.toEqual({

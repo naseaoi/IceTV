@@ -1,4 +1,4 @@
-﻿import { gzipSync } from 'node:zlib';
+import { gzipSync } from 'node:zlib';
 
 import {
   deleteCachedLiveChannels,
@@ -8,13 +8,18 @@ import {
   refreshLiveChannels,
   refreshLiveChannelSources,
 } from '@/features/live/lib/live';
-import { getConfigForRead } from '@/lib/config';
+import { getConfigForRead, saveConfig } from '@/lib/config';
+import { db } from '@/lib/db';
 import {
   clearUrlGuardDnsCacheForTests,
   resetUrlGuardDnsLookupForTests,
   setUrlGuardDnsLookupForTests,
   UrlValidationError,
 } from '@/lib/url-guard';
+
+jest.mock('@/lib/db', () => ({
+  db: { setLiveSourceChannelCount: jest.fn().mockResolvedValue(undefined) },
+}));
 
 jest.mock('@/lib/config', () => ({
   getConfig: jest.fn(),
@@ -213,7 +218,14 @@ describe('refreshLiveChannels', () => {
 
     pendingReads.splice(0).forEach((release) => release());
     await refreshPromise;
-    expect(sources.map((source) => source.channelNumber)).toEqual([1, 1, 1]);
+    expect(sources.map((source) => source.channelNumber)).toEqual([
+      undefined,
+      undefined,
+      undefined,
+    ]);
+    for (const source of sources)
+      expect(db.setLiveSourceChannelCount).toHaveBeenCalledWith(source, 1);
+    expect(saveConfig).not.toHaveBeenCalled();
   });
 
   it('流式解压 EPG 并只保留时间窗口内的节目', async () => {

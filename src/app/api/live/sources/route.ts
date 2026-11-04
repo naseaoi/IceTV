@@ -1,8 +1,9 @@
-﻿import { NextRequest, NextResponse } from 'next/server';
+import { NextRequest, NextResponse } from 'next/server';
 
 import { isLiveEntryEnabledInConfig } from '@/features/live/lib/live';
 import { isGuardFailure, requireActiveUser } from '@/lib/api-auth';
 import { getConfigForRead } from '@/lib/config';
+import { db } from '@/lib/db';
 
 export const runtime = 'nodejs';
 
@@ -26,9 +27,13 @@ export async function GET(request: NextRequest) {
       (source) => !source.disabled,
     );
 
+    const counts = await db.getLiveSourceChannelCounts();
     return NextResponse.json({
       success: true,
-      data: liveSources,
+      data: liveSources.map((source) => ({
+        ...source,
+        channelNumber: counts[source.key] ?? 0,
+      })),
     });
   } catch (error) {
     console.error('获取直播源失败:', error);

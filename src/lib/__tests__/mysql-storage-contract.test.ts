@@ -24,6 +24,8 @@ type SourceRouteStatsRow = {
 };
 
 type FakeState = {
+  subscription: Record<string, unknown> | null;
+  liveCounts: Map<string, Record<string, unknown>>;
   social: Record<string, Record<string, any>[]>;
   userAccess: Map<string, Record<string, any>>;
   userGroups: Record<string, any>[];
@@ -52,6 +54,10 @@ function cloneNestedMap(source: Map<string, Map<string, string>>) {
 
 function cloneState(state: FakeState): FakeState {
   return {
+    subscription: state.subscription ? { ...state.subscription } : null,
+    liveCounts: new Map(
+      [...state.liveCounts].map(([key, row]) => [key, { ...row }]),
+    ),
     social: Object.fromEntries(
       Object.entries(state.social).map(([key, rows]) => [
         key,
@@ -89,6 +95,8 @@ function cloneState(state: FakeState): FakeState {
 
 function createState(): FakeState {
   return {
+    subscription: null,
+    liveCounts: new Map(),
     social: {
       user_profiles: [],
       user_follows: [],
@@ -520,6 +528,39 @@ function createFakePool() {
       return [[], []];
     }
 
+    if (/^INSERT(?: IGNORE)? INTO config_subscription /.test(normalized)) {
+      const [url, auto_update, last_check, config_file] = params;
+      if (!normalized.startsWith('INSERT IGNORE') || !currentState.subscription)
+        currentState.subscription = {
+          url,
+          auto_update,
+          last_check,
+          config_file,
+        };
+      return [{ affectedRows: 1 }, []];
+    }
+    if (/^INSERT(?: IGNORE)? INTO live_source_state /.test(normalized)) {
+      const [source_key, channel_number, updated_at] = params;
+      if (
+        !normalized.startsWith('INSERT IGNORE') ||
+        !currentState.liveCounts.has(String(source_key))
+      )
+        currentState.liveCounts.set(String(source_key), {
+          source_key,
+          channel_number,
+          updated_at,
+        });
+      return [{ affectedRows: 1 }, []];
+    }
+    if (normalized === 'DELETE FROM config_subscription') {
+      currentState.subscription = null;
+      return [{ affectedRows: 1 }, []];
+    }
+    if (normalized.startsWith('DELETE FROM live_source_state')) {
+      if (params.length) currentState.liveCounts.delete(String(params[0]));
+      else currentState.liveCounts.clear();
+      return [{ affectedRows: 1 }, []];
+    }
     if (/^INSERT(?: IGNORE)? INTO invite_codes /.test(normalized)) {
       const [code, created_at, expires_at, created_by, max_uses, used_count] =
         params;
@@ -1136,6 +1177,12 @@ function createFakePool() {
   ) => {
     const normalized = normalizeSql(sql);
 
+    if (normalized.startsWith('SELECT * FROM config_subscription WHERE id = 1'))
+      return [currentState.subscription ? [currentState.subscription] : [], []];
+    if (
+      normalized === 'SELECT source_key, channel_number FROM live_source_state'
+    )
+      return [[...currentState.liveCounts.values()], []];
     if (normalized === 'SHOW COLUMNS FROM favorites')
       return [
         [
@@ -2170,6 +2217,52 @@ function sortRouteStats(items: SourceRouteStatsItem[]) {
 }
 
 describe('mysql storage contract', () => {
+  it('stores subscription and live counts outside config and fences stale subscription updates', async () => {
+    const storage = new MySqlStorage('mysql://demo:demo@localhost:3306/icetv');
+    const source = {
+      key: 'live',
+      name: 'Live',
+      url: 'https://example.com/live',
+      from: 'custom' as const,
+    };
+    const config = {
+      UserConfig: {},
+      SourceConfig: [],
+      LiveConfig: [source],
+    } as unknown as AdminConfig;
+    await storage.setAdminConfig(config);
+    const expected = await storage.getConfigSubscription();
+    const next = {
+      ConfigFile: '{}',
+      ConfigSubscribtion: {
+        URL: 'https://example.com/sub',
+        AutoUpdate: true,
+        LastCheck: 'now',
+      },
+    };
+    expect(
+      await storage.compareAndSetAdminConfig(config, config, {
+        subscription: { expected, next },
+        liveCounts: { live: 5 },
+      }),
+    ).toBe(true);
+    expect(await storage.getConfigSubscription()).toEqual(next);
+    expect(await storage.getLiveSourceChannelCounts()).toEqual({ live: 5 });
+    expect(
+      await storage.compareAndSetAdminConfig(config, config, {
+        subscription: { expected, next: expected },
+      }),
+    ).toBe(false);
+    await storage.setLiveSourceChannelCount(source, 10);
+    expect(await storage.getLiveSourceChannelCounts()).toEqual({ live: 10 });
+    expect(await storage.getAdminConfig()).toEqual(config);
+    await storage.compareAndSetAdminConfig(config, {
+      ...config,
+      LiveConfig: [],
+    });
+    expect(await storage.getLiveSourceChannelCounts()).toEqual({});
+  });
+
   it('原子占用邀请码名额，超出上限即失败', async () => {
     const storage = new MySqlStorage('mysql://demo:demo@localhost:3306/icetv');
     await storage.setAdminConfig({ UserConfig: {} } as AdminConfig);
@@ -2801,6 +2894,8 @@ describe('mysql storage contract', () => {
 
     const expectedConfig = JSON.parse(JSON.stringify(adminConfig));
     delete expectedConfig.UserConfig.Users;
+    delete expectedConfig.ConfigFile;
+    delete expectedConfig.ConfigSubscribtion;
     await expect(storage.getAdminConfig()).resolves.toEqual(expectedConfig);
     await expect(storage.getAllUsers()).resolves.toEqual(['demo-user']);
     await expect(storage.getAllUsersWithPasswords()).resolves.toEqual({

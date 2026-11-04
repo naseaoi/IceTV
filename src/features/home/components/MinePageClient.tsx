@@ -4,10 +4,14 @@ import { ChevronRight } from 'lucide-react';
 import Link from 'next/link';
 import type { ReactNode } from 'react';
 
+import { SECTION_HEADER_CLASS } from '@/components/section-header';
 import { FavoritePreviewSection } from '@/features/favorites/components/FavoritePreviewSection';
 import { useFavoriteItems } from '@/features/favorites/hooks/useFavoriteItems';
 import { PlaybackHistoryPreview } from '@/features/playback-stats/components/PlaybackHistoryPreview';
 import { PlaybackStatsPanel } from '@/features/playback-stats/components/PlaybackStatsPanel';
+
+// 概览页与其骨架共用
+export const MINE_OVERVIEW_CLASS = 'space-y-4 sm:space-y-6';
 
 export function MineSection({
   title,
@@ -20,7 +24,7 @@ export function MineSection({
 }) {
   return (
     <section>
-      <div className='mb-1 flex items-baseline justify-between sm:mb-2'>
+      <div className={SECTION_HEADER_CLASS}>
         <h2 className='text-lg font-semibold tracking-tight text-gray-900 dark:text-gray-100'>
           {title}
         </h2>
@@ -52,7 +56,7 @@ export function MinePageClient({
   } = useFavoriteItems(true, favoriteSkeletonCount);
 
   return (
-    <div className='space-y-4 sm:space-y-6'>
+    <div className={MINE_OVERVIEW_CLASS}>
       <MineSection title='最近观看' href='/me/history'>
         <PlaybackHistoryPreview />
       </MineSection>

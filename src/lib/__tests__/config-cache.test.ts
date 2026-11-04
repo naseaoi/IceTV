@@ -62,6 +62,10 @@ async function loadConfigModule(
   jest.doMock('@/lib/db', () => ({
     db: {
       getAdminConfig,
+      getConfigSubscription: jest.fn().mockResolvedValue({
+        ConfigFile: '',
+        ConfigSubscribtion: { URL: '', AutoUpdate: false, LastCheck: '' },
+      }),
       getAllUsers: jest.fn().mockResolvedValue(userNames),
       saveAdminConfig,
       compareAndSetAdminConfig:

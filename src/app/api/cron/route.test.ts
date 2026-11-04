@@ -28,7 +28,11 @@ jest.mock('@/features/live/lib/live', () => ({
 
 jest.mock('@/lib/config', () => ({
   getConfig: (...args: unknown[]) => mockGetConfig(...args),
+  getConfigForRead: (...args: unknown[]) => mockGetConfig(...args),
+  invalidateConfigCache: jest.fn(),
+  ConfigConflictError: class extends Error {},
   refineConfig: jest.fn((config) => config),
+  configSelfCheck: jest.fn((config) => config),
   saveConfig: jest.fn(),
 }));
 
@@ -43,6 +47,10 @@ jest.mock('@/lib/cron-lease', () => ({
 
 jest.mock('@/lib/db', () => ({
   db: {
+    getConfigSubscription: jest.fn().mockResolvedValue({
+      ConfigFile: '',
+      ConfigSubscribtion: { URL: '', AutoUpdate: false, LastCheck: '' },
+    }),
     getAllUsers: (...args: unknown[]) => mockGetAllUsers(...args),
     getAllPlayRecords: (...args: unknown[]) => mockGetAllPlayRecords(...args),
     getAllFavorites: (...args: unknown[]) => mockGetAllFavorites(...args),

@@ -1,4 +1,8 @@
-﻿import { AdminConfig } from '@/types/admin';
+import {
+  type ConfigStateUpdate,
+  type ConfigSubscription,
+} from '@/lib/config-state';
+import { AdminConfig } from '@/types/admin';
 
 // 播放记录数据结构
 export interface PlayRecord {
@@ -563,9 +567,16 @@ export interface IStorage {
   getAdminUserPage(
     query: import('@/features/admin/services/userQueryStorage').AdminUserStorageQuery,
   ): Promise<import('@/features/admin/lib/user-query').AdminUserPage>;
+  getConfigSubscription(): Promise<ConfigSubscription>;
+  getLiveSourceChannelCounts(): Promise<Record<string, number>>;
+  setLiveSourceChannelCount(
+    source: NonNullable<AdminConfig['LiveConfig']>[number],
+    count: number,
+  ): Promise<void>;
   compareAndSetAdminConfig(
     expected: AdminConfig | null,
     config: AdminConfig,
+    state?: ConfigStateUpdate,
   ): Promise<boolean>;
   getAllUsers(): Promise<string[]>;
   getAllUsersWithPasswords(): Promise<{ [username: string]: string }>;

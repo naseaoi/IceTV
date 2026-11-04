@@ -1,4 +1,4 @@
-﻿import { NextRequest, NextResponse } from 'next/server';
+import { NextRequest, NextResponse } from 'next/server';
 
 import { isGuardFailure, requireAdmin } from '@/lib/api-auth';
 import { getConfigFresh } from '@/lib/config';
@@ -16,10 +16,16 @@ export async function GET(request: NextRequest) {
     if (isGuardFailure(guardResult)) return guardResult.response;
 
     const config = await getConfigFresh();
+    const channelCounts = await db.getLiveSourceChannelCounts();
     const result: AdminConfigResult = {
       Role: guardResult.isOwner ? 'owner' : 'admin',
       Config: {
         ...config,
+        ...(await db.getConfigSubscription()),
+        LiveConfig: (config.LiveConfig || []).map((source) => ({
+          ...source,
+          channelNumber: channelCounts[source.key] ?? 0,
+        })),
         UserConfig: {
           ...config.UserConfig,
           Users: [],

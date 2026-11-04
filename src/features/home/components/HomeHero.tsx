@@ -11,6 +11,7 @@ import {
 
 import CoverImage from '@/components/CoverImage';
 import { PAGE_CONTAINER_CLASS } from '@/components/page-container';
+import SkeletonText, { SKELETON_TEXT_STRUT } from '@/components/SkeletonText';
 import { useIsMobileViewport } from '@/hooks/useIsMobileViewport';
 import {
   buildExternalSubjectUrl,
@@ -21,6 +22,27 @@ import {
 import { type HomeHeroItem, HERO_ITEM_LIMIT } from '../lib/home-hero';
 
 const ROTATE_INTERVAL_MS = 8000;
+// 真实 Hero 与骨架共用的几何类，骨架行高由同一字号行高撑出
+const DESKTOP_HERO_COVER_CLASS =
+  'aspect-[2/3] w-48 shrink-0 rounded-xl lg:w-56';
+const HERO_TEXT_COLUMN_CLASS = 'min-w-0 max-w-2xl flex-1 pb-1';
+const DESKTOP_HERO_TEXT = {
+  label: 'text-xs',
+  title: 'mt-2 text-4xl lg:text-5xl lg:leading-tight',
+  meta: 'mt-3 text-[15px]',
+  intro: 'text-[15px] leading-7',
+  credits: 'mt-3 text-sm',
+  actions: 'mt-7 flex items-center gap-3',
+  button: 'h-11 rounded-full',
+};
+// 标签与按钮是块内的 inline-flex，骨架沿用同样的盒子与字号才能撑出相同行盒
+const MOBILE_HERO_TEXT = {
+  label: 'inline-flex rounded px-1.5 py-0.5 text-[11px] leading-4',
+  title: 'mt-2 text-[28px] leading-tight',
+  meta: 'mt-1.5 text-[13px]',
+  intro: 'text-[13px] leading-5',
+  button: 'mt-4 inline-flex h-10 items-center rounded-full pl-4 pr-5 text-sm',
+};
 const DESKTOP_HERO_CONTAINER_CLASS = `${PAGE_CONTAINER_CLASS} relative flex h-[clamp(440px,58vh,560px)] items-end gap-10`;
 
 function heroMetaParts(item: HomeHeroItem): string[] {
@@ -82,7 +104,7 @@ function HeroActions({ item }: { item: HomeHeroItem }) {
   const externalUrl = buildExternalSubjectUrl(Number(item.id));
 
   return (
-    <div className='mt-7 flex items-center gap-3'>
+    <div className={DESKTOP_HERO_TEXT.actions}>
       <button
         type='button'
         onClick={play}
@@ -90,7 +112,7 @@ function HeroActions({ item }: { item: HomeHeroItem }) {
         onMouseLeave={cancelPrefetch}
         onFocus={prefetch}
         onBlur={cancelPrefetch}
-        className='inline-flex h-11 items-center gap-2 rounded-full bg-brand-500 pl-5 pr-6 text-[15px] font-medium text-white shadow-lg shadow-brand-500/25 transition-colors hover:bg-brand-600'
+        className={`${DESKTOP_HERO_TEXT.button} inline-flex items-center gap-2 bg-brand-500 pl-5 pr-6 text-[15px] font-medium text-white shadow-lg shadow-brand-500/25 transition-colors hover:bg-brand-600`}
       >
         <Play className='h-4 w-4 fill-current' />
         立即播放
@@ -100,7 +122,7 @@ function HeroActions({ item }: { item: HomeHeroItem }) {
           href={externalUrl}
           target='_blank'
           rel='noopener noreferrer'
-          className='inline-flex h-11 items-center gap-2 rounded-full bg-gray-900/[0.06] px-5 text-[15px] text-gray-700 transition-colors hover:bg-gray-900/10 dark:bg-white/10 dark:text-gray-200 dark:hover:bg-white/15'
+          className={`${DESKTOP_HERO_TEXT.button} inline-flex items-center gap-2 bg-gray-900/[0.06] px-5 text-[15px] text-gray-700 transition-colors hover:bg-gray-900/10 dark:bg-white/10 dark:text-gray-200 dark:hover:bg-white/15`}
         >
           豆瓣
           <ExternalLink className='h-3.5 w-3.5' />
@@ -121,7 +143,9 @@ function HeroSlideContent({
 
   return (
     <>
-      <div className='relative aspect-[2/3] w-48 shrink-0 overflow-hidden rounded-xl shadow-2xl shadow-black/30 ring-1 ring-black/5 dark:ring-white/10 lg:w-56'>
+      <div
+        className={`${DESKTOP_HERO_COVER_CLASS} relative overflow-hidden shadow-2xl shadow-black/30 ring-1 ring-black/5 dark:ring-white/10`}
+      >
         <CoverImage
           src={item.poster}
           alt={item.title}
@@ -130,21 +154,29 @@ function HeroSlideContent({
         />
       </div>
 
-      <div className='min-w-0 max-w-2xl flex-1 pb-1'>
-        <p className='text-xs font-medium tracking-wider text-brand-600 dark:text-brand-300'>
+      <div className={HERO_TEXT_COLUMN_CLASS}>
+        <p
+          className={`${DESKTOP_HERO_TEXT.label} font-medium tracking-wider text-brand-600 dark:text-brand-300`}
+        >
           {item.label}
         </p>
-        <h2 className='mt-2 line-clamp-2 text-4xl font-bold tracking-tight text-gray-900 dark:text-white lg:text-5xl lg:leading-tight'>
+        <h2
+          className={`${DESKTOP_HERO_TEXT.title} line-clamp-2 font-bold tracking-tight text-gray-900 dark:text-white`}
+        >
           {item.title}
         </h2>
-        <HeroMetaLine item={item} className='mt-3 text-[15px]' />
+        <HeroMetaLine item={item} className={DESKTOP_HERO_TEXT.meta} />
         {item.intro && (
-          <p className='mt-4 line-clamp-3 text-[15px] leading-7 text-gray-700 dark:text-gray-300'>
+          <p
+            className={`mt-4 ${DESKTOP_HERO_TEXT.intro} line-clamp-3 text-gray-700 dark:text-gray-300`}
+          >
             {item.intro}
           </p>
         )}
         {credits && (
-          <p className='mt-3 truncate text-sm text-gray-500 dark:text-gray-400'>
+          <p
+            className={`${DESKTOP_HERO_TEXT.credits} truncate text-gray-500 dark:text-gray-400`}
+          >
             {credits}
           </p>
         )}
@@ -344,22 +376,28 @@ function MobileHeroSlide({
       <div className='pointer-events-none absolute inset-x-0 bottom-0 h-3/5 bg-gradient-to-t from-gray-50 via-gray-50/80 to-transparent dark:from-gray-950 dark:via-gray-950/80' />
 
       <div className='pointer-events-none absolute inset-x-0 bottom-0 px-4 pb-4'>
-        <p className='inline-flex rounded bg-brand-500 px-1.5 py-0.5 text-[11px] font-medium leading-4 text-white'>
+        <p
+          className={`${MOBILE_HERO_TEXT.label} bg-brand-500 font-medium text-white`}
+        >
           {item.label}
         </p>
-        <h2 className='mt-2 line-clamp-2 text-[28px] font-bold leading-tight tracking-tight text-gray-900 dark:text-white'>
+        <h2
+          className={`${MOBILE_HERO_TEXT.title} line-clamp-2 font-bold tracking-tight text-gray-900 dark:text-white`}
+        >
           {item.title}
         </h2>
-        <HeroMetaLine item={item} className='mt-1.5 text-[13px]' />
+        <HeroMetaLine item={item} className={MOBILE_HERO_TEXT.meta} />
         {item.intro && (
-          <p className='mt-2 line-clamp-2 text-[13px] leading-5 text-gray-600 dark:text-gray-300'>
+          <p
+            className={`mt-2 ${MOBILE_HERO_TEXT.intro} line-clamp-2 text-gray-600 dark:text-gray-300`}
+          >
             {item.intro}
           </p>
         )}
         <button
           type='button'
           onClick={play}
-          className='pointer-events-auto mt-4 inline-flex h-10 items-center gap-1.5 rounded-full bg-brand-500 pl-4 pr-5 text-sm font-medium text-white shadow-lg shadow-brand-500/25 transition-transform active:scale-95'
+          className={`${MOBILE_HERO_TEXT.button} pointer-events-auto gap-1.5 bg-brand-500 font-medium text-white shadow-lg shadow-brand-500/25 transition-transform active:scale-95`}
         >
           <Play className='h-4 w-4 fill-current' />
           立即播放
@@ -477,28 +515,40 @@ export function HomeHeroSkeleton() {
         <div className={DESKTOP_HERO_CONTAINER_CLASS}>
           <div className='relative h-full min-w-0 flex-1'>
             <div className={SLIDE_CLASS}>
-              <div className='skeleton aspect-[2/3] w-48 shrink-0 rounded-xl lg:w-56' />
-              <div className='min-w-0 max-w-2xl flex-1 pb-1'>
-                <div className='flex h-4 items-center'>
-                  <div className='skeleton h-3 w-10 rounded' />
-                </div>
-                <div className='skeleton mt-2 h-10 w-2/3 rounded-lg lg:h-[60px]' />
-                <div className='mt-3 flex h-[22.5px] items-center'>
-                  <div className='skeleton h-4 w-1/2 rounded' />
-                </div>
+              <div className={`skeleton ${DESKTOP_HERO_COVER_CLASS}`} />
+              <div className={HERO_TEXT_COLUMN_CLASS}>
+                <SkeletonText
+                  className={DESKTOP_HERO_TEXT.label}
+                  barClassName='h-3 w-10 rounded'
+                />
+                <SkeletonText
+                  className={DESKTOP_HERO_TEXT.title}
+                  barClassName='w-2/3 self-stretch rounded-lg'
+                />
+                <SkeletonText
+                  className={DESKTOP_HERO_TEXT.meta}
+                  barClassName='h-4 w-1/2 rounded'
+                />
                 <div className='mt-4'>
                   {['w-full', 'w-11/12', 'w-3/5'].map((width) => (
-                    <div key={width} className='flex h-7 items-center'>
-                      <div className={`skeleton h-4 rounded ${width}`} />
-                    </div>
+                    <SkeletonText
+                      key={width}
+                      className={DESKTOP_HERO_TEXT.intro}
+                      barClassName={`h-4 rounded ${width}`}
+                    />
                   ))}
                 </div>
-                <div className='mt-3 flex h-5 items-center'>
-                  <div className='skeleton h-3.5 w-2/3 rounded' />
-                </div>
-                <div className='mt-7 flex gap-3'>
-                  <div className='skeleton h-11 w-32 rounded-full' />
-                  <div className='skeleton h-11 w-24 rounded-full' />
+                <SkeletonText
+                  className={DESKTOP_HERO_TEXT.credits}
+                  barClassName='h-3.5 w-2/3 rounded'
+                />
+                <div className={DESKTOP_HERO_TEXT.actions}>
+                  <div
+                    className={`skeleton w-32 ${DESKTOP_HERO_TEXT.button}`}
+                  />
+                  <div
+                    className={`skeleton w-24 ${DESKTOP_HERO_TEXT.button}`}
+                  />
                 </div>
               </div>
             </div>
@@ -520,20 +570,30 @@ export function HomeHeroSkeleton() {
         <div className='skeleton absolute inset-0' />
         <div className='absolute inset-x-0 bottom-0 h-3/5 bg-gradient-to-t from-gray-50 to-transparent dark:from-gray-950' />
         <div className='absolute inset-x-0 bottom-0 px-4 pb-4'>
-          <div className='skeleton h-5 w-8 rounded' />
-          <div className='skeleton mt-2 h-[35px] w-2/3 rounded-lg' />
-          <div className='mt-1.5 flex h-[19.5px] items-center'>
-            <div className='skeleton h-3.5 w-1/2 rounded' />
-          </div>
+          <p className={`skeleton w-8 ${MOBILE_HERO_TEXT.label}`}>
+            {SKELETON_TEXT_STRUT}
+          </p>
+          <SkeletonText
+            className={MOBILE_HERO_TEXT.title}
+            barClassName='w-2/3 self-stretch rounded-lg'
+          />
+          <SkeletonText
+            className={MOBILE_HERO_TEXT.meta}
+            barClassName='h-3.5 w-1/2 rounded'
+          />
           <div className='mt-2'>
-            <div className='flex h-5 items-center'>
-              <div className='skeleton h-3 w-full rounded' />
-            </div>
-            <div className='flex h-5 items-center'>
-              <div className='skeleton h-3 w-3/4 rounded' />
-            </div>
+            <SkeletonText
+              className={MOBILE_HERO_TEXT.intro}
+              barClassName='h-3 w-full rounded'
+            />
+            <SkeletonText
+              className={MOBILE_HERO_TEXT.intro}
+              barClassName='h-3 w-3/4 rounded'
+            />
           </div>
-          <div className='skeleton mt-4 h-10 w-28 rounded-full' />
+          <div className={`skeleton w-28 ${MOBILE_HERO_TEXT.button}`}>
+            {SKELETON_TEXT_STRUT}
+          </div>
         </div>
         <div className='absolute bottom-7 right-4 flex items-center gap-1.5'>
           {Array.from({ length: HERO_ITEM_LIMIT }, (_, index) => (

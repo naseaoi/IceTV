@@ -15,6 +15,11 @@ import ContinueWatchingCardSkeleton from '@/components/ContinueWatchingCardSkele
 import { useOptionalMessageCenter } from '@/components/messages/MessageCenterProvider';
 import { useRuntimeConfig } from '@/components/RuntimeConfigProvider';
 import ScrollableRow from '@/components/ScrollableRow';
+import {
+  SECTION_HEADER_CLASS,
+  SECTION_LINK_TEXT_CLASS,
+  SECTION_TITLE_TEXT_CLASS,
+} from '@/components/section-header';
 import { getAuthInfoFromBrowserCookie } from '@/lib/auth.client';
 import type { PlayRecord } from '@/lib/db.client';
 import {
@@ -238,18 +243,20 @@ export default function ContinueWatching({
 
   return (
     <section className={`mb-2 ${className || ''}`}>
-      <div className='mb-1 flex items-baseline justify-between sm:mb-2'>
-        <h2 className='text-lg font-semibold tracking-tight text-gray-900 dark:text-gray-100 sm:text-xl'>
+      <div className={SECTION_HEADER_CLASS}>
+        <h2
+          className={`${SECTION_TITLE_TEXT_CLASS} font-semibold tracking-tight text-gray-900 dark:text-gray-100`}
+        >
           继续观看
         </h2>
         {(loading || playRecords.length > 0) && (
           <Link
             href='/continue-watching'
-            className={
+            className={`${SECTION_LINK_TEXT_CLASS} flex items-center ${
               updateCount > 0
-                ? 'flex items-center text-sm font-semibold text-amber-600 hover:text-amber-700 dark:text-amber-400 dark:hover:text-amber-300'
-                : 'flex items-center text-sm text-gray-500 transition-colors hover:text-gray-900 dark:text-gray-400 dark:hover:text-white'
-            }
+                ? 'font-semibold text-amber-600 hover:text-amber-700 dark:text-amber-400 dark:hover:text-amber-300'
+                : 'text-gray-500 transition-colors hover:text-gray-900 dark:text-gray-400 dark:hover:text-white'
+            }`}
           >
             {updateCount > 0 ? `${updateCount} 部有更新` : '更多'}
             <ChevronRight className='h-4 w-4' />

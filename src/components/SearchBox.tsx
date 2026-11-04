@@ -16,6 +16,9 @@ export function buildSearchHref(query: string): string {
 
 const HISTORY_DROPDOWN_LIMIT = 8;
 
+// 页面搜索框外形，搜索页骨架共用
+export const SEARCH_BOX_PAGE_SHAPE_CLASS = 'h-11 rounded-full';
+
 const VARIANT_CLASS = {
   nav: {
     icon: 'left-3 h-4 w-4',
@@ -25,8 +28,7 @@ const VARIANT_CLASS = {
   },
   page: {
     icon: 'left-4 h-[18px] w-[18px]',
-    input:
-      'h-11 rounded-full bg-white pl-11 pr-11 text-base sm:text-[15px] ring-1 ring-gray-900/[0.08] focus:ring-2 focus:ring-brand-500/40 dark:bg-white/[0.06] dark:ring-white/10 dark:focus:ring-brand-400/40',
+    input: `${SEARCH_BOX_PAGE_SHAPE_CLASS} bg-white pl-11 pr-11 text-base sm:text-[15px] ring-1 ring-gray-900/[0.08] focus:ring-2 focus:ring-brand-500/40 dark:bg-white/[0.06] dark:ring-white/10 dark:focus:ring-brand-400/40`,
     clear: 'right-3 h-6 w-6',
   },
 } as const;

@@ -44,6 +44,7 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: '请提供加密密码' }, { status: 400 });
     }
 
+    Object.assign(config, await db.getConfigSubscription());
     config.UserConfig.Users = await db.getAllUserAccess();
     config.UserConfig.InviteCodes = await db.getAllInviteCodes();
 
