@@ -104,6 +104,179 @@ function sortRouteStats(items: SourceRouteStatsItem[]) {
 }
 
 describe('sqlite storage contract', () => {
+  it('rolls back the complete health search batch on a later row failure', async () => {
+    const storage = new LocalSqliteStorage(':memory:');
+    await storage.clearAllData();
+    const row = {
+      source: 'alpha',
+      bucketDate: '2026-01-02',
+      okCount: 1,
+      emptyCount: 0,
+      errorCount: 0,
+      latencyMsSum: 10,
+      latencySamples: 1,
+    };
+    await storage.recordSourceHealthSearchBatch([row]);
+    const broken = {
+      ...row,
+      get source(): string {
+        throw new Error('batch failure');
+      },
+    };
+    await expect(
+      storage.recordSourceHealthSearchBatch([
+        row,
+        { ...row, source: 'beta' },
+        broken,
+      ]),
+    ).rejects.toThrow('batch failure');
+    expect(await storage.getSourceHealthSearchDaily('2026-01-01')).toEqual([
+      row,
+    ]);
+  });
+
+  it('accumulates health search rows, normalizes counters and retains date boundaries', async () => {
+    const storage = new LocalSqliteStorage(':memory:');
+    await storage.clearAllData();
+    const row = {
+      source: 'alpha',
+      bucketDate: '2026-01-02',
+      okCount: 1,
+      emptyCount: 2,
+      errorCount: 3,
+      latencyMsSum: 12.5,
+      latencySamples: 3,
+    };
+    await storage.recordSourceHealthSearchBatch([]);
+    await storage.recordSourceHealthSearchBatch([
+      { ...row, source: 'zeta', bucketDate: '2026-01-03' },
+      { ...row, source: 'beta' },
+      { ...row, bucketDate: '2026-01-01' },
+      { ...row, source: ' alpha ' },
+      row,
+      { ...row, source: ' ' },
+      {
+        ...row,
+        source: ' ' + 'x'.repeat(200) + ' ',
+        okCount: NaN,
+        emptyCount: Infinity,
+        errorCount: -1,
+        latencyMsSum: -Infinity,
+        latencySamples: -3,
+      },
+    ]);
+    await storage.recordSourceHealthSearchBatch([row]);
+    expect(await storage.getSourceHealthSearchDaily('2026-01-02')).toEqual([
+      {
+        ...row,
+        okCount: 3,
+        emptyCount: 6,
+        errorCount: 9,
+        latencyMsSum: 37.5,
+        latencySamples: 9,
+      },
+      { ...row, source: 'beta' },
+      {
+        ...row,
+        source: 'x'.repeat(191),
+        okCount: 0,
+        emptyCount: 0,
+        errorCount: 0,
+        latencyMsSum: 0,
+        latencySamples: 0,
+      },
+      { ...row, source: 'zeta', bucketDate: '2026-01-03' },
+    ]);
+    await storage.purgeSourceHealthBefore('2026-01-02');
+    expect(await storage.getSourceHealthSearchDaily('2026-01-01')).toHaveLength(
+      4,
+    );
+    await storage.purgeSourceHealthBefore('2026-01-04');
+    expect(await storage.getSourceHealthSearchDaily('2026-01-01')).toEqual([]);
+  });
+
+  it('aggregates reporter-days in SQL with success precedence and clears health state', async () => {
+    const storage = new LocalSqliteStorage(':memory:');
+    await storage.clearAllData();
+    const report = {
+      source: ' alpha ',
+      bucketDate: '2026-01-02',
+      reporter: 'a',
+      success: false,
+    };
+    for (const success of [false, false, true, true, false])
+      await storage.recordSourcePlayReport({ ...report, success });
+    for (let i = 0; i < 3; i++)
+      await storage.recordSourcePlayReport({ ...report, reporter: 'b' });
+    await storage.recordSourcePlayReport({
+      ...report,
+      bucketDate: '2026-01-03',
+      success: true,
+    });
+    await storage.recordSourcePlayReport({
+      ...report,
+      bucketDate: '2026-01-01',
+      success: true,
+    });
+    await storage.recordSourcePlayReport({ ...report, source: 'beta' });
+    const summaries = [
+      {
+        source: 'alpha',
+        successReporterDays: 2,
+        failureReporterDays: 1,
+        lastSuccessDate: '2026-01-03',
+      },
+      {
+        source: 'beta',
+        successReporterDays: 0,
+        failureReporterDays: 1,
+        lastSuccessDate: null,
+      },
+    ];
+    expect(await storage.getSourcePlayReporterSummary('2026-01-02')).toEqual(
+      summaries,
+    );
+    await storage.purgeSourceHealthBefore('2026-01-02');
+    expect(await storage.getSourcePlayReporterSummary('2026-01-01')).toEqual(
+      summaries,
+    );
+    expect(await storage.getSourcePlayReporterSummary('2026-01-04')).toEqual(
+      [],
+    );
+    const seed = async () => {
+      await storage.recordSourcePlayReport(report);
+      await storage.recordSourceHealthSearchBatch([
+        {
+          source: 'alpha',
+          bucketDate: '2026-01-02',
+          okCount: 1,
+          emptyCount: 0,
+          errorCount: 0,
+          latencyMsSum: 1,
+          latencySamples: 1,
+        },
+      ]);
+    };
+    await seed();
+    await storage.clearAllData();
+    expect(await storage.getSourceHealthSearchDaily('2026-01-01')).toEqual([]);
+    expect(await storage.getSourcePlayReporterSummary('2026-01-01')).toEqual(
+      [],
+    );
+    await seed();
+    await storage.replaceAllData({
+      adminConfig: adminConfig,
+      users: {},
+      userData: {},
+      sourceRouteStats: [],
+      inviteCodeUsage: {},
+    });
+    expect(await storage.getSourceHealthSearchDaily('2026-01-01')).toEqual([]);
+    expect(await storage.getSourcePlayReporterSummary('2026-01-01')).toEqual(
+      [],
+    );
+  });
+
   it('persists user scoped data and deletes it with the user', async () => {
     const storage = new LocalSqliteStorage(':memory:');
 

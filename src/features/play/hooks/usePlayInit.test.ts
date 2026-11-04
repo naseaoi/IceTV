@@ -666,6 +666,35 @@ describe('usePlayInit 直达入口读取播放记录', () => {
     });
   }
 
+  it('keeps server source order when merging previously fetched details', async () => {
+    const good = createSource('good');
+    const poor = createSource('poor');
+    installFetch(
+      {},
+      {},
+      {
+        '/api/detail': Promise.resolve(poor),
+        '/api/playrecords': Promise.resolve({}),
+        '/api/search': Promise.resolve({ results: [good, poor] }),
+      },
+    );
+    const params = setupDirectHook(poor);
+    await waitFor(() =>
+      expect(params.setAvailableSources).toHaveBeenCalledWith(
+        expect.any(Function),
+      ),
+    );
+    const updates = (params.setAvailableSources as jest.Mock).mock.calls
+      .map(([update]) => update)
+      .filter((update) => typeof update === 'function');
+    const merged = updates.at(-1)([poor]);
+    expect(merged.map((item: SearchResult) => item.source)).toEqual([
+      'good',
+      'poor',
+    ]);
+    expect(merged[1]).toBe(poor);
+  });
+
   it('没有播放意图时与详情请求并行读取播放记录，起播交给历史恢复复用', async () => {
     const series = createSeries('direct-a', 3);
     const records = createPlayRecords(series, 2);

@@ -9,7 +9,12 @@ type HeadersReader = {
 export function parseCronTask(requestUrl: string): CronTask | null {
   const task = new URL(requestUrl).searchParams.get('task');
   if (!task || task === 'all') return 'all';
-  if (task === 'config' || task === 'live' || task === 'metadata') {
+  if (
+    task === 'config' ||
+    task === 'live' ||
+    task === 'metadata' ||
+    task === 'source-health'
+  ) {
     return task;
   }
   return null;

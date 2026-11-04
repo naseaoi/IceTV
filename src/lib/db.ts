@@ -16,6 +16,10 @@ import {
   PlayRecordPage,
   SharedCacheRecord,
   SkipConfig,
+  SourceHealthSearchDaily,
+  SourceHealthSearchDelta,
+  SourcePlayReporterSummary,
+  SourcePlayReportInput,
   SourceRouteStatInput,
   SourceRouteStatsBucket,
   SourceRouteStatsItem,
@@ -770,6 +774,37 @@ class DbManager {
   ): Promise<PlaybackPeriodSession[]> {
     const storage = await this.getStorage();
     return storage.getPlaybackPeriodSessions(userName, start, end);
+  }
+
+  async recordSourceHealthSearchBatch(
+    rows: SourceHealthSearchDelta[],
+  ): Promise<void> {
+    const storage = await this.getStorage();
+    await storage.recordSourceHealthSearchBatch(rows);
+  }
+
+  async recordSourcePlayReport(input: SourcePlayReportInput): Promise<void> {
+    const storage = await this.getStorage();
+    await storage.recordSourcePlayReport(input);
+  }
+
+  async getSourceHealthSearchDaily(
+    sinceDate: string,
+  ): Promise<SourceHealthSearchDaily[]> {
+    const storage = await this.getStorage();
+    return storage.getSourceHealthSearchDaily(sinceDate);
+  }
+
+  async getSourcePlayReporterSummary(
+    sinceDate: string,
+  ): Promise<SourcePlayReporterSummary[]> {
+    const storage = await this.getStorage();
+    return storage.getSourcePlayReporterSummary(sinceDate);
+  }
+
+  async purgeSourceHealthBefore(beforeDate: string): Promise<void> {
+    const storage = await this.getStorage();
+    await storage.purgeSourceHealthBefore(beforeDate);
   }
 
   async recordSourceRouteStat(input: SourceRouteStatInput): Promise<void> {

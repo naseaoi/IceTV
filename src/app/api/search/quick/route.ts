@@ -5,7 +5,9 @@ import type { ApiSite } from '@/lib/config';
 import { getAvailableApiSites, getConfigForRead } from '@/lib/config';
 import { getCachedDetail } from '@/lib/detail-cache';
 import { searchFirstPageFromApi } from '@/lib/downstream';
+import { getSourceHealthTiers } from '@/lib/source-health.server';
 import { filterSourcesForPlayback } from '@/lib/source-match';
+import { rankSourcesByHealth } from '@/lib/source-quality-policy';
 import type { SearchResult } from '@/lib/types';
 import { yellowWords } from '@/lib/yellow';
 
@@ -46,7 +48,11 @@ export async function GET(request: NextRequest) {
   }
 
   const config = await getConfigForRead();
-  const apiSites = await getAvailableApiSites(guardResult.username, config);
+  const [availableSites, sourceHealthTiers] = await Promise.all([
+    getAvailableApiSites(guardResult.username, config),
+    getSourceHealthTiers(),
+  ]);
+  const apiSites = rankSourcesByHealth(availableSites, sourceHealthTiers);
   const quickSites = apiSites.slice(0, QUICK_SOURCE_LIMIT);
   const controller = new AbortController();
 

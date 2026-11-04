@@ -80,6 +80,10 @@ import {
   PlayRecordPage,
   SharedCacheRecord,
   SkipConfig,
+  SourceHealthSearchDaily,
+  SourceHealthSearchDelta,
+  SourcePlayReporterSummary,
+  SourcePlayReportInput,
   SourceRouteStatInput,
   SourceRouteStatsBucket,
   SourceRouteStatsItem,
@@ -817,6 +821,32 @@ export class LocalSqliteStorage implements IStorage {
 
       CREATE INDEX IF NOT EXISTS idx_source_route_stats_bucket
         ON source_route_stats (bucket_date);
+
+      CREATE TABLE IF NOT EXISTS source_health_search (
+        source TEXT NOT NULL,
+        bucket_date TEXT NOT NULL,
+        ok_count INTEGER NOT NULL DEFAULT 0,
+        empty_count INTEGER NOT NULL DEFAULT 0,
+        error_count INTEGER NOT NULL DEFAULT 0,
+        latency_ms_sum REAL NOT NULL DEFAULT 0,
+        latency_samples INTEGER NOT NULL DEFAULT 0,
+        updated_at INTEGER NOT NULL,
+        PRIMARY KEY (source, bucket_date)
+      );
+      CREATE INDEX IF NOT EXISTS idx_source_health_search_bucket
+        ON source_health_search (bucket_date);
+
+      CREATE TABLE IF NOT EXISTS source_health_play (
+        source TEXT NOT NULL,
+        bucket_date TEXT NOT NULL,
+        reporter TEXT NOT NULL,
+        success_count INTEGER NOT NULL DEFAULT 0,
+        failure_count INTEGER NOT NULL DEFAULT 0,
+        updated_at INTEGER NOT NULL,
+        PRIMARY KEY (source, bucket_date, reporter)
+      );
+      CREATE INDEX IF NOT EXISTS idx_source_health_play_bucket
+        ON source_health_play (bucket_date);
 
       CREATE TABLE IF NOT EXISTS user_danmaku_episodes (
         username TEXT NOT NULL,
@@ -2986,6 +3016,108 @@ export class LocalSqliteStorage implements IStorage {
       .all(username, start, end) as PlaybackPeriodSession[];
   }
 
+  async recordSourceHealthSearchBatch(
+    rows: SourceHealthSearchDelta[],
+  ): Promise<void> {
+    if (rows.length === 0) return;
+    const count = (value: number) =>
+      Number.isFinite(value) && value >= 0 ? Math.floor(value) : 0;
+    this.db.transaction(() => {
+      const statement = this.db.prepare(`INSERT INTO source_health_search (
+        source, bucket_date, ok_count, empty_count, error_count, latency_ms_sum, latency_samples, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT(source, bucket_date) DO UPDATE SET
+        ok_count = ok_count + excluded.ok_count,
+        empty_count = empty_count + excluded.empty_count,
+        error_count = error_count + excluded.error_count,
+        latency_ms_sum = latency_ms_sum + excluded.latency_ms_sum,
+        latency_samples = latency_samples + excluded.latency_samples,
+        updated_at = excluded.updated_at`);
+      const now = Date.now();
+      for (const row of rows) {
+        const source = row.source.trim().slice(0, 191);
+        if (!source) continue;
+        statement.run(
+          source,
+          row.bucketDate,
+          count(row.okCount),
+          count(row.emptyCount),
+          count(row.errorCount),
+          Number.isFinite(row.latencyMsSum) && row.latencyMsSum >= 0
+            ? row.latencyMsSum
+            : 0,
+          count(row.latencySamples),
+          now,
+        );
+      }
+    })();
+  }
+
+  async recordSourcePlayReport(input: SourcePlayReportInput): Promise<void> {
+    const source = input.source.trim().slice(0, 191);
+    const reporter = input.reporter.trim().slice(0, 191);
+    if (!source || !reporter) return;
+    this.db
+      .prepare(
+        `INSERT INTO source_health_play (
+      source, bucket_date, reporter, success_count, failure_count, updated_at
+    ) VALUES (?, ?, ?, ?, ?, ?)
+    ON CONFLICT(source, bucket_date, reporter) DO UPDATE SET
+      success_count = success_count + excluded.success_count,
+      failure_count = failure_count + excluded.failure_count,
+      updated_at = excluded.updated_at`,
+      )
+      .run(
+        source,
+        input.bucketDate,
+        reporter,
+        input.success ? 1 : 0,
+        input.success ? 0 : 1,
+        Date.now(),
+      );
+  }
+
+  async getSourceHealthSearchDaily(
+    sinceDate: string,
+  ): Promise<SourceHealthSearchDaily[]> {
+    return this.db
+      .prepare(
+        `SELECT source, bucket_date AS bucketDate,
+      ok_count AS okCount, empty_count AS emptyCount, error_count AS errorCount,
+      latency_ms_sum AS latencyMsSum, latency_samples AS latencySamples
+    FROM source_health_search WHERE bucket_date >= ?
+    ORDER BY bucket_date ASC, source ASC`,
+      )
+      .all(sinceDate) as SourceHealthSearchDaily[];
+  }
+
+  async getSourcePlayReporterSummary(
+    sinceDate: string,
+  ): Promise<SourcePlayReporterSummary[]> {
+    return this.db
+      .prepare(
+        `SELECT source,
+      SUM(CASE WHEN success_count > 0 THEN 1 ELSE 0 END) AS successReporterDays,
+      SUM(CASE WHEN success_count = 0 AND failure_count > 0 THEN 1 ELSE 0 END) AS failureReporterDays,
+      MAX(CASE WHEN success_count > 0 THEN bucket_date ELSE NULL END) AS lastSuccessDate
+    FROM source_health_play WHERE bucket_date >= ?
+    GROUP BY source
+    ORDER BY source ASC`,
+      )
+      .all(sinceDate) as SourcePlayReporterSummary[];
+  }
+
+  async purgeSourceHealthBefore(beforeDate: string): Promise<void> {
+    this.db.transaction(() => {
+      this.db
+        .prepare('DELETE FROM source_health_search WHERE bucket_date < ?')
+        .run(beforeDate);
+      this.db
+        .prepare('DELETE FROM source_health_play WHERE bucket_date < ?')
+        .run(beforeDate);
+    })();
+  }
+
   async recordSourceRouteStat(input: SourceRouteStatInput): Promise<void> {
     const source = input.source.trim().slice(0, 191);
     if (!source) return;
@@ -3083,6 +3215,8 @@ export class LocalSqliteStorage implements IStorage {
         DELETE FROM playback_sessions;
         DELETE FROM admin_config;
         DELETE FROM source_route_stats;
+        DELETE FROM source_health_search;
+        DELETE FROM source_health_play;
         DELETE FROM user_message_state;
         DELETE FROM user_login_activity;
         DELETE FROM invite_code_usage;
@@ -3121,6 +3255,8 @@ export class LocalSqliteStorage implements IStorage {
         DELETE FROM playback_sessions;
         DELETE FROM admin_config;
         DELETE FROM source_route_stats;
+        DELETE FROM source_health_search;
+        DELETE FROM source_health_play;
         DELETE FROM user_message_state;
         DELETE FROM user_login_activity;
         DELETE FROM invite_code_usage;

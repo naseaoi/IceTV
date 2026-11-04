@@ -244,7 +244,12 @@ async function preferBestSource(
     if (!selectedKey) return;
     // 起播后页面可能已手动或自动换源，按页面当前的源判断；页面还没有当前源时以选中源为准
     const activeKey = getActiveSourceKey() || selectedKey;
-    const scored = scoreProbeResults(collectedResults);
+    const scored = scoreProbeResults(
+      candidates.flatMap((source) => {
+        const result = collectedResults.find((item) => item.source === source);
+        return result ? [result] : [];
+      }),
+    );
     const best = scored[0];
     if (!best) return;
     const bestKey = getSourceKey(best.source);
@@ -794,10 +799,16 @@ export function usePlayInit({
           const detailed = prev.filter(
             (item) => item.episodes && item.episodes.length > 0,
           );
-          return detailed.reduce(
-            (acc, item) => mergeSourceBundle(acc, item),
-            results,
+          const sourceOrder = new Map(
+            results.map((item, index) => [item.source, index]),
           );
+          return detailed
+            .reduce((acc, item) => mergeSourceBundle(acc, item), results)
+            .sort(
+              (a, b) =>
+                (sourceOrder.get(a.source) ?? Number.MAX_SAFE_INTEGER) -
+                (sourceOrder.get(b.source) ?? Number.MAX_SAFE_INTEGER),
+            );
         });
         return results;
       } catch (err) {

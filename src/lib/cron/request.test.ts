@@ -17,6 +17,7 @@ describe('cron request helpers', () => {
     ['http://localhost/api/cron?task=config', 'config'],
     ['http://localhost/api/cron?task=live', 'live'],
     ['http://localhost/api/cron?task=metadata', 'metadata'],
+    ['http://localhost/api/cron?task=source-health', 'source-health'],
   ])('解析任务 %s', (url, expected) => {
     expect(parseCronTask(url)).toBe(expected);
   });

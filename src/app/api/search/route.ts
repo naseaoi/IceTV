@@ -11,6 +11,8 @@ import {
   refreshCachedSearchAggregate,
 } from '@/lib/search-cache';
 import { resourceLimitResponse } from '@/lib/server-resource-errors';
+import { getSourceHealthTiers } from '@/lib/source-health.server';
+import { rankSourcesByHealth } from '@/lib/source-quality-policy';
 
 export const runtime = 'nodejs';
 
@@ -30,7 +32,11 @@ export async function GET(request: NextRequest) {
 
   const config = await getConfigForRead();
   const runtimeParams = normalizeRuntimeParams(config.SiteConfig);
-  const apiSites = await getAvailableApiSites(guardResult.username, config);
+  const [availableSites, sourceHealthTiers] = await Promise.all([
+    getAvailableApiSites(guardResult.username, config),
+    getSourceHealthTiers(),
+  ]);
+  const apiSites = rankSourcesByHealth(availableSites, sourceHealthTiers);
   const maxSearchPages = runtimeParams.SearchDownstreamMaxPage;
   const sourceFailureCooldownMs =
     runtimeParams.SourceFailureCooldownSeconds * 1000;
@@ -59,6 +65,7 @@ export async function GET(request: NextRequest) {
           sourceConcurrency,
           sourceFailureCooldownMs,
           sourceTimeoutMs,
+          sourceHealthTiers,
         }),
       ).catch((error) => {
         console.warn('搜索聚合后台刷新失败:', error);
@@ -83,6 +90,7 @@ export async function GET(request: NextRequest) {
           sourceConcurrency,
           sourceFailureCooldownMs,
           sourceTimeoutMs,
+          sourceHealthTiers,
         }),
     );
     return NextResponse.json(

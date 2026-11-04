@@ -145,6 +145,22 @@ DATABASE_URL=mysql://user:password@host:3306/dbname
 | `TRUSTED_PROXY_COUNT`               | 填实际代理层数，如 Nginx 为 1、Cloudflare + Nginx 为 2；默认 0 不能防伪造转发头 |
 | `CACHE_PROFILE`                     | 默认 `small` 仅限制业务缓存，不限制 Node、SQLite、sharp 等进程总内存            |
 
+## 定时维护与源站探测
+
+`/api/cron` 接受 `task=config|live|metadata|source-health|all`，省略参数时执行 `all`。`metadata` 包含源站探测，`all` 每轮也只探测一次；独立 `source-health` 仅执行探测。任务共享 cron 锁，忙时返回 202，本轮跳过；200 表示后台任务已启动，完成情况以服务端日志与健康报告为准。
+
+- Docker 由 `start.js` 在服务就绪后调用接口：默认直播 60 秒、配置 75 秒、元数据 90 秒后首次运行，随后分别每 1、6、6 小时运行；源站探测随元数据任务执行。周期和启动延迟变量见 [.env.example](../.env.example)。
+- 本地 `pnpm dev` 由进程内调度器直接启动任务：默认元数据 30 秒、直播 45 秒、配置 60 秒后首次运行，后续使用相同周期。`DEV_CRON_DISABLED=true` 关闭开发调度。
+- `pnpm start` 仅启动 Next 服务，定时调用由外部调度器负责。仓库 `vercel.json` 配置每天 UTC 01:00 请求 `/api/cron`（`all`）；平台执行时限仍适用，接口返回成功不代表后台批次已经完成。
+
+探测只请求启用普通源的搜索第一页，跳过搜索缓存读取，沿用真实搜索的样本分类与回源资源额度，结束后刷新样本缓冲。giri、xgcartoon 跳过；关键词按 UTC 日期轮换，列表、每次数量与并发上限统一见 `src/lib/source-quality-policy.ts`。
+
+手动执行（环境中先设置对应站点的 `CRON_SECRET`；远程部署替换地址）：
+
+```bash
+curl -fsS -H "Authorization: Bearer $CRON_SECRET" 'http://localhost:3000/api/cron?task=source-health'
+```
+
 ## 点播起播等待
 
 后台「运行参数 → 播放与记录」的 `VodPageTimeoutSeconds` 控制媒体开始加载后的无进展窗口。起播计时从 hls.js 运行时开始拉清单算起。详情获取、历史恢复、逐集解析、播放器模块准备期间以及原生媒体播放没有运行时进度，只按总时长上限兜底。清单成功、分片字节增长或分片完成会续期；每次线路加载同时受总时长上限约束，持续有流量但无法起播时也会结束等待。

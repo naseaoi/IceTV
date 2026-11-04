@@ -4,6 +4,7 @@ import { isGuardFailure, requireActiveUser } from '@/lib/api-auth';
 import { getAvailableApiSites, getConfigForRead } from '@/lib/config';
 import { db } from '@/lib/db';
 import { NO_STORE_HEADERS } from '@/lib/http-cache';
+import { recordSourcePlayOutcome } from '@/lib/source-health.server';
 import type { SourceRouteMode, SourceRouteStatInput } from '@/lib/types';
 
 export const runtime = 'nodejs';
@@ -69,6 +70,16 @@ export async function POST(request: NextRequest) {
     }
 
     await db.recordSourceRouteStat(stat);
+    try {
+      await recordSourcePlayOutcome(
+        guardResult.username,
+        stat.source,
+        stat.success,
+        stat.eventAt,
+      );
+    } catch (error) {
+      console.warn('Failed to record source play health', error);
+    }
 
     return NextResponse.json(
       { success: true },

@@ -254,6 +254,32 @@ export type PlaybackPeriodSession = Pick<
   | 'watch_seconds'
 >;
 
+export interface SourceHealthSearchDelta {
+  source: string;
+  bucketDate: string;
+  okCount: number;
+  emptyCount: number;
+  errorCount: number;
+  latencyMsSum: number;
+  latencySamples: number;
+}
+
+export type SourceHealthSearchDaily = SourceHealthSearchDelta;
+
+export interface SourcePlayReportInput {
+  source: string;
+  bucketDate: string;
+  reporter: string;
+  success: boolean;
+}
+
+export interface SourcePlayReporterSummary {
+  source: string;
+  successReporterDays: number;
+  failureReporterDays: number;
+  lastSuccessDate: string | null;
+}
+
 export type SourceRouteMode = 'browser' | 'server';
 
 export interface SourceRouteStatInput {
@@ -645,6 +671,16 @@ export interface IStorage {
     start: number,
     end: number,
   ): Promise<PlaybackPeriodSession[]>;
+  recordSourceHealthSearchBatch(rows: SourceHealthSearchDelta[]): Promise<void>;
+  recordSourcePlayReport(input: SourcePlayReportInput): Promise<void>;
+  getSourceHealthSearchDaily(
+    sinceDate: string,
+  ): Promise<SourceHealthSearchDaily[]>;
+  getSourcePlayReporterSummary(
+    sinceDate: string,
+  ): Promise<SourcePlayReporterSummary[]>;
+  purgeSourceHealthBefore(beforeDate: string): Promise<void>;
+
   recordSourceRouteStat(input: SourceRouteStatInput): Promise<void>;
   getSourceRouteStats(sinceDate: string): Promise<SourceRouteStatsItem[]>;
   getAllSourceRouteStatBuckets(): Promise<SourceRouteStatsBucket[]>;

@@ -23,7 +23,27 @@ type SourceRouteStatsRow = {
   updatedAt: number;
 };
 
+type HealthSearchRow = {
+  source: string;
+  bucketDate: string;
+  okCount: number;
+  emptyCount: number;
+  errorCount: number;
+  latencyMsSum: number;
+  latencySamples: number;
+};
+
+type HealthPlayRow = {
+  source: string;
+  bucketDate: string;
+  reporter: string;
+  successCount: number;
+  failureCount: number;
+};
+
 type FakeState = {
+  healthSearch: HealthSearchRow[];
+  healthPlay: HealthPlayRow[];
   subscription: Record<string, unknown> | null;
   liveCounts: Map<string, Record<string, unknown>>;
   social: Record<string, Record<string, any>[]>;
@@ -54,6 +74,8 @@ function cloneNestedMap(source: Map<string, Map<string, string>>) {
 
 function cloneState(state: FakeState): FakeState {
   return {
+    healthSearch: state.healthSearch.map((row) => ({ ...row })),
+    healthPlay: state.healthPlay.map((row) => ({ ...row })),
     subscription: state.subscription ? { ...state.subscription } : null,
     liveCounts: new Map(
       [...state.liveCounts].map(([key, row]) => [key, { ...row }]),
@@ -95,6 +117,8 @@ function cloneState(state: FakeState): FakeState {
 
 function createState(): FakeState {
   return {
+    healthSearch: [],
+    healthPlay: [],
     subscription: null,
     liveCounts: new Map(),
     social: {
@@ -1158,6 +1182,83 @@ function createFakePool() {
       return [[], []];
     }
 
+    if (normalized.startsWith('INSERT INTO source_health_search (')) {
+      const [
+        source,
+        bucketDate,
+        okCount,
+        emptyCount,
+        errorCount,
+        latencyMsSum,
+        latencySamples,
+      ] = params as [string, string, number, number, number, number, number];
+      const existing = currentState.healthSearch.find(
+        (row) => row.source === source && row.bucketDate === bucketDate,
+      );
+      if (existing) {
+        existing.okCount += okCount;
+        existing.emptyCount += emptyCount;
+        existing.errorCount += errorCount;
+        existing.latencyMsSum += latencyMsSum;
+        existing.latencySamples += latencySamples;
+      } else {
+        currentState.healthSearch.push({
+          source,
+          bucketDate,
+          okCount,
+          emptyCount,
+          errorCount,
+          latencyMsSum,
+          latencySamples,
+        });
+      }
+      return [[], []];
+    }
+    if (normalized.startsWith('INSERT INTO source_health_play (')) {
+      const [source, bucketDate, reporter, successCount, failureCount] =
+        params as [string, string, string, number, number];
+      const existing = currentState.healthPlay.find(
+        (row) =>
+          row.source === source &&
+          row.bucketDate === bucketDate &&
+          row.reporter === reporter,
+      );
+      if (existing) {
+        existing.successCount += successCount;
+        existing.failureCount += failureCount;
+      } else {
+        currentState.healthPlay.push({
+          source,
+          bucketDate,
+          reporter,
+          successCount,
+          failureCount,
+        });
+      }
+      return [[], []];
+    }
+    for (const [table, key] of [
+      ['source_health_search', 'healthSearch'],
+      ['source_health_play', 'healthPlay'],
+    ] as const) {
+      if (normalized === `DELETE FROM ${table}`) {
+        currentState[key] = [];
+        return [[], []];
+      }
+      if (normalized === `DELETE FROM ${table} WHERE bucket_date < ?`) {
+        const beforeDate = params[0] as string;
+        if (key === 'healthSearch')
+          currentState.healthSearch = currentState.healthSearch.filter(
+            (row) => row.bucketDate >= beforeDate,
+          );
+        else
+          currentState.healthPlay = currentState.healthPlay.filter(
+            (row) => row.bucketDate >= beforeDate,
+          );
+        return [[], []];
+      }
+    }
+
     if (normalized === 'DELETE FROM source_route_stats') {
       currentState.sourceRouteStats = [];
       return [[], []];
@@ -2047,6 +2148,65 @@ function createFakePool() {
       ];
     }
 
+    if (
+      normalized ===
+      'SELECT source, bucket_date AS bucketDate, ok_count AS okCount, empty_count AS emptyCount, error_count AS errorCount, latency_ms_sum AS latencyMsSum, latency_samples AS latencySamples FROM source_health_search WHERE bucket_date >= ? ORDER BY bucket_date ASC, source ASC'
+    ) {
+      return [
+        currentState.healthSearch
+          .filter((row) => row.bucketDate >= (params[0] as string))
+          .sort(
+            (a, b) =>
+              a.bucketDate.localeCompare(b.bucketDate) ||
+              a.source.localeCompare(b.source),
+          )
+          .map((row) => ({ ...row })),
+        [],
+      ];
+    }
+    if (
+      normalized ===
+      'SELECT source, SUM(CASE WHEN success_count > 0 THEN 1 ELSE 0 END) AS successReporterDays, SUM(CASE WHEN success_count = 0 AND failure_count > 0 THEN 1 ELSE 0 END) AS failureReporterDays, MAX(CASE WHEN success_count > 0 THEN bucket_date ELSE NULL END) AS lastSuccessDate FROM source_health_play WHERE bucket_date >= ? GROUP BY source ORDER BY source ASC'
+    ) {
+      const summaries = new Map<
+        string,
+        {
+          source: string;
+          successReporterDays: number;
+          failureReporterDays: number;
+          lastSuccessDate: string | null;
+        }
+      >();
+      for (const row of currentState.healthPlay) {
+        if (row.bucketDate < (params[0] as string)) continue;
+        const summary = summaries.get(row.source) ?? {
+          source: row.source,
+          successReporterDays: 0,
+          failureReporterDays: 0,
+          lastSuccessDate: null,
+        };
+        if (row.successCount > 0) {
+          summary.successReporterDays++;
+          if (
+            !summary.lastSuccessDate ||
+            row.bucketDate > summary.lastSuccessDate
+          )
+            summary.lastSuccessDate = row.bucketDate;
+        } else if (row.failureCount > 0) summary.failureReporterDays++;
+        summaries.set(row.source, summary);
+      }
+      return [
+        [...summaries.values()]
+          .sort((a, b) => a.source.localeCompare(b.source))
+          .map((row) => ({
+            ...row,
+            successReporterDays: String(row.successReporterDays),
+            failureReporterDays: String(row.failureReporterDays),
+          })),
+        [],
+      ];
+    }
+
     throw new Error(`Unhandled query SQL: ${normalized}`);
   };
 
@@ -2217,6 +2377,179 @@ function sortRouteStats(items: SourceRouteStatsItem[]) {
 }
 
 describe('mysql storage contract', () => {
+  it('rolls back the complete health search batch on a later row failure', async () => {
+    const storage = new MySqlStorage('mysql://demo:demo@localhost:3306/icetv');
+    await storage.clearAllData();
+    const row = {
+      source: 'alpha',
+      bucketDate: '2026-01-02',
+      okCount: 1,
+      emptyCount: 0,
+      errorCount: 0,
+      latencyMsSum: 10,
+      latencySamples: 1,
+    };
+    await storage.recordSourceHealthSearchBatch([row]);
+    const broken = {
+      ...row,
+      get source(): string {
+        throw new Error('batch failure');
+      },
+    };
+    await expect(
+      storage.recordSourceHealthSearchBatch([
+        row,
+        { ...row, source: 'beta' },
+        broken,
+      ]),
+    ).rejects.toThrow('batch failure');
+    expect(await storage.getSourceHealthSearchDaily('2026-01-01')).toEqual([
+      row,
+    ]);
+  });
+
+  it('accumulates health search rows, normalizes counters and retains date boundaries', async () => {
+    const storage = new MySqlStorage('mysql://demo:demo@localhost:3306/icetv');
+    await storage.clearAllData();
+    const row = {
+      source: 'alpha',
+      bucketDate: '2026-01-02',
+      okCount: 1,
+      emptyCount: 2,
+      errorCount: 3,
+      latencyMsSum: 12.5,
+      latencySamples: 3,
+    };
+    await storage.recordSourceHealthSearchBatch([]);
+    await storage.recordSourceHealthSearchBatch([
+      { ...row, source: 'zeta', bucketDate: '2026-01-03' },
+      { ...row, source: 'beta' },
+      { ...row, bucketDate: '2026-01-01' },
+      { ...row, source: ' alpha ' },
+      row,
+      { ...row, source: ' ' },
+      {
+        ...row,
+        source: ' ' + 'x'.repeat(200) + ' ',
+        okCount: NaN,
+        emptyCount: Infinity,
+        errorCount: -1,
+        latencyMsSum: -Infinity,
+        latencySamples: -3,
+      },
+    ]);
+    await storage.recordSourceHealthSearchBatch([row]);
+    expect(await storage.getSourceHealthSearchDaily('2026-01-02')).toEqual([
+      {
+        ...row,
+        okCount: 3,
+        emptyCount: 6,
+        errorCount: 9,
+        latencyMsSum: 37.5,
+        latencySamples: 9,
+      },
+      { ...row, source: 'beta' },
+      {
+        ...row,
+        source: 'x'.repeat(191),
+        okCount: 0,
+        emptyCount: 0,
+        errorCount: 0,
+        latencyMsSum: 0,
+        latencySamples: 0,
+      },
+      { ...row, source: 'zeta', bucketDate: '2026-01-03' },
+    ]);
+    await storage.purgeSourceHealthBefore('2026-01-02');
+    expect(await storage.getSourceHealthSearchDaily('2026-01-01')).toHaveLength(
+      4,
+    );
+    await storage.purgeSourceHealthBefore('2026-01-04');
+    expect(await storage.getSourceHealthSearchDaily('2026-01-01')).toEqual([]);
+  });
+
+  it('aggregates reporter-days in SQL with success precedence and clears health state', async () => {
+    const storage = new MySqlStorage('mysql://demo:demo@localhost:3306/icetv');
+    await storage.clearAllData();
+    const report = {
+      source: ' alpha ',
+      bucketDate: '2026-01-02',
+      reporter: 'a',
+      success: false,
+    };
+    for (const success of [false, false, true, true, false])
+      await storage.recordSourcePlayReport({ ...report, success });
+    for (let i = 0; i < 3; i++)
+      await storage.recordSourcePlayReport({ ...report, reporter: 'b' });
+    await storage.recordSourcePlayReport({
+      ...report,
+      bucketDate: '2026-01-03',
+      success: true,
+    });
+    await storage.recordSourcePlayReport({
+      ...report,
+      bucketDate: '2026-01-01',
+      success: true,
+    });
+    await storage.recordSourcePlayReport({ ...report, source: 'beta' });
+    const summaries = [
+      {
+        source: 'alpha',
+        successReporterDays: 2,
+        failureReporterDays: 1,
+        lastSuccessDate: '2026-01-03',
+      },
+      {
+        source: 'beta',
+        successReporterDays: 0,
+        failureReporterDays: 1,
+        lastSuccessDate: null,
+      },
+    ];
+    expect(await storage.getSourcePlayReporterSummary('2026-01-02')).toEqual(
+      summaries,
+    );
+    await storage.purgeSourceHealthBefore('2026-01-02');
+    expect(await storage.getSourcePlayReporterSummary('2026-01-01')).toEqual(
+      summaries,
+    );
+    expect(await storage.getSourcePlayReporterSummary('2026-01-04')).toEqual(
+      [],
+    );
+    const seed = async () => {
+      await storage.recordSourcePlayReport(report);
+      await storage.recordSourceHealthSearchBatch([
+        {
+          source: 'alpha',
+          bucketDate: '2026-01-02',
+          okCount: 1,
+          emptyCount: 0,
+          errorCount: 0,
+          latencyMsSum: 1,
+          latencySamples: 1,
+        },
+      ]);
+    };
+    await seed();
+    await storage.clearAllData();
+    expect(await storage.getSourceHealthSearchDaily('2026-01-01')).toEqual([]);
+    expect(await storage.getSourcePlayReporterSummary('2026-01-01')).toEqual(
+      [],
+    );
+    await seed();
+    await storage.replaceAllData({
+      adminConfig: adminConfig,
+      users: {},
+      userData: {},
+      sourceRouteStats: [],
+      inviteCodeUsage: {},
+    });
+    expect(await storage.getSourceHealthSearchDaily('2026-01-01')).toEqual([]);
+    expect(await storage.getSourcePlayReporterSummary('2026-01-01')).toEqual(
+      [],
+    );
+  });
+
   it('stores subscription and live counts outside config and fences stale subscription updates', async () => {
     const storage = new MySqlStorage('mysql://demo:demo@localhost:3306/icetv');
     const source = {

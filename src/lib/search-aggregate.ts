@@ -3,6 +3,10 @@ import { getUpstreamSearchConcurrency } from '@/lib/cache-budget-profile';
 import { runWithConcurrency, withAbortableTimeout } from '@/lib/concurrency';
 import type { ApiSite } from '@/lib/config';
 import { searchFromApi } from '@/lib/downstream';
+import {
+  type SourceHealthTier,
+  SOURCE_HEALTH_OFFLINE_SEARCH_TIMEOUT_MS,
+} from '@/lib/source-quality-policy';
 import type { SearchResult } from '@/lib/types';
 import { yellowWords } from '@/lib/yellow';
 
@@ -15,6 +19,7 @@ export interface SearchAggregationOptions {
   signal?: AbortSignal;
   sourceFailureCooldownMs?: number;
   sourceTimeoutMs?: number;
+  sourceHealthTiers?: ReadonlyMap<string, SourceHealthTier>;
   shouldContinue?: () => boolean;
   onSourceResult?: (site: ApiSite, results: SearchResult[]) => void;
   onSourceError?: (site: ApiSite, error: unknown) => void;
@@ -45,6 +50,7 @@ export async function runSearchAggregation({
   signal,
   sourceFailureCooldownMs,
   sourceTimeoutMs,
+  sourceHealthTiers,
   shouldContinue,
   onSourceResult,
   onSourceError,
@@ -77,7 +83,9 @@ export async function runSearchAggregation({
             maxSearchPages,
             signal: childSignal,
           }),
-        timeoutMs,
+        sourceHealthTiers?.get(site.key) === 'offline'
+          ? Math.min(timeoutMs, SOURCE_HEALTH_OFFLINE_SEARCH_TIMEOUT_MS)
+          : timeoutMs,
         `${site.name} timeout`,
         signal,
       );

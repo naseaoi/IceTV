@@ -2,6 +2,17 @@ const mockRefreshSubscribedConfig = jest.fn();
 const mockRefreshConfiguredLiveChannels = jest.fn();
 const mockRefreshRecordAndFavorites = jest.fn();
 const mockCleanupPlaybackSessions = jest.fn();
+const mockCleanupSourceHealth = jest.fn();
+const mockProbeConfiguredSources = jest.fn();
+
+jest.mock('./source-health', () => ({
+  probeConfiguredSources: (...args: unknown[]) =>
+    mockProbeConfiguredSources(...args),
+}));
+
+jest.mock('@/lib/source-health.server', () => ({
+  cleanupSourceHealth: (...args: unknown[]) => mockCleanupSourceHealth(...args),
+}));
 
 jest.mock('./config-refresh', () => ({
   refreshSubscribedConfig: (...args: unknown[]) =>
@@ -33,6 +44,8 @@ describe('cron task dispatcher', () => {
     expect(mockRefreshConfiguredLiveChannels).not.toHaveBeenCalled();
     expect(mockRefreshRecordAndFavorites).not.toHaveBeenCalled();
     expect(mockCleanupPlaybackSessions).not.toHaveBeenCalled();
+    expect(mockCleanupSourceHealth).not.toHaveBeenCalled();
+    expect(mockProbeConfiguredSources).not.toHaveBeenCalled();
 
     jest.clearAllMocks();
     await executeCronTask('live');
@@ -40,6 +53,8 @@ describe('cron task dispatcher', () => {
     expect(mockRefreshConfiguredLiveChannels).toHaveBeenCalledTimes(1);
     expect(mockRefreshRecordAndFavorites).not.toHaveBeenCalled();
     expect(mockCleanupPlaybackSessions).not.toHaveBeenCalled();
+    expect(mockCleanupSourceHealth).not.toHaveBeenCalled();
+    expect(mockProbeConfiguredSources).not.toHaveBeenCalled();
 
     jest.clearAllMocks();
     await executeCronTask('metadata');
@@ -47,6 +62,18 @@ describe('cron task dispatcher', () => {
     expect(mockRefreshConfiguredLiveChannels).not.toHaveBeenCalled();
     expect(mockRefreshRecordAndFavorites).toHaveBeenCalledTimes(1);
     expect(mockCleanupPlaybackSessions).toHaveBeenCalledTimes(1);
+    expect(mockCleanupSourceHealth).toHaveBeenCalledTimes(1);
+    expect(mockProbeConfiguredSources).toHaveBeenCalledTimes(1);
+  });
+
+  it('source-health only probes sources', async () => {
+    await executeCronTask('source-health');
+    expect(mockProbeConfiguredSources).toHaveBeenCalledTimes(1);
+    expect(mockRefreshSubscribedConfig).not.toHaveBeenCalled();
+    expect(mockRefreshConfiguredLiveChannels).not.toHaveBeenCalled();
+    expect(mockRefreshRecordAndFavorites).not.toHaveBeenCalled();
+    expect(mockCleanupPlaybackSessions).not.toHaveBeenCalled();
+    expect(mockCleanupSourceHealth).not.toHaveBeenCalled();
   });
 
   it('all 任务按顺序执行全部维护步骤', async () => {
@@ -64,8 +91,23 @@ describe('cron task dispatcher', () => {
       calls.push('retention');
     });
 
+    mockCleanupSourceHealth.mockImplementation(() => {
+      calls.push('health');
+    });
+
+    mockProbeConfiguredSources.mockImplementation(() => {
+      calls.push('probe');
+    });
+
     await executeCronTask('all');
 
-    expect(calls).toEqual(['config', 'live', 'metadata', 'retention']);
+    expect(calls).toEqual([
+      'config',
+      'live',
+      'metadata',
+      'retention',
+      'health',
+      'probe',
+    ]);
   });
 });

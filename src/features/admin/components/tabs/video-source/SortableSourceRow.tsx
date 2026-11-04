@@ -8,12 +8,20 @@ import type { CSSProperties } from 'react';
 import Select from '@/components/Select';
 import AdminRowMenu from '@/features/admin/components/AdminRowMenu';
 import { AdminStatusSwitch } from '@/features/admin/components/AdminStatusSwitch';
+import {
+  describeSourceHealth,
+  formatLastOkDate,
+  SOURCE_HEALTH_CHIP_CLASS,
+  SOURCE_HEALTH_SCORE_CLASS,
+  SOURCE_HEALTH_TIER_LABEL,
+} from '@/features/admin/components/tabs/video-source/sourceHealthView';
 import { checkboxStyles } from '@/features/admin/lib/buttonStyles';
 import { DataSource } from '@/features/admin/types/internal';
 import {
   type SourceProxyMode,
   DEFAULT_SOURCE_PROXY_MODE,
 } from '@/lib/proxy-modes';
+import type { SourceHealthReportItem } from '@/lib/source-quality-policy';
 
 export type SourceValidationStatus = {
   text: string;
@@ -49,6 +57,8 @@ interface SortableSourceRowProps {
   isSelected: boolean;
   validationStatus: SourceValidationStatus | null;
   sourceRouteStats: SourceRouteStatsView | null;
+  sourceHealth: SourceHealthReportItem | null;
+  healthDays: number;
   isProxyModeLoading: boolean;
   isSortingDisabled?: boolean;
   isToggleLoading: boolean;
@@ -67,6 +77,8 @@ export function SortableSourceRow({
   isSelected,
   validationStatus,
   sourceRouteStats,
+  sourceHealth,
+  healthDays,
   isProxyModeLoading,
   isSortingDisabled = false,
   isToggleLoading,
@@ -100,6 +112,12 @@ export function SortableSourceRow({
     })
     .join(' · ');
   const description = [source.api, source.detail].filter(Boolean).join(' · ');
+  const healthChipClass = sourceHealth
+    ? SOURCE_HEALTH_CHIP_CLASS[sourceHealth.tier]
+    : undefined;
+  const healthTitle = sourceHealth
+    ? describeSourceHealth(sourceHealth, healthDays)
+    : '暂无质量数据';
   return (
     <li
       ref={setNodeRef}
@@ -145,6 +163,17 @@ export function SortableSourceRow({
               已停用
             </span>
           )}
+          {sourceHealth && healthChipClass && (
+            <span
+              className={`rounded px-1.5 text-xs ${healthChipClass}`}
+              title={healthTitle}
+            >
+              {SOURCE_HEALTH_TIER_LABEL[sourceHealth.tier]}
+              {sourceHealth.tier === 'offline' &&
+                sourceHealth.lastOkDate &&
+                ` · ${formatLastOkDate(sourceHealth.lastOkDate)}可用`}
+            </span>
+          )}
           {validationStatus && (
             <span
               className={`rounded px-1.5 text-xs ${validationStatus.className}`}
@@ -164,7 +193,22 @@ export function SortableSourceRow({
       <div className='flex w-full shrink-0 items-center justify-end gap-3 sm:w-auto'>
         <span
           className='hidden whitespace-nowrap text-xs tabular-nums text-gray-500 dark:text-gray-400 md:inline'
-          title={`7天成功率 · ${routeDetails}`}
+          title={healthTitle}
+        >
+          质量{' '}
+          <span
+            className={`font-medium ${
+              sourceHealth
+                ? SOURCE_HEALTH_SCORE_CLASS[sourceHealth.tier]
+                : SOURCE_HEALTH_SCORE_CLASS.insufficient
+            }`}
+          >
+            {sourceHealth?.score ?? '—'}
+          </span>
+        </span>
+        <span
+          className='hidden whitespace-nowrap text-xs tabular-nums text-gray-500 dark:text-gray-400 lg:inline'
+          title={`${healthDays}天成功率 · ${routeDetails}`}
         >
           {routeSummary}
         </span>

@@ -209,3 +209,87 @@ describe('runSearchAggregation', () => {
     expect(getUpstreamSearchGateStats().limit).toBe(9);
   });
 });
+
+describe('source health search budgets', () => {
+  beforeEach(() => {
+    jest.useFakeTimers();
+    jest.clearAllMocks();
+    clearSearchSourceFailureCooldownsForTests();
+    jest.spyOn(console, 'warn').mockImplementation(() => {});
+  });
+  afterEach(() => {
+    jest.useRealTimers();
+    jest.restoreAllMocks();
+  });
+
+  it.each([3000, 12000])(
+    'caps only offline sources within the %i ms budget',
+    async (sourceTimeoutMs) => {
+      const signals = new Map<string, AbortSignal>();
+      (searchFromApi as jest.Mock).mockImplementation(
+        (site, _query, options) => {
+          signals.set(site.key, options.signal);
+          return new Promise(() => {});
+        },
+      );
+      const onSourceError = jest.fn();
+      const pending = runSearchAggregation({
+        apiSites: ['offline', 'poor', 'unknown'].map((key) => ({
+          key,
+          name: key,
+          api: 'https://example.com',
+        })),
+        query: 'test',
+        maxSearchPages: 1,
+        disableYellowFilter: true,
+        sourceConcurrency: 3,
+        sourceTimeoutMs,
+        sourceHealthTiers: new Map([
+          ['offline', 'offline'],
+          ['poor', 'poor'],
+        ]),
+        onSourceError,
+      });
+      await Promise.resolve();
+      jest.advanceTimersByTime(Math.min(sourceTimeoutMs, 5000) - 1);
+      expect(onSourceError).not.toHaveBeenCalled();
+      jest.advanceTimersByTime(1);
+      expect(signals.get('offline')?.aborted).toBe(true);
+      expect(signals.get('poor')?.aborted).toBe(sourceTimeoutMs <= 5000);
+      expect(signals.get('unknown')?.aborted).toBe(sourceTimeoutMs <= 5000);
+      jest.advanceTimersByTime(sourceTimeoutMs);
+      await expect(pending).resolves.toEqual([]);
+      expect(searchFromApi).toHaveBeenCalledTimes(3);
+    },
+  );
+
+  it('returns scheduling order despite reverse completion', async () => {
+    (searchFromApi as jest.Mock).mockImplementation(
+      (site) =>
+        new Promise((resolve) => {
+          setTimeout(
+            () => resolve([createResult({ source: site.key, title: 'test' })]),
+            site.key === 'good' ? 100 : 1,
+          );
+        }),
+    );
+    const completed: string[] = [];
+    const pending = runSearchAggregation({
+      apiSites: ['good', 'poor'].map((key) => ({
+        key,
+        name: key,
+        api: 'https://example.com',
+      })),
+      query: 'test',
+      maxSearchPages: 1,
+      disableYellowFilter: true,
+      sourceConcurrency: 2,
+      onSourceResult: (site) => completed.push(site.key),
+    });
+    await Promise.resolve();
+    jest.advanceTimersByTime(100);
+    const results = await pending;
+    expect(completed).toEqual(['poor', 'good']);
+    expect(results.map((item) => item.source)).toEqual(['good', 'poor']);
+  });
+});

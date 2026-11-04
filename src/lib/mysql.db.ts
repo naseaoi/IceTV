@@ -83,6 +83,10 @@ import {
   PlayRecordPage,
   SharedCacheRecord,
   SkipConfig,
+  SourceHealthSearchDaily,
+  SourceHealthSearchDelta,
+  SourcePlayReporterSummary,
+  SourcePlayReportInput,
   SourceRouteStatInput,
   SourceRouteStatsBucket,
   SourceRouteStatsItem,
@@ -551,6 +555,28 @@ export class MySqlStorage implements IStorage {
         updated_at BIGINT NOT NULL,
         PRIMARY KEY (source, route_mode, bucket_date),
         KEY idx_source_route_stats_bucket (bucket_date)
+      ) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci`,
+      `CREATE TABLE IF NOT EXISTS source_health_search (
+        source VARCHAR(191) NOT NULL,
+        bucket_date CHAR(10) NOT NULL,
+        ok_count BIGINT NOT NULL DEFAULT 0,
+        empty_count BIGINT NOT NULL DEFAULT 0,
+        error_count BIGINT NOT NULL DEFAULT 0,
+        latency_ms_sum DOUBLE NOT NULL DEFAULT 0,
+        latency_samples BIGINT NOT NULL DEFAULT 0,
+        updated_at BIGINT NOT NULL,
+        PRIMARY KEY (source, bucket_date),
+        KEY idx_source_health_search_bucket (bucket_date)
+      ) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci`,
+      `CREATE TABLE IF NOT EXISTS source_health_play (
+        source VARCHAR(191) NOT NULL,
+        bucket_date CHAR(10) NOT NULL,
+        reporter VARCHAR(191) NOT NULL,
+        success_count BIGINT NOT NULL DEFAULT 0,
+        failure_count BIGINT NOT NULL DEFAULT 0,
+        updated_at BIGINT NOT NULL,
+        PRIMARY KEY (source, bucket_date, reporter),
+        KEY idx_source_health_play_bucket (bucket_date)
       ) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci`,
       `CREATE TABLE IF NOT EXISTS user_danmaku_episodes (
         username VARCHAR(191) NOT NULL,
@@ -2470,6 +2496,129 @@ export class MySqlStorage implements IStorage {
     }));
   }
 
+  async recordSourceHealthSearchBatch(
+    rows: SourceHealthSearchDelta[],
+  ): Promise<void> {
+    if (rows.length === 0) return;
+    const count = (value: number) =>
+      Number.isFinite(value) && value >= 0 ? Math.floor(value) : 0;
+    await this.withTransaction(async (connection) => {
+      const now = Date.now();
+      for (const row of rows) {
+        const source = row.source.trim().slice(0, 191);
+        if (!source) continue;
+        await connection.execute(
+          `INSERT INTO source_health_search (
+          source, bucket_date, ok_count, empty_count, error_count, latency_ms_sum, latency_samples, updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        ON DUPLICATE KEY UPDATE
+          ok_count = ok_count + VALUES(ok_count),
+          empty_count = empty_count + VALUES(empty_count),
+          error_count = error_count + VALUES(error_count),
+          latency_ms_sum = latency_ms_sum + VALUES(latency_ms_sum),
+          latency_samples = latency_samples + VALUES(latency_samples),
+          updated_at = VALUES(updated_at)`,
+          [
+            source,
+            row.bucketDate,
+            count(row.okCount),
+            count(row.emptyCount),
+            count(row.errorCount),
+            Number.isFinite(row.latencyMsSum) && row.latencyMsSum >= 0
+              ? row.latencyMsSum
+              : 0,
+            count(row.latencySamples),
+            now,
+          ],
+        );
+      }
+    });
+  }
+
+  async recordSourcePlayReport(input: SourcePlayReportInput): Promise<void> {
+    const source = input.source.trim().slice(0, 191);
+    const reporter = input.reporter.trim().slice(0, 191);
+    if (!source || !reporter) return;
+    await this.ensureInitialized();
+    await this.pool.execute(
+      `INSERT INTO source_health_play (
+      source, bucket_date, reporter, success_count, failure_count, updated_at
+    ) VALUES (?, ?, ?, ?, ?, ?)
+    ON DUPLICATE KEY UPDATE
+      success_count = success_count + VALUES(success_count),
+      failure_count = failure_count + VALUES(failure_count),
+      updated_at = VALUES(updated_at)`,
+      [
+        source,
+        input.bucketDate,
+        reporter,
+        input.success ? 1 : 0,
+        input.success ? 0 : 1,
+        Date.now(),
+      ],
+    );
+  }
+
+  async getSourceHealthSearchDaily(
+    sinceDate: string,
+  ): Promise<SourceHealthSearchDaily[]> {
+    await this.ensureInitialized();
+    const [rows] = await this.pool.query<
+      (RowDataPacket & SourceHealthSearchDaily)[]
+    >(
+      `SELECT source, bucket_date AS bucketDate,
+      ok_count AS okCount, empty_count AS emptyCount, error_count AS errorCount,
+      latency_ms_sum AS latencyMsSum, latency_samples AS latencySamples
+    FROM source_health_search WHERE bucket_date >= ?
+    ORDER BY bucket_date ASC, source ASC`,
+      [sinceDate],
+    );
+    return rows.map((row) => ({
+      ...row,
+      okCount: Number(row.okCount),
+      emptyCount: Number(row.emptyCount),
+      errorCount: Number(row.errorCount),
+      latencyMsSum: Number(row.latencyMsSum),
+      latencySamples: Number(row.latencySamples),
+    }));
+  }
+
+  async getSourcePlayReporterSummary(
+    sinceDate: string,
+  ): Promise<SourcePlayReporterSummary[]> {
+    await this.ensureInitialized();
+    const [rows] = await this.pool.query<
+      (RowDataPacket & SourcePlayReporterSummary)[]
+    >(
+      `SELECT source,
+      SUM(CASE WHEN success_count > 0 THEN 1 ELSE 0 END) AS successReporterDays,
+      SUM(CASE WHEN success_count = 0 AND failure_count > 0 THEN 1 ELSE 0 END) AS failureReporterDays,
+      MAX(CASE WHEN success_count > 0 THEN bucket_date ELSE NULL END) AS lastSuccessDate
+    FROM source_health_play WHERE bucket_date >= ?
+    GROUP BY source
+    ORDER BY source ASC`,
+      [sinceDate],
+    );
+    return rows.map((row) => ({
+      ...row,
+      successReporterDays: Number(row.successReporterDays),
+      failureReporterDays: Number(row.failureReporterDays),
+    }));
+  }
+
+  async purgeSourceHealthBefore(beforeDate: string): Promise<void> {
+    await this.withTransaction(async (connection) => {
+      await connection.execute(
+        'DELETE FROM source_health_search WHERE bucket_date < ?',
+        [beforeDate],
+      );
+      await connection.execute(
+        'DELETE FROM source_health_play WHERE bucket_date < ?',
+        [beforeDate],
+      );
+    });
+  }
+
   async recordSourceRouteStat(input: SourceRouteStatInput): Promise<void> {
     await this.ensureInitialized();
     const source = input.source.trim().slice(0, 191);
@@ -2563,6 +2712,8 @@ export class MySqlStorage implements IStorage {
       await connection.execute('DELETE FROM playback_sessions');
       await connection.execute('DELETE FROM admin_config');
       await connection.execute('DELETE FROM source_route_stats');
+      await connection.execute('DELETE FROM source_health_search');
+      await connection.execute('DELETE FROM source_health_play');
       await connection.execute('DELETE FROM user_message_state');
       await connection.execute('DELETE FROM user_login_activity');
       await connection.execute('DELETE FROM invite_code_usage');
@@ -2646,6 +2797,8 @@ export class MySqlStorage implements IStorage {
       await connection.execute('DELETE FROM playback_sessions');
       await connection.execute('DELETE FROM admin_config');
       await connection.execute('DELETE FROM source_route_stats');
+      await connection.execute('DELETE FROM source_health_search');
+      await connection.execute('DELETE FROM source_health_play');
       await connection.execute('DELETE FROM user_message_state');
       await connection.execute('DELETE FROM user_login_activity');
       await connection.execute('DELETE FROM invite_code_usage');

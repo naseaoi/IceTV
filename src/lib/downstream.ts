@@ -26,6 +26,10 @@ import {
 } from '@/lib/search-cache';
 import { ResourceLimitError } from '@/lib/server-resource-errors';
 import { getSourceCacheKey } from '@/lib/source-cache-key';
+import {
+  type SourceSearchOutcome,
+  recordSourceSearchOutcome,
+} from '@/lib/source-health.server';
 import { SearchResult } from '@/lib/types';
 import { fetchUpstream } from '@/lib/upstream-fetch.server';
 import { cleanHtmlTags, normalizeInlineText } from '@/lib/utils';
@@ -147,6 +151,10 @@ async function fetchAndCacheSearchPage(
   }
 
   const abortState = createTimedAbortController(signal, timeoutMs);
+  const startedAt = Date.now();
+  let outcome: SourceSearchOutcome = 'error';
+  let latencyMs = 0;
+  let resourceLimited = false;
 
   try {
     const response = await fetchUpstream(url, {
@@ -155,6 +163,7 @@ async function fetchAndCacheSearchPage(
     });
 
     if (!response.ok) {
+      await response.body?.cancel();
       if (response.status === 403) {
         setCachedSearchPage(
           getSourceCacheKey(apiSite),
@@ -168,6 +177,10 @@ async function fetchAndCacheSearchPage(
     }
 
     const data = await response.json();
+    latencyMs = Date.now() - startedAt;
+    if (Array.isArray(data?.list)) {
+      outcome = data.list.length > 0 ? 'ok' : 'empty';
+    }
     if (
       !data ||
       !data.list ||
@@ -224,7 +237,10 @@ async function fetchAndCacheSearchPage(
     );
     return { results, pageCount };
   } catch (error: any) {
-    if (error instanceof ResourceLimitError) throw error;
+    if (error instanceof ResourceLimitError) {
+      resourceLimited = true;
+      throw error;
+    }
     abortState.cleanup();
     const abortedByParent = Boolean(signal?.aborted && !abortState.isTimeout());
     if (isAbortError(error) && !abortedByParent) {
@@ -239,6 +255,39 @@ async function fetchAndCacheSearchPage(
     return { results: [] };
   } finally {
     abortState.cleanup();
+    const abortedByParent = Boolean(signal?.aborted && !abortState.isTimeout());
+    if (page === 1 && !resourceLimited && !abortedByParent) {
+      recordSourceSearchOutcome(apiSite.key, outcome, latencyMs);
+    }
+  }
+}
+
+export async function probeSourceSearch(
+  apiSite: ApiSite,
+  query: string,
+  signal?: AbortSignal,
+): Promise<void> {
+  if (
+    signal?.aborted ||
+    isGirigiriSource(apiSite) ||
+    isXgcartoonSource(apiSite)
+  ) {
+    return;
+  }
+
+  try {
+    const runtimeParams = await readSearchRuntimeParams();
+    // Bypass cache reads and in-flight search deduplication to collect a fresh sample.
+    await fetchAndCacheSearchPage(
+      apiSite,
+      query,
+      1,
+      apiSite.api + API_CONFIG.search.path + encodeURIComponent(query),
+      runtimeParams.SearchRequestTimeoutSeconds * 1000,
+      signal,
+    );
+  } catch (error) {
+    console.warn(`Source health probe failed [${apiSite.key}]`, error);
   }
 }
 

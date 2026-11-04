@@ -22,6 +22,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 
 import AlertModal from '@/components/modals/AlertModal';
 import ConfirmModal from '@/components/modals/ConfirmModal';
+import Select from '@/components/Select';
 import AdminSearchField from '@/features/admin/components/AdminSearchField';
 import { BatchSourceMenu } from '@/features/admin/components/tabs/video-source/BatchSourceMenu';
 import {
@@ -29,6 +30,10 @@ import {
   type SourceRouteStatsView,
   SortableSourceRow,
 } from '@/features/admin/components/tabs/video-source/SortableSourceRow';
+import {
+  isSourceCleanupCandidate,
+  sortByHealth,
+} from '@/features/admin/components/tabs/video-source/sourceHealthView';
 import { SourceValidationModal } from '@/features/admin/components/tabs/video-source/SourceValidationModal';
 import { VideoSourceAddForm } from '@/features/admin/components/tabs/video-source/VideoSourceAddForm';
 import { VideoSourceEditForm } from '@/features/admin/components/tabs/video-source/VideoSourceEditForm';
@@ -49,10 +54,15 @@ import {
   type SourceProxyMode,
   DEFAULT_SOURCE_PROXY_MODE,
 } from '@/lib/proxy-modes';
+import type { SourceHealthReportItem } from '@/lib/source-quality-policy';
 import type { SourceRouteStatsItem } from '@/lib/types';
 import { AdminConfig } from '@/types/admin';
 
 type SourceRouteStatsBySource = Record<string, SourceRouteStatsView>;
+type SourceHealthFilter = 'all' | 'cleanup';
+type SourceSortMode = 'manual' | 'quality';
+
+const STATS_DAYS = 7;
 
 function toRouteModeStats(item: SourceRouteStatsItem): RouteModeStats {
   const totalCount = item.successCount + item.failureCount;
@@ -92,18 +102,35 @@ const VideoSourceConfig = ({
   const [sources, setSources] = useState<DataSource[]>([]);
   const [sourceRouteStats, setSourceRouteStats] =
     useState<SourceRouteStatsBySource>({});
+  const [sourceHealth, setSourceHealth] = useState<
+    Map<string, SourceHealthReportItem>
+  >(() => new Map());
   const [filterQuery, setFilterQuery] = useState('');
+  const [healthFilter, setHealthFilter] = useState<SourceHealthFilter>('all');
+  const [sortMode, setSortMode] = useState<SourceSortMode>('manual');
   const normalizedQuery = filterQuery.trim().toLowerCase();
-  const isFiltering = normalizedQuery.length > 0;
-  const visibleRows = useMemo(
+  const isFiltering = normalizedQuery.length > 0 || healthFilter !== 'all';
+  const isSortingLocked = isFiltering || sortMode !== 'manual';
+  const cleanupCount = useMemo(
     () =>
       sources.filter((item) =>
+        isSourceCleanupCandidate(sourceHealth.get(item.key)),
+      ).length,
+    [sources, sourceHealth],
+  );
+  const visibleRows = useMemo(() => {
+    const matched = sources.filter(
+      (item) =>
+        (healthFilter === 'all' ||
+          isSourceCleanupCandidate(sourceHealth.get(item.key))) &&
         [item.name, item.key, item.api, item.detail].some((value) =>
           value?.toLowerCase().includes(normalizedQuery),
         ),
-      ),
-    [sources, normalizedQuery],
-  );
+    );
+    return sortMode === 'quality'
+      ? sortByHealth(matched, sourceHealth)
+      : matched;
+  }, [sources, sourceHealth, healthFilter, sortMode, normalizedQuery]);
   const [showAddForm, setShowAddForm] = useState(false);
   const [editingSource, setEditingSource] = useState<DataSource | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<DataSource | null>(null);
@@ -177,7 +204,7 @@ const VideoSourceConfig = ({
     if (!config?.SourceConfig) return;
     let cancelled = false;
     adminGet<{ stats: SourceRouteStatsItem[] }>(
-      '/api/admin/source-route-stats?days=7',
+      `/api/admin/source-route-stats?days=${STATS_DAYS}`,
       '读取路由统计失败',
     )
       .then((payload) => {
@@ -188,6 +215,21 @@ const VideoSourceConfig = ({
         if (cancelled) return;
         console.warn('读取路由统计失败:', error);
         setSourceRouteStats({});
+      });
+    adminGet<{ items: SourceHealthReportItem[] }>(
+      `/api/admin/source-health?days=${STATS_DAYS}`,
+      '读取源站质量失败',
+    )
+      .then((payload) => {
+        if (cancelled) return;
+        setSourceHealth(
+          new Map((payload.items || []).map((item) => [item.source, item])),
+        );
+      })
+      .catch((error) => {
+        if (cancelled) return;
+        console.warn('读取源站质量失败:', error);
+        setSourceHealth(new Map());
       });
 
     return () => {
@@ -282,7 +324,7 @@ const VideoSourceConfig = ({
 
   const handleDragEnd = (event: DragEndEvent) => {
     const { active, over } = event;
-    if (isFiltering || !over || active.id === over.id) return;
+    if (isSortingLocked || !over || active.id === over.id) return;
     const oldIndex = sources.findIndex((s) => s.key === active.id);
     const newIndex = sources.findIndex((s) => s.key === over.id);
     setSources((prev) => arrayMove(prev, oldIndex, newIndex));
@@ -404,6 +446,34 @@ const VideoSourceConfig = ({
           className='min-w-0 flex-1 sm:w-72 sm:flex-none'
         />
         <div className='flex shrink-0 items-center gap-2'>
+          <Select
+            variant='pill'
+            align='end'
+            value={healthFilter}
+            onChange={(value) =>
+              setHealthFilter(value === 'cleanup' ? 'cleanup' : 'all')
+            }
+            options={[
+              { value: 'all', label: '全部' },
+              { value: 'cleanup', label: `待清理 ${cleanupCount}` },
+            ]}
+            showSelectedIcon={false}
+            ariaLabel='按源站质量筛选'
+          />
+          <Select
+            variant='pill'
+            align='end'
+            value={sortMode}
+            onChange={(value) =>
+              setSortMode(value === 'quality' ? 'quality' : 'manual')
+            }
+            options={[
+              { value: 'manual', label: '手动排序' },
+              { value: 'quality', label: '质量排序' },
+            ]}
+            showSelectedIcon={false}
+            ariaLabel='视频源排序方式'
+          />
           <button
             onClick={() => {
               setShowAddForm(true);
@@ -497,17 +567,23 @@ const VideoSourceConfig = ({
             >
               {visibleRows.length === 0 && (
                 <li className='rounded-b-xl bg-white px-6 py-12 text-center text-sm text-gray-500 dark:bg-gray-900 dark:text-gray-400'>
-                  {isFiltering ? '没有匹配的视频源' : '暂无视频源'}
+                  {healthFilter === 'cleanup' && !normalizedQuery
+                    ? '没有待清理的视频源'
+                    : isFiltering
+                      ? '没有匹配的视频源'
+                      : '暂无视频源'}
                 </li>
               )}
               {visibleRows.map((source) => (
                 <SortableSourceRow
-                  isSortingDisabled={isFiltering}
+                  isSortingDisabled={isSortingLocked}
                   key={source.key}
                   source={source}
                   isSelected={selectedSources.has(source.key)}
                   validationStatus={getValidationStatus(source.key)}
                   sourceRouteStats={sourceRouteStats[source.key] || null}
+                  sourceHealth={sourceHealth.get(source.key) || null}
+                  healthDays={STATS_DAYS}
                   isProxyModeLoading={isLoading(`proxyMode_${source.key}`)}
                   isToggleLoading={isLoading(`toggleSource_${source.key}`)}
                   isDeleteLoading={isLoading(`deleteSource_${source.key}`)}
