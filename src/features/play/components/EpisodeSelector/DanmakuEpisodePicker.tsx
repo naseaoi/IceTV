@@ -3,6 +3,7 @@
 import { ChevronLeft, ChevronRight, LocateFixed } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
+import { FLOATING_CONTROL_CLASS } from '@/components/floating-control';
 import Spinner from '@/components/Spinner';
 import { PanelActionButton } from '@/features/play/components/EpisodeSelector/PanelActionButton';
 import {
@@ -440,7 +441,7 @@ export const DanmakuEpisodePicker: React.FC<DanmakuEpisodePickerProps> = ({
               }
               scrollBoundIntoView(true);
             }}
-            className='absolute bottom-4 right-0 z-10 flex h-8 w-8 items-center justify-center rounded-full bg-white text-gray-600 shadow-md shadow-black/10 ring-1 ring-gray-900/[0.06] transition-colors hover:text-brand-600 dark:bg-gray-800 dark:text-gray-300 dark:shadow-black/40 dark:ring-white/10 dark:hover:text-brand-300'
+            className={`${FLOATING_CONTROL_CLASS} absolute bottom-4 right-0 z-10 h-8 w-8`}
             aria-label={locateLabel}
             title={locateLabel}
           >

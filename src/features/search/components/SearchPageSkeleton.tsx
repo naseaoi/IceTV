@@ -3,7 +3,7 @@
 import { useSearchParams } from 'next/navigation';
 import { Suspense } from 'react';
 
-import DoubanCardSkeleton from '@/components/DoubanCardSkeleton';
+import HomePosterCardSkeleton from '@/components/HomePosterCardSkeleton';
 import PageLayout from '@/components/PageLayout';
 import { POSTER_GRID_CLASS } from '@/components/poster-grid-layout';
 import { SEARCH_BOX_PAGE_SHAPE_CLASS } from '@/components/SearchBox';
@@ -27,7 +27,7 @@ export function SearchResultsLoading() {
   return (
     <div className={POSTER_GRID_CLASS} role='status' aria-label='正在搜索'>
       {Array.from({ length: 14 }, (_, index) => (
-        <DoubanCardSkeleton key={index} video />
+        <HomePosterCardSkeleton key={index} className='w-full' subtitle />
       ))}
     </div>
   );

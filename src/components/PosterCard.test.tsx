@@ -76,7 +76,7 @@ describe('PosterCard', () => {
     expect(warmupDanmakuForNavigation).not.toHaveBeenCalled();
   });
 
-  it('聚焦时保留卡片缩放并保持封面圆角裁剪', () => {
+  it('悬停上浮、按压回弹并保持封面圆角裁剪', () => {
     const { container } = render(
       <PosterCard title='测试影片' poster='/poster.webp' />,
     );
@@ -84,12 +84,39 @@ describe('PosterCard', () => {
     const card = container.firstElementChild;
     const poster = card?.firstElementChild;
 
-    expect(card).toHaveClass('hover:scale-[1.025]');
-    expect(card).toHaveClass('active:scale-[0.97]');
+    expect(card).toHaveClass('sm:hover:-translate-y-1');
+    expect(card).toHaveClass('active:scale-[0.98]');
     expect(poster).toHaveClass(
       'poster-rounded-clip',
       'overflow-hidden',
       'rounded-lg',
+    );
+  });
+
+  it('完整标题浮层挂到 body，不受卡片或横向滚动容器裁剪', () => {
+    const { container, getByText } = render(
+      <PosterCard title='很长的测试影片标题' poster='/poster.webp' />,
+    );
+    const titleRow = container.querySelector('[data-video-card-title]');
+    expect(titleRow).toHaveClass('h-5');
+
+    fireEvent.mouseEnter(getByText('很长的测试影片标题'));
+    act(() => jest.advanceTimersByTime(100));
+
+    const tooltips = document.body.querySelectorAll(':scope > div.fixed');
+    expect(tooltips).toHaveLength(1);
+    expect(tooltips[0]).toHaveTextContent('很长的测试影片标题');
+    expect(container.contains(tooltips[0])).toBe(false);
+  });
+
+  it('评分以统一的深色徽标显示在右上角', () => {
+    const { getByLabelText } = render(
+      <PosterCard title='测试影片' poster='/poster.webp' rate='7.2' />,
+    );
+    expect(getByLabelText('评分 7.2 分')).toHaveClass(
+      'right-2',
+      'top-2',
+      'bg-black/70',
     );
   });
 });

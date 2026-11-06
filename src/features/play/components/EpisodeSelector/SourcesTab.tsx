@@ -14,6 +14,7 @@ import React, {
   useSyncExternalStore,
 } from 'react';
 
+import { FLOATING_CONTROL_CLASS } from '@/components/floating-control';
 import { PLAYER_PANEL_INSET_CLASS } from '@/components/PlayerPanelTabBar';
 import Spinner from '@/components/Spinner';
 import { AddSourcesModal } from '@/features/play/components/EpisodeSelector/AddSourcesModal';
@@ -740,7 +741,7 @@ export const SourcesTab: React.FC<SourcesTabProps> = ({
               }
               scrollCurrentIntoView(true);
             }}
-            className='absolute bottom-4 right-5 z-10 flex h-8 w-8 items-center justify-center rounded-full bg-white text-gray-600 shadow-md shadow-black/10 ring-1 ring-gray-900/[0.06] transition-colors hover:text-brand-600 dark:bg-gray-800 dark:text-gray-300 dark:shadow-black/40 dark:ring-white/10 dark:hover:text-brand-300'
+            className={`${FLOATING_CONTROL_CLASS} absolute bottom-4 right-5 z-10 h-8 w-8`}
             aria-label='回到当前源'
             title='回到当前源'
           >

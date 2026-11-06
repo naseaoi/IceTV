@@ -1,9 +1,14 @@
-import { Check, Link, PlayCircleIcon, Trash2 } from 'lucide-react';
+import { Check } from 'lucide-react';
 import type React from 'react';
 
 import CoverImage from '@/components/CoverImage';
-import { FavoriteHeartButton } from '@/components/FavoriteHeartButton';
-import { POSTER_CARD_COVER_CLASS } from '@/components/poster-card-layout';
+import {
+  POSTER_BADGE_CLASS,
+  POSTER_BADGE_NEUTRAL_CLASS,
+  POSTER_CARD_COVER_CLASS,
+  POSTER_HOVER_SHADE_CLASS,
+} from '@/components/poster-card-layout';
+import PosterFavoriteButton from '@/components/PosterFavoriteButton';
 import RatingBadge from '@/components/RatingBadge';
 import SourceNameBadge from '@/components/SourceNameBadge';
 import type {
@@ -13,107 +18,6 @@ import type {
 
 import { noSelectStyle, preventContextMenu } from './constants';
 
-const PRIORITY_SOURCES = [
-  '爱奇艺',
-  '腾讯视频',
-  '优酷',
-  '芒果TV',
-  '哔哩哔哩',
-  'Netflix',
-  'Disney+',
-];
-
-function sortSourceNames(sourceNames: string[]): string[] {
-  return [...sourceNames].sort((left, right) => {
-    const leftIndex = PRIORITY_SOURCES.indexOf(left);
-    const rightIndex = PRIORITY_SOURCES.indexOf(right);
-    if (leftIndex !== -1 && rightIndex !== -1) {
-      return leftIndex - rightIndex;
-    }
-    if (leftIndex !== -1) {
-      return -1;
-    }
-    if (rightIndex !== -1) {
-      return 1;
-    }
-    return left.localeCompare(right);
-  });
-}
-
-interface AggregateSourcesIndicatorProps {
-  sourceNames: string[];
-}
-
-function AggregateSourcesIndicator({
-  sourceNames,
-}: AggregateSourcesIndicatorProps) {
-  const uniqueSources = Array.from(new Set(sourceNames));
-  const sortedSources = sortSourceNames(uniqueSources);
-  const maxDisplayCount = 6;
-  const displaySources = sortedSources.slice(0, maxDisplayCount);
-  const hasMore = sortedSources.length > maxDisplayCount;
-  const remainingCount = sortedSources.length - maxDisplayCount;
-
-  return (
-    <div
-      className='absolute bottom-2 right-2 opacity-0 transition-all delay-75 duration-300 ease-in-out sm:group-hover:opacity-100'
-      style={noSelectStyle}
-      onContextMenu={preventContextMenu}
-    >
-      <div className='group/sources relative' style={noSelectStyle}>
-        <div
-          className='flex h-6 w-6 cursor-pointer items-center justify-center rounded-full bg-gray-700 text-xs font-bold text-white shadow-md transition-all duration-300 ease-out hover:scale-[1.1] hover:bg-gray-600 sm:h-7 sm:w-7'
-          style={noSelectStyle}
-          onContextMenu={preventContextMenu}
-        >
-          {sortedSources.length}
-        </div>
-
-        <div
-          className='pointer-events-none invisible absolute bottom-full right-0 z-50 mb-2 -translate-x-0 opacity-0 transition-all delay-100 duration-200 ease-out group-hover/sources:visible group-hover/sources:opacity-100 sm:right-0 sm:translate-x-0'
-          style={noSelectStyle}
-          onContextMenu={preventContextMenu}
-        >
-          <div
-            className='w-[7em] overflow-hidden rounded-lg bg-gray-900 p-1.5 text-xs text-white shadow-xl ring-1 ring-white/[0.08] sm:w-[7.5em] sm:p-2 sm:text-xs'
-            style={noSelectStyle}
-            onContextMenu={preventContextMenu}
-          >
-            <div className='space-y-0.5 sm:space-y-1'>
-              {displaySources.map((sourceName) => (
-                <div
-                  key={sourceName}
-                  className='flex min-w-0 items-center gap-1 sm:gap-1.5'
-                >
-                  <div className='h-0.5 w-0.5 flex-shrink-0 rounded-full bg-brand-400 sm:h-1 sm:w-1'></div>
-                  <span
-                    className='block w-[4em] shrink-0 truncate text-[10px] leading-tight sm:text-xs'
-                    title={sourceName}
-                  >
-                    {sourceName}
-                  </span>
-                </div>
-              ))}
-            </div>
-
-            {hasMore && (
-              <div className='mt-1 border-t border-gray-700/50 pt-1 sm:mt-2 sm:pt-1.5'>
-                <div className='flex items-center justify-center text-gray-400'>
-                  <span className='text-[10px] font-medium sm:text-xs'>
-                    +{remainingCount} 播放源
-                  </span>
-                </div>
-              </div>
-            )}
-
-            <div className='absolute right-2 top-full h-0 w-0 border-l-[4px] border-r-[4px] border-t-[4px] border-transparent border-t-gray-800/90 sm:right-3 sm:border-l-[6px] sm:border-r-[6px] sm:border-t-[6px]'></div>
-          </div>
-        </div>
-      </div>
-    </div>
-  );
-}
-
 interface VideoCardPosterProps {
   title: string;
   poster: string;
@@ -122,22 +26,20 @@ interface VideoCardPosterProps {
   from: VideoCardProps['from'];
   config: VideoCardDisplayConfig;
   sourceName?: string;
-  year?: string;
   rate?: string;
   myRating?: number;
   episodes?: number;
   currentEpisode?: number;
   hasUpdate?: boolean;
   availableEpisodes?: number;
-  doubanId?: number;
-  isBangumi: boolean;
-  isAggregate: boolean;
-  sourceNames?: string[];
   progress?: number;
   visibleFavorited: boolean;
-  onDeleteRecord: React.MouseEventHandler<SVGSVGElement>;
   onToggleFavorite: React.MouseEventHandler<HTMLButtonElement>;
   onMarkUpdateRead?: React.MouseEventHandler<HTMLButtonElement>;
+}
+
+function formatEpisodeBadge(episodes: number, currentEpisode?: number) {
+  return currentEpisode ? `${currentEpisode}/${episodes}` : `${episodes} 集`;
 }
 
 export function VideoCardPoster({
@@ -148,25 +50,22 @@ export function VideoCardPoster({
   from,
   config,
   sourceName,
-  year,
   rate,
   myRating,
   episodes,
   currentEpisode,
   hasUpdate = false,
   availableEpisodes,
-  doubanId,
-  isBangumi,
-  isAggregate,
-  sourceNames,
   progress,
   visibleFavorited,
-  onDeleteRecord,
   onToggleFavorite,
   onMarkUpdateRead,
 }: VideoCardPosterProps) {
-  const displayYear = String(year ?? '').trim();
-  const showEpisodeBadge = (episodes ?? 0) > 1;
+  const rateValue = config.showRating ? Number.parseFloat(rate ?? '') : NaN;
+  const showRate = rateValue > 0;
+  const showEpisodeBadge = !showRate && (episodes ?? 0) > 1;
+  const showSourceName = config.showSourceName && Boolean(sourceName);
+  const showUpdate = hasUpdate && (availableEpisodes ?? 0) > 1;
 
   return (
     <div
@@ -184,159 +83,41 @@ export function VideoCardPoster({
         checkClientCacheBeforeLoad={from === 'playrecord'}
       />
 
-      <div
-        className='absolute inset-0 bg-gradient-to-t from-black/80 via-black/20 to-transparent opacity-0 transition-opacity duration-300 ease-in-out group-hover:opacity-100'
-        style={noSelectStyle}
-        onContextMenu={preventContextMenu}
-      />
+      <div className={POSTER_HOVER_SHADE_CLASS} />
 
-      {(config.showSourceName || showEpisodeBadge) && (
+      {(showSourceName || showEpisodeBadge || showRate) && (
         <div
-          className='absolute inset-x-2 top-2 z-10 flex items-start justify-between gap-2'
+          className='pointer-events-none absolute inset-x-2 top-2 flex items-start justify-between gap-2'
           style={noSelectStyle}
-          onContextMenu={preventContextMenu}
         >
-          {config.showSourceName && (
-            <SourceNameBadge
-              sourceName={sourceName}
-              origin={origin}
-              className={
-                config.showDoubanLink ? 'sm:group-hover:opacity-0' : ''
-              }
-            />
+          {showSourceName && (
+            <SourceNameBadge sourceName={sourceName} origin={origin} />
           )}
           {showEpisodeBadge && (
-            <div
-              className='ml-auto flex-shrink-0 whitespace-nowrap rounded-md bg-brand-500 px-1.5 py-0.5 text-[10px] font-semibold text-white shadow-md transition-all duration-300 ease-out group-hover:scale-110 sm:px-2 sm:py-1 sm:text-xs'
-              style={noSelectStyle}
-              onContextMenu={preventContextMenu}
+            <span
+              data-card-episodes
+              className={`ml-auto shrink-0 whitespace-nowrap ${POSTER_BADGE_NEUTRAL_CLASS}`}
             >
-              {currentEpisode ? `${currentEpisode}/${episodes}` : episodes}
-            </div>
+              {formatEpisodeBadge(episodes ?? 0, currentEpisode)}
+            </span>
           )}
-        </div>
-      )}
-
-      {config.showPlayButton && (
-        <div
-          data-button='true'
-          className='absolute inset-0 flex items-center justify-center opacity-0 transition-all delay-75 duration-300 ease-in-out group-hover:scale-100 group-hover:opacity-100'
-          style={noSelectStyle}
-          onContextMenu={preventContextMenu}
-        >
-          <PlayCircleIcon
-            size={50}
-            strokeWidth={0.8}
-            className='fill-transparent text-white transition-all duration-300 ease-out hover:scale-[1.1] hover:fill-brand-500'
-            style={noSelectStyle}
-            onContextMenu={preventContextMenu}
-          />
-        </div>
-      )}
-
-      {(config.showHeart || config.showCheckCircle) && (
-        <div
-          data-button='true'
-          className='absolute bottom-3 right-3 flex translate-y-2 gap-3 opacity-0 transition-all duration-300 ease-in-out sm:group-hover:translate-y-0 sm:group-hover:opacity-100'
-          style={noSelectStyle}
-          onContextMenu={preventContextMenu}
-        >
-          {config.showCheckCircle && (
-            <Trash2
-              onClick={onDeleteRecord}
-              size={20}
-              className='text-white transition-all duration-300 ease-out hover:scale-[1.1] hover:stroke-red-500'
-              style={noSelectStyle}
-              onContextMenu={preventContextMenu}
-            />
-          )}
-          {config.showHeart && from !== 'search' && (
-            <FavoriteHeartButton
-              favorited={visibleFavorited}
-              onClick={onToggleFavorite}
-              unfavoritedIconClassName={
-                from === 'playrecord'
-                  ? 'fill-transparent stroke-white hover:fill-red-400 hover:stroke-red-400'
-                  : undefined
-              }
-              style={noSelectStyle}
-              onContextMenu={preventContextMenu}
+          {showRate && (
+            <RatingBadge
+              value={rateValue}
+              variant='overlay'
+              label='评分'
+              className='ml-auto shrink-0'
             />
           )}
         </div>
       )}
 
-      {config.showYear &&
-        displayYear &&
-        displayYear !== 'unknown' &&
-        displayYear !== '0' && (
-          <div
-            data-card-year
-            className='absolute bottom-2 left-2 rounded bg-black/70 px-2 py-1 text-xs font-medium text-white shadow-sm transition-all duration-300 ease-out group-hover:opacity-90'
-            style={noSelectStyle}
-            onContextMenu={preventContextMenu}
-          >
-            {displayYear}
-          </div>
-        )}
-
-      {config.showRating && rate && (
-        <div
-          className='absolute right-2 top-2 flex h-7 w-7 items-center justify-center rounded-full bg-pink-500 text-xs font-bold text-white shadow-md transition-all duration-300 ease-out group-hover:scale-110'
-          style={noSelectStyle}
-          onContextMenu={preventContextMenu}
-        >
-          {rate}
-        </div>
-      )}
-
-      {myRating !== undefined && !hasUpdate && (
-        <RatingBadge
-          value={myRating}
-          variant='overlay'
-          label='我的评分'
-          className='absolute bottom-2 left-2 px-2 py-1'
-        />
-      )}
-
-      {config.showDoubanLink && doubanId && doubanId !== 0 && (
-        <a
-          href={
-            isBangumi
-              ? `https://bgm.tv/subject/${doubanId.toString()}`
-              : `https://movie.douban.com/subject/${doubanId.toString()}`
-          }
-          target='_blank'
-          rel='noopener noreferrer'
-          onClick={(event) => event.stopPropagation()}
-          className='absolute left-2 top-2 z-20 -translate-x-2 opacity-0 transition-all delay-100 duration-300 ease-in-out sm:group-hover:translate-x-0 sm:group-hover:opacity-100'
-          style={noSelectStyle}
-          onContextMenu={preventContextMenu}
-        >
-          <div
-            className='flex h-7 w-7 items-center justify-center rounded-full bg-brand-500 text-xs font-bold text-white shadow-md transition-all duration-300 ease-out hover:scale-[1.1] hover:bg-brand-600'
-            style={noSelectStyle}
-            onContextMenu={preventContextMenu}
-          >
-            <Link
-              size={16}
-              style={
-                {
-                  ...noSelectStyle,
-                  pointerEvents: 'none',
-                } as React.CSSProperties
-              }
-            />
-          </div>
-        </a>
-      )}
-
-      {hasUpdate && availableEpisodes && availableEpisodes > 1 && (
+      {showUpdate ? (
         <button
           type='button'
           data-card-update
           aria-label={`更新至 ${availableEpisodes} 集，点击标记已读`}
-          className='group/update absolute bottom-2 left-2 min-w-[4.75rem] rounded-md bg-amber-500 px-2 py-1 text-xs font-semibold text-white shadow-md'
+          className={`group/update absolute bottom-2 left-2 min-w-[4.75rem] justify-center bg-amber-500 font-semibold text-white ${POSTER_BADGE_CLASS}`}
           style={noSelectStyle}
           onContextMenu={preventContextMenu}
           onClick={onMarkUpdateRead}
@@ -351,27 +132,29 @@ export function VideoCardPoster({
             <Check size={16} strokeWidth={3} />
           </span>
         </button>
+      ) : (
+        myRating !== undefined && (
+          <RatingBadge
+            value={myRating}
+            variant='overlay'
+            label='我的评分'
+            className='absolute bottom-2 left-2'
+          />
+        )
       )}
 
-      {isAggregate && sourceNames && sourceNames.length > 0 && (
-        <AggregateSourcesIndicator sourceNames={sourceNames} />
+      {config.showHeart && from !== 'search' && (
+        <PosterFavoriteButton
+          favorited={visibleFavorited}
+          onClick={onToggleFavorite}
+        />
       )}
 
       {config.showProgress && progress !== undefined && progress > 0 && (
-        <div
-          className='absolute bottom-0 left-0 right-0 h-1 bg-black/30'
-          style={noSelectStyle}
-          onContextMenu={preventContextMenu}
-        >
+        <div className='pointer-events-none absolute inset-x-0 bottom-0 h-1 bg-black/30'>
           <div
-            className='h-full bg-brand-500 transition-all duration-500 ease-out'
-            style={
-              {
-                width: `${progress}%`,
-                ...noSelectStyle,
-              } as React.CSSProperties
-            }
-            onContextMenu={preventContextMenu}
+            className='h-full bg-brand-500'
+            style={{ width: `${Math.min(100, progress)}%` }}
           />
         </div>
       )}

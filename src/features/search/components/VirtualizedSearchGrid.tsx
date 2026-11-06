@@ -4,7 +4,7 @@ import { ReactNode } from 'react';
 
 import {
   POSTER_GRID_CLASS,
-  POSTER_VIRTUAL_GRID_LAYOUT,
+  POSTER_VIRTUAL_GRID_WITH_SUBTITLE_LAYOUT,
 } from '@/components/poster-grid-layout';
 import {
   type VirtualizedGridLayoutConfig,
@@ -31,7 +31,7 @@ export function VirtualizedSearchGrid<T>({
       items={items}
       getKey={getKey}
       renderItem={renderItem}
-      layout={{ ...POSTER_VIRTUAL_GRID_LAYOUT, ...layout }}
+      layout={{ ...POSTER_VIRTUAL_GRID_WITH_SUBTITLE_LAYOUT, ...layout }}
       overscanRows={overscanRows}
       fallbackClassName={POSTER_GRID_CLASS}
       fallbackItemClassName='w-full'

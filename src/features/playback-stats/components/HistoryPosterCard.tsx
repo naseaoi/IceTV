@@ -43,7 +43,6 @@ export function HistoryPosterCard({
       year={session.year}
       sourceName={session.source_name}
       progress={getProgressPercent(session)}
-      episode={session.episode_index}
       subtitle={`第 ${session.episode_index} 集 · 看了 ${formatWatchedMinutes(
         session.watch_seconds,
       )}`}

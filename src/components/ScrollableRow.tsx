@@ -4,6 +4,8 @@ import { ChevronLeft, ChevronRight } from 'lucide-react';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Children, useMemo } from 'react';
 
+import { FLOATING_CONTROL_CLASS } from '@/components/floating-control';
+
 interface ScrollableRowProps {
   children: React.ReactNode;
   scrollDistance?: number;
@@ -199,12 +201,9 @@ export default function ScrollableRow({
               type='button'
               aria-label='向左滚动'
               onClick={handleScrollLeftClick}
-              className='flex h-12 w-12 items-center justify-center rounded-full border border-gray-200 bg-white/95 shadow-lg transition-transform hover:scale-105 hover:bg-white dark:border-gray-600 dark:bg-gray-800/90 dark:hover:bg-gray-700'
+              className={`${FLOATING_CONTROL_CLASS} h-11 w-11`}
             >
-              <ChevronLeft
-                className='h-6 w-6 text-gray-600 dark:text-gray-300'
-                aria-hidden='true'
-              />
+              <ChevronLeft className='h-5 w-5' aria-hidden='true' />
             </button>
           </div>
         </div>
@@ -233,12 +232,9 @@ export default function ScrollableRow({
               type='button'
               aria-label='向右滚动'
               onClick={handleScrollRightClick}
-              className='flex h-12 w-12 items-center justify-center rounded-full border border-gray-200 bg-white/95 shadow-lg transition-transform hover:scale-105 hover:bg-white dark:border-gray-600 dark:bg-gray-800/90 dark:hover:bg-gray-700'
+              className={`${FLOATING_CONTROL_CLASS} h-11 w-11`}
             >
-              <ChevronRight
-                className='h-6 w-6 text-gray-600 dark:text-gray-300'
-                aria-hidden='true'
-              />
+              <ChevronRight className='h-5 w-5' aria-hidden='true' />
             </button>
           </div>
         </div>

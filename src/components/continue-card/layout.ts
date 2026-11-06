@@ -1,5 +1,5 @@
 // ContinueCard 与其骨架共用的几何类，改尺寸只改这里
-export const CONTINUE_CARD_CLASS = 'flex w-[236px] shrink-0 gap-3 md:w-[288px]';
+export const CONTINUE_CARD_CLASS = 'flex w-[236px] shrink-0 gap-3 md:w-[256px]';
 
 export const CONTINUE_CARD_COVER_CLASS =
   'aspect-[2/3] w-[76px] shrink-0 self-start rounded-lg md:w-[88px]';

@@ -1,6 +1,6 @@
 'use client';
 
-import { Check, PlayCircleIcon } from 'lucide-react';
+import { Check } from 'lucide-react';
 import type React from 'react';
 import { type ReactNode, useCallback, useEffect, useId } from 'react';
 
@@ -13,11 +13,13 @@ import {
   useFavoriteStatus,
 } from '@/components/CardInteractionProvider';
 import CoverImage from '@/components/CoverImage';
-import { FavoriteHeartButton } from '@/components/FavoriteHeartButton';
 import {
   POSTER_CARD_COVER_CLASS,
+  POSTER_CARD_INTERACTION_CLASS,
   POSTER_CARD_SUBTITLE_ROW_CLASS,
+  POSTER_HOVER_SHADE_CLASS,
 } from '@/components/poster-card-layout';
+import PosterFavoriteButton from '@/components/PosterFavoriteButton';
 import SourceNameBadge from '@/components/SourceNameBadge';
 import {
   noSelectStyle,
@@ -46,7 +48,6 @@ interface PlaybackPosterCardProps {
   progress?: number;
   rank?: number;
   coverSizes?: string;
-  episode?: number;
   onPlay: () => void;
   onPrefetch?: () => void;
   onDelete?: () => void | Promise<void>;
@@ -67,7 +68,6 @@ export function PlaybackPosterCard({
   progress = 0,
   rank,
   coverSizes,
-  episode,
   onPlay,
   onPrefetch,
   onDelete,
@@ -150,10 +150,7 @@ export function PlaybackPosterCard({
         title,
         poster: cover,
         actions: buildCardActions({
-          play: {
-            meta: episode ? `第 ${episode} 集` : undefined,
-            onClick: onPlay,
-          },
+          play: { onClick: onPlay },
           favorite: hasTarget
             ? { favorited: current, onToggle: () => toggleFavorite(current) }
             : undefined,
@@ -190,7 +187,6 @@ export function PlaybackPosterCard({
     [
       cover,
       ensureFavoritesLoaded,
-      episode,
       getFavoriteStatus,
       hasTarget,
       interactionId,
@@ -221,7 +217,7 @@ export function PlaybackPosterCard({
       tabIndex={0}
       aria-label={ariaLabel}
       aria-pressed={selectable ? selected : undefined}
-      className='group relative w-full cursor-pointer rounded-lg bg-transparent outline-none transition-[transform,opacity] duration-300 ease-in-out hover:z-10 hover:scale-[1.025] active:scale-[0.97] active:opacity-80'
+      className={`${POSTER_CARD_INTERACTION_CLASS} outline-none`}
       onClick={onPlay}
       onMouseEnter={handlePrefetch}
       onFocus={handlePrefetch}
@@ -281,34 +277,16 @@ export function PlaybackPosterCard({
           </div>
         ) : (
           <>
-            <div className='absolute inset-0 bg-gradient-to-t from-black/80 via-black/20 to-transparent opacity-0 transition-opacity duration-300 ease-in-out group-hover:opacity-100' />
-            <div
-              data-button='true'
-              className='absolute inset-0 flex items-center justify-center opacity-0 transition-all delay-75 duration-300 ease-in-out group-hover:opacity-100'
-            >
-              <PlayCircleIcon
-                size={50}
-                strokeWidth={0.8}
-                className='fill-transparent text-white transition-all duration-300 ease-out hover:scale-[1.1] hover:fill-brand-500'
-              />
-            </div>
+            <div className={POSTER_HOVER_SHADE_CLASS} />
             {hasTarget && (
-              <div
-                data-button='true'
-                className='absolute bottom-3 right-3 flex translate-y-2 opacity-0 transition-all duration-300 ease-in-out sm:group-hover:translate-y-0 sm:group-hover:opacity-100'
-              >
-                <FavoriteHeartButton
-                  favorited={favorited}
-                  onClick={(event) => {
-                    event.preventDefault();
-                    event.stopPropagation();
-                    void toggleFavorite(favorited);
-                  }}
-                  unfavoritedIconClassName='fill-transparent stroke-white hover:fill-red-400 hover:stroke-red-400'
-                  style={noSelectStyle}
-                  onContextMenu={preventContextMenu}
-                />
-              </div>
+              <PosterFavoriteButton
+                favorited={favorited}
+                onClick={(event) => {
+                  event.preventDefault();
+                  event.stopPropagation();
+                  void toggleFavorite(favorited);
+                }}
+              />
             )}
           </>
         )}

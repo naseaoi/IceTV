@@ -4,7 +4,7 @@ import type { CardAction } from '@/components/card-actions/actions';
 
 const VARIANT_CLASS = {
   menu: {
-    item: 'h-9 gap-2.5 rounded-lg px-2.5 text-sm [&_svg]:h-4 [&_svg]:w-4',
+    item: 'h-9 gap-2.5 rounded-lg pl-2.5 pr-5 text-sm [&_svg]:h-4 [&_svg]:w-4',
     separator: 'mx-1.5 my-1',
   },
   sheet: {
@@ -65,11 +65,6 @@ export default function CardActionList({
               {action.icon}
             </span>
             <span className='min-w-0 flex-1 truncate'>{action.label}</span>
-            {action.meta && (
-              <span className='shrink-0 text-xs tabular-nums text-gray-400 dark:text-gray-500'>
-                {action.meta}
-              </span>
-            )}
           </button>
         </Fragment>
       ))}

@@ -1,6 +1,6 @@
 'use client';
 
-import { RefreshCw, X } from 'lucide-react';
+import { KeyRound, RefreshCw, X } from 'lucide-react';
 import { useEffect, useState } from 'react';
 
 import { useAuthSession } from '@/components/AuthProvider';
@@ -40,10 +40,12 @@ export function ProfileForm({
   required = false,
   onSaved,
   onClose,
+  onChangePassword,
 }: {
   required?: boolean;
   onSaved?: () => void;
   onClose?: () => void;
+  onChangePassword?: () => void;
 }) {
   const { session, refreshSession } = useAuthSession();
   const profileId = session.status === 'authenticated' ? session.profileId : '';
@@ -281,7 +283,17 @@ export function ProfileForm({
         </p>
       )}
 
-      <div className='mt-6 flex justify-end gap-2'>
+      <div className='mt-6 flex items-center justify-end gap-2'>
+        {onChangePassword && (
+          <button
+            type='button'
+            onClick={onChangePassword}
+            className='-ml-2 mr-auto inline-flex h-9 items-center gap-1.5 rounded-lg px-2 text-sm text-gray-500 transition-colors hover:text-gray-900 dark:text-gray-400 dark:hover:text-white'
+          >
+            <KeyRound className='h-4 w-4' />
+            修改密码
+          </button>
+        )}
         {onClose && (
           <button
             type='button'
@@ -303,11 +315,21 @@ export function ProfileForm({
   );
 }
 
-export function ProfilePanel({ onClose }: { onClose: () => void }) {
+export function ProfilePanel({
+  onClose,
+  onChangePassword,
+}: {
+  onClose: () => void;
+  onChangePassword?: () => void;
+}) {
   return (
     <ModalShell isOpen onClose={onClose} panelClassName='max-w-sm p-5 sm:p-6'>
       <div role='dialog' aria-label='个人资料' aria-modal='true'>
-        <ProfileForm onSaved={onClose} onClose={onClose} />
+        <ProfileForm
+          onSaved={onClose}
+          onClose={onClose}
+          onChangePassword={onChangePassword}
+        />
       </div>
     </ModalShell>
   );

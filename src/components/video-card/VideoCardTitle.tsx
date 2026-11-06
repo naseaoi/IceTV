@@ -9,6 +9,8 @@ import { noSelectStyle, preventContextMenu } from './constants';
 
 interface VideoCardTitleProps {
   title: string;
+  // 标题行几何类，需与对应骨架一致
+  className?: string;
 }
 
 interface TooltipAnchor {
@@ -24,7 +26,10 @@ interface TooltipLayout {
 const TOOLTIP_VIEWPORT_MARGIN = 8;
 const TOOLTIP_SHOW_DELAY_MS = 100;
 
-export function VideoCardTitle({ title }: VideoCardTitleProps) {
+export function VideoCardTitle({
+  title,
+  className = POSTER_CARD_TITLE_ROW_CLASS,
+}: VideoCardTitleProps) {
   const tooltipRef = useRef<HTMLDivElement>(null);
   const showTimerRef = useRef<number | null>(null);
   const [anchor, setAnchor] = useState<TooltipAnchor | null>(null);
@@ -85,7 +90,7 @@ export function VideoCardTitle({ title }: VideoCardTitleProps) {
   return (
     <div
       data-video-card-title
-      className={POSTER_CARD_TITLE_ROW_CLASS}
+      className={className}
       style={noSelectStyle}
       onContextMenu={preventContextMenu}
     >

@@ -1,6 +1,6 @@
 'use client';
 
-import { ExternalLink, Play, Star } from 'lucide-react';
+import { BookmarkCheck, ExternalLink, Play, Star } from 'lucide-react';
 import {
   type CSSProperties,
   useCallback,
@@ -12,6 +12,10 @@ import {
 import CoverImage from '@/components/CoverImage';
 import { PAGE_CONTAINER_CLASS } from '@/components/page-container';
 import SkeletonText, { SKELETON_TEXT_STRUT } from '@/components/SkeletonText';
+import {
+  type WatchRecordTarget,
+  useOpenWatchRecord,
+} from '@/components/watch-record-context';
 import {
   type HomeHeroItem,
   HERO_ITEM_LIMIT,
@@ -43,8 +47,10 @@ const MOBILE_HERO_TEXT = {
   title: 'mt-2 text-[28px] leading-tight',
   meta: 'mt-1.5 text-[13px]',
   intro: 'text-[13px] leading-5',
-  button: 'mt-4 inline-flex h-10 items-center rounded-full pl-4 pr-5 text-sm',
+  actions: 'mt-4 flex items-center gap-2.5',
+  button: 'inline-flex h-10 items-center rounded-full pl-4 pr-5 text-sm',
 };
+const DESKTOP_HERO_SECONDARY_BUTTON_CLASS = `${DESKTOP_HERO_TEXT.button} inline-flex items-center gap-2 bg-gray-900/[0.06] px-5 text-[15px] text-gray-700 transition-colors hover:bg-gray-900/10 dark:bg-white/10 dark:text-gray-200 dark:hover:bg-white/15`;
 const DESKTOP_HERO_CONTAINER_CLASS = `${PAGE_CONTAINER_CLASS} relative flex h-[clamp(440px,58vh,560px)] items-end gap-10`;
 
 function heroMetaParts(item: HomeHeroItem): string[] {
@@ -97,12 +103,25 @@ function HeroMetaLine({
   );
 }
 
+function heroWatchRecordTarget(item: HomeHeroItem): WatchRecordTarget {
+  return {
+    source: 'douban',
+    id: item.id,
+    title: item.title,
+    year: item.year,
+    cover: item.poster,
+    sourceName: '豆瓣',
+    doubanId: Number(item.id),
+  };
+}
+
 function HeroActions({ item }: { item: HomeHeroItem }) {
   const { play, prefetch, cancelPrefetch } = usePosterPlay({
     title: item.title,
     year: item.year,
     type: item.type,
   });
+  const openWatchRecord = useOpenWatchRecord();
   const externalUrl = buildExternalSubjectUrl(Number(item.id));
 
   return (
@@ -119,12 +138,22 @@ function HeroActions({ item }: { item: HomeHeroItem }) {
         <Play className='h-4 w-4 fill-current' />
         立即播放
       </button>
+      {openWatchRecord && (
+        <button
+          type='button'
+          onClick={() => openWatchRecord(heroWatchRecordTarget(item))}
+          className={DESKTOP_HERO_SECONDARY_BUTTON_CLASS}
+        >
+          <BookmarkCheck className='h-4 w-4' />
+          标记评分
+        </button>
+      )}
       {externalUrl && (
         <a
           href={externalUrl}
           target='_blank'
           rel='noopener noreferrer'
-          className={`${DESKTOP_HERO_TEXT.button} inline-flex items-center gap-2 bg-gray-900/[0.06] px-5 text-[15px] text-gray-700 transition-colors hover:bg-gray-900/10 dark:bg-white/10 dark:text-gray-200 dark:hover:bg-white/15`}
+          className={DESKTOP_HERO_SECONDARY_BUTTON_CLASS}
         >
           豆瓣
           <ExternalLink className='h-3.5 w-3.5' />
@@ -353,6 +382,7 @@ function MobileHeroSlide({
     year: item.year,
     type: item.type,
   });
+  const openWatchRecord = useOpenWatchRecord();
 
   return (
     <div
@@ -396,14 +426,26 @@ function MobileHeroSlide({
             {item.intro}
           </p>
         )}
-        <button
-          type='button'
-          onClick={play}
-          className={`${MOBILE_HERO_TEXT.button} pointer-events-auto gap-1.5 bg-brand-500 font-medium text-white shadow-lg shadow-brand-500/25 transition-transform active:scale-95`}
-        >
-          <Play className='h-4 w-4 fill-current' />
-          立即播放
-        </button>
+        <div className={MOBILE_HERO_TEXT.actions}>
+          <button
+            type='button'
+            onClick={play}
+            className={`${MOBILE_HERO_TEXT.button} pointer-events-auto gap-1.5 bg-brand-500 font-medium text-white shadow-lg shadow-brand-500/25 transition-transform active:scale-95`}
+          >
+            <Play className='h-4 w-4 fill-current' />
+            立即播放
+          </button>
+          {openWatchRecord && (
+            <button
+              type='button'
+              aria-label='标记评分'
+              onClick={() => openWatchRecord(heroWatchRecordTarget(item))}
+              className='pointer-events-auto inline-flex h-10 w-10 items-center justify-center rounded-full bg-gray-900/[0.06] text-gray-700 transition-transform active:scale-95 dark:bg-white/10 dark:text-gray-200'
+            >
+              <BookmarkCheck className='h-[18px] w-[18px]' />
+            </button>
+          )}
+        </div>
       </div>
     </div>
   );
@@ -549,6 +591,9 @@ export function HomeHeroSkeleton() {
                     className={`skeleton w-32 ${DESKTOP_HERO_TEXT.button}`}
                   />
                   <div
+                    className={`skeleton w-32 ${DESKTOP_HERO_TEXT.button}`}
+                  />
+                  <div
                     className={`skeleton w-24 ${DESKTOP_HERO_TEXT.button}`}
                   />
                 </div>
@@ -593,8 +638,10 @@ export function HomeHeroSkeleton() {
               barClassName='h-3 w-3/4 rounded'
             />
           </div>
-          <div className={`skeleton w-28 ${MOBILE_HERO_TEXT.button}`}>
-            {SKELETON_TEXT_STRUT}
+          <div className={MOBILE_HERO_TEXT.actions}>
+            <div className={`skeleton w-28 ${MOBILE_HERO_TEXT.button}`}>
+              {SKELETON_TEXT_STRUT}
+            </div>
           </div>
         </div>
         <div className='absolute bottom-7 right-4 flex items-center gap-1.5'>

@@ -14,12 +14,15 @@ import React, {
 import {
   type CardActionAnchor,
   buildCardActions,
-  getEpisodeMeta,
 } from '@/components/card-actions/actions';
 import {
   useCardInteractionManager,
   useFavoriteStatus,
 } from '@/components/CardInteractionProvider';
+import {
+  POSTER_CARD_INTERACTION_CLASS,
+  POSTER_CARD_SUBTITLE_ROW_CLASS,
+} from '@/components/poster-card-layout';
 import { areVideoCardPropsEqual } from '@/components/video-card/compare';
 import { noSelectStyle } from '@/components/video-card/constants';
 import type {
@@ -166,6 +169,13 @@ const VideoCard = forwardRef<VideoCardHandle, VideoCardProps>(
     const actualDoubanId = dynamicDoubanId;
     const actualEpisodes = dynamicEpisodes;
     const actualYear = normalizeCardYear(year);
+    const aggregateSourceNames = useMemo(
+      () =>
+        isAggregate
+          ? Array.from(new Set(dynamicSourceNames ?? [])).filter(Boolean)
+          : [],
+      [dynamicSourceNames, isAggregate],
+    );
     const actualQuery = query || '';
     // 豆瓣卡片与目录收藏没有可播放源，按标题搜索起播
     const playsByTitle =
@@ -773,7 +783,6 @@ const VideoCard = forwardRef<VideoCardHandle, VideoCardProps>(
         play: config.showPlayButton
           ? {
               live: origin === 'live',
-              meta: getEpisodeMeta(currentEpisode, actualEpisodes),
               onClick: handleClick,
             }
           : undefined,
@@ -821,7 +830,6 @@ const VideoCard = forwardRef<VideoCardHandle, VideoCardProps>(
       actualSource,
       actualId,
       actualEpisodes,
-      currentEpisode,
       visibleFavorited,
       searchFavorited,
       visibleHasUpdate,
@@ -885,7 +893,7 @@ const VideoCard = forwardRef<VideoCardHandle, VideoCardProps>(
     return (
       <>
         <div
-          className={`group relative w-full cursor-pointer rounded-lg bg-transparent transition-[transform,opacity] duration-300 ease-in-out hover:z-10 hover:scale-[1.025] active:scale-[0.97] active:opacity-80 ${from === 'search' ? 'animate-fade-in' : ''}`}
+          className={`${POSTER_CARD_INTERACTION_CLASS} ${from === 'search' ? 'animate-fade-in' : ''}`}
           onClick={handleClick}
           onMouseEnter={handlePrefetch}
           onMouseLeave={cancelPrefetch}
@@ -932,25 +940,40 @@ const VideoCard = forwardRef<VideoCardHandle, VideoCardProps>(
             from={from}
             config={config}
             sourceName={source_name}
-            year={actualYear}
             rate={rate}
             myRating={myRating}
             episodes={actualEpisodes}
             currentEpisode={currentEpisode}
             hasUpdate={visibleHasUpdate}
             availableEpisodes={availableEpisodes}
-            doubanId={actualDoubanId}
-            isBangumi={isBangumi}
-            isAggregate={isAggregate}
-            sourceNames={dynamicSourceNames}
             progress={progress}
             visibleFavorited={visibleFavorited}
-            onDeleteRecord={handleDeleteRecord}
             onToggleFavorite={handleToggleFavorite}
             onMarkUpdateRead={handleMarkUpdateRead}
           />
 
           <VideoCardTitle title={actualTitle} />
+          {config.showYear && (
+            <p
+              data-card-subtitle
+              className={`${POSTER_CARD_SUBTITLE_ROW_CLASS} truncate text-gray-500 dark:text-gray-400`}
+              title={
+                aggregateSourceNames.length > 1
+                  ? aggregateSourceNames.join('、')
+                  : undefined
+              }
+              style={noSelectStyle}
+            >
+              {[
+                actualYear,
+                aggregateSourceNames.length > 1
+                  ? `${aggregateSourceNames.length} 个源`
+                  : '',
+              ]
+                .filter(Boolean)
+                .join(' · ') || ' '}
+            </p>
+          )}
         </div>
       </>
     );

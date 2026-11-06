@@ -4,7 +4,10 @@ import { Check } from 'lucide-react';
 import Link from 'next/link';
 
 import CoverImage from '@/components/CoverImage';
-import { POSTER_CARD_COVER_CLASS } from '@/components/poster-card-layout';
+import {
+  POSTER_BADGE_NEUTRAL_CLASS,
+  POSTER_CARD_COVER_CLASS,
+} from '@/components/poster-card-layout';
 import {
   POSTER_GRID_CLASS,
   POSTER_VIRTUAL_GRID_LAYOUT,
@@ -178,7 +181,9 @@ function ReadOnlyFavoriteCard({ item }: { item: FavoriteItem }) {
       >
         <CoverImage src={item.poster} alt={item.title} sizes='180px' />
         {status && (
-          <span className='absolute left-2 top-2 rounded-md bg-black/70 px-1.5 py-1 text-xs font-medium leading-none text-white shadow-sm ring-1 ring-inset ring-white/10'>
+          <span
+            className={`absolute left-2 top-2 ${POSTER_BADGE_NEUTRAL_CLASS}`}
+          >
             {status.label}
           </span>
         )}
@@ -187,7 +192,7 @@ function ReadOnlyFavoriteCard({ item }: { item: FavoriteItem }) {
             value={item.myRating}
             variant='overlay'
             label='评分'
-            className='absolute bottom-2 left-2 px-2 py-1'
+            className='absolute bottom-2 left-2'
           />
         )}
       </div>

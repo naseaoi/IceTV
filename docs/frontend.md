@@ -7,6 +7,9 @@
 - 强调色统一用 `brand-*`（`tailwind.config.ts` 定义的冰蓝色阶），`gray` 已覆盖为冷调中性灰；分区标题等装饰统一用中性灰，主色只出现在选中态、进度和主操作上。
 - 弹窗、下拉、菜单等浮层用实底（`bg-white` / `dark:bg-gray-900` + 细 ring），遮罩只压暗不模糊。毛玻璃只用于吸顶导航与筛选栏；叠在海报上的徽标与按钮用不低于 `bg-black/70` 的深色实底保证可读。弹窗标题、关闭与按钮复用 `src/components/modals/modal-styles.ts`。
 - 图标用 `lucide-react` 或 SVG，不用 emoji。
+- 悬浮在内容之上的圆形图标按钮（横排滚动箭头、回顶、列表定位）复用 `FLOATING_CONTROL_CLASS`（`src/components/floating-control.ts`），中性实底不用主色，尺寸与定位由调用方追加。
+- 海报卡片的徽标、悬停与按压样式取自 `poster-card-layout.ts`（`POSTER_BADGE_*`、`POSTER_CARD_INTERACTION_CLASS`、`POSTER_HOVER_SHADE_CLASS`），悬停收藏按钮用 `PosterFavoriteButton`。海报四角只放状态：左上来源、右上集数或评分、左下更新或我的评分（同一位置只显示一个）、右下悬停收藏；年份、来源数等次要信息放标题下的副标题行，播放、外链、删除等操作走卡片菜单。
+- 网格加副标题行时，虚拟网格行高改用 `POSTER_VIRTUAL_GRID_WITH_SUBTITLE_LAYOUT`（`poster-grid-layout.ts`），骨架传 `subtitle`，否则滚动定位与骨架高度会错位。
 
 ## 布局与导航
 

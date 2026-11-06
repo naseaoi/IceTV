@@ -81,6 +81,7 @@ function renderAggregateCard(openWatchRecord = jest.fn()) {
           year='2023'
           poster='https://img.example/poster.jpg'
           episodes={3}
+          source_names={['alpha 资源', 'beta 资源', 'alpha 资源']}
           aggregateGroup={[result('alpha', '1'), result('beta', '2')]}
         />
       </CardInteractionProvider>
@@ -99,6 +100,15 @@ describe('VideoCard 多源聚合搜索结果', () => {
     jest.mocked(getFavoriteForWork).mockReset();
     jest.mocked(saveFavorite).mockReset();
     jest.mocked(deleteFavorite).mockReset();
+  });
+
+  it('年份与去重后的来源数显示在标题下方', () => {
+    jest.mocked(getFavoriteForWork).mockResolvedValue(null);
+    renderAggregateCard();
+
+    const subtitle = screen.getByText('2023 · 2 个源');
+    expect(subtitle).toHaveAttribute('data-card-subtitle');
+    expect(subtitle).toHaveAttribute('title', 'alpha 资源、beta 资源');
   });
 
   it('按作品身份查询收藏状态，收藏到排序第一的源', async () => {

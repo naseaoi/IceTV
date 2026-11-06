@@ -7,7 +7,6 @@ import { useCallback, useEffect, useId, useState } from 'react';
 import {
   type CardActionAnchor,
   buildCardActions,
-  getEpisodeMeta,
 } from '@/components/card-actions/actions';
 import { useCardInteractionManager } from '@/components/CardInteractionProvider';
 import {
@@ -186,10 +185,7 @@ export default function ContinueCard({
         title,
         poster,
         actions: buildCardActions({
-          play: {
-            meta: getEpisodeMeta(currentEpisode, totalEpisodes),
-            onClick: handlePlay,
-          },
+          play: { onClick: handlePlay },
           favorite: {
             favorited,
             onToggle: async () => {
@@ -242,7 +238,6 @@ export default function ContinueCard({
       id,
       sourceName,
       year,
-      currentEpisode,
       totalEpisodes,
       query,
       handlePlay,

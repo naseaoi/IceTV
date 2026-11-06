@@ -18,7 +18,6 @@ export interface CardAction {
   icon: ReactNode;
   onClick: () => void | Promise<void>;
   tone?: 'default' | 'danger';
-  meta?: string;
   disabled?: boolean;
 }
 
@@ -33,7 +32,7 @@ export interface CardActionAnchor {
 type Handler = CardAction['onClick'];
 
 export interface CardActionSpec {
-  play?: { onClick: Handler; live?: boolean; meta?: string };
+  play?: { onClick: Handler; live?: boolean };
   favorite?: { favorited: boolean | null; onToggle: Handler };
   watchRecord?: Handler | null;
   updates?: {
@@ -72,25 +71,14 @@ export function buildCardActions(spec: CardActionSpec): CardAction[] {
   return actions;
 }
 
-export function getEpisodeMeta(
-  currentEpisode?: number,
-  totalEpisodes?: number,
-) {
-  return currentEpisode && totalEpisodes && totalEpisodes > 1
-    ? `第 ${currentEpisode} 集`
-    : undefined;
-}
-
 export function playAction(options: {
   onClick: Handler;
   live?: boolean;
-  meta?: string;
 }): CardAction {
   return {
     id: 'play',
     label: options.live ? '观看直播' : '立即播放',
     icon: <Play />,
-    meta: options.meta,
     onClick: options.onClick,
   };
 }
@@ -182,10 +170,4 @@ export function summarizeSources(sources?: string[]) {
   if (names.length === 0) return '';
   if (names.length <= 2) return names.join(' · ');
   return `${names.slice(0, 2).join(' · ')} 等 ${names.length} 个源`;
-}
-
-// 桌面菜单只有一行 meta 的位置，多源时只给数量
-export function summarizeSourcesCompact(sources?: string[]) {
-  const names = uniqueSourceNames(sources);
-  return names.length > 1 ? `${names.length} 个源` : (names[0] ?? '');
 }

@@ -5,7 +5,6 @@ import {
   CircleUserRound,
   Heart,
   History,
-  KeyRound,
   LogIn,
   LogOut,
   MessageSquareText,
@@ -142,11 +141,6 @@ export const UserMenu: React.FC = () => {
     router.push(href);
   };
 
-  const handleChangePassword = () => {
-    setIsOpen(false);
-    setIsChangePasswordOpen(true);
-  };
-
   const handleSettings = () => {
     setIsOpen(false);
     setIsSettingsOpen(true);
@@ -167,30 +161,23 @@ export const UserMenu: React.FC = () => {
     isAuthenticated && (role === 'owner' || role === 'admin');
   const showChangePassword = isAuthenticated && role !== 'owner';
 
-  const listActions = [
-    {
-      icon: CircleUserRound,
-      label: '个人资料',
-      onClick: () => {
-        setIsOpen(false);
-        setIsProfileOpen(true);
-      },
-      show: isAuthenticated,
-    },
-    { icon: Settings, label: '本地设置', onClick: handleSettings, show: true },
-    {
-      icon: Shield,
-      label: '管理后台',
-      onClick: () => navigateTo('/admin'),
-      show: showAdminPanel,
-    },
-    {
-      icon: KeyRound,
-      label: '修改密码',
-      onClick: handleChangePassword,
-      show: showChangePassword,
-    },
-  ].filter((action) => action.show);
+  const handleProfile = () => {
+    setIsOpen(false);
+    setIsProfileOpen(true);
+  };
+
+  const tileActions = [
+    ...QUICK_LINKS.map(({ icon, label, href }) => ({
+      icon,
+      label,
+      onClick: () => navigateTo(href),
+    })),
+    { icon: CircleUserRound, label: '资料', onClick: handleProfile },
+    { icon: Settings, label: '设置', onClick: handleSettings },
+    ...(showAdminPanel
+      ? [{ icon: Shield, label: '后台', onClick: () => navigateTo('/admin') }]
+      : []),
+  ];
 
   const displayName = isAuthenticated
     ? (session.nickname ?? session.username)
@@ -230,13 +217,15 @@ export const UserMenu: React.FC = () => {
               <ChevronRight className='h-4 w-4 flex-shrink-0 text-gray-300 transition-transform duration-200 group-hover:translate-x-0.5 dark:text-gray-600' />
             </button>
 
-            <div className='mt-1 grid grid-cols-3 gap-1'>
-              {QUICK_LINKS.map(({ icon: Icon, label, href }) => (
+            {/* 不足一行的宫格居中 */}
+            <div className='mt-1 flex flex-wrap justify-center gap-y-1'>
+              {tileActions.map(({ icon: Icon, label, onClick }) => (
                 <button
-                  key={href}
+                  key={label}
                   type='button'
-                  onClick={() => navigateTo(href)}
-                  className='flex flex-col items-center gap-1.5 rounded-xl py-2.5 text-xs text-gray-600 transition-colors hover:bg-gray-900/[0.05] hover:text-gray-900 dark:text-gray-400 dark:hover:bg-white/[0.06] dark:hover:text-white'
+                  role='menuitem'
+                  onClick={onClick}
+                  className='flex w-1/3 flex-col items-center gap-1.5 rounded-xl py-2.5 text-xs text-gray-600 transition-colors hover:bg-gray-900/[0.05] hover:text-gray-900 dark:text-gray-400 dark:hover:bg-white/[0.06] dark:hover:text-white'
                 >
                   <Icon className='h-[18px] w-[18px]' strokeWidth={1.75} />
                   {label}
@@ -245,67 +234,64 @@ export const UserMenu: React.FC = () => {
             </div>
           </>
         ) : (
-          <div className='flex items-center gap-3 px-2.5 py-2.5'>
-            <UserAvatar size='lg' />
-            <div className='min-w-0 flex-1 text-sm font-semibold text-gray-900 dark:text-gray-100'>
-              未登录
+          <>
+            <div className='flex items-center gap-3 px-2.5 py-2.5'>
+              <UserAvatar size='lg' />
+              <div className='min-w-0 flex-1 text-sm font-semibold text-gray-900 dark:text-gray-100'>
+                未登录
+              </div>
+              <button
+                type='button'
+                onClick={handleLogin}
+                className='inline-flex h-8 shrink-0 items-center gap-1.5 rounded-full bg-brand-600 px-3.5 text-[13px] font-medium text-white transition-colors hover:bg-brand-500'
+              >
+                <LogIn className='h-3.5 w-3.5' />
+                登录
+              </button>
             </div>
+            <div className={MENU_DIVIDER_CLASS} />
             <button
               type='button'
-              onClick={handleLogin}
-              className='inline-flex h-8 shrink-0 items-center gap-1.5 rounded-full bg-brand-600 px-3.5 text-[13px] font-medium text-white transition-colors hover:bg-brand-500'
+              role='menuitem'
+              onClick={handleSettings}
+              className={MENU_ROW_CLASS}
             >
-              <LogIn className='h-3.5 w-3.5' />
-              登录
+              <Settings className={MENU_ICON_CLASS} />
+              <span>本地设置</span>
             </button>
-          </div>
+          </>
         )}
 
         <div className={MENU_DIVIDER_CLASS} />
 
-        {listActions.map(({ icon: Icon, label, onClick }) => (
-          <button
-            key={label}
-            type='button'
-            role='menuitem'
-            onClick={onClick}
-            className={MENU_ROW_CLASS}
-          >
-            <Icon className={MENU_ICON_CLASS} />
-            <span>{label}</span>
-          </button>
-        ))}
-
-        {isAuthenticated && (
+        <div className='flex items-center justify-between gap-2'>
           <button
             type='button'
-            role='menuitem'
-            onClick={handleLogout}
-            className={MENU_ROW_CLASS}
+            onClick={handleVersionPanel}
+            className='flex min-w-0 items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-[11px] text-gray-400 transition-colors hover:text-gray-700 dark:text-gray-500 dark:hover:text-gray-300'
           >
-            <LogOut className={MENU_ICON_CLASS} />
-            <span>退出登录</span>
-          </button>
-        )}
-
-        <div className={MENU_DIVIDER_CLASS} />
-
-        <button
-          type='button'
-          onClick={handleVersionPanel}
-          className='flex w-full items-center justify-between rounded-lg px-2.5 py-1.5 text-[11px] text-gray-400 transition-colors hover:text-gray-700 dark:text-gray-500 dark:hover:text-gray-300'
-        >
-          <span className='flex items-center gap-1.5'>
-            <span className='font-mono'>v{CURRENT_VERSION}</span>
+            <span className='truncate font-mono'>v{CURRENT_VERSION}</span>
             {hasUpdate && (
-              <span className='inline-flex items-center gap-1 text-brand-600 dark:text-brand-300'>
+              <span className='inline-flex shrink-0 items-center gap-1 text-brand-600 dark:text-brand-300'>
                 <span className='h-1.5 w-1.5 rounded-full bg-brand-500' />
                 有新版本
               </span>
             )}
-          </span>
-          <span>{storageType}</span>
-        </button>
+            <span aria-hidden='true'>·</span>
+            <span className='shrink-0'>{storageType}</span>
+          </button>
+          {isAuthenticated && (
+            <button
+              type='button'
+              role='menuitem'
+              onClick={handleLogout}
+              className='inline-flex shrink-0 items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs text-gray-500 transition-colors hover:bg-gray-900/[0.05] hover:text-gray-900 dark:text-gray-400 dark:hover:bg-white/[0.06] dark:hover:text-white'
+            >
+              <LogOut className='h-3.5 w-3.5' />
+              退出
+            </button>
+          )}
+        </div>
       </div>
     </>
   );
@@ -350,7 +336,17 @@ export const UserMenu: React.FC = () => {
         )}
 
       {isProfileOpen && (
-        <ProfilePanel onClose={() => setIsProfileOpen(false)} />
+        <ProfilePanel
+          onClose={() => setIsProfileOpen(false)}
+          onChangePassword={
+            showChangePassword
+              ? () => {
+                  setIsProfileOpen(false);
+                  setIsChangePasswordOpen(true);
+                }
+              : undefined
+          }
+        />
       )}
       {isVersionPanelOpen && (
         <VersionPanel

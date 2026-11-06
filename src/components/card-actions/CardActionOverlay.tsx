@@ -4,7 +4,6 @@ import {
   type CardAction,
   type CardActionAnchor,
   summarizeSources,
-  summarizeSourcesCompact,
 } from '@/components/card-actions/actions';
 import CardActionMenu from '@/components/card-actions/CardActionMenu';
 import CardActionSheet from '@/components/card-actions/CardActionSheet';
@@ -75,21 +74,13 @@ export default function CardActionOverlay({
 
   if (mode === 'menu' && visible.anchorRect) {
     const anchor = visible.anchorRect;
-    const sourcesMeta = summarizeSourcesCompact(visible.sources);
-    const actions = sourcesMeta
-      ? visible.actions.map((action) =>
-          action.id === 'play' && !action.meta
-            ? { ...action, meta: sourcesMeta }
-            : action,
-        )
-      : visible.actions;
     return (
       <CardActionMenu
         key={`${anchor.top}:${anchor.left}`}
         shown={shown}
         anchor={anchor}
         title={visible.title}
-        actions={actions}
+        actions={visible.actions}
         onAction={handleAction}
         onClose={onClose}
       />

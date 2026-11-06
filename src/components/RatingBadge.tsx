@@ -1,5 +1,6 @@
 import { Star } from 'lucide-react';
 
+import { POSTER_BADGE_CLASS } from '@/components/poster-card-layout';
 import { formatRating } from '@/lib/rating';
 
 interface RatingBadgeProps {
@@ -12,9 +13,8 @@ interface RatingBadgeProps {
 }
 
 const VARIANT_CLASS = {
-  soft: 'bg-amber-500/10 text-amber-700 ring-1 ring-inset ring-amber-500/20 dark:text-amber-300',
-  overlay:
-    'bg-black/70 text-amber-300 shadow-sm ring-1 ring-inset ring-white/10',
+  soft: 'rounded-md px-1.5 py-0.5 text-xs leading-none bg-amber-500/10 text-amber-700 ring-1 ring-inset ring-amber-500/20 dark:text-amber-300',
+  overlay: `${POSTER_BADGE_CLASS} bg-black/70 text-amber-300`,
 } as const;
 
 export default function RatingBadge({
@@ -27,7 +27,7 @@ export default function RatingBadge({
     <span
       role='img'
       aria-label={`${label ? `${label} ` : ''}${formatRating(value)} 分`}
-      className={`inline-flex items-center gap-0.5 rounded-md px-1.5 py-0.5 text-xs font-semibold tabular-nums leading-none ${VARIANT_CLASS[variant]} ${className}`}
+      className={`inline-flex items-center gap-0.5 font-semibold tabular-nums ${VARIANT_CLASS[variant]} ${className}`}
     >
       <Star aria-hidden='true' className='h-3 w-3' fill='currentColor' />
       {formatRating(value)}

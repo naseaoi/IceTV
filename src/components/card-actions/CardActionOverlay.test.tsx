@@ -6,7 +6,6 @@ import {
   favoriteAction,
   playAction,
   summarizeSources,
-  summarizeSourcesCompact,
 } from '@/components/card-actions/actions';
 import CardActionOverlay from '@/components/card-actions/CardActionOverlay';
 
@@ -31,7 +30,7 @@ function mockPointer(fine: boolean) {
 const pointAnchor = { top: 100, left: 100, width: 0, height: 0 };
 
 describe('buildCardActions', () => {
-  it('按固定顺序组装全部操作并保留回调、分组和元信息', () => {
+  it('按固定顺序组装全部操作并保留回调与分组', () => {
     const play = jest.fn();
     const favorite = jest.fn();
     const watchRecord = jest.fn();
@@ -50,7 +49,7 @@ describe('buildCardActions', () => {
       },
       watchRecord,
       favorite: { favorited: true, onToggle: favorite },
-      play: { onClick: play, live: true, meta: '第 3 集' },
+      play: { onClick: play, live: true },
     });
 
     expect(actions.map(({ id }) => id)).toEqual([
@@ -71,7 +70,6 @@ describe('buildCardActions', () => {
       'Bangumi 详情',
       '删除记录',
     ]);
-    expect(actions[0].meta).toBe('第 3 集');
     expect(actions.map(({ tone }) => tone ?? 'default')).toEqual([
       ...Array(6).fill('default'),
       'danger',
@@ -185,7 +183,7 @@ describe('CardActionOverlay', () => {
         onClose={onClose}
         title='测试影片'
         actions={[
-          playAction({ onClick: jest.fn(), meta: '第 3 集' }),
+          playAction({ onClick: jest.fn() }),
           favoriteAction(false, jest.fn()),
           deleteRecordAction(onDelete),
         ]}
@@ -196,7 +194,9 @@ describe('CardActionOverlay', () => {
 
     expect(screen.getByRole('menu', { name: '测试影片' })).toBeInTheDocument();
     expect(screen.getAllByRole('separator')).toHaveLength(1);
-    expect(screen.getByText('第 3 集')).toBeInTheDocument();
+    expect(
+      screen.getByRole('menuitem', { name: '立即播放' }),
+    ).toHaveTextContent(/^立即播放$/);
     expect(screen.queryByText('测试影片')).not.toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('menuitem', { name: '删除记录' }));
@@ -224,27 +224,8 @@ describe('CardActionOverlay', () => {
     expect(screen.getByRole('menuitem', { name: '加入收藏' })).toBeDisabled();
   });
 
-  it('菜单播放项无集数时以来源数作为补充信息', () => {
-    mockPointer(true);
-    render(
-      <CardActionOverlay
-        isOpen
-        onClose={jest.fn()}
-        title='测试影片'
-        actions={[playAction({ onClick: jest.fn() })]}
-        sources={['甲源', '乙源', '丙源', '甲源']}
-        anchorRect={pointAnchor}
-      />,
-    );
-
-    expect(screen.getByRole('menuitem', { name: /播放/ })).toHaveTextContent(
-      '3 个源',
-    );
-  });
-
   it('来源摘要去重且两个以内全部列出', () => {
     expect(summarizeSources(['甲源', '甲源', '乙源'])).toBe('甲源 · 乙源');
     expect(summarizeSources([])).toBe('');
-    expect(summarizeSourcesCompact(['甲源'])).toBe('甲源');
   });
 });
