@@ -1,4 +1,6 @@
 const CHANGELOG_VERSION_RE = /^## \[([\d.]+)\] - (\d{4}-\d{2}-\d{2})$/;
+// 顶部的未发布区块随 dev 改动累积，发版时改名为版本标题；解析、生成与发版均跳过它
+const CHANGELOG_UNRELEASED_RE = /^## \[Unreleased\]$/;
 const CHANGELOG_SECTION_RE = /^###\s+(.+)$/;
 const CHANGELOG_ITEM_RE = /^-\s+(.+)$/;
 
@@ -52,12 +54,14 @@ function parseChangelog(content) {
     const trimmedLine = line.trim();
 
     const versionMatch = trimmedLine.match(CHANGELOG_VERSION_RE);
-    if (versionMatch) {
+    if (versionMatch || CHANGELOG_UNRELEASED_RE.test(trimmedLine)) {
       if (currentVersion) {
         versions.push(currentVersion);
       }
 
-      currentVersion = createEntry(versionMatch[1], versionMatch[2]);
+      currentVersion = versionMatch
+        ? createEntry(versionMatch[1], versionMatch[2])
+        : null;
       currentSection = null;
       continue;
     }
@@ -120,13 +124,19 @@ function validateChangelog(content) {
   const errors = [];
   const parsed = parseChangelog(content);
   const seenVersions = new Set();
+  let seenVersionHeading = false;
+  let seenUnreleased = false;
 
   for (const line of lines) {
     const trimmedLine = line.trim();
-    if (
-      trimmedLine.startsWith('## ') &&
-      !CHANGELOG_VERSION_RE.test(trimmedLine)
-    ) {
+    if (CHANGELOG_UNRELEASED_RE.test(trimmedLine)) {
+      if (seenUnreleased || seenVersionHeading) {
+        errors.push('[Unreleased] 只能出现一次且位于所有版本之前');
+      }
+      seenUnreleased = true;
+    } else if (CHANGELOG_VERSION_RE.test(trimmedLine)) {
+      seenVersionHeading = true;
+    } else if (trimmedLine.startsWith('## ')) {
       errors.push(`无效的版本标题: ${trimmedLine}`);
     }
 
