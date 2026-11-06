@@ -31,8 +31,9 @@ import {
   type VideoReviewDraft,
   useVideoReviews,
 } from '@/features/reviews/hooks/useVideoReviews';
+import { usePagedQuery } from '@/hooks/usePagedQuery';
 import { formatRelativeTime } from '@/lib/relative-time';
-import type { VideoReview } from '@/lib/types';
+import type { MyVideoReviewPage, VideoReview } from '@/lib/types';
 import { parseStorageKey } from '@/lib/utils';
 import {
   MY_REVIEWS_PAGE_SIZE,
@@ -61,6 +62,16 @@ const SORT_OPTIONS: { value: ReviewSort; label: string }[] = [
 
 const SKELETON_COUNT = MY_REVIEWS_PAGE_SIZE;
 const reviewCounts = new Map<string, number>();
+
+function matchesReviewFilter(review: VideoReview, filter: ReviewFilter) {
+  return (
+    filter === 'all' ||
+    (filter === 'public' && review.is_public) ||
+    (filter === 'private' && !review.is_public) ||
+    (filter === 'text' && review.rating === null)
+  );
+}
+
 const useIsomorphicLayoutEffect =
   typeof window !== 'undefined' ? useLayoutEffect : useEffect;
 function useReviewSkeletonCount() {
@@ -151,6 +162,7 @@ export function MyReviewsPageSkeleton() {
         count > 0 && (
           <LibraryToolbar
             searchLabel='搜索我的评价'
+            countsKey='reviews'
             query=''
             onQueryChange={noop}
             filterOptions={buildFilterOptions(null)}
@@ -302,10 +314,7 @@ export default function MyReviewsPageClient() {
     profileId,
     setCount,
   } = useReviewSkeletonCount();
-  const [reviews, setReviews] = useState<VideoReview[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState('');
-  const [version, setVersion] = useState(0);
+  const [mutationError, setMutationError] = useState('');
   const [query, setQuery] = useState('');
   const [filter, setFilter] = useState<ReviewFilter>('all');
   const [sort, setSort] = useState<ReviewSort>('updated');
@@ -316,91 +325,63 @@ export default function MyReviewsPageClient() {
   const inFlight = useRef(false);
   const deferredQuery = useDeferredValue(query);
 
-  const [total, setTotal] = useState(0);
-  const [counts, setCounts] = useState<Record<ReviewFilter, number> | null>(
-    null,
+  const q = deferredQuery.trim();
+  const fetchPage = useCallback(
+    async (
+      cursor: string | undefined,
+      signal: AbortSignal,
+    ): Promise<MyVideoReviewPage & { countsQuery: string }> => ({
+      ...(await fetchMyVideoReviews({ cursor, q, filter, sort }, signal)),
+      countsQuery: q,
+    }),
+    [q, filter, sort],
   );
-  // 计数随搜索词变化、与筛选无关；只有搜索词一致时才能用来预知新筛选的条数
-  const [countsQuery, setCountsQuery] = useState('');
-  const [cursor, setCursor] = useState<string | null>(null);
-  const [loadingMore, setLoadingMore] = useState(false);
-  const generation = useRef(0);
-  const pageInFlight = useRef(false);
-  const requestPage = useCallback(
-    async (next?: string) => {
-      if (next && pageInFlight.current) return;
-      const current = next ? generation.current : ++generation.current;
-      pageInFlight.current = true;
-      if (next) setLoadingMore(true);
-      else {
-        setLoading(true);
-        setLoadingMore(false);
-        setCursor(null);
-      }
-      setError('');
-      const q = deferredQuery.trim();
-      try {
-        const page = await fetchMyVideoReviews({
-          cursor: next,
-          q,
-          filter,
-          sort,
-        });
-        if (current !== generation.current) return;
-        setReviews((previous) =>
-          next
-            ? [
-                ...previous,
-                ...page.items.filter(
-                  (item) =>
-                    !previous.some(
-                      (existing) =>
-                        existing.title_norm === item.title_norm &&
-                        existing.year === item.year,
-                    ),
-                ),
-              ]
-            : page.items,
-        );
-        setCursor(page.nextCursor);
-        setTotal(page.total);
-        setCounts(page.counts);
-        setCountsQuery(q);
-        setCount(Math.min(page.total, MY_REVIEWS_PAGE_SIZE));
-        if (profileId) reviewCounts.set(profileId, page.total);
-      } catch {
-        if (current === generation.current) setError('评价加载失败，请重试');
-      } finally {
-        if (current === generation.current) {
-          pageInFlight.current = false;
-          setLoading(false);
-          setLoadingMore(false);
-        }
-      }
-    },
-    [deferredQuery, filter, sort, profileId, setCount],
-  );
+  const {
+    data,
+    initialLoading,
+    refreshing,
+    loadingMore,
+    error: queryError,
+    loadMore,
+    refresh: refreshPage,
+    updateData,
+  } = usePagedQuery({
+    scopeKey: profileId,
+    queryKey: JSON.stringify([q, filter, sort]),
+    fetchPage,
+    getItemKey: (review) => JSON.stringify([review.title_norm, review.year]),
+  });
+  const reviews = data?.items ?? [];
+  const total = data?.total ?? 0;
+  const counts = data?.counts ?? null;
+  const countsQuery = data?.countsQuery;
+  const cursor = data?.nextCursor;
+  const loading = initialLoading || refreshing;
+  const error = mutationError || (queryError ? '评价加载失败，请重试' : '');
+  const refresh = useCallback(() => {
+    setMutationError('');
+    refreshPage();
+  }, [refreshPage]);
 
   useEffect(() => {
-    void requestPage();
-    return () => {
-      generation.current += 1;
-    };
-  }, [version, requestPage]);
+    if (!data) return;
+    setCount(Math.min(data.total, MY_REVIEWS_PAGE_SIZE));
+    if (profileId) reviewCounts.set(profileId, data.total);
+  }, [data, profileId, setCount]);
+
   useEffect(() => {
     const update = () => {
       // 本页保存由返回值就地更新，事件仍交给其他页面同步。
-      if (!savingReview.current) setVersion((value) => value + 1);
+      if (!savingReview.current) refresh();
     };
     window.addEventListener(VIDEO_REVIEWS_UPDATED_EVENT, update);
     return () =>
       window.removeEventListener(VIDEO_REVIEWS_UPDATED_EVENT, update);
-  }, []);
+  }, [refresh]);
   const sentinelRef = useInfiniteScroll<HTMLDivElement>({
-    enabled: !!cursor && !loading && !loadingMore && !error,
-    onLoadMore: () => {
-      if (cursor) void requestPage(cursor);
-    },
+    enabled:
+      !!cursor && !initialLoading && !refreshing && !loadingMore && !error,
+    onLoadMore: loadMore,
   });
   const filterOptions = useMemo(() => buildFilterOptions(counts), [counts]);
   // 计数与当前筛选无关，重新查询时沿用旧值，避免占位块让胶囊宽度来回跳
@@ -420,8 +401,11 @@ export default function MyReviewsPageClient() {
           Math.max(knownCount - reviews.length, 1),
           MY_REVIEWS_PAGE_SIZE,
         );
-  // 已知新条件下没有评价时直接给出空状态，不先闪骨架
-  const listEmpty = loading ? knownCount === 0 : selected.length === 0;
+  // 新条件已知为空时直接给空状态；否则重新查询期间沿用屏幕上的旧结果（列表或空状态）并变暗
+  const listEmpty = loading
+    ? knownCount === 0 || (data !== null && selected.length === 0)
+    : selected.length === 0;
+  const dimmed = refreshing && knownCount !== 0;
 
   function applySavedReview(updated: VideoReview) {
     if (!editing) return;
@@ -430,35 +414,35 @@ export default function MyReviewsPageClient() {
       `${review.title} ${review.content}`
         .toLowerCase()
         .includes(deferredQuery.trim().toLowerCase());
-    const matchesFilter = (review: VideoReview, value: ReviewFilter) =>
-      value === 'all' ||
-      (value === 'public' && review.is_public) ||
-      (value === 'private' && !review.is_public) ||
-      (value === 'text' && review.rating === null);
-    setCounts(
-      (current) =>
-        current &&
-        (Object.fromEntries(
-          FILTERS.map(({ value }) => [
-            value,
-            current[value] +
-              Number(matchesQuery(updated) && matchesFilter(updated, value)) -
-              Number(matchesQuery(previous) && matchesFilter(previous, value)),
-          ]),
-        ) as Record<ReviewFilter, number> | null),
-    );
-    setReviews((current) =>
-      current.flatMap((review) => {
+    updateData((current) => {
+      if (!current) return current;
+      const items = current.items.flatMap((review) => {
         if (
           review.title_norm !== previous.title_norm ||
           review.year !== previous.year
         )
           return [review];
-        return matchesQuery(updated) && matchesFilter(updated, filter)
+        return matchesQuery(updated) && matchesReviewFilter(updated, filter)
           ? [updated]
           : [];
-      }),
-    );
+      });
+      return {
+        ...current,
+        items,
+        counts: Object.fromEntries(
+          FILTERS.map(({ value }) => [
+            value,
+            current.counts[value] +
+              Number(
+                matchesQuery(updated) && matchesReviewFilter(updated, value),
+              ) -
+              Number(
+                matchesQuery(previous) && matchesReviewFilter(previous, value),
+              ),
+          ]),
+        ) as Record<ReviewFilter, number>,
+      };
+    });
     setEditing(null);
   }
 
@@ -467,13 +451,24 @@ export default function MyReviewsPageClient() {
     const target = pending;
     inFlight.current = true;
     setDeleting(true);
-    setError('');
+    setMutationError('');
     try {
       await deleteVideoReview(target.title, target.year, target.title_norm);
-      setVersion((value) => value + 1);
+      updateData(
+        (current) =>
+          current && {
+            ...current,
+            items: current.items.filter(
+              (review) =>
+                review.title_norm !== target.title_norm ||
+                review.year !== target.year,
+            ),
+          },
+      );
+      refresh();
       setPending(null);
     } catch {
-      setError('删除失败，请重试');
+      setMutationError('删除失败，请重试');
     } finally {
       inFlight.current = false;
       setDeleting(false);
@@ -481,7 +476,7 @@ export default function MyReviewsPageClient() {
   }
 
   let content: React.ReactNode;
-  if (loading && !listEmpty) {
+  if (initialLoading && !listEmpty) {
     content = <ReviewListSkeleton count={listSkeletonCount} />;
   } else if (listEmpty && !narrowed) {
     content = error ? null : (
@@ -543,6 +538,7 @@ export default function MyReviewsPageClient() {
         ((loading && skeletonCount > 0) || total > 0 || narrowed) && (
           <LibraryToolbar
             searchLabel='搜索我的评价'
+            countsKey='reviews'
             query={query}
             onQueryChange={setQuery}
             filterOptions={filterOptions}
@@ -559,16 +555,18 @@ export default function MyReviewsPageClient() {
       {error && (
         <p role='alert' className='mb-4 text-sm text-red-500'>
           {error}
-          <button
-            type='button'
-            onClick={() => setVersion((value) => value + 1)}
-            className='ml-3 underline'
-          >
+          <button type='button' onClick={refresh} className='ml-3 underline'>
             重新加载
           </button>
         </p>
       )}
-      {content}
+      <div
+        aria-busy={dimmed}
+        inert={dimmed}
+        className={`transition-opacity duration-200 ${dimmed ? 'opacity-60' : ''}`}
+      >
+        {content}
+      </div>
       {!loading && cursor && (
         <div ref={sentinelRef} className='mt-3'>
           {loadingMore ? (
@@ -577,7 +575,7 @@ export default function MyReviewsPageClient() {
             <button
               type='button'
               className={LIBRARY_PILL_BUTTON_CLASS}
-              onClick={() => void requestPage(cursor)}
+              onClick={loadMore}
             >
               加载更多
             </button>

@@ -24,14 +24,18 @@ export default function SkeletonText({
 export function SkeletonNumber({
   digits = 1,
   className = '',
+  barClassName = 'h-3.5 rounded',
 }: {
   digits?: number;
   className?: string;
+  barClassName?: string;
 }) {
   return (
     <span aria-hidden='true' className={`relative inline-block ${className}`}>
       <span className='invisible'>{'0'.repeat(Math.max(1, digits))}</span>
-      <span className='skeleton absolute inset-x-0 top-1/2 h-3.5 -translate-y-1/2 rounded' />
+      <span
+        className={`skeleton absolute inset-x-0 top-1/2 -translate-y-1/2 ${barClassName}`}
+      />
     </span>
   );
 }

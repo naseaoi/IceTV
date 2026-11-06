@@ -4,6 +4,10 @@ import { ArrowUpDown, Search, X } from 'lucide-react';
 import { type ReactNode, useEffect, useRef } from 'react';
 
 import Select from '@/components/Select';
+import { SkeletonNumber } from '@/components/SkeletonText';
+
+// 本次会话各工具栏上次显示的计数位数，再次进入时占位与真实数字等宽
+const countDigits = new Map<string, Record<string, number>>();
 
 function isTypingTarget(target: EventTarget | null): boolean {
   if (!(target instanceof HTMLElement)) return false;
@@ -27,6 +31,8 @@ export interface LibraryToolbarProps<F extends string, S extends string> {
   onSortChange: (value: S) => void;
   // 加载期间计数用占位块，避免 0 跳到真实值时胶囊宽度抖动
   loading?: boolean;
+  // 区分不同页面的工具栏，用于记住上次计数位数
+  countsKey: string;
   // 页面级操作：窄屏排在搜索框右侧，宽屏排在排序之后
   action?: ReactNode;
 }
@@ -43,9 +49,21 @@ export function LibraryToolbar<F extends string, S extends string>({
   sort,
   onSortChange,
   loading = false,
+  countsKey,
   action,
 }: LibraryToolbarProps<F, S>) {
   const inputRef = useRef<HTMLInputElement>(null);
+  const lastDigits = countDigits.get(countsKey);
+
+  useEffect(() => {
+    if (loading) return;
+    countDigits.set(
+      countsKey,
+      Object.fromEntries(
+        filterOptions.map(({ value, count }) => [value, String(count).length]),
+      ),
+    );
+  }, [countsKey, filterOptions, loading]);
 
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
@@ -129,9 +147,10 @@ export function LibraryToolbar<F extends string, S extends string>({
               >
                 {option.label}
                 {loading ? (
-                  <span
-                    aria-hidden='true'
-                    className='skeleton ml-1.5 h-2.5 w-3 rounded-sm'
+                  <SkeletonNumber
+                    digits={lastDigits?.[option.value]}
+                    className='ml-1.5 tabular-nums'
+                    barClassName='h-2.5 rounded-sm'
                   />
                 ) : (
                   <span className='ml-1.5 tabular-nums opacity-55'>

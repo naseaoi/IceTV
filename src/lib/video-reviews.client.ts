@@ -93,11 +93,12 @@ export async function deleteVideoReview(
 
 export async function fetchMyVideoReviews(
   query: MyReviewQuery = {},
+  signal?: AbortSignal,
 ): Promise<MyVideoReviewPage> {
   const params = new URLSearchParams();
   for (const [key, value] of Object.entries(query))
     if (value) params.set(key, value);
-  const res = await fetchWithAuth(`/api/reviews/mine?${params}`);
+  const res = await fetchWithAuth(`/api/reviews/mine?${params}`, { signal });
   return res.json();
 }
 

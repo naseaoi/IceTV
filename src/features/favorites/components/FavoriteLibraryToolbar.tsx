@@ -53,6 +53,7 @@ export function FavoriteLibraryToolbar({
     <LibraryToolbar
       {...props}
       searchLabel='搜索收藏'
+      countsKey='favorites'
       filterOptions={FILTER_OPTIONS.map((option) => ({
         ...option,
         count: counts[option.value],

@@ -4,6 +4,9 @@ import { FavoritesPageClient } from '@/features/favorites/components/FavoritesPa
 import type { FavoriteItem } from '@/features/favorites/types';
 
 const mockBatch = jest.fn();
+const mockRetry = jest.fn();
+let mockRefreshing = false;
+let mockError: string | null = null;
 
 jest.mock('@/lib/db.client', () => ({
   batchFavorites: (...args: unknown[]) => mockBatch(...args),
@@ -49,10 +52,10 @@ jest.mock('@/features/favorites/hooks/useFavoriteLibrary', () => ({
   useFavoriteLibrary: () => ({
     items,
     loading: false,
-    refreshing: false,
+    refreshing: mockRefreshing,
     loadingMore: false,
-    error: null,
-    retry: jest.fn(),
+    error: mockError,
+    retry: mockRetry,
     skeletonCount: 3,
     clearFavorites: jest.fn(),
     counts: {},
@@ -64,7 +67,31 @@ jest.mock('@/features/favorites/hooks/useFavoriteLibrary', () => ({
 }));
 
 beforeEach(() => {
+  mockRetry.mockReset();
+  mockRefreshing = false;
+  mockError = null;
   mockBatch.mockReset().mockResolvedValue({ affected: 1 });
+});
+
+it('刷新时列表设置 inert，结束后恢复交互', () => {
+  mockRefreshing = true;
+  const { container, rerender } = render(<FavoritesPageClient />);
+  expect(container.querySelector('[aria-busy="true"]')).toHaveAttribute(
+    'inert',
+  );
+  expect(container.querySelector('[inert]')).toHaveClass('opacity-60');
+  mockRefreshing = false;
+  rerender(<FavoritesPageClient />);
+  expect(container.querySelector('[inert]')).toBeNull();
+});
+
+it('保留旧列表且没有下一页时仍显示错误并可重试', () => {
+  mockError = '收藏加载失败，请重试';
+  render(<FavoritesPageClient />);
+  expect(screen.getByText('作品a')).toBeInTheDocument();
+  expect(screen.getByRole('alert')).toHaveTextContent(mockError);
+  fireEvent.click(screen.getByRole('button', { name: '重试' }));
+  expect(mockRetry).toHaveBeenCalledTimes(1);
 });
 
 it('批量设置选中作品的状态后清空选择', async () => {

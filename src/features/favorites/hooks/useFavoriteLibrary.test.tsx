@@ -127,7 +127,10 @@ it('invalidates on favorite, playback and review updates and exposes recoverable
   }
   mockFetch.mockRejectedValueOnce(new Error('network failure'));
   act(() => window.dispatchEvent(new Event(VIDEO_REVIEWS_UPDATED_EVENT)));
-  await waitFor(() => expect(result.current.error).toBe('network failure'));
+  await waitFor(() =>
+    expect(result.current.error).toBe('收藏加载失败，请重试'),
+  );
+  expect(result.current.items[0].title).toBe('1');
   act(() => result.current.retry());
   await waitFor(() => expect(result.current.error).toBeNull());
 });

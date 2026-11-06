@@ -234,7 +234,8 @@ export function FavoritesPageClient({
 
   useEffect(() => {
     const sentinel = sentinelRef.current;
-    if (!hasMore || !sentinel || loading || loadingMore || error) return;
+    if (!hasMore || !sentinel || loading || refreshing || loadingMore || error)
+      return;
     const observer = new IntersectionObserver(
       ([entry]) => {
         if (entry?.isIntersecting) loadMore();
@@ -243,7 +244,7 @@ export function FavoritesPageClient({
     );
     observer.observe(sentinel);
     return () => observer.disconnect();
-  }, [hasMore, loadMore, loading, loadingMore, error]);
+  }, [hasMore, loadMore, loading, refreshing, loadingMore, error]);
 
   const resetNarrowing = () => {
     setQuery('');
@@ -372,9 +373,18 @@ export function FavoritesPageClient({
         )
       }
     >
+      {error && items.length > 0 && (
+        <p role='alert' className='mb-4 text-sm text-red-500'>
+          {error}
+          <button type='button' onClick={retry} className='ml-3 underline'>
+            重试
+          </button>
+        </p>
+      )}
       <div
         aria-busy={refreshing}
-        className={`transition-opacity duration-200 ${refreshing ? 'pointer-events-none opacity-60' : ''} ${selecting ? 'pb-28 md:pb-20' : ''}`}
+        inert={refreshing}
+        className={`transition-opacity duration-200 ${refreshing ? 'opacity-60' : ''} ${selecting ? 'pb-28 md:pb-20' : ''}`}
       >
         {content}
       </div>
