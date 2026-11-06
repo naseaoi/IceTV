@@ -6,7 +6,7 @@ import { type ReactNode, useEffect, useState } from 'react';
 
 import { useAuthSession } from '@/components/AuthProvider';
 import ProfileAvatar from '@/components/ProfileAvatar';
-import SkeletonText from '@/components/SkeletonText';
+import SkeletonText, { SkeletonNumber } from '@/components/SkeletonText';
 import { ProfilePanel } from '@/components/user-menu/ProfilePanel';
 import { FollowList } from '@/features/profile/FollowList';
 import { getUserProfile } from '@/lib/profile.client';
@@ -24,17 +24,18 @@ const NICKNAME_TEXT_CLASS = 'text-xl font-semibold tracking-tight sm:text-2xl';
 const AVATAR_CLASS = 'h-16 w-16 sm:h-20 sm:w-20';
 const STAT_CLASS =
   'inline-flex items-baseline gap-1 text-gray-500 transition hover:text-gray-900 dark:text-gray-400 dark:hover:text-gray-100';
+const STAT_VALUE_CLASS = 'font-semibold tabular-nums';
+// 横幅离开 /me 会卸载；回来时先展示上次的数字再静默刷新，只有首次加载才出现占位
+const knownStats = new Map<string, MineStats>();
 const ACTION_CLASS =
   'inline-flex h-9 shrink-0 items-center gap-1.5 rounded-full bg-gray-900/[0.05] px-4 text-sm text-gray-700 transition hover:bg-gray-900/[0.09] dark:bg-white/[0.07] dark:text-gray-200 dark:hover:bg-white/[0.12]';
 
 function StatValue({ value }: { value: number | null | undefined }) {
   if (value === undefined) {
-    return (
-      <span className='skeleton inline-block h-3.5 w-5 self-center rounded' />
-    );
+    return <SkeletonNumber className={STAT_VALUE_CLASS} />;
   }
   return (
-    <span className='font-semibold tabular-nums text-gray-900 dark:text-gray-100'>
+    <span className={`${STAT_VALUE_CLASS} text-gray-900 dark:text-gray-100`}>
       {value ?? '–'}
     </span>
   );
@@ -75,7 +76,9 @@ export function MineProfileHeader({ actions }: { actions?: ReactNode }) {
   const profileId =
     session.status === 'authenticated' ? session.profileId : null;
   // undefined 表示加载中，null 表示加载失败
-  const [stats, setStats] = useState<MineStats | null | undefined>(undefined);
+  const [stats, setStats] = useState<MineStats | null | undefined>(() =>
+    profileId ? knownStats.get(profileId) : undefined,
+  );
   const [list, setList] = useState<'followers' | 'following' | null>(null);
   const [editing, setEditing] = useState(false);
 
@@ -88,17 +91,21 @@ export function MineProfileHeader({ actions }: { actions?: ReactNode }) {
       Promise.all([getUserProfile(profileId), fetchMyVideoReviewCount()])
         .then(([profile, count]) => {
           if (!active || current !== generation) return;
-          setStats({
+          const next = {
             reviews: count,
             following: profile.followingCount,
             followers: profile.followerCount,
-          });
+          };
+          knownStats.set(profileId, next);
+          setStats(next);
         })
         .catch(() => {
-          if (active && current === generation) setStats(null);
+          // 已有数字时刷新失败保留原值，不把可用数据换成失败占位
+          if (active && current === generation && !knownStats.has(profileId))
+            setStats(null);
         });
     };
-    setStats(undefined);
+    setStats(knownStats.get(profileId));
     refresh();
     window.addEventListener(VIDEO_REVIEWS_UPDATED_EVENT, refresh);
     return () => {

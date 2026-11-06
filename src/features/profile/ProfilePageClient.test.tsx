@@ -46,6 +46,7 @@ const profile: UserProfileView = {
   followerCount: 2,
   followingCount: 1,
   publicReviewCount: 0,
+  favoriteCount: 0,
   libraryVisibility: 0,
 };
 beforeEach(() => {
@@ -229,18 +230,23 @@ it('公开等级 3 按状态筛选并展示状态与评分', async () => {
     expect(screen.queryByRole('heading', { name: '另一部' })).toBeNull(),
   );
 });
-it('收藏未返回时按资料中的公开等级先渲染筛选条与骨架', async () => {
+it('收藏未返回时按资料中的公开等级与收藏数渲染筛选条与骨架，不叠加转圈', async () => {
   jest
     .mocked(getUserProfile)
-    .mockResolvedValue({ ...profile, libraryVisibility: 2 });
+    .mockResolvedValue({ ...profile, libraryVisibility: 2, favoriteCount: 3 });
   jest.mocked(getUserFavorites).mockReturnValue(new Promise(() => undefined));
   render(<ProfilePageClient profileId='profileAlice' />);
   await screen.findByRole('heading', { name: '爱丽丝' });
   fireEvent.click(screen.getByRole('tab', { name: '收藏' }));
   expect(screen.getByRole('group', { name: '观看状态' })).toBeInTheDocument();
-  expect(
-    screen
-      .getAllByRole('status', { name: '加载中' })
-      .some((node) => node.querySelector('.skeleton')),
-  ).toBe(true);
+  const statuses = screen.getAllByRole('status', { name: '加载中' });
+  expect(statuses).toHaveLength(1);
+  expect(statuses[0].children).toHaveLength(3);
+});
+it('资料显示无公开评价时加载期间直接给出空状态', async () => {
+  jest.mocked(getUserReviews).mockReturnValue(new Promise(() => undefined));
+  render(<ProfilePageClient profileId='profileAlice' />);
+  await screen.findByRole('heading', { name: '爱丽丝' });
+  expect(screen.getByText('还没有公开评价')).toBeInTheDocument();
+  expect(screen.queryByRole('status', { name: '加载中' })).toBeNull();
 });

@@ -14,7 +14,7 @@ import PublicReviewContent, {
   PUBLIC_REVIEW_META_CLASS,
   PUBLIC_REVIEW_TIME_TEXT_CLASS,
 } from '@/components/PublicReviewContent';
-import SkeletonText from '@/components/SkeletonText';
+import SkeletonText, { SkeletonNumber } from '@/components/SkeletonText';
 import { ProfilePanel } from '@/components/user-menu/ProfilePanel';
 import { WATCH_STATUS_OPTIONS } from '@/components/watch-record-context';
 import {
@@ -43,6 +43,16 @@ import { parseStorageKey } from '@/lib/utils';
 const REVIEW_TITLE_TEXT_CLASS = 'mb-1.5';
 const NICKNAME_TEXT_CLASS = 'text-2xl font-semibold';
 const PROFILE_STATS_CLASS = 'mt-2 flex flex-wrap gap-x-5 gap-y-1 text-sm';
+const PROFILE_STAT_VALUE_CLASS = 'mr-1 font-semibold tabular-nums';
+const PROFILE_STAT_LABELS = ['评价', '关注', '粉丝'] as const;
+const LIST_SKELETON_LIMIT = 20;
+const DEFAULT_REVIEW_SKELETON_COUNT = 3;
+// 资料返回前无从得知评价数，沿用本次会话里上次看到的数量
+const knownReviewCounts = new Map<string, number>();
+
+function skeletonCount(count: number) {
+  return Math.min(count, LIST_SKELETON_LIMIT);
+}
 
 function playUrl(review: { title: string; year: string }) {
   return `/play?${new URLSearchParams({ title: review.title, year: review.year })}`;
@@ -62,10 +72,11 @@ function ProfileReviews({
     [profileId],
   );
   const page = useProfilePage(load);
+  const initialLoading = page.loading && page.items.length === 0;
   return (
     <div className='space-y-3'>
-      {page.loading && page.items.length === 0 && (
-        <ProfileReviewsSkeleton count={Math.min(reviewCount, 20)} />
+      {initialLoading && (
+        <ProfileReviewsSkeleton count={skeletonCount(reviewCount)} />
       )}
       {page.items.map((review) => (
         <article
@@ -97,12 +108,14 @@ function ProfileReviews({
           </div>
         </article>
       ))}
-      {!page.loading && !page.error && page.items.length === 0 && (
+      {(initialLoading
+        ? reviewCount === 0
+        : !page.error && page.items.length === 0) && (
         <p className='py-16 text-center text-sm text-gray-500'>
           还没有公开评价
         </p>
       )}
-      <PageFooter {...page} />
+      <PageFooter {...page} loading={page.loading && !initialLoading} />
     </div>
   );
 }
@@ -114,9 +127,11 @@ const PROFILE_FAVORITE_FILTERS: {
 function ProfileFavorites({
   profileId,
   initialVisibility,
+  favoriteCount,
 }: {
   profileId: string;
   initialVisibility: LibraryVisibility;
+  favoriteCount: number;
 }) {
   // 资料已带公开等级，首屏即按它渲染筛选条，避免数据返回后内容下移
   const [hidden, setHidden] = useState(initialVisibility === 0);
@@ -132,6 +147,7 @@ function ProfileFavorites({
     [profileId, filter],
   );
   const page = useProfilePage(load, { keepItems: true });
+  const initialLoading = page.loading && page.items.length === 0;
   const refreshing = page.loading && page.items.length > 0 && !page.cursor;
   if (hidden) {
     return (
@@ -168,8 +184,8 @@ function ProfileFavorites({
           })}
         </div>
       )}
-      {page.loading && page.items.length === 0 ? (
-        <ReadOnlyFavoriteGridSkeleton count={12} />
+      {initialLoading && favoriteCount > 0 ? (
+        <ReadOnlyFavoriteGridSkeleton count={skeletonCount(favoriteCount)} />
       ) : (
         <div
           aria-busy={refreshing}
@@ -199,11 +215,15 @@ function ProfileFavorites({
           />
         </div>
       )}
-      <PageFooter {...page} loading={page.loading && !refreshing} />
+      <PageFooter
+        {...page}
+        loading={page.loading && !refreshing && !initialLoading}
+      />
     </>
   );
 }
-function ProfileReviewsSkeleton({ count = 3 }: { count?: number }) {
+function ProfileReviewsSkeleton({ count }: { count: number }) {
+  if (count === 0) return null;
   return (
     <div className='space-y-3' role='status' aria-label='加载中'>
       {Array.from({ length: count }, (_, index) => (
@@ -240,7 +260,7 @@ function ProfileReviewsSkeleton({ count = 3 }: { count?: number }) {
   );
 }
 
-function ProfileHeaderSkeleton() {
+function ProfileHeaderSkeleton({ reviewCount }: { reviewCount: number }) {
   return (
     <div aria-label='加载中' role='status'>
       <div className='mb-6 flex flex-wrap items-center gap-4 rounded-2xl bg-white p-5 ring-1 ring-gray-200/80 dark:bg-white/[0.03] dark:ring-white/10'>
@@ -250,9 +270,12 @@ function ProfileHeaderSkeleton() {
             className={NICKNAME_TEXT_CLASS}
             barClassName='h-6 w-36 max-w-full rounded'
           />
-          <div className={PROFILE_STATS_CLASS}>
-            {Array.from({ length: 3 }, (_, index) => (
-              <SkeletonText key={index} barClassName='h-4 w-10 rounded' />
+          <div className={`${PROFILE_STATS_CLASS} text-gray-500`}>
+            {PROFILE_STAT_LABELS.map((label) => (
+              <span key={label}>
+                <SkeletonNumber className={PROFILE_STAT_VALUE_CLASS} />
+                {label}
+              </span>
             ))}
           </div>
         </div>
@@ -268,7 +291,7 @@ function ProfileHeaderSkeleton() {
           </span>
         ))}
       </div>
-      <ProfileReviewsSkeleton />
+      <ProfileReviewsSkeleton count={skeletonCount(reviewCount)} />
     </div>
   );
 }
@@ -291,6 +314,7 @@ export default function ProfilePageClient({
     setError('');
     getUserProfile(profileId)
       .then((value) => {
+        knownReviewCounts.set(profileId, value.publicReviewCount);
         if (active) setProfile(value);
       })
       .catch((error) => {
@@ -395,7 +419,9 @@ export default function ProfilePageClient({
                           onClick={onClick}
                           className='transition hover:text-gray-900 dark:hover:text-gray-100'
                         >
-                          <span className='mr-1 font-semibold tabular-nums text-gray-900 dark:text-gray-100'>
+                          <span
+                            className={`${PROFILE_STAT_VALUE_CLASS} text-gray-900 dark:text-gray-100`}
+                          >
                             {count}
                           </span>
                           {label}
@@ -464,6 +490,7 @@ export default function ProfilePageClient({
                   initialVisibility={
                     profile.isSelf ? 3 : profile.libraryVisibility
                   }
+                  favoriteCount={profile.favoriteCount}
                 />
               )}
               {list && (
@@ -483,7 +510,14 @@ export default function ProfilePageClient({
               )}
             </>
           ) : (
-            !error && <ProfileHeaderSkeleton />
+            !error && (
+              <ProfileHeaderSkeleton
+                reviewCount={
+                  knownReviewCounts.get(profileId) ??
+                  DEFAULT_REVIEW_SKELETON_COUNT
+                }
+              />
+            )
           )}
         </div>
       </main>

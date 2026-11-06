@@ -10,12 +10,6 @@ const EMPTY_TITLE_TEXT_CLASS = 'mt-4 text-base font-medium';
 export const LIBRARY_PILL_BUTTON_CLASS =
   'inline-flex h-9 items-center rounded-full bg-gray-900 px-4 text-sm font-medium text-white transition hover:bg-gray-700 dark:bg-white dark:text-gray-900 dark:hover:bg-gray-200';
 
-export function LibrarySubtitleSkeleton() {
-  return (
-    <span className='skeleton inline-block h-4 w-32 rounded align-middle' />
-  );
-}
-
 export function LibraryEmptySkeleton() {
   return (
     <div aria-hidden='true' className='flex flex-col items-center px-6 py-20'>

@@ -641,6 +641,35 @@ for (const backend of ['sqlite', 'mysql'] as const) {
       }
     });
 
+    it('资料收藏数与片单同口径，未公开时对他人为 0', async () => {
+      await storage.setFavorite(username, 'source+1', favorite);
+      await storage.setFavorite(username, 'source+2', {
+        ...favorite,
+        title: 'Other',
+      });
+      await storage.setFavorite(username, 'source+live', {
+        ...favorite,
+        title: 'Live',
+        origin: 'live',
+      });
+      await storage.updateUserProfile(username, { libraryVisibility: 1 });
+      const listed = await storage.getFavoriteLibraryPage(username, {
+        ...query,
+        profileScope: 'public',
+      });
+      expect(
+        (await storage.getUserProfileView(username, 'reader'))?.favoriteCount,
+      ).toBe(listed.items.length);
+      expect(listed.items).toHaveLength(2);
+      await storage.updateUserProfile(username, { libraryVisibility: 0 });
+      expect(
+        (await storage.getUserProfileView(username, 'reader'))?.favoriteCount,
+      ).toBe(0);
+      expect(
+        (await storage.getUserProfileView(username, username))?.favoriteCount,
+      ).toBe(2);
+    });
+
     it('uses user and join indexes in the actual query plan', async () => {
       for (let i = 0; i < 160; i++) {
         const title = `Plan ${i}`;

@@ -81,6 +81,18 @@ function binding(username: string, query: FavoriteLibraryQuery): string {
     .digest('hex');
 }
 
+// 个人主页片单不含直播收藏；资料页的收藏数须与片单列表同口径
+export function profileFavoriteOriginSql(
+  dialect: 'sqlite' | 'mysql',
+  column = 'favorite_json',
+) {
+  const origin =
+    dialect === 'sqlite'
+      ? `json_extract(${column}, '$.origin')`
+      : `JSON_UNQUOTE(JSON_EXTRACT(${column}, '$.origin'))`;
+  return `COALESCE(${origin}, '') <> 'live'`;
+}
+
 export function validateLibraryQuery(
   query: FavoriteLibraryQuery,
   username: string,
@@ -191,7 +203,7 @@ export function libraryStatements(
   const search = normalizedQuery
     ? ` AND INSTR(${dialect === 'mysql' ? 'BINARY f.search_text' : 'f.search_text'}, ?) > 0`
     : '';
-  const where = `WHERE f.username = ? AND f.library_valid = 1${search}${query.profileScope ? ` AND COALESCE(${dialect === 'sqlite' ? "json_extract(f.favorite_json, '$.origin')" : "JSON_UNQUOTE(JSON_EXTRACT(f.favorite_json, '$.origin'))"}, '') <> 'live'` : ''}`;
+  const where = `WHERE f.username = ? AND f.library_valid = 1${search}${query.profileScope ? ` AND ${profileFavoriteOriginSql(dialect, 'f.favorite_json')}` : ''}`;
   const params: (string | number)[] = [
     username,
     ...(normalizedQuery ? [normalizedQuery] : []),

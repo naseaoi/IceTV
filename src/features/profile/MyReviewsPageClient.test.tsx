@@ -142,6 +142,40 @@ it('切换筛选重新查询期间保留胶囊计数', async () => {
   );
   await act(async () => resolvePage());
 });
+it('切换筛选按该筛选计数渲染骨架，计数为 0 时直接显示空状态', async () => {
+  const { container } = render(<MyReviewsPageClient />);
+  await screen.findByRole('link', { name: '播放三体' });
+  const implementation = jest
+    .mocked(fetchMyVideoReviews)
+    .getMockImplementation()!;
+  let resolvePage: () => void = () => undefined;
+  jest.mocked(fetchMyVideoReviews).mockImplementationOnce(
+    (query) =>
+      new Promise((resolve) => {
+        resolvePage = () => resolve(implementation(query));
+      }),
+  );
+  fireEvent.click(screen.getByRole('button', { name: /^私密/ }));
+  expect(
+    container.querySelectorAll('ul[aria-hidden="true"] > li'),
+  ).toHaveLength(1);
+  await act(async () => resolvePage());
+
+  records = [review];
+  fireEvent.click(screen.getByRole('button', { name: /^全部/ }));
+  await waitFor(() =>
+    expect(screen.getByRole('button', { name: /^私密/ })).toHaveTextContent(
+      '私密0',
+    ),
+  );
+  jest
+    .mocked(fetchMyVideoReviews)
+    .mockReturnValueOnce(new Promise(() => undefined));
+  fireEvent.click(screen.getByRole('button', { name: /^私密/ }));
+  expect(screen.getByText('暂无符合条件的评价')).toBeInTheDocument();
+  expect(container.querySelector('.skeleton')).toBeNull();
+  expect(screen.queryByText(/条评价/)).toBeNull();
+});
 it('loads the next server page without replacing the first page', async () => {
   jest
     .mocked(fetchMyVideoReviews)

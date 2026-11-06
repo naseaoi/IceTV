@@ -100,6 +100,7 @@ export interface UserProfileView extends PublicUserRef {
   followerCount: number;
   followingCount: number;
   publicReviewCount: number;
+  favoriteCount: number;
   libraryVisibility: LibraryVisibility;
 }
 

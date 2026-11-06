@@ -20,7 +20,6 @@ import {
   LibraryEmptySkeleton,
   LibraryEmptyState,
   LibraryPageFrame,
-  LibrarySubtitleSkeleton,
 } from '@/components/LibraryPage';
 import { LibraryToolbar } from '@/components/LibraryToolbar';
 import ConfirmModal from '@/components/modals/ConfirmModal';
@@ -148,7 +147,6 @@ export function MyReviewsPageSkeleton() {
   return (
     <LibraryPageFrame
       title='我的评价'
-      subtitle={<LibrarySubtitleSkeleton />}
       toolbar={
         count > 0 && (
           <LibraryToolbar
@@ -322,6 +320,8 @@ export default function MyReviewsPageClient() {
   const [counts, setCounts] = useState<Record<ReviewFilter, number> | null>(
     null,
   );
+  // 计数随搜索词变化、与筛选无关；只有搜索词一致时才能用来预知新筛选的条数
+  const [countsQuery, setCountsQuery] = useState('');
   const [cursor, setCursor] = useState<string | null>(null);
   const [loadingMore, setLoadingMore] = useState(false);
   const generation = useRef(0);
@@ -338,10 +338,11 @@ export default function MyReviewsPageClient() {
         setCursor(null);
       }
       setError('');
+      const q = deferredQuery.trim();
       try {
         const page = await fetchMyVideoReviews({
           cursor: next,
-          q: deferredQuery.trim(),
+          q,
           filter,
           sort,
         });
@@ -364,6 +365,7 @@ export default function MyReviewsPageClient() {
         setCursor(page.nextCursor);
         setTotal(page.total);
         setCounts(page.counts);
+        setCountsQuery(q);
         setCount(Math.min(page.total, MY_REVIEWS_PAGE_SIZE));
         if (profileId) reviewCounts.set(profileId, page.total);
       } catch {
@@ -405,6 +407,21 @@ export default function MyReviewsPageClient() {
   const countsLoading = loading && counts === null;
   const selected = reviews;
   const narrowed = deferredQuery.trim() !== '' || filter !== 'all';
+  const knownCount =
+    counts && countsQuery === deferredQuery.trim() ? counts[filter] : null;
+  const listSkeletonCount =
+    knownCount === null
+      ? skeletonCount
+      : Math.min(knownCount, MY_REVIEWS_PAGE_SIZE);
+  const moreSkeletonCount =
+    knownCount === null
+      ? MY_REVIEWS_PAGE_SIZE
+      : Math.min(
+          Math.max(knownCount - reviews.length, 1),
+          MY_REVIEWS_PAGE_SIZE,
+        );
+  // 已知新条件下没有评价时直接给出空状态，不先闪骨架
+  const listEmpty = loading ? knownCount === 0 : selected.length === 0;
 
   function applySavedReview(updated: VideoReview) {
     if (!editing) return;
@@ -464,9 +481,9 @@ export default function MyReviewsPageClient() {
   }
 
   let content: React.ReactNode;
-  if (loading) {
-    content = <ReviewListSkeleton count={skeletonCount} />;
-  } else if (total === 0 && !narrowed) {
+  if (loading && !listEmpty) {
+    content = <ReviewListSkeleton count={listSkeletonCount} />;
+  } else if (listEmpty && !narrowed) {
     content = error ? null : (
       <LibraryEmptyState
         icon={MessageSquareText}
@@ -479,7 +496,7 @@ export default function MyReviewsPageClient() {
         }
       />
     );
-  } else if (selected.length === 0) {
+  } else if (listEmpty) {
     content = (
       <LibraryEmptyState
         icon={SearchX}
@@ -522,27 +539,6 @@ export default function MyReviewsPageClient() {
   return (
     <LibraryPageFrame
       title='我的评价'
-      subtitle={
-        countsLoading ? (
-          <LibrarySubtitleSkeleton />
-        ) : (
-          <>
-            <span className='font-medium tabular-nums text-gray-900 dark:text-gray-100'>
-              {total}
-            </span>{' '}
-            条评价
-            {narrowed && (
-              <span aria-live='polite'>
-                <span className='mx-1.5 text-gray-300 dark:text-gray-600'>
-                  /
-                </span>
-                当前匹配{' '}
-                <span className='tabular-nums'>{counts?.[filter] ?? 0}</span> 条
-              </span>
-            )}
-          </>
-        )
-      }
       toolbar={
         ((loading && skeletonCount > 0) || total > 0 || narrowed) && (
           <LibraryToolbar
@@ -576,7 +572,7 @@ export default function MyReviewsPageClient() {
       {!loading && cursor && (
         <div ref={sentinelRef} className='mt-3'>
           {loadingMore ? (
-            <ReviewListSkeleton />
+            <ReviewListSkeleton count={moreSkeletonCount} />
           ) : (
             <button
               type='button'

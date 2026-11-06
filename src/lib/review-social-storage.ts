@@ -1,5 +1,6 @@
 import { randomInt } from 'crypto';
 
+import { profileFavoriteOriginSql } from '@/features/favorites/lib/library-storage';
 import {
   type FollowReviewQuery,
   followReviewMessageId,
@@ -241,29 +242,42 @@ export class ReviewSocialStorage {
     viewer = normalizeUsername(viewer);
     const profile = await this.getUserProfile(username);
     if (!profile) return null;
+    const isSelf = username === viewer;
+    // 片单不公开时不统计收藏，避免经由数量泄露
+    const favoritesVisible = isSelf || profile.favorites_public > 0;
     const [counts] = await this.sql.rows<{
       followers: number;
       following: number;
       reviews: number;
       followed: number;
+      favorites: number;
     }>(
       `SELECT
       (SELECT COUNT(*) FROM user_follows WHERE followee = ?) AS followers,
       (SELECT COUNT(*) FROM user_follows WHERE follower = ?) AS following,
       (SELECT COUNT(*) FROM video_reviews WHERE username = ? AND is_public = 1) AS reviews,
-      (SELECT COUNT(*) FROM user_follows WHERE follower = ? AND followee = ?) AS followed`,
-      [username, username, username, viewer, username],
+      (SELECT COUNT(*) FROM user_follows WHERE follower = ? AND followee = ?) AS followed,
+      ${favoritesVisible ? `(SELECT COUNT(*) FROM favorites WHERE username = ? AND library_valid = 1 AND ${profileFavoriteOriginSql(this.sql.dialect)})` : '0'} AS favorites`,
+      [
+        username,
+        username,
+        username,
+        viewer,
+        username,
+        ...(favoritesVisible ? [username] : []),
+      ],
     );
     return {
       profileId: profile.profile_id,
       nickname: profile.nickname,
       avatarSeed: profile.avatar_seed,
       libraryVisibility: profile.favorites_public,
-      isSelf: username === viewer,
+      isSelf,
       isFollowing: Number(counts.followed) > 0,
       followerCount: Number(counts.followers),
       followingCount: Number(counts.following),
       publicReviewCount: Number(counts.reviews),
+      favoriteCount: Number(counts.favorites),
     };
   }
   async setUserFollow(
