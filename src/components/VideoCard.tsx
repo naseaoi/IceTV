@@ -42,6 +42,7 @@ import {
   deleteFavorite,
   deletePlayRecord,
   generateStorageKey,
+  getFavoriteForWork,
   markPlayRecordUpdateRead,
   saveFavorite,
   setPlayRecordTracking,
@@ -52,6 +53,7 @@ import {
 } from '@/lib/navigation-return';
 import { savePlayIntent } from '@/lib/play-intent';
 import { hasPlayRecordUpdate } from '@/lib/play-records';
+import { parseStorageKey } from '@/lib/utils';
 import {
   canUseHoverPrefetch,
   canUseNetworkPrefetch,
@@ -189,6 +191,64 @@ const VideoCard = forwardRef<VideoCardHandle, VideoCardProps>(
       shouldTrackFavoriteStatus,
     );
     const visibleFavorited = from === 'favorite' ? true : favorited;
+    // 多源聚合卡片代表作品而非某个源：收藏与标记落到排序第一的源，收藏状态按作品身份查询
+    const aggregateLead =
+      from === 'search' && isAggregate && !actualSource && !actualId
+        ? aggregateGroup?.[0]
+        : undefined;
+    const [workFavoriteKey, setWorkFavoriteKey] = useState<string | null>(null);
+    const workFavoriteRequestRef = useRef(0);
+
+    const loadWorkFavoriteStatus = useCallback(async () => {
+      if (!aggregateLead) return;
+      const request = ++workFavoriteRequestRef.current;
+      try {
+        const entry = await getFavoriteForWork({
+          key: generateStorageKey(aggregateLead.source, aggregateLead.id),
+          title: actualTitle,
+          year: actualYear,
+        });
+        if (request !== workFavoriteRequestRef.current) return;
+        setWorkFavoriteKey(entry?.key ?? null);
+        setSearchFavorited(Boolean(entry));
+      } catch {
+        if (request === workFavoriteRequestRef.current) {
+          setSearchFavorited((current) => current ?? false);
+        }
+      }
+    }, [aggregateLead, actualTitle, actualYear]);
+
+    const toggleWorkFavorite = useCallback(async () => {
+      if (!aggregateLead) return;
+      // 让切换前发出的状态查询作废，避免旧结果覆盖切换后的状态
+      workFavoriteRequestRef.current += 1;
+      const existing = workFavoriteKey
+        ? parseStorageKey(workFavoriteKey)
+        : null;
+      if (existing) {
+        await deleteFavorite(existing.source, existing.id);
+        setWorkFavoriteKey(null);
+        setSearchFavorited(false);
+        return;
+      }
+      const key = await saveFavorite(aggregateLead.source, aggregateLead.id, {
+        title: actualTitle,
+        source_name: aggregateLead.source_name || '',
+        year: actualYear,
+        cover: actualPoster || aggregateLead.poster,
+        total_episodes: aggregateLead.episodes.length || actualEpisodes || 1,
+        save_time: Date.now(),
+      });
+      setWorkFavoriteKey(key);
+      setSearchFavorited(true);
+    }, [
+      aggregateLead,
+      workFavoriteKey,
+      actualTitle,
+      actualYear,
+      actualPoster,
+      actualEpisodes,
+    ]);
 
     const loadFavoriteStatus = useCallback(async () => {
       if (!favoriteStorageKey || from === 'douban') {
@@ -209,6 +269,14 @@ const VideoCard = forwardRef<VideoCardHandle, VideoCardProps>(
       async (e: React.MouseEvent) => {
         e.preventDefault();
         e.stopPropagation();
+        if (aggregateLead) {
+          try {
+            await toggleWorkFavorite();
+          } catch {
+            throw new Error('切换收藏状态失败');
+          }
+          return;
+        }
         if (from === 'douban' || !actualSource || !actualId) return;
 
         try {
@@ -271,6 +339,8 @@ const VideoCard = forwardRef<VideoCardHandle, VideoCardProps>(
         showConfirm,
         interactionId,
         loadFavoriteStatus,
+        aggregateLead,
+        toggleWorkFavorite,
       ],
     );
 
@@ -572,6 +642,11 @@ const VideoCard = forwardRef<VideoCardHandle, VideoCardProps>(
     }, [from, favoriteStorageKey, searchFavorited, loadFavoriteStatus]);
 
     const requestVisibleFavoriteStatus = useCallback(() => {
+      // 作品可能经播放页或标记面板在其他源收藏，每次打开菜单都重新查询
+      if (aggregateLead) {
+        void loadWorkFavoriteStatus();
+        return;
+      }
       if (from === 'search') {
         void checkSearchFavoriteStatus();
         return;
@@ -581,9 +656,11 @@ const VideoCard = forwardRef<VideoCardHandle, VideoCardProps>(
         void loadFavoriteStatus();
       }
     }, [
+      aggregateLead,
       checkSearchFavoriteStatus,
       from,
       loadFavoriteStatus,
+      loadWorkFavoriteStatus,
       shouldTrackFavoriteStatus,
     ]);
 
@@ -681,7 +758,13 @@ const VideoCard = forwardRef<VideoCardHandle, VideoCardProps>(
                 id: actualId,
                 sourceName: source_name || '',
               }
-            : null;
+            : aggregateLead
+              ? {
+                  source: aggregateLead.source,
+                  id: aggregateLead.id,
+                  sourceName: aggregateLead.source_name || '',
+                }
+              : null;
       const externalUrl = config.showDoubanLink
         ? buildExternalSubjectUrl(actualDoubanId, isBangumi)
         : null;
@@ -695,7 +778,9 @@ const VideoCard = forwardRef<VideoCardHandle, VideoCardProps>(
             }
           : undefined,
         favorite:
-          config.showHeart && from !== 'douban' && hasRecordTarget
+          config.showHeart &&
+          from !== 'douban' &&
+          (hasRecordTarget || aggregateLead)
             ? {
                 favorited:
                   from === 'search' ? searchFavorited : visibleFavorited,
@@ -755,6 +840,7 @@ const VideoCard = forwardRef<VideoCardHandle, VideoCardProps>(
       actualYear,
       actualPoster,
       actualQuery,
+      aggregateLead,
     ]);
 
     useEffect(() => {
