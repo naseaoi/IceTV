@@ -100,6 +100,7 @@ export default async function RootLayout({
     SEARCH_HISTORY_LIMIT: publicConfig.SearchHistoryLimit,
     CONTINUE_WATCHING_LIMIT: publicConfig.ContinueWatchingLimit,
     COVER_IMAGE_CACHE_SIZE: publicConfig.CoverImageCacheSize,
+    IMAGE_PROXY_TIMEOUT_SECONDS: publicConfig.ImageProxyTimeoutSeconds,
     SOURCE_COVER_PROXY_MODE: publicConfig.SourceCoverProxyMode,
   };
   const serializedRuntimeConfig = serializeForInlineScript(runtimeConfig);

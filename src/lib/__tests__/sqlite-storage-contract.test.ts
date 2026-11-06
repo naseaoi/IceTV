@@ -781,10 +781,12 @@ describe('sqlite storage contract', () => {
 
     const refreshedRecord = {
       ...staleRecord,
+      cover: 'refreshed-record.jpg',
       metadata_checked_at: 10_000,
     };
     const refreshedFavorite = {
       ...staleFavorite,
+      cover: 'refreshed-favorite.jpg',
       metadata_checked_at: 10_000,
     };
     await expect(
@@ -803,6 +805,13 @@ describe('sqlite storage contract', () => {
         favoriteSnapshot as string,
       ),
     ).resolves.toBe(true);
+
+    await expect(
+      storage.getPlayRecord('cas-user', 'source+record'),
+    ).resolves.toEqual(refreshedRecord);
+    await expect(
+      storage.getFavorite('cas-user', 'source+favorite'),
+    ).resolves.toEqual(refreshedFavorite);
 
     const concurrentRecord = { ...refreshedRecord, play_time: 99 };
     const concurrentFavorite = { ...refreshedFavorite, title: '用户修改' };

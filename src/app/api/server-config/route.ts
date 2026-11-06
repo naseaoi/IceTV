@@ -60,6 +60,7 @@ export async function GET(request: NextRequest) {
     SearchHistoryLimit: publicConfig.SearchHistoryLimit,
     ContinueWatchingLimit: publicConfig.ContinueWatchingLimit,
     CoverImageCacheSize: publicConfig.CoverImageCacheSize,
+    ImageProxyTimeoutSeconds: publicConfig.ImageProxyTimeoutSeconds,
     SourceCoverProxyMode: publicConfig.SourceCoverProxyMode,
   };
   return NextResponse.json(result, {

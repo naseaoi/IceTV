@@ -24,6 +24,7 @@
 - `PlayerStateOverlay` 须与播放器容器同级挂在 `playerOverlay` 位置，`globals.css` 靠 `:has()` 在遮罩显示时隐藏内置缓冲指示。
 - 骨架与真实组件共用布局常量（`poster-card-layout.ts`、`continue-card/layout.ts`、`section-header.ts`、`src/features/home/lib/home-layout.ts`、`src/features/search/lib/search-layout.ts`），文字行用 `SkeletonText` 传入与真实文字相同的字号、行高与间距类，与标签同行的计数（含筛选胶囊、标签页等按钮内的计数）用 `SkeletonNumber` 传入与真实数字相同的字号字重类（宽度由隐形等宽数字撑出），不用固定宽度的灰块，否则按钮在占位与真实数字之间来回变宽；位数取已知值，`LibraryToolbar` 按 `countsKey` 记住上次位数。**不要手写像素高度**。改卡片、标题或间距时改共享常量，骨架随之同步；只改真实组件一侧会让骨架换成内容时跳动。
 - 列表骨架数量跟随已知的真实条数（服务端计数、`fav_count` cookie、播放记录快照、接口返回的各筛选计数、本次会话上次看到的数量），只在完全未知时用默认值；已知为 0 时直接渲染空状态，不先闪骨架。首屏骨架期间分页底栏不再显示 `Spinner`，转圈只用于加载更多。
+- 封面统一用 `CoverImage`：它自己用 `IntersectionObserver` 与 `imageScheduler` 决定何时挂载 `<img>`，所以图片固定 `loading='eager'`，改回原生懒加载会让超时计时早于请求开始。等待上限是后台"图片代理超时"加 5 秒，服务端还在回源时前端不先判失败；超时只显示占位、不写失败缓存，加载错误才写（10 分钟）。`auto` 模式下代理失败的域名改为浏览器直连，10 分钟后重新尝试代理。
 - 列表骨架只用于尚无结果的首次加载。已展示过结果后切换筛选、排序或搜索，保留屏幕上的旧结果（列表或空状态）并变暗、标 `aria-busy` 与 `inert`，新结果到达再替换；刷新期间同时停用无限滚动，否则触发标记不复位会让自动加载停住。游标分页列表统一用 `src/hooks/usePagedQuery.ts`（收藏、我的评价已接入）：它负责请求竞态与取消、组件实例内的首页快照、加载更多去重，返回 `initialLoading`（显示骨架）与 `refreshing`（变暗旧结果）。快照不跨页面保留；本地写入用 `updateData` 改当前数据，收到写入事件调 `refresh` 清空快照重新拉取。
 
 ## 通用组件

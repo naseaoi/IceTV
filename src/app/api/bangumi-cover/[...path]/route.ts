@@ -7,12 +7,14 @@ import {
   fetchStreamThroughProxy,
   getProxyUrlForTarget,
 } from '@/lib/http-proxy-json';
+import { getUpstreamFailureStatus } from '@/lib/proxy-diagnostics';
 import {
   assertContentLength,
   createLimitedReadableStream,
   ResponseSizeLimitError,
 } from '@/lib/proxy-response-limits';
 import { normalizeRuntimeParams } from '@/lib/runtime-params';
+import { resourceLimitResponse } from '@/lib/server-resource-errors';
 import { fetchWithUrlGuard, UrlValidationError } from '@/lib/url-guard';
 
 export const runtime = 'nodejs';
@@ -53,7 +55,7 @@ async function handleBangumiCover(
       imageResponse.body?.cancel().catch(() => {});
       return NextResponse.json(
         { error: 'Invalid image response' },
-        { status: 415 },
+        { status: 502 },
       );
     }
 
@@ -75,6 +77,8 @@ async function handleBangumiCover(
       },
     );
   } catch (error) {
+    const busy = resourceLimitResponse(error);
+    if (busy) return busy;
     if (error instanceof UrlValidationError) {
       return NextResponse.json({ error: error.reason }, { status: 403 });
     }
@@ -84,7 +88,7 @@ async function handleBangumiCover(
 
     return NextResponse.json(
       { error: 'Error fetching Bangumi cover' },
-      { status: 502 },
+      { status: getUpstreamFailureStatus(error) },
     );
   }
 }
@@ -93,7 +97,9 @@ async function fetchBangumiCover(
   targetUrl: URL,
   method: 'GET' | 'HEAD',
   timeoutMs: number,
-): Promise<ProxyStreamResult> {
+): Promise<
+  Omit<ProxyStreamResult, 'body'> & { body: ProxyStreamResult['body'] | null }
+> {
   const proxyUrl = getProxyUrlForTarget(targetUrl);
   if (proxyUrl) {
     return fetchStreamThroughProxy(targetUrl, proxyUrl, {
@@ -118,9 +124,10 @@ async function fetchBangumiCover(
   });
 
   if (!response.ok) {
+    await response.body?.cancel().catch(() => {});
     throw new Error(`Bangumi cover request failed: ${response.status}`);
   }
-  if (!response.body) {
+  if (method === 'GET' && !response.body) {
     throw new Error('Bangumi cover response is empty');
   }
 

@@ -3,6 +3,7 @@ import {
   markSourceCoverProxyHostFailed,
   normalizeSourceCoverProxyMode,
   shouldProxySourceCover,
+  SOURCE_COVER_PROXY_FAILURE_COOLDOWN_MS,
 } from '@/lib/source-cover-proxy';
 
 describe('source cover proxy', () => {
@@ -28,5 +29,30 @@ describe('source cover proxy', () => {
     markSourceCoverProxyHostFailed(firstUrl);
     expect(shouldProxySourceCover(secondUrl, 'auto')).toBe(false);
     expect(shouldProxySourceCover(secondUrl, 'server')).toBe(true);
+  });
+
+  it('retries the proxy for a failed host after the cooldown', () => {
+    const url = 'https://covers.example.com/a.jpg';
+    const failedAt = Date.now();
+    markSourceCoverProxyHostFailed(url, failedAt);
+
+    const nowSpy = jest.spyOn(Date, 'now');
+    nowSpy.mockReturnValue(
+      failedAt + SOURCE_COVER_PROXY_FAILURE_COOLDOWN_MS - 1,
+    );
+    expect(shouldProxySourceCover(url, 'auto')).toBe(false);
+    nowSpy.mockReturnValue(failedAt + SOURCE_COVER_PROXY_FAILURE_COOLDOWN_MS);
+    expect(shouldProxySourceCover(url, 'auto')).toBe(true);
+    nowSpy.mockRestore();
+  });
+
+  it('ignores the legacy host-only storage format', () => {
+    sessionStorage.setItem(
+      'icetv:source-cover-proxy-failed-hosts',
+      JSON.stringify(['covers.example.com']),
+    );
+    expect(
+      shouldProxySourceCover('https://covers.example.com/a.jpg', 'auto'),
+    ).toBe(true);
   });
 });

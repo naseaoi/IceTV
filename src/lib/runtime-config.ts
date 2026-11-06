@@ -29,6 +29,7 @@ export interface RuntimeConfig {
   SEARCH_HISTORY_LIMIT: number;
   CONTINUE_WATCHING_LIMIT: number;
   COVER_IMAGE_CACHE_SIZE: number;
+  IMAGE_PROXY_TIMEOUT_SECONDS: number;
   SOURCE_COVER_PROXY_MODE: SourceCoverProxyMode;
 }
 
@@ -61,6 +62,7 @@ export const DEFAULT_RUNTIME_CONFIG: RuntimeConfig = {
   SEARCH_HISTORY_LIMIT: 20,
   CONTINUE_WATCHING_LIMIT: 10,
   COVER_IMAGE_CACHE_SIZE: 500,
+  IMAGE_PROXY_TIMEOUT_SECONDS: 15,
   SOURCE_COVER_PROXY_MODE: 'auto',
 };
 
@@ -104,6 +106,7 @@ export type ServerConfigPayload = {
   SearchHistoryLimit?: number;
   ContinueWatchingLimit?: number;
   CoverImageCacheSize?: number;
+  ImageProxyTimeoutSeconds?: number;
   SourceCoverProxyMode?: SourceCoverProxyMode;
 };
 
@@ -200,6 +203,9 @@ function runtimeConfigFromServerConfig(
       DEFAULT_RUNTIME_CONFIG.CONTINUE_WATCHING_LIMIT,
     COVER_IMAGE_CACHE_SIZE:
       data.CoverImageCacheSize ?? DEFAULT_RUNTIME_CONFIG.COVER_IMAGE_CACHE_SIZE,
+    IMAGE_PROXY_TIMEOUT_SECONDS:
+      data.ImageProxyTimeoutSeconds ??
+      DEFAULT_RUNTIME_CONFIG.IMAGE_PROXY_TIMEOUT_SECONDS,
     SOURCE_COVER_PROXY_MODE:
       data.SourceCoverProxyMode ??
       DEFAULT_RUNTIME_CONFIG.SOURCE_COVER_PROXY_MODE,

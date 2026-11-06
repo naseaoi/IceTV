@@ -337,6 +337,9 @@ async function refreshFavoriteCandidates(
         console.warn(`跳过无法获取详情的收藏: ${key}`);
       } else {
         const episodeCount = detail.episodes?.length || 0;
+        if (detail.poster && detail.poster !== favorite.cover) {
+          nextFavorite.cover = detail.poster;
+        }
         if (episodeCount > 0 && episodeCount !== favorite.total_episodes) {
           nextFavorite = {
             ...nextFavorite,
@@ -390,6 +393,7 @@ export function buildRefreshedPlayRecord(
 ): PlayRecord {
   const baseRecord: PlayRecord = {
     ...record,
+    cover: detail?.poster || record.cover,
     metadata_checked_at: checkedAt,
     update_baseline_episodes:
       record.update_baseline_episodes ?? record.total_episodes,

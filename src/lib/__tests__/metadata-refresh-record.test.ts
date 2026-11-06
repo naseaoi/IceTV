@@ -125,6 +125,38 @@ describe('buildRefreshedPlayRecord', () => {
     expect(next.update_detected_at).toBeUndefined();
   });
 
+  it.each([0, 22])('详情集数为 %s 时独立更新封面且保留播放进度', (count) => {
+    const next = buildRefreshedPlayRecord(
+      createRecord(),
+      createDetail({
+        poster: 'new-cover.jpg',
+        episodes: Array.from({ length: count }, (_, index) => `ep-${index}`),
+        episode_groups: [
+          { label: '繁中', count: 11 },
+          { label: '简中', count: 11 },
+        ],
+      }),
+      5000,
+    );
+    expect(next).toMatchObject({
+      cover: 'new-cover.jpg',
+      index: 21,
+      play_time: 600,
+      save_time: 1000,
+      total_episodes: 22,
+    });
+    expect(next.update_detected_at).toBeUndefined();
+  });
+
+  it('详情封面为空时保留原封面', () => {
+    const next = buildRefreshedPlayRecord(
+      createRecord(),
+      createDetail({ poster: '', episodes: [] }),
+      5000,
+    );
+    expect(next.cover).toBe('cover.jpg');
+  });
+
   it('详情缺失时只更新检查时间并补齐基线', () => {
     const next = buildRefreshedPlayRecord(createRecord(), null, 5000);
 

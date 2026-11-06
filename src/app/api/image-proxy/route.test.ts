@@ -3,6 +3,8 @@
 import type { NextRequest } from 'next/server';
 
 import { installWebPolyfills } from '@/app/api/test-utils/web-polyfills';
+import { ResourceLimitError } from '@/lib/server-resource-errors';
+import { UrlValidationError } from '@/lib/url-guard';
 
 installWebPolyfills();
 
@@ -174,6 +176,7 @@ describe('image proxy resize cache', () => {
       ok: true,
       status: 200,
       headers: new Headers({ 'content-type': 'image/jpeg' }),
+      body: { cancel: jest.fn().mockResolvedValue(undefined) },
     });
     mockReadArrayBufferLimited.mockResolvedValue(new ArrayBuffer(64));
     mockResizeCoverImage.mockResolvedValue(new ArrayBuffer(16));
@@ -241,7 +244,7 @@ describe('image proxy resize cache', () => {
     const request = { url: RESIZE_URL } as NextRequest;
 
     const failure = await GET(request);
-    expect(failure.status).toBe(404);
+    expect(failure.status).toBe(502);
 
     const retry = await GET(request);
     expect(retry.status).toBe(200);
@@ -271,4 +274,104 @@ it('does not return an upstream statusText to the client', async () => {
   } as NextRequest);
   expect(response.status).toBe(502);
   expect(await response.json()).toEqual({ error: '图片获取失败' });
+});
+
+describe('图片代理上游错误与 Referer', () => {
+  const request = {
+    url: 'http://localhost/api/image-proxy?url=https://example.com/a.jpg',
+  } as NextRequest;
+
+  beforeEach(() => {
+    jest.clearAllMocks();
+    mockRequireServerProxyQuota.mockReturnValue(null);
+    mockResolveProxyAuthorization.mockResolvedValue({
+      authorized: true,
+      via: 'signature',
+    });
+    mockValidateProxyUrlForRequest.mockResolvedValue({
+      ok: true,
+      url: 'https://example.com/a.jpg',
+    });
+    mockGetConfigForRead.mockResolvedValue({ SiteConfig: {} });
+    mockFetchWithUrlGuard.mockResolvedValue({
+      ok: true,
+      status: 200,
+      headers: new Headers({ 'content-type': 'image/jpeg' }),
+      body: { cancel: jest.fn().mockResolvedValue(undefined) },
+    });
+  });
+
+  it.each([
+    [new Error('timeout'), 504],
+    [new TypeError('fetch failed'), 502],
+    [new Error('private token=secret'), 502],
+    [new UrlValidationError('Blocked destination'), 403],
+    [new ResourceLimitError(), 503],
+  ])('错误 %s 返回 %s 且隐藏内部信息', async (error, status) => {
+    mockFetchWithUrlGuard.mockRejectedValueOnce(error);
+    const response = await GET(request);
+    expect(response.status).toBe(status);
+    expect(JSON.stringify(await response.json())).not.toContain('secret');
+  });
+
+  it.each([404, 429, 500])('上游 HTTP %s 统一返回 502', async (status) => {
+    const cancel = jest.fn().mockResolvedValue(undefined);
+    mockFetchWithUrlGuard.mockResolvedValueOnce({
+      ok: false,
+      status,
+      body: { cancel },
+    });
+    expect((await GET(request)).status).toBe(502);
+    expect(cancel).toHaveBeenCalled();
+  });
+
+  it('非图片与无正文响应返回 502', async () => {
+    mockFetchWithUrlGuard.mockResolvedValueOnce({
+      ok: true,
+      headers: new Headers({ 'content-type': 'text/html' }),
+      body: null,
+    });
+    expect((await GET(request)).status).toBe(502);
+    mockFetchWithUrlGuard.mockResolvedValueOnce({
+      ok: true,
+      headers: new Headers({ 'content-type': 'image/jpeg' }),
+      body: null,
+    });
+    expect((await GET(request)).status).toBe(502);
+  });
+
+  it('初始 URL 校验拒绝仍返回 403', async () => {
+    mockValidateProxyUrlForRequest.mockResolvedValueOnce({
+      ok: false,
+      reason: 'Blocked destination',
+    });
+    expect((await GET(request)).status).toBe(403);
+    expect(mockFetchWithUrlGuard).not.toHaveBeenCalled();
+  });
+
+  it('内部配置读取失败不归为上游错误', async () => {
+    mockGetConfigForRead.mockRejectedValueOnce(new Error('config down'));
+    await expect(GET(request)).rejects.toThrow('config down');
+    expect(mockFetchWithUrlGuard).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ['https://doubanio.com/a.jpg', 'https://movie.douban.com/'],
+    ['https://img1.doubanio.com/a.jpg', 'https://movie.douban.com/'],
+    ['https://example.com:8443/a.jpg', 'https://example.com:8443/'],
+    ['https://evildoubanio.com/a.jpg', 'https://evildoubanio.com/'],
+    [
+      'https://doubanio.com.example.com/a.jpg',
+      'https://doubanio.com.example.com/',
+    ],
+  ])('%s 使用 Referer %s', async (url, referer) => {
+    mockValidateProxyUrlForRequest.mockResolvedValueOnce({ ok: true, url });
+    expect((await GET(request)).status).toBe(200);
+    expect(mockFetchWithUrlGuard).toHaveBeenCalledWith(
+      url,
+      expect.objectContaining({
+        headers: expect.objectContaining({ Referer: referer }),
+      }),
+    );
+  });
 });

@@ -213,6 +213,11 @@ export function classifyProxyFailure(
   });
 }
 
+// 回源抛出的超时来自 url-guard 的计时中止或代理连接超时，二者都只能从文案识别
+export function getUpstreamFailureStatus(error: unknown): 502 | 504 {
+  return isTimeoutMessage(getErrorMessage(error)) ? 504 : 502;
+}
+
 export function toProxyFailurePayload(diagnostic: ProxyFailureDiagnostic) {
   return {
     error: diagnostic.message,
