@@ -254,9 +254,6 @@ function AuthenticatedLivePageClient() {
       onTogglePanel={() =>
         sources.setIsChannelListCollapsed(!sources.isChannelListCollapsed)
       }
-      panelToggleTitle={
-        sources.isChannelListCollapsed ? '显示直播面板' : '隐藏直播面板'
-      }
       artRef={artRef}
       shortcutMode='live'
       titleSuffix={sources.currentChannel?.group || null}

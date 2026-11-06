@@ -361,9 +361,6 @@ export function PlayMainContent(props: PlayMainContentProps) {
       onTogglePanel={() =>
         setIsEpisodeSelectorCollapsed(!isEpisodeSelectorCollapsed)
       }
-      panelToggleTitle={
-        isEpisodeSelectorCollapsed ? '显示选集面板' : '隐藏选集面板'
-      }
       artRef={artRef}
       titleSuffix={
         totalEpisodes > 1
