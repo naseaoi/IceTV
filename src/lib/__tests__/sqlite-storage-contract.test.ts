@@ -12,6 +12,7 @@ import type {
   SkipConfig,
   SourceRouteStatsItem,
 } from '../types';
+import { userDanmakuContract } from './__fixtures__/user-danmaku-contract';
 import { videoReviewContract } from './__fixtures__/video-review-contract';
 
 const adminConfig: AdminConfig = {
@@ -28,15 +29,13 @@ const adminConfig: AdminConfig = {
     LiveDirectConnect: false,
     AutoSwitchSource: false,
     EnableDanmaku: false,
+    EnableUserDanmaku: false,
     ...DEFAULT_RUNTIME_PARAMS,
     SearchDownstreamMaxPage: 5,
     SiteInterfaceCacheTime: 300,
     DoubanProxyType: 'direct',
-    DoubanProxy: '',
     BangumiDataSource: 'server',
-    BangumiProxy: '',
     DoubanImageProxyType: 'direct',
-    DoubanImageProxy: '',
     DisableYellowFilter: false,
     FluidSearch: true,
   },
@@ -1187,4 +1186,22 @@ describe('sqlite social username migration', () => {
 
 describe('sqlite video review contract', () => {
   videoReviewContract(() => new LocalSqliteStorage(':memory:'), adminConfig);
+});
+
+describe('sqlite user danmaku contract', () => {
+  userDanmakuContract(() => new LocalSqliteStorage(':memory:'), adminConfig);
+});
+
+test('normalizes legacy danmaku usernames even without a users row', async () => {
+  const storage = new LocalSqliteStorage(':memory:');
+  const internal = storage as unknown as {
+    db: import('better-sqlite3').Database;
+    migrateLegacyUsernameCasing(): void;
+  };
+  internal.db
+    .prepare('INSERT INTO user_danmaku VALUES (?, ?, ?, ?, ?, ?, ?, ?)')
+    .run('legacy-id', 'dandan:1', 'Alice', 0, 'text', 0, '#ffffff', 1);
+  internal.migrateLegacyUsernameCasing();
+  expect((await storage.getAllUserDanmaku('alice'))[0].username).toBe('alice');
+  internal.db.close();
 });

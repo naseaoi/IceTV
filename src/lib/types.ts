@@ -2,6 +2,10 @@ import {
   type ConfigStateUpdate,
   type ConfigSubscription,
 } from '@/lib/config-state';
+import type {
+  StoredUserDanmaku,
+  UserDanmakuQuery,
+} from '@/lib/user-danmaku-storage';
 import { AdminConfig } from '@/types/admin';
 
 // 播放记录数据结构
@@ -323,6 +327,7 @@ export interface StorageUserImportData {
   playRecords: { [key: string]: PlayRecord };
   favorites: { [key: string]: Favorite };
   videoReviews?: VideoReview[];
+  userDanmaku?: Omit<StoredUserDanmaku, 'username'>[];
   profile?: UserProfile;
   follows?: { followee: string; created_at: number }[];
   likes?: {
@@ -377,6 +382,15 @@ export interface SharedCacheRecord {
 
 // 存储接口
 export interface IStorage {
+  addUserDanmaku(item: StoredUserDanmaku): Promise<void>;
+  getUserDanmaku(
+    episodeKey: string,
+    limit: number,
+  ): Promise<StoredUserDanmaku[]>;
+  getAllUserDanmaku(username: string): Promise<StoredUserDanmaku[]>;
+  deleteUserDanmaku(id: string, username?: string): Promise<boolean>;
+  getUserDanmakuPage(query: UserDanmakuQuery): Promise<StoredUserDanmaku[]>;
+  deleteUserDanmakuBatch(ids: string[]): Promise<number>;
   readonly resources: import('@/lib/shared-resource-store').SharedResourceStore;
   // 播放记录相关
   getPlayRecord(userName: string, key: string): Promise<PlayRecord | null>;

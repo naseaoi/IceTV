@@ -55,6 +55,8 @@ interface AdminSettingRowProps {
   label: ReactNode;
   htmlFor?: string;
   description?: ReactNode;
+  // 与标题同行的短状态或链接（测试结果、致谢），窄屏自动换到标题下方
+  labelAddon?: ReactNode;
   children?: ReactNode;
   // inline：开关等窄控件始终与标签同行；stacked：控件独占一行，适合多行文本、长输入框
   layout?: 'responsive' | 'inline' | 'stacked';
@@ -66,10 +68,13 @@ const ROW_LAYOUT_CLASS = {
   stacked: 'flex-col',
 };
 
+const LABEL_CLASS = 'text-sm font-medium text-gray-900 dark:text-gray-100';
+
 export function AdminSettingRow({
   label,
   htmlFor,
   description,
+  labelAddon,
   children,
   layout = 'responsive',
 }: AdminSettingRowProps) {
@@ -80,12 +85,18 @@ export function AdminSettingRow({
       className={`flex gap-x-6 gap-y-2.5 px-4 py-3.5 ${ROW_LAYOUT_CLASS[layout]}`}
     >
       <div className={layout === 'stacked' ? 'min-w-0' : 'min-w-0 flex-1'}>
-        <LabelTag
-          htmlFor={htmlFor}
-          className='block text-sm font-medium text-gray-900 dark:text-gray-100'
-        >
-          {label}
-        </LabelTag>
+        {labelAddon ? (
+          <div className='flex flex-wrap items-center gap-x-3 gap-y-0.5'>
+            <LabelTag htmlFor={htmlFor} className={LABEL_CLASS}>
+              {label}
+            </LabelTag>
+            {labelAddon}
+          </div>
+        ) : (
+          <LabelTag htmlFor={htmlFor} className={`block ${LABEL_CLASS}`}>
+            {label}
+          </LabelTag>
+        )}
         {description && (
           <div className='mt-0.5 text-xs leading-relaxed text-gray-500 dark:text-gray-400'>
             {description}

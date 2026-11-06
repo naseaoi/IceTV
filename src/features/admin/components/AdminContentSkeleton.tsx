@@ -2,6 +2,7 @@
 
 import { createContext, useContext } from 'react';
 
+import SkeletonText from '@/components/SkeletonText';
 import {
   ADMIN_PANEL_CLASS,
   AdminSettingRow,
@@ -9,6 +10,13 @@ import {
 } from '@/features/admin/components/AdminSettings';
 import type { AdminTabId } from '@/features/admin/lib/admin-tabs';
 import { COMMON_RUNTIME_PARAM_GROUPS } from '@/features/admin/lib/runtime-param-fields';
+import {
+  USER_DANMAKU_ACTION_CLASS,
+  USER_DANMAKU_META_CLASS,
+  USER_DANMAKU_ROW_CLASS,
+  USER_DANMAKU_TEXT_CLASS,
+  USER_DANMAKU_TOOLBAR_CLASS,
+} from '@/features/admin/lib/user-danmaku-layout';
 import { localPreferenceToggleDefinitions } from '@/lib/local-preference-toggles';
 import type { AdminConfig } from '@/types/admin';
 
@@ -158,6 +166,33 @@ function SearchToolbar({
         {live && <Block className='h-8 w-24 rounded-lg' />}
         <Block className='h-8 w-24 rounded-lg' />
       </div>
+    </div>
+  );
+}
+
+export function AdminUserDanmakuRowsSkeleton() {
+  return (
+    <div
+      role='status'
+      className='divide-y divide-gray-200 dark:divide-white/[0.06]'
+    >
+      <span className='sr-only'>加载中...</span>
+      {Array.from({ length: 6 }, (_, index) => (
+        <div key={index} className={USER_DANMAKU_ROW_CLASS}>
+          <Block className='h-4 w-4 shrink-0 rounded' />
+          <div className='min-w-0 flex-1'>
+            <SkeletonText
+              className={USER_DANMAKU_TEXT_CLASS}
+              barClassName='h-3.5 w-1/2 rounded'
+            />
+            <SkeletonText
+              className={USER_DANMAKU_META_CLASS}
+              barClassName='h-3 w-2/3 rounded'
+            />
+          </div>
+          <div className={`${USER_DANMAKU_ACTION_CLASS} shrink-0`} />
+        </div>
+      ))}
     </div>
   );
 }
@@ -347,6 +382,19 @@ export default function AdminContentSkeleton({
               tab={tab}
               userGroup
             />
+          </div>
+        </div>
+      );
+      break;
+    case 'danmaku':
+      content = (
+        <div className='space-y-5'>
+          <div className={USER_DANMAKU_TOOLBAR_CLASS}>
+            <Block className='h-9 w-24 rounded-lg' />
+            <Block className='h-9 w-full rounded-lg sm:w-72' />
+          </div>
+          <div className={ADMIN_PANEL_CLASS}>
+            <AdminUserDanmakuRowsSkeleton />
           </div>
         </div>
       );

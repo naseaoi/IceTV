@@ -4,6 +4,7 @@ import {
   FileText,
   FolderOpen,
   MessageSquare,
+  MessageSquareText,
   Settings,
   SlidersHorizontal,
   Tv,
@@ -17,6 +18,7 @@ export type AdminTabId =
   | 'runtime'
   | 'user'
   | 'reviews'
+  | 'danmaku'
   | 'video-source'
   | 'live-source'
   | 'category'
@@ -93,6 +95,13 @@ export const ADMIN_TABS: AdminTabMeta[] = [
     id: 'reviews',
     label: '评价管理',
     icon: MessageSquare,
+    group: 'community',
+    ownerOnly: false,
+  },
+  {
+    id: 'danmaku',
+    label: '弹幕管理',
+    icon: MessageSquareText,
     group: 'community',
     ownerOnly: false,
   },

@@ -1,5 +1,6 @@
 import {
   applyClientServerConfig,
+  DEFAULT_RUNTIME_CONFIG,
   getCustomCategoryLabel,
 } from '@/lib/runtime-config';
 
@@ -7,6 +8,35 @@ describe('runtime config', () => {
   afterEach(() => {
     delete window.RUNTIME_CONFIG;
     delete window.__runtimeConfigReady;
+  });
+
+  it('keeps the server-only filter flag out of client runtime config', () => {
+    const payload = { SiteName: 'IceTV', DisableYellowFilter: true };
+
+    expect(DEFAULT_RUNTIME_CONFIG).not.toHaveProperty('DISABLE_YELLOW_FILTER');
+    expect(applyClientServerConfig(payload)).not.toHaveProperty(
+      'DISABLE_YELLOW_FILTER',
+    );
+  });
+
+  it('preserves client custom proxy URLs', () => {
+    const config = applyClientServerConfig({
+      DoubanProxy: 'https://data.example/fetch?url=',
+      BangumiProxy: 'https://bangumi.example/fetch?url=',
+      DoubanImageProxy: 'https://image.example/fetch?url=',
+    });
+
+    expect(config.DOUBAN_PROXY).toBe('https://data.example/fetch?url=');
+    expect(config.BANGUMI_PROXY).toBe('https://bangumi.example/fetch?url=');
+    expect(config.DOUBAN_IMAGE_PROXY).toBe('https://image.example/fetch?url=');
+  });
+
+  it('defaults user danmaku off and maps the server switch', () => {
+    expect(DEFAULT_RUNTIME_CONFIG.ENABLE_USER_DANMAKU).toBe(false);
+    expect(applyClientServerConfig({}).ENABLE_USER_DANMAKU).toBe(false);
+    expect(
+      applyClientServerConfig({ EnableUserDanmaku: true }).ENABLE_USER_DANMAKU,
+    ).toBe(true);
   });
 
   it('keeps configured numeric runtime values', () => {

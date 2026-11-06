@@ -7,6 +7,7 @@ jest.mock('../env.server', () => ({
 import { parseImportData } from '../data-import';
 import type { StorageUserImportData } from '../types';
 import { IMPORT_ADMIN_CONFIG as adminConfig } from './__fixtures__/import-admin-config';
+import { userDanmaku } from './__fixtures__/user-danmaku-contract';
 import { videoReview } from './__fixtures__/video-review-contract';
 
 const exportedHash =
@@ -62,6 +63,26 @@ function createImportData() {
 }
 
 describe('data import full export fields', () => {
+  it('drops unknown site settings without validating retired proxy fields', async () => {
+    const data = createImportData();
+    data.data.adminConfig = {
+      ...adminConfig,
+      SiteConfig: Object.assign({}, adminConfig.SiteConfig, {
+        DoubanProxy: { invalid: true },
+        BangumiProxy: 123,
+        DoubanImageProxy: ['unused'],
+        UnknownSetting: true,
+      }),
+    };
+
+    const parsed = await parseImportData(data);
+
+    expect(parsed.snapshot.adminConfig.SiteConfig).toEqual({
+      ...adminConfig.SiteConfig,
+      SourceCoverProxyMode: 'auto',
+    });
+  });
+
   it('preserves social backups and validates cross-user references', async () => {
     const data = createImportData();
     data.data.userData.owner.videoReviews = [videoReview];
@@ -552,3 +573,72 @@ it.each([-1, 4, 1.5, 'true', null])(
     await expect(parseImportData(data)).rejects.toThrow('收藏公开等级无效');
   },
 );
+
+describe('user danmaku imports', () => {
+  it('normalizes content and owner identity; preserves switch', async () => {
+    const data = createImportData();
+    data.data.adminConfig = {
+      ...adminConfig,
+      SiteConfig: { ...adminConfig.SiteConfig, EnableUserDanmaku: true },
+    };
+    data.data.userData.owner.userDanmaku = [
+      { ...userDanmaku, text: ' a   b ', color: '#ABCDEF', mode: 8 as never },
+    ];
+    const parsed = await parseImportData(data);
+    expect(parsed.snapshot.adminConfig.SiteConfig.EnableUserDanmaku).toBe(true);
+    expect(parsed.snapshot.userData.owner.userDanmaku).toEqual([
+      expect.objectContaining({ text: 'a b', color: '#abcdef', mode: 0 }),
+    ]);
+    expect(parsed.snapshot.userData.owner.userDanmaku?.[0]).not.toHaveProperty(
+      'username',
+    );
+  });
+  it.each([
+    { episodeKey: 'invalid' },
+    { text: '' },
+    { timeMs: -1 },
+    { timeMs: 86400001 },
+    { id: 'invalid' },
+  ])('rejects malformed imported rows %j', async (patch) => {
+    const data = createImportData();
+    data.data.userData.owner.userDanmaku = [{ ...userDanmaku, ...patch }];
+    await expect(parseImportData(data)).rejects.toThrow();
+  });
+  it('rejects duplicate IDs across users and invalid switches', async () => {
+    const data = createImportData();
+    data.data.userData.owner.userDanmaku = [userDanmaku];
+    data.data.userData['demo-user'].userDanmaku = [userDanmaku];
+    await expect(parseImportData(data)).rejects.toThrow('弹幕标识重复');
+    data.data.adminConfig = {
+      ...adminConfig,
+      SiteConfig: {
+        ...adminConfig.SiteConfig,
+        EnableUserDanmaku: 'true' as never,
+      },
+    };
+    await expect(parseImportData(data)).rejects.toThrow('用户弹幕开关');
+  });
+  it('keeps latest 50,000 globally with truncation report', async () => {
+    const data = createImportData();
+    data.data.userData.owner.userDanmaku = Array.from(
+      { length: 50001 },
+      (_, i) => ({
+        ...userDanmaku,
+        id: `00000000-0000-4000-8000-${String(i).padStart(12, '0')}`,
+        createdAt: i,
+      }),
+    );
+    const parsed = await parseImportData(data);
+    expect(parsed.snapshot.userData.owner.userDanmaku).toHaveLength(50000);
+    expect(
+      parsed.snapshot.userData.owner.userDanmaku?.some(
+        (row) => row.createdAt === 0,
+      ),
+    ).toBe(false);
+    expect(parsed.truncated).toContainEqual({
+      username: 'owner',
+      kind: 'userDanmaku',
+      dropped: 1,
+    });
+  });
+});

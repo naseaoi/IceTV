@@ -434,6 +434,44 @@ div:has(> [data-player-overlay]) .art-loading {
   transition: height 0.15s ease !important;
 }
 
+/* --- 弹幕发送框 --- */
+
+/* 插件输入框没有 type，会被 @tailwindcss/forms 加上 1rem 字号、内边距和聚焦光圈 */
+.artplayer-plugin-danmuku .apd-input,
+.artplayer-plugin-danmuku .apd-input:focus {
+  padding: 0 10px 0 4px;
+  font-size: 13px;
+  box-shadow: none;
+}
+
+.artplayer-plugin-danmuku .apd-send:not(.apd-lock) {
+  background-color: #3d8dc6;
+}
+
+/* 插件默认定宽 260px（全屏 400px），控制栏有余量时随之拉长 */
+.art-video-player .art-controls-center .artplayer-plugin-danmuku .apd-emitter {
+  flex: 1 1 260px;
+  width: auto;
+  min-width: 180px;
+  max-width: 440px;
+}
+
+.art-video-player.art-fullscreen
+  .art-controls-center
+  .artplayer-plugin-danmuku
+  .apd-emitter,
+.art-video-player.art-fullscreen-web
+  .art-controls-center
+  .artplayer-plugin-danmuku
+  .apd-emitter {
+  max-width: 560px;
+}
+
+.art-fullscreen .artplayer-plugin-danmuku .apd-input,
+.art-fullscreen-web .artplayer-plugin-danmuku .apd-input {
+  font-size: 14px;
+}
+
 /* 热力图对齐进度条轨道 */
 .art-control-heatmap {
   left: 12px !important;

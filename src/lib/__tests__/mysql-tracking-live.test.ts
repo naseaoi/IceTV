@@ -4,6 +4,8 @@ import { assertPlaybackPeriodRange } from '@/lib/__tests__/__fixtures__/playback
 
 import { MySqlStorage } from '../mysql.db';
 import type { Favorite, PlayRecord } from '../types';
+import { IMPORT_ADMIN_CONFIG } from './__fixtures__/import-admin-config';
+import { userDanmakuContract } from './__fixtures__/user-danmaku-contract';
 import {
   assertActivityAndReportPagination,
   assertFollowPagination,
@@ -974,5 +976,20 @@ describeLive('MySQL 追更查询（真实实例）', () => {
         favoriteSnapshot as string,
       ),
     ).resolves.toBe(false);
+  });
+});
+
+describeLive('MySQL user danmaku contract (real instance)', () => {
+  const stores: MySqlStorage[] = [];
+  userDanmakuContract(() => {
+    const storage = new MySqlStorage(liveUrl);
+    stores.push(storage);
+    return storage;
+  }, IMPORT_ADMIN_CONFIG);
+  afterAll(async () => {
+    for (const storage of stores)
+      await (
+        storage as unknown as { pool: import('mysql2/promise').Pool }
+      ).pool.end();
   });
 });

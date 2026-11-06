@@ -54,6 +54,10 @@ const UserConfig = dynamic(
     ),
   { loading: () => <AdminContentSkeleton /> },
 );
+const UserDanmakuTab = dynamic(
+  () => import('@/features/admin/components/tabs/UserDanmakuTab'),
+  { loading: () => <AdminContentSkeleton /> },
+);
 const ReviewsTab = dynamic(
   () => import('@/features/admin/components/tabs/ReviewsTab'),
   { loading: () => <AdminContentSkeleton /> },
@@ -125,6 +129,8 @@ const AdminTabBody = ({
       );
     case 'reviews':
       return <ReviewsTab />;
+    case 'danmaku':
+      return <UserDanmakuTab />;
     case 'video-source':
       return (
         <VideoSourceConfig config={config} refreshConfig={refreshConfig} />

@@ -63,6 +63,16 @@ import {
   removedAccessReferences,
   userAccessSchema,
 } from '@/lib/user-access';
+import {
+  StoredUserDanmaku,
+  storedUserDanmaku,
+  USER_DANMAKU_COLUMNS,
+  USER_DANMAKU_INSERT,
+  USER_DANMAKU_PROJECTION,
+  userDanmakuPageSql,
+  userDanmakuSchema,
+  userDanmakuValues,
+} from '@/lib/user-danmaku-storage';
 import { mergeUserMessageState } from '@/lib/user-message-state';
 import {
   publicReview,
@@ -462,6 +472,7 @@ export class MySqlStorage implements IStorage {
   private async initializeSchema(): Promise<void> {
     const statements = [
       ...socialSchema('mysql'),
+      ...userDanmakuSchema('mysql'),
       ...userAccessSchema('mysql'),
       `CREATE TABLE IF NOT EXISTS users (
         username VARCHAR(191) NOT NULL PRIMARY KEY,
@@ -1448,6 +1459,62 @@ export class MySqlStorage implements IStorage {
     return this.socialFor().getUserSocialData(...args);
   }
 
+  async addUserDanmaku(item: StoredUserDanmaku): Promise<void> {
+    await this.ensureInitialized();
+    await this.pool.execute(USER_DANMAKU_INSERT, userDanmakuValues(item));
+  }
+  async getUserDanmaku(
+    episodeKey: string,
+    limit: number,
+  ): Promise<StoredUserDanmaku[]> {
+    await this.ensureInitialized();
+    const [rows] = await this.pool.query<(StoredUserDanmaku & RowDataPacket)[]>(
+      `SELECT ${USER_DANMAKU_PROJECTION} FROM user_danmaku WHERE episode_key = ? ORDER BY created_at DESC, id DESC LIMIT ?`,
+      [episodeKey, limit],
+    );
+    return rows.map(storedUserDanmaku);
+  }
+  async getAllUserDanmaku(username: string): Promise<StoredUserDanmaku[]> {
+    await this.ensureInitialized();
+    const [rows] = await this.pool.query<(StoredUserDanmaku & RowDataPacket)[]>(
+      `SELECT ${USER_DANMAKU_PROJECTION} FROM user_danmaku WHERE username = ? ORDER BY created_at DESC, id DESC`,
+      [normalizeUsername(username)],
+    );
+    return rows.map(storedUserDanmaku);
+  }
+  async deleteUserDanmaku(id: string, username?: string): Promise<boolean> {
+    await this.ensureInitialized();
+    const [result] = await this.pool.execute<
+      import('mysql2/promise').ResultSetHeader
+    >(
+      `DELETE FROM user_danmaku WHERE id = ?${username === undefined ? '' : ' AND username = ?'}`,
+      username === undefined ? [id] : [id, normalizeUsername(username)],
+    );
+    return result.affectedRows > 0;
+  }
+  async getUserDanmakuPage(
+    query: Parameters<IStorage['getUserDanmakuPage']>[0],
+  ): Promise<StoredUserDanmaku[]> {
+    await this.ensureInitialized();
+    const { sql, params } = userDanmakuPageSql(query);
+    const [rows] = await this.pool.query<(StoredUserDanmaku & RowDataPacket)[]>(
+      sql,
+      params,
+    );
+    return rows.map(storedUserDanmaku);
+  }
+  async deleteUserDanmakuBatch(ids: string[]): Promise<number> {
+    if (!ids.length) return 0;
+    await this.ensureInitialized();
+    const [result] = await this.pool.execute<
+      import('mysql2/promise').ResultSetHeader
+    >(
+      `DELETE FROM user_danmaku WHERE id IN (${ids.map(() => '?').join(',')})`,
+      ids,
+    );
+    return result.affectedRows;
+  }
+
   async getVideoReview(
     userName: string,
     titleNorm: string,
@@ -1799,6 +1866,9 @@ export class MySqlStorage implements IStorage {
         username,
       ]);
       await connection.execute('DELETE FROM favorites WHERE username = ?', [
+        username,
+      ]);
+      await connection.execute('DELETE FROM user_danmaku WHERE username = ?', [
         username,
       ]);
       await connection.execute('DELETE FROM video_reviews WHERE username = ?', [
@@ -2829,6 +2899,7 @@ export class MySqlStorage implements IStorage {
       await connection.execute('DELETE FROM play_records');
       await connection.execute('DELETE FROM favorites');
       await connection.execute('DELETE FROM video_reviews');
+      await connection.execute('DELETE FROM user_danmaku');
       for (const table of SOCIAL_TABLES)
         await connection.execute(`DELETE FROM ${table}`);
       await connection.execute('DELETE FROM search_history');
@@ -2914,6 +2985,7 @@ export class MySqlStorage implements IStorage {
       await connection.execute('DELETE FROM play_records');
       await connection.execute('DELETE FROM favorites');
       await connection.execute('DELETE FROM video_reviews');
+      await connection.execute('DELETE FROM user_danmaku');
       for (const table of SOCIAL_TABLES)
         await connection.execute(`DELETE FROM ${table}`);
       await connection.execute('DELETE FROM search_history');
@@ -3009,6 +3081,11 @@ export class MySqlStorage implements IStorage {
         'favorite_json',
         ...FAVORITE_PROJECTION_COLUMNS,
       ]);
+      const userDanmaku = createRowBatcher(
+        connection,
+        'user_danmaku',
+        USER_DANMAKU_COLUMNS,
+      );
       const videoReviews = createRowBatcher(connection, 'video_reviews', [
         'username',
         'title_norm',
@@ -3084,6 +3161,9 @@ export class MySqlStorage implements IStorage {
           ]);
         }
 
+        for (const item of userData.userDanmaku ?? []) {
+          await userDanmaku.add(userDanmakuValues({ ...item, username }));
+        }
         for (const review of userData.videoReviews ?? []) {
           await videoReviews.add([
             username,
@@ -3134,6 +3214,7 @@ export class MySqlStorage implements IStorage {
       await playRecords.flush();
       await favorites.flush();
       await videoReviews.flush();
+      await userDanmaku.flush();
       await searchHistories.flush();
       await skipConfigs.flush();
       await playbackSessions.flush();

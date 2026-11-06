@@ -17,16 +17,14 @@ const baseConfig: AdminConfig = {
     LiveDirectConnect: false,
     AutoSwitchSource: false,
     EnableDanmaku: false,
+    EnableUserDanmaku: false,
     ...DEFAULT_RUNTIME_PARAMS,
     SourceCoverProxyMode: 'auto',
     SearchDownstreamMaxPage: 5,
     SiteInterfaceCacheTime: 300,
     DoubanProxyType: 'direct',
-    DoubanProxy: '',
     BangumiDataSource: 'server',
-    BangumiProxy: '',
     DoubanImageProxyType: 'direct',
-    DoubanImageProxy: '',
     DisableYellowFilter: false,
     FluidSearch: true,
   },
@@ -105,6 +103,21 @@ describe('config cache persistence', () => {
     }
     jest.useRealTimers();
     jest.restoreAllMocks();
+  });
+
+  it('preserves user danmaku through self-check and public config', async () => {
+    const config = cloneBaseConfig();
+    config.SiteConfig.EnableUserDanmaku = true;
+    const { configSelfCheck, getPublicConfig } = await loadConfigModule(
+      jest.fn(),
+      { adminConfig: config },
+    );
+    expect(configSelfCheck(config).SiteConfig.EnableUserDanmaku).toBe(true);
+    expect((await getPublicConfig()).EnableUserDanmaku).toBe(true);
+    const legacy = cloneBaseConfig();
+    delete (legacy.SiteConfig as Partial<AdminConfig['SiteConfig']>)
+      .EnableUserDanmaku;
+    expect(configSelfCheck(legacy).SiteConfig.EnableUserDanmaku).toBe(false);
   });
 
   it('returns cloned config objects', async () => {
@@ -434,26 +447,38 @@ describe('config cache persistence', () => {
     });
   });
 
-  it('clears custom proxy values from stored site config', async () => {
+  it('normalizes site proxy modes and drops unknown site settings', async () => {
     const { configSelfCheck } = await loadConfigModule(jest.fn());
     const config = cloneBaseConfig();
-    config.SiteConfig.DoubanProxyType = 'custom';
-    config.SiteConfig.DoubanProxy = 'https://data.example/fetch?url=';
-    config.SiteConfig.DoubanImageProxyType = 'custom';
-    config.SiteConfig.DoubanImageProxy = 'https://image.example/fetch?url=';
-    config.SiteConfig.BangumiDataSource = 'custom';
-    config.SiteConfig.BangumiProxy = 'https://bangumi.example/fetch?url=';
+    Object.assign(config.SiteConfig, {
+      DoubanProxyType: 'custom',
+      DoubanImageProxyType: 'custom',
+      BangumiDataSource: 'custom',
+      DoubanProxy: 'https://data.example/fetch?url=',
+      DoubanImageProxy: 'https://image.example/fetch?url=',
+      BangumiProxy: 'https://bangumi.example/fetch?url=',
+      UnknownSetting: true,
+    });
 
     const checked = configSelfCheck(config);
 
-    expect(checked.SiteConfig).toMatchObject({
+    expect(checked.SiteConfig).toEqual({
+      ...baseConfig.SiteConfig,
       DoubanProxyType: 'direct',
-      DoubanProxy: '',
       DoubanImageProxyType: 'direct',
-      DoubanImageProxy: '',
       BangumiDataSource: 'direct',
-      BangumiProxy: '',
     });
+  });
+
+  it('preserves all supported site settings during config self check', async () => {
+    const { configSelfCheck } = await loadConfigModule(jest.fn());
+    const config = cloneBaseConfig();
+    config.SiteConfig.AnnouncementVersion = 'announcement-version';
+    config.SiteConfig.AnnouncementPublishedAt = 123;
+    config.SiteConfig.DisableYellowFilter = true;
+    const originalSiteConfig = { ...config.SiteConfig };
+
+    expect(configSelfCheck(config).SiteConfig).toEqual(originalSiteConfig);
   });
 
   it('keeps disabled fluid search config disabled', async () => {

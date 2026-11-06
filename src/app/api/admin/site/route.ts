@@ -36,6 +36,7 @@ export async function POST(request: NextRequest) {
       LiveDirectConnect,
       AutoSwitchSource,
       EnableDanmaku,
+      EnableUserDanmaku,
       SearchDownstreamMaxPage,
       SiteInterfaceCacheTime,
       DoubanProxyType,
@@ -57,6 +58,7 @@ export async function POST(request: NextRequest) {
       LiveDirectConnect: boolean;
       AutoSwitchSource?: boolean;
       EnableDanmaku?: boolean;
+      EnableUserDanmaku?: boolean;
       SearchDownstreamMaxPage: number;
       SiteInterfaceCacheTime: number;
       DoubanProxyType: string;
@@ -82,6 +84,8 @@ export async function POST(request: NextRequest) {
       (AutoSwitchSource !== undefined &&
         typeof AutoSwitchSource !== 'boolean') ||
       (EnableDanmaku !== undefined && typeof EnableDanmaku !== 'boolean') ||
+      (EnableUserDanmaku !== undefined &&
+        typeof EnableUserDanmaku !== 'boolean') ||
       typeof SearchDownstreamMaxPage !== 'number' ||
       typeof SiteInterfaceCacheTime !== 'number' ||
       typeof DoubanProxyType !== 'string' ||
@@ -164,17 +168,16 @@ export async function POST(request: NextRequest) {
       AutoSwitchSource:
         AutoSwitchSource ?? adminConfig.SiteConfig.AutoSwitchSource,
       EnableDanmaku: EnableDanmaku ?? adminConfig.SiteConfig.EnableDanmaku,
+      EnableUserDanmaku:
+        EnableUserDanmaku ?? adminConfig.SiteConfig.EnableUserDanmaku,
       SearchDownstreamMaxPage,
       SiteInterfaceCacheTime,
       DoubanProxyType: normalizeSiteDoubanProxyType(DoubanProxyType),
-      DoubanProxy: '',
       BangumiDataSource: normalizeSiteBangumiDataSource(
         BangumiDataSource || adminConfig.SiteConfig.BangumiDataSource,
       ),
-      BangumiProxy: '',
       DoubanImageProxyType:
         normalizeSiteDoubanImageProxyType(DoubanImageProxyType),
-      DoubanImageProxy: '',
       SourceCoverProxyMode: normalizeSourceCoverProxyMode(
         SourceCoverProxyMode ?? adminConfig.SiteConfig.SourceCoverProxyMode,
       ),

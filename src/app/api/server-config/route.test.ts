@@ -90,7 +90,6 @@ function createPublicConfig() {
     SiteIcon: '',
     Announcement: '',
     OpenRegister: false,
-    DisableYellowFilter: false,
     EnableLiveEntry: false,
     DefaultAggregateSearch: true,
     EnableOptimization: true,
@@ -110,11 +109,8 @@ function createConfig() {
   return {
     SiteConfig: {
       DoubanProxyType: 'custom',
-      DoubanProxy: 'https://data.example/fetch?url=',
       BangumiDataSource: 'custom',
-      BangumiProxy: 'https://bangumi.example/fetch?url=',
       DoubanImageProxyType: 'custom',
-      DoubanImageProxy: 'https://image.example/fetch?url=',
     },
   };
 }
@@ -127,6 +123,17 @@ describe('server config route', () => {
     });
     (getPublicConfig as jest.Mock).mockResolvedValue(createPublicConfig());
     (getConfigForRead as jest.Mock).mockResolvedValue(createConfig());
+  });
+
+  it('exposes the user danmaku switch', async () => {
+    (getPublicConfig as jest.Mock).mockResolvedValue({
+      ...createPublicConfig(),
+      EnableUserDanmaku: true,
+    });
+    const { GET } = require('./route');
+    expect(await (await GET({} as NextRequest)).json()).toMatchObject({
+      EnableUserDanmaku: true,
+    });
   });
 
   it('does not expose custom proxy URLs to authenticated users', async () => {
@@ -144,6 +151,22 @@ describe('server config route', () => {
       DoubanImageProxy: '',
     });
   });
+
+  it.each([null, { username: 'user-1' }])(
+    'omits the server-only filter flag for session %j',
+    async (activeUser) => {
+      (getOptionalActiveUser as jest.Mock).mockResolvedValue(activeUser);
+      (getPublicConfig as jest.Mock).mockResolvedValue({
+        ...createPublicConfig(),
+        DisableYellowFilter: true,
+      });
+      const { GET } = require('./route');
+
+      const response = await GET({} as NextRequest);
+
+      expect(await response.json()).not.toHaveProperty('DisableYellowFilter');
+    },
+  );
 
   it('exposes playback fault tolerance settings', async () => {
     const { GET } = require('./route');

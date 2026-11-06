@@ -136,14 +136,14 @@ const RuntimeParamsTab = ({
 
       <details className='group'>
         <summary className='flex w-full cursor-pointer list-none items-center gap-3 rounded-lg py-1 text-base font-semibold text-gray-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-500 dark:text-gray-100 [&::-webkit-details-marker]:hidden'>
-          <span>高级参数</span>
+          <span>高级</span>
           <span className='h-px flex-1 bg-gray-200 dark:bg-white/[0.06]' />
           <ChevronDown
             aria-hidden
             className='h-4 w-4 shrink-0 text-gray-400 transition-transform group-open:rotate-180'
           />
         </summary>
-        <div className='mt-6 space-y-8'>
+        <div className='mt-4'>
           {ADVANCED_RUNTIME_PARAM_GROUPS.map((group) => (
             <RuntimeParamSection
               key={group.id}

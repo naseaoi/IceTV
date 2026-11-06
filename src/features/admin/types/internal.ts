@@ -11,6 +11,7 @@ export interface SiteConfig {
   LiveDirectConnect: boolean;
   AutoSwitchSource: boolean;
   EnableDanmaku: boolean;
+  EnableUserDanmaku: boolean;
   DanmakuEpisodeLimit: number;
   DanmakuRequestTimeoutSeconds: number;
   SearchDownstreamMaxPage: number;
@@ -31,11 +32,8 @@ export interface SiteConfig {
   ImageProxyTimeoutSeconds: number;
   UpstreamSearchConcurrency: number;
   DoubanProxyType: string;
-  DoubanProxy: string;
   BangumiDataSource: string;
-  BangumiProxy: string;
   DoubanImageProxyType: string;
-  DoubanImageProxy: string;
   DisableYellowFilter: boolean;
   FluidSearch: boolean;
 }

@@ -4,6 +4,7 @@ import type { NextRequest } from 'next/server';
 import { gunzipSync } from 'zlib';
 
 import { installWebPolyfills } from '@/app/api/test-utils/web-polyfills';
+import { userDanmaku } from '@/lib/__tests__/__fixtures__/user-danmaku-contract';
 import { videoReview } from '@/lib/__tests__/__fixtures__/video-review-contract';
 
 type ExportRouteModule = typeof import('./route');
@@ -49,6 +50,7 @@ function makeDb(searchHistory: string[]) {
         updated_at: 1,
       },
     }),
+    getAllUserDanmaku: jest.fn().mockResolvedValue([userDanmaku]),
     getAllVideoReviews: jest.fn().mockResolvedValue([videoReview]),
     getSearchHistory: jest.fn().mockResolvedValue(searchHistory),
     getAllSkipConfigs: jest.fn().mockResolvedValue({}),
@@ -121,6 +123,7 @@ describe('data migration export route', () => {
     const backup = JSON.parse(
       gunzipSync(Buffer.from(compressed, 'base64')).toString('utf8'),
     );
+    expect(backup.data.userData['owner-1'].userDanmaku).toEqual([userDanmaku]);
     expect(backup.data.adminConfig.ConfigFile).toBe('{}');
     expect(backup.data.adminConfig.ConfigSubscribtion.URL).toBe(
       'https://example.com/sub',

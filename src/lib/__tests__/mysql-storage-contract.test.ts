@@ -1,11 +1,12 @@
 /** @jest-environment node */
-
 import { assertPlaybackPeriodRange } from '@/lib/__tests__/__fixtures__/playback-period-contract';
 import { hasPlayRecordUpdate } from '@/lib/play-records';
 import { DEFAULT_RUNTIME_PARAMS } from '@/lib/runtime-params';
+import type { StoredUserDanmaku } from '@/lib/user-danmaku-storage';
 import type { AdminConfig } from '@/types/admin';
 
 import { executeSocial, querySocial } from './__fixtures__/social-fake-sql';
+import { userDanmakuContract } from './__fixtures__/user-danmaku-contract';
 import { videoReviewContract } from './__fixtures__/video-review-contract';
 
 type SearchHistoryRow = {
@@ -53,6 +54,7 @@ type FakeState = {
   playRecords: Map<string, Map<string, string>>;
   favorites: Map<string, Map<string, string>>;
   videoReviews: Map<string, { username: string; review: VideoReview }>;
+  userDanmaku: Map<string, StoredUserDanmaku>;
   skipConfigs: Map<string, Map<string, string>>;
   playbackSessions: Map<string, Record<string, unknown>>;
   searchHistory: SearchHistoryRow[];
@@ -94,6 +96,7 @@ function cloneState(state: FakeState): FakeState {
     playRecords: cloneNestedMap(state.playRecords),
     favorites: cloneNestedMap(state.favorites),
     videoReviews: new Map(state.videoReviews),
+    userDanmaku: new Map(state.userDanmaku),
     skipConfigs: cloneNestedMap(state.skipConfigs),
     playbackSessions: new Map(state.playbackSessions),
     searchHistory: state.searchHistory.map((row) => ({ ...row })),
@@ -133,6 +136,7 @@ function createState(): FakeState {
     playRecords: new Map(),
     favorites: new Map(),
     videoReviews: new Map(),
+    userDanmaku: new Map(),
     skipConfigs: new Map(),
     playbackSessions: new Map(),
     searchHistory: [],
@@ -328,6 +332,45 @@ function createFakePool() {
     currentState: FakeState,
   ) => {
     const normalized = normalizeSql(sql);
+    if (normalized.startsWith('INSERT INTO user_danmaku (')) {
+      const [id, episodeKey, username, timeMs, text, mode, color, createdAt] =
+        params;
+      if (currentState.userDanmaku.has(String(id)))
+        throw new Error('duplicate id');
+      currentState.userDanmaku.set(String(id), {
+        id,
+        episodeKey,
+        username,
+        timeMs,
+        text,
+        mode,
+        color,
+        createdAt,
+      } as StoredUserDanmaku);
+      return [{ affectedRows: 1 }, []];
+    }
+    if (
+      normalized.startsWith('DELETE FROM user_danmaku') &&
+      !normalized.includes('user_danmaku_')
+    ) {
+      let deleted = 0;
+      for (const [id, row] of currentState.userDanmaku) {
+        const matches = normalized.includes('WHERE id IN')
+          ? params.includes(id)
+          : normalized.includes('WHERE id =')
+            ? id === params[0] &&
+              (!normalized.includes('AND username') ||
+                row.username === params[1])
+            : normalized.includes('WHERE username')
+              ? row.username === params[0]
+              : true;
+        if (matches) {
+          currentState.userDanmaku.delete(id);
+          deleted++;
+        }
+      }
+      return [{ affectedRows: deleted }, []];
+    }
 
     if (normalized.startsWith('INSERT IGNORE INTO user_access')) {
       for (const username of currentState.users.keys())
@@ -1277,6 +1320,52 @@ function createFakePool() {
     currentState: FakeState,
   ) => {
     const normalized = normalizeSql(sql);
+    if (
+      normalized.includes('FROM user_danmaku ') &&
+      !normalized.includes('FROM user_danmaku_')
+    ) {
+      let rows = [...currentState.userDanmaku.values()];
+      let offset = 0;
+      if (normalized.includes('episode_key = ?')) {
+        const key = params[offset++];
+        rows = rows.filter((row) => row.episodeKey === key);
+      }
+      if (normalized.includes('created_at < ?')) {
+        const [time, , id] = params.slice(offset);
+        offset += 3;
+        rows = rows.filter(
+          (row) =>
+            row.createdAt < Number(time) ||
+            (row.createdAt === Number(time) && row.id < String(id)),
+        );
+      }
+      if (normalized.includes('LOWER(text)')) {
+        const q = String(params[offset])
+          .slice(1, -1)
+          .replace(/!([!%_])/g, '$1')
+          .toLowerCase();
+        offset += 2;
+        rows = rows.filter(
+          (row) =>
+            row.text.toLowerCase().includes(q) ||
+            row.username.toLowerCase().includes(q),
+        );
+      }
+      if (normalized.includes('username = ?')) {
+        const username = params[offset++];
+        rows = rows.filter((row) => row.username === username);
+      }
+      rows.sort(
+        (a, b) => b.createdAt - a.createdAt || b.id.localeCompare(a.id),
+      );
+      const literalLimit = normalized.match(/LIMIT (\d+)$/);
+      const limit = literalLimit
+        ? Number(literalLimit[1])
+        : normalized.endsWith('LIMIT ?')
+          ? Number(params[offset])
+          : rows.length;
+      return [rows.slice(0, limit), []];
+    }
 
     if (normalized.startsWith('SELECT * FROM config_subscription WHERE id = 1'))
       return [currentState.subscription ? [currentState.subscription] : [], []];
@@ -2303,15 +2392,13 @@ const adminConfig: AdminConfig = {
     LiveDirectConnect: false,
     AutoSwitchSource: false,
     EnableDanmaku: false,
+    EnableUserDanmaku: false,
     ...DEFAULT_RUNTIME_PARAMS,
     SearchDownstreamMaxPage: 5,
     SiteInterfaceCacheTime: 300,
     DoubanProxyType: 'direct',
-    DoubanProxy: '',
     BangumiDataSource: 'server',
-    BangumiProxy: '',
     DoubanImageProxyType: 'direct',
-    DoubanImageProxy: '',
     DisableYellowFilter: false,
     FluidSearch: true,
   },
@@ -3418,6 +3505,13 @@ describe('mysql storage contract', () => {
 
 describe('mysql video review contract', () => {
   videoReviewContract(
+    () => new MySqlStorage('mysql://demo:demo@localhost:3306/icetv'),
+    adminConfig,
+  );
+});
+
+describe('mysql user danmaku contract', () => {
+  userDanmakuContract(
     () => new MySqlStorage('mysql://demo:demo@localhost:3306/icetv'),
     adminConfig,
   );

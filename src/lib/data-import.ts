@@ -7,6 +7,12 @@ import {
 import { CONFIG_SUBSCRIPTION_MAX_BYTES } from '@/lib/config-state';
 import { importedInviteCodes } from '@/lib/invite-code-storage';
 import { importedAvatarSeed } from '@/lib/review-social-storage';
+import {
+  isValidUserDanmakuKey,
+  normalizeUserDanmakuColor,
+  normalizeUserDanmakuMode,
+  normalizeUserDanmakuText,
+} from '@/lib/user-danmaku';
 import { mergeUserMessageState } from '@/lib/user-message-state';
 import { validateLibraryVisibility } from '@/lib/user-profile';
 import { AdminConfig } from '@/types/admin';
@@ -66,7 +72,10 @@ export class ImportValidationError extends Error {
   }
 }
 
-export type TruncationKind = 'searchHistory' | 'playbackSessions';
+export type TruncationKind =
+  | 'searchHistory'
+  | 'playbackSessions'
+  | 'userDanmaku';
 
 export type TruncationReport = {
   username: string;
@@ -118,6 +127,7 @@ export async function parseImportData(
   const inviteCodeUsage = normalizeInviteCodeUsage(data.inviteCodeUsage);
   const siteIcon = normalizeSiteIcon(data.siteIcon);
   const userEntries = Object.entries(userDataInput);
+  const danmakuIds = new Set<string>();
 
   if (userEntries.length > MAX_USERS) {
     throw new ImportValidationError('用户数量超出限制', 413);
@@ -178,12 +188,40 @@ export async function parseImportData(
       truncated.rename(username, targetName);
     }
 
+    for (const item of normalizedUserData.userDanmaku ?? []) {
+      if (danmakuIds.has(item.id))
+        throw new ImportValidationError('弹幕标识重复');
+      danmakuIds.add(item.id);
+    }
     userData[targetName] = normalizedUserData;
     // 站长凭据来自环境变量，不写 users 表
     if (targetName !== localOwner) {
       users[targetName] =
         importedPasswords[normalizedName] ?? (await hashPassword(randomUUID()));
     }
+  }
+
+  // 弹幕总量单独裁剪，按创建时间保留全站最新 50,000 条。
+  const latestDanmaku = Object.entries(userData)
+    .flatMap(([username, data]) =>
+      (data.userDanmaku ?? []).map((item) => ({ username, item })),
+    )
+    .sort(
+      (a, b) =>
+        b.item.createdAt - a.item.createdAt ||
+        b.item.id.localeCompare(a.item.id),
+    );
+  const retained = new Set(
+    latestDanmaku.slice(0, 50_000).map(({ item }) => item.id),
+  );
+  for (const [username, data] of Object.entries(userData)) {
+    const original = data.userDanmaku ?? [];
+    data.userDanmaku = original.filter((item) => retained.has(item.id));
+    truncated.add(
+      username,
+      'userDanmaku',
+      original.length - data.userDanmaku.length,
+    );
   }
 
   const remap = (name: string) =>
@@ -422,6 +460,9 @@ function normalizeSourceRouteStats(value: unknown): SourceRouteStatsBucket[] {
 
 function normalizeAdminConfig(value: unknown): AdminConfig {
   const cloned = cloneJson(requireObject(value, '管理员配置格式无效'));
+  const rawSite = requireObject(cloned.SiteConfig, '站点配置格式无效');
+  if (rawSite.EnableUserDanmaku !== undefined)
+    assertBoolean(rawSite.EnableUserDanmaku, '用户弹幕开关');
   const legacyInvites = (cloned as unknown as AdminConfig).UserConfig
     ?.InviteCodes;
   const legacyUsers = (cloned as unknown as AdminConfig).UserConfig?.Users;
@@ -478,29 +519,14 @@ function normalizeAdminConfig(value: unknown): AdminConfig {
     MAX_SHORT_STRING_LENGTH,
   );
   limitString(
-    config.SiteConfig.DoubanProxy,
-    '豆瓣代理',
-    MAX_LONG_STRING_LENGTH,
-  );
-  limitString(
     config.SiteConfig.BangumiDataSource,
     'Bangumi数据代理类型',
     MAX_SHORT_STRING_LENGTH,
   );
   limitString(
-    config.SiteConfig.BangumiProxy,
-    'Bangumi代理',
-    MAX_LONG_STRING_LENGTH,
-  );
-  limitString(
     config.SiteConfig.DoubanImageProxyType,
     '豆瓣图片代理类型',
     MAX_SHORT_STRING_LENGTH,
-  );
-  limitString(
-    config.SiteConfig.DoubanImageProxy,
-    '豆瓣图片代理',
-    MAX_LONG_STRING_LENGTH,
   );
   assertBoolean(config.SiteConfig.DisableYellowFilter, '黄色过滤');
   assertBoolean(config.SiteConfig.FluidSearch, '流式搜索');
@@ -661,6 +687,7 @@ function normalizeUserData(
       normalizeFavorite,
     ),
     videoReviews: normalizeVideoReviews(input.videoReviews),
+    userDanmaku: normalizeUserDanmaku(input.userDanmaku),
     ...normalizeSocialData(input, username),
     searchHistory: normalizeSearchHistory(
       input.searchHistory,
@@ -1189,4 +1216,44 @@ function normalizeImportedVisibility(value: unknown) {
   } catch {
     throw new ImportValidationError('收藏公开等级无效');
   }
+}
+
+function normalizeUserDanmaku(
+  value: unknown,
+): NonNullable<StorageUserImportData['userDanmaku']> {
+  if (value === undefined || value === null) return [];
+  if (!Array.isArray(value))
+    throw new ImportValidationError('用户弹幕格式无效');
+  return value.map((value) => {
+    const input = requireObject(value, '用户弹幕条目格式无效');
+    const text = normalizeUserDanmakuText(input.text);
+    if (
+      typeof input.id !== 'string' ||
+      !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(
+        input.id,
+      )
+    )
+      throw new ImportValidationError('弹幕标识无效');
+    if (!isValidUserDanmakuKey(input.episodeKey))
+      throw new ImportValidationError('弹幕集标识无效');
+    if (text === null) throw new ImportValidationError('弹幕内容为空或过长');
+    return {
+      id: input.id.toLowerCase(),
+      episodeKey: input.episodeKey,
+      timeMs: Math.round(
+        assertBoundedNumber(input.timeMs, '弹幕时间', 0, 86_400_000),
+      ),
+      text,
+      mode: normalizeUserDanmakuMode(input.mode),
+      color: normalizeUserDanmakuColor(input.color),
+      createdAt: Math.floor(
+        assertBoundedNumber(
+          input.createdAt,
+          '弹幕创建时间',
+          0,
+          MAX_TIMESTAMP_MS,
+        ),
+      ),
+    };
+  });
 }

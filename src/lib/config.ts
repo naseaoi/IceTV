@@ -285,6 +285,7 @@ async function getInitConfig(
       LiveDirectConnect: false,
       AutoSwitchSource: false,
       EnableDanmaku: false,
+      EnableUserDanmaku: false,
       ...normalizeRuntimeParams({
         ...DEFAULT_RUNTIME_PARAMS,
         SearchDownstreamMaxPage:
@@ -292,15 +293,12 @@ async function getInitConfig(
         SiteInterfaceCacheTime: cfgFile.cache_time || 7200,
       }),
       DoubanProxyType: process.env.NEXT_PUBLIC_DOUBAN_PROXY_TYPE || 'direct',
-      DoubanProxy: process.env.NEXT_PUBLIC_DOUBAN_PROXY || '',
       BangumiDataSource: normalizeBangumiDataSource(
         process.env.NEXT_PUBLIC_BANGUMI_DATA_SOURCE,
       ),
-      BangumiProxy: process.env.NEXT_PUBLIC_BANGUMI_PROXY || '',
       DoubanImageProxyType:
         process.env.NEXT_PUBLIC_DOUBAN_IMAGE_PROXY_TYPE ||
         DEFAULT_DOUBAN_IMAGE_PROXY_TYPE,
-      DoubanImageProxy: process.env.NEXT_PUBLIC_DOUBAN_IMAGE_PROXY || '',
       SourceCoverProxyMode: normalizeSourceCoverProxyMode(
         process.env.NEXT_PUBLIC_SOURCE_COVER_PROXY_MODE,
       ),
@@ -501,6 +499,7 @@ export function configSelfCheck(adminConfig: AdminConfig): AdminConfig {
       LiveDirectConnect: false,
       AutoSwitchSource: false,
       EnableDanmaku: false,
+      EnableUserDanmaku: false,
       ...normalizeRuntimeParams({
         ...DEFAULT_RUNTIME_PARAMS,
         SearchDownstreamMaxPage:
@@ -508,15 +507,12 @@ export function configSelfCheck(adminConfig: AdminConfig): AdminConfig {
         SiteInterfaceCacheTime: 7200,
       }),
       DoubanProxyType: process.env.NEXT_PUBLIC_DOUBAN_PROXY_TYPE || 'direct',
-      DoubanProxy: process.env.NEXT_PUBLIC_DOUBAN_PROXY || '',
       BangumiDataSource: normalizeBangumiDataSource(
         process.env.NEXT_PUBLIC_BANGUMI_DATA_SOURCE,
       ),
-      BangumiProxy: process.env.NEXT_PUBLIC_BANGUMI_PROXY || '',
       DoubanImageProxyType:
         process.env.NEXT_PUBLIC_DOUBAN_IMAGE_PROXY_TYPE ||
         DEFAULT_DOUBAN_IMAGE_PROXY_TYPE,
-      DoubanImageProxy: process.env.NEXT_PUBLIC_DOUBAN_IMAGE_PROXY || '',
       SourceCoverProxyMode: DEFAULT_SOURCE_COVER_PROXY_MODE,
       DisableYellowFilter:
         process.env.NEXT_PUBLIC_DISABLE_YELLOW_FILTER === 'true',
@@ -548,34 +544,42 @@ export function configSelfCheck(adminConfig: AdminConfig): AdminConfig {
   if (typeof adminConfig.SiteConfig.EnableDanmaku !== 'boolean') {
     adminConfig.SiteConfig.EnableDanmaku = false;
   }
+  if (typeof adminConfig.SiteConfig.EnableUserDanmaku !== 'boolean') {
+    adminConfig.SiteConfig.EnableUserDanmaku = false;
+  }
   if (typeof adminConfig.SiteConfig.FluidSearch !== 'boolean') {
     adminConfig.SiteConfig.FluidSearch =
       process.env.NEXT_PUBLIC_FLUID_SEARCH !== 'false';
   }
-  Object.assign(
-    adminConfig.SiteConfig,
-    normalizeRuntimeParams(adminConfig.SiteConfig),
-  );
-  adminConfig.SiteConfig.DoubanProxyType = normalizeSiteDoubanProxyType(
-    adminConfig.SiteConfig.DoubanProxyType,
-  );
-  adminConfig.SiteConfig.DoubanProxy = '';
-  adminConfig.SiteConfig.BangumiDataSource = normalizeSiteBangumiDataSource(
-    adminConfig.SiteConfig.BangumiDataSource || DEFAULT_BANGUMI_DATA_SOURCE,
-  );
-  if (typeof adminConfig.SiteConfig.BangumiProxy !== 'string') {
-    adminConfig.SiteConfig.BangumiProxy =
-      process.env.NEXT_PUBLIC_BANGUMI_PROXY || '';
-  }
-  adminConfig.SiteConfig.BangumiProxy = '';
-  adminConfig.SiteConfig.DoubanImageProxyType =
-    normalizeSiteDoubanImageProxyType(
-      adminConfig.SiteConfig.DoubanImageProxyType,
-    );
-  adminConfig.SiteConfig.DoubanImageProxy = '';
-  adminConfig.SiteConfig.SourceCoverProxyMode = normalizeSourceCoverProxyMode(
-    adminConfig.SiteConfig.SourceCoverProxyMode,
-  );
+  const site = adminConfig.SiteConfig;
+  adminConfig.SiteConfig = {
+    SiteName: site.SiteName,
+    SiteIcon: site.SiteIcon,
+    Announcement: site.Announcement,
+    AnnouncementVersion: site.AnnouncementVersion,
+    AnnouncementPublishedAt: site.AnnouncementPublishedAt,
+    FooterText: site.FooterText,
+    EnableLiveEntry: site.EnableLiveEntry,
+    DefaultAggregateSearch: site.DefaultAggregateSearch,
+    EnableOptimization: site.EnableOptimization,
+    LiveDirectConnect: site.LiveDirectConnect,
+    AutoSwitchSource: site.AutoSwitchSource,
+    EnableDanmaku: site.EnableDanmaku,
+    EnableUserDanmaku: site.EnableUserDanmaku,
+    ...normalizeRuntimeParams(site),
+    DoubanProxyType: normalizeSiteDoubanProxyType(site.DoubanProxyType),
+    BangumiDataSource: normalizeSiteBangumiDataSource(
+      site.BangumiDataSource || DEFAULT_BANGUMI_DATA_SOURCE,
+    ),
+    DoubanImageProxyType: normalizeSiteDoubanImageProxyType(
+      site.DoubanImageProxyType,
+    ),
+    SourceCoverProxyMode: normalizeSourceCoverProxyMode(
+      site.SourceCoverProxyMode,
+    ),
+    DisableYellowFilter: site.DisableYellowFilter,
+    FluidSearch: site.FluidSearch,
+  };
 
   // 视频源去重
   const seenSourceKeys = new Set<string>();
@@ -825,13 +829,13 @@ export async function getPublicConfig() {
     FooterText: normalizeSiteFooterText(config.SiteConfig.FooterText),
     OpenRegister: !!config.UserConfig.OpenRegister,
     RequireInviteCode: !!config.UserConfig.RequireInviteCode,
-    DisableYellowFilter: config.SiteConfig.DisableYellowFilter,
     EnableLiveEntry: config.SiteConfig.EnableLiveEntry,
     DefaultAggregateSearch: config.SiteConfig.DefaultAggregateSearch,
     EnableOptimization: config.SiteConfig.EnableOptimization,
     LiveDirectConnect: config.SiteConfig.LiveDirectConnect,
     AutoSwitchSource: config.SiteConfig.AutoSwitchSource,
     EnableDanmaku: config.SiteConfig.EnableDanmaku,
+    EnableUserDanmaku: config.SiteConfig.EnableUserDanmaku,
     ...normalizeRuntimeParams(config.SiteConfig),
     DoubanProxyType: getPublicDoubanProxyType(
       config.SiteConfig.DoubanProxyType,

@@ -64,7 +64,7 @@ describe('RuntimeParamsTab', () => {
     ).not.toBeInTheDocument();
     expect(
       within(screen.getByRole('region', { name: '搜索' })).getByLabelText(
-        '搜索源失败冷却',
+        '出错源跳过时长',
       ),
     ).toBeInTheDocument();
     expect(screen.queryByText('播放源失败冷却')).not.toBeInTheDocument();
@@ -75,7 +75,7 @@ describe('RuntimeParamsTab', () => {
       Object.keys(DEFAULT_RUNTIME_PARAMS).sort(),
     );
     expect(container.querySelector('details')).not.toHaveAttribute('open');
-    expect(screen.getByLabelText('封面加载记录上限')).toHaveValue(500);
+    expect(screen.getByLabelText('封面加载状态记录上限')).toHaveValue(500);
   });
 
   it('does not save an unchanged form', () => {
@@ -87,22 +87,22 @@ describe('RuntimeParamsTab', () => {
 
   it('describes inputs with their hint and restores defaults', () => {
     const { onDirtyChange } = setup();
-    const input = screen.getByLabelText('弹幕上游请求超时');
+    const input = screen.getByLabelText('单集弹幕条数上限');
 
     expect(input).toHaveAccessibleDescription(
-      '用于弹幕搜索、绑定校验、内容拉取和连接测试的单次回源请求。',
+      '超出后按时间均匀抽稀，条数越多播放越吃性能。',
     );
     const reset = screen.getByRole('button', {
-      name: '弹幕上游请求超时恢复默认值 12',
+      name: '单集弹幕条数上限恢复默认值 3000',
     });
     expect(reset).toHaveClass('invisible');
 
-    fireEvent.change(input, { target: { value: '25' } });
+    fireEvent.change(input, { target: { value: '5000' } });
     expect(reset).not.toHaveClass('invisible');
     expect(onDirtyChange).toHaveBeenLastCalledWith(true);
 
     fireEvent.click(reset);
-    expect(input).toHaveValue(12);
+    expect(input).toHaveValue(3000);
     expect(onDirtyChange).toHaveBeenLastCalledWith(false);
   });
 
@@ -116,7 +116,7 @@ describe('RuntimeParamsTab', () => {
     const { container, form, refreshConfig, onDirtyChange } = setup();
     const details = container.querySelector('details') as HTMLDetailsElement;
     details.open = true;
-    fireEvent.change(screen.getByLabelText('封面加载记录上限'), {
+    fireEvent.change(screen.getByLabelText('封面加载状态记录上限'), {
       target: { value: '750' },
     });
     details.open = false;
@@ -157,7 +157,7 @@ describe('RuntimeParamsTab', () => {
   it('opens advanced settings so an invalid input can receive focus', () => {
     const { container } = setup();
     const details = container.querySelector('details') as HTMLDetailsElement;
-    fireEvent.invalid(screen.getByLabelText('封面加载记录上限'));
+    fireEvent.invalid(screen.getByLabelText('封面加载状态记录上限'));
     expect(details.open).toBe(true);
     expect(adminPost).not.toHaveBeenCalled();
   });

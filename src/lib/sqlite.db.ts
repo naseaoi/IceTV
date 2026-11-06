@@ -60,6 +60,15 @@ import {
   removedAccessReferences,
   userAccessSchema,
 } from '@/lib/user-access';
+import {
+  StoredUserDanmaku,
+  storedUserDanmaku,
+  USER_DANMAKU_INSERT,
+  USER_DANMAKU_PROJECTION,
+  userDanmakuPageSql,
+  userDanmakuSchema,
+  userDanmakuValues,
+} from '@/lib/user-danmaku-storage';
 import { mergeUserMessageState } from '@/lib/user-message-state';
 import { validateNickname } from '@/lib/user-profile';
 import {
@@ -731,6 +740,7 @@ export class LocalSqliteStorage implements IStorage {
         PRIMARY KEY (username, favorite_key)
       );
 
+      ${userDanmakuSchema('sqlite').join(';')};
       CREATE TABLE IF NOT EXISTS video_reviews (
         username TEXT NOT NULL,
         title_norm TEXT NOT NULL,
@@ -1401,6 +1411,9 @@ export class LocalSqliteStorage implements IStorage {
         this.mergeUserRow(legacy, canonical);
         this.mergeSocialUsername(legacy, canonical);
         this.db
+          .prepare('UPDATE user_danmaku SET username = ? WHERE username = ?')
+          .run(canonical, legacy);
+        this.db
           .prepare(
             'UPDATE OR IGNORE user_access SET username = ? WHERE username = ?',
           )
@@ -1561,6 +1574,7 @@ export class LocalSqliteStorage implements IStorage {
       'play_records',
       'favorites',
       'video_reviews',
+      'user_danmaku',
       'user_profiles',
       'user_access',
       'user_group_members',
@@ -2178,6 +2192,60 @@ export class LocalSqliteStorage implements IStorage {
     return this.social.getUserSocialData(...args);
   }
 
+  async addUserDanmaku(item: StoredUserDanmaku): Promise<void> {
+    this.db.prepare(USER_DANMAKU_INSERT).run(...userDanmakuValues(item));
+  }
+  async getUserDanmaku(
+    episodeKey: string,
+    limit: number,
+  ): Promise<StoredUserDanmaku[]> {
+    return (
+      this.db
+        .prepare(
+          `SELECT ${USER_DANMAKU_PROJECTION} FROM user_danmaku WHERE episode_key = ? ORDER BY created_at DESC, id DESC LIMIT ?`,
+        )
+        .all(episodeKey, limit) as StoredUserDanmaku[]
+    ).map(storedUserDanmaku);
+  }
+  async getAllUserDanmaku(username: string): Promise<StoredUserDanmaku[]> {
+    return (
+      this.db
+        .prepare(
+          `SELECT ${USER_DANMAKU_PROJECTION} FROM user_danmaku WHERE username = ? ORDER BY created_at DESC, id DESC`,
+        )
+        .all(normalizeUsername(username)) as StoredUserDanmaku[]
+    ).map(storedUserDanmaku);
+  }
+  async deleteUserDanmaku(id: string, username?: string): Promise<boolean> {
+    return (
+      this.db
+        .prepare(
+          `DELETE FROM user_danmaku WHERE id = ?${username === undefined ? '' : ' AND username = ?'}`,
+        )
+        .run(
+          ...(username === undefined
+            ? [id]
+            : [id, normalizeUsername(username)]),
+        ).changes > 0
+    );
+  }
+  async getUserDanmakuPage(
+    query: Parameters<IStorage['getUserDanmakuPage']>[0],
+  ): Promise<StoredUserDanmaku[]> {
+    const { sql, params } = userDanmakuPageSql(query);
+    return (this.db.prepare(sql).all(...params) as StoredUserDanmaku[]).map(
+      storedUserDanmaku,
+    );
+  }
+  async deleteUserDanmakuBatch(ids: string[]): Promise<number> {
+    if (!ids.length) return 0;
+    return this.db
+      .prepare(
+        `DELETE FROM user_danmaku WHERE id IN (${ids.map(() => '?').join(',')})`,
+      )
+      .run(...ids).changes;
+  }
+
   async getVideoReview(
     userName: string,
     titleNorm: string,
@@ -2502,6 +2570,9 @@ export class LocalSqliteStorage implements IStorage {
       this.stmts.deletePlayRecordsByUser.run(targetUser);
       this.stmts.deleteFavoritesByUser.run(targetUser);
       this.stmts.deleteVideoReviewsByUser.run(targetUser);
+      this.db
+        .prepare('DELETE FROM user_danmaku WHERE username = ?')
+        .run(targetUser);
       this.stmts.deleteSearchHistoryByUser.run(targetUser);
       this.stmts.deleteSkipConfigsByUser.run(targetUser);
       this.stmts.deletePlaybackSessionsByUser.run(targetUser);
@@ -3290,6 +3361,7 @@ export class LocalSqliteStorage implements IStorage {
         DELETE FROM play_records;
         DELETE FROM favorites;
         DELETE FROM video_reviews;
+        DELETE FROM user_danmaku;
         DELETE FROM user_profiles;
         DELETE FROM user_follows;
         DELETE FROM video_review_likes;
@@ -3330,6 +3402,7 @@ export class LocalSqliteStorage implements IStorage {
         DELETE FROM play_records;
         DELETE FROM favorites;
         DELETE FROM video_reviews;
+        DELETE FROM user_danmaku;
         DELETE FROM user_profiles;
         DELETE FROM user_follows;
         DELETE FROM video_review_likes;
@@ -3420,6 +3493,11 @@ export class LocalSqliteStorage implements IStorage {
           );
         }
 
+        for (const item of userData.userDanmaku ?? []) {
+          this.db
+            .prepare(USER_DANMAKU_INSERT)
+            .run(...userDanmakuValues({ ...item, username }));
+        }
         for (const review of userData.videoReviews ?? []) {
           this.stmts.setVideoReview.run(
             username,

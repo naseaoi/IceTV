@@ -1,4 +1,5 @@
 import type { DanmakuItem } from '@/features/play/lib/danmaku/types';
+import { USER_DANMAKU_MAX_LENGTH } from '@/lib/user-danmaku';
 
 export interface DanmakuPluginOptions {
   loadItems: () => Promise<DanmakuItem[]>;
@@ -6,7 +7,19 @@ export interface DanmakuPluginOptions {
   fontSize: number;
   visible: boolean;
   heatmap: boolean;
+  // 传入时渲染发送框，返回 true 才会在本地立即显示
+  beforeEmit?: (danmu: DanmakuEmitPayload) => Promise<boolean>;
 }
+
+export interface DanmakuEmitPayload {
+  text: string;
+  mode?: number;
+  color?: string;
+  time?: number;
+}
+
+// 发送成功后输入框的锁定秒数，与服务端每分钟限额配合防连发
+const EMIT_LOCK_SECONDS = 5;
 
 // 插件会把 time=0 改写成当前播放位置
 const MIN_ITEM_TIME = 0.01;
@@ -47,6 +60,7 @@ export async function createDanmakuPlugin({
   fontSize,
   visible,
   heatmap,
+  beforeEmit,
 }: DanmakuPluginOptions) {
   const { default: artplayerPluginDanmuku } =
     await import('artplayer-plugin-danmuku');
@@ -62,8 +76,12 @@ export async function createDanmakuPlugin({
     antiOverlap: true,
     synchronousPlayback: true,
     visible,
-    // 第一期只读，不渲染发射器
-    emitter: false,
+    emitter: Boolean(beforeEmit),
+    ...(beforeEmit && {
+      beforeEmit,
+      maxLength: USER_DANMAKU_MAX_LENGTH,
+      lockTime: EMIT_LOCK_SECONDS,
+    }),
     heatmap: resolveDanmakuHeatmapOption(heatmap),
     theme: 'dark',
   });

@@ -7,11 +7,13 @@ import {
   clearPersistedEpisodeId,
   getPersistedEpisodeId,
 } from '@/features/play/lib/danmaku/episode-storage';
+import { downsampleByTime } from '@/features/play/lib/danmaku/normalize';
 import { applyOffset } from '@/features/play/lib/danmaku/plugin';
 import {
   type DanmakuItem,
   DanmakuEpisodeNotFoundError,
 } from '@/features/play/lib/danmaku/types';
+import { fetchUserDanmaku } from '@/features/play/lib/danmaku/user-client';
 import {
   buildDanmakuScopeKey,
   readDanmakuEpisodeSearchTitle,
@@ -19,12 +21,21 @@ import {
   writeDanmakuEpisodeId,
   writeDanmakuEpisodeSearchTitle,
 } from '@/lib/local-preferences';
+import { getRuntimeConfig } from '@/lib/runtime-config';
+import { type UserDanmakuItem, buildUserDanmakuKey } from '@/lib/user-danmaku';
 
 export type DanmakuEnabledReader = () => boolean;
+
+export interface UserDanmakuTarget {
+  key: string;
+  offset: number;
+}
 
 export interface DanmakuLoadOptions {
   forceRefresh?: boolean;
   onError?: (error?: unknown) => void;
+  // 站点开启用户弹幕时回传本集的发送目标
+  onUserTarget?: (target: UserDanmakuTarget) => void;
 }
 
 export interface DanmakuLoadContext {
@@ -78,20 +89,19 @@ async function resolveEpisodeCandidates(
     }));
 }
 
-export async function loadDanmakuForEpisode(
+interface ThirdPartyDanmaku {
+  items: DanmakuItem[];
+  // 已确定的第三方弹幕集，加载失败但有已存映射时仍返回，供用户弹幕定位
+  episodeId: number | null;
+}
+
+const NO_THIRD_PARTY: ThirdPartyDanmaku = { items: [], episodeId: null };
+
+async function loadThirdPartyDanmaku(
   context: DanmakuLoadContext,
-  isEnabled: DanmakuEnabledReader,
-  options: DanmakuLoadOptions = {},
-): Promise<DanmakuItem[]> {
-  if (!isEnabled()) return [];
-
-  const scopeKey = buildDanmakuScopeKey(
-    context.source,
-    context.videoId,
-    context.episodeIndex,
-  );
-  if (!scopeKey) return [];
-
+  scopeKey: string,
+  options: DanmakuLoadOptions,
+): Promise<ThirdPartyDanmaku> {
   try {
     let candidates = await resolveEpisodeCandidates(
       context.source,
@@ -116,7 +126,10 @@ export async function loadDanmakuForEpisode(
       } catch (error) {
         if (!(error instanceof DanmakuEpisodeNotFoundError)) {
           options.onError?.(error);
-          return [];
+          return {
+            items: [],
+            episodeId: candidate.persistOnSuccess ? null : candidate.episodeId,
+          };
         }
         missingEpisode = true;
         items = [];
@@ -131,7 +144,7 @@ export async function loadDanmakuForEpisode(
             context.episodeIndex,
           );
           const keyword = candidate.keyword || context.searchTitle;
-          if (!keyword) return [];
+          if (!keyword) return NO_THIRD_PARTY;
           const searched = await searchDanmakuCandidates(keyword, undefined, {
             force: missingEpisode,
           });
@@ -157,13 +170,72 @@ export async function loadDanmakuForEpisode(
         writeDanmakuEpisodeId(scopeKey, candidate.episodeId);
         writeDanmakuEpisodeSearchTitle(scopeKey, candidate.keyword);
       }
-      return applyOffset(items, readDanmakuOffset(scopeKey));
+      return { items, episodeId: candidate.episodeId };
     }
 
-    return [];
+    return NO_THIRD_PARTY;
   } catch (error) {
     console.warn('弹幕加载失败:', error);
     options.onError?.(error);
-    return [];
+    return NO_THIRD_PARTY;
+  }
+}
+
+function isUserDanmakuEnabled(): boolean {
+  return getRuntimeConfig()?.ENABLE_USER_DANMAKU === true;
+}
+
+// 用户弹幕优先占用预算，第三方弹幕按剩余额度抽稀，合计不超过单集上限
+function mergeUserDanmaku(
+  thirdParty: DanmakuItem[],
+  userItems: UserDanmakuItem[],
+  limit: number,
+): DanmakuItem[] {
+  if (userItems.length === 0) return thirdParty;
+  const budget = limit > 0 ? limit - userItems.length : thirdParty.length;
+  const sampled = budget > 0 ? downsampleByTime(thirdParty, budget) : [];
+  const merged: DanmakuItem[] = [...sampled];
+  for (const item of userItems) {
+    merged.push({
+      text: item.text,
+      time: item.time,
+      mode: item.mode,
+      color: item.color,
+      border: item.mine,
+    });
+  }
+  return merged.sort((a, b) => a.time - b.time);
+}
+
+export async function loadDanmakuForEpisode(
+  context: DanmakuLoadContext,
+  isEnabled: DanmakuEnabledReader,
+  options: DanmakuLoadOptions = {},
+): Promise<DanmakuItem[]> {
+  if (!isEnabled()) return [];
+
+  const scopeKey = buildDanmakuScopeKey(
+    context.source,
+    context.videoId,
+    context.episodeIndex,
+  );
+  if (!scopeKey) return [];
+
+  const { items, episodeId } = await loadThirdPartyDanmaku(
+    context,
+    scopeKey,
+    options,
+  );
+  const offset = readDanmakuOffset(scopeKey);
+  if (!isUserDanmakuEnabled()) return applyOffset(items, offset);
+
+  const key = buildUserDanmakuKey(episodeId, scopeKey);
+  options.onUserTarget?.({ key, offset });
+  try {
+    const user = await fetchUserDanmaku(key);
+    return applyOffset(mergeUserDanmaku(items, user.items, user.limit), offset);
+  } catch (error) {
+    console.warn('用户弹幕加载失败:', error);
+    return applyOffset(items, offset);
   }
 }

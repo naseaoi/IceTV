@@ -35,7 +35,7 @@
 
 - 首次起播放行（`setLoading(false)`）前经 `waitForHistoryRestore()`（`usePlayProgress.ts`）等历史恢复定下集数和续播时间，`loading` 期间页面不派生 `videoUrl`。等待有上限（`usePlayInit.ts` 的 `HISTORY_RESTORE_WAIT_TIMEOUT_MS`），超时放行后播放记录迟到时再恢复、换集。去掉等待会先按第 1 集建播放器再换集，白发清单与逐集解析请求。
 - 播放页详情先取本地快照（`detailSnapshot.ts`）再后台回源，历史恢复可能已按快照定下集索引。回源详情替换快照时当前集须经 `remapEpisodeIndexToDetail()`（`src/lib/episode-groups.ts`）按分组身份换算，**直接沿用绝对索引会让分组源在靠前分组新增剧集后退到上一集**。
-- 后台「运行参数 → 播放与记录」的 `VodPageTimeoutSeconds` 控制媒体开始加载后的无进展窗口。hls.js 从拉清单开始计时，清单成功、分片字节增长或分片完成续期；原生播放从 `loadstart` 计时，缓冲增长和 `loadedmetadata` 续期。实际窗口取配置值、源站起播下限与该源有效分片首字节超时的最大值，每次线路加载另受窗口 4 倍的总时长上限约束；服务端回落开始新一轮加载，重新计时。
+- 后台「运行参数 → 播放」的 `VodPageTimeoutSeconds` 控制媒体开始加载后的无进展窗口。hls.js 从拉清单开始计时，清单成功、分片字节增长或分片完成续期；原生播放从 `loadstart` 计时，缓冲增长和 `loadedmetadata` 续期。实际窗口取配置值、源站起播下限与该源有效分片首字节超时的最大值，每次线路加载另受窗口 4 倍的总时长上限约束；服务端回落开始新一轮加载，重新计时。
 - 起播窗口只负责页面回落与换源，分片请求仍由 HLS 加载策略负责。详情获取、历史恢复等准备阶段只有挂载了 `PlayMainContent` 的入口受总时长兜底，普通首次加载显示加载页时不计时。
 
 ## 分片缓存与预取
@@ -56,6 +56,15 @@
 - 弹幕剧集映射按 `源:ID:集` 隔离。换源提交时经 `carryOverDanmakuEpisodeMapping()` 把同一集已匹配的映射带到新源，否则新源按自己的标题重搜，标题格式不同就静默落空。
 - `provider.server.ts` 的 base URL 只来自环境变量，用户输入只经 `searchParams` 进 query。默认走 URL guard；内网自建服务须显式设置 `DANMAKU_API_ALLOW_PRIVATE=true`，经 `fetchPrivateUpstream()` 回源，仍受共享资源额度保护。
 - 后台弹幕「请求超时」只约束到响应头到达，响应体读取受共享资源层的总时限约束。
+
+### 用户弹幕
+
+共享规则在 `src/lib/user-danmaku.ts`，服务端以它为准；站点开关 `EnableUserDanmaku` 依赖 `EnableDanmaku`，两者都开才放行发送。
+
+- 归属键：当前集匹配到第三方弹幕集时用 `dandan:<episodeId>`，跨播放源共享；否则用 `src:<源:ID:集>`，只在该源内可见。之后再匹配到弹幕集，之前按 `src:` 存的弹幕不会迁移。
+- 时间存的是弹幕集时间轴上的秒数：发送时减去用户校准偏移，读取后与第三方弹幕一起 `applyOffset`。**直接存播放器时间会让调过偏移的用户之间错位。**
+- 条数预算：服务端每集最多返回 `DanmakuEpisodeLimit × USER_DANMAKU_BUDGET_RATIO` 条最新用户弹幕，客户端把第三方弹幕抽稀到剩余额度后合并，总量仍不超过 `DanmakuEpisodeLimit`。用户弹幕拉取失败时只展示第三方弹幕。
+- 发送走插件内置输入框的 `beforeEmit`：返回 `true` 由插件本地回显（自己的弹幕带边框），返回 `false` 不回显。请求期间换集只保存不回显，归属键在加载器 `onUserTarget` 回调里随当前集更新。
 
 ## 去广告
 

@@ -62,13 +62,11 @@ const DEFAULT_SITE_SETTINGS: SiteConfig = {
   LiveDirectConnect: false,
   AutoSwitchSource: false,
   EnableDanmaku: false,
+  EnableUserDanmaku: false,
   ...DEFAULT_RUNTIME_PARAMS,
   DoubanProxyType: 'direct',
-  DoubanProxy: '',
   BangumiDataSource: DEFAULT_BANGUMI_DATA_SOURCE,
-  BangumiProxy: '',
   DoubanImageProxyType: DEFAULT_DOUBAN_IMAGE_PROXY_TYPE,
-  DoubanImageProxy: '',
   SourceCoverProxyMode: DEFAULT_SOURCE_COVER_PROXY_MODE,
   DisableYellowFilter: false,
   FluidSearch: true,
@@ -86,6 +84,7 @@ type EditableSiteSettings = Pick<
   | 'LiveDirectConnect'
   | 'AutoSwitchSource'
   | 'EnableDanmaku'
+  | 'EnableUserDanmaku'
   | 'DoubanProxyType'
   | 'BangumiDataSource'
   | 'DoubanImageProxyType'
@@ -100,15 +99,12 @@ function buildSiteSettings(config: AdminConfig): SiteConfig {
     DoubanProxyType: normalizeSiteDoubanProxyType(
       config.SiteConfig.DoubanProxyType,
     ),
-    DoubanProxy: '',
     BangumiDataSource: normalizeSiteBangumiDataSource(
       config.SiteConfig.BangumiDataSource,
     ),
-    BangumiProxy: '',
     DoubanImageProxyType: normalizeSiteDoubanImageProxyType(
       config.SiteConfig.DoubanImageProxyType,
     ),
-    DoubanImageProxy: '',
     SourceCoverProxyMode: normalizeSourceCoverProxyMode(
       config.SiteConfig.SourceCoverProxyMode,
     ),
@@ -118,6 +114,7 @@ function buildSiteSettings(config: AdminConfig): SiteConfig {
     LiveDirectConnect: config.SiteConfig.LiveDirectConnect ?? false,
     AutoSwitchSource: config.SiteConfig.AutoSwitchSource ?? false,
     EnableDanmaku: config.SiteConfig.EnableDanmaku ?? false,
+    EnableUserDanmaku: config.SiteConfig.EnableUserDanmaku ?? false,
     DisableYellowFilter: config.SiteConfig.DisableYellowFilter ?? false,
     FluidSearch: config.SiteConfig.FluidSearch ?? true,
   };
@@ -137,6 +134,7 @@ function normalizeEditableSiteSettings(
     LiveDirectConnect: value.LiveDirectConnect ?? false,
     AutoSwitchSource: value.AutoSwitchSource ?? false,
     EnableDanmaku: value.EnableDanmaku ?? false,
+    EnableUserDanmaku: value.EnableUserDanmaku ?? false,
     DoubanProxyType: normalizeSiteDoubanProxyType(value.DoubanProxyType),
     BangumiDataSource: normalizeSiteBangumiDataSource(value.BangumiDataSource),
     DoubanImageProxyType: normalizeSiteDoubanImageProxyType(
@@ -225,7 +223,6 @@ const SiteConfigComponent = ({
     setSiteSettings((prev) => ({
       ...prev,
       DoubanProxyType: value,
-      DoubanProxy: '',
     }));
   };
 
@@ -234,7 +231,6 @@ const SiteConfigComponent = ({
     setSiteSettings((prev) => ({
       ...prev,
       BangumiDataSource: nextSource,
-      BangumiProxy: '',
     }));
   };
 
@@ -243,7 +239,6 @@ const SiteConfigComponent = ({
     setSiteSettings((prev) => ({
       ...prev,
       DoubanImageProxyType: value,
-      DoubanImageProxy: '',
     }));
   };
 
@@ -518,7 +513,7 @@ const SiteConfigComponent = ({
         <AdminSettingRow
           label='豆瓣数据代理'
           htmlFor='site-douban-proxy-type'
-          description={
+          labelAddon={
             getThanksInfo(siteSettings.DoubanProxyType) && (
               <button
                 type='button'
@@ -528,7 +523,7 @@ const SiteConfigComponent = ({
                     '_blank',
                   )
                 }
-                className='inline-flex items-center gap-1 hover:text-gray-700 dark:hover:text-gray-200'
+                className='inline-flex items-center gap-1 text-xs text-gray-500 transition-colors hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200'
               >
                 <span className='font-medium'>
                   {getThanksInfo(siteSettings.DoubanProxyType)!.text}
@@ -549,7 +544,7 @@ const SiteConfigComponent = ({
         <AdminSettingRow
           label='豆瓣图片代理'
           htmlFor='site-douban-image-proxy-type'
-          description={
+          labelAddon={
             getThanksInfo(siteSettings.DoubanImageProxyType) && (
               <button
                 type='button'
@@ -559,7 +554,7 @@ const SiteConfigComponent = ({
                     '_blank',
                   )
                 }
-                className='inline-flex items-center gap-1 hover:text-gray-700 dark:hover:text-gray-200'
+                className='inline-flex items-center gap-1 text-xs text-gray-500 transition-colors hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200'
               >
                 <span className='font-medium'>
                   {getThanksInfo(siteSettings.DoubanImageProxyType)!.text}
@@ -636,11 +631,11 @@ const SiteConfigComponent = ({
         <AdminSettingRow
           label='播放器弹幕'
           layout='inline'
-          description={
+          labelAddon={
             danmakuTestResult && (
               <span
                 role='status'
-                className={`flex items-start gap-1.5 text-xs ${
+                className={`flex min-w-0 items-start gap-1.5 text-xs ${
                   danmakuTestResult.success
                     ? 'text-brand-600 dark:text-brand-400'
                     : 'text-red-600 dark:text-red-400'
@@ -685,6 +680,20 @@ const SiteConfigComponent = ({
             }
           />
         </AdminSettingRow>
+        {siteSettings.EnableDanmaku && (
+          <AdminSettingRow label='用户发送弹幕' layout='inline'>
+            <AdminStatusSwitch
+              enabled={siteSettings.EnableUserDanmaku}
+              ariaLabel='切换用户发送弹幕'
+              onToggle={() =>
+                setSiteSettings((prev) => ({
+                  ...prev,
+                  EnableUserDanmaku: !prev.EnableUserDanmaku,
+                }))
+              }
+            />
+          </AdminSettingRow>
+        )}
       </AdminSettingsGroup>
 
       <AdminSettingsGroup title='本地设置默认值'>

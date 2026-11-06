@@ -160,6 +160,42 @@ class DbManager {
     return (await this.getStorage()).moderateReviewReports(...args);
   }
 
+  async addUserDanmaku(
+    ...args: Parameters<IStorage['addUserDanmaku']>
+  ): ReturnType<IStorage['addUserDanmaku']> {
+    return (await this.getStorage()).addUserDanmaku(...args);
+  }
+
+  async getUserDanmaku(
+    ...args: Parameters<IStorage['getUserDanmaku']>
+  ): ReturnType<IStorage['getUserDanmaku']> {
+    return (await this.getStorage()).getUserDanmaku(...args);
+  }
+
+  async getAllUserDanmaku(
+    ...args: Parameters<IStorage['getAllUserDanmaku']>
+  ): ReturnType<IStorage['getAllUserDanmaku']> {
+    return (await this.getStorage()).getAllUserDanmaku(...args);
+  }
+
+  async deleteUserDanmaku(
+    ...args: Parameters<IStorage['deleteUserDanmaku']>
+  ): ReturnType<IStorage['deleteUserDanmaku']> {
+    return (await this.getStorage()).deleteUserDanmaku(...args);
+  }
+
+  async getUserDanmakuPage(
+    ...args: Parameters<IStorage['getUserDanmakuPage']>
+  ): ReturnType<IStorage['getUserDanmakuPage']> {
+    return (await this.getStorage()).getUserDanmakuPage(...args);
+  }
+
+  async deleteUserDanmakuBatch(
+    ...args: Parameters<IStorage['deleteUserDanmakuBatch']>
+  ): ReturnType<IStorage['deleteUserDanmakuBatch']> {
+    return (await this.getStorage()).deleteUserDanmakuBatch(...args);
+  }
+
   async getVideoReview(
     userName: string,
     titleNorm: string,
