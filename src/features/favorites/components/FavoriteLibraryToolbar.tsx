@@ -1,5 +1,7 @@
 'use client';
 
+import type { ReactNode } from 'react';
+
 import { LibraryToolbar } from '@/components/LibraryToolbar';
 import type {
   FavoriteFilter,
@@ -9,22 +11,25 @@ import type {
 
 const FILTER_OPTIONS: { value: FavoriteFilter; label: string }[] = [
   { value: 'all', label: '全部' },
-  { value: 'watched', label: '看过' },
-  { value: 'unwatched', label: '未看' },
+  { value: 'planned', label: '想看' },
+  { value: 'watching', label: '在看' },
+  { value: 'completed', label: '看过' },
   { value: 'reviewed', label: '已评价' },
 ];
 
 const SORT_OPTIONS: { value: FavoriteSort; label: string }[] = [
   { value: 'saved', label: '最近收藏' },
   { value: 'played', label: '最近观看' },
+  { value: 'watched', label: '看过时间' },
   { value: 'rating', label: '我的评分' },
   { value: 'year', label: '上映年份' },
 ];
 
 export const EMPTY_FAVORITE_COUNTS: FavoriteFilterCounts = {
   all: 0,
-  watched: 0,
-  unwatched: 0,
+  planned: 0,
+  watching: 0,
+  completed: 0,
   reviewed: 0,
 };
 
@@ -37,6 +42,7 @@ interface FavoriteLibraryToolbarProps {
   onSortChange: (value: FavoriteSort) => void;
   counts: FavoriteFilterCounts;
   loading?: boolean;
+  action?: ReactNode;
 }
 
 export function FavoriteLibraryToolbar({

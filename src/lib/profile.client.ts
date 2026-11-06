@@ -1,6 +1,8 @@
 import { fetchWithAuth } from '@/lib/db.client.internal';
 import type {
+  FavoriteWatchStatus,
   FollowListPage,
+  LibraryVisibility,
   PublicFavoritePage,
   PublicUserRef,
   PublicVideoReviewPage,
@@ -8,7 +10,9 @@ import type {
 } from '@/lib/types';
 
 export const PROFILE_REQUIRED_EVENT = 'auth:profile-required';
-export type MyProfile = PublicUserRef & { favoritesPublic: boolean };
+export type MyProfile = PublicUserRef & {
+  libraryVisibility: LibraryVisibility;
+};
 
 export async function socialRequest<T>(
   url: string,
@@ -35,7 +39,7 @@ export function getMyProfile() {
 }
 export function updateProfile(input: {
   nickname?: string;
-  favoritesPublic?: boolean;
+  libraryVisibility?: LibraryVisibility;
 }) {
   return socialRequest<MyProfile>('/api/profile', {
     method: 'PUT',
@@ -56,9 +60,13 @@ export function getUserReviews(profileId: string, cursor?: string | null) {
     userPageUrl(profileId, 'reviews', cursor),
   );
 }
-export function getUserFavorites(profileId: string, cursor?: string | null) {
+export function getUserFavorites(
+  profileId: string,
+  cursor?: string | null,
+  filter: 'all' | FavoriteWatchStatus = 'all',
+) {
   return socialRequest<PublicFavoritePage>(
-    userPageUrl(profileId, 'favorites', cursor),
+    `${userPageUrl(profileId, 'favorites', cursor)}&filter=${filter}`,
   );
 }
 export function getUserFollows(

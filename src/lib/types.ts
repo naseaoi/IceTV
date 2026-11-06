@@ -42,6 +42,8 @@ export interface MetadataRecordPage<T> {
   nextCursor: string | null;
 }
 
+export type FavoriteWatchStatus = 'planned' | 'watching' | 'completed';
+
 // 收藏数据结构
 export interface Favorite {
   source_name: string;
@@ -53,6 +55,8 @@ export interface Favorite {
   metadata_checked_at?: number;
   search_title?: string; // 搜索时使用的标题
   origin?: 'vod' | 'live';
+  watch_status?: FavoriteWatchStatus;
+  watched_at?: number;
 }
 
 // 评价按作品身份（normalizeWorkTitle + normalizeWorkYear）存储，与源站无关
@@ -71,13 +75,15 @@ export interface VideoReview {
   updated_at: number;
 }
 
+export type LibraryVisibility = 0 | 1 | 2 | 3;
+
 // 用户资料：登录名只在服务端使用，对外一律用 profile_id + 昵称
 export interface UserProfile {
   username: string;
   profile_id: string;
   nickname: string | null;
   avatar_seed: string | null;
-  favorites_public: boolean;
+  favorites_public: LibraryVisibility;
   updated_at: number;
 }
 
@@ -94,7 +100,7 @@ export interface UserProfileView extends PublicUserRef {
   followerCount: number;
   followingCount: number;
   publicReviewCount: number;
-  favoritesPublic: boolean;
+  libraryVisibility: LibraryVisibility;
 }
 
 export interface FollowListItem extends PublicUserRef {
@@ -107,6 +113,8 @@ export interface FollowListPage {
 }
 
 export interface PublicFavoriteItem {
+  watchStatus?: FavoriteWatchStatus;
+  rating?: number | null;
   key: string;
   title: string;
   year: string;
@@ -118,8 +126,13 @@ export interface PublicFavoriteItem {
 }
 
 export type PublicFavoritePage =
-  | { hidden: true }
-  | { hidden: false; items: PublicFavoriteItem[]; nextCursor: string | null };
+  | { hidden: true; libraryVisibility: 0 }
+  | {
+      hidden: false;
+      libraryVisibility: LibraryVisibility;
+      items: PublicFavoriteItem[];
+      nextCursor: string | null;
+    };
 
 export interface PublicVideoReview {
   author: PublicUserRef;
@@ -407,6 +420,21 @@ export interface IStorage {
   // 收藏相关
   getFavorite(userName: string, key: string): Promise<Favorite | null>;
   setFavorite(userName: string, key: string, favorite: Favorite): Promise<void>;
+  saveMergedFavorite(
+    userName: string,
+    key: string,
+    favorite: Favorite,
+  ): Promise<string>;
+  batchFavorites(
+    userName: string,
+    input: import('@/features/favorites/lib/library-query').FavoriteBatchInput,
+  ): Promise<{ affected: number }>;
+  getFavoriteForWork(
+    userName: string,
+    work: import('@/features/favorites/lib/library-query').FavoriteWorkQuery,
+  ): Promise<
+    import('@/features/favorites/lib/library-query').FavoriteLibraryItem | null
+  >;
   setFavoriteIfUnchanged(
     userName: string,
     key: string,
@@ -480,7 +508,7 @@ export interface IStorage {
     patch: {
       nickname?: string;
       avatarSeed?: string | null;
-      favoritesPublic?: boolean;
+      libraryVisibility?: LibraryVisibility;
     },
   ): Promise<UserProfile>;
   isNicknameAvailable(

@@ -11,7 +11,19 @@ import {
   adminUserPage,
   adminUserStatements,
 } from '@/features/admin/services/userQueryStorage';
+import {
+  applyFavoriteStatus,
+  batchSelection,
+  mergeFavorite,
+  mergeSelection,
+  workSelection,
+} from '@/features/favorites/lib/library-mutations';
+import type {
+  FavoriteBatchInput,
+  FavoriteWorkQuery,
+} from '@/features/favorites/lib/library-query';
 import type { FavoriteLibraryQuery } from '@/features/favorites/lib/library-query';
+import { libraryItem } from '@/features/favorites/lib/library-storage';
 import {
   type LibraryCountsRow,
   type LibraryRow,
@@ -589,6 +601,8 @@ export class LocalSqliteStorage implements IStorage {
           year_number: 'REAL',
           search_text: 'TEXT',
           saved_at: 'REAL',
+          watch_status: 'TEXT',
+          watched_at: 'REAL',
           library_valid: 'INTEGER NOT NULL DEFAULT 0',
           projection_version: 'INTEGER NOT NULL DEFAULT 0',
         })) {
@@ -605,10 +619,10 @@ export class LocalSqliteStorage implements IStorage {
 
   private backfillFavoriteProjection(): void {
     const read = this.db.prepare(
-      'SELECT username, favorite_key, favorite_json FROM favorites WHERE projection_version = 0 LIMIT 250',
+      'SELECT username, favorite_key, favorite_json FROM favorites WHERE projection_version < 2 LIMIT 250',
     );
     const update = this.db.prepare(
-      'UPDATE favorites SET title_norm = ?, year_norm = ?, year_number = ?, search_text = ?, saved_at = ?, library_valid = ?, projection_version = ? WHERE username = ? AND favorite_key = ?',
+      'UPDATE favorites SET title_norm = ?, year_norm = ?, year_number = ?, search_text = ?, saved_at = ?, library_valid = ?, watch_status = ?, watched_at = ?, projection_version = ? WHERE username = ? AND favorite_key = ?',
     );
     const batch = this.db.transaction(() => {
       const rows = read.all() as {
@@ -1003,11 +1017,11 @@ export class LocalSqliteStorage implements IStorage {
         'SELECT favorite_json FROM favorites WHERE username = ? AND favorite_key = ?',
       ),
       setFavorite: this.db.prepare(
-        'INSERT OR REPLACE INTO favorites (username, favorite_key, favorite_json, title_norm, year_norm, year_number, search_text, saved_at, library_valid, projection_version) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+        'INSERT OR REPLACE INTO favorites (username, favorite_key, favorite_json, title_norm, year_norm, year_number, search_text, saved_at, library_valid, watch_status, watched_at, projection_version) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
       ),
       setFavoriteIfUnchanged: this.db.prepare(
         `UPDATE favorites
-         SET favorite_json = ?, title_norm = ?, year_norm = ?, year_number = ?, search_text = ?, saved_at = ?, library_valid = ?, projection_version = ?
+         SET favorite_json = ?, title_norm = ?, year_norm = ?, year_number = ?, search_text = ?, saved_at = ?, library_valid = ?, watch_status = ?, watched_at = ?, projection_version = ?
          WHERE username = ? AND favorite_key = ? AND favorite_json = ?`,
       ),
       getAllFavorites: this.db.prepare(
@@ -1019,6 +1033,7 @@ export class LocalSqliteStorage implements IStorage {
          WHERE username = ?
            AND ${SQLITE_STALE_FAVORITE_WHERE}
            AND ${SQLITE_NON_LIVE_FAVORITE_WHERE}
+             AND favorite_key NOT LIKE 'douban+%' AND favorite_key NOT LIKE 'bangumi+%'
          ORDER BY favorite_key ASC
          LIMIT ?`,
       ),
@@ -1029,6 +1044,7 @@ export class LocalSqliteStorage implements IStorage {
            AND favorite_key > ?
            AND ${SQLITE_STALE_FAVORITE_WHERE}
            AND ${SQLITE_NON_LIVE_FAVORITE_WHERE}
+             AND favorite_key NOT LIKE 'douban+%' AND favorite_key NOT LIKE 'bangumi+%'
          ORDER BY favorite_key ASC
          LIMIT ?`,
       ),
@@ -1302,7 +1318,7 @@ export class LocalSqliteStorage implements IStorage {
         'INSERT OR REPLACE INTO play_records (username, record_key, record_json) VALUES (?, ?, ?)',
       );
       const insertFavorite = this.db.prepare(
-        'INSERT OR REPLACE INTO favorites (username, favorite_key, favorite_json, title_norm, year_norm, year_number, search_text, saved_at, library_valid, projection_version) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+        'INSERT OR REPLACE INTO favorites (username, favorite_key, favorite_json, title_norm, year_norm, year_number, search_text, saved_at, library_valid, watch_status, watched_at, projection_version) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
       );
       const insertHistory = this.db.prepare(
         'INSERT OR REPLACE INTO search_history (username, keyword, sort_index) VALUES (?, ?, ?)',
@@ -1865,6 +1881,74 @@ export class LocalSqliteStorage implements IStorage {
       JSON.stringify(favorite),
       ...favoriteProjection(key, JSON.stringify(favorite)),
     );
+  }
+
+  async saveMergedFavorite(
+    userName: string,
+    key: string,
+    favorite: Favorite,
+  ): Promise<string> {
+    const username = normalizeUsername(userName);
+    return this.db
+      .transaction(() => {
+        const sql = mergeSelection(username, key, favorite);
+        const rows = this.db.prepare(sql.sql).all(...sql.params) as {
+          favorite_key: string;
+          favorite_json: string;
+        }[];
+        const merged = mergeFavorite(key, favorite, rows);
+        const json = JSON.stringify(merged.favorite);
+        this.stmts.setFavorite.run(
+          username,
+          merged.key,
+          json,
+          ...favoriteProjection(merged.key, json),
+        );
+        for (const remove of merged.removeKeys)
+          this.stmts.deleteFavorite.run(username, remove);
+        return merged.key;
+      })
+      .immediate();
+  }
+
+  async batchFavorites(
+    userName: string,
+    input: FavoriteBatchInput,
+  ): Promise<{ affected: number }> {
+    const username = normalizeUsername(userName);
+    const sql = batchSelection('sqlite', username, input);
+    return this.db
+      .transaction(() => {
+        const rows = this.db
+          .prepare(sql.sql)
+          .all(...sql.params) as LibraryRow[];
+        const now = Date.now();
+        for (const row of rows) {
+          if (input.action === 'remove')
+            this.stmts.deleteFavorite.run(username, row.favorite_key);
+          else {
+            const json = JSON.stringify(
+              applyFavoriteStatus(JSON.parse(row.favorite_json), input, now),
+            );
+            this.stmts.setFavorite.run(
+              username,
+              row.favorite_key,
+              json,
+              ...favoriteProjection(row.favorite_key, json),
+            );
+          }
+        }
+        return { affected: rows.length };
+      })
+      .immediate();
+  }
+
+  async getFavoriteForWork(userName: string, work: FavoriteWorkQuery) {
+    const sql = workSelection('sqlite', normalizeUsername(userName), work);
+    const row = this.db.prepare(sql.sql).get(...sql.params) as
+      | LibraryRow
+      | undefined;
+    return row ? libraryItem(row) : null;
   }
 
   async setFavoriteIfUnchanged(

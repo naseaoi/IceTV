@@ -1,6 +1,6 @@
 'use client';
 
-import { MessageSquareText, SearchX, Trash2 } from 'lucide-react';
+import { MessageSquareText, PencilLine, SearchX, Trash2 } from 'lucide-react';
 import Link from 'next/link';
 import {
   useCallback,
@@ -26,6 +26,11 @@ import { LibraryToolbar } from '@/components/LibraryToolbar';
 import ConfirmModal from '@/components/modals/ConfirmModal';
 import RatingBadge from '@/components/RatingBadge';
 import { useInfiniteScroll } from '@/features/douban/hooks/useInfiniteScroll';
+import { ReviewEditor } from '@/features/reviews/components/ReviewEditor';
+import {
+  type VideoReviewDraft,
+  useVideoReviews,
+} from '@/features/reviews/hooks/useVideoReviews';
 import { formatRelativeTime } from '@/lib/relative-time';
 import type { VideoReview } from '@/lib/types';
 import { parseStorageKey } from '@/lib/utils';
@@ -152,14 +157,55 @@ export function MyReviewsPageSkeleton() {
   );
 }
 
+function ReviewEditDialog({
+  review,
+  onClose,
+  onSaved,
+  onSavingChange,
+}: {
+  review: VideoReview;
+  onClose: () => void;
+  onSaved: (review: VideoReview) => void;
+  onSavingChange: (saving: boolean) => void;
+}) {
+  const { save } = useVideoReviews({
+    title: review.title,
+    year: review.year,
+    cover: review.cover,
+    doubanId: review.douban_id,
+    sourceKey: review.source_key,
+    summaryEnabled: false,
+    initialReview: review,
+  });
+  const submit = async (draft: VideoReviewDraft) => {
+    onSavingChange(true);
+    try {
+      onSaved(await save(draft));
+    } finally {
+      onSavingChange(false);
+    }
+  };
+  return (
+    <ReviewEditor
+      variant='modal'
+      initial={review}
+      workTitle={review.title}
+      onCancel={onClose}
+      onSubmit={submit}
+    />
+  );
+}
+
 function ReviewCard({
   review,
   deleting,
   onDelete,
+  onEdit,
 }: {
   review: VideoReview;
   deleting: boolean;
   onDelete: () => void;
+  onEdit: () => void;
 }) {
   const playUrl = reviewPlayUrl(review);
   return (
@@ -184,6 +230,15 @@ function ReviewCard({
               </span>
             )}
           </Link>
+          <button
+            type='button'
+            aria-label={`编辑对${review.title}的评价`}
+            disabled={deleting}
+            onClick={onEdit}
+            className='-mt-1 shrink-0 rounded-lg p-1.5 text-gray-400 transition hover:bg-gray-100 hover:text-gray-700 dark:hover:bg-white/10 dark:hover:text-gray-100'
+          >
+            <PencilLine className='h-4 w-4' />
+          </button>
           <button
             type='button'
             aria-label={`删除对${review.title}的评价`}
@@ -241,6 +296,8 @@ export default function MyReviewsPageClient() {
   const [filter, setFilter] = useState<ReviewFilter>('all');
   const [sort, setSort] = useState<ReviewSort>('updated');
   const [pending, setPending] = useState<VideoReview | null>(null);
+  const [editing, setEditing] = useState<VideoReview | null>(null);
+  const savingReview = useRef(false);
   const [deleting, setDeleting] = useState(false);
   const inFlight = useRef(false);
   const deferredQuery = useDeferredValue(query);
@@ -313,7 +370,10 @@ export default function MyReviewsPageClient() {
     };
   }, [version, requestPage]);
   useEffect(() => {
-    const update = () => setVersion((value) => value + 1);
+    const update = () => {
+      // 本页保存由返回值就地更新，事件仍交给其他页面同步。
+      if (!savingReview.current) setVersion((value) => value + 1);
+    };
     window.addEventListener(VIDEO_REVIEWS_UPDATED_EVENT, update);
     return () =>
       window.removeEventListener(VIDEO_REVIEWS_UPDATED_EVENT, update);
@@ -327,6 +387,45 @@ export default function MyReviewsPageClient() {
   const filterOptions = useMemo(() => buildFilterOptions(counts), [counts]);
   const selected = reviews;
   const narrowed = deferredQuery.trim() !== '' || filter !== 'all';
+
+  function applySavedReview(updated: VideoReview) {
+    if (!editing) return;
+    const previous = editing;
+    const matchesQuery = (review: VideoReview) =>
+      `${review.title} ${review.content}`
+        .toLowerCase()
+        .includes(deferredQuery.trim().toLowerCase());
+    const matchesFilter = (review: VideoReview, value: ReviewFilter) =>
+      value === 'all' ||
+      (value === 'public' && review.is_public) ||
+      (value === 'private' && !review.is_public) ||
+      (value === 'text' && review.rating === null);
+    setCounts(
+      (current) =>
+        current &&
+        (Object.fromEntries(
+          FILTERS.map(({ value }) => [
+            value,
+            current[value] +
+              Number(matchesQuery(updated) && matchesFilter(updated, value)) -
+              Number(matchesQuery(previous) && matchesFilter(previous, value)),
+          ]),
+        ) as Record<ReviewFilter, number> | null),
+    );
+    setReviews((current) =>
+      current.flatMap((review) => {
+        if (
+          review.title_norm !== previous.title_norm ||
+          review.year !== previous.year
+        )
+          return [review];
+        return matchesQuery(updated) && matchesFilter(updated, filter)
+          ? [updated]
+          : [];
+      }),
+    );
+    setEditing(null);
+  }
 
   async function remove() {
     if (!pending || inFlight.current) return;
@@ -395,6 +494,7 @@ export default function MyReviewsPageClient() {
             review={review}
             deleting={deleting}
             onDelete={() => setPending(review)}
+            onEdit={() => setEditing(review)}
           />
         ))}
       </ul>
@@ -469,6 +569,17 @@ export default function MyReviewsPageClient() {
             </button>
           )}
         </div>
+      )}
+      {editing && (
+        <ReviewEditDialog
+          key={`${editing.title_norm}:${editing.year}`}
+          review={editing}
+          onClose={() => setEditing(null)}
+          onSaved={applySavedReview}
+          onSavingChange={(saving) => {
+            savingReview.current = saving;
+          }}
+        />
       )}
       <ConfirmModal
         isOpen={pending !== null}

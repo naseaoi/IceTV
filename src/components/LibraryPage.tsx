@@ -63,7 +63,7 @@ export function LibraryPageFrame({
   children,
 }: {
   title: string;
-  subtitle: ReactNode;
+  subtitle?: ReactNode;
   action?: ReactNode;
   toolbar?: ReactNode;
   children: ReactNode;
@@ -71,13 +71,17 @@ export function LibraryPageFrame({
   return (
     <>
       <h2 className='sr-only'>{title}</h2>
-      {toolbar && <div className='mb-4'>{toolbar}</div>}
-      <div className='mb-5 flex min-h-9 items-center justify-between gap-4'>
-        <p className='min-w-0 text-sm text-gray-500 dark:text-gray-400'>
-          {subtitle}
-        </p>
-        {action}
-      </div>
+      {toolbar && (
+        <div className={subtitle || action ? 'mb-4' : 'mb-5'}>{toolbar}</div>
+      )}
+      {(subtitle || action) && (
+        <div className='mb-5 flex min-h-9 items-center justify-between gap-4'>
+          <p className='min-w-0 text-sm text-gray-500 dark:text-gray-400'>
+            {subtitle}
+          </p>
+          {action}
+        </div>
+      )}
       {children}
     </>
   );

@@ -57,6 +57,16 @@
 - `user_profiles`、`user_follows`、`video_review_likes`、`video_review_reports` 的删除、清空、替换、导入导出与 SQLite 大小写合并必须覆盖所有用户名列；删除评价同事务清理点赞与举报。导入昵称冲突置空、资料标识冲突重生成。
 - 保存评价、点赞、举报和关注的服务端写入口必须校验昵称，缺失返回 403 `NICKNAME_REQUIRED`；注册昵称与账号同事务保存，失败释放邀请码名额。
 
+## 收藏与观看状态
+
+- 有效观看状态（想看 / 在看 / 看过）与看过时间只在 `src/features/favorites/lib/library-storage.ts` 的 SQL 中推导：手动 `watch_status` 优先，其次评分或末集进度 ≥ 90% 判看过，有播放记录判在看。收藏库、按作品查询、批量匹配与公开收藏共用这段 SQL，**不要在前端或其他查询里另写推导**，否则计数与列表对不上。
+- 豆瓣 / Bangumi 目录收藏的键是 `douban+<id>` / `bangumi+<id>`，判定统一用 `isCatalogFavoriteSource()`（`src/lib/catalog-favorites.ts`）。它们没有播放源：点击按标题起播，元数据刷新等假设可播放源的路径须跳过；`douban` / `bangumi` 作为源 key 保留，后台、配置文件与订阅导入均拒绝。
+- 写入收藏时服务端按作品身份（`title_norm` + 年份）合并目录收藏与真实源收藏，最终键可能与提交的键不同。调用方以 `saveFavorite()` 返回的键为准，不要沿用本地拼出的键。
+- 状态修改与批量移出走 `POST /api/favorites/batch`；全选提交筛选条件加排除项，筛选语义与 `/api/favorites?format=library` 同一实现，不要先拉全量键再提交。
+- `user_profiles.favorites_public` 存公开等级 0–3（不公开 / 片单 / 加状态 / 加评分），接口字段为 `libraryVisibility`，本人始终按 3 级查看。公开评分只取 `is_public = 1` 的评价；精确年份的私密评价存在时不回落到空年份评价，避免泄露私密评分。
+- 标记与评分面板由根布局的 `WatchRecordProvider` 挂载，卡片菜单经 `useOpenWatchRecord()` 打开（`src/components/watch-record-context.ts`），未登录时返回 null 隐藏入口。新入口复用它，评价编辑复用 `src/features/reviews/`。
+- 卡片右键 / 长按菜单统一经 `buildCardActions()`（`src/components/card-actions/actions.tsx`）组装，顺序固定为播放 → 收藏 → 标记与评分 → 更新已读 / 追更 → 外部详情 → 删除记录；卡片只决定提供哪些项，不要在卡片里手排数组。
+
 ## 客户端 IP 与限流
 
 - `TRUSTED_PROXY_COUNT` 默认 0，此时 `getClientIp()` 回落到 `x-forwarded-for` 第一段，该值客户端可控。反代后不设它，注册限流可被伪造头绕过。

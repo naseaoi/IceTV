@@ -1,5 +1,8 @@
 import { act, fireEvent, render, screen } from '@testing-library/react';
 
+import type { CardAction } from '@/components/card-actions/actions';
+import { useOpenWatchRecord } from '@/components/watch-record-context';
+import { PlaybackPosterCard } from '@/features/playback-stats/components/PlaybackPosterCard';
 import { PlaybackStatsPanel } from '@/features/playback-stats/components/PlaybackStatsPanel';
 import {
   getCachedPlaybackPeriodSnapshot,
@@ -10,6 +13,11 @@ import type {
   PlaybackPeriodType,
   PlaybackTopWork,
 } from '@/features/playback-stats/types';
+
+const openWatchRecord = jest.fn();
+jest.mock('@/components/watch-record-context', () => ({
+  useOpenWatchRecord: jest.fn(),
+}));
 
 const push = jest.fn();
 jest.mock('next/navigation', () => ({ useRouter: () => ({ push }) }));
@@ -90,6 +98,7 @@ function stats(
 
 beforeEach(() => {
   jest.clearAllMocks();
+  jest.mocked(useOpenWatchRecord).mockReturnValue(openWatchRecord);
   jest.mocked(getCachedPlaybackPeriodSnapshot).mockReturnValue(null);
 });
 
@@ -197,5 +206,49 @@ it('常看海报右键在光标处打开操作菜单', async () => {
   });
   expect(
     payload.actions.map((action: { label: string }) => action.label),
-  ).toEqual(['播放', '收藏']);
+  ).toEqual(['播放', '收藏', '标记与评分']);
+  const actions: CardAction[] = payload.actions;
+  actions.find(({ id }) => id === 'watch-record')?.onClick();
+  expect(openWatchRecord).toHaveBeenCalledWith({
+    source: 'src',
+    id: '碧蓝之海',
+    title: '碧蓝之海',
+    year: '2024',
+    cover: '',
+    sourceName: '',
+    totalEpisodes: undefined,
+    searchTitle: undefined,
+  });
 });
+
+it.each(['无 Provider', '无目标'] as const)(
+  '观看海报在%s时隐藏标记与评分',
+  async (scenario) => {
+    if (scenario === '无 Provider') {
+      jest.mocked(useOpenWatchRecord).mockReturnValue(null);
+    }
+    render(
+      <PlaybackPosterCard
+        title='测试影片'
+        cover=''
+        source={scenario === '无目标' ? '' : 'src'}
+        videoId='1'
+        subtitle='观看记录'
+        ariaLabel='播放 测试影片'
+        onPlay={jest.fn()}
+        onDelete={jest.fn()}
+      />,
+    );
+    await act(async () => {
+      fireEvent.contextMenu(
+        screen.getByRole('button', { name: '播放 测试影片' }),
+      );
+    });
+    const actions: CardAction[] = showActionSheet.mock.calls[0][1].actions;
+    expect(actions.map(({ label }) => label)).toEqual(
+      scenario === '无目标'
+        ? ['播放', '删除记录']
+        : ['播放', '收藏', '删除记录'],
+    );
+  },
+);

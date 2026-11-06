@@ -1,6 +1,7 @@
 import { act, fireEvent, render, screen } from '@testing-library/react';
 
 import {
+  buildCardActions,
   deleteRecordAction,
   favoriteAction,
   playAction,
@@ -27,6 +28,100 @@ function mockPointer(fine: boolean) {
 }
 
 const pointAnchor = { top: 100, left: 100, width: 0, height: 0 };
+
+describe('buildCardActions', () => {
+  it('按固定顺序组装全部操作并保留回调、分组和元信息', () => {
+    const play = jest.fn();
+    const favorite = jest.fn();
+    const watchRecord = jest.fn();
+    const markRead = jest.fn();
+    const tracking = jest.fn();
+    const remove = jest.fn();
+    const open = jest.spyOn(window, 'open').mockImplementation(() => null);
+    const actions = buildCardActions({
+      remove,
+      external: { url: 'https://bgm.tv/subject/1', bangumi: true },
+      updates: {
+        hasUpdate: true,
+        onMarkRead: markRead,
+        tracking: true,
+        onToggleTracking: tracking,
+      },
+      watchRecord,
+      favorite: { favorited: true, onToggle: favorite },
+      play: { onClick: play, live: true, meta: '第 3 集' },
+    });
+
+    expect(actions.map(({ id }) => id)).toEqual([
+      'play',
+      'favorite',
+      'watch-record',
+      'mark-update-read',
+      'tracking',
+      'external-detail',
+      'delete',
+    ]);
+    expect(actions.map(({ label }) => label)).toEqual([
+      '观看直播',
+      '取消收藏',
+      '标记与评分',
+      '标记更新已读',
+      '取消追更',
+      'Bangumi 详情',
+      '删除记录',
+    ]);
+    expect(actions.map(({ group }) => group)).toEqual([
+      'play',
+      'manage',
+      'manage',
+      'manage',
+      'manage',
+      'link',
+      'danger',
+    ]);
+    expect(actions[0].meta).toBe('第 3 集');
+    expect(actions[6].tone).toBe('danger');
+    actions.forEach((action) => action.onClick());
+    [play, favorite, watchRecord, markRead, tracking, remove].forEach(
+      (handler) => {
+        expect(handler).toHaveBeenCalledTimes(1);
+      },
+    );
+    expect(open).toHaveBeenCalledWith(
+      'https://bgm.tv/subject/1',
+      '_blank',
+      'noopener,noreferrer',
+    );
+    open.mockRestore();
+  });
+
+  it('省略缺失和 null 选项，无更新时仅保留追更', () => {
+    expect(buildCardActions({})).toEqual([]);
+    const actions = buildCardActions({
+      watchRecord: null,
+      external: null,
+      updates: {
+        hasUpdate: false,
+        onMarkRead: jest.fn(),
+        tracking: false,
+        onToggleTracking: jest.fn(),
+      },
+    });
+    expect(actions.map(({ label }) => label)).toEqual(['追更']);
+  });
+
+  it('收藏状态为 null 时生成禁用操作', () => {
+    const actions = buildCardActions({
+      favorite: { favorited: null, onToggle: jest.fn() },
+    });
+    expect(actions).toHaveLength(1);
+    expect(actions[0]).toMatchObject({
+      id: 'favorite',
+      label: '收藏',
+      disabled: true,
+    });
+  });
+});
 
 describe('CardActionOverlay', () => {
   const originalMatchMedia = window.matchMedia;

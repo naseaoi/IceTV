@@ -1119,7 +1119,7 @@ describe('sqlite social username migration', () => {
         profile_id: 'Alice0123456',
         nickname: 'Alice',
         avatar_seed: null,
-        favorites_public: true,
+        favorites_public: 1 as const,
         updated_at: 123,
       });
       await storage.updateUserProfile('alice', { avatarSeed: 'Avatar012345' });

@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 
 import { isGuardFailure, requireOwner } from '@/lib/api-auth';
 import { configConflictResponse } from '@/lib/api-config-error';
+import { isCatalogFavoriteSource } from '@/lib/catalog-favorites';
 import {
   getConfig,
   invalidateConfigCache,
@@ -46,6 +47,11 @@ export async function POST(request: NextRequest) {
     }
     try {
       const parsed = JSON.parse(configFile);
+      if (Object.keys(parsed?.api_site ?? {}).some(isCatalogFavoriteSource))
+        return NextResponse.json(
+          { error: '目录收藏标识不能用于播放源' },
+          { status: 400 },
+        );
       if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed))
         throw new Error();
     } catch {

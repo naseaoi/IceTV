@@ -14,7 +14,19 @@ import {
   adminUserPage,
   adminUserStatements,
 } from '@/features/admin/services/userQueryStorage';
+import {
+  applyFavoriteStatus,
+  batchSelection,
+  mergeFavorite,
+  mergeSelection,
+  workSelection,
+} from '@/features/favorites/lib/library-mutations';
+import type {
+  FavoriteBatchInput,
+  FavoriteWorkQuery,
+} from '@/features/favorites/lib/library-query';
 import type { FavoriteLibraryQuery } from '@/features/favorites/lib/library-query';
+import { libraryItem } from '@/features/favorites/lib/library-storage';
 import {
   type LibraryCountsRow,
   type LibraryRow,
@@ -661,6 +673,8 @@ export class MySqlStorage implements IStorage {
       year_number: 'DOUBLE',
       search_text: 'LONGTEXT COLLATE utf8mb4_bin',
       saved_at: 'DOUBLE',
+      watch_status: 'VARCHAR(16) COLLATE utf8mb4_bin',
+      watched_at: 'DOUBLE',
       library_valid: 'TINYINT NOT NULL DEFAULT 0',
       projection_version: 'INT NOT NULL DEFAULT 0',
     })) {
@@ -693,13 +707,13 @@ export class MySqlStorage implements IStorage {
     }
     for (;;) {
       const [rows] = await this.pool.query<RowDataPacket[]>(
-        'SELECT username, favorite_key, favorite_json FROM favorites WHERE projection_version = 0 LIMIT 250',
+        'SELECT username, favorite_key, favorite_json FROM favorites WHERE projection_version < 2 LIMIT 250',
       );
       if (rows.length === 0) break;
       for (const row of rows) {
         // CAS 防止回填覆盖同时发生的收藏更新；另一实例已经完成的行同样跳过。
         await this.pool.execute(
-          `UPDATE favorites SET ${FAVORITE_PROJECTION_COLUMNS.map((column) => `${column} = ?`).join(', ')} WHERE username = ? AND favorite_key = ? AND projection_version = 0 AND BINARY favorite_json = BINARY ?`,
+          `UPDATE favorites SET ${FAVORITE_PROJECTION_COLUMNS.map((column) => `${column} = ?`).join(', ')} WHERE username = ? AND favorite_key = ? AND projection_version < 2 AND BINARY favorite_json = BINARY ?`,
           [
             ...favoriteProjection(row.favorite_key, row.favorite_json),
             row.username,
@@ -999,7 +1013,7 @@ export class MySqlStorage implements IStorage {
     const username = normalizeUsername(userName);
     await this.pool.execute(
       `INSERT INTO favorites (username, favorite_key, favorite_json, ${FAVORITE_PROJECTION_COLUMNS.join(', ')})
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
        ON DUPLICATE KEY UPDATE favorite_json = VALUES(favorite_json), ${FAVORITE_PROJECTION_COLUMNS.map((column) => `${column} = VALUES(${column})`).join(', ')}`,
       [
         username,
@@ -1008,6 +1022,114 @@ export class MySqlStorage implements IStorage {
         ...favoriteProjection(key, JSON.stringify(favorite)),
       ],
     );
+  }
+
+  async saveMergedFavorite(
+    userName: string,
+    key: string,
+    favorite: Favorite,
+  ): Promise<string> {
+    await this.ensureInitialized();
+    const username = normalizeUsername(userName);
+    await this.ensureUserProfile(username);
+    const connection = await this.pool.getConnection();
+    try {
+      await connection.beginTransaction();
+      // 资料行充当每用户写锁，空收藏库中的并发目录/真实源写入同样串行。
+      await connection.query(
+        'SELECT username FROM user_profiles WHERE username = ? FOR UPDATE',
+        [username],
+      );
+      const sql = mergeSelection(username, key, favorite);
+      const [rows] = await connection.query<
+        (RowDataPacket & { favorite_key: string; favorite_json: string })[]
+      >(`${sql.sql} FOR UPDATE`, sql.params);
+      const merged = mergeFavorite(key, favorite, rows);
+      const json = JSON.stringify(merged.favorite);
+      await connection.execute(
+        `INSERT INTO favorites (username, favorite_key, favorite_json, ${FAVORITE_PROJECTION_COLUMNS.join(', ')}) VALUES (${Array(
+          3 + FAVORITE_PROJECTION_COLUMNS.length,
+        )
+          .fill('?')
+          .join(
+            ',',
+          )}) ON DUPLICATE KEY UPDATE favorite_json = VALUES(favorite_json), ${FAVORITE_PROJECTION_COLUMNS.map((column) => `${column} = VALUES(${column})`).join(', ')}`,
+        [username, merged.key, json, ...favoriteProjection(merged.key, json)],
+      );
+      for (const remove of merged.removeKeys)
+        await connection.execute(
+          'DELETE FROM favorites WHERE username = ? AND favorite_key = ?',
+          [username, remove],
+        );
+      await connection.commit();
+      return merged.key;
+    } catch (error) {
+      await connection.rollback();
+      throw error;
+    } finally {
+      connection.release();
+    }
+  }
+
+  async batchFavorites(
+    userName: string,
+    input: FavoriteBatchInput,
+  ): Promise<{ affected: number }> {
+    await this.ensureInitialized();
+    const username = normalizeUsername(userName);
+    const sql = batchSelection('mysql', username, input);
+    await this.ensureUserProfile(username);
+    const connection = await this.pool.getConnection();
+    try {
+      await connection.beginTransaction();
+      await connection.query(
+        'SELECT username FROM user_profiles WHERE username = ? FOR UPDATE',
+        [username],
+      );
+      const [rows] = await connection.query<(LibraryRow & RowDataPacket)[]>(
+        `${sql.sql} FOR UPDATE`,
+        sql.params,
+      );
+      const now = Date.now();
+      for (const row of rows) {
+        if (input.action === 'remove')
+          await connection.execute(
+            'DELETE FROM favorites WHERE username = ? AND favorite_key = ?',
+            [username, row.favorite_key],
+          );
+        else {
+          const json = JSON.stringify(
+            applyFavoriteStatus(JSON.parse(row.favorite_json), input, now),
+          );
+          await connection.execute(
+            `UPDATE favorites SET favorite_json = ?, ${FAVORITE_PROJECTION_COLUMNS.map((column) => `${column} = ?`).join(', ')} WHERE username = ? AND favorite_key = ?`,
+            [
+              json,
+              ...favoriteProjection(row.favorite_key, json),
+              username,
+              row.favorite_key,
+            ],
+          );
+        }
+      }
+      await connection.commit();
+      return { affected: rows.length };
+    } catch (error) {
+      await connection.rollback();
+      throw error;
+    } finally {
+      connection.release();
+    }
+  }
+
+  async getFavoriteForWork(userName: string, work: FavoriteWorkQuery) {
+    await this.ensureInitialized();
+    const sql = workSelection('mysql', normalizeUsername(userName), work);
+    const [rows] = await this.pool.query<(LibraryRow & RowDataPacket)[]>(
+      sql.sql,
+      sql.params,
+    );
+    return rows[0] ? libraryItem(rows[0]) : null;
   }
 
   async setFavoriteIfUnchanged(
@@ -1076,6 +1198,7 @@ export class MySqlStorage implements IStorage {
              AND favorite_key > ?
              AND ${MYSQL_STALE_FAVORITE_WHERE}
              AND ${MYSQL_NON_LIVE_FAVORITE_WHERE}
+             AND favorite_key NOT LIKE 'douban+%' AND favorite_key NOT LIKE 'bangumi+%'
            ORDER BY favorite_key ASC
            LIMIT ?`
         : `SELECT favorite_key, favorite_json
@@ -1083,6 +1206,7 @@ export class MySqlStorage implements IStorage {
            WHERE username = ?
              AND ${MYSQL_STALE_FAVORITE_WHERE}
              AND ${MYSQL_NON_LIVE_FAVORITE_WHERE}
+             AND favorite_key NOT LIKE 'douban+%' AND favorite_key NOT LIKE 'bangumi+%'
            ORDER BY favorite_key ASC
            LIMIT ?`,
       hasCursor

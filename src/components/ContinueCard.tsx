@@ -6,12 +6,8 @@ import { useCallback, useEffect, useId, useState } from 'react';
 
 import {
   type CardActionAnchor,
-  deleteRecordAction,
-  favoriteAction,
+  buildCardActions,
   getEpisodeMeta,
-  markUpdateReadAction,
-  playAction,
-  trackingAction,
 } from '@/components/card-actions/actions';
 import { useCardInteractionManager } from '@/components/CardInteractionProvider';
 import {
@@ -27,6 +23,7 @@ import {
 } from '@/components/continue-card/layout';
 import { buildContinuePlayUrl } from '@/components/continue-card/play-url';
 import CoverImage from '@/components/CoverImage';
+import { useOpenWatchRecord } from '@/components/watch-record-context';
 import { warmupDanmakuForNavigation } from '@/features/play/lib/danmaku/navigation-warmup';
 import { useLongPress } from '@/hooks/useLongPress';
 import { getAuthInfoFromBrowserCookie } from '@/lib/auth.client';
@@ -91,6 +88,7 @@ export default function ContinueCard({
 }: ContinueCardProps) {
   const router = useRouter();
   const interactionId = useId();
+  const openWatchRecord = useOpenWatchRecord();
   const { showActionSheet, showConfirm } = useCardInteractionManager();
   const [visibleHasUpdate, setVisibleHasUpdate] = useState(hasUpdate);
   const [visibleTrackingEnabled, setVisibleTrackingEnabled] =
@@ -187,32 +185,50 @@ export default function ContinueCard({
       showActionSheet(interactionId, {
         title,
         poster,
-        actions: [
-          playAction({
+        actions: buildCardActions({
+          play: {
             meta: getEpisodeMeta(currentEpisode, totalEpisodes),
             onClick: handlePlay,
-          }),
-          favoriteAction(favorited, async () => {
-            if (favorited) {
-              await deleteFavorite(source, id);
-              return;
-            }
-            await saveFavorite(source, id, {
-              title,
-              source_name: sourceName || '',
-              year: year || '',
-              cover: poster,
-              total_episodes: totalEpisodes,
-              save_time: Date.now(),
-              search_title: query || '',
-            });
-          }),
-          ...(visibleHasUpdate
-            ? [markUpdateReadAction(handleMarkUpdateRead)]
-            : []),
-          trackingAction(visibleTrackingEnabled, handleToggleTracking),
-          deleteRecordAction(handleDelete),
-        ],
+          },
+          favorite: {
+            favorited,
+            onToggle: async () => {
+              if (favorited) {
+                await deleteFavorite(source, id);
+                return;
+              }
+              await saveFavorite(source, id, {
+                title,
+                source_name: sourceName || '',
+                year: year || '',
+                cover: poster,
+                total_episodes: totalEpisodes,
+                save_time: Date.now(),
+                search_title: query || '',
+              });
+            },
+          },
+          watchRecord: openWatchRecord
+            ? () =>
+                openWatchRecord({
+                  source,
+                  id,
+                  title,
+                  year,
+                  cover: poster,
+                  sourceName: sourceName || '',
+                  totalEpisodes,
+                  searchTitle: query || undefined,
+                })
+            : null,
+          updates: {
+            hasUpdate: visibleHasUpdate,
+            onMarkRead: handleMarkUpdateRead,
+            tracking: visibleTrackingEnabled,
+            onToggleTracking: handleToggleTracking,
+          },
+          remove: handleDelete,
+        }),
         sourceName: sourceName?.trim() || source,
         anchorRect: anchorRect ?? null,
       });
@@ -233,6 +249,7 @@ export default function ContinueCard({
       handleDelete,
       handleMarkUpdateRead,
       handleToggleTracking,
+      openWatchRecord,
       visibleHasUpdate,
       visibleTrackingEnabled,
     ],

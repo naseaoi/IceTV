@@ -1,6 +1,24 @@
-import { render, screen } from '@testing-library/react';
+import { act, fireEvent, render, screen } from '@testing-library/react';
 
+import type { CardAction } from '@/components/card-actions/actions';
 import ContinueCard from '@/components/ContinueCard';
+import { useOpenWatchRecord } from '@/components/watch-record-context';
+
+const showActionSheet = jest.fn();
+const openWatchRecord = jest.fn();
+
+jest.mock('@/components/watch-record-context', () => ({
+  useOpenWatchRecord: jest.fn(),
+}));
+
+jest.mock('@/lib/db.client', () => ({
+  deleteFavorite: jest.fn(),
+  deletePlayRecord: jest.fn(),
+  isFavorited: jest.fn().mockResolvedValue(false),
+  markPlayRecordUpdateRead: jest.fn(),
+  saveFavorite: jest.fn(),
+  setPlayRecordTracking: jest.fn(),
+}));
 
 jest.mock('next/navigation', () => ({
   useRouter: () => ({ push: jest.fn() }),
@@ -8,7 +26,7 @@ jest.mock('next/navigation', () => ({
 
 jest.mock('@/components/CardInteractionProvider', () => ({
   useCardInteractionManager: () => ({
-    showActionSheet: jest.fn(),
+    showActionSheet,
     showConfirm: jest.fn(),
   }),
 }));
@@ -34,6 +52,63 @@ const baseProps = {
 };
 
 describe('ContinueCard', () => {
+  beforeEach(() => {
+    jest.clearAllMocks();
+    jest.mocked(useOpenWatchRecord).mockReturnValue(openWatchRecord);
+  });
+
+  it('右键菜单按顺序包含标记与评分，并传递作品信息', async () => {
+    render(
+      <ContinueCard
+        {...baseProps}
+        year='2026'
+        sourceName='测试源站'
+        query='搜索标题'
+        hasUpdate
+      />,
+    );
+    await act(async () => {
+      fireEvent.contextMenu(
+        screen.getByRole('link', { name: '继续播放 测试影片' }),
+      );
+    });
+    const actions: CardAction[] = showActionSheet.mock.calls[0][1].actions;
+    expect(actions.map(({ label }) => label)).toEqual([
+      '播放',
+      '收藏',
+      '标记与评分',
+      '标记更新已读',
+      '取消追更',
+      '删除记录',
+    ]);
+    actions.find(({ id }) => id === 'watch-record')?.onClick();
+    expect(openWatchRecord).toHaveBeenCalledWith({
+      source: 'source-key',
+      id: 'video-id',
+      title: '测试影片',
+      year: '2026',
+      cover: '/poster.webp',
+      sourceName: '测试源站',
+      totalEpisodes: 12,
+      searchTitle: '搜索标题',
+    });
+  });
+
+  it('无 Provider 时隐藏标记与评分', async () => {
+    jest.mocked(useOpenWatchRecord).mockReturnValue(null);
+    render(<ContinueCard {...baseProps} />);
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: '更多操作' }));
+    });
+    const actions: CardAction[] = showActionSheet.mock.calls[0][1].actions;
+    expect(actions.map(({ label }) => label)).toEqual([
+      '播放',
+      '收藏',
+      '取消追更',
+      '删除记录',
+    ]);
+  });
+
   it('有集数时在集数下方显示源站名', () => {
     render(<ContinueCard {...baseProps} sourceName='测试源站' />);
 

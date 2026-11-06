@@ -2,26 +2,28 @@ import 'server-only';
 
 import { NextRequest, NextResponse } from 'next/server';
 
+import { InvalidFavoriteLibraryQuery } from '@/features/favorites/lib/library-storage';
 import { isGuardFailure, requireActiveUser } from '@/lib/api-auth';
+import { isFavoriteWatchStatus } from '@/lib/catalog-favorites';
 import { getClientIp } from '@/lib/client-ip';
 import { db } from '@/lib/db';
 import { FixedWindowRateLimiter } from '@/lib/fixed-window-rate-limit';
-import {
-  NicknameTakenError,
-  parseSocialCursor,
-  socialCursor,
-} from '@/lib/review-social-storage';
-import type { PublicFavoriteItem, UserProfile } from '@/lib/types';
+import { NicknameTakenError } from '@/lib/review-social-storage';
+import type {
+  LibraryVisibility,
+  PublicFavoriteItem,
+  UserProfile,
+} from '@/lib/types';
 import {
   ProfileValidationError,
   validateAvatarSeed,
+  validateLibraryVisibility,
   validateNickname,
 } from '@/lib/user-profile';
 import { normalizeUsername } from '@/lib/username';
 import { ReviewValidationError } from '@/lib/video-reviews';
 
 const nicknameLimiter = new FixedWindowRateLimiter(30, 60_000);
-const PUBLIC_FAVORITES_PAGE_SIZE = 30;
 
 export function socialJson(value: unknown, status = 200) {
   return NextResponse.json(value, {
@@ -35,7 +37,8 @@ export function socialFailure(error: unknown) {
     return socialJson({ error: '昵称已被使用' }, 409);
   if (
     error instanceof ReviewValidationError ||
-    error instanceof ProfileValidationError
+    error instanceof ProfileValidationError ||
+    error instanceof InvalidFavoriteLibraryQuery
   )
     return socialJson({ error: error.message }, 400);
   console.error('用户社交操作失败', error);
@@ -69,7 +72,7 @@ function ownProfile(profile: UserProfile) {
     profileId: profile.profile_id,
     nickname: profile.nickname,
     avatarSeed: profile.avatar_seed,
-    favoritesPublic: profile.favorites_public,
+    libraryVisibility: profile.favorites_public,
   };
 }
 
@@ -83,13 +86,14 @@ export async function handleProfile(request: NextRequest) {
     if (
       body.nickname === undefined &&
       body.favoritesPublic === undefined &&
+      body.libraryVisibility === undefined &&
       body.avatarSeed === undefined
     )
       throw new ReviewValidationError('请提供要修改的资料');
     const patch: {
       nickname?: string;
       avatarSeed?: string | null;
-      favoritesPublic?: boolean;
+      libraryVisibility?: LibraryVisibility;
     } = {};
     if (body.nickname !== undefined)
       patch.nickname = validateNickname(body.nickname, {
@@ -97,10 +101,14 @@ export async function handleProfile(request: NextRequest) {
       }).nickname;
     if (body.avatarSeed !== undefined)
       patch.avatarSeed = validateAvatarSeed(body.avatarSeed);
-    if (body.favoritesPublic !== undefined) {
+    if (body.libraryVisibility !== undefined) {
+      patch.libraryVisibility = validateLibraryVisibility(
+        body.libraryVisibility,
+      );
+    } else if (body.favoritesPublic !== undefined) {
       if (typeof body.favoritesPublic !== 'boolean')
         throw new ReviewValidationError('收藏公开状态必须为布尔值');
-      patch.favoritesPublic = body.favoritesPublic;
+      patch.libraryVisibility = body.favoritesPublic ? 1 : 0;
     }
     return socialJson(
       ownProfile(await db.updateUserProfile(guard.username, patch)),
@@ -185,21 +193,25 @@ export async function handlePublicUser(
         await db.getUserFollowPage(profile.username, type, cursor),
       );
     }
+    const isSelf = profile.username === normalizeUsername(guard.username);
+    const libraryVisibility = isSelf ? 3 : profile.favorites_public;
+    if (libraryVisibility === 0)
+      return socialJson({ hidden: true, libraryVisibility });
+    const filter = request.nextUrl.searchParams.get('filter') ?? 'all';
     if (
-      !profile.favorites_public &&
-      profile.username !== normalizeUsername(guard.username)
+      filter !== 'all' &&
+      (!isFavoriteWatchStatus(filter) || libraryVisibility < 2)
     )
-      return socialJson({ hidden: true });
-    const after = parseSocialCursor(cursor);
-    const page = await db.getFavoritePage(
-      profile.username,
-      PUBLIC_FAVORITES_PAGE_SIZE,
-      after?.[0],
-      after?.[1],
-      false,
-    );
+      throw new ReviewValidationError('当前片单不支持此筛选');
+    const page = await db.getFavoriteLibraryPage(profile.username, {
+      query: '',
+      filter: filter as 'all' | import('@/lib/types').FavoriteWatchStatus,
+      sort: 'saved',
+      cursor,
+      profileScope: isSelf ? 'self' : 'public',
+    });
     const items: PublicFavoriteItem[] = page.items.map(
-      ({ key, favorite: f }) => ({
+      ({ key, favorite: f, watchStatus, myRating }) => ({
         key,
         title: f.title,
         year: f.year,
@@ -208,16 +220,15 @@ export async function handlePublicUser(
         total_episodes: f.total_episodes,
         search_title: f.search_title,
         save_time: f.save_time,
+        ...(libraryVisibility >= 2 ? { watchStatus } : {}),
+        ...(libraryVisibility >= 3 ? { rating: myRating } : {}),
       }),
     );
-    const lastItem = items.at(-1);
     return socialJson({
       hidden: false,
+      libraryVisibility,
       items,
-      nextCursor:
-        page.nextCursor && lastItem
-          ? socialCursor([lastItem.save_time, lastItem.key])
-          : null,
+      nextCursor: page.nextCursor,
     });
   } catch (error) {
     return socialFailure(error);

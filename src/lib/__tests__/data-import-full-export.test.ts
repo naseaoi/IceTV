@@ -71,7 +71,7 @@ describe('data import full export fields', () => {
       profile_id: 'AbCdEf012345',
       avatar_seed: 'Avatar012345',
       nickname: 'Demo',
-      favorites_public: true,
+      favorites_public: 1,
       updated_at: 100,
     };
     user.follows = [
@@ -483,3 +483,72 @@ describe('data import full export fields', () => {
     );
   });
 });
+
+it('完整备份导入保留观看状态，丢弃非法字段', async () => {
+  const data = createImportData();
+  const favorite = {
+    title: 'Demo',
+    source_name: '豆瓣',
+    total_episodes: 0,
+    year: '2026',
+    cover: '',
+    save_time: 100,
+  };
+  data.data.userData['demo-user'].favorites = {
+    'douban+1': { ...favorite, watch_status: 'completed', watched_at: 123 },
+    'douban+2': { ...favorite, watch_status: 'planned', watched_at: 123 },
+    'douban+3': { ...favorite, watch_status: 'completed', watched_at: -1 },
+  };
+  const parsed = await parseImportData(data);
+  expect(
+    parsed.snapshot.userData['demo-user'].favorites['douban+1'],
+  ).toMatchObject({
+    watch_status: 'completed',
+    watched_at: 123,
+  });
+  expect(
+    parsed.snapshot.userData['demo-user'].favorites['douban+2'].watched_at,
+  ).toBeUndefined();
+  expect(
+    parsed.snapshot.userData['demo-user'].favorites['douban+3'].watched_at,
+  ).toBeUndefined();
+});
+
+it.each([
+  [true, 1],
+  [false, 0],
+  [0, 0],
+  [1, 1],
+  [2, 2],
+  [3, 3],
+])('导入兼容公开等级 %j → %s', async (input, expected) => {
+  const data = createImportData();
+  data.data.userData['demo-user'].profile = {
+    username: 'demo-user',
+    profile_id: 'AbCdEf012345',
+    nickname: null,
+    avatar_seed: null,
+    favorites_public: input as import('@/lib/types').LibraryVisibility,
+    updated_at: 100,
+  };
+  const result = await parseImportData(data);
+  expect(result.snapshot.userData['demo-user'].profile?.favorites_public).toBe(
+    expected,
+  );
+});
+
+it.each([-1, 4, 1.5, 'true', null])(
+  '导入拒绝非法公开等级 %j',
+  async (input) => {
+    const data = createImportData();
+    data.data.userData['demo-user'].profile = {
+      username: 'demo-user',
+      profile_id: 'AbCdEf012345',
+      nickname: null,
+      avatar_seed: null,
+      favorites_public: input as import('@/lib/types').LibraryVisibility,
+      updated_at: 100,
+    };
+    await expect(parseImportData(data)).rejects.toThrow('收藏公开等级无效');
+  },
+);

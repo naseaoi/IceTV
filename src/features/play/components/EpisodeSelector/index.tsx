@@ -26,8 +26,8 @@ import {
 import { SectionTitle } from '@/features/play/components/EpisodeSelector/SectionTitle';
 import { TabBar } from '@/features/play/components/EpisodeSelector/TabBar';
 import { useDoubanRating } from '@/features/play/hooks/useDoubanRating';
-import { useVideoReviews } from '@/features/play/hooks/useVideoReviews';
 import type { DanmakuReloadHandler } from '@/features/play/lib/danmaku/types';
+import { useVideoReviews } from '@/features/reviews/hooks/useVideoReviews';
 import {
   collapseSourcesForDisplay,
   getSourceBundle,

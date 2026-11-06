@@ -173,3 +173,20 @@ describe('useVideoReviews', () => {
     await waitFor(() => expect(mockedFetchSummary).toHaveBeenCalledTimes(2));
   });
 });
+
+it('复用列表已有评价，保存返回服务端记录供调用方就地更新', async () => {
+  mockedFetchMy.mockClear();
+  const updated = { ...review, rating: 9, updated_at: 10 };
+  mockedSave.mockResolvedValueOnce(updated);
+  const { result } = renderHook(() =>
+    useVideoReviews({ ...baseOptions, initialReview: review }),
+  );
+  expect(result.current.myReview).toEqual(review);
+  expect(mockedFetchMy).not.toHaveBeenCalled();
+  await act(async () => {
+    expect(
+      await result.current.save({ rating: 9, content: '', is_public: true }),
+    ).toEqual(updated);
+  });
+  expect(result.current.myReview).toEqual(updated);
+});

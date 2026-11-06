@@ -360,10 +360,20 @@ class DbManager {
     source: string,
     id: string,
     favorite: Favorite,
-  ): Promise<void> {
+  ): Promise<string> {
     const key = generateStorageKey(source, id);
     const storage = await this.getStorage();
-    await storage.setFavorite(userName, key, favorite);
+    return storage.saveMergedFavorite(userName, key, favorite);
+  }
+
+  async batchFavorites(...args: Parameters<IStorage['batchFavorites']>) {
+    return (await this.getStorage()).batchFavorites(...args);
+  }
+
+  async getFavoriteForWork(
+    ...args: Parameters<IStorage['getFavoriteForWork']>
+  ) {
+    return (await this.getStorage()).getFavoriteForWork(...args);
   }
 
   async saveFavoriteIfUnchanged(

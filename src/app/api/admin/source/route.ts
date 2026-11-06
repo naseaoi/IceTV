@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 
 import { isGuardFailure, requireAdmin } from '@/lib/api-auth';
 import { configConflictResponse } from '@/lib/api-config-error';
+import { isCatalogFavoriteSource } from '@/lib/catalog-favorites';
 import { getConfig, invalidateConfigCache, saveConfig } from '@/lib/config';
 import {
   buildConfigFileFromAdminConfig,
@@ -101,6 +102,11 @@ export async function POST(request: NextRequest) {
         if (!cleanKey || !cleanName || !cleanApi) {
           return NextResponse.json({ error: '缺少必要参数' }, { status: 400 });
         }
+        if (isCatalogFavoriteSource(cleanKey))
+          return NextResponse.json(
+            { error: '该标识用于目录收藏，请使用其他源标识' },
+            { status: 400 },
+          );
         const sourceApi = await validateSourceApiUrl(cleanApi);
         if (!sourceApi.ok) {
           return sourceApi.response;
@@ -132,6 +138,11 @@ export async function POST(request: NextRequest) {
         if (!cleanKey || !cleanName || !cleanApi) {
           return NextResponse.json({ error: '缺少必要参数' }, { status: 400 });
         }
+        if (isCatalogFavoriteSource(cleanKey))
+          return NextResponse.json(
+            { error: '该标识用于目录收藏，请使用其他源标识' },
+            { status: 400 },
+          );
         const sourceApi = await validateSourceApiUrl(cleanApi);
         if (!sourceApi.ok) {
           return sourceApi.response;

@@ -43,9 +43,12 @@ const page = (
         save_time: 1,
       },
       myRating: 8,
+      watchStatus: 'planned',
+      watchStatusManual: false,
+      watchedAt: null,
     },
   ],
-  counts: { all: 100, watched: 0, unwatched: 100, reviewed: 0 },
+  counts: { all: 100, planned: 100, watching: 0, completed: 0, reviewed: 0 },
   total: 100,
   libraryTotal: 100,
   nextCursor,
@@ -127,4 +130,35 @@ it('invalidates on favorite, playback and review updates and exposes recoverable
   await waitFor(() => expect(result.current.error).toBe('network failure'));
   act(() => result.current.retry());
   await waitFor(() => expect(result.current.error).toBeNull());
+});
+
+it('keeps current results while switching filters and reuses first-page snapshots', async () => {
+  let resolveReviewed!: (value: ReturnType<typeof response>) => void;
+  mockFetch
+    .mockResolvedValueOnce(response(page('all')))
+    .mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          resolveReviewed = resolve;
+        }),
+    )
+    .mockImplementationOnce(() => new Promise(() => {}));
+  const { result, rerender } = renderHook(
+    ({ filter }: { filter: 'all' | 'reviewed' }) =>
+      useFavoriteLibrary(0, { query: '', filter, sort: 'saved' }),
+    { initialProps: { filter: 'all' } },
+  );
+  await waitFor(() => expect(result.current.loading).toBe(false));
+
+  rerender({ filter: 'reviewed' });
+  expect(result.current.loading).toBe(false);
+  expect(result.current.refreshing).toBe(true);
+  expect(result.current.items[0].title).toBe('all');
+  await act(async () => resolveReviewed(response(page('reviewed'))));
+  expect(result.current.refreshing).toBe(false);
+  expect(result.current.items[0].title).toBe('reviewed');
+
+  rerender({ filter: 'all' });
+  expect(result.current.items[0].title).toBe('all');
+  expect(result.current.refreshing).toBe(true);
 });

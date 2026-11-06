@@ -1,4 +1,4 @@
-import { act, render, screen } from '@testing-library/react';
+import { act, fireEvent, render, screen } from '@testing-library/react';
 
 import { POSTER_GRID_CLASS } from '@/components/poster-grid-layout';
 import { FavoriteGrid } from '@/features/favorites/components/FavoriteGrid';
@@ -94,6 +94,24 @@ describe('FavoriteGrid', () => {
       'data-query',
       'Search 0',
     );
+  });
+
+  it('turns cards into checkboxes while selecting', () => {
+    const onToggle = jest.fn();
+    render(
+      <FavoriteGrid
+        items={items.slice(0, 2)}
+        selection={{ isSelected: (key) => key === 'source+1', onToggle }}
+      />,
+    );
+
+    const first = screen.getByRole('checkbox', { name: 'Favorite 0' });
+    expect(first).toHaveAttribute('aria-checked', 'false');
+    expect(
+      screen.getByRole('checkbox', { name: 'Favorite 1' }),
+    ).toHaveAttribute('aria-checked', 'true');
+    fireEvent.click(first);
+    expect(onToggle).toHaveBeenCalledWith('source+0');
   });
 
   it('recycles a large library on body scroll and renders the last row', () => {

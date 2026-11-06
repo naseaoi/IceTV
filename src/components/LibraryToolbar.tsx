@@ -1,7 +1,7 @@
 'use client';
 
 import { ArrowUpDown, Search, X } from 'lucide-react';
-import { useEffect, useRef } from 'react';
+import { type ReactNode, useEffect, useRef } from 'react';
 
 import Select from '@/components/Select';
 
@@ -27,6 +27,8 @@ export interface LibraryToolbarProps<F extends string, S extends string> {
   onSortChange: (value: S) => void;
   // 加载期间计数用占位块，避免 0 跳到真实值时胶囊宽度抖动
   loading?: boolean;
+  // 页面级操作：窄屏排在搜索框右侧，宽屏排在排序之后
+  action?: ReactNode;
 }
 
 // 收藏、我的评价等个人内容库共用的搜索 + 筛选胶囊 + 排序工具栏
@@ -41,6 +43,7 @@ export function LibraryToolbar<F extends string, S extends string>({
   sort,
   onSortChange,
   loading = false,
+  action,
 }: LibraryToolbarProps<F, S>) {
   const inputRef = useRef<HTMLInputElement>(null);
 
@@ -63,8 +66,8 @@ export function LibraryToolbar<F extends string, S extends string>({
   }, []);
 
   return (
-    <div className='flex flex-col gap-3 lg:flex-row lg:items-center lg:gap-4'>
-      <label className='group relative flex h-10 items-center rounded-xl bg-white/75 shadow-sm ring-1 ring-inset ring-black/[0.06] backdrop-blur transition focus-within:bg-white focus-within:ring-brand-500/50 dark:bg-white/[0.06] dark:shadow-none dark:ring-white/[0.06] dark:focus-within:bg-gray-900 lg:w-80'>
+    <div className='flex flex-wrap items-center gap-3 lg:flex-nowrap lg:gap-4'>
+      <label className='group relative order-1 flex h-10 min-w-0 flex-1 items-center rounded-xl bg-white/75 shadow-sm ring-1 ring-inset ring-black/[0.06] backdrop-blur transition focus-within:bg-white focus-within:ring-brand-500/50 dark:bg-white/[0.06] dark:shadow-none dark:ring-white/[0.06] dark:focus-within:bg-gray-900 lg:order-none lg:w-80 lg:flex-none'>
         <Search
           aria-hidden='true'
           className='pointer-events-none absolute left-3 h-4 w-4 text-gray-400 transition group-focus-within:text-brand-500'
@@ -104,7 +107,7 @@ export function LibraryToolbar<F extends string, S extends string>({
         )}
       </label>
 
-      <div className='flex min-w-0 flex-1 items-center gap-3'>
+      <div className='order-3 flex min-w-0 basis-full items-center gap-3 lg:order-none lg:flex-1 lg:basis-auto'>
         <div
           role='group'
           aria-label='筛选'
@@ -128,7 +131,7 @@ export function LibraryToolbar<F extends string, S extends string>({
                 {loading ? (
                   <span
                     aria-hidden='true'
-                    className='ml-1.5 h-2.5 w-3 animate-pulse rounded-sm bg-current opacity-20'
+                    className='skeleton ml-1.5 h-2.5 w-3 rounded-sm'
                   />
                 ) : (
                   <span className='ml-1.5 tabular-nums opacity-55'>
@@ -151,6 +154,12 @@ export function LibraryToolbar<F extends string, S extends string>({
           className='shrink-0'
         />
       </div>
+
+      {action && (
+        <div className='order-2 flex shrink-0 items-center gap-1 lg:order-none'>
+          {action}
+        </div>
+      )}
     </div>
   );
 }

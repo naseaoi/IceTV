@@ -10,6 +10,7 @@ import {
 } from 'react';
 
 import { useAuthSession } from '@/components/AuthProvider';
+import { EMPTY_FAVORITE_COUNTS } from '@/features/favorites/components/FavoriteLibraryToolbar';
 import type {
   FavoriteFilter,
   FavoriteSort,
@@ -28,7 +29,6 @@ import { VIDEO_REVIEWS_UPDATED_EVENT } from '@/lib/video-reviews';
 
 const useIsomorphicLayoutEffect =
   typeof window !== 'undefined' ? useLayoutEffect : useEffect;
-const EMPTY_COUNTS = { all: 0, watched: 0, unwatched: 0, reviewed: 0 };
 
 export function useFavoriteLibrary(
   initialSkeletonCount = 0,
@@ -44,7 +44,7 @@ export function useFavoriteLibrary(
   const [query, setQuery] = useState(options.query);
   const [version, setVersion] = useState(0);
   const [page, setPage] = useState<FavoriteLibraryPage | null>(null);
-  const [loading, setLoading] = useState(true);
+  const [pending, setPending] = useState(true);
   const [loadingMore, setLoadingMore] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [skeletonCount, setSkeletonCount] = useState(
@@ -55,8 +55,13 @@ export function useFavoriteLibrary(
     generation: number;
   } | null>(null);
   const generation = useRef(0);
+  // 各筛选条件的首页快照：切回已看过的条件时先展示快照再后台刷新
+  const firstPages = useRef(new Map<string, FavoriteLibraryPage>());
   const queryPending = query !== options.query;
-  const refresh = useCallback(() => setVersion((value) => value + 1), []);
+  const refresh = useCallback(() => {
+    firstPages.current.clear();
+    setVersion((value) => value + 1);
+  }, []);
 
   useIsomorphicLayoutEffect(() => {
     setSkeletonCount((current) =>
@@ -74,6 +79,11 @@ export function useFavoriteLibrary(
     const timer = setTimeout(() => setQuery(options.query), 250);
     return () => clearTimeout(timer);
   }, [options.query]);
+
+  useEffect(() => {
+    firstPages.current.clear();
+    setPage(null);
+  }, [profileId]);
 
   useEffect(() => {
     const unsubFavorites = subscribeToDataUpdates('favoritesUpdated', refresh);
@@ -94,19 +104,22 @@ export function useFavoriteLibrary(
       const controller = new AbortController();
       const currentGeneration = ++generation.current;
       request.current = { controller, generation: currentGeneration };
+      const params = new URLSearchParams({
+        format: 'library',
+        q: query,
+        filter: options.filter,
+        sort: options.sort,
+      });
+      const pageKey = params.toString();
       if (cursor) setLoadingMore(true);
       else {
-        setLoading(true);
-        setPage(null);
+        // 保留当前页直到新结果到达，避免切换筛选时整页闪回骨架
+        setPending(true);
+        const snapshot = firstPages.current.get(pageKey);
+        if (snapshot) setPage(snapshot);
       }
       setError(null);
       try {
-        const params = new URLSearchParams({
-          format: 'library',
-          q: query,
-          filter: options.filter,
-          sort: options.sort,
-        });
         if (cursor) params.set('cursor', cursor);
         const response = await fetchWithAuth(`/api/favorites?${params}`, {
           signal: controller.signal,
@@ -119,6 +132,7 @@ export function useFavoriteLibrary(
           controller.signal.aborted
         )
           return;
+        if (!cursor) firstPages.current.set(pageKey, result);
         setPage((previous) => {
           if (!cursor || !previous) return result;
           const seen = new Set(previous.items.map((item) => item.key));
@@ -137,6 +151,10 @@ export function useFavoriteLibrary(
           generation.current === currentGeneration &&
           !controller.signal.aborted
         ) {
+          if (!cursor) {
+            firstPages.current.delete(pageKey);
+            setPage(null);
+          }
           setError(
             error instanceof Error ? error.message : '收藏加载失败，请重试',
           );
@@ -144,7 +162,7 @@ export function useFavoriteLibrary(
       } finally {
         if (generation.current === currentGeneration) {
           request.current = null;
-          setLoading(false);
+          setPending(false);
           setLoadingMore(false);
         }
       }
@@ -167,30 +185,43 @@ export function useFavoriteLibrary(
   }, [fetchPage, page, queryPending]);
   const items = useMemo<FavoriteItem[]>(
     () =>
-      (page?.items ?? []).flatMap(({ key, favorite, playRecord, myRating }) => {
-        const parsed = parseStorageKey(key);
-        return parsed
-          ? [
-              {
-                id: parsed.id,
-                source: parsed.source,
-                title: favorite.title,
-                year: favorite.year,
-                poster: favorite.cover,
-                episodes: favorite.total_episodes,
-                source_name: favorite.source_name,
-                currentEpisode: playRecord?.index,
-                progress:
-                  playRecord && playRecord.total_time > 0
-                    ? (playRecord.play_time / playRecord.total_time) * 100
-                    : 0,
-                search_title: favorite.search_title,
-                origin: favorite.origin,
-                myRating: myRating ?? undefined,
-              },
-            ]
-          : [];
-      }),
+      (page?.items ?? []).flatMap(
+        ({
+          key,
+          favorite,
+          playRecord,
+          myRating,
+          watchStatus,
+          watchStatusManual,
+          watchedAt,
+        }) => {
+          const parsed = parseStorageKey(key);
+          return parsed
+            ? [
+                {
+                  id: parsed.id,
+                  source: parsed.source,
+                  title: favorite.title,
+                  year: favorite.year,
+                  poster: favorite.cover,
+                  episodes: favorite.total_episodes,
+                  source_name: favorite.source_name,
+                  currentEpisode: playRecord?.index,
+                  progress:
+                    playRecord && playRecord.total_time > 0
+                      ? (playRecord.play_time / playRecord.total_time) * 100
+                      : 0,
+                  search_title: favorite.search_title,
+                  origin: favorite.origin,
+                  myRating: myRating ?? undefined,
+                  watchStatus,
+                  watchStatusManual,
+                  watchedAt,
+                },
+              ]
+            : [];
+        },
+      ),
     [page],
   );
   const clearFavorites = useCallback(async () => {
@@ -201,13 +232,15 @@ export function useFavoriteLibrary(
 
   return {
     items,
-    loading: loading || queryPending,
+    // loading 仅指尚无任何结果的首次加载；已有结果时的重新查询走 refreshing
+    loading: page === null && (pending || queryPending),
+    refreshing: page !== null && (pending || queryPending),
     loadingMore,
     error,
     retry: refresh,
     skeletonCount,
     clearFavorites,
-    counts: page?.counts ?? EMPTY_COUNTS,
+    counts: page?.counts ?? EMPTY_FAVORITE_COUNTS,
     total: page?.total ?? 0,
     libraryTotal: page?.libraryTotal ?? 0,
     hasMore: Boolean(page?.nextCursor),

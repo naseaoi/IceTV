@@ -1,6 +1,7 @@
 import {
   Bell,
   BellOff,
+  BookmarkCheck,
   Check,
   ExternalLink,
   Heart,
@@ -34,6 +35,46 @@ export interface CardActionAnchor {
 }
 
 type Handler = CardAction['onClick'];
+
+export interface CardActionSpec {
+  play?: { onClick: Handler; live?: boolean; meta?: string };
+  favorite?: { favorited: boolean | null; onToggle: Handler };
+  watchRecord?: Handler | null;
+  updates?: {
+    hasUpdate: boolean;
+    onMarkRead: Handler;
+    tracking: boolean;
+    onToggleTracking: Handler;
+  };
+  external?: { url: string; bangumi: boolean } | null;
+  remove?: Handler;
+}
+
+export function buildCardActions(spec: CardActionSpec): CardAction[] {
+  const actions: CardAction[] = [];
+  if (spec.play) actions.push(playAction(spec.play));
+  if (spec.favorite) {
+    actions.push(
+      favoriteAction(spec.favorite.favorited, spec.favorite.onToggle),
+    );
+  }
+  if (spec.watchRecord) actions.push(watchRecordAction(spec.watchRecord));
+  if (spec.updates) {
+    if (spec.updates.hasUpdate) {
+      actions.push(markUpdateReadAction(spec.updates.onMarkRead));
+    }
+    actions.push(
+      trackingAction(spec.updates.tracking, spec.updates.onToggleTracking),
+    );
+  }
+  if (spec.external) {
+    actions.push(
+      externalDetailAction(spec.external.url, spec.external.bangumi),
+    );
+  }
+  if (spec.remove) actions.push(deleteRecordAction(spec.remove));
+  return actions;
+}
 
 export function getEpisodeMeta(
   currentEpisode?: number,
@@ -83,6 +124,16 @@ export function favoriteAction(
     ) : (
       <Heart />
     ),
+    group: 'manage',
+    onClick,
+  };
+}
+
+export function watchRecordAction(onClick: Handler): CardAction {
+  return {
+    id: 'watch-record',
+    label: '标记与评分',
+    icon: <BookmarkCheck />,
     group: 'manage',
     onClick,
   };

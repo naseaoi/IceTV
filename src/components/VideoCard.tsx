@@ -12,15 +12,9 @@ import React, {
 } from 'react';
 
 import {
-  type CardAction,
   type CardActionAnchor,
-  deleteRecordAction,
-  externalDetailAction,
-  favoriteAction,
+  buildCardActions,
   getEpisodeMeta,
-  markUpdateReadAction,
-  playAction,
-  trackingAction,
 } from '@/components/card-actions/actions';
 import {
   useCardInteractionManager,
@@ -35,6 +29,7 @@ import type {
 } from '@/components/video-card/types';
 import { VideoCardPoster } from '@/components/video-card/VideoCardPoster';
 import { VideoCardTitle } from '@/components/video-card/VideoCardTitle';
+import { useOpenWatchRecord } from '@/components/watch-record-context';
 import {
   warmupDanmakuForNavigation,
   warmupDanmakuSearchForNavigation,
@@ -42,6 +37,7 @@ import {
 import { useLongPress } from '@/hooks/useLongPress';
 import { buildExternalSubjectUrl } from '@/hooks/usePosterPlay';
 import { getAuthInfoFromBrowserCookie } from '@/lib/auth.client';
+import { isCatalogFavoriteSource } from '@/lib/catalog-favorites';
 import {
   deleteFavorite,
   deletePlayRecord,
@@ -106,6 +102,7 @@ const VideoCard = forwardRef<VideoCardHandle, VideoCardProps>(
   ) {
     const router = useRouter();
     const interactionId = useId();
+    const openWatchRecord = useOpenWatchRecord();
     const prefetchTimerRef = useRef<number | null>(null);
     const {
       showActionSheet,
@@ -168,6 +165,10 @@ const VideoCard = forwardRef<VideoCardHandle, VideoCardProps>(
     const actualEpisodes = dynamicEpisodes;
     const actualYear = normalizeCardYear(year);
     const actualQuery = query || '';
+    // 豆瓣卡片与目录收藏没有可播放源，按标题搜索起播
+    const playsByTitle =
+      from === 'douban' ||
+      (from === 'favorite' && isCatalogFavoriteSource(actualSource ?? ''));
     const actualSearchType = isAggregate
       ? actualEpisodes && actualEpisodes === 1
         ? 'movie'
@@ -333,7 +334,7 @@ const VideoCard = forwardRef<VideoCardHandle, VideoCardProps>(
           '',
         )}&id=${actualId.replace('live_', '')}`;
       }
-      if (from === 'douban') {
+      if (playsByTitle) {
         const localTarget = findLocalPlaybackTargetByTitle(
           actualTitle,
           actualYear,
@@ -350,7 +351,7 @@ const VideoCard = forwardRef<VideoCardHandle, VideoCardProps>(
           }`;
         }
       }
-      if (from === 'douban' || (isAggregate && !actualSource && !actualId)) {
+      if (playsByTitle || (isAggregate && !actualSource && !actualId)) {
         saveAggregateGroup();
         return `/play?title=${encodeURIComponent(actualTitle.trim())}${
           actualYear ? `&year=${actualYear}` : ''
@@ -376,7 +377,7 @@ const VideoCard = forwardRef<VideoCardHandle, VideoCardProps>(
       return null;
     }, [
       origin,
-      from,
+      playsByTitle,
       actualSource,
       actualId,
       actualTitle,
@@ -390,13 +391,18 @@ const VideoCard = forwardRef<VideoCardHandle, VideoCardProps>(
     ]);
 
     const warmupDanmaku = useCallback(() => {
-      const localTarget =
-        from === 'douban'
-          ? findLocalPlaybackTargetByTitle(actualTitle, actualYear)
-          : null;
+      const localTarget = playsByTitle
+        ? findLocalPlaybackTargetByTitle(actualTitle, actualYear)
+        : null;
       void warmupDanmakuForNavigation({
-        source: isAggregate ? '' : (localTarget?.source ?? actualSource ?? ''),
-        videoId: isAggregate ? '' : (localTarget?.id ?? actualId ?? ''),
+        source:
+          isAggregate || (playsByTitle && !localTarget)
+            ? ''
+            : (localTarget?.source ?? actualSource ?? ''),
+        videoId:
+          isAggregate || (playsByTitle && !localTarget)
+            ? ''
+            : (localTarget?.id ?? actualId ?? ''),
         episodeIndex:
           from === 'playrecord'
             ? (resumeEpisodeIndex ?? Math.max(0, (currentEpisode || 1) - 1))
@@ -405,6 +411,7 @@ const VideoCard = forwardRef<VideoCardHandle, VideoCardProps>(
         searchYear: actualYear || '',
       });
     }, [
+      playsByTitle,
       actualId,
       actualSource,
       actualTitle,
@@ -423,7 +430,7 @@ const VideoCard = forwardRef<VideoCardHandle, VideoCardProps>(
       warmupDanmaku();
       if (isAggregate) return;
 
-      if (from === 'douban' || !actualSource || !actualId) {
+      if (playsByTitle || !actualSource || !actualId) {
         if (!findLocalPlaybackTargetByTitle(actualTitle, actualYear)) {
           transferWarmedSearchToAggregateGroup(actualQuery || actualTitle);
         }
@@ -432,9 +439,9 @@ const VideoCard = forwardRef<VideoCardHandle, VideoCardProps>(
       }
       warmupForPlayback(actualSource, actualId);
     }, [
+      playsByTitle,
       origin,
       isAggregate,
-      from,
       actualSource,
       actualId,
       actualQuery,
@@ -502,18 +509,18 @@ const VideoCard = forwardRef<VideoCardHandle, VideoCardProps>(
         prefetchTimerRef.current = null;
         void warmupDanmakuSearchForNavigation(actualTitle);
         if (isAggregate) return;
-        if (from === 'douban' || !actualSource || !actualId) {
+        if (playsByTitle || !actualSource || !actualId) {
           warmupSearchForTitle(actualQuery || actualTitle);
           return;
         }
         warmupForPlayback(actualSource, actualId);
       }, PREFETCH_INTENT_DELAY_MS);
     }, [
+      playsByTitle,
       actualId,
       actualSource,
       actualQuery,
       actualTitle,
-      from,
       isAggregate,
       loadFavoriteStatus,
       origin,
@@ -652,7 +659,6 @@ const VideoCard = forwardRef<VideoCardHandle, VideoCardProps>(
 
     // 菜单操作项
     const buildMobileActions = useCallback(() => {
-      const actions: CardAction[] = [];
       // 菜单回调没有原生事件，复用卡片按钮的事件处理函数
       const noopEvent = {
         preventDefault: () => {},
@@ -660,48 +666,70 @@ const VideoCard = forwardRef<VideoCardHandle, VideoCardProps>(
       } as React.MouseEvent;
       const hasRecordTarget = Boolean(actualSource && actualId);
 
-      if (config.showPlayButton) {
-        actions.push(
-          playAction({
-            live: origin === 'live',
-            meta: getEpisodeMeta(currentEpisode, actualEpisodes),
-            onClick: handleClick,
-          }),
-        );
-      }
-
-      if (config.showHeart && from !== 'douban' && hasRecordTarget) {
-        actions.push(
-          favoriteAction(
-            from === 'search' ? searchFavorited : visibleFavorited,
-            () => handleToggleFavorite(noopEvent),
-          ),
-        );
-      }
-
-      if (from === 'playrecord' && hasRecordTarget) {
-        if (visibleHasUpdate) {
-          actions.push(
-            markUpdateReadAction(() => handleMarkUpdateRead(noopEvent)),
-          );
-        }
-        actions.push(
-          trackingAction(visibleTrackingEnabled, handleToggleTracking),
-        );
-      }
-
+      const recordTarget =
+        from === 'douban'
+          ? actualDoubanId
+            ? {
+                source: isBangumi ? 'bangumi' : 'douban',
+                id: String(actualDoubanId),
+                sourceName: isBangumi ? 'Bangumi' : '豆瓣',
+              }
+            : null
+          : hasRecordTarget && actualSource && actualId
+            ? {
+                source: actualSource,
+                id: actualId,
+                sourceName: source_name || '',
+              }
+            : null;
       const externalUrl = config.showDoubanLink
         ? buildExternalSubjectUrl(actualDoubanId, isBangumi)
         : null;
-      if (externalUrl) {
-        actions.push(externalDetailAction(externalUrl, isBangumi));
-      }
 
-      if (config.showCheckCircle && from === 'playrecord' && hasRecordTarget) {
-        actions.push(deleteRecordAction(() => handleDeleteRecord(noopEvent)));
-      }
-
-      return actions;
+      return buildCardActions({
+        play: config.showPlayButton
+          ? {
+              live: origin === 'live',
+              meta: getEpisodeMeta(currentEpisode, actualEpisodes),
+              onClick: handleClick,
+            }
+          : undefined,
+        favorite:
+          config.showHeart && from !== 'douban' && hasRecordTarget
+            ? {
+                favorited:
+                  from === 'search' ? searchFavorited : visibleFavorited,
+                onToggle: () => handleToggleFavorite(noopEvent),
+              }
+            : undefined,
+        watchRecord:
+          openWatchRecord && origin !== 'live' && recordTarget
+            ? () =>
+                openWatchRecord({
+                  ...recordTarget,
+                  title: actualTitle,
+                  year: actualYear,
+                  cover: actualPoster,
+                  totalEpisodes: actualEpisodes,
+                  searchTitle: actualQuery || undefined,
+                  doubanId: actualDoubanId,
+                })
+            : null,
+        updates:
+          from === 'playrecord' && hasRecordTarget
+            ? {
+                hasUpdate: visibleHasUpdate,
+                onMarkRead: () => handleMarkUpdateRead(noopEvent),
+                tracking: visibleTrackingEnabled,
+                onToggleTracking: handleToggleTracking,
+              }
+            : undefined,
+        external: externalUrl ? { url: externalUrl, bangumi: isBangumi } : null,
+        remove:
+          config.showCheckCircle && from === 'playrecord' && hasRecordTarget
+            ? () => handleDeleteRecord(noopEvent)
+            : undefined,
+      });
     }, [
       config,
       from,
@@ -721,6 +749,12 @@ const VideoCard = forwardRef<VideoCardHandle, VideoCardProps>(
       handleMarkUpdateRead,
       handleDeleteRecord,
       origin,
+      openWatchRecord,
+      source_name,
+      actualTitle,
+      actualYear,
+      actualPoster,
+      actualQuery,
     ]);
 
     useEffect(() => {

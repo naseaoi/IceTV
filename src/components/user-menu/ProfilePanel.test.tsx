@@ -17,7 +17,7 @@ const savedProfile = {
   profileId: 'profileAlice',
   nickname: '光影旅人',
   avatarSeed: null,
-  favoritesPublic: true,
+  libraryVisibility: 1 as const,
 };
 function mockSession(nickname: string | null) {
   jest.mocked(useAuthSession).mockReturnValue({
@@ -85,13 +85,14 @@ it('打开时不检测当前昵称，未改动不可保存', async () => {
 it('只提交改动的字段，保存失败保留表单', async () => {
   await renderLoadedForm();
   jest.mocked(updateProfile).mockRejectedValue(new Error('保存失败'));
-  const toggle = screen.getByRole('switch', { name: /公开我的收藏/ });
-  expect(toggle).toHaveAttribute('aria-checked', 'true');
-  fireEvent.click(toggle);
+  const select = screen.getByRole('button', { name: '收藏公开范围' });
+  expect(select).toHaveTextContent('仅片单');
+  fireEvent.click(select);
+  fireEvent.click(screen.getByRole('option', { name: '不公开' }));
   await act(async () => {
     fireEvent.click(saveButton());
   });
-  expect(updateProfile).toHaveBeenCalledWith({ favoritesPublic: false });
+  expect(updateProfile).toHaveBeenCalledWith({ libraryVisibility: 0 });
   expect(global.fetch).not.toHaveBeenCalled();
   expect(screen.getByRole('alert')).toHaveTextContent('保存失败');
   expect(refresh).not.toHaveBeenCalled();
@@ -120,4 +121,17 @@ it('换一批保留已选中的候选头像', async () => {
   const after = screen.getByRole('radio', { name: '候选头像 3' });
   expect(after).toHaveAttribute('aria-checked', 'true');
   expect(after.innerHTML).toBe(before);
+});
+
+it('可以选择片单、状态与评分并保存数字等级', async () => {
+  await renderLoadedForm();
+  jest
+    .mocked(updateProfile)
+    .mockResolvedValue({ ...savedProfile, libraryVisibility: 3 });
+  fireEvent.click(screen.getByRole('button', { name: '收藏公开范围' }));
+  fireEvent.click(screen.getByRole('option', { name: '片单、状态与评分' }));
+  await act(async () => {
+    fireEvent.click(saveButton());
+  });
+  expect(updateProfile).toHaveBeenCalledWith({ libraryVisibility: 3 });
 });

@@ -5,6 +5,7 @@ import {
   normalizeBangumiDataSource,
   normalizeSiteBangumiDataSource,
 } from '@/lib/bangumi-source';
+import { isCatalogFavoriteSource } from '@/lib/catalog-favorites';
 import { type ConfigStateUpdate, stripConfigState } from '@/lib/config-state';
 import { db } from '@/lib/db';
 import { PUBLIC_DOUBAN_IMAGE_PROXY_TYPES } from '@/lib/douban-image-url';
@@ -139,6 +140,8 @@ export function refineConfig(
   );
 
   apiSitesFromFile.forEach(([key, site]) => {
+    if (isCatalogFavoriteSource(key))
+      throw new Error('目录收藏标识不能用于播放源');
     const existingSource = currentApiSites.get(key);
     if (existingSource) {
       // 如果已存在，只覆盖 name、api、detail 和 from

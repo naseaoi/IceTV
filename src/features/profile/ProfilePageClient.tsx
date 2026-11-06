@@ -7,11 +7,14 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import CoverImage from '@/components/CoverImage';
 import { PAGE_CONTAINER_CLASS } from '@/components/page-container';
 import PageLayout from '@/components/PageLayout';
-import { POSTER_GRID_CLASS } from '@/components/poster-grid-layout';
 import ProfileAvatar from '@/components/ProfileAvatar';
 import PublicReviewContent from '@/components/PublicReviewContent';
 import { ProfilePanel } from '@/components/user-menu/ProfilePanel';
-import { FavoriteGrid } from '@/features/favorites/components/FavoriteGrid';
+import { WATCH_STATUS_OPTIONS } from '@/components/watch-record-context';
+import {
+  FavoriteGrid,
+  ReadOnlyFavoriteGridSkeleton,
+} from '@/features/favorites/components/FavoriteGrid';
 import {
   FollowList,
   PageFooter,
@@ -24,7 +27,11 @@ import {
   getUserReviews,
   setFollowing,
 } from '@/lib/profile.client';
-import type { UserProfileView } from '@/lib/types';
+import type {
+  FavoriteWatchStatus,
+  LibraryVisibility,
+  UserProfileView,
+} from '@/lib/types';
 import { parseStorageKey } from '@/lib/utils';
 
 function playUrl(review: { title: string; year: string }) {
@@ -89,59 +96,100 @@ function ProfileReviews({
     </div>
   );
 }
-function ProfileFavorites({ profileId }: { profileId: string }) {
-  const [hidden, setHidden] = useState(false);
+const PROFILE_FAVORITE_FILTERS: {
+  value: 'all' | FavoriteWatchStatus;
+  label: string;
+}[] = [{ value: 'all', label: '全部' }, ...WATCH_STATUS_OPTIONS];
+
+function ProfileFavorites({
+  profileId,
+  initialVisibility,
+}: {
+  profileId: string;
+  initialVisibility: LibraryVisibility;
+}) {
+  // 资料已带公开等级，首屏即按它渲染筛选条，避免数据返回后内容下移
+  const [hidden, setHidden] = useState(initialVisibility === 0);
+  const [visibility, setVisibility] = useState(initialVisibility);
+  const [filter, setFilter] = useState<'all' | FavoriteWatchStatus>('all');
   const load = useCallback(
     async (cursor: string | null) => {
-      const result = await getUserFavorites(profileId, cursor);
+      const result = await getUserFavorites(profileId, cursor, filter);
       setHidden(result.hidden);
+      setVisibility(result.libraryVisibility);
       return result.hidden ? { items: [], nextCursor: null } : result;
     },
-    [profileId],
+    [profileId, filter],
   );
-  const page = useProfilePage(load);
-  return hidden ? (
-    <p className='py-16 text-center text-sm text-gray-500'>
-      这位用户暂未公开收藏
-    </p>
-  ) : (
+  const page = useProfilePage(load, { keepItems: true });
+  const refreshing = page.loading && page.items.length > 0 && !page.cursor;
+  if (hidden) {
+    return (
+      <p className='py-16 text-center text-sm text-gray-500'>
+        这位用户暂未公开收藏
+      </p>
+    );
+  }
+  return (
     <>
-      {page.loading && page.items.length === 0 ? (
-        <div className={POSTER_GRID_CLASS} role='status' aria-label='加载中'>
-          {Array.from({ length: 12 }, (_, index) => (
-            <div key={index}>
-              <div className='skeleton aspect-[2/3] rounded-xl' />
-              <div className='mt-2 flex h-5 items-center'>
-                <div className='skeleton h-3.5 w-3/4 rounded' />
-              </div>
-              <div className='mt-1 flex h-4 items-center'>
-                <div className='skeleton h-3 w-1/2 rounded' />
-              </div>
-            </div>
-          ))}
-        </div>
-      ) : (
-        <FavoriteGrid
-          readOnly
-          items={page.items.flatMap((item) => {
-            const parsed = parseStorageKey(item.key);
-            return parsed
-              ? [
-                  {
-                    ...parsed,
-                    title: item.title,
-                    year: item.year,
-                    poster: item.cover,
-                    source_name: item.source_name,
-                    episodes: item.total_episodes,
-                    search_title: item.search_title,
-                  },
-                ]
-              : [];
+      {visibility >= 2 && (
+        <div
+          role='group'
+          aria-label='观看状态'
+          className='-mx-2 mb-5 flex gap-1.5 overflow-x-auto px-2 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden'
+        >
+          {PROFILE_FAVORITE_FILTERS.map((option) => {
+            const active = option.value === filter;
+            return (
+              <button
+                key={option.value}
+                type='button'
+                aria-pressed={active}
+                onClick={() => setFilter(option.value)}
+                className={`inline-flex h-8 shrink-0 items-center rounded-full px-3 text-[13px] font-medium transition ${
+                  active
+                    ? 'bg-gray-900 text-white shadow-sm dark:bg-white dark:text-gray-900'
+                    : 'bg-white/75 text-gray-600 ring-1 ring-inset ring-black/[0.06] hover:bg-white hover:text-gray-900 dark:bg-white/[0.06] dark:text-gray-300 dark:ring-white/[0.06] dark:hover:bg-white/10 dark:hover:text-white'
+                }`}
+              >
+                {option.label}
+              </button>
+            );
           })}
-        />
+        </div>
       )}
-      <PageFooter {...page} />
+      {page.loading && page.items.length === 0 ? (
+        <ReadOnlyFavoriteGridSkeleton count={12} />
+      ) : (
+        <div
+          aria-busy={refreshing}
+          className={`transition-opacity ${refreshing ? 'pointer-events-none opacity-60' : ''}`}
+        >
+          <FavoriteGrid
+            readOnly
+            emptyText={filter === 'all' ? '暂无收藏内容' : '没有符合条件的作品'}
+            items={page.items.flatMap((item) => {
+              const parsed = parseStorageKey(item.key);
+              return parsed
+                ? [
+                    {
+                      ...parsed,
+                      title: item.title,
+                      year: item.year,
+                      poster: item.cover,
+                      source_name: item.source_name,
+                      episodes: item.total_episodes,
+                      search_title: item.search_title,
+                      watchStatus: item.watchStatus,
+                      myRating: item.rating ?? undefined,
+                    },
+                  ]
+                : [];
+            })}
+          />
+        </div>
+      )}
+      <PageFooter {...page} loading={page.loading && !refreshing} />
     </>
   );
 }
@@ -386,6 +434,9 @@ export default function ProfilePageClient({
                 <ProfileFavorites
                   key={`${profileId}:${version}`}
                   profileId={profileId}
+                  initialVisibility={
+                    profile.isSelf ? 3 : profile.libraryVisibility
+                  }
                 />
               )}
               {list && (

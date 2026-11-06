@@ -1293,6 +1293,8 @@ function createFakePool() {
           'search_text',
           'saved_at',
           'library_valid',
+          'watch_status',
+          'watched_at',
           'projection_version',
         ].map((Field) => ({ Field })),
         [],
@@ -1308,7 +1310,7 @@ function createFakePool() {
       ];
     if (
       normalized ===
-      'SELECT username, favorite_key, favorite_json FROM favorites WHERE projection_version = 0 LIMIT 250'
+      'SELECT username, favorite_key, favorite_json FROM favorites WHERE projection_version < 2 LIMIT 250'
     )
       return [[], []];
     if (

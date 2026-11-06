@@ -4,6 +4,7 @@ import {
   render,
   screen,
   waitFor,
+  within,
 } from '@testing-library/react';
 import type { ReactNode } from 'react';
 
@@ -45,7 +46,7 @@ const profile: UserProfileView = {
   followerCount: 2,
   followingCount: 1,
   publicReviewCount: 0,
-  favoritesPublic: false,
+  libraryVisibility: 0,
 };
 beforeEach(() => {
   jest.clearAllMocks();
@@ -53,7 +54,9 @@ beforeEach(() => {
   jest
     .mocked(getUserReviews)
     .mockResolvedValue({ items: [], nextCursor: null });
-  jest.mocked(getUserFavorites).mockResolvedValue({ hidden: true });
+  jest
+    .mocked(getUserFavorites)
+    .mockResolvedValue({ hidden: true, libraryVisibility: 0 });
   jest.mocked(getUserFollows).mockResolvedValue({
     items: [
       {
@@ -104,6 +107,7 @@ it('公开收藏只读播放链接包含源标识且分页追加', async () => {
     .mocked(getUserFavorites)
     .mockResolvedValueOnce({
       hidden: false,
+      libraryVisibility: 1,
       items: [
         {
           key: 'a+1',
@@ -119,6 +123,7 @@ it('公开收藏只读播放链接包含源标识且分页追加', async () => {
     })
     .mockResolvedValueOnce({
       hidden: false,
+      libraryVisibility: 1,
       items: [
         {
           key: 'b+2',
@@ -140,10 +145,102 @@ it('公开收藏只读播放链接包含源标识且分页追加', async () => {
   expect(screen.queryByText('可编辑收藏卡片')).not.toBeInTheDocument();
   fireEvent.click(screen.getByRole('button', { name: '加载更多' }));
   await waitFor(() =>
-    expect(getUserFavorites).toHaveBeenLastCalledWith('profileAlice', 'next'),
+    expect(getUserFavorites).toHaveBeenLastCalledWith(
+      'profileAlice',
+      'next',
+      'all',
+    ),
   );
   expect(
     await screen.findByRole('heading', { name: '另一部' }),
   ).toBeInTheDocument();
   expect(screen.getByRole('heading', { name: '三体' })).toBeInTheDocument();
+  expect(screen.queryByRole('group', { name: '观看状态' })).toBeNull();
+});
+it('公开等级 3 按状态筛选并展示状态与评分', async () => {
+  jest
+    .mocked(getUserFavorites)
+    .mockResolvedValueOnce({
+      hidden: false,
+      libraryVisibility: 3,
+      items: [
+        {
+          key: 'douban+42',
+          title: '三体',
+          year: '2023',
+          cover: '',
+          source_name: '豆瓣',
+          total_episodes: 0,
+          save_time: 1,
+          watchStatus: 'completed',
+          rating: 8.5,
+        },
+        {
+          key: 'a+1',
+          title: '另一部',
+          year: '',
+          cover: '',
+          source_name: '源甲',
+          total_episodes: 1,
+          save_time: 1,
+          watchStatus: 'planned',
+          rating: null,
+        },
+      ],
+      nextCursor: null,
+    })
+    .mockResolvedValueOnce({
+      hidden: false,
+      libraryVisibility: 3,
+      items: [
+        {
+          key: 'douban+42',
+          title: '三体',
+          year: '2023',
+          cover: '',
+          source_name: '豆瓣',
+          total_episodes: 0,
+          save_time: 1,
+          watchStatus: 'completed',
+          rating: 8.5,
+        },
+      ],
+      nextCursor: null,
+    });
+  render(<ProfilePageClient profileId='profileAlice' />);
+  await screen.findByRole('heading', { name: '爱丽丝' });
+  fireEvent.click(screen.getByRole('tab', { name: '收藏' }));
+  const link = await screen.findByRole('link', { name: /三体/ });
+  expect(link.getAttribute('href')).toBe(
+    '/play?title=%E4%B8%89%E4%BD%93&year=2023',
+  );
+  expect(screen.getByRole('img', { name: '评分 8.5 分' })).toBeInTheDocument();
+  expect(screen.getByText('想看', { selector: 'a span' })).toBeInTheDocument();
+  const filters = screen.getByRole('group', { name: '观看状态' });
+  fireEvent.click(within(filters).getByRole('button', { name: '看过' }));
+  await waitFor(() =>
+    expect(getUserFavorites).toHaveBeenLastCalledWith(
+      'profileAlice',
+      null,
+      'completed',
+    ),
+  );
+  await waitFor(() =>
+    expect(screen.queryByRole('heading', { name: '另一部' })).toBeNull(),
+  );
+});
+it('收藏未返回时按资料中的公开等级先渲染筛选条与骨架', async () => {
+  jest
+    .mocked(getUserProfile)
+    .mockResolvedValue({ ...profile, libraryVisibility: 2 });
+  jest.mocked(getUserFavorites).mockReturnValue(new Promise(() => undefined));
+  render(<ProfilePageClient profileId='profileAlice' />);
+  await screen.findByRole('heading', { name: '爱丽丝' });
+  fireEvent.click(screen.getByRole('tab', { name: '收藏' }));
+  expect(screen.getByRole('group', { name: '观看状态' })).toBeInTheDocument();
+  expect(
+    screen
+      .getAllByRole('status', { name: '加载中' })
+      .some((node) => node.querySelector('.skeleton')),
+  ).toBe(true);
 });

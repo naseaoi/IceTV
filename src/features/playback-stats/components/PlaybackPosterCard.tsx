@@ -5,11 +5,8 @@ import type React from 'react';
 import { type ReactNode, useCallback, useEffect, useId } from 'react';
 
 import {
-  type CardAction,
   type CardActionAnchor,
-  deleteRecordAction,
-  favoriteAction,
-  playAction,
+  buildCardActions,
 } from '@/components/card-actions/actions';
 import {
   useCardInteractionManager,
@@ -27,6 +24,7 @@ import {
   preventContextMenu,
 } from '@/components/video-card/constants';
 import { VideoCardTitle } from '@/components/video-card/VideoCardTitle';
+import { useOpenWatchRecord } from '@/components/watch-record-context';
 import { useLongPress } from '@/hooks/useLongPress';
 import {
   deleteFavorite,
@@ -77,6 +75,7 @@ export function PlaybackPosterCard({
   selected = false,
 }: PlaybackPosterCardProps) {
   const interactionId = useId();
+  const openWatchRecord = useOpenWatchRecord();
   const {
     showActionSheet,
     hideActionSheet,
@@ -140,35 +139,50 @@ export function PlaybackPosterCard({
   const openActions = useCallback(
     async (anchorRect: CardActionAnchor | null) => {
       if (selectable) return;
-      const actions: CardAction[] = [
-        playAction({
-          meta: episode ? `第 ${episode} 集` : undefined,
-          onClick: onPlay,
-        }),
-      ];
-      if (hasTarget) {
-        await ensureFavoritesLoaded();
-        const current = getFavoriteStatus(generateStorageKey(source, videoId));
-        actions.push(favoriteAction(current, () => toggleFavorite(current)));
-      }
-      if (onDelete) {
-        actions.push(
-          deleteRecordAction(() =>
-            showConfirm(interactionId, {
-              title: '确认删除该记录？',
-              message: `确认删除「${title}」的观看记录吗？删除后无法恢复。`,
-              danger: true,
-              cancelText: '取消',
-              confirmText: '确认删除',
-              onConfirm: onDelete,
-            }),
-          ),
-        );
-      }
+      if (hasTarget) await ensureFavoritesLoaded();
+      const current = hasTarget
+        ? getFavoriteStatus(generateStorageKey(source, videoId))
+        : false;
+      const record = hasTarget
+        ? getCachedPlayRecordsSnapshot()?.[generateStorageKey(source, videoId)]
+        : undefined;
       showActionSheet(interactionId, {
         title,
         poster: cover,
-        actions,
+        actions: buildCardActions({
+          play: {
+            meta: episode ? `第 ${episode} 集` : undefined,
+            onClick: onPlay,
+          },
+          favorite: hasTarget
+            ? { favorited: current, onToggle: () => toggleFavorite(current) }
+            : undefined,
+          watchRecord:
+            openWatchRecord && hasTarget
+              ? () =>
+                  openWatchRecord({
+                    source,
+                    id: videoId,
+                    title,
+                    year: year || record?.year || '',
+                    cover: cover || record?.cover || '',
+                    sourceName: sourceName || record?.source_name || '',
+                    totalEpisodes: record?.total_episodes,
+                    searchTitle: record?.search_title || undefined,
+                  })
+              : null,
+          remove: onDelete
+            ? () =>
+                showConfirm(interactionId, {
+                  title: '确认删除该记录？',
+                  message: `确认删除「${title}」的观看记录吗？删除后无法恢复。`,
+                  danger: true,
+                  cancelText: '取消',
+                  confirmText: '确认删除',
+                  onConfirm: onDelete,
+                })
+            : undefined,
+        }),
         sourceName: sourceName || undefined,
         anchorRect,
       });
@@ -182,6 +196,7 @@ export function PlaybackPosterCard({
       interactionId,
       onDelete,
       onPlay,
+      openWatchRecord,
       selectable,
       showActionSheet,
       showConfirm,
@@ -190,6 +205,7 @@ export function PlaybackPosterCard({
       title,
       toggleFavorite,
       videoId,
+      year,
     ],
   );
 

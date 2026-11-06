@@ -584,7 +584,7 @@ export function videoReviewContract(
     });
     await storage.updateUserProfile('author', {
       nickname: 'Author',
-      favoritesPublic: true,
+      libraryVisibility: 1,
     });
     expect(
       (await storage.getUserProfileById(author.profile_id))?.avatar_seed,
@@ -665,7 +665,7 @@ export function videoReviewContract(
       profile_id: 'AbCdEf012345',
       avatar_seed: 'Avatar012345',
       nickname: 'Alice',
-      favorites_public: true,
+      favorites_public: 3 as const,
       updated_at: 1000,
     };
     const snapshot = {
@@ -706,6 +706,7 @@ export function videoReviewContract(
     expect(reader?.profile_id).not.toBe(author?.profile_id);
     expect(reader?.nickname).toBeNull();
     expect(author?.avatar_seed).toBe(profile.avatar_seed);
+    expect(author?.favorites_public).toBe(3);
     expect((await storage.getUserSocialData('author')).profile).toEqual(author);
     expect(reader?.avatar_seed).toBe(profile.avatar_seed);
     expect(await storage.getUserProfile('missing')).not.toBeNull();

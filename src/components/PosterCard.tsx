@@ -4,8 +4,8 @@ import { Link as LinkIcon, PlayCircleIcon } from 'lucide-react';
 import React, { memo, useCallback, useEffect, useId } from 'react';
 
 import {
-  externalDetailAction,
-  playAction,
+  type CardActionAnchor,
+  buildCardActions,
 } from '@/components/card-actions/actions';
 import { useOptionalCardInteractionManager } from '@/components/CardInteractionProvider';
 import CoverImage from '@/components/CoverImage';
@@ -13,6 +13,7 @@ import {
   POSTER_CARD_COVER_CLASS,
   POSTER_CARD_FIXED_TITLE_ROW_CLASS,
 } from '@/components/poster-card-layout';
+import { useOpenWatchRecord } from '@/components/watch-record-context';
 import { useLongPress } from '@/hooks/useLongPress';
 import {
   buildExternalSubjectUrl,
@@ -72,6 +73,7 @@ function PosterCard({
   const interactionManager = useOptionalCardInteractionManager();
   const showActionSheet = interactionManager?.showActionSheet;
   const hideActionSheet = interactionManager?.hideActionSheet;
+  const openWatchRecord = useOpenWatchRecord();
   const externalUrl = buildExternalSubjectUrl(doubanId, isBangumi);
   const externalLinkLabel = isBangumi
     ? `打开${title}的 Bangumi 页面`
@@ -82,32 +84,54 @@ function PosterCard({
     cancelPrefetch,
   } = usePosterPlay({ title, year, type });
 
-  // 桌面端点击即播放、悬停可跳外链，只为触屏长按提供操作面板
-  const openActionSheet = useCallback(() => {
-    if (!showActionSheet) {
-      return;
-    }
+  // 桌面端点击即播放，右键在光标处展开菜单；触屏长按展开底部面板
+  const openActionSheet = useCallback(
+    (anchorRect?: CardActionAnchor) => {
+      if (!showActionSheet) {
+        return;
+      }
 
-    showActionSheet(interactionId, {
-      title,
+      showActionSheet(interactionId, {
+        title,
+        poster,
+        anchorRect,
+        actions: buildCardActions({
+          play: { onClick: handlePlay },
+          watchRecord:
+            openWatchRecord && doubanId
+              ? () =>
+                  openWatchRecord({
+                    source: isBangumi ? 'bangumi' : 'douban',
+                    id: String(doubanId),
+                    title,
+                    year,
+                    cover: poster,
+                    sourceName: isBangumi ? 'Bangumi' : '豆瓣',
+                    doubanId: isBangumi ? undefined : doubanId,
+                  })
+              : null,
+          external: externalUrl
+            ? { url: externalUrl, bangumi: isBangumi }
+            : null,
+        }),
+      });
+    },
+    [
+      doubanId,
+      externalUrl,
+      handlePlay,
+      interactionId,
+      isBangumi,
+      openWatchRecord,
       poster,
-      actions: [
-        playAction({ onClick: handlePlay }),
-        ...(externalUrl ? [externalDetailAction(externalUrl, isBangumi)] : []),
-      ],
-    });
-  }, [
-    externalUrl,
-    handlePlay,
-    interactionId,
-    isBangumi,
-    poster,
-    showActionSheet,
-    title,
-  ]);
+      showActionSheet,
+      title,
+      year,
+    ],
+  );
 
   const longPressProps = useLongPress({
-    onLongPress: openActionSheet,
+    onLongPress: () => openActionSheet(),
     onClick: handlePlay,
     longPressDelay: 500,
   });
@@ -135,7 +159,15 @@ function PosterCard({
           pointerEvents: 'auto',
         } as React.CSSProperties
       }
-      onContextMenu={preventContextMenu}
+      onContextMenu={(event) => {
+        event.preventDefault();
+        openActionSheet({
+          top: event.clientY,
+          left: event.clientX,
+          width: 0,
+          height: 0,
+        });
+      }}
       onDragStart={(event) => {
         event.preventDefault();
         return false;

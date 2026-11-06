@@ -1,3 +1,5 @@
+import type { FavoriteWatchStatus } from '@/lib/types';
+
 export type FavoriteItem = {
   id: string;
   source: string;
@@ -11,4 +13,7 @@ export type FavoriteItem = {
   search_title?: string;
   origin?: 'vod' | 'live';
   myRating?: number;
+  watchStatus?: FavoriteWatchStatus;
+  watchStatusManual?: boolean;
+  watchedAt?: number | null;
 };

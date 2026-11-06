@@ -5,6 +5,7 @@ import { Inter } from 'next/font/google';
 import { cookies } from 'next/headers';
 
 import { AuthProvider } from '@/components/AuthProvider';
+import { WatchRecordProvider } from '@/features/watch-record/WatchRecordProvider';
 import { getServerAuthSession } from '@/lib/auth-session.server';
 import { getPublicConfig } from '@/lib/config';
 import { THEME_STORAGE_KEY } from '@/lib/local-preferences';
@@ -157,7 +158,7 @@ export default async function RootLayout({
               <AuthProvider initialSession={initialAuthSession}>
                 <MessageCenterProvider>
                   <CardInteractionProvider>
-                    {children}
+                    <WatchRecordProvider>{children}</WatchRecordProvider>
                     <PageScrollRestorer />
                     <ClientErrorReporter />
                     <GlobalErrorIndicator />

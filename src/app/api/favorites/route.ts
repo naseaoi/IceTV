@@ -1,8 +1,14 @@
 import { NextRequest, NextResponse } from 'next/server';
 
+import { InvalidFavoriteMutation } from '@/features/favorites/lib/library-mutations';
 import type { FavoriteLibraryQuery } from '@/features/favorites/lib/library-query';
 import { InvalidFavoriteLibraryQuery } from '@/features/favorites/lib/library-storage';
 import { isGuardFailure, requireActiveUser } from '@/lib/api-auth';
+import {
+  isCatalogFavoriteSource,
+  isFavoriteWatchStatus,
+  isWatchedAt,
+} from '@/lib/catalog-favorites';
 import { db } from '@/lib/db';
 import { normalizeFavoriteLimit, parseFavoriteCursor } from '@/lib/favorites';
 import { NO_STORE_HEADERS } from '@/lib/http-cache';
@@ -25,6 +31,15 @@ export async function GET(request: NextRequest) {
 
     const { searchParams } = new URL(request.url);
     const key = searchParams.get('key');
+
+    if (searchParams.get('format') === 'work') {
+      const item = await db.getFavoriteForWork(guardResult.username, {
+        key: key ?? '',
+        title: searchParams.get('title') ?? '',
+        year: searchParams.get('year') ?? '',
+      });
+      return NextResponse.json(item, { headers: NO_STORE_HEADERS });
+    }
 
     if (searchParams.get('format') === 'library') {
       const page = await db.getFavoriteLibraryPage(guardResult.username, {
@@ -79,7 +94,10 @@ export async function GET(request: NextRequest) {
       headers: NO_STORE_HEADERS,
     });
   } catch (err) {
-    if (err instanceof InvalidFavoriteLibraryQuery) {
+    if (
+      err instanceof InvalidFavoriteLibraryQuery ||
+      err instanceof InvalidFavoriteMutation
+    ) {
       return NextResponse.json(
         { error: err.message },
         { status: 400, headers: NO_STORE_HEADERS },
@@ -103,9 +121,18 @@ export async function POST(request: NextRequest) {
     if (isGuardFailure(guardResult)) return guardResult.response;
 
     const body = await request.json();
+    if (!body || typeof body !== 'object' || Array.isArray(body))
+      return NextResponse.json({ error: '收藏请求格式无效' }, { status: 400 });
     const { key, favorite }: { key: string; favorite: Favorite } = body;
 
-    if (!key || !favorite) {
+    if (
+      typeof key !== 'string' ||
+      !key ||
+      key.length > 255 ||
+      !favorite ||
+      typeof favorite !== 'object' ||
+      Array.isArray(favorite)
+    ) {
       return NextResponse.json(
         { error: 'Missing key or favorite' },
         { status: 400 },
@@ -113,7 +140,22 @@ export async function POST(request: NextRequest) {
     }
 
     // 验证必要字段
-    if (!favorite.title || !favorite.source_name) {
+    if (
+      typeof favorite.title !== 'string' ||
+      !favorite.title.trim() ||
+      favorite.title.length > 500 ||
+      typeof favorite.source_name !== 'string' ||
+      !favorite.source_name ||
+      (favorite.year !== undefined && typeof favorite.year !== 'string') ||
+      (favorite.search_title !== undefined &&
+        typeof favorite.search_title !== 'string') ||
+      (favorite.save_time !== undefined && !isWatchedAt(favorite.save_time)) ||
+      (favorite.watch_status !== undefined &&
+        !isFavoriteWatchStatus(favorite.watch_status)) ||
+      (favorite.watched_at !== undefined &&
+        (!isWatchedAt(favorite.watched_at) ||
+          favorite.watch_status !== 'completed'))
+    ) {
       return NextResponse.json(
         { error: 'Invalid favorite data' },
         { status: 400 },
@@ -128,22 +170,39 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    if (
+      isCatalogFavoriteSource(parsed.source) &&
+      !/^[1-9]\d*$/.test(parsed.id)
+    ) {
+      return NextResponse.json({ error: '目录作品编号无效' }, { status: 400 });
+    }
     const now = Date.now();
     const finalFavorite = {
       ...favorite,
+      ...(isCatalogFavoriteSource(parsed.source)
+        ? {
+            source_name: parsed.source === 'douban' ? '豆瓣' : 'Bangumi',
+            origin: 'vod' as const,
+          }
+        : {}),
       save_time: favorite.save_time ?? now,
       metadata_checked_at: now,
     } as Favorite;
 
-    await db.saveFavorite(
+    const finalKey = await db.saveFavorite(
       guardResult.username,
       parsed.source,
       parsed.id,
       finalFavorite,
     );
 
-    return NextResponse.json({ success: true }, { status: 200 });
+    return NextResponse.json(
+      { success: true, key: finalKey ?? key },
+      { status: 200 },
+    );
   } catch (err) {
+    if (err instanceof SyntaxError)
+      return NextResponse.json({ error: '收藏请求格式无效' }, { status: 400 });
     console.error('保存收藏失败', err);
     return NextResponse.json(
       { error: 'Internal Server Error' },

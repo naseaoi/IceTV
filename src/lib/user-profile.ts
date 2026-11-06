@@ -1,3 +1,5 @@
+import type { LibraryVisibility } from '@/lib/types';
+
 // 昵称前后端共用校验；唯一性按 nicknameNorm 判定
 export const NICKNAME_MIN_LENGTH = 2;
 export const NICKNAME_MAX_LENGTH = 16;
@@ -64,4 +66,19 @@ export function createAvatarSeed(): string {
   return Array.from(bytes, (byte) => byte.toString(36).padStart(2, '0'))
     .join('')
     .slice(0, 16);
+}
+
+export function validateLibraryVisibility(
+  value: unknown,
+  allowLegacyBoolean = false,
+): LibraryVisibility {
+  if (allowLegacyBoolean && typeof value === 'boolean') return value ? 1 : 0;
+  if (
+    typeof value !== 'number' ||
+    !Number.isInteger(value) ||
+    value < 0 ||
+    value > 3
+  )
+    throw new ProfileValidationError('收藏公开等级无效');
+  return value as LibraryVisibility;
 }

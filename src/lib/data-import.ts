@@ -1,9 +1,14 @@
 import { randomUUID } from 'crypto';
 
+import {
+  isCatalogFavoriteSource,
+  normalizeFavoriteWatchFields,
+} from '@/lib/catalog-favorites';
 import { CONFIG_SUBSCRIPTION_MAX_BYTES } from '@/lib/config-state';
 import { importedInviteCodes } from '@/lib/invite-code-storage';
 import { importedAvatarSeed } from '@/lib/review-social-storage';
 import { mergeUserMessageState } from '@/lib/user-message-state';
+import { validateLibraryVisibility } from '@/lib/user-profile';
 import { AdminConfig } from '@/types/admin';
 
 import { configSelfCheck } from './config';
@@ -560,6 +565,8 @@ function validateSourceConfig(config: AdminConfig): void {
   for (const source of config.SourceConfig) {
     requireObject(source, '视频源条目格式无效');
     assertKey(source.key, '视频源 key', MAX_KEY_LENGTH);
+    if (isCatalogFavoriteSource(source.key))
+      throw new ImportValidationError('目录收藏标识不能用于播放源');
     limitString(source.name, '视频源名称', MAX_SHORT_STRING_LENGTH);
     limitString(source.api, '视频源地址', MAX_LONG_STRING_LENGTH);
     if (source.detail !== undefined) {
@@ -729,7 +736,7 @@ function normalizeSocialData(
       profile_id: typeof p.profile_id === 'string' ? p.profile_id : '',
       nickname: p.nickname as string | null,
       avatar_seed: importedAvatarSeed(p.avatar_seed),
-      favorites_public: assertBoolean(p.favorites_public, '收藏公开状态'),
+      favorites_public: normalizeImportedVisibility(p.favorites_public),
       updated_at: timestamp(p.updated_at),
     };
   }
@@ -1003,6 +1010,7 @@ function normalizeFavorite(value: unknown): Favorite {
       '',
     ),
     ...(origin ? { origin } : {}),
+    ...normalizeFavoriteWatchFields(input),
   };
 }
 
@@ -1173,4 +1181,12 @@ function assertStringArray(
 
 function cloneJson<T>(value: T): T {
   return JSON.parse(JSON.stringify(value)) as T;
+}
+
+function normalizeImportedVisibility(value: unknown) {
+  try {
+    return validateLibraryVisibility(value, true);
+  } catch {
+    throw new ImportValidationError('收藏公开等级无效');
+  }
 }

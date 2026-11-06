@@ -10,6 +10,7 @@ import type { FollowReviewUserMessage } from '@/lib/message-types';
 import type {
   AdminReviewReportPage,
   FollowListPage,
+  LibraryVisibility,
   MyVideoReviewPage,
   PublicVideoReviewPage,
   ReviewReportReason,
@@ -21,7 +22,11 @@ import type {
   WorkReviewSummary,
 } from '@/lib/types';
 import { REVIEW_REPORT_REASONS } from '@/lib/types';
-import { validateAvatarSeed, validateNickname } from '@/lib/user-profile';
+import {
+  validateAvatarSeed,
+  validateLibraryVisibility,
+  validateNickname,
+} from '@/lib/user-profile';
 import { normalizeUsername } from '@/lib/username';
 import {
   type MyReviewQuery,
@@ -88,7 +93,7 @@ export function profileFromRow(row: UserProfile): UserProfile {
     profile_id: row.profile_id,
     nickname: row.nickname,
     avatar_seed: row.avatar_seed,
-    favorites_public: Boolean(row.favorites_public),
+    favorites_public: validateLibraryVisibility(Number(row.favorites_public)),
     updated_at: Number(row.updated_at),
   };
 }
@@ -193,7 +198,7 @@ export class ReviewSocialStorage {
     patch: {
       nickname?: string;
       avatarSeed?: string | null;
-      favoritesPublic?: boolean;
+      libraryVisibility?: LibraryVisibility;
     },
   ): Promise<UserProfile> {
     username = normalizeUsername(username);
@@ -211,9 +216,9 @@ export class ReviewSocialStorage {
       columns.push('avatar_seed = ?');
       params.push(validateAvatarSeed(patch.avatarSeed));
     }
-    if (patch.favoritesPublic !== undefined) {
+    if (patch.libraryVisibility !== undefined) {
       columns.push('favorites_public = ?');
-      params.push(patch.favoritesPublic ? 1 : 0);
+      params.push(validateLibraryVisibility(patch.libraryVisibility));
     }
     if (columns.length) {
       try {
@@ -253,7 +258,7 @@ export class ReviewSocialStorage {
       profileId: profile.profile_id,
       nickname: profile.nickname,
       avatarSeed: profile.avatar_seed,
-      favoritesPublic: profile.favorites_public,
+      libraryVisibility: profile.favorites_public,
       isSelf: username === viewer,
       isFollowing: Number(counts.followed) > 0,
       followerCount: Number(counts.followers),
@@ -942,7 +947,7 @@ export function importedProfileValues(
     nickname,
     norm,
     importedAvatarSeed(profile?.avatar_seed),
-    profile?.favorites_public ? 1 : 0,
+    validateLibraryVisibility(profile?.favorites_public ?? 0, true),
     profile?.updated_at ?? Date.now(),
   ];
 }

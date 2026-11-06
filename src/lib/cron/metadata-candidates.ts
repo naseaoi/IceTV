@@ -1,5 +1,7 @@
+import { isCatalogFavoriteSource } from '@/lib/catalog-favorites';
 import { hasPlayRecordUpdate } from '@/lib/play-records';
 import type { Favorite, PlayRecord } from '@/lib/types';
+import { parseStorageKey } from '@/lib/utils';
 
 export interface MetadataCandidate<T> {
   user: string;
@@ -104,6 +106,7 @@ export function buildFavoriteCandidate(
   snapshot?: string,
 ): MetadataCandidate<Favorite> | null {
   if (
+    isCatalogFavoriteSource(parseStorageKey(key)?.source ?? '') ||
     favorite.origin === 'live' ||
     !shouldRefreshMetadata(favorite.metadata_checked_at, now, ttlMs)
   ) {

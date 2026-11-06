@@ -4,6 +4,7 @@ import type {
   FavoriteLibraryPage,
   FavoriteLibraryQuery,
 } from '@/features/favorites/lib/library-query';
+import { normalizeFavoriteWatchFields } from '@/lib/catalog-favorites';
 import { FAVORITE_RENDER_CHUNK } from '@/lib/favorites-count';
 import { normalizeWorkTitle, normalizeWorkYear } from '@/lib/source-match';
 import type { Favorite, PlayRecord } from '@/lib/types';
@@ -16,6 +17,8 @@ export const FAVORITE_PROJECTION_COLUMNS = [
   'search_text',
   'saved_at',
   'library_valid',
+  'watch_status',
+  'watched_at',
   'projection_version',
 ] as const;
 
@@ -37,10 +40,11 @@ export function favoriteProjection(
     )
       throw new Error('Invalid favorite');
   } catch {
-    return ['', '', null, '', 0, 0, 1];
+    return ['', '', null, '', 0, 0, null, null, 2];
   }
   const year = normalizeWorkYear(favorite.year);
   const number = Number.parseInt(year, 10);
+  const watchFields = normalizeFavoriteWatchFields(favorite);
   return [
     normalizeWorkTitle(favorite.title),
     year,
@@ -48,7 +52,9 @@ export function favoriteProjection(
     normalizeWorkTitle(`${favorite.title} ${favorite.search_title ?? ''}`),
     favorite.save_time,
     1,
-    1,
+    watchFields.watch_status ?? null,
+    watchFields.watched_at ?? null,
+    2,
   ];
 }
 
@@ -69,6 +75,7 @@ function binding(username: string, query: FavoriteLibraryQuery): string {
         normalizeWorkTitle(query.query),
         query.filter,
         query.sort,
+        query.profileScope,
       ]),
     )
     .digest('hex');
@@ -81,8 +88,10 @@ export function validateLibraryQuery(
   if (
     typeof query.query !== 'string' ||
     query.query.length > 500 ||
-    !['all', 'watched', 'unwatched', 'reviewed'].includes(query.filter) ||
-    !['saved', 'played', 'rating', 'year'].includes(query.sort)
+    !['all', 'planned', 'watching', 'completed', 'reviewed'].includes(
+      query.filter,
+    ) ||
+    !['saved', 'played', 'watched', 'rating', 'year'].includes(query.sort)
   ) {
     throw new InvalidFavoriteLibraryQuery('收藏查询条件无效');
   }
@@ -113,13 +122,18 @@ export interface LibraryRow {
   favorite_json: string;
   record_json: string | null;
   my_rating: number | null;
+  watch_status: Favorite['watch_status'];
+  effective_status: NonNullable<Favorite['watch_status']>;
+  watched_at: number | null;
   sort_value: number;
   sort_missing: number;
   saved_at: number;
 }
 export interface LibraryCountsRow {
   all_count: number;
-  watched: number;
+  planned: number;
+  watching: number;
+  completed: number;
   reviewed: number;
   library_total: number;
 }
@@ -136,10 +150,27 @@ export function libraryStatements(
       : `CAST(NULLIF(JSON_UNQUOTE(JSON_EXTRACT(${column}, '$.${field}')), 'null') AS DOUBLE)`;
   // 存在精确年份评价即选它，包括只有正文、rating 为 null 的记录。
   const rating = `CASE WHEN exact_review.username IS NOT NULL THEN ${numericJson('exact_review.review_json', 'rating')} ELSE ${numericJson('fallback_review.review_json', 'rating')} END`;
+  const visibleRating =
+    query.profileScope === 'public'
+      ? `CASE WHEN exact_review.username IS NOT NULL THEN CASE WHEN exact_review.is_public = 1 THEN ${numericJson('exact_review.review_json', 'rating')} ELSE NULL END ELSE CASE WHEN fallback_review.is_public = 1 THEN ${numericJson('fallback_review.review_json', 'rating')} ELSE NULL END END`
+      : rating;
   const played = numericJson('p.record_json', 'save_time');
-  const sort = { saved: 'f.saved_at', played, rating, year: 'f.year_number' }[
-    query.sort
-  ];
+  const recordNumber = (field: string) => numericJson('p.record_json', field);
+  const groupValid = `(${recordNumber('group_index')} >= 1 AND ${recordNumber('group_total')} >= 1)`;
+  const episode = `CASE WHEN ${groupValid} THEN ${recordNumber('group_index')} ELSE ${recordNumber('index')} END`;
+  const total = `CASE WHEN ${groupValid} THEN ${recordNumber('group_total')} ELSE ${recordNumber('total_episodes')} END`;
+  // 点播写入的绝对集数与组内集数均为 1 基；组内刻度有效时优先采用。
+  const finished = `(${total} > 0 AND ${episode} >= ${total} AND ${recordNumber('total_time')} > 0 AND ${recordNumber('play_time')} >= ${recordNumber('total_time')} * 0.9)`;
+  const status = `CASE WHEN f.watch_status IS NOT NULL THEN f.watch_status WHEN ${rating} IS NOT NULL OR ${finished} THEN 'completed' WHEN p.record_key IS NOT NULL THEN 'watching' ELSE 'planned' END`;
+  const reviewTime = `CASE WHEN exact_review.username IS NOT NULL THEN ${numericJson('exact_review.review_json', 'updated_at')} ELSE ${numericJson('fallback_review.review_json', 'updated_at')} END`;
+  const watched = `CASE WHEN (${status}) = 'completed' THEN COALESCE(f.watched_at, ${played}, ${reviewTime}) ELSE NULL END`;
+  const sort = {
+    saved: 'f.saved_at',
+    played,
+    watched,
+    rating,
+    year: 'f.year_number',
+  }[query.sort];
   const value = query.sort === 'saved' ? 'f.saved_at' : `COALESCE(${sort}, 0)`;
   const missing =
     query.sort === 'saved'
@@ -160,27 +191,35 @@ export function libraryStatements(
   const search = normalizedQuery
     ? ` AND INSTR(${dialect === 'mysql' ? 'BINARY f.search_text' : 'f.search_text'}, ?) > 0`
     : '';
-  const where = `WHERE f.username = ? AND f.library_valid = 1${search}`;
+  const where = `WHERE f.username = ? AND f.library_valid = 1${search}${query.profileScope ? ` AND COALESCE(${dialect === 'sqlite' ? "json_extract(f.favorite_json, '$.origin')" : "JSON_UNQUOTE(JSON_EXTRACT(f.favorite_json, '$.origin'))"}, '') <> 'live'` : ''}`;
   const params: (string | number)[] = [
     username,
     ...(normalizedQuery ? [normalizedQuery] : []),
   ];
   const filter = {
     all: '',
-    watched: ' AND p.record_key IS NOT NULL',
-    unwatched: ' AND p.record_key IS NULL',
+    planned: ` AND (${status}) = 'planned'`,
+    watching: ` AND (${status}) = 'watching'`,
+    completed: ` AND (${status}) = 'completed'`,
     reviewed: ` AND ${reviewed}`,
   }[query.filter];
   const after = cursor
     ? ` AND (${missing} > ? OR (${missing} = ? AND (${value} < ? OR (${value} = ? AND (f.saved_at < ? OR (f.saved_at = ? AND ${key} < ?))))))`
     : '';
+  const selection = `SELECT f.favorite_key, f.favorite_json, p.record_json, ${visibleRating} AS my_rating,
+    f.watch_status, ${status} AS effective_status, ${watched} AS watched_at,
+    ${value} AS sort_value, ${missing} AS sort_missing, f.saved_at ${from} ${where}${filter}`;
   return {
-    counts: `SELECT COUNT(*) AS all_count, COALESCE(SUM(CASE WHEN p.record_key IS NOT NULL THEN 1 ELSE 0 END), 0) AS watched,
+    selection,
+    selectionParams: params,
+    counts: `SELECT COUNT(*) AS all_count,
+      COALESCE(SUM(CASE WHEN (${status}) = 'planned' THEN 1 ELSE 0 END), 0) AS planned,
+      COALESCE(SUM(CASE WHEN (${status}) = 'watching' THEN 1 ELSE 0 END), 0) AS watching,
+      COALESCE(SUM(CASE WHEN (${status}) = 'completed' THEN 1 ELSE 0 END), 0) AS completed,
       COALESCE(SUM(CASE WHEN ${reviewed} THEN 1 ELSE 0 END), 0) AS reviewed,
       (SELECT COUNT(*) FROM favorites WHERE username = ? AND library_valid = 1) AS library_total ${from} ${where}`,
     countParams: [username, ...params],
-    page: `SELECT f.favorite_key, f.favorite_json, p.record_json, ${rating} AS my_rating,
-      ${value} AS sort_value, ${missing} AS sort_missing, f.saved_at ${from} ${where}${filter}${after}
+    page: `${selection}${after}
       ORDER BY ${query.sort === 'saved' ? `f.saved_at DESC, ${key} DESC` : `${missing} ASC, ${value} DESC, f.saved_at DESC, ${key} DESC`} LIMIT ${FAVORITE_RENDER_CHUNK + 1}`,
     pageParams: [
       ...params,
@@ -207,21 +246,15 @@ export function buildLibraryPage(
 ): FavoriteLibraryPage {
   const counts = {
     all: Number(countsRow.all_count),
-    watched: Number(countsRow.watched),
-    unwatched: Number(countsRow.all_count) - Number(countsRow.watched),
+    planned: Number(countsRow.planned),
+    watching: Number(countsRow.watching),
+    completed: Number(countsRow.completed),
     reviewed: Number(countsRow.reviewed),
   };
   const page = rows.slice(0, FAVORITE_RENDER_CHUNK);
   const last = page.at(-1);
   return {
-    items: page.map((row) => ({
-      key: row.favorite_key,
-      favorite: JSON.parse(row.favorite_json) as Favorite,
-      playRecord: row.record_json
-        ? (JSON.parse(row.record_json) as PlayRecord)
-        : undefined,
-      myRating: row.my_rating === null ? null : Number(row.my_rating),
-    })),
+    items: page.map(libraryItem),
     counts,
     total: counts[query.filter],
     libraryTotal: Number(countsRow.library_total),
@@ -237,5 +270,20 @@ export function buildLibraryPage(
             } satisfies Cursor),
           ).toString('base64url')
         : null,
+  };
+}
+
+export function libraryItem(row: LibraryRow) {
+  return {
+    key: row.favorite_key,
+    favorite: JSON.parse(row.favorite_json) as Favorite,
+    playRecord: row.record_json
+      ? (JSON.parse(row.record_json) as PlayRecord)
+      : undefined,
+    myRating: row.my_rating === null ? null : Number(row.my_rating),
+    watchStatus: row.effective_status,
+    watchStatusManual:
+      row.watch_status !== null && row.watch_status !== undefined,
+    watchedAt: row.watched_at === null ? null : Number(row.watched_at),
   };
 }

@@ -1,5 +1,10 @@
 ﻿'use client';
 
+import type {
+  FavoriteBatchInput,
+  FavoriteLibraryItem,
+  FavoriteWorkQuery,
+} from '@/features/favorites/lib/library-query';
 import { normalizeSearchQueryInput } from '@/features/search/lib/searchQuery';
 
 import { getAuthInfoFromBrowserCookie } from './auth.client';
@@ -433,27 +438,63 @@ export function getCachedFavoritesSnapshot(): Record<string, Favorite> | null {
   return cacheManager.getCachedFavorites();
 }
 
+async function refreshFavoritesAfterWrite(): Promise<void> {
+  const favorites =
+    await fetchFromApi<Record<string, Favorite>>('/api/favorites');
+  cacheManager.cacheFavorites(favorites);
+  window.dispatchEvent(
+    new CustomEvent('favoritesUpdated', { detail: favorites }),
+  );
+  window.dispatchEvent(new Event('userLibraryUpdated'));
+}
+
+export async function getFavoriteForWork(
+  work: FavoriteWorkQuery,
+): Promise<FavoriteLibraryItem | null> {
+  const params = new URLSearchParams({ format: 'work', ...work });
+  return fetchFromApi<FavoriteLibraryItem | null>(
+    `/api/favorites?${params.toString()}`,
+  );
+}
+
+export async function batchFavorites(
+  input: FavoriteBatchInput,
+): Promise<{ affected: number }> {
+  try {
+    const result = await fetchWithAuth('/api/favorites/batch', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(input),
+    });
+    const data = (await result.json()) as { affected: number };
+    await refreshFavoritesAfterWrite();
+    return data;
+  } catch (error) {
+    await handleDatabaseOperationFailure('favorites', error);
+    throw error;
+  }
+}
+
 export async function saveFavorite(
   source: string,
   id: string,
   favorite: Favorite,
-): Promise<void> {
+): Promise<string> {
   const key = generateStorageKey(source, id);
-  return _writeFavorites({
-    mutateCached: (cached) => {
-      cached[key] = favorite;
-      return cached;
-    },
-    syncToServer: () =>
-      fetchWithAuth('/api/favorites', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ key, favorite }),
-      }).then(() => {}),
-    onServerError: async (err) => {
-      await handleDatabaseOperationFailure('favorites', err);
-    },
-  });
+  try {
+    const response = await fetchWithAuth('/api/favorites', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ key, favorite }),
+    });
+    const result = (await response.json()) as { key: string };
+    // 合并可能删除另一目录键，成功后以服务端快照刷新，避免缓存保留幽灵收藏。
+    await refreshFavoritesAfterWrite();
+    return result.key;
+  } catch (error) {
+    await handleDatabaseOperationFailure('favorites', error);
+    throw error;
+  }
 }
 
 export async function deleteFavorite(

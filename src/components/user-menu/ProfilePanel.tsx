@@ -14,8 +14,10 @@ import {
 } from '@/components/modals/modal-styles';
 import ModalShell from '@/components/modals/ModalShell';
 import ProfileAvatar from '@/components/ProfileAvatar';
+import Select from '@/components/Select';
 import { useNicknameAvailability } from '@/hooks/useNicknameAvailability';
 import { getMyProfile, updateProfile } from '@/lib/profile.client';
+import type { LibraryVisibility } from '@/lib/types';
 import {
   createAvatarSeed,
   NICKNAME_MAX_LENGTH,
@@ -31,7 +33,7 @@ function createCandidates() {
 type SavedProfile = {
   nickname: string;
   avatarSeed: string | null;
-  favoritesPublic: boolean;
+  libraryVisibility: LibraryVisibility;
 };
 
 export function ProfileForm({
@@ -51,12 +53,13 @@ export function ProfileForm({
     nickname:
       session.status === 'authenticated' ? (session.nickname ?? '') : '',
     avatarSeed: session.status === 'authenticated' ? session.avatarSeed : null,
-    favoritesPublic: false,
+    libraryVisibility: 0,
   }));
   const [nickname, setNickname] = useState(saved.nickname);
   const [avatarSeed, setAvatarSeed] = useState(saved.avatarSeed);
   const [candidates, setCandidates] = useState<string[]>([]);
-  const [favoritesPublic, setFavoritesPublic] = useState(false);
+  const [libraryVisibility, setLibraryVisibility] =
+    useState<LibraryVisibility>(0);
   const [loaded, setLoaded] = useState(required);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
@@ -74,7 +77,7 @@ export function ProfileForm({
   const dirty =
     nicknameChanged ||
     avatarSeed !== saved.avatarSeed ||
-    favoritesPublic !== saved.favoritesPublic;
+    libraryVisibility !== saved.libraryVisibility;
   const canSave = loaded && !saving && nicknameReady && dirty;
   const nicknameLength = Array.from(trimmedNickname).length;
 
@@ -91,12 +94,12 @@ export function ProfileForm({
         const next = {
           nickname: profile.nickname ?? '',
           avatarSeed: profile.avatarSeed,
-          favoritesPublic: profile.favoritesPublic,
+          libraryVisibility: profile.libraryVisibility,
         };
         setSaved(next);
         setNickname(next.nickname);
         setAvatarSeed(next.avatarSeed);
-        setFavoritesPublic(next.favoritesPublic);
+        setLibraryVisibility(next.libraryVisibility);
         setLoaded(true);
       })
       .catch(() => {
@@ -120,8 +123,8 @@ export function ProfileForm({
             }
           : {}),
         ...(avatarSeed !== saved.avatarSeed ? { avatarSeed } : {}),
-        ...(!required && favoritesPublic !== saved.favoritesPublic
-          ? { favoritesPublic }
+        ...(!required && libraryVisibility !== saved.libraryVisibility
+          ? { libraryVisibility }
           : {}),
       });
       await refreshSession();
@@ -246,30 +249,27 @@ export function ProfileForm({
       </div>
 
       {!required && (
-        <button
-          type='button'
-          role='switch'
-          aria-checked={favoritesPublic}
-          disabled={!loaded || saving}
-          onClick={() => setFavoritesPublic(!favoritesPublic)}
-          className='mt-2 flex w-full items-center justify-between gap-4 rounded-xl bg-gray-900/[0.03] px-3.5 py-3 text-left text-sm text-gray-900 transition-colors hover:bg-gray-900/[0.05] disabled:opacity-60 dark:bg-white/[0.04] dark:text-gray-100 dark:hover:bg-white/[0.06]'
-        >
-          <span>公开我的收藏</span>
-          <span
-            aria-hidden='true'
-            className={`relative h-6 w-10 shrink-0 rounded-full transition-colors ${
-              favoritesPublic
-                ? 'bg-brand-500'
-                : 'bg-gray-200 dark:bg-white/[0.12]'
-            }`}
-          >
-            <span
-              className={`absolute left-0.5 top-0.5 h-5 w-5 rounded-full bg-white shadow-sm transition-transform ${
-                favoritesPublic ? 'translate-x-4' : ''
-              }`}
-            />
-          </span>
-        </button>
+        <div className='mt-2'>
+          <label htmlFor='profile-visibility' className={MODAL_LABEL_CLASS}>
+            收藏公开范围
+          </label>
+          <Select
+            id='profile-visibility'
+            ariaLabel='收藏公开范围'
+            variant='field'
+            value={String(libraryVisibility)}
+            disabled={!loaded || saving}
+            onChange={(value) =>
+              setLibraryVisibility(Number(value) as LibraryVisibility)
+            }
+            options={[
+              { value: '0', label: '不公开' },
+              { value: '1', label: '仅片单' },
+              { value: '2', label: '片单与观看状态' },
+              { value: '3', label: '片单、状态与评分' },
+            ]}
+          />
+        </div>
       )}
 
       {error && (

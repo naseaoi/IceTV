@@ -18,7 +18,7 @@ jest.mock('@/lib/db', () => ({
     getUserProfileView: jest.fn(),
     getUserPublicReviewPage: jest.fn(),
     getUserFollowPage: jest.fn(),
-    getFavoritePage: jest.fn(),
+    getFavoriteLibraryPage: jest.fn(),
     setUserFollow: jest.fn(),
     setVideoReviewLike: jest.fn(),
     reportVideoReview: jest.fn(),
@@ -67,17 +67,17 @@ beforeEach(() => {
     profile_id: 'Reader012345',
     nickname: 'Reader',
     avatar_seed: null,
-    favorites_public: false,
+    favorites_public: 0,
   });
   db.getUserProfileById.mockResolvedValue({
     username: 'author',
     profile_id: target.profileId,
     nickname: 'Author',
-    favorites_public: false,
+    favorites_public: 0,
   });
   db.getUserPublicReviewPage.mockResolvedValue({ items: [], nextCursor: null });
   db.getUserFollowPage.mockResolvedValue({ items: [], nextCursor: null });
-  db.getFavoritePage.mockResolvedValue({
+  db.getFavoriteLibraryPage.mockResolvedValue({
     items: [],
     total: 0,
     nextCursor: null,
@@ -89,12 +89,12 @@ it('returns only public profile fields and validates updates', async () => {
     profileId: 'Reader012345',
     nickname: 'Reader',
     avatarSeed: null,
-    favoritesPublic: false,
+    libraryVisibility: 0,
   });
   db.updateUserProfile.mockResolvedValue({
     profile_id: 'Reader012345',
     nickname: 'NewName',
-    favorites_public: true,
+    favorites_public: 1,
   });
   expect(
     (
@@ -105,7 +105,7 @@ it('returns only public profile fields and validates updates', async () => {
   ).toBe(200);
   expect(db.updateUserProfile).toHaveBeenCalledWith('reader', {
     nickname: 'NewName',
-    favoritesPublic: true,
+    libraryVisibility: 1,
   });
   expect(
     (await profile.PUT(request('PUT', { nickname: 'admin' }))).status,
@@ -123,7 +123,7 @@ it('allows reserved nicknames only for the owner', async () => {
   db.updateUserProfile.mockResolvedValue({
     profile_id: 'Owner0123456',
     nickname: '站长',
-    favorites_public: false,
+    favorites_public: 0,
   });
   expect((await profile.PUT(request('PUT', { nickname: '站长' }))).status).toBe(
     400,
@@ -154,7 +154,7 @@ it.each(['Avatar012345', 'a'.repeat(8), 'Z'.repeat(24), null])(
       profile_id: 'Reader012345',
       nickname: null,
       avatar_seed: avatarSeed,
-      favorites_public: false,
+      favorites_public: 0,
     });
     const response = await profile.PUT(request('PUT', { avatarSeed }));
     expect(response.status).toBe(200);
@@ -162,7 +162,7 @@ it.each(['Avatar012345', 'a'.repeat(8), 'Z'.repeat(24), null])(
       profileId: 'Reader012345',
       nickname: null,
       avatarSeed,
-      favoritesPublic: false,
+      libraryVisibility: 0,
     });
     expect(db.updateUserProfile).toHaveBeenCalledWith('reader', { avatarSeed });
   },
@@ -279,10 +279,11 @@ it('maps opaque identities to server usernames and validates reports', async () 
 it('respects favorite privacy and excludes live and private fields', async () => {
   expect(await (await favorites.GET(request(), context)).json()).toEqual({
     hidden: true,
+    libraryVisibility: 0,
   });
-  expect(db.getFavoritePage).not.toHaveBeenCalled();
+  expect(db.getFavoriteLibraryPage).not.toHaveBeenCalled();
   requireActiveUser.mockResolvedValue({ username: 'AUTHOR', role: 'user' });
-  db.getFavoritePage.mockResolvedValue({
+  db.getFavoriteLibraryPage.mockResolvedValue({
     items: [
       {
         key: 'vod+1',
@@ -307,13 +308,13 @@ it('respects favorite privacy and excludes live and private fields', async () =>
   expect(response.items).toHaveLength(1);
   expect(response.items[0]).not.toHaveProperty('secret');
   expect(response.items[0]).not.toHaveProperty('playRecord');
-  expect(db.getFavoritePage).toHaveBeenCalledWith(
-    'author',
-    30,
-    undefined,
-    undefined,
-    false,
-  );
+  expect(db.getFavoriteLibraryPage).toHaveBeenCalledWith('author', {
+    query: '',
+    filter: 'all',
+    sort: 'saved',
+    cursor: undefined,
+    profileScope: 'self',
+  });
   expect((await reviews.GET(request(), context)).status).toBe(200);
   expect(
     (
@@ -331,41 +332,101 @@ it('respects favorite privacy and excludes live and private fields', async () =>
   expect((await user.GET(request(), context)).status).toBe(404);
 });
 
-it('keeps public favorite cursors compatible and rejects malformed cursors', async () => {
+it('传递绑定筛选的收藏库游标并返回失效提示', async () => {
+  const { InvalidFavoriteLibraryQuery } =
+    await import('@/features/favorites/lib/library-storage');
   db.getUserProfileById.mockResolvedValue({
     username: 'author',
-    favorites_public: true,
+    favorites_public: 2,
   });
-  const cursor = Buffer.from(JSON.stringify([10, 'vod+2'])).toString(
-    'base64url',
-  );
-  const nextCursor = Buffer.from(JSON.stringify([10, 'vod+1'])).toString(
-    'base64url',
-  );
-  db.getFavoritePage.mockResolvedValue({
-    items: [{ key: 'vod+1', favorite: { title: 'Work', save_time: 10 } }],
-    total: 3,
-    nextCursor: '10|vod+1',
+  db.getFavoriteLibraryPage.mockResolvedValue({
+    items: [],
+    nextCursor: 'next',
   });
   const response = await favorites.GET(
-    request('GET', undefined, `?cursor=${cursor}`),
+    request('GET', undefined, '?cursor=bound&filter=completed'),
     context,
   );
-  expect((await response.json()).nextCursor).toBe(nextCursor);
-  expect(db.getFavoritePage).toHaveBeenCalledWith(
-    'author',
-    30,
-    10,
-    'vod+2',
-    false,
+  expect((await response.json()).nextCursor).toBe('next');
+  expect(db.getFavoriteLibraryPage).toHaveBeenCalledWith('author', {
+    query: '',
+    filter: 'completed',
+    sort: 'saved',
+    cursor: 'bound',
+    profileScope: 'public',
+  });
+  db.getFavoriteLibraryPage.mockRejectedValue(
+    new InvalidFavoriteLibraryQuery('收藏分页游标已失效，请重新加载'),
   );
-  db.getFavoritePage.mockClear();
   expect(
     (await favorites.GET(request('GET', undefined, '?cursor=invalid'), context))
       .status,
   ).toBe(400);
-  expect(db.getFavoritePage).not.toHaveBeenCalled();
 });
+
+it.each([0, 1, 2, 3])(
+  '资料 API 保存数字公开等级 %s',
+  async (libraryVisibility) => {
+    db.updateUserProfile.mockResolvedValue({
+      profile_id: 'Reader012345',
+      nickname: 'Reader',
+      avatar_seed: null,
+      favorites_public: libraryVisibility,
+    });
+    const response = await profile.PUT(request('PUT', { libraryVisibility }));
+    expect(response.status).toBe(200);
+    expect((await response.json()).libraryVisibility).toBe(libraryVisibility);
+    expect(db.updateUserProfile).toHaveBeenCalledWith('reader', {
+      libraryVisibility,
+    });
+  },
+);
+
+it.each([-1, 4, 1.5, '2', null, true])(
+  '拒绝非法公开等级 %j',
+  async (libraryVisibility) => {
+    expect(
+      (await profile.PUT(request('PUT', { libraryVisibility }))).status,
+    ).toBe(400);
+    expect(db.updateUserProfile).not.toHaveBeenCalled();
+  },
+);
+
+it.each([1, 2, 3])(
+  '公开收藏按等级 %s 裁剪状态与评分',
+  async (libraryVisibility) => {
+    db.getUserProfileById.mockResolvedValue({
+      username: 'author',
+      favorites_public: libraryVisibility,
+    });
+    db.getFavoriteLibraryPage.mockResolvedValue({
+      items: [
+        {
+          key: 'douban+1',
+          favorite: { title: 'Demo', save_time: 10 },
+          watchStatus: 'completed',
+          myRating: 8,
+        },
+      ],
+      nextCursor: null,
+    });
+    const body = await (await favorites.GET(request(), context)).json();
+    expect(body.libraryVisibility).toBe(libraryVisibility);
+    expect(body.items[0].watchStatus).toBe(
+      libraryVisibility >= 2 ? 'completed' : undefined,
+    );
+    expect(body.items[0].rating).toBe(libraryVisibility >= 3 ? 8 : undefined);
+    if (libraryVisibility === 1)
+      expect(
+        (
+          await favorites.GET(
+            request('GET', undefined, '?filter=completed'),
+            context,
+          )
+        ).status,
+      ).toBe(400);
+  },
+);
 
 it('returns follow status and grouped admin reports and applies moderation', async () => {
   db.setUserFollow.mockResolvedValue({ following: true, followerCount: 1 });
