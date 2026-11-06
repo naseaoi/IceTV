@@ -6,6 +6,7 @@ import {
   favoriteAction,
   playAction,
   summarizeSources,
+  summarizeSourcesCompact,
 } from '@/components/card-actions/actions';
 import CardActionOverlay from '@/components/card-actions/CardActionOverlay';
 
@@ -64,23 +65,17 @@ describe('buildCardActions', () => {
     expect(actions.map(({ label }) => label)).toEqual([
       '观看直播',
       '取消收藏',
-      '标记与评分',
-      '标记更新已读',
+      '标记评分',
+      '标为已读',
       '取消追更',
       'Bangumi 详情',
       '删除记录',
     ]);
-    expect(actions.map(({ group }) => group)).toEqual([
-      'play',
-      'manage',
-      'manage',
-      'manage',
-      'manage',
-      'link',
+    expect(actions[0].meta).toBe('第 3 集');
+    expect(actions.map(({ tone }) => tone ?? 'default')).toEqual([
+      ...Array(6).fill('default'),
       'danger',
     ]);
-    expect(actions[0].meta).toBe('第 3 集');
-    expect(actions[6].tone).toBe('danger');
     actions.forEach((action) => action.onClick());
     [play, favorite, watchRecord, markRead, tracking, remove].forEach(
       (handler) => {
@@ -107,7 +102,7 @@ describe('buildCardActions', () => {
         onToggleTracking: jest.fn(),
       },
     });
-    expect(actions.map(({ label }) => label)).toEqual(['追更']);
+    expect(actions.map(({ label }) => label)).toEqual(['开启追更']);
   });
 
   it('收藏状态为 null 时生成禁用操作', () => {
@@ -117,7 +112,7 @@ describe('buildCardActions', () => {
     expect(actions).toHaveLength(1);
     expect(actions[0]).toMatchObject({
       id: 'favorite',
-      label: '收藏',
+      label: '加入收藏',
       disabled: true,
     });
   });
@@ -157,7 +152,9 @@ describe('CardActionOverlay', () => {
     act(() => {
       jest.runOnlyPendingTimers();
     });
-    expect(screen.getByRole('menuitem', { name: '播放' })).toBeInTheDocument();
+    expect(
+      screen.getByRole('menuitem', { name: '立即播放' }),
+    ).toBeInTheDocument();
 
     rerender(
       <CardActionOverlay
@@ -170,15 +167,15 @@ describe('CardActionOverlay', () => {
     act(() => {
       jest.advanceTimersByTime(199);
     });
-    expect(screen.getByText('测试影片')).toBeInTheDocument();
+    expect(screen.getByRole('menu', { name: '测试影片' })).toBeInTheDocument();
 
     act(() => {
       jest.advanceTimersByTime(1);
     });
-    expect(screen.queryByText('测试影片')).not.toBeInTheDocument();
+    expect(screen.queryByRole('menu')).not.toBeInTheDocument();
   });
 
-  it('精确指针带锚点时为菜单，按分组分隔并在点击后关闭', () => {
+  it('精确指针带锚点时为菜单，仅在危险项前分隔并在点击后关闭', () => {
     mockPointer(true);
     const onClose = jest.fn();
     const onDelete = jest.fn();
@@ -198,9 +195,9 @@ describe('CardActionOverlay', () => {
     );
 
     expect(screen.getByRole('menu', { name: '测试影片' })).toBeInTheDocument();
-    expect(screen.getAllByRole('separator')).toHaveLength(2);
+    expect(screen.getAllByRole('separator')).toHaveLength(1);
     expect(screen.getByText('第 3 集')).toBeInTheDocument();
-    expect(screen.getByText('甲源 · 乙源 等 3 个源')).toBeInTheDocument();
+    expect(screen.queryByText('测试影片')).not.toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('menuitem', { name: '删除记录' }));
     expect(onDelete).toHaveBeenCalledTimes(1);
@@ -224,11 +221,30 @@ describe('CardActionOverlay', () => {
       screen.getByRole('heading', { name: '测试影片' }),
     ).toBeInTheDocument();
     expect(screen.getByText('甲源')).toBeInTheDocument();
-    expect(screen.getByRole('menuitem', { name: '收藏' })).toBeDisabled();
+    expect(screen.getByRole('menuitem', { name: '加入收藏' })).toBeDisabled();
+  });
+
+  it('菜单播放项无集数时以来源数作为补充信息', () => {
+    mockPointer(true);
+    render(
+      <CardActionOverlay
+        isOpen
+        onClose={jest.fn()}
+        title='测试影片'
+        actions={[playAction({ onClick: jest.fn() })]}
+        sources={['甲源', '乙源', '丙源', '甲源']}
+        anchorRect={pointAnchor}
+      />,
+    );
+
+    expect(screen.getByRole('menuitem', { name: /播放/ })).toHaveTextContent(
+      '3 个源',
+    );
   });
 
   it('来源摘要去重且两个以内全部列出', () => {
     expect(summarizeSources(['甲源', '甲源', '乙源'])).toBe('甲源 · 乙源');
     expect(summarizeSources([])).toBe('');
+    expect(summarizeSourcesCompact(['甲源'])).toBe('甲源');
   });
 });

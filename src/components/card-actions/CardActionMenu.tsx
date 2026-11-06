@@ -58,7 +58,6 @@ interface CardActionMenuProps {
   shown: boolean;
   anchor: CardActionAnchor;
   title: string;
-  footer?: string;
   actions: CardAction[];
   onAction: (action: CardAction) => void;
   onClose: () => void;
@@ -68,7 +67,6 @@ export default function CardActionMenu({
   shown,
   anchor,
   title,
-  footer,
   actions,
   onAction,
   onClose,
@@ -85,7 +83,7 @@ export default function CardActionMenu({
     const panel = panelRef.current;
     if (!panel) return;
     setPlacement(placeMenu(anchor, panel.offsetWidth, panel.offsetHeight));
-  }, [anchor, actions.length, footer]);
+  }, [anchor, actions.length]);
 
   useEffect(() => {
     const panel = panelRef.current;
@@ -162,7 +160,7 @@ export default function CardActionMenu({
         ref={panelRef}
         role='menu'
         aria-label={title}
-        className={`absolute w-52 select-none rounded-xl bg-white p-1 shadow-2xl shadow-black/10 ring-1 ring-gray-900/[0.08] transition-[opacity,transform] duration-150 ease-out dark:bg-gray-900 dark:shadow-black/50 dark:ring-white/[0.08] ${
+        className={`absolute w-52 select-none rounded-xl bg-white p-1.5 shadow-xl shadow-black/[0.12] ring-1 ring-gray-900/[0.08] transition-[opacity,transform] duration-150 ease-out dark:bg-gray-900 dark:shadow-black/60 dark:ring-white/[0.12] ${
           shown && placement
             ? 'pointer-events-auto scale-100 opacity-100'
             : 'scale-95 opacity-0'
@@ -175,18 +173,7 @@ export default function CardActionMenu({
         }}
         onContextMenu={(event) => event.preventDefault()}
       >
-        <p className='truncate px-2.5 pb-1 pt-1.5 text-xs font-medium text-gray-500 dark:text-gray-400'>
-          {title}
-        </p>
         <CardActionList actions={actions} variant='menu' onAction={onAction} />
-        {footer && (
-          <>
-            <div className='mx-1.5 my-1 h-px bg-gray-900/[0.06] dark:bg-white/[0.06]' />
-            <p className='truncate px-2.5 pb-1.5 pt-1 text-xs text-gray-400 dark:text-gray-500'>
-              {footer}
-            </p>
-          </>
-        )}
       </div>
     </div>
   );

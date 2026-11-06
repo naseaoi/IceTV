@@ -40,12 +40,14 @@ export default function CardActionList({
     <>
       {actions.map((action, index) => (
         <Fragment key={action.id}>
-          {index > 0 && actions[index - 1].group !== action.group && (
-            <div
-              role='separator'
-              className={`h-px bg-gray-900/[0.06] dark:bg-white/[0.06] ${styles.separator}`}
-            />
-          )}
+          {index > 0 &&
+            action.tone === 'danger' &&
+            actions[index - 1].tone !== 'danger' && (
+              <div
+                role='separator'
+                className={`h-px bg-gray-900/[0.06] dark:bg-white/[0.06] ${styles.separator}`}
+              />
+            )}
           <button
             type='button'
             role='menuitem'

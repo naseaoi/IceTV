@@ -206,7 +206,7 @@ it('常看海报右键在光标处打开操作菜单', async () => {
   });
   expect(
     payload.actions.map((action: { label: string }) => action.label),
-  ).toEqual(['播放', '收藏', '标记与评分']);
+  ).toEqual(['立即播放', '加入收藏', '标记评分']);
   const actions: CardAction[] = payload.actions;
   actions.find(({ id }) => id === 'watch-record')?.onClick();
   expect(openWatchRecord).toHaveBeenCalledWith({
@@ -222,7 +222,7 @@ it('常看海报右键在光标处打开操作菜单', async () => {
 });
 
 it.each(['无 Provider', '无目标'] as const)(
-  '观看海报在%s时隐藏标记与评分',
+  '观看海报在%s时隐藏标记评分',
   async (scenario) => {
     if (scenario === '无 Provider') {
       jest.mocked(useOpenWatchRecord).mockReturnValue(null);
@@ -247,8 +247,8 @@ it.each(['无 Provider', '无目标'] as const)(
     const actions: CardAction[] = showActionSheet.mock.calls[0][1].actions;
     expect(actions.map(({ label }) => label)).toEqual(
       scenario === '无目标'
-        ? ['播放', '删除记录']
-        : ['播放', '收藏', '删除记录'],
+        ? ['立即播放', '删除记录']
+        : ['立即播放', '加入收藏', '删除记录'],
     );
   },
 );

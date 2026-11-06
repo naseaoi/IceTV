@@ -57,7 +57,7 @@ describe('ContinueCard', () => {
     jest.mocked(useOpenWatchRecord).mockReturnValue(openWatchRecord);
   });
 
-  it('右键菜单按顺序包含标记与评分，并传递作品信息', async () => {
+  it('右键菜单按顺序包含标记评分，并传递作品信息', async () => {
     render(
       <ContinueCard
         {...baseProps}
@@ -74,10 +74,10 @@ describe('ContinueCard', () => {
     });
     const actions: CardAction[] = showActionSheet.mock.calls[0][1].actions;
     expect(actions.map(({ label }) => label)).toEqual([
-      '播放',
-      '收藏',
-      '标记与评分',
-      '标记更新已读',
+      '立即播放',
+      '加入收藏',
+      '标记评分',
+      '标为已读',
       '取消追更',
       '删除记录',
     ]);
@@ -94,7 +94,7 @@ describe('ContinueCard', () => {
     });
   });
 
-  it('无 Provider 时隐藏标记与评分', async () => {
+  it('无 Provider 时隐藏标记评分', async () => {
     jest.mocked(useOpenWatchRecord).mockReturnValue(null);
     render(<ContinueCard {...baseProps} />);
     await act(async () => {
@@ -102,8 +102,8 @@ describe('ContinueCard', () => {
     });
     const actions: CardAction[] = showActionSheet.mock.calls[0][1].actions;
     expect(actions.map(({ label }) => label)).toEqual([
-      '播放',
-      '收藏',
+      '立即播放',
+      '加入收藏',
       '取消追更',
       '删除记录',
     ]);
