@@ -3,6 +3,10 @@
 import type { LucideIcon } from 'lucide-react';
 import type { ReactNode } from 'react';
 
+import SkeletonText from '@/components/SkeletonText';
+
+const EMPTY_TITLE_TEXT_CLASS = 'mt-4 text-base font-medium';
+
 export const LIBRARY_PILL_BUTTON_CLASS =
   'inline-flex h-9 items-center rounded-full bg-gray-900 px-4 text-sm font-medium text-white transition hover:bg-gray-700 dark:bg-white dark:text-gray-900 dark:hover:bg-gray-200';
 
@@ -16,9 +20,10 @@ export function LibraryEmptySkeleton() {
   return (
     <div aria-hidden='true' className='flex flex-col items-center px-6 py-20'>
       <div className='skeleton h-14 w-14 rounded-2xl' />
-      <div className='mt-4 flex h-6 items-center'>
-        <div className='skeleton h-4 w-28 rounded' />
-      </div>
+      <SkeletonText
+        className={EMPTY_TITLE_TEXT_CLASS}
+        barClassName='h-4 w-28 rounded'
+      />
       <div className='skeleton mt-5 h-9 w-28 rounded-full' />
     </div>
   );
@@ -40,7 +45,9 @@ export function LibraryEmptyState({
       <div className='flex h-14 w-14 items-center justify-center rounded-2xl bg-gray-100 text-gray-400 dark:bg-white/[0.06] dark:text-gray-500'>
         <Icon aria-hidden='true' className='h-6 w-6' />
       </div>
-      <p className='mt-4 text-base font-medium text-gray-900 dark:text-gray-100'>
+      <p
+        className={`${EMPTY_TITLE_TEXT_CLASS} text-gray-900 dark:text-gray-100`}
+      >
         {title}
       </p>
       {description && (

@@ -1,3 +1,9 @@
+import {
+  readStorage,
+  removeStorage,
+  writeStorage,
+} from '@/lib/browser-storage';
+
 export const DEFAULT_AGGREGATE_SEARCH_STORAGE_KEY = 'defaultAggregateSearch';
 export const ENABLE_OPTIMIZATION_STORAGE_KEY = 'enableOptimization';
 export const FLUID_SEARCH_STORAGE_KEY = 'fluidSearch';
@@ -9,7 +15,6 @@ export const BLOCK_AD_STORAGE_KEY = 'enable_blockad';
 export const AUTO_PLAY_NEXT_STORAGE_KEY = 'enable_autoplay_next';
 export const PREFERRED_QUALITY_STORAGE_KEY = 'preferredQuality';
 export const SOURCE_PREFERRED_QUALITY_STORAGE_PREFIX = 'preferredQuality:';
-export const THEME_STORAGE_KEY = 'theme';
 export const SEEN_ANNOUNCEMENT_STORAGE_KEY = 'hasSeenAnnouncement';
 export const CONTINUE_WATCHING_COUNT_STORAGE_KEY = 'continueWatchingCount';
 export const CONTINUE_WATCHING_PAGE_COUNT_STORAGE_KEY =
@@ -26,11 +31,7 @@ export const DANMAKU_EPISODE_MAP_STORAGE_PREFIX = 'danmakuEpisode:';
 export const DANMAKU_EPISODE_SEARCH_STORAGE_PREFIX = 'danmakuEpisodeSearch:';
 
 function readStoredBoolean(key: string): boolean | undefined {
-  if (typeof window === 'undefined') {
-    return undefined;
-  }
-
-  const raw = window.localStorage.getItem(key);
+  const raw = readStorage(key);
   if (raw === null) {
     return undefined;
   }
@@ -44,35 +45,19 @@ function readStoredBoolean(key: string): boolean | undefined {
 }
 
 function writeStoredBoolean(key: string, value: boolean) {
-  if (typeof window === 'undefined') {
-    return;
-  }
-
-  window.localStorage.setItem(key, JSON.stringify(value));
+  writeStorage(key, JSON.stringify(value));
 }
 
 function resetStoredBoolean(key: string) {
-  if (typeof window === 'undefined') {
-    return;
-  }
-
-  window.localStorage.removeItem(key);
+  removeStorage(key);
 }
 
 function readStoredString(key: string): string | undefined {
-  if (typeof window === 'undefined') {
-    return undefined;
-  }
-
-  return window.localStorage.getItem(key) ?? undefined;
+  return readStorage(key) ?? undefined;
 }
 
 function writeStoredString(key: string, value: string) {
-  if (typeof window === 'undefined') {
-    return;
-  }
-
-  window.localStorage.setItem(key, value);
+  writeStorage(key, value);
 }
 
 export function readDefaultAggregateSearch(): boolean {
@@ -289,11 +274,7 @@ export function writeContinueWatchingPageCount(value: number): void {
 }
 
 export function resetContinueWatchingPageCount(): void {
-  try {
-    if (typeof window !== 'undefined') {
-      window.localStorage.removeItem(CONTINUE_WATCHING_PAGE_COUNT_STORAGE_KEY);
-    }
-  } catch {}
+  removeStorage(CONTINUE_WATCHING_PAGE_COUNT_STORAGE_KEY);
   try {
     if (typeof document !== 'undefined') {
       document.cookie = 'cw_page_count=0;path=/;max-age=0;samesite=lax';
@@ -303,11 +284,7 @@ export function resetContinueWatchingPageCount(): void {
 
 export function resetContinueWatchingCount(): void {
   resetContinueWatchingPageCount();
-  try {
-    if (typeof window !== 'undefined') {
-      window.localStorage.removeItem(CONTINUE_WATCHING_COUNT_STORAGE_KEY);
-    }
-  } catch {}
+  removeStorage(CONTINUE_WATCHING_COUNT_STORAGE_KEY);
   try {
     if (typeof document !== 'undefined') {
       document.cookie = 'cw_count=0;path=/;max-age=0;samesite=lax';
@@ -557,9 +534,7 @@ export function writeDanmakuEpisodeId(
   const key = `${DANMAKU_EPISODE_MAP_STORAGE_PREFIX}${scopeKey}`;
   if (episodeId === null) {
     writeDanmakuEpisodeSearchTitle(scopeKey, '');
-    if (typeof window !== 'undefined') {
-      window.localStorage.removeItem(key);
-    }
+    removeStorage(key);
     return;
   }
   if (!Number.isSafeInteger(episodeId) || episodeId <= 0) return;

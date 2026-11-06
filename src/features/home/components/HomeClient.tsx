@@ -26,19 +26,19 @@ import {
   primeDefaultDoubanFeedViewCache,
 } from '@/features/douban/hooks/useDoubanFeed';
 import { HomeInitialData } from '@/features/home/lib/home.types';
-import { getDoubanCategories } from '@/lib/douban.client';
-import { DoubanItem, PlayRecord } from '@/lib/types';
-
 import {
   mergeHomeInitialDataWithClientSnapshot,
   writeHomeClientSnapshot,
-} from '../lib/home-client-cache';
-import { pickHomeHeroItems } from '../lib/home-hero';
+} from '@/features/home/lib/home-client-cache';
+import { pickHomeHeroItems } from '@/features/home/lib/home-hero';
 import {
   HOME_BODY_CLASS,
   HOME_SECTION_CLASS,
   HOME_SECTIONS_CLASS,
-} from '../lib/home-layout';
+} from '@/features/home/lib/home-layout';
+import { getDoubanCategories } from '@/lib/douban.client';
+import { DoubanItem, PlayRecord } from '@/lib/types';
+
 import { HomeHero, HomeHeroSkeleton } from './HomeHero';
 
 interface HomeClientProps {

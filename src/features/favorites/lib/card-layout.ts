@@ -1,1 +1,2 @@
+export const FAVORITE_PREVIEW_EMPTY_TEXT_CLASS = 'text-sm';
 export const FAVORITE_PREVIEW_EMPTY_HEIGHT_CLASS = 'h-[68px]';

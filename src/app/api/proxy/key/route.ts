@@ -1,5 +1,9 @@
 ﻿import { NextRequest, NextResponse } from 'next/server';
 
+import {
+  getProxySourceKey,
+  resolveProxyUserAgent,
+} from '@/app/api/proxy/utils';
 import { isLiveEntryEnabled } from '@/features/live/lib/live';
 import { getConfigForRead } from '@/lib/config';
 import {
@@ -18,8 +22,6 @@ import {
   UrlValidationError,
   validateProxyUrlForRequest,
 } from '@/lib/url-guard';
-
-import { getProxySourceKey, resolveProxyUserAgent } from '../utils';
 
 export const runtime = 'nodejs';
 

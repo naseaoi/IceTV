@@ -2,10 +2,12 @@ import React, { useEffect, useMemo, useRef } from 'react';
 
 import { SearchFilterCategory } from '@/components/SearchResultFilter';
 import { VideoCardHandle } from '@/components/VideoCard';
+import {
+  compareYear,
+  computeGroupStats,
+} from '@/features/search/lib/searchUtils';
 import { normalizeWorkTitle } from '@/lib/source-match';
 import { SearchResult } from '@/lib/types';
-
-import { compareYear, computeGroupStats } from '../lib/searchUtils';
 
 export type FilterState = {
   source: string;

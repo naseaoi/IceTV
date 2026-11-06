@@ -272,7 +272,7 @@ export function VideoCardPoster({
         displayYear !== '0' && (
           <div
             data-card-year
-            className='absolute bottom-2 left-2 rounded bg-black/50 px-2 py-1 text-xs font-medium text-white shadow-sm backdrop-blur-sm transition-all duration-300 ease-out group-hover:opacity-90'
+            className='absolute bottom-2 left-2 rounded bg-black/70 px-2 py-1 text-xs font-medium text-white shadow-sm transition-all duration-300 ease-out group-hover:opacity-90'
             style={noSelectStyle}
             onContextMenu={preventContextMenu}
           >

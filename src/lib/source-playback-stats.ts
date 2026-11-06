@@ -1,3 +1,5 @@
+import { readStorage, writeStorage } from '@/lib/browser-storage';
+
 export const SOURCE_PLAYBACK_STATS_STORAGE_KEY = 'sourcePlaybackStats';
 
 const STATS_VERSION = 1;
@@ -72,7 +74,7 @@ export function readSourcePlaybackStats(): Map<string, SourcePlaybackStat> {
   if (typeof window === 'undefined') return stats;
 
   try {
-    const raw = window.localStorage.getItem(SOURCE_PLAYBACK_STATS_STORAGE_KEY);
+    const raw = readStorage(SOURCE_PLAYBACK_STATS_STORAGE_KEY);
     if (!raw) return stats;
     const parsed = JSON.parse(raw) as Partial<StoredSourcePlaybackStats>;
     if (parsed?.v !== STATS_VERSION || !Array.isArray(parsed.entries)) {
@@ -95,14 +97,8 @@ function writeSourcePlaybackStats(stats: Map<string, SourcePlaybackStat>) {
     .sort((a, b) => b[1].lastUsedAt - a[1].lastUsedAt)
     .slice(0, MAX_TRACKED_SOURCES);
   const payload: StoredSourcePlaybackStats = { v: STATS_VERSION, entries };
-  try {
-    window.localStorage.setItem(
-      SOURCE_PLAYBACK_STATS_STORAGE_KEY,
-      JSON.stringify(payload),
-    );
-  } catch {
-    // 存储配额或隐私模式导致写入失败时只放弃统计，不影响播放
-  }
+  // 存储配额或隐私模式导致写入失败时只放弃统计，不影响播放
+  writeStorage(SOURCE_PLAYBACK_STATS_STORAGE_KEY, JSON.stringify(payload));
 }
 
 // 每闲置满一个周期计数减半；持续使用时由计数上限保证近期结果占主导

@@ -203,7 +203,7 @@ function PosterCard({
 
         {hasDisplayableRate(rate) && (
           <div
-            className='absolute right-1.5 top-1.5 rounded-md bg-black/60 px-1.5 py-0.5 text-[11px] font-semibold tabular-nums leading-4 text-amber-300 backdrop-blur-sm'
+            className='absolute right-1.5 top-1.5 rounded-md bg-black/70 px-1.5 py-0.5 text-[11px] font-semibold tabular-nums leading-4 text-amber-300'
             style={noSelectStyle}
             onContextMenu={preventContextMenu}
           >
@@ -224,7 +224,7 @@ function PosterCard({
             title={externalLinkLabel}
           >
             <div
-              className='flex h-7 w-7 items-center justify-center rounded-full bg-black/60 text-white backdrop-blur-sm transition-colors duration-200 hover:bg-brand-500'
+              className='flex h-7 w-7 items-center justify-center rounded-full bg-black/70 text-white transition-colors duration-200 hover:bg-brand-500'
               style={noSelectStyle}
               onContextMenu={preventContextMenu}
             >

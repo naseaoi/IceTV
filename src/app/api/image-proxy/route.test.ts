@@ -248,3 +248,27 @@ describe('image proxy resize cache', () => {
     expect(mockFetchWithUrlGuard).toHaveBeenCalledTimes(2);
   });
 });
+
+it('does not return an upstream statusText to the client', async () => {
+  mockResolveProxyAuthorization.mockResolvedValue({
+    authorized: true,
+    via: 'signature',
+  });
+  mockRequireServerProxyQuota.mockReturnValue(null);
+  mockGetConfigForRead.mockResolvedValue({ SiteConfig: {} });
+  mockValidateProxyUrlForRequest.mockResolvedValue({
+    ok: true,
+    url: 'https://example.com/private.jpg',
+  });
+  mockFetchWithUrlGuard.mockResolvedValue({
+    ok: false,
+    status: 502,
+    statusText: 'private upstream token=secret',
+    body: null,
+  });
+  const response = await GET({
+    url: 'http://localhost/api/image-proxy?url=https://example.com/private.jpg',
+  } as NextRequest);
+  expect(response.status).toBe(502);
+  expect(await response.json()).toEqual({ error: '图片获取失败' });
+});

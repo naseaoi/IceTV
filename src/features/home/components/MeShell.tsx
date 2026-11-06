@@ -40,7 +40,7 @@ export function MeShell({ children }: { children: ReactNode }) {
         {profileId && (
           <div
             aria-hidden='true'
-            className='pointer-events-none absolute inset-0 bg-gradient-to-br from-brand-300 to-brand-600 opacity-25 [mask-image:linear-gradient(to_bottom,black,transparent)] dark:opacity-20 md:hidden'
+            className='pointer-events-none absolute inset-0 bg-gradient-to-br from-gray-200 to-gray-400 opacity-50 [mask-image:linear-gradient(to_bottom,black,transparent)] dark:from-gray-700 dark:to-gray-900 dark:opacity-60 md:hidden'
           />
         )}
         <div

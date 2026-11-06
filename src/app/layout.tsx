@@ -5,24 +5,23 @@ import { Inter } from 'next/font/google';
 import { cookies } from 'next/headers';
 
 import { AuthProvider } from '@/components/AuthProvider';
+import { CardInteractionProvider } from '@/components/CardInteractionProvider';
+import { ClientErrorReporter } from '@/components/ClientErrorReporter';
+import { GlobalErrorIndicator } from '@/components/GlobalErrorIndicator';
+import { MessageCenterProvider } from '@/components/messages/MessageCenterProvider';
+import { PageScrollRestorer } from '@/components/PageScrollRestorer';
+import { RuntimeConfigProvider } from '@/components/RuntimeConfigProvider';
+import { SiteProvider } from '@/components/SiteProvider';
+import { SWRegister } from '@/components/SWRegister';
+import { ThemeProvider } from '@/components/ThemeProvider';
 import { WatchRecordProvider } from '@/features/watch-record/WatchRecordProvider';
 import { getServerAuthSession } from '@/lib/auth-session.server';
 import { getPublicConfig } from '@/lib/config';
-import { THEME_STORAGE_KEY } from '@/lib/local-preferences';
 import { serializeForInlineScript } from '@/lib/script-serialization';
 import { DEFAULT_SITE_FOOTER_TEXT } from '@/lib/site-footer';
 import { getStorageType } from '@/lib/storage-type';
+import { buildThemeInitScript, DEFAULT_THEME } from '@/lib/theme-preference';
 import { CURRENT_UPDATE_BRANCH } from '@/lib/version';
-
-import { CardInteractionProvider } from '../components/CardInteractionProvider';
-import { ClientErrorReporter } from '../components/ClientErrorReporter';
-import { GlobalErrorIndicator } from '../components/GlobalErrorIndicator';
-import { MessageCenterProvider } from '../components/messages/MessageCenterProvider';
-import { PageScrollRestorer } from '../components/PageScrollRestorer';
-import { RuntimeConfigProvider } from '../components/RuntimeConfigProvider';
-import { SiteProvider } from '../components/SiteProvider';
-import { SWRegister } from '../components/SWRegister';
-import { ThemeProvider } from '../components/ThemeProvider';
 
 const inter = Inter({
   subsets: ['latin'],
@@ -107,24 +106,11 @@ export default async function RootLayout({
   const runtimeConfigReadyForGuest = initialAuthSession.status === 'guest';
 
   return (
-    <html lang='zh-CN' className='dark' suppressHydrationWarning>
+    <html lang='zh-CN' className={DEFAULT_THEME} suppressHydrationWarning>
       <head>
         <script
           dangerouslySetInnerHTML={{
-            __html: `(() => {
-  try {
-    const saved = localStorage.getItem(${serializeForInlineScript(THEME_STORAGE_KEY)});
-    const theme = saved === 'system'
-      ? (window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light')
-      : saved === 'light' || saved === 'dark'
-        ? saved
-        : 'dark';
-    const root = document.documentElement;
-    root.classList.remove('light', 'dark');
-    root.classList.add(theme);
-    root.style.colorScheme = theme;
-  } catch {}
-})();`,
+            __html: buildThemeInitScript(),
           }}
         />
         <link
@@ -141,13 +127,7 @@ export default async function RootLayout({
       <body
         className={`${inter.className} min-h-screen bg-white text-gray-900 dark:bg-gray-950 dark:text-gray-200`}
       >
-        <ThemeProvider
-          attribute='class'
-          defaultTheme='dark'
-          enableSystem
-          disableTransitionOnChange
-          storageKey={THEME_STORAGE_KEY}
-        >
+        <ThemeProvider disableTransitionOnChange>
           <RuntimeConfigProvider initialConfig={runtimeConfig}>
             <SiteProvider
               siteName={initialSiteName}

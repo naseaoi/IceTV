@@ -14,6 +14,7 @@ import RatingStars from '@/components/RatingStars';
 import {
   INFO_COVER_CLASS,
   INFO_RATING_LINE_CLASS,
+  INFO_RATING_TEXT_CLASS,
 } from '@/features/play/components/EpisodeSelector/layout';
 import { formatRating } from '@/lib/rating';
 import { getVerticalScrollMaskStyle } from '@/lib/scroll-edge-fade';
@@ -182,7 +183,9 @@ export const InfoTab: React.FC<InfoTabProps> = ({
                 </span>
               ) : (
                 <>
-                  <span className='text-[15px] font-semibold tabular-nums text-amber-600 dark:text-amber-400'>
+                  <span
+                    className={`${INFO_RATING_TEXT_CLASS} text-amber-600 dark:text-amber-400`}
+                  >
                     {formatRating(rating.average)}
                   </span>
                   <RatingStars value={rating.average} size='sm' />

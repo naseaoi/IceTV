@@ -1,6 +1,7 @@
 'use client';
 
 import VideoCard from '@/components/VideoCard';
+import type { ContinueWatchingItem } from '@/features/continue-watching/hooks/useContinueWatchingItems';
 import {
   CONTINUE_WATCHING_GRID_CLASS,
   CONTINUE_WATCHING_GRID_ITEM_CLASS,
@@ -11,8 +12,6 @@ import {
   hasPlayRecordUpdate,
 } from '@/lib/play-records';
 import { parseStorageKey } from '@/lib/utils';
-
-import type { ContinueWatchingItem } from '../hooks/useContinueWatchingItems';
 
 function getProgress(record: ContinueWatchingItem) {
   if (record.total_time <= 0) return 0;

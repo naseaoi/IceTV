@@ -314,7 +314,7 @@ export function PlaybackPosterCard({
         )}
 
         {rank !== undefined ? (
-          <span className='absolute left-0 top-0 flex h-6 min-w-6 items-center justify-center rounded-br-lg bg-black/55 px-1.5 text-xs font-semibold tabular-nums text-white backdrop-blur-sm'>
+          <span className='absolute left-0 top-0 flex h-6 min-w-6 items-center justify-center rounded-br-lg bg-black/70 px-1.5 text-xs font-semibold tabular-nums text-white'>
             {rank}
           </span>
         ) : (

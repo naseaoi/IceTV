@@ -14,7 +14,7 @@ interface RatingBadgeProps {
 const VARIANT_CLASS = {
   soft: 'bg-amber-500/10 text-amber-700 ring-1 ring-inset ring-amber-500/20 dark:text-amber-300',
   overlay:
-    'bg-black/55 text-amber-300 shadow-sm ring-1 ring-inset ring-white/10 backdrop-blur-md',
+    'bg-black/70 text-amber-300 shadow-sm ring-1 ring-inset ring-white/10',
 } as const;
 
 export default function RatingBadge({

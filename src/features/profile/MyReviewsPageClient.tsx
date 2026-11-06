@@ -25,6 +25,7 @@ import {
 import { LibraryToolbar } from '@/components/LibraryToolbar';
 import ConfirmModal from '@/components/modals/ConfirmModal';
 import RatingBadge from '@/components/RatingBadge';
+import SkeletonText from '@/components/SkeletonText';
 import { useInfiniteScroll } from '@/features/douban/hooks/useInfiniteScroll';
 import { ReviewEditor } from '@/features/reviews/components/ReviewEditor';
 import {
@@ -83,6 +84,13 @@ function useReviewSkeletonCount() {
 const CARD_CLASS =
   'flex gap-4 rounded-2xl bg-white p-4 ring-1 ring-gray-200 dark:bg-white/[0.03] dark:ring-white/10';
 
+const REVIEW_TITLE_TEXT_CLASS = 'font-semibold';
+const REVIEW_META_CLASS =
+  'mt-1.5 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs';
+const REVIEW_VISIBILITY_CLASS = 'rounded px-1.5 py-0.5';
+const REVIEW_BODY_SPACING_CLASS = 'mt-2';
+const REVIEW_BODY_TEXT_CLASS = 'text-sm leading-6';
+
 function reviewPlayUrl(review: VideoReview) {
   const target = parseStorageKey(review.source_key);
   return `/play?${new URLSearchParams({ title: review.title, year: review.year, ...(target ? { source: target.source, id: target.id } : {}) })}`;
@@ -108,19 +116,25 @@ function ReviewListSkeleton({ count = SKELETON_COUNT }: { count?: number }) {
         <li key={index} className={CARD_CLASS}>
           <div className='skeleton aspect-[2/3] w-16 shrink-0 self-start rounded-lg sm:w-20' />
           <div className='min-w-0 flex-1'>
-            <div className='flex h-6 items-center'>
-              <div className='skeleton h-4 w-2/5 rounded' />
+            <SkeletonText
+              className={REVIEW_TITLE_TEXT_CLASS}
+              barClassName='h-4 w-2/5 rounded'
+            />
+            <div className={REVIEW_META_CLASS}>
+              <SkeletonText
+                className={`${REVIEW_VISIBILITY_CLASS} w-full`}
+                barClassName='h-3 w-1/4 rounded'
+              />
             </div>
-            <div className='mt-1.5 flex h-5 items-center'>
-              <div className='skeleton h-3 w-1/4 rounded' />
-            </div>
-            <div className='mt-2'>
-              <div className='flex h-6 items-center'>
-                <div className='skeleton h-3 w-full rounded' />
-              </div>
-              <div className='flex h-6 items-center'>
-                <div className='skeleton h-3 w-3/4 rounded' />
-              </div>
+            <div className={REVIEW_BODY_SPACING_CLASS}>
+              <SkeletonText
+                className={REVIEW_BODY_TEXT_CLASS}
+                barClassName='h-3 w-full rounded'
+              />
+              <SkeletonText
+                className={REVIEW_BODY_TEXT_CLASS}
+                barClassName='h-3 w-3/4 rounded'
+              />
             </div>
           </div>
         </li>
@@ -221,7 +235,7 @@ function ReviewCard({
         <div className='flex items-start gap-2'>
           <Link
             href={playUrl}
-            className='min-w-0 flex-1 truncate font-semibold text-gray-900 transition hover:text-brand-600 dark:text-gray-100 dark:hover:text-brand-400'
+            className={`min-w-0 flex-1 truncate ${REVIEW_TITLE_TEXT_CLASS} text-gray-900 transition hover:text-brand-600 dark:text-gray-100 dark:hover:text-brand-400`}
           >
             {review.title}
             {review.year && (
@@ -249,10 +263,12 @@ function ReviewCard({
             <Trash2 className='h-4 w-4' />
           </button>
         </div>
-        <div className='mt-1.5 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-gray-500 dark:text-gray-400'>
+        <div
+          className={`${REVIEW_META_CLASS} text-gray-500 dark:text-gray-400`}
+        >
           {review.rating !== null && <RatingBadge value={review.rating} />}
           <span
-            className={`rounded px-1.5 py-0.5 ${
+            className={`${REVIEW_VISIBILITY_CLASS} ${
               review.is_public
                 ? 'bg-brand-500/10 text-brand-700 dark:text-brand-400'
                 : 'bg-gray-100 dark:bg-white/[0.06]'
@@ -270,7 +286,7 @@ function ReviewCard({
         {review.content ? (
           <ExpandableText
             text={review.content}
-            className='mt-2 text-sm leading-6 text-gray-700 dark:text-gray-300'
+            className={`${REVIEW_BODY_SPACING_CLASS} ${REVIEW_BODY_TEXT_CLASS} text-gray-700 dark:text-gray-300`}
           />
         ) : (
           <p className='mt-2 text-sm text-gray-400 dark:text-gray-500'>

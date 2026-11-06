@@ -67,7 +67,7 @@ export function LibraryToolbar<F extends string, S extends string>({
 
   return (
     <div className='flex flex-wrap items-center gap-3 lg:flex-nowrap lg:gap-4'>
-      <label className='group relative order-1 flex h-10 min-w-0 flex-1 items-center rounded-xl bg-white/75 shadow-sm ring-1 ring-inset ring-black/[0.06] backdrop-blur transition focus-within:bg-white focus-within:ring-brand-500/50 dark:bg-white/[0.06] dark:shadow-none dark:ring-white/[0.06] dark:focus-within:bg-gray-900 lg:order-none lg:w-80 lg:flex-none'>
+      <label className='group relative order-1 flex h-10 min-w-0 flex-1 items-center rounded-xl bg-white shadow-sm ring-1 ring-inset ring-black/[0.06] transition focus-within:bg-white focus-within:ring-brand-500/50 dark:bg-white/[0.06] dark:shadow-none dark:ring-white/[0.06] dark:focus-within:bg-gray-900 lg:order-none lg:w-80 lg:flex-none'>
         <Search
           aria-hidden='true'
           className='pointer-events-none absolute left-3 h-4 w-4 text-gray-400 transition group-focus-within:text-brand-500'

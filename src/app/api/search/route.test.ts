@@ -175,3 +175,36 @@ it('ranks before the quick-search source limit, preserving same-tier order and p
   ).toEqual(['source-11', ...many.slice(0, 9).map((site) => site.key)]);
   expect(await response.json()).toMatchObject({ searchedSources: 10 });
 });
+
+it('keeps upstream exception details out of source_error events', async () => {
+  const error = new Error('https://private.example/?token=secret');
+  (runSearchAggregation as jest.Mock).mockImplementationOnce(
+    async (options) => {
+      options.onSourceError(sites[0], error);
+      return [];
+    },
+  );
+  const log = jest.spyOn(console, 'error').mockImplementation(() => {});
+  try {
+    const response = await streamGET(request());
+    const text = await response.text();
+    const events = text
+      .trim()
+      .split('\n\n')
+      .map((line) => JSON.parse(line.slice(6)));
+    expect(events.find((event) => event.type === 'source_error')).toMatchObject(
+      {
+        source: sites[0].key,
+        error: '搜索失败',
+      },
+    );
+    expect(text).not.toContain('secret');
+    expect(log).toHaveBeenCalledWith(
+      '流式搜索源请求失败:',
+      sites[0].key,
+      error,
+    );
+  } finally {
+    log.mockRestore();
+  }
+});

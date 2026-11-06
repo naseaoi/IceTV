@@ -1,6 +1,10 @@
 import HomePosterCardSkeleton from '@/components/HomePosterCardSkeleton';
 import ScrollableRow from '@/components/ScrollableRow';
-import { FAVORITE_PREVIEW_EMPTY_HEIGHT_CLASS } from '@/features/favorites/lib/card-layout';
+import SkeletonText from '@/components/SkeletonText';
+import {
+  FAVORITE_PREVIEW_EMPTY_HEIGHT_CLASS,
+  FAVORITE_PREVIEW_EMPTY_TEXT_CLASS,
+} from '@/features/favorites/lib/card-layout';
 import {
   clampFavoriteSkeletonCount,
   FAVORITE_PREVIEW_LIMIT,
@@ -28,7 +32,10 @@ export function FavoritePreviewSkeleton({
         <div
           className={`flex items-center ${FAVORITE_PREVIEW_EMPTY_HEIGHT_CLASS}`}
         >
-          <div className='skeleton h-3.5 w-28 rounded' />
+          <SkeletonText
+            className={FAVORITE_PREVIEW_EMPTY_TEXT_CLASS}
+            barClassName='h-3.5 w-28 rounded'
+          />
         </div>
       )}
     </>

@@ -8,7 +8,13 @@ import CoverImage from '@/components/CoverImage';
 import { PAGE_CONTAINER_CLASS } from '@/components/page-container';
 import PageLayout from '@/components/PageLayout';
 import ProfileAvatar from '@/components/ProfileAvatar';
-import PublicReviewContent from '@/components/PublicReviewContent';
+import PublicReviewContent, {
+  PUBLIC_REVIEW_BODY_SPACING_CLASS,
+  PUBLIC_REVIEW_BODY_TEXT_CLASS,
+  PUBLIC_REVIEW_META_CLASS,
+  PUBLIC_REVIEW_TIME_TEXT_CLASS,
+} from '@/components/PublicReviewContent';
+import SkeletonText from '@/components/SkeletonText';
 import { ProfilePanel } from '@/components/user-menu/ProfilePanel';
 import { WATCH_STATUS_OPTIONS } from '@/components/watch-record-context';
 import {
@@ -33,6 +39,10 @@ import type {
   UserProfileView,
 } from '@/lib/types';
 import { parseStorageKey } from '@/lib/utils';
+
+const REVIEW_TITLE_TEXT_CLASS = 'mb-1.5';
+const NICKNAME_TEXT_CLASS = 'text-2xl font-semibold';
+const PROFILE_STATS_CLASS = 'mt-2 flex flex-wrap gap-x-5 gap-y-1 text-sm';
 
 function playUrl(review: { title: string; year: string }) {
   return `/play?${new URLSearchParams({ title: review.title, year: review.year })}`;
@@ -70,7 +80,7 @@ function ProfileReviews({
             <CoverImage src={review.cover} alt={review.title} sizes='80px' />
           </Link>
           <div className='min-w-0 flex-1'>
-            <h2 className='mb-1.5 truncate'>
+            <h2 className={`${REVIEW_TITLE_TEXT_CLASS} truncate`}>
               <Link
                 href={playUrl(review)}
                 className='font-semibold text-gray-900 transition hover:text-brand-600 dark:text-gray-100 dark:hover:text-brand-400'
@@ -203,12 +213,26 @@ function ProfileReviewsSkeleton({ count = 3 }: { count?: number }) {
         >
           <div className='skeleton aspect-[2/3] w-16 shrink-0 self-start rounded-lg sm:w-20' />
           <div className='min-w-0 flex-1'>
-            <div className='mb-1.5 flex h-6 items-center'>
-              <div className='skeleton h-4 w-1/2 rounded' />
+            <SkeletonText
+              className={REVIEW_TITLE_TEXT_CLASS}
+              barClassName='h-4 w-1/2 rounded'
+            />
+            <div className={PUBLIC_REVIEW_META_CLASS}>
+              <SkeletonText
+                className={PUBLIC_REVIEW_TIME_TEXT_CLASS}
+                barClassName='h-4 w-24 rounded'
+              />
             </div>
-            <div className='skeleton mb-3 h-4 w-24 rounded' />
-            <div className='skeleton mb-2 h-4 w-full rounded' />
-            <div className='skeleton h-4 w-3/4 rounded' />
+            <div className={PUBLIC_REVIEW_BODY_SPACING_CLASS}>
+              <SkeletonText
+                className={PUBLIC_REVIEW_BODY_TEXT_CLASS}
+                barClassName='h-4 w-full rounded'
+              />
+              <SkeletonText
+                className={PUBLIC_REVIEW_BODY_TEXT_CLASS}
+                barClassName='h-4 w-3/4 rounded'
+              />
+            </div>
           </div>
         </div>
       ))}
@@ -222,14 +246,13 @@ function ProfileHeaderSkeleton() {
       <div className='mb-6 flex flex-wrap items-center gap-4 rounded-2xl bg-white p-5 ring-1 ring-gray-200/80 dark:bg-white/[0.03] dark:ring-white/10'>
         <div className='skeleton h-16 w-16 shrink-0 rounded-full' />
         <div className='min-w-0 flex-1'>
-          <div className='flex h-8 items-center'>
-            <div className='skeleton h-6 w-36 max-w-full rounded' />
-          </div>
-          <div className='mt-2 flex flex-wrap gap-x-5 gap-y-1'>
+          <SkeletonText
+            className={NICKNAME_TEXT_CLASS}
+            barClassName='h-6 w-36 max-w-full rounded'
+          />
+          <div className={PROFILE_STATS_CLASS}>
             {Array.from({ length: 3 }, (_, index) => (
-              <div key={index} className='flex h-5 items-center'>
-                <div className='skeleton h-4 w-10 rounded' />
-              </div>
+              <SkeletonText key={index} barClassName='h-4 w-10 rounded' />
             ))}
           </div>
         </div>
@@ -339,10 +362,14 @@ export default function ProfilePageClient({
                 <div className='flex flex-wrap items-center gap-4'>
                   <ProfileAvatar user={profile} className='h-16 w-16' />
                   <div className='min-w-0 flex-1'>
-                    <h1 className='break-words text-2xl font-semibold text-gray-900 dark:text-gray-100'>
+                    <h1
+                      className={`break-words ${NICKNAME_TEXT_CLASS} text-gray-900 dark:text-gray-100`}
+                    >
                       {profile.nickname ?? '未设置昵称'}
                     </h1>
-                    <div className='mt-2 flex flex-wrap gap-x-5 gap-y-1 text-sm text-gray-500 dark:text-gray-400'>
+                    <div
+                      className={`${PROFILE_STATS_CLASS} text-gray-500 dark:text-gray-400`}
+                    >
                       {(
                         [
                           [

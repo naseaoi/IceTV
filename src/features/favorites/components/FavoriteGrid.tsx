@@ -118,7 +118,7 @@ function FavoriteVideoCard({
             className={`absolute bottom-2.5 right-2 flex h-6 w-6 items-center justify-center rounded-full shadow-sm transition ${
               selected
                 ? 'bg-brand-500 text-white'
-                : 'bg-black/30 text-transparent ring-[1.5px] ring-inset ring-white/90 backdrop-blur-sm'
+                : 'bg-black/40 text-transparent ring-[1.5px] ring-inset ring-white/90'
             }`}
           >
             <Check className='h-3.5 w-3.5' strokeWidth={3} />
@@ -178,7 +178,7 @@ function ReadOnlyFavoriteCard({ item }: { item: FavoriteItem }) {
       >
         <CoverImage src={item.poster} alt={item.title} sizes='180px' />
         {status && (
-          <span className='absolute left-2 top-2 rounded-md bg-black/55 px-1.5 py-1 text-xs font-medium leading-none text-white shadow-sm ring-1 ring-inset ring-white/10 backdrop-blur-md'>
+          <span className='absolute left-2 top-2 rounded-md bg-black/70 px-1.5 py-1 text-xs font-medium leading-none text-white shadow-sm ring-1 ring-inset ring-white/10'>
             {status.label}
           </span>
         )}

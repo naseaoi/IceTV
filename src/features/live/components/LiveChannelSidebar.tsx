@@ -12,14 +12,13 @@ import {
   formatTimeToHHMM,
   parseCustomTimeFormat,
 } from '@/features/live/lib/time';
-
 import type {
   EpgData,
   EpgProgram,
   LiveChannel,
   LivePanelTab,
   LiveSource,
-} from '../types';
+} from '@/features/live/types';
 
 interface LiveChannelSidebarProps {
   activeTab: LivePanelTab;
@@ -337,7 +336,7 @@ export function LiveChannelSidebar({
             <div className='flex flex-shrink-0 items-center gap-3 border-b border-gray-200/70 px-3 py-2.5 dark:border-white/[0.06]'>
               {isSwitchingSource && (
                 <div className='flex items-center gap-2 whitespace-nowrap text-xs text-amber-600 dark:text-amber-400'>
-                  <div className='h-2 w-2 animate-pulse rounded-full bg-amber-500' />
+                  <Spinner className='h-3 w-3' strokeWidth={6} />
                   切换中
                 </div>
               )}

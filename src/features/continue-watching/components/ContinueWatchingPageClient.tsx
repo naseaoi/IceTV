@@ -2,18 +2,17 @@
 
 import { useState } from 'react';
 
-import AuthenticatedRoute from '@/components/AuthenticatedRoute';
 import ConfirmModal from '@/components/modals/ConfirmModal';
 import Spinner from '@/components/Spinner';
+import { useContinueWatchingItems } from '@/features/continue-watching/hooks/useContinueWatchingItems';
 
-import { useContinueWatchingItems } from '../hooks/useContinueWatchingItems';
 import { ContinueWatchingGrid } from './ContinueWatchingGrid';
 import {
   ContinueWatchingGridSkeleton,
   ContinueWatchingPageFrame,
 } from './ContinueWatchingPageFrame';
 
-function AuthenticatedContinueWatchingPage({
+export function ContinueWatchingPageClient({
   initialSkeletonCount = 0,
 }: {
   initialSkeletonCount?: number;
@@ -80,19 +79,5 @@ function AuthenticatedContinueWatchingPage({
         }}
       />
     </ContinueWatchingPageFrame>
-  );
-}
-
-export function ContinueWatchingPageClient({
-  initialSkeletonCount = 0,
-}: {
-  initialSkeletonCount?: number;
-}) {
-  return (
-    <AuthenticatedRoute activePath='/' message='请先登录后再查看继续观看记录。'>
-      <AuthenticatedContinueWatchingPage
-        initialSkeletonCount={initialSkeletonCount}
-      />
-    </AuthenticatedRoute>
   );
 }

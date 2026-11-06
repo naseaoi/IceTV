@@ -66,7 +66,7 @@ async function fetchImageOrigin(
     throw new ImageOriginError(
       response.status,
       response.status,
-      response.statusText,
+      '图片获取失败',
     );
   }
 

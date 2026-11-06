@@ -1,19 +1,18 @@
 import { ReadonlyURLSearchParams } from 'next/navigation';
 import { startTransition, useEffect, useRef, useState } from 'react';
 
+import { normalizeSearchQueryInput } from '@/features/search/lib/searchQuery';
+import {
+  getSearchSnapshot,
+  setSearchSnapshot,
+} from '@/features/search/lib/searchSnapshotCache';
+import { sortBatchForNoOrder } from '@/features/search/lib/searchUtils';
 import { useClientHydrated } from '@/hooks/useClientHydrated';
 import { addSearchHistory } from '@/lib/db.client';
 import { readFluidSearch } from '@/lib/local-preferences';
 import { SearchResult } from '@/lib/types';
 
-import { normalizeSearchQueryInput } from '../lib/searchQuery';
-import {
-  getSearchSnapshot,
-  setSearchSnapshot,
-} from '../lib/searchSnapshotCache';
-import { sortBatchForNoOrder } from '../lib/searchUtils';
-
-export { clearSearchSnapshotCache } from '../lib/searchSnapshotCache';
+export { clearSearchSnapshotCache } from '@/features/search/lib/searchSnapshotCache';
 
 interface UseSearchExecutionParams {
   searchParams: ReadonlyURLSearchParams;

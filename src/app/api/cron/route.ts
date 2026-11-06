@@ -25,7 +25,7 @@ export async function GET(request: NextRequest) {
       {
         success: false,
         message: 'Cron job failed',
-        error: error instanceof Error ? error.message : 'Unknown error',
+        error: '定时任务执行失败',
         timestamp: new Date().toISOString(),
       },
       { status: 500 },

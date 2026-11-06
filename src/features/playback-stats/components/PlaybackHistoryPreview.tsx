@@ -3,12 +3,15 @@
 import HomePosterCardSkeleton from '@/components/HomePosterCardSkeleton';
 import { HOME_POSTER_CARD_CLASS } from '@/components/poster-card-layout';
 import ScrollableRow from '@/components/ScrollableRow';
+import SkeletonText from '@/components/SkeletonText';
 import { HistoryPosterCard } from '@/features/playback-stats/components/HistoryPosterCard';
 import {
   usePlaybackHistory,
   usePlaybackHistoryPlaceholder,
   usePlayHistorySession,
 } from '@/features/playback-stats/hooks/usePlaybackHistory';
+
+const EMPTY_TEXT_CLASS = 'text-sm';
 
 export function PlaybackHistoryPreviewSkeleton({ count }: { count?: number }) {
   const placeholder = usePlaybackHistoryPlaceholder();
@@ -20,7 +23,10 @@ export function PlaybackHistoryPreviewSkeleton({ count }: { count?: number }) {
   if (resolvedCount === 0) {
     return (
       <div aria-hidden='true' className='flex h-[68px] items-center'>
-        <div className='skeleton h-3.5 w-28 rounded' />
+        <SkeletonText
+          className={EMPTY_TEXT_CLASS}
+          barClassName='h-3.5 w-28 rounded'
+        />
       </div>
     );
   }
@@ -44,7 +50,9 @@ export function PlaybackHistoryPreview() {
 
   if (items.length === 0) {
     return (
-      <p className='py-6 text-sm text-gray-400 dark:text-gray-500'>
+      <p
+        className={`py-6 ${EMPTY_TEXT_CLASS} text-gray-400 dark:text-gray-500`}
+      >
         还没有观看记录
       </p>
     );

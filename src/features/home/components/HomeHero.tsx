@@ -12,14 +12,16 @@ import {
 import CoverImage from '@/components/CoverImage';
 import { PAGE_CONTAINER_CLASS } from '@/components/page-container';
 import SkeletonText, { SKELETON_TEXT_STRUT } from '@/components/SkeletonText';
+import {
+  type HomeHeroItem,
+  HERO_ITEM_LIMIT,
+} from '@/features/home/lib/home-hero';
 import { useIsMobileViewport } from '@/hooks/useIsMobileViewport';
 import {
   buildExternalSubjectUrl,
   hasDisplayableRate,
   usePosterPlay,
 } from '@/hooks/usePosterPlay';
-
-import { type HomeHeroItem, HERO_ITEM_LIMIT } from '../lib/home-hero';
 
 const ROTATE_INTERVAL_MS = 8000;
 // 真实 Hero 与骨架共用的几何类，骨架行高由同一字号行高撑出

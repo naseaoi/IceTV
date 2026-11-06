@@ -1,7 +1,8 @@
 import { fireEvent, render, screen } from '@testing-library/react';
-import type { ReactNode } from 'react';
+import { type ReactNode, Suspense } from 'react';
 
 import { installCryptoPolyfill } from '@/app/api/test-utils/crypto-polyfill';
+import ContinueWatchingLayout from '@/app/continue-watching/layout';
 import AuthenticatedRoute from '@/components/AuthenticatedRoute';
 import { useAuthSession } from '@/components/AuthProvider';
 
@@ -48,6 +49,36 @@ describe('AuthenticatedRoute', () => {
       isRefreshing: false,
       refreshSession: mockRefreshSession,
     });
+  });
+
+  it('继续观看布局在 Suspense 骨架之前阻止游客挂载且保持当前地址', () => {
+    window.history.replaceState(null, '', '/continue-watching');
+    const pending = new Promise<never>(() => {});
+    const protectedContent = jest.fn(() => {
+      throw pending;
+    });
+    const ProtectedContent = protectedContent;
+
+    render(
+      <ContinueWatchingLayout>
+        <Suspense fallback={<div>继续观看骨架</div>}>
+          <ProtectedContent />
+        </Suspense>
+      </ContinueWatchingLayout>,
+    );
+
+    expect(screen.getByText('需要登录')).toBeInTheDocument();
+    expect(
+      screen.getByText('请先登录后再查看继续观看记录。'),
+    ).toBeInTheDocument();
+    expect(screen.queryByText('继续观看骨架')).not.toBeInTheDocument();
+    expect(protectedContent).not.toHaveBeenCalled();
+    expect(window.location.pathname).toBe('/continue-watching');
+    expect(screen.getByRole('link', { name: '前往登录' })).toHaveAttribute(
+      'href',
+      '/login?redirect=%2Fcontinue-watching',
+    );
+    window.history.replaceState(null, '', '/');
   });
 
   it('游客直接显示登录提示且不挂载受保护内容', () => {

@@ -85,9 +85,7 @@ async function handleGet(request: NextRequest) {
       },
     );
   } catch (error) {
-    return NextResponse.json(
-      { error: (error as Error).message },
-      { status: 500 },
-    );
+    console.error('播放地址解析失败:', error);
+    return NextResponse.json({ error: '播放地址解析失败' }, { status: 500 });
   }
 }

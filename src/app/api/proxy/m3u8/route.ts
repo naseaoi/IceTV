@@ -1,5 +1,9 @@
 ﻿import { NextRequest, NextResponse } from 'next/server';
 
+import {
+  getProxySourceKey,
+  resolveProxyUserAgent,
+} from '@/app/api/proxy/utils';
 import { isLiveEntryEnabled } from '@/features/live/lib/live';
 import { getRewrittenM3U8Content } from '@/features/play/lib/m3u8-rewrite';
 import { withSourceProbeBudget } from '@/features/play/lib/sourceProbeGuard.server';
@@ -17,7 +21,6 @@ import {
   validateProxyUrlForRequest,
 } from '@/lib/url-guard';
 
-import { getProxySourceKey, resolveProxyUserAgent } from '../utils';
 import {
   isSignedM3U8Url,
   loadM3U8Data,

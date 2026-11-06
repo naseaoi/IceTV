@@ -14,6 +14,8 @@ import React, {
 } from 'react';
 import { createPortal } from 'react-dom';
 
+import { subscribePageScroll } from '@/hooks/usePageScroll';
+
 type SearchFilterKey = 'source' | 'title' | 'year' | 'yearOrder';
 
 interface SearchFilterOption {
@@ -185,10 +187,10 @@ const SearchResultFilter: React.FC<SearchResultFilterProps> = ({
     const handleResize = () => {
       if (activeCategory) calculateDropdownPosition(activeCategory);
     };
-    document.body.addEventListener('scroll', handleScroll, { passive: true });
+    const unsubscribeScroll = subscribePageScroll(handleScroll);
     window.addEventListener('resize', handleResize);
     return () => {
-      document.body.removeEventListener('scroll', handleScroll);
+      unsubscribeScroll();
       window.removeEventListener('resize', handleResize);
     };
   }, [activeCategory, calculateDropdownPosition]);

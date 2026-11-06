@@ -185,11 +185,12 @@ export async function GET(request: NextRequest) {
             return;
           }
 
+          console.error('流式搜索源请求失败:', site.key, error);
           const errorEvent = `data: ${JSON.stringify({
             type: 'source_error',
             source: site.key,
             sourceName: site.name,
-            error: error instanceof Error ? error.message : '搜索失败',
+            error: '搜索失败',
             timestamp: Date.now(),
           })}\n\n`;
 

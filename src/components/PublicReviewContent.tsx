@@ -16,6 +16,11 @@ import {
 } from '@/lib/types';
 import { reportVideoReview, setReviewLiked } from '@/lib/video-reviews.client';
 
+export const PUBLIC_REVIEW_META_CLASS = 'flex min-h-7 items-center gap-2';
+export const PUBLIC_REVIEW_TIME_TEXT_CLASS = 'text-[11px]';
+export const PUBLIC_REVIEW_BODY_SPACING_CLASS = 'mt-1.5';
+export const PUBLIC_REVIEW_BODY_TEXT_CLASS = 'text-[13px] leading-[1.7]';
+
 export const REPORT_REASON_LABELS: Record<ReviewReportReason, string> = {
   spoiler: '未标注剧透',
   abuse: '辱骂或人身攻击',
@@ -46,7 +51,7 @@ export function SpoilerContent({
   ) : (
     <ExpandableText
       text={content}
-      className='text-[13px] leading-[1.7] text-gray-600 dark:text-gray-400'
+      className={`${PUBLIC_REVIEW_BODY_TEXT_CLASS} text-gray-600 dark:text-gray-400`}
     />
   );
 }
@@ -128,7 +133,7 @@ export default function PublicReviewContent({
         </Link>
       )}
       <div className='min-w-0 flex-1'>
-        <div className='flex min-h-7 items-center gap-2'>
+        <div className={PUBLIC_REVIEW_META_CLASS}>
           {!hideAuthor && (
             <Link
               href={`/u/${review.author.profileId}`}
@@ -145,7 +150,9 @@ export default function PublicReviewContent({
           {review.rating !== null && (
             <RatingBadge value={review.rating} className='shrink-0' />
           )}
-          <span className='shrink-0 text-[11px] text-gray-400'>
+          <span
+            className={`shrink-0 ${PUBLIC_REVIEW_TIME_TEXT_CLASS} text-gray-400`}
+          >
             {formatRelativeTime(review.updated_at)}
           </span>
           <div className='-mr-1.5 ml-auto flex shrink-0 items-center text-xs text-gray-500 dark:text-gray-400'>
@@ -204,7 +211,7 @@ export default function PublicReviewContent({
             )}
           </div>
         </div>
-        <div className='mt-1.5'>
+        <div className={PUBLIC_REVIEW_BODY_SPACING_CLASS}>
           <SpoilerContent content={review.content} spoiler={review.spoiler} />
         </div>
         {error && !reporting && (

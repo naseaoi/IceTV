@@ -4,6 +4,7 @@ import { Check, Copy, Plus, Trash2 } from 'lucide-react';
 import { useState } from 'react';
 
 import Select from '@/components/Select';
+import SkeletonText from '@/components/SkeletonText';
 import Spinner from '@/components/Spinner';
 import AdminDialog from '@/features/admin/components/AdminDialog';
 import { AdminStatusSwitch } from '@/features/admin/components/AdminStatusSwitch';
@@ -57,6 +58,9 @@ interface RegistrationSettingsDialogProps {
   onDeleteCode: (code: string) => void;
   onClose: () => void;
 }
+
+const INVITE_CODE_TEXT_CLASS = 'font-mono text-sm';
+const INVITE_META_TEXT_CLASS = 'mt-0.5 text-xs';
 
 const LABEL_CLASS =
   'mb-1 block text-sm font-medium text-gray-900 dark:text-gray-100';
@@ -132,12 +136,16 @@ function InviteCodeRow({
     <li className='flex items-center gap-3 px-4 py-2.5'>
       <div className='min-w-0 flex-1'>
         <div className='flex h-5 items-center gap-1'>
-          <span className='truncate font-mono text-sm text-gray-900 dark:text-gray-100'>
+          <span
+            className={`truncate ${INVITE_CODE_TEXT_CLASS} text-gray-900 dark:text-gray-100`}
+          >
             {item.code}
           </span>
           <CopyCodeButton code={item.code} />
         </div>
-        <p className='mt-0.5 truncate text-xs text-gray-500 dark:text-gray-400'>
+        <p
+          className={`truncate ${INVITE_META_TEXT_CLASS} text-gray-500 dark:text-gray-400`}
+        >
           {remaining === null
             ? '不限次数'
             : `剩余 ${remaining} / ${item.maxUses}`}
@@ -182,12 +190,14 @@ function InviteCodeRowsSkeleton() {
       {Array.from({ length: 3 }, (_, index) => (
         <div key={index} className='flex items-center gap-3 px-4 py-2.5'>
           <div className='min-w-0 flex-1'>
-            <div className='flex h-5 items-center'>
-              <div className='skeleton h-3.5 w-32 rounded' />
-            </div>
-            <div className='mt-0.5 flex h-4 items-center'>
-              <div className='skeleton h-3 w-44 rounded' />
-            </div>
+            <SkeletonText
+              className={INVITE_CODE_TEXT_CLASS}
+              barClassName='h-3.5 w-32 rounded'
+            />
+            <SkeletonText
+              className={INVITE_META_TEXT_CLASS}
+              barClassName='h-3 w-44 rounded'
+            />
           </div>
           <div className='skeleton h-5 w-10 rounded-full' />
           <div className='skeleton h-8 w-8 rounded-lg' />

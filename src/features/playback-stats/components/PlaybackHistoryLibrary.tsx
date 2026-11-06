@@ -12,6 +12,7 @@ import {
 } from '@/components/LibraryPage';
 import ConfirmModal from '@/components/modals/ConfirmModal';
 import { POSTER_GRID_CLASS } from '@/components/poster-grid-layout';
+import SkeletonText from '@/components/SkeletonText';
 import { HistoryPosterCard } from '@/features/playback-stats/components/HistoryPosterCard';
 import {
   usePlaybackHistory,
@@ -20,6 +21,8 @@ import {
 } from '@/features/playback-stats/hooks/usePlaybackHistory';
 import { groupPlaybackSessionsByDay } from '@/features/playback-stats/lib/history';
 import type { PlaybackSession } from '@/lib/types';
+
+const GROUP_TITLE_TEXT_CLASS = 'mb-3 text-sm font-medium';
 
 const TOOLBAR_BUTTON_CLASS =
   'inline-flex h-9 shrink-0 items-center rounded-full px-4 text-sm text-gray-600 transition hover:bg-gray-900/[0.05] hover:text-gray-900 disabled:pointer-events-none disabled:opacity-40 dark:text-gray-300 dark:hover:bg-white/[0.06] dark:hover:text-white';
@@ -37,9 +40,10 @@ export function PlaybackHistoryGridSkeleton({ count }: { count?: number }) {
     <div aria-hidden='true' className='space-y-8'>
       {groups.map((size, groupIndex) => (
         <div key={groupIndex}>
-          <div className='mb-3 flex h-5 items-center'>
-            <div className='skeleton h-3.5 w-16 rounded' />
-          </div>
+          <SkeletonText
+            className={GROUP_TITLE_TEXT_CLASS}
+            barClassName='h-3.5 w-16 rounded'
+          />
           <div className={POSTER_GRID_CLASS}>
             {Array.from({ length: size }, (_, index) => (
               <HomePosterCardSkeleton key={index} className='w-full' subtitle />
@@ -152,7 +156,9 @@ export function PlaybackHistoryLibrary() {
       >
         {groups.map((group) => (
           <section key={group.key} aria-label={group.label}>
-            <h3 className='mb-3 text-sm font-medium text-gray-500 dark:text-gray-400'>
+            <h3
+              className={`${GROUP_TITLE_TEXT_CLASS} text-gray-500 dark:text-gray-400`}
+            >
               {group.label}
             </h3>
             <div className={POSTER_GRID_CLASS}>

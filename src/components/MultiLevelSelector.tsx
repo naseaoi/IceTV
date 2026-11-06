@@ -3,6 +3,8 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 
+import { subscribePageScroll } from '@/hooks/usePageScroll';
+
 interface MultiLevelOption {
   label: string;
   value: string;
@@ -475,11 +477,10 @@ const MultiLevelSelector: React.FC<MultiLevelSelectorProps> = ({
       }
     };
 
-    // 监听 body 滚动事件，因为该项目的滚动容器是 document.body
-    document.body.addEventListener('scroll', handleScroll, { passive: true });
+    const unsubscribeScroll = subscribePageScroll(handleScroll);
     window.addEventListener('resize', handleResize);
     return () => {
-      document.body.removeEventListener('scroll', handleScroll);
+      unsubscribeScroll();
       window.removeEventListener('resize', handleResize);
     };
   }, [activeCategory]);

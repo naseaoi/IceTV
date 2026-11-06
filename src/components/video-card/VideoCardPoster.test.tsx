@@ -68,7 +68,7 @@ describe('VideoCardPoster', () => {
     );
 
     const badge = screen.getByTitle('测试源站');
-    expect(badge).toHaveClass('w-fit', 'min-w-0', 'bg-black/60');
+    expect(badge).toHaveClass('w-fit', 'min-w-0', 'bg-black/70');
     expect(badge.parentElement).toHaveClass('inset-x-2', 'top-2');
     expect(screen.getByText('2026')).toHaveClass('bottom-2', 'left-2');
     expect(screen.getByText('2026')).not.toHaveClass('top-2');

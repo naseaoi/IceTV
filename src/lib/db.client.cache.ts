@@ -1,3 +1,10 @@
+import {
+  listStorageKeys,
+  readStorage,
+  removeStorage,
+  writeStorage,
+} from '@/lib/browser-storage';
+
 import { getAuthInfoFromBrowserCookie } from './auth.client';
 import type { Favorite, PlayRecord, SkipConfig } from './types';
 
@@ -23,16 +30,16 @@ function getStorageValueWithLegacy(
   key: string,
   legacyKey?: string,
 ): string | null {
-  const raw = localStorage.getItem(key);
+  const raw = readStorage(key);
   if (raw !== null) {
     return raw;
   }
   if (!legacyKey) {
     return null;
   }
-  const legacyRaw = localStorage.getItem(legacyKey);
+  const legacyRaw = readStorage(legacyKey);
   if (legacyRaw !== null) {
-    localStorage.setItem(key, legacyRaw);
+    writeStorage(key, legacyRaw);
   }
   return legacyRaw;
 }
@@ -84,21 +91,15 @@ class HybridCacheManager {
       }
 
       const cacheKey = this.getUserCacheKey(username);
-      localStorage.setItem(cacheKey, JSON.stringify(cache));
+      const payload = JSON.stringify(cache);
+      if (writeStorage(cacheKey, payload)) return;
+      // 写入失败多为配额已满，清掉本模块缓存后重试一次
+      this.clearAllCache();
+      if (!writeStorage(cacheKey, payload)) {
+        console.warn('保存用户缓存失败');
+      }
     } catch (error) {
       console.warn('保存用户缓存失败:', error);
-      if (
-        error instanceof DOMException &&
-        error.name === 'QuotaExceededError'
-      ) {
-        this.clearAllCache();
-        try {
-          const cacheKey = this.getUserCacheKey(username);
-          localStorage.setItem(cacheKey, JSON.stringify(cache));
-        } catch (retryError) {
-          console.error('重试保存缓存仍然失败:', retryError);
-        }
-      }
     }
   }
 
@@ -116,12 +117,10 @@ class HybridCacheManager {
   }
 
   private clearAllCache(): void {
-    const keys = Object.keys(localStorage);
-    keys.forEach((key) => {
-      if (key.startsWith(CACHE_PREFIX) || key.startsWith(LEGACY_CACHE_PREFIX)) {
-        localStorage.removeItem(key);
-      }
-    });
+    [
+      ...listStorageKeys(CACHE_PREFIX),
+      ...listStorageKeys(LEGACY_CACHE_PREFIX),
+    ].forEach(removeStorage);
   }
 
   private isCacheValid<T>(cache: CacheData<T>): boolean {
@@ -198,45 +197,22 @@ class HybridCacheManager {
   clearUserCache(username?: string): void {
     const targetUsername = username || this.getCurrentUsername();
     if (!targetUsername) return;
-    try {
-      const cacheKey = this.getUserCacheKey(targetUsername);
-      localStorage.removeItem(cacheKey);
-    } catch (error) {
-      console.warn('清除用户缓存失败:', error);
-    }
+    removeStorage(this.getUserCacheKey(targetUsername));
   }
 
   clearExpiredCaches(): void {
-    if (typeof window === 'undefined') return;
-    try {
-      const keysToRemove: string[] = [];
-      for (let i = 0; i < localStorage.length; i++) {
-        const key = localStorage.key(i);
-        if (key?.startsWith(CACHE_PREFIX)) {
-          try {
-            const cache = JSON.parse(localStorage.getItem(key) || '{}');
-            let hasValidData = false;
-            for (const [, cacheData] of Object.entries(cache)) {
-              if (
-                cacheData &&
-                this.isCacheValid(cacheData as CacheData<unknown>)
-              ) {
-                hasValidData = true;
-                break;
-              }
-            }
-            if (!hasValidData) {
-              keysToRemove.push(key);
-            }
-          } catch {
-            keysToRemove.push(key);
-          }
-        }
+    const keysToRemove = listStorageKeys(CACHE_PREFIX).filter((key) => {
+      try {
+        const cache = JSON.parse(readStorage(key) || '{}');
+        return !Object.values(cache).some(
+          (cacheData) =>
+            cacheData && this.isCacheValid(cacheData as CacheData<unknown>),
+        );
+      } catch {
+        return true;
       }
-      keysToRemove.forEach((key) => localStorage.removeItem(key));
-    } catch (error) {
-      console.warn('清除过期缓存失败:', error);
-    }
+    });
+    keysToRemove.forEach(removeStorage);
   }
 }
 

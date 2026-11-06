@@ -34,9 +34,6 @@ export async function POST(request: NextRequest) {
     const conflict = configConflictResponse(error);
     if (conflict) return conflict;
     console.error('直播源刷新失败:', error);
-    return NextResponse.json(
-      { error: error instanceof Error ? error.message : '刷新失败' },
-      { status: 500 },
-    );
+    return NextResponse.json({ error: '刷新失败' }, { status: 500 });
   }
 }

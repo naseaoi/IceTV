@@ -6,6 +6,7 @@ import { type ReactNode, useEffect, useState } from 'react';
 
 import { useAuthSession } from '@/components/AuthProvider';
 import ProfileAvatar from '@/components/ProfileAvatar';
+import SkeletonText from '@/components/SkeletonText';
 import { ProfilePanel } from '@/components/user-menu/ProfilePanel';
 import { FollowList } from '@/features/profile/FollowList';
 import { getUserProfile } from '@/lib/profile.client';
@@ -19,6 +20,7 @@ interface MineStats {
 }
 
 const BANNER_CLASS = 'flex items-center gap-4 pb-6 pt-4 sm:gap-5 md:pt-10';
+const NICKNAME_TEXT_CLASS = 'text-xl font-semibold tracking-tight sm:text-2xl';
 const AVATAR_CLASS = 'h-16 w-16 sm:h-20 sm:w-20';
 const STAT_CLASS =
   'inline-flex items-baseline gap-1 text-gray-500 transition hover:text-gray-900 dark:text-gray-400 dark:hover:text-gray-100';
@@ -43,8 +45,12 @@ export function MineProfileHeaderSkeleton() {
     <div aria-hidden='true' className={BANNER_CLASS}>
       <div className={`${AVATAR_CLASS} skeleton shrink-0 rounded-full`} />
       <div className='min-w-0 flex-1'>
-        <div className='flex h-8 items-center'>
-          <div className='skeleton h-6 w-36 max-w-full rounded' />
+        <div className='flex items-center gap-1'>
+          <SkeletonText
+            className={`min-w-0 ${NICKNAME_TEXT_CLASS}`}
+            barClassName='h-6 w-36 max-w-full rounded'
+          />
+          <span className='h-8 w-8 shrink-0 md:hidden' />
         </div>
         <div className='mt-1.5 flex flex-wrap gap-x-5 gap-y-1 text-sm'>
           {['评价', '关注', '粉丝'].map((label) => (
@@ -122,7 +128,9 @@ export function MineProfileHeader({ actions }: { actions?: ReactNode }) {
 
       <div className='min-w-0 flex-1'>
         <div className='flex items-center gap-1'>
-          <h1 className='min-w-0 truncate text-xl font-semibold tracking-tight text-gray-900 dark:text-gray-50 sm:text-2xl'>
+          <h1
+            className={`min-w-0 truncate ${NICKNAME_TEXT_CLASS} text-gray-900 dark:text-gray-50`}
+          >
             <Link href={profileHref}>{nickname}</Link>
           </h1>
           <button

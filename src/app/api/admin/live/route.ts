@@ -26,12 +26,14 @@ type EditableLiveInfo = {
   disabled: boolean;
 };
 
+class LiveSourceValidationError extends Error {}
+
 async function refreshOrRejectLiveSource(liveInfo: EditableLiveInfo) {
   await validateLiveSourceUrls(liveInfo);
 
   const channelNumber = await refreshLiveChannels(liveInfo, false);
   if (channelNumber <= 0) {
-    throw new Error('未获取到频道列表，请检查直播源地址');
+    throw new LiveSourceValidationError('未获取到频道列表，请检查直播源地址');
   }
   return channelNumber;
 }
@@ -39,7 +41,7 @@ async function refreshOrRejectLiveSource(liveInfo: EditableLiveInfo) {
 async function validateLiveSourceUrls(liveInfo: EditableLiveInfo) {
   const sourceValidation = await validateProxyUrlForRequest(liveInfo.url);
   if (!sourceValidation.ok) {
-    throw new Error('直播源地址无效');
+    throw new LiveSourceValidationError('直播源地址无效');
   }
 
   const epgUrl = liveInfo.epg.trim();
@@ -49,7 +51,7 @@ async function validateLiveSourceUrls(liveInfo: EditableLiveInfo) {
 
   const epgValidation = await validateProxyUrlForRequest(epgUrl);
   if (!epgValidation.ok) {
-    throw new Error('节目单地址无效');
+    throw new LiveSourceValidationError('节目单地址无效');
   }
 }
 
@@ -115,7 +117,7 @@ export async function POST(request: NextRequest) {
           return NextResponse.json(
             {
               error:
-                error instanceof Error
+                error instanceof LiveSourceValidationError
                   ? error.message
                   : '未获取到频道列表，请检查直播源地址',
             },
@@ -194,7 +196,7 @@ export async function POST(request: NextRequest) {
           return NextResponse.json(
             {
               error:
-                error instanceof Error
+                error instanceof LiveSourceValidationError
                   ? error.message
                   : '未获取到频道列表，请检查直播源地址',
             },
@@ -259,9 +261,7 @@ export async function POST(request: NextRequest) {
   } catch (error) {
     const conflict = configConflictResponse(error);
     if (conflict) return conflict;
-    return NextResponse.json(
-      { error: error instanceof Error ? error.message : '操作失败' },
-      { status: 500 },
-    );
+    console.error('直播源操作失败:', error);
+    return NextResponse.json({ error: '操作失败' }, { status: 500 });
   }
 }

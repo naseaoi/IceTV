@@ -1,6 +1,7 @@
 import type { PlaybackRequestMode } from '@/features/play/hooks/usePlayPageState';
 import { PLAYBACK_STALL_CONFIRMATION_DELAY_MS } from '@/features/play/lib/playbackStallRecovery';
 import { getVodStartupProgress } from '@/features/play/lib/playerLoading';
+import { AUTO_ROUTE_PROXY_COOLDOWN_MS } from '@/features/play/lib/vodAutoRoutePolicy';
 import {
   createVodM3u8Loader,
   getVodRuntimeSourceUrl,
@@ -12,7 +13,10 @@ import {
   buildVodSegmentProxyUrl,
 } from '@/features/play/lib/vodProxyUrl';
 import { getManagedVideo, runManagedVideoCleanup } from '@/lib/player-runtime';
-import { HLS_FATAL_NETWORK_RECOVERY_DELAYS_MS } from '@/lib/player-utils';
+import {
+  HLS_FATAL_MEDIA_RECOVERY_LIMIT,
+  HLS_FATAL_NETWORK_RECOVERY_DELAYS_MS,
+} from '@/lib/player-utils';
 import type { SearchResult } from '@/lib/types';
 
 const mockIsServerProxy = jest.fn<boolean, [string, string | undefined]>();
@@ -97,7 +101,9 @@ class FakeHls {
   }
 
   emit(event: string, data: unknown) {
-    this.listeners.get(event)?.forEach((listener) => listener(event, data));
+    [...(this.listeners.get(event) ?? [])].forEach((listener) =>
+      listener(event, data),
+    );
   }
 }
 
@@ -169,6 +175,7 @@ const createdVideos: HTMLVideoElement[] = [];
 
 function createVideo() {
   const video = document.createElement('video');
+  video.pause = jest.fn();
   createdVideos.push(video);
   return video;
 }
@@ -459,6 +466,77 @@ describe('vodHlsRuntime 运行时释放', () => {
       );
     });
 
+    it.each([EPISODE_1, EPISODE_2])(
+      '失败后保留实例，重新加载 %s 时恢复运行时',
+      (retryUrl) => {
+        const runtime = setupRuntime();
+        const video = createVideo();
+        runtime.load(video, EPISODE_1);
+        const hls = getFakeHls(video);
+        hls.stopLoad.mockImplementation(() => {
+          expect(getVodRuntimeSourceUrl(video)).toBeNull();
+        });
+
+        hls.emit(FakeHls.Events.ERROR, FATAL_MANIFEST_ERROR);
+
+        expect(getManagedVideo(video).__icetvHlsCleanup).toBeNull();
+        expect(getManagedVideo(video).__icetvSwitchToServerProxy).toBeNull();
+        expect(getVodStartupProgress(video)).toBeNull();
+        expect(video.pause).toHaveBeenCalledTimes(1);
+        expect(pauseIfVodRuntimeReleased(video)).toBe(true);
+        expect(runtime.setIsVideoLoading).toHaveBeenLastCalledWith(false);
+        expect(runtime.setRealtimeLoadSpeed).toHaveBeenLastCalledWith('');
+        expect(hls.destroy).not.toHaveBeenCalled();
+        runtime.setRealtimeLoadSpeed.mockClear();
+        mockReportSourceRouteStat.mockClear();
+        hls.emit(FakeHls.Events.FRAG_LOADED, FRAG_LOADED);
+        expect(runtime.setRealtimeLoadSpeed).not.toHaveBeenCalled();
+        expect(mockReportSourceRouteStat).not.toHaveBeenCalled();
+
+        runtime.load(video, retryUrl);
+
+        expect(getFakeHls(video)).toBe(hls);
+        expect(getVodRuntimeSourceUrl(video)).toBe(retryUrl);
+        expect(pauseIfVodRuntimeReleased(video)).toBe(false);
+        expect(hls.loadSource).toHaveBeenCalledTimes(2);
+        hls.emit(FakeHls.Events.FRAG_LOADED, FRAG_LOADED);
+        expect(mockReportSourceRouteStat).toHaveBeenCalledWith(
+          DETAIL.source,
+          'server',
+          true,
+        );
+      },
+    );
+
+    it('外层接手后由换源流程清理，保留其新建的运行时且不展示旧源失败', () => {
+      const runtime = setupRuntime();
+      const video = createVideo();
+      runtime.load(video, EPISODE_1);
+      const hls = getFakeHls(video);
+      runtime.onPlaybackRecoveryExhausted.mockImplementation(() => {
+        expect(getVodRuntimeSourceUrl(video)).toBe(EPISODE_1);
+        expect(hls.stopLoad).not.toHaveBeenCalled();
+        runManagedVideoCleanup(video);
+        hls.stopLoad();
+        video.pause();
+        runtime.load(video, EPISODE_2);
+        return true;
+      });
+
+      hls.emit(FakeHls.Events.ERROR, FATAL_MANIFEST_ERROR);
+
+      expect(runtime.onPlaybackRecoveryExhausted).toHaveBeenCalledTimes(1);
+      expect(hls.stopLoad).toHaveBeenCalledTimes(1);
+      expect(video.pause).toHaveBeenCalledTimes(1);
+      expect(getVodRuntimeSourceUrl(video)).toBe(EPISODE_2);
+      expect(getManagedVideo(video).__icetvHlsCleanup).toEqual(
+        expect.any(Function),
+      );
+      expect(runtime.setError).not.toHaveBeenCalled();
+      expect(runtime.setIsVideoLoading).not.toHaveBeenCalled();
+      expect(hls.destroy).not.toHaveBeenCalled();
+    });
+
     it('已释放的运行时收到迟到的失败时不停止加载、不回退路线也不上报失败', () => {
       const runtime = setupRuntime();
       const video = createVideo();
@@ -537,6 +615,29 @@ describe('vodHlsRuntime 致命网络错误恢复', () => {
     );
     expect(runtime.setError).toHaveBeenCalledWith('当前源加载失败');
     expect(hls.stopLoad).toHaveBeenCalledTimes(1);
+  });
+
+  it('失败时取消尚未执行的网络恢复，迟到错误保持失败态', () => {
+    const { runtime, video, hls } = loadEpisode();
+    hls.emit(FakeHls.Events.ERROR, fatalFragError(11));
+    for (let i = 0; i <= HLS_FATAL_MEDIA_RECOVERY_LIMIT; i += 1) {
+      hls.emit(FakeHls.Events.ERROR, {
+        type: FakeHls.ErrorTypes.MEDIA_ERROR,
+        details: 'bufferAppendError',
+        fatal: true,
+      });
+    }
+
+    expect(getVodRuntimeSourceUrl(video)).toBeNull();
+    expect(runtime.setError).toHaveBeenCalledWith('当前源加载失败');
+    jest.runOnlyPendingTimers();
+    hls.emit(FakeHls.Events.ERROR, fatalFragError(11));
+    expect(hls.startLoad).not.toHaveBeenCalled();
+    expect(hls.loadSource).toHaveBeenCalledTimes(1);
+    expect(runtime.onPlaybackRecoveryExhausted).toHaveBeenCalledTimes(1);
+    expect(hls.recoverMediaError).toHaveBeenCalledTimes(
+      HLS_FATAL_MEDIA_RECOVERY_LIMIT,
+    );
   });
 
   it('分片加载到失败位置后清零恢复次数，之后的失败重新开始恢复', () => {
@@ -621,6 +722,47 @@ describe('vodHlsRuntime 致命网络错误恢复', () => {
         }),
       );
     });
+
+    it.each([true, false])(
+      '最终失败中止代理探测，迟到探测结果 %s 保持停止状态',
+      async (proxyHealthy) => {
+        let finishProbe!: (response: unknown) => void;
+        (global.fetch as jest.Mock).mockImplementation(
+          () => new Promise((resolve) => (finishProbe = resolve)),
+        );
+        const { runtime, video, hls } = loadEpisode();
+        getManagedVideo(video).__icetvSwitchToServerProxy?.('loading-timeout');
+        runtime.options.loadingSessionRef.current.playbackStartNotified = true;
+        jest.advanceTimersByTime(AUTO_ROUTE_PROXY_COOLDOWN_MS);
+        hls.emit(FakeHls.Events.ERROR, FATAL_MANIFEST_ERROR);
+        jest.advanceTimersByTime(AUTO_ROUTE_PROXY_COOLDOWN_MS);
+        hls.emit(FakeHls.Events.ERROR, FATAL_MANIFEST_ERROR);
+        expect(global.fetch).toHaveBeenCalledTimes(1);
+        const signal = (global.fetch as jest.Mock).mock.calls[0][1]
+          .signal as AbortSignal;
+        expect(signal.aborted).toBe(false);
+
+        for (let i = 0; i <= HLS_FATAL_MEDIA_RECOVERY_LIMIT; i += 1) {
+          hls.emit(FakeHls.Events.ERROR, {
+            type: FakeHls.ErrorTypes.MEDIA_ERROR,
+            details: 'bufferAppendError',
+            fatal: true,
+          });
+        }
+
+        expect(runtime.setError).toHaveBeenCalledWith('当前源加载失败');
+        expect(getVodRuntimeSourceUrl(video)).toBeNull();
+        expect(signal.aborted).toBe(true);
+        hls.loadSource.mockClear();
+        runtime.setRealtimeLoadSpeed.mockClear();
+        finishProbe({ ok: proxyHealthy, text: async () => '#EXTM3U' });
+        await flushMicrotasks();
+        jest.runOnlyPendingTimers();
+        expect(hls.startLoad).not.toHaveBeenCalled();
+        expect(hls.loadSource).not.toHaveBeenCalled();
+        expect(runtime.setRealtimeLoadSpeed).not.toHaveBeenCalled();
+      },
+    );
 
     it('分片加载到失败位置后清零直连失败计数，不探测代理', () => {
       const { hls } = loadEpisode();

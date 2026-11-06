@@ -15,17 +15,17 @@ import {
   SECTION_TITLE_TEXT_CLASS,
 } from '@/components/section-header';
 import SkeletonText from '@/components/SkeletonText';
-import { useClientHydrated } from '@/hooks/useClientHydrated';
-
 import {
   type HomeClientSnapshot,
   getHomeClientSnapshot,
-} from '../lib/home-client-cache';
+} from '@/features/home/lib/home-client-cache';
 import {
   HOME_BODY_CLASS,
   HOME_SECTION_CLASS,
   HOME_SECTIONS_CLASS,
-} from '../lib/home-layout';
+} from '@/features/home/lib/home-layout';
+import { useClientHydrated } from '@/hooks/useClientHydrated';
+
 import HomeClient from './HomeClient';
 import { HomeHeroSkeleton } from './HomeHero';
 

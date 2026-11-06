@@ -22,6 +22,7 @@ import {
   DESKTOP_MAIN_GRID_CLASS,
   INFO_COVER_CLASS,
   INFO_RATING_LINE_CLASS,
+  INFO_RATING_TEXT_CLASS,
 } from '@/features/play/components/EpisodeSelector/layout';
 import { SectionTitle } from '@/features/play/components/EpisodeSelector/SectionTitle';
 import { TabBar } from '@/features/play/components/EpisodeSelector/TabBar';
@@ -82,7 +83,10 @@ function InfoTabLoading({
           />
           <div className='skeleton h-5 w-1/2 rounded' />
           <div className={INFO_RATING_LINE_CLASS}>
-            <div className='skeleton h-3.5 w-24 rounded' />
+            <SkeletonText
+              className={INFO_RATING_TEXT_CLASS}
+              barClassName='h-3.5 w-24 rounded'
+            />
           </div>
         </div>
         <div className='skeleton h-7 w-16 rounded-full' />

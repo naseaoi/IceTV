@@ -7,6 +7,7 @@ import { HOME_POSTER_CARD_CLASS } from '@/components/poster-card-layout';
 import ScrollableRow from '@/components/ScrollableRow';
 import VideoCard from '@/components/VideoCard';
 import { FavoritePreviewSkeleton } from '@/features/favorites/components/FavoritePreviewSkeleton';
+import { FAVORITE_PREVIEW_EMPTY_TEXT_CLASS } from '@/features/favorites/lib/card-layout';
 import type { FavoriteItem } from '@/features/favorites/types';
 import { FAVORITE_PREVIEW_LIMIT } from '@/lib/favorites-count';
 
@@ -51,7 +52,7 @@ export function FavoritePreviewSection({
     return (
       <p
         data-favorite-empty-state
-        className='py-6 text-sm text-gray-400 dark:text-gray-500'
+        className={`py-6 ${FAVORITE_PREVIEW_EMPTY_TEXT_CLASS} text-gray-400 dark:text-gray-500`}
       >
         还没有收藏
       </p>
