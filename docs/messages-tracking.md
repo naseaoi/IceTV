@@ -1,6 +1,6 @@
 # 消息与追更边界
 
-只保留当前生效、容易误判的约束。实现见 `src/lib/tracking-sql.ts`、`src/lib/play-records.ts` 与 `src/components/messages/`。
+改消息中心、追更未读或关注动态前先读本文。实现见 `src/lib/tracking-sql.ts`、`src/lib/play-records.ts` 与 `src/components/messages/`。
 
 ## 数据与查询
 
@@ -23,8 +23,4 @@
 - 删除失败时，列表可能已乐观移除，但不会派发 `messagesUpdated`；角标由下一轮可见页面轮询恢复，不要求同步回滚所有视图。
 - 连续快速切换标签页时，补拉可能被最小间隔挡住；停止切换后恢复正常轮询，不为每个 focus 事件单独请求。
 
-## 测试边界
-
-- fake pool 只验接线，不执行数据库 SQL。真实 MySQL 的运行方式见 [AGENTS.md](../AGENTS.md#测试)。
-- 真实 MySQL 当前覆盖追更查询、评价社交 SQL、双后端一致性、共享缓存和资源租约；不能据此推断整个 `IStorage` 接口均已覆盖。
-- MySQL 的 JSON 布尔读取不能用数值比较替代字符串 `'false'`；无效数字字符串的 CAST 可能转成 0 而非抛错，输入校验与跨后端用例仍须保留。
+跨后端 SQL 与真实 MySQL 验证要求见 [数据与存储](data-storage.md#sqlite--mysql-双后端)。
