@@ -385,6 +385,8 @@ export default function MyReviewsPageClient() {
     },
   });
   const filterOptions = useMemo(() => buildFilterOptions(counts), [counts]);
+  // 计数与当前筛选无关，重新查询时沿用旧值，避免占位块让胶囊宽度来回跳
+  const countsLoading = loading && counts === null;
   const selected = reviews;
   const narrowed = deferredQuery.trim() !== '' || filter !== 'all';
 
@@ -505,7 +507,7 @@ export default function MyReviewsPageClient() {
     <LibraryPageFrame
       title='我的评价'
       subtitle={
-        loading ? (
+        countsLoading ? (
           <LibrarySubtitleSkeleton />
         ) : (
           <>
@@ -537,7 +539,7 @@ export default function MyReviewsPageClient() {
             sortOptions={SORT_OPTIONS}
             sort={sort}
             onSortChange={setSort}
-            loading={loading}
+            loading={countsLoading}
           />
         )
       }

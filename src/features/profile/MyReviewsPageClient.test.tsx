@@ -118,6 +118,30 @@ it('显示私密评价并用源标识跳转，筛选仅文字与搜索', async (
   });
   expect(await screen.findByText('暂无符合条件的评价')).toBeInTheDocument();
 });
+it('切换筛选重新查询期间保留胶囊计数', async () => {
+  render(<MyReviewsPageClient />);
+  await screen.findByRole('link', { name: '播放三体' });
+
+  let resolvePage: () => void = () => undefined;
+  const implementation = jest
+    .mocked(fetchMyVideoReviews)
+    .getMockImplementation();
+  jest.mocked(fetchMyVideoReviews).mockImplementationOnce(
+    (query) =>
+      new Promise((resolve) => {
+        resolvePage = () => resolve(implementation!(query));
+      }),
+  );
+  fireEvent.click(screen.getByRole('button', { name: /^私密/ }));
+
+  expect(screen.getByRole('button', { name: /^全部/ })).toHaveTextContent(
+    '全部2',
+  );
+  expect(screen.getByRole('button', { name: /^私密/ })).toHaveTextContent(
+    '私密1',
+  );
+  await act(async () => resolvePage());
+});
 it('loads the next server page without replacing the first page', async () => {
   jest
     .mocked(fetchMyVideoReviews)
