@@ -5,6 +5,7 @@ import { assertPlaybackPeriodRange } from '@/lib/__tests__/__fixtures__/playback
 import { MySqlStorage } from '../mysql.db';
 import type { Favorite, PlayRecord } from '../types';
 import { IMPORT_ADMIN_CONFIG } from './__fixtures__/import-admin-config';
+import { inviteCodeBatchContract } from './__fixtures__/invite-code-contract';
 import { userDanmakuContract } from './__fixtures__/user-danmaku-contract';
 import {
   assertActivityAndReportPagination,
@@ -268,6 +269,10 @@ describeLive('MySQL 追更查询（真实实例）', () => {
       [],
     );
   });
+  describe('邀请码批量事务契约（真实实例）', () => {
+    inviteCodeBatchContract(() => storage);
+  });
+
   it('邀请码真实 SQL 分页、并发占用与过期过滤一致', async () => {
     await storage.setAdminConfig({
       UserConfig: {},

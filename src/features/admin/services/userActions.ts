@@ -11,6 +11,7 @@ import {
   generateInviteCode,
   INVITE_MAX_USES_RULE_MESSAGE,
   isValidCustomInviteCode,
+  MAX_INVITE_BATCH_SIZE,
   MAX_INVITE_CODES,
   MAX_INVITE_VALID_DAYS,
   MIN_INVITE_VALID_DAYS,
@@ -610,6 +611,18 @@ async function runAdminUserAction(
         break;
       }
       case 'createInviteCode': {
+        const { count = 1 } = body as { count?: unknown };
+        if (
+          typeof count !== 'number' ||
+          !Number.isInteger(count) ||
+          count < 1 ||
+          count > MAX_INVITE_BATCH_SIZE
+        ) {
+          return actionResponse(
+            { error: `生成数量需在 1-${MAX_INVITE_BATCH_SIZE} 之间` },
+            400,
+          );
+        }
         const validDays = parseInviteValidDays(
           (body as { validDays?: unknown }).validDays,
         );
@@ -635,6 +648,9 @@ async function runAdminUserAction(
         const rawCustomCode = (body as { code?: unknown }).code;
         const hasCustomCode =
           typeof rawCustomCode === 'string' && rawCustomCode.trim() !== '';
+        if (hasCustomCode && count > 1) {
+          return actionResponse({ error: '自定义邀请码只能单个生成' }, 400);
+        }
         if (hasCustomCode && !isValidCustomInviteCode(rawCustomCode)) {
           return actionResponse(
             { error: CUSTOM_INVITE_CODE_RULE_MESSAGE },
@@ -642,16 +658,32 @@ async function runAdminUserAction(
           );
         }
         for (let attempt = 0; attempt < 10; attempt += 1) {
-          const code = hasCustomCode
-            ? normalizeInviteCode(rawCustomCode)
-            : generateInviteCode((size) => randomBytes(size));
-          const result = await db.createInviteCode(
-            buildInviteCode({ code, validDays, createdBy: username, maxUses }),
+          const codes: string[] = Array.from({ length: count }, () =>
+            hasCustomCode
+              ? normalizeInviteCode(rawCustomCode)
+              : generateInviteCode((size) => randomBytes(size)),
+          );
+          if (new Set(codes).size !== count) continue;
+          const now = Date.now();
+          const result = await db.createInviteCodes(
+            codes.map((code) =>
+              buildInviteCode({
+                code,
+                validDays,
+                createdBy: username,
+                maxUses,
+                now,
+              }),
+            ),
           );
           if (result === 'created')
-            return actionResponse({ ok: true, code }, undefined, {
-              'Cache-Control': 'no-store',
-            });
+            return actionResponse(
+              { ok: true, code: codes[0], codes },
+              undefined,
+              {
+                'Cache-Control': 'no-store',
+              },
+            );
           if (result === 'limit')
             return actionResponse(
               { error: `有效邀请码不能超过 ${MAX_INVITE_CODES} 个` },

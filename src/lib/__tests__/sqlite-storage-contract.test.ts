@@ -12,8 +12,13 @@ import type {
   SkipConfig,
   SourceRouteStatsItem,
 } from '../types';
+import { inviteCodeBatchContract } from './__fixtures__/invite-code-contract';
 import { userDanmakuContract } from './__fixtures__/user-danmaku-contract';
 import { videoReviewContract } from './__fixtures__/video-review-contract';
+
+describe('SQLite 邀请码批量事务契约', () => {
+  inviteCodeBatchContract(() => new LocalSqliteStorage(':memory:'));
+});
 
 const adminConfig: AdminConfig = {
   ConfigSubscribtion: { URL: '', AutoUpdate: false, LastCheck: '' },

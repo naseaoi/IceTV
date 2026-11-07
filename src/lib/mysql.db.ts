@@ -1957,9 +1957,12 @@ export class MySqlStorage implements IStorage {
     await this.ensureInitialized();
     return this.invites.countActive();
   }
-  async createInviteCode(item: InviteCode) {
+  async createInviteCodes(items: InviteCode[]) {
     await this.ensureInitialized();
-    return this.invites.create(item);
+    return this.invites.create(items);
+  }
+  async createInviteCode(item: InviteCode) {
+    return this.createInviteCodes([item]);
   }
   async deleteInviteCode(code: string) {
     await this.ensureInitialized();

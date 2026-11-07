@@ -16,6 +16,13 @@ type UserAction =
   | 'deleteUser'
   | 'setOpenRegister';
 
+export interface InviteCodeDraft {
+  count: number;
+  validDays: number;
+  maxUses?: number;
+  customCode?: string;
+}
+
 interface UseAdminUserActionsOptions {
   refreshConfig: () => Promise<void>;
   showAlert: ShowAlertFn;
@@ -25,10 +32,18 @@ export function useAdminUserActions(options: UseAdminUserActionsOptions) {
   const { refreshConfig, showAlert } = options;
 
   const runUserMutation = useCallback(
-    async (payload: Record<string, unknown>, fallbackPrefix = '操作失败') => {
+    async <T = Record<string, unknown>>(
+      payload: Record<string, unknown>,
+      fallbackPrefix = '操作失败',
+    ): Promise<T> => {
       try {
-        await adminPost('/api/admin/user', payload, fallbackPrefix);
+        const data = await adminPost<T>(
+          '/api/admin/user',
+          payload,
+          fallbackPrefix,
+        );
         await refreshConfig();
+        return data;
       } catch (err) {
         showError(
           err instanceof Error ? err.message : fallbackPrefix,
@@ -122,18 +137,20 @@ export function useAdminUserActions(options: UseAdminUserActionsOptions) {
     [refreshConfig, showAlert],
   );
 
-  const createInviteCode = useCallback(
-    async (validDays: number, customCode?: string, maxUses?: number) => {
+  const createInviteCodes = useCallback(
+    async ({ count, validDays, maxUses, customCode }: InviteCodeDraft) => {
       const code = customCode?.trim();
-      await runUserMutation(
+      const data = await runUserMutation<{ code?: string; codes?: string[] }>(
         {
           action: 'createInviteCode',
           validDays,
           ...(code ? { code } : {}),
           ...(maxUses ? { maxUses } : {}),
+          ...(count > 1 ? { count } : {}),
         },
         '生成邀请码失败',
       );
+      return data.codes ?? (data.code ? [data.code] : []);
     },
     [runUserMutation],
   );
@@ -194,7 +211,7 @@ export function useAdminUserActions(options: UseAdminUserActionsOptions) {
     batchUpdateUserGroups,
     previewInactiveUsers,
     deleteInactiveUsers,
-    createInviteCode,
+    createInviteCodes,
     deleteInviteCode,
     setRequireInviteCode,
     updateUserApis,

@@ -669,6 +669,9 @@ export interface IStorage {
     query: import('@/lib/invite-code-storage').InviteCodeQuery,
   ): Promise<import('@/lib/invite-code-storage').InviteCodePage>;
   countActiveInviteCodes(): Promise<number>;
+  createInviteCodes(
+    items: import('@/features/admin/services/inviteCodes').InviteCode[],
+  ): Promise<import('@/lib/invite-code-storage').InviteCodeCreateResult>;
   createInviteCode(
     item: import('@/features/admin/services/inviteCodes').InviteCode,
   ): Promise<import('@/lib/invite-code-storage').InviteCodeCreateResult>;

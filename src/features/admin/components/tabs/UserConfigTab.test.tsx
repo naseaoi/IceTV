@@ -296,14 +296,11 @@ describe('UserConfigTab user search and selection', () => {
     });
   }
 
-  it('places the user list before groups and removes the standalone count card', () => {
+  it('shows the closed registration mode without an invite count', () => {
     setup();
-    expect(
-      screen.getAllByRole('heading').map((heading) => heading.textContent),
-    ).toEqual(['用户列表', '用户组']);
-    expect(screen.queryByText('用户统计')).not.toBeInTheDocument();
-    expect(screen.queryByText('总用户数')).not.toBeInTheDocument();
-    expect(screen.getByText('开放注册 · 已关闭')).toBeInTheDocument();
+    const summary = screen.getByRole('region', { name: '用户注册' });
+    expect(summary).toHaveTextContent('已关闭');
+    expect(summary).not.toHaveTextContent('有效邀请码');
   });
 
   it('searches usernames and groups case-insensitively after trimming', () => {

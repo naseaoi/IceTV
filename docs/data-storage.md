@@ -20,6 +20,7 @@
 ## 邀请码
 
 - 邀请码定义与用量的唯一真相源是 `invite_codes`，配置 JSON 仅保留注册开关。后台列表走 `/api/admin/invite-codes` 的 SQL 游标分页，注册摘要走 COUNT；完整列表仅用于备份导出。
+- 批量创建在单个事务内校验整批冲突与有效码总数上限，整批成功或全部不写入；单条创建复用同一路径。
 - 名额占用走 `reserveInviteCodeUse()`，以数据库内的有效期与次数上限做条件 UPDATE，按受影响行数判成败；注册后续步骤失败调用 `releaseInviteCode()` 回滚。
 - 存储初始化在事务内迁移旧配置与用量、CAS 移除配置中的邀请码；导出把表数据组装到 `UserConfig.InviteCodes`，导入在同一替换事务还原表并剥离该配置字段。
 

@@ -6,11 +6,8 @@ import AdminContentSkeleton, {
 import { COMMON_RUNTIME_PARAM_GROUPS } from '@/features/admin/lib/runtime-param-fields';
 import type { AdminConfig } from '@/types/admin';
 
-it('站点骨架使用新版设置分区，扫光仅出现在叶子块', () => {
+it('站点骨架的扫光仅出现在叶子块', () => {
   const { container } = render(<AdminContentSkeleton activeTab='site' />);
-  expect(
-    screen.getAllByRole('heading').map((heading) => heading.textContent),
-  ).toEqual(['基本信息', '数据与图片代理', '功能', '本地设置默认值']);
   expect(container.querySelector('.skeleton .skeleton')).toBeNull();
   expect(container.firstElementChild).not.toHaveClass('rounded-xl');
 });

@@ -78,6 +78,7 @@
 
 ## 测试
 
+- 测试断言行为、数据与文档约定的不变量（如骨架与真实组件共用布局常量），不断言页面标题的完整列表与顺序、已移除的旧界面不存在等布局快照；改版式不应牵动无关测试。
 - 需要 `crypto` 的测试调 `installCryptoPolyfill()`（`src/app/api/test-utils/crypto-polyfill.ts`）。jest 的 jsdom 与 node 环境都不提供全局 `crypto`，**只加 `@jest-environment node` 不够**。
 - 需要 `Headers` / `Request` / `Response` 的路由测试调 `installWebPolyfills()`（同目录），它不含 crypto。
 - `jest.setup.js` 把 `LOCAL_DB_PATH` 固定为 `:memory:`，防止测试写进开发库。新增测试不要覆盖成真实路径。

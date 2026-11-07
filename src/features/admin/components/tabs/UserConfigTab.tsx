@@ -16,11 +16,15 @@ import { ConfigureUserGroupDialog } from '@/features/admin/components/tabs/user-
 import { DeleteUserConfirm } from '@/features/admin/components/tabs/user-config/DeleteUserConfirm';
 import { DeleteUserGroupConfirm } from '@/features/admin/components/tabs/user-config/DeleteUserGroupConfirm';
 import { RegistrationSettingsDialog } from '@/features/admin/components/tabs/user-config/RegistrationSettingsDialog';
+import { RegistrationSummaryCard } from '@/features/admin/components/tabs/user-config/RegistrationSummaryCard';
 import { UserGroupFormDialog } from '@/features/admin/components/tabs/user-config/UserGroupFormDialog';
 import { UserGroupTable } from '@/features/admin/components/tabs/user-config/UserGroupTable';
 import { UserTable } from '@/features/admin/components/tabs/user-config/UserTable';
 import { useAdminInviteCodes } from '@/features/admin/hooks/useAdminInviteCodes';
-import { useAdminUserActions } from '@/features/admin/hooks/useAdminUserActions';
+import {
+  type InviteCodeDraft,
+  useAdminUserActions,
+} from '@/features/admin/hooks/useAdminUserActions';
 import { useAdminUsers } from '@/features/admin/hooks/useAdminUsers';
 import { useLoadingState } from '@/features/admin/hooks/useLoadingState';
 import { adminGet, adminPost } from '@/features/admin/lib/api';
@@ -33,12 +37,6 @@ import {
   type AdminUserQuery,
   type AdminUserSelection,
 } from '@/features/admin/lib/user-query';
-import {
-  CUSTOM_INVITE_CODE_RULE_MESSAGE,
-  INVITE_MAX_USES_RULE_MESSAGE,
-  isValidCustomInviteCode,
-  parseInviteMaxUses,
-} from '@/features/admin/services/inviteCodes';
 import { useAlertModal } from '@/hooks/useAlertModal';
 import { useModalState } from '@/hooks/useModalState';
 import { useRetainedValue } from '@/hooks/useRetainedValue';
@@ -55,7 +53,6 @@ interface UserConfigProps {
 type SensitiveUserAction = 'ban' | 'setAdmin' | 'cancelAdmin';
 
 const DEFAULT_INACTIVE_DAYS = 90;
-const DEFAULT_INVITE_VALID_DAYS = 7;
 
 interface PendingSensitiveUserAction {
   action: SensitiveUserAction;
@@ -105,7 +102,7 @@ const UserConfig = ({ config, role, refreshConfig }: UserConfigProps) => {
     assignUserGroups,
     previewInactiveUsers,
     deleteInactiveUsers,
-    createInviteCode,
+    createInviteCodes,
     deleteInviteCode,
     setRequireInviteCode,
     updateUserApis,
@@ -180,11 +177,6 @@ const UserConfig = ({ config, role, refreshConfig }: UserConfigProps) => {
   } | null>(null);
   const [showRegistrationModal, setShowRegistrationModal] =
     useModalState(false);
-  const [inviteValidDays, setInviteValidDays] = useState(
-    DEFAULT_INVITE_VALID_DAYS,
-  );
-  const [inviteCustomCode, setInviteCustomCode] = useState('');
-  const [inviteMaxUses, setInviteMaxUses] = useState('');
   const [inviteFilter, setInviteFilter] = useState<InviteCodeFilter>('all');
 
   const currentUsername = getAuthInfoFromBrowserCookie()?.username || null;
@@ -224,12 +216,6 @@ const UserConfig = ({ config, role, refreshConfig }: UserConfigProps) => {
 
   const openRegister = !!config?.UserConfig?.OpenRegister;
   const requireInviteCode = !!config?.UserConfig?.RequireInviteCode;
-
-  const registrationStatusText = !openRegister
-    ? '已关闭'
-    : !requireInviteCode
-      ? '已开启 · 无需邀请码'
-      : `已开启 · ${activeInviteCodeCount} 个有效邀请码`;
 
   const selectAllUsers =
     selectableVisibleUsers.length > 0 &&
@@ -420,34 +406,17 @@ const UserConfig = ({ config, role, refreshConfig }: UserConfigProps) => {
     });
   };
 
-  const handleCreateInviteCode = async () => {
-    const customCode = inviteCustomCode.trim();
-    if (customCode && !isValidCustomInviteCode(customCode)) {
-      showError(CUSTOM_INVITE_CODE_RULE_MESSAGE, showAlert);
-      return;
-    }
-
-    const trimmedMaxUses = inviteMaxUses.trim();
-    const maxUses = parseInviteMaxUses(
-      trimmedMaxUses ? Number(trimmedMaxUses) : undefined,
-    );
-    if (maxUses === null) {
-      showError(INVITE_MAX_USES_RULE_MESSAGE, showAlert);
-      return;
-    }
-
-    await withLoading('createInviteCode', async () => {
+  const handleCreateInviteCodes = (draft: InviteCodeDraft) =>
+    withLoading('createInviteCode', async () => {
       try {
-        await createInviteCode(inviteValidDays, customCode, maxUses);
-        setInviteCustomCode('');
-        setInviteMaxUses('');
-        showSuccess('邀请码已生成');
+        const codes = await createInviteCodes(draft);
         void inviteList.refresh();
+        return codes;
       } catch {
-        // handled in createInviteCode
+        // handled in createInviteCodes
+        return null;
       }
     });
-  };
 
   const handleDeleteInviteCode = async (code: string) => {
     await withLoading(`deleteInviteCode_${code}`, async () => {
@@ -786,18 +755,12 @@ const UserConfig = ({ config, role, refreshConfig }: UserConfigProps) => {
 
   return (
     <div className='space-y-6'>
-      <div className='flex items-center justify-between gap-3 rounded-lg bg-gray-50 px-4 py-3 dark:bg-gray-800/50'>
-        <p className='text-sm text-gray-600 dark:text-gray-400'>
-          开放注册 · {registrationStatusText}
-        </p>
-        <button
-          type='button'
-          onClick={() => setShowRegistrationModal(true)}
-          className={buttonStyles.outline}
-        >
-          管理
-        </button>
-      </div>
+      <RegistrationSummaryCard
+        openRegister={openRegister}
+        requireInviteCode={requireInviteCode}
+        activeInviteCodeCount={activeInviteCodeCount}
+        onManage={() => setShowRegistrationModal(true)}
+      />
 
       <div>
         <h2 className='mb-3 text-base font-semibold text-gray-900 dark:text-gray-100'>
@@ -1138,9 +1101,6 @@ const UserConfig = ({ config, role, refreshConfig }: UserConfigProps) => {
         requireInviteCode={!!config.UserConfig.RequireInviteCode}
         inviteFilter={inviteFilter}
         inviteList={inviteList}
-        validDays={inviteValidDays}
-        customCode={inviteCustomCode}
-        maxUses={inviteMaxUses}
         isTogglingRegister={isLoading('setOpenRegister')}
         isTogglingInvite={isLoading('setRequireInviteCode')}
         isCreatingCode={isLoading('createInviteCode')}
@@ -1152,10 +1112,7 @@ const UserConfig = ({ config, role, refreshConfig }: UserConfigProps) => {
         onToggleOpenRegister={handleToggleOpenRegister}
         onToggleRequireInviteCode={handleToggleRequireInviteCode}
         onInviteFilterChange={setInviteFilter}
-        onValidDaysChange={setInviteValidDays}
-        onCustomCodeChange={setInviteCustomCode}
-        onMaxUsesChange={setInviteMaxUses}
-        onCreateCode={handleCreateInviteCode}
+        onCreateCodes={handleCreateInviteCodes}
         onDeleteCode={handleDeleteInviteCode}
         onClose={() => setShowRegistrationModal(false)}
       />

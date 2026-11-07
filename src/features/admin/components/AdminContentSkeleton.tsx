@@ -8,6 +8,7 @@ import {
   AdminSettingRow,
   AdminSettingsGroup,
 } from '@/features/admin/components/AdminSettings';
+import { RegistrationSummaryCardSkeleton } from '@/features/admin/components/tabs/user-config/RegistrationSummaryCard';
 import type { AdminTabId } from '@/features/admin/lib/admin-tabs';
 import { COMMON_RUNTIME_PARAM_GROUPS } from '@/features/admin/lib/runtime-param-fields';
 import {
@@ -359,10 +360,7 @@ export default function AdminContentSkeleton({
     case 'user':
       content = (
         <div className='space-y-6'>
-          <div className='flex items-center justify-between gap-3 rounded-lg bg-gray-50 px-4 py-3 dark:bg-gray-800/50'>
-            <Block className='h-5 w-40' />
-            <Block className='h-8 w-14 rounded-lg' />
-          </div>
+          <RegistrationSummaryCardSkeleton />
           <div>
             <h2 className='mb-3 text-base font-semibold text-gray-900 dark:text-gray-100'>
               用户列表

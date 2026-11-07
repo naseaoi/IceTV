@@ -2625,8 +2625,11 @@ export class LocalSqliteStorage implements IStorage {
   async countActiveInviteCodes() {
     return this.invites.countActive();
   }
+  async createInviteCodes(items: InviteCode[]) {
+    return this.invites.create(items);
+  }
   async createInviteCode(item: InviteCode) {
-    return this.invites.create(item);
+    return this.createInviteCodes([item]);
   }
   async deleteInviteCode(code: string) {
     return this.invites.delete(code);

@@ -1,6 +1,18 @@
 /** @jest-environment node */
 
+import { randomBytes } from 'crypto';
+
+import {
+  type InviteCode,
+  MAX_INVITE_BATCH_SIZE,
+  MAX_INVITE_CODES,
+} from '@/features/admin/services/inviteCodes';
 import type { AdminConfig } from '@/types/admin';
+
+jest.mock('crypto', () => ({
+  ...jest.requireActual('crypto'),
+  randomBytes: jest.fn(),
+}));
 
 const mockGetConfig = jest.fn();
 const mockSaveConfig = jest.fn();
@@ -26,7 +38,7 @@ jest.mock('@/lib/db', () => ({
     updateUserAccess: jest.fn(),
     deleteUser: jest.fn(),
     getAllUserLastActive: jest.fn(),
-    createInviteCode: jest.fn(),
+    createInviteCodes: jest.fn(),
     deleteInviteCode: jest.fn(),
     getAdminUserPage: jest.fn(),
   },
@@ -203,7 +215,18 @@ describe('handleAdminUserAction 配置读取时机', () => {
 describe('邀请码后台数据库写入', () => {
   beforeEach(() => {
     mockGetConfig.mockResolvedValue(makeConfig([]));
-    (db.createInviteCode as jest.Mock).mockResolvedValue('created');
+    let sequence = 0;
+    (randomBytes as jest.Mock)
+      .mockReset()
+      .mockImplementation((size: number) => {
+        const bytes = Buffer.alloc(size);
+        bytes[0] = sequence % 32;
+        bytes[1] = Math.floor(sequence++ / 32);
+        return bytes;
+      });
+    (db.createInviteCodes as jest.Mock)
+      .mockReset()
+      .mockResolvedValue('created');
     (db.deleteInviteCode as jest.Mock).mockResolvedValue(true);
   });
 
@@ -218,22 +241,164 @@ describe('邀请码后台数据库写入', () => {
         maxUses: 2,
       },
     });
-    expect(result.body).toEqual({ ok: true, code: 'WELCOME' });
-    expect(db.createInviteCode).toHaveBeenCalledWith(
+    expect(result.body).toEqual({
+      ok: true,
+      code: 'WELCOME',
+      codes: ['WELCOME'],
+    });
+    expect(result.headers).toEqual({ 'Cache-Control': 'no-store' });
+    expect(db.createInviteCodes).toHaveBeenCalledWith([
       expect.objectContaining({
         code: 'WELCOME',
         maxUses: 2,
         createdBy: 'manager',
       }),
-    );
+    ]);
     expect(mockSaveConfig).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    0,
+    -1,
+    1.5,
+    MAX_INVITE_BATCH_SIZE + 1,
+    '2',
+    null,
+    false,
+    NaN,
+    Infinity,
+    {},
+    [],
+  ])('拒绝无效生成数量 %p', async (count) => {
+    const result = await handleAdminUserAction({
+      operatorUsername: 'manager',
+      operatorRole: 'admin',
+      body: { action: 'createInviteCode', validDays: 7, count },
+    });
+    expect(result.status).toBe(400);
+    expect(result.body).toEqual({
+      error: `生成数量需在 1-${MAX_INVITE_BATCH_SIZE} 之间`,
+    });
+    expect(db.createInviteCodes).not.toHaveBeenCalled();
+  });
+
+  it('拒绝批量生成自定义邀请码', async () => {
+    const result = await handleAdminUserAction({
+      operatorUsername: 'manager',
+      operatorRole: 'admin',
+      body: {
+        action: 'createInviteCode',
+        validDays: 7,
+        count: 2,
+        code: ' welcome ',
+      },
+    });
+    expect(result.status).toBe(400);
+    expect(result.body).toEqual({ error: '自定义邀请码只能单个生成' });
+    expect(db.createInviteCodes).not.toHaveBeenCalled();
+  });
+
+  it.each([undefined, 1, 3, MAX_INVITE_BATCH_SIZE])(
+    '生成数量 %p 的完整批次并返回兼容字段',
+    async (count) => {
+      const result = await handleAdminUserAction({
+        operatorUsername: 'manager',
+        operatorRole: 'admin',
+        body: { action: 'createInviteCode', validDays: 7, count, maxUses: 2 },
+      });
+      expect(db.createInviteCodes).toHaveBeenCalledTimes(1);
+      const items = (db.createInviteCodes as jest.Mock).mock
+        .calls[0][0] as InviteCode[];
+      const codes = items.map((item) => item.code);
+      expect(codes).toHaveLength(count ?? 1);
+      expect(new Set(codes).size).toBe(codes.length);
+      for (const item of items) {
+        expect(item).toMatchObject({
+          createdBy: 'manager',
+          maxUses: 2,
+          usedCount: 0,
+        });
+        expect(item.expiresAt - item.createdAt).toBe(7 * 86400000);
+      }
+      expect(result.body).toEqual({ ok: true, code: codes[0], codes });
+      expect(result.headers).toEqual({ 'Cache-Control': 'no-store' });
+      expect(mockSaveConfig).not.toHaveBeenCalled();
+    },
+  );
+
+  it('随机码冲突后重新生成整批', async () => {
+    (db.createInviteCodes as jest.Mock).mockResolvedValueOnce('exists');
+    const result = await handleAdminUserAction({
+      operatorUsername: 'manager',
+      operatorRole: 'admin',
+      body: { action: 'createInviteCode', validDays: 7, count: 3 },
+    });
+    const calls = (db.createInviteCodes as jest.Mock).mock.calls;
+    expect(calls).toHaveLength(2);
+    const first = calls[0][0] as InviteCode[];
+    const second = calls[1][0] as InviteCode[];
+    expect(first).toHaveLength(3);
+    expect(second).toHaveLength(3);
+    const codes = second.map((item) => item.code);
+    expect(
+      codes.every((code) => !first.some((item) => item.code === code)),
+    ).toBe(true);
+    expect(result.body).toEqual({ ok: true, code: codes[0], codes });
+  });
+
+  it('批内随机码重复时丢弃整批并重新生成', async () => {
+    (randomBytes as jest.Mock)
+      .mockReturnValueOnce(Buffer.alloc(12, 31))
+      .mockReturnValueOnce(Buffer.alloc(12, 31));
+    const result = await handleAdminUserAction({
+      operatorUsername: 'manager',
+      operatorRole: 'admin',
+      body: { action: 'createInviteCode', validDays: 7, count: 2 },
+    });
+    expect(randomBytes).toHaveBeenCalledTimes(4);
+    expect(db.createInviteCodes).toHaveBeenCalledTimes(1);
+    expect(result.body).toMatchObject({ ok: true });
+  });
+
+  it.each(['existing', 'within-batch'])(
+    '随机码持续冲突 %s 时最多尝试十批',
+    async (conflict) => {
+      if (conflict === 'existing')
+        (db.createInviteCodes as jest.Mock).mockResolvedValue('exists');
+      else (randomBytes as jest.Mock).mockReturnValue(Buffer.alloc(12));
+      const result = await handleAdminUserAction({
+        operatorUsername: 'manager',
+        operatorRole: 'admin',
+        body: { action: 'createInviteCode', validDays: 7, count: 2 },
+      });
+      expect(result.status).toBe(500);
+      expect(result.body).toEqual({ error: '生成邀请码失败，请重试' });
+      expect(randomBytes).toHaveBeenCalledTimes(20);
+      expect(db.createInviteCodes).toHaveBeenCalledTimes(
+        conflict === 'existing' ? 10 : 0,
+      );
+    },
+  );
+
+  it('批量超限时直接返回容量错误', async () => {
+    (db.createInviteCodes as jest.Mock).mockResolvedValue('limit');
+    const result = await handleAdminUserAction({
+      operatorUsername: 'manager',
+      operatorRole: 'admin',
+      body: { action: 'createInviteCode', validDays: 7, count: 3 },
+    });
+    expect(result.status).toBe(400);
+    expect(result.body).toEqual({
+      error: `有效邀请码不能超过 ${MAX_INVITE_CODES} 个`,
+    });
+    expect(db.createInviteCodes).toHaveBeenCalledTimes(1);
   });
 
   it.each([
     ['exists', 409],
     ['limit', 400],
   ] as const)('处理数据库创建结果 %s', async (outcome, status) => {
-    (db.createInviteCode as jest.Mock).mockResolvedValue(outcome);
+    (db.createInviteCodes as jest.Mock).mockResolvedValue(outcome);
     const result = await handleAdminUserAction({
       operatorUsername: 'manager',
       operatorRole: 'admin',

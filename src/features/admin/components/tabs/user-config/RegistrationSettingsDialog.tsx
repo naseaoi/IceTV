@@ -1,25 +1,41 @@
 'use client';
 
-import { Check, Copy, Plus, Trash2 } from 'lucide-react';
-import { useState } from 'react';
+import { Check, CircleCheck, Copy, Plus, Trash2, X } from 'lucide-react';
+import {
+  type CSSProperties,
+  type FormEvent,
+  type ReactNode,
+  useEffect,
+  useRef,
+  useState,
+} from 'react';
 
 import Select from '@/components/Select';
 import SkeletonText from '@/components/SkeletonText';
 import Spinner from '@/components/Spinner';
 import AdminDialog from '@/features/admin/components/AdminDialog';
+import { ADMIN_PANEL_CLASS } from '@/features/admin/components/AdminSettings';
 import { AdminStatusSwitch } from '@/features/admin/components/AdminStatusSwitch';
+import type { InviteCodeDraft } from '@/features/admin/hooks/useAdminUserActions';
 import { buttonStyles, inputStyles } from '@/features/admin/lib/buttonStyles';
 import { formatDateTime } from '@/features/admin/lib/formatDateTime';
 import {
   type InviteCode,
   CUSTOM_INVITE_CODE_MAX_LENGTH,
+  CUSTOM_INVITE_CODE_RULE_MESSAGE,
   getInviteCodeRemainingUses,
+  INVITE_MAX_USES_RULE_MESSAGE,
   isInviteCodeExhausted,
   isInviteCodeExpired,
+  isValidCustomInviteCode,
+  MAX_INVITE_BATCH_SIZE,
+  MAX_INVITE_CODES,
   MAX_INVITE_MAX_USES,
   MAX_INVITE_VALID_DAYS,
   MIN_INVITE_MAX_USES,
   MIN_INVITE_VALID_DAYS,
+  parseInviteMaxUses,
+  parseInviteValidDays,
 } from '@/features/admin/services/inviteCodes';
 import { copyTextToClipboard } from '@/lib/clipboard';
 import type { InviteCodeFilter } from '@/lib/invite-code-storage';
@@ -41,9 +57,6 @@ interface RegistrationSettingsDialogProps {
   requireInviteCode: boolean;
   inviteFilter: InviteCodeFilter;
   inviteList: InviteCodeListState;
-  validDays: number;
-  customCode: string;
-  maxUses: string;
   isTogglingRegister: boolean;
   isTogglingInvite: boolean;
   isCreatingCode: boolean;
@@ -51,19 +64,46 @@ interface RegistrationSettingsDialogProps {
   onToggleOpenRegister: () => void;
   onToggleRequireInviteCode: () => void;
   onInviteFilterChange: (next: InviteCodeFilter) => void;
-  onValidDaysChange: (next: number) => void;
-  onCustomCodeChange: (next: string) => void;
-  onMaxUsesChange: (next: string) => void;
-  onCreateCode: () => void;
+  // 成功返回本次生成的邀请码，失败返回 null（错误由调用方提示）
+  onCreateCodes: (draft: InviteCodeDraft) => Promise<string[] | null>;
   onDeleteCode: (code: string) => void;
   onClose: () => void;
 }
 
+const DEFAULT_VALID_DAYS = 7;
+const COPIED_FEEDBACK_MS = 1500;
+
 const INVITE_CODE_TEXT_CLASS = 'font-mono text-sm';
 const INVITE_META_TEXT_CLASS = 'mt-0.5 text-xs';
-
+const SECTION_TITLE_CLASS =
+  'text-sm font-semibold text-gray-900 dark:text-gray-100';
 const LABEL_CLASS =
-  'mb-1 block text-sm font-medium text-gray-900 dark:text-gray-100';
+  'mb-1.5 block text-xs font-medium text-gray-600 dark:text-gray-300';
+const INVALID_INPUT_CLASS =
+  'aria-[invalid=true]:ring-red-400 dark:aria-[invalid=true]:ring-red-500/70';
+const NUMBER_INPUT_CLASS =
+  'tabular-nums [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none';
+
+type DraftField = 'count' | 'validDays' | 'maxUses' | 'customCode';
+
+// 同一时间只保留一个“已复制”反馈，切换复制目标时前一个立即复位
+function useCopyFeedback() {
+  const [copiedKey, setCopiedKey] = useState<string | null>(null);
+  const timer = useRef<number | undefined>(undefined);
+  useEffect(() => () => window.clearTimeout(timer.current), []);
+
+  const copy = async (key: string, text: string) => {
+    if (!(await copyTextToClipboard(text))) return;
+    window.clearTimeout(timer.current);
+    setCopiedKey(key);
+    timer.current = window.setTimeout(
+      () => setCopiedKey(null),
+      COPIED_FEEDBACK_MS,
+    );
+  };
+
+  return { copiedKey, copy };
+}
 
 function ToggleRow({
   title,
@@ -79,7 +119,7 @@ function ToggleRow({
   onToggle: () => void;
 }) {
   return (
-    <div className='flex items-center justify-between gap-4 py-2.5'>
+    <div className='flex items-center justify-between gap-4 px-4 py-3'>
       <p className='text-sm font-medium text-gray-900 dark:text-gray-100'>
         {title}
       </p>
@@ -93,55 +133,379 @@ function ToggleRow({
   );
 }
 
-function CopyCodeButton({ code }: { code: string }) {
-  const [copied, setCopied] = useState(false);
+function NumberField({
+  id,
+  label,
+  suffix,
+  value,
+  min,
+  max,
+  placeholder,
+  invalid,
+  onChange,
+}: {
+  id: string;
+  label: string;
+  suffix: string;
+  value: string;
+  min: number;
+  max: number;
+  placeholder?: string;
+  invalid: boolean;
+  onChange: (next: string) => void;
+}) {
+  return (
+    <div className='min-w-0'>
+      <label htmlFor={id} className={LABEL_CLASS}>
+        {label}
+      </label>
+      <div className='relative'>
+        <input
+          id={id}
+          type='number'
+          inputMode='numeric'
+          min={min}
+          max={max}
+          step={1}
+          placeholder={placeholder}
+          value={value}
+          aria-invalid={invalid}
+          onChange={(e) => onChange(e.target.value)}
+          className={`w-full pr-8 ${inputStyles.withFocus} ${NUMBER_INPUT_CLASS} ${INVALID_INPUT_CLASS}`}
+        />
+        <span
+          aria-hidden='true'
+          className='pointer-events-none absolute inset-y-0 right-3 flex items-center text-xs text-gray-400 dark:text-gray-500'
+        >
+          {suffix}
+        </span>
+      </div>
+    </div>
+  );
+}
 
-  const handleCopy = async () => {
-    const ok = await copyTextToClipboard(code);
-    if (!ok) return;
-    setCopied(true);
-    window.setTimeout(() => setCopied(false), 1500);
+function CreatedCodesCard({
+  codes,
+  onDismiss,
+}: {
+  codes: string[];
+  onDismiss: () => void;
+}) {
+  const { copiedKey, copy } = useCopyFeedback();
+  const allCopied = copiedKey === '*';
+
+  return (
+    <div className='rounded-xl bg-brand-50/70 p-3 ring-1 ring-inset ring-brand-100 dark:bg-brand-500/[0.06] dark:ring-brand-400/15'>
+      <div className='flex items-center justify-between gap-3'>
+        <p
+          role='status'
+          className='flex items-center gap-1.5 text-sm font-medium text-brand-800 dark:text-brand-200'
+        >
+          <CircleCheck className='h-4 w-4 shrink-0' />
+          已生成 {codes.length} 个邀请码
+        </p>
+        <div className='flex shrink-0 items-center gap-1'>
+          {codes.length > 1 && (
+            <button
+              type='button'
+              onClick={() => void copy('*', codes.join('\n'))}
+              className='inline-flex items-center gap-1 rounded-lg px-2 py-1 text-xs font-medium text-brand-700 transition-colors hover:bg-brand-100 dark:text-brand-300 dark:hover:bg-brand-500/10'
+            >
+              {allCopied ? (
+                <Check className='h-3.5 w-3.5' />
+              ) : (
+                <Copy className='h-3.5 w-3.5' />
+              )}
+              {allCopied ? '已复制' : '复制全部'}
+            </button>
+          )}
+          <button
+            type='button'
+            onClick={onDismiss}
+            aria-label='收起生成结果'
+            className='rounded-lg p-1 text-brand-700/70 transition-colors hover:bg-brand-100 hover:text-brand-800 dark:text-brand-300/70 dark:hover:bg-brand-500/10 dark:hover:text-brand-200'
+          >
+            <X className='h-4 w-4' />
+          </button>
+        </div>
+      </div>
+      <ul
+        aria-label='本次生成的邀请码'
+        className='motion-stagger mt-2.5 grid max-h-44 grid-cols-2 gap-1.5 overflow-y-auto sm:grid-cols-3'
+      >
+        {codes.map((code, index) => {
+          const copied = copiedKey === code;
+          return (
+            <li
+              key={code}
+              style={{ '--stagger-index': index } as CSSProperties}
+            >
+              <button
+                type='button'
+                onClick={() => void copy(code, code)}
+                aria-label={`复制邀请码 ${code}`}
+                className='group flex w-full items-center justify-between gap-2 rounded-lg bg-white px-2.5 py-1.5 text-left ring-1 ring-inset ring-brand-100 transition-colors hover:ring-brand-300 dark:bg-gray-900 dark:ring-white/[0.06] dark:hover:ring-brand-400/40'
+              >
+                <span
+                  className={`truncate ${INVITE_CODE_TEXT_CLASS} text-gray-900 dark:text-gray-100`}
+                >
+                  {code}
+                </span>
+                {copied ? (
+                  <Check className='h-3.5 w-3.5 shrink-0 text-brand-500' />
+                ) : (
+                  <Copy className='h-3.5 w-3.5 shrink-0 text-gray-300 transition-colors group-hover:text-gray-500 dark:text-gray-600 dark:group-hover:text-gray-300' />
+                )}
+              </button>
+            </li>
+          );
+        })}
+      </ul>
+    </div>
+  );
+}
+
+function InviteCodeGenerator({
+  activeCount,
+  isCreating,
+  onCreateCodes,
+}: {
+  activeCount: number;
+  isCreating: boolean;
+  onCreateCodes: (draft: InviteCodeDraft) => Promise<string[] | null>;
+}) {
+  const [count, setCount] = useState('1');
+  const [validDays, setValidDays] = useState(String(DEFAULT_VALID_DAYS));
+  const [maxUses, setMaxUses] = useState('');
+  const [customCode, setCustomCode] = useState('');
+  const [error, setError] = useState<{
+    field: DraftField;
+    message: string;
+  } | null>(null);
+  const [created, setCreated] = useState<{ id: number; codes: string[] }>({
+    id: 0,
+    codes: [],
+  });
+
+  const maxCount = Math.min(
+    MAX_INVITE_BATCH_SIZE,
+    Math.max(0, MAX_INVITE_CODES - activeCount),
+  );
+  const parsedCount = Number(count);
+  const isBatch = Number.isFinite(parsedCount) && parsedCount > 1;
+
+  const update =
+    (field: DraftField, setter: (next: string) => void) => (next: string) => {
+      setter(next);
+      if (error?.field === field) setError(null);
+    };
+
+  const validate = (): InviteCodeDraft | null => {
+    if (
+      !Number.isInteger(parsedCount) ||
+      parsedCount < 1 ||
+      parsedCount > maxCount
+    ) {
+      setError({
+        field: 'count',
+        message:
+          maxCount === 1
+            ? '当前只能再生成 1 个'
+            : `数量需在 1-${maxCount} 之间`,
+      });
+      return null;
+    }
+    const days = parseInviteValidDays(Number(validDays));
+    if (days === null || validDays.trim() === '') {
+      setError({
+        field: 'validDays',
+        message: `有效天数需在 ${MIN_INVITE_VALID_DAYS}-${MAX_INVITE_VALID_DAYS} 之间`,
+      });
+      return null;
+    }
+    const trimmedMaxUses = maxUses.trim();
+    const uses = parseInviteMaxUses(
+      trimmedMaxUses ? Number(trimmedMaxUses) : undefined,
+    );
+    if (uses === null) {
+      setError({ field: 'maxUses', message: INVITE_MAX_USES_RULE_MESSAGE });
+      return null;
+    }
+    const code = isBatch ? '' : customCode.trim();
+    if (code && !isValidCustomInviteCode(code)) {
+      setError({
+        field: 'customCode',
+        message: CUSTOM_INVITE_CODE_RULE_MESSAGE,
+      });
+      return null;
+    }
+    return {
+      count: parsedCount,
+      validDays: days,
+      ...(uses ? { maxUses: uses } : {}),
+      ...(code ? { customCode: code } : {}),
+    };
+  };
+
+  const handleSubmit = async (event: FormEvent) => {
+    event.preventDefault();
+    if (isCreating) return;
+    const draft = validate();
+    if (!draft) return;
+    const codes = await onCreateCodes(draft);
+    if (!codes?.length) return;
+    setCustomCode('');
+    setCreated((previous) => ({ id: previous.id + 1, codes }));
   };
 
   return (
-    <button
-      type='button'
-      onClick={handleCopy}
-      title={copied ? '已复制' : '复制邀请码'}
-      aria-label={`复制邀请码 ${code}`}
-      className='shrink-0 rounded p-1 text-gray-400 transition-colors hover:bg-gray-100 hover:text-gray-600 dark:hover:bg-gray-700 dark:hover:text-gray-200'
-    >
-      {copied ? (
-        <Check className='h-4 w-4 text-brand-500' />
-      ) : (
-        <Copy className='h-4 w-4' />
+    <div className='space-y-3'>
+      <form
+        noValidate
+        onSubmit={handleSubmit}
+        className='rounded-xl bg-gray-50 p-3 ring-1 ring-inset ring-gray-200 dark:bg-white/[0.02] dark:ring-white/[0.06] sm:p-4'
+      >
+        <div className='grid grid-cols-3 gap-2.5 sm:gap-3'>
+          <NumberField
+            id='invite-count'
+            label='数量'
+            suffix='个'
+            value={count}
+            min={1}
+            max={Math.max(1, maxCount)}
+            invalid={error?.field === 'count'}
+            onChange={update('count', setCount)}
+          />
+          <NumberField
+            id='invite-valid-days'
+            label='有效天数'
+            suffix='天'
+            value={validDays}
+            min={MIN_INVITE_VALID_DAYS}
+            max={MAX_INVITE_VALID_DAYS}
+            invalid={error?.field === 'validDays'}
+            onChange={update('validDays', setValidDays)}
+          />
+          <NumberField
+            id='invite-max-uses'
+            label='每码可用'
+            suffix='次'
+            value={maxUses}
+            min={MIN_INVITE_MAX_USES}
+            max={MAX_INVITE_MAX_USES}
+            placeholder='不限'
+            invalid={error?.field === 'maxUses'}
+            onChange={update('maxUses', setMaxUses)}
+          />
+        </div>
+        <div className='mt-3 flex items-end gap-2.5 sm:gap-3'>
+          <div className='min-w-0 flex-1'>
+            <label htmlFor='invite-custom-code' className={LABEL_CLASS}>
+              自定义邀请码
+            </label>
+            <input
+              id='invite-custom-code'
+              type='text'
+              autoComplete='off'
+              autoCapitalize='characters'
+              spellCheck={false}
+              maxLength={CUSTOM_INVITE_CODE_MAX_LENGTH}
+              placeholder={isBatch ? '批量时随机生成' : '留空随机生成'}
+              value={isBatch ? '' : customCode}
+              disabled={isBatch}
+              aria-invalid={error?.field === 'customCode'}
+              onChange={(e) =>
+                update('customCode', setCustomCode)(e.target.value)
+              }
+              className={`w-full font-mono uppercase placeholder:font-sans placeholder:normal-case ${inputStyles.withFocus} ${INVALID_INPUT_CLASS}`}
+            />
+          </div>
+          <button
+            type='submit'
+            disabled={isCreating || maxCount === 0}
+            title={
+              maxCount === 0
+                ? `有效邀请码已达 ${MAX_INVITE_CODES} 个`
+                : undefined
+            }
+            className={`${buttonStyles.primary} inline-flex h-[38px] shrink-0 items-center justify-center gap-1.5 px-4 disabled:cursor-not-allowed disabled:opacity-50`}
+          >
+            {isCreating ? (
+              <Spinner className='h-4 w-4' />
+            ) : (
+              <Plus className='h-4 w-4' />
+            )}
+            {isBatch && parsedCount <= maxCount
+              ? `生成 ${parsedCount} 个`
+              : '生成'}
+          </button>
+        </div>
+        {error && (
+          <p
+            role='alert'
+            className='mt-2 text-xs text-red-600 dark:text-red-400'
+          >
+            {error.message}
+          </p>
+        )}
+      </form>
+
+      {created.codes.length > 0 && (
+        <CreatedCodesCard
+          key={created.id}
+          codes={created.codes}
+          onDismiss={() =>
+            setCreated((previous) => ({ ...previous, codes: [] }))
+          }
+        />
       )}
-    </button>
+    </div>
   );
 }
 
 function InviteCodeRow({
   item,
   deleting,
+  copied,
+  onCopy,
   onDelete,
 }: {
   item: InviteCode;
   deleting: boolean;
+  copied: boolean;
+  onCopy: (code: string) => void;
   onDelete: (code: string) => void;
 }) {
   const expired = isInviteCodeExpired(item);
   const exhausted = isInviteCodeExhausted(item);
+  const usable = !expired && !exhausted;
   const remaining = getInviteCodeRemainingUses(item);
   return (
     <li className='flex items-center gap-3 px-4 py-2.5'>
       <div className='min-w-0 flex-1'>
         <div className='flex h-5 items-center gap-1'>
           <span
-            className={`truncate ${INVITE_CODE_TEXT_CLASS} text-gray-900 dark:text-gray-100`}
+            className={`truncate ${INVITE_CODE_TEXT_CLASS} ${
+              usable
+                ? 'text-gray-900 dark:text-gray-100'
+                : 'text-gray-400 line-through decoration-gray-300 dark:text-gray-500 dark:decoration-gray-600'
+            }`}
           >
             {item.code}
           </span>
-          <CopyCodeButton code={item.code} />
+          <button
+            type='button'
+            onClick={() => onCopy(item.code)}
+            title={copied ? '已复制' : '复制邀请码'}
+            aria-label={`复制邀请码 ${item.code}`}
+            className='shrink-0 rounded p-1 text-gray-400 transition-colors hover:bg-gray-100 hover:text-gray-600 dark:hover:bg-gray-700 dark:hover:text-gray-200'
+          >
+            {copied ? (
+              <Check className='h-4 w-4 text-brand-500' />
+            ) : (
+              <Copy className='h-4 w-4' />
+            )}
+          </button>
         </div>
         <p
           className={`truncate ${INVITE_META_TEXT_CLASS} text-gray-500 dark:text-gray-400`}
@@ -154,12 +518,18 @@ function InviteCodeRow({
         </p>
       </div>
       <span
-        className={`shrink-0 rounded-full px-2 py-0.5 text-xs ${
-          expired || exhausted
-            ? 'bg-gray-100 text-gray-600 dark:bg-white/[0.06] dark:text-gray-400'
-            : 'bg-brand-100 text-brand-800 dark:bg-brand-900/30 dark:text-brand-300'
+        className={`inline-flex shrink-0 items-center gap-1.5 rounded-full px-2 py-0.5 text-xs font-medium ${
+          usable
+            ? 'bg-brand-50 text-brand-700 dark:bg-brand-500/10 dark:text-brand-300'
+            : 'bg-gray-100 text-gray-600 dark:bg-white/[0.06] dark:text-gray-400'
         }`}
       >
+        <span
+          aria-hidden='true'
+          className={`h-1.5 w-1.5 rounded-full ${
+            usable ? 'bg-brand-500' : 'bg-gray-400 dark:bg-gray-500'
+          }`}
+        />
         {expired ? '已过期' : exhausted ? '已用尽' : '有效'}
       </span>
       <button
@@ -199,11 +569,35 @@ function InviteCodeRowsSkeleton() {
               barClassName='h-3 w-44 rounded'
             />
           </div>
-          <div className='skeleton h-5 w-10 rounded-full' />
+          <div className='skeleton h-5 w-12 rounded-full' />
           <div className='skeleton h-8 w-8 rounded-lg' />
         </div>
       ))}
     </div>
+  );
+}
+
+function Section({
+  id,
+  title,
+  addon,
+  children,
+}: {
+  id: string;
+  title: string;
+  addon?: ReactNode;
+  children: ReactNode;
+}) {
+  return (
+    <section aria-labelledby={id}>
+      <div className='mb-2.5 flex min-h-8 items-center justify-between gap-3'>
+        <h4 id={id} className={SECTION_TITLE_CLASS}>
+          {title}
+        </h4>
+        {addon}
+      </div>
+      {children}
+    </section>
   );
 }
 
@@ -213,9 +607,6 @@ export function RegistrationSettingsDialog({
   requireInviteCode,
   inviteFilter,
   inviteList,
-  validDays,
-  customCode,
-  maxUses,
   isTogglingRegister,
   isTogglingInvite,
   isCreatingCode,
@@ -223,15 +614,13 @@ export function RegistrationSettingsDialog({
   onToggleOpenRegister,
   onToggleRequireInviteCode,
   onInviteFilterChange,
-  onValidDaysChange,
-  onCustomCodeChange,
-  onMaxUsesChange,
-  onCreateCode,
+  onCreateCodes,
   onDeleteCode,
   onClose,
 }: RegistrationSettingsDialogProps) {
   const { items, total, activeCount, nextCursor, loading, error } = inviteList;
   const initialLoading = loading && items.length === 0;
+  const { copiedKey, copy } = useCopyFeedback();
 
   return (
     <AdminDialog
@@ -240,8 +629,10 @@ export function RegistrationSettingsDialog({
       onClose={onClose}
       panelClassName='max-w-2xl max-h-[85vh] overflow-y-auto'
     >
-      <div className='space-y-5'>
-        <div className='divide-y divide-gray-200 dark:divide-white/[0.06]'>
+      <div className='space-y-6'>
+        <div
+          className={`${ADMIN_PANEL_CLASS} divide-y divide-gray-200 dark:divide-white/[0.06]`}
+        >
           <ToggleRow
             title='开放注册'
             checked={openRegister}
@@ -258,99 +649,41 @@ export function RegistrationSettingsDialog({
           />
         </div>
 
-        <section aria-labelledby='invite-code-heading'>
-          <h4
-            id='invite-code-heading'
-            className='mb-3 text-sm font-semibold text-gray-900 dark:text-gray-100'
-          >
-            邀请码
-          </h4>
+        <Section id='invite-generate-heading' title='生成邀请码'>
+          <InviteCodeGenerator
+            activeCount={activeCount}
+            isCreating={isCreatingCode}
+            onCreateCodes={onCreateCodes}
+          />
+        </Section>
 
-          <div className='mb-4 grid grid-cols-2 items-end gap-3 sm:grid-cols-[minmax(0,1fr)_6.5rem_6.5rem_auto]'>
-            <div className='col-span-2 min-w-0 sm:col-span-1'>
-              <label htmlFor='invite-custom-code' className={LABEL_CLASS}>
-                自定义邀请码
-              </label>
-              <input
-                id='invite-custom-code'
-                type='text'
-                autoComplete='off'
-                autoCapitalize='characters'
-                spellCheck={false}
-                maxLength={CUSTOM_INVITE_CODE_MAX_LENGTH}
-                placeholder='留空随机生成'
-                value={customCode}
-                onChange={(e) => onCustomCodeChange(e.target.value)}
-                className={`w-full uppercase placeholder:normal-case ${inputStyles.withFocus}`}
-              />
-            </div>
-            <div>
-              <label htmlFor='invite-valid-days' className={LABEL_CLASS}>
-                有效天数
-              </label>
-              <input
-                id='invite-valid-days'
-                type='number'
-                min={MIN_INVITE_VALID_DAYS}
-                max={MAX_INVITE_VALID_DAYS}
-                value={validDays}
-                onChange={(e) => onValidDaysChange(Number(e.target.value))}
-                className={`w-full ${inputStyles.withFocus}`}
-              />
-            </div>
-            <div>
-              <label htmlFor='invite-max-uses' className={LABEL_CLASS}>
-                可用次数
-              </label>
-              <input
-                id='invite-max-uses'
-                type='number'
-                min={MIN_INVITE_MAX_USES}
-                max={MAX_INVITE_MAX_USES}
-                placeholder='不限'
-                value={maxUses}
-                onChange={(e) => onMaxUsesChange(e.target.value)}
-                className={`w-full ${inputStyles.withFocus}`}
-              />
-            </div>
-            <button
-              type='button'
-              onClick={onCreateCode}
-              disabled={isCreatingCode}
-              aria-label='生成邀请码'
-              className={`${buttonStyles.primary} col-span-2 flex h-[38px] items-center justify-center gap-1.5 disabled:cursor-not-allowed disabled:opacity-50 sm:col-span-1`}
-            >
-              {isCreatingCode ? (
-                <Spinner className='h-4 w-4' />
-              ) : (
-                <Plus className='h-4 w-4' />
+        <Section
+          id='invite-code-heading'
+          title='邀请码'
+          addon={
+            <div className='flex items-center gap-3'>
+              {!error && !initialLoading && (
+                <span className='text-xs tabular-nums text-gray-500 dark:text-gray-400'>
+                  共 {total} 个
+                </span>
               )}
-              生成
-            </button>
-          </div>
-
-          <div className='mb-2 flex items-center justify-between gap-3'>
-            <Select
-              value={inviteFilter}
-              onChange={(value) =>
-                onInviteFilterChange(value as InviteCodeFilter)
-              }
-              ariaLabel='筛选邀请码状态'
-              variant='pill'
-              options={[
-                { value: 'all', label: '全部' },
-                { value: 'active', label: `有效 ${activeCount}` },
-                { value: 'expired', label: '已过期' },
-                { value: 'exhausted', label: '已用尽' },
-              ]}
-            />
-            {!error && !initialLoading && (
-              <span className='text-xs text-gray-500 dark:text-gray-400'>
-                共 {total} 个
-              </span>
-            )}
-          </div>
-
+              <Select
+                value={inviteFilter}
+                onChange={(value) =>
+                  onInviteFilterChange(value as InviteCodeFilter)
+                }
+                ariaLabel='筛选邀请码状态'
+                variant='pill'
+                options={[
+                  { value: 'all', label: '全部' },
+                  { value: 'active', label: `有效 ${activeCount}` },
+                  { value: 'expired', label: '已过期' },
+                  { value: 'exhausted', label: '已用尽' },
+                ]}
+              />
+            </div>
+          }
+        >
           <div className='overflow-hidden rounded-xl ring-1 ring-gray-200 dark:ring-white/[0.06]'>
             {error ? (
               <div
@@ -384,6 +717,8 @@ export function RegistrationSettingsDialog({
                     key={item.code}
                     item={item}
                     deleting={deletingCode === item.code}
+                    copied={copiedKey === item.code}
+                    onCopy={(code) => void copy(code, code)}
                     onDelete={onDeleteCode}
                   />
                 ))}
@@ -402,7 +737,7 @@ export function RegistrationSettingsDialog({
               </ul>
             )}
           </div>
-        </section>
+        </Section>
       </div>
     </AdminDialog>
   );

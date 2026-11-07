@@ -93,23 +93,26 @@ export class SqliteInviteCodeStore {
     )();
   }
 
-  create(item: InviteCode): InviteCodeCreateResult {
+  create(items: InviteCode[]): InviteCodeCreateResult {
+    if (new Set(items.map((item) => item.code)).size !== items.length)
+      return 'exists';
     return this.db
       .transaction((): InviteCodeCreateResult => {
         const now = Date.now();
-        if (
-          this.db
-            .prepare(
-              `SELECT 1 FROM invite_codes WHERE code = ? AND ${INVITE_ACTIVE_SQL}`,
-            )
-            .get(item.code, now)
-        )
-          return 'exists';
-        if (this.countActive(now) >= MAX_INVITE_CODES) return 'limit';
-        this.db
-          .prepare('DELETE FROM invite_codes WHERE code = ?')
-          .run(item.code);
-        this.db.prepare(INVITE_INSERT_SQL).run(...inviteValues(item));
+        const existing = this.db.prepare(
+          `SELECT 1 FROM invite_codes WHERE code = ? AND ${INVITE_ACTIVE_SQL}`,
+        );
+        if (items.some((item) => existing.get(item.code, now))) return 'exists';
+        if (this.countActive(now) + items.length > MAX_INVITE_CODES)
+          return 'limit';
+        const remove = this.db.prepare(
+          'DELETE FROM invite_codes WHERE code = ?',
+        );
+        const insert = this.db.prepare(INVITE_INSERT_SQL);
+        for (const item of items) {
+          remove.run(item.code);
+          insert.run(...inviteValues(item));
+        }
         return 'created';
       })
       .immediate();

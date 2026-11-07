@@ -108,7 +108,9 @@ export class MysqlInviteCodeStore {
     });
   }
 
-  async create(item: InviteCode): Promise<InviteCodeCreateResult> {
+  async create(items: InviteCode[]): Promise<InviteCodeCreateResult> {
+    if (new Set(items.map((item) => item.code)).size !== items.length)
+      return 'exists';
     return this.transaction(
       async (connection): Promise<InviteCodeCreateResult> => {
         // 管理配置行作为创建操作的互斥锁，限额检查与插入在同一事务执行。
@@ -117,20 +119,25 @@ export class MysqlInviteCodeStore {
         );
         if (!config.length) throw new Error('管理员配置尚未初始化');
         const now = Date.now();
-        const [existing] = await connection.query<RowDataPacket[]>(
-          `SELECT code FROM invite_codes WHERE code = ? AND ${INVITE_ACTIVE_SQL}`,
-          [item.code, now],
-        );
-        if (existing.length) return 'exists';
+        for (const item of items) {
+          const [existing] = await connection.query<RowDataPacket[]>(
+            `SELECT code FROM invite_codes WHERE code = ? AND ${INVITE_ACTIVE_SQL}`,
+            [item.code, now],
+          );
+          if (existing.length) return 'exists';
+        }
         const [active] = await connection.query<RowDataPacket[]>(
           `SELECT COUNT(*) AS total FROM invite_codes WHERE ${INVITE_ACTIVE_SQL}`,
           [now],
         );
-        if (Number(active[0].total) >= MAX_INVITE_CODES) return 'limit';
-        await connection.execute('DELETE FROM invite_codes WHERE code = ?', [
-          item.code,
-        ]);
-        await connection.execute(INVITE_INSERT_SQL, inviteValues(item));
+        if (Number(active[0].total) + items.length > MAX_INVITE_CODES)
+          return 'limit';
+        for (const item of items) {
+          await connection.execute('DELETE FROM invite_codes WHERE code = ?', [
+            item.code,
+          ]);
+          await connection.execute(INVITE_INSERT_SQL, inviteValues(item));
+        }
         return 'created';
       },
     );

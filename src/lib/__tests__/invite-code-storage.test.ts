@@ -17,8 +17,9 @@ const makeCode = (code: string, extra = {}) => ({
 describe('邀请码数据库分页及迁移', () => {
   it('同创建时间按码倒序分页，游标绑定筛选', async () => {
     const storage = new LocalSqliteStorage(':memory:');
-    for (const code of ['AAAA', 'BBBB', 'CCCC'])
-      await storage.createInviteCode(makeCode(code));
+    await storage.createInviteCodes(
+      ['AAAA', 'BBBB', 'CCCC'].map((code) => makeCode(code)),
+    );
     const first = await storage.queryInviteCodes({ limit: 2 });
     expect(first.items.map((item) => item.code)).toEqual(['CCCC', 'BBBB']);
     expect(first).toMatchObject({ total: 3, activeCount: 3 });

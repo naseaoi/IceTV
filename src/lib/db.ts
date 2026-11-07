@@ -643,6 +643,12 @@ class DbManager {
     return (await this.getStorage()).countActiveInviteCodes();
   }
 
+  async createInviteCodes(
+    ...args: Parameters<IStorage['createInviteCodes']>
+  ): ReturnType<IStorage['createInviteCodes']> {
+    return (await this.getStorage()).createInviteCodes(...args);
+  }
+
   async createInviteCode(
     ...args: Parameters<IStorage['createInviteCode']>
   ): ReturnType<IStorage['createInviteCode']> {
