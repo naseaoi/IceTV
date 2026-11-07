@@ -84,7 +84,7 @@ async function main() {
     console.log(`📊 版本统计:`);
     changelogData.entries.forEach((version) => {
       console.log(
-        `   ${version.version} (${version.date}): +${version.added.length} ~${version.changed.length} !${version.fixed.length}`,
+        `   ${version.version} (${version.date}): +${version.added.length} ~${version.changed.length} !${version.fixed.length} @${version.admin.length}`,
       );
     });
 

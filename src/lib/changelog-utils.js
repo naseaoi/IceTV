@@ -4,11 +4,18 @@ const CHANGELOG_UNRELEASED_RE = /^## \[Unreleased\]$/;
 const CHANGELOG_SECTION_RE = /^###\s+(.+)$/;
 const CHANGELOG_ITEM_RE = /^-\s+(.+)$/;
 
+// Admin 只收录站长与管理员可感知的后台改动，前端仅对这两种身份展示
 const SECTION_MAP = {
   Added: 'added',
   Changed: 'changed',
   Fixed: 'fixed',
+  Admin: 'admin',
 };
+const SECTION_KEYS = Object.values(SECTION_MAP);
+
+function isEmptyEntry(entry) {
+  return SECTION_KEYS.every((key) => entry[key].length === 0);
+}
 
 function createEntry(version, date) {
   return {
@@ -17,6 +24,7 @@ function createEntry(version, date) {
     added: [],
     changed: [],
     fixed: [],
+    admin: [],
     content: [],
   };
 }
@@ -29,14 +37,10 @@ function finalizeEntries(entries) {
       added: [...entry.added],
       changed: [...entry.changed],
       fixed: [...entry.fixed],
+      admin: [...entry.admin],
     };
 
-    if (
-      nextEntry.added.length === 0 &&
-      nextEntry.changed.length === 0 &&
-      nextEntry.fixed.length === 0 &&
-      entry.content.length > 0
-    ) {
+    if (isEmptyEntry(nextEntry) && entry.content.length > 0) {
       nextEntry.changed = [...entry.content];
     }
 
@@ -156,11 +160,7 @@ function validateChangelog(content) {
     }
     seenVersions.add(entry.version);
 
-    if (
-      entry.added.length === 0 &&
-      entry.changed.length === 0 &&
-      entry.fixed.length === 0
-    ) {
+    if (isEmptyEntry(entry)) {
       errors.push(`版本 ${entry.version} 没有任何更新条目`);
     }
 
@@ -204,29 +204,14 @@ function renderReleaseNotes(entry) {
 
   const lines = [`发布日期：${entry.date}`, ''];
 
-  if (entry.added.length > 0) {
-    lines.push('### Added', '');
-    entry.added.forEach((item) => {
+  Object.entries(SECTION_MAP).forEach(([title, key]) => {
+    if (entry[key].length === 0) return;
+    lines.push(`### ${title}`, '');
+    entry[key].forEach((item) => {
       lines.push(`- ${item}`);
     });
     lines.push('');
-  }
-
-  if (entry.changed.length > 0) {
-    lines.push('### Changed', '');
-    entry.changed.forEach((item) => {
-      lines.push(`- ${item}`);
-    });
-    lines.push('');
-  }
-
-  if (entry.fixed.length > 0) {
-    lines.push('### Fixed', '');
-    entry.fixed.forEach((item) => {
-      lines.push(`- ${item}`);
-    });
-    lines.push('');
-  }
+  });
 
   return `${lines.join('\n').trim()}\n`;
 }

@@ -9,10 +9,12 @@ import {
   Github,
   Plus,
   RefreshCw,
+  ShieldCheck,
   X,
 } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
 
+import { useAuthSession } from '@/components/AuthProvider';
 import {
   MODAL_CLOSE_BUTTON_CLASS,
   MODAL_TITLE_CLASS,
@@ -35,6 +37,12 @@ interface TimelineEntry {
 
 const VISIBLE_COUNT = 5;
 
+function hasPublicChanges(entry: ChangelogEntry) {
+  return (
+    entry.added.length > 0 || entry.changed.length > 0 || entry.fixed.length > 0
+  );
+}
+
 export const VersionPanel: React.FC<VersionPanelProps> = ({
   isOpen,
   onClose,
@@ -45,6 +53,10 @@ export const VersionPanel: React.FC<VersionPanelProps> = ({
   const [latestVersion, setLatestVersion] = useState<string>('');
   const [showAllEntries, setShowAllEntries] = useState(false);
   const repoUrl = getPrimaryRepoUrl();
+  const { session } = useAuthSession();
+  const showAdminChanges =
+    session.status === 'authenticated' &&
+    (session.role === 'owner' || session.role === 'admin');
 
   useEffect(() => {
     if (isOpen) {
@@ -114,6 +126,7 @@ export const VersionPanel: React.FC<VersionPanelProps> = ({
           added: [],
           changed: ['已检测到新版本，暂未获取到详细更新日志。'],
           fixed: [],
+          admin: [],
         },
         type: 'update',
       });
@@ -127,8 +140,15 @@ export const VersionPanel: React.FC<VersionPanelProps> = ({
       }),
     );
 
-    return [...remoteOnly, ...local];
-  }, [remoteChangelog, hasUpdate, latestVersion]);
+    // 普通用户看不到后台条目，只含后台改动的历史版本整条隐藏
+    return [...remoteOnly, ...local].filter(
+      ({ entry, type }) =>
+        showAdminChanges ||
+        type === 'current' ||
+        type === 'update' ||
+        hasPublicChanges(entry),
+    );
+  }, [remoteChangelog, hasUpdate, latestVersion, showAdminChanges]);
 
   const visibleEntries = showAllEntries
     ? timeline
@@ -292,6 +312,12 @@ export const VersionPanel: React.FC<VersionPanelProps> = ({
                       <Bug className='h-3 w-3' />,
                       '修复',
                     )}
+                    {showAdminChanges &&
+                      renderChanges(
+                        entry.admin,
+                        <ShieldCheck className='h-3 w-3' />,
+                        '后台',
+                      )}
                   </div>
                 </li>
               );

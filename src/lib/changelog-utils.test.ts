@@ -80,3 +80,35 @@ describe('changelog-utils [Unreleased]', () => {
     expect(manifest.errors).toContain('无效的版本标题: ## Unreleased');
   });
 });
+
+describe('changelog-utils ### Admin', () => {
+  const ADMIN_ONLY = `## [0.5.3] - 2026-11-05
+
+### Admin
+
+- 后台改动
+
+${RELEASED}`;
+
+  it('后台章节解析为 admin 字段，仅含后台条目的版本不算空版本', () => {
+    const manifest = buildChangelogManifest(ADMIN_ONLY);
+    const entry = manifest.entries[0];
+
+    expect(manifest.errors).toEqual([]);
+    expect(entry).toMatchObject({
+      version: '0.5.3',
+      added: [],
+      changed: [],
+      fixed: [],
+      admin: ['后台改动'],
+    });
+  });
+
+  it('发版说明保留后台章节', () => {
+    const release = extractLatestRelease(ADMIN_ONLY);
+
+    expect(release.errors).toEqual([]);
+    expect(release.notes).toContain('### Admin');
+    expect(release.notes).toContain('后台改动');
+  });
+});
