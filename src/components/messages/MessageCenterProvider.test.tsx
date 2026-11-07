@@ -1,6 +1,7 @@
 import { act, render, screen, waitFor } from '@testing-library/react';
 
 import type { UserMessagePage, UserMessageSummary } from '@/lib/message-types';
+import { dismissToast, showToast } from '@/lib/toast';
 
 const mockGetMessageSummary = jest.fn();
 const mockGetMessagePage = jest.fn();
@@ -33,10 +34,9 @@ jest.mock('@/lib/messages.client', () => ({
   readAllMessages: (...args: unknown[]) => mockReadAllMessages(...args),
 }));
 
-jest.mock('@/components/messages/MessageToast', () => ({
-  __esModule: true,
-  default: ({ text }: { text: string | null }) =>
-    text ? <div data-testid='toast'>{text}</div> : null,
+jest.mock('@/lib/toast', () => ({
+  showToast: jest.fn(),
+  dismissToast: jest.fn(),
 }));
 
 jest.mock('@/components/messages/MessagePanel', () => ({
@@ -95,6 +95,7 @@ function summaryOf(revision: string, unreadCount: number): UserMessageSummary {
       source: 'source',
       videoId: 'video',
       title: '测试剧集',
+      year: '2024',
       sourceName: '测试源站',
       cover: '/cover.webp',
       fromEpisodes: 1,
@@ -114,6 +115,7 @@ function pageOf(total: number): UserMessagePage {
         source: 'source',
         videoId: 'video',
         title: '测试剧集',
+        year: '2024',
         sourceName: '测试源站',
         cover: '/cover.webp',
         fromEpisodes: 1,
@@ -180,7 +182,22 @@ describe('MessageCenterProvider', () => {
       expect(screen.getByTestId('unread').textContent).toBe('1'),
     );
     expect(screen.getByTestId('tracking-unread').textContent).toBe('1');
-    expect(screen.getByTestId('toast')).toBeInTheDocument();
+    expect(showToast).toHaveBeenCalledWith(
+      '《测试剧集》已更新至第 2 集',
+      'notice',
+      expect.objectContaining({ key: 'messages' }),
+    );
+  });
+
+  it('消息提示的查看操作打开面板并收起提示', async () => {
+    renderProvider();
+    await waitFor(() => expect(showToast).toHaveBeenCalled());
+    const options = jest.mocked(showToast).mock.calls[0][2];
+
+    await act(async () => options?.action?.onClick());
+
+    await screen.findByTestId('panel');
+    expect(dismissToast).toHaveBeenCalledWith('messages');
   });
 
   it('面板打开时轮询到新 revision 会重载首页', async () => {

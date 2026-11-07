@@ -7,13 +7,14 @@ import { cookies } from 'next/headers';
 import { AuthProvider } from '@/components/AuthProvider';
 import { CardInteractionProvider } from '@/components/CardInteractionProvider';
 import { ClientErrorReporter } from '@/components/ClientErrorReporter';
-import { GlobalErrorIndicator } from '@/components/GlobalErrorIndicator';
 import { MessageCenterProvider } from '@/components/messages/MessageCenterProvider';
 import { PageScrollRestorer } from '@/components/PageScrollRestorer';
+import ReleaseNotifier from '@/components/ReleaseNotifier';
 import { RuntimeConfigProvider } from '@/components/RuntimeConfigProvider';
 import { SiteProvider } from '@/components/SiteProvider';
 import { SWRegister } from '@/components/SWRegister';
 import { ThemeProvider } from '@/components/ThemeProvider';
+import ToastViewport from '@/components/ToastViewport';
 import { WatchRecordProvider } from '@/features/watch-record/WatchRecordProvider';
 import { getServerAuthSession } from '@/lib/auth-session.server';
 import { getPublicConfig } from '@/lib/config';
@@ -142,7 +143,8 @@ export default async function RootLayout({
                     <WatchRecordProvider>{children}</WatchRecordProvider>
                     <PageScrollRestorer />
                     <ClientErrorReporter />
-                    <GlobalErrorIndicator />
+                    <ToastViewport />
+                    <ReleaseNotifier />
                     <SWRegister />
                   </CardInteractionProvider>
                 </MessageCenterProvider>

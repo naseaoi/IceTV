@@ -1,10 +1,11 @@
 'use client';
 
-import { Check, Inbox, Megaphone, RefreshCw, Rss, X } from 'lucide-react';
+import { Check, Inbox, Megaphone, Play, RefreshCw, Rss, X } from 'lucide-react';
 import Link from 'next/link';
 import { useEffect, useId } from 'react';
 import { createPortal } from 'react-dom';
 
+import { buildContinuePlayUrl } from '@/components/continue-card/play-url';
 import CoverImage from '@/components/CoverImage';
 import ProfileAvatar from '@/components/ProfileAvatar';
 import RatingBadge from '@/components/RatingBadge';
@@ -27,6 +28,100 @@ interface MessagePanelProps {
   onRetry: () => Promise<void>;
 }
 
+const MESSAGE_PRIMARY_CLASS =
+  'truncate text-sm font-semibold text-gray-900 dark:text-gray-100';
+const MESSAGE_BODY_CLASS =
+  'mt-1 text-sm leading-5 text-gray-600 dark:text-gray-300';
+const MESSAGE_META_CLASS = 'text-xs text-gray-400 dark:text-gray-500';
+
+function ReadButton({
+  working,
+  onClick,
+}: {
+  working: boolean;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type='button'
+      disabled={working}
+      aria-label='标记为已读'
+      title='标记为已读'
+      className='flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-gray-400 transition-colors hover:bg-brand-100/80 hover:text-brand-700 disabled:opacity-50 dark:hover:bg-brand-900/50 dark:hover:text-brand-300'
+      onClick={onClick}
+    >
+      {working ? (
+        <Spinner className='h-4 w-4' />
+      ) : (
+        <Check className='h-4 w-4' />
+      )}
+    </button>
+  );
+}
+
+function MessageBody({ message }: { message: UserMessage }) {
+  if (message.type === 'announcement')
+    return (
+      <>
+        <div className='flex h-11 w-11 shrink-0 items-center justify-center rounded-lg bg-brand-100 text-brand-700 dark:bg-brand-900/35 dark:text-brand-300'>
+          <Megaphone className='h-5 w-5' />
+        </div>
+        <div className='min-w-0 flex-1'>
+          <p className='text-sm leading-6 text-gray-800 dark:text-gray-100'>
+            {message.content}
+          </p>
+          <p className={`mt-1 ${MESSAGE_META_CLASS}`}>
+            {formatRelativeTime(message.createdAt)}
+          </p>
+        </div>
+      </>
+    );
+
+  if (message.type === 'follow-review')
+    return (
+      <>
+        <ProfileAvatar user={message.author} />
+        <div className='min-w-0 flex-1'>
+          <p className={MESSAGE_PRIMARY_CLASS}>
+            {message.author.nickname ?? '未设置昵称'}
+          </p>
+          <p className={MESSAGE_BODY_CLASS}>评价了《{message.title}》</p>
+          <div className='mt-1.5 flex items-center gap-2'>
+            {message.rating !== null && <RatingBadge value={message.rating} />}
+            <span className={MESSAGE_META_CLASS}>
+              {formatRelativeTime(message.createdAt)}
+            </span>
+          </div>
+        </div>
+      </>
+    );
+
+  return (
+    <>
+      <div className='relative h-[72px] w-12 shrink-0 overflow-hidden rounded-md bg-gray-100 dark:bg-gray-800'>
+        <CoverImage
+          src={message.cover}
+          alt={message.title}
+          fallbackLabel='无封面'
+          checkClientCacheBeforeLoad
+        />
+      </div>
+      <div className='min-w-0 flex-1'>
+        <p className='flex items-center gap-1.5'>
+          <Rss className='h-3.5 w-3.5 shrink-0 text-amber-500' />
+          <span className={MESSAGE_PRIMARY_CLASS}>{message.title}</span>
+        </p>
+        <p className={MESSAGE_BODY_CLASS}>
+          已从 {message.fromEpisodes} 集更新至 {message.toEpisodes} 集
+        </p>
+        <p className={`mt-1 ${MESSAGE_META_CLASS}`}>
+          {message.sourceName} · {formatRelativeTime(message.createdAt)}
+        </p>
+      </div>
+    </>
+  );
+}
+
 function MessageRow({
   message,
   working,
@@ -38,107 +133,50 @@ function MessageRow({
   onRead: (message: UserMessage) => Promise<void>;
   onNavigate: () => void;
 }) {
-  if (message.type === 'follow-review')
-    return (
-      <div className='flex items-start gap-3 rounded-lg border border-gray-200/80 bg-white/60 p-4 dark:border-gray-700/80 dark:bg-gray-800/40'>
-        <Link
-          href={`/u/${message.author.profileId}`}
-          onClick={onNavigate}
-          className='flex min-w-0 flex-1 gap-3'
-        >
-          <ProfileAvatar user={message.author} />
-          <div className='min-w-0'>
-            <p className='text-sm font-semibold text-gray-900 dark:text-gray-100'>
-              {message.author.nickname ?? '未设置昵称'}
-            </p>
-            <p className='mt-1 text-sm text-gray-600 dark:text-gray-300'>
-              评价了《{message.title}》
-            </p>
-            <div className='mt-2 flex items-center gap-2'>
-              {message.rating !== null && (
-                <RatingBadge value={message.rating} />
-              )}
-              <span className='text-xs text-gray-400'>
-                {formatRelativeTime(message.createdAt)}
-              </span>
-            </div>
-          </div>
-        </Link>
-        <button
-          type='button'
-          aria-label='标记为已读'
-          disabled={working}
-          onClick={() => void onRead(message)}
-          className='rounded-full p-2 text-gray-400 hover:bg-brand-50 dark:hover:bg-brand-900/30'
-        >
-          {working ? (
-            <Spinner className='h-4 w-4' />
-          ) : (
-            <Check className='h-4 w-4' />
-          )}
-        </button>
-      </div>
-    );
-  const isAnnouncement = message.type === 'announcement';
+  const bodyClass = 'flex min-w-0 flex-1 gap-3';
 
   return (
     <div
-      className={`group flex gap-3 rounded-lg border p-3 sm:p-4 ${
-        isAnnouncement
+      className={`flex items-start gap-3 rounded-lg border p-3 sm:p-4 ${
+        message.type === 'announcement'
           ? 'border-brand-200/80 bg-brand-50/70 dark:border-brand-800/60 dark:bg-brand-950/25'
           : 'border-gray-200/80 bg-white/60 dark:border-gray-700/80 dark:bg-gray-800/40'
       }`}
     >
-      {isAnnouncement ? (
-        <div className='flex h-11 w-11 shrink-0 items-center justify-center rounded-lg bg-brand-100 text-brand-700 dark:bg-brand-900/35 dark:text-brand-300'>
-          <Megaphone className='h-5 w-5' />
-        </div>
+      {message.type === 'follow-review' ? (
+        <Link
+          href={`/u/${message.author.profileId}`}
+          onClick={onNavigate}
+          className={bodyClass}
+        >
+          <MessageBody message={message} />
+        </Link>
       ) : (
-        <div className='relative h-[72px] w-12 shrink-0 overflow-hidden rounded-md bg-gray-100 dark:bg-gray-800'>
-          <CoverImage
-            src={message.cover}
-            alt={message.title}
-            fallbackLabel='无封面'
-            checkClientCacheBeforeLoad
-          />
+        <div className={bodyClass}>
+          <MessageBody message={message} />
         </div>
       )}
 
-      <div className='min-w-0 flex-1'>
-        <span className='flex items-center gap-1.5'>
-          {!isAnnouncement && (
-            <Rss className='h-3.5 w-3.5 shrink-0 text-amber-500' />
-          )}
-          <span className='truncate text-sm font-semibold text-gray-900 dark:text-gray-100'>
-            {isAnnouncement ? '站点公告' : message.title}
-          </span>
-        </span>
-        <span className='mt-1 block text-sm leading-5 text-gray-600 dark:text-gray-300'>
-          {isAnnouncement
-            ? message.content
-            : `已从 ${message.fromEpisodes} 集更新至 ${message.toEpisodes} 集`}
-        </span>
-        <span className='mt-1 block text-xs text-gray-400 dark:text-gray-500'>
-          {isAnnouncement ? '公告' : message.sourceName}
-          {' · '}
-          {formatRelativeTime(message.createdAt)}
-        </span>
-      </div>
-
-      <button
-        type='button'
-        disabled={working}
-        aria-label='标记为已读'
-        title='标记为已读'
-        className='flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-gray-400 transition-colors hover:bg-brand-100/80 hover:text-brand-700 disabled:opacity-50 dark:hover:bg-brand-900/50 dark:hover:text-brand-300'
-        onClick={() => void onRead(message)}
-      >
-        {working ? (
-          <Spinner className='h-4 w-4' />
-        ) : (
-          <Check className='h-4 w-4' />
+      <div className='flex shrink-0 flex-col items-end justify-between gap-2 self-stretch'>
+        <ReadButton working={working} onClick={() => void onRead(message)} />
+        {message.type === 'tracking-update' && (
+          <Link
+            href={buildContinuePlayUrl({
+              source: message.source,
+              id: message.videoId,
+              title: message.title,
+              year: message.year,
+              query: message.searchTitle,
+            })}
+            onClick={onNavigate}
+            aria-label={`去观看《${message.title}》`}
+            className='inline-flex h-7 items-center gap-1 rounded-full bg-brand-50 px-2.5 text-xs font-medium text-brand-700 transition-colors hover:bg-brand-100 dark:bg-brand-900/30 dark:text-brand-300 dark:hover:bg-brand-900/50'
+          >
+            <Play className='h-3 w-3 fill-current' />
+            去观看
+          </Link>
         )}
-      </button>
+      </div>
     </div>
   );
 }

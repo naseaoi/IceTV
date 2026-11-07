@@ -1,6 +1,12 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 
 import { WatchRecordPanel } from '@/features/watch-record/WatchRecordPanel';
+import { showToast } from '@/lib/toast';
+
+jest.mock('@/lib/toast', () => ({
+  showToast: jest.fn(),
+  dismissToast: jest.fn(),
+}));
 
 const mockGetFavoriteForWork = jest.fn();
 const mockBatch = jest.fn();
@@ -95,6 +101,7 @@ it('未改动时不可保存，改状态后按片单键提交', async () => {
   );
   expect(mockSaveReview).not.toHaveBeenCalled();
   await waitFor(() => expect(onClose).toHaveBeenCalled());
+  expect(showToast).toHaveBeenCalledWith('观看记录已保存', 'success');
 });
 
 it('未在片单的作品只写评分时一并加入片单', async () => {
@@ -154,5 +161,6 @@ it('保存失败时保留面板并提示', async () => {
   fireEvent.click(screen.getByRole('button', { name: '保存' }));
   expect(await screen.findByText('保存失败，请重试')).toBeInTheDocument();
   expect(onClose).not.toHaveBeenCalled();
+  expect(showToast).not.toHaveBeenCalled();
   expect(screen.getByRole('button', { name: '保存' })).toBeEnabled();
 });

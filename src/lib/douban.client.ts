@@ -9,6 +9,7 @@ import {
 } from './douban-normalize';
 import { readDoubanProxyType, readDoubanProxyUrl } from './douban-source';
 import { createTimedAbortController } from './downstream-sources/shared';
+import { showToast } from './toast';
 import { DoubanResult } from './types';
 
 // ================================================================
@@ -270,14 +271,7 @@ async function fetchDoubanCategories(
       list: list,
     };
   } catch (error) {
-    // 触发全局错误提示
-    if (typeof window !== 'undefined') {
-      window.dispatchEvent(
-        new CustomEvent('globalError', {
-          detail: { message: '获取豆瓣分类数据失败' },
-        }),
-      );
-    }
+    showToast('获取豆瓣分类数据失败', 'error');
     throw new Error(`获取豆瓣分类数据失败: ${(error as Error).message}`);
   }
 }
@@ -382,14 +376,7 @@ async function fetchDoubanList(
       list: list,
     };
   } catch (error) {
-    // 触发全局错误提示
-    if (typeof window !== 'undefined') {
-      window.dispatchEvent(
-        new CustomEvent('globalError', {
-          detail: { message: '获取豆瓣列表数据失败' },
-        }),
-      );
-    }
+    showToast('获取豆瓣列表数据失败', 'error');
     throw new Error(`获取豆瓣列表数据失败: ${(error as Error).message}`);
   }
 }

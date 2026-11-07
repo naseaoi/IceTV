@@ -12,6 +12,7 @@ import {
   AdminSettingsGroup,
 } from '@/features/admin/components/AdminSettings';
 import { buttonStyles, inputStyles } from '@/features/admin/lib/buttonStyles';
+import { showToast } from '@/lib/toast';
 
 interface DataMigrationProps {
   onRefreshConfig?: () => Promise<void>;
@@ -144,12 +145,7 @@ const DataMigration = ({ onRefreshConfig }: DataMigrationProps) => {
       window.URL.revokeObjectURL(url);
       document.body.removeChild(a);
 
-      showAlert({
-        type: 'success',
-        title: '导出成功',
-        message: '数据已成功导出，请妥善保管备份文件和密码',
-        timer: 3000,
-      });
+      showToast('导出成功，请妥善保管备份文件和密码', 'success');
 
       setExportPassword('');
     } catch (error) {

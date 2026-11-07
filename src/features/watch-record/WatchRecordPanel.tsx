@@ -29,6 +29,7 @@ import {
   getFavoriteForWork,
   saveFavorite,
 } from '@/lib/db.client';
+import { showToast } from '@/lib/toast';
 import type { Favorite, FavoriteWatchStatus, VideoReview } from '@/lib/types';
 import { parseStorageKey } from '@/lib/utils';
 import { REVIEW_CONTENT_MAX_LENGTH } from '@/lib/video-reviews';
@@ -291,11 +292,12 @@ function WatchRecordForm({
     ...fields,
   });
 
-  const run = async (write: () => Promise<void>) => {
+  const run = async (write: () => Promise<void>, successMessage?: string) => {
     setSaving(true);
     setError('');
     try {
       await write();
+      if (successMessage) showToast(successMessage, 'success');
       onDirtyChange(false);
       onDone();
     } catch {
@@ -353,7 +355,7 @@ function WatchRecordForm({
       if (!inList) {
         await saveFavorite(target.source, target.id, buildFavorite());
       }
-    });
+    }, '观看记录已保存');
 
   const removeEntry = () =>
     run(async () => {

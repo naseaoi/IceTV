@@ -11,6 +11,12 @@ import { RUNTIME_PARAMS_FORM_ID } from '@/features/admin/lib/admin-form-ids';
 import { adminPost } from '@/features/admin/lib/api';
 import { IMPORT_ADMIN_CONFIG } from '@/lib/__tests__/__fixtures__/import-admin-config';
 import { DEFAULT_RUNTIME_PARAMS } from '@/lib/runtime-params';
+import { showToast } from '@/lib/toast';
+
+jest.mock('@/lib/toast', () => ({
+  showToast: jest.fn(),
+  dismissToast: jest.fn(),
+}));
 
 jest.mock('@/components/modals/AlertModal', () => ({
   __esModule: true,
@@ -128,6 +134,7 @@ describe('RuntimeParamsTab', () => {
     fireEvent.submit(form);
 
     await waitFor(() => expect(refreshConfig).toHaveBeenCalledTimes(1));
+    expect(showToast).toHaveBeenCalledWith('保存成功', 'success');
     expect(adminPost).toHaveBeenCalledWith(
       '/api/admin/runtime',
       expect.objectContaining({

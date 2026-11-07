@@ -3,6 +3,17 @@ import { act, fireEvent, render, screen } from '@testing-library/react';
 import type { CardAction } from '@/components/card-actions/actions';
 import ContinueCard from '@/components/ContinueCard';
 import { useOpenWatchRecord } from '@/components/watch-record-context';
+import {
+  isFavorited,
+  saveFavorite,
+  setPlayRecordTracking,
+} from '@/lib/db.client';
+import { showToast } from '@/lib/toast';
+
+jest.mock('@/lib/toast', () => ({
+  showToast: jest.fn(),
+  dismissToast: jest.fn(),
+}));
 
 const showActionSheet = jest.fn();
 const openWatchRecord = jest.fn();
@@ -155,4 +166,60 @@ describe('ContinueCard', () => {
       'data-continue-source',
     );
   });
+});
+
+it.each([false, true])(
+  '继续观看菜单收藏状态为 %s 时提示实际结果',
+  async (favorited) => {
+    jest.clearAllMocks();
+    jest.mocked(isFavorited).mockResolvedValueOnce(favorited);
+    render(<ContinueCard {...baseProps} />);
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: '更多操作' }));
+    });
+    const actions: CardAction[] = showActionSheet.mock.calls[0][1].actions;
+    await act(async () => {
+      await actions.find(({ id }) => id === 'favorite')?.onClick();
+    });
+    expect(showToast).toHaveBeenCalledWith(
+      favorited ? '已取消收藏' : '已加入收藏',
+      'success',
+    );
+  },
+);
+
+it.each([false, true])(
+  '继续观看菜单追更状态为 %s 时提示实际结果',
+  async (trackingEnabled) => {
+    jest.clearAllMocks();
+    jest.mocked(setPlayRecordTracking).mockResolvedValueOnce({
+      tracking_enabled: !trackingEnabled,
+    } as Awaited<ReturnType<typeof setPlayRecordTracking>>);
+    render(<ContinueCard {...baseProps} trackingEnabled={trackingEnabled} />);
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: '更多操作' }));
+    });
+    const actions: CardAction[] = showActionSheet.mock.calls[0][1].actions;
+    await act(async () => {
+      await actions.find(({ id }) => id === 'tracking')?.onClick();
+    });
+    expect(showToast).toHaveBeenCalledWith(
+      trackingEnabled ? '已取消追更' : '已开启追更',
+      'success',
+    );
+  },
+);
+
+it('继续观看菜单收藏失败时不提示成功', async () => {
+  jest.clearAllMocks();
+  jest.mocked(saveFavorite).mockRejectedValueOnce(new Error('failed'));
+  render(<ContinueCard {...baseProps} />);
+  await act(async () => {
+    fireEvent.click(screen.getByRole('button', { name: '更多操作' }));
+  });
+  const actions: CardAction[] = showActionSheet.mock.calls[0][1].actions;
+  await expect(
+    actions.find(({ id }) => id === 'favorite')?.onClick(),
+  ).rejects.toThrow('failed');
+  expect(showToast).not.toHaveBeenCalled();
 });

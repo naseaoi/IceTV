@@ -299,7 +299,7 @@ const SiteConfigComponent = ({
         setBaselineSiteSettings(normalizedSiteSettings);
         setPendingIconFile(null);
         revokeIconPreviewObjectUrl();
-        showSuccess('保存成功, 请刷新页面', showAlert);
+        showSuccess('保存成功, 请刷新页面');
         await refreshConfig();
       });
     } catch (err) {

@@ -72,6 +72,8 @@ function buildTrackingMessage(
     source: parsed.source,
     videoId: parsed.id,
     title: record.title,
+    year: record.year,
+    ...(record.search_title ? { searchTitle: record.search_title } : {}),
     sourceName: record.source_name,
     cover: record.cover,
     fromEpisodes,

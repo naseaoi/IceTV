@@ -258,7 +258,6 @@ const UserConfig = ({ config, role, refreshConfig }: UserConfigProps) => {
             : action === 'edit'
               ? '用户组更新成功'
               : '用户组删除成功',
-          showAlert,
         );
       } catch (err) {
         showError(err instanceof Error ? err.message : '操作失败', showAlert);
@@ -327,7 +326,7 @@ const UserConfig = ({ config, role, refreshConfig }: UserConfigProps) => {
     return withLoading(`assignUserGroup_${username}`, async () => {
       try {
         await assignUserGroups(username, nextUserGroups);
-        showSuccess('用户组分配成功', showAlert);
+        showSuccess('用户组分配成功');
       } catch (err) {
         showError(err instanceof Error ? err.message : '操作失败', showAlert);
         throw err;
@@ -389,7 +388,7 @@ const UserConfig = ({ config, role, refreshConfig }: UserConfigProps) => {
           undefined,
           openRegister,
         );
-        showSuccess('开放注册设置已更新', showAlert);
+        showSuccess('开放注册设置已更新');
       } catch (err) {
         showError(err instanceof Error ? err.message : '更新失败', showAlert);
         throw err;
@@ -410,10 +409,7 @@ const UserConfig = ({ config, role, refreshConfig }: UserConfigProps) => {
     await withLoading('setRequireInviteCode', async () => {
       try {
         await setRequireInviteCode(next);
-        showSuccess(
-          next ? '注册已要求邀请码' : '注册已不要求邀请码',
-          showAlert,
-        );
+        showSuccess(next ? '注册已要求邀请码' : '注册已不要求邀请码');
       } catch {
         // handled in setRequireInviteCode
       }
@@ -441,7 +437,7 @@ const UserConfig = ({ config, role, refreshConfig }: UserConfigProps) => {
         await createInviteCode(inviteValidDays, customCode, maxUses);
         setInviteCustomCode('');
         setInviteMaxUses('');
-        showSuccess('邀请码已生成', showAlert);
+        showSuccess('邀请码已生成');
         void inviteList.refresh();
       } catch {
         // handled in createInviteCode
@@ -698,7 +694,6 @@ const UserConfig = ({ config, role, refreshConfig }: UserConfigProps) => {
         await refreshUsersAndConfig();
         showSuccess(
           `已处理 ${result.processedCount} 个用户，跳过 ${result.skippedCount} 个`,
-          showAlert,
         );
       } catch (error) {
         showError(
@@ -755,7 +750,6 @@ const UserConfig = ({ config, role, refreshConfig }: UserConfigProps) => {
           result.skippedCount > 0
             ? `已删除 ${result.deletedCount} 个用户，${result.skippedCount} 个因期间有活跃被跳过`
             : `已删除 ${result.deletedCount} 个用户`,
-          showAlert,
         );
       } catch {
         // handled in deleteInactiveUsers

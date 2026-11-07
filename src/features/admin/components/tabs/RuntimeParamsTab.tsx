@@ -82,7 +82,7 @@ const RuntimeParamsTab = ({
         }
 
         setBaselineRuntimeParams(normalizedRuntimeParams);
-        showSuccess('保存成功', showAlert);
+        showSuccess('保存成功');
         await refreshConfig();
       });
     } catch (err) {

@@ -4,14 +4,12 @@ import { ExternalLink, RotateCcw, X } from 'lucide-react';
 import { type ReactNode, useEffect, useMemo, useState } from 'react';
 
 import AdminSelect from '@/components/admin/AdminSelect';
-import AlertModal from '@/components/modals/AlertModal';
 import ConfirmModal from '@/components/modals/ConfirmModal';
 import {
   MODAL_CLOSE_BUTTON_CLASS,
   MODAL_TITLE_CLASS,
 } from '@/components/modals/modal-styles';
 import { CustomProxyActions } from '@/components/proxy/CustomProxyActions';
-import { useAlertModal } from '@/hooks/useAlertModal';
 import { getAuthInfoFromBrowserCookie } from '@/lib/auth.client';
 import {
   bangumiDataSourceOptions,
@@ -68,6 +66,7 @@ import {
   readLocalPreferenceToggleState,
   resetAllLocalPreferenceToggles,
 } from '@/lib/local-preference-toggles';
+import { showToast } from '@/lib/toast';
 
 import { useBodyScrollLock } from './useBodyScrollLock';
 
@@ -99,7 +98,6 @@ export function SettingsPanel({ onClose }: SettingsPanelProps) {
     null,
   );
   const [showResetConfirm, setShowResetConfirm] = useState(false);
-  const { alertModal, showAlert, hideAlert } = useAlertModal();
 
   useBodyScrollLock(true);
 
@@ -156,21 +154,11 @@ export function SettingsPanel({ onClose }: SettingsPanelProps) {
   );
 
   const showProxyToast = () => {
-    showAlert({
-      type: 'success',
-      title: '更换成功',
-      message: '刷新页面后生效',
-      timer: 2000,
-    });
+    showToast('更换成功，刷新页面后生效', 'success');
   };
 
   const showLoginRequiredToast = () => {
-    showAlert({
-      type: 'warning',
-      title: '登录后可用',
-      message: '服务器请求会消耗本站资源，请登录后使用。',
-      timer: 2400,
-    });
+    showToast('登录后可使用服务器请求', 'info');
   };
 
   const handleDoubanProxyUrlChange = (value: string) => {
@@ -221,12 +209,7 @@ export function SettingsPanel({ onClose }: SettingsPanelProps) {
         'douban-data': error,
       }));
       if (error) {
-        showAlert({
-          type: 'warning',
-          title: '代理地址必填',
-          message: error,
-          timer: 2200,
-        });
+        showToast(error, 'error');
         return;
       }
     }
@@ -248,12 +231,7 @@ export function SettingsPanel({ onClose }: SettingsPanelProps) {
         bangumi: error,
       }));
       if (error) {
-        showAlert({
-          type: 'warning',
-          title: '代理地址必填',
-          message: error,
-          timer: 2200,
-        });
+        showToast(error, 'error');
         return;
       }
     }
@@ -294,12 +272,7 @@ export function SettingsPanel({ onClose }: SettingsPanelProps) {
         'douban-image': error,
       }));
       if (error) {
-        showAlert({
-          type: 'warning',
-          title: '代理地址必填',
-          message: error,
-          timer: 2200,
-        });
+        showToast(error, 'error');
         return;
       }
     }
@@ -336,12 +309,7 @@ export function SettingsPanel({ onClose }: SettingsPanelProps) {
     const error = getCustomProxyError(kind, proxyUrl);
     if (error) {
       setCustomProxyErrors((prev) => ({ ...prev, [kind]: error }));
-      showAlert({
-        type: 'warning',
-        title: '代理地址必填',
-        message: error,
-        timer: 2200,
-      });
+      showToast(error, 'error');
       return;
     }
 
@@ -349,21 +317,11 @@ export function SettingsPanel({ onClose }: SettingsPanelProps) {
     try {
       await testCustomProxy(kind, proxyUrl);
       setCustomProxyErrors((prev) => ({ ...prev, [kind]: '' }));
-      showAlert({
-        type: 'success',
-        title: '测试通过',
-        message: `${CUSTOM_PROXY_LABELS[kind]}可用`,
-        timer: 2200,
-      });
+      showToast(`测试通过，${CUSTOM_PROXY_LABELS[kind]}可用`, 'success');
     } catch (error) {
       const message = error instanceof Error ? error.message : '代理测试失败';
       setCustomProxyErrors((prev) => ({ ...prev, [kind]: message }));
-      showAlert({
-        type: 'error',
-        title: '测试失败',
-        message,
-        timer: 3000,
-      });
+      showToast(`测试失败，${message}`, 'error');
     } finally {
       setTestingProxy(null);
     }
@@ -577,14 +535,6 @@ export function SettingsPanel({ onClose }: SettingsPanelProps) {
         confirmText='确认恢复'
         onCancel={() => setShowResetConfirm(false)}
         onConfirm={handleResetSettings}
-      />
-      <AlertModal
-        isOpen={alertModal.isOpen}
-        onClose={hideAlert}
-        type={alertModal.type}
-        title={alertModal.title}
-        message={alertModal.message}
-        timer={alertModal.timer}
       />
     </>
   );

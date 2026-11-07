@@ -8,8 +8,15 @@ import {
   deleteFavorite,
   getFavoriteForWork,
   saveFavorite,
+  setPlayRecordTracking,
 } from '@/lib/db.client';
+import { showToast } from '@/lib/toast';
 import type { SearchResult } from '@/lib/types';
+
+jest.mock('@/lib/toast', () => ({
+  showToast: jest.fn(),
+  dismissToast: jest.fn(),
+}));
 
 jest.mock('@/components/card-actions/CardActionOverlay', () => ({
   __esModule: true,
@@ -36,7 +43,16 @@ jest.mock('@/components/CoverImage', () => ({
 }));
 jest.mock('@/components/modals/ConfirmModal', () => ({
   __esModule: true,
-  default: () => null,
+  default: ({
+    isOpen,
+    onConfirm,
+  }: {
+    isOpen: boolean;
+    onConfirm: () => Promise<void>;
+  }) =>
+    isOpen ? (
+      <button onClick={() => void onConfirm()}>确认取消收藏</button>
+    ) : null,
 }));
 jest.mock('@/features/play/lib/danmaku/navigation-warmup', () => ({
   warmupDanmakuForNavigation: jest.fn(),
@@ -55,6 +71,7 @@ jest.mock('@/lib/db.client', () => ({
   getFavoriteForWork: jest.fn(),
   saveFavorite: jest.fn(),
   deleteFavorite: jest.fn(),
+  setPlayRecordTracking: jest.fn(),
 }));
 
 function result(source: string, id: string): SearchResult {
@@ -97,6 +114,7 @@ async function openMenu() {
 
 describe('VideoCard 多源聚合搜索结果', () => {
   beforeEach(() => {
+    jest.mocked(showToast).mockClear();
     jest.mocked(getFavoriteForWork).mockReset();
     jest.mocked(saveFavorite).mockReset();
     jest.mocked(deleteFavorite).mockReset();
@@ -137,6 +155,7 @@ describe('VideoCard 多源聚合搜索结果', () => {
         total_episodes: 3,
       }),
     );
+    expect(showToast).toHaveBeenCalledWith('已加入收藏', 'success');
   });
 
   it('作品已在其他源收藏时显示取消收藏，并删除实际收藏键', async () => {
@@ -150,6 +169,7 @@ describe('VideoCard 多源聚合搜索结果', () => {
       fireEvent.click(screen.getByRole('menuitem', { name: '取消收藏' }));
     });
     expect(deleteFavorite).toHaveBeenCalledWith('gamma', '9');
+    expect(showToast).toHaveBeenCalledWith('已取消收藏', 'success');
     expect(saveFavorite).not.toHaveBeenCalled();
   });
 
@@ -171,3 +191,72 @@ describe('VideoCard 多源聚合搜索结果', () => {
     );
   });
 });
+
+it('收藏菜单等待二次确认和删除成功后才反馈', async () => {
+  jest.clearAllMocks();
+  render(
+    <CardInteractionProvider>
+      <VideoCard from='favorite' source='src' id='1' title='三体' />
+    </CardInteractionProvider>,
+  );
+  await openMenu();
+  await act(async () => {
+    fireEvent.click(screen.getByRole('menuitem', { name: '取消收藏' }));
+  });
+  expect(showToast).not.toHaveBeenCalled();
+  expect(deleteFavorite).not.toHaveBeenCalled();
+  await act(async () => {
+    fireEvent.click(screen.getByRole('button', { name: '确认取消收藏' }));
+  });
+  expect(deleteFavorite).toHaveBeenCalledWith('src', '1');
+  expect(showToast).toHaveBeenCalledWith('已取消收藏', 'success');
+});
+
+it('心形收藏按钮保持静默', async () => {
+  jest.clearAllMocks();
+  render(
+    <CardInteractionProvider>
+      <VideoCard from='playrecord' source='src' id='1' title='三体' />
+    </CardInteractionProvider>,
+  );
+  await act(async () => {
+    fireEvent.click(screen.getByRole('button', { name: '收藏' }));
+  });
+  expect(saveFavorite).toHaveBeenCalled();
+  expect(showToast).not.toHaveBeenCalled();
+});
+
+it.each([true, false])(
+  '视频卡片菜单追更状态 %s 的成功反馈',
+  async (trackingEnabled) => {
+    jest.clearAllMocks();
+    jest
+      .mocked(setPlayRecordTracking)
+      .mockResolvedValueOnce({ tracking_enabled: !trackingEnabled } as Awaited<
+        ReturnType<typeof setPlayRecordTracking>
+      >);
+    render(
+      <CardInteractionProvider>
+        <VideoCard
+          from='playrecord'
+          source='src'
+          id='1'
+          title='三体'
+          trackingEnabled={trackingEnabled}
+        />
+      </CardInteractionProvider>,
+    );
+    await openMenu();
+    await act(async () => {
+      fireEvent.click(
+        screen.getByRole('menuitem', {
+          name: trackingEnabled ? '取消追更' : '开启追更',
+        }),
+      );
+    });
+    expect(showToast).toHaveBeenCalledWith(
+      trackingEnabled ? '已取消追更' : '已开启追更',
+      'success',
+    );
+  },
+);

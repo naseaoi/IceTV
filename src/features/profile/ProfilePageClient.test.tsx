@@ -9,6 +9,7 @@ import {
 import type { ReactNode } from 'react';
 
 import ProfilePageClient from '@/features/profile/ProfilePageClient';
+import { copyTextToClipboard } from '@/lib/clipboard';
 import {
   getUserFavorites,
   getUserFollows,
@@ -16,6 +17,7 @@ import {
   getUserReviews,
   setFollowing,
 } from '@/lib/profile.client';
+import { showToast } from '@/lib/toast';
 import type { UserProfileView } from '@/lib/types';
 
 jest.mock('@/components/PageLayout', () => ({
@@ -29,6 +31,12 @@ jest.mock('@/components/CoverImage', () => ({
 jest.mock('@/components/VideoCard', () => ({
   __esModule: true,
   default: () => <span>可编辑收藏卡片</span>,
+}));
+jest.mock('@/lib/clipboard', () => ({
+  copyTextToClipboard: jest.fn(),
+}));
+jest.mock('@/lib/toast', () => ({
+  showToast: jest.fn(),
 }));
 jest.mock('@/lib/profile.client', () => ({
   getUserProfile: jest.fn(),
@@ -249,4 +257,27 @@ it('资料显示无公开评价时加载期间直接给出空状态', async () =
   await screen.findByRole('heading', { name: '爱丽丝' });
   expect(screen.getByText('还没有公开评价')).toBeInTheDocument();
   expect(screen.queryByRole('status', { name: '加载中' })).toBeNull();
+});
+
+it('复制主页链接使用当前站点地址与资料标识，并按结果给出提示', async () => {
+  jest.mocked(copyTextToClipboard).mockResolvedValueOnce(true);
+  render(<ProfilePageClient profileId='profileAlice' />);
+
+  const button = await screen.findByRole('button', { name: '复制主页链接' });
+  fireEvent.click(button);
+  await waitFor(() =>
+    expect(showToast).toHaveBeenCalledWith('已复制主页链接', 'success'),
+  );
+  expect(copyTextToClipboard).toHaveBeenCalledWith(
+    `${window.location.origin}/u/profileAlice`,
+  );
+
+  jest.mocked(copyTextToClipboard).mockResolvedValueOnce(false);
+  fireEvent.click(button);
+  await waitFor(() =>
+    expect(showToast).toHaveBeenLastCalledWith(
+      '复制失败，请手动复制地址栏中的链接',
+      'error',
+    ),
+  );
 });

@@ -12,6 +12,8 @@ export interface TrackingUpdateUserMessage {
   source: string;
   videoId: string;
   title: string;
+  year: string;
+  searchTitle?: string;
   sourceName: string;
   cover: string;
   fromEpisodes: number;

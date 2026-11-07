@@ -14,6 +14,7 @@ import {
 
 import { useAuthSession } from '@/components/AuthProvider';
 import { UserMessage, UserMessageSummary } from '@/lib/message-types';
+import { dismissToast, showToast } from '@/lib/toast';
 
 import {
   getMessagePreviewMode,
@@ -21,7 +22,6 @@ import {
   getMessagePreviewSummary,
   getMessagePreviewToast,
 } from './message-preview';
-import MessageToast from './MessageToast';
 import { useMessagePagination } from './useMessagePagination';
 import { useMessageSummaryPolling } from './useMessageSummaryPolling';
 
@@ -40,6 +40,9 @@ interface MessageCenterContextValue {
 const MessageCenterContext = createContext<MessageCenterContextValue | null>(
   null,
 );
+
+const MESSAGE_TOAST_KEY = 'messages';
+const MESSAGE_TOAST_DURATION_MS = 7_000;
 
 const EMPTY_SUMMARY: UserMessageSummary = {
   unreadCount: 0,
@@ -70,12 +73,21 @@ export function MessageCenterProvider({ children }: { children: ReactNode }) {
     loadFirstPageRef.current();
   }, []);
 
-  const { summary, setSummary, toastText, setToastText, refreshSummary } =
-    useMessageSummaryPolling({
-      authenticated,
-      username,
-      onRevisionChanged: reloadOpenPanel,
+  const openPanelRef = useRef<() => void>(() => {});
+  const notify = useCallback((text: string) => {
+    showToast(text, 'notice', {
+      key: MESSAGE_TOAST_KEY,
+      duration: MESSAGE_TOAST_DURATION_MS,
+      action: { label: '查看', onClick: () => openPanelRef.current() },
     });
+  }, []);
+
+  const { summary, setSummary, refreshSummary } = useMessageSummaryPolling({
+    authenticated,
+    username,
+    onRevisionChanged: reloadOpenPanel,
+    onNotify: notify,
+  });
 
   const onAfterMutate = useCallback(
     () => refreshSummary('local'),
@@ -106,15 +118,19 @@ export function MessageCenterProvider({ children }: { children: ReactNode }) {
       setPanelOpen(true);
     }
     if (previewMode !== 'panel') {
-      setToastText(getMessagePreviewToast(previewMode));
+      notify(getMessagePreviewToast(previewMode));
     }
-  }, [authenticated, setPage, setPanelOpen, setSummary, setToastText]);
+  }, [authenticated, notify, setPage, setPanelOpen, setSummary]);
 
   const openPanel = useCallback(() => {
-    setToastText(null);
+    dismissToast(MESSAGE_TOAST_KEY);
     setPanelOpen(true);
     void loadFirstPage();
-  }, [loadFirstPage, setPanelOpen, setToastText]);
+  }, [loadFirstPage, setPanelOpen]);
+
+  useEffect(() => {
+    openPanelRef.current = openPanel;
+  }, [openPanel]);
 
   const handleRead = useCallback(
     async (message: UserMessage) => {
@@ -162,11 +178,6 @@ export function MessageCenterProvider({ children }: { children: ReactNode }) {
           onRetry={loadFirstPage}
         />
       )}
-      <MessageToast
-        text={toastText}
-        onClose={() => setToastText(null)}
-        onOpen={() => openPanel()}
-      />
     </MessageCenterContext.Provider>
   );
 }

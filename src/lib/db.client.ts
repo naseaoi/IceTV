@@ -246,7 +246,11 @@ export async function deletePlayRecord(
         method: 'DELETE',
       }).then(() => {}),
     onServerError: async (err) => {
-      await handleDatabaseOperationFailure('playRecords', err);
+      await handleDatabaseOperationFailure(
+        'playRecords',
+        err,
+        '删除播放记录失败，请重试',
+      );
     },
     requireExistingCacheForOptimisticUpdate: true,
   });
@@ -257,6 +261,7 @@ async function patchPlayRecordState(
   source: string,
   id: string,
   body: Record<string, unknown>,
+  failureMessage: string,
 ): Promise<PlayRecord> {
   try {
     const key = generateStorageKey(source, id);
@@ -278,7 +283,7 @@ async function patchPlayRecordState(
 
     return record;
   } catch (error) {
-    await handleDatabaseOperationFailure('playRecords', error);
+    await handleDatabaseOperationFailure('playRecords', error, failureMessage);
     throw error;
   }
 }
@@ -292,10 +297,15 @@ export async function markPlayRecordUpdateRead(
   id: string,
   readThroughEpisodes?: number,
 ): Promise<PlayRecord> {
-  const record = await patchPlayRecordState(source, id, {
-    action: 'mark-update-read',
-    readThroughEpisodes,
-  });
+  const record = await patchPlayRecordState(
+    source,
+    id,
+    {
+      action: 'mark-update-read',
+      readThroughEpisodes,
+    },
+    '标记已读失败，请重试',
+  );
   notifyMessagesUpdated();
   return record;
 }
@@ -305,10 +315,15 @@ export async function setPlayRecordTracking(
   id: string,
   enabled: boolean,
 ): Promise<PlayRecord> {
-  const record = await patchPlayRecordState(source, id, {
-    action: 'set-tracking',
-    trackingEnabled: enabled,
-  });
+  const record = await patchPlayRecordState(
+    source,
+    id,
+    {
+      action: 'set-tracking',
+      trackingEnabled: enabled,
+    },
+    '追更设置保存失败，请重试',
+  );
   notifyMessagesUpdated();
   return record;
 }
@@ -323,7 +338,11 @@ export async function clearAllPlayRecords(): Promise<void> {
     });
     notifyMessagesUpdated();
   } catch (err) {
-    await handleDatabaseOperationFailure('playRecords', err);
+    await handleDatabaseOperationFailure(
+      'playRecords',
+      err,
+      '删除播放记录失败，请重试',
+    );
     throw err;
   } finally {
     window.dispatchEvent(new Event('userLibraryUpdated'));

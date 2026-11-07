@@ -13,20 +13,18 @@ import { getMessageSummary } from '@/lib/messages.client';
 import { buildToastText, RefreshMode } from './message-toast-text';
 
 const POLL_INTERVAL_MS = 30_000;
-const TOAST_DURATION_MS = 7_000;
 const EXTERNAL_REFRESH_DEBOUNCE_MS = 400;
 
 interface MessageSummaryPollingOptions {
   authenticated: boolean;
   username?: string;
   onRevisionChanged: () => void;
+  onNotify: (text: string) => void;
 }
 
 export interface MessageSummaryPolling {
   summary: UserMessageSummary | null;
   setSummary: (summary: UserMessageSummary | null) => void;
-  toastText: string | null;
-  setToastText: (text: string | null) => void;
   refreshSummary: (mode: RefreshMode) => Promise<void>;
 }
 
@@ -34,15 +32,17 @@ export function useMessageSummaryPolling({
   authenticated,
   username,
   onRevisionChanged,
+  onNotify,
 }: MessageSummaryPollingOptions): MessageSummaryPolling {
   const [summary, setSummary] = useState<UserMessageSummary | null>(null);
-  const [toastText, setToastText] = useState<string | null>(null);
   const summaryRef = useRef<UserMessageSummary | null>(null);
   const onRevisionChangedRef = useRef(onRevisionChanged);
+  const onNotifyRef = useRef(onNotify);
 
   useEffect(() => {
     onRevisionChangedRef.current = onRevisionChanged;
-  }, [onRevisionChanged]);
+    onNotifyRef.current = onNotify;
+  }, [onNotify, onRevisionChanged]);
 
   const refreshSummary = useCallback(
     async (mode: RefreshMode) => {
@@ -64,7 +64,7 @@ export function useMessageSummaryPolling({
           nextSummary.revision !== baselineRevision &&
           nextSummary.unreadCount >= (previous?.unreadCount ?? 0)
         ) {
-          setToastText(buildToastText(nextSummary, previous, mode));
+          onNotifyRef.current(buildToastText(nextSummary, previous, mode));
         }
         writeNotifiedMessageRevision(username, nextSummary.revision);
 
@@ -116,20 +116,9 @@ export function useMessageSummaryPolling({
     };
   }, [authenticated, refreshSummary]);
 
-  useEffect(() => {
-    if (!toastText) return;
-    const timer = window.setTimeout(
-      () => setToastText(null),
-      TOAST_DURATION_MS,
-    );
-    return () => window.clearTimeout(timer);
-  }, [toastText]);
-
   return {
     summary,
     setSummary: setSummaryDirectly,
-    toastText,
-    setToastText,
     refreshSummary,
   };
 }

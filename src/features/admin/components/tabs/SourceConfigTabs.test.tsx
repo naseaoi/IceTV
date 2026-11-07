@@ -3,7 +3,8 @@ import { useSortable } from '@dnd-kit/sortable';
 import { act, fireEvent, render, screen, within } from '@testing-library/react';
 import type { ReactNode } from 'react';
 
-import { adminGet } from '@/features/admin/lib/api';
+import { adminGet, adminPost } from '@/features/admin/lib/api';
+import { showToast } from '@/lib/toast';
 import type { AdminConfig } from '@/types/admin';
 
 import CategoryConfig from './CategoryConfigTab';
@@ -11,6 +12,11 @@ import LiveSourceConfig from './LiveSourceConfigTab';
 import VideoSourceConfig from './VideoSourceConfigTab';
 
 let mockOnDragEnd: (event: DragEndEvent) => void;
+
+jest.mock('@/lib/toast', () => ({
+  showToast: jest.fn(),
+  dismissToast: jest.fn(),
+}));
 
 jest.mock('@dnd-kit/core', () => ({
   ...jest.requireActual('@dnd-kit/core'),
@@ -225,4 +231,20 @@ it('视频源全选和取消全选只影响可见行，并保留隐藏行的选�
   expect(screen.getAllByRole('checkbox')[1]).toBeChecked();
   expect(screen.getAllByRole('checkbox')[2]).not.toBeChecked();
   expect(screen.getByText('已选 1 个')).toBeVisible();
+});
+
+it('直播源刷新完成后通过轻提示反馈', async () => {
+  const refreshConfig = jest.fn().mockResolvedValue(undefined);
+  render(<LiveSourceConfig config={config} refreshConfig={refreshConfig} />);
+  await act(async () => {
+    fireEvent.click(screen.getByRole('button', { name: '刷新直播源' }));
+  });
+  expect(adminPost).toHaveBeenCalledWith(
+    '/api/admin/live/refresh',
+    {},
+    '刷新失败',
+  );
+  expect(refreshConfig).toHaveBeenCalledTimes(1);
+  expect(showToast).toHaveBeenCalledWith('直播源已刷新', 'success');
+  expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
 });

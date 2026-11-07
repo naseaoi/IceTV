@@ -30,6 +30,11 @@
 ## 通用组件
 
 - 下拉统一用 `src/components/Select.tsx`（`field` 表单整宽、`pill` 工具栏胶囊），`AdminSelect` 只是 `field` 的包装。
+- 操作结果、错误与提醒的轻提示统一调 `showToast()`（`src/lib/toast.ts`），由根布局的 `ToastViewport` 渲染；`triggerGlobalError()`、消息中心新消息提醒、站长的新版本提醒都走这条路径。只需告知结果的场景不用 `AlertModal` 加 `timer`，弹窗留给需要用户确认的情况。
+  - 同一 `key` 的提示原地更新文案并重新计时，同时播放一次回弹，不叠加；默认 `key` 为语气加文案，所以连续重复同一操作只会回弹不会刷屏。轮询类提醒传固定 `key`，需要主动收起时调 `dismissToast(key)`。
+  - `notice` 用于需要用户留意的提醒，可带一个 `action`；点击后执行回调并收起提示。
+  - 离场动画时长由 CSS 的 `.toast-*` 动画决定，`TOAST_LEAVE_MS` 必须与之一致，否则节点会在动画结束前被移除或残留。
+  - 只在用户主动触发、且界面上没有其他可见变化的操作后提示成功；列表行消失、按钮状态切换等已有直接反馈的操作不再叠加提示。
 - 长文本折叠用 `src/components/ExpandableText.tsx`；弹窗外壳 `ModalShell` 支持 `backdropClassName`（遮罩底色）与 `initialFocusRef`（打开后聚焦的元素）。
 - 卡片菜单与标记评分入口见 [评价与收藏](reviews-favorites.md#入口复用)。
 

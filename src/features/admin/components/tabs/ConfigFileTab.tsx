@@ -110,7 +110,7 @@ const ConfigFileComponent = ({
           setConfigContent(data.configContent);
           const currentTime = new Date().toISOString();
           setLastCheckTime(currentTime);
-          showSuccess('配置拉取成功', showAlert);
+          showSuccess('配置拉取成功');
         } else {
           showError('拉取失败：未获取到配置内容', showAlert);
         }
@@ -139,7 +139,7 @@ const ConfigFileComponent = ({
         );
 
         setBaselineDraft(currentDraft);
-        showSuccess('配置文件保存成功', showAlert);
+        showSuccess('配置文件保存成功');
         await refreshConfig();
       } catch (err) {
         showError(err instanceof Error ? err.message : '保存失败', showAlert);
@@ -183,7 +183,7 @@ const ConfigFileComponent = ({
     link.click();
     link.remove();
     URL.revokeObjectURL(url);
-    showSuccess('配置文件已导出', showAlert);
+    showSuccess('配置文件已导出');
   };
 
   const handleImport = async (event: React.ChangeEvent<HTMLInputElement>) => {
@@ -203,7 +203,7 @@ const ConfigFileComponent = ({
       const content = await file.text();
       JSON.parse(content);
       setConfigContent(content);
-      showSuccess('JSON 已导入，请保存后生效', showAlert);
+      showSuccess('JSON 已导入，请保存后生效');
     } catch {
       showError('JSON 文件格式错误', showAlert);
     }

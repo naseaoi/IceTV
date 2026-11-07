@@ -16,6 +16,7 @@ export const AUTO_PLAY_NEXT_STORAGE_KEY = 'enable_autoplay_next';
 export const PREFERRED_QUALITY_STORAGE_KEY = 'preferredQuality';
 export const SOURCE_PREFERRED_QUALITY_STORAGE_PREFIX = 'preferredQuality:';
 export const SEEN_ANNOUNCEMENT_STORAGE_KEY = 'hasSeenAnnouncement';
+export const NOTIFIED_RELEASE_VERSION_STORAGE_KEY = 'notifiedReleaseVersion';
 export const CONTINUE_WATCHING_COUNT_STORAGE_KEY = 'continueWatchingCount';
 export const CONTINUE_WATCHING_PAGE_COUNT_STORAGE_KEY =
   'continueWatchingPageCount';
@@ -206,6 +207,14 @@ export function readSeenAnnouncement(): string | undefined {
 
 export function writeSeenAnnouncement(value: string) {
   writeStoredString(SEEN_ANNOUNCEMENT_STORAGE_KEY, value);
+}
+
+export function readNotifiedReleaseVersion(): string | undefined {
+  return readStoredString(NOTIFIED_RELEASE_VERSION_STORAGE_KEY);
+}
+
+export function writeNotifiedReleaseVersion(version: string) {
+  writeStoredString(NOTIFIED_RELEASE_VERSION_STORAGE_KEY, version);
 }
 
 function getNotifiedMessageRevisionStorageKey(username: string): string | null {

@@ -20,6 +20,7 @@ const tracking: TrackingUpdateUserMessage = {
   source: 'source-a',
   videoId: 'video-1',
   title: '示例剧集',
+  year: '2024',
   sourceName: '示例源',
   cover: '/cover.jpg',
   fromEpisodes: 10,

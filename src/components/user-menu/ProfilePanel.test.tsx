@@ -4,6 +4,12 @@ import { installCryptoPolyfill } from '@/app/api/test-utils/crypto-polyfill';
 import { useAuthSession } from '@/components/AuthProvider';
 import { ProfileForm } from '@/components/user-menu/ProfilePanel';
 import { getMyProfile, updateProfile } from '@/lib/profile.client';
+import { showToast } from '@/lib/toast';
+
+jest.mock('@/lib/toast', () => ({
+  showToast: jest.fn(),
+  dismissToast: jest.fn(),
+}));
 
 jest.mock('@/components/AuthProvider', () => ({ useAuthSession: jest.fn() }));
 jest.mock('@/lib/profile.client', () => ({
@@ -72,6 +78,7 @@ it('首次设置昵称：检测可用后保存并刷新会话', async () => {
   });
   expect(updateProfile).toHaveBeenCalledWith({ nickname: '光影旅人' });
   expect(refresh).toHaveBeenCalledTimes(1);
+  expect(showToast).toHaveBeenCalledWith('个人资料已保存', 'success');
 });
 it('打开时不检测当前昵称，未改动不可保存', async () => {
   await renderLoadedForm();
@@ -96,6 +103,7 @@ it('只提交改动的字段，保存失败保留表单', async () => {
   expect(global.fetch).not.toHaveBeenCalled();
   expect(screen.getByRole('alert')).toHaveTextContent('保存失败');
   expect(refresh).not.toHaveBeenCalled();
+  expect(showToast).not.toHaveBeenCalled();
 });
 it('选择候选头像后保存头像种子，选回当前头像则无改动', async () => {
   await renderLoadedForm();

@@ -105,4 +105,25 @@ describe('version check', () => {
 
     expect(fetchMock).not.toHaveBeenCalled();
   });
+  it('keeps the latest version alongside the cached status', async () => {
+    const fetchMock = jest
+      .fn()
+      .mockResolvedValue(createVersionResponse('999.0.0'));
+    global.fetch = fetchMock as unknown as typeof fetch;
+    const { checkLatestRelease, UpdateStatus } = loadVersionCheckModule();
+
+    await expect(checkLatestRelease()).resolves.toEqual({
+      status: UpdateStatus.HAS_UPDATE,
+      latestVersion: '999.0.0',
+    });
+
+    const refetch = jest.fn();
+    global.fetch = refetch as unknown as typeof fetch;
+    const reloaded = loadVersionCheckModule();
+    await expect(reloaded.checkLatestRelease()).resolves.toEqual({
+      status: UpdateStatus.HAS_UPDATE,
+      latestVersion: '999.0.0',
+    });
+    expect(refetch).not.toHaveBeenCalled();
+  });
 });

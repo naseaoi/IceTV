@@ -1,4 +1,8 @@
-import { UserMessagePage, UserMessageSummary } from '@/lib/message-types';
+import {
+  UserMessage,
+  UserMessagePage,
+  UserMessageSummary,
+} from '@/lib/message-types';
 
 export type MessagePreviewMode =
   | 'panel'
@@ -33,21 +37,47 @@ export function getMessagePreviewMode(): MessagePreviewMode | null {
     : null;
 }
 
+const previewFollowReviews = [
+  { nickname: '光影旅人', title: '漫长的季节', year: '2023', rating: 9 },
+  { nickname: '深夜放映员', title: '星际远征', year: '2024', rating: 7.5 },
+  { nickname: null, title: '城市边缘', year: '2022', rating: null },
+];
+
 export function getMessagePreviewPage(): UserMessagePage {
   const now = Date.now();
-  const tracking = previewTrackingTitles.map((title, index) => ({
+  const tracking: UserMessage[] = previewTrackingTitles.map((title, index) => ({
     id: `tracking:preview+${index}:${index + 2}:${index + 3}`,
-    type: 'tracking-update' as const,
+    type: 'tracking-update',
     recordKey: `preview+${index}`,
     source: 'preview',
     videoId: String(index),
     title,
+    year: '2024',
     sourceName: '预览源站',
     cover: `https://picsum.photos/seed/icetv-message-${index}/96/144`,
     fromEpisodes: index + 2,
     toEpisodes: index + 3,
     createdAt: now - index * 3_600_000,
   }));
+  const followReviews: UserMessage[] = previewFollowReviews.map(
+    (review, index) => ({
+      id: `follow-review:preview+${index}`,
+      type: 'follow-review',
+      author: {
+        profileId: `previewUser${index + 1}`,
+        nickname: review.nickname,
+        avatarSeed: null,
+      },
+      title: review.title,
+      year: review.year,
+      cover: '',
+      rating: review.rating,
+      createdAt: now - index * 5_400_000 - 1_800_000,
+    }),
+  );
+  const updates = [...tracking, ...followReviews].sort(
+    (a, b) => b.createdAt - a.createdAt,
+  );
 
   return {
     items: [
@@ -57,23 +87,9 @@ export function getMessagePreviewPage(): UserMessagePage {
         content: '这是开发环境的消息面板预览公告，不会写入真实消息状态。',
         createdAt: now,
       },
-      {
-        id: 'follow-review:preview',
-        type: 'follow-review',
-        author: {
-          profileId: 'previewUser1',
-          nickname: '光影旅人',
-          avatarSeed: null,
-        },
-        title: '漫长的季节',
-        year: '2023',
-        cover: '',
-        rating: 9,
-        createdAt: now,
-      },
-      ...tracking,
+      ...updates,
     ],
-    total: tracking.length + 2,
+    total: updates.length + 1,
     nextCursor: null,
   };
 }
@@ -101,5 +117,5 @@ export function getMessagePreviewToast(mode: MessagePreviewMode): string {
   if (mode === 'announcement') return '有一条新公告';
   if (mode === 'tracking') return '《测试剧集：最新一集》已更新至第 3 集';
   if (mode === 'follow-review') return '关注的人发布了新评价';
-  return '9 条新消息';
+  return `${getMessagePreviewPage().total} 条新消息`;
 }

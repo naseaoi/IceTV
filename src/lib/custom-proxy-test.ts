@@ -21,7 +21,7 @@ export function normalizeCustomProxyUrl(value: string): string {
 }
 
 export function getCustomProxyRequiredMessage(label: string): string {
-  return `请填写${label}地址`;
+  return `请填写${/^[a-z]/i.test(label) ? ' ' : ''}${label}地址`;
 }
 
 export function getCustomProxyError(

@@ -17,6 +17,7 @@ import ProfileAvatar from '@/components/ProfileAvatar';
 import Select from '@/components/Select';
 import { useNicknameAvailability } from '@/hooks/useNicknameAvailability';
 import { getMyProfile, updateProfile } from '@/lib/profile.client';
+import { showToast } from '@/lib/toast';
 import type { LibraryVisibility } from '@/lib/types';
 import {
   createAvatarSeed,
@@ -130,6 +131,7 @@ export function ProfileForm({
           : {}),
       });
       await refreshSession();
+      showToast('个人资料已保存', 'success');
       onSaved?.();
     } catch (error) {
       setError((error as Error).message);

@@ -23,6 +23,7 @@ const messagePage: UserMessagePage = {
       source: 'source',
       videoId: 'video',
       title: '测试剧集',
+      year: '2024',
       sourceName: '测试源站',
       cover: '/cover.webp',
       fromEpisodes: 1,
@@ -67,6 +68,7 @@ describe('MessagePanel', () => {
       screen.getByRole('heading', { name: '追更更新' }),
     ).toBeInTheDocument();
     expect(screen.getByText('测试公告内容')).toBeInTheDocument();
+    expect(screen.queryByText('站点公告')).not.toBeInTheDocument();
     expect(screen.getByText('已从 1 集更新至 2 集')).toBeInTheDocument();
 
     const readButtons = screen.getAllByRole('button', { name: '标记为已读' });
@@ -85,6 +87,21 @@ describe('MessagePanel', () => {
     fireEvent.click(screen.getByText('已从 1 集更新至 2 集'));
     fireEvent.click(screen.getByLabelText('测试剧集'));
 
+    expect(props.onRead).not.toHaveBeenCalled();
+  });
+
+  it('追更消息的去观看入口跳转播放页并关闭面板', () => {
+    const props = renderPanel();
+
+    const link = screen.getByRole('link', { name: '去观看《测试剧集》' });
+    expect(link).toHaveAttribute(
+      'href',
+      `/play?${new URLSearchParams({ source: 'source', id: 'video', title: '测试剧集', year: '2024' })}`,
+    );
+    link.addEventListener('click', (event) => event.preventDefault());
+    fireEvent.click(link);
+
+    expect(props.onClose).toHaveBeenCalledTimes(1);
     expect(props.onRead).not.toHaveBeenCalled();
   });
 

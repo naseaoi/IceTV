@@ -4,6 +4,7 @@ import { useCallback, useState } from 'react';
 
 import { useLoadingState } from '@/features/admin/hooks/useLoadingState';
 import { useAlertModal } from '@/hooks/useAlertModal';
+import { showToast } from '@/lib/toast';
 
 type SourceProxyMode = 'server' | 'browser' | 'auto';
 
@@ -122,12 +123,7 @@ export function useSourceBatchOperation({
         onConfirm: async () => {
           try {
             await withLoading(loadingKey, () => callSourceApi(body));
-            showAlert({
-              type: 'success',
-              title: `${actionName}成功`,
-              message: successMessage,
-              timer: 2000,
-            });
+            showToast(successMessage, 'success');
             onClearSelection();
           } catch (err) {
             showAlert({

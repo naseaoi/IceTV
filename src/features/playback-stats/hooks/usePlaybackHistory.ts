@@ -21,6 +21,7 @@ import {
   withReturnTo,
 } from '@/lib/navigation-return';
 import { savePlayIntent } from '@/lib/play-intent';
+import { showToast } from '@/lib/toast';
 import type { PlaybackSession } from '@/lib/types';
 import { canUseNetworkPrefetch, warmupForPlayback } from '@/lib/video-prefetch';
 
@@ -221,6 +222,17 @@ export function usePlaybackHistory() {
     });
     if (removed.size > 0) {
       setItems((prev) => prev.filter((item) => !removed.has(item.id)));
+    }
+    const failed = results.filter(
+      (result) => result.status === 'rejected',
+    ).length;
+    if (failed > 0) {
+      showToast(
+        removed.size > 0
+          ? `已删除 ${removed.size} 条，${failed} 条删除失败，请重试`
+          : '删除失败，请重试',
+        'error',
+      );
     }
     return removed.size;
   }, []);

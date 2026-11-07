@@ -8,8 +8,14 @@ import {
 
 import { UserGroupTable } from '@/features/admin/components/tabs/user-config/UserGroupTable';
 import UserConfigTab from '@/features/admin/components/tabs/UserConfigTab';
+import { showToast } from '@/lib/toast';
 
 const mockBatchPost = jest.fn();
+jest.mock('@/lib/toast', () => ({
+  showToast: jest.fn(),
+  dismissToast: jest.fn(),
+}));
+
 jest.mock('@/features/admin/lib/api', () => ({
   adminPost: (...args: unknown[]) => mockBatchPost(...args),
   adminGet: jest.fn(),
@@ -191,6 +197,7 @@ describe('UserConfigTab sensitive actions', () => {
         undefined,
         true,
       );
+      expect(showToast).toHaveBeenCalledWith('开放注册设置已更新', 'success');
     });
   });
 });

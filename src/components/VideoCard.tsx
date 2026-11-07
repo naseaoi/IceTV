@@ -56,6 +56,7 @@ import {
 } from '@/lib/navigation-return';
 import { savePlayIntent } from '@/lib/play-intent';
 import { hasPlayRecordUpdate } from '@/lib/play-records';
+import { showToast } from '@/lib/toast';
 import { parseStorageKey } from '@/lib/utils';
 import {
   canUseHoverPrefetch,
@@ -239,7 +240,7 @@ const VideoCard = forwardRef<VideoCardHandle, VideoCardProps>(
         await deleteFavorite(existing.source, existing.id);
         setWorkFavoriteKey(null);
         setSearchFavorited(false);
-        return;
+        return false;
       }
       const key = await saveFavorite(aggregateLead.source, aggregateLead.id, {
         title: actualTitle,
@@ -251,6 +252,7 @@ const VideoCard = forwardRef<VideoCardHandle, VideoCardProps>(
       });
       setWorkFavoriteKey(key);
       setSearchFavorited(true);
+      return true;
     }, [
       aggregateLead,
       workFavoriteKey,
@@ -276,12 +278,13 @@ const VideoCard = forwardRef<VideoCardHandle, VideoCardProps>(
     }, [ensureFavoritesLoaded, favoriteStorageKey, from, getFavoriteStatus]);
 
     const handleToggleFavorite = useCallback(
-      async (e: React.MouseEvent) => {
+      async (e: React.MouseEvent, onSuccess?: (favorited: boolean) => void) => {
         e.preventDefault();
         e.stopPropagation();
         if (aggregateLead) {
           try {
-            await toggleWorkFavorite();
+            const nextFavorited = await toggleWorkFavorite();
+            if (nextFavorited !== undefined) onSuccess?.(nextFavorited);
           } catch {
             throw new Error('切换收藏状态失败');
           }
@@ -310,6 +313,7 @@ const VideoCard = forwardRef<VideoCardHandle, VideoCardProps>(
                 confirmText: '取消收藏',
                 onConfirm: async () => {
                   await deleteFavorite(actualSource, actualId);
+                  onSuccess?.(false);
                 },
               });
               return;
@@ -332,6 +336,7 @@ const VideoCard = forwardRef<VideoCardHandle, VideoCardProps>(
               setSearchFavorited(true);
             }
           }
+          onSuccess?.(!currentFavorited);
         } catch {
           throw new Error('切换收藏状态失败');
         }
@@ -638,6 +643,10 @@ const VideoCard = forwardRef<VideoCardHandle, VideoCardProps>(
       );
       setVisibleTrackingEnabled(record.tracking_enabled !== false);
       setVisibleHasUpdate(hasPlayRecordUpdate(record));
+      showToast(
+        record.tracking_enabled !== false ? '已开启追更' : '已取消追更',
+        'success',
+      );
     }, [actualId, actualSource, from, visibleTrackingEnabled]);
 
     // 检查搜索结果的收藏状态
@@ -793,7 +802,13 @@ const VideoCard = forwardRef<VideoCardHandle, VideoCardProps>(
             ? {
                 favorited:
                   from === 'search' ? searchFavorited : visibleFavorited,
-                onToggle: () => handleToggleFavorite(noopEvent),
+                onToggle: () =>
+                  handleToggleFavorite(noopEvent, (nextFavorited) => {
+                    showToast(
+                      nextFavorited ? '已加入收藏' : '已取消收藏',
+                      'success',
+                    );
+                  }),
               }
             : undefined,
         watchRecord:

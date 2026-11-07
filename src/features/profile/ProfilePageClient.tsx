@@ -1,6 +1,6 @@
 'use client';
 
-import { UserCheck, UserPlus } from 'lucide-react';
+import { Link2, UserCheck, UserPlus } from 'lucide-react';
 import Link from 'next/link';
 import { useCallback, useEffect, useRef, useState } from 'react';
 
@@ -27,12 +27,14 @@ import {
   profileButtonClass as buttonClass,
 } from '@/features/profile/FollowList';
 import { useProfilePage } from '@/features/profile/hooks/useProfilePage';
+import { copyTextToClipboard } from '@/lib/clipboard';
 import {
   getUserFavorites,
   getUserProfile,
   getUserReviews,
   setFollowing,
 } from '@/lib/profile.client';
+import { showToast } from '@/lib/toast';
 import type {
   FavoriteWatchStatus,
   LibraryVisibility,
@@ -279,7 +281,10 @@ function ProfileHeaderSkeleton({ reviewCount }: { reviewCount: number }) {
             ))}
           </div>
         </div>
-        <div className='skeleton h-9 w-[88px] rounded-xl' />
+        <div className='flex items-center gap-2'>
+          <div className='skeleton h-9 w-9 rounded-xl' />
+          <div className='skeleton h-9 w-[88px] rounded-xl' />
+        </div>
       </div>
       <div className='mb-6 flex gap-2 border-b border-gray-200 dark:border-white/10'>
         {['评价', '收藏'].map((label) => (
@@ -293,6 +298,28 @@ function ProfileHeaderSkeleton({ reviewCount }: { reviewCount: number }) {
       </div>
       <ProfileReviewsSkeleton count={skeletonCount(reviewCount)} />
     </div>
+  );
+}
+
+function CopyProfileLinkButton({ profileId }: { profileId: string }) {
+  async function copy() {
+    const ok = await copyTextToClipboard(
+      `${window.location.origin}/u/${profileId}`,
+    );
+    if (ok) showToast('已复制主页链接', 'success');
+    else showToast('复制失败，请手动复制地址栏中的链接', 'error');
+  }
+
+  return (
+    <button
+      type='button'
+      onClick={() => void copy()}
+      aria-label='复制主页链接'
+      title='复制主页链接'
+      className='flex h-9 w-9 items-center justify-center rounded-xl bg-gray-100 text-gray-600 hover:bg-gray-200 dark:bg-white/10 dark:text-gray-300 dark:hover:bg-white/15'
+    >
+      <Link2 className='h-4 w-4' />
+    </button>
   );
 }
 
@@ -429,34 +456,37 @@ export default function ProfilePageClient({
                       ))}
                     </div>
                   </div>
-                  {profile.isSelf ? (
-                    <button
-                      type='button'
-                      onClick={() => setEditing(true)}
-                      className={buttonClass}
-                    >
-                      编辑资料
-                    </button>
-                  ) : (
-                    <button
-                      type='button'
-                      disabled={busy}
-                      aria-pressed={profile.isFollowing}
-                      onClick={() => void follow()}
-                      className={
-                        profile.isFollowing
-                          ? `inline-flex items-center gap-2 ${buttonClass}`
-                          : 'inline-flex items-center gap-2 rounded-xl bg-brand-600 px-4 py-2 text-sm text-white hover:bg-brand-700 disabled:opacity-50'
-                      }
-                    >
-                      {profile.isFollowing ? (
-                        <UserCheck className='h-4 w-4' />
-                      ) : (
-                        <UserPlus className='h-4 w-4' />
-                      )}
-                      {profile.isFollowing ? '已关注' : '关注'}
-                    </button>
-                  )}
+                  <div className='flex items-center gap-2'>
+                    <CopyProfileLinkButton profileId={profileId} />
+                    {profile.isSelf ? (
+                      <button
+                        type='button'
+                        onClick={() => setEditing(true)}
+                        className={buttonClass}
+                      >
+                        编辑资料
+                      </button>
+                    ) : (
+                      <button
+                        type='button'
+                        disabled={busy}
+                        aria-pressed={profile.isFollowing}
+                        onClick={() => void follow()}
+                        className={
+                          profile.isFollowing
+                            ? `inline-flex items-center gap-2 ${buttonClass}`
+                            : 'inline-flex items-center gap-2 rounded-xl bg-brand-600 px-4 py-2 text-sm text-white hover:bg-brand-700 disabled:opacity-50'
+                        }
+                      >
+                        {profile.isFollowing ? (
+                          <UserCheck className='h-4 w-4' />
+                        ) : (
+                          <UserPlus className='h-4 w-4' />
+                        )}
+                        {profile.isFollowing ? '已关注' : '关注'}
+                      </button>
+                    )}
+                  </div>
                 </div>
               </header>
               <div

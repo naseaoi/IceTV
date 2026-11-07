@@ -268,15 +268,20 @@ export const UserMenu: React.FC = () => {
           <button
             type='button'
             onClick={handleVersionPanel}
+            title={hasUpdate ? '有新版本' : undefined}
             className='flex min-w-0 items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-[11px] text-gray-400 transition-colors hover:text-gray-700 dark:text-gray-500 dark:hover:text-gray-300'
           >
-            <span className='truncate font-mono'>v{CURRENT_VERSION}</span>
-            {hasUpdate && (
-              <span className='inline-flex shrink-0 items-center gap-1 text-brand-600 dark:text-brand-300'>
-                <span className='h-1.5 w-1.5 rounded-full bg-brand-500' />
-                有新版本
+            <span className={`relative min-w-0 ${hasUpdate ? 'pr-2' : ''}`}>
+              <span className='block truncate font-mono'>
+                v{CURRENT_VERSION}
               </span>
-            )}
+              {hasUpdate && (
+                <>
+                  <span className='absolute right-0 top-0 h-1.5 w-1.5 rounded-full bg-brand-500' />
+                  <span className='sr-only'>，有新版本</span>
+                </>
+              )}
+            </span>
             <span aria-hidden='true'>·</span>
             <span className='shrink-0'>{storageType}</span>
           </button>

@@ -33,6 +33,7 @@ import { buttonStyles } from '@/features/admin/lib/buttonStyles';
 import { showError } from '@/features/admin/lib/notifications';
 import { LiveDataSource } from '@/features/admin/types/internal';
 import { useAlertModal } from '@/hooks/useAlertModal';
+import { showToast } from '@/lib/toast';
 import { AdminConfig } from '@/types/admin';
 
 const LiveSourceConfig = ({
@@ -140,12 +141,7 @@ const LiveSourceConfig = ({
       try {
         await adminPost('/api/admin/live/refresh', {}, '刷新失败');
         await refreshConfig();
-        showAlert({
-          type: 'success',
-          title: '刷新成功',
-          message: '直播源已刷新',
-          timer: 2000,
-        });
+        showToast('直播源已刷新', 'success');
       } catch (err) {
         showError(err instanceof Error ? err.message : '刷新失败', showAlert);
         throw err;

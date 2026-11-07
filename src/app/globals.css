@@ -338,6 +338,427 @@ div[data-media-provider] video {
 }
 
 /* ==========================================================================
+   轻提示：圆点弹出 → 舒展成胶囊 → 收回圆点飘散；离场总时长与 ToastViewport 的 TOAST_LEAVE_MS 对应
+   ========================================================================== */
+
+:root {
+  --toast-head: 40px;
+  --toast-radius: 1.375rem;
+  --toast-spring: cubic-bezier(0.34, 1.56, 0.64, 1);
+  --toast-spring-soft: cubic-bezier(0.22, 1.2, 0.36, 1);
+  --toast-ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+@supports (transition-timing-function: linear(0, 1)) {
+  :root {
+    --toast-spring: linear(
+      0,
+      0.0381,
+      0.1352,
+      0.2681,
+      0.4175,
+      0.5679,
+      0.7083,
+      0.8313,
+      0.9326,
+      1.0111,
+      1.0672,
+      1.103,
+      1.1216,
+      1.1263,
+      1.1205,
+      1.1077,
+      1.0906,
+      1.0716,
+      1.0527,
+      1.0351,
+      1.0199,
+      1.0074,
+      0.9977,
+      0.9909,
+      0.9867,
+      0.9845,
+      0.9841,
+      0.9849,
+      0.9866,
+      0.9888,
+      0.9912,
+      0.9936,
+      0.9958,
+      0.9977,
+      0.9992,
+      1.0004,
+      1
+    );
+    --toast-spring-soft: linear(
+      0,
+      0.0209,
+      0.0744,
+      0.1487,
+      0.235,
+      0.3262,
+      0.4173,
+      0.5047,
+      0.5861,
+      0.66,
+      0.7257,
+      0.783,
+      0.8321,
+      0.8734,
+      0.9076,
+      0.9355,
+      0.9577,
+      0.9751,
+      0.9884,
+      0.9983,
+      1.0053,
+      1.0101,
+      1.013,
+      1.0146,
+      1.0152,
+      1.0149,
+      1.0142,
+      1.0131,
+      1.0118,
+      1.0104,
+      1.0091,
+      1.0077,
+      1.0065,
+      1.0053,
+      1.0043,
+      1.0034,
+      1
+    );
+  }
+}
+
+.toast-slot {
+  position: absolute;
+  top: 0;
+  left: 50%;
+  width: max-content;
+  max-width: calc(100vw - 2rem);
+  transform: translate3d(-50%, var(--toast-y, 0px), 0);
+  transition: transform 640ms var(--toast-spring-soft);
+  pointer-events: auto;
+  touch-action: none;
+  user-select: none;
+}
+
+.toast-shadow {
+  filter: drop-shadow(0 10px 22px rgba(15, 23, 42, 0.13))
+    drop-shadow(0 2px 5px rgba(15, 23, 42, 0.07));
+  transform: translate3d(0, var(--toast-drag, 0px), 0);
+}
+
+.dark .toast-shadow {
+  filter: drop-shadow(0 12px 26px rgba(0, 0, 0, 0.5))
+    drop-shadow(0 2px 6px rgba(0, 0, 0, 0.3));
+}
+
+.toast-shadow[data-dragging='false'] {
+  transition: transform 520ms var(--toast-spring);
+}
+
+.toast-motion {
+  animation: toast-pop 600ms var(--toast-spring) both;
+}
+
+.toast-motion[data-bump='a'] {
+  animation: toast-jelly-a 560ms ease-out both;
+}
+
+.toast-motion[data-bump='b'] {
+  animation: toast-jelly-b 560ms ease-out both;
+}
+
+.toast-motion[data-phase='leave'] {
+  animation: toast-vanish 240ms cubic-bezier(0.4, 0, 1, 1) 180ms both;
+}
+
+.toast-surface {
+  clip-path: inset(0 round var(--toast-radius));
+  animation: toast-morph 760ms var(--toast-ease-out) 120ms both;
+}
+
+.toast-surface[data-tone='error'] {
+  animation:
+    toast-morph 760ms var(--toast-ease-out) 120ms both,
+    toast-shake 480ms ease-in-out 760ms;
+}
+
+.toast-surface[data-phase='leave'] {
+  animation: toast-unmorph 300ms cubic-bezier(0.55, 0, 0.25, 1) both;
+}
+
+.toast-content {
+  animation: toast-content-in 460ms var(--toast-ease-out)
+    var(--toast-content-delay, 300ms) both;
+}
+
+.toast-content[data-phase='leave'] {
+  animation: toast-content-out 150ms ease-in both;
+}
+
+.toast-head {
+  position: relative;
+  animation: toast-head-in 560ms var(--toast-spring) 60ms both;
+}
+
+.toast-head[data-tone='success']::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  border: 2px solid currentColor;
+  opacity: 0;
+  animation: toast-ripple 720ms var(--toast-ease-out) 620ms;
+}
+
+.toast-draw {
+  stroke-dasharray: 1;
+  stroke-dashoffset: 1;
+  animation: toast-draw var(--toast-draw-duration, 380ms)
+    cubic-bezier(0.65, 0, 0.35, 1) var(--toast-draw-delay, 0ms) forwards;
+}
+
+.toast-dot {
+  transform-box: fill-box;
+  transform-origin: center;
+  animation: toast-head-in 420ms var(--toast-spring)
+    var(--toast-draw-delay, 0ms) both;
+}
+
+.toast-bell {
+  transform-origin: 50% 8%;
+  animation: toast-swing 1000ms ease-in-out 260ms;
+}
+
+@keyframes toast-pop {
+  from {
+    opacity: 0;
+    transform: translateY(-14px) scale(0.3);
+    filter: blur(8px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+    filter: blur(0);
+  }
+}
+
+@keyframes toast-vanish {
+  to {
+    opacity: 0;
+    transform: translateY(-10px) scale(0.45);
+    filter: blur(6px);
+  }
+}
+
+@keyframes toast-jelly-a {
+  0%,
+  100% {
+    transform: none;
+  }
+  22% {
+    transform: scale(1.08, 0.92);
+  }
+  45% {
+    transform: scale(0.96, 1.04);
+  }
+  68% {
+    transform: scale(1.02, 0.98);
+  }
+  84% {
+    transform: scale(0.995, 1.005);
+  }
+}
+
+@keyframes toast-jelly-b {
+  0%,
+  100% {
+    transform: none;
+  }
+  22% {
+    transform: scale(1.08, 0.92);
+  }
+  45% {
+    transform: scale(0.96, 1.04);
+  }
+  68% {
+    transform: scale(1.02, 0.98);
+  }
+  84% {
+    transform: scale(0.995, 1.005);
+  }
+}
+
+@keyframes toast-morph {
+  from {
+    clip-path: inset(
+      calc(50% - var(--toast-head) / 2) calc(100% - var(--toast-head))
+        calc(50% - var(--toast-head) / 2) 0 round calc(var(--toast-head) / 2)
+    );
+    transform: translateX(
+      calc(var(--toast-w, 0px) / 2 - var(--toast-head) / 2)
+    );
+  }
+  to {
+    clip-path: inset(0 0 0 0 round var(--toast-radius));
+    transform: none;
+  }
+}
+
+@keyframes toast-unmorph {
+  from {
+    clip-path: inset(0 0 0 0 round var(--toast-radius));
+    transform: none;
+  }
+  to {
+    clip-path: inset(
+      calc(50% - var(--toast-head) / 2) calc(100% - var(--toast-head))
+        calc(50% - var(--toast-head) / 2) 0 round calc(var(--toast-head) / 2)
+    );
+    transform: translateX(
+      calc(var(--toast-w, 0px) / 2 - var(--toast-head) / 2)
+    );
+  }
+}
+
+@keyframes toast-shake {
+  0%,
+  100% {
+    transform: none;
+  }
+  15% {
+    transform: translateX(-6px);
+  }
+  32% {
+    transform: translateX(5px);
+  }
+  50% {
+    transform: translateX(-3px);
+  }
+  68% {
+    transform: translateX(2px);
+  }
+  84% {
+    transform: translateX(-1px);
+  }
+}
+
+@keyframes toast-content-in {
+  from {
+    opacity: 0;
+    transform: translateX(-8px);
+    filter: blur(6px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+    filter: blur(0);
+  }
+}
+
+@keyframes toast-content-out {
+  to {
+    opacity: 0;
+    filter: blur(4px);
+  }
+}
+
+@keyframes toast-head-in {
+  from {
+    transform: scale(0.4);
+  }
+  to {
+    transform: none;
+  }
+}
+
+@keyframes toast-ripple {
+  from {
+    opacity: 0.5;
+    transform: scale(1);
+  }
+  to {
+    opacity: 0;
+    transform: scale(1.42);
+  }
+}
+
+@keyframes toast-draw {
+  to {
+    stroke-dashoffset: 0;
+  }
+}
+
+@keyframes toast-swing {
+  0%,
+  100% {
+    transform: none;
+  }
+  15% {
+    transform: rotate(18deg);
+  }
+  32% {
+    transform: rotate(-14deg);
+  }
+  50% {
+    transform: rotate(9deg);
+  }
+  68% {
+    transform: rotate(-5deg);
+  }
+  84% {
+    transform: rotate(2deg);
+  }
+}
+
+@keyframes toast-fade {
+  from {
+    opacity: 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .toast-slot,
+  .toast-shadow[data-dragging='false'] {
+    transition: opacity 200ms ease;
+  }
+
+  .toast-motion,
+  .toast-motion[data-bump],
+  .toast-surface,
+  .toast-surface[data-tone='error'],
+  .toast-content,
+  .toast-head,
+  .toast-dot,
+  .toast-bell {
+    animation: none;
+  }
+
+  .toast-motion:not([data-phase='leave']) {
+    animation: toast-fade 200ms ease both;
+  }
+
+  .toast-motion[data-phase='leave'],
+  .toast-surface[data-phase='leave'],
+  .toast-content[data-phase='leave'] {
+    animation: toast-content-out 200ms ease both;
+  }
+
+  .toast-head[data-tone='success']::after {
+    display: none;
+  }
+
+  .toast-draw {
+    animation: none;
+    stroke-dashoffset: 0;
+  }
+}
+
+/* ==========================================================================
    ArtPlayer 现代化玻璃拟态风格 — 与项目 ModalShell 风格统一
    ========================================================================== */
 

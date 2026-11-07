@@ -42,6 +42,7 @@ import {
 import { savePlayIntent } from '@/lib/play-intent';
 import { hasPlayRecordUpdate } from '@/lib/play-records';
 import { formatTime } from '@/lib/player-utils';
+import { showToast } from '@/lib/toast';
 import { canUseNetworkPrefetch, warmupForPlayback } from '@/lib/video-prefetch';
 
 interface ContinueCardProps {
@@ -170,6 +171,10 @@ export default function ContinueCard({
     );
     setVisibleTrackingEnabled(record.tracking_enabled !== false);
     setVisibleHasUpdate(hasPlayRecordUpdate(record));
+    showToast(
+      record.tracking_enabled !== false ? '已开启追更' : '已取消追更',
+      'success',
+    );
   }, [id, source, visibleTrackingEnabled]);
 
   const openActions = useCallback(
@@ -191,6 +196,7 @@ export default function ContinueCard({
             onToggle: async () => {
               if (favorited) {
                 await deleteFavorite(source, id);
+                showToast('已取消收藏', 'success');
                 return;
               }
               await saveFavorite(source, id, {
@@ -202,6 +208,7 @@ export default function ContinueCard({
                 save_time: Date.now(),
                 search_title: query || '',
               });
+              showToast('已加入收藏', 'success');
             },
           },
           watchRecord: openWatchRecord
