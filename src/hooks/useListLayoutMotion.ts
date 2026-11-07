@@ -105,9 +105,12 @@ function playExit(container: HTMLElement, { element, offset }: ItemSnapshot) {
     zIndex: '0',
   });
   container.appendChild(ghost);
-  // 节点重新插入会重播其内部的入场动画，直接跳到终态
+  // 节点重新插入会重播其内部的入场动画，直接跳到终态；无限循环动画（骨架扫光、加载圈）调用 finish 会抛 InvalidStateError
   ghost.getAnimations({ subtree: true }).forEach((animation) => {
-    animation.finish();
+    const endTime = animation.effect?.getComputedTiming().endTime;
+    if (typeof endTime === 'number' && Number.isFinite(endTime)) {
+      animation.finish();
+    }
   });
   const animation = ghost.animate(
     [

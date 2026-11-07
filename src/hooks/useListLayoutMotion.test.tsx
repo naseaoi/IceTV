@@ -74,6 +74,29 @@ describe('useListLayoutMotion', () => {
     expect(list).toHaveTextContent('ac');
   });
 
+  it('finishes replayed finite animations and leaves infinite ones running', () => {
+    const replayed = (endTime: number) => ({
+      effect: { getComputedTiming: () => ({ endTime }) },
+      finish: jest.fn(),
+    });
+    const finite = replayed(320);
+    const infinite = replayed(Infinity);
+    Element.prototype.getAnimations = jest.fn(
+      () => [finite, infinite] as unknown as Animation[],
+    );
+
+    const { getByTestId, rerender } = render(
+      <KeyedList items={['a', 'b', 'c']} />,
+    );
+    expect(() => rerender(<KeyedList items={['a', 'c']} />)).not.toThrow();
+
+    expect(finite.finish).toHaveBeenCalledTimes(1);
+    expect(infinite.finish).not.toHaveBeenCalled();
+    expect(
+      getByTestId('list').querySelector('[data-list-motion-ghost]'),
+    ).toHaveTextContent('b');
+  });
+
   it('skips append-only growth and large replacements', () => {
     const { getByTestId, rerender } = render(<KeyedList items={['a', 'b']} />);
     rerender(<KeyedList items={['a', 'b', 'c', 'd']} />);
