@@ -1,3 +1,4 @@
+import { resolveDanmakuTop } from '@/features/play/lib/danmaku/lane';
 import type { DanmakuItem } from '@/features/play/lib/danmaku/types';
 import { USER_DANMAKU_MAX_LENGTH } from '@/lib/user-danmaku';
 
@@ -74,6 +75,7 @@ export async function createDanmakuPlugin({
     mode: 0,
     modes: [0, 1, 2],
     antiOverlap: true,
+    getDanmuTop: resolveDanmakuTop,
     synchronousPlayback: true,
     visible,
     emitter: Boolean(beforeEmit),
