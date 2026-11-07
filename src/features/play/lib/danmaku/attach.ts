@@ -324,8 +324,10 @@ function resetDanmakuQueue(
   player: PlayerWithPlugins,
   api: DanmakuPluginApi,
 ): void {
+  // 不能用 display: none：重载期间插件仍在投放弹幕，隐藏层里量出的宽高为 0、过渡不执行，
+  // 恢复显示后弹幕会静止堆在左上角。样式见 globals.css。
   const container = player.template?.$danmuku;
-  if (container) container.style.display = 'none';
+  if (container) container.dataset.reloading = 'true';
   try {
     api.reset();
   } catch (error) {
@@ -486,7 +488,7 @@ export async function reloadDanmaku(
         nextContext.status =
           loadEnabled && !nextContext.failed ? 'loaded' : 'unloaded';
         const container = player.template?.$danmuku;
-        if (container) container.style.display = '';
+        if (container) delete container.dataset.reloading;
       }
     } catch (error) {
       nextContext.failed = true;

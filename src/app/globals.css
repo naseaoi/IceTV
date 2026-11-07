@@ -855,6 +855,11 @@ div:has(> [data-player-overlay]) .art-loading {
   transition: height 0.15s ease !important;
 }
 
+/* 重载弹幕时隐藏旧弹幕，保留布局让插件能正确测量和定位；!important 压过插件逐条写入的内联 visible */
+.art-danmuku[data-reloading] > * {
+  visibility: hidden !important;
+}
+
 /* --- 弹幕发送框 --- */
 
 /* 插件输入框没有 type，会被 @tailwindcss/forms 加上 1rem 字号、内边距和聚焦光圈 */

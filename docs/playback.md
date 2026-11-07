@@ -52,6 +52,7 @@
 - 模式值两边不同：dandanplay `1/2/3` 滚动、`5` 顶部、`4` 底部；artplayer 插件 `0` 滚动、`1` 顶部、`2` 底部。颜色上游是十进制整数，插件要 CSS 字符串。**直接透传会让顶部 / 底部弹幕静默错位**，一律走 `normalize.ts`。
 - `p` 字段 4 段时颜色在第 3 位，8/9 段时在第 4 位，取错只是颜色不对不会报错。
 - 换集时播放器可能**复用实例**（非 webkit + 前后都是 hls），此时插件不会自行重新调用加载器，必须显式 `reloadDanmaku()`。去广告开关会 `destroy()` 重建，走的是另一条路。
+- 重载期间插件的渲染循环不停，仍会往弹幕层投放弹幕，并按当时量到的宽高定位。隐藏旧弹幕用 `data-reloading` 属性配合 `globals.css` 的 `visibility: hidden !important`；**不能对弹幕层用 `display: none`**（量到的宽高为 0、过渡不执行，恢复后弹幕静止堆在左上角），也不能用 `opacity`（插件的显示 / 隐藏开关占用它）。
 - 加载器在本地开关关闭时返回空数组以免白跑请求，所以**开关打开时必须触发一次 `reloadDanmaku()`**，只调 `api.show()` 显示的是空数据。
 - 弹幕剧集映射按 `源:ID:集` 隔离。换源提交时经 `carryOverDanmakuEpisodeMapping()` 把同一集已匹配的映射带到新源，否则新源按自己的标题重搜，标题格式不同就静默落空。
 - `provider.server.ts` 的 base URL 只来自环境变量，用户输入只经 `searchParams` 进 query。默认走 URL guard；内网自建服务须显式设置 `DANMAKU_API_ALLOW_PRIVATE=true`，经 `fetchPrivateUpstream()` 回源，仍受共享资源额度保护。
