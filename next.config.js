@@ -19,6 +19,11 @@ const nextConfig = {
         : false,
   },
   serverExternalPackages: ['better-sqlite3', 'mysql2'],
+  experimental: {
+    // 持久化缓存在机械盘上会持续写入与合并、越积越大，拖慢热更新；关闭后热更新只走内存
+    turbopackFileSystemCacheForDev:
+      process.env.NEXT_TURBOPACK_DEV_CACHE === '1',
+  },
   env: {
     NEXT_PUBLIC_APP_VERSION: appVersion,
   },

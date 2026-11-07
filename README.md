@@ -154,7 +154,7 @@ cp .env.example .env
 pnpm dev
 ```
 
-本地默认使用 Turbopack，遇到兼容问题改用 `pnpm dev:webpack`。改代码前先读 [AGENTS.md](AGENTS.md)，其余工程文档见 [docs/](docs/README.md)。
+本地默认使用 Turbopack，遇到兼容问题改用 `pnpm dev:webpack`。开发模式默认关闭 Turbopack 磁盘缓存，热更新只走内存，避免缓存在机械盘上越积越大；项目在固态盘上时可设 `NEXT_TURBOPACK_DEV_CACHE=1` 开启，换取更快的重启。改代码前先读 [AGENTS.md](AGENTS.md)，其余工程文档见 [docs/](docs/README.md)。
 
 ## 客户端
 

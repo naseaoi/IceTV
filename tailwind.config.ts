@@ -33,11 +33,12 @@ const gray = {
 
 const config: Config = {
   darkMode: 'class',
+  // 开发时改动扫描范围内的任何文件都会重跑一次样式构建，测试与接口路由不含样式类名
   content: [
-    './src/pages/**/*.{js,ts,jsx,tsx,mdx}',
-    './src/components/**/*.{js,ts,jsx,tsx,mdx}',
-    './src/app/**/*.{js,ts,jsx,tsx,mdx}',
-    './src/features/**/*.{js,ts,jsx,tsx,mdx}',
+    './src/{components,app,features}/**/*.{ts,tsx}',
+    '!./src/app/api/**',
+    '!./src/**/*.test.{ts,tsx}',
+    '!./src/**/__tests__/**',
   ],
   theme: {
     screens: {
