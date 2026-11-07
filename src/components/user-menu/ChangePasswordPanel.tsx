@@ -11,9 +11,8 @@ import {
   MODAL_SECONDARY_BUTTON_CLASS,
   MODAL_TITLE_CLASS,
 } from '@/components/modals/modal-styles';
+import ModalShell, { useDeferredClose } from '@/components/modals/ModalShell';
 import { PasswordInput } from '@/components/PasswordInput';
-
-import { useBodyScrollLock } from './useBodyScrollLock';
 
 interface ChangePasswordPanelProps {
   onClose: () => void;
@@ -45,6 +44,19 @@ export function ChangePasswordPanel({
   onClose,
   onLogout,
 }: ChangePasswordPanelProps) {
+  const [open, requestClose] = useDeferredClose(onClose);
+  return (
+    <ModalShell
+      isOpen={open}
+      onClose={requestClose}
+      panelClassName='max-w-sm overflow-hidden'
+    >
+      <ChangePasswordForm onClose={requestClose} onLogout={onLogout} />
+    </ModalShell>
+  );
+}
+
+function ChangePasswordForm({ onClose, onLogout }: ChangePasswordPanelProps) {
   const [oldPassword, setOldPassword] = useState('');
   const [newPassword, setNewPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
@@ -61,8 +73,6 @@ export function ChangePasswordPanel({
     new: setNewPassword,
     confirm: setConfirmPassword,
   };
-
-  useBodyScrollLock(true);
 
   const handleSubmit = async () => {
     setPasswordError('');
@@ -115,20 +125,9 @@ export function ChangePasswordPanel({
   return (
     <>
       <div
-        className='fixed inset-0 z-[1000] bg-black/50'
-        onClick={onClose}
-        onTouchMove={(event) => event.preventDefault()}
-        onWheel={(event) => event.preventDefault()}
-        style={{
-          touchAction: 'none',
-        }}
-      />
-
-      <div
         role='dialog'
         aria-modal='true'
         aria-labelledby='change-password-title'
-        className='fixed left-1/2 top-1/2 z-[1001] w-[calc(100%-2rem)] max-w-sm -translate-x-1/2 -translate-y-1/2 overflow-hidden rounded-2xl bg-white shadow-2xl shadow-black/10 ring-1 ring-gray-900/[0.08] dark:bg-gray-900 dark:shadow-black/50 dark:ring-white/[0.08]'
       >
         <form
           className='p-5 sm:p-6'

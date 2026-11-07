@@ -750,34 +750,33 @@ export const SourcesTab: React.FC<SourcesTabProps> = ({
         )}
       </div>
 
-      {showAddSourcesModal && (
-        <AddSourcesModal
-          candidates={searchCandidates}
-          existingKeys={
-            new Set(availableSources.map((s) => `${s.source}-${s.id}`))
+      <AddSourcesModal
+        isOpen={showAddSourcesModal}
+        candidates={searchCandidates}
+        existingKeys={
+          new Set(availableSources.map((s) => `${s.source}-${s.id}`))
+        }
+        currentEpisodeCount={
+          activeDetail
+            ? Math.max(
+                activeDetail.episodes.length,
+                activeDetail.episodes_titles?.length || 0,
+              )
+            : undefined
+        }
+        onConfirm={async (selected) => {
+          setShowAddSourcesModal(false);
+          if (selected.length > 0) {
+            onAddSources?.(selected);
+            await probeSourcesInBatches(selected);
           }
-          currentEpisodeCount={
-            activeDetail
-              ? Math.max(
-                  activeDetail.episodes.length,
-                  activeDetail.episodes_titles?.length || 0,
-                )
-              : undefined
-          }
-          onConfirm={async (selected) => {
-            setShowAddSourcesModal(false);
-            if (selected.length > 0) {
-              onAddSources?.(selected);
-              await probeSourcesInBatches(selected);
-            }
-            setSearchMoreDone(true);
-          }}
-          onCancel={() => {
-            setShowAddSourcesModal(false);
-            setSearchMoreDone(true);
-          }}
-        />
-      )}
+          setSearchMoreDone(true);
+        }}
+        onCancel={() => {
+          setShowAddSourcesModal(false);
+          setSearchMoreDone(true);
+        }}
+      />
     </div>
   );
 };

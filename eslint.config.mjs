@@ -22,25 +22,15 @@ const LOADING_CLASS_RULES = classRule(
 );
 const BACKDROP_BLUR_RULES = classRule(
   '/(^|[^a-z0-9-])backdrop-blur/',
-  '毛玻璃只用于吸顶导航与筛选栏，其他浮层与徽标用实底。',
+  '界面统一用实底，不用毛玻璃。',
 );
 const BASE_SYNTAX_RULES = [
   NATIVE_SELECT_RULE,
   ...MAX_VARIANT_RULES,
   ...LOADING_CLASS_RULES,
+  ...BACKDROP_BLUR_RULES,
 ];
 
-// 吸顶导航与筛选栏
-const BACKDROP_BLUR_ALLOWED_FILES = [
-  'src/components/TopNav.tsx',
-  'src/components/MobileHeader.tsx',
-  'src/components/MobileBottomNav.tsx',
-  'src/components/mobile/MobileChannelHeader.tsx',
-  'src/features/home/components/MeShell.tsx',
-  'src/features/search/lib/search-layout.ts',
-  'src/features/douban/components/DoubanFilterBar.tsx',
-  'src/features/playback-stats/components/PlaybackHistoryLibrary.tsx',
-];
 const TEST_FILES = ['src/**/__tests__/**', 'src/**/*.test.{ts,tsx}'];
 
 export default [
@@ -110,7 +100,6 @@ export default [
       'no-restricted-syntax': [
         'error',
         ...BASE_SYNTAX_RULES,
-        ...BACKDROP_BLUR_RULES,
       ],
       'no-restricted-imports': [
         'error',
@@ -138,12 +127,6 @@ export default [
           message: '经 src/lib/browser-storage.ts 或对应偏好 helper 读写。',
         },
       ],
-    },
-  },
-  {
-    files: BACKDROP_BLUR_ALLOWED_FILES,
-    rules: {
-      'no-restricted-syntax': ['error', ...BASE_SYNTAX_RULES],
     },
   },
   {

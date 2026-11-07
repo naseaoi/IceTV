@@ -1,4 +1,4 @@
-﻿'use client';
+'use client';
 
 import { ExternalLink, RotateCcw, X } from 'lucide-react';
 import { type ReactNode, useEffect, useMemo, useState } from 'react';
@@ -9,11 +9,11 @@ import {
   MODAL_CLOSE_BUTTON_CLASS,
   MODAL_TITLE_CLASS,
 } from '@/components/modals/modal-styles';
+import ModalShell, { useDeferredClose } from '@/components/modals/ModalShell';
 import { CustomProxyActions } from '@/components/proxy/CustomProxyActions';
 import { getAuthInfoFromBrowserCookie } from '@/lib/auth.client';
 import {
   bangumiDataSourceOptions,
-  DEFAULT_BANGUMI_DATA_SOURCE,
   normalizeBangumiDataSource,
   readBangumiDataSource,
   readBangumiProxyUrl,
@@ -68,8 +68,6 @@ import {
 } from '@/lib/local-preference-toggles';
 import { showToast } from '@/lib/toast';
 
-import { useBodyScrollLock } from './useBodyScrollLock';
-
 interface SettingsPanelProps {
   onClose: () => void;
 }
@@ -78,19 +76,84 @@ type CustomProxyField = CustomProxyTestKind;
 
 const SERVER_PROXY_DISABLED_REASON = '登录后可用';
 
+interface InitialSettings {
+  isAuthenticated: boolean;
+  localPreferenceToggles: ReturnType<typeof readLocalPreferenceToggleState>;
+  doubanDataSource: string;
+  doubanProxyUrl: string;
+  bangumiDataSource: string;
+  bangumiProxyUrl: string;
+  doubanImageProxyType: string;
+  doubanImageProxyUrl: string;
+}
+
+// 面板只在用户打开时挂载，首帧直接读本地存储，避免默认值渲染后再替换造成跳动
+function readInitialSettings(): InitialSettings {
+  const isAuthenticated = Boolean(getAuthInfoFromBrowserCookie()?.username);
+  const doubanProxyUrl = readDoubanProxyUrl();
+  const bangumiProxyUrl = readBangumiProxyUrl();
+  const doubanImageProxyUrl = readDoubanImageProxyUrl();
+  return {
+    isAuthenticated,
+    localPreferenceToggles: readLocalPreferenceToggleState(),
+    doubanDataSource: resolveInitialProxySource(
+      readDoubanProxyType(),
+      doubanProxyUrl,
+      isAuthenticated,
+    ),
+    doubanProxyUrl,
+    bangumiDataSource: normalizeBangumiDataSource(
+      resolveInitialProxySource(
+        readBangumiDataSource(),
+        bangumiProxyUrl,
+        isAuthenticated,
+      ),
+    ),
+    bangumiProxyUrl,
+    doubanImageProxyType: resolveInitialProxySource(
+      readDoubanImageProxyType(),
+      doubanImageProxyUrl,
+      isAuthenticated,
+    ),
+    doubanImageProxyUrl,
+  };
+}
+
 export function SettingsPanel({ onClose }: SettingsPanelProps) {
+  const [open, requestClose] = useDeferredClose(onClose);
+  return (
+    <ModalShell
+      isOpen={open}
+      onClose={requestClose}
+      panelClassName='flex max-h-[85vh] max-w-xl flex-col overflow-hidden'
+    >
+      <SettingsPanelContent onClose={requestClose} />
+    </ModalShell>
+  );
+}
+
+function SettingsPanelContent({ onClose }: SettingsPanelProps) {
+  const [initial] = useState(readInitialSettings);
+  const { isAuthenticated } = initial;
   const [localPreferenceToggles, setLocalPreferenceToggles] = useState(
-    readLocalPreferenceToggleDefaultState,
+    initial.localPreferenceToggles,
   );
-  const [doubanProxyUrl, setDoubanProxyUrl] = useState('');
-  const [doubanDataSource, setDoubanDataSource] = useState('direct');
+  const [doubanProxyUrl, setDoubanProxyUrl] = useState(initial.doubanProxyUrl);
+  const [doubanDataSource, setDoubanDataSource] = useState(
+    initial.doubanDataSource,
+  );
   const [bangumiDataSource, setBangumiDataSource] = useState(
-    DEFAULT_BANGUMI_DATA_SOURCE,
+    initial.bangumiDataSource,
   );
-  const [bangumiProxyUrl, setBangumiProxyUrl] = useState('');
-  const [doubanImageProxyType, setDoubanImageProxyType] = useState('direct');
-  const [doubanImageProxyUrl, setDoubanImageProxyUrl] = useState('');
-  const [isAuthenticated, setIsAuthenticated] = useState(false);
+  const [bangumiProxyUrl, setBangumiProxyUrl] = useState(
+    initial.bangumiProxyUrl,
+  );
+  const [doubanImageProxyType, setDoubanImageProxyType] = useState(
+    initial.doubanImageProxyType,
+  );
+  const [doubanImageProxyUrl, setDoubanImageProxyUrl] = useState(
+    initial.doubanImageProxyUrl,
+  );
   const [customProxyErrors, setCustomProxyErrors] = useState<
     Partial<Record<CustomProxyField, string>>
   >({});
@@ -99,46 +162,25 @@ export function SettingsPanel({ onClose }: SettingsPanelProps) {
   );
   const [showResetConfirm, setShowResetConfirm] = useState(false);
 
-  useBodyScrollLock(true);
-
+  // 已选自定义代理但地址失效时，把存储里的来源一并清回默认
   useEffect(() => {
-    const loggedIn = Boolean(getAuthInfoFromBrowserCookie()?.username);
-    const nextDoubanSource = readDoubanProxyType();
-    const nextDoubanProxyUrl = readDoubanProxyUrl();
-    const nextBangumiSource = readBangumiDataSource();
-    const nextBangumiProxyUrl = readBangumiProxyUrl();
-    const nextDoubanImageSource = readDoubanImageProxyType();
-    const nextDoubanImageProxyUrl = readDoubanImageProxyUrl();
-    const resolvedDoubanSource = resolveInitialProxySource(
-      nextDoubanSource,
-      nextDoubanProxyUrl,
-      loggedIn,
-      resetDoubanProxyType,
-    );
-    const resolvedBangumiSource = resolveInitialProxySource(
-      nextBangumiSource,
-      nextBangumiProxyUrl,
-      loggedIn,
-      resetBangumiDataSource,
-    );
-    const resolvedDoubanImageSource = resolveInitialProxySource(
-      nextDoubanImageSource,
-      nextDoubanImageProxyUrl,
-      loggedIn,
-      resetDoubanImageProxyType,
-    );
-
-    setIsAuthenticated(loggedIn);
-    setLocalPreferenceToggles(readLocalPreferenceToggleState());
-
-    setDoubanDataSource(resolvedDoubanSource);
-    setDoubanProxyUrl(nextDoubanProxyUrl);
-    setBangumiDataSource(normalizeBangumiDataSource(resolvedBangumiSource));
-    setBangumiProxyUrl(nextBangumiProxyUrl);
-
-    setDoubanImageProxyType(resolvedDoubanImageSource);
-    setDoubanImageProxyUrl(nextDoubanImageProxyUrl);
-  }, []);
+    if (isInvalidCustomProxy(readDoubanProxyType(), initial.doubanProxyUrl)) {
+      resetDoubanProxyType();
+    }
+    if (
+      isInvalidCustomProxy(readBangumiDataSource(), initial.bangumiProxyUrl)
+    ) {
+      resetBangumiDataSource();
+    }
+    if (
+      isInvalidCustomProxy(
+        readDoubanImageProxyType(),
+        initial.doubanImageProxyUrl,
+      )
+    ) {
+      resetDoubanImageProxyType();
+    }
+  }, [initial]);
 
   const doubanDataOptions = useMemo(
     () => markServerProxyOption(doubanDataSourceOptions, isAuthenticated),
@@ -359,20 +401,10 @@ export function SettingsPanel({ onClose }: SettingsPanelProps) {
   return (
     <>
       <div
-        className='fixed inset-0 z-[1000] bg-black/50'
-        onClick={onClose}
-        onTouchMove={(event) => event.preventDefault()}
-        onWheel={(event) => event.preventDefault()}
-        style={{
-          touchAction: 'none',
-        }}
-      />
-
-      <div
         role='dialog'
         aria-modal='true'
         aria-labelledby='local-settings-title'
-        className='fixed left-1/2 top-1/2 z-[1001] flex max-h-[85vh] w-[calc(100%-2rem)] max-w-xl -translate-x-1/2 -translate-y-1/2 flex-col overflow-hidden rounded-2xl bg-white shadow-2xl shadow-black/10 ring-1 ring-gray-900/[0.08] dark:bg-gray-900 dark:shadow-black/50 dark:ring-white/[0.08]'
+        className='flex min-h-0 flex-1 flex-col'
       >
         <div className='flex items-center justify-between gap-3 border-b border-gray-200/70 py-3 pl-5 pr-3 dark:border-white/[0.06]'>
           <h3 id='local-settings-title' className={MODAL_TITLE_CLASS}>
@@ -559,21 +591,21 @@ function canSelectProxyValue(value: string, isAuthenticated: boolean): boolean {
   return value !== 'server' || isAuthenticated;
 }
 
+function isInvalidCustomProxy(source: string, proxyUrl: string) {
+  return source === 'custom' && !normalizeCustomProxyUrl(proxyUrl);
+}
+
 function resolveInitialProxySource(
   source: string,
   proxyUrl: string,
   isAuthenticated: boolean,
-  resetSource: () => void,
 ): string {
   if (source === 'server' && !isAuthenticated) {
     return 'direct';
   }
-
-  if (source === 'custom' && !normalizeCustomProxyUrl(proxyUrl)) {
-    resetSource();
+  if (isInvalidCustomProxy(source, proxyUrl)) {
     return 'direct';
   }
-
   return source;
 }
 

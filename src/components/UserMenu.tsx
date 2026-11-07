@@ -21,6 +21,7 @@ import {
 } from 'react';
 import { createPortal } from 'react-dom';
 
+import { usePresence } from '@/hooks/usePresence';
 import { getClientAuthRuntimeConfig } from '@/lib/runtime-config';
 import { CURRENT_VERSION } from '@/lib/version';
 
@@ -48,6 +49,8 @@ const MENU_ROW_CLASS =
 
 const MENU_ICON_CLASS = 'h-4 w-4 text-gray-400 dark:text-gray-500';
 
+const MENU_EXIT_MS = 200;
+
 const QUICK_LINKS = [
   { icon: Heart, label: '收藏', href: '/me/favorites' },
   { icon: History, label: '历史', href: '/me/history' },
@@ -61,6 +64,7 @@ export const UserMenu: React.FC = () => {
   const [menuPlacement, setMenuPlacement] = useState<'up' | 'down'>('down');
   const [menuPos, setMenuPos] = useState<CSSProperties>({});
   const [isOpen, setIsOpen] = useState(false);
+  const menuPresence = usePresence(isOpen, MENU_EXIT_MS);
   const [isProfileOpen, setIsProfileOpen] = useState(false);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [isChangePasswordOpen, setIsChangePasswordOpen] = useState(false);
@@ -185,18 +189,26 @@ export const UserMenu: React.FC = () => {
 
   const menuPanel = (
     <>
-      <div
-        className='fixed inset-0 z-[1000] bg-transparent'
-        onClick={handleCloseMenu}
-      />
+      {isOpen && (
+        <div
+          className='fixed inset-0 z-[1000] bg-transparent'
+          onClick={handleCloseMenu}
+        />
+      )}
 
       <div
         role='menu'
         aria-label='账户菜单'
-        className={`fixed z-[1001] w-64 max-w-[calc(100vw-16px)] select-none overflow-hidden rounded-2xl bg-white p-1.5 shadow-2xl shadow-black/10 ring-1 ring-gray-900/[0.08] motion-reduce:animate-none dark:bg-gray-900 dark:shadow-black/50 dark:ring-white/[0.08] ${
-          menuPlacement === 'up' ? 'animate-menu-in-up' : 'animate-menu-in-down'
-        }`}
-        style={menuPos}
+        data-open={menuPresence.visible}
+        className='motion-popover fixed z-[1001] w-64 max-w-[calc(100vw-16px)] select-none overflow-hidden rounded-2xl bg-white p-1.5 shadow-2xl shadow-black/10 ring-1 ring-gray-900/[0.08] dark:bg-gray-900 dark:shadow-black/50 dark:ring-white/[0.08]'
+        style={
+          {
+            ...menuPos,
+            '--popover-origin':
+              menuPlacement === 'up' ? 'bottom right' : 'top right',
+            '--popover-shift': menuPlacement === 'up' ? '6px' : '-6px',
+          } as CSSProperties
+        }
       >
         {isAuthenticated ? (
           <>
@@ -218,13 +230,14 @@ export const UserMenu: React.FC = () => {
             </button>
 
             {/* 不足一行的宫格居中 */}
-            <div className='mt-1 flex flex-wrap justify-center gap-y-1'>
-              {tileActions.map(({ icon: Icon, label, onClick }) => (
+            <div className='motion-stagger mt-1 flex flex-wrap justify-center gap-y-1'>
+              {tileActions.map(({ icon: Icon, label, onClick }, index) => (
                 <button
                   key={label}
                   type='button'
                   role='menuitem'
                   onClick={onClick}
+                  style={{ '--stagger-index': index } as CSSProperties}
                   className='flex w-1/3 flex-col items-center gap-1.5 rounded-xl py-2.5 text-xs text-gray-600 transition-colors hover:bg-gray-900/[0.05] hover:text-gray-900 dark:text-gray-400 dark:hover:bg-white/[0.06] dark:hover:text-white'
                 >
                   <Icon className='h-[18px] w-[18px]' strokeWidth={1.75} />
@@ -321,24 +334,20 @@ export const UserMenu: React.FC = () => {
         )}
       </div>
 
-      {isOpen && mounted && createPortal(menuPanel, document.body)}
-
-      {isSettingsOpen &&
+      {menuPresence.mounted &&
         mounted &&
-        createPortal(
-          <SettingsPanel onClose={() => setIsSettingsOpen(false)} />,
-          document.body,
-        )}
+        createPortal(menuPanel, document.body)}
 
-      {isChangePasswordOpen &&
-        mounted &&
-        createPortal(
-          <ChangePasswordPanel
-            onClose={() => setIsChangePasswordOpen(false)}
-            onLogout={handleLogout}
-          />,
-          document.body,
-        )}
+      {isSettingsOpen && (
+        <SettingsPanel onClose={() => setIsSettingsOpen(false)} />
+      )}
+
+      {isChangePasswordOpen && (
+        <ChangePasswordPanel
+          onClose={() => setIsChangePasswordOpen(false)}
+          onLogout={handleLogout}
+        />
+      )}
 
       {isProfileOpen && (
         <ProfilePanel

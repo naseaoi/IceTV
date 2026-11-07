@@ -31,7 +31,9 @@ import {
   type VideoReviewDraft,
   useVideoReviews,
 } from '@/features/reviews/hooks/useVideoReviews';
+import { useListLayoutMotion } from '@/hooks/useListLayoutMotion';
 import { usePagedQuery } from '@/hooks/usePagedQuery';
+import { useRetainedValue } from '@/hooks/useRetainedValue';
 import { formatRelativeTime } from '@/lib/relative-time';
 import type { MyVideoReviewPage, VideoReview } from '@/lib/types';
 import { parseStorageKey } from '@/lib/utils';
@@ -182,24 +184,25 @@ export function MyReviewsPageSkeleton() {
 }
 
 function ReviewEditDialog({
-  review,
+  review: target,
   onClose,
   onSaved,
   onSavingChange,
 }: {
-  review: VideoReview;
+  review: VideoReview | null;
   onClose: () => void;
   onSaved: (review: VideoReview) => void;
   onSavingChange: (saving: boolean) => void;
 }) {
+  const review = useRetainedValue(target);
   const { save } = useVideoReviews({
-    title: review.title,
-    year: review.year,
-    cover: review.cover,
-    doubanId: review.douban_id,
-    sourceKey: review.source_key,
+    title: review?.title ?? '',
+    year: review?.year ?? '',
+    cover: review?.cover ?? '',
+    doubanId: review?.douban_id ?? 0,
+    sourceKey: review?.source_key ?? '',
     summaryEnabled: false,
-    initialReview: review,
+    initialReview: review ?? undefined,
   });
   const submit = async (draft: VideoReviewDraft) => {
     onSavingChange(true);
@@ -212,8 +215,9 @@ function ReviewEditDialog({
   return (
     <ReviewEditor
       variant='modal'
-      initial={review}
-      workTitle={review.title}
+      isOpen={Boolean(target)}
+      initial={review ?? null}
+      workTitle={review?.title ?? ''}
       onCancel={onClose}
       onSubmit={submit}
     />
@@ -233,7 +237,10 @@ function ReviewCard({
 }) {
   const playUrl = reviewPlayUrl(review);
   return (
-    <li className={CARD_CLASS}>
+    <li
+      data-list-motion-key={`${review.title_norm}:${review.year}`}
+      className={CARD_CLASS}
+    >
       <Link
         href={playUrl}
         aria-label={`播放${review.title}`}
@@ -387,6 +394,9 @@ export default function MyReviewsPageClient() {
   // 计数与当前筛选无关，重新查询时沿用旧值，避免占位块让胶囊宽度来回跳
   const countsLoading = loading && counts === null;
   const selected = reviews;
+  const containerRef = useListLayoutMotion<HTMLUListElement>(
+    selected.map((review) => `${review.title_norm}:${review.year}`),
+  );
   const narrowed = deferredQuery.trim() !== '' || filter !== 'all';
   const knownCount =
     counts && countsQuery === deferredQuery.trim() ? counts[filter] : null;
@@ -517,7 +527,10 @@ export default function MyReviewsPageClient() {
     );
   } else {
     content = (
-      <ul className='grid grid-cols-1 items-start gap-3 xl:grid-cols-2'>
+      <ul
+        ref={containerRef}
+        className='relative grid grid-cols-1 items-start gap-3 xl:grid-cols-2'
+      >
         {selected.map((review) => (
           <ReviewCard
             key={`${review.title_norm}:${review.year}`}
@@ -582,17 +595,14 @@ export default function MyReviewsPageClient() {
           )}
         </div>
       )}
-      {editing && (
-        <ReviewEditDialog
-          key={`${editing.title_norm}:${editing.year}`}
-          review={editing}
-          onClose={() => setEditing(null)}
-          onSaved={applySavedReview}
-          onSavingChange={(saving) => {
-            savingReview.current = saving;
-          }}
-        />
-      )}
+      <ReviewEditDialog
+        review={editing}
+        onClose={() => setEditing(null)}
+        onSaved={applySavedReview}
+        onSavingChange={(saving) => {
+          savingReview.current = saving;
+        }}
+      />
       <ConfirmModal
         isOpen={pending !== null}
         title='删除评价'

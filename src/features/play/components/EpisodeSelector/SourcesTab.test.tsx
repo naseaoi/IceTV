@@ -1,4 +1,10 @@
-import { act, fireEvent, render, screen } from '@testing-library/react';
+import {
+  act,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+} from '@testing-library/react';
 
 import {
   getCompletedProbeInfo,
@@ -141,6 +147,66 @@ describe('SourcesTab probe status', () => {
   beforeEach(() => {
     mockProbeSnapshot = new Map();
     mockGetOrProbe.mockReset().mockResolvedValue(undefined);
+  });
+
+  it('添加源站通过 Portal 显示，退出保留选择并在重新打开时重置', async () => {
+    const originalFetch = global.fetch;
+    const originalResizeObserver = global.ResizeObserver;
+    global.ResizeObserver = jest.fn().mockImplementation(() => ({
+      observe: jest.fn(),
+      unobserve: jest.fn(),
+      disconnect: jest.fn(),
+    }));
+    global.fetch = jest.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        results: [source, createSource({ id: '2', source_name: 'Source B' })],
+      }),
+    });
+    try {
+      const { container } = render(
+        <SourcesTab
+          availableSources={[source]}
+          currentSource={source.source}
+          currentId={source.id}
+          onSourceChange={jest.fn()}
+          videoTitle='test'
+          sourceSearchLoading={false}
+          sourceSearchError={null}
+        />,
+      );
+      fireEvent.click(screen.getByRole('button', { name: '搜索更多源站' }));
+      await screen.findByRole('heading', { name: '选择要添加的源站' });
+      expect(container.querySelector('.motion-dialog')).toBeNull();
+      expect(
+        screen.getByRole('button', { name: /Source A.*已添加/ }),
+      ).toBeDisabled();
+      fireEvent.click(screen.getByRole('button', { name: /Source B/ }));
+      fireEvent.click(screen.getByRole('button', { name: '取消' }));
+      expect(
+        screen
+          .getByRole('button', { name: '添加 1 个源站' })
+          .closest('.motion-dialog'),
+      ).toHaveAttribute('data-open', 'false');
+      await waitFor(() =>
+        expect(
+          screen.queryByRole('heading', { name: '选择要添加的源站' }),
+        ).toBeNull(),
+      );
+      fireEvent.click(screen.getByRole('button', { name: '搜索完成' }));
+      expect(
+        await screen.findByRole('button', { name: '请选择源站' }),
+      ).toBeDisabled();
+      fireEvent.keyDown(window, { key: 'Escape' });
+      expect(
+        screen
+          .getByRole('button', { name: '请选择源站' })
+          .closest('.motion-dialog'),
+      ).toHaveAttribute('data-open', 'false');
+    } finally {
+      global.fetch = originalFetch;
+      global.ResizeObserver = originalResizeObserver;
+    }
   });
 
   it('标题栏操作统一为小号按钮，检测时原位转圈且保留名称', async () => {

@@ -3,7 +3,7 @@
 import { Search } from 'lucide-react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import { useLayoutEffect, useMemo, useRef } from 'react';
+import { useLayoutEffect, useMemo } from 'react';
 
 import { getChannelItems, isNavItemActive } from '@/components/channel-nav';
 import MessageBell from '@/components/messages/MessageBell';
@@ -11,6 +11,10 @@ import { useRuntimeConfig } from '@/components/RuntimeConfigProvider';
 import { SiteIcon } from '@/components/SiteIcon';
 import { useChannelNavigation } from '@/hooks/useChannelNavigation';
 import { useHideOnScrollDown, usePageScrolled } from '@/hooks/usePageScroll';
+import {
+  usePendingTarget,
+  useSlidingIndicator,
+} from '@/hooks/useSlidingIndicator';
 
 // 首屏精选的大半高度滚过后再转实底，避免刚开始滚动就盖住海报
 const SOLID_AFTER_PX = 160;
@@ -19,6 +23,9 @@ interface MobileChannelHeaderProps {
   activePath: string;
   transparentAtTop: boolean;
 }
+
+const CHANNEL_INDICATOR_CLASS =
+  'h-[3px] rounded-full bg-brand-400 group-data-[solid=true]:bg-brand-500 dark:group-data-[solid=true]:bg-brand-400';
 
 export default function MobileChannelHeader({
   activePath,
@@ -34,27 +41,34 @@ export default function MobileChannelHeader({
   const scrolled = usePageScrolled(SOLID_AFTER_PX);
   const collapsed = useHideOnScrollDown(true);
   const solid = !transparentAtTop || scrolled;
-  const stripRef = useRef<HTMLDivElement>(null);
   const activeHref = channels.find((item) =>
     isNavItemActive(item.href, pathname, activePath),
   )?.href;
+  const { targetHref, markPending } = usePendingTarget(activeHref);
+  const indicator = useSlidingIndicator<HTMLElement>(targetHref, {
+    width: 16,
+    memoryKey: 'mobile-channel',
+  });
+  const stripRef = indicator.containerRef;
 
   // 切到靠后的频道时把选中项滚进可视区
   useLayoutEffect(() => {
     const strip = stripRef.current;
-    const active = strip?.querySelector<HTMLElement>('[aria-current="page"]');
-    if (!strip || !active) return;
+    const selected = strip?.querySelector<HTMLElement>(
+      '[data-indicator-target]',
+    );
+    if (!strip || !selected) return;
     const target =
-      active.offsetLeft - (strip.clientWidth - active.offsetWidth) / 2;
+      selected.offsetLeft - (strip.clientWidth - selected.offsetWidth) / 2;
     strip.scrollLeft = Math.max(0, target);
-  }, [activeHref]);
+  }, [targetHref, stripRef]);
 
   return (
     <header
       data-solid={solid}
       className={`group fixed inset-x-0 top-0 z-[999] w-full border-b transition-[transform,background-color,border-color] duration-300 ease-out md:hidden ${
         solid
-          ? 'border-gray-200/70 bg-gray-50/90 backdrop-blur-xl dark:border-white/[0.06] dark:bg-gray-950/85'
+          ? 'border-gray-200/70 bg-gray-50 dark:border-white/[0.06] dark:bg-gray-950'
           : 'border-transparent'
       } ${collapsed ? '-translate-y-12' : 'translate-y-0'}`}
       style={{ paddingTop: 'env(safe-area-inset-top)' }}
@@ -82,31 +96,45 @@ export default function MobileChannelHeader({
       <nav
         ref={stripRef}
         aria-label='频道'
-        className='scrollbar-hide flex h-10 items-center gap-5 overflow-x-auto px-4'
+        className='scrollbar-hide relative flex h-10 items-center gap-5 overflow-x-auto px-4'
       >
         {channels.map((item) => {
           const active = item.href === activeHref;
+          const selected = item.href === targetHref;
           return (
             <Link
               key={item.href}
               href={item.href}
               prefetch={false}
               onTouchStart={() => prefetchRoute(item.href)}
-              onClick={(event) => handleNavClick(event, item.href)}
+              onClick={(event) => {
+                markPending(event, item.href);
+                handleNavClick(event, item.href);
+              }}
+              data-indicator-target={selected || undefined}
               aria-current={active ? 'page' : undefined}
               className={`relative shrink-0 whitespace-nowrap py-2 transition-colors ${
-                active
+                selected
                   ? 'text-[17px] font-semibold text-white group-data-[solid=true]:text-gray-900 dark:group-data-[solid=true]:text-white'
                   : 'text-[15px] text-white/70 group-data-[solid=true]:text-gray-500 dark:group-data-[solid=true]:text-gray-400'
               }`}
             >
               {item.label}
-              {active && (
-                <span className='absolute inset-x-0 bottom-0.5 mx-auto h-[3px] w-4 rounded-full bg-brand-400 group-data-[solid=true]:bg-brand-500 dark:group-data-[solid=true]:bg-brand-400' />
+              {selected && !indicator.indicatorProps && (
+                <span
+                  className={`absolute inset-x-0 bottom-0.5 mx-auto w-4 ${CHANNEL_INDICATOR_CLASS}`}
+                />
               )}
             </Link>
           );
         })}
+        {indicator.indicatorProps && (
+          <span
+            aria-hidden='true'
+            className={`sliding-indicator -mt-[5px] ${CHANNEL_INDICATOR_CLASS}`}
+            {...indicator.indicatorProps}
+          />
+        )}
       </nav>
     </header>
   );

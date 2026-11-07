@@ -132,7 +132,6 @@ const config: Config = {
         'overlay-in': 'fadeIn 0.2s ease-out',
         'status-icon-in':
           'statusIconIn 0.4s cubic-bezier(0.34, 1.56, 0.64, 1) both',
-        'menu-in-up': 'slideUp 0.18s cubic-bezier(0.16, 1, 0.3, 1)',
         'menu-in-down': 'slideDown 0.18s cubic-bezier(0.16, 1, 0.3, 1)',
         'hero-slide-in':
           'heroSlideIn 0.65s cubic-bezier(0.22, 1, 0.36, 1) both',

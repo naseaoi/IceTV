@@ -193,13 +193,12 @@ export function MineProfileHeader({ actions }: { actions?: ReactNode }) {
         </Link>
       </div>
 
-      {list && (
-        <FollowList
-          profileId={profileId}
-          type={list}
-          onClose={() => setList(null)}
-        />
-      )}
+      <FollowList
+        isOpen={Boolean(list)}
+        profileId={profileId}
+        type={list}
+        onClose={() => setList(null)}
+      />
       {editing && <ProfilePanel onClose={() => setEditing(false)} />}
     </section>
   );

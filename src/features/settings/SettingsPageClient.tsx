@@ -13,7 +13,6 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useTheme } from 'next-themes';
 import { type ReactNode, useState } from 'react';
-import { createPortal } from 'react-dom';
 
 import { useAuthSession } from '@/components/AuthProvider';
 import ConfirmModal from '@/components/modals/ConfirmModal';
@@ -248,13 +247,10 @@ export function SettingsPageClient() {
       </div>
 
       {panel === 'profile' && <ProfilePanel onClose={close} />}
-      {panel === 'local' &&
-        createPortal(<SettingsPanel onClose={close} />, document.body)}
-      {panel === 'password' &&
-        createPortal(
-          <ChangePasswordPanel onClose={close} onLogout={logout} />,
-          document.body,
-        )}
+      {panel === 'local' && <SettingsPanel onClose={close} />}
+      {panel === 'password' && (
+        <ChangePasswordPanel onClose={close} onLogout={logout} />
+      )}
       {panel === 'version' && <VersionPanel isOpen onClose={close} />}
       <ConfirmModal
         isOpen={panel === 'logout'}

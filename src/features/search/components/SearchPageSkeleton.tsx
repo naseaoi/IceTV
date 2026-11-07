@@ -90,7 +90,7 @@ function SearchPagePlaceholder({
       </div>
       {showResults ? (
         <>
-          <div className={SEARCH_DESKTOP_BAR_CLASS}>
+          <div data-nav-subbar className={SEARCH_DESKTOP_BAR_CLASS}>
             <div className={SEARCH_DESKTOP_BAR_ROW_CLASS}>
               <div className='flex min-w-0 flex-1 gap-2'>
                 {Array.from({ length: 4 }, (_, index) => (

@@ -12,12 +12,12 @@ import {
   X,
 } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
-import { createPortal } from 'react-dom';
 
 import {
   MODAL_CLOSE_BUTTON_CLASS,
   MODAL_TITLE_CLASS,
 } from '@/components/modals/modal-styles';
+import ModalShell, { useDeferredClose } from '@/components/modals/ModalShell';
 import { changelog, ChangelogEntry } from '@/lib/changelog';
 import { getPrimaryRepoUrl } from '@/lib/update-source';
 import { CURRENT_VERSION } from '@/lib/version';
@@ -39,7 +39,7 @@ export const VersionPanel: React.FC<VersionPanelProps> = ({
   isOpen,
   onClose,
 }) => {
-  const [mounted, setMounted] = useState(false);
+  const [open, requestClose] = useDeferredClose(onClose);
   const [remoteChangelog, setRemoteChangelog] = useState<ChangelogEntry[]>([]);
   const [hasUpdate, setIsHasUpdate] = useState(false);
   const [latestVersion, setLatestVersion] = useState<string>('');
@@ -47,34 +47,12 @@ export const VersionPanel: React.FC<VersionPanelProps> = ({
   const repoUrl = getPrimaryRepoUrl();
 
   useEffect(() => {
-    setMounted(true);
-    return () => setMounted(false);
-  }, []);
-
-  // Body 滚动锁定
-  useEffect(() => {
-    if (isOpen) {
-      const body = document.body;
-      const html = document.documentElement;
-      const originalBodyOverflow = body.style.overflow;
-      const originalHtmlOverflow = html.style.overflow;
-      body.style.overflow = 'hidden';
-      html.style.overflow = 'hidden';
-      return () => {
-        body.style.overflow = originalBodyOverflow;
-        html.style.overflow = originalHtmlOverflow;
-      };
-    }
-  }, [isOpen]);
-
-  useEffect(() => {
     if (isOpen) {
       const controller = new AbortController();
       fetchRemoteChangelog(controller.signal);
       return () => controller.abort();
-    } else {
-      setShowAllEntries(false);
     }
+    setShowAllEntries(false);
   }, [isOpen]);
 
   const fetchRemoteChangelog = async (signal?: AbortSignal) => {
@@ -183,25 +161,17 @@ export const VersionPanel: React.FC<VersionPanelProps> = ({
     );
   };
 
-  if (!mounted || !isOpen) return null;
-
-  return createPortal(
-    <>
-      <div
-        className='fixed inset-0 z-[1000] bg-black/50'
-        onClick={onClose}
-        onTouchMove={(e) => e.preventDefault()}
-        onWheel={(e) => e.preventDefault()}
-        style={{ touchAction: 'none' }}
-      />
-
+  return (
+    <ModalShell
+      isOpen={isOpen && open}
+      onClose={requestClose}
+      panelClassName='flex max-h-[85vh] max-w-lg flex-col overflow-hidden'
+    >
       <div
         role='dialog'
         aria-modal='true'
         aria-labelledby='version-panel-title'
-        className='fixed left-1/2 top-1/2 z-[1001] flex max-h-[85vh] w-[calc(100%-2rem)] max-w-lg -translate-x-1/2 -translate-y-1/2 flex-col overflow-hidden rounded-2xl bg-white shadow-2xl shadow-black/10 ring-1 ring-gray-900/[0.08] dark:bg-gray-900 dark:shadow-black/50 dark:ring-white/[0.08]'
-        onTouchMove={(e) => e.stopPropagation()}
-        style={{ touchAction: 'auto' }}
+        className='flex min-h-0 flex-1 flex-col'
       >
         <div className='flex flex-shrink-0 items-center justify-between gap-3 border-b border-gray-200/70 py-3 pl-5 pr-3 dark:border-white/[0.06]'>
           <div className='flex min-w-0 items-baseline gap-2'>
@@ -226,7 +196,7 @@ export const VersionPanel: React.FC<VersionPanelProps> = ({
             )}
             <button
               type='button'
-              onClick={onClose}
+              onClick={requestClose}
               className={MODAL_CLOSE_BUTTON_CLASS}
               aria-label='关闭'
             >
@@ -349,7 +319,6 @@ export const VersionPanel: React.FC<VersionPanelProps> = ({
           )}
         </div>
       </div>
-    </>,
-    document.body,
+    </ModalShell>
   );
 };

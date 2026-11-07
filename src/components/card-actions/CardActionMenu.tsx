@@ -160,17 +160,19 @@ export default function CardActionMenu({
         ref={panelRef}
         role='menu'
         aria-label={title}
-        className={`absolute w-max select-none rounded-xl bg-white p-1.5 shadow-xl shadow-black/[0.12] ring-1 ring-gray-900/[0.08] transition-[opacity,transform] duration-150 ease-out dark:bg-gray-900 dark:shadow-black/60 dark:ring-white/[0.12] ${
-          shown && placement
-            ? 'pointer-events-auto scale-100 opacity-100'
-            : 'scale-95 opacity-0'
-        }`}
-        style={{
-          top: placement?.top ?? anchor.top,
-          left: placement?.left ?? anchor.left,
-          transformOrigin: placement?.origin,
-          visibility: placement ? undefined : 'hidden',
-        }}
+        data-open={Boolean(shown && placement)}
+        className='motion-popover pointer-events-auto absolute w-max select-none rounded-xl bg-white p-1.5 shadow-xl shadow-black/[0.12] ring-1 ring-gray-900/[0.08] dark:bg-gray-900 dark:shadow-black/60 dark:ring-white/[0.12]'
+        style={
+          {
+            top: placement?.top ?? anchor.top,
+            left: placement?.left ?? anchor.left,
+            '--popover-origin': placement?.origin,
+            '--popover-shift': placement?.origin.startsWith('bottom')
+              ? '4px'
+              : '-4px',
+            visibility: placement ? undefined : 'hidden',
+          } as React.CSSProperties
+        }
         onContextMenu={(event) => event.preventDefault()}
       >
         <CardActionList actions={actions} variant='menu' onAction={onAction} />

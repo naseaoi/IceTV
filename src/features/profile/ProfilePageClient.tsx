@@ -4,6 +4,7 @@ import { Link2, UserCheck, UserPlus } from 'lucide-react';
 import Link from 'next/link';
 import { useCallback, useEffect, useRef, useState } from 'react';
 
+import AnimatedCount from '@/components/AnimatedCount';
 import CoverImage from '@/components/CoverImage';
 import { PAGE_CONTAINER_CLASS } from '@/components/page-container';
 import PageLayout from '@/components/PageLayout';
@@ -449,7 +450,7 @@ export default function ProfilePageClient({
                           <span
                             className={`${PROFILE_STAT_VALUE_CLASS} text-gray-900 dark:text-gray-100`}
                           >
-                            {count}
+                            <AnimatedCount key={profileId} value={count} />
                           </span>
                           {label}
                         </button>
@@ -523,13 +524,12 @@ export default function ProfilePageClient({
                   favoriteCount={profile.favoriteCount}
                 />
               )}
-              {list && (
-                <FollowList
-                  profileId={profileId}
-                  type={list}
-                  onClose={() => setList(null)}
-                />
-              )}
+              <FollowList
+                isOpen={Boolean(list)}
+                profileId={profileId}
+                type={list}
+                onClose={() => setList(null)}
+              />
               {editing && (
                 <ProfilePanel
                   onClose={() => {

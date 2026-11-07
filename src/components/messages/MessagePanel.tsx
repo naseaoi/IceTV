@@ -11,6 +11,8 @@ import ProfileAvatar from '@/components/ProfileAvatar';
 import RatingBadge from '@/components/RatingBadge';
 import Spinner from '@/components/Spinner';
 import { useBodyScrollLock } from '@/components/user-menu/useBodyScrollLock';
+import { useListLayoutMotion } from '@/hooks/useListLayoutMotion';
+import { usePresence } from '@/hooks/usePresence';
 import { UserMessage, UserMessagePage } from '@/lib/message-types';
 import { formatRelativeTime } from '@/lib/relative-time';
 
@@ -137,6 +139,7 @@ function MessageRow({
 
   return (
     <div
+      data-list-motion-key={String(message.id)}
       className={`flex items-start gap-3 rounded-lg border p-3 sm:p-4 ${
         message.type === 'announcement'
           ? 'border-brand-200/80 bg-brand-50/70 dark:border-brand-800/60 dark:bg-brand-950/25'
@@ -196,6 +199,9 @@ function MessageSection({
   onRead: (message: UserMessage) => Promise<void>;
   onNavigate: () => void;
 }) {
+  const containerRef = useListLayoutMotion<HTMLDivElement>(
+    messages.map((message) => String(message.id)),
+  );
   if (messages.length === 0) return null;
 
   return (
@@ -203,18 +209,22 @@ function MessageSection({
       <h3 className='px-0.5 text-xs font-semibold text-gray-500 dark:text-gray-400'>
         {title}
       </h3>
-      {messages.map((message) => (
-        <MessageRow
-          key={message.id}
-          message={message}
-          working={readingAll || workingIds.has(message.id)}
-          onRead={onRead}
-          onNavigate={onNavigate}
-        />
-      ))}
+      <div ref={containerRef} className='relative space-y-2.5'>
+        {messages.map((message) => (
+          <MessageRow
+            key={message.id}
+            message={message}
+            working={readingAll || workingIds.has(message.id)}
+            onRead={onRead}
+            onNavigate={onNavigate}
+          />
+        ))}
+      </div>
     </section>
   );
 }
+
+const PANEL_EXIT_MS = 130;
 
 export default function MessagePanel({
   open,
@@ -230,6 +240,7 @@ export default function MessagePanel({
   onRetry,
 }: MessagePanelProps) {
   const titleId = useId();
+  const presence = usePresence(open, PANEL_EXIT_MS);
   useBodyScrollLock(open);
 
   useEffect(() => {
@@ -241,7 +252,7 @@ export default function MessagePanel({
     return () => document.removeEventListener('keydown', handleKeyDown);
   }, [onClose, open]);
 
-  if (!open || typeof document === 'undefined') return null;
+  if (!presence.mounted || typeof document === 'undefined') return null;
   const readingAll = workingIds.has('all');
   const announcements = page.items.filter(
     (message) => message.type === 'announcement',
@@ -255,14 +266,16 @@ export default function MessagePanel({
       <button
         type='button'
         aria-label='关闭消息面板'
-        className='absolute inset-0 cursor-default bg-black/50'
+        data-open={presence.visible}
+        className='motion-backdrop absolute inset-0 cursor-default bg-black/50'
         onClick={onClose}
       />
       <div
         role='dialog'
         aria-modal='true'
         aria-labelledby={titleId}
-        className='relative z-10 flex max-h-[90dvh] w-full max-w-2xl flex-col overflow-hidden rounded-2xl bg-white shadow-2xl shadow-black/10 outline-none ring-1 ring-gray-900/[0.08] dark:bg-gray-900 dark:shadow-black/50 dark:ring-white/[0.08]'
+        data-open={presence.visible}
+        className='motion-dialog relative z-10 flex max-h-[90dvh] w-full max-w-2xl flex-col overflow-hidden rounded-2xl bg-white shadow-2xl shadow-black/10 outline-none ring-1 ring-gray-900/[0.08] dark:bg-gray-900 dark:shadow-black/50 dark:ring-white/[0.08]'
       >
         <div className='flex shrink-0 items-center gap-3 border-b border-gray-200/80 px-4 py-3.5 dark:border-gray-700/80 sm:px-6 sm:py-4'>
           <div className='flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-brand-100 text-brand-700 dark:bg-brand-900/40 dark:text-brand-300'>

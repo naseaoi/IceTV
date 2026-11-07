@@ -6,6 +6,7 @@ import {
   CONTINUE_WATCHING_GRID_CLASS,
   CONTINUE_WATCHING_GRID_ITEM_CLASS,
 } from '@/features/continue-watching/lib/layout';
+import { useListLayoutMotion } from '@/hooks/useListLayoutMotion';
 import {
   getPlayRecordEpisodeDisplay,
   getPlayRecordResumeGroup,
@@ -25,6 +26,9 @@ export function ContinueWatchingGrid({
   items: ContinueWatchingItem[];
   onDelete: (key: string) => void;
 }) {
+  const containerRef = useListLayoutMotion<HTMLDivElement>(
+    items.map((record) => String(record.key)),
+  );
   if (items.length === 0) {
     return (
       <div className='py-5 text-center text-gray-500 dark:text-gray-400'>
@@ -34,14 +38,21 @@ export function ContinueWatchingGrid({
   }
 
   return (
-    <div className={CONTINUE_WATCHING_GRID_CLASS}>
+    <div
+      ref={containerRef}
+      className={`relative ${CONTINUE_WATCHING_GRID_CLASS}`}
+    >
       {items.map((record) => {
         const parsedKey = parseStorageKey(record.key);
         if (!parsedKey) return null;
 
         const episodeDisplay = getPlayRecordEpisodeDisplay(record);
         return (
-          <div key={record.key} className={CONTINUE_WATCHING_GRID_ITEM_CLASS}>
+          <div
+            key={record.key}
+            data-list-motion-key={String(record.key)}
+            className={CONTINUE_WATCHING_GRID_ITEM_CLASS}
+          >
             <VideoCard
               id={parsedKey.id}
               title={record.title}

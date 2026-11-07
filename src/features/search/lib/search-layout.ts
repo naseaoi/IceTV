@@ -3,7 +3,7 @@ import { PAGE_CONTAINER_CLASS } from '@/components/page-container';
 // 搜索页与其骨架共用的容器几何类
 
 export const SEARCH_STICKY_BAR_CLASS =
-  'border-b border-gray-200/70 bg-gray-50/85 backdrop-blur-xl dark:border-white/[0.06] dark:bg-gray-950/80';
+  'border-b border-gray-200/70 bg-gray-50 dark:border-white/[0.06] dark:bg-gray-950';
 
 export const SEARCH_MOBILE_BAR_CLASS = `sticky top-0 z-30 md:top-16 lg:hidden ${SEARCH_STICKY_BAR_CLASS}`;
 

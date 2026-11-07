@@ -50,7 +50,7 @@ const MobileBottomNav = () => {
   return (
     <nav
       aria-label='主导航'
-      className='fixed inset-x-0 bottom-0 z-[600] border-t border-gray-200/70 bg-gray-50/90 backdrop-blur-xl dark:border-white/[0.06] dark:bg-gray-950/85 md:hidden'
+      className='fixed inset-x-0 bottom-0 z-[600] border-t border-gray-200/70 bg-gray-50 dark:border-white/[0.06] dark:bg-gray-950 md:hidden'
       style={{ paddingBottom: 'env(safe-area-inset-bottom)' }}
     >
       <ul className='flex h-14 items-stretch'>

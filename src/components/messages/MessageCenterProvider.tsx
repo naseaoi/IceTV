@@ -59,6 +59,9 @@ export function MessageCenterProvider({ children }: { children: ReactNode }) {
   const username =
     session.status === 'authenticated' ? session.username : undefined;
   const [isOpen, setIsOpen] = useState(false);
+  // 首次打开后才加载面板代码，之后常驻以便播放退场
+  const [panelLoaded, setPanelLoaded] = useState(false);
+  if (isOpen && !panelLoaded) setPanelLoaded(true);
   const previewModeRef = useRef<ReturnType<typeof getMessagePreviewMode>>(null);
   const panelOpenRef = useRef(false);
   const loadFirstPageRef = useRef<() => void>(() => {});
@@ -163,7 +166,7 @@ export function MessageCenterProvider({ children }: { children: ReactNode }) {
   return (
     <MessageCenterContext.Provider value={contextValue}>
       {children}
-      {isOpen && (
+      {panelLoaded && (
         <MessagePanel
           open={isOpen}
           page={pagination.page}

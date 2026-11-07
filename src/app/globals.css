@@ -338,20 +338,19 @@ div[data-media-provider] video {
 }
 
 /* ==========================================================================
-   轻提示：圆点弹出 → 舒展成胶囊 → 收回圆点飘散；离场总时长与 ToastViewport 的 TOAST_LEAVE_MS 对应
+   全站动效参数：弹簧曲线由 linear() 采样，不支持时退回近似的 cubic-bezier
    ========================================================================== */
 
 :root {
-  --toast-head: 40px;
-  --toast-radius: 1.375rem;
-  --toast-spring: cubic-bezier(0.34, 1.56, 0.64, 1);
-  --toast-spring-soft: cubic-bezier(0.22, 1.2, 0.36, 1);
-  --toast-ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+  --motion-spring: cubic-bezier(0.34, 1.56, 0.64, 1);
+  --motion-spring-soft: cubic-bezier(0.22, 1.2, 0.36, 1);
+  --motion-ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+  --motion-ease-in: cubic-bezier(0.4, 0, 1, 1);
 }
 
 @supports (transition-timing-function: linear(0, 1)) {
   :root {
-    --toast-spring: linear(
+    --motion-spring: linear(
       0,
       0.0381,
       0.1352,
@@ -390,7 +389,7 @@ div[data-media-provider] video {
       1.0004,
       1
     );
-    --toast-spring-soft: linear(
+    --motion-spring-soft: linear(
       0,
       0.0209,
       0.0744,
@@ -432,6 +431,340 @@ div[data-media-provider] video {
   }
 }
 
+/* 浮层进出场由 data-open 切换：入场弹簧舒展，离场快速收回；离场时长须短于组件的卸载延时 */
+.motion-popover {
+  transform-origin: var(--popover-origin, top center);
+  transition:
+    opacity 140ms var(--motion-ease-out),
+    transform 420ms var(--motion-spring),
+    filter 200ms var(--motion-ease-out);
+}
+
+.motion-popover[data-open='false'] {
+  opacity: 0;
+  transform: translateY(var(--popover-shift, -6px)) scale(0.92);
+  filter: blur(2px);
+  pointer-events: none;
+  transition:
+    opacity 120ms var(--motion-ease-in),
+    transform 140ms var(--motion-ease-in),
+    filter 120ms var(--motion-ease-in);
+}
+
+.motion-dialog {
+  transition:
+    opacity 100ms var(--motion-ease-out),
+    transform 260ms var(--motion-spring-soft);
+}
+
+.motion-dialog[data-open='false'] {
+  opacity: 0;
+  transform: translateY(14px) scale(0.95);
+  pointer-events: none;
+  transition:
+    opacity 80ms var(--motion-ease-in),
+    transform 90ms var(--motion-ease-in);
+}
+
+.motion-backdrop {
+  transition: opacity 120ms var(--motion-ease-out);
+}
+
+.motion-backdrop[data-open='false'] {
+  opacity: 0;
+  pointer-events: none;
+  transition-duration: 90ms;
+}
+
+/* 菜单项随面板依次浮现，--stagger-index 由调用方给出 */
+.motion-stagger > * {
+  animation: motion-rise 360ms var(--motion-ease-out) both;
+  animation-delay: calc(60ms + var(--stagger-index, 0) * 24ms);
+}
+
+@keyframes motion-rise {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+}
+
+/* 导航指示条：位置与滑动由 useSlidingIndicator 以 transform 驱动 */
+.sliding-indicator {
+  position: absolute;
+  left: 0;
+  transform-origin: left center;
+  pointer-events: none;
+}
+
+/* 收藏：心形按压回弹，外圈扩散，粒子沿各自角度飞散 */
+.heart-like {
+  animation: heart-like 640ms var(--motion-ease-out) both;
+}
+
+.heart-unlike {
+  animation: heart-unlike 320ms var(--motion-ease-out) both;
+}
+
+.heart-ring {
+  position: absolute;
+  inset: -15%;
+  border-radius: 9999px;
+  border: 2px solid rgb(244 63 94);
+  opacity: 0;
+  animation: heart-ring 560ms var(--motion-ease-out) 60ms both;
+}
+
+.heart-particle {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: var(--particle-size, 4px);
+  height: var(--particle-size, 4px);
+  margin: calc(var(--particle-size, 4px) / -2) 0 0
+    calc(var(--particle-size, 4px) / -2);
+  border-radius: 9999px;
+  background: var(--particle-color, rgb(244 63 94));
+  opacity: 0;
+  animation: heart-particle 620ms var(--motion-ease-out) 110ms both;
+}
+
+@keyframes heart-like {
+  0% {
+    transform: scale(1);
+  }
+  14% {
+    transform: scale(0.72);
+  }
+  42% {
+    transform: scale(1.26);
+  }
+  62% {
+    transform: scale(0.94);
+  }
+  80% {
+    transform: scale(1.04);
+  }
+  100% {
+    transform: scale(1);
+  }
+}
+
+@keyframes heart-unlike {
+  40% {
+    transform: scale(0.78);
+  }
+}
+
+@keyframes heart-ring {
+  0% {
+    opacity: 0.7;
+    transform: scale(0.35);
+    border-width: 3px;
+  }
+  100% {
+    opacity: 0;
+    transform: scale(1.25);
+    border-width: 0.5px;
+  }
+}
+
+@keyframes heart-particle {
+  0% {
+    opacity: 1;
+    transform: rotate(var(--particle-angle))
+      translateY(calc(var(--particle-distance) * -0.45)) scale(0);
+  }
+  35% {
+    opacity: 1;
+    transform: rotate(var(--particle-angle))
+      translateY(calc(var(--particle-distance) * -0.75)) scale(1);
+  }
+  100% {
+    opacity: 0;
+    transform: rotate(var(--particle-angle))
+      translateY(calc(var(--particle-distance) * -1)) scale(0);
+  }
+}
+
+/* 评分：新点亮的星依次弹起，落点那颗更饱满；分数降低时落点星轻沉一下 */
+.rating-star-pop {
+  animation: motion-pop-soft 440ms var(--motion-ease-out)
+    calc(var(--star-index, 0) * 45ms) both;
+}
+
+.rating-star-pop[data-last] {
+  animation-name: motion-pop;
+  animation-duration: 560ms;
+}
+
+.rating-star-dip {
+  animation: rating-star-dip 300ms var(--motion-ease-out) both;
+}
+
+/* 点赞等轻量确认：图标按下后弹起 */
+.motion-pop {
+  animation: motion-pop 520ms var(--motion-ease-out) both;
+}
+
+@keyframes motion-pop {
+  0% {
+    transform: scale(1);
+  }
+  28% {
+    transform: scale(1.34) rotate(-10deg);
+  }
+  58% {
+    transform: scale(0.92) rotate(3deg);
+  }
+  80% {
+    transform: scale(1.04) rotate(0deg);
+  }
+  100% {
+    transform: scale(1);
+  }
+}
+
+@keyframes motion-pop-soft {
+  0% {
+    transform: scale(1);
+  }
+  35% {
+    transform: scale(1.2) rotate(-5deg);
+  }
+  70% {
+    transform: scale(0.97);
+  }
+  100% {
+    transform: scale(1);
+  }
+}
+
+@keyframes rating-star-dip {
+  45% {
+    transform: scale(0.8);
+  }
+}
+
+/* 数字变化：旧值沿变化方向滚出，新值弹性滚入 */
+.count-roll {
+  display: inline-grid;
+  overflow: hidden;
+}
+
+.count-roll > * {
+  grid-area: 1 / 1;
+}
+
+.count-roll-in-up {
+  animation: count-in-up 420ms var(--motion-spring-soft) both;
+}
+
+.count-roll-in-down {
+  animation: count-in-down 420ms var(--motion-spring-soft) both;
+}
+
+.count-roll-out-up {
+  animation: count-out-up 220ms var(--motion-ease-in) both;
+}
+
+.count-roll-out-down {
+  animation: count-out-down 220ms var(--motion-ease-in) both;
+}
+
+@keyframes count-in-up {
+  from {
+    opacity: 0;
+    transform: translateY(90%);
+  }
+}
+
+@keyframes count-in-down {
+  from {
+    opacity: 0;
+    transform: translateY(-90%);
+  }
+}
+
+@keyframes count-out-up {
+  to {
+    opacity: 0;
+    transform: translateY(-90%);
+  }
+}
+
+@keyframes count-out-down {
+  to {
+    opacity: 0;
+    transform: translateY(90%);
+  }
+}
+
+/* 整组内容切换：条目沿切换方向依次滑入，--swap-shift 的正负表示方向 */
+.motion-swap-in {
+  animation: motion-swap-in 480ms cubic-bezier(0.16, 1, 0.3, 1) both;
+  animation-delay: calc(min(var(--stagger-index, 0), 8) * 32ms);
+}
+
+@keyframes motion-swap-in {
+  from {
+    opacity: 0;
+    transform: translateX(var(--swap-shift, 24px));
+  }
+}
+
+/* 角标出现时从中心弹出 */
+.motion-badge-in {
+  animation: motion-badge-in 420ms var(--motion-spring) both;
+}
+
+@keyframes motion-badge-in {
+  from {
+    opacity: 0;
+    transform: scale(0.3);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .motion-popover,
+  .motion-popover[data-open='false'],
+  .motion-dialog,
+  .motion-dialog[data-open='false'] {
+    transform: none;
+    filter: none;
+    transition: opacity 150ms ease;
+  }
+
+  .motion-stagger > *,
+  .heart-like,
+  .heart-unlike,
+  .rating-star-pop,
+  .rating-star-dip,
+  .motion-pop,
+  .motion-badge-in,
+  .motion-swap-in,
+  .count-roll-in-up,
+  .count-roll-in-down {
+    animation: none;
+  }
+
+  .heart-ring,
+  .heart-particle,
+  .count-roll-out-up,
+  .count-roll-out-down {
+    display: none;
+  }
+}
+
+/* ==========================================================================
+   轻提示：圆点弹出 → 舒展成胶囊 → 收回圆点飘散；离场总时长与 ToastViewport 的 TOAST_LEAVE_MS 对应
+   ========================================================================== */
+
+:root {
+  --toast-head: 40px;
+  --toast-radius: 1.375rem;
+}
+
 .toast-slot {
   position: absolute;
   top: 0;
@@ -439,7 +772,7 @@ div[data-media-provider] video {
   width: max-content;
   max-width: calc(100vw - 2rem);
   transform: translate3d(-50%, var(--toast-y, 0px), 0);
-  transition: transform 640ms var(--toast-spring-soft);
+  transition: transform 640ms var(--motion-spring-soft);
   pointer-events: auto;
   touch-action: none;
   user-select: none;
@@ -457,11 +790,11 @@ div[data-media-provider] video {
 }
 
 .toast-shadow[data-dragging='false'] {
-  transition: transform 520ms var(--toast-spring);
+  transition: transform 520ms var(--motion-spring);
 }
 
 .toast-motion {
-  animation: toast-pop 600ms var(--toast-spring) both;
+  animation: toast-pop 600ms var(--motion-spring) both;
 }
 
 .toast-motion[data-bump='a'] {
@@ -478,12 +811,12 @@ div[data-media-provider] video {
 
 .toast-surface {
   clip-path: inset(0 round var(--toast-radius));
-  animation: toast-morph 760ms var(--toast-ease-out) 120ms both;
+  animation: toast-morph 760ms var(--motion-ease-out) 120ms both;
 }
 
 .toast-surface[data-tone='error'] {
   animation:
-    toast-morph 760ms var(--toast-ease-out) 120ms both,
+    toast-morph 760ms var(--motion-ease-out) 120ms both,
     toast-shake 480ms ease-in-out 760ms;
 }
 
@@ -492,7 +825,7 @@ div[data-media-provider] video {
 }
 
 .toast-content {
-  animation: toast-content-in 460ms var(--toast-ease-out)
+  animation: toast-content-in 460ms var(--motion-ease-out)
     var(--toast-content-delay, 300ms) both;
 }
 
@@ -502,7 +835,7 @@ div[data-media-provider] video {
 
 .toast-head {
   position: relative;
-  animation: toast-head-in 560ms var(--toast-spring) 60ms both;
+  animation: toast-head-in 560ms var(--motion-spring) 60ms both;
 }
 
 .toast-head[data-tone='success']::after {
@@ -512,7 +845,7 @@ div[data-media-provider] video {
   border-radius: inherit;
   border: 2px solid currentColor;
   opacity: 0;
-  animation: toast-ripple 720ms var(--toast-ease-out) 620ms;
+  animation: toast-ripple 720ms var(--motion-ease-out) 620ms;
 }
 
 .toast-draw {
@@ -525,7 +858,7 @@ div[data-media-provider] video {
 .toast-dot {
   transform-box: fill-box;
   transform-origin: center;
-  animation: toast-head-in 420ms var(--toast-spring)
+  animation: toast-head-in 420ms var(--motion-spring)
     var(--toast-draw-delay, 0ms) both;
 }
 

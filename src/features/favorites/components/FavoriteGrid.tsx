@@ -18,6 +18,7 @@ import VideoCard from '@/components/VideoCard';
 import { VirtualizedGrid } from '@/components/VirtualizedGrid';
 import { WATCH_STATUS_OPTIONS } from '@/components/watch-record-context';
 import type { FavoriteItem } from '@/features/favorites/types';
+import { useListLayoutMotion } from '@/hooks/useListLayoutMotion';
 import { isCatalogFavoriteSource } from '@/lib/catalog-favorites';
 import { FAVORITE_RENDER_CHUNK } from '@/lib/favorites-count';
 
@@ -49,7 +50,7 @@ export function FavoriteGrid({
     return (
       <VirtualizedGrid
         items={items}
-        getKey={(item) => `${item.source}+${item.id}`}
+        getKey={favoriteKey}
         renderItem={(item) => (
           <FavoriteVideoCard item={item} selection={selection} />
         )}
@@ -61,16 +62,44 @@ export function FavoriteGrid({
   }
 
   return (
-    <div className={POSTER_GRID_CLASS}>
-      {items.map((item) => (
-        <div key={item.id + item.source} className='w-full'>
-          {readOnly ? (
-            <ReadOnlyFavoriteCard item={item} />
-          ) : (
-            <FavoriteVideoCard item={item} selection={selection} />
-          )}
-        </div>
-      ))}
+    <PlainFavoriteGrid
+      items={items}
+      readOnly={readOnly}
+      selection={selection}
+    />
+  );
+}
+
+function favoriteKey(item: FavoriteItem) {
+  return `${item.source}+${item.id}`;
+}
+
+function PlainFavoriteGrid({
+  items,
+  readOnly,
+  selection,
+}: {
+  items: FavoriteItem[];
+  readOnly: boolean;
+  selection?: FavoriteGridSelection;
+}) {
+  const containerRef = useListLayoutMotion<HTMLDivElement>(
+    items.map(favoriteKey),
+  );
+  return (
+    <div ref={containerRef} className={`relative ${POSTER_GRID_CLASS}`}>
+      {items.map((item) => {
+        const key = favoriteKey(item);
+        return (
+          <div key={key} data-list-motion-key={key} className='w-full'>
+            {readOnly ? (
+              <ReadOnlyFavoriteCard item={item} />
+            ) : (
+              <FavoriteVideoCard item={item} selection={selection} />
+            )}
+          </div>
+        );
+      })}
     </div>
   );
 }
@@ -96,7 +125,7 @@ function FavoriteVideoCard({
     />
   );
   if (!selection) return card;
-  const key = `${item.source}+${item.id}`;
+  const key = favoriteKey(item);
   const selected = selection.isSelected(key);
   return (
     <div className='relative'>

@@ -12,7 +12,7 @@ import {
   MODAL_SECONDARY_BUTTON_CLASS,
   MODAL_TITLE_CLASS,
 } from '@/components/modals/modal-styles';
-import ModalShell from '@/components/modals/ModalShell';
+import ModalShell, { useDeferredClose } from '@/components/modals/ModalShell';
 import ProfileAvatar from '@/components/ProfileAvatar';
 import Select from '@/components/Select';
 import { useNicknameAvailability } from '@/hooks/useNicknameAvailability';
@@ -324,12 +324,17 @@ export function ProfilePanel({
   onClose: () => void;
   onChangePassword?: () => void;
 }) {
+  const [open, requestClose] = useDeferredClose(onClose);
   return (
-    <ModalShell isOpen onClose={onClose} panelClassName='max-w-sm p-5 sm:p-6'>
+    <ModalShell
+      isOpen={open}
+      onClose={requestClose}
+      panelClassName='max-w-sm p-5 sm:p-6'
+    >
       <div role='dialog' aria-label='个人资料' aria-modal='true'>
         <ProfileForm
-          onSaved={onClose}
-          onClose={onClose}
+          onSaved={requestClose}
+          onClose={requestClose}
           onChangePassword={onChangePassword}
         />
       </div>

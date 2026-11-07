@@ -47,6 +47,31 @@ export function PageFooter({
   );
 }
 export function FollowList({
+  isOpen,
+  profileId,
+  type,
+  onClose,
+}: {
+  isOpen: boolean;
+  profileId: string;
+  type: 'followers' | 'following' | null;
+  onClose: () => void;
+}) {
+  return (
+    <ModalShell isOpen={isOpen} onClose={onClose} panelClassName='max-w-md p-5'>
+      {type && (
+        <FollowListContent
+          key={`${profileId}:${type}`}
+          profileId={profileId}
+          type={type}
+          onClose={onClose}
+        />
+      )}
+    </ModalShell>
+  );
+}
+
+function FollowListContent({
   profileId,
   type,
   onClose,
@@ -61,38 +86,36 @@ export function FollowList({
   );
   const page = useProfilePage(load);
   return (
-    <ModalShell isOpen onClose={onClose} panelClassName='max-w-md p-5'>
-      <div
-        role='dialog'
-        aria-modal='true'
-        aria-label={type === 'followers' ? '粉丝' : '关注'}
-      >
-        <div className='mb-4 flex justify-between'>
-          <h2 className='font-semibold'>
-            {type === 'followers' ? '粉丝' : '关注'}
-          </h2>
-          <button type='button' aria-label='关闭列表' onClick={onClose}>
-            <X className='h-5 w-5' />
-          </button>
-        </div>
-        <div className='max-h-[60dvh] overflow-y-auto'>
-          {page.items.map((item) => (
-            <Link
-              key={item.profileId}
-              href={`/u/${item.profileId}`}
-              onClick={onClose}
-              className='flex items-center gap-3 rounded-xl p-3 hover:bg-gray-100 dark:hover:bg-white/5'
-            >
-              <ProfileAvatar user={item} />
-              <span>{item.nickname ?? '未设置昵称'}</span>
-            </Link>
-          ))}
-          {!page.loading && !page.error && page.items.length === 0 && (
-            <p className='py-8 text-center text-sm text-gray-500'>暂无用户</p>
-          )}
-          <PageFooter {...page} />
-        </div>
+    <div
+      role='dialog'
+      aria-modal='true'
+      aria-label={type === 'followers' ? '粉丝' : '关注'}
+    >
+      <div className='mb-4 flex justify-between'>
+        <h2 className='font-semibold'>
+          {type === 'followers' ? '粉丝' : '关注'}
+        </h2>
+        <button type='button' aria-label='关闭列表' onClick={onClose}>
+          <X className='h-5 w-5' />
+        </button>
       </div>
-    </ModalShell>
+      <div className='max-h-[60dvh] overflow-y-auto'>
+        {page.items.map((item) => (
+          <Link
+            key={item.profileId}
+            href={`/u/${item.profileId}`}
+            onClick={onClose}
+            className='flex items-center gap-3 rounded-xl p-3 hover:bg-gray-100 dark:hover:bg-white/5'
+          >
+            <ProfileAvatar user={item} />
+            <span>{item.nickname ?? '未设置昵称'}</span>
+          </Link>
+        ))}
+        {!page.loading && !page.error && page.items.length === 0 && (
+          <p className='py-8 text-center text-sm text-gray-500'>暂无用户</p>
+        )}
+        <PageFooter {...page} />
+      </div>
+    </div>
   );
 }

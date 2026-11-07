@@ -1,7 +1,13 @@
 'use client';
 
 import { useRouter } from 'next/navigation';
-import { type ReactNode, useEffect, useLayoutEffect, useState } from 'react';
+import {
+  type CSSProperties,
+  type ReactNode,
+  useEffect,
+  useLayoutEffect,
+  useState,
+} from 'react';
 
 import {
   HOME_POSTER_CARD_CLASS,
@@ -28,6 +34,10 @@ import type {
   PlaybackPeriodType,
   PlaybackTopWork,
 } from '@/features/playback-stats/types';
+import {
+  INDICATOR_TARGET_ATTR,
+  useSlidingIndicator,
+} from '@/hooks/useSlidingIndicator';
 import {
   getCurrentNavigationPath,
   withReturnTo,
@@ -205,6 +215,10 @@ function TopWorksMessage({ children }: { children: ReactNode }) {
   );
 }
 
+function rangeOrder(value: PlaybackPeriodType) {
+  return TOP_RANGE_OPTIONS.findIndex((option) => option.value === value);
+}
+
 function TopWorks({ week }: { week: PlaybackPeriodStats }) {
   const router = useRouter();
   const [range, setRange] = useState<PlaybackPeriodType>('week');
@@ -223,6 +237,15 @@ function TopWorks({ week }: { week: PlaybackPeriodStats }) {
   if (loaded && shownRange !== range) setShownRange(range);
   const works = worksOf(loaded ? range : shownRange) ?? [];
   const pending = !loaded && !failed;
+  // 展示的范围变化时卡片沿切换方向依次滑入；首次展示不播放
+  const [swap, setSwap] = useState({ range: shownRange, shift: 0 });
+  if (swap.range !== shownRange) {
+    setSwap({
+      range: shownRange,
+      shift: rangeOrder(shownRange) > rangeOrder(swap.range) ? 1 : -1,
+    });
+  }
+  const indicator = useSlidingIndicator<HTMLDivElement>(range);
 
   useEffect(() => {
     if (range === 'week') return;
@@ -258,10 +281,19 @@ function TopWorks({ week }: { week: PlaybackPeriodStats }) {
     <section className={STATS_COLUMN_CLASS}>
       <StatsHeading title='常看'>
         <div
+          ref={indicator.containerRef}
           role='radiogroup'
           aria-label='常看范围'
-          className='flex h-7 rounded-full bg-gray-900/[0.05] p-0.5 dark:bg-white/[0.06]'
+          className='relative flex h-7 rounded-full bg-gray-900/[0.05] p-0.5 dark:bg-white/[0.06]'
         >
+          {indicator.indicatorProps && (
+            <span
+              aria-hidden='true'
+              ref={indicator.indicatorProps.ref}
+              style={{ ...indicator.indicatorProps.style, top: undefined }}
+              className='sliding-indicator bottom-0.5 top-0.5 rounded-full bg-white shadow-sm dark:bg-white/[0.14]'
+            />
+          )}
           {TOP_RANGE_OPTIONS.map((option) => {
             const selected = range === option.value;
             return (
@@ -270,10 +302,11 @@ function TopWorks({ week }: { week: PlaybackPeriodStats }) {
                 type='button'
                 role='radio'
                 aria-checked={selected}
+                {...(selected ? { [INDICATOR_TARGET_ATTR]: '' } : {})}
                 onClick={() => setRange(option.value)}
-                className={`min-w-9 rounded-full px-2.5 text-xs transition-colors ${
+                className={`relative min-w-9 rounded-full px-2.5 text-xs transition-colors ${
                   selected
-                    ? 'bg-white font-medium text-gray-900 shadow-sm dark:bg-white/[0.14] dark:text-white'
+                    ? 'font-medium text-gray-900 dark:text-white'
                     : 'text-gray-500 hover:text-gray-800 dark:text-gray-400 dark:hover:text-gray-100'
                 }`}
               >
@@ -291,14 +324,19 @@ function TopWorks({ week }: { week: PlaybackPeriodStats }) {
         </TopWorksMessage>
       ) : (
         <div
+          key={shownRange}
           aria-busy={pending}
           className={`transition-opacity ${pending ? 'opacity-50' : ''}`}
+          style={{ '--swap-shift': `${swap.shift * 28}px` } as CSSProperties}
         >
           <ScrollableRow>
             {works.map((work, index) => (
               <div
                 key={`${work.source}+${work.videoId}`}
-                className={HOME_POSTER_CARD_CLASS}
+                className={`${HOME_POSTER_CARD_CLASS} ${
+                  swap.shift ? 'motion-swap-in' : ''
+                }`}
+                style={{ '--stagger-index': index } as CSSProperties}
               >
                 <TopWorkCard work={work} rank={index + 1} onOpen={open} />
               </div>

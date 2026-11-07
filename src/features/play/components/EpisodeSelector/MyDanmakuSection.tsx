@@ -10,6 +10,7 @@ import {
   fetchUserDanmaku,
   USER_DANMAKU_SENT_EVENT,
 } from '@/features/play/lib/danmaku/user-client';
+import { useListLayoutMotion } from '@/hooks/useListLayoutMotion';
 import { type UserDanmakuItem, buildUserDanmakuKey } from '@/lib/user-danmaku';
 
 interface MyDanmakuSectionProps {
@@ -37,6 +38,9 @@ export function MyDanmakuSection({
   onDeleted,
 }: MyDanmakuSectionProps) {
   const [items, setItems] = useState<UserDanmakuItem[]>([]);
+  const containerRef = useListLayoutMotion<HTMLUListElement>(
+    items.map((item) => String(item.id)),
+  );
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [error, setError] = useState('');
   const [sentToken, setSentToken] = useState(0);
@@ -104,10 +108,14 @@ export function MyDanmakuSection({
           {error}
         </p>
       )}
-      <ul className='max-h-40 overflow-y-auto rounded-xl bg-gray-900/[0.03] p-1 dark:bg-white/[0.04]'>
+      <ul
+        ref={containerRef}
+        className='relative max-h-40 overflow-y-auto rounded-xl bg-gray-900/[0.03] p-1 dark:bg-white/[0.04]'
+      >
         {items.map((item) => (
           <li
             key={item.id}
+            data-list-motion-key={String(item.id)}
             className='flex items-center gap-3 rounded-lg py-1 pl-2.5 pr-1 hover:bg-gray-900/[0.04] dark:hover:bg-white/[0.05]'
           >
             <span className='w-10 shrink-0 text-xs tabular-nums text-gray-400 dark:text-gray-500'>

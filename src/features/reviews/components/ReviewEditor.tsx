@@ -29,6 +29,7 @@ export interface ReviewEditorProps {
   onCancel?: () => void;
   onSubmit: (draft: VideoReviewDraft) => Promise<unknown>;
   variant?: 'inline' | 'modal';
+  isOpen?: boolean;
 }
 
 const surfaceClass =
@@ -202,6 +203,7 @@ export function ReviewEditor({
   onCancel,
   onSubmit,
   variant = 'inline',
+  isOpen = true,
 }: ReviewEditorProps) {
   const [rating, setRating] = useState<number | null>(initial?.rating ?? null);
   const [content, setContent] = useState(initial?.content ?? '');
@@ -215,6 +217,20 @@ export function ReviewEditor({
   const fullTextareaRef = useRef<HTMLTextAreaElement>(null);
   // 仅在打开展开编辑器后的首次聚焦把光标移到末尾，之后尊重用户点击位置
   const caretToEndRef = useRef(false);
+  const [previousOpen, setPreviousOpen] = useState(isOpen);
+  const [previousInitial, setPreviousInitial] = useState(initial);
+  if (isOpen !== previousOpen || initial !== previousInitial) {
+    setPreviousOpen(isOpen);
+    setPreviousInitial(initial);
+    if (modal && isOpen) {
+      setRating(initial?.rating ?? null);
+      setContent(initial?.content ?? '');
+      setIsPublic(initial?.is_public ?? false);
+      setSpoiler(initial?.spoiler ?? false);
+      setError('');
+      setSaving(false);
+    }
+  }
 
   const trimmedLength = content.trim().length;
   const canSubmit =
@@ -338,7 +354,7 @@ export function ReviewEditor({
         </form>
       )}
       <ModalShell
-        isOpen={modal || expanded}
+        isOpen={modal ? isOpen : expanded}
         onClose={() => {
           if (modal) {
             if (!savingRef.current) onCancel?.();

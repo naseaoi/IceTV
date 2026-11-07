@@ -86,24 +86,12 @@ jest.mock(
   () => ({ ChangePasswordForm: () => null }),
 );
 jest.mock(
-  '@/features/admin/components/tabs/user-config/ConfigureUserApisDialog',
-  () => ({ ConfigureUserApisDialog: () => null }),
-);
-jest.mock(
-  '@/features/admin/components/tabs/user-config/ConfigureUserGroupDialog',
-  () => ({ ConfigureUserGroupDialog: () => null }),
-);
-jest.mock(
   '@/features/admin/components/tabs/user-config/DeleteUserConfirm',
   () => ({ DeleteUserConfirm: () => null }),
 );
 jest.mock(
   '@/features/admin/components/tabs/user-config/DeleteUserGroupConfirm',
   () => ({ DeleteUserGroupConfirm: () => null }),
-);
-jest.mock(
-  '@/features/admin/components/tabs/user-config/UserGroupFormDialog',
-  () => ({ UserGroupFormDialog: () => null }),
 );
 
 jest.mock('@/features/admin/hooks/useAdminUserActions', () => ({
@@ -151,6 +139,67 @@ describe('UserConfigTab sensitive actions', () => {
     mockNextCursor = null;
     mockUserAction.mockResolvedValue(undefined);
     mockRows = [{ username: 'demo', role: 'user' }];
+  });
+
+  it.each([
+    ['配置视频源', '配置用户视频源权限 - demo'],
+    ['配置用户组', '配置用户组 - demo'],
+  ])('%s 关闭后保留内容直到退出动画结束', async (action, title) => {
+    render(
+      <UserConfigTab config={config} role='owner' refreshConfig={jest.fn()} />,
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'demo 的操作' }));
+    fireEvent.click(screen.getByRole('menuitem', { name: action }));
+    fireEvent.click(screen.getByRole('button', { name: '取消' }));
+    expect(
+      screen.getByRole('heading', { name: title }).closest('.motion-dialog'),
+    ).toHaveAttribute('data-open', 'false');
+    await waitFor(() =>
+      expect(screen.queryByRole('heading', { name: title })).toBeNull(),
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'demo 的操作' }));
+    fireEvent.click(screen.getByRole('menuitem', { name: action }));
+    expect(screen.getByRole('heading', { name: title })).toBeInTheDocument();
+  });
+
+  it('编辑用户组关闭时保留名称与选择，重新打开恢复原始选择', async () => {
+    const groupConfig = {
+      UserConfig: {
+        OpenRegister: false,
+        Users: [],
+        Tags: [{ name: 'VIP', enabledApis: ['a'] }],
+      },
+      SourceConfig: [
+        { key: 'a', name: '源甲', api: 'https://example.com', disabled: false },
+      ],
+    } as never;
+    render(
+      <UserConfigTab
+        config={groupConfig}
+        role='owner'
+        refreshConfig={jest.fn()}
+      />,
+    );
+    const open = () => {
+      fireEvent.click(screen.getByRole('button', { name: 'VIP 的操作' }));
+      fireEvent.click(screen.getByRole('menuitem', { name: '编辑' }));
+    };
+    open();
+    fireEvent.click(screen.getByRole('checkbox', { name: '全选' }));
+    fireEvent.click(screen.getByRole('button', { name: '取消' }));
+    expect(
+      screen
+        .getByRole('heading', { name: '编辑用户组 - VIP' })
+        .closest('.motion-dialog'),
+    ).toHaveAttribute('data-open', 'false');
+    expect(screen.getByRole('checkbox', { name: '全选' })).not.toBeChecked();
+    await waitFor(() =>
+      expect(
+        screen.queryByRole('heading', { name: '编辑用户组 - VIP' }),
+      ).toBeNull(),
+    );
+    open();
+    expect(screen.getByRole('checkbox', { name: '全选' })).toBeChecked();
   });
 
   it('confirms administrator authorization before executing it', async () => {

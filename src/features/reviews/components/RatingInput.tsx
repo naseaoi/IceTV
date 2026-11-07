@@ -1,6 +1,9 @@
 import React, { useEffect, useRef, useState } from 'react';
 
-import RatingStars from '@/components/RatingStars';
+import RatingStars, {
+  type RatingStarsPop,
+  litStarCount,
+} from '@/components/RatingStars';
 import {
   formatRating,
   normalizeRating,
@@ -39,7 +42,19 @@ function parseRatingText(text: string): number | null | undefined {
 export function RatingInput({ value, onChange, disabled }: RatingInputProps) {
   const [previewValue, setPreviewValue] = useState<number | null>(null);
   const [text, setText] = useState(value === null ? '' : formatRating(value));
+  const [pop, setPop] = useState<RatingStarsPop | null>(null);
   const draggingRef = useRef(false);
+
+  const commit = (next: number | null) => {
+    if (next !== value) {
+      setPop((current) => ({
+        id: (current?.id ?? 0) + 1,
+        from: litStarCount(value),
+        to: litStarCount(next),
+      }));
+    }
+    onChange(next);
+  };
 
   useEffect(() => {
     setText(value === null ? '' : formatRating(value));
@@ -51,7 +66,7 @@ export function RatingInput({ value, onChange, disabled }: RatingInputProps) {
       setText(value === null ? '' : formatRating(value));
       return;
     }
-    onChange(parsed);
+    commit(parsed);
     setText(parsed === null ? '' : formatRating(parsed));
   };
 
@@ -83,7 +98,7 @@ export function RatingInput({ value, onChange, disabled }: RatingInputProps) {
         return;
     }
     event.preventDefault();
-    onChange(next);
+    commit(next);
   };
 
   const shown = previewValue ?? value;
@@ -118,7 +133,7 @@ export function RatingInput({ value, onChange, disabled }: RatingInputProps) {
           if (disabled || !draggingRef.current) return;
           draggingRef.current = false;
           setPreviewValue(null);
-          onChange(ratingFromPointer(event));
+          commit(ratingFromPointer(event));
         }}
         onPointerLeave={() => {
           if (!draggingRef.current) setPreviewValue(null);
@@ -128,7 +143,7 @@ export function RatingInput({ value, onChange, disabled }: RatingInputProps) {
           setPreviewValue(null);
         }}
       >
-        <RatingStars value={shown} size='lg' decorative />
+        <RatingStars value={shown} size='lg' decorative pop={pop} />
       </div>
       <label className='flex h-9 w-14 shrink-0 items-center rounded-lg bg-gray-900/[0.04] px-1.5 transition focus-within:ring-2 focus-within:ring-amber-500/50 dark:bg-white/[0.06]'>
         <span className='sr-only'>分数（1.0–10.0）</span>

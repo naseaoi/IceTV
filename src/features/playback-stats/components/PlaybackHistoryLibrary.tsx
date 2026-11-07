@@ -20,6 +20,7 @@ import {
   usePlayHistorySession,
 } from '@/features/playback-stats/hooks/usePlaybackHistory';
 import { groupPlaybackSessionsByDay } from '@/features/playback-stats/lib/history';
+import { useListLayoutMotion } from '@/hooks/useListLayoutMotion';
 import type { PlaybackSession } from '@/lib/types';
 
 const GROUP_TITLE_TEXT_CLASS = 'mb-3 text-sm font-medium';
@@ -67,6 +68,39 @@ export function PlaybackHistoryPageSkeleton() {
       </div>
       <PlaybackHistoryGridSkeleton />
     </>
+  );
+}
+
+function PlaybackHistoryGroupGrid({
+  sessions,
+  selectedIds,
+  ...cardProps
+}: {
+  sessions: PlaybackSession[];
+  selectedIds: Set<string>;
+} & Omit<
+  React.ComponentProps<typeof HistoryPosterCard>,
+  'session' | 'selected'
+>) {
+  const containerRef = useListLayoutMotion<HTMLDivElement>(
+    sessions.map((session) => String(session.id)),
+  );
+  return (
+    <div ref={containerRef} className={`relative ${POSTER_GRID_CLASS}`}>
+      {sessions.map((session) => (
+        <div
+          key={session.id}
+          data-list-motion-key={String(session.id)}
+          className='w-full'
+        >
+          <HistoryPosterCard
+            {...cardProps}
+            session={session}
+            selected={selectedIds.has(session.id)}
+          />
+        </div>
+      ))}
+    </div>
   );
 }
 
@@ -161,21 +195,16 @@ export function PlaybackHistoryLibrary() {
             >
               {group.label}
             </h3>
-            <div className={POSTER_GRID_CLASS}>
-              {group.sessions.map((session) => (
-                <HistoryPosterCard
-                  key={session.id}
-                  session={session}
-                  selectable={editing}
-                  selected={selectedIds.has(session.id)}
-                  onActivate={editing ? toggleSelected : playHistoryItem}
-                  onPrefetch={prefetchPlayPage}
-                  onDelete={async (item) => {
-                    await removeSessions([item.id]);
-                  }}
-                />
-              ))}
-            </div>
+            <PlaybackHistoryGroupGrid
+              sessions={group.sessions}
+              selectable={editing}
+              selectedIds={selectedIds}
+              onActivate={editing ? toggleSelected : playHistoryItem}
+              onPrefetch={prefetchPlayPage}
+              onDelete={async (item) => {
+                await removeSessions([item.id]);
+              }}
+            />
           </section>
         ))}
 
@@ -197,7 +226,7 @@ export function PlaybackHistoryLibrary() {
 
   return (
     <>
-      <div className='z-20 -mx-4 mb-4 flex items-center gap-2 bg-gray-50/85 px-4 py-3 backdrop-blur-xl dark:bg-gray-950/80 sm:-mx-8 sm:px-8 md:sticky md:top-16 xl:-mx-12 xl:px-12'>
+      <div className='z-20 -mx-4 mb-4 flex items-center gap-2 bg-gray-50 px-4 py-3 dark:bg-gray-950 sm:-mx-8 sm:px-8 md:sticky md:top-16 xl:-mx-12 xl:px-12'>
         {editing ? (
           <>
             <span className='text-sm text-gray-500 dark:text-gray-400'>

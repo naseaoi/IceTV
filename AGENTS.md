@@ -56,7 +56,7 @@
 
 ## 界面硬约束
 
-其余界面规范见 [前端界面](docs/frontend.md)。原生 `<select>`、`max-*` 变体、`animate-pulse` / `animate-spin`、导航与筛选栏以外的 `backdrop-blur` 由 ESLint（`eslint.config.mjs`）报错拦截，新增吸顶导航或筛选栏时把文件加入 `BACKDROP_BLUR_ALLOWED_FILES`。
+其余界面规范见 [前端界面](docs/frontend.md)。原生 `<select>`、`max-*` 变体、`animate-pulse` / `animate-spin`、`backdrop-blur` 由 ESLint（`eslint.config.mjs`）报错拦截。
 
 - `tailwind.config.ts` 含 raw 断点（`split`），Tailwind 因此**不生成 `max-sm:` / `max-md:` 等 `max-*` 变体**，写了也静默无效。窄屏样式写成基础类加 `sm:` / `md:` 覆盖，窄屏横屏用 `phone-landscape:`。
 - `@tailwindcss/forms` 按控件类型给原生 input / select / textarea 加边框、内边距和背景（select 另有背景箭头）。自定义样式的控件须显式 `border-0`、重置 padding、`focus:ring-0`（select 再加 `bg-none`），否则浅色模式出现灰框或文字被裁切。下拉统一用 `src/components/Select.tsx`，不写原生 `<select>`。

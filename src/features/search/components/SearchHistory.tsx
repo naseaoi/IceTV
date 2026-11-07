@@ -13,6 +13,7 @@ import {
   SEARCH_HISTORY_TITLE_TEXT_CLASS,
 } from '@/features/search/lib/search-layout';
 import { normalizeSearchQueryInput } from '@/features/search/lib/searchQuery';
+import { useListLayoutMotion } from '@/hooks/useListLayoutMotion';
 import { useLongPress } from '@/hooks/useLongPress';
 import { clearSearchHistory, deleteSearchHistory } from '@/lib/db.client';
 
@@ -44,7 +45,7 @@ function HistoryChip({
   });
 
   return (
-    <li className='group relative'>
+    <li data-list-motion-key={item} className='group relative'>
       <button
         type='button'
         aria-label={editing ? `删除搜索历史 ${item}` : undefined}
@@ -82,6 +83,7 @@ export default function SearchHistory({
   loading = false,
 }: SearchHistoryProps) {
   const router = useRouter();
+  const containerRef = useListLayoutMotion<HTMLUListElement>(searchHistory);
   const [showClearConfirm, setShowClearConfirm] = useState(false);
   const [editing, setEditing] = useState(false);
 
@@ -128,7 +130,7 @@ export default function SearchHistory({
           )}
         </div>
       </div>
-      <ul className='flex flex-wrap gap-2'>
+      <ul ref={containerRef} className='relative flex flex-wrap gap-2'>
         {searchHistory.map((item) => (
           <HistoryChip
             key={item}

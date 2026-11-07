@@ -284,7 +284,9 @@ it('编辑后就地更新卡片并派发更新事件，保留其他卡片', asyn
         }),
       }),
     );
-    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    await waitFor(() =>
+      expect(screen.queryByRole('dialog')).not.toBeInTheDocument(),
+    );
     expect(screen.getByText('新的感受')).toBeInTheDocument();
     expect(screen.getByText('9.1')).toBeInTheDocument();
     expect(screen.getByText('包含剧透')).toBeInTheDocument();
@@ -329,8 +331,10 @@ it('保存失败保留草稿，缺少昵称复用统一事件，随后可以重�
     await act(async () => {
       fireEvent.click(screen.getByRole('button', { name: '保存' }));
     });
+    await waitFor(() =>
+      expect(screen.queryByRole('dialog')).not.toBeInTheDocument(),
+    );
     expect(screen.getByText('保留草稿')).toBeInTheDocument();
-    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
   } finally {
     window.removeEventListener(PROFILE_REQUIRED_EVENT, listener);
   }
@@ -350,6 +354,15 @@ it('取消编辑保持原评价，文字筛选中添加评分后移出卡片', a
   });
   fireEvent.click(screen.getByRole('button', { name: '取消' }));
   expect(global.fetch).not.toHaveBeenCalled();
+  expect(screen.getByRole('dialog').closest('.motion-dialog')).toHaveAttribute(
+    'data-open',
+    'false',
+  );
+  expect(screen.getByLabelText('评价全文')).toHaveValue('未保存');
+  fireEvent.click(screen.getByRole('button', { name: '编辑对三体的评价' }));
+  expect(screen.getByLabelText('评价全文')).toHaveValue('值得一看');
+  fireEvent.click(screen.getByRole('button', { name: '取消' }));
+  await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
   expect(screen.getAllByText('值得一看')).toHaveLength(2);
   fireEvent.click(screen.getByRole('button', { name: /^仅文字/ }));
   await waitFor(() =>
@@ -443,9 +456,13 @@ it('保存时取消旧刷新请求并重新取首页，迟到响应保持新评�
   });
   expect(signal?.aborted).toBe(true);
   expect(fetchMyVideoReviews).toHaveBeenCalledTimes(3);
-  expect(screen.getByText(updated.content)).toBeInTheDocument();
+  expect(
+    screen.getByText(updated.content, { selector: 'p' }),
+  ).toBeInTheDocument();
   await act(async () => resolveOld());
-  expect(screen.getByText(updated.content)).toBeInTheDocument();
+  expect(
+    screen.getByText(updated.content, { selector: 'p' }),
+  ).toBeInTheDocument();
   expect(
     screen.getByRole('link', { name: '播放私密电影' }),
   ).toBeInTheDocument();

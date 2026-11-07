@@ -41,6 +41,7 @@ import {
 } from '@/features/admin/services/inviteCodes';
 import { useAlertModal } from '@/hooks/useAlertModal';
 import { useModalState } from '@/hooks/useModalState';
+import { useRetainedValue } from '@/hooks/useRetainedValue';
 import { getAuthInfoFromBrowserCookie } from '@/lib/auth.client';
 import type { InviteCodeFilter } from '@/lib/invite-code-storage';
 import { AdminConfig } from '@/types/admin';
@@ -151,6 +152,9 @@ const UserConfig = ({ config, role, refreshConfig }: UserConfigProps) => {
     role: 'user' | 'admin' | 'owner';
     tags?: string[];
   } | null>(null);
+  const retainedUser = useRetainedValue(selectedUser);
+  const retainedUserForGroup = useRetainedValue(selectedUserForGroup);
+  const retainedEditingGroup = useRetainedValue(editingUserGroup);
   const [selectedUserGroups, setSelectedUserGroups] = useState<string[]>([]);
   const [selectedUsers, setSelectedUsers] = useState<Set<string>>(new Set());
   const [showBatchUserGroupModal, setShowBatchUserGroupModal] =
@@ -1019,18 +1023,16 @@ const UserConfig = ({ config, role, refreshConfig }: UserConfigProps) => {
         />
       </div>
 
-      {selectedUser && (
-        <ConfigureUserApisDialog
-          isOpen={showConfigureApisModal}
-          username={selectedUser.username}
-          sources={config.SourceConfig || []}
-          selectedApis={selectedApis}
-          onSelectedApisChange={setSelectedApis}
-          onClose={closeConfigureApisModal}
-          onSave={handleSaveUserApis}
-          isSaving={isLoading(`saveUserApis_${selectedUser.username}`)}
-        />
-      )}
+      <ConfigureUserApisDialog
+        isOpen={showConfigureApisModal && Boolean(selectedUser)}
+        username={retainedUser?.username ?? ''}
+        sources={config.SourceConfig || []}
+        selectedApis={selectedApis}
+        onSelectedApisChange={setSelectedApis}
+        onClose={closeConfigureApisModal}
+        onSave={handleSaveUserApis}
+        isSaving={isLoading(`saveUserApis_${retainedUser?.username}`)}
+      />
 
       <UserGroupFormDialog
         mode='add'
@@ -1043,42 +1045,35 @@ const UserConfig = ({ config, role, refreshConfig }: UserConfigProps) => {
         isSubmitting={isLoading('userGroup_add_new')}
       />
 
-      {editingUserGroup && (
-        <UserGroupFormDialog
-          mode='edit'
-          isOpen={showEditUserGroupForm}
-          value={editingUserGroup}
-          onChange={(next) =>
-            setEditingUserGroup({
-              name: editingUserGroup.name,
-              enabledApis: next.enabledApis,
-            })
-          }
-          sources={config.SourceConfig || []}
-          onClose={closeEditUserGroupModal}
-          onSubmit={handleEditUserGroup}
-          isSubmitting={isLoading(`userGroup_edit_${editingUserGroup.name}`)}
-        />
-      )}
+      <UserGroupFormDialog
+        mode='edit'
+        isOpen={showEditUserGroupForm && Boolean(editingUserGroup)}
+        value={retainedEditingGroup ?? { name: '', enabledApis: [] }}
+        onChange={(next) =>
+          setEditingUserGroup((current) =>
+            current ? { ...current, enabledApis: next.enabledApis } : current,
+          )
+        }
+        sources={config.SourceConfig || []}
+        onClose={closeEditUserGroupModal}
+        onSubmit={handleEditUserGroup}
+        isSubmitting={isLoading(`userGroup_edit_${retainedEditingGroup?.name}`)}
+      />
 
-      {selectedUserForGroup && (
-        <ConfigureUserGroupDialog
-          isOpen={showConfigureUserGroupModal}
-          username={selectedUserForGroup.username}
-          selectedGroup={
-            selectedUserGroups.length > 0 ? selectedUserGroups[0] : ''
-          }
-          userGroups={userGroups}
-          onSelectedGroupChange={(next) =>
-            setSelectedUserGroups(next ? [next] : [])
-          }
-          onClose={closeConfigureUserGroupModal}
-          onSave={handleSaveUserGroups}
-          isSaving={isLoading(
-            `saveUserGroups_${selectedUserForGroup.username}`,
-          )}
-        />
-      )}
+      <ConfigureUserGroupDialog
+        isOpen={showConfigureUserGroupModal && Boolean(selectedUserForGroup)}
+        username={retainedUserForGroup?.username ?? ''}
+        selectedGroup={
+          selectedUserGroups.length > 0 ? selectedUserGroups[0] : ''
+        }
+        userGroups={userGroups}
+        onSelectedGroupChange={(next) =>
+          setSelectedUserGroups(next ? [next] : [])
+        }
+        onClose={closeConfigureUserGroupModal}
+        onSave={handleSaveUserGroups}
+        isSaving={isLoading(`saveUserGroups_${retainedUserForGroup?.username}`)}
+      />
 
       <DeleteUserGroupConfirm
         isOpen={showDeleteUserGroupModal && !!deletingUserGroup}

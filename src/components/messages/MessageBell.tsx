@@ -2,15 +2,20 @@
 
 import { Bell } from 'lucide-react';
 
+import AnimatedCount from '@/components/AnimatedCount';
 import { useAuthSession } from '@/components/AuthProvider';
 
 import { useMessageCenter } from './MessageCenterProvider';
 
+function formatUnread(count: number) {
+  return count > 99 ? '99+' : String(count);
+}
+
 function UnreadBadge({ count }: { count: number }) {
   if (count <= 0) return null;
   return (
-    <span className='absolute -right-1 -top-1 flex min-h-4 min-w-4 items-center justify-center rounded-full bg-rose-500 px-1 text-[10px] font-semibold leading-4 text-white ring-2 ring-white dark:ring-gray-900'>
-      {count > 99 ? '99+' : count}
+    <span className='motion-badge-in absolute -right-1 -top-1 flex min-h-4 min-w-4 items-center justify-center rounded-full bg-rose-500 px-1 text-[10px] font-semibold leading-4 text-white ring-2 ring-white dark:ring-gray-900'>
+      <AnimatedCount value={count} format={formatUnread} />
     </span>
   );
 }

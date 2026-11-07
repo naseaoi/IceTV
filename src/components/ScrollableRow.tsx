@@ -2,9 +2,10 @@
 
 import { ChevronLeft, ChevronRight } from 'lucide-react';
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Children, useMemo } from 'react';
+import { Children, isValidElement, useMemo } from 'react';
 
 import { FLOATING_CONTROL_CLASS } from '@/components/floating-control';
+import { useListLayoutMotion } from '@/hooks/useListLayoutMotion';
 
 interface ScrollableRowProps {
   children: React.ReactNode;
@@ -19,7 +20,6 @@ export default function ScrollableRow({
   initialItemCount,
   mountBatchSize = 8,
 }: ScrollableRowProps) {
-  const containerRef = useRef<HTMLDivElement>(null);
   const childItems = useMemo(() => Children.toArray(children), [children]);
   const totalItemCount = childItems.length;
   const progressiveMounting =
@@ -30,6 +30,15 @@ export default function ScrollableRow({
   const normalizedMountBatchSize = Math.max(1, Math.floor(mountBatchSize));
   const [mountedItemCount, setMountedItemCount] = useState(
     normalizedInitialItemCount,
+  );
+  const mountedItems = childItems.slice(0, mountedItemCount);
+  const containerRef = useListLayoutMotion<HTMLDivElement>(
+    mountedItems.map((child, index) =>
+      isValidElement(child) && child.key !== null
+        ? String(child.key)
+        : `index:${index}`,
+    ),
+    { matchChildOrder: true },
   );
   const [showLeftScroll, setShowLeftScroll] = useState(false);
   const [showRightScroll, setShowRightScroll] = useState(false);
@@ -93,6 +102,7 @@ export default function ScrollableRow({
         scrollWidth - (scrollLeft + clientWidth) > threshold,
     });
   }, [
+    containerRef,
     mountMoreItems,
     mountedItemCount,
     progressiveMounting,
@@ -138,7 +148,7 @@ export default function ScrollableRow({
         animationFrameRef.current = null;
       }
     };
-  }, [checkScroll, scheduleCheckScroll]);
+  }, [checkScroll, containerRef, scheduleCheckScroll]);
 
   const handleScrollRightClick = () => {
     const container = containerRef.current;
@@ -173,10 +183,10 @@ export default function ScrollableRow({
     >
       <div
         ref={containerRef}
-        className='scrollbar-hide flex space-x-3 overflow-x-auto py-2 pb-4 pl-2 pr-5 sm:space-x-4 sm:py-2 sm:pb-6 sm:pl-2 sm:pr-6'
+        className='scrollbar-hide relative flex space-x-3 overflow-x-auto py-2 pb-4 pl-2 pr-5 sm:space-x-4 sm:py-2 sm:pb-6 sm:pl-2 sm:pr-6'
         onScroll={scheduleCheckScroll}
       >
-        {childItems.slice(0, mountedItemCount)}
+        {mountedItems}
       </div>
       {showLeftScroll && (
         <div

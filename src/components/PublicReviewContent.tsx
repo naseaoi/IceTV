@@ -4,6 +4,7 @@ import { EyeOff, Flag, MoreHorizontal, ThumbsUp, X } from 'lucide-react';
 import Link from 'next/link';
 import { useEffect, useRef, useState } from 'react';
 
+import AnimatedCount from '@/components/AnimatedCount';
 import ExpandableText from '@/components/ExpandableText';
 import ModalShell from '@/components/modals/ModalShell';
 import ProfileAvatar from '@/components/ProfileAvatar';
@@ -71,6 +72,7 @@ export default function PublicReviewContent({
     likeCount: review.likeCount,
   });
   const [busy, setBusy] = useState(false);
+  const [likePop, setLikePop] = useState(0);
   const inFlight = useRef(false);
   const [menu, setMenu] = useState(false);
   const [reporting, setReporting] = useState(false);
@@ -93,6 +95,7 @@ export default function PublicReviewContent({
     setBusy(true);
     setError('');
     const previous = like;
+    if (!previous.liked) setLikePop((count) => count + 1);
     setLike({
       liked: !like.liked,
       likeCount: Math.max(0, like.likeCount + (like.liked ? -1 : 1)),
@@ -163,7 +166,10 @@ export default function PublicReviewContent({
                   className='inline-flex h-7 items-center gap-1 px-2'
                 >
                   <ThumbsUp aria-hidden='true' className='h-3.5 w-3.5' />
-                  <span className='tabular-nums'>{like.likeCount}</span>
+                  <AnimatedCount
+                    value={like.likeCount}
+                    className='tabular-nums'
+                  />
                 </span>
               )
             ) : (
@@ -174,13 +180,17 @@ export default function PublicReviewContent({
                   aria-pressed={like.liked}
                   disabled={busy}
                   onClick={() => void toggleLike()}
-                  className={`inline-flex h-7 items-center gap-1 rounded-full px-2 transition hover:bg-gray-100 disabled:opacity-50 dark:hover:bg-white/10 ${like.liked ? 'text-brand-600 dark:text-brand-400' : 'hover:text-gray-700 dark:hover:text-gray-200'}`}
+                  className={`inline-flex h-7 items-center gap-1 rounded-full px-2 transition hover:bg-gray-100 dark:hover:bg-white/10 ${like.liked ? 'text-brand-600 dark:text-brand-400' : 'hover:text-gray-700 dark:hover:text-gray-200'}`}
                 >
                   <ThumbsUp
+                    key={likePop}
                     aria-hidden='true'
-                    className={`h-3.5 w-3.5 ${like.liked ? 'fill-current' : ''}`}
+                    className={`h-3.5 w-3.5 ${like.liked ? 'fill-current' : ''} ${like.liked && likePop > 0 ? 'motion-pop' : ''}`}
                   />
-                  <span className='tabular-nums'>{like.likeCount}</span>
+                  <AnimatedCount
+                    value={like.likeCount}
+                    className='tabular-nums'
+                  />
                 </button>
                 <div className='relative'>
                   <button

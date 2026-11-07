@@ -242,6 +242,22 @@ const CoverImage: React.FC<CoverImageProps> = memo(function CoverImage({
     if (typeof image?.animate === 'function') {
       animations.push(image.animate([{ opacity: 0 }, { opacity: 1 }], options));
     }
+    if (
+      typeof image?.animate === 'function' &&
+      !window.matchMedia('(prefers-reduced-motion: reduce)').matches
+    ) {
+      // 轻微回缩只在动画期间生效，结束后不残留变换
+      animations.push(
+        image.animate(
+          [{ transform: 'scale(1.06)' }, { transform: 'scale(1)' }],
+          {
+            duration: 900,
+            easing: options.easing,
+            fill: 'backwards',
+          },
+        ),
+      );
+    }
 
     return () => animations.forEach((animation) => animation.cancel());
   }, [loaded, processed, showFallback]);
@@ -338,7 +354,10 @@ const CoverImage: React.FC<CoverImageProps> = memo(function CoverImage({
   }
 
   return (
-    <div ref={containerRef} className='absolute inset-0'>
+    <div
+      ref={containerRef}
+      className='absolute inset-0 overflow-hidden rounded-[inherit]'
+    >
       <ImageLoadingBackdrop
         ref={loadingBackdropRef}
         active={!revealed}

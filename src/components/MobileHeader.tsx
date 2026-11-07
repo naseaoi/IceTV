@@ -21,7 +21,7 @@ const PAGE_TITLES: Record<string, string> = {
 };
 
 const HEADER_SURFACE_CLASS =
-  'fixed inset-x-0 top-0 z-[999] w-full border-b border-gray-200/70 bg-gray-50/90 backdrop-blur-xl dark:border-white/[0.06] dark:bg-gray-950/85 md:hidden';
+  'fixed inset-x-0 top-0 z-[999] w-full border-b border-gray-200/70 bg-gray-50 dark:border-white/[0.06] dark:bg-gray-950 md:hidden';
 
 function getVariant(pathname: string): 'player' | 'page' {
   return pathname.startsWith('/play') || pathname.startsWith('/live')

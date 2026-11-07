@@ -5,7 +5,8 @@
 ## 视觉
 
 - 强调色统一用 `brand-*`（`tailwind.config.ts` 定义的冰蓝色阶），`gray` 已覆盖为冷调中性灰；分区标题等装饰统一用中性灰，主色只出现在选中态、进度和主操作上。
-- 弹窗、下拉、菜单等浮层用实底（`bg-white` / `dark:bg-gray-900` + 细 ring），遮罩只压暗不模糊。毛玻璃只用于吸顶导航与筛选栏；叠在海报上的徽标与按钮用不低于 `bg-black/70` 的深色实底保证可读。弹窗标题、关闭与按钮复用 `src/components/modals/modal-styles.ts`。
+- 弹窗、下拉、菜单等浮层用实底（`bg-white` / `dark:bg-gray-900` + 细 ring），遮罩只压暗不模糊。吸顶导航与筛选栏同样用实底，底色与页面背景一致（`bg-gray-50` / `dark:bg-gray-950`），靠底部分隔线与内容区分；全站不用毛玻璃。叠在海报上的徽标与按钮用不低于 `bg-black/70` 的深色实底保证可读。弹窗标题、关闭与按钮复用 `src/components/modals/modal-styles.ts`。
+- 吸附在桌面顶栏下方的子栏（分区筛选栏、搜索结果栏）根元素加 `data-nav-subbar`，顶栏据此去掉自己的底线，两者连成一块吸顶区，只在子栏底部留一条分隔线。只在部分断点吸附的子栏，只给在顶栏可见断点上吸附的那个元素加。
 - 图标用 `lucide-react` 或 SVG，不用 emoji。
 - 悬浮在内容之上的圆形图标按钮（横排滚动箭头、回顶、列表定位）复用 `FLOATING_CONTROL_CLASS`（`src/components/floating-control.ts`），中性实底不用主色，尺寸与定位由调用方追加。
 - 海报卡片的徽标、悬停与按压样式取自 `poster-card-layout.ts`（`POSTER_BADGE_*`、`POSTER_CARD_INTERACTION_CLASS`、`POSTER_HOVER_SHADE_CLASS`），悬停收藏按钮用 `PosterFavoriteButton`。海报四角只放状态：左上来源、右上集数或评分、左下更新或我的评分（同一位置只显示一个）、右下悬停收藏；年份、来源数等次要信息放标题下的副标题行，播放、外链、删除等操作走卡片菜单。
@@ -26,6 +27,18 @@
 - 列表骨架数量跟随已知的真实条数（服务端计数、`fav_count` cookie、播放记录快照、接口返回的各筛选计数、本次会话上次看到的数量），只在完全未知时用默认值；已知为 0 时直接渲染空状态，不先闪骨架。首屏骨架期间分页底栏不再显示 `Spinner`，转圈只用于加载更多。
 - 封面统一用 `CoverImage`：它自己用 `IntersectionObserver` 与 `imageScheduler` 决定何时挂载 `<img>`，所以图片固定 `loading='eager'`，改回原生懒加载会让超时计时早于请求开始。等待上限是后台"图片代理超时"加 5 秒，服务端还在回源时前端不先判失败；超时只显示占位、不写失败缓存，加载错误才写（10 分钟）。`auto` 模式下代理失败的域名改为浏览器直连，10 分钟后重新尝试代理。
 - 列表骨架只用于尚无结果的首次加载。已展示过结果后切换筛选、排序或搜索，保留屏幕上的旧结果（列表或空状态）并变暗、标 `aria-busy` 与 `inert`，新结果到达再替换；刷新期间同时停用无限滚动，否则触发标记不复位会让自动加载停住。游标分页列表统一用 `src/hooks/usePagedQuery.ts`（收藏、我的评价已接入）：它负责请求竞态与取消、组件实例内的首页快照、加载更多去重，返回 `initialLoading`（显示骨架）与 `refreshing`（变暗旧结果）。快照不跨页面保留；本地写入用 `updateData` 改当前数据，收到写入事件调 `refresh` 清空快照重新拉取。
+
+## 动效
+
+- 缓动统一用 `globals.css` 的 `--motion-spring`（明显回弹）、`--motion-spring-soft`（轻微回弹）、`--motion-ease-out` 与 `--motion-ease-in`，不在组件里另写贝塞尔曲线。弹簧曲线由 `linear()` 采样，不支持时退回近似的 `cubic-bezier`。
+- 浮层进出场：下拉与菜单加 `motion-popover`，弹窗面板加 `motion-dialog`，遮罩加 `motion-backdrop`，统一用 `data-open` 切换。挂载与卸载交给 `usePresence`，**卸载延时要比 CSS 离场过渡长约 40ms**，否则开发模式或主线程繁忙时离场动画会被截断。下拉与菜单用 `--popover-origin` 指定展开原点、`--popover-shift` 指定位移方向。
+- 居中弹窗一律用 `ModalShell`，它负责进出场、遮罩、滚动锁定与 Esc（叠放时只关最上层），不再手写遮罩与 `fixed` 面板。父组件条件渲染会让弹窗瞬间卸载、退场动画丢失：常驻的弹窗由父组件传 `isOpen` 控制，关闭时会被清空的目标数据用 `useRetainedValue` 保留最后一份，撑住退场期间的内容；按需加载、打开时才挂载的面板在内部用同文件的 `useDeferredClose(onClose)` 拿到 `open` 与 `requestClose`，所有关闭入口都走 `requestClose`，退场结束后才通知父组件卸载。弹窗内容放在 `ModalShell` 的子组件里，每次打开重新挂载，初始状态在首帧直接从本地存储读出，不在副作用里补读，避免内容跳动。
+- 同一区域整组内容切换（如“常看”切换周/月/年）时，内容容器以当前范围为 `key` 重新挂载，条目加 `motion-swap-in` 并给出 `--stagger-index`，容器的 `--swap-shift` 用正负表示切换方向；首次展示不加。
+- 导航与标签栏的选中条用 `useSlidingIndicator`：目标项加 `data-indicator-target`，容器设为定位元素。指示条由 Web Animations 驱动 `transform`，在合成层运行，换页时主线程繁忙也不掉帧，不要改回 `left`/`width` 过渡。随页面重新挂载的导航（顶栏、移动端频道条）传 `memoryKey`，新页面才能从上一页的位置滑过来；链接式导航配合同文件的 `usePendingTarget`，点击后立即切换选中态，不等路由完成。
+- 收藏爱心的回弹与粒子只在用户点击后、收藏状态真正翻转时播放，异步加载或其他页面同步的状态变化不播放。评分星的弹起同理，由 `RatingInput` 在用户改分时传 `pop` 给 `RatingStars`，外部传入的新分值不播放。
+- 计数（点赞、粉丝、未读）用 `AnimatedCount`，数值变化时按增减方向滚动；首次渲染不播放，跨实体复用同一组件时（如切换个人主页）用 `key` 重置。
+- 列表增删与重排用 `useListLayoutMotion(keys)`：容器设为定位元素并挂返回的 ref，列表项根元素加 `data-list-motion-key`，值与 React key 一致。被删项由 React 移出后，原节点放回容器原位置作为残影淡出，其余项按布局偏移（`offsetLeft`/`offsetTop`，不受进行中的变换影响）做 FLIP 滑动。增或删超过 8 项、只在末尾追加（加载更多）、首批数据到达时直接切换。子项是无法加属性的组件时传 `matchChildOrder`，按直接子元素顺序对应 keys，`ScrollableRow` 已内置。虚拟网格按序号绝对定位，不接这个 hook。
+- 动效须处理 `prefers-reduced-motion`：CSS 动效在 `globals.css` 的减弱动效媒体查询里降级，JS 驱动的动效自行检查该媒体查询。
 
 ## 通用组件
 

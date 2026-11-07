@@ -16,6 +16,7 @@ import type {
   VideoReviewDraft,
   VideoReviewsState,
 } from '@/features/reviews/hooks/useVideoReviews';
+import { useListLayoutMotion } from '@/hooks/useListLayoutMotion';
 import { formatRating } from '@/lib/rating';
 import { formatRelativeTime } from '@/lib/relative-time';
 import type { VideoReview } from '@/lib/types';
@@ -162,6 +163,11 @@ export const ReviewsTab: React.FC<ReviewsTabProps> = ({
     loadMoreReviews,
     reviewsLoadingMore,
   } = reviews;
+  const containerRef = useListLayoutMotion<HTMLUListElement>(
+    summary?.reviews.map(
+      (review) => `${review.author.profileId}:${review.year}`,
+    ) ?? [],
+  );
   const [editing, setEditing] = useState(false);
   const { session } = useAuthSession();
   const profileId =
@@ -250,10 +256,14 @@ export const ReviewsTab: React.FC<ReviewsTabProps> = ({
           )}
         </SectionTitle>
         {summary && summary.reviews.length > 0 ? (
-          <ul className='divide-y divide-gray-100 dark:divide-white/[0.06]'>
+          <ul
+            ref={containerRef}
+            className='relative divide-y divide-gray-100 dark:divide-white/[0.06]'
+          >
             {summary.reviews.map((review) => (
               <li
                 key={`${review.author.profileId}:${review.year}`}
+                data-list-motion-key={`${review.author.profileId}:${review.year}`}
                 className='py-3.5 first:pt-0 last:pb-0'
               >
                 <PublicReviewContent

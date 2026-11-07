@@ -34,4 +34,28 @@ describe('RatingStars', () => {
     const { container } = render(<RatingStars value={6} size='sm' />);
     expect(container.querySelector('svg')).toHaveClass('h-3.5', 'w-3.5');
   });
+
+  it('pops newly lit stars in order and marks the landing star', () => {
+    const { container } = render(
+      <RatingStars value={8} decorative pop={{ id: 1, from: 1, to: 4 }} />,
+    );
+    const stars = Array.from(container.firstElementChild?.children ?? []);
+    expect(
+      stars.map((star) => star.classList.contains('rating-star-pop')),
+    ).toEqual([false, true, true, true, false]);
+    expect(stars[3]).toHaveAttribute('data-last');
+    expect(
+      (stars[2] as HTMLElement).style.getPropertyValue('--star-index'),
+    ).toBe('1');
+  });
+
+  it('dips the stars that go dark when the rating drops', () => {
+    const { container } = render(
+      <RatingStars value={2} decorative pop={{ id: 1, from: 4, to: 1 }} />,
+    );
+    const stars = Array.from(container.firstElementChild?.children ?? []);
+    expect(
+      stars.map((star) => star.classList.contains('rating-star-dip')),
+    ).toEqual([false, true, true, true, false]);
+  });
 });

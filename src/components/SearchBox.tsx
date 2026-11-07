@@ -6,6 +6,7 @@ import { type FormEvent, useCallback, useRef, useState } from 'react';
 
 import { useSearchHistory } from '@/features/search/hooks/useSearchHistory';
 import { normalizeSearchQueryInput } from '@/features/search/lib/searchQuery';
+import { useListLayoutMotion } from '@/hooks/useListLayoutMotion';
 import { deleteSearchHistory } from '@/lib/db.client';
 
 import SearchSuggestions from './SearchSuggestions';
@@ -43,6 +44,7 @@ function SearchHistoryDropdown({
   const [expanded, setExpanded] = useState(false);
   const visible = expanded ? history : history.slice(0, HISTORY_DROPDOWN_LIMIT);
   const hiddenCount = history.length - visible.length;
+  const containerRef = useListLayoutMotion<HTMLUListElement>(visible);
 
   return (
     <div
@@ -51,9 +53,16 @@ function SearchHistoryDropdown({
       // 阻止输入框失焦，点击条目或删除时下拉保持打开
       onMouseDown={(event) => event.preventDefault()}
     >
-      <ul className={expanded ? 'max-h-80 overflow-y-auto' : undefined}>
+      <ul
+        ref={containerRef}
+        className={`relative ${expanded ? 'max-h-80 overflow-y-auto' : ''}`}
+      >
         {visible.map((item) => (
-          <li key={item} className='group flex items-center'>
+          <li
+            key={item}
+            data-list-motion-key={item}
+            className='group flex items-center'
+          >
             <button
               type='button'
               onClick={() => onSelect(item)}

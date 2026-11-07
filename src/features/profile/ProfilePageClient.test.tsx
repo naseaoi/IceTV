@@ -108,6 +108,15 @@ it('粉丝列表可跳转主页，非公开收藏展示占位', async () => {
     null,
   );
   fireEvent.click(screen.getByRole('button', { name: '关闭列表' }));
+  expect(
+    screen.getByRole('dialog', { name: '粉丝' }).closest('.motion-dialog'),
+  ).toHaveAttribute('data-open', 'false');
+  expect(screen.getByRole('link', { name: '鲍勃' })).toBeInTheDocument();
+  await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+  fireEvent.click(screen.getByRole('button', { name: '2 粉丝' }));
+  expect(await screen.findByRole('link', { name: '鲍勃' })).toBeInTheDocument();
+  expect(getUserFollows).toHaveBeenCalledTimes(2);
+  fireEvent.click(screen.getByRole('button', { name: '关闭列表' }));
   fireEvent.click(screen.getByRole('tab', { name: '收藏' }));
   expect(await screen.findByText('这位用户暂未公开收藏')).toBeInTheDocument();
 });

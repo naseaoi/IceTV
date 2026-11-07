@@ -3,6 +3,8 @@
 import { type LucideIcon, Check, ChevronDown } from 'lucide-react';
 import { useEffect, useId, useRef, useState } from 'react';
 
+import { usePresence } from '@/hooks/usePresence';
+
 export interface SelectOption {
   label: string;
   value: string;
@@ -44,6 +46,8 @@ const TRIGGER_STATE_CLASS = {
   },
 } as const;
 
+const POPOVER_EXIT_MS = 200;
+
 export default function Select({
   id,
   ariaLabel,
@@ -59,6 +63,7 @@ export default function Select({
   align = 'start',
 }: SelectProps) {
   const [isOpen, setIsOpen] = useState(false);
+  const presence = usePresence(isOpen && !disabled, POPOVER_EXIT_MS);
   const containerRef = useRef<HTMLDivElement>(null);
   const triggerRef = useRef<HTMLButtonElement>(null);
   const optionRefs = useRef<(HTMLButtonElement | null)[]>([]);
@@ -79,12 +84,12 @@ export default function Select({
   }, [isOpen]);
 
   useEffect(() => {
-    if (!isOpen) return;
+    if (!isOpen || !presence.mounted) return;
     const target =
       optionRefs.current[selectedIndex] ??
       optionRefs.current.find((option) => option && !option.disabled);
     target?.focus();
-  }, [isOpen, selectedIndex]);
+  }, [isOpen, presence.mounted, selectedIndex]);
 
   const close = (restoreFocus: boolean) => {
     setIsOpen(false);
@@ -190,12 +195,18 @@ export default function Select({
         </div>
       )}
 
-      {isOpen && !disabled && (
+      {presence.mounted && (
         <div
           id={listboxId}
           role='listbox'
           aria-label={ariaLabel}
-          className={`absolute top-full z-50 mt-1.5 max-h-72 overflow-auto rounded-xl bg-white p-1 shadow-xl shadow-black/[0.08] ring-1 ring-black/[0.08] dark:bg-gray-900 dark:shadow-black/40 dark:ring-white/10 ${
+          data-open={presence.visible}
+          style={
+            {
+              '--popover-origin': `top ${align === 'end' ? 'right' : 'left'}`,
+            } as React.CSSProperties
+          }
+          className={`motion-popover absolute top-full z-50 mt-1.5 max-h-72 overflow-auto rounded-xl bg-white p-1 shadow-xl shadow-black/[0.08] ring-1 ring-black/[0.08] dark:bg-gray-900 dark:shadow-black/40 dark:ring-white/10 ${
             variant === 'field' ? 'w-full' : 'min-w-[9rem]'
           } ${align === 'end' ? 'right-0' : 'left-0'}`}
         >

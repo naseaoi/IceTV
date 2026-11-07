@@ -218,7 +218,7 @@ function AuthenticatedSearchPageClient() {
 
       {showResults ? (
         <>
-          <div className={SEARCH_DESKTOP_BAR_CLASS}>
+          <div data-nav-subbar className={SEARCH_DESKTOP_BAR_CLASS}>
             <div className={SEARCH_DESKTOP_BAR_ROW_CLASS}>
               <div className='min-w-0 flex-1'>
                 <SearchResultFilter
