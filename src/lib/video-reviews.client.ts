@@ -1,6 +1,11 @@
 import { fetchWithAuth } from '@/lib/db.client.internal';
 import { socialRequest } from '@/lib/profile.client';
-import type { ReviewReportReason } from '@/lib/types';
+import type { PublicVideoReview, ReviewTarget } from '@/lib/types';
+import type {
+  PublicReviewReply,
+  PublicReviewReplyPage,
+  ReviewReportReason,
+} from '@/lib/types';
 import type {
   MyVideoReviewPage,
   VideoReview,
@@ -12,7 +17,10 @@ import {
   VIDEO_REVIEWS_UPDATED_EVENT,
 } from '@/lib/video-reviews';
 
-export { REVIEW_CONTENT_MAX_LENGTH } from '@/lib/video-reviews';
+export {
+  REVIEW_CONTENT_MAX_LENGTH,
+  REVIEW_REPLY_MAX_LENGTH,
+} from '@/lib/video-reviews';
 
 export interface VideoReviewInput {
   title: string;
@@ -116,11 +124,7 @@ export async function fetchMyVideoReviewRatings(): Promise<
   return data.ratings;
 }
 
-export interface ReviewTarget {
-  profileId: string;
-  title_norm: string;
-  year: string;
-}
+export type { ReviewTarget } from '@/lib/types';
 export function setReviewLiked(target: ReviewTarget, liked: boolean) {
   return socialRequest<{ liked: boolean; likeCount: number }>(
     liked
@@ -147,4 +151,49 @@ export function reportVideoReview(
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ ...target, reason, detail }),
   });
+}
+
+export function fetchReviewReplies(target: ReviewTarget, cursor?: string) {
+  const query = new URLSearchParams({
+    ...target,
+    ...(cursor ? { cursor } : {}),
+  });
+  return socialRequest<PublicReviewReplyPage>(`/api/reviews/replies?${query}`);
+}
+export function postReviewReply(
+  target: ReviewTarget,
+  content: string,
+  replyToId?: string,
+) {
+  return socialRequest<PublicReviewReply>('/api/reviews/replies', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ ...target, content, replyToId }),
+  });
+}
+export function deleteReviewReply(id: string) {
+  return socialRequest<{ ok: true }>(
+    `/api/reviews/replies?${new URLSearchParams({ id })}`,
+    { method: 'DELETE' },
+  );
+}
+export function reportReviewReply(
+  id: string,
+  reason: ReviewReportReason,
+  detail: string,
+) {
+  return socialRequest<{ ok: true }>('/api/reviews/replies/reports', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ id, reason, detail }),
+  });
+}
+
+export async function fetchPublicReview(
+  target: ReviewTarget,
+): Promise<PublicVideoReview | null> {
+  const result = await socialRequest<{ review: PublicVideoReview | null }>(
+    `/api/reviews/single?${new URLSearchParams({ ...target })}`,
+  );
+  return result.review;
 }

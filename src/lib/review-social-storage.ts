@@ -8,6 +8,10 @@ import {
   parseFollowReviewSortKey,
 } from '@/lib/follow-review-identity';
 import type { FollowReviewUserMessage } from '@/lib/message-types';
+import { publicUserRole } from '@/lib/public-user-role.server';
+import { replySchema, ReviewReplyStorage } from '@/lib/review-reply-storage';
+import { SocialNotificationStorage } from '@/lib/social-notification-storage';
+import type { IStorage } from '@/lib/types';
 import type {
   AdminReviewReportPage,
   FollowListPage,
@@ -46,6 +50,8 @@ export const SOCIAL_TABLES = [
   'user_follows',
   'video_review_likes',
   'video_review_reports',
+  'video_review_replies',
+  'video_review_reply_reports',
 ] as const;
 export class NicknameTakenError extends Error {
   constructor() {
@@ -65,6 +71,7 @@ export function socialSchema(dialect: 'sqlite' | 'mysql'): string[] {
   const suffix =
     dialect === 'mysql' ? ' CHARACTER SET utf8mb4 COLLATE utf8mb4_bin' : '';
   return [
+    ...replySchema(dialect),
     `CREATE TABLE IF NOT EXISTS user_profiles (username ${text} NOT NULL PRIMARY KEY, profile_id VARCHAR(12) NOT NULL UNIQUE, nickname VARCHAR(64), nickname_norm VARCHAR(64) UNIQUE, avatar_seed VARCHAR(24), favorites_public INTEGER NOT NULL DEFAULT 0, updated_at ${time} NOT NULL)${suffix}`,
     `CREATE TABLE IF NOT EXISTS user_follows (follower ${text} NOT NULL, followee ${text} NOT NULL, created_at ${time} NOT NULL, PRIMARY KEY (follower, followee)${dialect === 'mysql' ? ', KEY idx_user_follows_followee (followee)' : ''})${suffix}`,
     ...['likes', 'reports'].map((kind) => {
@@ -74,6 +81,8 @@ export function socialSchema(dialect: 'sqlite' | 'mysql'): string[] {
     ...(dialect === 'sqlite'
       ? [
           'CREATE INDEX IF NOT EXISTS idx_user_follows_followee ON user_follows (followee)',
+          'CREATE INDEX IF NOT EXISTS idx_follow_notifications ON user_follows (followee, created_at, follower)',
+          'CREATE INDEX IF NOT EXISTS idx_like_notifications ON video_review_likes (author, created_at, title_norm, year)',
           'CREATE INDEX IF NOT EXISTS idx_review_likes ON video_review_likes (liker)',
           'CREATE INDEX IF NOT EXISTS idx_review_reports ON video_review_reports (created_at)',
         ]
@@ -149,8 +158,32 @@ export function socialPage<T>(
   };
 }
 
-export class ReviewSocialStorage {
-  constructor(private readonly sql: SocialExecutor) {}
+export class ReviewSocialStorage extends ReviewReplyStorage {
+  async getSocialNotifications(
+    ...args: Parameters<IStorage['getSocialNotifications']>
+  ) {
+    return new SocialNotificationStorage(this.sql).getSocialNotifications(
+      ...args,
+    );
+  }
+  async getSocialNotificationCount(
+    ...args: Parameters<IStorage['getSocialNotificationCount']>
+  ) {
+    return new SocialNotificationStorage(this.sql).getSocialNotificationCount(
+      ...args,
+    );
+  }
+  async getPublicReview(
+    ...[target, viewer]: Parameters<IStorage['getPublicReview']>
+  ): ReturnType<IStorage['getPublicReview']> {
+    const rows = await this.sql.rows<VideoReviewRow>(
+      'SELECT v.username, v.review_json FROM video_reviews v JOIN user_profiles p ON p.username = v.username WHERE p.profile_id = ? AND v.title_norm = ? AND v.year = ? AND v.is_public = 1',
+      [target.profileId, target.title_norm, target.year],
+    );
+    return rows.length
+      ? publicReview((await this.enrichReviews(rows, viewer))[0])
+      : null;
+  }
 
   async getUserProfile(username: string): Promise<UserProfile | null> {
     const rows = await this.sql.rows<UserProfile>(
@@ -348,6 +381,15 @@ export class ReviewSocialStorage {
     rows: VideoReviewRow[],
     viewer = '',
   ): Promise<VideoReviewRow[]> {
+    if (!rows.length) return [];
+    const usernames = [
+      ...new Set(rows.map((row) => normalizeUsername(row.username))),
+    ];
+    const access = await this.sql.rows<{ username: string; role: string }>(
+      `SELECT username, role FROM user_access WHERE username IN (${usernames.map(() => '?').join(',')})`,
+      usernames,
+    );
+    const roles = new Map(access.map((user) => [user.username, user.role]));
     return Promise.all(
       rows.map(async (row) => {
         const review = JSON.parse(row.review_json) as VideoReview;
@@ -361,8 +403,17 @@ export class ReviewSocialStorage {
             review.year,
           ],
         );
+        const [replies] = await this.sql.rows<{ count: number }>(
+          'SELECT COUNT(*) AS count FROM video_review_replies WHERE author = ? AND title_norm = ? AND year = ?',
+          [row.username, review.title_norm, review.year],
+        );
         return {
           ...row,
+          role: publicUserRole(
+            row.username,
+            roles.get(normalizeUsername(row.username)),
+          ),
+          reply_count: Number(replies.count),
           profile_id: profile.profile_id,
           nickname: profile.nickname,
           avatar_seed: profile.avatar_seed,
@@ -653,14 +704,14 @@ export class ReviewSocialStorage {
   }
   async getReviewReportPage(cursor?: string): Promise<AdminReviewReportPage> {
     const after = parseSocialCursor(cursor);
-    let identity: string[] | null = null;
+    let identity: string[] = [];
     if (after) {
       try {
         const value = JSON.parse(after[1]);
         if (
           !Array.isArray(value) ||
-          value.length !== 4 ||
-          value[0] !== 'reports-v2' ||
+          value.length !== 6 ||
+          value[0] !== 'reports-v3' ||
           value.slice(1).some((part: unknown) => typeof part !== 'string')
         )
           throw new Error();
@@ -669,15 +720,21 @@ export class ReviewSocialStorage {
         throw new ReviewValidationError('举报分页已更新，请刷新列表');
       }
     }
-    const from =
-      'FROM video_review_reports r JOIN video_reviews v ON v.username = r.author AND v.title_norm = r.title_norm AND v.year = r.year WHERE v.is_public = 1';
-    const grouped = `SELECT r.author, r.title_norm, r.year, COUNT(*) AS report_count, MAX(r.created_at) AS latest_reported_at,
-      ${REVIEW_REPORT_REASONS.map((reason) => `SUM(CASE WHEN r.reason = '${reason}' THEN 1 ELSE 0 END) AS ${reason}`).join(', ')}
-      ${from} GROUP BY r.author, r.title_norm, r.year`;
+    const reasons = REVIEW_REPORT_REASONS.map(
+      (reason) =>
+        `SUM(CASE WHEN r.reason = '${reason}' THEN 1 ELSE 0 END) AS ${reason}`,
+    ).join(', ');
+    const grouped = `SELECT 'review' AS kind, '' AS reply_id, r.author, r.title_norm, r.year, COUNT(*) AS report_count, MAX(r.created_at) AS latest_reported_at, ${reasons}
+      FROM video_review_reports r JOIN video_reviews v ON v.username = r.author AND v.title_norm = r.title_norm AND v.year = r.year WHERE v.is_public = 1 GROUP BY r.author, r.title_norm, r.year
+      UNION ALL
+      SELECT 'reply' AS kind, q.id AS reply_id, q.author, q.title_norm, q.year, COUNT(*) AS report_count, MAX(r.created_at) AS latest_reported_at, ${reasons}
+      FROM video_review_reply_reports r JOIN video_review_replies q ON q.id = r.reply_id JOIN video_reviews v ON v.username = q.author AND v.title_norm = q.title_norm AND v.year = q.year WHERE v.is_public = 1 GROUP BY q.id, q.author, q.title_norm, q.year`;
     const [total] = await this.sql.rows<{ count: number }>(
-      `SELECT COUNT(*) AS count FROM (SELECT r.author, r.title_norm, r.year ${from} GROUP BY r.author, r.title_norm, r.year) pending`,
+      `SELECT COUNT(*) AS count FROM (${grouped}) pending`,
     );
     type GroupRow = VideoReviewRow & {
+      kind: string;
+      reply_id: string;
       author: string;
       title_norm: string;
       year: string;
@@ -686,78 +743,54 @@ export class ReviewSocialStorage {
     } & Record<ReviewReportReason, number>;
     const groups = await this.sql.rows<GroupRow>(
       `SELECT g.*, v.username, v.review_json, p.profile_id, p.nickname, p.avatar_seed
-       FROM (${grouped}) g JOIN video_reviews v ON v.username = g.author AND v.title_norm = g.title_norm AND v.year = g.year
-       JOIN user_profiles p ON p.username = g.author
-       WHERE v.is_public = 1 ${after ? 'AND (g.latest_reported_at < ? OR (g.latest_reported_at = ? AND (g.author, g.title_norm, g.year) < (?, ?, ?)))' : ''}
-       ORDER BY g.latest_reported_at DESC, g.author DESC, g.title_norm DESC, g.year DESC LIMIT 31`,
-      after && identity ? [after[0], after[0], ...identity] : [],
+      FROM (${grouped}) g JOIN video_reviews v ON v.username = g.author AND v.title_norm = g.title_norm AND v.year = g.year JOIN user_profiles p ON p.username = g.author
+      WHERE v.is_public = 1 ${after ? 'AND (g.latest_reported_at < ? OR (g.latest_reported_at = ? AND (g.kind, g.author, g.title_norm, g.year, g.reply_id) < (?, ?, ?, ?, ?)))' : ''}
+      ORDER BY g.latest_reported_at DESC, g.kind DESC, g.author DESC, g.title_norm DESC, g.year DESC, g.reply_id DESC LIMIT 31`,
+      after ? [after[0], after[0], ...identity] : [],
     );
-    const page = groups.slice(0, 30);
-    const key = (row: { author: string; title_norm: string; year: string }) =>
-      JSON.stringify([row.author, row.title_norm, row.year]);
-    const items: AdminReviewReportPage['items'] = page.map((row) => ({
-      review: { ...publicReview(row), username: row.username },
-      reportCount: Number(row.report_count),
-      reasons: Object.fromEntries(
-        REVIEW_REPORT_REASONS.filter((reason) => Number(row[reason]) > 0).map(
-          (reason) => [reason, Number(row[reason])],
-        ),
-      ),
-      reports: [],
-      latestReportedAt: Number(row.latest_reported_at),
-    }));
-    if (page.length) {
-      const targets = page
-        .map(() => '(author = ? AND title_norm = ? AND year = ?)')
-        .join(' OR ');
-      const params = page.flatMap((row) => [
-        row.author,
-        row.title_norm,
-        row.year,
-      ]);
-      const likes = await this.sql.rows<{
-        author: string;
-        title_norm: string;
-        year: string;
-        count: number;
-      }>(
-        `SELECT author, title_norm, year, COUNT(*) AS count FROM video_review_likes WHERE ${targets} GROUP BY author, title_norm, year`,
-        params,
-      );
+    const items: AdminReviewReportPage['items'] = [];
+    const reviews = await this.enrichReviews(groups.slice(0, 30));
+    for (const [index, row] of groups.slice(0, 30).entries()) {
+      const reply =
+        row.kind === 'reply'
+          ? await this.getPublicReplyById(row.reply_id, '')
+          : null;
       const reports = await this.sql.rows<{
-        author: string;
-        title_norm: string;
-        year: string;
-        reason: ReviewReportReason;
-        detail: string;
-        created_at: number;
         profile_id: string;
         nickname: string | null;
         avatar_seed: string | null;
+        reason: ReviewReportReason;
+        detail: string;
+        created_at: number;
       }>(
-        `SELECT ranked.*, p.profile_id, p.nickname, p.avatar_seed FROM (
-          SELECT r.*, ROW_NUMBER() OVER (PARTITION BY author, title_norm, year ORDER BY created_at DESC, reporter DESC) AS report_rank
-          FROM video_review_reports r WHERE ${targets}
-        ) ranked JOIN user_profiles p ON p.username = ranked.reporter WHERE report_rank <= 5
-        ORDER BY created_at DESC, reporter DESC`,
-        params,
+        `SELECT r.*, p.profile_id, p.nickname, p.avatar_seed FROM ${row.kind === 'reply' ? 'video_review_reply_reports' : 'video_review_reports'} r JOIN user_profiles p ON p.username = r.reporter WHERE ${row.kind === 'reply' ? 'r.reply_id = ?' : 'r.author = ? AND r.title_norm = ? AND r.year = ?'} ORDER BY r.created_at DESC, r.reporter DESC LIMIT 5`,
+        row.kind === 'reply'
+          ? [row.reply_id]
+          : [row.author, row.title_norm, row.year],
       );
-      const indexes = new Map(page.map((row, index) => [key(row), index]));
-      for (const row of likes)
-        items[indexes.get(key(row))!].review.likeCount = Number(row.count);
-      for (const row of reports)
-        items[indexes.get(key(row))!].reports.push({
+      items.push({
+        review: { ...publicReview(reviews[index]), username: row.username },
+        ...(reply ? { reply } : {}),
+        reportCount: Number(row.report_count),
+        reasons: Object.fromEntries(
+          REVIEW_REPORT_REASONS.filter((reason) => Number(row[reason]) > 0).map(
+            (reason) => [reason, Number(row[reason])],
+          ),
+        ),
+        latestReportedAt: Number(row.latest_reported_at),
+        reports: reports.map((report) => ({
           reporter: {
-            profileId: row.profile_id,
-            nickname: row.nickname,
-            avatarSeed: row.avatar_seed,
+            profileId: report.profile_id,
+            nickname: report.nickname,
+            avatarSeed: report.avatar_seed,
           },
-          reason: row.reason,
-          detail: row.detail,
-          created_at: Number(row.created_at),
-        });
+          reason: report.reason,
+          detail: report.detail,
+          created_at: Number(report.created_at),
+        })),
+      });
     }
-    const last = page.at(-1);
+    const last = groups.slice(0, 30).at(-1);
     return {
       items,
       pendingTotal: Number(total.count),
@@ -766,10 +799,12 @@ export class ReviewSocialStorage {
           ? socialCursor([
               Number(last.latest_reported_at),
               JSON.stringify([
-                'reports-v2',
+                'reports-v3',
+                last.kind,
                 last.author,
                 last.title_norm,
                 last.year,
+                last.reply_id,
               ]),
             ])
           : null,
@@ -869,6 +904,11 @@ export class ReviewSocialStorage {
           r.updated_at,
         ),
         type: 'follow-review' as const,
+        review: {
+          profileId: row.profile_id,
+          title_norm: r.title_norm,
+          year: r.year,
+        },
         author: {
           profileId: row.profile_id,
           nickname: row.nickname,
@@ -885,7 +925,10 @@ export class ReviewSocialStorage {
   async getUserSocialData(
     username: string,
   ): Promise<
-    Pick<StorageUserImportData, 'profile' | 'follows' | 'likes' | 'reports'>
+    Pick<
+      StorageUserImportData,
+      'profile' | 'follows' | 'likes' | 'reports' | 'replies' | 'replyReports'
+    >
   > {
     username = normalizeUsername(username);
     const profile = await this.getUserProfile(username);
@@ -906,7 +949,26 @@ export class ReviewSocialStorage {
       'SELECT author, title_norm, year, reason, detail, created_at FROM video_review_reports WHERE reporter = ?',
       [username],
     );
-    return { profile: profile ?? undefined, follows, likes, reports };
+    const replies = await this.sql.rows<
+      NonNullable<StorageUserImportData['replies']>[number]
+    >(
+      'SELECT id, author, title_norm, year, reply_to, content, created_at FROM video_review_replies WHERE username = ?',
+      [username],
+    );
+    const replyReports = await this.sql.rows<
+      NonNullable<StorageUserImportData['replyReports']>[number]
+    >(
+      'SELECT reply_id, reason, detail, created_at FROM video_review_reply_reports WHERE reporter = ?',
+      [username],
+    );
+    return {
+      profile: profile ?? undefined,
+      follows,
+      likes,
+      reports,
+      replies,
+      replyReports,
+    };
   }
 }
 

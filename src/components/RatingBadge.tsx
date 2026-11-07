@@ -5,15 +5,19 @@ import { formatRating } from '@/lib/rating';
 
 interface RatingBadgeProps {
   value: number;
-  // soft 用于普通背景，overlay 用于压在封面图上
-  variant?: 'soft' | 'overlay';
+  // soft 用于普通背景，compact 用于与小号辅助文字同行，overlay 用于压在封面图上
+  variant?: 'soft' | 'compact' | 'overlay';
   // 读屏前缀，如「我的评分」
   label?: string;
   className?: string;
 }
 
+const SOFT_TONE_CLASS =
+  'bg-amber-500/10 text-amber-700 ring-1 ring-inset ring-amber-500/20 dark:text-amber-300';
+
 const VARIANT_CLASS = {
-  soft: 'rounded-md px-1.5 py-0.5 text-xs leading-none bg-amber-500/10 text-amber-700 ring-1 ring-inset ring-amber-500/20 dark:text-amber-300',
+  soft: `rounded-md px-1.5 py-0.5 text-xs leading-none ${SOFT_TONE_CLASS}`,
+  compact: `h-3.5 rounded px-1 text-[11px] leading-none ${SOFT_TONE_CLASS}`,
   overlay: `${POSTER_BADGE_CLASS} bg-black/70 text-amber-300`,
 } as const;
 
@@ -29,7 +33,11 @@ export default function RatingBadge({
       aria-label={`${label ? `${label} ` : ''}${formatRating(value)} 分`}
       className={`inline-flex items-center gap-0.5 font-semibold tabular-nums ${VARIANT_CLASS[variant]} ${className}`}
     >
-      <Star aria-hidden='true' className='h-3 w-3' fill='currentColor' />
+      <Star
+        aria-hidden='true'
+        className={variant === 'compact' ? 'h-2.5 w-2.5' : 'h-3 w-3'}
+        fill='currentColor'
+      />
       {formatRating(value)}
     </span>
   );

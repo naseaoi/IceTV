@@ -148,6 +148,66 @@ class DbManager {
     return (await this.getStorage()).getFollowReviewMessages(...args);
   }
 
+  async getReviewReplies(
+    ...args: Parameters<IStorage['getReviewReplies']>
+  ): ReturnType<IStorage['getReviewReplies']> {
+    return (await this.getStorage()).getReviewReplies(...args);
+  }
+
+  async postReviewReply(
+    ...args: Parameters<IStorage['postReviewReply']>
+  ): ReturnType<IStorage['postReviewReply']> {
+    return (await this.getStorage()).postReviewReply(...args);
+  }
+
+  async reportReviewReply(
+    ...args: Parameters<IStorage['reportReviewReply']>
+  ): ReturnType<IStorage['reportReviewReply']> {
+    return (await this.getStorage()).reportReviewReply(...args);
+  }
+
+  async getReviewReplyMessages(
+    ...args: Parameters<IStorage['getReviewReplyMessages']>
+  ): ReturnType<IStorage['getReviewReplyMessages']> {
+    return (await this.getStorage()).getReviewReplyMessages(...args);
+  }
+
+  async getReviewReplyMessageCount(
+    ...args: Parameters<IStorage['getReviewReplyMessageCount']>
+  ): ReturnType<IStorage['getReviewReplyMessageCount']> {
+    return (await this.getStorage()).getReviewReplyMessageCount(...args);
+  }
+
+  async deleteReviewReply(
+    ...args: Parameters<IStorage['deleteReviewReply']>
+  ): ReturnType<IStorage['deleteReviewReply']> {
+    return (await this.getStorage()).deleteReviewReply(...args);
+  }
+
+  async moderateReplyReports(
+    ...args: Parameters<IStorage['moderateReplyReports']>
+  ): ReturnType<IStorage['moderateReplyReports']> {
+    return (await this.getStorage()).moderateReplyReports(...args);
+  }
+
+  async getPublicReview(
+    ...args: Parameters<IStorage['getPublicReview']>
+  ): ReturnType<IStorage['getPublicReview']> {
+    return (await this.getStorage()).getPublicReview(...args);
+  }
+
+  async getSocialNotifications(
+    ...args: Parameters<IStorage['getSocialNotifications']>
+  ): ReturnType<IStorage['getSocialNotifications']> {
+    return (await this.getStorage()).getSocialNotifications(...args);
+  }
+
+  async getSocialNotificationCount(
+    ...args: Parameters<IStorage['getSocialNotificationCount']>
+  ): ReturnType<IStorage['getSocialNotificationCount']> {
+    return (await this.getStorage()).getSocialNotificationCount(...args);
+  }
+
   async getUserSocialData(
     ...args: Parameters<IStorage['getUserSocialData']>
   ): ReturnType<IStorage['getUserSocialData']> {

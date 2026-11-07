@@ -2,6 +2,10 @@
 
 import type { AdminConfig } from '@/types/admin';
 
+const mockGetSocialNotifications = jest.fn();
+const mockGetSocialNotificationCount = jest.fn();
+const mockGetReviewReplyMessages = jest.fn();
+const mockGetReviewReplyMessageCount = jest.fn();
 const mockGetFollowReviewMessages = jest.fn();
 const mockGetFollowReviewMessageCount = jest.fn();
 const mockGetConfigForRead = jest.fn();
@@ -19,6 +23,14 @@ jest.mock('@/lib/config', () => ({
 
 jest.mock('@/lib/db', () => ({
   db: {
+    getSocialNotifications: (...args: unknown[]) =>
+      mockGetSocialNotifications(...args),
+    getSocialNotificationCount: (...args: unknown[]) =>
+      mockGetSocialNotificationCount(...args),
+    getReviewReplyMessages: (...args: unknown[]) =>
+      mockGetReviewReplyMessages(...args),
+    getReviewReplyMessageCount: (...args: unknown[]) =>
+      mockGetReviewReplyMessageCount(...args),
     getFollowReviewMessageCount: (...args: unknown[]) =>
       mockGetFollowReviewMessageCount(...args),
     getFollowReviewMessages: (...args: unknown[]) =>
@@ -88,6 +100,10 @@ function usePersistedUserMessageState(): void {
 describe('messages server', () => {
   beforeEach(() => {
     jest.clearAllMocks();
+    mockGetSocialNotifications.mockResolvedValue([]);
+    mockGetSocialNotificationCount.mockResolvedValue(0);
+    mockGetReviewReplyMessages.mockResolvedValue([]);
+    mockGetReviewReplyMessageCount.mockResolvedValue(0);
     mockGetFollowReviewMessages.mockResolvedValue([]);
     mockGetFollowReviewMessageCount.mockResolvedValue(0);
     mockGetConfigForRead.mockResolvedValue(config);
@@ -109,6 +125,132 @@ describe('messages server', () => {
     mockGetPlayRecord.mockResolvedValue(updatedRecord);
     mockSavePlayRecord.mockResolvedValue(undefined);
     mockSavePlayRecordsByKey.mockResolvedValue(undefined);
+  });
+
+  it('静音类型跳过查询并排除列表、计数与摘要 revision', async () => {
+    mockGetUserMessageState.mockResolvedValue({
+      mutedKinds: [
+        'tracking-update',
+        'follow-review',
+        'review-reply',
+        'new-follower',
+        'review-like',
+      ],
+    });
+    const summary = await getUserMessageSummary('reader');
+    expect(summary).toMatchObject({
+      unreadCount: 1,
+      trackingUnreadCount: 0,
+      followReviewUnreadCount: 0,
+      reviewReplyUnreadCount: 0,
+      newFollowerUnreadCount: 0,
+      reviewLikeUnreadCount: 0,
+    });
+    expect(
+      (await getUserMessagePage('reader', 20)).items.map((item) => item.type),
+    ).toEqual(['announcement']);
+    expect(mockGetUnreadTrackingPlayRecordPage).not.toHaveBeenCalled();
+    expect(mockGetFollowReviewMessages).not.toHaveBeenCalled();
+    expect(mockGetReviewReplyMessages).not.toHaveBeenCalled();
+    expect(mockGetSocialNotifications).not.toHaveBeenCalled();
+    expect(mockGetSocialNotificationCount).not.toHaveBeenCalled();
+    mockGetSocialNotificationCount.mockResolvedValue(100);
+    expect((await getUserMessageSummary('reader')).revision).toBe(
+      summary.revision,
+    );
+    expect(await readUserMessage('reader', 'new-follower:any')).toBeNull();
+  });
+
+  it('新粉丝与点赞参与摘要、混排、单条及全部已读', async () => {
+    const follower = {
+      id: 'new-follower:opaque',
+      type: 'new-follower',
+      follower: {
+        profileId: 'Reader000001',
+        nickname: '读者',
+        avatarSeed: null,
+      },
+      createdAt: 8000,
+    };
+    const like = {
+      id: 'review-like:opaque',
+      type: 'review-like',
+      latestLiker: follower.follower,
+      likeCount: 2,
+      review: { profileId: 'Author000001', title_norm: 'work', year: '' },
+      title: '作品',
+      year: '',
+      cover: '',
+      createdAt: 7000,
+    };
+    mockGetSocialNotifications.mockImplementation(async (kind) =>
+      kind === 'new-follower' ? [follower] : [like],
+    );
+    mockGetSocialNotificationCount.mockResolvedValue(1);
+    expect(await getUserMessageSummary('author')).toMatchObject({
+      unreadCount: 4,
+      newFollowerUnreadCount: 1,
+      reviewLikeUnreadCount: 1,
+    });
+    expect(
+      (await getUserMessagePage('author', 3)).items.map((item) => item.type),
+    ).toEqual(['announcement', 'new-follower', 'review-like']);
+    expect((await readUserMessage('author', follower.id))?.message).toEqual(
+      follower,
+    );
+    expect((await readUserMessage('author', like.id))?.message).toEqual(like);
+    expect(mockUpdateUserMessageState).toHaveBeenCalledWith('author', {
+      newFollower: { id: follower.id, createdAt: 8000 },
+    });
+    expect(mockUpdateUserMessageState).toHaveBeenCalledWith('author', {
+      reviewLike: { id: like.id, createdAt: 7000 },
+    });
+    mockGetUnreadTrackingPlayRecordPage.mockResolvedValue({
+      items: {},
+      total: 0,
+      nextCursor: null,
+    });
+    await readAllUserMessages('author');
+    expect(mockUpdateUserMessageState).toHaveBeenLastCalledWith(
+      'author',
+      expect.objectContaining({
+        newFollowerReadAt: expect.any(Number),
+        reviewLikeReadAt: expect.any(Number),
+      }),
+    );
+  });
+
+  it('回复参与摘要、混排分页和单条已读', async () => {
+    const reply = {
+      id: 'review-reply:7000:00000000-0000-4000-8000-000000000001',
+      type: 'review-reply',
+      author: { profileId: 'Reader000001', nickname: '读者', avatarSeed: null },
+      title: '作品',
+      year: '2026',
+      cover: '',
+      content: '回复',
+      createdAt: 7000,
+    };
+    mockGetReviewReplyMessages.mockResolvedValue([reply]);
+    mockGetReviewReplyMessageCount.mockResolvedValue(2);
+    const summary = await getUserMessageSummary('author');
+    expect(summary).toMatchObject({
+      unreadCount: 4,
+      reviewReplyUnreadCount: 2,
+    });
+    const page = await getUserMessagePage('author', 2);
+    expect(page.items.map((item) => item.type)).toEqual([
+      'announcement',
+      'review-reply',
+    ]);
+    expect((await readUserMessage('author', reply.id))?.message).toEqual(reply);
+    expect(mockUpdateUserMessageState).toHaveBeenCalledWith('author', {
+      reviewReply: { id: reply.id, createdAt: 7000 },
+    });
+    mockGetReviewReplyMessageCount.mockResolvedValue(3);
+    expect((await getUserMessageSummary('author')).revision).not.toBe(
+      summary.revision,
+    );
   });
 
   it('merges followed reviews with tracking, counts them and reads individual activity', async () => {
@@ -327,7 +469,12 @@ describe('messages server', () => {
     expect(summary.unreadCount).toBe(1);
     expect(summary.announcement).toBeNull();
     expect(summary.latestTracking?.type).toBe('tracking-update');
-    expect(mockGetUnreadTrackingPlayRecordPage).toHaveBeenCalledWith('demo', 1);
+    expect(mockGetUnreadTrackingPlayRecordPage).toHaveBeenCalledWith(
+      'demo',
+      1,
+      undefined,
+      undefined,
+    );
     expect(mockGetAllPlayRecords).not.toHaveBeenCalled();
   });
 

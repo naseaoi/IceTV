@@ -18,6 +18,7 @@ const review: AdminVideoReview = {
   username: 'alice',
   author: { profileId: 'profileAlice', avatarSeed: null, nickname: '爱丽丝' },
   spoiler: false,
+  replyCount: 0,
   likeCount: 0,
   likedByMe: false,
   title_norm: '测试电影',

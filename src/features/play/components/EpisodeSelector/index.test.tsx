@@ -10,6 +10,10 @@ jest.mock('next/dynamic', () => ({
     },
 }));
 
+jest.mock('next/navigation', () => ({
+  useSearchParams: () => new URLSearchParams(),
+}));
+
 jest.mock('@/features/play/components/EpisodeSelector/InfoTab', () => ({
   InfoTab: () => <div data-dynamic-component />,
 }));

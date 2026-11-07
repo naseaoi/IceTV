@@ -1,12 +1,28 @@
 'use client';
 
-import { Check, Inbox, Megaphone, Play, RefreshCw, Rss, X } from 'lucide-react';
+import {
+  Check,
+  ChevronLeft,
+  Inbox,
+  Megaphone,
+  Play,
+  RefreshCw,
+  Rss,
+  Settings,
+  X,
+} from 'lucide-react';
 import Link from 'next/link';
-import { useEffect, useId } from 'react';
+import { useEffect, useId, useLayoutEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 
 import { buildContinuePlayUrl } from '@/components/continue-card/play-url';
 import CoverImage from '@/components/CoverImage';
+import MessageReviewDetail, {
+  type ReviewMessage,
+  isReviewMessage,
+} from '@/components/messages/MessageReviewDetail';
+import MessageSettings from '@/components/messages/MessageSettings';
+import { hasOpenModalShell } from '@/components/modals/ModalShell';
 import ProfileAvatar from '@/components/ProfileAvatar';
 import RatingBadge from '@/components/RatingBadge';
 import Spinner from '@/components/Spinner';
@@ -28,7 +44,13 @@ interface MessagePanelProps {
   onReadAll: () => Promise<void>;
   onLoadMore: () => Promise<void>;
   onRetry: () => Promise<void>;
+  onSettingsSaved: () => void;
 }
+
+type PanelView =
+  | { kind: 'list' }
+  | { kind: 'settings' }
+  | { kind: 'review'; message: ReviewMessage };
 
 const MESSAGE_PRIMARY_CLASS =
   'truncate text-sm font-semibold text-gray-900 dark:text-gray-100';
@@ -79,7 +101,30 @@ function MessageBody({ message }: { message: UserMessage }) {
       </>
     );
 
-  if (message.type === 'follow-review')
+  if (message.type === 'new-follower' || message.type === 'review-like') {
+    const user =
+      message.type === 'new-follower' ? message.follower : message.latestLiker;
+    return (
+      <>
+        <ProfileAvatar user={user} />
+        <div className='min-w-0 flex-1'>
+          <p className={MESSAGE_PRIMARY_CLASS}>
+            {user.nickname ?? '未设置昵称'}
+          </p>
+          <p className={MESSAGE_BODY_CLASS}>
+            {message.type === 'new-follower'
+              ? '关注了你'
+              : `${message.likeCount > 1 ? `等 ${message.likeCount} 人` : ''}赞了你对《${message.title}》的评价`}
+          </p>
+          <p className={`mt-1.5 ${MESSAGE_META_CLASS}`}>
+            {formatRelativeTime(message.createdAt)}
+          </p>
+        </div>
+      </>
+    );
+  }
+
+  if (message.type === 'follow-review' || message.type === 'review-reply')
     return (
       <>
         <ProfileAvatar user={message.author} />
@@ -87,9 +132,20 @@ function MessageBody({ message }: { message: UserMessage }) {
           <p className={MESSAGE_PRIMARY_CLASS}>
             {message.author.nickname ?? '未设置昵称'}
           </p>
-          <p className={MESSAGE_BODY_CLASS}>评价了《{message.title}》</p>
+          <p className={MESSAGE_BODY_CLASS}>
+            {message.type === 'review-reply'
+              ? `在《${message.title}》中回复了你`
+              : `评价了《${message.title}》`}
+          </p>
+          {message.type === 'review-reply' && (
+            <p className={`${MESSAGE_BODY_CLASS} line-clamp-2 break-words`}>
+              {message.content}
+            </p>
+          )}
           <div className='mt-1.5 flex items-center gap-2'>
-            {message.rating !== null && <RatingBadge value={message.rating} />}
+            {message.type === 'follow-review' && message.rating !== null && (
+              <RatingBadge value={message.rating} />
+            )}
             <span className={MESSAGE_META_CLASS}>
               {formatRelativeTime(message.createdAt)}
             </span>
@@ -129,13 +185,15 @@ function MessageRow({
   working,
   onRead,
   onNavigate,
+  onOpenReview,
 }: {
   message: UserMessage;
   working: boolean;
   onRead: (message: UserMessage) => Promise<void>;
   onNavigate: () => void;
+  onOpenReview: (message: ReviewMessage) => void;
 }) {
-  const bodyClass = 'flex min-w-0 flex-1 gap-3';
+  const bodyClass = 'flex min-w-0 flex-1 gap-3 text-left';
 
   return (
     <div
@@ -146,9 +204,17 @@ function MessageRow({
           : 'border-gray-200/80 bg-white/60 dark:border-gray-700/80 dark:bg-gray-800/40'
       }`}
     >
-      {message.type === 'follow-review' ? (
+      {isReviewMessage(message) ? (
+        <button
+          type='button'
+          onClick={() => onOpenReview(message)}
+          className={bodyClass}
+        >
+          <MessageBody message={message} />
+        </button>
+      ) : message.type === 'new-follower' ? (
         <Link
-          href={`/u/${message.author.profileId}`}
+          href={`/u/${message.follower.profileId}`}
           onClick={onNavigate}
           className={bodyClass}
         >
@@ -191,6 +257,7 @@ function MessageSection({
   readingAll,
   onRead,
   onNavigate,
+  onOpenReview,
 }: {
   title: string;
   messages: UserMessage[];
@@ -198,6 +265,7 @@ function MessageSection({
   readingAll: boolean;
   onRead: (message: UserMessage) => Promise<void>;
   onNavigate: () => void;
+  onOpenReview: (message: ReviewMessage) => void;
 }) {
   const containerRef = useListLayoutMotion<HTMLDivElement>(
     messages.map((message) => String(message.id)),
@@ -217,6 +285,7 @@ function MessageSection({
             working={readingAll || workingIds.has(message.id)}
             onRead={onRead}
             onNavigate={onNavigate}
+            onOpenReview={onOpenReview}
           />
         ))}
       </div>
@@ -238,19 +307,49 @@ export default function MessagePanel({
   onReadAll,
   onLoadMore,
   onRetry,
+  onSettingsSaved,
 }: MessagePanelProps) {
   const titleId = useId();
   const presence = usePresence(open, PANEL_EXIT_MS);
   useBodyScrollLock(open);
+  const [view, setView] = useState<PanelView>({ kind: 'list' });
+  const [lastOpen, setLastOpen] = useState(open);
+  if (open !== lastOpen) {
+    setLastOpen(open);
+    if (open) setView({ kind: 'list' });
+  }
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const listScrollTop = useRef(0);
+
+  // 子视图从顶部开始，回到列表时恢复离开前的位置
+  useLayoutEffect(() => {
+    const container = scrollRef.current;
+    if (!container) return;
+    container.scrollTop = view.kind === 'list' ? listScrollTop.current : 0;
+  }, [view]);
+
+  function showView(next: PanelView) {
+    if (view.kind === 'list')
+      listScrollTop.current = scrollRef.current?.scrollTop ?? 0;
+    setView(next);
+  }
+
+  function openReview(message: ReviewMessage) {
+    showView({ kind: 'review', message });
+    void onRead(message);
+  }
 
   useEffect(() => {
     if (!open) return;
     const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') onClose();
+      // 叠在面板上的举报、删除确认等弹窗由自己处理 Esc
+      if (event.key !== 'Escape' || hasOpenModalShell()) return;
+      if (view.kind === 'list') onClose();
+      else setView({ kind: 'list' });
     };
     document.addEventListener('keydown', handleKeyDown);
     return () => document.removeEventListener('keydown', handleKeyDown);
-  }, [onClose, open]);
+  }, [onClose, open, view.kind]);
 
   if (!presence.mounted || typeof document === 'undefined') return null;
   const readingAll = workingIds.has('all');
@@ -278,23 +377,39 @@ export default function MessagePanel({
         className='motion-dialog relative z-10 flex max-h-[90dvh] w-full max-w-2xl flex-col overflow-hidden rounded-2xl bg-white shadow-2xl shadow-black/10 outline-none ring-1 ring-gray-900/[0.08] dark:bg-gray-900 dark:shadow-black/50 dark:ring-white/[0.08]'
       >
         <div className='flex shrink-0 items-center gap-3 border-b border-gray-200/80 px-4 py-3.5 dark:border-gray-700/80 sm:px-6 sm:py-4'>
-          <div className='flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-brand-100 text-brand-700 dark:bg-brand-900/40 dark:text-brand-300'>
-            <Inbox className='h-5 w-5' />
-          </div>
+          {view.kind === 'list' ? (
+            <div className='flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-brand-100 text-brand-700 dark:bg-brand-900/40 dark:text-brand-300'>
+              <Inbox className='h-5 w-5' />
+            </div>
+          ) : (
+            <button
+              type='button'
+              aria-label='返回消息列表'
+              title='返回'
+              className='flex h-10 w-10 shrink-0 items-center justify-center rounded-lg text-gray-500 transition-colors hover:bg-gray-100 hover:text-gray-800 dark:text-gray-400 dark:hover:bg-gray-800 dark:hover:text-gray-100'
+              onClick={() => setView({ kind: 'list' })}
+            >
+              <ChevronLeft className='h-5 w-5' />
+            </button>
+          )}
           <div className='min-w-0 flex-1'>
             <h2
               id={titleId}
               className='text-base font-semibold text-gray-900 dark:text-gray-100'
             >
-              我的消息
+              {view.kind === 'settings'
+                ? '通知设置'
+                : view.kind === 'review'
+                  ? '评价详情'
+                  : '我的消息'}
             </h2>
-            <p className='mt-0.5 text-xs text-gray-400 dark:text-gray-500'>
-              {page.total > 0
-                ? `${page.total} 条未读消息`
-                : '公告、追更与关注动态会显示在这里'}
-            </p>
+            {view.kind === 'list' && page.total > 0 && (
+              <p className='mt-0.5 text-xs text-gray-400 dark:text-gray-500'>
+                {page.total} 条未读消息
+              </p>
+            )}
           </div>
-          {page.total > 0 && (
+          {view.kind === 'list' && page.total > 0 && (
             <button
               type='button'
               disabled={readingAll}
@@ -303,6 +418,17 @@ export default function MessagePanel({
             >
               {readingAll && <Spinner className='h-3.5 w-3.5' />}
               全部已读
+            </button>
+          )}
+          {view.kind === 'list' && (
+            <button
+              type='button'
+              aria-label='通知设置'
+              title='通知设置'
+              className='flex h-9 w-9 items-center justify-center rounded-full text-gray-400 hover:bg-gray-100 hover:text-gray-700 dark:hover:bg-gray-800 dark:hover:text-gray-200'
+              onClick={() => showView({ kind: 'settings' })}
+            >
+              <Settings className='h-[18px] w-[18px]' />
             </button>
           )}
           <button
@@ -316,8 +442,19 @@ export default function MessagePanel({
           </button>
         </div>
 
-        <div className='min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 py-4 sm:px-6 sm:py-5'>
-          {loading && page.items.length === 0 ? (
+        <div
+          ref={scrollRef}
+          className='min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 py-4 sm:px-6 sm:py-5'
+        >
+          {view.kind === 'settings' ? (
+            <MessageSettings onSaved={onSettingsSaved} />
+          ) : view.kind === 'review' ? (
+            <MessageReviewDetail
+              key={view.message.id}
+              message={view.message}
+              onNavigate={onClose}
+            />
+          ) : loading && page.items.length === 0 ? (
             <div className='flex min-h-52 items-center justify-center text-gray-400'>
               <Spinner className='h-6 w-6' />
             </div>
@@ -356,13 +493,14 @@ export default function MessagePanel({
                 readingAll={readingAll}
                 onRead={onRead}
                 onNavigate={onClose}
+                onOpenReview={openReview}
               />
               <MessageSection
                 title={
                   trackingUpdates.some(
-                    (message) => message.type === 'follow-review',
+                    (message) => message.type !== 'tracking-update',
                   )
-                    ? '追更与关注动态'
+                    ? '追更与互动'
                     : '追更更新'
                 }
                 messages={trackingUpdates}
@@ -370,6 +508,7 @@ export default function MessagePanel({
                 readingAll={readingAll}
                 onRead={onRead}
                 onNavigate={onClose}
+                onOpenReview={openReview}
               />
               {page.nextCursor && (
                 <div className='flex justify-center pt-1'>

@@ -1,12 +1,14 @@
 import { normalizeWorkTitle, normalizeWorkYear } from '@/lib/source-match';
 import type {
   AdminVideoReviewPage,
+  PublicUserRef,
   PublicVideoReview,
   VideoReview,
 } from '@/lib/types';
 
 // 前后端共用；存储列为 MEDIUMTEXT，放宽上限无需迁移
 export const REVIEW_CONTENT_MAX_LENGTH = 5000;
+export const REVIEW_REPLY_MAX_LENGTH = 300;
 export const MY_REVIEWS_PAGE_SIZE = 20;
 export const WORK_REVIEWS_PAGE_SIZE = 20;
 export const VIDEO_REVIEWS_UPDATED_EVENT = 'videoReviewsUpdated';
@@ -157,7 +159,9 @@ export type VideoReviewRow = {
   profile_id?: string;
   nickname?: string | null;
   avatar_seed?: string | null;
+  role?: PublicUserRef['role'];
   like_count?: number;
+  reply_count?: number;
   liked_by_me?: boolean;
 };
 
@@ -168,10 +172,12 @@ export function publicReview(row: VideoReviewRow): PublicVideoReview {
       profileId: row.profile_id ?? '',
       nickname: row.nickname ?? null,
       avatarSeed: row.avatar_seed ?? null,
+      ...(row.role ? { role: row.role } : {}),
     },
     title_norm: review.title_norm,
     spoiler: review.spoiler === true,
     likeCount: row.like_count ?? 0,
+    replyCount: row.reply_count ?? 0,
     likedByMe: row.liked_by_me ?? false,
     title: review.title,
     year: review.year,

@@ -96,6 +96,8 @@ export interface PublicUserRef {
   nickname: string | null;
   // null 时头像按 profileId 生成
   avatarSeed: string | null;
+  // 仅站长、管理员返回；普通用户省略
+  role?: 'owner' | 'admin';
 }
 
 export interface UserProfileView extends PublicUserRef {
@@ -149,11 +151,30 @@ export interface PublicVideoReview {
   content: string;
   spoiler: boolean;
   likeCount: number;
+  replyCount: number;
   likedByMe: boolean;
   created_at: number;
   updated_at: number;
 }
 
+export interface ReviewTarget {
+  profileId: string;
+  title_norm: string;
+  year: string;
+}
+
+export interface PublicReviewReply {
+  id: string;
+  author: PublicUserRef;
+  replyTo: { profileId: string; nickname: string | null } | null;
+  content: string;
+  created_at: number;
+  isMine: boolean;
+}
+export interface PublicReviewReplyPage {
+  items: PublicReviewReply[];
+  nextCursor: string | null;
+}
 export interface PublicVideoReviewPage {
   items: PublicVideoReview[];
   nextCursor: string | null;
@@ -200,6 +221,7 @@ export type ReviewReportReason = (typeof REVIEW_REPORT_REASONS)[number];
 
 export interface AdminReviewReportItem {
   review: AdminVideoReview;
+  reply?: PublicReviewReply;
   reportCount: number;
   reasons: Partial<Record<ReviewReportReason, number>>;
   // 最近 5 条举报
@@ -344,6 +366,16 @@ export interface StorageUserImportData {
     detail: string;
     created_at: number;
   }[];
+  replies?: Omit<
+    import('@/lib/review-reply-storage').ReviewReplyRow,
+    'username'
+  >[];
+  replyReports?: {
+    reply_id: string;
+    reason: ReviewReportReason;
+    detail: string;
+    created_at: number;
+  }[];
   searchHistory: string[];
   skipConfigs: { [key: string]: SkipConfig };
   playbackSessions: { [key: string]: PlaybackSession };
@@ -353,13 +385,30 @@ export interface StorageUserImportData {
 }
 
 export interface UserMessageStateUpdate {
+  notificationSettings?: {
+    mutedKinds: import('@/lib/message-types').MessageNotificationKind[];
+    now: number;
+  };
+  newFollower?: { id: string; createdAt: number };
+  newFollowerReadAt?: number;
+  reviewLike?: { id: string; createdAt: number };
+  reviewLikeReadAt?: number;
   announcement?: { id: string; previousId?: string };
   followReview?: { id: string; createdAt: number };
+  reviewReply?: { id: string; createdAt: number };
+  reviewReplyReadAt?: number;
   followReviewReadAt?: number;
 }
 
 export interface UserMessageState {
+  mutedKinds?: import('@/lib/message-types').MessageNotificationKind[];
+  newFollowerReadAt?: number;
+  newFollowerReadIds?: string[];
+  reviewLikeReadAt?: number;
+  reviewLikeReadIds?: string[];
   readAnnouncementId?: string;
+  reviewReplyReadAt?: number;
+  reviewReplyReadIds?: string[];
   // 关注动态已读水位，之前的视为已读；水位之后单独已读的消息 id 记在列表里
   followReviewReadAt?: number;
   followReviewReadIds?: string[];
@@ -564,6 +613,73 @@ export interface IStorage {
     reason: ReviewReportReason,
     detail: string,
   ): Promise<boolean>;
+  getReviewReplies(
+    author: string,
+    title: string,
+    year: string,
+    viewer: string,
+    cursor?: string,
+  ): Promise<PublicReviewReplyPage>;
+  postReviewReply(
+    author: string,
+    title: string,
+    year: string,
+    username: string,
+    content: string,
+    replyToId?: string,
+  ): Promise<PublicReviewReply | null>;
+  deleteReviewReply(
+    id: string,
+    username: string,
+    admin?: boolean,
+  ): Promise<boolean>;
+  reportReviewReply(
+    id: string,
+    reporter: string,
+    reason: ReviewReportReason,
+    detail: string,
+  ): Promise<boolean>;
+  moderateReplyReports(
+    id: string,
+    action: 'dismiss' | 'delete-reply',
+  ): Promise<void>;
+  getReviewReplyMessages(
+    username: string,
+    readAt: number,
+    readIds: string[],
+    now: number,
+    query?: import('@/lib/follow-review-identity').FollowReviewQuery,
+  ): Promise<import('@/lib/message-types').ReviewReplyUserMessage[]>;
+  getReviewReplyMessageCount(
+    username: string,
+    readAt: number,
+    readIds: string[],
+    now: number,
+  ): Promise<number>;
+  getPublicReview(
+    target: ReviewTarget,
+    viewer: string,
+  ): Promise<PublicVideoReview | null>;
+  getSocialNotifications(
+    kind: import('@/lib/social-notification-identity').SocialNotificationKind,
+    username: string,
+    readAt: number,
+    readIds: string[],
+    now: number,
+    query?: import('@/lib/follow-review-identity').FollowReviewQuery,
+  ): Promise<
+    (
+      | import('@/lib/message-types').NewFollowerUserMessage
+      | import('@/lib/message-types').ReviewLikeUserMessage
+    )[]
+  >;
+  getSocialNotificationCount(
+    kind: import('@/lib/social-notification-identity').SocialNotificationKind,
+    username: string,
+    readAt: number,
+    readIds: string[],
+    now: number,
+  ): Promise<number>;
   getReviewReportPage(cursor?: string): Promise<AdminReviewReportPage>;
   moderateReviewReports(
     author: string,
@@ -587,7 +703,10 @@ export interface IStorage {
   getUserSocialData(
     username: string,
   ): Promise<
-    Pick<StorageUserImportData, 'profile' | 'follows' | 'likes' | 'reports'>
+    Pick<
+      StorageUserImportData,
+      'profile' | 'follows' | 'likes' | 'reports' | 'replies' | 'replyReports'
+    >
   >;
 
   // 用户相关

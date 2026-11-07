@@ -6,7 +6,15 @@ import {
 } from '@/lib/catalog-favorites';
 import { CONFIG_SUBSCRIPTION_MAX_BYTES } from '@/lib/config-state';
 import { importedInviteCodes } from '@/lib/invite-code-storage';
+import {
+  parseReplyMessageId,
+  validateReplyContent,
+} from '@/lib/review-reply-storage';
 import { importedAvatarSeed } from '@/lib/review-social-storage';
+import {
+  parseSocialNotificationId,
+  validateMutedKinds,
+} from '@/lib/social-notification-identity';
 import {
   isValidUserDanmakuKey,
   normalizeUserDanmakuColor,
@@ -167,6 +175,8 @@ export async function parseImportData(
       (normalizedUserData.follows?.length ?? 0) +
       (normalizedUserData.likes?.length ?? 0) +
       (normalizedUserData.reports?.length ?? 0) +
+      (normalizedUserData.replies?.length ?? 0) +
+      (normalizedUserData.replyReports?.length ?? 0) +
       normalizedUserData.searchHistory.length +
       Object.keys(normalizedUserData.skipConfigs).length +
       Object.keys(normalizedUserData.playbackSessions).length;
@@ -254,6 +264,30 @@ export async function parseImportData(
           ),
       );
   }
+  const replyIds = new Set<string>();
+  for (const data of Object.values(userData)) {
+    data.replies = data.replies
+      ?.map((row) => ({
+        ...row,
+        author: remap(row.author),
+        reply_to: row.reply_to ? remap(row.reply_to) : null,
+      }))
+      .filter((row) =>
+        userData[row.author]?.videoReviews?.some(
+          (review) =>
+            review.title_norm === row.title_norm && review.year === row.year,
+        ),
+      );
+    for (const row of data.replies ?? []) {
+      if (replyIds.has(row.id)) throw new ImportValidationError('回复标识重复');
+      replyIds.add(row.id);
+      if (row.reply_to && !userData[row.reply_to]) row.reply_to = null;
+    }
+  }
+  for (const data of Object.values(userData))
+    data.replyReports = data.replyReports?.filter((row) =>
+      replyIds.has(row.reply_id),
+    );
   alignConfigOwner(adminConfig, localOwner, backupOwner);
 
   return {
@@ -739,7 +773,10 @@ function normalizeUserData(
 function normalizeSocialData(
   input: Record<string, unknown>,
   username: string,
-): Pick<StorageUserImportData, 'profile' | 'follows' | 'likes' | 'reports'> {
+): Pick<
+  StorageUserImportData,
+  'profile' | 'follows' | 'likes' | 'reports' | 'replies' | 'replyReports'
+> {
   const timestamp = (value: unknown) =>
     Math.floor(
       assertBoundedNumber(value, '社交记录时间', 0, Number.MAX_SAFE_INTEGER),
@@ -785,7 +822,40 @@ function normalizeSocialData(
       updated_at: timestamp(p.updated_at),
     };
   }
+  const replyId = (value: unknown) => {
+    if (typeof value !== 'string' || !/^[a-f0-9-]{36}$/.test(value))
+      throw new ImportValidationError('回复标识无效');
+    return value;
+  };
   return {
+    replies: rows(input.replies).map((row) => {
+      try {
+        return {
+          ...identity(row),
+          id: replyId(row.id),
+          reply_to: row.reply_to == null ? null : name(row.reply_to),
+          content: validateReplyContent(row.content),
+        };
+      } catch (error) {
+        if (error instanceof ReviewValidationError)
+          throw new ImportValidationError(error.message);
+        throw error;
+      }
+    }),
+    replyReports: rows(input.replyReports).map((row) => {
+      if (
+        !REVIEW_REPORT_REASONS.includes(row.reason as ReviewReportReason) ||
+        typeof row.detail !== 'string' ||
+        row.detail.length > 200
+      )
+        throw new ImportValidationError('回复举报记录无效');
+      return {
+        reply_id: replyId(row.reply_id),
+        reason: row.reason as ReviewReportReason,
+        detail: row.detail,
+        created_at: timestamp(row.created_at),
+      };
+    }),
     profile,
     follows: rows(input.follows).map((row) => ({
       followee: name(row.followee),
@@ -895,7 +965,75 @@ function normalizeMessageState(value: unknown): UserMessageState {
       ...new Set(input.followReviewReadIds as string[]),
     ];
   }
+  if (input.reviewReplyReadAt !== undefined)
+    result.reviewReplyReadAt = Math.floor(
+      assertBoundedNumber(
+        input.reviewReplyReadAt,
+        '回复已读时间',
+        0,
+        Number.MAX_SAFE_INTEGER,
+      ),
+    );
+  if (input.reviewReplyReadIds !== undefined) {
+    if (
+      !Array.isArray(input.reviewReplyReadIds) ||
+      input.reviewReplyReadIds.some(
+        (id) => typeof id !== 'string' || !parseReplyMessageId(id),
+      )
+    )
+      throw new ImportValidationError('回复已读标识无效');
+    result.reviewReplyReadIds = [
+      ...new Set(input.reviewReplyReadIds as string[]),
+    ];
+  }
+  if (input.mutedKinds !== undefined) {
+    try {
+      result.mutedKinds = validateMutedKinds(input.mutedKinds);
+    } catch {
+      throw new ImportValidationError('通知设置无效');
+    }
+  }
+  for (const [kind, field] of [
+    ['new-follower', 'newFollower'],
+    ['review-like', 'reviewLike'],
+  ] as const) {
+    const timeKey = `${field}ReadAt` as const;
+    const idsKey = `${field}ReadIds` as const;
+    if (input[timeKey] !== undefined)
+      result[timeKey] = Math.floor(
+        assertBoundedNumber(
+          input[timeKey],
+          '通知已读时间',
+          0,
+          Number.MAX_SAFE_INTEGER,
+        ),
+      );
+    const ids = input[idsKey];
+    if (ids !== undefined) {
+      if (
+        !Array.isArray(ids) ||
+        ids.some(
+          (id) =>
+            typeof id !== 'string' || !parseSocialNotificationId(kind, id),
+        )
+      )
+        throw new ImportValidationError('通知已读标识无效');
+      result[idsKey] = [...new Set(ids as string[])];
+    }
+  }
   return mergeUserMessageState(result, {
+    ...(result.newFollowerReadAt !== undefined ||
+    result.newFollowerReadIds !== undefined
+      ? { newFollowerReadAt: result.newFollowerReadAt ?? 0 }
+      : {}),
+    ...(result.reviewLikeReadAt !== undefined ||
+    result.reviewLikeReadIds !== undefined
+      ? { reviewLikeReadAt: result.reviewLikeReadAt ?? 0 }
+      : {}),
+    ...(result.reviewReplyReadAt !== undefined ||
+    result.reviewReplyReadIds !== undefined
+      ? { reviewReplyReadAt: result.reviewReplyReadAt ?? 0 }
+      : {}),
     followReviewReadAt: result.followReviewReadAt ?? 0,
   });
 }

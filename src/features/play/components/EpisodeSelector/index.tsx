@@ -6,7 +6,15 @@ import {
   Star,
 } from 'lucide-react';
 import dynamic from 'next/dynamic';
-import React, { lazy, Suspense, useCallback, useMemo, useState } from 'react';
+import { useSearchParams } from 'next/navigation';
+import React, {
+  lazy,
+  Suspense,
+  useCallback,
+  useEffect,
+  useMemo,
+  useState,
+} from 'react';
 
 import MobileSheet from '@/components/mobile/MobileSheet';
 import {
@@ -29,6 +37,7 @@ import { TabBar } from '@/features/play/components/EpisodeSelector/TabBar';
 import { useDoubanRating } from '@/features/play/hooks/useDoubanRating';
 import type { DanmakuReloadHandler } from '@/features/play/lib/danmaku/types';
 import { useVideoReviews } from '@/features/reviews/hooks/useVideoReviews';
+import { MOBILE_QUERY } from '@/hooks/useIsMobileViewport';
 import {
   collapseSourcesForDisplay,
   getSourceBundle,
@@ -300,8 +309,19 @@ const EpisodeSelector: React.FC<EpisodeSelectorProps> = ({
   const hasEpisodesTab = totalEpisodes > 1 || variantSources.length > 1;
   const showDesktopEpisodes = detailLoading || hasEpisodesTab;
 
+  // 消息面板的评价详情可带 tab=reviews 进入，直接展示评价；播放页之间跳转不会重新挂载，按整串参数重新触发
+  const searchParams = useSearchParams();
+  const reviewsRequest =
+    searchParams.get('tab') === 'reviews' ? searchParams.toString() : null;
   const [mobileSheet, setMobileSheet] = useState<MobileSheetKey | null>(null);
-  const [desktopTab, setDesktopTab] = useState<DesktopTabKey>('main');
+  const [desktopTab, setDesktopTab] = useState<DesktopTabKey>(
+    reviewsRequest ? 'reviews' : 'main',
+  );
+  useEffect(() => {
+    if (!reviewsRequest) return;
+    setDesktopTab('reviews');
+    if (window.matchMedia(MOBILE_QUERY).matches) setMobileSheet('reviews');
+  }, [reviewsRequest]);
   const [reviewEditRequested, setReviewEditRequested] = useState(false);
 
   const reviews = useVideoReviews({

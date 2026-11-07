@@ -45,6 +45,11 @@ import {
   inviteValues,
 } from '@/lib/invite-code-storage';
 import {
+  REPLY_INSERT,
+  REPLY_REPORT_INSERT,
+  replyValues,
+} from '@/lib/review-reply-storage';
+import {
   importedProfileValues,
   newProfileId,
   NicknameTakenError,
@@ -1505,6 +1510,8 @@ export class LocalSqliteStorage implements IStorage {
       ['user_follows', ['follower', 'followee']],
       ['video_review_likes', ['author', 'liker']],
       ['video_review_reports', ['author', 'reporter']],
+      ['video_review_replies', ['author', 'username', 'reply_to']],
+      ['video_review_reply_reports', ['reporter']],
     ] as const) {
       for (const column of columns) {
         this.db
@@ -1529,6 +1536,18 @@ export class LocalSqliteStorage implements IStorage {
           'INSERT INTO user_profiles (username, profile_id, nickname, nickname_norm, avatar_seed, favorites_public, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)',
         )
         .run(...importedProfileValues(username, data.profile, ids, names));
+      for (const row of data.replies ?? [])
+        this.db.prepare(REPLY_INSERT).run(...replyValues(username, row));
+      for (const row of data.replyReports ?? [])
+        this.db
+          .prepare(REPLY_REPORT_INSERT)
+          .run(
+            row.reply_id,
+            normalizeUsername(username),
+            row.reason,
+            row.detail,
+            row.created_at,
+          );
       for (const row of data.follows ?? [])
         this.db
           .prepare(
@@ -1591,7 +1610,7 @@ export class LocalSqliteStorage implements IStorage {
         .all() as { username: string }[];
       for (const row of rows) {
         if (row.username) {
-          usernames.add(row.username);
+          if (row.username) usernames.add(row.username);
         }
       }
     }
@@ -1599,12 +1618,14 @@ export class LocalSqliteStorage implements IStorage {
       ['user_follows', ['follower', 'followee']],
       ['video_review_likes', ['author', 'liker']],
       ['video_review_reports', ['author', 'reporter']],
+      ['video_review_replies', ['author', 'username', 'reply_to']],
+      ['video_review_reply_reports', ['reporter']],
     ] as const) {
       for (const column of columns)
         for (const row of this.db
           .prepare(`SELECT DISTINCT ${column} AS username FROM ${table}`)
           .all() as { username: string }[])
-          usernames.add(row.username);
+          if (row.username) usernames.add(row.username);
     }
     return [...usernames];
   }
@@ -2186,6 +2207,85 @@ export class LocalSqliteStorage implements IStorage {
     return this.social.getFollowReviewMessages(...args);
   }
 
+  async deleteReviewReply(
+    id: string,
+    username: string,
+    admin = false,
+  ): Promise<boolean> {
+    return this.db.transaction(() => {
+      const result = this.db
+        .prepare(
+          'DELETE FROM video_review_replies WHERE id = ? AND (? = 1 OR username = ?)',
+        )
+        .run(id, admin ? 1 : 0, normalizeUsername(username));
+      if (result.changes)
+        this.db
+          .prepare('DELETE FROM video_review_reply_reports WHERE reply_id = ?')
+          .run(id);
+      return result.changes > 0;
+    })();
+  }
+  async moderateReplyReports(
+    id: string,
+    action: 'dismiss' | 'delete-reply',
+  ): Promise<void> {
+    if (action === 'delete-reply') {
+      await this.deleteReviewReply(id, '', true);
+      return;
+    }
+    this.db
+      .prepare('DELETE FROM video_review_reply_reports WHERE reply_id = ?')
+      .run(id);
+  }
+
+  async getReviewReplies(
+    ...args: Parameters<IStorage['getReviewReplies']>
+  ): ReturnType<IStorage['getReviewReplies']> {
+    return this.social.getReviewReplies(...args);
+  }
+
+  async postReviewReply(
+    ...args: Parameters<IStorage['postReviewReply']>
+  ): ReturnType<IStorage['postReviewReply']> {
+    return this.social.postReviewReply(...args);
+  }
+
+  async reportReviewReply(
+    ...args: Parameters<IStorage['reportReviewReply']>
+  ): ReturnType<IStorage['reportReviewReply']> {
+    return this.social.reportReviewReply(...args);
+  }
+
+  async getReviewReplyMessages(
+    ...args: Parameters<IStorage['getReviewReplyMessages']>
+  ): ReturnType<IStorage['getReviewReplyMessages']> {
+    return this.social.getReviewReplyMessages(...args);
+  }
+
+  async getReviewReplyMessageCount(
+    ...args: Parameters<IStorage['getReviewReplyMessageCount']>
+  ): ReturnType<IStorage['getReviewReplyMessageCount']> {
+    return this.social.getReviewReplyMessageCount(...args);
+  }
+
+  async getPublicReview(
+    ...args: Parameters<IStorage['getPublicReview']>
+  ): ReturnType<IStorage['getPublicReview']> {
+    return this.social.getPublicReview(...args);
+  }
+
+  async getSocialNotifications(
+    ...args: Parameters<IStorage['getSocialNotifications']>
+  ): ReturnType<IStorage['getSocialNotifications']> {
+    return this.social.getSocialNotifications(...args);
+  }
+
+  async getSocialNotificationCount(
+    ...args: Parameters<IStorage['getSocialNotificationCount']>
+  ): ReturnType<IStorage['getSocialNotificationCount']> {
+    return this.social.getSocialNotificationCount(...args);
+  }
+
   async getUserSocialData(
     ...args: Parameters<IStorage['getUserSocialData']>
   ): ReturnType<IStorage['getUserSocialData']> {
@@ -2298,6 +2398,16 @@ export class LocalSqliteStorage implements IStorage {
     title: string,
     year: string,
   ): void {
+    this.db
+      .prepare(
+        'DELETE FROM video_review_reply_reports WHERE reply_id IN (SELECT id FROM video_review_replies WHERE author = ? AND title_norm = ? AND year = ?)',
+      )
+      .run(author, title, year);
+    this.db
+      .prepare(
+        'DELETE FROM video_review_replies WHERE author = ? AND title_norm = ? AND year = ?',
+      )
+      .run(author, title, year);
     for (const table of ['video_review_likes', 'video_review_reports'])
       this.db
         .prepare(
@@ -2565,6 +2675,21 @@ export class LocalSqliteStorage implements IStorage {
         .run(targetUser);
       this.db
         .prepare('DELETE FROM user_access WHERE username = ?')
+        .run(targetUser);
+      this.db
+        .prepare(
+          'DELETE FROM video_review_reply_reports WHERE reporter = ? OR reply_id IN (SELECT id FROM video_review_replies WHERE author = ? OR username = ?)',
+        )
+        .run(targetUser, targetUser, targetUser);
+      this.db
+        .prepare(
+          'DELETE FROM video_review_replies WHERE author = ? OR username = ?',
+        )
+        .run(targetUser, targetUser);
+      this.db
+        .prepare(
+          'UPDATE video_review_replies SET reply_to = NULL WHERE reply_to = ?',
+        )
         .run(targetUser);
       this.stmts.deleteUserRow.run(targetUser);
       this.stmts.deletePlayRecordsByUser.run(targetUser);
@@ -3369,6 +3494,8 @@ export class LocalSqliteStorage implements IStorage {
         DELETE FROM user_follows;
         DELETE FROM video_review_likes;
         DELETE FROM video_review_reports;
+        DELETE FROM video_review_replies;
+        DELETE FROM video_review_reply_reports;
         DELETE FROM search_history;
         DELETE FROM skip_configs;
         DELETE FROM playback_sessions;
@@ -3410,6 +3537,8 @@ export class LocalSqliteStorage implements IStorage {
         DELETE FROM user_follows;
         DELETE FROM video_review_likes;
         DELETE FROM video_review_reports;
+        DELETE FROM video_review_replies;
+        DELETE FROM video_review_reply_reports;
         DELETE FROM search_history;
         DELETE FROM skip_configs;
         DELETE FROM playback_sessions;

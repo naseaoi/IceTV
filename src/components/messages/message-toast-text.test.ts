@@ -34,6 +34,9 @@ function makeSummary(
   return {
     unreadCount: 0,
     trackingUnreadCount: 0,
+    reviewReplyUnreadCount: 0,
+    newFollowerUnreadCount: 0,
+    reviewLikeUnreadCount: 0,
     followReviewUnreadCount: 0,
     revision: 'rev',
     announcement: null,

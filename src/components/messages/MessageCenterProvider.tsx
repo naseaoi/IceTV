@@ -47,6 +47,9 @@ const MESSAGE_TOAST_DURATION_MS = 7_000;
 const EMPTY_SUMMARY: UserMessageSummary = {
   unreadCount: 0,
   trackingUnreadCount: 0,
+  reviewReplyUnreadCount: 0,
+  newFollowerUnreadCount: 0,
+  reviewLikeUnreadCount: 0,
   followReviewUnreadCount: 0,
   revision: '',
   announcement: null,
@@ -152,6 +155,7 @@ export function MessageCenterProvider({ children }: { children: ReactNode }) {
     () => ({
       unreadCount: summary?.unreadCount ?? 0,
       trackingUnreadCount: summary?.trackingUnreadCount ?? null,
+      reviewReplyUnreadCount: 0,
       followReviewUnreadCount: summary?.followReviewUnreadCount ?? null,
       openPanel,
     }),
@@ -179,6 +183,10 @@ export function MessageCenterProvider({ children }: { children: ReactNode }) {
           onReadAll={handleReadAll}
           onLoadMore={pagination.loadMore}
           onRetry={loadFirstPage}
+          onSettingsSaved={() => {
+            void loadFirstPage();
+            void refreshSummary('local');
+          }}
         />
       )}
     </MessageCenterContext.Provider>

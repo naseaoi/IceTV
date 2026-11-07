@@ -1,6 +1,8 @@
 /** @jest-environment node */
 
 import { assertPlaybackPeriodRange } from '@/lib/__tests__/__fixtures__/playback-period-contract';
+import { assertReviewReplies } from '@/lib/__tests__/__fixtures__/review-reply-contract';
+import { assertSocialNotifications } from '@/lib/__tests__/__fixtures__/social-notification-contract';
 
 import { MySqlStorage } from '../mysql.db';
 import type { Favorite, PlayRecord } from '../types';
@@ -10,6 +12,7 @@ import { userDanmakuContract } from './__fixtures__/user-danmaku-contract';
 import {
   assertActivityAndReportPagination,
   assertFollowPagination,
+  assertPublicReviewRoles,
   videoReview,
 } from './__fixtures__/video-review-contract';
 
@@ -48,6 +51,21 @@ describeLive('MySQL 追更查询（真实实例）', () => {
     await (
       storage as unknown as { pool: { end: () => Promise<void> } }
     ).pool.end();
+  });
+
+  it('新粉丝与点赞通知双后端契约', async () => {
+    await storage.clearAllData();
+    await assertSocialNotifications(storage, 'mysql-notification');
+  });
+
+  it('公开评价作者角色双后端契约', async () => {
+    await storage.clearAllData();
+    await assertPublicReviewRoles(storage, 'mysql-review-role');
+  });
+
+  it('回复双后端契约', async () => {
+    await storage.clearAllData();
+    await assertReviewReplies(storage, 'mysql-reply');
   });
 
   it('keeps concurrent search increments and play counters without multiplying reporter-days', async () => {

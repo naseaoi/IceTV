@@ -53,6 +53,11 @@ import { MysqlInviteCodeStore } from '@/lib/mysql-invite-code-store';
 import { MySqlResourceStore } from '@/lib/mysql-resource-store';
 import { MysqlUserAccessStore } from '@/lib/mysql-user-access';
 import {
+  REPLY_INSERT,
+  REPLY_REPORT_INSERT,
+  replyValues,
+} from '@/lib/review-reply-storage';
+import {
   importedProfileValues,
   ReviewSocialStorage,
   SOCIAL_TABLES,
@@ -654,6 +659,30 @@ export class MySqlStorage implements IStorage {
         // 多实例同时初始化时，其他实例可能已完成加列。
         if ((error as { code?: string }).code !== 'ER_DUP_FIELDNAME')
           throw error;
+      }
+    }
+    for (const [table, index, columns] of [
+      [
+        'user_follows',
+        'idx_follow_notifications',
+        'followee, created_at, follower',
+      ],
+      [
+        'video_review_likes',
+        'idx_like_notifications',
+        'author, created_at, title_norm, year',
+      ],
+    ]) {
+      const [indexes] = await this.pool.query<RowDataPacket[]>(
+        `SHOW INDEX FROM ${table}`,
+      );
+      if (indexes.some((row) => row.Key_name === index)) continue;
+      try {
+        await this.pool.execute(
+          `CREATE INDEX ${index} ON ${table} (${columns})`,
+        );
+      } catch (error) {
+        if ((error as { code?: string }).code !== 'ER_DUP_KEYNAME') throw error;
       }
     }
     await this.migrateFavoriteProjection();
@@ -1452,6 +1481,109 @@ export class MySqlStorage implements IStorage {
     return this.socialFor().getFollowReviewMessages(...args);
   }
 
+  async deleteReviewReply(
+    id: string,
+    username: string,
+    admin = false,
+  ): Promise<boolean> {
+    return this.withTransaction(async (connection) => {
+      const [result] = await connection.execute<
+        import('mysql2/promise').ResultSetHeader
+      >(
+        'DELETE FROM video_review_replies WHERE id = ? AND (? = 1 OR username = ?)',
+        [id, admin ? 1 : 0, normalizeUsername(username)],
+      );
+      if (result.affectedRows)
+        await connection.execute(
+          'DELETE FROM video_review_reply_reports WHERE reply_id = ?',
+          [id],
+        );
+      return result.affectedRows > 0;
+    });
+  }
+  async moderateReplyReports(
+    id: string,
+    action: 'dismiss' | 'delete-reply',
+  ): Promise<void> {
+    if (action === 'delete-reply') {
+      await this.deleteReviewReply(id, '', true);
+      return;
+    }
+    await this.ensureInitialized();
+    await this.pool.execute(
+      'DELETE FROM video_review_reply_reports WHERE reply_id = ?',
+      [id],
+    );
+  }
+
+  async getReviewReplies(
+    ...args: Parameters<IStorage['getReviewReplies']>
+  ): ReturnType<IStorage['getReviewReplies']> {
+    await this.ensureInitialized();
+    return this.socialFor().getReviewReplies(...args);
+  }
+
+  async postReviewReply(
+    ...args: Parameters<IStorage['postReviewReply']>
+  ): ReturnType<IStorage['postReviewReply']> {
+    await this.ensureInitialized();
+    return this.withTransaction(async (connection) => {
+      await connection.query(
+        'SELECT username FROM video_reviews WHERE username = ? AND title_norm = ? AND year = ? FOR UPDATE',
+        [normalizeUsername(args[0]), args[1], args[2]],
+      );
+      return this.socialFor(connection).postReviewReply(...args);
+    });
+  }
+
+  async reportReviewReply(
+    ...args: Parameters<IStorage['reportReviewReply']>
+  ): ReturnType<IStorage['reportReviewReply']> {
+    await this.ensureInitialized();
+    return this.withTransaction(async (connection) => {
+      await connection.query(
+        'SELECT id FROM video_review_replies WHERE id = ? FOR UPDATE',
+        [args[0]],
+      );
+      return this.socialFor(connection).reportReviewReply(...args);
+    });
+  }
+
+  async getReviewReplyMessages(
+    ...args: Parameters<IStorage['getReviewReplyMessages']>
+  ): ReturnType<IStorage['getReviewReplyMessages']> {
+    await this.ensureInitialized();
+    return this.socialFor().getReviewReplyMessages(...args);
+  }
+
+  async getReviewReplyMessageCount(
+    ...args: Parameters<IStorage['getReviewReplyMessageCount']>
+  ): ReturnType<IStorage['getReviewReplyMessageCount']> {
+    await this.ensureInitialized();
+    return this.socialFor().getReviewReplyMessageCount(...args);
+  }
+
+  async getPublicReview(
+    ...args: Parameters<IStorage['getPublicReview']>
+  ): ReturnType<IStorage['getPublicReview']> {
+    await this.ensureInitialized();
+    return this.socialFor().getPublicReview(...args);
+  }
+
+  async getSocialNotifications(
+    ...args: Parameters<IStorage['getSocialNotifications']>
+  ): ReturnType<IStorage['getSocialNotifications']> {
+    await this.ensureInitialized();
+    return this.socialFor().getSocialNotifications(...args);
+  }
+
+  async getSocialNotificationCount(
+    ...args: Parameters<IStorage['getSocialNotificationCount']>
+  ): ReturnType<IStorage['getSocialNotificationCount']> {
+    await this.ensureInitialized();
+    return this.socialFor().getSocialNotificationCount(...args);
+  }
+
   async getUserSocialData(
     ...args: Parameters<IStorage['getUserSocialData']>
   ): ReturnType<IStorage['getUserSocialData']> {
@@ -1558,6 +1690,16 @@ export class MySqlStorage implements IStorage {
       const [result] = await connection.execute<
         import('mysql2/promise').ResultSetHeader
       >(REVIEW_SQL.delete, [...target, publicOnly ? 1 : 0]);
+      if (result.affectedRows) {
+        await connection.execute(
+          'DELETE FROM video_review_reply_reports WHERE reply_id IN (SELECT id FROM video_review_replies WHERE author = ? AND title_norm = ? AND year = ?)',
+          target,
+        );
+        await connection.execute(
+          'DELETE FROM video_review_replies WHERE author = ? AND title_norm = ? AND year = ?',
+          target,
+        );
+      }
       if (result.affectedRows)
         for (const table of ['video_review_likes', 'video_review_reports'])
           await connection.execute(
@@ -1582,6 +1724,14 @@ export class MySqlStorage implements IStorage {
       if (!rows.length) return;
       if (action === 'delete-review') {
         await connection.execute(REVIEW_SQL.delete, [...target, 1]);
+        await connection.execute(
+          'DELETE FROM video_review_reply_reports WHERE reply_id IN (SELECT id FROM video_review_replies WHERE author = ? AND title_norm = ? AND year = ?)',
+          target,
+        );
+        await connection.execute(
+          'DELETE FROM video_review_replies WHERE author = ? AND title_norm = ? AND year = ?',
+          target,
+        );
         await connection.execute(
           'DELETE FROM video_review_likes WHERE author = ? AND title_norm = ? AND year = ?',
           target,
@@ -1859,6 +2009,18 @@ export class MySqlStorage implements IStorage {
       await connection.execute('DELETE FROM user_access WHERE username = ?', [
         username,
       ]);
+      await connection.execute(
+        'DELETE FROM video_review_reply_reports WHERE reporter = ? OR reply_id IN (SELECT id FROM video_review_replies WHERE author = ? OR username = ?)',
+        [username, username, username],
+      );
+      await connection.execute(
+        'DELETE FROM video_review_replies WHERE author = ? OR username = ?',
+        [username, username],
+      );
+      await connection.execute(
+        'UPDATE video_review_replies SET reply_to = NULL WHERE reply_to = ?',
+        [username],
+      );
       await connection.execute('DELETE FROM users WHERE username = ?', [
         username,
       ]);
@@ -2940,6 +3102,19 @@ export class MySqlStorage implements IStorage {
           names,
         ) as ExecuteValues,
       );
+      for (const row of data.replies ?? [])
+        await connection.execute(
+          REPLY_INSERT,
+          replyValues(username, row) as ExecuteValues,
+        );
+      for (const row of data.replyReports ?? [])
+        await connection.execute(REPLY_REPORT_INSERT, [
+          row.reply_id,
+          normalizeUsername(username),
+          row.reason,
+          row.detail,
+          row.created_at,
+        ]);
       for (const row of data.follows ?? [])
         await connection.execute(
           'INSERT IGNORE INTO user_follows (follower, followee, created_at) VALUES (?, ?, ?)',

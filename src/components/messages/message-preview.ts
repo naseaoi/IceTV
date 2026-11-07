@@ -63,6 +63,11 @@ export function getMessagePreviewPage(): UserMessagePage {
     (review, index) => ({
       id: `follow-review:preview+${index}`,
       type: 'follow-review',
+      review: {
+        profileId: `previewUser${index + 1}`,
+        title_norm: review.title,
+        year: review.year,
+      },
       author: {
         profileId: `previewUser${index + 1}`,
         nickname: review.nickname,
@@ -103,6 +108,9 @@ export function getMessagePreviewSummary(
   return {
     unreadCount: page.total,
     trackingUnreadCount: tracking.length,
+    reviewReplyUnreadCount: 0,
+    newFollowerUnreadCount: 0,
+    reviewLikeUnreadCount: 0,
     followReviewUnreadCount: page.items.filter(
       (message) => message.type === 'follow-review',
     ).length,

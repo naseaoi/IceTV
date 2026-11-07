@@ -4,7 +4,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 
 import ExpandableText from '@/components/ExpandableText';
 import ConfirmModal from '@/components/modals/ConfirmModal';
-import { REPORT_REASON_LABELS } from '@/components/PublicReviewContent';
+import { REPORT_REASON_LABELS } from '@/components/ReportDialog';
 import {
   getAdminReviewReports,
   moderateReviewReport,
@@ -13,11 +13,12 @@ import { buttonStyles } from '@/features/admin/lib/buttonStyles';
 import { formatRelativeTime } from '@/lib/relative-time';
 import { type AdminReviewReportItem, REVIEW_REPORT_REASONS } from '@/lib/types';
 
-type Action = 'dismiss' | 'mark-spoiler' | 'delete-review';
+type Action = 'dismiss' | 'mark-spoiler' | 'delete-review' | 'delete-reply';
 const ACTION_LABELS: Record<Action, string> = {
   dismiss: '驳回举报',
   'mark-spoiler': '标为剧透',
   'delete-review': '删除评价',
+  'delete-reply': '删除回复',
 };
 export default function ReviewReports({
   onCountChanged,
@@ -72,6 +73,7 @@ export default function ReviewReports({
       const { review } = pending.item;
       await moderateReviewReport({
         action: pending.action,
+        replyId: pending.item.reply?.id,
         username: review.username,
         title_norm: review.title_norm,
         year: review.year,
@@ -95,6 +97,7 @@ export default function ReviewReports({
       {items.map((item) => (
         <article
           key={JSON.stringify([
+            item.reply?.id,
             item.review.username,
             item.review.title_norm,
             item.review.year,
@@ -105,12 +108,13 @@ export default function ReviewReports({
             {item.review.title} {item.review.year}
           </h3>
           <p className='mt-1 text-sm text-gray-500'>
-            {item.review.author.nickname ?? '未设置昵称'}（
-            {item.review.username}）
+            {(item.reply?.author ?? item.review.author).nickname ??
+              '未设置昵称'}
+            {item.reply ? ' · 回复' : `（${item.review.username}）`}
           </p>
           <div className='my-3'>
             <ExpandableText
-              text={item.review.content || '仅评分'}
+              text={item.reply?.content ?? (item.review.content || '仅评分')}
               className='text-sm text-gray-700 dark:text-gray-300'
             />
           </div>
@@ -144,14 +148,17 @@ export default function ReviewReports({
             ))}
           </ul>
           <div className='flex flex-wrap gap-2'>
-            {(Object.keys(ACTION_LABELS) as Action[]).map((action) => (
+            {(item.reply
+              ? (['dismiss', 'delete-reply'] as Action[])
+              : (['dismiss', 'mark-spoiler', 'delete-review'] as Action[])
+            ).map((action) => (
               <button
                 type='button'
                 key={action}
                 disabled={saving || loading}
                 onClick={() => setPending({ item, action })}
                 className={
-                  action === 'delete-review'
+                  action.startsWith('delete-')
                     ? buttonStyles.danger
                     : buttonStyles.secondary
                 }
@@ -186,11 +193,11 @@ export default function ReviewReports({
         title={pending ? ACTION_LABELS[pending.action] : '处理举报'}
         message={
           pending
-            ? `确认${ACTION_LABELS[pending.action]}：${pending.item.review.author.nickname ?? '未设置昵称'}对《${pending.item.review.title}》的评价？${pending.action === 'delete-review' ? '删除后无法恢复。' : '此操作将清空该评价的当前举报。'}`
+            ? `确认${ACTION_LABELS[pending.action]}：${(pending.item.reply?.author ?? pending.item.review.author).nickname ?? '未设置昵称'}对《${pending.item.review.title}》的${pending.item.reply ? '回复' : '评价'}？${pending.action.startsWith('delete-') ? '删除后无法恢复。' : '此操作将清空当前举报。'}`
             : ''
         }
         confirmText='确认处理'
-        danger={pending?.action === 'delete-review'}
+        danger={pending?.action.startsWith('delete-')}
         confirmDisabled={saving}
         onConfirm={() => void moderate()}
         onClose={() => {

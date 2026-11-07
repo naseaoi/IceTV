@@ -63,6 +63,63 @@ function createImportData() {
 }
 
 describe('data import full export fields', () => {
+  it('保留通知设置与新增已读状态并拒绝未知通知类型', async () => {
+    const data = createImportData();
+    const followerId = `new-follower:${Buffer.from(JSON.stringify(['Reader000001', '', '', 200])).toString('base64url')}`;
+    const likeId = `review-like:${Buffer.from(JSON.stringify(['Author000001', 'work', '', 200])).toString('base64url')}`;
+    data.data.userData.owner.messageState = {
+      mutedKinds: ['new-follower', 'review-like'],
+      newFollowerReadAt: 100,
+      newFollowerReadIds: [followerId],
+      reviewLikeReadAt: 100,
+      reviewLikeReadIds: [likeId],
+    };
+    const parsed = await parseImportData(data);
+    expect(parsed.snapshot.userData.owner.messageState).toMatchObject(
+      data.data.userData.owner.messageState,
+    );
+    (
+      data.data.userData.owner.messageState as unknown as {
+        mutedKinds: string[];
+      }
+    ).mutedKinds = ['announcement'];
+    await expect(parseImportData(data)).rejects.toThrow('通知设置无效');
+  });
+
+  it('保留回复、被提及者和举报，拒绝重复稳定标识', async () => {
+    const data = createImportData();
+    const id = '00000000-0000-4000-8000-000000000001';
+    data.data.userData.owner.videoReviews = [videoReview];
+    data.data.userData['demo-user'].replies = [
+      {
+        id,
+        author: 'OWNER',
+        title_norm: videoReview.title_norm,
+        year: videoReview.year,
+        reply_to: 'OWNER',
+        content: ' 回复 ',
+        created_at: 1000,
+      },
+    ];
+    data.data.userData.owner.replyReports = [
+      { reply_id: id, reason: 'spam', detail: '', created_at: 1001 },
+    ];
+    const parsed = await parseImportData(data);
+    expect(parsed.snapshot.userData['demo-user'].replies?.[0]).toMatchObject({
+      id,
+      author: 'owner',
+      reply_to: 'owner',
+      content: '回复',
+    });
+    expect(parsed.snapshot.userData.owner.replyReports).toEqual(
+      data.data.userData.owner.replyReports,
+    );
+    data.data.userData.owner.replies = [
+      ...data.data.userData['demo-user'].replies,
+    ];
+    await expect(parseImportData(data)).rejects.toThrow('回复标识重复');
+  });
+
   it('drops unknown site settings without validating retired proxy fields', async () => {
     const data = createImportData();
     data.data.adminConfig = {

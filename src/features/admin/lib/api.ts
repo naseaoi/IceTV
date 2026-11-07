@@ -93,7 +93,8 @@ export function getAdminReviewReports(cursor?: string | null) {
   );
 }
 export function moderateReviewReport(input: {
-  action: 'dismiss' | 'mark-spoiler' | 'delete-review';
+  action: 'dismiss' | 'mark-spoiler' | 'delete-review' | 'delete-reply';
+  replyId?: string;
   username: string;
   title_norm: string;
   year: string;

@@ -2,7 +2,7 @@
 
 import { useSyncExternalStore } from 'react';
 
-const MOBILE_QUERY = '(max-width: 767px)';
+export const MOBILE_QUERY = '(max-width: 767px)';
 
 function subscribe(onChange: () => void) {
   const mediaQuery = window.matchMedia(MOBILE_QUERY);

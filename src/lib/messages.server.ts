@@ -136,50 +136,124 @@ function parseTrackingMessageId(messageId: string): {
   }
 }
 
-export async function getUserMessagePage(
+async function getVisibleMessageSources(
   userName: string,
+  state: UserMessageState,
   limit: number,
-  cursor?: string | null,
-): Promise<UserMessagePage> {
-  const decodedCursor = decodeCursor(cursor);
-  const { announcement, state } = await getAnnouncementContext(userName);
+  before?: import('@/lib/message-cursor.server').MessageCursor | null,
+) {
+  const muted = new Set(state.mutedKinds ?? []);
   const now = Date.now();
+  const query = { limit, before };
   const followArgs = [
     userName,
     state.followReviewReadAt ?? 0,
     state.followReviewReadIds ?? [],
     now,
   ] as const;
-  const [trackingPage, followed, followCount] = await Promise.all([
-    db.getUnreadTrackingPlayRecordPage(
-      userName,
-      limit + 1,
-      decodedCursor?.createdAt,
-      // 非追更游标排除同毫秒追更；空串会被存储层当成没有游标。
-      decodedCursor
-        ? decodedCursor.key.startsWith('tracking:')
-          ? decodedCursor.key.slice(9)
-          : '\u0001'
-        : undefined,
-    ),
-    db.getFollowReviewMessages(...followArgs, {
-      limit: limit + 1,
-      before: decodedCursor,
-    }),
-    db.getFollowReviewMessageCount(...followArgs),
+  const replyArgs = [
+    userName,
+    state.reviewReplyReadAt ?? 0,
+    state.reviewReplyReadIds ?? [],
+    now,
+  ] as const;
+  const newArgs = [
+    'new-follower',
+    userName,
+    state.newFollowerReadAt ?? 0,
+    state.newFollowerReadIds ?? [],
+    now,
+  ] as const;
+  const likeArgs = [
+    'review-like',
+    userName,
+    state.reviewLikeReadAt ?? 0,
+    state.reviewLikeReadIds ?? [],
+    now,
+  ] as const;
+  const [
+    tracking,
+    followed,
+    followCount,
+    replies,
+    replyCount,
+    followers,
+    followerCount,
+    likes,
+    likeCount,
+  ] = await Promise.all([
+    muted.has('tracking-update')
+      ? { items: {}, total: 0, nextCursor: null }
+      : db.getUnreadTrackingPlayRecordPage(
+          userName,
+          limit,
+          before?.createdAt,
+          before
+            ? before.key.startsWith('tracking:')
+              ? before.key.slice(9)
+              : '\u0001'
+            : undefined,
+        ),
+    muted.has('follow-review')
+      ? []
+      : db.getFollowReviewMessages(...followArgs, query),
+    muted.has('follow-review')
+      ? 0
+      : db.getFollowReviewMessageCount(...followArgs),
+    muted.has('review-reply')
+      ? []
+      : db.getReviewReplyMessages(...replyArgs, query),
+    muted.has('review-reply') ? 0 : db.getReviewReplyMessageCount(...replyArgs),
+    muted.has('new-follower')
+      ? []
+      : db.getSocialNotifications(...newArgs, query),
+    muted.has('new-follower') ? 0 : db.getSocialNotificationCount(...newArgs),
+    muted.has('review-like')
+      ? []
+      : db.getSocialNotifications(...likeArgs, query),
+    muted.has('review-like') ? 0 : db.getSocialNotificationCount(...likeArgs),
   ]);
-  const includeAnnouncement = !decodedCursor && !!announcement;
+  return {
+    tracking,
+    followed,
+    followCount,
+    replies,
+    replyCount,
+    followers,
+    followerCount,
+    likes,
+    likeCount,
+  };
+}
+
+export async function getUserMessagePage(
+  userName: string,
+  limit: number,
+  cursor?: string | null,
+): Promise<UserMessagePage> {
+  const before = decodeCursor(cursor);
+  const { announcement, state } = await getAnnouncementContext(userName);
+  const sources = await getVisibleMessageSources(
+    userName,
+    state,
+    limit + 1,
+    before,
+  );
+  const includeAnnouncement = !before && !!announcement;
   const pageLimit = Math.max(0, limit - (includeAnnouncement ? 1 : 0));
   const merged: UserMessage[] = [
-    ...buildTrackingMessages(trackingPage.items),
-    ...followed,
+    ...buildTrackingMessages(sources.tracking.items),
+    ...sources.followed,
+    ...sources.replies,
+    ...sources.followers,
+    ...sources.likes,
   ];
   const remaining = merged.filter(
     (message) =>
-      !decodedCursor ||
-      message.createdAt < decodedCursor.createdAt ||
-      (message.createdAt === decodedCursor.createdAt &&
-        messageSortKey(message) < decodedCursor.key),
+      !before ||
+      message.createdAt < before.createdAt ||
+      (message.createdAt === before.createdAt &&
+        messageSortKey(message) < before.key),
   );
   remaining.sort(
     (a, b) =>
@@ -187,13 +261,20 @@ export async function getUserMessagePage(
       (messageSortKey(a) < messageSortKey(b) ? 1 : -1),
   );
   const page = remaining.slice(0, pageLimit);
-  const hasMore = remaining.length > page.length || !!trackingPage.nextCursor;
+  const hasMore =
+    remaining.length > page.length || !!sources.tracking.nextCursor;
   return {
     items: [
       ...(includeAnnouncement && announcement ? [announcement] : []),
       ...page,
     ],
-    total: trackingPage.total + followCount + (announcement ? 1 : 0),
+    total:
+      sources.tracking.total +
+      sources.followCount +
+      sources.replyCount +
+      sources.followerCount +
+      sources.likeCount +
+      (announcement ? 1 : 0),
     nextCursor: hasMore
       ? page.length
         ? encodeCursor(page[page.length - 1])
@@ -205,37 +286,46 @@ export async function getUserMessagePage(
 export async function getUserMessageSummary(
   userName: string,
 ): Promise<UserMessageSummary> {
-  const [{ announcement, state }, trackingPage] = await Promise.all([
-    getAnnouncementContext(userName),
-    db.getUnreadTrackingPlayRecordPage(userName, 1),
-  ]);
-  const latestTracking = buildTrackingMessages(trackingPage.items)[0] || null;
-  const followArgs = [
-    userName,
-    state.followReviewReadAt ?? 0,
-    state.followReviewReadIds ?? [],
-    Date.now(),
-  ] as const;
-  const [followed, followCount] = await Promise.all([
-    db.getFollowReviewMessages(...followArgs, { limit: 1 }),
-    db.getFollowReviewMessageCount(...followArgs),
-  ]);
-  const unreadCount = trackingPage.total + followCount + (announcement ? 1 : 0);
-  const revision = hashValue(
-    [
-      unreadCount,
-      trackingPage.total,
-      followCount,
-      announcement?.id ?? '',
-      latestTracking?.id ?? '',
-      ...followed.map((message) => message.id).sort(),
-    ].join('|'),
-  );
+  const { announcement, state } = await getAnnouncementContext(userName);
+  const sources = await getVisibleMessageSources(userName, state, 1);
+  const latestTracking =
+    buildTrackingMessages(sources.tracking.items)[0] ?? null;
+  const unreadCount =
+    sources.tracking.total +
+    sources.followCount +
+    sources.replyCount +
+    sources.followerCount +
+    sources.likeCount +
+    (announcement ? 1 : 0);
+  const latest = [
+    ...sources.followed,
+    ...sources.replies,
+    ...sources.followers,
+    ...sources.likes,
+  ];
   return {
     unreadCount,
-    trackingUnreadCount: trackingPage.total,
-    followReviewUnreadCount: followCount,
-    revision,
+    trackingUnreadCount: sources.tracking.total,
+    followReviewUnreadCount: sources.followCount,
+    reviewReplyUnreadCount: sources.replyCount,
+    newFollowerUnreadCount: sources.followerCount,
+    reviewLikeUnreadCount: sources.likeCount,
+    revision: hashValue(
+      [
+        unreadCount,
+        sources.tracking.total,
+        sources.followCount,
+        sources.replyCount,
+        sources.followerCount,
+        sources.likeCount,
+        announcement?.id ?? '',
+        latestTracking?.id ?? '',
+        ...latest.map(
+          (message) =>
+            `${message.id}${message.type === 'review-like' ? `:${message.likeCount}` : ''}`,
+        ),
+      ].join('|'),
+    ),
     announcement,
     latestTracking,
   };
@@ -254,6 +344,47 @@ export async function readUserMessage(
       },
     });
     return { message: announcement };
+  }
+
+  const messageKind = messageId.startsWith('tracking:')
+    ? 'tracking-update'
+    : messageId.split(':')[0];
+  if (state.mutedKinds?.some((kind) => kind === messageKind)) return null;
+  for (const [kind, field] of [
+    ['new-follower', 'newFollower'],
+    ['review-like', 'reviewLike'],
+  ] as const) {
+    if (!messageId.startsWith(`${kind}:`)) continue;
+    const messages = await db.getSocialNotifications(
+      kind,
+      userName,
+      state[`${field}ReadAt`] ?? 0,
+      state[`${field}ReadIds`] ?? [],
+      Date.now(),
+      { id: messageId, limit: 1 },
+    );
+    const message = messages.find((item) => item.id === messageId);
+    if (!message) return null;
+    await db.updateUserMessageState(userName, {
+      [field]: { id: messageId, createdAt: message.createdAt },
+    });
+    return { message };
+  }
+
+  if (messageId.startsWith('review-reply:')) {
+    const messages = await db.getReviewReplyMessages(
+      userName,
+      state.reviewReplyReadAt ?? 0,
+      state.reviewReplyReadIds ?? [],
+      Date.now(),
+      { id: messageId, limit: 1 },
+    );
+    const message = messages.find((item) => item.id === messageId);
+    if (!message) return null;
+    await db.updateUserMessageState(userName, {
+      reviewReply: { id: messageId, createdAt: message.createdAt },
+    });
+    return { message };
   }
 
   if (messageId.startsWith('follow-review:')) {
@@ -325,10 +456,13 @@ export async function readAllUserMessages(
         }
       : {}),
     followReviewReadAt: Date.now(),
+    reviewReplyReadAt: Date.now(),
+    newFollowerReadAt: Date.now(),
+    reviewLikeReadAt: Date.now(),
   });
 
   const updatedRecords: Record<string, PlayRecord> = {};
-  for (;;) {
+  while (!state.mutedKinds?.includes('tracking-update')) {
     const page = await db.getUnreadTrackingPlayRecordPage(
       userName,
       READ_ALL_BATCH_SIZE,

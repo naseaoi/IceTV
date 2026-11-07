@@ -85,6 +85,9 @@ function summaryOf(revision: string, unreadCount: number): UserMessageSummary {
   return {
     unreadCount,
     trackingUnreadCount: unreadCount,
+    reviewReplyUnreadCount: 0,
+    newFollowerUnreadCount: 0,
+    reviewLikeUnreadCount: 0,
     followReviewUnreadCount: 0,
     revision,
     announcement: null,

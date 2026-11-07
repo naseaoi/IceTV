@@ -4,6 +4,7 @@ type Row = Record<string, any>;
 export type SocialFakeState = {
   social: Record<string, Row[]>;
   users: Map<string, string>;
+  userAccess: Map<string, Row>;
   videoReviews: Map<string, { username: string; review: VideoReview }>;
 };
 
@@ -13,11 +14,22 @@ export function executeSocial(
   state: SocialFakeState,
 ): number | undefined {
   const table =
-    /(?:INTO|UPDATE|FROM) (user_profiles|user_follows|video_review_likes|video_review_reports)\b/.exec(
+    /(?:INTO|UPDATE|FROM) (user_profiles|user_follows|video_review_likes|video_review_reports|video_review_replies|video_review_reply_reports)\b/.exec(
       sql,
     )?.[1];
   if (!table || sql.startsWith('SELECT')) return undefined;
   const rows = state.social[table];
+  if (
+    table === 'video_review_replies' ||
+    table === 'video_review_reply_reports'
+  ) {
+    // 此 fake 仅覆盖无回复的旧契约；回复行为由 SQLite 与真实 MySQL 共用契约验证。
+    if (
+      rows.length === 0 &&
+      (sql.startsWith('DELETE') || sql.startsWith('UPDATE'))
+    )
+      return 0;
+  }
   if (sql.startsWith('DELETE')) {
     const before = rows.length;
     state.social[table] = rows.filter((row) => {
@@ -160,9 +172,44 @@ export function querySocial(
   params: unknown[],
   state: SocialFakeState,
 ): Row[] | undefined {
+  if (
+    sql.startsWith('SHOW INDEX FROM user_follows') ||
+    sql.startsWith('SHOW INDEX FROM video_review_likes')
+  )
+    return [
+      { Key_name: 'idx_follow_notifications' },
+      { Key_name: 'idx_like_notifications' },
+    ];
   if (sql.startsWith('SHOW COLUMNS FROM user_profiles'))
     return [{ Field: 'avatar_seed' }];
+  if (
+    sql.startsWith('SELECT username, role FROM user_access WHERE username IN')
+  )
+    return params.flatMap((username) => {
+      const row = state.userAccess.get(String(username));
+      return row ? [{ username: row.username, role: row.role }] : [];
+    });
   const profiles = state.social.user_profiles;
+  if (
+    sql.startsWith(
+      'SELECT v.username, v.review_json FROM video_reviews v JOIN user_profiles p',
+    )
+  )
+    return [...state.videoReviews.values()]
+      .filter(
+        ({ username, review }) =>
+          profiles.some(
+            (profile) =>
+              profile.username === username && profile.profile_id === params[0],
+          ) &&
+          review.title_norm === params[1] &&
+          review.year === params[2] &&
+          review.is_public,
+      )
+      .map(({ username, review }) => ({
+        username,
+        review_json: JSON.stringify(review),
+      }));
   const follows = state.social.user_follows;
   const likes = state.social.video_review_likes;
   const reports = state.social.video_review_reports;
@@ -187,6 +234,8 @@ export function querySocial(
       if (!row) {
         row = {
           ...report,
+          kind: 'review',
+          reply_id: '',
           username: review.username,
           review_json: JSON.stringify(review.review),
           ...profiles.find((profile) => profile.username === review.username),
@@ -214,7 +263,10 @@ export function querySocial(
           !params.length ||
           row.latest_reported_at < Number(params[0]) ||
           (row.latest_reported_at === Number(params[0]) &&
-            compareTuple(identity(row), params.slice(2).map(String)) < 0),
+            compareTuple(
+              ['review', ...identity(row), ''],
+              params.slice(2).map(String),
+            ) < 0),
       )
       .sort(
         (a, b) =>
@@ -222,6 +274,34 @@ export function querySocial(
           -compareTuple(identity(a), identity(b)),
       )
       .slice(0, 31);
+  }
+  if (
+    sql.startsWith(
+      'SELECT r.*, p.profile_id, p.nickname, p.avatar_seed FROM video_review_reports',
+    )
+  ) {
+    return reports
+      .filter(targetMatches)
+      .sort(
+        (a, b) =>
+          b.created_at - a.created_at ||
+          -compareTuple([a.reporter], [b.reporter]),
+      )
+      .slice(0, 5)
+      .map((row) => ({
+        ...row,
+        ...profiles.find((profile) => profile.username === row.reporter),
+      }));
+  }
+  if (sql.includes('FROM video_review_replies') && !sql.includes('UNION ALL')) {
+    if (state.social.video_review_replies.length === 0)
+      return sql.startsWith('SELECT COUNT') ? [{ count: 0 }] : [];
+  }
+  if (
+    sql.includes('FROM video_review_reply_reports') &&
+    !sql.includes('UNION ALL')
+  ) {
+    if (state.social.video_review_reply_reports.length === 0) return [];
   }
   if (sql.includes('ROW_NUMBER()')) {
     const counts = new Map<string, number>();

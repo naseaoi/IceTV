@@ -74,6 +74,7 @@ describe('useVideoReviews', () => {
       ...review,
       author: { profileId: 'Author000001', nickname: '作者', avatarSeed: null },
       spoiler: false,
+      replyCount: 0,
       likeCount: 0,
       likedByMe: false,
     };

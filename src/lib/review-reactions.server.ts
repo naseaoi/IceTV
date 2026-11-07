@@ -8,6 +8,7 @@ import {
   requireAdmin,
 } from '@/lib/api-auth';
 import { db } from '@/lib/db';
+import { replyId } from '@/lib/review-replies.server';
 import { type ReviewReportReason, REVIEW_REPORT_REASONS } from '@/lib/types';
 import {
   requireNickname,
@@ -95,6 +96,12 @@ export async function handleAdminReviewReports(request: NextRequest) {
         ),
       );
     const body = await socialBody(request);
+    if (body.replyId !== undefined) {
+      if (body.action !== 'dismiss' && body.action !== 'delete-reply')
+        throw new ReviewValidationError('回复审核动作无效');
+      await db.moderateReplyReports(replyId(body.replyId), body.action);
+      return socialJson({ ok: true });
+    }
     const { title, year } = targetIdentity(body);
     if (
       typeof body.username !== 'string' ||

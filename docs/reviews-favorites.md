@@ -19,9 +19,15 @@
 
 ## 用户资料与关注
 
-- 公开评价、个人主页、关注列表与关注动态只返回 `profileId` 和昵称，登录名仅用于服务端身份和后台接口。
+- 公开评价、个人主页、关注列表与关注动态使用 `profileId`、昵称和头像标识，登录名仅用于服务端身份和后台接口。公开评价与回复的 `author.role` 仅向站长、管理员返回 `owner` / `admin`（归一化环境变量站长优先，其余取 `user_access.role`），普通用户省略该字段。
 - 每个 `users` 行必须有 `user_profiles` 行；建号同事务写入，初始化与 `replaceAllData()` 结尾补齐。站长无 `users` 行，在会话恢复时按需 `ensureUserProfile()`。用户名比较先归一化。
-- `user_profiles`、`user_follows`、`video_review_likes`、`video_review_reports` 的删除、清空、替换、导入导出与 SQLite 大小写合并必须覆盖所有用户名列；删除评价同事务清理点赞与举报。导入昵称冲突置空、资料标识冲突重生成。
+- `user_profiles`、`user_follows`、`video_review_likes`、`video_review_reports`、`video_review_replies`、`video_review_reply_reports` 的删除、清空、替换、导入导出与 SQLite 大小写合并必须覆盖所有用户名列；删除评价同事务清理点赞、举报、回复和回复举报。导入昵称冲突置空、资料标识冲突重生成。
+
+## 评价回复
+
+- 回复按评价作者、归一化标题与精确年份关联，单层平铺；被回复者从同一评价内的回复 ID 推导并保存用户名，展示时解析当前公开资料。正文上限共用 `REVIEW_REPLY_MAX_LENGTH`。
+- 私密评价的回复与回复举报保留，但列表、消息和后台举报查询均经父评价的公开状态过滤；恢复公开后重新可见。回复作者始终可以删除本人回复，管理员删除使用独立后台 Guard。
+- 删除用户时清除其评价下的回复、本人发送的回复及相关举报；仅被提及时置空 `reply_to`，保留其他人的正文。备份回复以发送者为外层归属，评价作者与被提及者都参加站长重映射；稳定回复 ID 重复时拒绝导入。
 
 ## 收藏库与观看状态
 

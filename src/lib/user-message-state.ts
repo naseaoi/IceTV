@@ -1,11 +1,43 @@
 import { parseFollowReviewMessageId } from '@/lib/follow-review-identity';
+import { parseReplyMessageId } from '@/lib/review-reply-storage';
+import { parseSocialNotificationId } from '@/lib/social-notification-identity';
 import type { UserMessageState, UserMessageStateUpdate } from '@/lib/types';
 
 export function mergeUserMessageState(
   current: UserMessageState,
   update: UserMessageStateUpdate,
 ): UserMessageState {
+  if (update.notificationSettings) {
+    const settings = update.notificationSettings;
+    const reopened = (current.mutedKinds ?? []).filter(
+      (kind) => !settings.mutedKinds.includes(kind),
+    );
+    // 在存储事务读到的最新状态上计算重新开启的水位，避免并发设置覆盖已读状态。
+    update = { ...update };
+    if (reopened.includes('follow-review'))
+      update.followReviewReadAt = Math.max(
+        update.followReviewReadAt ?? 0,
+        settings.now,
+      );
+    if (reopened.includes('review-reply'))
+      update.reviewReplyReadAt = Math.max(
+        update.reviewReplyReadAt ?? 0,
+        settings.now,
+      );
+    if (reopened.includes('new-follower'))
+      update.newFollowerReadAt = Math.max(
+        update.newFollowerReadAt ?? 0,
+        settings.now,
+      );
+    if (reopened.includes('review-like'))
+      update.reviewLikeReadAt = Math.max(
+        update.reviewLikeReadAt ?? 0,
+        settings.now,
+      );
+  }
   const next = { ...current };
+  if (update.notificationSettings)
+    next.mutedKinds = [...update.notificationSettings.mutedKinds];
   // 公告版本不具备时间顺序，按调用方读到的旧标识做 CAS，避免迟到请求覆盖新版本。
   if (
     update.announcement &&
@@ -56,5 +88,57 @@ export function mergeUserMessageState(
   }
   if (update.followReview || update.followReviewReadAt !== undefined)
     next.followReviewReadIds = ids;
+  const previousReplyWatermark = current.reviewReplyReadAt ?? 0;
+  let replyWatermark = Math.max(
+    previousReplyWatermark,
+    update.reviewReplyReadAt ?? 0,
+  );
+  let replyIds = [...new Set(current.reviewReplyReadIds ?? [])].filter(
+    (id) => (parseReplyMessageId(id)?.createdAt ?? 0) > replyWatermark,
+  );
+  if (
+    update.reviewReply &&
+    update.reviewReply.createdAt > replyWatermark &&
+    !replyIds.includes(update.reviewReply.id)
+  )
+    replyIds.push(update.reviewReply.id);
+  if (replyIds.length > 200) {
+    const times = replyIds
+      .map((id) => parseReplyMessageId(id)?.createdAt ?? 0)
+      .sort((a, b) => a - b);
+    replyWatermark = Math.max(replyWatermark, times[times.length - 201]);
+    replyIds = replyIds.filter(
+      (id) => (parseReplyMessageId(id)?.createdAt ?? 0) > replyWatermark,
+    );
+  }
+  if (update.reviewReply || update.reviewReplyReadAt !== undefined) {
+    next.reviewReplyReadAt = replyWatermark;
+    next.reviewReplyReadIds = replyIds;
+  }
+  for (const [kind, field] of [
+    ['new-follower', 'newFollower'],
+    ['review-like', 'reviewLike'],
+  ] as const) {
+    const timeKey = `${field}ReadAt` as const;
+    const idsKey = `${field}ReadIds` as const;
+    let mark = Math.max(current[timeKey] ?? 0, update[timeKey] ?? 0);
+    const timestamp = (id: string) =>
+      parseSocialNotificationId(kind, id)?.[3] ?? 0;
+    let readIds = [...new Set(current[idsKey] ?? [])].filter(
+      (id) => timestamp(id) > mark,
+    );
+    const single = update[field];
+    if (single && single.createdAt > mark && !readIds.includes(single.id))
+      readIds.push(single.id);
+    if (readIds.length > 200) {
+      const times = readIds.map(timestamp).sort((a, b) => a - b);
+      mark = Math.max(mark, times[times.length - 201]);
+      readIds = readIds.filter((id) => timestamp(id) > mark);
+    }
+    if (single || update[timeKey] !== undefined) {
+      next[timeKey] = mark;
+      next[idsKey] = readIds;
+    }
+  }
   return next;
 }

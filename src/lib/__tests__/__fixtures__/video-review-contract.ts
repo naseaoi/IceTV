@@ -209,10 +209,92 @@ export async function assertActivityAndReportPagination(
   }
 }
 
+export async function assertPublicReviewRoles(
+  storage: IStorage,
+  prefix: string,
+) {
+  const owner = `${prefix}-owner`;
+  const admin = `${prefix}-admin`;
+  const user = `${prefix}-user`;
+  const missing = `${prefix}-missing`;
+  const previousOwner = process.env.ICETV_USERNAME;
+  try {
+    for (const username of [owner, admin, user])
+      await storage.registerUser(username, 'test-password');
+    await storage.updateUserAccess([owner, admin], { role: 'admin' });
+    process.env.ICETV_USERNAME = ` ${owner.toUpperCase()} `;
+    const expected = new Map<string, 'owner' | 'admin' | undefined>();
+    for (const username of [owner, admin, user, missing]) {
+      const profile = await storage.ensureUserProfile(username);
+      expected.set(
+        profile.profile_id,
+        username === owner ? 'owner' : username === admin ? 'admin' : undefined,
+      );
+      await storage.setVideoReview(username, {
+        ...videoReview,
+        title_norm: prefix,
+      });
+    }
+    const assertAuthor = (author: import('@/lib/types').PublicUserRef) => {
+      expect(expected.has(author.profileId)).toBe(true);
+      const role = expected.get(author.profileId);
+      if (role) expect(author.role).toBe(role);
+      else expect(author).not.toHaveProperty('role');
+      expect(author).not.toHaveProperty('username');
+    };
+    const page = await storage.getWorkVideoReviewPage(
+      prefix,
+      videoReview.year,
+      user,
+    );
+    expect(page.reviews).toHaveLength(4);
+    page.reviews.forEach((review) => assertAuthor(review.author));
+    const summary = await storage.getPublicVideoReviewsForWork(
+      prefix,
+      videoReview.year,
+      user,
+    );
+    expect(summary.reviews).toHaveLength(4);
+    summary.reviews.forEach((review) => assertAuthor(review.author));
+    for (const username of [owner, admin, user, missing]) {
+      const profile = await storage.getUserProfile(username);
+      const single = await storage.getPublicReview(
+        {
+          profileId: profile!.profile_id,
+          title_norm: prefix,
+          year: videoReview.year,
+        },
+        user,
+      );
+      expect(single).not.toBeNull();
+      assertAuthor(single!.author);
+      const profilePage = await storage.getUserPublicReviewPage(username, user);
+      assertAuthor(profilePage.items[0].author);
+    }
+    // 角色变更后下一次读取使用当前权限，不缓存旧徽标。
+    await storage.updateUserAccess([admin], { role: 'user' });
+    const demoted = await storage.getUserPublicReviewPage(admin, user);
+    expect(demoted.items[0].author).not.toHaveProperty('role');
+    process.env.ICETV_USERNAME = ` ${missing.toUpperCase()} `;
+    const ownerWithoutAccess = await storage.getUserPublicReviewPage(
+      missing,
+      user,
+    );
+    expect(ownerWithoutAccess.items[0].author.role).toBe('owner');
+  } finally {
+    if (previousOwner === undefined) delete process.env.ICETV_USERNAME;
+    else process.env.ICETV_USERNAME = previousOwner;
+  }
+}
+
 export function videoReviewContract(
   createStorage: () => IStorage,
   adminConfig: AdminConfig,
 ) {
+  it('公开评价列表与单条评价返回当前作者角色，普通用户省略字段', async () => {
+    await assertPublicReviewRoles(createStorage(), 'review-role');
+  });
+
   it('paginates activity and report groups with tied times, SQL counts and read exclusion', async () => {
     await assertActivityAndReportPagination(createStorage(), 'activity-page');
   });

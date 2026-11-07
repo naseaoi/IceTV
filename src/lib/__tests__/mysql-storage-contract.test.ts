@@ -129,6 +129,8 @@ function createState(): FakeState {
       user_follows: [],
       video_review_likes: [],
       video_review_reports: [],
+      video_review_replies: [],
+      video_review_reply_reports: [],
     },
     userAccess: new Map(),
     userGroups: [],
