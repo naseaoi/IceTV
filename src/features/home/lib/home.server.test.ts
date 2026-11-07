@@ -38,12 +38,15 @@ function hotItem(id: string) {
   };
 }
 
+const HERO_INTRO_WAIT_MS = 800;
+
 describe('home server hero intros', () => {
   let getHomeInitialData: typeof import('./home.server').getHomeInitialData;
   let fetchDoubanData: jest.Mock;
   let loadIntro: jest.Mock;
 
   beforeEach(() => {
+    jest.useFakeTimers();
     jest.resetModules();
     ({ getHomeInitialData } = require('./home.server'));
     ({ fetchDoubanData } = require('@/lib/douban'));
@@ -60,6 +63,7 @@ describe('home server hero intros', () => {
   });
 
   afterEach(() => {
+    jest.useRealTimers();
     jest.restoreAllMocks();
   });
 
@@ -72,13 +76,34 @@ describe('home server hero intros', () => {
     ]);
   }
 
-  it('returns lists without waiting for cold intros and coalesces concurrent loads', async () => {
+  async function loadPastWaitBudget() {
+    const page = getHomeInitialData();
+    await flushBackground();
+    jest.advanceTimersByTime(HERO_INTRO_WAIT_MS);
+    return page;
+  }
+
+  it('includes intros that load within the wait budget', async () => {
+    const page = await loadWithoutWaiting();
+
+    expect(page.heroItems.map((item) => item.intro)).toEqual(
+      Array(5).fill('Cached intro'),
+    );
+    expect(loadIntro).toHaveBeenCalledWith(
+      'https://m.douban.com/rexxar/api/v2/movie/1',
+    );
+    expect(loadIntro).toHaveBeenCalledWith(
+      'https://m.douban.com/rexxar/api/v2/tv/4',
+    );
+  });
+
+  it('stops waiting for slow intros and coalesces concurrent loads', async () => {
     const pending = deferred<{ intro: string }>();
     loadIntro.mockReturnValue(pending.promise);
 
     const pages = await Promise.all([
-      loadWithoutWaiting(),
-      loadWithoutWaiting(),
+      loadPastWaitBudget(),
+      loadPastWaitBudget(),
     ]);
 
     for (const page of pages) {
@@ -91,12 +116,6 @@ describe('home server hero intros', () => {
       );
     }
     expect(loadIntro).toHaveBeenCalledTimes(5);
-    expect(loadIntro).toHaveBeenCalledWith(
-      'https://m.douban.com/rexxar/api/v2/movie/1',
-    );
-    expect(loadIntro).toHaveBeenCalledWith(
-      'https://m.douban.com/rexxar/api/v2/tv/4',
-    );
 
     pending.resolve({ intro: `  Intro\n text ${'x'.repeat(400)}  ` });
     await flushBackground();
@@ -111,7 +130,6 @@ describe('home server hero intros', () => {
   it('serves stale intros while refreshing them in the background', async () => {
     const clock = jest.spyOn(Date, 'now').mockReturnValue(1_000_000);
     await loadWithoutWaiting();
-    await flushBackground();
     clock.mockReturnValue(1_000_000 + 24 * 60 * 60 * 1000 + 1);
     const pending = deferred<{ intro: string }>();
     loadIntro.mockReturnValue(pending.promise);
@@ -131,17 +149,14 @@ describe('home server hero intros', () => {
     expect(loadIntro).toHaveBeenCalledTimes(10);
   });
 
-  it('swallows background failures and retries on a later request', async () => {
-    const pending = deferred<{ intro: string }>();
-    loadIntro.mockReturnValue(pending.promise);
-    await loadWithoutWaiting();
+  it('omits failed intros and retries on a later request', async () => {
+    loadIntro.mockRejectedValue(new Error('Upstream unavailable'));
+    const failed = await loadWithoutWaiting();
+    expect(failed.heroItems.every((item) => item.intro === undefined)).toBe(
+      true,
+    );
 
-    pending.reject(new Error('Upstream unavailable'));
-    await flushBackground();
     loadIntro.mockResolvedValue({ intro: 'Recovered intro' });
-    await loadWithoutWaiting();
-    await flushBackground();
-
     const recovered = await loadWithoutWaiting();
     expect(recovered.heroItems.map((item) => item.intro)).toEqual(
       Array(5).fill('Recovered intro'),
@@ -152,7 +167,6 @@ describe('home server hero intros', () => {
   it('caches empty intros without repeatedly fetching details', async () => {
     loadIntro.mockResolvedValue({});
     await loadWithoutWaiting();
-    await flushBackground();
 
     const page = await loadWithoutWaiting();
     expect(page.heroItems.every((item) => item.intro === undefined)).toBe(true);

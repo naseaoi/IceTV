@@ -39,6 +39,7 @@ const homeRecommendations = createSharedServerCache<DoubanCategoryApiResponse>({
 });
 
 const HERO_INTRO_MAX_LENGTH = 300;
+const HERO_INTRO_WAIT_MS = 800;
 
 const heroIntros = createSharedServerCache<string>({
   name: 'home-douban-intro-v1',
@@ -91,38 +92,52 @@ function toDoubanItem({ id, title, poster, rate, year }: RecentHotItem) {
   return { id, title, poster, rate, year };
 }
 
-function getCachedHeroIntro(item: { id: string; type?: string }) {
+function loadHeroIntroDetail(target: string) {
+  return fetchDoubanData<{ intro?: string }>(target, {
+    cache: 'no-store',
+  }).then((detail) =>
+    (detail.intro || '')
+      .replace(/\s+/g, ' ')
+      .trim()
+      .slice(0, HERO_INTRO_MAX_LENGTH),
+  );
+}
+
+// 简介只等短暂预算：共享缓存命中即刻返回，冷启动回源超时则本次留空，加载在后台继续写缓存
+async function getHeroIntro(item: {
+  id: string;
+  type?: string;
+}): Promise<string | undefined> {
   if (!/^\d+$/.test(item.id)) return undefined;
   const kind = item.type === 'movie' ? 'movie' : 'tv';
   const target = `https://m.douban.com/rexxar/api/v2/${kind}/${item.id}`;
-  const cached = heroIntros.peek(target);
-  if (!cached?.fresh) {
-    void heroIntros
-      .refresh(target, async () => {
-        const detail = await fetchDoubanData<{ intro?: string }>(target, {
-          cache: 'no-store',
-        });
-        return (detail.intro || '')
-          .replace(/\s+/g, ' ')
-          .trim()
-          .slice(0, HERO_INTRO_MAX_LENGTH);
-      })
-      .catch(() => {});
+  const task = heroIntros.getOrLoad(target, () => loadHeroIntroDetail(target));
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const timeout = new Promise<undefined>((resolve) => {
+    timer = setTimeout(() => resolve(undefined), HERO_INTRO_WAIT_MS);
+  });
+  try {
+    return (await Promise.race([task, timeout])) || undefined;
+  } catch {
+    return undefined;
+  } finally {
+    clearTimeout(timer);
   }
-  return cached?.value || undefined;
 }
 
 function buildHeroItems(
   hotMovies: RecentHotItem[],
   hotTvShows: RecentHotItem[],
-): HomeHeroItem[] {
+): Promise<HomeHeroItem[]> {
   const picked = pickHomeHeroItems(hotMovies, hotTvShows);
-  return picked.map(({ subtitle, episodesInfo, ...item }) => ({
-    ...item,
-    ...parseDoubanCardSubtitle(subtitle),
-    episodesInfo: episodesInfo || undefined,
-    intro: getCachedHeroIntro(item),
-  }));
+  return Promise.all(
+    picked.map(async ({ subtitle, episodesInfo, ...item }) => ({
+      ...item,
+      ...parseDoubanCardSubtitle(subtitle),
+      episodesInfo: episodesInfo || undefined,
+      intro: await getHeroIntro(item),
+    })),
+  );
 }
 
 export async function getHomeInitialData(): Promise<HomeInitialData> {
@@ -158,6 +173,6 @@ export async function getHomeInitialData(): Promise<HomeInitialData> {
     hotTvShows: hotTvShows.map(toDoubanItem),
     hotVarietyShows: hotVarietyShows.map(toDoubanItem),
     bangumiCalendarData,
-    heroItems: buildHeroItems(hotMovies, hotTvShows),
+    heroItems: await buildHeroItems(hotMovies, hotTvShows),
   };
 }
