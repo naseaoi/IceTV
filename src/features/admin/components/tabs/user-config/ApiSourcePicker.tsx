@@ -1,6 +1,6 @@
 'use client';
 
-import { useMemo, useState } from 'react';
+import { useCallback, useMemo, useState } from 'react';
 
 import Select from '@/components/Select';
 import AdminSearchField from '@/features/admin/components/AdminSearchField';
@@ -63,21 +63,34 @@ export function ApiSourcePicker({
   const [query, setQuery] = useState('');
   const [filter, setFilter] = useState<PickerFilter>('all');
   const selectedSet = useMemo(() => new Set(selected), [selected]);
+  // 列表按选中筛选项那一刻的勾选状态过滤，勾选或全选后条目留在原处；数量仍按实时状态统计
+  const [filterSelection, setFilterSelection] = useState(selectedSet);
   const normalizedQuery = query.trim().toLowerCase();
 
-  const matchers = useMemo(() => {
-    const isRelay = (source: DataSource) =>
-      capabilities[source.key]?.direct === 'blocked';
-    return {
-      all: () => true,
-      selected: (source: DataSource) => selectedSet.has(source.key),
-      unselected: (source: DataSource) => !selectedSet.has(source.key),
-      direct: (source: DataSource) => !isRelay(source),
-      relay: isRelay,
-      cleanup: (source: DataSource) =>
-        isSourceCleanupCandidate(health.get(source.key)),
-    } satisfies Record<PickerFilter, (source: DataSource) => boolean>;
-  }, [capabilities, health, selectedSet]);
+  const createMatchers = useCallback(
+    (membership: ReadonlySet<string>) => {
+      const isRelay = (source: DataSource) =>
+        capabilities[source.key]?.direct === 'blocked';
+      return {
+        all: () => true,
+        selected: (source: DataSource) => membership.has(source.key),
+        unselected: (source: DataSource) => !membership.has(source.key),
+        direct: (source: DataSource) => !isRelay(source),
+        relay: isRelay,
+        cleanup: (source: DataSource) =>
+          isSourceCleanupCandidate(health.get(source.key)),
+      } satisfies Record<PickerFilter, (source: DataSource) => boolean>;
+    },
+    [capabilities, health],
+  );
+  const matchers = useMemo(
+    () => createMatchers(selectedSet),
+    [createMatchers, selectedSet],
+  );
+  const listMatchers = useMemo(
+    () => createMatchers(filterSelection),
+    [createMatchers, filterSelection],
+  );
 
   const counts = useMemo(
     () =>
@@ -89,7 +102,7 @@ export function ApiSourcePicker({
 
   const visibleSources = sources.filter(
     (source) =>
-      matchers[filter](source) &&
+      listMatchers[filter](source) &&
       (!normalizedQuery ||
         [source.name, source.key, source.api].some((value) =>
           value?.toLowerCase().includes(normalizedQuery),
@@ -133,7 +146,10 @@ export function ApiSourcePicker({
           variant='pill'
           ariaLabel='筛选视频源'
           value={filter}
-          onChange={(value) => setFilter(isPickerFilter(value) ? value : 'all')}
+          onChange={(value) => {
+            setFilter(isPickerFilter(value) ? value : 'all');
+            setFilterSelection(selectedSet);
+          }}
           options={FILTERS.map((key) => ({
             value: key,
             label:

@@ -32,6 +32,19 @@ describe('AnimatedCount', () => {
     );
   });
 
+  it('keeps the incoming roll direction after the old value leaves', () => {
+    const { container, rerender } = render(<AnimatedCount value={1} />);
+    rerender(<AnimatedCount value={0} />);
+    const [outgoing, incoming] = Array.from(
+      container.firstElementChild?.children ?? [],
+    );
+    expect(incoming).toHaveClass('count-roll-in-down');
+
+    fireEvent.animationEnd(outgoing);
+    expect(container.firstElementChild?.children).toHaveLength(1);
+    expect(incoming).toHaveClass('count-roll-in-down');
+  });
+
   it('formats both values', () => {
     const { container, rerender } = render(
       <AnimatedCount value={99} format={(n) => (n > 99 ? '99+' : String(n))} />,

@@ -1,4 +1,5 @@
 import { fireEvent, render, screen } from '@testing-library/react';
+import { useState } from 'react';
 
 import type { DataSource } from '@/features/admin/types/internal';
 
@@ -72,6 +73,32 @@ describe('ApiSourcePicker', () => {
     fireEvent.click(screen.getByRole('checkbox', { name: '全选' }));
 
     expect(onChange).toHaveBeenCalledWith(['relay']);
+  });
+
+  it('在未选筛选下全选后条目保留在列表中，重新筛选才刷新', () => {
+    function ControlledPicker() {
+      const [selected, setSelected] = useState<string[]>([]);
+      return (
+        <ApiSourcePicker
+          sources={sources}
+          selected={selected}
+          onChange={setSelected}
+        />
+      );
+    }
+    render(<ControlledPicker />);
+
+    chooseFilter(/^未选 3$/);
+    fireEvent.click(screen.getByRole('checkbox', { name: '全选' }));
+
+    expect(screen.getByRole('checkbox', { name: '全选' })).toBeChecked();
+    expect(screen.getByText('直连甲')).toBeTruthy();
+    expect(screen.getByText('中转乙')).toBeTruthy();
+
+    chooseFilter(/^未选 1$/);
+
+    expect(screen.queryByText('直连甲')).toBeNull();
+    expect(screen.getByText('直连丙')).toBeTruthy();
   });
 
   it('搜索无结果时显示空状态', () => {

@@ -62,13 +62,13 @@ function heroMetaParts(item: HomeHeroItem): string[] {
   ].filter((part): part is string => Boolean(part));
 }
 
-function heroCredits(item: HomeHeroItem): string {
+function heroCredits(item: HomeHeroItem) {
   return [
-    item.directors && `导演 ${item.directors}`,
-    item.actors && `主演 ${item.actors}`,
-  ]
-    .filter(Boolean)
-    .join('　');
+    { label: '导演', names: item.directors },
+    { label: '主演', names: item.actors },
+  ].filter((credit): credit is { label: string; names: string } =>
+    Boolean(credit.names),
+  );
 }
 
 function HeroRate({ rate, className }: { rate: string; className: string }) {
@@ -204,11 +204,18 @@ function HeroSlideContent({
             {item.intro}
           </p>
         )}
-        {credits && (
+        {credits.length > 0 && (
           <p
-            className={`${DESKTOP_HERO_TEXT.credits} truncate text-gray-500 dark:text-gray-400`}
+            className={`${DESKTOP_HERO_TEXT.credits} truncate text-gray-700 dark:text-gray-200`}
           >
-            {credits}
+            {credits.map((credit, index) => (
+              <span key={credit.label} className={index > 0 ? 'ml-4' : ''}>
+                <span className='mr-1.5 rounded bg-gray-900/[0.06] px-1.5 py-0.5 text-xs font-medium text-gray-500 dark:bg-white/10 dark:text-gray-400'>
+                  {credit.label}
+                </span>
+                {credit.names}
+              </span>
+            ))}
           </p>
         )}
         <HeroActions item={item} />

@@ -86,7 +86,7 @@ describe('SortableSourceRow', () => {
     for (const label of ['编辑', '检测', '仅管理员可用', '删除']) {
       fireEvent.click(trigger);
       fireEvent.click(screen.getByRole('menuitem', { name: label }));
-      expect(screen.queryByRole('menu')).not.toBeInTheDocument();
+      expect(trigger).toHaveAttribute('aria-expanded', 'false');
     }
     expect(onEdit).toHaveBeenCalledWith(source);
     expect(onValidate).toHaveBeenCalledWith(source.key);

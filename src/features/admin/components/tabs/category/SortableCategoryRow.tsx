@@ -5,7 +5,7 @@ import { CSS } from '@dnd-kit/utilities';
 import { GripVertical } from 'lucide-react';
 import type { CSSProperties } from 'react';
 
-import AdminRowMenu from '@/features/admin/components/AdminRowMenu';
+import MoreMenu from '@/components/MoreMenu';
 import { AdminStatusSwitch } from '@/features/admin/components/AdminStatusSwitch';
 import { CustomCategory } from '@/features/admin/types/internal';
 
@@ -92,7 +92,7 @@ export function SortableCategoryRow({
           ariaLabel={`${category.name || category.query}状态`}
           onToggle={() => onToggleEnable(category)}
         />
-        <AdminRowMenu
+        <MoreMenu
           label={`${category.name || category.query} 的操作`}
           items={[
             {

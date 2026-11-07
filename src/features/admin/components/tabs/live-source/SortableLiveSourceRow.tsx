@@ -5,7 +5,7 @@ import { CSS } from '@dnd-kit/utilities';
 import { GripVertical } from 'lucide-react';
 import type { CSSProperties } from 'react';
 
-import AdminRowMenu from '@/features/admin/components/AdminRowMenu';
+import MoreMenu from '@/components/MoreMenu';
 import { AdminStatusSwitch } from '@/features/admin/components/AdminStatusSwitch';
 import { LiveDataSource } from '@/features/admin/types/internal';
 
@@ -103,7 +103,7 @@ export function SortableLiveSourceRow({
           ariaLabel={`${liveSource.name}状态`}
           onToggle={() => onToggleEnable(liveSource.key)}
         />
-        <AdminRowMenu
+        <MoreMenu
           label={`${liveSource.name} 的操作`}
           items={[
             {

@@ -1,8 +1,6 @@
 'use client';
 
-import AdminRowMenu, {
-  type AdminRowMenuItem,
-} from '@/features/admin/components/AdminRowMenu';
+import MoreMenu, { type MoreMenuItem } from '@/components/MoreMenu';
 import {
   buttonStyles,
   checkboxStyles,
@@ -116,7 +114,7 @@ export function UserTable({
         >
           {users.map((user) => {
             const canConfigure = canConfigureUser(user, permissionContext);
-            const items: AdminRowMenuItem[] = [];
+            const items: MoreMenuItem[] = [];
             if (canConfigure) {
               items.push(
                 {
@@ -251,10 +249,7 @@ export function UserTable({
                   </p>
                 </div>
                 <div className='shrink-0'>
-                  <AdminRowMenu
-                    label={`${user.username} 的操作`}
-                    items={items}
-                  />
+                  <MoreMenu label={`${user.username} 的操作`} items={items} />
                 </div>
               </li>
             );

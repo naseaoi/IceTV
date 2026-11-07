@@ -22,6 +22,7 @@ import {
 import { createPortal } from 'react-dom';
 
 import { usePresence } from '@/hooks/usePresence';
+import { snapToDevicePixel } from '@/lib/pixel-snap';
 import { getClientAuthRuntimeConfig } from '@/lib/runtime-config';
 import { CURRENT_VERSION } from '@/lib/version';
 
@@ -107,15 +108,19 @@ export const UserMenu: React.FC = () => {
 
       setMenuPlacement(shouldOpenUp ? 'up' : 'down');
 
-      const right = Math.max(window.innerWidth - rect.right, VIEWPORT_GAP_PX);
+      const right = snapToDevicePixel(
+        Math.max(window.innerWidth - rect.right, VIEWPORT_GAP_PX),
+      );
       if (shouldOpenUp) {
         return {
-          bottom: Math.max(window.innerHeight - rect.top + ANCHOR_GAP_PX, 0),
+          bottom: snapToDevicePixel(
+            Math.max(window.innerHeight - rect.top + ANCHOR_GAP_PX, 0),
+          ),
           right,
         };
       }
       return {
-        top: rect.bottom + ANCHOR_GAP_PX,
+        top: snapToDevicePixel(rect.bottom + ANCHOR_GAP_PX),
         right,
       };
     };

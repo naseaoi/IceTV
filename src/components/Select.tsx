@@ -1,9 +1,18 @@
 'use client';
 
 import { type LucideIcon, Check, ChevronDown } from 'lucide-react';
-import { useEffect, useId, useRef, useState } from 'react';
+import {
+  useCallback,
+  useEffect,
+  useId,
+  useLayoutEffect,
+  useRef,
+  useState,
+} from 'react';
+import { createPortal } from 'react-dom';
 
 import { usePresence } from '@/hooks/usePresence';
+import { snapToDevicePixel } from '@/lib/pixel-snap';
 
 export interface SelectOption {
   label: string;
@@ -47,6 +56,9 @@ const TRIGGER_STATE_CLASS = {
 } as const;
 
 const POPOVER_EXIT_MS = 200;
+const POPOVER_GAP = 6;
+const POPOVER_MAX_HEIGHT = 288;
+const VIEWPORT_GAP = 8;
 
 export default function Select({
   id,
@@ -66,6 +78,7 @@ export default function Select({
   const presence = usePresence(isOpen && !disabled, POPOVER_EXIT_MS);
   const containerRef = useRef<HTMLDivElement>(null);
   const triggerRef = useRef<HTMLButtonElement>(null);
+  const popoverRef = useRef<HTMLDivElement>(null);
   const optionRefs = useRef<(HTMLButtonElement | null)[]>([]);
   const listboxId = useId();
 
@@ -75,13 +88,78 @@ export default function Select({
   useEffect(() => {
     if (!isOpen) return;
     const handleClickOutside = (event: MouseEvent) => {
-      if (!containerRef.current?.contains(event.target as Node)) {
+      const target = event.target as Node;
+      if (
+        !containerRef.current?.contains(target) &&
+        !popoverRef.current?.contains(target)
+      ) {
         setIsOpen(false);
       }
     };
     document.addEventListener('mousedown', handleClickOutside);
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, [isOpen]);
+
+  // 下拉挂到 body 上按触发器定位，避免被弹窗、面板等滚动容器裁切；下方放不下时向上展开
+  const place = useCallback(() => {
+    const trigger = triggerRef.current;
+    const popover = popoverRef.current;
+    if (!trigger || !popover) return;
+    const rect = trigger.getBoundingClientRect();
+    const viewportWidth = window.innerWidth;
+    const viewportHeight = window.innerHeight;
+    if (variant === 'field') popover.style.width = `${rect.width}px`;
+    else popover.style.minWidth = `${rect.width}px`;
+    popover.style.maxWidth = `${viewportWidth - VIEWPORT_GAP * 2}px`;
+    popover.style.maxHeight = `${POPOVER_MAX_HEIGHT}px`;
+
+    const spaceBelow =
+      viewportHeight - rect.bottom - POPOVER_GAP - VIEWPORT_GAP;
+    const spaceAbove = rect.top - POPOVER_GAP - VIEWPORT_GAP;
+    const openUp = popover.offsetHeight > spaceBelow && spaceAbove > spaceBelow;
+    popover.style.maxHeight = `${Math.min(
+      POPOVER_MAX_HEIGHT,
+      Math.max(openUp ? spaceAbove : spaceBelow, 0),
+    )}px`;
+    popover.style.top = `${snapToDevicePixel(
+      openUp
+        ? rect.top - POPOVER_GAP - popover.offsetHeight
+        : rect.bottom + POPOVER_GAP,
+    )}px`;
+
+    const width = popover.offsetWidth;
+    const left = align === 'end' ? rect.right - width : rect.left;
+    popover.style.left = `${snapToDevicePixel(
+      Math.max(
+        VIEWPORT_GAP,
+        Math.min(left, viewportWidth - width - VIEWPORT_GAP),
+      ),
+    )}px`;
+    popover.style.setProperty(
+      '--popover-origin',
+      `${openUp ? 'bottom' : 'top'} ${align === 'end' ? 'right' : 'left'}`,
+    );
+    popover.style.setProperty('--popover-shift', openUp ? '6px' : '-6px');
+  }, [align, variant]);
+
+  useLayoutEffect(() => {
+    if (!presence.mounted) return;
+    place();
+  }, [presence.mounted, place, options]);
+
+  useEffect(() => {
+    if (!presence.mounted) return;
+    const handleScroll = (event: Event) => {
+      if (popoverRef.current?.contains(event.target as Node)) return;
+      place();
+    };
+    window.addEventListener('resize', place);
+    window.addEventListener('scroll', handleScroll, true);
+    return () => {
+      window.removeEventListener('resize', place);
+      window.removeEventListener('scroll', handleScroll, true);
+    };
+  }, [presence.mounted, place]);
 
   useEffect(() => {
     if (!isOpen || !presence.mounted) return;
@@ -195,60 +273,58 @@ export default function Select({
         </div>
       )}
 
-      {presence.mounted && (
-        <div
-          id={listboxId}
-          role='listbox'
-          aria-label={ariaLabel}
-          data-open={presence.visible}
-          style={
-            {
-              '--popover-origin': `top ${align === 'end' ? 'right' : 'left'}`,
-            } as React.CSSProperties
-          }
-          className={`motion-popover absolute top-full z-50 mt-1.5 max-h-72 overflow-auto rounded-xl bg-white p-1 shadow-xl shadow-black/[0.08] ring-1 ring-black/[0.08] dark:bg-gray-900 dark:shadow-black/40 dark:ring-white/10 ${
-            variant === 'field' ? 'w-full' : 'min-w-[9rem]'
-          } ${align === 'end' ? 'right-0' : 'left-0'}`}
-        >
-          {options.map((opt, index) => {
-            const isSelected = opt.value === value;
-            return (
-              <button
-                key={opt.value}
-                ref={(node) => {
-                  optionRefs.current[index] = node;
-                }}
-                type='button'
-                role='option'
-                aria-selected={isSelected}
-                disabled={opt.disabled}
-                title={opt.disabledReason}
-                onClick={() => select(opt)}
-                onKeyDown={(event) => handleOptionKeyDown(event, index)}
-                className={`flex w-full items-center justify-between gap-3 rounded-lg px-2.5 py-2 text-left text-sm outline-none transition-colors duration-150 ${
-                  opt.disabled
-                    ? 'cursor-not-allowed text-gray-400 dark:text-gray-500'
-                    : isSelected
-                      ? 'font-medium text-brand-600 hover:bg-brand-500/10 focus-visible:bg-brand-500/10 dark:text-brand-400'
-                      : 'text-gray-700 hover:bg-gray-100 focus-visible:bg-gray-100 dark:text-gray-200 dark:hover:bg-white/[0.06] dark:focus-visible:bg-white/[0.06]'
-                }`}
-              >
-                <span className='flex min-w-0 items-center gap-2'>
-                  <span className='truncate'>{opt.label}</span>
-                  {opt.disabledReason && (
-                    <span className='shrink-0 text-xs text-rose-500 dark:text-rose-400'>
-                      {opt.disabledReason}
-                    </span>
+      {presence.mounted &&
+        createPortal(
+          <div
+            ref={popoverRef}
+            id={listboxId}
+            role='listbox'
+            aria-label={ariaLabel}
+            data-open={presence.visible}
+            className={`motion-popover fixed left-0 top-0 z-[10000] overflow-auto rounded-xl bg-white p-1 shadow-xl shadow-black/[0.08] ring-1 ring-black/[0.08] dark:bg-gray-900 dark:shadow-black/40 dark:ring-white/10 ${
+              variant === 'field' ? '' : 'w-max'
+            }`}
+          >
+            {options.map((opt, index) => {
+              const isSelected = opt.value === value;
+              return (
+                <button
+                  key={opt.value}
+                  ref={(node) => {
+                    optionRefs.current[index] = node;
+                  }}
+                  type='button'
+                  role='option'
+                  aria-selected={isSelected}
+                  disabled={opt.disabled}
+                  title={opt.disabledReason}
+                  onClick={() => select(opt)}
+                  onKeyDown={(event) => handleOptionKeyDown(event, index)}
+                  className={`flex w-full items-center justify-between gap-3 rounded-lg px-2.5 py-2 text-left text-sm outline-none transition-colors duration-150 ${
+                    opt.disabled
+                      ? 'cursor-not-allowed text-gray-400 dark:text-gray-500'
+                      : isSelected
+                        ? 'font-medium text-brand-600 hover:bg-brand-500/10 focus-visible:bg-brand-500/10 dark:text-brand-400'
+                        : 'text-gray-700 hover:bg-gray-100 focus-visible:bg-gray-100 dark:text-gray-200 dark:hover:bg-white/[0.06] dark:focus-visible:bg-white/[0.06]'
+                  }`}
+                >
+                  <span className='flex min-w-0 items-center gap-2'>
+                    <span className='truncate'>{opt.label}</span>
+                    {opt.disabledReason && (
+                      <span className='shrink-0 text-xs text-rose-500 dark:text-rose-400'>
+                        {opt.disabledReason}
+                      </span>
+                    )}
+                  </span>
+                  {isSelected && showSelectedIcon && (
+                    <Check className='h-4 w-4 flex-shrink-0' />
                   )}
-                </span>
-                {isSelected && showSelectedIcon && (
-                  <Check className='h-4 w-4 flex-shrink-0' />
-                )}
-              </button>
-            );
-          })}
-        </div>
-      )}
+                </button>
+              );
+            })}
+          </div>,
+          document.body,
+        )}
     </div>
   );
 }

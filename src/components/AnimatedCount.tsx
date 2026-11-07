@@ -11,6 +11,8 @@ interface AnimatedCountProps {
 interface CountState {
   value: number;
   previous: number | null;
+  // 方向随变化一起记录，旧值滚出结束后清空 previous 不能改变新值的动画类
+  direction: 'up' | 'down';
   id: number;
 }
 
@@ -23,15 +25,19 @@ export default function AnimatedCount({
   const [state, setState] = useState<CountState>({
     value,
     previous: null,
+    direction: 'up',
     id: 0,
   });
   if (state.value !== value) {
-    setState({ value, previous: state.value, id: state.id + 1 });
+    setState({
+      value,
+      previous: state.value,
+      direction: value < state.value ? 'down' : 'up',
+      id: state.id + 1,
+    });
   }
 
-  const direction =
-    state.previous !== null && state.value < state.previous ? 'down' : 'up';
-  const id = state.id;
+  const { direction, id } = state;
 
   return (
     <span className={`count-roll ${className}`.trim()}>

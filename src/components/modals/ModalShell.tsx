@@ -30,6 +30,11 @@ const CLOSE_ANIMATION_MS = 130;
 // 叠放的弹窗按打开顺序入栈，Esc 只关闭最上层
 const openShells: symbol[] = [];
 
+// 不经 ModalShell 的自绘浮层用它避让 Esc，让叠在上面的弹窗先关闭
+export function hasOpenModalShell() {
+  return openShells.length > 0;
+}
+
 // 打开时才挂载的弹窗（父组件条件渲染、按需加载）用它代替直接关闭：
 // 先播放退场，结束后再通知父组件卸载
 export function useDeferredClose(onClose: () => void) {

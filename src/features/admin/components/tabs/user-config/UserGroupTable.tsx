@@ -1,6 +1,6 @@
 'use client';
 
-import AdminRowMenu from '@/features/admin/components/AdminRowMenu';
+import MoreMenu from '@/components/MoreMenu';
 
 interface UserGroup {
   name: string;
@@ -55,7 +55,7 @@ export function UserGroupTable({
                 </p>
               </div>
               <div className='shrink-0'>
-                <AdminRowMenu
+                <MoreMenu
                   label={`${group.name} 的操作`}
                   items={[
                     {

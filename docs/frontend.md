@@ -32,7 +32,7 @@
 
 - 缓动统一用 `globals.css` 的 `--motion-spring`（明显回弹）、`--motion-spring-soft`（轻微回弹）、`--motion-ease-out` 与 `--motion-ease-in`，不在组件里另写贝塞尔曲线。弹簧曲线由 `linear()` 采样，不支持时退回近似的 `cubic-bezier`。
 - 浮层进出场：下拉与菜单加 `motion-popover`，弹窗面板加 `motion-dialog`，遮罩加 `motion-backdrop`，统一用 `data-open` 切换。挂载与卸载交给 `usePresence`，**卸载延时要比 CSS 离场过渡长约 40ms**，否则开发模式或主线程繁忙时离场动画会被截断。下拉与菜单用 `--popover-origin` 指定展开原点、`--popover-shift` 指定位移方向。
-- 居中弹窗一律用 `ModalShell`，它负责进出场、遮罩、滚动锁定与 Esc（叠放时只关最上层），不再手写遮罩与 `fixed` 面板。父组件条件渲染会让弹窗瞬间卸载、退场动画丢失：常驻的弹窗由父组件传 `isOpen` 控制，关闭时会被清空的目标数据用 `useRetainedValue` 保留最后一份，撑住退场期间的内容；按需加载、打开时才挂载的面板在内部用同文件的 `useDeferredClose(onClose)` 拿到 `open` 与 `requestClose`，所有关闭入口都走 `requestClose`，退场结束后才通知父组件卸载。弹窗内容放在 `ModalShell` 的子组件里，每次打开重新挂载，初始状态在首帧直接从本地存储读出，不在副作用里补读，避免内容跳动。
+- 居中弹窗一律用 `ModalShell`，它负责进出场、遮罩、滚动锁定与 Esc（叠放时只关最上层），不再手写遮罩与 `fixed` 面板。父组件条件渲染会让弹窗瞬间卸载、退场动画丢失：常驻的弹窗由父组件传 `isOpen` 控制，关闭时会被清空的目标数据用 `useRetainedValue` 保留最后一份，撑住退场期间的内容；按需加载、打开时才挂载的面板在内部用同文件的 `useDeferredClose(onClose)` 拿到 `open` 与 `requestClose`，所有关闭入口都走 `requestClose`，退场结束后才通知父组件卸载。弹窗内容放在 `ModalShell` 的子组件里，每次打开重新挂载，初始状态在首帧直接从本地存储读出，不在副作用里补读，避免内容跳动。消息面板等不经 `ModalShell` 的自绘浮层自行监听 Esc 时，先用 `hasOpenModalShell()` 判断，有弹窗叠在上面就不处理，否则会和上层弹窗一起被关闭。
 - 同一区域整组内容切换（如“常看”切换周/月/年）时，内容容器以当前范围为 `key` 重新挂载，条目加 `motion-swap-in` 并给出 `--stagger-index`，容器的 `--swap-shift` 用正负表示切换方向；首次展示不加。
 - 导航与标签栏的选中条用 `useSlidingIndicator`：目标项加 `data-indicator-target`，容器设为定位元素。指示条由 Web Animations 驱动 `transform`，在合成层运行，换页时主线程繁忙也不掉帧，不要改回 `left`/`width` 过渡。随页面重新挂载的导航（顶栏、移动端频道条）传 `memoryKey`，新页面才能从上一页的位置滑过来；链接式导航配合同文件的 `usePendingTarget`，点击后立即切换选中态，不等路由完成。
 - 收藏爱心的回弹与粒子只在用户点击后、收藏状态真正翻转时播放，异步加载或其他页面同步的状态变化不播放。评分星的弹起同理，由 `RatingInput` 在用户改分时传 `pop` 给 `RatingStars`，外部传入的新分值不播放。
@@ -42,7 +42,7 @@
 
 ## 通用组件
 
-- 下拉统一用 `src/components/Select.tsx`（`field` 表单整宽、`pill` 工具栏胶囊），`AdminSelect` 只是 `field` 的包装。
+- 下拉统一用 `src/components/Select.tsx`（`field` 表单整宽、`pill` 工具栏胶囊），`AdminSelect` 只是 `field` 的包装。下拉层挂到 `body` 上按触发器 `fixed` 定位，放在弹窗等滚动容器内不会被裁切，下方空间不足时向上展开；`field` 与触发器等宽，`pill` 随最长选项自适应。“更多”操作菜单统一用 `src/components/MoreMenu.tsx`，同样挂 `body`。
 - 操作结果、错误与提醒的轻提示统一调 `showToast()`（`src/lib/toast.ts`），由根布局的 `ToastViewport` 渲染；`triggerGlobalError()`、消息中心新消息提醒、站长的新版本提醒都走这条路径。只需告知结果的场景不用 `AlertModal` 加 `timer`，弹窗留给需要用户确认的情况。
   - 同一 `key` 的提示原地更新文案并重新计时，同时播放一次回弹，不叠加；默认 `key` 为语气加文案，所以连续重复同一操作只会回弹不会刷屏。轮询类提醒传固定 `key`，需要主动收起时调 `dismissToast(key)`。
   - `notice` 用于需要用户留意的提醒，可带一个 `action`；点击后执行回调并收起提示。
@@ -55,5 +55,5 @@
 
 - 新增 tab：在 `src/features/admin/lib/admin-tabs.ts` 注册，在 `AdminTabContent.tsx` 挂载；`useAdminTab.ts` 经注册表解析，无需改动。
 - 弹窗复用 `ConfirmModal` / `AlertModal`；表单样式复用 `src/features/admin/lib/buttonStyles.ts`（`buttonStyles` / `inputStyles` / `checkboxStyles`）。
-- 设置类内容用 `AdminSettings.tsx` 的 `AdminSettingsGroup` / `AdminSettingRow`，开关用 `AdminStatusSwitch`，列表行操作收进 `AdminRowMenu`。`AdminSettingRow` 的 `description` 放标题下方的说明，测试结果、致谢链接等短状态用 `labelAddon` 与标题同行。
+- 设置类内容用 `AdminSettings.tsx` 的 `AdminSettingsGroup` / `AdminSettingRow`，开关用 `AdminStatusSwitch`，列表行操作收进 `MoreMenu`。`AdminSettingRow` 的 `description` 放标题下方的说明，测试结果、致谢链接等短状态用 `labelAddon` 与标题同行。
 - `ADMIN_PANEL_CLASS` 外框不裁切溢出，行内下拉才能伸出；贴边底色的子元素自行加圆角，不要给外框补 `overflow-hidden`。

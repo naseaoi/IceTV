@@ -5,6 +5,7 @@ import type {
   CardActionAnchor,
 } from '@/components/card-actions/actions';
 import CardActionList from '@/components/card-actions/CardActionList';
+import { snapToDevicePixel } from '@/lib/pixel-snap';
 
 const VIEWPORT_PADDING = 8;
 const BUTTON_GAP = 4;
@@ -40,8 +41,10 @@ function placeMenu(
   }
 
   return {
-    top: Math.max(VIEWPORT_PADDING, Math.min(top, maxTop)),
-    left: Math.max(VIEWPORT_PADDING, Math.min(left, maxLeft)),
+    top: snapToDevicePixel(Math.max(VIEWPORT_PADDING, Math.min(top, maxTop))),
+    left: snapToDevicePixel(
+      Math.max(VIEWPORT_PADDING, Math.min(left, maxLeft)),
+    ),
     origin: `${above ? 'bottom' : 'top'} ${alignRight ? 'right' : 'left'}`,
   };
 }

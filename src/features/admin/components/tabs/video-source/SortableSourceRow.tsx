@@ -5,8 +5,8 @@ import { CSS } from '@dnd-kit/utilities';
 import { GripVertical } from 'lucide-react';
 import type { CSSProperties } from 'react';
 
+import MoreMenu from '@/components/MoreMenu';
 import Select from '@/components/Select';
-import AdminRowMenu from '@/features/admin/components/AdminRowMenu';
 import { AdminStatusSwitch } from '@/features/admin/components/AdminStatusSwitch';
 import {
   describeSourceHealth,
@@ -283,7 +283,7 @@ export function SortableSourceRow({
           ariaLabel={`${source.name}状态`}
           onToggle={() => onToggleEnable(source.key)}
         />
-        <AdminRowMenu
+        <MoreMenu
           label={`${source.name} 的操作`}
           items={[
             {
