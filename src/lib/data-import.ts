@@ -463,6 +463,21 @@ function normalizeAdminConfig(value: unknown): AdminConfig {
   const rawSite = requireObject(cloned.SiteConfig, '站点配置格式无效');
   if (rawSite.EnableUserDanmaku !== undefined)
     assertBoolean(rawSite.EnableUserDanmaku, '用户弹幕开关');
+  if (
+    rawSite.LiveAccess !== undefined &&
+    rawSite.LiveAccess !== 'all' &&
+    rawSite.LiveAccess !== 'groups'
+  ) {
+    throw new ImportValidationError('直播权限范围格式无效');
+  }
+  const rawTags = (cloned as unknown as AdminConfig).UserConfig?.Tags;
+  if (Array.isArray(rawTags)) {
+    for (const tag of rawTags) {
+      requireObject(tag, '用户组条目格式无效');
+      if (tag.allowLive !== undefined)
+        assertBoolean(tag.allowLive, '用户组直播权限');
+    }
+  }
   const legacyInvites = (cloned as unknown as AdminConfig).UserConfig
     ?.InviteCodes;
   const legacyUsers = (cloned as unknown as AdminConfig).UserConfig?.Users;
@@ -612,6 +627,9 @@ function validateSourceConfig(config: AdminConfig): void {
       ) {
         throw new ImportValidationError('视频源代理模式格式无效');
       }
+    }
+    if (source.adminOnly !== undefined) {
+      assertBoolean(source.adminOnly, '视频源可见范围');
     }
   }
 }

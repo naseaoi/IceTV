@@ -40,8 +40,11 @@ import { VideoSourceEditForm } from '@/features/admin/components/tabs/video-sour
 import { useAdminSourceActions } from '@/features/admin/hooks/useAdminSourceActions';
 import { useLoadingState } from '@/features/admin/hooks/useLoadingState';
 import { useSourceBatchOperation } from '@/features/admin/hooks/useSourceBatchOperation';
+import {
+  SOURCE_INSIGHT_DAYS,
+  useSourceInsights,
+} from '@/features/admin/hooks/useSourceInsights';
 import { useSourceValidation } from '@/features/admin/hooks/useSourceValidation';
-import { adminGet } from '@/features/admin/lib/api';
 import {
   buttonStyles,
   checkboxStyles,
@@ -54,15 +57,16 @@ import {
   type SourceProxyMode,
   DEFAULT_SOURCE_PROXY_MODE,
 } from '@/lib/proxy-modes';
-import type { SourceHealthReportItem } from '@/lib/source-quality-policy';
 import type { SourceRouteStatsItem } from '@/lib/types';
 import { AdminConfig } from '@/types/admin';
 
 type SourceRouteStatsBySource = Record<string, SourceRouteStatsView>;
-type SourceHealthFilter = 'all' | 'cleanup';
-type SourceSortMode = 'manual' | 'quality';
+type SourceHealthFilter = 'all' | 'cleanup' | 'relay';
 
-const STATS_DAYS = 7;
+function isSourceHealthFilter(value: string): value is SourceHealthFilter {
+  return value === 'all' || value === 'cleanup' || value === 'relay';
+}
+type SourceSortMode = 'manual' | 'quality';
 
 function toRouteModeStats(item: SourceRouteStatsItem): RouteModeStats {
   const totalCount = item.successCount + item.failureCount;
@@ -100,11 +104,15 @@ const VideoSourceConfig = ({
     showAlert,
   });
   const [sources, setSources] = useState<DataSource[]>([]);
-  const [sourceRouteStats, setSourceRouteStats] =
-    useState<SourceRouteStatsBySource>({});
-  const [sourceHealth, setSourceHealth] = useState<
-    Map<string, SourceHealthReportItem>
-  >(() => new Map());
+  const {
+    routeStats,
+    capabilities: routeCapabilities,
+    health: sourceHealth,
+  } = useSourceInsights(config, Boolean(config?.SourceConfig));
+  const sourceRouteStats = useMemo(
+    () => buildSourceRouteStats(routeStats),
+    [routeStats],
+  );
   const [filterQuery, setFilterQuery] = useState('');
   const [healthFilter, setHealthFilter] = useState<SourceHealthFilter>('all');
   const [sortMode, setSortMode] = useState<SourceSortMode>('manual');
@@ -118,11 +126,21 @@ const VideoSourceConfig = ({
       ).length,
     [sources, sourceHealth],
   );
+  const isRelaySource = useCallback(
+    (key: string) => routeCapabilities[key]?.direct === 'blocked',
+    [routeCapabilities],
+  );
+  const relayCount = useMemo(
+    () => sources.filter((item) => isRelaySource(item.key)).length,
+    [sources, isRelaySource],
+  );
   const visibleRows = useMemo(() => {
     const matched = sources.filter(
       (item) =>
         (healthFilter === 'all' ||
-          isSourceCleanupCandidate(sourceHealth.get(item.key))) &&
+          (healthFilter === 'cleanup'
+            ? isSourceCleanupCandidate(sourceHealth.get(item.key))
+            : isRelaySource(item.key))) &&
         [item.name, item.key, item.api, item.detail].some((value) =>
           value?.toLowerCase().includes(normalizedQuery),
         ),
@@ -130,7 +148,14 @@ const VideoSourceConfig = ({
     return sortMode === 'quality'
       ? sortByHealth(matched, sourceHealth)
       : matched;
-  }, [sources, sourceHealth, healthFilter, sortMode, normalizedQuery]);
+  }, [
+    sources,
+    sourceHealth,
+    healthFilter,
+    isRelaySource,
+    sortMode,
+    normalizedQuery,
+  ]);
   const [showAddForm, setShowAddForm] = useState(false);
   const [editingSource, setEditingSource] = useState<DataSource | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<DataSource | null>(null);
@@ -200,43 +225,6 @@ const VideoSourceConfig = ({
     setSelectedSources(new Set());
   }, [config]);
 
-  useEffect(() => {
-    if (!config?.SourceConfig) return;
-    let cancelled = false;
-    adminGet<{ stats: SourceRouteStatsItem[] }>(
-      `/api/admin/source-route-stats?days=${STATS_DAYS}`,
-      '读取路由统计失败',
-    )
-      .then((payload) => {
-        if (cancelled) return;
-        setSourceRouteStats(buildSourceRouteStats(payload.stats || []));
-      })
-      .catch((error) => {
-        if (cancelled) return;
-        console.warn('读取路由统计失败:', error);
-        setSourceRouteStats({});
-      });
-    adminGet<{ items: SourceHealthReportItem[] }>(
-      `/api/admin/source-health?days=${STATS_DAYS}`,
-      '读取源站质量失败',
-    )
-      .then((payload) => {
-        if (cancelled) return;
-        setSourceHealth(
-          new Map((payload.items || []).map((item) => [item.source, item])),
-        );
-      })
-      .catch((error) => {
-        if (cancelled) return;
-        console.warn('读取源站质量失败:', error);
-        setSourceHealth(new Map());
-      });
-
-    return () => {
-      cancelled = true;
-    };
-  }, [config]);
-
   const callSourceApi = useCallback(
     async (body: Record<string, unknown>) => {
       try {
@@ -268,6 +256,18 @@ const VideoSourceConfig = ({
     }
     withLoading(`proxyMode_${key}`, () =>
       callSourceApi({ action: 'set_proxy_mode', key, proxyMode }),
+    ).catch(() => void 0);
+  };
+
+  const handleToggleAdminOnly = (key: string) => {
+    const target = sources.find((s) => s.key === key);
+    if (!target) return;
+    withLoading(`adminOnly_${key}`, () =>
+      callSourceApi({
+        action: 'set_admin_only',
+        key,
+        adminOnly: !target.adminOnly,
+      }),
     ).catch(() => void 0);
   };
 
@@ -434,7 +434,9 @@ const VideoSourceConfig = ({
     isLoading('batchSource_batch_delete') ||
     isLoading('batchSource_batch_set_proxy_mode_browser') ||
     isLoading('batchSource_batch_set_proxy_mode_server') ||
-    isLoading('batchSource_batch_set_proxy_mode_auto');
+    isLoading('batchSource_batch_set_proxy_mode_auto') ||
+    isLoading('batchSource_batch_set_admin_only_on') ||
+    isLoading('batchSource_batch_set_admin_only_off');
 
   return (
     <div className='space-y-6'>
@@ -451,11 +453,12 @@ const VideoSourceConfig = ({
             align='end'
             value={healthFilter}
             onChange={(value) =>
-              setHealthFilter(value === 'cleanup' ? 'cleanup' : 'all')
+              setHealthFilter(isSourceHealthFilter(value) ? value : 'all')
             }
             options={[
               { value: 'all', label: '全部' },
               { value: 'cleanup', label: `待清理 ${cleanupCount}` },
+              { value: 'relay', label: `需中转 ${relayCount}` },
             ]}
             showSelectedIcon={false}
             ariaLabel='按源站质量筛选'
@@ -539,12 +542,21 @@ const VideoSourceConfig = ({
                 isAutoRouteLoading={isLoading(
                   'batchSource_batch_set_proxy_mode_auto',
                 )}
+                isAdminOnlyLoading={isLoading(
+                  'batchSource_batch_set_admin_only_on',
+                )}
+                isPublicLoading={isLoading(
+                  'batchSource_batch_set_admin_only_off',
+                )}
                 onEnable={() => requestBatchOperation('batch_enable')}
                 onDisable={() => requestBatchOperation('batch_disable')}
                 onDelete={() => requestBatchOperation('batch_delete')}
                 onValidate={handleBatchValidation}
                 onSetProxyMode={(proxyMode) =>
                   requestBatchOperation('batch_set_proxy_mode', { proxyMode })
+                }
+                onSetAdminOnly={(adminOnly) =>
+                  requestBatchOperation('batch_set_admin_only', { adminOnly })
                 }
               />
             )}
@@ -569,9 +581,11 @@ const VideoSourceConfig = ({
                 <li className='rounded-b-xl bg-white px-6 py-12 text-center text-sm text-gray-500 dark:bg-gray-900 dark:text-gray-400'>
                   {healthFilter === 'cleanup' && !normalizedQuery
                     ? '没有待清理的视频源'
-                    : isFiltering
-                      ? '没有匹配的视频源'
-                      : '暂无视频源'}
+                    : healthFilter === 'relay' && !normalizedQuery
+                      ? '没有需中转的视频源'
+                      : isFiltering
+                        ? '没有匹配的视频源'
+                        : '暂无视频源'}
                 </li>
               )}
               {visibleRows.map((source) => (
@@ -582,15 +596,18 @@ const VideoSourceConfig = ({
                   isSelected={selectedSources.has(source.key)}
                   validationStatus={getValidationStatus(source.key)}
                   sourceRouteStats={sourceRouteStats[source.key] || null}
+                  routeCapability={routeCapabilities[source.key] || null}
                   sourceHealth={sourceHealth.get(source.key) || null}
-                  healthDays={STATS_DAYS}
+                  healthDays={SOURCE_INSIGHT_DAYS}
                   isProxyModeLoading={isLoading(`proxyMode_${source.key}`)}
                   isToggleLoading={isLoading(`toggleSource_${source.key}`)}
+                  isAdminOnlyLoading={isLoading(`adminOnly_${source.key}`)}
                   isDeleteLoading={isLoading(`deleteSource_${source.key}`)}
                   isValidationLoading={isValidating}
                   onSelectSource={handleSelectSource}
                   onChangeProxyMode={handleChangeProxyMode}
                   onToggleEnable={handleToggleEnable}
+                  onToggleAdminOnly={handleToggleAdminOnly}
                   onValidate={handleValidateSource}
                   onEdit={(source) => {
                     setEditingSource(source);

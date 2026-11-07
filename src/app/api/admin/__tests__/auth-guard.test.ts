@@ -339,6 +339,43 @@ describe('admin api auth guard regression', () => {
     );
   });
 
+  it.each(['groups', 'all', undefined, 'invalid', null])(
+    'validates and preserves live access %j',
+    async (LiveAccess) => {
+      const { updateSiteConfig } = getHandlers();
+      mockedGetAuthInfoFromCookie.mockReturnValue({
+        username: 'owner-1',
+        expiresAt: Date.now() + 60_000,
+        signature: 'mock-signature',
+        sessionType: 'account',
+      });
+      const stored = {
+        ...baseConfig,
+        SiteConfig: { ...baseConfig.SiteConfig, LiveAccess: 'groups' },
+      };
+      mockedGetConfig.mockResolvedValue(stored as never);
+      const response = await updateSiteConfig({
+        json: async () => ({
+          ...baseConfig.SiteConfig,
+          FooterText: '',
+          LiveAccess,
+        }),
+      } as any);
+      const valid =
+        LiveAccess === undefined ||
+        LiveAccess === 'all' ||
+        LiveAccess === 'groups';
+      expect(response.status).toBe(valid ? 200 : 400);
+      if (valid) {
+        expect(mockedSaveConfig).toHaveBeenCalledWith(stored);
+        expect(stored.SiteConfig.LiveAccess).toBe(LiveAccess ?? 'groups');
+      } else {
+        expect(await response.json()).toEqual({ error: '直播权限范围无效' });
+        expect(mockedSaveConfig).not.toHaveBeenCalled();
+      }
+    },
+  );
+
   it('keeps the stored auto source switch default when older clients omit it', async () => {
     const { updateSiteConfig } = getHandlers();
     mockedGetAuthInfoFromCookie.mockReturnValue({

@@ -59,13 +59,14 @@ export function useAdminUserActions(options: UseAdminUserActionsOptions) {
     async (
       action: 'add' | 'edit' | 'delete',
       groupName: string,
-      enabledApis?: string[],
+      permissions?: { enabledApis: string[]; allowLive?: boolean },
     ) => {
       await runUserMutation({
         action: 'userGroup',
         groupAction: action,
         groupName,
-        enabledApis,
+        enabledApis: permissions?.enabledApis,
+        allowLive: permissions?.allowLive === true,
       });
     },
     [runUserMutation],

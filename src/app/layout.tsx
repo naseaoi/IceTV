@@ -17,7 +17,8 @@ import { ThemeProvider } from '@/components/ThemeProvider';
 import ToastViewport from '@/components/ToastViewport';
 import { WatchRecordProvider } from '@/features/watch-record/WatchRecordProvider';
 import { getServerAuthSession } from '@/lib/auth-session.server';
-import { getPublicConfig } from '@/lib/config';
+import { getConfigForRead, getPublicConfig } from '@/lib/config';
+import { canUserWatchLive } from '@/lib/live-access.server';
 import { serializeForInlineScript } from '@/lib/script-serialization';
 import { DEFAULT_SITE_FOOTER_TEXT } from '@/lib/site-footer';
 import { getStorageType } from '@/lib/storage-type';
@@ -65,10 +66,19 @@ export default async function RootLayout({
   children: React.ReactNode;
 }) {
   const cookieStore = await cookies();
-  const [initialAuthSession, publicConfig] = await Promise.all([
-    getServerAuthSession(cookieStore.get('auth')?.value),
-    getPublicConfig(),
-  ]);
+  const sessionPromise = getServerAuthSession(cookieStore.get('auth')?.value);
+  const liveAccessPromise = Promise.all([
+    sessionPromise,
+    getConfigForRead(),
+  ]).then(([session, config]) =>
+    canUserWatchLive(
+      session.status === 'authenticated' ? session.username : undefined,
+      config,
+    ),
+  );
+  const [initialAuthSession, publicConfig, enableLiveEntry] = await Promise.all(
+    [sessionPromise, getPublicConfig(), liveAccessPromise],
+  );
   const initialSiteName = publicConfig.SiteName || siteName;
   const initialSiteIcon = publicConfig.SiteIcon || siteIcon;
   const initialAnnouncement = publicConfig.Announcement || announcement;
@@ -85,7 +95,7 @@ export default async function RootLayout({
     BANGUMI_PROXY: process.env.NEXT_PUBLIC_BANGUMI_PROXY || '',
     DOUBAN_IMAGE_PROXY_TYPE: publicConfig.DoubanImageProxyType,
     DOUBAN_IMAGE_PROXY: process.env.NEXT_PUBLIC_DOUBAN_IMAGE_PROXY || '',
-    ENABLE_LIVE_ENTRY: publicConfig.EnableLiveEntry,
+    ENABLE_LIVE_ENTRY: enableLiveEntry,
     DEFAULT_AGGREGATE_SEARCH: publicConfig.DefaultAggregateSearch,
     ENABLE_OPTIMIZATION: publicConfig.EnableOptimization,
     LIVE_DIRECT_CONNECT: publicConfig.LiveDirectConnect,

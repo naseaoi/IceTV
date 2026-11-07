@@ -3,6 +3,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { isGuardFailure, requireAdmin } from '@/lib/api-auth';
 import { db } from '@/lib/db';
 import { NO_STORE_HEADERS } from '@/lib/http-cache';
+import { getSourceRouteCapabilities } from '@/lib/source-route-capability.server';
 
 export const runtime = 'nodejs';
 
@@ -24,10 +25,13 @@ export async function GET(request: NextRequest) {
     if (isGuardFailure(guardResult)) return guardResult.response;
 
     const days = readDays(request.nextUrl.searchParams.get('days'));
-    const stats = await db.getSourceRouteStats(getSinceDate(days));
+    const [stats, capabilities] = await Promise.all([
+      db.getSourceRouteStats(getSinceDate(days)),
+      getSourceRouteCapabilities(),
+    ]);
 
     return NextResponse.json(
-      { days, stats },
+      { days, stats, capabilities },
       { status: 200, headers: NO_STORE_HEADERS },
     );
   } catch (error) {

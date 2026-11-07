@@ -4,6 +4,7 @@ import { isLiveEntryEnabledInConfig } from '@/features/live/lib/live';
 import { isGuardFailure, requireActiveUser } from '@/lib/api-auth';
 import { getConfigForRead } from '@/lib/config';
 import { db } from '@/lib/db';
+import { canUserWatchLive } from '@/lib/live-access.server';
 
 export const runtime = 'nodejs';
 
@@ -20,6 +21,9 @@ export async function GET(request: NextRequest) {
 
     if (!isLiveEntryEnabledInConfig(config)) {
       return NextResponse.json({ error: '直播未开启' }, { status: 404 });
+    }
+    if (!(await canUserWatchLive(guardResult.username, config))) {
+      return NextResponse.json({ error: '没有直播权限' }, { status: 403 });
     }
 
     // 过滤出所有非 disabled 的直播源

@@ -6,7 +6,10 @@ import {
   searchDanmakuCandidates,
 } from '@/features/play/lib/danmaku/provider.server';
 import { danmakuRateLimitResponse } from '@/features/play/lib/danmaku/rate-limit-response.server';
-import { DanmakuProviderError } from '@/features/play/lib/danmaku/types';
+import {
+  DanmakuProviderError,
+  DanmakuRateLimitError,
+} from '@/features/play/lib/danmaku/types';
 import { isGuardFailure, requireActiveUser } from '@/lib/api-auth';
 import { getConfigForRead } from '@/lib/config';
 import { NO_STORE_HEADERS } from '@/lib/http-cache';
@@ -15,7 +18,10 @@ import {
   recordServerProxyFailure,
   requireServerProxyQuota,
 } from '@/lib/server-proxy-guard';
-import { resourceLimitResponse } from '@/lib/server-resource-errors';
+import {
+  resourceLimitResponse,
+  UpstreamCooldownError,
+} from '@/lib/server-resource-errors';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -99,7 +105,12 @@ export async function GET(request: NextRequest) {
       { headers: NO_STORE_HEADERS },
     );
   } catch (error) {
-    const rateLimited = danmakuRateLimitResponse(error);
+    // 弹幕客户端通过 429 识别退避，保留专用协议与共享冷却的剩余秒数。
+    const rateLimited = danmakuRateLimitResponse(
+      error instanceof UpstreamCooldownError
+        ? new DanmakuRateLimitError(error.retryAfterSeconds)
+        : error,
+    );
     if (rateLimited) return rateLimited;
     const busy = resourceLimitResponse(error);
     if (busy) return busy;

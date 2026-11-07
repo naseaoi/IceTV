@@ -57,6 +57,7 @@ const DEFAULT_SITE_SETTINGS: SiteConfig = {
   Announcement: '',
   FooterText: DEFAULT_SITE_FOOTER_TEXT,
   EnableLiveEntry: false,
+  LiveAccess: 'all',
   DefaultAggregateSearch: true,
   EnableOptimization: true,
   LiveDirectConnect: false,
@@ -79,6 +80,7 @@ type EditableSiteSettings = Pick<
   | 'Announcement'
   | 'FooterText'
   | 'EnableLiveEntry'
+  | 'LiveAccess'
   | 'DefaultAggregateSearch'
   | 'EnableOptimization'
   | 'LiveDirectConnect'
@@ -92,6 +94,15 @@ type EditableSiteSettings = Pick<
   | 'DisableYellowFilter'
   | 'FluidSearch'
 >;
+
+const LIVE_ACCESS_OPTIONS = [
+  { value: 'all', label: '所有用户' },
+  { value: 'groups', label: '指定用户组' },
+];
+
+function normalizeLiveAccess(value: unknown): SiteConfig['LiveAccess'] {
+  return value === 'groups' ? 'groups' : 'all';
+}
 
 function buildSiteSettings(config: AdminConfig): SiteConfig {
   return {
@@ -109,6 +120,7 @@ function buildSiteSettings(config: AdminConfig): SiteConfig {
       config.SiteConfig.SourceCoverProxyMode,
     ),
     EnableLiveEntry: config.SiteConfig.EnableLiveEntry ?? false,
+    LiveAccess: normalizeLiveAccess(config.SiteConfig.LiveAccess),
     DefaultAggregateSearch: config.SiteConfig.DefaultAggregateSearch ?? true,
     EnableOptimization: config.SiteConfig.EnableOptimization ?? true,
     LiveDirectConnect: config.SiteConfig.LiveDirectConnect ?? false,
@@ -129,6 +141,7 @@ function normalizeEditableSiteSettings(
     Announcement: value.Announcement || '',
     FooterText: value.FooterText || DEFAULT_SITE_FOOTER_TEXT,
     EnableLiveEntry: value.EnableLiveEntry ?? false,
+    LiveAccess: normalizeLiveAccess(value.LiveAccess),
     DefaultAggregateSearch: value.DefaultAggregateSearch ?? true,
     EnableOptimization: value.EnableOptimization ?? true,
     LiveDirectConnect: value.LiveDirectConnect ?? false,
@@ -616,6 +629,22 @@ const SiteConfigComponent = ({
             }
           />
         </AdminSettingRow>
+        {siteSettings.EnableLiveEntry && (
+          <AdminSettingRow label='直播观看范围' htmlFor='site-live-access'>
+            <AdminSelect
+              id='site-live-access'
+              value={siteSettings.LiveAccess}
+              onChange={(value) =>
+                setSiteSettings((prev) => ({
+                  ...prev,
+                  LiveAccess: normalizeLiveAccess(value),
+                }))
+              }
+              options={LIVE_ACCESS_OPTIONS}
+              className='w-full sm:w-80'
+            />
+          </AdminSettingRow>
+        )}
         <AdminSettingRow label='NSFW 模式' layout='inline'>
           <AdminStatusSwitch
             enabled={siteSettings.DisableYellowFilter}

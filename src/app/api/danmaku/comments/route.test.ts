@@ -5,6 +5,10 @@ import {
   DanmakuProviderError,
   DanmakuRateLimitError,
 } from '@/features/play/lib/danmaku/types';
+import {
+  ResourceLimitError,
+  UpstreamCooldownError,
+} from '@/lib/server-resource-errors';
 
 installWebPolyfills();
 
@@ -71,6 +75,20 @@ describe('danmaku comment errors', () => {
       code: 'DANMAKU_RATE_LIMITED',
       retryAfterSeconds: 45,
     });
+    expect(mockRecordFailure).not.toHaveBeenCalled();
+  });
+
+  it('preserves client backoff for host cooldown without reclassifying resource exhaustion', async () => {
+    mockFetchDanmaku.mockRejectedValueOnce(new UpstreamCooldownError(27));
+    const response = await GET(createRequest());
+    expect(response.status).toBe(429);
+    expect(response.headers.get('Retry-After')).toBe('27');
+    await expect(response.json()).resolves.toMatchObject({
+      code: 'DANMAKU_RATE_LIMITED',
+      retryAfterSeconds: 27,
+    });
+    mockFetchDanmaku.mockRejectedValueOnce(new ResourceLimitError(503, 2));
+    expect((await GET(createRequest())).status).toBe(503);
     expect(mockRecordFailure).not.toHaveBeenCalled();
   });
 

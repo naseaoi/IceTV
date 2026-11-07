@@ -31,6 +31,29 @@ export class MySqlResourceStore implements SharedResourceStore {
     }
   }
 
+  async getCooldown(key: string): Promise<number> {
+    await this.initialize();
+    const [rows] = await this.pool.query<RowDataPacket[]>(
+      'SELECT reset_at FROM shared_resource_usage WHERE resource_key = ?',
+      [key],
+    );
+    return Number(rows[0]?.reset_at ?? 0);
+  }
+
+  async extendCooldown(key: string, until: number): Promise<number> {
+    return this.transaction(async (connection) => {
+      await connection.execute(
+        'INSERT INTO shared_resource_usage (resource_key, used, reset_at) VALUES (?, 0, ?) ON DUPLICATE KEY UPDATE reset_at = GREATEST(reset_at, ?)',
+        [key, until, until],
+      );
+      const [rows] = await connection.query<RowDataPacket[]>(
+        'SELECT reset_at FROM shared_resource_usage WHERE resource_key = ? FOR UPDATE',
+        [key],
+      );
+      return Number(rows[0].reset_at);
+    });
+  }
+
   async consume(
     key: string,
     amount: number,

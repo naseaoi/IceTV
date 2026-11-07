@@ -1,12 +1,23 @@
+import { cookies } from 'next/headers';
 import { notFound } from 'next/navigation';
 
 import LivePageClient from '@/features/live/LivePageClient';
-import { getPublicConfig } from '@/lib/config';
+import { getServerAuthSession } from '@/lib/auth-session.server';
+import { getConfigForRead } from '@/lib/config';
+import { canUserWatchLive } from '@/lib/live-access.server';
 
 export default async function LivePage() {
-  const config = await getPublicConfig();
+  const cookieStore = await cookies();
+  const [config, session] = await Promise.all([
+    getConfigForRead(),
+    getServerAuthSession(cookieStore.get('auth')?.value),
+  ]);
 
-  if (!config.EnableLiveEntry) {
+  if (
+    config.SiteConfig.EnableLiveEntry !== true ||
+    (session.status === 'authenticated' &&
+      !(await canUserWatchLive(session.username, config)))
+  ) {
     notFound();
   }
 

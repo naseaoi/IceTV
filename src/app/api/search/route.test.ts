@@ -19,13 +19,18 @@ jest.mock('@/lib/api-auth', () => ({
   isGuardFailure: (result: object) => 'response' in result,
 }));
 jest.mock('@/lib/config', () => ({
-  getConfigForRead: jest
-    .fn()
-    .mockResolvedValue({ SiteConfig: { DisableYellowFilter: true } }),
+  getConfigForRead: jest.fn().mockResolvedValue({
+    SiteConfig: { DisableYellowFilter: true },
+    SourceConfig: [],
+  }),
   getAvailableApiSites: jest.fn(),
 }));
 jest.mock('@/lib/source-health.server', () => ({
   getSourceHealthTiers: jest.fn(),
+}));
+jest.mock('@/lib/source-route-capability.server', () => ({
+  getSourceRouteCapabilities: jest.fn().mockResolvedValue({}),
+  resolveSourceRoute: () => 'auto',
 }));
 jest.mock('@/lib/search-aggregate', () => ({
   runSearchAggregation: jest.fn(),

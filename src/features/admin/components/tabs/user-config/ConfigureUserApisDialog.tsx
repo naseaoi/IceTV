@@ -2,10 +2,7 @@
 
 import AdminDialog from '@/features/admin/components/AdminDialog';
 import { ApiSourcePicker } from '@/features/admin/components/tabs/user-config/ApiSourcePicker';
-import {
-  buttonStyles,
-  checkboxStyles,
-} from '@/features/admin/lib/buttonStyles';
+import { buttonStyles } from '@/features/admin/lib/buttonStyles';
 import { DataSource } from '@/features/admin/types/internal';
 
 interface ConfigureUserApisDialogProps {
@@ -29,13 +26,6 @@ export function ConfigureUserApisDialog({
   onSave,
   isSaving,
 }: ConfigureUserApisDialogProps) {
-  const selectableApiKeys = sources
-    .filter((source) => !source.disabled)
-    .map((source) => source.key);
-  const isAllSelected =
-    selectableApiKeys.length > 0 &&
-    selectableApiKeys.every((key) => selectedApis.includes(key));
-
   return (
     <AdminDialog
       isOpen={isOpen}
@@ -44,24 +34,9 @@ export function ConfigureUserApisDialog({
       panelClassName='max-w-4xl max-h-[80vh] overflow-y-auto'
     >
       <div className='mb-6'>
-        <div className='mb-4 flex items-center justify-between gap-3'>
-          <h4 className='text-sm font-medium text-gray-900 dark:text-gray-100'>
-            选择可用的视频源：
-          </h4>
-          <label className='flex items-center gap-2 text-sm text-gray-600 dark:text-gray-400'>
-            <input
-              type='checkbox'
-              checked={isAllSelected}
-              onChange={(event) =>
-                onSelectedApisChange(
-                  event.target.checked ? selectableApiKeys : [],
-                )
-              }
-              className={checkboxStyles}
-            />
-            全选
-          </label>
-        </div>
+        <h4 className='mb-3 text-sm font-medium text-gray-900 dark:text-gray-100'>
+          选择可用的视频源：
+        </h4>
         <ApiSourcePicker
           sources={sources}
           selected={selectedApis}

@@ -4,6 +4,8 @@ export interface ResourceAdmission {
 }
 
 export interface SharedResourceStore {
+  getCooldown(key: string): Promise<number>;
+  extendCooldown(key: string, until: number): Promise<number>;
   consume(
     key: string,
     amount: number,

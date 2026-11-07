@@ -5,10 +5,12 @@ import AdminRowMenu from '@/features/admin/components/AdminRowMenu';
 interface UserGroup {
   name: string;
   enabledApis?: string[];
+  allowLive?: boolean;
 }
 
 interface UserGroupTableProps {
   userGroups: UserGroup[];
+  showLiveAccess: boolean;
   isEditLoading: (groupName: string) => boolean;
   onEdit: (group: UserGroup) => void;
   onDelete: (groupName: string) => void;
@@ -16,6 +18,7 @@ interface UserGroupTableProps {
 
 export function UserGroupTable({
   userGroups,
+  showLiveAccess,
   isEditLoading,
   onEdit,
   onDelete,
@@ -48,6 +51,7 @@ export function UserGroupTable({
                   {group.enabledApis?.length
                     ? `${group.enabledApis.length} 个`
                     : '无限制'}
+                  {showLiveAccess && group.allowLive && ' · 可看直播'}
                 </p>
               </div>
               <div className='shrink-0'>

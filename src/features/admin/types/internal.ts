@@ -6,6 +6,7 @@ export interface SiteConfig {
   AnnouncementPublishedAt?: number;
   FooterText: string;
   EnableLiveEntry: boolean;
+  LiveAccess: 'all' | 'groups';
   DefaultAggregateSearch: boolean;
   EnableOptimization: boolean;
   LiveDirectConnect: boolean;
@@ -47,6 +48,7 @@ export interface DataSource {
   disabled?: boolean;
   from: 'config' | 'custom';
   proxyMode?: 'server' | 'browser' | 'auto';
+  adminOnly?: boolean;
 }
 
 // 直播源数据类型

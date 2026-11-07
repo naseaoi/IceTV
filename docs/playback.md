@@ -15,6 +15,13 @@
 
 新增快捷键动作依次补齐三处，不要在页面单独监听 keydown。
 
+## 线路检测
+
+- 清单始终经服务端，分片才区分直连和代理。代理媒体清单时，`scheduleSourceDirectProbe()`（`src/lib/source-route-capability.server.ts`）在后台抽中间一个分片，带页面 `Origin` / `Referer` 检测：HTTPS 页面上的 HTTP 分片判为混合内容，响应成功但不放行页面来源判为跨域受限，上游错误、超时或额度不足不下结论。结论存进共享缓存的一条记录，按源分键，6 小时后重检、24 小时作废。
+- `/api/proxy-modes` 返回各源实际线路：判为无法直连的「自动」源直接给 `server`，客户端不再先直连失败一轮，也不会切回直连。「直连」「代理」是站长显式选择，不被检测结论改写。
+- 选源偏好直连：比较键依次为健康等级 → 本地历史可靠性档 → 非 `server` 线路，较慢的直连只在同档内优先，不跨档提升（`src/features/play/lib/sourceRoutePreference.ts`）。`/api/search/quick` 在服务端同档内先发起直连源，中转源先解析出可播详情时最多再等 1.5 秒给仍未完成的同档或更优直连源。客户端起播优选与自动换源用同一比较键；自动换源只读 `peekSourceSelectionContext()` 的缓存，不在换源路径上等网络。线路或健康等级任一缺失时不施加偏好。
+- 检测只覆盖所有用户都会失败的情况；个别用户的网络不通仍由运行时回落处理，回落记录只存在该标签页的 sessionStorage 里。
+
 ## 缓冲
 
 - 前向缓冲按码率收敛到字节预算，由控制器改写 `hls.config.maxMaxBufferLength`；码率极高时保留最少秒数下限，码率未知时沿用原配置。hls.js 的 `maxBufferSize` 是「至少缓冲到 `maxBufferLength`」的下限，不是字节上限，调它压不住 SourceBuffer 配额。

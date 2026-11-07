@@ -3,6 +3,10 @@ import type { NextRequest } from 'next/server';
 import { installWebPolyfills } from '@/app/api/test-utils/web-polyfills';
 import { searchDanmakuCandidates } from '@/features/play/lib/danmaku/provider.server';
 import { DanmakuRateLimitError } from '@/features/play/lib/danmaku/types';
+import {
+  ResourceLimitError,
+  UpstreamCooldownError,
+} from '@/lib/server-resource-errors';
 
 jest.mock('server-only', () => ({}));
 
@@ -71,6 +75,19 @@ describe('danmaku search refresh', () => {
     await expect(response.json()).resolves.toMatchObject({
       code: 'DANMAKU_RATE_LIMITED',
     });
+  });
+
+  it('preserves client backoff for host cooldown without reclassifying resource exhaustion', async () => {
+    mockGetOrLoad.mockRejectedValueOnce(new UpstreamCooldownError(27));
+    const response = await GET(createRequest());
+    expect(response.status).toBe(429);
+    expect(response.headers.get('Retry-After')).toBe('27');
+    await expect(response.json()).resolves.toMatchObject({
+      code: 'DANMAKU_RATE_LIMITED',
+      retryAfterSeconds: 27,
+    });
+    mockGetOrLoad.mockRejectedValueOnce(new ResourceLimitError(503, 2));
+    expect((await GET(createRequest())).status).toBe(503);
   });
 
   it('invalidates only the requested keyword on explicit recovery', async () => {

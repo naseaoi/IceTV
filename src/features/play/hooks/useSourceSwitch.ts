@@ -33,6 +33,7 @@ import {
 } from '@/features/play/lib/episodeResumePolicy';
 import { replacePlayPageUrl } from '@/features/play/lib/playPageUrl';
 import type { ResumeMode } from '@/features/play/lib/resumePlayback';
+import { peekSourceSelectionContext } from '@/features/play/lib/sourceSelectionContext';
 import {
   type SourceSwitchCleanupTask,
   finalizeSourceSwitchCleanup,
@@ -603,6 +604,8 @@ export function useSourceSwitch(options: UseSourceSwitchOptions) {
         }),
         precomputedVideoInfo,
         readSourcePlaybackStats(),
+        Date.now(),
+        peekSourceSelectionContext(),
       );
       if (!target) return false;
 

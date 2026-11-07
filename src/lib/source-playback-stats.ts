@@ -233,6 +233,13 @@ function resolvePlaybackPreference(
   };
 }
 
+export function getSourcePlaybackPreferenceTier(
+  stat: SourcePlaybackStat | undefined,
+  now = Date.now(),
+): number {
+  return resolvePlaybackPreference(stat, now).tier;
+}
+
 function compareAscending(a: number, b: number): number {
   if (a < b) return -1;
   if (a > b) return 1;

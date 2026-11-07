@@ -11,8 +11,11 @@
 
 ## 用户权限
 
+- 直播权限由 `SiteConfig.EnableLiveEntry` 与 `SiteConfig.LiveAccess` 共同决定；`LiveAccess` 为 `groups` 时仅站长、管理员及任一 `allowLive: true` 用户组成员可观看。直播 API、直播代理、直播页面及 layout / server-config 的逐用户 `ENABLE_LIVE_ENTRY` 统一经 `canUserWatchLive()` 判定。
+
 - 用户权限以 `user_access` 和 `user_group_members` 为唯一真相源；鉴权按归一化用户名查主键，运行时配置不携带 `Users`。该字段只用于旧数据迁移与备份兼容，用户组定义 `Tags` 留在配置。
 - `enabledApis` 为空数组时存为 `NULL`，含义是**不限制**而非禁止全部；没有有效个人源或组源列表时返回全部启用源。删除用户最后一个授权源会让其回落为全部可用。
+- 视频源 `adminOnly` 存在配置 JSON 的 `SourceConfig` 里，由 `getAvailableApiSites()` 统一过滤：普通用户和没有 `user_access` 行的用户名看不到，管理员与站长不受影响，再与 `enabledApis` / 用户组取交集。不传用户名的内部调用（定时任务）返回全部启用源。用户侧读取源列表一律经该函数，不直接遍历 `SourceConfig`。
 - 每个 `users` 行必须有 `user_access` 行；建号同事务写入，初始化与 `replaceAllData()` 结尾补齐。站长角色和封禁豁免由环境变量决定，表仅保存其源权限和用户组。
 - 用户权限更新与批量操作在存储事务内复核角色；配置 CAS 同事务清理被删除组和源的用户引用，避免配置冲突后留下部分写入。
 - 后台用户操作复用 `src/features/admin/services/userActions.ts`，不在 `route.ts` 里重新展开权限与用户组逻辑。后台用户列表走 `/api/admin/user` 的 SQL 游标分页，全部匹配批量操作提交筛选与排除项；`/api/admin/config` 仅返回用户总数。

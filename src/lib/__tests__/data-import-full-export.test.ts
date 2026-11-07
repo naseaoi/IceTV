@@ -80,8 +80,65 @@ describe('data import full export fields', () => {
     expect(parsed.snapshot.adminConfig.SiteConfig).toEqual({
       ...adminConfig.SiteConfig,
       SourceCoverProxyMode: 'auto',
+      LiveAccess: 'all',
     });
   });
+
+  it.each(['all', 'groups'])(
+    'preserves imported live policy %s and normalizes group grants',
+    async (LiveAccess) => {
+      const data = createImportData();
+      data.data.adminConfig = {
+        ...adminConfig,
+        SiteConfig: Object.assign({}, adminConfig.SiteConfig, { LiveAccess }),
+        UserConfig: {
+          ...adminConfig.UserConfig,
+          Tags: [
+            { name: 'live', enabledApis: [], allowLive: true },
+            { name: 'vod', enabledApis: [], allowLive: false },
+          ],
+        },
+      };
+      const parsed = await parseImportData(data);
+      expect(parsed.snapshot.adminConfig.SiteConfig.LiveAccess).toBe(
+        LiveAccess,
+      );
+      expect(parsed.snapshot.adminConfig.UserConfig.Tags).toEqual([
+        { name: 'live', enabledApis: [], allowLive: true },
+        { name: 'vod', enabledApis: [] },
+      ]);
+    },
+  );
+
+  it.each([null, false, '', 'invalid'])(
+    'rejects invalid imported live policy %j before normalization',
+    async (LiveAccess) => {
+      const data = createImportData();
+      data.data.adminConfig = {
+        ...adminConfig,
+        SiteConfig: Object.assign({}, adminConfig.SiteConfig, { LiveAccess }),
+      };
+      await expect(parseImportData(data)).rejects.toThrow(
+        '直播权限范围格式无效',
+      );
+    },
+  );
+
+  it.each([null, 'true', 1])(
+    'rejects invalid imported group grant %j before normalization',
+    async (allowLive) => {
+      const data = createImportData();
+      data.data.adminConfig = {
+        ...adminConfig,
+        UserConfig: {
+          ...adminConfig.UserConfig,
+          Tags: [{ name: 'live', enabledApis: [] }],
+        },
+      };
+      Object.assign(data.data.adminConfig.UserConfig.Tags![0], { allowLive });
+      await expect(parseImportData(data)).rejects.toThrow('用户组直播权限');
+    },
+  );
 
   it('preserves social backups and validates cross-user references', async () => {
     const data = createImportData();

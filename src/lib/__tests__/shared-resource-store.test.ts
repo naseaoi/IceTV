@@ -45,6 +45,22 @@ function contract(
     ).toBe(true);
   });
 
+  it('shares cooldown deadlines, atomically keeps the longest, and prunes expired entries', async () => {
+    const key = `cooldown:host:${randomUUID()}`;
+    expect(await stores[0].resources.getCooldown(key)).toBe(0);
+    await Promise.all(
+      [90_000, 10_000, 60_000, 30_000].map((until, index) =>
+        stores[index % stores.length].resources.extendCooldown(key, until),
+      ),
+    );
+    expect(await stores[1].resources.getCooldown(key)).toBe(90_000);
+    expect(await stores[0].resources.extendCooldown(key, 20_000)).toBe(90_000);
+    await stores[1].resources.prune(89_999);
+    expect(await stores[0].resources.getCooldown(key)).toBe(90_000);
+    await stores[0].resources.prune(90_000);
+    expect(await stores[1].resources.getCooldown(key)).toBe(0);
+  });
+
   it('caps shared connections and fences expired owners', async () => {
     const key = randomUUID();
     const results = await Promise.all(

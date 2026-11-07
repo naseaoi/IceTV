@@ -16,11 +16,14 @@ interface BatchSourceMenuProps {
   isBrowserRouteLoading: boolean;
   isServerRouteLoading: boolean;
   isAutoRouteLoading: boolean;
+  isAdminOnlyLoading: boolean;
+  isPublicLoading: boolean;
   onEnable: () => void;
   onDisable: () => void;
   onDelete: () => void;
   onValidate: () => void;
   onSetProxyMode: (proxyMode: SourceProxyMode) => void;
+  onSetAdminOnly: (adminOnly: boolean) => void;
 }
 
 export function BatchSourceMenu({
@@ -32,11 +35,14 @@ export function BatchSourceMenu({
   isBrowserRouteLoading,
   isServerRouteLoading,
   isAutoRouteLoading,
+  isAdminOnlyLoading,
+  isPublicLoading,
   onEnable,
   onDisable,
   onDelete,
   onValidate,
   onSetProxyMode,
+  onSetAdminOnly,
 }: BatchSourceMenuProps) {
   const [isOpen, setIsOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement | null>(null);
@@ -68,6 +74,10 @@ export function BatchSourceMenu({
     { label: '浏览器直连', mode: 'browser', loading: isBrowserRouteLoading },
     { label: '服务端代理', mode: 'server', loading: isServerRouteLoading },
     { label: '自动选择', mode: 'auto', loading: isAutoRouteLoading },
+  ];
+  const scopeItems = [
+    { label: '仅管理员可用', adminOnly: true, loading: isAdminOnlyLoading },
+    { label: '所有用户可用', adminOnly: false, loading: isPublicLoading },
   ];
 
   return (
@@ -128,6 +138,23 @@ export function BatchSourceMenu({
               type='button'
               role='menuitem'
               onClick={() => handleAction(() => onSetProxyMode(item.mode))}
+              disabled={item.loading}
+              className='block w-full whitespace-nowrap px-3 py-2 text-right text-sm text-gray-700 hover:bg-gray-100 disabled:cursor-not-allowed disabled:opacity-50 dark:text-gray-200 dark:hover:bg-gray-800'
+            >
+              {item.loading ? '设置中...' : item.label}
+            </button>
+          ))}
+
+          <div className='my-1 border-t border-gray-200 dark:border-gray-700' />
+          <div className='px-3 py-1.5 text-right text-xs text-gray-500 dark:text-gray-400'>
+            可见范围
+          </div>
+          {scopeItems.map((item) => (
+            <button
+              key={item.label}
+              type='button'
+              role='menuitem'
+              onClick={() => handleAction(() => onSetAdminOnly(item.adminOnly))}
               disabled={item.loading}
               className='block w-full whitespace-nowrap px-3 py-2 text-right text-sm text-gray-700 hover:bg-gray-100 disabled:cursor-not-allowed disabled:opacity-50 dark:text-gray-200 dark:hover:bg-gray-800'
             >

@@ -59,6 +59,14 @@ jest.mock('@/components/modals/AlertModal', () => ({
   default: () => null,
 }));
 
+jest.mock('@/features/admin/hooks/useSourceInsights', () => ({
+  useSourceInsights: () => ({
+    routeStats: [],
+    capabilities: {},
+    health: new Map(),
+  }),
+}));
+
 jest.mock('@/features/admin/hooks/useUserActivity', () => ({
   useUserActivity: () => ({
     lastActiveAt: {},
@@ -492,6 +500,7 @@ describe('UserGroupTable responsive list', () => {
     const onDelete = jest.fn();
     render(
       <UserGroupTable
+        showLiveAccess={false}
         userGroups={[group]}
         isEditLoading={() => false}
         onEdit={onEdit}
@@ -511,6 +520,7 @@ describe('UserGroupTable responsive list', () => {
   it('disables an editing group and shows unlimited sources', () => {
     render(
       <UserGroupTable
+        showLiveAccess={false}
         userGroups={[{ name: 'VIP' }]}
         isEditLoading={() => true}
         onEdit={jest.fn()}
@@ -525,6 +535,7 @@ describe('UserGroupTable responsive list', () => {
   it('shows an empty state without a table', () => {
     render(
       <UserGroupTable
+        showLiveAccess={false}
         userGroups={[]}
         isEditLoading={() => false}
         onEdit={jest.fn()}

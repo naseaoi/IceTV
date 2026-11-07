@@ -5,6 +5,24 @@ import type { SharedResourceStore } from '@/lib/shared-resource-store';
 export class SqliteResourceStore implements SharedResourceStore {
   constructor(private readonly database: Database.Database) {}
 
+  async getCooldown(key: string): Promise<number> {
+    const row = this.database
+      .prepare(
+        'SELECT reset_at FROM shared_resource_usage WHERE resource_key = ?',
+      )
+      .get(key) as { reset_at: number } | undefined;
+    return row?.reset_at ?? 0;
+  }
+
+  async extendCooldown(key: string, until: number): Promise<number> {
+    const row = this.database
+      .prepare(
+        'INSERT INTO shared_resource_usage (resource_key, used, reset_at) VALUES (?, 0, ?) ON CONFLICT(resource_key) DO UPDATE SET reset_at = MAX(reset_at, excluded.reset_at) RETURNING reset_at',
+      )
+      .get(key, until) as { reset_at: number };
+    return row.reset_at;
+  }
+
   async consume(
     key: string,
     amount: number,

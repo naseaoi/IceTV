@@ -1,6 +1,11 @@
 import type { VideoQualityInfo } from '@/features/play/hooks/usePlayPageState';
 import { resolveEpisodeTargetIndex } from '@/features/play/lib/episodeMapping';
 import {
+  type SourceSelectionContext,
+  compareSourceRoutePreference,
+  EMPTY_SOURCE_SELECTION_CONTEXT,
+} from '@/features/play/lib/sourceRoutePreference';
+import {
   type SourcePlaybackStat,
   compareSourcePlaybackPreference,
 } from '@/lib/source-playback-stats';
@@ -61,12 +66,13 @@ export function selectAutoSwitchCandidates({
   });
 }
 
-// 本次测速失败是当下的直接证据，先于历史表现排到最后，免得占用有限的自动换源次数；其余按历史播放表现分档，同档内按已测加载速度从快到慢，仍相同时保持原顺序
+// 本次测速失败先排最后；其余按健康等级、历史可靠性分档、线路、历史偏好和速度排序。
 export function rankAutoSwitchCandidates(
   candidates: readonly SearchResult[],
   videoInfoByKey: ReadonlyMap<string, VideoQualityInfo>,
   playbackStats: ReadonlyMap<string, SourcePlaybackStat>,
   now = Date.now(),
+  selectionContext: SourceSelectionContext = EMPTY_SOURCE_SELECTION_CONTEXT,
 ): SearchResult[] {
   return candidates
     .map((candidate, index) => {
@@ -85,6 +91,13 @@ export function rankAutoSwitchCandidates(
     .sort(
       (a, b) =>
         Number(a.failed) - Number(b.failed) ||
+        compareSourceRoutePreference(
+          a.candidate,
+          b.candidate,
+          selectionContext,
+          playbackStats,
+          now,
+        ) ||
         compareSourcePlaybackPreference(a.playbackStat, b.playbackStat, now) ||
         b.speedKBps - a.speedKBps ||
         a.index - b.index,

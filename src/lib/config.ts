@@ -18,6 +18,7 @@ import {
   DEFAULT_DOUBAN_IMAGE_PROXY_TYPE,
   DEFAULT_DOUBAN_PROXY_TYPE,
 } from '@/lib/douban-source';
+import { getOwnerUsername } from '@/lib/env.server';
 import {
   DEFAULT_RUNTIME_PARAMS,
   normalizeRuntimeParams,
@@ -280,6 +281,7 @@ async function getInitConfig(
         '本网站仅提供影视信息搜索服务，所有内容均来自第三方网站。本站不存储任何视频资源，不对任何内容的准确性、合法性、完整性负责。',
       FooterText: DEFAULT_SITE_FOOTER_TEXT,
       EnableLiveEntry: false,
+      LiveAccess: 'all',
       DefaultAggregateSearch: true,
       EnableOptimization: true,
       LiveDirectConnect: false,
@@ -466,6 +468,11 @@ export function configSelfCheck(adminConfig: AdminConfig): AdminConfig {
     adminConfig.UserConfig = {};
   }
   delete adminConfig.UserConfig.Users;
+  if (Array.isArray(adminConfig.UserConfig.Tags)) {
+    for (const tag of adminConfig.UserConfig.Tags) {
+      if (tag && tag.allowLive !== true) delete tag.allowLive;
+    }
+  }
   if (typeof adminConfig.UserConfig.OpenRegister !== 'boolean') {
     adminConfig.UserConfig.OpenRegister = false;
   }
@@ -494,6 +501,7 @@ export function configSelfCheck(adminConfig: AdminConfig): AdminConfig {
         '本网站仅提供影视信息搜索服务，所有内容均来自第三方网站。本站不存储任何视频资源，不对任何内容的准确性、合法性、完整性负责。',
       FooterText: DEFAULT_SITE_FOOTER_TEXT,
       EnableLiveEntry: false,
+      LiveAccess: 'all',
       DefaultAggregateSearch: true,
       EnableOptimization: true,
       LiveDirectConnect: false,
@@ -529,6 +537,9 @@ export function configSelfCheck(adminConfig: AdminConfig): AdminConfig {
   if (typeof adminConfig.SiteConfig.EnableLiveEntry !== 'boolean') {
     adminConfig.SiteConfig.EnableLiveEntry = false;
   }
+  if (adminConfig.SiteConfig.LiveAccess !== 'groups') {
+    adminConfig.SiteConfig.LiveAccess = 'all';
+  }
   if (typeof adminConfig.SiteConfig.DefaultAggregateSearch !== 'boolean') {
     adminConfig.SiteConfig.DefaultAggregateSearch = true;
   }
@@ -560,6 +571,7 @@ export function configSelfCheck(adminConfig: AdminConfig): AdminConfig {
     AnnouncementPublishedAt: site.AnnouncementPublishedAt,
     FooterText: site.FooterText,
     EnableLiveEntry: site.EnableLiveEntry,
+    LiveAccess: site.LiveAccess,
     DefaultAggregateSearch: site.DefaultAggregateSearch,
     EnableOptimization: site.EnableOptimization,
     LiveDirectConnect: site.LiveDirectConnect,
@@ -711,16 +723,21 @@ export async function getAvailableApiSites(
   config?: Readonly<AdminConfig>,
 ): Promise<ApiSite[]> {
   const currentConfig = config || (await getConfigForRead());
-  const allApiSites = currentConfig.SourceConfig.filter((s) => !s.disabled).map(
-    toApiSite,
-  );
+  const enabledSources = currentConfig.SourceConfig.filter((s) => !s.disabled);
 
   if (!user) {
-    return allApiSites;
+    return enabledSources.map(toApiSite);
   }
 
   const lookupUsername = normalizeUsername(user);
   const userConfig = await db.getUserAccess(lookupUsername);
+  const isStaff =
+    lookupUsername === normalizeUsername(getOwnerUsername()) ||
+    userConfig?.role === 'admin' ||
+    userConfig?.role === 'owner';
+  const allApiSites = (
+    isStaff ? enabledSources : enabledSources.filter((s) => !s.adminOnly)
+  ).map(toApiSite);
   if (!userConfig) {
     return allApiSites;
   }

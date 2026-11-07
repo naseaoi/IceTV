@@ -17,7 +17,11 @@ import { DeleteUserConfirm } from '@/features/admin/components/tabs/user-config/
 import { DeleteUserGroupConfirm } from '@/features/admin/components/tabs/user-config/DeleteUserGroupConfirm';
 import { RegistrationSettingsDialog } from '@/features/admin/components/tabs/user-config/RegistrationSettingsDialog';
 import { RegistrationSummaryCard } from '@/features/admin/components/tabs/user-config/RegistrationSummaryCard';
-import { UserGroupFormDialog } from '@/features/admin/components/tabs/user-config/UserGroupFormDialog';
+import {
+  type UserGroupDraft,
+  EMPTY_USER_GROUP_DRAFT,
+  UserGroupFormDialog,
+} from '@/features/admin/components/tabs/user-config/UserGroupFormDialog';
 import { UserGroupTable } from '@/features/admin/components/tabs/user-config/UserGroupTable';
 import { UserTable } from '@/features/admin/components/tabs/user-config/UserTable';
 import { useAdminInviteCodes } from '@/features/admin/hooks/useAdminInviteCodes';
@@ -125,14 +129,11 @@ const UserConfig = ({ config, role, refreshConfig }: UserConfigProps) => {
     username: '',
     password: '',
   });
-  const [newUserGroup, setNewUserGroup] = useState({
-    name: '',
-    enabledApis: [] as string[],
-  });
-  const [editingUserGroup, setEditingUserGroup] = useState<{
-    name: string;
-    enabledApis: string[];
-  } | null>(null);
+  const [newUserGroup, setNewUserGroup] = useState<UserGroupDraft>(
+    EMPTY_USER_GROUP_DRAFT,
+  );
+  const [editingUserGroup, setEditingUserGroup] =
+    useState<UserGroupDraft | null>(null);
   const [showConfigureApisModal, setShowConfigureApisModal] =
     useModalState(false);
   const [selectedUser, setSelectedUser] = useState<{
@@ -224,18 +225,21 @@ const UserConfig = ({ config, role, refreshConfig }: UserConfigProps) => {
     );
 
   const userGroups = config?.UserConfig?.Tags || [];
+  const isLiveGrantedByGroup =
+    config?.SiteConfig?.EnableLiveEntry === true &&
+    config.SiteConfig.LiveAccess === 'groups';
 
   const handleUserGroupAction = async (
     action: 'add' | 'edit' | 'delete',
     groupName: string,
-    enabledApis?: string[],
+    draft?: UserGroupDraft,
   ) => {
     return withLoading(`userGroup_${action}_${groupName}`, async () => {
       try {
-        await userGroupAction(action, groupName, enabledApis);
+        await userGroupAction(action, groupName, draft);
 
         if (action === 'add') {
-          setNewUserGroup({ name: '', enabledApis: [] });
+          setNewUserGroup(EMPTY_USER_GROUP_DRAFT);
           setShowAddUserGroupForm(false);
         } else if (action === 'edit') {
           setEditingUserGroup(null);
@@ -258,16 +262,12 @@ const UserConfig = ({ config, role, refreshConfig }: UserConfigProps) => {
 
   const handleAddUserGroup = () => {
     if (!newUserGroup.name.trim()) return;
-    handleUserGroupAction('add', newUserGroup.name, newUserGroup.enabledApis);
+    handleUserGroupAction('add', newUserGroup.name, newUserGroup);
   };
 
   const handleEditUserGroup = () => {
     if (!editingUserGroup?.name.trim()) return;
-    handleUserGroupAction(
-      'edit',
-      editingUserGroup.name,
-      editingUserGroup.enabledApis,
-    );
+    handleUserGroupAction('edit', editingUserGroup.name, editingUserGroup);
   };
 
   const handleDeleteUserGroup = async (groupName: string) => {
@@ -300,10 +300,12 @@ const UserConfig = ({ config, role, refreshConfig }: UserConfigProps) => {
   const handleStartEditUserGroup = (group: {
     name: string;
     enabledApis?: string[];
+    allowLive?: boolean;
   }) => {
     setEditingUserGroup({
       name: group.name,
       enabledApis: group.enabledApis || [],
+      allowLive: group.allowLive === true,
     });
     setShowEditUserGroupForm(true);
     setShowAddUserGroupForm(false);
@@ -978,6 +980,7 @@ const UserConfig = ({ config, role, refreshConfig }: UserConfigProps) => {
 
         <UserGroupTable
           userGroups={userGroups}
+          showLiveAccess={isLiveGrantedByGroup}
           isEditLoading={(groupName) =>
             isLoading(`userGroup_edit_${groupName}`)
           }
@@ -1003,6 +1006,7 @@ const UserConfig = ({ config, role, refreshConfig }: UserConfigProps) => {
         value={newUserGroup}
         onChange={setNewUserGroup}
         sources={config.SourceConfig || []}
+        showLiveAccess={isLiveGrantedByGroup}
         onClose={closeAddUserGroupModal}
         onSubmit={handleAddUserGroup}
         isSubmitting={isLoading('userGroup_add_new')}
@@ -1011,13 +1015,20 @@ const UserConfig = ({ config, role, refreshConfig }: UserConfigProps) => {
       <UserGroupFormDialog
         mode='edit'
         isOpen={showEditUserGroupForm && Boolean(editingUserGroup)}
-        value={retainedEditingGroup ?? { name: '', enabledApis: [] }}
+        value={retainedEditingGroup ?? EMPTY_USER_GROUP_DRAFT}
         onChange={(next) =>
           setEditingUserGroup((current) =>
-            current ? { ...current, enabledApis: next.enabledApis } : current,
+            current
+              ? {
+                  ...current,
+                  enabledApis: next.enabledApis,
+                  allowLive: next.allowLive,
+                }
+              : current,
           )
         }
         sources={config.SourceConfig || []}
+        showLiveAccess={isLiveGrantedByGroup}
         onClose={closeEditUserGroupModal}
         onSubmit={handleEditUserGroup}
         isSubmitting={isLoading(`userGroup_edit_${retainedEditingGroup?.name}`)}

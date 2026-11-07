@@ -15,6 +15,7 @@ export interface AdminConfig {
     AnnouncementPublishedAt?: number;
     FooterText: string;
     EnableLiveEntry: boolean;
+    LiveAccess?: 'all' | 'groups';
     DefaultAggregateSearch: boolean;
     EnableOptimization: boolean;
     LiveDirectConnect: boolean;
@@ -69,6 +70,7 @@ export interface AdminConfig {
     Tags?: {
       name: string;
       enabledApis: string[];
+      allowLive?: boolean;
     }[];
   };
   SourceConfig: {
@@ -79,6 +81,8 @@ export interface AdminConfig {
     from: 'config' | 'custom';
     disabled?: boolean;
     proxyMode?: 'server' | 'browser' | 'auto';
+    // 仅站长与管理员可见，普通用户的搜索、详情与播放都不提供该源
+    adminOnly?: boolean;
   }[];
   CustomCategories: {
     name?: string;

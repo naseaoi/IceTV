@@ -10,7 +10,9 @@ import {
 } from '@/lib/server-resource-errors';
 import type { SharedResourceStore } from '@/lib/shared-resource-store';
 import { LocalSqliteStorage } from '@/lib/sqlite.db';
+import { SqliteResourceStore } from '@/lib/sqlite-resource-store';
 import { withUpstreamResponse } from '@/lib/upstream-resource-guard.server';
+import { UPSTREAM_COOLDOWN_POLICY } from '@/lib/upstream-resource-policy';
 
 jest.unmock('@/lib/upstream-resource-guard.server');
 installStreamPolyfills();
@@ -44,6 +46,214 @@ describe('upstream resources', () => {
         .prepare('SELECT COUNT(*) AS total FROM shared_resource_leases')
         .get() as { total: number }
     ).total;
+
+  describe('host cooldown', () => {
+    const now = Date.parse('2026-11-07T12:00:00Z');
+    beforeEach(() => {
+      jest.spyOn(Date, 'now').mockReturnValue(now);
+      jest.spyOn(console, 'warn').mockImplementation(() => {});
+    });
+
+    function limited(status = 429, retryAfter?: string) {
+      return new Response(null, {
+        status,
+        headers: retryAfter === undefined ? {} : { 'Retry-After': retryAfter },
+      });
+    }
+
+    it('cancels the triggering body, releases leases and refuses before any admission', async () => {
+      const cancel = jest.fn().mockRejectedValue(new Error('cancel failed'));
+      const origin = jest.fn(
+        async () =>
+          new Response(new ReadableStream({ cancel }), { status: 429 }),
+      );
+      const failure = await withUpstreamResponse(
+        'https://UP.example.:8443/a',
+        origin,
+        { store },
+      ).catch((error) => error);
+      expect(failure).toBeInstanceOf(ResourceLimitError);
+      expect(resourceLimitResponse(failure)?.status).toBe(503);
+      expect(resourceLimitResponse(failure)?.headers.get('Retry-After')).toBe(
+        '30',
+      );
+      expect(cancel).toHaveBeenCalledTimes(1);
+      expect(leaseCount()).toBe(0);
+      const acquire = jest.spyOn(store, 'acquire');
+      const consume = jest.spyOn(store, 'consume');
+      const read = jest.spyOn(store, 'getCooldown');
+      jest.mocked(Date.now).mockReturnValue(now + 1200);
+      await expect(
+        withUpstreamResponse('http://up.example/b', origin, {
+          store,
+          kind: 'live',
+          identity: 'other',
+        }),
+      ).rejects.toMatchObject({ status: 503, retryAfterSeconds: 29 });
+      expect(origin).toHaveBeenCalledTimes(1);
+      expect(acquire).not.toHaveBeenCalled();
+      expect(consume).not.toHaveBeenCalled();
+      expect(read).not.toHaveBeenCalled();
+      expect(console.warn).toHaveBeenCalledTimes(1);
+      expect(console.warn).toHaveBeenCalledWith('Upstream host cooldown', {
+        host: 'up.example',
+        seconds: 30,
+        status: 429,
+      });
+    });
+
+    it.each([
+      [undefined, 30],
+      ['invalid', 30],
+      ['', 30],
+      ['20', 20],
+      ['0', 5],
+      ['-4', 5],
+      ['1.2', 5],
+      ['900', 300],
+      ['Sat, 07 Nov 2026 12:00:42 GMT', 42],
+      ['Sat, 07 Nov 2026 11:59:00 GMT', 5],
+      ['Sat, 07 Nov 2026 13:00:00 GMT', 300],
+    ])('normalizes Retry-After %s to %s seconds', async (value, expected) => {
+      await expect(
+        withUpstreamResponse(
+          'https://up.example/a',
+          async () => limited(429, value),
+          { store },
+        ),
+      ).rejects.toMatchObject({ status: 503, retryAfterSeconds: expected });
+    });
+
+    it('cools 503 with Retry-After but preserves other error responses', async () => {
+      for (const status of [403, 500, 503]) {
+        const response = await withUpstreamResponse(
+          'https://up.example/a',
+          async () => limited(status),
+          { store },
+        );
+        expect(response.status).toBe(status);
+      }
+      await expect(
+        withUpstreamResponse(
+          'https://up.example/a',
+          async () => limited(503, '15'),
+          { store },
+        ),
+      ).rejects.toMatchObject({ status: 503, retryAfterSeconds: 15 });
+    });
+
+    it('isolates hosts and restores upstream access on expiry', async () => {
+      await expect(
+        withUpstreamResponse(
+          'https://up.example/a',
+          async () => limited(429, '5'),
+          { store },
+        ),
+      ).rejects.toMatchObject({ retryAfterSeconds: 5 });
+      await (
+        await withUpstreamResponse('https://other.example/a', loader, { store })
+      ).body!.cancel();
+      jest.mocked(Date.now).mockReturnValue(now + 5000);
+      const origin = jest.fn(loader);
+      await (
+        await withUpstreamResponse('https://up.example/a', origin, { store })
+      ).body!.cancel();
+      expect(origin).toHaveBeenCalledTimes(1);
+    });
+
+    it('shares cooldown across store instances while caching misses for three seconds', async () => {
+      const other = new SqliteResourceStore(
+        (storage as unknown as { db: Database.Database }).db,
+      );
+      const read = jest.spyOn(other, 'getCooldown');
+      const origin = jest.fn(loader);
+      await Promise.all(
+        Array.from({ length: 4 }, async () =>
+          (
+            await withUpstreamResponse('https://up.example/a', origin, {
+              store: other,
+            })
+          ).body!.cancel(),
+        ),
+      );
+      expect(read).toHaveBeenCalledTimes(1);
+      await expect(
+        withUpstreamResponse('https://up.example/a', async () => limited(), {
+          store,
+        }),
+      ).rejects.toMatchObject({ retryAfterSeconds: 30 });
+      await (
+        await withUpstreamResponse('https://up.example/a', origin, {
+          store: other,
+        })
+      ).body!.cancel();
+      expect(read).toHaveBeenCalledTimes(1);
+      jest
+        .mocked(Date.now)
+        .mockReturnValue(now + UPSTREAM_COOLDOWN_POLICY.negativeCacheMs);
+      await expect(
+        withUpstreamResponse('https://up.example/a', origin, { store: other }),
+      ).rejects.toMatchObject({ status: 503, retryAfterSeconds: 27 });
+      expect(read).toHaveBeenCalledTimes(2);
+      expect(origin).toHaveBeenCalledTimes(5);
+    });
+
+    it('keeps longer cooldowns when concurrent responses arrive out of order', async () => {
+      const other = new SqliteResourceStore(
+        (storage as unknown as { db: Database.Database }).db,
+      );
+      let respond!: (response: Response) => void;
+      let started!: () => void;
+      const ready = new Promise<void>((resolve) => {
+        started = resolve;
+      });
+      const pending = withUpstreamResponse(
+        'https://up.example/a',
+        () => {
+          started();
+          return new Promise<Response>((resolve) => {
+            respond = resolve;
+          });
+        },
+        { store: other },
+      );
+      await ready;
+      await expect(
+        withUpstreamResponse(
+          'https://up.example/b',
+          async () => limited(429, '120'),
+          { store },
+        ),
+      ).rejects.toMatchObject({ retryAfterSeconds: 120 });
+      respond(limited(429, '5'));
+      await expect(pending).rejects.toMatchObject({ retryAfterSeconds: 120 });
+      await expect(
+        withUpstreamResponse('https://up.example/c', loader, { store: other }),
+      ).rejects.toMatchObject({ retryAfterSeconds: 120 });
+    });
+
+    it('retains local cooldown and normal upstream access on cooldown storage failures', async () => {
+      jest
+        .spyOn(store, 'getCooldown')
+        .mockRejectedValue(new Error('read failed'));
+      jest
+        .spyOn(store, 'extendCooldown')
+        .mockRejectedValue(new Error('write failed'));
+      await (
+        await withUpstreamResponse('https://other.example/a', loader, { store })
+      ).body!.cancel();
+      await expect(
+        withUpstreamResponse('https://up.example/a', async () => limited(), {
+          store,
+        }),
+      ).rejects.toMatchObject({ retryAfterSeconds: 30 });
+      const origin = jest.fn(loader);
+      await expect(
+        withUpstreamResponse('https://up.example/a', origin, { store }),
+      ).rejects.toMatchObject({ retryAfterSeconds: 30 });
+      expect(origin).not.toHaveBeenCalled();
+    });
+  });
 
   it('caps fifteen concurrent probe users at eight without consuming playback slots', async () => {
     const probeLoader = jest.fn(loader);

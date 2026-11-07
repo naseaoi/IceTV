@@ -4,15 +4,16 @@ import {
   getProxySourceKey,
   resolveProxyUserAgent,
 } from '@/app/api/proxy/utils';
-import { isLiveEntryEnabled } from '@/features/live/lib/live';
 import { withSourceProbeBudget } from '@/features/play/lib/sourceProbeGuard.server';
 import { resolveVodSegmentProxyTimeoutMs } from '@/features/play/lib/vodSourcePlaybackPolicy';
+import { getOptionalActiveUser } from '@/lib/api-auth';
 import { getClientIp } from '@/lib/client-ip';
 import { getConfigForRead } from '@/lib/config';
 import {
   fetchStreamThroughProxy,
   getProxyUrlForTarget,
 } from '@/lib/http-proxy-json';
+import { canUserWatchLive } from '@/lib/live-access.server';
 import { resolveProxyAuthorization } from '@/lib/proxy-auth';
 import {
   classifyProxyFailure,
@@ -115,8 +116,20 @@ async function handleGet(request: NextRequest) {
         : `ip:${getClientIp(request)}`,
   };
 
-  if (isLiveStream && !(await isLiveEntryEnabled())) {
-    return NextResponse.json({ error: '直播未开启' }, { status: 404 });
+  if (isLiveStream) {
+    const config = await getConfigForRead();
+    if (config.SiteConfig.EnableLiveEntry !== true) {
+      return NextResponse.json({ error: '直播未开启' }, { status: 404 });
+    }
+    const username =
+      authorization.via === 'session'
+        ? authorization.username
+        : config.SiteConfig.LiveAccess === 'groups'
+          ? (await getOptionalActiveUser(request))?.username
+          : undefined;
+    if (!(await canUserWatchLive(username, config))) {
+      return NextResponse.json({ error: '没有直播权限' }, { status: 403 });
+    }
   }
 
   const validation = await validateProxyUrlForRequest(url);

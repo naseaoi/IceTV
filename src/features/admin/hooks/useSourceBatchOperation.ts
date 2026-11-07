@@ -12,10 +12,12 @@ type BatchAction =
   | 'batch_enable'
   | 'batch_disable'
   | 'batch_delete'
-  | 'batch_set_proxy_mode';
+  | 'batch_set_proxy_mode'
+  | 'batch_set_admin_only';
 
 interface BatchOperationOptions {
   proxyMode?: SourceProxyMode;
+  adminOnly?: boolean;
 }
 
 const proxyModeLabels: Record<SourceProxyMode, string> = {
@@ -112,6 +114,18 @@ export function useSourceBatchOperation({
           successMessage = `已将 ${keys.length} 个视频源流量路由改为「${proxyModeLabel}」`;
           loadingKey = `${loadingKey}_${proxyMode}`;
           body.proxyMode = proxyMode;
+          break;
+        }
+        case 'batch_set_admin_only': {
+          const adminOnly = options.adminOnly === true;
+          const scopeLabel = adminOnly ? '仅管理员可用' : '所有用户可用';
+          confirmMessage = adminOnly
+            ? `确定要将选中的 ${keys.length} 个视频源设为「仅管理员可用」吗？普通用户将无法搜索和播放这些源。`
+            : `确定要将选中的 ${keys.length} 个视频源对所有用户开放吗？`;
+          actionName = `设置为${scopeLabel}`;
+          successMessage = `已将 ${keys.length} 个视频源设为「${scopeLabel}」`;
+          loadingKey = `${loadingKey}_${adminOnly ? 'on' : 'off'}`;
+          body.adminOnly = adminOnly;
           break;
         }
       }

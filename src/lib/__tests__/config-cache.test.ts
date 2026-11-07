@@ -12,6 +12,7 @@ const baseConfig: AdminConfig = {
     Announcement: '',
     FooterText: '',
     EnableLiveEntry: false,
+    LiveAccess: 'all',
     DefaultAggregateSearch: true,
     EnableOptimization: true,
     LiveDirectConnect: false,
@@ -45,6 +46,7 @@ type LoadConfigOptions = {
   getAdminConfig?: jest.Mock;
   compareAndSetAdminConfig?: jest.Mock;
   userNames?: string[];
+  userAccess?: Record<string, { role: 'user' | 'admin' }>;
 };
 
 async function loadConfigModule(
@@ -65,6 +67,11 @@ async function loadConfigModule(
         ConfigSubscribtion: { URL: '', AutoUpdate: false, LastCheck: '' },
       }),
       getAllUsers: jest.fn().mockResolvedValue(userNames),
+      getUserAccess: jest.fn(async (username: string) =>
+        options.userAccess?.[username]
+          ? { username, ...options.userAccess[username] }
+          : null,
+      ),
       saveAdminConfig,
       compareAndSetAdminConfig:
         options.compareAndSetAdminConfig ||
@@ -119,6 +126,29 @@ describe('config cache persistence', () => {
       .EnableUserDanmaku;
     expect(configSelfCheck(legacy).SiteConfig.EnableUserDanmaku).toBe(false);
   });
+
+  it.each(['groups', 'all', undefined, 'invalid'])(
+    'normalizes live access %s and keeps only true group grants',
+    async (LiveAccess) => {
+      const { configSelfCheck } = await loadConfigModule(jest.fn());
+      const config = cloneBaseConfig();
+      Object.assign(config.SiteConfig, { LiveAccess });
+      config.UserConfig.Tags = [
+        { name: 'granted', enabledApis: [], allowLive: true },
+        { name: 'denied', enabledApis: [], allowLive: false },
+        { name: 'default', enabledApis: [] },
+      ];
+      const checked = configSelfCheck(config);
+      expect(checked.SiteConfig.LiveAccess).toBe(
+        LiveAccess === 'groups' ? 'groups' : 'all',
+      );
+      expect(checked.UserConfig.Tags).toEqual([
+        { name: 'granted', enabledApis: [], allowLive: true },
+        { name: 'denied', enabledApis: [] },
+        { name: 'default', enabledApis: [] },
+      ]);
+    },
+  );
 
   it('returns cloned config objects', async () => {
     const { getConfig } = await loadConfigModule(jest.fn());
@@ -289,6 +319,32 @@ describe('config cache persistence', () => {
     const second = await getAvailableApiSites();
 
     expect(second[0].name).toBe('Source 1');
+  });
+
+  it('hides admin-only sources from regular users', async () => {
+    const adminConfig = cloneBaseConfig();
+    adminConfig.SourceConfig = [
+      { key: 'open', name: 'Open', api: 'https://a.example', from: 'custom' },
+      {
+        key: 'relay',
+        name: 'Relay',
+        api: 'https://b.example',
+        from: 'custom',
+        adminOnly: true,
+      },
+    ];
+    const { getAvailableApiSites } = await loadConfigModule(jest.fn(), {
+      adminConfig,
+      userAccess: { alice: { role: 'user' }, bob: { role: 'admin' } },
+    });
+    const keys = async (user?: string) =>
+      (await getAvailableApiSites(user)).map((site) => site.key);
+
+    await expect(keys('alice')).resolves.toEqual(['open']);
+    await expect(keys('guest-without-record')).resolves.toEqual(['open']);
+    await expect(keys('bob')).resolves.toEqual(['open', 'relay']);
+    await expect(keys('owner-1')).resolves.toEqual(['open', 'relay']);
+    await expect(keys()).resolves.toEqual(['open', 'relay']);
   });
 
   it('uses database users as the source of truth', async () => {

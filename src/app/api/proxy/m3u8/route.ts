@@ -4,9 +4,11 @@ import {
   getProxySourceKey,
   resolveProxyUserAgent,
 } from '@/app/api/proxy/utils';
-import { isLiveEntryEnabled } from '@/features/live/lib/live';
 import { getRewrittenM3U8Content } from '@/features/play/lib/m3u8-rewrite';
 import { withSourceProbeBudget } from '@/features/play/lib/sourceProbeGuard.server';
+import { getOptionalActiveUser } from '@/lib/api-auth';
+import { getConfigForRead } from '@/lib/config';
+import { canUserWatchLive } from '@/lib/live-access.server';
 import { resolveProxyAuthorization } from '@/lib/proxy-auth';
 import {
   classifyProxyFailure,
@@ -16,6 +18,7 @@ import {
 } from '@/lib/proxy-diagnostics';
 import { requireServerProxyQuota } from '@/lib/server-proxy-guard';
 import { resourceLimitResponse } from '@/lib/server-resource-errors';
+import { scheduleSourceDirectProbe } from '@/lib/source-route-capability.server';
 import {
   UrlValidationError,
   validateProxyUrlForRequest,
@@ -91,8 +94,20 @@ async function handleGet(request: NextRequest) {
   );
   if (quotaFailure) return quotaFailure;
 
-  if (isLive && !(await isLiveEntryEnabled())) {
-    return NextResponse.json({ error: '直播未开启' }, { status: 404 });
+  if (isLive) {
+    const config = await getConfigForRead();
+    if (config.SiteConfig.EnableLiveEntry !== true) {
+      return NextResponse.json({ error: '直播未开启' }, { status: 404 });
+    }
+    const username =
+      authorization.via === 'session'
+        ? authorization.username
+        : config.SiteConfig.LiveAccess === 'groups'
+          ? (await getOptionalActiveUser(request))?.username
+          : undefined;
+    if (!(await canUserWatchLive(username, config))) {
+      return NextResponse.json({ error: '没有直播权限' }, { status: 403 });
+    }
   }
 
   const validation = await validateProxyUrlForRequest(url);
@@ -131,6 +146,13 @@ async function handleGet(request: NextRequest) {
         // 软过期：后台刷新，不阻塞当前响应
         void refreshM3U8Cache(validation.url, ua, source, isLive);
       }
+      scheduleSourceDirectProbe({
+        source,
+        playlistContent: value.content,
+        playlistUrl: value.finalUrl || validation.url,
+        referer: request.headers.get('referer'),
+        userAgent: ua,
+      });
       const modifiedContent = await getRewrittenM3U8Content(
         value,
         validation.url,
@@ -171,6 +193,15 @@ async function handleGet(request: NextRequest) {
         userInitiated,
       },
     );
+    if (!isLive) {
+      scheduleSourceDirectProbe({
+        source,
+        playlistContent: loaded.content,
+        playlistUrl: loaded.finalUrl || validation.url,
+        referer: request.headers.get('referer'),
+        userAgent: ua,
+      });
+    }
     const modifiedContent = await getRewrittenM3U8Content(
       loaded,
       validation.url,

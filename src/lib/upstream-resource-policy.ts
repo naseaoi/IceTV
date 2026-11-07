@@ -1,3 +1,35 @@
+export const UPSTREAM_COOLDOWN_POLICY = {
+  minSeconds: 5,
+  maxSeconds: 300,
+  defaultSeconds: 30,
+  negativeCacheMs: 3000,
+  storeTimeoutMs: 1000,
+  maxLocalHosts: 4096,
+} as const;
+
+export function upstreamCooldownSeconds(
+  value: string | null,
+  now: number,
+): number {
+  const raw = value?.trim();
+  const parsed = raw
+    ? /^-?\d+(?:\.\d+)?$/.test(raw)
+      ? Number(raw)
+      : /[a-z]/i.test(raw)
+        ? (Date.parse(raw) - now) / 1000
+        : NaN
+    : NaN;
+  return Math.min(
+    UPSTREAM_COOLDOWN_POLICY.maxSeconds,
+    Math.max(
+      UPSTREAM_COOLDOWN_POLICY.minSeconds,
+      Number.isFinite(parsed)
+        ? Math.ceil(parsed)
+        : UPSTREAM_COOLDOWN_POLICY.defaultSeconds,
+    ),
+  );
+}
+
 export type UpstreamResourceKind = 'metadata' | 'vod' | 'live' | 'probe';
 
 export interface UpstreamResourceContext {

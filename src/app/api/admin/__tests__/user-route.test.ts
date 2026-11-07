@@ -2,9 +2,11 @@
 
 import type { NextRequest } from 'next/server';
 
+import { installWebPolyfills } from '@/app/api/test-utils/web-polyfills';
 import { requireAdmin } from '@/lib/api-auth';
 import { ConfigConflictError, getConfig, saveConfig } from '@/lib/config';
 import { db } from '@/lib/db';
+import type { AdminConfig } from '@/types/admin';
 
 jest.mock('@/lib/api-auth', () => ({
   isGuardFailure: jest.fn((result) => Boolean(result?.response)),
@@ -35,66 +37,7 @@ jest.mock('@/lib/db', () => ({
   },
 }));
 
-if (!(globalThis as any).Headers) {
-  class MinimalHeaders {
-    private store: Record<string, string> = {};
-
-    constructor(init?: Record<string, string>) {
-      if (!init) return;
-      Object.entries(init).forEach(([key, value]) => {
-        this.set(key, value);
-      });
-    }
-
-    set(key: string, value: string) {
-      this.store[key.toLowerCase()] = String(value);
-    }
-
-    get(key: string) {
-      return this.store[key.toLowerCase()] ?? null;
-    }
-  }
-
-  (globalThis as any).Headers = MinimalHeaders;
-}
-
-if (!(globalThis as any).Request) {
-  (globalThis as any).Request = class {
-    constructor(
-      public url = '',
-      public init: Record<string, unknown> = {},
-    ) {}
-  };
-}
-
-if (!(globalThis as any).Response) {
-  class MinimalResponse {
-    body: string;
-    status: number;
-    headers: InstanceType<typeof Headers>;
-
-    constructor(body?: string, init?: { status?: number; headers?: any }) {
-      this.body = body || '';
-      this.status = init?.status ?? 200;
-      this.headers = new Headers(init?.headers || {});
-    }
-
-    static json(data: unknown, init?: { status?: number; headers?: any }) {
-      const headers = new Headers(init?.headers || {});
-      headers.set('content-type', 'application/json');
-      return new MinimalResponse(JSON.stringify(data), {
-        status: init?.status,
-        headers,
-      });
-    }
-
-    async json() {
-      return this.body ? JSON.parse(this.body) : null;
-    }
-  }
-
-  (globalThis as any).Response = MinimalResponse;
-}
+installWebPolyfills();
 
 function createAdminConfig() {
   const users: Array<{
@@ -126,7 +69,7 @@ function createAdminConfig() {
     },
     UserConfig: {
       Users: users,
-      Tags: [],
+      Tags: [] as NonNullable<AdminConfig['UserConfig']['Tags']>,
       OpenRegister: false,
     },
     SourceConfig: [],
@@ -165,6 +108,61 @@ describe('admin user route', () => {
     );
     (db.updateUserAccess as jest.Mock).mockResolvedValue(1);
   });
+
+  it.each([true, false, undefined])(
+    'stores only a true live grant when adding a group (%s)',
+    async (allowLive) => {
+      const config = createAdminConfig();
+      (getConfig as jest.Mock).mockResolvedValue(config);
+      const response = await getHandler()(
+        createRequest({
+          action: 'userGroup',
+          groupAction: 'add',
+          groupName: 'live',
+          enabledApis: [],
+          allowLive,
+        }),
+      );
+      expect(response.status).toBe(200);
+      expect(config.UserConfig.Tags).toEqual([
+        {
+          name: 'live',
+          enabledApis: [],
+          ...(allowLive === true ? { allowLive: true } : {}),
+        },
+      ]);
+      expect(saveConfig).toHaveBeenCalledWith(config);
+    },
+  );
+
+  it.each([true, false, undefined])(
+    'updates or removes the group live grant (%s)',
+    async (allowLive) => {
+      const config = createAdminConfig();
+      config.UserConfig.Tags = [
+        { name: 'live', enabledApis: [], allowLive: true },
+      ];
+      (getConfig as jest.Mock).mockResolvedValue(config);
+      const response = await getHandler()(
+        createRequest({
+          action: 'userGroup',
+          groupAction: 'edit',
+          groupName: 'live',
+          enabledApis: ['source'],
+          allowLive,
+        }),
+      );
+      expect(response.status).toBe(200);
+      expect(config.UserConfig.Tags).toEqual([
+        {
+          name: 'live',
+          enabledApis: ['source'],
+          ...(allowLive === true ? { allowLive: true } : {}),
+        },
+      ]);
+      expect(saveConfig).toHaveBeenCalledWith(config);
+    },
+  );
 
   it('rejects add when the user exists only in the database', async () => {
     const POST = getHandler();

@@ -423,10 +423,11 @@ async function runAdminUserAction(
         break;
       }
       case 'userGroup': {
-        const { groupAction, groupName, enabledApis } = body as {
+        const { groupAction, groupName, enabledApis, allowLive } = body as {
           groupAction: 'add' | 'edit' | 'delete';
           groupName: string;
           enabledApis?: string[];
+          allowLive?: boolean;
         };
 
         if (!adminConfig.UserConfig.Tags) {
@@ -444,6 +445,7 @@ async function runAdminUserAction(
             adminConfig.UserConfig.Tags.push({
               name: groupName,
               enabledApis: enabledApis || [],
+              ...(allowLive === true ? { allowLive: true } : {}),
             });
             break;
           }
@@ -457,8 +459,10 @@ async function runAdminUserAction(
                 { status: 404 },
               );
             }
-            adminConfig.UserConfig.Tags[groupIndex].enabledApis =
-              enabledApis || [];
+            const group = adminConfig.UserConfig.Tags[groupIndex];
+            group.enabledApis = enabledApis || [];
+            if (allowLive === true) group.allowLive = true;
+            else delete group.allowLive;
             break;
           }
           case 'delete': {

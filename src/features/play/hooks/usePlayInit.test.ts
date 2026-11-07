@@ -3,19 +3,24 @@ import { act, cleanup, renderHook, waitFor } from '@testing-library/react';
 import { usePlayInit } from '@/features/play/hooks/usePlayInit';
 import type { HistoryRestoreGate } from '@/features/play/hooks/usePlayProgress';
 import { peekResolvedLazyEpisodeUrl } from '@/features/play/lib/lazyEpisode';
+import { getSourceSelectionContext } from '@/features/play/lib/sourceSelectionContext';
 import { probeVodEpisodeUrl } from '@/features/play/lib/vodProbe';
 import { buildVodProxyUrl } from '@/features/play/lib/vodProxyUrl';
 import { generateStorageKey } from '@/lib/db.client';
 import { cacheManager } from '@/lib/db.client.cache';
 import { PLAY_INTENT_KEY, savePlayIntent } from '@/lib/play-intent';
 import { prefetchM3U8 } from '@/lib/player-runtime';
-import { isServerProxy } from '@/lib/proxy-modes';
+import { getProxyModes, isServerProxy } from '@/lib/proxy-modes';
 import {
   isTrustedSourcePlaybackStat,
   readSourcePlaybackStats,
   recordSourcePlaybackSuccess,
 } from '@/lib/source-playback-stats';
 import type { PlayRecord, SearchResult } from '@/lib/types';
+
+jest.mock('@/features/play/lib/sourceSelectionContext', () => ({
+  getSourceSelectionContext: jest.fn(),
+}));
 
 jest.mock('@/features/play/lib/vodProbe', () => ({
   probeVodEpisodeUrl: jest.fn(),
@@ -265,6 +270,11 @@ function setPagePlaybackStarted(
 const originalFetch = global.fetch;
 
 beforeEach(() => {
+  (getSourceSelectionContext as jest.Mock).mockClear();
+  (getSourceSelectionContext as jest.Mock).mockResolvedValue({
+    proxyModes: {},
+    healthTiers: {},
+  });
   jest.useFakeTimers();
   localStorage.clear();
   sessionStorage.clear();
@@ -278,6 +288,116 @@ afterEach(() => {
   jest.runOnlyPendingTimers();
   jest.useRealTimers();
   global.fetch = originalFetch;
+});
+
+describe('usePlayInit 线路偏好', () => {
+  const relay = createSource('relay');
+  const direct = createSource('direct');
+  const poor = createSource('poor');
+
+  beforeEach(() => {
+    (getSourceSelectionContext as jest.Mock).mockResolvedValue({
+      proxyModes: { relay: 'server', direct: 'auto', poor: 'browser' },
+      healthTiers: { relay: 'good', direct: 'good', poor: 'poor' },
+    });
+    installFetch({});
+  });
+
+  it('同等级先等直连测速，失败后才以前台中转候选起播', async () => {
+    let rejectDirect!: (error: Error) => void;
+    probeMock.mockImplementation((url) =>
+      url === direct.episodes[0]
+        ? new Promise((_resolve, reject) => {
+            rejectDirect = reject;
+          })
+        : Promise.resolve(PASSING_PROBE),
+    );
+    const params = setupHook([relay, direct]);
+    await waitFor(() => expect(probeMock).toHaveBeenCalledTimes(1));
+    expect(probeMock.mock.calls[0][0]).toBe(direct.episodes[0]);
+    expect(params.setCurrentSource).not.toHaveBeenCalled();
+    await act(async () => rejectDirect(new Error('unavailable')));
+    await waitFor(() =>
+      expect(params.setCurrentSource).toHaveBeenCalledWith('relay'),
+    );
+  });
+
+  it('直连成功后中转只作后台备选，不抢占选择', async () => {
+    probeOnly([relay.episodes[0], direct.episodes[0]]);
+    const params = setupHook([relay, direct]);
+    await waitFor(() =>
+      expect(params.setCurrentSource).toHaveBeenCalledWith('direct'),
+    );
+    expect(params.setCurrentSource).toHaveBeenCalledTimes(1);
+  });
+
+  it('后台更快的同等级中转不产生优于当前直连的推荐', async () => {
+    markTrusted(direct.source);
+    markTrusted(relay.source);
+    installFetch({ [direct.episodes[0]]: 'ok' });
+    probeMock.mockImplementation(async (url) => ({
+      ...PASSING_PROBE,
+      loadSpeed: url === relay.episodes[0] ? '9 MB/s' : '200 KB/s',
+    }));
+    const params = setupHook([relay, direct]);
+    await waitFor(() =>
+      expect(params.setCurrentSource).toHaveBeenCalledWith('direct'),
+    );
+    (params.setSourceRecommendation as jest.Mock).mockClear();
+    await act(async () => {
+      jest.advanceTimersByTime(5_000);
+    });
+    expect(probeMock).toHaveBeenCalledTimes(2);
+    expect(params.setSourceRecommendation).not.toHaveBeenCalled();
+  });
+
+  it('较差等级的直连不越过中转，关闭测速时也遵循', async () => {
+    const params = setupHook([poor, relay], { optimizationEnabled: false });
+    await waitFor(() =>
+      expect(params.setCurrentSource).toHaveBeenCalledWith('relay'),
+    );
+  });
+
+  it('有中转线路时仍走 quick，由服务端竞速决定起播源', async () => {
+    installFetch(
+      {},
+      {},
+      {
+        '/api/search/quick': Promise.resolve({
+          detail: direct,
+          sources: [relay, direct],
+        }),
+        '/api/search': Promise.resolve({ results: [relay, direct] }),
+      },
+    );
+    const params = setupHook(null);
+    await waitFor(() =>
+      expect(params.setCurrentSource).toHaveBeenCalledWith('direct'),
+    );
+    expect(apiRequests('/api/search/quick')).toHaveLength(1);
+    expect(probeMock).not.toHaveBeenCalled();
+  });
+
+  it('指定中转源的直达与续播入口保留原选择', async () => {
+    installFetch(
+      {},
+      {},
+      {
+        '/api/detail': Promise.resolve(relay),
+        '/api/search': Promise.resolve({ results: [relay, direct] }),
+      },
+    );
+    const params = setupHook(null, {
+      currentSource: relay.source,
+      currentId: relay.id,
+      needPreferRef: { current: false },
+    });
+    await waitFor(() =>
+      expect(params.setCurrentSource).toHaveBeenCalledWith('relay'),
+    );
+    expect(probeMock).not.toHaveBeenCalled();
+    expect(getSourceSelectionContext).not.toHaveBeenCalled();
+  });
 });
 
 describe('usePlayInit 常用源直接起播', () => {
@@ -573,6 +693,12 @@ describe('usePlayInit 按续播的集测速', () => {
     );
     probeOnly([resumed.episodes[2], fresh.episodes[0]]);
 
+    (getSourceSelectionContext as jest.Mock).mockImplementationOnce(
+      async () => ({
+        proxyModes: await getProxyModes(),
+        healthTiers: {},
+      }),
+    );
     const params = setupHook(null);
     await waitFor(() =>
       expect(apiRequests('/api/playrecords')).toHaveLength(1),
@@ -614,6 +740,7 @@ describe('usePlayInit 起播等历史恢复', () => {
 
     const params = setupHook([series]);
 
+    await act(async () => undefined);
     expect(params.setDetail).toHaveBeenCalledWith(series);
     expect(params.setLoading).not.toHaveBeenCalledWith(false);
 
@@ -638,6 +765,7 @@ describe('usePlayInit 起播等历史恢复', () => {
     const params = setupHook([series]);
     const gate = params.historyRestoreGateRef.current;
 
+    await act(async () => undefined);
     expect(params.setDetail).toHaveBeenCalledWith(series);
     expect(gate.playRecords).not.toBeNull();
     await expect(gate.playRecords).resolves.toEqual(records);
@@ -721,6 +849,7 @@ describe('usePlayInit 直达入口读取播放记录', () => {
       resolveDetail(series);
     });
 
+    await act(async () => undefined);
     expect(params.setDetail).toHaveBeenCalledWith(series);
     await expect(
       params.historyRestoreGateRef.current.playRecords,

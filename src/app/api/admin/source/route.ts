@@ -10,6 +10,7 @@ import {
 } from '@/lib/config-file-json';
 import { db } from '@/lib/db';
 import { validateProxyUrlForRequest } from '@/lib/url-guard';
+import type { AdminConfig } from '@/types/admin';
 
 export const runtime = 'nodejs';
 
@@ -25,7 +26,9 @@ type Action =
   | 'batch_enable'
   | 'batch_delete'
   | 'batch_set_proxy_mode'
-  | 'set_proxy_mode';
+  | 'set_proxy_mode'
+  | 'batch_set_admin_only'
+  | 'set_admin_only';
 
 interface BaseBody {
   action?: Action;
@@ -77,6 +80,8 @@ export async function POST(request: NextRequest) {
       'batch_delete',
       'batch_set_proxy_mode',
       'set_proxy_mode',
+      'batch_set_admin_only',
+      'set_admin_only',
     ];
     if (!action || !ACTIONS.includes(action)) {
       return NextResponse.json({ error: '参数格式错误' }, { status: 400 });
@@ -314,6 +319,34 @@ export async function POST(request: NextRequest) {
         });
         break;
       }
+      case 'batch_set_admin_only': {
+        const { keys, adminOnly } = body as {
+          keys?: string[];
+          adminOnly?: unknown;
+        };
+        if (!Array.isArray(keys) || keys.length === 0) {
+          return NextResponse.json(
+            { error: '缺少 keys 参数或为空' },
+            { status: 400 },
+          );
+        }
+        if (typeof adminOnly !== 'boolean') {
+          return NextResponse.json(
+            { error: 'adminOnly 必须为布尔值' },
+            { status: 400 },
+          );
+        }
+        const keySet = new Set(
+          keys
+            .filter((key): key is string => typeof key === 'string')
+            .map((key) => key.trim())
+            .filter(Boolean),
+        );
+        adminConfig.SourceConfig.forEach((entry) => {
+          if (keySet.has(entry.key)) setSourceAdminOnly(entry, adminOnly);
+        });
+        break;
+      }
       case 'sort': {
         const { order } = body as { order?: string[] };
         if (!Array.isArray(order)) {
@@ -361,6 +394,25 @@ export async function POST(request: NextRequest) {
         entry.proxyMode = proxyMode;
         break;
       }
+      case 'set_admin_only': {
+        const { key, adminOnly } = body as {
+          key?: string;
+          adminOnly?: unknown;
+        };
+        if (!key)
+          return NextResponse.json({ error: '缺少 key 参数' }, { status: 400 });
+        if (typeof adminOnly !== 'boolean') {
+          return NextResponse.json(
+            { error: 'adminOnly 必须为布尔值' },
+            { status: 400 },
+          );
+        }
+        const entry = adminConfig.SourceConfig.find((s) => s.key === key);
+        if (!entry)
+          return NextResponse.json({ error: '源不存在' }, { status: 404 });
+        setSourceAdminOnly(entry, adminOnly);
+        break;
+      }
       default:
         return NextResponse.json({ error: '未知操作' }, { status: 400 });
     }
@@ -389,4 +441,12 @@ export async function POST(request: NextRequest) {
     console.error('视频源管理操作失败:', error);
     return NextResponse.json({ error: '视频源管理操作失败' }, { status: 500 });
   }
+}
+
+function setSourceAdminOnly(
+  entry: AdminConfig['SourceConfig'][number],
+  adminOnly: boolean,
+): void {
+  if (adminOnly) entry.adminOnly = true;
+  else delete entry.adminOnly;
 }
