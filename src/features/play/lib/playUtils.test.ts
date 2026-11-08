@@ -113,4 +113,37 @@ describe('filterAdsFromM3U8', () => {
     expect(output).toContain('main-b.ts');
     expect(output.trim().endsWith('#EXT-X-ENDLIST')).toBe(true);
   });
+
+  it('会移除 ikun 插在正片分块之间、换转码目录的整数时长广告', () => {
+    const mainDurations = [2.085, 1.626, 2.085, 2.419, 1.751, 2.085, 1.501];
+    const mainBlock = (block: number, count: number) => [
+      ...(block === 0 ? [] : ['#EXT-X-DISCONTINUITY']),
+      ...Array.from({ length: count }, (_, index) => [
+        `#EXTINF:${mainDurations[index % mainDurations.length]},`,
+        `https://cdn.example.com:65/20221213/4GFb1YPb/2000kb/hls/m${block}-${index}.ts`,
+      ]).flat(),
+    ];
+    const adBlock = [
+      '#EXT-X-DISCONTINUITY',
+      ...[3, 3, 5, 3, 3, 0.64].flatMap((duration, index) => [
+        `#EXTINF:${duration},`,
+        `https://cdn.example.com:65/20261101/tkPlKg7b/10082kb/hls/ad${index}.ts`,
+      ]),
+    ];
+    const input = createPlaylist([
+      ...Array.from({ length: 4 }, (_, block) => mainBlock(block, 20)),
+      mainBlock(4, 7),
+      adBlock,
+      mainBlock(5, 13),
+      ...Array.from({ length: 4 }, (_, block) => mainBlock(block + 6, 20)),
+      ['#EXT-X-ENDLIST'],
+    ]);
+
+    const output = filterAdsFromM3U8(input);
+
+    expect(output).not.toContain('/10082kb/');
+    expect(output).toContain('m4-6.ts');
+    expect(output).toContain('m5-0.ts');
+    expect(output.match(/\.ts$/gm)).toHaveLength(9 * 20);
+  });
 });

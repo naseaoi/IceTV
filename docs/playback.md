@@ -83,3 +83,4 @@
 - 每个服务端策略有独立 `id` 和 `version`，规则变化时递增 `version`（它参与缓存键）。
 - 新增策略补源站 fixture，验证广告删除、正片保留、时间轴边界。
 - 服务端策略源不再跑客户端通用过滤，避免清单被二次重建。
+- 客户端过滤只在 hls.js 加载清单时生效。iPadOS / Safari 17+ 下 hls.js 用 ManagedMediaSource，以 blob: 的 `<source>` 挂载；`ensureVideoSource()` 必须让它留在最前，播放地址只作为末尾的 AirPlay 备选，否则 Safari 选中 m3u8 原生播放，广告原样播出。

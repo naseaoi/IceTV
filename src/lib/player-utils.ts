@@ -5,12 +5,21 @@ import { resolveHlsBufferDefaults } from '@/lib/hls-buffer-policy';
 // 视频源管理
 // ---------------------------------------------------------------------------
 
+// url 作为远程播放（AirPlay）的备选源追加在末尾。hls.js 在 ManagedMediaSource 下（iPadOS / Safari 17+）
+// 用 blob: 的 <source> 挂载媒体源，必须保留且排在最前；删掉它 Safari 会按顺序选中 m3u8 原生播放，
+// 绕过 hls.js 的清单处理（客户端去广告、线路回落等）。
 export function ensureVideoSource(video: HTMLVideoElement | null, url: string) {
   if (!video || !url) return;
-  const sources = Array.from(video.getElementsByTagName('source'));
-  const existed = sources.some((s) => s.src === url);
-  if (!existed) {
-    sources.forEach((s) => s.remove());
+  let hasTarget = false;
+  for (const source of Array.from(video.getElementsByTagName('source'))) {
+    if (source.src.startsWith('blob:')) continue;
+    if (source.src === url && !hasTarget) {
+      hasTarget = true;
+      continue;
+    }
+    source.remove();
+  }
+  if (!hasTarget) {
     const sourceEl = document.createElement('source');
     sourceEl.src = url;
     video.appendChild(sourceEl);
