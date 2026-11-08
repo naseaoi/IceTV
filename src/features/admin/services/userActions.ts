@@ -1,4 +1,4 @@
-﻿import { randomBytes } from 'crypto';
+import { randomBytes } from 'crypto';
 
 import {
   readInactiveConfirmation,
@@ -31,6 +31,7 @@ import {
 } from '@/lib/config';
 import { db } from '@/lib/db';
 import { getOwnerUsername } from '@/lib/env.server';
+import { isLinuxDoConfigured } from '@/lib/linuxdo-config.server';
 import { validateAccountPassword } from '@/lib/password-policy';
 import { assertValidUsername, normalizeUsername } from '@/lib/username';
 
@@ -46,6 +47,7 @@ const ACTIONS = [
   'userGroup',
   'updateUserGroups',
   'batchUpdateUserGroups',
+  'setLinuxDo',
   'setOpenRegister',
   'previewInactiveUsers',
   'deleteInactiveUsers',
@@ -59,6 +61,7 @@ const ACTIONS = [
 const TARGETLESS_ACTIONS = [
   'userGroup',
   'batchUpdateUserGroups',
+  'setLinuxDo',
   'setOpenRegister',
   'previewInactiveUsers',
   'deleteInactiveUsers',
@@ -597,6 +600,27 @@ async function runAdminUserAction(
       case 'previewInactiveUsers':
       case 'deleteInactiveUsers':
         return actionResponse({ error: '页面已更新，请刷新后重试' }, 400);
+      case 'setLinuxDo': {
+        const { linuxDo } = body as {
+          linuxDo?: { Enabled?: unknown; MinTrustLevel?: unknown };
+        };
+        if (
+          !linuxDo ||
+          typeof linuxDo.Enabled !== 'boolean' ||
+          typeof linuxDo.MinTrustLevel !== 'number' ||
+          !Number.isInteger(linuxDo.MinTrustLevel) ||
+          linuxDo.MinTrustLevel < 0 ||
+          linuxDo.MinTrustLevel > 4
+        )
+          return actionResponse({ error: 'LinuxDo 设置参数错误' }, 400);
+        if (linuxDo.Enabled && !isLinuxDoConfigured())
+          return actionResponse({ error: 'LinuxDo 环境变量尚未配置完整' }, 400);
+        adminConfig.UserConfig.LinuxDo = {
+          Enabled: linuxDo.Enabled,
+          MinTrustLevel: linuxDo.MinTrustLevel as 0 | 1 | 2 | 3 | 4,
+        };
+        break;
+      }
       case 'setOpenRegister': {
         const { openRegister } = body as { openRegister?: boolean };
         if (typeof openRegister !== 'boolean') {
@@ -793,6 +817,7 @@ async function runAdminUserAction(
         'updateUserGroups',
         'batchUpdateUserGroups',
         'userGroup',
+        'setLinuxDo',
         'setOpenRegister',
         'setRequireInviteCode',
       ];

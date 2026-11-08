@@ -6,8 +6,9 @@ import { assertSocialNotifications } from '@/lib/__tests__/__fixtures__/social-n
 
 import { MySqlStorage } from '../mysql.db';
 import type { Favorite, PlayRecord } from '../types';
-import { IMPORT_ADMIN_CONFIG } from './__fixtures__/import-admin-config';
 import { inviteCodeBatchContract } from './__fixtures__/invite-code-contract';
+import { resetMysqlTestData } from './__fixtures__/mysql-test-data';
+import { oauthIdentityContract } from './__fixtures__/oauth-identity-contract';
 import { userDanmakuContract } from './__fixtures__/user-danmaku-contract';
 import {
   assertActivityAndReportPagination,
@@ -47,6 +48,8 @@ describeLive('MySQL 追更查询（真实实例）', () => {
     storage = new MySqlStorage(liveUrl);
   });
 
+  beforeEach(async () => resetMysqlTestData(storage));
+
   afterAll(async () => {
     await (
       storage as unknown as { pool: { end: () => Promise<void> } }
@@ -54,22 +57,18 @@ describeLive('MySQL 追更查询（真实实例）', () => {
   });
 
   it('新粉丝与点赞通知双后端契约', async () => {
-    await storage.clearAllData();
     await assertSocialNotifications(storage, 'mysql-notification');
   });
 
   it('公开评价作者角色双后端契约', async () => {
-    await storage.clearAllData();
     await assertPublicReviewRoles(storage, 'mysql-review-role');
   });
 
   it('回复双后端契约', async () => {
-    await storage.clearAllData();
     await assertReviewReplies(storage, 'mysql-reply');
   });
 
   it('keeps concurrent search increments and play counters without multiplying reporter-days', async () => {
-    await storage.clearAllData();
     const row = {
       source: 'concurrent',
       bucketDate: '2026-01-02',
@@ -115,7 +114,6 @@ describeLive('MySQL 追更查询（真实实例）', () => {
   });
 
   it('rolls back the complete health search batch on a later row failure', async () => {
-    await storage.clearAllData();
     const row = {
       source: 'alpha',
       bucketDate: '2026-01-02',
@@ -145,7 +143,6 @@ describeLive('MySQL 追更查询（真实实例）', () => {
   });
 
   it('accumulates health search rows, normalizes counters and retains date boundaries', async () => {
-    await storage.clearAllData();
     const row = {
       source: 'alpha',
       bucketDate: '2026-01-02',
@@ -204,7 +201,6 @@ describeLive('MySQL 追更查询（真实实例）', () => {
   });
 
   it('aggregates reporter-days in SQL with success precedence and clears health state', async () => {
-    await storage.clearAllData();
     const report = {
       source: ' alpha ',
       bucketDate: '2026-01-02',
@@ -250,45 +246,14 @@ describeLive('MySQL 追更查询（真实实例）', () => {
     expect(await storage.getSourcePlayReporterSummary('2026-01-04')).toEqual(
       [],
     );
-    const seed = async () => {
-      await storage.recordSourcePlayReport(report);
-      await storage.recordSourceHealthSearchBatch([
-        {
-          source: 'alpha',
-          bucketDate: '2026-01-02',
-          okCount: 1,
-          emptyCount: 0,
-          errorCount: 0,
-          latencyMsSum: 1,
-          latencySamples: 1,
-        },
-      ]);
-    };
-    await seed();
-    await storage.clearAllData();
-    expect(await storage.getSourceHealthSearchDaily('2026-01-01')).toEqual([]);
-    expect(await storage.getSourcePlayReporterSummary('2026-01-01')).toEqual(
-      [],
-    );
-    await seed();
-    await storage.replaceAllData({
-      adminConfig: {
-        UserConfig: {},
-        SourceConfig: [],
-        LiveConfig: [],
-      } as unknown as import('@/types/admin').AdminConfig,
-      users: {},
-      userData: {},
-      sourceRouteStats: [],
-      inviteCodeUsage: {},
-    });
+    await storage.purgeSourceHealthBefore('2026-01-04');
     expect(await storage.getSourceHealthSearchDaily('2026-01-01')).toEqual([]);
     expect(await storage.getSourcePlayReporterSummary('2026-01-01')).toEqual(
       [],
     );
   });
   describe('邀请码批量事务契约（真实实例）', () => {
-    inviteCodeBatchContract(() => storage);
+    inviteCodeBatchContract(() => storage, resetMysqlTestData);
   });
 
   it('邀请码真实 SQL 分页、并发占用与过期过滤一致', async () => {
@@ -1008,7 +973,22 @@ describeLive('MySQL user danmaku contract (real instance)', () => {
     const storage = new MySqlStorage(liveUrl);
     stores.push(storage);
     return storage;
-  }, IMPORT_ADMIN_CONFIG);
+  }, resetMysqlTestData);
+  afterAll(async () => {
+    for (const storage of stores)
+      await (
+        storage as unknown as { pool: import('mysql2/promise').Pool }
+      ).pool.end();
+  });
+});
+
+describeLive('MySQL OAuth 身份契约（真实实例）', () => {
+  const stores: MySqlStorage[] = [];
+  oauthIdentityContract(() => {
+    const storage = new MySqlStorage(liveUrl);
+    stores.push(storage);
+    return storage;
+  }, resetMysqlTestData);
   afterAll(async () => {
     for (const storage of stores)
       await (

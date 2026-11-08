@@ -328,35 +328,6 @@ export default function AdminContentSkeleton({
         </div>
       );
       break;
-    case 'data-migration':
-      content = (
-        <div className='space-y-8'>
-          <AdminSettingsGroup title='导出备份'>
-            <AdminSettingRow
-              label='加密密码'
-              description='导入时需输入相同密码'
-            >
-              <Block className='h-9 w-full rounded-lg sm:w-96' />
-            </AdminSettingRow>
-            <AdminSettingRow label='备份内容' layout='stacked'>
-              <div className='flex flex-wrap gap-1.5'>
-                {Array.from({ length: 8 }, (_, index) => (
-                  <Block key={index} className='h-5 w-20' />
-                ))}
-              </div>
-              <Block className='mt-2 h-4 w-48 max-w-full' />
-            </AdminSettingRow>
-          </AdminSettingsGroup>
-          <AdminSettingsGroup title='导入备份'>
-            {['备份文件', '解密密码'].map((label) => (
-              <AdminSettingRow key={label} label={label}>
-                <Block className='h-9 w-full rounded-lg sm:w-96' />
-              </AdminSettingRow>
-            ))}
-          </AdminSettingsGroup>
-        </div>
-      );
-      break;
     case 'user':
       content = (
         <div className='space-y-6'>

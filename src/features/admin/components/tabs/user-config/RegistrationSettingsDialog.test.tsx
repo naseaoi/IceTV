@@ -38,6 +38,11 @@ function renderDialog(
       inviteList={inviteList}
       isTogglingRegister={false}
       isTogglingInvite={false}
+      linuxDoConfigured={false}
+      linuxDo={{ Enabled: false, MinTrustLevel: 1 }}
+      isSettingLinuxDo={false}
+      onToggleLinuxDo={jest.fn()}
+      onLinuxDoTrustLevelChange={jest.fn()}
       isCreatingCode={false}
       deletingCode={null}
       isPurgingCodes={false}

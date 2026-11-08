@@ -20,18 +20,18 @@
 ## 用户资料与关注
 
 - 公开评价、个人主页、关注列表与关注动态使用 `profileId`、昵称和头像标识，登录名仅用于服务端身份和后台接口。公开评价与回复的 `author.role` 仅向站长、管理员返回 `owner` / `admin`（归一化环境变量站长优先，其余取 `user_access.role`），普通用户省略该字段。
-- 每个 `users` 行必须有 `user_profiles` 行；建号同事务写入，初始化与 `replaceAllData()` 结尾补齐。站长无 `users` 行，在会话恢复时按需 `ensureUserProfile()`。用户名比较先归一化。
-- `user_profiles`、`user_follows`、`video_review_likes`、`video_review_reports`、`video_review_replies`、`video_review_reply_reports` 的删除、清空、替换、导入导出与 SQLite 大小写合并必须覆盖所有用户名列；删除评价同事务清理点赞、举报、回复和回复举报。导入昵称冲突置空、资料标识冲突重生成。
+- 每个 `users` 行必须有 `user_profiles` 行；建号同事务写入，初始化时补齐。站长无 `users` 行，在会话恢复时按需 `ensureUserProfile()`。用户名比较先归一化。
+- `user_profiles`、`user_follows`、`video_review_likes`、`video_review_reports`、`video_review_replies`、`video_review_reply_reports` 的用户删除与 SQLite 大小写合并必须覆盖所有用户名列；删除评价同事务清理点赞、举报、回复和回复举报。
 
 ## 评价回复
 
 - 回复按评价作者、归一化标题与精确年份关联，单层平铺；被回复者从同一评价内的回复 ID 推导并保存用户名，展示时解析当前公开资料。正文上限共用 `REVIEW_REPLY_MAX_LENGTH`。
 - 私密评价的回复与回复举报保留，但列表、消息和后台举报查询均经父评价的公开状态过滤；恢复公开后重新可见。回复作者始终可以删除本人回复，管理员删除使用独立后台 Guard。
-- 删除用户时清除其评价下的回复、本人发送的回复及相关举报；仅被提及时置空 `reply_to`，保留其他人的正文。备份回复以发送者为外层归属，评价作者与被提及者都参加站长重映射；稳定回复 ID 重复时拒绝导入。
+- 删除用户时清除其评价下的回复、本人发送的回复及相关举报；仅被提及时置空 `reply_to`，保留其他人的正文。
 
 ## 收藏库与观看状态
 
-- 收藏仍按 `source+id` 存储。收藏查询投影与 JSON 同次写入，导入、替换与用户名合并都经 `favoriteProjection()` 重建；启动按 `projection_version` 分批补齐，投影规则改变须升级版本并回填。
+- 收藏仍按 `source+id` 存储。收藏查询投影与 JSON 同次写入，写入与用户名合并都经 `favoriteProjection()` 重建；启动按 `projection_version` 分批补齐，投影规则改变须升级版本并回填。
 - 有效观看状态（想看 / 在看 / 看过）与看过时间只在 `src/features/favorites/lib/library-storage.ts` 的 SQL 中推导：手动 `watch_status` 优先，其次评分或末集进度 ≥ 90% 判看过，有播放记录判在看。收藏库、按作品查询、批量匹配与公开收藏共用这段 SQL，**不要在前端或其他查询里另写推导**，否则计数与列表对不上。
 - 状态修改与批量移出走 `POST /api/favorites/batch`；全选提交筛选条件加排除项，筛选语义与 `/api/favorites?format=library` 同一实现，不要先拉全量键再提交。
 - `user_profiles.favorites_public` 存公开等级 0–3（不公开 / 片单 / 加状态 / 加评分），接口字段为 `libraryVisibility`，本人始终按 3 级查看。公开评分只取 `is_public = 1` 的评价；精确年份的私密评价存在时不回落到空年份评价，避免泄露私密评分。

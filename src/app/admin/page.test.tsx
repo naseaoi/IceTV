@@ -26,11 +26,6 @@ jest.mock('@/components/AuthProvider', () => ({
   }),
 }));
 
-jest.mock('@/components/DataMigration', () => ({
-  __esModule: true,
-  default: () => <div>DataMigration</div>,
-}));
-
 jest.mock('@/components/modals/AlertModal', () => ({
   __esModule: true,
   default: () => null,
@@ -197,7 +192,6 @@ describe('AdminPage role visibility', () => {
       expect(screen.getByText('配置文件')).toBeInTheDocument();
     });
 
-    expect(screen.getByText('数据迁移')).toBeInTheDocument();
     expect(
       screen.getByRole('button', { name: '重置配置' }),
     ).toBeInTheDocument();
@@ -213,7 +207,6 @@ describe('AdminPage role visibility', () => {
     });
 
     expect(screen.queryByText('配置文件')).not.toBeInTheDocument();
-    expect(screen.queryByText('数据迁移')).not.toBeInTheDocument();
     expect(
       screen.queryByRole('button', { name: '重置配置' }),
     ).not.toBeInTheDocument();

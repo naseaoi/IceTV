@@ -3,9 +3,9 @@
 import type Database from 'better-sqlite3';
 
 import { IMPORT_ADMIN_CONFIG } from '@/lib/__tests__/__fixtures__/import-admin-config';
+import { resetMysqlTestData } from '@/lib/__tests__/__fixtures__/mysql-test-data';
 import { configSelfCheck } from '@/lib/config';
 import { stripConfigState, subscriptionFromConfig } from '@/lib/config-state';
-import { parseImportData } from '@/lib/data-import';
 import { LocalSqliteStorage } from '@/lib/sqlite.db';
 import { SqliteConfigStateStore } from '@/lib/sqlite-config-state-store';
 import type { AdminConfig } from '@/types/admin';
@@ -119,33 +119,6 @@ describe('config state storage', () => {
     expect(await storage.getConfigSubscription()).toEqual(next);
   });
 
-  it('round trips legacy backup shape, strips derived counts, and clears both tables', async () => {
-    const legacy = legacyConfig();
-    const backup = { data: { adminConfig: legacy, users: {}, userData: {} } };
-    const parsed = await parseImportData(backup);
-    await storage.replaceAllData(parsed.snapshot);
-    expect(await storage.getConfigSubscription()).toEqual(
-      subscriptionFromConfig(legacy),
-    );
-    expect(await storage.getLiveSourceChannelCounts()).toEqual({});
-    const stored = (await storage.getAdminConfig())!;
-    expect(stored.ConfigFile).toBeUndefined();
-    expect(stored.ConfigSubscribtion).toBeUndefined();
-    expect(stored.LiveConfig?.[0].channelNumber).toBeUndefined();
-    const exported = { ...stored, ...(await storage.getConfigSubscription()) };
-    const roundTrip = await parseImportData({
-      data: { adminConfig: exported, users: {}, userData: {} },
-    });
-    await storage.replaceAllData(roundTrip.snapshot);
-    expect(await storage.getConfigSubscription()).toEqual(
-      subscriptionFromConfig(legacy),
-    );
-    await storage.setLiveSourceChannelCount(source, 2);
-    await storage.clearAllData();
-    expect(await storage.getLiveSourceChannelCounts()).toEqual({});
-    expect((await storage.getConfigSubscription()).ConfigFile).toBe('');
-  });
-
   it('runtime self-check strips compatibility fields', () => {
     const config = configSelfCheck(legacyConfig());
     expect(config.ConfigFile).toBeUndefined();
@@ -169,7 +142,7 @@ mysqlSuite('MySQL config state storage (real SQL)', () => {
   it('migrates idempotently and fences concurrent subscription/config writes', async () => {
     const { MysqlConfigStateStore } =
       await import('@/lib/mysql-config-state-store');
-    await storage.clearAllData();
+    await resetMysqlTestData(storage);
     const legacy = legacyConfig();
     await storage.setAdminConfig(legacy);
     const connection = await pool.getConnection();
@@ -213,25 +186,23 @@ mysqlSuite('MySQL config state storage (real SQL)', () => {
     await storage.setLiveSourceChannelCount(source, 99);
     expect(await storage.getLiveSourceChannelCounts()).toEqual({});
   });
+});
 
-  it('restores subscription inside replace transaction and clears derived state', async () => {
-    const legacy = legacyConfig();
-    await storage.replaceAllData({
-      adminConfig: legacy,
-      users: {},
-      userData: {},
-      sourceRouteStats: [],
-      inviteCodeUsage: {},
-    });
-    expect(await storage.getConfigSubscription()).toEqual(
-      subscriptionFromConfig(legacy),
-    );
-    expect(await storage.getLiveSourceChannelCounts()).toEqual({});
-    expect(
-      (await storage.getAdminConfig())?.ConfigSubscribtion,
-    ).toBeUndefined();
-    await storage.clearAllData();
-    expect((await storage.getConfigSubscription()).ConfigFile).toBe('');
-    expect(await storage.getLiveSourceChannelCounts()).toEqual({});
+it('LinuxDo 设置自检保留合法值并恢复无效默认值', () => {
+  const config = legacyConfig();
+  config.UserConfig.LinuxDo = { Enabled: true, MinTrustLevel: 4 };
+  expect(configSelfCheck(config).UserConfig.LinuxDo).toEqual({
+    Enabled: true,
+    MinTrustLevel: 4,
   });
+  config.UserConfig.LinuxDo = {
+    Enabled: 'true',
+    MinTrustLevel: 9,
+  } as unknown as NonNullable<AdminConfig['UserConfig']['LinuxDo']>;
+  config.UserConfig.LinuxDoConfigured = true;
+  expect(configSelfCheck(config).UserConfig.LinuxDo).toEqual({
+    Enabled: false,
+    MinTrustLevel: 1,
+  });
+  expect(config.UserConfig.LinuxDoConfigured).toBeUndefined();
 });

@@ -141,12 +141,6 @@ export const ADVANCED_RUNTIME_PARAM_GROUPS: RuntimeParamGroup[] = [
         unit: '条',
         hint: '浏览器记住已加载和加载失败的封面，避免重复加载。',
       },
-      {
-        key: 'DataImportPlaybackSessionsLimit',
-        label: '导入时每人播放记录上限',
-        unit: '条',
-        hint: '超出时保留最新的记录。',
-      },
     ],
   },
 ];

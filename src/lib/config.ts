@@ -19,6 +19,7 @@ import {
   DEFAULT_DOUBAN_PROXY_TYPE,
 } from '@/lib/douban-source';
 import { getOwnerUsername } from '@/lib/env.server';
+import { isLinuxDoLoginEnabled } from '@/lib/linuxdo-config.server';
 import {
   DEFAULT_RUNTIME_PARAMS,
   normalizeRuntimeParams,
@@ -486,6 +487,18 @@ export function configSelfCheck(adminConfig: AdminConfig): AdminConfig {
   ) {
     delete adminConfig.UserConfig.DefaultUserGroup;
   }
+  const linuxDo = adminConfig.UserConfig.LinuxDo;
+  adminConfig.UserConfig.LinuxDo = {
+    Enabled: linuxDo?.Enabled === true,
+    MinTrustLevel:
+      linuxDo &&
+      Number.isInteger(linuxDo.MinTrustLevel) &&
+      linuxDo.MinTrustLevel >= 0 &&
+      linuxDo.MinTrustLevel <= 4
+        ? linuxDo.MinTrustLevel
+        : 1,
+  };
+  delete adminConfig.UserConfig.LinuxDoConfigured;
   delete adminConfig.UserConfig.InviteCodes;
   if (!adminConfig.SourceConfig || !Array.isArray(adminConfig.SourceConfig)) {
     adminConfig.SourceConfig = [];
@@ -806,13 +819,6 @@ function toApiSite(site: ApiSite): ApiSite {
   };
 }
 
-export async function setCachedConfig(config: AdminConfig) {
-  cachedConfig = configSelfCheck(cloneConfig(config));
-  cachedConfigVersion = getConfigVersion(cachedConfig);
-  cachedConfigLoadedAt = Date.now();
-  bindConfigVersion(cachedConfig, cachedConfigVersion);
-}
-
 function cloneConfig(config: AdminConfig): AdminConfig {
   const cloned = JSON.parse(JSON.stringify(config)) as AdminConfig;
   const version = configVersionByObject.get(config);
@@ -852,6 +858,7 @@ export async function getPublicConfig() {
     Announcement: config.SiteConfig.Announcement,
     FooterText: normalizeSiteFooterText(config.SiteConfig.FooterText),
     OpenRegister: !!config.UserConfig.OpenRegister,
+    LinuxDoLogin: isLinuxDoLoginEnabled(config),
     RequireInviteCode: !!config.UserConfig.RequireInviteCode,
     EnableLiveEntry: config.SiteConfig.EnableLiveEntry,
     DefaultAggregateSearch: config.SiteConfig.DefaultAggregateSearch,

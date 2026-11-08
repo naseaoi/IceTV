@@ -88,7 +88,7 @@ const MobileBottomNav = () => {
                     fillOpacity={active ? 0.16 : 0}
                   />
                   {showDot && (
-                    <span className='absolute -right-1 -top-0.5 h-2 w-2 rounded-full bg-brand-500 ring-2 ring-gray-50 dark:ring-gray-950' />
+                    <span className='absolute -right-1 -top-0.5 h-2 w-2 rounded-full bg-brand-500' />
                   )}
                 </span>
                 <span

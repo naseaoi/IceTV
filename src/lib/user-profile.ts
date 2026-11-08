@@ -68,11 +68,7 @@ export function createAvatarSeed(): string {
     .slice(0, 16);
 }
 
-export function validateLibraryVisibility(
-  value: unknown,
-  allowLegacyBoolean = false,
-): LibraryVisibility {
-  if (allowLegacyBoolean && typeof value === 'boolean') return value ? 1 : 0;
+export function validateLibraryVisibility(value: unknown): LibraryVisibility {
   if (
     typeof value !== 'number' ||
     !Number.isInteger(value) ||

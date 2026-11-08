@@ -45,21 +45,6 @@ export class MysqlUserAccessStore {
     );
   }
 
-  async all(): Promise<UserAccess[]> {
-    const [rows] = await this.db.query<RowDataPacket[]>(
-      'SELECT username FROM user_access ORDER BY username',
-    );
-    const result: UserAccess[] = [];
-    for (const row of rows) {
-      const user = await this.get(String(row.username));
-      if (user) result.push(user);
-    }
-    const owner = normalizeUsername(getOwnerUsername() || '');
-    if (owner && !result.some((row) => row.username === owner))
-      result.push((await this.get(owner))!);
-    return result;
-  }
-
   async put(user: UserAccess): Promise<void> {
     const username = normalizeUsername(user.username);
     await this.db.execute(USER_ACCESS_UPSERT.mysql, userAccessValues(user));

@@ -47,6 +47,7 @@ import {
 } from '@/features/admin/services/inviteCodes';
 import { copyTextToClipboard } from '@/lib/clipboard';
 import type { InviteCodeFilter } from '@/lib/invite-code-storage';
+import type { LinuxDoLoginSettings, LinuxDoTrustLevel } from '@/types/admin';
 
 export interface InviteCodeListState {
   items: InviteCode[];
@@ -73,6 +74,11 @@ interface RegistrationSettingsDialogProps {
   inviteList: InviteCodeListState;
   isTogglingRegister: boolean;
   isTogglingInvite: boolean;
+  linuxDoConfigured: boolean;
+  linuxDo: LinuxDoLoginSettings;
+  isSettingLinuxDo: boolean;
+  onToggleLinuxDo: () => void;
+  onLinuxDoTrustLevelChange: (level: LinuxDoTrustLevel) => void;
   isCreatingCode: boolean;
   deletingCode: string | null;
   isPurgingCodes: boolean;
@@ -86,6 +92,14 @@ interface RegistrationSettingsDialogProps {
   onPurgeInactiveCodes: () => void;
   onClose: () => void;
 }
+
+const LINUXDO_TRUST_LEVEL_OPTIONS = [
+  { value: '0', label: '0 级 · 新用户' },
+  { value: '1', label: '1 级 · 基本用户' },
+  { value: '2', label: '2 级 · 成员' },
+  { value: '3', label: '3 级 · 活跃用户' },
+  { value: '4', label: '4 级 · 领导者' },
+];
 
 const DEFAULT_VALID_DAYS = 7;
 const COPIED_FEEDBACK_MS = 1500;
@@ -129,12 +143,14 @@ function useCopyFeedback() {
 
 function ToggleRow({
   title,
+  addon,
   checked,
   disabled,
   label,
   onToggle,
 }: {
   title: string;
+  addon?: ReactNode;
   checked: boolean;
   disabled: boolean;
   label: string;
@@ -142,8 +158,9 @@ function ToggleRow({
 }) {
   return (
     <div className='flex items-center justify-between gap-4 px-4 py-3'>
-      <p className='text-sm font-medium text-gray-900 dark:text-gray-100'>
+      <p className='flex items-center gap-2 text-sm font-medium text-gray-900 dark:text-gray-100'>
         {title}
+        {addon}
       </p>
       <AdminStatusSwitch
         enabled={checked}
@@ -634,6 +651,11 @@ export function RegistrationSettingsDialog({
   inviteList,
   isTogglingRegister,
   isTogglingInvite,
+  linuxDoConfigured,
+  linuxDo,
+  isSettingLinuxDo,
+  onToggleLinuxDo,
+  onLinuxDoTrustLevelChange,
   isCreatingCode,
   deletingCode,
   isPurgingCodes,
@@ -703,6 +725,40 @@ export function RegistrationSettingsDialog({
                     label: name,
                   })),
                 ]}
+              />
+            </div>
+          )}
+          <ToggleRow
+            title='LinuxDo 登录'
+            addon={
+              !linuxDoConfigured && (
+                <span className='text-xs font-normal text-gray-500 dark:text-gray-400'>
+                  环境变量未配置
+                </span>
+              )
+            }
+            checked={linuxDo.Enabled}
+            disabled={
+              isSettingLinuxDo || (!linuxDoConfigured && !linuxDo.Enabled)
+            }
+            label='切换 LinuxDo 登录'
+            onToggle={onToggleLinuxDo}
+          />
+          {linuxDo.Enabled && (
+            <div className='flex items-center justify-between gap-4 py-2 pl-4 pr-2'>
+              <p className='text-sm font-medium text-gray-900 dark:text-gray-100'>
+                LinuxDo 最低信任等级
+              </p>
+              <Select
+                value={String(linuxDo.MinTrustLevel)}
+                onChange={(value) =>
+                  onLinuxDoTrustLevelChange(Number(value) as LinuxDoTrustLevel)
+                }
+                ariaLabel='LinuxDo 最低信任等级'
+                variant='pill'
+                align='end'
+                disabled={isSettingLinuxDo}
+                options={LINUXDO_TRUST_LEVEL_OPTIONS}
               />
             </div>
           )}

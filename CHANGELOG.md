@@ -1,3 +1,14 @@
+## [Unreleased]
+
+### Added
+
+- 支持 LinuxDo 登录、绑定与解绑，新用户沿用站点注册和邀请码规则
+
+### Admin
+
+- LinuxDo 登录新增 `LINUXDO_CLIENT_ID`、`LINUXDO_CLIENT_SECRET` 与可选 `LINUXDO_REDIRECT_URI`，后台可启用并设置最低信任等级
+- 后台数据导入导出已移除，备份改用[数据库原生方式](docs/deployment.md#升级与备份)；升级前如需旧格式备份，请先用旧版本导出
+
 ## [0.6.0] - 2026-11-08
 
 ### Added

@@ -33,7 +33,6 @@ export function executeSocial(
   if (sql.startsWith('DELETE')) {
     const before = rows.length;
     state.social[table] = rows.filter((row) => {
-      if (!sql.includes(' WHERE ')) return false;
       if (table === 'user_profiles') return row.username !== params[0];
       if (sql.includes(' OR '))
         return (
@@ -88,10 +87,10 @@ export function executeSocial(
       row = {
         username: params[0],
         profile_id: params[1],
-        nickname: params.length === 3 ? null : params[2],
-        nickname_norm: params.length === 3 ? null : params[3],
-        avatar_seed: params.length === 3 ? null : params[4],
-        favorites_public: params.length === 3 ? 0 : params[5],
+        nickname: null,
+        nickname_norm: null,
+        avatar_seed: null,
+        favorites_public: 0,
         updated_at: params[params.length - 1],
       };
       if (
@@ -103,36 +102,25 @@ export function executeSocial(
       )
         return 0;
     } else if (table === 'user_follows') {
-      row = sql.includes('SELECT')
-        ? { follower: params[0], followee: params[2], created_at: params[1] }
-        : { follower: params[0], followee: params[1], created_at: params[2] };
-      if (
-        sql.includes('SELECT') &&
-        !state.social.user_profiles.some((p) => p.username === row.followee)
-      )
+      row = { follower: params[0], followee: params[2], created_at: params[1] };
+      if (!state.social.user_profiles.some((p) => p.username === row.followee))
         return 0;
     } else {
       const report = table === 'video_review_reports';
-      const selecting = sql.includes('SELECT');
       const offset = report ? 4 : 2;
-      const target = selecting
-        ? params.slice(offset, offset + 3)
-        : params.slice(0, 3);
-      if (
-        selecting &&
-        !state.videoReviews.get(JSON.stringify(target))?.review.is_public
-      )
+      const target = params.slice(offset, offset + 3);
+      if (!state.videoReviews.get(JSON.stringify(target))?.review.is_public)
         return 0;
       row = {
         author: target[0],
         title_norm: target[1],
         year: target[2],
-        [report ? 'reporter' : 'liker']: selecting ? params[0] : params[3],
-        created_at: selecting ? params[offset - 1] : params[report ? 6 : 4],
+        [report ? 'reporter' : 'liker']: params[0],
+        created_at: params[offset - 1],
       };
       if (report) {
-        row.reason = params[selecting ? 1 : 4];
-        row.detail = params[selecting ? 2 : 5];
+        row.reason = params[1];
+        row.detail = params[2];
       }
     }
     const keys =

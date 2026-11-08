@@ -56,6 +56,21 @@ describe('SQLite 遗留用户名大小写归一化', () => {
     db.close();
   }
 
+  it('身份表归一化并在合并冲突时保留规范用户名绑定', async () => {
+    seed((db) => {
+      const insert = db.prepare(
+        'INSERT INTO oauth_identities VALUES (?, ?, ?, ?, ?, ?)',
+      );
+      insert.run('linuxdo', '100', 'ALICE', 'Alice', 0, 1);
+      insert.run('linuxdo', '101', 'alice', 'Another', 0, 2);
+      insert.run('linuxdo', '102', 'BOBBY', 'Bobby', 0, 1);
+    });
+    const storage = openStorage();
+    expect(await storage.getOAuthIdentity('100')).toBeNull();
+    expect((await storage.getOAuthIdentity('101'))?.username).toBe('alice');
+    expect((await storage.getOAuthIdentity('102'))?.username).toBe('bobby');
+  });
+
   it('merges legacy reviews by composite identity and newest update', async () => {
     seed((db) => {
       const insert = db.prepare(
@@ -151,8 +166,10 @@ describe('SQLite 遗留用户名大小写归一化', () => {
     });
 
     const migrated = openStorage();
-    const passwords = await migrated.getAllUsersWithPasswords();
-    expect(passwords).toEqual({ tat: 'canonical-password' });
+    const database = (migrated as unknown as { db: Database.Database }).db;
+    expect(
+      database.prepare('SELECT username, password FROM users').all(),
+    ).toEqual([{ username: 'tat', password: 'canonical-password' }]);
 
     const records = await migrated.getAllPlayRecords('tat');
     expect(Object.keys(records).sort()).toEqual(['bfzy+1', 'bfzy+2']);

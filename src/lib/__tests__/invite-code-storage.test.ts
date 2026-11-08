@@ -4,7 +4,6 @@ import Database from 'better-sqlite3';
 
 import { LocalSqliteStorage } from '@/lib/sqlite.db';
 import { SqliteInviteCodeStore } from '@/lib/sqlite-invite-code-store';
-import type { AdminConfig } from '@/types/admin';
 
 const makeCode = (code: string, extra = {}) => ({
   code,
@@ -110,26 +109,5 @@ describe('邀请码数据库分页及迁移', () => {
     store.delete('LEGACY');
     store.migrate();
     expect(store.all().map((item) => item.code)).toEqual(['CONFIG']);
-  });
-
-  it('备份替换导入包含邀请码定义与用量，持久化配置不带邀请码', async () => {
-    const storage = new LocalSqliteStorage(':memory:');
-    await storage.replaceAllData({
-      adminConfig: {
-        UserConfig: { InviteCodes: [makeCode('BACKUP', { usedCount: 2 })] },
-      } as AdminConfig,
-      users: {},
-      userData: {},
-      sourceRouteStats: [],
-      inviteCodeUsage: { BACKUP: 3 },
-    });
-    expect(await storage.getAllInviteCodes()).toEqual([
-      expect.objectContaining({ code: 'BACKUP', usedCount: 3 }),
-    ]);
-    expect(
-      (await storage.getAdminConfig())?.UserConfig.InviteCodes,
-    ).toBeUndefined();
-    await storage.clearAllData();
-    expect(await storage.getAllInviteCodes()).toEqual([]);
   });
 });

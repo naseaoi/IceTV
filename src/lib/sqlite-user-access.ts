@@ -41,19 +41,6 @@ export class SqliteUserAccessStore {
     );
   }
 
-  all(): UserAccess[] {
-    const rows = this.db
-      .prepare('SELECT username FROM user_access ORDER BY username')
-      .all() as { username: string }[];
-    const result = rows
-      .map((row) => this.get(row.username))
-      .filter((user): user is UserAccess => user !== null);
-    const owner = normalizeUsername(getOwnerUsername() || '');
-    if (owner && !result.some((row) => row.username === owner))
-      result.push(this.get(owner)!);
-    return result;
-  }
-
   put(user: UserAccess): void {
     const username = normalizeUsername(user.username);
     this.db.prepare(USER_ACCESS_UPSERT.sqlite).run(...userAccessValues(user));

@@ -35,23 +35,20 @@ import {
   type ConfigStateUpdate,
   type ConfigSubscription,
   sameSubscription,
-  stripConfigState,
-  subscriptionFromConfig,
 } from '@/lib/config-state';
 import {
   type InviteCodePurge,
   type InviteCodeQuery,
-  importedInviteCodes,
-  INVITE_INSERT_SQL,
-  inviteValues,
 } from '@/lib/invite-code-storage';
 import {
-  REPLY_INSERT,
-  REPLY_REPORT_INSERT,
-  replyValues,
-} from '@/lib/review-reply-storage';
+  type OAuthBindResult,
+  type OAuthIdentity,
+  OAUTH_INSERT,
+  OAUTH_SCHEMA,
+  oauthIdentityParams,
+  readOAuthIdentity,
+} from '@/lib/oauth-identity';
 import {
-  importedProfileValues,
   newProfileId,
   NicknameTakenError,
   ReviewSocialStorage,
@@ -91,7 +88,6 @@ import {
   buildPlaybackSearchLikePattern,
   normalizePlaybackSearchKeyword,
 } from './playback-query';
-import { normalizeRuntimeParam } from './runtime-params';
 import { buildTrackingSql, SQLITE_TRACKING_DIALECT } from './tracking-sql';
 import {
   AdminVideoReviewPage,
@@ -114,7 +110,6 @@ import {
   SourceRouteStatInput,
   SourceRouteStatsBucket,
   SourceRouteStatsItem,
-  StorageImportData,
   UserMessageState,
   UserMessageStateUpdate,
   VideoReview,
@@ -469,7 +464,6 @@ export class LocalSqliteStorage implements IStorage {
     checkUserExist: Database.Statement;
     deleteUserRow: Database.Statement;
     getAllUsers: Database.Statement;
-    getAllUsersWithPasswords: Database.Statement;
     // search_history
     getSearchHistory: Database.Statement;
     deleteSearchHistoryAll: Database.Statement;
@@ -759,6 +753,7 @@ export class LocalSqliteStorage implements IStorage {
       CREATE INDEX IF NOT EXISTS idx_video_reviews_work ON video_reviews (title_norm, is_public, updated_at);
       CREATE INDEX IF NOT EXISTS idx_video_reviews_public ON video_reviews (is_public, updated_at);
 
+      ${OAUTH_SCHEMA};
       CREATE TABLE IF NOT EXISTS search_history (
         username TEXT NOT NULL,
         keyword TEXT NOT NULL,
@@ -1117,9 +1112,6 @@ export class LocalSqliteStorage implements IStorage {
       getAllUsers: this.db.prepare(
         'SELECT username FROM users ORDER BY username ASC',
       ),
-      getAllUsersWithPasswords: this.db.prepare(
-        'SELECT username, password FROM users ORDER BY username ASC',
-      ),
       // search_history
       getSearchHistory: this.db.prepare(
         'SELECT keyword FROM search_history WHERE username = ? ORDER BY sort_index ASC',
@@ -1417,6 +1409,14 @@ export class LocalSqliteStorage implements IStorage {
         this.mergeUserRow(legacy, canonical);
         this.mergeSocialUsername(legacy, canonical);
         this.db
+          .prepare(
+            'UPDATE OR IGNORE oauth_identities SET username = ? WHERE username = ?',
+          )
+          .run(canonical, legacy);
+        this.db
+          .prepare('DELETE FROM oauth_identities WHERE username = ?')
+          .run(legacy);
+        this.db
           .prepare('UPDATE user_danmaku SET username = ? WHERE username = ?')
           .run(canonical, legacy);
         this.db
@@ -1528,72 +1528,13 @@ export class LocalSqliteStorage implements IStorage {
     );
   }
 
-  private importSocialData(snapshot: StorageImportData): void {
-    const ids = new Set<string>();
-    const names = new Set<string>();
-    for (const [username, data] of Object.entries(snapshot.userData)) {
-      this.db
-        .prepare(
-          'INSERT INTO user_profiles (username, profile_id, nickname, nickname_norm, avatar_seed, favorites_public, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)',
-        )
-        .run(...importedProfileValues(username, data.profile, ids, names));
-      for (const row of data.replies ?? [])
-        this.db.prepare(REPLY_INSERT).run(...replyValues(username, row));
-      for (const row of data.replyReports ?? [])
-        this.db
-          .prepare(REPLY_REPORT_INSERT)
-          .run(
-            row.reply_id,
-            normalizeUsername(username),
-            row.reason,
-            row.detail,
-            row.created_at,
-          );
-      for (const row of data.follows ?? [])
-        this.db
-          .prepare(
-            'INSERT OR IGNORE INTO user_follows (follower, followee, created_at) VALUES (?, ?, ?)',
-          )
-          .run(
-            normalizeUsername(username),
-            normalizeUsername(row.followee),
-            row.created_at,
-          );
-      for (const row of data.likes ?? [])
-        this.db
-          .prepare(
-            'INSERT OR IGNORE INTO video_review_likes (author, title_norm, year, liker, created_at) VALUES (?, ?, ?, ?, ?)',
-          )
-          .run(
-            normalizeUsername(row.author),
-            row.title_norm,
-            row.year,
-            normalizeUsername(username),
-            row.created_at,
-          );
-      for (const row of data.reports ?? [])
-        this.db
-          .prepare(
-            'INSERT OR REPLACE INTO video_review_reports (author, title_norm, year, reporter, reason, detail, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)',
-          )
-          .run(
-            normalizeUsername(row.author),
-            row.title_norm,
-            row.year,
-            normalizeUsername(username),
-            row.reason,
-            row.detail,
-            row.created_at,
-          );
-    }
-  }
-
   private collectDistinctUsernames(): string[] {
     const tables = [
       'users',
       'play_records',
       'favorites',
       'video_reviews',
+      'oauth_identities',
       'user_danmaku',
       'user_profiles',
       'user_access',
@@ -2531,11 +2472,78 @@ export class LocalSqliteStorage implements IStorage {
     return reviewPage(await this.social.enrichReviews(rows));
   }
 
+  async getOAuthIdentity(id: string) {
+    return readOAuthIdentity(
+      this.db
+        .prepare(
+          "SELECT * FROM oauth_identities WHERE provider = 'linuxdo' AND provider_user_id = ?",
+        )
+        .get(id) as Record<string, unknown> | undefined,
+    );
+  }
+  async getUserOAuthIdentity(username: string) {
+    return readOAuthIdentity(
+      this.db
+        .prepare(
+          "SELECT * FROM oauth_identities WHERE provider = 'linuxdo' AND username = ?",
+        )
+        .get(normalizeUsername(username)) as
+        | Record<string, unknown>
+        | undefined,
+    );
+  }
+  async bindOAuthIdentity(identity: OAuthIdentity): Promise<OAuthBindResult> {
+    const username = normalizeUsername(identity.username);
+    return this.db.transaction(() => {
+      if (!this.stmts.checkUserExist.get(username)) return 'user_missing';
+      const existing = readOAuthIdentity(
+        this.db
+          .prepare(
+            "SELECT * FROM oauth_identities WHERE provider = 'linuxdo' AND provider_user_id = ?",
+          )
+          .get(identity.providerUserId) as Record<string, unknown> | undefined,
+      );
+      if (existing)
+        return existing.username === username ? 'bound' : 'identity_taken';
+      if (
+        this.db
+          .prepare(
+            "SELECT 1 FROM oauth_identities WHERE provider = 'linuxdo' AND username = ?",
+          )
+          .get(username)
+      )
+        return 'user_bound';
+      this.db
+        .prepare(OAUTH_INSERT)
+        .run(
+          ...oauthIdentityParams({ ...identity, username, autoCreated: false }),
+        );
+      return 'bound';
+    })();
+  }
+  async unbindOAuthIdentity(username: string): Promise<boolean> {
+    return (
+      this.db
+        .prepare(
+          "DELETE FROM oauth_identities WHERE provider = 'linuxdo' AND username = ? AND auto_created = 0",
+        )
+        .run(normalizeUsername(username)).changes > 0
+    );
+  }
+  async updateOAuthProviderUsername(id: string, name: string): Promise<void> {
+    this.db
+      .prepare(
+        "UPDATE oauth_identities SET provider_username = ? WHERE provider = 'linuxdo' AND provider_user_id = ?",
+      )
+      .run(name, id);
+  }
+
   async registerUser(
     userName: string,
     password: string,
     nickname?: string,
     userGroups?: string[],
+    identity?: import('@/lib/oauth-identity').OAuthIdentity,
   ): Promise<void> {
     const username = assertValidUsernameFormat(userName);
     if (this.stmts.checkUserExist.get(username)) {
@@ -2549,6 +2557,7 @@ export class LocalSqliteStorage implements IStorage {
         Date.now(),
         nickname,
         userGroups,
+        identity,
       );
     } catch (error) {
       if (isSqliteUniqueConstraintError(error)) {
@@ -2565,9 +2574,18 @@ export class LocalSqliteStorage implements IStorage {
     now: number,
     nickname?: string,
     userGroups?: string[],
+    identity?: OAuthIdentity,
   ): void {
     this.db.transaction(() => {
       this.stmts.registerUser.run(username, hashedPassword);
+      if (identity)
+        this.db.prepare(OAUTH_INSERT).run(
+          ...oauthIdentityParams({
+            ...identity,
+            username,
+            autoCreated: true,
+          }),
+        );
       this.stmts.recordUserLogin.run(username, now);
       this.insertUserProfile(username, nickname);
       new SqliteUserAccessStore(this.db).put({
@@ -2614,10 +2632,6 @@ export class LocalSqliteStorage implements IStorage {
 
   async getUserAccess(username: string) {
     return new SqliteUserAccessStore(this.db).get(username);
-  }
-
-  async getAllUserAccess() {
-    return new SqliteUserAccessStore(this.db).all();
   }
 
   async updateUserAccess(...args: Parameters<IStorage['updateUserAccess']>) {
@@ -2703,6 +2717,9 @@ export class LocalSqliteStorage implements IStorage {
         .prepare(
           'UPDATE video_review_replies SET reply_to = NULL WHERE reply_to = ?',
         )
+        .run(targetUser);
+      this.db
+        .prepare('DELETE FROM oauth_identities WHERE username = ?')
         .run(targetUser);
       this.stmts.deleteUserRow.run(targetUser);
       this.stmts.deletePlayRecordsByUser.run(targetUser);
@@ -2915,20 +2932,6 @@ export class LocalSqliteStorage implements IStorage {
   async getAllUsers(): Promise<string[]> {
     const rows = this.stmts.getAllUsers.all() as { username: string }[];
     return [...new Set(rows.map((row) => normalizeUsername(row.username)))];
-  }
-
-  async getAllUsersWithPasswords(): Promise<{ [username: string]: string }> {
-    const rows = this.stmts.getAllUsersWithPasswords.all() as {
-      username: string;
-      password: string;
-    }[];
-    const result: { [username: string]: string } = {};
-    for (const row of rows) {
-      if (row.username && row.password) {
-        result[normalizeUsername(row.username)] = row.password;
-      }
-    }
-    return result;
   }
 
   async getUserMessageState(userName: string): Promise<UserMessageState> {
@@ -3510,207 +3513,5 @@ export class LocalSqliteStorage implements IStorage {
         successCount: Number(row.success_count || 0),
         failureCount: Number(row.failure_count || 0),
       }));
-  }
-
-  async clearAllData(): Promise<void> {
-    const clear = this.db.transaction(() => {
-      this.db.exec(`
-        DELETE FROM user_group_members;
-        DELETE FROM user_access;
-        DELETE FROM users;
-        DELETE FROM play_records;
-        DELETE FROM favorites;
-        DELETE FROM video_reviews;
-        DELETE FROM user_danmaku;
-        DELETE FROM user_profiles;
-        DELETE FROM user_follows;
-        DELETE FROM video_review_likes;
-        DELETE FROM video_review_reports;
-        DELETE FROM video_review_replies;
-        DELETE FROM video_review_reply_reports;
-        DELETE FROM search_history;
-        DELETE FROM skip_configs;
-        DELETE FROM playback_sessions;
-        DELETE FROM admin_config;
-        DELETE FROM source_route_stats;
-        DELETE FROM source_health_search;
-        DELETE FROM source_health_play;
-        DELETE FROM user_message_state;
-        DELETE FROM user_login_activity;
-        DELETE FROM invite_code_usage;
-        DELETE FROM invite_codes;
-        DELETE FROM config_subscription;
-        DELETE FROM live_source_state;
-        DELETE FROM user_danmaku_episodes;
-        DELETE FROM user_danmaku_settings;
-        DELETE FROM shared_cache;
-      `);
-    });
-
-    clear();
-    console.log(`SQLite 数据库已清空: ${this.dbPath}`);
-  }
-
-  async replaceAllData(data: StorageImportData): Promise<void> {
-    const searchHistoryLimit = normalizeRuntimeParam(
-      'SearchHistoryLimit',
-      data.adminConfig?.SiteConfig?.SearchHistoryLimit,
-    );
-    const replace = this.db.transaction((snapshot: StorageImportData) => {
-      this.db.exec(`
-        DELETE FROM user_group_members;
-        DELETE FROM user_access;
-        DELETE FROM users;
-        DELETE FROM play_records;
-        DELETE FROM favorites;
-        DELETE FROM video_reviews;
-        DELETE FROM user_danmaku;
-        DELETE FROM user_profiles;
-        DELETE FROM user_follows;
-        DELETE FROM video_review_likes;
-        DELETE FROM video_review_reports;
-        DELETE FROM video_review_replies;
-        DELETE FROM video_review_reply_reports;
-        DELETE FROM search_history;
-        DELETE FROM skip_configs;
-        DELETE FROM playback_sessions;
-        DELETE FROM admin_config;
-        DELETE FROM source_route_stats;
-        DELETE FROM source_health_search;
-        DELETE FROM source_health_play;
-        DELETE FROM user_message_state;
-        DELETE FROM user_login_activity;
-        DELETE FROM invite_code_usage;
-        DELETE FROM invite_codes;
-        DELETE FROM config_subscription;
-        DELETE FROM live_source_state;
-        DELETE FROM user_danmaku_episodes;
-        DELETE FROM user_danmaku_settings;
-        DELETE FROM shared_cache;
-      `);
-
-      const inviteCodes = importedInviteCodes(
-        snapshot.adminConfig.UserConfig?.InviteCodes,
-        snapshot.inviteCodeUsage,
-      );
-      const storedConfig = JSON.parse(
-        JSON.stringify(snapshot.adminConfig),
-      ) as AdminConfig;
-      if (storedConfig.UserConfig) delete storedConfig.UserConfig.InviteCodes;
-      new SqliteConfigStateStore(this.db).saveSubscription(
-        subscriptionFromConfig(storedConfig),
-      );
-      stripConfigState(storedConfig);
-      this.stmts.setAdminConfig.run(JSON.stringify(storedConfig));
-      const insertInvite = this.db.prepare(INVITE_INSERT_SQL);
-      for (const item of inviteCodes) insertInvite.run(...inviteValues(item));
-
-      const insertRouteStat = this.db.prepare(
-        `INSERT INTO source_route_stats (
-          source, route_mode, bucket_date, success_count, failure_count, updated_at
-        ) VALUES (?, ?, ?, ?, ?, ?)`,
-      );
-      const routeStatUpdatedAt = Date.now();
-      for (const stat of snapshot.sourceRouteStats) {
-        insertRouteStat.run(
-          stat.source,
-          stat.routeMode,
-          stat.bucketDate,
-          stat.successCount,
-          stat.failureCount,
-          routeStatUpdatedAt,
-        );
-      }
-
-      for (const [userName, passwordHash] of Object.entries(snapshot.users)) {
-        const username = assertValidUsernameFormat(userName);
-        this.stmts.registerUser.run(username, passwordHash);
-      }
-
-      for (const [userName, userData] of Object.entries(snapshot.userData)) {
-        const username = assertValidUsernameFormat(userName);
-        if (userData.messageState) {
-          this.stmts.setUserMessageState.run(
-            username,
-            JSON.stringify(userData.messageState),
-          );
-        }
-        if (typeof userData.danmakuEnabled === 'boolean') {
-          this.stmts.setDanmakuEnabledPreference.run(
-            username,
-            userData.danmakuEnabled ? 1 : 0,
-          );
-        }
-        if (typeof userData.lastLoginAt === 'number') {
-          this.stmts.recordUserLogin.run(username, userData.lastLoginAt);
-        }
-        for (const [key, record] of Object.entries(userData.playRecords)) {
-          this.stmts.setPlayRecord.run(username, key, JSON.stringify(record));
-        }
-
-        for (const [key, favorite] of Object.entries(userData.favorites)) {
-          this.stmts.setFavorite.run(
-            username,
-            key,
-            JSON.stringify(favorite),
-            ...favoriteProjection(key, JSON.stringify(favorite)),
-          );
-        }
-
-        for (const item of userData.userDanmaku ?? []) {
-          this.db
-            .prepare(USER_DANMAKU_INSERT)
-            .run(...userDanmakuValues({ ...item, username }));
-        }
-        for (const review of userData.videoReviews ?? []) {
-          this.stmts.setVideoReview.run(
-            username,
-            review.title_norm,
-            review.year,
-            JSON.stringify(review),
-            review.is_public ? 1 : 0,
-            review.updated_at,
-          );
-        }
-
-        userData.searchHistory
-          .slice(0, searchHistoryLimit)
-          .forEach((keyword, index) => {
-            this.stmts.insertSearchHistory.run(username, keyword, index);
-          });
-
-        for (const [key, config] of Object.entries(userData.skipConfigs)) {
-          this.stmts.setSkipConfig.run(username, key, JSON.stringify(config));
-        }
-
-        for (const session of Object.values(userData.playbackSessions)) {
-          this.stmts.setPlaybackSession.run(
-            session.id,
-            username,
-            session.source,
-            session.video_id,
-            session.episode_index,
-            session.title,
-            session.source_name,
-            session.cover,
-            session.year,
-            session.started_at,
-            session.ended_at,
-            session.watch_seconds,
-            session.last_position,
-            session.total_time,
-            session.created_at,
-            session.updated_at,
-          );
-        }
-      }
-
-      this.importSocialData(snapshot);
-      new SqliteUserAccessStore(this.db).migrate();
-      this.backfillMissingLoginActivity();
-      this.backfillUserProfiles();
-    });
-
-    replace(data);
   }
 }

@@ -13,7 +13,6 @@ export type RuntimeParamSettings = Pick<
   | 'SourceFailureCooldownSeconds'
   | 'ContinueWatchingLimit'
   | 'CoverImageCacheSize'
-  | 'DataImportPlaybackSessionsLimit'
   | 'LivePrecheckTimeoutSeconds'
   | 'ProxyRequestTimeoutSeconds'
   | 'ImageProxyTimeoutSeconds'
@@ -37,7 +36,6 @@ export const DEFAULT_RUNTIME_PARAMS: RuntimeParamSettings = {
   SourceFailureCooldownSeconds: 300,
   ContinueWatchingLimit: 10,
   CoverImageCacheSize: 500,
-  DataImportPlaybackSessionsLimit: 500,
   LivePrecheckTimeoutSeconds: 15,
   ProxyRequestTimeoutSeconds: 30,
   ImageProxyTimeoutSeconds: 15,
@@ -61,7 +59,6 @@ export const RUNTIME_PARAM_RANGES: Record<
   SourceFailureCooldownSeconds: { min: 0, max: 3600 },
   ContinueWatchingLimit: { min: 1, max: 100 },
   CoverImageCacheSize: { min: 50, max: 5000 },
-  DataImportPlaybackSessionsLimit: { min: 1, max: 20000 },
   LivePrecheckTimeoutSeconds: { min: 1, max: 60 },
   ProxyRequestTimeoutSeconds: { min: 1, max: 120 },
   ImageProxyTimeoutSeconds: { min: 1, max: 120 },

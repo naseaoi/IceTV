@@ -1,10 +1,10 @@
 /** @jest-environment node */
 import { assertPlaybackPeriodRange } from '@/lib/__tests__/__fixtures__/playback-period-contract';
 import { hasPlayRecordUpdate } from '@/lib/play-records';
-import { DEFAULT_RUNTIME_PARAMS } from '@/lib/runtime-params';
 import type { StoredUserDanmaku } from '@/lib/user-danmaku-storage';
 import type { AdminConfig } from '@/types/admin';
 
+import { oauthIdentityContract } from './__fixtures__/oauth-identity-contract';
 import { executeSocial, querySocial } from './__fixtures__/social-fake-sql';
 import { userDanmakuContract } from './__fixtures__/user-danmaku-contract';
 import { videoReviewContract } from './__fixtures__/video-review-contract';
@@ -311,7 +311,6 @@ function createFakePool() {
   let state = createState();
   let transactionQueue = Promise.resolve();
   let queryCount = 0;
-  const insertStatementCounts = new Map<string, number>();
 
   const runExecute = async (
     sql: string,
@@ -402,20 +401,17 @@ function createFakePool() {
       currentState.userGroups.push({ username, group_name, position });
       return [{ affectedRows: 1 }, []];
     }
-    if (normalized.startsWith('DELETE FROM user_access')) {
-      if (params.length) currentState.userAccess.delete(String(params[0]));
-      else currentState.userAccess.clear();
+    if (normalized === 'DELETE FROM user_access WHERE username = ?') {
+      currentState.userAccess.delete(String(params[0]));
       return [{ affectedRows: 1 }, []];
     }
     if (normalized.startsWith('DELETE FROM user_group_members')) {
-      currentState.userGroups = params.length
-        ? currentState.userGroups.filter(
-            (row) =>
-              row[
-                normalized.includes('group_name =') ? 'group_name' : 'username'
-              ] !== params[0],
-          )
-        : [];
+      currentState.userGroups = currentState.userGroups.filter(
+        (row) =>
+          row[
+            normalized.includes('group_name =') ? 'group_name' : 'username'
+          ] !== params[0],
+      );
       return [{ affectedRows: 1 }, []];
     }
     if (
@@ -426,6 +422,54 @@ function createFakePool() {
       const matches = currentState.adminConfig === params[1];
       if (matches) currentState.adminConfig = String(params[0]);
       return [{ affectedRows: matches ? 1 : 0 }, []];
+    }
+    if (normalized.startsWith('INSERT INTO oauth_identities')) {
+      const rows = (currentState.social.oauth_identities ||= []);
+      const [
+        provider,
+        provider_user_id,
+        username,
+        provider_username,
+        auto_created,
+        created_at,
+      ] = params;
+      if (
+        rows.some(
+          (row) =>
+            row.provider === provider &&
+            (row.provider_user_id === provider_user_id ||
+              row.username === username),
+        )
+      )
+        throw Object.assign(new Error('duplicate'), { code: 'ER_DUP_ENTRY' });
+      rows.push({
+        provider,
+        provider_user_id,
+        username,
+        provider_username,
+        auto_created,
+        created_at,
+      });
+      return [{ affectedRows: 1 }, []];
+    }
+    if (normalized.startsWith('DELETE FROM oauth_identities')) {
+      const rows = currentState.social.oauth_identities || [];
+      const remaining = rows.filter(
+        (row) =>
+          row.username !== params[0] ||
+          (normalized.includes('auto_created = 0') && row.auto_created !== 0),
+      );
+      currentState.social.oauth_identities = remaining;
+      return [{ affectedRows: rows.length - remaining.length }, []];
+    }
+    if (
+      normalized.startsWith('UPDATE oauth_identities SET provider_username')
+    ) {
+      const row = currentState.social.oauth_identities?.find(
+        (row) => row.provider_user_id === params[1],
+      );
+      if (row) row.provider_username = params[0];
+      return [{ affectedRows: row ? 1 : 0 }, []];
     }
     const socialResult = executeSocial(normalized, params, currentState);
     if (socialResult !== undefined) return [{ affectedRows: socialResult }, []];
@@ -455,12 +499,11 @@ function createFakePool() {
       let affectedRows = 0;
       for (const [key, row] of currentState.videoReviews) {
         if (
-          !params.length ||
-          (row.username === params[0] &&
-            (params.length === 1 ||
-              (row.review.title_norm === params[1] &&
-                row.review.year === params[2] &&
-                (!params[3] || row.review.is_public))))
+          row.username === params[0] &&
+          (params.length === 1 ||
+            (row.review.title_norm === params[1] &&
+              row.review.year === params[2] &&
+              (!params[3] || row.review.is_public)))
         ) {
           currentState.videoReviews.delete(key);
           affectedRows++;
@@ -496,19 +539,9 @@ function createFakePool() {
       return [[], []];
     }
 
-    if (normalized === 'DELETE FROM users') {
-      currentState.users.clear();
-      return [[], []];
-    }
-
     if (normalized === 'DELETE FROM user_message_state WHERE username = ?') {
       const [username] = params as [string];
       currentState.messageStates.delete(username);
-      return [[], []];
-    }
-
-    if (normalized === 'DELETE FROM user_message_state') {
-      currentState.messageStates.clear();
       return [[], []];
     }
 
@@ -518,16 +551,9 @@ function createFakePool() {
       return [[], []];
     }
 
-    if (normalized === 'DELETE FROM user_danmaku_settings') {
-      currentState.danmakuEnabled.clear();
-      return [[], []];
-    }
-
     if (
       normalized ===
-        'INSERT INTO user_danmaku_settings (username, enabled) VALUES (?, ?) ON DUPLICATE KEY UPDATE enabled = VALUES(enabled)' ||
-      normalized ===
-        'INSERT INTO user_danmaku_settings (username, enabled) VALUES (?, ?)'
+      'INSERT INTO user_danmaku_settings (username, enabled) VALUES (?, ?) ON DUPLICATE KEY UPDATE enabled = VALUES(enabled)'
     ) {
       const [username, enabled] = params as [string, number | boolean];
       currentState.danmakuEnabled.set(username, Number(enabled) !== 0);
@@ -565,11 +591,6 @@ function createFakePool() {
       return [[], []];
     }
 
-    if (normalized === 'DELETE FROM user_danmaku_episodes') {
-      currentState.danmakuEpisodes.clear();
-      return [[], []];
-    }
-
     if (
       normalized ===
       'INSERT INTO user_message_state (username, state_json) VALUES (?, ?) ON DUPLICATE KEY UPDATE username = VALUES(username)'
@@ -588,9 +609,7 @@ function createFakePool() {
 
     if (
       normalized ===
-        'INSERT INTO user_message_state (username, state_json) VALUES (?, ?) ON DUPLICATE KEY UPDATE state_json = VALUES(state_json)' ||
-      normalized ===
-        'INSERT INTO user_message_state (username, state_json) VALUES (?, ?)'
+      'INSERT INTO user_message_state (username, state_json) VALUES (?, ?) ON DUPLICATE KEY UPDATE state_json = VALUES(state_json)'
     ) {
       const [username, stateJson] = params as [string, string];
       currentState.messageStates.set(username, stateJson);
@@ -621,13 +640,8 @@ function createFakePool() {
         });
       return [{ affectedRows: 1 }, []];
     }
-    if (normalized === 'DELETE FROM config_subscription') {
-      currentState.subscription = null;
-      return [{ affectedRows: 1 }, []];
-    }
-    if (normalized.startsWith('DELETE FROM live_source_state')) {
-      if (params.length) currentState.liveCounts.delete(String(params[0]));
-      else currentState.liveCounts.clear();
+    if (normalized === 'DELETE FROM live_source_state WHERE source_key = ?') {
+      currentState.liveCounts.delete(String(params[0]));
       return [{ affectedRows: 1 }, []];
     }
     if (/^INSERT(?: IGNORE)? INTO invite_codes /.test(normalized)) {
@@ -681,11 +695,6 @@ function createFakePool() {
         [],
       ];
     }
-    if (normalized === 'DELETE FROM invite_codes') {
-      currentState.inviteCodes.clear();
-      return [{ affectedRows: 1 }, []];
-    }
-
     if (
       normalized ===
       'INSERT IGNORE INTO invite_code_usage (code, used_count) VALUES (?, ?)'
@@ -738,15 +747,6 @@ function createFakePool() {
       return [[], []];
     }
 
-    if (
-      normalized ===
-      'INSERT INTO invite_code_usage (code, used_count) VALUES (?, ?)'
-    ) {
-      const [code, usedCount] = params as [string, number];
-      currentState.inviteCodeUsage.set(code, Number(usedCount));
-      return [[], []];
-    }
-
     if (normalized === 'DELETE FROM invite_code_usage') {
       currentState.inviteCodeUsage.clear();
       return [[], []];
@@ -755,11 +755,6 @@ function createFakePool() {
     if (normalized === 'DELETE FROM user_login_activity WHERE username = ?') {
       const [username] = params as [string];
       currentState.loginActivities.delete(username);
-      return [[], []];
-    }
-
-    if (normalized === 'DELETE FROM user_login_activity') {
-      currentState.loginActivities.clear();
       return [[], []];
     }
 
@@ -798,15 +793,6 @@ function createFakePool() {
 
     if (
       normalized ===
-      'INSERT INTO play_records (username, record_key, record_json) VALUES (?, ?, ?)'
-    ) {
-      const [username, key, value] = params as [string, string, string];
-      upsertJsonRecord(currentState.playRecords, username, key, value);
-      return [[], []];
-    }
-
-    if (
-      normalized ===
       'UPDATE play_records SET record_json = ? WHERE username = ? AND record_key = ? AND BINARY record_json = BINARY ?'
     ) {
       const [value, username, key, snapshot] = params as [
@@ -833,15 +819,6 @@ function createFakePool() {
       return [[], []];
     }
 
-    if (
-      normalized ===
-      'INSERT INTO favorites (username, favorite_key, favorite_json) VALUES (?, ?, ?)'
-    ) {
-      const [username, key, value] = params as [string, string, string];
-      upsertJsonRecord(currentState.favorites, username, key, value);
-      return [[], []];
-    }
-
     if (normalized.startsWith('UPDATE favorites SET favorite_json = ?,')) {
       const value = params[0] as string;
       const [username, key, snapshot] = params.slice(-3) as [
@@ -860,15 +837,6 @@ function createFakePool() {
     if (
       normalized ===
       'INSERT INTO skip_configs (username, config_key, config_json) VALUES (?, ?, ?) ON DUPLICATE KEY UPDATE config_json = VALUES(config_json)'
-    ) {
-      const [username, key, value] = params as [string, string, string];
-      upsertJsonRecord(currentState.skipConfigs, username, key, value);
-      return [[], []];
-    }
-
-    if (
-      normalized ===
-      'INSERT INTO skip_configs (username, config_key, config_json) VALUES (?, ?, ?)'
     ) {
       const [username, key, value] = params as [string, string, string];
       upsertJsonRecord(currentState.skipConfigs, username, key, value);
@@ -926,89 +894,9 @@ function createFakePool() {
       return [{ affectedRows }, []];
     }
 
-    if (normalized === 'DELETE FROM play_records') {
-      currentState.playRecords.clear();
-      return [[], []];
-    }
-
-    if (normalized === 'DELETE FROM favorites') {
-      currentState.favorites.clear();
-      return [[], []];
-    }
-
-    if (normalized === 'DELETE FROM skip_configs') {
-      currentState.skipConfigs.clear();
-      return [[], []];
-    }
-
-    if (normalized === 'DELETE FROM playback_sessions') {
-      currentState.playbackSessions.clear();
-      return [[], []];
-    }
-
     if (
       normalized ===
       'INSERT INTO playback_sessions (id, username, source, video_id, episode_index, title, source_name, cover, year, started_at, ended_at, watch_seconds, last_position, total_time, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON DUPLICATE KEY UPDATE username = VALUES(username), source = VALUES(source), video_id = VALUES(video_id), episode_index = VALUES(episode_index), title = VALUES(title), source_name = VALUES(source_name), cover = VALUES(cover), year = VALUES(year), started_at = VALUES(started_at), ended_at = VALUES(ended_at), watch_seconds = VALUES(watch_seconds), last_position = VALUES(last_position), total_time = VALUES(total_time), created_at = VALUES(created_at), updated_at = VALUES(updated_at)'
-    ) {
-      const [
-        id,
-        username,
-        source,
-        videoId,
-        episodeIndex,
-        title,
-        sourceName,
-        cover,
-        year,
-        startedAt,
-        endedAt,
-        watchSeconds,
-        lastPosition,
-        totalTime,
-        createdAt,
-        updatedAt,
-      ] = params as [
-        string,
-        string,
-        string,
-        string,
-        number,
-        string,
-        string,
-        string,
-        string,
-        number,
-        number,
-        number,
-        number,
-        number,
-        number,
-        number,
-      ];
-      currentState.playbackSessions.set(id, {
-        id,
-        username,
-        source,
-        video_id: videoId,
-        episode_index: episodeIndex,
-        title,
-        source_name: sourceName,
-        cover,
-        year,
-        started_at: startedAt,
-        ended_at: endedAt,
-        watch_seconds: watchSeconds,
-        last_position: lastPosition,
-        total_time: totalTime,
-        created_at: createdAt,
-        updated_at: updatedAt,
-      });
-      return [[], []];
-    }
-
-    if (
-      normalized ===
-      'INSERT INTO playback_sessions (id, username, source, video_id, episode_index, title, source_name, cover, year, started_at, ended_at, watch_seconds, last_position, total_time, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
     ) {
       const [
         id,
@@ -1101,15 +989,6 @@ function createFakePool() {
 
     if (
       normalized ===
-      'INSERT INTO search_history (username, keyword, sort_index) VALUES (?, ?, ?)'
-    ) {
-      const [username, keyword, sortIndex] = params as [string, string, number];
-      currentState.searchHistory.push({ username, keyword, sortIndex });
-      return [[], []];
-    }
-
-    if (
-      normalized ===
       'DELETE FROM search_history WHERE username = ? AND sort_index >= ?'
     ) {
       const [username, limit] = params as [string, number];
@@ -1127,11 +1006,6 @@ function createFakePool() {
       return [[], []];
     }
 
-    if (normalized === 'DELETE FROM search_history') {
-      currentState.searchHistory = [];
-      return [[], []];
-    }
-
     if (
       normalized ===
       'INSERT INTO admin_config (id, config_json) VALUES (1, ?) ON DUPLICATE KEY UPDATE config_json = VALUES(config_json)'
@@ -1146,11 +1020,6 @@ function createFakePool() {
     ) {
       const [configJson] = params as [string];
       currentState.adminConfig = configJson;
-      return [[], []];
-    }
-
-    if (normalized === 'DELETE FROM admin_config') {
-      currentState.adminConfig = null;
       return [[], []];
     }
 
@@ -1194,36 +1063,6 @@ function createFakePool() {
           updatedAt,
         });
       }
-      return [[], []];
-    }
-
-    if (
-      normalized ===
-      'INSERT INTO source_route_stats (source, route_mode, bucket_date, success_count, failure_count, updated_at) VALUES (?, ?, ?, ?, ?, ?)'
-    ) {
-      const [
-        source,
-        routeMode,
-        bucketDate,
-        successCount,
-        failureCount,
-        updatedAt,
-      ] = params as [
-        string,
-        'browser' | 'server',
-        string,
-        number,
-        number,
-        number,
-      ];
-      currentState.sourceRouteStats.push({
-        source,
-        routeMode,
-        bucketDate,
-        successCount,
-        failureCount,
-        updatedAt,
-      });
       return [[], []];
     }
 
@@ -1286,10 +1125,6 @@ function createFakePool() {
       ['source_health_search', 'healthSearch'],
       ['source_health_play', 'healthPlay'],
     ] as const) {
-      if (normalized === `DELETE FROM ${table}`) {
-        currentState[key] = [];
-        return [[], []];
-      }
       if (normalized === `DELETE FROM ${table} WHERE bucket_date < ?`) {
         const beforeDate = params[0] as string;
         if (key === 'healthSearch')
@@ -1309,15 +1144,6 @@ function createFakePool() {
         (row) => row.bucketDate >= (params[0] as string),
       );
       return [[], []];
-    }
-
-    if (normalized === 'DELETE FROM source_route_stats') {
-      currentState.sourceRouteStats = [];
-      return [[], []];
-    }
-
-    if (normalized === 'DELETE FROM shared_cache') {
-      return [{ affectedRows: 0 }, []];
     }
 
     throw new Error(`Unhandled execute SQL: ${normalized}`);
@@ -1432,6 +1258,27 @@ function createFakePool() {
           .filter((row) => row.username === params[0])
           .sort((a, b) => a.position - b.position)
           .map((row) => ({ group_name: row.group_name })),
+        [],
+      ];
+    if (normalized.startsWith('SELECT * FROM oauth_identities'))
+      return [
+        (currentState.social.oauth_identities || []).filter(
+          (row) =>
+            row[
+              normalized.includes('provider_user_id =')
+                ? 'provider_user_id'
+                : 'username'
+            ] === params[0],
+        ),
+        [],
+      ];
+    if (
+      normalized === 'SELECT username FROM users WHERE username = ? FOR UPDATE'
+    )
+      return [
+        currentState.users.has(String(params[0]))
+          ? [{ username: params[0] }]
+          : [],
         [],
       ];
     const socialRows = querySocial(normalized, params, currentState);
@@ -2052,18 +1899,6 @@ function createFakePool() {
     }
 
     if (
-      normalized ===
-      'SELECT username, password FROM users ORDER BY username ASC'
-    ) {
-      return [
-        Array.from(currentState.users.entries())
-          .sort(([a], [b]) => a.localeCompare(b))
-          .map(([username, password]) => ({ username, password })),
-        [],
-      ];
-    }
-
-    if (
       normalized === 'SELECT config_json FROM admin_config WHERE id = 1 LIMIT 1'
     ) {
       return [[{ config_json: currentState.adminConfig }], []];
@@ -2158,7 +1993,9 @@ function createFakePool() {
 
     if (
       normalized ===
-      'SELECT last_login_at FROM user_login_activity WHERE username = ? LIMIT 1'
+        'SELECT last_login_at FROM user_login_activity WHERE username = ? LIMIT 1' ||
+      normalized ===
+        'SELECT last_login_at FROM user_login_activity WHERE username = ? FOR UPDATE'
     ) {
       const [username] = params as [string];
       const lastLoginAt = currentState.loginActivities.get(username);
@@ -2324,11 +2161,9 @@ function createFakePool() {
     resetQueryCount() {
       queryCount = 0;
     },
-    getInsertStatementCounts() {
-      return new Map(insertStatementCounts);
-    },
-    resetInsertStatementCounts() {
-      insertStatementCounts.clear();
+    reset() {
+      state = createState();
+      queryCount = 0;
     },
     async getConnection() {
       let transactionState = cloneState(state);
@@ -2353,13 +2188,6 @@ function createFakePool() {
           unlock();
         },
         async execute(sql: string, params?: unknown[]) {
-          const table = /^INSERT INTO (\w+)/.exec(normalizeSql(sql))?.[1];
-          if (table) {
-            insertStatementCounts.set(
-              table,
-              (insertStatementCounts.get(table) || 0) + 1,
-            );
-          }
           return runExecute(sql, params, transactionState);
         },
         release() {},
@@ -2369,6 +2197,8 @@ function createFakePool() {
 }
 
 const fakePool = createFakePool();
+
+beforeEach(() => fakePool.reset());
 
 jest.mock('mysql2/promise', () => ({
   __esModule: true,
@@ -2386,40 +2216,6 @@ import type {
   SourceRouteStatsItem,
   VideoReview,
 } from '../types';
-
-const adminConfig: AdminConfig = {
-  ConfigSubscribtion: { URL: '', AutoUpdate: false, LastCheck: '' },
-  ConfigFile: '',
-  SiteConfig: {
-    SiteName: 'IceTV',
-    SiteIcon: '',
-    Announcement: '',
-    FooterText: '',
-    EnableLiveEntry: false,
-    DefaultAggregateSearch: true,
-    EnableOptimization: true,
-    LiveDirectConnect: false,
-    AutoSwitchSource: false,
-    EnableDanmaku: false,
-    EnableUserDanmaku: false,
-    ...DEFAULT_RUNTIME_PARAMS,
-    SearchDownstreamMaxPage: 5,
-    SiteInterfaceCacheTime: 300,
-    DoubanProxyType: 'direct',
-    BangumiDataSource: 'server',
-    DoubanImageProxyType: 'direct',
-    DisableYellowFilter: false,
-    FluidSearch: true,
-  },
-  UserConfig: {
-    Users: [],
-    OpenRegister: false,
-    Tags: [],
-  },
-  SourceConfig: [],
-  CustomCategories: [],
-  LiveConfig: [],
-};
 
 const playRecord: PlayRecord = {
   title: 'Demo',
@@ -2477,7 +2273,6 @@ function sortRouteStats(items: SourceRouteStatsItem[]) {
 describe('mysql storage contract', () => {
   it('rolls back the complete health search batch on a later row failure', async () => {
     const storage = new MySqlStorage('mysql://demo:demo@localhost:3306/icetv');
-    await storage.clearAllData();
     const row = {
       source: 'alpha',
       bucketDate: '2026-01-02',
@@ -2508,7 +2303,6 @@ describe('mysql storage contract', () => {
 
   it('accumulates health search rows, normalizes counters and retains date boundaries', async () => {
     const storage = new MySqlStorage('mysql://demo:demo@localhost:3306/icetv');
-    await storage.clearAllData();
     const row = {
       source: 'alpha',
       bucketDate: '2026-01-02',
@@ -2568,7 +2362,6 @@ describe('mysql storage contract', () => {
 
   it('aggregates reporter-days in SQL with success precedence and clears health state', async () => {
     const storage = new MySqlStorage('mysql://demo:demo@localhost:3306/icetv');
-    await storage.clearAllData();
     const report = {
       source: ' alpha ',
       bucketDate: '2026-01-02',
@@ -2614,34 +2407,7 @@ describe('mysql storage contract', () => {
     expect(await storage.getSourcePlayReporterSummary('2026-01-04')).toEqual(
       [],
     );
-    const seed = async () => {
-      await storage.recordSourcePlayReport(report);
-      await storage.recordSourceHealthSearchBatch([
-        {
-          source: 'alpha',
-          bucketDate: '2026-01-02',
-          okCount: 1,
-          emptyCount: 0,
-          errorCount: 0,
-          latencyMsSum: 1,
-          latencySamples: 1,
-        },
-      ]);
-    };
-    await seed();
-    await storage.clearAllData();
-    expect(await storage.getSourceHealthSearchDaily('2026-01-01')).toEqual([]);
-    expect(await storage.getSourcePlayReporterSummary('2026-01-01')).toEqual(
-      [],
-    );
-    await seed();
-    await storage.replaceAllData({
-      adminConfig: adminConfig,
-      users: {},
-      userData: {},
-      sourceRouteStats: [],
-      inviteCodeUsage: {},
-    });
+    await storage.purgeSourceHealthBefore('2026-01-04');
     expect(await storage.getSourceHealthSearchDaily('2026-01-01')).toEqual([]);
     expect(await storage.getSourcePlayReporterSummary('2026-01-01')).toEqual(
       [],
@@ -3326,133 +3092,9 @@ describe('mysql storage contract', () => {
     expect((await storage.getFavoritePage('public-user', 10)).total).toBe(6);
   });
 
-  it('replaces all data from an import snapshot', async () => {
-    const storage = new MySqlStorage('mysql://demo:demo@localhost:3306/icetv');
-    const passwordHash =
-      '$2b$10$abcdefghijklmnopqrstuu9dBwFh6R0D4A5gHfHnM6kQ7xS8tT9u';
-
-    await storage.replaceAllData({
-      adminConfig,
-      users: {
-        'demo-user': passwordHash,
-      },
-      userData: {
-        'demo-user': {
-          playRecords: { 'source+1': playRecord },
-          favorites: { 'source+1': favorite },
-          searchHistory: ['first', 'second'],
-          skipConfigs: { 'source+1': skipConfig },
-          playbackSessions: { [playbackSession.id]: playbackSession },
-          messageState: { readAnnouncementId: 'announcement:v1' },
-          danmakuEnabled: false,
-          lastLoginAt: 1700000000000,
-        },
-      },
-      sourceRouteStats: [
-        {
-          source: 'source-a',
-          routeMode: 'browser',
-          bucketDate: '2026-01-08',
-          successCount: 3,
-          failureCount: 1,
-        },
-      ],
-      inviteCodeUsage: { 'invite-a': 3 },
-    });
-
-    const expectedConfig = JSON.parse(JSON.stringify(adminConfig));
-    delete expectedConfig.UserConfig.Users;
-    delete expectedConfig.ConfigFile;
-    delete expectedConfig.ConfigSubscribtion;
-    await expect(storage.getAdminConfig()).resolves.toEqual(expectedConfig);
-    await expect(storage.getAllUsers()).resolves.toEqual(['demo-user']);
-    await expect(storage.getAllUsersWithPasswords()).resolves.toEqual({
-      'demo-user': passwordHash,
-    });
-    await expect(storage.getAllPlayRecords('demo-user')).resolves.toEqual({
-      'source+1': playRecord,
-    });
-    await expect(storage.getAllFavorites('demo-user')).resolves.toEqual({
-      'source+1': favorite,
-    });
-    await expect(storage.getSearchHistory('demo-user')).resolves.toEqual([
-      'first',
-      'second',
-    ]);
-    await expect(storage.getAllSkipConfigs('demo-user')).resolves.toEqual({
-      'source+1': skipConfig,
-    });
-    await expect(storage.getPlaybackSessions('demo-user')).resolves.toEqual([
-      playbackSession,
-    ]);
-    await expect(storage.getAllPlaybackSessions('demo-user')).resolves.toEqual([
-      playbackSession,
-    ]);
-    await expect(storage.getUserMessageState('demo-user')).resolves.toEqual({
-      readAnnouncementId: 'announcement:v1',
-    });
-    await expect(
-      storage.getDanmakuEnabledPreference('demo-user'),
-    ).resolves.toBe(false);
-    await expect(storage.getUserLastLogin('demo-user')).resolves.toBe(
-      1700000000000,
-    );
-    await expect(storage.getAllSourceRouteStatBuckets()).resolves.toEqual([
-      {
-        source: 'source-a',
-        routeMode: 'browser',
-        bucketDate: '2026-01-08',
-        successCount: 3,
-        failureCount: 1,
-      },
-    ]);
-  });
-
-  it('导入时按批次插入而非逐行插入', async () => {
-    const storage = new MySqlStorage('mysql://demo:demo@localhost:3306/icetv');
-    const recordCount = 450;
-    const playRecords: Record<string, PlayRecord> = {};
-    const playbackSessions: Record<string, PlaybackSession> = {};
-    for (let index = 0; index < recordCount; index++) {
-      playRecords[`source+${index}`] = { ...playRecord, index };
-      playbackSessions[`session_${index}`] = {
-        ...playbackSession,
-        id: `session_${index}`,
-      };
-    }
-
-    fakePool.resetInsertStatementCounts();
-    await storage.replaceAllData({
-      adminConfig,
-      users: { 'demo-user': 'hash' },
-      userData: {
-        'demo-user': {
-          playRecords,
-          favorites: {},
-          searchHistory: [],
-          skipConfigs: {},
-          playbackSessions,
-        },
-      },
-      sourceRouteStats: [],
-      inviteCodeUsage: {},
-    });
-
-    const counts = fakePool.getInsertStatementCounts();
-    expect(counts.get('play_records')).toBe(3);
-    expect(counts.get('playback_sessions')).toBe(3);
-    await expect(storage.getAllPlayRecords('demo-user')).resolves.toEqual(
-      playRecords,
-    );
-    await expect(
-      storage.getAllPlaybackSessions('demo-user'),
-    ).resolves.toHaveLength(recordCount);
-  });
-
   it('按最后更新时间清理过期播放统计会话', async () => {
     const storage = new MySqlStorage('mysql://demo:demo@localhost:3306/icetv');
 
-    await storage.clearAllData();
     await storage.setPlaybackSession('demo-user', {
       ...playbackSession,
       id: 'session_old',
@@ -3478,7 +3120,6 @@ describe('mysql storage contract', () => {
   it('normalizes usernames before storing and looking them up', async () => {
     const storage = new MySqlStorage('mysql://demo:demo@localhost:3306/icetv');
 
-    await storage.clearAllData();
     await storage.registerUser(' Alice_User ', 'password');
 
     await expect(storage.getAllUsers()).resolves.toEqual(['alice_user']);
@@ -3492,7 +3133,6 @@ describe('mysql storage contract', () => {
   it('aggregates source route stats by date and mode', async () => {
     const storage = new MySqlStorage('mysql://demo:demo@localhost:3306/icetv');
 
-    await storage.clearAllData();
     await storage.recordSourceRouteStat({
       source: 'source-a',
       routeMode: 'browser',
@@ -3559,13 +3199,17 @@ describe('mysql storage contract', () => {
 describe('mysql video review contract', () => {
   videoReviewContract(
     () => new MySqlStorage('mysql://demo:demo@localhost:3306/icetv'),
-    adminConfig,
   );
 });
 
 describe('mysql user danmaku contract', () => {
   userDanmakuContract(
     () => new MySqlStorage('mysql://demo:demo@localhost:3306/icetv'),
-    adminConfig,
+  );
+});
+
+describe('MySQL OAuth 身份契约（fake pool）', () => {
+  oauthIdentityContract(
+    () => new MySqlStorage('mysql://demo:demo@localhost:3306/icetv'),
   );
 });

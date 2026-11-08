@@ -1,6 +1,5 @@
 import type { IStorage } from '@/lib/types';
 import type { StoredUserDanmaku } from '@/lib/user-danmaku-storage';
-import type { AdminConfig } from '@/types/admin';
 
 export const userDanmaku: StoredUserDanmaku = {
   id: '00000000-0000-4000-8000-000000000001',
@@ -15,15 +14,15 @@ export const userDanmaku: StoredUserDanmaku = {
 
 export function userDanmakuContract(
   createStorage: () => IStorage,
-  adminConfig: AdminConfig,
+  reset: (storage: IStorage) => Promise<void> = async () => {},
 ) {
   let storage: IStorage;
   beforeEach(async () => {
     storage = createStorage();
-    await storage.clearAllData();
+    await reset(storage);
   });
   afterEach(async () => {
-    await storage.clearAllData();
+    await reset(storage);
   });
 
   it('stores exact keys, canonical users and newest N; restricts owner deletion', async () => {
@@ -77,39 +76,17 @@ export function userDanmakuContract(
     expect(await storage.deleteUserDanmakuBatch([])).toBe(0);
   });
 
-  it('deletes user data and restores only imported rows; clears all data', async () => {
+  it('删除用户时同步清理本人弹幕并保留其他用户数据', async () => {
     await storage.registerUser('alice', 'password');
     await storage.addUserDanmaku(userDanmaku);
+    const other = {
+      ...userDanmaku,
+      id: '00000000-0000-4000-8000-000000000099',
+      username: 'owner',
+    };
+    await storage.addUserDanmaku(other);
     await storage.deleteUser('alice');
     expect(await storage.getAllUserDanmaku('alice')).toEqual([]);
-    await storage.addUserDanmaku(userDanmaku);
-    await storage.replaceAllData({
-      adminConfig,
-      users: {},
-      sourceRouteStats: [],
-      inviteCodeUsage: {},
-      userData: {
-        owner: {
-          playRecords: {},
-          favorites: {},
-          searchHistory: [],
-          skipConfigs: {},
-          playbackSessions: {},
-          userDanmaku: [
-            { ...userDanmaku, id: '00000000-0000-4000-8000-000000000099' },
-          ],
-        },
-      },
-    });
-    expect(await storage.getAllUserDanmaku('alice')).toEqual([]);
-    expect(await storage.getAllUserDanmaku('owner')).toEqual([
-      {
-        ...userDanmaku,
-        username: 'owner',
-        id: '00000000-0000-4000-8000-000000000099',
-      },
-    ]);
-    await storage.clearAllData();
-    expect(await storage.getUserDanmakuPage({})).toEqual([]);
+    expect(await storage.getAllUserDanmaku('owner')).toEqual([other]);
   });
 }

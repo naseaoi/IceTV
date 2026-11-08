@@ -13,7 +13,7 @@ export function normalizeUsername(value: string): string {
   return value.trim().toLowerCase();
 }
 
-// 宽松格式校验：用于存储写入与备份导入，兼容存量用户名
+// 宽松格式校验：用于存储写入，兼容存量用户名
 export function isValidUsernameFormat(value: string): boolean {
   const username = normalizeUsername(value);
   return (

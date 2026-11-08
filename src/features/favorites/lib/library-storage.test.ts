@@ -11,13 +11,7 @@ import {
 import { videoReview } from '@/lib/__tests__/__fixtures__/video-review-contract';
 import { MySqlStorage } from '@/lib/mysql.db';
 import { LocalSqliteStorage } from '@/lib/sqlite.db';
-import type {
-  Favorite,
-  IStorage,
-  PlayRecord,
-  StorageImportData,
-  VideoReview,
-} from '@/lib/types';
+import type { Favorite, IStorage, PlayRecord, VideoReview } from '@/lib/types';
 
 const favorite: Favorite = {
   title: 'Demo',
@@ -300,29 +294,14 @@ for (const backend of ['sqlite', 'mysql'] as const) {
       ).toBe(0);
     });
 
-    it('rebuilds projections through replace/import and clear paths', async () => {
-      // 测试使用独立数据库；替换全库不会接触开发数据。
-      const data = {
-        users: { [username]: '' },
-        userData: {
-          [username]: {
-            favorites: {
-              'source+imported': { ...favorite, title: 'Imported' },
-            },
-            playRecords: {},
-            searchHistory: [],
-            skipConfigs: {},
-            playbackSessions: {},
-          },
-        },
-        adminConfig: {},
-        sourceRouteStats: [],
-        inviteCodeUsage: {},
-      } as unknown as StorageImportData;
-      await storage.replaceAllData(data);
+    it('写入收藏时重建投影，清空收藏时同步移除投影', async () => {
+      await storage.setFavorite(username, 'source+projected', {
+        ...favorite,
+        title: 'Projected',
+      });
       const page = await storage.getFavoriteLibraryPage(username, {
         ...query,
-        query: 'imported',
+        query: 'projected',
       });
       expect(page.total).toBe(1);
       await storage.deleteAllFavorites(username);

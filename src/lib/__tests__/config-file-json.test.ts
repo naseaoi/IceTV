@@ -114,7 +114,6 @@ describe('buildConfigFileFromAdminConfig', () => {
         SourceFailureCooldownSeconds: 300,
         ContinueWatchingLimit: 10,
         CoverImageCacheSize: 500,
-        DataImportPlaybackSessionsLimit: 500,
         LivePrecheckTimeoutSeconds: 15,
         ProxyRequestTimeoutSeconds: 30,
         ImageProxyTimeoutSeconds: 15,

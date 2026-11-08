@@ -8,10 +8,6 @@ import AdminContentSkeleton, {
 import { type AdminTabId } from '@/features/admin/lib/admin-tabs';
 import { type AdminConfig } from '@/types/admin';
 
-const DataMigration = dynamic(
-  () => import('@/components/DataMigration').then((mod) => mod.default),
-  { loading: () => <AdminContentSkeleton /> },
-);
 const CategoryConfig = dynamic(
   () =>
     import('@/features/admin/components/tabs/CategoryConfigTab').then(
@@ -139,8 +135,6 @@ const AdminTabBody = ({
       return <LiveSourceConfig config={config} refreshConfig={refreshConfig} />;
     case 'category':
       return <CategoryConfig config={config} refreshConfig={refreshConfig} />;
-    case 'data-migration':
-      return <DataMigration onRefreshConfig={refreshConfig} />;
     default:
       return null;
   }

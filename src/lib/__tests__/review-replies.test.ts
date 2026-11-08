@@ -1,6 +1,5 @@
 /** @jest-environment node */
 
-import { IMPORT_ADMIN_CONFIG } from '@/lib/__tests__/__fixtures__/import-admin-config';
 import { assertReviewReplies } from '@/lib/__tests__/__fixtures__/review-reply-contract';
 import { videoReview } from '@/lib/__tests__/__fixtures__/video-review-contract';
 import { publicUserRole } from '@/lib/public-user-role.server';
@@ -31,7 +30,7 @@ it('回复公开性、权限、提醒去重、已读与评价级联删除', asyn
   await assertReviewReplies(new LocalSqliteStorage(':memory:'), 'reply');
 });
 
-it('回复备份替换与删除用户覆盖发送者、评价作者、被提及者和举报人', async () => {
+it('删除用户覆盖回复发送者、评价作者、被提及者和举报人', async () => {
   const storage = new LocalSqliteStorage(':memory:');
   for (const username of ['author', 'reader', 'third'])
     await storage.ensureUserProfile(username);
@@ -45,29 +44,6 @@ it('回复备份替换与删除用户覆盖发送者、评价作者、被提及�
     first!.id,
   );
   await storage.reportReviewReply(second!.id, 'reader', 'spam', '');
-  const userData = Object.fromEntries(
-    await Promise.all(
-      ['author', 'reader', 'third'].map(async (username) => [
-        username,
-        {
-          playRecords: {},
-          favorites: {},
-          searchHistory: [],
-          skipConfigs: {},
-          playbackSessions: {},
-          videoReviews: await storage.getAllVideoReviews(username),
-          ...(await storage.getUserSocialData(username)),
-        },
-      ]),
-    ),
-  );
-  await storage.replaceAllData({
-    adminConfig: IMPORT_ADMIN_CONFIG,
-    users: {},
-    userData,
-    sourceRouteStats: [],
-    inviteCodeUsage: {},
-  });
   expect(
     (await storage.getReviewReplies(...target, 'third')).items,
   ).toHaveLength(2);

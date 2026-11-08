@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react';
 
+import { useAuthSession } from '@/components/AuthProvider';
 import { checkForUpdates, UpdateStatus } from '@/lib/version-check';
 
 export const ROLE_TEXT: Record<string, string> = {
@@ -27,10 +28,15 @@ export function buildLoginHref(): string {
   return `/login?redirect=${encodeURIComponent(redirect)}`;
 }
 
+// 版本更新提醒只面向部署者（站长）
 export function useHasUpdate(): boolean {
+  const { session } = useAuthSession();
+  const isOwner =
+    session.status === 'authenticated' && session.role === 'owner';
   const [hasUpdate, setHasUpdate] = useState(false);
 
   useEffect(() => {
+    if (!isOwner) return;
     let cancelled = false;
     checkForUpdates()
       .then((status) => {
@@ -40,7 +46,7 @@ export function useHasUpdate(): boolean {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [isOwner]);
 
-  return hasUpdate;
+  return isOwner && hasUpdate;
 }

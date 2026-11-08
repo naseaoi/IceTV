@@ -66,14 +66,14 @@ it.each([
   { watch_status: 'invalid', watched_at: 123 },
   { watch_status: 'completed', watched_at: -1 },
   { watch_status: 'planned', watched_at: 123 },
-])('导入丢弃非法状态或无意义日期 %j', (value) => {
+])('归一化丢弃非法状态或无意义日期 %j', (value) => {
   const normalized = normalizeFavoriteWatchFields(value);
   expect(normalized.watched_at).toBeUndefined();
   if (value.watch_status === 'invalid')
     expect(normalized.watch_status).toBeUndefined();
 });
 
-it('导入保留合法状态与日期', () => {
+it('归一化保留合法状态与日期', () => {
   expect(
     normalizeFavoriteWatchFields({
       watch_status: 'completed',

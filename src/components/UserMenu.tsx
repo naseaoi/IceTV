@@ -335,7 +335,7 @@ export const UserMenu: React.FC = () => {
           )}
         </button>
         {hasUpdate && (
-          <span className='pointer-events-none absolute right-1 top-1 h-2 w-2 rounded-full bg-brand-500 ring-2 ring-gray-50 dark:ring-gray-950' />
+          <span className='pointer-events-none absolute right-1 top-1 h-2 w-2 rounded-full bg-brand-500' />
         )}
       </div>
 

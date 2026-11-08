@@ -5,6 +5,7 @@ import { useCallback } from 'react';
 import { adminPost } from '@/features/admin/lib/api';
 import { showError } from '@/features/admin/lib/notifications';
 import { type ShowAlertFn } from '@/hooks/useAlertModal';
+import type { LinuxDoLoginSettings } from '@/types/admin';
 
 type UserAction =
   | 'add'
@@ -184,6 +185,16 @@ export function useAdminUserActions(options: UseAdminUserActionsOptions) {
     [runUserMutation],
   );
 
+  const setLinuxDo = useCallback(
+    async (linuxDo: LinuxDoLoginSettings) => {
+      await runUserMutation(
+        { action: 'setLinuxDo', linuxDo },
+        '设置 LinuxDo 登录失败',
+      );
+    },
+    [runUserMutation],
+  );
+
   const setDefaultUserGroup = useCallback(
     async (userGroup: string) => {
       await runUserMutation(
@@ -234,6 +245,7 @@ export function useAdminUserActions(options: UseAdminUserActionsOptions) {
     deleteInviteCode,
     purgeInactiveInviteCodes,
     setRequireInviteCode,
+    setLinuxDo,
     setDefaultUserGroup,
     updateUserApis,
     userAction,

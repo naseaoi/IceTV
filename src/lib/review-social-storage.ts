@@ -19,9 +19,9 @@ import type {
   MyVideoReviewPage,
   PublicVideoReviewPage,
   ReviewReportReason,
-  StorageUserImportData,
   UserProfile,
   UserProfileView,
+  UserSocialData,
   VideoReview,
   VideoReviewRating,
   WorkReviewSummary,
@@ -45,14 +45,6 @@ import {
   WORK_REVIEWS_PAGE_SIZE,
 } from '@/lib/video-reviews';
 
-export const SOCIAL_TABLES = [
-  'user_profiles',
-  'user_follows',
-  'video_review_likes',
-  'video_review_reports',
-  'video_review_replies',
-  'video_review_reply_reports',
-] as const;
 export class NicknameTakenError extends Error {
   constructor() {
     super('昵称已被使用');
@@ -922,41 +914,34 @@ export class ReviewSocialStorage extends ReviewReplyStorage {
       };
     });
   }
-  async getUserSocialData(
-    username: string,
-  ): Promise<
-    Pick<
-      StorageUserImportData,
-      'profile' | 'follows' | 'likes' | 'reports' | 'replies' | 'replyReports'
-    >
-  > {
+  async getUserSocialData(username: string): Promise<UserSocialData> {
     username = normalizeUsername(username);
     const profile = await this.getUserProfile(username);
     const follows = await this.sql.rows<
-      NonNullable<StorageUserImportData['follows']>[number]
+      NonNullable<UserSocialData['follows']>[number]
     >('SELECT followee, created_at FROM user_follows WHERE follower = ?', [
       username,
     ]);
     const likes = await this.sql.rows<
-      NonNullable<StorageUserImportData['likes']>[number]
+      NonNullable<UserSocialData['likes']>[number]
     >(
       'SELECT author, title_norm, year, created_at FROM video_review_likes WHERE liker = ?',
       [username],
     );
     const reports = await this.sql.rows<
-      NonNullable<StorageUserImportData['reports']>[number]
+      NonNullable<UserSocialData['reports']>[number]
     >(
       'SELECT author, title_norm, year, reason, detail, created_at FROM video_review_reports WHERE reporter = ?',
       [username],
     );
     const replies = await this.sql.rows<
-      NonNullable<StorageUserImportData['replies']>[number]
+      NonNullable<UserSocialData['replies']>[number]
     >(
       'SELECT id, author, title_norm, year, reply_to, content, created_at FROM video_review_replies WHERE username = ?',
       [username],
     );
     const replyReports = await this.sql.rows<
-      NonNullable<StorageUserImportData['replyReports']>[number]
+      NonNullable<UserSocialData['replyReports']>[number]
     >(
       'SELECT reply_id, reason, detail, created_at FROM video_review_reply_reports WHERE reporter = ?',
       [username],
@@ -983,47 +968,4 @@ export function isUniqueError(error: unknown): boolean {
       'ER_DUP_ENTRY',
     ].includes(String(error.code))
   );
-}
-
-export function importedAvatarSeed(value: unknown): string | null {
-  try {
-    return validateAvatarSeed(value);
-  } catch {
-    return null;
-  }
-}
-
-export function importedProfileValues(
-  username: string,
-  profile: UserProfile | undefined,
-  usedIds: Set<string>,
-  usedNames: Set<string>,
-): unknown[] {
-  let id = profile?.profile_id;
-  while (!id || !/^[a-zA-Z0-9]{12}$/.test(id) || usedIds.has(id))
-    id = newProfileId();
-  usedIds.add(id);
-  let nickname: string | null = null;
-  let norm: string | null = null;
-  if (profile?.nickname) {
-    try {
-      const v = validateNickname(profile.nickname, { allowReserved: true });
-      if (!usedNames.has(v.nicknameNorm)) {
-        nickname = v.nickname;
-        norm = v.nicknameNorm;
-        usedNames.add(norm);
-      }
-    } catch {
-      // 旧备份昵称按当前规则重新校验。
-    }
-  }
-  return [
-    normalizeUsername(username),
-    id,
-    nickname,
-    norm,
-    importedAvatarSeed(profile?.avatar_seed),
-    validateLibraryVisibility(profile?.favorites_public ?? 0, true),
-    profile?.updated_at ?? Date.now(),
-  ];
 }

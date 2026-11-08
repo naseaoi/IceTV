@@ -27,7 +27,6 @@ export interface SiteConfig {
   ContinueWatchingLimit: number;
   CoverImageCacheSize: number;
   SourceCoverProxyMode: 'auto' | 'browser' | 'server';
-  DataImportPlaybackSessionsLimit: number;
   LivePrecheckTimeoutSeconds: number;
   ProxyRequestTimeoutSeconds: number;
   ImageProxyTimeoutSeconds: number;

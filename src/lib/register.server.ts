@@ -42,9 +42,13 @@ function isDuplicateUserError(error: unknown): boolean {
   );
 }
 
+export function checkRegistrationRateLimit(request: NextRequest) {
+  return limiter.check(getClientIp(request));
+}
+
 export async function handleRegister(request: NextRequest) {
   try {
-    const verdict = limiter.check(getClientIp(request));
+    const verdict = checkRegistrationRateLimit(request);
     if (!verdict.allowed) {
       return NextResponse.json(
         { error: '注册过于频繁，请稍后再试' },

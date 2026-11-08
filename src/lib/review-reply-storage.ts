@@ -37,32 +37,8 @@ type PublicReplyRow = ReviewReplyRow & {
   review_profile_id: string;
 };
 
-export const REPLY_TABLES = [
-  'video_review_replies',
-  'video_review_reply_reports',
-] as const;
 export const REPLY_COLUMNS =
   'id, author, title_norm, year, username, reply_to, content, created_at';
-export const REPLY_INSERT = `INSERT INTO video_review_replies (${REPLY_COLUMNS}) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`;
-export const REPLY_REPORT_INSERT =
-  'INSERT INTO video_review_reply_reports (reply_id, reporter, reason, detail, created_at) VALUES (?, ?, ?, ?, ?)';
-
-export function replyValues(
-  username: string,
-  row: Omit<ReviewReplyRow, 'username'>,
-): unknown[] {
-  return [
-    row.id,
-    normalizeUsername(row.author),
-    row.title_norm,
-    row.year,
-    normalizeUsername(username),
-    row.reply_to ? normalizeUsername(row.reply_to) : null,
-    row.content,
-    row.created_at,
-  ];
-}
-
 export function replySchema(dialect: 'sqlite' | 'mysql'): string[] {
   const text = dialect === 'sqlite' ? 'TEXT' : 'VARCHAR(191)';
   const time = dialect === 'sqlite' ? 'INTEGER' : 'BIGINT';

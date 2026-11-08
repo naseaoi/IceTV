@@ -1,6 +1,5 @@
 import type { LucideIcon } from 'lucide-react';
 import {
-  Database,
   FileText,
   FolderOpen,
   MessageSquare,
@@ -21,8 +20,7 @@ export type AdminTabId =
   | 'danmaku'
   | 'video-source'
   | 'live-source'
-  | 'category'
-  | 'data-migration';
+  | 'category';
 
 export type AdminTabGroupId = 'site' | 'content' | 'community' | 'maintenance';
 
@@ -109,13 +107,6 @@ export const ADMIN_TABS: AdminTabMeta[] = [
     id: 'config-file',
     label: '配置文件',
     icon: FileText,
-    group: 'maintenance',
-    ownerOnly: true,
-  },
-  {
-    id: 'data-migration',
-    label: '数据迁移',
-    icon: Database,
     group: 'maintenance',
     ownerOnly: true,
   },

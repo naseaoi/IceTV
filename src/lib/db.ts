@@ -23,7 +23,6 @@ import {
   SourceRouteStatInput,
   SourceRouteStatsBucket,
   SourceRouteStatsItem,
-  StorageImportData,
   UserMessageState,
   VideoReview,
   WorkReviewSummary,
@@ -431,16 +430,6 @@ class DbManager {
     await storage.deleteAllPlayRecords(userName);
   }
 
-  /** 按原始 key 写入播放记录（用于数据导入等场景） */
-  async setPlayRecordByKey(
-    userName: string,
-    key: string,
-    record: PlayRecord,
-  ): Promise<void> {
-    const storage = await this.getStorage();
-    await storage.setPlayRecord(userName, key, record);
-  }
-
   async getFavorite(
     userName: string,
     source: string,
@@ -541,16 +530,6 @@ class DbManager {
     await storage.deleteAllFavorites(userName);
   }
 
-  /** 按原始 key 写入收藏（用于数据导入等场景） */
-  async setFavoriteByKey(
-    userName: string,
-    key: string,
-    favorite: Favorite,
-  ): Promise<void> {
-    const storage = await this.getStorage();
-    await storage.setFavorite(userName, key, favorite);
-  }
-
   async isFavorited(
     userName: string,
     source: string,
@@ -560,14 +539,47 @@ class DbManager {
     return favorite !== null;
   }
 
+  async getOAuthIdentity(...args: Parameters<IStorage['getOAuthIdentity']>) {
+    return (await this.getStorage()).getOAuthIdentity(...args);
+  }
+
+  async getUserOAuthIdentity(
+    ...args: Parameters<IStorage['getUserOAuthIdentity']>
+  ) {
+    return (await this.getStorage()).getUserOAuthIdentity(...args);
+  }
+
+  async bindOAuthIdentity(...args: Parameters<IStorage['bindOAuthIdentity']>) {
+    return (await this.getStorage()).bindOAuthIdentity(...args);
+  }
+
+  async unbindOAuthIdentity(
+    ...args: Parameters<IStorage['unbindOAuthIdentity']>
+  ) {
+    return (await this.getStorage()).unbindOAuthIdentity(...args);
+  }
+
+  async updateOAuthProviderUsername(
+    ...args: Parameters<IStorage['updateOAuthProviderUsername']>
+  ) {
+    return (await this.getStorage()).updateOAuthProviderUsername(...args);
+  }
+
   async registerUser(
     userName: string,
     password: string,
     nickname?: string,
     userGroups?: string[],
+    identity?: import('@/lib/oauth-identity').OAuthIdentity,
   ): Promise<void> {
     const storage = await this.getStorage();
-    await storage.registerUser(userName, password, nickname, userGroups);
+    await storage.registerUser(
+      userName,
+      password,
+      nickname,
+      userGroups,
+      identity,
+    );
   }
 
   async verifyUser(userName: string, password: string): Promise<boolean> {
@@ -587,10 +599,6 @@ class DbManager {
 
   async getUserAccess(...args: Parameters<IStorage['getUserAccess']>) {
     return (await this.getStorage()).getUserAccess(...args);
-  }
-
-  async getAllUserAccess() {
-    return (await this.getStorage()).getAllUserAccess();
   }
 
   async updateUserAccess(...args: Parameters<IStorage['updateUserAccess']>) {
@@ -670,19 +678,9 @@ class DbManager {
     return storage.getAllUsers();
   }
 
-  async getAllUsersWithPasswords(): Promise<{ [username: string]: string }> {
-    const storage = await this.getStorage();
-    return storage.getAllUsersWithPasswords();
-  }
-
   async recordUserActivity(userName: string, activeAt: number): Promise<void> {
     const storage = await this.getStorage();
     await storage.recordUserLogin(userName, activeAt);
-  }
-
-  async getUserLastActive(userName: string): Promise<number | null> {
-    const storage = await this.getStorage();
-    return storage.getUserLastLogin(userName);
   }
 
   async getAllUserLastActive(): Promise<Record<string, number>> {
@@ -1004,16 +1002,6 @@ class DbManager {
   async pruneSharedCache(now: number, limit: number): Promise<void> {
     const storage = await this.getStorage();
     await storage.pruneSharedCache(now, limit);
-  }
-
-  async clearAllData(): Promise<void> {
-    const storage = await this.getStorage();
-    await storage.clearAllData();
-  }
-
-  async replaceAllData(data: StorageImportData): Promise<void> {
-    const storage = await this.getStorage();
-    await storage.replaceAllData(data);
   }
 
   async getSharedResourceStore() {

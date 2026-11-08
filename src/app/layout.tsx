@@ -7,6 +7,7 @@ import { cookies } from 'next/headers';
 import { AuthProvider } from '@/components/AuthProvider';
 import { CardInteractionProvider } from '@/components/CardInteractionProvider';
 import { ClientErrorReporter } from '@/components/ClientErrorReporter';
+import { LinuxDoBindNotifier } from '@/components/LinuxDoBindNotifier';
 import { MessageCenterProvider } from '@/components/messages/MessageCenterProvider';
 import { PageScrollRestorer } from '@/components/PageScrollRestorer';
 import ReleaseNotifier from '@/components/ReleaseNotifier';
@@ -86,6 +87,7 @@ export default async function RootLayout({
   const runtimeConfig = {
     STORAGE_TYPE: storageType,
     OPEN_REGISTER: publicConfig.OpenRegister,
+    LINUXDO_LOGIN: publicConfig.LinuxDoLogin,
     REQUIRE_INVITE_CODE: publicConfig.RequireInviteCode,
     UPDATE_REPOS: process.env.NEXT_PUBLIC_UPDATE_REPOS || 'naseaoi/IceTV',
     UPDATE_BRANCH: CURRENT_UPDATE_BRANCH,
@@ -154,6 +156,7 @@ export default async function RootLayout({
                     <PageScrollRestorer />
                     <ClientErrorReporter />
                     <ToastViewport />
+                    <LinuxDoBindNotifier />
                     <ReleaseNotifier />
                     <SWRegister />
                   </CardInteractionProvider>

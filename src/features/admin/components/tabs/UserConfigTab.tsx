@@ -46,7 +46,11 @@ import { useModalState } from '@/hooks/useModalState';
 import { useRetainedValue } from '@/hooks/useRetainedValue';
 import { getAuthInfoFromBrowserCookie } from '@/lib/auth.client';
 import type { InviteCodeFilter } from '@/lib/invite-code-storage';
-import { AdminConfig } from '@/types/admin';
+import {
+  type LinuxDoLoginSettings,
+  type LinuxDoTrustLevel,
+  AdminConfig,
+} from '@/types/admin';
 
 interface UserConfigProps {
   config: AdminConfig | null;
@@ -110,6 +114,7 @@ const UserConfig = ({ config, role, refreshConfig }: UserConfigProps) => {
     deleteInviteCode,
     purgeInactiveInviteCodes,
     setRequireInviteCode,
+    setLinuxDo,
     setDefaultUserGroup,
     updateUserApis,
     userAction,
@@ -410,6 +415,33 @@ const UserConfig = ({ config, role, refreshConfig }: UserConfigProps) => {
       }
     });
   };
+
+  const linuxDo: LinuxDoLoginSettings = config?.UserConfig?.LinuxDo ?? {
+    Enabled: false,
+    MinTrustLevel: 1,
+  };
+
+  const updateLinuxDo = (next: LinuxDoLoginSettings, message: string) =>
+    withLoading('setLinuxDo', async () => {
+      try {
+        await setLinuxDo(next);
+        showSuccess(message);
+      } catch {
+        // handled in setLinuxDo
+      }
+    });
+
+  const handleToggleLinuxDo = () =>
+    updateLinuxDo(
+      { ...linuxDo, Enabled: !linuxDo.Enabled },
+      linuxDo.Enabled ? 'LinuxDo 登录已关闭' : 'LinuxDo 登录已开启',
+    );
+
+  const handleLinuxDoTrustLevelChange = (level: LinuxDoTrustLevel) =>
+    updateLinuxDo(
+      { ...linuxDo, MinTrustLevel: level },
+      `最低信任等级已设为 ${level} 级`,
+    );
 
   const handleDefaultUserGroupChange = (next: string) =>
     withLoading('setDefaultUserGroup', async () => {
@@ -1156,6 +1188,11 @@ const UserConfig = ({ config, role, refreshConfig }: UserConfigProps) => {
         }}
         isTogglingRegister={isLoading('setOpenRegister')}
         isTogglingInvite={isLoading('setRequireInviteCode')}
+        linuxDoConfigured={!!config.UserConfig.LinuxDoConfigured}
+        linuxDo={linuxDo}
+        isSettingLinuxDo={isLoading('setLinuxDo')}
+        onToggleLinuxDo={handleToggleLinuxDo}
+        onLinuxDoTrustLevelChange={handleLinuxDoTrustLevelChange}
         isCreatingCode={isLoading('createInviteCode')}
         deletingCode={
           inviteList.items.find((item) =>

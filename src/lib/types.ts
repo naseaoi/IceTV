@@ -346,11 +346,7 @@ export interface SourceRouteStatsBucket {
   failureCount: number;
 }
 
-export interface StorageUserImportData {
-  playRecords: { [key: string]: PlayRecord };
-  favorites: { [key: string]: Favorite };
-  videoReviews?: VideoReview[];
-  userDanmaku?: Omit<StoredUserDanmaku, 'username'>[];
+export interface UserSocialData {
   profile?: UserProfile;
   follows?: { followee: string; created_at: number }[];
   likes?: {
@@ -377,12 +373,6 @@ export interface StorageUserImportData {
     detail: string;
     created_at: number;
   }[];
-  searchHistory: string[];
-  skipConfigs: { [key: string]: SkipConfig };
-  playbackSessions: { [key: string]: PlaybackSession };
-  messageState?: UserMessageState;
-  danmakuEnabled?: boolean;
-  lastLoginAt?: number;
 }
 
 export interface UserMessageStateUpdate {
@@ -413,14 +403,6 @@ export interface UserMessageState {
   // 关注动态已读水位，之前的视为已读；水位之后单独已读的消息 id 记在列表里
   followReviewReadAt?: number;
   followReviewReadIds?: string[];
-}
-
-export interface StorageImportData {
-  adminConfig: AdminConfig;
-  users: { [username: string]: string };
-  userData: { [username: string]: StorageUserImportData };
-  sourceRouteStats: SourceRouteStatsBucket[];
-  inviteCodeUsage: { [code: string]: number };
 }
 
 export interface SharedCacheRecord {
@@ -701,21 +683,29 @@ export interface IStorage {
     readIds: string[],
     now: number,
   ): Promise<number>;
-  getUserSocialData(
-    username: string,
-  ): Promise<
-    Pick<
-      StorageUserImportData,
-      'profile' | 'follows' | 'likes' | 'reports' | 'replies' | 'replyReports'
-    >
-  >;
+  getUserSocialData(username: string): Promise<UserSocialData>;
 
   // 用户相关
+  getOAuthIdentity(
+    providerUserId: string,
+  ): Promise<import('@/lib/oauth-identity').OAuthIdentity | null>;
+  getUserOAuthIdentity(
+    username: string,
+  ): Promise<import('@/lib/oauth-identity').OAuthIdentity | null>;
+  bindOAuthIdentity(
+    identity: import('@/lib/oauth-identity').OAuthIdentity,
+  ): Promise<import('@/lib/oauth-identity').OAuthBindResult>;
+  unbindOAuthIdentity(username: string): Promise<boolean>;
+  updateOAuthProviderUsername(
+    providerUserId: string,
+    providerUsername: string,
+  ): Promise<void>;
   registerUser(
     userName: string,
     password: string,
     nickname?: string,
     userGroups?: string[],
+    identity?: import('@/lib/oauth-identity').OAuthIdentity,
   ): Promise<void>;
   verifyUser(userName: string, password: string): Promise<boolean>;
   // 检查用户是否存在（无需密码）
@@ -730,7 +720,6 @@ export interface IStorage {
   getUserAccess(
     username: string,
   ): Promise<import('@/lib/user-access').UserAccess | null>;
-  getAllUserAccess(): Promise<import('@/lib/user-access').UserAccess[]>;
   updateUserAccess(
     usernames: string[],
     patch: import('@/lib/user-access').UserAccessPatch,
@@ -769,7 +758,6 @@ export interface IStorage {
     state?: ConfigStateUpdate,
   ): Promise<boolean>;
   getAllUsers(): Promise<string[]>;
-  getAllUsersWithPasswords(): Promise<{ [username: string]: string }>;
 
   getUserMessageState(userName: string): Promise<UserMessageState>;
   setUserMessageState(userName: string, state: UserMessageState): Promise<void>;
@@ -898,10 +886,6 @@ export interface IStorage {
     userName: string,
     enabled: boolean,
   ): Promise<void>;
-
-  // 数据清理相关
-  clearAllData(): Promise<void>;
-  replaceAllData(data: StorageImportData): Promise<void>;
 }
 
 // 搜索结果数据结构

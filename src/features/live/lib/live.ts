@@ -62,15 +62,6 @@ export function deleteCachedLiveChannels(key: string) {
   delete inflightRequests[key];
 }
 
-export function clearCachedLiveChannels() {
-  for (const key of new Set([
-    ...Object.keys(cachedLiveChannels),
-    ...Object.keys(inflightRequests),
-  ])) {
-    deleteCachedLiveChannels(key);
-  }
-}
-
 export function isLiveEntryEnabledInConfig(config: {
   SiteConfig?: { EnableLiveEntry?: boolean };
 }) {

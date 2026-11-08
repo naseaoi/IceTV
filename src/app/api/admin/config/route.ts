@@ -4,6 +4,7 @@ import { isGuardFailure, requireAdmin } from '@/lib/api-auth';
 import { getConfigFresh } from '@/lib/config';
 import { db } from '@/lib/db';
 import { getOwnerUsername } from '@/lib/env.server';
+import { isLinuxDoConfigured } from '@/lib/linuxdo-config.server';
 import { AdminConfigResult } from '@/types/admin';
 
 export const runtime = 'nodejs';
@@ -28,6 +29,7 @@ export async function GET(request: NextRequest) {
         })),
         UserConfig: {
           ...config.UserConfig,
+          LinuxDoConfigured: isLinuxDoConfigured(),
           Users: [],
           TotalUsers: (
             await db.getAdminUserPage({

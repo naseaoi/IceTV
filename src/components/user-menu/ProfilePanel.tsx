@@ -14,6 +14,7 @@ import {
 } from '@/components/modals/modal-styles';
 import ModalShell, { useDeferredClose } from '@/components/modals/ModalShell';
 import ProfileAvatar from '@/components/ProfileAvatar';
+import { useRuntimeConfig } from '@/components/RuntimeConfigProvider';
 import Select from '@/components/Select';
 import { useNicknameAvailability } from '@/hooks/useNicknameAvailability';
 import { getMyProfile, updateProfile } from '@/lib/profile.client';
@@ -24,6 +25,8 @@ import {
   NICKNAME_MAX_LENGTH,
   validateNickname,
 } from '@/lib/user-profile';
+
+import { LinuxDoBindingTile } from './LinuxDoBindingTile';
 
 const AVATAR_CANDIDATE_COUNT = 5;
 
@@ -52,6 +55,12 @@ export function ProfileForm({
   const profileId = session.status === 'authenticated' ? session.profileId : '';
   const allowReserved =
     session.status === 'authenticated' && session.role === 'owner';
+  const runtimeConfig = useRuntimeConfig();
+  const showLinuxDoBinding =
+    !required &&
+    runtimeConfig.LINUXDO_LOGIN &&
+    session.status === 'authenticated' &&
+    session.role !== 'owner';
   const [saved, setSaved] = useState<SavedProfile>(() => ({
     nickname:
       session.status === 'authenticated' ? (session.nickname ?? '') : '',
@@ -273,6 +282,15 @@ export function ProfileForm({
               { value: '3', label: '片单、状态与评分' },
             ]}
           />
+        </div>
+      )}
+
+      {showLinuxDoBinding && (
+        <div className='mt-5'>
+          <p className={MODAL_LABEL_CLASS}>账号绑定</p>
+          <div className='grid grid-cols-2 gap-2'>
+            <LinuxDoBindingTile />
+          </div>
         </div>
       )}
 
