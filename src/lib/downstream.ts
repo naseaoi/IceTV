@@ -24,6 +24,7 @@ import {
   peekCachedSearchPage,
   setCachedSearchPage,
 } from '@/lib/search-cache';
+import { parseSeriesStatus } from '@/lib/series-status';
 import { ResourceLimitError } from '@/lib/server-resource-errors';
 import { getSourceCacheKey } from '@/lib/source-cache-key';
 import {
@@ -39,6 +40,9 @@ interface ApiSearchItem {
   vod_name: string;
   vod_pic: string;
   vod_remarks?: string;
+  vod_isend?: number | string;
+  vod_serial?: number | string;
+  vod_total?: number | string;
   vod_play_url?: string;
   vod_class?: string;
   vod_year?: string;
@@ -218,6 +222,10 @@ async function fetchAndCacheSearchPage(
           : 'unknown',
         desc: cleanHtmlTags(item.vod_content || ''),
         type_name: item.type_name,
+        series_status: parseSeriesStatus({
+          ...item,
+          episodeCount: episodes.length,
+        }),
         douban_id: item.vod_douban_id,
       };
     });
@@ -516,6 +524,10 @@ async function getDetailFromVodApi(
         : 'unknown',
       desc: cleanHtmlTags(videoDetail.vod_content),
       type_name: videoDetail.type_name,
+      series_status: parseSeriesStatus({
+        ...videoDetail,
+        episodeCount: episodes.length,
+      }),
       douban_id: videoDetail.vod_douban_id,
     };
   } finally {

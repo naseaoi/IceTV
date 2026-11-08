@@ -66,6 +66,14 @@ export class SqliteInviteCodeStore {
     ).map(inviteFromRow);
   }
 
+  count(): number {
+    return (
+      this.db.prepare('SELECT COUNT(*) AS total FROM invite_codes').get() as {
+        total: number;
+      }
+    ).total;
+  }
+
   countActive(now = Date.now()): number {
     return (
       this.db

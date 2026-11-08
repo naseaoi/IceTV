@@ -78,6 +78,13 @@ export class MysqlInviteCodeStore {
     return rows.map(inviteFromRow);
   }
 
+  async count(): Promise<number> {
+    const [rows] = await this.pool.query<RowDataPacket[]>(
+      'SELECT COUNT(*) AS total FROM invite_codes',
+    );
+    return Number(rows[0].total);
+  }
+
   async countActive(now = Date.now()): Promise<number> {
     const [rows] = await this.pool.query<RowDataPacket[]>(
       `SELECT COUNT(*) AS total FROM invite_codes WHERE ${INVITE_ACTIVE_SQL}`,

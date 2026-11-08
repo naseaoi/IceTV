@@ -45,6 +45,8 @@ export interface InviteCodeListState {
   total: number;
   activeCount: number;
   nextCursor: string | null;
+  // 骨架行数依据；未知时按 1 行
+  expectedCount?: number;
   loading: boolean;
   error: string;
   refresh: () => void;
@@ -55,6 +57,9 @@ interface RegistrationSettingsDialogProps {
   isOpen: boolean;
   openRegister: boolean;
   requireInviteCode: boolean;
+  userGroupNames: string[];
+  defaultUserGroup: string;
+  isSettingDefaultGroup: boolean;
   inviteFilter: InviteCodeFilter;
   inviteList: InviteCodeListState;
   isTogglingRegister: boolean;
@@ -63,6 +68,7 @@ interface RegistrationSettingsDialogProps {
   deletingCode: string | null;
   onToggleOpenRegister: () => void;
   onToggleRequireInviteCode: () => void;
+  onDefaultUserGroupChange: (next: string) => void;
   onInviteFilterChange: (next: InviteCodeFilter) => void;
   // 成功返回本次生成的邀请码，失败返回 null（错误由调用方提示）
   onCreateCodes: (draft: InviteCodeDraft) => Promise<string[] | null>;
@@ -74,6 +80,11 @@ const DEFAULT_VALID_DAYS = 7;
 const COPIED_FEEDBACK_MS = 1500;
 
 const INVITE_CODE_TEXT_CLASS = 'font-mono text-sm';
+const INVITE_ROW_CLASS = 'flex items-center gap-3 px-4 py-2.5';
+const INVITE_LIST_CLASS =
+  'max-h-80 divide-y divide-gray-200 dark:divide-white/[0.06]';
+// 列表限高 max-h-80（320px）约容纳 5.5 行，多出的骨架行被裁掉
+const MAX_SKELETON_ROWS = 6;
 const INVITE_META_TEXT_CLASS = 'mt-0.5 text-xs';
 const SECTION_TITLE_CLASS =
   'text-sm font-semibold text-gray-900 dark:text-gray-100';
@@ -481,7 +492,7 @@ function InviteCodeRow({
   const usable = !expired && !exhausted;
   const remaining = getInviteCodeRemainingUses(item);
   return (
-    <li className='flex items-center gap-3 px-4 py-2.5'>
+    <li className={INVITE_ROW_CLASS}>
       <div className='min-w-0 flex-1'>
         <div className='flex h-5 items-center gap-1'>
           <span
@@ -550,15 +561,15 @@ function InviteCodeRow({
   );
 }
 
-function InviteCodeRowsSkeleton() {
+function InviteCodeRowsSkeleton({ count }: { count: number }) {
   return (
     <div
       role='status'
       aria-label='加载邀请码'
-      className='divide-y divide-gray-200 dark:divide-white/[0.06]'
+      className={`${INVITE_LIST_CLASS} overflow-hidden`}
     >
-      {Array.from({ length: 3 }, (_, index) => (
-        <div key={index} className='flex items-center gap-3 px-4 py-2.5'>
+      {Array.from({ length: Math.min(count, MAX_SKELETON_ROWS) }, (_, i) => (
+        <div key={i} className={INVITE_ROW_CLASS}>
           <div className='min-w-0 flex-1'>
             <SkeletonText
               className={INVITE_CODE_TEXT_CLASS}
@@ -605,6 +616,9 @@ export function RegistrationSettingsDialog({
   isOpen,
   openRegister,
   requireInviteCode,
+  userGroupNames,
+  defaultUserGroup,
+  isSettingDefaultGroup,
   inviteFilter,
   inviteList,
   isTogglingRegister,
@@ -613,13 +627,15 @@ export function RegistrationSettingsDialog({
   deletingCode,
   onToggleOpenRegister,
   onToggleRequireInviteCode,
+  onDefaultUserGroupChange,
   onInviteFilterChange,
   onCreateCodes,
   onDeleteCode,
   onClose,
 }: RegistrationSettingsDialogProps) {
   const { items, total, activeCount, nextCursor, loading, error } = inviteList;
-  const initialLoading = loading && items.length === 0;
+  const expectedCount = inviteList.expectedCount ?? 1;
+  const initialLoading = loading && items.length === 0 && expectedCount > 0;
   const { copiedKey, copy } = useCopyFeedback();
 
   return (
@@ -647,6 +663,28 @@ export function RegistrationSettingsDialog({
             label='切换邀请码要求'
             onToggle={onToggleRequireInviteCode}
           />
+          {userGroupNames.length > 0 && (
+            <div className='flex items-center justify-between gap-4 py-2 pl-4 pr-2'>
+              <p className='text-sm font-medium text-gray-900 dark:text-gray-100'>
+                新用户默认用户组
+              </p>
+              <Select
+                value={defaultUserGroup}
+                onChange={onDefaultUserGroupChange}
+                ariaLabel='新用户默认用户组'
+                variant='pill'
+                align='end'
+                disabled={isSettingDefaultGroup}
+                options={[
+                  { value: '', label: '无' },
+                  ...userGroupNames.map((name) => ({
+                    value: name,
+                    label: name,
+                  })),
+                ]}
+              />
+            </div>
+          )}
         </div>
 
         <Section id='invite-generate-heading' title='生成邀请码'>
@@ -700,7 +738,7 @@ export function RegistrationSettingsDialog({
                 </button>
               </div>
             ) : initialLoading ? (
-              <InviteCodeRowsSkeleton />
+              <InviteCodeRowsSkeleton count={expectedCount} />
             ) : items.length === 0 ? (
               <p className='px-4 py-8 text-center text-sm text-gray-500 dark:text-gray-400'>
                 {inviteFilter === 'all'
@@ -710,7 +748,7 @@ export function RegistrationSettingsDialog({
             ) : (
               <ul
                 aria-label='邀请码列表'
-                className='max-h-80 divide-y divide-gray-200 overflow-y-auto dark:divide-white/[0.06]'
+                className={`${INVITE_LIST_CLASS} overflow-y-auto`}
               >
                 {items.map((item) => (
                   <InviteCodeRow

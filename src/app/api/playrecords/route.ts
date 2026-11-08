@@ -9,6 +9,7 @@ import {
   normalizePlayRecordLimit,
   parsePlayRecordCursor,
 } from '@/lib/play-records';
+import { isSeriesStatus } from '@/lib/series-status';
 import { PlayRecord } from '@/lib/types';
 import { parseStorageKey } from '@/lib/utils';
 
@@ -72,7 +73,15 @@ export async function POST(request: NextRequest) {
     }
 
     // 验证播放记录数据
-    if (!record.title || !record.source_name || record.index < 1) {
+    if (
+      !record.title ||
+      !record.source_name ||
+      record.index < 1 ||
+      (record.series_status !== undefined &&
+        !isSeriesStatus(record.series_status)) ||
+      (record.tracking_enabled !== undefined &&
+        typeof record.tracking_enabled !== 'boolean')
+    ) {
       return NextResponse.json(
         { error: 'Invalid record data' },
         { status: 400 },

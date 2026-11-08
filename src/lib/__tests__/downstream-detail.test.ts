@@ -45,6 +45,16 @@ function mockResponses(api: unknown, page = PAGE_HTML) {
 }
 
 describe('配置了详情页的源', () => {
+  it.each([
+    ['全2集', 'ended'],
+    ['更新至2集', 'ongoing'],
+  ])('详情映射作品状态 %s', async (vod_remarks, expected) => {
+    mockResponses({ list: [{ ...API_ITEM, vod_remarks }] });
+    expect((await getDetailFromApi(SITE, '110900')).series_status).toBe(
+      expected,
+    );
+  });
+
   beforeEach(() => {
     global.fetch = jest.fn();
   });

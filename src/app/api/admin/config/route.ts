@@ -36,6 +36,7 @@ export async function GET(request: NextRequest) {
               limit: 1,
             })
           ).total,
+          inviteCodeCount: await db.countInviteCodes(),
           activeInviteCodeCount: await db.countActiveInviteCodes(),
         },
       },

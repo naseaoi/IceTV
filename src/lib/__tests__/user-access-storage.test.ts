@@ -61,6 +61,14 @@ describe('user access migration and transactional updates', () => {
     });
   });
 
+  it('writes initial groups in the registration transaction', async () => {
+    await storage.registerUser('carol', 'password', undefined, ['second']);
+    expect(await storage.getUserAccess('carol')).toMatchObject({
+      role: 'user',
+      tags: ['second'],
+    });
+  });
+
   it('rolls back migration data if config CAS fails', () => {
     raw
       .prepare('INSERT INTO users (username, password) VALUES (?, ?)')

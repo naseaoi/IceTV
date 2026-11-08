@@ -116,8 +116,14 @@ export async function handleRegister(request: NextRequest) {
       }
     }
 
+    const defaultGroup = config.UserConfig.DefaultUserGroup;
     try {
-      await db.registerUser(username, password, nickname);
+      await db.registerUser(
+        username,
+        password,
+        nickname,
+        defaultGroup ? [defaultGroup] : undefined,
+      );
     } catch (error) {
       if (reserved) {
         await releaseInviteCode(body.inviteCode);

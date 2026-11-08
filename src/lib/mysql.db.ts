@@ -1834,6 +1834,7 @@ export class MySqlStorage implements IStorage {
     userName: string,
     password: string,
     nickname?: string,
+    userGroups?: string[],
   ): Promise<void> {
     await this.ensureInitialized();
     const username = assertValidUsernameFormat(userName);
@@ -1851,6 +1852,7 @@ export class MySqlStorage implements IStorage {
       await new MysqlUserAccessStore(connection, true).put({
         username,
         role: 'user',
+        tags: userGroups,
       });
       if (nickname !== undefined)
         await this.socialFor(connection).updateUserProfile(username, {
@@ -2114,6 +2116,10 @@ export class MySqlStorage implements IStorage {
   async queryInviteCodes(query: InviteCodeQuery) {
     await this.ensureInitialized();
     return this.invites.page(query);
+  }
+  async countInviteCodes() {
+    await this.ensureInitialized();
+    return this.invites.count();
   }
   async countActiveInviteCodes() {
     await this.ensureInitialized();

@@ -50,6 +50,7 @@ const ACTIONS = [
   'previewInactiveUsers',
   'deleteInactiveUsers',
   'setRequireInviteCode',
+  'setDefaultUserGroup',
   'createInviteCode',
   'deleteInviteCode',
 ] as const;
@@ -61,6 +62,7 @@ const TARGETLESS_ACTIONS = [
   'previewInactiveUsers',
   'deleteInactiveUsers',
   'setRequireInviteCode',
+  'setDefaultUserGroup',
   'createInviteCode',
   'deleteInviteCode',
 ];
@@ -255,20 +257,21 @@ async function runAdminUserAction(
         if (passwordError) {
           return toActionResponse({ error: passwordError }, { status: 400 });
         }
-        await db.registerUser(cleanTargetUsername, targetPassword);
-
-        const { userGroup } = body as { userGroup?: string };
-
-        const newUser: any = {
-          username: cleanTargetUsername,
-          role: 'user',
-        };
-
-        if (userGroup && userGroup.trim()) {
-          newUser.tags = [userGroup];
+        const { userGroup } = body as { userGroup?: unknown };
+        if (
+          userGroup !== undefined &&
+          userGroup !== '' &&
+          (typeof userGroup !== 'string' ||
+            !adminConfig.UserConfig.Tags?.some((tag) => tag.name === userGroup))
+        ) {
+          return toActionResponse({ error: '用户组不存在' }, { status: 400 });
         }
-
-        await db.updateUserAccess([cleanTargetUsername], newUser);
+        await db.registerUser(
+          cleanTargetUsername,
+          targetPassword,
+          undefined,
+          userGroup ? [userGroup as string] : undefined,
+        );
         return actionResponse({ ok: true });
       }
       case 'ban': {
@@ -612,6 +615,21 @@ async function runAdminUserAction(
           );
         }
         adminConfig.UserConfig.RequireInviteCode = requireInviteCode;
+        break;
+      }
+      case 'setDefaultUserGroup': {
+        const { userGroup } = body as { userGroup?: unknown };
+        if (userGroup === '') {
+          delete adminConfig.UserConfig.DefaultUserGroup;
+          break;
+        }
+        if (
+          typeof userGroup !== 'string' ||
+          !adminConfig.UserConfig.Tags?.some((tag) => tag.name === userGroup)
+        ) {
+          return toActionResponse({ error: '用户组不存在' }, { status: 400 });
+        }
+        adminConfig.UserConfig.DefaultUserGroup = userGroup;
         break;
       }
       case 'createInviteCode': {

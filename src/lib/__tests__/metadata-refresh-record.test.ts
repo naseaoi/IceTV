@@ -45,6 +45,35 @@ function createDetail(overrides: Partial<SearchResult> = {}): SearchResult {
 }
 
 describe('buildRefreshedPlayRecord', () => {
+  it('状态刷新独立于集数变化且保留手动追更', () => {
+    const record = createRecord({
+      series_status: 'ongoing',
+      tracking_enabled: true,
+    });
+    const next = buildRefreshedPlayRecord(
+      record,
+      createDetail({ series_status: 'ended', episodes: [] }),
+      5000,
+    );
+    expect(next).toMatchObject({
+      series_status: 'ended',
+      tracking_enabled: true,
+    });
+    expect(
+      buildRefreshedPlayRecord(
+        next,
+        createDetail({ series_status: 'ongoing' }),
+        6000,
+      ).series_status,
+    ).toBe('ongoing');
+    expect(
+      buildRefreshedPlayRecord(next, createDetail(), 6000).series_status,
+    ).toBe('ended');
+    expect(buildRefreshedPlayRecord(next, null, 6000).series_status).toBe(
+      'ended',
+    );
+  });
+
   it.each([
     ['简中 8', '简中'],
     ['简中8', '简中'],

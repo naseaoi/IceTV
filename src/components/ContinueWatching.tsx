@@ -35,6 +35,7 @@ import {
   getPlayRecordEpisodeDisplay,
   getPlayRecordResumeGroup,
   hasPlayRecordUpdate,
+  isTrackingEnabled,
 } from '@/lib/play-records';
 import { parseStorageKey } from '@/lib/utils';
 
@@ -291,7 +292,7 @@ export default function ContinueWatching({
                   resumeGroup={getPlayRecordResumeGroup(record)}
                   progress={getProgress(record)}
                   hasUpdate={hasPlayRecordUpdate(record)}
-                  trackingEnabled={record.tracking_enabled !== false}
+                  trackingEnabled={isTrackingEnabled(record)}
                   availableEpisodes={episodeDisplay.totalEpisodes}
                   resumeTime={Math.max(0, Math.floor(record.play_time || 0))}
                   query={record.search_title}

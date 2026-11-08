@@ -176,6 +176,16 @@ export function useAdminUserActions(options: UseAdminUserActionsOptions) {
     [runUserMutation],
   );
 
+  const setDefaultUserGroup = useCallback(
+    async (userGroup: string) => {
+      await runUserMutation(
+        { action: 'setDefaultUserGroup', userGroup },
+        '设置默认用户组失败',
+      );
+    },
+    [runUserMutation],
+  );
+
   const updateUserApis = useCallback(
     async (username: string, enabledApis: string[]) => {
       await runUserMutation({
@@ -215,6 +225,7 @@ export function useAdminUserActions(options: UseAdminUserActionsOptions) {
     createInviteCodes,
     deleteInviteCode,
     setRequireInviteCode,
+    setDefaultUserGroup,
     updateUserApis,
     userAction,
   };

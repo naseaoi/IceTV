@@ -451,6 +451,29 @@ describe('usePlayProgress helpers', () => {
     expect(mockedSavePlayRecord).not.toHaveBeenCalled();
   });
 
+  it('保存进度携带当前详情的作品状态', async () => {
+    await saveCurrentPlayProgress(
+      { current: { currentTime: 120, duration: 1500 } } as any,
+      { current: 'source-a' },
+      { current: 'id-a' },
+      { current: '番剧A' },
+      { current: { ...detail, series_status: 'ended' } },
+      { current: 0 },
+      { current: 120 },
+      { current: false },
+      {
+        current: { inFlight: false, pending: null, lastSavedFingerprint: null },
+      },
+      { current: 0 },
+      '番剧A',
+    );
+    expect(mockedSavePlayRecord).toHaveBeenCalledWith(
+      'source-a',
+      'id-a',
+      expect.objectContaining({ series_status: 'ended' }),
+    );
+  });
+
   it('起播前的 0 进度不写 checkpoint，避免覆盖真实进度', () => {
     savePlaybackCheckpoint(
       { current: 'source-a' },

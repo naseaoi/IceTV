@@ -2534,6 +2534,7 @@ export class LocalSqliteStorage implements IStorage {
     userName: string,
     password: string,
     nickname?: string,
+    userGroups?: string[],
   ): Promise<void> {
     const username = assertValidUsernameFormat(userName);
     if (this.stmts.checkUserExist.get(username)) {
@@ -2541,7 +2542,13 @@ export class LocalSqliteStorage implements IStorage {
     }
     const hashed = await hashPassword(password);
     try {
-      this.registerUserWithActivity(username, hashed, Date.now(), nickname);
+      this.registerUserWithActivity(
+        username,
+        hashed,
+        Date.now(),
+        nickname,
+        userGroups,
+      );
     } catch (error) {
       if (isSqliteUniqueConstraintError(error)) {
         throw new Error('用户已存在');
@@ -2556,12 +2563,17 @@ export class LocalSqliteStorage implements IStorage {
     hashedPassword: string,
     now: number,
     nickname?: string,
+    userGroups?: string[],
   ): void {
     this.db.transaction(() => {
       this.stmts.registerUser.run(username, hashedPassword);
       this.stmts.recordUserLogin.run(username, now);
       this.insertUserProfile(username, nickname);
-      new SqliteUserAccessStore(this.db).put({ username, role: 'user' });
+      new SqliteUserAccessStore(this.db).put({
+        username,
+        role: 'user',
+        tags: userGroups,
+      });
     })();
   }
 
@@ -2746,6 +2758,9 @@ export class LocalSqliteStorage implements IStorage {
   }
   async queryInviteCodes(query: InviteCodeQuery) {
     return this.invites.page(query);
+  }
+  async countInviteCodes() {
+    return this.invites.count();
   }
   async countActiveInviteCodes() {
     return this.invites.countActive();

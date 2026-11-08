@@ -11,6 +11,7 @@ import {
   validateReplyContent,
 } from '@/lib/review-reply-storage';
 import { importedAvatarSeed } from '@/lib/review-social-storage';
+import { isSeriesStatus } from '@/lib/series-status';
 import {
   parseSocialNotificationId,
   validateMutedKinds,
@@ -1094,10 +1095,28 @@ function normalizeRecordMap<T>(
 
 function normalizePlayRecord(value: unknown): PlayRecord {
   const input = requireObject(value, '播放记录格式无效');
+  if (
+    input.series_status !== undefined &&
+    !isSeriesStatus(input.series_status)
+  ) {
+    throw new ImportValidationError('作品连载状态无效');
+  }
+  if (
+    input.tracking_enabled !== undefined &&
+    typeof input.tracking_enabled !== 'boolean'
+  ) {
+    throw new ImportValidationError('追更开关格式无效');
+  }
   if ((input.group_index === undefined) !== (input.group_total === undefined)) {
     throw new ImportValidationError('组内集数与组内总集数必须成对出现');
   }
   return {
+    ...(input.series_status === undefined
+      ? {}
+      : { series_status: input.series_status }),
+    ...(input.tracking_enabled === undefined
+      ? {}
+      : { tracking_enabled: input.tracking_enabled }),
     title: limitString(input.title, '标题', MAX_SHORT_STRING_LENGTH),
     source_name: limitString(
       input.source_name,

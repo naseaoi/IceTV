@@ -479,6 +479,13 @@ export function configSelfCheck(adminConfig: AdminConfig): AdminConfig {
   if (typeof adminConfig.UserConfig.RequireInviteCode !== 'boolean') {
     adminConfig.UserConfig.RequireInviteCode = false;
   }
+  const defaultGroup = adminConfig.UserConfig.DefaultUserGroup;
+  if (
+    typeof defaultGroup !== 'string' ||
+    !adminConfig.UserConfig.Tags?.some((tag) => tag?.name === defaultGroup)
+  ) {
+    delete adminConfig.UserConfig.DefaultUserGroup;
+  }
   delete adminConfig.UserConfig.InviteCodes;
   if (!adminConfig.SourceConfig || !Array.isArray(adminConfig.SourceConfig)) {
     adminConfig.SourceConfig = [];

@@ -250,3 +250,23 @@ it('records network failures during probing without throwing', async () => {
   expect(recordSourceSearchOutcome).toHaveBeenCalledTimes(1);
   expect(recordSourceSearchOutcome).toHaveBeenCalledWith('a', 'error', 0);
 });
+
+it.each([
+  ['全1集', 'ended'],
+  ['更新至1集', 'ongoing'],
+])('搜索映射作品状态 %s', async (vod_remarks, expected) => {
+  fetchMock.mockResolvedValue({
+    ok: true,
+    json: async () => ({
+      list: [
+        {
+          ...item,
+          vod_remarks,
+          vod_play_url: '第1集$https://example.com/1.m3u8',
+        },
+      ],
+    }),
+  });
+  const results = await searchFromApi(site, 'movie');
+  expect(results[0].series_status).toBe(expected);
+});

@@ -58,6 +58,8 @@ export interface AdminConfig {
     }[];
     OpenRegister?: boolean;
     RequireInviteCode?: boolean;
+    DefaultUserGroup?: string;
+    inviteCodeCount?: number;
     activeInviteCodeCount?: number;
     InviteCodes?: {
       code: string;

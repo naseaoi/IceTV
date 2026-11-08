@@ -43,6 +43,8 @@ export function inviteCodeBatchContract(createStorage: () => IStorage) {
     await storage.createInviteCode(
       makeCode('EXHAUSTED', { maxUses: 1, usedCount: 1 }),
     );
+    expect(await storage.countInviteCodes()).toBe(2);
+    expect(await storage.countActiveInviteCodes()).toBe(0);
     const items = ['NEW', 'EXPIRED', 'EXHAUSTED'].map((code) =>
       makeCode(code, { maxUses: 3 }),
     );

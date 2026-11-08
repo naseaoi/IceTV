@@ -183,11 +183,12 @@ describe('admin user route', () => {
     expect(saveConfig).not.toHaveBeenCalled();
   });
 
-  it('adds user metadata only after database registration succeeds', async () => {
+  it('adds user with the chosen group in the registration write', async () => {
     const POST = getHandler();
     (db.checkUserExist as jest.Mock).mockResolvedValue(false);
     (db.registerUser as jest.Mock).mockResolvedValue(undefined);
     const adminConfig = createAdminConfig();
+    adminConfig.UserConfig.Tags = [{ name: 'vip', enabledApis: [] }];
     (getConfig as jest.Mock).mockResolvedValue(adminConfig);
 
     const response = await POST(
@@ -200,13 +201,60 @@ describe('admin user route', () => {
     );
 
     expect(response.status).toBe(200);
-    expect(db.registerUser).toHaveBeenCalledWith('new-user', 'new-password');
-    expect(db.updateUserAccess).toHaveBeenCalledWith(['new-user'], {
-      username: 'new-user',
-      role: 'user',
-      tags: ['vip'],
-    });
+    expect(db.registerUser).toHaveBeenCalledWith(
+      'new-user',
+      'new-password',
+      undefined,
+      ['vip'],
+    );
     expect(saveConfig).not.toHaveBeenCalled();
+  });
+
+  it('rejects adding a user to a missing group', async () => {
+    const POST = getHandler();
+    (db.checkUserExist as jest.Mock).mockResolvedValue(false);
+    (getConfig as jest.Mock).mockResolvedValue(createAdminConfig());
+
+    const response = await POST(
+      createRequest({
+        action: 'add',
+        targetUsername: 'new-user',
+        targetPassword: 'new-password',
+        userGroup: 'ghost',
+      }),
+    );
+
+    expect(response.status).toBe(400);
+    expect(db.registerUser).not.toHaveBeenCalled();
+  });
+
+  it('sets and clears the default user group', async () => {
+    const POST = getHandler();
+    const adminConfig = createAdminConfig();
+    adminConfig.UserConfig.Tags = [{ name: 'vip', enabledApis: [] }];
+    (getConfig as jest.Mock).mockResolvedValue(adminConfig);
+
+    const missing = await POST(
+      createRequest({ action: 'setDefaultUserGroup', userGroup: 'ghost' }),
+    );
+    expect(missing.status).toBe(400);
+    expect(saveConfig).not.toHaveBeenCalled();
+
+    const set = await POST(
+      createRequest({ action: 'setDefaultUserGroup', userGroup: 'vip' }),
+    );
+    expect(set.status).toBe(200);
+    expect(
+      (adminConfig.UserConfig as AdminConfig['UserConfig']).DefaultUserGroup,
+    ).toBe('vip');
+
+    const cleared = await POST(
+      createRequest({ action: 'setDefaultUserGroup', userGroup: '' }),
+    );
+    expect(cleared.status).toBe(200);
+    expect(
+      (adminConfig.UserConfig as AdminConfig['UserConfig']).DefaultUserGroup,
+    ).toBeUndefined();
   });
 
   it('returns 409 when persisting hits a config conflict', async () => {

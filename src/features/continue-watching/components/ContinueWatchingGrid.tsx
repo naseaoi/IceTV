@@ -11,6 +11,7 @@ import {
   getPlayRecordEpisodeDisplay,
   getPlayRecordResumeGroup,
   hasPlayRecordUpdate,
+  isTrackingEnabled,
 } from '@/lib/play-records';
 import { parseStorageKey } from '@/lib/utils';
 
@@ -64,7 +65,7 @@ export function ContinueWatchingGrid({
               episodes={episodeDisplay.totalEpisodes}
               currentEpisode={episodeDisplay.currentEpisode}
               hasUpdate={hasPlayRecordUpdate(record)}
-              trackingEnabled={record.tracking_enabled !== false}
+              trackingEnabled={isTrackingEnabled(record)}
               availableEpisodes={episodeDisplay.totalEpisodes}
               resumeEpisodeIndex={Math.max(0, record.index - 1)}
               resumeGroup={getPlayRecordResumeGroup(record)}

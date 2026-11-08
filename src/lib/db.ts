@@ -564,9 +564,10 @@ class DbManager {
     userName: string,
     password: string,
     nickname?: string,
+    userGroups?: string[],
   ): Promise<void> {
     const storage = await this.getStorage();
-    await storage.registerUser(userName, password, nickname);
+    await storage.registerUser(userName, password, nickname, userGroups);
   }
 
   async verifyUser(userName: string, password: string): Promise<boolean> {
@@ -697,6 +698,10 @@ class DbManager {
     ...args: Parameters<IStorage['queryInviteCodes']>
   ): ReturnType<IStorage['queryInviteCodes']> {
     return (await this.getStorage()).queryInviteCodes(...args);
+  }
+
+  async countInviteCodes(): Promise<number> {
+    return (await this.getStorage()).countInviteCodes();
   }
 
   async countActiveInviteCodes(): Promise<number> {

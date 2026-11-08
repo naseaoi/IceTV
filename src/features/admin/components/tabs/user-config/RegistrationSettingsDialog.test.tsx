@@ -29,6 +29,9 @@ function renderDialog(
       isOpen
       openRegister
       requireInviteCode
+      userGroupNames={[]}
+      defaultUserGroup=''
+      isSettingDefaultGroup={false}
       inviteFilter={filter}
       inviteList={inviteList}
       isTogglingRegister={false}
@@ -37,6 +40,7 @@ function renderDialog(
       deletingCode={null}
       onToggleOpenRegister={jest.fn()}
       onToggleRequireInviteCode={jest.fn()}
+      onDefaultUserGroupChange={jest.fn()}
       onInviteFilterChange={jest.fn()}
       onCreateCodes={onCreateCodes}
       onDeleteCode={onDeleteCode}
@@ -99,11 +103,33 @@ describe('RegistrationSettingsDialog invite code list', () => {
     expect(screen.queryByText(/共 \d+ 个/)).not.toBeInTheDocument();
   });
 
-  it('shows skeleton rows on first load', () => {
+  it('matches skeleton rows to the expected count, capped by list height', () => {
+    renderDialog({ loading: true, expectedCount: 3 });
+    expect(
+      screen.getByRole('status', { name: '加载邀请码' }).childElementCount,
+    ).toBe(3);
+  });
+
+  it('caps skeleton rows for long lists', () => {
+    renderDialog({ loading: true, expectedCount: 40 });
+    expect(
+      screen.getByRole('status', { name: '加载邀请码' }).childElementCount,
+    ).toBeLessThan(40);
+  });
+
+  it('falls back to one skeleton row when the count is unknown', () => {
     renderDialog({ loading: true });
     expect(
-      screen.getByRole('status', { name: '加载邀请码' }),
-    ).toBeInTheDocument();
+      screen.getByRole('status', { name: '加载邀请码' }).childElementCount,
+    ).toBe(1);
+  });
+
+  it('shows the empty state while loading when no codes are expected', () => {
+    renderDialog({ loading: true, expectedCount: 0 });
+    expect(
+      screen.queryByRole('status', { name: '加载邀请码' }),
+    ).not.toBeInTheDocument();
+    expect(screen.getByText('还没有邀请码')).toBeInTheDocument();
   });
 });
 

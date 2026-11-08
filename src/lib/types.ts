@@ -27,6 +27,7 @@ export interface PlayRecord {
   update_baseline_group_total?: number;
   update_detected_at?: number;
   tracking_enabled?: boolean;
+  series_status?: 'ongoing' | 'ended';
   search_title?: string; // 搜索时使用的标题
 }
 
@@ -714,6 +715,7 @@ export interface IStorage {
     userName: string,
     password: string,
     nickname?: string,
+    userGroups?: string[],
   ): Promise<void>;
   verifyUser(userName: string, password: string): Promise<boolean>;
   // 检查用户是否存在（无需密码）
@@ -787,6 +789,7 @@ export interface IStorage {
   queryInviteCodes(
     query: import('@/lib/invite-code-storage').InviteCodeQuery,
   ): Promise<import('@/lib/invite-code-storage').InviteCodePage>;
+  countInviteCodes(): Promise<number>;
   countActiveInviteCodes(): Promise<number>;
   createInviteCodes(
     items: import('@/features/admin/services/inviteCodes').InviteCode[],
@@ -911,6 +914,7 @@ export interface SearchResult {
   source: string;
   source_name: string;
   variant_label?: string;
+  series_status?: 'ongoing' | 'ended';
   class?: string;
   year: string;
   desc?: string;

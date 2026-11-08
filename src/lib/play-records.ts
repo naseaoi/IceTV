@@ -182,8 +182,14 @@ export function hasPlayRecordGroupChanged(
   );
 }
 
+export function isTrackingEnabled(
+  record: Pick<PlayRecord, 'tracking_enabled' | 'series_status'>,
+): boolean {
+  return record.tracking_enabled ?? record.series_status !== 'ended';
+}
+
 export function hasPlayRecordUpdate(record: PlayRecord): boolean {
-  if (record.tracking_enabled === false) return false;
+  if (!isTrackingEnabled(record)) return false;
 
   const { currentEpisode, totalEpisodes } = getPlayRecordEpisodeDisplay(record);
   const baseline = getPlayRecordUpdateBaseline(record);
@@ -240,6 +246,7 @@ export function mergePlayRecordUpdateBaseline(
   return {
     ...next,
     tracking_enabled: next.tracking_enabled ?? previous?.tracking_enabled,
+    series_status: next.series_status ?? previous?.series_status,
     ...(isGrouped
       ? { update_baseline_group_total: Math.max(0, baseline) }
       : { update_baseline_episodes: Math.max(0, baseline) }),

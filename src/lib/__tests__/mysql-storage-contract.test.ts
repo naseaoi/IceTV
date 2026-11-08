@@ -3058,6 +3058,34 @@ describe('mysql storage contract', () => {
 
   // 以下四个未读追更用例走 fake pool，其筛选复用生产的 hasPlayRecordUpdate
   // 断言范围是筛选与排序语义，不覆盖真实 SQL 谓词（MySQL 比 'false' 字符串、SQLite 比数字 0 的分歧测不出来）
+  it('作品状态与显式开关的组合决定追更查询并保留导出字段', async () => {
+    const storage = new MySqlStorage('mysql://demo:demo@localhost:3306/icetv');
+    const records: Record<string, PlayRecord> = {};
+    const expected: string[] = [];
+    for (const series_status of [undefined, 'ongoing', 'ended'] as const) {
+      for (const tracking_enabled of [undefined, true, false]) {
+        const key = `source+${series_status}-${tracking_enabled}`;
+        records[key] = {
+          ...playRecord,
+          index: 1,
+          total_episodes: 12,
+          update_baseline_episodes: 10,
+          series_status,
+          tracking_enabled,
+        };
+        if (tracking_enabled ?? series_status !== 'ended') expected.push(key);
+      }
+    }
+    await storage.setPlayRecords('status-contract', records);
+    const page = await storage.getUnreadTrackingPlayRecordPage(
+      'status-contract',
+      20,
+    );
+    expect(Object.keys(page.items).sort()).toEqual(expected.sort());
+    expect(page.total).toBe(expected.length);
+    expect(await storage.getAllPlayRecords('status-contract')).toEqual(records);
+  });
+
   it('只返回未读且未关闭追更的记录', async () => {
     const storage = new MySqlStorage('mysql://demo:demo@localhost:3306/icetv');
     const makeRecord = (

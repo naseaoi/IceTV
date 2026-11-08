@@ -109,6 +109,7 @@ const UserConfig = ({ config, role, refreshConfig }: UserConfigProps) => {
     createInviteCodes,
     deleteInviteCode,
     setRequireInviteCode,
+    setDefaultUserGroup,
     updateUserApis,
     userAction,
   } = useAdminUserActions({
@@ -407,6 +408,16 @@ const UserConfig = ({ config, role, refreshConfig }: UserConfigProps) => {
       }
     });
   };
+
+  const handleDefaultUserGroupChange = (next: string) =>
+    withLoading('setDefaultUserGroup', async () => {
+      try {
+        await setDefaultUserGroup(next);
+        showSuccess(next ? `新用户将加入「${next}」` : '新用户不再自动分组');
+      } catch {
+        // handled in setDefaultUserGroup
+      }
+    });
 
   const handleCreateInviteCodes = (draft: InviteCodeDraft) =>
     withLoading('createInviteCode', async () => {
@@ -831,6 +842,11 @@ const UserConfig = ({ config, role, refreshConfig }: UserConfigProps) => {
             </button>
             <button
               onClick={() => {
+                setNewUser({
+                  username: '',
+                  password: '',
+                  userGroup: config?.UserConfig?.DefaultUserGroup || '',
+                });
                 setShowAddUserForm(true);
                 if (showChangePasswordForm) {
                   setShowChangePasswordForm(false);
@@ -1110,8 +1126,19 @@ const UserConfig = ({ config, role, refreshConfig }: UserConfigProps) => {
         isOpen={showRegistrationModal}
         openRegister={!!config.UserConfig.OpenRegister}
         requireInviteCode={!!config.UserConfig.RequireInviteCode}
+        userGroupNames={userGroups.map((group) => group.name)}
+        defaultUserGroup={config.UserConfig.DefaultUserGroup || ''}
+        isSettingDefaultGroup={isLoading('setDefaultUserGroup')}
         inviteFilter={inviteFilter}
-        inviteList={inviteList}
+        inviteList={{
+          ...inviteList,
+          expectedCount:
+            inviteFilter === 'all'
+              ? config.UserConfig.inviteCodeCount
+              : inviteFilter === 'active'
+                ? activeInviteCodeCount
+                : inviteList.totals[inviteFilter],
+        }}
         isTogglingRegister={isLoading('setOpenRegister')}
         isTogglingInvite={isLoading('setRequireInviteCode')}
         isCreatingCode={isLoading('createInviteCode')}
@@ -1122,6 +1149,7 @@ const UserConfig = ({ config, role, refreshConfig }: UserConfigProps) => {
         }
         onToggleOpenRegister={handleToggleOpenRegister}
         onToggleRequireInviteCode={handleToggleRequireInviteCode}
+        onDefaultUserGroupChange={handleDefaultUserGroupChange}
         onInviteFilterChange={setInviteFilter}
         onCreateCodes={handleCreateInviteCodes}
         onDeleteCode={handleDeleteInviteCode}

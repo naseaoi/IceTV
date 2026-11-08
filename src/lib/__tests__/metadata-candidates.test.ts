@@ -1,6 +1,8 @@
 import {
+  buildPlayRecordCandidate,
   collectFavoriteCandidates,
   collectPlayRecordCandidates,
+  ENDED_SERIES_METADATA_REFRESH_TTL_MS,
   shouldRefreshMetadata,
   sortMetadataCandidates,
 } from '@/lib/cron/metadata-candidates';
@@ -46,6 +48,75 @@ describe('shouldRefreshMetadata', () => {
 });
 
 describe('collectPlayRecordCandidates', () => {
+  it.each([undefined, false])(
+    '未显式开启（%s）的完结记录按七天边界复查',
+    (tracking_enabled) => {
+      const record = createRecord({
+        series_status: 'ended',
+        tracking_enabled,
+        metadata_checked_at: NOW - ENDED_SERIES_METADATA_REFRESH_TTL_MS + 1,
+      });
+      expect(
+        buildPlayRecordCandidate('user', 'source+1', record, NOW, TTL_MS),
+      ).toBeNull();
+      expect(
+        buildPlayRecordCandidate(
+          'user',
+          'source+1',
+          {
+            ...record,
+            metadata_checked_at: NOW - ENDED_SERIES_METADATA_REFRESH_TTL_MS,
+          },
+          NOW,
+          TTL_MS,
+        ),
+      ).toMatchObject({ priority: 2 });
+    },
+  );
+
+  it('显式开启的完结作品仍按普通 TTL 检查', () => {
+    expect(
+      buildPlayRecordCandidate(
+        'user',
+        'source+1',
+        createRecord({
+          series_status: 'ended',
+          tracking_enabled: true,
+          metadata_checked_at: NOW - TTL_MS,
+        }),
+        NOW,
+        TTL_MS,
+      ),
+    ).not.toBeNull();
+  });
+
+  it.each([undefined, 'ongoing'] as const)(
+    '状态 %s 仍按普通 TTL 检查',
+    (series_status) => {
+      expect(
+        buildPlayRecordCandidate(
+          'user',
+          'source+1',
+          createRecord({ series_status, metadata_checked_at: NOW - TTL_MS }),
+          NOW,
+          TTL_MS,
+        ),
+      ).not.toBeNull();
+    },
+  );
+
+  it('从未检查的完结记录仍参加刷新', () => {
+    expect(
+      buildPlayRecordCandidate(
+        'user',
+        'source+1',
+        createRecord({ series_status: 'ended' }),
+        NOW,
+        TTL_MS,
+      ),
+    ).not.toBeNull();
+  });
+
   it('跳过尚在 TTL 内的记录', () => {
     const candidates = collectPlayRecordCandidates(
       'user',

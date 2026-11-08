@@ -23,6 +23,9 @@ export function useAdminInviteCodes(
   const [page, setPage] = useState<InviteCodePage>(EMPTY_PAGE);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+  const [totals, setTotals] = useState<
+    Partial<Record<InviteCodeFilter, number>>
+  >({});
   const controller = useRef<AbortController | null>(null);
   const generation = useRef(0);
 
@@ -52,6 +55,12 @@ export function useAdminInviteCodes(
           activeCount: payload.activeCount ?? 0,
           nextCursor: payload.nextCursor ?? null,
         };
+        if (!cursor)
+          setTotals((previous) => ({
+            ...previous,
+            [filter]: result.total,
+            active: result.activeCount,
+          }));
         setPage((previous) =>
           cursor
             ? {
@@ -90,6 +99,7 @@ export function useAdminInviteCodes(
 
   return {
     ...page,
+    totals,
     loading,
     error,
     refresh: () => load(),

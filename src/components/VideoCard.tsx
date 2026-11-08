@@ -55,7 +55,7 @@ import {
   withReturnTo,
 } from '@/lib/navigation-return';
 import { savePlayIntent } from '@/lib/play-intent';
-import { hasPlayRecordUpdate } from '@/lib/play-records';
+import { hasPlayRecordUpdate, isTrackingEnabled } from '@/lib/play-records';
 import { showToast } from '@/lib/toast';
 import { parseStorageKey } from '@/lib/utils';
 import {
@@ -641,10 +641,10 @@ const VideoCard = forwardRef<VideoCardHandle, VideoCardProps>(
         actualId,
         !visibleTrackingEnabled,
       );
-      setVisibleTrackingEnabled(record.tracking_enabled !== false);
+      setVisibleTrackingEnabled(isTrackingEnabled(record));
       setVisibleHasUpdate(hasPlayRecordUpdate(record));
       showToast(
-        record.tracking_enabled !== false ? '已开启追更' : '已取消追更',
+        isTrackingEnabled(record) ? '已开启追更' : '已取消追更',
         'success',
       );
     }, [actualId, actualSource, from, visibleTrackingEnabled]);

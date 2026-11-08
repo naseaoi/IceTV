@@ -127,6 +127,18 @@ describe('config cache persistence', () => {
     expect(configSelfCheck(legacy).SiteConfig.EnableUserDanmaku).toBe(false);
   });
 
+  it('drops a default user group that no longer exists', async () => {
+    const { configSelfCheck } = await loadConfigModule(jest.fn(), {
+      adminConfig: cloneBaseConfig(),
+    });
+    const config = cloneBaseConfig();
+    config.UserConfig.Tags = [{ name: 'vip', enabledApis: [] }];
+    config.UserConfig.DefaultUserGroup = 'vip';
+    expect(configSelfCheck(config).UserConfig.DefaultUserGroup).toBe('vip');
+    config.UserConfig.Tags = [];
+    expect(configSelfCheck(config).UserConfig.DefaultUserGroup).toBeUndefined();
+  });
+
   it.each(['groups', 'all', undefined, 'invalid'])(
     'normalizes live access %s and keeps only true group grants',
     async (LiveAccess) => {

@@ -119,6 +119,26 @@ describe('register route', () => {
       'demo-user',
       'strong-password',
       '测试昵称',
+      undefined,
+    );
+  });
+
+  it('把新用户写入默认用户组', async () => {
+    const { POST } = require('./route');
+    const config = createConfig();
+    (config.UserConfig as Record<string, unknown>).DefaultUserGroup = 'vip';
+    (getConfigForRead as jest.Mock).mockResolvedValue(config);
+
+    const response = await POST(
+      createRequest({ username: 'demo-user', password: 'strong-password' }),
+    );
+
+    expect(response.status).toBe(200);
+    expect(db.registerUser).toHaveBeenCalledWith(
+      'demo-user',
+      'strong-password',
+      '测试昵称',
+      ['vip'],
     );
   });
 

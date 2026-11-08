@@ -394,6 +394,7 @@ export function buildRefreshedPlayRecord(
   const baseRecord: PlayRecord = {
     ...record,
     cover: detail?.poster || record.cover,
+    series_status: detail?.series_status ?? record.series_status,
     metadata_checked_at: checkedAt,
     update_baseline_episodes:
       record.update_baseline_episodes ?? record.total_episodes,

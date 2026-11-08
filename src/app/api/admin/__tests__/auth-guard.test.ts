@@ -91,6 +91,7 @@ jest.mock('@/lib/db', () => ({
     getLiveSourceChannelCounts: jest.fn().mockResolvedValue({}),
     getUserAccess: jest.fn(),
     getAdminUserPage: jest.fn(),
+    countInviteCodes: jest.fn().mockResolvedValue(0),
     countActiveInviteCodes: jest.fn().mockResolvedValue(0),
     recordUserLogin: jest.fn(),
     recordUserActivity: jest.fn().mockResolvedValue(undefined),
