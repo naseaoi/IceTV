@@ -113,6 +113,7 @@ export async function GET(request: NextRequest) {
       timeoutMs,
     });
     if (!response.ok) {
+      await response.body?.cancel().catch(() => {});
       return NextResponse.json(
         { error: 'Failed to fetch key' },
         { status: 500 },

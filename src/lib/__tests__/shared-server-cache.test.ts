@@ -70,6 +70,8 @@ describe('shared server cache', () => {
       'origin failed',
     );
     expect(loader).toHaveBeenCalledTimes(1);
+    const key = `shared-test:${createHash('sha256').update('same').digest('hex')}`;
+    expect(await storage.getSharedCache(key)).toBeNull();
     await expect(
       cache().getOrLoad('same', async () => 'recovered'),
     ).resolves.toBe('recovered');
@@ -248,6 +250,23 @@ describe('shared server cache', () => {
     });
     await small.getOrLoad('large', async () => 'x'.repeat(100));
     expect(small.stats().size).toBe(0);
+    expect(db.setSharedCache).not.toHaveBeenCalled();
+    const key = `bounded:${createHash('sha256').update('large').digest('hex')}`;
+    expect(await storage.getSharedCache(key)).toBeNull();
+  });
+
+  it('removes placeholders when shouldCache rejects the loaded value', async () => {
+    const rejected = createSharedServerCache<string>({
+      name: 'rejected',
+      freshMs: 1000,
+      enabled: true,
+      shouldCache: () => false,
+    });
+    await expect(rejected.getOrLoad('same', async () => 'value')).resolves.toBe(
+      'value',
+    );
+    const key = `rejected:${createHash('sha256').update('same').digest('hex')}`;
+    expect(await storage.getSharedCache(key)).toBeNull();
     expect(db.setSharedCache).not.toHaveBeenCalled();
   });
 });

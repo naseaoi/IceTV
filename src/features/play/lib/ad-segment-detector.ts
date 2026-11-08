@@ -425,13 +425,11 @@ async function fetchTsSize(url: string, ua: string): Promise<number> {
       cache: 'no-store',
       redirect: 'follow',
     });
+    await res.body?.cancel().catch(() => {});
     if (!res.ok || res.status !== 206) return 0;
     const cr = res.headers.get('content-range') || '';
     const total = Number.parseInt(cr.split('/')[1] || '0', 10);
 
-    try {
-      await res.arrayBuffer();
-    } catch {}
     return Number.isFinite(total) ? total : 0;
   } catch {
     return 0;

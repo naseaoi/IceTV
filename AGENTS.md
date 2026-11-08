@@ -44,7 +44,7 @@
 ## 外部请求与客户端 IP
 
 - **不要直接 `fetch` 未经校验的外部输入 URL**。复用 `authorizeProxyRequest()`、`fetchWithUrlGuard()`、`validateProxyUrlForRequest()`（签名 `src/lib/proxy-auth.ts`，校验 `src/lib/url-guard.ts`）。
-- 普通服务端回源复用 `fetchUpstream()` / `fetchWithUrlGuard()`，它们会申请数据库共享资源额度。得到的响应体必须消费或取消，连接租约不会在响应头到达时释放。
+- 普通服务端回源复用 `fetchUpstream()` / `fetchWithUrlGuard()`，它们会申请数据库共享资源额度。得到的响应体必须消费或取消，连接租约不会在响应头到达时释放。外部正文用 `readJsonLimited()` / `readTextLimited()` / `readArrayBufferLimited()`（`src/lib/proxy-response-limits.ts`）限字节读取，不直接 `.json()` / `.text()`。
 - `getClientIp()` 在 `TRUSTED_PROXY_COUNT` 为 0（默认）时依次取 `cf-connecting-ip`、`x-real-ip`、`x-forwarded-for` 第一段，均可由客户端伪造。反代后不设该变量，注册限流可被绕过。
 - `FixedWindowRateLimiter` 是进程内 `Map`，每实例独立计数。多实例或 Vercel 部署时实际放行量按实例数翻倍。
 

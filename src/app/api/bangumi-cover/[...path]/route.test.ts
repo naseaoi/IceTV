@@ -122,3 +122,18 @@ it('内部配置读取失败不归为上游错误', async () => {
   await expect(HEAD(request, context)).rejects.toThrow('config down');
   expect(mockFetch).not.toHaveBeenCalled();
 });
+
+it('GET 大小预检超限时取消正文', async () => {
+  const cancel = jest.fn().mockRejectedValue(new Error('cancel failed'));
+  mockFetch.mockResolvedValue({
+    ok: true,
+    status: 200,
+    headers: new Headers({
+      'content-type': 'image/jpeg',
+      'content-length': String(8 * 1024 * 1024 + 1),
+    }),
+    body: { cancel },
+  });
+  expect((await GET(request, context)).status).toBe(413);
+  expect(cancel).toHaveBeenCalledTimes(1);
+});

@@ -190,7 +190,12 @@ async function proxyImage(request: NextRequest, method: 'GET' | 'HEAD') {
       });
     }
 
-    assertContentLength(imageResponse.headers, MAX_IMAGE_BYTES);
+    try {
+      assertContentLength(imageResponse.headers, MAX_IMAGE_BYTES);
+    } catch (error) {
+      await imageResponse.body?.cancel().catch(() => {});
+      throw error;
+    }
 
     return new Response(
       createLimitedReadableStream(imageResponse.body, MAX_IMAGE_BYTES),

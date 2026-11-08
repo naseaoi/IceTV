@@ -23,14 +23,40 @@ import { normalizeUsername } from '@/lib/username';
 
 export type SourceSearchOutcome = 'ok' | 'empty' | 'error';
 
+const MAX_PENDING_ENTRIES = 4096;
 let pending = new Map<string, SourceHealthSearchDelta>();
+let pendingCutoff = '';
 let lastFlushAt = Date.now();
 let inFlight: Promise<void> | null = null;
 
+function prunePending(): string {
+  const cutoff = utcDateDaysAgo(SOURCE_HEALTH_RETENTION_DAYS, new Date());
+  if (cutoff !== pendingCutoff) {
+    for (const [key, row] of pending) {
+      if (row.bucketDate < cutoff) pending.delete(key);
+    }
+    pendingCutoff = cutoff;
+  }
+  return cutoff;
+}
+
 function mergeDelta(row: SourceHealthSearchDelta): void {
+  if (row.bucketDate < prunePending()) return;
   const key = JSON.stringify([row.source, row.bucketDate]);
   const current = pending.get(key);
   if (!current) {
+    if (pending.size >= MAX_PENDING_ENTRIES) {
+      let oldestKey: string | undefined;
+      let oldestDate = row.bucketDate;
+      for (const [candidateKey, candidate] of pending) {
+        if (candidate.bucketDate <= oldestDate) {
+          oldestKey = candidateKey;
+          oldestDate = candidate.bucketDate;
+        }
+      }
+      if (oldestKey === undefined) return;
+      pending.delete(oldestKey);
+    }
     pending.set(key, { ...row });
     return;
   }
@@ -68,6 +94,7 @@ export function recordSourceSearchOutcome(
 
 export function flushSourceHealthSearch(): Promise<void> {
   if (inFlight) return inFlight;
+  prunePending();
   if (pending.size === 0) return Promise.resolve();
 
   const batch = [...pending.values()];
@@ -88,6 +115,7 @@ export function flushSourceHealthSearch(): Promise<void> {
 
 export function resetSourceHealthSearchForTests(): void {
   pending = new Map();
+  pendingCutoff = '';
   lastFlushAt = Date.now();
   inFlight = null;
   tiersCache = null;

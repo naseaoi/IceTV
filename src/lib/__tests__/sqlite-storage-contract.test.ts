@@ -1119,6 +1119,13 @@ describe('sqlite storage contract', () => {
     });
 
     const stats = await storage.getSourceRouteStats('2026-01-02');
+    await storage.purgeSourceRouteStatsBefore('2026-01-07');
+    expect(await storage.getAllSourceRouteStatBuckets()).toHaveLength(3);
+    expect(await storage.getSourceRouteStats('2025-01-01')).toEqual(stats);
+    await storage.purgeSourceRouteStatsBefore('2026-01-08');
+    expect(await storage.getAllSourceRouteStatBuckets()).toHaveLength(2);
+    await storage.purgeSourceRouteStatsBefore('2026-01-09');
+    expect(await storage.getAllSourceRouteStatBuckets()).toEqual([]);
 
     expect(sortRouteStats(stats)).toEqual([
       {

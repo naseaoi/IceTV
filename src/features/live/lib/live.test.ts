@@ -1,6 +1,7 @@
 import { gzipSync } from 'node:zlib';
 
 import {
+  clearCachedLiveChannels,
   deleteCachedLiveChannels,
   getCachedLiveChannels,
   parseEpgXmlForChannels,
@@ -16,6 +17,12 @@ import {
   setUrlGuardDnsLookupForTests,
   UrlValidationError,
 } from '@/lib/url-guard';
+
+jest.mock('@/lib/http-proxy-json', () => ({
+  getProxyUrlForTarget: () => undefined,
+  fetchStreamThroughProxy: jest.fn(),
+  fetchTextThroughProxy: jest.fn(),
+}));
 
 jest.mock('@/lib/db', () => ({
   db: { setLiveSourceChannelCount: jest.fn().mockResolvedValue(undefined) },
@@ -78,6 +85,135 @@ describe('refreshLiveChannels', () => {
     } else {
       process.env.LIVE_REFRESH_CONCURRENCY = originalLiveRefreshConcurrency;
     }
+  });
+
+  it.each([deleteCachedLiveChannels, () => clearCachedLiveChannels()])(
+    '清理缓存后丢弃迟到刷新且保留新一轮在途请求',
+    async (invalidate) => {
+      const source = {
+        key: 'atomic-source',
+        name: 'Atomic',
+        url: 'https://example.com/live.m3u',
+        from: 'custom' as const,
+      };
+      const pendingReads: Array<() => void> = [];
+      (global.fetch as jest.Mock).mockImplementation(() =>
+        Promise.resolve(
+          createDeferredTextResponse(
+            '频道,https://example.com/live.m3u8',
+            (release) => pendingReads.push(release),
+          ),
+        ),
+      );
+      mockedGetConfigForRead.mockResolvedValue({
+        SiteConfig: { EnableLiveEntry: true },
+        LiveConfig: [],
+      } as unknown as Awaited<ReturnType<typeof getConfigForRead>>);
+      const oldRefresh = refreshLiveChannels(source);
+      await waitForCondition(() => pendingReads.length === 1);
+      invalidate(source.key);
+      const newRefresh = refreshLiveChannels(source);
+      await waitForCondition(() => pendingReads.length === 2);
+      pendingReads[0]();
+      await oldRefresh;
+      expect(await getCachedLiveChannels(source.key)).toBeNull();
+      const coalesced = refreshLiveChannels(source);
+      await flushAsyncWork();
+      expect(global.fetch).toHaveBeenCalledTimes(2);
+      pendingReads[1]();
+      await Promise.all([newRefresh, coalesced]);
+      expect((await getCachedLiveChannels(source.key))?.channelNumber).toBe(1);
+      clearCachedLiveChannels();
+      expect(await getCachedLiveChannels(source.key)).toBeNull();
+    },
+  );
+
+  it.each(['playlist', 'epg'])('上游 %s 错误时取消正文', async (kind) => {
+    const cancel = jest.fn().mockResolvedValue(undefined);
+    const failure = { ok: false, status: 503, body: { cancel } };
+    jest.spyOn(console, 'warn').mockImplementation(() => {});
+    if (kind === 'epg') {
+      (global.fetch as jest.Mock).mockResolvedValueOnce(
+        createTextResponse('频道,https://example.com/a.m3u8'),
+      );
+    }
+    (global.fetch as jest.Mock).mockResolvedValue(failure);
+    const refresh = refreshLiveChannels({
+      key: 'epg-stream',
+      name: 'EPG',
+      from: 'custom',
+      url: 'https://example.com/live.m3u',
+      epg: kind === 'epg' ? 'https://example.com/epg.xml' : '',
+    });
+    if (kind === 'epg') await refresh;
+    else await expect(refresh).rejects.toThrow('直播源请求失败');
+    expect(cancel).toHaveBeenCalledTimes(1);
+  });
+
+  it.each([
+    'playlist-limit',
+    'epg-first-limit',
+    'epg-later-limit',
+    'epg-gzip-error',
+    'epg-read-error',
+  ])('%s 取消上游并释放 reader', async (kind) => {
+    jest.spyOn(console, 'warn').mockImplementation(() => {});
+    const reader = {
+      read: jest.fn(),
+      cancel: jest.fn().mockResolvedValue(undefined),
+      releaseLock: jest.fn(),
+    };
+    const isPlaylist = kind === 'playlist-limit';
+    if (isPlaylist) {
+      reader.read.mockResolvedValueOnce({
+        done: false,
+        value: Buffer.alloc(5 * 1024 * 1024 + 1),
+      });
+    } else if (kind === 'epg-first-limit') {
+      reader.read.mockResolvedValueOnce({
+        done: false,
+        value: Buffer.alloc(50 * 1024 * 1024 + 1),
+      });
+    } else if (kind === 'epg-later-limit') {
+      const chunk = Buffer.alloc(26 * 1024 * 1024);
+      reader.read.mockResolvedValue({ done: false, value: chunk });
+    } else if (kind === 'epg-read-error') {
+      reader.read.mockRejectedValueOnce(new Error('read failed'));
+    } else {
+      reader.read.mockResolvedValueOnce({
+        done: false,
+        value: Buffer.from([0x1f, 0x8b, 0, 0]),
+      });
+      let finishPendingRead: (() => void) | undefined;
+      reader.read.mockImplementation(
+        () =>
+          new Promise((resolve) => {
+            finishPendingRead = () => resolve({ done: true });
+          }),
+      );
+      reader.cancel.mockImplementation(async () => finishPendingRead?.());
+    }
+    if (!isPlaylist) {
+      (global.fetch as jest.Mock).mockResolvedValueOnce(
+        createTextResponse('频道,https://example.com/a.m3u8'),
+      );
+    }
+    (global.fetch as jest.Mock).mockResolvedValueOnce({
+      ok: true,
+      headers: { get: () => null },
+      body: { getReader: () => reader },
+    });
+    const refresh = refreshLiveChannels({
+      key: 'epg-stream',
+      name: 'EPG',
+      from: 'custom',
+      url: 'https://example.com/live.m3u',
+      epg: isPlaylist ? '' : 'https://example.com/epg.xml',
+    });
+    if (isPlaylist) await expect(refresh).rejects.toThrow('直播源文件过大');
+    else await expect(refresh).resolves.toBe(1);
+    expect(reader.cancel).toHaveBeenCalledTimes(1);
+    expect(reader.releaseLock).toHaveBeenCalledTimes(1);
   });
 
   it('拒绝内网直播源地址', async () => {
@@ -335,6 +471,8 @@ function createTextResponse(body: string): Response {
     headers: { get: () => null },
     body: {
       getReader: () => ({
+        cancel: async () => {},
+        releaseLock: () => {},
         read: async () => {
           if (consumed) {
             return { done: true, value: undefined };
@@ -361,6 +499,8 @@ function createDeferredTextResponse(
     headers: { get: () => null },
     body: {
       getReader: () => ({
+        cancel: async () => {},
+        releaseLock: () => {},
         read: async () => {
           if (consumed) {
             return { done: true, value: undefined };
@@ -388,6 +528,8 @@ function createChunkedResponse(
     },
     body: {
       getReader: () => ({
+        cancel: async () => {},
+        releaseLock: () => {},
         read: async () => {
           if (index >= chunks.length) {
             return { done: true, value: undefined };
@@ -396,7 +538,6 @@ function createChunkedResponse(
           index += 1;
           return { done: false, value };
         },
-        releaseLock: () => {},
       }),
     },
   } as unknown as Response;

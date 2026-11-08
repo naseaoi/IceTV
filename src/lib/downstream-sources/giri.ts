@@ -6,6 +6,11 @@ import {
   parseGirigiriVariantId,
 } from '@/lib/giri';
 import { buildLazyEpisodeUrl } from '@/lib/lazy-episodes';
+import {
+  readJsonLimited,
+  readTextLimited,
+  UPSTREAM_METADATA_MAX_BYTES,
+} from '@/lib/proxy-response-limits';
 import { ResourceLimitError } from '@/lib/server-resource-errors';
 import type { SearchResult } from '@/lib/types';
 import { fetchUpstream } from '@/lib/upstream-fetch.server';
@@ -54,7 +59,7 @@ async function fetchGiriHtml(url: string): Promise<string | null> {
         signal: abortState.signal,
       });
       if (res.ok) {
-        const html = await res.text();
+        const html = await readTextLimited(res, UPSTREAM_METADATA_MAX_BYTES);
         if (!isCfChallenge(html)) return html;
       }
     } catch (error) {
@@ -212,7 +217,10 @@ async function fetchGirigiriSuggestList(
     });
 
     if (!response.ok) return null;
-    const data = await response.json();
+    const data = await readJsonLimited<any>(
+      response,
+      UPSTREAM_METADATA_MAX_BYTES,
+    );
     return Array.isArray(data?.list)
       ? (data.list as GirigiriSuggestItem[])
       : null;

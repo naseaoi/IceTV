@@ -1304,6 +1304,13 @@ function createFakePool() {
       }
     }
 
+    if (normalized === 'DELETE FROM source_route_stats WHERE bucket_date < ?') {
+      currentState.sourceRouteStats = currentState.sourceRouteStats.filter(
+        (row) => row.bucketDate >= (params[0] as string),
+      );
+      return [[], []];
+    }
+
     if (normalized === 'DELETE FROM source_route_stats') {
       currentState.sourceRouteStats = [];
       return [[], []];
@@ -3518,6 +3525,13 @@ describe('mysql storage contract', () => {
     });
 
     const stats = await storage.getSourceRouteStats('2026-01-02');
+    await storage.purgeSourceRouteStatsBefore('2026-01-07');
+    expect(await storage.getAllSourceRouteStatBuckets()).toHaveLength(3);
+    expect(await storage.getSourceRouteStats('2025-01-01')).toEqual(stats);
+    await storage.purgeSourceRouteStatsBefore('2026-01-08');
+    expect(await storage.getAllSourceRouteStatBuckets()).toHaveLength(2);
+    await storage.purgeSourceRouteStatsBefore('2026-01-09');
+    expect(await storage.getAllSourceRouteStatBuckets()).toEqual([]);
 
     expect(sortRouteStats(stats)).toEqual([
       {

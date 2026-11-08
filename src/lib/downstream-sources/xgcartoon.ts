@@ -1,5 +1,9 @@
 import type { ApiSite } from '@/lib/config';
 import { buildLazyEpisodeUrl } from '@/lib/lazy-episodes';
+import {
+  readTextLimited,
+  UPSTREAM_METADATA_MAX_BYTES,
+} from '@/lib/proxy-response-limits';
 import { ResourceLimitError } from '@/lib/server-resource-errors';
 import type { SearchResult } from '@/lib/types';
 import { fetchUpstream } from '@/lib/upstream-fetch.server';
@@ -79,7 +83,7 @@ async function fetchXgcartoonHtml(
       return null;
     }
     return {
-      html: await res.text(),
+      html: await readTextLimited(res, UPSTREAM_METADATA_MAX_BYTES),
       finalUrl: res.url || url,
     };
   } catch (error) {

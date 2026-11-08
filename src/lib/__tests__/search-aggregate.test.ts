@@ -4,6 +4,7 @@ import {
   getUpstreamSearchGateStats,
   runSearchAggregation,
 } from '@/lib/search-aggregate';
+import { ResourceLimitError } from '@/lib/server-resource-errors';
 import type { SearchResult } from '@/lib/types';
 
 jest.mock('@/lib/downstream', () => ({
@@ -262,6 +263,51 @@ describe('source health search budgets', () => {
       expect(searchFromApi).toHaveBeenCalledTimes(3);
     },
   );
+
+  it('闸门排队超时按繁忙报错且不进入源失败冷却', async () => {
+    let finishHolder: (value: SearchResult[]) => void = () => {};
+    (searchFromApi as jest.Mock).mockImplementationOnce(
+      () =>
+        new Promise<SearchResult[]>((resolve) => {
+          finishHolder = resolve;
+        }),
+    );
+    const base = {
+      query: 'test',
+      maxSearchPages: 1,
+      disableYellowFilter: true,
+      sourceConcurrency: 1,
+      sourceTimeoutMs: 120_000,
+    };
+    const holder = runSearchAggregation({
+      ...base,
+      apiSites: [{ key: 'a', name: 'a', api: 'https://a.example' }],
+    });
+    await Promise.resolve();
+
+    const onSourceError = jest.fn();
+    const queued = runSearchAggregation({
+      ...base,
+      apiSites: [{ key: 'b', name: 'b', api: 'https://b.example' }],
+      onSourceError,
+    });
+    await Promise.resolve();
+    expect(getUpstreamSearchGateStats().waiting).toBe(1);
+
+    jest.advanceTimersByTime(30_000);
+    await expect(queued).resolves.toEqual([]);
+    expect(onSourceError.mock.calls[0][1]).toBeInstanceOf(ResourceLimitError);
+    expect(getUpstreamSearchGateStats().waiting).toBe(0);
+
+    finishHolder([]);
+    await holder;
+    (searchFromApi as jest.Mock).mockResolvedValueOnce([]);
+    await runSearchAggregation({
+      ...base,
+      apiSites: [{ key: 'b', name: 'b', api: 'https://b.example' }],
+    });
+    expect(searchFromApi).toHaveBeenCalledTimes(2);
+  });
 
   it('returns scheduling order despite reverse completion', async () => {
     (searchFromApi as jest.Mock).mockImplementation(

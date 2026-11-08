@@ -62,6 +62,15 @@ export function deleteCachedLiveChannels(key: string) {
   delete inflightRequests[key];
 }
 
+export function clearCachedLiveChannels() {
+  for (const key of new Set([
+    ...Object.keys(cachedLiveChannels),
+    ...Object.keys(inflightRequests),
+  ])) {
+    deleteCachedLiveChannels(key);
+  }
+}
+
 export function isLiveEntryEnabledInConfig(config: {
   SiteConfig?: { EnableLiveEntry?: boolean };
 }) {
@@ -136,7 +145,7 @@ export async function refreshLiveChannels(
         name: channel.name,
       })),
     );
-    if (persistCount)
+    if (persistCount && inflightRequests[liveInfo.key] === refreshRequest) {
       cachedLiveChannels[liveInfo.key] = {
         data: {
           channelNumber: result.channels.length,
@@ -146,16 +155,19 @@ export async function refreshLiveChannels(
         },
         freshUntil: Date.now() + CACHE_FRESH_MS,
       };
-    if (persistCount)
       await db.setLiveSourceChannelCount(liveInfo, result.channels.length);
+    }
     return result.channels.length;
   };
 
   if (!persistCount) return doRefresh();
-  inflightRequests[liveInfo.key] = doRefresh().finally(() => {
-    delete inflightRequests[liveInfo.key];
+  const refreshRequest = doRefresh().finally(() => {
+    if (inflightRequests[liveInfo.key] === refreshRequest) {
+      delete inflightRequests[liveInfo.key];
+    }
   });
-  return inflightRequests[liveInfo.key];
+  inflightRequests[liveInfo.key] = refreshRequest;
+  return refreshRequest;
 }
 
 export async function refreshLiveChannelSources(
@@ -199,6 +211,7 @@ async function fetchLivePlaylistText(url: string, ua: string): Promise<string> {
       timeoutMs: 15_000,
     });
     if (!response.ok) {
+      await response.body?.cancel().catch(() => {});
       throw new Error(`直播源请求失败: ${response.status}`);
     }
     const buffer = await readResponseBody(
@@ -265,6 +278,7 @@ async function fetchEpgData(
       timeoutMs: 30_000,
     });
     if (!response.ok) {
+      await response.body?.cancel().catch(() => {});
       throw new Error(`节目单请求失败: ${response.status}`);
     }
     return parseEpgResponseStream(
@@ -312,22 +326,20 @@ async function parseEpgResponseStream(
   }
 
   const reader = body.getReader();
-  const firstRead = await reader.read();
-  if (firstRead.done || !firstRead.value) {
-    reader.releaseLock();
-    return {};
-  }
+  let input: Readable | undefined;
+  let decodedStream: Readable | undefined;
+  try {
+    const firstRead = await reader.read();
+    if (firstRead.done || !firstRead.value) return {};
 
-  const firstChunk = Buffer.from(firstRead.value);
-  const shouldGunzip = isGzipEpg(headers, url, firstChunk);
+    const firstChunk = Buffer.from(firstRead.value);
+    const shouldGunzip = isGzipEpg(headers, url, firstChunk);
 
-  async function* readChunks() {
-    let totalBytes = firstChunk.length;
-    if (totalBytes > maxResponseBytes) {
-      throw new Error('节目单文件过大');
-    }
-
-    try {
+    async function* readChunks() {
+      let totalBytes = firstChunk.length;
+      if (totalBytes > maxResponseBytes) {
+        throw new Error('节目单文件过大');
+      }
       yield firstChunk;
       while (true) {
         const { done, value } = await reader.read();
@@ -339,42 +351,48 @@ async function parseEpgResponseStream(
         }
         yield chunk;
       }
-    } finally {
-      reader.releaseLock();
-    }
-  }
-
-  const input = Readable.from(readChunks());
-  const decodedStream = shouldGunzip ? input.pipe(createGunzip()) : input;
-  const decoder = new StringDecoder('utf8');
-  const collector = new EpgXmlCollector(channels);
-  let decodedBytes = 0;
-
-  for await (const rawChunk of decodedStream) {
-    const chunk = Buffer.isBuffer(rawChunk)
-      ? rawChunk
-      : Buffer.from(rawChunk as Uint8Array);
-    decodedBytes += chunk.length;
-    if (decodedBytes > MAX_EPG_TEXT_BYTES) {
-      throw new Error('节目单解压后文件过大');
     }
 
-    for (
-      let offset = 0;
-      offset < chunk.length;
-      offset += EPG_PARSE_CHUNK_BYTES
-    ) {
-      collector.push(
-        decoder.write(chunk.subarray(offset, offset + EPG_PARSE_CHUNK_BYTES)),
-      );
-      if (offset + EPG_PARSE_CHUNK_BYTES < chunk.length) {
-        await yieldToEventLoop();
+    input = Readable.from(readChunks());
+    decodedStream = shouldGunzip ? input.pipe(createGunzip()) : input;
+    if (decodedStream !== input) {
+      input.on('error', (error) => decodedStream?.destroy(error));
+    }
+    const decoder = new StringDecoder('utf8');
+    const collector = new EpgXmlCollector(channels);
+    let decodedBytes = 0;
+
+    for await (const rawChunk of decodedStream) {
+      const chunk = Buffer.isBuffer(rawChunk)
+        ? rawChunk
+        : Buffer.from(rawChunk as Uint8Array);
+      decodedBytes += chunk.length;
+      if (decodedBytes > MAX_EPG_TEXT_BYTES) {
+        throw new Error('节目单解压后文件过大');
+      }
+
+      for (
+        let offset = 0;
+        offset < chunk.length;
+        offset += EPG_PARSE_CHUNK_BYTES
+      ) {
+        collector.push(
+          decoder.write(chunk.subarray(offset, offset + EPG_PARSE_CHUNK_BYTES)),
+        );
+        if (offset + EPG_PARSE_CHUNK_BYTES < chunk.length) {
+          await yieldToEventLoop();
+        }
       }
     }
-  }
 
-  collector.push(decoder.end());
-  return collector.finish();
+    collector.push(decoder.end());
+    return collector.finish();
+  } finally {
+    decodedStream?.destroy();
+    input?.destroy();
+    await reader.cancel().catch(() => {});
+    reader.releaseLock();
+  }
 }
 
 function isGzipEpg(headers: Headers, url: URL, firstChunk: Buffer) {
@@ -404,18 +422,23 @@ async function readResponseBody(
 
   const chunks: Buffer[] = [];
   let totalBytes = 0;
-  while (true) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    const chunk = Buffer.from(value);
-    totalBytes += chunk.length;
-    if (totalBytes > maxBytes) {
-      throw new Error(`${label}文件过大`);
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      const chunk = Buffer.from(value);
+      totalBytes += chunk.length;
+      if (totalBytes > maxBytes) {
+        throw new Error(`${label}文件过大`);
+      }
+      chunks.push(chunk);
     }
-    chunks.push(chunk);
-  }
 
-  return Buffer.concat(chunks);
+    return Buffer.concat(chunks);
+  } finally {
+    await reader.cancel().catch(() => {});
+    reader.releaseLock();
+  }
 }
 
 function isResponseLimitError(error: unknown): boolean {

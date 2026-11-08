@@ -7,6 +7,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 
 import { MySqlStorage } from '@/lib/mysql.db';
+import { pruneResourceBatches } from '@/lib/shared-resource-store';
 import { LocalSqliteStorage } from '@/lib/sqlite.db';
 import type { IStorage } from '@/lib/types';
 
@@ -61,6 +62,66 @@ function contract(
     expect(await stores[1].resources.getCooldown(key)).toBe(0);
   });
 
+  it('prunes multiple batches from both tables and preserves unexpired rows', async () => {
+    const prefix = randomUUID();
+    const now = 1_000_000;
+    const clock = jest.spyOn(Date, 'now').mockReturnValue(now);
+    try {
+      const storage = stores[0];
+      // Seed directly so the test measures pruning, not per-key admission.
+      for (const [table, columns, rows] of [
+        [
+          'shared_resource_usage',
+          'resource_key, used, reset_at',
+          Array.from({ length: 1201 }, (_, index) => [
+            `${prefix}:${index}`,
+            1,
+            index === 1200 ? now + 1 : now,
+          ]),
+        ],
+        [
+          'shared_resource_leases',
+          'resource_key, token, expires_at',
+          Array.from({ length: 701 }, (_, index) => [
+            `${prefix}:${index}`,
+            prefix,
+            index === 700 ? now + 1 : now,
+          ]),
+        ],
+      ] as const) {
+        const sql = `INSERT INTO ${table} (${columns}) VALUES ${rows.map(() => '(?, ?, ?)').join(', ')}`;
+        if (storage instanceof LocalSqliteStorage) {
+          (storage as unknown as { db: Database.Database }).db
+            .prepare(sql)
+            .run(...rows.flat());
+        } else {
+          await (
+            storage as unknown as { pool: import('mysql2/promise').Pool }
+          ).pool.execute(sql, rows.flat());
+        }
+      }
+      await storage.resources.prune(now);
+      expect(await storage.resources.getCooldown(`${prefix}:0`)).toBe(0);
+      expect(await storage.resources.getCooldown(`${prefix}:1199`)).toBe(0);
+      expect(await storage.resources.getCooldown(`${prefix}:1200`)).toBe(
+        now + 1,
+      );
+      expect(
+        await storage.resources.renew(
+          `${prefix}:699`,
+          prefix,
+          now - 1,
+          now + 2,
+        ),
+      ).toBe(false);
+      expect(
+        await storage.resources.renew(`${prefix}:700`, prefix, now, now + 2),
+      ).toBe(true);
+    } finally {
+      clock.mockRestore();
+    }
+  });
+
   it('caps shared connections and fences expired owners', async () => {
     const key = randomUUID();
     const results = await Promise.all(
@@ -97,6 +158,37 @@ function contract(
     ).toBe(true);
   });
 }
+
+describe('resource pruning budget', () => {
+  afterEach(() => jest.restoreAllMocks());
+
+  it('stops after a partial batch', async () => {
+    const prune = jest
+      .fn()
+      .mockResolvedValueOnce(500)
+      .mockResolvedValueOnce(499);
+    await pruneResourceBatches(prune);
+    expect(prune).toHaveBeenCalledTimes(2);
+    expect(prune).toHaveBeenCalledWith(500);
+  });
+
+  it('stops at the batch cap even when the clock does not advance', async () => {
+    jest.spyOn(Date, 'now').mockReturnValue(1000);
+    const prune = jest.fn().mockResolvedValue(500);
+    await pruneResourceBatches(prune);
+    expect(prune).toHaveBeenCalledTimes(20);
+  });
+
+  it('does not start another batch after spending the time budget', async () => {
+    const clock = jest.spyOn(Date, 'now').mockReturnValue(1000);
+    const prune = jest.fn().mockImplementation(async () => {
+      clock.mockReturnValue(1200);
+      return 500;
+    });
+    await pruneResourceBatches(prune);
+    expect(prune).toHaveBeenCalledTimes(1);
+  });
+});
 
 describe('SQLite shared resource storage', () => {
   let directory: string;

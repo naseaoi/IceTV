@@ -15,6 +15,11 @@ import {
   searchFromXgcartoon,
 } from '@/lib/downstream-sources/xgcartoon';
 import {
+  readJsonLimited,
+  readTextLimited,
+  UPSTREAM_METADATA_MAX_BYTES,
+} from '@/lib/proxy-response-limits';
+import {
   DEFAULT_RUNTIME_PARAMS,
   normalizeRuntimeParams,
 } from '@/lib/runtime-params';
@@ -180,7 +185,10 @@ async function fetchAndCacheSearchPage(
       return { results: [] };
     }
 
-    const data = await response.json();
+    const data = await readJsonLimited<any>(
+      response,
+      UPSTREAM_METADATA_MAX_BYTES,
+    );
     latencyMs = Date.now() - startedAt;
     if (Array.isArray(data?.list)) {
       outcome = data.list.length > 0 ? 'ok' : 'empty';
@@ -488,7 +496,10 @@ async function getDetailFromVodApi(
       throw new Error(`详情请求失败: ${response.status}`);
     }
 
-    const data = await response.json();
+    const data = await readJsonLimited<any>(
+      response,
+      UPSTREAM_METADATA_MAX_BYTES,
+    );
 
     if (
       !data ||
@@ -553,7 +564,7 @@ async function handleSpecialSourceDetail(
       throw new Error(`详情页请求失败: ${response.status}`);
     }
 
-    html = await response.text();
+    html = await readTextLimited(response, UPSTREAM_METADATA_MAX_BYTES);
   } finally {
     abortState.cleanup();
   }

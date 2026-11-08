@@ -10,6 +10,8 @@ import {
 } from '@/lib/upstream-resource-guard.server';
 import type { UpstreamResourceContext } from '@/lib/upstream-resource-policy';
 
+const MAX_PROXY_RESPONSE_HEADER_BYTES = 64 * 1024;
+
 interface ProxyJsonOptions {
   signal?: AbortSignal | null;
   resourceContext?: UpstreamResourceContext;
@@ -288,9 +290,22 @@ function fetchHttpsStreamThroughProxy(
       });
       secureSocket.on('data', (chunk: Buffer) => {
         if (!settled) {
-          headerBuffer = Buffer.concat([headerBuffer, chunk]);
+          const previousHeaderBytes = headerBuffer.length;
+          headerBuffer = Buffer.concat([
+            headerBuffer,
+            chunk.subarray(
+              0,
+              MAX_PROXY_RESPONSE_HEADER_BYTES - previousHeaderBytes,
+            ),
+          ]);
           const headerEndIndex = headerBuffer.indexOf('\r\n\r\n');
           if (headerEndIndex === -1) {
+            if (
+              previousHeaderBytes + chunk.length >=
+              MAX_PROXY_RESPONSE_HEADER_BYTES
+            ) {
+              fail(new Error('代理响应头过大'));
+            }
             return;
           }
 
@@ -310,7 +325,10 @@ function fetchHttpsStreamThroughProxy(
             body: stream,
           });
 
-          const bodyChunk = headerBuffer.subarray(headerEndIndex + 4);
+          const bodyChunk = chunk.subarray(
+            headerEndIndex + 4 - previousHeaderBytes,
+          );
+          headerBuffer = Buffer.alloc(0);
           if (bodyChunk.length > 0) {
             const enqueued = enqueueProxyStreamChunk(
               bodyChunk,

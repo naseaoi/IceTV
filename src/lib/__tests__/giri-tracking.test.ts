@@ -1,6 +1,7 @@
 /** @jest-environment node */
 
 import { installCryptoPolyfill } from '@/app/api/test-utils/crypto-polyfill';
+import { installStreamPolyfills } from '@/app/api/test-utils/stream-polyfills';
 import { refreshRecordAndFavorites } from '@/lib/cron/metadata-refresh';
 import { db } from '@/lib/db';
 import {
@@ -37,6 +38,7 @@ jest.mock('@/lib/env.server', () => ({
 }));
 
 installCryptoPolyfill();
+installStreamPolyfills();
 
 const username = 'giri-tracking-test';
 const originalFetch = global.fetch;
@@ -45,13 +47,7 @@ let upstreamHtml: string;
 describe('Giri tracking from upstream metadata to stored messages', () => {
   beforeEach(async () => {
     upstreamHtml = createGiriTrackingHtml(9, 9);
-    global.fetch = jest.fn(
-      async () =>
-        ({
-          ok: true,
-          text: async () => upstreamHtml,
-        }) as Response,
-    );
+    global.fetch = jest.fn(async () => new Response(upstreamHtml));
     await db.savePlayRecord(username, 'giri', '27100', giriTrackingRecord);
   });
 

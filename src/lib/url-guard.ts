@@ -16,6 +16,7 @@ const MAX_REDIRECTS = 5;
 const DEFAULT_FETCH_TIMEOUT_MS = 15_000;
 const DEFAULT_DNS_CACHE_TTL_MS = 30_000;
 const DEFAULT_DNS_NEGATIVE_CACHE_TTL_MS = 5_000;
+const DNS_CACHE_MAX_ENTRIES = 1024;
 
 type DnsLookup = typeof lookup;
 
@@ -164,6 +165,10 @@ export function clearUrlGuardDnsCacheForTests(): void {
   dnsCache.clear();
 }
 
+export function getUrlGuardDnsCacheSizeForTests(): number {
+  return dnsCache.size;
+}
+
 export function setUrlGuardDnsLookupForTests(nextLookup: DnsLookup): void {
   dnsLookup = nextLookup;
 }
@@ -259,6 +264,8 @@ async function lookupHostname(
   const now = Date.now();
   const cached = dnsCache.get(hostname);
   if (ttlMs > 0 && cached && cached.expiresAt > now) {
+    dnsCache.delete(hostname);
+    dnsCache.set(hostname, cached);
     if (cached.failed) {
       throw new Error('DNS lookup failed');
     }
@@ -271,19 +278,38 @@ async function lookupHostname(
   } catch (error) {
     const negativeTtlMs = getDnsNegativeCacheTtlMs();
     if (negativeTtlMs > 0) {
-      dnsCache.set(hostname, {
-        addresses: [],
-        expiresAt: now + negativeTtlMs,
-        failed: true,
-      });
+      setDnsCacheEntry(
+        hostname,
+        { addresses: [], expiresAt: now + negativeTtlMs, failed: true },
+        now,
+      );
     }
     throw error;
   }
 
   if (ttlMs > 0) {
-    dnsCache.set(hostname, { addresses, expiresAt: now + ttlMs });
+    setDnsCacheEntry(hostname, { addresses, expiresAt: now + ttlMs }, now);
   }
   return addresses;
+}
+
+// hostname 来自外部 URL，基数不可控；Map 按插入顺序充当 LRU，命中时移到队尾
+function setDnsCacheEntry(
+  hostname: string,
+  entry: DnsCacheEntry,
+  now: number,
+): void {
+  dnsCache.delete(hostname);
+  dnsCache.set(hostname, entry);
+  if (dnsCache.size <= DNS_CACHE_MAX_ENTRIES) return;
+
+  dnsCache.forEach((value, key) => {
+    if (value.expiresAt <= now) dnsCache.delete(key);
+  });
+  for (const key of dnsCache.keys()) {
+    if (dnsCache.size <= DNS_CACHE_MAX_ENTRIES) break;
+    dnsCache.delete(key);
+  }
 }
 
 function isRedirectResponse(status: number): boolean {

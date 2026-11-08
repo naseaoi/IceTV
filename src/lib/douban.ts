@@ -1,4 +1,8 @@
 import { createTimedAbortController } from '@/lib/downstream-sources/shared';
+import {
+  readJsonLimited,
+  UPSTREAM_METADATA_MAX_BYTES,
+} from '@/lib/proxy-response-limits';
 import { fetchUpstream } from '@/lib/upstream-fetch.server';
 
 type DoubanFetchInit = RequestInit & {
@@ -46,7 +50,7 @@ export async function fetchDoubanData<T>(
       throw new Error(`HTTP error! Status: ${response.status}`);
     }
 
-    return await response.json();
+    return await readJsonLimited(response, UPSTREAM_METADATA_MAX_BYTES);
   } catch (error) {
     throw error;
   } finally {

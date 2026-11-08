@@ -349,7 +349,11 @@ function createPoolOptions(databaseUrl: string): mysql.PoolOptions {
       Math.max(1, Math.ceil(connectionLimit / 2)),
     ),
     idleTimeout: parseInteger(process.env.MYSQL_IDLE_TIMEOUT_MS, 60000),
-    queueLimit: 0,
+    // mysql2 的 0 表示不限；数据库阻塞时等待者会无界堆积在进程内
+    queueLimit: parseInteger(
+      process.env.MYSQL_QUEUE_LIMIT,
+      connectionLimit * 50,
+    ),
     ssl: buildSslOptions(),
   };
 }
@@ -2602,6 +2606,12 @@ export class MySqlStorage implements IStorage {
   async releaseSharedCacheLease(key: string, token: string): Promise<void> {
     await this.ensureInitialized();
     await this.pool.execute(
+      `DELETE FROM shared_cache
+       WHERE cache_key = ? AND lease_token = ?
+         AND LENGTH(value_text) = 0 AND fresh_until = 0 AND stale_until = 0`,
+      [key, token],
+    );
+    await this.pool.execute(
       `UPDATE shared_cache
        SET lease_token = NULL, lease_until = 0
        WHERE cache_key = ? AND lease_token = ?`,
@@ -3044,6 +3054,14 @@ export class MySqlStorage implements IStorage {
         successCount: Number(row.success_count || 0),
         failureCount: Number(row.failure_count || 0),
       }));
+  }
+
+  async purgeSourceRouteStatsBefore(beforeDate: string): Promise<void> {
+    await this.ensureInitialized();
+    await this.pool.execute(
+      'DELETE FROM source_route_stats WHERE bucket_date < ?',
+      [beforeDate],
+    );
   }
 
   async getAllSourceRouteStatBuckets(): Promise<SourceRouteStatsBucket[]> {

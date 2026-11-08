@@ -67,7 +67,12 @@ async function handleBangumiCover(
       });
     }
 
-    assertContentLength(imageResponse.headers, BANGUMI_COVER_MAX_BYTES);
+    try {
+      assertContentLength(imageResponse.headers, BANGUMI_COVER_MAX_BYTES);
+    } catch (error) {
+      await imageResponse.body?.cancel().catch(() => {});
+      throw error;
+    }
 
     return new Response(
       createLimitedReadableStream(imageResponse.body, BANGUMI_COVER_MAX_BYTES),

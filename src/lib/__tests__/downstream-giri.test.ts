@@ -1,3 +1,4 @@
+import { installStreamPolyfills } from '@/app/api/test-utils/stream-polyfills';
 import type { ApiSite } from '@/lib/config';
 import { getDetailFromApi, searchFirstPageFromApi } from '@/lib/downstream';
 import { resolveGirigiriEpisodePlayUrlByPath } from '@/lib/downstream-sources/giri';
@@ -18,20 +19,16 @@ jest.mock('@/lib/config', () => ({
   }),
 }));
 
+installStreamPolyfills();
+
 const originalFetch = global.fetch;
 
 function createJsonResponse(data: unknown, ok = true): Response {
-  return {
-    ok,
-    json: async () => data,
-  } as Response;
+  return new Response(JSON.stringify(data), { status: ok ? 200 : 500 });
 }
 
 function createTextResponse(data: string, ok = true): Response {
-  return {
-    ok,
-    text: async () => data,
-  } as Response;
+  return new Response(data, { status: ok ? 200 : 500 });
 }
 
 function createGiriSite(api: string): ApiSite {

@@ -942,6 +942,11 @@ class DbManager {
     return storage.getSourceRouteStats(sinceDate);
   }
 
+  async purgeSourceRouteStatsBefore(beforeDate: string): Promise<void> {
+    const storage = await this.getStorage();
+    await storage.purgeSourceRouteStatsBefore(beforeDate);
+  }
+
   async getAllSourceRouteStatBuckets(): Promise<SourceRouteStatsBucket[]> {
     const storage = await this.getStorage();
     return storage.getAllSourceRouteStatBuckets();

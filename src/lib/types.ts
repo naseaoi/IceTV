@@ -856,6 +856,7 @@ export interface IStorage {
   recordSourceRouteStat(input: SourceRouteStatInput): Promise<void>;
   getSourceRouteStats(sinceDate: string): Promise<SourceRouteStatsItem[]>;
   getAllSourceRouteStatBuckets(): Promise<SourceRouteStatsBucket[]>;
+  purgeSourceRouteStatsBefore(beforeDate: string): Promise<void>;
 
   getSharedCache(key: string): Promise<SharedCacheRecord | null>;
   acquireSharedCacheLease(

@@ -112,6 +112,78 @@ it('serializes flushes and merges failed increments with newly recorded samples'
   expect(warn).toHaveBeenCalledTimes(1);
 });
 
+it('drops expired pending buckets while retaining the thirty-day boundary', async () => {
+  recordSourceSearchOutcome('expired', 'ok', 1, Date.parse('2026-10-04'));
+  recordSourceSearchOutcome('boundary', 'ok', 1, Date.parse('2026-10-05'));
+  await flushSourceHealthSearch();
+  expect(batch.mock.calls[0][0]).toEqual([
+    expect.objectContaining({ source: 'boundary' }),
+  ]);
+
+  recordSourceSearchOutcome('aged', 'ok');
+  jest.setSystemTime(new Date('2026-12-05T12:00:00Z'));
+  await flushSourceHealthSearch();
+  expect(batch).toHaveBeenCalledTimes(1);
+});
+
+it('bounds repeated failed batches and evicts by date rather than insertion order', async () => {
+  jest.spyOn(console, 'warn').mockImplementation(() => {});
+  batch.mockRejectedValue(new Error('database unavailable'));
+  recordSourceSearchOutcome('newest', 'ok');
+  for (let index = 0; index < 4096; index += 1) {
+    recordSourceSearchOutcome(
+      `old-${index}`,
+      'ok',
+      1,
+      Date.parse('2026-10-20'),
+    );
+  }
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    await flushSourceHealthSearch();
+    const rows = batch.mock.calls[attempt][0];
+    expect(rows).toHaveLength(4096);
+    expect(rows).toContainEqual(expect.objectContaining({ source: 'newest' }));
+    recordSourceSearchOutcome(`recent-${attempt}`, 'ok');
+  }
+  // Incoming older buckets cannot displace newer buffered buckets.
+  recordSourceSearchOutcome('too-old', 'ok', 1, Date.parse('2026-10-10'));
+  batch.mockResolvedValue(undefined);
+  await flushSourceHealthSearch();
+  expect(batch.mock.calls[3][0]).toHaveLength(4096);
+  expect(batch.mock.calls[3][0]).not.toContainEqual(
+    expect.objectContaining({ source: 'too-old' }),
+  );
+  await flushSourceHealthSearch();
+  expect(batch).toHaveBeenCalledTimes(4);
+});
+
+it('discards a failed in-flight batch that aged beyond retention before reinsertion', async () => {
+  jest.spyOn(console, 'warn').mockImplementation(() => {});
+  let reject!: (error: Error) => void;
+  batch.mockImplementationOnce(
+    () =>
+      new Promise<void>((_, fail) => {
+        reject = fail;
+      }),
+  );
+  recordSourceSearchOutcome(
+    'expired-in-flight',
+    'ok',
+    1,
+    Date.parse('2026-10-05'),
+  );
+  const flushing = flushSourceHealthSearch();
+  await Promise.resolve();
+  jest.setSystemTime(new Date('2026-11-05T12:00:00Z'));
+  recordSourceSearchOutcome('current', 'empty', 20);
+  reject(new Error('database unavailable'));
+  await flushing;
+  await flushSourceHealthSearch();
+  expect(batch.mock.calls[1][0]).toEqual([
+    expect.objectContaining({ source: 'current', emptyCount: 1 }),
+  ]);
+});
+
 it('isolates synchronous storage failures and invalid timestamps', async () => {
   jest.spyOn(console, 'warn').mockImplementation(() => {});
   batch.mockImplementationOnce(() => {

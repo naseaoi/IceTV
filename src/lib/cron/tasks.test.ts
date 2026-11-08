@@ -1,3 +1,12 @@
+const mockPurgeSourceRouteStatsBefore = jest.fn();
+
+jest.mock('@/lib/db', () => ({
+  db: {
+    purgeSourceRouteStatsBefore: (...args: unknown[]) =>
+      mockPurgeSourceRouteStatsBefore(...args),
+  },
+}));
+
 const mockRefreshSubscribedConfig = jest.fn();
 const mockRefreshConfiguredLiveChannels = jest.fn();
 const mockRefreshRecordAndFavorites = jest.fn();
@@ -40,6 +49,11 @@ const { executeCronTask } = require('./tasks') as typeof import('./tasks');
 describe('cron task dispatcher', () => {
   beforeEach(() => {
     jest.clearAllMocks();
+    jest.useFakeTimers().setSystemTime(new Date('2026-11-08T00:30:00Z'));
+  });
+
+  afterEach(() => {
+    jest.useRealTimers();
   });
 
   it('按任务只执行对应的刷新', async () => {
@@ -49,6 +63,7 @@ describe('cron task dispatcher', () => {
     expect(mockRefreshRecordAndFavorites).not.toHaveBeenCalled();
     expect(mockCleanupPlaybackSessions).not.toHaveBeenCalled();
     expect(mockCleanupSourceHealth).not.toHaveBeenCalled();
+    expect(mockPurgeSourceRouteStatsBefore).not.toHaveBeenCalled();
     expect(mockProbeConfiguredSources).not.toHaveBeenCalled();
 
     jest.clearAllMocks();
@@ -58,6 +73,7 @@ describe('cron task dispatcher', () => {
     expect(mockRefreshRecordAndFavorites).not.toHaveBeenCalled();
     expect(mockCleanupPlaybackSessions).not.toHaveBeenCalled();
     expect(mockCleanupSourceHealth).not.toHaveBeenCalled();
+    expect(mockPurgeSourceRouteStatsBefore).not.toHaveBeenCalled();
     expect(mockProbeConfiguredSources).not.toHaveBeenCalled();
 
     jest.clearAllMocks();
@@ -68,6 +84,7 @@ describe('cron task dispatcher', () => {
     expect(mockCleanupPlaybackSessions).toHaveBeenCalledTimes(1);
     expect(mockCleanupInviteCodes).toHaveBeenCalledTimes(1);
     expect(mockCleanupSourceHealth).toHaveBeenCalledTimes(1);
+    expect(mockPurgeSourceRouteStatsBefore).toHaveBeenCalledWith('2026-10-02');
     expect(mockProbeConfiguredSources).toHaveBeenCalledTimes(1);
   });
 
@@ -79,6 +96,7 @@ describe('cron task dispatcher', () => {
     expect(mockRefreshRecordAndFavorites).not.toHaveBeenCalled();
     expect(mockCleanupPlaybackSessions).not.toHaveBeenCalled();
     expect(mockCleanupSourceHealth).not.toHaveBeenCalled();
+    expect(mockPurgeSourceRouteStatsBefore).not.toHaveBeenCalled();
   });
 
   it('all 任务按顺序执行全部维护步骤', async () => {
@@ -103,6 +121,10 @@ describe('cron task dispatcher', () => {
       calls.push('health');
     });
 
+    mockPurgeSourceRouteStatsBefore.mockImplementation(() => {
+      calls.push('routes');
+    });
+
     mockProbeConfiguredSources.mockImplementation(() => {
       calls.push('probe');
     });
@@ -116,6 +138,7 @@ describe('cron task dispatcher', () => {
       'retention',
       'invites',
       'health',
+      'routes',
       'probe',
     ]);
   });

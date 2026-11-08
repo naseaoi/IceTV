@@ -1,6 +1,7 @@
 import {
   clearUrlGuardDnsCacheForTests,
   fetchWithUrlGuard,
+  getUrlGuardDnsCacheSizeForTests,
   resetUrlGuardDnsLookupForTests,
   setUrlGuardDnsLookupForTests,
   validateProxyUrl,
@@ -120,5 +121,34 @@ describe('url guard', () => {
       url: 'https://example.com/c',
     });
     expect(lookup).toHaveBeenCalledTimes(2);
+  });
+
+  it('bounds dns cache size across many distinct hostnames', async () => {
+    process.env.PROXY_DNS_CACHE_TTL_MS = '60000';
+
+    for (let i = 0; i < 1500; i += 1) {
+      await validateProxyUrlForRequest(`https://h${i}.example.com/a`);
+    }
+    expect(getUrlGuardDnsCacheSizeForTests()).toBe(1024);
+
+    lookup.mockClear();
+    await validateProxyUrlForRequest('https://h1499.example.com/b');
+    expect(lookup).not.toHaveBeenCalled();
+    await validateProxyUrlForRequest('https://h0.example.com/b');
+    expect(lookup).toHaveBeenCalledTimes(1);
+  });
+
+  it('drops expired dns entries when the cache overflows', async () => {
+    process.env.PROXY_DNS_CACHE_TTL_MS = '1000';
+    jest.useFakeTimers();
+    jest.setSystemTime(new Date('2026-01-01T00:00:00.000Z'));
+
+    for (let i = 0; i < 1024; i += 1) {
+      await validateProxyUrlForRequest(`https://old${i}.example.com/a`);
+    }
+    jest.advanceTimersByTime(1001);
+    await validateProxyUrlForRequest('https://fresh.example.com/a');
+
+    expect(getUrlGuardDnsCacheSizeForTests()).toBe(1);
   });
 });

@@ -22,6 +22,11 @@ services:
       LOCAL_DB_PATH: /data/icetv-data.sqlite
     volumes:
       - icetv-data:/data
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: '3'
 
 volumes:
   icetv-data:
@@ -30,6 +35,8 @@ volumes:
 ```bash
 docker compose up -d
 ```
+
+示例中的 `logging` 限制容器日志总量；去掉后 Docker 默认 `json-file` 驱动不轮转，日志随运行时间持续占盘。
 
 访问 `http://localhost:3000`，用配置的站长账号登录。项目不内置播放源，需在后台配置。
 
@@ -77,6 +84,11 @@ services:
       CRON_SECRET: replace_with_random_cron_secret
       NEXT_PUBLIC_STORAGE_TYPE: mysql
       DATABASE_URL: mysql://icetv:replace_with_mysql_password@mysql:3306/icetv
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: '3'
 
 volumes:
   icetv-mysql:
@@ -136,20 +148,21 @@ DATABASE_URL=mysql://user:password@host:3306/dbname
 
 ## 环境变量边界
 
-| 配置                                | 易错点                                                                          |
-| ----------------------------------- | ------------------------------------------------------------------------------- |
-| `ICETV_USERNAME` / `ICETV_PASSWORD` | 站长账号不来自普通用户表，密码须使用强随机值                                    |
-| `AUTH_SECRET`                       | 会话签名密钥，不用站长密码代替；各实例保持一致                                  |
-| `CRON_SECRET`                       | 定时接口凭证，Docker 启动时必填；不要依赖旧兼容变量名                           |
-| `LOCAL_DB_PATH`                     | Docker 默认在 `/data`；本地开发路径以 `.env.example` 为准                       |
-| `TRUSTED_PROXY_COUNT`               | 填实际代理层数，如 Nginx 为 1、Cloudflare + Nginx 为 2；默认 0 不能防伪造转发头 |
-| `CACHE_PROFILE`                     | 默认 `small` 仅限制业务缓存，不限制 Node、SQLite、sharp 等进程总内存            |
+| 配置                                | 易错点                                                                             |
+| ----------------------------------- | ---------------------------------------------------------------------------------- |
+| `ICETV_USERNAME` / `ICETV_PASSWORD` | 站长账号不来自普通用户表，密码须使用强随机值                                       |
+| `AUTH_SECRET`                       | 会话签名密钥，不用站长密码代替；各实例保持一致                                     |
+| `CRON_SECRET`                       | 定时接口凭证，Docker 启动时必填；不要依赖旧兼容变量名                              |
+| `LOCAL_DB_PATH`                     | Docker 默认在 `/data`；本地开发路径以 `.env.example` 为准                          |
+| `TRUSTED_PROXY_COUNT`               | 填实际代理层数，如 Nginx 为 1、Cloudflare + Nginx 为 2；默认 0 不能防伪造转发头    |
+| `CACHE_PROFILE`                     | 默认 `small` 仅限制业务缓存，不限制 Node、SQLite、sharp 等进程总内存               |
+| `MYSQL_QUEUE_LIMIT`                 | 等待连接的队列上限，默认连接数的 50 倍；队列满时数据库操作直接失败，不在内存中堆积 |
 
 ## 定时维护与源站探测
 
 `/api/cron` 接受 `task=config|live|metadata|source-health|all`，省略参数时执行 `all`。`metadata` 包含源站探测，`all` 每轮也只探测一次；独立 `source-health` 仅执行探测。任务互斥，已有任务运行时返回 202，本轮跳过。进程内用内存标记，跨进程靠文件锁：Docker 默认 `/data/icetv-cron.lock`（`CRON_LOCK_PATH` 可改），非 Docker 未设置时不加文件锁，不共享数据卷的多个容器也互不感知。200 表示后台任务已启动，完成情况以服务端日志与健康报告为准。
 
-- Docker 由 `start.js` 在服务就绪后调用接口：默认直播 60 秒、配置 75 秒、元数据 90 秒后首次运行，随后分别每 1、6、6 小时运行；源站探测与过期邀请码清理随元数据任务执行。周期和启动延迟变量见 [.env.example](../.env.example)。
+- Docker 由 `start.js` 在服务就绪后调用接口：默认直播 60 秒、配置 75 秒、元数据 90 秒后首次运行，随后分别每 1、6、6 小时运行；源站探测、过期邀请码清理与线路统计（`source_route_stats`）的 37 天保留清理随元数据任务执行。周期和启动延迟变量见 [.env.example](../.env.example)。
 - 本地 `pnpm dev` 由进程内调度器直接启动任务：默认元数据 30 秒、直播 45 秒、配置 60 秒后首次运行，后续使用相同周期。`DEV_CRON_DISABLED=true` 关闭开发调度。
 - `pnpm start` 仅启动 Next 服务，定时调用由外部调度器负责。仓库 `vercel.json` 配置每天 UTC 01:00 请求 `/api/cron`（`all`）；平台执行时限仍适用，接口返回成功不代表后台批次已经完成。
 
@@ -186,6 +199,7 @@ curl -fsS -H "Authorization: Bearer $CRON_SECRET" 'http://localhost:3000/api/cro
 - 主机按目标 URL 的 hostname 合并，不按可修改的 source 参数或端口拆分。带有效播放签名的请求按客户端 IP 计数（即使同时登录），其余按账号计数；同出口用户可能共享额度。
 - 连接租约持续到响应体读完、取消或出错，不在收到响应头时释放；每 10 秒续租，实例失联后 30 秒过期。
 - 用户超额返回 429，共享资源繁忙或数据库故障返回 503，附带 `Retry-After`；已开始发送的流只能中断，不能改 HTTP 状态。
+- 搜索上游闸门（`src/lib/search-aggregate.ts`）和封面转码（`src/lib/cover-image-resize.ts`）的排队有条数上限和等待期限：搜索排队满或超时只让该源记为失败，不进入源失败冷却；封面转码返回 503。
 - 上游返回 429，或返回带 `Retry-After` 的 503 时，该主机进入冷却（`src/lib/upstream-cooldown.server.ts`，时长按 `Retry-After` 取 5～300 秒，缺失时 30 秒）。冷却期内本站不再向该主机回源，各类请求统一返回带剩余秒数的 503，弹幕接口仍返回 429。冷却经数据库在实例间共享，查询结果在本地缓存 3 秒；冷却存储故障时只在本实例内生效。
 - 请求数与流量额度按 60 秒固定窗口计数：各实例按块向数据库预约后在内存中扣减（预取块为 64 个请求或 8 MiB，流量以 256 KiB 为单位；单次缺口更大时按实际缺口预约），未用完的额度不退还。多实例时每个实例对每项额度最多提前占用一块未用额度，接近上限时可能略早拒绝。实例间时钟同步（如 NTP）时不会超发；时钟落后的实例在窗口翻转时，每项额度最多多放一块。流量额度是保护性上限，不是平滑限速或实际网卡流量统计；单分片仍有 256 MiB 上限。
 - 缓存命中只消耗入口额度，浏览器直连不消耗本站回源额度。预算不随业务数据导入或清空重置。

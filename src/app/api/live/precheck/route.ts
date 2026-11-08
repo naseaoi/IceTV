@@ -61,6 +61,7 @@ export async function GET(request: NextRequest) {
     });
 
     if (!response.ok) {
+      await response.body?.cancel().catch(() => {});
       return NextResponse.json(
         { error: 'Failed to fetch', message: response.statusText },
         { status: 500 },
@@ -68,9 +69,7 @@ export async function GET(request: NextRequest) {
     }
 
     const contentType = response.headers.get('Content-Type');
-    if (response.body) {
-      response.body.cancel();
-    }
+    await response.body?.cancel().catch(() => {});
     if (contentType?.includes('video/mp4')) {
       return NextResponse.json({ success: true, type: 'mp4' }, { status: 200 });
     }

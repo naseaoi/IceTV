@@ -98,6 +98,7 @@ export async function GET(request: NextRequest) {
 
 async function buildLogoResponse(imageResponse: Response) {
   if (!imageResponse.ok) {
+    await imageResponse.body?.cancel().catch(() => {});
     return NextResponse.json(
       { error: imageResponse.statusText },
       { status: imageResponse.status },

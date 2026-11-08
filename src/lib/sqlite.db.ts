@@ -3138,6 +3138,13 @@ export class LocalSqliteStorage implements IStorage {
   }
 
   async releaseSharedCacheLease(key: string, token: string): Promise<void> {
+    this.db
+      .prepare(
+        `DELETE FROM shared_cache
+         WHERE cache_key = ? AND lease_token = ?
+           AND LENGTH(value_text) = 0 AND fresh_until = 0 AND stale_until = 0`,
+      )
+      .run(key, token);
     this.stmts.releaseSharedCacheLease.run(key, token);
   }
 
@@ -3475,6 +3482,12 @@ export class LocalSqliteStorage implements IStorage {
         successCount: Number(row.success_count || 0),
         failureCount: Number(row.failure_count || 0),
       }));
+  }
+
+  async purgeSourceRouteStatsBefore(beforeDate: string): Promise<void> {
+    this.db
+      .prepare('DELETE FROM source_route_stats WHERE bucket_date < ?')
+      .run(beforeDate);
   }
 
   async getAllSourceRouteStatBuckets(): Promise<SourceRouteStatsBucket[]> {

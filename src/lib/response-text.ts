@@ -7,6 +7,7 @@ export async function readResponseTextWithLimit(
   if (contentLength) {
     const length = Number(contentLength);
     if (Number.isFinite(length) && length > maxBytes) {
+      await response.body?.cancel().catch(() => {});
       throw new Error(`${label}超过大小限制`);
     }
   }

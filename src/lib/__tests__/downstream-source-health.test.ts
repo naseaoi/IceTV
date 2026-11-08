@@ -1,5 +1,6 @@
 /** @jest-environment node */
 
+import { installStreamPolyfills } from '@/app/api/test-utils/stream-polyfills';
 import type { ApiSite } from '@/lib/config';
 import { probeSourceSearch, searchFromApi } from '@/lib/downstream';
 import {
@@ -40,6 +41,8 @@ jest.mock('@/lib/upstream-fetch.server', () => ({
   fetchPrivateUpstream: jest.fn(),
 }));
 
+installStreamPolyfills();
+
 const site: ApiSite = { key: 'a', name: 'A', api: 'https://example.com/api' };
 const fetchMock = fetchUpstream as jest.Mock;
 const item = { vod_id: 1, vod_name: 'Movie', vod_pic: '', vod_play_url: '' };
@@ -62,13 +65,20 @@ it.each([
     jest.useFakeTimers().setSystemTime(0);
     fetchMock.mockImplementation(async () => {
       jest.advanceTimersByTime(100);
-      return {
-        ok: true,
-        json: async () => {
-          jest.advanceTimersByTime(50);
-          return { list };
-        },
-      };
+      return new Response(
+        new ReadableStream<Uint8Array>(
+          {
+            pull(controller) {
+              jest.advanceTimersByTime(50);
+              controller.enqueue(
+                new TextEncoder().encode(JSON.stringify({ list })),
+              );
+              controller.close();
+            },
+          },
+          { highWaterMark: 0 },
+        ),
+      );
     });
     await searchFromApi(site, 'movie');
     expect(recordSourceSearchOutcome).toHaveBeenCalledWith('a', outcome, 150);
@@ -89,13 +99,11 @@ it.each(['network', 'json', 'shape'])(
   async (failure) => {
     fetchMock.mockImplementation(async () => {
       if (failure === 'network') throw new Error('network');
-      return {
-        ok: true,
-        json: async () => {
-          if (failure === 'json') throw new SyntaxError('invalid JSON');
-          return { list: 'invalid' };
-        },
-      };
+      return new Response(
+        failure === 'json'
+          ? 'invalid JSON'
+          : JSON.stringify({ list: 'invalid' }),
+      );
     });
     await searchFromApi(site, 'movie');
     expect(recordSourceSearchOutcome).toHaveBeenCalledWith(
@@ -153,10 +161,9 @@ it('excludes already aborted requests and resource limits', async () => {
 });
 
 it('counts page one once while fetching subsequent pages', async () => {
-  fetchMock.mockResolvedValue({
-    ok: true,
-    json: async () => ({ list: [], pagecount: 2 }),
-  });
+  fetchMock.mockImplementation(
+    async () => new Response(JSON.stringify({ list: [], pagecount: 2 })),
+  );
   await searchFromApi(site, 'movie', { maxSearchPages: 2 });
   expect(fetchMock).toHaveBeenCalledTimes(2);
   expect(recordSourceSearchOutcome).toHaveBeenCalledTimes(1);
@@ -176,7 +183,7 @@ it('excludes fresh cache hits and counts the actual stale background refresh', a
     fresh: false,
     entry: { status: 'ok', data: [], pageCount: 1 },
   });
-  fetchMock.mockResolvedValue({ ok: true, json: async () => ({ list: [] }) });
+  fetchMock.mockResolvedValue(new Response(JSON.stringify({ list: [] })));
   await searchFromApi(site, 'movie');
   expect(dedupeSearchLoad).toHaveBeenCalledTimes(1);
   await (dedupeSearchLoad as jest.Mock).mock.results[0].value;
@@ -195,10 +202,9 @@ it.each([
       data: [],
       pageCount: 5,
     });
-    fetchMock.mockResolvedValue({
-      ok: true,
-      json: async () => ({ list, pagecount: 5 }),
-    });
+    fetchMock.mockResolvedValue(
+      new Response(JSON.stringify({ list, pagecount: 5 })),
+    );
     await expect(
       probeSourceSearch(site, 'space movie'),
     ).resolves.toBeUndefined();
@@ -255,18 +261,19 @@ it.each([
   ['全1集', 'ended'],
   ['更新至1集', 'ongoing'],
 ])('搜索映射作品状态 %s', async (vod_remarks, expected) => {
-  fetchMock.mockResolvedValue({
-    ok: true,
-    json: async () => ({
-      list: [
-        {
-          ...item,
-          vod_remarks,
-          vod_play_url: '第1集$https://example.com/1.m3u8',
-        },
-      ],
-    }),
-  });
+  fetchMock.mockResolvedValue(
+    new Response(
+      JSON.stringify({
+        list: [
+          {
+            ...item,
+            vod_remarks,
+            vod_play_url: '第1集$https://example.com/1.m3u8',
+          },
+        ],
+      }),
+    ),
+  );
   const results = await searchFromApi(site, 'movie');
   expect(results[0].series_status).toBe(expected);
 });
