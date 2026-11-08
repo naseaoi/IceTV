@@ -108,6 +108,7 @@ const UserConfig = ({ config, role, refreshConfig }: UserConfigProps) => {
     deleteInactiveUsers,
     createInviteCodes,
     deleteInviteCode,
+    purgeInactiveInviteCodes,
     setRequireInviteCode,
     setDefaultUserGroup,
     updateUserApis,
@@ -170,6 +171,7 @@ const UserConfig = ({ config, role, refreshConfig }: UserConfigProps) => {
   const [pendingSensitiveUserAction, setPendingSensitiveUserAction] =
     useState<PendingSensitiveUserAction | null>(null);
   const [showOpenRegisterConfirm, setShowOpenRegisterConfirm] = useState(false);
+  const [showPurgeInviteConfirm, setShowPurgeInviteConfirm] = useState(false);
   const [showCleanupInactiveModal, setShowCleanupInactiveModal] =
     useModalState(false);
   const [inactiveDays, setInactiveDays] = useState(DEFAULT_INACTIVE_DAYS);
@@ -438,6 +440,19 @@ const UserConfig = ({ config, role, refreshConfig }: UserConfigProps) => {
       } catch {
         // 邀请码可能已被其他管理员删除，拉一次最新摘要
         await refreshConfig().catch(() => undefined);
+      }
+      void inviteList.refresh();
+    });
+  };
+
+  const handlePurgeInactiveInviteCodes = () => {
+    setShowPurgeInviteConfirm(false);
+    void withLoading('purgeInactiveInviteCodes', async () => {
+      try {
+        const deleted = await purgeInactiveInviteCodes();
+        showSuccess(`已清理 ${deleted} 个失效邀请码`);
+      } catch {
+        // handled in purgeInactiveInviteCodes
       }
       void inviteList.refresh();
     });
@@ -1153,7 +1168,19 @@ const UserConfig = ({ config, role, refreshConfig }: UserConfigProps) => {
         onInviteFilterChange={setInviteFilter}
         onCreateCodes={handleCreateInviteCodes}
         onDeleteCode={handleDeleteInviteCode}
+        isPurgingCodes={isLoading('purgeInactiveInviteCodes')}
+        onPurgeInactiveCodes={() => setShowPurgeInviteConfirm(true)}
         onClose={() => setShowRegistrationModal(false)}
+      />
+
+      <ConfirmModal
+        isOpen={showPurgeInviteConfirm}
+        title='清理失效邀请码'
+        message={`将删除 ${inviteList.inactiveCount} 个已过期或已用尽的邀请码，删除后无法恢复。`}
+        onClose={() => setShowPurgeInviteConfirm(false)}
+        onConfirm={handlePurgeInactiveInviteCodes}
+        confirmText='确认清理'
+        danger
       />
 
       <ConfirmModal

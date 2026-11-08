@@ -1,6 +1,14 @@
 'use client';
 
-import { Check, CircleCheck, Copy, Plus, Trash2, X } from 'lucide-react';
+import {
+  Check,
+  CircleCheck,
+  Copy,
+  Eraser,
+  Plus,
+  Trash2,
+  X,
+} from 'lucide-react';
 import {
   type CSSProperties,
   type FormEvent,
@@ -44,6 +52,7 @@ export interface InviteCodeListState {
   items: InviteCode[];
   total: number;
   activeCount: number;
+  inactiveCount: number;
   nextCursor: string | null;
   // 骨架行数依据；未知时按 1 行
   expectedCount?: number;
@@ -66,6 +75,7 @@ interface RegistrationSettingsDialogProps {
   isTogglingInvite: boolean;
   isCreatingCode: boolean;
   deletingCode: string | null;
+  isPurgingCodes: boolean;
   onToggleOpenRegister: () => void;
   onToggleRequireInviteCode: () => void;
   onDefaultUserGroupChange: (next: string) => void;
@@ -73,6 +83,7 @@ interface RegistrationSettingsDialogProps {
   // 成功返回本次生成的邀请码，失败返回 null（错误由调用方提示）
   onCreateCodes: (draft: InviteCodeDraft) => Promise<string[] | null>;
   onDeleteCode: (code: string) => void;
+  onPurgeInactiveCodes: () => void;
   onClose: () => void;
 }
 
@@ -625,15 +636,25 @@ export function RegistrationSettingsDialog({
   isTogglingInvite,
   isCreatingCode,
   deletingCode,
+  isPurgingCodes,
   onToggleOpenRegister,
   onToggleRequireInviteCode,
   onDefaultUserGroupChange,
   onInviteFilterChange,
   onCreateCodes,
   onDeleteCode,
+  onPurgeInactiveCodes,
   onClose,
 }: RegistrationSettingsDialogProps) {
-  const { items, total, activeCount, nextCursor, loading, error } = inviteList;
+  const {
+    items,
+    total,
+    activeCount,
+    inactiveCount,
+    nextCursor,
+    loading,
+    error,
+  } = inviteList;
   const expectedCount = inviteList.expectedCount ?? 1;
   const initialLoading = loading && items.length === 0 && expectedCount > 0;
   const { copiedKey, copy } = useCopyFeedback();
@@ -704,6 +725,22 @@ export function RegistrationSettingsDialog({
                 <span className='text-xs tabular-nums text-gray-500 dark:text-gray-400'>
                   共 {total} 个
                 </span>
+              )}
+              {inactiveCount > 0 && (
+                <button
+                  type='button'
+                  onClick={onPurgeInactiveCodes}
+                  disabled={isPurgingCodes}
+                  title='删除所有已过期和已用尽的邀请码'
+                  className='inline-flex h-8 items-center gap-1.5 rounded-full px-3 text-xs font-medium text-gray-600 ring-1 ring-inset ring-gray-200 transition-colors hover:bg-red-50 hover:text-red-600 hover:ring-red-200 disabled:cursor-not-allowed disabled:opacity-50 dark:text-gray-300 dark:ring-white/[0.08] dark:hover:bg-red-500/10 dark:hover:text-red-400 dark:hover:ring-red-500/30'
+                >
+                  {isPurgingCodes ? (
+                    <Spinner className='h-3.5 w-3.5' />
+                  ) : (
+                    <Eraser className='h-3.5 w-3.5' />
+                  )}
+                  清理失效 {inactiveCount}
+                </button>
               )}
               <Select
                 value={inviteFilter}

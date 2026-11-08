@@ -166,6 +166,14 @@ export function useAdminUserActions(options: UseAdminUserActionsOptions) {
     [runUserMutation],
   );
 
+  const purgeInactiveInviteCodes = useCallback(async () => {
+    const data = await runUserMutation<{ deleted?: number }>(
+      { action: 'purgeInactiveInviteCodes' },
+      '清理失效邀请码失败',
+    );
+    return data.deleted ?? 0;
+  }, [runUserMutation]);
+
   const setRequireInviteCode = useCallback(
     async (requireInviteCode: boolean) => {
       await runUserMutation(
@@ -224,6 +232,7 @@ export function useAdminUserActions(options: UseAdminUserActionsOptions) {
     deleteInactiveUsers,
     createInviteCodes,
     deleteInviteCode,
+    purgeInactiveInviteCodes,
     setRequireInviteCode,
     setDefaultUserGroup,
     updateUserApis,

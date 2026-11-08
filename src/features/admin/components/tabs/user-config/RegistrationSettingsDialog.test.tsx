@@ -16,6 +16,7 @@ function renderDialog(
     items: [],
     total: 0,
     activeCount: 0,
+    inactiveCount: 0,
     nextCursor: null,
     loading: false,
     error: '',
@@ -24,6 +25,7 @@ function renderDialog(
     ...list,
   };
   const onDeleteCode = jest.fn();
+  const onPurgeInactiveCodes = jest.fn();
   render(
     <RegistrationSettingsDialog
       isOpen
@@ -38,16 +40,18 @@ function renderDialog(
       isTogglingInvite={false}
       isCreatingCode={false}
       deletingCode={null}
+      isPurgingCodes={false}
       onToggleOpenRegister={jest.fn()}
       onToggleRequireInviteCode={jest.fn()}
       onDefaultUserGroupChange={jest.fn()}
       onInviteFilterChange={jest.fn()}
       onCreateCodes={onCreateCodes}
       onDeleteCode={onDeleteCode}
+      onPurgeInactiveCodes={onPurgeInactiveCodes}
       onClose={jest.fn()}
     />,
   );
-  return { inviteList, onDeleteCode };
+  return { inviteList, onDeleteCode, onPurgeInactiveCodes };
 }
 
 describe('RegistrationSettingsDialog invite code list', () => {
@@ -88,6 +92,19 @@ describe('RegistrationSettingsDialog invite code list', () => {
       screen.getByRole('button', { name: '删除邀请码 OLD00001' }),
     );
     expect(onDeleteCode).toHaveBeenCalledWith('OLD00001');
+  });
+
+  it('offers purging only when inactive codes exist', () => {
+    const { onPurgeInactiveCodes } = renderDialog({ inactiveCount: 3 });
+    fireEvent.click(screen.getByRole('button', { name: /清理失效 3/ }));
+    expect(onPurgeInactiveCodes).toHaveBeenCalledTimes(1);
+  });
+
+  it('hides purging when every code is active', () => {
+    renderDialog({ activeCount: 2 });
+    expect(
+      screen.queryByRole('button', { name: /清理失效/ }),
+    ).not.toBeInTheDocument();
   });
 
   it('shows a filter-aware empty state', () => {

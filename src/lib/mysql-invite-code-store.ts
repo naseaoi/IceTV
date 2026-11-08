@@ -3,6 +3,7 @@ import type { Pool, PoolConnection, RowDataPacket } from 'mysql2/promise';
 import type { InviteCode } from '@/features/admin/services/inviteCodes';
 import {
   type InviteCodeCreateResult,
+  type InviteCodePurge,
   type InviteCodeQuery,
   type InviteCodeRow,
   importedInviteCodes,
@@ -11,6 +12,7 @@ import {
   inviteFromRow,
   invitePage,
   invitePageStatements,
+  invitePurgeStatement,
   inviteValues,
   MAX_INVITE_CODES,
 } from '@/lib/invite-code-storage';
@@ -106,10 +108,14 @@ export class MysqlInviteCodeStore {
         `SELECT COUNT(*) AS total FROM invite_codes WHERE ${INVITE_ACTIVE_SQL}`,
         [now],
       );
+      const [all] = await connection.query<RowDataPacket[]>(
+        'SELECT COUNT(*) AS total FROM invite_codes',
+      );
       return invitePage(
         rows,
         Number(totals[0].total),
         Number(active[0].total),
+        Number(all[0].total) - Number(active[0].total),
         query,
       );
     });
@@ -156,6 +162,12 @@ export class MysqlInviteCodeStore {
       [code],
     );
     return Number((result as { affectedRows: number }).affectedRows) > 0;
+  }
+
+  async purge(options: InviteCodePurge): Promise<number> {
+    const { sql, params } = invitePurgeStatement(options);
+    const [result] = await this.pool.execute(sql, params);
+    return Number((result as { affectedRows: number }).affectedRows);
   }
 
   async reserve(code: string): Promise<boolean> {

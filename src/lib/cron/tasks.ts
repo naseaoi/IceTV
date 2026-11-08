@@ -1,6 +1,7 @@
 import { cleanupSourceHealth } from '@/lib/source-health.server';
 
 import { refreshSubscribedConfig } from './config-refresh';
+import { cleanupInviteCodes } from './invite-code-retention';
 import { refreshConfiguredLiveChannels } from './live-refresh';
 import { refreshRecordAndFavorites } from './metadata-refresh';
 import { cleanupPlaybackSessions } from './playback-retention';
@@ -17,6 +18,7 @@ export async function executeCronTask(task: CronTask): Promise<void> {
   if (task === 'all' || task === 'metadata') {
     await refreshRecordAndFavorites();
     await cleanupPlaybackSessions();
+    await cleanupInviteCodes();
     await cleanupSourceHealth();
   }
   // Existing production and development schedulers both dispatch metadata.

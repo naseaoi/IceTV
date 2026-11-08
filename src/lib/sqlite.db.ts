@@ -39,6 +39,7 @@ import {
   subscriptionFromConfig,
 } from '@/lib/config-state';
 import {
+  type InviteCodePurge,
   type InviteCodeQuery,
   importedInviteCodes,
   INVITE_INSERT_SQL,
@@ -2773,6 +2774,9 @@ export class LocalSqliteStorage implements IStorage {
   }
   async deleteInviteCode(code: string) {
     return this.invites.delete(code);
+  }
+  async purgeInviteCodes(options: InviteCodePurge) {
+    return this.invites.purge(options);
   }
   async reserveInviteCodeUse(code: string): Promise<boolean> {
     return this.invites.reserve(code);

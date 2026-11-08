@@ -43,6 +43,7 @@ import {
   subscriptionFromConfig,
 } from '@/lib/config-state';
 import {
+  type InviteCodePurge,
   type InviteCodeQuery,
   importedInviteCodes,
   INVITE_INSERT_SQL,
@@ -2135,6 +2136,10 @@ export class MySqlStorage implements IStorage {
   async deleteInviteCode(code: string) {
     await this.ensureInitialized();
     return this.invites.delete(code);
+  }
+  async purgeInviteCodes(options: InviteCodePurge) {
+    await this.ensureInitialized();
+    return this.invites.purge(options);
   }
   async reserveInviteCodeUse(code: string): Promise<boolean> {
     await this.ensureInitialized();

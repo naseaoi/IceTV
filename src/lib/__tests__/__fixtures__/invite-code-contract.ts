@@ -115,6 +115,37 @@ export function inviteCodeBatchContract(createStorage: () => IStorage) {
     expect(await storage.getAllInviteCodes()).toEqual(before);
   });
 
+  it('清理按到期截止时间删除，可选连同已用尽的码', async () => {
+    const now = Date.now();
+    await storage.createInviteCodes([
+      makeCode('OLD', { expiresAt: now - 40 * 86400000 }),
+      makeCode('RECENT', { expiresAt: now - 86400000 }),
+      makeCode('USED-UP', { maxUses: 1, usedCount: 1 }),
+      makeCode('ACTIVE', { maxUses: 2, usedCount: 1 }),
+      makeCode('UNLIMITED'),
+    ]);
+    const page = await storage.queryInviteCodes({});
+    expect(page.activeCount).toBe(2);
+    expect(page.inactiveCount).toBe(3);
+
+    expect(
+      await storage.purgeInviteCodes({
+        expiredBefore: now - 30 * 86400000,
+        includeExhausted: false,
+      }),
+    ).toBe(1);
+    expect(
+      await storage.purgeInviteCodes({
+        expiredBefore: now,
+        includeExhausted: true,
+      }),
+    ).toBe(2);
+    expect(
+      (await storage.getAllInviteCodes()).map((item) => item.code).sort(),
+    ).toEqual(['ACTIVE', 'UNLIMITED']);
+    expect((await storage.queryInviteCodes({})).inactiveCount).toBe(0);
+  });
+
   it('并发批量创建保持总上限且失败批次没有部分写入', async () => {
     await fill(MAX_INVITE_CODES - 2);
     const batches = [

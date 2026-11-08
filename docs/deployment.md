@@ -149,7 +149,7 @@ DATABASE_URL=mysql://user:password@host:3306/dbname
 
 `/api/cron` 接受 `task=config|live|metadata|source-health|all`，省略参数时执行 `all`。`metadata` 包含源站探测，`all` 每轮也只探测一次；独立 `source-health` 仅执行探测。任务互斥，已有任务运行时返回 202，本轮跳过。进程内用内存标记，跨进程靠文件锁：Docker 默认 `/data/icetv-cron.lock`（`CRON_LOCK_PATH` 可改），非 Docker 未设置时不加文件锁，不共享数据卷的多个容器也互不感知。200 表示后台任务已启动，完成情况以服务端日志与健康报告为准。
 
-- Docker 由 `start.js` 在服务就绪后调用接口：默认直播 60 秒、配置 75 秒、元数据 90 秒后首次运行，随后分别每 1、6、6 小时运行；源站探测随元数据任务执行。周期和启动延迟变量见 [.env.example](../.env.example)。
+- Docker 由 `start.js` 在服务就绪后调用接口：默认直播 60 秒、配置 75 秒、元数据 90 秒后首次运行，随后分别每 1、6、6 小时运行；源站探测与过期邀请码清理随元数据任务执行。周期和启动延迟变量见 [.env.example](../.env.example)。
 - 本地 `pnpm dev` 由进程内调度器直接启动任务：默认元数据 30 秒、直播 45 秒、配置 60 秒后首次运行，后续使用相同周期。`DEV_CRON_DISABLED=true` 关闭开发调度。
 - `pnpm start` 仅启动 Next 服务，定时调用由外部调度器负责。仓库 `vercel.json` 配置每天 UTC 01:00 请求 `/api/cron`（`all`）；平台执行时限仍适用，接口返回成功不代表后台批次已经完成。
 

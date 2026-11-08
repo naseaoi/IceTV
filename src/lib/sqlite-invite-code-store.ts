@@ -3,6 +3,7 @@ import type Database from 'better-sqlite3';
 import type { InviteCode } from '@/features/admin/services/inviteCodes';
 import {
   type InviteCodeCreateResult,
+  type InviteCodePurge,
   type InviteCodeQuery,
   type InviteCodeRow,
   importedInviteCodes,
@@ -11,6 +12,7 @@ import {
   inviteFromRow,
   invitePage,
   invitePageStatements,
+  invitePurgeStatement,
   inviteValues,
   MAX_INVITE_CODES,
 } from '@/lib/invite-code-storage';
@@ -87,18 +89,20 @@ export class SqliteInviteCodeStore {
   page(query: InviteCodeQuery) {
     const now = Date.now();
     const sql = invitePageStatements(query, now);
-    return this.db.transaction(() =>
-      invitePage(
+    return this.db.transaction(() => {
+      const active = this.countActive(now);
+      return invitePage(
         this.db.prepare(sql.rows).all(...sql.params) as InviteCodeRow[],
         (
           this.db.prepare(sql.count).get(...sql.countParams) as {
             total: number;
           }
         ).total,
-        this.countActive(now),
+        active,
+        this.count() - active,
         query,
-      ),
-    )();
+      );
+    })();
   }
 
   create(items: InviteCode[]): InviteCodeCreateResult {
@@ -131,6 +135,11 @@ export class SqliteInviteCodeStore {
       this.db.prepare('DELETE FROM invite_codes WHERE code = ?').run(code)
         .changes > 0
     );
+  }
+
+  purge(options: InviteCodePurge): number {
+    const { sql, params } = invitePurgeStatement(options);
+    return this.db.prepare(sql).run(...params).changes;
   }
 
   reserve(code: string): boolean {

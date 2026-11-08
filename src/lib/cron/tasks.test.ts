@@ -3,6 +3,7 @@ const mockRefreshConfiguredLiveChannels = jest.fn();
 const mockRefreshRecordAndFavorites = jest.fn();
 const mockCleanupPlaybackSessions = jest.fn();
 const mockCleanupSourceHealth = jest.fn();
+const mockCleanupInviteCodes = jest.fn();
 const mockProbeConfiguredSources = jest.fn();
 
 jest.mock('./source-health', () => ({
@@ -25,6 +26,9 @@ jest.mock('./live-refresh', () => ({
 jest.mock('./metadata-refresh', () => ({
   refreshRecordAndFavorites: (...args: unknown[]) =>
     mockRefreshRecordAndFavorites(...args),
+}));
+jest.mock('./invite-code-retention', () => ({
+  cleanupInviteCodes: (...args: unknown[]) => mockCleanupInviteCodes(...args),
 }));
 jest.mock('./playback-retention', () => ({
   cleanupPlaybackSessions: (...args: unknown[]) =>
@@ -62,6 +66,7 @@ describe('cron task dispatcher', () => {
     expect(mockRefreshConfiguredLiveChannels).not.toHaveBeenCalled();
     expect(mockRefreshRecordAndFavorites).toHaveBeenCalledTimes(1);
     expect(mockCleanupPlaybackSessions).toHaveBeenCalledTimes(1);
+    expect(mockCleanupInviteCodes).toHaveBeenCalledTimes(1);
     expect(mockCleanupSourceHealth).toHaveBeenCalledTimes(1);
     expect(mockProbeConfiguredSources).toHaveBeenCalledTimes(1);
   });
@@ -90,6 +95,9 @@ describe('cron task dispatcher', () => {
     mockCleanupPlaybackSessions.mockImplementation(() => {
       calls.push('retention');
     });
+    mockCleanupInviteCodes.mockImplementation(() => {
+      calls.push('invites');
+    });
 
     mockCleanupSourceHealth.mockImplementation(() => {
       calls.push('health');
@@ -106,6 +114,7 @@ describe('cron task dispatcher', () => {
       'live',
       'metadata',
       'retention',
+      'invites',
       'health',
       'probe',
     ]);

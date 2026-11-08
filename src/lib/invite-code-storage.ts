@@ -17,6 +17,7 @@ export type InviteCodePage = {
   items: InviteCode[];
   total: number;
   activeCount: number;
+  inactiveCount: number;
   nextCursor: string | null;
 };
 export type InviteCodeCreateResult = 'created' | 'exists' | 'limit';
@@ -30,9 +31,28 @@ export type InviteCodeRow = {
 };
 export const INVITE_ACTIVE_SQL =
   'expires_at > ? AND (max_uses IS NULL OR used_count < max_uses)';
+export const INVITE_EXHAUSTED_SQL =
+  'max_uses IS NOT NULL AND used_count >= max_uses';
 export const INVITE_INSERT_SQL =
   'INSERT INTO invite_codes (code, created_at, expires_at, created_by, max_uses, used_count) VALUES (?, ?, ?, ?, ?, ?)';
 export { MAX_INVITE_CODES };
+
+export type InviteCodePurge = {
+  expiredBefore: number;
+  includeExhausted: boolean;
+};
+
+export function invitePurgeStatement({
+  expiredBefore,
+  includeExhausted,
+}: InviteCodePurge) {
+  return {
+    sql: `DELETE FROM invite_codes WHERE expires_at <= ?${
+      includeExhausted ? ` OR (${INVITE_EXHAUSTED_SQL})` : ''
+    }`,
+    params: [expiredBefore],
+  };
+}
 
 export function inviteValues(item: InviteCode): (string | number | null)[] {
   return [
@@ -83,7 +103,7 @@ export function invitePageStatements(query: InviteCodeQuery, now = Date.now()) {
       : filter === 'expired'
         ? 'expires_at <= ?'
         : filter === 'exhausted'
-          ? 'max_uses IS NOT NULL AND used_count >= max_uses'
+          ? INVITE_EXHAUSTED_SQL
           : '1 = 1';
   const countParams: (string | number)[] =
     filter === 'active' || filter === 'expired' ? [now] : [];
@@ -125,6 +145,7 @@ export function invitePage(
   rows: InviteCodeRow[],
   total: number,
   activeCount: number,
+  inactiveCount: number,
   query: InviteCodeQuery,
 ): InviteCodePage {
   const limit = query.limit ?? INVITE_CODE_PAGE_SIZE;
@@ -134,6 +155,7 @@ export function invitePage(
     items: selected.map(inviteFromRow),
     total,
     activeCount,
+    inactiveCount,
     nextCursor:
       rows.length > limit && last
         ? Buffer.from(

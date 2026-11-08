@@ -40,6 +40,7 @@ jest.mock('@/lib/db', () => ({
     getAllUserLastActive: jest.fn(),
     createInviteCodes: jest.fn(),
     deleteInviteCode: jest.fn(),
+    purgeInviteCodes: jest.fn(),
     getAdminUserPage: jest.fn(),
   },
 }));
@@ -418,6 +419,21 @@ describe('邀请码后台数据库写入', () => {
     expect(db.deleteInviteCode).toHaveBeenCalledWith('WELCOME');
     (db.deleteInviteCode as jest.Mock).mockResolvedValue(false);
     expect((await handleAdminUserAction(context)).status).toBe(404);
+    expect(mockSaveConfig).not.toHaveBeenCalled();
+  });
+
+  it('清理失效邀请码删除所有已过期和已用尽的码并返回条数', async () => {
+    (db.purgeInviteCodes as jest.Mock).mockResolvedValue(3);
+    const before = Date.now();
+    const result = await handleAdminUserAction({
+      operatorUsername: 'manager',
+      operatorRole: 'admin',
+      body: { action: 'purgeInactiveInviteCodes' },
+    });
+    expect(result.body).toEqual({ ok: true, deleted: 3 });
+    const [options] = (db.purgeInviteCodes as jest.Mock).mock.calls[0];
+    expect(options.includeExhausted).toBe(true);
+    expect(options.expiredBefore).toBeGreaterThanOrEqual(before);
     expect(mockSaveConfig).not.toHaveBeenCalled();
   });
 });

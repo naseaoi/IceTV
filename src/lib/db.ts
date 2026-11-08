@@ -724,6 +724,12 @@ class DbManager {
     return (await this.getStorage()).deleteInviteCode(code);
   }
 
+  async purgeInviteCodes(
+    ...args: Parameters<IStorage['purgeInviteCodes']>
+  ): ReturnType<IStorage['purgeInviteCodes']> {
+    return (await this.getStorage()).purgeInviteCodes(...args);
+  }
+
   async reserveInviteCodeUse(code: string): Promise<boolean> {
     return (await this.getStorage()).reserveInviteCodeUse(code);
   }

@@ -798,6 +798,10 @@ export interface IStorage {
     item: import('@/features/admin/services/inviteCodes').InviteCode,
   ): Promise<import('@/lib/invite-code-storage').InviteCodeCreateResult>;
   deleteInviteCode(code: string): Promise<boolean>;
+  // 删除到期时间不晚于 expiredBefore 的邀请码，可选连同已用尽的一起删除，返回删除条数
+  purgeInviteCodes(
+    options: import('@/lib/invite-code-storage').InviteCodePurge,
+  ): Promise<number>;
   reserveInviteCodeUse(code: string): Promise<boolean>;
   releaseInviteCodeUse(code: string): Promise<void>;
   getAllInviteCodeUsage(): Promise<Record<string, number>>;

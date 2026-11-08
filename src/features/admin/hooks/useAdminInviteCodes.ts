@@ -13,6 +13,7 @@ const EMPTY_PAGE: InviteCodePage = {
   items: [],
   total: 0,
   activeCount: 0,
+  inactiveCount: 0,
   nextCursor: null,
 };
 
@@ -53,6 +54,7 @@ export function useAdminInviteCodes(
           items: Array.isArray(payload.items) ? payload.items : [],
           total: payload.total ?? 0,
           activeCount: payload.activeCount ?? 0,
+          inactiveCount: payload.inactiveCount ?? 0,
           nextCursor: payload.nextCursor ?? null,
         };
         if (!cursor)

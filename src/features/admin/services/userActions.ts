@@ -53,6 +53,7 @@ const ACTIONS = [
   'setDefaultUserGroup',
   'createInviteCode',
   'deleteInviteCode',
+  'purgeInactiveInviteCodes',
 ] as const;
 
 const TARGETLESS_ACTIONS = [
@@ -65,6 +66,7 @@ const TARGETLESS_ACTIONS = [
   'setDefaultUserGroup',
   'createInviteCode',
   'deleteInviteCode',
+  'purgeInactiveInviteCodes',
 ];
 
 type AdminUserActionResponse = {
@@ -726,6 +728,15 @@ async function runAdminUserAction(
           return toActionResponse({ error: '邀请码不存在' }, { status: 404 });
         }
         return actionResponse({ ok: true }, undefined, {
+          'Cache-Control': 'no-store',
+        });
+      }
+      case 'purgeInactiveInviteCodes': {
+        const deleted = await db.purgeInviteCodes({
+          expiredBefore: Date.now(),
+          includeExhausted: true,
+        });
+        return actionResponse({ ok: true, deleted }, undefined, {
           'Cache-Control': 'no-store',
         });
       }
