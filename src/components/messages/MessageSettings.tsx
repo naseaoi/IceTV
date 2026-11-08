@@ -3,7 +3,6 @@
 import { useEffect, useRef, useState } from 'react';
 
 import { OptionSwitchRow } from '@/components/OptionSwitchRow';
-import Spinner from '@/components/Spinner';
 import {
   type MessageNotificationKind,
   MESSAGE_NOTIFICATION_KINDS,
@@ -76,21 +75,8 @@ export default function MessageSettings({ onSaved }: { onSaved: () => void }) {
       });
   }
 
-  if (!muted)
-    return (
-      <div className='flex min-h-52 items-center justify-center text-gray-400'>
-        {error ? (
-          <p role='alert' className='text-sm text-red-500'>
-            {error}
-          </p>
-        ) : (
-          <Spinner className='h-6 w-6' />
-        )}
-      </div>
-    );
-
   return (
-    <div>
+    <div className='-mx-3'>
       <h3 className='px-3 pb-1 text-xs font-semibold text-gray-500 dark:text-gray-400'>
         接收以下通知
       </h3>
@@ -98,7 +84,8 @@ export default function MessageSettings({ onSaved }: { onSaved: () => void }) {
         <OptionSwitchRow
           key={kind}
           label={KIND_LABELS[kind]}
-          checked={!muted.includes(kind)}
+          checked={muted ? !muted.includes(kind) : false}
+          pending={!muted}
           onChange={() => toggle(kind)}
         />
       ))}

@@ -5,12 +5,15 @@ export function OptionSwitchRow({
   description,
   checked,
   onChange,
+  pending = false,
   className = 'w-full px-3',
 }: {
   label: string;
   description?: string;
   checked: boolean;
   onChange: (next: boolean) => void;
+  // 状态未知时占住开关位置，到达后原地替换，不改变行高
+  pending?: boolean;
   className?: string;
 }) {
   return (
@@ -19,7 +22,9 @@ export function OptionSwitchRow({
       role='switch'
       aria-checked={checked}
       aria-label={label}
-      className={`flex items-center justify-between gap-3 rounded-lg py-2.5 text-left transition-colors hover:bg-gray-100 dark:hover:bg-white/[0.06] ${className}`}
+      aria-busy={pending || undefined}
+      disabled={pending}
+      className={`flex items-center justify-between gap-3 rounded-lg py-2.5 text-left transition-colors enabled:hover:bg-gray-100 dark:enabled:hover:bg-white/[0.06] ${className}`}
       onClick={() => onChange(!checked)}
     >
       <span className='min-w-0'>
@@ -32,18 +37,25 @@ export function OptionSwitchRow({
           </span>
         )}
       </span>
-      <span
-        aria-hidden='true'
-        className={`relative h-5 w-9 shrink-0 rounded-full transition-colors ${
-          checked ? 'bg-brand-500' : 'bg-gray-300 dark:bg-gray-600'
-        }`}
-      >
+      {pending ? (
         <span
-          className={`absolute left-0.5 top-0.5 h-4 w-4 rounded-full bg-white shadow-sm transition-transform ${
-            checked ? 'translate-x-4' : ''
-          }`}
+          aria-hidden='true'
+          className='skeleton h-5 w-9 shrink-0 rounded-full'
         />
-      </span>
+      ) : (
+        <span
+          aria-hidden='true'
+          className={`relative h-5 w-9 shrink-0 rounded-full transition-colors ${
+            checked ? 'bg-brand-500' : 'bg-gray-300 dark:bg-gray-600'
+          }`}
+        >
+          <span
+            className={`absolute left-0.5 top-0.5 h-4 w-4 rounded-full bg-white shadow-sm transition-transform ${
+              checked ? 'translate-x-4' : ''
+            }`}
+          />
+        </span>
+      )}
     </button>
   );
 }

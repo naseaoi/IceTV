@@ -17,6 +17,7 @@
 - 桌面端导航是 `src/components/TopNav.tsx`（由 `PageLayout` 挂载），页面水平容器统一用 `PAGE_CONTAINER_CLASS`（`src/components/page-container.ts`），否则内容与导航左边缘错位。
 - 移动端顶部区域由 `PageLayout` 按路径决定：首页与 `/douban` 走 `MobileChannelHeader`（频道条，频道列表与高亮规则在 `src/components/channel-nav.ts`，与桌面顶栏共用），其余页面走 `MobileHeader`；传 `mobileHeader={false}` 表示页面自带顶部区域（搜索、`/me`）。频道页忽略 `mobileHeader` 的标题和操作按钮，入口不要放在那里。
 - 账号相关能力（退出、登录跳转、版本更新标记、设置 / 改密 / 版本面板）在 `src/components/user-menu/`，桌面 `UserMenu` 与移动端 `/settings` 共用。
+- 消息面板是固定高度的居中浮层，列表、通知设置与评价详情在同一框内滚动，空、加载与错误状态在框内居中。改回随内容伸缩会让面板在切换视图、加载完成或标记已读时整体上下跳动。
 - `/me` 下各标签页的外壳（`PageLayout`、个人横幅、标签栏）由 `app/me/layout.tsx` 的 `MeShell` 提供，子页面与其 `loading.tsx` 只渲染内容区，**再套 `PageLayout` 会出现双层导航**。概览页及其骨架放在路由组 `app/me/(overview)/`，`app/me/` 根目录不放 `loading.tsx`，否则冷加载其他标签会先闪出概览骨架。海报网格统一用 `POSTER_GRID_CLASS`（`src/components/poster-grid-layout.ts`）。
 
 ## 加载反馈与骨架
@@ -37,7 +38,7 @@
 - 导航与标签栏的选中条用 `useSlidingIndicator`：目标项加 `data-indicator-target`，容器设为定位元素。指示条由 Web Animations 驱动 `transform`，在合成层运行，换页时主线程繁忙也不掉帧，不要改回 `left`/`width` 过渡。随页面重新挂载的导航（顶栏、移动端频道条）传 `memoryKey`，新页面才能从上一页的位置滑过来；链接式导航配合同文件的 `usePendingTarget`，点击后立即切换选中态，不等路由完成。
 - 收藏爱心的回弹与粒子只在用户点击后、收藏状态真正翻转时播放，异步加载或其他页面同步的状态变化不播放。评分星的弹起同理，由 `RatingInput` 在用户改分时传 `pop` 给 `RatingStars`，外部传入的新分值不播放。
 - 计数（点赞、粉丝、未读）用 `AnimatedCount`，数值变化时按增减方向滚动；首次渲染不播放，跨实体复用同一组件时（如切换个人主页）用 `key` 重置。
-- 列表增删与重排用 `useListLayoutMotion(keys)`：容器设为定位元素并挂返回的 ref，列表项根元素加 `data-list-motion-key`，值与 React key 一致。被删项由 React 移出后，原节点放回容器原位置作为残影淡出，其余项按布局偏移（`offsetLeft`/`offsetTop`，不受进行中的变换影响）做 FLIP 滑动。增或删超过 8 项、只在末尾追加（加载更多）、首批数据到达时直接切换。子项是无法加属性的组件时传 `matchChildOrder`，按直接子元素顺序对应 keys，`ScrollableRow` 已内置。虚拟网格按序号绝对定位，不接这个 hook。
+- 列表增删与重排用 `useListLayoutMotion(keys)`：容器设为定位元素并挂返回的 ref，列表项根元素加 `data-list-motion-key`，值与 React key 一致。被删项由 React 移出后，原节点放回容器原位置作为残影淡出，其余项按布局偏移（`offsetLeft`/`offsetTop`，不受进行中的变换影响）做 FLIP 滑动。增或删超过 8 项、只在末尾追加（加载更多）、首批数据到达时直接切换。子项是无法加属性的组件时传 `matchChildOrder`，按直接子元素顺序对应 keys，`ScrollableRow` 已内置。虚拟网格按序号绝对定位，不接这个 hook。分组列表（如消息面板）整表共用一个容器，分组标题与空状态也带 key；每组各用一个容器时，组被删空会随容器卸载丢掉离场动画，下一组也不会滑动补位。
 - 动效须处理 `prefers-reduced-motion`：CSS 动效在 `globals.css` 的减弱动效媒体查询里降级，JS 驱动的动效自行检查该媒体查询。
 
 ## 通用组件

@@ -54,9 +54,10 @@ type PanelView =
 
 const MESSAGE_PRIMARY_CLASS =
   'truncate text-sm font-semibold text-gray-900 dark:text-gray-100';
-const MESSAGE_BODY_CLASS =
-  'mt-1 text-sm leading-5 text-gray-600 dark:text-gray-300';
-const MESSAGE_META_CLASS = 'text-xs text-gray-400 dark:text-gray-500';
+const MESSAGE_BODY_CLASS = 'text-sm leading-5 text-gray-600 dark:text-gray-300';
+const MESSAGE_META_CLASS = 'mt-1 text-xs text-gray-400 dark:text-gray-500';
+// 头像、公告图标与封面共用同一列宽，各类消息的正文左缘对齐
+const MESSAGE_LEAD_CLASS = 'h-10 w-10 shrink-0';
 
 function ReadButton({
   working,
@@ -71,7 +72,7 @@ function ReadButton({
       disabled={working}
       aria-label='标记为已读'
       title='标记为已读'
-      className='flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-gray-400 transition-colors hover:bg-brand-100/80 hover:text-brand-700 disabled:opacity-50 dark:hover:bg-brand-900/50 dark:hover:text-brand-300'
+      className='flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-gray-400 transition-colors hover:bg-brand-100/80 hover:text-brand-700 disabled:opacity-50 dark:hover:bg-brand-900/50 dark:hover:text-brand-300'
       onClick={onClick}
     >
       {working ? (
@@ -83,18 +84,31 @@ function ReadButton({
   );
 }
 
+function SocialLine({ name, action }: { name: string; action: string }) {
+  return (
+    <p className={`${MESSAGE_BODY_CLASS} break-words`}>
+      <span className='font-semibold text-gray-900 dark:text-gray-100'>
+        {name}
+      </span>
+      <span className='ml-1.5'>{action}</span>
+    </p>
+  );
+}
+
 function MessageBody({ message }: { message: UserMessage }) {
   if (message.type === 'announcement')
     return (
       <>
-        <div className='flex h-11 w-11 shrink-0 items-center justify-center rounded-lg bg-brand-100 text-brand-700 dark:bg-brand-900/35 dark:text-brand-300'>
-          <Megaphone className='h-5 w-5' />
+        <div
+          className={`${MESSAGE_LEAD_CLASS} flex items-center justify-center rounded-full bg-brand-100 text-brand-700 dark:bg-brand-900/40 dark:text-brand-300`}
+        >
+          <Megaphone className='h-[18px] w-[18px]' />
         </div>
-        <div className='min-w-0 flex-1'>
-          <p className='text-sm leading-6 text-gray-800 dark:text-gray-100'>
+        <div className='min-w-0 flex-1 pt-0.5'>
+          <p className='whitespace-pre-line break-words text-sm leading-5 text-gray-800 dark:text-gray-100'>
             {message.content}
           </p>
-          <p className={`mt-1 ${MESSAGE_META_CLASS}`}>
+          <p className={MESSAGE_META_CLASS}>
             {formatRelativeTime(message.createdAt)}
           </p>
         </div>
@@ -106,17 +120,17 @@ function MessageBody({ message }: { message: UserMessage }) {
       message.type === 'new-follower' ? message.follower : message.latestLiker;
     return (
       <>
-        <ProfileAvatar user={user} />
-        <div className='min-w-0 flex-1'>
-          <p className={MESSAGE_PRIMARY_CLASS}>
-            {user.nickname ?? '未设置昵称'}
-          </p>
-          <p className={MESSAGE_BODY_CLASS}>
-            {message.type === 'new-follower'
-              ? '关注了你'
-              : `${message.likeCount > 1 ? `等 ${message.likeCount} 人` : ''}赞了你对《${message.title}》的评价`}
-          </p>
-          <p className={`mt-1.5 ${MESSAGE_META_CLASS}`}>
+        <ProfileAvatar user={user} className={MESSAGE_LEAD_CLASS} />
+        <div className='min-w-0 flex-1 pt-0.5'>
+          <SocialLine
+            name={user.nickname ?? '未设置昵称'}
+            action={
+              message.type === 'new-follower'
+                ? '关注了你'
+                : `${message.likeCount > 1 ? `等 ${message.likeCount} 人` : ''}赞了你对《${message.title}》的评价`
+            }
+          />
+          <p className={MESSAGE_META_CLASS}>
             {formatRelativeTime(message.createdAt)}
           </p>
         </div>
@@ -127,26 +141,26 @@ function MessageBody({ message }: { message: UserMessage }) {
   if (message.type === 'follow-review' || message.type === 'review-reply')
     return (
       <>
-        <ProfileAvatar user={message.author} />
-        <div className='min-w-0 flex-1'>
-          <p className={MESSAGE_PRIMARY_CLASS}>
-            {message.author.nickname ?? '未设置昵称'}
-          </p>
-          <p className={MESSAGE_BODY_CLASS}>
-            {message.type === 'review-reply'
-              ? `在《${message.title}》中回复了你`
-              : `评价了《${message.title}》`}
-          </p>
+        <ProfileAvatar user={message.author} className={MESSAGE_LEAD_CLASS} />
+        <div className='min-w-0 flex-1 pt-0.5'>
+          <SocialLine
+            name={message.author.nickname ?? '未设置昵称'}
+            action={
+              message.type === 'review-reply'
+                ? `在《${message.title}》中回复了你`
+                : `评价了《${message.title}》`
+            }
+          />
           {message.type === 'review-reply' && (
-            <p className={`${MESSAGE_BODY_CLASS} line-clamp-2 break-words`}>
+            <p className='mt-1.5 line-clamp-2 break-words rounded-lg bg-gray-100 px-2.5 py-1.5 text-[13px] leading-5 text-gray-700 dark:bg-white/[0.06] dark:text-gray-300'>
               {message.content}
             </p>
           )}
-          <div className='mt-1.5 flex items-center gap-2'>
+          <div className='mt-1 flex items-center gap-2'>
             {message.type === 'follow-review' && message.rating !== null && (
               <RatingBadge value={message.rating} />
             )}
-            <span className={MESSAGE_META_CLASS}>
+            <span className='text-xs text-gray-400 dark:text-gray-500'>
               {formatRelativeTime(message.createdAt)}
             </span>
           </div>
@@ -156,7 +170,7 @@ function MessageBody({ message }: { message: UserMessage }) {
 
   return (
     <>
-      <div className='relative h-[72px] w-12 shrink-0 overflow-hidden rounded-md bg-gray-100 dark:bg-gray-800'>
+      <div className='relative h-[60px] w-10 shrink-0 overflow-hidden rounded-md bg-gray-100 dark:bg-gray-800'>
         <CoverImage
           src={message.cover}
           alt={message.title}
@@ -164,15 +178,15 @@ function MessageBody({ message }: { message: UserMessage }) {
           checkClientCacheBeforeLoad
         />
       </div>
-      <div className='min-w-0 flex-1'>
+      <div className='min-w-0 flex-1 pt-0.5'>
         <p className='flex items-center gap-1.5'>
           <Rss className='h-3.5 w-3.5 shrink-0 text-amber-500' />
           <span className={MESSAGE_PRIMARY_CLASS}>{message.title}</span>
         </p>
-        <p className={MESSAGE_BODY_CLASS}>
+        <p className={`mt-0.5 ${MESSAGE_BODY_CLASS}`}>
           已从 {message.fromEpisodes} 集更新至 {message.toEpisodes} 集
         </p>
-        <p className={`mt-1 ${MESSAGE_META_CLASS}`}>
+        <p className={MESSAGE_META_CLASS}>
           {message.sourceName} · {formatRelativeTime(message.createdAt)}
         </p>
       </div>
@@ -194,14 +208,17 @@ function MessageRow({
   onOpenReview: (message: ReviewMessage) => void;
 }) {
   const bodyClass = 'flex min-w-0 flex-1 gap-3 text-left';
+  const clickable = isReviewMessage(message) || message.type === 'new-follower';
 
   return (
     <div
       data-list-motion-key={String(message.id)}
-      className={`flex items-start gap-3 rounded-lg border p-3 sm:p-4 ${
+      className={`-mx-2 mb-1 flex items-start gap-2 rounded-xl px-2 py-3 sm:-mx-3 sm:px-3 ${
         message.type === 'announcement'
-          ? 'border-brand-200/80 bg-brand-50/70 dark:border-brand-800/60 dark:bg-brand-950/25'
-          : 'border-gray-200/80 bg-white/60 dark:border-gray-700/80 dark:bg-gray-800/40'
+          ? 'bg-brand-50 dark:bg-brand-950/30'
+          : clickable
+            ? 'transition-colors hover:bg-gray-100/80 dark:hover:bg-white/[0.04]'
+            : ''
       }`}
     >
       {isReviewMessage(message) ? (
@@ -250,46 +267,115 @@ function MessageRow({
   );
 }
 
-function MessageSection({
-  title,
-  messages,
+const ANNOUNCEMENT_TITLE_KEY = 'section:announcement';
+const FEED_TITLE_KEY = 'section:feed';
+const EMPTY_KEY = 'empty';
+const LOAD_MORE_KEY = 'load-more';
+
+function SectionTitle({
+  motionKey,
+  children,
+}: {
+  motionKey: string;
+  children: string;
+}) {
+  return (
+    <h3
+      data-list-motion-key={motionKey}
+      className='mt-4 pb-1 text-xs font-semibold text-gray-500 first:mt-0 dark:text-gray-400'
+    >
+      {children}
+    </h3>
+  );
+}
+
+// 分组标题、消息行、空状态与加载更多同在一个动效容器里：
+// 已读某组最后一条时标题随之淡出，下一组整体滑上来；读完最后一条时空状态浮现
+function MessageList({
+  items,
+  hasMore,
+  loadingMore,
   workingIds,
-  readingAll,
   onRead,
+  onLoadMore,
   onNavigate,
   onOpenReview,
 }: {
-  title: string;
-  messages: UserMessage[];
+  items: UserMessage[];
+  hasMore: boolean;
+  loadingMore: boolean;
   workingIds: Set<string>;
-  readingAll: boolean;
   onRead: (message: UserMessage) => Promise<void>;
+  onLoadMore: () => Promise<void>;
   onNavigate: () => void;
   onOpenReview: (message: ReviewMessage) => void;
 }) {
-  const containerRef = useListLayoutMotion<HTMLDivElement>(
-    messages.map((message) => String(message.id)),
+  const readingAll = workingIds.has('all');
+  const announcements = items.filter(
+    (message) => message.type === 'announcement',
   );
-  if (messages.length === 0) return null;
+  const feed = items.filter((message) => message.type !== 'announcement');
+  const motionKeys = [
+    ...(announcements.length > 0 ? [ANNOUNCEMENT_TITLE_KEY] : []),
+    ...announcements.map((message) => message.id),
+    ...(feed.length > 0 ? [FEED_TITLE_KEY] : []),
+    ...feed.map((message) => message.id),
+    ...(items.length === 0 ? [EMPTY_KEY] : []),
+    ...(hasMore ? [LOAD_MORE_KEY] : []),
+  ];
+  const containerRef = useListLayoutMotion<HTMLDivElement>(motionKeys);
+
+  const renderRow = (message: UserMessage) => (
+    <MessageRow
+      key={message.id}
+      message={message}
+      working={readingAll || workingIds.has(message.id)}
+      onRead={onRead}
+      onNavigate={onNavigate}
+      onOpenReview={onOpenReview}
+    />
+  );
 
   return (
-    <section className='space-y-2.5'>
-      <h3 className='px-0.5 text-xs font-semibold text-gray-500 dark:text-gray-400'>
-        {title}
-      </h3>
-      <div ref={containerRef} className='relative space-y-2.5'>
-        {messages.map((message) => (
-          <MessageRow
-            key={message.id}
-            message={message}
-            working={readingAll || workingIds.has(message.id)}
-            onRead={onRead}
-            onNavigate={onNavigate}
-            onOpenReview={onOpenReview}
-          />
-        ))}
-      </div>
-    </section>
+    <div ref={containerRef} className='relative flex min-h-full flex-col'>
+      {announcements.length > 0 && (
+        <SectionTitle motionKey={ANNOUNCEMENT_TITLE_KEY}>公告</SectionTitle>
+      )}
+      {announcements.map(renderRow)}
+      {feed.length > 0 && (
+        <SectionTitle motionKey={FEED_TITLE_KEY}>
+          {feed.some((message) => message.type !== 'tracking-update')
+            ? '追更与互动'
+            : '追更更新'}
+        </SectionTitle>
+      )}
+      {feed.map(renderRow)}
+      {items.length === 0 && (
+        <div
+          data-list-motion-key={EMPTY_KEY}
+          className='flex flex-1 flex-col items-center justify-center gap-2 px-4 text-center text-gray-400'
+        >
+          <Inbox className='h-10 w-10' />
+          <p className='text-sm'>暂无新消息</p>
+        </div>
+      )}
+      {hasMore && (
+        <div
+          data-list-motion-key={LOAD_MORE_KEY}
+          className='flex justify-center pt-2'
+        >
+          <button
+            type='button'
+            disabled={loadingMore}
+            className='inline-flex min-h-9 items-center gap-1.5 rounded-md px-3 text-sm font-medium text-brand-600 transition-colors hover:bg-brand-50 hover:text-brand-700 disabled:opacity-50 dark:text-brand-400 dark:hover:bg-brand-950/50'
+            onClick={() => void onLoadMore()}
+          >
+            {loadingMore && <Spinner className='h-3.5 w-3.5' />}
+            {loadingMore ? '加载中' : '加载更多'}
+          </button>
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -353,12 +439,6 @@ export default function MessagePanel({
 
   if (!presence.mounted || typeof document === 'undefined') return null;
   const readingAll = workingIds.has('all');
-  const announcements = page.items.filter(
-    (message) => message.type === 'announcement',
-  );
-  const trackingUpdates = page.items.filter(
-    (message) => message.type !== 'announcement',
-  );
 
   return createPortal(
     <div className='fixed inset-0 z-[1250] flex items-center justify-center p-4 sm:p-6'>
@@ -374,7 +454,7 @@ export default function MessagePanel({
         aria-modal='true'
         aria-labelledby={titleId}
         data-open={presence.visible}
-        className='motion-dialog relative z-10 flex max-h-[90dvh] w-full max-w-2xl flex-col overflow-hidden rounded-2xl bg-white shadow-2xl shadow-black/10 outline-none ring-1 ring-gray-900/[0.08] dark:bg-gray-900 dark:shadow-black/50 dark:ring-white/[0.08]'
+        className='motion-dialog relative z-10 flex h-[min(40rem,calc(100dvh-2rem))] w-full max-w-xl flex-col overflow-hidden rounded-2xl bg-white shadow-2xl shadow-black/10 outline-none ring-1 ring-gray-900/[0.08] dark:bg-gray-900 dark:shadow-black/50 dark:ring-white/[0.08] sm:h-[min(40rem,calc(100dvh-3rem))]'
       >
         <div className='flex shrink-0 items-center gap-3 border-b border-gray-200/80 px-4 py-3.5 dark:border-gray-700/80 sm:px-6 sm:py-4'>
           {view.kind === 'list' ? (
@@ -455,11 +535,11 @@ export default function MessagePanel({
               onNavigate={onClose}
             />
           ) : loading && page.items.length === 0 ? (
-            <div className='flex min-h-52 items-center justify-center text-gray-400'>
+            <div className='flex min-h-full items-center justify-center text-gray-400'>
               <Spinner className='h-6 w-6' />
             </div>
           ) : loadError && page.items.length === 0 ? (
-            <div className='flex min-h-52 flex-col items-center justify-center gap-3 px-4 text-center'>
+            <div className='flex min-h-full flex-col items-center justify-center gap-3 px-4 text-center'>
               <div className='flex h-11 w-11 items-center justify-center rounded-full bg-gray-100 text-gray-400 dark:bg-gray-800 dark:text-gray-500'>
                 <RefreshCw className='h-5 w-5' />
               </div>
@@ -479,51 +559,17 @@ export default function MessagePanel({
                 重新加载
               </button>
             </div>
-          ) : page.items.length === 0 ? (
-            <div className='flex min-h-52 flex-col items-center justify-center gap-2 px-4 text-center text-gray-400'>
-              <Inbox className='h-10 w-10' />
-              <p className='text-sm'>暂无新消息</p>
-            </div>
           ) : (
-            <div className='space-y-5'>
-              <MessageSection
-                title='公告'
-                messages={announcements}
-                workingIds={workingIds}
-                readingAll={readingAll}
-                onRead={onRead}
-                onNavigate={onClose}
-                onOpenReview={openReview}
-              />
-              <MessageSection
-                title={
-                  trackingUpdates.some(
-                    (message) => message.type !== 'tracking-update',
-                  )
-                    ? '追更与互动'
-                    : '追更更新'
-                }
-                messages={trackingUpdates}
-                workingIds={workingIds}
-                readingAll={readingAll}
-                onRead={onRead}
-                onNavigate={onClose}
-                onOpenReview={openReview}
-              />
-              {page.nextCursor && (
-                <div className='flex justify-center pt-1'>
-                  <button
-                    type='button'
-                    disabled={loadingMore}
-                    className='inline-flex min-h-9 items-center gap-1.5 rounded-md px-3 text-sm font-medium text-brand-600 transition-colors hover:bg-brand-50 hover:text-brand-700 disabled:opacity-50 dark:text-brand-400 dark:hover:bg-brand-950/50'
-                    onClick={() => void onLoadMore()}
-                  >
-                    {loadingMore && <Spinner className='h-3.5 w-3.5' />}
-                    {loadingMore ? '加载中' : '加载更多'}
-                  </button>
-                </div>
-              )}
-            </div>
+            <MessageList
+              items={page.items}
+              hasMore={Boolean(page.nextCursor)}
+              loadingMore={loadingMore}
+              workingIds={workingIds}
+              onRead={onRead}
+              onLoadMore={onLoadMore}
+              onNavigate={onClose}
+              onOpenReview={openReview}
+            />
           )}
         </div>
       </div>
