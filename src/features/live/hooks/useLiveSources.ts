@@ -10,14 +10,13 @@ import {
 } from 'react';
 
 import { parseCustomTimeFormat } from '@/features/live/lib/time';
-
 import type {
   EpgData,
   EpgProgram,
   LiveChannel,
   LivePanelTab,
   LiveSource,
-} from '../types';
+} from '@/features/live/types';
 
 // ----- EPG 数据清洗 -----
 

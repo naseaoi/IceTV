@@ -8,6 +8,10 @@ import {
   DanmakuProviderError,
   DanmakuRateLimitError,
 } from '@/features/play/lib/danmaku/types';
+import {
+  readTextLimited,
+  ResponseSizeLimitError,
+} from '@/lib/proxy-response-limits';
 import { DEFAULT_RUNTIME_PARAMS } from '@/lib/runtime-params';
 import { ResourceLimitError } from '@/lib/server-resource-errors';
 import { fetchPrivateUpstream } from '@/lib/upstream-fetch.server';
@@ -125,15 +129,17 @@ async function readJson(
     );
   }
 
-  const declaredLength = Number(response.headers.get('content-length'));
-  if (Number.isFinite(declaredLength) && declaredLength > MAX_RESPONSE_BYTES) {
-    await response.body?.cancel().catch(() => {});
-    throw new DanmakuProviderError('invalid-response', '弹幕数据超出体积上限');
-  }
-
-  const text = await response.text();
-  if (text.length > MAX_RESPONSE_BYTES) {
-    throw new DanmakuProviderError('invalid-response', '弹幕数据超出体积上限');
+  let text: string;
+  try {
+    text = await readTextLimited(response, MAX_RESPONSE_BYTES);
+  } catch (error) {
+    if (error instanceof ResponseSizeLimitError) {
+      throw new DanmakuProviderError(
+        'invalid-response',
+        '弹幕数据超出体积上限',
+      );
+    }
+    throw error;
   }
 
   try {

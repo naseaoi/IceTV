@@ -52,6 +52,40 @@ function contract(
     });
   });
 
+  it("deletes only the releasing owner's empty placeholder", async () => {
+    const key = randomUUID();
+    await storage.acquireSharedCacheLease(key, 'old', 1000, 2000);
+    await storage.acquireSharedCacheLease(key, 'next', 2000, 3000);
+    await storage.releaseSharedCacheLease(key, 'old');
+    expect(await storage.getSharedCache(key)).toMatchObject({
+      leaseUntil: 3000,
+    });
+    await storage.releaseSharedCacheLease(key, 'next');
+    expect(await storage.getSharedCache(key)).toBeNull();
+    expect(
+      await storage.acquireSharedCacheLease(key, 'retry', 2100, 3100),
+    ).toBe(true);
+    await storage.releaseSharedCacheLease(key, 'retry');
+    expect(await storage.getSharedCache(key)).toBeNull();
+  });
+
+  it.each(['old value', ' ', ''])(
+    'preserves previously written values on release: %j',
+    async (value) => {
+      const key = randomUUID();
+      await storage.acquireSharedCacheLease(key, 'writer', 1000, 2000);
+      await storage.setSharedCache(key, 'writer', value, 2000, 4000, 1100);
+      await storage.acquireSharedCacheLease(key, 'refresh', 2500, 3500);
+      await storage.releaseSharedCacheLease(key, 'refresh');
+      expect(await storage.getSharedCache(key)).toEqual({
+        value,
+        freshUntil: 2000,
+        staleUntil: 4000,
+        leaseUntil: 0,
+      });
+    },
+  );
+
   it('prunes expired rows without removing active leases', async () => {
     const expired = randomUUID();
     const active = randomUUID();

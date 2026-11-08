@@ -1,12 +1,20 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 
+import { showToast } from '@/lib/toast';
+
 import DataMigration from './DataMigration';
+
+jest.mock('@/lib/toast', () => ({
+  showToast: jest.fn(),
+  dismissToast: jest.fn(),
+}));
 
 describe('DataMigration', () => {
   const originalFetch = global.fetch;
   const originalReload = window.location.reload;
 
   beforeEach(() => {
+    jest.clearAllMocks();
     global.fetch = jest.fn();
     Object.defineProperty(window, 'location', {
       configurable: true,
@@ -31,6 +39,39 @@ describe('DataMigration', () => {
       },
     });
     jest.restoreAllMocks();
+  });
+
+  it('导出成功使用轻提示并清空密码', async () => {
+    const originalCreate = URL.createObjectURL;
+    const originalRevoke = URL.revokeObjectURL;
+    URL.createObjectURL = jest.fn().mockReturnValue('blob:backup');
+    URL.revokeObjectURL = jest.fn();
+    jest
+      .spyOn(HTMLAnchorElement.prototype, 'click')
+      .mockImplementation(() => undefined);
+    (global.fetch as jest.Mock).mockResolvedValue({
+      ok: true,
+      headers: { get: () => null },
+      blob: async () => new Blob(['backup']),
+    });
+    try {
+      render(<DataMigration />);
+      fireEvent.change(screen.getByLabelText('加密密码'), {
+        target: { value: 'backup-password' },
+      });
+      fireEvent.click(screen.getByRole('button', { name: '导出数据' }));
+      await waitFor(() =>
+        expect(showToast).toHaveBeenCalledWith(
+          '导出成功，请妥善保管备份文件和密码',
+          'success',
+        ),
+      );
+      expect(screen.getByLabelText('加密密码')).toHaveValue('');
+      expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    } finally {
+      URL.createObjectURL = originalCreate;
+      URL.revokeObjectURL = originalRevoke;
+    }
   });
 
   it('renders imported metadata as text in the success modal', async () => {

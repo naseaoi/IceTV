@@ -1,5 +1,29 @@
-﻿import { randomUUID } from 'crypto';
+import { randomUUID } from 'crypto';
 
+import {
+  isCatalogFavoriteSource,
+  normalizeFavoriteWatchFields,
+} from '@/lib/catalog-favorites';
+import { CONFIG_SUBSCRIPTION_MAX_BYTES } from '@/lib/config-state';
+import { importedInviteCodes } from '@/lib/invite-code-storage';
+import {
+  parseReplyMessageId,
+  validateReplyContent,
+} from '@/lib/review-reply-storage';
+import { importedAvatarSeed } from '@/lib/review-social-storage';
+import { isSeriesStatus } from '@/lib/series-status';
+import {
+  parseSocialNotificationId,
+  validateMutedKinds,
+} from '@/lib/social-notification-identity';
+import {
+  isValidUserDanmakuKey,
+  normalizeUserDanmakuColor,
+  normalizeUserDanmakuMode,
+  normalizeUserDanmakuText,
+} from '@/lib/user-danmaku';
+import { mergeUserMessageState } from '@/lib/user-message-state';
+import { validateLibraryVisibility } from '@/lib/user-profile';
 import { AdminConfig } from '@/types/admin';
 
 import { configSelfCheck } from './config';
@@ -14,13 +38,18 @@ import {
   Favorite,
   PlaybackSession,
   PlayRecord,
+  REVIEW_REPORT_REASONS,
+  ReviewReportReason,
   SkipConfig,
   SourceRouteStatsBucket,
   StorageImportData,
   StorageUserImportData,
+  UserMessageState,
+  VideoReview,
 } from './types';
 import { normalizeUsername } from './username';
 import { parseStorageKey } from './utils';
+import { reviewInput, ReviewValidationError } from './video-reviews';
 
 const MAX_USERS = 1000;
 const MAX_RECORDS_PER_USER = 20000;
@@ -52,7 +81,10 @@ export class ImportValidationError extends Error {
   }
 }
 
-export type TruncationKind = 'searchHistory' | 'playbackSessions';
+export type TruncationKind =
+  | 'searchHistory'
+  | 'playbackSessions'
+  | 'userDanmaku';
 
 export type TruncationReport = {
   username: string;
@@ -104,6 +136,7 @@ export async function parseImportData(
   const inviteCodeUsage = normalizeInviteCodeUsage(data.inviteCodeUsage);
   const siteIcon = normalizeSiteIcon(data.siteIcon);
   const userEntries = Object.entries(userDataInput);
+  const danmakuIds = new Set<string>();
 
   if (userEntries.length > MAX_USERS) {
     throw new ImportValidationError('用户数量超出限制', 413);
@@ -139,6 +172,12 @@ export async function parseImportData(
     totalItems +=
       Object.keys(normalizedUserData.playRecords).length +
       Object.keys(normalizedUserData.favorites).length +
+      (normalizedUserData.videoReviews?.length ?? 0) +
+      (normalizedUserData.follows?.length ?? 0) +
+      (normalizedUserData.likes?.length ?? 0) +
+      (normalizedUserData.reports?.length ?? 0) +
+      (normalizedUserData.replies?.length ?? 0) +
+      (normalizedUserData.replyReports?.length ?? 0) +
       normalizedUserData.searchHistory.length +
       Object.keys(normalizedUserData.skipConfigs).length +
       Object.keys(normalizedUserData.playbackSessions).length;
@@ -160,6 +199,11 @@ export async function parseImportData(
       truncated.rename(username, targetName);
     }
 
+    for (const item of normalizedUserData.userDanmaku ?? []) {
+      if (danmakuIds.has(item.id))
+        throw new ImportValidationError('弹幕标识重复');
+      danmakuIds.add(item.id);
+    }
     userData[targetName] = normalizedUserData;
     // 站长凭据来自环境变量，不写 users 表
     if (targetName !== localOwner) {
@@ -168,6 +212,83 @@ export async function parseImportData(
     }
   }
 
+  // 弹幕总量单独裁剪，按创建时间保留全站最新 50,000 条。
+  const latestDanmaku = Object.entries(userData)
+    .flatMap(([username, data]) =>
+      (data.userDanmaku ?? []).map((item) => ({ username, item })),
+    )
+    .sort(
+      (a, b) =>
+        b.item.createdAt - a.item.createdAt ||
+        b.item.id.localeCompare(a.item.id),
+    );
+  const retained = new Set(
+    latestDanmaku.slice(0, 50_000).map(({ item }) => item.id),
+  );
+  for (const [username, data] of Object.entries(userData)) {
+    const original = data.userDanmaku ?? [];
+    data.userDanmaku = original.filter((item) => retained.has(item.id));
+    truncated.add(
+      username,
+      'userDanmaku',
+      original.length - data.userDanmaku.length,
+    );
+  }
+
+  const remap = (name: string) =>
+    shouldRemapOwner && normalizeUsername(name) === backupOwner
+      ? localOwner
+      : normalizeUsername(name);
+  for (const [username, data] of Object.entries(userData)) {
+    if (data.profile) data.profile.username = username;
+    data.follows = data.follows
+      ?.map((row) => ({ ...row, followee: remap(row.followee) }))
+      .filter((row) => row.followee !== username && !!userData[row.followee]);
+    data.likes = data.likes
+      ?.map((row) => ({ ...row, author: remap(row.author) }))
+      .filter(
+        (row) =>
+          row.author !== username &&
+          userData[row.author]?.videoReviews?.some(
+            (review) =>
+              review.title_norm === row.title_norm && review.year === row.year,
+          ),
+      );
+    data.reports = data.reports
+      ?.map((row) => ({ ...row, author: remap(row.author) }))
+      .filter(
+        (row) =>
+          row.author !== username &&
+          userData[row.author]?.videoReviews?.some(
+            (review) =>
+              review.title_norm === row.title_norm && review.year === row.year,
+          ),
+      );
+  }
+  const replyIds = new Set<string>();
+  for (const data of Object.values(userData)) {
+    data.replies = data.replies
+      ?.map((row) => ({
+        ...row,
+        author: remap(row.author),
+        reply_to: row.reply_to ? remap(row.reply_to) : null,
+      }))
+      .filter((row) =>
+        userData[row.author]?.videoReviews?.some(
+          (review) =>
+            review.title_norm === row.title_norm && review.year === row.year,
+        ),
+      );
+    for (const row of data.replies ?? []) {
+      if (replyIds.has(row.id)) throw new ImportValidationError('回复标识重复');
+      replyIds.add(row.id);
+      if (row.reply_to && !userData[row.reply_to]) row.reply_to = null;
+    }
+  }
+  for (const data of Object.values(userData))
+    data.replyReports = data.replyReports?.filter((row) =>
+      replyIds.has(row.reply_id),
+    );
   alignConfigOwner(adminConfig, localOwner, backupOwner);
 
   return {
@@ -240,7 +361,7 @@ function alignConfigOwner(
 ): void {
   if (!localOwner) return;
 
-  const users = config.UserConfig.Users;
+  const users = config.UserConfig.Users || [];
   const kept = users
     .filter((user) => {
       const name = normalizeUsername(user.username);
@@ -374,7 +495,39 @@ function normalizeSourceRouteStats(value: unknown): SourceRouteStatsBucket[] {
 
 function normalizeAdminConfig(value: unknown): AdminConfig {
   const cloned = cloneJson(requireObject(value, '管理员配置格式无效'));
+  const rawSite = requireObject(cloned.SiteConfig, '站点配置格式无效');
+  if (rawSite.EnableUserDanmaku !== undefined)
+    assertBoolean(rawSite.EnableUserDanmaku, '用户弹幕开关');
+  if (
+    rawSite.LiveAccess !== undefined &&
+    rawSite.LiveAccess !== 'all' &&
+    rawSite.LiveAccess !== 'groups'
+  ) {
+    throw new ImportValidationError('直播权限范围格式无效');
+  }
+  const rawTags = (cloned as unknown as AdminConfig).UserConfig?.Tags;
+  if (Array.isArray(rawTags)) {
+    for (const tag of rawTags) {
+      requireObject(tag, '用户组条目格式无效');
+      if (tag.allowLive !== undefined)
+        assertBoolean(tag.allowLive, '用户组直播权限');
+    }
+  }
+  const legacyInvites = (cloned as unknown as AdminConfig).UserConfig
+    ?.InviteCodes;
+  const legacyUsers = (cloned as unknown as AdminConfig).UserConfig?.Users;
+  const subscription = {
+    ConfigFile: cloned.ConfigFile ?? '',
+    ConfigSubscribtion: cloned.ConfigSubscribtion ?? {
+      URL: '',
+      AutoUpdate: false,
+      LastCheck: '',
+    },
+  };
   const config = configSelfCheck(cloned as AdminConfig);
+  Object.assign(config, subscription);
+  config.UserConfig.Users = legacyUsers ?? [];
+  config.UserConfig.InviteCodes = importedInviteCodes(legacyInvites, {});
 
   requireObject(config.ConfigSubscribtion, '订阅配置格式无效');
   limitString(
@@ -389,7 +542,11 @@ function normalizeAdminConfig(value: unknown): AdminConfig {
     MAX_SHORT_STRING_LENGTH,
   );
 
-  limitString(config.ConfigFile, '配置文件', MAX_LONG_STRING_LENGTH);
+  limitString(config.ConfigFile, '配置文件', CONFIG_SUBSCRIPTION_MAX_BYTES);
+  if (
+    Buffer.byteLength(config.ConfigFile, 'utf8') > CONFIG_SUBSCRIPTION_MAX_BYTES
+  )
+    throw new ImportValidationError('配置文件超过 2MB 上限', 413);
   requireObject(config.SiteConfig, '站点配置格式无效');
   limitString(config.SiteConfig.SiteName, '站点名称', MAX_SHORT_STRING_LENGTH);
   limitString(config.SiteConfig.SiteIcon, '站点图标', MAX_LONG_STRING_LENGTH);
@@ -412,29 +569,14 @@ function normalizeAdminConfig(value: unknown): AdminConfig {
     MAX_SHORT_STRING_LENGTH,
   );
   limitString(
-    config.SiteConfig.DoubanProxy,
-    '豆瓣代理',
-    MAX_LONG_STRING_LENGTH,
-  );
-  limitString(
     config.SiteConfig.BangumiDataSource,
     'Bangumi数据代理类型',
     MAX_SHORT_STRING_LENGTH,
   );
   limitString(
-    config.SiteConfig.BangumiProxy,
-    'Bangumi代理',
-    MAX_LONG_STRING_LENGTH,
-  );
-  limitString(
     config.SiteConfig.DoubanImageProxyType,
     '豆瓣图片代理类型',
     MAX_SHORT_STRING_LENGTH,
-  );
-  limitString(
-    config.SiteConfig.DoubanImageProxy,
-    '豆瓣图片代理',
-    MAX_LONG_STRING_LENGTH,
   );
   assertBoolean(config.SiteConfig.DisableYellowFilter, '黄色过滤');
   assertBoolean(config.SiteConfig.FluidSearch, '流式搜索');
@@ -499,6 +641,8 @@ function validateSourceConfig(config: AdminConfig): void {
   for (const source of config.SourceConfig) {
     requireObject(source, '视频源条目格式无效');
     assertKey(source.key, '视频源 key', MAX_KEY_LENGTH);
+    if (isCatalogFavoriteSource(source.key))
+      throw new ImportValidationError('目录收藏标识不能用于播放源');
     limitString(source.name, '视频源名称', MAX_SHORT_STRING_LENGTH);
     limitString(source.api, '视频源地址', MAX_LONG_STRING_LENGTH);
     if (source.detail !== undefined) {
@@ -518,6 +662,9 @@ function validateSourceConfig(config: AdminConfig): void {
       ) {
         throw new ImportValidationError('视频源代理模式格式无效');
       }
+    }
+    if (source.adminOnly !== undefined) {
+      assertBoolean(source.adminOnly, '视频源可见范围');
     }
   }
 }
@@ -592,6 +739,9 @@ function normalizeUserData(
       MAX_FAVORITES_PER_USER,
       normalizeFavorite,
     ),
+    videoReviews: normalizeVideoReviews(input.videoReviews),
+    userDanmaku: normalizeUserDanmaku(input.userDanmaku),
+    ...normalizeSocialData(input, username),
     searchHistory: normalizeSearchHistory(
       input.searchHistory,
       searchHistoryLimit,
@@ -621,6 +771,157 @@ function normalizeUserData(
   };
 }
 
+function normalizeSocialData(
+  input: Record<string, unknown>,
+  username: string,
+): Pick<
+  StorageUserImportData,
+  'profile' | 'follows' | 'likes' | 'reports' | 'replies' | 'replyReports'
+> {
+  const timestamp = (value: unknown) =>
+    Math.floor(
+      assertBoundedNumber(value, '社交记录时间', 0, Number.MAX_SAFE_INTEGER),
+    );
+  const name = (value: unknown) => {
+    if (typeof value !== 'string' || !value.trim() || value.length > 191)
+      throw new ImportValidationError('社交记录用户名无效');
+    return normalizeUsername(value);
+  };
+  const rows = (value: unknown): Record<string, unknown>[] => {
+    if (value === undefined) return [];
+    if (!Array.isArray(value) || value.length > MAX_FAVORITES_PER_USER)
+      throw new ImportValidationError('社交记录格式或数量无效');
+    return value.map((row) => requireObject(row, '社交记录格式无效'));
+  };
+  const identity = (row: Record<string, unknown>) => {
+    if (
+      typeof row.title_norm !== 'string' ||
+      !row.title_norm ||
+      row.title_norm.length > 191 ||
+      typeof row.year !== 'string' ||
+      row.year.length > 16
+    )
+      throw new ImportValidationError('评价引用无效');
+    return {
+      author: name(row.author),
+      title_norm: row.title_norm,
+      year: row.year,
+      created_at: timestamp(row.created_at),
+    };
+  };
+  let profile: StorageUserImportData['profile'];
+  if (input.profile !== undefined && input.profile !== null) {
+    const p = requireObject(input.profile, '用户资料格式无效');
+    if (p.nickname !== null && typeof p.nickname !== 'string')
+      throw new ImportValidationError('昵称格式无效');
+    profile = {
+      username: normalizeUsername(username),
+      profile_id: typeof p.profile_id === 'string' ? p.profile_id : '',
+      nickname: p.nickname as string | null,
+      avatar_seed: importedAvatarSeed(p.avatar_seed),
+      favorites_public: normalizeImportedVisibility(p.favorites_public),
+      updated_at: timestamp(p.updated_at),
+    };
+  }
+  const replyId = (value: unknown) => {
+    if (typeof value !== 'string' || !/^[a-f0-9-]{36}$/.test(value))
+      throw new ImportValidationError('回复标识无效');
+    return value;
+  };
+  return {
+    replies: rows(input.replies).map((row) => {
+      try {
+        return {
+          ...identity(row),
+          id: replyId(row.id),
+          reply_to: row.reply_to == null ? null : name(row.reply_to),
+          content: validateReplyContent(row.content),
+        };
+      } catch (error) {
+        if (error instanceof ReviewValidationError)
+          throw new ImportValidationError(error.message);
+        throw error;
+      }
+    }),
+    replyReports: rows(input.replyReports).map((row) => {
+      if (
+        !REVIEW_REPORT_REASONS.includes(row.reason as ReviewReportReason) ||
+        typeof row.detail !== 'string' ||
+        row.detail.length > 200
+      )
+        throw new ImportValidationError('回复举报记录无效');
+      return {
+        reply_id: replyId(row.reply_id),
+        reason: row.reason as ReviewReportReason,
+        detail: row.detail,
+        created_at: timestamp(row.created_at),
+      };
+    }),
+    profile,
+    follows: rows(input.follows).map((row) => ({
+      followee: name(row.followee),
+      created_at: timestamp(row.created_at),
+    })),
+    likes: rows(input.likes).map(identity),
+    reports: rows(input.reports).map((row) => {
+      if (
+        !REVIEW_REPORT_REASONS.includes(row.reason as ReviewReportReason) ||
+        typeof row.detail !== 'string' ||
+        row.detail.length > 200
+      )
+        throw new ImportValidationError('举报记录无效');
+      return {
+        ...identity(row),
+        reason: row.reason as ReviewReportReason,
+        detail: row.detail,
+      };
+    }),
+  };
+}
+
+function normalizeVideoReviews(value: unknown): VideoReview[] {
+  if (value === undefined) return [];
+  if (!Array.isArray(value)) throw new ImportValidationError('评价格式无效');
+  if (value.length > MAX_FAVORITES_PER_USER)
+    throw new ImportValidationError('评价数量超出限制', 413);
+  const reviews = new Map<string, VideoReview>();
+  for (const item of value) {
+    try {
+      const input = requireObject(item, '评价格式无效');
+      const review: VideoReview = {
+        ...reviewInput(input),
+        created_at: Math.floor(
+          assertBoundedNumber(
+            input.created_at,
+            '评价创建时间',
+            0,
+            MAX_TIMESTAMP_MS,
+          ),
+        ),
+        updated_at: Math.floor(
+          assertBoundedNumber(
+            input.updated_at,
+            '评价更新时间',
+            0,
+            MAX_TIMESTAMP_MS,
+          ),
+        ),
+      };
+      if (review.updated_at < review.created_at)
+        throw new ImportValidationError('评价更新时间必须晚于创建时间');
+      const key = JSON.stringify([review.title_norm, review.year]);
+      const existing = reviews.get(key);
+      if (!existing || review.updated_at > existing.updated_at)
+        reviews.set(key, review);
+    } catch (error) {
+      if (error instanceof ReviewValidationError)
+        throw new ImportValidationError(error.message);
+      throw error;
+    }
+  }
+  return [...reviews.values()];
+}
+
 function normalizeLastLoginAt(value: unknown): number | undefined {
   if (value === undefined || value === null) return undefined;
   return Math.floor(
@@ -628,7 +929,7 @@ function normalizeLastLoginAt(value: unknown): number | undefined {
   );
 }
 
-function normalizeMessageState(value: unknown) {
+function normalizeMessageState(value: unknown): UserMessageState {
   if (value === undefined || value === null) return {};
   const input = requireObject(value, '消息状态格式无效');
   const readAnnouncementId = input.readAnnouncementId;
@@ -638,7 +939,104 @@ function normalizeMessageState(value: unknown) {
   ) {
     throw new ImportValidationError('公告已读状态格式无效');
   }
-  return readAnnouncementId ? { readAnnouncementId } : {};
+  const result: UserMessageState = readAnnouncementId
+    ? { readAnnouncementId }
+    : {};
+  if (input.followReviewReadAt !== undefined)
+    result.followReviewReadAt = Math.floor(
+      assertBoundedNumber(
+        input.followReviewReadAt,
+        '关注动态已读时间',
+        0,
+        Number.MAX_SAFE_INTEGER,
+      ),
+    );
+  if (input.followReviewReadIds !== undefined) {
+    if (
+      !Array.isArray(input.followReviewReadIds) ||
+      input.followReviewReadIds.some(
+        (id) =>
+          typeof id !== 'string' ||
+          !id.startsWith('follow-review:') ||
+          id.length > 4000,
+      )
+    )
+      throw new ImportValidationError('关注动态已读标识无效');
+    result.followReviewReadIds = [
+      ...new Set(input.followReviewReadIds as string[]),
+    ];
+  }
+  if (input.reviewReplyReadAt !== undefined)
+    result.reviewReplyReadAt = Math.floor(
+      assertBoundedNumber(
+        input.reviewReplyReadAt,
+        '回复已读时间',
+        0,
+        Number.MAX_SAFE_INTEGER,
+      ),
+    );
+  if (input.reviewReplyReadIds !== undefined) {
+    if (
+      !Array.isArray(input.reviewReplyReadIds) ||
+      input.reviewReplyReadIds.some(
+        (id) => typeof id !== 'string' || !parseReplyMessageId(id),
+      )
+    )
+      throw new ImportValidationError('回复已读标识无效');
+    result.reviewReplyReadIds = [
+      ...new Set(input.reviewReplyReadIds as string[]),
+    ];
+  }
+  if (input.mutedKinds !== undefined) {
+    try {
+      result.mutedKinds = validateMutedKinds(input.mutedKinds);
+    } catch {
+      throw new ImportValidationError('通知设置无效');
+    }
+  }
+  for (const [kind, field] of [
+    ['new-follower', 'newFollower'],
+    ['review-like', 'reviewLike'],
+  ] as const) {
+    const timeKey = `${field}ReadAt` as const;
+    const idsKey = `${field}ReadIds` as const;
+    if (input[timeKey] !== undefined)
+      result[timeKey] = Math.floor(
+        assertBoundedNumber(
+          input[timeKey],
+          '通知已读时间',
+          0,
+          Number.MAX_SAFE_INTEGER,
+        ),
+      );
+    const ids = input[idsKey];
+    if (ids !== undefined) {
+      if (
+        !Array.isArray(ids) ||
+        ids.some(
+          (id) =>
+            typeof id !== 'string' || !parseSocialNotificationId(kind, id),
+        )
+      )
+        throw new ImportValidationError('通知已读标识无效');
+      result[idsKey] = [...new Set(ids as string[])];
+    }
+  }
+  return mergeUserMessageState(result, {
+    ...(result.newFollowerReadAt !== undefined ||
+    result.newFollowerReadIds !== undefined
+      ? { newFollowerReadAt: result.newFollowerReadAt ?? 0 }
+      : {}),
+    ...(result.reviewLikeReadAt !== undefined ||
+    result.reviewLikeReadIds !== undefined
+      ? { reviewLikeReadAt: result.reviewLikeReadAt ?? 0 }
+      : {}),
+    ...(result.reviewReplyReadAt !== undefined ||
+    result.reviewReplyReadIds !== undefined
+      ? { reviewReplyReadAt: result.reviewReplyReadAt ?? 0 }
+      : {}),
+    followReviewReadAt: result.followReviewReadAt ?? 0,
+  });
 }
 
 // 超出上限时保留最新的会话，避免整体导入失败
@@ -697,10 +1095,28 @@ function normalizeRecordMap<T>(
 
 function normalizePlayRecord(value: unknown): PlayRecord {
   const input = requireObject(value, '播放记录格式无效');
+  if (
+    input.series_status !== undefined &&
+    !isSeriesStatus(input.series_status)
+  ) {
+    throw new ImportValidationError('作品连载状态无效');
+  }
+  if (
+    input.tracking_enabled !== undefined &&
+    typeof input.tracking_enabled !== 'boolean'
+  ) {
+    throw new ImportValidationError('追更开关格式无效');
+  }
   if ((input.group_index === undefined) !== (input.group_total === undefined)) {
     throw new ImportValidationError('组内集数与组内总集数必须成对出现');
   }
   return {
+    ...(input.series_status === undefined
+      ? {}
+      : { series_status: input.series_status }),
+    ...(input.tracking_enabled === undefined
+      ? {}
+      : { tracking_enabled: input.tracking_enabled }),
     title: limitString(input.title, '标题', MAX_SHORT_STRING_LENGTH),
     source_name: limitString(
       input.source_name,
@@ -796,6 +1212,7 @@ function normalizeFavorite(value: unknown): Favorite {
       '',
     ),
     ...(origin ? { origin } : {}),
+    ...normalizeFavoriteWatchFields(input),
   };
 }
 
@@ -966,4 +1383,52 @@ function assertStringArray(
 
 function cloneJson<T>(value: T): T {
   return JSON.parse(JSON.stringify(value)) as T;
+}
+
+function normalizeImportedVisibility(value: unknown) {
+  try {
+    return validateLibraryVisibility(value, true);
+  } catch {
+    throw new ImportValidationError('收藏公开等级无效');
+  }
+}
+
+function normalizeUserDanmaku(
+  value: unknown,
+): NonNullable<StorageUserImportData['userDanmaku']> {
+  if (value === undefined || value === null) return [];
+  if (!Array.isArray(value))
+    throw new ImportValidationError('用户弹幕格式无效');
+  return value.map((value) => {
+    const input = requireObject(value, '用户弹幕条目格式无效');
+    const text = normalizeUserDanmakuText(input.text);
+    if (
+      typeof input.id !== 'string' ||
+      !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(
+        input.id,
+      )
+    )
+      throw new ImportValidationError('弹幕标识无效');
+    if (!isValidUserDanmakuKey(input.episodeKey))
+      throw new ImportValidationError('弹幕集标识无效');
+    if (text === null) throw new ImportValidationError('弹幕内容为空或过长');
+    return {
+      id: input.id.toLowerCase(),
+      episodeKey: input.episodeKey,
+      timeMs: Math.round(
+        assertBoundedNumber(input.timeMs, '弹幕时间', 0, 86_400_000),
+      ),
+      text,
+      mode: normalizeUserDanmakuMode(input.mode),
+      color: normalizeUserDanmakuColor(input.color),
+      createdAt: Math.floor(
+        assertBoundedNumber(
+          input.createdAt,
+          '弹幕创建时间',
+          0,
+          MAX_TIMESTAMP_MS,
+        ),
+      ),
+    };
+  });
 }

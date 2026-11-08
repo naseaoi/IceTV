@@ -1,91 +1,428 @@
 'use client';
 
-import { Loader2, Star } from 'lucide-react';
-import { useState } from 'react';
+import { Heart, ListChecks, SearchX, Trash2 } from 'lucide-react';
+import Link from 'next/link';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
-import AuthenticatedRoute from '@/components/AuthenticatedRoute';
+import {
+  LIBRARY_PILL_BUTTON_CLASS,
+  LibraryEmptySkeleton,
+  LibraryEmptyState,
+  LibraryPageFrame,
+} from '@/components/LibraryPage';
 import ConfirmModal from '@/components/modals/ConfirmModal';
-import PageLayout from '@/components/PageLayout';
-import { FavoriteGrid } from '@/features/favorites/components/FavoriteGrid';
+import {
+  type FavoriteGridSelection,
+  FavoriteGrid,
+} from '@/features/favorites/components/FavoriteGrid';
 import { FavoriteGridSkeleton } from '@/features/favorites/components/FavoriteGridSkeleton';
-import { useFavoriteItems } from '@/features/favorites/hooks/useFavoriteItems';
-import { HomeMineSwitch } from '@/features/home/components/HomeMineSwitch';
+import {
+  EMPTY_FAVORITE_COUNTS,
+  FavoriteLibraryToolbar,
+} from '@/features/favorites/components/FavoriteLibraryToolbar';
+import {
+  type FavoriteBatchCommand,
+  FavoriteSelectionBar,
+} from '@/features/favorites/components/FavoriteSelectionBar';
+import { useFavoriteLibrary } from '@/features/favorites/hooks/useFavoriteLibrary';
+import {
+  type FavoriteFilter,
+  type FavoriteSort,
+} from '@/features/favorites/lib/favorite-library';
+import type { FavoriteBatchInput } from '@/features/favorites/lib/library-query';
+import { batchFavorites } from '@/lib/db.client';
+import { FAVORITE_RENDER_CHUNK as RENDER_CHUNK } from '@/lib/favorites-count';
 
-function AuthenticatedFavoritesPageClient({
+// all 为真时按当前搜索与筛选全选，keys 记录排除项；否则 keys 为选中项
+interface FavoriteSelection {
+  scope: string;
+  all: boolean;
+  keys: ReadonlySet<string>;
+}
+
+export function FavoritesPageSkeleton({
+  skeletonCount,
+}: {
+  skeletonCount: number;
+}) {
+  return (
+    <LibraryPageFrame
+      title='我的收藏'
+      toolbar={
+        skeletonCount > 0 && (
+          <FavoriteLibraryToolbar
+            query=''
+            onQueryChange={noop}
+            filter='all'
+            onFilterChange={noop}
+            sort='saved'
+            onSortChange={noop}
+            counts={EMPTY_FAVORITE_COUNTS}
+            loading
+            action={
+              <>
+                <SelectModeButton active={false} disabled onClick={noop} />
+                <ClearFavoritesButton disabled onClick={noop} />
+              </>
+            }
+          />
+        )
+      }
+    >
+      <FavoriteGridSkeleton count={skeletonCount} />
+    </LibraryPageFrame>
+  );
+}
+
+function noop() {}
+
+function ClearFavoritesButton({
+  disabled,
+  onClick,
+}: {
+  disabled?: boolean;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type='button'
+      aria-label='清空收藏'
+      title='清空收藏'
+      disabled={disabled}
+      onClick={onClick}
+      className='flex h-10 w-10 items-center justify-center rounded-full text-gray-400 transition hover:bg-red-500/10 hover:text-red-500 disabled:pointer-events-none disabled:opacity-40 lg:h-8 lg:w-8'
+    >
+      <Trash2 aria-hidden='true' className='h-[18px] w-[18px]' />
+    </button>
+  );
+}
+
+function SelectModeButton({
+  active,
+  disabled,
+  onClick,
+}: {
+  active: boolean;
+  disabled?: boolean;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type='button'
+      aria-label='多选'
+      title='多选'
+      aria-pressed={active}
+      disabled={disabled}
+      onClick={onClick}
+      className={`flex h-10 w-10 items-center justify-center rounded-full transition disabled:pointer-events-none disabled:opacity-40 lg:h-8 lg:w-8 ${
+        active
+          ? 'bg-gray-900 text-white dark:bg-white dark:text-gray-900'
+          : 'text-gray-400 hover:bg-gray-900/[0.06] hover:text-gray-700 dark:hover:bg-white/10 dark:hover:text-gray-200'
+      }`}
+    >
+      <ListChecks aria-hidden='true' className='h-[18px] w-[18px]' />
+    </button>
+  );
+}
+
+export function FavoritesPageClient({
   favoriteSkeletonCount = 0,
 }: {
   favoriteSkeletonCount?: number;
 }) {
+  const [query, setQuery] = useState('');
+  const [filter, setFilter] = useState<FavoriteFilter>('all');
+  const [sort, setSort] = useState<FavoriteSort>('saved');
   const {
-    favoriteItems,
-    total,
+    items,
     loading,
+    refreshing,
     loadingMore,
+    error,
+    retry,
     skeletonCount,
+    clearFavorites,
+    counts,
+    total: resultTotal,
+    libraryTotal,
     hasMore,
     loadMore,
-    clearFavorites,
-  } = useFavoriteItems(true, favoriteSkeletonCount, 24);
+  } = useFavoriteLibrary(favoriteSkeletonCount, { query, filter, sort });
   const [showClearConfirm, setShowClearConfirm] = useState(false);
-  const favoriteCount = loading && total === 0 ? skeletonCount : total;
+  const sentinelRef = useRef<HTMLDivElement>(null);
+  const narrowed = query.trim() !== '' || filter !== 'all';
+  const [selecting, setSelecting] = useState(false);
+  const scope = `${filter}\n${query}`;
+  const [rawSelection, setSelection] = useState<FavoriteSelection>({
+    scope,
+    all: false,
+    keys: new Set(),
+  });
+  // 搜索或筛选变化后旧选择不再对应当前列表，视为空选择
+  const selection = useMemo<FavoriteSelection>(
+    () =>
+      rawSelection.scope === scope
+        ? rawSelection
+        : { scope, all: false, keys: new Set() },
+    [rawSelection, scope],
+  );
+  const [batchBusy, setBatchBusy] = useState<FavoriteBatchCommand | null>(null);
+  const [batchError, setBatchError] = useState('');
+  const [confirmBatchRemove, setConfirmBatchRemove] = useState(false);
+  const selectedCount = selection.all
+    ? Math.max(0, resultTotal - selection.keys.size)
+    : selection.keys.size;
+  const allSelected = resultTotal > 0 && selectedCount === resultTotal;
+
+  const clearSelection = useCallback(() => {
+    setSelection({ scope, all: false, keys: new Set() });
+    setBatchError('');
+  }, [scope]);
+  const exitSelecting = useCallback(() => {
+    setSelecting(false);
+    clearSelection();
+  }, [clearSelection]);
+  const gridSelection = useMemo<FavoriteGridSelection | undefined>(
+    () =>
+      selecting
+        ? {
+            isSelected: (key) => selection.all !== selection.keys.has(key),
+            onToggle: (key) => {
+              const keys = new Set(selection.keys);
+              if (keys.has(key)) keys.delete(key);
+              else keys.add(key);
+              setSelection({ ...selection, keys });
+              setBatchError('');
+            },
+          }
+        : undefined,
+    [selecting, selection],
+  );
+
+  useEffect(() => {
+    if (!selecting) return;
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape' && !confirmBatchRemove) exitSelecting();
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [selecting, confirmBatchRemove, exitSelecting]);
+
+  const runBatch = async (command: FavoriteBatchCommand) => {
+    const target: FavoriteBatchInput['target'] = selection.all
+      ? { match: { q: query, filter }, exclude: [...selection.keys] }
+      : { keys: [...selection.keys] };
+    setBatchBusy(command);
+    setBatchError('');
+    try {
+      await batchFavorites(
+        command === 'remove'
+          ? { action: 'remove', target }
+          : {
+              action: 'set-status',
+              target,
+              watchStatus: command === 'auto' ? null : command,
+            },
+      );
+      clearSelection();
+    } catch {
+      setBatchError('操作失败，请重试');
+    } finally {
+      setBatchBusy(null);
+    }
+  };
+
+  useEffect(() => {
+    const sentinel = sentinelRef.current;
+    if (!hasMore || !sentinel || loading || refreshing || loadingMore || error)
+      return;
+    const observer = new IntersectionObserver(
+      ([entry]) => {
+        if (entry?.isIntersecting) loadMore();
+      },
+      { rootMargin: '600px 0px' },
+    );
+    observer.observe(sentinel);
+    return () => observer.disconnect();
+  }, [hasMore, loadMore, loading, refreshing, loadingMore, error]);
+
+  const resetNarrowing = () => {
+    setQuery('');
+    setFilter('all');
+  };
+
+  let content: React.ReactNode;
+  if (loading) {
+    content =
+      skeletonCount > 0 ? (
+        <FavoriteGridSkeleton count={skeletonCount} />
+      ) : (
+        <LibraryEmptySkeleton />
+      );
+  } else if (error && items.length === 0 && !refreshing) {
+    content = (
+      <LibraryEmptyState
+        icon={SearchX}
+        title={error}
+        action={
+          <button
+            type='button'
+            onClick={retry}
+            className={LIBRARY_PILL_BUTTON_CLASS}
+          >
+            重试
+          </button>
+        }
+      />
+    );
+  } else if (libraryTotal === 0 && !narrowed) {
+    content = (
+      <LibraryEmptyState
+        icon={Heart}
+        title='还没有收藏'
+        action={
+          <Link href='/' className={LIBRARY_PILL_BUTTON_CLASS}>
+            去首页逛逛
+          </Link>
+        }
+      />
+    );
+  } else if (resultTotal === 0) {
+    content = (
+      <LibraryEmptyState
+        icon={SearchX}
+        title='没有匹配的收藏'
+        description={
+          query.trim()
+            ? `找不到与「${query.trim()}」相关的作品`
+            : '当前筛选下没有作品'
+        }
+        action={
+          <button
+            type='button'
+            onClick={resetNarrowing}
+            className={LIBRARY_PILL_BUTTON_CLASS}
+          >
+            清除筛选
+          </button>
+        }
+      />
+    );
+  } else {
+    content = (
+      <>
+        <FavoriteGrid
+          items={items}
+          virtualized={resultTotal > RENDER_CHUNK}
+          selection={gridSelection}
+        />
+        {hasMore && (
+          <div ref={sentinelRef} className='mt-8 flex justify-center'>
+            <button
+              type='button'
+              onClick={loadMore}
+              disabled={loadingMore}
+              className='inline-flex h-9 items-center rounded-full px-4 text-sm text-gray-500 transition hover:bg-gray-100 hover:text-gray-900 dark:text-gray-400 dark:hover:bg-white/[0.06] dark:hover:text-gray-100'
+            >
+              {error
+                ? '加载失败，点击重试'
+                : loadingMore
+                  ? '加载中'
+                  : `显示更多 · 还有 ${Math.max(0, resultTotal - items.length)} 部`}
+            </button>
+          </div>
+        )}
+      </>
+    );
+  }
 
   return (
-    <PageLayout
-      activePath='/'
-      mobileHeader={{ title: '我的收藏', showBack: true }}
+    <LibraryPageFrame
+      title='我的收藏'
+      toolbar={
+        ((loading && skeletonCount > 0) || libraryTotal > 0 || narrowed) && (
+          <FavoriteLibraryToolbar
+            query={query}
+            onQueryChange={setQuery}
+            filter={filter}
+            onFilterChange={setFilter}
+            sort={sort}
+            onSortChange={setSort}
+            counts={counts}
+            loading={loading}
+            action={
+              (loading ? skeletonCount > 0 : libraryTotal > 0) && (
+                <>
+                  <SelectModeButton
+                    active={selecting}
+                    disabled={loading}
+                    onClick={
+                      selecting ? exitSelecting : () => setSelecting(true)
+                    }
+                  />
+                  {!selecting && (
+                    <ClearFavoritesButton
+                      disabled={loading}
+                      onClick={() => setShowClearConfirm(true)}
+                    />
+                  )}
+                </>
+              )
+            }
+          />
+        )
+      }
     >
-      <div className='overflow-visible px-2 pb-2 pt-4 sm:px-10 sm:pt-8'>
-        <div className='mb-4 hidden justify-center md:flex'>
-          <HomeMineSwitch active='mine' />
-        </div>
-
-        <div className='mx-auto max-w-[95%]'>
-          <div className='mb-6 flex items-center justify-between'>
-            <h1 className='hidden items-center gap-2 text-2xl font-bold text-gray-900 dark:text-gray-100 sm:flex'>
-              <Star className='h-6 w-6 text-amber-500' />
-              我的收藏
-            </h1>
-            <div className='flex flex-1 items-center justify-between gap-4 sm:flex-none sm:justify-end'>
-              <span className='text-sm text-gray-500 dark:text-gray-400'>
-                {favoriteCount} 部收藏
-              </span>
-              {favoriteItems.length > 0 && (
-                <button
-                  className='text-sm text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200'
-                  onClick={() => setShowClearConfirm(true)}
-                >
-                  清空
-                </button>
-              )}
-            </div>
-          </div>
-
-          {loading && skeletonCount > 0 && favoriteItems.length === 0 ? (
-            <FavoriteGridSkeleton count={skeletonCount} />
-          ) : (
-            <FavoriteGrid items={favoriteItems} />
-          )}
-
-          {hasMore && (
-            <div className='mt-8 flex justify-center'>
-              <button
-                type='button'
-                className='inline-flex items-center gap-2 rounded-lg border border-gray-200 px-4 py-2 text-sm text-gray-600 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-60 dark:border-gray-700 dark:text-gray-300 dark:hover:bg-gray-800'
-                onClick={() => void loadMore()}
-                disabled={loadingMore}
-              >
-                {loadingMore && <Loader2 className='h-4 w-4 animate-spin' />}
-                {loadingMore ? '加载中...' : '加载更多'}
-              </button>
-            </div>
-          )}
-        </div>
+      {error && items.length > 0 && (
+        <p role='alert' className='mb-4 text-sm text-red-500'>
+          {error}
+          <button type='button' onClick={retry} className='ml-3 underline'>
+            重试
+          </button>
+        </p>
+      )}
+      <div
+        aria-busy={refreshing}
+        inert={refreshing}
+        className={`transition-opacity duration-200 ${refreshing ? 'opacity-60' : ''} ${selecting ? 'pb-28 md:pb-20' : ''}`}
+      >
+        {content}
       </div>
-
+      {selecting && (
+        <FavoriteSelectionBar
+          count={selectedCount}
+          allSelected={allSelected}
+          busy={batchBusy}
+          error={batchError}
+          onToggleAll={() => {
+            setBatchError('');
+            setSelection({ scope, all: !allSelected, keys: new Set() });
+          }}
+          onCommand={(command) =>
+            command === 'remove'
+              ? setConfirmBatchRemove(true)
+              : void runBatch(command)
+          }
+          onClose={exitSelecting}
+        />
+      )}
+      <ConfirmModal
+        isOpen={confirmBatchRemove}
+        title={`移出 ${selectedCount} 部作品？`}
+        message='评价会保留。'
+        danger
+        cancelText='再想想'
+        confirmText='移出'
+        onCancel={() => setConfirmBatchRemove(false)}
+        onConfirm={async () => {
+          setConfirmBatchRemove(false);
+          await runBatch('remove');
+        }}
+      />
       <ConfirmModal
         isOpen={showClearConfirm}
         title='确认清空收藏夹？'
-        message='该操作会删除所有收藏内容，删除后无法恢复。'
+        message='该操作会删除所有收藏内容，删除后无法恢复。评价会保留。'
         danger
         cancelText='再想想'
         confirmText='确认清空'
@@ -95,23 +432,6 @@ function AuthenticatedFavoritesPageClient({
           setShowClearConfirm(false);
         }}
       />
-    </PageLayout>
-  );
-}
-
-export function FavoritesPageClient({
-  favoriteSkeletonCount = 0,
-}: {
-  favoriteSkeletonCount?: number;
-}) {
-  return (
-    <AuthenticatedRoute
-      activePath='/me/favorites'
-      message='请先登录后再查看收藏内容。'
-    >
-      <AuthenticatedFavoritesPageClient
-        favoriteSkeletonCount={favoriteSkeletonCount}
-      />
-    </AuthenticatedRoute>
+    </LibraryPageFrame>
   );
 }

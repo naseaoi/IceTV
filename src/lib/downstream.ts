@@ -15,6 +15,11 @@ import {
   searchFromXgcartoon,
 } from '@/lib/downstream-sources/xgcartoon';
 import {
+  readJsonLimited,
+  readTextLimited,
+  UPSTREAM_METADATA_MAX_BYTES,
+} from '@/lib/proxy-response-limits';
+import {
   DEFAULT_RUNTIME_PARAMS,
   normalizeRuntimeParams,
 } from '@/lib/runtime-params';
@@ -24,8 +29,13 @@ import {
   peekCachedSearchPage,
   setCachedSearchPage,
 } from '@/lib/search-cache';
+import { parseSeriesStatus } from '@/lib/series-status';
 import { ResourceLimitError } from '@/lib/server-resource-errors';
 import { getSourceCacheKey } from '@/lib/source-cache-key';
+import {
+  type SourceSearchOutcome,
+  recordSourceSearchOutcome,
+} from '@/lib/source-health.server';
 import { SearchResult } from '@/lib/types';
 import { fetchUpstream } from '@/lib/upstream-fetch.server';
 import { cleanHtmlTags, normalizeInlineText } from '@/lib/utils';
@@ -35,6 +45,9 @@ interface ApiSearchItem {
   vod_name: string;
   vod_pic: string;
   vod_remarks?: string;
+  vod_isend?: number | string;
+  vod_serial?: number | string;
+  vod_total?: number | string;
   vod_play_url?: string;
   vod_class?: string;
   vod_year?: string;
@@ -147,6 +160,10 @@ async function fetchAndCacheSearchPage(
   }
 
   const abortState = createTimedAbortController(signal, timeoutMs);
+  const startedAt = Date.now();
+  let outcome: SourceSearchOutcome = 'error';
+  let latencyMs = 0;
+  let resourceLimited = false;
 
   try {
     const response = await fetchUpstream(url, {
@@ -155,6 +172,7 @@ async function fetchAndCacheSearchPage(
     });
 
     if (!response.ok) {
+      await response.body?.cancel();
       if (response.status === 403) {
         setCachedSearchPage(
           getSourceCacheKey(apiSite),
@@ -167,7 +185,14 @@ async function fetchAndCacheSearchPage(
       return { results: [] };
     }
 
-    const data = await response.json();
+    const data = await readJsonLimited<any>(
+      response,
+      UPSTREAM_METADATA_MAX_BYTES,
+    );
+    latencyMs = Date.now() - startedAt;
+    if (Array.isArray(data?.list)) {
+      outcome = data.list.length > 0 ? 'ok' : 'empty';
+    }
     if (
       !data ||
       !data.list ||
@@ -205,6 +230,10 @@ async function fetchAndCacheSearchPage(
           : 'unknown',
         desc: cleanHtmlTags(item.vod_content || ''),
         type_name: item.type_name,
+        series_status: parseSeriesStatus({
+          ...item,
+          episodeCount: episodes.length,
+        }),
         douban_id: item.vod_douban_id,
       };
     });
@@ -224,7 +253,10 @@ async function fetchAndCacheSearchPage(
     );
     return { results, pageCount };
   } catch (error: any) {
-    if (error instanceof ResourceLimitError) throw error;
+    if (error instanceof ResourceLimitError) {
+      resourceLimited = true;
+      throw error;
+    }
     abortState.cleanup();
     const abortedByParent = Boolean(signal?.aborted && !abortState.isTimeout());
     if (isAbortError(error) && !abortedByParent) {
@@ -239,6 +271,39 @@ async function fetchAndCacheSearchPage(
     return { results: [] };
   } finally {
     abortState.cleanup();
+    const abortedByParent = Boolean(signal?.aborted && !abortState.isTimeout());
+    if (page === 1 && !resourceLimited && !abortedByParent) {
+      recordSourceSearchOutcome(apiSite.key, outcome, latencyMs);
+    }
+  }
+}
+
+export async function probeSourceSearch(
+  apiSite: ApiSite,
+  query: string,
+  signal?: AbortSignal,
+): Promise<void> {
+  if (
+    signal?.aborted ||
+    isGirigiriSource(apiSite) ||
+    isXgcartoonSource(apiSite)
+  ) {
+    return;
+  }
+
+  try {
+    const runtimeParams = await readSearchRuntimeParams();
+    // Bypass cache reads and in-flight search deduplication to collect a fresh sample.
+    await fetchAndCacheSearchPage(
+      apiSite,
+      query,
+      1,
+      apiSite.api + API_CONFIG.search.path + encodeURIComponent(query),
+      runtimeParams.SearchRequestTimeoutSeconds * 1000,
+      signal,
+    );
+  } catch (error) {
+    console.warn(`Source health probe failed [${apiSite.key}]`, error);
   }
 }
 
@@ -431,7 +496,10 @@ async function getDetailFromVodApi(
       throw new Error(`详情请求失败: ${response.status}`);
     }
 
-    const data = await response.json();
+    const data = await readJsonLimited<any>(
+      response,
+      UPSTREAM_METADATA_MAX_BYTES,
+    );
 
     if (
       !data ||
@@ -467,6 +535,10 @@ async function getDetailFromVodApi(
         : 'unknown',
       desc: cleanHtmlTags(videoDetail.vod_content),
       type_name: videoDetail.type_name,
+      series_status: parseSeriesStatus({
+        ...videoDetail,
+        episodeCount: episodes.length,
+      }),
       douban_id: videoDetail.vod_douban_id,
     };
   } finally {
@@ -492,7 +564,7 @@ async function handleSpecialSourceDetail(
       throw new Error(`详情页请求失败: ${response.status}`);
     }
 
-    html = await response.text();
+    html = await readTextLimited(response, UPSTREAM_METADATA_MAX_BYTES);
   } finally {
     abortState.cleanup();
   }

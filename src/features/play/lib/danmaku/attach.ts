@@ -3,11 +3,15 @@ import {
   beginDanmakuLoadNotice,
   clearDanmakuLoadNotice,
 } from '@/features/play/lib/danmaku/load-notice';
-import { createDanmakuPlugin } from '@/features/play/lib/danmaku/plugin';
+import {
+  type DanmakuEmitPayload,
+  createDanmakuPlugin,
+} from '@/features/play/lib/danmaku/plugin';
 import {
   type DanmakuEnabledReader,
   type DanmakuLoadContext,
   type DanmakuLoadOptions,
+  type UserDanmakuTarget,
   loadDanmakuForEpisode,
 } from '@/features/play/lib/danmaku/resolve';
 import {
@@ -15,6 +19,7 @@ import {
   type DanmakuReloadResult,
   DanmakuRateLimitError,
 } from '@/features/play/lib/danmaku/types';
+import { sendUserDanmaku } from '@/features/play/lib/danmaku/user-client';
 import {
   readDanmakuFontSize,
   readDanmakuHeatmapEnabled,
@@ -23,6 +28,12 @@ import {
   writeDanmakuOpacity,
 } from '@/lib/local-preferences';
 import { getRuntimeConfig } from '@/lib/runtime-config';
+import {
+  normalizeUserDanmakuColor,
+  normalizeUserDanmakuMode,
+  normalizeUserDanmakuText,
+  USER_DANMAKU_MAX_LENGTH,
+} from '@/lib/user-danmaku';
 
 const PLUGIN_NAME = 'artplayerPluginDanmuku';
 
@@ -44,6 +55,14 @@ interface AttachedDanmakuContext {
 const attachedDanmakuContexts = new WeakMap<object, AttachedDanmakuContext>();
 const danmakuReloadChains = new WeakMap<object, Promise<void>>();
 const activeDanmakuContexts = new WeakMap<object, AttachedDanmakuContext>();
+
+// 发送框挂在插件上、早于播放器创建，加载完成后再回填当前集的发送目标
+interface UserDanmakuSendState {
+  player: PlayerWithPlugins | null;
+  target: UserDanmakuTarget | null;
+}
+
+const userDanmakuSendStates = new WeakMap<object, UserDanmakuSendState>();
 
 type DanmakuPluginApi = {
   load: (danmuku?: () => Promise<DanmakuItem[]>) => Promise<unknown>;
@@ -94,6 +113,53 @@ function bindPlayerEvent(player: PlayerWithPlugins): DanmakuEventBinder | null {
 
 export function isDanmakuFeatureEnabled(): boolean {
   return getRuntimeConfig()?.ENABLE_DANMAKU === true;
+}
+
+function isUserDanmakuFeatureEnabled(): boolean {
+  return getRuntimeConfig()?.ENABLE_USER_DANMAKU === true;
+}
+
+function showPlayerNotice(player: PlayerWithPlugins | null, message: string) {
+  if (player?.notice) player.notice.show = message;
+}
+
+function buildUserDanmakuEmitter(
+  state: UserDanmakuSendState,
+  enabledRef: DanmakuEnabledRef,
+): (danmu: DanmakuEmitPayload) => Promise<boolean> {
+  return async (danmu) => {
+    const { player, target } = state;
+    if (!enabledRef.current) {
+      showPlayerNotice(player, '请先打开弹幕');
+      return false;
+    }
+    if (!player || !target) {
+      showPlayerNotice(player, '弹幕加载中，请稍后再发');
+      return false;
+    }
+    const text = normalizeUserDanmakuText(danmu.text);
+    if (!text) {
+      showPlayerNotice(player, `弹幕最多 ${USER_DANMAKU_MAX_LENGTH} 字`);
+      return false;
+    }
+    try {
+      await sendUserDanmaku({
+        key: target.key,
+        time: Math.max(0, (danmu.time ?? 0) - target.offset),
+        text,
+        mode: normalizeUserDanmakuMode(danmu.mode),
+        color: normalizeUserDanmakuColor(danmu.color),
+      });
+    } catch (error) {
+      showPlayerNotice(
+        player,
+        error instanceof Error && error.message ? error.message : '发送失败',
+      );
+      return false;
+    }
+    // 请求期间已切到别的集时只保存不回显
+    return state.target === target;
+  };
 }
 
 export function getDanmakuPluginApi(
@@ -149,6 +215,9 @@ export async function createDanmakuPluginIfEnabled(
 
   const isEnabled = () => enabledRef.current;
   let initialContext: AttachedDanmakuContext | undefined;
+  const sendState: UserDanmakuSendState | null = isUserDanmakuFeatureEnabled()
+    ? { player: null, target: null }
+    : null;
 
   try {
     const plugin = await createDanmakuPlugin({
@@ -161,14 +230,32 @@ export async function createDanmakuPluginIfEnabled(
             }
           }
         },
+        ...(sendState && {
+          onUserTarget: (target: UserDanmakuTarget) => {
+            const player = sendState.player;
+            if (
+              player &&
+              attachedDanmakuContexts.get(player) === initialContext
+            ) {
+              sendState.target = target;
+            }
+          },
+        }),
       }),
       opacity: readDanmakuOpacity(),
       fontSize: readDanmakuFontSize(),
       visible: enabledRef.current,
       heatmap: true,
+      beforeEmit: sendState
+        ? buildUserDanmakuEmitter(sendState, enabledRef)
+        : undefined,
     });
 
     return (player: Parameters<typeof plugin>[0]) => {
+      if (sendState) {
+        sendState.player = player;
+        userDanmakuSendStates.set(player, sendState);
+      }
       markDanmakuContextAttached(player, context, enabledRef.current);
       initialContext = attachedDanmakuContexts.get(player);
       if (initialContext) {
@@ -237,8 +324,10 @@ function resetDanmakuQueue(
   player: PlayerWithPlugins,
   api: DanmakuPluginApi,
 ): void {
+  // 不能用 display: none：重载期间插件仍在投放弹幕，隐藏层里量出的宽高为 0、过渡不执行，
+  // 恢复显示后弹幕会静止堆在左上角。样式见 globals.css。
   const container = player.template?.$danmuku;
-  if (container) container.style.display = 'none';
+  if (container) container.dataset.reloading = 'true';
   try {
     api.reset();
   } catch (error) {
@@ -353,6 +442,8 @@ export async function reloadDanmaku(
     ),
   };
   attachedDanmakuContexts.set(player, nextContext);
+  const sendState = userDanmakuSendStates.get(player);
+  if (sendState) sendState.target = null;
 
   const previousTask = danmakuReloadChains.get(player);
   resetDanmakuQueue(player, api);
@@ -374,6 +465,13 @@ export async function reloadDanmaku(
           nextContext.retryAfterSeconds = error.retryAfterSeconds;
         }
       },
+      ...(sendState && {
+        onUserTarget: (target: UserDanmakuTarget) => {
+          if (attachedDanmakuContexts.get(player) === nextContext) {
+            sendState.target = target;
+          }
+        },
+      }),
     });
     option.danmuku = async () => {
       const items = await loader();
@@ -390,7 +488,7 @@ export async function reloadDanmaku(
         nextContext.status =
           loadEnabled && !nextContext.failed ? 'loaded' : 'unloaded';
         const container = player.template?.$danmuku;
-        if (container) container.style.display = '';
+        if (container) delete container.dataset.reloading;
       }
     } catch (error) {
       nextContext.failed = true;

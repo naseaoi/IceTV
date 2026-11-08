@@ -10,6 +10,10 @@ import {
 } from '@/lib/shared-resource-quota.server';
 import type { SharedResourceStore } from '@/lib/shared-resource-store';
 import {
+  checkUpstreamCooldown,
+  recordUpstreamCooldown,
+} from '@/lib/upstream-cooldown.server';
+import {
   type UpstreamResourceContext,
   upstreamResourcePolicy,
 } from '@/lib/upstream-resource-policy';
@@ -49,6 +53,7 @@ export async function withUpstreamResponse(
   const scope =
     kind === 'probe' ? 'probe' : kind === 'metadata' ? 'metadata' : 'media';
   const store = options.store ?? (await sharedResourceStore());
+  await checkUpstreamCooldown(store, host);
   const token = randomUUID();
   const leases: string[] = [];
   const abortController = new AbortController();
@@ -190,6 +195,16 @@ export async function withUpstreamResponse(
     if (abortController.signal.aborted) {
       await response.body?.cancel();
       throw abortController.signal.reason;
+    }
+    if (
+      response.status === 429 ||
+      (response.status === 503 && response.headers.has('retry-after'))
+    ) {
+      const cooling = recordUpstreamCooldown(store, host, response);
+      await response.body?.cancel().catch(() => {});
+      terminated = true;
+      await release();
+      throw await cooling;
     }
     if (!response.body) {
       terminated = true;

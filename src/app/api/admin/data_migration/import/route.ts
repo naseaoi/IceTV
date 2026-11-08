@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { promisify } from 'util';
 import { gunzip } from 'zlib';
 
+import { clearCachedLiveChannels } from '@/features/live/lib/live';
 import { isGuardFailure, requireOwner } from '@/lib/api-auth';
 import { setCachedConfig } from '@/lib/config';
 import { SimpleCrypto } from '@/lib/crypto';
@@ -110,6 +111,7 @@ export async function POST(req: NextRequest) {
     const parsedImport = await parseImportData(importData);
 
     await db.replaceAllData(parsedImport.snapshot);
+    clearCachedLiveChannels();
     await setCachedConfig(parsedImport.snapshot.adminConfig);
 
     const siteIconWarning = restoreSiteIcon(parsedImport);

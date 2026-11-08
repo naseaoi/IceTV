@@ -1,9 +1,12 @@
 ﻿'use client';
 
-import { useCallback, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 
 import AlertModal from '@/components/modals/AlertModal';
 import ConfirmModal from '@/components/modals/ConfirmModal';
+import Select from '@/components/Select';
+import { AdminUserRowsSkeleton } from '@/features/admin/components/AdminContentSkeleton';
+import AdminSearchField from '@/features/admin/components/AdminSearchField';
 import { AddUserForm } from '@/features/admin/components/tabs/user-config/AddUserForm';
 import { BatchUserGroupDialog } from '@/features/admin/components/tabs/user-config/BatchUserGroupDialog';
 import { ChangePasswordForm } from '@/features/admin/components/tabs/user-config/ChangePasswordForm';
@@ -13,26 +16,36 @@ import { ConfigureUserGroupDialog } from '@/features/admin/components/tabs/user-
 import { DeleteUserConfirm } from '@/features/admin/components/tabs/user-config/DeleteUserConfirm';
 import { DeleteUserGroupConfirm } from '@/features/admin/components/tabs/user-config/DeleteUserGroupConfirm';
 import { RegistrationSettingsDialog } from '@/features/admin/components/tabs/user-config/RegistrationSettingsDialog';
-import { UserGroupFormDialog } from '@/features/admin/components/tabs/user-config/UserGroupFormDialog';
+import { RegistrationSummaryCard } from '@/features/admin/components/tabs/user-config/RegistrationSummaryCard';
+import {
+  type UserGroupDraft,
+  EMPTY_USER_GROUP_DRAFT,
+  UserGroupFormDialog,
+} from '@/features/admin/components/tabs/user-config/UserGroupFormDialog';
 import { UserGroupTable } from '@/features/admin/components/tabs/user-config/UserGroupTable';
 import { UserTable } from '@/features/admin/components/tabs/user-config/UserTable';
-import { useAdminUserActions } from '@/features/admin/hooks/useAdminUserActions';
+import { useAdminInviteCodes } from '@/features/admin/hooks/useAdminInviteCodes';
+import {
+  type InviteCodeDraft,
+  useAdminUserActions,
+} from '@/features/admin/hooks/useAdminUserActions';
+import { useAdminUsers } from '@/features/admin/hooks/useAdminUsers';
 import { useLoadingState } from '@/features/admin/hooks/useLoadingState';
-import { useUserActivity } from '@/features/admin/hooks/useUserActivity';
+import { adminGet, adminPost } from '@/features/admin/lib/api';
 import { buttonStyles } from '@/features/admin/lib/buttonStyles';
 import { showError, showSuccess } from '@/features/admin/lib/notifications';
 import { getSelectableUsers } from '@/features/admin/lib/permissions';
-import { type InactiveCandidate } from '@/features/admin/services/inactiveUsers';
 import {
-  countActiveInviteCodes,
-  CUSTOM_INVITE_CODE_RULE_MESSAGE,
-  INVITE_MAX_USES_RULE_MESSAGE,
-  isValidCustomInviteCode,
-  parseInviteMaxUses,
-} from '@/features/admin/services/inviteCodes';
+  type AdminUserFilter,
+  type AdminUserPage,
+  type AdminUserQuery,
+  type AdminUserSelection,
+} from '@/features/admin/lib/user-query';
 import { useAlertModal } from '@/hooks/useAlertModal';
 import { useModalState } from '@/hooks/useModalState';
+import { useRetainedValue } from '@/hooks/useRetainedValue';
 import { getAuthInfoFromBrowserCookie } from '@/lib/auth.client';
+import type { InviteCodeFilter } from '@/lib/invite-code-storage';
 import { AdminConfig } from '@/types/admin';
 
 interface UserConfigProps {
@@ -44,7 +57,6 @@ interface UserConfigProps {
 type SensitiveUserAction = 'ban' | 'setAdmin' | 'cancelAdmin';
 
 const DEFAULT_INACTIVE_DAYS = 90;
-const DEFAULT_INVITE_VALID_DAYS = 7;
 
 interface PendingSensitiveUserAction {
   action: SensitiveUserAction;
@@ -54,23 +66,55 @@ interface PendingSensitiveUserAction {
   confirmText: string;
 }
 
+const SELECTION_LINK_CLASS =
+  'font-medium text-brand-600 hover:text-brand-700 dark:text-brand-400 dark:hover:text-brand-300';
+
 const UserConfig = ({ config, role, refreshConfig }: UserConfigProps) => {
   const { alertModal, showAlert, hideAlert } = useAlertModal();
   const { isLoading, withLoading } = useLoadingState();
-  const { lastActiveAt, refreshActivity } = useUserActivity();
+  const [userSearch, setUserSearch] = useState('');
+  const [userFilter, setUserFilter] =
+    useState<AdminUserFilter['filter']>('all');
+  const [userGroupFilter, setUserGroupFilter] = useState('');
+  const [userSort, setUserSort] = useState<AdminUserQuery['sort']>('priority');
+  const userList = useAdminUsers({
+    q: userSearch,
+    filter: userFilter,
+    group: userGroupFilter,
+    sort: userSort,
+  });
+  const refreshUsersAndConfig = async () => {
+    setSelectedUsers(new Set());
+    setAllMatching(false);
+    setExcludedUsers(new Set());
+    setBatchPreview(null);
+    await Promise.all([refreshConfig(), userList.refresh()]);
+  };
+  const lastActiveAt = Object.fromEntries(
+    userList.items.map((user) => [user.username, user.lastActiveAt || 0]),
+  );
+  const [allMatching, setAllMatching] = useState(false);
+  const [excludedUsers, setExcludedUsers] = useState<Set<string>>(new Set());
+  const [batchPreview, setBatchPreview] = useState<{
+    affectedCount: number;
+    skippedCount: number;
+    selection: AdminUserSelection;
+    group: string;
+  } | null>(null);
   const {
     userGroupAction,
     assignUserGroups,
-    batchUpdateUserGroups,
     previewInactiveUsers,
     deleteInactiveUsers,
-    createInviteCode,
+    createInviteCodes,
     deleteInviteCode,
+    purgeInactiveInviteCodes,
     setRequireInviteCode,
+    setDefaultUserGroup,
     updateUserApis,
     userAction,
   } = useAdminUserActions({
-    refreshConfig,
+    refreshConfig: refreshUsersAndConfig,
     showAlert,
   });
   const [showAddUserForm, setShowAddUserForm] = useState(false);
@@ -87,14 +131,11 @@ const UserConfig = ({ config, role, refreshConfig }: UserConfigProps) => {
     username: '',
     password: '',
   });
-  const [newUserGroup, setNewUserGroup] = useState({
-    name: '',
-    enabledApis: [] as string[],
-  });
-  const [editingUserGroup, setEditingUserGroup] = useState<{
-    name: string;
-    enabledApis: string[];
-  } | null>(null);
+  const [newUserGroup, setNewUserGroup] = useState<UserGroupDraft>(
+    EMPTY_USER_GROUP_DRAFT,
+  );
+  const [editingUserGroup, setEditingUserGroup] =
+    useState<UserGroupDraft | null>(null);
   const [showConfigureApisModal, setShowConfigureApisModal] =
     useModalState(false);
   const [selectedUser, setSelectedUser] = useState<{
@@ -111,6 +152,9 @@ const UserConfig = ({ config, role, refreshConfig }: UserConfigProps) => {
     role: 'user' | 'admin' | 'owner';
     tags?: string[];
   } | null>(null);
+  const retainedUser = useRetainedValue(selectedUser);
+  const retainedUserForGroup = useRetainedValue(selectedUserForGroup);
+  const retainedEditingGroup = useRetainedValue(editingUserGroup);
   const [selectedUserGroups, setSelectedUserGroups] = useState<string[]>([]);
   const [selectedUsers, setSelectedUsers] = useState<Set<string>>(new Set());
   const [showBatchUserGroupModal, setShowBatchUserGroupModal] =
@@ -120,29 +164,24 @@ const UserConfig = ({ config, role, refreshConfig }: UserConfigProps) => {
     useModalState(false);
   const [deletingUserGroup, setDeletingUserGroup] = useState<{
     name: string;
-    affectedUsers: Array<{
-      username: string;
-      role: 'user' | 'admin' | 'owner';
-    }>;
+    affectedCount: number;
   } | null>(null);
   const [showDeleteUserModal, setShowDeleteUserModal] = useModalState(false);
   const [deletingUser, setDeletingUser] = useState<string | null>(null);
   const [pendingSensitiveUserAction, setPendingSensitiveUserAction] =
     useState<PendingSensitiveUserAction | null>(null);
   const [showOpenRegisterConfirm, setShowOpenRegisterConfirm] = useState(false);
+  const [showPurgeInviteConfirm, setShowPurgeInviteConfirm] = useState(false);
   const [showCleanupInactiveModal, setShowCleanupInactiveModal] =
     useModalState(false);
   const [inactiveDays, setInactiveDays] = useState(DEFAULT_INACTIVE_DAYS);
-  const [inactiveCandidates, setInactiveCandidates] = useState<
-    InactiveCandidate[] | null
-  >(null);
+  const [inactiveCandidates, setInactiveCandidates] = useState<{
+    count: number;
+    confirmation: string;
+  } | null>(null);
   const [showRegistrationModal, setShowRegistrationModal] =
     useModalState(false);
-  const [inviteValidDays, setInviteValidDays] = useState(
-    DEFAULT_INVITE_VALID_DAYS,
-  );
-  const [inviteCustomCode, setInviteCustomCode] = useState('');
-  const [inviteMaxUses, setInviteMaxUses] = useState('');
+  const [inviteFilter, setInviteFilter] = useState<InviteCodeFilter>('all');
 
   const currentUsername = getAuthInfoFromBrowserCookie()?.username || null;
   const permissionContext = useMemo(
@@ -150,46 +189,60 @@ const UserConfig = ({ config, role, refreshConfig }: UserConfigProps) => {
     [role, currentUsername],
   );
 
-  const selectableUsersCount = useMemo(
+  const visibleUsers = userList.items;
+  useEffect(() => {
+    setSelectedUsers(new Set());
+    setAllMatching(false);
+    setExcludedUsers(new Set());
+    setBatchPreview(null);
+  }, [userSearch, userFilter, userGroupFilter, userSort]);
+  const selectedCount = allMatching
+    ? Math.max(0, userList.total - excludedUsers.size)
+    : selectedUsers.size;
+  const displayedSelection = allMatching
+    ? new Set(
+        visibleUsers
+          .filter((user) => !excludedUsers.has(user.username))
+          .map((user) => user.username),
+      )
+    : selectedUsers;
+
+  const selectableVisibleUsers = useMemo(
     () =>
-      getSelectableUsers(config?.UserConfig?.Users || [], permissionContext)
-        .length,
-    [config?.UserConfig?.Users, permissionContext],
+      getSelectableUsers(visibleUsers, permissionContext).filter(
+        (user) => user.username !== currentUsername && user.role !== 'owner',
+      ),
+    [visibleUsers, permissionContext, currentUsername],
   );
 
-  const inviteCodes = useMemo(
-    () => config?.UserConfig?.InviteCodes || [],
-    [config?.UserConfig?.InviteCodes],
-  );
+  const inviteList = useAdminInviteCodes(inviteFilter, showRegistrationModal);
+  const activeInviteCodeCount = config?.UserConfig?.activeInviteCodeCount ?? 0;
 
   const openRegister = !!config?.UserConfig?.OpenRegister;
   const requireInviteCode = !!config?.UserConfig?.RequireInviteCode;
 
-  const registrationStatusText = useMemo(() => {
-    if (!openRegister) return '已关闭';
-    if (!requireInviteCode) return '已开启 · 无需邀请码';
-    return `已开启 · ${countActiveInviteCodes(inviteCodes)} 个有效邀请码`;
-  }, [openRegister, requireInviteCode, inviteCodes]);
-
-  const selectAllUsers = useMemo(() => {
-    return (
-      selectedUsers.size === selectableUsersCount && selectedUsers.size > 0
+  const selectAllUsers =
+    selectableVisibleUsers.length > 0 &&
+    selectableVisibleUsers.every((user) =>
+      displayedSelection.has(user.username),
     );
-  }, [selectedUsers.size, selectableUsersCount]);
 
   const userGroups = config?.UserConfig?.Tags || [];
+  const isLiveGrantedByGroup =
+    config?.SiteConfig?.EnableLiveEntry === true &&
+    config.SiteConfig.LiveAccess === 'groups';
 
   const handleUserGroupAction = async (
     action: 'add' | 'edit' | 'delete',
     groupName: string,
-    enabledApis?: string[],
+    draft?: UserGroupDraft,
   ) => {
     return withLoading(`userGroup_${action}_${groupName}`, async () => {
       try {
-        await userGroupAction(action, groupName, enabledApis);
+        await userGroupAction(action, groupName, draft);
 
         if (action === 'add') {
-          setNewUserGroup({ name: '', enabledApis: [] });
+          setNewUserGroup(EMPTY_USER_GROUP_DRAFT);
           setShowAddUserGroupForm(false);
         } else if (action === 'edit') {
           setEditingUserGroup(null);
@@ -202,7 +255,6 @@ const UserConfig = ({ config, role, refreshConfig }: UserConfigProps) => {
             : action === 'edit'
               ? '用户组更新成功'
               : '用户组删除成功',
-          showAlert,
         );
       } catch (err) {
         showError(err instanceof Error ? err.message : '操作失败', showAlert);
@@ -213,32 +265,27 @@ const UserConfig = ({ config, role, refreshConfig }: UserConfigProps) => {
 
   const handleAddUserGroup = () => {
     if (!newUserGroup.name.trim()) return;
-    handleUserGroupAction('add', newUserGroup.name, newUserGroup.enabledApis);
+    handleUserGroupAction('add', newUserGroup.name, newUserGroup);
   };
 
   const handleEditUserGroup = () => {
     if (!editingUserGroup?.name.trim()) return;
-    handleUserGroupAction(
-      'edit',
-      editingUserGroup.name,
-      editingUserGroup.enabledApis,
-    );
+    handleUserGroupAction('edit', editingUserGroup.name, editingUserGroup);
   };
 
-  const handleDeleteUserGroup = (groupName: string) => {
-    const affectedUsers =
-      config?.UserConfig?.Users?.filter(
-        (user) => user.tags && user.tags.includes(groupName),
-      ) || [];
-
-    setDeletingUserGroup({
-      name: groupName,
-      affectedUsers: affectedUsers.map((u) => ({
-        username: u.username,
-        role: u.role,
-      })),
-    });
-    setShowDeleteUserGroupModal(true);
+  const handleDeleteUserGroup = async (groupName: string) => {
+    try {
+      const page = await adminGet<AdminUserPage>(
+        `/api/admin/user?${new URLSearchParams({ group: groupName, limit: '1' })}`,
+      );
+      setDeletingUserGroup({ name: groupName, affectedCount: page.total });
+      setShowDeleteUserGroupModal(true);
+    } catch (error) {
+      showError(
+        error instanceof Error ? error.message : '获取用户组人数失败',
+        showAlert,
+      );
+    }
   };
 
   const handleConfirmDeleteUserGroup = async () => {
@@ -256,10 +303,12 @@ const UserConfig = ({ config, role, refreshConfig }: UserConfigProps) => {
   const handleStartEditUserGroup = (group: {
     name: string;
     enabledApis?: string[];
+    allowLive?: boolean;
   }) => {
     setEditingUserGroup({
       name: group.name,
       enabledApis: group.enabledApis || [],
+      allowLive: group.allowLive === true,
     });
     setShowEditUserGroupForm(true);
     setShowAddUserGroupForm(false);
@@ -272,7 +321,7 @@ const UserConfig = ({ config, role, refreshConfig }: UserConfigProps) => {
     return withLoading(`assignUserGroup_${username}`, async () => {
       try {
         await assignUserGroups(username, nextUserGroups);
-        showSuccess('用户组分配成功', showAlert);
+        showSuccess('用户组分配成功');
       } catch (err) {
         showError(err instanceof Error ? err.message : '操作失败', showAlert);
         throw err;
@@ -334,7 +383,7 @@ const UserConfig = ({ config, role, refreshConfig }: UserConfigProps) => {
           undefined,
           openRegister,
         );
-        showSuccess('开放注册设置已更新', showAlert);
+        showSuccess('开放注册设置已更新');
       } catch (err) {
         showError(err instanceof Error ? err.message : '更新失败', showAlert);
         throw err;
@@ -355,52 +404,57 @@ const UserConfig = ({ config, role, refreshConfig }: UserConfigProps) => {
     await withLoading('setRequireInviteCode', async () => {
       try {
         await setRequireInviteCode(next);
-        showSuccess(
-          next ? '注册已要求邀请码' : '注册已不要求邀请码',
-          showAlert,
-        );
+        showSuccess(next ? '注册已要求邀请码' : '注册已不要求邀请码');
       } catch {
         // handled in setRequireInviteCode
       }
     });
   };
 
-  const handleCreateInviteCode = async () => {
-    const customCode = inviteCustomCode.trim();
-    if (customCode && !isValidCustomInviteCode(customCode)) {
-      showError(CUSTOM_INVITE_CODE_RULE_MESSAGE, showAlert);
-      return;
-    }
-
-    const trimmedMaxUses = inviteMaxUses.trim();
-    const maxUses = parseInviteMaxUses(
-      trimmedMaxUses ? Number(trimmedMaxUses) : undefined,
-    );
-    if (maxUses === null) {
-      showError(INVITE_MAX_USES_RULE_MESSAGE, showAlert);
-      return;
-    }
-
-    await withLoading('createInviteCode', async () => {
+  const handleDefaultUserGroupChange = (next: string) =>
+    withLoading('setDefaultUserGroup', async () => {
       try {
-        await createInviteCode(inviteValidDays, customCode, maxUses);
-        setInviteCustomCode('');
-        setInviteMaxUses('');
-        showSuccess('邀请码已生成', showAlert);
+        await setDefaultUserGroup(next);
+        showSuccess(next ? `新用户将加入「${next}」` : '新用户不再自动分组');
       } catch {
-        // handled in createInviteCode
+        // handled in setDefaultUserGroup
       }
     });
-  };
+
+  const handleCreateInviteCodes = (draft: InviteCodeDraft) =>
+    withLoading('createInviteCode', async () => {
+      try {
+        const codes = await createInviteCodes(draft);
+        void inviteList.refresh();
+        return codes;
+      } catch {
+        // handled in createInviteCodes
+        return null;
+      }
+    });
 
   const handleDeleteInviteCode = async (code: string) => {
     await withLoading(`deleteInviteCode_${code}`, async () => {
       try {
         await deleteInviteCode(code);
       } catch {
-        // 邀请码可能已被其他管理员删除，拉一次最新列表
+        // 邀请码可能已被其他管理员删除，拉一次最新摘要
         await refreshConfig().catch(() => undefined);
       }
+      void inviteList.refresh();
+    });
+  };
+
+  const handlePurgeInactiveInviteCodes = () => {
+    setShowPurgeInviteConfirm(false);
+    void withLoading('purgeInactiveInviteCodes', async () => {
+      try {
+        const deleted = await purgeInactiveInviteCodes();
+        showSuccess(`已清理 ${deleted} 个失效邀请码`);
+      } catch {
+        // handled in purgeInactiveInviteCodes
+      }
+      void inviteList.refresh();
     });
   };
 
@@ -551,50 +605,102 @@ const UserConfig = ({ config, role, refreshConfig }: UserConfigProps) => {
     setInactiveCandidates(null);
   };
 
-  const handleSelectUser = useCallback((username: string, checked: boolean) => {
-    setSelectedUsers((prev) => {
-      const next = new Set(prev);
-      if (checked) {
-        next.add(username);
-      } else {
-        next.delete(username);
+  const handleSelectUser = useCallback(
+    (username: string, checked: boolean) => {
+      if (allMatching) {
+        setExcludedUsers((previous) => {
+          const next = new Set(previous);
+          if (checked) next.delete(username);
+          else next.add(username);
+          return next;
+        });
+        return;
       }
-      return next;
-    });
-  }, []);
+      setSelectedUsers((prev) => {
+        const next = new Set(prev);
+        if (checked) {
+          next.add(username);
+        } else {
+          next.delete(username);
+        }
+        return next;
+      });
+    },
+    [allMatching],
+  );
 
   const handleSelectAllUsers = useCallback(
     (checked: boolean) => {
-      if (checked) {
-        const selectableUsernames = getSelectableUsers(
-          config?.UserConfig?.Users || [],
-          permissionContext,
-        ).map((u) => u.username);
-        setSelectedUsers(new Set(selectableUsernames));
-      } else {
-        setSelectedUsers(new Set());
-      }
+      setAllMatching(false);
+      setExcludedUsers(new Set());
+      setSelectedUsers((previous) => {
+        const next = new Set(previous);
+        selectableVisibleUsers.forEach(({ username }) => {
+          if (checked) next.add(username);
+          else next.delete(username);
+        });
+        return next;
+      });
     },
-    [config?.UserConfig?.Users, permissionContext],
+    [selectableVisibleUsers],
   );
 
   const handleBatchSetUserGroup = async (userGroup: string) => {
-    if (selectedUsers.size === 0) return;
-
+    if (!selectedCount) return;
+    const selection: AdminUserSelection = allMatching
+      ? {
+          mode: 'all',
+          filter: { q: userSearch, filter: userFilter, group: userGroupFilter },
+          excluded: [...excludedUsers],
+        }
+      : { mode: 'explicit', usernames: [...selectedUsers] };
     await withLoading('batchSetUserGroup', async () => {
       try {
-        await batchUpdateUserGroups(Array.from(selectedUsers), userGroup);
-        const userCount = selectedUsers.size;
-        setSelectedUsers(new Set());
+        const result = await adminPost<{
+          affectedCount: number;
+          skippedCount: number;
+        }>('/api/admin/user', {
+          action: 'batchUpdateUserGroups',
+          selection,
+          userGroups: userGroup ? [userGroup] : [],
+          dryRun: true,
+        });
+        setBatchPreview({ ...result, selection, group: userGroup });
         closeBatchUserGroupModal();
-        showSuccess(
-          `已为 ${userCount} 个用户设置用户组: ${userGroup}`,
+      } catch (error) {
+        showError(
+          error instanceof Error ? error.message : '预估操作人数失败',
           showAlert,
         );
-        await refreshConfig();
-      } catch (err) {
-        showError('批量设置用户组失败', showAlert);
-        throw err;
+      }
+    });
+  };
+
+  const confirmBatch = async () => {
+    if (!batchPreview) return;
+    await withLoading('batchSetUserGroup', async () => {
+      try {
+        const result = await adminPost<{
+          processedCount: number;
+          skippedCount: number;
+        }>('/api/admin/user', {
+          action: 'batchUpdateUserGroups',
+          selection: batchPreview.selection,
+          userGroups: batchPreview.group ? [batchPreview.group] : [],
+        });
+        setBatchPreview(null);
+        setSelectedUsers(new Set());
+        setAllMatching(false);
+        setExcludedUsers(new Set());
+        await refreshUsersAndConfig();
+        showSuccess(
+          `已处理 ${result.processedCount} 个用户，跳过 ${result.skippedCount} 个`,
+        );
+      } catch (error) {
+        showError(
+          error instanceof Error ? error.message : '批量设置用户组失败',
+          showAlert,
+        );
       }
     });
   };
@@ -630,22 +736,21 @@ const UserConfig = ({ config, role, refreshConfig }: UserConfigProps) => {
   };
 
   const handleConfirmCleanupInactive = async () => {
-    if (!inactiveCandidates || inactiveCandidates.length === 0) return;
+    if (!inactiveCandidates || inactiveCandidates.count === 0) return;
 
     await withLoading('cleanupInactiveUsers', async () => {
       try {
         const result = await deleteInactiveUsers(
           inactiveDays,
-          inactiveCandidates.map((candidate) => candidate.username),
+          inactiveCandidates.confirmation,
         );
-        await refreshActivity();
+        await userList.refresh();
         setShowCleanupInactiveModal(false);
         setInactiveCandidates(null);
         showSuccess(
           result.skippedCount > 0
             ? `已删除 ${result.deletedCount} 个用户，${result.skippedCount} 个因期间有活跃被跳过`
             : `已删除 ${result.deletedCount} 个用户`,
-          showAlert,
         );
       } catch {
         // handled in deleteInactiveUsers
@@ -659,7 +764,7 @@ const UserConfig = ({ config, role, refreshConfig }: UserConfigProps) => {
     await withLoading(`deleteUser_${deletingUser}`, async () => {
       try {
         await handleUserAction('deleteUser', deletingUser);
-        await refreshActivity();
+        await userList.refresh();
         setShowDeleteUserModal(false);
         setDeletingUser(null);
       } catch {
@@ -678,112 +783,94 @@ const UserConfig = ({ config, role, refreshConfig }: UserConfigProps) => {
 
   return (
     <div className='space-y-6'>
-      <div className='mb-1 grid grid-cols-1 gap-4 lg:grid-cols-2'>
-        <div>
-          <h4 className='mb-3 text-sm font-medium text-gray-700 dark:text-gray-300'>
-            用户统计
-          </h4>
-          <div className='min-h-[96px] rounded-lg border border-green-200 bg-green-50 p-4 dark:border-green-800 dark:bg-green-900/20'>
-            <div className='text-2xl font-bold text-green-800 dark:text-green-300'>
-              {config.UserConfig.Users.length}
-            </div>
-            <div className='text-sm text-green-600 dark:text-green-400'>
-              总用户数
-            </div>
-          </div>
-        </div>
-        <div>
-          <h4 className='mb-3 text-sm font-medium text-gray-700 dark:text-gray-300'>
-            注册设置
-          </h4>
-          <div className='flex min-h-[96px] items-center justify-between gap-4 rounded-lg border border-gray-200 bg-gray-50 p-4 dark:border-gray-700 dark:bg-gray-900'>
-            <div>
-              <p className='text-sm font-medium text-gray-900 dark:text-gray-100'>
-                开放注册
-              </p>
-              <p className='mt-1 text-xs text-gray-500 dark:text-gray-400'>
-                {registrationStatusText}
-              </p>
-            </div>
-            <button
-              type='button'
-              onClick={() => setShowRegistrationModal(true)}
-              className={buttonStyles.primary}
-            >
-              管理
-            </button>
-          </div>
-        </div>
-      </div>
+      <RegistrationSummaryCard
+        openRegister={openRegister}
+        requireInviteCode={requireInviteCode}
+        activeInviteCodeCount={activeInviteCodeCount}
+        onManage={() => setShowRegistrationModal(true)}
+      />
 
       <div>
-        <div className='mb-3 flex items-center justify-between'>
-          <h4 className='text-sm font-medium text-gray-700 dark:text-gray-300'>
-            用户组管理
-          </h4>
-          <button
-            onClick={() => {
-              setShowAddUserGroupForm(true);
-              if (showEditUserGroupForm) {
-                setShowEditUserGroupForm(false);
-                setEditingUserGroup(null);
+        <h2 className='mb-3 text-base font-semibold text-gray-900 dark:text-gray-100'>
+          用户列表
+        </h2>
+        <div className='mb-4 flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between'>
+          <div className='flex min-w-0 flex-wrap items-center gap-2'>
+            <AdminSearchField
+              value={userSearch}
+              onChange={setUserSearch}
+              label='搜索用户名或昵称'
+              className='w-full sm:w-64'
+            />
+            <Select
+              value={userFilter || 'all'}
+              onChange={(value) =>
+                setUserFilter(value as AdminUserFilter['filter'])
               }
-            }}
-            className={buttonStyles.primary}
-          >
-            添加用户组
-          </button>
-        </div>
-
-        <UserGroupTable
-          userGroups={userGroups}
-          isEditLoading={(groupName) =>
-            isLoading(`userGroup_edit_${groupName}`)
-          }
-          onEdit={handleStartEditUserGroup}
-          onDelete={handleDeleteUserGroup}
-        />
-      </div>
-
-      <div>
-        <div className='mb-3 flex items-center justify-between'>
-          <h4 className='text-sm font-medium text-gray-700 dark:text-gray-300'>
-            用户列表
-          </h4>
-          <div className='flex items-center space-x-2'>
-            {selectedUsers.size > 0 && (
-              <>
-                <div className='flex items-center space-x-3'>
-                  <span className='text-sm text-gray-600 dark:text-gray-400'>
-                    已选择 {selectedUsers.size} 个用户
-                  </span>
-                  <button
-                    onClick={() => setShowBatchUserGroupModal(true)}
-                    className={buttonStyles.primary}
-                  >
-                    批量设置用户组
-                  </button>
-                </div>
-                <div className='h-6 w-px bg-gray-300 dark:bg-gray-600'></div>
-              </>
+              ariaLabel='筛选用户角色或状态'
+              variant='pill'
+              className='shrink-0'
+              options={[
+                { value: 'all', label: '全部' },
+                { value: 'owner', label: '站长' },
+                { value: 'admin', label: '管理员' },
+                { value: 'user', label: '普通用户' },
+                { value: 'banned', label: '已封禁' },
+              ]}
+            />
+            {(userGroups.length > 0 || userGroupFilter) && (
+              <Select
+                value={userGroupFilter}
+                onChange={setUserGroupFilter}
+                ariaLabel='筛选用户组'
+                variant='pill'
+                className='shrink-0'
+                options={[
+                  { value: '', label: '全部用户组' },
+                  ...userGroups.map((group) => ({
+                    value: group.name,
+                    label: group.name,
+                  })),
+                ]}
+              />
             )}
+            <Select
+              value={userSort || 'priority'}
+              onChange={(value) => setUserSort(value as AdminUserQuery['sort'])}
+              ariaLabel='用户排序'
+              variant='pill'
+              className='shrink-0'
+              options={[
+                { value: 'priority', label: '默认排序' },
+                { value: 'username', label: '用户名' },
+                { value: 'activeDesc', label: '最近活跃' },
+                { value: 'activeAsc', label: '最久未活跃' },
+              ]}
+            />
+          </div>
+          <div className='flex shrink-0 flex-wrap items-center gap-2'>
+            <button
+              onClick={handleOpenCleanupInactive}
+              className={buttonStyles.outline}
+            >
+              清理不活跃
+            </button>
             <button
               onClick={() => {
+                setNewUser({
+                  username: '',
+                  password: '',
+                  userGroup: config?.UserConfig?.DefaultUserGroup || '',
+                });
                 setShowAddUserForm(true);
                 if (showChangePasswordForm) {
                   setShowChangePasswordForm(false);
                   setChangePasswordUser({ username: '', password: '' });
                 }
               }}
-              className={buttonStyles.success}
+              className={buttonStyles.primary}
             >
               添加用户
-            </button>
-            <button
-              onClick={handleOpenCleanupInactive}
-              className={buttonStyles.warning}
-            >
-              清理不活跃
             </button>
           </div>
         </div>
@@ -818,40 +905,131 @@ const UserConfig = ({ config, role, refreshConfig }: UserConfigProps) => {
           )}
         />
 
-        <UserTable
-          users={config.UserConfig.Users}
-          lastActiveAt={lastActiveAt}
-          currentUsername={currentUsername}
-          permissionContext={permissionContext}
-          selectableUsersCount={selectableUsersCount}
-          selectedUsers={selectedUsers}
-          selectAllUsers={selectAllUsers}
-          isLoading={isLoading}
-          onSelectAllUsers={handleSelectAllUsers}
-          onSelectUser={handleSelectUser}
-          onConfigureUserGroup={handleConfigureUserGroup}
-          onConfigureUserApis={handleConfigureUserApis}
-          onShowChangePassword={handleShowChangePasswordForm}
-          onSetAdmin={handleSetAdmin}
-          onRemoveAdmin={handleRemoveAdmin}
-          onBanUser={handleBanUser}
-          onUnbanUser={handleUnbanUser}
-          onDeleteUser={handleDeleteUser}
+        {(allMatching || (selectAllUsers && userList.nextCursor)) && (
+          <div className='mb-3 flex flex-wrap items-center gap-x-3 gap-y-1 rounded-lg bg-brand-50 px-3 py-2 text-sm text-gray-700 dark:bg-brand-500/10 dark:text-gray-300'>
+            {allMatching ? (
+              <>
+                <span>已选择全部 {selectedCount} 个匹配用户</span>
+                <button
+                  type='button'
+                  className={SELECTION_LINK_CLASS}
+                  onClick={() => handleSelectAllUsers(false)}
+                >
+                  清除选择
+                </button>
+              </>
+            ) : (
+              <>
+                <span>已选择已加载的 {selectedUsers.size} 个用户</span>
+                <button
+                  type='button'
+                  className={SELECTION_LINK_CLASS}
+                  onClick={() => {
+                    setAllMatching(true);
+                    setExcludedUsers(new Set());
+                  }}
+                >
+                  选择全部 {userList.total} 个匹配用户
+                </button>
+              </>
+            )}
+          </div>
+        )}
+        {userList.error && (
+          <p role='alert' className='mb-3 text-sm text-red-600'>
+            {userList.error}{' '}
+            <button
+              type='button'
+              className={buttonStyles.quickAction}
+              onClick={() => void userList.refresh()}
+            >
+              重试
+            </button>
+          </p>
+        )}
+        {userList.loading && visibleUsers.length === 0 ? (
+          <AdminUserRowsSkeleton
+            count={Math.min(config.UserConfig.TotalUsers ?? 50, 50)}
+          />
+        ) : (
+          <UserTable
+            total={userList.total}
+            selectedCount={selectedCount}
+            users={visibleUsers}
+            lastActiveAt={lastActiveAt}
+            currentUsername={currentUsername}
+            permissionContext={permissionContext}
+            selectableUsersCount={selectableVisibleUsers.length}
+            selectedUsers={displayedSelection}
+            selectAllUsers={selectAllUsers}
+            isLoading={isLoading}
+            onBatchUserGroup={() => setShowBatchUserGroupModal(true)}
+            onSelectAllUsers={handleSelectAllUsers}
+            onSelectUser={handleSelectUser}
+            onConfigureUserGroup={handleConfigureUserGroup}
+            onConfigureUserApis={handleConfigureUserApis}
+            onShowChangePassword={handleShowChangePasswordForm}
+            onSetAdmin={handleSetAdmin}
+            onRemoveAdmin={handleRemoveAdmin}
+            onBanUser={handleBanUser}
+            onUnbanUser={handleUnbanUser}
+            onDeleteUser={handleDeleteUser}
+          />
+        )}
+        {userList.nextCursor && (
+          <div className='mt-4 flex justify-center'>
+            <button
+              type='button'
+              disabled={userList.loading}
+              onClick={() => void userList.loadMore()}
+              className={buttonStyles.outline}
+            >
+              {userList.loading ? '加载中...' : '加载更多'}
+            </button>
+          </div>
+        )}
+      </div>
+
+      <div>
+        <div className='mb-3 flex items-center justify-between'>
+          <h2 className='text-base font-semibold text-gray-900 dark:text-gray-100'>
+            用户组
+          </h2>
+          <button
+            onClick={() => {
+              setShowAddUserGroupForm(true);
+              if (showEditUserGroupForm) {
+                setShowEditUserGroupForm(false);
+                setEditingUserGroup(null);
+              }
+            }}
+            className={buttonStyles.primary}
+          >
+            添加用户组
+          </button>
+        </div>
+
+        <UserGroupTable
+          userGroups={userGroups}
+          showLiveAccess={isLiveGrantedByGroup}
+          isEditLoading={(groupName) =>
+            isLoading(`userGroup_edit_${groupName}`)
+          }
+          onEdit={handleStartEditUserGroup}
+          onDelete={handleDeleteUserGroup}
         />
       </div>
 
-      {selectedUser && (
-        <ConfigureUserApisDialog
-          isOpen={showConfigureApisModal}
-          username={selectedUser.username}
-          sources={config.SourceConfig || []}
-          selectedApis={selectedApis}
-          onSelectedApisChange={setSelectedApis}
-          onClose={closeConfigureApisModal}
-          onSave={handleSaveUserApis}
-          isSaving={isLoading(`saveUserApis_${selectedUser.username}`)}
-        />
-      )}
+      <ConfigureUserApisDialog
+        isOpen={showConfigureApisModal && Boolean(selectedUser)}
+        username={retainedUser?.username ?? ''}
+        sources={config.SourceConfig || []}
+        selectedApis={selectedApis}
+        onSelectedApisChange={setSelectedApis}
+        onClose={closeConfigureApisModal}
+        onSave={handleSaveUserApis}
+        isSaving={isLoading(`saveUserApis_${retainedUser?.username}`)}
+      />
 
       <UserGroupFormDialog
         mode='add'
@@ -859,52 +1037,53 @@ const UserConfig = ({ config, role, refreshConfig }: UserConfigProps) => {
         value={newUserGroup}
         onChange={setNewUserGroup}
         sources={config.SourceConfig || []}
+        showLiveAccess={isLiveGrantedByGroup}
         onClose={closeAddUserGroupModal}
         onSubmit={handleAddUserGroup}
         isSubmitting={isLoading('userGroup_add_new')}
       />
 
-      {editingUserGroup && (
-        <UserGroupFormDialog
-          mode='edit'
-          isOpen={showEditUserGroupForm}
-          value={editingUserGroup}
-          onChange={(next) =>
-            setEditingUserGroup({
-              name: editingUserGroup.name,
-              enabledApis: next.enabledApis,
-            })
-          }
-          sources={config.SourceConfig || []}
-          onClose={closeEditUserGroupModal}
-          onSubmit={handleEditUserGroup}
-          isSubmitting={isLoading(`userGroup_edit_${editingUserGroup.name}`)}
-        />
-      )}
+      <UserGroupFormDialog
+        mode='edit'
+        isOpen={showEditUserGroupForm && Boolean(editingUserGroup)}
+        value={retainedEditingGroup ?? EMPTY_USER_GROUP_DRAFT}
+        onChange={(next) =>
+          setEditingUserGroup((current) =>
+            current
+              ? {
+                  ...current,
+                  enabledApis: next.enabledApis,
+                  allowLive: next.allowLive,
+                }
+              : current,
+          )
+        }
+        sources={config.SourceConfig || []}
+        showLiveAccess={isLiveGrantedByGroup}
+        onClose={closeEditUserGroupModal}
+        onSubmit={handleEditUserGroup}
+        isSubmitting={isLoading(`userGroup_edit_${retainedEditingGroup?.name}`)}
+      />
 
-      {selectedUserForGroup && (
-        <ConfigureUserGroupDialog
-          isOpen={showConfigureUserGroupModal}
-          username={selectedUserForGroup.username}
-          selectedGroup={
-            selectedUserGroups.length > 0 ? selectedUserGroups[0] : ''
-          }
-          userGroups={userGroups}
-          onSelectedGroupChange={(next) =>
-            setSelectedUserGroups(next ? [next] : [])
-          }
-          onClose={closeConfigureUserGroupModal}
-          onSave={handleSaveUserGroups}
-          isSaving={isLoading(
-            `saveUserGroups_${selectedUserForGroup.username}`,
-          )}
-        />
-      )}
+      <ConfigureUserGroupDialog
+        isOpen={showConfigureUserGroupModal && Boolean(selectedUserForGroup)}
+        username={retainedUserForGroup?.username ?? ''}
+        selectedGroup={
+          selectedUserGroups.length > 0 ? selectedUserGroups[0] : ''
+        }
+        userGroups={userGroups}
+        onSelectedGroupChange={(next) =>
+          setSelectedUserGroups(next ? [next] : [])
+        }
+        onClose={closeConfigureUserGroupModal}
+        onSave={handleSaveUserGroups}
+        isSaving={isLoading(`saveUserGroups_${retainedUserForGroup?.username}`)}
+      />
 
       <DeleteUserGroupConfirm
         isOpen={showDeleteUserGroupModal && !!deletingUserGroup}
         groupName={deletingUserGroup?.name || ''}
-        affectedUsers={deletingUserGroup?.affectedUsers || []}
+        affectedCount={deletingUserGroup?.affectedCount || 0}
         onCancel={() => {
           setShowDeleteUserGroupModal(false);
           setDeletingUserGroup(null);
@@ -925,7 +1104,6 @@ const UserConfig = ({ config, role, refreshConfig }: UserConfigProps) => {
 
       <BatchUserGroupDialog
         isOpen={showBatchUserGroupModal}
-        selectedUserCount={selectedUsers.size}
         selectedGroup={selectedUserGroup}
         userGroups={userGroups}
         onSelectedGroupChange={setSelectedUserGroup}
@@ -934,6 +1112,16 @@ const UserConfig = ({ config, role, refreshConfig }: UserConfigProps) => {
         isSaving={isLoading('batchSetUserGroup')}
       />
 
+      <ConfirmModal
+        isOpen={!!batchPreview}
+        title='确认批量设置用户组'
+        message={`预计处理 ${batchPreview?.affectedCount || 0} 个用户，跳过 ${batchPreview?.skippedCount || 0} 个。`}
+        onClose={() => setBatchPreview(null)}
+        onConfirm={() => void confirmBatch()}
+        confirmDisabled={
+          isLoading('batchSetUserGroup') || !batchPreview?.affectedCount
+        }
+      />
       <CleanupInactiveUsersDialog
         isOpen={showCleanupInactiveModal}
         inactiveDays={inactiveDays}
@@ -953,25 +1141,46 @@ const UserConfig = ({ config, role, refreshConfig }: UserConfigProps) => {
         isOpen={showRegistrationModal}
         openRegister={!!config.UserConfig.OpenRegister}
         requireInviteCode={!!config.UserConfig.RequireInviteCode}
-        inviteCodes={inviteCodes}
-        validDays={inviteValidDays}
-        customCode={inviteCustomCode}
-        maxUses={inviteMaxUses}
+        userGroupNames={userGroups.map((group) => group.name)}
+        defaultUserGroup={config.UserConfig.DefaultUserGroup || ''}
+        isSettingDefaultGroup={isLoading('setDefaultUserGroup')}
+        inviteFilter={inviteFilter}
+        inviteList={{
+          ...inviteList,
+          expectedCount:
+            inviteFilter === 'all'
+              ? config.UserConfig.inviteCodeCount
+              : inviteFilter === 'active'
+                ? activeInviteCodeCount
+                : inviteList.totals[inviteFilter],
+        }}
         isTogglingRegister={isLoading('setOpenRegister')}
         isTogglingInvite={isLoading('setRequireInviteCode')}
         isCreatingCode={isLoading('createInviteCode')}
         deletingCode={
-          inviteCodes.find((item) => isLoading(`deleteInviteCode_${item.code}`))
-            ?.code || null
+          inviteList.items.find((item) =>
+            isLoading(`deleteInviteCode_${item.code}`),
+          )?.code || null
         }
         onToggleOpenRegister={handleToggleOpenRegister}
         onToggleRequireInviteCode={handleToggleRequireInviteCode}
-        onValidDaysChange={setInviteValidDays}
-        onCustomCodeChange={setInviteCustomCode}
-        onMaxUsesChange={setInviteMaxUses}
-        onCreateCode={handleCreateInviteCode}
+        onDefaultUserGroupChange={handleDefaultUserGroupChange}
+        onInviteFilterChange={setInviteFilter}
+        onCreateCodes={handleCreateInviteCodes}
         onDeleteCode={handleDeleteInviteCode}
+        isPurgingCodes={isLoading('purgeInactiveInviteCodes')}
+        onPurgeInactiveCodes={() => setShowPurgeInviteConfirm(true)}
         onClose={() => setShowRegistrationModal(false)}
+      />
+
+      <ConfirmModal
+        isOpen={showPurgeInviteConfirm}
+        title='清理失效邀请码'
+        message={`将删除 ${inviteList.inactiveCount} 个已过期或已用尽的邀请码，删除后无法恢复。`}
+        onClose={() => setShowPurgeInviteConfirm(false)}
+        onConfirm={handlePurgeInactiveInviteCodes}
+        confirmText='确认清理'
+        danger
       />
 
       <ConfirmModal

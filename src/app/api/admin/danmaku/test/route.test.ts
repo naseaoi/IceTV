@@ -38,3 +38,34 @@ describe('danmaku connection test runtime settings', () => {
     },
   );
 });
+
+it.each([
+  ['mysql://user:secret@internal/db', '无法完成弹幕服务测试，请稍后重试'],
+  [
+    '安全校验拦截 https://private/?token=secret',
+    '弹幕服务地址未通过安全校验，请检查服务配置',
+  ],
+  [
+    'upstream-unavailable token=secret',
+    '无法连接到弹幕服务，请检查服务地址和网络连接',
+  ],
+])('sanitizes diagnostic details: %s', async (message, details) => {
+  (getConfigFresh as jest.Mock).mockResolvedValue({
+    SiteConfig: { EnableDanmaku: true },
+  });
+  const error = new Error(message);
+  (searchDanmakuCandidates as jest.Mock).mockRejectedValueOnce(error);
+  const log = jest.spyOn(console, 'error').mockImplementation(() => {});
+  try {
+    const response = await POST({} as NextRequest);
+    expect(response.status).toBe(500);
+    expect(await response.json()).toEqual({
+      success: false,
+      error: '弹幕服务测试失败',
+      details,
+    });
+    expect(log).toHaveBeenCalledWith('弹幕服务测试失败:', error);
+  } finally {
+    log.mockRestore();
+  }
+});

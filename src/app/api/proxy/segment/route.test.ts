@@ -4,26 +4,27 @@ import type Database from 'better-sqlite3';
 import type { NextRequest } from 'next/server';
 
 import { installStreamPolyfills } from '@/app/api/test-utils/stream-polyfills';
+import { getOptionalActiveUser } from '@/lib/api-auth';
+import { getConfigForRead } from '@/lib/config';
 import { db } from '@/lib/db';
+import { resolveProxyAuthorization } from '@/lib/proxy-auth';
 import { LocalSqliteStorage } from '@/lib/sqlite.db';
 
 jest.unmock('@/lib/upstream-resource-guard.server');
 jest.mock('@/lib/config', () => ({
-  getConfigForRead: async () => ({ SiteConfig: {} }),
+  getConfigForRead: jest.fn(async () => ({ SiteConfig: {} })),
 }));
-jest.mock('@/features/live/lib/live', () => ({
-  isLiveEntryEnabled: async () => true,
-}));
+jest.mock('@/lib/api-auth', () => ({ getOptionalActiveUser: jest.fn() }));
 jest.mock('@/app/api/proxy/utils', () => ({
   getProxySourceKey: () => null,
   resolveProxyUserAgent: async () => 'IceTV Test',
 }));
 jest.mock('@/lib/proxy-auth', () => ({
-  resolveProxyAuthorization: async () => ({
+  resolveProxyAuthorization: jest.fn(async () => ({
     authorized: true,
     via: 'session',
     username: 'test-user',
-  }),
+  })),
 }));
 jest.mock('@/lib/http-proxy-json', () => ({
   getProxyUrlForTarget: () => undefined,
@@ -61,6 +62,13 @@ describe('segment shared resource integration', () => {
   let storage: LocalSqliteStorage;
   const originalLimit = process.env.UPSTREAM_MEDIA_USER_CONCURRENCY;
   beforeEach(() => {
+    (getConfigForRead as jest.Mock).mockResolvedValue({ SiteConfig: {} });
+    (resolveProxyAuthorization as jest.Mock).mockResolvedValue({
+      authorized: true,
+      via: 'session',
+      username: 'test-user',
+    });
+    (getOptionalActiveUser as jest.Mock).mockReset();
     storage = new LocalSqliteStorage(':memory:');
     jest
       .spyOn(db, 'getSharedResourceStore')
@@ -83,6 +91,69 @@ describe('segment shared resource integration', () => {
       delete process.env.UPSTREAM_MEDIA_USER_CONCURRENCY;
     else process.env.UPSTREAM_MEDIA_USER_CONCURRENCY = originalLimit;
     (storage as unknown as { db: Database.Database }).db.close();
+  });
+
+  it.each(['session', 'signature'])(
+    'denies live segments without a granting group (%s)',
+    async (via) => {
+      (getConfigForRead as jest.Mock).mockResolvedValue({
+        SiteConfig: { EnableLiveEntry: true, LiveAccess: 'groups' },
+        UserConfig: { Tags: [] },
+      });
+      (resolveProxyAuthorization as jest.Mock).mockResolvedValue({
+        authorized: true,
+        via,
+        username: 'test-user',
+      });
+      (getOptionalActiveUser as jest.Mock).mockResolvedValue({
+        username: 'test-user',
+      });
+      jest
+        .spyOn(db, 'getUserAccess')
+        .mockResolvedValue({ username: 'test-user', role: 'user', tags: [] });
+      const liveRequest = request();
+      Object.assign(liveRequest, { url: `${liveRequest.url}&icetv-live=1` });
+      const response = await GET(liveRequest);
+      expect(response.status).toBe(403);
+      expect(await response.json()).toEqual({ error: '没有直播权限' });
+      expect(mockOrigin).not.toHaveBeenCalled();
+    },
+  );
+
+  it('allows a signed live request using its authenticated user group', async () => {
+    (getConfigForRead as jest.Mock).mockResolvedValue({
+      SiteConfig: { EnableLiveEntry: true, LiveAccess: 'groups' },
+      UserConfig: { Tags: [{ name: 'live', allowLive: true }] },
+    });
+    (resolveProxyAuthorization as jest.Mock).mockResolvedValue({
+      authorized: true,
+      via: 'signature',
+    });
+    (getOptionalActiveUser as jest.Mock).mockResolvedValue({
+      username: 'test-user',
+    });
+    jest.spyOn(db, 'getUserAccess').mockResolvedValue({
+      username: 'test-user',
+      role: 'user',
+      tags: ['live'],
+    });
+    const liveRequest = request();
+    Object.assign(liveRequest, { url: `${liveRequest.url}&icetv-live=1` });
+    const response = await GET(liveRequest);
+    expect(response.status).toBe(200);
+    expect(getOptionalActiveUser).toHaveBeenCalledWith(liveRequest);
+    await response.body!.cancel();
+  });
+
+  it('retains 404 for disabled live segments', async () => {
+    (getConfigForRead as jest.Mock).mockResolvedValue({
+      SiteConfig: { EnableLiveEntry: false },
+    });
+    const liveRequest = request();
+    Object.assign(liveRequest, { url: `${liveRequest.url}&icetv-live=1` });
+    const response = await GET(liveRequest);
+    expect(response.status).toBe(404);
+    expect(mockOrigin).not.toHaveBeenCalled();
   });
 
   it('returns 429 before upstream fetch while a user stream is active', async () => {

@@ -7,12 +7,15 @@ import {
   Clapperboard,
   RefreshCw,
   Search,
-  X,
   Zap,
 } from 'lucide-react';
 import { ReactNode, useEffect, useRef, useState } from 'react';
 
 import LoadingStatePanel from '@/components/LoadingStatePanel';
+import {
+  MODAL_PRIMARY_BUTTON_CLASS,
+  MODAL_SECONDARY_BUTTON_CLASS,
+} from '@/components/modals/modal-styles';
 import PageLayout from '@/components/PageLayout';
 
 type LoadingStage = 'searching' | 'preferring' | 'fetching' | 'ready';
@@ -31,15 +34,15 @@ interface PlayErrorViewProps {
 
 function getLoadingStageIcon(loadingStage: LoadingStage): ReactNode {
   if (loadingStage === 'searching') {
-    return <Search className='h-10 w-10' />;
+    return <Search />;
   }
   if (loadingStage === 'preferring') {
-    return <Zap className='h-10 w-10' />;
+    return <Zap />;
   }
   if (loadingStage === 'fetching') {
-    return <Clapperboard className='h-10 w-10' />;
+    return <Clapperboard />;
   }
-  return <CheckCircle2 className='h-10 w-10' />;
+  return <CheckCircle2 />;
 }
 
 /**
@@ -115,31 +118,27 @@ export function PlayLoadingView({
   return (
     <PageLayout activePath='/play'>
       <div className='flex h-full items-center justify-center'>
-        <div className='flex w-full max-w-2xl flex-col items-center gap-4 px-4'>
-          <LoadingStatePanel
-            icon={getLoadingStageIcon(loadingStage)}
-            tone='emerald'
-            glow
-            title='正在加载'
-            message={loadingMessage}
-            progress={loadingProgress}
-          />
+        <LoadingStatePanel
+          icon={getLoadingStageIcon(loadingStage)}
+          iconKey={loadingStage}
+          loading={loadingStage !== 'ready'}
+          message={loadingMessage}
+          progress={loadingProgress}
+        >
           <button
+            type='button'
             onClick={onBack}
             aria-label='取消加载'
-            title='取消加载'
             disabled={!onBack}
             aria-hidden={!onBack}
             tabIndex={onBack ? 0 : -1}
-            className={`inline-flex h-9 w-9 items-center justify-center rounded-full bg-gray-100 text-gray-700 transition-colors dark:bg-gray-800 dark:text-gray-200 ${
-              onBack
-                ? 'hover:bg-gray-200 dark:hover:bg-gray-700'
-                : 'pointer-events-none invisible'
+            className={`${MODAL_SECONDARY_BUTTON_CLASS} ${
+              onBack ? '' : 'invisible'
             }`}
           >
-            <X className='h-5 w-5' />
+            取消
           </button>
-        </div>
+        </LoadingStatePanel>
       </div>
     </PageLayout>
   );
@@ -153,25 +152,26 @@ export function PlayErrorView({ error, onBack, onRetry }: PlayErrorViewProps) {
 
   return (
     <PageLayout activePath='/play'>
-      <div className='flex h-full items-center justify-center bg-transparent'>
+      <div className='flex h-full items-center justify-center'>
         <LoadingStatePanel
-          icon={<AlertTriangle className='h-10 w-10' />}
+          icon={<AlertTriangle />}
           tone='red'
           title={error}
           message={message}
         >
           <div className='flex items-center justify-center gap-3'>
             <button
+              type='button'
               onClick={onBack}
-              className='inline-flex transform items-center gap-1.5 rounded-lg bg-gradient-to-r from-green-500 to-emerald-600 px-3.5 py-2 text-sm font-medium text-white shadow-lg transition-all duration-200 hover:scale-105 hover:from-green-600 hover:to-emerald-700 hover:shadow-xl'
+              className={`gap-1.5 ${MODAL_SECONDARY_BUTTON_CLASS}`}
             >
               <ArrowLeft className='h-4 w-4' />
               返回前页
             </button>
-
             <button
+              type='button'
               onClick={onRetry}
-              className='inline-flex items-center gap-1.5 rounded-lg bg-gray-100 px-3.5 py-2 text-sm font-medium text-gray-700 transition-colors duration-200 hover:bg-gray-200 dark:bg-gray-700 dark:text-gray-300 dark:hover:bg-gray-600'
+              className={`gap-1.5 ${MODAL_PRIMARY_BUTTON_CLASS}`}
             >
               <RefreshCw className='h-4 w-4' />
               重新尝试

@@ -1,4 +1,4 @@
-﻿import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import type { ReactNode } from 'react';
 
 import AdminPage from '@/app/admin/page';
@@ -11,6 +11,19 @@ jest.mock('@/components/PageLayout', () => ({
 jest.mock('@/components/AuthenticatedRoute', () => ({
   __esModule: true,
   default: ({ children }: { children: ReactNode }) => <>{children}</>,
+}));
+
+let mockSessionRole: 'owner' | 'admin' = 'admin';
+jest.mock('@/components/AuthProvider', () => ({
+  useAuthSession: () => ({
+    session: {
+      status: 'authenticated',
+      username: 'tester',
+      role: mockSessionRole,
+    },
+    isRefreshing: false,
+    refreshSession: async () => {},
+  }),
 }));
 
 jest.mock('@/components/DataMigration', () => ({
@@ -35,10 +48,11 @@ jest.mock('@/components/modals/ConfirmModal', () => ({
 }));
 
 const mockReplace = jest.fn();
+let mockSearch = '';
 jest.mock('next/navigation', () => ({
   useRouter: () => ({ replace: mockReplace }),
   usePathname: () => '/admin',
-  useSearchParams: () => new URLSearchParams(),
+  useSearchParams: () => new URLSearchParams(mockSearch),
 }));
 
 jest.mock('@/features/admin/components/tabs/UserConfigTab', () => ({
@@ -113,11 +127,8 @@ describe('AdminPage role visibility', () => {
       SearchDownstreamMaxPage: 1,
       SiteInterfaceCacheTime: 300,
       DoubanProxyType: '',
-      DoubanProxy: '',
       BangumiDataSource: 'server',
-      BangumiProxy: '',
       DoubanImageProxyType: '',
-      DoubanImageProxy: '',
       DisableYellowFilter: false,
       FluidSearch: true,
     },
@@ -129,9 +140,12 @@ describe('AdminPage role visibility', () => {
 
   beforeEach(() => {
     jest.clearAllMocks();
+    mockSearch = '';
+    mockSessionRole = 'admin';
   });
 
   function setupRole(role: 'owner' | 'admin') {
+    mockSessionRole = role;
     mockUseAdminPageActions.mockImplementation(
       (options: UseAdminPageActionsOptions) => ({
         fetchConfig: async () => {
@@ -146,6 +160,7 @@ describe('AdminPage role visibility', () => {
   }
 
   function setupOwnerWithResetSpy(resetConfig: jest.Mock) {
+    mockSessionRole = 'owner';
     mockUseAdminPageActions.mockImplementation(
       (options: UseAdminPageActionsOptions) => ({
         fetchConfig: async () => {
@@ -174,6 +189,7 @@ describe('AdminPage role visibility', () => {
   }
 
   it('shows owner-only sections for owner', async () => {
+    mockSearch = 'tab=config-file';
     setupRole('owner');
     render(<AdminPage />);
 
@@ -188,11 +204,12 @@ describe('AdminPage role visibility', () => {
   });
 
   it('hides owner-only sections for admin', async () => {
+    mockSearch = 'tab=config-file';
     setupRole('admin');
     render(<AdminPage />);
 
     await waitFor(() => {
-      expect(screen.getByText('站点配置')).toBeInTheDocument();
+      expect(screen.getByText('站点设置')).toBeInTheDocument();
     });
 
     expect(screen.queryByText('配置文件')).not.toBeInTheDocument();
@@ -204,6 +221,7 @@ describe('AdminPage role visibility', () => {
 
   it('opens reset confirm modal and triggers reset action', async () => {
     const resetConfig = jest.fn().mockResolvedValue(undefined);
+    mockSearch = 'tab=config-file';
     setupOwnerWithResetSpy(resetConfig);
 
     render(<AdminPage />);
@@ -268,7 +286,7 @@ describe('AdminPage role visibility', () => {
     });
 
     fireEvent.click(screen.getByText('SiteConfigTab'));
-    fireEvent.click(screen.getByRole('button', { name: '用户配置' }));
+    fireEvent.click(screen.getByRole('button', { name: '用户' }));
 
     expect(screen.getByText('ConfirmModal')).toBeInTheDocument();
     expect(mockReplace).not.toHaveBeenCalled();
@@ -278,6 +296,32 @@ describe('AdminPage role visibility', () => {
     expect(mockReplace).toHaveBeenCalledWith('/admin?tab=user', {
       scroll: false,
     });
+  });
+
+  it('shows a save bar for unsaved changes and discards them', async () => {
+    setupRole('admin');
+    render(<AdminPage />);
+
+    await waitFor(() => {
+      expect(screen.getByText('SiteConfigTab')).toBeInTheDocument();
+    });
+    expect(
+      screen.queryByRole('region', { name: '未保存的改动' }),
+    ).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByText('SiteConfigTab'));
+    expect(
+      screen.getByRole('region', { name: '未保存的改动' }),
+    ).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '保存' })).toHaveAttribute(
+      'form',
+      'admin-site-config-form',
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: '放弃' }));
+    expect(
+      screen.queryByRole('region', { name: '未保存的改动' }),
+    ).not.toBeInTheDocument();
   });
 
   it('registers browser leave protection for unsaved changes', async () => {

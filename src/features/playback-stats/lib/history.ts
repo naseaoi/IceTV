@@ -93,3 +93,50 @@ export function dedupePlaybackSessionsByTitle(
 
   return typeof limit === 'number' ? deduped.slice(0, limit) : deduped;
 }
+
+export interface PlaybackSessionDayGroup {
+  key: string;
+  label: string;
+  sessions: PlaybackSession[];
+}
+
+function startOfLocalDay(timestamp: number): number {
+  const date = new Date(timestamp);
+  date.setHours(0, 0, 0, 0);
+  return date.getTime();
+}
+
+function formatDayLabel(dayStart: number, todayStart: number): string {
+  if (dayStart === todayStart) return '今天';
+  if (dayStart === startOfLocalDay(todayStart - 1)) return '昨天';
+  const date = new Date(dayStart);
+  const monthDay = `${date.getMonth() + 1}月${date.getDate()}日`;
+  return date.getFullYear() === new Date(todayStart).getFullYear()
+    ? monthDay
+    : `${date.getFullYear()}年${monthDay}`;
+}
+
+// 按本地日期分组，保持传入顺序（调用方已按时间倒序）
+export function groupPlaybackSessionsByDay(
+  sessions: PlaybackSession[],
+  now = Date.now(),
+): PlaybackSessionDayGroup[] {
+  const todayStart = startOfLocalDay(now);
+  const groups = new Map<number, PlaybackSessionDayGroup>();
+
+  for (const session of sessions) {
+    const dayStart = startOfLocalDay(getPlaybackSessionTime(session));
+    let group = groups.get(dayStart);
+    if (!group) {
+      group = {
+        key: String(dayStart),
+        label: formatDayLabel(dayStart, todayStart),
+        sessions: [],
+      };
+      groups.set(dayStart, group);
+    }
+    group.sessions.push(session);
+  }
+
+  return Array.from(groups.values());
+}

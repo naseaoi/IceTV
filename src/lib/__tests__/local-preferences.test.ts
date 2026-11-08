@@ -1,21 +1,21 @@
 import {
-  ADMIN_TABLE_COLUMN_WIDTHS_STORAGE_KEY,
   AUTO_PLAY_NEXT_STORAGE_KEY,
   AUTO_SWITCH_SOURCE_STORAGE_KEY,
   BLOCK_AD_STORAGE_KEY,
   CONTINUE_WATCHING_COUNT_STORAGE_KEY,
+  CONTINUE_WATCHING_PAGE_COUNT_STORAGE_KEY,
   DEFAULT_AGGREGATE_SEARCH_STORAGE_KEY,
   ENABLE_OPTIMIZATION_STORAGE_KEY,
   FLUID_SEARCH_STORAGE_KEY,
   LIVE_DIRECT_CONNECT_CHANGE_EVENT,
   LIVE_DIRECT_CONNECT_STORAGE_KEY,
   PREFERRED_QUALITY_STORAGE_KEY,
-  readAdminTableColumnWidth,
   readAggregateSearch,
   readAutoPlayNextEnabled,
   readAutoSwitchSource,
   readBlockAdEnabled,
   readContinueWatchingCount,
+  readContinueWatchingPageCount,
   readDanmakuEpisodeSearchTitle,
   readEnableOptimization,
   readFluidSearch,
@@ -23,7 +23,6 @@ import {
   readPreferredQualityHeight,
   readPreferredQualityPreference,
   readSeenAnnouncement,
-  readSidebarCollapsed,
   readSourcePreferredQualityPreference,
   resetAggregateSearch,
   resetAutoSwitchSource,
@@ -32,15 +31,13 @@ import {
   resetFluidSearch,
   resetLiveDirectConnect,
   SEEN_ANNOUNCEMENT_STORAGE_KEY,
-  SIDEBAR_AUTO_COLLAPSE_BELOW_WIDTH,
-  SIDEBAR_COLLAPSED_STORAGE_KEY,
   SOURCE_PREFERRED_QUALITY_STORAGE_PREFIX,
-  writeAdminTableColumnWidth,
   writeAggregateSearch,
   writeAutoPlayNextEnabled,
   writeAutoSwitchSource,
   writeBlockAdEnabled,
   writeContinueWatchingCount,
+  writeContinueWatchingPageCount,
   writeDanmakuEpisodeId,
   writeDanmakuEpisodeSearchTitle,
   writeEnableOptimization,
@@ -48,11 +45,26 @@ import {
   writeLiveDirectConnect,
   writePreferredQualityHeight,
   writeSeenAnnouncement,
-  writeSidebarCollapsed,
   writeSourcePreferredQualityHeight,
 } from '../local-preferences';
 
 describe('local preferences', () => {
+  it('keeps full-page record counts separate and clears both counts on logout', () => {
+    writeContinueWatchingCount(10);
+    writeContinueWatchingPageCount(24);
+    expect(readContinueWatchingCount()).toBe(10);
+    expect(readContinueWatchingPageCount()).toBe(24);
+    expect(document.cookie).toContain('cw_page_count=24');
+    expect(document.cookie).toContain('cw_count=10');
+    resetContinueWatchingCount();
+    expect(readContinueWatchingCount()).toBe(0);
+    expect(readContinueWatchingPageCount()).toBe(0);
+    expect(
+      localStorage.getItem(CONTINUE_WATCHING_PAGE_COUNT_STORAGE_KEY),
+    ).toBeNull();
+    expect(document.cookie).not.toContain('cw_page_count=');
+  });
+
   it('保存手动弹幕搜索词并随清除绑定重置', () => {
     const scopeKey = 'test:video:0';
     writeDanmakuEpisodeSearchTitle(scopeKey, ' 手动标题 ');
@@ -193,38 +205,6 @@ describe('local preferences', () => {
     expect(readAutoPlayNextEnabled()).toBe(false);
   });
 
-  it('defaults sidebar collapsed by viewport width without a stored preference', () => {
-    const originalWidth = window.innerWidth;
-    try {
-      Object.defineProperty(window, 'innerWidth', {
-        configurable: true,
-        value: SIDEBAR_AUTO_COLLAPSE_BELOW_WIDTH - 1,
-      });
-      expect(readSidebarCollapsed()).toBe(true);
-
-      Object.defineProperty(window, 'innerWidth', {
-        configurable: true,
-        value: SIDEBAR_AUTO_COLLAPSE_BELOW_WIDTH,
-      });
-      expect(readSidebarCollapsed()).toBe(false);
-    } finally {
-      Object.defineProperty(window, 'innerWidth', {
-        configurable: true,
-        value: originalWidth,
-      });
-    }
-  });
-
-  it('stores sidebar collapsed preference through the shared helper', () => {
-    writeSidebarCollapsed(false);
-    expect(readSidebarCollapsed()).toBe(false);
-
-    writeSidebarCollapsed(true);
-
-    expect(localStorage.getItem(SIDEBAR_COLLAPSED_STORAGE_KEY)).toBe('true');
-    expect(readSidebarCollapsed()).toBe(true);
-  });
-
   it('stores seen announcement through the shared helper', () => {
     writeSeenAnnouncement('notice-v1');
 
@@ -248,38 +228,6 @@ describe('local preferences', () => {
     ).toBeNull();
     expect(readContinueWatchingCount()).toBe(0);
     expect(document.cookie).not.toContain('cw_count=4');
-  });
-
-  it('stores admin table column widths independently', () => {
-    writeAdminTableColumnWidth('source-list', 'name', 220.4);
-    writeAdminTableColumnWidth('source-list', 'api', 360);
-    writeAdminTableColumnWidth('user-list', 'name', 180);
-
-    expect(readAdminTableColumnWidth('source-list', 'name')).toBe(220);
-    expect(readAdminTableColumnWidth('source-list', 'api')).toBe(360);
-    expect(readAdminTableColumnWidth('user-list', 'name')).toBe(180);
-  });
-
-  it('ignores invalid admin table column width preferences', () => {
-    localStorage.setItem(
-      ADMIN_TABLE_COLUMN_WIDTHS_STORAGE_KEY,
-      JSON.stringify({
-        'source-list': {
-          name: 20,
-          api: '360',
-          status: 120,
-        },
-        '../unsafe': { name: 200 },
-      }),
-    );
-
-    expect(readAdminTableColumnWidth('source-list', 'name')).toBeUndefined();
-    expect(readAdminTableColumnWidth('source-list', 'api')).toBeUndefined();
-    expect(readAdminTableColumnWidth('source-list', 'status')).toBe(120);
-    expect(readAdminTableColumnWidth('../unsafe', 'name')).toBeUndefined();
-
-    writeAdminTableColumnWidth('source-list', 'name', Number.NaN);
-    expect(readAdminTableColumnWidth('source-list', 'name')).toBeUndefined();
   });
 
   it('distinguishes unset, auto, and manual quality preferences', () => {

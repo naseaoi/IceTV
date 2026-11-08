@@ -2,6 +2,12 @@ import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 
 import ConfigFileTab from '@/features/admin/components/tabs/ConfigFileTab';
 import { adminPost } from '@/features/admin/lib/api';
+import { showToast } from '@/lib/toast';
+
+jest.mock('@/lib/toast', () => ({
+  showToast: jest.fn(),
+  dismissToast: jest.fn(),
+}));
 
 jest.mock('@/components/modals/AlertModal', () => ({
   __esModule: true,
@@ -71,6 +77,10 @@ describe('ConfigFileTab', () => {
     });
     expect(onDirtyChange).toHaveBeenLastCalledWith(true);
     expect(adminPost).not.toHaveBeenCalled();
+    expect(showToast).toHaveBeenCalledWith(
+      'JSON 已导入，请保存后生效',
+      'success',
+    );
     expect(
       screen.queryByRole('button', { name: '保存' }),
     ).not.toBeInTheDocument();

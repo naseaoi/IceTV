@@ -11,10 +11,9 @@ import React, {
   useSyncExternalStore,
 } from 'react';
 
-import MobileActionSheet, {
-  ActionItem,
-  ActionSheetAnchorRect,
-} from '@/components/MobileActionSheet';
+import CardActionOverlay, {
+  type CardActionContent,
+} from '@/components/card-actions/CardActionOverlay';
 import ConfirmModal from '@/components/modals/ConfirmModal';
 import {
   Favorite,
@@ -23,18 +22,7 @@ import {
   subscribeToDataUpdates,
 } from '@/lib/db.client';
 
-type ActionSheetPayload = {
-  title: string;
-  actions: ActionItem[];
-  poster?: string;
-  sources?: string[];
-  isAggregate?: boolean;
-  sourceName?: string;
-  currentEpisode?: number;
-  totalEpisodes?: number;
-  origin?: 'vod' | 'live';
-  anchorRect?: ActionSheetAnchorRect | null;
-};
+type ActionSheetPayload = CardActionContent;
 
 type ConfirmPayload = {
   title: string;
@@ -270,17 +258,14 @@ export function CardInteractionProvider({
   return (
     <CardInteractionContext.Provider value={contextValue}>
       {children}
-      <MobileActionSheet
+      <CardActionOverlay
         isOpen={!!actionSheetState}
         onClose={() => hideActionSheet()}
         title={actionSheetState?.payload.title || ''}
-        poster={actionSheetState?.payload.poster}
         actions={actionSheetState?.payload.actions || []}
+        poster={actionSheetState?.payload.poster}
         sources={actionSheetState?.payload.sources}
-        isAggregate={actionSheetState?.payload.isAggregate}
         sourceName={actionSheetState?.payload.sourceName}
-        currentEpisode={actionSheetState?.payload.currentEpisode}
-        totalEpisodes={actionSheetState?.payload.totalEpisodes}
         origin={actionSheetState?.payload.origin}
         anchorRect={actionSheetState?.payload.anchorRect}
       />

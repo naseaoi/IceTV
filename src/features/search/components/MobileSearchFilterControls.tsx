@@ -21,7 +21,8 @@ const SORT_OPTIONS = [
 ];
 
 interface MobileSearchFilterControlsProps {
-  resultCount: number;
+  // 搜索中尚无结果时传 null，不显示计数
+  resultCount: number | null;
   categories: SearchFilterCategory[];
   values: FilterValues;
   onChange: (values: FilterValues) => void;
@@ -49,7 +50,7 @@ export default function MobileSearchFilterControls({
   const buttonClass = (active: boolean) =>
     `flex h-8 items-center gap-1 rounded-full border px-3 text-xs ${
       active
-        ? 'border-green-500/50 bg-green-500/10 text-green-600 dark:text-green-400'
+        ? 'border-brand-500/50 bg-brand-500/10 text-brand-600 dark:text-brand-400'
         : 'border-gray-200 bg-white text-gray-700 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-200'
     }`;
 
@@ -57,7 +58,7 @@ export default function MobileSearchFilterControls({
     <>
       <div className='flex items-center justify-between gap-2'>
         <span className='truncate text-sm text-gray-500 dark:text-gray-400'>
-          {resultCount} 个结果
+          {resultCount !== null && `${resultCount} 个结果`}
         </span>
         <div className='flex shrink-0 items-center gap-2'>
           <button
@@ -98,7 +99,7 @@ export default function MobileSearchFilterControls({
                 checked={aggregate}
                 onChange={() => onAggregateChange(!aggregate)}
               />
-              <div className='h-5 w-9 rounded-full bg-gray-300 transition-colors peer-checked:bg-green-500 dark:bg-gray-600'></div>
+              <div className='h-5 w-9 rounded-full bg-gray-300 transition-colors peer-checked:bg-brand-500 dark:bg-gray-600'></div>
               <div className='absolute left-0.5 top-0.5 h-4 w-4 rounded-full bg-white transition-transform peer-checked:translate-x-4'></div>
             </label>
           </div>
@@ -119,7 +120,7 @@ export default function MobileSearchFilterControls({
                       aria-pressed={selected}
                       className={`max-w-full truncate rounded-full border px-3 py-1.5 text-xs ${
                         selected
-                          ? 'border-green-500/50 bg-green-500/10 text-green-600 dark:text-green-400'
+                          ? 'border-brand-500/50 bg-brand-500/10 text-brand-600 dark:text-brand-400'
                           : 'border-gray-200 text-gray-700 dark:border-gray-700 dark:text-gray-300'
                       }`}
                       onClick={() =>
@@ -148,7 +149,7 @@ export default function MobileSearchFilterControls({
               type='button'
               className={`flex h-11 w-full items-center gap-2 rounded-lg px-3 text-sm ${
                 yearOrder === option.value
-                  ? 'bg-green-500/10 text-green-600 dark:text-green-400'
+                  ? 'bg-brand-500/10 text-brand-600 dark:text-brand-400'
                   : 'text-gray-700 dark:text-gray-200'
               }`}
               onClick={() => {

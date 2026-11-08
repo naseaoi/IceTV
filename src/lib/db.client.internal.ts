@@ -13,6 +13,7 @@ import {
 } from './auth.client';
 import type { CacheUpdateEvent, Favorite, PlayRecord } from './db.client';
 import { cacheManager } from './db.client.cache';
+import { showToast } from './toast';
 
 export { cacheManager } from './db.client.cache';
 
@@ -260,13 +261,7 @@ function resetAuthLossHandlingFlag() {
 // ================================================================
 
 export function triggerGlobalError(message: string) {
-  if (typeof window !== 'undefined') {
-    window.dispatchEvent(
-      new CustomEvent('globalError', {
-        detail: { message },
-      }),
-    );
-  }
+  showToast(message, 'error');
 }
 
 // ================================================================
@@ -348,10 +343,15 @@ export async function fetchFromApi<T>(path: string): Promise<T> {
 export async function handleDatabaseOperationFailure(
   dataType: 'playRecords' | 'favorites' | 'searchHistory',
   error: unknown,
+  failureMessage?: string,
 ): Promise<void> {
   console.error(`数据库操作失败 (${dataType}):`, error);
 
-  const message = getDatabaseOperationFailureMessage(dataType, error);
+  const message = getDatabaseOperationFailureMessage(
+    dataType,
+    error,
+    failureMessage,
+  );
   if (message) {
     triggerGlobalError(message);
   }
@@ -398,12 +398,17 @@ export async function handleDatabaseOperationFailure(
 function getDatabaseOperationFailureMessage(
   dataType: 'playRecords' | 'favorites' | 'searchHistory',
   error: unknown,
+  failureMessage?: string,
 ): string | null {
-  if (isClientRequestError(error)) {
-    if (error.kind === 'session_lost' || error.kind === 'auth_rejected') {
-      return null;
-    }
+  if (
+    isClientRequestError(error) &&
+    (error.kind === 'session_lost' || error.kind === 'auth_rejected')
+  ) {
+    return null;
+  }
+  if (failureMessage) return failureMessage;
 
+  if (isClientRequestError(error)) {
     if (dataType === 'playRecords') {
       if (error.kind === 'network' || error.kind === 'request_aborted') {
         return '播放进度暂时保存失败，当前进度已保留，稍后会继续尝试';
@@ -592,6 +597,13 @@ export function createOptimisticWriter<TCache>(options: {
         await onServerError(err);
       }
       throw err;
+    } finally {
+      if (
+        eventName === 'favoritesUpdated' ||
+        eventName === 'playRecordsUpdated'
+      ) {
+        window.dispatchEvent(new Event('userLibraryUpdated'));
+      }
     }
   };
 }

@@ -13,6 +13,10 @@ import {
   persistEpisodeId,
 } from '@/features/play/lib/danmaku/episode-storage';
 import type { DanmakuMatchCandidate } from '@/features/play/lib/danmaku/types';
+import {
+  buildDanmakuScopeKey,
+  writeDanmakuEpisodeSearchTitle,
+} from '@/lib/local-preferences';
 
 jest.mock('@/features/play/lib/danmaku/episode-storage', () => ({
   clearPersistedEpisodeId: jest.fn(),
@@ -154,7 +158,7 @@ it('打开当前源后保留已绑定弹幕集的定位', async () => {
   fireEvent.click(screen.getByRole('button', { name: '回到已绑定弹幕集' }));
 
   expect(getList().scrollTop).toBe(160);
-  expect(screen.getByRole('button', { name: '第6集 ID: 606' })).toHaveAttribute(
+  expect(screen.getByRole('button', { name: '第6集' })).toHaveAttribute(
     'aria-pressed',
     'true',
   );
@@ -185,7 +189,7 @@ it('重新搜索后仍自动展开当前绑定源', async () => {
   fireEvent.click(screen.getByRole('button', { name: '搜索' }));
 
   await screen.findByRole('button', { name: '返回源列表' });
-  expect(screen.getByRole('button', { name: '第6集 ID: 606' })).toHaveAttribute(
+  expect(screen.getByRole('button', { name: '第6集' })).toHaveAttribute(
     'aria-pressed',
     'true',
   );
@@ -232,3 +236,26 @@ it.each([null, 99999])(
     expect(screen.queryByRole('button', { name: /回到.*弹幕/ })).toBeNull();
   },
 );
+
+it('绑定卡片展示可读的弹幕集名称而不是编号', async () => {
+  render(<DanmakuEpisodePicker {...props} />);
+
+  expect(await screen.findByText('source-6')).toBeInTheDocument();
+  expect(screen.getAllByText('第6集').length).toBeGreaterThan(0);
+  expect(screen.queryByText(/ID/)).toBeNull();
+});
+
+it('优先用该集上次手动匹配的关键词搜索', async () => {
+  window.localStorage.clear();
+  const scopeKey = buildDanmakuScopeKey('test', 'video', 0)!;
+  writeDanmakuEpisodeSearchTitle(scopeKey, '手动关键词');
+  render(<DanmakuEpisodePicker {...props} />);
+
+  await waitFor(() =>
+    expect(global.fetch).toHaveBeenCalledWith(
+      expect.stringContaining(encodeURIComponent('手动关键词')),
+    ),
+  );
+  expect(screen.getByPlaceholderText('搜索番剧名称')).toHaveValue('手动关键词');
+  window.localStorage.clear();
+});

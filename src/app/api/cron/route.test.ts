@@ -28,7 +28,11 @@ jest.mock('@/features/live/lib/live', () => ({
 
 jest.mock('@/lib/config', () => ({
   getConfig: (...args: unknown[]) => mockGetConfig(...args),
+  getConfigForRead: (...args: unknown[]) => mockGetConfig(...args),
+  invalidateConfigCache: jest.fn(),
+  ConfigConflictError: class extends Error {},
   refineConfig: jest.fn((config) => config),
+  configSelfCheck: jest.fn((config) => config),
   saveConfig: jest.fn(),
 }));
 
@@ -43,6 +47,10 @@ jest.mock('@/lib/cron-lease', () => ({
 
 jest.mock('@/lib/db', () => ({
   db: {
+    getConfigSubscription: jest.fn().mockResolvedValue({
+      ConfigFile: '',
+      ConfigSubscribtion: { URL: '', AutoUpdate: false, LastCheck: '' },
+    }),
     getAllUsers: (...args: unknown[]) => mockGetAllUsers(...args),
     getAllPlayRecords: (...args: unknown[]) => mockGetAllPlayRecords(...args),
     getAllFavorites: (...args: unknown[]) => mockGetAllFavorites(...args),
@@ -520,6 +528,54 @@ describe('cron route', () => {
     } finally {
       nowSpy.mockRestore();
     }
+  });
+
+  it.each([0, 1])(
+    '收藏详情集数为 %s 时独立更新封面并保留集数和保存时间',
+    async (count) => {
+      mockGetAllUsers.mockResolvedValue(['user']);
+      const favorite = createFavorite();
+      mockGetAllFavorites.mockResolvedValue({ 'source+1': favorite });
+      mockFetchVideoDetail.mockResolvedValue({
+        title: '新标题',
+        poster: 'new-cover.jpg',
+        year: '2027',
+        episodes: Array.from({ length: count }, () => '第 1 集'),
+      });
+      await runMetadataTask();
+      expect(mockSaveFavoriteIfUnchanged).toHaveBeenCalledWith(
+        'user',
+        'source',
+        '1',
+        expect.objectContaining({
+          cover: 'new-cover.jpg',
+          total_episodes: 1,
+          save_time: 1,
+          title: favorite.title,
+          year: favorite.year,
+        }),
+        JSON.stringify(favorite),
+      );
+    },
+  );
+
+  it('收藏详情空封面保留旧值，集数变化仍更新标题与年份', async () => {
+    mockGetAllUsers.mockResolvedValue(['user']);
+    mockGetAllFavorites.mockResolvedValue({ 'source+1': createFavorite() });
+    mockFetchVideoDetail.mockResolvedValue({
+      title: '新标题',
+      poster: '',
+      year: '2027',
+      episodes: ['1', '2'],
+    });
+    await runMetadataTask();
+    expect(mockSaveFavoriteIfUnchanged.mock.calls[0][3]).toMatchObject({
+      cover: 'cover.jpg',
+      total_episodes: 2,
+      title: '新标题',
+      year: '2027',
+      save_time: 1,
+    });
   });
 
   it('记录和收藏中的同一视频复用详情请求', async () => {

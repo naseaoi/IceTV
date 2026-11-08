@@ -1,5 +1,9 @@
 import type { ApiSite } from '@/lib/config';
 import { buildLazyEpisodeUrl } from '@/lib/lazy-episodes';
+import {
+  readTextLimited,
+  UPSTREAM_METADATA_MAX_BYTES,
+} from '@/lib/proxy-response-limits';
 import { ResourceLimitError } from '@/lib/server-resource-errors';
 import type { SearchResult } from '@/lib/types';
 import { fetchUpstream } from '@/lib/upstream-fetch.server';
@@ -75,10 +79,11 @@ async function fetchXgcartoonHtml(
       signal: abortState.signal,
     });
     if (!res.ok) {
+      await res.body?.cancel();
       return null;
     }
     return {
-      html: await res.text(),
+      html: await readTextLimited(res, UPSTREAM_METADATA_MAX_BYTES),
       finalUrl: res.url || url,
     };
   } catch (error) {
@@ -230,7 +235,50 @@ async function fetchXgcartoonEpisodePlaylistUrl(
   }
 
   const videoId = extractXgcartoonPlayerVid(result.html);
-  return videoId ? buildXgcartoonPlaylistUrl(videoId) : null;
+  if (videoId) {
+    return buildXgcartoonPlaylistUrl(videoId);
+  }
+
+  const chapterId = playPath.match(/^\/video\/[\w-]+\/([\w-]+)\.html$/)?.[1];
+  if (
+    !chapterId ||
+    !/<iframe\b[^>]*\bid=["']xgct_player_iframe["']/i.test(result.html)
+  ) {
+    return null;
+  }
+
+  // 新版页面由脚本为无 src 的 iframe 请求访客播放地址。
+  const playerApiUrl = new URL('/user/amp/content_pframe_url', result.origin);
+  playerApiUrl.searchParams.set('chapter_id', chapterId);
+  playerApiUrl.searchParams.set('level', 'low');
+  playerApiUrl.searchParams.set('expires', '3600');
+  const playerResult = await fetchXgcartoonHtml(
+    playerApiUrl.toString(),
+    undefined,
+    result.finalUrl,
+  );
+  if (!playerResult) {
+    return null;
+  }
+
+  try {
+    const payload: unknown = JSON.parse(playerResult.html);
+    if (
+      !payload ||
+      typeof payload !== 'object' ||
+      !('result' in payload) ||
+      payload.result !== true ||
+      !('data' in payload) ||
+      typeof payload.data !== 'string'
+    ) {
+      return null;
+    }
+
+    const resolvedVideoId = extractXgcartoonPlayerVid(payload.data);
+    return resolvedVideoId ? buildXgcartoonPlaylistUrl(resolvedVideoId) : null;
+  } catch {
+    return null;
+  }
 }
 
 export async function resolveXgcartoonEpisodeUrlByPath(

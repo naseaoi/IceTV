@@ -1,9 +1,9 @@
-﻿import { NextRequest, NextResponse } from 'next/server';
+import { NextRequest, NextResponse } from 'next/server';
 
-import { mergeInviteCodeUsage } from '@/features/admin/services/inviteCodes';
 import { isGuardFailure, requireAdmin } from '@/lib/api-auth';
 import { getConfigFresh } from '@/lib/config';
 import { db } from '@/lib/db';
+import { getOwnerUsername } from '@/lib/env.server';
 import { AdminConfigResult } from '@/types/admin';
 
 export const runtime = 'nodejs';
@@ -16,16 +16,28 @@ export async function GET(request: NextRequest) {
     if (isGuardFailure(guardResult)) return guardResult.response;
 
     const config = await getConfigFresh();
+    const channelCounts = await db.getLiveSourceChannelCounts();
     const result: AdminConfigResult = {
       Role: guardResult.isOwner ? 'owner' : 'admin',
       Config: {
         ...config,
+        ...(await db.getConfigSubscription()),
+        LiveConfig: (config.LiveConfig || []).map((source) => ({
+          ...source,
+          channelNumber: channelCounts[source.key] ?? 0,
+        })),
         UserConfig: {
           ...config.UserConfig,
-          InviteCodes: mergeInviteCodeUsage(
-            config.UserConfig.InviteCodes,
-            await db.getAllInviteCodeUsage(),
-          ),
+          Users: [],
+          TotalUsers: (
+            await db.getAdminUserPage({
+              ownerUsername: getOwnerUsername() || '',
+              operatorUsername: guardResult.username,
+              limit: 1,
+            })
+          ).total,
+          inviteCodeCount: await db.countInviteCodes(),
+          activeInviteCodeCount: await db.countActiveInviteCodes(),
         },
       },
     };

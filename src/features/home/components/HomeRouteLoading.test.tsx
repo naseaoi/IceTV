@@ -35,7 +35,8 @@ jest.mock('@/components/ContinueWatchingCardSkeleton', () => ({
 }));
 jest.mock('@/components/HomePosterCardSkeleton', () => ({
   __esModule: true,
-  default: () => <div />,
+  HOME_RECOMMENDATION_INITIAL_COUNT: 10,
+  default: () => <div data-home-poster-skeleton />,
 }));
 
 const snapshot: HomeClientSnapshot = {
@@ -52,6 +53,7 @@ const snapshot: HomeClientSnapshot = {
     hotTvShows: [],
     hotVarietyShows: [],
     bangumiCalendarData: [],
+    heroItems: [],
   },
   continueWatchingSkeletonCount: 3,
   updatedAt: Date.now(),
@@ -77,6 +79,9 @@ describe('HomeRouteLoading', () => {
 
     expect(screen.getByTestId('home-skeleton')).toBeInTheDocument();
     expect(screen.queryByTestId('cached-home')).not.toBeInTheDocument();
+    expect(
+      document.querySelectorAll('[data-home-poster-skeleton]'),
+    ).toHaveLength(40);
   });
 
   it('preserves server markup during hydration before restoring the browser snapshot', async () => {

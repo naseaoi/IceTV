@@ -73,11 +73,11 @@ export function CapsuleSelector({
   return (
     <div
       ref={containerRef}
-      className='relative inline-flex rounded-lg bg-gray-200/60 p-0.5 backdrop-blur-sm dark:bg-gray-700/60 sm:p-1'
+      className='relative inline-flex rounded-full bg-gray-900/[0.05] p-1 dark:bg-white/[0.06]'
     >
       {indicatorStyle.width > 0 && (
         <div
-          className='absolute bottom-0.5 top-0.5 rounded-lg bg-white shadow-sm transition-all duration-300 ease-out dark:bg-gray-500 sm:bottom-1 sm:top-1'
+          className='absolute bottom-1 top-1 rounded-full bg-white shadow-sm transition-all duration-300 ease-out dark:bg-white/[0.14]'
           style={{
             left: `${indicatorStyle.left}px`,
             width: `${indicatorStyle.width}px`,
@@ -94,7 +94,7 @@ export function CapsuleSelector({
               buttonRefs.current[index] = el;
             }}
             onClick={() => onChange(option.value)}
-            className={`relative z-10 whitespace-nowrap rounded-lg px-2 py-1 text-xs font-medium transition-all duration-200 sm:px-4 sm:py-2 sm:text-sm ${
+            className={`relative z-10 whitespace-nowrap rounded-full px-3 py-1 text-[13px] transition-colors duration-200 sm:px-3.5 sm:py-1.5 sm:text-sm ${
               isActive
                 ? 'cursor-default text-gray-900 dark:text-gray-100'
                 : 'cursor-pointer text-gray-700 hover:text-gray-900 dark:text-gray-400 dark:hover:text-gray-100'

@@ -1,6 +1,6 @@
-import { readResponseTextWithLimit } from './response-text';
+import { CONFIG_SUBSCRIPTION_MAX_BYTES } from '@/lib/config-state';
 
-const CONFIG_SUBSCRIPTION_MAX_BYTES = 2 * 1024 * 1024;
+import { readResponseTextWithLimit } from './response-text';
 
 export function decodeConfigSubscriptionContent(
   content: string,

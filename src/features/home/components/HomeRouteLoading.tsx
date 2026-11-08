@@ -3,36 +3,34 @@
 import { useEffect, useLayoutEffect, useState } from 'react';
 
 import ContinueWatchingCardSkeleton from '@/components/ContinueWatchingCardSkeleton';
-import HomePosterCardSkeleton from '@/components/HomePosterCardSkeleton';
+import HomePosterCardSkeleton, {
+  HOME_RECOMMENDATION_INITIAL_COUNT,
+} from '@/components/HomePosterCardSkeleton';
+import { PAGE_CONTAINER_CLASS } from '@/components/page-container';
 import PageLayout from '@/components/PageLayout';
 import ScrollableRow from '@/components/ScrollableRow';
-import { useClientHydrated } from '@/hooks/useClientHydrated';
-
+import {
+  SECTION_HEADER_CLASS,
+  SECTION_LINK_TEXT_CLASS,
+  SECTION_TITLE_TEXT_CLASS,
+} from '@/components/section-header';
+import SkeletonText from '@/components/SkeletonText';
 import {
   type HomeClientSnapshot,
   getHomeClientSnapshot,
-} from '../lib/home-client-cache';
+} from '@/features/home/lib/home-client-cache';
+import {
+  HOME_BODY_CLASS,
+  HOME_SECTION_CLASS,
+  HOME_SECTIONS_CLASS,
+} from '@/features/home/lib/home-layout';
+import { useClientHydrated } from '@/hooks/useClientHydrated';
+
 import HomeClient from './HomeClient';
+import { HomeHeroSkeleton } from './HomeHero';
 
 const useIsomorphicLayoutEffect =
   typeof window !== 'undefined' ? useLayoutEffect : useEffect;
-
-function CapsuleSwitchSkeleton() {
-  return (
-    <div className='relative flex items-end'>
-      <div className='absolute bottom-0 left-0 right-0 h-[1px] bg-gradient-to-r from-transparent via-gray-300/60 to-transparent dark:via-white/20' />
-
-      {Array.from({ length: 2 }).map((_, index) => (
-        <div key={index} className='relative px-6 py-3'>
-          <div className='flex items-center gap-2'>
-            <div className='h-4 w-4 animate-pulse rounded bg-gray-200 dark:bg-gray-800' />
-            <div className='h-5 w-10 animate-pulse rounded bg-gray-200 dark:bg-gray-800' />
-          </div>
-        </div>
-      ))}
-    </div>
-  );
-}
 
 function SkeletonRow({
   count,
@@ -47,7 +45,7 @@ function SkeletonRow({
         mobileContinue ? (
           <ContinueWatchingCardSkeleton key={index} />
         ) : (
-          <HomePosterCardSkeleton key={index} />
+          <HomePosterCardSkeleton key={index} variant='poster' />
         ),
       )}
     </ScrollableRow>
@@ -56,9 +54,15 @@ function SkeletonRow({
 
 function SkeletonSectionHeader() {
   return (
-    <div className='mb-4 flex items-center justify-between'>
-      <div className='h-7 w-28 animate-pulse rounded bg-gray-200 dark:bg-gray-800' />
-      <div className='h-5 w-16 animate-pulse rounded bg-gray-200 dark:bg-gray-800' />
+    <div className={SECTION_HEADER_CLASS}>
+      <SkeletonText
+        className={SECTION_TITLE_TEXT_CLASS}
+        barClassName='h-6 w-28 rounded'
+      />
+      <SkeletonText
+        className={SECTION_LINK_TEXT_CLASS}
+        barClassName='h-4 w-16 rounded'
+      />
     </div>
   );
 }
@@ -69,39 +73,38 @@ function HomeLoadingSkeleton({
   continueWatchingCount: number;
 }) {
   return (
-    <PageLayout>
-      <div className='overflow-visible px-2 pb-2 pt-4 sm:px-10 sm:pt-8'>
-        <div className='mb-4 hidden justify-center md:flex'>
-          <CapsuleSwitchSkeleton />
-        </div>
+    <PageLayout transparentTopNav>
+      <HomeHeroSkeleton />
+      <div className={HOME_BODY_CLASS}>
+        <div className={PAGE_CONTAINER_CLASS}>
+          <div className={HOME_SECTIONS_CLASS}>
+            {continueWatchingCount > 0 && (
+              <section className={HOME_SECTION_CLASS}>
+                <SkeletonSectionHeader />
+                <SkeletonRow count={continueWatchingCount} mobileContinue />
+              </section>
+            )}
 
-        <div className='mx-auto max-w-[95%]'>
-          {continueWatchingCount > 0 && (
-            <section className='mb-2'>
+            <section className={HOME_SECTION_CLASS}>
               <SkeletonSectionHeader />
-              <SkeletonRow count={continueWatchingCount} mobileContinue />
+              <SkeletonRow count={HOME_RECOMMENDATION_INITIAL_COUNT} />
             </section>
-          )}
 
-          <section className='mb-2'>
-            <SkeletonSectionHeader />
-            <SkeletonRow count={12} />
-          </section>
+            <section className={HOME_SECTION_CLASS}>
+              <SkeletonSectionHeader />
+              <SkeletonRow count={HOME_RECOMMENDATION_INITIAL_COUNT} />
+            </section>
 
-          <section className='mb-2'>
-            <SkeletonSectionHeader />
-            <SkeletonRow count={12} />
-          </section>
+            <section className={HOME_SECTION_CLASS}>
+              <SkeletonSectionHeader />
+              <SkeletonRow count={HOME_RECOMMENDATION_INITIAL_COUNT} />
+            </section>
 
-          <section className='mb-2'>
-            <SkeletonSectionHeader />
-            <SkeletonRow count={12} />
-          </section>
-
-          <section className='mb-2'>
-            <SkeletonSectionHeader />
-            <SkeletonRow count={12} />
-          </section>
+            <section className={HOME_SECTION_CLASS}>
+              <SkeletonSectionHeader />
+              <SkeletonRow count={HOME_RECOMMENDATION_INITIAL_COUNT} />
+            </section>
+          </div>
         </div>
       </div>
     </PageLayout>

@@ -6,25 +6,11 @@ import { useTheme } from 'next-themes';
 import { type MouseEvent, useEffect, useRef } from 'react';
 import { flushSync } from 'react-dom';
 
-import {
-  getSidebarItemLabelClass,
-  SIDEBAR_BUTTON_STATE_CLASS,
-  SIDEBAR_ITEM_ICON_CLASS,
-  SIDEBAR_ITEM_ICON_WRAP_CLASS,
-  SIDEBAR_ITEM_LAYOUT_CLASS,
-} from './SidebarItem';
-
 interface ThemeToggleProps {
-  variant?: 'icon' | 'sidebar';
-  isCollapsed?: boolean;
   className?: string;
 }
 
-export function ThemeToggle({
-  variant = 'icon',
-  isCollapsed = false,
-  className,
-}: ThemeToggleProps) {
+export function ThemeToggle({ className }: ThemeToggleProps) {
   const { setTheme, resolvedTheme } = useTheme();
   const pathname = usePathname();
   const transitionInProgressRef = useRef(false);
@@ -139,36 +125,16 @@ export function ThemeToggle({
       });
   };
 
-  if (variant === 'sidebar') {
-    return (
-      <button
-        onClick={toggleTheme}
-        className={`${SIDEBAR_ITEM_LAYOUT_CLASS} w-full ${SIDEBAR_BUTTON_STATE_CLASS}`}
-        aria-label='主题'
-        title='主题'
-      >
-        <div
-          data-theme-transition-anchor
-          className={SIDEBAR_ITEM_ICON_WRAP_CLASS}
-        >
-          <Sun className={`${SIDEBAR_ITEM_ICON_CLASS} hidden dark:block`} />
-          <Moon className={`${SIDEBAR_ITEM_ICON_CLASS} dark:hidden`} />
-        </div>
-        <span className={getSidebarItemLabelClass(isCollapsed)}>主题</span>
-      </button>
-    );
-  }
-
   return (
     <button
       onClick={toggleTheme}
       className={
         className ??
-        'flex h-10 w-10 items-center justify-center rounded-full p-2 text-gray-600 transition-colors hover:bg-gray-200/50 dark:text-gray-300 dark:hover:bg-gray-700/50'
+        'flex h-10 w-10 items-center justify-center rounded-full text-gray-600 transition-colors hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-800'
       }
       aria-label='切换主题'
     >
-      <span data-theme-transition-anchor className='h-full w-full'>
+      <span data-theme-transition-anchor className='h-5 w-5'>
         <Sun className='hidden h-full w-full dark:block' />
         <Moon className='h-full w-full dark:hidden' />
       </span>

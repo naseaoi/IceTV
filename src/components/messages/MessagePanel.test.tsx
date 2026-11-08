@@ -1,11 +1,57 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import {
+  act,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+} from '@testing-library/react';
 
 import MessagePanel from '@/components/messages/MessagePanel';
-import { UserMessagePage } from '@/lib/message-types';
+import { UserMessage, UserMessagePage } from '@/lib/message-types';
+import {
+  fetchMessageSettings,
+  saveMessageSettings,
+} from '@/lib/messages.client';
+import { fetchPublicReview } from '@/lib/video-reviews.client';
 
 jest.mock('@/components/CoverImage', () => ({
   __esModule: true,
   default: ({ alt }: { alt: string }) => <div aria-label={alt} />,
+}));
+jest.mock('@/components/AuthProvider', () => ({
+  useAuthSession: () => ({
+    session: { status: 'authenticated', profileId: 'profileMe' },
+  }),
+}));
+jest.mock('@/components/PublicReviewContent', () => ({
+  __esModule: true,
+  default: ({
+    review,
+    isMine,
+    defaultRepliesExpanded,
+    highlightReplyId,
+  }: {
+    review: { content: string };
+    isMine: boolean;
+    defaultRepliesExpanded?: boolean;
+    highlightReplyId?: string;
+  }) => (
+    <div
+      data-testid='review'
+      data-mine={String(isMine)}
+      data-expanded={String(Boolean(defaultRepliesExpanded))}
+      data-highlight={highlightReplyId ?? ''}
+    >
+      {review.content}
+    </div>
+  ),
+}));
+jest.mock('@/lib/video-reviews.client', () => ({
+  fetchPublicReview: jest.fn(),
+}));
+jest.mock('@/lib/messages.client', () => ({
+  fetchMessageSettings: jest.fn(),
+  saveMessageSettings: jest.fn(),
 }));
 
 const messagePage: UserMessagePage = {
@@ -23,6 +69,7 @@ const messagePage: UserMessagePage = {
       source: 'source',
       videoId: 'video',
       title: '测试剧集',
+      year: '2024',
       sourceName: '测试源站',
       cover: '/cover.webp',
       fromEpisodes: 1,
@@ -49,6 +96,7 @@ function renderPanel(
     onReadAll: jest.fn().mockResolvedValue(undefined),
     onLoadMore: jest.fn().mockResolvedValue(undefined),
     onRetry: jest.fn().mockResolvedValue(undefined),
+    onSettingsSaved: jest.fn(),
     ...overrides,
   };
   render(<MessagePanel {...props} />);
@@ -67,6 +115,7 @@ describe('MessagePanel', () => {
       screen.getByRole('heading', { name: '追更更新' }),
     ).toBeInTheDocument();
     expect(screen.getByText('测试公告内容')).toBeInTheDocument();
+    expect(screen.queryByText('站点公告')).not.toBeInTheDocument();
     expect(screen.getByText('已从 1 集更新至 2 集')).toBeInTheDocument();
 
     const readButtons = screen.getAllByRole('button', { name: '标记为已读' });
@@ -85,6 +134,21 @@ describe('MessagePanel', () => {
     fireEvent.click(screen.getByText('已从 1 集更新至 2 集'));
     fireEvent.click(screen.getByLabelText('测试剧集'));
 
+    expect(props.onRead).not.toHaveBeenCalled();
+  });
+
+  it('追更消息的去观看入口跳转播放页并关闭面板', () => {
+    const props = renderPanel();
+
+    const link = screen.getByRole('link', { name: '去观看《测试剧集》' });
+    expect(link).toHaveAttribute(
+      'href',
+      `/play?${new URLSearchParams({ source: 'source', id: 'video', title: '测试剧集', year: '2024' })}`,
+    );
+    link.addEventListener('click', (event) => event.preventDefault());
+    fireEvent.click(link);
+
+    expect(props.onClose).toHaveBeenCalledTimes(1);
     expect(props.onRead).not.toHaveBeenCalled();
   });
 
@@ -116,6 +180,7 @@ describe('MessagePanel', () => {
         onReadAll={jest.fn().mockResolvedValue(undefined)}
         onLoadMore={jest.fn().mockResolvedValue(undefined)}
         onRetry={jest.fn().mockResolvedValue(undefined)}
+        onSettingsSaved={jest.fn()}
       />,
     );
 
@@ -130,4 +195,225 @@ describe('MessagePanel', () => {
     expect(document.body.style.overflow).toBe('');
     expect(document.documentElement.style.overflow).toBe('');
   });
+});
+
+const reviewTarget = {
+  profileId: 'profileAlice',
+  title_norm: '三体',
+  year: '2023',
+};
+const alice = {
+  profileId: 'profileAlice',
+  avatarSeed: null,
+  nickname: '爱丽丝',
+};
+const bob = { profileId: 'profileBob', avatarSeed: null, nickname: '鲍勃' };
+const followReview: UserMessage = {
+  id: 'follow:1',
+  type: 'follow-review',
+  review: reviewTarget,
+  author: alice,
+  title: '三体',
+  year: '2023',
+  cover: '',
+  rating: 8,
+  createdAt: 1,
+};
+const publicReview = {
+  author: alice,
+  title_norm: '三体',
+  title: '三体',
+  year: '2023',
+  cover: '',
+  rating: 8,
+  content: '值得一看',
+  spoiler: false,
+  likeCount: 0,
+  likedByMe: false,
+  replyCount: 0,
+  created_at: 1,
+  updated_at: 1,
+};
+
+function pageOf(...items: UserMessage[]): UserMessagePage {
+  return { items, total: items.length, nextCursor: null };
+}
+
+it('点开评价类消息在面板内显示评价详情并标记已读，可返回列表', async () => {
+  jest.mocked(fetchPublicReview).mockResolvedValue(publicReview);
+  const props = renderPanel({ page: pageOf(followReview) });
+  expect(screen.getByText('评价了《三体》')).toBeInTheDocument();
+
+  await act(async () => {
+    fireEvent.click(screen.getByRole('button', { name: /爱丽丝/ }));
+  });
+
+  expect(props.onRead).toHaveBeenCalledWith(followReview);
+  expect(fetchPublicReview).toHaveBeenCalledWith(reviewTarget);
+  expect(screen.getByRole('heading', { name: '评价详情' })).toBeInTheDocument();
+  expect(screen.getByTestId('review')).toHaveTextContent('值得一看');
+  expect(screen.getByTestId('review')).toHaveAttribute('data-mine', 'false');
+  expect(screen.getByRole('link', { name: '在播放页查看' })).toHaveAttribute(
+    'href',
+    `/play?${new URLSearchParams({ title: '三体', year: '2023', tab: 'reviews' })}`,
+  );
+
+  fireEvent.click(screen.getByRole('button', { name: '返回消息列表' }));
+  expect(screen.getByRole('heading', { name: '我的消息' })).toBeInTheDocument();
+});
+
+it('回复消息的评价详情展开回复并高亮该条回复', async () => {
+  jest.mocked(fetchPublicReview).mockResolvedValue(publicReview);
+  renderPanel({
+    page: pageOf({
+      id: 'review-reply:1',
+      type: 'review-reply',
+      review: reviewTarget,
+      replyId: 'reply-1',
+      author: bob,
+      title: '三体',
+      year: '2023',
+      cover: '',
+      content: '同意',
+      createdAt: 1,
+    }),
+  });
+  expect(screen.getByText('在《三体》中回复了你')).toBeInTheDocument();
+
+  await act(async () => {
+    fireEvent.click(screen.getByRole('button', { name: /鲍勃/ }));
+  });
+
+  expect(screen.getByTestId('review')).toHaveAttribute('data-expanded', 'true');
+  expect(screen.getByTestId('review')).toHaveAttribute(
+    'data-highlight',
+    'reply-1',
+  );
+});
+
+it('评价已删除或转为私密时提示不可查看', async () => {
+  jest.mocked(fetchPublicReview).mockResolvedValue(null);
+  renderPanel({ page: pageOf(followReview) });
+  await act(async () => {
+    fireEvent.click(screen.getByRole('button', { name: /爱丽丝/ }));
+  });
+  expect(
+    screen.getByText('这条评价已删除或设为仅自己可见'),
+  ).toBeInTheDocument();
+});
+
+it('新粉丝消息链接对方主页，点赞消息合并显示人数', () => {
+  renderPanel({
+    page: pageOf(
+      {
+        id: 'new-follower:1',
+        type: 'new-follower',
+        follower: bob,
+        createdAt: 1,
+      },
+      {
+        id: 'review-like:1',
+        type: 'review-like',
+        latestLiker: alice,
+        likeCount: 3,
+        review: reviewTarget,
+        title: '三体',
+        year: '2023',
+        cover: '',
+        createdAt: 1,
+      },
+    ),
+  });
+  expect(screen.getByRole('link', { name: /鲍勃/ })).toHaveAttribute(
+    'href',
+    '/u/profileBob',
+  );
+  expect(screen.getByText('关注了你')).toBeInTheDocument();
+  expect(screen.getByText('等 3 人赞了你对《三体》的评价')).toBeInTheDocument();
+  expect(
+    screen.getByRole('heading', { name: '追更与互动' }),
+  ).toBeInTheDocument();
+});
+
+it('通知设置按类型开关并保存，保存后通知刷新列表', async () => {
+  jest
+    .mocked(fetchMessageSettings)
+    .mockResolvedValue({ mutedKinds: ['review-like'] });
+  jest
+    .mocked(saveMessageSettings)
+    .mockResolvedValue({ mutedKinds: ['review-like', 'new-follower'] });
+  const props = renderPanel();
+
+  await act(async () => {
+    fireEvent.click(screen.getByRole('button', { name: '通知设置' }));
+  });
+  expect(screen.getByRole('switch', { name: '评价被点赞' })).toHaveAttribute(
+    'aria-checked',
+    'false',
+  );
+  const follower = screen.getByRole('switch', { name: '新粉丝' });
+  expect(follower).toHaveAttribute('aria-checked', 'true');
+
+  await act(async () => {
+    fireEvent.click(follower);
+  });
+  expect(saveMessageSettings).toHaveBeenCalledWith([
+    'review-like',
+    'new-follower',
+  ]);
+  expect(follower).toHaveAttribute('aria-checked', 'false');
+  expect(props.onSettingsSaved).toHaveBeenCalledTimes(1);
+});
+
+it('保存失败时提示并恢复为服务端设置', async () => {
+  jest.mocked(fetchMessageSettings).mockResolvedValue({ mutedKinds: [] });
+  jest.mocked(saveMessageSettings).mockRejectedValue(new Error('HTTP 500'));
+  renderPanel();
+  await act(async () => {
+    fireEvent.click(screen.getByRole('button', { name: '通知设置' }));
+  });
+  await act(async () => {
+    fireEvent.click(screen.getByRole('switch', { name: '追更更新' }));
+  });
+  expect(screen.getByRole('alert')).toHaveTextContent('保存失败，请重试');
+  expect(screen.getByRole('switch', { name: '追更更新' })).toHaveAttribute(
+    'aria-checked',
+    'true',
+  );
+});
+
+it('子视图中 Escape 先返回列表，再次 Escape 才关闭面板', async () => {
+  jest.mocked(fetchMessageSettings).mockResolvedValue({ mutedKinds: [] });
+  const props = renderPanel();
+  await act(async () => {
+    fireEvent.click(screen.getByRole('button', { name: '通知设置' }));
+  });
+  fireEvent.keyDown(document, { key: 'Escape' });
+  expect(props.onClose).not.toHaveBeenCalled();
+  expect(screen.getByRole('heading', { name: '我的消息' })).toBeInTheDocument();
+  fireEvent.keyDown(document, { key: 'Escape' });
+  expect(props.onClose).toHaveBeenCalledTimes(1);
+});
+
+it('同一批次内连续切换多个开关时按最新状态提交', async () => {
+  jest.mocked(fetchMessageSettings).mockResolvedValue({ mutedKinds: [] });
+  jest
+    .mocked(saveMessageSettings)
+    .mockImplementation(async (mutedKinds) => ({ mutedKinds }));
+  renderPanel();
+  await act(async () => {
+    fireEvent.click(screen.getByRole('button', { name: '通知设置' }));
+  });
+  await act(async () => {
+    fireEvent.click(screen.getByRole('switch', { name: '新粉丝' }));
+    fireEvent.click(screen.getByRole('switch', { name: '评价被点赞' }));
+  });
+  expect(saveMessageSettings).toHaveBeenLastCalledWith([
+    'new-follower',
+    'review-like',
+  ]);
+  expect(screen.getByRole('switch', { name: '新粉丝' })).toHaveAttribute(
+    'aria-checked',
+    'false',
+  );
 });

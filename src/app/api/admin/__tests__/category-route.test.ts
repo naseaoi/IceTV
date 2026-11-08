@@ -11,8 +11,18 @@ jest.mock('@/lib/api-auth', () => ({
   requireAdmin: jest.fn(),
 }));
 
+jest.mock('@/lib/db', () => ({
+  db: {
+    getConfigSubscription: jest.fn().mockResolvedValue({
+      ConfigFile: 'old-config',
+      ConfigSubscribtion: { URL: '', AutoUpdate: false, LastCheck: '' },
+    }),
+  },
+}));
+
 jest.mock('@/lib/config', () => ({
   getConfig: jest.fn(),
+  invalidateConfigCache: jest.fn(),
   saveConfig: jest.fn(),
 }));
 
@@ -146,9 +156,19 @@ describe('admin category route', () => {
       type: 'movie',
       query: '院线',
     });
-    expect(buildConfigFileFromAdminConfig).toHaveBeenCalledWith(config);
-    expect(config.ConfigFile).toBe('rebuilt-config');
-    expect(saveConfig).toHaveBeenCalledWith(config);
+    expect(buildConfigFileFromAdminConfig).toHaveBeenCalledWith(
+      config,
+      'old-config',
+    );
+    expect(config.ConfigFile).toBe('old-config');
+    expect(saveConfig).toHaveBeenCalledWith(
+      config,
+      expect.objectContaining({
+        subscription: expect.objectContaining({
+          next: expect.objectContaining({ ConfigFile: 'rebuilt-config' }),
+        }),
+      }),
+    );
   });
 
   it('deletes a config category after confirmation reaches the API', async () => {
@@ -162,8 +182,18 @@ describe('admin category route', () => {
     expect(response.status).toBe(200);
     expect(config.CustomCategories).toHaveLength(1);
     expect(config.CustomCategories[0].type).toBe('tv');
-    expect(buildConfigFileFromAdminConfig).toHaveBeenCalledWith(config);
-    expect(config.ConfigFile).toBe('rebuilt-config');
-    expect(saveConfig).toHaveBeenCalledWith(config);
+    expect(buildConfigFileFromAdminConfig).toHaveBeenCalledWith(
+      config,
+      'old-config',
+    );
+    expect(config.ConfigFile).toBe('old-config');
+    expect(saveConfig).toHaveBeenCalledWith(
+      config,
+      expect.objectContaining({
+        subscription: expect.objectContaining({
+          next: expect.objectContaining({ ConfigFile: 'rebuilt-config' }),
+        }),
+      }),
+    );
   });
 });

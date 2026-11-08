@@ -38,10 +38,10 @@ export function ConfigureUserGroupDialog({
       panelClassName='max-w-4xl max-h-[80vh] overflow-y-auto'
     >
       <div className='mb-6'>
-        <div className='rounded-lg border border-blue-200 bg-blue-50 p-4 dark:border-blue-800 dark:bg-blue-900/20'>
+        <div className='rounded-lg border border-brand-200 bg-brand-50 p-4 dark:border-brand-800 dark:bg-brand-900/20'>
           <div className='mb-2 flex items-center space-x-2'>
             <svg
-              className='h-5 w-5 text-blue-600 dark:text-blue-400'
+              className='h-5 w-5 text-brand-600 dark:text-brand-400'
               fill='none'
               stroke='currentColor'
               viewBox='0 0 24 24'
@@ -53,11 +53,11 @@ export function ConfigureUserGroupDialog({
                 d='M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z'
               />
             </svg>
-            <span className='text-sm font-medium text-blue-800 dark:text-blue-300'>
+            <span className='text-sm font-medium text-brand-800 dark:text-brand-300'>
               配置说明
             </span>
           </div>
-          <p className='mt-1 text-sm text-blue-700 dark:text-blue-400'>
+          <p className='mt-1 text-sm text-brand-700 dark:text-brand-400'>
             选择&ldquo;无用户组&rdquo;为无限制，选择特定用户组将限制用户只能访问该用户组允许的视频源
           </p>
         </div>

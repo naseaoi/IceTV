@@ -10,6 +10,8 @@ import {
   refreshCachedSearchAggregate,
   setCachedSearchAggregate,
 } from '@/lib/search-cache';
+import { getSourceHealthTiers } from '@/lib/source-health.server';
+import { rankSourcesByHealth } from '@/lib/source-quality-policy';
 
 export const runtime = 'nodejs';
 
@@ -31,7 +33,11 @@ export async function GET(request: NextRequest) {
 
   const config = await getConfigForRead();
   const runtimeParams = normalizeRuntimeParams(config.SiteConfig);
-  const apiSites = await getAvailableApiSites(guardResult.username, config);
+  const [availableSites, sourceHealthTiers] = await Promise.all([
+    getAvailableApiSites(guardResult.username, config),
+    getSourceHealthTiers(),
+  ]);
+  const apiSites = rankSourcesByHealth(availableSites, sourceHealthTiers);
   const maxSearchPages = runtimeParams.SearchDownstreamMaxPage;
   const sourceFailureCooldownMs =
     runtimeParams.SourceFailureCooldownSeconds * 1000;
@@ -60,6 +66,7 @@ export async function GET(request: NextRequest) {
           sourceConcurrency,
           sourceFailureCooldownMs,
           sourceTimeoutMs,
+          sourceHealthTiers,
         }),
       ).catch((error) => {
         console.warn('流式搜索聚合后台刷新失败:', error);
@@ -148,6 +155,7 @@ export async function GET(request: NextRequest) {
         sourceConcurrency,
         sourceFailureCooldownMs,
         sourceTimeoutMs,
+        sourceHealthTiers,
         signal: searchAbortController.signal,
         shouldContinue: () =>
           !streamClosed && !searchAbortController.signal.aborted,
@@ -177,11 +185,12 @@ export async function GET(request: NextRequest) {
             return;
           }
 
+          console.error('流式搜索源请求失败:', site.key, error);
           const errorEvent = `data: ${JSON.stringify({
             type: 'source_error',
             source: site.key,
             sourceName: site.name,
-            error: error instanceof Error ? error.message : '搜索失败',
+            error: '搜索失败',
             timestamp: Date.now(),
           })}\n\n`;
 

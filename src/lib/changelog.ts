@@ -6,6 +6,8 @@ export interface ChangelogEntry {
   added: string[];
   changed: string[];
   fixed: string[];
+  // 只对站长与管理员展示的后台改动
+  admin: string[];
 }
 
 export interface ChangelogManifest {
@@ -43,6 +45,7 @@ export function normalizeChangelogEntry(value: unknown): ChangelogEntry | null {
     added: normalizeTextList(entry.added),
     changed: normalizeTextList(entry.changed),
     fixed: normalizeTextList(entry.fixed),
+    admin: normalizeTextList(entry.admin),
   };
 }
 

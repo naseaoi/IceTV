@@ -1,93 +1,108 @@
-const TOP_ITEM_LIMIT = 3;
+'use client';
 
-function SectionHeaderSkeleton() {
+import { type ReactNode, useEffect, useLayoutEffect, useState } from 'react';
+
+import HomePosterCardSkeleton from '@/components/HomePosterCardSkeleton';
+import ScrollableRow from '@/components/ScrollableRow';
+import { getCachedPlaybackPeriodSnapshot } from '@/features/playback-stats/lib/client';
+import { PLAYBACK_TOP_WORKS_LIMIT } from '@/features/playback-stats/types';
+
+// 桌面端观看统计与常看并排，统计卡拉伸到与海报区同高
+export const STATS_LAYOUT_CLASS =
+  'space-y-4 sm:space-y-6 md:grid md:grid-cols-[minmax(0,2fr)_minmax(0,3fr)] md:gap-x-8 md:space-y-0';
+
+export const STATS_COLUMN_CLASS = 'flex min-w-0 flex-col';
+
+// 上下外边距对齐 ScrollableRow 的内边距，卡片边缘与海报顶部、标题底部齐平
+export const STATS_CARD_CLASS =
+  'mt-2 flex flex-col rounded-2xl bg-white p-4 ring-1 ring-gray-200/80 dark:bg-white/[0.03] dark:ring-white/10 sm:p-5 md:mb-6 md:flex-1';
+
+export function StatsHeading({
+  title,
+  children,
+}: {
+  title: string;
+  children?: ReactNode;
+}) {
   return (
-    <div className='mb-4 flex items-center gap-2'>
-      <div className='h-5 w-5 animate-pulse rounded bg-gray-200 dark:bg-gray-800' />
-      <div className='h-7 w-24 animate-pulse rounded bg-gray-200 dark:bg-gray-800' />
+    <div className='mb-1 flex h-7 items-center justify-between gap-3 sm:mb-2'>
+      <h2 className='text-lg font-semibold tracking-tight text-gray-900 dark:text-gray-100'>
+        {title}
+      </h2>
+      {children}
     </div>
   );
 }
 
-function StatsCardSkeleton() {
-  return (
-    <div className='h-full rounded-lg border border-gray-200 bg-white/70 p-4 dark:border-gray-700 dark:bg-gray-900/50'>
-      <div className='mb-3 flex items-center gap-2'>
-        <div className='h-4 w-4 animate-pulse rounded bg-gray-200 dark:bg-gray-800' />
-        <div className='h-5 w-16 animate-pulse rounded bg-gray-200 dark:bg-gray-800' />
-      </div>
-      <div className='h-8 w-32 animate-pulse rounded bg-gray-200 dark:bg-gray-800' />
-    </div>
-  );
-}
+const BLOCK_CLASS = 'skeleton rounded';
 
-function WeeklyChartSkeleton() {
+function MetricSkeleton() {
   return (
-    <div className='h-36 rounded-lg border border-gray-200 bg-white/70 p-4 dark:border-gray-700 dark:bg-gray-900/50'>
-      <div className='mb-3 flex items-center justify-between gap-3'>
-        <div className='flex items-center gap-2'>
-          <div className='h-4 w-4 animate-pulse rounded bg-gray-200 dark:bg-gray-800' />
-          <div className='h-5 w-16 animate-pulse rounded bg-gray-200 dark:bg-gray-800' />
-        </div>
-        <div className='h-4 w-24 animate-pulse rounded bg-gray-200 dark:bg-gray-800' />
+    <div>
+      <div className='flex h-[1.5em] items-center text-[13px]'>
+        <div className={`h-3 w-10 ${BLOCK_CLASS}`} />
       </div>
-      <div className='grid h-20 grid-cols-7 gap-2'>
-        {Array.from({ length: 7 }).map((_, index) => (
-          <div
-            key={index}
-            className='grid h-full min-w-0 grid-rows-[1fr_auto] items-end'
-          >
-            <div className='flex h-14 items-end'>
-              <div
-                className='w-full animate-pulse rounded-t bg-gray-200 dark:bg-gray-800'
-                style={{ height: 12 + ((index * 11) % 44) }}
-              />
-            </div>
-            <div className='mx-auto mt-2 h-4 w-8 animate-pulse rounded bg-gray-200 dark:bg-gray-800' />
-          </div>
-        ))}
+      <div className='relative mt-1 flex items-baseline gap-0.5'>
+        <span
+          aria-hidden='true'
+          className='invisible flex items-baseline gap-0.5'
+        >
+          <span className='text-[28px] font-semibold leading-none'>0</span>
+          <span className='text-[13px]'>分钟</span>
+        </span>
+        <div className={`absolute inset-y-0 w-24 ${BLOCK_CLASS}`} />
       </div>
     </div>
   );
 }
 
-function TopContentSkeleton() {
-  return (
-    <div className='flex h-36 min-w-0 flex-col overflow-hidden rounded-lg border border-gray-200 bg-white/70 p-4 dark:border-gray-700 dark:bg-gray-900/50'>
-      <div className='mb-3 flex min-w-0 items-center justify-between gap-2'>
-        <div className='flex min-w-0 items-center gap-2'>
-          <div className='h-4 w-4 animate-pulse rounded bg-gray-200 dark:bg-gray-800' />
-          <div className='h-5 w-16 animate-pulse rounded bg-gray-200 dark:bg-gray-800' />
-        </div>
-        <div className='h-6 w-[88px] animate-pulse rounded border border-gray-200 bg-gray-100 dark:border-gray-700 dark:bg-gray-800' />
-      </div>
-      <div className='min-w-0 space-y-2'>
-        {Array.from({ length: TOP_ITEM_LIMIT }).map((_, index) => (
-          <div
-            key={index}
-            className='flex min-w-0 items-center justify-between gap-3'
-          >
-            <div className='h-5 flex-1 animate-pulse rounded bg-gray-200 dark:bg-gray-800' />
-            <div className='h-5 w-20 shrink-0 animate-pulse rounded bg-gray-200 dark:bg-gray-800' />
-          </div>
-        ))}
-      </div>
-    </div>
-  );
-}
+const useIsomorphicLayoutEffect =
+  typeof window !== 'undefined' ? useLayoutEffect : useEffect;
 
 export function PlaybackStatsSkeleton() {
+  const [count, setCount] = useState(PLAYBACK_TOP_WORKS_LIMIT);
+  useIsomorphicLayoutEffect(() => {
+    const cached = getCachedPlaybackPeriodSnapshot('week');
+    if (cached) setCount(cached.topWorks.length);
+  }, []);
   return (
-    <section className='mb-2'>
-      <SectionHeaderSkeleton />
-      <div className='grid min-w-0 gap-3 sm:grid-cols-2'>
-        <StatsCardSkeleton />
-        <StatsCardSkeleton />
-      </div>
-      <div className='mt-3 grid min-w-0 items-stretch gap-3 md:grid-cols-2'>
-        <WeeklyChartSkeleton />
-        <TopContentSkeleton />
-      </div>
-    </section>
+    <div className={STATS_LAYOUT_CLASS}>
+      <section className={STATS_COLUMN_CLASS}>
+        <StatsHeading title='观看统计' />
+        <div className={STATS_CARD_CLASS}>
+          <div className='flex flex-wrap gap-x-8 gap-y-3'>
+            <MetricSkeleton />
+            <MetricSkeleton />
+          </div>
+          <div className='mt-5 grid flex-1 grid-cols-7 gap-1.5'>
+            {Array.from({ length: 7 }, (_, index) => (
+              <div key={index} className='flex flex-col items-center gap-2'>
+                <div className='flex h-20 w-full items-end justify-center md:h-auto md:min-h-20 md:flex-1'>
+                  <div
+                    className={`w-full max-w-[28px] rounded-md ${BLOCK_CLASS}`}
+                    style={{ height: 12 + ((index * 11) % 44) }}
+                  />
+                </div>
+                <div className='flex h-4 items-center'>
+                  <div className={`h-3 w-4 ${BLOCK_CLASS}`} />
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      </section>
+      <section className={STATS_COLUMN_CLASS}>
+        <StatsHeading title='常看'>
+          <div className='skeleton h-7 w-28 rounded-full' />
+        </StatsHeading>
+        <div className={count === 0 ? 'invisible' : undefined}>
+          <ScrollableRow>
+            {Array.from({ length: Math.max(1, count) }, (_, index) => (
+              <HomePosterCardSkeleton key={index} subtitle />
+            ))}
+          </ScrollableRow>
+        </div>
+      </section>
+    </div>
   );
 }

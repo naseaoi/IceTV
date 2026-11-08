@@ -1,5 +1,6 @@
 import 'server-only';
 
+import { createAsyncSemaphore } from '@/lib/async-semaphore';
 import {
   COVER_IMAGE_QUALITIES,
   COVER_IMAGE_WIDTHS,
@@ -7,6 +8,11 @@ import {
 } from '@/lib/cover-image-variants';
 
 const MAX_COVER_IMAGE_PIXELS = 40_000_000;
+// 排队任务各持有一份原图，等待者需有上限；下载阶段已受回源连接预算约束
+const RESIZE_CONCURRENCY = 4;
+const RESIZE_MAX_WAITING = 16;
+const RESIZE_WAIT_TIMEOUT_MS = 10_000;
+const resizeGate = createAsyncSemaphore(RESIZE_CONCURRENCY);
 
 export interface CoverImageResizeOptions {
   width: number;
@@ -51,6 +57,21 @@ export function parseCoverImageResizeOptions(
 }
 
 export async function resizeCoverImage(
+  source: ArrayBuffer,
+  options: CoverImageResizeOptions,
+): Promise<ArrayBuffer> {
+  const release = await resizeGate.acquire({
+    maxWaiting: RESIZE_MAX_WAITING,
+    waitTimeoutMs: RESIZE_WAIT_TIMEOUT_MS,
+  });
+  try {
+    return await transcodeCoverImage(source, options);
+  } finally {
+    release();
+  }
+}
+
+async function transcodeCoverImage(
   source: ArrayBuffer,
   options: CoverImageResizeOptions,
 ): Promise<ArrayBuffer> {

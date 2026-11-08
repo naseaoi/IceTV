@@ -35,17 +35,17 @@ describe('DanmakuTab reload controls', () => {
     );
     render(<DanmakuTab {...props} onReload={onReload} />);
     const button = screen.getByRole('button', { name: '重载弹幕' });
-    for (const name of ['弹幕偏移', '弹幕选集']) {
+    for (const name of ['弹幕匹配']) {
       expect(
-        screen.getByRole('heading', { name, level: 3 }).firstElementChild,
-      ).toHaveClass('w-[3px]', 'h-3.5');
+        screen.getByRole('heading', { name, level: 3 }),
+      ).toBeInTheDocument();
     }
     expect(button).toHaveClass('h-7', 'text-xs', 'bg-transparent');
     fireEvent.click(button);
     expect(onReload).toHaveBeenCalledWith({ refreshData: true });
     expect(button).toBeDisabled();
     expect(button).toHaveAttribute('aria-busy', 'true');
-    expect(button.querySelector('svg')).toHaveClass('animate-spin');
+    expect(button.querySelector('svg')).toHaveClass('ice-spinner');
     expect(button.querySelector('span')).toHaveClass('opacity-0');
     expect(button).toHaveTextContent('重载');
     fireEvent.click(button);

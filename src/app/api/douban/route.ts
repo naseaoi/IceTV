@@ -11,6 +11,10 @@ import {
 } from '@/lib/douban-normalize';
 import { createTimedAbortController } from '@/lib/downstream-sources/shared';
 import {
+  readTextLimited,
+  UPSTREAM_METADATA_MAX_BYTES,
+} from '@/lib/proxy-response-limits';
+import {
   recordServerProxyFailure,
   requireServerProxyQuota,
 } from '@/lib/server-proxy-guard';
@@ -136,7 +140,10 @@ async function fetchTop250Result(target: string): Promise<DoubanResult> {
       throw new Error(`HTTP error! Status: ${fetchResponse.status}`);
     }
 
-    const html = await fetchResponse.text();
+    const html = await readTextLimited(
+      fetchResponse,
+      UPSTREAM_METADATA_MAX_BYTES,
+    );
     const moviePattern =
       /<div class="item">[\s\S]*?<a[^>]+href="https?:\/\/movie\.douban\.com\/subject\/(\d+)\/"[\s\S]*?<img[^>]+alt="([^"]+)"[^>]*src="([^"]+)"[\s\S]*?<span class="rating_num"[^>]*>([^<]*)<\/span>[\s\S]*?<\/div>/g;
     const movies: DoubanItem[] = [];

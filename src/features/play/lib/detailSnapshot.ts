@@ -1,3 +1,9 @@
+import {
+  listStorageKeys,
+  readStorage,
+  removeStorage,
+  writeStorage,
+} from '@/lib/browser-storage';
 import type { SearchResult } from '@/lib/types';
 
 const SNAPSHOT_KEY_PREFIX = 'icetv-detail-snapshot:';
@@ -25,14 +31,6 @@ function parseSnapshotEntry(raw: string | null): DetailSnapshotEntry | null {
   }
 }
 
-function removeSnapshotKey(key: string): void {
-  try {
-    window.localStorage.removeItem(key);
-  } catch {
-    // 忽略
-  }
-}
-
 export function readDetailSnapshot(
   source: string,
   id: string,
@@ -40,12 +38,7 @@ export function readDetailSnapshot(
   if (typeof window === 'undefined' || !source || !id) return null;
 
   const key = buildSnapshotKey(source, id);
-  let raw: string | null = null;
-  try {
-    raw = window.localStorage.getItem(key);
-  } catch {
-    return null;
-  }
+  const raw = readStorage(key);
   if (!raw) return null;
 
   const entry = parseSnapshotEntry(raw);
@@ -54,7 +47,7 @@ export function readDetailSnapshot(
     entry.data.episodes.length === 0 ||
     Date.now() - entry.savedAt > SNAPSHOT_TTL_MS
   ) {
-    removeSnapshotKey(key);
+    removeStorage(key);
     return null;
   }
   return entry.data;
@@ -74,31 +67,23 @@ export function saveDetailSnapshot(
     savedAt: Date.now(),
   } satisfies DetailSnapshotEntry);
 
-  try {
-    window.localStorage.setItem(key, payload);
+  if (writeStorage(key, payload)) {
     pruneDetailSnapshots(SNAPSHOT_MAX_ENTRIES);
-  } catch {
-    try {
-      pruneDetailSnapshots(Math.floor(SNAPSHOT_MAX_ENTRIES / 2));
-      window.localStorage.setItem(key, payload);
-    } catch {
-      // 忽略
-    }
+    return;
   }
+  pruneDetailSnapshots(Math.floor(SNAPSHOT_MAX_ENTRIES / 2));
+  writeStorage(key, payload);
 }
 
 function pruneDetailSnapshots(maxEntries: number): void {
-  const entries: { key: string; savedAt: number }[] = [];
-  for (let i = 0; i < window.localStorage.length; i++) {
-    const key = window.localStorage.key(i);
-    if (!key || !key.startsWith(SNAPSHOT_KEY_PREFIX)) continue;
-    const entry = parseSnapshotEntry(window.localStorage.getItem(key));
-    entries.push({ key, savedAt: entry?.savedAt ?? 0 });
-  }
+  const entries = listStorageKeys(SNAPSHOT_KEY_PREFIX).map((key) => ({
+    key,
+    savedAt: parseSnapshotEntry(readStorage(key))?.savedAt ?? 0,
+  }));
   if (entries.length <= maxEntries) return;
 
   entries.sort((a, b) => a.savedAt - b.savedAt);
   for (const item of entries.slice(0, entries.length - maxEntries)) {
-    removeSnapshotKey(item.key);
+    removeStorage(item.key);
   }
 }

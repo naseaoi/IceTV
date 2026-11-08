@@ -1,8 +1,14 @@
 import { NextRequest, NextResponse } from 'next/server';
 
 import { isGuardFailure, requireAdmin } from '@/lib/api-auth';
+import { runWithConcurrency } from '@/lib/concurrency';
 import { API_CONFIG, getConfigForRead } from '@/lib/config';
 import { createTimedAbortController } from '@/lib/downstream-sources/shared';
+import {
+  readJsonLimited,
+  UPSTREAM_METADATA_MAX_BYTES,
+} from '@/lib/proxy-response-limits';
+import { fetchWithUrlGuard } from '@/lib/url-guard';
 
 export const runtime = 'nodejs';
 
@@ -44,6 +50,13 @@ export async function GET(request: NextRequest) {
 
   // 共享状态
   let streamClosed = false;
+  const upstreamController = new AbortController();
+  const cancelUpstream = () => {
+    streamClosed = true;
+    upstreamController.abort();
+  };
+  request.signal.addEventListener('abort', cancelUpstream, { once: true });
+  if (request.signal.aborted) cancelUpstream();
 
   // 创建可读流
   const stream = new ReadableStream({
@@ -63,7 +76,7 @@ export async function GET(request: NextRequest) {
           return true;
         } catch (error) {
           console.warn('Failed to enqueue data:', error);
-          streamClosed = true;
+          cancelUpstream();
           return false;
         }
       };
@@ -75,6 +88,7 @@ export async function GET(request: NextRequest) {
       })}\n\n`;
 
       if (!safeEnqueue(encoder.encode(startEvent))) {
+        request.signal.removeEventListener('abort', cancelUpstream);
         return;
       }
 
@@ -82,26 +96,33 @@ export async function GET(request: NextRequest) {
       let completedSources = 0;
 
       // 为每个源创建验证 Promise
-      const validationPromises = apiSites.map(async (site) => {
+      const validationTasks = apiSites.map((site) => async () => {
         try {
           // 构建搜索URL，只获取第一页
           const searchUrl = `${site.api}?ac=videolist&wd=${encodeURIComponent(
             searchKeyword,
           )}`;
 
-          const abortState = createTimedAbortController(undefined, 10000);
+          const abortState = createTimedAbortController(
+            upstreamController.signal,
+            10000,
+          );
 
           try {
-            const response = await fetch(searchUrl, {
+            const response = await fetchWithUrlGuard(searchUrl, {
               headers: API_CONFIG.search.headers,
               signal: abortState.signal,
             });
 
             if (!response.ok) {
+              await response.body?.cancel().catch(() => {});
               throw new Error(`HTTP ${response.status}`);
             }
 
-            const data = (await response.json()) as any;
+            const data = await readJsonLimited<any>(
+              response,
+              UPSTREAM_METADATA_MAX_BYTES,
+            );
 
             // 检查结果是否有效
             let status: 'valid' | 'no_results' | 'invalid';
@@ -165,34 +186,28 @@ export async function GET(request: NextRequest) {
             }
           }
         }
-
-        // 检查是否所有源都已完成
-        if (completedSources === apiSites.length) {
-          if (!streamClosed) {
-            // 发送最终完成事件
-            const completeEvent = `data: ${JSON.stringify({
-              type: 'complete',
-              completedSources,
-            })}\n\n`;
-
-            if (safeEnqueue(encoder.encode(completeEvent))) {
-              try {
-                controller.close();
-              } catch (error) {
-                console.warn('Failed to close controller:', error);
-              }
-            }
-          }
-        }
       });
 
-      // 等待所有验证完成
-      await Promise.allSettled(validationPromises);
+      try {
+        await runWithConcurrency(validationTasks, 3, () => !streamClosed);
+        if (!streamClosed) {
+          const completeEvent = `data: ${JSON.stringify({
+            type: 'complete',
+            completedSources,
+          })}\n\n`;
+          if (safeEnqueue(encoder.encode(completeEvent))) {
+            controller.close();
+            streamClosed = true;
+          }
+        }
+      } finally {
+        request.signal.removeEventListener('abort', cancelUpstream);
+      }
     },
 
     cancel() {
-      streamClosed = true;
-      console.log('Client disconnected, cancelling validation stream');
+      cancelUpstream();
+      request.signal.removeEventListener('abort', cancelUpstream);
     },
   });
 

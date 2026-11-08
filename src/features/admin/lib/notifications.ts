@@ -1,4 +1,5 @@
 ﻿import { type ShowAlertFn } from '@/hooks/useAlertModal';
+import { showToast } from '@/lib/toast';
 
 export function showError(message: string, showAlert?: ShowAlertFn) {
   if (showAlert) {
@@ -9,11 +10,6 @@ export function showError(message: string, showAlert?: ShowAlertFn) {
   console.error(message);
 }
 
-export function showSuccess(message: string, showAlert?: ShowAlertFn) {
-  if (showAlert) {
-    showAlert({ type: 'success', title: '成功', message, timer: 2000 });
-    return;
-  }
-
-  console.log(message);
+export function showSuccess(message: string) {
+  showToast(message, 'success');
 }

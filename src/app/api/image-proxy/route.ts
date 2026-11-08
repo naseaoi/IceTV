@@ -9,6 +9,7 @@ import {
 } from '@/lib/cover-image-resize';
 import { loadResizedCoverImage } from '@/lib/cover-image-resize-cache.server';
 import { resolveProxyAuthorization } from '@/lib/proxy-auth';
+import { getUpstreamFailureStatus } from '@/lib/proxy-diagnostics';
 import {
   assertContentLength,
   createLimitedReadableStream,
@@ -33,18 +34,13 @@ const MAX_IMAGE_BYTES = 10 * 1024 * 1024;
 
 const ORIGIN_FETCH_HEADERS = {
   Accept: 'image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8',
-  Referer: 'https://movie.douban.com/',
   'User-Agent':
     'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36',
 } as const;
 
 class ImageOriginError extends Error {
-  constructor(
-    readonly status: number,
-    readonly reason: string | number,
-    message: string,
-  ) {
-    super(message);
+  constructor(readonly reason: string | number) {
+    super('图片获取失败');
     this.name = 'ImageOriginError';
   }
 }
@@ -54,30 +50,35 @@ async function fetchImageOrigin(
   method: 'GET' | 'HEAD',
   timeoutMs: number,
 ): Promise<{ response: Response; contentType: string }> {
+  const target = new URL(url);
+  const hostname = target.hostname.toLowerCase().replace(/\.$/, '');
+  const isDoubanImage =
+    hostname === 'doubanio.com' || hostname.endsWith('.doubanio.com');
   const response = await fetchWithUrlGuard(url, {
     method,
-    headers: ORIGIN_FETCH_HEADERS,
+    // 重定向沿用初始图床的来源，避免把跳转后的 CDN 当作来源站点
+    headers: {
+      ...ORIGIN_FETCH_HEADERS,
+      Referer: isDoubanImage
+        ? 'https://movie.douban.com/'
+        : `${target.origin}/`,
+    },
     skipInitialValidation: true,
     timeoutMs,
   });
 
   if (!response.ok) {
     await response.body?.cancel().catch(() => {});
-    throw new ImageOriginError(
-      response.status,
-      response.status,
-      response.statusText,
-    );
+    throw new ImageOriginError(response.status);
   }
 
   const contentType = response.headers.get('content-type');
   if (!contentType?.toLowerCase().startsWith('image/')) {
     await response.body?.cancel().catch(() => {});
-    throw new ImageOriginError(
-      415,
-      contentType || 'content-type',
-      'Invalid image response',
-    );
+    throw new ImageOriginError(contentType || 'content-type');
+  }
+  if (method === 'GET' && !response.body) {
+    throw new ImageOriginError('empty-body');
   }
 
   return { response, contentType };
@@ -182,13 +183,19 @@ async function proxyImage(request: NextRequest, method: 'GET' | 'HEAD') {
     }
 
     if (method === 'HEAD') {
+      await imageResponse.body?.cancel().catch(() => {});
       return new Response(null, {
         status: 200,
         headers,
       });
     }
 
-    assertContentLength(imageResponse.headers, MAX_IMAGE_BYTES);
+    try {
+      assertContentLength(imageResponse.headers, MAX_IMAGE_BYTES);
+    } catch (error) {
+      await imageResponse.body?.cancel().catch(() => {});
+      throw error;
+    }
 
     return new Response(
       createLimitedReadableStream(imageResponse.body, MAX_IMAGE_BYTES),
@@ -202,10 +209,7 @@ async function proxyImage(request: NextRequest, method: 'GET' | 'HEAD') {
     if (busy) return busy;
     if (error instanceof ImageOriginError) {
       recordServerProxyFailure('douban-image', error.reason);
-      return NextResponse.json(
-        { error: error.message },
-        { status: error.status },
-      );
+      return NextResponse.json({ error: error.message }, { status: 502 });
     }
     if (error instanceof UrlValidationError) {
       return NextResponse.json({ error: 'Invalid URL' }, { status: 403 });
@@ -218,7 +222,7 @@ async function proxyImage(request: NextRequest, method: 'GET' | 'HEAD') {
     recordServerProxyFailure('douban-image', error);
     return NextResponse.json(
       { error: 'Error fetching image' },
-      { status: 500 },
+      { status: getUpstreamFailureStatus(error) },
     );
   }
 }

@@ -1,3 +1,6 @@
+// 源站搜索、详情、豆瓣页面等外部元数据的正文上限；异常源返回超大正文时不整体读入内存
+export const UPSTREAM_METADATA_MAX_BYTES = 8 * 1024 * 1024;
+
 export class ResponseSizeLimitError extends Error {
   constructor(public readonly maxBytes: number) {
     super('Response body too large');
@@ -72,6 +75,13 @@ export async function readTextLimited(
 ): Promise<string> {
   const buffer = await readArrayBufferLimited(response, maxBytes);
   return new TextDecoder().decode(buffer);
+}
+
+export async function readJsonLimited<T = unknown>(
+  response: Response,
+  maxBytes: number,
+): Promise<T> {
+  return JSON.parse(await readTextLimited(response, maxBytes)) as T;
 }
 
 export function createLimitedReadableStream(

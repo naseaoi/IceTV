@@ -1,9 +1,8 @@
 import { MutableRefObject, useRef, useState } from 'react';
 
+import type { LiveChannel, LiveSource } from '@/features/live/types';
 import { useFavoriteSync } from '@/hooks/useFavoriteSync';
 import { deleteFavorite, saveFavorite } from '@/lib/db.client';
-
-import type { LiveChannel, LiveSource } from '../types';
 
 interface UseLiveFavoriteParams {
   currentSource: LiveSource | null;

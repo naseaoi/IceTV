@@ -5,6 +5,7 @@ import { ReactNode, useEffect, useId, useRef } from 'react';
 import { createPortal } from 'react-dom';
 
 import { useBodyScrollLock } from '@/components/user-menu/useBodyScrollLock';
+import { usePresence } from '@/hooks/usePresence';
 
 interface MobileSheetProps {
   open: boolean;
@@ -13,6 +14,8 @@ interface MobileSheetProps {
   children: ReactNode;
   footer?: ReactNode;
 }
+
+const SHEET_EXIT_MS = 300;
 
 export default function MobileSheet({
   open,
@@ -25,6 +28,12 @@ export default function MobileSheet({
   const closeButtonRef = useRef<HTMLButtonElement>(null);
   const onCloseRef = useRef(onClose);
   const titleId = useId();
+  const { mounted, visible } = usePresence(open, SHEET_EXIT_MS);
+  // 收起动画期间保留关闭前的内容，避免调用方清空数据后面板先变空再滑走
+  const snapshot = useRef({ title, children, footer });
+  if (open) {
+    snapshot.current = { title, children, footer };
+  }
 
   useBodyScrollLock(open);
 
@@ -94,12 +103,16 @@ export default function MobileSheet({
     };
   }, [open]);
 
-  if (!open || typeof document === 'undefined') return null;
+  if (!mounted || typeof document === 'undefined') return null;
 
   return createPortal(
-    <div className='fixed inset-0 z-[1200] md:hidden'>
+    <div
+      className={`fixed inset-0 z-[1200] md:hidden ${open ? '' : 'pointer-events-none'}`}
+    >
       <div
-        className='absolute inset-0 bg-black/50'
+        className={`absolute inset-0 bg-black/50 transition-opacity duration-300 motion-reduce:transition-none ${
+          visible ? 'opacity-100' : 'opacity-0'
+        }`}
         aria-hidden='true'
         onClick={onClose}
       />
@@ -109,7 +122,9 @@ export default function MobileSheet({
         aria-modal='true'
         aria-labelledby={titleId}
         tabIndex={-1}
-        className='absolute inset-x-0 bottom-0 flex max-h-[75dvh] flex-col rounded-t-2xl bg-white outline-none dark:bg-gray-900'
+        className={`absolute inset-x-0 bottom-0 flex max-h-[75dvh] flex-col rounded-t-2xl bg-white outline-none transition-transform duration-300 ease-[cubic-bezier(0.32,0.72,0,1)] motion-reduce:transition-none dark:bg-gray-900 ${
+          visible ? 'translate-y-0' : 'translate-y-full'
+        }`}
         style={{ paddingBottom: 'env(safe-area-inset-bottom)' }}
       >
         <div className='mx-auto mt-2 h-1 w-10 shrink-0 rounded-full bg-gray-300 dark:bg-gray-600' />
@@ -118,7 +133,7 @@ export default function MobileSheet({
             id={titleId}
             className='text-base font-semibold text-gray-900 dark:text-gray-100'
           >
-            {title}
+            {snapshot.current.title}
           </h3>
           <button
             ref={closeButtonRef}
@@ -131,11 +146,11 @@ export default function MobileSheet({
           </button>
         </div>
         <div className='min-h-0 flex-1 overflow-y-auto px-4 pb-4'>
-          {children}
+          {snapshot.current.children}
         </div>
-        {footer && (
+        {snapshot.current.footer && (
           <div className='shrink-0 border-t border-gray-200 px-4 py-3 dark:border-gray-700'>
-            {footer}
+            {snapshot.current.footer}
           </div>
         )}
       </div>

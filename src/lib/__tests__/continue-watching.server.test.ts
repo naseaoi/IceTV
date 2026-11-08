@@ -43,6 +43,32 @@ describe('getContinueWatchingSkeletonCount', () => {
     expect(mockGetServerAuthSession).toHaveBeenCalledWith('invalid');
   });
 
+  it('reads the full-page count independently of the home row and caps it at its page size', async () => {
+    mockCookieStore({ auth: 'valid', cw_count: '4', cw_page_count: '100' });
+    mockGetServerAuthSession.mockResolvedValue({ status: 'authenticated' });
+    await expect(
+      getContinueWatchingSkeletonCount({
+        cookieName: 'cw_page_count',
+        limit: 24,
+      }),
+    ).resolves.toBe(24);
+    await expect(getContinueWatchingSkeletonCount()).resolves.toBe(4);
+  });
+
+  it.each(['', '-1', 'Infinity', 'invalid'])(
+    'treats invalid page count %s as unknown',
+    async (count) => {
+      mockCookieStore({ auth: 'valid', cw_page_count: count });
+      mockGetServerAuthSession.mockResolvedValue({ status: 'authenticated' });
+      await expect(
+        getContinueWatchingSkeletonCount({
+          cookieName: 'cw_page_count',
+          limit: 24,
+        }),
+      ).resolves.toBe(0);
+    },
+  );
+
   it('仅为已登录用户返回限制后的骨架数量', async () => {
     mockCookieStore({ auth: 'valid', cw_count: '12' });
     mockGetServerAuthSession.mockResolvedValue({

@@ -28,7 +28,7 @@ overrides:
 
 patchedDependencies:
   artplayer-plugin-danmuku@5.3.0:
-    hash: 59914e6377406073daddeed36b442f5c23a06e52b0d26873ae2f5af4ba538c2c
+    hash: 94f552be2d3eb9f64a718ad92c79b1409d98816dffe4afc0700cb8bdab738014
     path: patches/artplayer-plugin-danmuku@5.3.0.patch
 
 importers:
@@ -55,7 +55,7 @@ importers:
         version: 5.2.5
       artplayer-plugin-danmuku:
         specifier: ^5.3.0
-        version: 5.3.0(patch_hash=59914e6377406073daddeed36b442f5c23a06e52b0d26873ae2f5af4ba538c2c)
+        version: 5.3.0(patch_hash=94f552be2d3eb9f64a718ad92c79b1409d98816dffe4afc0700cb8bdab738014)
       bcrypt:
         specifier: ^6.0.0
         version: 6.0.0
@@ -65,6 +65,9 @@ importers:
       better-sqlite3:
         specifier: ^12.6.2
         version: 12.6.2
+      boring-avatars:
+        specifier: ^2.0.4
+        version: 2.0.4(react-dom@19.2.5(react@19.2.5))(react@19.2.5)
       bs58:
         specifier: ^6.0.0
         version: 6.0.0
@@ -1520,6 +1523,12 @@ packages:
 
   bl@4.1.0:
     resolution: {integrity: sha512-1W07cM9gS6DcLperZfFSj+bWLtaPGSOHWhPiGzXmvVJbRLdG82sH/Kn8EtW1VqWVA54AKf2h5k5BbnIbwF3h6w==}
+
+  boring-avatars@2.0.4:
+    resolution: {integrity: sha512-xhZO/w/6aFmRfkaWohcl2NfyIy87gK5SBbys8kctZeTGF1Apjpv/10pfUuv+YEfVPkESU/h2Y6tt/Dwp+bIZPw==}
+    peerDependencies:
+      react: '>=18.0.0'
+      react-dom: '>=18.0.0'
 
   brace-expansion@1.1.15:
     resolution: {integrity: sha512-EwOCDEex4quD37XhqM3omwtMoJjr//isUZz1JopUNWms+4Z2ViyM/k1YIRePpoVNnQhENnxtFjLaxNHrT7xIUg==}
@@ -5549,7 +5558,7 @@ snapshots:
 
   arrify@1.0.1: {}
 
-  artplayer-plugin-danmuku@5.3.0(patch_hash=59914e6377406073daddeed36b442f5c23a06e52b0d26873ae2f5af4ba538c2c): {}
+  artplayer-plugin-danmuku@5.3.0(patch_hash=94f552be2d3eb9f64a718ad92c79b1409d98816dffe4afc0700cb8bdab738014): {}
 
   artplayer@5.2.5:
     dependencies:
@@ -5672,6 +5681,11 @@ snapshots:
       buffer: 5.7.1
       inherits: 2.0.4
       readable-stream: 3.6.2
+
+  boring-avatars@2.0.4(react-dom@19.2.5(react@19.2.5))(react@19.2.5):
+    dependencies:
+      react: 19.2.5
+      react-dom: 19.2.5(react@19.2.5)
 
   brace-expansion@1.1.15:
     dependencies:

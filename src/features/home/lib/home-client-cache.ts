@@ -68,5 +68,9 @@ export function mergeHomeInitialDataWithClientSnapshot(
     bangumiCalendarData: hasBangumiData
       ? initialData.bangumiCalendarData
       : cached.bangumiCalendarData,
+    heroItems:
+      initialData.heroItems.length > 0
+        ? initialData.heroItems
+        : cached.heroItems,
   };
 }

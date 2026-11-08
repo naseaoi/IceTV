@@ -2,8 +2,9 @@ import { NextRequest, NextResponse } from 'next/server';
 
 import { isGuardFailure, requireAdmin } from '@/lib/api-auth';
 import { configConflictResponse } from '@/lib/api-config-error';
-import { getConfig, saveConfig } from '@/lib/config';
+import { getConfig, invalidateConfigCache, saveConfig } from '@/lib/config';
 import { buildConfigFileFromAdminConfig } from '@/lib/config-file-json';
+import { db } from '@/lib/db';
 
 export const runtime = 'nodejs';
 
@@ -59,7 +60,10 @@ export async function POST(request: NextRequest) {
     }
 
     // 获取配置与存储
+    invalidateConfigCache();
     const adminConfig = await getConfig();
+    const subscription = await db.getConfigSubscription();
+    let configFile = subscription.ConfigFile;
 
     switch (action) {
       case 'add': {
@@ -209,10 +213,15 @@ export async function POST(request: NextRequest) {
         return NextResponse.json({ error: '未知操作' }, { status: 400 });
     }
 
-    adminConfig.ConfigFile = buildConfigFileFromAdminConfig(adminConfig);
+    configFile = buildConfigFileFromAdminConfig(adminConfig, configFile);
 
     // 持久化到存储
-    await saveConfig(adminConfig);
+    await saveConfig(adminConfig, {
+      subscription: {
+        expected: subscription,
+        next: { ...subscription, ConfigFile: configFile },
+      },
+    });
 
     return NextResponse.json(
       { ok: true },

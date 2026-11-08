@@ -1,5 +1,10 @@
 ﻿'use client';
 
+import type {
+  FavoriteBatchInput,
+  FavoriteLibraryItem,
+  FavoriteWorkQuery,
+} from '@/features/favorites/lib/library-query';
 import { normalizeSearchQueryInput } from '@/features/search/lib/searchQuery';
 
 import { getAuthInfoFromBrowserCookie } from './auth.client';
@@ -241,7 +246,11 @@ export async function deletePlayRecord(
         method: 'DELETE',
       }).then(() => {}),
     onServerError: async (err) => {
-      await handleDatabaseOperationFailure('playRecords', err);
+      await handleDatabaseOperationFailure(
+        'playRecords',
+        err,
+        '删除播放记录失败，请重试',
+      );
     },
     requireExistingCacheForOptimisticUpdate: true,
   });
@@ -252,6 +261,7 @@ async function patchPlayRecordState(
   source: string,
   id: string,
   body: Record<string, unknown>,
+  failureMessage: string,
 ): Promise<PlayRecord> {
   try {
     const key = generateStorageKey(source, id);
@@ -273,7 +283,7 @@ async function patchPlayRecordState(
 
     return record;
   } catch (error) {
-    await handleDatabaseOperationFailure('playRecords', error);
+    await handleDatabaseOperationFailure('playRecords', error, failureMessage);
     throw error;
   }
 }
@@ -287,10 +297,15 @@ export async function markPlayRecordUpdateRead(
   id: string,
   readThroughEpisodes?: number,
 ): Promise<PlayRecord> {
-  const record = await patchPlayRecordState(source, id, {
-    action: 'mark-update-read',
-    readThroughEpisodes,
-  });
+  const record = await patchPlayRecordState(
+    source,
+    id,
+    {
+      action: 'mark-update-read',
+      readThroughEpisodes,
+    },
+    '标记已读失败，请重试',
+  );
   notifyMessagesUpdated();
   return record;
 }
@@ -300,10 +315,15 @@ export async function setPlayRecordTracking(
   id: string,
   enabled: boolean,
 ): Promise<PlayRecord> {
-  const record = await patchPlayRecordState(source, id, {
-    action: 'set-tracking',
-    trackingEnabled: enabled,
-  });
+  const record = await patchPlayRecordState(
+    source,
+    id,
+    {
+      action: 'set-tracking',
+      trackingEnabled: enabled,
+    },
+    '追更设置保存失败，请重试',
+  );
   notifyMessagesUpdated();
   return record;
 }
@@ -318,8 +338,14 @@ export async function clearAllPlayRecords(): Promise<void> {
     });
     notifyMessagesUpdated();
   } catch (err) {
-    await handleDatabaseOperationFailure('playRecords', err);
+    await handleDatabaseOperationFailure(
+      'playRecords',
+      err,
+      '删除播放记录失败，请重试',
+    );
     throw err;
+  } finally {
+    window.dispatchEvent(new Event('userLibraryUpdated'));
   }
 }
 
@@ -431,27 +457,63 @@ export function getCachedFavoritesSnapshot(): Record<string, Favorite> | null {
   return cacheManager.getCachedFavorites();
 }
 
+async function refreshFavoritesAfterWrite(): Promise<void> {
+  const favorites =
+    await fetchFromApi<Record<string, Favorite>>('/api/favorites');
+  cacheManager.cacheFavorites(favorites);
+  window.dispatchEvent(
+    new CustomEvent('favoritesUpdated', { detail: favorites }),
+  );
+  window.dispatchEvent(new Event('userLibraryUpdated'));
+}
+
+export async function getFavoriteForWork(
+  work: FavoriteWorkQuery,
+): Promise<FavoriteLibraryItem | null> {
+  const params = new URLSearchParams({ format: 'work', ...work });
+  return fetchFromApi<FavoriteLibraryItem | null>(
+    `/api/favorites?${params.toString()}`,
+  );
+}
+
+export async function batchFavorites(
+  input: FavoriteBatchInput,
+): Promise<{ affected: number }> {
+  try {
+    const result = await fetchWithAuth('/api/favorites/batch', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(input),
+    });
+    const data = (await result.json()) as { affected: number };
+    await refreshFavoritesAfterWrite();
+    return data;
+  } catch (error) {
+    await handleDatabaseOperationFailure('favorites', error);
+    throw error;
+  }
+}
+
 export async function saveFavorite(
   source: string,
   id: string,
   favorite: Favorite,
-): Promise<void> {
+): Promise<string> {
   const key = generateStorageKey(source, id);
-  return _writeFavorites({
-    mutateCached: (cached) => {
-      cached[key] = favorite;
-      return cached;
-    },
-    syncToServer: () =>
-      fetchWithAuth('/api/favorites', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ key, favorite }),
-      }).then(() => {}),
-    onServerError: async (err) => {
-      await handleDatabaseOperationFailure('favorites', err);
-    },
-  });
+  try {
+    const response = await fetchWithAuth('/api/favorites', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ key, favorite }),
+    });
+    const result = (await response.json()) as { key: string };
+    // 合并可能删除另一目录键，成功后以服务端快照刷新，避免缓存保留幽灵收藏。
+    await refreshFavoritesAfterWrite();
+    return result.key;
+  } catch (error) {
+    await handleDatabaseOperationFailure('favorites', error);
+    throw error;
+  }
 }
 
 export async function deleteFavorite(
@@ -529,6 +591,8 @@ export async function clearAllFavorites(): Promise<void> {
   } catch (err) {
     await handleDatabaseOperationFailure('favorites', err);
     throw err;
+  } finally {
+    window.dispatchEvent(new Event('userLibraryUpdated'));
   }
 }
 

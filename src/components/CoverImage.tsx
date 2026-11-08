@@ -52,6 +52,9 @@ function needsImageUnoptimized(
   return true;
 }
 
+// 服务端回源超时之外再留出缩放与传输时间，避免服务端仍在取图时前端先判失败
+const COVER_LOAD_TIMEOUT_GRACE_MS = 5000;
+
 const VIEWPORT_PRELOAD_MARGIN = '520px 180px';
 const REDUCED_VIEWPORT_PRELOAD_MARGIN = '320px 96px';
 
@@ -239,6 +242,22 @@ const CoverImage: React.FC<CoverImageProps> = memo(function CoverImage({
     if (typeof image?.animate === 'function') {
       animations.push(image.animate([{ opacity: 0 }, { opacity: 1 }], options));
     }
+    if (
+      typeof image?.animate === 'function' &&
+      !window.matchMedia('(prefers-reduced-motion: reduce)').matches
+    ) {
+      // 轻微回缩只在动画期间生效，结束后不残留变换
+      animations.push(
+        image.animate(
+          [{ transform: 'scale(1.06)' }, { transform: 'scale(1)' }],
+          {
+            duration: 900,
+            easing: options.easing,
+            fill: 'backwards',
+          },
+        ),
+      );
+    }
 
     return () => animations.forEach((animation) => animation.cancel());
   }, [loaded, processed, showFallback]);
@@ -250,30 +269,33 @@ const CoverImage: React.FC<CoverImageProps> = memo(function CoverImage({
     releaseSlotRef.current = null;
   }, [cacheKeys]);
 
-  const handleError = useCallback(() => {
-    if (
-      runtimeConfig.SOURCE_COVER_PROXY_MODE === 'auto' &&
-      isSourceCoverProxyUrl(processed) &&
-      !useDirectFallback
-    ) {
-      markSourceCoverProxyHostFailed(src);
-      setLoaded(false);
-      setHasError(false);
-      setUseDirectFallback(true);
-      return;
-    }
+  const failLoad = useCallback(
+    (persistFailure: boolean) => {
+      if (
+        runtimeConfig.SOURCE_COVER_PROXY_MODE === 'auto' &&
+        isSourceCoverProxyUrl(processed) &&
+        !useDirectFallback
+      ) {
+        markSourceCoverProxyHostFailed(src);
+        setLoaded(false);
+        setHasError(false);
+        setUseDirectFallback(true);
+        return;
+      }
 
-    markCoverImagesFailed([processed]);
-    setHasError(true);
-    setLoaded(true);
-    releaseSlotRef.current?.();
-    releaseSlotRef.current = null;
-  }, [
-    processed,
-    runtimeConfig.SOURCE_COVER_PROXY_MODE,
-    src,
-    useDirectFallback,
-  ]);
+      // 超时只说明这次没等到，不记入失败缓存，下次挂载仍会重试
+      if (persistFailure) markCoverImagesFailed([processed]);
+      setHasError(true);
+      setLoaded(true);
+      releaseSlotRef.current?.();
+      releaseSlotRef.current = null;
+    },
+    [processed, runtimeConfig.SOURCE_COVER_PROXY_MODE, src, useDirectFallback],
+  );
+  const handleError = useCallback(() => failLoad(true), [failLoad]);
+  const loadTimeoutMs =
+    runtimeConfig.IMAGE_PROXY_TIMEOUT_SECONDS * 1000 +
+    COVER_LOAD_TIMEOUT_GRACE_MS;
 
   useEffect(() => {
     if (!slotGranted || loaded || hasError) return;
@@ -307,14 +329,23 @@ const CoverImage: React.FC<CoverImageProps> = memo(function CoverImage({
     }
 
     const timeoutId = setTimeout(() => {
-      if (!finishFromImageState()) handleError();
-    }, 8000);
+      if (!finishFromImageState()) failLoad(false);
+    }, loadTimeoutMs);
 
     return () => {
       cancelled = true;
       clearTimeout(timeoutId);
     };
-  }, [handleError, handleLoad, hasError, loaded, processed, slotGranted]);
+  }, [
+    failLoad,
+    handleError,
+    handleLoad,
+    hasError,
+    loaded,
+    loadTimeoutMs,
+    processed,
+    slotGranted,
+  ]);
 
   if (showFallback) {
     return (
@@ -323,7 +354,10 @@ const CoverImage: React.FC<CoverImageProps> = memo(function CoverImage({
   }
 
   return (
-    <div ref={containerRef} className='absolute inset-0'>
+    <div
+      ref={containerRef}
+      className='absolute inset-0 overflow-hidden rounded-[inherit]'
+    >
       <ImageLoadingBackdrop
         ref={loadingBackdropRef}
         active={!revealed}
@@ -348,7 +382,7 @@ const CoverImage: React.FC<CoverImageProps> = memo(function CoverImage({
           unoptimized={needsUnoptimized}
           className={`${fit === 'contain' ? 'object-contain' : 'object-cover'} ${revealed ? 'opacity-100' : 'opacity-0'}`}
           referrerPolicy='no-referrer'
-          loading={priority || knownCached || loaded ? 'eager' : 'lazy'}
+          loading='eager'
           decoding={knownCached ? 'sync' : 'async'}
           onLoad={handleLoad}
           onError={handleError}

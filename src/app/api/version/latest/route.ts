@@ -24,6 +24,7 @@ interface RemoteChangelogEntry {
   added: string[];
   changed: string[];
   fixed: string[];
+  admin: string[];
 }
 
 async function fetchChangelogFromUrl(url: string): Promise<{

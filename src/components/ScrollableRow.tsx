@@ -2,7 +2,10 @@
 
 import { ChevronLeft, ChevronRight } from 'lucide-react';
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Children, useMemo } from 'react';
+import { Children, isValidElement, useMemo } from 'react';
+
+import { FLOATING_CONTROL_CLASS } from '@/components/floating-control';
+import { useListLayoutMotion } from '@/hooks/useListLayoutMotion';
 
 interface ScrollableRowProps {
   children: React.ReactNode;
@@ -17,7 +20,6 @@ export default function ScrollableRow({
   initialItemCount,
   mountBatchSize = 8,
 }: ScrollableRowProps) {
-  const containerRef = useRef<HTMLDivElement>(null);
   const childItems = useMemo(() => Children.toArray(children), [children]);
   const totalItemCount = childItems.length;
   const progressiveMounting =
@@ -28,6 +30,15 @@ export default function ScrollableRow({
   const normalizedMountBatchSize = Math.max(1, Math.floor(mountBatchSize));
   const [mountedItemCount, setMountedItemCount] = useState(
     normalizedInitialItemCount,
+  );
+  const mountedItems = childItems.slice(0, mountedItemCount);
+  const containerRef = useListLayoutMotion<HTMLDivElement>(
+    mountedItems.map((child, index) =>
+      isValidElement(child) && child.key !== null
+        ? String(child.key)
+        : `index:${index}`,
+    ),
+    { matchChildOrder: true },
   );
   const [showLeftScroll, setShowLeftScroll] = useState(false);
   const [showRightScroll, setShowRightScroll] = useState(false);
@@ -91,6 +102,7 @@ export default function ScrollableRow({
         scrollWidth - (scrollLeft + clientWidth) > threshold,
     });
   }, [
+    containerRef,
     mountMoreItems,
     mountedItemCount,
     progressiveMounting,
@@ -136,7 +148,7 @@ export default function ScrollableRow({
         animationFrameRef.current = null;
       }
     };
-  }, [checkScroll, scheduleCheckScroll]);
+  }, [checkScroll, containerRef, scheduleCheckScroll]);
 
   const handleScrollRightClick = () => {
     const container = containerRef.current;
@@ -162,7 +174,7 @@ export default function ScrollableRow({
 
   return (
     <div
-      className='relative'
+      className='relative -ml-2'
       onMouseEnter={() => {
         setIsHovered(true);
         scheduleCheckScroll();
@@ -171,14 +183,14 @@ export default function ScrollableRow({
     >
       <div
         ref={containerRef}
-        className='scrollbar-hide flex space-x-3 overflow-x-auto py-2 pb-4 pl-2 pr-5 sm:space-x-7 sm:py-2 sm:pb-6 sm:pl-2 sm:pr-6'
+        className='scrollbar-hide relative flex space-x-3 overflow-x-auto py-2 pb-4 pl-2 pr-5 sm:space-x-4 sm:py-2 sm:pb-6 sm:pl-2 sm:pr-6'
         onScroll={scheduleCheckScroll}
       >
-        {childItems.slice(0, mountedItemCount)}
+        {mountedItems}
       </div>
       {showLeftScroll && (
         <div
-          className={`absolute bottom-0 left-0 top-0 z-[600] hidden w-16 items-center justify-center transition-opacity duration-200 sm:flex ${
+          className={`absolute bottom-0 left-0 top-0 z-20 hidden w-16 items-center justify-center transition-opacity duration-200 sm:flex ${
             isHovered ? 'opacity-100' : 'opacity-0'
           }`}
           style={{
@@ -199,12 +211,9 @@ export default function ScrollableRow({
               type='button'
               aria-label='向左滚动'
               onClick={handleScrollLeftClick}
-              className='flex h-12 w-12 items-center justify-center rounded-full border border-gray-200 bg-white/95 shadow-lg transition-transform hover:scale-105 hover:bg-white dark:border-gray-600 dark:bg-gray-800/90 dark:hover:bg-gray-700'
+              className={`${FLOATING_CONTROL_CLASS} h-11 w-11`}
             >
-              <ChevronLeft
-                className='h-6 w-6 text-gray-600 dark:text-gray-300'
-                aria-hidden='true'
-              />
+              <ChevronLeft className='h-5 w-5' aria-hidden='true' />
             </button>
           </div>
         </div>
@@ -212,7 +221,7 @@ export default function ScrollableRow({
 
       {showRightScroll && (
         <div
-          className={`absolute bottom-0 right-0 top-0 z-[600] hidden w-16 items-center justify-center transition-opacity duration-200 sm:flex ${
+          className={`absolute bottom-0 right-0 top-0 z-20 hidden w-16 items-center justify-center transition-opacity duration-200 sm:flex ${
             isHovered ? 'opacity-100' : 'opacity-0'
           }`}
           style={{
@@ -233,12 +242,9 @@ export default function ScrollableRow({
               type='button'
               aria-label='向右滚动'
               onClick={handleScrollRightClick}
-              className='flex h-12 w-12 items-center justify-center rounded-full border border-gray-200 bg-white/95 shadow-lg transition-transform hover:scale-105 hover:bg-white dark:border-gray-600 dark:bg-gray-800/90 dark:hover:bg-gray-700'
+              className={`${FLOATING_CONTROL_CLASS} h-11 w-11`}
             >
-              <ChevronRight
-                className='h-6 w-6 text-gray-600 dark:text-gray-300'
-                aria-hidden='true'
-              />
+              <ChevronRight className='h-5 w-5' aria-hidden='true' />
             </button>
           </div>
         </div>

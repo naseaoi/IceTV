@@ -12,21 +12,20 @@ const baseConfig: AdminConfig = {
     Announcement: '',
     FooterText: '',
     EnableLiveEntry: false,
+    LiveAccess: 'all',
     DefaultAggregateSearch: true,
     EnableOptimization: true,
     LiveDirectConnect: false,
     AutoSwitchSource: false,
     EnableDanmaku: false,
+    EnableUserDanmaku: false,
     ...DEFAULT_RUNTIME_PARAMS,
     SourceCoverProxyMode: 'auto',
     SearchDownstreamMaxPage: 5,
     SiteInterfaceCacheTime: 300,
     DoubanProxyType: 'direct',
-    DoubanProxy: '',
     BangumiDataSource: 'server',
-    BangumiProxy: '',
     DoubanImageProxyType: 'direct',
-    DoubanImageProxy: '',
     DisableYellowFilter: false,
     FluidSearch: true,
   },
@@ -45,7 +44,9 @@ const baseConfig: AdminConfig = {
 type LoadConfigOptions = {
   adminConfig?: AdminConfig;
   getAdminConfig?: jest.Mock;
+  compareAndSetAdminConfig?: jest.Mock;
   userNames?: string[];
+  userAccess?: Record<string, { role: 'user' | 'admin' }>;
 };
 
 async function loadConfigModule(
@@ -61,8 +62,23 @@ async function loadConfigModule(
   jest.doMock('@/lib/db', () => ({
     db: {
       getAdminConfig,
+      getConfigSubscription: jest.fn().mockResolvedValue({
+        ConfigFile: '',
+        ConfigSubscribtion: { URL: '', AutoUpdate: false, LastCheck: '' },
+      }),
       getAllUsers: jest.fn().mockResolvedValue(userNames),
+      getUserAccess: jest.fn(async (username: string) =>
+        options.userAccess?.[username]
+          ? { username, ...options.userAccess[username] }
+          : null,
+      ),
       saveAdminConfig,
+      compareAndSetAdminConfig:
+        options.compareAndSetAdminConfig ||
+        (async (_expected: unknown, next: AdminConfig) => {
+          await saveAdminConfig(next);
+          return true;
+        }),
     },
   }));
   jest.doMock('@/lib/env.server', () => ({
@@ -96,6 +112,56 @@ describe('config cache persistence', () => {
     jest.restoreAllMocks();
   });
 
+  it('preserves user danmaku through self-check and public config', async () => {
+    const config = cloneBaseConfig();
+    config.SiteConfig.EnableUserDanmaku = true;
+    const { configSelfCheck, getPublicConfig } = await loadConfigModule(
+      jest.fn(),
+      { adminConfig: config },
+    );
+    expect(configSelfCheck(config).SiteConfig.EnableUserDanmaku).toBe(true);
+    expect((await getPublicConfig()).EnableUserDanmaku).toBe(true);
+    const legacy = cloneBaseConfig();
+    delete (legacy.SiteConfig as Partial<AdminConfig['SiteConfig']>)
+      .EnableUserDanmaku;
+    expect(configSelfCheck(legacy).SiteConfig.EnableUserDanmaku).toBe(false);
+  });
+
+  it('drops a default user group that no longer exists', async () => {
+    const { configSelfCheck } = await loadConfigModule(jest.fn(), {
+      adminConfig: cloneBaseConfig(),
+    });
+    const config = cloneBaseConfig();
+    config.UserConfig.Tags = [{ name: 'vip', enabledApis: [] }];
+    config.UserConfig.DefaultUserGroup = 'vip';
+    expect(configSelfCheck(config).UserConfig.DefaultUserGroup).toBe('vip');
+    config.UserConfig.Tags = [];
+    expect(configSelfCheck(config).UserConfig.DefaultUserGroup).toBeUndefined();
+  });
+
+  it.each(['groups', 'all', undefined, 'invalid'])(
+    'normalizes live access %s and keeps only true group grants',
+    async (LiveAccess) => {
+      const { configSelfCheck } = await loadConfigModule(jest.fn());
+      const config = cloneBaseConfig();
+      Object.assign(config.SiteConfig, { LiveAccess });
+      config.UserConfig.Tags = [
+        { name: 'granted', enabledApis: [], allowLive: true },
+        { name: 'denied', enabledApis: [], allowLive: false },
+        { name: 'default', enabledApis: [] },
+      ];
+      const checked = configSelfCheck(config);
+      expect(checked.SiteConfig.LiveAccess).toBe(
+        LiveAccess === 'groups' ? 'groups' : 'all',
+      );
+      expect(checked.UserConfig.Tags).toEqual([
+        { name: 'granted', enabledApis: [], allowLive: true },
+        { name: 'denied', enabledApis: [] },
+        { name: 'default', enabledApis: [] },
+      ]);
+    },
+  );
+
   it('returns cloned config objects', async () => {
     const { getConfig } = await loadConfigModule(jest.fn());
     const first = await getConfig();
@@ -104,6 +170,17 @@ describe('config cache persistence', () => {
 
     const second = await getConfig();
     expect(second.SiteConfig.SiteName).toBe('IceTV');
+  });
+
+  it('stops retrying persistence after repeated compare-and-set conflicts', async () => {
+    const compareAndSetAdminConfig = jest.fn().mockResolvedValue(false);
+    const { getConfig } = await loadConfigModule(jest.fn(), {
+      getAdminConfig: jest.fn().mockResolvedValue(null),
+      compareAndSetAdminConfig,
+    });
+
+    await expect(getConfig()).resolves.toBeTruthy();
+    expect(compareAndSetAdminConfig).toHaveBeenCalledTimes(3);
   });
 
   it('keeps cached config unchanged when save fails', async () => {
@@ -256,6 +333,32 @@ describe('config cache persistence', () => {
     expect(second[0].name).toBe('Source 1');
   });
 
+  it('hides admin-only sources from regular users', async () => {
+    const adminConfig = cloneBaseConfig();
+    adminConfig.SourceConfig = [
+      { key: 'open', name: 'Open', api: 'https://a.example', from: 'custom' },
+      {
+        key: 'relay',
+        name: 'Relay',
+        api: 'https://b.example',
+        from: 'custom',
+        adminOnly: true,
+      },
+    ];
+    const { getAvailableApiSites } = await loadConfigModule(jest.fn(), {
+      adminConfig,
+      userAccess: { alice: { role: 'user' }, bob: { role: 'admin' } },
+    });
+    const keys = async (user?: string) =>
+      (await getAvailableApiSites(user)).map((site) => site.key);
+
+    await expect(keys('alice')).resolves.toEqual(['open']);
+    await expect(keys('guest-without-record')).resolves.toEqual(['open']);
+    await expect(keys('bob')).resolves.toEqual(['open', 'relay']);
+    await expect(keys('owner-1')).resolves.toEqual(['open', 'relay']);
+    await expect(keys()).resolves.toEqual(['open', 'relay']);
+  });
+
   it('uses database users as the source of truth', async () => {
     const adminConfig = cloneBaseConfig();
     adminConfig.UserConfig.Users = [
@@ -276,29 +379,7 @@ describe('config cache persistence', () => {
 
     const config = await getConfig();
 
-    expect(config.UserConfig.Users).toEqual([
-      {
-        username: 'owner-1',
-        role: 'owner',
-        banned: false,
-        enabledApis: undefined,
-        tags: undefined,
-      },
-      {
-        username: 'db-user',
-        role: 'admin',
-        banned: true,
-        enabledApis: undefined,
-        tags: ['vip'],
-      },
-      {
-        username: 'new-user',
-        role: 'user',
-        banned: false,
-        enabledApis: undefined,
-        tags: undefined,
-      },
-    ]);
+    expect(config.UserConfig.Users).toBeUndefined();
   });
 
   it('rejects stale config writes', async () => {
@@ -314,6 +395,7 @@ describe('config cache persistence', () => {
 
     const config = await getConfig();
     config.SiteConfig.Announcement = 'local change';
+    saveAdminConfig.mockClear();
 
     await expect(saveConfig(config)).rejects.toThrow(ConfigConflictError);
     expect(saveAdminConfig).not.toHaveBeenCalled();
@@ -433,26 +515,38 @@ describe('config cache persistence', () => {
     });
   });
 
-  it('clears custom proxy values from stored site config', async () => {
+  it('normalizes site proxy modes and drops unknown site settings', async () => {
     const { configSelfCheck } = await loadConfigModule(jest.fn());
     const config = cloneBaseConfig();
-    config.SiteConfig.DoubanProxyType = 'custom';
-    config.SiteConfig.DoubanProxy = 'https://data.example/fetch?url=';
-    config.SiteConfig.DoubanImageProxyType = 'custom';
-    config.SiteConfig.DoubanImageProxy = 'https://image.example/fetch?url=';
-    config.SiteConfig.BangumiDataSource = 'custom';
-    config.SiteConfig.BangumiProxy = 'https://bangumi.example/fetch?url=';
+    Object.assign(config.SiteConfig, {
+      DoubanProxyType: 'custom',
+      DoubanImageProxyType: 'custom',
+      BangumiDataSource: 'custom',
+      DoubanProxy: 'https://data.example/fetch?url=',
+      DoubanImageProxy: 'https://image.example/fetch?url=',
+      BangumiProxy: 'https://bangumi.example/fetch?url=',
+      UnknownSetting: true,
+    });
 
     const checked = configSelfCheck(config);
 
-    expect(checked.SiteConfig).toMatchObject({
+    expect(checked.SiteConfig).toEqual({
+      ...baseConfig.SiteConfig,
       DoubanProxyType: 'direct',
-      DoubanProxy: '',
       DoubanImageProxyType: 'direct',
-      DoubanImageProxy: '',
       BangumiDataSource: 'direct',
-      BangumiProxy: '',
     });
+  });
+
+  it('preserves all supported site settings during config self check', async () => {
+    const { configSelfCheck } = await loadConfigModule(jest.fn());
+    const config = cloneBaseConfig();
+    config.SiteConfig.AnnouncementVersion = 'announcement-version';
+    config.SiteConfig.AnnouncementPublishedAt = 123;
+    config.SiteConfig.DisableYellowFilter = true;
+    const originalSiteConfig = { ...config.SiteConfig };
+
+    expect(configSelfCheck(config).SiteConfig).toEqual(originalSiteConfig);
   });
 
   it('keeps disabled fluid search config disabled', async () => {

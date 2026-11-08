@@ -9,12 +9,18 @@ import { DoubanItem } from '@/lib/types';
 
 import { HomeInitialData } from './home.types';
 import { HOME_RECOMMENDATION_REVALIDATE_SECONDS } from './home-cache';
+import {
+  type HomeHeroItem,
+  parseDoubanCardSubtitle,
+  pickHomeHeroItems,
+} from './home-hero';
 
 interface DoubanCategoryApiResponse {
   items: Array<{
     id: string;
     title: string;
     card_subtitle: string;
+    episodes_info?: string;
     pic: {
       large: string;
       normal: string;
@@ -32,6 +38,21 @@ const homeRecommendations = createSharedServerCache<DoubanCategoryApiResponse>({
   staleMs: HOME_RECOMMENDATION_REVALIDATE_SECONDS * 1000,
 });
 
+const HERO_INTRO_MAX_LENGTH = 300;
+const HERO_INTRO_WAIT_MS = 800;
+
+const heroIntros = createSharedServerCache<string>({
+  name: 'home-douban-intro-v1',
+  ...getServerCacheBudget('douban-route'),
+  freshMs: 24 * 60 * 60 * 1000,
+  staleMs: 6 * 24 * 60 * 60 * 1000,
+});
+
+interface RecentHotItem extends DoubanItem {
+  subtitle: string;
+  episodesInfo: string;
+}
+
 async function getServerDoubanRecentHot(params: {
   kind: 'movie' | 'tv';
   category: string;
@@ -39,7 +60,7 @@ async function getServerDoubanRecentHot(params: {
   imageProxyType: string;
   limit?: number;
   start?: number;
-}): Promise<DoubanItem[]> {
+}): Promise<RecentHotItem[]> {
   const {
     kind,
     category,
@@ -62,7 +83,61 @@ async function getServerDoubanRecentHot(params: {
     ),
     rate: item.rating?.value ? item.rating.value.toFixed(1) : '',
     year: item.card_subtitle?.match(/(\d{4})/)?.[1] || '',
+    subtitle: item.card_subtitle || '',
+    episodesInfo: item.episodes_info || '',
   }));
+}
+
+function toDoubanItem({ id, title, poster, rate, year }: RecentHotItem) {
+  return { id, title, poster, rate, year };
+}
+
+function loadHeroIntroDetail(target: string) {
+  return fetchDoubanData<{ intro?: string }>(target, {
+    cache: 'no-store',
+  }).then((detail) =>
+    (detail.intro || '')
+      .replace(/\s+/g, ' ')
+      .trim()
+      .slice(0, HERO_INTRO_MAX_LENGTH),
+  );
+}
+
+// 简介只等短暂预算：共享缓存命中即刻返回，冷启动回源超时则本次留空，加载在后台继续写缓存
+async function getHeroIntro(item: {
+  id: string;
+  type?: string;
+}): Promise<string | undefined> {
+  if (!/^\d+$/.test(item.id)) return undefined;
+  const kind = item.type === 'movie' ? 'movie' : 'tv';
+  const target = `https://m.douban.com/rexxar/api/v2/${kind}/${item.id}`;
+  const task = heroIntros.getOrLoad(target, () => loadHeroIntroDetail(target));
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const timeout = new Promise<undefined>((resolve) => {
+    timer = setTimeout(() => resolve(undefined), HERO_INTRO_WAIT_MS);
+  });
+  try {
+    return (await Promise.race([task, timeout])) || undefined;
+  } catch {
+    return undefined;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+function buildHeroItems(
+  hotMovies: RecentHotItem[],
+  hotTvShows: RecentHotItem[],
+): Promise<HomeHeroItem[]> {
+  const picked = pickHomeHeroItems(hotMovies, hotTvShows);
+  return Promise.all(
+    picked.map(async ({ subtitle, episodesInfo, ...item }) => ({
+      ...item,
+      ...parseDoubanCardSubtitle(subtitle),
+      episodesInfo: episodesInfo || undefined,
+      intro: await getHeroIntro(item),
+    })),
+  );
 }
 
 export async function getHomeInitialData(): Promise<HomeInitialData> {
@@ -94,9 +169,10 @@ export async function getHomeInitialData(): Promise<HomeInitialData> {
     ]);
 
   return {
-    hotMovies,
-    hotTvShows,
-    hotVarietyShows,
+    hotMovies: hotMovies.map(toDoubanItem),
+    hotTvShows: hotTvShows.map(toDoubanItem),
+    hotVarietyShows: hotVarietyShows.map(toDoubanItem),
     bangumiCalendarData,
+    heroItems: await buildHeroItems(hotMovies, hotTvShows),
   };
 }

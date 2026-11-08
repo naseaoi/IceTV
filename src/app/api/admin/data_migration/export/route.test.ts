@@ -1,8 +1,11 @@
 /** @jest-environment node */
 
 import type { NextRequest } from 'next/server';
+import { gunzipSync } from 'zlib';
 
 import { installWebPolyfills } from '@/app/api/test-utils/web-polyfills';
+import { userDanmaku } from '@/lib/__tests__/__fixtures__/user-danmaku-contract';
+import { videoReview } from '@/lib/__tests__/__fixtures__/video-review-contract';
 
 type ExportRouteModule = typeof import('./route');
 
@@ -19,12 +22,36 @@ const adminConfig = {
 function makeDb(searchHistory: string[]) {
   return {
     getAdminConfig: jest.fn().mockResolvedValue(adminConfig),
+    getConfigSubscription: jest.fn().mockResolvedValue({
+      ConfigFile: '{}',
+      ConfigSubscribtion: {
+        URL: 'https://example.com/sub',
+        AutoUpdate: true,
+        LastCheck: 'checked',
+      },
+    }),
     getAllUsersWithPasswords: jest.fn().mockResolvedValue({}),
     getAllSourceRouteStatBuckets: jest.fn().mockResolvedValue([]),
-    getAllInviteCodeUsage: jest.fn().mockResolvedValue({}),
+    getAllInviteCodes: jest.fn().mockResolvedValue([]),
+    getAllUserAccess: jest.fn().mockResolvedValue([]),
     getAllUsers: jest.fn().mockResolvedValue([]),
     getAllPlayRecords: jest.fn().mockResolvedValue({}),
     getAllFavorites: jest.fn().mockResolvedValue({}),
+    getUserSocialData: jest.fn().mockResolvedValue({
+      follows: [],
+      likes: [],
+      reports: [],
+      profile: {
+        username: 'owner-1',
+        profile_id: 'AbCdEf012345',
+        avatar_seed: 'Avatar012345',
+        nickname: null,
+        favorites_public: false,
+        updated_at: 1,
+      },
+    }),
+    getAllUserDanmaku: jest.fn().mockResolvedValue([userDanmaku]),
+    getAllVideoReviews: jest.fn().mockResolvedValue([videoReview]),
     getSearchHistory: jest.fn().mockResolvedValue(searchHistory),
     getAllSkipConfigs: jest.fn().mockResolvedValue({}),
     getAllPlaybackSessions: jest.fn().mockResolvedValue([]),
@@ -88,7 +115,29 @@ describe('data migration export route', () => {
     expect(response.headers.get('Content-Disposition')).toMatch(
       /icetv-backup-\d{8}-\d{6}\.dat/,
     );
-    expect((await response.text()).length).toBeGreaterThan(0);
+    const { SimpleCrypto } = require('@/lib/crypto');
+    const compressed = SimpleCrypto.decrypt(
+      await response.text(),
+      'strong-password',
+    );
+    const backup = JSON.parse(
+      gunzipSync(Buffer.from(compressed, 'base64')).toString('utf8'),
+    );
+    expect(backup.data.userData['owner-1'].userDanmaku).toEqual([userDanmaku]);
+    expect(backup.data.adminConfig.ConfigFile).toBe('{}');
+    expect(backup.data.adminConfig.ConfigSubscribtion.URL).toBe(
+      'https://example.com/sub',
+    );
+    expect(backup.data.userData['owner-1'].videoReviews).toEqual([videoReview]);
+    expect(backup.data.userData['owner-1'].profile.profile_id).toBe(
+      'AbCdEf012345',
+    );
+    expect(backup.data.userData['owner-1'].profile.avatar_seed).toBe(
+      'Avatar012345',
+    );
+    expect(backup.data.userData['owner-1'].follows).toEqual([]);
+    expect(backup.data.userData['owner-1'].likes).toEqual([]);
+    expect(backup.data.userData['owner-1'].reports).toEqual([]);
   });
 
   it('原始数据超过解压上限时拒绝导出', async () => {

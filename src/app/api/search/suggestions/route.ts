@@ -7,6 +7,8 @@ import {
 import { isGuardFailure, requireActiveUser } from '@/lib/api-auth';
 import { getAvailableApiSites, getConfigForRead } from '@/lib/config';
 import { searchFirstPageFromApi } from '@/lib/downstream';
+import { getSourceHealthTiers } from '@/lib/source-health.server';
+import { rankSourcesByHealth } from '@/lib/source-quality-policy';
 import { yellowWords } from '@/lib/yellow';
 import { AdminConfig } from '@/types/admin';
 
@@ -60,7 +62,11 @@ async function generateSuggestions(
 > {
   const queryLower = query.toLowerCase();
 
-  const apiSites = await getAvailableApiSites(username, config);
+  const [availableSites, sourceHealthTiers] = await Promise.all([
+    getAvailableApiSites(username, config),
+    getSourceHealthTiers(),
+  ]);
+  const apiSites = rankSourcesByHealth(availableSites, sourceHealthTiers);
   let realKeywords: string[] = [];
 
   if (apiSites.length > 0) {

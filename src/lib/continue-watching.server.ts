@@ -8,7 +8,10 @@ import type { PlayRecord } from '@/lib/types';
 
 const MAX_CONTINUE_WATCHING_SKELETON_COUNT = 8;
 
-export async function getContinueWatchingSkeletonCount() {
+export async function getContinueWatchingSkeletonCount({
+  cookieName = 'cw_count',
+  limit = MAX_CONTINUE_WATCHING_SKELETON_COUNT,
+}: { cookieName?: 'cw_count' | 'cw_page_count'; limit?: number } = {}) {
   const cookieStore = await cookies();
   const authCookie = cookieStore.get('auth')?.value;
   if (!authCookie) {
@@ -20,13 +23,13 @@ export async function getContinueWatchingSkeletonCount() {
     return 0;
   }
 
-  const rawCount = Number(cookieStore.get('cw_count')?.value || 0);
+  const rawCount = Number(cookieStore.get(cookieName)?.value || 0);
 
   if (!Number.isFinite(rawCount) || rawCount <= 0) {
     return 0;
   }
 
-  return Math.min(Math.floor(rawCount), MAX_CONTINUE_WATCHING_SKELETON_COUNT);
+  return Math.min(Math.floor(rawCount), limit);
 }
 
 export interface ContinueWatchingInitialData {

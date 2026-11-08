@@ -1,12 +1,17 @@
 ﻿import { NextRequest, NextResponse } from 'next/server';
 
-import { isLiveEntryEnabled } from '@/features/live/lib/live';
+import {
+  getProxySourceKey,
+  resolveProxyUserAgent,
+} from '@/app/api/proxy/utils';
+import { getOptionalActiveUser } from '@/lib/api-auth';
 import { getConfigForRead } from '@/lib/config';
 import {
   fetchResponseThroughProxy,
   getProxyUrlForTarget,
 } from '@/lib/http-proxy-json';
-import { authorizeProxyRequest } from '@/lib/proxy-auth';
+import { canUserWatchLive } from '@/lib/live-access.server';
+import { resolveProxyAuthorization } from '@/lib/proxy-auth';
 import {
   readArrayBufferLimited,
   ResponseSizeLimitError,
@@ -18,8 +23,6 @@ import {
   UrlValidationError,
   validateProxyUrlForRequest,
 } from '@/lib/url-guard';
-
-import { getProxySourceKey, resolveProxyUserAgent } from '../utils';
 
 export const runtime = 'nodejs';
 
@@ -34,13 +37,25 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ error: 'Missing url' }, { status: 400 });
   }
 
-  const authFailure = await authorizeProxyRequest(request, 'key', url);
-  if (authFailure) {
-    return authFailure;
+  const authorization = await resolveProxyAuthorization(request, 'key', url);
+  if (!authorization.authorized) {
+    return authorization.response;
   }
 
-  if (isLiveStream && !(await isLiveEntryEnabled())) {
-    return NextResponse.json({ error: '直播未开启' }, { status: 404 });
+  if (isLiveStream) {
+    const config = await getConfigForRead();
+    if (config.SiteConfig.EnableLiveEntry !== true) {
+      return NextResponse.json({ error: '直播未开启' }, { status: 404 });
+    }
+    const username =
+      authorization.via === 'session'
+        ? authorization.username
+        : config.SiteConfig.LiveAccess === 'groups'
+          ? (await getOptionalActiveUser(request))?.username
+          : undefined;
+    if (!(await canUserWatchLive(username, config))) {
+      return NextResponse.json({ error: '没有直播权限' }, { status: 403 });
+    }
   }
 
   const validation = await validateProxyUrlForRequest(url);
@@ -98,6 +113,7 @@ export async function GET(request: NextRequest) {
       timeoutMs,
     });
     if (!response.ok) {
+      await response.body?.cancel().catch(() => {});
       return NextResponse.json(
         { error: 'Failed to fetch key' },
         { status: 500 },

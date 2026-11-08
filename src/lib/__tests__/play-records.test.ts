@@ -1,5 +1,6 @@
 import {
   hasPlayRecordUpdate,
+  isTrackingEnabled,
   markPlayRecordUpdateRead,
   mergePlayRecordUpdateBaseline,
   normalizePlayRecordLimit,
@@ -9,6 +10,56 @@ import {
 import type { PlayRecord } from '@/lib/types';
 
 describe('play record selection', () => {
+  it.each([undefined, 'ongoing', 'ended'] as const)(
+    '状态 %s 下显式开关优先',
+    (series_status) => {
+      expect(isTrackingEnabled({ series_status })).toBe(
+        series_status !== 'ended',
+      );
+      expect(isTrackingEnabled({ series_status, tracking_enabled: true })).toBe(
+        true,
+      );
+      expect(
+        isTrackingEnabled({ series_status, tracking_enabled: false }),
+      ).toBe(false);
+    },
+  );
+
+  it('完结默认隐藏更新，手动开启恢复更新', () => {
+    const record = {
+      index: 1,
+      total_episodes: 12,
+      update_baseline_episodes: 10,
+      series_status: 'ended',
+    } as PlayRecord;
+    expect(hasPlayRecordUpdate(record)).toBe(false);
+    expect(hasPlayRecordUpdate({ ...record, tracking_enabled: true })).toBe(
+      true,
+    );
+  });
+
+  it('新状态覆盖旧状态，未知详情保留旧状态与手动开关', () => {
+    const previous = {
+      index: 1,
+      total_episodes: 12,
+      series_status: 'ended',
+      tracking_enabled: true,
+    } as PlayRecord;
+    expect(
+      mergePlayRecordUpdateBaseline(previous, {
+        ...previous,
+        series_status: undefined,
+        tracking_enabled: undefined,
+      }),
+    ).toMatchObject({ series_status: 'ended', tracking_enabled: true });
+    expect(
+      mergePlayRecordUpdateBaseline(previous, {
+        ...previous,
+        series_status: 'ongoing',
+      }).series_status,
+    ).toBe('ongoing');
+  });
+
   it('limits invalid and oversized values', () => {
     expect(normalizePlayRecordLimit('invalid')).toBe(10);
     expect(normalizePlayRecordLimit(0)).toBe(10);

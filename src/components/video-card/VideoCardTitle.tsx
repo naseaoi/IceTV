@@ -3,10 +3,14 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 
+import { POSTER_CARD_TITLE_ROW_CLASS } from '@/components/poster-card-layout';
+
 import { noSelectStyle, preventContextMenu } from './constants';
 
 interface VideoCardTitleProps {
   title: string;
+  // 标题行几何类，需与对应骨架一致
+  className?: string;
 }
 
 interface TooltipAnchor {
@@ -22,7 +26,10 @@ interface TooltipLayout {
 const TOOLTIP_VIEWPORT_MARGIN = 8;
 const TOOLTIP_SHOW_DELAY_MS = 100;
 
-export function VideoCardTitle({ title }: VideoCardTitleProps) {
+export function VideoCardTitle({
+  title,
+  className = POSTER_CARD_TITLE_ROW_CLASS,
+}: VideoCardTitleProps) {
   const tooltipRef = useRef<HTMLDivElement>(null);
   const showTimerRef = useRef<number | null>(null);
   const [anchor, setAnchor] = useState<TooltipAnchor | null>(null);
@@ -83,12 +90,12 @@ export function VideoCardTitle({ title }: VideoCardTitleProps) {
   return (
     <div
       data-video-card-title
-      className='mt-2 text-center'
+      className={className}
       style={noSelectStyle}
       onContextMenu={preventContextMenu}
     >
       <span
-        className='block truncate text-sm font-semibold text-gray-900 transition-colors duration-300 ease-in-out group-hover:text-green-600 dark:text-gray-100 dark:group-hover:text-green-400'
+        className='block truncate font-medium text-gray-800 transition-colors duration-200 group-hover:text-brand-600 dark:text-gray-200 dark:group-hover:text-brand-300'
         style={noSelectStyle}
         onContextMenu={preventContextMenu}
         onMouseEnter={showTooltip}

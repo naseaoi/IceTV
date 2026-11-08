@@ -3,8 +3,8 @@
 import { ReactNode } from 'react';
 
 import {
-  POSTER_GRID_BASE_CLASS,
-  POSTER_GRID_ROW_GAP,
+  POSTER_GRID_CLASS,
+  POSTER_VIRTUAL_GRID_WITH_SUBTITLE_LAYOUT,
 } from '@/components/poster-grid-layout';
 import {
   type VirtualizedGridLayoutConfig,
@@ -19,21 +19,6 @@ interface VirtualizedSearchGridProps<T> {
   overscanRows?: number;
 }
 
-const SEARCH_GRID_FALLBACK_CLASS = `${POSTER_GRID_BASE_CLASS} px-0 sm:grid-cols-[repeat(auto-fill,_minmax(11rem,_1fr))] sm:gap-x-8 sm:px-2`;
-
-const SEARCH_GRID_LAYOUT = {
-  mobileColumnCount: 3,
-  mobileWideBreakpoint: 480,
-  mobileWideColumnCount: 4,
-  mobileColumnGap: 12,
-  mobileRowGap: POSTER_GRID_ROW_GAP,
-  mobileContentHeight: 28,
-  desktopColumnGap: 32,
-  desktopRowGap: POSTER_GRID_ROW_GAP,
-  desktopMinColumnWidth: 176,
-  desktopContentHeight: 28,
-};
-
 export function VirtualizedSearchGrid<T>({
   items,
   getKey,
@@ -46,9 +31,9 @@ export function VirtualizedSearchGrid<T>({
       items={items}
       getKey={getKey}
       renderItem={renderItem}
-      layout={{ ...SEARCH_GRID_LAYOUT, ...layout }}
+      layout={{ ...POSTER_VIRTUAL_GRID_WITH_SUBTITLE_LAYOUT, ...layout }}
       overscanRows={overscanRows}
-      fallbackClassName={SEARCH_GRID_FALLBACK_CLASS}
+      fallbackClassName={POSTER_GRID_CLASS}
       fallbackItemClassName='w-full'
     />
   );

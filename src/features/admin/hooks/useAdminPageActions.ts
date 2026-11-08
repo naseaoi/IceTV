@@ -71,8 +71,8 @@ export function useAdminPageActions(options: UseAdminPageActionsOptions) {
 
   const resetConfig = useCallback(async () => {
     await adminGet('/api/admin/reset', '重置失败');
-    showSuccess('重置成功，请刷新页面！', showAlert);
-  }, [showAlert]);
+    showSuccess('重置成功，请刷新页面！');
+  }, []);
 
   return { fetchConfig, resetConfig };
 }

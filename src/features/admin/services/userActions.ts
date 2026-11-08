@@ -1,27 +1,28 @@
 ﻿import { randomBytes } from 'crypto';
 
 import {
-  findInactiveUsers,
-  MAX_INACTIVE_DAYS,
-  MIN_INACTIVE_DAYS,
-  parseInactiveDays,
-  resolveConfirmedDeletions,
-} from '@/features/admin/services/inactiveUsers';
+  readInactiveConfirmation,
+  signInactiveConfirmation,
+} from '@/features/admin/services/inactiveConfirmation';
+import { parseInactiveDays } from '@/features/admin/services/inactiveUsers';
 import {
   buildInviteCode,
   CUSTOM_INVITE_CODE_RULE_MESSAGE,
   generateInviteCode,
   INVITE_MAX_USES_RULE_MESSAGE,
-  isInviteCodeUsable,
   isValidCustomInviteCode,
+  MAX_INVITE_BATCH_SIZE,
   MAX_INVITE_CODES,
   MAX_INVITE_VALID_DAYS,
-  mergeInviteCodeUsage,
   MIN_INVITE_VALID_DAYS,
   normalizeInviteCode,
   parseInviteMaxUses,
   parseInviteValidDays,
 } from '@/features/admin/services/inviteCodes';
+import {
+  matchingUsernames,
+  selectionQuery,
+} from '@/features/admin/services/userSelection';
 import {
   ConfigConflictError,
   getConfig,
@@ -29,6 +30,7 @@ import {
   saveConfig,
 } from '@/lib/config';
 import { db } from '@/lib/db';
+import { getOwnerUsername } from '@/lib/env.server';
 import { validateAccountPassword } from '@/lib/password-policy';
 import { assertValidUsername, normalizeUsername } from '@/lib/username';
 
@@ -48,8 +50,10 @@ const ACTIONS = [
   'previewInactiveUsers',
   'deleteInactiveUsers',
   'setRequireInviteCode',
+  'setDefaultUserGroup',
   'createInviteCode',
   'deleteInviteCode',
+  'purgeInactiveInviteCodes',
 ] as const;
 
 const TARGETLESS_ACTIONS = [
@@ -59,8 +63,10 @@ const TARGETLESS_ACTIONS = [
   'previewInactiveUsers',
   'deleteInactiveUsers',
   'setRequireInviteCode',
+  'setDefaultUserGroup',
   'createInviteCode',
   'deleteInviteCode',
+  'purgeInactiveInviteCodes',
 ];
 
 type AdminUserActionResponse = {
@@ -90,22 +96,16 @@ function toActionResponse(
   return actionResponse(body, init?.status, init?.headers);
 }
 
-// 邀请码从配置里移除后一并清掉用量行，避免重建同名码继承旧次数
-async function dropInviteCodeUsage(codes: string[]): Promise<void> {
-  for (const code of codes) {
-    try {
-      await db.deleteInviteCodeUsage(code);
-    } catch (error) {
-      console.warn('清理邀请码用量失败:', error);
-    }
-  }
+export async function handleAdminUserAction(
+  context: AdminUserActionContext,
+): Promise<AdminUserActionResponse> {
+  return runAdminUserAction(context, 0);
 }
 
-export async function handleAdminUserAction({
-  body,
-  operatorUsername,
-  operatorRole,
-}: AdminUserActionContext): Promise<AdminUserActionResponse> {
+async function runAdminUserAction(
+  { body, operatorUsername, operatorRole }: AdminUserActionContext,
+  attempt: number,
+): Promise<AdminUserActionResponse> {
   const username = normalizeUsername(operatorUsername);
 
   try {
@@ -148,12 +148,9 @@ export async function handleAdminUserAction({
 
     let targetEntry: any = null;
     let isTargetAdmin = false;
-    let usageCodesToDrop: string[] = [];
 
     if (!TARGETLESS_ACTIONS.includes(action) && targetUsername) {
-      targetEntry = adminConfig.UserConfig.Users.find(
-        (u) => u.username === targetUsername,
-      );
+      targetEntry = await db.getUserAccess(targetUsername);
 
       if (targetEntry?.role === 'owner' && operatorRole !== 'owner') {
         return toActionResponse(
@@ -173,6 +170,65 @@ export async function handleAdminUserAction({
       }
 
       isTargetAdmin = targetEntry?.role === 'admin';
+    }
+
+    if (
+      (action === 'previewInactiveUsers' &&
+        (body as { countOnly?: boolean }).countOnly) ||
+      (action === 'deleteInactiveUsers' &&
+        (body as { confirmation?: unknown }).confirmation)
+    ) {
+      const inactiveDays = parseInactiveDays(
+        (body as { inactiveDays?: unknown }).inactiveDays,
+      );
+      if (inactiveDays === null)
+        return actionResponse({ error: '不活跃天数错误' }, 400);
+      let confirmation;
+      try {
+        confirmation =
+          action === 'deleteInactiveUsers'
+            ? readInactiveConfirmation(
+                (body as { confirmation: unknown }).confirmation,
+                username,
+                inactiveDays,
+              )
+            : null;
+      } catch (error) {
+        return actionResponse({ error: (error as Error).message }, 400);
+      }
+      const before =
+        confirmation?.before ?? Date.now() - inactiveDays * 86_400_000;
+      const query = {
+        ownerUsername: getOwnerUsername() || '',
+        operatorUsername: username,
+        inactiveBefore: before,
+        sort: 'username' as const,
+        limit: 100,
+      };
+      if (!confirmation) {
+        const page = await db.getAdminUserPage({ ...query, limit: 1 });
+        return actionResponse({
+          count: page.total,
+          confirmation: signInactiveConfirmation({
+            before,
+            count: page.total,
+            operator: username,
+            days: inactiveDays,
+          }),
+        });
+      }
+      const targets = await matchingUsernames(query);
+      let deletedCount = 0;
+      for (const target of targets) {
+        if (await db.deleteUserIfInactive(target, before, username))
+          deletedCount += 1;
+      }
+      invalidateConfigCache();
+      return actionResponse({
+        ok: true,
+        deletedCount,
+        skippedCount: Math.max(0, confirmation.count - deletedCount),
+      });
     }
 
     switch (action) {
@@ -203,23 +259,22 @@ export async function handleAdminUserAction({
         if (passwordError) {
           return toActionResponse({ error: passwordError }, { status: 400 });
         }
-        await db.registerUser(cleanTargetUsername, targetPassword);
-
-        const { userGroup } = body as { userGroup?: string };
-
-        const newUser: any = {
-          username: cleanTargetUsername,
-          role: 'user',
-        };
-
-        if (userGroup && userGroup.trim()) {
-          newUser.tags = [userGroup];
+        const { userGroup } = body as { userGroup?: unknown };
+        if (
+          userGroup !== undefined &&
+          userGroup !== '' &&
+          (typeof userGroup !== 'string' ||
+            !adminConfig.UserConfig.Tags?.some((tag) => tag.name === userGroup))
+        ) {
+          return toActionResponse({ error: '用户组不存在' }, { status: 400 });
         }
-
-        adminConfig.UserConfig.Users.push(newUser);
-        targetEntry =
-          adminConfig.UserConfig.Users[adminConfig.UserConfig.Users.length - 1];
-        break;
+        await db.registerUser(
+          cleanTargetUsername,
+          targetPassword,
+          undefined,
+          userGroup ? [userGroup as string] : undefined,
+        );
+        return actionResponse({ ok: true });
       }
       case 'ban': {
         if (!targetEntry) {
@@ -320,7 +375,7 @@ export async function handleAdminUserAction({
         }
 
         await db.changePassword(targetUsername!, targetPassword);
-        break;
+        return actionResponse({ ok: true });
       }
       case 'deleteUser': {
         if (!targetEntry) {
@@ -338,16 +393,13 @@ export async function handleAdminUserAction({
           );
         }
 
-        await db.deleteUser(targetUsername!);
+        await db.deleteUser(targetUsername!, {
+          operatorUsername: username,
+          operatorRole,
+          excludeSelf: true,
+        });
 
-        const userIndex = adminConfig.UserConfig.Users.findIndex(
-          (u) => u.username === targetUsername,
-        );
-        if (userIndex > -1) {
-          adminConfig.UserConfig.Users.splice(userIndex, 1);
-        }
-
-        break;
+        return actionResponse({ ok: true });
       }
       case 'updateUserApis': {
         if (!targetEntry) {
@@ -376,10 +428,11 @@ export async function handleAdminUserAction({
         break;
       }
       case 'userGroup': {
-        const { groupAction, groupName, enabledApis } = body as {
+        const { groupAction, groupName, enabledApis, allowLive } = body as {
           groupAction: 'add' | 'edit' | 'delete';
           groupName: string;
           enabledApis?: string[];
+          allowLive?: boolean;
         };
 
         if (!adminConfig.UserConfig.Tags) {
@@ -397,6 +450,7 @@ export async function handleAdminUserAction({
             adminConfig.UserConfig.Tags.push({
               name: groupName,
               enabledApis: enabledApis || [],
+              ...(allowLive === true ? { allowLive: true } : {}),
             });
             break;
           }
@@ -410,8 +464,10 @@ export async function handleAdminUserAction({
                 { status: 404 },
               );
             }
-            adminConfig.UserConfig.Tags[groupIndex].enabledApis =
-              enabledApis || [];
+            const group = adminConfig.UserConfig.Tags[groupIndex];
+            group.enabledApis = enabledApis || [];
+            if (allowLive === true) group.allowLive = true;
+            else delete group.allowLive;
             break;
           }
           case 'delete': {
@@ -425,24 +481,7 @@ export async function handleAdminUserAction({
               );
             }
 
-            const affectedUsers: string[] = [];
-            adminConfig.UserConfig.Users.forEach((user) => {
-              if (user.tags && user.tags.includes(groupName)) {
-                affectedUsers.push(user.username);
-                user.tags = user.tags.filter((tag) => tag !== groupName);
-                if (user.tags.length === 0) {
-                  delete user.tags;
-                }
-              }
-            });
-
             adminConfig.UserConfig.Tags.splice(groupIndex, 1);
-
-            console.log(
-              `删除用户组 "${groupName}"，影响用户: ${
-                affectedUsers.length > 0 ? affectedUsers.join(', ') : '无'
-              }`,
-            );
 
             break;
           }
@@ -481,144 +520,83 @@ export async function handleAdminUserAction({
         break;
       }
       case 'batchUpdateUserGroups': {
-        const { usernames: rawUsernames, userGroups } = body as {
-          usernames: string[];
-          userGroups: string[];
+        const { selection, usernames, userGroups, dryRun } = body as {
+          selection?: unknown;
+          usernames?: unknown;
+          userGroups?: unknown;
+          dryRun?: boolean;
         };
-
         if (
-          !rawUsernames ||
-          !Array.isArray(rawUsernames) ||
-          rawUsernames.length === 0
+          !selection &&
+          Array.isArray(usernames) &&
+          operatorRole !== 'owner'
         ) {
-          return toActionResponse({ error: '缺少用户名列表' }, { status: 400 });
-        }
-
-        const usernames = rawUsernames.map((item) => normalizeUsername(item));
-
-        if (operatorRole !== 'owner') {
-          for (const targetUsername of usernames) {
-            const targetUser = adminConfig.UserConfig.Users.find(
-              (u) => u.username === targetUsername,
-            );
-            if (targetUser?.role === 'owner') {
-              return toActionResponse(
-                { error: `管理员无法操作站长 ${targetUsername}` },
-                { status: 403 },
+          for (const raw of usernames) {
+            if (typeof raw !== 'string')
+              return actionResponse({ error: '用户名列表格式错误' }, 400);
+            const target = await db.getUserAccess(normalizeUsername(raw));
+            if (target?.role === 'owner')
+              return actionResponse(
+                { error: `管理员无法操作站长 ${target.username}` },
+                403,
               );
-            }
-            if (
-              targetUser &&
-              targetUser.role === 'admin' &&
-              targetUsername !== username
-            ) {
-              return toActionResponse(
-                { error: `管理员无法操作其他管理员 ${targetUsername}` },
-                { status: 403 },
+            if (target?.role === 'admin' && target.username !== username)
+              return actionResponse(
+                { error: `管理员无法操作其他管理员 ${target.username}` },
+                403,
               );
-            }
           }
         }
-
-        for (const targetUsername of usernames) {
-          const targetUser = adminConfig.UserConfig.Users.find(
-            (u) => u.username === targetUsername,
-          );
-          if (targetUser) {
-            if (userGroups && userGroups.length > 0) {
-              targetUser.tags = userGroups;
-            } else {
-              delete targetUser.tags;
-            }
-          }
+        if (
+          !Array.isArray(userGroups) ||
+          userGroups.some(
+            (group) =>
+              typeof group !== 'string' ||
+              !adminConfig.UserConfig.Tags?.some((tag) => tag.name === group),
+          )
+        ) {
+          return actionResponse({ error: '用户组不存在' }, 400);
         }
-
-        break;
-      }
-      case 'previewInactiveUsers': {
-        const inactiveDays = parseInactiveDays(
-          (body as { inactiveDays?: unknown }).inactiveDays,
+        let query;
+        try {
+          query = selectionQuery(
+            selection || { mode: 'explicit', usernames },
+            username,
+          );
+        } catch (error) {
+          return actionResponse({ error: (error as Error).message }, 400);
+        }
+        const targets = await matchingUsernames(query);
+        const entries = await Promise.all(
+          targets.map((target) => db.getUserAccess(target)),
         );
-        if (inactiveDays === null) {
-          return toActionResponse(
-            {
-              error: `不活跃天数需在 ${MIN_INACTIVE_DAYS}-${MAX_INACTIVE_DAYS} 之间`,
-            },
-            { status: 400 },
-          );
-        }
-
-        const candidates = findInactiveUsers({
-          users: adminConfig.UserConfig.Users,
-          lastActiveAt: await db.getAllUserLastActive(),
-          inactiveDays,
-          operatorUsername: username,
+        const eligible = entries.filter(
+          (user) =>
+            user &&
+            user.username !== username &&
+            user.role !== 'owner' &&
+            (operatorRole === 'owner' || user.role !== 'admin'),
+        );
+        const skippedCount = targets.length - eligible.length;
+        if (dryRun)
+          return actionResponse({
+            affectedCount: eligible.length,
+            skippedCount,
+          });
+        const processedCount = await db.updateUserAccess(
+          eligible.map((user) => user!.username),
+          { tags: userGroups as string[] },
+          { operatorUsername: username, operatorRole, excludeSelf: true },
+        );
+        return actionResponse({
+          ok: true,
+          processedCount,
+          skippedCount: targets.length - processedCount,
         });
-
-        return toActionResponse(
-          { candidates },
-          { headers: { 'Cache-Control': 'no-store' } },
-        );
       }
-      case 'deleteInactiveUsers': {
-        const { usernames: rawUsernames } = body as { usernames?: unknown };
-        const inactiveDays = parseInactiveDays(
-          (body as { inactiveDays?: unknown }).inactiveDays,
-        );
-        if (inactiveDays === null) {
-          return toActionResponse(
-            {
-              error: `不活跃天数需在 ${MIN_INACTIVE_DAYS}-${MAX_INACTIVE_DAYS} 之间`,
-            },
-            { status: 400 },
-          );
-        }
-
-        if (!Array.isArray(rawUsernames) || rawUsernames.length === 0) {
-          return toActionResponse({ error: '缺少用户名列表' }, { status: 400 });
-        }
-
-        const confirmedUsernames = rawUsernames
-          .filter((item): item is string => typeof item === 'string')
-          .map((item) => normalizeUsername(item));
-
-        const candidates = findInactiveUsers({
-          users: adminConfig.UserConfig.Users,
-          lastActiveAt: await db.getAllUserLastActive(),
-          inactiveDays,
-          operatorUsername: username,
-        });
-        const deletable = resolveConfirmedDeletions(
-          candidates,
-          confirmedUsernames,
-        );
-
-        for (const target of deletable) {
-          await db.deleteUser(target);
-        }
-
-        if (deletable.length === 0) {
-          return toActionResponse(
-            {
-              ok: true,
-              deletedCount: 0,
-              skippedCount: confirmedUsernames.length,
-            },
-            { headers: { 'Cache-Control': 'no-store' } },
-          );
-        }
-
-        await saveConfig(adminConfig);
-
-        return toActionResponse(
-          {
-            ok: true,
-            deletedCount: deletable.length,
-            skippedCount: confirmedUsernames.length - deletable.length,
-          },
-          { headers: { 'Cache-Control': 'no-store' } },
-        );
-      }
+      case 'previewInactiveUsers':
+      case 'deleteInactiveUsers':
+        return actionResponse({ error: '页面已更新，请刷新后重试' }, 400);
       case 'setOpenRegister': {
         const { openRegister } = body as { openRegister?: boolean };
         if (typeof openRegister !== 'boolean') {
@@ -641,7 +619,34 @@ export async function handleAdminUserAction({
         adminConfig.UserConfig.RequireInviteCode = requireInviteCode;
         break;
       }
+      case 'setDefaultUserGroup': {
+        const { userGroup } = body as { userGroup?: unknown };
+        if (userGroup === '') {
+          delete adminConfig.UserConfig.DefaultUserGroup;
+          break;
+        }
+        if (
+          typeof userGroup !== 'string' ||
+          !adminConfig.UserConfig.Tags?.some((tag) => tag.name === userGroup)
+        ) {
+          return toActionResponse({ error: '用户组不存在' }, { status: 400 });
+        }
+        adminConfig.UserConfig.DefaultUserGroup = userGroup;
+        break;
+      }
       case 'createInviteCode': {
+        const { count = 1 } = body as { count?: unknown };
+        if (
+          typeof count !== 'number' ||
+          !Number.isInteger(count) ||
+          count < 1 ||
+          count > MAX_INVITE_BATCH_SIZE
+        ) {
+          return actionResponse(
+            { error: `生成数量需在 1-${MAX_INVITE_BATCH_SIZE} 之间` },
+            400,
+          );
+        }
         const validDays = parseInviteValidDays(
           (body as { validDays?: unknown }).validDays,
         );
@@ -664,69 +669,54 @@ export async function handleAdminUserAction({
           );
         }
 
-        const inviteCodes = mergeInviteCodeUsage(
-          adminConfig.UserConfig.InviteCodes,
-          await db.getAllInviteCodeUsage(),
-        );
-        const activeCodes = inviteCodes.filter((item) =>
-          isInviteCodeUsable(item),
-        );
-        if (activeCodes.length >= MAX_INVITE_CODES) {
-          return toActionResponse(
-            { error: `有效邀请码不能超过 ${MAX_INVITE_CODES} 个` },
-            { status: 400 },
-          );
-        }
-
-        const existing = new Set(inviteCodes.map((item) => item.code));
         const rawCustomCode = (body as { code?: unknown }).code;
         const hasCustomCode =
           typeof rawCustomCode === 'string' && rawCustomCode.trim() !== '';
-
-        let code = '';
-        if (hasCustomCode) {
-          if (!isValidCustomInviteCode(rawCustomCode)) {
-            return toActionResponse(
-              { error: CUSTOM_INVITE_CODE_RULE_MESSAGE },
-              { status: 400 },
-            );
-          }
-          code = normalizeInviteCode(rawCustomCode);
-          if (activeCodes.some((item) => item.code === code)) {
-            return toActionResponse(
-              { error: '该邀请码已存在' },
-              { status: 409 },
-            );
-          }
-        } else {
-          for (let attempt = 0; attempt < 10; attempt += 1) {
-            code = generateInviteCode((size) => randomBytes(size));
-            if (!existing.has(code)) break;
-            code = '';
-          }
-          if (!code) {
-            return toActionResponse(
-              { error: '生成邀请码失败，请重试' },
-              { status: 500 },
-            );
-          }
+        if (hasCustomCode && count > 1) {
+          return actionResponse({ error: '自定义邀请码只能单个生成' }, 400);
         }
-
-        // 顺手清掉过期码和已用尽的码
-        const dropped = inviteCodes.filter((item) => !isInviteCodeUsable(item));
-        adminConfig.UserConfig.InviteCodes = [
-          ...activeCodes,
-          buildInviteCode({ code, validDays, createdBy: username, maxUses }),
-        ];
-
-        await dropInviteCodeUsage([code]);
-        await saveConfig(adminConfig);
-        await dropInviteCodeUsage(dropped.map((item) => item.code));
-
-        return toActionResponse(
-          { ok: true, code },
-          { headers: { 'Cache-Control': 'no-store' } },
-        );
+        if (hasCustomCode && !isValidCustomInviteCode(rawCustomCode)) {
+          return actionResponse(
+            { error: CUSTOM_INVITE_CODE_RULE_MESSAGE },
+            400,
+          );
+        }
+        for (let attempt = 0; attempt < 10; attempt += 1) {
+          const codes: string[] = Array.from({ length: count }, () =>
+            hasCustomCode
+              ? normalizeInviteCode(rawCustomCode)
+              : generateInviteCode((size) => randomBytes(size)),
+          );
+          if (new Set(codes).size !== count) continue;
+          const now = Date.now();
+          const result = await db.createInviteCodes(
+            codes.map((code) =>
+              buildInviteCode({
+                code,
+                validDays,
+                createdBy: username,
+                maxUses,
+                now,
+              }),
+            ),
+          );
+          if (result === 'created')
+            return actionResponse(
+              { ok: true, code: codes[0], codes },
+              undefined,
+              {
+                'Cache-Control': 'no-store',
+              },
+            );
+          if (result === 'limit')
+            return actionResponse(
+              { error: `有效邀请码不能超过 ${MAX_INVITE_CODES} 个` },
+              400,
+            );
+          if (hasCustomCode)
+            return actionResponse({ error: '该邀请码已存在' }, 409);
+        }
+        return actionResponse({ error: '生成邀请码失败，请重试' }, 500);
       }
       case 'deleteInviteCode': {
         const code = normalizeInviteCode((body as { code?: unknown }).code);
@@ -734,21 +724,54 @@ export async function handleAdminUserAction({
           return toActionResponse({ error: '缺少邀请码' }, { status: 400 });
         }
 
-        const inviteCodes = adminConfig.UserConfig.InviteCodes || [];
-        const next = inviteCodes.filter((item) => item.code !== code);
-        if (next.length === inviteCodes.length) {
+        if (!(await db.deleteInviteCode(code))) {
           return toActionResponse({ error: '邀请码不存在' }, { status: 404 });
         }
-        adminConfig.UserConfig.InviteCodes = next;
-        usageCodesToDrop = [code];
-        break;
+        return actionResponse({ ok: true }, undefined, {
+          'Cache-Control': 'no-store',
+        });
+      }
+      case 'purgeInactiveInviteCodes': {
+        const deleted = await db.purgeInviteCodes({
+          expiredBefore: Date.now(),
+          includeExhausted: true,
+        });
+        return actionResponse({ ok: true, deleted }, undefined, {
+          'Cache-Control': 'no-store',
+        });
       }
       default:
         return toActionResponse({ error: '未知操作' }, { status: 400 });
     }
 
-    await saveConfig(adminConfig);
-    await dropInviteCodeUsage(usageCodesToDrop);
+    if (
+      targetEntry &&
+      [
+        'ban',
+        'unban',
+        'setAdmin',
+        'cancelAdmin',
+        'updateUserApis',
+        'updateUserGroups',
+      ].includes(action)
+    ) {
+      const patch =
+        action === 'ban' || action === 'unban'
+          ? { banned: targetEntry.banned }
+          : action === 'setAdmin' || action === 'cancelAdmin'
+            ? { role: targetEntry.role }
+            : action === 'updateUserApis'
+              ? { enabledApis: targetEntry.enabledApis }
+              : { tags: targetEntry.tags };
+      const updated = await db.updateUserAccess([targetUsername!], patch, {
+        operatorUsername: username,
+        operatorRole,
+      });
+      if (!updated)
+        return actionResponse({ error: '用户权限已变化，请刷新后重试' }, 409);
+    } else {
+      await saveConfig(adminConfig);
+    }
 
     return toActionResponse(
       { ok: true },
@@ -760,6 +783,25 @@ export async function handleAdminUserAction({
     );
   } catch (error) {
     if (error instanceof ConfigConflictError) {
+      const action = (body as { action?: string })?.action;
+      const retryable = [
+        'ban',
+        'unban',
+        'setAdmin',
+        'cancelAdmin',
+        'updateUserApis',
+        'updateUserGroups',
+        'batchUpdateUserGroups',
+        'userGroup',
+        'setOpenRegister',
+        'setRequireInviteCode',
+      ];
+      if (attempt < 2 && action && retryable.includes(action)) {
+        return runAdminUserAction(
+          { body, operatorUsername, operatorRole },
+          attempt + 1,
+        );
+      }
       return toActionResponse({ error: error.message }, { status: 409 });
     }
     console.error('用户管理操作失败:', error);

@@ -1,12 +1,21 @@
 const CHANGELOG_VERSION_RE = /^## \[([\d.]+)\] - (\d{4}-\d{2}-\d{2})$/;
+// 顶部的未发布区块随 dev 改动累积，发版时改名为版本标题；解析、生成与发版均跳过它
+const CHANGELOG_UNRELEASED_RE = /^## \[Unreleased\]$/;
 const CHANGELOG_SECTION_RE = /^###\s+(.+)$/;
 const CHANGELOG_ITEM_RE = /^-\s+(.+)$/;
 
+// Admin 只收录站长与管理员可感知的后台改动，前端仅对这两种身份展示
 const SECTION_MAP = {
   Added: 'added',
   Changed: 'changed',
   Fixed: 'fixed',
+  Admin: 'admin',
 };
+const SECTION_KEYS = Object.values(SECTION_MAP);
+
+function isEmptyEntry(entry) {
+  return SECTION_KEYS.every((key) => entry[key].length === 0);
+}
 
 function createEntry(version, date) {
   return {
@@ -15,6 +24,7 @@ function createEntry(version, date) {
     added: [],
     changed: [],
     fixed: [],
+    admin: [],
     content: [],
   };
 }
@@ -27,14 +37,10 @@ function finalizeEntries(entries) {
       added: [...entry.added],
       changed: [...entry.changed],
       fixed: [...entry.fixed],
+      admin: [...entry.admin],
     };
 
-    if (
-      nextEntry.added.length === 0 &&
-      nextEntry.changed.length === 0 &&
-      nextEntry.fixed.length === 0 &&
-      entry.content.length > 0
-    ) {
+    if (isEmptyEntry(nextEntry) && entry.content.length > 0) {
       nextEntry.changed = [...entry.content];
     }
 
@@ -52,12 +58,14 @@ function parseChangelog(content) {
     const trimmedLine = line.trim();
 
     const versionMatch = trimmedLine.match(CHANGELOG_VERSION_RE);
-    if (versionMatch) {
+    if (versionMatch || CHANGELOG_UNRELEASED_RE.test(trimmedLine)) {
       if (currentVersion) {
         versions.push(currentVersion);
       }
 
-      currentVersion = createEntry(versionMatch[1], versionMatch[2]);
+      currentVersion = versionMatch
+        ? createEntry(versionMatch[1], versionMatch[2])
+        : null;
       currentSection = null;
       continue;
     }
@@ -120,13 +128,19 @@ function validateChangelog(content) {
   const errors = [];
   const parsed = parseChangelog(content);
   const seenVersions = new Set();
+  let seenVersionHeading = false;
+  let seenUnreleased = false;
 
   for (const line of lines) {
     const trimmedLine = line.trim();
-    if (
-      trimmedLine.startsWith('## ') &&
-      !CHANGELOG_VERSION_RE.test(trimmedLine)
-    ) {
+    if (CHANGELOG_UNRELEASED_RE.test(trimmedLine)) {
+      if (seenUnreleased || seenVersionHeading) {
+        errors.push('[Unreleased] 只能出现一次且位于所有版本之前');
+      }
+      seenUnreleased = true;
+    } else if (CHANGELOG_VERSION_RE.test(trimmedLine)) {
+      seenVersionHeading = true;
+    } else if (trimmedLine.startsWith('## ')) {
       errors.push(`无效的版本标题: ${trimmedLine}`);
     }
 
@@ -146,11 +160,7 @@ function validateChangelog(content) {
     }
     seenVersions.add(entry.version);
 
-    if (
-      entry.added.length === 0 &&
-      entry.changed.length === 0 &&
-      entry.fixed.length === 0
-    ) {
+    if (isEmptyEntry(entry)) {
       errors.push(`版本 ${entry.version} 没有任何更新条目`);
     }
 
@@ -194,29 +204,14 @@ function renderReleaseNotes(entry) {
 
   const lines = [`发布日期：${entry.date}`, ''];
 
-  if (entry.added.length > 0) {
-    lines.push('### Added', '');
-    entry.added.forEach((item) => {
+  Object.entries(SECTION_MAP).forEach(([title, key]) => {
+    if (entry[key].length === 0) return;
+    lines.push(`### ${title}`, '');
+    entry[key].forEach((item) => {
       lines.push(`- ${item}`);
     });
     lines.push('');
-  }
-
-  if (entry.changed.length > 0) {
-    lines.push('### Changed', '');
-    entry.changed.forEach((item) => {
-      lines.push(`- ${item}`);
-    });
-    lines.push('');
-  }
-
-  if (entry.fixed.length > 0) {
-    lines.push('### Fixed', '');
-    entry.fixed.forEach((item) => {
-      lines.push(`- ${item}`);
-    });
-    lines.push('');
-  }
+  });
 
   return `${lines.join('\n').trim()}\n`;
 }

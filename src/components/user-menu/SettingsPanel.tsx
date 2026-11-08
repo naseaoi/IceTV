@@ -1,17 +1,19 @@
-﻿'use client';
+'use client';
 
 import { ExternalLink, RotateCcw, X } from 'lucide-react';
-import { useEffect, useMemo, useState } from 'react';
+import { type ReactNode, useEffect, useMemo, useState } from 'react';
 
 import AdminSelect from '@/components/admin/AdminSelect';
-import AlertModal from '@/components/modals/AlertModal';
 import ConfirmModal from '@/components/modals/ConfirmModal';
+import {
+  MODAL_CLOSE_BUTTON_CLASS,
+  MODAL_TITLE_CLASS,
+} from '@/components/modals/modal-styles';
+import ModalShell, { useDeferredClose } from '@/components/modals/ModalShell';
 import { CustomProxyActions } from '@/components/proxy/CustomProxyActions';
-import { useAlertModal } from '@/hooks/useAlertModal';
 import { getAuthInfoFromBrowserCookie } from '@/lib/auth.client';
 import {
   bangumiDataSourceOptions,
-  DEFAULT_BANGUMI_DATA_SOURCE,
   normalizeBangumiDataSource,
   readBangumiDataSource,
   readBangumiProxyUrl,
@@ -64,8 +66,7 @@ import {
   readLocalPreferenceToggleState,
   resetAllLocalPreferenceToggles,
 } from '@/lib/local-preference-toggles';
-
-import { useBodyScrollLock } from './useBodyScrollLock';
+import { showToast } from '@/lib/toast';
 
 interface SettingsPanelProps {
   onClose: () => void;
@@ -75,20 +76,84 @@ type CustomProxyField = CustomProxyTestKind;
 
 const SERVER_PROXY_DISABLED_REASON = '登录后可用';
 
+interface InitialSettings {
+  isAuthenticated: boolean;
+  localPreferenceToggles: ReturnType<typeof readLocalPreferenceToggleState>;
+  doubanDataSource: string;
+  doubanProxyUrl: string;
+  bangumiDataSource: string;
+  bangumiProxyUrl: string;
+  doubanImageProxyType: string;
+  doubanImageProxyUrl: string;
+}
+
+// 面板只在用户打开时挂载，首帧直接读本地存储，避免默认值渲染后再替换造成跳动
+function readInitialSettings(): InitialSettings {
+  const isAuthenticated = Boolean(getAuthInfoFromBrowserCookie()?.username);
+  const doubanProxyUrl = readDoubanProxyUrl();
+  const bangumiProxyUrl = readBangumiProxyUrl();
+  const doubanImageProxyUrl = readDoubanImageProxyUrl();
+  return {
+    isAuthenticated,
+    localPreferenceToggles: readLocalPreferenceToggleState(),
+    doubanDataSource: resolveInitialProxySource(
+      readDoubanProxyType(),
+      doubanProxyUrl,
+      isAuthenticated,
+    ),
+    doubanProxyUrl,
+    bangumiDataSource: normalizeBangumiDataSource(
+      resolveInitialProxySource(
+        readBangumiDataSource(),
+        bangumiProxyUrl,
+        isAuthenticated,
+      ),
+    ),
+    bangumiProxyUrl,
+    doubanImageProxyType: resolveInitialProxySource(
+      readDoubanImageProxyType(),
+      doubanImageProxyUrl,
+      isAuthenticated,
+    ),
+    doubanImageProxyUrl,
+  };
+}
+
 export function SettingsPanel({ onClose }: SettingsPanelProps) {
-  const helperTextClassName = 'mt-1 text-xs text-gray-400 dark:text-gray-500';
+  const [open, requestClose] = useDeferredClose(onClose);
+  return (
+    <ModalShell
+      isOpen={open}
+      onClose={requestClose}
+      panelClassName='flex max-h-[85vh] max-w-xl flex-col overflow-hidden'
+    >
+      <SettingsPanelContent onClose={requestClose} />
+    </ModalShell>
+  );
+}
+
+function SettingsPanelContent({ onClose }: SettingsPanelProps) {
+  const [initial] = useState(readInitialSettings);
+  const { isAuthenticated } = initial;
   const [localPreferenceToggles, setLocalPreferenceToggles] = useState(
-    readLocalPreferenceToggleDefaultState,
+    initial.localPreferenceToggles,
   );
-  const [doubanProxyUrl, setDoubanProxyUrl] = useState('');
-  const [doubanDataSource, setDoubanDataSource] = useState('direct');
+  const [doubanProxyUrl, setDoubanProxyUrl] = useState(initial.doubanProxyUrl);
+  const [doubanDataSource, setDoubanDataSource] = useState(
+    initial.doubanDataSource,
+  );
   const [bangumiDataSource, setBangumiDataSource] = useState(
-    DEFAULT_BANGUMI_DATA_SOURCE,
+    initial.bangumiDataSource,
   );
-  const [bangumiProxyUrl, setBangumiProxyUrl] = useState('');
-  const [doubanImageProxyType, setDoubanImageProxyType] = useState('direct');
-  const [doubanImageProxyUrl, setDoubanImageProxyUrl] = useState('');
-  const [isAuthenticated, setIsAuthenticated] = useState(false);
+  const [bangumiProxyUrl, setBangumiProxyUrl] = useState(
+    initial.bangumiProxyUrl,
+  );
+  const [doubanImageProxyType, setDoubanImageProxyType] = useState(
+    initial.doubanImageProxyType,
+  );
+  const [doubanImageProxyUrl, setDoubanImageProxyUrl] = useState(
+    initial.doubanImageProxyUrl,
+  );
   const [customProxyErrors, setCustomProxyErrors] = useState<
     Partial<Record<CustomProxyField, string>>
   >({});
@@ -96,48 +161,26 @@ export function SettingsPanel({ onClose }: SettingsPanelProps) {
     null,
   );
   const [showResetConfirm, setShowResetConfirm] = useState(false);
-  const { alertModal, showAlert, hideAlert } = useAlertModal();
 
-  useBodyScrollLock(true);
-
+  // 已选自定义代理但地址失效时，把存储里的来源一并清回默认
   useEffect(() => {
-    const loggedIn = Boolean(getAuthInfoFromBrowserCookie()?.username);
-    const nextDoubanSource = readDoubanProxyType();
-    const nextDoubanProxyUrl = readDoubanProxyUrl();
-    const nextBangumiSource = readBangumiDataSource();
-    const nextBangumiProxyUrl = readBangumiProxyUrl();
-    const nextDoubanImageSource = readDoubanImageProxyType();
-    const nextDoubanImageProxyUrl = readDoubanImageProxyUrl();
-    const resolvedDoubanSource = resolveInitialProxySource(
-      nextDoubanSource,
-      nextDoubanProxyUrl,
-      loggedIn,
-      resetDoubanProxyType,
-    );
-    const resolvedBangumiSource = resolveInitialProxySource(
-      nextBangumiSource,
-      nextBangumiProxyUrl,
-      loggedIn,
-      resetBangumiDataSource,
-    );
-    const resolvedDoubanImageSource = resolveInitialProxySource(
-      nextDoubanImageSource,
-      nextDoubanImageProxyUrl,
-      loggedIn,
-      resetDoubanImageProxyType,
-    );
-
-    setIsAuthenticated(loggedIn);
-    setLocalPreferenceToggles(readLocalPreferenceToggleState());
-
-    setDoubanDataSource(resolvedDoubanSource);
-    setDoubanProxyUrl(nextDoubanProxyUrl);
-    setBangumiDataSource(normalizeBangumiDataSource(resolvedBangumiSource));
-    setBangumiProxyUrl(nextBangumiProxyUrl);
-
-    setDoubanImageProxyType(resolvedDoubanImageSource);
-    setDoubanImageProxyUrl(nextDoubanImageProxyUrl);
-  }, []);
+    if (isInvalidCustomProxy(readDoubanProxyType(), initial.doubanProxyUrl)) {
+      resetDoubanProxyType();
+    }
+    if (
+      isInvalidCustomProxy(readBangumiDataSource(), initial.bangumiProxyUrl)
+    ) {
+      resetBangumiDataSource();
+    }
+    if (
+      isInvalidCustomProxy(
+        readDoubanImageProxyType(),
+        initial.doubanImageProxyUrl,
+      )
+    ) {
+      resetDoubanImageProxyType();
+    }
+  }, [initial]);
 
   const doubanDataOptions = useMemo(
     () => markServerProxyOption(doubanDataSourceOptions, isAuthenticated),
@@ -153,21 +196,11 @@ export function SettingsPanel({ onClose }: SettingsPanelProps) {
   );
 
   const showProxyToast = () => {
-    showAlert({
-      type: 'success',
-      title: '更换成功',
-      message: '刷新页面后生效',
-      timer: 2000,
-    });
+    showToast('更换成功，刷新页面后生效', 'success');
   };
 
   const showLoginRequiredToast = () => {
-    showAlert({
-      type: 'warning',
-      title: '登录后可用',
-      message: '服务器请求会消耗本站资源，请登录后使用。',
-      timer: 2400,
-    });
+    showToast('登录后可使用服务器请求', 'info');
   };
 
   const handleDoubanProxyUrlChange = (value: string) => {
@@ -218,12 +251,7 @@ export function SettingsPanel({ onClose }: SettingsPanelProps) {
         'douban-data': error,
       }));
       if (error) {
-        showAlert({
-          type: 'warning',
-          title: '代理地址必填',
-          message: error,
-          timer: 2200,
-        });
+        showToast(error, 'error');
         return;
       }
     }
@@ -245,12 +273,7 @@ export function SettingsPanel({ onClose }: SettingsPanelProps) {
         bangumi: error,
       }));
       if (error) {
-        showAlert({
-          type: 'warning',
-          title: '代理地址必填',
-          message: error,
-          timer: 2200,
-        });
+        showToast(error, 'error');
         return;
       }
     }
@@ -291,12 +314,7 @@ export function SettingsPanel({ onClose }: SettingsPanelProps) {
         'douban-image': error,
       }));
       if (error) {
-        showAlert({
-          type: 'warning',
-          title: '代理地址必填',
-          message: error,
-          timer: 2200,
-        });
+        showToast(error, 'error');
         return;
       }
     }
@@ -333,12 +351,7 @@ export function SettingsPanel({ onClose }: SettingsPanelProps) {
     const error = getCustomProxyError(kind, proxyUrl);
     if (error) {
       setCustomProxyErrors((prev) => ({ ...prev, [kind]: error }));
-      showAlert({
-        type: 'warning',
-        title: '代理地址必填',
-        message: error,
-        timer: 2200,
-      });
+      showToast(error, 'error');
       return;
     }
 
@@ -346,21 +359,11 @@ export function SettingsPanel({ onClose }: SettingsPanelProps) {
     try {
       await testCustomProxy(kind, proxyUrl);
       setCustomProxyErrors((prev) => ({ ...prev, [kind]: '' }));
-      showAlert({
-        type: 'success',
-        title: '测试通过',
-        message: `${CUSTOM_PROXY_LABELS[kind]}可用`,
-        timer: 2200,
-      });
+      showToast(`测试通过，${CUSTOM_PROXY_LABELS[kind]}可用`, 'success');
     } catch (error) {
       const message = error instanceof Error ? error.message : '代理测试失败';
       setCustomProxyErrors((prev) => ({ ...prev, [kind]: message }));
-      showAlert({
-        type: 'error',
-        title: '测试失败',
-        message,
-        timer: 3000,
-      });
+      showToast(`测试失败，${message}`, 'error');
     } finally {
       setTestingProxy(null);
     }
@@ -398,287 +401,161 @@ export function SettingsPanel({ onClose }: SettingsPanelProps) {
   return (
     <>
       <div
-        className='fixed inset-0 z-[1000] bg-black/50 backdrop-blur-sm'
-        onClick={onClose}
-        onTouchMove={(event) => event.preventDefault()}
-        onWheel={(event) => event.preventDefault()}
-        style={{
-          touchAction: 'none',
-        }}
-      />
+        role='dialog'
+        aria-modal='true'
+        aria-labelledby='local-settings-title'
+        className='flex min-h-0 flex-1 flex-col'
+      >
+        <div className='flex items-center justify-between gap-3 border-b border-gray-200/70 py-3 pl-5 pr-3 dark:border-white/[0.06]'>
+          <h3 id='local-settings-title' className={MODAL_TITLE_CLASS}>
+            本地设置
+          </h3>
+          <div className='flex items-center gap-1'>
+            <button
+              type='button'
+              onClick={() => setShowResetConfirm(true)}
+              className='inline-flex h-8 items-center gap-1.5 rounded-full px-3 text-[13px] text-gray-500 transition-colors hover:bg-gray-900/[0.05] hover:text-gray-900 dark:text-gray-400 dark:hover:bg-white/[0.06] dark:hover:text-white'
+            >
+              <RotateCcw className='h-3.5 w-3.5' />
+              恢复默认
+            </button>
+            <button
+              type='button'
+              onClick={onClose}
+              className={MODAL_CLOSE_BUTTON_CLASS}
+              aria-label='关闭'
+            >
+              <X className='h-4 w-4' />
+            </button>
+          </div>
+        </div>
 
-      <div className='fixed left-1/2 top-1/2 z-[1001] flex max-h-[90vh] w-[calc(100%-2rem)] max-w-xl -translate-x-1/2 -translate-y-1/2 flex-col rounded-2xl border border-gray-200/70 bg-white/80 shadow-2xl ring-1 ring-black/10 backdrop-blur-xl dark:border-white/10 dark:bg-gray-900/70 dark:ring-white/10'>
         <div
-          className='flex-1 overflow-y-auto p-6'
+          className='flex-1 space-y-6 overflow-y-auto px-5 pb-6 pt-4'
           data-panel-content
           style={{
             touchAction: 'pan-y',
             overscrollBehavior: 'contain',
           }}
         >
-          <div className='mb-6 flex items-center justify-between'>
-            <div>
-              <h3 className='text-xl font-bold text-gray-800 dark:text-gray-200'>
-                本地设置
-              </h3>
-              <p className='mt-1 text-xs text-gray-500 dark:text-gray-400'>
-                设置保存在本地浏览器中
-              </p>
-            </div>
-            <div className='flex items-center gap-2'>
-              <button
-                onClick={() => setShowResetConfirm(true)}
-                className='flex h-8 w-8 items-center justify-center rounded-full p-1 text-red-500 transition-colors hover:bg-red-50 hover:text-red-600 dark:text-red-400 dark:hover:bg-red-900/20 dark:hover:text-red-300'
-                title='重置为默认设置'
-                aria-label='重置为默认设置'
+          <SettingsSection title='数据来源'>
+            <SettingsRow
+              title='豆瓣数据代理'
+              thanks={getThanksInfo(doubanDataSource)}
+              control={
+                <AdminSelect
+                  value={doubanDataSource}
+                  onChange={(value) => handleDoubanDataSourceChange(value)}
+                  options={doubanDataOptions}
+                />
+              }
+            >
+              {doubanDataSource === 'custom' && (
+                <CustomProxyField
+                  id='local-douban-proxy-url'
+                  name='localDoubanProxyUrl'
+                  label='豆瓣代理地址'
+                  value={doubanProxyUrl}
+                  error={customProxyErrors['douban-data']}
+                  isTesting={testingProxy === 'douban-data'}
+                  onChange={handleDoubanProxyUrlChange}
+                  onTest={() =>
+                    handleTestCustomProxy('douban-data', doubanProxyUrl)
+                  }
+                />
+              )}
+            </SettingsRow>
+
+            <SettingsRow
+              title='豆瓣图片代理'
+              thanks={getThanksInfo(doubanImageProxyType)}
+              control={
+                <AdminSelect
+                  value={doubanImageProxyType}
+                  onChange={(value) => handleDoubanImageProxyTypeChange(value)}
+                  options={doubanImageOptions}
+                />
+              }
+            >
+              {doubanImageProxyType === 'custom' && (
+                <CustomProxyField
+                  id='local-douban-image-proxy-url'
+                  name='localDoubanImageProxyUrl'
+                  label='豆瓣图片代理地址'
+                  value={doubanImageProxyUrl}
+                  error={customProxyErrors['douban-image']}
+                  isTesting={testingProxy === 'douban-image'}
+                  onChange={handleDoubanImageProxyUrlChange}
+                  onTest={() =>
+                    handleTestCustomProxy('douban-image', doubanImageProxyUrl)
+                  }
+                />
+              )}
+            </SettingsRow>
+
+            <SettingsRow
+              title='Bangumi 数据代理'
+              thanks={getThanksInfo(bangumiDataSource)}
+              control={
+                <AdminSelect
+                  value={bangumiDataSource}
+                  onChange={(value) => handleBangumiDataSourceChange(value)}
+                  options={bangumiOptions}
+                />
+              }
+            >
+              {bangumiDataSource === 'custom' && (
+                <CustomProxyField
+                  id='local-bangumi-proxy-url'
+                  name='localBangumiProxyUrl'
+                  label='Bangumi 代理地址'
+                  value={bangumiProxyUrl}
+                  error={customProxyErrors.bangumi}
+                  isTesting={testingProxy === 'bangumi'}
+                  onChange={handleBangumiProxyUrlChange}
+                  onTest={() =>
+                    handleTestCustomProxy('bangumi', bangumiProxyUrl)
+                  }
+                />
+              )}
+            </SettingsRow>
+          </SettingsSection>
+
+          <SettingsSection title='功能'>
+            {localPreferenceToggleDefinitions.map((definition) => (
+              <label
+                key={definition.id}
+                htmlFor={`local-${definition.id}`}
+                className='flex cursor-pointer items-center justify-between gap-6 py-3.5'
               >
-                <RotateCcw className='h-4 w-4' />
-              </button>
-              <button
-                onClick={onClose}
-                className='flex h-8 w-8 items-center justify-center rounded-full p-1 text-gray-500 transition-colors hover:bg-gray-100 dark:hover:bg-gray-800'
-                aria-label='Close'
-              >
-                <X className='h-full w-full' />
-              </button>
-            </div>
-          </div>
-
-          <div className='space-y-6'>
-            <div className='space-y-3'>
-              <div>
-                <div className='flex items-baseline justify-between gap-2'>
-                  <h4 className='text-sm font-medium text-gray-700 dark:text-gray-300'>
-                    豆瓣数据代理
-                  </h4>
-                  {getThanksInfo(doubanDataSource) && (
-                    <button
-                      type='button'
-                      onClick={() =>
-                        window.open(
-                          getThanksInfo(doubanDataSource)!.url,
-                          '_blank',
-                        )
-                      }
-                      className='flex shrink-0 cursor-pointer items-center gap-1 text-[11px] leading-none text-gray-400 hover:text-gray-600 dark:text-gray-500 dark:hover:text-gray-300'
-                    >
-                      <span className='font-medium'>
-                        {getThanksInfo(doubanDataSource)!.text}
-                      </span>
-                      <ExternalLink className='h-3 w-3 opacity-70' />
-                    </button>
-                  )}
-                </div>
-              </div>
-              <AdminSelect
-                value={doubanDataSource}
-                onChange={(value) => handleDoubanDataSourceChange(value)}
-                options={doubanDataOptions}
-              />
-            </div>
-
-            {doubanDataSource === 'custom' && (
-              <div className='space-y-2'>
-                <div className='flex items-center justify-between gap-3'>
-                  <h4 className='text-sm font-medium text-gray-700 dark:text-gray-300'>
-                    豆瓣代理地址
-                  </h4>
-                  {customProxyErrors['douban-data'] && (
-                    <p className='truncate text-xs text-rose-500 dark:text-rose-400'>
-                      {customProxyErrors['douban-data']}
-                    </p>
-                  )}
-                </div>
-                <div className='flex items-center gap-2'>
+                <span className='min-w-0'>
+                  <span className='block text-sm text-gray-900 dark:text-gray-100'>
+                    {definition.title}
+                  </span>
+                  <span className='mt-0.5 block text-xs text-gray-400 dark:text-gray-500'>
+                    {definition.description}
+                  </span>
+                </span>
+                <span className='relative shrink-0'>
                   <input
-                    id='local-douban-proxy-url'
-                    name='localDoubanProxyUrl'
-                    type='text'
-                    className='min-w-0 flex-1 rounded-lg border border-gray-300 bg-white px-3 py-2.5 text-sm text-gray-900 placeholder-gray-500 shadow-sm transition-all duration-200 hover:border-gray-400 focus:border-green-500 focus:outline-none focus:ring-2 focus:ring-green-500 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100 dark:placeholder-gray-400 dark:hover:border-gray-500'
-                    placeholder='例如: https://proxy.example.com/fetch?url='
-                    value={doubanProxyUrl}
+                    id={`local-${definition.id}`}
+                    name={definition.id}
+                    type='checkbox'
+                    className='peer sr-only'
+                    checked={localPreferenceToggles[definition.id]}
                     onChange={(event) =>
-                      handleDoubanProxyUrlChange(event.target.value)
-                    }
-                  />
-                  <CustomProxyActions
-                    isTesting={testingProxy === 'douban-data'}
-                    onTest={() =>
-                      handleTestCustomProxy('douban-data', doubanProxyUrl)
-                    }
-                  />
-                </div>
-              </div>
-            )}
-
-            <div className='space-y-3'>
-              <div>
-                <div className='flex items-baseline justify-between gap-2'>
-                  <h4 className='text-sm font-medium text-gray-700 dark:text-gray-300'>
-                    豆瓣图片代理
-                  </h4>
-                  {getThanksInfo(doubanImageProxyType) && (
-                    <button
-                      type='button'
-                      onClick={() =>
-                        window.open(
-                          getThanksInfo(doubanImageProxyType)!.url,
-                          '_blank',
-                        )
-                      }
-                      className='flex shrink-0 cursor-pointer items-center gap-1 text-[11px] leading-none text-gray-400 hover:text-gray-600 dark:text-gray-500 dark:hover:text-gray-300'
-                    >
-                      <span className='font-medium'>
-                        {getThanksInfo(doubanImageProxyType)!.text}
-                      </span>
-                      <ExternalLink className='h-3 w-3 opacity-70' />
-                    </button>
-                  )}
-                </div>
-              </div>
-              <AdminSelect
-                value={doubanImageProxyType}
-                onChange={(value) => handleDoubanImageProxyTypeChange(value)}
-                options={doubanImageOptions}
-              />
-            </div>
-
-            {doubanImageProxyType === 'custom' && (
-              <div className='space-y-2'>
-                <div className='flex items-center justify-between gap-3'>
-                  <h4 className='text-sm font-medium text-gray-700 dark:text-gray-300'>
-                    豆瓣图片代理地址
-                  </h4>
-                  {customProxyErrors['douban-image'] && (
-                    <p className='truncate text-xs text-rose-500 dark:text-rose-400'>
-                      {customProxyErrors['douban-image']}
-                    </p>
-                  )}
-                </div>
-                <div className='flex items-center gap-2'>
-                  <input
-                    id='local-douban-image-proxy-url'
-                    name='localDoubanImageProxyUrl'
-                    type='text'
-                    className='min-w-0 flex-1 rounded-lg border border-gray-300 bg-white px-3 py-2.5 text-sm text-gray-900 placeholder-gray-500 shadow-sm transition-all duration-200 hover:border-gray-400 focus:border-green-500 focus:outline-none focus:ring-2 focus:ring-green-500 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100 dark:placeholder-gray-400 dark:hover:border-gray-500'
-                    placeholder='例如: https://proxy.example.com/fetch?url='
-                    value={doubanImageProxyUrl}
-                    onChange={(event) =>
-                      handleDoubanImageProxyUrlChange(event.target.value)
-                    }
-                  />
-                  <CustomProxyActions
-                    isTesting={testingProxy === 'douban-image'}
-                    onTest={() =>
-                      handleTestCustomProxy('douban-image', doubanImageProxyUrl)
-                    }
-                  />
-                </div>
-              </div>
-            )}
-
-            <div className='space-y-3'>
-              <div>
-                <h4 className='text-sm font-medium text-gray-700 dark:text-gray-300'>
-                  Bangumi 数据代理
-                </h4>
-              </div>
-              <AdminSelect
-                value={bangumiDataSource}
-                onChange={(value) => handleBangumiDataSourceChange(value)}
-                options={bangumiOptions}
-              />
-
-              {getThanksInfo(bangumiDataSource) && (
-                <div className='mt-3'>
-                  <button
-                    type='button'
-                    onClick={() =>
-                      window.open(
-                        getThanksInfo(bangumiDataSource)!.url,
-                        '_blank',
+                      handleLocalPreferenceToggle(
+                        definition.id,
+                        event.target.checked,
                       )
                     }
-                    className='flex w-full cursor-pointer items-center justify-center gap-1.5 px-3 text-xs text-gray-500 dark:text-gray-400'
-                  >
-                    <span className='font-medium'>
-                      {getThanksInfo(bangumiDataSource)!.text}
-                    </span>
-                    <ExternalLink className='w-3.5 opacity-70' />
-                  </button>
-                </div>
-              )}
-            </div>
-
-            {bangumiDataSource === 'custom' && (
-              <div className='space-y-2'>
-                <div className='flex items-center justify-between gap-3'>
-                  <h4 className='text-sm font-medium text-gray-700 dark:text-gray-300'>
-                    Bangumi 代理地址
-                  </h4>
-                  {customProxyErrors.bangumi && (
-                    <p className='truncate text-xs text-rose-500 dark:text-rose-400'>
-                      {customProxyErrors.bangumi}
-                    </p>
-                  )}
-                </div>
-                <div className='flex items-center gap-2'>
-                  <input
-                    id='local-bangumi-proxy-url'
-                    name='localBangumiProxyUrl'
-                    type='text'
-                    className='min-w-0 flex-1 rounded-lg border border-gray-300 bg-white px-3 py-2.5 text-sm text-gray-900 placeholder-gray-500 shadow-sm transition-all duration-200 hover:border-gray-400 focus:border-green-500 focus:outline-none focus:ring-2 focus:ring-green-500 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100 dark:placeholder-gray-400 dark:hover:border-gray-500'
-                    placeholder='例如: https://proxy.example.com/fetch?url='
-                    value={bangumiProxyUrl}
-                    onChange={(event) =>
-                      handleBangumiProxyUrlChange(event.target.value)
-                    }
                   />
-                  <CustomProxyActions
-                    isTesting={testingProxy === 'bangumi'}
-                    onTest={() =>
-                      handleTestCustomProxy('bangumi', bangumiProxyUrl)
-                    }
-                  />
-                </div>
-              </div>
-            )}
-
-            {localPreferenceToggleDefinitions.map((definition) => (
-              <div
-                key={definition.id}
-                className='flex items-center justify-between'
-              >
-                <div>
-                  <h4 className='text-sm font-medium text-gray-700 dark:text-gray-300'>
-                    {definition.title}
-                  </h4>
-                  <p className={helperTextClassName}>
-                    {definition.description}
-                  </p>
-                </div>
-                <label className='flex cursor-pointer items-center'>
-                  <div className='relative'>
-                    <input
-                      id={`local-${definition.id}`}
-                      name={definition.id}
-                      type='checkbox'
-                      className='peer sr-only'
-                      checked={localPreferenceToggles[definition.id]}
-                      onChange={(event) =>
-                        handleLocalPreferenceToggle(
-                          definition.id,
-                          event.target.checked,
-                        )
-                      }
-                    />
-                    <div className='h-6 w-11 rounded-full bg-gray-300 transition-colors peer-checked:bg-green-500 dark:bg-gray-600'></div>
-                    <div className='absolute left-0.5 top-0.5 h-5 w-5 rounded-full bg-white transition-transform peer-checked:translate-x-5'></div>
-                  </div>
-                </label>
-              </div>
+                  <span className='block h-6 w-10 rounded-full bg-gray-200 transition-colors peer-checked:bg-brand-500 peer-focus-visible:ring-2 peer-focus-visible:ring-brand-500/40 dark:bg-white/[0.12]' />
+                  <span className='absolute left-0.5 top-0.5 h-5 w-5 rounded-full bg-white shadow-sm transition-transform peer-checked:translate-x-4' />
+                </span>
+              </label>
             ))}
-          </div>
+          </SettingsSection>
         </div>
       </div>
       <ConfirmModal
@@ -690,14 +567,6 @@ export function SettingsPanel({ onClose }: SettingsPanelProps) {
         confirmText='确认恢复'
         onCancel={() => setShowResetConfirm(false)}
         onConfirm={handleResetSettings}
-      />
-      <AlertModal
-        isOpen={alertModal.isOpen}
-        onClose={hideAlert}
-        type={alertModal.type}
-        title={alertModal.title}
-        message={alertModal.message}
-        timer={alertModal.timer}
       />
     </>
   );
@@ -722,20 +591,120 @@ function canSelectProxyValue(value: string, isAuthenticated: boolean): boolean {
   return value !== 'server' || isAuthenticated;
 }
 
+function isInvalidCustomProxy(source: string, proxyUrl: string) {
+  return source === 'custom' && !normalizeCustomProxyUrl(proxyUrl);
+}
+
 function resolveInitialProxySource(
   source: string,
   proxyUrl: string,
   isAuthenticated: boolean,
-  resetSource: () => void,
 ): string {
   if (source === 'server' && !isAuthenticated) {
     return 'direct';
   }
-
-  if (source === 'custom' && !normalizeCustomProxyUrl(proxyUrl)) {
-    resetSource();
+  if (isInvalidCustomProxy(source, proxyUrl)) {
     return 'direct';
   }
-
   return source;
+}
+
+function SettingsSection({
+  title,
+  children,
+}: {
+  title: string;
+  children: ReactNode;
+}) {
+  return (
+    <section>
+      <h4 className='text-xs font-medium text-gray-400 dark:text-gray-500'>
+        {title}
+      </h4>
+      <div className='divide-y divide-gray-200/70 dark:divide-white/[0.06]'>
+        {children}
+      </div>
+    </section>
+  );
+}
+
+function SettingsRow({
+  title,
+  thanks,
+  control,
+  children,
+}: {
+  title: string;
+  thanks?: { text: string; url: string } | null;
+  control: ReactNode;
+  children?: ReactNode;
+}) {
+  return (
+    <div className='py-3.5'>
+      <div className='flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between sm:gap-6'>
+        <div className='min-w-0 sm:shrink-0'>
+          <div className='text-sm text-gray-900 dark:text-gray-100'>
+            {title}
+          </div>
+          {thanks && (
+            <a
+              href={thanks.url}
+              target='_blank'
+              rel='noopener noreferrer'
+              className='mt-0.5 inline-flex items-center gap-1 text-xs text-gray-400 transition-colors hover:text-gray-700 dark:text-gray-500 dark:hover:text-gray-300'
+            >
+              {thanks.text}
+              <ExternalLink className='h-3 w-3' />
+            </a>
+          )}
+        </div>
+        <div className='w-full sm:min-w-0 sm:max-w-xs sm:flex-1'>{control}</div>
+      </div>
+      {children}
+    </div>
+  );
+}
+
+function CustomProxyField({
+  id,
+  name,
+  label,
+  value,
+  error,
+  isTesting,
+  onChange,
+  onTest,
+}: {
+  id: string;
+  name: string;
+  label: string;
+  value: string;
+  error?: string;
+  isTesting: boolean;
+  onChange: (value: string) => void;
+  onTest: () => void;
+}) {
+  return (
+    <div className='mt-3'>
+      <div className='flex items-center gap-2'>
+        <input
+          id={id}
+          name={name}
+          type='text'
+          aria-label={label}
+          aria-invalid={error ? true : undefined}
+          className='h-[42px] min-w-0 flex-1 rounded-lg border border-gray-300 bg-white px-3 text-sm text-gray-900 placeholder-gray-400 shadow-sm transition-colors hover:border-gray-400 focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100 dark:placeholder-gray-500 dark:hover:border-gray-500'
+          placeholder='例如: https://proxy.example.com/fetch?url='
+          value={value}
+          onChange={(event) => onChange(event.target.value)}
+        />
+        <CustomProxyActions isTesting={isTesting} onTest={onTest} />
+      </div>
+      {error && (
+        <p className='mt-1.5 text-xs text-rose-500 dark:text-rose-400'>
+          {error}
+        </p>
+      )}
+    </div>
+  );
 }

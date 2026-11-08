@@ -2,22 +2,19 @@ import { act, renderHook, waitFor } from '@testing-library/react';
 
 import { useAdminPageActions } from '@/features/admin/hooks/useAdminPageActions';
 import { adminGet } from '@/features/admin/lib/api';
-import { showSuccess } from '@/features/admin/lib/notifications';
+import { showToast } from '@/lib/toast';
 
 jest.mock('@/features/admin/lib/api', () => ({
   adminGet: jest.fn(),
 }));
 
-jest.mock('@/features/admin/lib/notifications', () => ({
-  showError: jest.fn(),
-  showSuccess: jest.fn(),
+jest.mock('@/lib/toast', () => ({
+  showToast: jest.fn(),
+  dismissToast: jest.fn(),
 }));
 
 describe('useAdminPageActions', () => {
   const mockedAdminGet = adminGet as jest.MockedFunction<typeof adminGet>;
-  const mockedShowSuccess = showSuccess as jest.MockedFunction<
-    typeof showSuccess
-  >;
 
   beforeEach(() => {
     jest.clearAllMocks();
@@ -105,6 +102,13 @@ describe('useAdminPageActions', () => {
     expect(setConfig).not.toHaveBeenCalled();
     expect(setRole).not.toHaveBeenCalled();
     expect(setError).toHaveBeenCalledWith('权限不足');
+    expect(showAlert).toHaveBeenCalledWith({
+      type: 'error',
+      title: '错误',
+      message: '权限不足',
+      showConfirm: true,
+    });
+    expect(showToast).not.toHaveBeenCalled();
     expect(setLoading).toHaveBeenLastCalledWith(false);
   });
 
@@ -183,9 +187,7 @@ describe('useAdminPageActions', () => {
     });
 
     expect(mockedAdminGet).toHaveBeenCalledWith('/api/admin/reset', '重置失败');
-    expect(mockedShowSuccess).toHaveBeenCalledWith(
-      '重置成功，请刷新页面！',
-      showAlert,
-    );
+    expect(showToast).toHaveBeenCalledWith('重置成功，请刷新页面！', 'success');
+    expect(showAlert).not.toHaveBeenCalled();
   });
 });

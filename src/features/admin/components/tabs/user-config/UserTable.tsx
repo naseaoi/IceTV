@@ -1,6 +1,6 @@
 'use client';
 
-import { ResizableTableHeader } from '@/features/admin/components/ResizableTableHeader';
+import MoreMenu, { type MoreMenuItem } from '@/components/MoreMenu';
 import {
   buttonStyles,
   checkboxStyles,
@@ -19,6 +19,7 @@ import {
 
 interface User {
   username: string;
+  nickname?: string | null;
   role: 'user' | 'admin' | 'owner';
   banned?: boolean;
   enabledApis?: string[];
@@ -27,6 +28,8 @@ interface User {
 
 interface UserTableProps {
   users: User[];
+  total?: number;
+  selectedCount?: number;
   lastActiveAt: Record<string, number>;
   currentUsername: string | null;
   permissionContext: PermissionContext;
@@ -34,6 +37,7 @@ interface UserTableProps {
   selectedUsers: Set<string>;
   selectAllUsers: boolean;
   isLoading: (key: string) => boolean;
+  onBatchUserGroup: () => void;
   onSelectAllUsers: (checked: boolean) => void;
   onSelectUser: (username: string, checked: boolean) => void;
   onConfigureUserGroup: (user: User) => void;
@@ -48,6 +52,8 @@ interface UserTableProps {
 
 export function UserTable({
   users,
+  total = users.length,
+  selectedCount,
   lastActiveAt,
   currentUsername,
   permissionContext,
@@ -55,6 +61,7 @@ export function UserTable({
   selectedUsers,
   selectAllUsers,
   isLoading,
+  onBatchUserGroup,
   onSelectAllUsers,
   onSelectUser,
   onConfigureUserGroup,
@@ -66,303 +73,189 @@ export function UserTable({
   onUnbanUser,
   onDeleteUser,
 }: UserTableProps) {
-  // 按规则排序用户：自己 -> 站长(若非自己) -> 管理员 -> 其他
-  const sortedUsers = [...users].sort((a, b) => {
-    const priority = (u: User) => {
-      if (u.username === currentUsername) return 0;
-      if (u.role === 'owner') return 1;
-      if (u.role === 'admin') return 2;
-      return 3;
-    };
-    return priority(a) - priority(b);
-  });
+  const selectionCount = selectedCount ?? selectedUsers.size;
 
   return (
-    <div
-      className='relative overflow-x-auto rounded-lg border border-gray-200 dark:border-gray-700'
-      data-table='user-list-v2'
-    >
-      <table className='w-full table-fixed divide-y divide-gray-200 dark:divide-gray-700'>
-        <thead className='sticky top-0 z-10 bg-gray-50 dark:bg-gray-900'>
-          <tr>
-            <th
-              data-column-width='16'
-              style={{ width: 16, minWidth: 16, maxWidth: 16 }}
-            />
-            <th
-              data-column-width='40'
-              style={{ width: 40, minWidth: 40, maxWidth: 40 }}
-              className='px-1 py-3 text-center'
-            >
-              {selectableUsersCount > 0 ? (
-                <input
-                  type='checkbox'
-                  checked={selectAllUsers}
-                  onChange={(e) => onSelectAllUsers(e.target.checked)}
-                  className={checkboxStyles}
-                />
-              ) : (
-                <div className='h-4 w-4' />
-              )}
-            </th>
-            <ResizableTableHeader
-              tableId='user-list-v2'
-              columnId='username'
-              defaultWidth={198}
-              minWidth={96}
-              scope='col'
-              className='px-6 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400'
-            >
-              用户名
-            </ResizableTableHeader>
-            <ResizableTableHeader
-              tableId='user-list-v2'
-              columnId='role'
-              defaultWidth={122}
-              minWidth={88}
-              scope='col'
-              className='px-6 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400'
-            >
-              角色
-            </ResizableTableHeader>
-            <ResizableTableHeader
-              tableId='user-list-v2'
-              columnId='status'
-              defaultWidth={94}
-              minWidth={88}
-              scope='col'
-              className='px-6 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400'
-            >
-              状态
-            </ResizableTableHeader>
-            <ResizableTableHeader
-              tableId='user-list-v2'
-              columnId='last-login'
-              defaultWidth={290}
-              minWidth={96}
-              scope='col'
-              className='px-6 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400'
-            >
-              最后活跃
-            </ResizableTableHeader>
-            <ResizableTableHeader
-              tableId='user-list-v2'
-              columnId='groups'
-              defaultWidth={253}
-              minWidth={96}
-              scope='col'
-              className='px-6 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400'
-            >
-              用户组
-            </ResizableTableHeader>
-            <ResizableTableHeader
-              tableId='user-list-v2'
-              columnId='source-permissions'
-              defaultWidth={217}
-              minWidth={120}
-              scope='col'
-              className='px-6 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400'
-            >
-              视频源权限
-            </ResizableTableHeader>
-            <ResizableTableHeader
-              tableId='user-list-v2'
-              columnId='actions'
-              defaultWidth={360}
-              minWidth={360}
-              hideDivider
-              scope='col'
-              className='px-6 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400'
-            >
-              操作
-            </ResizableTableHeader>
-          </tr>
-        </thead>
-        <tbody className='divide-y divide-gray-200 dark:divide-gray-700'>
-          {sortedUsers.map((user) => {
+    <div className='overflow-hidden rounded-xl ring-1 ring-gray-200 dark:ring-white/[0.06]'>
+      <div className='flex h-10 items-center gap-3 bg-gray-50 px-3 dark:bg-white/[0.03]'>
+        {selectableUsersCount > 0 ? (
+          <input
+            type='checkbox'
+            aria-label='全选当前用户'
+            checked={selectAllUsers}
+            onChange={(event) => onSelectAllUsers(event.target.checked)}
+            className={`${checkboxStyles} shrink-0`}
+          />
+        ) : (
+          <span className='h-4 w-4 shrink-0' />
+        )}
+        <span className='text-xs text-gray-500 dark:text-gray-400'>
+          共 {total} 人
+          {selectionCount > 0 ? ` · 已选 ${selectionCount} 人` : ''}
+        </span>
+        {selectionCount > 0 && (
+          <button
+            type='button'
+            onClick={onBatchUserGroup}
+            className={`${buttonStyles.outline} ml-auto`}
+          >
+            批量设置用户组
+          </button>
+        )}
+      </div>
+      {users.length === 0 ? (
+        <p className='bg-white px-3 py-12 text-center text-sm text-gray-500 dark:bg-gray-900 dark:text-gray-400'>
+          没有匹配的用户
+        </p>
+      ) : (
+        <ul
+          aria-label='用户列表'
+          className='divide-y divide-gray-200 dark:divide-white/[0.06]'
+        >
+          {users.map((user) => {
             const canConfigure = canConfigureUser(user, permissionContext);
-            const canChangePassword = canChangeUserPassword(
-              user,
-              permissionContext,
-            );
-            const canDeleteUser = canDeleteManagedUser(user, permissionContext);
-            const canOperate = canOperateUser(user, permissionContext);
-            return (
-              <tr
-                key={user.username}
-                className='transition-colors hover:bg-gray-50 dark:hover:bg-gray-800'
-              >
-                <td className='w-4' />
-                <td className='w-10 px-1 py-3 text-center'>
-                  {canConfigure ? (
-                    <input
-                      type='checkbox'
-                      checked={selectedUsers.has(user.username)}
-                      onChange={(e) =>
-                        onSelectUser(user.username, e.target.checked)
+            const items: MoreMenuItem[] = [];
+            if (canConfigure) {
+              items.push(
+                {
+                  label: '配置用户组',
+                  onSelect: () => onConfigureUserGroup(user),
+                  disabled: isLoading(`saveUserGroups_${user.username}`),
+                },
+                {
+                  label: '配置视频源',
+                  onSelect: () => onConfigureUserApis(user),
+                  disabled: isLoading(`saveUserApis_${user.username}`),
+                },
+              );
+            }
+            if (canChangeUserPassword(user, permissionContext)) {
+              items.push({
+                label: '修改密码',
+                onSelect: () => onShowChangePassword(user.username),
+                disabled: isLoading(`changePassword_${user.username}`),
+              });
+            }
+            if (canOperateUser(user, permissionContext)) {
+              if (user.role === 'user') {
+                items.push({
+                  label: '设为管理',
+                  onSelect: () => onSetAdmin(user.username),
+                  disabled: isLoading(`setAdmin_${user.username}`),
+                });
+              } else if (user.role === 'admin') {
+                items.push({
+                  label: '取消管理',
+                  onSelect: () => onRemoveAdmin(user.username),
+                  disabled: isLoading(`removeAdmin_${user.username}`),
+                });
+              }
+              if (user.role !== 'owner') {
+                items.push(
+                  user.banned
+                    ? {
+                        label: '解封',
+                        onSelect: () => onUnbanUser(user.username),
+                        disabled: isLoading(`unbanUser_${user.username}`),
                       }
-                      className={checkboxStyles}
-                    />
-                  ) : (
-                    <div className='h-4 w-4' />
-                  )}
-                </td>
-                <td className='whitespace-nowrap px-6 py-4 text-sm font-medium text-gray-900 dark:text-gray-100'>
-                  {user.username}
-                </td>
-                <td className='whitespace-nowrap px-6 py-4'>
-                  <span
-                    className={`rounded-full px-2 py-1 text-xs ${
-                      user.role === 'owner'
-                        ? 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900/20 dark:text-yellow-300'
+                    : {
+                        label: '封禁',
+                        onSelect: () => onBanUser(user.username),
+                        danger: true,
+                        disabled: isLoading(`ban_${user.username}`),
+                      },
+                );
+              }
+            }
+            if (canDeleteManagedUser(user, permissionContext)) {
+              items.push({
+                label: '删除用户',
+                onSelect: () => onDeleteUser(user.username),
+                danger: true,
+                disabled: isLoading(`deleteUser_${user.username}`),
+              });
+            }
+            return (
+              <li
+                key={user.username}
+                className='flex items-center gap-3 bg-white px-3 py-3 transition-colors hover:bg-gray-50 dark:bg-gray-900 dark:hover:bg-white/[0.02]'
+              >
+                {canConfigure &&
+                user.role !== 'owner' &&
+                user.username !== currentUsername ? (
+                  <input
+                    type='checkbox'
+                    aria-label={`选择用户 ${user.username}`}
+                    checked={selectedUsers.has(user.username)}
+                    onChange={(event) =>
+                      onSelectUser(user.username, event.target.checked)
+                    }
+                    className={`${checkboxStyles} shrink-0`}
+                  />
+                ) : (
+                  <span className='h-4 w-4 shrink-0' />
+                )}
+                <div className='min-w-0 flex-1'>
+                  <div className='flex min-w-0 items-center gap-2'>
+                    <span
+                      title={user.username}
+                      className='truncate text-sm font-medium text-gray-900 dark:text-gray-100'
+                    >
+                      {user.username}
+                      {user.nickname && (
+                        <span className='ml-2 font-normal text-gray-500'>
+                          {user.nickname}
+                        </span>
+                      )}
+                    </span>
+                    <span
+                      className={`shrink-0 rounded-full px-2 py-0.5 text-xs ${
+                        user.role === 'owner'
+                          ? 'bg-amber-100 text-amber-800 dark:bg-amber-900/20 dark:text-amber-300'
+                          : user.role === 'admin'
+                            ? 'bg-brand-100 text-brand-800 dark:bg-brand-900/20 dark:text-brand-300'
+                            : 'bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-400'
+                      }`}
+                    >
+                      {user.role === 'owner'
+                        ? '站长'
                         : user.role === 'admin'
-                          ? 'bg-purple-100 text-purple-800 dark:bg-purple-900/20 dark:text-purple-300'
-                          : 'bg-gray-100 text-gray-700 dark:bg-gray-700 dark:text-gray-300'
-                    }`}
-                  >
-                    {user.role === 'owner'
-                      ? '站长'
-                      : user.role === 'admin'
-                        ? '管理员'
-                        : '普通用户'}
-                  </span>
-                </td>
-                <td className='whitespace-nowrap px-6 py-4'>
-                  <span
-                    className={`rounded-full px-2 py-1 text-xs ${
-                      !user.banned
-                        ? 'bg-green-100 text-green-800 dark:bg-green-900/20 dark:text-green-300'
-                        : 'bg-red-100 text-red-800 dark:bg-red-900/20 dark:text-red-300'
-                    }`}
-                  >
-                    {!user.banned ? '正常' : '已封禁'}
-                  </span>
-                </td>
-                <td className='whitespace-nowrap px-6 py-4'>
-                  <span
-                    title={formatLastActiveTooltip(lastActiveAt[user.username])}
-                    className={`text-sm ${
-                      lastActiveAt[user.username]
-                        ? 'text-gray-900 dark:text-gray-100'
-                        : 'text-gray-400 dark:text-gray-500'
-                    }`}
-                  >
-                    {formatLastActive(lastActiveAt[user.username])}
-                  </span>
-                </td>
-                <td className='whitespace-nowrap px-6 py-4'>
-                  <div className='flex items-center space-x-2'>
-                    <span className='text-sm text-gray-900 dark:text-gray-100'>
-                      {user.tags && user.tags.length > 0
-                        ? user.tags.join(', ')
-                        : '无用户组'}
+                          ? '管理员'
+                          : '普通用户'}
                     </span>
-                    {canConfigure && (
-                      <button
-                        onClick={() => onConfigureUserGroup(user)}
-                        className={buttonStyles.roundedPrimary}
-                      >
-                        配置
-                      </button>
+                    {user.banned && (
+                      <span className='shrink-0 rounded-full bg-red-100 px-2 py-0.5 text-xs text-red-800 dark:bg-red-900/20 dark:text-red-300'>
+                        已封禁
+                      </span>
+                    )}
+                    {user.username === currentUsername && (
+                      <span className='shrink-0 text-xs text-gray-400'>我</span>
                     )}
                   </div>
-                </td>
-                <td className='whitespace-nowrap px-6 py-4'>
-                  <div className='flex items-center space-x-2'>
-                    <span className='text-sm text-gray-900 dark:text-gray-100'>
-                      {user.enabledApis && user.enabledApis.length > 0
-                        ? `${user.enabledApis.length} 个源`
-                        : '无限制'}
+                  <p className='mt-1 truncate text-xs text-gray-500 dark:text-gray-400'>
+                    <span
+                      title={formatLastActiveTooltip(
+                        lastActiveAt[user.username],
+                      )}
+                    >
+                      最后活跃 {formatLastActive(lastActiveAt[user.username])}
                     </span>
-                    {canConfigure && (
-                      <button
-                        onClick={() => onConfigureUserApis(user)}
-                        className={buttonStyles.roundedPrimary}
-                      >
-                        配置
-                      </button>
-                    )}
-                  </div>
-                </td>
-                <td className='space-x-2 whitespace-nowrap px-6 py-4 text-left text-sm font-medium'>
-                  {canChangePassword && (
-                    <button
-                      onClick={() => onShowChangePassword(user.username)}
-                      className={buttonStyles.roundedPrimary}
-                    >
-                      修改密码
-                    </button>
-                  )}
-                  {canOperate && (
-                    <>
-                      {user.role === 'user' && (
-                        <button
-                          onClick={() => onSetAdmin(user.username)}
-                          disabled={isLoading(`setAdmin_${user.username}`)}
-                          className={`${buttonStyles.roundedPurple} ${
-                            isLoading(`setAdmin_${user.username}`)
-                              ? 'cursor-not-allowed opacity-50'
-                              : ''
-                          }`}
-                        >
-                          设为管理
-                        </button>
-                      )}
-                      {user.role === 'admin' && (
-                        <button
-                          onClick={() => onRemoveAdmin(user.username)}
-                          disabled={isLoading(`removeAdmin_${user.username}`)}
-                          className={`${buttonStyles.roundedSecondary} ${
-                            isLoading(`removeAdmin_${user.username}`)
-                              ? 'cursor-not-allowed opacity-50'
-                              : ''
-                          }`}
-                        >
-                          取消管理
-                        </button>
-                      )}
-                      {user.role !== 'owner' &&
-                        (!user.banned ? (
-                          <button
-                            onClick={() => onBanUser(user.username)}
-                            disabled={isLoading(`banUser_${user.username}`)}
-                            className={`${buttonStyles.roundedDanger} ${
-                              isLoading(`banUser_${user.username}`)
-                                ? 'cursor-not-allowed opacity-50'
-                                : ''
-                            }`}
-                          >
-                            封禁
-                          </button>
-                        ) : (
-                          <button
-                            onClick={() => onUnbanUser(user.username)}
-                            disabled={isLoading(`unbanUser_${user.username}`)}
-                            className={`${buttonStyles.roundedSuccess} ${
-                              isLoading(`unbanUser_${user.username}`)
-                                ? 'cursor-not-allowed opacity-50'
-                                : ''
-                            }`}
-                          >
-                            解封
-                          </button>
-                        ))}
-                    </>
-                  )}
-                  {canDeleteUser && (
-                    <button
-                      onClick={() => onDeleteUser(user.username)}
-                      className={buttonStyles.roundedDanger}
-                    >
-                      删除用户
-                    </button>
-                  )}
-                </td>
-              </tr>
+                    {' · 用户组 '}
+                    {user.tags?.length ? user.tags.join(', ') : '无'}
+                    {' · 视频源 '}
+                    {user.enabledApis?.length
+                      ? `${user.enabledApis.length} 个`
+                      : '无限制'}
+                  </p>
+                </div>
+                <div className='shrink-0'>
+                  <MoreMenu label={`${user.username} 的操作`} items={items} />
+                </div>
+              </li>
             );
           })}
-        </tbody>
-      </table>
+        </ul>
+      )}
     </div>
   );
 }

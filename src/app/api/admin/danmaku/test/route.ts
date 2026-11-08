@@ -69,11 +69,11 @@ export async function POST(request: NextRequest): Promise<Response> {
       message: `弹幕服务连接正常，测试搜索返回 ${candidates.length} 条结果`,
     });
   } catch (error) {
-    let errorMessage = '未知错误';
-    let errorDetails: string | undefined;
+    console.error('弹幕服务测试失败:', error);
+    let errorDetails = '无法完成弹幕服务测试，请稍后重试';
 
     if (error instanceof Error) {
-      errorMessage = error.message;
+      const errorMessage = error.message;
 
       if (errorMessage.includes('not-configured')) {
         errorDetails = '环境变量 DANMAKU_API_BASE_URL 未配置';
@@ -85,7 +85,7 @@ export async function POST(request: NextRequest): Promise<Response> {
       } else if (errorMessage.includes('invalid-response')) {
         errorDetails = '弹幕服务返回格式错误，请检查服务版本是否匹配';
       } else if (errorMessage.includes('安全校验拦截')) {
-        errorDetails = errorMessage;
+        errorDetails = '弹幕服务地址未通过安全校验，请检查服务配置';
       }
     }
 
@@ -93,7 +93,7 @@ export async function POST(request: NextRequest): Promise<Response> {
       {
         success: false,
         error: '弹幕服务测试失败',
-        details: errorDetails || errorMessage,
+        details: errorDetails,
       },
       { status: 500 },
     );

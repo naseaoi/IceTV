@@ -1,11 +1,25 @@
 import { act, render, screen, waitFor } from '@testing-library/react';
 
 import type { UserMessagePage, UserMessageSummary } from '@/lib/message-types';
+import { dismissToast, showToast } from '@/lib/toast';
 
 const mockGetMessageSummary = jest.fn();
 const mockGetMessagePage = jest.fn();
 const mockReadMessage = jest.fn();
 const mockReadAllMessages = jest.fn();
+const mockLoadPanel = jest.fn();
+
+jest.mock('next/dynamic', () => {
+  const dynamic = jest.requireActual('next/dynamic').default;
+  return {
+    __esModule: true,
+    default: (loader: () => Promise<unknown>, options: unknown) =>
+      dynamic(() => {
+        mockLoadPanel();
+        return loader();
+      }, options),
+  };
+});
 
 jest.mock('@/components/AuthProvider', () => ({
   useAuthSession: () => ({
@@ -20,10 +34,9 @@ jest.mock('@/lib/messages.client', () => ({
   readAllMessages: (...args: unknown[]) => mockReadAllMessages(...args),
 }));
 
-jest.mock('@/components/messages/MessageToast', () => ({
-  __esModule: true,
-  default: ({ text }: { text: string | null }) =>
-    text ? <div data-testid='toast'>{text}</div> : null,
+jest.mock('@/lib/toast', () => ({
+  showToast: jest.fn(),
+  dismissToast: jest.fn(),
 }));
 
 jest.mock('@/components/messages/MessagePanel', () => ({
@@ -33,14 +46,19 @@ jest.mock('@/components/messages/MessagePanel', () => ({
     page,
     onRead,
     onReadAll,
+    onClose,
   }: {
     open: boolean;
     page: UserMessagePage;
     onRead: (message: UserMessagePage['items'][number]) => void;
     onReadAll: () => void;
+    onClose: () => void;
   }) =>
     open ? (
       <div data-testid='panel'>
+        <button data-testid='close-panel' onClick={onClose}>
+          close
+        </button>
         <span data-testid='panel-total'>{page.total}</span>
         {page.items.map((item) => (
           <button
@@ -67,6 +85,10 @@ function summaryOf(revision: string, unreadCount: number): UserMessageSummary {
   return {
     unreadCount,
     trackingUnreadCount: unreadCount,
+    reviewReplyUnreadCount: 0,
+    newFollowerUnreadCount: 0,
+    reviewLikeUnreadCount: 0,
+    followReviewUnreadCount: 0,
     revision,
     announcement: null,
     latestTracking: {
@@ -76,6 +98,7 @@ function summaryOf(revision: string, unreadCount: number): UserMessageSummary {
       source: 'source',
       videoId: 'video',
       title: '测试剧集',
+      year: '2024',
       sourceName: '测试源站',
       cover: '/cover.webp',
       fromEpisodes: 1,
@@ -95,6 +118,7 @@ function pageOf(total: number): UserMessagePage {
         source: 'source',
         videoId: 'video',
         title: '测试剧集',
+        year: '2024',
         sourceName: '测试源站',
         cover: '/cover.webp',
         fromEpisodes: 1,
@@ -138,6 +162,22 @@ describe('MessageCenterProvider', () => {
     mockReadAllMessages.mockResolvedValue({ updatedRecords: {} });
   });
 
+  it('loads the panel only on first open and reuses it after closing', async () => {
+    renderProvider();
+    await waitFor(() => expect(mockGetMessageSummary).toHaveBeenCalled());
+    expect(mockLoadPanel).not.toHaveBeenCalled();
+
+    await act(async () => screen.getByTestId('open').click());
+    await screen.findByTestId('panel');
+    expect(mockLoadPanel).toHaveBeenCalledTimes(1);
+
+    await act(async () => screen.getByTestId('close-panel').click());
+    expect(screen.queryByTestId('panel')).not.toBeInTheDocument();
+    await act(async () => screen.getByTestId('open').click());
+    await screen.findByTestId('panel');
+    expect(mockLoadPanel).toHaveBeenCalledTimes(1);
+  });
+
   it('挂载后暴露未读数并弹出提示', async () => {
     renderProvider();
 
@@ -145,7 +185,22 @@ describe('MessageCenterProvider', () => {
       expect(screen.getByTestId('unread').textContent).toBe('1'),
     );
     expect(screen.getByTestId('tracking-unread').textContent).toBe('1');
-    expect(screen.getByTestId('toast')).toBeInTheDocument();
+    expect(showToast).toHaveBeenCalledWith(
+      '《测试剧集》已更新至第 2 集',
+      'notice',
+      expect.objectContaining({ key: 'messages' }),
+    );
+  });
+
+  it('消息提示的查看操作打开面板并收起提示', async () => {
+    renderProvider();
+    await waitFor(() => expect(showToast).toHaveBeenCalled());
+    const options = jest.mocked(showToast).mock.calls[0][2];
+
+    await act(async () => options?.action?.onClick());
+
+    await screen.findByTestId('panel');
+    expect(dismissToast).toHaveBeenCalledWith('messages');
   });
 
   it('面板打开时轮询到新 revision 会重载首页', async () => {

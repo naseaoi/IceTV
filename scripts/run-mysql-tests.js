@@ -9,7 +9,10 @@ const PORT = process.env.MYSQL_TEST_PORT || '33061';
 const IMAGE = 'mysql:8.4';
 const READY_TIMEOUT_MS = 180_000;
 const TEST_PATTERNS = [
+  'config-state-storage',
+  'admin-user-storage',
   'mysql-tracking-live',
+  'library-storage',
   'tracking-backend-parity',
   'shared-cache-storage',
   'shared-resource-store',
@@ -88,13 +91,17 @@ try {
     'bin',
     'jest.js',
   );
-  const result = spawnSync(process.execPath, [jestBin, ...TEST_PATTERNS], {
-    stdio: 'inherit',
-    env: {
-      ...process.env,
-      MYSQL_TEST_URL: `mysql://root:${PASSWORD}@127.0.0.1:${PORT}/${DATABASE}`,
+  const result = spawnSync(
+    process.execPath,
+    [jestBin, '--runInBand', ...TEST_PATTERNS],
+    {
+      stdio: 'inherit',
+      env: {
+        ...process.env,
+        MYSQL_TEST_URL: `mysql://root:${PASSWORD}@127.0.0.1:${PORT}/${DATABASE}`,
+      },
     },
-  });
+  );
   exitCode = result.status ?? 1;
 } catch (error) {
   console.error(error.message);

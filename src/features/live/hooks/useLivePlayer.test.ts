@@ -181,6 +181,31 @@ describe('useLivePlayer playback failure', () => {
     mediaSpies.forEach((spy) => spy.mockRestore());
   });
 
+  it.each([true, false])(
+    'only starts loading a parsed manifest when loadingEnabled is false (current: %s)',
+    async (loadingEnabled) => {
+      renderLivePlayer();
+      const { player, hls } = await waitForPlayer(1);
+      hls.loadingEnabled = loadingEnabled;
+      hls.liveSyncPosition = 120;
+      const play = jest.mocked(HTMLMediaElement.prototype.play);
+      play.mockClear();
+
+      act(() => {
+        hls.emit(MockHls.Events.MANIFEST_PARSED, {});
+      });
+
+      if (loadingEnabled) {
+        expect(hls.startLoad).not.toHaveBeenCalled();
+      } else {
+        expect(hls.startLoad).toHaveBeenCalledTimes(1);
+        expect(hls.startLoad).toHaveBeenCalledWith(-1);
+      }
+      expect(player.video.currentTime).toBe(120);
+      expect(play).toHaveBeenCalled();
+    },
+  );
+
   it('enters the player failure state when media recovery is exhausted', async () => {
     const { result, setIsVideoLoading } = renderLivePlayer();
     const { player, hls } = await waitForPlayer(1);

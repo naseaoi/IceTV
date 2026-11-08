@@ -9,7 +9,7 @@ export type RuntimeParamField = {
 
 export type RuntimeParamGroup = {
   id: string;
-  title: string;
+  title?: string;
   fields: RuntimeParamField[];
 };
 
@@ -20,52 +20,50 @@ export const COMMON_RUNTIME_PARAM_GROUPS: RuntimeParamGroup[] = [
     fields: [
       {
         key: 'SearchDownstreamMaxPage',
-        label: '单源搜索最大页数',
+        label: '单源最大翻页数',
         unit: '页',
-        hint: '页数越多，搜索覆盖更广，也会增加源站请求。',
+        hint: '页数越多结果越全，源站请求也越多。',
       },
       {
         key: 'SearchRequestTimeoutSeconds',
-        label: '单次搜索请求超时',
+        label: '单次请求超时',
         unit: '秒',
       },
       {
         key: 'UpstreamSearchConcurrency',
-        label: '上游搜索并发上限',
+        label: '同时搜索的源数上限',
         unit: '个',
-        hint: '0 表示跟随部署档位或环境变量。',
+        hint: '0 表示跟随部署档位。',
       },
       {
         key: 'SourceFailureCooldownSeconds',
-        label: '搜索源失败冷却',
+        label: '出错源跳过时长',
         unit: '秒',
-        hint: '搜索失败后暂时跳过该源；0 表示关闭，不控制播放换源。',
+        hint: '0 表示不跳过。',
       },
     ],
   },
   {
     id: 'playback',
-    title: '播放与记录',
+    title: '播放',
     fields: [
       {
         key: 'VodPageTimeoutSeconds',
-        label: '点播起播无进展超时',
+        label: '点播起播超时',
         unit: '秒',
-        hint: '从媒体开始加载计时，清单成功或分片下载进展会续期；实际窗口取此值、源站下限与分片首字节超时的最大值，总等待上限为窗口的 4 倍。',
+        hint: '起播阶段持续无加载进展时判定失败。',
       },
       {
         key: 'VodFragmentTimeoutSeconds',
         label: '分片请求超时',
         unit: '秒',
-        hint: '单个分片等待首字节的秒数；超时计入线路失败，用于触发直连与代理之间的切换。',
+        hint: '超时后在直连与代理线路间切换。',
       },
       {
         key: 'LivePrecheckTimeoutSeconds',
-        label: '直播预检查超时',
+        label: '直播格式探测超时',
         unit: '秒',
       },
-      { key: 'ContinueWatchingLimit', label: '首页继续观看数量', unit: '条' },
-      { key: 'PlaybackHistoryLimit', label: '历史播放条数上限', unit: '条' },
     ],
   },
   {
@@ -76,35 +74,58 @@ export const COMMON_RUNTIME_PARAM_GROUPS: RuntimeParamGroup[] = [
         key: 'DanmakuEpisodeLimit',
         label: '单集弹幕条数上限',
         unit: '条',
-        hint: '超出后按时间抽稀；条数越高，播放器渲染开销越大。',
+        hint: '超出后按时间均匀抽稀，条数越多播放越吃性能。',
       },
       {
         key: 'DanmakuRequestTimeoutSeconds',
         label: '弹幕上游请求超时',
         unit: '秒',
-        hint: '用于弹幕搜索、绑定校验、内容拉取和连接测试的单次回源请求。',
       },
     ],
   },
   {
+    id: 'lists',
+    title: '列表与记录',
+    fields: [
+      {
+        key: 'ContinueWatchingLimit',
+        label: '首页继续观看数量',
+        unit: '条',
+      },
+      {
+        key: 'PlaybackHistoryPageSize',
+        label: '观看历史每次加载数量',
+        unit: '条',
+        hint: '同时决定“我的”页最近观看的数量。',
+      },
+      {
+        key: 'PlaybackHistoryLimit',
+        label: '观看历史可浏览条数',
+        unit: '条',
+      },
+      { key: 'SearchHistoryLimit', label: '搜索历史保留条数', unit: '条' },
+    ],
+  },
+  {
     id: 'network',
-    title: '缓存与代理',
+    title: '代理与缓存',
     fields: [
       {
         key: 'ProxyRequestTimeoutSeconds',
-        label: '代理请求超时',
+        label: '视频代理超时',
         unit: '秒',
+        hint: '播放清单、分片与直播台标。',
       },
       {
         key: 'ImageProxyTimeoutSeconds',
         label: '图片代理超时',
         unit: '秒',
+        hint: '海报与番剧封面。',
       },
       {
         key: 'SiteInterfaceCacheTime',
-        label: '豆瓣接口响应缓存时间',
+        label: '豆瓣数据缓存时间',
         unit: '秒',
-        hint: '控制豆瓣接口响应缓存头，不是搜索、封面文件或弹幕缓存时长。',
       },
     ],
   },
@@ -112,27 +133,19 @@ export const COMMON_RUNTIME_PARAM_GROUPS: RuntimeParamGroup[] = [
 
 export const ADVANCED_RUNTIME_PARAM_GROUPS: RuntimeParamGroup[] = [
   {
-    id: 'history',
-    title: '历史与导入',
-    fields: [
-      { key: 'SearchHistoryLimit', label: '搜索历史条数上限', unit: '条' },
-      { key: 'PlaybackHistoryPageSize', label: '历史播放单页数量', unit: '条' },
-      {
-        key: 'DataImportPlaybackSessionsLimit',
-        label: '导入单用户历史上限',
-        unit: '条',
-      },
-    ],
-  },
-  {
-    id: 'browser-cache',
-    title: '浏览器加载记录',
+    id: 'advanced',
     fields: [
       {
         key: 'CoverImageCacheSize',
-        label: '封面加载记录上限',
+        label: '封面加载状态记录上限',
         unit: '条',
-        hint: '原始和代理 URL 分别计数；不限制浏览器图片文件缓存，也不改变服务端图片缓存。',
+        hint: '浏览器记住已加载和加载失败的封面，避免重复加载。',
+      },
+      {
+        key: 'DataImportPlaybackSessionsLimit',
+        label: '导入时每人播放记录上限',
+        unit: '条',
+        hint: '超出时保留最新的记录。',
       },
     ],
   },

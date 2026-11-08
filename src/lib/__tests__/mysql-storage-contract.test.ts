@@ -1,8 +1,13 @@
 /** @jest-environment node */
-
+import { assertPlaybackPeriodRange } from '@/lib/__tests__/__fixtures__/playback-period-contract';
 import { hasPlayRecordUpdate } from '@/lib/play-records';
 import { DEFAULT_RUNTIME_PARAMS } from '@/lib/runtime-params';
+import type { StoredUserDanmaku } from '@/lib/user-danmaku-storage';
 import type { AdminConfig } from '@/types/admin';
+
+import { executeSocial, querySocial } from './__fixtures__/social-fake-sql';
+import { userDanmakuContract } from './__fixtures__/user-danmaku-contract';
+import { videoReviewContract } from './__fixtures__/video-review-contract';
 
 type SearchHistoryRow = {
   username: string;
@@ -19,10 +24,37 @@ type SourceRouteStatsRow = {
   updatedAt: number;
 };
 
+type HealthSearchRow = {
+  source: string;
+  bucketDate: string;
+  okCount: number;
+  emptyCount: number;
+  errorCount: number;
+  latencyMsSum: number;
+  latencySamples: number;
+};
+
+type HealthPlayRow = {
+  source: string;
+  bucketDate: string;
+  reporter: string;
+  successCount: number;
+  failureCount: number;
+};
+
 type FakeState = {
+  healthSearch: HealthSearchRow[];
+  healthPlay: HealthPlayRow[];
+  subscription: Record<string, unknown> | null;
+  liveCounts: Map<string, Record<string, unknown>>;
+  social: Record<string, Record<string, any>[]>;
+  userAccess: Map<string, Record<string, any>>;
+  userGroups: Record<string, any>[];
   users: Map<string, string>;
   playRecords: Map<string, Map<string, string>>;
   favorites: Map<string, Map<string, string>>;
+  videoReviews: Map<string, { username: string; review: VideoReview }>;
+  userDanmaku: Map<string, StoredUserDanmaku>;
   skipConfigs: Map<string, Map<string, string>>;
   playbackSessions: Map<string, Record<string, unknown>>;
   searchHistory: SearchHistoryRow[];
@@ -31,6 +63,7 @@ type FakeState = {
   messageStates: Map<string, string>;
   loginActivities: Map<string, number>;
   inviteCodeUsage: Map<string, number>;
+  inviteCodes: Map<string, Record<string, any>>;
   danmakuEpisodes: Map<string, Map<string, number>>;
   danmakuEnabled: Map<string, boolean>;
 };
@@ -43,9 +76,27 @@ function cloneNestedMap(source: Map<string, Map<string, string>>) {
 
 function cloneState(state: FakeState): FakeState {
   return {
+    healthSearch: state.healthSearch.map((row) => ({ ...row })),
+    healthPlay: state.healthPlay.map((row) => ({ ...row })),
+    subscription: state.subscription ? { ...state.subscription } : null,
+    liveCounts: new Map(
+      [...state.liveCounts].map(([key, row]) => [key, { ...row }]),
+    ),
+    social: Object.fromEntries(
+      Object.entries(state.social).map(([key, rows]) => [
+        key,
+        rows.map((row) => ({ ...row })),
+      ]),
+    ),
+    userAccess: new Map(
+      [...state.userAccess].map(([key, row]) => [key, { ...row }]),
+    ),
+    userGroups: state.userGroups.map((row) => ({ ...row })),
     users: new Map(state.users),
     playRecords: cloneNestedMap(state.playRecords),
     favorites: cloneNestedMap(state.favorites),
+    videoReviews: new Map(state.videoReviews),
+    userDanmaku: new Map(state.userDanmaku),
     skipConfigs: cloneNestedMap(state.skipConfigs),
     playbackSessions: new Map(state.playbackSessions),
     searchHistory: state.searchHistory.map((row) => ({ ...row })),
@@ -54,6 +105,9 @@ function cloneState(state: FakeState): FakeState {
     messageStates: new Map(state.messageStates),
     loginActivities: new Map(state.loginActivities),
     inviteCodeUsage: new Map(state.inviteCodeUsage),
+    inviteCodes: new Map(
+      [...state.inviteCodes].map(([code, item]) => [code, { ...item }]),
+    ),
     danmakuEpisodes: new Map(
       Array.from(state.danmakuEpisodes.entries(), ([key, value]) => [
         key,
@@ -66,9 +120,25 @@ function cloneState(state: FakeState): FakeState {
 
 function createState(): FakeState {
   return {
+    healthSearch: [],
+    healthPlay: [],
+    subscription: null,
+    liveCounts: new Map(),
+    social: {
+      user_profiles: [],
+      user_follows: [],
+      video_review_likes: [],
+      video_review_reports: [],
+      video_review_replies: [],
+      video_review_reply_reports: [],
+    },
+    userAccess: new Map(),
+    userGroups: [],
     users: new Map(),
     playRecords: new Map(),
     favorites: new Map(),
+    videoReviews: new Map(),
+    userDanmaku: new Map(),
     skipConfigs: new Map(),
     playbackSessions: new Map(),
     searchHistory: [],
@@ -77,6 +147,7 @@ function createState(): FakeState {
     messageStates: new Map(),
     loginActivities: new Map(),
     inviteCodeUsage: new Map(),
+    inviteCodes: new Map(),
     danmakuEpisodes: new Map(),
     danmakuEnabled: new Map(),
   };
@@ -238,6 +309,7 @@ function selectUnreadTrackingRows(
 
 function createFakePool() {
   let state = createState();
+  let transactionQueue = Promise.resolve();
   let queryCount = 0;
   const insertStatementCounts = new Map<string, number>();
 
@@ -262,6 +334,140 @@ function createFakePool() {
     currentState: FakeState,
   ) => {
     const normalized = normalizeSql(sql);
+    if (normalized.startsWith('INSERT INTO user_danmaku (')) {
+      const [id, episodeKey, username, timeMs, text, mode, color, createdAt] =
+        params;
+      if (currentState.userDanmaku.has(String(id)))
+        throw new Error('duplicate id');
+      currentState.userDanmaku.set(String(id), {
+        id,
+        episodeKey,
+        username,
+        timeMs,
+        text,
+        mode,
+        color,
+        createdAt,
+      } as StoredUserDanmaku);
+      return [{ affectedRows: 1 }, []];
+    }
+    if (
+      normalized.startsWith('DELETE FROM user_danmaku') &&
+      !normalized.includes('user_danmaku_')
+    ) {
+      let deleted = 0;
+      for (const [id, row] of currentState.userDanmaku) {
+        const matches = normalized.includes('WHERE id IN')
+          ? params.includes(id)
+          : normalized.includes('WHERE id =')
+            ? id === params[0] &&
+              (!normalized.includes('AND username') ||
+                row.username === params[1])
+            : normalized.includes('WHERE username')
+              ? row.username === params[0]
+              : true;
+        if (matches) {
+          currentState.userDanmaku.delete(id);
+          deleted++;
+        }
+      }
+      return [{ affectedRows: deleted }, []];
+    }
+
+    if (normalized.startsWith('INSERT IGNORE INTO user_access')) {
+      for (const username of currentState.users.keys())
+        if (!currentState.userAccess.has(username))
+          currentState.userAccess.set(username, {
+            username,
+            role: 'user',
+            banned: 0,
+            enabled_apis: null,
+            updated_at: params[0],
+          });
+      return [{ affectedRows: 1 }, []];
+    }
+    if (normalized.startsWith('INSERT INTO user_access')) {
+      const [username, role, banned, enabled_apis, updated_at] = params;
+      currentState.userAccess.set(String(username), {
+        username,
+        role,
+        banned,
+        enabled_apis,
+        updated_at,
+      });
+      return [{ affectedRows: 1 }, []];
+    }
+    if (normalized.startsWith('INSERT INTO user_group_members')) {
+      const [username, group_name, position] = params;
+      currentState.userGroups.push({ username, group_name, position });
+      return [{ affectedRows: 1 }, []];
+    }
+    if (normalized.startsWith('DELETE FROM user_access')) {
+      if (params.length) currentState.userAccess.delete(String(params[0]));
+      else currentState.userAccess.clear();
+      return [{ affectedRows: 1 }, []];
+    }
+    if (normalized.startsWith('DELETE FROM user_group_members')) {
+      currentState.userGroups = params.length
+        ? currentState.userGroups.filter(
+            (row) =>
+              row[
+                normalized.includes('group_name =') ? 'group_name' : 'username'
+              ] !== params[0],
+          )
+        : [];
+      return [{ affectedRows: 1 }, []];
+    }
+    if (
+      normalized.startsWith(
+        'UPDATE admin_config SET config_json = ? WHERE id = 1 AND CAST(config_json AS CHAR)',
+      )
+    ) {
+      const matches = currentState.adminConfig === params[1];
+      if (matches) currentState.adminConfig = String(params[0]);
+      return [{ affectedRows: matches ? 1 : 0 }, []];
+    }
+    const socialResult = executeSocial(normalized, params, currentState);
+    if (socialResult !== undefined) return [{ affectedRows: socialResult }, []];
+    if (
+      normalized.startsWith('UPDATE video_reviews SET review_json = JSON_SET')
+    ) {
+      const row = currentState.videoReviews.get(JSON.stringify(params));
+      if (row?.review.is_public) row.review = { ...row.review, spoiler: true };
+      return [{ affectedRows: row ? 1 : 0 }, []];
+    }
+
+    if (normalized.startsWith('INSERT INTO video_reviews')) {
+      const [username, title, year, raw] = params as [
+        string,
+        string,
+        string,
+        string,
+      ];
+      const key = JSON.stringify([username, title, year]);
+      const review = JSON.parse(raw) as VideoReview;
+      const existing = currentState.videoReviews.get(key);
+      if (existing) review.created_at = existing.review.created_at;
+      currentState.videoReviews.set(key, { username, review });
+      return [[], []];
+    }
+    if (normalized.startsWith('DELETE FROM video_reviews')) {
+      let affectedRows = 0;
+      for (const [key, row] of currentState.videoReviews) {
+        if (
+          !params.length ||
+          (row.username === params[0] &&
+            (params.length === 1 ||
+              (row.review.title_norm === params[1] &&
+                row.review.year === params[2] &&
+                (!params[3] || row.review.is_public))))
+        ) {
+          currentState.videoReviews.delete(key);
+          affectedRows++;
+        }
+      }
+      return [{ affectedRows }, []];
+    }
 
     if (normalized.startsWith('CREATE TABLE IF NOT EXISTS')) {
       return [[], []];
@@ -366,6 +572,22 @@ function createFakePool() {
 
     if (
       normalized ===
+      'INSERT INTO user_message_state (username, state_json) VALUES (?, ?) ON DUPLICATE KEY UPDATE username = VALUES(username)'
+    ) {
+      if (!currentState.messageStates.has(String(params[0])))
+        currentState.messageStates.set(String(params[0]), String(params[1]));
+      return [{ affectedRows: 1 }, []];
+    }
+    if (
+      normalized ===
+      'UPDATE user_message_state SET state_json = ? WHERE username = ?'
+    ) {
+      currentState.messageStates.set(String(params[1]), String(params[0]));
+      return [{ affectedRows: 1 }, []];
+    }
+
+    if (
+      normalized ===
         'INSERT INTO user_message_state (username, state_json) VALUES (?, ?) ON DUPLICATE KEY UPDATE state_json = VALUES(state_json)' ||
       normalized ===
         'INSERT INTO user_message_state (username, state_json) VALUES (?, ?)'
@@ -373,6 +595,95 @@ function createFakePool() {
       const [username, stateJson] = params as [string, string];
       currentState.messageStates.set(username, stateJson);
       return [[], []];
+    }
+
+    if (/^INSERT(?: IGNORE)? INTO config_subscription /.test(normalized)) {
+      const [url, auto_update, last_check, config_file] = params;
+      if (!normalized.startsWith('INSERT IGNORE') || !currentState.subscription)
+        currentState.subscription = {
+          url,
+          auto_update,
+          last_check,
+          config_file,
+        };
+      return [{ affectedRows: 1 }, []];
+    }
+    if (/^INSERT(?: IGNORE)? INTO live_source_state /.test(normalized)) {
+      const [source_key, channel_number, updated_at] = params;
+      if (
+        !normalized.startsWith('INSERT IGNORE') ||
+        !currentState.liveCounts.has(String(source_key))
+      )
+        currentState.liveCounts.set(String(source_key), {
+          source_key,
+          channel_number,
+          updated_at,
+        });
+      return [{ affectedRows: 1 }, []];
+    }
+    if (normalized === 'DELETE FROM config_subscription') {
+      currentState.subscription = null;
+      return [{ affectedRows: 1 }, []];
+    }
+    if (normalized.startsWith('DELETE FROM live_source_state')) {
+      if (params.length) currentState.liveCounts.delete(String(params[0]));
+      else currentState.liveCounts.clear();
+      return [{ affectedRows: 1 }, []];
+    }
+    if (/^INSERT(?: IGNORE)? INTO invite_codes /.test(normalized)) {
+      const [code, created_at, expires_at, created_by, max_uses, used_count] =
+        params;
+      if (
+        !normalized.startsWith('INSERT IGNORE') ||
+        !currentState.inviteCodes.has(String(code))
+      )
+        currentState.inviteCodes.set(String(code), {
+          code,
+          created_at,
+          expires_at,
+          created_by,
+          max_uses,
+          used_count,
+        });
+      return [{ affectedRows: 1 }, []];
+    }
+    if (
+      normalized.startsWith(
+        'UPDATE invite_codes SET used_count = used_count + 1',
+      )
+    ) {
+      const item = currentState.inviteCodes.get(String(params[0]));
+      if (
+        !item ||
+        item.expires_at <= Number(params[1]) ||
+        (item.max_uses !== null && item.used_count >= item.max_uses)
+      )
+        return [{ affectedRows: 0 }, []];
+      item.used_count += 1;
+      return [{ affectedRows: 1 }, []];
+    }
+    if (
+      normalized.startsWith(
+        'UPDATE invite_codes SET used_count = used_count - 1',
+      )
+    ) {
+      const item = currentState.inviteCodes.get(String(params[0]));
+      if (item && item.used_count > 0) item.used_count -= 1;
+      return [{ affectedRows: 1 }, []];
+    }
+    if (normalized === 'DELETE FROM invite_codes WHERE code = ?') {
+      return [
+        {
+          affectedRows: Number(
+            currentState.inviteCodes.delete(String(params[0])),
+          ),
+        },
+        [],
+      ];
+    }
+    if (normalized === 'DELETE FROM invite_codes') {
+      currentState.inviteCodes.clear();
+      return [{ affectedRows: 1 }, []];
     }
 
     if (
@@ -513,8 +824,9 @@ function createFakePool() {
     }
 
     if (
-      normalized ===
-      'INSERT INTO favorites (username, favorite_key, favorite_json) VALUES (?, ?, ?) ON DUPLICATE KEY UPDATE favorite_json = VALUES(favorite_json)'
+      normalized.startsWith(
+        'INSERT INTO favorites (username, favorite_key, favorite_json,',
+      )
     ) {
       const [username, key, value] = params as [string, string, string];
       upsertJsonRecord(currentState.favorites, username, key, value);
@@ -530,12 +842,9 @@ function createFakePool() {
       return [[], []];
     }
 
-    if (
-      normalized ===
-      'UPDATE favorites SET favorite_json = ? WHERE username = ? AND favorite_key = ? AND BINARY favorite_json = BINARY ?'
-    ) {
-      const [value, username, key, snapshot] = params as [
-        string,
+    if (normalized.startsWith('UPDATE favorites SET favorite_json = ?,')) {
+      const value = params[0] as string;
+      const [username, key, snapshot] = params.slice(-3) as [
         string,
         string,
         string,
@@ -590,6 +899,17 @@ function createFakePool() {
         if (row.username === username) {
           currentState.playbackSessions.delete(id);
         }
+      }
+      return [[], []];
+    }
+
+    if (
+      normalized ===
+      'DELETE FROM playback_sessions WHERE username = ? AND id = ?'
+    ) {
+      const [username, id] = params as [string, string];
+      if (currentState.playbackSessions.get(id)?.username === username) {
+        currentState.playbackSessions.delete(id);
       }
       return [[], []];
     }
@@ -907,6 +1227,90 @@ function createFakePool() {
       return [[], []];
     }
 
+    if (normalized.startsWith('INSERT INTO source_health_search (')) {
+      const [
+        source,
+        bucketDate,
+        okCount,
+        emptyCount,
+        errorCount,
+        latencyMsSum,
+        latencySamples,
+      ] = params as [string, string, number, number, number, number, number];
+      const existing = currentState.healthSearch.find(
+        (row) => row.source === source && row.bucketDate === bucketDate,
+      );
+      if (existing) {
+        existing.okCount += okCount;
+        existing.emptyCount += emptyCount;
+        existing.errorCount += errorCount;
+        existing.latencyMsSum += latencyMsSum;
+        existing.latencySamples += latencySamples;
+      } else {
+        currentState.healthSearch.push({
+          source,
+          bucketDate,
+          okCount,
+          emptyCount,
+          errorCount,
+          latencyMsSum,
+          latencySamples,
+        });
+      }
+      return [[], []];
+    }
+    if (normalized.startsWith('INSERT INTO source_health_play (')) {
+      const [source, bucketDate, reporter, successCount, failureCount] =
+        params as [string, string, string, number, number];
+      const existing = currentState.healthPlay.find(
+        (row) =>
+          row.source === source &&
+          row.bucketDate === bucketDate &&
+          row.reporter === reporter,
+      );
+      if (existing) {
+        existing.successCount += successCount;
+        existing.failureCount += failureCount;
+      } else {
+        currentState.healthPlay.push({
+          source,
+          bucketDate,
+          reporter,
+          successCount,
+          failureCount,
+        });
+      }
+      return [[], []];
+    }
+    for (const [table, key] of [
+      ['source_health_search', 'healthSearch'],
+      ['source_health_play', 'healthPlay'],
+    ] as const) {
+      if (normalized === `DELETE FROM ${table}`) {
+        currentState[key] = [];
+        return [[], []];
+      }
+      if (normalized === `DELETE FROM ${table} WHERE bucket_date < ?`) {
+        const beforeDate = params[0] as string;
+        if (key === 'healthSearch')
+          currentState.healthSearch = currentState.healthSearch.filter(
+            (row) => row.bucketDate >= beforeDate,
+          );
+        else
+          currentState.healthPlay = currentState.healthPlay.filter(
+            (row) => row.bucketDate >= beforeDate,
+          );
+        return [[], []];
+      }
+    }
+
+    if (normalized === 'DELETE FROM source_route_stats WHERE bucket_date < ?') {
+      currentState.sourceRouteStats = currentState.sourceRouteStats.filter(
+        (row) => row.bucketDate >= (params[0] as string),
+      );
+      return [[], []];
+    }
+
     if (normalized === 'DELETE FROM source_route_stats') {
       currentState.sourceRouteStats = [];
       return [[], []];
@@ -925,6 +1329,366 @@ function createFakePool() {
     currentState: FakeState,
   ) => {
     const normalized = normalizeSql(sql);
+    if (
+      normalized.includes('FROM user_danmaku ') &&
+      !normalized.includes('FROM user_danmaku_')
+    ) {
+      let rows = [...currentState.userDanmaku.values()];
+      let offset = 0;
+      if (normalized.includes('episode_key = ?')) {
+        const key = params[offset++];
+        rows = rows.filter((row) => row.episodeKey === key);
+      }
+      if (normalized.includes('created_at < ?')) {
+        const [time, , id] = params.slice(offset);
+        offset += 3;
+        rows = rows.filter(
+          (row) =>
+            row.createdAt < Number(time) ||
+            (row.createdAt === Number(time) && row.id < String(id)),
+        );
+      }
+      if (normalized.includes('LOWER(text)')) {
+        const q = String(params[offset])
+          .slice(1, -1)
+          .replace(/!([!%_])/g, '$1')
+          .toLowerCase();
+        offset += 2;
+        rows = rows.filter(
+          (row) =>
+            row.text.toLowerCase().includes(q) ||
+            row.username.toLowerCase().includes(q),
+        );
+      }
+      if (normalized.includes('username = ?')) {
+        const username = params[offset++];
+        rows = rows.filter((row) => row.username === username);
+      }
+      rows.sort(
+        (a, b) => b.createdAt - a.createdAt || b.id.localeCompare(a.id),
+      );
+      const literalLimit = normalized.match(/LIMIT (\d+)$/);
+      const limit = literalLimit
+        ? Number(literalLimit[1])
+        : normalized.endsWith('LIMIT ?')
+          ? Number(params[offset])
+          : rows.length;
+      return [rows.slice(0, limit), []];
+    }
+
+    if (normalized.startsWith('SELECT * FROM config_subscription WHERE id = 1'))
+      return [currentState.subscription ? [currentState.subscription] : [], []];
+    if (
+      normalized === 'SELECT source_key, channel_number FROM live_source_state'
+    )
+      return [[...currentState.liveCounts.values()], []];
+    if (normalized === 'SHOW COLUMNS FROM favorites')
+      return [
+        [
+          'title_norm',
+          'year_norm',
+          'year_number',
+          'search_text',
+          'saved_at',
+          'library_valid',
+          'watch_status',
+          'watched_at',
+          'projection_version',
+        ].map((Field) => ({ Field })),
+        [],
+      ];
+    if (normalized === 'SHOW INDEX FROM favorites')
+      return [
+        [
+          'idx_favorites_saved',
+          'idx_favorites_work',
+          'idx_favorites_projection',
+        ].map((Key_name) => ({ Key_name })),
+        [],
+      ];
+    if (
+      normalized ===
+      'SELECT username, favorite_key, favorite_json FROM favorites WHERE projection_version < 2 LIMIT 250'
+    )
+      return [[], []];
+    if (
+      normalized.startsWith(
+        'SELECT username, role, banned, enabled_apis FROM user_access',
+      )
+    ) {
+      const row = currentState.userAccess.get(String(params[0]));
+      return [row ? [{ ...row }] : [], []];
+    }
+    if (normalized === 'SELECT username FROM user_access ORDER BY username')
+      return [
+        [...currentState.userAccess.keys()]
+          .sort()
+          .map((username) => ({ username })),
+        [],
+      ];
+    if (normalized.startsWith('SELECT group_name FROM user_group_members'))
+      return [
+        currentState.userGroups
+          .filter((row) => row.username === params[0])
+          .sort((a, b) => a.position - b.position)
+          .map((row) => ({ group_name: row.group_name })),
+        [],
+      ];
+    const socialRows = querySocial(normalized, params, currentState);
+    if (socialRows !== undefined) return [socialRows, []];
+
+    if (normalized.includes('FROM video_reviews')) {
+      let rows = [...currentState.videoReviews.values()];
+      const compareText = (a: string, b: string) =>
+        a === b ? 0 : a < b ? -1 : 1;
+      const sortRows = (a: (typeof rows)[number], b: (typeof rows)[number]) =>
+        b.review.updated_at - a.review.updated_at ||
+        compareText(b.username, a.username) ||
+        compareText(b.review.title_norm, a.review.title_norm) ||
+        compareText(b.review.year, a.review.year);
+      if (
+        normalized.startsWith('SELECT COUNT(*) AS count FROM video_reviews')
+      ) {
+        const matching = normalized.includes('WHERE username = ?')
+          ? rows.filter((row) => row.username === params[0])
+          : rows.filter(
+              (row) =>
+                row.review.is_public &&
+                row.review.title_norm === params[0] &&
+                (!params[1] ||
+                  row.review.year === params[1] ||
+                  row.review.year === ''),
+            );
+        return [[{ count: matching.length }], []];
+      }
+      if (normalized.startsWith('SELECT title_norm, year,')) {
+        return [
+          rows
+            .filter((row) => row.username === params[0])
+            .map(({ review }) => ({
+              title_norm: review.title_norm,
+              year: review.year,
+              rating: review.rating,
+            })),
+          [],
+        ];
+      }
+      if (normalized.includes('LOWER(CONCAT(')) {
+        rows = rows.filter(
+          (row) =>
+            row.username === params[0] &&
+            `${row.review.title} ${row.review.content}`
+              .toLowerCase()
+              .includes(String(params[1]).toLowerCase()),
+        );
+        if (normalized.includes('AS `all`'))
+          return [
+            [
+              {
+                all: rows.length,
+                public: rows.filter((row) => row.review.is_public).length,
+                private: rows.filter((row) => !row.review.is_public).length,
+                text: rows.filter((row) => row.review.rating === null).length,
+              },
+            ],
+            [],
+          ];
+        const rank = (review: VideoReview) =>
+          normalized.includes('101 - ROUND')
+            ? review.rating === null
+              ? 0
+              : 101 - Math.round(review.rating * 10)
+            : normalized.includes('COALESCE(ROUND')
+              ? review.rating === null
+                ? 0
+                : Math.round(review.rating * 10)
+              : review.updated_at;
+        if (normalized.includes('AND is_public = 1'))
+          rows = rows.filter((row) => row.review.is_public);
+        if (normalized.includes('AND is_public = 0'))
+          rows = rows.filter((row) => !row.review.is_public);
+        if (normalized.includes('END IS NULL'))
+          rows = rows.filter((row) => row.review.rating === null);
+        rows.sort((a, b) => rank(b.review) - rank(a.review) || sortRows(a, b));
+        if (params.length > 3)
+          rows = rows.filter(
+            ({ review }) =>
+              rank(review) < Number(params[3]) ||
+              (rank(review) === Number(params[3]) &&
+                (review.updated_at < Number(params[5]) ||
+                  (review.updated_at === Number(params[5]) &&
+                    (review.title_norm < String(params[7]) ||
+                      (review.title_norm === params[7] &&
+                        review.year < String(params[9])))))),
+          );
+        return [
+          rows
+            .slice(0, 21)
+            .map((row) => ({ review_json: JSON.stringify(row.review) })),
+          [],
+        ];
+      }
+      if (
+        normalized.includes('JOIN user_profiles p ON p.username = r.username')
+      ) {
+        const profileId = (username: string) =>
+          currentState.social.user_profiles.find((p) => p.username === username)
+            ?.profile_id ?? '';
+        rows = rows.filter(
+          (row) =>
+            row.review.is_public &&
+            row.review.title_norm === params[0] &&
+            (!params[1] ||
+              row.review.year === params[1] ||
+              row.review.year === ''),
+        );
+        rows.sort(
+          (a, b) =>
+            b.review.updated_at - a.review.updated_at ||
+            compareText(profileId(b.username), profileId(a.username)) ||
+            compareText(b.review.year, a.review.year),
+        );
+        if (params.length > 3)
+          rows = rows.filter(
+            (row) =>
+              row.review.updated_at < Number(params[3]) ||
+              (row.review.updated_at === Number(params[3]) &&
+                (profileId(row.username) < String(params[5]) ||
+                  (profileId(row.username) === params[5] &&
+                    row.review.year < String(params[7])))),
+          );
+        return [
+          rows.slice(0, 21).map((row) => ({
+            username: row.username,
+            profile_id: profileId(row.username),
+            review_json: JSON.stringify(row.review),
+          })),
+          [],
+        ];
+      }
+      if (
+        normalized.includes('WHERE username = ? AND is_public = 1') &&
+        normalized.includes('LIMIT 21')
+      ) {
+        rows = rows
+          .filter((row) => row.username === params[0] && row.review.is_public)
+          .sort(sortRows);
+        if (params.length > 1)
+          rows = rows.filter(
+            ({ review }) =>
+              review.updated_at < Number(params[1]) ||
+              (review.updated_at === Number(params[1]) &&
+                (review.title_norm < String(params[3]) ||
+                  (review.title_norm === params[3] &&
+                    review.year < String(params[5])))),
+          );
+        return [
+          rows.slice(0, 21).map((row) => ({
+            username: row.username,
+            review_json: JSON.stringify(row.review),
+          })),
+          [],
+        ];
+      }
+      if (normalized.includes('WHERE username = ?')) {
+        rows = rows.filter((row) => row.username === params[0]);
+        if (normalized.includes('title_norm = ?')) {
+          rows = rows.filter(
+            (row) =>
+              row.review.title_norm === params[1] &&
+              (params.length === 2 ||
+                row.review.year === params[2] ||
+                row.review.year === ''),
+          );
+        }
+        rows.sort(
+          (a, b) =>
+            (params.length > 2
+              ? Number(b.review.year === params[2]) -
+                Number(a.review.year === params[2])
+              : 0) || sortRows(a, b),
+        );
+        if (normalized.includes('is_public = 1'))
+          rows = rows.filter(
+            (row) =>
+              row.review.is_public &&
+              (!normalized.includes('year = ?') ||
+                row.review.year === params[2]),
+          );
+        if (normalized.includes('LIMIT 1')) rows = rows.slice(0, 1);
+      } else {
+        rows = rows.filter((row) => row.review.is_public);
+        if (normalized.includes('WHERE title_norm = ?')) {
+          rows = rows.filter(
+            (row) =>
+              row.review.title_norm === params[0] &&
+              (!params[1] ||
+                row.review.year === params[1] ||
+                row.review.year === ''),
+          );
+          if (normalized.includes(' AS bucket')) {
+            const counts = new Map<number, number>();
+            for (const row of rows)
+              if (row.review.rating !== null) {
+                const bucket = Math.floor(row.review.rating);
+                counts.set(bucket, (counts.get(bucket) ?? 0) + 1);
+              }
+            return [
+              [...counts].map(([bucket, count]) => ({ bucket, count })),
+              [],
+            ];
+          }
+          if (normalized.startsWith('SELECT AVG(')) {
+            const rated = rows.filter((row) => row.review.rating !== null);
+            return [
+              [
+                {
+                  average: rated.length
+                    ? String(
+                        rated.reduce(
+                          (sum, row) => sum + row.review.rating!,
+                          0,
+                        ) / rated.length,
+                      )
+                    : null,
+                  count: rated.length,
+                },
+              ],
+              [],
+            ];
+          }
+          rows.sort(sortRows);
+          rows = rows.slice(0, 50);
+        } else {
+          const q = String(params[0]).toLowerCase();
+          rows = rows.filter(
+            (row) =>
+              row.review.title.toLowerCase().includes(q) ||
+              row.username.toLowerCase().includes(q),
+          );
+          rows.sort(sortRows);
+          if (params[3]) {
+            const after = {
+              username: String(params[6]),
+              review: {
+                updated_at: Number(params[4]),
+                title_norm: String(params[8]),
+                year: String(params[10]),
+              } as VideoReview,
+            };
+            rows = rows.filter((row) => sortRows(row, after) > 0);
+          }
+          rows = rows.slice(0, 31);
+        }
+      }
+      return [
+        rows.map((row) => ({
+          username: row.username,
+          review_json: JSON.stringify(row.review),
+        })),
+        [],
+      ];
+    }
 
     if (
       normalized ===
@@ -1123,7 +1887,7 @@ function createFakePool() {
         'SELECT f.favorite_key, f.favorite_json, p.record_json FROM favorites f LEFT JOIN play_records p',
       )
     ) {
-      const [username] = params as [string];
+      const [username, includeLive] = params as [string, number];
       const rows = (
         getJsonRows(
           currentState.favorites,
@@ -1132,6 +1896,10 @@ function createFakePool() {
           'favorite_json',
         ) as Array<{ favorite_key: string; favorite_json: string }>
       )
+        .filter(
+          (row) =>
+            includeLive || JSON.parse(row.favorite_json).origin !== 'live',
+        )
         .map((row) => ({
           ...row,
           record_json: currentState.playRecords
@@ -1147,9 +1915,10 @@ function createFakePool() {
             right.favorite_key.localeCompare(left.favorite_key)
           );
         });
-      if (params.length === 5) {
-        const [, cursorTime, , cursorKey, limit] = params as [
+      if (params.length === 6) {
+        const [, , cursorTime, , cursorKey, limit] = params as [
           string,
+          number,
           number,
           number,
           string,
@@ -1168,16 +1937,22 @@ function createFakePool() {
           [],
         ];
       }
-      const [, limit] = params as [string, number];
+      const [, , limit] = params as [string, number, number];
       return [rows.slice(0, limit), []];
     }
 
     if (
-      normalized ===
-      'SELECT COUNT(*) AS count FROM favorites WHERE username = ?'
+      normalized.startsWith(
+        'SELECT COUNT(*) AS count FROM favorites WHERE username = ?',
+      )
     ) {
-      const [username] = params as [string];
-      return [[{ count: currentState.favorites.get(username)?.size || 0 }], []];
+      const [username, includeLive] = params as [string, number];
+      const count = [
+        ...(currentState.favorites.get(username)?.values() ?? []),
+      ].filter(
+        (json) => includeLive || JSON.parse(json).origin !== 'live',
+      ).length;
+      return [[{ count }], []];
     }
 
     if (
@@ -1237,94 +2012,20 @@ function createFakePool() {
     }
 
     if (
-      normalized.startsWith('SELECT COALESCE(SUM(CASE WHEN started_at >= ?') &&
-      normalized.includes('AS range_0')
+      normalized ===
+      'SELECT source, video_id, title, cover, year, started_at, ended_at, watch_seconds FROM playback_sessions WHERE username = ? AND started_at >= ? AND started_at < ? AND watch_seconds > 0'
     ) {
-      const rangeMatches = Array.from(normalized.matchAll(/AS range_(\d+)/g));
-      const rangeCount = rangeMatches.length;
-      const username = params[rangeCount * 2] as string;
-      const sessions = Array.from(
-        currentState.playbackSessions.values(),
-      ).filter((row) => row.username === username);
-      const totals = Object.fromEntries(
-        Array.from({ length: rangeCount }, (_, index) => {
-          const start = Number(params[index * 2]);
-          const end = Number(params[index * 2 + 1]);
-          const total = sessions.reduce((sum, row) => {
-            const startedAt = Number(row.started_at || 0);
-            const watchSeconds = Number(row.watch_seconds || 0);
-            return startedAt >= start && startedAt < end && watchSeconds > 0
-              ? sum + watchSeconds
-              : sum;
-          }, 0);
-          return [`range_${index}`, total];
-        }),
-      );
-      return [[totals], []];
-    }
-
-    if (normalized.startsWith('WITH normalized_sessions AS (')) {
-      const username = params[0] as string;
-      const hasPeriodStart = params.length === 3;
-      const periodStart = hasPeriodStart ? Number(params[1]) : null;
-      const limit = Number(params[params.length - 1]);
-      const grouped = new Map<string, Record<string, unknown>[]>();
-
-      for (const row of currentState.playbackSessions.values()) {
-        if (row.username !== username) continue;
-        if (periodStart !== null && Number(row.started_at || 0) < periodStart) {
-          continue;
-        }
-        const normalizedTitle = String(row.title || '')
-          .trim()
-          .toLocaleLowerCase();
-        const key =
-          normalizedTitle || `${String(row.source)}:${String(row.video_id)}`;
-        const sessions = grouped.get(key) || [];
-        sessions.push(row);
-        grouped.set(key, sessions);
-      }
-
-      const rows = Array.from(grouped.values())
-        .map((sessions) => {
-          const latest = [...sessions].sort((a, b) => {
-            const startedAtDifference =
-              Number(b.started_at || 0) - Number(a.started_at || 0);
-            return (
-              startedAtDifference ||
-              String(b.id || '').localeCompare(String(a.id || ''))
-            );
-          })[0];
-          return {
-            source: latest.source,
-            video_id: latest.video_id,
-            title: latest.title,
-            source_name: latest.source_name,
-            cover: latest.cover,
-            year: latest.year,
-            watch_seconds: sessions.reduce(
-              (sum, row) => sum + Math.max(0, Number(row.watch_seconds || 0)),
-              0,
-            ),
-            session_count: sessions.length,
-            last_watched_at: Math.max(
-              ...sessions.map((row) =>
-                Math.max(
-                  Number(row.started_at || 0),
-                  Number(row.ended_at || 0),
-                ),
-              ),
-            ),
-          };
-        })
-        .sort(
-          (a, b) =>
-            b.watch_seconds - a.watch_seconds ||
-            b.last_watched_at - a.last_watched_at,
-        )
-        .slice(0, limit);
-
-      return [rows, []];
+      const [username, start, end] = params as [string, number, number];
+      return [
+        Array.from(currentState.playbackSessions.values()).filter(
+          (row) =>
+            row.username === username &&
+            Number(row.started_at) >= start &&
+            Number(row.started_at) < end &&
+            Number(row.watch_seconds) > 0,
+        ),
+        [],
+      ];
     }
 
     if (
@@ -1370,7 +2071,9 @@ function createFakePool() {
 
     if (
       normalized ===
-      'SELECT state_json FROM user_message_state WHERE username = ? LIMIT 1'
+        'SELECT state_json FROM user_message_state WHERE username = ? LIMIT 1' ||
+      normalized ===
+        'SELECT state_json FROM user_message_state WHERE username = ? FOR UPDATE'
     ) {
       const [username] = params as [string];
       const stateJson = currentState.messageStates.get(username);
@@ -1395,6 +2098,53 @@ function createFakePool() {
       const [username] = params as [string];
       const enabled = currentState.danmakuEnabled.get(username);
       return [enabled === undefined ? [] : [{ enabled: enabled ? 1 : 0 }], []];
+    }
+
+    if (
+      normalized ===
+      'SELECT config_json FROM admin_config WHERE id = 1 FOR UPDATE'
+    ) {
+      return [
+        currentState.adminConfig
+          ? [{ config_json: currentState.adminConfig }]
+          : [],
+        [],
+      ];
+    }
+    if (
+      normalized ===
+      'SELECT * FROM invite_codes ORDER BY created_at DESC, code DESC'
+    ) {
+      return [[...currentState.inviteCodes.values()], []];
+    }
+    if (normalized.startsWith('SELECT code FROM invite_codes WHERE code = ?')) {
+      const item = currentState.inviteCodes.get(String(params[0]));
+      return [
+        item &&
+        item.expires_at > Number(params[1]) &&
+        (item.max_uses === null || item.used_count < item.max_uses)
+          ? [item]
+          : [],
+        [],
+      ];
+    }
+    if (
+      normalized.startsWith(
+        'SELECT COUNT(*) AS total FROM invite_codes WHERE expires_at > ?',
+      )
+    ) {
+      return [
+        [
+          {
+            total: [...currentState.inviteCodes.values()].filter(
+              (item) =>
+                item.expires_at > Number(params[0]) &&
+                (item.max_uses === null || item.used_count < item.max_uses),
+            ).length,
+          },
+        ],
+        [],
+      ];
     }
 
     if (normalized === 'SELECT code, used_count FROM invite_code_usage') {
@@ -1498,6 +2248,65 @@ function createFakePool() {
       ];
     }
 
+    if (
+      normalized ===
+      'SELECT source, bucket_date AS bucketDate, ok_count AS okCount, empty_count AS emptyCount, error_count AS errorCount, latency_ms_sum AS latencyMsSum, latency_samples AS latencySamples FROM source_health_search WHERE bucket_date >= ? ORDER BY bucket_date ASC, source ASC'
+    ) {
+      return [
+        currentState.healthSearch
+          .filter((row) => row.bucketDate >= (params[0] as string))
+          .sort(
+            (a, b) =>
+              a.bucketDate.localeCompare(b.bucketDate) ||
+              a.source.localeCompare(b.source),
+          )
+          .map((row) => ({ ...row })),
+        [],
+      ];
+    }
+    if (
+      normalized ===
+      'SELECT source, SUM(CASE WHEN success_count > 0 THEN 1 ELSE 0 END) AS successReporterDays, SUM(CASE WHEN success_count = 0 AND failure_count > 0 THEN 1 ELSE 0 END) AS failureReporterDays, MAX(CASE WHEN success_count > 0 THEN bucket_date ELSE NULL END) AS lastSuccessDate FROM source_health_play WHERE bucket_date >= ? GROUP BY source ORDER BY source ASC'
+    ) {
+      const summaries = new Map<
+        string,
+        {
+          source: string;
+          successReporterDays: number;
+          failureReporterDays: number;
+          lastSuccessDate: string | null;
+        }
+      >();
+      for (const row of currentState.healthPlay) {
+        if (row.bucketDate < (params[0] as string)) continue;
+        const summary = summaries.get(row.source) ?? {
+          source: row.source,
+          successReporterDays: 0,
+          failureReporterDays: 0,
+          lastSuccessDate: null,
+        };
+        if (row.successCount > 0) {
+          summary.successReporterDays++;
+          if (
+            !summary.lastSuccessDate ||
+            row.bucketDate > summary.lastSuccessDate
+          )
+            summary.lastSuccessDate = row.bucketDate;
+        } else if (row.failureCount > 0) summary.failureReporterDays++;
+        summaries.set(row.source, summary);
+      }
+      return [
+        [...summaries.values()]
+          .sort((a, b) => a.source.localeCompare(b.source))
+          .map((row) => ({
+            ...row,
+            successReporterDays: String(row.successReporterDays),
+            failureReporterDays: String(row.failureReporterDays),
+          })),
+        [],
+      ];
+    }
+
     throw new Error(`Unhandled query SQL: ${normalized}`);
   };
 
@@ -1523,15 +2332,26 @@ function createFakePool() {
     },
     async getConnection() {
       let transactionState = cloneState(state);
-
+      let unlock = () => {};
       return {
         async beginTransaction() {
+          const previous = transactionQueue;
+          transactionQueue = new Promise<void>((resolve) => {
+            unlock = resolve;
+          });
+          await previous;
           transactionState = cloneState(state);
+        },
+        async query(sql: string, params?: unknown[]) {
+          return runQuery(sql, params, transactionState);
         },
         async commit() {
           state = cloneState(transactionState);
+          unlock();
         },
-        async rollback() {},
+        async rollback() {
+          unlock();
+        },
         async execute(sql: string, params?: unknown[]) {
           const table = /^INSERT INTO (\w+)/.exec(normalizeSql(sql))?.[1];
           if (table) {
@@ -1564,6 +2384,7 @@ import type {
   PlayRecord,
   SkipConfig,
   SourceRouteStatsItem,
+  VideoReview,
 } from '../types';
 
 const adminConfig: AdminConfig = {
@@ -1580,15 +2401,13 @@ const adminConfig: AdminConfig = {
     LiveDirectConnect: false,
     AutoSwitchSource: false,
     EnableDanmaku: false,
+    EnableUserDanmaku: false,
     ...DEFAULT_RUNTIME_PARAMS,
     SearchDownstreamMaxPage: 5,
     SiteInterfaceCacheTime: 300,
     DoubanProxyType: 'direct',
-    DoubanProxy: '',
     BangumiDataSource: 'server',
-    BangumiProxy: '',
     DoubanImageProxyType: 'direct',
-    DoubanImageProxy: '',
     DisableYellowFilter: false,
     FluidSearch: true,
   },
@@ -1656,18 +2475,240 @@ function sortRouteStats(items: SourceRouteStatsItem[]) {
 }
 
 describe('mysql storage contract', () => {
+  it('rolls back the complete health search batch on a later row failure', async () => {
+    const storage = new MySqlStorage('mysql://demo:demo@localhost:3306/icetv');
+    await storage.clearAllData();
+    const row = {
+      source: 'alpha',
+      bucketDate: '2026-01-02',
+      okCount: 1,
+      emptyCount: 0,
+      errorCount: 0,
+      latencyMsSum: 10,
+      latencySamples: 1,
+    };
+    await storage.recordSourceHealthSearchBatch([row]);
+    const broken = {
+      ...row,
+      get source(): string {
+        throw new Error('batch failure');
+      },
+    };
+    await expect(
+      storage.recordSourceHealthSearchBatch([
+        row,
+        { ...row, source: 'beta' },
+        broken,
+      ]),
+    ).rejects.toThrow('batch failure');
+    expect(await storage.getSourceHealthSearchDaily('2026-01-01')).toEqual([
+      row,
+    ]);
+  });
+
+  it('accumulates health search rows, normalizes counters and retains date boundaries', async () => {
+    const storage = new MySqlStorage('mysql://demo:demo@localhost:3306/icetv');
+    await storage.clearAllData();
+    const row = {
+      source: 'alpha',
+      bucketDate: '2026-01-02',
+      okCount: 1,
+      emptyCount: 2,
+      errorCount: 3,
+      latencyMsSum: 12.5,
+      latencySamples: 3,
+    };
+    await storage.recordSourceHealthSearchBatch([]);
+    await storage.recordSourceHealthSearchBatch([
+      { ...row, source: 'zeta', bucketDate: '2026-01-03' },
+      { ...row, source: 'beta' },
+      { ...row, bucketDate: '2026-01-01' },
+      { ...row, source: ' alpha ' },
+      row,
+      { ...row, source: ' ' },
+      {
+        ...row,
+        source: ' ' + 'x'.repeat(200) + ' ',
+        okCount: NaN,
+        emptyCount: Infinity,
+        errorCount: -1,
+        latencyMsSum: -Infinity,
+        latencySamples: -3,
+      },
+    ]);
+    await storage.recordSourceHealthSearchBatch([row]);
+    expect(await storage.getSourceHealthSearchDaily('2026-01-02')).toEqual([
+      {
+        ...row,
+        okCount: 3,
+        emptyCount: 6,
+        errorCount: 9,
+        latencyMsSum: 37.5,
+        latencySamples: 9,
+      },
+      { ...row, source: 'beta' },
+      {
+        ...row,
+        source: 'x'.repeat(191),
+        okCount: 0,
+        emptyCount: 0,
+        errorCount: 0,
+        latencyMsSum: 0,
+        latencySamples: 0,
+      },
+      { ...row, source: 'zeta', bucketDate: '2026-01-03' },
+    ]);
+    await storage.purgeSourceHealthBefore('2026-01-02');
+    expect(await storage.getSourceHealthSearchDaily('2026-01-01')).toHaveLength(
+      4,
+    );
+    await storage.purgeSourceHealthBefore('2026-01-04');
+    expect(await storage.getSourceHealthSearchDaily('2026-01-01')).toEqual([]);
+  });
+
+  it('aggregates reporter-days in SQL with success precedence and clears health state', async () => {
+    const storage = new MySqlStorage('mysql://demo:demo@localhost:3306/icetv');
+    await storage.clearAllData();
+    const report = {
+      source: ' alpha ',
+      bucketDate: '2026-01-02',
+      reporter: 'a',
+      success: false,
+    };
+    for (const success of [false, false, true, true, false])
+      await storage.recordSourcePlayReport({ ...report, success });
+    for (let i = 0; i < 3; i++)
+      await storage.recordSourcePlayReport({ ...report, reporter: 'b' });
+    await storage.recordSourcePlayReport({
+      ...report,
+      bucketDate: '2026-01-03',
+      success: true,
+    });
+    await storage.recordSourcePlayReport({
+      ...report,
+      bucketDate: '2026-01-01',
+      success: true,
+    });
+    await storage.recordSourcePlayReport({ ...report, source: 'beta' });
+    const summaries = [
+      {
+        source: 'alpha',
+        successReporterDays: 2,
+        failureReporterDays: 1,
+        lastSuccessDate: '2026-01-03',
+      },
+      {
+        source: 'beta',
+        successReporterDays: 0,
+        failureReporterDays: 1,
+        lastSuccessDate: null,
+      },
+    ];
+    expect(await storage.getSourcePlayReporterSummary('2026-01-02')).toEqual(
+      summaries,
+    );
+    await storage.purgeSourceHealthBefore('2026-01-02');
+    expect(await storage.getSourcePlayReporterSummary('2026-01-01')).toEqual(
+      summaries,
+    );
+    expect(await storage.getSourcePlayReporterSummary('2026-01-04')).toEqual(
+      [],
+    );
+    const seed = async () => {
+      await storage.recordSourcePlayReport(report);
+      await storage.recordSourceHealthSearchBatch([
+        {
+          source: 'alpha',
+          bucketDate: '2026-01-02',
+          okCount: 1,
+          emptyCount: 0,
+          errorCount: 0,
+          latencyMsSum: 1,
+          latencySamples: 1,
+        },
+      ]);
+    };
+    await seed();
+    await storage.clearAllData();
+    expect(await storage.getSourceHealthSearchDaily('2026-01-01')).toEqual([]);
+    expect(await storage.getSourcePlayReporterSummary('2026-01-01')).toEqual(
+      [],
+    );
+    await seed();
+    await storage.replaceAllData({
+      adminConfig: adminConfig,
+      users: {},
+      userData: {},
+      sourceRouteStats: [],
+      inviteCodeUsage: {},
+    });
+    expect(await storage.getSourceHealthSearchDaily('2026-01-01')).toEqual([]);
+    expect(await storage.getSourcePlayReporterSummary('2026-01-01')).toEqual(
+      [],
+    );
+  });
+
+  it('stores subscription and live counts outside config and fences stale subscription updates', async () => {
+    const storage = new MySqlStorage('mysql://demo:demo@localhost:3306/icetv');
+    const source = {
+      key: 'live',
+      name: 'Live',
+      url: 'https://example.com/live',
+      from: 'custom' as const,
+    };
+    const config = {
+      UserConfig: {},
+      SourceConfig: [],
+      LiveConfig: [source],
+    } as unknown as AdminConfig;
+    await storage.setAdminConfig(config);
+    const expected = await storage.getConfigSubscription();
+    const next = {
+      ConfigFile: '{}',
+      ConfigSubscribtion: {
+        URL: 'https://example.com/sub',
+        AutoUpdate: true,
+        LastCheck: 'now',
+      },
+    };
+    expect(
+      await storage.compareAndSetAdminConfig(config, config, {
+        subscription: { expected, next },
+        liveCounts: { live: 5 },
+      }),
+    ).toBe(true);
+    expect(await storage.getConfigSubscription()).toEqual(next);
+    expect(await storage.getLiveSourceChannelCounts()).toEqual({ live: 5 });
+    expect(
+      await storage.compareAndSetAdminConfig(config, config, {
+        subscription: { expected, next: expected },
+      }),
+    ).toBe(false);
+    await storage.setLiveSourceChannelCount(source, 10);
+    expect(await storage.getLiveSourceChannelCounts()).toEqual({ live: 10 });
+    expect(await storage.getAdminConfig()).toEqual(config);
+    await storage.compareAndSetAdminConfig(config, {
+      ...config,
+      LiveConfig: [],
+    });
+    expect(await storage.getLiveSourceChannelCounts()).toEqual({});
+  });
+
   it('原子占用邀请码名额，超出上限即失败', async () => {
     const storage = new MySqlStorage('mysql://demo:demo@localhost:3306/icetv');
+    await storage.setAdminConfig({ UserConfig: {} } as AdminConfig);
+    await storage.createInviteCode({
+      code: 'LIMITED',
+      createdAt: 1,
+      expiresAt: Date.now() + 86400000,
+      createdBy: 'owner',
+      maxUses: 2,
+      usedCount: 0,
+    });
 
-    await expect(storage.reserveInviteCodeUse('LIMITED', 2)).resolves.toBe(
-      true,
-    );
-    await expect(storage.reserveInviteCodeUse('LIMITED', 2)).resolves.toBe(
-      true,
-    );
-    await expect(storage.reserveInviteCodeUse('LIMITED', 2)).resolves.toBe(
-      false,
-    );
+    await expect(storage.reserveInviteCodeUse('LIMITED')).resolves.toBe(true);
+    await expect(storage.reserveInviteCodeUse('LIMITED')).resolves.toBe(true);
+    await expect(storage.reserveInviteCodeUse('LIMITED')).resolves.toBe(false);
     await expect(storage.getAllInviteCodeUsage()).resolves.toMatchObject({
       LIMITED: 2,
     });
@@ -1675,9 +2716,18 @@ describe('mysql storage contract', () => {
 
   it('maxUses 为 0 表示不限次数', async () => {
     const storage = new MySqlStorage('mysql://demo:demo@localhost:3306/icetv');
+    await storage.setAdminConfig({ UserConfig: {} } as AdminConfig);
+    await storage.createInviteCode({
+      code: 'FREE',
+      createdAt: 1,
+      expiresAt: Date.now() + 86400000,
+      createdBy: 'owner',
+      maxUses: 0,
+      usedCount: 0,
+    });
 
-    await expect(storage.reserveInviteCodeUse('FREE', 0)).resolves.toBe(true);
-    await expect(storage.reserveInviteCodeUse('FREE', 0)).resolves.toBe(true);
+    await expect(storage.reserveInviteCodeUse('FREE')).resolves.toBe(true);
+    await expect(storage.reserveInviteCodeUse('FREE')).resolves.toBe(true);
     await expect(storage.getAllInviteCodeUsage()).resolves.toMatchObject({
       FREE: 2,
     });
@@ -1685,13 +2735,18 @@ describe('mysql storage contract', () => {
 
   it('首次占用以配置里的历史用量为种子', async () => {
     const storage = new MySqlStorage('mysql://demo:demo@localhost:3306/icetv');
+    await storage.setAdminConfig({ UserConfig: {} } as AdminConfig);
+    await storage.createInviteCode({
+      code: 'SEEDED',
+      createdAt: 1,
+      expiresAt: Date.now() + 86400000,
+      createdBy: 'owner',
+      maxUses: 3,
+      usedCount: 2,
+    });
 
-    await expect(storage.reserveInviteCodeUse('SEEDED', 3, 2)).resolves.toBe(
-      true,
-    );
-    await expect(storage.reserveInviteCodeUse('SEEDED', 3, 2)).resolves.toBe(
-      false,
-    );
+    await expect(storage.reserveInviteCodeUse('SEEDED')).resolves.toBe(true);
+    await expect(storage.reserveInviteCodeUse('SEEDED')).resolves.toBe(false);
     await expect(storage.getAllInviteCodeUsage()).resolves.toMatchObject({
       SEEDED: 3,
     });
@@ -1699,8 +2754,17 @@ describe('mysql storage contract', () => {
 
   it('回滚邀请码次数且不会减到负数', async () => {
     const storage = new MySqlStorage('mysql://demo:demo@localhost:3306/icetv');
+    await storage.setAdminConfig({ UserConfig: {} } as AdminConfig);
+    await storage.createInviteCode({
+      code: 'ROLLBACK',
+      createdAt: 1,
+      expiresAt: Date.now() + 86400000,
+      createdBy: 'owner',
+      maxUses: 2,
+      usedCount: 0,
+    });
 
-    await storage.reserveInviteCodeUse('ROLLBACK', 2);
+    await storage.reserveInviteCodeUse('ROLLBACK');
     await storage.releaseInviteCodeUse('ROLLBACK');
     await expect(storage.getAllInviteCodeUsage()).resolves.toMatchObject({
       ROLLBACK: 0,
@@ -1714,16 +2778,30 @@ describe('mysql storage contract', () => {
 
   it('删除邀请码用量后重建从零开始', async () => {
     const storage = new MySqlStorage('mysql://demo:demo@localhost:3306/icetv');
+    await storage.setAdminConfig({ UserConfig: {} } as AdminConfig);
+    await storage.createInviteCode({
+      code: 'RECREATED',
+      createdAt: 1,
+      expiresAt: Date.now() + 86400000,
+      createdBy: 'owner',
+      maxUses: 1,
+      usedCount: 0,
+    });
 
-    await storage.reserveInviteCodeUse('RECREATED', 1);
+    await storage.reserveInviteCodeUse('RECREATED');
     await storage.deleteInviteCodeUsage('RECREATED');
 
     await expect(
       (await storage.getAllInviteCodeUsage()).RECREATED,
     ).toBeUndefined();
-    await expect(storage.reserveInviteCodeUse('RECREATED', 1)).resolves.toBe(
-      true,
-    );
+    await storage.createInviteCode({
+      code: 'RECREATED',
+      createdAt: 2,
+      expiresAt: Date.now() + 86400000,
+      createdBy: 'owner',
+      maxUses: 1,
+    });
+    await expect(storage.reserveInviteCodeUse('RECREATED')).resolves.toBe(true);
   });
 
   it('persists user scoped data and deletes it with the user', async () => {
@@ -1920,10 +2998,12 @@ describe('mysql storage contract', () => {
 
     const refreshedRecord = {
       ...staleRecord,
+      cover: 'refreshed-record.jpg',
       metadata_checked_at: 10_000,
     };
     const refreshedFavorite = {
       ...staleFavorite,
+      cover: 'refreshed-favorite.jpg',
       metadata_checked_at: 10_000,
     };
     await expect(
@@ -1942,6 +3022,13 @@ describe('mysql storage contract', () => {
         favoriteSnapshot as string,
       ),
     ).resolves.toBe(true);
+
+    await expect(
+      storage.getPlayRecord('cas-user', 'source+record'),
+    ).resolves.toEqual(refreshedRecord);
+    await expect(
+      storage.getFavorite('cas-user', 'source+favorite'),
+    ).resolves.toEqual(refreshedFavorite);
 
     const concurrentRecord = { ...refreshedRecord, play_time: 99 };
     const concurrentFavorite = { ...refreshedFavorite, title: '用户修改' };
@@ -1978,6 +3065,34 @@ describe('mysql storage contract', () => {
 
   // 以下四个未读追更用例走 fake pool，其筛选复用生产的 hasPlayRecordUpdate
   // 断言范围是筛选与排序语义，不覆盖真实 SQL 谓词（MySQL 比 'false' 字符串、SQLite 比数字 0 的分歧测不出来）
+  it('作品状态与显式开关的组合决定追更查询并保留导出字段', async () => {
+    const storage = new MySqlStorage('mysql://demo:demo@localhost:3306/icetv');
+    const records: Record<string, PlayRecord> = {};
+    const expected: string[] = [];
+    for (const series_status of [undefined, 'ongoing', 'ended'] as const) {
+      for (const tracking_enabled of [undefined, true, false]) {
+        const key = `source+${series_status}-${tracking_enabled}`;
+        records[key] = {
+          ...playRecord,
+          index: 1,
+          total_episodes: 12,
+          update_baseline_episodes: 10,
+          series_status,
+          tracking_enabled,
+        };
+        if (tracking_enabled ?? series_status !== 'ended') expected.push(key);
+      }
+    }
+    await storage.setPlayRecords('status-contract', records);
+    const page = await storage.getUnreadTrackingPlayRecordPage(
+      'status-contract',
+      20,
+    );
+    expect(Object.keys(page.items).sort()).toEqual(expected.sort());
+    expect(page.total).toBe(expected.length);
+    expect(await storage.getAllPlayRecords('status-contract')).toEqual(records);
+  });
+
   it('只返回未读且未关闭追更的记录', async () => {
     const storage = new MySqlStorage('mysql://demo:demo@localhost:3306/icetv');
     const makeRecord = (
@@ -2170,6 +3285,47 @@ describe('mysql storage contract', () => {
     expect(secondPage.nextCursor).toBeNull();
   });
 
+  it('filters live favorites before paging and traverses tied timestamps without gaps', async () => {
+    const storage = new MySqlStorage('mysql://demo:demo@localhost:3306/icetv');
+    for (const [key, origin] of [
+      ['source+z', 'live'],
+      ['source+e', 'vod'],
+      ['source+d', 'live'],
+      ['source+c', undefined],
+      ['source+b', 'vod'],
+      ['source+a', 'live'],
+    ] as const) {
+      await storage.setFavorite('public-user', key, {
+        ...favorite,
+        origin,
+        save_time: 1000,
+      });
+    }
+    const first = await storage.getFavoritePage(
+      'public-user',
+      2,
+      undefined,
+      undefined,
+      false,
+    );
+    const second = await storage.getFavoritePage(
+      'public-user',
+      2,
+      1000,
+      'source+c',
+      false,
+    );
+    expect(first.items.map((item) => item.key)).toEqual([
+      'source+e',
+      'source+c',
+    ]);
+    expect(first.total).toBe(3);
+    expect(first.nextCursor).toBe('1000|source+c');
+    expect(second.items.map((item) => item.key)).toEqual(['source+b']);
+    expect(second.nextCursor).toBeNull();
+    expect((await storage.getFavoritePage('public-user', 10)).total).toBe(6);
+  });
+
   it('replaces all data from an import snapshot', async () => {
     const storage = new MySqlStorage('mysql://demo:demo@localhost:3306/icetv');
     const passwordHash =
@@ -2204,7 +3360,11 @@ describe('mysql storage contract', () => {
       inviteCodeUsage: { 'invite-a': 3 },
     });
 
-    await expect(storage.getAdminConfig()).resolves.toEqual(adminConfig);
+    const expectedConfig = JSON.parse(JSON.stringify(adminConfig));
+    delete expectedConfig.UserConfig.Users;
+    delete expectedConfig.ConfigFile;
+    delete expectedConfig.ConfigSubscribtion;
+    await expect(storage.getAdminConfig()).resolves.toEqual(expectedConfig);
     await expect(storage.getAllUsers()).resolves.toEqual(['demo-user']);
     await expect(storage.getAllUsersWithPasswords()).resolves.toEqual({
       'demo-user': passwordHash,
@@ -2310,86 +3470,9 @@ describe('mysql storage contract', () => {
     ]);
   });
 
-  it('aggregates playback ranges and top items with one query each', async () => {
+  it('reads positive playback sessions in a half-open user-scoped range', async () => {
     const storage = new MySqlStorage('mysql://demo:demo@localhost:3306/icetv');
-
-    await storage.clearAllData();
-    await storage.setPlaybackSession('demo-user', {
-      ...playbackSession,
-      id: 'show-a-old',
-      title: 'Show A',
-      started_at: 100,
-      ended_at: 160,
-      watch_seconds: 60,
-    });
-    await storage.setPlaybackSession('demo-user', {
-      ...playbackSession,
-      id: 'show-a-latest',
-      title: ' Show A ',
-      started_at: 300,
-      ended_at: 360,
-      watch_seconds: 120,
-    });
-    await storage.setPlaybackSession('demo-user', {
-      ...playbackSession,
-      id: 'show-b',
-      video_id: '2',
-      title: 'Show B',
-      started_at: 200,
-      ended_at: 260,
-      watch_seconds: 200,
-    });
-    await storage.setPlaybackSession('other-user', {
-      ...playbackSession,
-      id: 'other-user-show',
-      started_at: 250,
-      ended_at: 350,
-      watch_seconds: 999,
-    });
-
-    fakePool.resetQueryCount();
-    await expect(
-      storage.getPlaybackRangeWatchTotals('demo-user', [
-        { key: 'early', start: 0, end: 200 },
-        { key: 'recent', start: 200, end: 400 },
-      ]),
-    ).resolves.toEqual([
-      { key: 'early', watchSeconds: 60 },
-      { key: 'recent', watchSeconds: 320 },
-    ]);
-    expect(fakePool.getQueryCount()).toBe(1);
-
-    await storage.setPlaybackSession('demo-user', {
-      ...playbackSession,
-      id: 'show-a-other-source',
-      source: 'source-b',
-      video_id: '3',
-      title: 'Show A',
-      started_at: 250,
-      ended_at: 280,
-      watch_seconds: 30,
-    });
-
-    fakePool.resetQueryCount();
-    await expect(
-      storage.getPlaybackTopItems('demo-user', 6, 100),
-    ).resolves.toEqual([
-      expect.objectContaining({
-        videoId: '1',
-        title: ' Show A ',
-        watchSeconds: 210,
-        sessionCount: 3,
-        lastWatchedAt: 360,
-      }),
-      expect.objectContaining({
-        videoId: '2',
-        title: 'Show B',
-        watchSeconds: 200,
-        sessionCount: 1,
-        lastWatchedAt: 260,
-      }),
-    ]);
-    expect(fakePool.getQueryCount()).toBe(1);
+    await assertPlaybackPeriodRange(storage);
   });
 
   it('normalizes usernames before storing and looking them up', async () => {
@@ -2442,6 +3525,13 @@ describe('mysql storage contract', () => {
     });
 
     const stats = await storage.getSourceRouteStats('2026-01-02');
+    await storage.purgeSourceRouteStatsBefore('2026-01-07');
+    expect(await storage.getAllSourceRouteStatBuckets()).toHaveLength(3);
+    expect(await storage.getSourceRouteStats('2025-01-01')).toEqual(stats);
+    await storage.purgeSourceRouteStatsBefore('2026-01-08');
+    expect(await storage.getAllSourceRouteStatBuckets()).toHaveLength(2);
+    await storage.purgeSourceRouteStatsBefore('2026-01-09');
+    expect(await storage.getAllSourceRouteStatBuckets()).toEqual([]);
 
     expect(sortRouteStats(stats)).toEqual([
       {
@@ -2464,4 +3554,18 @@ describe('mysql storage contract', () => {
       },
     ]);
   });
+});
+
+describe('mysql video review contract', () => {
+  videoReviewContract(
+    () => new MySqlStorage('mysql://demo:demo@localhost:3306/icetv'),
+    adminConfig,
+  );
+});
+
+describe('mysql user danmaku contract', () => {
+  userDanmakuContract(
+    () => new MySqlStorage('mysql://demo:demo@localhost:3306/icetv'),
+    adminConfig,
+  );
 });

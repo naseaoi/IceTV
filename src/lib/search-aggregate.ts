@@ -3,6 +3,10 @@ import { getUpstreamSearchConcurrency } from '@/lib/cache-budget-profile';
 import { runWithConcurrency, withAbortableTimeout } from '@/lib/concurrency';
 import type { ApiSite } from '@/lib/config';
 import { searchFromApi } from '@/lib/downstream';
+import {
+  type SourceHealthTier,
+  SOURCE_HEALTH_OFFLINE_SEARCH_TIMEOUT_MS,
+} from '@/lib/source-quality-policy';
 import type { SearchResult } from '@/lib/types';
 import { yellowWords } from '@/lib/yellow';
 
@@ -15,6 +19,7 @@ export interface SearchAggregationOptions {
   signal?: AbortSignal;
   sourceFailureCooldownMs?: number;
   sourceTimeoutMs?: number;
+  sourceHealthTiers?: ReadonlyMap<string, SourceHealthTier>;
   shouldContinue?: () => boolean;
   onSourceResult?: (site: ApiSite, results: SearchResult[]) => void;
   onSourceError?: (site: ApiSite, error: unknown) => void;
@@ -27,6 +32,8 @@ type SourceFailureCooldown = {
 
 const DEFAULT_SOURCE_FAILURE_COOLDOWN_MS = 5 * 60 * 1000;
 const DEFAULT_SOURCE_TIMEOUT_MS = 20_000;
+const SEARCH_GATE_MAX_WAITING_PER_SLOT = 32;
+const SEARCH_GATE_WAIT_TIMEOUT_MS = 30_000;
 const sourceFailureCooldowns = new Map<string, SourceFailureCooldown>();
 
 // 跨请求共享：多人同时搜索时上游请求排队而不是叠加
@@ -45,6 +52,7 @@ export async function runSearchAggregation({
   signal,
   sourceFailureCooldownMs,
   sourceTimeoutMs,
+  sourceHealthTiers,
   shouldContinue,
   onSourceResult,
   onSourceError,
@@ -64,7 +72,19 @@ export async function runSearchAggregation({
     }
 
     // 先取闸门再起超时，排队时间不占用单源超时预算
-    const releaseGate = await upstreamSearchGate.acquire();
+    let releaseGate: () => void;
+    try {
+      releaseGate = await upstreamSearchGate.acquire({
+        signal,
+        maxWaiting:
+          upstreamSearchGate.stats().limit * SEARCH_GATE_MAX_WAITING_PER_SLOT,
+        waitTimeoutMs: SEARCH_GATE_WAIT_TIMEOUT_MS,
+      });
+    } catch (error) {
+      // 本机排队繁忙或请求已取消，不是源站故障，不进入失败冷却
+      if (!signal?.aborted) onSourceError?.(site, error);
+      return [];
+    }
     if (signal?.aborted || shouldContinue?.() === false) {
       releaseGate();
       return [];
@@ -77,7 +97,9 @@ export async function runSearchAggregation({
             maxSearchPages,
             signal: childSignal,
           }),
-        timeoutMs,
+        sourceHealthTiers?.get(site.key) === 'offline'
+          ? Math.min(timeoutMs, SOURCE_HEALTH_OFFLINE_SEARCH_TIMEOUT_MS)
+          : timeoutMs,
         `${site.name} timeout`,
         signal,
       );
@@ -141,8 +163,12 @@ function markSourceFailureCooldown(
   const cooldownMs = getSourceFailureCooldownMs(sourceFailureCooldownMs);
   if (cooldownMs <= 0) return;
 
+  const now = Date.now();
+  sourceFailureCooldowns.forEach((record, key) => {
+    if (record.expiresAt <= now) sourceFailureCooldowns.delete(key);
+  });
   sourceFailureCooldowns.set(getSourceFailureKey(site), {
-    expiresAt: Date.now() + cooldownMs,
+    expiresAt: now + cooldownMs,
     error:
       error instanceof Error
         ? error

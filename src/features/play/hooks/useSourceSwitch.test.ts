@@ -31,6 +31,19 @@ jest.mock('@/lib/play-intent', () => ({
   savePlayIntent: jest.fn(),
 }));
 
+type MockSelectionContext = {
+  proxyModes: Record<string, string>;
+  healthTiers: Record<string, string>;
+};
+let mockSelectionContext: MockSelectionContext = {
+  proxyModes: {},
+  healthTiers: {},
+};
+
+jest.mock('@/features/play/lib/sourceSelectionContext', () => ({
+  peekSourceSelectionContext: () => mockSelectionContext,
+}));
+
 const mockGetVodRuntimeSourceUrl = jest.fn<string | null, [HTMLVideoElement]>(
   () => null,
 );
@@ -202,6 +215,7 @@ describe('useSourceSwitch 自动换源', () => {
 
   beforeEach(() => {
     localStorage.clear();
+    mockSelectionContext = { proxyModes: {}, healthTiers: {} };
     mockGetVodRuntimeSourceUrl.mockReset();
     mockGetVodRuntimeSourceUrl.mockReturnValue(null);
     jest.spyOn(console, 'warn').mockImplementation(() => undefined);
@@ -281,6 +295,32 @@ describe('useSourceSwitch 自动换源', () => {
     expect(options.setRealtimeLoadSpeed).toHaveBeenLastCalledWith(
       '当前源加载超时',
     );
+  });
+
+  it('同等健康度下优先切到直连源，较差的直连不越过中转', async () => {
+    localStorage.setItem(AUTO_SWITCH_SOURCE_STORAGE_KEY, 'true');
+    mockSelectionContext = {
+      proxyModes: { relay: 'server' },
+      healthTiers: { relay: 'good', direct: 'good', poor: 'poor' },
+    };
+    const { result, options } = setupHook({
+      availableSources: ['a', 'poor', 'relay', 'direct'].map((key) =>
+        createSource(key, THREE_EPISODES),
+      ),
+      videoInfo: new Map([
+        ['poor-poor-id', info('9.0 MB/s')],
+        ['relay-relay-id', info('9.0 MB/s')],
+        ['direct-direct-id', info('200.0 KB/s')],
+      ]),
+    });
+
+    expect(result.current.handleLoadingTimeout()).toBe(true);
+    await waitFor(() =>
+      expect(options.setCurrentSource).toHaveBeenCalledWith('direct'),
+    );
+    expect(fetchedDetailUrls()).toEqual([
+      '/api/detail?source=direct&id=direct-id',
+    ]);
   });
 
   it('开启后切到测速最快且有目标集的源', async () => {

@@ -1,3 +1,9 @@
+import {
+  readStorage,
+  removeStorage,
+  writeStorage,
+} from '@/lib/browser-storage';
+
 export const DEFAULT_AGGREGATE_SEARCH_STORAGE_KEY = 'defaultAggregateSearch';
 export const ENABLE_OPTIMIZATION_STORAGE_KEY = 'enableOptimization';
 export const FLUID_SEARCH_STORAGE_KEY = 'fluidSearch';
@@ -9,13 +15,11 @@ export const BLOCK_AD_STORAGE_KEY = 'enable_blockad';
 export const AUTO_PLAY_NEXT_STORAGE_KEY = 'enable_autoplay_next';
 export const PREFERRED_QUALITY_STORAGE_KEY = 'preferredQuality';
 export const SOURCE_PREFERRED_QUALITY_STORAGE_PREFIX = 'preferredQuality:';
-export const SIDEBAR_COLLAPSED_STORAGE_KEY = 'sidebarCollapsed';
-// 无本地偏好时，窄于该宽度的视口（如 iPad）默认折叠侧栏；根布局内联脚本共用此值
-export const SIDEBAR_AUTO_COLLAPSE_BELOW_WIDTH = 1280;
-export const THEME_STORAGE_KEY = 'theme';
 export const SEEN_ANNOUNCEMENT_STORAGE_KEY = 'hasSeenAnnouncement';
-export const ADMIN_TABLE_COLUMN_WIDTHS_STORAGE_KEY = 'adminTableColumnWidths';
+export const NOTIFIED_RELEASE_VERSION_STORAGE_KEY = 'notifiedReleaseVersion';
 export const CONTINUE_WATCHING_COUNT_STORAGE_KEY = 'continueWatchingCount';
+export const CONTINUE_WATCHING_PAGE_COUNT_STORAGE_KEY =
+  'continueWatchingPageCount';
 export const FAVORITE_ITEMS_COUNT_STORAGE_KEY = 'favoriteItemsCount';
 export const NOTIFIED_MESSAGE_REVISION_STORAGE_PREFIX =
   'notifiedMessageRevision:';
@@ -27,18 +31,8 @@ export const DANMAKU_OFFSET_STORAGE_PREFIX = 'danmakuOffset:';
 export const DANMAKU_EPISODE_MAP_STORAGE_PREFIX = 'danmakuEpisode:';
 export const DANMAKU_EPISODE_SEARCH_STORAGE_PREFIX = 'danmakuEpisodeSearch:';
 
-type AdminTableColumnWidths = Record<string, Record<string, number>>;
-
-const ADMIN_TABLE_ID_PATTERN = /^[a-zA-Z0-9_-]{1,64}$/;
-const MIN_ADMIN_TABLE_COLUMN_WIDTH = 48;
-const MAX_ADMIN_TABLE_COLUMN_WIDTH = 1200;
-
 function readStoredBoolean(key: string): boolean | undefined {
-  if (typeof window === 'undefined') {
-    return undefined;
-  }
-
-  const raw = window.localStorage.getItem(key);
+  const raw = readStorage(key);
   if (raw === null) {
     return undefined;
   }
@@ -52,122 +46,19 @@ function readStoredBoolean(key: string): boolean | undefined {
 }
 
 function writeStoredBoolean(key: string, value: boolean) {
-  if (typeof window === 'undefined') {
-    return;
-  }
-
-  window.localStorage.setItem(key, JSON.stringify(value));
+  writeStorage(key, JSON.stringify(value));
 }
 
 function resetStoredBoolean(key: string) {
-  if (typeof window === 'undefined') {
-    return;
-  }
-
-  window.localStorage.removeItem(key);
+  removeStorage(key);
 }
 
 function readStoredString(key: string): string | undefined {
-  if (typeof window === 'undefined') {
-    return undefined;
-  }
-
-  return window.localStorage.getItem(key) ?? undefined;
+  return readStorage(key) ?? undefined;
 }
 
 function writeStoredString(key: string, value: string) {
-  if (typeof window === 'undefined') {
-    return;
-  }
-
-  window.localStorage.setItem(key, value);
-}
-
-function isValidAdminTableId(value: string): boolean {
-  return ADMIN_TABLE_ID_PATTERN.test(value);
-}
-
-function isValidAdminTableColumnWidth(value: unknown): value is number {
-  return (
-    typeof value === 'number' &&
-    Number.isFinite(value) &&
-    value >= MIN_ADMIN_TABLE_COLUMN_WIDTH &&
-    value <= MAX_ADMIN_TABLE_COLUMN_WIDTH
-  );
-}
-
-function readAdminTableColumnWidths(): AdminTableColumnWidths {
-  const raw = readStoredString(ADMIN_TABLE_COLUMN_WIDTHS_STORAGE_KEY);
-  if (!raw) {
-    return {};
-  }
-
-  try {
-    const parsed = JSON.parse(raw) as unknown;
-    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
-      return {};
-    }
-
-    const widths: AdminTableColumnWidths = {};
-    Object.entries(parsed).forEach(([tableId, columns]) => {
-      if (
-        !isValidAdminTableId(tableId) ||
-        !columns ||
-        typeof columns !== 'object' ||
-        Array.isArray(columns)
-      ) {
-        return;
-      }
-
-      const validColumns: Record<string, number> = {};
-      Object.entries(columns).forEach(([columnId, width]) => {
-        if (
-          isValidAdminTableId(columnId) &&
-          isValidAdminTableColumnWidth(width)
-        ) {
-          validColumns[columnId] = Math.round(width);
-        }
-      });
-      widths[tableId] = validColumns;
-    });
-    return widths;
-  } catch {
-    return {};
-  }
-}
-
-export function readAdminTableColumnWidth(
-  tableId: string,
-  columnId: string,
-): number | undefined {
-  if (!isValidAdminTableId(tableId) || !isValidAdminTableId(columnId)) {
-    return undefined;
-  }
-  return readAdminTableColumnWidths()[tableId]?.[columnId];
-}
-
-export function writeAdminTableColumnWidth(
-  tableId: string,
-  columnId: string,
-  width: number,
-): void {
-  if (
-    !isValidAdminTableId(tableId) ||
-    !isValidAdminTableId(columnId) ||
-    !isValidAdminTableColumnWidth(width)
-  ) {
-    return;
-  }
-
-  const widths = readAdminTableColumnWidths();
-  widths[tableId] = {
-    ...widths[tableId],
-    [columnId]: Math.round(width),
-  };
-  writeStoredString(
-    ADMIN_TABLE_COLUMN_WIDTHS_STORAGE_KEY,
-    JSON.stringify(widths),
-  );
+  writeStorage(key, value);
 }
 
 export function readDefaultAggregateSearch(): boolean {
@@ -310,24 +201,20 @@ export function writeAutoPlayNextEnabled(value: boolean) {
   writeStoredBoolean(AUTO_PLAY_NEXT_STORAGE_KEY, value);
 }
 
-export function readSidebarCollapsed(): boolean {
-  return (
-    readStoredBoolean(SIDEBAR_COLLAPSED_STORAGE_KEY) ??
-    (typeof window !== 'undefined' &&
-      window.innerWidth < SIDEBAR_AUTO_COLLAPSE_BELOW_WIDTH)
-  );
-}
-
-export function writeSidebarCollapsed(value: boolean) {
-  writeStoredBoolean(SIDEBAR_COLLAPSED_STORAGE_KEY, value);
-}
-
 export function readSeenAnnouncement(): string | undefined {
   return readStoredString(SEEN_ANNOUNCEMENT_STORAGE_KEY);
 }
 
 export function writeSeenAnnouncement(value: string) {
   writeStoredString(SEEN_ANNOUNCEMENT_STORAGE_KEY, value);
+}
+
+export function readNotifiedReleaseVersion(): string | undefined {
+  return readStoredString(NOTIFIED_RELEASE_VERSION_STORAGE_KEY);
+}
+
+export function writeNotifiedReleaseVersion(version: string) {
+  writeStoredString(NOTIFIED_RELEASE_VERSION_STORAGE_KEY, version);
 }
 
 function getNotifiedMessageRevisionStorageKey(username: string): string | null {
@@ -376,12 +263,37 @@ export function writeContinueWatchingCount(value: number): void {
   } catch {}
 }
 
-export function resetContinueWatchingCount(): void {
+export function readContinueWatchingPageCount(): number {
+  const count = Number(
+    readStoredString(CONTINUE_WATCHING_PAGE_COUNT_STORAGE_KEY),
+  );
+  return Number.isFinite(count) ? Math.max(0, Math.floor(count)) : 0;
+}
+
+export function writeContinueWatchingPageCount(value: number): void {
+  const count = Math.max(0, Math.floor(Number.isFinite(value) ? value : 0));
   try {
-    if (typeof window !== 'undefined') {
-      window.localStorage.removeItem(CONTINUE_WATCHING_COUNT_STORAGE_KEY);
+    writeStoredString(CONTINUE_WATCHING_PAGE_COUNT_STORAGE_KEY, String(count));
+  } catch {}
+  try {
+    if (typeof document !== 'undefined') {
+      document.cookie = `cw_page_count=${count};path=/;max-age=${365 * 24 * 60 * 60};samesite=lax`;
     }
   } catch {}
+}
+
+export function resetContinueWatchingPageCount(): void {
+  removeStorage(CONTINUE_WATCHING_PAGE_COUNT_STORAGE_KEY);
+  try {
+    if (typeof document !== 'undefined') {
+      document.cookie = 'cw_page_count=0;path=/;max-age=0;samesite=lax';
+    }
+  } catch {}
+}
+
+export function resetContinueWatchingCount(): void {
+  resetContinueWatchingPageCount();
+  removeStorage(CONTINUE_WATCHING_COUNT_STORAGE_KEY);
   try {
     if (typeof document !== 'undefined') {
       document.cookie = 'cw_count=0;path=/;max-age=0;samesite=lax';
@@ -631,9 +543,7 @@ export function writeDanmakuEpisodeId(
   const key = `${DANMAKU_EPISODE_MAP_STORAGE_PREFIX}${scopeKey}`;
   if (episodeId === null) {
     writeDanmakuEpisodeSearchTitle(scopeKey, '');
-    if (typeof window !== 'undefined') {
-      window.localStorage.removeItem(key);
-    }
+    removeStorage(key);
     return;
   }
   if (!Number.isSafeInteger(episodeId) || episodeId <= 0) return;

@@ -19,21 +19,31 @@ type StoredCheckStatus = UpdateStatus | 'pending';
 type CachedCheckResult = {
   status: StoredCheckStatus;
   checkedAt: number;
+  latestVersion?: string;
 };
 
-let cachedCheckPromise: Promise<UpdateStatus> | null = null;
+export interface ReleaseCheckResult {
+  status: UpdateStatus;
+  latestVersion: string | null;
+}
+
+let cachedCheckPromise: Promise<ReleaseCheckResult> | null = null;
 let cachedCheckResult: CachedCheckResult | null = null;
 
 export async function checkForUpdates(): Promise<UpdateStatus> {
+  return (await checkLatestRelease()).status;
+}
+
+export async function checkLatestRelease(): Promise<ReleaseCheckResult> {
   const now = Date.now();
-  const cachedStatus = resolveCachedStatus(cachedCheckResult, now);
-  if (cachedStatus) {
-    return cachedStatus;
+  const cached = resolveCachedResult(cachedCheckResult, now);
+  if (cached) {
+    return cached;
   }
 
-  const storedStatus = resolveCachedStatus(readStoredCheckResult(), now);
-  if (storedStatus) {
-    return storedStatus;
+  const stored = resolveCachedResult(readStoredCheckResult(), now);
+  if (stored) {
+    return stored;
   }
 
   if (cachedCheckPromise) {
@@ -46,12 +56,15 @@ export async function checkForUpdates(): Promise<UpdateStatus> {
   });
 
   cachedCheckPromise = checkForUpdatesInternal()
-    .then((status) => {
+    .then((result) => {
       writeCheckResult({
-        status,
+        status: result.status,
         checkedAt: Date.now(),
+        ...(result.latestVersion
+          ? { latestVersion: result.latestVersion }
+          : {}),
       });
-      return status;
+      return result;
     })
     .finally(() => {
       cachedCheckPromise = null;
@@ -60,21 +73,24 @@ export async function checkForUpdates(): Promise<UpdateStatus> {
   return cachedCheckPromise;
 }
 
-function resolveCachedStatus(
+function resolveCachedResult(
   result: CachedCheckResult | null,
   now: number,
-): UpdateStatus | null {
+): ReleaseCheckResult | null {
   if (!result) return null;
   const age = now - result.checkedAt;
   if (result.status === 'pending') {
     return age < FAILED_CHECK_RETRY_INTERVAL_MS
-      ? UpdateStatus.FETCH_FAILED
+      ? { status: UpdateStatus.FETCH_FAILED, latestVersion: null }
       : null;
   }
-  if (result.status === UpdateStatus.FETCH_FAILED) {
-    return age < FAILED_CHECK_RETRY_INTERVAL_MS ? result.status : null;
-  }
-  return age < SUCCESS_CHECK_CACHE_MS ? result.status : null;
+  const ttl =
+    result.status === UpdateStatus.FETCH_FAILED
+      ? FAILED_CHECK_RETRY_INTERVAL_MS
+      : SUCCESS_CHECK_CACHE_MS;
+  return age < ttl
+    ? { status: result.status, latestVersion: result.latestVersion ?? null }
+    : null;
 }
 
 function readStoredCheckResult(): CachedCheckResult | null {
@@ -95,7 +111,9 @@ function readStoredCheckResult(): CachedCheckResult | null {
       return null;
     }
     if (!Number.isFinite(checkedAt)) return null;
-    return { status, checkedAt };
+    return typeof data.latestVersion === 'string' && data.latestVersion
+      ? { status, checkedAt, latestVersion: data.latestVersion }
+      : { status, checkedAt };
   } catch {
     return null;
   }
@@ -110,17 +128,20 @@ function writeCheckResult(result: CachedCheckResult): void {
   } catch {}
 }
 
-async function checkForUpdatesInternal(): Promise<UpdateStatus> {
+async function checkForUpdatesInternal(): Promise<ReleaseCheckResult> {
   try {
     const remoteVersion = await fetchLatestVersion();
     if (!remoteVersion) {
-      return UpdateStatus.FETCH_FAILED;
+      return { status: UpdateStatus.FETCH_FAILED, latestVersion: null };
     }
 
-    return compareVersions(remoteVersion);
+    return {
+      status: compareVersions(remoteVersion),
+      latestVersion: remoteVersion,
+    };
   } catch (error) {
     console.error('版本检查失败:', error);
-    return UpdateStatus.FETCH_FAILED;
+    return { status: UpdateStatus.FETCH_FAILED, latestVersion: null };
   }
 }
 

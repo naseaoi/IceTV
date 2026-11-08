@@ -38,29 +38,11 @@ body {
 }
 
 html.light body {
-  background: linear-gradient(
-    180deg,
-    #e6f3fb 0%,
-    #eaf3f7 18%,
-    #f7f7f3 38%,
-    #e9ecef 60%,
-    #dbe3ea 80%,
-    #d3dde6 100%
-  );
-  background-attachment: fixed;
+  background: #f6f7f9;
 }
 
 html:not(.light) body {
-  background: linear-gradient(
-    180deg,
-    #0a0e14 0%,
-    #0d1117 18%,
-    #111820 38%,
-    #0f1419 60%,
-    #0c1015 80%,
-    #0a0d12 100%
-  );
-  background-attachment: fixed;
+  background: #0d0e11;
 }
 
 /* 自定义滚动条样式 */
@@ -98,34 +80,6 @@ html:not(.light) body {
     rgba(0, 0, 0, 0) 0%,
     rgba(0, 0, 0, 0.8) 100%
   );
-}
-
-/* 防止侧栏折叠状态在刷新时闪烁：CSS 在 React 水合前即生效 */
-@media (min-width: 768px) {
-  html[data-sidebar-collapsed='true'] [data-sidebar] {
-    width: 5rem;
-  }
-  html[data-sidebar-collapsed='true'] .sidebar-offset {
-    width: 5rem;
-  }
-  /* 折叠态品牌链接内边距和间距，消除图标位置偏移 */
-  html[data-sidebar-collapsed='true'] [data-sidebar] [data-brand-link] {
-    padding-left: 0.25rem;
-    padding-right: 0.25rem;
-    gap: 0;
-  }
-  /* 折叠态隐藏文字标签 */
-  html[data-sidebar-collapsed='true'] [data-sidebar] [data-sidebar-label] {
-    max-width: 0;
-    opacity: 0;
-  }
-}
-
-/* 首次挂载前禁止侧栏过渡动画，消除 SSR→客户端折叠状态差异导致的视觉抖动 */
-[data-sidebar]:not([data-ready]),
-[data-sidebar]:not([data-ready]) *,
-[data-sidebar-offset]:not([data-ready]) {
-  transition-duration: 0s !important;
 }
 
 /* 隐藏移动端（<768px）垂直滚动条 */
@@ -229,94 +183,948 @@ div[data-media-provider] video {
   }
 }
 
-/* 首页 Tab 切换滑入动画 */
-@keyframes slide-in-left {
-  from {
-    transform: translateX(-30px);
-    opacity: 0;
-  }
-  to {
-    transform: translateX(0);
-    opacity: 1;
-  }
-}
-@keyframes slide-in-right {
-  from {
-    transform: translateX(30px);
-    opacity: 0;
-  }
-  to {
-    transform: translateX(0);
-    opacity: 1;
-  }
-}
-
-/* ImagePlaceholder 骨架屏动画 */
-@keyframes shine {
-  0% {
-    background-position: -200% 0;
-  }
-  100% {
-    background-position: 200% 0;
-  }
-}
-
 /* 登录页海报墙横向循环滚动 */
-@keyframes poster-marquee {
+.poster-wall {
+  transform: translate(-50%, -50%) perspective(1600px) rotateX(20deg)
+    rotateY(-10deg) rotateZ(12deg);
+}
+
+/* 列内容为两份相同封面且居中摆放，对称位移一份高度才能首尾衔接且两端不露空 */
+@keyframes poster-column {
   from {
-    transform: translateX(0);
+    transform: translateY(25%);
   }
   to {
-    transform: translateX(-50%);
+    transform: translateY(-25%);
   }
 }
 
-.poster-marquee {
-  animation: poster-marquee 240s linear infinite;
+.poster-column {
+  animation: poster-column 120s linear infinite;
 }
 
-.poster-marquee-reverse {
+.poster-column-reverse {
   animation-direction: reverse;
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .poster-marquee {
+  .poster-column {
     animation: none;
   }
 }
 
-:root {
-  --skeleton-color: #f0f0f0;
-  --skeleton-highlight: #e0e0e0;
-}
+/* ==========================================================================
+   加载反馈：骨架块、环形指示器、进度条，全站与播放器共用
+   ========================================================================== */
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --skeleton-color: #2d2d2d;
-    --skeleton-highlight: #3d3d3d;
-  }
+:root {
+  --skeleton-base: rgba(24, 26, 31, 0.07);
+  --skeleton-shine: rgba(255, 255, 255, 0.65);
 }
 
 .dark {
-  --skeleton-color: #2d2d2d;
-  --skeleton-highlight: #3d3d3d;
+  --skeleton-base: rgba(255, 255, 255, 0.065);
+  --skeleton-shine: rgba(255, 255, 255, 0.07);
+}
+
+@layer components {
+  /* 放在 components 层，absolute 等定位工具类仍能覆盖 relative */
+  .skeleton {
+    position: relative;
+    overflow: hidden;
+    background-color: var(--skeleton-base);
+  }
+
+  .skeleton-surface {
+    background-color: var(--skeleton-base);
+  }
+
+  .skeleton::after,
+  .skeleton-sweep {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background-image: linear-gradient(
+      100deg,
+      transparent 20%,
+      var(--skeleton-shine) 50%,
+      transparent 80%
+    );
+    transform: translateX(-100%);
+    animation: skeleton-sweep 1.9s cubic-bezier(0.4, 0, 0.2, 1) infinite;
+  }
+}
+
+/* 扫过后停顿，整页骨架同步呼吸而不是持续闪动 */
+@keyframes skeleton-sweep {
+  0% {
+    transform: translateX(-100%);
+  }
+  60%,
+  100% {
+    transform: translateX(100%);
+  }
+}
+
+.ice-spinner {
+  animation: ice-spinner-rotate 1.6s linear infinite;
+}
+
+.ice-spinner-track {
+  stroke: currentColor;
+  opacity: 0.16;
+}
+
+.ice-spinner-arc {
+  stroke: currentColor;
+  stroke-linecap: round;
+  stroke-dasharray: 1 126;
+  stroke-dashoffset: 0;
+  animation: ice-spinner-dash 1.4s ease-in-out infinite;
+}
+
+@keyframes ice-spinner-rotate {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@keyframes ice-spinner-dash {
+  0% {
+    stroke-dasharray: 1 126;
+    stroke-dashoffset: 0;
+  }
+  50% {
+    stroke-dasharray: 78 126;
+    stroke-dashoffset: -22;
+  }
+  100% {
+    stroke-dasharray: 78 126;
+    stroke-dashoffset: -124;
+  }
+}
+
+.loading-bar-fill {
+  position: relative;
+  overflow: hidden;
+}
+
+.loading-bar-fill::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background-image: linear-gradient(
+    90deg,
+    transparent,
+    rgba(255, 255, 255, 0.45),
+    transparent
+  );
+  transform: translateX(-100%);
+  animation: skeleton-sweep 1.6s ease-in-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .skeleton::after,
+  .skeleton-sweep,
+  .loading-bar-fill::after {
+    animation: none;
+    opacity: 0;
+  }
+
+  .ice-spinner-arc {
+    animation: none;
+    stroke-dasharray: 60 126;
+  }
+}
+
+/* ==========================================================================
+   全站动效参数：弹簧曲线由 linear() 采样，不支持时退回近似的 cubic-bezier
+   ========================================================================== */
+
+:root {
+  --motion-spring: cubic-bezier(0.34, 1.56, 0.64, 1);
+  --motion-spring-soft: cubic-bezier(0.22, 1.2, 0.36, 1);
+  --motion-ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+  --motion-ease-in: cubic-bezier(0.4, 0, 1, 1);
+}
+
+@supports (transition-timing-function: linear(0, 1)) {
+  :root {
+    --motion-spring: linear(
+      0,
+      0.0381,
+      0.1352,
+      0.2681,
+      0.4175,
+      0.5679,
+      0.7083,
+      0.8313,
+      0.9326,
+      1.0111,
+      1.0672,
+      1.103,
+      1.1216,
+      1.1263,
+      1.1205,
+      1.1077,
+      1.0906,
+      1.0716,
+      1.0527,
+      1.0351,
+      1.0199,
+      1.0074,
+      0.9977,
+      0.9909,
+      0.9867,
+      0.9845,
+      0.9841,
+      0.9849,
+      0.9866,
+      0.9888,
+      0.9912,
+      0.9936,
+      0.9958,
+      0.9977,
+      0.9992,
+      1.0004,
+      1
+    );
+    --motion-spring-soft: linear(
+      0,
+      0.0209,
+      0.0744,
+      0.1487,
+      0.235,
+      0.3262,
+      0.4173,
+      0.5047,
+      0.5861,
+      0.66,
+      0.7257,
+      0.783,
+      0.8321,
+      0.8734,
+      0.9076,
+      0.9355,
+      0.9577,
+      0.9751,
+      0.9884,
+      0.9983,
+      1.0053,
+      1.0101,
+      1.013,
+      1.0146,
+      1.0152,
+      1.0149,
+      1.0142,
+      1.0131,
+      1.0118,
+      1.0104,
+      1.0091,
+      1.0077,
+      1.0065,
+      1.0053,
+      1.0043,
+      1.0034,
+      1
+    );
+  }
+}
+
+/* 浮层进出场由 data-open 切换：入场弹簧舒展，离场快速收回；离场时长须短于组件的卸载延时 */
+.motion-popover {
+  transform-origin: var(--popover-origin, top center);
+  transition:
+    opacity 140ms var(--motion-ease-out),
+    transform 420ms var(--motion-spring),
+    filter 200ms var(--motion-ease-out);
+}
+
+.motion-popover[data-open='false'] {
+  opacity: 0;
+  transform: translateY(var(--popover-shift, -6px)) scale(0.92);
+  filter: blur(2px);
+  pointer-events: none;
+  transition:
+    opacity 120ms var(--motion-ease-in),
+    transform 140ms var(--motion-ease-in),
+    filter 120ms var(--motion-ease-in);
+}
+
+.motion-dialog {
+  transition:
+    opacity 100ms var(--motion-ease-out),
+    transform 260ms var(--motion-spring-soft);
+}
+
+.motion-dialog[data-open='false'] {
+  opacity: 0;
+  transform: translateY(14px) scale(0.95);
+  pointer-events: none;
+  transition:
+    opacity 80ms var(--motion-ease-in),
+    transform 90ms var(--motion-ease-in);
+}
+
+.motion-backdrop {
+  transition: opacity 120ms var(--motion-ease-out);
+}
+
+.motion-backdrop[data-open='false'] {
+  opacity: 0;
+  pointer-events: none;
+  transition-duration: 90ms;
+}
+
+/* 菜单项随面板依次浮现，--stagger-index 由调用方给出 */
+.motion-stagger > * {
+  animation: motion-rise 360ms var(--motion-ease-out) both;
+  animation-delay: calc(60ms + var(--stagger-index, 0) * 24ms);
+}
+
+@keyframes motion-rise {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+}
+
+/* 导航指示条：位置与滑动由 useSlidingIndicator 以 transform 驱动 */
+.sliding-indicator {
+  position: absolute;
+  left: 0;
+  transform-origin: left center;
+  pointer-events: none;
+}
+
+/* 收藏：心形按压回弹，外圈扩散，粒子沿各自角度飞散 */
+.heart-like {
+  animation: heart-like 640ms var(--motion-ease-out) both;
+}
+
+.heart-unlike {
+  animation: heart-unlike 320ms var(--motion-ease-out) both;
+}
+
+.heart-ring {
+  position: absolute;
+  inset: -15%;
+  border-radius: 9999px;
+  border: 2px solid rgb(244 63 94);
+  opacity: 0;
+  animation: heart-ring 560ms var(--motion-ease-out) 60ms both;
+}
+
+.heart-particle {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: var(--particle-size, 4px);
+  height: var(--particle-size, 4px);
+  margin: calc(var(--particle-size, 4px) / -2) 0 0
+    calc(var(--particle-size, 4px) / -2);
+  border-radius: 9999px;
+  background: var(--particle-color, rgb(244 63 94));
+  opacity: 0;
+  animation: heart-particle 620ms var(--motion-ease-out) 110ms both;
+}
+
+@keyframes heart-like {
+  0% {
+    transform: scale(1);
+  }
+  14% {
+    transform: scale(0.72);
+  }
+  42% {
+    transform: scale(1.26);
+  }
+  62% {
+    transform: scale(0.94);
+  }
+  80% {
+    transform: scale(1.04);
+  }
+  100% {
+    transform: scale(1);
+  }
+}
+
+@keyframes heart-unlike {
+  40% {
+    transform: scale(0.78);
+  }
+}
+
+@keyframes heart-ring {
+  0% {
+    opacity: 0.7;
+    transform: scale(0.35);
+    border-width: 3px;
+  }
+  100% {
+    opacity: 0;
+    transform: scale(1.25);
+    border-width: 0.5px;
+  }
+}
+
+@keyframes heart-particle {
+  0% {
+    opacity: 1;
+    transform: rotate(var(--particle-angle))
+      translateY(calc(var(--particle-distance) * -0.45)) scale(0);
+  }
+  35% {
+    opacity: 1;
+    transform: rotate(var(--particle-angle))
+      translateY(calc(var(--particle-distance) * -0.75)) scale(1);
+  }
+  100% {
+    opacity: 0;
+    transform: rotate(var(--particle-angle))
+      translateY(calc(var(--particle-distance) * -1)) scale(0);
+  }
+}
+
+/* 评分：新点亮的星依次弹起，落点那颗更饱满；分数降低时落点星轻沉一下 */
+.rating-star-pop {
+  animation: motion-pop-soft 440ms var(--motion-ease-out)
+    calc(var(--star-index, 0) * 45ms) both;
+}
+
+.rating-star-pop[data-last] {
+  animation-name: motion-pop;
+  animation-duration: 560ms;
+}
+
+.rating-star-dip {
+  animation: rating-star-dip 300ms var(--motion-ease-out) both;
+}
+
+/* 点赞等轻量确认：图标按下后弹起 */
+.motion-pop {
+  animation: motion-pop 520ms var(--motion-ease-out) both;
+}
+
+@keyframes motion-pop {
+  0% {
+    transform: scale(1);
+  }
+  28% {
+    transform: scale(1.34) rotate(-10deg);
+  }
+  58% {
+    transform: scale(0.92) rotate(3deg);
+  }
+  80% {
+    transform: scale(1.04) rotate(0deg);
+  }
+  100% {
+    transform: scale(1);
+  }
+}
+
+@keyframes motion-pop-soft {
+  0% {
+    transform: scale(1);
+  }
+  35% {
+    transform: scale(1.2) rotate(-5deg);
+  }
+  70% {
+    transform: scale(0.97);
+  }
+  100% {
+    transform: scale(1);
+  }
+}
+
+@keyframes rating-star-dip {
+  45% {
+    transform: scale(0.8);
+  }
+}
+
+/* 数字变化：旧值沿变化方向滚出，新值弹性滚入 */
+.count-roll {
+  display: inline-grid;
+  overflow: hidden;
+}
+
+.count-roll > * {
+  grid-area: 1 / 1;
+}
+
+.count-roll-in-up {
+  animation: count-in-up 420ms var(--motion-spring-soft) both;
+}
+
+.count-roll-in-down {
+  animation: count-in-down 420ms var(--motion-spring-soft) both;
+}
+
+.count-roll-out-up {
+  animation: count-out-up 220ms var(--motion-ease-in) both;
+}
+
+.count-roll-out-down {
+  animation: count-out-down 220ms var(--motion-ease-in) both;
+}
+
+@keyframes count-in-up {
+  from {
+    opacity: 0;
+    transform: translateY(90%);
+  }
+}
+
+@keyframes count-in-down {
+  from {
+    opacity: 0;
+    transform: translateY(-90%);
+  }
+}
+
+@keyframes count-out-up {
+  to {
+    opacity: 0;
+    transform: translateY(-90%);
+  }
+}
+
+@keyframes count-out-down {
+  to {
+    opacity: 0;
+    transform: translateY(90%);
+  }
+}
+
+/* 整组内容切换：条目沿切换方向依次滑入，--swap-shift 的正负表示方向 */
+.motion-swap-in {
+  animation: motion-swap-in 480ms cubic-bezier(0.16, 1, 0.3, 1) both;
+  animation-delay: calc(min(var(--stagger-index, 0), 8) * 32ms);
+}
+
+@keyframes motion-swap-in {
+  from {
+    opacity: 0;
+    transform: translateX(var(--swap-shift, 24px));
+  }
+}
+
+/* 角标出现时从中心弹出 */
+.motion-badge-in {
+  animation: motion-badge-in 420ms var(--motion-spring) both;
+}
+
+@keyframes motion-badge-in {
+  from {
+    opacity: 0;
+    transform: scale(0.3);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .motion-popover,
+  .motion-popover[data-open='false'],
+  .motion-dialog,
+  .motion-dialog[data-open='false'] {
+    transform: none;
+    filter: none;
+    transition: opacity 150ms ease;
+  }
+
+  .motion-stagger > *,
+  .heart-like,
+  .heart-unlike,
+  .rating-star-pop,
+  .rating-star-dip,
+  .motion-pop,
+  .motion-badge-in,
+  .motion-swap-in,
+  .count-roll-in-up,
+  .count-roll-in-down {
+    animation: none;
+  }
+
+  .heart-ring,
+  .heart-particle,
+  .count-roll-out-up,
+  .count-roll-out-down {
+    display: none;
+  }
+}
+
+/* ==========================================================================
+   轻提示：圆点弹出 → 舒展成胶囊 → 收回圆点飘散；离场总时长与 ToastViewport 的 TOAST_LEAVE_MS 对应
+   ========================================================================== */
+
+:root {
+  --toast-head: 40px;
+  --toast-radius: 1.375rem;
+}
+
+.toast-slot {
+  position: absolute;
+  top: 0;
+  left: 50%;
+  width: max-content;
+  max-width: calc(100vw - 2rem);
+  transform: translate3d(-50%, var(--toast-y, 0px), 0);
+  transition: transform 640ms var(--motion-spring-soft);
+  pointer-events: auto;
+  touch-action: none;
+  user-select: none;
+}
+
+.toast-shadow {
+  filter: drop-shadow(0 10px 22px rgba(15, 23, 42, 0.13))
+    drop-shadow(0 2px 5px rgba(15, 23, 42, 0.07));
+  transform: translate3d(0, var(--toast-drag, 0px), 0);
+}
+
+.dark .toast-shadow {
+  filter: drop-shadow(0 12px 26px rgba(0, 0, 0, 0.5))
+    drop-shadow(0 2px 6px rgba(0, 0, 0, 0.3));
+}
+
+.toast-shadow[data-dragging='false'] {
+  transition: transform 520ms var(--motion-spring);
+}
+
+.toast-motion {
+  animation: toast-pop 600ms var(--motion-spring) both;
+}
+
+.toast-motion[data-bump='a'] {
+  animation: toast-jelly-a 560ms ease-out both;
+}
+
+.toast-motion[data-bump='b'] {
+  animation: toast-jelly-b 560ms ease-out both;
+}
+
+.toast-motion[data-phase='leave'] {
+  animation: toast-vanish 240ms cubic-bezier(0.4, 0, 1, 1) 180ms both;
+}
+
+.toast-surface {
+  clip-path: inset(0 round var(--toast-radius));
+  animation: toast-morph 760ms var(--motion-ease-out) 120ms both;
+}
+
+.toast-surface[data-tone='error'] {
+  animation:
+    toast-morph 760ms var(--motion-ease-out) 120ms both,
+    toast-shake 480ms ease-in-out 760ms;
+}
+
+.toast-surface[data-phase='leave'] {
+  animation: toast-unmorph 300ms cubic-bezier(0.55, 0, 0.25, 1) both;
+}
+
+.toast-content {
+  animation: toast-content-in 460ms var(--motion-ease-out)
+    var(--toast-content-delay, 300ms) both;
+}
+
+.toast-content[data-phase='leave'] {
+  animation: toast-content-out 150ms ease-in both;
+}
+
+.toast-head {
+  position: relative;
+  animation: toast-head-in 560ms var(--motion-spring) 60ms both;
+}
+
+.toast-head[data-tone='success']::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  border: 2px solid currentColor;
+  opacity: 0;
+  animation: toast-ripple 720ms var(--motion-ease-out) 620ms;
+}
+
+.toast-draw {
+  stroke-dasharray: 1;
+  stroke-dashoffset: 1;
+  animation: toast-draw var(--toast-draw-duration, 380ms)
+    cubic-bezier(0.65, 0, 0.35, 1) var(--toast-draw-delay, 0ms) forwards;
+}
+
+.toast-dot {
+  transform-box: fill-box;
+  transform-origin: center;
+  animation: toast-head-in 420ms var(--motion-spring)
+    var(--toast-draw-delay, 0ms) both;
+}
+
+.toast-bell {
+  transform-origin: 50% 8%;
+  animation: toast-swing 1000ms ease-in-out 260ms;
+}
+
+@keyframes toast-pop {
+  from {
+    opacity: 0;
+    transform: translateY(-14px) scale(0.3);
+    filter: blur(8px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+    filter: blur(0);
+  }
+}
+
+@keyframes toast-vanish {
+  to {
+    opacity: 0;
+    transform: translateY(-10px) scale(0.45);
+    filter: blur(6px);
+  }
+}
+
+@keyframes toast-jelly-a {
+  0%,
+  100% {
+    transform: none;
+  }
+  22% {
+    transform: scale(1.08, 0.92);
+  }
+  45% {
+    transform: scale(0.96, 1.04);
+  }
+  68% {
+    transform: scale(1.02, 0.98);
+  }
+  84% {
+    transform: scale(0.995, 1.005);
+  }
+}
+
+@keyframes toast-jelly-b {
+  0%,
+  100% {
+    transform: none;
+  }
+  22% {
+    transform: scale(1.08, 0.92);
+  }
+  45% {
+    transform: scale(0.96, 1.04);
+  }
+  68% {
+    transform: scale(1.02, 0.98);
+  }
+  84% {
+    transform: scale(0.995, 1.005);
+  }
+}
+
+@keyframes toast-morph {
+  from {
+    clip-path: inset(
+      calc(50% - var(--toast-head) / 2) calc(100% - var(--toast-head))
+        calc(50% - var(--toast-head) / 2) 0 round calc(var(--toast-head) / 2)
+    );
+    transform: translateX(
+      calc(var(--toast-w, 0px) / 2 - var(--toast-head) / 2)
+    );
+  }
+  to {
+    clip-path: inset(0 0 0 0 round var(--toast-radius));
+    transform: none;
+  }
+}
+
+@keyframes toast-unmorph {
+  from {
+    clip-path: inset(0 0 0 0 round var(--toast-radius));
+    transform: none;
+  }
+  to {
+    clip-path: inset(
+      calc(50% - var(--toast-head) / 2) calc(100% - var(--toast-head))
+        calc(50% - var(--toast-head) / 2) 0 round calc(var(--toast-head) / 2)
+    );
+    transform: translateX(
+      calc(var(--toast-w, 0px) / 2 - var(--toast-head) / 2)
+    );
+  }
+}
+
+@keyframes toast-shake {
+  0%,
+  100% {
+    transform: none;
+  }
+  15% {
+    transform: translateX(-6px);
+  }
+  32% {
+    transform: translateX(5px);
+  }
+  50% {
+    transform: translateX(-3px);
+  }
+  68% {
+    transform: translateX(2px);
+  }
+  84% {
+    transform: translateX(-1px);
+  }
+}
+
+@keyframes toast-content-in {
+  from {
+    opacity: 0;
+    transform: translateX(-8px);
+    filter: blur(6px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+    filter: blur(0);
+  }
+}
+
+@keyframes toast-content-out {
+  to {
+    opacity: 0;
+    filter: blur(4px);
+  }
+}
+
+@keyframes toast-head-in {
+  from {
+    transform: scale(0.4);
+  }
+  to {
+    transform: none;
+  }
+}
+
+@keyframes toast-ripple {
+  from {
+    opacity: 0.5;
+    transform: scale(1);
+  }
+  to {
+    opacity: 0;
+    transform: scale(1.42);
+  }
+}
+
+@keyframes toast-draw {
+  to {
+    stroke-dashoffset: 0;
+  }
+}
+
+@keyframes toast-swing {
+  0%,
+  100% {
+    transform: none;
+  }
+  15% {
+    transform: rotate(18deg);
+  }
+  32% {
+    transform: rotate(-14deg);
+  }
+  50% {
+    transform: rotate(9deg);
+  }
+  68% {
+    transform: rotate(-5deg);
+  }
+  84% {
+    transform: rotate(2deg);
+  }
+}
+
+@keyframes toast-fade {
+  from {
+    opacity: 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .toast-slot,
+  .toast-shadow[data-dragging='false'] {
+    transition: opacity 200ms ease;
+  }
+
+  .toast-motion,
+  .toast-motion[data-bump],
+  .toast-surface,
+  .toast-surface[data-tone='error'],
+  .toast-content,
+  .toast-head,
+  .toast-dot,
+  .toast-bell {
+    animation: none;
+  }
+
+  .toast-motion:not([data-phase='leave']) {
+    animation: toast-fade 200ms ease both;
+  }
+
+  .toast-motion[data-phase='leave'],
+  .toast-surface[data-phase='leave'],
+  .toast-content[data-phase='leave'] {
+    animation: toast-content-out 200ms ease both;
+  }
+
+  .toast-head[data-tone='success']::after {
+    display: none;
+  }
+
+  .toast-draw {
+    animation: none;
+    stroke-dashoffset: 0;
+  }
 }
 
 /* ==========================================================================
    ArtPlayer 现代化玻璃拟态风格 — 与项目 ModalShell 风格统一
    ========================================================================== */
 
-/* --- 播放器容器圆角 --- */
+/* --- 播放器容器圆角：跟随外层容器（移动端通栏无圆角，桌面 rounded-xl） --- */
 .art-video-player {
-  border-radius: 8px !important;
+  border-radius: inherit !important;
   overflow: hidden !important;
 }
 
-/* --- 移动端播放器全宽通栏，去除圆角 --- */
-@media (max-width: 767.98px) {
-  .art-video-player {
-    border-radius: 0 !important;
-  }
+/* --- 缓冲指示与中央播放按钮：与站内 Spinner 同款，移动端缩小 --- */
+.art-video-player {
+  --art-state-size: 64px !important;
+}
+
+.art-video-player.art-mobile {
+  --art-state-size: 48px !important;
+}
+
+.art-video-player .art-loading .ice-spinner {
+  width: 44px;
+  height: 44px;
+  color: #8fc4e6;
+  filter: drop-shadow(0 1px 6px rgba(0, 0, 0, 0.45));
+}
+
+.art-video-player.art-mobile .art-loading .ice-spinner {
+  width: 32px;
+  height: 32px;
+}
+
+/* 站内状态遮罩（PlayerStateOverlay）与播放器同级，显示期间隐藏内置缓冲指示，避免叠出两个转圈 */
+div:has(> [data-player-overlay]) .art-loading {
+  visibility: hidden !important;
 }
 
 /* --- 右键菜单 --- */
@@ -341,8 +1149,8 @@ div[data-media-provider] video {
 }
 
 .art-contextmenu:hover {
-  background: rgba(59, 130, 246, 0.18) !important;
-  color: #60a5fa !important;
+  background: rgba(95, 168, 216, 0.16) !important;
+  color: #8fc4e6 !important;
 }
 
 .art-contextmenu a {
@@ -380,6 +1188,49 @@ div[data-media-provider] video {
   transition: height 0.15s ease !important;
 }
 
+/* 重载弹幕时隐藏旧弹幕，保留布局让插件能正确测量和定位；!important 压过插件逐条写入的内联 visible */
+.art-danmuku[data-reloading] > * {
+  visibility: hidden !important;
+}
+
+/* --- 弹幕发送框 --- */
+
+/* 插件输入框没有 type，会被 @tailwindcss/forms 加上 1rem 字号、内边距和聚焦光圈 */
+.artplayer-plugin-danmuku .apd-input,
+.artplayer-plugin-danmuku .apd-input:focus {
+  padding: 0 10px 0 4px;
+  font-size: 13px;
+  box-shadow: none;
+}
+
+.artplayer-plugin-danmuku .apd-send:not(.apd-lock) {
+  background-color: #3d8dc6;
+}
+
+/* 插件默认定宽 260px（全屏 400px），控制栏有余量时随之拉长 */
+.art-video-player .art-controls-center .artplayer-plugin-danmuku .apd-emitter {
+  flex: 1 1 260px;
+  width: auto;
+  min-width: 180px;
+  max-width: 440px;
+}
+
+.art-video-player.art-fullscreen
+  .art-controls-center
+  .artplayer-plugin-danmuku
+  .apd-emitter,
+.art-video-player.art-fullscreen-web
+  .art-controls-center
+  .artplayer-plugin-danmuku
+  .apd-emitter {
+  max-width: 560px;
+}
+
+.art-fullscreen .artplayer-plugin-danmuku .apd-input,
+.art-fullscreen-web .artplayer-plugin-danmuku .apd-input {
+  font-size: 14px;
+}
+
 /* 热力图对齐进度条轨道 */
 .art-control-heatmap {
   left: 12px !important;
@@ -400,15 +1251,15 @@ div[data-media-provider] video {
 
 .art-progress .art-progress-played {
   border-radius: 4px !important;
-  background: #3b82f6 !important;
+  background: #5fa8d8 !important;
 }
 
 /* 进度条拖拽手柄 */
 .art-progress .art-progress-indicator {
   border-radius: 50% !important;
   background: #fff !important;
-  box-shadow: 0 0 6px rgba(59, 130, 246, 0.5) !important;
-  border: 2px solid #3b82f6 !important;
+  box-shadow: 0 0 6px rgba(95, 168, 216, 0.5) !important;
+  border: 2px solid #5fa8d8 !important;
   transition: transform 0.1s ease !important;
 }
 
@@ -458,7 +1309,7 @@ div[data-media-provider] video {
 }
 
 .art-setting-item:hover {
-  background: rgba(59, 130, 246, 0.18) !important;
+  background: rgba(95, 168, 216, 0.16) !important;
 }
 
 /* 设置面板内部项 */
@@ -472,7 +1323,7 @@ div[data-media-provider] video {
 
 /* 设置面板开关 */
 .art-setting-item .art-setting-item-right-tooltip {
-  color: #60a5fa !important;
+  color: #8fc4e6 !important;
   font-weight: 500 !important;
 }
 
@@ -484,13 +1335,13 @@ div[data-media-provider] video {
 }
 
 .art-volume-panel .art-volume-slider-handle {
-  background: #3b82f6 !important;
+  background: #5fa8d8 !important;
 }
 
 .art-volume-panel .art-volume-slider-handle::before {
   background: #fff !important;
-  border: 2px solid #3b82f6 !important;
-  box-shadow: 0 0 4px rgba(59, 130, 246, 0.4) !important;
+  border: 2px solid #5fa8d8 !important;
+  box-shadow: 0 0 4px rgba(95, 168, 216, 0.4) !important;
 }
 
 /* --- 提示文字（notice） --- */
@@ -590,8 +1441,8 @@ div[data-media-provider] video {
 
 .art-video-player .art-selector-item:hover,
 .art-video-player .art-selector-item.art-current {
-  background: rgba(59, 130, 246, 0.18) !important;
-  color: #60a5fa !important;
+  background: rgba(95, 168, 216, 0.16) !important;
+  color: #8fc4e6 !important;
 }
 
 /* --- Tooltip --- */
@@ -622,78 +1473,6 @@ div[data-media-provider] video {
 
 .art-video-player[data-fullscreen-web] {
   border-radius: 0 !important;
-}
-
-/* ==========================================================================
-   LoadingStatePanel 动画（改为全局样式，避免在 Server Component 中引入 styled-jsx）
-   ========================================================================== */
-
-.ls-glow-ring {
-  background: conic-gradient(
-    from 0deg,
-    transparent 0deg,
-    transparent 200deg,
-    currentColor 320deg,
-    transparent 360deg
-  );
-  mask: radial-gradient(circle, transparent 62%, black 64%);
-  -webkit-mask: radial-gradient(circle, transparent 62%, black 64%);
-  animation: ls-rotate 1.4s linear infinite;
-}
-
-.ls-shimmer {
-  position: relative;
-  overflow: hidden;
-  background-size: 100% 100%;
-  background-position: 0 0;
-}
-
-.ls-shimmer::after {
-  content: '';
-  position: absolute;
-  inset: 0;
-  background: linear-gradient(
-    90deg,
-    rgba(255, 255, 255, 0) 0%,
-    rgba(255, 255, 255, 0.16) 40%,
-    rgba(255, 255, 255, 0.34) 50%,
-    rgba(255, 255, 255, 0.16) 60%,
-    rgba(255, 255, 255, 0) 100%
-  );
-  transform: translateX(-100%);
-  animation: ls-shimmer-sweep 1.8s linear infinite;
-}
-
-@keyframes ls-rotate {
-  0% {
-    transform: rotate(0deg);
-  }
-  100% {
-    transform: rotate(360deg);
-  }
-}
-
-@keyframes ls-shimmer-sweep {
-  0% {
-    transform: translateX(-100%);
-  }
-  100% {
-    transform: translateX(100%);
-  }
-}
-
-/* 卡片封面扫光动画 */
-@keyframes shimmer {
-  0% {
-    transform: translateX(-100%);
-  }
-  100% {
-    transform: translateX(100%);
-  }
-}
-
-.animate-shimmer {
-  animation: shimmer 1.5s ease-in-out infinite;
 }
 
 /* 搜索结果卡片渐显动画 */

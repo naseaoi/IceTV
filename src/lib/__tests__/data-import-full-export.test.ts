@@ -7,6 +7,8 @@ jest.mock('../env.server', () => ({
 import { parseImportData } from '../data-import';
 import type { StorageUserImportData } from '../types';
 import { IMPORT_ADMIN_CONFIG as adminConfig } from './__fixtures__/import-admin-config';
+import { userDanmaku } from './__fixtures__/user-danmaku-contract';
+import { videoReview } from './__fixtures__/video-review-contract';
 
 const exportedHash =
   '$2b$10$abcdefghijklmnopqrstuu9dBwFh6R0D4A5gHfHnM6kQ7xS8tT9u';
@@ -61,6 +63,282 @@ function createImportData() {
 }
 
 describe('data import full export fields', () => {
+  it('保留通知设置与新增已读状态并拒绝未知通知类型', async () => {
+    const data = createImportData();
+    const followerId = `new-follower:${Buffer.from(JSON.stringify(['Reader000001', '', '', 200])).toString('base64url')}`;
+    const likeId = `review-like:${Buffer.from(JSON.stringify(['Author000001', 'work', '', 200])).toString('base64url')}`;
+    data.data.userData.owner.messageState = {
+      mutedKinds: ['new-follower', 'review-like'],
+      newFollowerReadAt: 100,
+      newFollowerReadIds: [followerId],
+      reviewLikeReadAt: 100,
+      reviewLikeReadIds: [likeId],
+    };
+    const parsed = await parseImportData(data);
+    expect(parsed.snapshot.userData.owner.messageState).toMatchObject(
+      data.data.userData.owner.messageState,
+    );
+    (
+      data.data.userData.owner.messageState as unknown as {
+        mutedKinds: string[];
+      }
+    ).mutedKinds = ['announcement'];
+    await expect(parseImportData(data)).rejects.toThrow('通知设置无效');
+  });
+
+  it('保留回复、被提及者和举报，拒绝重复稳定标识', async () => {
+    const data = createImportData();
+    const id = '00000000-0000-4000-8000-000000000001';
+    data.data.userData.owner.videoReviews = [videoReview];
+    data.data.userData['demo-user'].replies = [
+      {
+        id,
+        author: 'OWNER',
+        title_norm: videoReview.title_norm,
+        year: videoReview.year,
+        reply_to: 'OWNER',
+        content: ' 回复 ',
+        created_at: 1000,
+      },
+    ];
+    data.data.userData.owner.replyReports = [
+      { reply_id: id, reason: 'spam', detail: '', created_at: 1001 },
+    ];
+    const parsed = await parseImportData(data);
+    expect(parsed.snapshot.userData['demo-user'].replies?.[0]).toMatchObject({
+      id,
+      author: 'owner',
+      reply_to: 'owner',
+      content: '回复',
+    });
+    expect(parsed.snapshot.userData.owner.replyReports).toEqual(
+      data.data.userData.owner.replyReports,
+    );
+    data.data.userData.owner.replies = [
+      ...data.data.userData['demo-user'].replies,
+    ];
+    await expect(parseImportData(data)).rejects.toThrow('回复标识重复');
+  });
+
+  it('drops unknown site settings without validating retired proxy fields', async () => {
+    const data = createImportData();
+    data.data.adminConfig = {
+      ...adminConfig,
+      SiteConfig: Object.assign({}, adminConfig.SiteConfig, {
+        DoubanProxy: { invalid: true },
+        BangumiProxy: 123,
+        DoubanImageProxy: ['unused'],
+        UnknownSetting: true,
+      }),
+    };
+
+    const parsed = await parseImportData(data);
+
+    expect(parsed.snapshot.adminConfig.SiteConfig).toEqual({
+      ...adminConfig.SiteConfig,
+      SourceCoverProxyMode: 'auto',
+      LiveAccess: 'all',
+    });
+  });
+
+  it.each(['all', 'groups'])(
+    'preserves imported live policy %s and normalizes group grants',
+    async (LiveAccess) => {
+      const data = createImportData();
+      data.data.adminConfig = {
+        ...adminConfig,
+        SiteConfig: Object.assign({}, adminConfig.SiteConfig, { LiveAccess }),
+        UserConfig: {
+          ...adminConfig.UserConfig,
+          Tags: [
+            { name: 'live', enabledApis: [], allowLive: true },
+            { name: 'vod', enabledApis: [], allowLive: false },
+          ],
+        },
+      };
+      const parsed = await parseImportData(data);
+      expect(parsed.snapshot.adminConfig.SiteConfig.LiveAccess).toBe(
+        LiveAccess,
+      );
+      expect(parsed.snapshot.adminConfig.UserConfig.Tags).toEqual([
+        { name: 'live', enabledApis: [], allowLive: true },
+        { name: 'vod', enabledApis: [] },
+      ]);
+    },
+  );
+
+  it.each([null, false, '', 'invalid'])(
+    'rejects invalid imported live policy %j before normalization',
+    async (LiveAccess) => {
+      const data = createImportData();
+      data.data.adminConfig = {
+        ...adminConfig,
+        SiteConfig: Object.assign({}, adminConfig.SiteConfig, { LiveAccess }),
+      };
+      await expect(parseImportData(data)).rejects.toThrow(
+        '直播权限范围格式无效',
+      );
+    },
+  );
+
+  it.each([null, 'true', 1])(
+    'rejects invalid imported group grant %j before normalization',
+    async (allowLive) => {
+      const data = createImportData();
+      data.data.adminConfig = {
+        ...adminConfig,
+        UserConfig: {
+          ...adminConfig.UserConfig,
+          Tags: [{ name: 'live', enabledApis: [] }],
+        },
+      };
+      Object.assign(data.data.adminConfig.UserConfig.Tags![0], { allowLive });
+      await expect(parseImportData(data)).rejects.toThrow('用户组直播权限');
+    },
+  );
+
+  it('preserves social backups and validates cross-user references', async () => {
+    const data = createImportData();
+    data.data.userData.owner.videoReviews = [videoReview];
+    const user = data.data.userData['demo-user'];
+    user.profile = {
+      username: 'untrusted',
+      profile_id: 'AbCdEf012345',
+      avatar_seed: 'Avatar012345',
+      nickname: 'Demo',
+      favorites_public: 1,
+      updated_at: 100,
+    };
+    user.follows = [
+      { followee: 'OWNER', created_at: 1 },
+      { followee: 'missing', created_at: 1 },
+    ];
+    user.likes = [
+      {
+        author: 'OWNER',
+        title_norm: videoReview.title_norm,
+        year: videoReview.year,
+        created_at: 2,
+      },
+    ];
+    user.reports = [
+      { ...user.likes[0], reason: 'spoiler', detail: 'description' },
+    ];
+    user.messageState = {
+      followReviewReadAt: 100,
+      followReviewReadIds: ['follow-review:encoded'],
+    };
+    const parsed = (await parseImportData(data)).snapshot.userData['demo-user'];
+    expect(parsed.profile).toEqual({ ...user.profile, username: 'demo-user' });
+    expect(parsed.follows).toEqual([{ followee: 'owner', created_at: 1 }]);
+    expect(parsed.likes?.[0].author).toBe('owner');
+    expect(parsed.reports?.[0].reason).toBe('spoiler');
+    expect(parsed.messageState).toEqual(user.messageState);
+    user.reports[0].detail = 'x'.repeat(201);
+    await expect(parseImportData(data)).rejects.toThrow('举报记录无效');
+  });
+
+  it.each([
+    undefined,
+    null,
+    '',
+    'short',
+    'x'.repeat(25),
+    'invalid-seed',
+    123,
+    {},
+  ])(
+    'normalizes absent or invalid imported avatar seeds to null: %j',
+    async (avatar_seed) => {
+      const data = createImportData();
+      Object.assign(data.data.userData['demo-user'], {
+        profile: {
+          username: 'demo-user',
+          profile_id: 'AbCdEf012345',
+          nickname: 'Demo',
+          avatar_seed,
+          favorites_public: false,
+          updated_at: 100,
+        },
+      });
+      const parsed = await parseImportData(data);
+      expect(
+        parsed.snapshot.userData['demo-user'].profile?.avatar_seed,
+      ).toBeNull();
+    },
+  );
+
+  it('normalizes review identity, preserves private fields and supports old backups', async () => {
+    const data = createImportData();
+    data.data.userData['demo-user'].videoReviews = [
+      {
+        ...videoReview,
+        title: ' Review Demo! ',
+        title_norm: 'untrusted',
+        year: 'unknown',
+        content: ' Good ',
+        is_public: false,
+      },
+    ];
+    const parsed = await parseImportData(data);
+    expect(parsed.snapshot.userData['demo-user'].videoReviews).toEqual([
+      {
+        ...videoReview,
+        title: 'Review Demo!',
+        title_norm: 'reviewdemo',
+        year: '',
+        content: 'Good',
+        is_public: false,
+      },
+    ]);
+    expect(parsed.snapshot.userData.owner.videoReviews).toEqual([]);
+  });
+
+  it.each([
+    [1, 1],
+    [10, 10],
+    [8.6, 8.6],
+    [8.65, 8.7],
+    [8.64, 8.6],
+    [null, null],
+  ])('normalizes imported rating %s to %s', async (rating, expected) => {
+    const data = createImportData();
+    data.data.userData['demo-user'].videoReviews = [{ ...videoReview, rating }];
+    const parsed = await parseImportData(data);
+    expect(parsed.snapshot.userData['demo-user'].videoReviews).toEqual([
+      { ...videoReview, rating: expected },
+    ]);
+  });
+
+  it.each([
+    { rating: 11 },
+    { rating: 0.9 },
+    { rating: 10.1 },
+    { rating: 0.99 },
+    { rating: 10.01 },
+    { rating: NaN },
+    { rating: Infinity },
+    { rating: -Infinity },
+    { rating: '8.6' },
+    { rating: null, content: ' ' },
+    { is_public: 'true' },
+    { content: 'x'.repeat(5001) },
+    { created_at: -1 },
+  ])('rejects invalid review imports %j', async (extra) => {
+    const data = createImportData();
+    data.data.userData['demo-user'].videoReviews = [
+      { ...videoReview, ...extra } as never,
+    ];
+    await expect(parseImportData(data)).rejects.toThrow();
+  });
+
+  it('enforces review import count limits', async () => {
+    const data = createImportData();
+    data.data.userData['demo-user'].videoReviews =
+      Array(20001).fill(videoReview);
+    await expect(parseImportData(data)).rejects.toMatchObject({ status: 413 });
+  });
+
   it('restores exported password hashes and skips the owner', async () => {
     const parsed = await parseImportData(createImportData());
 
@@ -338,5 +616,143 @@ describe('data import full export fields', () => {
     await expect(parseImportData(importData)).rejects.toThrow(
       '源站路由统计条目重复',
     );
+  });
+});
+
+it('完整备份导入保留观看状态，丢弃非法字段', async () => {
+  const data = createImportData();
+  const favorite = {
+    title: 'Demo',
+    source_name: '豆瓣',
+    total_episodes: 0,
+    year: '2026',
+    cover: '',
+    save_time: 100,
+  };
+  data.data.userData['demo-user'].favorites = {
+    'douban+1': { ...favorite, watch_status: 'completed', watched_at: 123 },
+    'douban+2': { ...favorite, watch_status: 'planned', watched_at: 123 },
+    'douban+3': { ...favorite, watch_status: 'completed', watched_at: -1 },
+  };
+  const parsed = await parseImportData(data);
+  expect(
+    parsed.snapshot.userData['demo-user'].favorites['douban+1'],
+  ).toMatchObject({
+    watch_status: 'completed',
+    watched_at: 123,
+  });
+  expect(
+    parsed.snapshot.userData['demo-user'].favorites['douban+2'].watched_at,
+  ).toBeUndefined();
+  expect(
+    parsed.snapshot.userData['demo-user'].favorites['douban+3'].watched_at,
+  ).toBeUndefined();
+});
+
+it.each([
+  [true, 1],
+  [false, 0],
+  [0, 0],
+  [1, 1],
+  [2, 2],
+  [3, 3],
+])('导入兼容公开等级 %j → %s', async (input, expected) => {
+  const data = createImportData();
+  data.data.userData['demo-user'].profile = {
+    username: 'demo-user',
+    profile_id: 'AbCdEf012345',
+    nickname: null,
+    avatar_seed: null,
+    favorites_public: input as import('@/lib/types').LibraryVisibility,
+    updated_at: 100,
+  };
+  const result = await parseImportData(data);
+  expect(result.snapshot.userData['demo-user'].profile?.favorites_public).toBe(
+    expected,
+  );
+});
+
+it.each([-1, 4, 1.5, 'true', null])(
+  '导入拒绝非法公开等级 %j',
+  async (input) => {
+    const data = createImportData();
+    data.data.userData['demo-user'].profile = {
+      username: 'demo-user',
+      profile_id: 'AbCdEf012345',
+      nickname: null,
+      avatar_seed: null,
+      favorites_public: input as import('@/lib/types').LibraryVisibility,
+      updated_at: 100,
+    };
+    await expect(parseImportData(data)).rejects.toThrow('收藏公开等级无效');
+  },
+);
+
+describe('user danmaku imports', () => {
+  it('normalizes content and owner identity; preserves switch', async () => {
+    const data = createImportData();
+    data.data.adminConfig = {
+      ...adminConfig,
+      SiteConfig: { ...adminConfig.SiteConfig, EnableUserDanmaku: true },
+    };
+    data.data.userData.owner.userDanmaku = [
+      { ...userDanmaku, text: ' a   b ', color: '#ABCDEF', mode: 8 as never },
+    ];
+    const parsed = await parseImportData(data);
+    expect(parsed.snapshot.adminConfig.SiteConfig.EnableUserDanmaku).toBe(true);
+    expect(parsed.snapshot.userData.owner.userDanmaku).toEqual([
+      expect.objectContaining({ text: 'a b', color: '#abcdef', mode: 0 }),
+    ]);
+    expect(parsed.snapshot.userData.owner.userDanmaku?.[0]).not.toHaveProperty(
+      'username',
+    );
+  });
+  it.each([
+    { episodeKey: 'invalid' },
+    { text: '' },
+    { timeMs: -1 },
+    { timeMs: 86400001 },
+    { id: 'invalid' },
+  ])('rejects malformed imported rows %j', async (patch) => {
+    const data = createImportData();
+    data.data.userData.owner.userDanmaku = [{ ...userDanmaku, ...patch }];
+    await expect(parseImportData(data)).rejects.toThrow();
+  });
+  it('rejects duplicate IDs across users and invalid switches', async () => {
+    const data = createImportData();
+    data.data.userData.owner.userDanmaku = [userDanmaku];
+    data.data.userData['demo-user'].userDanmaku = [userDanmaku];
+    await expect(parseImportData(data)).rejects.toThrow('弹幕标识重复');
+    data.data.adminConfig = {
+      ...adminConfig,
+      SiteConfig: {
+        ...adminConfig.SiteConfig,
+        EnableUserDanmaku: 'true' as never,
+      },
+    };
+    await expect(parseImportData(data)).rejects.toThrow('用户弹幕开关');
+  });
+  it('keeps latest 50,000 globally with truncation report', async () => {
+    const data = createImportData();
+    data.data.userData.owner.userDanmaku = Array.from(
+      { length: 50001 },
+      (_, i) => ({
+        ...userDanmaku,
+        id: `00000000-0000-4000-8000-${String(i).padStart(12, '0')}`,
+        createdAt: i,
+      }),
+    );
+    const parsed = await parseImportData(data);
+    expect(parsed.snapshot.userData.owner.userDanmaku).toHaveLength(50000);
+    expect(
+      parsed.snapshot.userData.owner.userDanmaku?.some(
+        (row) => row.createdAt === 0,
+      ),
+    ).toBe(false);
+    expect(parsed.truncated).toContainEqual({
+      username: 'owner',
+      kind: 'userDanmaku',
+      dropped: 1,
+    });
   });
 });

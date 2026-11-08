@@ -1,17 +1,24 @@
 ﻿'use client';
 
-import { Cat, ChevronRight, Clover, Film, Tv } from 'lucide-react';
+import { ChevronRight } from 'lucide-react';
 import Link from 'next/link';
 import { useEffect, useMemo, useState } from 'react';
 
 import ContinueWatching from '@/components/ContinueWatching';
 import GuestAnnouncement from '@/components/GuestAnnouncement';
 import HomePosterCardSkeleton, {
-  HOME_POSTER_CARD_CLASS,
+  HOME_RECOMMENDATION_INITIAL_COUNT,
 } from '@/components/HomePosterCardSkeleton';
+import { PAGE_CONTAINER_CLASS } from '@/components/page-container';
 import PageLayout from '@/components/PageLayout';
+import { HOME_POSTER_CARD_CLASS } from '@/components/poster-card-layout';
 import PosterCard from '@/components/PosterCard';
 import ScrollableRow from '@/components/ScrollableRow';
+import {
+  SECTION_HEADER_CLASS,
+  SECTION_LINK_TEXT_CLASS,
+  SECTION_TITLE_TEXT_CLASS,
+} from '@/components/section-header';
 import { GetBangumiCalendarData } from '@/features/bangumi/lib/bangumi.client';
 import { selectBangumiCardCover } from '@/features/bangumi/lib/bangumi-normalize';
 import {
@@ -19,14 +26,20 @@ import {
   primeDefaultDoubanFeedViewCache,
 } from '@/features/douban/hooks/useDoubanFeed';
 import { HomeInitialData } from '@/features/home/lib/home.types';
-import { getDoubanCategories } from '@/lib/douban.client';
-import { DoubanItem, PlayRecord } from '@/lib/types';
-
 import {
   mergeHomeInitialDataWithClientSnapshot,
   writeHomeClientSnapshot,
-} from '../lib/home-client-cache';
-import { HomeMineSwitch } from './HomeMineSwitch';
+} from '@/features/home/lib/home-client-cache';
+import { pickHomeHeroItems } from '@/features/home/lib/home-hero';
+import {
+  HOME_BODY_CLASS,
+  HOME_SECTION_CLASS,
+  HOME_SECTIONS_CLASS,
+} from '@/features/home/lib/home-layout';
+import { getDoubanCategories } from '@/lib/douban.client';
+import { DoubanItem, PlayRecord } from '@/lib/types';
+
+import { HomeHero, HomeHeroSkeleton } from './HomeHero';
 
 interface HomeClientProps {
   initialData: HomeInitialData;
@@ -34,6 +47,7 @@ interface HomeClientProps {
   continueWatchingRecords?: Record<string, PlayRecord> | null;
   continueWatchingUpdateCount?: number;
   routeFallback?: boolean;
+  likelyMobile?: boolean;
 }
 
 type RecommendationLoadingState = {
@@ -46,9 +60,9 @@ type RecommendationLoadingState = {
 const RECOMMENDATION_UNAVAILABLE_MESSAGE = '暂时无法获取数据';
 
 function RecommendationSkeletonRow() {
-  return Array.from({ length: 8 }).map((_, index) => (
-    <HomePosterCardSkeleton key={index} />
-  ));
+  return Array.from({ length: HOME_RECOMMENDATION_INITIAL_COUNT }).map(
+    (_, index) => <HomePosterCardSkeleton key={index} variant='poster' />,
+  );
 }
 
 function RecommendationEmptyRow({ message }: { message: string }) {
@@ -62,8 +76,6 @@ function RecommendationEmptyRow({ message }: { message: string }) {
 function RecommendationSection({
   title,
   href,
-  icon: Icon,
-  iconClassName,
   items,
   loading,
   type,
@@ -73,8 +85,6 @@ function RecommendationSection({
 }: {
   title: string;
   href: string;
-  icon: typeof Film;
-  iconClassName: string;
   items: DoubanItem[];
   loading: boolean;
   type?: string;
@@ -83,21 +93,25 @@ function RecommendationSection({
   emptyMessage?: string;
 }) {
   return (
-    <section className='mb-2'>
-      <div className='mb-4 flex items-center justify-between'>
-        <h2 className='flex items-center gap-2 text-lg font-bold text-gray-800 dark:text-gray-200 sm:text-xl'>
-          <Icon className={iconClassName} />
+    <section className={HOME_SECTION_CLASS}>
+      <div className={SECTION_HEADER_CLASS}>
+        <h2
+          className={`${SECTION_TITLE_TEXT_CLASS} font-semibold tracking-tight text-gray-900 dark:text-gray-100`}
+        >
           {title}
         </h2>
         <Link
           href={href}
-          className='flex items-center text-sm text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200'
+          className={`${SECTION_LINK_TEXT_CLASS} flex items-center text-gray-500 transition-colors hover:text-gray-900 dark:text-gray-400 dark:hover:text-white`}
         >
-          查看更多
-          <ChevronRight className='ml-1 h-4 w-4' />
+          更多
+          <ChevronRight className='h-4 w-4' />
         </Link>
       </div>
-      <ScrollableRow initialItemCount={8} mountBatchSize={8}>
+      <ScrollableRow
+        initialItemCount={HOME_RECOMMENDATION_INITIAL_COUNT}
+        mountBatchSize={HOME_RECOMMENDATION_INITIAL_COUNT}
+      >
         {loading ? (
           RecommendationSkeletonRow()
         ) : items.length > 0 ? (
@@ -135,6 +149,7 @@ export default function HomeClient({
   continueWatchingRecords = null,
   continueWatchingUpdateCount,
   routeFallback = false,
+  likelyMobile = false,
 }: HomeClientProps) {
   const [initialViewData] = useState(() =>
     mergeHomeInitialDataWithClientSnapshot(initialData),
@@ -305,6 +320,14 @@ export default function HomeClient({
 
   const currentWeekday = useMemo(() => getCurrentWeekday(), []);
 
+  const heroItems = useMemo(
+    () =>
+      initialViewData.heroItems.length > 0
+        ? initialViewData.heroItems
+        : pickHomeHeroItems(hotMovies, hotTvShows),
+    [initialViewData.heroItems, hotMovies, hotTvShows],
+  );
+
   const todayAnimes = useMemo(() => {
     const items =
       bangumiCalendarData.find((item) => item.weekday.en === currentWeekday)
@@ -350,12 +373,14 @@ export default function HomeClient({
         hotTvShows,
         hotVarietyShows,
         bangumiCalendarData,
+        heroItems,
       },
       continueWatchingSkeletonCount,
     );
   }, [
     bangumiCalendarData,
     continueWatchingSkeletonCount,
+    heroItems,
     hotMovies,
     hotTvShows,
     hotVarietyShows,
@@ -364,15 +389,19 @@ export default function HomeClient({
     unavailable,
   ]);
 
-  return (
-    <PageLayout>
-      <div className='overflow-visible px-2 pb-2 pt-4 sm:px-10 sm:pt-8'>
-        <div className='mb-4 hidden justify-center md:flex'>
-          <HomeMineSwitch active='home' />
-        </div>
+  const heroLoading =
+    heroItems.length === 0 && (loading.hotMovies || loading.hotTvShows);
 
-        <div className='mx-auto max-w-[95%]'>
-          <div className='-mb-3 sm:-mb-6'>
+  return (
+    <PageLayout transparentTopNav={heroLoading || heroItems.length > 0}>
+      {heroLoading ? (
+        <HomeHeroSkeleton />
+      ) : (
+        <HomeHero items={heroItems} likelyMobile={likelyMobile} />
+      )}
+      <div className={HOME_BODY_CLASS}>
+        <div className={PAGE_CONTAINER_CLASS}>
+          <div className={HOME_SECTIONS_CLASS}>
             <ContinueWatching
               initialSkeletonCount={continueWatchingSkeletonCount}
               initialRecords={continueWatchingRecords}
@@ -383,8 +412,6 @@ export default function HomeClient({
             <RecommendationSection
               title='热门电影'
               href='/douban?type=movie'
-              icon={Film}
-              iconClassName='h-5 w-5 text-blue-500'
               items={hotMovies}
               loading={loading.hotMovies && hotMovies.length === 0}
               type='movie'
@@ -399,8 +426,6 @@ export default function HomeClient({
             <RecommendationSection
               title='热门剧集'
               href='/douban?type=tv'
-              icon={Tv}
-              iconClassName='h-5 w-5 text-emerald-500'
               items={hotTvShows}
               loading={loading.hotTvShows && hotTvShows.length === 0}
               emptyMessage={
@@ -413,8 +438,6 @@ export default function HomeClient({
             <RecommendationSection
               title='新番放送'
               href='/douban?type=anime'
-              icon={Cat}
-              iconClassName='h-5 w-5 text-pink-500'
               items={todayAnimes}
               loading={
                 loading.bangumiCalendar &&
@@ -432,8 +455,6 @@ export default function HomeClient({
             <RecommendationSection
               title='热门综艺'
               href='/douban?type=show'
-              icon={Clover}
-              iconClassName='h-5 w-5 text-violet-500'
               items={hotVarietyShows}
               loading={loading.hotVarietyShows && hotVarietyShows.length === 0}
               emptyMessage={

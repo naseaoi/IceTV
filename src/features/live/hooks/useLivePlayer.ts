@@ -9,6 +9,19 @@ import {
   useState,
 } from 'react';
 
+import {
+  readBufferedRanges,
+  resolveLiveRecoveryPosition,
+  shouldTreatLivePauseAsUserPause,
+} from '@/features/live/lib/livePlaybackRecovery';
+import {
+  type LivePlaybackRoute,
+  buildLiveM3u8ProxyUrl,
+  isLivePlaylistContextType,
+  rewriteLivePlaylistRequestUrl,
+} from '@/features/live/lib/livePlaybackRoute';
+import type { LiveChannel, LiveSource } from '@/features/live/types';
+import { createArtPlayerContextmenus } from '@/features/play/lib/artPlayerSettings';
 import { logHlsError } from '@/lib/hls-error-log';
 import {
   LIVE_DIRECT_CONNECT_CHANGE_EVENT,
@@ -35,20 +48,6 @@ import {
   destroyArtPlayer,
   ensureVideoSource,
 } from '@/lib/player-utils';
-
-import { createArtPlayerContextmenus } from '../../play/lib/artPlayerSettings';
-import {
-  readBufferedRanges,
-  resolveLiveRecoveryPosition,
-  shouldTreatLivePauseAsUserPause,
-} from '../lib/livePlaybackRecovery';
-import {
-  type LivePlaybackRoute,
-  buildLiveM3u8ProxyUrl,
-  isLivePlaylistContextType,
-  rewriteLivePlaylistRequestUrl,
-} from '../lib/livePlaybackRoute';
-import type { LiveChannel, LiveSource } from '../types';
 
 const LIVE_PRECHECK_CACHE_TTL_MS = 5 * 60 * 1000;
 const LIVE_STALL_RECOVERY_DELAY_MS = 2500;
@@ -498,7 +497,9 @@ export function useLivePlayer({
           });
 
           hls.on(Hls.Events.MANIFEST_PARSED, function () {
-            hls.startLoad(-1);
+            if (!hls.loadingEnabled) {
+              hls.startLoad(-1);
+            }
             alignToLiveEdge();
             requestInitialLiveAutoplay(video);
           });

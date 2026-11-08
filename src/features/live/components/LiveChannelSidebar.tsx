@@ -2,22 +2,23 @@
 import { MutableRefObject, ReactNode, useEffect, useMemo, useRef } from 'react';
 
 import {
+  PLAYER_PANEL_SURFACE_CLASS,
   PlayerPanelContent,
   PlayerPanelTabBar,
 } from '@/components/PlayerPanelTabBar';
+import Spinner from '@/components/Spinner';
 import { useVerticalScrollEdgeFade } from '@/features/live/hooks/useVerticalScrollEdgeFade';
 import {
   formatTimeToHHMM,
   parseCustomTimeFormat,
 } from '@/features/live/lib/time';
-
 import type {
   EpgData,
   EpgProgram,
   LiveChannel,
   LivePanelTab,
   LiveSource,
-} from '../types';
+} from '@/features/live/types';
 
 interface LiveChannelSidebarProps {
   activeTab: LivePanelTab;
@@ -195,7 +196,7 @@ function EpgTab({
 
       {isEpgLoading ? (
         <div className='flex min-h-0 flex-1 items-center justify-center text-sm text-gray-500 dark:text-gray-400'>
-          <div className='mr-3 h-5 w-5 animate-spin rounded-full border-2 border-gray-300 border-t-blue-500' />
+          <Spinner className='mr-3 h-5 w-5 text-brand-500' />
           加载节目单...
         </div>
       ) : programs.length === 0 ? (
@@ -225,17 +226,17 @@ function EpgTab({
                   ref={isCurrent ? currentProgramRef : undefined}
                   className={`rounded-lg border p-3 transition-colors ${
                     isCurrent
-                      ? 'border-green-500/30 bg-green-500/10 dark:bg-green-500/20'
+                      ? 'border-brand-500/30 bg-brand-500/10 dark:bg-brand-500/20'
                       : isFinished
                         ? 'border-gray-200 bg-gray-100/70 dark:border-gray-700 dark:bg-gray-800/70'
-                        : 'border-blue-500/20 bg-blue-500/10 dark:bg-blue-500/20'
+                        : 'border-brand-500/20 bg-brand-500/10 dark:bg-brand-500/20'
                   }`}
                 >
                   <div className='mb-2 flex items-center justify-between text-xs'>
                     <span
                       className={
                         isCurrent
-                          ? 'font-medium text-green-600 dark:text-green-400'
+                          ? 'font-medium text-brand-600 dark:text-brand-400'
                           : 'text-gray-500 dark:text-gray-400'
                       }
                     >
@@ -248,7 +249,7 @@ function EpgTab({
                   <div
                     className={`line-clamp-2 text-sm font-medium ${
                       isCurrent
-                        ? 'text-green-900 dark:text-green-100'
+                        ? 'text-brand-900 dark:text-brand-100'
                         : 'text-gray-900 dark:text-gray-100'
                     }`}
                     title={program.title}
@@ -256,7 +257,7 @@ function EpgTab({
                     {program.title}
                   </div>
                   {isCurrent && (
-                    <div className='mt-2 flex items-center gap-1.5 text-xs font-medium text-green-600 dark:text-green-400'>
+                    <div className='mt-2 flex items-center gap-1.5 text-xs font-medium text-brand-600 dark:text-brand-400'>
                       <Target className='h-3 w-3' />
                       正在播放
                     </div>
@@ -321,7 +322,7 @@ export function LiveChannelSidebar({
   }, [selectedGroup, groupedChannels, groupContainerRef]);
 
   return (
-    <div className='flex h-full flex-col overflow-hidden md:ml-1'>
+    <div className={`flex h-full flex-col ${PLAYER_PANEL_SURFACE_CLASS}`}>
       <PlayerPanelTabBar
         tabs={tabs}
         active={activeTab}
@@ -332,10 +333,10 @@ export function LiveChannelSidebar({
       <PlayerPanelContent>
         {activeTab === 'channels' && (
           <div className='flex min-h-0 flex-1 flex-col overflow-hidden'>
-            <div className='flex flex-shrink-0 items-center gap-3 border-b border-gray-200/80 px-4 dark:border-white/10'>
+            <div className='flex flex-shrink-0 items-center gap-3 border-b border-gray-200/70 px-3 py-2.5 dark:border-white/[0.06]'>
               {isSwitchingSource && (
                 <div className='flex items-center gap-2 whitespace-nowrap text-xs text-amber-600 dark:text-amber-400'>
-                  <div className='h-2 w-2 animate-pulse rounded-full bg-amber-500' />
+                  <Spinner className='h-3 w-3' strokeWidth={6} />
                   切换中
                 </div>
               )}
@@ -343,7 +344,7 @@ export function LiveChannelSidebar({
                 ref={groupContainerRef}
                 className='min-w-0 flex-1 overflow-x-auto'
               >
-                <div className='flex min-w-max gap-3'>
+                <div className='flex min-w-max gap-1'>
                   {Object.keys(groupedChannels).map((group, index) => (
                     <button
                       key={group}
@@ -353,19 +354,16 @@ export function LiveChannelSidebar({
                       }}
                       onClick={() => handleGroupChange(group)}
                       disabled={isSwitchingSource}
-                      className={`relative w-20 flex-shrink-0 overflow-hidden py-3 text-center text-sm font-medium transition-colors ${
+                      className={`max-w-[8rem] flex-shrink-0 rounded-full px-3 py-1 text-[13px] transition-colors ${
                         isSwitchingSource
                           ? 'cursor-not-allowed text-gray-400 opacity-50 dark:text-gray-600'
                           : selectedGroup === group
-                            ? 'text-green-500 dark:text-green-400'
-                            : 'text-gray-600 hover:text-green-600 dark:text-gray-300 dark:hover:text-green-400'
+                            ? 'bg-gray-900/[0.07] font-medium text-gray-900 dark:bg-white/[0.1] dark:text-white'
+                            : 'text-gray-500 hover:text-gray-900 dark:text-gray-400 dark:hover:text-white'
                       }`}
                       title={group}
                     >
-                      <span className='block truncate px-1'>{group}</span>
-                      {selectedGroup === group && !isSwitchingSource && (
-                        <div className='absolute bottom-0 left-0 right-0 h-0.5 rounded-full bg-green-500 dark:bg-green-400' />
-                      )}
+                      <span className='block truncate'>{group}</span>
                     </button>
                   ))}
                 </div>
@@ -377,8 +375,8 @@ export function LiveChannelSidebar({
               data-live-scroll-panel='channels'
               data-top-fade={channelScrollFade.hasTopFade}
               data-bottom-fade={channelScrollFade.hasBottomFade}
-              className={`max-h-[50dvh] min-h-0 flex-1 overflow-y-auto p-3 md:max-h-none ${
-                filteredChannels.length > 0 ? 'space-y-2' : 'flex flex-col'
+              className={`max-h-[50dvh] min-h-0 flex-1 overflow-y-auto p-2 md:max-h-none ${
+                filteredChannels.length > 0 ? 'space-y-0.5' : 'flex flex-col'
               }`}
               onScroll={channelScrollFade.onScroll}
               style={channelScrollFade.style}
@@ -392,12 +390,12 @@ export function LiveChannelSidebar({
                       data-channel-id={channel.id}
                       onClick={() => handleChannelChange(channel)}
                       disabled={isSwitchingSource}
-                      className={`w-full rounded-lg p-3 text-left transition-all duration-200 ${
+                      className={`w-full rounded-lg px-3 py-2.5 text-left transition-colors ${
                         isSwitchingSource
                           ? 'cursor-not-allowed opacity-50'
                           : isActive
-                            ? 'border border-green-300 bg-green-100 dark:border-green-700 dark:bg-green-900/30'
-                            : 'hover:bg-gray-100 dark:hover:bg-white/10'
+                            ? 'bg-brand-500/10 dark:bg-brand-400/10'
+                            : 'hover:bg-gray-900/[0.04] dark:hover:bg-white/[0.05]'
                       }`}
                     >
                       <div className='flex items-center gap-3'>
@@ -466,11 +464,11 @@ export function LiveChannelSidebar({
                       }}
                       className={`relative flex w-full items-start gap-3 rounded-lg px-3 py-3 text-left transition-all duration-200 ${
                         isCurrentSource
-                          ? 'border border-green-500/30 bg-green-500/10 dark:bg-green-500/20'
-                          : 'hover:bg-gray-100 dark:hover:bg-white/10'
+                          ? 'bg-brand-500/10 dark:bg-brand-400/10'
+                          : 'hover:bg-gray-900/[0.04] dark:hover:bg-white/[0.05]'
                       }`}
                     >
-                      <div className='flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-lg bg-gray-100 dark:bg-gray-800'>
+                      <div className='flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-lg bg-gray-900/[0.05] dark:bg-white/[0.06]'>
                         <Radio className='h-5 w-5 text-gray-500' />
                       </div>
                       <div className='min-w-0 flex-1'>
@@ -484,7 +482,7 @@ export function LiveChannelSidebar({
                         </div>
                       </div>
                       {isCurrentSource && (
-                        <div className='absolute right-3 top-3 h-2 w-2 rounded-full bg-green-500' />
+                        <div className='absolute right-3 top-3 h-2 w-2 rounded-full bg-brand-500' />
                       )}
                     </button>
                   );

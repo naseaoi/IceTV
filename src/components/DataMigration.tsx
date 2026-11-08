@@ -1,11 +1,18 @@
 ﻿'use client';
 
-import { AlertTriangle, Download, FileCheck, Lock, Upload } from 'lucide-react';
+import { Download, FileUp, Upload } from 'lucide-react';
 import { type FormEvent, type ReactNode, useRef, useState } from 'react';
 
 import AlertModal from '@/components/modals/AlertModal';
 import ConfirmModal from '@/components/modals/ConfirmModal';
 import { PasswordInput } from '@/components/PasswordInput';
+import Spinner from '@/components/Spinner';
+import {
+  AdminSettingRow,
+  AdminSettingsGroup,
+} from '@/features/admin/components/AdminSettings';
+import { buttonStyles, inputStyles } from '@/features/admin/lib/buttonStyles';
+import { showToast } from '@/lib/toast';
 
 interface DataMigrationProps {
   onRefreshConfig?: () => Promise<void>;
@@ -14,6 +21,25 @@ interface DataMigrationProps {
 const EXPORT_PASSWORD_ID = 'data-export-password';
 const IMPORT_FILE_ID = 'data-import-file';
 const IMPORT_PASSWORD_ID = 'data-import-password';
+
+const BACKUP_INCLUDED = [
+  '管理配置',
+  '用户与密码',
+  '播放记录',
+  '收藏夹',
+  '搜索历史',
+  '跳过片头片尾',
+  '观看统计',
+  '邀请码与用量',
+  '源站路由统计',
+  '站点图标',
+];
+
+const BACKUP_EXCLUDED = [
+  '站长账号密码（由环境变量决定）',
+  '环境变量与部署配置',
+  '服务端缓存与封面缓存',
+];
 
 const TRUNCATION_LABELS: Record<string, string> = {
   searchHistory: '搜索历史',
@@ -119,12 +145,7 @@ const DataMigration = ({ onRefreshConfig }: DataMigrationProps) => {
       window.URL.revokeObjectURL(url);
       document.body.removeChild(a);
 
-      showAlert({
-        type: 'success',
-        title: '导出成功',
-        message: '数据已成功导出，请妥善保管备份文件和密码',
-        timer: 3000,
-      });
+      showToast('导出成功，请妥善保管备份文件和密码', 'success');
 
       setExportPassword('');
     } catch (error) {
@@ -206,7 +227,7 @@ const DataMigration = ({ onRefreshConfig }: DataMigrationProps) => {
             </p>
             <p>服务器版本: {result.serverVersion || '未知版本'}</p>
             {result.ownerRemappedFrom && (
-              <p className='mt-2 text-blue-600'>
+              <p className='mt-2 text-brand-600'>
                 原站站长 {result.ownerRemappedFrom}{' '}
                 的数据已归到本机站长账号下，登录仍使用本机的站长密码。
               </p>
@@ -264,202 +285,128 @@ const DataMigration = ({ onRefreshConfig }: DataMigrationProps) => {
     handleImportRequest();
   };
 
+  const canExport = !isExporting && exportPassword.trim().length > 0;
+  const canImport =
+    !isImporting && selectedFile !== null && importPassword.trim().length > 0;
+
   return (
     <>
-      <div className='mx-auto max-w-6xl space-y-6'>
-        <div className='flex items-center gap-3 rounded-lg border border-amber-200 bg-amber-50/30 p-4 dark:border-amber-700 dark:bg-amber-900/5'>
-          <AlertTriangle className='h-5 w-5 flex-shrink-0 text-amber-600 dark:text-amber-400' />
-          <p className='text-sm text-amber-800 dark:text-amber-200'>
-            数据迁移操作请谨慎，确保已备份重要数据
-          </p>
-        </div>
-
-        <div className='grid grid-cols-1 gap-6 lg:grid-cols-2'>
-          <div className='flex flex-col rounded-lg border border-gray-200 bg-white p-6 transition-shadow hover:shadow-sm dark:border-gray-700 dark:bg-gray-800'>
-            <div className='mb-6 flex items-center gap-3'>
-              <div className='flex h-8 w-8 items-center justify-center rounded-lg bg-blue-50 dark:bg-blue-900/20'>
-                <Upload className='h-4 w-4 text-blue-600 dark:text-blue-400' />
-              </div>
-              <div>
-                <h3 className='font-semibold text-gray-900 dark:text-gray-100'>
-                  数据导出
-                </h3>
-                <p className='text-sm text-gray-600 dark:text-gray-400'>
-                  创建加密备份文件
-                </p>
-              </div>
-            </div>
-
-            <form
-              onSubmit={handleExportSubmit}
-              className='flex flex-1 flex-col'
+      <div className='space-y-8'>
+        <form onSubmit={handleExportSubmit}>
+          <AdminSettingsGroup title='导出备份'>
+            <AdminSettingRow
+              label='加密密码'
+              htmlFor={EXPORT_PASSWORD_ID}
+              description='导入时需输入相同密码'
             >
-              <div className='space-y-4'>
-                <div>
-                  <label
-                    htmlFor={EXPORT_PASSWORD_ID}
-                    className='mb-2 flex items-center gap-2 text-sm font-medium text-gray-700 dark:text-gray-300'
+              <div className='flex w-full gap-2 sm:w-96'>
+                <PasswordInput
+                  id={EXPORT_PASSWORD_ID}
+                  name='exportPassword'
+                  value={exportPassword}
+                  onChange={(e) => setExportPassword(e.target.value)}
+                  autoComplete='new-password'
+                  wrapperClassName='min-w-0 flex-1'
+                  className={`h-9 w-full pr-10 ${inputStyles.withFocus}`}
+                  disabled={isExporting}
+                />
+                <button
+                  type='submit'
+                  disabled={!canExport}
+                  className={`inline-flex h-9 shrink-0 items-center gap-1.5 disabled:cursor-not-allowed disabled:opacity-50 ${buttonStyles.primary}`}
+                >
+                  {isExporting ? (
+                    <Spinner className='h-3.5 w-3.5' />
+                  ) : (
+                    <Upload aria-hidden='true' className='h-3.5 w-3.5' />
+                  )}
+                  {isExporting ? '导出中' : '导出数据'}
+                </button>
+              </div>
+            </AdminSettingRow>
+            <AdminSettingRow label='备份内容' layout='stacked'>
+              <ul className='flex flex-wrap gap-1.5'>
+                {BACKUP_INCLUDED.map((item) => (
+                  <li
+                    key={item}
+                    className='rounded-md bg-gray-100 px-2 py-0.5 text-xs text-gray-600 dark:bg-white/[0.06] dark:text-gray-300'
                   >
-                    <Lock className='h-4 w-4' />
-                    加密密码
-                  </label>
-                  <PasswordInput
-                    id={EXPORT_PASSWORD_ID}
-                    name='exportPassword'
-                    value={exportPassword}
-                    onChange={(e) => setExportPassword(e.target.value)}
-                    placeholder='设置强密码保护备份文件'
-                    className='w-full rounded-lg border border-gray-300 bg-white px-3 py-2.5 pr-10 text-gray-900 transition-colors focus:border-blue-500 focus:ring-2 focus:ring-blue-500 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-100'
-                    disabled={isExporting}
-                  />
-                  <p className='mt-1 text-xs text-gray-500 dark:text-gray-400'>
-                    导入时需要使用相同密码
-                  </p>
-                </div>
+                    {item}
+                  </li>
+                ))}
+              </ul>
+              <p className='mt-2 text-xs text-gray-500 dark:text-gray-400'>
+                不含：{BACKUP_EXCLUDED.join('、')}
+              </p>
+            </AdminSettingRow>
+          </AdminSettingsGroup>
+        </form>
 
-                <div className='space-y-1 text-xs text-gray-600 dark:text-gray-400'>
-                  <p className='mb-2 font-medium text-gray-700 dark:text-gray-300'>
-                    包含：
-                  </p>
-                  <div className='grid grid-cols-2 gap-1'>
-                    <div>• 管理配置</div>
-                    <div>• 用户与密码</div>
-                    <div>• 播放记录</div>
-                    <div>• 收藏夹</div>
-                    <div>• 搜索历史</div>
-                    <div>• 跳过片头片尾</div>
-                    <div>• 观看统计</div>
-                    <div>• 邀请码与用量</div>
-                    <div>• 源站路由统计</div>
-                    <div>• 站点图标</div>
-                  </div>
-                  <p className='mb-2 mt-3 font-medium text-gray-700 dark:text-gray-300'>
-                    不包含：
-                  </p>
-                  <div className='space-y-1'>
-                    <div>• 站长账号密码（由环境变量决定）</div>
-                    <div>• 环境变量与部署配置</div>
-                    <div>• 服务端缓存与封面缓存</div>
-                  </div>
-                </div>
+        <form onSubmit={handleImportSubmit}>
+          <AdminSettingsGroup title='导入备份'>
+            <AdminSettingRow label='备份文件' htmlFor={IMPORT_FILE_ID}>
+              <div className='flex w-full min-w-0 items-center gap-3 sm:w-96'>
+                <input
+                  ref={fileInputRef}
+                  id={IMPORT_FILE_ID}
+                  name='backupFile'
+                  type='file'
+                  accept='.dat'
+                  onChange={handleFileSelect}
+                  className='hidden'
+                  disabled={isImporting}
+                />
+                <button
+                  type='button'
+                  onClick={() => fileInputRef.current?.click()}
+                  disabled={isImporting}
+                  className={`inline-flex h-9 shrink-0 items-center gap-1.5 disabled:cursor-not-allowed disabled:opacity-50 ${buttonStyles.outline}`}
+                >
+                  <FileUp aria-hidden='true' className='h-3.5 w-3.5' />
+                  选择文件
+                </button>
+                <span
+                  className={`min-w-0 truncate text-sm ${
+                    selectedFile
+                      ? 'text-gray-900 dark:text-gray-100'
+                      : 'text-gray-400'
+                  }`}
+                  title={selectedFile?.name}
+                >
+                  {selectedFile
+                    ? `${selectedFile.name} · ${(selectedFile.size / 1024).toFixed(1)} KB`
+                    : '未选择'}
+                </span>
               </div>
-
-              <button
-                type='submit'
-                disabled={isExporting || !exportPassword.trim()}
-                className={`mt-10 w-full rounded-lg px-4 py-2.5 font-medium transition-colors ${
-                  isExporting || !exportPassword.trim()
-                    ? 'cursor-not-allowed bg-gray-100 text-gray-500 dark:bg-gray-700 dark:text-gray-400'
-                    : 'bg-blue-600 text-white hover:bg-blue-700'
-                }`}
-              >
-                {isExporting ? (
-                  <div className='flex items-center justify-center gap-2'>
-                    <div className='h-4 w-4 animate-spin rounded-full border-2 border-white border-t-transparent'></div>
-                    导出中...
-                  </div>
-                ) : (
-                  <div className='flex items-center justify-center gap-2'>
-                    <Upload className='h-4 w-4' />
-                    导出数据
-                  </div>
-                )}
-              </button>
-            </form>
-          </div>
-
-          <div className='flex flex-col rounded-lg border border-gray-200 bg-white p-6 transition-shadow hover:shadow-sm dark:border-gray-700 dark:bg-gray-800'>
-            <div className='mb-6 flex items-center gap-3'>
-              <div className='flex h-8 w-8 items-center justify-center rounded-lg bg-red-50 dark:bg-red-900/20'>
-                <Download className='h-4 w-4 text-red-600 dark:text-red-400' />
+            </AdminSettingRow>
+            <AdminSettingRow label='解密密码' htmlFor={IMPORT_PASSWORD_ID}>
+              <div className='flex w-full gap-2 sm:w-96'>
+                <PasswordInput
+                  id={IMPORT_PASSWORD_ID}
+                  name='importPassword'
+                  value={importPassword}
+                  onChange={(e) => setImportPassword(e.target.value)}
+                  autoComplete='off'
+                  wrapperClassName='min-w-0 flex-1'
+                  className={`h-9 w-full pr-10 ${inputStyles.withFocus}`}
+                  disabled={isImporting}
+                />
+                <button
+                  type='submit'
+                  disabled={!canImport}
+                  className={`inline-flex h-9 shrink-0 items-center gap-1.5 disabled:cursor-not-allowed disabled:opacity-50 ${buttonStyles.danger}`}
+                >
+                  {isImporting ? (
+                    <Spinner className='h-3.5 w-3.5' />
+                  ) : (
+                    <Download aria-hidden='true' className='h-3.5 w-3.5' />
+                  )}
+                  {isImporting ? '导入中' : '导入数据'}
+                </button>
               </div>
-              <div>
-                <h3 className='font-semibold text-gray-900 dark:text-gray-100'>
-                  数据导入
-                </h3>
-                <p className='text-sm text-red-600 dark:text-red-400'>
-                  将清空现有数据
-                </p>
-              </div>
-            </div>
-
-            <form
-              onSubmit={handleImportSubmit}
-              className='flex flex-1 flex-col'
-            >
-              <div className='space-y-4'>
-                <div>
-                  <label
-                    htmlFor={IMPORT_FILE_ID}
-                    className='mb-2 flex items-center gap-2 text-sm font-medium text-gray-700 dark:text-gray-300'
-                  >
-                    <FileCheck className='h-4 w-4' />
-                    备份文件
-                    {selectedFile && (
-                      <span className='ml-auto text-xs font-normal text-green-600 dark:text-green-400'>
-                        {selectedFile.name} (
-                        {(selectedFile.size / 1024).toFixed(1)} KB)
-                      </span>
-                    )}
-                  </label>
-                  <input
-                    ref={fileInputRef}
-                    id={IMPORT_FILE_ID}
-                    name='backupFile'
-                    type='file'
-                    accept='.dat'
-                    onChange={handleFileSelect}
-                    className='w-full rounded-lg border border-gray-300 bg-white px-3 py-2.5 text-gray-900 transition-colors file:mr-3 file:rounded file:border-0 file:bg-gray-50 file:px-3 file:py-1.5 file:text-sm file:font-medium file:text-gray-700 hover:file:bg-gray-100 focus:border-red-500 focus:ring-2 focus:ring-red-500 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-100 dark:file:bg-gray-600 dark:file:text-gray-300 dark:hover:file:bg-gray-500'
-                    disabled={isImporting}
-                  />
-                </div>
-
-                <div>
-                  <label
-                    htmlFor={IMPORT_PASSWORD_ID}
-                    className='mb-2 flex items-center gap-2 text-sm font-medium text-gray-700 dark:text-gray-300'
-                  >
-                    <Lock className='h-4 w-4' />
-                    解密密码
-                  </label>
-                  <PasswordInput
-                    id={IMPORT_PASSWORD_ID}
-                    name='importPassword'
-                    value={importPassword}
-                    onChange={(e) => setImportPassword(e.target.value)}
-                    placeholder='输入导出时的加密密码'
-                    className='w-full rounded-lg border border-gray-300 bg-white px-3 py-2.5 pr-10 text-gray-900 transition-colors focus:border-red-500 focus:ring-2 focus:ring-red-500 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-100'
-                    disabled={isImporting}
-                  />
-                </div>
-              </div>
-
-              <button
-                type='submit'
-                disabled={
-                  isImporting || !selectedFile || !importPassword.trim()
-                }
-                className={`mt-10 w-full rounded-lg px-4 py-2.5 font-medium transition-colors ${
-                  isImporting || !selectedFile || !importPassword.trim()
-                    ? 'cursor-not-allowed bg-gray-100 text-gray-500 dark:bg-gray-700 dark:text-gray-400'
-                    : 'bg-red-600 text-white hover:bg-red-700'
-                }`}
-              >
-                {isImporting ? (
-                  <div className='flex items-center justify-center gap-2'>
-                    <div className='h-4 w-4 animate-spin rounded-full border-2 border-white border-t-transparent'></div>
-                    导入中...
-                  </div>
-                ) : (
-                  <div className='flex items-center justify-center gap-2'>
-                    <Download className='h-4 w-4' />
-                    导入数据
-                  </div>
-                )}
-              </button>
-            </form>
-          </div>
-        </div>
+            </AdminSettingRow>
+          </AdminSettingsGroup>
+        </form>
       </div>
 
       <AlertModal

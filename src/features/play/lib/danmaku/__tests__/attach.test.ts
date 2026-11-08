@@ -291,7 +291,7 @@ describe('reloadDanmaku', () => {
     expect(api.load).toHaveBeenCalledTimes(2);
     expect(mockLoadDanmakuForEpisode).toHaveBeenCalledTimes(2);
     expect(mockLoadDanmakuForEpisode.mock.calls[0][1]()).toBe(false);
-    expect(player.template.$danmuku.style.display).toBe('');
+    expect(player.template.$danmuku.dataset.reloading).toBeUndefined();
     expect(mockLoadDanmakuForEpisode.mock.calls[1][1]()).toBe(true);
     expect(mockLoadDanmakuForEpisode.mock.calls[1][0]).toEqual(nextContext);
     expect(mockLoadDanmakuForEpisode.mock.calls[1][2]).toEqual({
@@ -324,9 +324,9 @@ describe('reloadDanmaku', () => {
     const { player, api } = createDanmakuPlayer();
     const enabledRef = { current: true };
     markDanmakuContextAttached(player, loadContext, true);
-    player.template.$danmuku.style.display = '';
+    delete player.template.$danmuku.dataset.reloading;
     mockLoadDanmakuForEpisode.mockImplementation(async () => {
-      expect(player.template.$danmuku.style.display).toBe('none');
+      expect(player.template.$danmuku.dataset.reloading).toBe('true');
       return [];
     });
 
@@ -337,7 +337,7 @@ describe('reloadDanmaku', () => {
     );
 
     expect(api.reset).toHaveBeenCalled();
-    expect(player.template.$danmuku.style.display).toBe('');
+    expect(player.template.$danmuku.dataset.reloading).toBeUndefined();
   });
 
   it('连续手动重载不复用旧任务并按顺序完成', async () => {

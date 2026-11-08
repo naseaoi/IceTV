@@ -1,15 +1,14 @@
+import { installStreamPolyfills } from '@/app/api/test-utils/stream-polyfills';
 import type { ApiSite } from '@/lib/config';
 import { getDetailFromApi, searchFirstPageFromApi } from '@/lib/downstream';
 import { resolveXgcartoonEpisodeUrlByPath } from '@/lib/downstream-sources/xgcartoon';
 
+installStreamPolyfills();
+
 const originalFetch = global.fetch;
 
 function createTextResponse(data: string, ok = true): Response {
-  return {
-    ok,
-    url: '',
-    text: async () => data,
-  } as Response;
+  return new Response(data, { status: ok ? 200 : 500 });
 }
 
 function createXgcartoonSite(api = 'https://www.xgcartoon.com'): ApiSite {
@@ -110,6 +109,106 @@ describe('downstream xgcartoon source', () => {
     ).resolves.toBe(
       'https://xgct-video.bzcdn.net/11111111-1111-4111-8111-111111111111/playlist.m3u8',
     );
+  });
+
+  it('新版无 src 播放器通过访客接口获取视频 ID', async () => {
+    const playPath = '/video/haizeiwangriyu-weitianrongyilang/QMqftG5xrN.html';
+    const finalUrl = `https://cn1.xgcartoon.com${playPath}`;
+    const playResponse = createTextResponse(`
+      <div id="video_content" style="position: relative; padding-top: 56.25%;" data-v-36e9140a>
+        <iframe id="xgct_player_iframe" loading="lazy" allow="accelerometer; gyroscope; autoplay; encrypted-media; picture-in-picture;" allowfullscreen="allowfullscreen" data-v-36e9140a></iframe>
+      </div>
+      <input type="hidden" id="chapter_id" value="QMqftG5xrN" data-v-36e9140a>
+      <script src="/xgct/js/chapter.min.js?v=2026091501"></script>
+    `);
+    Object.defineProperty(playResponse, 'url', { value: finalUrl });
+    const fetchMock = global.fetch as jest.Mock;
+    fetchMock.mockResolvedValueOnce(playResponse).mockResolvedValueOnce(
+      createTextResponse(
+        JSON.stringify({
+          data: 'https://pframe.xgcartoon.com/pframe/player.htm?vid=ffc8786e-5da3-46a9-8014-d640a75265b0&reportUrl=https://stats.xgcartoon.com/api/xgcts/video_playback_report&heatmapUrl=https://stats.xgcartoon.com/api/xgcts/video_heatmap',
+          result: true,
+        }),
+      ),
+    );
+
+    await expect(
+      resolveXgcartoonEpisodeUrlByPath(createXgcartoonSite(), playPath),
+    ).resolves.toBe(
+      'https://xgct-video.bzcdn.net/ffc8786e-5da3-46a9-8014-d640a75265b0/playlist.m3u8',
+    );
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      2,
+      'https://cn1.xgcartoon.com/user/amp/content_pframe_url?chapter_id=QMqftG5xrN&level=low&expires=3600',
+      expect.objectContaining({
+        headers: expect.objectContaining({ Referer: finalUrl }),
+      }),
+    );
+  });
+
+  it.each([
+    '<html>request blocked</html>',
+    'null',
+    '{}',
+    '{"result":false,"data":"https://pframe.xgcartoon.com/player.htm?vid=ffc8786e-5da3-46a9-8014-d640a75265b0"}',
+    '{"result":true,"data":null}',
+    '{"result":true,"data":{"url":"unexpected"}}',
+    '{"result":true,"data":""}',
+    '{"result":true,"data":"https://pframe.xgcartoon.com/player.htm?vid=invalid"}',
+  ])('访客接口返回无效内容时解析失败：%s', async (payload) => {
+    const fetchMock = global.fetch as jest.Mock;
+    fetchMock
+      .mockResolvedValueOnce(
+        createTextResponse('<iframe id="xgct_player_iframe"></iframe>'),
+      )
+      .mockResolvedValueOnce(createTextResponse(payload));
+
+    await expect(
+      resolveXgcartoonEpisodeUrlByPath(
+        createXgcartoonSite(),
+        '/video/test-cartoon/c1.html',
+      ),
+    ).resolves.toBeNull();
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it('访客接口 HTTP 失败时取消响应体并返回解析失败', async () => {
+    const cancel = jest.fn().mockResolvedValue(undefined);
+    const fetchMock = global.fetch as jest.Mock;
+    fetchMock
+      .mockResolvedValueOnce(
+        createTextResponse('<iframe id="xgct_player_iframe"></iframe>'),
+      )
+      .mockResolvedValueOnce({
+        ok: false,
+        status: 500,
+        body: { cancel },
+      });
+
+    await expect(
+      resolveXgcartoonEpisodeUrlByPath(
+        createXgcartoonSite(),
+        '/video/test-cartoon/c1.html',
+      ),
+    ).resolves.toBeNull();
+    expect(cancel).toHaveBeenCalledTimes(1);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it('非播放页面不请求访客接口', async () => {
+    const fetchMock = global.fetch as jest.Mock;
+    fetchMock.mockResolvedValueOnce(
+      createTextResponse('<html>request blocked</html>'),
+    );
+
+    await expect(
+      resolveXgcartoonEpisodeUrlByPath(
+        createXgcartoonSite(),
+        '/video/test-cartoon/c1.html',
+      ),
+    ).resolves.toBeNull();
+    expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
   it('携带旧版 __xg_ 后缀ID时仍返回合并后的完整剧集', async () => {

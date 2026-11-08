@@ -59,10 +59,11 @@ export function withReturnTo(target: string, returnTo: string): string {
 }
 
 export function getBackFallbackPath(pathname: string): string {
-  if (pathname.startsWith('/douban')) {
-    return '/categories';
-  }
-  if (pathname.startsWith('/me/favorites')) {
+  if (
+    pathname.startsWith('/me/') ||
+    pathname.startsWith('/settings') ||
+    pathname.startsWith('/u/')
+  ) {
     return '/me';
   }
   return '/';

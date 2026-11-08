@@ -2,10 +2,14 @@
 
 import { X } from 'lucide-react';
 
+import {
+  MODAL_CLOSE_BUTTON_CLASS,
+  MODAL_TITLE_CLASS,
+} from '@/components/modals/modal-styles';
 import ModalShell from '@/components/modals/ModalShell';
 import { PasswordInput } from '@/components/PasswordInput';
 import { RandomPasswordButton } from '@/features/admin/components/RandomPasswordButton';
-import { buttonStyles } from '@/features/admin/lib/buttonStyles';
+import { buttonStyles, inputStyles } from '@/features/admin/lib/buttonStyles';
 
 interface ChangePasswordFormProps {
   username: string;
@@ -29,16 +33,18 @@ export function ChangePasswordForm({
   const disabled = !password || isSubmitting;
 
   return (
-    <ModalShell isOpen={isOpen} onClose={onCancel} panelClassName='max-w-md'>
-      <div className='space-y-4 p-6'>
-        <div className='flex items-center justify-between'>
-          <h5 className='text-base font-semibold text-gray-900 dark:text-gray-100'>
-            修改用户密码
-          </h5>
+    <ModalShell
+      isOpen={isOpen}
+      onClose={onCancel}
+      panelClassName='max-w-md max-h-[80vh] overflow-y-auto'
+    >
+      <div className='space-y-4 p-4 sm:p-6'>
+        <div className='flex items-start justify-between gap-3'>
+          <h5 className={MODAL_TITLE_CLASS}>修改用户密码</h5>
           <button
             onClick={onCancel}
             aria-label='关闭'
-            className='text-gray-400 transition-colors hover:text-gray-600 dark:hover:text-gray-300'
+            className={MODAL_CLOSE_BUTTON_CLASS}
           >
             <X className='h-5 w-5' />
           </button>
@@ -49,27 +55,27 @@ export function ChangePasswordForm({
             placeholder='用户名'
             value={username}
             disabled
-            className='w-full cursor-not-allowed rounded-lg border border-gray-300 bg-gray-100 px-3 py-2 text-gray-900 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-100'
+            className={`w-full ${inputStyles.withFocus}`}
           />
           <div className='flex items-center gap-2'>
             <PasswordInput
               placeholder='新密码'
               value={password}
               onChange={(e) => onPasswordChange(e.target.value)}
-              wrapperClassName='flex-1'
-              className='w-full rounded-lg border border-gray-300 bg-white px-3 py-2 pr-10 text-gray-900 focus:border-transparent focus:ring-2 focus:ring-blue-500 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100'
+              wrapperClassName='min-w-0 flex-1'
+              className={`w-full pr-10 ${inputStyles.withFocus}`}
             />
             <RandomPasswordButton onGenerate={onPasswordChange} />
           </div>
         </div>
         <div className='flex justify-end space-x-2'>
-          <button onClick={onCancel} className={buttonStyles.secondary}>
+          <button onClick={onCancel} className={buttonStyles.outline}>
             取消
           </button>
           <button
             onClick={onSubmit}
             disabled={disabled}
-            className={disabled ? buttonStyles.disabled : buttonStyles.primary}
+            className={`${buttonStyles.primary} disabled:cursor-not-allowed disabled:opacity-50`}
           >
             {isSubmitting ? '修改中...' : '修改密码'}
           </button>

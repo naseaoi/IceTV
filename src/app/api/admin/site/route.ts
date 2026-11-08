@@ -31,11 +31,13 @@ export async function POST(request: NextRequest) {
       Announcement,
       FooterText,
       EnableLiveEntry,
+      LiveAccess,
       DefaultAggregateSearch,
       EnableOptimization,
       LiveDirectConnect,
       AutoSwitchSource,
       EnableDanmaku,
+      EnableUserDanmaku,
       SearchDownstreamMaxPage,
       SiteInterfaceCacheTime,
       DoubanProxyType,
@@ -52,11 +54,13 @@ export async function POST(request: NextRequest) {
       Announcement: string;
       FooterText: string;
       EnableLiveEntry: boolean;
+      LiveAccess?: 'all' | 'groups';
       DefaultAggregateSearch: boolean;
       EnableOptimization: boolean;
       LiveDirectConnect: boolean;
       AutoSwitchSource?: boolean;
       EnableDanmaku?: boolean;
+      EnableUserDanmaku?: boolean;
       SearchDownstreamMaxPage: number;
       SiteInterfaceCacheTime: number;
       DoubanProxyType: string;
@@ -82,6 +86,8 @@ export async function POST(request: NextRequest) {
       (AutoSwitchSource !== undefined &&
         typeof AutoSwitchSource !== 'boolean') ||
       (EnableDanmaku !== undefined && typeof EnableDanmaku !== 'boolean') ||
+      (EnableUserDanmaku !== undefined &&
+        typeof EnableUserDanmaku !== 'boolean') ||
       typeof SearchDownstreamMaxPage !== 'number' ||
       typeof SiteInterfaceCacheTime !== 'number' ||
       typeof DoubanProxyType !== 'string' ||
@@ -97,6 +103,14 @@ export async function POST(request: NextRequest) {
       (RemoveSiteIcon !== undefined && typeof RemoveSiteIcon !== 'boolean')
     ) {
       return NextResponse.json({ error: '参数格式错误' }, { status: 400 });
+    }
+
+    if (
+      LiveAccess !== undefined &&
+      LiveAccess !== 'all' &&
+      LiveAccess !== 'groups'
+    ) {
+      return NextResponse.json({ error: '直播权限范围无效' }, { status: 400 });
     }
 
     if (SiteIconStagingToken && RemoveSiteIcon) {
@@ -158,23 +172,23 @@ export async function POST(request: NextRequest) {
         : adminConfig.SiteConfig.AnnouncementPublishedAt,
       FooterText,
       EnableLiveEntry,
+      LiveAccess: LiveAccess ?? adminConfig.SiteConfig.LiveAccess,
       DefaultAggregateSearch,
       EnableOptimization,
       LiveDirectConnect,
       AutoSwitchSource:
         AutoSwitchSource ?? adminConfig.SiteConfig.AutoSwitchSource,
       EnableDanmaku: EnableDanmaku ?? adminConfig.SiteConfig.EnableDanmaku,
+      EnableUserDanmaku:
+        EnableUserDanmaku ?? adminConfig.SiteConfig.EnableUserDanmaku,
       SearchDownstreamMaxPage,
       SiteInterfaceCacheTime,
       DoubanProxyType: normalizeSiteDoubanProxyType(DoubanProxyType),
-      DoubanProxy: '',
       BangumiDataSource: normalizeSiteBangumiDataSource(
         BangumiDataSource || adminConfig.SiteConfig.BangumiDataSource,
       ),
-      BangumiProxy: '',
       DoubanImageProxyType:
         normalizeSiteDoubanImageProxyType(DoubanImageProxyType),
-      DoubanImageProxy: '',
       SourceCoverProxyMode: normalizeSourceCoverProxyMode(
         SourceCoverProxyMode ?? adminConfig.SiteConfig.SourceCoverProxyMode,
       ),

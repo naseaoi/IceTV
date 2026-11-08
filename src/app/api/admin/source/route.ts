@@ -2,12 +2,15 @@ import { NextRequest, NextResponse } from 'next/server';
 
 import { isGuardFailure, requireAdmin } from '@/lib/api-auth';
 import { configConflictResponse } from '@/lib/api-config-error';
-import { getConfig, saveConfig } from '@/lib/config';
+import { isCatalogFavoriteSource } from '@/lib/catalog-favorites';
+import { getConfig, invalidateConfigCache, saveConfig } from '@/lib/config';
 import {
   buildConfigFileFromAdminConfig,
   removeConfigFileEntries,
 } from '@/lib/config-file-json';
+import { db } from '@/lib/db';
 import { validateProxyUrlForRequest } from '@/lib/url-guard';
+import type { AdminConfig } from '@/types/admin';
 
 export const runtime = 'nodejs';
 
@@ -23,7 +26,9 @@ type Action =
   | 'batch_enable'
   | 'batch_delete'
   | 'batch_set_proxy_mode'
-  | 'set_proxy_mode';
+  | 'set_proxy_mode'
+  | 'batch_set_admin_only'
+  | 'set_admin_only';
 
 interface BaseBody {
   action?: Action;
@@ -75,13 +80,17 @@ export async function POST(request: NextRequest) {
       'batch_delete',
       'batch_set_proxy_mode',
       'set_proxy_mode',
+      'batch_set_admin_only',
+      'set_admin_only',
     ];
     if (!action || !ACTIONS.includes(action)) {
       return NextResponse.json({ error: '参数格式错误' }, { status: 400 });
     }
 
-    // 获取配置与存储
+    invalidateConfigCache();
     const adminConfig = await getConfig();
+    const subscription = await db.getConfigSubscription();
+    let configFile = subscription.ConfigFile;
 
     switch (action) {
       case 'add': {
@@ -98,6 +107,11 @@ export async function POST(request: NextRequest) {
         if (!cleanKey || !cleanName || !cleanApi) {
           return NextResponse.json({ error: '缺少必要参数' }, { status: 400 });
         }
+        if (isCatalogFavoriteSource(cleanKey))
+          return NextResponse.json(
+            { error: '该标识用于目录收藏，请使用其他源标识' },
+            { status: 400 },
+          );
         const sourceApi = await validateSourceApiUrl(cleanApi);
         if (!sourceApi.ok) {
           return sourceApi.response;
@@ -129,6 +143,11 @@ export async function POST(request: NextRequest) {
         if (!cleanKey || !cleanName || !cleanApi) {
           return NextResponse.json({ error: '缺少必要参数' }, { status: 400 });
         }
+        if (isCatalogFavoriteSource(cleanKey))
+          return NextResponse.json(
+            { error: '该标识用于目录收藏，请使用其他源标识' },
+            { status: 400 },
+          );
         const sourceApi = await validateSourceApiUrl(cleanApi);
         if (!sourceApi.ok) {
           return sourceApi.response;
@@ -175,11 +194,9 @@ export async function POST(request: NextRequest) {
         if (idx === -1)
           return NextResponse.json({ error: '源不存在' }, { status: 404 });
         adminConfig.SourceConfig.splice(idx, 1);
-        adminConfig.ConfigFile = removeConfigFileEntries(
-          adminConfig.ConfigFile,
-          'api_site',
-          [cleanKey],
-        );
+        configFile = removeConfigFileEntries(configFile, 'api_site', [
+          cleanKey,
+        ]);
 
         if (adminConfig.UserConfig.Tags) {
           adminConfig.UserConfig.Tags.forEach((tag) => {
@@ -191,13 +208,6 @@ export async function POST(request: NextRequest) {
           });
         }
 
-        adminConfig.UserConfig.Users.forEach((user) => {
-          if (user.enabledApis) {
-            user.enabledApis = user.enabledApis.filter(
-              (api) => api !== cleanKey,
-            );
-          }
-        });
         break;
       }
       case 'batch_disable': {
@@ -256,8 +266,8 @@ export async function POST(request: NextRequest) {
             adminConfig.SourceConfig.splice(idx, 1);
           }
         });
-        adminConfig.ConfigFile = removeConfigFileEntries(
-          adminConfig.ConfigFile,
+        configFile = removeConfigFileEntries(
+          configFile,
           'api_site',
           keysToDelete,
         );
@@ -272,14 +282,6 @@ export async function POST(request: NextRequest) {
               }
             });
           }
-
-          adminConfig.UserConfig.Users.forEach((user) => {
-            if (user.enabledApis) {
-              user.enabledApis = user.enabledApis.filter(
-                (api) => !keysToDelete.includes(api),
-              );
-            }
-          });
         }
         break;
       }
@@ -314,6 +316,34 @@ export async function POST(request: NextRequest) {
           if (keySet.has(entry.key)) {
             entry.proxyMode = proxyMode;
           }
+        });
+        break;
+      }
+      case 'batch_set_admin_only': {
+        const { keys, adminOnly } = body as {
+          keys?: string[];
+          adminOnly?: unknown;
+        };
+        if (!Array.isArray(keys) || keys.length === 0) {
+          return NextResponse.json(
+            { error: '缺少 keys 参数或为空' },
+            { status: 400 },
+          );
+        }
+        if (typeof adminOnly !== 'boolean') {
+          return NextResponse.json(
+            { error: 'adminOnly 必须为布尔值' },
+            { status: 400 },
+          );
+        }
+        const keySet = new Set(
+          keys
+            .filter((key): key is string => typeof key === 'string')
+            .map((key) => key.trim())
+            .filter(Boolean),
+        );
+        adminConfig.SourceConfig.forEach((entry) => {
+          if (keySet.has(entry.key)) setSourceAdminOnly(entry, adminOnly);
         });
         break;
       }
@@ -364,14 +394,38 @@ export async function POST(request: NextRequest) {
         entry.proxyMode = proxyMode;
         break;
       }
+      case 'set_admin_only': {
+        const { key, adminOnly } = body as {
+          key?: string;
+          adminOnly?: unknown;
+        };
+        if (!key)
+          return NextResponse.json({ error: '缺少 key 参数' }, { status: 400 });
+        if (typeof adminOnly !== 'boolean') {
+          return NextResponse.json(
+            { error: 'adminOnly 必须为布尔值' },
+            { status: 400 },
+          );
+        }
+        const entry = adminConfig.SourceConfig.find((s) => s.key === key);
+        if (!entry)
+          return NextResponse.json({ error: '源不存在' }, { status: 404 });
+        setSourceAdminOnly(entry, adminOnly);
+        break;
+      }
       default:
         return NextResponse.json({ error: '未知操作' }, { status: 400 });
     }
 
-    adminConfig.ConfigFile = buildConfigFileFromAdminConfig(adminConfig);
+    configFile = buildConfigFileFromAdminConfig(adminConfig, configFile);
 
     // 持久化到存储
-    await saveConfig(adminConfig);
+    await saveConfig(adminConfig, {
+      subscription: {
+        expected: subscription,
+        next: { ...subscription, ConfigFile: configFile },
+      },
+    });
 
     return NextResponse.json(
       { ok: true },
@@ -387,4 +441,12 @@ export async function POST(request: NextRequest) {
     console.error('视频源管理操作失败:', error);
     return NextResponse.json({ error: '视频源管理操作失败' }, { status: 500 });
   }
+}
+
+function setSourceAdminOnly(
+  entry: AdminConfig['SourceConfig'][number],
+  adminOnly: boolean,
+): void {
+  if (adminOnly) entry.adminOnly = true;
+  else delete entry.adminOnly;
 }

@@ -4,7 +4,6 @@ import {
   CheckCircle2,
   ExternalLink,
   ImagePlus,
-  Loader2,
   Trash2,
   Upload,
   XCircle,
@@ -13,9 +12,16 @@ import { type FormEvent, useEffect, useRef, useState } from 'react';
 
 import AdminSelect from '@/components/admin/AdminSelect';
 import AlertModal from '@/components/modals/AlertModal';
+import Spinner from '@/components/Spinner';
+import {
+  AdminSettingRow,
+  AdminSettingsGroup,
+} from '@/features/admin/components/AdminSettings';
+import { AdminStatusSwitch } from '@/features/admin/components/AdminStatusSwitch';
 import { useLoadingState } from '@/features/admin/hooks/useLoadingState';
 import { SITE_CONFIG_FORM_ID } from '@/features/admin/lib/admin-form-ids';
 import { adminPost } from '@/features/admin/lib/api';
+import { buttonStyles, inputStyles } from '@/features/admin/lib/buttonStyles';
 import { showError, showSuccess } from '@/features/admin/lib/notifications';
 import { SiteConfig } from '@/features/admin/types/internal';
 import { useAlertModal } from '@/hooks/useAlertModal';
@@ -51,18 +57,17 @@ const DEFAULT_SITE_SETTINGS: SiteConfig = {
   Announcement: '',
   FooterText: DEFAULT_SITE_FOOTER_TEXT,
   EnableLiveEntry: false,
+  LiveAccess: 'all',
   DefaultAggregateSearch: true,
   EnableOptimization: true,
   LiveDirectConnect: false,
   AutoSwitchSource: false,
   EnableDanmaku: false,
+  EnableUserDanmaku: false,
   ...DEFAULT_RUNTIME_PARAMS,
   DoubanProxyType: 'direct',
-  DoubanProxy: '',
   BangumiDataSource: DEFAULT_BANGUMI_DATA_SOURCE,
-  BangumiProxy: '',
   DoubanImageProxyType: DEFAULT_DOUBAN_IMAGE_PROXY_TYPE,
-  DoubanImageProxy: '',
   SourceCoverProxyMode: DEFAULT_SOURCE_COVER_PROXY_MODE,
   DisableYellowFilter: false,
   FluidSearch: true,
@@ -75,11 +80,13 @@ type EditableSiteSettings = Pick<
   | 'Announcement'
   | 'FooterText'
   | 'EnableLiveEntry'
+  | 'LiveAccess'
   | 'DefaultAggregateSearch'
   | 'EnableOptimization'
   | 'LiveDirectConnect'
   | 'AutoSwitchSource'
   | 'EnableDanmaku'
+  | 'EnableUserDanmaku'
   | 'DoubanProxyType'
   | 'BangumiDataSource'
   | 'DoubanImageProxyType'
@@ -88,30 +95,38 @@ type EditableSiteSettings = Pick<
   | 'FluidSearch'
 >;
 
+const LIVE_ACCESS_OPTIONS = [
+  { value: 'all', label: '所有用户' },
+  { value: 'groups', label: '指定用户组' },
+];
+
+function normalizeLiveAccess(value: unknown): SiteConfig['LiveAccess'] {
+  return value === 'groups' ? 'groups' : 'all';
+}
+
 function buildSiteSettings(config: AdminConfig): SiteConfig {
   return {
     ...config.SiteConfig,
     DoubanProxyType: normalizeSiteDoubanProxyType(
       config.SiteConfig.DoubanProxyType,
     ),
-    DoubanProxy: '',
     BangumiDataSource: normalizeSiteBangumiDataSource(
       config.SiteConfig.BangumiDataSource,
     ),
-    BangumiProxy: '',
     DoubanImageProxyType: normalizeSiteDoubanImageProxyType(
       config.SiteConfig.DoubanImageProxyType,
     ),
-    DoubanImageProxy: '',
     SourceCoverProxyMode: normalizeSourceCoverProxyMode(
       config.SiteConfig.SourceCoverProxyMode,
     ),
     EnableLiveEntry: config.SiteConfig.EnableLiveEntry ?? false,
+    LiveAccess: normalizeLiveAccess(config.SiteConfig.LiveAccess),
     DefaultAggregateSearch: config.SiteConfig.DefaultAggregateSearch ?? true,
     EnableOptimization: config.SiteConfig.EnableOptimization ?? true,
     LiveDirectConnect: config.SiteConfig.LiveDirectConnect ?? false,
     AutoSwitchSource: config.SiteConfig.AutoSwitchSource ?? false,
     EnableDanmaku: config.SiteConfig.EnableDanmaku ?? false,
+    EnableUserDanmaku: config.SiteConfig.EnableUserDanmaku ?? false,
     DisableYellowFilter: config.SiteConfig.DisableYellowFilter ?? false,
     FluidSearch: config.SiteConfig.FluidSearch ?? true,
   };
@@ -126,11 +141,13 @@ function normalizeEditableSiteSettings(
     Announcement: value.Announcement || '',
     FooterText: value.FooterText || DEFAULT_SITE_FOOTER_TEXT,
     EnableLiveEntry: value.EnableLiveEntry ?? false,
+    LiveAccess: normalizeLiveAccess(value.LiveAccess),
     DefaultAggregateSearch: value.DefaultAggregateSearch ?? true,
     EnableOptimization: value.EnableOptimization ?? true,
     LiveDirectConnect: value.LiveDirectConnect ?? false,
     AutoSwitchSource: value.AutoSwitchSource ?? false,
     EnableDanmaku: value.EnableDanmaku ?? false,
+    EnableUserDanmaku: value.EnableUserDanmaku ?? false,
     DoubanProxyType: normalizeSiteDoubanProxyType(value.DoubanProxyType),
     BangumiDataSource: normalizeSiteBangumiDataSource(value.BangumiDataSource),
     DoubanImageProxyType: normalizeSiteDoubanImageProxyType(
@@ -219,7 +236,6 @@ const SiteConfigComponent = ({
     setSiteSettings((prev) => ({
       ...prev,
       DoubanProxyType: value,
-      DoubanProxy: '',
     }));
   };
 
@@ -228,7 +244,6 @@ const SiteConfigComponent = ({
     setSiteSettings((prev) => ({
       ...prev,
       BangumiDataSource: nextSource,
-      BangumiProxy: '',
     }));
   };
 
@@ -237,7 +252,6 @@ const SiteConfigComponent = ({
     setSiteSettings((prev) => ({
       ...prev,
       DoubanImageProxyType: value,
-      DoubanImageProxy: '',
     }));
   };
 
@@ -298,7 +312,7 @@ const SiteConfigComponent = ({
         setBaselineSiteSettings(normalizedSiteSettings);
         setPendingIconFile(null);
         revokeIconPreviewObjectUrl();
-        showSuccess('保存成功, 请刷新页面', showAlert);
+        showSuccess('保存成功, 请刷新页面');
         await refreshConfig();
       });
     } catch (err) {
@@ -354,11 +368,7 @@ const SiteConfigComponent = ({
   };
 
   if (!config) {
-    return (
-      <div className='text-center text-gray-500 dark:text-gray-400'>
-        加载中...
-      </div>
-    );
+    return null;
   }
 
   return (
@@ -367,15 +377,8 @@ const SiteConfigComponent = ({
       onSubmit={handleSubmit}
       className='space-y-6'
     >
-      <div className='grid grid-cols-1 gap-6 md:grid-cols-2'>
-        {/* 站点名称 */}
-        <div>
-          <label
-            htmlFor='site-name'
-            className='mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300'
-          >
-            站点名称
-          </label>
+      <AdminSettingsGroup title='基本信息'>
+        <AdminSettingRow label='站点名称' htmlFor='site-name'>
           <input
             id='site-name'
             name='siteName'
@@ -384,26 +387,12 @@ const SiteConfigComponent = ({
             onChange={(e) =>
               setSiteSettings((prev) => ({ ...prev, SiteName: e.target.value }))
             }
-            className='w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-gray-900 focus:border-transparent focus:ring-2 focus:ring-green-500 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100'
+            className={`${inputStyles.withFocus} w-full sm:w-80`}
           />
-        </div>
-
-        {/* 站点图标 */}
-        <div>
-          <div className='mb-2 flex items-end gap-2'>
-            <label
-              htmlFor='site-icon'
-              className='text-sm font-medium text-gray-700 dark:text-gray-300'
-            >
-              站点图标
-            </label>
-            <p className='text-xs text-gray-400 dark:text-gray-500'>
-              PNG/JPEG/WebP/SVG/ICO，≤512KB
-            </p>
-          </div>
-          <div className='flex items-start gap-3'>
-            {/* 预览 */}
-            <div className='flex h-10 w-10 flex-shrink-0 items-center justify-center overflow-hidden rounded-lg border border-gray-300 bg-gray-50 dark:border-gray-600 dark:bg-gray-800'>
+        </AdminSettingRow>
+        <AdminSettingRow label='站点图标' htmlFor='site-icon'>
+          <div className='flex w-full min-w-0 items-start gap-3 sm:w-[32rem]'>
+            <div className='flex h-10 w-10 shrink-0 items-center justify-center overflow-hidden rounded-lg bg-gray-50 ring-1 ring-inset ring-gray-200 dark:bg-gray-800 dark:ring-gray-700'>
               {iconPreview ? (
                 <img
                   src={iconPreview}
@@ -416,7 +405,7 @@ const SiteConfigComponent = ({
               )}
             </div>
             <div className='min-w-0 flex-1 space-y-2'>
-              <div className='flex min-w-0 items-center gap-2'>
+              <div className='flex min-w-0 flex-wrap items-center gap-2'>
                 <input
                   id='site-icon'
                   name='siteIcon'
@@ -430,7 +419,7 @@ const SiteConfigComponent = ({
                     setIconPreview(url);
                   }}
                   placeholder='输入图标 URL 或上传文件'
-                  className='min-w-0 flex-1 rounded-lg border border-gray-300 bg-white px-3 py-2 text-gray-900 focus:border-transparent focus:ring-2 focus:ring-green-500 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100'
+                  className={`${inputStyles.withFocus} min-w-0 flex-1 basis-48`}
                 />
                 <div className='flex shrink-0 items-center gap-2'>
                   <button
@@ -439,7 +428,7 @@ const SiteConfigComponent = ({
                     onClick={() => iconFileRef.current?.click()}
                     aria-label={iconUploading ? '上传中' : '上传图标'}
                     title={iconUploading ? '上传中...' : '上传图标'}
-                    className='flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-lg border border-gray-300 bg-white text-gray-700 transition-colors hover:bg-gray-50 disabled:opacity-60 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-300 dark:hover:bg-gray-700'
+                    className={`${buttonStyles.outline} flex h-10 w-10 shrink-0 items-center justify-center !p-0 disabled:opacity-60`}
                   >
                     <Upload className='h-5 w-5' />
                   </button>
@@ -452,7 +441,7 @@ const SiteConfigComponent = ({
                         setSiteSettings((prev) => ({ ...prev, SiteIcon: '' }));
                         setIconPreview('');
                       }}
-                      className='flex flex-shrink-0 items-center gap-1.5 rounded-lg border border-red-300 px-3 py-2 text-xs font-medium text-red-600 transition-colors hover:bg-red-50 dark:border-red-600/50 dark:text-red-400 dark:hover:bg-red-900/20'
+                      className={`${buttonStyles.outline} flex shrink-0 items-center gap-1.5`}
                     >
                       <Trash2 className='h-3.5 w-3.5' />
                       清除
@@ -490,21 +479,13 @@ const SiteConfigComponent = ({
               />
             </div>
           </div>
-        </div>
-
-        {/* 站点公告 */}
-        <div>
-          <div className='mb-2 flex items-end gap-2'>
-            <label
-              htmlFor='site-announcement'
-              className='text-sm font-medium text-gray-700 dark:text-gray-300'
-            >
-              站点公告
-            </label>
-            <p className='text-xs text-gray-400 dark:text-gray-500'>
-              修改后将会重新推送给用户
-            </p>
-          </div>
+        </AdminSettingRow>
+        <AdminSettingRow
+          label='站点公告'
+          htmlFor='site-announcement'
+          description='修改后会重新推送给用户'
+          layout='stacked'
+        >
           <textarea
             id='site-announcement'
             name='siteAnnouncement'
@@ -516,25 +497,18 @@ const SiteConfigComponent = ({
               }))
             }
             rows={3}
-            className='w-full resize-y rounded-lg border border-gray-300 bg-white px-3 py-2 text-gray-900 focus:border-transparent focus:ring-2 focus:ring-green-500 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100'
+            className={`${inputStyles.withFocus} block w-full resize-y`}
           />
-        </div>
-
-        <div>
-          <div className='mb-2 flex items-end gap-2'>
-            <label
-              htmlFor='site-footer-text'
-              className='text-sm font-medium text-gray-700 dark:text-gray-300'
-            >
-              底部声明
-            </label>
-            <p className='text-xs text-gray-400 dark:text-gray-500'>
-              支持换行，留空时使用默认文案
-            </p>
-          </div>
+        </AdminSettingRow>
+        <AdminSettingRow
+          label='底部声明'
+          htmlFor='site-footer-text'
+          layout='stacked'
+        >
           <textarea
             id='site-footer-text'
             name='siteFooterText'
+            placeholder='留空使用默认文案'
             value={siteSettings.FooterText}
             onChange={(e) =>
               setSiteSettings((prev) => ({
@@ -543,208 +517,156 @@ const SiteConfigComponent = ({
               }))
             }
             rows={3}
-            className='w-full resize-y rounded-lg border border-gray-300 bg-white px-3 py-2 text-gray-900 focus:border-transparent focus:ring-2 focus:ring-green-500 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100'
+            className={`${inputStyles.withFocus} block w-full resize-y`}
           />
-        </div>
+        </AdminSettingRow>
+      </AdminSettingsGroup>
 
-        {/* 豆瓣数据源设置 */}
-        <div className='space-y-3'>
-          <div>
-            <div className='mb-2 flex items-baseline justify-between gap-2'>
-              <label
-                htmlFor='site-douban-proxy-type'
-                className='block text-sm font-medium text-gray-700 dark:text-gray-300'
+      <AdminSettingsGroup title='数据与图片代理'>
+        <AdminSettingRow
+          label='豆瓣数据代理'
+          htmlFor='site-douban-proxy-type'
+          labelAddon={
+            getThanksInfo(siteSettings.DoubanProxyType) && (
+              <button
+                type='button'
+                onClick={() =>
+                  window.open(
+                    getThanksInfo(siteSettings.DoubanProxyType)!.url,
+                    '_blank',
+                  )
+                }
+                className='inline-flex items-center gap-1 text-xs text-gray-500 transition-colors hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200'
               >
-                豆瓣数据代理
-              </label>
-              {getThanksInfo(siteSettings.DoubanProxyType) && (
-                <button
-                  type='button'
-                  onClick={() =>
-                    window.open(
-                      getThanksInfo(siteSettings.DoubanProxyType)!.url,
-                      '_blank',
-                    )
-                  }
-                  className='flex shrink-0 cursor-pointer items-center gap-1 text-[11px] leading-none text-gray-400 hover:text-gray-600 dark:text-gray-500 dark:hover:text-gray-300'
-                >
-                  <span className='font-medium'>
-                    {getThanksInfo(siteSettings.DoubanProxyType)!.text}
-                  </span>
-                  <ExternalLink className='h-3 w-3 opacity-70' />
-                </button>
-              )}
-            </div>
-            <AdminSelect
-              id='site-douban-proxy-type'
-              value={siteSettings.DoubanProxyType}
-              onChange={(value) => handleDoubanDataSourceChange(value)}
-              options={siteDoubanDataSourceOptions}
-            />
-          </div>
-        </div>
-
-        {/* 豆瓣图片代理设置 */}
-        <div className='space-y-3'>
-          <div>
-            <div className='mb-2 flex items-baseline justify-between gap-2'>
-              <label
-                htmlFor='site-douban-image-proxy-type'
-                className='block text-sm font-medium text-gray-700 dark:text-gray-300'
+                <span className='font-medium'>
+                  {getThanksInfo(siteSettings.DoubanProxyType)!.text}
+                </span>
+                <ExternalLink className='h-3 w-3 opacity-70' />
+              </button>
+            )
+          }
+        >
+          <AdminSelect
+            id='site-douban-proxy-type'
+            value={siteSettings.DoubanProxyType}
+            onChange={(value) => handleDoubanDataSourceChange(value)}
+            options={siteDoubanDataSourceOptions}
+            className='w-full sm:w-80'
+          />
+        </AdminSettingRow>
+        <AdminSettingRow
+          label='豆瓣图片代理'
+          htmlFor='site-douban-image-proxy-type'
+          labelAddon={
+            getThanksInfo(siteSettings.DoubanImageProxyType) && (
+              <button
+                type='button'
+                onClick={() =>
+                  window.open(
+                    getThanksInfo(siteSettings.DoubanImageProxyType)!.url,
+                    '_blank',
+                  )
+                }
+                className='inline-flex items-center gap-1 text-xs text-gray-500 transition-colors hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200'
               >
-                豆瓣图片代理
-              </label>
-              {getThanksInfo(siteSettings.DoubanImageProxyType) && (
-                <button
-                  type='button'
-                  onClick={() =>
-                    window.open(
-                      getThanksInfo(siteSettings.DoubanImageProxyType)!.url,
-                      '_blank',
-                    )
-                  }
-                  className='flex shrink-0 cursor-pointer items-center gap-1 text-[11px] leading-none text-gray-400 hover:text-gray-600 dark:text-gray-500 dark:hover:text-gray-300'
-                >
-                  <span className='font-medium'>
-                    {getThanksInfo(siteSettings.DoubanImageProxyType)!.text}
-                  </span>
-                  <ExternalLink className='h-3 w-3 opacity-70' />
-                </button>
-              )}
-            </div>
-            <AdminSelect
-              id='site-douban-image-proxy-type'
-              value={siteSettings.DoubanImageProxyType}
-              onChange={(value) => handleDoubanImageProxyChange(value)}
-              options={siteDoubanImageProxyTypeOptions}
-            />
-          </div>
-        </div>
+                <span className='font-medium'>
+                  {getThanksInfo(siteSettings.DoubanImageProxyType)!.text}
+                </span>
+                <ExternalLink className='h-3 w-3 opacity-70' />
+              </button>
+            )
+          }
+        >
+          <AdminSelect
+            id='site-douban-image-proxy-type'
+            value={siteSettings.DoubanImageProxyType}
+            onChange={(value) => handleDoubanImageProxyChange(value)}
+            options={siteDoubanImageProxyTypeOptions}
+            className='w-full sm:w-80'
+          />
+        </AdminSettingRow>
+        <AdminSettingRow
+          label='Bangumi 数据代理'
+          htmlFor='site-bangumi-data-source'
+        >
+          <AdminSelect
+            id='site-bangumi-data-source'
+            value={siteSettings.BangumiDataSource}
+            onChange={(value) => handleBangumiDataSourceChange(value)}
+            options={siteBangumiDataSourceOptions}
+            className='w-full sm:w-80'
+          />
+        </AdminSettingRow>
+        <AdminSettingRow
+          label='源站封面加载'
+          htmlFor='site-source-cover-proxy-mode'
+        >
+          <AdminSelect
+            id='site-source-cover-proxy-mode'
+            value={siteSettings.SourceCoverProxyMode}
+            onChange={(value) =>
+              setSiteSettings((prev) => ({
+                ...prev,
+                SourceCoverProxyMode: normalizeSourceCoverProxyMode(value),
+              }))
+            }
+            options={sourceCoverProxyModeOptions}
+            className='w-full sm:w-80'
+          />
+        </AdminSettingRow>
+      </AdminSettingsGroup>
 
-        <div className='space-y-3'>
-          <div>
-            <label
-              htmlFor='site-bangumi-data-source'
-              className='mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300'
-            >
-              Bangumi 数据代理
-            </label>
-            <AdminSelect
-              id='site-bangumi-data-source'
-              value={siteSettings.BangumiDataSource}
-              onChange={(value) => handleBangumiDataSourceChange(value)}
-              options={siteBangumiDataSourceOptions}
-            />
-          </div>
-        </div>
-
-        <div className='space-y-3'>
-          <div>
-            <label
-              htmlFor='site-source-cover-proxy-mode'
-              className='mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300'
-            >
-              源站封面加载
-            </label>
-            <AdminSelect
-              id='site-source-cover-proxy-mode'
-              value={siteSettings.SourceCoverProxyMode}
-              onChange={(value) =>
-                setSiteSettings((prev) => ({
-                  ...prev,
-                  SourceCoverProxyMode: normalizeSourceCoverProxyMode(value),
-                }))
-              }
-              options={sourceCoverProxyModeOptions}
-            />
-          </div>
-        </div>
-      </div>
-
-      <div className='grid grid-cols-1 gap-6 md:grid-cols-2'>
-        <div className='flex min-h-[96px] items-center justify-between gap-4 rounded-lg border border-gray-200 bg-gray-50 p-4 dark:border-gray-700 dark:bg-gray-800/55'>
-          <div>
-            <p className='text-sm font-medium text-gray-900 dark:text-gray-100'>
-              显示直播入口
-            </p>
-            <p className='mt-1 text-xs text-gray-500 dark:text-gray-400'>
-              开启后，侧栏和底部导航会显示“直播”分类入口。
-            </p>
-          </div>
-          <button
-            type='button'
-            onClick={() =>
+      <AdminSettingsGroup title='功能'>
+        <AdminSettingRow label='显示直播入口' layout='inline'>
+          <AdminStatusSwitch
+            enabled={siteSettings.EnableLiveEntry}
+            ariaLabel='切换直播入口显示'
+            onToggle={() =>
               setSiteSettings((prev) => ({
                 ...prev,
                 EnableLiveEntry: !prev.EnableLiveEntry,
               }))
             }
-            className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
-              siteSettings.EnableLiveEntry
-                ? 'bg-green-500'
-                : 'bg-gray-300 dark:bg-gray-600'
-            }`}
-            aria-label='切换直播入口显示'
-            aria-pressed={siteSettings.EnableLiveEntry}
-          >
-            <span
-              className={`inline-block h-5 w-5 transform rounded-full bg-white transition-transform ${
-                siteSettings.EnableLiveEntry
-                  ? 'translate-x-5'
-                  : 'translate-x-0.5'
-              }`}
+          />
+        </AdminSettingRow>
+        {siteSettings.EnableLiveEntry && (
+          <AdminSettingRow label='直播观看范围' htmlFor='site-live-access'>
+            <AdminSelect
+              id='site-live-access'
+              value={siteSettings.LiveAccess}
+              onChange={(value) =>
+                setSiteSettings((prev) => ({
+                  ...prev,
+                  LiveAccess: normalizeLiveAccess(value),
+                }))
+              }
+              options={LIVE_ACCESS_OPTIONS}
+              className='w-full sm:w-80'
             />
-          </button>
-        </div>
-
-        <div className='flex min-h-[96px] items-center justify-between gap-4 rounded-lg border border-gray-200 bg-gray-50 p-4 dark:border-gray-700 dark:bg-gray-800/55'>
-          <div>
-            <p className='text-sm font-medium text-gray-900 dark:text-gray-100'>
-              NSFW模式
-            </p>
-            <p className='mt-1 text-xs text-gray-500 dark:text-gray-400'>
-              开启后，允许NSFW内容。
-            </p>
-          </div>
-          <button
-            type='button'
-            onClick={() =>
+          </AdminSettingRow>
+        )}
+        <AdminSettingRow label='NSFW 模式' layout='inline'>
+          <AdminStatusSwitch
+            enabled={siteSettings.DisableYellowFilter}
+            ariaLabel='切换NSFW模式'
+            onToggle={() =>
               setSiteSettings((prev) => ({
                 ...prev,
                 DisableYellowFilter: !prev.DisableYellowFilter,
               }))
             }
-            className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
-              siteSettings.DisableYellowFilter
-                ? 'bg-green-500'
-                : 'bg-gray-300 dark:bg-gray-600'
-            }`}
-            aria-label='切换NSFW模式'
-            aria-pressed={siteSettings.DisableYellowFilter}
-          >
-            <span
-              className={`inline-block h-5 w-5 transform rounded-full bg-white transition-transform ${
-                siteSettings.DisableYellowFilter
-                  ? 'translate-x-5'
-                  : 'translate-x-0.5'
-              }`}
-            />
-          </button>
-        </div>
-
-        <div className='flex min-h-[96px] items-center justify-between gap-4 rounded-lg border border-gray-200 bg-gray-50 p-4 dark:border-gray-700 dark:bg-gray-800/55'>
-          <div className='min-w-0 flex-1'>
-            <p className='text-sm font-medium text-gray-900 dark:text-gray-100'>
-              播放器弹幕
-            </p>
-            <p className='mt-1 text-xs text-gray-500 dark:text-gray-400'>
-              需同时配置 DANMAKU_API_BASE_URL 环境变量指向自建弹幕服务。
-            </p>
-            {danmakuTestResult && (
-              <div
-                className={`mt-2 flex items-start gap-1.5 text-xs ${
+          />
+        </AdminSettingRow>
+        <AdminSettingRow
+          label='播放器弹幕'
+          layout='inline'
+          labelAddon={
+            danmakuTestResult && (
+              <span
+                role='status'
+                className={`flex min-w-0 items-start gap-1.5 text-xs ${
                   danmakuTestResult.success
-                    ? 'text-green-600 dark:text-green-400'
+                    ? 'text-brand-600 dark:text-brand-400'
                     : 'text-red-600 dark:text-red-400'
                 }`}
               >
@@ -756,105 +678,76 @@ const SiteConfigComponent = ({
                 <span className='min-w-0 break-words'>
                   {danmakuTestResult.message}
                 </span>
-              </div>
+              </span>
+            )
+          }
+        >
+          <button
+            type='button'
+            onClick={handleDanmakuTest}
+            disabled={danmakuTesting}
+            className={`${buttonStyles.outline} flex items-center gap-1.5 whitespace-nowrap !text-xs disabled:cursor-not-allowed disabled:opacity-60`}
+            aria-label={danmakuTesting ? '测试中' : '测试弹幕连接'}
+          >
+            {danmakuTesting ? (
+              <>
+                <Spinner className='h-3.5 w-3.5' />
+                测试中
+              </>
+            ) : (
+              '测试连接'
             )}
-          </div>
-          <div className='flex flex-shrink-0 items-center gap-2'>
-            <button
-              type='button'
-              onClick={handleDanmakuTest}
-              disabled={danmakuTesting}
-              className='flex items-center gap-1.5 rounded-lg border border-gray-300 bg-white px-3 py-1.5 text-xs font-medium text-gray-700 transition-colors hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-60 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-200 dark:hover:bg-gray-600'
-              aria-label={danmakuTesting ? '测试中' : '测试弹幕连接'}
-            >
-              {danmakuTesting ? (
-                <>
-                  <Loader2 className='h-3.5 w-3.5 animate-spin' />
-                  测试中
-                </>
-              ) : (
-                '测试连接'
-              )}
-            </button>
-            <button
-              type='button'
-              onClick={() =>
+          </button>
+          <AdminStatusSwitch
+            enabled={siteSettings.EnableDanmaku}
+            ariaLabel='切换播放器弹幕'
+            onToggle={() =>
+              setSiteSettings((prev) => ({
+                ...prev,
+                EnableDanmaku: !prev.EnableDanmaku,
+              }))
+            }
+          />
+        </AdminSettingRow>
+        {siteSettings.EnableDanmaku && (
+          <AdminSettingRow label='用户发送弹幕' layout='inline'>
+            <AdminStatusSwitch
+              enabled={siteSettings.EnableUserDanmaku}
+              ariaLabel='切换用户发送弹幕'
+              onToggle={() =>
                 setSiteSettings((prev) => ({
                   ...prev,
-                  EnableDanmaku: !prev.EnableDanmaku,
+                  EnableUserDanmaku: !prev.EnableUserDanmaku,
                 }))
               }
-              className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
-                siteSettings.EnableDanmaku
-                  ? 'bg-green-500'
-                  : 'bg-gray-300 dark:bg-gray-600'
-              }`}
-              aria-label='切换播放器弹幕'
-              aria-pressed={siteSettings.EnableDanmaku}
+            />
+          </AdminSettingRow>
+        )}
+      </AdminSettingsGroup>
+
+      <AdminSettingsGroup title='本地设置默认值'>
+        {localPreferenceToggleDefinitions.map((definition) => {
+          const enabled = siteSettings[definition.siteConfigKey];
+
+          return (
+            <AdminSettingRow
+              key={definition.id}
+              label={definition.title}
+              description={definition.description}
+              layout='inline'
             >
-              <span
-                className={`inline-block h-5 w-5 transform rounded-full bg-white transition-transform ${
-                  siteSettings.EnableDanmaku
-                    ? 'translate-x-5'
-                    : 'translate-x-0.5'
-                }`}
+              <AdminStatusSwitch
+                enabled={enabled}
+                ariaLabel={`切换${definition.title}`}
+                onToggle={() =>
+                  handleLocalPreferenceDefaultToggle(definition.siteConfigKey)
+                }
               />
-            </button>
-          </div>
-        </div>
-      </div>
+            </AdminSettingRow>
+          );
+        })}
+      </AdminSettingsGroup>
 
-      <div className='space-y-3'>
-        <div>
-          <h3 className='text-sm font-medium text-gray-900 dark:text-gray-100'>
-            本地设置默认值
-          </h3>
-          <p className='mt-1 text-xs text-gray-500 dark:text-gray-400'>
-            这里的设置会作为用户“本地设置”的默认值。
-          </p>
-        </div>
-
-        <div className='grid grid-cols-1 gap-6 md:grid-cols-2'>
-          {localPreferenceToggleDefinitions.map((definition) => {
-            const enabled = siteSettings[definition.siteConfigKey];
-
-            return (
-              <div
-                key={definition.id}
-                className='flex min-h-[96px] items-center justify-between gap-4 rounded-lg border border-gray-200 bg-gray-50 p-4 dark:border-gray-700 dark:bg-gray-800/55'
-              >
-                <div>
-                  <p className='text-sm font-medium text-gray-900 dark:text-gray-100'>
-                    {definition.title}
-                  </p>
-                  <p className='mt-1 text-xs text-gray-500 dark:text-gray-400'>
-                    {definition.description}
-                  </p>
-                </div>
-                <button
-                  type='button'
-                  onClick={() =>
-                    handleLocalPreferenceDefaultToggle(definition.siteConfigKey)
-                  }
-                  className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
-                    enabled ? 'bg-green-500' : 'bg-gray-300 dark:bg-gray-600'
-                  }`}
-                  aria-label={`切换${definition.title}`}
-                  aria-pressed={enabled}
-                >
-                  <span
-                    className={`inline-block h-5 w-5 transform rounded-full bg-white transition-transform ${
-                      enabled ? 'translate-x-5' : 'translate-x-0.5'
-                    }`}
-                  />
-                </button>
-              </div>
-            );
-          })}
-        </div>
-      </div>
-
-      {/* 通用弹窗组件 */}
       <AlertModal
         isOpen={alertModal.isOpen}
         onClose={hideAlert}

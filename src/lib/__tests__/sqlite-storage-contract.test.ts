@@ -1,5 +1,6 @@
 /** @jest-environment node */
 
+import { assertPlaybackPeriodRange } from '@/lib/__tests__/__fixtures__/playback-period-contract';
 import { DEFAULT_RUNTIME_PARAMS } from '@/lib/runtime-params';
 import type { AdminConfig } from '@/types/admin';
 
@@ -11,6 +12,13 @@ import type {
   SkipConfig,
   SourceRouteStatsItem,
 } from '../types';
+import { inviteCodeBatchContract } from './__fixtures__/invite-code-contract';
+import { userDanmakuContract } from './__fixtures__/user-danmaku-contract';
+import { videoReviewContract } from './__fixtures__/video-review-contract';
+
+describe('SQLite 邀请码批量事务契约', () => {
+  inviteCodeBatchContract(() => new LocalSqliteStorage(':memory:'));
+});
 
 const adminConfig: AdminConfig = {
   ConfigSubscribtion: { URL: '', AutoUpdate: false, LastCheck: '' },
@@ -26,15 +34,13 @@ const adminConfig: AdminConfig = {
     LiveDirectConnect: false,
     AutoSwitchSource: false,
     EnableDanmaku: false,
+    EnableUserDanmaku: false,
     ...DEFAULT_RUNTIME_PARAMS,
     SearchDownstreamMaxPage: 5,
     SiteInterfaceCacheTime: 300,
     DoubanProxyType: 'direct',
-    DoubanProxy: '',
     BangumiDataSource: 'server',
-    BangumiProxy: '',
     DoubanImageProxyType: 'direct',
-    DoubanImageProxy: '',
     DisableYellowFilter: false,
     FluidSearch: true,
   },
@@ -102,6 +108,179 @@ function sortRouteStats(items: SourceRouteStatsItem[]) {
 }
 
 describe('sqlite storage contract', () => {
+  it('rolls back the complete health search batch on a later row failure', async () => {
+    const storage = new LocalSqliteStorage(':memory:');
+    await storage.clearAllData();
+    const row = {
+      source: 'alpha',
+      bucketDate: '2026-01-02',
+      okCount: 1,
+      emptyCount: 0,
+      errorCount: 0,
+      latencyMsSum: 10,
+      latencySamples: 1,
+    };
+    await storage.recordSourceHealthSearchBatch([row]);
+    const broken = {
+      ...row,
+      get source(): string {
+        throw new Error('batch failure');
+      },
+    };
+    await expect(
+      storage.recordSourceHealthSearchBatch([
+        row,
+        { ...row, source: 'beta' },
+        broken,
+      ]),
+    ).rejects.toThrow('batch failure');
+    expect(await storage.getSourceHealthSearchDaily('2026-01-01')).toEqual([
+      row,
+    ]);
+  });
+
+  it('accumulates health search rows, normalizes counters and retains date boundaries', async () => {
+    const storage = new LocalSqliteStorage(':memory:');
+    await storage.clearAllData();
+    const row = {
+      source: 'alpha',
+      bucketDate: '2026-01-02',
+      okCount: 1,
+      emptyCount: 2,
+      errorCount: 3,
+      latencyMsSum: 12.5,
+      latencySamples: 3,
+    };
+    await storage.recordSourceHealthSearchBatch([]);
+    await storage.recordSourceHealthSearchBatch([
+      { ...row, source: 'zeta', bucketDate: '2026-01-03' },
+      { ...row, source: 'beta' },
+      { ...row, bucketDate: '2026-01-01' },
+      { ...row, source: ' alpha ' },
+      row,
+      { ...row, source: ' ' },
+      {
+        ...row,
+        source: ' ' + 'x'.repeat(200) + ' ',
+        okCount: NaN,
+        emptyCount: Infinity,
+        errorCount: -1,
+        latencyMsSum: -Infinity,
+        latencySamples: -3,
+      },
+    ]);
+    await storage.recordSourceHealthSearchBatch([row]);
+    expect(await storage.getSourceHealthSearchDaily('2026-01-02')).toEqual([
+      {
+        ...row,
+        okCount: 3,
+        emptyCount: 6,
+        errorCount: 9,
+        latencyMsSum: 37.5,
+        latencySamples: 9,
+      },
+      { ...row, source: 'beta' },
+      {
+        ...row,
+        source: 'x'.repeat(191),
+        okCount: 0,
+        emptyCount: 0,
+        errorCount: 0,
+        latencyMsSum: 0,
+        latencySamples: 0,
+      },
+      { ...row, source: 'zeta', bucketDate: '2026-01-03' },
+    ]);
+    await storage.purgeSourceHealthBefore('2026-01-02');
+    expect(await storage.getSourceHealthSearchDaily('2026-01-01')).toHaveLength(
+      4,
+    );
+    await storage.purgeSourceHealthBefore('2026-01-04');
+    expect(await storage.getSourceHealthSearchDaily('2026-01-01')).toEqual([]);
+  });
+
+  it('aggregates reporter-days in SQL with success precedence and clears health state', async () => {
+    const storage = new LocalSqliteStorage(':memory:');
+    await storage.clearAllData();
+    const report = {
+      source: ' alpha ',
+      bucketDate: '2026-01-02',
+      reporter: 'a',
+      success: false,
+    };
+    for (const success of [false, false, true, true, false])
+      await storage.recordSourcePlayReport({ ...report, success });
+    for (let i = 0; i < 3; i++)
+      await storage.recordSourcePlayReport({ ...report, reporter: 'b' });
+    await storage.recordSourcePlayReport({
+      ...report,
+      bucketDate: '2026-01-03',
+      success: true,
+    });
+    await storage.recordSourcePlayReport({
+      ...report,
+      bucketDate: '2026-01-01',
+      success: true,
+    });
+    await storage.recordSourcePlayReport({ ...report, source: 'beta' });
+    const summaries = [
+      {
+        source: 'alpha',
+        successReporterDays: 2,
+        failureReporterDays: 1,
+        lastSuccessDate: '2026-01-03',
+      },
+      {
+        source: 'beta',
+        successReporterDays: 0,
+        failureReporterDays: 1,
+        lastSuccessDate: null,
+      },
+    ];
+    expect(await storage.getSourcePlayReporterSummary('2026-01-02')).toEqual(
+      summaries,
+    );
+    await storage.purgeSourceHealthBefore('2026-01-02');
+    expect(await storage.getSourcePlayReporterSummary('2026-01-01')).toEqual(
+      summaries,
+    );
+    expect(await storage.getSourcePlayReporterSummary('2026-01-04')).toEqual(
+      [],
+    );
+    const seed = async () => {
+      await storage.recordSourcePlayReport(report);
+      await storage.recordSourceHealthSearchBatch([
+        {
+          source: 'alpha',
+          bucketDate: '2026-01-02',
+          okCount: 1,
+          emptyCount: 0,
+          errorCount: 0,
+          latencyMsSum: 1,
+          latencySamples: 1,
+        },
+      ]);
+    };
+    await seed();
+    await storage.clearAllData();
+    expect(await storage.getSourceHealthSearchDaily('2026-01-01')).toEqual([]);
+    expect(await storage.getSourcePlayReporterSummary('2026-01-01')).toEqual(
+      [],
+    );
+    await seed();
+    await storage.replaceAllData({
+      adminConfig: adminConfig,
+      users: {},
+      userData: {},
+      sourceRouteStats: [],
+      inviteCodeUsage: {},
+    });
+    expect(await storage.getSourceHealthSearchDaily('2026-01-01')).toEqual([]);
+    expect(await storage.getSourcePlayReporterSummary('2026-01-01')).toEqual(
+      [],
+    );
+  });
+
   it('persists user scoped data and deletes it with the user', async () => {
     const storage = new LocalSqliteStorage(':memory:');
 
@@ -226,20 +405,36 @@ describe('sqlite storage contract', () => {
 
   it('原子占用邀请码名额，超出上限即失败', async () => {
     const storage = new LocalSqliteStorage(':memory:');
+    await storage.setAdminConfig({ UserConfig: {} } as AdminConfig);
+    await storage.createInviteCode({
+      code: 'CODE',
+      createdAt: 1,
+      expiresAt: Date.now() + 86400000,
+      createdBy: 'owner',
+      maxUses: 2,
+      usedCount: 0,
+    });
 
-    await expect(storage.reserveInviteCodeUse('CODE', 2)).resolves.toBe(true);
-    await expect(storage.reserveInviteCodeUse('CODE', 2)).resolves.toBe(true);
-    await expect(storage.reserveInviteCodeUse('CODE', 2)).resolves.toBe(false);
+    await expect(storage.reserveInviteCodeUse('CODE')).resolves.toBe(true);
+    await expect(storage.reserveInviteCodeUse('CODE')).resolves.toBe(true);
+    await expect(storage.reserveInviteCodeUse('CODE')).resolves.toBe(false);
     await expect(storage.getAllInviteCodeUsage()).resolves.toEqual({ CODE: 2 });
   });
 
   it('并发占用邀请码不会超发', async () => {
     const storage = new LocalSqliteStorage(':memory:');
+    await storage.setAdminConfig({ UserConfig: {} } as AdminConfig);
+    await storage.createInviteCode({
+      code: 'RUSH',
+      createdAt: 1,
+      expiresAt: Date.now() + 86400000,
+      createdBy: 'owner',
+      maxUses: 5,
+      usedCount: 0,
+    });
 
     const results = await Promise.all(
-      Array.from({ length: 20 }, () =>
-        storage.reserveInviteCodeUse('RUSH', 5, 0),
-      ),
+      Array.from({ length: 20 }, () => storage.reserveInviteCodeUse('RUSH')),
     );
 
     expect(results.filter(Boolean)).toHaveLength(5);
@@ -248,35 +443,69 @@ describe('sqlite storage contract', () => {
 
   it('maxUses 为 0 表示不限次数', async () => {
     const storage = new LocalSqliteStorage(':memory:');
+    await storage.setAdminConfig({ UserConfig: {} } as AdminConfig);
+    await storage.createInviteCode({
+      code: 'FREE',
+      createdAt: 1,
+      expiresAt: Date.now() + 86400000,
+      createdBy: 'owner',
+      maxUses: 0,
+      usedCount: 0,
+    });
 
-    await expect(storage.reserveInviteCodeUse('FREE', 0)).resolves.toBe(true);
-    await expect(storage.reserveInviteCodeUse('FREE', 0)).resolves.toBe(true);
+    await expect(storage.reserveInviteCodeUse('FREE')).resolves.toBe(true);
+    await expect(storage.reserveInviteCodeUse('FREE')).resolves.toBe(true);
     await expect(storage.getAllInviteCodeUsage()).resolves.toEqual({ FREE: 2 });
   });
 
   it('首次占用以配置里的历史用量为种子', async () => {
     const storage = new LocalSqliteStorage(':memory:');
+    await storage.setAdminConfig({ UserConfig: {} } as AdminConfig);
+    await storage.createInviteCode({
+      code: 'OLD',
+      createdAt: 1,
+      expiresAt: Date.now() + 86400000,
+      createdBy: 'owner',
+      maxUses: 3,
+      usedCount: 2,
+    });
 
-    await expect(storage.reserveInviteCodeUse('OLD', 3, 2)).resolves.toBe(true);
-    await expect(storage.reserveInviteCodeUse('OLD', 3, 2)).resolves.toBe(
-      false,
-    );
+    await expect(storage.reserveInviteCodeUse('OLD')).resolves.toBe(true);
+    await expect(storage.reserveInviteCodeUse('OLD')).resolves.toBe(false);
     await expect(storage.getAllInviteCodeUsage()).resolves.toEqual({ OLD: 3 });
   });
 
   it('种子值只在建行时生效，不会重复累加', async () => {
     const storage = new LocalSqliteStorage(':memory:');
+    await storage.setAdminConfig({ UserConfig: {} } as AdminConfig);
+    await storage.createInviteCode({
+      code: 'SEED',
+      createdAt: 1,
+      expiresAt: Date.now() + 86400000,
+      createdBy: 'owner',
+      maxUses: 10,
+      usedCount: 1,
+    });
 
-    await storage.reserveInviteCodeUse('SEED', 10, 1);
-    await storage.reserveInviteCodeUse('SEED', 10, 1);
+    await storage.reserveInviteCodeUse('SEED');
+    await storage.reserveInviteCodeUse('SEED');
 
     await expect(storage.getAllInviteCodeUsage()).resolves.toEqual({ SEED: 3 });
   });
 
   it('回滚邀请码次数且不会减到负数', async () => {
     const storage = new LocalSqliteStorage(':memory:');
+    await storage.setAdminConfig({ UserConfig: {} } as AdminConfig);
+    await storage.createInviteCode({
+      code: 'CODE',
+      createdAt: 1,
+      expiresAt: Date.now() + 86400000,
+      createdBy: 'owner',
+      maxUses: 2,
+      usedCount: 0,
+    });
 
-    await storage.reserveInviteCodeUse('CODE', 2);
+    await storage.reserveInviteCodeUse('CODE');
     await storage.releaseInviteCodeUse('CODE');
     await expect(storage.getAllInviteCodeUsage()).resolves.toEqual({ CODE: 0 });
 
@@ -295,12 +524,28 @@ describe('sqlite storage contract', () => {
 
   it('删除邀请码用量后重建从零开始', async () => {
     const storage = new LocalSqliteStorage(':memory:');
+    await storage.setAdminConfig({ UserConfig: {} } as AdminConfig);
+    await storage.createInviteCode({
+      code: 'CODE',
+      createdAt: 1,
+      expiresAt: Date.now() + 86400000,
+      createdBy: 'owner',
+      maxUses: 1,
+      usedCount: 0,
+    });
 
-    await storage.reserveInviteCodeUse('CODE', 1);
+    await storage.reserveInviteCodeUse('CODE');
     await storage.deleteInviteCodeUsage('CODE');
 
     await expect(storage.getAllInviteCodeUsage()).resolves.toEqual({});
-    await expect(storage.reserveInviteCodeUse('CODE', 1)).resolves.toBe(true);
+    await storage.createInviteCode({
+      code: 'CODE',
+      createdAt: 2,
+      expiresAt: Date.now() + 86400000,
+      createdBy: 'owner',
+      maxUses: 1,
+    });
+    await expect(storage.reserveInviteCodeUse('CODE')).resolves.toBe(true);
   });
 
   it('searches playback sessions before applying the page limit', async () => {
@@ -407,6 +652,47 @@ describe('sqlite storage contract', () => {
     expect(secondPage.nextCursor).toBeNull();
   });
 
+  it('filters live favorites before paging and traverses tied timestamps without gaps', async () => {
+    const storage = new LocalSqliteStorage(':memory:');
+    for (const [key, origin] of [
+      ['source+z', 'live'],
+      ['source+e', 'vod'],
+      ['source+d', 'live'],
+      ['source+c', undefined],
+      ['source+b', 'vod'],
+      ['source+a', 'live'],
+    ] as const) {
+      await storage.setFavorite('public-user', key, {
+        ...favorite,
+        origin,
+        save_time: 1000,
+      });
+    }
+    const first = await storage.getFavoritePage(
+      'public-user',
+      2,
+      undefined,
+      undefined,
+      false,
+    );
+    const second = await storage.getFavoritePage(
+      'public-user',
+      2,
+      1000,
+      'source+c',
+      false,
+    );
+    expect(first.items.map((item) => item.key)).toEqual([
+      'source+e',
+      'source+c',
+    ]);
+    expect(first.total).toBe(3);
+    expect(first.nextCursor).toBe('1000|source+c');
+    expect(second.items.map((item) => item.key)).toEqual(['source+b']);
+    expect(second.nextCursor).toBeNull();
+    expect((await storage.getFavoritePage('public-user', 10)).total).toBe(6);
+  });
+
   it('按主键游标分页读取过期元数据并排除新鲜项与直播收藏', async () => {
     const storage = new LocalSqliteStorage(':memory:');
     const now = 10_000;
@@ -500,10 +786,12 @@ describe('sqlite storage contract', () => {
 
     const refreshedRecord = {
       ...staleRecord,
+      cover: 'refreshed-record.jpg',
       metadata_checked_at: 10_000,
     };
     const refreshedFavorite = {
       ...staleFavorite,
+      cover: 'refreshed-favorite.jpg',
       metadata_checked_at: 10_000,
     };
     await expect(
@@ -522,6 +810,13 @@ describe('sqlite storage contract', () => {
         favoriteSnapshot as string,
       ),
     ).resolves.toBe(true);
+
+    await expect(
+      storage.getPlayRecord('cas-user', 'source+record'),
+    ).resolves.toEqual(refreshedRecord);
+    await expect(
+      storage.getFavorite('cas-user', 'source+favorite'),
+    ).resolves.toEqual(refreshedFavorite);
 
     const concurrentRecord = { ...refreshedRecord, play_time: 99 };
     const concurrentFavorite = { ...refreshedFavorite, title: '用户修改' };
@@ -590,10 +885,13 @@ describe('sqlite storage contract', () => {
       inviteCodeUsage: { 'invite-a': 3 },
     });
 
-    await expect(storage.getAllInviteCodeUsage()).resolves.toEqual({
-      'invite-a': 3,
-    });
-    await expect(storage.getAdminConfig()).resolves.toEqual(adminConfig);
+    // 没有对应邀请码定义的旧用量行不导入。
+    await expect(storage.getAllInviteCodeUsage()).resolves.toEqual({});
+    const expectedConfig = JSON.parse(JSON.stringify(adminConfig));
+    delete expectedConfig.UserConfig.Users;
+    delete expectedConfig.ConfigFile;
+    delete expectedConfig.ConfigSubscribtion;
+    await expect(storage.getAdminConfig()).resolves.toEqual(expectedConfig);
     await expect(storage.getAllUsers()).resolves.toEqual(['demo-user']);
     await expect(storage.getAllUsersWithPasswords()).resolves.toEqual({
       'demo-user': passwordHash,
@@ -640,6 +938,34 @@ describe('sqlite storage contract', () => {
         failureCount: 1,
       },
     ]);
+  });
+
+  it('作品状态与显式开关的组合决定追更查询并保留导出字段', async () => {
+    const storage = new LocalSqliteStorage(':memory:');
+    const records: Record<string, PlayRecord> = {};
+    const expected: string[] = [];
+    for (const series_status of [undefined, 'ongoing', 'ended'] as const) {
+      for (const tracking_enabled of [undefined, true, false]) {
+        const key = `source+${series_status}-${tracking_enabled}`;
+        records[key] = {
+          ...playRecord,
+          index: 1,
+          total_episodes: 12,
+          update_baseline_episodes: 10,
+          series_status,
+          tracking_enabled,
+        };
+        if (tracking_enabled ?? series_status !== 'ended') expected.push(key);
+      }
+    }
+    await storage.setPlayRecords('status-contract', records);
+    const page = await storage.getUnreadTrackingPlayRecordPage(
+      'status-contract',
+      20,
+    );
+    expect(Object.keys(page.items).sort()).toEqual(expected.sort());
+    expect(page.total).toBe(expected.length);
+    expect(await storage.getAllPlayRecords('status-contract')).toEqual(records);
   });
 
   it('queries unread tracking records in database order without loading all records', async () => {
@@ -727,81 +1053,9 @@ describe('sqlite storage contract', () => {
     ]);
   });
 
-  it('aggregates playback ranges and top items in set-based queries', async () => {
+  it('reads positive playback sessions in a half-open user-scoped range', async () => {
     const storage = new LocalSqliteStorage(':memory:');
-
-    await storage.setPlaybackSession('demo-user', {
-      ...playbackSession,
-      id: 'show-a-old',
-      title: 'Show A',
-      started_at: 100,
-      ended_at: 160,
-      watch_seconds: 60,
-    });
-    await storage.setPlaybackSession('demo-user', {
-      ...playbackSession,
-      id: 'show-a-latest',
-      title: ' Show A ',
-      started_at: 300,
-      ended_at: 360,
-      watch_seconds: 120,
-    });
-    await storage.setPlaybackSession('demo-user', {
-      ...playbackSession,
-      id: 'show-b',
-      video_id: '2',
-      title: 'Show B',
-      started_at: 200,
-      ended_at: 260,
-      watch_seconds: 200,
-    });
-    await storage.setPlaybackSession('other-user', {
-      ...playbackSession,
-      id: 'other-user-show',
-      started_at: 250,
-      ended_at: 350,
-      watch_seconds: 999,
-    });
-
-    await expect(
-      storage.getPlaybackRangeWatchTotals('demo-user', [
-        { key: 'early', start: 0, end: 200 },
-        { key: 'recent', start: 200, end: 400 },
-      ]),
-    ).resolves.toEqual([
-      { key: 'early', watchSeconds: 60 },
-      { key: 'recent', watchSeconds: 320 },
-    ]);
-
-    await storage.setPlaybackSession('demo-user', {
-      ...playbackSession,
-      id: 'show-a-other-source',
-      source: 'source-b',
-      video_id: '3',
-      title: 'Show A',
-      started_at: 250,
-      ended_at: 280,
-      watch_seconds: 30,
-    });
-
-    await expect(
-      storage.getPlaybackTopItems('demo-user', 6, 100),
-    ).resolves.toEqual([
-      expect.objectContaining({
-        videoId: '1',
-        title: ' Show A ',
-        watchSeconds: 210,
-        sessionCount: 3,
-        lastWatchedAt: 360,
-      }),
-      expect.objectContaining({
-        videoId: '2',
-        title: 'Show B',
-        watchSeconds: 200,
-        sessionCount: 1,
-        lastWatchedAt: 260,
-      }),
-    ]);
+    await assertPlaybackPeriodRange(storage);
   });
 
   it('returns null when admin config is absent', async () => {
@@ -865,6 +1119,13 @@ describe('sqlite storage contract', () => {
     });
 
     const stats = await storage.getSourceRouteStats('2026-01-02');
+    await storage.purgeSourceRouteStatsBefore('2026-01-07');
+    expect(await storage.getAllSourceRouteStatBuckets()).toHaveLength(3);
+    expect(await storage.getSourceRouteStats('2025-01-01')).toEqual(stats);
+    await storage.purgeSourceRouteStatsBefore('2026-01-08');
+    expect(await storage.getAllSourceRouteStatBuckets()).toHaveLength(2);
+    await storage.purgeSourceRouteStatsBefore('2026-01-09');
+    expect(await storage.getAllSourceRouteStatBuckets()).toEqual([]);
 
     expect(sortRouteStats(stats)).toEqual([
       {
@@ -887,4 +1148,109 @@ describe('sqlite storage contract', () => {
       },
     ]);
   });
+});
+
+describe('sqlite social username migration', () => {
+  it('adds avatar_seed to legacy profiles idempotently without changing identity', async () => {
+    const storage = new LocalSqliteStorage(':memory:');
+    const internal = storage as unknown as {
+      db: import('better-sqlite3').Database;
+      migrateUserProfileAvatarSeed(): void;
+    };
+    try {
+      internal.db.exec(`DROP TABLE user_profiles;
+        CREATE TABLE user_profiles (username TEXT PRIMARY KEY, profile_id VARCHAR(12) UNIQUE, nickname VARCHAR(64), nickname_norm VARCHAR(64) UNIQUE, favorites_public INTEGER DEFAULT 0, updated_at INTEGER);
+        INSERT INTO user_profiles VALUES ('alice', 'Alice0123456', 'Alice', 'alice', 1, 123);`);
+      internal.migrateUserProfileAvatarSeed();
+      expect(await storage.getUserProfile('alice')).toEqual({
+        username: 'alice',
+        profile_id: 'Alice0123456',
+        nickname: 'Alice',
+        avatar_seed: null,
+        favorites_public: 1 as const,
+        updated_at: 123,
+      });
+      await storage.updateUserProfile('alice', { avatarSeed: 'Avatar012345' });
+      internal.migrateUserProfileAvatarSeed();
+      expect((await storage.getUserProfile('alice'))?.avatar_seed).toBe(
+        'Avatar012345',
+      );
+    } finally {
+      internal.db.close();
+    }
+  });
+  it('merges every username column while retaining canonical profile identity', async () => {
+    const storage = new LocalSqliteStorage(':memory:');
+    const internal = storage as unknown as {
+      db: import('better-sqlite3').Database;
+      migrateLegacyUsernameCasing(): void;
+      backfillUserProfiles(): void;
+    };
+    await storage.ensureUserProfile('alice');
+    await storage.ensureUserProfile('bob');
+    await storage.updateUserProfile('alice', { avatarSeed: 'Canon0123456' });
+    const canonical = await storage.getUserProfile('alice');
+    internal.db
+      .prepare(
+        'INSERT INTO user_profiles (username, profile_id, nickname, nickname_norm, avatar_seed, favorites_public, updated_at) VALUES (?, ?, ?, ?, ?, 0, 1)',
+      )
+      .run('Alice', 'Legacy012345', 'Legacy', 'legacy', 'LegacyAvatar');
+    internal.db
+      .prepare(
+        'INSERT INTO user_profiles (username, profile_id, avatar_seed, updated_at) VALUES (?, ?, ?, ?)',
+      )
+      .run('Carol', 'Carol0123456', 'CarolAvatar1', 1);
+    internal.db.exec(
+      "INSERT INTO user_follows VALUES ('Alice', 'Bob', 1); INSERT INTO video_review_likes VALUES ('Bob', 'work', '2026', 'Alice', 1); INSERT INTO video_review_reports VALUES ('Alice', 'work', '2026', 'Bob', 'spam', '', 1);",
+    );
+    internal.migrateLegacyUsernameCasing();
+    expect((await storage.getUserProfile('alice'))?.avatar_seed).toBe(
+      'Canon0123456',
+    );
+    expect((await storage.getUserProfile('carol'))?.avatar_seed).toBe(
+      'CarolAvatar1',
+    );
+    expect((await storage.getUserProfile('alice'))?.profile_id).toBe(
+      canonical?.profile_id,
+    );
+    expect(
+      internal.db.prepare('SELECT follower, followee FROM user_follows').all(),
+    ).toEqual([{ follower: 'alice', followee: 'bob' }]);
+    expect(
+      internal.db.prepare('SELECT author, liker FROM video_review_likes').all(),
+    ).toEqual([{ author: 'bob', liker: 'alice' }]);
+    expect(
+      internal.db
+        .prepare('SELECT author, reporter FROM video_review_reports')
+        .all(),
+    ).toEqual([{ author: 'alice', reporter: 'bob' }]);
+    internal.db
+      .prepare('INSERT INTO users (username, password) VALUES (?, ?)')
+      .run('missing', 'hash');
+    internal.backfillUserProfiles();
+    expect(await storage.getUserProfile('missing')).not.toBeNull();
+    internal.db.close();
+  });
+});
+
+describe('sqlite video review contract', () => {
+  videoReviewContract(() => new LocalSqliteStorage(':memory:'), adminConfig);
+});
+
+describe('sqlite user danmaku contract', () => {
+  userDanmakuContract(() => new LocalSqliteStorage(':memory:'), adminConfig);
+});
+
+test('normalizes legacy danmaku usernames even without a users row', async () => {
+  const storage = new LocalSqliteStorage(':memory:');
+  const internal = storage as unknown as {
+    db: import('better-sqlite3').Database;
+    migrateLegacyUsernameCasing(): void;
+  };
+  internal.db
+    .prepare('INSERT INTO user_danmaku VALUES (?, ?, ?, ?, ?, ?, ?, ?)')
+    .run('legacy-id', 'dandan:1', 'Alice', 0, 'text', 0, '#ffffff', 1);
+  internal.migrateLegacyUsernameCasing();
+  expect((await storage.getAllUserDanmaku('alice'))[0].username).toBe('alice');
+  internal.db.close();
 });

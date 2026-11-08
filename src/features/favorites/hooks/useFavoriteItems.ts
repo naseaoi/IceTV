@@ -17,15 +17,13 @@ import {
   subscribeToDataUpdates,
 } from '@/lib/db.client';
 import { normalizeFavoriteLimit } from '@/lib/favorites';
+import { FAVORITE_PREVIEW_LIMIT } from '@/lib/favorites-count';
 import {
   readFavoriteItemsCount,
   writeFavoriteItemsCount,
 } from '@/lib/local-preferences';
 import type { FavoritePageItem, PlayRecord } from '@/lib/types';
 import { parseStorageKey } from '@/lib/utils';
-
-const MAX_FAVORITE_SKELETON_COUNT = 8;
-const DEFAULT_FAVORITE_ITEMS_LIMIT = 20;
 const useIsomorphicLayoutEffect =
   typeof window !== 'undefined' ? useLayoutEffect : useEffect;
 
@@ -89,19 +87,18 @@ function readCachedFavoriteItems(limit: number): {
 export function useFavoriteItems(
   enabled: boolean,
   initialSkeletonCount = 0,
-  pageLimit = DEFAULT_FAVORITE_ITEMS_LIMIT,
+  pageLimit = FAVORITE_PREVIEW_LIMIT,
 ) {
   const limit = useMemo(() => normalizeFavoriteLimit(pageLimit), [pageLimit]);
   const normalizedInitialSkeletonCount = Math.min(
     Math.max(0, Math.floor(initialSkeletonCount)),
-    MAX_FAVORITE_SKELETON_COUNT,
+    limit,
   );
   const [favoriteItems, setFavoriteItems] = useState<FavoriteItem[]>([]);
   const [total, setTotal] = useState(0);
   const [nextCursor, setNextCursor] = useState<string | null>(null);
-  const [loading, setLoading] = useState(
-    () => enabled && normalizedInitialSkeletonCount > 0,
-  );
+  // 首次请求返回前一律视为加载中，避免先闪出空态
+  const [loading, setLoading] = useState(enabled);
   const [loadingMore, setLoadingMore] = useState(false);
   const [skeletonCount, setSkeletonCount] = useState(
     normalizedInitialSkeletonCount,
@@ -114,19 +111,17 @@ export function useFavoriteItems(
     if (cached) {
       setFavoriteItems(cached.items);
       setTotal(cached.total);
-      setSkeletonCount(
-        Math.min(cached.items.length, MAX_FAVORITE_SKELETON_COUNT),
-      );
+      setSkeletonCount(Math.min(cached.items.length, limit));
       setLoading(false);
       return;
     }
 
     const nextSkeletonCount = Math.min(
       Math.max(normalizedInitialSkeletonCount, readFavoriteItemsCount()),
-      MAX_FAVORITE_SKELETON_COUNT,
+      limit,
     );
     setSkeletonCount(nextSkeletonCount);
-    setLoading(nextSkeletonCount > 0);
+    setLoading(true);
   }, [enabled, limit, normalizedInitialSkeletonCount]);
 
   useEffect(() => {
@@ -141,7 +136,7 @@ export function useFavoriteItems(
         setFavoriteItems(items);
         setTotal(page.total);
         setNextCursor(page.nextCursor);
-        setSkeletonCount(Math.min(items.length, MAX_FAVORITE_SKELETON_COUNT));
+        setSkeletonCount(Math.min(items.length, limit));
         writeFavoriteItemsCount(page.total);
       } catch (error) {
         console.error('获取收藏失败:', error);

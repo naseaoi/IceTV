@@ -1,8 +1,8 @@
 import {
   dedupePlaybackSessionsByTitle,
   filterPlaybackHistorySessions,
+  groupPlaybackSessionsByDay,
 } from '@/features/playback-stats/lib/history';
-import { buildPlaybackStatsSummary } from '@/features/playback-stats/lib/summary';
 import type { PlaybackSession } from '@/lib/types';
 
 function createSession(
@@ -127,63 +127,43 @@ describe('playback history dedupe', () => {
       ),
     ).toEqual([watchedSession]);
   });
+});
 
-  it('dedupes recent summary items without changing watch totals', () => {
-    const sessions = [
-      createSession({
-        id: 'session_39',
-        title: 'Demo',
-        episode_index: 39,
-        watch_seconds: 30,
-        started_at: 1000,
-        ended_at: 2000,
-      }),
-      createSession({
-        id: 'session_40',
-        title: 'Demo',
-        episode_index: 40,
-        watch_seconds: 50,
-        started_at: 3000,
-        ended_at: 4000,
-      }),
-    ];
+describe('groupPlaybackSessionsByDay', () => {
+  it('按本地日期分组并生成相对标签', () => {
+    const now = new Date(2026, 10, 3, 20).getTime();
+    const groups = groupPlaybackSessionsByDay(
+      [
+        createSession({
+          id: 'a',
+          started_at: new Date(2026, 10, 3, 9).getTime(),
+        }),
+        createSession({
+          id: 'b',
+          started_at: new Date(2026, 10, 3, 1).getTime(),
+        }),
+        createSession({
+          id: 'c',
+          started_at: new Date(2026, 10, 2, 23).getTime(),
+        }),
+        createSession({
+          id: 'd',
+          started_at: new Date(2026, 9, 28, 12).getTime(),
+        }),
+        createSession({
+          id: 'e',
+          started_at: new Date(2025, 11, 31, 12).getTime(),
+        }),
+      ],
+      now,
+    );
 
-    const summary = buildPlaybackStatsSummary(sessions, 5000);
-
-    expect(summary.totalWatchSeconds).toBe(80);
-    expect(summary.recentItems).toEqual([sessions[1]]);
-  });
-
-  it('merges same-title top content across sources without merging history', () => {
-    const sourceA = createSession({
-      id: 'source_a',
-      source: 'source-a',
-      video_id: 'video-a',
-      title: '同名内容',
-      watch_seconds: 30,
-      started_at: 1000,
-      ended_at: 2000,
-    });
-    const sourceB = createSession({
-      id: 'source_b',
-      source: 'source-b',
-      video_id: 'video-b',
-      title: ' 同名内容 ',
-      watch_seconds: 50,
-      started_at: 3000,
-      ended_at: 4000,
-    });
-
-    const summary = buildPlaybackStatsSummary([sourceA, sourceB], 5000);
-
-    expect(summary.topItems).toEqual([
-      expect.objectContaining({
-        source: 'source-b',
-        videoId: 'video-b',
-        watchSeconds: 80,
-        sessionCount: 2,
-      }),
+    expect(groups.map((group) => group.label)).toEqual([
+      '今天',
+      '昨天',
+      '10月28日',
+      '2025年12月31日',
     ]);
-    expect(summary.recentItems).toEqual([sourceB, sourceA]);
+    expect(groups[0].sessions.map((session) => session.id)).toEqual(['a', 'b']);
   });
 });

@@ -9,12 +9,17 @@ import {
 } from '@/features/play/lib/danmaku/episode-storage';
 import { loadDanmakuForEpisode } from '@/features/play/lib/danmaku/resolve';
 import { DanmakuEpisodeNotFoundError } from '@/features/play/lib/danmaku/types';
+import { fetchUserDanmaku } from '@/features/play/lib/danmaku/user-client';
 import { writeDanmakuEpisodeSearchTitle } from '@/lib/local-preferences';
 
 jest.mock('@/features/play/lib/danmaku/client', () => ({
   fetchDanmakuComments: jest.fn(),
   rankCandidatesByEpisode: jest.fn(),
   searchDanmakuCandidates: jest.fn(),
+}));
+
+jest.mock('@/features/play/lib/danmaku/user-client', () => ({
+  fetchUserDanmaku: jest.fn(),
 }));
 
 jest.mock('@/features/play/lib/danmaku/episode-storage', () => ({
@@ -162,5 +167,131 @@ describe('loadDanmakuForEpisode outcomes', () => {
       force: undefined,
       keyword: '手动搜索标题',
     });
+  });
+});
+
+describe('loadDanmakuForEpisode with user danmaku', () => {
+  const thirdParty = Array.from({ length: 10 }, (_, index) => ({
+    text: `third-${index}`,
+    time: index + 1,
+    mode: 0 as const,
+    color: '#FFFFFF',
+  }));
+
+  beforeEach(() => {
+    jest.resetAllMocks();
+    window.localStorage.clear();
+    (getPersistedEpisodeId as jest.Mock).mockResolvedValue(123);
+    (fetchDanmakuComments as jest.Mock).mockResolvedValue(thirdParty);
+    (window as { RUNTIME_CONFIG?: unknown }).RUNTIME_CONFIG = {
+      ENABLE_USER_DANMAKU: true,
+    };
+  });
+
+  afterEach(() => {
+    delete (window as { RUNTIME_CONFIG?: unknown }).RUNTIME_CONFIG;
+  });
+
+  it('targets the matched third-party episode and keeps the total within the episode limit', async () => {
+    (fetchUserDanmaku as jest.Mock).mockResolvedValue({
+      items: [
+        {
+          id: 'a',
+          time: 2.5,
+          text: 'mine',
+          mode: 0,
+          color: '#ff0000',
+          mine: true,
+        },
+        {
+          id: 'b',
+          time: 7.5,
+          text: 'other',
+          mode: 1,
+          color: '#ffffff',
+          mine: false,
+        },
+      ],
+      limit: 6,
+    });
+    const onUserTarget = jest.fn();
+
+    const items = await loadDanmakuForEpisode(context, () => true, {
+      onUserTarget,
+    });
+
+    expect(fetchUserDanmaku).toHaveBeenCalledWith('dandan:123');
+    expect(onUserTarget).toHaveBeenCalledWith({ key: 'dandan:123', offset: 0 });
+    expect(items).toHaveLength(6);
+    expect(items.map((item) => item.time)).toEqual(
+      [...items.map((item) => item.time)].sort((a, b) => a - b),
+    );
+    expect(items).toContainEqual(
+      expect.objectContaining({ text: 'mine', border: true }),
+    );
+    expect(items).toContainEqual(
+      expect.objectContaining({ text: 'other', border: false }),
+    );
+  });
+
+  it('falls back to the source scope and still shows user danmaku without a third-party match', async () => {
+    (getPersistedEpisodeId as jest.Mock).mockResolvedValue(null);
+    (searchDanmakuCandidates as jest.Mock).mockResolvedValue([]);
+    (rankCandidatesByEpisode as jest.Mock).mockReturnValue([]);
+    (fetchUserDanmaku as jest.Mock).mockResolvedValue({
+      items: [
+        {
+          id: 'a',
+          time: 3,
+          text: 'hello',
+          mode: 0,
+          color: '#ffffff',
+          mine: false,
+        },
+      ],
+      limit: 3000,
+    });
+
+    const items = await loadDanmakuForEpisode(context, () => true);
+
+    expect(fetchUserDanmaku).toHaveBeenCalledWith('src:source-a:video-a:0');
+    expect(items).toEqual([
+      expect.objectContaining({ text: 'hello', time: 3 }),
+    ]);
+  });
+
+  it('keeps the persisted episode as the target when third-party comments fail', async () => {
+    (fetchDanmakuComments as jest.Mock).mockRejectedValue(new Error('down'));
+    (fetchUserDanmaku as jest.Mock).mockResolvedValue({
+      items: [],
+      limit: 3000,
+    });
+    const onUserTarget = jest.fn();
+
+    await loadDanmakuForEpisode(context, () => true, { onUserTarget });
+
+    expect(onUserTarget).toHaveBeenCalledWith({ key: 'dandan:123', offset: 0 });
+  });
+
+  it('returns third-party danmaku when user danmaku fails to load', async () => {
+    (fetchUserDanmaku as jest.Mock).mockRejectedValue(new Error('500'));
+    const warning = jest.spyOn(console, 'warn').mockImplementation(() => {});
+
+    await expect(
+      loadDanmakuForEpisode(context, () => true),
+    ).resolves.toHaveLength(thirdParty.length);
+    warning.mockRestore();
+  });
+
+  it('skips user danmaku when the site switch is off', async () => {
+    (window as { RUNTIME_CONFIG?: unknown }).RUNTIME_CONFIG = {
+      ENABLE_USER_DANMAKU: false,
+    };
+    const onUserTarget = jest.fn();
+
+    await loadDanmakuForEpisode(context, () => true, { onUserTarget });
+
+    expect(fetchUserDanmaku).not.toHaveBeenCalled();
+    expect(onUserTarget).not.toHaveBeenCalled();
   });
 });

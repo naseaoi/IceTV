@@ -1,7 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 
 import { isGuardFailure, requireActiveUser } from '@/lib/api-auth';
-import { getConfigForRead } from '@/lib/config';
 
 export const runtime = 'nodejs';
 
@@ -63,13 +62,9 @@ export async function GET(request: NextRequest) {
     });
   }
 
-  const config = await getConfigForRead();
-  const user = config.UserConfig.Users.find(
-    (entry) => entry.username === guardResult.username,
-  );
   const body: AuthStatusResponse = {
     authenticated: true,
-    role: user?.role || 'user',
+    role: guardResult.role,
     username: guardResult.username,
   };
 

@@ -10,6 +10,11 @@ import {
   readBangumiDataSource,
   readBangumiProxyUrl,
 } from '@/lib/bangumi-source';
+import {
+  readStorage,
+  removeStorage,
+  writeStorage,
+} from '@/lib/browser-storage';
 import { createTimedAbortController } from '@/lib/downstream-sources/shared';
 
 import type { BangumiCalendarData } from './bangumi';
@@ -181,9 +186,7 @@ function readBangumiCalendarClientCache(
   }
 
   try {
-    const rawCache = window.localStorage.getItem(
-      BANGUMI_CALENDAR_CACHE_STORAGE_KEY,
-    );
+    const rawCache = readStorage(BANGUMI_CALENDAR_CACHE_STORAGE_KEY);
     if (!rawCache) {
       return null;
     }
@@ -191,7 +194,7 @@ function readBangumiCalendarClientCache(
     const cache = JSON.parse(rawCache) as BangumiCalendarClientCache;
     const now = Date.now();
     if (!Number.isFinite(cache.staleUntil) || cache.staleUntil <= now) {
-      window.localStorage.removeItem(BANGUMI_CALENDAR_CACHE_STORAGE_KEY);
+      removeStorage(BANGUMI_CALENDAR_CACHE_STORAGE_KEY);
       return null;
     }
 
@@ -204,13 +207,13 @@ function readBangumiCalendarClientCache(
 
     const data = normalizeBangumiCalendarData(cache.data);
     if (!isUsableBangumiCalendarData(data)) {
-      window.localStorage.removeItem(BANGUMI_CALENDAR_CACHE_STORAGE_KEY);
+      removeStorage(BANGUMI_CALENDAR_CACHE_STORAGE_KEY);
       return null;
     }
 
     return data;
   } catch {
-    window.localStorage.removeItem(BANGUMI_CALENDAR_CACHE_STORAGE_KEY);
+    removeStorage(BANGUMI_CALENDAR_CACHE_STORAGE_KEY);
     return null;
   }
 }
@@ -221,17 +224,16 @@ function writeBangumiCalendarClientCache(data: BangumiCalendarData[]): void {
   }
 
   const now = Date.now();
-  try {
-    window.localStorage.setItem(
-      BANGUMI_CALENDAR_CACHE_STORAGE_KEY,
-      JSON.stringify({
-        data,
-        freshUntil: now + BANGUMI_CALENDAR_FRESH_MS,
-        staleUntil: now + BANGUMI_CALENDAR_MAX_AGE_MS,
-      }),
-    );
-  } catch {
-    window.localStorage.removeItem(BANGUMI_CALENDAR_CACHE_STORAGE_KEY);
+  const written = writeStorage(
+    BANGUMI_CALENDAR_CACHE_STORAGE_KEY,
+    JSON.stringify({
+      data,
+      freshUntil: now + BANGUMI_CALENDAR_FRESH_MS,
+      staleUntil: now + BANGUMI_CALENDAR_MAX_AGE_MS,
+    }),
+  );
+  if (!written) {
+    removeStorage(BANGUMI_CALENDAR_CACHE_STORAGE_KEY);
   }
 }
 

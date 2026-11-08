@@ -1,3 +1,4 @@
+import { installStreamPolyfills } from '@/app/api/test-utils/stream-polyfills';
 import type { ApiSite } from '@/lib/config';
 import { getDetailFromApi } from '@/lib/downstream';
 
@@ -31,20 +32,38 @@ const PAGE_HTML = `
   <li>第1集$https://v.example.com/page/1/index.m3u8</li>
 `;
 
+installStreamPolyfills();
+
+function responseAt(url: string, body: string): Response {
+  const response = new Response(body);
+  Object.defineProperty(response, 'url', { value: url });
+  return response;
+}
+
 function mockResponses(api: unknown, page = PAGE_HTML) {
   const fetchMock = global.fetch as jest.Mock;
   fetchMock.mockImplementation(async (input: RequestInfo | URL) => {
     const url = String(input);
     if (url === PAGE_URL) {
-      return { ok: true, url, text: async () => page } as Response;
+      return responseAt(url, page);
     }
     if (api instanceof Error) throw api;
-    return { ok: true, url, json: async () => api } as Response;
+    return responseAt(url, JSON.stringify(api));
   });
   return fetchMock;
 }
 
 describe('配置了详情页的源', () => {
+  it.each([
+    ['全2集', 'ended'],
+    ['更新至2集', 'ongoing'],
+  ])('详情映射作品状态 %s', async (vod_remarks, expected) => {
+    mockResponses({ list: [{ ...API_ITEM, vod_remarks }] });
+    expect((await getDetailFromApi(SITE, '110900')).series_status).toBe(
+      expected,
+    );
+  });
+
   beforeEach(() => {
     global.fetch = jest.fn();
   });

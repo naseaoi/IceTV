@@ -35,6 +35,12 @@ import {
   SOURCE_PROBE_CONCURRENCY,
   SourceProbeDeferredError,
 } from '@/features/play/lib/sourceProbeRequestPolicy';
+import {
+  type SourceSelectionContext,
+  compareSourceRoutePreference,
+  preferDirectRouteSources,
+} from '@/features/play/lib/sourceRoutePreference';
+import { getSourceSelectionContext } from '@/features/play/lib/sourceSelectionContext';
 import { probeVodEpisodeUrl } from '@/features/play/lib/vodProbe';
 import {
   buildVodProxyUrl,
@@ -50,7 +56,7 @@ import { isLazyEpisodeUrl } from '@/lib/lazy-episodes';
 import { PLAYER_EXIT_EVENT } from '@/lib/navigation-return';
 import { hasMatchingPlayIntent } from '@/lib/play-intent';
 import { prefetchM3U8 } from '@/lib/player-runtime';
-import { getProxyModes, shouldUseServerProxy } from '@/lib/proxy-modes';
+import { shouldUseServerProxy } from '@/lib/proxy-modes';
 import { mergeSourceBundle } from '@/lib/source-bundle';
 import { filterSourcesForPlayback } from '@/lib/source-match';
 import {
@@ -178,19 +184,29 @@ async function preferBestSource(
   setSourceRecommendation: Dispatch<
     SetStateAction<SourceRecommendation | null>
   >,
+  selectionContext: SourceSelectionContext,
   signal?: AbortSignal,
 ): Promise<SearchResult> {
   if (sources.length === 1) return sources[0];
 
   setSourceRecommendation(null);
-  const proxyModes = await getProxyModes();
+  const { proxyModes } = selectionContext;
   if (signal?.aborted) return sources[0];
 
   const playbackStats = readSourcePlaybackStats();
-  const candidates = sortSourcesByPlaybackStats(
-    sources,
-    (source) => source.source,
+  const now = Date.now();
+  const comparePriority = (a: SearchResult, b: SearchResult) =>
+    compareSourceRoutePreference(a, b, selectionContext, playbackStats, now);
+  const candidates = preferDirectRouteSources(
+    sortSourcesByPlaybackStats(
+      sources,
+      (source) => source.source,
+      playbackStats,
+      now,
+    ),
+    selectionContext,
     playbackStats,
+    now,
   );
   const collectedResults: SourceProbeResult[] = [];
   const failedSourceKeys = new Set<string>();
@@ -244,7 +260,12 @@ async function preferBestSource(
     if (!selectedKey) return;
     // 起播后页面可能已手动或自动换源，按页面当前的源判断；页面还没有当前源时以选中源为准
     const activeKey = getActiveSourceKey() || selectedKey;
-    const scored = scoreProbeResults(collectedResults);
+    const scored = scoreProbeResults(
+      candidates.flatMap((source) => {
+        const result = collectedResults.find((item) => item.source === source);
+        return result ? [result] : [];
+      }),
+    ).sort((a, b) => comparePriority(a.source, b.source) || b.score - a.score);
     const best = scored[0];
     if (!best) return;
     const bestKey = getSourceKey(best.source);
@@ -256,7 +277,12 @@ async function preferBestSource(
       const active = scored.find(
         (item) => getSourceKey(item.source) === activeKey,
       );
-      if (!active || best.score <= active.score) return;
+      if (
+        !active ||
+        (comparePriority(best.source, active.source) ||
+          active.score - best.score) >= 0
+      )
+        return;
     }
 
     recommendedKey = bestKey;
@@ -431,6 +457,7 @@ async function preferBestSource(
   );
   if (
     trustedSource &&
+    comparePriority(trustedSource, candidates[0]) === 0 &&
     (await isTargetPlaylistAvailable(trustedSource)) &&
     !signal?.aborted
   ) {
@@ -448,21 +475,16 @@ async function preferBestSource(
     return trustedSource;
   }
 
-  for (
-    let start = 0;
-    start < candidates.length && !signal?.aborted;
-    start += SOURCE_PROBE_FOREGROUND_LIMIT
-  ) {
-    const batch = candidates.slice(
-      start,
-      start + SOURCE_PROBE_FOREGROUND_LIMIT,
-    );
+  // 同优先级内仍并发抢先起播；跨等级或线路分批，避免中转源抢先完成而绕过偏好。
+  for (let start = 0; start < candidates.length && !signal?.aborted; ) {
+    const batch = candidates
+      .slice(start, start + SOURCE_PROBE_FOREGROUND_LIMIT)
+      .filter((source) => comparePriority(source, candidates[start]) === 0);
     const result = await probeBatchUntilSuccess(batch);
+    start += batch.length;
     if (result) {
       settleProbeSamples(result.source);
-      void probeRemainingSources(
-        candidates.slice(start + SOURCE_PROBE_FOREGROUND_LIMIT),
-      );
+      void probeRemainingSources(candidates.slice(start));
       prefetchRunnerUp(result.source);
       return result.source;
     }
@@ -794,10 +816,16 @@ export function usePlayInit({
           const detailed = prev.filter(
             (item) => item.episodes && item.episodes.length > 0,
           );
-          return detailed.reduce(
-            (acc, item) => mergeSourceBundle(acc, item),
-            results,
+          const sourceOrder = new Map(
+            results.map((item, index) => [item.source, index]),
           );
+          return detailed
+            .reduce((acc, item) => mergeSourceBundle(acc, item), results)
+            .sort(
+              (a, b) =>
+                (sourceOrder.get(a.source) ?? Number.MAX_SAFE_INTEGER) -
+                (sourceOrder.get(b.source) ?? Number.MAX_SAFE_INTEGER),
+            );
         });
         return results;
       } catch (err) {
@@ -988,6 +1016,8 @@ export function usePlayInit({
         }
       }
 
+      // quick 竞速在服务端已优先直连源，这里不等待选源上下文
+      const selectionContextPromise = getSourceSelectionContext();
       const quickQuery = searchTitle || videoTitle;
       if (!cachedGroup && !currentSource && !currentId && optimizationEnabled) {
         const quickData = quickQuery
@@ -1052,7 +1082,13 @@ export function usePlayInit({
         return;
       }
 
-      let detailData: SearchResult = sourcesInfo[0];
+      const selectionContext = await selectionContextPromise;
+      if (signal.aborted) return;
+      let detailData: SearchResult = preferDirectRouteSources(
+        sourcesInfo,
+        selectionContext,
+        readSourcePlaybackStats(),
+      )[0];
       if (currentSource && currentId && !needPreferRef.current) {
         const target = sourcesInfo.find(
           (source) =>
@@ -1089,6 +1125,7 @@ export function usePlayInit({
           getPlayingSourceKey,
           setPrecomputedVideoInfo,
           setSourceRecommendation,
+          selectionContext,
           signal,
         );
       }

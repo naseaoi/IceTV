@@ -8,6 +8,13 @@ export class ResourceLimitError extends Error {
   }
 }
 
+export class UpstreamCooldownError extends ResourceLimitError {
+  constructor(retryAfterSeconds: number) {
+    super(503, retryAfterSeconds);
+    this.name = 'UpstreamCooldownError';
+  }
+}
+
 export function resourceLimitResponse(error: unknown): Response | null {
   if (!(error instanceof ResourceLimitError)) return null;
   return new Response(JSON.stringify({ error: error.message }), {

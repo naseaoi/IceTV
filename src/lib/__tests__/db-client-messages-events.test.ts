@@ -1,5 +1,10 @@
 import { cacheManager } from '@/lib/db.client.cache';
 
+jest.mock('@/lib/toast', () => ({
+  showToast: jest.fn(),
+  dismissToast: jest.fn(),
+}));
+
 jest.mock('@/lib/auth.client', () => ({
   getAuthInfoFromBrowserCookie: () => ({ username: 'tester' }),
 }));
@@ -25,6 +30,7 @@ describe('messagesUpdated 派发点', () => {
   beforeEach(() => {
     jest.resetModules();
     listener.mockReset();
+    jest.clearAllMocks();
     localStorage.clear();
     fetchMock = jest.fn().mockResolvedValue(okResponse());
     global.fetch = fetchMock as unknown as typeof fetch;
@@ -109,4 +115,58 @@ describe('messagesUpdated 派发点', () => {
 
     window.removeEventListener('playRecordsUpdated', playRecordsListener);
   });
+});
+
+describe('播放记录操作失败文案', () => {
+  const originalFetch = global.fetch;
+  beforeEach(() => {
+    jest.resetModules();
+    jest.clearAllMocks();
+    jest.spyOn(console, 'error').mockImplementation(() => undefined);
+  });
+  afterEach(() => {
+    global.fetch = originalFetch;
+    jest.restoreAllMocks();
+  });
+
+  it.each(['network', 'http'] as const)(
+    '%s 失败按实际操作提示且不重复',
+    async (failure) => {
+      global.fetch =
+        failure === 'network'
+          ? jest.fn().mockRejectedValue(new TypeError('offline'))
+          : jest.fn().mockResolvedValue(errorResponse());
+      const {
+        deletePlayRecord,
+        clearAllPlayRecords,
+        setPlayRecordTracking,
+        markPlayRecordUpdateRead,
+      } = await import('@/lib/db.client');
+      const { showToast } = await import('@/lib/toast');
+      const operations = [
+        {
+          run: () => deletePlayRecord('src', '1'),
+          message: '删除播放记录失败，请重试',
+        },
+        {
+          run: () => clearAllPlayRecords(),
+          message: '删除播放记录失败，请重试',
+        },
+        {
+          run: () => setPlayRecordTracking('src', '1', false),
+          message: '追更设置保存失败，请重试',
+        },
+        {
+          run: () => markPlayRecordUpdateRead('src', '1'),
+          message: '标记已读失败，请重试',
+        },
+      ];
+      for (const { run, message } of operations) {
+        jest.mocked(showToast).mockClear();
+        await expect(run()).rejects.toThrow();
+        expect(showToast).toHaveBeenCalledTimes(1);
+        expect(showToast).toHaveBeenCalledWith(message, 'error');
+      }
+    },
+  );
 });

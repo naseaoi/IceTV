@@ -1,7 +1,20 @@
 /** @jest-environment node */
 
+import { assertPlaybackPeriodRange } from '@/lib/__tests__/__fixtures__/playback-period-contract';
+import { assertReviewReplies } from '@/lib/__tests__/__fixtures__/review-reply-contract';
+import { assertSocialNotifications } from '@/lib/__tests__/__fixtures__/social-notification-contract';
+
 import { MySqlStorage } from '../mysql.db';
 import type { Favorite, PlayRecord } from '../types';
+import { IMPORT_ADMIN_CONFIG } from './__fixtures__/import-admin-config';
+import { inviteCodeBatchContract } from './__fixtures__/invite-code-contract';
+import { userDanmakuContract } from './__fixtures__/user-danmaku-contract';
+import {
+  assertActivityAndReportPagination,
+  assertFollowPagination,
+  assertPublicReviewRoles,
+  videoReview,
+} from './__fixtures__/video-review-contract';
 
 const liveUrl = (process.env.MYSQL_TEST_URL || '').trim();
 const describeLive = liveUrl ? describe : describe.skip;
@@ -40,6 +53,351 @@ describeLive('MySQL 追更查询（真实实例）', () => {
     ).pool.end();
   });
 
+  it('新粉丝与点赞通知双后端契约', async () => {
+    await storage.clearAllData();
+    await assertSocialNotifications(storage, 'mysql-notification');
+  });
+
+  it('公开评价作者角色双后端契约', async () => {
+    await storage.clearAllData();
+    await assertPublicReviewRoles(storage, 'mysql-review-role');
+  });
+
+  it('回复双后端契约', async () => {
+    await storage.clearAllData();
+    await assertReviewReplies(storage, 'mysql-reply');
+  });
+
+  it('keeps concurrent search increments and play counters without multiplying reporter-days', async () => {
+    await storage.clearAllData();
+    const row = {
+      source: 'concurrent',
+      bucketDate: '2026-01-02',
+      okCount: 1,
+      emptyCount: 0,
+      errorCount: 0,
+      latencyMsSum: 10,
+      latencySamples: 1,
+    };
+    await Promise.all(
+      Array.from({ length: 12 }, () =>
+        storage.recordSourceHealthSearchBatch([row]),
+      ),
+    );
+    await Promise.all(
+      Array.from({ length: 12 }, (_, index) =>
+        storage.recordSourcePlayReport({
+          source: row.source,
+          bucketDate: row.bucketDate,
+          reporter: 'same',
+          success: index < 4,
+        }),
+      ),
+    );
+    expect(await storage.getSourceHealthSearchDaily(row.bucketDate)).toEqual([
+      { ...row, okCount: 12, latencyMsSum: 120, latencySamples: 12 },
+    ]);
+    expect(await storage.getSourcePlayReporterSummary(row.bucketDate)).toEqual([
+      {
+        source: row.source,
+        successReporterDays: 1,
+        failureReporterDays: 0,
+        lastSuccessDate: row.bucketDate,
+      },
+    ]);
+    const pool = (storage as unknown as { pool: import('mysql2/promise').Pool })
+      .pool;
+    const [rows] = await pool.query(
+      'SELECT success_count, failure_count FROM source_health_play WHERE source = ?',
+      [row.source],
+    );
+    expect(rows).toEqual([{ success_count: 4, failure_count: 8 }]);
+  });
+
+  it('rolls back the complete health search batch on a later row failure', async () => {
+    await storage.clearAllData();
+    const row = {
+      source: 'alpha',
+      bucketDate: '2026-01-02',
+      okCount: 1,
+      emptyCount: 0,
+      errorCount: 0,
+      latencyMsSum: 10,
+      latencySamples: 1,
+    };
+    await storage.recordSourceHealthSearchBatch([row]);
+    const broken = {
+      ...row,
+      get source(): string {
+        throw new Error('batch failure');
+      },
+    };
+    await expect(
+      storage.recordSourceHealthSearchBatch([
+        row,
+        { ...row, source: 'beta' },
+        broken,
+      ]),
+    ).rejects.toThrow('batch failure');
+    expect(await storage.getSourceHealthSearchDaily('2026-01-01')).toEqual([
+      row,
+    ]);
+  });
+
+  it('accumulates health search rows, normalizes counters and retains date boundaries', async () => {
+    await storage.clearAllData();
+    const row = {
+      source: 'alpha',
+      bucketDate: '2026-01-02',
+      okCount: 1,
+      emptyCount: 2,
+      errorCount: 3,
+      latencyMsSum: 12.5,
+      latencySamples: 3,
+    };
+    await storage.recordSourceHealthSearchBatch([]);
+    await storage.recordSourceHealthSearchBatch([
+      { ...row, source: 'zeta', bucketDate: '2026-01-03' },
+      { ...row, source: 'beta' },
+      { ...row, bucketDate: '2026-01-01' },
+      { ...row, source: ' alpha ' },
+      row,
+      { ...row, source: ' ' },
+      {
+        ...row,
+        source: ' ' + 'x'.repeat(200) + ' ',
+        okCount: NaN,
+        emptyCount: Infinity,
+        errorCount: -1,
+        latencyMsSum: -Infinity,
+        latencySamples: -3,
+      },
+    ]);
+    await storage.recordSourceHealthSearchBatch([row]);
+    expect(await storage.getSourceHealthSearchDaily('2026-01-02')).toEqual([
+      {
+        ...row,
+        okCount: 3,
+        emptyCount: 6,
+        errorCount: 9,
+        latencyMsSum: 37.5,
+        latencySamples: 9,
+      },
+      { ...row, source: 'beta' },
+      {
+        ...row,
+        source: 'x'.repeat(191),
+        okCount: 0,
+        emptyCount: 0,
+        errorCount: 0,
+        latencyMsSum: 0,
+        latencySamples: 0,
+      },
+      { ...row, source: 'zeta', bucketDate: '2026-01-03' },
+    ]);
+    await storage.purgeSourceHealthBefore('2026-01-02');
+    expect(await storage.getSourceHealthSearchDaily('2026-01-01')).toHaveLength(
+      4,
+    );
+    await storage.purgeSourceHealthBefore('2026-01-04');
+    expect(await storage.getSourceHealthSearchDaily('2026-01-01')).toEqual([]);
+  });
+
+  it('aggregates reporter-days in SQL with success precedence and clears health state', async () => {
+    await storage.clearAllData();
+    const report = {
+      source: ' alpha ',
+      bucketDate: '2026-01-02',
+      reporter: 'a',
+      success: false,
+    };
+    for (const success of [false, false, true, true, false])
+      await storage.recordSourcePlayReport({ ...report, success });
+    for (let i = 0; i < 3; i++)
+      await storage.recordSourcePlayReport({ ...report, reporter: 'b' });
+    await storage.recordSourcePlayReport({
+      ...report,
+      bucketDate: '2026-01-03',
+      success: true,
+    });
+    await storage.recordSourcePlayReport({
+      ...report,
+      bucketDate: '2026-01-01',
+      success: true,
+    });
+    await storage.recordSourcePlayReport({ ...report, source: 'beta' });
+    const summaries = [
+      {
+        source: 'alpha',
+        successReporterDays: 2,
+        failureReporterDays: 1,
+        lastSuccessDate: '2026-01-03',
+      },
+      {
+        source: 'beta',
+        successReporterDays: 0,
+        failureReporterDays: 1,
+        lastSuccessDate: null,
+      },
+    ];
+    expect(await storage.getSourcePlayReporterSummary('2026-01-02')).toEqual(
+      summaries,
+    );
+    await storage.purgeSourceHealthBefore('2026-01-02');
+    expect(await storage.getSourcePlayReporterSummary('2026-01-01')).toEqual(
+      summaries,
+    );
+    expect(await storage.getSourcePlayReporterSummary('2026-01-04')).toEqual(
+      [],
+    );
+    const seed = async () => {
+      await storage.recordSourcePlayReport(report);
+      await storage.recordSourceHealthSearchBatch([
+        {
+          source: 'alpha',
+          bucketDate: '2026-01-02',
+          okCount: 1,
+          emptyCount: 0,
+          errorCount: 0,
+          latencyMsSum: 1,
+          latencySamples: 1,
+        },
+      ]);
+    };
+    await seed();
+    await storage.clearAllData();
+    expect(await storage.getSourceHealthSearchDaily('2026-01-01')).toEqual([]);
+    expect(await storage.getSourcePlayReporterSummary('2026-01-01')).toEqual(
+      [],
+    );
+    await seed();
+    await storage.replaceAllData({
+      adminConfig: {
+        UserConfig: {},
+        SourceConfig: [],
+        LiveConfig: [],
+      } as unknown as import('@/types/admin').AdminConfig,
+      users: {},
+      userData: {},
+      sourceRouteStats: [],
+      inviteCodeUsage: {},
+    });
+    expect(await storage.getSourceHealthSearchDaily('2026-01-01')).toEqual([]);
+    expect(await storage.getSourcePlayReporterSummary('2026-01-01')).toEqual(
+      [],
+    );
+  });
+  describe('邀请码批量事务契约（真实实例）', () => {
+    inviteCodeBatchContract(() => storage);
+  });
+
+  it('邀请码真实 SQL 分页、并发占用与过期过滤一致', async () => {
+    await storage.setAdminConfig({
+      UserConfig: {},
+    } as import('@/types/admin').AdminConfig);
+    const prefix = `INVITE-${Date.now()}`;
+    const codes = ['A', 'B', 'C'].map((suffix) => `${prefix}-${suffix}`);
+    try {
+      for (const code of codes)
+        await storage.createInviteCode({
+          code,
+          createdAt: Date.now(),
+          expiresAt: Date.now() + 86400000,
+          createdBy: 'owner',
+          maxUses: 2,
+        });
+      const results = await Promise.all(
+        Array.from({ length: 15 }, () =>
+          storage.reserveInviteCodeUse(codes[0]),
+        ),
+      );
+      expect(results.filter(Boolean)).toHaveLength(2);
+      const exhausted = await storage.queryInviteCodes({ filter: 'exhausted' });
+      expect(exhausted.items.some((item) => item.code === codes[0])).toBe(true);
+      const first = await storage.queryInviteCodes({
+        filter: 'active',
+        limit: 1,
+      });
+      expect(first.nextCursor).toBeTruthy();
+      const second = await storage.queryInviteCodes({
+        filter: 'active',
+        limit: 1,
+        cursor: first.nextCursor!,
+      });
+      expect(second.items[0].code).not.toBe(first.items[0].code);
+      await expect(
+        storage.queryInviteCodes({ filter: 'all', cursor: first.nextCursor! }),
+      ).rejects.toThrow('邀请码游标无效');
+      await storage.releaseInviteCodeUse(codes[0]);
+      expect(await storage.reserveInviteCodeUse(codes[0])).toBe(true);
+      await storage.deleteInviteCode(codes[2]);
+      await storage.createInviteCode({
+        code: codes[2],
+        createdAt: 1,
+        expiresAt: 1,
+        createdBy: 'owner',
+      });
+      expect(await storage.reserveInviteCodeUse(codes[2])).toBe(false);
+    } finally {
+      for (const code of codes) await storage.deleteInviteCode(code);
+    }
+  });
+
+  it('邀请码真实 SQL 迁移在并发实例下保持用量并剥离配置', async () => {
+    const { MysqlInviteCodeStore } =
+      await import('@/lib/mysql-invite-code-store');
+    const pool = (storage as unknown as { pool: import('mysql2/promise').Pool })
+      .pool;
+    const code = `MIGRATE-${Date.now()}`;
+    await storage.setAdminConfig({
+      UserConfig: {
+        InviteCodes: [
+          {
+            code,
+            createdAt: 1,
+            expiresAt: Date.now() + 86400000,
+            createdBy: 'owner',
+            maxUses: 10,
+            usedCount: 2,
+          },
+        ],
+      },
+    } as import('@/types/admin').AdminConfig);
+    await pool.execute(
+      'INSERT INTO invite_code_usage (code, used_count) VALUES (?, ?)',
+      [code, 4],
+    );
+    try {
+      await Promise.all([
+        new MysqlInviteCodeStore(pool).migrate(),
+        new MysqlInviteCodeStore(pool).migrate(),
+      ]);
+      expect(
+        (await storage.getAllInviteCodes()).find((item) => item.code === code)
+          ?.usedCount,
+      ).toBe(4);
+      expect(
+        (await storage.getAdminConfig())?.UserConfig.InviteCodes,
+      ).toBeUndefined();
+      const [rows] = await pool.query(
+        'SELECT code FROM invite_code_usage WHERE code = ?',
+        [code],
+      );
+      expect(rows).toEqual([]);
+      await storage.deleteInviteCode(code);
+      await new MysqlInviteCodeStore(pool).migrate();
+      expect(
+        (await storage.getAllInviteCodes()).some((item) => item.code === code),
+      ).toBe(false);
+    } finally {
+      await storage.deleteInviteCode(code);
+    }
+  });
+
+  it('paginates activity and report groups in real SQL', async () => {
+    await assertActivityAndReportPagination(storage, `activity-${Date.now()}`);
+  });
+
   const makeRecord = (
     total: number,
     baseline: number,
@@ -54,6 +412,365 @@ describeLive('MySQL 追更查询（真实实例）', () => {
     update_baseline_episodes: baseline,
     tracking_enabled: true,
     ...extra,
+  });
+
+  it('paginates own and work reviews in real SQL with tied timestamps and wildcard years', async () => {
+    const prefix = `review-page-${Date.now()}`;
+    const titleNorm = prefix;
+    const authors = Array.from({ length: 25 }, (_, i) => `${prefix}-${i}`);
+    try {
+      for (const [index, author] of authors.entries()) {
+        await storage.ensureUserProfile(author);
+        await storage.setVideoReview(author, {
+          ...videoReview,
+          title_norm: titleNorm,
+          year: index % 2 ? '' : '2026',
+        });
+        await storage.setVideoReview(prefix, {
+          ...videoReview,
+          title_norm: `${prefix}-${String(index).padStart(2, '0')}`,
+          rating: index % 3 ? 8.6 : null,
+          is_public: index % 2 === 0,
+        });
+      }
+      for (const sort of ['updated', 'high', 'low'] as const) {
+        const first = await storage.getMyVideoReviewPage(prefix, { sort });
+        const next = await storage.getMyVideoReviewPage(prefix, {
+          sort,
+          cursor: first.nextCursor!,
+        });
+        expect(first.items).toHaveLength(20);
+        expect(next.items).toHaveLength(5);
+        expect(
+          new Set(
+            [...first.items, ...next.items].map((item) => item.title_norm),
+          ).size,
+        ).toBe(25);
+        expect(first.counts.private).toBe(12);
+        if (sort !== 'updated')
+          expect(next.items.every((item) => item.rating === null)).toBe(true);
+      }
+      const work = await storage.getWorkVideoReviewPage(
+        titleNorm,
+        '2026',
+        prefix,
+      );
+      const next = await storage.getWorkVideoReviewPage(
+        titleNorm,
+        '2026',
+        prefix,
+        work.nextCursor!,
+      );
+      expect(work.reviews).toHaveLength(20);
+      expect(next.reviews).toHaveLength(5);
+      expect(work.count).toBe(25);
+      expect(
+        new Set(
+          [...work.reviews, ...next.reviews].map(
+            (item) => item.author.profileId,
+          ),
+        ).size,
+      ).toBe(25);
+    } finally {
+      for (const author of [...authors, prefix])
+        await storage.deleteUser(author);
+    }
+  });
+
+  it('filters live favorites in SQL before applying a tied-time cursor', async () => {
+    const username = `public-favorites-${Date.now()}`;
+    try {
+      for (const [key, origin] of [
+        ['source+z', 'live'],
+        ['source+e', 'vod'],
+        ['source+d', 'live'],
+        ['source+c', undefined],
+        ['source+b', 'vod'],
+        ['source+a', 'live'],
+      ] as const) {
+        await storage.setFavorite(username, key, {
+          ...baseFavorite,
+          origin,
+          save_time: 1000,
+        });
+      }
+      const first = await storage.getFavoritePage(
+        username,
+        2,
+        undefined,
+        undefined,
+        false,
+      );
+      const second = await storage.getFavoritePage(
+        username,
+        2,
+        1000,
+        'source+c',
+        false,
+      );
+      expect(first.items.map((item) => item.key)).toEqual([
+        'source+e',
+        'source+c',
+      ]);
+      expect(first.total).toBe(3);
+      expect(first.nextCursor).toBe('1000|source+c');
+      expect(second.items.map((item) => item.key)).toEqual(['source+b']);
+      expect(second.nextCursor).toBeNull();
+      expect((await storage.getFavoritePage(username, 10)).total).toBe(6);
+    } finally {
+      await storage.deleteAllFavorites(username);
+    }
+  });
+
+  it('paginates follows with real SQL predicates', async () => {
+    const username = `follow-page-${Date.now()}`;
+    try {
+      await assertFollowPagination(storage, username);
+    } finally {
+      await storage.deleteUser(username);
+      for (let index = 0; index < 35; index++) {
+        await storage.deleteUser(`${username}-${index}`);
+      }
+    }
+  });
+
+  it('reads period sessions with real SQL range and user predicates', async () => {
+    await assertPlaybackPeriodRange(storage);
+  });
+
+  it('serializes concurrent message-state updates on a missing row', async () => {
+    const username = `atomic-read-${Date.now()}`;
+    try {
+      await Promise.all(
+        Array.from({ length: 12 }, (_, index) =>
+          storage.updateUserMessageState(username, {
+            followReview: {
+              id: `follow-review:${index}`,
+              createdAt: index + 1,
+            },
+          }),
+        ),
+      );
+      expect(
+        (await storage.getUserMessageState(username)).followReviewReadIds,
+      ).toHaveLength(12);
+      await storage.updateUserMessageState(username, {
+        followReviewReadAt: 100,
+        announcement: { id: 'new' },
+      });
+      await Promise.all([
+        storage.updateUserMessageState(username, {
+          followReview: { id: 'late', createdAt: 1 },
+        }),
+        storage.updateUserMessageState(username, {
+          followReviewReadAt: 50,
+          announcement: { id: 'old' },
+        }),
+      ]);
+      expect(await storage.getUserMessageState(username)).toEqual({
+        followReviewReadAt: 100,
+        followReviewReadIds: [],
+        readAnnouncementId: 'new',
+      });
+    } finally {
+      await storage.deleteUser(username);
+    }
+  });
+
+  it('social SQL enforces profile uniqueness, reactions, moderation and deletion', async () => {
+    const suffix = Date.now();
+    const author = `social-author-${suffix}`;
+    const reader = `social-reader-${suffix}`;
+    const title = `social${suffix}`;
+    try {
+      await storage.registerUser(author, 'test-password');
+      await storage.registerUser(reader, 'test-password');
+      const profile = await storage.ensureUserProfile(author);
+      expect(profile.profile_id).toMatch(/^[A-Za-z0-9]{12}$/);
+      const nickname = `N${String(suffix).slice(-12)}`;
+      expect(profile.avatar_seed).toBeNull();
+      await storage.updateUserProfile(author, { avatarSeed: 'Avatar012345' });
+      await storage.updateUserProfile(author, { nickname });
+      expect(
+        (await storage.getUserProfileById(profile.profile_id))?.avatar_seed,
+      ).toBe('Avatar012345');
+      await expect(
+        storage.updateUserProfile(reader, { nickname: nickname.toLowerCase() }),
+      ).rejects.toThrow('昵称已被使用');
+      await storage.setUserFollow(reader, author, true);
+      await storage.setVideoReview(author, {
+        ...videoReview,
+        title_norm: title,
+        rating: 8.7,
+        updated_at: Date.now() + 1000,
+      });
+      expect(
+        await storage.setVideoReviewLike(author, title, '2026', reader, true),
+      ).toEqual({ liked: true, likeCount: 1 });
+      expect(
+        await storage.setVideoReviewLike(author, title, '2026', reader, true),
+      ).toEqual({ liked: true, likeCount: 1 });
+      expect(
+        await storage.reportVideoReview(
+          author,
+          title,
+          '2026',
+          reader,
+          'spam',
+          '',
+        ),
+      ).toBe(true);
+      expect(
+        await storage.reportVideoReview(
+          author,
+          title,
+          '2026',
+          reader,
+          'spoiler',
+          'detail',
+        ),
+      ).toBe(true);
+      const reports = await storage.getReviewReportPage();
+      expect(
+        reports.items.find((item) => item.review.username === author),
+      ).toMatchObject({ reportCount: 1, reasons: { spoiler: 1 } });
+      const work = await storage.getPublicVideoReviewsForWork(
+        title,
+        '2026',
+        reader,
+      );
+      expect(work.distribution[7]).toBe(1);
+      expect(work.distribution[8]).toBe(0);
+      expect(work.reviews[0]).toMatchObject({
+        author: { profileId: profile.profile_id, avatarSeed: 'Avatar012345' },
+        likedByMe: true,
+        likeCount: 1,
+      });
+      expect(
+        await storage.getFollowReviewMessages(reader, 0, [], Date.now() + 2000),
+      ).toHaveLength(1);
+      await storage.moderateReviewReports(
+        author,
+        title,
+        '2026',
+        'mark-spoiler',
+      );
+      expect(
+        (await storage.getVideoReview(author, title, '2026'))?.spoiler,
+      ).toBe(true);
+      await storage.deleteVideoReview(author, title, '2026');
+      expect((await storage.getUserSocialData(reader)).likes).toEqual([]);
+      expect((await storage.getUserSocialData(reader)).reports).toEqual([]);
+      await storage.deleteUser(author);
+      expect((await storage.getUserSocialData(reader)).follows).toEqual([]);
+    } finally {
+      await storage.deleteUser(author);
+      await storage.deleteUser(reader);
+    }
+  });
+
+  it('review SQL preserves identity, privacy, nullable ratings and literal cursor search', async () => {
+    const user = `live-review-${Date.now()}`;
+    const title = `review${Date.now()}`;
+    const review = { ...videoReview, title_norm: title, title: `${title} %_!` };
+    try {
+      await storage.setVideoReview(user, { ...review, year: '', rating: null });
+      await storage.setVideoReview(user, review);
+      await storage.setVideoReview(user, {
+        ...review,
+        created_at: 3000,
+        updated_at: 4000,
+      });
+      expect(await storage.getVideoReview(user, title, '2026')).toMatchObject({
+        year: '2026',
+        created_at: 1000,
+      });
+      expect(await storage.getVideoReview(user, title, '2025')).toMatchObject({
+        year: '',
+        rating: null,
+      });
+      expect(
+        await storage.getVideoReview(user, title.toUpperCase(), '2026'),
+      ).toBeNull();
+      expect(
+        await storage.getPublicVideoReviewsForWork(title, '2026'),
+      ).toMatchObject({ average: 8, count: 1 });
+      for (let index = 0; index < 32; index++) {
+        await storage.setVideoReview(user, {
+          ...review,
+          title_norm: `${title}-${index}`,
+        });
+      }
+      const first = await storage.getPublicVideoReviewPage(
+        undefined,
+        `${title} %_!`,
+      );
+      expect(first.items).toHaveLength(30);
+      const second = await storage.getPublicVideoReviewPage(
+        first.nextCursor!,
+        `${title} %_!`,
+      );
+      expect(second.items).toHaveLength(4);
+      expect(second.nextCursor).toBeNull();
+      expect(
+        new Set(
+          [...first.items, ...second.items].map((row) =>
+            JSON.stringify([row.title_norm, row.year]),
+          ),
+        ).size,
+      ).toBe(34);
+      await storage.setVideoReview(user, { ...review, is_public: false });
+      await storage.deleteVideoReview(user, title, '2026', true);
+      expect(await storage.getVideoReview(user, title, '2026')).toMatchObject({
+        is_public: false,
+      });
+      expect(
+        await storage.getPublicVideoReviewsForWork(title, '2026'),
+      ).toMatchObject({ average: null, count: 0 });
+    } finally {
+      await storage.deleteUser(user);
+    }
+  });
+
+  it('round trips decimal reviews and aggregates decimal ratings as numbers', async () => {
+    const user = `live-decimal-${Date.now()}`;
+    const otherUser = `${user}-other`;
+    const title = `decimal${Date.now()}`;
+    const older = { ...videoReview, title_norm: title, rating: 8.6 };
+    const newer = {
+      ...older,
+      title_norm: `${title}-private`,
+      rating: 9.1,
+      is_public: false,
+      updated_at: 3000,
+    };
+    try {
+      await storage.setVideoReview(user, newer);
+      await storage.setVideoReview(user, older);
+      await storage.setVideoReview(otherUser, { ...older, rating: 8.7 });
+      await storage.setVideoReview(user, { ...older, year: '', rating: null });
+      await storage.setVideoReview(user, {
+        ...older,
+        year: '2025',
+        rating: 1.1,
+        is_public: false,
+      });
+      expect(await storage.getVideoReview(user, title, '2026')).toEqual(older);
+      const ownReviews = await storage.getAllVideoReviews(user);
+      expect(ownReviews).toHaveLength(4);
+      expect(ownReviews[0]).toEqual(newer);
+      expect(ownReviews).toContainEqual(older);
+      const summary = await storage.getPublicVideoReviewsForWork(title, '');
+      expect(summary.count).toBe(2);
+      expect(typeof summary.average).toBe('number');
+      expect(summary.average).toBeCloseTo(8.65, 8);
+      expect(summary.reviews.map((review) => review.rating)).toEqual(
+        expect.arrayContaining([8.6, 8.7, null]),
+      );
+    } finally {
+      await storage.deleteUser(user);
+      await storage.deleteUser(otherUser);
+    }
   });
 
   it('只返回未读且未关闭追更的记录', async () => {
@@ -282,5 +999,20 @@ describeLive('MySQL 追更查询（真实实例）', () => {
         favoriteSnapshot as string,
       ),
     ).resolves.toBe(false);
+  });
+});
+
+describeLive('MySQL user danmaku contract (real instance)', () => {
+  const stores: MySqlStorage[] = [];
+  userDanmakuContract(() => {
+    const storage = new MySqlStorage(liveUrl);
+    stores.push(storage);
+    return storage;
+  }, IMPORT_ADMIN_CONFIG);
+  afterAll(async () => {
+    for (const storage of stores)
+      await (
+        storage as unknown as { pool: import('mysql2/promise').Pool }
+      ).pool.end();
   });
 });

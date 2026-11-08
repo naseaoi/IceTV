@@ -1,11 +1,12 @@
 import 'server-only';
 
-import { sanitizeInviteCodes } from '@/features/admin/services/inviteCodes';
 import {
   DEFAULT_BANGUMI_DATA_SOURCE,
   normalizeBangumiDataSource,
   normalizeSiteBangumiDataSource,
 } from '@/lib/bangumi-source';
+import { isCatalogFavoriteSource } from '@/lib/catalog-favorites';
+import { type ConfigStateUpdate, stripConfigState } from '@/lib/config-state';
 import { db } from '@/lib/db';
 import { PUBLIC_DOUBAN_IMAGE_PROXY_TYPES } from '@/lib/douban-image-url';
 import {
@@ -95,7 +96,6 @@ const PUBLIC_DOUBAN_PROXY_TYPES = new Set([
   'cmliussss-cdn-ali',
   'cors-anywhere',
 ]);
-type ManagedUser = AdminConfig['UserConfig']['Users'][number];
 const configVersionByObject = new WeakMap<AdminConfig, string>();
 
 export function getPublicDoubanProxyType(
@@ -122,10 +122,13 @@ export function getPublicDoubanImageProxyType(
 }
 
 // 从配置文件补充管理员配置
-export function refineConfig(adminConfig: AdminConfig): AdminConfig {
+export function refineConfig(
+  adminConfig: AdminConfig,
+  configFile: string,
+): AdminConfig {
   let fileConfig: ConfigFileStruct;
   try {
-    fileConfig = JSON.parse(adminConfig.ConfigFile) as ConfigFileStruct;
+    fileConfig = JSON.parse(configFile) as ConfigFileStruct;
   } catch (e) {
     console.warn('解析配置文件失败:', e);
     fileConfig = {} as ConfigFileStruct;
@@ -138,6 +141,8 @@ export function refineConfig(adminConfig: AdminConfig): AdminConfig {
   );
 
   apiSitesFromFile.forEach(([key, site]) => {
+    if (isCatalogFavoriteSource(key))
+      throw new Error('目录收藏标识不能用于播放源');
     const existingSource = currentApiSites.get(key);
     if (existingSource) {
       // 如果已存在，只覆盖 name、api、detail 和 from
@@ -226,7 +231,6 @@ export function refineConfig(adminConfig: AdminConfig): AdminConfig {
         url: site.url,
         ua: site.ua,
         epg: site.epg,
-        channelNumber: 0,
         from: 'config',
         disabled: false,
       });
@@ -244,7 +248,7 @@ export function refineConfig(adminConfig: AdminConfig): AdminConfig {
   // 将 Map 转换回数组
   adminConfig.LiveConfig = Array.from(currentLives.values());
 
-  return adminConfig;
+  return stripConfigState(adminConfig);
 }
 
 async function getInitConfig(
@@ -260,7 +264,6 @@ async function getInitConfig(
   },
 ): Promise<AdminConfig> {
   let cfgFile: ConfigFileStruct;
-  const ownerUsername = getOwnerUsername();
   try {
     cfgFile = JSON.parse(configFile) as ConfigFileStruct;
   } catch (e) {
@@ -278,11 +281,13 @@ async function getInitConfig(
         '本网站仅提供影视信息搜索服务，所有内容均来自第三方网站。本站不存储任何视频资源，不对任何内容的准确性、合法性、完整性负责。',
       FooterText: DEFAULT_SITE_FOOTER_TEXT,
       EnableLiveEntry: false,
+      LiveAccess: 'all',
       DefaultAggregateSearch: true,
       EnableOptimization: true,
       LiveDirectConnect: false,
       AutoSwitchSource: false,
       EnableDanmaku: false,
+      EnableUserDanmaku: false,
       ...normalizeRuntimeParams({
         ...DEFAULT_RUNTIME_PARAMS,
         SearchDownstreamMaxPage:
@@ -290,15 +295,12 @@ async function getInitConfig(
         SiteInterfaceCacheTime: cfgFile.cache_time || 7200,
       }),
       DoubanProxyType: process.env.NEXT_PUBLIC_DOUBAN_PROXY_TYPE || 'direct',
-      DoubanProxy: process.env.NEXT_PUBLIC_DOUBAN_PROXY || '',
       BangumiDataSource: normalizeBangumiDataSource(
         process.env.NEXT_PUBLIC_BANGUMI_DATA_SOURCE,
       ),
-      BangumiProxy: process.env.NEXT_PUBLIC_BANGUMI_PROXY || '',
       DoubanImageProxyType:
         process.env.NEXT_PUBLIC_DOUBAN_IMAGE_PROXY_TYPE ||
         DEFAULT_DOUBAN_IMAGE_PROXY_TYPE,
-      DoubanImageProxy: process.env.NEXT_PUBLIC_DOUBAN_IMAGE_PROXY || '',
       SourceCoverProxyMode: normalizeSourceCoverProxyMode(
         process.env.NEXT_PUBLIC_SOURCE_COVER_PROXY_MODE,
       ),
@@ -307,34 +309,12 @@ async function getInitConfig(
       FluidSearch: process.env.NEXT_PUBLIC_FLUID_SEARCH !== 'false',
     },
     UserConfig: {
-      Users: [],
       OpenRegister: false,
     },
     SourceConfig: [],
     CustomCategories: [],
     LiveConfig: [],
   };
-
-  // 补充用户信息
-  let userNames: string[] = [];
-  try {
-    userNames = await db.getAllUsers();
-  } catch (e) {
-    console.error('获取用户列表失败:', e);
-  }
-  const allUsers = userNames
-    .filter((u) => u !== ownerUsername)
-    .map((u) => ({
-      username: u,
-      role: 'user',
-      banned: false,
-    }));
-  allUsers.unshift({
-    username: ownerUsername,
-    role: 'owner',
-    banned: false,
-  });
-  adminConfig.UserConfig.Users = allUsers as any;
 
   // 从配置文件中补充源信息
   Object.entries(cfgFile.api_site || []).forEach(([key, site]) => {
@@ -370,13 +350,12 @@ async function getInitConfig(
       url: live.url,
       ua: live.ua,
       epg: live.epg,
-      channelNumber: 0,
       from: 'config',
       disabled: false,
     });
   });
 
-  return adminConfig;
+  return stripConfigState(adminConfig);
 }
 
 async function loadConfig(): Promise<AdminConfig> {
@@ -394,7 +373,12 @@ async function loadConfig(): Promise<AdminConfig> {
   return inflightConfigLoad;
 }
 
-async function loadConfigUncached(generation: number): Promise<AdminConfig> {
+const CONFIG_PERSIST_MAX_ATTEMPTS = 3;
+
+async function loadConfigUncached(
+  generation: number,
+  attempt = 1,
+): Promise<AdminConfig> {
   let adminConfig: AdminConfig | null;
   try {
     adminConfig = await db.getAdminConfig();
@@ -406,13 +390,14 @@ async function loadConfigUncached(generation: number): Promise<AdminConfig> {
     throw e;
   }
 
+  const wasMissing = !adminConfig;
   let shouldPersist = false;
   if (!adminConfig) {
     adminConfig = await getInitConfig('');
     shouldPersist = true;
   }
   const originalConfigJson = JSON.stringify(adminConfig);
-  adminConfig = await syncConfigUsersWithDb(configSelfCheck(adminConfig));
+  adminConfig = configSelfCheck(adminConfig);
 
   if (generation !== configCacheGeneration) {
     return cachedConfig;
@@ -429,7 +414,15 @@ async function loadConfigUncached(generation: number): Promise<AdminConfig> {
 
   if (shouldPersist) {
     try {
-      await db.saveAdminConfig(cachedConfig);
+      const original = wasMissing
+        ? null
+        : (JSON.parse(originalConfigJson) as AdminConfig);
+      if (!(await db.compareAndSetAdminConfig(original, cachedConfig))) {
+        // 补写期间配置被并发改写：重读后再补，超过上限沿用本次结果，下次加载继续补齐。
+        if (attempt >= CONFIG_PERSIST_MAX_ATTEMPTS) return cachedConfig;
+        invalidateConfigCache();
+        return loadConfigUncached(configCacheGeneration, attempt + 1);
+      }
     } catch (e) {
       console.error('保存管理员配置失败:', e);
     }
@@ -472,13 +465,13 @@ function getConfigCacheTtlMs(): number {
 export function configSelfCheck(adminConfig: AdminConfig): AdminConfig {
   // 初始化必要属性
   if (!adminConfig.UserConfig) {
-    adminConfig.UserConfig = { Users: [] };
+    adminConfig.UserConfig = {};
   }
-  if (
-    !adminConfig.UserConfig.Users ||
-    !Array.isArray(adminConfig.UserConfig.Users)
-  ) {
-    adminConfig.UserConfig.Users = [];
+  delete adminConfig.UserConfig.Users;
+  if (Array.isArray(adminConfig.UserConfig.Tags)) {
+    for (const tag of adminConfig.UserConfig.Tags) {
+      if (tag && tag.allowLive !== true) delete tag.allowLive;
+    }
   }
   if (typeof adminConfig.UserConfig.OpenRegister !== 'boolean') {
     adminConfig.UserConfig.OpenRegister = false;
@@ -486,9 +479,14 @@ export function configSelfCheck(adminConfig: AdminConfig): AdminConfig {
   if (typeof adminConfig.UserConfig.RequireInviteCode !== 'boolean') {
     adminConfig.UserConfig.RequireInviteCode = false;
   }
-  adminConfig.UserConfig.InviteCodes = sanitizeInviteCodes(
-    adminConfig.UserConfig.InviteCodes,
-  );
+  const defaultGroup = adminConfig.UserConfig.DefaultUserGroup;
+  if (
+    typeof defaultGroup !== 'string' ||
+    !adminConfig.UserConfig.Tags?.some((tag) => tag?.name === defaultGroup)
+  ) {
+    delete adminConfig.UserConfig.DefaultUserGroup;
+  }
+  delete adminConfig.UserConfig.InviteCodes;
   if (!adminConfig.SourceConfig || !Array.isArray(adminConfig.SourceConfig)) {
     adminConfig.SourceConfig = [];
   }
@@ -510,11 +508,13 @@ export function configSelfCheck(adminConfig: AdminConfig): AdminConfig {
         '本网站仅提供影视信息搜索服务，所有内容均来自第三方网站。本站不存储任何视频资源，不对任何内容的准确性、合法性、完整性负责。',
       FooterText: DEFAULT_SITE_FOOTER_TEXT,
       EnableLiveEntry: false,
+      LiveAccess: 'all',
       DefaultAggregateSearch: true,
       EnableOptimization: true,
       LiveDirectConnect: false,
       AutoSwitchSource: false,
       EnableDanmaku: false,
+      EnableUserDanmaku: false,
       ...normalizeRuntimeParams({
         ...DEFAULT_RUNTIME_PARAMS,
         SearchDownstreamMaxPage:
@@ -522,15 +522,12 @@ export function configSelfCheck(adminConfig: AdminConfig): AdminConfig {
         SiteInterfaceCacheTime: 7200,
       }),
       DoubanProxyType: process.env.NEXT_PUBLIC_DOUBAN_PROXY_TYPE || 'direct',
-      DoubanProxy: process.env.NEXT_PUBLIC_DOUBAN_PROXY || '',
       BangumiDataSource: normalizeBangumiDataSource(
         process.env.NEXT_PUBLIC_BANGUMI_DATA_SOURCE,
       ),
-      BangumiProxy: process.env.NEXT_PUBLIC_BANGUMI_PROXY || '',
       DoubanImageProxyType:
         process.env.NEXT_PUBLIC_DOUBAN_IMAGE_PROXY_TYPE ||
         DEFAULT_DOUBAN_IMAGE_PROXY_TYPE,
-      DoubanImageProxy: process.env.NEXT_PUBLIC_DOUBAN_IMAGE_PROXY || '',
       SourceCoverProxyMode: DEFAULT_SOURCE_COVER_PROXY_MODE,
       DisableYellowFilter:
         process.env.NEXT_PUBLIC_DISABLE_YELLOW_FILTER === 'true',
@@ -547,6 +544,9 @@ export function configSelfCheck(adminConfig: AdminConfig): AdminConfig {
   if (typeof adminConfig.SiteConfig.EnableLiveEntry !== 'boolean') {
     adminConfig.SiteConfig.EnableLiveEntry = false;
   }
+  if (adminConfig.SiteConfig.LiveAccess !== 'groups') {
+    adminConfig.SiteConfig.LiveAccess = 'all';
+  }
   if (typeof adminConfig.SiteConfig.DefaultAggregateSearch !== 'boolean') {
     adminConfig.SiteConfig.DefaultAggregateSearch = true;
   }
@@ -562,78 +562,43 @@ export function configSelfCheck(adminConfig: AdminConfig): AdminConfig {
   if (typeof adminConfig.SiteConfig.EnableDanmaku !== 'boolean') {
     adminConfig.SiteConfig.EnableDanmaku = false;
   }
+  if (typeof adminConfig.SiteConfig.EnableUserDanmaku !== 'boolean') {
+    adminConfig.SiteConfig.EnableUserDanmaku = false;
+  }
   if (typeof adminConfig.SiteConfig.FluidSearch !== 'boolean') {
     adminConfig.SiteConfig.FluidSearch =
       process.env.NEXT_PUBLIC_FLUID_SEARCH !== 'false';
   }
-  Object.assign(
-    adminConfig.SiteConfig,
-    normalizeRuntimeParams(adminConfig.SiteConfig),
-  );
-  adminConfig.SiteConfig.DoubanProxyType = normalizeSiteDoubanProxyType(
-    adminConfig.SiteConfig.DoubanProxyType,
-  );
-  adminConfig.SiteConfig.DoubanProxy = '';
-  adminConfig.SiteConfig.BangumiDataSource = normalizeSiteBangumiDataSource(
-    adminConfig.SiteConfig.BangumiDataSource || DEFAULT_BANGUMI_DATA_SOURCE,
-  );
-  if (typeof adminConfig.SiteConfig.BangumiProxy !== 'string') {
-    adminConfig.SiteConfig.BangumiProxy =
-      process.env.NEXT_PUBLIC_BANGUMI_PROXY || '';
-  }
-  adminConfig.SiteConfig.BangumiProxy = '';
-  adminConfig.SiteConfig.DoubanImageProxyType =
-    normalizeSiteDoubanImageProxyType(
-      adminConfig.SiteConfig.DoubanImageProxyType,
-    );
-  adminConfig.SiteConfig.DoubanImageProxy = '';
-  adminConfig.SiteConfig.SourceCoverProxyMode = normalizeSourceCoverProxyMode(
-    adminConfig.SiteConfig.SourceCoverProxyMode,
-  );
-
-  // 站长变更自检
-  const ownerUser = getOwnerUsername();
-  const normalizedOwnerUser = normalizeUsername(ownerUser || '');
-
-  adminConfig.UserConfig.Users = adminConfig.UserConfig.Users.map((user) => {
-    const normalized = normalizeUsername(user.username || '');
-    return {
-      ...user,
-      username: normalized === normalizedOwnerUser ? ownerUser! : normalized,
-    };
-  }).filter((user) => Boolean(user.username));
-
-  // 去重
-  const seenUsernames = new Set<string>();
-  adminConfig.UserConfig.Users = adminConfig.UserConfig.Users.filter((user) => {
-    const dedupeKey = normalizeUsername(user.username);
-    if (seenUsernames.has(dedupeKey)) {
-      return false;
-    }
-    seenUsernames.add(dedupeKey);
-    return true;
-  });
-  // 过滤站长
-  const originOwnerCfg = adminConfig.UserConfig.Users.find(
-    (u) => normalizeUsername(u.username) === normalizedOwnerUser,
-  );
-  adminConfig.UserConfig.Users = adminConfig.UserConfig.Users.filter(
-    (user) => normalizeUsername(user.username) !== normalizedOwnerUser,
-  );
-  // 其他用户不得拥有 owner 权限
-  adminConfig.UserConfig.Users.forEach((user) => {
-    if (user.role === 'owner') {
-      user.role = 'user';
-    }
-  });
-  // 重新添加回站长
-  adminConfig.UserConfig.Users.unshift({
-    username: ownerUser!,
-    role: 'owner',
-    banned: false,
-    enabledApis: originOwnerCfg?.enabledApis || undefined,
-    tags: originOwnerCfg?.tags || undefined,
-  });
+  const site = adminConfig.SiteConfig;
+  adminConfig.SiteConfig = {
+    SiteName: site.SiteName,
+    SiteIcon: site.SiteIcon,
+    Announcement: site.Announcement,
+    AnnouncementVersion: site.AnnouncementVersion,
+    AnnouncementPublishedAt: site.AnnouncementPublishedAt,
+    FooterText: site.FooterText,
+    EnableLiveEntry: site.EnableLiveEntry,
+    LiveAccess: site.LiveAccess,
+    DefaultAggregateSearch: site.DefaultAggregateSearch,
+    EnableOptimization: site.EnableOptimization,
+    LiveDirectConnect: site.LiveDirectConnect,
+    AutoSwitchSource: site.AutoSwitchSource,
+    EnableDanmaku: site.EnableDanmaku,
+    EnableUserDanmaku: site.EnableUserDanmaku,
+    ...normalizeRuntimeParams(site),
+    DoubanProxyType: normalizeSiteDoubanProxyType(site.DoubanProxyType),
+    BangumiDataSource: normalizeSiteBangumiDataSource(
+      site.BangumiDataSource || DEFAULT_BANGUMI_DATA_SOURCE,
+    ),
+    DoubanImageProxyType: normalizeSiteDoubanImageProxyType(
+      site.DoubanImageProxyType,
+    ),
+    SourceCoverProxyMode: normalizeSourceCoverProxyMode(
+      site.SourceCoverProxyMode,
+    ),
+    DisableYellowFilter: site.DisableYellowFilter,
+    FluidSearch: site.FluidSearch,
+  };
 
   // 视频源去重
   const seenSourceKeys = new Set<string>();
@@ -677,7 +642,7 @@ export function configSelfCheck(adminConfig: AdminConfig): AdminConfig {
     return true;
   });
 
-  return adminConfig;
+  return stripConfigState(adminConfig);
 }
 
 function trimConfigString(value: unknown): string {
@@ -694,18 +659,8 @@ function trimOptionalConfigString(value: unknown): string | undefined {
 }
 
 export async function resetConfig() {
-  let originConfig: AdminConfig | null = null;
-  try {
-    originConfig = await db.getAdminConfig();
-  } catch (e) {
-    console.error('获取管理员配置失败:', e);
-  }
-  if (!originConfig) {
-    originConfig = {} as AdminConfig;
-  }
   const adminConfig = await getInitConfig(
-    originConfig.ConfigFile,
-    originConfig.ConfigSubscribtion,
+    (await db.getConfigSubscription()).ConfigFile,
   );
   await db.saveAdminConfig(adminConfig);
   configCacheGeneration += 1;
@@ -717,15 +672,24 @@ export async function resetConfig() {
   return;
 }
 
-export async function saveConfig(config: AdminConfig): Promise<AdminConfig> {
+export async function saveConfig(
+  config: AdminConfig,
+  state?: ConfigStateUpdate,
+): Promise<AdminConfig> {
   const expectedVersion = configVersionByObject.get(config);
-  const nextConfig = await syncConfigUsersWithDb(
-    configSelfCheck(cloneConfig(config)),
-  );
-  if (expectedVersion) {
-    await assertConfigVersion(expectedVersion);
+  const nextConfig = configSelfCheck(cloneConfig(config));
+  const current = await db.getAdminConfig();
+  if (
+    expectedVersion &&
+    (!current ||
+      getConfigVersion(configSelfCheck(cloneConfig(current))) !==
+        expectedVersion)
+  ) {
+    throw new ConfigConflictError();
   }
-  await db.saveAdminConfig(nextConfig);
+  if (!(await db.compareAndSetAdminConfig(current, nextConfig, state))) {
+    throw new ConfigConflictError();
+  }
   configCacheGeneration += 1;
   cachedConfig = cloneConfig(nextConfig);
   cachedConfigVersion = getConfigVersion(cachedConfig);
@@ -739,82 +703,6 @@ export class ConfigConflictError extends Error {
     super('配置已被其他操作更新，请刷新后重试');
     this.name = 'ConfigConflictError';
   }
-}
-
-async function assertConfigVersion(expectedVersion: string): Promise<void> {
-  const currentConfig = await db.getAdminConfig();
-  if (!currentConfig) {
-    if (expectedVersion !== '') {
-      throw new ConfigConflictError();
-    }
-    return;
-  }
-
-  if (getConfigVersion(configSelfCheck(currentConfig)) !== expectedVersion) {
-    throw new ConfigConflictError();
-  }
-}
-
-async function syncConfigUsersWithDb(
-  adminConfig: AdminConfig,
-): Promise<AdminConfig> {
-  let userNames: string[];
-  try {
-    userNames = await db.getAllUsers();
-  } catch (error) {
-    console.error('获取用户列表失败:', error);
-    return adminConfig;
-  }
-
-  const ownerUsername = getOwnerUsername();
-  const existingUsers = new Map(
-    adminConfig.UserConfig.Users.map((user) => [
-      normalizeUsername(user.username),
-      user,
-    ]),
-  );
-  const nextUsers: ManagedUser[] = [];
-  const seenUsernames = new Set<string>();
-
-  const normalizedOwnerUsername = normalizeUsername(ownerUsername || '');
-
-  if (ownerUsername) {
-    const ownerEntry =
-      existingUsers.get(ownerUsername) ||
-      existingUsers.get(normalizedOwnerUsername);
-    nextUsers.push({
-      username: ownerUsername,
-      role: 'owner',
-      banned: false,
-      enabledApis: cloneStringList(ownerEntry?.enabledApis),
-      tags: cloneStringList(ownerEntry?.tags),
-    });
-    seenUsernames.add(normalizedOwnerUsername);
-  }
-
-  for (const userName of userNames) {
-    const normalizedUserName = normalizeUsername(userName);
-    if (!normalizedUserName || seenUsernames.has(normalizedUserName)) {
-      continue;
-    }
-
-    const existingUser = existingUsers.get(normalizedUserName);
-    nextUsers.push({
-      username: normalizedUserName,
-      role: existingUser?.role === 'admin' ? 'admin' : 'user',
-      banned: !!existingUser?.banned,
-      enabledApis: cloneStringList(existingUser?.enabledApis),
-      tags: cloneStringList(existingUser?.tags),
-    });
-    seenUsernames.add(normalizedUserName);
-  }
-
-  adminConfig.UserConfig.Users = nextUsers;
-  return adminConfig;
-}
-
-function cloneStringList(value?: string[]): string[] | undefined {
-  return Array.isArray(value) ? [...value] : undefined;
 }
 
 export function getCacheTime(config: Readonly<AdminConfig>): number;
@@ -842,18 +730,21 @@ export async function getAvailableApiSites(
   config?: Readonly<AdminConfig>,
 ): Promise<ApiSite[]> {
   const currentConfig = config || (await getConfigForRead());
-  const allApiSites = currentConfig.SourceConfig.filter((s) => !s.disabled).map(
-    toApiSite,
-  );
+  const enabledSources = currentConfig.SourceConfig.filter((s) => !s.disabled);
 
   if (!user) {
-    return allApiSites;
+    return enabledSources.map(toApiSite);
   }
 
   const lookupUsername = normalizeUsername(user);
-  const userConfig = currentConfig.UserConfig.Users.find(
-    (u) => u.username === lookupUsername,
-  );
+  const userConfig = await db.getUserAccess(lookupUsername);
+  const isStaff =
+    lookupUsername === normalizeUsername(getOwnerUsername()) ||
+    userConfig?.role === 'admin' ||
+    userConfig?.role === 'owner';
+  const allApiSites = (
+    isStaff ? enabledSources : enabledSources.filter((s) => !s.adminOnly)
+  ).map(toApiSite);
   if (!userConfig) {
     return allApiSites;
   }
@@ -962,13 +853,13 @@ export async function getPublicConfig() {
     FooterText: normalizeSiteFooterText(config.SiteConfig.FooterText),
     OpenRegister: !!config.UserConfig.OpenRegister,
     RequireInviteCode: !!config.UserConfig.RequireInviteCode,
-    DisableYellowFilter: config.SiteConfig.DisableYellowFilter,
     EnableLiveEntry: config.SiteConfig.EnableLiveEntry,
     DefaultAggregateSearch: config.SiteConfig.DefaultAggregateSearch,
     EnableOptimization: config.SiteConfig.EnableOptimization,
     LiveDirectConnect: config.SiteConfig.LiveDirectConnect,
     AutoSwitchSource: config.SiteConfig.AutoSwitchSource,
     EnableDanmaku: config.SiteConfig.EnableDanmaku,
+    EnableUserDanmaku: config.SiteConfig.EnableUserDanmaku,
     ...normalizeRuntimeParams(config.SiteConfig),
     DoubanProxyType: getPublicDoubanProxyType(
       config.SiteConfig.DoubanProxyType,

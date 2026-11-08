@@ -2,6 +2,7 @@
 
 import { Dices } from 'lucide-react';
 
+import { buttonStyles } from '@/features/admin/lib/buttonStyles';
 import { generateRandomPassword } from '@/lib/random-password';
 
 interface RandomPasswordButtonProps {
@@ -20,9 +21,9 @@ export function RandomPasswordButton({
       disabled={disabled}
       title='随机生成密码'
       aria-label='随机生成密码'
-      className='flex h-[42px] w-[42px] shrink-0 items-center justify-center rounded-lg border border-gray-300 bg-white text-gray-500 transition-colors hover:border-blue-500 hover:text-blue-600 disabled:cursor-not-allowed disabled:opacity-50 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-400 dark:hover:border-blue-500 dark:hover:text-blue-400'
+      className={`${buttonStyles.outline} flex h-9 w-9 shrink-0 items-center justify-center disabled:cursor-not-allowed disabled:opacity-50`}
     >
-      <Dices className='h-4 w-4' />
+      <Dices className='h-4 w-4 shrink-0' />
     </button>
   );
 }

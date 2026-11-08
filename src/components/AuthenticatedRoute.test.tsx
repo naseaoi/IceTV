@@ -1,6 +1,8 @@
 import { fireEvent, render, screen } from '@testing-library/react';
-import type { ReactNode } from 'react';
+import { type ReactNode, Suspense } from 'react';
 
+import { installCryptoPolyfill } from '@/app/api/test-utils/crypto-polyfill';
+import ContinueWatchingLayout from '@/app/continue-watching/layout';
 import AuthenticatedRoute from '@/components/AuthenticatedRoute';
 import { useAuthSession } from '@/components/AuthProvider';
 
@@ -32,6 +34,8 @@ jest.mock('@/components/AuthProvider', () => ({
   useAuthSession: jest.fn(),
 }));
 
+installCryptoPolyfill();
+
 const mockUseAuthSession = useAuthSession as jest.MockedFunction<
   typeof useAuthSession
 >;
@@ -45,6 +49,36 @@ describe('AuthenticatedRoute', () => {
       isRefreshing: false,
       refreshSession: mockRefreshSession,
     });
+  });
+
+  it('继续观看布局在 Suspense 骨架之前阻止游客挂载且保持当前地址', () => {
+    window.history.replaceState(null, '', '/continue-watching');
+    const pending = new Promise<never>(() => {});
+    const protectedContent = jest.fn(() => {
+      throw pending;
+    });
+    const ProtectedContent = protectedContent;
+
+    render(
+      <ContinueWatchingLayout>
+        <Suspense fallback={<div>继续观看骨架</div>}>
+          <ProtectedContent />
+        </Suspense>
+      </ContinueWatchingLayout>,
+    );
+
+    expect(screen.getByText('需要登录')).toBeInTheDocument();
+    expect(
+      screen.getByText('请先登录后再查看继续观看记录。'),
+    ).toBeInTheDocument();
+    expect(screen.queryByText('继续观看骨架')).not.toBeInTheDocument();
+    expect(protectedContent).not.toHaveBeenCalled();
+    expect(window.location.pathname).toBe('/continue-watching');
+    expect(screen.getByRole('link', { name: '前往登录' })).toHaveAttribute(
+      'href',
+      '/login?redirect=%2Fcontinue-watching',
+    );
+    window.history.replaceState(null, '', '/');
   });
 
   it('游客直接显示登录提示且不挂载受保护内容', () => {
@@ -61,7 +95,14 @@ describe('AuthenticatedRoute', () => {
 
   it('服务端确认的有效会话首次渲染就挂载受保护内容', () => {
     mockUseAuthSession.mockReturnValue({
-      session: { status: 'authenticated', username: 'alice', role: 'user' },
+      session: {
+        status: 'authenticated',
+        profileId: 'profileAlice',
+        avatarSeed: null,
+        nickname: '爱丽丝',
+        username: 'alice',
+        role: 'user',
+      },
       isRefreshing: false,
       refreshSession: mockRefreshSession,
     });
@@ -78,7 +119,14 @@ describe('AuthenticatedRoute', () => {
 
   it('普通用户不能挂载管理员页面', () => {
     mockUseAuthSession.mockReturnValue({
-      session: { status: 'authenticated', username: 'alice', role: 'user' },
+      session: {
+        status: 'authenticated',
+        profileId: 'profileAlice',
+        avatarSeed: null,
+        nickname: '爱丽丝',
+        username: 'alice',
+        role: 'user',
+      },
       isRefreshing: false,
       refreshSession: mockRefreshSession,
     });
@@ -104,7 +152,14 @@ describe('AuthenticatedRoute', () => {
 
   it.each(['admin', 'owner'] as const)('%s 可以挂载管理员页面', (role) => {
     mockUseAuthSession.mockReturnValue({
-      session: { status: 'authenticated', username: 'alice', role },
+      session: {
+        status: 'authenticated',
+        profileId: 'profileAlice',
+        avatarSeed: null,
+        nickname: '爱丽丝',
+        username: 'alice',
+        role,
+      },
       isRefreshing: false,
       refreshSession: mockRefreshSession,
     });
@@ -155,4 +210,26 @@ describe('AuthenticatedRoute', () => {
     fireEvent.click(screen.getByRole('button', { name: '重新验证' }));
     expect(mockRefreshSession).toHaveBeenCalledTimes(1);
   });
+});
+
+it('昵称未设置时先展示资料门禁，业务内容保持未挂载', () => {
+  mockUseAuthSession.mockReturnValue({
+    session: {
+      status: 'authenticated',
+      username: 'private-login',
+      role: 'user',
+      profileId: 'profileAlice',
+      avatarSeed: null,
+      nickname: null,
+    },
+    isRefreshing: false,
+    refreshSession: mockRefreshSession,
+  });
+  render(
+    <AuthenticatedRoute activePath='/me' message='请登录'>
+      <div>受保护业务</div>
+    </AuthenticatedRoute>,
+  );
+  expect(screen.getByText('设置你的昵称')).toBeInTheDocument();
+  expect(screen.queryByText('受保护业务')).not.toBeInTheDocument();
 });

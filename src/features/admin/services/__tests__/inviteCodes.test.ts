@@ -201,12 +201,12 @@ describe('sanitizeInviteCodes 次数字段', () => {
       { ...makeCode(), maxUses: 0, usedCount: 2 },
     ]);
     expect(zero.maxUses).toBeUndefined();
-    expect(zero.usedCount).toBeUndefined();
+    expect(zero.usedCount).toBe(2);
 
     const [bad] = sanitizeInviteCodes([
       { ...makeCode(), maxUses: 'many', usedCount: 2 },
     ]);
     expect(bad.maxUses).toBeUndefined();
-    expect(bad.usedCount).toBeUndefined();
+    expect(bad.usedCount).toBe(2);
   });
 });

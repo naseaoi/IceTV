@@ -13,13 +13,13 @@ export interface RuntimeConfig {
   BANGUMI_PROXY: string;
   DOUBAN_IMAGE_PROXY_TYPE: string;
   DOUBAN_IMAGE_PROXY: string;
-  DISABLE_YELLOW_FILTER: boolean;
   ENABLE_LIVE_ENTRY: boolean;
   DEFAULT_AGGREGATE_SEARCH: boolean;
   ENABLE_OPTIMIZATION: boolean;
   LIVE_DIRECT_CONNECT: boolean;
   AUTO_SWITCH_SOURCE: boolean;
   ENABLE_DANMAKU: boolean;
+  ENABLE_USER_DANMAKU: boolean;
   CUSTOM_CATEGORIES: { name: string; type: 'movie' | 'tv'; query: string }[];
   FLUID_SEARCH: boolean;
   VOD_PAGE_TIMEOUT_SECONDS: number;
@@ -29,6 +29,7 @@ export interface RuntimeConfig {
   SEARCH_HISTORY_LIMIT: number;
   CONTINUE_WATCHING_LIMIT: number;
   COVER_IMAGE_CACHE_SIZE: number;
+  IMAGE_PROXY_TIMEOUT_SECONDS: number;
   SOURCE_COVER_PROXY_MODE: SourceCoverProxyMode;
 }
 
@@ -45,13 +46,13 @@ export const DEFAULT_RUNTIME_CONFIG: RuntimeConfig = {
   BANGUMI_PROXY: '',
   DOUBAN_IMAGE_PROXY_TYPE: 'direct',
   DOUBAN_IMAGE_PROXY: '',
-  DISABLE_YELLOW_FILTER: false,
   ENABLE_LIVE_ENTRY: false,
   DEFAULT_AGGREGATE_SEARCH: true,
   ENABLE_OPTIMIZATION: true,
   LIVE_DIRECT_CONNECT: false,
   AUTO_SWITCH_SOURCE: false,
   ENABLE_DANMAKU: false,
+  ENABLE_USER_DANMAKU: false,
   CUSTOM_CATEGORIES: [],
   FLUID_SEARCH: true,
   VOD_PAGE_TIMEOUT_SECONDS: 15,
@@ -61,6 +62,7 @@ export const DEFAULT_RUNTIME_CONFIG: RuntimeConfig = {
   SEARCH_HISTORY_LIMIT: 20,
   CONTINUE_WATCHING_LIMIT: 10,
   COVER_IMAGE_CACHE_SIZE: 500,
+  IMAGE_PROXY_TIMEOUT_SECONDS: 15,
   SOURCE_COVER_PROXY_MODE: 'auto',
 };
 
@@ -88,13 +90,13 @@ export type ServerConfigPayload = {
   BangumiProxy?: string;
   DoubanImageProxyType?: string;
   DoubanImageProxy?: string;
-  DisableYellowFilter?: boolean;
   EnableLiveEntry?: boolean;
   DefaultAggregateSearch?: boolean;
   EnableOptimization?: boolean;
   LiveDirectConnect?: boolean;
   AutoSwitchSource?: boolean;
   EnableDanmaku?: boolean;
+  EnableUserDanmaku?: boolean;
   CustomCategories?: RuntimeConfig['CUSTOM_CATEGORIES'];
   FluidSearch?: boolean;
   VodPageTimeoutSeconds?: number;
@@ -104,6 +106,7 @@ export type ServerConfigPayload = {
   SearchHistoryLimit?: number;
   ContinueWatchingLimit?: number;
   CoverImageCacheSize?: number;
+  ImageProxyTimeoutSeconds?: number;
   SourceCoverProxyMode?: SourceCoverProxyMode;
 };
 
@@ -111,7 +114,6 @@ declare global {
   interface Window {
     RUNTIME_CONFIG?: RuntimeConfig;
     __runtimeConfigReady?: boolean;
-    __sidebarCollapsed?: boolean;
   }
 }
 
@@ -148,10 +150,6 @@ function runtimeConfigFromServerConfig(
       DEFAULT_RUNTIME_CONFIG.DOUBAN_IMAGE_PROXY_TYPE,
     DOUBAN_IMAGE_PROXY:
       data.DoubanImageProxy || DEFAULT_RUNTIME_CONFIG.DOUBAN_IMAGE_PROXY,
-    DISABLE_YELLOW_FILTER:
-      data.DisableYellowFilter === undefined
-        ? DEFAULT_RUNTIME_CONFIG.DISABLE_YELLOW_FILTER
-        : data.DisableYellowFilter,
     ENABLE_LIVE_ENTRY:
       data.EnableLiveEntry === undefined
         ? DEFAULT_RUNTIME_CONFIG.ENABLE_LIVE_ENTRY
@@ -176,6 +174,10 @@ function runtimeConfigFromServerConfig(
       data.EnableDanmaku === undefined
         ? DEFAULT_RUNTIME_CONFIG.ENABLE_DANMAKU
         : data.EnableDanmaku,
+    ENABLE_USER_DANMAKU:
+      data.EnableUserDanmaku === undefined
+        ? DEFAULT_RUNTIME_CONFIG.ENABLE_USER_DANMAKU
+        : data.EnableUserDanmaku,
     CUSTOM_CATEGORIES:
       data.CustomCategories || DEFAULT_RUNTIME_CONFIG.CUSTOM_CATEGORIES,
     FLUID_SEARCH:
@@ -201,6 +203,9 @@ function runtimeConfigFromServerConfig(
       DEFAULT_RUNTIME_CONFIG.CONTINUE_WATCHING_LIMIT,
     COVER_IMAGE_CACHE_SIZE:
       data.CoverImageCacheSize ?? DEFAULT_RUNTIME_CONFIG.COVER_IMAGE_CACHE_SIZE,
+    IMAGE_PROXY_TIMEOUT_SECONDS:
+      data.ImageProxyTimeoutSeconds ??
+      DEFAULT_RUNTIME_CONFIG.IMAGE_PROXY_TIMEOUT_SECONDS,
     SOURCE_COVER_PROXY_MODE:
       data.SourceCoverProxyMode ??
       DEFAULT_RUNTIME_CONFIG.SOURCE_COVER_PROXY_MODE,

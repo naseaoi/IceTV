@@ -3,6 +3,7 @@ import { act, fireEvent, render, screen } from '@testing-library/react';
 import { AuthProvider, useAuthSession } from '@/components/AuthProvider';
 import { AUTH_SESSION_LOST_EVENT } from '@/lib/auth.client';
 import { getClientAuthSession } from '@/lib/auth-session.client';
+import { PROFILE_REQUIRED_EVENT } from '@/lib/profile.client';
 
 jest.mock('@/lib/auth-session.client', () => ({
   getClientAuthSession: jest.fn(),
@@ -36,6 +37,9 @@ describe('AuthProvider', () => {
       <AuthProvider
         initialSession={{
           status: 'authenticated',
+          profileId: 'profileAlice',
+          avatarSeed: null,
+          nickname: '爱丽丝',
           username: 'alice',
           role: 'user',
         }}
@@ -53,6 +57,9 @@ describe('AuthProvider', () => {
       <AuthProvider
         initialSession={{
           status: 'authenticated',
+          profileId: 'profileAlice',
+          avatarSeed: null,
+          nickname: '爱丽丝',
           username: 'alice',
           role: 'user',
         }}
@@ -71,6 +78,9 @@ describe('AuthProvider', () => {
   it('只在显式刷新时调用客户端会话接口', async () => {
     mockGetClientAuthSession.mockResolvedValue({
       status: 'authenticated',
+      profileId: 'profileAlice',
+      avatarSeed: null,
+      nickname: '爱丽丝',
       username: 'alice',
       role: 'user',
     });
@@ -87,4 +97,34 @@ describe('AuthProvider', () => {
     expect(mockGetClientAuthSession).toHaveBeenCalledTimes(1);
     expect(screen.getByText('idle')).toBeInTheDocument();
   });
+});
+
+it('昵称缺失事件触发显式会话刷新', async () => {
+  jest.clearAllMocks();
+  mockGetClientAuthSession.mockResolvedValue({
+    status: 'authenticated',
+    username: 'alice',
+    profileId: 'profileAlice',
+    avatarSeed: null,
+    nickname: null,
+    role: 'user',
+  });
+  render(
+    <AuthProvider
+      initialSession={{
+        status: 'authenticated',
+        username: 'alice',
+        profileId: 'profileAlice',
+        avatarSeed: null,
+        nickname: '爱丽丝',
+        role: 'user',
+      }}
+    >
+      <SessionConsumer />
+    </AuthProvider>,
+  );
+  await act(async () => {
+    window.dispatchEvent(new Event(PROFILE_REQUIRED_EVENT));
+  });
+  expect(mockGetClientAuthSession).toHaveBeenCalledTimes(1);
 });

@@ -1,3 +1,5 @@
+import { readStorage, writeStorage } from '@/lib/browser-storage';
+
 export const PLAYER_SHORTCUTS_STORAGE_KEY = 'playerShortcuts';
 export const PLAYER_SHORTCUTS_CHANGED_EVENT = 'icetv:player-shortcuts-changed';
 export const OPEN_PLAYER_SHORTCUTS_EVENT = 'icetv:open-player-shortcuts';
@@ -102,7 +104,7 @@ export function readPlayerShortcuts(): PlayerShortcutMap {
     return { ...DEFAULT_PLAYER_SHORTCUTS };
   }
 
-  const raw = window.localStorage.getItem(PLAYER_SHORTCUTS_STORAGE_KEY);
+  const raw = readStorage(PLAYER_SHORTCUTS_STORAGE_KEY);
   if (!raw) {
     return { ...DEFAULT_PLAYER_SHORTCUTS };
   }
@@ -131,10 +133,7 @@ export function readPlayerShortcuts(): PlayerShortcutMap {
 
 export function writePlayerShortcuts(map: PlayerShortcutMap): void {
   if (typeof window === 'undefined') return;
-  window.localStorage.setItem(
-    PLAYER_SHORTCUTS_STORAGE_KEY,
-    JSON.stringify(map),
-  );
+  writeStorage(PLAYER_SHORTCUTS_STORAGE_KEY, JSON.stringify(map));
   window.dispatchEvent(new CustomEvent(PLAYER_SHORTCUTS_CHANGED_EVENT));
 }
 

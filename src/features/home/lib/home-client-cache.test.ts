@@ -11,6 +11,7 @@ const initialData: HomeInitialData = {
   hotTvShows: [],
   hotVarietyShows: [],
   bangumiCalendarData: [],
+  heroItems: [],
 };
 
 describe('home-client-cache', () => {

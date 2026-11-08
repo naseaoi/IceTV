@@ -82,7 +82,7 @@ const RuntimeParamsTab = ({
         }
 
         setBaselineRuntimeParams(normalizedRuntimeParams);
-        showSuccess('保存成功', showAlert);
+        showSuccess('保存成功');
         await refreshConfig();
       });
     } catch (err) {
@@ -105,13 +105,7 @@ const RuntimeParamsTab = ({
     setRuntimeParams((previous) => ({ ...previous, [key]: value }));
   };
 
-  if (!config) {
-    return (
-      <div className='text-center text-gray-500 dark:text-gray-400'>
-        加载中...
-      </div>
-    );
-  }
+  if (!config) return null;
 
   return (
     <form
@@ -122,34 +116,34 @@ const RuntimeParamsTab = ({
         const details = event.target.closest('details');
         if (details) details.open = true;
       }}
+      className='space-y-8'
     >
-      <div className='grid grid-cols-1 gap-4 lg:grid-cols-2'>
-        {COMMON_RUNTIME_PARAM_GROUPS.map((group) => (
-          <RuntimeParamSection
-            key={group.id}
-            group={group}
-            values={runtimeParams}
-            onChange={handleParamChange}
-            status={
-              group.id === 'danmaku'
-                ? config.SiteConfig.EnableDanmaku
-                  ? '站点已开启'
-                  : '站点未开启'
-                : undefined
-            }
-          />
-        ))}
-      </div>
+      {COMMON_RUNTIME_PARAM_GROUPS.map((group) => (
+        <RuntimeParamSection
+          key={group.id}
+          group={group}
+          values={runtimeParams}
+          onChange={handleParamChange}
+          status={
+            group.id === 'danmaku'
+              ? config.SiteConfig.EnableDanmaku
+                ? '站点已开启'
+                : '站点未开启'
+              : undefined
+          }
+        />
+      ))}
 
-      <details className='group mt-4 rounded-lg border border-gray-200 bg-gray-50/60 dark:border-gray-700 dark:bg-gray-900/30'>
-        <summary className='flex cursor-pointer list-none items-center justify-between gap-3 rounded-lg px-4 py-3 text-sm font-medium text-gray-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 dark:text-gray-200 [&::-webkit-details-marker]:hidden'>
-          <span>高级参数</span>
+      <details className='group'>
+        <summary className='flex w-full cursor-pointer list-none items-center gap-3 rounded-lg py-1 text-base font-semibold text-gray-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-500 dark:text-gray-100 [&::-webkit-details-marker]:hidden'>
+          <span>高级</span>
+          <span className='h-px flex-1 bg-gray-200 dark:bg-white/[0.06]' />
           <ChevronDown
             aria-hidden
-            className='h-4 w-4 shrink-0 transition-transform group-open:rotate-180'
+            className='h-4 w-4 shrink-0 text-gray-400 transition-transform group-open:rotate-180'
           />
         </summary>
-        <div className='grid grid-cols-1 gap-4 px-4 pb-4 lg:grid-cols-2'>
+        <div className='mt-4'>
           {ADVANCED_RUNTIME_PARAM_GROUPS.map((group) => (
             <RuntimeParamSection
               key={group.id}

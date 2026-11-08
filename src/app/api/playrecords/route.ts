@@ -8,8 +8,8 @@ import {
   mergePlayRecordUpdateBaseline,
   normalizePlayRecordLimit,
   parsePlayRecordCursor,
-  selectRecentPlayRecords,
 } from '@/lib/play-records';
+import { isSeriesStatus } from '@/lib/series-status';
 import { PlayRecord } from '@/lib/types';
 import { parseStorageKey } from '@/lib/utils';
 
@@ -34,15 +34,16 @@ export async function GET(request: NextRequest) {
         headers: NO_STORE_HEADERS,
       });
     }
-    const records = await db.getAllPlayRecords(guardResult.username);
     const limitParam = searchParams.get('limit');
     const responseRecords =
       limitParam === null
-        ? records
-        : selectRecentPlayRecords(
-            records,
-            normalizePlayRecordLimit(limitParam),
-          );
+        ? await db.getAllPlayRecords(guardResult.username)
+        : (
+            await db.getPlayRecordPage(
+              guardResult.username,
+              normalizePlayRecordLimit(limitParam),
+            )
+          ).items;
     return NextResponse.json(responseRecords, {
       status: 200,
       headers: NO_STORE_HEADERS,
@@ -72,7 +73,15 @@ export async function POST(request: NextRequest) {
     }
 
     // 验证播放记录数据
-    if (!record.title || !record.source_name || record.index < 1) {
+    if (
+      !record.title ||
+      !record.source_name ||
+      record.index < 1 ||
+      (record.series_status !== undefined &&
+        !isSeriesStatus(record.series_status)) ||
+      (record.tracking_enabled !== undefined &&
+        typeof record.tracking_enabled !== 'boolean')
+    ) {
       return NextResponse.json(
         { error: 'Invalid record data' },
         { status: 400 },

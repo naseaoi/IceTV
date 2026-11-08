@@ -1,8 +1,15 @@
 'use client';
 
-import { AlertTriangle } from 'lucide-react';
+import { X } from 'lucide-react';
 import { type ReactNode } from 'react';
 
+import {
+  MODAL_CLOSE_BUTTON_CLASS,
+  MODAL_DANGER_BUTTON_CLASS,
+  MODAL_PRIMARY_BUTTON_CLASS,
+  MODAL_SECONDARY_BUTTON_CLASS,
+  MODAL_TITLE_CLASS,
+} from '@/components/modals/modal-styles';
 import ModalShell from '@/components/modals/ModalShell';
 
 interface ConfirmModalProps {
@@ -51,10 +58,10 @@ export default function ConfirmModal({
 
   // 高级模式：有 children 时使用标题栏 + 关闭按钮布局
   if (children) {
-    const defaultConfirmCls =
-      'px-6 py-2.5 text-sm font-medium bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition-colors';
-    const defaultCancelCls =
-      'px-6 py-2.5 text-sm font-medium bg-gray-600 hover:bg-gray-700 text-white rounded-lg transition-colors';
+    const defaultConfirmCls = danger
+      ? MODAL_DANGER_BUTTON_CLASS
+      : MODAL_PRIMARY_BUTTON_CLASS;
+    const defaultCancelCls = MODAL_SECONDARY_BUTTON_CLASS;
 
     return (
       <ModalShell
@@ -62,34 +69,22 @@ export default function ConfirmModal({
         onClose={handleClose}
         panelClassName={containerClassName ?? 'max-w-2xl'}
       >
-        <div className='p-6'>
-          <div className='mb-6 flex items-center justify-between'>
-            <h3 className='text-xl font-semibold text-gray-900 dark:text-gray-100'>
-              {title}
-            </h3>
+        <div className='p-5 sm:p-6'>
+          <div className='mb-5 flex items-center justify-between gap-3'>
+            <h3 className={MODAL_TITLE_CLASS}>{title}</h3>
             <button
+              type='button'
               onClick={handleClose}
-              className='text-gray-400 transition-colors hover:text-gray-600 dark:hover:text-gray-300'
+              aria-label='关闭'
+              className={`${MODAL_CLOSE_BUTTON_CLASS} -mr-1.5`}
             >
-              <svg
-                className='h-6 w-6'
-                fill='none'
-                stroke='currentColor'
-                viewBox='0 0 24 24'
-              >
-                <path
-                  strokeLinecap='round'
-                  strokeLinejoin='round'
-                  strokeWidth={2}
-                  d='M6 18L18 6M6 6l12 12'
-                />
-              </svg>
+              <X className='h-4 w-4' />
             </button>
           </div>
 
           <div className='mb-6'>{children}</div>
 
-          <div className='flex justify-end space-x-3'>
+          <div className='flex justify-end gap-2'>
             <button
               onClick={handleClose}
               className={cancelClassName ?? defaultCancelCls}
@@ -109,12 +104,7 @@ export default function ConfirmModal({
     );
   }
 
-  // 简单模式：纯文本 message + 居中图标布局
-  // 点击确认后立即关闭弹窗，操作在后台执行
-  const defaultConfirmSimple = danger
-    ? 'bg-rose-600 hover:bg-rose-500'
-    : 'bg-blue-600 hover:bg-blue-500';
-
+  // 简单模式：点击确认后立即关闭弹窗，操作在后台执行
   const handleSimpleConfirm = () => {
     handleClose();
     onConfirm();
@@ -124,39 +114,31 @@ export default function ConfirmModal({
     <ModalShell
       isOpen={isOpen}
       onClose={handleClose}
-      panelClassName={containerClassName ?? 'max-w-md'}
+      panelClassName={containerClassName ?? 'max-w-sm'}
     >
-      <div className='p-6 sm:p-7'>
-        <div className='text-center'>
-          <span className='mx-auto inline-flex h-10 w-10 items-center justify-center rounded-full bg-amber-100 text-amber-600 dark:bg-amber-500/20 dark:text-amber-300'>
-            <AlertTriangle className='h-5 w-5' />
-          </span>
-          <h3 className='mt-4 text-lg font-semibold text-gray-900 dark:text-gray-100'>
-            {title}
-          </h3>
-          {message && (
-            <p className='mt-2 text-sm leading-6 text-gray-600 dark:text-gray-300'>
-              {message}
-            </p>
-          )}
-        </div>
+      <div className='p-5 sm:p-6'>
+        <h3 className={MODAL_TITLE_CLASS}>{title}</h3>
+        {message && (
+          <p className='mt-2 text-sm leading-6 text-gray-500 dark:text-gray-400'>
+            {message}
+          </p>
+        )}
 
-        <div className='mt-7 grid grid-cols-1 gap-3 sm:grid-cols-2'>
+        <div className='mt-6 flex justify-end gap-2'>
           <button
+            type='button'
             onClick={handleClose}
-            className={
-              cancelClassName ??
-              'rounded-xl border border-gray-200/70 bg-white px-4 py-2.5 text-sm font-medium text-gray-700 transition-colors hover:bg-gray-100/70 dark:border-white/10 dark:bg-gray-800/70 dark:text-gray-200 dark:hover:bg-white/[0.06]'
-            }
+            className={cancelClassName ?? MODAL_SECONDARY_BUTTON_CLASS}
           >
             {cancelText}
           </button>
           <button
+            type='button'
             onClick={handleSimpleConfirm}
             disabled={confirmDisabled}
             className={
               confirmClassName ??
-              `rounded-xl px-4 py-2.5 text-sm font-medium text-white transition-colors ${defaultConfirmSimple}`
+              (danger ? MODAL_DANGER_BUTTON_CLASS : MODAL_PRIMARY_BUTTON_CLASS)
             }
           >
             {confirmText}

@@ -1,15 +1,25 @@
+import { SPINNER_MARKUP } from '@/components/Spinner';
 import { resolveHlsBufferDefaults } from '@/lib/hls-buffer-policy';
 
 // ---------------------------------------------------------------------------
 // 视频源管理
 // ---------------------------------------------------------------------------
 
+// url 作为远程播放（AirPlay）的备选源追加在末尾。hls.js 在 ManagedMediaSource 下（iPadOS / Safari 17+）
+// 用 blob: 的 <source> 挂载媒体源，必须保留且排在最前；删掉它 Safari 会按顺序选中 m3u8 原生播放，
+// 绕过 hls.js 的清单处理（客户端去广告、线路回落等）。
 export function ensureVideoSource(video: HTMLVideoElement | null, url: string) {
   if (!video || !url) return;
-  const sources = Array.from(video.getElementsByTagName('source'));
-  const existed = sources.some((s) => s.src === url);
-  if (!existed) {
-    sources.forEach((s) => s.remove());
+  let hasTarget = false;
+  for (const source of Array.from(video.getElementsByTagName('source'))) {
+    if (source.src.startsWith('blob:')) continue;
+    if (source.src === url && !hasTarget) {
+      hasTarget = true;
+      continue;
+    }
+    source.remove();
+  }
+  if (!hasTarget) {
     const sourceEl = document.createElement('source');
     sourceEl.src = url;
     video.appendChild(sourceEl);
@@ -220,9 +230,6 @@ export interface ArtPlayerConfigOverrides {
   moreVideoAttr?: Record<string, unknown>;
 }
 
-const LOADING_ICON_SVG =
-  '<img src="data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSI1MCIgaGVpZ2h0PSI1MCIgdmlld0JveD0iMCAwIDUwIDUwIj48cGF0aCBkPSJNMjUuMjUxIDYuNDYxYy0xMC4zMTggMC0xOC42ODMgOC4zNjUtMTguNjgzIDE4LjY4M2g0LjA2OGMwLTguMDcgNi41NDUtMTQuNjE1IDE0LjYxNS0xNC42MTVWNi40NjF6IiBmaWxsPSIjMDA5Njg4Ij48YW5pbWF0ZVRyYW5zZm9ybSBhdHRyaWJ1dGVOYW1lPSJ0cmFuc2Zvcm0iIGF0dHJpYnV0ZVR5cGU9IlhNTCIgZHVyPSIxcyIgZnJvbT0iMCAyNSAyNSIgcmVwZWF0Q291bnQ9ImluZGVmaW5pdGUiIHRvPSIzNjAgMjUgMjUiIHR5cGU9InJvdGF0ZSIvPjwvcGF0aD48L3N2Zz4=">';
-
 /**
  * 创建 Artplayer 基础配置，VOD / Live 场景通过 overrides 差异化。
  * 不包含 container / url，这两个必须在调用端传入。
@@ -249,7 +256,8 @@ export function createArtPlayerConfig(overrides?: ArtPlayerConfigOverrides) {
     backdrop: false,
     playsInline: true,
     airplay: true,
-    theme: '#3b82f6',
+    // brand-400：深色画面上比 brand-500 更易辨认
+    theme: '#5fa8d8',
     lang: 'zh-cn' as const,
     hotkey: false,
     autoOrientation: true,
@@ -258,7 +266,7 @@ export function createArtPlayerConfig(overrides?: ArtPlayerConfigOverrides) {
       crossOrigin: 'anonymous',
       ...extraVideoAttr,
     },
-    icons: { loading: LOADING_ICON_SVG },
+    icons: { loading: SPINNER_MARKUP },
     // 以下为可覆盖的差异项
     isLive: false,
     setting: false,

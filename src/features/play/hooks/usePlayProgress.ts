@@ -154,6 +154,7 @@ export async function saveCurrentPlayProgress(
     cover: detailRef.current?.poster || '',
     index: currentEpisodeIndexRef.current + 1,
     total_episodes: detailRef.current?.episodes.length || 1,
+    series_status: detailRef.current?.series_status,
     ...(groupPosition
       ? {
           group_index: groupPosition.episodeOffset + 1,

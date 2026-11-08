@@ -1,3 +1,9 @@
+import {
+  readStorage,
+  removeStorage,
+  writeStorage,
+} from '@/lib/browser-storage';
+
 type ProxySourceHelperConfig<T extends string> = {
   values: readonly T[];
   defaultValue: T;
@@ -32,7 +38,7 @@ export function createProxySourceHelper<T extends string>({
       return defaultValue;
     }
 
-    const savedSource = window.localStorage.getItem(sourceStorageKey);
+    const savedSource = readStorage(sourceStorageKey);
     return savedSource === null
       ? readDefaultSource()
       : normalizeSource(savedSource);
@@ -40,16 +46,12 @@ export function createProxySourceHelper<T extends string>({
 
   function writeSource(value: unknown): T {
     const normalizedSource = normalizeSource(value);
-    if (typeof window !== 'undefined') {
-      window.localStorage.setItem(sourceStorageKey, normalizedSource);
-    }
+    writeStorage(sourceStorageKey, normalizedSource);
     return normalizedSource;
   }
 
   function resetSource(): void {
-    if (typeof window !== 'undefined') {
-      window.localStorage.removeItem(sourceStorageKey);
-    }
+    removeStorage(sourceStorageKey);
   }
 
   function readDefaultProxyUrl(): string {
@@ -65,20 +67,16 @@ export function createProxySourceHelper<T extends string>({
       return '';
     }
 
-    const savedProxyUrl = window.localStorage.getItem(proxyUrlStorageKey);
+    const savedProxyUrl = readStorage(proxyUrlStorageKey);
     return savedProxyUrl === null ? readDefaultProxyUrl() : savedProxyUrl;
   }
 
   function writeProxyUrl(value: string): void {
-    if (typeof window !== 'undefined') {
-      window.localStorage.setItem(proxyUrlStorageKey, value);
-    }
+    writeStorage(proxyUrlStorageKey, value);
   }
 
   function resetProxyUrl(): void {
-    if (typeof window !== 'undefined') {
-      window.localStorage.removeItem(proxyUrlStorageKey);
-    }
+    removeStorage(proxyUrlStorageKey);
   }
 
   return {

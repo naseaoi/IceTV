@@ -410,9 +410,6 @@ export function createVodM3u8Loader({
       bufferFullErrorDetail: Hls.ErrorDetails?.BUFFER_FULL_ERROR,
     });
     const failCurrentSource = (reason: string) => {
-      if (typeof hls.stopLoad === 'function') {
-        hls.stopLoad();
-      }
       if (sourceKey) {
         clearSourceProxyOverride(sourceKey, url);
       }
@@ -420,6 +417,12 @@ export function createVodM3u8Loader({
       if (onPlaybackRecoveryExhausted?.(reason)) {
         return;
       }
+      // 自动换源接手时由换源流程释放；否则先取消恢复与探测，再停止加载，保留实例供手动重试。
+      runManagedVideoCleanup(video);
+      if (typeof hls.stopLoad === 'function') {
+        hls.stopLoad();
+      }
+      video.pause();
       setIsVideoLoading(false);
       setRealtimeLoadSpeed('');
       setError('当前源加载失败');

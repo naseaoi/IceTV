@@ -1,4 +1,4 @@
-﻿import type { AdminConfig } from '@/types/admin';
+import type { AdminConfig } from '@/types/admin';
 
 type ConfigFileData = {
   api_site?: Record<string, unknown>;
@@ -47,8 +47,11 @@ export function removeConfigFileEntries(
   return JSON.stringify(parsed, null, 2);
 }
 
-export function buildConfigFileFromAdminConfig(config: AdminConfig): string {
-  const parsed = parseConfigFile(config.ConfigFile) || {};
+export function buildConfigFileFromAdminConfig(
+  config: AdminConfig,
+  configFile: string,
+): string {
+  const parsed = parseConfigFile(configFile) || {};
   const apiSiteEntries = config.SourceConfig.filter(
     (source) => source.key.trim() && source.name.trim() && source.api.trim(),
   ).map((source) => {

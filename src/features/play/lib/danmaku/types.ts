@@ -7,6 +7,8 @@ export interface DanmakuItem {
   time: number;
   mode: DanmakuMode;
   color: string;
+  // 插件按描边标出本人发送的弹幕
+  border?: boolean;
 }
 
 export interface DanmakuFetchResult {

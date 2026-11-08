@@ -147,13 +147,11 @@ describe('CoverImage', () => {
     expect(document.querySelector('[data-cover-loading-backdrop]')).toHaveClass(
       'z-[100]',
       'opacity-100',
-      'bg-gray-200/70',
-      'dark:bg-gray-700/60',
+      'skeleton-surface',
     );
-    expect(document.querySelector('.animate-shimmer')).toHaveClass(
-      'via-white/20',
-      'dark:via-white/12',
-    );
+    expect(
+      document.querySelector('[data-cover-loading-backdrop] .skeleton-sweep'),
+    ).toBeInTheDocument();
 
     Object.defineProperty(image, 'complete', {
       configurable: true,
@@ -191,11 +189,34 @@ describe('CoverImage', () => {
     );
 
     act(() => {
-      jest.advanceTimersByTime(8000);
+      jest.advanceTimersByTime(19_999);
+    });
+    expect(screen.getByTestId('cover-image')).toBeInTheDocument();
+
+    act(() => {
+      jest.advanceTimersByTime(1);
     });
 
     expect(screen.getByText('无封面')).toBeInTheDocument();
     expect(screen.queryByTestId('cover-image')).not.toBeInTheDocument();
+  });
+
+  it('超时不写入失败缓存，重新挂载会再次加载', () => {
+    jest.useFakeTimers();
+    const src =
+      'https://img1.doubanio.com/view/photo/s_ratio_poster/public/p2931173550.jpg';
+
+    const { unmount } = render(
+      <CoverImage src={src} alt='超时封面' priority />,
+    );
+    act(() => {
+      jest.advanceTimersByTime(20_000);
+    });
+    expect(screen.getByText('无封面')).toBeInTheDocument();
+    unmount();
+
+    render(<CoverImage src={src} alt='超时封面' priority />);
+    expect(screen.getByTestId('cover-image')).toBeInTheDocument();
   });
 
   it('缓存命中时首帧直接显示且不展示加载态', async () => {
@@ -222,7 +243,7 @@ describe('CoverImage', () => {
       document.querySelector('[data-cover-loading-backdrop]'),
     ).not.toHaveClass('cover-loading-backdrop-pending');
     expect(
-      document.querySelector('[data-cover-loading-backdrop] .animate-shimmer'),
+      document.querySelector('[data-cover-loading-backdrop] .skeleton-sweep'),
     ).not.toBeInTheDocument();
 
     fireEvent.load(image);
@@ -234,7 +255,7 @@ describe('CoverImage', () => {
       'opacity-0',
     );
     expect(
-      document.querySelector('[data-cover-loading-backdrop] .animate-shimmer'),
+      document.querySelector('[data-cover-loading-backdrop] .skeleton-sweep'),
     ).not.toBeInTheDocument();
   });
 
@@ -271,7 +292,7 @@ describe('CoverImage', () => {
         container.querySelector('[data-cover-loading-backdrop]'),
       ).toHaveAttribute('data-cover-state', 'revealed');
       expect(
-        container.querySelector('.animate-shimmer'),
+        container.querySelector('.skeleton-sweep'),
       ).not.toBeInTheDocument();
     } finally {
       if (root) {

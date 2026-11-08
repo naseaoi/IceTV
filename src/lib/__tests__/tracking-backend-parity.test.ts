@@ -49,6 +49,28 @@ const CASES: Record<string, PlayRecord> = {
     update_baseline_episodes: 10,
     tracking_enabled: true,
   }),
+  'k+ended-default': make(55, {
+    total_episodes: 12,
+    update_baseline_episodes: 10,
+    series_status: 'ended',
+  }),
+  'k+ended-enabled': make(54, {
+    total_episodes: 12,
+    update_baseline_episodes: 10,
+    series_status: 'ended',
+    tracking_enabled: true,
+  }),
+  'k+ongoing-default': make(53, {
+    total_episodes: 12,
+    update_baseline_episodes: 10,
+    series_status: 'ongoing',
+  }),
+  'k+ongoing-disabled': make(52, {
+    total_episodes: 12,
+    update_baseline_episodes: 10,
+    series_status: 'ongoing',
+    tracking_enabled: false,
+  }),
   'k+no-baseline': make(50, { total_episodes: 12 }),
   'k+group-unread': make(40, {
     group_index: 1,

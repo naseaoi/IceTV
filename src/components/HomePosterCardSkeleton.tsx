@@ -1,22 +1,46 @@
-export const HOME_POSTER_CARD_CLASS =
-  'home-poster-card w-[25vw] min-w-[25vw] sm:w-44 sm:min-w-[180px]';
+import {
+  HOME_POSTER_CARD_CLASS,
+  POSTER_CARD_COVER_CLASS,
+  POSTER_CARD_FIXED_TITLE_ROW_CLASS,
+  POSTER_CARD_SUBTITLE_ROW_CLASS,
+  POSTER_CARD_TITLE_ROW_CLASS,
+} from '@/components/poster-card-layout';
+import SkeletonText from '@/components/SkeletonText';
+
+// 覆盖 1680px 容器内的首屏与右侧露出的下一张，和真实横排共用挂载批量。
+export const HOME_RECOMMENDATION_INITIAL_COUNT = 10;
 
 interface HomePosterCardSkeletonProps {
   className?: string;
+  subtitle?: boolean;
+  // poster 对应 PosterCard 的固定标题行，video 对应 VideoCard 等自然行高
+  variant?: 'poster' | 'video';
 }
 
 export default function HomePosterCardSkeleton({
   className = HOME_POSTER_CARD_CLASS,
+  subtitle = false,
+  variant = 'video',
 }: HomePosterCardSkeletonProps) {
   return (
     <div className={className}>
       <div className='group relative w-full rounded-lg bg-transparent'>
-        <div className='relative aspect-[2/3] overflow-hidden rounded-lg bg-gray-200 dark:bg-gray-800'>
-          <div className='absolute inset-0 animate-pulse bg-gray-300 dark:bg-gray-700' />
-        </div>
-        <div className='mt-2 text-center'>
-          <div className='mx-auto h-5 w-4/5 animate-pulse rounded bg-gray-200 dark:bg-gray-800' />
-        </div>
+        <div
+          className={`skeleton relative overflow-hidden ${POSTER_CARD_COVER_CLASS}`}
+        />
+        <SkeletonText
+          className={
+            variant === 'poster' && !subtitle
+              ? POSTER_CARD_FIXED_TITLE_ROW_CLASS
+              : POSTER_CARD_TITLE_ROW_CLASS
+          }
+        />
+        {subtitle && (
+          <SkeletonText
+            className={POSTER_CARD_SUBTITLE_ROW_CLASS}
+            barClassName='h-3 w-1/2 rounded'
+          />
+        )}
       </div>
     </div>
   );

@@ -2,8 +2,13 @@
 
 import type { NextRequest } from 'next/server';
 
+import { installWebPolyfills } from '@/app/api/test-utils/web-polyfills';
 import { getOptionalActiveUser } from '@/lib/api-auth';
 import { getConfigForRead, getPublicConfig } from '@/lib/config';
+import { db } from '@/lib/db';
+
+jest.mock('@/lib/db', () => ({ db: { getUserAccess: jest.fn() } }));
+jest.mock('@/lib/env.server', () => ({ getOwnerUsername: () => 'owner' }));
 
 jest.mock('@/lib/api-auth', () => ({
   getOptionalActiveUser: jest.fn(),
@@ -23,66 +28,7 @@ jest.mock('@/lib/version', () => ({
   CURRENT_VERSION: 'test-version',
 }));
 
-if (!(globalThis as any).Headers) {
-  class MinimalHeaders {
-    private store: Record<string, string> = {};
-
-    constructor(init?: Record<string, string>) {
-      if (!init) return;
-      Object.entries(init).forEach(([key, value]) => {
-        this.set(key, value);
-      });
-    }
-
-    set(key: string, value: string) {
-      this.store[key.toLowerCase()] = String(value);
-    }
-
-    get(key: string) {
-      return this.store[key.toLowerCase()] ?? null;
-    }
-  }
-
-  (globalThis as any).Headers = MinimalHeaders;
-}
-
-if (!(globalThis as any).Request) {
-  (globalThis as any).Request = class {
-    constructor(
-      public url = '',
-      public init: Record<string, unknown> = {},
-    ) {}
-  };
-}
-
-if (!(globalThis as any).Response) {
-  class MinimalResponse {
-    body: string;
-    status: number;
-    headers: InstanceType<typeof Headers>;
-
-    constructor(body?: string, init?: { status?: number; headers?: any }) {
-      this.body = body || '';
-      this.status = init?.status ?? 200;
-      this.headers = new Headers(init?.headers || {});
-    }
-
-    static json(data: unknown, init?: { status?: number; headers?: any }) {
-      const headers = new Headers(init?.headers || {});
-      headers.set('content-type', 'application/json');
-      return new MinimalResponse(JSON.stringify(data), {
-        status: init?.status,
-        headers,
-      });
-    }
-
-    async json() {
-      return this.body ? JSON.parse(this.body) : null;
-    }
-  }
-
-  (globalThis as any).Response = MinimalResponse;
-}
+installWebPolyfills();
 
 function createPublicConfig() {
   return {
@@ -90,7 +36,6 @@ function createPublicConfig() {
     SiteIcon: '',
     Announcement: '',
     OpenRegister: false,
-    DisableYellowFilter: false,
     EnableLiveEntry: false,
     DefaultAggregateSearch: true,
     EnableOptimization: true,
@@ -109,12 +54,11 @@ function createPublicConfig() {
 function createConfig() {
   return {
     SiteConfig: {
+      EnableLiveEntry: false,
+      LiveAccess: 'all',
       DoubanProxyType: 'custom',
-      DoubanProxy: 'https://data.example/fetch?url=',
       BangumiDataSource: 'custom',
-      BangumiProxy: 'https://bangumi.example/fetch?url=',
       DoubanImageProxyType: 'custom',
-      DoubanImageProxy: 'https://image.example/fetch?url=',
     },
   };
 }
@@ -127,6 +71,53 @@ describe('server config route', () => {
     });
     (getPublicConfig as jest.Mock).mockResolvedValue(createPublicConfig());
     (getConfigForRead as jest.Mock).mockResolvedValue(createConfig());
+  });
+
+  it.each([
+    [null, 'all', true, [], true],
+    [null, 'groups', true, [], false],
+    ['user-1', 'all', true, [], true],
+    ['user-1', 'groups', true, ['live'], true],
+    ['user-1', 'groups', true, [], false],
+    ['owner', 'groups', true, [], true],
+    ['owner', 'groups', false, [], false],
+  ])(
+    'sets live visibility for %s / %s / %s / %j',
+    async (username, LiveAccess, EnableLiveEntry, tags, expected) => {
+      (getOptionalActiveUser as jest.Mock).mockResolvedValue(
+        username ? { username } : null,
+      );
+      (getConfigForRead as jest.Mock).mockResolvedValue({
+        ...createConfig(),
+        SiteConfig: {
+          ...createConfig().SiteConfig,
+          LiveAccess,
+          EnableLiveEntry,
+        },
+        UserConfig: { Tags: [{ name: 'live', allowLive: true }] },
+      });
+      (db.getUserAccess as jest.Mock).mockResolvedValue({ role: 'user', tags });
+      const { GET } = require('./route');
+      const response = await GET({} as NextRequest);
+      expect(await response.json()).toMatchObject({
+        EnableLiveEntry: expected,
+      });
+      expect(response.headers.get('Vary')).toBe('Cookie');
+      expect(response.headers.get('Cache-Control')).toContain(
+        username ? 'private' : 'public',
+      );
+    },
+  );
+
+  it('exposes the user danmaku switch', async () => {
+    (getPublicConfig as jest.Mock).mockResolvedValue({
+      ...createPublicConfig(),
+      EnableUserDanmaku: true,
+    });
+    const { GET } = require('./route');
+    expect(await (await GET({} as NextRequest)).json()).toMatchObject({
+      EnableUserDanmaku: true,
+    });
   });
 
   it('does not expose custom proxy URLs to authenticated users', async () => {
@@ -144,6 +135,22 @@ describe('server config route', () => {
       DoubanImageProxy: '',
     });
   });
+
+  it.each([null, { username: 'user-1' }])(
+    'omits the server-only filter flag for session %j',
+    async (activeUser) => {
+      (getOptionalActiveUser as jest.Mock).mockResolvedValue(activeUser);
+      (getPublicConfig as jest.Mock).mockResolvedValue({
+        ...createPublicConfig(),
+        DisableYellowFilter: true,
+      });
+      const { GET } = require('./route');
+
+      const response = await GET({} as NextRequest);
+
+      expect(await response.json()).not.toHaveProperty('DisableYellowFilter');
+    },
+  );
 
   it('exposes playback fault tolerance settings', async () => {
     const { GET } = require('./route');

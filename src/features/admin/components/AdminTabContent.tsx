@@ -1,72 +1,73 @@
-﻿'use client';
+'use client';
 
-import { Loader2 } from 'lucide-react';
 import dynamic from 'next/dynamic';
 
+import AdminContentSkeleton, {
+  AdminSkeletonContext,
+} from '@/features/admin/components/AdminContentSkeleton';
 import { type AdminTabId } from '@/features/admin/lib/admin-tabs';
 import { type AdminConfig } from '@/types/admin';
 
-function AdminTabLoading() {
-  return (
-    <div className='flex min-h-32 items-center justify-center text-sm text-gray-500 dark:text-gray-400'>
-      <Loader2 className='mr-2 h-4 w-4 animate-spin text-green-500' />
-      加载中...
-    </div>
-  );
-}
-
 const DataMigration = dynamic(
   () => import('@/components/DataMigration').then((mod) => mod.default),
-  { loading: AdminTabLoading },
+  { loading: () => <AdminContentSkeleton /> },
 );
 const CategoryConfig = dynamic(
   () =>
     import('@/features/admin/components/tabs/CategoryConfigTab').then(
       (mod) => mod.default,
     ),
-  { loading: AdminTabLoading },
+  { loading: () => <AdminContentSkeleton /> },
 );
 const ConfigFileComponent = dynamic(
   () =>
     import('@/features/admin/components/tabs/ConfigFileTab').then(
       (mod) => mod.default,
     ),
-  { loading: AdminTabLoading },
+  { loading: () => <AdminContentSkeleton /> },
 );
 const LiveSourceConfig = dynamic(
   () =>
     import('@/features/admin/components/tabs/LiveSourceConfigTab').then(
       (mod) => mod.default,
     ),
-  { loading: AdminTabLoading },
+  { loading: () => <AdminContentSkeleton /> },
 );
 const SiteConfigComponent = dynamic(
   () =>
     import('@/features/admin/components/tabs/SiteConfigTab').then(
       (mod) => mod.default,
     ),
-  { loading: AdminTabLoading },
+  { loading: () => <AdminContentSkeleton /> },
 );
 const RuntimeParamsComponent = dynamic(
   () =>
     import('@/features/admin/components/tabs/RuntimeParamsTab').then(
       (mod) => mod.default,
     ),
-  { loading: AdminTabLoading },
+  { loading: () => <AdminContentSkeleton /> },
 );
 const UserConfig = dynamic(
   () =>
     import('@/features/admin/components/tabs/UserConfigTab').then(
       (mod) => mod.default,
     ),
-  { loading: AdminTabLoading },
+  { loading: () => <AdminContentSkeleton /> },
+);
+const UserDanmakuTab = dynamic(
+  () => import('@/features/admin/components/tabs/UserDanmakuTab'),
+  { loading: () => <AdminContentSkeleton /> },
+);
+const ReviewsTab = dynamic(
+  () => import('@/features/admin/components/tabs/ReviewsTab'),
+  { loading: () => <AdminContentSkeleton /> },
 );
 const VideoSourceConfig = dynamic(
   () =>
     import('@/features/admin/components/tabs/VideoSourceConfigTab').then(
       (mod) => mod.default,
     ),
-  { loading: AdminTabLoading },
+  { loading: () => <AdminContentSkeleton /> },
 );
 
 interface AdminTabContentProps {
@@ -82,7 +83,7 @@ interface AdminTabContentProps {
   onConfigFileDirtyChange?: (dirty: boolean) => void;
 }
 
-const AdminTabContent = ({
+const AdminTabBody = ({
   activeTab,
   config,
   role,
@@ -126,6 +127,10 @@ const AdminTabContent = ({
       return (
         <UserConfig config={config} role={role} refreshConfig={refreshConfig} />
       );
+    case 'reviews':
+      return <ReviewsTab />;
+    case 'danmaku':
+      return <UserDanmakuTab />;
     case 'video-source':
       return (
         <VideoSourceConfig config={config} refreshConfig={refreshConfig} />
@@ -141,4 +146,12 @@ const AdminTabContent = ({
   }
 };
 
-export default AdminTabContent;
+export default function AdminTabContent(props: AdminTabContentProps) {
+  return (
+    <AdminSkeletonContext.Provider
+      value={{ activeTab: props.activeTab, config: props.config }}
+    >
+      <AdminTabBody {...props} />
+    </AdminSkeletonContext.Provider>
+  );
+}

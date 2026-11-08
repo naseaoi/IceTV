@@ -1,11 +1,15 @@
 'use client';
 
+import { Check, ChevronLeft, ChevronRight, LocateFixed } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
+import { FLOATING_CONTROL_CLASS } from '@/components/floating-control';
+import Spinner from '@/components/Spinner';
 import { PanelActionButton } from '@/features/play/components/EpisodeSelector/PanelActionButton';
 import {
   type DanmakuSourceGroup,
   groupCandidatesBySource,
+  splitSourceProvider,
 } from '@/features/play/lib/danmaku/client';
 import {
   clearPersistedEpisodeId,
@@ -13,10 +17,23 @@ import {
   persistEpisodeId,
 } from '@/features/play/lib/danmaku/episode-storage';
 import type { DanmakuMatchCandidate } from '@/features/play/lib/danmaku/types';
+import {
+  buildDanmakuScopeKey,
+  readDanmakuEpisodeSearchTitle,
+} from '@/lib/local-preferences';
 import { getVerticalScrollMaskStyle } from '@/lib/scroll-edge-fade';
 
 const USER_SCROLL_IDLE_MS = 2000;
 const PROGRAMMATIC_SCROLL_MS = 800;
+// 弹幕集标题常以「【提供方】」开头，提供方已在源标签中展示
+const EPISODE_PROVIDER_PREFIX = /^【[^】]*】\s*/;
+const PROVIDER_TAG_CLASS =
+  'flex-shrink-0 rounded bg-gray-900/[0.06] px-1.5 py-0.5 text-[10px] font-medium uppercase leading-none tracking-wide text-gray-500 dark:bg-white/[0.08] dark:text-gray-400';
+
+function formatEpisodeTitle(candidate: DanmakuMatchCandidate): string {
+  const title = candidate.episodeTitle || candidate.animeTitle;
+  return title.replace(EPISODE_PROVIDER_PREFIX, '') || title;
+}
 
 interface DanmakuEpisodePickerProps {
   source: string;
@@ -73,12 +90,16 @@ export const DanmakuEpisodePicker: React.FC<DanmakuEpisodePickerProps> = ({
       sourceGroups.find((group) => group.animeTitle === openedSource) ?? null,
     [sourceGroups, openedSource],
   );
-  const boundSourceTitle = useMemo(
+  const boundCandidate = useMemo(
     () =>
-      candidates.find((candidate) => candidate.episodeId === boundEpisodeId)
-        ?.animeTitle ?? null,
+      candidates.find((candidate) => candidate.episodeId === boundEpisodeId) ??
+      null,
     [boundEpisodeId, candidates],
   );
+  const boundSourceTitle = boundCandidate?.animeTitle ?? null;
+  const boundSource = boundCandidate
+    ? splitSourceProvider(boundCandidate.animeTitle)
+    : null;
   const boundItemKey = openedGroup
     ? openedGroup.animeTitle === boundSourceTitle
       ? `episode:${boundEpisodeId}`
@@ -191,12 +212,16 @@ export const DanmakuEpisodePicker: React.FC<DanmakuEpisodePickerProps> = ({
     setOpenedSource(boundSourceTitle);
   }, [boundSourceTitle, candidates]);
 
+  // 与加载器一致，优先用该集上次手动匹配时的关键词，已绑定的弹幕集才能出现在结果里
   useEffect(() => {
-    if (!searchTitle || autoSearchedRef.current === searchTitle) return;
-    autoSearchedRef.current = searchTitle;
-    setKeyword(searchTitle);
-    void runSearch(searchTitle);
-  }, [searchTitle, runSearch]);
+    const scopeKey = buildDanmakuScopeKey(source, videoId, episodeIndex);
+    const initial =
+      (scopeKey && readDanmakuEpisodeSearchTitle(scopeKey)) || searchTitle;
+    if (!initial || autoSearchedRef.current === initial) return;
+    autoSearchedRef.current = initial;
+    setKeyword(initial);
+    void runSearch(initial);
+  }, [source, videoId, episodeIndex, searchTitle, runSearch]);
 
   const handleSelect = useCallback(
     async (episodeId: number) => {
@@ -275,6 +300,33 @@ export const DanmakuEpisodePicker: React.FC<DanmakuEpisodePickerProps> = ({
 
   return (
     <div className='flex min-h-0 flex-1 flex-col gap-3'>
+      {boundEpisodeId !== null && (
+        <div className='flex items-center gap-3 rounded-xl bg-brand-500/[0.08] py-2.5 pl-3 pr-1.5 dark:bg-brand-400/[0.1]'>
+          <div className='min-w-0 flex-1'>
+            <div className='flex min-w-0 items-center gap-1.5'>
+              {boundSource?.providerLabel && (
+                <span className={PROVIDER_TAG_CLASS}>
+                  {boundSource.providerLabel}
+                </span>
+              )}
+              <span className='truncate text-sm font-medium text-gray-900 dark:text-gray-100'>
+                {boundCandidate
+                  ? formatEpisodeTitle(boundCandidate)
+                  : '已匹配弹幕'}
+              </span>
+            </div>
+            {boundSource && (
+              <div className='mt-0.5 truncate text-xs text-gray-500 dark:text-gray-400'>
+                {boundSource.displayTitle}
+              </div>
+            )}
+          </div>
+          <PanelActionButton onClick={() => void handleClear()}>
+            清除绑定
+          </PanelActionButton>
+        </div>
+      )}
+
       <div className='flex gap-2'>
         <input
           type='text'
@@ -284,62 +336,32 @@ export const DanmakuEpisodePicker: React.FC<DanmakuEpisodePickerProps> = ({
             if (event.key === 'Enter') void runSearch(keyword);
           }}
           placeholder='搜索番剧名称'
-          className='min-w-0 flex-1 rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm text-gray-900 outline-none focus:border-green-500/60 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-100 dark:placeholder:text-gray-500'
+          className='h-9 min-w-0 flex-1 rounded-lg border-0 bg-gray-900/[0.04] px-3 text-sm text-gray-900 outline-none placeholder:text-gray-400 focus:ring-2 focus:ring-brand-500/40 dark:bg-white/[0.05] dark:text-gray-100 dark:placeholder:text-gray-500'
         />
         <button
           type='button'
           onClick={() => void runSearch(keyword)}
           disabled={loading || !keyword.trim()}
-          className='relative flex flex-shrink-0 items-center justify-center rounded-lg bg-green-600 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-green-700 disabled:cursor-not-allowed disabled:opacity-50'
+          className='relative flex h-9 flex-shrink-0 items-center justify-center rounded-lg bg-gray-900/[0.06] px-3.5 text-[13px] font-medium text-gray-700 transition-colors hover:bg-gray-900/[0.1] disabled:cursor-not-allowed disabled:opacity-50 dark:bg-white/[0.08] dark:text-gray-200 dark:hover:bg-white/[0.12]'
           aria-busy={loading}
           aria-label={loading ? '搜索中' : undefined}
         >
           <span className={loading ? 'invisible' : undefined}>搜索</span>
-          {loading && (
-            <span className='absolute h-4 w-4 animate-spin rounded-full border-2 border-white border-t-transparent' />
-          )}
+          {loading && <Spinner className='absolute h-4 w-4' />}
         </button>
       </div>
 
-      {boundEpisodeId !== null && (
-        <div className='flex items-center justify-between gap-2 rounded-lg border border-green-500/40 bg-green-500/5 px-3 py-2'>
-          <span className='min-w-0 truncate text-xs text-green-600 dark:text-green-400'>
-            已绑定集 ID: {boundEpisodeId}
+      {openedGroup && (
+        <PanelActionButton
+          onClick={() => setOpenedSource(null)}
+          className='-my-1 self-start'
+        >
+          <ChevronLeft className='h-3.5 w-3.5' />
+          <span className='min-w-0 truncate' title={openedGroup.animeTitle}>
+            返回源列表
           </span>
-          <PanelActionButton onClick={() => void handleClear()}>
-            清除绑定
-          </PanelActionButton>
-        </div>
+        </PanelActionButton>
       )}
-
-      {sourceGroups.length > 0 &&
-        (openedGroup ? (
-          <PanelActionButton
-            onClick={() => setOpenedSource(null)}
-            className='self-start'
-          >
-            <svg
-              xmlns='http://www.w3.org/2000/svg'
-              width='14'
-              height='14'
-              viewBox='0 0 24 24'
-              fill='none'
-              stroke='currentColor'
-              strokeWidth='2'
-              strokeLinecap='round'
-              strokeLinejoin='round'
-            >
-              <path d='M15 18l-6-6 6-6' />
-            </svg>
-            <span className='min-w-0 truncate' title={openedGroup.animeTitle}>
-              返回源列表
-            </span>
-          </PanelActionButton>
-        ) : (
-          <div className='self-start px-1 py-0.5 text-xs text-gray-500 dark:text-gray-400'>
-            弹幕源列表
-          </div>
-        ))}
 
       <div className='relative flex min-h-0 flex-1 flex-col'>
         <div
@@ -347,10 +369,10 @@ export const DanmakuEpisodePicker: React.FC<DanmakuEpisodePickerProps> = ({
           data-top-fade={hasTopFade}
           data-bottom-fade={hasBottomFade}
           style={getVerticalScrollMaskStyle(hasTopFade, hasBottomFade)}
-          className='-mx-1 flex min-h-0 flex-1 flex-col gap-2 overflow-y-auto px-1 py-1'
+          className='flex min-h-0 flex-1 flex-col gap-0.5 overflow-y-auto pb-1'
         >
           {candidates.length === 0 && !loading && (
-            <div className='py-8 text-center text-sm text-gray-500 dark:text-gray-400'>
+            <div className='px-2 py-6 text-center text-[13px] text-gray-400 dark:text-gray-500'>
               {keyword ? '未找到匹配结果' : '输入关键词搜索番剧'}
             </div>
           )}
@@ -365,10 +387,10 @@ export const DanmakuEpisodePicker: React.FC<DanmakuEpisodePickerProps> = ({
                   type='button'
                   aria-current={hasBound ? 'true' : undefined}
                   onClick={() => setOpenedSource(group.animeTitle)}
-                  className={`flex w-full items-center gap-3 rounded-lg border px-3 py-2 text-left transition-colors ${
+                  className={`flex w-full shrink-0 items-center gap-3 rounded-lg px-3 py-2.5 text-left transition-colors ${
                     hasBound
-                      ? 'border-green-500/60 bg-green-500/10'
-                      : 'border-gray-200 bg-white hover:bg-gray-50 dark:border-gray-700 dark:bg-gray-800 dark:hover:bg-gray-700'
+                      ? 'bg-brand-500/[0.08] dark:bg-brand-400/[0.08]'
+                      : 'hover:bg-gray-900/[0.04] dark:hover:bg-white/[0.04]'
                   }`}
                 >
                   <div className='min-w-0 flex-1'>
@@ -377,7 +399,7 @@ export const DanmakuEpisodePicker: React.FC<DanmakuEpisodePickerProps> = ({
                       title={group.animeTitle}
                     >
                       {group.providerLabel && (
-                        <span className='flex-shrink-0 rounded bg-green-500/10 px-1.5 py-0.5 text-[11px] font-medium uppercase leading-none tracking-wide text-green-600 dark:bg-green-500/15 dark:text-green-400'>
+                        <span className={PROVIDER_TAG_CLASS}>
                           {group.providerLabel}
                         </span>
                       )}
@@ -385,32 +407,19 @@ export const DanmakuEpisodePicker: React.FC<DanmakuEpisodePickerProps> = ({
                         {group.displayTitle}
                       </span>
                     </div>
-                    <div className='mt-1 flex flex-wrap gap-x-3 gap-y-0.5 text-xs text-gray-500 dark:text-gray-400'>
+                    <div className='mt-0.5 flex flex-wrap gap-x-3 gap-y-0.5 text-xs text-gray-500 dark:text-gray-400'>
                       <span>{group.candidates.length} 集</span>
                       {group.typeDescription && (
                         <span>{group.typeDescription}</span>
                       )}
                       {hasBound && (
-                        <span className='text-green-600 dark:text-green-400'>
+                        <span className='text-brand-600 dark:text-brand-400'>
                           当前绑定
                         </span>
                       )}
                     </div>
                   </div>
-                  <svg
-                    xmlns='http://www.w3.org/2000/svg'
-                    width='16'
-                    height='16'
-                    viewBox='0 0 24 24'
-                    fill='none'
-                    stroke='currentColor'
-                    strokeWidth='2'
-                    strokeLinecap='round'
-                    strokeLinejoin='round'
-                    className='flex-shrink-0 text-gray-400 dark:text-gray-500'
-                  >
-                    <path d='M9 18l6-6-6-6' />
-                  </svg>
+                  <ChevronRight className='h-4 w-4 flex-shrink-0 text-gray-400 dark:text-gray-500' />
                 </button>
               );
             })}
@@ -424,21 +433,25 @@ export const DanmakuEpisodePicker: React.FC<DanmakuEpisodePickerProps> = ({
                 type='button'
                 aria-pressed={selected}
                 onClick={() => void handleSelect(candidate.episodeId)}
-                className={`w-full rounded-lg border px-3 py-2 text-left transition-colors ${
+                className={`flex w-full shrink-0 items-center gap-3 rounded-lg px-3 py-2 text-left transition-colors ${
                   selected
-                    ? 'border-green-500/60 bg-green-500/10'
-                    : 'border-gray-200 bg-white hover:bg-gray-50 dark:border-gray-700 dark:bg-gray-800 dark:hover:bg-gray-700'
+                    ? 'bg-brand-500/[0.08] dark:bg-brand-400/[0.08]'
+                    : 'hover:bg-gray-900/[0.04] dark:hover:bg-white/[0.04]'
                 }`}
               >
-                <div
-                  className='truncate text-sm font-medium text-gray-900 dark:text-gray-100'
+                <span
+                  className={`min-w-0 flex-1 truncate text-sm ${
+                    selected
+                      ? 'font-medium text-brand-600 dark:text-brand-400'
+                      : 'text-gray-800 dark:text-gray-200'
+                  }`}
                   title={candidate.episodeTitle || candidate.animeTitle}
                 >
-                  {candidate.episodeTitle || candidate.animeTitle}
-                </div>
-                <div className='mt-1 flex flex-wrap gap-x-3 gap-y-0.5 text-xs text-gray-500 dark:text-gray-400'>
-                  <span>ID: {candidate.episodeId}</span>
-                </div>
+                  {formatEpisodeTitle(candidate)}
+                </span>
+                {selected && (
+                  <Check className='h-4 w-4 shrink-0 text-brand-500 dark:text-brand-400' />
+                )}
               </button>
             );
           })}
@@ -448,7 +461,7 @@ export const DanmakuEpisodePicker: React.FC<DanmakuEpisodePickerProps> = ({
               type='button'
               disabled={loading}
               onClick={() => void loadMore()}
-              className='w-full rounded-lg border border-dashed border-gray-300 px-3 py-2 text-sm text-gray-600 transition-colors hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-60 dark:border-gray-600 dark:text-gray-300 dark:hover:bg-gray-800'
+              className='w-full shrink-0 rounded-lg px-3 py-2.5 text-[13px] text-gray-500 transition-colors hover:bg-gray-900/[0.04] hover:text-gray-900 disabled:cursor-not-allowed disabled:opacity-60 dark:text-gray-400 dark:hover:bg-white/[0.04] dark:hover:text-white'
             >
               {loading ? '加载中…' : '加载更多候选'}
             </button>
@@ -465,28 +478,11 @@ export const DanmakuEpisodePicker: React.FC<DanmakuEpisodePickerProps> = ({
               }
               scrollBoundIntoView(true);
             }}
-            className='absolute bottom-4 right-4 z-10 flex h-9 w-9 items-center justify-center rounded-full bg-green-500 text-white shadow-lg transition-all hover:bg-green-600 dark:bg-green-600 dark:hover:bg-green-500'
+            className={`${FLOATING_CONTROL_CLASS} absolute bottom-4 right-0 z-10 h-8 w-8`}
             aria-label={locateLabel}
             title={locateLabel}
           >
-            <svg
-              xmlns='http://www.w3.org/2000/svg'
-              width='18'
-              height='18'
-              viewBox='0 0 24 24'
-              fill='none'
-              stroke='currentColor'
-              strokeWidth='2'
-              strokeLinecap='round'
-              strokeLinejoin='round'
-            >
-              <circle cx='12' cy='12' r='8' />
-              <circle cx='12' cy='12' r='2.5' />
-              <line x1='12' y1='2' x2='12' y2='5' />
-              <line x1='12' y1='19' x2='12' y2='22' />
-              <line x1='2' y1='12' x2='5' y2='12' />
-              <line x1='19' y1='12' x2='22' y2='12' />
-            </svg>
+            <LocateFixed className='h-4 w-4' />
           </button>
         )}
       </div>

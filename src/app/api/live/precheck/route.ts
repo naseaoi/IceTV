@@ -3,6 +3,7 @@
 import { isLiveEntryEnabledInConfig } from '@/features/live/lib/live';
 import { isGuardFailure, requireActiveUser } from '@/lib/api-auth';
 import { getConfigForRead } from '@/lib/config';
+import { canUserWatchLive } from '@/lib/live-access.server';
 import { normalizeRuntimeParams } from '@/lib/runtime-params';
 import {
   fetchWithUrlGuard,
@@ -20,6 +21,9 @@ export async function GET(request: NextRequest) {
   const runtimeParams = normalizeRuntimeParams(config.SiteConfig);
   if (!isLiveEntryEnabledInConfig(config)) {
     return NextResponse.json({ error: '直播未开启' }, { status: 404 });
+  }
+  if (!(await canUserWatchLive(guardResult.username, config))) {
+    return NextResponse.json({ error: '没有直播权限' }, { status: 403 });
   }
 
   const { searchParams } = new URL(request.url);
@@ -57,6 +61,7 @@ export async function GET(request: NextRequest) {
     });
 
     if (!response.ok) {
+      await response.body?.cancel().catch(() => {});
       return NextResponse.json(
         { error: 'Failed to fetch', message: response.statusText },
         { status: 500 },
@@ -64,9 +69,7 @@ export async function GET(request: NextRequest) {
     }
 
     const contentType = response.headers.get('Content-Type');
-    if (response.body) {
-      response.body.cancel();
-    }
+    await response.body?.cancel().catch(() => {});
     if (contentType?.includes('video/mp4')) {
       return NextResponse.json({ success: true, type: 'mp4' }, { status: 200 });
     }

@@ -1,6 +1,6 @@
 {
   "name": "icetv",
-  "version": "0.5.2",
+  "version": "0.6.0",
   "private": true,
   "engines": {
     "node": ">=22.14.0 <25",
@@ -42,6 +42,7 @@
     "bcrypt": "^6.0.0",
     "bcryptjs": "^3.0.3",
     "better-sqlite3": "^12.6.2",
+    "boring-avatars": "^2.0.4",
     "bs58": "^6.0.0",
     "he": "^1.2.0",
     "hls.js": "^1.6.10",

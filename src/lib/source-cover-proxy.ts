@@ -6,6 +6,8 @@ export const DEFAULT_SOURCE_COVER_PROXY_MODE: SourceCoverProxyMode = 'auto';
 
 const FAILED_HOSTS_STORAGE_KEY = 'icetv:source-cover-proxy-failed-hosts';
 const MAX_FAILED_HOSTS = 100;
+// 代理失败多为上游临时不可达，冷却后重新尝试服务端代理
+export const SOURCE_COVER_PROXY_FAILURE_COOLDOWN_MS = 10 * 60 * 1000;
 
 export const sourceCoverProxyModeOptions = [
   { value: 'auto', label: '自动（服务端失败后浏览器直连）' },
@@ -38,18 +40,21 @@ export function shouldProxySourceCover(
     return false;
   }
 
-  return mode === 'server' || !readFailedHosts().has(hostname);
+  return mode === 'server' || !readFailedHosts(Date.now()).has(hostname);
 }
 
-export function markSourceCoverProxyHostFailed(originalUrl: string): void {
+export function markSourceCoverProxyHostFailed(
+  originalUrl: string,
+  now = Date.now(),
+): void {
   const hostname = getRemoteHostname(originalUrl);
   if (!hostname || typeof window === 'undefined') {
     return;
   }
 
-  const hosts = readFailedHosts();
+  const hosts = readFailedHosts(now);
   hosts.delete(hostname);
-  hosts.add(hostname);
+  hosts.set(hostname, now);
   const trimmedHosts = Array.from(hosts).slice(-MAX_FAILED_HOSTS);
 
   try {
@@ -75,9 +80,10 @@ function getRemoteHostname(url: string): string | null {
   }
 }
 
-function readFailedHosts(): Set<string> {
+function readFailedHosts(now: number): Map<string, number> {
+  const hosts = new Map<string, number>();
   if (typeof window === 'undefined') {
-    return new Set();
+    return hosts;
   }
 
   try {
@@ -85,14 +91,18 @@ function readFailedHosts(): Set<string> {
       window.sessionStorage.getItem(FAILED_HOSTS_STORAGE_KEY) || '[]',
     ) as unknown;
     if (!Array.isArray(parsed)) {
-      return new Set();
+      return hosts;
     }
-    return new Set(
-      parsed
-        .filter((host): host is string => typeof host === 'string')
-        .slice(-MAX_FAILED_HOSTS),
-    );
-  } catch {
-    return new Set();
-  }
+    for (const item of parsed.slice(-MAX_FAILED_HOSTS)) {
+      if (
+        Array.isArray(item) &&
+        typeof item[0] === 'string' &&
+        typeof item[1] === 'number' &&
+        now - item[1] < SOURCE_COVER_PROXY_FAILURE_COOLDOWN_MS
+      ) {
+        hosts.set(item[0], item[1]);
+      }
+    }
+  } catch {}
+  return hosts;
 }

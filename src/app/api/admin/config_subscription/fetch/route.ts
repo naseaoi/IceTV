@@ -25,6 +25,7 @@ export async function POST(request: NextRequest) {
     const response = await fetchWithUrlGuard(url);
 
     if (!response.ok) {
+      await response.body?.cancel().catch(() => {});
       return NextResponse.json(
         { error: `请求失败: ${response.status} ${response.statusText}` },
         { status: response.status },

@@ -4,6 +4,7 @@ import { applyPlayRecordStateUpdates } from '@/lib/db.client';
 import { fetchWithAuth } from '@/lib/db.client.internal';
 import { DEFAULT_MESSAGE_PAGE_LIMIT } from '@/lib/message-page';
 import {
+  MessageNotificationKind,
   ReadAllUserMessagesResult,
   ReadUserMessageResult,
   UserMessagePage,
@@ -56,4 +57,23 @@ export async function readAllMessages(): Promise<ReadAllUserMessagesResult> {
   const result = (await response.json()) as ReadAllUserMessagesResult;
   applyPlayRecordStateUpdates(result.updatedRecords);
   return result;
+}
+
+export async function fetchMessageSettings(): Promise<{
+  mutedKinds: MessageNotificationKind[];
+}> {
+  const response = await fetchWithAuth('/api/messages/settings', {
+    cache: 'no-store',
+  });
+  return response.json();
+}
+export async function saveMessageSettings(
+  mutedKinds: MessageNotificationKind[],
+): Promise<{ mutedKinds: MessageNotificationKind[] }> {
+  const response = await fetchWithAuth('/api/messages/settings', {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ mutedKinds }),
+  });
+  return response.json();
 }

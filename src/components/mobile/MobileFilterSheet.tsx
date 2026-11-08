@@ -25,7 +25,7 @@ export default function MobileFilterSheet({
       footer={
         <button
           type='button'
-          className='h-11 w-full rounded-xl bg-green-600 text-sm font-semibold text-white hover:bg-green-700'
+          className='h-11 w-full rounded-xl bg-brand-600 text-sm font-semibold text-white hover:bg-brand-700'
           onClick={onClose}
         >
           完成

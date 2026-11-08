@@ -1,15 +1,48 @@
-import { ArrowLeftRight, Heart, LayoutGrid, MessageSquare } from 'lucide-react';
+import {
+  ArrowLeftRight,
+  Heart,
+  LayoutGrid,
+  MessageSquare,
+  Star,
+} from 'lucide-react';
 import dynamic from 'next/dynamic';
-import React, { useMemo, useState } from 'react';
+import { useSearchParams } from 'next/navigation';
+import React, {
+  lazy,
+  Suspense,
+  useCallback,
+  useEffect,
+  useMemo,
+  useState,
+} from 'react';
 
 import MobileSheet from '@/components/mobile/MobileSheet';
-import { PlayerPanelContent } from '@/components/PlayerPanelTabBar';
+import {
+  PLAYER_PANEL_INSET_CLASS,
+  PLAYER_PANEL_SURFACE_CLASS,
+  PlayerPanelContent,
+} from '@/components/PlayerPanelTabBar';
 import { useRuntimeConfig } from '@/components/RuntimeConfigProvider';
+import SkeletonText from '@/components/SkeletonText';
+import { EpisodesTab } from '@/features/play/components/EpisodeSelector/EpisodesTab';
+import type { InfoRating } from '@/features/play/components/EpisodeSelector/InfoTab';
+import {
+  DESKTOP_MAIN_GRID_CLASS,
+  INFO_COVER_CLASS,
+  INFO_RATING_LINE_CLASS,
+  INFO_RATING_TEXT_CLASS,
+} from '@/features/play/components/EpisodeSelector/layout';
 import { SectionTitle } from '@/features/play/components/EpisodeSelector/SectionTitle';
 import { TabBar } from '@/features/play/components/EpisodeSelector/TabBar';
+import { useDoubanRating } from '@/features/play/hooks/useDoubanRating';
 import type { DanmakuReloadHandler } from '@/features/play/lib/danmaku/types';
-import { getSourceBundle } from '@/lib/source-bundle';
-import { normalizeTitleForSourceMatch } from '@/lib/source-match';
+import { useVideoReviews } from '@/features/reviews/hooks/useVideoReviews';
+import { MOBILE_QUERY } from '@/hooks/useIsMobileViewport';
+import {
+  collapseSourcesForDisplay,
+  getSourceBundle,
+} from '@/lib/source-bundle';
+import { normalizeWorkTitle } from '@/lib/source-match';
 import { SearchResult } from '@/lib/types';
 
 const infoSkeletonLineWidths = [
@@ -32,60 +65,75 @@ function EpisodeTabLoading() {
   );
 }
 
-function InfoTabLoading() {
-  return (
+function InfoTabLoading({
+  scrollMode = 'desc',
+}: {
+  scrollMode?: 'panel' | 'desc';
+}) {
+  const desc = scrollMode === 'desc';
+  const header = (
     <div
-      data-play-detail-skeleton
-      className='flex min-h-0 flex-col gap-2 px-5 pb-1 pt-4 sm:px-6 sm:pb-1 sm:pt-5'
+      className={`flex flex-shrink-0 gap-4 ${
+        desc ? `${PLAYER_PANEL_INSET_CLASS} pb-3 pt-5` : ''
+      }`.trim()}
     >
-      <div className='flex flex-shrink-0 gap-4 sm:gap-5'>
-        <div className='aspect-[2/3] w-24 flex-shrink-0 animate-pulse rounded-xl bg-gray-200/80 dark:bg-white/[0.08] sm:w-28 xl:w-32' />
-        <div className='flex min-w-0 flex-1 flex-col justify-end gap-2.5 pb-0.5'>
-          <div className='h-5 w-2/3 animate-pulse rounded-md bg-gray-200/80 dark:bg-white/[0.08]' />
-          <div className='h-4 w-12 animate-pulse rounded-md bg-gray-200/80 dark:bg-white/[0.08]' />
-          <div className='h-5 w-20 animate-pulse rounded-full bg-emerald-100/80 dark:bg-emerald-900/25' />
-          <div className='flex gap-1.5'>
-            <div className='h-5 w-14 animate-pulse rounded-full bg-gray-200/80 dark:bg-white/[0.08]' />
-            <div className='h-5 w-20 animate-pulse rounded-full bg-violet-100/80 dark:bg-violet-900/25' />
-          </div>
-          <div className='flex gap-1.5'>
-            <div className='h-5 w-16 animate-pulse rounded-full bg-blue-100/80 dark:bg-blue-900/25' />
-          </div>
-        </div>
-      </div>
-      <div className='flex min-h-0 flex-1 flex-col overflow-hidden'>
-        <div className='flex min-h-0 flex-1 flex-col gap-2.5 overflow-hidden'>
-          {infoSkeletonLineWidths.map((widthClass, index) => (
-            <div
-              key={index}
-              className={`h-[18px] flex-shrink-0 animate-pulse rounded bg-gray-200/70 dark:bg-white/[0.07] ${widthClass}`}
+      <div
+        className={`skeleton flex-shrink-0 self-start rounded-lg ${INFO_COVER_CLASS}`}
+      />
+      <div className='flex min-w-0 flex-1 flex-col justify-between gap-2'>
+        <div className='space-y-1.5'>
+          <SkeletonText
+            className='text-lg leading-snug'
+            barClassName='h-4 w-2/3 rounded-md'
+          />
+          <SkeletonText
+            className='text-[13px]'
+            barClassName='h-3 w-1/3 rounded'
+          />
+          <div className='skeleton h-5 w-1/2 rounded' />
+          <div className={INFO_RATING_LINE_CLASS}>
+            <SkeletonText
+              className={INFO_RATING_TEXT_CLASS}
+              barClassName='h-3.5 w-24 rounded'
             />
-          ))}
+          </div>
         </div>
+        <div className='skeleton h-7 w-16 rounded-full' />
       </div>
     </div>
   );
-}
+  const lines = (
+    <div
+      className={`flex min-h-0 flex-col overflow-hidden ${
+        desc ? `${PLAYER_PANEL_INSET_CLASS} pb-4` : ''
+      }`.trim()}
+    >
+      {infoSkeletonLineWidths.map((widthClass, index) => (
+        <SkeletonText
+          key={index}
+          className='shrink-0 text-[13px] leading-[1.8]'
+          barClassName={`h-3.5 rounded ${widthClass}`}
+        />
+      ))}
+    </div>
+  );
 
-function EpisodesTabLoading() {
+  if (desc) {
+    return (
+      <div data-play-detail-skeleton className='contents'>
+        {header}
+        {lines}
+      </div>
+    );
+  }
+
   return (
-    <div data-play-episodes-skeleton className='flex min-h-0 flex-1 flex-col'>
-      <div className='flex flex-shrink-0 gap-1 px-5 pb-2 pt-2 sm:px-6'>
-        {Array.from({ length: 4 }, (_, index) => (
-          <div
-            key={index}
-            className='h-7 flex-1 animate-pulse rounded-md bg-gray-200/70 dark:bg-white/[0.07]'
-          />
-        ))}
-      </div>
-      <div className='flex flex-1 flex-wrap content-start justify-center gap-2 overflow-hidden px-5 pb-5 pt-2 sm:px-6 sm:pb-6'>
-        {Array.from({ length: 24 }, (_, index) => (
-          <div
-            key={index}
-            className='h-11 w-12 animate-pulse rounded-lg bg-gray-200/70 dark:bg-white/[0.07]'
-          />
-        ))}
-      </div>
+    <div
+      data-play-detail-skeleton
+      className={`flex min-h-0 min-w-0 flex-1 flex-col gap-4 overflow-hidden py-5 ${PLAYER_PANEL_INSET_CLASS}`}
+    >
+      {header}
+      {lines}
     </div>
   );
 }
@@ -95,14 +143,14 @@ function pickDoubanId(
   targetTitle: string,
   totalEpisodes: number,
 ) {
-  const normalizedTarget = normalizeTitleForSourceMatch(targetTitle);
+  const normalizedTarget = normalizeWorkTitle(targetTitle);
   if (!normalizedTarget) return 0;
 
   const counts = new Map<number, number>();
   for (const candidate of candidates) {
     const doubanId = candidate.douban_id || 0;
     if (doubanId <= 0) continue;
-    if (normalizeTitleForSourceMatch(candidate.title) !== normalizedTarget) {
+    if (normalizeWorkTitle(candidate.title) !== normalizedTarget) {
       continue;
     }
 
@@ -132,21 +180,10 @@ function pickDoubanId(
   return selected;
 }
 
-const EpisodesTab = dynamic(
-  () =>
-    import('@/features/play/components/EpisodeSelector/EpisodesTab').then(
-      (mod) => mod.EpisodesTab,
-    ),
-  { loading: EpisodesTabLoading },
-);
-const InfoTab = dynamic(
-  () =>
-    import('@/features/play/components/EpisodeSelector/InfoTab').then(
-      (mod) => mod.InfoTab,
-    ),
-  {
-    loading: InfoTabLoading,
-  },
+const InfoTab = lazy(() =>
+  import('@/features/play/components/EpisodeSelector/InfoTab').then((mod) => ({
+    default: mod.InfoTab,
+  })),
 );
 const SourcesTab = dynamic(
   () =>
@@ -159,6 +196,13 @@ const DanmakuTab = dynamic(
   () =>
     import('@/features/play/components/EpisodeSelector/DanmakuTab').then(
       (mod) => mod.DanmakuTab,
+    ),
+  { loading: EpisodeTabLoading },
+);
+const ReviewsTab = dynamic(
+  () =>
+    import('@/features/play/components/EpisodeSelector/ReviewsTab').then(
+      (mod) => mod.ReviewsTab,
     ),
   { loading: EpisodeTabLoading },
 );
@@ -198,8 +242,8 @@ interface EpisodeSelectorProps {
   onDanmakuHeatmapChange?: (enabled: boolean) => void;
 }
 
-type MobileSheetKey = 'episodes' | 'sources' | 'danmaku';
-type DesktopTabKey = 'main' | 'sources' | 'danmaku';
+type MobileSheetKey = 'episodes' | 'sources' | 'danmaku' | 'reviews';
+type DesktopTabKey = 'main' | 'sources' | 'danmaku' | 'reviews';
 
 const MOBILE_EPISODE_STRIP_SIZE = 12;
 
@@ -261,11 +305,65 @@ const EpisodeSelector: React.FC<EpisodeSelectorProps> = ({
     videoTitle,
   ]);
 
-  const hasEpisodesTab = totalEpisodes > 0 || variantSources.length > 1;
+  // 单集且无其他版本时只有一个「正片」按钮，不提供选择意义
+  const hasEpisodesTab = totalEpisodes > 1 || variantSources.length > 1;
   const showDesktopEpisodes = detailLoading || hasEpisodesTab;
 
+  // 消息面板的评价详情可带 tab=reviews 进入，直接展示评价；播放页之间跳转不会重新挂载，按整串参数重新触发
+  const searchParams = useSearchParams();
+  const reviewsRequest =
+    searchParams.get('tab') === 'reviews' ? searchParams.toString() : null;
   const [mobileSheet, setMobileSheet] = useState<MobileSheetKey | null>(null);
-  const [desktopTab, setDesktopTab] = useState<DesktopTabKey>('main');
+  const [desktopTab, setDesktopTab] = useState<DesktopTabKey>(
+    reviewsRequest ? 'reviews' : 'main',
+  );
+  useEffect(() => {
+    if (!reviewsRequest) return;
+    setDesktopTab('reviews');
+    if (window.matchMedia(MOBILE_QUERY).matches) setMobileSheet('reviews');
+  }, [reviewsRequest]);
+  const [reviewEditRequested, setReviewEditRequested] = useState(false);
+
+  const reviews = useVideoReviews({
+    title: detail?.title || videoTitle || '',
+    year: detail?.year || videoYear,
+    cover: videoCover || detail?.poster || '',
+    doubanId: resolvedDoubanId,
+    sourceKey:
+      currentSource && currentId ? `${currentSource}+${currentId}` : '',
+    // 详情头部展示站内评分，移动端详情常驻，桌面默认停在详情
+    summaryEnabled: true,
+  });
+
+  const siteSummary = reviews.summary;
+  const siteAverage =
+    siteSummary && siteSummary.count > 0 ? siteSummary.average : null;
+  // 站内无人评分或汇总失败时以豆瓣评分兜底
+  const needsDoubanRating =
+    siteAverage === null && (!!siteSummary || reviews.summaryError);
+  const doubanRating = useDoubanRating(
+    needsDoubanRating ? resolvedDoubanId : 0,
+  );
+  const infoRating: InfoRating | null =
+    siteSummary && siteAverage !== null
+      ? { kind: 'site', average: siteAverage, count: siteSummary.count }
+      : !needsDoubanRating || doubanRating === undefined
+        ? null
+        : doubanRating !== null
+          ? { kind: 'douban', average: doubanRating }
+          : { kind: 'none' };
+
+  const openDesktopReviewEditor = useCallback(() => {
+    setDesktopTab('reviews');
+    setReviewEditRequested(true);
+  }, []);
+  const handleReviewEditRequestHandled = useCallback(() => {
+    setReviewEditRequested(false);
+  }, []);
+  const openMobileReviewEditor = useCallback(() => {
+    setMobileSheet('reviews');
+    setReviewEditRequested(true);
+  }, []);
 
   const stripEpisodes = useMemo(() => {
     if (totalEpisodes <= 1) {
@@ -280,10 +378,20 @@ const EpisodeSelector: React.FC<EpisodeSelectorProps> = ({
     return Array.from({ length: end - start + 1 }, (_, i) => start + i);
   }, [totalEpisodes, value]);
 
-  const desktopTabs: { key: DesktopTabKey; label: string }[] = [
+  const sourceCount = useMemo(
+    () =>
+      sourceSearchLoading
+        ? 0
+        : collapseSourcesForDisplay(availableSources, currentSource, currentId)
+            .length,
+    [availableSources, currentId, currentSource, sourceSearchLoading],
+  );
+
+  const desktopTabs: { key: DesktopTabKey; label: string; count?: number }[] = [
     { key: 'main', label: '详情' },
-    { key: 'sources', label: '换源' },
+    { key: 'sources', label: '换源', count: sourceCount },
     ...(danmakuEnabled ? [{ key: 'danmaku', label: '弹幕' } as const] : []),
+    { key: 'reviews', label: '评价' },
   ];
 
   const renderEpisodesTab = (afterSelect?: () => void) => (
@@ -307,23 +415,30 @@ const EpisodeSelector: React.FC<EpisodeSelectorProps> = ({
     />
   );
 
-  const renderInfoTab = (scrollMode: 'panel' | 'desc') => {
+  const renderInfoTab = (
+    scrollMode: 'panel' | 'desc',
+    onOpenReview: () => void,
+  ) => {
     if (detailLoading) {
-      return <InfoTabLoading />;
+      return <InfoTabLoading scrollMode={scrollMode} />;
     }
 
     return (
-      <InfoTab
-        videoTitle={videoTitle || ''}
-        totalEpisodes={totalEpisodes}
-        detail={detail}
-        videoYear={videoYear}
-        favorited={favorited}
-        onToggleFavorite={onToggleFavorite || (() => {})}
-        videoCover={videoCover}
-        videoDoubanId={resolvedDoubanId}
-        scrollMode={scrollMode}
-      />
+      <Suspense fallback={<InfoTabLoading scrollMode={scrollMode} />}>
+        <InfoTab
+          videoTitle={videoTitle || ''}
+          detail={detail}
+          videoYear={videoYear}
+          favorited={favorited}
+          onToggleFavorite={onToggleFavorite || (() => {})}
+          videoCover={videoCover}
+          videoDoubanId={resolvedDoubanId}
+          scrollMode={scrollMode}
+          myReview={reviews.myReview}
+          onOpenReview={onOpenReview}
+          rating={infoRating}
+        />
+      </Suspense>
     );
   };
 
@@ -362,11 +477,22 @@ const EpisodeSelector: React.FC<EpisodeSelectorProps> = ({
     />
   );
 
+  const renderReviewsTab = () => (
+    <ReviewsTab
+      workTitle={detail?.title || videoTitle || ''}
+      reviews={reviews}
+      favorited={favorited}
+      onAddFavorite={onToggleFavorite}
+      editRequested={reviewEditRequested}
+      onEditRequestHandled={handleReviewEditRequestHandled}
+    />
+  );
+
   const mobileActionButtonClass =
-    'flex h-9 items-center gap-1 rounded-full border border-gray-200 bg-white px-3 text-xs text-gray-700 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-200';
+    'flex h-9 items-center gap-1 rounded-full bg-gray-900/[0.05] px-3 text-xs text-gray-700 transition-colors active:bg-gray-900/[0.09] dark:bg-white/[0.06] dark:text-gray-200 dark:active:bg-white/[0.1]';
 
   return (
-    <div className='flex h-full flex-col overflow-hidden md:ml-1'>
+    <div className='-mx-4 flex h-full flex-col overflow-hidden px-4 md:mx-0 md:ml-1 md:px-0'>
       <div className='flex min-h-0 flex-1 flex-col md:hidden'>
         <div className='flex items-center justify-between gap-2 py-1'>
           <div className='flex shrink-0 items-center gap-1.5'>
@@ -415,11 +541,19 @@ const EpisodeSelector: React.FC<EpisodeSelectorProps> = ({
                 弹幕
               </button>
             )}
+            <button
+              type='button'
+              className={mobileActionButtonClass}
+              onClick={() => setMobileSheet('reviews')}
+            >
+              <Star className='h-3.5 w-3.5' />
+              评价
+            </button>
           </div>
         </div>
 
         {stripEpisodes.length > 0 && (
-          <div className='scrollbar-hide -mx-1 mt-2 flex gap-2 overflow-x-auto px-1 pb-1'>
+          <div className='scrollbar-hide -mx-4 mt-2 flex scroll-px-4 gap-2 overflow-x-auto px-4 pb-1'>
             {stripEpisodes.map((episodeNumber) => {
               const active = episodeNumber === value;
               return (
@@ -427,10 +561,10 @@ const EpisodeSelector: React.FC<EpisodeSelectorProps> = ({
                   key={episodeNumber}
                   type='button'
                   aria-current={active ? 'true' : undefined}
-                  className={`h-11 min-w-[44px] shrink-0 rounded-lg border px-2 text-sm font-medium ${
+                  className={`h-10 min-w-[44px] shrink-0 rounded-lg px-2 text-sm font-medium tabular-nums transition-colors ${
                     active
-                      ? 'border-green-500/60 bg-green-500/10 text-green-600 dark:text-green-400'
-                      : 'border-gray-200 bg-white text-gray-700 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-200'
+                      ? 'bg-brand-600 text-white'
+                      : 'bg-gray-900/[0.05] text-gray-700 dark:bg-white/[0.06] dark:text-gray-200'
                   }`}
                   onClick={() => onChange?.(episodeNumber)}
                 >
@@ -440,7 +574,7 @@ const EpisodeSelector: React.FC<EpisodeSelectorProps> = ({
             })}
             <button
               type='button'
-              className='h-11 shrink-0 rounded-lg border border-gray-200 bg-white px-3 text-sm text-gray-500 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-400'
+              className='h-10 shrink-0 rounded-lg bg-gray-900/[0.05] px-3 text-sm text-gray-500 dark:bg-white/[0.06] dark:text-gray-400'
               onClick={() => setMobileSheet('episodes')}
             >
               全部
@@ -448,8 +582,10 @@ const EpisodeSelector: React.FC<EpisodeSelectorProps> = ({
           </div>
         )}
 
-        <div className='mt-3 flex min-h-0 flex-1 flex-col overflow-hidden rounded-xl border border-gray-200/60 bg-white/60 dark:border-gray-700/60 dark:bg-gray-800/40'>
-          {renderInfoTab('panel')}
+        <div
+          className={`mt-3 flex min-h-0 flex-1 flex-col ${PLAYER_PANEL_SURFACE_CLASS}`}
+        >
+          {renderInfoTab('panel', openMobileReviewEditor)}
         </div>
 
         <MobileSheet
@@ -483,9 +619,21 @@ const EpisodeSelector: React.FC<EpisodeSelectorProps> = ({
             </div>
           </MobileSheet>
         )}
+
+        <MobileSheet
+          open={mobileSheet === 'reviews'}
+          title='评价'
+          onClose={() => setMobileSheet(null)}
+        >
+          <div className='flex h-[70dvh] flex-col overflow-hidden'>
+            {renderReviewsTab()}
+          </div>
+        </MobileSheet>
       </div>
 
-      <div className='hidden min-h-0 flex-1 flex-col md:flex'>
+      <div
+        className={`hidden min-h-0 flex-1 flex-col md:flex ${PLAYER_PANEL_SURFACE_CLASS}`}
+      >
         <TabBar
           tabs={desktopTabs}
           active={desktopTab}
@@ -495,28 +643,41 @@ const EpisodeSelector: React.FC<EpisodeSelectorProps> = ({
         <PlayerPanelContent>
           {desktopTab === 'main' &&
             (showDesktopEpisodes ? (
-              <div className='grid min-h-0 min-w-0 flex-1 grid-rows-2 gap-0 overflow-hidden'>
-                <div className='flex min-h-0 min-w-0 flex-col overflow-hidden'>
-                  {renderInfoTab('desc')}
-                </div>
-                <div className='flex min-h-0 min-w-0 flex-col overflow-hidden'>
-                  <div className='flex-shrink-0 px-5 pt-0 sm:px-6'>
-                    <SectionTitle label='选集' />
+              <div className={DESKTOP_MAIN_GRID_CLASS}>
+                {renderInfoTab('desc', openDesktopReviewEditor)}
+                <section
+                  aria-label='选集'
+                  className='flex min-h-0 min-w-0 flex-col overflow-hidden border-t border-gray-100 pt-3 dark:border-white/[0.06]'
+                >
+                  <div className={`flex-shrink-0 ${PLAYER_PANEL_INSET_CLASS}`}>
+                    <SectionTitle
+                      label='选集'
+                      count={totalEpisodes > 1 ? totalEpisodes : undefined}
+                    />
                   </div>
-                  <div className='flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden'>
-                    {detailLoading ? (
-                      <EpisodesTabLoading />
-                    ) : (
-                      renderEpisodesTab()
-                    )}
-                  </div>
-                </div>
+                  {detailLoading ? (
+                    <EpisodesTab
+                      loading
+                      totalEpisodes={totalEpisodes || 24}
+                      episodes_titles={episodes_titles}
+                      episodesPerPage={episodesPerPage}
+                      value={value}
+                      episodeGroups={detail?.episode_groups}
+                      variantSources={variantSources}
+                      currentSource={currentSource}
+                      currentId={currentId}
+                    />
+                  ) : (
+                    renderEpisodesTab()
+                  )}
+                </section>
               </div>
             ) : (
-              renderInfoTab('panel')
+              renderInfoTab('panel', openDesktopReviewEditor)
             ))}
           {desktopTab === 'sources' && renderSourcesTab()}
           {danmakuEnabled && desktopTab === 'danmaku' && renderDanmakuTab()}
+          {desktopTab === 'reviews' && renderReviewsTab()}
         </PlayerPanelContent>
       </div>
     </div>

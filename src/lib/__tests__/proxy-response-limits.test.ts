@@ -1,34 +1,20 @@
-import { ReadableStream } from 'stream/web';
-import { TextDecoder } from 'util';
+import { installStreamPolyfills } from '@/app/api/test-utils/stream-polyfills';
 
 import {
   assertContentLength,
   createLimitedReadableStream,
+  readJsonLimited,
   readTextLimited,
   ResponseSizeLimitError,
 } from '../proxy-response-limits';
 
-function createResponse(body: string): Response {
-  const bytes = Buffer.from(body, 'utf8');
-  const stream = new ReadableStream<Uint8Array>({
-    start(controller) {
-      controller.enqueue(bytes);
-      controller.close();
-    },
-  });
+installStreamPolyfills();
 
-  return {
-    headers: new Headers(),
-    body: stream as unknown as ReadableStream<Uint8Array>,
-    arrayBuffer: async () => bytes.buffer,
-  } as unknown as Response;
+function createResponse(body: string): Response {
+  return new Response(body);
 }
 
 describe('proxy response limits', () => {
-  beforeAll(() => {
-    Object.assign(globalThis, { ReadableStream, TextDecoder });
-  });
-
   it('rejects content-length values over the limit', () => {
     const headers = new Headers({ 'content-length': '10' });
 
@@ -49,6 +35,36 @@ describe('proxy response limits', () => {
     await expect(readTextLimited(response, 4)).rejects.toThrow(
       ResponseSizeLimitError,
     );
+  });
+
+  it('cancels the upstream reader when streamed JSON exceeds the limit without Content-Length', async () => {
+    const cancel = jest.fn();
+    const chunks = ['{"ok":', 'true}'].map((chunk) =>
+      new TextEncoder().encode(chunk),
+    );
+    let chunksSent = 0;
+    const response = new Response(
+      new ReadableStream<Uint8Array>(
+        {
+          pull(controller) {
+            if (chunksSent < chunks.length) {
+              controller.enqueue(chunks[chunksSent++]);
+            } else {
+              controller.close();
+            }
+          },
+          cancel,
+        },
+        { highWaterMark: 0 },
+      ),
+    );
+    expect(response.headers.has('content-length')).toBe(false);
+
+    await expect(readJsonLimited(response, 10)).rejects.toThrow(
+      ResponseSizeLimitError,
+    );
+    expect(chunksSent).toBe(2);
+    expect(cancel).toHaveBeenCalledTimes(1);
   });
 
   it('rejects streams that exceed the limit while forwarding', async () => {

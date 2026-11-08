@@ -6,27 +6,35 @@ import {
 } from '@/features/playback-stats/lib/history';
 import type {
   PlaybackHistoryResponse,
-  PlaybackStatsSummary,
-  PlaybackTopItemsResponse,
-  PlaybackTopRange,
+  PlaybackPeriodStats,
+  PlaybackPeriodType,
 } from '@/features/playback-stats/types';
 import { getAuthInfoFromBrowserCookie } from '@/lib/auth.client';
 
 const PLAYBACK_HISTORY_PAGE_SIZE = 10;
 
-let playbackStatsSummaryCache: {
-  username: string;
-  data: PlaybackStatsSummary;
-} | null = null;
+const playbackPeriodCache = new Map<string, PlaybackPeriodStats>();
+
+function periodCacheKey(
+  username: string,
+  type: PlaybackPeriodType,
+  date?: string,
+): string {
+  return JSON.stringify([username, type, date ?? 'current']);
+}
+
 let playbackHistoryCache: {
   username: string;
   data: PlaybackHistoryResponse;
 } | null = null;
 
-export function getCachedPlaybackStatsSummarySnapshot(): PlaybackStatsSummary | null {
+export function getCachedPlaybackPeriodSnapshot(
+  type: PlaybackPeriodType,
+  date?: string,
+): PlaybackPeriodStats | null {
   const username = getAuthInfoFromBrowserCookie()?.username;
-  return username && playbackStatsSummaryCache?.username === username
-    ? playbackStatsSummaryCache.data
+  return username
+    ? (playbackPeriodCache.get(periodCacheKey(username, type, date)) ?? null)
     : null;
 }
 
@@ -80,42 +88,27 @@ export function removePlaybackHistorySnapshotItem(id: string): void {
   };
 }
 
-export async function getPlaybackStatsSummary(): Promise<PlaybackStatsSummary | null> {
-  if (!getAuthInfoFromBrowserCookie()?.username) return null;
-
-  const response = await fetch('/api/playback-stats/summary?range=7d', {
-    cache: 'no-store',
-  });
-  if (!response.ok) {
-    throw new Error(`Playback stats summary failed: ${response.status}`);
-  }
-  const summary = (await response.json()) as PlaybackStatsSummary;
-  const normalizedSummary = {
-    ...summary,
-    recentItems: dedupePlaybackSessionsByTitle(summary.recentItems, 6),
-  };
+export async function getPlaybackPeriodStats(
+  type: PlaybackPeriodType,
+  date?: string,
+): Promise<PlaybackPeriodStats | null> {
   const username = getAuthInfoFromBrowserCookie()?.username;
-  if (username) {
-    playbackStatsSummaryCache = { username, data: normalizedSummary };
-  }
-  return normalizedSummary;
-}
-
-export async function getPlaybackTopItems(
-  range: PlaybackTopRange,
-): Promise<PlaybackTopItemsResponse> {
-  if (!getAuthInfoFromBrowserCookie()?.username) {
-    return { range, items: [] };
-  }
-
-  const params = new URLSearchParams({ range });
-  const response = await fetch(`/api/playback-stats/top?${params}`, {
+  if (!username) return null;
+  const params = new URLSearchParams({
+    type,
+    tz: Intl.DateTimeFormat().resolvedOptions().timeZone,
+  });
+  if (date !== undefined) params.set('date', date);
+  const response = await fetch(`/api/playback-stats/period?${params}`, {
     cache: 'no-store',
   });
-  if (!response.ok) {
-    throw new Error(`Playback top items failed: ${response.status}`);
+  if (!response.ok)
+    throw new Error(`Playback period stats failed: ${response.status}`);
+  const stats = (await response.json()) as PlaybackPeriodStats;
+  if (getAuthInfoFromBrowserCookie()?.username === username) {
+    playbackPeriodCache.set(periodCacheKey(username, type, date), stats);
   }
-  return (await response.json()) as PlaybackTopItemsResponse;
+  return stats;
 }
 
 export async function getPlaybackHistory(

@@ -1,7 +1,9 @@
+import { installStreamPolyfills } from '@/app/api/test-utils/stream-polyfills';
 import {
   fetchDanmakuByEpisodeId,
   searchDanmakuCandidates,
 } from '@/features/play/lib/danmaku/provider.server';
+import { DanmakuProviderError } from '@/features/play/lib/danmaku/types';
 import { DEFAULT_RUNTIME_PARAMS } from '@/lib/runtime-params';
 import { fetchWithUrlGuard } from '@/lib/url-guard';
 
@@ -10,6 +12,8 @@ jest.mock('@/lib/url-guard', () => ({
   fetchWithUrlGuard: jest.fn(),
   UrlValidationError: class UrlValidationError extends Error {},
 }));
+
+installStreamPolyfills();
 
 describe('danmaku provider missing episodes', () => {
   const originalFetch = global.fetch;
@@ -63,12 +67,20 @@ describe('danmaku provider missing episodes', () => {
         headers: { get: () => '30' },
         body: { cancel },
       })
-      .mockResolvedValue({
-        ok: true,
-        status: 200,
-        headers: { get: () => null },
-        text: async () => JSON.stringify({ comments: [] }),
-      });
+      .mockImplementation(
+        async () =>
+          new Response(
+            new ReadableStream<Uint8Array>({
+              start(controller) {
+                // 显式关闭正文，避免假时钟暂停 Response 的关闭微任务。
+                controller.enqueue(
+                  new TextEncoder().encode(JSON.stringify({ comments: [] })),
+                );
+                controller.close();
+              },
+            }),
+          ),
+      );
     await expect(fetchDanmakuByEpisodeId(123, 100)).rejects.toMatchObject({
       kind: 'rate-limited',
       retryAfterSeconds: 30,
@@ -90,26 +102,56 @@ describe('danmaku provider missing episodes', () => {
   });
 
   it('rejects malformed success payloads rather than caching them as empty', async () => {
-    (global.fetch as jest.Mock).mockResolvedValue({
-      ok: true,
-      status: 200,
-      headers: { get: () => null },
-      text: async () =>
+    (global.fetch as jest.Mock).mockResolvedValue(
+      new Response(
         JSON.stringify({ success: false, errorMessage: 'private details' }),
-    });
+      ),
+    );
     await expect(fetchDanmakuByEpisodeId(123, 100)).rejects.toMatchObject({
       kind: 'invalid-response',
     });
   });
 
+  it('rejects streamed bodies over 12 MiB without Content-Length', async () => {
+    const chunk = new Uint8Array(1024 * 1024).fill(0x20);
+    const cancel = jest.fn();
+    let chunksSent = 0;
+    const response = new Response(
+      new ReadableStream<Uint8Array>(
+        {
+          pull(controller) {
+            if (chunksSent < 12) {
+              controller.enqueue(chunk);
+            } else if (chunksSent === 12) {
+              controller.enqueue(new TextEncoder().encode('{"comments":[]}'));
+            } else {
+              controller.close();
+            }
+            chunksSent++;
+          },
+          cancel,
+        },
+        { highWaterMark: 0 },
+      ),
+    );
+    expect(response.headers.has('content-length')).toBe(false);
+    (global.fetch as jest.Mock).mockResolvedValue(response);
+
+    const pending = fetchDanmakuByEpisodeId(123, 100);
+    await expect(pending).rejects.toBeInstanceOf(DanmakuProviderError);
+    await expect(pending).rejects.toMatchObject({ kind: 'invalid-response' });
+    expect(chunksSent).toBe(13);
+    expect(cancel).toHaveBeenCalledTimes(1);
+  });
+
   it('passes custom and default request deadlines to guarded upstream requests', async () => {
     process.env.DANMAKU_API_ALLOW_PRIVATE = 'false';
     const guardedFetch = fetchWithUrlGuard as jest.Mock;
-    guardedFetch.mockReset().mockResolvedValue({
-      ok: true,
-      headers: { get: () => null },
-      text: async () => JSON.stringify({ animes: [], comments: [] }),
-    });
+    guardedFetch
+      .mockReset()
+      .mockImplementation(
+        async () => new Response(JSON.stringify({ animes: [], comments: [] })),
+      );
 
     await searchDanmakuCandidates('test');
     expect(guardedFetch).toHaveBeenLastCalledWith(

@@ -50,11 +50,8 @@ function createConfig() {
       SearchDownstreamMaxPage: 5,
       SiteInterfaceCacheTime: 300,
       DoubanProxyType: 'direct',
-      DoubanProxy: '',
       BangumiDataSource: 'server',
-      BangumiProxy: '',
       DoubanImageProxyType: 'direct',
-      DoubanImageProxy: '',
       DisableYellowFilter: false,
       FluidSearch: true,
     },
@@ -77,7 +74,7 @@ let requestSeq = 0;
 function createRequest(body: unknown, ip?: string) {
   const clientIp = ip || `10.0.0.${(requestSeq += 1)}`;
   return {
-    json: async () => body,
+    json: async () => ({ nickname: '测试昵称', ...(body as object) }),
     headers: new Headers({ 'x-forwarded-for': clientIp }),
   } as unknown as NextRequest;
 }
@@ -121,6 +118,27 @@ describe('register route', () => {
     expect(db.registerUser).toHaveBeenCalledWith(
       'demo-user',
       'strong-password',
+      '测试昵称',
+      undefined,
+    );
+  });
+
+  it('把新用户写入默认用户组', async () => {
+    const { POST } = require('./route');
+    const config = createConfig();
+    (config.UserConfig as Record<string, unknown>).DefaultUserGroup = 'vip';
+    (getConfigForRead as jest.Mock).mockResolvedValue(config);
+
+    const response = await POST(
+      createRequest({ username: 'demo-user', password: 'strong-password' }),
+    );
+
+    expect(response.status).toBe(200);
+    expect(db.registerUser).toHaveBeenCalledWith(
+      'demo-user',
+      'strong-password',
+      '测试昵称',
+      ['vip'],
     );
   });
 
@@ -219,6 +237,7 @@ describe('register route', () => {
 
   it('邀请码已用尽时拒绝', async () => {
     withInviteCode({ maxUses: 1, usedCount: 1 });
+    (reserveInviteCode as jest.Mock).mockResolvedValue(false);
     const { POST } = require('./route');
 
     const response = await POST(
@@ -252,6 +271,44 @@ describe('register route', () => {
     expect(response.status).toBe(403);
     expect(db.registerUser).not.toHaveBeenCalled();
     expect(releaseInviteCode).not.toHaveBeenCalled();
+  });
+
+  it('昵称冲突返回 409 并释放邀请码名额', async () => {
+    withInviteCode({ maxUses: 2, usedCount: 0 });
+    const { NicknameTakenError } = require('@/lib/review-social-storage');
+    (db.registerUser as jest.Mock).mockRejectedValueOnce(
+      new NicknameTakenError(),
+    );
+    const { POST } = require('./route');
+    const response = await POST(
+      createRequest({
+        username: 'demo-user',
+        password: 'strong-password',
+        nickname: '新昵称',
+        inviteCode: 'WELCOME-2026',
+      }),
+    );
+    expect(response.status).toBe(409);
+    expect(await response.json()).toEqual({ error: '昵称已被使用' });
+    expect(releaseInviteCode).toHaveBeenCalledWith('WELCOME-2026');
+  });
+
+  it('注册必须提供符合规则的昵称', async () => {
+    const { POST } = require('./route');
+    for (const nickname of [undefined, '', 'admin', 'x']) {
+      expect(
+        (
+          await POST(
+            createRequest({
+              username: 'demo-user',
+              password: 'strong-password',
+              nickname,
+            }),
+          )
+        ).status,
+      ).toBe(400);
+    }
+    expect(db.registerUser).not.toHaveBeenCalled();
   });
 
   it('建号失败时回滚已占用的次数', async () => {

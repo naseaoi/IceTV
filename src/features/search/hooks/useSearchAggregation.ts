@@ -2,13 +2,12 @@ import React, { useEffect, useMemo, useRef } from 'react';
 
 import { SearchFilterCategory } from '@/components/SearchResultFilter';
 import { VideoCardHandle } from '@/components/VideoCard';
-import { SearchResult } from '@/lib/types';
-
 import {
   compareYear,
   computeGroupStats,
-  normalizeTitleForAggregation,
-} from '../lib/searchUtils';
+} from '@/features/search/lib/searchUtils';
+import { normalizeWorkTitle } from '@/lib/source-match';
+import { SearchResult } from '@/lib/types';
 
 export type FilterState = {
   source: string;
@@ -79,7 +78,7 @@ function addSearchResultToIndex(
     index.years.add(item.year);
   }
 
-  const normalizedTitle = normalizeTitleForAggregation(item.title || '');
+  const normalizedTitle = normalizeWorkTitle(item.title || '');
   if (!normalizedTitle) {
     index.resultCount += 1;
     return;

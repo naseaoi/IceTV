@@ -91,6 +91,7 @@ export function areVideoCardPropsEqual(
     isSameResumeGroup(prev.resumeGroup, next.resumeGroup) &&
     prev.douban_id === next.douban_id &&
     prev.rate === next.rate &&
+    prev.myRating === next.myRating &&
     prev.type === next.type &&
     prev.isBangumi === next.isBangumi &&
     prev.isAggregate === next.isAggregate &&

@@ -1,9 +1,30 @@
 import type Database from 'better-sqlite3';
 
-import type { SharedResourceStore } from '@/lib/shared-resource-store';
+import {
+  type SharedResourceStore,
+  pruneResourceBatches,
+} from '@/lib/shared-resource-store';
 
 export class SqliteResourceStore implements SharedResourceStore {
   constructor(private readonly database: Database.Database) {}
+
+  async getCooldown(key: string): Promise<number> {
+    const row = this.database
+      .prepare(
+        'SELECT reset_at FROM shared_resource_usage WHERE resource_key = ?',
+      )
+      .get(key) as { reset_at: number } | undefined;
+    return row?.reset_at ?? 0;
+  }
+
+  async extendCooldown(key: string, until: number): Promise<number> {
+    const row = this.database
+      .prepare(
+        'INSERT INTO shared_resource_usage (resource_key, used, reset_at) VALUES (?, 0, ?) ON CONFLICT(resource_key) DO UPDATE SET reset_at = MAX(reset_at, excluded.reset_at) RETURNING reset_at',
+      )
+      .get(key, until) as { reset_at: number };
+    return row.reset_at;
+  }
 
   async consume(
     key: string,
@@ -91,15 +112,16 @@ export class SqliteResourceStore implements SharedResourceStore {
   }
 
   async prune(now: number) {
-    this.database
-      .prepare(
-        'DELETE FROM shared_resource_leases WHERE rowid IN (SELECT rowid FROM shared_resource_leases WHERE expires_at <= ? LIMIT 500)',
-      )
-      .run(now);
-    this.database
-      .prepare(
-        'DELETE FROM shared_resource_usage WHERE resource_key IN (SELECT resource_key FROM shared_resource_usage WHERE reset_at <= ? LIMIT 500)',
-      )
-      .run(now);
+    const leases = this.database.prepare(
+      'DELETE FROM shared_resource_leases WHERE rowid IN (SELECT rowid FROM shared_resource_leases WHERE expires_at <= ? LIMIT ?)',
+    );
+    const usage = this.database.prepare(
+      'DELETE FROM shared_resource_usage WHERE resource_key IN (SELECT resource_key FROM shared_resource_usage WHERE reset_at <= ? LIMIT ?)',
+    );
+    await pruneResourceBatches(async (limit) => {
+      const deletedLeases = leases.run(now, limit).changes;
+      const deletedUsage = usage.run(now, limit).changes;
+      return Math.max(deletedLeases, deletedUsage);
+    });
   }
 }

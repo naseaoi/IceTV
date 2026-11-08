@@ -1,4 +1,4 @@
-﻿/** @jest-environment node */
+/** @jest-environment node */
 
 import { getAuthInfoFromCookie } from '@/lib/auth.server';
 import {
@@ -9,6 +9,7 @@ import {
   resetConfig,
   saveConfig,
 } from '@/lib/config';
+import { db } from '@/lib/db';
 import { getOwnerPassword, getOwnerUsername } from '@/lib/env.server';
 import { verifyAuthSignature } from '@/lib/signing-secret.server';
 import {
@@ -80,6 +81,22 @@ if (!(globalThis as any).Response) {
 
   (globalThis as any).Response = MinimalResponse;
 }
+
+jest.mock('@/lib/db', () => ({
+  db: {
+    getConfigSubscription: jest.fn().mockResolvedValue({
+      ConfigFile: '',
+      ConfigSubscribtion: { URL: '', AutoUpdate: false, LastCheck: '' },
+    }),
+    getLiveSourceChannelCounts: jest.fn().mockResolvedValue({}),
+    getUserAccess: jest.fn(),
+    getAdminUserPage: jest.fn(),
+    countInviteCodes: jest.fn().mockResolvedValue(0),
+    countActiveInviteCodes: jest.fn().mockResolvedValue(0),
+    recordUserLogin: jest.fn(),
+    recordUserActivity: jest.fn().mockResolvedValue(undefined),
+  },
+}));
 
 jest.mock('@/lib/auth.server', () => ({
   getAuthInfoFromCookie: jest.fn(),
@@ -166,11 +183,8 @@ describe('admin api auth guard regression', () => {
       SearchDownstreamMaxPage: 5,
       SiteInterfaceCacheTime: 300,
       DoubanProxyType: 'direct',
-      DoubanProxy: '',
       BangumiDataSource: 'server',
-      BangumiProxy: '',
       DoubanImageProxyType: 'direct',
-      DoubanImageProxy: '',
       DisableYellowFilter: false,
       FluidSearch: true,
     },
@@ -196,13 +210,26 @@ describe('admin api auth guard regression', () => {
     mockedGetConfig.mockResolvedValue(baseConfig as never);
     mockedGetConfigForRead.mockResolvedValue(baseConfig as never);
     mockedGetConfigFresh.mockResolvedValue(baseConfig as never);
+    (db.getUserAccess as jest.Mock).mockImplementation(
+      async (username) =>
+        baseConfig.UserConfig.Users.find(
+          (user) => user.username === username,
+        ) || null,
+    );
+    (db.getAdminUserPage as jest.Mock).mockResolvedValue({
+      total: baseConfig.UserConfig.Users.length,
+      items: [],
+      nextCursor: null,
+    });
   });
 
   it('returns 401 when request is unauthenticated', async () => {
     const { getAdminConfig } = getHandlers();
     mockedGetAuthInfoFromCookie.mockReturnValue(null);
 
-    const response = await getAdminConfig({} as any);
+    const response = await getAdminConfig({
+      url: 'http://localhost/api/admin/config',
+    } as any);
     const payload = await response.json();
 
     expect(response.status).toBe(401);
@@ -218,7 +245,9 @@ describe('admin api auth guard regression', () => {
       sessionType: 'account',
     });
 
-    const response = await getAdminConfig({} as any);
+    const response = await getAdminConfig({
+      url: 'http://localhost/api/admin/config',
+    } as any);
     const payload = await response.json();
 
     expect(response.status).toBe(403);
@@ -234,12 +263,18 @@ describe('admin api auth guard regression', () => {
       sessionType: 'account',
     });
 
-    const response = await getAdminConfig({} as any);
+    const response = await getAdminConfig({
+      url: 'http://localhost/api/admin/config',
+    } as any);
     const payload = await response.json();
 
     expect(response.status).toBe(200);
     expect(payload.Role).toBe('admin');
     expect(payload.Config).toBeDefined();
+    expect(payload.Config.UserConfig.Users).toEqual([]);
+    expect(payload.Config.UserConfig.TotalUsers).toBe(
+      baseConfig.UserConfig.Users.length,
+    );
   });
 
   it('returns 403 when non-owner tries to reset config', async () => {
@@ -282,11 +317,8 @@ describe('admin api auth guard regression', () => {
         SearchDownstreamMaxPage: 5,
         SiteInterfaceCacheTime: 300,
         DoubanProxyType: 'direct',
-        DoubanProxy: '',
         BangumiDataSource: 'server',
-        BangumiProxy: '',
         DoubanImageProxyType: 'direct',
-        DoubanImageProxy: '',
         DisableYellowFilter: false,
         FluidSearch: true,
       }),
@@ -307,6 +339,43 @@ describe('admin api auth guard regression', () => {
       }),
     );
   });
+
+  it.each(['groups', 'all', undefined, 'invalid', null])(
+    'validates and preserves live access %j',
+    async (LiveAccess) => {
+      const { updateSiteConfig } = getHandlers();
+      mockedGetAuthInfoFromCookie.mockReturnValue({
+        username: 'owner-1',
+        expiresAt: Date.now() + 60_000,
+        signature: 'mock-signature',
+        sessionType: 'account',
+      });
+      const stored = {
+        ...baseConfig,
+        SiteConfig: { ...baseConfig.SiteConfig, LiveAccess: 'groups' },
+      };
+      mockedGetConfig.mockResolvedValue(stored as never);
+      const response = await updateSiteConfig({
+        json: async () => ({
+          ...baseConfig.SiteConfig,
+          FooterText: '',
+          LiveAccess,
+        }),
+      } as any);
+      const valid =
+        LiveAccess === undefined ||
+        LiveAccess === 'all' ||
+        LiveAccess === 'groups';
+      expect(response.status).toBe(valid ? 200 : 400);
+      if (valid) {
+        expect(mockedSaveConfig).toHaveBeenCalledWith(stored);
+        expect(stored.SiteConfig.LiveAccess).toBe(LiveAccess ?? 'groups');
+      } else {
+        expect(await response.json()).toEqual({ error: '直播权限范围无效' });
+        expect(mockedSaveConfig).not.toHaveBeenCalled();
+      }
+    },
+  );
 
   it('keeps the stored auto source switch default when older clients omit it', async () => {
     const { updateSiteConfig } = getHandlers();

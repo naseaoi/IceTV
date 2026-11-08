@@ -1,350 +1,417 @@
 'use client';
 
-import { BarChart3, Clock3, TrendingUp } from 'lucide-react';
-import { useEffect, useMemo, useState } from 'react';
-
-import { PlaybackStatsSkeleton } from '@/features/playback-stats/components/PlaybackStatsSkeleton';
+import { useRouter } from 'next/navigation';
 import {
-  getCachedPlaybackStatsSummarySnapshot,
-  getPlaybackStatsSummary,
-  getPlaybackTopItems,
+  type CSSProperties,
+  type ReactNode,
+  useEffect,
+  useLayoutEffect,
+  useState,
+} from 'react';
+
+import {
+  HOME_POSTER_CARD_CLASS,
+  POSTER_CARD_COVER_CLASS,
+  POSTER_CARD_SUBTITLE_ROW_CLASS,
+  POSTER_CARD_TITLE_ROW_CLASS,
+} from '@/components/poster-card-layout';
+import ScrollableRow from '@/components/ScrollableRow';
+import { PlaybackPosterCard } from '@/features/playback-stats/components/PlaybackPosterCard';
+import {
+  PlaybackStatsSkeleton,
+  STATS_CARD_CLASS,
+  STATS_COLUMN_CLASS,
+  STATS_LAYOUT_CLASS,
+  StatsHeading,
+} from '@/features/playback-stats/components/PlaybackStatsSkeleton';
+import {
+  getCachedPlaybackPeriodSnapshot,
+  getPlaybackPeriodStats,
 } from '@/features/playback-stats/lib/client';
 import type {
-  PlaybackStatsSummary,
-  PlaybackTopRange,
+  PlaybackPeriodBucket,
+  PlaybackPeriodStats,
+  PlaybackPeriodType,
+  PlaybackTopWork,
 } from '@/features/playback-stats/types';
+import {
+  INDICATOR_TARGET_ATTR,
+  useSlidingIndicator,
+} from '@/hooks/useSlidingIndicator';
+import {
+  getCurrentNavigationPath,
+  withReturnTo,
+} from '@/lib/navigation-return';
 
-const TOP_ITEM_LIMIT = 3;
-const TOP_RANGE_OPTIONS: Array<{ value: PlaybackTopRange; label: string }> = [
+const WEEKDAY_LABELS = ['一', '二', '三', '四', '五', '六', '日'];
+const TOP_RANGE_OPTIONS: Array<{ value: PlaybackPeriodType; label: string }> = [
   { value: 'week', label: '周' },
   { value: 'month', label: '月' },
-  { value: 'all', label: '总' },
+  { value: 'year', label: '年' },
 ];
-const DAY_MS = 24 * 60 * 60 * 1000;
+const TOP_EMPTY_TEXT: Record<PlaybackPeriodType, string> = {
+  week: '这周还没有看过什么',
+  month: '这个月还没有看过什么',
+  year: '今年还没有看过什么',
+};
+
+function durationParts(seconds: number): Array<[number, string]> {
+  const minutes = Math.floor(Math.max(0, seconds) / 60);
+  const hours = Math.floor(minutes / 60);
+  if (hours === 0) return [[minutes, '分钟']];
+  const rest = minutes % 60;
+  return rest > 0
+    ? [
+        [hours, '小时'],
+        [rest, '分'],
+      ]
+    : [[hours, '小时']];
+}
 
 function formatDuration(seconds: number): string {
-  const safeSeconds = Math.max(0, Math.floor(seconds || 0));
-  const hours = Math.floor(safeSeconds / 3600);
-  const minutes = Math.floor((safeSeconds % 3600) / 60);
-
-  if (hours > 0) {
-    return `${hours}小时${minutes}分钟`;
-  }
-  return `${minutes}分钟`;
+  return durationParts(seconds)
+    .map(([value, unit]) => `${value} ${unit}`)
+    .join(' ');
 }
 
-function formatShortDate(date: string): string {
-  const [, month, day] = date.split('-');
-  return `${Number(month)}/${Number(day)}`;
+function formatDayLabel(key: string): string {
+  const [, month, day] = key.split('-');
+  return `${Number(month)}月${Number(day)}日`;
 }
 
-function formatLocalDate(timestamp: number): string {
-  const date = new Date(timestamp);
-  const year = date.getFullYear();
-  const month = `${date.getMonth() + 1}`.padStart(2, '0');
-  const day = `${date.getDate()}`.padStart(2, '0');
-  return `${year}-${month}-${day}`;
-}
-
-function createEmptySummary(now = Date.now()): PlaybackStatsSummary {
-  const date = new Date(now);
-  date.setHours(0, 0, 0, 0);
-  const todayStart = date.getTime();
-
-  return {
-    totalWatchSeconds: 0,
-    weekWatchSeconds: 0,
-    dailyWatchSeconds: Array.from({ length: 7 }, (_, index) => ({
-      date: formatLocalDate(todayStart - (6 - index) * DAY_MS),
-      watchSeconds: 0,
-    })),
-    recentItems: [],
-    topItems: [],
-  };
-}
-
-function StatTile({
-  icon: Icon,
-  label,
-  value,
-}: {
-  icon: typeof Clock3;
-  label: string;
-  value: string;
-}) {
+function Metric({ label, seconds }: { label: string; seconds: number }) {
   return (
-    <div className='h-full rounded-lg border border-gray-200 bg-white/70 p-4 dark:border-gray-700 dark:bg-gray-900/50'>
-      <div className='mb-3 flex items-center gap-2 text-sm text-gray-500 dark:text-gray-400'>
-        <Icon className='h-4 w-4 text-green-500' />
-        {label}
-      </div>
-      <div className='truncate text-2xl font-semibold text-gray-900 dark:text-gray-100'>
-        {value}
-      </div>
+    <div className='min-w-0'>
+      <p className='text-[13px] text-gray-500 dark:text-gray-400'>{label}</p>
+      <p className='mt-1 flex items-baseline gap-0.5 whitespace-nowrap text-gray-900 dark:text-gray-50'>
+        {durationParts(seconds).map(([value, unit]) => (
+          <span key={unit} className='flex items-baseline gap-0.5'>
+            <span className='text-[28px] font-semibold tabular-nums leading-none tracking-tight'>
+              {value}
+            </span>
+            <span className='mr-1 text-[13px] text-gray-500 dark:text-gray-400'>
+              {unit}
+            </span>
+          </span>
+        ))}
+      </p>
     </div>
   );
 }
 
-function TopContentTile({
-  items,
+function WeekChart({
+  buckets,
+  today,
+  selectedKey,
+  onSelect,
 }: {
-  items: PlaybackStatsSummary['topItems'];
+  buckets: PlaybackPeriodBucket[];
+  today: string;
+  selectedKey: string | null;
+  onSelect: (key: string | null) => void;
 }) {
-  const [activeRange, setActiveRange] = useState<PlaybackTopRange>('week');
-  const [loadingRange, setLoadingRange] = useState<PlaybackTopRange | null>(
-    null,
-  );
-  const [loadedRanges, setLoadedRanges] = useState<
-    Record<PlaybackTopRange, boolean>
-  >({
-    week: true,
-    month: false,
-    all: false,
-  });
-  const [itemsByRange, setItemsByRange] = useState<
-    Record<PlaybackTopRange, PlaybackStatsSummary['topItems']>
-  >({
-    week: items,
-    month: [],
-    all: [],
-  });
-
-  useEffect(() => {
-    setItemsByRange((prev) => ({ ...prev, week: items }));
-    setLoadedRanges((prev) => ({ ...prev, week: true }));
-  }, [items]);
-
-  useEffect(() => {
-    if (activeRange === 'week' || loadedRanges[activeRange]) return;
-
-    let cancelled = false;
-    setLoadingRange(activeRange);
-    getPlaybackTopItems(activeRange)
-      .then((response) => {
-        if (cancelled) return;
-        setItemsByRange((prev) => ({
-          ...prev,
-          [response.range]: response.items,
-        }));
-        setLoadedRanges((prev) => ({
-          ...prev,
-          [response.range]: true,
-        }));
-      })
-      .catch((error) => {
-        if (!cancelled) {
-          console.error('获取常看内容失败:', error);
-        }
-      })
-      .finally(() => {
-        if (!cancelled) {
-          setLoadingRange(null);
-        }
-      });
-
-    return () => {
-      cancelled = true;
-    };
-  }, [activeRange, loadedRanges]);
-
-  const activeItems = itemsByRange[activeRange];
-  const isLoading = loadingRange === activeRange;
+  const max = Math.max(1, ...buckets.map((bucket) => bucket.watchSeconds));
+  const highlightKey = selectedKey ?? today;
 
   return (
-    <div className='flex h-36 min-w-0 flex-col overflow-hidden rounded-lg border border-gray-200 bg-white/70 p-4 dark:border-gray-700 dark:bg-gray-900/50'>
-      <div className='mb-3 flex min-w-0 items-center justify-between gap-2 text-sm text-gray-500 dark:text-gray-400'>
-        <div className='flex min-w-0 items-center gap-2'>
-          <TrendingUp className='h-4 w-4 shrink-0 text-pink-500' />
-          <span className='truncate'>常看内容</span>
+    <div className='grid flex-1 grid-cols-7 gap-1.5'>
+      {buckets.map((bucket, index) => {
+        const future = bucket.key > today;
+        const highlighted = bucket.key === highlightKey;
+        const ratio = bucket.watchSeconds / max;
+        return (
+          <button
+            key={bucket.key}
+            type='button'
+            disabled={future}
+            aria-pressed={bucket.key === selectedKey}
+            aria-label={`${formatDayLabel(bucket.key)} ${formatDuration(bucket.watchSeconds)}`}
+            onClick={() =>
+              onSelect(bucket.key === selectedKey ? null : bucket.key)
+            }
+            className='group flex min-w-0 flex-col items-center gap-2 focus:outline-none'
+          >
+            <span className='flex h-20 w-full items-end justify-center md:h-auto md:min-h-20 md:flex-1'>
+              {bucket.watchSeconds > 0 ? (
+                <span
+                  className={`w-full max-w-[28px] rounded-md transition-colors ${
+                    highlighted
+                      ? 'bg-brand-500 dark:bg-brand-400'
+                      : 'bg-gray-200 group-hover:bg-gray-300 dark:bg-white/[0.12] dark:group-hover:bg-white/20'
+                  }`}
+                  style={{ height: `${Math.max(8, ratio * 100)}%` }}
+                />
+              ) : (
+                <span
+                  className={`h-1 w-full max-w-[28px] rounded-full ${
+                    highlighted
+                      ? 'bg-brand-500/40'
+                      : 'bg-gray-200/70 dark:bg-white/[0.06]'
+                  }`}
+                />
+              )}
+            </span>
+            <span
+              className={`text-xs ${
+                highlighted
+                  ? 'font-medium text-gray-900 dark:text-gray-100'
+                  : future
+                    ? 'text-gray-300 dark:text-gray-600'
+                    : 'text-gray-500 dark:text-gray-400'
+              }`}
+            >
+              {bucket.key === today ? '今天' : WEEKDAY_LABELS[index]}
+            </span>
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
+function TopWorkCard({
+  work,
+  rank,
+  onOpen,
+}: {
+  work: PlaybackTopWork;
+  rank: number;
+  onOpen: (work: PlaybackTopWork) => void;
+}) {
+  return (
+    <PlaybackPosterCard
+      title={work.title}
+      cover={work.cover || ''}
+      coverSizes='(min-width: 640px) 160px, 25vw'
+      source={work.source}
+      videoId={work.videoId}
+      year={work.year}
+      rank={rank}
+      subtitle={formatDuration(work.watchSeconds)}
+      ariaLabel={`播放 ${work.title}`}
+      onPlay={() => onOpen(work)}
+    />
+  );
+}
+
+// 占住一行海报的高度，空态与有内容之间切换时不跳动
+function TopWorksMessage({ children }: { children: ReactNode }) {
+  return (
+    <div className='relative'>
+      <ScrollableRow>
+        <div
+          aria-hidden='true'
+          className={`invisible ${HOME_POSTER_CARD_CLASS}`}
+        >
+          <div className={POSTER_CARD_COVER_CLASS} />
+          <p className={POSTER_CARD_TITLE_ROW_CLASS}>&nbsp;</p>
+          <p className={POSTER_CARD_SUBTITLE_ROW_CLASS}>&nbsp;</p>
         </div>
-        <div className='flex h-6 shrink-0 rounded border border-gray-200 bg-gray-50 p-0.5 dark:border-gray-700 dark:bg-gray-800'>
+      </ScrollableRow>
+      <p className='absolute inset-0 flex items-center justify-center text-sm text-gray-400 dark:text-gray-500'>
+        {children}
+      </p>
+    </div>
+  );
+}
+
+function rangeOrder(value: PlaybackPeriodType) {
+  return TOP_RANGE_OPTIONS.findIndex((option) => option.value === value);
+}
+
+function TopWorks({ week }: { week: PlaybackPeriodStats }) {
+  const router = useRouter();
+  const [range, setRange] = useState<PlaybackPeriodType>('week');
+  const [byRange, setByRange] = useState<
+    Partial<Record<PlaybackPeriodType, PlaybackTopWork[]>>
+  >(() => ({
+    month: getCachedPlaybackPeriodSnapshot('month')?.topWorks,
+    year: getCachedPlaybackPeriodSnapshot('year')?.topWorks,
+  }));
+  const [failed, setFailed] = useState(false);
+  const worksOf = (value: PlaybackPeriodType) =>
+    value === 'week' ? week.topWorks : byRange[value];
+  // 新范围加载完成前继续展示上一份结果，避免占位与实际高度不同导致布局跳动
+  const [shownRange, setShownRange] = useState<PlaybackPeriodType>('week');
+  const loaded = worksOf(range) !== undefined;
+  if (loaded && shownRange !== range) setShownRange(range);
+  const works = worksOf(loaded ? range : shownRange) ?? [];
+  const pending = !loaded && !failed;
+  // 展示的范围变化时卡片沿切换方向依次滑入；首次展示不播放
+  const [swap, setSwap] = useState({ range: shownRange, shift: 0 });
+  if (swap.range !== shownRange) {
+    setSwap({
+      range: shownRange,
+      shift: rangeOrder(shownRange) > rangeOrder(swap.range) ? 1 : -1,
+    });
+  }
+  const indicator = useSlidingIndicator<HTMLDivElement>(range);
+
+  useEffect(() => {
+    if (range === 'week') return;
+    let active = true;
+    setFailed(false);
+    getPlaybackPeriodStats(range)
+      .then((stats) => {
+        if (active && stats)
+          setByRange((previous) => ({ ...previous, [range]: stats.topWorks }));
+      })
+      .catch((error) => {
+        console.error('获取常看内容失败:', error);
+        if (active) setFailed(true);
+      });
+    return () => {
+      active = false;
+    };
+  }, [range]);
+
+  const open = (work: PlaybackTopWork) => {
+    const params = new URLSearchParams({
+      source: work.source,
+      id: work.videoId,
+      title: work.title,
+    });
+    if (work.year) params.set('year', work.year);
+    router.push(
+      withReturnTo(`/play?${params.toString()}`, getCurrentNavigationPath()),
+    );
+  };
+
+  return (
+    <section className={STATS_COLUMN_CLASS}>
+      <StatsHeading title='常看'>
+        <div
+          ref={indicator.containerRef}
+          role='radiogroup'
+          aria-label='常看范围'
+          className='relative flex h-7 rounded-full bg-gray-900/[0.05] p-0.5 dark:bg-white/[0.06]'
+        >
+          {indicator.indicatorProps && (
+            <span
+              aria-hidden='true'
+              ref={indicator.indicatorProps.ref}
+              style={{ ...indicator.indicatorProps.style, top: undefined }}
+              className='sliding-indicator bottom-0.5 top-0.5 rounded-full bg-white shadow-sm dark:bg-white/[0.14]'
+            />
+          )}
           {TOP_RANGE_OPTIONS.map((option) => {
-            const selected = activeRange === option.value;
+            const selected = range === option.value;
             return (
               <button
                 key={option.value}
                 type='button'
-                className={`min-w-7 rounded px-2 text-xs transition-colors focus:outline-none focus:ring-2 focus:ring-green-500/30 ${
+                role='radio'
+                aria-checked={selected}
+                {...(selected ? { [INDICATOR_TARGET_ATTR]: '' } : {})}
+                onClick={() => setRange(option.value)}
+                className={`relative min-w-9 rounded-full px-2.5 text-xs transition-colors ${
                   selected
-                    ? 'bg-green-600 text-white'
-                    : 'text-gray-500 hover:bg-white hover:text-gray-800 dark:text-gray-400 dark:hover:bg-gray-700 dark:hover:text-gray-100'
+                    ? 'font-medium text-gray-900 dark:text-white'
+                    : 'text-gray-500 hover:text-gray-800 dark:text-gray-400 dark:hover:text-gray-100'
                 }`}
-                aria-pressed={selected}
-                onClick={() => setActiveRange(option.value)}
               >
                 {option.label}
               </button>
             );
           })}
         </div>
-      </div>
-      {activeItems.length > 0 ? (
-        <div className={`min-w-0 space-y-2 ${isLoading ? 'opacity-50' : ''}`}>
-          {activeItems.slice(0, TOP_ITEM_LIMIT).map((item) => (
-            <div
-              key={`${item.source}+${item.videoId}`}
-              className='flex min-w-0 items-center justify-between gap-3 text-sm'
-            >
-              <div
-                className='min-w-0 flex-1 truncate text-gray-800 dark:text-gray-100'
-                title={item.title}
-              >
-                {item.title}
-              </div>
-              <div className='shrink-0 text-gray-500 dark:text-gray-400'>
-                {formatDuration(item.watchSeconds)}
-              </div>
-            </div>
-          ))}
-        </div>
+      </StatsHeading>
+      {failed && !loaded ? (
+        <TopWorksMessage>加载失败，请稍后重试</TopWorksMessage>
+      ) : works.length === 0 ? (
+        <TopWorksMessage>
+          {TOP_EMPTY_TEXT[loaded ? range : shownRange]}
+        </TopWorksMessage>
       ) : (
-        <div className='flex min-h-0 flex-1 items-center justify-center rounded-lg border border-dashed border-gray-200 bg-gray-50 text-sm text-gray-500 dark:border-gray-700 dark:bg-gray-900/40 dark:text-gray-400'>
-          {isLoading ? '加载中...' : '暂无常看内容'}
+        <div
+          key={shownRange}
+          aria-busy={pending}
+          className={`transition-opacity ${pending ? 'opacity-50' : ''}`}
+          style={{ '--swap-shift': `${swap.shift * 28}px` } as CSSProperties}
+        >
+          <ScrollableRow>
+            {works.map((work, index) => (
+              <div
+                key={`${work.source}+${work.videoId}`}
+                className={`${HOME_POSTER_CARD_CLASS} ${
+                  swap.shift ? 'motion-swap-in' : ''
+                }`}
+                style={{ '--stagger-index': index } as CSSProperties}
+              >
+                <TopWorkCard work={work} rank={index + 1} onOpen={open} />
+              </div>
+            ))}
+          </ScrollableRow>
         </div>
       )}
-    </div>
+    </section>
   );
 }
 
+const useIsomorphicLayoutEffect =
+  typeof window !== 'undefined' ? useLayoutEffect : useEffect;
+
 export function PlaybackStatsPanel() {
-  const [summary, setSummary] = useState<PlaybackStatsSummary | null>(() =>
-    getCachedPlaybackStatsSummarySnapshot(),
-  );
-  const [loading, setLoading] = useState(
-    () => !getCachedPlaybackStatsSummarySnapshot(),
-  );
-  const [activeDailyDate, setActiveDailyDate] = useState<string | null>(null);
-  const emptySummary = useMemo(() => createEmptySummary(), []);
-  const displaySummary = summary || emptySummary;
+  const [stats, setStats] = useState<PlaybackPeriodStats | null>(null);
+  useIsomorphicLayoutEffect(() => {
+    setStats(getCachedPlaybackPeriodSnapshot('week'));
+  }, []);
+  const [failed, setFailed] = useState(false);
+  const [selectedKey, setSelectedKey] = useState<string | null>(null);
 
   useEffect(() => {
-    let cancelled = false;
-
-    const loadSummary = async () => {
-      try {
-        if (!getCachedPlaybackStatsSummarySnapshot()) {
-          setLoading(true);
-        }
-        const data = await getPlaybackStatsSummary();
-        if (!cancelled) {
-          setSummary(data);
-        }
-      } catch (error) {
+    let active = true;
+    getPlaybackPeriodStats('week')
+      .then((data) => {
+        if (active && data) setStats(data);
+      })
+      .catch((error) => {
         console.error('获取播放统计失败:', error);
-        if (!cancelled && !getCachedPlaybackStatsSummarySnapshot()) {
-          setSummary(null);
-        }
-      } finally {
-        if (!cancelled) {
-          setLoading(false);
-        }
-      }
-    };
-
-    void loadSummary();
-
+        if (active) setFailed(true);
+      });
     return () => {
-      cancelled = true;
+      active = false;
     };
   }, []);
 
-  const maxDailySeconds = useMemo(() => {
-    return Math.max(
-      1,
-      ...displaySummary.dailyWatchSeconds.map((item) => item.watchSeconds),
+  if (!stats) {
+    return failed ? (
+      <section>
+        <StatsHeading title='观看统计' />
+        <p className='py-6 text-sm text-gray-400 dark:text-gray-500'>
+          统计加载失败，请稍后重试
+        </p>
+      </section>
+    ) : (
+      <PlaybackStatsSkeleton />
     );
-  }, [displaySummary]);
-
-  const activeDailyItem = useMemo(() => {
-    return (
-      displaySummary.dailyWatchSeconds.find(
-        (item) => item.date === activeDailyDate,
-      ) ||
-      displaySummary.dailyWatchSeconds[
-        displaySummary.dailyWatchSeconds.length - 1
-      ] ||
-      null
-    );
-  }, [activeDailyDate, displaySummary]);
-
-  if (loading) {
-    return <PlaybackStatsSkeleton />;
   }
 
+  const selected = stats.buckets.find((bucket) => bucket.key === selectedKey);
+
   return (
-    <section className='mb-2'>
-      <h2 className='mb-4 flex items-center gap-2 text-xl font-bold text-gray-800 dark:text-gray-200'>
-        <BarChart3 className='h-5 w-5 text-green-500' />
-        观看统计
-      </h2>
-
-      <div className='grid min-w-0 gap-3 sm:grid-cols-2'>
-        <StatTile
-          icon={Clock3}
-          label='本周观看'
-          value={formatDuration(displaySummary.weekWatchSeconds)}
-        />
-        <StatTile
-          icon={TrendingUp}
-          label='累计观看'
-          value={formatDuration(displaySummary.totalWatchSeconds)}
-        />
-      </div>
-
-      <div className='mt-3 grid min-w-0 items-stretch gap-3 md:grid-cols-2'>
-        <div className='h-36 rounded-lg border border-gray-200 bg-white/70 p-4 dark:border-gray-700 dark:bg-gray-900/50'>
-          <div className='mb-3 flex items-center justify-between gap-3 text-sm'>
-            <div className='flex items-center gap-2 font-medium text-gray-700 dark:text-gray-200'>
-              <BarChart3 className='h-4 w-4 text-blue-500' />
-              最近一周
-            </div>
-            {activeDailyItem && (
-              <div className='shrink-0 text-xs text-green-600 dark:text-green-400'>
-                {formatShortDate(activeDailyItem.date)} ·{' '}
-                {formatDuration(activeDailyItem.watchSeconds)}
-              </div>
-            )}
+    <div className={STATS_LAYOUT_CLASS}>
+      <section className={STATS_COLUMN_CLASS}>
+        <StatsHeading title='观看统计' />
+        <div className={STATS_CARD_CLASS}>
+          <div className='flex flex-wrap gap-x-8 gap-y-3'>
+            <Metric
+              label={selected ? formatDayLabel(selected.key) : '本周'}
+              seconds={selected ? selected.watchSeconds : stats.watchSeconds}
+            />
+            <Metric label='累计' seconds={stats.lifetimeWatchSeconds} />
           </div>
-          <div className='grid h-20 grid-cols-7 gap-2'>
-            {displaySummary.dailyWatchSeconds.map((item) => {
-              const height = Math.max(
-                8,
-                Math.round((item.watchSeconds / maxDailySeconds) * 56),
-              );
-              const isActive = activeDailyItem?.date === item.date;
-              return (
-                <div
-                  key={item.date}
-                  className='grid h-full min-w-0 grid-rows-[1fr_auto] items-end'
-                >
-                  <div className='flex h-14 items-end'>
-                    <button
-                      type='button'
-                      className={`w-full rounded-t transition-colors focus:outline-none focus:ring-2 focus:ring-green-500/40 ${
-                        isActive
-                          ? 'bg-green-600'
-                          : 'bg-green-500/80 hover:bg-green-500'
-                      }`}
-                      style={{ height }}
-                      title={formatDuration(item.watchSeconds)}
-                      aria-label={`${formatShortDate(item.date)} ${formatDuration(
-                        item.watchSeconds,
-                      )}`}
-                      onClick={() => setActiveDailyDate(item.date)}
-                      onFocus={() => setActiveDailyDate(item.date)}
-                      onMouseEnter={() => setActiveDailyDate(item.date)}
-                    />
-                  </div>
-                  <div className='mt-2 truncate text-center text-xs text-gray-500 dark:text-gray-400'>
-                    {formatShortDate(item.date)}
-                  </div>
-                </div>
-              );
-            })}
+          <div className='mt-5 flex min-w-0 flex-1 flex-col'>
+            <WeekChart
+              buckets={stats.buckets}
+              today={stats.date}
+              selectedKey={selectedKey}
+              onSelect={setSelectedKey}
+            />
           </div>
         </div>
-        <TopContentTile items={displaySummary.topItems} />
-      </div>
-    </section>
+      </section>
+      <TopWorks week={stats} />
+    </div>
   );
 }

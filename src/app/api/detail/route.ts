@@ -47,9 +47,7 @@ async function handleGet(request: NextRequest) {
   } catch (error) {
     const busy = resourceLimitResponse(error);
     if (busy) return busy;
-    return NextResponse.json(
-      { error: (error as Error).message },
-      { status: 500 },
-    );
+    console.error('获取视频详情失败:', error);
+    return NextResponse.json({ error: '获取视频详情失败' }, { status: 500 });
   }
 }

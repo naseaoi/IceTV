@@ -1,12 +1,18 @@
 ﻿'use client';
-import { Download, Upload } from 'lucide-react';
+import { Download, RefreshCw, Upload } from 'lucide-react';
 import { type FormEvent, useEffect, useRef, useState } from 'react';
 
 import AlertModal from '@/components/modals/AlertModal';
+import Spinner from '@/components/Spinner';
+import {
+  AdminSettingRow,
+  AdminSettingsGroup,
+} from '@/features/admin/components/AdminSettings';
+import { AdminStatusSwitch } from '@/features/admin/components/AdminStatusSwitch';
 import { useLoadingState } from '@/features/admin/hooks/useLoadingState';
 import { CONFIG_FILE_FORM_ID } from '@/features/admin/lib/admin-form-ids';
 import { adminPost } from '@/features/admin/lib/api';
-import { buttonStyles } from '@/features/admin/lib/buttonStyles';
+import { buttonStyles, inputStyles } from '@/features/admin/lib/buttonStyles';
 import { showError, showSuccess } from '@/features/admin/lib/notifications';
 import { useAlertModal } from '@/hooks/useAlertModal';
 import { buildConfigFileFromAdminConfig } from '@/lib/config-file-json';
@@ -14,7 +20,6 @@ import { AdminConfig } from '@/types/admin';
 
 const CONFIG_SUBSCRIPTION_URL_ID = 'config-subscription-url';
 const CONFIG_FILE_CONTENT_ID = 'config-file-content';
-const CONFIG_FILE_HELP_ID = 'config-file-help';
 const CONFIG_FILE_INPUT_ID = 'config-file-import';
 const CONFIG_FILE_MAX_SIZE = 5 * 1024 * 1024;
 
@@ -63,7 +68,10 @@ const ConfigFileComponent = ({
   useEffect(() => {
     if (config) {
       const nextDraft = {
-        configContent: buildConfigFileFromAdminConfig(config),
+        configContent: buildConfigFileFromAdminConfig(
+          config,
+          config.ConfigFile,
+        ),
         subscriptionUrl: config.ConfigSubscribtion?.URL || '',
         autoUpdate: config.ConfigSubscribtion?.AutoUpdate || false,
         lastCheckTime: config.ConfigSubscribtion?.LastCheck || '',
@@ -102,7 +110,7 @@ const ConfigFileComponent = ({
           setConfigContent(data.configContent);
           const currentTime = new Date().toISOString();
           setLastCheckTime(currentTime);
-          showSuccess('配置拉取成功', showAlert);
+          showSuccess('配置拉取成功');
         } else {
           showError('拉取失败：未获取到配置内容', showAlert);
         }
@@ -131,7 +139,7 @@ const ConfigFileComponent = ({
         );
 
         setBaselineDraft(currentDraft);
-        showSuccess('配置文件保存成功', showAlert);
+        showSuccess('配置文件保存成功');
         await refreshConfig();
       } catch (err) {
         showError(err instanceof Error ? err.message : '保存失败', showAlert);
@@ -175,7 +183,7 @@ const ConfigFileComponent = ({
     link.click();
     link.remove();
     URL.revokeObjectURL(url);
-    showSuccess('配置文件已导出', showAlert);
+    showSuccess('配置文件已导出');
   };
 
   const handleImport = async (event: React.ChangeEvent<HTMLInputElement>) => {
@@ -195,181 +203,114 @@ const ConfigFileComponent = ({
       const content = await file.text();
       JSON.parse(content);
       setConfigContent(content);
-      showSuccess('JSON 已导入，请保存后生效', showAlert);
+      showSuccess('JSON 已导入，请保存后生效');
     } catch {
       showError('JSON 文件格式错误', showAlert);
     }
   };
 
-  if (!config) {
-    return (
-      <div className='text-center text-gray-500 dark:text-gray-400'>
-        加载中...
-      </div>
-    );
-  }
+  if (!config) return null;
+
+  const fetching = isLoading('fetchConfig');
 
   return (
     <form
       id={CONFIG_FILE_FORM_ID}
       onSubmit={handleSubmit}
-      className='flex h-full flex-col'
+      className='space-y-8'
     >
-      <div className='grid min-h-0 flex-1 grid-cols-1 gap-4 lg:grid-cols-2 lg:grid-rows-1'>
-        <div className='self-start rounded-lg border border-gray-200 bg-white p-6 shadow-sm dark:border-gray-700 dark:bg-gray-800'>
-          <div className='mb-6 flex items-center justify-between'>
-            <h3 className='text-xl font-semibold text-gray-900 dark:text-gray-100'>
-              配置订阅
-            </h3>
-            <div className='rounded-full px-3 py-1.5 text-sm text-gray-500 dark:text-gray-400'>
-              {hasUnsavedFetchTime ? '本次拉取' : '最后更新'}:{' '}
-              {lastCheckTime
-                ? new Date(lastCheckTime).toLocaleString('zh-CN')
-                : '从未更新'}
-            </div>
-          </div>
-
-          <div className='space-y-6'>
-            <div>
-              <label
-                htmlFor={CONFIG_SUBSCRIPTION_URL_ID}
-                className='mb-3 block text-sm font-medium text-gray-700 dark:text-gray-300'
-              >
-                订阅URL
-              </label>
-              <input
-                id={CONFIG_SUBSCRIPTION_URL_ID}
-                name='subscriptionUrl'
-                type='url'
-                value={subscriptionUrl}
-                onChange={(e) => setSubscriptionUrl(e.target.value)}
-                placeholder='https://example.com/config.json'
-                disabled={false}
-                className='w-full rounded-lg border border-gray-300 bg-white px-4 py-3 text-gray-900 shadow-sm transition-all duration-200 hover:border-gray-400 focus:border-transparent focus:ring-2 focus:ring-green-500 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-100 dark:hover:border-gray-500'
-              />
-              <p className='mt-2 text-xs text-gray-500 dark:text-gray-400'>
-                输入配置文件的订阅地址，要求 JSON 格式，且使用 Base58 编码
-              </p>
-            </div>
-
-            <div className='pt-2'>
-              <button
-                type='button'
-                onClick={handleFetchConfig}
-                disabled={isLoading('fetchConfig') || !subscriptionUrl.trim()}
-                className={`w-full rounded-lg px-6 py-3 font-medium transition-all duration-200 ${
-                  isLoading('fetchConfig') || !subscriptionUrl.trim()
-                    ? buttonStyles.disabled
-                    : buttonStyles.success
-                }`}
-              >
-                {isLoading('fetchConfig') ? (
-                  <div className='flex items-center justify-center gap-2'>
-                    <div className='h-4 w-4 animate-spin rounded-full border-2 border-white border-t-transparent'></div>
-                    拉取中…
-                  </div>
-                ) : (
-                  '拉取配置'
-                )}
-              </button>
-            </div>
-
-            <div className='flex min-h-[96px] items-center justify-between gap-4 rounded-lg border border-gray-200 bg-gray-50 p-4 dark:border-gray-700 dark:bg-gray-800/55'>
-              <div>
-                <p className='text-sm font-medium text-gray-900 dark:text-gray-100'>
-                  自动更新
-                </p>
-                <p className='mt-1 text-xs text-gray-500 dark:text-gray-400'>
-                  启用后系统将定期自动拉取最新配置
-                </p>
-              </div>
-              <button
-                type='button'
-                onClick={() => setAutoUpdate(!autoUpdate)}
-                className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
-                  autoUpdate ? 'bg-green-500' : 'bg-gray-300 dark:bg-gray-600'
-                }`}
-                aria-label='切换配置自动更新'
-                aria-pressed={autoUpdate}
-              >
-                <span
-                  className={`inline-block h-5 w-5 transform rounded-full bg-white transition-transform ${
-                    autoUpdate ? 'translate-x-5' : 'translate-x-0.5'
-                  }`}
-                />
-              </button>
-            </div>
-          </div>
-        </div>
-
-        <div className='flex min-h-0 flex-col gap-4 rounded-lg border border-gray-200 bg-white p-6 shadow-sm dark:border-gray-700 dark:bg-gray-800'>
-          <div className='flex flex-wrap items-center justify-between gap-3'>
-            <div>
-              <h3 className='text-xl font-semibold text-gray-900 dark:text-gray-100'>
-                配置编辑
-              </h3>
-              <p
-                id={CONFIG_FILE_HELP_ID}
-                className='mt-1 text-xs text-gray-500 dark:text-gray-400'
-              >
-                支持 JSON 格式，用于配置视频源和自定义分类
-              </p>
-            </div>
-            <div className='flex items-center gap-2'>
-              <input
-                ref={configFileInputRef}
-                id={CONFIG_FILE_INPUT_ID}
-                type='file'
-                accept='.json,application/json'
-                className='hidden'
-                onChange={handleImport}
-              />
-              <button
-                type='button'
-                onClick={() => configFileInputRef.current?.click()}
-                className={`inline-flex items-center gap-1.5 rounded-lg px-4 py-2 transition-colors ${buttonStyles.secondary}`}
-              >
-                <Upload className='h-4 w-4' />
-                导入
-              </button>
-              <button
-                type='button'
-                onClick={handleExport}
-                disabled={!configContent.trim()}
-                className={`inline-flex items-center gap-1.5 rounded-lg px-4 py-2 transition-colors ${
-                  !configContent.trim()
-                    ? buttonStyles.disabled
-                    : buttonStyles.secondary
-                }`}
-              >
-                <Download className='h-4 w-4' />
-                导出
-              </button>
-            </div>
-          </div>
-          <div className='relative min-h-[28rem] flex-1'>
-            <label htmlFor={CONFIG_FILE_CONTENT_ID} className='sr-only'>
-              配置文件内容
-            </label>
-            <textarea
-              id={CONFIG_FILE_CONTENT_ID}
-              name='configFileContent'
-              aria-describedby={CONFIG_FILE_HELP_ID}
-              value={configContent}
-              onChange={(e) => setConfigContent(e.target.value)}
-              placeholder='请输入配置文件内容（JSON 格式）...'
-              disabled={false}
-              className='h-full w-full resize-none rounded-lg border border-gray-300 bg-white px-4 py-3 font-mono text-sm leading-relaxed text-gray-900 transition-all duration-200 hover:border-gray-400 focus:border-transparent focus:ring-2 focus:ring-blue-500 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100 dark:hover:border-gray-500'
-              style={{
-                fontFamily:
-                  'ui-monospace, SFMono-Regular, "SF Mono", Consolas, "Liberation Mono", Menlo, monospace',
-              }}
-              spellCheck={false}
-              data-gramm={false}
+      <AdminSettingsGroup
+        title='配置订阅'
+        actions={
+          <span className='text-xs text-gray-500 dark:text-gray-400'>
+            {hasUnsavedFetchTime ? '本次拉取' : '最后更新'}{' '}
+            {lastCheckTime
+              ? new Date(lastCheckTime).toLocaleString('zh-CN')
+              : '从未更新'}
+          </span>
+        }
+      >
+        <AdminSettingRow label='订阅地址' htmlFor={CONFIG_SUBSCRIPTION_URL_ID}>
+          <div className='flex w-full gap-2 sm:w-96'>
+            <input
+              id={CONFIG_SUBSCRIPTION_URL_ID}
+              name='subscriptionUrl'
+              type='url'
+              value={subscriptionUrl}
+              onChange={(e) => setSubscriptionUrl(e.target.value)}
+              placeholder='https://example.com/config.json'
+              className={`h-9 min-w-0 flex-1 ${inputStyles.withFocus}`}
             />
+            <button
+              type='button'
+              onClick={handleFetchConfig}
+              disabled={fetching || !subscriptionUrl.trim()}
+              className={`inline-flex h-9 shrink-0 items-center gap-1.5 disabled:cursor-not-allowed disabled:opacity-50 ${buttonStyles.outline}`}
+            >
+              {fetching ? (
+                <Spinner className='h-3.5 w-3.5' />
+              ) : (
+                <RefreshCw aria-hidden='true' className='h-3.5 w-3.5' />
+              )}
+              {fetching ? '拉取中' : '拉取'}
+            </button>
           </div>
-        </div>
-      </div>
+        </AdminSettingRow>
+        <AdminSettingRow label='自动更新' layout='inline'>
+          <AdminStatusSwitch
+            enabled={autoUpdate}
+            ariaLabel='切换配置自动更新'
+            onToggle={() => setAutoUpdate(!autoUpdate)}
+          />
+        </AdminSettingRow>
+      </AdminSettingsGroup>
+
+      <AdminSettingsGroup
+        title='配置内容'
+        actions={
+          <>
+            <input
+              ref={configFileInputRef}
+              id={CONFIG_FILE_INPUT_ID}
+              type='file'
+              accept='.json,application/json'
+              className='hidden'
+              onChange={handleImport}
+            />
+            <button
+              type='button'
+              onClick={() => configFileInputRef.current?.click()}
+              className={`inline-flex items-center gap-1.5 ${buttonStyles.outline}`}
+            >
+              <Upload aria-hidden='true' className='h-3.5 w-3.5' />
+              导入
+            </button>
+            <button
+              type='button'
+              onClick={handleExport}
+              disabled={!configContent.trim()}
+              className={`inline-flex items-center gap-1.5 disabled:cursor-not-allowed disabled:opacity-50 ${buttonStyles.outline}`}
+            >
+              <Download aria-hidden='true' className='h-3.5 w-3.5' />
+              导出
+            </button>
+          </>
+        }
+      >
+        <label htmlFor={CONFIG_FILE_CONTENT_ID} className='sr-only'>
+          配置文件内容
+        </label>
+        <textarea
+          id={CONFIG_FILE_CONTENT_ID}
+          name='configFileContent'
+          value={configContent}
+          onChange={(e) => setConfigContent(e.target.value)}
+          placeholder='{ "api_site": {}, "custom_category": [] }'
+          spellCheck={false}
+          data-gramm={false}
+          className='block min-h-[32rem] w-full resize-y rounded-xl border-0 bg-transparent px-4 py-3 font-mono text-[13px] leading-relaxed text-gray-900 placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-inset focus:ring-brand-500 dark:text-gray-100'
+        />
+      </AdminSettingsGroup>
 
       <AlertModal
         isOpen={alertModal.isOpen}

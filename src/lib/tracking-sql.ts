@@ -10,7 +10,7 @@ export const SQLITE_TRACKING_DIALECT: TrackingSqlDialect = {
   jsonTimestamp: (field) =>
     `CAST(json_extract(record_json, '$.${field}') AS INTEGER)`,
   trackingEnabled: () =>
-    `COALESCE(json_extract(record_json, '$.tracking_enabled'), 1) <> 0`,
+    `COALESCE(json_extract(record_json, '$.tracking_enabled'), COALESCE(json_extract(record_json, '$.series_status'), '') <> 'ended') <> 0`,
 };
 
 export const MYSQL_TRACKING_DIALECT: TrackingSqlDialect = {
@@ -19,7 +19,7 @@ export const MYSQL_TRACKING_DIALECT: TrackingSqlDialect = {
   jsonTimestamp: (field) =>
     `CAST(JSON_UNQUOTE(JSON_EXTRACT(record_json, '$.${field}')) AS UNSIGNED)`,
   trackingEnabled: () =>
-    `COALESCE(JSON_UNQUOTE(JSON_EXTRACT(record_json, '$.tracking_enabled')), 'true') <> 'false'`,
+    `COALESCE(NULLIF(JSON_UNQUOTE(JSON_EXTRACT(record_json, '$.tracking_enabled')), 'null'), CASE WHEN JSON_UNQUOTE(JSON_EXTRACT(record_json, '$.series_status')) = 'ended' THEN 'false' ELSE 'true' END) <> 'false'`,
 };
 
 export interface TrackingSql {

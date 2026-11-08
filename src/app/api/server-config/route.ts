@@ -7,6 +7,7 @@ import {
   normalizeSiteDoubanImageProxyType,
   normalizeSiteDoubanProxyType,
 } from '@/lib/douban-options';
+import { canUserWatchLive } from '@/lib/live-access.server';
 import { DEFAULT_RUNTIME_CONFIG } from '@/lib/runtime-config';
 import { getStorageType } from '@/lib/storage-type';
 import { CURRENT_UPDATE_BRANCH, CURRENT_VERSION } from '@/lib/version';
@@ -44,13 +45,13 @@ export async function GET(request: NextRequest) {
     BangumiProxy: DEFAULT_RUNTIME_CONFIG.BANGUMI_PROXY,
     DoubanImageProxyType: doubanImageProxyType,
     DoubanImageProxy: DEFAULT_RUNTIME_CONFIG.DOUBAN_IMAGE_PROXY,
-    DisableYellowFilter: publicConfig.DisableYellowFilter,
-    EnableLiveEntry: publicConfig.EnableLiveEntry,
+    EnableLiveEntry: await canUserWatchLive(activeUser?.username, config),
     DefaultAggregateSearch: publicConfig.DefaultAggregateSearch,
     EnableOptimization: publicConfig.EnableOptimization,
     LiveDirectConnect: publicConfig.LiveDirectConnect,
     AutoSwitchSource: publicConfig.AutoSwitchSource,
     EnableDanmaku: publicConfig.EnableDanmaku,
+    EnableUserDanmaku: publicConfig.EnableUserDanmaku,
     CustomCategories: publicConfig.CustomCategories,
     FluidSearch: publicConfig.FluidSearch,
     VodPageTimeoutSeconds: publicConfig.VodPageTimeoutSeconds,
@@ -60,6 +61,7 @@ export async function GET(request: NextRequest) {
     SearchHistoryLimit: publicConfig.SearchHistoryLimit,
     ContinueWatchingLimit: publicConfig.ContinueWatchingLimit,
     CoverImageCacheSize: publicConfig.CoverImageCacheSize,
+    ImageProxyTimeoutSeconds: publicConfig.ImageProxyTimeoutSeconds,
     SourceCoverProxyMode: publicConfig.SourceCoverProxyMode,
   };
   return NextResponse.json(result, {

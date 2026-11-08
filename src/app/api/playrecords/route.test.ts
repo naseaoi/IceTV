@@ -76,6 +76,54 @@ const records = {
 };
 
 describe('playrecords route', () => {
+  it.each(['ongoing', 'ended'])(
+    '保存合法作品状态 %s 并保留手动追更',
+    async (series_status) => {
+      mockGetPlayRecord.mockResolvedValue({
+        ...records['source+new'],
+        tracking_enabled: true,
+      });
+      const response = await POST(
+        createJsonRequest({
+          key: 'source+new',
+          record: { ...records['source+new'], series_status },
+        }),
+      );
+      expect(response.status).toBe(200);
+      expect(mockSavePlayRecord).toHaveBeenCalledWith(
+        'demo',
+        'source',
+        'new',
+        expect.objectContaining({ series_status, tracking_enabled: true }),
+      );
+    },
+  );
+
+  it.each(['unknown', '', null, true, 1, {}, []])(
+    '拒绝非法作品状态 %p',
+    async (series_status) => {
+      const response = await POST(
+        createJsonRequest({
+          key: 'source+new',
+          record: { ...records['source+new'], series_status },
+        }),
+      );
+      expect(response.status).toBe(400);
+      expect(mockSavePlayRecord).not.toHaveBeenCalled();
+    },
+  );
+
+  it('拒绝非布尔追更开关', async () => {
+    const response = await POST(
+      createJsonRequest({
+        key: 'source+new',
+        record: { ...records['source+new'], tracking_enabled: 'false' },
+      }),
+    );
+    expect(response.status).toBe(400);
+    expect(mockSavePlayRecord).not.toHaveBeenCalled();
+  });
+
   beforeEach(() => {
     jest.clearAllMocks();
     mockGetAllPlayRecords.mockResolvedValue(records);
@@ -101,7 +149,8 @@ describe('playrecords route', () => {
       'source+middle': records['source+middle'],
     });
     expect(response.status).toBe(200);
-    expect(mockGetAllPlayRecords).toHaveBeenCalledWith('demo');
+    expect(mockGetPlayRecordPage).toHaveBeenCalledWith('demo', 2);
+    expect(mockGetAllPlayRecords).not.toHaveBeenCalled();
   });
 
   it('不带 limit 时保持返回完整记录', async () => {

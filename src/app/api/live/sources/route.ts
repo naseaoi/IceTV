@@ -1,8 +1,10 @@
-﻿import { NextRequest, NextResponse } from 'next/server';
+import { NextRequest, NextResponse } from 'next/server';
 
 import { isLiveEntryEnabledInConfig } from '@/features/live/lib/live';
 import { isGuardFailure, requireActiveUser } from '@/lib/api-auth';
 import { getConfigForRead } from '@/lib/config';
+import { db } from '@/lib/db';
+import { canUserWatchLive } from '@/lib/live-access.server';
 
 export const runtime = 'nodejs';
 
@@ -20,15 +22,22 @@ export async function GET(request: NextRequest) {
     if (!isLiveEntryEnabledInConfig(config)) {
       return NextResponse.json({ error: '直播未开启' }, { status: 404 });
     }
+    if (!(await canUserWatchLive(guardResult.username, config))) {
+      return NextResponse.json({ error: '没有直播权限' }, { status: 403 });
+    }
 
     // 过滤出所有非 disabled 的直播源
     const liveSources = (config.LiveConfig || []).filter(
       (source) => !source.disabled,
     );
 
+    const counts = await db.getLiveSourceChannelCounts();
     return NextResponse.json({
       success: true,
-      data: liveSources,
+      data: liveSources.map((source) => ({
+        ...source,
+        channelNumber: counts[source.key] ?? 0,
+      })),
     });
   } catch (error) {
     console.error('获取直播源失败:', error);

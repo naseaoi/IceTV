@@ -1,12 +1,17 @@
 'use client';
 
-import { Loader2, LockKeyhole, RefreshCw } from 'lucide-react';
+import { LockKeyhole, RefreshCw, ShieldAlert } from 'lucide-react';
 import Link from 'next/link';
 import { ReactNode } from 'react';
 
 import { useAuthSession } from '@/components/AuthProvider';
 import LoadingStatePanel from '@/components/LoadingStatePanel';
-import PageLayout from '@/components/PageLayout';
+import {
+  MODAL_PRIMARY_BUTTON_CLASS,
+  MODAL_SECONDARY_BUTTON_CLASS,
+} from '@/components/modals/modal-styles';
+import PageLayout, { type MobileHeaderConfig } from '@/components/PageLayout';
+import { ProfileForm } from '@/components/user-menu/ProfilePanel';
 import { AuthSessionRole } from '@/lib/auth-session';
 
 interface AuthenticatedRouteProps {
@@ -15,6 +20,7 @@ interface AuthenticatedRouteProps {
   message: string;
   contentMode?: 'default' | 'player';
   showDesktopBack?: boolean;
+  mobileHeader?: MobileHeaderConfig;
   requiredRole?: AuthSessionRole;
   forbiddenMessage?: string;
 }
@@ -31,6 +37,7 @@ export default function AuthenticatedRoute({
   message,
   contentMode = 'default',
   showDesktopBack,
+  mobileHeader,
   requiredRole = 'user',
   forbiddenMessage = '当前账号没有访问该页面的权限。',
 }: AuthenticatedRouteProps) {
@@ -41,6 +48,20 @@ export default function AuthenticatedRoute({
     isAuthenticated && ROLE_LEVEL[session.role] < ROLE_LEVEL[requiredRole];
 
   if (isAuthenticated && !isForbidden) {
+    if (session.nickname === null) {
+      return (
+        <PageLayout
+          activePath={activePath}
+          contentMode={contentMode}
+          showDesktopBack={showDesktopBack}
+          mobileHeader={mobileHeader}
+        >
+          <div className='mx-auto my-16 w-full max-w-md rounded-2xl bg-white p-6 shadow-sm ring-1 ring-gray-200 dark:bg-gray-900 dark:ring-white/10'>
+            <ProfileForm required />
+          </div>
+        </PageLayout>
+      );
+    }
     return children;
   }
 
@@ -49,23 +70,21 @@ export default function AuthenticatedRoute({
       ? activePath
       : `${window.location.pathname}${window.location.search}`;
   const isError = session.status === 'error';
+  const isBlocked = !isRefreshing && (isError || isForbidden);
 
   return (
     <PageLayout
       activePath={activePath}
       contentMode={contentMode}
       showDesktopBack={showDesktopBack}
+      mobileHeader={mobileHeader}
     >
       <div className='flex min-h-[calc(100dvh-6.5rem-env(safe-area-inset-top)-env(safe-area-inset-bottom))] flex-1 items-center justify-center px-4 py-12 md:min-h-[calc(100dvh-3.5rem-env(safe-area-inset-bottom))]'>
         <LoadingStatePanel
-          icon={
-            isRefreshing ? (
-              <Loader2 className='h-10 w-10 animate-spin' />
-            ) : (
-              <LockKeyhole className='h-10 w-10' />
-            )
-          }
-          tone={isError || isForbidden ? 'red' : 'amber'}
+          icon={isBlocked ? <ShieldAlert /> : <LockKeyhole />}
+          iconKey={isBlocked ? 'blocked' : 'lock'}
+          loading={isRefreshing}
+          tone={isBlocked ? 'red' : 'neutral'}
           title={
             isRefreshing
               ? '正在重新验证登录状态'
@@ -91,7 +110,7 @@ export default function AuthenticatedRoute({
                 <button
                   type='button'
                   onClick={() => void refreshSession()}
-                  className='inline-flex items-center gap-2 rounded-lg bg-green-600 px-4 py-2.5 text-sm font-medium text-white transition-colors hover:bg-green-700'
+                  className={`gap-1.5 ${MODAL_PRIMARY_BUTTON_CLASS}`}
                 >
                   <RefreshCw className='h-4 w-4' />
                   重新验证
@@ -99,15 +118,12 @@ export default function AuthenticatedRoute({
               ) : (
                 <Link
                   href={`/login?redirect=${encodeURIComponent(redirectPath)}`}
-                  className='inline-flex items-center rounded-lg bg-green-600 px-4 py-2.5 text-sm font-medium text-white transition-colors hover:bg-green-700'
+                  className={MODAL_PRIMARY_BUTTON_CLASS}
                 >
                   前往登录
                 </Link>
               )}
-              <Link
-                href='/'
-                className='inline-flex items-center rounded-lg bg-gray-100 px-4 py-2.5 text-sm font-medium text-gray-700 transition-colors hover:bg-gray-200 dark:bg-gray-700 dark:text-gray-200 dark:hover:bg-gray-600'
-              >
+              <Link href='/' className={MODAL_SECONDARY_BUTTON_CLASS}>
                 返回首页
               </Link>
             </div>

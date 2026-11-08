@@ -1,15 +1,19 @@
 'use client';
 
-import { POSTER_GRID_BASE_CLASS } from '@/components/poster-grid-layout';
 import VideoCard from '@/components/VideoCard';
+import type { ContinueWatchingItem } from '@/features/continue-watching/hooks/useContinueWatchingItems';
+import {
+  CONTINUE_WATCHING_GRID_CLASS,
+  CONTINUE_WATCHING_GRID_ITEM_CLASS,
+} from '@/features/continue-watching/lib/layout';
+import { useListLayoutMotion } from '@/hooks/useListLayoutMotion';
 import {
   getPlayRecordEpisodeDisplay,
   getPlayRecordResumeGroup,
   hasPlayRecordUpdate,
+  isTrackingEnabled,
 } from '@/lib/play-records';
 import { parseStorageKey } from '@/lib/utils';
-
-import type { ContinueWatchingItem } from '../hooks/useContinueWatchingItems';
 
 function getProgress(record: ContinueWatchingItem) {
   if (record.total_time <= 0) return 0;
@@ -23,6 +27,9 @@ export function ContinueWatchingGrid({
   items: ContinueWatchingItem[];
   onDelete: (key: string) => void;
 }) {
+  const containerRef = useListLayoutMotion<HTMLDivElement>(
+    items.map((record) => String(record.key)),
+  );
   if (items.length === 0) {
     return (
       <div className='py-5 text-center text-gray-500 dark:text-gray-400'>
@@ -33,7 +40,8 @@ export function ContinueWatchingGrid({
 
   return (
     <div
-      className={`${POSTER_GRID_BASE_CLASS} px-0 sm:grid-cols-[repeat(auto-fill,_180px)] sm:gap-x-6 sm:px-2`}
+      ref={containerRef}
+      className={`relative ${CONTINUE_WATCHING_GRID_CLASS}`}
     >
       {items.map((record) => {
         const parsedKey = parseStorageKey(record.key);
@@ -41,7 +49,11 @@ export function ContinueWatchingGrid({
 
         const episodeDisplay = getPlayRecordEpisodeDisplay(record);
         return (
-          <div key={record.key} className='w-full sm:w-[180px]'>
+          <div
+            key={record.key}
+            data-list-motion-key={String(record.key)}
+            className={CONTINUE_WATCHING_GRID_ITEM_CLASS}
+          >
             <VideoCard
               id={parsedKey.id}
               title={record.title}
@@ -53,7 +65,7 @@ export function ContinueWatchingGrid({
               episodes={episodeDisplay.totalEpisodes}
               currentEpisode={episodeDisplay.currentEpisode}
               hasUpdate={hasPlayRecordUpdate(record)}
-              trackingEnabled={record.tracking_enabled !== false}
+              trackingEnabled={isTrackingEnabled(record)}
               availableEpisodes={episodeDisplay.totalEpisodes}
               resumeEpisodeIndex={Math.max(0, record.index - 1)}
               resumeGroup={getPlayRecordResumeGroup(record)}

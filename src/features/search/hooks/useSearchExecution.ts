@@ -1,19 +1,18 @@
 import { ReadonlyURLSearchParams } from 'next/navigation';
 import { startTransition, useEffect, useRef, useState } from 'react';
 
+import { normalizeSearchQueryInput } from '@/features/search/lib/searchQuery';
+import {
+  getSearchSnapshot,
+  setSearchSnapshot,
+} from '@/features/search/lib/searchSnapshotCache';
+import { sortBatchForNoOrder } from '@/features/search/lib/searchUtils';
 import { useClientHydrated } from '@/hooks/useClientHydrated';
 import { addSearchHistory } from '@/lib/db.client';
 import { readFluidSearch } from '@/lib/local-preferences';
 import { SearchResult } from '@/lib/types';
 
-import { normalizeSearchQueryInput } from '../lib/searchQuery';
-import {
-  getSearchSnapshot,
-  setSearchSnapshot,
-} from '../lib/searchSnapshotCache';
-import { sortBatchForNoOrder } from '../lib/searchUtils';
-
-export { clearSearchSnapshotCache } from '../lib/searchSnapshotCache';
+export { clearSearchSnapshotCache } from '@/features/search/lib/searchSnapshotCache';
 
 interface UseSearchExecutionParams {
   searchParams: ReadonlyURLSearchParams;
@@ -33,8 +32,10 @@ export function useSearchExecution({
   const [initialSnapshot] = useState(() =>
     clientHydrated ? getSearchSnapshot(query) : null,
   );
-  const [isLoading, setIsLoading] = useState(false);
-  const [showResults, setShowResults] = useState(!!initialSnapshot);
+  const [isLoading, setIsLoading] = useState(
+    Boolean(query) && !initialSnapshot,
+  );
+  const [showResults, setShowResults] = useState(Boolean(query));
   const [searchResults, setSearchResults] = useState<SearchResult[]>(
     initialSnapshot?.results ?? [],
   );
@@ -70,21 +71,10 @@ export function useSearchExecution({
     };
   }, [filterAggYearOrder, filterAllYearOrder, viewMode]);
 
+  // 连接随 effect 清理关闭；StrictMode 重跑时会重新建立，不能按 query 去重跳过
   useEffect(() => {
-    if (query === currentQueryRef.current) return;
     currentQueryRef.current = query;
     setResultsQuery(query);
-
-    if (eventSourceRef.current) {
-      try {
-        eventSourceRef.current.close();
-      } catch {}
-      eventSourceRef.current = null;
-    }
-    if (flushTimerRef.current) {
-      clearTimeout(flushTimerRef.current);
-      flushTimerRef.current = null;
-    }
     pendingResultsRef.current = [];
     hasFirstBatchRef.current = false;
 
@@ -270,6 +260,20 @@ export function useSearchExecution({
       setIsLoading(false);
       setShowResults(false);
     }
+
+    return () => {
+      if (eventSourceRef.current) {
+        try {
+          eventSourceRef.current.close();
+        } catch {}
+        eventSourceRef.current = null;
+      }
+      if (flushTimerRef.current) {
+        clearTimeout(flushTimerRef.current);
+        flushTimerRef.current = null;
+      }
+      pendingResultsRef.current = [];
+    };
   }, [query]);
 
   useEffect(() => {
@@ -293,23 +297,6 @@ export function useSearchExecution({
     useFluidSearch,
     isLoading,
   ]);
-
-  // 连接清理
-  useEffect(() => {
-    return () => {
-      if (eventSourceRef.current) {
-        try {
-          eventSourceRef.current.close();
-        } catch {}
-        eventSourceRef.current = null;
-      }
-      if (flushTimerRef.current) {
-        clearTimeout(flushTimerRef.current);
-        flushTimerRef.current = null;
-      }
-      pendingResultsRef.current = [];
-    };
-  }, []);
 
   return {
     isLoading,

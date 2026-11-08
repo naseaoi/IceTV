@@ -1,9 +1,11 @@
 export interface AdminConfig {
+  // 仅后台响应、迁移与备份兼容；运行时配置由 configSelfCheck 剥离。
   ConfigSubscribtion: {
     URL: string;
     AutoUpdate: boolean;
     LastCheck: string;
   };
+  // 订阅原文的真相源是 config_subscription。
   ConfigFile: string;
   SiteConfig: {
     SiteName: string;
@@ -13,6 +15,7 @@ export interface AdminConfig {
     AnnouncementPublishedAt?: number;
     FooterText: string;
     EnableLiveEntry: boolean;
+    LiveAccess?: 'all' | 'groups';
     DefaultAggregateSearch: boolean;
     EnableOptimization: boolean;
     LiveDirectConnect: boolean;
@@ -35,19 +38,18 @@ export interface AdminConfig {
     ImageProxyTimeoutSeconds: number;
     UpstreamSearchConcurrency: number;
     DoubanProxyType: string;
-    DoubanProxy: string;
     BangumiDataSource: string;
-    BangumiProxy: string;
     DoubanImageProxyType: string;
-    DoubanImageProxy: string;
     DisableYellowFilter: boolean;
     FluidSearch: boolean;
     EnableDanmaku: boolean;
+    EnableUserDanmaku: boolean;
     DanmakuEpisodeLimit: number;
     DanmakuRequestTimeoutSeconds: number;
   };
   UserConfig: {
-    Users: {
+    TotalUsers?: number;
+    Users?: {
       username: string;
       role: 'user' | 'admin' | 'owner';
       banned?: boolean;
@@ -56,6 +58,9 @@ export interface AdminConfig {
     }[];
     OpenRegister?: boolean;
     RequireInviteCode?: boolean;
+    DefaultUserGroup?: string;
+    inviteCodeCount?: number;
+    activeInviteCodeCount?: number;
     InviteCodes?: {
       code: string;
       createdAt: number;
@@ -67,6 +72,7 @@ export interface AdminConfig {
     Tags?: {
       name: string;
       enabledApis: string[];
+      allowLive?: boolean;
     }[];
   };
   SourceConfig: {
@@ -77,6 +83,8 @@ export interface AdminConfig {
     from: 'config' | 'custom';
     disabled?: boolean;
     proxyMode?: 'server' | 'browser' | 'auto';
+    // 仅站长与管理员可见，普通用户的搜索、详情与播放都不提供该源
+    adminOnly?: boolean;
   }[];
   CustomCategories: {
     name?: string;
@@ -92,6 +100,7 @@ export interface AdminConfig {
     ua?: string;
     epg?: string;
     from: 'config' | 'custom';
+    // 仅响应与旧备份兼容，真相源是 live_source_state。
     channelNumber?: number;
     disabled?: boolean;
   }[];

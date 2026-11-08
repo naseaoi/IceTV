@@ -4,6 +4,16 @@ import { isGuardFailure, requireActiveUserFromAuthInfo } from '@/lib/api-auth';
 import { parseAuthCookieValue } from '@/lib/auth.server';
 import { getServerAuthSession } from '@/lib/auth-session.server';
 
+jest.mock('@/lib/db', () => ({
+  db: {
+    ensureUserProfile: jest.fn().mockResolvedValue({
+      profile_id: 'AbCdEf012345',
+      avatar_seed: 'Avatar012345',
+      nickname: 'Alice',
+    }),
+  },
+}));
+
 jest.mock('server-only', () => ({}));
 
 jest.mock('@/lib/api-auth', () => ({
@@ -53,6 +63,9 @@ describe('getServerAuthSession', () => {
 
     await expect(getServerAuthSession('cookie')).resolves.toEqual({
       status: 'authenticated',
+      profileId: 'AbCdEf012345',
+      avatarSeed: 'Avatar012345',
+      nickname: 'Alice',
       username: 'alice',
       role: 'user',
     });

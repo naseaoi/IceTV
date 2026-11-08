@@ -5,7 +5,10 @@ import type {
   RowDataPacket,
 } from 'mysql2/promise';
 
-import type { SharedResourceStore } from '@/lib/shared-resource-store';
+import {
+  type SharedResourceStore,
+  pruneResourceBatches,
+} from '@/lib/shared-resource-store';
 
 export class MySqlResourceStore implements SharedResourceStore {
   constructor(
@@ -29,6 +32,29 @@ export class MySqlResourceStore implements SharedResourceStore {
     } finally {
       connection.release();
     }
+  }
+
+  async getCooldown(key: string): Promise<number> {
+    await this.initialize();
+    const [rows] = await this.pool.query<RowDataPacket[]>(
+      'SELECT reset_at FROM shared_resource_usage WHERE resource_key = ?',
+      [key],
+    );
+    return Number(rows[0]?.reset_at ?? 0);
+  }
+
+  async extendCooldown(key: string, until: number): Promise<number> {
+    return this.transaction(async (connection) => {
+      await connection.execute(
+        'INSERT INTO shared_resource_usage (resource_key, used, reset_at) VALUES (?, 0, ?) ON DUPLICATE KEY UPDATE reset_at = GREATEST(reset_at, ?)',
+        [key, until, until],
+      );
+      const [rows] = await connection.query<RowDataPacket[]>(
+        'SELECT reset_at FROM shared_resource_usage WHERE resource_key = ? FOR UPDATE',
+        [key],
+      );
+      return Number(rows[0].reset_at);
+    });
   }
 
   async consume(
@@ -123,13 +149,17 @@ export class MySqlResourceStore implements SharedResourceStore {
 
   async prune(now: number) {
     await this.initialize();
-    await this.pool.execute(
-      'DELETE FROM shared_resource_leases WHERE expires_at <= ? LIMIT 500',
-      [now],
-    );
-    await this.pool.execute(
-      'DELETE FROM shared_resource_usage WHERE reset_at <= ? LIMIT 500',
-      [now],
-    );
+    await pruneResourceBatches(async (limit) => {
+      // query 将 LIMIT 格式化为整数字面量，避开 execute 的 DOUBLE 参数类型。
+      const [leases] = await this.pool.query<ResultSetHeader>(
+        'DELETE FROM shared_resource_leases WHERE expires_at <= ? LIMIT ?',
+        [now, limit],
+      );
+      const [usage] = await this.pool.query<ResultSetHeader>(
+        'DELETE FROM shared_resource_usage WHERE reset_at <= ? LIMIT ?',
+        [now, limit],
+      );
+      return Math.max(leases.affectedRows, usage.affectedRows);
+    });
   }
 }

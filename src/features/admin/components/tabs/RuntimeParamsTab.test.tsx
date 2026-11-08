@@ -10,11 +10,13 @@ import RuntimeParamsTab from '@/features/admin/components/tabs/RuntimeParamsTab'
 import { RUNTIME_PARAMS_FORM_ID } from '@/features/admin/lib/admin-form-ids';
 import { adminPost } from '@/features/admin/lib/api';
 import { IMPORT_ADMIN_CONFIG } from '@/lib/__tests__/__fixtures__/import-admin-config';
-import {
-  type RuntimeParamSettings,
-  DEFAULT_RUNTIME_PARAMS,
-  RUNTIME_PARAM_RANGES,
-} from '@/lib/runtime-params';
+import { DEFAULT_RUNTIME_PARAMS } from '@/lib/runtime-params';
+import { showToast } from '@/lib/toast';
+
+jest.mock('@/lib/toast', () => ({
+  showToast: jest.fn(),
+  dismissToast: jest.fn(),
+}));
 
 jest.mock('@/components/modals/AlertModal', () => ({
   __esModule: true,
@@ -68,7 +70,7 @@ describe('RuntimeParamsTab', () => {
     ).not.toBeInTheDocument();
     expect(
       within(screen.getByRole('region', { name: '搜索' })).getByLabelText(
-        '搜索源失败冷却',
+        '出错源跳过时长',
       ),
     ).toBeInTheDocument();
     expect(screen.queryByText('播放源失败冷却')).not.toBeInTheDocument();
@@ -79,7 +81,7 @@ describe('RuntimeParamsTab', () => {
       Object.keys(DEFAULT_RUNTIME_PARAMS).sort(),
     );
     expect(container.querySelector('details')).not.toHaveAttribute('open');
-    expect(screen.getByLabelText('封面加载记录上限')).toHaveValue(500);
+    expect(screen.getByLabelText('封面加载状态记录上限')).toHaveValue(500);
   });
 
   it('does not save an unchanged form', () => {
@@ -89,32 +91,25 @@ describe('RuntimeParamsTab', () => {
     expect(adminPost).not.toHaveBeenCalled();
   });
 
-  it('places ranges immediately before the inputs instead of below labels', () => {
-    const { container } = setup();
-    const inputs = container.querySelectorAll<HTMLInputElement>('input[name]');
+  it('describes inputs with their hint and restores defaults', () => {
+    const { onDirtyChange } = setup();
+    const input = screen.getByLabelText('单集弹幕条数上限');
 
-    inputs.forEach((input) => {
-      const key = input.name as keyof RuntimeParamSettings;
-      const range = RUNTIME_PARAM_RANGES[key];
-      const rangeDescription = document.getElementById(`${input.id}-range`);
-      const label = container.querySelector(`label[for="${input.id}"]`);
-
-      expect(input.previousElementSibling).toBe(rangeDescription);
-      expect(rangeDescription).toHaveTextContent(`${range.min}–${range.max}`);
-      expect(rangeDescription).toHaveTextContent(
-        `默认 ${DEFAULT_RUNTIME_PARAMS[key]}`,
-      );
-      expect(label?.parentElement).not.toContainElement(rangeDescription);
-      expect(input.getAttribute('aria-describedby')?.split(' ')).toContain(
-        rangeDescription?.id,
-      );
-    });
-
-    expect(
-      screen.getByLabelText('弹幕上游请求超时'),
-    ).toHaveAccessibleDescription(
-      '1–60 默认 12 用于弹幕搜索、绑定校验、内容拉取和连接测试的单次回源请求。',
+    expect(input).toHaveAccessibleDescription(
+      '超出后按时间均匀抽稀，条数越多播放越吃性能。',
     );
+    const reset = screen.getByRole('button', {
+      name: '单集弹幕条数上限恢复默认值 3000',
+    });
+    expect(reset).toHaveClass('invisible');
+
+    fireEvent.change(input, { target: { value: '5000' } });
+    expect(reset).not.toHaveClass('invisible');
+    expect(onDirtyChange).toHaveBeenLastCalledWith(true);
+
+    fireEvent.click(reset);
+    expect(input).toHaveValue(3000);
+    expect(onDirtyChange).toHaveBeenLastCalledWith(false);
   });
 
   it('omits the introductory note above the parameter groups', () => {
@@ -127,7 +122,7 @@ describe('RuntimeParamsTab', () => {
     const { container, form, refreshConfig, onDirtyChange } = setup();
     const details = container.querySelector('details') as HTMLDetailsElement;
     details.open = true;
-    fireEvent.change(screen.getByLabelText('封面加载记录上限'), {
+    fireEvent.change(screen.getByLabelText('封面加载状态记录上限'), {
       target: { value: '750' },
     });
     details.open = false;
@@ -139,6 +134,7 @@ describe('RuntimeParamsTab', () => {
     fireEvent.submit(form);
 
     await waitFor(() => expect(refreshConfig).toHaveBeenCalledTimes(1));
+    expect(showToast).toHaveBeenCalledWith('保存成功', 'success');
     expect(adminPost).toHaveBeenCalledWith(
       '/api/admin/runtime',
       expect.objectContaining({
@@ -168,7 +164,7 @@ describe('RuntimeParamsTab', () => {
   it('opens advanced settings so an invalid input can receive focus', () => {
     const { container } = setup();
     const details = container.querySelector('details') as HTMLDetailsElement;
-    fireEvent.invalid(screen.getByLabelText('封面加载记录上限'));
+    fireEvent.invalid(screen.getByLabelText('封面加载状态记录上限'));
     expect(details.open).toBe(true);
     expect(adminPost).not.toHaveBeenCalled();
   });

@@ -28,6 +28,9 @@ describe('getClientAuthSession', () => {
       ok: true,
       json: async () => ({
         authenticated: true,
+        profileId: 'profileAlice',
+        avatarSeed: null,
+        nickname: '爱丽丝',
         username: 'alice',
         role: 'user',
       }),
@@ -35,6 +38,9 @@ describe('getClientAuthSession', () => {
 
     await expect(getClientAuthSession()).resolves.toEqual({
       status: 'authenticated',
+      profileId: 'profileAlice',
+      avatarSeed: null,
+      nickname: '爱丽丝',
       username: 'alice',
       role: 'user',
     });
@@ -44,6 +50,49 @@ describe('getClientAuthSession', () => {
       headers: { 'Cache-Control': 'no-cache' },
     });
   });
+
+  it.each([null, 'Avatar012345'])(
+    'preserves a valid avatar seed: %s',
+    async (avatarSeed) => {
+      mockGetAuthInfo.mockReturnValue({ username: 'alice', role: 'user' });
+      (global.fetch as jest.Mock).mockResolvedValue({
+        ok: true,
+        json: async () => ({
+          authenticated: true,
+          username: 'alice',
+          role: 'user',
+          profileId: 'AbCdEf012345',
+          nickname: null,
+          avatarSeed,
+        }),
+      });
+      await expect(getClientAuthSession()).resolves.toMatchObject({
+        status: 'authenticated',
+        avatarSeed,
+      });
+    },
+  );
+
+  it.each([undefined, 123, {}, []])(
+    'rejects a missing or non-string avatar seed: %j',
+    async (avatarSeed) => {
+      mockGetAuthInfo.mockReturnValue({ username: 'alice', role: 'user' });
+      (global.fetch as jest.Mock).mockResolvedValue({
+        ok: true,
+        json: async () => ({
+          authenticated: true,
+          username: 'alice',
+          role: 'user',
+          profileId: 'AbCdEf012345',
+          nickname: null,
+          avatarSeed,
+        }),
+      });
+      await expect(getClientAuthSession()).resolves.toEqual({
+        status: 'error',
+      });
+    },
+  );
 
   it('失效会话按游客处理', async () => {
     mockGetAuthInfo.mockReturnValue({ username: 'alice', role: 'user' });

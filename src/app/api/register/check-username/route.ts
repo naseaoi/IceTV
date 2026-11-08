@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 
 import { getClientIp } from '@/lib/client-ip';
-import { getConfig } from '@/lib/config';
+import { getConfigForRead } from '@/lib/config';
 import { db } from '@/lib/db';
 import { getOwnerUsername } from '@/lib/env.server';
 import { FixedWindowRateLimiter } from '@/lib/fixed-window-rate-limit';
@@ -52,7 +52,7 @@ export async function GET(request: NextRequest) {
       return jsonResponse({ error: USERNAME_RULE_MESSAGE }, 400);
     }
 
-    const config = await getConfig();
+    const config = await getConfigForRead();
     if (!config.UserConfig.OpenRegister) {
       return jsonResponse({ error: '当前未开放注册' }, 403);
     }

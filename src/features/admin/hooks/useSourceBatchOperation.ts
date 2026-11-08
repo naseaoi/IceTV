@@ -4,6 +4,7 @@ import { useCallback, useState } from 'react';
 
 import { useLoadingState } from '@/features/admin/hooks/useLoadingState';
 import { useAlertModal } from '@/hooks/useAlertModal';
+import { showToast } from '@/lib/toast';
 
 type SourceProxyMode = 'server' | 'browser' | 'auto';
 
@@ -11,10 +12,12 @@ type BatchAction =
   | 'batch_enable'
   | 'batch_disable'
   | 'batch_delete'
-  | 'batch_set_proxy_mode';
+  | 'batch_set_proxy_mode'
+  | 'batch_set_admin_only';
 
 interface BatchOperationOptions {
   proxyMode?: SourceProxyMode;
+  adminOnly?: boolean;
 }
 
 const proxyModeLabels: Record<SourceProxyMode, string> = {
@@ -113,6 +116,18 @@ export function useSourceBatchOperation({
           body.proxyMode = proxyMode;
           break;
         }
+        case 'batch_set_admin_only': {
+          const adminOnly = options.adminOnly === true;
+          const scopeLabel = adminOnly ? '仅管理员可用' : '所有用户可用';
+          confirmMessage = adminOnly
+            ? `确定要将选中的 ${keys.length} 个视频源设为「仅管理员可用」吗？普通用户将无法搜索和播放这些源。`
+            : `确定要将选中的 ${keys.length} 个视频源对所有用户开放吗？`;
+          actionName = `设置为${scopeLabel}`;
+          successMessage = `已将 ${keys.length} 个视频源设为「${scopeLabel}」`;
+          loadingKey = `${loadingKey}_${adminOnly ? 'on' : 'off'}`;
+          body.adminOnly = adminOnly;
+          break;
+        }
       }
 
       setConfirmModal({
@@ -122,12 +137,7 @@ export function useSourceBatchOperation({
         onConfirm: async () => {
           try {
             await withLoading(loadingKey, () => callSourceApi(body));
-            showAlert({
-              type: 'success',
-              title: `${actionName}成功`,
-              message: successMessage,
-              timer: 2000,
-            });
+            showToast(successMessage, 'success');
             onClearSelection();
           } catch (err) {
             showAlert({

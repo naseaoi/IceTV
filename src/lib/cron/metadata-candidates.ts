@@ -1,5 +1,9 @@
-import { hasPlayRecordUpdate } from '@/lib/play-records';
+import { isCatalogFavoriteSource } from '@/lib/catalog-favorites';
+import { hasPlayRecordUpdate, isTrackingEnabled } from '@/lib/play-records';
 import type { Favorite, PlayRecord } from '@/lib/types';
+import { parseStorageKey } from '@/lib/utils';
+
+export const ENDED_SERIES_METADATA_REFRESH_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 
 export interface MetadataCandidate<T> {
   user: string;
@@ -34,7 +38,7 @@ export function shouldRefreshMetadata(
 
 // 未看完且开启追更的记录优先，其次是已看完的，关闭追更的最后
 function getPlayRecordPriority(record: PlayRecord): number {
-  if (record.tracking_enabled === false) return 2;
+  if (!isTrackingEnabled(record)) return 2;
   return hasPlayRecordUpdate(record) || isUnfinished(record) ? 0 : 1;
 }
 
@@ -81,7 +85,11 @@ export function buildPlayRecordCandidate(
   ttlMs: number,
   snapshot?: string,
 ): MetadataCandidate<PlayRecord> | null {
-  if (!shouldRefreshMetadata(record.metadata_checked_at, now, ttlMs)) {
+  const refreshTtlMs =
+    record.tracking_enabled !== true && record.series_status === 'ended'
+      ? Math.max(ttlMs, ENDED_SERIES_METADATA_REFRESH_TTL_MS)
+      : ttlMs;
+  if (!shouldRefreshMetadata(record.metadata_checked_at, now, refreshTtlMs)) {
     return null;
   }
 
@@ -104,6 +112,7 @@ export function buildFavoriteCandidate(
   snapshot?: string,
 ): MetadataCandidate<Favorite> | null {
   if (
+    isCatalogFavoriteSource(parseStorageKey(key)?.source ?? '') ||
     favorite.origin === 'live' ||
     !shouldRefreshMetadata(favorite.metadata_checked_at, now, ttlMs)
   ) {

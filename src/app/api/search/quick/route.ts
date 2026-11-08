@@ -5,7 +5,16 @@ import type { ApiSite } from '@/lib/config';
 import { getAvailableApiSites, getConfigForRead } from '@/lib/config';
 import { getCachedDetail } from '@/lib/detail-cache';
 import { searchFirstPageFromApi } from '@/lib/downstream';
+import { getSourceHealthTiers } from '@/lib/source-health.server';
 import { filterSourcesForPlayback } from '@/lib/source-match';
+import {
+  type SourceHealthTier,
+  SOURCE_HEALTH_TIER_PRIORITY,
+} from '@/lib/source-quality-policy';
+import {
+  getSourceRouteCapabilities,
+  resolveSourceRoute,
+} from '@/lib/source-route-capability.server';
 import type { SearchResult } from '@/lib/types';
 import { yellowWords } from '@/lib/yellow';
 
@@ -14,6 +23,10 @@ export const runtime = 'nodejs';
 const QUICK_SOURCE_LIMIT = 10;
 const QUICK_SOURCE_CONCURRENCY = 4;
 const QUICK_DETAIL_LIMIT_PER_SOURCE = 2;
+// 中转源先解析出可播详情时，最多再等这么久让同等健康度的直连源完成，省下分片中转流量
+const QUICK_RELAY_GRACE_MS = 1_500;
+
+type QuickSite = ApiSite & { healthRank: number; relay: boolean };
 
 type QuickSearchPayload = {
   detail: SearchResult | null;
@@ -46,8 +59,23 @@ export async function GET(request: NextRequest) {
   }
 
   const config = await getConfigForRead();
-  const apiSites = await getAvailableApiSites(guardResult.username, config);
-  const quickSites = apiSites.slice(0, QUICK_SOURCE_LIMIT);
+  const [availableSites, sourceHealthTiers, capabilities] = await Promise.all([
+    getAvailableApiSites(guardResult.username, config),
+    getSourceHealthTiers(),
+    getSourceRouteCapabilities(),
+  ]);
+  const proxyModes = new Map(
+    config.SourceConfig.map((source) => [source.key, source.proxyMode]),
+  );
+  const quickSites = rankQuickSites(
+    availableSites.map((site) => ({
+      ...site,
+      healthRank: healthRank(sourceHealthTiers.get(site.key)),
+      relay:
+        resolveSourceRoute(proxyModes.get(site.key), capabilities, site.key) ===
+        'server',
+    })),
+  ).slice(0, QUICK_SOURCE_LIMIT);
   const controller = new AbortController();
 
   const payload = await resolveQuickPlayableSource({
@@ -74,7 +102,7 @@ async function resolveQuickPlayableSource({
   signal,
   onResolved,
 }: {
-  apiSites: ApiSite[];
+  apiSites: QuickSite[];
   query: string;
   year: string;
   searchType: '' | 'tv' | 'movie';
@@ -92,16 +120,44 @@ async function resolveQuickPlayableSource({
     let running = 0;
     let searchedSources = 0;
     let settled = false;
+    const completed = new Set<number>();
+    let relayFallback: { detail: SearchResult; site: QuickSite } | null = null;
+    let graceTimer: ReturnType<typeof setTimeout> | null = null;
 
     const finish = (detail: SearchResult | null) => {
       if (settled) return;
       settled = true;
+      if (graceTimer) clearTimeout(graceTimer);
       if (detail) onResolved();
       resolve({
         detail,
         sources: mergeQuickSources(detail ? [detail, ...sources] : sources),
         searchedSources,
       });
+    };
+
+    const hasPendingDirectPeer = (relaySite: QuickSite) =>
+      apiSites.some(
+        (site, index) =>
+          !site.relay &&
+          site.healthRank <= relaySite.healthRank &&
+          !completed.has(index),
+      );
+
+    const acceptDetail = (detail: SearchResult, site: QuickSite) => {
+      if (!site.relay) {
+        if (relayFallback && site.healthRank > relayFallback.site.healthRank)
+          return;
+        finish(detail);
+        return;
+      }
+      if (relayFallback) return;
+      if (!hasPendingDirectPeer(site)) {
+        finish(detail);
+        return;
+      }
+      relayFallback = { detail, site };
+      graceTimer = setTimeout(() => finish(detail), QUICK_RELAY_GRACE_MS);
     };
 
     const pump = () => {
@@ -112,7 +168,8 @@ async function resolveQuickPlayableSource({
         nextIndex < apiSites.length &&
         !signal.aborted
       ) {
-        const site = apiSites[nextIndex];
+        const siteIndex = nextIndex;
+        const site = apiSites[siteIndex];
         nextIndex += 1;
         running += 1;
         searchedSources += 1;
@@ -128,14 +185,19 @@ async function resolveQuickPlayableSource({
           .then((result) => {
             if (settled) return;
             sources.push(...result.sources);
-            if (result.detail) finish(result.detail);
+            if (result.detail) acceptDetail(result.detail, site);
           })
           .catch(() => undefined)
           .finally(() => {
             running -= 1;
+            completed.add(siteIndex);
             if (settled) return;
+            if (relayFallback && !hasPendingDirectPeer(relayFallback.site)) {
+              finish(relayFallback.detail);
+              return;
+            }
             if (nextIndex >= apiSites.length && running === 0) {
-              finish(null);
+              finish(relayFallback?.detail ?? null);
               return;
             }
             pump();
@@ -143,7 +205,7 @@ async function resolveQuickPlayableSource({
       }
 
       if (nextIndex >= apiSites.length && running === 0) {
-        finish(null);
+        finish(relayFallback?.detail ?? null);
       }
     };
 
@@ -226,6 +288,20 @@ function filterYellowResults(
         (result.type_name || '').includes(word),
       ),
   );
+}
+
+function healthRank(tier: SourceHealthTier | undefined): number {
+  return SOURCE_HEALTH_TIER_PRIORITY[tier ?? 'insufficient'];
+}
+
+// 同等健康度内直连源先发起，减少中转源抢先胜出
+function rankQuickSites(sites: QuickSite[]): QuickSite[] {
+  return sites
+    .slice()
+    .sort(
+      (a, b) =>
+        a.healthRank - b.healthRank || Number(a.relay) - Number(b.relay),
+    );
 }
 
 function mergeQuickSources(sources: SearchResult[]): SearchResult[] {

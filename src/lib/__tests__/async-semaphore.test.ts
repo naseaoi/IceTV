@@ -1,4 +1,5 @@
 import { createAsyncSemaphore } from '@/lib/async-semaphore';
+import { ResourceLimitError } from '@/lib/server-resource-errors';
 
 describe('async semaphore', () => {
   it('并发不超过上限，超出的任务排队', async () => {
@@ -115,5 +116,57 @@ describe('async semaphore', () => {
 
     expect(queuedReady).toBe(true);
     expect(gate.stats()).toEqual({ limit: 2, active: 2, waiting: 0 });
+  });
+
+  it('等待者达到上限时直接拒绝', async () => {
+    const gate = createAsyncSemaphore(1);
+    const release = await gate.acquire();
+    const queued = gate.acquire({ maxWaiting: 1 });
+
+    await expect(gate.acquire({ maxWaiting: 1 })).rejects.toBeInstanceOf(
+      ResourceLimitError,
+    );
+    expect(gate.stats().waiting).toBe(1);
+
+    release();
+    (await queued)();
+    expect(gate.stats()).toMatchObject({ active: 0, waiting: 0 });
+  });
+
+  it('取消信号使排队者立即出队且不占槽位', async () => {
+    const gate = createAsyncSemaphore(1);
+    const release = await gate.acquire();
+    const controller = new AbortController();
+    const queued = gate.acquire({ signal: controller.signal });
+
+    controller.abort();
+    await expect(queued).rejects.toBeDefined();
+    expect(gate.stats().waiting).toBe(0);
+
+    release();
+    expect(gate.stats().active).toBe(0);
+    await expect(
+      gate.acquire({ signal: controller.signal }),
+    ).rejects.toBeDefined();
+  });
+
+  it('等待超时后出队并报繁忙', async () => {
+    jest.useFakeTimers();
+    try {
+      const gate = createAsyncSemaphore(1);
+      const release = await gate.acquire();
+      const queued = gate.acquire({ waitTimeoutMs: 1000 });
+      const assertion =
+        expect(queued).rejects.toBeInstanceOf(ResourceLimitError);
+
+      jest.advanceTimersByTime(1000);
+      await assertion;
+      expect(gate.stats().waiting).toBe(0);
+
+      release();
+      expect(gate.stats().active).toBe(0);
+    } finally {
+      jest.useRealTimers();
+    }
   });
 });

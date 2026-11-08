@@ -45,6 +45,35 @@ function createDetail(overrides: Partial<SearchResult> = {}): SearchResult {
 }
 
 describe('buildRefreshedPlayRecord', () => {
+  it('状态刷新独立于集数变化且保留手动追更', () => {
+    const record = createRecord({
+      series_status: 'ongoing',
+      tracking_enabled: true,
+    });
+    const next = buildRefreshedPlayRecord(
+      record,
+      createDetail({ series_status: 'ended', episodes: [] }),
+      5000,
+    );
+    expect(next).toMatchObject({
+      series_status: 'ended',
+      tracking_enabled: true,
+    });
+    expect(
+      buildRefreshedPlayRecord(
+        next,
+        createDetail({ series_status: 'ongoing' }),
+        6000,
+      ).series_status,
+    ).toBe('ongoing');
+    expect(
+      buildRefreshedPlayRecord(next, createDetail(), 6000).series_status,
+    ).toBe('ended');
+    expect(buildRefreshedPlayRecord(next, null, 6000).series_status).toBe(
+      'ended',
+    );
+  });
+
   it.each([
     ['简中 8', '简中'],
     ['简中8', '简中'],
@@ -123,6 +152,38 @@ describe('buildRefreshedPlayRecord', () => {
     expect(next.index).toBe(21);
     expect(next.group_total).toBe(11);
     expect(next.update_detected_at).toBeUndefined();
+  });
+
+  it.each([0, 22])('详情集数为 %s 时独立更新封面且保留播放进度', (count) => {
+    const next = buildRefreshedPlayRecord(
+      createRecord(),
+      createDetail({
+        poster: 'new-cover.jpg',
+        episodes: Array.from({ length: count }, (_, index) => `ep-${index}`),
+        episode_groups: [
+          { label: '繁中', count: 11 },
+          { label: '简中', count: 11 },
+        ],
+      }),
+      5000,
+    );
+    expect(next).toMatchObject({
+      cover: 'new-cover.jpg',
+      index: 21,
+      play_time: 600,
+      save_time: 1000,
+      total_episodes: 22,
+    });
+    expect(next.update_detected_at).toBeUndefined();
+  });
+
+  it('详情封面为空时保留原封面', () => {
+    const next = buildRefreshedPlayRecord(
+      createRecord(),
+      createDetail({ poster: '', episodes: [] }),
+      5000,
+    );
+    expect(next.cover).toBe('cover.jpg');
   });
 
   it('详情缺失时只更新检查时间并补齐基线', () => {
