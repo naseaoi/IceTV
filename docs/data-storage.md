@@ -15,7 +15,7 @@
 
 - 用户权限以 `user_access` 和 `user_group_members` 为唯一真相源；鉴权按归一化用户名查主键，运行时配置不携带 `Users`。该字段只用于旧数据迁移，用户组定义 `Tags` 留在配置。
 - `enabledApis` 为空数组时存为 `NULL`，含义是**不限制**而非禁止全部；没有有效个人源或组源列表时返回全部启用源。删除用户最后一个授权源会让其回落为全部可用。
-- 视频源 `adminOnly` 存在配置 JSON 的 `SourceConfig` 里，由 `getAvailableApiSites()` 统一过滤：普通用户和没有 `user_access` 行的用户名看不到，管理员与站长不受影响，再与 `enabledApis` / 用户组取交集。不传用户名的内部调用（定时任务）返回全部启用源。用户侧读取源列表一律经该函数，不直接遍历 `SourceConfig`。
+- 视频源 `adminOnly` 存在配置 JSON 的 `SourceConfig` 里，由 `getAvailableApiSites()` 统一过滤：普通用户和没有 `user_access` 行的用户名看不到，管理员与站长不受影响，再与 `enabledApis` / 用户组取交集。个人 `enabledApis` 非空时整体覆盖用户组（不与组取交集），多个组取并集；该优先级只在 `resolveSourceAccessRule()`（`src/lib/source-access.ts`）实现，后台用户列表的生效源数量同用此函数。不传用户名的内部调用（定时任务）返回全部启用源。用户侧读取源列表一律经该函数，不直接遍历 `SourceConfig`。
 - 新用户默认用户组 `UserConfig.DefaultUserGroup` 存在配置 JSON；`configSelfCheck()` 在其不对应任何 `Tags` 时清除，删组无需另行处理。注册与后台添加用户经 `registerUser()` 的 `userGroups` 参数在建号事务内写入组成员。
 - 每个 `users` 行必须有 `user_access` 行；建号同事务写入，初始化时补齐。站长角色和封禁豁免由环境变量决定，表仅保存其源权限和用户组。
 - 用户权限更新与批量操作在存储事务内复核角色；配置 CAS 同事务清理被删除组和源的用户引用，避免配置冲突后留下部分写入。

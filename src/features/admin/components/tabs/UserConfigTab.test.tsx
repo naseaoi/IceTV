@@ -170,6 +170,43 @@ describe('UserConfigTab sensitive actions', () => {
     expect(screen.getByRole('heading', { name: title })).toBeInTheDocument();
   });
 
+  it('用户列表按用户组显示实际可用的视频源数量', () => {
+    mockRows = [
+      { username: 'demo', role: 'user', tags: ['VIP'] },
+      { username: 'free', role: 'user' },
+    ];
+    const groupConfig = {
+      UserConfig: {
+        OpenRegister: false,
+        Tags: [{ name: 'VIP', enabledApis: ['a', 'off', 'staff'] }],
+      },
+      SourceConfig: [
+        { key: 'a', name: 'A', api: 'https://a.example.com' },
+        {
+          key: 'off',
+          name: 'Off',
+          api: 'https://off.example.com',
+          disabled: true,
+        },
+        {
+          key: 'staff',
+          name: 'Staff',
+          api: 'https://s.example.com',
+          adminOnly: true,
+        },
+      ],
+    } as never;
+    render(
+      <UserConfigTab
+        config={groupConfig}
+        role='owner'
+        refreshConfig={jest.fn()}
+      />,
+    );
+    expect(screen.getByText(/视频源 1 个（用户组）$/)).toBeInTheDocument();
+    expect(screen.getByText(/用户组 无 · 视频源 无限制$/)).toBeInTheDocument();
+  });
+
   it('编辑用户组关闭时保留名称与选择，重新打开恢复原始选择', async () => {
     const groupConfig = {
       UserConfig: {

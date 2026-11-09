@@ -988,6 +988,8 @@ const UserConfig = ({ config, role, refreshConfig }: UserConfigProps) => {
             total={userList.total}
             selectedCount={selectedCount}
             users={visibleUsers}
+            userGroups={userGroups}
+            sources={config.SourceConfig}
             lastActiveAt={lastActiveAt}
             currentUsername={currentUsername}
             permissionContext={permissionContext}

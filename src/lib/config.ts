@@ -28,6 +28,7 @@ import {
   DEFAULT_SITE_FOOTER_TEXT,
   normalizeSiteFooterText,
 } from '@/lib/site-footer';
+import { resolveSourceAccessRule } from '@/lib/source-access';
 import {
   DEFAULT_SOURCE_COVER_PROXY_MODE,
   normalizeSourceCoverProxyMode,
@@ -762,52 +763,11 @@ export async function getAvailableApiSites(
     return allApiSites;
   }
 
-  // 优先根据用户自己的 enabledApis 配置查找
-  if (userConfig.enabledApis && userConfig.enabledApis.length > 0) {
-    const userApiSitesSet = new Set(userConfig.enabledApis);
-    return allApiSites
-      .filter((s) => userApiSitesSet.has(s.key))
-      .map((s) => ({
-        key: s.key,
-        name: s.name,
-        api: s.api,
-        detail: s.detail,
-      }));
-  }
-
-  // 如果没有 enabledApis 配置，则根据 tags 查找
-  if (
-    userConfig.tags &&
-    userConfig.tags.length > 0 &&
-    currentConfig.UserConfig.Tags
-  ) {
-    const enabledApisFromTags = new Set<string>();
-
-    userConfig.tags.forEach((tagName) => {
-      const tagConfig = currentConfig.UserConfig.Tags?.find(
-        (t) => t.name === tagName,
-      );
-      if (tagConfig && tagConfig.enabledApis) {
-        tagConfig.enabledApis.forEach((apiKey) =>
-          enabledApisFromTags.add(apiKey),
-        );
-      }
-    });
-
-    if (enabledApisFromTags.size > 0) {
-      return allApiSites
-        .filter((s) => enabledApisFromTags.has(s.key))
-        .map((s) => ({
-          key: s.key,
-          name: s.name,
-          api: s.api,
-          detail: s.detail,
-        }));
-    }
-  }
-
-  // 如果都没有配置，返回所有可用的 API 站点
-  return allApiSites;
+  const rule = resolveSourceAccessRule(
+    userConfig,
+    currentConfig.UserConfig.Tags,
+  );
+  return rule ? allApiSites.filter((s) => rule.keys.has(s.key)) : allApiSites;
 }
 
 function toApiSite(site: ApiSite): ApiSite {
