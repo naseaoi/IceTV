@@ -1,5 +1,7 @@
 import type HlsType from 'hls.js';
 
+import type { SourcePlaybackRoute } from '@/lib/proxy-modes';
+
 type PlayerModules = {
   Artplayer: any;
   Hls: any;
@@ -86,7 +88,7 @@ export type ManagedVideoElement = HTMLVideoElement & {
   } | null;
   /** 当前会话内该 video 实际使用的流量路由，供起播成功后清理短期兜底记忆。 */
   __icetvUsingServerProxy?: boolean;
-  /** browser 起播失败时，挂给外层事件复用的同源 server 回退入口。 */
+  // 自动线路加载超时时尝试本意图尚未使用的另一线路，固定线路返回 false。
   __icetvSwitchToServerProxy?: ((reason: string) => boolean) | null;
   /** 预期媒体请求中止截止时间 */
   __icetvExpectedAbortUntil?: number;
@@ -117,7 +119,11 @@ export function preloadPlayerModules(): void {
 }
 
 /** 预取 m3u8 代理地址（与模块加载并行），填充服务端缓存 */
-export function prefetchM3U8(proxyUrl: string): void {
+export function prefetchM3U8(
+  proxyUrl: string,
+  route: Pick<SourcePlaybackRoute, 'directManifest'>,
+): void {
+  if (route.directManifest) return;
   fetch(proxyUrl, { cache: 'no-store' }).catch(() => {});
 }
 
@@ -509,7 +515,11 @@ export function bindPlayerMobileControls(
 
 type HlsLoaderFactoryOptions = {
   rewriteContext?: (context: LoaderContext) => void;
-  transformManifestText?: (content: string, context: LoaderContext) => string;
+  transformManifestText?: (
+    content: string,
+    context: LoaderContext,
+    manifestUrl: string,
+  ) => string;
 };
 
 /**
@@ -547,11 +557,12 @@ export function createHlsLoaderClass(
             callbackContext: unknown,
             networkDetails?: unknown,
           ) {
-            const nextResponse = response as { data?: unknown };
+            const nextResponse = response as { data?: unknown; url?: string };
             if (typeof nextResponse.data === 'string') {
               nextResponse.data = options.transformManifestText!(
                 nextResponse.data,
                 loaderContext,
+                nextResponse.url || loaderContext.url || '',
               );
             }
             return onSuccess(response, stats, callbackContext, networkDetails);

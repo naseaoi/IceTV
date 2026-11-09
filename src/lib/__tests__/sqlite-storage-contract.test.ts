@@ -901,6 +901,64 @@ describe('sqlite storage contract', () => {
     await expect(storage.getAdminConfig()).rejects.toThrow();
   });
 
+  it('isolates current route semantics while retaining and purging both versions', async () => {
+    const storage = new LocalSqliteStorage(':memory:');
+    await storage.recordSourceRouteStat({
+      source: 'versioned',
+      routeMode: 'browser',
+      success: true,
+      eventAt: Date.UTC(2026, 0, 8),
+    });
+    await storage.recordSourceRouteStat({
+      source: 'versioned',
+      routeMode: 'server',
+      success: false,
+      eventAt: Date.UTC(2026, 0, 8),
+    });
+    const database = (
+      storage as unknown as {
+        db: {
+          prepare: (sql: string) => { run: (...values: unknown[]) => void };
+        };
+      }
+    ).db;
+    for (const mode of ['browser', 'server']) {
+      database
+        .prepare(
+          'INSERT INTO source_route_stats (source, route_mode, bucket_date, success_count, failure_count, updated_at) VALUES (?, ?, ?, ?, ?, ?)',
+        )
+        .run('versioned', mode, '2026-01-08', 99, 99, 1);
+    }
+    expect(await storage.getSourceRouteStats('2026-01-01')).toEqual(
+      expect.arrayContaining([
+        {
+          source: 'versioned',
+          routeMode: 'browser',
+          successCount: 1,
+          failureCount: 0,
+        },
+        {
+          source: 'versioned',
+          routeMode: 'server',
+          successCount: 0,
+          failureCount: 1,
+        },
+      ]),
+    );
+    expect(await storage.getSourceRouteStats('2026-01-01')).toHaveLength(2);
+    expect(
+      (await storage.getAllSourceRouteStatBuckets()).map(
+        (row) => row.routeMode,
+      ),
+    ).toEqual(
+      expect.arrayContaining(['browser', 'server', 'browser-v2', 'server-v2']),
+    );
+    await storage.purgeSourceRouteStatsBefore('2026-01-08');
+    expect(await storage.getAllSourceRouteStatBuckets()).toHaveLength(4);
+    await storage.purgeSourceRouteStatsBefore('2026-01-09');
+    expect(await storage.getAllSourceRouteStatBuckets()).toEqual([]);
+  });
+
   it('aggregates source route stats by date and mode', async () => {
     const storage = new LocalSqliteStorage(':memory:');
 

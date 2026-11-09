@@ -10,19 +10,10 @@ jest.mock('@/lib/proxy-auth', () => ({
 jest.mock('@/lib/server-proxy-guard', () => ({
   requireServerProxyQuota: async () => null,
 }));
-jest.mock('@/lib/source-route-capability.server', () => ({
-  scheduleSourceDirectProbe: jest.fn(),
-}));
 jest.mock('@/features/play/lib/m3u8-rewrite', () => ({
   getRewrittenM3U8Content: async (entry: { content: string }) => entry.content,
 }));
 
-jest.mock('@/features/play/lib/ad-filter-strategy-registry', () => ({
-  getAdFilterCacheNamespace: (source: string | null) => `test:${source ?? ''}`,
-}));
-jest.mock('@/features/play/lib/ad-segment-detector', () => ({
-  filterM3U8AdsForSource: async (content: string) => content,
-}));
 jest.mock('@/lib/config', () => ({
   getConfigForRead: async () => ({ SiteConfig: {} }),
 }));
@@ -150,6 +141,33 @@ describe('m3u8 cache ttl', () => {
 
   afterEach(() => {
     jest.restoreAllMocks();
+  });
+
+  it('缓存 rycj 原始广告和边界，并保持源隔离', async () => {
+    const url = 'https://cdn.example/vod/rycj/index.m3u8';
+    const content = [
+      '#EXTM3U',
+      ...Array.from({ length: 8 }, (_, block) => [
+        '#EXT-X-DISCONTINUITY',
+        ...Array.from(
+          { length: 5 },
+          (_, fragment) =>
+            `#EXTINF:${block === 3 ? 4 : 5},\n${block}-${fragment}.ts`,
+        ),
+      ]).flat(),
+      '#EXT-X-ENDLIST',
+    ].join('\n');
+    mockFetch.mockResolvedValueOnce(new Response(content));
+    const result = await loadM3U8Data(url, 'test', 'rycj', false, false, {
+      startedAt: START,
+      proxyMode: 'server-proxy',
+      userAction: null,
+      userInitiated: false,
+    });
+    expect(result.content).toBe(content);
+    expect(peekM3U8Cache(url, 'rycj')?.value.content).toBe(content);
+    expect(peekM3U8Cache(url, 'other')).toBeNull();
+    expect(mockFetch).toHaveBeenCalledTimes(1);
   });
 
   it('keeps ended media playlists without signed params for thirty minutes', async () => {

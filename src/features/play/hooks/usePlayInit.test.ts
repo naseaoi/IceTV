@@ -10,7 +10,7 @@ import { generateStorageKey } from '@/lib/db.client';
 import { cacheManager } from '@/lib/db.client.cache';
 import { PLAY_INTENT_KEY, savePlayIntent } from '@/lib/play-intent';
 import { prefetchM3U8 } from '@/lib/player-runtime';
-import { getProxyModes, isServerProxy } from '@/lib/proxy-modes';
+import { getProxyModes, getSourcePlaybackRoute } from '@/lib/proxy-modes';
 import {
   isTrustedSourcePlaybackStat,
   readSourcePlaybackStats,
@@ -118,7 +118,7 @@ function markTrusted(sourceKey: string) {
 function playerPlaylistUrl(sourceKey: string, episodeUrl: string) {
   return buildVodProxyUrl({
     rawUrl: episodeUrl,
-    useServerProxy: isServerProxy(sourceKey, episodeUrl),
+    ...getSourcePlaybackRoute(sourceKey, episodeUrl),
     sourceKey,
     playbackRequestMode: 'initial',
   });
@@ -140,8 +140,8 @@ function installFetch(
         json: async () => body,
       }));
     }
-    if (url.pathname === '/api/proxy/m3u8') {
-      const behavior = playlists[target];
+    if (url.pathname === '/api/proxy/m3u8' || playlists[url.href]) {
+      const behavior = playlists[target || url.href];
       if (behavior === 'ok') {
         return Promise.resolve({
           ok: true,
@@ -178,7 +178,9 @@ function installFetch(
 function playlistRequests(): string[] {
   return (global.fetch as jest.Mock).mock.calls
     .map(([input]) => String(input))
-    .filter((url) => url.startsWith('/api/proxy/m3u8?'));
+    .filter(
+      (url) => url.startsWith('/api/proxy/m3u8?') || /^https?:/.test(url),
+    );
 }
 
 function apiRequests(pathname: string): string[] {
@@ -404,6 +406,29 @@ describe('usePlayInit 常用源直接起播', () => {
   const trusted = createSource('a');
   const other = createSource('b');
 
+  it('直连可信候选验证原始清单，备选预取携带跳过标记', async () => {
+    markTrusted('a');
+    jest.mocked(getSourceSelectionContext).mockResolvedValue({
+      proxyModes: { a: 'browser', b: 'browser' },
+      healthTiers: {},
+    });
+    installFetch({ [trusted.episodes[0]]: 'ok' });
+    const params = setupHook([other, trusted]);
+    await waitFor(() =>
+      expect(params.setCurrentSource).toHaveBeenCalledWith('a'),
+    );
+    expect(global.fetch).toHaveBeenCalledWith(
+      trusted.episodes[0],
+      expect.any(Object),
+    );
+    expect(playlistRequests()).toEqual([trusted.episodes[0]]);
+    expect(prefetchM3U8).toHaveBeenCalledWith(other.episodes[0], {
+      useServerProxy: false,
+      directManifest: true,
+      allowAutoFallback: false,
+    });
+  });
+
   it('目标集清单不可用时回到常规测速并选测通的源', async () => {
     markTrusted('a');
     installFetch({});
@@ -457,6 +482,7 @@ describe('usePlayInit 常用源直接起播', () => {
     expect(probeMock).not.toHaveBeenCalled();
     expect(prefetchM3U8).toHaveBeenCalledWith(
       playerPlaylistUrl('b', other.episodes[0]),
+      expect.objectContaining({ directManifest: true }),
     );
 
     jest.runOnlyPendingTimers();
@@ -637,6 +663,7 @@ describe('usePlayInit 按续播的集测速', () => {
     ]);
     expect(prefetchM3U8).toHaveBeenCalledWith(
       playerPlaylistUrl('b', other.episodes[2]),
+      expect.objectContaining({ directManifest: true }),
     );
 
     jest.runOnlyPendingTimers();
@@ -666,6 +693,7 @@ describe('usePlayInit 按续播的集测速', () => {
     ]);
     expect(prefetchM3U8).toHaveBeenCalledWith(
       playerPlaylistUrl('b', fresh.episodes[1]),
+      expect.objectContaining({ directManifest: true }),
     );
   });
 

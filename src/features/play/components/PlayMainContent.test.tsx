@@ -10,6 +10,10 @@ import {
   clearVodStartupProgress,
   getVodStartupProgress,
 } from '@/features/play/lib/playerLoading';
+import {
+  createVodPlaybackIntent,
+  getVodSourceAttempt,
+} from '@/features/play/lib/vodPlaybackIntent';
 import type { SearchResult } from '@/lib/types';
 
 jest.mock('@/components/PlayerPageLayout', () => ({
@@ -323,7 +327,7 @@ describe('PlayMainContent', () => {
     expect(screen.getByText('正在加载视频')).toBeInTheDocument();
   });
 
-  it('没有媒体运行时进度时按总上限兜底超时', () => {
+  it('没有 attempt 的准备阶段按 W 兜底超时', () => {
     const onLoadingTimeout = jest.fn(() => false);
     render(
       <PlayMainContent
@@ -333,19 +337,19 @@ describe('PlayMainContent', () => {
       />,
     );
     act(() => {
-      jest.advanceTimersByTime(59_000);
+      jest.advanceTimersByTime(14_750);
     });
     expect(onLoadingTimeout).not.toHaveBeenCalled();
     act(() => {
-      jest.advanceTimersByTime(1_000);
+      jest.advanceTimersByTime(250);
     });
     expect(onLoadingTimeout).toHaveBeenCalledTimes(1);
     expect(
-      screen.getByText('媒体加载已达 60 秒，仍未能起播'),
+      screen.getByText('媒体加载已连续 15 秒无进展，源站响应超时'),
     ).toBeInTheDocument();
   });
 
-  it('等待详情和模块期间只受总上限约束，媒体进展续期且受总上限约束', () => {
+  it('未登记源尝试的准备耗时不回填媒体预算，媒体进展仍受总上限约束', () => {
     const onLoadingTimeout = jest.fn(() => false);
     render(
       <PlayMainContent
@@ -355,7 +359,7 @@ describe('PlayMainContent', () => {
       />,
     );
     act(() => {
-      jest.advanceTimersByTime(50_000);
+      jest.advanceTimersByTime(10_000);
     });
     expect(onLoadingTimeout).not.toHaveBeenCalled();
     const progress = startMedia('source-a');
@@ -375,6 +379,33 @@ describe('PlayMainContent', () => {
     ).toBeInTheDocument();
   });
 
+  it('页面轮询不把准备阶段起点写入后来创建的媒体 attempt', () => {
+    const intent = createVodPlaybackIntent();
+    const onLoadingTimeout = jest.fn(() => false);
+    render(
+      <PlayMainContent
+        {...createBaseProps()}
+        isVideoLoading
+        playbackIntentRef={{ current: intent }}
+        onLoadingTimeout={onLoadingTimeout}
+      />,
+    );
+    act(() => jest.advanceTimersByTime(5_000));
+    const attempt = getVodSourceAttempt(intent, 'source-a', 'a-id');
+    act(() => jest.advanceTimersByTime(250));
+    expect(attempt.startedAt).toBeNull();
+    const progress = startMedia('source-a');
+    attempt.startedAt = progress.startedAt;
+    for (let i = 0; i < 5; i += 1) {
+      act(() => jest.advanceTimersByTime(10_000));
+      progress.lastProgressAt = performance.now();
+    }
+    act(() => jest.advanceTimersByTime(9_750));
+    expect(onLoadingTimeout).not.toHaveBeenCalled();
+    act(() => jest.advanceTimersByTime(250));
+    expect(onLoadingTimeout).toHaveBeenCalledTimes(1);
+  });
+
   it('运行时释放后旧进度不触发超时，回落后的新运行时独立计时', () => {
     const onLoadingTimeout = jest.fn(() => true);
     render(
@@ -390,7 +421,7 @@ describe('PlayMainContent', () => {
     });
     clearVodStartupProgress(document.querySelector('video')!);
     act(() => {
-      jest.advanceTimersByTime(30_000);
+      jest.advanceTimersByTime(4_000);
     });
     expect(onLoadingTimeout).not.toHaveBeenCalled();
     startMedia('source-a');
@@ -422,7 +453,7 @@ describe('PlayMainContent', () => {
       <PlayMainContent {...props} isVideoLoading videoLoadingAttempt={1} />,
     );
     act(() => {
-      jest.advanceTimersByTime(30_000);
+      jest.advanceTimersByTime(10_000);
     });
     expect(onLoadingTimeout).not.toHaveBeenCalled();
     expect(screen.queryByText('加载视频超时')).not.toBeInTheDocument();
@@ -455,6 +486,135 @@ describe('PlayMainContent', () => {
       jest.advanceTimersByTime(250);
     });
     expect(onLoadingTimeout).toHaveBeenCalledTimes(1);
+  });
+
+  it('为回落保留完整窗口，同源总预算封顶且新候选重新计时', () => {
+    const intent = createVodPlaybackIntent();
+    const attempt = getVodSourceAttempt(intent, 'source-a', 'a-id');
+    attempt.startedAt = performance.now();
+    attempt.allowAutoFallback = true;
+    const onLoadingTimeout = jest.fn(() => {
+      if (!attempt.routeSwitched) {
+        attempt.routeSwitched = true;
+        startMedia('source-a');
+        return true;
+      }
+      return false;
+    });
+    const props = {
+      ...createBaseProps(),
+      isVideoLoading: true,
+      onLoadingTimeout,
+      playbackIntentRef: { current: intent },
+    };
+    const { rerender } = render(<PlayMainContent {...props} />);
+    const progress = startMedia('source-a');
+    for (let i = 0; i < 4; i += 1) {
+      act(() => jest.advanceTimersByTime(10_000));
+      progress.lastProgressAt = performance.now();
+    }
+    act(() => jest.advanceTimersByTime(5_000));
+    expect(onLoadingTimeout).toHaveBeenCalledTimes(1);
+    act(() => jest.advanceTimersByTime(14_750));
+    expect(onLoadingTimeout).toHaveBeenCalledTimes(1);
+    act(() => jest.advanceTimersByTime(250));
+    expect(onLoadingTimeout).toHaveBeenCalledTimes(2);
+    const candidate = getVodSourceAttempt(intent, 'source-b', 'b-id');
+    candidate.startedAt = performance.now();
+    candidate.allowAutoFallback = true;
+    rerender(
+      <PlayMainContent
+        {...props}
+        currentSource='source-b'
+        videoLoadingAttempt={1}
+      />,
+    );
+    startMedia('source-b');
+    act(() => jest.advanceTimersByTime(14_750));
+    expect(onLoadingTimeout).toHaveBeenCalledTimes(2);
+    act(() => jest.advanceTimersByTime(250));
+    expect(onLoadingTimeout).toHaveBeenCalledTimes(3);
+  });
+
+  it('成功起播后的故障从恢复起点计时，不继承旧媒体起播时间', () => {
+    const intent = createVodPlaybackIntent();
+    const attempt = getVodSourceAttempt(intent, 'source-a', 'a-id');
+    attempt.startedAt = performance.now();
+    const onLoadingTimeout = jest.fn(() => false);
+    const props = {
+      ...createBaseProps(),
+      playbackIntentRef: { current: intent },
+      onLoadingTimeout,
+    };
+    const { rerender } = render(<PlayMainContent {...props} isVideoLoading />);
+    startMedia('source-a');
+    attempt.startedAt = null;
+    rerender(<PlayMainContent {...props} isVideoLoading={false} />);
+    act(() => jest.advanceTimersByTime(300_000));
+    rerender(
+      <PlayMainContent {...props} isVideoLoading videoLoadingAttempt={1} />,
+    );
+    act(() => jest.advanceTimersByTime(14_750));
+    expect(onLoadingTimeout).not.toHaveBeenCalled();
+    act(() => jest.advanceTimersByTime(250));
+    expect(onLoadingTimeout).toHaveBeenCalledTimes(1);
+  });
+
+  it('懒解析与媒体共用 T，准备阶段用 W 且不重置候选起点', () => {
+    const intent = createVodPlaybackIntent();
+    const attempt = getVodSourceAttempt(intent, 'source-a', 'a-id');
+    attempt.startedAt = performance.now();
+    const onLoadingTimeout = jest.fn(() => false);
+    const props = {
+      ...createBaseProps(),
+      isVideoLoading: true,
+      playbackIntentRef: { current: intent },
+      onLoadingTimeout,
+    };
+    const { rerender } = render(<PlayMainContent {...props} />);
+    act(() => jest.advanceTimersByTime(10_000));
+    const progress = startMedia('source-a');
+    rerender(<PlayMainContent {...props} videoLoadingAttempt={1} />);
+    for (let i = 0; i < 4; i += 1) {
+      act(() => jest.advanceTimersByTime(10_000));
+      progress.lastProgressAt = performance.now();
+    }
+    act(() => jest.advanceTimersByTime(9_750));
+    expect(onLoadingTimeout).not.toHaveBeenCalled();
+    act(() => jest.advanceTimersByTime(250));
+    expect(onLoadingTimeout).toHaveBeenCalledTimes(1);
+    expect(attempt.startedAt).toBe(0);
+  });
+
+  it('回落恢复后关闭页面计时，缓冲不再增长也不换源', () => {
+    const intent = createVodPlaybackIntent();
+    const attempt = getVodSourceAttempt(intent, 'source-a', 'a-id');
+    const onLoadingTimeout = jest.fn(() => false);
+    const props = {
+      ...createBaseProps(),
+      playbackIntentRef: { current: intent },
+      onLoadingTimeout,
+    };
+    const { rerender } = render(<PlayMainContent {...props} />);
+    act(() => jest.advanceTimersByTime(300_000));
+    attempt.startedAt = performance.now();
+    attempt.routeSwitched = true;
+    rerender(
+      <PlayMainContent {...props} isVideoLoading videoLoadingAttempt={1} />,
+    );
+    startMedia('source-a');
+    act(() => jest.advanceTimersByTime(5_000));
+    attempt.startedAt = null;
+    rerender(
+      <PlayMainContent
+        {...props}
+        isVideoLoading={false}
+        videoLoadingAttempt={1}
+      />,
+    );
+    act(() => jest.advanceTimersByTime(120_000));
+    expect(onLoadingTimeout).not.toHaveBeenCalled();
+    expect(attempt.startedAt).toBeNull();
   });
 
   it('加载超时层支持继续尝试', () => {

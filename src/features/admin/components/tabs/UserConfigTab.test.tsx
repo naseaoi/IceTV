@@ -62,7 +62,6 @@ jest.mock('@/components/modals/AlertModal', () => ({
 jest.mock('@/features/admin/hooks/useSourceInsights', () => ({
   useSourceInsights: () => ({
     routeStats: [],
-    capabilities: {},
     health: new Map(),
   }),
 }));

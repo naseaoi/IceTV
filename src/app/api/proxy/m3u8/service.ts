@@ -1,5 +1,3 @@
-import { getAdFilterCacheNamespace } from '@/features/play/lib/ad-filter-strategy-registry';
-import { filterM3U8AdsForSource } from '@/features/play/lib/ad-segment-detector';
 import { resolveVodM3U8ProxyTimeoutMs } from '@/features/play/lib/vodSourcePlaybackPolicy';
 import { getServerCacheBudget } from '@/lib/cache-budget-profile';
 import { getConfigForRead } from '@/lib/config';
@@ -91,7 +89,7 @@ function getM3U8CacheTtl(entry: M3U8CacheEntry) {
 }
 
 function getM3U8CacheKey(url: string, source: string | null): string {
-  return `${getAdFilterCacheNamespace(source)}\0${url}`;
+  return `${source?.trim().toLowerCase() || 'unknown'}\0${url}`;
 }
 
 export function peekM3U8Cache(url: string, source: string | null) {
@@ -284,7 +282,7 @@ async function fetchM3U8Data(
 
   const contentType = response.headers.get('Content-Type') || '';
   const finalUrl = response.url;
-  let content = await readTextLimited(response, MAX_M3U8_BYTES);
+  const content = await readTextLimited(response, MAX_M3U8_BYTES);
   const loadedAt = Date.now();
   assertM3U8Content(content, contentType, {
     route: 'm3u8',
@@ -300,14 +298,6 @@ async function fetchM3U8Data(
     userAction: context.userAction,
     userInitiated: context.userInitiated,
   });
-
-  if (!isLive) {
-    try {
-      content = await filterM3U8AdsForSource(content, finalUrl, ua, source);
-    } catch (error) {
-      console.warn('m3u8 广告段检测失败:', error);
-    }
-  }
 
   return {
     content,

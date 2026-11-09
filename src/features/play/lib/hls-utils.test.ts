@@ -61,7 +61,7 @@ describe('takeProbeSegmentSample', () => {
 
     const result = await getVideoResolutionFromM3u8(
       'https://example.test/single.m3u8',
-      false,
+      { useServerProxy: false, directManifest: false, allowAutoFallback: true },
       'demo',
     );
     const sample = takeProbeSegmentSample(result);
@@ -90,7 +90,7 @@ describe('takeProbeSegmentSample', () => {
 
     const result = await getVideoResolutionFromM3u8(
       'https://example.test/prefix.m3u8',
-      false,
+      { useServerProxy: false, directManifest: false, allowAutoFallback: true },
       'demo',
     );
 
@@ -112,11 +112,6 @@ describe('takeProbeSegmentSample', () => {
       ],
       segmentUrl,
     ],
-    [
-      '相对分片地址',
-      ['#EXTM3U', '#EXTINF:4.000000,', '/segment.ts'],
-      '/segment.ts',
-    ],
   ])('%s不保留样本', async (_label, playlistLines, firstSegment) => {
     const fetchMock = jest
       .fn()
@@ -135,7 +130,7 @@ describe('takeProbeSegmentSample', () => {
 
     const result = await getVideoResolutionFromM3u8(
       'https://example.test/other.m3u8',
-      false,
+      { useServerProxy: false, directManifest: false, allowAutoFallback: true },
       'demo',
     );
 
@@ -231,6 +226,125 @@ describe('getVideoResolutionFromM3u8', () => {
     jest.useRealTimers();
   });
 
+  it.each([false, true])(
+    '直连测速逐层使用重定向最终地址解析相对 URI（master=%s）',
+    async (master) => {
+      const rawUrl = 'https://origin.example/start.m3u8';
+      const mediaUrl = 'https://media.example/final/playlist.m3u8';
+      const fetchMock = jest.fn();
+      if (master) {
+        fetchMock.mockResolvedValueOnce({
+          ...playlistResponse([
+            '#EXTM3U',
+            '#EXT-X-STREAM-INF:BANDWIDTH=800000,RESOLUTION=1280x720',
+            '../variant/index.m3u8',
+          ]),
+          url: 'https://master.example/redirect/root/master.m3u8',
+        });
+      }
+      fetchMock
+        .mockResolvedValueOnce({
+          ...playlistResponse([
+            '#EXTM3U',
+            '#EXTINF:4,',
+            '../segments/first.ts',
+          ]),
+          url: mediaUrl,
+        })
+        .mockResolvedValueOnce(
+          segmentResponse([new Uint8Array(1000)], {
+            'content-range': 'bytes 0-999/1000',
+          }),
+        );
+      global.fetch = fetchMock;
+      const result = await getVideoResolutionFromM3u8(
+        rawUrl,
+        {
+          useServerProxy: false,
+          directManifest: true,
+          allowAutoFallback: false,
+        },
+        'demo',
+      );
+      expect(fetchMock.mock.calls.map(([url]) => url)).toEqual([
+        rawUrl,
+        ...(master
+          ? ['https://master.example/redirect/variant/index.m3u8']
+          : []),
+        'https://media.example/segments/first.ts',
+      ]);
+      expect(takeProbeSegmentSample(result)?.url).toBe(
+        'https://media.example/segments/first.ts',
+      );
+    },
+  );
+
+  it.each(['playlist', 'segment'])(
+    '直连 %s 正文中断后只回落一次代理',
+    async (phase) => {
+      const playlist = playlistResponse(['#EXTM3U', '#EXTINF:4,', 'seg.ts']);
+      const broken = {
+        ok: true,
+        headers: { get: () => null },
+        text: async () => {
+          throw new TypeError('terminated');
+        },
+        body: {
+          getReader: () => ({
+            read: async () => {
+              throw new TypeError('terminated');
+            },
+            cancel: async () => {},
+          }),
+        },
+      };
+      const mock = jest.fn();
+      if (phase === 'segment') mock.mockResolvedValueOnce(playlist);
+      mock
+        .mockResolvedValueOnce(broken)
+        .mockResolvedValueOnce(playlist)
+        .mockResolvedValueOnce(
+          segmentResponse([new Uint8Array(1000)], {
+            'content-range': 'bytes 0-999/1000',
+          }),
+        );
+      global.fetch = mock;
+      await expect(
+        getVideoResolutionFromM3u8(
+          'https://cdn.example/video.m3u8',
+          {
+            useServerProxy: false,
+            directManifest: true,
+            allowAutoFallback: true,
+          },
+          'demo',
+        ),
+      ).resolves.toBeDefined();
+      expect(
+        mock.mock.calls.filter(([url]) =>
+          String(url).includes('forceServer=true'),
+        ),
+      ).toHaveLength(1);
+    },
+  );
+
+  it('显式直连失败只请求源站，不回退代理', async () => {
+    const fetchMock = jest.fn().mockRejectedValue(new Error('CORS blocked'));
+    global.fetch = fetchMock;
+    await expect(
+      getVideoResolutionFromM3u8(
+        'https://origin.example/index.m3u8',
+        {
+          useServerProxy: false,
+          directManifest: true,
+          allowAutoFallback: false,
+        },
+        'demo',
+      ),
+    ).rejects.toThrow('CORS blocked');
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
   it('首分片加载失败时不返回 playlist 分辨率', async () => {
     const fetchMock = jest
       .fn()
@@ -258,7 +372,11 @@ describe('getVideoResolutionFromM3u8', () => {
     await expect(
       getVideoResolutionFromM3u8(
         'https://example.test/index.m3u8',
-        true,
+        {
+          useServerProxy: true,
+          directManifest: false,
+          allowAutoFallback: false,
+        },
         'zuid',
       ),
     ).rejects.toThrow('Failed to load first segment');
@@ -291,7 +409,11 @@ describe('getVideoResolutionFromM3u8', () => {
     await expect(
       getVideoResolutionFromM3u8(
         'https://example.test/index.m3u8',
-        true,
+        {
+          useServerProxy: true,
+          directManifest: false,
+          allowAutoFallback: false,
+        },
         'giri',
       ),
     ).resolves.toMatchObject({
@@ -320,7 +442,11 @@ describe('getVideoResolutionFromM3u8', () => {
     const assertion = expect(
       getVideoResolutionFromM3u8(
         'https://example.test/timeout.m3u8',
-        true,
+        {
+          useServerProxy: true,
+          directManifest: false,
+          allowAutoFallback: false,
+        },
         'giri',
       ),
     ).rejects.toThrow('timed out');
@@ -335,7 +461,11 @@ describe('getVideoResolutionFromM3u8', () => {
     await expect(
       getVideoResolutionFromM3u8(
         'https://example.test/busy.m3u8',
-        false,
+        {
+          useServerProxy: false,
+          directManifest: false,
+          allowAutoFallback: true,
+        },
         'giri',
       ),
     ).rejects.toMatchObject({ name: 'SourceProbeDeferredError' });

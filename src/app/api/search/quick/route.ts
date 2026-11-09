@@ -11,10 +11,6 @@ import {
   type SourceHealthTier,
   SOURCE_HEALTH_TIER_PRIORITY,
 } from '@/lib/source-quality-policy';
-import {
-  getSourceRouteCapabilities,
-  resolveSourceRoute,
-} from '@/lib/source-route-capability.server';
 import type { SearchResult } from '@/lib/types';
 import { yellowWords } from '@/lib/yellow';
 
@@ -59,10 +55,9 @@ export async function GET(request: NextRequest) {
   }
 
   const config = await getConfigForRead();
-  const [availableSites, sourceHealthTiers, capabilities] = await Promise.all([
+  const [availableSites, sourceHealthTiers] = await Promise.all([
     getAvailableApiSites(guardResult.username, config),
     getSourceHealthTiers(),
-    getSourceRouteCapabilities(),
   ]);
   const proxyModes = new Map(
     config.SourceConfig.map((source) => [source.key, source.proxyMode]),
@@ -71,9 +66,7 @@ export async function GET(request: NextRequest) {
     availableSites.map((site) => ({
       ...site,
       healthRank: healthRank(sourceHealthTiers.get(site.key)),
-      relay:
-        resolveSourceRoute(proxyModes.get(site.key), capabilities, site.key) ===
-        'server',
+      relay: proxyModes.get(site.key) === 'server',
     })),
   ).slice(0, QUICK_SOURCE_LIMIT);
   const controller = new AbortController();

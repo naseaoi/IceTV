@@ -103,6 +103,7 @@ import {
   PlayRecordPage,
   SharedCacheRecord,
   SkipConfig,
+  SOURCE_ROUTE_STAT_STORAGE_MODES,
   SourceHealthSearchDaily,
   SourceHealthSearchDelta,
   SourcePlayReporterSummary,
@@ -3433,7 +3434,7 @@ export class LocalSqliteStorage implements IStorage {
   async recordSourceRouteStat(input: SourceRouteStatInput): Promise<void> {
     const source = input.source.trim().slice(0, 191);
     if (!source) return;
-    const routeMode = input.routeMode === 'server' ? 'server' : 'browser';
+    const routeMode = SOURCE_ROUTE_STAT_STORAGE_MODES[input.routeMode];
     const eventAt = Number.isFinite(input.eventAt) ? input.eventAt : Date.now();
     const bucketDate = new Date(eventAt).toISOString().slice(0, 10);
     const successIncrement = input.success ? 1 : 0;
@@ -3477,11 +3478,16 @@ export class LocalSqliteStorage implements IStorage {
 
     return rows
       .filter(
-        (row) => row.route_mode === 'browser' || row.route_mode === 'server',
+        (row) =>
+          row.route_mode === SOURCE_ROUTE_STAT_STORAGE_MODES.browser ||
+          row.route_mode === SOURCE_ROUTE_STAT_STORAGE_MODES.server,
       )
       .map((row) => ({
         source: row.source,
-        routeMode: row.route_mode as SourceRouteStatsItem['routeMode'],
+        routeMode:
+          row.route_mode === SOURCE_ROUTE_STAT_STORAGE_MODES.server
+            ? 'server'
+            : 'browser',
         successCount: Number(row.success_count || 0),
         failureCount: Number(row.failure_count || 0),
       }));
@@ -3504,7 +3510,11 @@ export class LocalSqliteStorage implements IStorage {
 
     return rows
       .filter(
-        (row) => row.route_mode === 'browser' || row.route_mode === 'server',
+        (row) =>
+          row.route_mode === 'browser' ||
+          row.route_mode === 'server' ||
+          row.route_mode === SOURCE_ROUTE_STAT_STORAGE_MODES.browser ||
+          row.route_mode === SOURCE_ROUTE_STAT_STORAGE_MODES.server,
       )
       .map((row) => ({
         source: row.source,

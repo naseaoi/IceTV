@@ -18,6 +18,7 @@ import {
   describeVodStartupState,
   getVodStartupProgress,
 } from '@/features/play/lib/playerLoading';
+import type { VodPlaybackIntent } from '@/features/play/lib/vodPlaybackIntent';
 import {
   resolveVodStartupTimeouts,
   VOD_STARTUP_PROGRESS_POLL_MS,
@@ -68,6 +69,7 @@ interface PlayMainContentProps {
   // 返回 true 表示已切换线路或自动换源，继续显示加载而不进入超时状态
   onLoadingTimeout?: () => boolean | void;
   playbackError?: string | null;
+  playbackIntentRef?: RefObject<VodPlaybackIntent>;
 }
 
 const SOURCE_RECOMMENDATION_AUTO_DISMISS_MS = 5000;
@@ -249,6 +251,7 @@ export function PlayMainContent(props: PlayMainContentProps) {
     onLoadingTimeout,
     realtimeLoadSpeed,
     playbackError,
+    playbackIntentRef,
   } = props;
 
   const [loadingTimedOut, setLoadingTimedOut] = useState(false);
@@ -287,7 +290,7 @@ export function PlayMainContent(props: PlayMainContentProps) {
     }
     setLoadingTimedOut(false);
     setTotalLimitReached(false);
-    // 原生播放与详情、懒解析阶段没有 hls 运行时登记进度，按总上限兜底，避免无限加载。
+    // 无运行时的准备阶段用一个无进展窗口兜底；已登记的源尝试同时受总预算约束。
     const effectStartedAt = performance.now();
     const fallbackProgress = {
       sourceKey: '',
@@ -295,9 +298,17 @@ export function PlayMainContent(props: PlayMainContentProps) {
       lastProgressAt: effectStartedAt,
     };
     let expiredProgress: ReturnType<typeof getVodStartupProgress> = null;
+    const intent = playbackIntentRef?.current;
     const timer = setInterval(() => {
+      if (intent !== playbackIntentRef?.current) return;
       const video = artRef.current?.querySelector('video');
       const runtimeProgress = video ? getVodStartupProgress(video) : null;
+      const attempt = playbackIntentRef?.current.activeSource;
+      const attemptTimeouts = resolveVodStartupTimeouts(
+        attempt?.source || currentSource,
+        runtimeConfig.VOD_PAGE_TIMEOUT_SECONDS,
+        runtimeConfig.VOD_FRAGMENT_TIMEOUT_SECONDS,
+      );
       const progress =
         runtimeProgress &&
         runtimeProgress !== settledStartupProgressRef.current &&
@@ -306,14 +317,16 @@ export function PlayMainContent(props: PlayMainContentProps) {
           ? runtimeProgress
           : fallbackProgress;
       if (progress === expiredProgress) return;
+      const startedAt = attempt?.startedAt ?? progress.startedAt;
+      // 首条线路最多占用总预算减去一个窗口，保证回落仍有完整的无进展窗口。
+      const totalBudget =
+        attemptTimeouts.totalMs -
+        (attempt?.allowAutoFallback && !attempt.routeSwitched
+          ? attemptTimeouts.idleMs
+          : 0);
       const now = performance.now();
-      if (
-        progress === fallbackProgress &&
-        now - progress.startedAt < totalLoadingTimeoutMs
-      )
-        return;
-      const totalLimit = now - progress.startedAt >= totalLoadingTimeoutMs;
-      if (!totalLimit && now - progress.lastProgressAt < loadingTimeoutMs)
+      const totalLimit = now - startedAt >= totalBudget;
+      if (!totalLimit && now - progress.lastProgressAt < attemptTimeouts.idleMs)
         return;
       expiredProgress = progress;
       console.warn('点播起播超时', {
@@ -341,6 +354,9 @@ export function PlayMainContent(props: PlayMainContentProps) {
     playbackError,
     loadingTimeoutMs,
     totalLoadingTimeoutMs,
+    playbackIntentRef,
+    runtimeConfig.VOD_PAGE_TIMEOUT_SECONDS,
+    runtimeConfig.VOD_FRAGMENT_TIMEOUT_SECONDS,
   ]);
 
   useEffect(() => {

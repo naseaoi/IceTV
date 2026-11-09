@@ -1,7 +1,6 @@
 import { fireEvent, render, screen } from '@testing-library/react';
 
-import type { SourceRouteCapability } from '@/lib/source-route-capability.server';
-
+import type { SourceRouteStatsView } from './SortableSourceRow';
 import { SortableSourceRow } from './SortableSourceRow';
 
 jest.mock('@dnd-kit/sortable', () => ({
@@ -32,7 +31,7 @@ describe('SortableSourceRow', () => {
     onDelete = jest.fn(),
     onToggleAdminOnly = jest.fn(),
     proxyMode = source.proxyMode as 'auto' | 'browser' | 'server',
-    routeCapability = null as SourceRouteCapability | null,
+    sourceRouteStats = null as SourceRouteStatsView | null,
   } = {}) {
     render(
       <ul>
@@ -40,8 +39,7 @@ describe('SortableSourceRow', () => {
           source={{ ...source, proxyMode }}
           isSelected={false}
           validationStatus={null}
-          sourceRouteStats={null}
-          routeCapability={routeCapability}
+          sourceRouteStats={sourceRouteStats}
           sourceHealth={null}
           healthDays={7}
           isProxyModeLoading={false}
@@ -113,29 +111,25 @@ describe('SortableSourceRow', () => {
     expect(onChangeProxyMode).toHaveBeenCalledWith('test-source', 'server');
   });
 
-  it('flags auto sources whose segments block direct playback', () => {
+  it('displays route success rates and sample counts', () => {
     renderRow({
-      routeCapability: { direct: 'blocked', reason: 'cors', checkedAt: 1 },
+      sourceRouteStats: {
+        browser: {
+          successCount: 3,
+          failureCount: 1,
+          totalCount: 4,
+          successRate: 0.75,
+        },
+        server: {
+          successCount: 1,
+          failureCount: 0,
+          totalCount: 1,
+          successRate: 1,
+        },
+      },
     });
-    expect(screen.getByText('需中转')).toHaveAttribute(
-      'title',
-      '分片不允许跨域访问',
-    );
-  });
-
-  it('suggests direct playback only for proxied sources', () => {
-    renderRow({
-      proxyMode: 'server',
-      routeCapability: { direct: 'ok', checkedAt: 1 },
-    });
-    expect(screen.getByText('可直连')).toBeInTheDocument();
-  });
-
-  it('hides the hint when the route already matches the capability', () => {
-    renderRow({
-      proxyMode: 'server',
-      routeCapability: { direct: 'blocked', reason: 'cors', checkedAt: 1 },
-    });
-    expect(screen.queryByText('需中转')).toBeNull();
+    expect(
+      screen.getByTitle('7天成功率 · 直连 3/4 · 代理 1/1'),
+    ).toHaveTextContent('直连 75% · 代理 100%');
   });
 });

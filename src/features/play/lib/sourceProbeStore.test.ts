@@ -1,13 +1,16 @@
 import { SourceProbeDeferredError } from '@/features/play/lib/sourceProbeRequestPolicy';
 import {
+  getFreshProbeInfo,
   getOrProbe,
   getSnapshot,
   resetProbes,
   resolveRequestedProbeEpisodeUrl,
+  seedProbeResults,
+  writePlayerInfo,
 } from '@/features/play/lib/sourceProbeStore';
 import { probeVodEpisodeUrl } from '@/features/play/lib/vodProbe';
-import { shouldUseServerProxy } from '@/lib/proxy-modes';
-import { reportSourceRouteStat } from '@/lib/source-route-stats.client';
+import { getSourcePlaybackRoute } from '@/lib/proxy-modes';
+import { reportSourcePlayOutcome } from '@/lib/source-route-stats.client';
 import type { SearchResult } from '@/lib/types';
 
 jest.mock('@/features/play/lib/vodProbe', () => ({
@@ -16,11 +19,15 @@ jest.mock('@/features/play/lib/vodProbe', () => ({
 
 jest.mock('@/lib/proxy-modes', () => ({
   getProxyModes: jest.fn(() => Promise.resolve({})),
-  shouldUseServerProxy: jest.fn(() => false),
+  getSourcePlaybackRoute: jest.fn(() => ({
+    useServerProxy: false,
+    directManifest: false,
+    allowAutoFallback: true,
+  })),
 }));
 
 jest.mock('@/lib/source-route-stats.client', () => ({
-  reportSourceRouteStat: jest.fn(),
+  reportSourcePlayOutcome: jest.fn(),
 }));
 
 function createSearchResult(partial: Partial<SearchResult>): SearchResult {
@@ -42,8 +49,64 @@ describe('sourceProbeStore helpers', () => {
     resetProbes();
     jest.clearAllMocks();
     (
-      shouldUseServerProxy as jest.MockedFunction<typeof shouldUseServerProxy>
-    ).mockReturnValue(false);
+      getSourcePlaybackRoute as jest.MockedFunction<
+        typeof getSourcePlaybackRoute
+      >
+    ).mockReturnValue({
+      useServerProxy: false,
+      directManifest: false,
+      allowAutoFallback: true,
+    });
+  });
+
+  it('预计算结果只补空位并保留最新测量与原始有效期', () => {
+    const now = Date.now();
+    const info = { quality: '1080p', loadSpeed: '1 MB/s', pingTime: 20 };
+    seedProbeResults([['probe', info]], now);
+    const snapshot = getSnapshot();
+    seedProbeResults([['probe', { ...info, hasError: true }]], now + 1);
+    expect(getSnapshot()).toBe(snapshot);
+    expect(getFreshProbeInfo('probe', now + 10 * 60_000 - 1)).toEqual(info);
+    seedProbeResults([['probe', info]], now + 10 * 60_000);
+    expect(getFreshProbeInfo('probe', now + 10 * 60_000)).toBeUndefined();
+    expect(getFreshProbeInfo('missing', now)).toBeUndefined();
+
+    writePlayerInfo('player', info);
+    const timestamp = getSnapshot().get('player')!.ts;
+    seedProbeResults([['player', { ...info, hasError: true }]]);
+    expect(getFreshProbeInfo('player', timestamp)).toEqual(info);
+    expect(
+      getFreshProbeInfo('player', timestamp + 10 * 60_000),
+    ).toBeUndefined();
+  });
+
+  it('进行中和暂缓状态不把旧测量作为新证据', async () => {
+    const info = { quality: '1080p', loadSpeed: '1 MB/s', pingTime: 20 };
+    const source = createSearchResult({
+      episodes: ['https://example.test/video.m3u8'],
+    });
+    seedProbeResults([['source-a-1', info]]);
+    let rejectProbe!: (error: Error) => void;
+    jest.mocked(probeVodEpisodeUrl).mockImplementation(
+      () =>
+        new Promise((_, reject) => {
+          rejectProbe = reject;
+        }),
+    );
+    const task = getOrProbe(source, { force: true });
+    expect(getSnapshot().get('source-a-1')?.source).toBe('queued');
+    expect(getFreshProbeInfo('source-a-1')).toBeUndefined();
+    for (let index = 0; index < 10 && !rejectProbe; index += 1) {
+      await Promise.resolve();
+    }
+    expect(getSnapshot().get('source-a-1')?.source).toBe('pending');
+    expect(getFreshProbeInfo('source-a-1')).toBeUndefined();
+    seedProbeResults([['source-a-1', info]]);
+    expect(getSnapshot().get('source-a-1')?.source).toBe('pending');
+    rejectProbe(new SourceProbeDeferredError(2));
+    await task;
+    expect(getSnapshot().get('source-a-1')?.source).toBe('deferred');
+    expect(getFreshProbeInfo('source-a-1')).toBeUndefined();
   });
 
   it('会返回指定集数对应的测速地址', () => {
@@ -123,12 +186,8 @@ describe('sourceProbeStore helpers', () => {
     expect(maxActiveCount).toBe(2);
     await Promise.all(tasks);
     expect(probeMock).toHaveBeenCalledTimes(6);
-    expect(reportSourceRouteStat).toHaveBeenCalledTimes(6);
-    expect(reportSourceRouteStat).toHaveBeenCalledWith(
-      'source-0',
-      'browser',
-      true,
-    );
+    expect(reportSourcePlayOutcome).toHaveBeenCalledTimes(6);
+    expect(reportSourcePlayOutcome).toHaveBeenCalledWith('source-0', true);
   });
 
   it('繁忙时保留暂缓状态且不污染源站失败统计', async () => {
@@ -142,12 +201,12 @@ describe('sourceProbeStore helpers', () => {
       source: 'deferred',
     });
     expect(getSnapshot().get('source-a-1')?.info.hasError).toBeUndefined();
-    expect(reportSourceRouteStat).not.toHaveBeenCalled();
+    expect(reportSourcePlayOutcome).not.toHaveBeenCalled();
     await getOrProbe(source, { force: true });
     expect(probeMock).toHaveBeenCalledTimes(1);
   });
 
-  it('把检测失败写入源站路由统计', async () => {
+  it('把检测失败写入源健康统计', async () => {
     const probeMock = probeVodEpisodeUrl as jest.MockedFunction<
       typeof probeVodEpisodeUrl
     >;
@@ -161,9 +220,8 @@ describe('sourceProbeStore helpers', () => {
       { force: true },
     );
 
-    expect(reportSourceRouteStat).toHaveBeenCalledWith(
+    expect(reportSourcePlayOutcome).toHaveBeenCalledWith(
       'source-failed',
-      'browser',
       false,
     );
   });
@@ -184,14 +242,10 @@ describe('sourceProbeStore helpers', () => {
       global.fetch = originalFetch;
     }
 
-    expect(reportSourceRouteStat).toHaveBeenCalledWith(
-      'source-empty',
-      'browser',
-      false,
-    );
+    expect(reportSourcePlayOutcome).toHaveBeenCalledWith('source-empty', false);
   });
 
-  it('按最终采用的服务端路由写入检测成功结果', async () => {
+  it('代理检测成功写入源健康结果', async () => {
     const probeMock = probeVodEpisodeUrl as jest.MockedFunction<
       typeof probeVodEpisodeUrl
     >;
@@ -201,8 +255,14 @@ describe('sourceProbeStore helpers', () => {
       pingTime: 20,
     });
     (
-      shouldUseServerProxy as jest.MockedFunction<typeof shouldUseServerProxy>
-    ).mockReturnValue(true);
+      getSourcePlaybackRoute as jest.MockedFunction<
+        typeof getSourcePlaybackRoute
+      >
+    ).mockReturnValue({
+      useServerProxy: true,
+      directManifest: false,
+      allowAutoFallback: false,
+    });
 
     await getOrProbe(
       createSearchResult({
@@ -212,10 +272,6 @@ describe('sourceProbeStore helpers', () => {
       { force: true },
     );
 
-    expect(reportSourceRouteStat).toHaveBeenCalledWith(
-      'source-server',
-      'server',
-      true,
-    );
+    expect(reportSourcePlayOutcome).toHaveBeenCalledWith('source-server', true);
   });
 });

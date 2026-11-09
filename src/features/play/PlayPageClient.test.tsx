@@ -8,7 +8,9 @@ import type {
   updateVideoUrl,
   usePlayInit,
 } from '@/features/play/hooks/usePlayInit';
+import type { usePlayProgress } from '@/features/play/hooks/usePlayProgress';
 import type { useSourceSwitch } from '@/features/play/hooks/useSourceSwitch';
+import { createVodPlaybackIntent } from '@/features/play/lib/vodPlaybackIntent';
 import { PlayPageClient } from '@/features/play/PlayPageClient';
 import { buildLazyEpisodeUrl } from '@/lib/lazy-episodes';
 import type { SearchResult } from '@/lib/types';
@@ -22,6 +24,7 @@ const mockSearchParams = new URLSearchParams(
   'source=giri&id=giri-id&title=测试剧',
 );
 const mockSourceSwitch = {
+  playbackIntentRef: { current: createVodPlaybackIntent() },
   handleSourceChange: jest.fn(),
   handleLoadingTimeout: jest.fn(),
   handlePlaybackRecoveryExhausted: jest.fn(),
@@ -46,6 +49,10 @@ const mockPlayProgress = {
   requestWakeLock: jest.fn(),
   releaseWakeLock: jest.fn(),
 };
+const mockUsePlayProgress = jest.fn<
+  typeof mockPlayProgress,
+  [Parameters<typeof usePlayProgress>[0]]
+>(() => mockPlayProgress);
 const mockPlaybackStatsReporter = {
   startPlaybackStatsSession: jest.fn(),
   reportPlaybackStats: jest.fn(),
@@ -136,7 +143,8 @@ jest.mock('@/features/play/hooks/usePlayInit', () => ({
 }));
 
 jest.mock('@/features/play/hooks/usePlayProgress', () => ({
-  usePlayProgress: () => mockPlayProgress,
+  usePlayProgress: (params: Parameters<typeof usePlayProgress>[0]) =>
+    mockUsePlayProgress(params),
 }));
 
 jest.mock('@/features/play/hooks/useSkipConfig', () => ({
@@ -257,10 +265,39 @@ async function settleLazyEpisode(lazyUrl: string, resolvedUrl: string | null) {
 describe('PlayPageClient', () => {
   beforeEach(() => {
     jest.clearAllMocks();
+    mockSourceSwitch.playbackIntentRef.current = createVodPlaybackIntent();
     mockPendingLazyResolutions.clear();
     mockPeekResolvedLazyEpisodeUrl.mockImplementation(() => null);
     mockGetVodRuntimeSourceUrl.mockImplementation(() => null);
     sessionStorage.clear();
+  });
+
+  it('历史恢复换集回调同步重置意图，换源提交索引不触发通用重置', () => {
+    renderLoadedPage();
+    const restore = lastArg(mockUsePlayProgress);
+    act(() => restore.onRestoreEpisodeChange?.());
+    expect(mockSourceSwitch.resetAutoSourceSwitch).toHaveBeenCalledTimes(1);
+    act(() => latestSourceSwitch().setCurrentEpisodeIndex(1));
+    expect(mockSourceSwitch.resetAutoSourceSwitch).toHaveBeenCalledTimes(1);
+  });
+
+  it('普通详情等待不创建预算，懒解析开始登记源尝试且解析完成保留起点', async () => {
+    const clock = jest.spyOn(performance, 'now').mockReturnValue(0);
+    render(<PlayPageClient />);
+    act(() => latestPlayInit().setDetail(LAZY_DETAIL));
+    expect(mockSourceSwitch.playbackIntentRef.current.activeSource).toBeNull();
+    clock.mockReturnValue(50_000);
+    act(() => latestPlayInit().setLoading(false));
+    const attempt = mockSourceSwitch.playbackIntentRef.current.activeSource;
+    expect(attempt?.source).toBe('giri');
+    expect(attempt?.startedAt).toBe(50_000);
+    clock.mockReturnValue(55_000);
+    await settleLazyEpisode(LAZY_EPISODES[0], 'https://cdn.example/ep1.m3u8');
+    expect(mockSourceSwitch.playbackIntentRef.current.activeSource).toBe(
+      attempt,
+    );
+    expect(attempt?.startedAt).toBe(50_000);
+    clock.mockRestore();
   });
 
   describe('起播放行前不派生播放地址', () => {
@@ -366,6 +403,21 @@ describe('PlayPageClient', () => {
     expect(
       mockSourceSwitch.handleEpisodeUrlResolveFailed,
     ).toHaveBeenCalledTimes(1);
+  });
+
+  it('点击当前集与越界选集保留当前播放意图', () => {
+    renderLoadedPage();
+    const choose = (index: number) =>
+      act(() => lastArg(mockPlayMainContent).onEpisodeChange(index));
+    choose(0);
+    choose(-1);
+    choose(999);
+    expect(mockSourceSwitch.resetAutoSourceSwitch).not.toHaveBeenCalled();
+    mockEpisodeSwitch.handleEpisodeChange.mockImplementationOnce(() => {
+      latestSourceSwitch().currentEpisodeIndexRef.current = 1;
+    });
+    choose(1);
+    expect(mockSourceSwitch.resetAutoSourceSwitch).toHaveBeenCalledTimes(1);
   });
 
   it('重试按当前进度重新拉起，不再按换集清空进度；起播后补显示暂存提示', () => {

@@ -1,7 +1,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
 
-import { stripAdSegmentsByPhysicalSignal } from '@/features/play/lib/ad-segment-detector';
+import { filterM3U8AdsForSource } from '@/features/play/lib/ad-segment-detector';
 
 const ORIGIN = 'https://cdn.ryplay.example/rycj/episode-8/2000k/hls/index.m3u8';
 
@@ -28,7 +28,7 @@ function sumExtinfDurations(content: string): number {
 describe('ad-segment-detector rycj 源站样本回归', () => {
   test('删除等长广告并保留全部正片和片尾分片', async () => {
     const m3u8 = fs.readFileSync(fixturePath('rycj-episode-8.m3u8'), 'utf8');
-    const result = await stripAdSegmentsByPhysicalSignal(m3u8, ORIGIN, 'ua');
+    const result = await filterM3U8AdsForSource(m3u8, ORIGIN, 'rycj');
 
     expect(m3u8.match(/ad_\d+\.ts/g)).toHaveLength(5);
     expect(result).not.toMatch(/ad_\d+\.ts/);
@@ -50,10 +50,10 @@ describe('ad-segment-detector rycj 源站样本回归', () => {
 
   test('删除片尾 25fps 网格广告并保留最后一段正片', async () => {
     const m3u8 = fs.readFileSync(fixturePath('rycj-episode-12.m3u8'), 'utf8');
-    const result = await stripAdSegmentsByPhysicalSignal(
+    const result = await filterM3U8AdsForSource(
       m3u8,
       ORIGIN.replace('episode-8', 'episode-12'),
-      'ua',
+      'rycj',
     );
 
     expect(m3u8.match(/tail_ad_\d+\.ts/g)).toHaveLength(3);

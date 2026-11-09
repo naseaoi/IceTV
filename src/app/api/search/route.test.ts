@@ -28,10 +28,6 @@ jest.mock('@/lib/config', () => ({
 jest.mock('@/lib/source-health.server', () => ({
   getSourceHealthTiers: jest.fn(),
 }));
-jest.mock('@/lib/source-route-capability.server', () => ({
-  getSourceRouteCapabilities: jest.fn().mockResolvedValue({}),
-  resolveSourceRoute: () => 'auto',
-}));
 jest.mock('@/lib/search-aggregate', () => ({
   runSearchAggregation: jest.fn(),
 }));

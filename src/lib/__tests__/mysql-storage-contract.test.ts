@@ -17,7 +17,7 @@ type SearchHistoryRow = {
 
 type SourceRouteStatsRow = {
   source: string;
-  routeMode: 'browser' | 'server';
+  routeMode: 'browser' | 'server' | 'browser-v2' | 'server-v2';
   bucketDate: string;
   successCount: number;
   failureCount: number;
@@ -1037,7 +1037,7 @@ function createFakePool() {
         updatedAt,
       ] = params as [
         string,
-        'browser' | 'server',
+        SourceRouteStatsRow['routeMode'],
         string,
         number,
         number,
@@ -2040,7 +2040,7 @@ function createFakePool() {
         string,
         {
           source: string;
-          route_mode: 'browser' | 'server';
+          route_mode: SourceRouteStatsRow['routeMode'];
           success_count: number;
           failure_count: number;
         }
@@ -3128,6 +3128,56 @@ describe('mysql storage contract', () => {
       true,
     );
     await expect(storage.registerUser('alice_user', 'other')).rejects.toThrow();
+  });
+
+  it('isolates current route semantics while retaining and purging both versions', async () => {
+    const storage = new MySqlStorage('mysql://demo:demo@localhost:3306/icetv');
+    await storage.recordSourceRouteStat({
+      source: 'versioned',
+      routeMode: 'browser',
+      success: true,
+      eventAt: Date.UTC(2026, 0, 8),
+    });
+    await storage.recordSourceRouteStat({
+      source: 'versioned',
+      routeMode: 'server',
+      success: false,
+      eventAt: Date.UTC(2026, 0, 8),
+    });
+    for (const mode of ['browser', 'server']) {
+      await fakePool.execute(
+        'INSERT INTO source_route_stats (source, route_mode, bucket_date, success_count, failure_count, updated_at) VALUES (?, ?, ?, ?, ?, ?) ON DUPLICATE KEY UPDATE success_count = success_count + VALUES(success_count)',
+        ['versioned', mode, '2026-01-08', 99, 99, 1],
+      );
+    }
+    expect(await storage.getSourceRouteStats('2026-01-01')).toEqual(
+      expect.arrayContaining([
+        {
+          source: 'versioned',
+          routeMode: 'browser',
+          successCount: 1,
+          failureCount: 0,
+        },
+        {
+          source: 'versioned',
+          routeMode: 'server',
+          successCount: 0,
+          failureCount: 1,
+        },
+      ]),
+    );
+    expect(await storage.getSourceRouteStats('2026-01-01')).toHaveLength(2);
+    expect(
+      (await storage.getAllSourceRouteStatBuckets()).map(
+        (row) => row.routeMode,
+      ),
+    ).toEqual(
+      expect.arrayContaining(['browser', 'server', 'browser-v2', 'server-v2']),
+    );
+    await storage.purgeSourceRouteStatsBefore('2026-01-08');
+    expect(await storage.getAllSourceRouteStatBuckets()).toHaveLength(4);
+    await storage.purgeSourceRouteStatsBefore('2026-01-09');
+    expect(await storage.getAllSourceRouteStatBuckets()).toEqual([]);
   });
 
   it('aggregates source route stats by date and mode', async () => {

@@ -2,15 +2,13 @@ import { NextRequest, NextResponse } from 'next/server';
 
 import { isGuardFailure, requireActiveUser } from '@/lib/api-auth';
 import { getAvailableApiSites, getConfigForRead } from '@/lib/config';
-import { DEFAULT_SOURCE_PROXY_MODE } from '@/lib/proxy-modes';
 import {
-  getSourceRouteCapabilities,
-  resolveSourceRoute,
-} from '@/lib/source-route-capability.server';
+  type SourceProxyMode,
+  DEFAULT_SOURCE_PROXY_MODE,
+} from '@/lib/proxy-modes';
 
 export const runtime = 'nodejs';
 
-// 返回各源实际采用的线路：「自动」源已检测出浏览器无法直连时直接给「代理」，客户端不再先直连失败一轮
 export async function GET(request: NextRequest) {
   try {
     const guardResult = await requireActiveUser(request);
@@ -22,14 +20,10 @@ export async function GET(request: NextRequest) {
         (source) => source.key,
       ),
     );
-    const capabilities = await getSourceRouteCapabilities();
-    const modes: Record<string, string> = {};
+    const modes: Record<string, SourceProxyMode> = {};
     for (const s of config.SourceConfig) {
       if (!availableSources.has(s.key)) continue;
-      const route = resolveSourceRoute(s.proxyMode, capabilities, s.key);
-      if (s.proxyMode || route !== DEFAULT_SOURCE_PROXY_MODE) {
-        modes[s.key] = route;
-      }
+      modes[s.key] = s.proxyMode || DEFAULT_SOURCE_PROXY_MODE;
     }
     return NextResponse.json(modes, {
       headers: { 'Cache-Control': 'no-store' },

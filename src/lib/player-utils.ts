@@ -347,6 +347,8 @@ export type HlsFatalRecoveryController = {
   // 返回 true 表示这次加载算作网络已恢复，调用方的线路失败计数也按它清零
   handleFragmentLoaded: (fragment?: HlsFragmentRef) => boolean;
   handlePlaybackProgress: (currentTime: number) => void;
+  recordNetworkFailure: (fragment?: HlsFragmentRef) => void;
+  cancelPendingRetry: () => void;
   reset: () => void;
   dispose: () => void;
 };
@@ -466,6 +468,10 @@ export function createHlsFatalRecoveryController(): HlsFatalRecoveryController {
         failedFragment = null;
       }
     },
+    recordNetworkFailure(fragment) {
+      failedFragment = resolveFragmentPosition(fragment) ?? failedFragment;
+    },
+    cancelPendingRetry: clearNetworkRetryTimer,
     reset,
     dispose() {
       disposed = true;

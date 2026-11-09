@@ -1,4 +1,4 @@
-import { shouldFilterAdsOnClient } from '@/features/play/lib/ad-filter-strategy-registry';
+import { filterM3U8AdsForSource } from '@/features/play/lib/ad-segment-detector';
 import {
   type FragmentMemoryCache,
   type FragmentMemoryEntry,
@@ -8,14 +8,13 @@ import {
   isCacheableFragmentUrl,
 } from '@/features/play/lib/fragmentMemoryCache';
 import { resolveLazyEpisodeUrl } from '@/features/play/lib/lazyEpisode';
-import { filterAdsFromM3U8 } from '@/features/play/lib/playUtils';
 import {
   buildVodProxyUrl,
   isVodM3u8Url,
 } from '@/features/play/lib/vodProxyUrl';
 import { createTimedAbortController } from '@/lib/downstream-sources/shared';
 import { getManagedVideo } from '@/lib/player-runtime';
-import { isServerProxy } from '@/lib/proxy-modes';
+import { resolveSourcePlaybackRoute } from '@/lib/proxy-modes';
 
 export const NEXT_EPISODE_PRELOAD_LIMITS = {
   remainingSeconds: 60,
@@ -327,10 +326,12 @@ export async function preloadEpisodeFragments(
   );
   if (signal.aborted || !isVodM3u8Url(resolvedUrl)) return 0;
 
+  const route = await resolveSourcePlaybackRoute(sourceKey, resolvedUrl);
+  if (signal.aborted) return 0;
   const manifestUrl = new URL(
     buildVodProxyUrl({
       rawUrl: resolvedUrl,
-      useServerProxy: isServerProxy(sourceKey, resolvedUrl),
+      ...route,
       sourceKey,
       playbackRequestMode: 'episode',
     }),
@@ -350,7 +351,7 @@ export async function preloadEpisodeFragments(
   if (!playlist || signal.aborted) return 0;
 
   const mediaText = options.filterAds
-    ? filterAdsFromM3U8(playlist.text)
+    ? filterM3U8AdsForSource(playlist.text, playlist.url, sourceKey)
     : playlist.text;
   const segmentUrls = selectPreloadSegmentUrls(
     mediaText,
@@ -476,9 +477,7 @@ function checkPreloadSession(session: PreloadSession): void {
     episodeUrl: options.nextEpisodeUrl,
     targetBitrate: getHlsLevelBitrate(hls),
     startOffsetSeconds: skip && skip.intro_time > 0 ? skip.intro_time : 0,
-    filterAds:
-      options.blockAdEnabledRef.current &&
-      shouldFilterAdsOnClient(options.sourceKey),
+    filterAds: options.blockAdEnabledRef.current,
     signal: controller.signal,
   })
     .catch(() => 0)

@@ -1,23 +1,5 @@
-﻿/**
- * 广告段识别纯函数的单测。
- * 覆盖本地强信号（EXTINF 整数规律、Host 异常）与兜底短路路径。
- * 网络相关的码率兜底路径不在此测试范围内（需 fetch stub）。
- */
-import {
-  filterM3U8AdsForSource,
-  shouldRunAdDetection,
-  stripAdSegmentsByPhysicalSignal,
-} from '@/features/play/lib/ad-segment-detector';
-
-describe('shouldRunAdDetection', () => {
-  test('仅对 rycj 源站启用', () => {
-    expect(shouldRunAdDetection('rycj')).toBe(true);
-    expect(shouldRunAdDetection('ikun')).toBe(false);
-    expect(shouldRunAdDetection('other')).toBe(false);
-    expect(shouldRunAdDetection(null)).toBe(false);
-    expect(shouldRunAdDetection('')).toBe(false);
-  });
-});
+import { filterM3U8AdsForSource } from '@/features/play/lib/ad-segment-detector';
+import { filterAdsFromM3U8 } from '@/features/play/lib/playUtils';
 
 describe('filterM3U8AdsForSource', () => {
   test('不同源站策略相互隔离', async () => {
@@ -36,23 +18,21 @@ describe('filterM3U8AdsForSource', () => {
       filterM3U8AdsForSource(
         m3u8,
         'https://cdn.example.com/index.m3u8',
-        'ua',
         'rycj',
       ),
       filterM3U8AdsForSource(
         m3u8,
         'https://cdn.example.com/index.m3u8',
-        'ua',
         'other',
       ),
     ]);
 
     expect(rycjResult).not.toContain('#EXT-X-DISCONTINUITY');
-    expect(otherResult).toBe(m3u8);
+    expect(otherResult).toBe(filterAdsFromM3U8(m3u8));
   });
 });
 
-describe('stripAdSegmentsByPhysicalSignal', () => {
+describe('filterM3U8AdsForSource', () => {
   test('不含 DISCONTINUITY 时原样返回', async () => {
     const m3u8 = [
       '#EXTM3U',
@@ -61,10 +41,10 @@ describe('stripAdSegmentsByPhysicalSignal', () => {
       'a.ts',
       '#EXT-X-ENDLIST',
     ].join('\n');
-    const result = await stripAdSegmentsByPhysicalSignal(
+    const result = await filterM3U8AdsForSource(
       m3u8,
       'https://cdn.example.com/x/index.m3u8',
-      'ua',
+      'rycj',
     );
     expect(result).toBe(m3u8);
   });
@@ -80,10 +60,10 @@ describe('stripAdSegmentsByPhysicalSignal', () => {
       'b.ts',
       '#EXT-X-ENDLIST',
     ].join('\n');
-    const result = await stripAdSegmentsByPhysicalSignal(
+    const result = await filterM3U8AdsForSource(
       m3u8,
       'https://cdn.example.com/x/index.m3u8',
-      'ua',
+      'rycj',
     );
     expect(result).toBe(m3u8);
   });
@@ -129,10 +109,10 @@ describe('stripAdSegmentsByPhysicalSignal', () => {
     lines.push('#EXT-X-ENDLIST');
     const m3u8 = lines.join('\n');
 
-    const result = await stripAdSegmentsByPhysicalSignal(
+    const result = await filterM3U8AdsForSource(
       m3u8,
       'https://cdn.example.com/x/index.m3u8',
-      'ua',
+      'rycj',
     );
     // 广告 ts 全部被剔除
     expect(result).not.toMatch(/ad_\d+\.ts/);
@@ -156,10 +136,10 @@ describe('stripAdSegmentsByPhysicalSignal', () => {
     lines.push('#EXT-X-ENDLIST');
     const m3u8 = lines.join('\n');
 
-    const result = await stripAdSegmentsByPhysicalSignal(
+    const result = await filterM3U8AdsForSource(
       m3u8,
       'https://cdn.example.com/x/index.m3u8',
-      'ua',
+      'rycj',
     );
 
     expect(result).not.toMatch(/coarse_ad_\d+\.ts/);
@@ -203,10 +183,10 @@ describe('stripAdSegmentsByPhysicalSignal', () => {
     });
     lines.push('#EXT-X-ENDLIST');
 
-    const result = await stripAdSegmentsByPhysicalSignal(
+    const result = await filterM3U8AdsForSource(
       lines.join('\n'),
       'https://cdn.example.com/x/index.m3u8',
-      'ua',
+      'rycj',
     );
 
     expect(result).not.toMatch(/camouflaged_ad_\d+\.ts/);
@@ -234,10 +214,10 @@ describe('stripAdSegmentsByPhysicalSignal', () => {
     });
     lines.push('#EXT-X-ENDLIST');
 
-    const result = await stripAdSegmentsByPhysicalSignal(
+    const result = await filterM3U8AdsForSource(
       lines.join('\n'),
       'https://cdn.example.com/x/index.m3u8',
-      'ua',
+      'rycj',
     );
 
     expect(result).not.toContain('#EXT-X-DISCONTINUITY');
@@ -259,10 +239,10 @@ describe('stripAdSegmentsByPhysicalSignal', () => {
     lines.push('#EXT-X-ENDLIST');
     const m3u8 = lines.join('\n');
 
-    const result = await stripAdSegmentsByPhysicalSignal(
+    const result = await filterM3U8AdsForSource(
       m3u8,
       'https://cdn.example.com/x/index.m3u8',
-      'ua',
+      'rycj',
     );
 
     expect(result).not.toMatch(/duration_ad_\d+\.ts/);
@@ -283,10 +263,10 @@ describe('stripAdSegmentsByPhysicalSignal', () => {
     lines.push('#EXT-X-ENDLIST');
     const m3u8 = lines.join('\n');
 
-    const result = await stripAdSegmentsByPhysicalSignal(
+    const result = await filterM3U8AdsForSource(
       m3u8,
       'https://cdn.example.com/x/index.m3u8',
-      'ua',
+      'rycj',
     );
 
     expect(result).toContain('normal_4_4.ts');
@@ -308,10 +288,10 @@ describe('stripAdSegmentsByPhysicalSignal', () => {
     lines.push('#EXTINF:2.333333,', 'tail_ad_1.ts');
     lines.push('#EXT-X-ENDLIST');
 
-    const result = await stripAdSegmentsByPhysicalSignal(
+    const result = await filterM3U8AdsForSource(
       lines.join('\n'),
       'https://cdn.example.com/x/index.m3u8',
-      'ua',
+      'rycj',
     );
 
     expect(result).not.toContain('tail_ad_0.ts');
@@ -333,10 +313,10 @@ describe('stripAdSegmentsByPhysicalSignal', () => {
     lines.push('#EXTINF:1.126200,', 'tail_content.ts');
     lines.push('#EXT-X-ENDLIST');
 
-    const result = await stripAdSegmentsByPhysicalSignal(
+    const result = await filterM3U8AdsForSource(
       lines.join('\n'),
       'https://cdn.example.com/x/index.m3u8',
-      'ua',
+      'rycj',
     );
 
     expect(result).toContain('tail_content.ts');
@@ -365,23 +345,23 @@ describe('stripAdSegmentsByPhysicalSignal', () => {
   }
 
   test('片尾 23.976fps 整秒附近正片块不被当成网格广告', async () => {
-    const result = await stripAdSegmentsByPhysicalSignal(
+    const result = await filterM3U8AdsForSource(
       buildPeriodicPlaylist(
         [4.170833, 3.628622, 5.130122, 4.504, 3.378],
         [4.004, 3.003, 2.002],
       ),
       'https://cdn.example.com/x/index.m3u8',
-      'ua',
+      'rycj',
     );
 
     expect(result).toMatch(/tail_0\.ts[\s\S]*tail_2\.ts/);
   });
 
   test('正片本身是 25fps 网格时不按网格删除片尾块', async () => {
-    const result = await stripAdSegmentsByPhysicalSignal(
+    const result = await filterM3U8AdsForSource(
       buildPeriodicPlaylist([4.2, 3.84, 5.08, 4.36, 2.96], [4, 5.48, 2.68]),
       'https://cdn.example.com/x/index.m3u8',
-      'ua',
+      'rycj',
     );
 
     expect(result).toMatch(/tail_0\.ts[\s\S]*tail_2\.ts/);
@@ -404,10 +384,10 @@ describe('stripAdSegmentsByPhysicalSignal', () => {
     }
     lines.push('#EXT-X-ENDLIST');
 
-    const result = await stripAdSegmentsByPhysicalSignal(
+    const result = await filterM3U8AdsForSource(
       lines.join('\n'),
       'https://cdn.example.com/x/index.m3u8',
-      'ua',
+      'rycj',
     );
 
     expect(result).not.toMatch(/ad_\d+\.ts/);
@@ -429,10 +409,10 @@ describe('stripAdSegmentsByPhysicalSignal', () => {
     lines.push('#EXT-X-ENDLIST');
     const m3u8 = lines.join('\n');
 
-    const result = await stripAdSegmentsByPhysicalSignal(
+    const result = await filterM3U8AdsForSource(
       m3u8,
       'https://cdn.example.com/x/index.m3u8',
-      'ua',
+      'rycj',
     );
     expect(result).toBe(m3u8);
   });
@@ -459,14 +439,56 @@ describe('stripAdSegmentsByPhysicalSignal', () => {
     lines.push('#EXT-X-ENDLIST');
     const m3u8 = lines.join('\n');
 
-    const result = await stripAdSegmentsByPhysicalSignal(
+    const result = await filterM3U8AdsForSource(
       m3u8,
       'https://cdn.main.com/x/index.m3u8',
-      'ua',
+      'rycj',
     );
     expect(result).not.toMatch(/ads\.evil-cdn\.net/);
     expect(result).toMatch(/normal_0_0\.ts/);
   });
+
+  test.each(['raw', 'absolute', 'proxy-relative', 'proxy-absolute'])(
+    'Host 信号在 %s 地址下保留相同正片与边界',
+    (mode) => {
+      const finalUrl = 'https://final.example/show/level/index.m3u8';
+      const proxy = (uri: string) =>
+        `${mode === 'proxy-absolute' ? 'https://icetv.example' : ''}/api/proxy/segment?url=${encodeURIComponent(uri)}&signature=test`;
+      const convert = (uri: string) => {
+        if (mode === 'raw') return uri;
+        const absolute = new URL(uri, finalUrl).href;
+        return mode === 'absolute' ? absolute : proxy(absolute);
+      };
+      const lines = ['#EXTM3U'];
+      for (let block = 0; block < 5; block++) {
+        lines.push('#EXT-X-DISCONTINUITY');
+        for (let fragment = 0; fragment < 3; fragment++) {
+          lines.push(`#EXTINF:${4.173 + fragment * 0.113},`);
+          const uri =
+            block === 2
+              ? `https://other.example/clip-${fragment}.ts`
+              : `../media/${block}-${fragment}.ts`;
+          lines.push(convert(uri));
+        }
+      }
+      lines.push('#EXT-X-ENDLIST');
+      const text = lines.join('\n');
+      const manifestUrl = mode.startsWith('proxy')
+        ? `/api/proxy/m3u8?url=${encodeURIComponent(finalUrl)}`
+        : finalUrl;
+      const result = filterM3U8AdsForSource(text, manifestUrl, 'rycj');
+      for (let fragment = 0; fragment < 3; fragment++) {
+        expect(result).not.toContain(
+          convert(`https://other.example/clip-${fragment}.ts`),
+        );
+        for (const block of [0, 1, 3, 4]) {
+          expect(result).toContain(convert(`../media/${block}-${fragment}.ts`));
+        }
+      }
+      expect(result.match(/#EXTINF:/g)).toHaveLength(12);
+      expect(result.match(/#EXT-X-DISCONTINUITY/g)).toHaveLength(4);
+    },
+  );
 
   test('段内只有 1 个绝对 URL 时不足以判广告', async () => {
     // 保守策略：段内至少 2 个绝对 URL TS 才启用 host 异常识别
@@ -484,10 +506,10 @@ describe('stripAdSegmentsByPhysicalSignal', () => {
     lines.push('#EXT-X-ENDLIST');
     const m3u8 = lines.join('\n');
 
-    const result = await stripAdSegmentsByPhysicalSignal(
+    const result = await filterM3U8AdsForSource(
       m3u8,
       'https://cdn.main.com/x/index.m3u8',
-      'ua',
+      'rycj',
     );
     expect(result).toMatch(/only_one\.ts/);
   });
@@ -505,10 +527,10 @@ describe('stripAdSegmentsByPhysicalSignal', () => {
     });
     lines.push('#EXT-X-ENDLIST');
     const m3u8 = lines.join('\n');
-    const result = await stripAdSegmentsByPhysicalSignal(
+    const result = await filterM3U8AdsForSource(
       m3u8,
       'https://cdn.example.com/x/index.m3u8',
-      'ua',
+      'rycj',
     );
     expect(result).toBe(m3u8);
   });

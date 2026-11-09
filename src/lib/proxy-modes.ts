@@ -16,7 +16,11 @@ export const DEFAULT_SOURCE_PROXY_MODE: SourceProxyMode = 'auto';
 type ProxyOverrideMap = Record<string, { mode: 'server'; at: number }>;
 
 function isStorageAvailable(): boolean {
-  return typeof window !== 'undefined' && !!window.sessionStorage;
+  try {
+    return typeof window !== 'undefined' && !!window.sessionStorage;
+  } catch {
+    return false;
+  }
 }
 
 function readOverrides(): ProxyOverrideMap {
@@ -49,7 +53,7 @@ function getRouteOverrideKey(sourceKey: string, rawUrl?: string): string {
   if (!rawUrl) return sourceKey;
   try {
     const url = new URL(rawUrl);
-    return `${sourceKey}::${url.origin}${url.pathname}`;
+    return `${sourceKey}::${url.host}`;
   } catch {
     return `${sourceKey}::${rawUrl}`;
   }
@@ -137,18 +141,7 @@ export function shouldUseServerProxy(
   rawUrl?: string,
   modes?: Record<string, string>,
 ): boolean {
-  dropLegacySourceOverride(sourceKey, rawUrl);
-  const configuredMode = getConfiguredProxyMode(sourceKey, modes);
-  if (configuredMode === 'server') {
-    return true;
-  }
-  if (configuredMode === 'browser') {
-    return false;
-  }
-  if (getRuntimeProxyOverride(sourceKey, rawUrl) === 'server') {
-    return true;
-  }
-  return false;
+  return getSourcePlaybackRoute(sourceKey, rawUrl, modes).useServerProxy;
 }
 
 export function isServerProxy(sourceKey: string, rawUrl?: string): boolean {
@@ -164,7 +157,27 @@ export function shouldAutoFallbackToServer(
 
 export interface SourcePlaybackRoute {
   useServerProxy: boolean;
+  directManifest: boolean;
   allowAutoFallback: boolean;
+}
+
+// 同步入口使用已取得的模式快照；异步入口先等待配置，再复用同一解析规则。
+export function getSourcePlaybackRoute(
+  sourceKey: string,
+  rawUrl?: string,
+  modes?: Record<string, string>,
+): SourcePlaybackRoute {
+  dropLegacySourceOverride(sourceKey, rawUrl);
+  const mode = getConfiguredProxyMode(sourceKey, modes);
+  const useServerProxy =
+    mode === 'server' ||
+    (mode === 'auto' &&
+      getRuntimeProxyOverride(sourceKey, rawUrl) === 'server');
+  return {
+    useServerProxy,
+    directManifest: !useServerProxy,
+    allowAutoFallback: mode === 'auto',
+  };
 }
 
 export async function resolveSourcePlaybackRoute(
@@ -172,10 +185,7 @@ export async function resolveSourcePlaybackRoute(
   rawUrl: string,
 ): Promise<SourcePlaybackRoute> {
   const modes = await getProxyModes();
-  return {
-    useServerProxy: shouldUseServerProxy(sourceKey, rawUrl, modes),
-    allowAutoFallback: shouldAutoFallbackToServer(sourceKey, modes),
-  };
+  return getSourcePlaybackRoute(sourceKey, rawUrl, modes);
 }
 
 export function rememberSourceServerProxy(

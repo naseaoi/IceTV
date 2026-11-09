@@ -3,7 +3,6 @@ import type { NextRequest } from 'next/server';
 import { getServerCacheBudget } from '@/lib/cache-budget-profile';
 import { appendProxySignature } from '@/lib/proxy-auth';
 import { createSwrCache } from '@/lib/server-cache';
-import { isSourceCorsCapable } from '@/lib/source-capability';
 import { getBaseUrl, resolveUrl } from '@/lib/url-resolve';
 
 export type M3U8RewriteEntry = {
@@ -136,9 +135,7 @@ async function rewriteM3U8Content(
   const requestSearchParams = new URL(req.url).searchParams;
   const switchAction = requestSearchParams.get('icetv-switch');
   const userSwitch = requestSearchParams.get('icetv-user-switch');
-  const corsCapable =
-    !isLive && source ? isSourceCorsCapable(source) === true : false;
-  const effectiveAllowCors = !forceServer && (allowCORS || corsCapable);
+  const effectiveAllowCors = !forceServer && allowCORS;
   const nestedPlaylistRoute: Record<string, string> = forceServer
     ? { forceServer: 'true' }
     : allowCORS

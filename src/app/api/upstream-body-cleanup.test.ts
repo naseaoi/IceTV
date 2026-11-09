@@ -47,10 +47,6 @@ jest.mock('@/lib/config-subscription', () => ({
   decodeConfigSubscriptionContent: jest.fn(),
   readConfigSubscriptionText: jest.fn(),
 }));
-jest.mock('@/lib/source-capability', () => ({
-  markSourceCors: jest.fn(),
-  responseAllowsCors: jest.fn(),
-}));
 jest.mock('@/lib/server-proxy-guard', () => ({
   recordServerProxyFailure: jest.fn(),
   requireServerProxyQuota: () => null,

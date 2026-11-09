@@ -1,17 +1,14 @@
 import type { PlaybackRequestMode } from '@/features/play/hooks/usePlayPageState';
 import { PLAYBACK_STALL_CONFIRMATION_DELAY_MS } from '@/features/play/lib/playbackStallRecovery';
 import { getVodStartupProgress } from '@/features/play/lib/playerLoading';
-import { AUTO_ROUTE_PROXY_COOLDOWN_MS } from '@/features/play/lib/vodAutoRoutePolicy';
 import {
   createVodM3u8Loader,
   getVodRuntimeSourceUrl,
   pauseIfVodRuntimeReleased,
   registerVodNativeRuntime,
 } from '@/features/play/lib/vodHlsRuntime';
-import {
-  buildVodProxyUrl,
-  buildVodSegmentProxyUrl,
-} from '@/features/play/lib/vodProxyUrl';
+import { createVodPlaybackIntent } from '@/features/play/lib/vodPlaybackIntent';
+import { buildVodProxyUrl } from '@/features/play/lib/vodProxyUrl';
 import { getManagedVideo, runManagedVideoCleanup } from '@/lib/player-runtime';
 import {
   HLS_FATAL_MEDIA_RECOVERY_LIMIT,
@@ -27,8 +24,11 @@ const mockReportSourceRouteStat = jest.fn();
 jest.mock('@/lib/proxy-modes', () => ({
   clearSourceProxyOverride: (...args: unknown[]) =>
     mockClearSourceProxyOverride(...args),
-  isServerProxy: (sourceKey: string, rawUrl?: string) =>
-    mockIsServerProxy(sourceKey, rawUrl),
+  getSourcePlaybackRoute: (sourceKey: string, rawUrl?: string) => ({
+    useServerProxy: mockIsServerProxy(sourceKey, rawUrl),
+    directManifest: false,
+    allowAutoFallback: mockShouldAutoFallbackToServer(sourceKey),
+  }),
   rememberSourceServerProxy: jest.fn(),
   shouldAutoFallbackToServer: (sourceKey: string) =>
     mockShouldAutoFallbackToServer(sourceKey),
@@ -163,12 +163,6 @@ function fatalFragError(sn: number) {
   };
 }
 
-async function flushMicrotasks() {
-  for (let i = 0; i < 20; i += 1) {
-    await Promise.resolve();
-  }
-}
-
 const NATIVE_URL = 'https://cdn.example/movie.mp4';
 
 const createdVideos: HTMLVideoElement[] = [];
@@ -232,6 +226,7 @@ describe('vodHlsRuntime 运行时释放', () => {
     FakeHls.created = 0;
     mockIsServerProxy.mockReset().mockReturnValue(false);
     mockShouldAutoFallbackToServer.mockReset().mockReturnValue(true);
+    jest.requireMock('@/lib/proxy-modes').rememberSourceServerProxy.mockClear();
     mockClearSourceProxyOverride.mockReset();
     mockReportSourceRouteStat.mockReset();
     jest.spyOn(console, 'error').mockImplementation(() => undefined);
@@ -305,7 +300,7 @@ describe('vodHlsRuntime 运行时释放', () => {
     expect(getVodStartupProgress(video)).toBeNull();
   });
 
-  it('服务端回落重新计时并保留续播初始加载位置', () => {
+  it('服务端回落共用总预算并保留续播初始加载位置', () => {
     let now = 0;
     jest.spyOn(performance, 'now').mockImplementation(() => now);
     const { load, options } = setupRuntime();
@@ -319,9 +314,85 @@ describe('vodHlsRuntime 运行时释放', () => {
       true,
     );
     expect(getVodStartupProgress(video)).not.toBe(first);
-    expect(getVodStartupProgress(video)?.startedAt).toBe(15_000);
+    expect(getVodStartupProgress(video)?.startedAt).toBe(first?.startedAt);
     expect(getFakeHls(video).config.startPosition).toBe(1064);
     expect(getFakeHls(video).startLoad).not.toHaveBeenCalled();
+  });
+
+  it('播放中 HLS 回落进入页面加载等待并以新的恢复起点计时', () => {
+    const { options, setIsVideoLoading } = setupRuntime();
+    options.playbackIntentRef = { current: createVodPlaybackIntent() };
+    const now = jest.spyOn(performance, 'now').mockReturnValue(0);
+    const video = createVideo();
+    createVodM3u8Loader(options)(video, EPISODE_1);
+    video.dispatchEvent(new Event('playing'));
+    now.mockReturnValue(300_000);
+    getFakeHls(video).emit(FakeHls.Events.ERROR, FATAL_MANIFEST_ERROR);
+    expect(setIsVideoLoading).toHaveBeenLastCalledWith(true);
+    expect(options.onSourceProxyFallbackStarted).toHaveBeenCalledTimes(1);
+    expect(getVodStartupProgress(video)?.startedAt).toBe(300_000);
+    video.dispatchEvent(new Event('playing'));
+    expect(
+      options.playbackIntentRef.current.activeSource?.startedAt,
+    ).toBeNull();
+  });
+
+  it('原生运行时重新登记时释放旧回落入口与进度监听', () => {
+    const video = createVideo();
+    registerVodNativeRuntime(video, NATIVE_URL);
+    const oldProgress = getVodStartupProgress(video)!;
+    getManagedVideo(video).__icetvSwitchToServerProxy = jest.fn(() => true);
+    registerVodNativeRuntime(video, `${NATIVE_URL}?next=1`);
+    expect(getManagedVideo(video).__icetvSwitchToServerProxy).toBeNull();
+    const now = jest.spyOn(performance, 'now').mockReturnValue(300_000);
+    video.dispatchEvent(new Event('loadedmetadata'));
+    expect(oldProgress.lastProgressAt).not.toBe(300_000);
+    expect(getVodStartupProgress(video)?.lastProgressAt).toBe(300_000);
+    now.mockRestore();
+  });
+
+  it('成功播放后换源开启恢复预算，保留原意图尝试集合', () => {
+    const { options } = setupRuntime();
+    options.playbackIntentRef = { current: createVodPlaybackIntent() };
+    const load = createVodM3u8Loader(options);
+    const now = jest.spyOn(performance, 'now').mockReturnValue(0);
+    const video = createVideo();
+    load(video, EPISODE_1);
+    now.mockReturnValue(300_000);
+    video.dispatchEvent(new Event('playing'));
+    load(video, EPISODE_2);
+    expect(getVodStartupProgress(video)?.startedAt).toBe(300_000);
+    expect(
+      options.playbackIntentRef.current.activeSource?.triedRoutes.size,
+    ).toBe(1);
+  });
+
+  it('A 两路失败后 B 仍可直连回落代理，回落不占换源名额', () => {
+    const { options, onPlaybackRecoveryExhausted } = setupRuntime();
+    options.playbackIntentRef = { current: createVodPlaybackIntent() };
+    const video = createVideo();
+    createVodM3u8Loader(options)(video, EPISODE_1);
+    const hls = getFakeHls(video);
+    hls.emit(FakeHls.Events.ERROR, FATAL_MANIFEST_ERROR);
+    expect(options.playbackIntentRef.current.attempts).toBe(0);
+    hls.emit(FakeHls.Events.ERROR, FATAL_MANIFEST_ERROR);
+    expect(onPlaybackRecoveryExhausted).toHaveBeenCalledTimes(1);
+    options.detailRef.current = { ...DETAIL, source: 'b', id: 'b-id' };
+    options.playbackIntentRef.current.attempts = 3;
+    const now = jest.spyOn(performance, 'now').mockReturnValue(59_750);
+    createVodM3u8Loader(options)(video, EPISODE_2);
+    expect(getVodStartupProgress(video)?.startedAt).toBe(59_750);
+    now.mockReturnValue(60_000);
+    getFakeHls(video).emit(FakeHls.Events.ERROR, FATAL_MANIFEST_ERROR);
+    expect(getManagedVideo(video).__icetvUsingServerProxy).toBe(true);
+    expect(options.playbackIntentRef.current.attempts).toBe(3);
+    expect(
+      options.playbackIntentRef.current.activeSource?.triedRoutes.size,
+    ).toBe(2);
+    video.dispatchEvent(new Event('playing'));
+    expect(
+      options.playbackIntentRef.current.activeSource?.startedAt,
+    ).toBeNull();
   });
 
   it('加载后登记运行时对应的地址，释放后清除登记和服务端回退入口', () => {
@@ -357,6 +428,7 @@ describe('vodHlsRuntime 运行时释放', () => {
       buildVodProxyUrl({
         rawUrl: EPISODE_2,
         useServerProxy: false,
+        directManifest: true,
         sourceKey: DETAIL.source,
         playbackRequestMode: 'episode',
       }),
@@ -567,6 +639,7 @@ describe('vodHlsRuntime 致命网络错误恢复', () => {
     jest.useFakeTimers();
     mockIsServerProxy.mockReset().mockReturnValue(false);
     mockShouldAutoFallbackToServer.mockReset().mockReturnValue(false);
+    jest.requireMock('@/lib/proxy-modes').rememberSourceServerProxy.mockClear();
     mockClearSourceProxyOverride.mockReset();
     mockReportSourceRouteStat.mockReset();
     jest.spyOn(console, 'error').mockImplementation(() => undefined);
@@ -678,141 +751,81 @@ describe('vodHlsRuntime 致命网络错误恢复', () => {
     expect(runtime.setError).toHaveBeenCalledWith('当前源加载失败');
   });
 
-  describe('直连自动回退', () => {
-    beforeEach(() => {
-      mockShouldAutoFallbackToServer.mockReturnValue(true);
-      global.fetch = jest.fn(() =>
-        Promise.resolve({
-          ok: true,
-          body: {
-            getReader: () => ({
-              read: () =>
-                Promise.resolve({ done: false, value: new Uint8Array([1]) }),
-              cancel: () => Promise.resolve(),
-            }),
-          },
-        }),
-      ) as unknown as typeof fetch;
-    });
-
-    it('失败位置之前的分片加载成功不清零直连失败计数，连续失败后探测并切到服务端代理', async () => {
-      const { hls } = loadEpisode();
-
-      failAfterCachedReload(hls, HLS_FATAL_NETWORK_RECOVERY_DELAYS_MS[0]);
-      failAfterCachedReload(hls, HLS_FATAL_NETWORK_RECOVERY_DELAYS_MS[1]);
-      expect(global.fetch).not.toHaveBeenCalled();
-
-      hls.emit(FakeHls.Events.ERROR, fatalFragError(11));
-      expect(global.fetch).toHaveBeenCalledWith(
-        buildVodSegmentProxyUrl({
-          rawUrl: mainFragment(11).url,
-          sourceKey: DETAIL.source,
-          playbackRequestMode: 'episode',
-        }),
-        expect.objectContaining({ headers: { Range: 'bytes=0-65535' } }),
-      );
-      await flushMicrotasks();
-
-      expect(hls.loadSource).toHaveBeenLastCalledWith(
-        buildVodProxyUrl({
-          rawUrl: EPISODE_1,
-          useServerProxy: true,
-          sourceKey: DETAIL.source,
-          playbackRequestMode: 'episode',
-        }),
-      );
-    });
-
-    it.each([true, false])(
-      '最终失败中止代理探测，迟到探测结果 %s 保持停止状态',
-      async (proxyHealthy) => {
-        let finishProbe!: (response: unknown) => void;
-        (global.fetch as jest.Mock).mockImplementation(
-          () => new Promise((resolve) => (finishProbe = resolve)),
-        );
-        const { runtime, video, hls } = loadEpisode();
-        getManagedVideo(video).__icetvSwitchToServerProxy?.('loading-timeout');
-        runtime.options.loadingSessionRef.current.playbackStartNotified = true;
-        jest.advanceTimersByTime(AUTO_ROUTE_PROXY_COOLDOWN_MS);
-        hls.emit(FakeHls.Events.ERROR, FATAL_MANIFEST_ERROR);
-        jest.advanceTimersByTime(AUTO_ROUTE_PROXY_COOLDOWN_MS);
-        hls.emit(FakeHls.Events.ERROR, FATAL_MANIFEST_ERROR);
-        expect(global.fetch).toHaveBeenCalledTimes(1);
-        const signal = (global.fetch as jest.Mock).mock.calls[0][1]
-          .signal as AbortSignal;
-        expect(signal.aborted).toBe(false);
-
-        for (let i = 0; i <= HLS_FATAL_MEDIA_RECOVERY_LIMIT; i += 1) {
-          hls.emit(FakeHls.Events.ERROR, {
-            type: FakeHls.ErrorTypes.MEDIA_ERROR,
-            details: 'bufferAppendError',
-            fatal: true,
-          });
-        }
-
-        expect(runtime.setError).toHaveBeenCalledWith('当前源加载失败');
-        expect(getVodRuntimeSourceUrl(video)).toBeNull();
-        expect(signal.aborted).toBe(true);
-        hls.loadSource.mockClear();
-        runtime.setRealtimeLoadSpeed.mockClear();
-        finishProbe({ ok: proxyHealthy, text: async () => '#EXTM3U' });
-        await flushMicrotasks();
-        jest.runOnlyPendingTimers();
-        expect(hls.startLoad).not.toHaveBeenCalled();
-        expect(hls.loadSource).not.toHaveBeenCalled();
-        expect(runtime.setRealtimeLoadSpeed).not.toHaveBeenCalled();
-      },
-    );
-
-    it('分片加载到失败位置后清零直连失败计数，不探测代理', () => {
-      const { hls } = loadEpisode();
-
-      for (const sn of [11, 12]) {
-        hls.emit(FakeHls.Events.ERROR, fatalFragError(sn));
-        jest.advanceTimersByTime(HLS_FATAL_NETWORK_RECOVERY_DELAYS_MS[0]);
-        hls.emit(FakeHls.Events.FRAG_LOADED, { frag: mainFragment(sn) });
-      }
-      hls.emit(FakeHls.Events.ERROR, fatalFragError(13));
-
-      expect(global.fetch).not.toHaveBeenCalled();
-    });
-
-    it('清单加载失败且代理探测失败时继续直连并重新拉清单', async () => {
-      (global.fetch as jest.Mock).mockResolvedValue({ ok: false });
-      const { hls } = loadEpisode({ manifestParsed: false });
-      const directUrl = hls.loadSource.mock.calls[0][0];
-
+  describe('自动线路单次切换', () => {
+    beforeEach(() => mockShouldAutoFallbackToServer.mockReturnValue(true));
+    it('清单失败快速直连转代理，第二路失败交给外层而不循环', () => {
+      const { load, onPlaybackRecoveryExhausted } = setupRuntime();
+      const video = createVideo();
+      load(video, EPISODE_1);
+      const hls = getFakeHls(video);
+      expect(hls.loadSource).toHaveBeenLastCalledWith(EPISODE_1);
       hls.emit(FakeHls.Events.ERROR, FATAL_MANIFEST_ERROR);
-      await flushMicrotasks();
-
-      expect(hls.startLoad).not.toHaveBeenCalled();
       expect(hls.loadSource).toHaveBeenCalledTimes(2);
-      expect(hls.loadSource).toHaveBeenLastCalledWith(directUrl);
+      expect(hls.loadSource.mock.calls[1][0]).toContain('forceServer=true');
+      hls.emit(FakeHls.Events.ERROR, FATAL_MANIFEST_ERROR);
+      expect(onPlaybackRecoveryExhausted).toHaveBeenCalledTimes(1);
+      expect(hls.loadSource).toHaveBeenCalledTimes(2);
     });
-
-    it('代理探测失败进入冷却后，页面超时仍直接切到服务端代理', async () => {
-      (global.fetch as jest.Mock).mockResolvedValue({ ok: false });
-      const { hls, video } = loadEpisode();
-
-      failAfterCachedReload(hls, HLS_FATAL_NETWORK_RECOVERY_DELAYS_MS[0]);
-      failAfterCachedReload(hls, HLS_FATAL_NETWORK_RECOVERY_DELAYS_MS[1]);
-      hls.emit(FakeHls.Events.ERROR, fatalFragError(11));
-      await flushMicrotasks();
+    it('失败位置之前的分片不清零阈值，代理到达失败位置后才记忆', () => {
+      const { load } = setupRuntime();
+      const video = createVideo();
+      load(video, EPISODE_1);
+      const hls = getFakeHls(video);
+      for (let i = 0; i < 3; i++) {
+        hls.emit(FakeHls.Events.ERROR, {
+          ...NON_FATAL_FRAG_ERROR,
+          frag: mainFragment(11),
+        });
+        hls.emit(FakeHls.Events.FRAG_LOADED, { frag: mainFragment(10) });
+      }
+      const { rememberSourceServerProxy } =
+        jest.requireMock('@/lib/proxy-modes');
+      expect(rememberSourceServerProxy).not.toHaveBeenCalled();
+      expect(hls.loadSource).toHaveBeenCalledTimes(2);
+      hls.emit(FakeHls.Events.FRAG_LOADED, { frag: mainFragment(11) });
+      expect(rememberSourceServerProxy).toHaveBeenCalledWith('demo', EPISODE_1);
+    });
+    it('服务器优先失败只切直连一次', () => {
+      mockIsServerProxy.mockReturnValue(true);
+      const { load, onPlaybackRecoveryExhausted } = setupRuntime();
+      const video = createVideo();
+      load(video, EPISODE_1);
+      const hls = getFakeHls(video);
+      hls.emit(FakeHls.Events.ERROR, FATAL_MANIFEST_ERROR);
+      expect(hls.loadSource).toHaveBeenLastCalledWith(EPISODE_1);
+      hls.emit(FakeHls.Events.ERROR, FATAL_MANIFEST_ERROR);
+      expect(onPlaybackRecoveryExhausted).toHaveBeenCalled();
+      expect(hls.loadSource).toHaveBeenCalledTimes(2);
+    });
+    it.each([
+      'bufferFullError',
+      'manifestParsingError',
+      'fragParsingError',
+      'fragLoadAborted',
+    ])('非网络加载错误 %s 不切线路', (details) => {
+      const { load } = setupRuntime();
+      const video = createVideo();
+      load(video, EPISODE_1);
+      const hls = getFakeHls(video);
+      hls.emit(FakeHls.Events.ERROR, {
+        type: 'networkError',
+        details,
+        fatal: false,
+      });
       expect(hls.loadSource).toHaveBeenCalledTimes(1);
-
-      expect(
-        getManagedVideo(video).__icetvSwitchToServerProxy?.(
-          'page-loading-timeout',
-        ),
-      ).toBe(true);
-      expect(hls.loadSource).toHaveBeenLastCalledWith(
-        buildVodProxyUrl({
-          rawUrl: EPISODE_1,
-          useServerProxy: true,
-          sourceKey: DETAIL.source,
-          playbackRequestMode: 'episode',
-        }),
-      );
+    });
+    it('同意图重建运行时不重置线路尝试', () => {
+      const { options } = setupRuntime();
+      options.playbackIntentRef = { current: createVodPlaybackIntent() };
+      const load = createVodM3u8Loader(options);
+      const video = createVideo();
+      load(video, EPISODE_1);
+      getFakeHls(video).emit(FakeHls.Events.ERROR, FATAL_MANIFEST_ERROR);
+      load(video, EPISODE_1);
+      const hls = getFakeHls(video);
+      const calls = hls.loadSource.mock.calls.length;
+      hls.emit(FakeHls.Events.ERROR, FATAL_MANIFEST_ERROR);
+      expect(hls.loadSource).toHaveBeenCalledTimes(calls);
     });
   });
 });
@@ -825,6 +838,7 @@ describe('vodHlsRuntime 卡顿恢复', () => {
     jest.useFakeTimers();
     mockIsServerProxy.mockReset().mockReturnValue(false);
     mockShouldAutoFallbackToServer.mockReset().mockReturnValue(true);
+    jest.requireMock('@/lib/proxy-modes').rememberSourceServerProxy.mockClear();
     mockClearSourceProxyOverride.mockReset();
     mockReportSourceRouteStat.mockReset();
     jest.spyOn(console, 'error').mockImplementation(() => undefined);
@@ -923,6 +937,7 @@ describe('vodHlsRuntime 缓冲配额', () => {
   beforeEach(() => {
     mockIsServerProxy.mockReset().mockReturnValue(false);
     mockShouldAutoFallbackToServer.mockReset().mockReturnValue(true);
+    jest.requireMock('@/lib/proxy-modes').rememberSourceServerProxy.mockClear();
     mockClearSourceProxyOverride.mockReset();
     mockReportSourceRouteStat.mockReset();
     jest.spyOn(console, 'error').mockImplementation(() => undefined);

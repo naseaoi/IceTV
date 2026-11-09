@@ -41,6 +41,14 @@ import {
 } from '@/features/play/lib/sourceSwitchCleanup';
 import { getVodRuntimeSourceUrl } from '@/features/play/lib/vodHlsRuntime';
 import {
+  type VodPlaybackIntent,
+  canHandleVodPlaybackFailure,
+  createVodPlaybackIntent,
+  getVodSourceAttempt,
+  reportVodPlaybackOutcome,
+} from '@/features/play/lib/vodPlaybackIntent';
+import { resolveVodStartupTimeouts } from '@/features/play/lib/vodSourcePlaybackPolicy';
+import {
   deletePlayRecord,
   deleteSkipConfig,
   saveSkipConfig,
@@ -48,6 +56,7 @@ import {
 import { readAutoSwitchSource } from '@/lib/local-preferences';
 import { savePlayIntent } from '@/lib/play-intent';
 import { getManagedVideo, runManagedVideoCleanup } from '@/lib/player-runtime';
+import { getRuntimeConfig } from '@/lib/runtime-config';
 import { mergeSourceBundle } from '@/lib/source-bundle';
 import {
   readSourcePlaybackStats,
@@ -189,7 +198,7 @@ export function useSourceSwitch(options: UseSourceSwitchOptions) {
   } = options;
 
   const autoSwitchFailedKeysRef = useRef<Set<string>>(new Set());
-  const autoSwitchAttemptsRef = useRef(0);
+  const playbackIntentRef = useRef(createVodPlaybackIntent());
   const tryAutoSwitchSourceRef = useRef<(reason: string) => boolean>(
     () => false,
   );
@@ -201,10 +210,16 @@ export function useSourceSwitch(options: UseSourceSwitchOptions) {
   const pendingPlaybackNoticeRef = useRef<string | null>(null);
 
   const resetAutoSourceSwitch = useCallback(() => {
+    sourceChangeRequestIdRef.current += 1;
+    sourceDetailAbortRef.current?.abort();
+    sourceDetailAbortRef.current = null;
+    sourceSwitchInFlightRef.current = false;
     autoSwitchFailedKeysRef.current = new Set();
-    autoSwitchAttemptsRef.current = 0;
+    playbackIntentRef.current = createVodPlaybackIntent();
     pendingPlaybackNoticeRef.current = null;
-  }, []);
+  }, [sourceChangeRequestIdRef]);
+
+  useEffect(() => () => resetAutoSourceSwitch(), [resetAutoSourceSwitch]);
 
   const stopActiveHlsLoading = useCallback(() => {
     const video = artPlayerRef.current?.video as HTMLVideoElement | undefined;
@@ -294,7 +309,13 @@ export function useSourceSwitch(options: UseSourceSwitchOptions) {
         ? 'auto-source'
         : 'manual-source';
 
+      const intent = playbackIntentRef.current;
+      const attempt = getVodSourceAttempt(intent, newSource, newId);
+      attempt.startedAt = performance.now();
       const currentRequestId = ++sourceChangeRequestIdRef.current;
+      const isCurrentRequest = () =>
+        currentRequestId === sourceChangeRequestIdRef.current &&
+        intent === playbackIntentRef.current;
       sourceSwitchInFlightRef.current = true;
       sourceDetailAbortRef.current?.abort();
       const detailAbortController = new AbortController();
@@ -339,36 +360,78 @@ export function useSourceSwitch(options: UseSourceSwitchOptions) {
           previousDetail,
         );
 
+        const config = getRuntimeConfig();
+        const { idleMs } = resolveVodStartupTimeouts(
+          newSource,
+          config?.VOD_PAGE_TIMEOUT_SECONDS,
+          config?.VOD_FRAGMENT_TIMEOUT_SECONDS,
+        );
+        // 详情只占一个无进展窗口，余下预算留给媒体和第二条线路。
+        const detailTimer = setTimeout(
+          () => detailAbortController.abort(),
+          idleMs,
+        );
+        let rejectAborted: () => void = () => undefined;
         try {
-          const detailRes = await fetch(
-            `/api/detail?source=${newSource}&id=${newId}`,
-            IS_DEVELOPMENT
-              ? { cache: 'no-store', signal: detailAbortController.signal }
-              : { signal: detailAbortController.signal },
-          );
-          if (currentRequestId !== sourceChangeRequestIdRef.current) {
-            return;
-          }
-          if (detailRes.ok) {
-            const fullDetail = (await detailRes.json()) as SearchResult;
-            if (fullDetail.episodes && fullDetail.episodes.length > 0) {
-              saveDetailSnapshot(newSource, newId, fullDetail);
-              newDetail = mergeSourceSwitchDetail(
-                fullDetail,
-                targetSource,
-                previousDetail,
+          const fullDetail = await Promise.race([
+            (async () => {
+              const response = await fetch(
+                `/api/detail?source=${newSource}&id=${newId}`,
+                IS_DEVELOPMENT
+                  ? { cache: 'no-store', signal: detailAbortController.signal }
+                  : { signal: detailAbortController.signal },
               );
-              setAvailableSources((prev) => mergeSourceBundle(prev, newDetail));
-            }
+              return response.ok
+                ? ((await response.json()) as SearchResult)
+                : null;
+            })(),
+            new Promise<never>((_resolve, reject) => {
+              rejectAborted = () =>
+                reject(
+                  new DOMException('Detail request aborted', 'AbortError'),
+                );
+              detailAbortController.signal.addEventListener(
+                'abort',
+                rejectAborted,
+                { once: true },
+              );
+            }),
+          ]);
+          if (!isCurrentRequest()) return;
+          if (fullDetail?.episodes?.length) {
+            saveDetailSnapshot(newSource, newId, fullDetail);
+            newDetail = mergeSourceSwitchDetail(
+              fullDetail,
+              targetSource,
+              previousDetail,
+            );
+            setAvailableSources((prev) => mergeSourceBundle(prev, newDetail));
           }
         } catch (err) {
-          // 被新的换源取代而中止是预期内的，由下面的请求号判断直接收尾
-          if (currentRequestId === sourceChangeRequestIdRef.current) {
+          if (isCurrentRequest() && (err as Error)?.name !== 'AbortError') {
             console.error('换源刷新详情失败:', err);
           }
+        } finally {
+          clearTimeout(detailTimer);
+          detailAbortController.signal.removeEventListener(
+            'abort',
+            rejectAborted,
+          );
         }
 
-        if (currentRequestId !== sourceChangeRequestIdRef.current) {
+        if (!isCurrentRequest()) return;
+        if (!canHandleVodPlaybackFailure(intent, playbackIntentRef.current)) {
+          // 离线期间候选尚未提交，撤回它的尝试名额。
+          if (isAutoSwitch) {
+            intent.attempts -= 1;
+            autoSwitchFailedKeysRef.current.delete(
+              buildAutoSwitchSourceKey(newSource, newId),
+            );
+          }
+          setIsVideoLoading(false);
+          setRealtimeLoadSpeed('');
+          playbackRequestModeRef.current = 'initial';
+          setError('网络已断开，请联网后重试');
           return;
         }
 
@@ -397,9 +460,10 @@ export function useSourceSwitch(options: UseSourceSwitchOptions) {
         }
 
         if (
-          !preserveProgress &&
-          (isAutoSwitch ||
-            (!clearTargetEpisodeProgress && episodeAnchor.episodeIndex > 0))
+          !newDetail.episodes?.length ||
+          (!preserveProgress &&
+            (isAutoSwitch ||
+              (!clearTargetEpisodeProgress && episodeAnchor.episodeIndex > 0)))
         ) {
           // 候选按搜索结果预筛过，拉到完整详情后仍缺目标集时换下一个，不能自动跳到别的集
           if (isAutoSwitch) {
@@ -408,6 +472,7 @@ export function useSourceSwitch(options: UseSourceSwitchOptions) {
             );
             // 本次换源到此结束，放开进行中标记才能接着尝试下一个候选
             sourceSwitchInFlightRef.current = false;
+            reportVodPlaybackOutcome(intent, newSource, false);
             if (!tryAutoSwitchSourceRef.current('missing-episode')) {
               setIsVideoLoading(false);
               setRealtimeLoadSpeed('');
@@ -417,6 +482,9 @@ export function useSourceSwitch(options: UseSourceSwitchOptions) {
             return;
           }
 
+          if (!newDetail.episodes?.length) {
+            reportVodPlaybackOutcome(intent, newSource, false);
+          }
           const targetEpisodeNumber = episodeAnchor.episodeIndex + 1;
           const notice = `该源没有第 ${targetEpisodeNumber} 集，已保留当前播放`;
           if (artPlayerRef.current) {
@@ -519,16 +587,22 @@ export function useSourceSwitch(options: UseSourceSwitchOptions) {
           };
         }
       } catch (err) {
-        if (currentRequestId !== sourceChangeRequestIdRef.current) {
+        if (!isCurrentRequest()) {
           return;
         }
         pendingSourceSwitchCleanupRef.current = null;
+        if (
+          (err as Error)?.name !== 'AbortError' &&
+          canHandleVodPlaybackFailure(intent, playbackIntentRef.current)
+        ) {
+          reportVodPlaybackOutcome(intent, newSource, false);
+        }
         setIsVideoLoading(false);
         setRealtimeLoadSpeed('');
         playbackRequestModeRef.current = 'initial';
         setError(err instanceof Error ? err.message : '换源失败');
       } finally {
-        if (currentRequestId === sourceChangeRequestIdRef.current) {
+        if (isCurrentRequest()) {
           sourceSwitchInFlightRef.current = false;
         }
       }
@@ -575,6 +649,13 @@ export function useSourceSwitch(options: UseSourceSwitchOptions) {
 
   const tryAutoSwitchSource = useCallback(
     (reason: string): boolean => {
+      if (
+        !canHandleVodPlaybackFailure(
+          playbackIntentRef.current,
+          playbackIntentRef.current,
+        )
+      )
+        return false;
       if (sourceSwitchInFlightRef.current) return true;
       if (!readAutoSwitchSource()) return false;
       const curSource = currentSourceRef.current;
@@ -583,7 +664,9 @@ export function useSourceSwitch(options: UseSourceSwitchOptions) {
 
       const failedKeys = autoSwitchFailedKeysRef.current;
       failedKeys.add(buildAutoSwitchSourceKey(curSource, curId));
-      if (autoSwitchAttemptsRef.current >= AUTO_SOURCE_SWITCH_MAX_ATTEMPTS) {
+      if (
+        playbackIntentRef.current.attempts >= AUTO_SOURCE_SWITCH_MAX_ATTEMPTS
+      ) {
         return false;
       }
 
@@ -612,7 +695,7 @@ export function useSourceSwitch(options: UseSourceSwitchOptions) {
       const targetKey = buildAutoSwitchSourceKey(target.source, target.id);
       // 发起即记为已尝试，换源完成前即使再次触发也不会重复选中同一目标
       failedKeys.add(targetKey);
-      autoSwitchAttemptsRef.current += 1;
+      playbackIntentRef.current.attempts += 1;
       console.warn('当前源播放失败，自动切换其他源', {
         from: buildAutoSwitchSourceKey(curSource, curId),
         to: targetKey,
@@ -641,63 +724,86 @@ export function useSourceSwitch(options: UseSourceSwitchOptions) {
   }, [tryAutoSwitchSource]);
 
   // 以下入口会被播放器实例和长生命周期 effect 捕获，经 ref 调用保持引用稳定
-  const handleLoadingTimeout = useCallback((): boolean => {
-    // 换源等待详情期间的页面超时即详情请求超时：中止请求，按详情获取失败继续换源，提交新源时重新计时
-    if (sourceSwitchInFlightRef.current) {
-      sourceDetailAbortRef.current?.abort();
-      return true;
-    }
-    if (!currentSourceRef.current || !currentIdRef.current) return false;
+  const handleLoadingTimeout = useCallback(
+    (intent = playbackIntentRef.current): boolean => {
+      if (!canHandleVodPlaybackFailure(intent, playbackIntentRef.current)) {
+        if (intent === playbackIntentRef.current) stopActiveHlsLoading();
+        return false;
+      }
+      // 换源等待详情期间的页面超时即详情请求超时：中止请求，按详情获取失败继续换源，提交新源时重新计时
+      if (sourceSwitchInFlightRef.current) {
+        sourceDetailAbortRef.current?.abort();
+        return true;
+      }
+      if (!currentSourceRef.current || !currentIdRef.current) return false;
 
-    const video = artPlayerRef.current?.video as HTMLVideoElement | undefined;
-    const activeVideoUrl = videoUrlRef.current;
-    // 懒解析换集会先清空 videoUrl，此时播放器上挂的仍是上一集的运行时，回退代理会重载上一集并把它的进度带进新集
-    if (
-      video &&
-      activeVideoUrl &&
-      getVodRuntimeSourceUrl(video) === activeVideoUrl &&
-      getManagedVideo(video).__icetvSwitchToServerProxy?.(
-        'page-loading-timeout',
-      )
-    ) {
-      return true;
-    }
-    onPlaybackStartFailed?.();
-    if (tryAutoSwitchSourceRef.current('loading-timeout')) {
-      return true;
-    }
-
-    stopActiveHlsLoading();
-    setRealtimeLoadSpeed('当前源加载超时');
-    return false;
-  }, [
-    artPlayerRef,
-    currentSourceRef,
-    currentIdRef,
-    videoUrlRef,
-    stopActiveHlsLoading,
-    setRealtimeLoadSpeed,
-    onPlaybackStartFailed,
-  ]);
-
-  const handlePlaybackRecoveryExhausted = useCallback(
-    (reason: string) => {
-      if (sourceSwitchInFlightRef.current) return true;
+      const video = artPlayerRef.current?.video as HTMLVideoElement | undefined;
+      const activeVideoUrl = videoUrlRef.current;
+      // 懒解析换集会先清空 videoUrl，此时播放器上挂的仍是上一集的运行时，回退代理会重载上一集并把它的进度带进新集
+      if (
+        video &&
+        activeVideoUrl &&
+        getVodRuntimeSourceUrl(video) === activeVideoUrl &&
+        getManagedVideo(video).__icetvSwitchToServerProxy?.(
+          'page-loading-timeout',
+        )
+      ) {
+        return true;
+      }
       onPlaybackStartFailed?.();
-      return tryAutoSwitchSourceRef.current(reason);
+      reportVodPlaybackOutcome(intent, currentSourceRef.current, false);
+      if (tryAutoSwitchSourceRef.current('loading-timeout')) {
+        return true;
+      }
+
+      stopActiveHlsLoading();
+      setRealtimeLoadSpeed('当前源加载超时');
+      return false;
     },
-    [onPlaybackStartFailed],
+    [
+      artPlayerRef,
+      currentSourceRef,
+      currentIdRef,
+      videoUrlRef,
+      stopActiveHlsLoading,
+      setRealtimeLoadSpeed,
+      onPlaybackStartFailed,
+    ],
   );
 
-  const handleEpisodeUrlResolveFailed = useCallback(() => {
-    if (sourceSwitchInFlightRef.current) return;
-    onPlaybackStartFailed?.();
-    if (tryAutoSwitchSourceRef.current('episode-url-resolve-failed')) {
-      return;
-    }
-    stopActiveHlsLoading();
-    setRealtimeLoadSpeed('播放地址解析失败');
-  }, [stopActiveHlsLoading, setRealtimeLoadSpeed, onPlaybackStartFailed]);
+  const handlePlaybackRecoveryExhausted = useCallback(
+    (reason: string, intent: VodPlaybackIntent = playbackIntentRef.current) => {
+      if (!canHandleVodPlaybackFailure(intent, playbackIntentRef.current))
+        return false;
+      if (sourceSwitchInFlightRef.current) return true;
+      onPlaybackStartFailed?.();
+      reportVodPlaybackOutcome(intent, currentSourceRef.current, false);
+      if (tryAutoSwitchSourceRef.current(reason)) return true;
+      return false;
+    },
+    [onPlaybackStartFailed, currentSourceRef],
+  );
+
+  const handleEpisodeUrlResolveFailed = useCallback(
+    (intent = playbackIntentRef.current) => {
+      if (!canHandleVodPlaybackFailure(intent, playbackIntentRef.current))
+        return;
+      if (sourceSwitchInFlightRef.current) return;
+      onPlaybackStartFailed?.();
+      reportVodPlaybackOutcome(intent, currentSourceRef.current, false);
+      if (tryAutoSwitchSourceRef.current('episode-url-resolve-failed')) {
+        return;
+      }
+      stopActiveHlsLoading();
+      setRealtimeLoadSpeed('播放地址解析失败');
+    },
+    [
+      stopActiveHlsLoading,
+      setRealtimeLoadSpeed,
+      onPlaybackStartFailed,
+      currentSourceRef,
+    ],
+  );
 
   const finalizePendingSourceSwitchCleanup = useCallback(
     async (activeSource: string, activeId: string) => {
@@ -723,6 +829,7 @@ export function useSourceSwitch(options: UseSourceSwitchOptions) {
     handlePlaybackRecoveryExhausted,
     handleEpisodeUrlResolveFailed,
     resetAutoSourceSwitch,
+    playbackIntentRef,
     finalizePendingSourceSwitchCleanup,
     stopActiveHlsLoading,
     restartCurrentPlayback,

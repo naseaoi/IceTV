@@ -64,6 +64,11 @@
 - 需要逐字节匹配的列在 MySQL 用 `utf8mb4_bin`，换成 `_ci` 排序规则会让两种存储的匹配结果不一致。
 - 存储变更须跑 `pnpm test:mysql`，原因见 [AGENTS.md](../AGENTS.md#测试)。
 
+## 源站线路统计
+
+- `source_route_stats.route_mode` 用 `browser-v2` / `server-v2` 保存全程直连 / 全程代理的新口径，接口仍收发 `browser` / `server`。管理端聚合只读 v2，旧 `browser` / `server` 行保留且不混入成功率；原始桶读取保留存储键以区分口径。
+- 定时清理按日期作用于整表，覆盖新旧口径。新键适配现有 MySQL `VARCHAR(16)`，两后端均保持原表结构。
+
 ## 共享缓存
 
 `src/lib/shared-server-cache.ts` 的 `invalidate()` / `clear()` 只清本实例内存，不删除数据库里的共享条目，下次加载可能读回旧值。业务失效依赖缓存键（源配置、策略版本等）变化，不依赖这两个方法。`shared_cache` 是可丢弃数据。加载前占租约会插入空占位行（空值、有效期为 0），释放租约时按持有 token 删除仍为空的占位行；改租约或写入逻辑时保留这一条件，否则失败与不缓存的加载会留下绕过清理预算的空行。

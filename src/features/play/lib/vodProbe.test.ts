@@ -1,12 +1,28 @@
 ﻿import { getVideoResolutionFromM3u8 } from '@/features/play/lib/hls-utils';
 import { probeVodEpisodeUrl } from '@/features/play/lib/vodProbe';
-import { shouldAutoFallbackToServer } from '@/lib/proxy-modes';
+import type { SourcePlaybackRoute } from '@/lib/proxy-modes';
+
+const browserRoute: SourcePlaybackRoute = {
+  useServerProxy: false,
+  directManifest: true,
+  allowAutoFallback: false,
+};
+const serverRoute: SourcePlaybackRoute = {
+  useServerProxy: true,
+  directManifest: false,
+  allowAutoFallback: false,
+};
 
 jest.mock('@/features/play/lib/hls-utils', () => ({
   getVideoResolutionFromM3u8: jest.fn(),
 }));
 
 jest.mock('@/lib/proxy-modes', () => ({
+  getSourcePlaybackRoute: jest.fn(() => ({
+    useServerProxy: false,
+    directManifest: true,
+    allowAutoFallback: false,
+  })),
   clearSourceProxyOverride: jest.fn(),
   rememberSourceServerProxy: jest.fn(),
   shouldAutoFallbackToServer: jest.fn(() => false),
@@ -23,10 +39,6 @@ function createSampleResponse(size: number, ok = true, status = 206) {
 describe('probeVodEpisodeUrl', () => {
   const originalFetch = global.fetch;
 
-  beforeEach(() => {
-    (shouldAutoFallbackToServer as jest.Mock).mockReturnValue(false);
-  });
-
   afterEach(() => {
     global.fetch = originalFetch;
     jest.clearAllMocks();
@@ -40,7 +52,11 @@ describe('probeVodEpisodeUrl', () => {
     });
 
     await expect(
-      probeVodEpisodeUrl('https://example.test/index.m3u8', false, 'giri'),
+      probeVodEpisodeUrl(
+        'https://example.test/index.m3u8',
+        browserRoute,
+        'giri',
+      ),
     ).resolves.toEqual({
       quality: '1080p',
       loadSpeed: '1.0 MB/s',
@@ -48,7 +64,7 @@ describe('probeVodEpisodeUrl', () => {
     });
     expect(getVideoResolutionFromM3u8).toHaveBeenCalledWith(
       'https://example.test/index.m3u8',
-      false,
+      browserRoute,
       'giri',
     );
   });
@@ -66,7 +82,9 @@ describe('probeVodEpisodeUrl', () => {
       pingTime: 50,
     });
 
-    await expect(probeVodEpisodeUrl(lazyUrl, false, 'giri')).resolves.toEqual({
+    await expect(
+      probeVodEpisodeUrl(lazyUrl, browserRoute, 'giri'),
+    ).resolves.toEqual({
       quality: '720p',
       loadSpeed: '2.0 MB/s',
       pingTime: 50,
@@ -77,9 +95,30 @@ describe('probeVodEpisodeUrl', () => {
     );
     expect(getVideoResolutionFromM3u8).toHaveBeenCalledWith(
       'https://cdn.example/lazy.m3u8',
-      false,
+      browserRoute,
       'giri',
     );
+  });
+
+  it('MP4 正文中断触发一次代理回落', async () => {
+    const mock = jest
+      .fn()
+      .mockResolvedValueOnce({
+        ok: true,
+        arrayBuffer: async () => {
+          throw new TypeError('terminated');
+        },
+      })
+      .mockResolvedValueOnce(createSampleResponse(65536));
+    global.fetch = mock;
+    await expect(
+      probeVodEpisodeUrl(
+        'https://cdn.example/a.mp4',
+        { ...browserRoute, allowAutoFallback: true },
+        'demo',
+      ),
+    ).resolves.toBeDefined();
+    expect(mock).toHaveBeenCalledTimes(2);
   });
 
   it('mp4 地址使用 Range 样本探测', async () => {
@@ -90,7 +129,7 @@ describe('probeVodEpisodeUrl', () => {
 
     const result = await probeVodEpisodeUrl(
       'https://example.test/video.mp4?token=abc',
-      false,
+      browserRoute,
       'giri',
     );
 
@@ -107,7 +146,6 @@ describe('probeVodEpisodeUrl', () => {
   });
 
   it('mp4 自动代理模式直连失败后回退到 segment 代理', async () => {
-    (shouldAutoFallbackToServer as jest.Mock).mockReturnValue(true);
     const fetchMock = jest
       .fn()
       .mockRejectedValueOnce(new Error('direct failed'))
@@ -115,7 +153,15 @@ describe('probeVodEpisodeUrl', () => {
     global.fetch = fetchMock as unknown as typeof fetch;
 
     await expect(
-      probeVodEpisodeUrl('https://example.test/video.mp4', false, 'giri'),
+      probeVodEpisodeUrl(
+        'https://example.test/video.mp4',
+        {
+          useServerProxy: false,
+          directManifest: false,
+          allowAutoFallback: true,
+        },
+        'giri',
+      ),
     ).resolves.toMatchObject({
       quality: 'MP4',
     });
@@ -127,7 +173,7 @@ describe('probeVodEpisodeUrl', () => {
     const fetchMock = jest.fn().mockResolvedValue({ status: 503 });
     global.fetch = fetchMock as unknown as typeof fetch;
     await expect(
-      probeVodEpisodeUrl('https://example.test/busy.mp4', true, 'giri'),
+      probeVodEpisodeUrl('https://example.test/busy.mp4', serverRoute, 'giri'),
     ).rejects.toMatchObject({ name: 'SourceProbeDeferredError' });
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });

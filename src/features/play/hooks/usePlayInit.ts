@@ -56,7 +56,7 @@ import { isLazyEpisodeUrl } from '@/lib/lazy-episodes';
 import { PLAYER_EXIT_EVENT } from '@/lib/navigation-return';
 import { hasMatchingPlayIntent } from '@/lib/play-intent';
 import { prefetchM3U8 } from '@/lib/player-runtime';
-import { shouldUseServerProxy } from '@/lib/proxy-modes';
+import { getSourcePlaybackRoute } from '@/lib/proxy-modes';
 import { mergeSourceBundle } from '@/lib/source-bundle';
 import { filterSourcesForPlayback } from '@/lib/source-match';
 import {
@@ -312,14 +312,14 @@ async function preferBestSource(
     }
 
     try {
-      const useProxy = shouldUseServerProxy(
+      const route = getSourcePlaybackRoute(
         source.source,
         episodeUrl,
         proxyModes,
       );
       const testResult = await probeVodEpisodeUrl(
         episodeUrl,
-        useProxy,
+        route,
         source.source,
       );
       const sample = takeProbeSegmentSample(testResult);
@@ -350,11 +350,7 @@ async function preferBestSource(
   const buildPlaybackPlaylistUrl = (source: SearchResult, episodeUrl: string) =>
     buildVodProxyUrl({
       rawUrl: episodeUrl,
-      useServerProxy: shouldUseServerProxy(
-        source.source,
-        episodeUrl,
-        proxyModes,
-      ),
+      ...getSourcePlaybackRoute(source.source, episodeUrl, proxyModes),
       sourceKey: source.source,
       playbackRequestMode: 'initial',
     });
@@ -404,7 +400,10 @@ async function preferBestSource(
       ? peekResolvedLazyEpisodeUrl(runnerUp.source, rawUrl)
       : rawUrl;
     if (!episodeUrl || !isVodM3u8Url(episodeUrl)) return;
-    prefetchM3U8(buildPlaybackPlaylistUrl(runnerUp, episodeUrl));
+    prefetchM3U8(
+      buildPlaybackPlaylistUrl(runnerUp, episodeUrl),
+      getSourcePlaybackRoute(runnerUp.source, episodeUrl, proxyModes),
+    );
   };
 
   const probeBatchUntilSuccess = async (

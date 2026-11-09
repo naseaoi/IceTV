@@ -8,10 +8,6 @@ jest.mock('@/lib/proxy-auth', () => ({
   }),
 }));
 
-jest.mock('@/lib/source-capability', () => ({
-  isSourceCorsCapable: jest.fn(() => false),
-}));
-
 function createRequest(search = ''): NextRequest {
   return {
     url: `http://localhost/api/proxy/m3u8${search}`,
@@ -43,6 +39,39 @@ const extendedPlaylist = [
 ].join('\n');
 
 describe('m3u8 rewrite', () => {
+  it.each([
+    { allowCORS: true, forceServer: false, direct: true },
+    { allowCORS: true, forceServer: true, direct: false },
+    { allowCORS: false, forceServer: false, direct: false },
+  ])(
+    'honors explicit VOD rewrite flags: %j',
+    async ({ allowCORS, forceServer, direct }) => {
+      const result = await getRewrittenM3U8Content(
+        {
+          content: mediaPlaylist,
+          finalUrl: 'https://stream.example.com/vod/index.m3u8',
+          loadedAt: 1,
+        },
+        'https://stream.example.com/vod/index.m3u8',
+        createRequest(),
+        allowCORS,
+        forceServer,
+        'vod-source',
+        false,
+        false,
+      );
+      if (direct) {
+        expect(result).toContain('https://stream.example.com/vod/segment-1.ts');
+        expect(result).toContain(
+          'URI="https://stream.example.com/vod/key.bin"',
+        );
+        expect(result).not.toContain('/api/proxy/');
+      } else {
+        expect(result).toContain('/api/proxy/segment?');
+        expect(result).toContain('/api/proxy/key?');
+      }
+    },
+  );
   it('keeps live media resources direct when browser direct mode is enabled', async () => {
     const result = await getRewrittenM3U8Content(
       {

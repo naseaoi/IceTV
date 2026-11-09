@@ -323,6 +323,12 @@ export interface SourcePlayReporterSummary {
 
 export type SourceRouteMode = 'browser' | 'server';
 
+// 数据库存储键隔离全程线路口径，API 仍使用 browser / server。
+export const SOURCE_ROUTE_STAT_STORAGE_MODES = {
+  browser: 'browser-v2',
+  server: 'server-v2',
+} as const;
+
 export interface SourceRouteStatInput {
   source: string;
   routeMode: SourceRouteMode;
@@ -340,7 +346,9 @@ export interface SourceRouteStatsItem {
 // 源站路由统计原始行（按天粒度）
 export interface SourceRouteStatsBucket {
   source: string;
-  routeMode: SourceRouteMode;
+  routeMode:
+    | SourceRouteMode
+    | (typeof SOURCE_ROUTE_STAT_STORAGE_MODES)[SourceRouteMode];
   bucketDate: string;
   successCount: number;
   failureCount: number;

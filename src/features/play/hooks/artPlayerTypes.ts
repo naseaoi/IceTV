@@ -4,6 +4,7 @@ import type { Dispatch, MutableRefObject, SetStateAction } from 'react';
 import type { PlaybackRequestMode } from '@/features/play/hooks/usePlayPageState';
 import type { WakeLockSentinel } from '@/features/play/lib/playTypes';
 import type { ResumeMode } from '@/features/play/lib/resumePlayback';
+import type { VodPlaybackIntent } from '@/features/play/lib/vodPlaybackIntent';
 import type { SearchResult, SkipConfig } from '@/lib/types';
 
 export type CurrentSourceVideoInfo = {
@@ -66,6 +67,7 @@ export interface UseArtPlayerParams {
   onDanmakuEnabledChange?: (enabled: boolean) => void;
   onPlaybackStarted?: () => void;
   onDanmakuEnable?: () => void;
+  playbackIntentRef?: MutableRefObject<VodPlaybackIntent>;
   onSourceProxyFallbackStarted?: () => void;
   // 返回 true 表示已自动换源接手，播放器不再展示当前源失败
   onPlaybackRecoveryExhausted?: (reason: string) => boolean;

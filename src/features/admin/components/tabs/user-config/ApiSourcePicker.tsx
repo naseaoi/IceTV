@@ -31,8 +31,8 @@ const FILTER_LABEL: Record<PickerFilter, string> = {
   all: '全部',
   selected: '已选',
   unselected: '未选',
-  direct: '不需中转',
-  relay: '需中转',
+  direct: '直连 / 自动',
+  relay: '代理',
   cleanup: '待清理',
 };
 
@@ -59,7 +59,7 @@ export function ApiSourcePicker({
   selected,
   onChange,
 }: ApiSourcePickerProps) {
-  const { capabilities, health } = useSourceInsights('api-source-picker');
+  const { health } = useSourceInsights('api-source-picker');
   const [query, setQuery] = useState('');
   const [filter, setFilter] = useState<PickerFilter>('all');
   const selectedSet = useMemo(() => new Set(selected), [selected]);
@@ -69,8 +69,7 @@ export function ApiSourcePicker({
 
   const createMatchers = useCallback(
     (membership: ReadonlySet<string>) => {
-      const isRelay = (source: DataSource) =>
-        capabilities[source.key]?.direct === 'blocked';
+      const isRelay = (source: DataSource) => source.proxyMode === 'server';
       return {
         all: () => true,
         selected: (source: DataSource) => membership.has(source.key),
@@ -81,7 +80,7 @@ export function ApiSourcePicker({
           isSourceCleanupCandidate(health.get(source.key)),
       } satisfies Record<PickerFilter, (source: DataSource) => boolean>;
     },
-    [capabilities, health],
+    [health],
   );
   const matchers = useMemo(
     () => createMatchers(selectedSet),
@@ -199,7 +198,7 @@ export function ApiSourcePicker({
                       <span
                         className={`${CHIP_CLASS} bg-amber-100 text-amber-800 dark:bg-amber-900/20 dark:text-amber-300`}
                       >
-                        需中转
+                        代理
                       </span>
                     )}
                     {tier && healthChipClass && (

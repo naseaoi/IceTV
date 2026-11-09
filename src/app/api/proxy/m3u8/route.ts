@@ -19,7 +19,6 @@ import {
 } from '@/lib/proxy-diagnostics';
 import { requireServerProxyQuota } from '@/lib/server-proxy-guard';
 import { resourceLimitResponse } from '@/lib/server-resource-errors';
-import { scheduleSourceDirectProbe } from '@/lib/source-route-capability.server';
 import {
   UrlValidationError,
   validateProxyUrlForRequest,
@@ -152,13 +151,6 @@ async function handleGet(request: NextRequest) {
         // 软过期：后台刷新，不阻塞当前响应
         void refreshM3U8Cache(validation.url, ua, source, isLive, identity);
       }
-      scheduleSourceDirectProbe({
-        source,
-        playlistContent: value.content,
-        playlistUrl: value.finalUrl || validation.url,
-        referer: request.headers.get('referer'),
-        userAgent: ua,
-      });
       const modifiedContent = await getRewrittenM3U8Content(
         value,
         validation.url,
@@ -200,15 +192,6 @@ async function handleGet(request: NextRequest) {
         userInitiated,
       },
     );
-    if (!isLive) {
-      scheduleSourceDirectProbe({
-        source,
-        playlistContent: loaded.content,
-        playlistUrl: loaded.finalUrl || validation.url,
-        referer: request.headers.get('referer'),
-        userAgent: ua,
-      });
-    }
     const modifiedContent = await getRewrittenM3U8Content(
       loaded,
       validation.url,

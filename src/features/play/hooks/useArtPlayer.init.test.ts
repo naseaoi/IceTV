@@ -4,8 +4,10 @@ import type { UseArtPlayerParams } from '@/features/play/hooks/artPlayerTypes';
 import { useArtPlayer } from '@/features/play/hooks/useArtPlayer';
 import { initializeArtPlayer } from '@/features/play/hooks/useArtPlayer.init';
 import { reloadDanmaku } from '@/features/play/lib/danmaku/attach';
+import { createVodPlaybackIntent } from '@/features/play/lib/vodPlaybackIntent';
 import { getManagedVideo, runManagedVideoCleanup } from '@/lib/player-runtime';
 import { resolveSourcePlaybackRoute } from '@/lib/proxy-modes';
+import { reportSourceRouteStat } from '@/lib/source-route-stats.client';
 import type { SearchResult } from '@/lib/types';
 
 type Listener = (...args: unknown[]) => void;
@@ -232,8 +234,7 @@ function createParams(): UseArtPlayerParams {
 const createdVideos: HTMLVideoElement[] = [];
 
 // Artplayer 在设置地址后回调 customType，这里手动调用以拿到本次加载的 hls 实例
-async function setupPlayer() {
-  const params = createParams();
+async function setupPlayer(params = createParams()) {
   await initializeArtPlayer(params, {
     loadingSessionRef: {
       current: {
@@ -254,7 +255,9 @@ async function setupPlayer() {
   const { video } = player;
   createdVideos.push(video);
   video.pause = jest.fn();
-  player.option.customType.m3u8(video, player.option.url);
+  if (!params.videoUrl.endsWith('.mp4')) {
+    player.option.customType.m3u8(video, player.option.url);
+  }
   const hls = getManagedVideo(video).hls as unknown as MockHls;
   return { params, player, video, hls };
 }
@@ -283,6 +286,7 @@ describe('initializeArtPlayer 拉流控制', () => {
     MockArtplayer.instances = [];
     jest.mocked(resolveSourcePlaybackRoute).mockReset().mockResolvedValue({
       useServerProxy: false,
+      directManifest: false,
       allowAutoFallback: false,
     });
     jest.mocked(reloadDanmaku).mockClear();
@@ -295,6 +299,135 @@ describe('initializeArtPlayer 拉流控制', () => {
     createdVideos.splice(0).forEach((video) => runManagedVideoCleanup(video));
     jest.restoreAllMocks();
     jest.useRealTimers();
+  });
+
+  it.each(['hls', 'native'])(
+    '%s 播放中回落开启加载，恢复只结束等待而不重复通知起播',
+    async (kind) => {
+      jest.mocked(resolveSourcePlaybackRoute).mockResolvedValueOnce({
+        useServerProxy: false,
+        directManifest: true,
+        allowAutoFallback: true,
+      });
+      jest.mocked(reportSourceRouteStat).mockClear();
+      const params = createParams();
+      params.playbackIntentRef = { current: createVodPlaybackIntent() };
+      params.onPlaybackStarted = jest.fn();
+      params.startPlaybackStatsSession = jest.fn();
+      params.onSourceProxyFallbackStarted = jest.fn();
+      if (kind === 'native') params.videoUrl = 'https://cdn.example/movie.mp4';
+      const { player, video } = await setupPlayer(params);
+      if (kind === 'native') {
+        player.switchUrl.mockImplementation(() => {
+          video.dispatchEvent(new Event('loadstart'));
+          return Promise.resolve();
+        });
+        video.play = jest.fn().mockResolvedValue(undefined);
+      }
+      video.dispatchEvent(new Event('playing'));
+      player.emit('video:playing');
+      expect(params.onPlaybackStarted).toHaveBeenCalledTimes(1);
+      act(() => jest.advanceTimersByTime(300_000));
+      const fallback = getManagedVideo(video).__icetvSwitchToServerProxy!;
+      expect(fallback('page-loading-timeout')).toBe(true);
+      expect(params.setIsVideoLoading).toHaveBeenLastCalledWith(true);
+      expect(params.onSourceProxyFallbackStarted).toHaveBeenCalledTimes(1);
+      expect(params.playbackIntentRef.current.activeSource?.startedAt).toBe(
+        300_000,
+      );
+
+      player.emit('video:seeked');
+      expect(params.setIsVideoLoading).toHaveBeenLastCalledWith(true);
+      video.dispatchEvent(new Event('playing'));
+      player.emit('video:playing');
+      player.emit('video:playing');
+      expect(params.setIsVideoLoading).toHaveBeenLastCalledWith(false);
+      expect(params.setRealtimeLoadSpeed).toHaveBeenLastCalledWith('');
+      expect(
+        params.playbackIntentRef.current.activeSource?.startedAt,
+      ).toBeNull();
+      expect(params.onPlaybackStarted).toHaveBeenCalledTimes(1);
+      expect(params.startPlaybackStatsSession).toHaveBeenCalledTimes(1);
+      if (kind === 'native') {
+        expect(
+          jest
+            .mocked(reportSourceRouteStat)
+            .mock.calls.filter(
+              ([, route, success]) => route === 'server' && success,
+            ),
+        ).toHaveLength(1);
+      }
+      runManagedVideoCleanup(video);
+      expect(getManagedVideo(video).__icetvSwitchToServerProxy).toBeNull();
+      expect(fallback('late-timeout')).toBe(false);
+    },
+  );
+
+  it('原生运行时释放后已捕获的回落入口与迟到 playing 均失效', async () => {
+    jest.mocked(resolveSourcePlaybackRoute).mockResolvedValueOnce({
+      useServerProxy: false,
+      directManifest: true,
+      allowAutoFallback: true,
+    });
+    const params = createParams();
+    params.videoUrl = 'https://cdn.example/movie.mp4';
+    params.onPlaybackStarted = jest.fn();
+    const { player, video } = await setupPlayer(params);
+    const fallback = getManagedVideo(video).__icetvSwitchToServerProxy!;
+    runManagedVideoCleanup(video);
+    expect(getManagedVideo(video).__icetvSwitchToServerProxy).toBeNull();
+    expect(fallback('page-loading-timeout')).toBe(false);
+    player.emit('video:playing');
+    expect(player.switchUrl).not.toHaveBeenCalled();
+    expect(params.onPlaybackStarted).not.toHaveBeenCalled();
+    expect(params.setIsVideoLoading).not.toHaveBeenCalledWith(false);
+  });
+
+  it('复用加载器按当前源选择规则，rycj 遵守去广告开关', async () => {
+    const { params, player, video } = await setupPlayer();
+    const content = [
+      '#EXTM3U',
+      ...Array.from({ length: 8 }, (_, block) => [
+        '#EXT-X-DISCONTINUITY',
+        ...Array.from(
+          { length: 5 },
+          (_, fragment) => `#EXTINF:5,\nmain-${block}-${fragment}.ts`,
+        ),
+      ]).flat(),
+      '#EXT-X-ENDLIST',
+    ].join('\n');
+    const transform = (hls: MockHls) => {
+      const Loader = hls.config.loader as new (config: unknown) => MockLoader;
+      const loader = new Loader({});
+      const callbacks = { onSuccess: jest.fn() };
+      const context = { type: 'level', url: EPISODE_1 };
+      loader.load(context, {}, callbacks);
+      const response = { data: content, url: EPISODE_2 };
+      callbacks.onSuccess(response, {}, context);
+      return response.data;
+    };
+    params.blockAdEnabledRef.current = true;
+    player.option.customType.m3u8(video, EPISODE_1);
+    const hls = getManagedVideo(video).hls as unknown as MockHls;
+    expect(transform(hls)).toBe(content);
+
+    params.detailRef.current = { ...DETAIL, source: 'rycj' };
+    player.option.customType.m3u8(video, EPISODE_2);
+    expect(getManagedVideo(video).hls).toBe(hls);
+    expect(transform(hls)).not.toContain('#EXT-X-DISCONTINUITY');
+    expect(transform(hls).match(/#EXTINF:/g)).toHaveLength(40);
+
+    params.detailRef.current = DETAIL;
+    player.option.customType.m3u8(video, EPISODE_1);
+    expect(getManagedVideo(video).hls).toBe(hls);
+    expect(transform(hls)).toBe(content);
+
+    params.detailRef.current = { ...DETAIL, source: 'rycj' };
+    params.blockAdEnabledRef.current = false;
+    player.option.customType.m3u8(video, EPISODE_2);
+    const unfilteredHls = getManagedVideo(video).hls as unknown as MockHls;
+    expect(unfilteredHls).not.toBe(hls);
+    expect(transform(unfilteredHls)).toBe(content);
   });
 
   describe('routing and detail refresh', () => {
@@ -315,6 +448,7 @@ describe('initializeArtPlayer 拉流控制', () => {
     it('waits for the route and uses the same snapshot for HLS', async () => {
       let resolve!: (route: {
         useServerProxy: boolean;
+        directManifest: boolean;
         allowAutoFallback: boolean;
       }) => void;
       jest.mocked(resolveSourcePlaybackRoute).mockReturnValueOnce(
@@ -327,7 +461,11 @@ describe('initializeArtPlayer 拉流控制', () => {
       await act(flushMicrotasks);
       expect(MockArtplayer.instances).toHaveLength(0);
       await act(async () => {
-        resolve({ useServerProxy: true, allowAutoFallback: false });
+        resolve({
+          useServerProxy: true,
+          directManifest: false,
+          allowAutoFallback: false,
+        });
         await flushMicrotasks();
       });
       const player = MockArtplayer.instances[0];
@@ -340,6 +478,7 @@ describe('initializeArtPlayer 拉流控制', () => {
     it('discards initialization when the route arrives after unmount', async () => {
       let resolve!: (route: {
         useServerProxy: boolean;
+        directManifest: boolean;
         allowAutoFallback: boolean;
       }) => void;
       jest.mocked(resolveSourcePlaybackRoute).mockReturnValueOnce(
@@ -350,15 +489,35 @@ describe('initializeArtPlayer 拉流控制', () => {
       const hook = renderHook(() => useArtPlayer(createParams()));
       hook.unmount();
       await act(async () => {
-        resolve({ useServerProxy: true, allowAutoFallback: false });
+        resolve({
+          useServerProxy: true,
+          directManifest: false,
+          allowAutoFallback: false,
+        });
         await flushMicrotasks();
       });
       expect(MockArtplayer.instances).toHaveLength(0);
     });
 
+    it('显式直连把原始清单交给 HLS 和 AirPlay，失败仍留在直连', async () => {
+      jest.mocked(resolveSourcePlaybackRoute).mockResolvedValueOnce({
+        useServerProxy: false,
+        directManifest: true,
+        allowAutoFallback: false,
+      });
+      const { player, unmount } = await mountHook();
+      const managed = getManagedVideo(player.video);
+      expect(managed.hls?.loadSource).toHaveBeenCalledWith(EPISODE_1);
+      expect(player.video.querySelector('source')?.src).toBe(EPISODE_1);
+      expect(managed.__icetvSwitchToServerProxy?.('timeout')).toBe(false);
+      expect(managed.hls?.loadSource).toHaveBeenCalledTimes(1);
+      unmount();
+    });
+
     it('keeps automatic fallback enabled for the lifetime of the HLS load', async () => {
       jest.mocked(resolveSourcePlaybackRoute).mockResolvedValueOnce({
         useServerProxy: false,
+        directManifest: false,
         allowAutoFallback: true,
       });
       const { player } = await mountHook();
@@ -370,6 +529,7 @@ describe('initializeArtPlayer 拉流控制', () => {
     it('discards an old route response after switching episodes', async () => {
       let resolve!: (route: {
         useServerProxy: boolean;
+        directManifest: boolean;
         allowAutoFallback: boolean;
       }) => void;
       jest.mocked(resolveSourcePlaybackRoute).mockReturnValueOnce(
@@ -385,7 +545,11 @@ describe('initializeArtPlayer 拉流控制', () => {
       hook.rerender({ ...params, videoUrl: EPISODE_2, currentEpisodeIndex: 1 });
       await act(flushMicrotasks);
       await act(async () => {
-        resolve({ useServerProxy: true, allowAutoFallback: false });
+        resolve({
+          useServerProxy: true,
+          directManifest: false,
+          allowAutoFallback: false,
+        });
         await flushMicrotasks();
       });
       expect(MockArtplayer.instances).toHaveLength(1);

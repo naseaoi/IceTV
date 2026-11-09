@@ -104,11 +104,10 @@ const VideoSourceConfig = ({
     showAlert,
   });
   const [sources, setSources] = useState<DataSource[]>([]);
-  const {
-    routeStats,
-    capabilities: routeCapabilities,
-    health: sourceHealth,
-  } = useSourceInsights(config, Boolean(config?.SourceConfig));
+  const { routeStats, health: sourceHealth } = useSourceInsights(
+    config,
+    Boolean(config?.SourceConfig),
+  );
   const sourceRouteStats = useMemo(
     () => buildSourceRouteStats(routeStats),
     [routeStats],
@@ -126,13 +125,9 @@ const VideoSourceConfig = ({
       ).length,
     [sources, sourceHealth],
   );
-  const isRelaySource = useCallback(
-    (key: string) => routeCapabilities[key]?.direct === 'blocked',
-    [routeCapabilities],
-  );
   const relayCount = useMemo(
-    () => sources.filter((item) => isRelaySource(item.key)).length,
-    [sources, isRelaySource],
+    () => sources.filter((item) => item.proxyMode === 'server').length,
+    [sources],
   );
   const visibleRows = useMemo(() => {
     const matched = sources.filter(
@@ -140,7 +135,7 @@ const VideoSourceConfig = ({
         (healthFilter === 'all' ||
           (healthFilter === 'cleanup'
             ? isSourceCleanupCandidate(sourceHealth.get(item.key))
-            : isRelaySource(item.key))) &&
+            : item.proxyMode === 'server')) &&
         [item.name, item.key, item.api, item.detail].some((value) =>
           value?.toLowerCase().includes(normalizedQuery),
         ),
@@ -148,14 +143,7 @@ const VideoSourceConfig = ({
     return sortMode === 'quality'
       ? sortByHealth(matched, sourceHealth)
       : matched;
-  }, [
-    sources,
-    sourceHealth,
-    healthFilter,
-    isRelaySource,
-    sortMode,
-    normalizedQuery,
-  ]);
+  }, [sources, sourceHealth, healthFilter, sortMode, normalizedQuery]);
   const [showAddForm, setShowAddForm] = useState(false);
   const [editingSource, setEditingSource] = useState<DataSource | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<DataSource | null>(null);
@@ -458,7 +446,7 @@ const VideoSourceConfig = ({
             options={[
               { value: 'all', label: '全部' },
               { value: 'cleanup', label: `待清理 ${cleanupCount}` },
-              { value: 'relay', label: `需中转 ${relayCount}` },
+              { value: 'relay', label: `代理 ${relayCount}` },
             ]}
             showSelectedIcon={false}
             ariaLabel='按源站质量筛选'
@@ -582,7 +570,7 @@ const VideoSourceConfig = ({
                   {healthFilter === 'cleanup' && !normalizedQuery
                     ? '没有待清理的视频源'
                     : healthFilter === 'relay' && !normalizedQuery
-                      ? '没有需中转的视频源'
+                      ? '没有使用代理的视频源'
                       : isFiltering
                         ? '没有匹配的视频源'
                         : '暂无视频源'}
@@ -596,7 +584,6 @@ const VideoSourceConfig = ({
                   isSelected={selectedSources.has(source.key)}
                   validationStatus={getValidationStatus(source.key)}
                   sourceRouteStats={sourceRouteStats[source.key] || null}
-                  routeCapability={routeCapabilities[source.key] || null}
                   sourceHealth={sourceHealth.get(source.key) || null}
                   healthDays={SOURCE_INSIGHT_DAYS}
                   isProxyModeLoading={isLoading(`proxyMode_${source.key}`)}

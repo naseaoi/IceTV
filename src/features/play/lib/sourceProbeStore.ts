@@ -6,8 +6,8 @@ import {
 } from '@/features/play/lib/sourceProbeRequestPolicy';
 import { probeVodEpisodeUrl } from '@/features/play/lib/vodProbe';
 import { isLazyEpisodeUrl } from '@/lib/lazy-episodes';
-import { getProxyModes, shouldUseServerProxy } from '@/lib/proxy-modes';
-import { reportSourceRouteStat } from '@/lib/source-route-stats.client';
+import { getProxyModes, getSourcePlaybackRoute } from '@/lib/proxy-modes';
+import { reportSourcePlayOutcome } from '@/lib/source-route-stats.client';
 import { SearchResult } from '@/lib/types';
 
 export interface VideoInfo {
@@ -56,6 +56,21 @@ export function subscribe(listener: () => void) {
 
 export function getSnapshot(): ReadonlyMap<string, ProbeEntry> {
   return snapshotRef;
+}
+
+export function getFreshProbeInfo(
+  key: string,
+  now = Date.now(),
+): VideoInfo | undefined {
+  const entry = snapshotRef.get(key);
+  // 排队、暂缓和进行中的条目没有新测量；previousInfo 没有原始时间戳，不能续期使用。
+  if (
+    !entry ||
+    (entry.source !== 'probe' && entry.source !== 'player') ||
+    now - entry.ts >= PROBE_TTL_MS
+  )
+    return undefined;
+  return entry.info;
 }
 
 function deleteEntry(key: string) {
@@ -199,13 +214,9 @@ async function runProbe(
     }
 
     const proxyModes = await getProxyModes();
-    let useProxy = shouldUseServerProxy(resolved.source, undefined, proxyModes);
+    let route = getSourcePlaybackRoute(resolved.source, undefined, proxyModes);
     if (!resolved.episodes || resolved.episodes.length === 0) {
-      reportSourceRouteStat(
-        resolved.source,
-        useProxy ? 'server' : 'browser',
-        false,
-      );
+      reportSourcePlayOutcome(resolved.source, false);
       setEntry(key, {
         info: {
           quality: '未知',
@@ -231,36 +242,24 @@ async function runProbe(
       if (!probeEpisodeUrl) {
         throw new Error('Requested episode is unavailable for probe');
       }
-      useProxy = shouldUseServerProxy(
+      route = getSourcePlaybackRoute(
         resolved.source,
         probeEpisodeUrl,
         proxyModes,
       );
       const info = await probeVodEpisodeUrl(
         probeEpisodeUrl,
-        useProxy,
+        route,
         resolved.source,
       );
       // 换源面板的测速不用于起播，首分片样本立即释放
       takeProbeSegmentSample(info);
-      const finalUseProxy = shouldUseServerProxy(
-        resolved.source,
-        probeEpisodeUrl,
-        proxyModes,
-      );
-      reportSourceRouteStat(
-        resolved.source,
-        finalUseProxy ? 'server' : 'browser',
-        true,
-      );
+      reportSourcePlayOutcome(resolved.source, true);
       setEntry(key, { info, ts: Date.now(), source: 'probe' });
     } catch (error) {
       if (error instanceof SourceProbeDeferredError) throw error;
-      reportSourceRouteStat(
-        resolved.source,
-        useProxy ? 'server' : 'browser',
-        false,
-      );
+      if ((error as Error)?.name !== 'AbortError' && navigator.onLine !== false)
+        reportSourcePlayOutcome(resolved.source, false);
       setEntry(key, {
         info: {
           quality: '错误',
@@ -302,16 +301,16 @@ export function invalidateProbe(key: string) {
 
 export function seedProbeResults(
   results: Iterable<readonly [string, VideoInfo]>,
+  now = Date.now(),
 ) {
-  const now = Date.now();
   let mutated = false;
   const iter = results[Symbol.iterator]();
   while (true) {
     const { done, value } = iter.next();
     if (done) break;
     const [key, info] = value;
-    const existed = state.entries.get(key);
-    if (existed?.source === 'player') continue;
+    // 预计算结果没有测量时间，只补空位，避免覆盖面板新结果或给旧结果续期。
+    if (state.entries.has(key)) continue;
     state.entries.set(key, { info, ts: now, source: 'probe' });
     mutated = true;
   }

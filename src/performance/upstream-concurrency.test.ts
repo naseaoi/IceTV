@@ -71,9 +71,6 @@ jest.mock('@/lib/url-guard', () => ({
   ) => mockFetch(url, init),
   validateProxyUrlForRequest: async (url: string) => ({ ok: true, url }),
 }));
-jest.mock('@/features/play/lib/ad-segment-detector', () => ({
-  filterM3U8AdsForSource: async (content: string) => content,
-}));
 jest.mock('@/features/live/lib/live', () => ({
   isLiveEntryEnabled: async () => true,
 }));

@@ -10,6 +10,23 @@ type SourceRouteStatPayload = {
   eventAt: number;
 };
 
+export function reportSourcePlayOutcome(
+  source: string,
+  success: boolean,
+): void {
+  if (!getAuthInfoFromBrowserCookie()?.username || !source.trim()) return;
+  try {
+    void fetch('/api/source-route-stats', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        outcome: { source: source.trim(), success, eventAt: Date.now() },
+      }),
+      keepalive: true,
+    }).catch(() => {});
+  } catch {}
+}
+
 export function reportSourceRouteStat(
   source: string,
   routeMode: SourceRouteMode,

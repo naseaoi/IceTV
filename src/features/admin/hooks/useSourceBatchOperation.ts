@@ -109,9 +109,9 @@ export function useSourceBatchOperation({
             return;
           }
           const proxyModeLabel = proxyModeLabels[proxyMode];
-          confirmMessage = `确定要将选中的 ${keys.length} 个视频源流量路由改为「${proxyModeLabel}」吗？`;
-          actionName = `设置流量路由为${proxyModeLabel}`;
-          successMessage = `已将 ${keys.length} 个视频源流量路由改为「${proxyModeLabel}」`;
+          confirmMessage = `将选中的 ${keys.length} 个视频源设为「${proxyModeLabel}」吗？`;
+          actionName = `设置${proxyModeLabel}`;
+          successMessage = `已将 ${keys.length} 个视频源设为「${proxyModeLabel}」`;
           loadingKey = `${loadingKey}_${proxyMode}`;
           body.proxyMode = proxyMode;
           break;

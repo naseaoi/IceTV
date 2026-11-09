@@ -6,7 +6,6 @@ import type {
   CurrentSourceVideoInfoContext,
 } from '@/features/play/hooks/artPlayerTypes';
 import type { PlaybackRequestMode } from '@/features/play/hooks/usePlayPageState';
-import { shouldFilterAdsOnClient } from '@/features/play/lib/ad-filter-strategy-registry';
 import { resolveSourceSwitchCurrentPlayTime } from '@/features/play/lib/episodeResumePolicy';
 import { FragmentMemoryCacheLoader } from '@/features/play/lib/fragmentMemoryCache';
 import {
@@ -24,12 +23,10 @@ import {
   resolvePendingResumeTime,
 } from '@/features/play/lib/resumePlayback';
 import {
-  AUTO_ROUTE_PROXY_COOLDOWN_MS,
   BROWSER_ROUTE_FAILURE_THRESHOLD,
   buildVodFragLoadPolicy,
   ConsecutiveRouteFailureTracker,
   resolveAutoRouteFailureWindowMs,
-  resolveAutoRouteProxyProbeTimeoutMs,
   resolveVodFragmentTimeoutMs,
   SERVER_ROUTE_FAILURE_THRESHOLD,
 } from '@/features/play/lib/vodAutoRoutePolicy';
@@ -40,9 +37,12 @@ import {
 } from '@/features/play/lib/vodFragmentCacheRecovery';
 import { createVodHlsQualityController } from '@/features/play/lib/vodHlsQualityController';
 import {
-  buildVodProxyUrl,
-  buildVodSegmentProxyUrl,
-} from '@/features/play/lib/vodProxyUrl';
+  type VodPlaybackIntent,
+  createVodPlaybackIntent,
+  getVodSourceAttempt,
+  isVodRouteNetworkError,
+} from '@/features/play/lib/vodPlaybackIntent';
+import { buildVodProxyUrl } from '@/features/play/lib/vodProxyUrl';
 import { createVodSegmentPrebufferController } from '@/features/play/lib/vodSegmentPrebuffer';
 import {
   getVodHlsBufferOverrides,
@@ -67,9 +67,8 @@ import {
 import {
   type SourcePlaybackRoute,
   clearSourceProxyOverride,
-  isServerProxy,
+  getSourcePlaybackRoute,
   rememberSourceServerProxy,
-  shouldAutoFallbackToServer,
 } from '@/lib/proxy-modes';
 import { getRuntimeConfig } from '@/lib/runtime-config';
 import { reportSourceRouteStat } from '@/lib/source-route-stats.client';
@@ -86,6 +85,7 @@ type CreateVodM3u8LoaderOptions = {
   blockAdEnabledRef: MutableRefObject<boolean>;
   detailRef: MutableRefObject<SearchResult | null>;
   playbackInfoContext: CurrentSourceVideoInfoContext;
+  playbackIntentRef?: MutableRefObject<VodPlaybackIntent>;
   playbackRouteRef?: MutableRefObject<SourcePlaybackRoute | null>;
   playbackRequestModeRef: MutableRefObject<PlaybackRequestMode>;
   resumeTimeRef: MutableRefObject<number | null>;
@@ -132,13 +132,28 @@ export function getVodRuntimeSourceUrl(video: HTMLVideoElement): string | null {
 }
 
 // 原生播放没有 hls 运行时，同样登记本次加载的地址并挂上释放入口，换源和逐集解析停旧集时随之释放
-export function registerVodNativeRuntime(video: HTMLVideoElement, url: string) {
+export function registerVodNativeRuntime(
+  video: HTMLVideoElement,
+  url: string,
+  intent?: VodPlaybackIntent,
+) {
+  runManagedVideoCleanup(video);
+  getManagedVideo(video).__icetvSwitchToServerProxy = null;
   vodRuntimeSourceUrls.set(video, url);
-  let progress = beginVodStartupProgress(video, '');
+  const attempt = intent?.activeSource;
+  const beginProgress = () => {
+    const next = beginVodStartupProgress(video, '');
+    if (attempt) {
+      attempt.startedAt ??= next.startedAt;
+      next.startedAt = attempt.startedAt;
+    }
+    return next;
+  };
+  let progress = beginProgress();
   let bufferedEnd = 0;
   const onLoadStart = () => {
     bufferedEnd = 0;
-    progress = beginVodStartupProgress(video, '');
+    progress = beginProgress();
   };
   const onProgress = () => {
     const end = video.buffered.length
@@ -152,12 +167,18 @@ export function registerVodNativeRuntime(video: HTMLVideoElement, url: string) {
   const onLoadedMetadata = () => {
     progress.lastProgressAt = performance.now();
   };
+  const onPlaying = () => {
+    if (attempt) attempt.startedAt = null;
+  };
+  video.addEventListener('playing', onPlaying);
   video.addEventListener('loadstart', onLoadStart);
   video.addEventListener('progress', onProgress);
   video.addEventListener('loadedmetadata', onLoadedMetadata);
   assignManagedVideoCleanup(video, () => {
+    getManagedVideo(video).__icetvSwitchToServerProxy = null;
     vodRuntimeSourceUrls.delete(video);
     clearVodStartupProgress(video);
+    video.removeEventListener('playing', onPlaying);
     video.removeEventListener('loadstart', onLoadStart);
     video.removeEventListener('progress', onProgress);
     video.removeEventListener('loadedmetadata', onLoadedMetadata);
@@ -179,6 +200,7 @@ export function createVodM3u8Loader({
   detailRef,
   playbackInfoContext,
   playbackRouteRef,
+  playbackIntentRef,
   playbackRequestModeRef,
   resumeTimeRef,
   resumeModeRef,
@@ -198,11 +220,17 @@ export function createVodM3u8Loader({
       return;
     }
 
+    const intent = playbackIntentRef?.current ?? createVodPlaybackIntent();
     const managedVideo = getManagedVideo(video);
 
     runManagedVideoCleanup(managedVideo);
 
     const sourceKey = detailRef.current?.source || '';
+    const attempt = getVodSourceAttempt(
+      intent,
+      sourceKey,
+      detailRef.current?.id || '',
+    );
     const fragmentTimeoutMs = resolveVodSourceFragmentTimeoutMs(
       sourceKey,
       resolveVodFragmentTimeoutMs(
@@ -219,9 +247,7 @@ export function createVodM3u8Loader({
       ...sharedHlsConfig,
       ...sourceBufferOverrides,
     };
-    const currentBlockAd = blockAdEnabledRef.current;
-    const useClientAdFilter =
-      currentBlockAd && shouldFilterAdsOnClient(sourceKey);
+    const useClientAdFilter = blockAdEnabledRef.current;
     const fragmentHttpCacheRecovery =
       shouldRecoverVodFragmentHttpCache(sourceKey);
     const baseLoader = useClientAdFilter
@@ -314,6 +340,8 @@ export function createVodM3u8Loader({
           }
         }
       });
+      attempt.startedAt ??= progress.startedAt;
+      progress.startedAt = attempt.startedAt;
       return progress;
     };
     let startupProgress: ReturnType<typeof beginMediaLoad> | null = null;
@@ -321,19 +349,23 @@ export function createVodM3u8Loader({
       if (startupProgress) startupProgress.lastProgressAt = performance.now();
     };
 
+    const playbackRoute =
+      playbackRouteRef?.current ?? getSourcePlaybackRoute(sourceKey, url);
     const buildTargetUrl = (rawUrl: string, useServerProxy: boolean) =>
       buildVodProxyUrl({
         rawUrl,
         useServerProxy,
+        directManifest: !useServerProxy,
         sourceKey,
         playbackRequestMode: playbackRequestModeRef.current || 'initial',
       });
 
-    const playbackRoute = playbackRouteRef?.current;
-    const allowAutoFallback =
-      playbackRoute?.allowAutoFallback ?? shouldAutoFallbackToServer(sourceKey);
-    let currentUseServerProxy =
-      playbackRoute?.useServerProxy ?? isServerProxy(sourceKey, url);
+    const allowAutoFallback = playbackRoute.allowAutoFallback;
+    attempt.allowAutoFallback = allowAutoFallback;
+    const previousRoute = [...attempt.triedRoutes].at(-1);
+    let currentUseServerProxy = previousRoute
+      ? previousRoute === 'server'
+      : playbackRoute.useServerProxy;
     let targetUrl = buildTargetUrl(url, currentUseServerProxy);
     managedVideo.__icetvUsingServerProxy = currentUseServerProxy;
     const segmentPrebufferController = createVodSegmentPrebufferController({
@@ -352,11 +384,9 @@ export function createVodM3u8Loader({
     );
     const recoveryController = createHlsFatalRecoveryController();
     let videoRuntimeCleaned = false;
-    let proxyProbeInFlight = false;
-    let proxyProbeSequence = 0;
-    let proxyProbeController: AbortController | null = null;
-    let proxyRetryBlockedUntil = 0;
-    let serverFallbackAttempted = false;
+    const routeKey = (server: boolean) => (server ? 'server' : 'browser');
+    attempt.triedRoutes.add(routeKey(currentUseServerProxy));
+    let fallbackAwaitingProgress = attempt.routeSwitched;
     const routeStatReported = {
       browser: { success: false, failure: false },
       server: { success: false, failure: false },
@@ -410,14 +440,10 @@ export function createVodM3u8Loader({
       bufferFullErrorDetail: Hls.ErrorDetails?.BUFFER_FULL_ERROR,
     });
     const failCurrentSource = (reason: string) => {
-      if (sourceKey) {
-        clearSourceProxyOverride(sourceKey, url);
-      }
-      reportRouteStat(false);
       if (onPlaybackRecoveryExhausted?.(reason)) {
         return;
       }
-      // 自动换源接手时由换源流程释放；否则先取消恢复与探测，再停止加载，保留实例供手动重试。
+      // 自动换源接手时由换源流程释放；否则先取消恢复，再停止加载，保留实例供手动重试。
       runManagedVideoCleanup(video);
       if (typeof hls.stopLoad === 'function') {
         hls.stopLoad();
@@ -446,109 +472,44 @@ export function createVodM3u8Loader({
       loadingSessionRef.current.pendingInitialResumeTarget = null;
     };
 
-    const cancelProxyProbe = () => {
-      if (!proxyProbeInFlight && !proxyProbeController) {
-        return;
-      }
-      proxyProbeSequence += 1;
-      proxyProbeController?.abort();
-      proxyProbeController = null;
-      proxyProbeInFlight = false;
-    };
-
-    const switchToServerProxy = (reason: string) => {
+    const switchRoute = (_reason: string) => {
+      const nextServer = !currentUseServerProxy;
       if (
         videoRuntimeCleaned ||
+        (playbackIntentRef && playbackIntentRef.current !== intent) ||
         managedVideo.hls !== hls ||
-        currentUseServerProxy ||
+        !allowAutoFallback ||
         !sourceKey ||
-        !allowAutoFallback
-      ) {
+        navigator.onLine === false ||
+        attempt.routeSwitched ||
+        attempt.triedRoutes.has(routeKey(nextServer))
+      )
         return false;
-      }
-
-      const fallbackTargetUrl = buildTargetUrl(url, true);
-      console.warn('浏览器直连起播失败，切换服务端代理重试', {
-        sourceKey,
-        reason,
-      });
+      attempt.routeSwitched = true;
+      attempt.triedRoutes.add(routeKey(nextServer));
       reportRouteStat(false);
-      setRealtimeLoadSpeed('直连失败，切换代理...');
+      currentUseServerProxy = nextServer;
+      fallbackAwaitingProgress = true;
+      targetUrl = buildTargetUrl(url, nextServer);
+      managedVideo.__icetvUsingServerProxy = nextServer;
       segmentPrebufferController.dispose();
-
-      try {
-        if (sourceKey) {
-          rememberSourceServerProxy(sourceKey, url);
-        }
-        currentUseServerProxy = true;
-        serverFallbackAttempted = true;
-        targetUrl = fallbackTargetUrl;
-        managedVideo.__icetvUsingServerProxy = true;
-        browserFailureTracker.reset();
-        serverFailureTracker.reset();
-        recoveryController.reset();
-        firstFragSpeed = '';
-        firstFragPing = 0;
-        videoInfoReported = false;
-        fragLoadStart = performance.now();
-        setRealtimeLoadSpeed('代理加载中...');
-        resetSpeedFallbackTimer();
-        preservePlaybackPositionBeforeReload();
-        onSourceProxyFallbackStarted?.();
-        if (typeof hls.stopLoad === 'function') {
-          markManagedVideoExpectedAbort(video);
-          hls.stopLoad();
-        }
-        startupProgress = beginMediaLoad();
-        hls.loadSource(fallbackTargetUrl);
-        ensureVideoSource(video, fallbackTargetUrl);
-        return true;
-      } catch (error) {
-        console.error('切换服务端代理失败:', error);
-        return false;
-      }
-    };
-
-    const switchToBrowserDirect = (reason: string) => {
-      if (
-        videoRuntimeCleaned ||
-        managedVideo.hls !== hls ||
-        !currentUseServerProxy ||
-        !sourceKey ||
-        !allowAutoFallback
-      ) {
-        return false;
-      }
-
-      const directTargetUrl = buildTargetUrl(url, false);
-      console.warn('服务端代理连续加载失败，切回浏览器直连', {
-        sourceKey,
-        reason,
-      });
-      reportRouteStat(false);
-      clearSourceProxyOverride(sourceKey, url);
-      currentUseServerProxy = false;
-      targetUrl = directTargetUrl;
-      managedVideo.__icetvUsingServerProxy = false;
-      proxyRetryBlockedUntil = Date.now() + AUTO_ROUTE_PROXY_COOLDOWN_MS;
-      browserFailureTracker.reset();
-      serverFailureTracker.reset();
-      recoveryController.reset();
+      recoveryController.cancelPendingRetry();
       firstFragSpeed = '';
       firstFragPing = 0;
       videoInfoReported = false;
       fragLoadStart = performance.now();
-      setRealtimeLoadSpeed('代理响应较慢，切回浏览器直连...');
+      setRealtimeLoadSpeed(
+        nextServer ? '直连失败，切换代理...' : '代理失败，切换直连...',
+      );
       resetSpeedFallbackTimer();
       preservePlaybackPositionBeforeReload();
+      setIsVideoLoading(true);
       onSourceProxyFallbackStarted?.();
-      if (typeof hls.stopLoad === 'function') {
-        markManagedVideoExpectedAbort(video);
-        hls.stopLoad();
-      }
+      markManagedVideoExpectedAbort(video);
+      hls.stopLoad?.();
       startupProgress = beginMediaLoad();
-      hls.loadSource(directTargetUrl);
-      ensureVideoSource(video, directTargetUrl);
+      hls.loadSource(targetUrl);
+      ensureVideoSource(video, targetUrl);
       return true;
     };
 
@@ -561,114 +522,12 @@ export function createVodM3u8Loader({
       hls.loadSource(targetUrl);
     };
 
-    const requestServerProxyFallback = (
-      reason: string,
-      segmentUrl: string | null,
-    ) => {
-      if (
-        videoRuntimeCleaned ||
-        managedVideo.hls !== hls ||
-        currentUseServerProxy ||
-        !sourceKey ||
-        !allowAutoFallback ||
-        Date.now() < proxyRetryBlockedUntil
-      ) {
-        return false;
-      }
-      if (proxyProbeInFlight) {
-        return true;
-      }
-
-      proxyProbeInFlight = true;
-      const probeSequence = proxyProbeSequence + 1;
-      proxyProbeSequence = probeSequence;
-      const controller = new AbortController();
-      proxyProbeController = controller;
-      const probeTimer = setTimeout(
-        () => controller.abort(),
-        resolveAutoRouteProxyProbeTimeoutMs(fragmentTimeoutMs),
-      );
-      const probeUrl = segmentUrl
-        ? buildVodSegmentProxyUrl({
-            rawUrl: segmentUrl,
-            sourceKey,
-            playbackRequestMode: playbackRequestModeRef.current || 'initial',
-          })
-        : buildTargetUrl(url, true);
-
-      setRealtimeLoadSpeed('直连连续失败，正在检测代理...');
-      void (async () => {
-        try {
-          const response = await fetch(probeUrl, {
-            cache: 'no-store',
-            headers: segmentUrl ? { Range: 'bytes=0-65535' } : undefined,
-            signal: controller.signal,
-          });
-          if (!response.ok) {
-            return false;
-          }
-          if (segmentUrl) {
-            const reader = response.body?.getReader();
-            if (!reader) {
-              return false;
-            }
-            const chunk = await reader.read();
-            await reader.cancel().catch(() => {});
-            return !chunk.done && !!chunk.value?.byteLength;
-          }
-          const content = await response.text();
-          return content.includes('#EXTM3U');
-        } catch {
-          return false;
-        } finally {
-          clearTimeout(probeTimer);
-        }
-      })()
-        .then((proxyHealthy) => {
-          if (
-            probeSequence !== proxyProbeSequence ||
-            videoRuntimeCleaned ||
-            managedVideo.hls !== hls
-          ) {
-            return;
-          }
-          if (proxyHealthy) {
-            switchToServerProxy(reason);
-            return;
-          }
-          browserFailureTracker.reset();
-          proxyRetryBlockedUntil = Date.now() + AUTO_ROUTE_PROXY_COOLDOWN_MS;
-          setRealtimeLoadSpeed('代理响应较慢，继续浏览器直连');
-          resumeLoading();
-        })
-        .finally(() => {
-          if (probeSequence !== proxyProbeSequence) {
-            return;
-          }
-          proxyProbeController = null;
-          proxyProbeInFlight = false;
-        });
-      return true;
-    };
-    // 页面超时与恢复耗尽时直接切服务端不再探测，每次加载只试一次；成功时 onSourceProxyFallbackStarted 会重置页面超时计时。
-    // 不受探测冷却限制：探测慢只说明代理慢，此时直连已确定走不通，慢代理也好过停在超时
-    const startServerFallbackNow = (reason: string) => {
-      if (serverFallbackAttempted) {
-        return false;
-      }
-      cancelProxyProbe();
-      return switchToServerProxy(reason);
-    };
-    managedVideo.__icetvSwitchToServerProxy = startServerFallbackNow;
+    managedVideo.__icetvSwitchToServerProxy = switchRoute;
     registerStartupStateDescriber(video, 'route', () => ({
       allowAutoFallback,
       currentUseServerProxy,
-      serverFallbackAttempted,
-      proxyProbeInFlight,
-      proxyCooldownRemainingMs: Math.max(
-        0,
-        proxyRetryBlockedUntil - Date.now(),
-      ),
+      triedRoutes: [...attempt.triedRoutes],
+      routeSwitched: attempt.routeSwitched,
       fragmentTimeoutMs,
     }));
     vodRuntimeSourceUrls.set(video, url);
@@ -762,6 +621,13 @@ export function createVodM3u8Loader({
       tryRecoverPlaybackStall('stalled');
     };
     const onPlaying = () => {
+      if (
+        videoRuntimeCleaned ||
+        (playbackIntentRef && playbackIntentRef.current !== intent)
+      )
+        return;
+      // 起播完成关闭本轮预算，后续故障开启恢复预算；线路与换源尝试仍属于同一意图。
+      attempt.startedAt = null;
       clearStallConfirmation();
     };
     const onTimeUpdate = () => {
@@ -785,7 +651,6 @@ export function createVodM3u8Loader({
     const cleanupVideoRuntime = () => {
       if (videoRuntimeCleaned) return;
       videoRuntimeCleaned = true;
-      cancelProxyProbe();
       managedVideo.__icetvSwitchToServerProxy = null;
       vodRuntimeSourceUrls.delete(video);
       clearVodStartupProgress(video);
@@ -810,6 +675,11 @@ export function createVodM3u8Loader({
     video.addEventListener('timeupdate', onTimeUpdate);
 
     const onHlsError = function (_event: unknown, data: any) {
+      if (
+        managedVideo.hls !== hls ||
+        (playbackIntentRef && playbackIntentRef.current !== intent)
+      )
+        return;
       const errorDetails = String(data?.details || '');
       const errorReason = `${String(data?.type || 'unknown')}:${errorDetails || 'fatal'}`;
       const logResult = logHlsError(_event, data, {
@@ -826,63 +696,38 @@ export function createVodM3u8Loader({
       // bufferFullError 非致命，hls.js 已自行降低上限并安排重下失败分片；这里只把上限压到当前前向缓冲以内，不计失败也不拉流
       bufferBudgetController.handleError(data);
 
-      const isFragOrLevelNetworkError =
-        data.type === Hls.ErrorTypes.NETWORK_ERROR &&
-        /frag|segment|level/i.test(errorDetails);
+      if (navigator.onLine === false || /abort/i.test(errorDetails)) return;
+      const isRouteNetworkError = isVodRouteNetworkError(data);
       const isFragNetworkError =
-        data.type === Hls.ErrorTypes.NETWORK_ERROR &&
-        /frag|segment/i.test(errorDetails);
-      const isManifestOrLevelNetworkError =
-        data.type === Hls.ErrorTypes.NETWORK_ERROR &&
-        /manifest|level/i.test(errorDetails);
-      const isRouteNetworkError =
-        data.type === Hls.ErrorTypes.NETWORK_ERROR &&
-        /frag|segment|level|manifest/i.test(errorDetails);
-      let browserFailureThresholdReached = false;
-
+        isRouteNetworkError && /frag|segment/i.test(errorDetails);
+      const isFragOrLevelNetworkError =
+        isRouteNetworkError && /frag|segment|level/i.test(errorDetails);
       if (isRouteNetworkError) {
-        if (currentUseServerProxy) {
-          const serverFailureThresholdReached = serverFailureTracker.record();
-          // 起播前刚从直连回退过来就不再切回直连，否则两条路线会来回切到页面超时
-          const canReturnToBrowser =
-            !serverFallbackAttempted ||
-            loadingSessionRef.current.playbackStartNotified;
-          if (
-            (data.fatal || serverFailureThresholdReached) &&
-            canReturnToBrowser &&
-            switchToBrowserDirect(errorReason)
-          ) {
+        recoveryController.recordNetworkFailure(data.frag);
+        const thresholdReached = (
+          currentUseServerProxy ? serverFailureTracker : browserFailureTracker
+        ).record();
+        if (!isFragNetworkError || thresholdReached) {
+          reportRouteStat(false);
+          if (switchRoute(errorReason)) return;
+          if (allowAutoFallback) {
+            failCurrentSource(errorReason);
             return;
           }
-        } else {
-          browserFailureThresholdReached = browserFailureTracker.record();
         }
       }
-
       if (
         qualityController.tryRecoverManualSelectionFailure(
           isFragOrLevelNetworkError,
         )
-      ) {
+      )
         return;
-      }
-
-      if (
-        !currentUseServerProxy &&
-        (browserFailureThresholdReached ||
-          (data.fatal && isManifestOrLevelNetworkError)) &&
-        requestServerProxyFallback(
-          errorReason,
-          isFragNetworkError && data?.frag?.url ? String(data.frag.url) : null,
-        )
-      ) {
-        return;
-      }
 
       if (data.fatal) {
         if (
-          data.type === Hls.ErrorTypes.NETWORK_ERROR &&
-          currentUseServerProxy
+          isRouteNetworkError &&
+          currentUseServerProxy &&
+          !allowAutoFallback
         ) {
           failCurrentSource(errorReason);
           return;
@@ -911,7 +756,8 @@ export function createVodM3u8Loader({
           return;
         }
         if (recovery === 'exhausted') {
-          if (!startServerFallbackNow(errorReason)) {
+          if (!(isRouteNetworkError && switchRoute(errorReason))) {
+            if (isRouteNetworkError) reportRouteStat(false);
             failCurrentSource(errorReason);
           }
           return;
@@ -941,18 +787,21 @@ export function createVodM3u8Loader({
       segmentPrebufferController.handlePlaybackProgress();
       // 恢复时重下的失败位置之前的分片可能命中浏览器缓存，不能当作线路恢复，否则直连失败永远凑不满回退阈值
       if (recoveryController.handleFragmentLoaded(data?.frag)) {
+        reportRouteStat(true);
         if (currentUseServerProxy) {
           serverFailureTracker.reset();
+          if (fallbackAwaitingProgress)
+            rememberSourceServerProxy(sourceKey, url);
         } else {
           browserFailureTracker.reset();
-          cancelProxyProbe();
+          clearSourceProxyOverride(sourceKey, url);
         }
+        fallbackAwaitingProgress = false;
       }
       if (speedFallbackTimer) {
         clearTimeout(speedFallbackTimer);
         speedFallbackTimer = null;
       }
-      reportRouteStat(true);
       const stats = data.frag.stats;
       const loadedBytes = stats.loaded ?? stats.total ?? 0;
       const startTime = stats.loading.first ?? 0;
@@ -1000,7 +849,12 @@ export function createVodM3u8Loader({
     const whileRuntimeActive =
       <Args extends unknown[]>(handler: (...args: Args) => void) =>
       (...args: Args) => {
-        if (!videoRuntimeCleaned) handler(...args);
+        if (
+          !videoRuntimeCleaned &&
+          managedVideo.hls === hls &&
+          (!playbackIntentRef || playbackIntentRef.current === intent)
+        )
+          handler(...args);
       };
     const hlsHandlers = {
       onError: onHlsError,

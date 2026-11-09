@@ -1,10 +1,8 @@
 import {
   AUTO_ROUTE_FAILURE_WINDOW_MS,
-  AUTO_ROUTE_PROXY_PROBE_TIMEOUT_MS,
   buildVodFragLoadPolicy,
   ConsecutiveRouteFailureTracker,
   resolveAutoRouteFailureWindowMs,
-  resolveAutoRouteProxyProbeTimeoutMs,
   resolveVodFragmentTimeoutMs,
   VOD_FRAGMENT_MAX_LOAD_TIME_MS,
   VOD_FRAGMENT_MAX_RETRY_DELAY_MS,
@@ -87,12 +85,5 @@ describe('VOD fragment load policy', () => {
       2 * 10_000 + VOD_FRAGMENT_MAX_RETRY_DELAY_MS,
     );
     expect(resolveAutoRouteFailureWindowMs(30_000)).toBe(64_000);
-  });
-
-  it('derives the proxy probe timeout from the fragment timeout', () => {
-    expect(resolveAutoRouteProxyProbeTimeoutMs(3_000)).toBe(
-      AUTO_ROUTE_PROXY_PROBE_TIMEOUT_MS,
-    );
-    expect(resolveAutoRouteProxyProbeTimeoutMs(30_000)).toBe(30_000);
   });
 });

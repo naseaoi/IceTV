@@ -1,6 +1,10 @@
 import type { VideoQualityInfo } from '@/features/play/hooks/usePlayPageState';
 import { resolveEpisodeTargetIndex } from '@/features/play/lib/episodeMapping';
 import {
+  getFreshProbeInfo,
+  seedProbeResults,
+} from '@/features/play/lib/sourceProbeStore';
+import {
   type SourceSelectionContext,
   compareSourceRoutePreference,
   EMPTY_SOURCE_SELECTION_CONTEXT,
@@ -66,7 +70,7 @@ export function selectAutoSwitchCandidates({
   });
 }
 
-// 本次测速失败先排最后；其余按健康等级、历史可靠性分档、线路、历史偏好和速度排序。
+// 本次有效测速失败先排最后；其余按本地可靠性、条件性健康等级、线路、历史偏好和速度排序。
 export function rankAutoSwitchCandidates(
   candidates: readonly SearchResult[],
   videoInfoByKey: ReadonlyMap<string, VideoQualityInfo>,
@@ -74,10 +78,13 @@ export function rankAutoSwitchCandidates(
   now = Date.now(),
   selectionContext: SourceSelectionContext = EMPTY_SOURCE_SELECTION_CONTEXT,
 ): SearchResult[] {
+  // 面板尚未挂载时也接入预计算结果；之后只消费 store，过期条目不回退到旧参数。
+  seedProbeResults(videoInfoByKey, now);
   return candidates
     .map((candidate, index) => {
-      const info = videoInfoByKey.get(
+      const info = getFreshProbeInfo(
         buildAutoSwitchSourceKey(candidate.source, candidate.id),
+        now,
       );
       const failed = info?.hasError === true;
       return {

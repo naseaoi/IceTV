@@ -8,7 +8,6 @@ import { ApiSourcePicker } from './ApiSourcePicker';
 jest.mock('@/features/admin/hooks/useSourceInsights', () => ({
   useSourceInsights: () => ({
     routeStats: [],
-    capabilities: { relay: { direct: 'blocked' } },
     health: new Map(),
   }),
 }));
@@ -20,7 +19,13 @@ const sources: DataSource[] = [
     api: 'https://a.test/api',
     from: 'config',
   },
-  { key: 'relay', name: '中转乙', api: 'https://b.test/api', from: 'config' },
+  {
+    key: 'relay',
+    name: '中转乙',
+    api: 'https://b.test/api',
+    from: 'config',
+    proxyMode: 'server',
+  },
   {
     key: 'direct-c',
     name: '直连丙',
@@ -51,7 +56,7 @@ describe('ApiSourcePicker', () => {
   it('按线路筛选并只显示命中的视频源', () => {
     renderPicker();
 
-    chooseFilter(/^需中转 1$/);
+    chooseFilter(/^代理 1$/);
 
     expect(screen.getByText('中转乙')).toBeTruthy();
     expect(screen.queryByText('直连甲')).toBeNull();
@@ -60,7 +65,7 @@ describe('ApiSourcePicker', () => {
   it('全选只追加当前筛选结果中未禁用的视频源', () => {
     const onChange = renderPicker(['relay']);
 
-    chooseFilter(/^不需中转 2$/);
+    chooseFilter(/^直连 \/ 自动 2$/);
     fireEvent.click(screen.getByRole('checkbox', { name: '全选' }));
 
     expect(onChange).toHaveBeenCalledWith(['relay', 'direct-a']);
@@ -69,7 +74,7 @@ describe('ApiSourcePicker', () => {
   it('取消全选只移除当前筛选结果', () => {
     const onChange = renderPicker(['relay', 'direct-a']);
 
-    chooseFilter(/^不需中转 2$/);
+    chooseFilter(/^直连 \/ 自动 2$/);
     fireEvent.click(screen.getByRole('checkbox', { name: '全选' }));
 
     expect(onChange).toHaveBeenCalledWith(['relay']);

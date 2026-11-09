@@ -17,7 +17,7 @@ export const EMPTY_SOURCE_SELECTION_CONTEXT: SourceSelectionContext = {
   healthTiers: {},
 };
 
-// 等级缺失时不猜测服务端排序的分组边界，保留调用方原有的排序。
+// 本地可靠性独立于远端上下文；只有双方均为中性档时才参考全局健康。
 export function compareSourceRoutePreference(
   a: { source: string },
   b: { source: string },
@@ -25,19 +25,34 @@ export function compareSourceRoutePreference(
   playbackStats: ReadonlyMap<string, SourcePlaybackStat>,
   now = Date.now(),
 ): number {
-  if (
-    Object.keys(context.proxyModes).length === 0 ||
-    Object.keys(context.healthTiers).length === 0
-  )
-    return 0;
-  const healthRank = (source: string) =>
-    SOURCE_HEALTH_TIER_PRIORITY[context.healthTiers[source] ?? 'insufficient'];
+  const aTier = getSourcePlaybackPreferenceTier(
+    playbackStats.get(a.source),
+    now,
+  );
+  const bTier = getSourcePlaybackPreferenceTier(
+    playbackStats.get(b.source),
+    now,
+  );
+  if (aTier !== bTier) return aTier - bTier;
+
+  if (aTier === 1) {
+    // 没有本地证据且远端上下文不完整时，保留调用方原有顺序。
+    if (
+      Object.keys(context.proxyModes).length === 0 ||
+      Object.keys(context.healthTiers).length === 0
+    )
+      return 0;
+    const healthRank = (source: string) =>
+      SOURCE_HEALTH_TIER_PRIORITY[
+        context.healthTiers[source] ?? 'insufficient'
+      ];
+    const healthDifference = healthRank(a.source) - healthRank(b.source);
+    if (healthDifference) return healthDifference;
+  }
+
   return (
-    healthRank(a.source) - healthRank(b.source) ||
-    getSourcePlaybackPreferenceTier(playbackStats.get(a.source), now) -
-      getSourcePlaybackPreferenceTier(playbackStats.get(b.source), now) ||
     Number(context.proxyModes[a.source] === 'server') -
-      Number(context.proxyModes[b.source] === 'server')
+    Number(context.proxyModes[b.source] === 'server')
   );
 }
 

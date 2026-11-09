@@ -22,7 +22,6 @@ import {
   DEFAULT_SOURCE_PROXY_MODE,
 } from '@/lib/proxy-modes';
 import type { SourceHealthReportItem } from '@/lib/source-quality-policy';
-import type { SourceRouteCapability } from '@/lib/source-route-capability.server';
 
 export type SourceValidationStatus = {
   text: string;
@@ -49,38 +48,6 @@ const PROXY_MODE_OPTIONS = [
   { value: 'server', label: '代理' },
 ];
 
-const ROUTE_BLOCK_REASON_LABEL = {
-  cors: '分片不允许跨域访问',
-  'mixed-content': 'HTTPS 页面无法加载 HTTP 分片',
-} as const;
-
-// 只在线路设置与检测结论不一致、值得站长调整时提示
-function describeRouteCapability(
-  mode: SourceProxyMode,
-  capability: SourceRouteCapability | null,
-): { text: string; title: string; className: string } | null {
-  if (!capability) return null;
-  if (capability.direct === 'ok' && mode === 'server') {
-    return {
-      text: '可直连',
-      title: '分片允许跨域访问',
-      className:
-        'bg-emerald-100 text-emerald-800 dark:bg-emerald-900/20 dark:text-emerald-300',
-    };
-  }
-  if (capability.direct === 'blocked' && mode !== 'server') {
-    return {
-      text: '需中转',
-      title: capability.reason
-        ? ROUTE_BLOCK_REASON_LABEL[capability.reason]
-        : '浏览器无法直连',
-      className:
-        'bg-amber-100 text-amber-800 dark:bg-amber-900/20 dark:text-amber-300',
-    };
-  }
-  return null;
-}
-
 function isSourceProxyMode(value: string): value is SourceProxyMode {
   return value === 'auto' || value === 'browser' || value === 'server';
 }
@@ -90,7 +57,6 @@ interface SortableSourceRowProps {
   isSelected: boolean;
   validationStatus: SourceValidationStatus | null;
   sourceRouteStats: SourceRouteStatsView | null;
-  routeCapability: SourceRouteCapability | null;
   sourceHealth: SourceHealthReportItem | null;
   healthDays: number;
   isProxyModeLoading: boolean;
@@ -113,7 +79,6 @@ export function SortableSourceRow({
   isSelected,
   validationStatus,
   sourceRouteStats,
-  routeCapability,
   sourceHealth,
   healthDays,
   isProxyModeLoading,
@@ -138,7 +103,6 @@ export function SortableSourceRow({
     transition,
   } as CSSProperties;
   const proxyMode = source.proxyMode || DEFAULT_SOURCE_PROXY_MODE;
-  const routeHint = describeRouteCapability(proxyMode, routeCapability);
 
   const routeRate = (stats?: RouteModeStats) =>
     stats && stats.successRate !== null
@@ -217,14 +181,6 @@ export function SortableSourceRow({
           {source.adminOnly && (
             <span className='rounded bg-gray-100 px-1.5 text-xs text-gray-600 dark:bg-white/[0.06] dark:text-gray-300'>
               仅管理员
-            </span>
-          )}
-          {routeHint && (
-            <span
-              className={`rounded px-1.5 text-xs ${routeHint.className}`}
-              title={routeHint.title}
-            >
-              {routeHint.text}
             </span>
           )}
           {validationStatus && (

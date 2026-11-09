@@ -7,6 +7,7 @@ import type {
   VideoQualityInfo,
 } from '@/features/play/hooks/usePlayPageState';
 import { useSourceSwitch } from '@/features/play/hooks/useSourceSwitch';
+import { reportVodPlaybackOutcome } from '@/features/play/lib/vodPlaybackIntent';
 import {
   AUTO_SWITCH_SOURCE_STORAGE_KEY,
   readDanmakuEpisodeId,
@@ -19,7 +20,12 @@ import {
   readSourcePlaybackStats,
   recordSourcePlaybackSuccess,
 } from '@/lib/source-playback-stats';
+import { reportSourcePlayOutcome } from '@/lib/source-route-stats.client';
 import type { SearchResult } from '@/lib/types';
+
+jest.mock('@/lib/source-route-stats.client', () => ({
+  reportSourcePlayOutcome: jest.fn(),
+}));
 
 jest.mock('@/lib/db.client', () => ({
   deletePlayRecord: jest.fn(),
@@ -215,6 +221,7 @@ describe('useSourceSwitch 自动换源', () => {
 
   beforeEach(() => {
     localStorage.clear();
+    jest.mocked(reportSourcePlayOutcome).mockClear();
     mockSelectionContext = { proxyModes: {}, healthTiers: {} };
     mockGetVodRuntimeSourceUrl.mockReset();
     mockGetVodRuntimeSourceUrl.mockReturnValue(null);
@@ -247,6 +254,127 @@ describe('useSourceSwitch 自动换源', () => {
     expect(global.fetch).not.toHaveBeenCalled();
     // 未开启自动换源也要把三处触发点报给起播统计
     expect(options.onPlaybackStartFailed).toHaveBeenCalledTimes(3);
+  });
+
+  it('离线起播超时显示可重试状态而不消耗线路和源健康', () => {
+    jest.spyOn(navigator, 'onLine', 'get').mockReturnValue(false);
+    const { result, options } = setupHook({
+      availableSources: [createSource('a', THREE_EPISODES)],
+    });
+    expect(result.current.handleLoadingTimeout()).toBe(false);
+    expect(options.onPlaybackStartFailed).not.toHaveBeenCalled();
+    expect(result.current.playbackIntentRef.current.reportedSources.size).toBe(
+      0,
+    );
+    expect(result.current.playbackIntentRef.current.attempts).toBe(0);
+  });
+
+  it('离线懒解析与恢复耗尽共用守卫，不消费换源或健康', () => {
+    localStorage.setItem(AUTO_SWITCH_SOURCE_STORAGE_KEY, 'true');
+    jest.spyOn(navigator, 'onLine', 'get').mockReturnValue(false);
+    const { result, options } = setupHook({
+      availableSources: ['a', 'b'].map((key) =>
+        createSource(key, THREE_EPISODES),
+      ),
+    });
+    result.current.handleEpisodeUrlResolveFailed();
+    result.current.handlePlaybackRecoveryExhausted('fatal');
+    expect(result.current.playbackIntentRef.current.attempts).toBe(0);
+    expect(reportSourcePlayOutcome).not.toHaveBeenCalled();
+    expect(options.onPlaybackStartFailed).not.toHaveBeenCalled();
+    expect(global.fetch).not.toHaveBeenCalled();
+  });
+
+  it('候选详情期间离线撤回名额并进入可重试错误，联网后能重新加载', async () => {
+    localStorage.setItem(AUTO_SWITCH_SOURCE_STORAGE_KEY, 'true');
+    const online = jest.spyOn(navigator, 'onLine', 'get').mockReturnValue(true);
+    const { video, runtimeCleanup } = createLoadingVideo();
+    const { result, options } = setupHook({
+      availableSources: ['a', 'b'].map((key) =>
+        createSource(key, THREE_EPISODES),
+      ),
+      video,
+    });
+    const release = holdNextDetailFetch();
+    result.current.handlePlaybackRecoveryExhausted('fatal');
+    expect(runtimeCleanup).toHaveBeenCalledTimes(1);
+    online.mockReturnValue(false);
+    release();
+    await waitFor(() =>
+      expect(options.setError).toHaveBeenLastCalledWith(
+        '网络已断开，请联网后重试',
+      ),
+    );
+    expect(options.setCurrentSource).not.toHaveBeenCalled();
+    expect(options.setIsVideoLoading).toHaveBeenLastCalledWith(false);
+    expect(options.setRealtimeLoadSpeed).toHaveBeenLastCalledWith('');
+    expect(options.playbackRequestModeRef.current).toBe('initial');
+    expect(result.current.playbackIntentRef.current.attempts).toBe(0);
+    expect(reportSourcePlayOutcome).toHaveBeenCalledTimes(1);
+    expect(reportSourcePlayOutcome).toHaveBeenCalledWith('a', false);
+    online.mockReturnValue(true);
+    result.current.resetAutoSourceSwitch();
+    result.current.restartCurrentPlayback();
+    expect(options.setError).toHaveBeenLastCalledWith(null);
+    expect(options.setIsVideoLoading).toHaveBeenLastCalledWith(true);
+    expect(options.setPlaybackRetryNonce).toHaveBeenCalledTimes(1);
+    result.current.handlePlaybackRecoveryExhausted('fatal');
+    await waitFor(() => expect(options.currentSourceRef.current).toBe('b'));
+  });
+
+  it('换集重置中止详情请求，迟到的 JSON 不提交且旧意图失败不计数', async () => {
+    localStorage.setItem(AUTO_SWITCH_SOURCE_STORAGE_KEY, 'true');
+    const { result, options } = setupHook({
+      availableSources: ['a', 'b'].map((key) =>
+        createSource(key, THREE_EPISODES),
+      ),
+    });
+    let resolveBody!: (value: SearchResult) => void;
+    let signal: AbortSignal | null | undefined;
+    jest.mocked(global.fetch).mockImplementationOnce(async (_url, init) => {
+      signal = init?.signal;
+      return {
+        ok: true,
+        json: () =>
+          new Promise((resolve) => {
+            resolveBody = resolve;
+          }),
+      } as Response;
+    });
+    const oldIntent = result.current.playbackIntentRef.current;
+    result.current.handlePlaybackRecoveryExhausted('fatal');
+    await waitFor(() => expect(resolveBody).toBeDefined());
+    result.current.resetAutoSourceSwitch();
+    expect(signal?.aborted).toBe(true);
+    resolveBody(createSource('b', THREE_EPISODES));
+    await Promise.resolve();
+    await Promise.resolve();
+    result.current.handleEpisodeUrlResolveFailed(oldIntent);
+    expect(options.setCurrentSource).not.toHaveBeenCalled();
+    expect(options.setAvailableSources).not.toHaveBeenCalled();
+    expect(result.current.playbackIntentRef.current.attempts).toBe(0);
+    expect(reportSourcePlayOutcome).toHaveBeenCalledTimes(1);
+    expect(reportSourcePlayOutcome).toHaveBeenCalledWith('a', false);
+  });
+
+  it('中间失败源与成功候选各上报一次，候选独立获得预算', async () => {
+    localStorage.setItem(AUTO_SWITCH_SOURCE_STORAGE_KEY, 'true');
+    const { result, options } = setupHook({
+      availableSources: ['a', 'b'].map((key) =>
+        createSource(key, THREE_EPISODES),
+      ),
+    });
+    jest.spyOn(performance, 'now').mockReturnValue(59_750);
+    result.current.handleEpisodeUrlResolveFailed();
+    await waitFor(() => expect(options.currentSourceRef.current).toBe('b'));
+    const intent = result.current.playbackIntentRef.current;
+    expect(intent.activeSource?.startedAt).toBe(59_750);
+    reportVodPlaybackOutcome(intent, 'b', true);
+    reportVodPlaybackOutcome(intent, 'b', true);
+    result.current.handlePlaybackRecoveryExhausted('fatal');
+    expect(reportSourcePlayOutcome).toHaveBeenCalledTimes(2);
+    expect(reportSourcePlayOutcome).toHaveBeenNthCalledWith(1, 'a', false);
+    expect(reportSourcePlayOutcome).toHaveBeenNthCalledWith(2, 'b', true);
   });
 
   it('页面超时优先切到服务端代理，不急于换源', () => {

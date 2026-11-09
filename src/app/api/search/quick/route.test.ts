@@ -10,7 +10,6 @@ type Plan = { delayMs: number; playable: boolean };
 const plans: Record<string, Plan> = {};
 let healthTiers = new Map<string, string>();
 let proxyModes: Record<string, string | undefined> = {};
-let capabilities: Record<string, { direct: string; checkedAt: number }> = {};
 
 jest.mock('@/lib/api-auth', () => ({
   requireActiveUser: jest.fn(async () => ({ username: 'alice' })),
@@ -30,17 +29,6 @@ jest.mock('@/lib/config', () => ({
 }));
 jest.mock('@/lib/source-health.server', () => ({
   getSourceHealthTiers: jest.fn(async () => healthTiers),
-}));
-jest.mock('@/lib/source-route-capability.server', () => ({
-  getSourceRouteCapabilities: jest.fn(async () => capabilities),
-  resolveSourceRoute: (
-    mode: string | undefined,
-    caps: Record<string, { direct: string }>,
-    source: string,
-  ) =>
-    (mode || 'auto') === 'auto' && caps[source]?.direct === 'blocked'
-      ? 'server'
-      : mode || 'auto',
 }));
 jest.mock('@/lib/source-match', () => ({
   filterSourcesForPlayback: (results: unknown[]) => results,
@@ -79,7 +67,6 @@ describe('quick search route preference', () => {
   beforeEach(() => {
     healthTiers = new Map();
     proxyModes = {};
-    capabilities = {};
   });
 
   it('waits briefly for a direct source of the same health tier', async () => {
@@ -92,14 +79,14 @@ describe('quick search route preference', () => {
     await expect(quickWinner()).resolves.toMatchObject({ source: 'direct' });
   });
 
-  it('treats auto sources detected as blocked as relayed', async () => {
+  it('treats auto sources as direct candidates', async () => {
     setPlans({
       blocked: { delayMs: 5, playable: true },
       direct: { delayMs: 200, playable: true },
     });
-    capabilities = { blocked: { direct: 'blocked', checkedAt: Date.now() } };
+    proxyModes = { blocked: 'auto' };
 
-    await expect(quickWinner()).resolves.toMatchObject({ source: 'direct' });
+    await expect(quickWinner()).resolves.toMatchObject({ source: 'blocked' });
   });
 
   it('returns the relay source once no direct peer can win', async () => {

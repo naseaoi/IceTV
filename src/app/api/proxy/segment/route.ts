@@ -29,7 +29,6 @@ import {
 import { normalizeRuntimeParams } from '@/lib/runtime-params';
 import { requireServerProxyQuota } from '@/lib/server-proxy-guard';
 import { resourceLimitResponse } from '@/lib/server-resource-errors';
-import { markSourceCors, responseAllowsCors } from '@/lib/source-capability';
 import {
   fetchWithUrlGuard,
   UrlValidationError,
@@ -210,10 +209,6 @@ async function handleGet(request: NextRequest) {
             userInitiated,
           });
 
-          if (source) {
-            markSourceCors(source, responseAllowsCors(response.headers));
-          }
-
           return new Response(response.body, {
             status: response.status,
             statusText: response.statusText,
@@ -294,11 +289,6 @@ async function handleGet(request: NextRequest) {
       userAction,
       userInitiated,
     });
-
-    // 只用真实 segment 响应学习跨域能力，避免被 m3u8 响应头误导。
-    if (source) {
-      markSourceCors(source, responseAllowsCors(response.headers));
-    }
 
     const responseHeaders = buildSegmentResponseHeaders(
       response.headers,

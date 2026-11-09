@@ -30,7 +30,7 @@ it.each([
   ['batch_enable', '启用了 2 个视频源'],
   ['batch_disable', '禁用了 2 个视频源'],
   ['batch_delete', '删除了 2 个视频源'],
-  ['batch_set_proxy_mode', '已将 2 个视频源流量路由改为「服务端代理」'],
+  ['batch_set_proxy_mode', '已将 2 个视频源设为「服务端代理」'],
 ] as const)('%s 确认后执行并使用轻提示反馈', async (action, message) => {
   const { result, showAlert, callSourceApi, onClearSelection } = setup();
   act(() =>
