@@ -40,6 +40,8 @@ export async function withUpstreamTask<T>(
 export interface UpstreamGuardOptions extends UpstreamResourceContext {
   signal?: AbortSignal | null;
   store?: SharedResourceStore;
+  // 经代理出口时按出口分别冷却，单个出口被限流不拖累其他出口
+  cooldownScope?: string;
 }
 
 export async function withUpstreamResponse(
@@ -53,7 +55,10 @@ export async function withUpstreamResponse(
   const scope =
     kind === 'probe' ? 'probe' : kind === 'metadata' ? 'metadata' : 'media';
   const store = options.store ?? (await sharedResourceStore());
-  await checkUpstreamCooldown(store, host);
+  const cooldownKey = options.cooldownScope
+    ? `${host}@${options.cooldownScope}`
+    : host;
+  await checkUpstreamCooldown(store, cooldownKey);
   const token = randomUUID();
   const leases: string[] = [];
   const abortController = new AbortController();
@@ -200,7 +205,7 @@ export async function withUpstreamResponse(
       response.status === 429 ||
       (response.status === 503 && response.headers.has('retry-after'))
     ) {
-      const cooling = recordUpstreamCooldown(store, host, response);
+      const cooling = recordUpstreamCooldown(store, cooldownKey, response);
       await response.body?.cancel().catch(() => {});
       terminated = true;
       await release();

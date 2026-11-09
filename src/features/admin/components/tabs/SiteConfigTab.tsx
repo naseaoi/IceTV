@@ -62,6 +62,7 @@ const DEFAULT_SITE_SETTINGS: SiteConfig = {
   EnableOptimization: true,
   LiveDirectConnect: false,
   AutoSwitchSource: false,
+  UpstreamProxyPoolSegments: false,
   EnableDanmaku: false,
   EnableUserDanmaku: false,
   ...DEFAULT_RUNTIME_PARAMS,
@@ -85,6 +86,7 @@ type EditableSiteSettings = Pick<
   | 'EnableOptimization'
   | 'LiveDirectConnect'
   | 'AutoSwitchSource'
+  | 'UpstreamProxyPoolSegments'
   | 'EnableDanmaku'
   | 'EnableUserDanmaku'
   | 'DoubanProxyType'
@@ -125,6 +127,8 @@ function buildSiteSettings(config: AdminConfig): SiteConfig {
     EnableOptimization: config.SiteConfig.EnableOptimization ?? true,
     LiveDirectConnect: config.SiteConfig.LiveDirectConnect ?? false,
     AutoSwitchSource: config.SiteConfig.AutoSwitchSource ?? false,
+    UpstreamProxyPoolSegments:
+      config.SiteConfig.UpstreamProxyPoolSegments ?? false,
     EnableDanmaku: config.SiteConfig.EnableDanmaku ?? false,
     EnableUserDanmaku: config.SiteConfig.EnableUserDanmaku ?? false,
     DisableYellowFilter: config.SiteConfig.DisableYellowFilter ?? false,
@@ -146,6 +150,7 @@ function normalizeEditableSiteSettings(
     EnableOptimization: value.EnableOptimization ?? true,
     LiveDirectConnect: value.LiveDirectConnect ?? false,
     AutoSwitchSource: value.AutoSwitchSource ?? false,
+    UpstreamProxyPoolSegments: value.UpstreamProxyPoolSegments ?? false,
     EnableDanmaku: value.EnableDanmaku ?? false,
     EnableUserDanmaku: value.EnableUserDanmaku ?? false,
     DoubanProxyType: normalizeSiteDoubanProxyType(value.DoubanProxyType),
@@ -614,6 +619,20 @@ const SiteConfigComponent = ({
             className='w-full sm:w-80'
           />
         </AdminSettingRow>
+        {siteSettings.UpstreamProxyPoolConfigured && (
+          <AdminSettingRow label='视频分片走代理池' layout='inline'>
+            <AdminStatusSwitch
+              enabled={siteSettings.UpstreamProxyPoolSegments}
+              ariaLabel='切换视频分片走代理池'
+              onToggle={() =>
+                setSiteSettings((prev) => ({
+                  ...prev,
+                  UpstreamProxyPoolSegments: !prev.UpstreamProxyPoolSegments,
+                }))
+              }
+            />
+          </AdminSettingRow>
+        )}
       </AdminSettingsGroup>
 
       <AdminSettingsGroup title='功能'>

@@ -5,6 +5,7 @@ import {
   resolveProxyUserAgent,
 } from '@/app/api/proxy/utils';
 import { getOptionalActiveUser } from '@/lib/api-auth';
+import { getClientIp } from '@/lib/client-ip';
 import { getConfigForRead } from '@/lib/config';
 import {
   fetchResponseThroughProxy,
@@ -109,6 +110,13 @@ export async function GET(request: NextRequest) {
       headers: {
         'User-Agent': ua,
       },
+      resourceContext: {
+        identity:
+          authorization.via === 'session'
+            ? `user:${authorization.username}`
+            : `ip:${getClientIp(request)}`,
+      },
+      useProxyPool: !isLiveStream,
       skipInitialValidation: true,
       timeoutMs,
     });

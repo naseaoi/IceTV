@@ -158,9 +158,8 @@ async function handleGet(request: NextRequest) {
   }
 
   const ua = await resolveProxyUserAgent(source);
-  const runtimeParams = normalizeRuntimeParams(
-    (await getConfigForRead()).SiteConfig,
-  );
+  const siteConfig = (await getConfigForRead()).SiteConfig;
+  const runtimeParams = normalizeRuntimeParams(siteConfig);
   const timeoutMs = resolveVodSegmentProxyTimeoutMs(
     source,
     runtimeParams.ProxyRequestTimeoutSeconds * 1000,
@@ -250,6 +249,8 @@ async function handleGet(request: NextRequest) {
       headers,
       skipInitialValidation: true,
       timeoutMs,
+      useProxyPool:
+        !isLiveStream && siteConfig.UpstreamProxyPoolSegments === true,
       resourceContext,
       signal: request.signal,
     });

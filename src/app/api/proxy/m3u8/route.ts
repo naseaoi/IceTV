@@ -7,6 +7,7 @@ import {
 import { getRewrittenM3U8Content } from '@/features/play/lib/m3u8-rewrite';
 import { withSourceProbeBudget } from '@/features/play/lib/sourceProbeGuard.server';
 import { getOptionalActiveUser } from '@/lib/api-auth';
+import { getClientIp } from '@/lib/client-ip';
 import { getConfigForRead } from '@/lib/config';
 import { canUserWatchLive } from '@/lib/live-access.server';
 import { resolveProxyAuthorization } from '@/lib/proxy-auth';
@@ -94,6 +95,11 @@ async function handleGet(request: NextRequest) {
   );
   if (quotaFailure) return quotaFailure;
 
+  const identity =
+    authorization.via === 'session'
+      ? `user:${authorization.username}`
+      : `ip:${getClientIp(request)}`;
+
   if (isLive) {
     const config = await getConfigForRead();
     if (config.SiteConfig.EnableLiveEntry !== true) {
@@ -144,7 +150,7 @@ async function handleGet(request: NextRequest) {
       const { value, fresh } = cached;
       if (!fresh) {
         // 软过期：后台刷新，不阻塞当前响应
-        void refreshM3U8Cache(validation.url, ua, source, isLive);
+        void refreshM3U8Cache(validation.url, ua, source, isLive, identity);
       }
       scheduleSourceDirectProbe({
         source,
@@ -187,6 +193,7 @@ async function handleGet(request: NextRequest) {
       isLive,
       skipCache,
       {
+        identity,
         startedAt,
         proxyMode,
         userAction,

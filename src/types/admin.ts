@@ -45,6 +45,9 @@ export interface AdminConfig {
     EnableUserDanmaku: boolean;
     DanmakuEpisodeLimit: number;
     DanmakuRequestTimeoutSeconds: number;
+    UpstreamProxyPoolSegments?: boolean;
+    // 仅后台响应：服务端是否配置了 UPSTREAM_PROXY_POOL
+    UpstreamProxyPoolConfigured?: boolean;
   };
   UserConfig: {
     TotalUsers?: number;

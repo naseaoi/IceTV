@@ -110,6 +110,40 @@ it.each([
   }
 });
 
+it('仅在服务端配置代理池时显示分片走代理池开关，默认关闭', () => {
+  const { unmount } = render(
+    <SiteConfigTab config={config} refreshConfig={jest.fn()} />,
+  );
+  expect(
+    screen.queryByRole('switch', { name: '切换视频分片走代理池' }),
+  ).not.toBeInTheDocument();
+  unmount();
+
+  const onDirtyChange = jest.fn();
+  render(
+    <SiteConfigTab
+      config={
+        {
+          ...config,
+          SiteConfig: {
+            ...config.SiteConfig,
+            UpstreamProxyPoolConfigured: true,
+          },
+        } as AdminConfig
+      }
+      refreshConfig={jest.fn()}
+      onDirtyChange={onDirtyChange}
+    />,
+  );
+  const toggle = screen.getByRole('switch', {
+    name: '切换视频分片走代理池',
+    checked: false,
+  });
+  fireEvent.click(toggle);
+  expect(toggle).toHaveAttribute('aria-checked', 'true');
+  expect(onDirtyChange).toHaveBeenLastCalledWith(true);
+});
+
 it('配置未就绪时保持空内容', () => {
   const { container } = render(
     <SiteConfigTab config={null} refreshConfig={jest.fn()} />,

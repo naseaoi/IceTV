@@ -10,6 +10,7 @@
 
 ### Admin
 
+- 站长可配置 `UPSTREAM_PROXY_POOL` 上游代理池，分散回源出口 IP，降低单 IP 被源站限流的影响；视频分片默认直连，可在站点设置中切换为走代理池
 - LinuxDo 登录新增 `LINUXDO_CLIENT_ID`、`LINUXDO_CLIENT_SECRET` 与可选 `LINUXDO_REDIRECT_URI`，后台可启用并设置最低信任等级
 - 后台数据导入导出已移除，备份改用[数据库原生方式](docs/deployment.md#升级与备份)；升级前如需旧格式备份，请先用旧版本导出
 - 用户列表的视频源一栏显示实际可用数量，由用户组限定的会标注“用户组”，不再误显示为无限制

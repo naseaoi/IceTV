@@ -17,6 +17,7 @@ const baseConfig: AdminConfig = {
     EnableOptimization: true,
     LiveDirectConnect: false,
     AutoSwitchSource: false,
+    UpstreamProxyPoolSegments: false,
     EnableDanmaku: false,
     EnableUserDanmaku: false,
     ...DEFAULT_RUNTIME_PARAMS,

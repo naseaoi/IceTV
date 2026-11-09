@@ -17,6 +17,7 @@
 
 ## 线路检测
 
+- 点播清单、密钥与分片回源都传同一规则的 `resourceContext.identity`，[上游代理池](deployment.md#上游代理池)据此让同一用户走同一出口，漏传会静默变成轮询；清单与密钥只传标识不传 `kind`，避免改变资源额度类别。直播回源传 `useProxyPool: false`，不经代理池；点播分片仅在 `SiteConfig.UpstreamProxyPoolSegments` 为 `true` 时走代理池。新增 `SiteConfig` 字段须同步加入 `configSelfCheck()` 的字段白名单重建，否则保存后被静默丢弃。
 - 清单始终经服务端，分片才区分直连和代理。代理媒体清单时，`scheduleSourceDirectProbe()`（`src/lib/source-route-capability.server.ts`）在后台抽中间一个分片，带页面 `Origin` / `Referer` 检测：HTTPS 页面上的 HTTP 分片判为混合内容，响应成功但不放行页面来源判为跨域受限，上游错误、超时或额度不足不下结论。结论存进共享缓存的一条记录，按源分键，6 小时后重检、24 小时作废。
 - `/api/proxy-modes` 返回各源实际线路：判为无法直连的「自动」源直接给 `server`，客户端不再先直连失败一轮，也不会切回直连。「直连」「代理」是站长显式选择，不被检测结论改写。
 - 选源偏好直连：比较键依次为健康等级 → 本地历史可靠性档 → 非 `server` 线路，较慢的直连只在同档内优先，不跨档提升（`src/features/play/lib/sourceRoutePreference.ts`）。`/api/search/quick` 在服务端同档内先发起直连源，中转源先解析出可播详情时最多再等 1.5 秒给仍未完成的同档或更优直连源。客户端起播优选与自动换源用同一比较键；自动换源只读 `peekSourceSelectionContext()` 的缓存，不在换源路径上等网络。线路或健康等级任一缺失时不施加偏好。

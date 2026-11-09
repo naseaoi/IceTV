@@ -7,6 +7,7 @@ import { db } from '@/lib/db';
 import {
   ResourceLimitError,
   resourceLimitResponse,
+  UpstreamCooldownError,
 } from '@/lib/server-resource-errors';
 import type { SharedResourceStore } from '@/lib/shared-resource-store';
 import { LocalSqliteStorage } from '@/lib/sqlite.db';
@@ -158,6 +159,64 @@ describe('upstream resources', () => {
       await (
         await withUpstreamResponse('https://up.example/a', origin, { store })
       ).body!.cancel();
+      expect(origin).toHaveBeenCalledTimes(1);
+    });
+
+    it('isolates proxy cooldowns from direct and other exits, including shared storage reads', async () => {
+      const scope = 'http://127.0.0.1:7891';
+      const otherScope = 'http://127.0.0.1:7892';
+      const limitedOrigin = jest.fn(async () => limited(429, '30'));
+      await expect(
+        withUpstreamResponse('https://UP.example.:8443/a', limitedOrigin, {
+          store,
+          cooldownScope: scope,
+        }),
+      ).rejects.toBeInstanceOf(UpstreamCooldownError);
+      expect(leaseCount()).toBe(0);
+
+      const sharedStore = new SqliteResourceStore(
+        (storage as unknown as { db: Database.Database }).db,
+      );
+      const origin = jest.fn(loader);
+      for (const resourceStore of [store, sharedStore]) {
+        await expect(
+          withUpstreamResponse('http://up.example/b', origin, {
+            store: resourceStore,
+            cooldownScope: scope,
+          }),
+        ).rejects.toBeInstanceOf(UpstreamCooldownError);
+      }
+      expect(origin).not.toHaveBeenCalled();
+      expect(limitedOrigin).toHaveBeenCalledTimes(1);
+
+      for (const cooldownScope of [undefined, otherScope]) {
+        const response = await withUpstreamResponse(
+          'https://up.example/c',
+          origin,
+          { store: sharedStore, cooldownScope },
+        );
+        expect((await response.arrayBuffer()).byteLength).toBe(16);
+      }
+      expect(origin).toHaveBeenCalledTimes(2);
+      expect(leaseCount()).toBe(0);
+    });
+
+    it('keeps direct host cooldown separate from a proxy exit', async () => {
+      await expect(
+        withUpstreamResponse('https://up.example/a', async () => limited(), {
+          store,
+        }),
+      ).rejects.toBeInstanceOf(UpstreamCooldownError);
+      const origin = jest.fn(loader);
+      const response = await withUpstreamResponse(
+        'https://up.example/b',
+        origin,
+        { store, cooldownScope: 'http://127.0.0.1:7891' },
+      );
+      await response.arrayBuffer();
+      await expect(
+        withUpstreamResponse('https://up.example/c', origin, { store }),
+      ).rejects.toBeInstanceOf(UpstreamCooldownError);
       expect(origin).toHaveBeenCalledTimes(1);
     });
 

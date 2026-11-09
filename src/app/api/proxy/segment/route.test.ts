@@ -35,16 +35,23 @@ jest.mock('@/lib/url-guard', () => ({
   validateProxyUrlForRequest: (url: string) => mockValidateProxyUrl(url),
   fetchWithUrlGuard: (
     url: string,
-    init: { signal: AbortSignal; resourceContext: object },
-  ) =>
-    require('@/lib/upstream-resource-guard.server').withUpstreamResponse(
+    init: {
+      signal: AbortSignal;
+      resourceContext: object;
+      useProxyPool: boolean;
+    },
+  ) => {
+    mockFetchOptions(init);
+    return require('@/lib/upstream-resource-guard.server').withUpstreamResponse(
       url,
       mockOrigin,
       { ...init.resourceContext, signal: init.signal },
-    ),
+    );
+  },
 }));
 
 const mockOrigin = jest.fn();
+const mockFetchOptions = jest.fn();
 const mockValidateProxyUrl = jest.fn();
 installStreamPolyfills();
 const { GET } =
@@ -92,6 +99,37 @@ describe('segment shared resource integration', () => {
     else process.env.UPSTREAM_MEDIA_USER_CONCURRENCY = originalLimit;
     (storage as unknown as { db: Database.Database }).db.close();
   });
+
+  it.each([
+    [false, true, true],
+    [false, false, false],
+    [false, undefined, false],
+    [true, true, false],
+  ])(
+    'routes segments through the upstream pool only for VOD when enabled (live=%s, toggle=%s)',
+    async (isLive, segmentsToggle, expected) => {
+      (getConfigForRead as jest.Mock).mockResolvedValue({
+        SiteConfig: {
+          EnableLiveEntry: true,
+          LiveAccess: 'all',
+          UpstreamProxyPoolSegments: segmentsToggle,
+        },
+      });
+      mockFetchOptions.mockClear();
+      const mediaRequest = request();
+      Object.assign(mediaRequest, {
+        url: `${mediaRequest.url}&icetv-live=${isLive ? '1' : '0'}`,
+      });
+      const response = await GET(mediaRequest);
+      expect(response.status).toBe(200);
+      await response.arrayBuffer();
+      expect(mockFetchOptions).toHaveBeenCalledWith(
+        expect.objectContaining({
+          useProxyPool: expected,
+        }),
+      );
+    },
+  );
 
   it.each(['session', 'signature'])(
     'denies live segments without a granting group (%s)',

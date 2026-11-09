@@ -31,6 +31,7 @@ export type M3U8LoadResult = M3U8CacheEntry & {
 };
 
 export type M3U8ProxyRequestContext = {
+  identity?: string;
   startedAt: number;
   proxyMode: string;
   userAction: string | null;
@@ -102,6 +103,7 @@ export function refreshM3U8Cache(
   ua: string,
   source: string | null,
   isLive = false,
+  identity?: string,
 ): Promise<void> {
   const cacheKey = getM3U8CacheKey(url, source);
   const existing = m3u8RefreshInflight.get(cacheKey);
@@ -110,6 +112,7 @@ export function refreshM3U8Cache(
   const task = m3u8Cache
     .refresh(cacheKey, async () => {
       const loaded = await fetchM3U8Data(url, ua, source, isLive, {
+        identity,
         startedAt: Date.now(),
         proxyMode: 'server-proxy',
         userAction: null,
@@ -254,6 +257,8 @@ async function fetchM3U8Data(
     headers: {
       'User-Agent': ua,
     },
+    resourceContext: { identity: context.identity },
+    useProxyPool: !isLive,
     skipInitialValidation: true,
     timeoutMs,
   });

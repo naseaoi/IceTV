@@ -11,6 +11,8 @@ export interface SiteConfig {
   EnableOptimization: boolean;
   LiveDirectConnect: boolean;
   AutoSwitchSource: boolean;
+  UpstreamProxyPoolSegments: boolean;
+  UpstreamProxyPoolConfigured?: boolean;
   EnableDanmaku: boolean;
   EnableUserDanmaku: boolean;
   DanmakuEpisodeLimit: number;

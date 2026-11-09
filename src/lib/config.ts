@@ -573,6 +573,9 @@ export function configSelfCheck(adminConfig: AdminConfig): AdminConfig {
   if (typeof adminConfig.SiteConfig.AutoSwitchSource !== 'boolean') {
     adminConfig.SiteConfig.AutoSwitchSource = false;
   }
+  if (typeof adminConfig.SiteConfig.UpstreamProxyPoolSegments !== 'boolean') {
+    adminConfig.SiteConfig.UpstreamProxyPoolSegments = false;
+  }
   if (typeof adminConfig.SiteConfig.EnableDanmaku !== 'boolean') {
     adminConfig.SiteConfig.EnableDanmaku = false;
   }
@@ -597,6 +600,7 @@ export function configSelfCheck(adminConfig: AdminConfig): AdminConfig {
     EnableOptimization: site.EnableOptimization,
     LiveDirectConnect: site.LiveDirectConnect,
     AutoSwitchSource: site.AutoSwitchSource,
+    UpstreamProxyPoolSegments: site.UpstreamProxyPoolSegments,
     EnableDanmaku: site.EnableDanmaku,
     EnableUserDanmaku: site.EnableUserDanmaku,
     ...normalizeRuntimeParams(site),

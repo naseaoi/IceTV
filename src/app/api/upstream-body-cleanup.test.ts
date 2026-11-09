@@ -6,6 +6,11 @@ import { installWebPolyfills } from '@/app/api/test-utils/web-polyfills';
 
 installWebPolyfills();
 const mockFetch = jest.fn();
+const mockAuthorization = jest.fn(async () => ({
+  authorized: true,
+  via: 'session',
+  username: 'owner',
+}));
 
 jest.mock('@/lib/api-auth', () => ({
   isGuardFailure: () => false,
@@ -27,11 +32,7 @@ jest.mock('@/lib/live-access.server', () => ({
 }));
 jest.mock('@/lib/proxy-auth', () => ({
   authorizeProxyRequest: async () => null,
-  resolveProxyAuthorization: async () => ({
-    authorized: true,
-    via: 'session',
-    username: 'owner',
-  }),
+  resolveProxyAuthorization: () => mockAuthorization(),
 }));
 jest.mock('@/lib/url-guard', () => ({
   fetchWithUrlGuard: (...args: unknown[]) => mockFetch(...args),
@@ -95,6 +96,37 @@ it.each([
     });
     expect((await handle(request)).status).toBe(status);
     expect(cancel).toHaveBeenCalledTimes(1);
+  },
+);
+
+it.each([
+  ['session', false, 'user:owner'],
+  ['signature', false, 'ip:203.0.113.8'],
+  ['session', true, 'user:owner'],
+] as const)(
+  'key forwards %s identity and live=%s pool selection',
+  async (via, isLive, identity) => {
+    mockAuthorization.mockResolvedValueOnce({
+      authorized: true,
+      via,
+      username: 'owner',
+    });
+    mockFetch.mockClear().mockResolvedValue({
+      ok: false,
+      body: { cancel: jest.fn().mockResolvedValue(undefined) },
+    });
+    const response = await keyRoute.GET({
+      url: `${request.url}&icetv-live=${isLive ? '1' : '0'}`,
+      headers: new Headers({ 'x-real-ip': '203.0.113.8' }),
+    } as NextRequest);
+    expect(response.status).toBe(500);
+    expect(mockFetch).toHaveBeenCalledWith(
+      'https://example.com/image.jpg',
+      expect.objectContaining({
+        resourceContext: { identity },
+        useProxyPool: !isLive,
+      }),
+    );
   },
 );
 

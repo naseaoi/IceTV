@@ -206,3 +206,16 @@ it('LinuxDo 设置自检保留合法值并恢复无效默认值', () => {
   });
   expect(config.UserConfig.LinuxDoConfigured).toBeUndefined();
 });
+
+it('分片代理池开关自检保留布尔值并剔除仅响应字段', () => {
+  const config = legacyConfig();
+  config.SiteConfig.UpstreamProxyPoolSegments = true;
+  config.SiteConfig.UpstreamProxyPoolConfigured = true;
+  const checked = configSelfCheck(config).SiteConfig;
+  expect(checked.UpstreamProxyPoolSegments).toBe(true);
+  expect(checked.UpstreamProxyPoolConfigured).toBeUndefined();
+  config.SiteConfig.UpstreamProxyPoolSegments = 'on' as unknown as boolean;
+  expect(configSelfCheck(config).SiteConfig.UpstreamProxyPoolSegments).toBe(
+    false,
+  );
+});

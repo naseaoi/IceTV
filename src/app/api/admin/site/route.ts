@@ -36,6 +36,7 @@ export async function POST(request: NextRequest) {
       EnableOptimization,
       LiveDirectConnect,
       AutoSwitchSource,
+      UpstreamProxyPoolSegments,
       EnableDanmaku,
       EnableUserDanmaku,
       SearchDownstreamMaxPage,
@@ -59,6 +60,7 @@ export async function POST(request: NextRequest) {
       EnableOptimization: boolean;
       LiveDirectConnect: boolean;
       AutoSwitchSource?: boolean;
+      UpstreamProxyPoolSegments?: boolean;
       EnableDanmaku?: boolean;
       EnableUserDanmaku?: boolean;
       SearchDownstreamMaxPage: number;
@@ -85,6 +87,8 @@ export async function POST(request: NextRequest) {
       typeof LiveDirectConnect !== 'boolean' ||
       (AutoSwitchSource !== undefined &&
         typeof AutoSwitchSource !== 'boolean') ||
+      (UpstreamProxyPoolSegments !== undefined &&
+        typeof UpstreamProxyPoolSegments !== 'boolean') ||
       (EnableDanmaku !== undefined && typeof EnableDanmaku !== 'boolean') ||
       (EnableUserDanmaku !== undefined &&
         typeof EnableUserDanmaku !== 'boolean') ||
@@ -178,6 +182,9 @@ export async function POST(request: NextRequest) {
       LiveDirectConnect,
       AutoSwitchSource:
         AutoSwitchSource ?? adminConfig.SiteConfig.AutoSwitchSource,
+      UpstreamProxyPoolSegments:
+        UpstreamProxyPoolSegments ??
+        adminConfig.SiteConfig.UpstreamProxyPoolSegments,
       EnableDanmaku: EnableDanmaku ?? adminConfig.SiteConfig.EnableDanmaku,
       EnableUserDanmaku:
         EnableUserDanmaku ?? adminConfig.SiteConfig.EnableUserDanmaku,

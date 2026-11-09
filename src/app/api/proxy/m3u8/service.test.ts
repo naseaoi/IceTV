@@ -1,6 +1,21 @@
 /** @jest-environment node */
 
+import type { NextRequest } from 'next/server';
+
 import { installStreamPolyfills } from '@/app/api/test-utils/stream-polyfills';
+
+jest.mock('@/lib/proxy-auth', () => ({
+  resolveProxyAuthorization: (...args: unknown[]) => mockAuthorization(...args),
+}));
+jest.mock('@/lib/server-proxy-guard', () => ({
+  requireServerProxyQuota: async () => null,
+}));
+jest.mock('@/lib/source-route-capability.server', () => ({
+  scheduleSourceDirectProbe: jest.fn(),
+}));
+jest.mock('@/features/play/lib/m3u8-rewrite', () => ({
+  getRewrittenM3U8Content: async (entry: { content: string }) => entry.content,
+}));
 
 jest.mock('@/features/play/lib/ad-filter-strategy-registry', () => ({
   getAdFilterCacheNamespace: (source: string | null) => `test:${source ?? ''}`,
@@ -16,13 +31,18 @@ jest.mock('@/lib/http-proxy-json', () => ({
   getProxyUrlForTarget: () => undefined,
 }));
 jest.mock('@/lib/url-guard', () => ({
-  fetchWithUrlGuard: (url: string) => mockFetch(url),
+  fetchWithUrlGuard: (...args: unknown[]) => mockFetch(...args),
+  validateProxyUrlForRequest: async (url: string) => ({ ok: true, url }),
+  UrlValidationError: class extends Error {},
 }));
 
 const mockFetch = jest.fn();
+const mockAuthorization = jest.fn();
 installStreamPolyfills();
-const { loadM3U8Data, peekM3U8Cache } =
+const { loadM3U8Data, peekM3U8Cache, refreshM3U8Cache } =
   require('@/app/api/proxy/m3u8/service') as typeof import('@/app/api/proxy/m3u8/service');
+const { GET } =
+  require('@/app/api/proxy/m3u8/route') as typeof import('@/app/api/proxy/m3u8/route');
 
 const START = 1_000_000;
 const MINUTE = 60 * 1000;
@@ -51,6 +71,74 @@ async function load(url: string, content: string): Promise<void> {
     userInitiated: false,
   });
 }
+
+describe('m3u8 upstream identity', () => {
+  beforeEach(() => {
+    mockFetch.mockReset().mockImplementation(
+      async () =>
+        new Response(mediaPlaylist('seg-1.ts'), {
+          headers: { 'Content-Type': 'application/vnd.apple.mpegurl' },
+        }),
+    );
+  });
+
+  it.each([
+    ['session', 'user:viewer'],
+    ['signature', 'ip:203.0.113.8'],
+  ])(
+    'passes %s authorization identity without changing the resource kind',
+    async (via, identity) => {
+      mockAuthorization.mockResolvedValue({
+        authorized: true,
+        via,
+        username: 'viewer',
+      });
+      const url = `https://cdn.example/identity/${via}.m3u8?token=test`;
+      const response = await GET({
+        url: `http://localhost/api/proxy/m3u8?url=${encodeURIComponent(url)}`,
+        headers: new Headers({ 'x-real-ip': '203.0.113.8' }),
+      } as NextRequest);
+
+      expect(response.status).toBe(200);
+      expect(mockFetch).toHaveBeenCalledWith(
+        url,
+        expect.objectContaining({
+          resourceContext: { identity },
+          useProxyPool: true,
+        }),
+      );
+    },
+  );
+
+  it('preserves the requesting identity during a background refresh', async () => {
+    const url = 'https://cdn.example/identity/refresh.m3u8';
+    await refreshM3U8Cache(url, 'IceTV Test', SOURCE, false, 'user:viewer');
+    expect(mockFetch).toHaveBeenCalledWith(
+      url,
+      expect.objectContaining({
+        resourceContext: { identity: 'user:viewer' },
+      }),
+    );
+  });
+
+  it('keeps live fallback outside the upstream pool', async () => {
+    const url = 'https://cdn.example/identity/live.m3u8';
+    await loadM3U8Data(url, 'IceTV Test', SOURCE, true, true, {
+      identity: 'user:viewer',
+      startedAt: Date.now(),
+      proxyMode: 'server-proxy',
+      userAction: null,
+      userInitiated: false,
+    });
+    expect(mockFetch).toHaveBeenCalledWith(
+      url,
+      expect.objectContaining({
+        resourceContext: { identity: 'user:viewer' },
+        useProxyPool: false,
+      }),
+    );
+  });
+});
 
 describe('m3u8 cache ttl', () => {
   let clock: jest.SpyInstance<number, []>;

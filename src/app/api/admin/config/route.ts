@@ -5,6 +5,7 @@ import { getConfigFresh } from '@/lib/config';
 import { db } from '@/lib/db';
 import { getOwnerUsername } from '@/lib/env.server';
 import { isLinuxDoConfigured } from '@/lib/linuxdo-config.server';
+import { isUpstreamProxyPoolConfigured } from '@/lib/upstream-proxy-pool.server';
 import { AdminConfigResult } from '@/types/admin';
 
 export const runtime = 'nodejs';
@@ -23,6 +24,10 @@ export async function GET(request: NextRequest) {
       Config: {
         ...config,
         ...(await db.getConfigSubscription()),
+        SiteConfig: {
+          ...config.SiteConfig,
+          UpstreamProxyPoolConfigured: isUpstreamProxyPoolConfigured(),
+        },
         LiveConfig: (config.LiveConfig || []).map((source) => ({
           ...source,
           channelNumber: channelCounts[source.key] ?? 0,
