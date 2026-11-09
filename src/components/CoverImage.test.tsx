@@ -131,6 +131,37 @@ describe('CoverImage', () => {
     expect(screen.queryByTestId('cover-image')).not.toBeInTheDocument();
   });
 
+  it('豆瓣图片自动模式依次换用镜像，并在本标签页记住可用镜像', () => {
+    localStorage.setItem(DOUBAN_IMAGE_PROXY_TYPE_STORAGE_KEY, 'auto');
+    const src =
+      'https://img1.doubanio.com/view/photo/s_ratio_poster/public/p1.jpg';
+    const { unmount } = render(
+      <CoverImage src={src} alt='豆瓣封面' priority />,
+    );
+
+    expect(screen.getByTestId('cover-image')).toHaveAttribute(
+      'src',
+      'https://img.doubanio.cmliussss.net/view/photo/s_ratio_poster/public/p1.jpg',
+    );
+    fireEvent.error(screen.getByTestId('cover-image'));
+    const aliUrl =
+      'https://img.doubanio.cmliussss.com/view/photo/s_ratio_poster/public/p1.jpg';
+    expect(screen.getByTestId('cover-image')).toHaveAttribute('src', aliUrl);
+    fireEvent.load(screen.getByTestId('cover-image'));
+    unmount();
+
+    render(
+      <CoverImage
+        src='https://img1.doubanio.com/view/photo/s_ratio_poster/public/p2.jpg'
+        alt='另一张封面'
+        priority
+      />,
+    );
+    expect(screen.getByTestId('cover-image').getAttribute('src')).toContain(
+      'img.doubanio.cmliussss.com',
+    );
+  });
+
   it('同步已完成但未触发 load 的图片状态', async () => {
     jest.useFakeTimers();
 
@@ -346,6 +377,21 @@ describe('CoverImage', () => {
       'https://covers.example.com/poster.jpg',
     );
     expect(screen.queryByText('无封面')).not.toBeInTheDocument();
+  });
+
+  it('Bangumi 封面代理失败后回退原图直连一次', () => {
+    const src = 'https://lain.bgm.tv/pic/cover/l/27/ff/377130_wDU1x.jpg';
+    render(<CoverImage src={src} alt='番剧封面' priority />);
+
+    expect(screen.getByTestId('cover-image').getAttribute('src')).toMatch(
+      /^\/api\/bangumi-cover\//,
+    );
+
+    fireEvent.error(screen.getByTestId('cover-image'));
+    expect(screen.getByTestId('cover-image')).toHaveAttribute('src', src);
+
+    fireEvent.error(screen.getByTestId('cover-image'));
+    expect(screen.getByText('无封面')).toBeInTheDocument();
   });
 
   it('短期内不重试已经最终失败的封面', () => {

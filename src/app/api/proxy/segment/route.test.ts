@@ -122,6 +122,11 @@ describe('segment shared resource integration', () => {
       });
       const response = await GET(mediaRequest);
       expect(response.status).toBe(200);
+      expect(response.headers.get('Cache-Control')).toBe(
+        isLive
+          ? 'no-cache'
+          : 'private, max-age=3600, stale-while-revalidate=300',
+      );
       await response.arrayBuffer();
       expect(mockFetchOptions).toHaveBeenCalledWith(
         expect.objectContaining({

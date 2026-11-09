@@ -239,7 +239,7 @@ const serwist = new Serwist({
           new CacheableResponsePlugin({ statuses: [200] }),
           new ExpirationPlugin({
             maxEntries: 512,
-            // 和服务端 s-maxage 语义对齐，短 TTL 即可，SWR 会后台刷新
+            // Cache Storage 使用独立 TTL，SWR 后台刷新，不依赖 HTTP 的 public 指令
             maxAgeSeconds: 60 * 60,
           }),
         ],

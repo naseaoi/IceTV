@@ -1,10 +1,5 @@
 import 'server-only';
 
-import {
-  DEFAULT_BANGUMI_DATA_SOURCE,
-  normalizeBangumiDataSource,
-  normalizeSiteBangumiDataSource,
-} from '@/lib/bangumi-source';
 import { isCatalogFavoriteSource } from '@/lib/catalog-favorites';
 import { type ConfigStateUpdate, stripConfigState } from '@/lib/config-state';
 import { db } from '@/lib/db';
@@ -92,6 +87,7 @@ let inflightConfigLoad: Promise<AdminConfig> | null = null;
 let configCacheGeneration = 0;
 const DEFAULT_CONFIG_CACHE_TTL_MS = 60_000;
 const PUBLIC_DOUBAN_PROXY_TYPES = new Set([
+  'auto',
   'direct',
   'cors-proxy-zwei',
   'cmliussss-cdn-tencent',
@@ -106,12 +102,6 @@ export function getPublicDoubanProxyType(
   return proxyType && PUBLIC_DOUBAN_PROXY_TYPES.has(proxyType)
     ? proxyType
     : DEFAULT_DOUBAN_PROXY_TYPE;
-}
-
-export function getPublicBangumiDataSource(
-  dataSource: string | undefined,
-): string {
-  return dataSource === 'direct' ? dataSource : DEFAULT_BANGUMI_DATA_SOURCE;
 }
 
 export function getPublicDoubanImageProxyType(
@@ -296,10 +286,8 @@ async function getInitConfig(
           Number(process.env.NEXT_PUBLIC_SEARCH_MAX_PAGE) || 5,
         SiteInterfaceCacheTime: cfgFile.cache_time || 7200,
       }),
-      DoubanProxyType: process.env.NEXT_PUBLIC_DOUBAN_PROXY_TYPE || 'direct',
-      BangumiDataSource: normalizeBangumiDataSource(
-        process.env.NEXT_PUBLIC_BANGUMI_DATA_SOURCE,
-      ),
+      DoubanProxyType:
+        process.env.NEXT_PUBLIC_DOUBAN_PROXY_TYPE || DEFAULT_DOUBAN_PROXY_TYPE,
       DoubanImageProxyType:
         process.env.NEXT_PUBLIC_DOUBAN_IMAGE_PROXY_TYPE ||
         DEFAULT_DOUBAN_IMAGE_PROXY_TYPE,
@@ -535,10 +523,8 @@ export function configSelfCheck(adminConfig: AdminConfig): AdminConfig {
           Number(process.env.NEXT_PUBLIC_SEARCH_MAX_PAGE) || 5,
         SiteInterfaceCacheTime: 7200,
       }),
-      DoubanProxyType: process.env.NEXT_PUBLIC_DOUBAN_PROXY_TYPE || 'direct',
-      BangumiDataSource: normalizeBangumiDataSource(
-        process.env.NEXT_PUBLIC_BANGUMI_DATA_SOURCE,
-      ),
+      DoubanProxyType:
+        process.env.NEXT_PUBLIC_DOUBAN_PROXY_TYPE || DEFAULT_DOUBAN_PROXY_TYPE,
       DoubanImageProxyType:
         process.env.NEXT_PUBLIC_DOUBAN_IMAGE_PROXY_TYPE ||
         DEFAULT_DOUBAN_IMAGE_PROXY_TYPE,
@@ -605,9 +591,6 @@ export function configSelfCheck(adminConfig: AdminConfig): AdminConfig {
     EnableUserDanmaku: site.EnableUserDanmaku,
     ...normalizeRuntimeParams(site),
     DoubanProxyType: normalizeSiteDoubanProxyType(site.DoubanProxyType),
-    BangumiDataSource: normalizeSiteBangumiDataSource(
-      site.BangumiDataSource || DEFAULT_BANGUMI_DATA_SOURCE,
-    ),
     DoubanImageProxyType: normalizeSiteDoubanImageProxyType(
       site.DoubanImageProxyType,
     ),
@@ -834,9 +817,6 @@ export async function getPublicConfig() {
     ...normalizeRuntimeParams(config.SiteConfig),
     DoubanProxyType: getPublicDoubanProxyType(
       config.SiteConfig.DoubanProxyType,
-    ),
-    BangumiDataSource: getPublicBangumiDataSource(
-      config.SiteConfig.BangumiDataSource,
     ),
     DoubanImageProxyType: getPublicDoubanImageProxyType(
       config.SiteConfig.DoubanImageProxyType,

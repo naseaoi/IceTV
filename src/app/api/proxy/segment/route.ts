@@ -366,7 +366,7 @@ function buildSegmentResponseHeaders(
     'Cache-Control',
     isLiveStream
       ? 'no-cache'
-      : 'public, max-age=3600, stale-while-revalidate=300',
+      : 'private, max-age=3600, stale-while-revalidate=300',
   );
 
   const contentType = sourceHeaders.get('content-type');

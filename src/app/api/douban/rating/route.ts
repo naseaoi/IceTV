@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 
 import { isGuardFailure, requireActiveUser } from '@/lib/api-auth';
-import { createPublicApiCacheHeaders } from '@/lib/api-cache-headers';
+import { createPrivateApiCacheHeaders } from '@/lib/api-cache-headers';
 import { getServerCacheBudget } from '@/lib/cache-budget-profile';
 import { getCacheTime } from '@/lib/config';
 import { fetchDoubanData } from '@/lib/douban';
@@ -66,7 +66,7 @@ export async function GET(request: NextRequest) {
 
     return NextResponse.json(
       { rate },
-      { headers: createPublicApiCacheHeaders(await getCacheTime()) },
+      { headers: createPrivateApiCacheHeaders(await getCacheTime()) },
     );
   } catch (error) {
     const busy = resourceLimitResponse(error);

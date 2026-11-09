@@ -31,17 +31,13 @@ beforeEach(() => {
 });
 
 function selectCustomProxy(index = 0) {
-  fireEvent.click(
-    screen.getAllByRole('button', { name: '直连（浏览器请求）' })[index],
-  );
+  fireEvent.click(screen.getAllByRole('button', { name: '自动' })[index]);
   fireEvent.click(screen.getByRole('option', { name: '自定义代理' }));
 }
 
 it('更换代理使用轻提示并保留设置面板', () => {
   render(<SettingsPanel onClose={jest.fn()} />);
-  fireEvent.click(
-    screen.getAllByRole('button', { name: '直连（浏览器请求）' })[0],
-  );
+  fireEvent.click(screen.getAllByRole('button', { name: '自动' })[0]);
   fireEvent.click(screen.getByRole('option', { name: 'Cors Proxy By Zwei' }));
   expect(showToast).toHaveBeenCalledWith('更换成功，刷新页面后生效', 'success');
   expect(screen.getAllByRole('dialog')).toHaveLength(1);
@@ -51,7 +47,6 @@ it('更换代理使用轻提示并保留设置面板', () => {
 it.each([
   [0, '请填写豆瓣代理地址'],
   [1, '请填写豆瓣图片代理地址'],
-  [2, '请填写 Bangumi 代理地址'],
 ])('第 %s 项代理地址缺失时显示错误轻提示', (index, message) => {
   render(<SettingsPanel onClose={jest.fn()} />);
   selectCustomProxy(Number(index));

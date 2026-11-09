@@ -62,6 +62,84 @@ describe('shared server cache', () => {
     expect(loader).toHaveBeenCalledTimes(1);
   });
 
+  it('returns cold-instance stale data while one background refresh writes back', async () => {
+    const clock = jest.spyOn(Date, 'now').mockReturnValue(1000);
+    await cache().getOrLoad('same', async () => 'old');
+    clock.mockReturnValue(2100);
+    let resolveOrigin!: (value: string) => void;
+    const loader = jest.fn(
+      () =>
+        new Promise<string>((resolve) => {
+          resolveOrigin = resolve;
+        }),
+    );
+    const cold = cache();
+    const staleRequest = cold.getOrLoad('same', loader);
+    let refreshSettled = false;
+    const concurrentRefresh = cold.refresh('same', loader).then(() => {
+      refreshSettled = true;
+    });
+    await expect(staleRequest).resolves.toBe('old');
+    expect(refreshSettled).toBe(false);
+    await expect(cold.getOrLoad('same', loader)).resolves.toBe('old');
+    await expect(cache().getOrLoad('same', loader)).resolves.toBe('old');
+    expect(loader).toHaveBeenCalledTimes(1);
+    expect(cold.stats().inflight).toBe(1);
+    resolveOrigin('new');
+    await concurrentRefresh;
+    expect(refreshSettled).toBe(true);
+    await cold.refresh('same', loader);
+    expect(cold.stats().inflight).toBe(0);
+    await expect(cache().getOrLoad('same', loader)).resolves.toBe('new');
+    expect(loader).toHaveBeenCalledTimes(1);
+  });
+
+  it('keeps returned stale data and releases its lease when background loading fails', async () => {
+    const clock = jest.spyOn(Date, 'now').mockReturnValue(1000);
+    await cache().getOrLoad('same', async () => 'old');
+    clock.mockReturnValue(2100);
+    let rejectOrigin!: (error: Error) => void;
+    const cold = cache();
+    const loader = () =>
+      new Promise<string>((_resolve, reject) => {
+        rejectOrigin = reject;
+      });
+    await expect(cold.getOrLoad('same', loader)).resolves.toBe('old');
+    const completed = cold.refresh('same', loader);
+    rejectOrigin(new Error('background failed'));
+    await expect(completed).rejects.toThrow('background failed');
+    expect(cold.peek('same')).toEqual({ value: 'old', fresh: false });
+    const key = `shared-test:${createHash('sha256').update('same').digest('hex')}`;
+    expect((await storage.getSharedCache(key))?.value).toBe('"old"');
+    expect(
+      await storage.acquireSharedCacheLease(key, 'next', 2100, 31_000),
+    ).toBe(true);
+    await storage.releaseSharedCacheLease(key, 'next');
+  });
+
+  it('waits for the origin when there is no usable value', async () => {
+    let resolveOrigin!: (value: string) => void;
+    let settled = false;
+    let pending!: Promise<string>;
+    const started = new Promise<void>((resolveStarted) => {
+      const cold = cache();
+      const result = cold.getOrLoad('empty', () => {
+        resolveStarted();
+        return new Promise<string>((resolve) => {
+          resolveOrigin = resolve;
+        });
+      });
+      void result.then(() => {
+        settled = true;
+      });
+      pending = result;
+    });
+    await started;
+    expect(settled).toBe(false);
+    resolveOrigin('loaded');
+    await expect(pending).resolves.toBe('loaded');
+  });
+
   it('does not rerun a rejected origin loader', async () => {
     const loader = jest.fn(async () => {
       throw new Error('origin failed');

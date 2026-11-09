@@ -1,6 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server';
 
-import { episodeUrlCache } from '@/app/api/episode-url/cache';
+import {
+  episodeUrlCache,
+  getEpisodeUrlCacheKey,
+} from '@/app/api/episode-url/cache';
 import { withSourceProbeBudget } from '@/features/play/lib/sourceProbeGuard.server';
 import { isGuardFailure, requireActiveUser } from '@/lib/api-auth';
 import type { ApiSite } from '@/lib/config';
@@ -69,7 +72,7 @@ async function handleGet(request: NextRequest) {
       return NextResponse.json({ error: '无效的API来源' }, { status: 400 });
     }
 
-    const cacheKey = `${sourceCode}::${lazyUrl}`;
+    const cacheKey = getEpisodeUrlCacheKey(apiSite, lazyUrl);
     const url = IS_DEVELOPMENT
       ? await resolveEpisodeUrl(target.kind, apiSite, target.path)
       : await episodeUrlCache.getOrLoad(cacheKey, () =>

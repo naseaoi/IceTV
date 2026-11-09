@@ -15,10 +15,20 @@ jest.mock('@/lib/douban.client', () => ({
 }));
 
 function DoubanFeedProbe() {
-  const { hasMore, loading, selectorsReady } = useDoubanFeed('movie');
+  const {
+    doubanData,
+    hasMore,
+    loading,
+    selectorsReady,
+    loadFailed,
+    retryLoad,
+  } = useDoubanFeed('movie');
 
   return (
     <div>
+      <span data-testid='count'>{doubanData.length}</span>
+      <span data-testid='load-failed'>{String(loadFailed)}</span>
+      <button onClick={retryLoad}>重试</button>
       <span data-testid='has-more'>{String(hasMore)}</span>
       <span data-testid='loading'>{String(loading)}</span>
       <span data-testid='selectors-ready'>{String(selectorsReady)}</span>
@@ -66,7 +76,31 @@ describe('useDoubanFeed', () => {
     await waitFor(() => {
       expect(screen.getByTestId('loading')).toHaveTextContent('false');
       expect(screen.getByTestId('has-more')).toHaveTextContent('false');
+      expect(screen.getByTestId('load-failed')).toHaveTextContent('true');
     });
+  });
+
+  it('retries a failed initial load', async () => {
+    (getDoubanCategories as jest.Mock)
+      .mockRejectedValueOnce(new Error('获取豆瓣分类数据失败'))
+      .mockResolvedValueOnce({
+        code: 200,
+        message: 'ok',
+        list: [{ id: '1', title: 'A', poster: '', rate: '', year: '' }],
+      });
+
+    render(<DoubanFeedProbe />);
+    await waitFor(() => {
+      expect(screen.getByTestId('load-failed')).toHaveTextContent('true');
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: '重试' }));
+
+    await waitFor(() => {
+      expect(screen.getByTestId('count')).toHaveTextContent('1');
+      expect(screen.getByTestId('load-failed')).toHaveTextContent('false');
+    });
+    expect(getDoubanCategories).toHaveBeenCalledTimes(2);
   });
 
   it('switches Bangumi weekdays from the loaded calendar without showing loading again', async () => {

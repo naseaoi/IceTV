@@ -3,7 +3,6 @@ import { NextRequest, NextResponse } from 'next/server';
 
 import { isGuardFailure, requireAdmin } from '@/lib/api-auth';
 import { configConflictResponse } from '@/lib/api-config-error';
-import { normalizeSiteBangumiDataSource } from '@/lib/bangumi-source';
 import { getConfig, invalidateConfigCache, saveConfig } from '@/lib/config';
 import {
   normalizeSiteDoubanImageProxyType,
@@ -42,7 +41,6 @@ export async function POST(request: NextRequest) {
       SearchDownstreamMaxPage,
       SiteInterfaceCacheTime,
       DoubanProxyType,
-      BangumiDataSource,
       DoubanImageProxyType,
       SourceCoverProxyMode,
       DisableYellowFilter,
@@ -66,7 +64,6 @@ export async function POST(request: NextRequest) {
       SearchDownstreamMaxPage: number;
       SiteInterfaceCacheTime: number;
       DoubanProxyType: string;
-      BangumiDataSource?: string;
       DoubanImageProxyType: string;
       SourceCoverProxyMode?: string;
       DisableYellowFilter: boolean;
@@ -95,8 +92,6 @@ export async function POST(request: NextRequest) {
       typeof SearchDownstreamMaxPage !== 'number' ||
       typeof SiteInterfaceCacheTime !== 'number' ||
       typeof DoubanProxyType !== 'string' ||
-      (BangumiDataSource !== undefined &&
-        typeof BangumiDataSource !== 'string') ||
       typeof DoubanImageProxyType !== 'string' ||
       (SourceCoverProxyMode !== undefined &&
         typeof SourceCoverProxyMode !== 'string') ||
@@ -132,11 +127,7 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    if (
-      DoubanProxyType === 'custom' ||
-      BangumiDataSource === 'custom' ||
-      DoubanImageProxyType === 'custom'
-    ) {
+    if (DoubanProxyType === 'custom' || DoubanImageProxyType === 'custom') {
       return NextResponse.json(
         { error: '站点配置不支持自定义代理，请在本地设置中配置' },
         { status: 400 },
@@ -191,9 +182,6 @@ export async function POST(request: NextRequest) {
       SearchDownstreamMaxPage,
       SiteInterfaceCacheTime,
       DoubanProxyType: normalizeSiteDoubanProxyType(DoubanProxyType),
-      BangumiDataSource: normalizeSiteBangumiDataSource(
-        BangumiDataSource || adminConfig.SiteConfig.BangumiDataSource,
-      ),
       DoubanImageProxyType:
         normalizeSiteDoubanImageProxyType(DoubanImageProxyType),
       SourceCoverProxyMode: normalizeSourceCoverProxyMode(

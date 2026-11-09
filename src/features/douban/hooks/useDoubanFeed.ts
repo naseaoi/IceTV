@@ -224,9 +224,12 @@ export function useDoubanFeed(type: string) {
   const runtimeConfig = useRuntimeConfig();
   const [doubanData, setDoubanData] = useState<DoubanItem[]>([]);
   const [loading, setLoading] = useState(false);
+  // 区分「请求失败」与「没有更多」：失败时保留重试入口，不能显示成空列表或已到底
+  const [loadFailed, setLoadFailed] = useState(false);
   const [bangumiCalendarError, setBangumiCalendarError] = useState<
     string | null
   >(null);
+  const [retryCount, setRetryCount] = useState(0);
   const [currentPage, setCurrentPage] = useState(0);
   const [hasMore, setHasMore] = useState(true);
   const [isLoadingMore, setIsLoadingMore] = useState(false);
@@ -371,6 +374,7 @@ export function useDoubanFeed(type: string) {
 
     const cached = readFeedViewCache(requestSnapshot);
 
+    setLoadFailed(false);
     if (cached) {
       setDoubanData(cached.data);
       restoredCurrentPageRef.current =
@@ -423,6 +427,7 @@ export function useDoubanFeed(type: string) {
       selectedWeekday,
       currentPage: 0,
     };
+    setLoadFailed(false);
 
     try {
       const cached = readFeedViewCache(requestSnapshot);
@@ -532,9 +537,7 @@ export function useDoubanFeed(type: string) {
       console.error(err);
       const currentSnapshot = { ...currentParamsRef.current };
       if (isSnapshotEqual(requestSnapshot, currentSnapshot)) {
-        if (type === 'anime' && primarySelection === '每日放送') {
-          setBangumiCalendarError('Bangumi 番剧数据获取失败，请稍后重试。');
-        }
+        setLoadFailed(true);
         setCurrentPage(0);
         setHasMore(false);
         setIsLoadingMore(false);
@@ -597,6 +600,7 @@ export function useDoubanFeed(type: string) {
       };
 
       try {
+        setLoadFailed(false);
         setIsLoadingMore(true);
 
         let data: DoubanResult;
@@ -672,7 +676,7 @@ export function useDoubanFeed(type: string) {
         console.error(err);
         const currentSnapshot = { ...currentParamsRef.current };
         if (isFeedSelectionEqual(requestSnapshot, currentSnapshot)) {
-          setHasMore(false);
+          setLoadFailed(true);
           setIsLoadingMore(false);
         }
       }
@@ -688,6 +692,7 @@ export function useDoubanFeed(type: string) {
     multiLevelValues,
     selectedWeekday,
     getRequestParams,
+    retryCount,
   ]);
 
   const handlePrimaryChange = useCallback(
@@ -786,6 +791,7 @@ export function useDoubanFeed(type: string) {
         const nextHasMore = cached?.hasMore ?? false;
 
         setSelectedWeekday(weekday);
+        setLoadFailed(false);
         setDoubanData(nextData);
         setCurrentPage(cached?.currentPage ?? 0);
         setHasMore(nextHasMore);
@@ -822,6 +828,16 @@ export function useDoubanFeed(type: string) {
     setCurrentPage((prev) => prev + 1);
   }, []);
 
+  const retryLoad = useCallback(() => {
+    if (currentPage > 0) {
+      // 当前页号保持不变，靠计数让续取 effect 重跑同一页
+      setLoadFailed(false);
+      setRetryCount((count) => count + 1);
+    } else {
+      void loadInitialData();
+    }
+  }, [currentPage, loadInitialData]);
+
   return {
     doubanData,
     loading,
@@ -837,6 +853,8 @@ export function useDoubanFeed(type: string) {
     handleMultiLevelChange,
     handleWeekdayChange,
     loadNextPage,
+    loadFailed,
+    retryLoad,
     bangumiCalendarError,
     clearBangumiCalendarError,
   };

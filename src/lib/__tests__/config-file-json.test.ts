@@ -119,7 +119,6 @@ describe('buildConfigFileFromAdminConfig', () => {
         ImageProxyTimeoutSeconds: 15,
         UpstreamSearchConcurrency: 0,
         DoubanProxyType: 'direct',
-        BangumiDataSource: 'server',
         DoubanImageProxyType: 'direct',
         DisableYellowFilter: false,
         FluidSearch: true,

@@ -6,6 +6,7 @@ import {
 } from '@/lib/douban-source';
 
 export const doubanDataSourceOptions: { value: string; label: string }[] = [
+  { value: 'auto', label: '自动' },
   { value: 'direct', label: '直连（浏览器请求）' },
   { value: 'server', label: '代理（服务器请求）' },
   { value: 'cors-proxy-zwei', label: 'Cors Proxy By Zwei' },
@@ -22,6 +23,7 @@ export const siteDoubanDataSourceOptions = doubanDataSourceOptions.filter(
 );
 
 export const doubanImageProxyTypeOptions: { value: string; label: string }[] = [
+  { value: 'auto', label: '自动' },
   { value: 'direct', label: '直连（浏览器请求）' },
   { value: 'server', label: '代理（服务器请求）' },
   {

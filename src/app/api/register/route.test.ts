@@ -50,7 +50,6 @@ function createConfig() {
       SearchDownstreamMaxPage: 5,
       SiteInterfaceCacheTime: 300,
       DoubanProxyType: 'direct',
-      BangumiDataSource: 'server',
       DoubanImageProxyType: 'direct',
       DisableYellowFilter: false,
       FluidSearch: true,

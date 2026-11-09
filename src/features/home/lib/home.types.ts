@@ -1,4 +1,4 @@
-import { BangumiCalendarData } from '@/features/bangumi/lib/bangumi';
+import type { BangumiCalendarData } from '@/features/bangumi/lib/bangumi';
 import { DoubanItem } from '@/lib/types';
 
 import type { HomeHeroItem } from './home-hero';

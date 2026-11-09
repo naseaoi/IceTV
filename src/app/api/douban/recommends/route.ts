@@ -2,13 +2,14 @@ import { NextRequest, NextResponse } from 'next/server';
 
 import { recommendsCache } from '@/app/api/douban/recommends/cache';
 import { isGuardFailure, requireActiveUser } from '@/lib/api-auth';
-import { createPublicApiCacheHeaders } from '@/lib/api-cache-headers';
+import { createPrivateApiCacheHeaders } from '@/lib/api-cache-headers';
 import { getCacheTime } from '@/lib/config';
 import { fetchDoubanData } from '@/lib/douban';
 import {
   DoubanRecommendApiResponse,
   normalizeDoubanRecommendItems,
 } from '@/lib/douban-normalize';
+import { buildDoubanRecommendUrl } from '@/lib/douban-upstream-url';
 import {
   recordServerProxyFailure,
   requireServerProxyQuota,
@@ -38,20 +39,6 @@ export async function GET(request: NextRequest) {
   const kind = searchParams.get('kind');
   const pageLimit = Number(searchParams.get('limit') || '20');
   const pageStart = Number(searchParams.get('start') || '0');
-  const category =
-    searchParams.get('category') === 'all' ? '' : searchParams.get('category');
-  const format =
-    searchParams.get('format') === 'all' ? '' : searchParams.get('format');
-  const region =
-    searchParams.get('region') === 'all' ? '' : searchParams.get('region');
-  const year =
-    searchParams.get('year') === 'all' ? '' : searchParams.get('year');
-  const platform =
-    searchParams.get('platform') === 'all' ? '' : searchParams.get('platform');
-  const sort = searchParams.get('sort') === 'T' ? '' : searchParams.get('sort');
-  const label =
-    searchParams.get('label') === 'all' ? '' : searchParams.get('label');
-
   if (!kind) {
     return NextResponse.json({ error: '缺少必要参数: kind' }, { status: 400 });
   }
@@ -77,48 +64,18 @@ export async function GET(request: NextRequest) {
     );
   }
 
-  const selectedCategories = { 类型: category } as any;
-  if (format) {
-    selectedCategories['形式'] = format;
-  }
-  if (region) {
-    selectedCategories['地区'] = region;
-  }
-
-  const tags = [] as Array<string>;
-  if (category) {
-    tags.push(category);
-  }
-  if (!category && format) {
-    tags.push(format);
-  }
-  if (label) {
-    tags.push(label);
-  }
-  if (region) {
-    tags.push(region);
-  }
-  if (year) {
-    tags.push(year);
-  }
-  if (platform) {
-    tags.push(platform);
-  }
-
-  const baseUrl = `https://m.douban.com/rexxar/api/v2/${kind}/recommend`;
-  const params = new URLSearchParams();
-  params.append('refresh', '0');
-  params.append('start', pageStart.toString());
-  params.append('count', pageLimit.toString());
-  params.append('selected_categories', JSON.stringify(selectedCategories));
-  params.append('uncollect', 'false');
-  params.append('score_range', '0,10');
-  params.append('tags', tags.join(','));
-  if (sort) {
-    params.append('sort', sort);
-  }
-
-  const target = `${baseUrl}?${params.toString()}`;
+  const target = buildDoubanRecommendUrl({
+    kind: kind as 'tv' | 'movie',
+    start: pageStart,
+    limit: pageLimit,
+    category: searchParams.get('category'),
+    format: searchParams.get('format'),
+    label: searchParams.get('label'),
+    region: searchParams.get('region'),
+    year: searchParams.get('year'),
+    platform: searchParams.get('platform'),
+    sort: searchParams.get('sort'),
+  });
   try {
     // 以完整 target URL 作为缓存键，参数变体天然区分
     const response = await recommendsCache.getOrLoad(target, async () => {
@@ -135,7 +92,7 @@ export async function GET(request: NextRequest) {
 
     const cacheTime = await getCacheTime();
     return NextResponse.json(response, {
-      headers: createPublicApiCacheHeaders(cacheTime),
+      headers: createPrivateApiCacheHeaders(cacheTime),
     });
   } catch (error) {
     const busy = resourceLimitResponse(error);

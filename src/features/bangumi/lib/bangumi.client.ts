@@ -5,11 +5,6 @@ import {
   BANGUMI_CALENDAR_FRESH_SECONDS,
   BANGUMI_CALENDAR_MAX_AGE_SECONDS,
 } from '@/features/home/lib/home-cache';
-import { getAuthInfoFromBrowserCookie } from '@/lib/auth.client';
-import {
-  readBangumiDataSource,
-  readBangumiProxyUrl,
-} from '@/lib/bangumi-source';
 import {
   readStorage,
   removeStorage,
@@ -18,7 +13,10 @@ import {
 import { createTimedAbortController } from '@/lib/downstream-sources/shared';
 
 import type { BangumiCalendarData } from './bangumi';
-import { normalizeBangumiCalendarData } from './bangumi-normalize';
+import {
+  isUsableBangumiCalendarData,
+  normalizeBangumiCalendarData,
+} from './bangumi-normalize';
 
 const BANGUMI_CALENDAR_URL = 'https://api.bgm.tv/calendar';
 const BANGUMI_CALENDAR_CACHE_STORAGE_KEY = 'bangumiCalendarCache';
@@ -59,17 +57,10 @@ export async function GetBangumiCalendarDataWithMeta(
   }
 
   const staleData = readBangumiCalendarClientCache({ allowStale: true });
-  const source = getUsableBangumiDataSource(readBangumiDataSource());
   let data: BangumiCalendarData[];
 
   try {
-    if (source === 'direct') {
-      data = await fetchBangumiCalendarDirect(options);
-    } else if (source === 'custom') {
-      data = await fetchBangumiCalendarCustomProxy(options);
-    } else {
-      data = await fetchBangumiCalendarFromServer(options);
-    }
+    data = await fetchBangumiCalendarPreferServer(options);
   } catch (error) {
     if (staleData) {
       return {
@@ -94,30 +85,37 @@ export async function GetBangumiCalendarDataWithMeta(
   };
 }
 
-function getUsableBangumiDataSource(source: string): string {
-  if (source !== 'server') {
-    return source;
+// 日历全站一份，服务端共享缓存命中最快；服务端回源不通时浏览器直连兜底
+async function fetchBangumiCalendarPreferServer(
+  options: BangumiCalendarClientOptions,
+): Promise<BangumiCalendarData[]> {
+  try {
+    const data = await fetchBangumiCalendarFromServer(options);
+    if (isUsableBangumiCalendarData(data)) return data;
+  } catch {
+    // 交给直连
   }
-
-  return getAuthInfoFromBrowserCookie()?.username ? source : 'direct';
+  return fetchBangumiCalendarDirect(options);
 }
 
 async function fetchBangumiCalendarFromServer(
   options: BangumiCalendarClientOptions,
 ): Promise<BangumiCalendarData[]> {
-  const params = new URLSearchParams({ source: 'server' });
-
+  const params = new URLSearchParams();
   if (options.timeoutMs) {
     params.set('timeoutMs', options.timeoutMs.toString());
   }
+  const query = params.toString();
 
-  const response = await fetch(`/api/bangumi/calendar?${params.toString()}`);
+  const response = await fetch(
+    `/api/bangumi/calendar${query ? `?${query}` : ''}`,
+  );
 
   if (!response.ok) {
     throw new Error(`Bangumi calendar: ${response.status}`);
   }
 
-  return (await response.json()) as BangumiCalendarData[];
+  return normalizeBangumiCalendarData(await response.json());
 }
 
 async function fetchBangumiCalendarDirect(
@@ -130,35 +128,6 @@ async function fetchBangumiCalendarDirect(
       cache: 'no-store',
       signal: abortState?.signal,
     });
-
-    if (!response.ok) {
-      throw new Error(`Bangumi calendar: ${response.status}`);
-    }
-
-    return normalizeBangumiCalendarData(await response.json());
-  } finally {
-    abortState?.cleanup();
-  }
-}
-
-async function fetchBangumiCalendarCustomProxy(
-  options: BangumiCalendarClientOptions,
-): Promise<BangumiCalendarData[]> {
-  const proxyUrl = readBangumiProxyUrl().trim();
-  if (!proxyUrl) {
-    throw new Error('Bangumi custom proxy URL is empty');
-  }
-
-  const abortState = createOptionalAbortState(options.timeoutMs);
-
-  try {
-    const response = await fetch(
-      `${proxyUrl}${encodeURIComponent(BANGUMI_CALENDAR_URL)}`,
-      {
-        cache: 'no-store',
-        signal: abortState?.signal,
-      },
-    );
 
     if (!response.ok) {
       throw new Error(`Bangumi calendar: ${response.status}`);
@@ -235,8 +204,4 @@ function writeBangumiCalendarClientCache(data: BangumiCalendarData[]): void {
   if (!written) {
     removeStorage(BANGUMI_CALENDAR_CACHE_STORAGE_KEY);
   }
-}
-
-function isUsableBangumiCalendarData(data: BangumiCalendarData[]): boolean {
-  return data.some((item) => item.items.length > 0);
 }

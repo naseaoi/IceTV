@@ -20,11 +20,15 @@ import {
   SECTION_TITLE_TEXT_CLASS,
 } from '@/components/section-header';
 import { GetBangumiCalendarData } from '@/features/bangumi/lib/bangumi.client';
-import { selectBangumiCardCover } from '@/features/bangumi/lib/bangumi-normalize';
+import {
+  isUsableBangumiCalendarData,
+  selectBangumiCardCover,
+} from '@/features/bangumi/lib/bangumi-normalize';
 import {
   getCurrentWeekday,
   primeDefaultDoubanFeedViewCache,
 } from '@/features/douban/hooks/useDoubanFeed';
+import { DOUBAN_PAGE_SIZE } from '@/features/douban/lib/grid-layout';
 import { HomeInitialData } from '@/features/home/lib/home.types';
 import {
   mergeHomeInitialDataWithClientSnapshot,
@@ -137,12 +141,6 @@ function RecommendationSection({
   );
 }
 
-function hasUsableBangumiCalendarData(
-  data: HomeInitialData['bangumiCalendarData'],
-): boolean {
-  return data.some((item) => item.items.length > 0);
-}
-
 export default function HomeClient({
   initialData,
   continueWatchingSkeletonCount = 0,
@@ -206,6 +204,7 @@ export default function HomeClient({
           kind: 'movie',
           category: '热门',
           type: '全部',
+          pageLimit: DOUBAN_PAGE_SIZE,
         });
 
         if (!cancelled && moviesData.code === 200 && moviesData.list.length) {
@@ -232,6 +231,7 @@ export default function HomeClient({
           kind: 'tv',
           category: 'tv',
           type: 'tv',
+          pageLimit: DOUBAN_PAGE_SIZE,
         });
 
         if (!cancelled && tvShowsData.code === 200 && tvShowsData.list.length) {
@@ -258,6 +258,7 @@ export default function HomeClient({
           kind: 'tv',
           category: 'show',
           type: 'show',
+          pageLimit: DOUBAN_PAGE_SIZE,
         });
 
         if (
@@ -286,7 +287,7 @@ export default function HomeClient({
       try {
         const bangumiData = await GetBangumiCalendarData();
 
-        if (!cancelled && hasUsableBangumiCalendarData(bangumiData)) {
+        if (!cancelled && isUsableBangumiCalendarData(bangumiData)) {
           setBangumiCalendarData(bangumiData);
           setSectionUnavailable('bangumiCalendar', false);
           finishLoading('bangumiCalendar');
@@ -356,7 +357,7 @@ export default function HomeClient({
       hotMovies.length > 0 &&
       hotTvShows.length > 0 &&
       hotVarietyShows.length > 0 &&
-      hasUsableBangumiCalendarData(bangumiCalendarData);
+      isUsableBangumiCalendarData(bangumiCalendarData);
 
     if (
       routeFallback ||

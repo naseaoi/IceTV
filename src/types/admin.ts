@@ -37,7 +37,6 @@ export interface AdminConfig {
     ImageProxyTimeoutSeconds: number;
     UpstreamSearchConcurrency: number;
     DoubanProxyType: string;
-    BangumiDataSource: string;
     DoubanImageProxyType: string;
     DisableYellowFilter: boolean;
     FluidSearch: boolean;

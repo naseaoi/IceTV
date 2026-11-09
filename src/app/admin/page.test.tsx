@@ -122,7 +122,6 @@ describe('AdminPage role visibility', () => {
       SearchDownstreamMaxPage: 1,
       SiteInterfaceCacheTime: 300,
       DoubanProxyType: '',
-      BangumiDataSource: 'server',
       DoubanImageProxyType: '',
       DisableYellowFilter: false,
       FluidSearch: true,

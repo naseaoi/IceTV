@@ -6,6 +6,7 @@ export const DOUBAN_IMAGE_PROXY_TYPE_STORAGE_KEY = 'doubanImageProxyType';
 export const DOUBAN_IMAGE_PROXY_URL_STORAGE_KEY = 'doubanImageProxyUrl';
 
 export const DOUBAN_PROXY_TYPE_VALUES = [
+  'auto',
   'direct',
   'server',
   'cors-proxy-zwei',
@@ -17,9 +18,10 @@ export const DOUBAN_PROXY_TYPE_VALUES = [
 
 export type DoubanProxyType = (typeof DOUBAN_PROXY_TYPE_VALUES)[number];
 
-export const DEFAULT_DOUBAN_PROXY_TYPE: DoubanProxyType = 'direct';
+export const DEFAULT_DOUBAN_PROXY_TYPE: DoubanProxyType = 'auto';
 
 export const DOUBAN_IMAGE_PROXY_TYPE_VALUES = [
+  'auto',
   'direct',
   'server',
   'cmliussss-cdn-tencent',
@@ -30,7 +32,7 @@ export const DOUBAN_IMAGE_PROXY_TYPE_VALUES = [
 export type DoubanImageProxyType =
   (typeof DOUBAN_IMAGE_PROXY_TYPE_VALUES)[number];
 
-export const DEFAULT_DOUBAN_IMAGE_PROXY_TYPE: DoubanImageProxyType = 'direct';
+export const DEFAULT_DOUBAN_IMAGE_PROXY_TYPE: DoubanImageProxyType = 'auto';
 
 const doubanProxySourceHelper = createProxySourceHelper({
   values: DOUBAN_PROXY_TYPE_VALUES,

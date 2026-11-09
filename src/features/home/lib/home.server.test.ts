@@ -3,7 +3,7 @@
 import { setImmediate } from 'node:timers';
 
 jest.mock('@/features/bangumi/lib/bangumi', () => ({
-  getCachedBangumiCalendarData: jest.fn(() => []),
+  getBangumiCalendarData: jest.fn(async () => []),
 }));
 jest.mock('@/lib/config', () => ({
   getPublicConfig: jest.fn(async () => ({ DoubanImageProxyType: 'direct' })),
@@ -38,7 +38,7 @@ function hotItem(id: string) {
   };
 }
 
-const HERO_INTRO_WAIT_MS = 800;
+const HOME_UPSTREAM_WAIT_MS = 800;
 
 describe('home server hero intros', () => {
   let getHomeInitialData: typeof import('./home.server').getHomeInitialData;
@@ -79,7 +79,7 @@ describe('home server hero intros', () => {
   async function loadPastWaitBudget() {
     const page = getHomeInitialData();
     await flushBackground();
-    jest.advanceTimersByTime(HERO_INTRO_WAIT_MS);
+    jest.advanceTimersByTime(HOME_UPSTREAM_WAIT_MS);
     return page;
   }
 
@@ -181,5 +181,90 @@ describe('home server hero intros', () => {
     expect(page.heroItems.every((item) => item.intro === undefined)).toBe(true);
     expect(loadIntro).not.toHaveBeenCalled();
     expect(fetchDoubanData).toHaveBeenCalledTimes(3);
+  });
+});
+
+describe('home server bangumi calendar', () => {
+  let getHomeInitialData: typeof import('./home.server').getHomeInitialData;
+  let getBangumiCalendarData: jest.Mock;
+
+  const calendar = [
+    {
+      weekday: { en: 'Sun' },
+      items: [
+        {
+          id: 1,
+          name: 'Anime',
+          name_cn: '动画',
+          rating: { score: 8 },
+          air_date: '2026-01-01',
+          images: { large: '', common: '', medium: '', small: '', grid: '' },
+        },
+      ],
+    },
+  ];
+
+  beforeEach(() => {
+    jest.useFakeTimers();
+    jest.resetModules();
+    ({ getHomeInitialData } = require('./home.server'));
+    ({ getBangumiCalendarData } = require('@/features/bangumi/lib/bangumi'));
+    const { fetchDoubanData } = require('@/lib/douban');
+    fetchDoubanData.mockResolvedValue({ items: [] });
+  });
+
+  afterEach(() => {
+    jest.useRealTimers();
+    jest.restoreAllMocks();
+  });
+
+  it('renders the calendar when it loads within the wait budget', async () => {
+    getBangumiCalendarData.mockResolvedValue(calendar);
+
+    const page = await getHomeInitialData();
+
+    expect(page.bangumiCalendarData).toEqual(calendar);
+  });
+
+  it('leaves the calendar to the client when loading is slow', async () => {
+    const pending = deferred<typeof calendar>();
+    getBangumiCalendarData.mockReturnValue(pending.promise);
+
+    const page = getHomeInitialData();
+    await flushBackground();
+    jest.advanceTimersByTime(HOME_UPSTREAM_WAIT_MS);
+
+    expect((await page).bangumiCalendarData).toEqual([]);
+  });
+
+  it('leaves calendars without any items to the client', async () => {
+    getBangumiCalendarData.mockResolvedValue([
+      { weekday: { en: 'Sun' }, items: [] },
+    ]);
+
+    const page = await getHomeInitialData();
+
+    expect(page.bangumiCalendarData).toEqual([]);
+  });
+});
+
+describe('home server recommendations', () => {
+  it('requests one full feed page so the category feed continues without gaps', async () => {
+    jest.resetModules();
+    const { getHomeInitialData } = require('./home.server');
+    const { fetchDoubanData } = require('@/lib/douban');
+    const { DOUBAN_PAGE_SIZE } = require('@/features/douban/lib/grid-layout');
+    fetchDoubanData.mockResolvedValue({ items: [] });
+
+    await getHomeInitialData();
+
+    const feedUrls = fetchDoubanData.mock.calls
+      .map(([url]: [string]) => new URL(url))
+      .filter((url: URL) => url.pathname.includes('/recent_hot/'));
+    expect(feedUrls.length).toBeGreaterThan(0);
+    for (const url of feedUrls) {
+      expect(url.searchParams.get('start')).toBe('0');
+      expect(url.searchParams.get('limit')).toBe(String(DOUBAN_PAGE_SIZE));
+    }
   });
 });

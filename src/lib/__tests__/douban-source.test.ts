@@ -30,7 +30,9 @@ describe('normalizeDoubanProxyType', () => {
   });
 
   it('falls back for unsupported values', () => {
-    expect(normalizeDoubanProxyType('auto')).toBe(DEFAULT_DOUBAN_PROXY_TYPE);
+    expect(normalizeDoubanProxyType('unsupported')).toBe(
+      DEFAULT_DOUBAN_PROXY_TYPE,
+    );
     expect(normalizeDoubanProxyType(null)).toBe(DEFAULT_DOUBAN_PROXY_TYPE);
   });
 });
@@ -109,8 +111,8 @@ describe('readDoubanProxyType', () => {
       DOUBAN_IMAGE_PROXY_TYPE: 'cmliussss-cdn-ali',
     } as typeof window.RUNTIME_CONFIG;
 
-    expect(writeDoubanProxyType('unsupported')).toBe('direct');
-    expect(writeDoubanImageProxyType('unsupported')).toBe('direct');
+    expect(writeDoubanProxyType('unsupported')).toBe('auto');
+    expect(writeDoubanImageProxyType('unsupported')).toBe('auto');
     writeDoubanProxyUrl('https://local.example/data?url=');
     writeDoubanImageProxyUrl('https://local.example/image?url=');
 

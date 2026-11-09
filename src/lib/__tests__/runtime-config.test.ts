@@ -31,12 +31,10 @@ describe('runtime config', () => {
   it('preserves client custom proxy URLs', () => {
     const config = applyClientServerConfig({
       DoubanProxy: 'https://data.example/fetch?url=',
-      BangumiProxy: 'https://bangumi.example/fetch?url=',
       DoubanImageProxy: 'https://image.example/fetch?url=',
     });
 
     expect(config.DOUBAN_PROXY).toBe('https://data.example/fetch?url=');
-    expect(config.BANGUMI_PROXY).toBe('https://bangumi.example/fetch?url=');
     expect(config.DOUBAN_IMAGE_PROXY).toBe('https://image.example/fetch?url=');
   });
 

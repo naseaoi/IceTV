@@ -1,3 +1,7 @@
+import {
+  DEFAULT_DOUBAN_IMAGE_PROXY_TYPE,
+  DEFAULT_DOUBAN_PROXY_TYPE,
+} from '@/lib/douban-source';
 import type { SourceCoverProxyMode } from '@/lib/source-cover-proxy';
 import { CURRENT_UPDATE_BRANCH } from '@/lib/version';
 
@@ -10,8 +14,6 @@ export interface RuntimeConfig {
   UPDATE_BRANCH: string;
   DOUBAN_PROXY_TYPE: string;
   DOUBAN_PROXY: string;
-  BANGUMI_DATA_SOURCE: string;
-  BANGUMI_PROXY: string;
   DOUBAN_IMAGE_PROXY_TYPE: string;
   DOUBAN_IMAGE_PROXY: string;
   ENABLE_LIVE_ENTRY: boolean;
@@ -42,11 +44,9 @@ export const DEFAULT_RUNTIME_CONFIG: RuntimeConfig = {
   REQUIRE_INVITE_CODE: false,
   UPDATE_REPOS: 'naseaoi/IceTV',
   UPDATE_BRANCH: CURRENT_UPDATE_BRANCH,
-  DOUBAN_PROXY_TYPE: 'direct',
+  DOUBAN_PROXY_TYPE: DEFAULT_DOUBAN_PROXY_TYPE,
   DOUBAN_PROXY: '',
-  BANGUMI_DATA_SOURCE: 'direct',
-  BANGUMI_PROXY: '',
-  DOUBAN_IMAGE_PROXY_TYPE: 'direct',
+  DOUBAN_IMAGE_PROXY_TYPE: DEFAULT_DOUBAN_IMAGE_PROXY_TYPE,
   DOUBAN_IMAGE_PROXY: '',
   ENABLE_LIVE_ENTRY: false,
   DEFAULT_AGGREGATE_SEARCH: true,
@@ -89,8 +89,6 @@ export type ServerConfigPayload = {
   UpdateBranch?: string;
   DoubanProxyType?: string;
   DoubanProxy?: string;
-  BangumiDataSource?: string;
-  BangumiProxy?: string;
   DoubanImageProxyType?: string;
   DoubanImageProxy?: string;
   EnableLiveEntry?: boolean;
@@ -146,9 +144,6 @@ function runtimeConfigFromServerConfig(
     DOUBAN_PROXY_TYPE:
       data.DoubanProxyType || DEFAULT_RUNTIME_CONFIG.DOUBAN_PROXY_TYPE,
     DOUBAN_PROXY: data.DoubanProxy || DEFAULT_RUNTIME_CONFIG.DOUBAN_PROXY,
-    BANGUMI_DATA_SOURCE:
-      data.BangumiDataSource || DEFAULT_RUNTIME_CONFIG.BANGUMI_DATA_SOURCE,
-    BANGUMI_PROXY: data.BangumiProxy || DEFAULT_RUNTIME_CONFIG.BANGUMI_PROXY,
     DOUBAN_IMAGE_PROXY_TYPE:
       data.DoubanImageProxyType ||
       DEFAULT_RUNTIME_CONFIG.DOUBAN_IMAGE_PROXY_TYPE,

@@ -78,6 +78,10 @@ describe('douban recommends route input validation', () => {
     );
 
     expect(response.status).toBe(200);
+    expect(response.headers.get('Cache-Control')).toBe('private, max-age=300');
+    expect(response.headers.has('CDN-Cache-Control')).toBe(false);
+    expect(response.headers.has('Vercel-CDN-Cache-Control')).toBe(false);
+    expect(response.headers.has('Netlify-Vary')).toBe(false);
     expect(fetchDoubanData).toHaveBeenCalledWith(
       expect.stringContaining('start=10&count=30'),
     );
@@ -91,6 +95,10 @@ describe('douban recommends route input validation', () => {
     );
 
     expect(response.status).toBe(200);
+    expect(response.headers.get('Cache-Control')).toBe('private, max-age=300');
+    expect(response.headers.has('CDN-Cache-Control')).toBe(false);
+    expect(response.headers.has('Vercel-CDN-Cache-Control')).toBe(false);
+    expect(response.headers.has('Netlify-Vary')).toBe(false);
     expect(fetchDoubanData).toHaveBeenCalledWith(
       expect.stringContaining('start=0&count=20'),
     );

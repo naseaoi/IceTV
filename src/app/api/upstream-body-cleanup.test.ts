@@ -126,6 +126,20 @@ it.each([
   },
 );
 
+it('logo 成功响应只允许浏览器私有缓存', async () => {
+  mockFetch.mockResolvedValue({
+    ok: true,
+    headers: new Headers({ 'content-type': 'image/png' }),
+    body: null,
+    arrayBuffer: async () => new Uint8Array([1, 2]).buffer,
+  });
+  const response = await logoRoute.GET(request);
+  expect(response.status).toBe(200);
+  expect(response.headers.get('Cache-Control')).toBe('private, max-age=86400');
+  expect(response.headers.has('CDN-Cache-Control')).toBe(false);
+  expect(response.headers.has('Vercel-CDN-Cache-Control')).toBe(false);
+});
+
 it('直播预检成功仅读取响应头并取消正文', async () => {
   const cancel = jest.fn().mockResolvedValue(undefined);
   mockFetch.mockResolvedValue({

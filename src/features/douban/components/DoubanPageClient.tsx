@@ -44,11 +44,15 @@ export function DoubanPageClient() {
     handleMultiLevelChange,
     handleWeekdayChange,
     loadNextPage,
+    loadFailed,
+    retryLoad,
     bangumiCalendarError,
     clearBangumiCalendarError,
   } = useDoubanFeed(type);
 
-  const canLoadMore = hasMore && !isLoadingMore && !loading && selectorsReady;
+  const canLoadMore =
+    hasMore && !loadFailed && !isLoadingMore && !loading && selectorsReady;
+  const showContent = !loading && selectorsReady;
 
   const selectorNode =
     type !== 'custom' ? (
@@ -109,7 +113,24 @@ export function DoubanPageClient() {
           )}
         </div>
 
-        {hasMore && !loading && (
+        {showContent && loadFailed && (
+          <div
+            className={`flex flex-col items-center justify-center gap-3 text-sm text-gray-500 dark:text-gray-400 ${
+              doubanData.length > 0 ? 'h-24' : 'py-24'
+            }`}
+          >
+            加载失败
+            <button
+              type='button'
+              onClick={retryLoad}
+              className='rounded-full border border-gray-200 px-4 py-1.5 text-xs text-gray-700 transition-colors hover:bg-gray-100 dark:border-white/10 dark:text-gray-200 dark:hover:bg-white/[0.06]'
+            >
+              重试
+            </button>
+          </div>
+        )}
+
+        {hasMore && !loading && !loadFailed && (
           <div
             ref={loadingRef}
             className='flex h-24 items-center justify-center'
@@ -124,7 +145,7 @@ export function DoubanPageClient() {
           </div>
         )}
 
-        {!hasMore && doubanData.length > 0 && (
+        {!hasMore && !loadFailed && doubanData.length > 0 && (
           <div className='mt-6 flex items-center gap-4 py-10 text-xs text-gray-400 dark:text-gray-500'>
             <span className='h-px flex-1 bg-gray-200 dark:bg-white/[0.06]' />
             已加载全部
@@ -132,7 +153,7 @@ export function DoubanPageClient() {
           </div>
         )}
 
-        {!loading && selectorsReady && doubanData.length === 0 && (
+        {showContent && !loadFailed && doubanData.length === 0 && (
           <div className='py-24 text-center text-sm text-gray-500 dark:text-gray-400'>
             暂无相关内容
           </div>

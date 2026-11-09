@@ -231,11 +231,8 @@ function createImageProxyCacheHeaders(): Headers {
   const headers = new Headers();
   headers.set(
     'Cache-Control',
-    'public, max-age=2592000, s-maxage=2592000, stale-while-revalidate=86400',
+    'private, max-age=2592000, stale-while-revalidate=86400',
   );
-  headers.set('CDN-Cache-Control', 'public, s-maxage=15720000');
-  headers.set('Vercel-CDN-Cache-Control', 'public, s-maxage=15720000');
-  headers.set('Netlify-Vary', 'query');
   return headers;
 }
 

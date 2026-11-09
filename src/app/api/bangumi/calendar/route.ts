@@ -5,7 +5,6 @@ import {
   BANGUMI_CALENDAR_FRESH_SECONDS,
   BANGUMI_CALENDAR_STALE_SECONDS,
 } from '@/features/home/lib/home-cache';
-import { isGuardFailure, requireActiveUser } from '@/lib/api-auth';
 import {
   recordServerProxyFailure,
   requireServerProxyQuota,
@@ -21,32 +20,9 @@ export const revalidate = 0;
 
 export async function GET(request: NextRequest) {
   try {
-    const guardResult = await requireActiveUser(request, {
-      unauthorizedMessage: 'Unauthorized',
-      includeUserStateCode: false,
-    });
-    if (isGuardFailure(guardResult)) return guardResult.response;
-
-    const quotaFailure = await requireServerProxyQuota(
-      'bangumi-data',
-      request,
-      guardResult.username,
-    );
+    // 游客可用：只读固定地址的全站共享缓存，不构成任意回源代理
+    const quotaFailure = await requireServerProxyQuota('bangumi-data', request);
     if (quotaFailure) return quotaFailure;
-
-    const source = request.nextUrl.searchParams.get('source');
-
-    if (source && source !== 'server') {
-      return NextResponse.json(
-        { error: '不支持的 Bangumi 数据源' },
-        {
-          status: 400,
-          headers: {
-            'Cache-Control': 'no-store',
-          },
-        },
-      );
-    }
 
     const timeoutMs = readTimeoutMs(
       request.nextUrl.searchParams.get('timeoutMs'),

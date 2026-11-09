@@ -10,6 +10,17 @@ export function toBangumiCoverProxyUrl(rawUrl: string): string {
   return routePath ? `${BANGUMI_COVER_PROXY_PREFIX}${routePath}` : '';
 }
 
+export function isBangumiCoverProxyUrl(url: string): boolean {
+  return url.startsWith(`${BANGUMI_COVER_PROXY_PREFIX}/`);
+}
+
+// 卡片数据保留可直连的原图地址（统一为 https），渲染时再映射到本站代理，代理失败可回退原图
+export function toBangumiCoverDirectUrl(rawUrl: string): string {
+  const routePath = getBangumiCoverRoutePath(rawUrl);
+
+  return routePath ? `https://${BANGUMI_COVER_HOST}/pic/cover${routePath}` : '';
+}
+
 export function getBangumiCoverTargetUrl(
   pathSegments: readonly string[],
 ): URL | null {

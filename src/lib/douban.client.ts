@@ -7,9 +7,19 @@ import {
   normalizeDoubanListSubjects,
   normalizeDoubanRecommendItems,
 } from './douban-normalize';
+import {
+  orderDoubanRoutes,
+  readDoubanFallbackRoute,
+  recordDoubanRouteResult,
+} from './douban-route-memory';
 import { readDoubanProxyType, readDoubanProxyUrl } from './douban-source';
+import {
+  buildDoubanRecentHotUrl,
+  buildDoubanRecommendUrl,
+  buildDoubanSearchSubjectsUrl,
+  DoubanUpstreamHost,
+} from './douban-upstream-url';
 import { createTimedAbortController } from './downstream-sources/shared';
-import { showToast } from './toast';
 import { DoubanResult } from './types';
 
 // ================================================================
@@ -166,46 +176,118 @@ async function fetchWithTimeout(
   }
 }
 
+// 镜像站自带跨域支持，不再叠加 CORS 代理
 type DoubanProxyLoader = (
   proxyUrl: string,
-  useTencentCDN?: boolean,
-  useAliCDN?: boolean,
+  host?: DoubanUpstreamHost,
 ) => Promise<DoubanResult>;
 
-function fetchWithDoubanProxy(
+function isDoubanResult(value: unknown): value is DoubanResult {
+  const result = value as DoubanResult | null;
+  return result?.code === 200 && Array.isArray(result.list);
+}
+
+// 失败必须 reject：成功结果会进请求缓存，界面也会把空列表当成「没有更多」
+async function fetchDoubanFromServer(
+  serverPath: string,
+): Promise<DoubanResult> {
+  const response = await fetch(serverPath);
+  if (!response.ok) {
+    throw new Error(`HTTP error! Status: ${response.status}`);
+  }
+  const data: unknown = await response.json();
+  if (!isDoubanResult(data)) {
+    throw new Error('豆瓣数据格式异常');
+  }
+  return data;
+}
+
+// 第三方公益代理优先，本站服务端兜底（仅登录用户可用）；浏览器直连受跨域限制，不参与自动
+const AUTO_DOUBAN_DATA_ROUTES = [
+  'cors-proxy-zwei',
+  'cmliussss-cdn-tencent',
+  'server',
+] as const;
+
+function isAuthenticated(): boolean {
+  return Boolean(getAuthInfoFromBrowserCookie()?.username);
+}
+
+function fetchDoubanRoute(
+  route: string,
   serverPath: string,
   loader: DoubanProxyLoader,
 ): Promise<DoubanResult> {
-  const proxyType = getUsableDoubanProxyType(readDoubanProxyType());
-  const proxyUrl = readDoubanProxyUrl().trim();
-  switch (proxyType) {
+  switch (route) {
     case 'cors-proxy-zwei':
       return loader('https://ciao-cors.is-an.org/');
     case 'cmliussss-cdn-tencent':
-      return loader('', true, false);
+      return loader('', 'cmliussss-tencent');
     case 'cmliussss-cdn-ali':
-      return loader('', false, true);
+      return loader('', 'cmliussss-ali');
     case 'cors-anywhere':
       return loader('https://cors-anywhere.com/');
-    case 'custom':
-      if (!proxyUrl) {
-        throw new Error('豆瓣自定义代理地址不能为空');
-      }
-      return loader(proxyUrl);
     case 'server':
-      return fetch(serverPath).then((response) => response.json());
+      return fetchDoubanFromServer(serverPath);
     case 'direct':
     default:
       return loader('');
   }
 }
 
-function getUsableDoubanProxyType(proxyType: string): string {
-  if (proxyType !== 'server') {
-    return proxyType;
+async function fetchDoubanAuto(
+  serverPath: string,
+  loader: DoubanProxyLoader,
+): Promise<DoubanResult> {
+  const routes = orderDoubanRoutes(
+    AUTO_DOUBAN_DATA_ROUTES.filter(
+      (route) => route !== 'server' || isAuthenticated(),
+    ),
+    readDoubanFallbackRoute('data'),
+  );
+  let lastError: unknown;
+  for (let index = 0; index < routes.length; index += 1) {
+    try {
+      const result = await fetchDoubanRoute(routes[index], serverPath, loader);
+      recordDoubanRouteResult(
+        'data',
+        routes,
+        AUTO_DOUBAN_DATA_ROUTES[0],
+        index,
+        true,
+      );
+      return result;
+    } catch (error) {
+      recordDoubanRouteResult(
+        'data',
+        routes,
+        AUTO_DOUBAN_DATA_ROUTES[0],
+        index,
+        false,
+      );
+      lastError = error;
+    }
   }
+  throw lastError;
+}
 
-  return getAuthInfoFromBrowserCookie()?.username ? proxyType : 'direct';
+function fetchWithDoubanProxy(
+  serverPath: string,
+  loader: DoubanProxyLoader,
+): Promise<DoubanResult> {
+  const proxyType = readDoubanProxyType();
+  if (proxyType === 'custom') {
+    const proxyUrl = readDoubanProxyUrl().trim();
+    if (!proxyUrl) {
+      return Promise.reject(new Error('豆瓣自定义代理地址不能为空'));
+    }
+    return loader(proxyUrl);
+  }
+  // 游客不能用本站服务端，改走自动
+  if (proxyType === 'auto' || (proxyType === 'server' && !isAuthenticated())) {
+    return fetchDoubanAuto(serverPath, loader);
+  }
+  return fetchDoubanRoute(proxyType, serverPath, loader);
 }
 
 function createQueryString(
@@ -223,8 +305,7 @@ function createQueryString(
 async function fetchDoubanCategories(
   params: DoubanCategoriesParams,
   proxyUrl: string,
-  useTencentCDN = false,
-  useAliCDN = false,
+  host: DoubanUpstreamHost = 'douban',
 ): Promise<DoubanResult> {
   const { kind, category, type, pageLimit = 20, pageStart = 0 } = params;
 
@@ -245,16 +326,15 @@ async function fetchDoubanCategories(
     throw new Error('pageStart 不能小于 0');
   }
 
-  const target = useTencentCDN
-    ? `https://m.douban.cmliussss.net/rexxar/api/v2/subject/recent_hot/${kind}?start=${pageStart}&limit=${pageLimit}&category=${category}&type=${type}`
-    : useAliCDN
-      ? `https://m.douban.cmliussss.com/rexxar/api/v2/subject/recent_hot/${kind}?start=${pageStart}&limit=${pageLimit}&category=${category}&type=${type}`
-      : `https://m.douban.com/rexxar/api/v2/subject/recent_hot/${kind}?start=${pageStart}&limit=${pageLimit}&category=${category}&type=${type}`;
+  const target = buildDoubanRecentHotUrl(
+    { kind, category, type, start: pageStart, limit: pageLimit },
+    host,
+  );
 
   try {
     const response = await fetchWithTimeout(
       target,
-      useTencentCDN || useAliCDN ? '' : proxyUrl,
+      host === 'douban' ? proxyUrl : '',
     );
 
     if (!response.ok) {
@@ -271,7 +351,6 @@ async function fetchDoubanCategories(
       list: list,
     };
   } catch (error) {
-    showToast('获取豆瓣分类数据失败', 'error');
     throw new Error(`获取豆瓣分类数据失败: ${(error as Error).message}`);
   }
 }
@@ -294,8 +373,7 @@ export function getDoubanCategories(
     });
     return fetchWithDoubanProxy(
       `/api/douban/categories?${query}`,
-      (proxyUrl, useTencentCDN, useAliCDN) =>
-        fetchDoubanCategories(params, proxyUrl, useTencentCDN, useAliCDN),
+      (proxyUrl, host) => fetchDoubanCategories(params, proxyUrl, host),
     );
   });
 }
@@ -317,10 +395,8 @@ export function getDoubanList(params: DoubanListParams): Promise<DoubanResult> {
       pageSize: pageLimit,
       pageStart,
     });
-    return fetchWithDoubanProxy(
-      `/api/douban?${query}`,
-      (proxyUrl, useTencentCDN, useAliCDN) =>
-        fetchDoubanList(params, proxyUrl, useTencentCDN, useAliCDN),
+    return fetchWithDoubanProxy(`/api/douban?${query}`, (proxyUrl, host) =>
+      fetchDoubanList(params, proxyUrl, host),
     );
   });
 }
@@ -328,8 +404,7 @@ export function getDoubanList(params: DoubanListParams): Promise<DoubanResult> {
 async function fetchDoubanList(
   params: DoubanListParams,
   proxyUrl: string,
-  useTencentCDN = false,
-  useAliCDN = false,
+  host: DoubanUpstreamHost = 'douban',
 ): Promise<DoubanResult> {
   const { tag, type, pageLimit = 20, pageStart = 0 } = params;
 
@@ -350,16 +425,15 @@ async function fetchDoubanList(
     throw new Error('pageStart 不能小于 0');
   }
 
-  const target = useTencentCDN
-    ? `https://movie.douban.cmliussss.net/j/search_subjects?type=${type}&tag=${tag}&sort=recommend&page_limit=${pageLimit}&page_start=${pageStart}`
-    : useAliCDN
-      ? `https://movie.douban.cmliussss.com/j/search_subjects?type=${type}&tag=${tag}&sort=recommend&page_limit=${pageLimit}&page_start=${pageStart}`
-      : `https://movie.douban.com/j/search_subjects?type=${type}&tag=${tag}&sort=recommend&page_limit=${pageLimit}&page_start=${pageStart}`;
+  const target = buildDoubanSearchSubjectsUrl(
+    { type: type as 'tv' | 'movie', tag, start: pageStart, limit: pageLimit },
+    host,
+  );
 
   try {
     const response = await fetchWithTimeout(
       target,
-      useTencentCDN || useAliCDN ? '' : proxyUrl,
+      host === 'douban' ? proxyUrl : '',
     );
 
     if (!response.ok) {
@@ -376,7 +450,6 @@ async function fetchDoubanList(
       list: list,
     };
   } catch (error) {
-    showToast('获取豆瓣列表数据失败', 'error');
     throw new Error(`获取豆瓣列表数据失败: ${(error as Error).message}`);
   }
 }
@@ -425,8 +498,7 @@ export function getDoubanRecommends(
     });
     return fetchWithDoubanProxy(
       `/api/douban/recommends?${query}`,
-      (proxyUrl, useTencentCDN, useAliCDN) =>
-        fetchDoubanRecommends(params, proxyUrl, useTencentCDN, useAliCDN),
+      (proxyUrl, host) => fetchDoubanRecommends(params, proxyUrl, host),
     );
   });
 }
@@ -434,82 +506,20 @@ export function getDoubanRecommends(
 async function fetchDoubanRecommends(
   params: DoubanRecommendsParams,
   proxyUrl: string,
-  useTencentCDN = false,
-  useAliCDN = false,
+  host: DoubanUpstreamHost = 'douban',
 ): Promise<DoubanResult> {
-  const { kind, pageLimit = 20, pageStart = 0 } = params;
-  let { category, format, region, year, platform, sort, label } = params;
-  if (category === 'all') {
-    category = '';
-  }
-  if (format === 'all') {
-    format = '';
-  }
-  if (label === 'all') {
-    label = '';
-  }
-  if (region === 'all') {
-    region = '';
-  }
-  if (year === 'all') {
-    year = '';
-  }
-  if (platform === 'all') {
-    platform = '';
-  }
-  if (sort === 'T') {
-    sort = '';
-  }
-
-  const selectedCategories = { 类型: category } as any;
-  if (format) {
-    selectedCategories['形式'] = format;
-  }
-  if (region) {
-    selectedCategories['地区'] = region;
-  }
-
-  const tags = [] as Array<string>;
-  if (category) {
-    tags.push(category);
-  }
-  if (!category && format) {
-    tags.push(format);
-  }
-  if (label) {
-    tags.push(label);
-  }
-  if (region) {
-    tags.push(region);
-  }
-  if (year) {
-    tags.push(year);
-  }
-  if (platform) {
-    tags.push(platform);
-  }
-
-  const baseUrl = useTencentCDN
-    ? `https://m.douban.cmliussss.net/rexxar/api/v2/${kind}/recommend`
-    : useAliCDN
-      ? `https://m.douban.cmliussss.com/rexxar/api/v2/${kind}/recommend`
-      : `https://m.douban.com/rexxar/api/v2/${kind}/recommend`;
-  const reqParams = new URLSearchParams();
-  reqParams.append('refresh', '0');
-  reqParams.append('start', pageStart.toString());
-  reqParams.append('count', pageLimit.toString());
-  reqParams.append('selected_categories', JSON.stringify(selectedCategories));
-  reqParams.append('uncollect', 'false');
-  reqParams.append('score_range', '0,10');
-  reqParams.append('tags', tags.join(','));
-  if (sort) {
-    reqParams.append('sort', sort);
-  }
-  const target = `${baseUrl}?${reqParams.toString()}`;
+  const target = buildDoubanRecommendUrl(
+    {
+      ...params,
+      start: params.pageStart ?? 0,
+      limit: params.pageLimit ?? 20,
+    },
+    host,
+  );
   try {
     const response = await fetchWithTimeout(
       target,
-      useTencentCDN || useAliCDN ? '' : proxyUrl,
+      host === 'douban' ? proxyUrl : '',
     );
 
     if (!response.ok) {

@@ -192,6 +192,12 @@ describe('image proxy resize cache', () => {
     const second = await GET(request);
 
     expect(first.status).toBe(200);
+    expect(first.headers.get('Cache-Control')).toBe(
+      'private, max-age=2592000, stale-while-revalidate=86400',
+    );
+    expect(first.headers.has('CDN-Cache-Control')).toBe(false);
+    expect(first.headers.has('Vercel-CDN-Cache-Control')).toBe(false);
+    expect(first.headers.has('Netlify-Vary')).toBe(false);
     expect(second.status).toBe(200);
     expect(first.headers.get('content-type')).toBe('image/webp');
     expect(second.headers.get('content-type')).toBe('image/webp');

@@ -26,18 +26,16 @@ import { showError, showSuccess } from '@/features/admin/lib/notifications';
 import { SiteConfig } from '@/features/admin/types/internal';
 import { useAlertModal } from '@/hooks/useAlertModal';
 import {
-  DEFAULT_BANGUMI_DATA_SOURCE,
-  normalizeSiteBangumiDataSource,
-  siteBangumiDataSourceOptions,
-} from '@/lib/bangumi-source';
-import {
   getThanksInfo,
   normalizeSiteDoubanImageProxyType,
   normalizeSiteDoubanProxyType,
   siteDoubanDataSourceOptions,
   siteDoubanImageProxyTypeOptions,
 } from '@/lib/douban-options';
-import { DEFAULT_DOUBAN_IMAGE_PROXY_TYPE } from '@/lib/douban-source';
+import {
+  DEFAULT_DOUBAN_IMAGE_PROXY_TYPE,
+  DEFAULT_DOUBAN_PROXY_TYPE,
+} from '@/lib/douban-source';
 import {
   type LocalPreferenceToggleSiteConfigKey,
   localPreferenceToggleDefinitions,
@@ -66,8 +64,7 @@ const DEFAULT_SITE_SETTINGS: SiteConfig = {
   EnableDanmaku: false,
   EnableUserDanmaku: false,
   ...DEFAULT_RUNTIME_PARAMS,
-  DoubanProxyType: 'direct',
-  BangumiDataSource: DEFAULT_BANGUMI_DATA_SOURCE,
+  DoubanProxyType: DEFAULT_DOUBAN_PROXY_TYPE,
   DoubanImageProxyType: DEFAULT_DOUBAN_IMAGE_PROXY_TYPE,
   SourceCoverProxyMode: DEFAULT_SOURCE_COVER_PROXY_MODE,
   DisableYellowFilter: false,
@@ -90,7 +87,6 @@ type EditableSiteSettings = Pick<
   | 'EnableDanmaku'
   | 'EnableUserDanmaku'
   | 'DoubanProxyType'
-  | 'BangumiDataSource'
   | 'DoubanImageProxyType'
   | 'SourceCoverProxyMode'
   | 'DisableYellowFilter'
@@ -111,9 +107,6 @@ function buildSiteSettings(config: AdminConfig): SiteConfig {
     ...config.SiteConfig,
     DoubanProxyType: normalizeSiteDoubanProxyType(
       config.SiteConfig.DoubanProxyType,
-    ),
-    BangumiDataSource: normalizeSiteBangumiDataSource(
-      config.SiteConfig.BangumiDataSource,
     ),
     DoubanImageProxyType: normalizeSiteDoubanImageProxyType(
       config.SiteConfig.DoubanImageProxyType,
@@ -154,7 +147,6 @@ function normalizeEditableSiteSettings(
     EnableDanmaku: value.EnableDanmaku ?? false,
     EnableUserDanmaku: value.EnableUserDanmaku ?? false,
     DoubanProxyType: normalizeSiteDoubanProxyType(value.DoubanProxyType),
-    BangumiDataSource: normalizeSiteBangumiDataSource(value.BangumiDataSource),
     DoubanImageProxyType: normalizeSiteDoubanImageProxyType(
       value.DoubanImageProxyType,
     ),
@@ -241,14 +233,6 @@ const SiteConfigComponent = ({
     setSiteSettings((prev) => ({
       ...prev,
       DoubanProxyType: value,
-    }));
-  };
-
-  const handleBangumiDataSourceChange = (value: string) => {
-    const nextSource = normalizeSiteBangumiDataSource(value);
-    setSiteSettings((prev) => ({
-      ...prev,
-      BangumiDataSource: nextSource,
     }));
   };
 
@@ -587,18 +571,6 @@ const SiteConfigComponent = ({
             value={siteSettings.DoubanImageProxyType}
             onChange={(value) => handleDoubanImageProxyChange(value)}
             options={siteDoubanImageProxyTypeOptions}
-            className='w-full sm:w-80'
-          />
-        </AdminSettingRow>
-        <AdminSettingRow
-          label='Bangumi 数据代理'
-          htmlFor='site-bangumi-data-source'
-        >
-          <AdminSelect
-            id='site-bangumi-data-source'
-            value={siteSettings.BangumiDataSource}
-            onChange={(value) => handleBangumiDataSourceChange(value)}
-            options={siteBangumiDataSourceOptions}
             className='w-full sm:w-80'
           />
         </AdminSettingRow>

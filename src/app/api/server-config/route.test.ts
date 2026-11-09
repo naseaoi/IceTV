@@ -42,7 +42,6 @@ function createPublicConfig() {
     LiveDirectConnect: false,
     AutoSwitchSource: true,
     DoubanProxyType: 'direct',
-    BangumiDataSource: 'direct',
     DoubanImageProxyType: 'direct',
     CustomCategories: [],
     FluidSearch: true,
@@ -57,7 +56,6 @@ function createConfig() {
       EnableLiveEntry: false,
       LiveAccess: 'all',
       DoubanProxyType: 'custom',
-      BangumiDataSource: 'custom',
       DoubanImageProxyType: 'custom',
     },
   };
@@ -127,11 +125,9 @@ describe('server config route', () => {
     const body = await response.json();
 
     expect(body).toMatchObject({
-      DoubanProxyType: 'direct',
+      DoubanProxyType: 'auto',
       DoubanProxy: '',
-      BangumiDataSource: 'direct',
-      BangumiProxy: '',
-      DoubanImageProxyType: 'direct',
+      DoubanImageProxyType: 'auto',
       DoubanImageProxy: '',
     });
   });

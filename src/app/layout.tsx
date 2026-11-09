@@ -93,8 +93,6 @@ export default async function RootLayout({
     UPDATE_BRANCH: CURRENT_UPDATE_BRANCH,
     DOUBAN_PROXY_TYPE: publicConfig.DoubanProxyType,
     DOUBAN_PROXY: process.env.NEXT_PUBLIC_DOUBAN_PROXY || '',
-    BANGUMI_DATA_SOURCE: publicConfig.BangumiDataSource,
-    BANGUMI_PROXY: process.env.NEXT_PUBLIC_BANGUMI_PROXY || '',
     DOUBAN_IMAGE_PROXY_TYPE: publicConfig.DoubanImageProxyType,
     DOUBAN_IMAGE_PROXY: process.env.NEXT_PUBLIC_DOUBAN_IMAGE_PROXY || '',
     ENABLE_LIVE_ENTRY: enableLiveEntry,

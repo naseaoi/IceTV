@@ -25,7 +25,6 @@ const baseConfig: AdminConfig = {
     SearchDownstreamMaxPage: 5,
     SiteInterfaceCacheTime: 300,
     DoubanProxyType: 'direct',
-    BangumiDataSource: 'server',
     DoubanImageProxyType: 'direct',
     DisableYellowFilter: false,
     FluidSearch: true,
@@ -488,15 +487,13 @@ describe('config cache persistence', () => {
     const adminConfig = cloneBaseConfig();
     adminConfig.SiteConfig.DoubanProxyType = 'server';
     adminConfig.SiteConfig.DoubanImageProxyType = 'cmliussss-cdn-ali';
-    adminConfig.SiteConfig.BangumiDataSource = 'direct';
     const { getPublicConfig } = await loadConfigModule(jest.fn(), {
       adminConfig,
     });
 
     await expect(getPublicConfig()).resolves.toMatchObject({
-      DoubanProxyType: 'direct',
+      DoubanProxyType: 'auto',
       DoubanImageProxyType: 'cmliussss-cdn-ali',
-      BangumiDataSource: 'direct',
     });
   });
 
@@ -504,15 +501,13 @@ describe('config cache persistence', () => {
     const adminConfig = cloneBaseConfig();
     adminConfig.SiteConfig.DoubanProxyType = 'custom';
     adminConfig.SiteConfig.DoubanImageProxyType = 'custom';
-    adminConfig.SiteConfig.BangumiDataSource = 'custom';
     const { getPublicConfig } = await loadConfigModule(jest.fn(), {
       adminConfig,
     });
 
     await expect(getPublicConfig()).resolves.toMatchObject({
-      DoubanProxyType: 'direct',
-      DoubanImageProxyType: 'direct',
-      BangumiDataSource: 'direct',
+      DoubanProxyType: 'auto',
+      DoubanImageProxyType: 'auto',
     });
   });
 
@@ -522,10 +517,8 @@ describe('config cache persistence', () => {
     Object.assign(config.SiteConfig, {
       DoubanProxyType: 'custom',
       DoubanImageProxyType: 'custom',
-      BangumiDataSource: 'custom',
       DoubanProxy: 'https://data.example/fetch?url=',
       DoubanImageProxy: 'https://image.example/fetch?url=',
-      BangumiProxy: 'https://bangumi.example/fetch?url=',
       UnknownSetting: true,
     });
 
@@ -533,9 +526,8 @@ describe('config cache persistence', () => {
 
     expect(checked.SiteConfig).toEqual({
       ...baseConfig.SiteConfig,
-      DoubanProxyType: 'direct',
-      DoubanImageProxyType: 'direct',
-      BangumiDataSource: 'direct',
+      DoubanProxyType: 'auto',
+      DoubanImageProxyType: 'auto',
     });
   });
 
