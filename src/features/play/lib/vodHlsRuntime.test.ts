@@ -814,6 +814,136 @@ describe('vodHlsRuntime 致命网络错误恢复', () => {
       });
       expect(hls.loadSource).toHaveBeenCalledTimes(1);
     });
+    describe('画质档损坏先于线路回落', () => {
+      function parseLevels(hls: FakeHls) {
+        hls.levels = [360, 720, 1080].map((height, index) => ({
+          height,
+          bitrate: (index + 1) * 500_000,
+        }));
+        Object.assign(hls, {
+          currentLevel: -1,
+          startLevel: -1,
+          loadLevel: -1,
+          nextLoadLevel: -1,
+          nextAutoLevel: -1,
+          autoLevelCapping: -1,
+          autoLevelEnabled: true,
+        });
+        hls.emit(FakeHls.Events.MANIFEST_PARSED, { levels: hls.levels });
+      }
+      const levelLoadError = (level: number) => ({
+        type: FakeHls.ErrorTypes.NETWORK_ERROR,
+        details: 'levelLoadError',
+        fatal: false,
+        level,
+        context: { type: 'level', level },
+        response: { code: 0 },
+      });
+      const levelFragment = (level: number, sn: number) => ({
+        frag: { ...mainFragment(sn), level },
+      });
+      function loadAutoRoute() {
+        const runtime = setupRuntime();
+        const video = createVideo();
+        runtime.load(video, EPISODE_1);
+        const hls = getFakeHls(video) as FakeHls & Record<string, unknown>;
+        parseLevels(hls);
+        return { ...runtime, hls };
+      }
+      const rememberSourceServerProxy = () =>
+        jest.requireMock('@/lib/proxy-modes').rememberSourceServerProxy;
+
+      it('只有高画质档损坏时同线路降档，不切线路、不换源、不记代理成功', () => {
+        const { hls, options, onPlaybackRecoveryExhausted } = loadAutoRoute();
+        hls.emit(FakeHls.Events.FRAG_LOADED, levelFragment(1, 1));
+
+        hls.emit(FakeHls.Events.ERROR, levelLoadError(2));
+
+        expect(hls.loadSource).toHaveBeenCalledTimes(1);
+        expect(hls.nextLoadLevel).toBe(1);
+        expect(hls.autoLevelCapping).toBe(1);
+        expect(hls.startLoad).not.toHaveBeenCalled();
+        expect(options.onSourceProxyFallbackStarted).not.toHaveBeenCalled();
+        expect(onPlaybackRecoveryExhausted).not.toHaveBeenCalled();
+        hls.emit(FakeHls.Events.FRAG_LOADED, levelFragment(1, 2));
+        expect(rememberSourceServerProxy()).not.toHaveBeenCalled();
+        expect(mockReportSourceRouteStat).not.toHaveBeenCalledWith(
+          'demo',
+          'browser',
+          false,
+        );
+      });
+
+      it('高画质档分片连续失败到阈值时同样先降档', () => {
+        const { hls, onPlaybackRecoveryExhausted } = loadAutoRoute();
+        hls.emit(FakeHls.Events.FRAG_LOADED, levelFragment(1, 1));
+
+        for (let i = 0; i < 3; i++) {
+          hls.emit(FakeHls.Events.ERROR, {
+            ...NON_FATAL_FRAG_ERROR,
+            ...levelFragment(2, 2),
+          });
+        }
+
+        expect(hls.loadSource).toHaveBeenCalledTimes(1);
+        expect(hls.autoLevelCapping).toBe(1);
+        expect(onPlaybackRecoveryExhausted).not.toHaveBeenCalled();
+      });
+
+      it('整条线路不可用时直连首次子清单失败即切代理', () => {
+        const { hls } = loadAutoRoute();
+
+        hls.emit(FakeHls.Events.ERROR, levelLoadError(2));
+
+        expect(hls.loadSource).toHaveBeenCalledTimes(2);
+        expect(hls.loadSource.mock.calls[1][0]).toContain('forceServer=true');
+        expect(hls.nextLoadLevel).toBe(-1);
+        expect(hls.autoLevelCapping).toBe(-1);
+      });
+
+      it('起播时高画质档两路都失败，代理线路兜底降档且不记代理成功', () => {
+        const { hls, onPlaybackRecoveryExhausted } = loadAutoRoute();
+        hls.emit(FakeHls.Events.ERROR, levelLoadError(2));
+        parseLevels(hls);
+
+        hls.emit(FakeHls.Events.ERROR, levelLoadError(2));
+
+        expect(onPlaybackRecoveryExhausted).not.toHaveBeenCalled();
+        expect(hls.loadSource).toHaveBeenCalledTimes(2);
+        expect(hls.nextLoadLevel).toBe(1);
+        hls.emit(FakeHls.Events.FRAG_LOADED, levelFragment(1, 1));
+        expect(rememberSourceServerProxy()).not.toHaveBeenCalled();
+      });
+
+      it('降档后的档位再失败时交回线路回落，不逐档下降', () => {
+        const { hls, onPlaybackRecoveryExhausted } = loadAutoRoute();
+        hls.emit(FakeHls.Events.FRAG_LOADED, levelFragment(0, 1));
+        hls.emit(FakeHls.Events.ERROR, levelLoadError(2));
+        expect(hls.nextLoadLevel).toBe(1);
+
+        hls.emit(FakeHls.Events.ERROR, levelLoadError(1));
+
+        expect(hls.loadSource).toHaveBeenCalledTimes(2);
+        expect(hls.loadSource.mock.calls[1][0]).toContain('forceServer=true');
+        expect(onPlaybackRecoveryExhausted).not.toHaveBeenCalled();
+      });
+
+      it('固定代理线路致命分片错误先降档再判源失败', () => {
+        mockShouldAutoFallbackToServer.mockReturnValue(false);
+        mockIsServerProxy.mockReturnValue(true);
+        const { hls, onPlaybackRecoveryExhausted } = loadAutoRoute();
+
+        hls.emit(FakeHls.Events.ERROR, {
+          ...fatalFragError(3),
+          ...levelFragment(2, 3),
+        });
+
+        expect(onPlaybackRecoveryExhausted).not.toHaveBeenCalled();
+        expect(hls.nextLoadLevel).toBe(1);
+        expect(hls.startLoad).toHaveBeenCalledTimes(1);
+      });
+    });
+
     it('同意图重建运行时不重置线路尝试', () => {
       const { options } = setupRuntime();
       options.playbackIntentRef = { current: createVodPlaybackIntent() };

@@ -1,6 +1,6 @@
 export type VodQualityPolicy = {
-  defaultHeight: number;
-  autoStartHeight: number;
+  defaultHeight?: number;
+  autoStartHeight?: number;
   autoMinHeight?: number;
   autoMaxHeight?: number;
   emergencyBufferSeconds?: number;
@@ -8,6 +8,11 @@ export type VodQualityPolicy = {
   allowFailureDowngrade: boolean;
   preserveManualSelectionOnFailure?: boolean;
 };
+
+// 未登记的源交给 hls.js 自动码率，只保留失败降档
+const DEFAULT_VOD_QUALITY_POLICY: VodQualityPolicy = Object.freeze({
+  allowFailureDowngrade: true,
+});
 
 const VOD_QUALITY_POLICIES: Readonly<Record<string, VodQualityPolicy>> = {
   xigua: {
@@ -22,8 +27,6 @@ const VOD_QUALITY_POLICIES: Readonly<Record<string, VodQualityPolicy>> = {
   },
 };
 
-export function resolveVodQualityPolicy(
-  sourceKey: string,
-): VodQualityPolicy | null {
-  return VOD_QUALITY_POLICIES[sourceKey] || null;
+export function resolveVodQualityPolicy(sourceKey: string): VodQualityPolicy {
+  return VOD_QUALITY_POLICIES[sourceKey] || DEFAULT_VOD_QUALITY_POLICY;
 }

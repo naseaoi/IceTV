@@ -5,6 +5,7 @@ export type VodSourceAttempt = {
   id: string;
   triedRoutes: Set<'browser' | 'server'>;
   routeSwitched: boolean;
+  qualityDowngradedRoutes: Set<'browser' | 'server'>;
   allowAutoFallback: boolean;
   startedAt: number | null;
 };
@@ -38,6 +39,7 @@ export function getVodSourceAttempt(
       id,
       triedRoutes: new Set(),
       routeSwitched: false,
+      qualityDowngradedRoutes: new Set(),
       allowAutoFallback: false,
       startedAt: null,
     };

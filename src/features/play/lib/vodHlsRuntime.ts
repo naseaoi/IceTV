@@ -35,7 +35,10 @@ import {
   createVodFragmentCacheRecoveryLoader,
   shouldRecoverVodFragmentHttpCache,
 } from '@/features/play/lib/vodFragmentCacheRecovery';
-import { createVodHlsQualityController } from '@/features/play/lib/vodHlsQualityController';
+import {
+  type HlsLevelFailure,
+  createVodHlsQualityController,
+} from '@/features/play/lib/vodHlsQualityController';
 import {
   type VodPlaybackIntent,
   createVodPlaybackIntent,
@@ -472,17 +475,20 @@ export function createVodM3u8Loader({
       loadingSessionRef.current.pendingInitialResumeTarget = null;
     };
 
+    const hasUntriedRoute = () =>
+      allowAutoFallback &&
+      !!sourceKey &&
+      !attempt.routeSwitched &&
+      !attempt.triedRoutes.has(routeKey(!currentUseServerProxy));
+
     const switchRoute = (_reason: string) => {
       const nextServer = !currentUseServerProxy;
       if (
         videoRuntimeCleaned ||
         (playbackIntentRef && playbackIntentRef.current !== intent) ||
         managedVideo.hls !== hls ||
-        !allowAutoFallback ||
-        !sourceKey ||
         navigator.onLine === false ||
-        attempt.routeSwitched ||
-        attempt.triedRoutes.has(routeKey(nextServer))
+        !hasUntriedRoute()
       )
         return false;
       attempt.routeSwitched = true;
@@ -510,6 +516,24 @@ export function createVodM3u8Loader({
       startupProgress = beginMediaLoad();
       hls.loadSource(targetUrl);
       ensureVideoSource(video, targetUrl);
+      return true;
+    };
+
+    // 还有未试线路时，只有本线路已有其他档位加载成功（坏的是单个档位）才先降档；线路用尽时降档是判源失败前的兜底。每条线路最多降档一次
+    const tryQualityDowngrade = (data: HlsLevelFailure) => {
+      const route = routeKey(currentUseServerProxy);
+      if (attempt.qualityDowngradedRoutes.has(route)) return false;
+      const requireOtherLevelLoaded = hasUntriedRoute();
+      if (
+        !qualityController.tryDowngradeFailedLevel(data, {
+          requireOtherLevelLoaded,
+        })
+      )
+        return false;
+      attempt.qualityDowngradedRoutes.add(route);
+      recoveryController.cancelPendingRetry();
+      // 兜底降档说明失败可能只在高画质档，本线路随后成功不能证明另一条线路不可用
+      if (!requireOtherLevelLoaded) fallbackAwaitingProgress = false;
       return true;
     };
 
@@ -708,6 +732,12 @@ export function createVodM3u8Loader({
           currentUseServerProxy ? serverFailureTracker : browserFailureTracker
         ).record();
         if (!isFragNetworkError || thresholdReached) {
+          if (
+            allowAutoFallback &&
+            isFragOrLevelNetworkError &&
+            tryQualityDowngrade(data)
+          )
+            return;
           reportRouteStat(false);
           if (switchRoute(errorReason)) return;
           if (allowAutoFallback) {
@@ -724,6 +754,8 @@ export function createVodM3u8Loader({
         return;
 
       if (data.fatal) {
+        if (isFragOrLevelNetworkError && tryQualityDowngrade(data)) return;
+
         if (
           isRouteNetworkError &&
           currentUseServerProxy &&
@@ -734,10 +766,9 @@ export function createVodM3u8Loader({
         }
 
         if (
-          qualityController.tryRecoverFatalNetworkFailure({
-            isFragmentNetworkError: isFragNetworkError,
-            isFragmentOrLevelNetworkError: isFragOrLevelNetworkError,
-          })
+          qualityController.tryRecoverFatalNetworkFailure(
+            isFragOrLevelNetworkError,
+          )
         ) {
           return;
         }
@@ -783,7 +814,7 @@ export function createVodM3u8Loader({
     const onHlsFragLoaded = function (_: unknown, data: any) {
       markStartupProgress();
       bufferBudgetController.handleFragmentLoaded(data?.frag);
-      qualityController.handleFragmentLoaded();
+      qualityController.handleFragmentLoaded(data?.frag);
       segmentPrebufferController.handlePlaybackProgress();
       // 恢复时重下的失败位置之前的分片可能命中浏览器缓存，不能当作线路恢复，否则直连失败永远凑不满回退阈值
       if (recoveryController.handleFragmentLoaded(data?.frag)) {
