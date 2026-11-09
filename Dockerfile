@@ -10,8 +10,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends python3 make g+
 # 固定 corepack 缓存目录，便于跨阶段复用
 ENV COREPACK_HOME=/corepack
 
-# corepack 拉取 pnpm 版本时偶发被 npmjs 403；这里显式指定 registry 并加重试
-ENV COREPACK_NPM_REGISTRY=https://registry.npmmirror.com
+# corepack 拉取 pnpm 偶发 403 / 5xx，靠下方重试兜底
+ENV COREPACK_NPM_REGISTRY=https://registry.npmjs.org
 
 # 启用 corepack 并激活 pnpm（版本与 package.json packageManager 字段一致）
 RUN corepack enable \
@@ -32,16 +32,14 @@ COPY package.json pnpm-lock.yaml ./
 COPY patches ./patches
 
 # 安装所有依赖（含 devDependencies，后续会裁剪）
-# npmjs.org 对 CI runner IP 偶发 403，使用镜像源规避
-RUN pnpm config set registry https://registry.npmmirror.com \
-  && pnpm install --frozen-lockfile
+RUN npm_config_fetch_retries=5 pnpm install --frozen-lockfile
 
 # ---- 第 2 阶段：构建项目 ----
 FROM node:22.14-bookworm-slim AS builder
 ARG PNPM_VERSION=10.14.0
 ARG NEXT_PUBLIC_APP_VERSION
 ENV COREPACK_HOME=/corepack
-ENV COREPACK_NPM_REGISTRY=https://registry.npmmirror.com
+ENV COREPACK_NPM_REGISTRY=https://registry.npmjs.org
 
 # 复用 deps 阶段已下载的 pnpm
 COPY --from=deps /corepack /corepack
