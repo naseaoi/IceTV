@@ -101,7 +101,6 @@ import { buildTrackingSql, MYSQL_TRACKING_DIALECT } from './tracking-sql';
 import {
   AdminVideoReviewPage,
   Favorite,
-  FavoritePage,
   IStorage,
   MetadataRecordPage,
   PlaybackPeriodSession,
@@ -231,35 +230,6 @@ function buildTrackingPlayRecordPage(
     nextCursor:
       rows.length > limit && lastRow?.record_key && lastCreatedAt !== null
         ? `${lastCreatedAt}|${lastRow.record_key}`
-        : null,
-  };
-}
-
-function buildFavoritePage(
-  rows: JsonRow[],
-  total: number,
-  limit: number,
-): FavoritePage {
-  const items = rows.slice(0, limit).flatMap((row) => {
-    if (!row.favorite_key || !row.favorite_json) return [];
-    const favorite = parseJsonValue<Favorite>(row.favorite_json);
-    if (!favorite) return [];
-    const playRecord = parseJsonValue<PlayRecord>(row.record_json);
-    return [
-      {
-        key: row.favorite_key,
-        favorite,
-        ...(playRecord ? { playRecord } : {}),
-      },
-    ];
-  });
-  const lastItem = items.at(-1);
-  return {
-    items,
-    total,
-    nextCursor:
-      rows.length > limit && lastItem
-        ? `${lastItem.favorite.save_time}|${lastItem.key}`
         : null,
   };
 }
@@ -1219,60 +1189,6 @@ export class MySqlStorage implements IStorage {
     );
 
     return buildMetadataFavoritePage(rows, pageLimit);
-  }
-
-  async getFavoritePage(
-    userName: string,
-    limit: number,
-    cursorTime?: number,
-    cursorKey?: string,
-    includeLive = true,
-  ): Promise<FavoritePage> {
-    await this.ensureInitialized();
-    const username = normalizeUsername(userName);
-    const saveTimeExpression =
-      "CAST(JSON_UNQUOTE(JSON_EXTRACT(f.favorite_json, '$.save_time')) AS UNSIGNED)";
-    const hasCursor = cursorTime !== undefined && !!cursorKey;
-    const rowsQuery = this.pool.query<JsonRow[]>(
-      hasCursor
-        ? `SELECT f.favorite_key, f.favorite_json, p.record_json
-           FROM favorites f
-           LEFT JOIN play_records p
-             ON p.username = f.username AND p.record_key = f.favorite_key
-           WHERE f.username = ?
-             AND (? = 1 OR ${MYSQL_NON_LIVE_FAVORITE_WHERE})
-             AND (${saveTimeExpression} < ?
-               OR (${saveTimeExpression} = ? AND f.favorite_key < ?))
-           ORDER BY ${saveTimeExpression} DESC, f.favorite_key DESC
-           LIMIT ?`
-        : `SELECT f.favorite_key, f.favorite_json, p.record_json
-           FROM favorites f
-           LEFT JOIN play_records p
-             ON p.username = f.username AND p.record_key = f.favorite_key
-           WHERE f.username = ?
-             AND (? = 1 OR ${MYSQL_NON_LIVE_FAVORITE_WHERE})
-           ORDER BY ${saveTimeExpression} DESC, f.favorite_key DESC
-           LIMIT ?`,
-      hasCursor
-        ? [
-            username,
-            Number(includeLive),
-            cursorTime,
-            cursorTime,
-            cursorKey,
-            limit + 1,
-          ]
-        : [username, Number(includeLive), limit + 1],
-    );
-    const countQuery = this.pool.query<
-      Array<RowDataPacket & { count: number }>
-    >(
-      `SELECT COUNT(*) AS count FROM favorites
-       WHERE username = ? AND (? = 1 OR ${MYSQL_NON_LIVE_FAVORITE_WHERE})`,
-      [username, Number(includeLive)],
-    );
-    const [[rows], [countRows]] = await Promise.all([rowsQuery, countQuery]);
-    return buildFavoritePage(rows, countRows[0]?.count || 0, limit);
   }
 
   async getFavoriteLibraryPage(userName: string, query: FavoriteLibraryQuery) {

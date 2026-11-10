@@ -3,6 +3,7 @@ import { cookies } from 'next/headers';
 import { getServerAuthSession } from '@/lib/auth-session.server';
 import { getPublicConfig } from '@/lib/config';
 import { db } from '@/lib/db';
+import { getListSkeletonCount } from '@/lib/list-count-cookies.server';
 import { normalizePlayRecordLimit } from '@/lib/play-records';
 import type { PlayRecord } from '@/lib/types';
 
@@ -23,13 +24,7 @@ export async function getContinueWatchingSkeletonCount({
     return 0;
   }
 
-  const rawCount = Number(cookieStore.get(cookieName)?.value || 0);
-
-  if (!Number.isFinite(rawCount) || rawCount <= 0) {
-    return 0;
-  }
-
-  return Math.min(Math.floor(rawCount), limit);
+  return getListSkeletonCount(cookieName, limit);
 }
 
 export interface ContinueWatchingInitialData {

@@ -491,23 +491,6 @@ class DbManager {
     return storage.getStaleFavoritePage(userName, now, ttlMs, limit, cursorKey);
   }
 
-  async getFavoritePage(
-    userName: string,
-    limit: number,
-    cursorTime?: number,
-    cursorKey?: string,
-    includeLive = true,
-  ) {
-    const storage = await this.getStorage();
-    return storage.getFavoritePage(
-      userName,
-      limit,
-      cursorTime,
-      cursorKey,
-      includeLive,
-    );
-  }
-
   async getFavoriteLibraryPage(
     ...args: Parameters<IStorage['getFavoriteLibraryPage']>
   ) {

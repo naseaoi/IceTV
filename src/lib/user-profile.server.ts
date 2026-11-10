@@ -1,9 +1,11 @@
 import 'server-only';
 
+import { cookies } from 'next/headers';
 import { NextRequest, NextResponse } from 'next/server';
 
 import { InvalidFavoriteLibraryQuery } from '@/features/favorites/lib/library-storage';
 import { isGuardFailure, requireActiveUser } from '@/lib/api-auth';
+import { getServerAuthSession } from '@/lib/auth-session.server';
 import { isFavoriteWatchStatus } from '@/lib/catalog-favorites';
 import { getClientIp } from '@/lib/client-ip';
 import { db } from '@/lib/db';
@@ -13,6 +15,7 @@ import type {
   LibraryVisibility,
   PublicFavoriteItem,
   UserProfile,
+  UserProfileView,
 } from '@/lib/types';
 import {
   ProfileValidationError,
@@ -160,6 +163,23 @@ export async function handleNicknameAvailability(request: NextRequest) {
 }
 
 export type ProfileRouteContext = { params: Promise<{ profileId: string }> };
+
+// 个人主页首屏预取资料，骨架即可按公开评价数渲染；失败返回 null，由客户端照常请求并展示错误
+export async function getInitialProfileView(
+  profileId: string,
+): Promise<UserProfileView | null> {
+  try {
+    const cookieStore = await cookies();
+    const session = await getServerAuthSession(cookieStore.get('auth')?.value);
+    if (session.status !== 'authenticated') return null;
+    const profile = await db.getUserProfileById(profileId);
+    if (!profile) return null;
+    return await db.getUserProfileView(profile.username, session.username);
+  } catch (error) {
+    console.error('预取个人主页资料失败:', error);
+    return null;
+  }
+}
 
 export async function handlePublicUser(
   request: NextRequest,

@@ -6,6 +6,7 @@ import { PAGE_CONTAINER_CLASS } from '@/components/page-container';
 import PageLayout from '@/components/PageLayout';
 import SkeletonText from '@/components/SkeletonText';
 import {
+  CONTINUE_WATCHING_EMPTY_CLASS,
   CONTINUE_WATCHING_GRID_CLASS,
   CONTINUE_WATCHING_GRID_ITEM_CLASS,
 } from '@/features/continue-watching/lib/layout';
@@ -54,9 +55,19 @@ export function ContinueWatchingPageFrame({
 }
 
 export function ContinueWatchingGridSkeleton({ count }: { count: number }) {
+  if (count === 0) {
+    return (
+      <div
+        aria-hidden='true'
+        className={`flex justify-center ${CONTINUE_WATCHING_EMPTY_CLASS}`}
+      >
+        <SkeletonText barClassName='h-4 w-32 rounded' />
+      </div>
+    );
+  }
   return (
     <div className={CONTINUE_WATCHING_GRID_CLASS}>
-      {Array.from({ length: count || 8 }).map((_, index) => (
+      {Array.from({ length: count }).map((_, index) => (
         <HomePosterCardSkeleton
           key={index}
           className={CONTINUE_WATCHING_GRID_ITEM_CLASS}

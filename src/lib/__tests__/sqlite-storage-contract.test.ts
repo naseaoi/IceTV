@@ -546,7 +546,7 @@ describe('sqlite storage contract', () => {
     expect(secondPage.nextCursor).toBeNull();
   });
 
-  it('paginates favorites with matching play progress', async () => {
+  it('收藏库按指定条数分页并关联播放进度', async () => {
     const storage = new LocalSqliteStorage(':memory:');
     for (const [key, saveTime] of [
       ['source+old', 1000],
@@ -564,13 +564,17 @@ describe('sqlite storage contract', () => {
       index: 4,
     });
 
-    const firstPage = await storage.getFavoritePage('demo-user', 2);
-    const secondPage = await storage.getFavoritePage(
-      'demo-user',
-      2,
-      2000,
-      'source+middle',
-    );
+    const query = {
+      query: '',
+      filter: 'all',
+      sort: 'saved',
+      limit: 2,
+    } as const;
+    const firstPage = await storage.getFavoriteLibraryPage('demo-user', query);
+    const secondPage = await storage.getFavoriteLibraryPage('demo-user', {
+      ...query,
+      cursor: firstPage.nextCursor,
+    });
 
     expect(firstPage.items.map((item) => item.key)).toEqual([
       'source+new',
@@ -579,13 +583,14 @@ describe('sqlite storage contract', () => {
     expect(firstPage.items[1]?.playRecord?.index).toBe(4);
     expect(firstPage).toMatchObject({
       total: 3,
-      nextCursor: '2000|source+middle',
+      libraryTotal: 3,
+      nextCursor: expect.any(String),
     });
     expect(secondPage.items.map((item) => item.key)).toEqual(['source+old']);
     expect(secondPage.nextCursor).toBeNull();
   });
 
-  it('filters live favorites before paging and traverses tied timestamps without gaps', async () => {
+  it('个人主页收藏库排除直播后分页，库总数仍包含直播', async () => {
     const storage = new LocalSqliteStorage(':memory:');
     for (const [key, origin] of [
       ['source+z', 'live'],
@@ -601,29 +606,37 @@ describe('sqlite storage contract', () => {
         save_time: 1000,
       });
     }
-    const first = await storage.getFavoritePage(
-      'public-user',
-      2,
-      undefined,
-      undefined,
-      false,
-    );
-    const second = await storage.getFavoritePage(
-      'public-user',
-      2,
-      1000,
-      'source+c',
-      false,
-    );
+    const query = {
+      query: '',
+      filter: 'all',
+      sort: 'saved',
+      limit: 2,
+      profileScope: 'public',
+    } as const;
+    const first = await storage.getFavoriteLibraryPage('public-user', query);
+    const second = await storage.getFavoriteLibraryPage('public-user', {
+      ...query,
+      cursor: first.nextCursor,
+    });
     expect(first.items.map((item) => item.key)).toEqual([
       'source+e',
       'source+c',
     ]);
     expect(first.total).toBe(3);
-    expect(first.nextCursor).toBe('1000|source+c');
+    expect(first.nextCursor).toEqual(expect.any(String));
+    expect(first.libraryTotal).toBe(6);
     expect(second.items.map((item) => item.key)).toEqual(['source+b']);
     expect(second.nextCursor).toBeNull();
-    expect((await storage.getFavoritePage('public-user', 10)).total).toBe(6);
+    expect(
+      (
+        await storage.getFavoriteLibraryPage('public-user', {
+          query: '',
+          filter: 'all',
+          sort: 'saved',
+          limit: 10,
+        })
+      ).total,
+    ).toBe(6);
   });
 
   it('按主键游标分页读取过期元数据并排除新鲜项与直播收藏', async () => {

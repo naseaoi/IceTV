@@ -18,7 +18,6 @@ import {
   retryClientRequest,
   triggerGlobalError,
 } from './db.client.internal';
-import { normalizeFavoriteLimit } from './favorites';
 import type { PlayRecordPage } from './play-records';
 import {
   DEFAULT_RECENT_PLAY_RECORD_LIMIT,
@@ -27,7 +26,7 @@ import {
   selectRecentPlayRecords,
 } from './play-records';
 import { getRuntimeConfig } from './runtime-config';
-import type { Favorite, FavoritePage, PlayRecord, SkipConfig } from './types';
+import type { Favorite, PlayRecord, SkipConfig } from './types';
 
 export type { Favorite, PlayRecord, SkipConfig } from './types';
 
@@ -435,18 +434,6 @@ export async function deleteSearchHistory(keyword: string): Promise<void> {
 
 export async function getAllFavorites(): Promise<Record<string, Favorite>> {
   return _getAllFavorites();
-}
-
-export async function getFavoritePage(
-  limit: number,
-  cursor?: string | null,
-): Promise<FavoritePage> {
-  const params = new URLSearchParams({
-    format: 'page',
-    limit: String(normalizeFavoriteLimit(limit)),
-  });
-  if (cursor) params.set('cursor', cursor);
-  return fetchFromApi<FavoritePage>(`/api/favorites?${params.toString()}`);
 }
 
 export function getCachedFavoritesSnapshot(): Record<string, Favorite> | null {

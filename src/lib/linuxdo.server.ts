@@ -17,6 +17,7 @@ import {
   type LinuxDoErrorCode,
   LINUXDO_ERROR_MESSAGES,
 } from '@/lib/linuxdo-errors';
+import { seedListCountCookies } from '@/lib/list-count-seed.server';
 import {
   generateAuthCookie,
   recordLoginActivity,
@@ -387,7 +388,10 @@ async function attachSession(
       username,
     ),
   );
-  await recordLoginActivity(username);
+  await Promise.all([
+    recordLoginActivity(username),
+    seedListCountCookies(response, username),
+  ]);
 }
 async function createAccount(
   request: NextRequest,

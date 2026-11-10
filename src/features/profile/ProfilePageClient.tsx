@@ -326,10 +326,14 @@ function CopyProfileLinkButton({ profileId }: { profileId: string }) {
 
 export default function ProfilePageClient({
   profileId,
+  initialProfile = null,
 }: {
   profileId: string;
+  initialProfile?: UserProfileView | null;
 }) {
-  const [profile, setProfile] = useState<UserProfileView | null>(null);
+  const [profile, setProfile] = useState<UserProfileView | null>(
+    initialProfile,
+  );
   const [error, setError] = useState('');
   const [version, setVersion] = useState(0);
   const [tab, setTab] = useState<'reviews' | 'favorites'>('reviews');
@@ -338,6 +342,11 @@ export default function ProfilePageClient({
   const [busy, setBusy] = useState(false);
   const following = useRef(false);
   useEffect(() => {
+    // 服务端已预取同一用户时首轮不再请求，version 变化后照常重新拉取
+    if (version === 0 && initialProfile?.profileId === profileId) {
+      knownReviewCounts.set(profileId, initialProfile.publicReviewCount);
+      return;
+    }
     let active = true;
     setError('');
     getUserProfile(profileId)
@@ -351,7 +360,7 @@ export default function ProfilePageClient({
     return () => {
       active = false;
     };
-  }, [profileId, version]);
+  }, [initialProfile, profileId, version]);
   async function follow() {
     if (!profile || following.current) return;
     following.current = true;

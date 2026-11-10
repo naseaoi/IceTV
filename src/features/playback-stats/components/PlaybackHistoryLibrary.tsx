@@ -28,13 +28,17 @@ const GROUP_TITLE_TEXT_CLASS = 'mb-3 text-sm font-medium';
 const TOOLBAR_BUTTON_CLASS =
   'inline-flex h-9 shrink-0 items-center rounded-full px-4 text-sm text-gray-600 transition hover:bg-gray-900/[0.05] hover:text-gray-900 disabled:pointer-events-none disabled:opacity-40 dark:text-gray-300 dark:hover:bg-white/[0.06] dark:hover:text-white';
 
-export function PlaybackHistoryGridSkeleton({ count }: { count?: number }) {
-  const placeholder = usePlaybackHistoryPlaceholder();
+export function PlaybackHistoryGridSkeleton({
+  initialCount,
+}: {
+  initialCount?: number;
+}) {
+  const placeholder = usePlaybackHistoryPlaceholder(initialCount);
   const groups = placeholder.snapshot
     ? groupPlaybackSessionsByDay(placeholder.snapshot.items).map(
         (group) => group.sessions.length,
       )
-    : [count ?? placeholder.count];
+    : [placeholder.count];
   if (groups.length === 0 || groups.every((size) => size === 0))
     return <LibraryEmptySkeleton />;
   return (
@@ -56,17 +60,21 @@ export function PlaybackHistoryGridSkeleton({ count }: { count?: number }) {
   );
 }
 
-export function PlaybackHistoryPageSkeleton() {
-  const { snapshot } = usePlaybackHistoryPlaceholder();
+export function PlaybackHistoryPageSkeleton({
+  initialCount,
+}: {
+  initialCount?: number;
+}) {
+  const { count } = usePlaybackHistoryPlaceholder(initialCount);
   return (
     <>
       <div className='mb-4 flex items-center gap-2 py-3'>
         <div className='skeleton h-9 w-full rounded-full sm:w-72' />
-        {(!snapshot || snapshot.items.length > 0) && (
+        {count > 0 && (
           <div className='skeleton ml-auto h-9 w-[60px] shrink-0 rounded-full' />
         )}
       </div>
-      <PlaybackHistoryGridSkeleton />
+      <PlaybackHistoryGridSkeleton initialCount={initialCount} />
     </>
   );
 }
@@ -104,11 +112,14 @@ function PlaybackHistoryGroupGrid({
   );
 }
 
-export function PlaybackHistoryLibrary() {
+export function PlaybackHistoryLibrary({
+  initialSkeletonCount,
+}: {
+  initialSkeletonCount?: number;
+}) {
   const {
     items,
     loading,
-    skeletonCount,
     loadingMore,
     refreshing,
     searchText,
@@ -118,6 +129,7 @@ export function PlaybackHistoryLibrary() {
     loadMore,
     removeSessions,
   } = usePlaybackHistory();
+  const placeholder = usePlaybackHistoryPlaceholder(initialSkeletonCount);
   const { playHistoryItem, prefetchPlayPage } = usePlayHistorySession();
   const [editing, setEditing] = useState(false);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
@@ -154,7 +166,9 @@ export function PlaybackHistoryLibrary() {
 
   let content: React.ReactNode;
   if (loading) {
-    content = <PlaybackHistoryGridSkeleton count={skeletonCount} />;
+    content = (
+      <PlaybackHistoryGridSkeleton initialCount={initialSkeletonCount} />
+    );
   } else if (items.length === 0) {
     content = searchKeyword ? (
       <LibraryEmptyState
@@ -286,22 +300,22 @@ export function PlaybackHistoryLibrary() {
                 </button>
               )}
             </label>
-            {loading ? (
-              <div
-                aria-hidden='true'
-                className='skeleton ml-auto h-9 w-[60px] shrink-0 rounded-full'
-              />
-            ) : (
-              items.length > 0 && (
-                <button
-                  type='button'
-                  onClick={() => setEditing(true)}
-                  className={`${TOOLBAR_BUTTON_CLASS} ml-auto`}
-                >
-                  编辑
-                </button>
-              )
-            )}
+            {loading
+              ? placeholder.count > 0 && (
+                  <div
+                    aria-hidden='true'
+                    className='skeleton ml-auto h-9 w-[60px] shrink-0 rounded-full'
+                  />
+                )
+              : items.length > 0 && (
+                  <button
+                    type='button'
+                    onClick={() => setEditing(true)}
+                    className={`${TOOLBAR_BUTTON_CLASS} ml-auto`}
+                  >
+                    编辑
+                  </button>
+                )}
           </>
         )}
       </div>

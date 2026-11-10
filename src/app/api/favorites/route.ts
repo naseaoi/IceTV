@@ -10,7 +10,6 @@ import {
   isWatchedAt,
 } from '@/lib/catalog-favorites';
 import { db } from '@/lib/db';
-import { normalizeFavoriteLimit, parseFavoriteCursor } from '@/lib/favorites';
 import { NO_STORE_HEADERS } from '@/lib/http-cache';
 import { Favorite } from '@/lib/types';
 import { parseStorageKey } from '@/lib/utils';
@@ -20,9 +19,9 @@ export const runtime = 'nodejs';
 /**
  * GET /api/favorites
  *
- * 支持两种调用方式：
- * 1. 不带 query，返回全部收藏列表（Record<string, Favorite>）。
- * 2. 带 key=source+id，返回单条收藏（Favorite | null）。
+ * format=library 返回收藏库分页、计数与观看状态，支持 limit 指定条数。
+ * format=work 按作品匹配收藏；key=source+id 查询单条收藏。
+ * 无参数时返回全部收藏（Record<string, Favorite>）。
  */
 export async function GET(request: NextRequest) {
   try {
@@ -42,6 +41,7 @@ export async function GET(request: NextRequest) {
     }
 
     if (searchParams.get('format') === 'library') {
+      const limit = searchParams.get('limit');
       const page = await db.getFavoriteLibraryPage(guardResult.username, {
         query: searchParams.get('q') ?? '',
         filter: (searchParams.get('filter') ??
@@ -49,22 +49,9 @@ export async function GET(request: NextRequest) {
         sort: (searchParams.get('sort') ??
           'saved') as FavoriteLibraryQuery['sort'],
         cursor: searchParams.get('cursor'),
+        ...(limit !== null ? { limit: Number(limit) } : {}),
       });
       return NextResponse.json(page, { headers: NO_STORE_HEADERS });
-    }
-
-    if (searchParams.get('format') === 'page') {
-      const cursor = parseFavoriteCursor(searchParams.get('cursor'));
-      const page = await db.getFavoritePage(
-        guardResult.username,
-        normalizeFavoriteLimit(searchParams.get('limit')),
-        cursor?.time,
-        cursor?.key,
-      );
-      return NextResponse.json(page, {
-        status: 200,
-        headers: NO_STORE_HEADERS,
-      });
     }
 
     // 查询单条收藏

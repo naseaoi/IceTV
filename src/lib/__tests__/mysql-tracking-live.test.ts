@@ -498,7 +498,7 @@ describeLive('MySQL 追更查询（真实实例）', () => {
     }
   });
 
-  it('filters live favorites in SQL before applying a tied-time cursor', async () => {
+  it('真实 SQL 中个人主页排除直播后续页，库总数包含直播', async () => {
     const username = `public-favorites-${Date.now()}`;
     try {
       for (const [key, origin] of [
@@ -515,29 +515,37 @@ describeLive('MySQL 追更查询（真实实例）', () => {
           save_time: 1000,
         });
       }
-      const first = await storage.getFavoritePage(
-        username,
-        2,
-        undefined,
-        undefined,
-        false,
-      );
-      const second = await storage.getFavoritePage(
-        username,
-        2,
-        1000,
-        'source+c',
-        false,
-      );
+      const query = {
+        query: '',
+        filter: 'all',
+        sort: 'saved',
+        limit: 2,
+        profileScope: 'public',
+      } as const;
+      const first = await storage.getFavoriteLibraryPage(username, query);
+      const second = await storage.getFavoriteLibraryPage(username, {
+        ...query,
+        cursor: first.nextCursor,
+      });
       expect(first.items.map((item) => item.key)).toEqual([
         'source+e',
         'source+c',
       ]);
       expect(first.total).toBe(3);
-      expect(first.nextCursor).toBe('1000|source+c');
+      expect(first.nextCursor).toEqual(expect.any(String));
+      expect(first.libraryTotal).toBe(6);
       expect(second.items.map((item) => item.key)).toEqual(['source+b']);
       expect(second.nextCursor).toBeNull();
-      expect((await storage.getFavoritePage(username, 10)).total).toBe(6);
+      expect(
+        (
+          await storage.getFavoriteLibraryPage(username, {
+            query: '',
+            filter: 'all',
+            sort: 'saved',
+            limit: 10,
+          })
+        ).total,
+      ).toBe(6);
     } finally {
       await storage.deleteAllFavorites(username);
     }

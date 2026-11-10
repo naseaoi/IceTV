@@ -10,6 +10,7 @@ import {
   isSecureRequest,
 } from '@/lib/auth.server';
 import { db } from '@/lib/db';
+import { clearListCountCookiesOnResponse } from '@/lib/list-count-cookies';
 import { getAuthSigningSecret } from '@/lib/signing-secret.server';
 type AuthRole = 'owner' | 'admin' | 'user';
 
@@ -59,6 +60,9 @@ export function setAuthCookies(
       secure,
     },
   );
+
+  // 计数快照不区分账号，换账号登录时清掉上一位用户的条数
+  clearListCountCookiesOnResponse(response);
 }
 
 export async function generateAuthCookie(

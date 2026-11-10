@@ -45,20 +45,22 @@ export function MineSection({
 
 export function MinePageClient({
   favoriteSkeletonCount = 0,
+  historySkeletonCount = 0,
 }: {
   favoriteSkeletonCount?: number;
+  historySkeletonCount?: number;
 }) {
   const {
     favoriteItems,
     total: favoriteTotal,
     loading: favoritesLoading,
     skeletonCount: favoriteLoadingSkeletonCount,
-  } = useFavoriteItems(true, favoriteSkeletonCount);
+  } = useFavoriteItems(favoriteSkeletonCount);
 
   return (
     <div className={MINE_OVERVIEW_CLASS}>
       <MineSection title='最近观看' href='/me/history'>
-        <PlaybackHistoryPreview />
+        <PlaybackHistoryPreview initialSkeletonCount={historySkeletonCount} />
       </MineSection>
       <MineSection title='我的收藏' href='/me/favorites'>
         <FavoritePreviewSection

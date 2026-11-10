@@ -3,6 +3,7 @@
 import VideoCard from '@/components/VideoCard';
 import type { ContinueWatchingItem } from '@/features/continue-watching/hooks/useContinueWatchingItems';
 import {
+  CONTINUE_WATCHING_EMPTY_CLASS,
   CONTINUE_WATCHING_GRID_CLASS,
   CONTINUE_WATCHING_GRID_ITEM_CLASS,
 } from '@/features/continue-watching/lib/layout';
@@ -32,7 +33,9 @@ export function ContinueWatchingGrid({
   );
   if (items.length === 0) {
     return (
-      <div className='py-5 text-center text-gray-500 dark:text-gray-400'>
+      <div
+        className={`${CONTINUE_WATCHING_EMPTY_CLASS} text-center text-gray-500 dark:text-gray-400`}
+      >
         暂无继续观看内容
       </div>
     );

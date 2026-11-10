@@ -16,6 +16,7 @@ import {
   getPlaybackSessionMergeKey,
 } from '@/features/playback-stats/lib/history';
 import type { PlaybackHistoryResponse } from '@/features/playback-stats/types';
+import { readListCountCookie } from '@/lib/list-count-cookies';
 import {
   getCurrentNavigationPath,
   withReturnTo,
@@ -28,21 +29,30 @@ import { canUseNetworkPrefetch, warmupForPlayback } from '@/lib/video-prefetch';
 const useIsomorphicLayoutEffect =
   typeof window !== 'undefined' ? useLayoutEffect : useEffect;
 
-// 只读已有快照；路由 loading 与客户端占位共用，不为占位发起请求。
-export function usePlaybackHistoryPlaceholder() {
+// 只读已有快照与计数 cookie，不为占位发起请求；initialCount 是服务端读到的计数，供首屏 HTML 使用。
+// count 为首页应显示的条数，已按请求页大小截断。
+export function usePlaybackHistoryPlaceholder(initialCount = 0) {
   const runtimeConfig = useRuntimeConfig();
-  const [snapshot, setSnapshot] = useState<PlaybackHistoryResponse | null>(
-    null,
+  const pageSize = Math.max(
+    1,
+    Math.floor(runtimeConfig.PLAYBACK_HISTORY_PAGE_SIZE || 10),
   );
+  const [state, setState] = useState<{
+    snapshot: PlaybackHistoryResponse | null;
+    known: number;
+  }>({ snapshot: null, known: initialCount });
   useIsomorphicLayoutEffect(() => {
-    setSnapshot(getCachedPlaybackHistorySnapshot());
-  }, []);
+    const snapshot = getCachedPlaybackHistorySnapshot();
+    setState({
+      snapshot,
+      known: snapshot
+        ? snapshot.items.length
+        : (readListCountCookie('history_count') ?? initialCount),
+    });
+  }, [initialCount]);
   return {
-    snapshot,
-    count: Math.max(
-      1,
-      Math.floor(runtimeConfig.PLAYBACK_HISTORY_PAGE_SIZE || 10),
-    ),
+    snapshot: state.snapshot,
+    count: Math.min(state.known, pageSize),
   };
 }
 
@@ -70,7 +80,7 @@ export function usePlaybackHistory() {
   const [refreshing, setRefreshing] = useState(false);
   const [searchText, setSearchText] = useState('');
   const [searchKeyword, setSearchKeyword] = useState('');
-  const skeletonCount = Math.min(historyPageSize, historyLimit);
+  const pageSize = Math.min(historyPageSize, historyLimit);
 
   useEffect(() => {
     const timeoutId = window.setTimeout(() => {
@@ -242,7 +252,7 @@ export function usePlaybackHistory() {
     loading,
     loadingMore,
     refreshing,
-    skeletonCount,
+    pageSize,
     searchText,
     setSearchText,
     searchKeyword,

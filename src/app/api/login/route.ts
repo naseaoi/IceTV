@@ -3,6 +3,7 @@ import { NextRequest, NextResponse } from 'next/server';
 
 import { db } from '@/lib/db';
 import { getOwnerPassword, getOwnerUsername } from '@/lib/env.server';
+import { seedListCountCookies } from '@/lib/list-count-seed.server';
 import {
   generateAuthCookie,
   recordLoginActivity,
@@ -243,7 +244,10 @@ export async function POST(req: NextRequest) {
       const authPayload = await generateAuthCookie('owner', rawUsername);
       setAuthCookies(response, req, authPayload);
       clearLoginFailures(rateLimitState.buckets);
-      await recordLoginActivity(username);
+      await Promise.all([
+        recordLoginActivity(username),
+        seedListCountCookies(response, username),
+      ]);
 
       return response;
     } else if (
@@ -279,7 +283,10 @@ export async function POST(req: NextRequest) {
       );
       setAuthCookies(response, req, authPayload);
       clearLoginFailures(rateLimitState.buckets);
-      await recordLoginActivity(username);
+      await Promise.all([
+        recordLoginActivity(username),
+        seedListCountCookies(response, username),
+      ]);
 
       return response;
     } catch (err) {

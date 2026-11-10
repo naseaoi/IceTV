@@ -247,12 +247,6 @@ export interface FavoritePageItem {
   playRecord?: PlayRecord;
 }
 
-export interface FavoritePage {
-  items: FavoritePageItem[];
-  total: number;
-  nextCursor: string | null;
-}
-
 export interface PlaybackSession {
   id: string;
   source: string;
@@ -528,13 +522,6 @@ export interface IStorage {
     limit: number,
     cursorKey?: string,
   ): Promise<MetadataRecordPage<Favorite>>;
-  getFavoritePage(
-    userName: string,
-    limit: number,
-    cursorTime?: number,
-    cursorKey?: string,
-    includeLive?: boolean,
-  ): Promise<FavoritePage>;
   getFavoriteLibraryPage(
     userName: string,
     query: import('@/features/favorites/lib/library-query').FavoriteLibraryQuery,

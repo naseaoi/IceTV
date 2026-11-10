@@ -2,8 +2,6 @@ import {
   AUTO_PLAY_NEXT_STORAGE_KEY,
   AUTO_SWITCH_SOURCE_STORAGE_KEY,
   BLOCK_AD_STORAGE_KEY,
-  CONTINUE_WATCHING_COUNT_STORAGE_KEY,
-  CONTINUE_WATCHING_PAGE_COUNT_STORAGE_KEY,
   DEFAULT_AGGREGATE_SEARCH_STORAGE_KEY,
   ENABLE_OPTIMIZATION_STORAGE_KEY,
   FLUID_SEARCH_STORAGE_KEY,
@@ -59,9 +57,6 @@ describe('local preferences', () => {
     resetContinueWatchingCount();
     expect(readContinueWatchingCount()).toBe(0);
     expect(readContinueWatchingPageCount()).toBe(0);
-    expect(
-      localStorage.getItem(CONTINUE_WATCHING_PAGE_COUNT_STORAGE_KEY),
-    ).toBeNull();
     expect(document.cookie).not.toContain('cw_page_count=');
   });
 
@@ -217,15 +212,11 @@ describe('local preferences', () => {
   it('stores and resets the continue watching count through the shared helper', () => {
     writeContinueWatchingCount(4.8);
 
-    expect(localStorage.getItem(CONTINUE_WATCHING_COUNT_STORAGE_KEY)).toBe('4');
     expect(readContinueWatchingCount()).toBe(4);
     expect(document.cookie).toContain('cw_count=4');
 
     resetContinueWatchingCount();
 
-    expect(
-      localStorage.getItem(CONTINUE_WATCHING_COUNT_STORAGE_KEY),
-    ).toBeNull();
     expect(readContinueWatchingCount()).toBe(0);
     expect(document.cookie).not.toContain('cw_count=4');
   });

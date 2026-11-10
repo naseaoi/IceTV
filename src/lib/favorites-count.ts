@@ -1,4 +1,3 @@
-export const FAVORITE_ITEMS_COUNT_COOKIE = 'fav_count';
 export const FAVORITE_PREVIEW_LIMIT = 20;
 export const FAVORITE_RENDER_CHUNK = 48;
 

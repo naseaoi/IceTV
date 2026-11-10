@@ -3,6 +3,11 @@ import {
   removeStorage,
   writeStorage,
 } from '@/lib/browser-storage';
+import {
+  clearListCountCookie,
+  readListCountCookie,
+  writeListCountCookie,
+} from '@/lib/list-count-cookies';
 
 export const DEFAULT_AGGREGATE_SEARCH_STORAGE_KEY = 'defaultAggregateSearch';
 export const ENABLE_OPTIMIZATION_STORAGE_KEY = 'enableOptimization';
@@ -17,10 +22,6 @@ export const PREFERRED_QUALITY_STORAGE_KEY = 'preferredQuality';
 export const SOURCE_PREFERRED_QUALITY_STORAGE_PREFIX = 'preferredQuality:';
 export const SEEN_ANNOUNCEMENT_STORAGE_KEY = 'hasSeenAnnouncement';
 export const NOTIFIED_RELEASE_VERSION_STORAGE_KEY = 'notifiedReleaseVersion';
-export const CONTINUE_WATCHING_COUNT_STORAGE_KEY = 'continueWatchingCount';
-export const CONTINUE_WATCHING_PAGE_COUNT_STORAGE_KEY =
-  'continueWatchingPageCount';
-export const FAVORITE_ITEMS_COUNT_STORAGE_KEY = 'favoriteItemsCount';
 export const NOTIFIED_MESSAGE_REVISION_STORAGE_PREFIX =
   'notifiedMessageRevision:';
 export const DANMAKU_ENABLED_STORAGE_KEY = 'danmakuEnabled';
@@ -245,78 +246,38 @@ export function writeNotifiedMessageRevision(
   } catch {}
 }
 
+// 列表计数只存在不区分账号的 cookie 中，登录时由服务端覆盖、退出时清除，不再落 localStorage
 export function readContinueWatchingCount(): number {
-  const raw = readStoredString(CONTINUE_WATCHING_COUNT_STORAGE_KEY);
-  const count = Number.parseInt(raw || '', 10);
-  return Number.isFinite(count) ? Math.max(0, count) : 0;
+  return readListCountCookie('cw_count') ?? 0;
 }
 
 export function writeContinueWatchingCount(value: number): void {
-  const count = Math.max(0, Math.floor(Number.isFinite(value) ? value : 0));
-  try {
-    writeStoredString(CONTINUE_WATCHING_COUNT_STORAGE_KEY, String(count));
-  } catch {}
-  try {
-    if (typeof document !== 'undefined') {
-      document.cookie = `cw_count=${count};path=/;max-age=${365 * 24 * 60 * 60};samesite=lax`;
-    }
-  } catch {}
+  writeListCountCookie('cw_count', value);
 }
 
 export function readContinueWatchingPageCount(): number {
-  const count = Number(
-    readStoredString(CONTINUE_WATCHING_PAGE_COUNT_STORAGE_KEY),
-  );
-  return Number.isFinite(count) ? Math.max(0, Math.floor(count)) : 0;
+  return readListCountCookie('cw_page_count') ?? 0;
 }
 
 export function writeContinueWatchingPageCount(value: number): void {
-  const count = Math.max(0, Math.floor(Number.isFinite(value) ? value : 0));
-  try {
-    writeStoredString(CONTINUE_WATCHING_PAGE_COUNT_STORAGE_KEY, String(count));
-  } catch {}
-  try {
-    if (typeof document !== 'undefined') {
-      document.cookie = `cw_page_count=${count};path=/;max-age=${365 * 24 * 60 * 60};samesite=lax`;
-    }
-  } catch {}
+  writeListCountCookie('cw_page_count', value);
 }
 
 export function resetContinueWatchingPageCount(): void {
-  removeStorage(CONTINUE_WATCHING_PAGE_COUNT_STORAGE_KEY);
-  try {
-    if (typeof document !== 'undefined') {
-      document.cookie = 'cw_page_count=0;path=/;max-age=0;samesite=lax';
-    }
-  } catch {}
+  clearListCountCookie('cw_page_count');
 }
 
 export function resetContinueWatchingCount(): void {
   resetContinueWatchingPageCount();
-  removeStorage(CONTINUE_WATCHING_COUNT_STORAGE_KEY);
-  try {
-    if (typeof document !== 'undefined') {
-      document.cookie = 'cw_count=0;path=/;max-age=0;samesite=lax';
-    }
-  } catch {}
+  clearListCountCookie('cw_count');
 }
 
 export function readFavoriteItemsCount(): number {
-  const raw = readStoredString(FAVORITE_ITEMS_COUNT_STORAGE_KEY);
-  const count = Number.parseInt(raw || '', 10);
-  return Number.isFinite(count) ? Math.max(0, count) : 0;
+  return readListCountCookie('fav_count') ?? 0;
 }
 
 export function writeFavoriteItemsCount(value: number): void {
-  const count = Math.max(0, Math.floor(Number.isFinite(value) ? value : 0));
-  try {
-    writeStoredString(FAVORITE_ITEMS_COUNT_STORAGE_KEY, String(count));
-  } catch {}
-  try {
-    if (typeof document !== 'undefined') {
-      document.cookie = `fav_count=${count};path=/;max-age=${365 * 24 * 60 * 60};samesite=lax`;
-    }
-  } catch {}
+  writeListCountCookie('fav_count', value);
 }
 
 export function readPreferredQualityHeight(): number | null {

@@ -100,7 +100,6 @@ import { buildTrackingSql, SQLITE_TRACKING_DIALECT } from './tracking-sql';
 import {
   AdminVideoReviewPage,
   Favorite,
-  FavoritePage,
   IStorage,
   MetadataRecordPage,
   PlaybackPeriodSession,
@@ -345,38 +344,6 @@ function buildTrackingPlayRecordPage(
   };
 }
 
-function buildFavoritePage(
-  rows: Array<{
-    favorite_key: string;
-    favorite_json: string;
-    record_json?: string | null;
-  }>,
-  total: number,
-  limit: number,
-): FavoritePage {
-  const items = rows.slice(0, limit).flatMap((row) => {
-    const favorite = parseJsonValue<Favorite>(row.favorite_json);
-    if (!favorite) return [];
-    const playRecord = parseJsonValue<PlayRecord>(row.record_json);
-    return [
-      {
-        key: row.favorite_key,
-        favorite,
-        ...(playRecord ? { playRecord } : {}),
-      },
-    ];
-  });
-  const lastItem = items.at(-1);
-  return {
-    items,
-    total,
-    nextCursor:
-      rows.length > limit && lastItem
-        ? `${lastItem.favorite.save_time}|${lastItem.key}`
-        : null,
-  };
-}
-
 function buildMetadataRecordPage<T>(
   rows: Array<{ record_key: string; record_json: string }>,
   limit: number,
@@ -463,9 +430,6 @@ export class LocalSqliteStorage implements IStorage {
     getAllFavorites: Database.Statement;
     getStaleFavoritePage: Database.Statement;
     getStaleFavoritePageAfter: Database.Statement;
-    getFavoritePage: Database.Statement;
-    getFavoritePageAfter: Database.Statement;
-    countFavorites: Database.Statement;
     deleteFavorite: Database.Statement;
     // users
     registerUser: Database.Statement;
@@ -1077,39 +1041,6 @@ export class LocalSqliteStorage implements IStorage {
              AND favorite_key NOT LIKE 'douban+%' AND favorite_key NOT LIKE 'bangumi+%'
          ORDER BY favorite_key ASC
          LIMIT ?`,
-      ),
-      getFavoritePage: this.db.prepare(
-        `SELECT f.favorite_key, f.favorite_json, p.record_json
-         FROM favorites f
-         LEFT JOIN play_records p
-           ON p.username = f.username AND p.record_key = f.favorite_key
-         WHERE f.username = ?
-           AND (? = 1 OR ${SQLITE_NON_LIVE_FAVORITE_WHERE})
-         ORDER BY CAST(json_extract(f.favorite_json, '$.save_time') AS INTEGER) DESC,
-                  f.favorite_key DESC
-         LIMIT ?`,
-      ),
-      getFavoritePageAfter: this.db.prepare(
-        `SELECT f.favorite_key, f.favorite_json, p.record_json
-         FROM favorites f
-         LEFT JOIN play_records p
-           ON p.username = f.username AND p.record_key = f.favorite_key
-         WHERE f.username = ?
-           AND (? = 1 OR ${SQLITE_NON_LIVE_FAVORITE_WHERE})
-           AND (
-             CAST(json_extract(f.favorite_json, '$.save_time') AS INTEGER) < ?
-             OR (
-               CAST(json_extract(f.favorite_json, '$.save_time') AS INTEGER) = ?
-               AND f.favorite_key < ?
-             )
-           )
-         ORDER BY CAST(json_extract(f.favorite_json, '$.save_time') AS INTEGER) DESC,
-                  f.favorite_key DESC
-         LIMIT ?`,
-      ),
-      countFavorites: this.db.prepare(
-        `SELECT COUNT(*) AS count FROM favorites
-         WHERE username = ? AND (? = 1 OR ${SQLITE_NON_LIVE_FAVORITE_WHERE})`,
       ),
       deleteFavorite: this.db.prepare(
         'DELETE FROM favorites WHERE username = ? AND favorite_key = ?',
@@ -2011,43 +1942,6 @@ export class LocalSqliteStorage implements IStorage {
     ) as Array<{ favorite_key: string; favorite_json: string }>;
 
     return buildMetadataFavoritePage(rows, pageLimit);
-  }
-
-  async getFavoritePage(
-    userName: string,
-    limit: number,
-    cursorTime?: number,
-    cursorKey?: string,
-    includeLive = true,
-  ): Promise<FavoritePage> {
-    const username = normalizeUsername(userName);
-    const rows = (
-      cursorTime !== undefined && cursorKey
-        ? this.stmts.getFavoritePageAfter.all(
-            username,
-            Number(includeLive),
-            cursorTime,
-            cursorTime,
-            cursorKey,
-            limit + 1,
-          )
-        : this.stmts.getFavoritePage.all(
-            username,
-            Number(includeLive),
-            limit + 1,
-          )
-    ) as Array<{
-      favorite_key: string;
-      favorite_json: string;
-      record_json?: string | null;
-    }>;
-    const countRow = this.stmts.countFavorites.get(
-      username,
-      Number(includeLive),
-    ) as {
-      count: number;
-    };
-    return buildFavoritePage(rows, countRow.count, limit);
   }
 
   async getFavoriteLibraryPage(userName: string, query: FavoriteLibraryQuery) {
