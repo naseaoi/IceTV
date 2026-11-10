@@ -446,7 +446,8 @@ export class MySqlStorage implements IStorage {
       ...userAccessSchema('mysql'),
       `CREATE TABLE IF NOT EXISTS users (
         username VARCHAR(191) NOT NULL PRIMARY KEY,
-        password TEXT NOT NULL
+        password TEXT NOT NULL,
+        password_set TINYINT NOT NULL DEFAULT 1
       ) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci`,
       `CREATE TABLE IF NOT EXISTS play_records (
         username VARCHAR(191) NOT NULL,
@@ -618,6 +619,23 @@ export class MySqlStorage implements IStorage {
 
     for (const statement of statements) {
       await this.pool.execute(statement);
+    }
+    const [userColumns] = await this.pool.query<RowDataPacket[]>(
+      "SHOW COLUMNS FROM users LIKE 'password_set'",
+    );
+    // 存量第三方自动建号的账号只有随机密码，迁移时标为未设密，用户可直接首次设置
+    if (!userColumns.length) {
+      try {
+        await this.pool.execute(
+          'ALTER TABLE users ADD COLUMN password_set TINYINT NOT NULL DEFAULT 1',
+        );
+        await this.pool.execute(
+          'UPDATE users SET password_set = 0 WHERE username IN (SELECT username FROM oauth_identities WHERE auto_created = 1)',
+        );
+      } catch (error) {
+        if ((error as { code?: string }).code !== 'ER_DUP_FIELDNAME')
+          throw error;
+      }
     }
     await new MysqlConfigStateStore(this.pool).migrateSchema();
 
@@ -2085,9 +2103,10 @@ export class MySqlStorage implements IStorage {
     const username = assertValidUsernameFormat(userName);
     const hashed = await hashPassword(password);
     await this.withTransaction(async (connection) => {
+      // 第三方自动建号写入的是随机密码，记为未设密，允许用户免旧密码首次设置
       await connection.execute(
-        'INSERT INTO users (username, password) VALUES (?, ?)',
-        [username, hashed],
+        'INSERT INTO users (username, password, password_set) VALUES (?, ?, ?)',
+        [username, hashed, identity ? 0 : 1],
       );
       if (identity)
         await connection.execute(
@@ -2147,27 +2166,46 @@ export class MySqlStorage implements IStorage {
     return rows.length > 0;
   }
 
+  async isPasswordSet(userName: string): Promise<boolean> {
+    await this.ensureInitialized();
+    const [rows] = await this.pool.query<RowDataPacket[]>(
+      'SELECT password_set FROM users WHERE username = ? LIMIT 1',
+      [normalizeUsername(userName)],
+    );
+    return Boolean(Number(rows[0]?.password_set ?? 0));
+  }
+
   async changePassword(
     userName: string,
     newPassword: string,
     admin = false,
-  ): Promise<void> {
+    currentPassword?: string | null,
+  ): Promise<boolean> {
     await this.ensureInitialized();
     const username = normalizeUsername(userName);
     const hashed = await hashPassword(newPassword);
-    await this.withTransaction(async (connection) => {
+    return this.withTransaction(async (connection) => {
       const [rows] = await connection.query<RowDataPacket[]>(
-        'SELECT password FROM users WHERE username = ? FOR UPDATE',
+        'SELECT password, password_set FROM users WHERE username = ? FOR UPDATE',
         [username],
       );
+      if (!rows.length) return false;
+      if (currentPassword !== undefined) {
+        if (
+          Number(rows[0].password_set) !== 0 &&
+          (!currentPassword ||
+            !(await verifyPassword(currentPassword, String(rows[0].password)))
+              .match)
+        )
+          return false;
+      }
       if (
-        !rows.length ||
-        (admin &&
-          (await verifyPassword(newPassword, String(rows[0].password))).match)
+        admin &&
+        (await verifyPassword(newPassword, String(rows[0].password))).match
       )
-        return;
+        return true;
       await connection.execute(
-        'UPDATE users SET password = ? WHERE username = ?',
+        'UPDATE users SET password = ?, password_set = 1 WHERE username = ?',
         [hashed, username],
       );
       if (admin) {
@@ -2181,6 +2219,7 @@ export class MySqlStorage implements IStorage {
         );
         await connection.execute(event.sql, event.params);
       }
+      return true;
     });
   }
 

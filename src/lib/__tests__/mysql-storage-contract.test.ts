@@ -61,6 +61,7 @@ type FakeState = {
   userAccess: Map<string, Record<string, any>>;
   userGroups: Record<string, any>[];
   users: Map<string, string>;
+  unsetPasswords: Set<string>;
   playRecords: Map<string, Map<string, string>>;
   favorites: Map<string, Map<string, string>>;
   videoReviews: Map<
@@ -113,6 +114,7 @@ function cloneState(state: FakeState): FakeState {
     ),
     userGroups: state.userGroups.map((row) => ({ ...row })),
     users: new Map(state.users),
+    unsetPasswords: new Set(state.unsetPasswords),
     playRecords: cloneNestedMap(state.playRecords),
     favorites: cloneNestedMap(state.favorites),
     videoReviews: new Map(state.videoReviews),
@@ -162,6 +164,7 @@ function createState(): FakeState {
     userAccess: new Map(),
     userGroups: [],
     users: new Map(),
+    unsetPasswords: new Set(),
     playRecords: new Map(),
     favorites: new Map(),
     videoReviews: new Map(),
@@ -816,14 +819,23 @@ function createFakePool() {
       return [[], []];
     }
 
-    if (normalized === 'INSERT INTO users (username, password) VALUES (?, ?)') {
-      const [username, password] = params as [string, string];
+    if (
+      normalized ===
+      'INSERT INTO users (username, password, password_set) VALUES (?, ?, ?)'
+    ) {
+      const [username, password, passwordSet] = params as [
+        string,
+        string,
+        number,
+      ];
       if (currentState.users.has(username)) {
         const error = new Error('Duplicate entry');
         (error as Error & { code?: string }).code = 'ER_DUP_ENTRY';
         throw error;
       }
       currentState.users.set(username, password);
+      if (passwordSet) currentState.unsetPasswords.delete(username);
+      else currentState.unsetPasswords.add(username);
       return [[], []];
     }
 
@@ -833,9 +845,20 @@ function createFakePool() {
       return [[], []];
     }
 
+    if (
+      normalized ===
+      'UPDATE users SET password = ?, password_set = 1 WHERE username = ?'
+    ) {
+      const [password, username] = params as [string, string];
+      currentState.users.set(username, password);
+      currentState.unsetPasswords.delete(username);
+      return [[], []];
+    }
+
     if (normalized === 'DELETE FROM users WHERE username = ?') {
       const [username] = params as [string];
       currentState.users.delete(username);
+      currentState.unsetPasswords.delete(username);
       return [[], []];
     }
 
@@ -1481,13 +1504,33 @@ function createFakePool() {
     ) {
       return [[{ Field: 'failure_since' }], []];
     }
+    if (normalized === "SHOW COLUMNS FROM users LIKE 'password_set'")
+      return [[{ Field: 'password_set' }], []];
     if (normalized.startsWith('SHOW COLUMNS FROM user_danmaku'))
       return [[{ Field: normalized.includes('title') ? 'title' : 'year' }], []];
     if (
-      normalized === 'SELECT password FROM users WHERE username = ? FOR UPDATE'
+      normalized ===
+      'SELECT password, password_set FROM users WHERE username = ? FOR UPDATE'
     ) {
-      const password = currentState.users.get(String(params[0]));
-      return [password ? [{ password }] : [], []];
+      const username = String(params[0]);
+      const password = currentState.users.get(username);
+      const password_set = currentState.unsetPasswords.has(username) ? 0 : 1;
+      return [password ? [{ password, password_set }] : [], []];
+    }
+    if (
+      normalized === 'SELECT password_set FROM users WHERE username = ? LIMIT 1'
+    ) {
+      const username = String(params[0]);
+      return [
+        currentState.users.has(username)
+          ? [
+              {
+                password_set: currentState.unsetPasswords.has(username) ? 0 : 1,
+              },
+            ]
+          : [],
+        [],
+      ];
     }
     if (
       normalized ===

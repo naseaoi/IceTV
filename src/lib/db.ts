@@ -629,13 +629,23 @@ class DbManager {
     return storage.checkUserExist(userName);
   }
 
+  async isPasswordSet(userName: string): Promise<boolean> {
+    return (await this.getStorage()).isPasswordSet(userName);
+  }
+
   async changePassword(
     userName: string,
     newPassword: string,
     admin = false,
-  ): Promise<void> {
+    currentPassword?: string | null,
+  ): Promise<boolean> {
     const storage = await this.getStorage();
-    await storage.changePassword(userName, newPassword, admin);
+    return storage.changePassword(
+      userName,
+      newPassword,
+      admin,
+      currentPassword,
+    );
   }
 
   async getUserAccess(...args: Parameters<IStorage['getUserAccess']>) {

@@ -59,7 +59,7 @@ describe('SQLite 遗留用户名大小写归一化', () => {
   it('身份表归一化并在合并冲突时保留规范用户名绑定', async () => {
     seed((db) => {
       const insert = db.prepare(
-        'INSERT INTO oauth_identities VALUES (?, ?, ?, ?, ?, ?)',
+        'INSERT INTO oauth_identities (provider, provider_user_id, username, provider_username, auto_created, created_at) VALUES (?, ?, ?, ?, ?, ?)',
       );
       insert.run('linuxdo', '100', 'ALICE', 'Alice', 0, 1);
       insert.run('linuxdo', '101', 'alice', 'Another', 0, 2);

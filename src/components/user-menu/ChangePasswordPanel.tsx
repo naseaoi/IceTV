@@ -1,8 +1,9 @@
 'use client';
 
 import { X } from 'lucide-react';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 
+import { useAuthSession } from '@/components/AuthProvider';
 import {
   MODAL_CLOSE_BUTTON_CLASS,
   MODAL_INPUT_CLASS,
@@ -57,11 +58,30 @@ export function ChangePasswordPanel({
 }
 
 function ChangePasswordForm({ onClose, onLogout }: ChangePasswordPanelProps) {
+  const { session } = useAuthSession();
+  const username = session.status === 'authenticated' ? session.username : '';
   const [oldPassword, setOldPassword] = useState('');
   const [newPassword, setNewPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [passwordLoading, setPasswordLoading] = useState(false);
   const [passwordError, setPasswordError] = useState('');
+  const [hasPassword, setHasPassword] = useState<boolean | null>(null);
+
+  useEffect(() => {
+    const controller = new AbortController();
+    void fetch('/api/change-password', { signal: controller.signal })
+      .then(async (response) => {
+        const data = await response.json();
+        if (!response.ok || typeof data.hasPassword !== 'boolean')
+          throw new Error('password status');
+        setHasPassword(data.hasPassword);
+      })
+      .catch(() => {
+        if (!controller.signal.aborted)
+          setPasswordError('读取密码状态失败，请重新打开');
+      });
+    return () => controller.abort();
+  }, []);
 
   const passwordValues = {
     old: oldPassword,
@@ -77,7 +97,8 @@ function ChangePasswordForm({ onClose, onLogout }: ChangePasswordPanelProps) {
   const handleSubmit = async () => {
     setPasswordError('');
 
-    if (!oldPassword) {
+    if (hasPassword === null) return;
+    if (hasPassword && !oldPassword) {
       setPasswordError('请输入当前密码');
       return;
     }
@@ -143,7 +164,7 @@ function ChangePasswordForm({ onClose, onLogout }: ChangePasswordPanelProps) {
         >
           <div className='mb-5 flex items-center justify-between gap-3'>
             <h3 id='change-password-title' className={MODAL_TITLE_CLASS}>
-              修改密码
+              {hasPassword === false ? '设置密码' : '修改密码'}
             </h3>
             <button
               type='button'
@@ -156,7 +177,25 @@ function ChangePasswordForm({ onClose, onLogout }: ChangePasswordPanelProps) {
           </div>
 
           <div className='space-y-4'>
-            {PASSWORD_FIELDS.map((field) => (
+            <div>
+              <label
+                htmlFor='change-password-username'
+                className={MODAL_LABEL_CLASS}
+              >
+                用户名
+              </label>
+              <input
+                id='change-password-username'
+                type='text'
+                autoComplete='username'
+                readOnly
+                value={username}
+                className={MODAL_INPUT_CLASS}
+              />
+            </div>
+            {PASSWORD_FIELDS.filter(
+              (field) => field.key !== 'old' || hasPassword !== false,
+            ).map((field) => (
               <div key={field.id}>
                 <label htmlFor={field.id} className={MODAL_LABEL_CLASS}>
                   {field.label}
@@ -169,7 +208,7 @@ function ChangePasswordForm({ onClose, onLogout }: ChangePasswordPanelProps) {
                   onChange={(event) =>
                     passwordSetters[field.key](event.target.value)
                   }
-                  disabled={passwordLoading}
+                  disabled={passwordLoading || hasPassword === null}
                 />
               </div>
             ))}
@@ -198,12 +237,17 @@ function ChangePasswordForm({ onClose, onLogout }: ChangePasswordPanelProps) {
               className={MODAL_PRIMARY_BUTTON_CLASS}
               disabled={
                 passwordLoading ||
-                !oldPassword ||
+                hasPassword === null ||
+                (hasPassword && !oldPassword) ||
                 !newPassword ||
                 !confirmPassword
               }
             >
-              {passwordLoading ? '修改中…' : '修改并重新登录'}
+              {passwordLoading
+                ? '保存中…'
+                : hasPassword === false
+                  ? '设置并重新登录'
+                  : '修改并重新登录'}
             </button>
           </div>
         </form>

@@ -585,6 +585,19 @@ export class LocalSqliteStorage implements IStorage {
       this.db.pragma(`busy_timeout = ${busyTimeoutMs}`);
       this.initializeSchema();
     });
+    const userColumns = this.db.prepare('PRAGMA table_info(users)').all() as {
+      name: string;
+    }[];
+    // 存量第三方自动建号的账号只有随机密码，迁移时标为未设密，用户可直接首次设置
+    if (!userColumns.some((column) => column.name === 'password_set'))
+      this.db.transaction(() => {
+        this.db.exec(
+          'ALTER TABLE users ADD COLUMN password_set INTEGER NOT NULL DEFAULT 1',
+        );
+        this.db.exec(
+          'UPDATE users SET password_set = 0 WHERE username IN (SELECT username FROM oauth_identities WHERE auto_created = 1)',
+        );
+      })();
     for (const name of ['title', 'year']) {
       const columns = this.db
         .prepare('PRAGMA table_info(user_danmaku)')
@@ -877,7 +890,8 @@ export class LocalSqliteStorage implements IStorage {
     this.db.exec(`
       CREATE TABLE IF NOT EXISTS users (
         username TEXT PRIMARY KEY,
-        password TEXT NOT NULL
+        password TEXT NOT NULL,
+        password_set INTEGER NOT NULL DEFAULT 1
       );
 
       CREATE TABLE IF NOT EXISTS play_records (
@@ -1251,7 +1265,7 @@ export class LocalSqliteStorage implements IStorage {
       ),
       // users
       registerUser: this.db.prepare(
-        'INSERT INTO users (username, password) VALUES (?, ?)',
+        'INSERT INTO users (username, password, password_set) VALUES (?, ?, ?)',
       ),
       getPassword: this.db.prepare(
         'SELECT password FROM users WHERE username = ?',
@@ -1773,8 +1787,8 @@ export class LocalSqliteStorage implements IStorage {
   private mergeUserRow(legacy: string, canonical: string): void {
     this.db
       .prepare(
-        `INSERT INTO users (username, password)
-         SELECT ?, password FROM users WHERE username = ?
+        `INSERT INTO users (username, password, password_set)
+         SELECT ?, password, password_set FROM users WHERE username = ?
          ON CONFLICT(username) DO NOTHING`,
       )
       .run(canonical, legacy);
@@ -2812,7 +2826,8 @@ export class LocalSqliteStorage implements IStorage {
     identity?: OAuthIdentity,
   ): void {
     this.db.transaction(() => {
-      this.stmts.registerUser.run(username, hashedPassword);
+      // 第三方自动建号写入的是随机密码，记为未设密，允许用户免旧密码首次设置
+      this.stmts.registerUser.run(username, hashedPassword, identity ? 0 : 1);
       if (identity)
         this.db.prepare(OAUTH_INSERT).run(
           ...oauthIdentityParams({
@@ -2851,26 +2866,40 @@ export class LocalSqliteStorage implements IStorage {
     return Boolean(this.stmts.checkUserExist.get(username));
   }
 
+  async isPasswordSet(userName: string): Promise<boolean> {
+    const row = this.db
+      .prepare('SELECT password_set FROM users WHERE username = ?')
+      .get(normalizeUsername(userName)) as { password_set: number } | undefined;
+    return Boolean(row?.password_set);
+  }
+
   async changePassword(
     userName: string,
     newPassword: string,
     admin = false,
-  ): Promise<void> {
+    currentPassword?: string | null,
+  ): Promise<boolean> {
     const username = normalizeUsername(userName);
     const hashed = await hashPassword(newPassword);
     const old = this.db
-      .prepare('SELECT password FROM users WHERE username = ?')
-      .get(username) as { password: string } | undefined;
-    if (
-      !old ||
-      (admin && (await verifyPassword(newPassword, old.password)).match)
-    )
-      return;
+      .prepare('SELECT password, password_set FROM users WHERE username = ?')
+      .get(username) as { password: string; password_set: number } | undefined;
+    if (!old) return false;
+    if (currentPassword !== undefined) {
+      if (
+        old.password_set &&
+        (!currentPassword ||
+          !(await verifyPassword(currentPassword, old.password)).match)
+      )
+        return false;
+    }
+    if (admin && (await verifyPassword(newPassword, old.password)).match)
+      return true;
     this.db
       .transaction(() => {
         const result = this.db
           .prepare(
-            'UPDATE users SET password = ? WHERE username = ? AND password = ?',
+            'UPDATE users SET password = ?, password_set = 1 WHERE username = ? AND password = ?',
           )
           .run(hashed, username, old.password);
         if (!result.changes) throw new Error('密码已变化，请重试');
@@ -2887,6 +2916,7 @@ export class LocalSqliteStorage implements IStorage {
         }
       })
       .immediate();
+    return true;
   }
 
   async deleteUser(
