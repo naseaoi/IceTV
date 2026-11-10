@@ -1,8 +1,7 @@
-﻿'use client';
+'use client';
 import { Download, RefreshCw, Upload } from 'lucide-react';
 import { type FormEvent, useEffect, useRef, useState } from 'react';
 
-import AlertModal from '@/components/modals/AlertModal';
 import Spinner from '@/components/Spinner';
 import {
   AdminSettingRow,
@@ -13,15 +12,15 @@ import { useLoadingState } from '@/features/admin/hooks/useLoadingState';
 import { CONFIG_FILE_FORM_ID } from '@/features/admin/lib/admin-form-ids';
 import { adminPost } from '@/features/admin/lib/api';
 import { buttonStyles, inputStyles } from '@/features/admin/lib/buttonStyles';
-import { showError, showSuccess } from '@/features/admin/lib/notifications';
-import { useAlertModal } from '@/hooks/useAlertModal';
 import { buildConfigFileFromAdminConfig } from '@/lib/config-file-json';
+import { CONFIG_SUBSCRIPTION_MAX_BYTES } from '@/lib/config-state';
+import { DisplayableError } from '@/lib/user-facing-error';
+import { getErrorMessage } from '@/lib/user-facing-error';
 import { AdminConfig } from '@/types/admin';
 
 const CONFIG_SUBSCRIPTION_URL_ID = 'config-subscription-url';
 const CONFIG_FILE_CONTENT_ID = 'config-file-content';
 const CONFIG_FILE_INPUT_ID = 'config-file-import';
-const CONFIG_FILE_MAX_SIZE = 5 * 1024 * 1024;
 
 interface ConfigFileDraft {
   configContent: string;
@@ -41,7 +40,7 @@ const ConfigFileComponent = ({
   onSavingChange?: (saving: boolean) => void;
   onDirtyChange?: (dirty: boolean) => void;
 }) => {
-  const { alertModal, showAlert, hideAlert } = useAlertModal();
+  const [error, setError] = useState('');
   const { isLoading, withLoading } = useLoadingState();
   const [configContent, setConfigContent] = useState('');
   const [subscriptionUrl, setSubscriptionUrl] = useState('');
@@ -54,6 +53,8 @@ const ConfigFileComponent = ({
     lastCheckTime: '',
   });
   const savingRef = useRef(false);
+  const importingRef = useRef(false);
+  const [importing, setImporting] = useState(false);
   const configFileInputRef = useRef<HTMLInputElement>(null);
   const currentDraft: ConfigFileDraft = {
     configContent,
@@ -89,8 +90,9 @@ const ConfigFileComponent = ({
   }, [configFileDirty, onDirtyChange]);
 
   const handleFetchConfig = async () => {
+    setError('');
     if (!subscriptionUrl.trim()) {
-      showError('请输入订阅URL', showAlert);
+      setError('请输入订阅URL');
       return;
     }
 
@@ -105,24 +107,23 @@ const ConfigFileComponent = ({
           try {
             JSON.parse(data.configContent);
           } catch {
-            throw new Error('订阅内容不是有效的 JSON');
+            throw new DisplayableError('订阅内容不是有效的 JSON');
           }
           setConfigContent(data.configContent);
           const currentTime = new Date().toISOString();
           setLastCheckTime(currentTime);
-          showSuccess('配置拉取成功');
         } else {
-          showError('拉取失败：未获取到配置内容', showAlert);
+          setError('拉取失败：未获取到配置内容');
         }
       } catch (err) {
-        showError(err instanceof Error ? err.message : '拉取失败', showAlert);
-        throw err;
+        setError(getErrorMessage(err, '拉取失败'));
       }
     });
   };
 
   const handleSave = async () => {
-    if (savingRef.current || !configFileDirty) return;
+    if (savingRef.current || importingRef.current || !configFileDirty) return;
+    setError('');
     savingRef.current = true;
     onSavingChange?.(true);
     await withLoading('saveConfig', async () => {
@@ -139,11 +140,9 @@ const ConfigFileComponent = ({
         );
 
         setBaselineDraft(currentDraft);
-        showSuccess('配置文件保存成功');
         await refreshConfig();
       } catch (err) {
-        showError(err instanceof Error ? err.message : '保存失败', showAlert);
-        throw err;
+        setError(getErrorMessage(err, '保存失败'));
       }
     }).finally(() => {
       savingRef.current = false;
@@ -157,14 +156,15 @@ const ConfigFileComponent = ({
   };
 
   const handleExport = () => {
+    setError('');
     if (!configContent.trim()) {
-      showError('配置文件内容为空', showAlert);
+      setError('配置文件内容为空');
       return;
     }
     try {
       JSON.parse(configContent);
     } catch {
-      showError('当前内容不是有效的 JSON，无法导出', showAlert);
+      setError('当前内容不是有效的 JSON，无法导出');
       return;
     }
 
@@ -183,29 +183,42 @@ const ConfigFileComponent = ({
     link.click();
     link.remove();
     URL.revokeObjectURL(url);
-    showSuccess('配置文件已导出');
   };
 
   const handleImport = async (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
     event.target.value = '';
-    if (!file) return;
+    if (!file || importingRef.current || savingRef.current) return;
+    setError('');
     if (!file.name.toLowerCase().endsWith('.json')) {
-      showError('只支持导入 JSON 文件', showAlert);
+      setError('只支持导入 JSON 文件');
       return;
     }
-    if (file.size > CONFIG_FILE_MAX_SIZE) {
-      showError('JSON 文件不能超过 5MB', showAlert);
+    if (file.size > CONFIG_SUBSCRIPTION_MAX_BYTES) {
+      setError('JSON 文件不能超过 2MB');
       return;
     }
 
+    importingRef.current = true;
+    setImporting(true);
     try {
-      const content = await file.text();
-      JSON.parse(content);
+      let content: string;
+      try {
+        content = await file.text();
+      } catch {
+        setError('读取文件失败，请重试');
+        return;
+      }
+      try {
+        JSON.parse(content);
+      } catch {
+        setError('JSON 文件格式错误');
+        return;
+      }
       setConfigContent(content);
-      showSuccess('JSON 已导入，请保存后生效');
-    } catch {
-      showError('JSON 文件格式错误', showAlert);
+    } finally {
+      importingRef.current = false;
+      setImporting(false);
     }
   };
 
@@ -219,6 +232,11 @@ const ConfigFileComponent = ({
       onSubmit={handleSubmit}
       className='space-y-8'
     >
+      {error && (
+        <p role='alert' className='text-sm text-red-600'>
+          {error}
+        </p>
+      )}
       <AdminSettingsGroup
         title='配置订阅'
         actions={
@@ -279,11 +297,12 @@ const ConfigFileComponent = ({
             />
             <button
               type='button'
+              disabled={importing || isLoading('saveConfig')}
               onClick={() => configFileInputRef.current?.click()}
               className={`inline-flex items-center gap-1.5 ${buttonStyles.outline}`}
             >
               <Upload aria-hidden='true' className='h-3.5 w-3.5' />
-              导入
+              {importing ? '读取中...' : '导入'}
             </button>
             <button
               type='button'
@@ -311,16 +330,6 @@ const ConfigFileComponent = ({
           className='block min-h-[32rem] w-full resize-y rounded-xl border-0 bg-transparent px-4 py-3 font-mono text-[13px] leading-relaxed text-gray-900 placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-inset focus:ring-brand-500 dark:text-gray-100'
         />
       </AdminSettingsGroup>
-
-      <AlertModal
-        isOpen={alertModal.isOpen}
-        onClose={hideAlert}
-        type={alertModal.type}
-        title={alertModal.title}
-        message={alertModal.message}
-        timer={alertModal.timer}
-        showConfirm={alertModal.showConfirm}
-      />
     </form>
   );
 };

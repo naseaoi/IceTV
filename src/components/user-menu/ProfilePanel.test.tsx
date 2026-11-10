@@ -143,3 +143,20 @@ it('可以选择片单、状态与评分并保存数字等级', async () => {
   });
   expect(updateProfile).toHaveBeenCalledWith({ libraryVisibility: 3 });
 });
+
+it('个人主页入口保存资料后不重复提示成功', async () => {
+  mockSession('光影旅人');
+  jest.mocked(getMyProfile).mockResolvedValue(savedProfile);
+  jest.mocked(updateProfile).mockResolvedValue(savedProfile);
+  const onSaved = jest.fn();
+  await act(async () => {
+    render(<ProfileForm showSuccessToast={false} onSaved={onSaved} />);
+  });
+  fireEvent.click(screen.getByRole('radio', { name: '候选头像 1' }));
+  await act(async () => {
+    fireEvent.click(saveButton());
+  });
+  expect(onSaved).toHaveBeenCalledTimes(1);
+  expect(refresh).toHaveBeenCalledTimes(1);
+  expect(showToast).not.toHaveBeenCalled();
+});

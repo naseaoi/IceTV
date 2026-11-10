@@ -77,7 +77,7 @@ function SearchHistoryDropdown({
             <button
               type='button'
               aria-label={`删除搜索历史 ${item}`}
-              onClick={() => void deleteSearchHistory(item)}
+              onClick={() => void deleteSearchHistory(item).catch(() => {})}
               className='ml-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-gray-400 transition-colors hover:bg-gray-900/[0.05] hover:text-gray-700 dark:text-gray-500 dark:hover:bg-white/[0.06] dark:hover:text-gray-200'
             >
               <X className='h-3.5 w-3.5' />

@@ -47,8 +47,8 @@ type LocalPreferenceToggleDefinition = {
   description: string;
   readValue: () => boolean;
   readDefaultValue: () => boolean;
-  writeValue: (value: boolean) => void;
-  resetValue: () => void;
+  writeValue: (value: boolean) => boolean;
+  resetValue: () => boolean;
 };
 
 export const localPreferenceToggleDefinitions: LocalPreferenceToggleDefinition[] =
@@ -120,7 +120,7 @@ export function readLocalPreferenceToggleDefaultState(): LocalPreferenceToggleSt
 }
 
 export function resetAllLocalPreferenceToggles() {
-  localPreferenceToggleDefinitions.forEach((definition) => {
-    definition.resetValue();
-  });
+  return localPreferenceToggleDefinitions
+    .map((definition) => definition.resetValue())
+    .every(Boolean);
 }

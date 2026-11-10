@@ -7,6 +7,7 @@ import { LinuxDoIcon } from '@/components/LinuxDoIcon';
 import Spinner from '@/components/Spinner';
 import { getLinuxDoErrorMessage } from '@/lib/linuxdo-errors';
 import { showToast } from '@/lib/toast';
+import { getErrorMessage, isAbortError } from '@/lib/user-facing-error';
 
 type Binding = {
   bound: boolean;
@@ -22,20 +23,29 @@ const TILE_CLASS =
 
 export function LinuxDoBindingTile() {
   const [binding, setBinding] = useState<Binding | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [retryCount, setRetryCount] = useState(0);
   const [busy, setBusy] = useState(false);
 
   useEffect(() => {
     let active = true;
+    setError(null);
     fetch('/api/auth/linuxdo/binding')
-      .then((res) => (res.ok ? res.json() : null))
+      .then((res) => {
+        if (!res.ok) throw new Error('Binding request failed');
+        return res.json();
+      })
       .then((data: Binding | null) => {
         if (active && data) setBinding(data);
       })
-      .catch(() => undefined);
+      .catch((error) => {
+        if (active && !isAbortError(error))
+          setError(getErrorMessage(error, '加载失败'));
+      });
     return () => {
       active = false;
     };
-  }, []);
+  }, [retryCount]);
 
   async function unbind() {
     setBusy(true);
@@ -84,6 +94,22 @@ export function LinuxDoBindingTile() {
       </span>
     </span>
   );
+
+  if (error) {
+    return (
+      <div className={TILE_CLASS} role='alert'>
+        <LinuxDoIcon className='h-7 w-7 shrink-0' />
+        <span className='flex-1 text-sm'>LinuxDo · {error}</span>
+        <button
+          type='button'
+          onClick={() => setRetryCount((count) => count + 1)}
+          className='text-sm text-brand-600'
+        >
+          重试
+        </button>
+      </div>
+    );
+  }
 
   if (binding?.bound) {
     return (

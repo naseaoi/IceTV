@@ -1,4 +1,4 @@
-﻿'use client';
+'use client';
 
 import AdminSelect from '@/components/admin/AdminSelect';
 import AdminDialog from '@/features/admin/components/AdminDialog';
@@ -11,6 +11,7 @@ interface UserGroupOption {
 
 interface BatchUserGroupDialogProps {
   isOpen: boolean;
+  error?: string;
   selectedGroup: string;
   userGroups: UserGroupOption[];
   onSelectedGroupChange: (next: string) => void;
@@ -21,6 +22,7 @@ interface BatchUserGroupDialogProps {
 
 export function BatchUserGroupDialog({
   isOpen,
+  error,
   selectedGroup,
   userGroups,
   onSelectedGroupChange,
@@ -35,6 +37,11 @@ export function BatchUserGroupDialog({
       onClose={onClose}
       panelClassName='max-w-md'
     >
+      {error && (
+        <p role='alert' className='px-4 pt-3 text-sm text-red-600'>
+          {error}
+        </p>
+      )}
       <div className='mb-6'>
         <label className='mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300'>
           用户组

@@ -6,6 +6,7 @@ export function OptionSwitchRow({
   checked,
   onChange,
   pending = false,
+  disabled = false,
   className = 'w-full px-3',
 }: {
   label: string;
@@ -14,6 +15,7 @@ export function OptionSwitchRow({
   onChange: (next: boolean) => void;
   // 状态未知时占住开关位置，到达后原地替换，不改变行高
   pending?: boolean;
+  disabled?: boolean;
   className?: string;
 }) {
   return (
@@ -22,9 +24,9 @@ export function OptionSwitchRow({
       role='switch'
       aria-checked={checked}
       aria-label={label}
-      aria-busy={pending || undefined}
-      disabled={pending}
-      className={`flex items-center justify-between gap-3 rounded-lg py-2.5 text-left transition-colors enabled:hover:bg-gray-100 dark:enabled:hover:bg-white/[0.06] ${className}`}
+      aria-busy={pending || disabled || undefined}
+      disabled={pending || disabled}
+      className={`flex items-center justify-between gap-3 rounded-lg py-2.5 text-left transition-colors enabled:hover:bg-gray-100 disabled:cursor-not-allowed disabled:opacity-50 dark:enabled:hover:bg-white/[0.06] ${className}`}
       onClick={() => onChange(!checked)}
     >
       <span className='min-w-0'>

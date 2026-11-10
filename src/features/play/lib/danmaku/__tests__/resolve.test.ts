@@ -221,7 +221,12 @@ describe('loadDanmakuForEpisode with user danmaku', () => {
     });
 
     expect(fetchUserDanmaku).toHaveBeenCalledWith('dandan:123');
-    expect(onUserTarget).toHaveBeenCalledWith({ key: 'dandan:123', offset: 0 });
+    expect(onUserTarget).toHaveBeenCalledWith({
+      key: 'dandan:123',
+      offset: 0,
+      title: context.searchTitle,
+      year: context.searchYear,
+    });
     expect(items).toHaveLength(6);
     expect(items.map((item) => item.time)).toEqual(
       [...items.map((item) => item.time)].sort((a, b) => a - b),
@@ -270,7 +275,12 @@ describe('loadDanmakuForEpisode with user danmaku', () => {
 
     await loadDanmakuForEpisode(context, () => true, { onUserTarget });
 
-    expect(onUserTarget).toHaveBeenCalledWith({ key: 'dandan:123', offset: 0 });
+    expect(onUserTarget).toHaveBeenCalledWith({
+      key: 'dandan:123',
+      offset: 0,
+      title: context.searchTitle,
+      year: context.searchYear,
+    });
   });
 
   it('returns third-party danmaku when user danmaku fails to load', async () => {

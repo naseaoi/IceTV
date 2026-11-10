@@ -47,11 +47,11 @@ function readStoredBoolean(key: string): boolean | undefined {
 }
 
 function writeStoredBoolean(key: string, value: boolean) {
-  writeStorage(key, JSON.stringify(value));
+  return writeStorage(key, JSON.stringify(value));
 }
 
 function resetStoredBoolean(key: string) {
-  removeStorage(key);
+  return removeStorage(key);
 }
 
 function readStoredString(key: string): string | undefined {
@@ -59,7 +59,7 @@ function readStoredString(key: string): string | undefined {
 }
 
 function writeStoredString(key: string, value: string) {
-  writeStorage(key, value);
+  return writeStorage(key, value);
 }
 
 export function readDefaultAggregateSearch(): boolean {
@@ -78,11 +78,11 @@ export function readAggregateSearch(): boolean {
 }
 
 export function writeAggregateSearch(value: boolean) {
-  writeStoredBoolean(DEFAULT_AGGREGATE_SEARCH_STORAGE_KEY, value);
+  return writeStoredBoolean(DEFAULT_AGGREGATE_SEARCH_STORAGE_KEY, value);
 }
 
 export function resetAggregateSearch() {
-  resetStoredBoolean(DEFAULT_AGGREGATE_SEARCH_STORAGE_KEY);
+  return resetStoredBoolean(DEFAULT_AGGREGATE_SEARCH_STORAGE_KEY);
 }
 
 export function readDefaultEnableOptimization(): boolean {
@@ -101,11 +101,11 @@ export function readEnableOptimization(): boolean {
 }
 
 export function writeEnableOptimization(value: boolean) {
-  writeStoredBoolean(ENABLE_OPTIMIZATION_STORAGE_KEY, value);
+  return writeStoredBoolean(ENABLE_OPTIMIZATION_STORAGE_KEY, value);
 }
 
 export function resetEnableOptimization() {
-  resetStoredBoolean(ENABLE_OPTIMIZATION_STORAGE_KEY);
+  return resetStoredBoolean(ENABLE_OPTIMIZATION_STORAGE_KEY);
 }
 
 export function readDefaultFluidSearch(): boolean {
@@ -123,11 +123,11 @@ export function readFluidSearch(): boolean {
 }
 
 export function writeFluidSearch(value: boolean) {
-  writeStoredBoolean(FLUID_SEARCH_STORAGE_KEY, value);
+  return writeStoredBoolean(FLUID_SEARCH_STORAGE_KEY, value);
 }
 
 export function resetFluidSearch() {
-  resetStoredBoolean(FLUID_SEARCH_STORAGE_KEY);
+  return resetStoredBoolean(FLUID_SEARCH_STORAGE_KEY);
 }
 
 export function readDefaultLiveDirectConnect(): boolean {
@@ -146,7 +146,7 @@ export function readLiveDirectConnect(): boolean {
 }
 
 export function writeLiveDirectConnect(value: boolean) {
-  writeStoredBoolean(LIVE_DIRECT_CONNECT_STORAGE_KEY, value);
+  const saved = writeStoredBoolean(LIVE_DIRECT_CONNECT_STORAGE_KEY, value);
   if (typeof window !== 'undefined') {
     window.dispatchEvent(
       new CustomEvent(LIVE_DIRECT_CONNECT_CHANGE_EVENT, {
@@ -154,13 +154,15 @@ export function writeLiveDirectConnect(value: boolean) {
       }),
     );
   }
+  return saved;
 }
 
 export function resetLiveDirectConnect() {
-  resetStoredBoolean(LIVE_DIRECT_CONNECT_STORAGE_KEY);
+  const saved = resetStoredBoolean(LIVE_DIRECT_CONNECT_STORAGE_KEY);
   if (typeof window !== 'undefined') {
     window.dispatchEvent(new Event(LIVE_DIRECT_CONNECT_CHANGE_EVENT));
   }
+  return saved;
 }
 
 export function readDefaultAutoSwitchSource(): boolean {
@@ -179,11 +181,11 @@ export function readAutoSwitchSource(): boolean {
 }
 
 export function writeAutoSwitchSource(value: boolean) {
-  writeStoredBoolean(AUTO_SWITCH_SOURCE_STORAGE_KEY, value);
+  return writeStoredBoolean(AUTO_SWITCH_SOURCE_STORAGE_KEY, value);
 }
 
 export function resetAutoSwitchSource() {
-  resetStoredBoolean(AUTO_SWITCH_SOURCE_STORAGE_KEY);
+  return resetStoredBoolean(AUTO_SWITCH_SOURCE_STORAGE_KEY);
 }
 
 export function readBlockAdEnabled(): boolean {
@@ -191,7 +193,7 @@ export function readBlockAdEnabled(): boolean {
 }
 
 export function writeBlockAdEnabled(value: boolean) {
-  writeStoredBoolean(BLOCK_AD_STORAGE_KEY, value);
+  return writeStoredBoolean(BLOCK_AD_STORAGE_KEY, value);
 }
 
 export function readAutoPlayNextEnabled(): boolean {
@@ -199,7 +201,7 @@ export function readAutoPlayNextEnabled(): boolean {
 }
 
 export function writeAutoPlayNextEnabled(value: boolean) {
-  writeStoredBoolean(AUTO_PLAY_NEXT_STORAGE_KEY, value);
+  return writeStoredBoolean(AUTO_PLAY_NEXT_STORAGE_KEY, value);
 }
 
 export function readSeenAnnouncement(): string | undefined {
@@ -207,7 +209,7 @@ export function readSeenAnnouncement(): string | undefined {
 }
 
 export function writeSeenAnnouncement(value: string) {
-  writeStoredString(SEEN_ANNOUNCEMENT_STORAGE_KEY, value);
+  return writeStoredString(SEEN_ANNOUNCEMENT_STORAGE_KEY, value);
 }
 
 export function readNotifiedReleaseVersion(): string | undefined {
@@ -215,7 +217,7 @@ export function readNotifiedReleaseVersion(): string | undefined {
 }
 
 export function writeNotifiedReleaseVersion(version: string) {
-  writeStoredString(NOTIFIED_RELEASE_VERSION_STORAGE_KEY, version);
+  return writeStoredString(NOTIFIED_RELEASE_VERSION_STORAGE_KEY, version);
 }
 
 function getNotifiedMessageRevisionStorageKey(username: string): string | null {
@@ -324,7 +326,7 @@ export function readPreferredQualityPreference(): PreferredQualityPreference {
 }
 
 export function writePreferredQualityHeight(height: number | null) {
-  writeStoredString(
+  return writeStoredString(
     PREFERRED_QUALITY_STORAGE_KEY,
     height && height > 0 ? String(height) : 'auto',
   );
@@ -350,12 +352,15 @@ export function readSourcePreferredQualityPreference(
 export function writeSourcePreferredQualityHeight(
   sourceKey: string,
   height: number | null,
-): void {
+): boolean {
   const storageKey = getSourcePreferredQualityStorageKey(sourceKey);
   if (!storageKey) {
-    return;
+    return false;
   }
-  writeStoredString(storageKey, height && height > 0 ? String(height) : 'auto');
+  return writeStoredString(
+    storageKey,
+    height && height > 0 ? String(height) : 'auto',
+  );
 }
 
 export const DANMAKU_OPACITY_RANGE = { min: 0.1, max: 1 };
@@ -374,20 +379,20 @@ export function readStoredDanmakuEnabled(): boolean | undefined {
 }
 
 // 账号设置成功接管后清理旧版客户端偏好
-export function clearStoredDanmakuEnabled(): void {
-  resetStoredBoolean(DANMAKU_ENABLED_STORAGE_KEY);
+export function clearStoredDanmakuEnabled(): boolean {
+  return resetStoredBoolean(DANMAKU_ENABLED_STORAGE_KEY);
 }
 
-export function writeDanmakuEnabled(value: boolean): void {
-  writeStoredBoolean(DANMAKU_ENABLED_STORAGE_KEY, value);
+export function writeDanmakuEnabled(value: boolean): boolean {
+  return writeStoredBoolean(DANMAKU_ENABLED_STORAGE_KEY, value);
 }
 
 export function readDanmakuHeatmapEnabled(): boolean {
   return readStoredBoolean(DANMAKU_HEATMAP_STORAGE_KEY) ?? true;
 }
 
-export function writeDanmakuHeatmapEnabled(value: boolean): void {
-  writeStoredBoolean(DANMAKU_HEATMAP_STORAGE_KEY, value);
+export function writeDanmakuHeatmapEnabled(value: boolean): boolean {
+  return writeStoredBoolean(DANMAKU_HEATMAP_STORAGE_KEY, value);
 }
 
 function clamp(value: number, min: number, max: number): number {
@@ -405,11 +410,11 @@ export function readDanmakuOpacity(): number {
   return clamp(raw, DANMAKU_OPACITY_RANGE.min, DANMAKU_OPACITY_RANGE.max);
 }
 
-export function writeDanmakuOpacity(value: number): void {
+export function writeDanmakuOpacity(value: number): boolean {
   const next = Number.isFinite(value)
     ? clamp(value, DANMAKU_OPACITY_RANGE.min, DANMAKU_OPACITY_RANGE.max)
     : DANMAKU_DEFAULT_OPACITY;
-  writeStoredString(DANMAKU_OPACITY_STORAGE_KEY, String(next));
+  return writeStoredString(DANMAKU_OPACITY_STORAGE_KEY, String(next));
 }
 
 export function readDanmakuFontSize(): number {
@@ -421,7 +426,7 @@ export function readDanmakuFontSize(): number {
   return clamp(raw, DANMAKU_FONT_SIZE_RANGE.min, DANMAKU_FONT_SIZE_RANGE.max);
 }
 
-export function writeDanmakuFontSize(value: number): void {
+export function writeDanmakuFontSize(value: number): boolean {
   const next = Number.isFinite(value)
     ? clamp(
         Math.floor(value),
@@ -429,7 +434,7 @@ export function writeDanmakuFontSize(value: number): void {
         DANMAKU_FONT_SIZE_RANGE.max,
       )
     : DANMAKU_DEFAULT_FONT_SIZE;
-  writeStoredString(DANMAKU_FONT_SIZE_STORAGE_KEY, String(next));
+  return writeStoredString(DANMAKU_FONT_SIZE_STORAGE_KEY, String(next));
 }
 
 // 偏移与弹幕库映射按 源站:视频ID:集索引 维度隔离，换源后各自独立
@@ -459,11 +464,11 @@ export function readDanmakuOffset(scopeKey: string): number {
   return clamp(raw, DANMAKU_OFFSET_RANGE.min, DANMAKU_OFFSET_RANGE.max);
 }
 
-export function writeDanmakuOffset(scopeKey: string, value: number): void {
+export function writeDanmakuOffset(scopeKey: string, value: number): boolean {
   const next = Number.isFinite(value)
     ? clamp(value, DANMAKU_OFFSET_RANGE.min, DANMAKU_OFFSET_RANGE.max)
     : 0;
-  writeStoredString(
+  return writeStoredString(
     `${DANMAKU_OFFSET_STORAGE_PREFIX}${scopeKey}`,
     String(next),
   );
@@ -488,10 +493,10 @@ export function readDanmakuEpisodeSearchTitle(scopeKey: string): string {
 export function writeDanmakuEpisodeSearchTitle(
   scopeKey: string,
   title: string,
-): void {
+): boolean {
   const normalized = title.trim();
-  if (normalized.length > 80) return;
-  writeStoredString(
+  if (normalized.length > 80) return false;
+  return writeStoredString(
     `${DANMAKU_EPISODE_SEARCH_STORAGE_PREFIX}${scopeKey}`,
     normalized,
   );
@@ -500,13 +505,12 @@ export function writeDanmakuEpisodeSearchTitle(
 export function writeDanmakuEpisodeId(
   scopeKey: string,
   episodeId: number | null,
-): void {
+): boolean {
   const key = `${DANMAKU_EPISODE_MAP_STORAGE_PREFIX}${scopeKey}`;
   if (episodeId === null) {
-    writeDanmakuEpisodeSearchTitle(scopeKey, '');
-    removeStorage(key);
-    return;
+    const cleared = removeStorage(key);
+    return writeDanmakuEpisodeSearchTitle(scopeKey, '') && cleared;
   }
-  if (!Number.isSafeInteger(episodeId) || episodeId <= 0) return;
-  writeStoredString(key, String(episodeId));
+  if (!Number.isSafeInteger(episodeId) || episodeId <= 0) return false;
+  return writeStoredString(key, String(episodeId));
 }

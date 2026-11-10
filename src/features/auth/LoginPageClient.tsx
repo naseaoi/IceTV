@@ -286,7 +286,10 @@ export function LoginPageClient() {
       } else if (res.status === 403) {
         const data = await res.json().catch(() => ({}));
         setError(
-          data.error ?? (mode === 'register' ? '当前未开放注册' : '无访问权限'),
+          data.code === 'USER_BANNED'
+            ? '账号已被封禁，请联系管理员'
+            : (data.error ??
+                (mode === 'register' ? '当前未开放注册' : '无访问权限')),
         );
       } else if (res.status === 409) {
         const data = await res.json().catch(() => ({}));

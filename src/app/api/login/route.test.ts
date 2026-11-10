@@ -6,6 +6,7 @@ import { installWebPolyfills } from '@/app/api/test-utils/web-polyfills';
 
 installWebPolyfills();
 
+const mockGetUserAccess = jest.fn();
 const mockCheckUserExist = jest.fn();
 const mockVerifyUser = jest.fn();
 const mockGetConfig = jest.fn();
@@ -13,6 +14,7 @@ const mockVerifyPassword = jest.fn();
 
 jest.mock('@/lib/db', () => ({
   db: {
+    getUserAccess: (...args: unknown[]) => mockGetUserAccess(...args),
     checkUserExist: (...args: unknown[]) => mockCheckUserExist(...args),
     verifyUser: (...args: unknown[]) => mockVerifyUser(...args),
   },
@@ -72,6 +74,22 @@ describe('login route enumeration hardening', () => {
     expect(response.status).toBe(401);
     expect(body).toEqual({ error: '用户名或密码错误' });
     expect(mockGetConfig).not.toHaveBeenCalled();
+  });
+
+  it('凭据正确的封禁账号返回结构化状态且不签发会话', async () => {
+    mockCheckUserExist.mockResolvedValue(true);
+    mockVerifyUser.mockResolvedValue(true);
+    mockGetUserAccess.mockResolvedValue({ banned: true });
+    const response = await POST(
+      createLoginRequest('verified-banned-user', 'correct-password'),
+    );
+    expect(response.status).toBe(403);
+    expect(await response.json()).toEqual({
+      error: '账号已被封禁，请联系管理员',
+      code: 'USER_BANNED',
+      accountStatus: 'banned',
+    });
+    expect(response.headers.get('set-cookie')).toBeNull();
   });
 
   it('uses a dummy password verification for missing users', async () => {

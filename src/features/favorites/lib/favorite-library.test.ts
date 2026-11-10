@@ -32,6 +32,7 @@ it('真实源吸收目录状态和更早保存时间', () => {
     key: 'source+1',
     favorite: {
       ...favorite,
+      update_baseline_episodes: 1,
       save_time: 50,
       watch_status: 'completed',
       watched_at: 20,

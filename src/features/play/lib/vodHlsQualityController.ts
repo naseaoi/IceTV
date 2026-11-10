@@ -26,6 +26,7 @@ import {
   writeSourcePreferredQualityHeight,
 } from '@/lib/local-preferences';
 import { showTimedArtNotice } from '@/lib/player-utils';
+import { showToast } from '@/lib/toast';
 
 type VodQualityHls = HlsQualityController & {
   autoLevelEnabled?: boolean;
@@ -208,7 +209,10 @@ export function createVodHlsQualityController({
       autoInitialMinLevelIndex: autoPreferredLevelIndex,
       autoMaxLevelIndex,
       onPreferenceChange: (height) => {
-        writeSourcePreferredQualityHeight(sourceKey, height);
+        if (!writeSourcePreferredQualityHeight(sourceKey, height))
+          showToast('设置未能保存，刷新后会恢复', 'error', {
+            key: 'local-preference-save',
+          });
         if (!controlOptions) {
           return;
         }

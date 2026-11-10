@@ -7,6 +7,7 @@ import { DataSource } from '@/features/admin/types/internal';
 
 interface ConfigureUserApisDialogProps {
   isOpen: boolean;
+  error?: string;
   username: string;
   sources: DataSource[];
   selectedApis: string[];
@@ -18,6 +19,7 @@ interface ConfigureUserApisDialogProps {
 
 export function ConfigureUserApisDialog({
   isOpen,
+  error,
   username,
   sources,
   selectedApis,
@@ -33,6 +35,11 @@ export function ConfigureUserApisDialog({
       onClose={onClose}
       panelClassName='max-w-4xl max-h-[80vh] overflow-y-auto'
     >
+      {error && (
+        <p role='alert' className='px-4 pt-3 text-sm text-red-600'>
+          {error}
+        </p>
+      )}
       <div className='mb-6'>
         <h4 className='mb-3 text-sm font-medium text-gray-900 dark:text-gray-100'>
           选择可用的视频源：

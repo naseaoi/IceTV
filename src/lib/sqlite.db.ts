@@ -13,6 +13,11 @@ import {
   adminUserStatements,
 } from '@/features/admin/services/userQueryStorage';
 import {
+  favoriteMessageQueries,
+  favoriteMessagesFromRows,
+  favoriteReadStatement,
+} from '@/features/favorites/lib/favorite-tracking';
+import {
   applyFavoriteStatus,
   batchSelection,
   mergeFavorite,
@@ -89,6 +94,17 @@ import {
   userDanmakuValues,
 } from '@/lib/user-danmaku-storage';
 import { mergeUserMessageState } from '@/lib/user-message-state';
+import {
+  accessPermissionsKey,
+  configPermissionsChanged,
+} from '@/lib/user-notice';
+import {
+  type NoticeMutation,
+  noticeInsert,
+  NoticeModeration,
+  userNoticeSchema,
+  UserNoticeStorage,
+} from '@/lib/user-notice-storage';
 import { validateNickname } from '@/lib/user-profile';
 import {
   publicReview,
@@ -569,6 +585,16 @@ export class LocalSqliteStorage implements IStorage {
       this.db.pragma(`busy_timeout = ${busyTimeoutMs}`);
       this.initializeSchema();
     });
+    for (const name of ['title', 'year']) {
+      const columns = this.db
+        .prepare('PRAGMA table_info(user_danmaku)')
+        .all() as { name: string }[];
+      if (!columns.some((column) => column.name === name))
+        this.db.exec(
+          `ALTER TABLE user_danmaku ADD COLUMN ${name} TEXT NOT NULL DEFAULT ''`,
+        );
+    }
+    for (const statement of userNoticeSchema('sqlite')) this.db.exec(statement);
     for (const statement of socialSchema('sqlite')) this.db.exec(statement);
     for (const statement of userAccessSchema('sqlite')) this.db.exec(statement);
     runWithBusyRetry('迁移 SQLite 用户头像', () => {
@@ -576,6 +602,7 @@ export class LocalSqliteStorage implements IStorage {
     });
     this.migrateFavoriteProjection();
     this.migratePlaybackSchema();
+    this.migrateReviewFirstPublished();
     this.stmts = this.prepareStatements();
     if (!isMemoryDb) {
       runWithBusyRetry('迁移 SQLite 历史数据', () => {
@@ -595,6 +622,34 @@ export class LocalSqliteStorage implements IStorage {
     new SqliteUserAccessStore(this.db).migrate();
     this.invites.migrate();
     new SqliteConfigStateStore(this.db).migrate();
+  }
+
+  private migrateReviewFirstPublished(): void {
+    this.db
+      .transaction(() => {
+        const columns = this.db.pragma('table_info(video_reviews)') as {
+          name: string;
+        }[];
+        if (!columns.some((column) => column.name === 'first_published_at'))
+          this.db.exec(
+            'ALTER TABLE video_reviews ADD COLUMN first_published_at INTEGER',
+          );
+        if (
+          this.db
+            .prepare('SELECT 1 FROM storage_migrations WHERE name = ?')
+            .get('review_first_published_v1')
+        )
+          return;
+        this.db.exec(
+          'UPDATE video_reviews SET first_published_at = updated_at WHERE first_published_at IS NULL',
+        );
+        this.db
+          .prepare(
+            'INSERT INTO storage_migrations (name, completed_at) VALUES (?, ?)',
+          )
+          .run('review_first_published_v1', Date.now());
+      })
+      .immediate();
   }
 
   private migratePlaybackSchema(): void {
@@ -1142,9 +1197,10 @@ export class LocalSqliteStorage implements IStorage {
       getVideoReview: this.db.prepare(REVIEW_SQL.own),
       getLatestVideoReview: this.db.prepare(REVIEW_SQL.latest),
       setVideoReview: this.db.prepare(`INSERT INTO video_reviews
-        (username, title_norm, year, review_json, is_public, updated_at) VALUES (?, ?, ?, ?, ?, ?)
+        (username, title_norm, year, review_json, is_public, updated_at, first_published_at) VALUES (?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(username, title_norm, year) DO UPDATE SET
         review_json = json_set(excluded.review_json, '$.created_at', json_extract(video_reviews.review_json, '$.created_at')),
+        first_published_at = COALESCE(video_reviews.first_published_at, excluded.first_published_at),
         is_public = excluded.is_public, updated_at = excluded.updated_at`),
       deleteVideoReview: this.db.prepare(REVIEW_SQL.delete),
       deleteVideoReviewsByUser: this.db.prepare(
@@ -1567,10 +1623,11 @@ export class LocalSqliteStorage implements IStorage {
         this.db
           .prepare(
             `INSERT INTO video_reviews
-          (username, title_norm, year, review_json, is_public, updated_at)
-          SELECT ?, title_norm, year, review_json, is_public, updated_at FROM video_reviews WHERE username = ?
+          (username, title_norm, year, review_json, is_public, updated_at, first_published_at)
+          SELECT ?, title_norm, year, review_json, is_public, updated_at, first_published_at FROM video_reviews WHERE username = ?
           ON CONFLICT(username, title_norm, year) DO UPDATE SET
-            review_json = excluded.review_json, is_public = excluded.is_public, updated_at = excluded.updated_at
+            review_json = excluded.review_json, is_public = excluded.is_public, updated_at = excluded.updated_at,
+            first_published_at = CASE WHEN video_reviews.first_published_at IS NULL THEN excluded.first_published_at WHEN excluded.first_published_at IS NULL THEN video_reviews.first_published_at ELSE MIN(video_reviews.first_published_at, excluded.first_published_at) END
           WHERE excluded.updated_at > video_reviews.updated_at`,
           )
           .run(canonical, legacy);
@@ -1643,6 +1700,7 @@ export class LocalSqliteStorage implements IStorage {
         .prepare('UPDATE user_profiles SET username = ? WHERE username = ?')
         .run(canonical, legacy);
     for (const [table, columns] of [
+      ['user_notice_events', ['recipient_username']],
       ['user_follows', ['follower', 'followee']],
       ['video_review_likes', ['author', 'liker']],
       ['video_review_reports', ['author', 'reporter']],
@@ -1695,6 +1753,7 @@ export class LocalSqliteStorage implements IStorage {
       }
     }
     for (const [table, columns] of [
+      ['user_notice_events', ['recipient_username']],
       ['user_follows', ['follower', 'followee']],
       ['video_review_likes', ['author', 'liker']],
       ['video_review_reports', ['author', 'reporter']],
@@ -2022,6 +2081,31 @@ export class LocalSqliteStorage implements IStorage {
     this.stmts.deletePlayRecordsByUser.run(username);
   }
 
+  async getFavoriteUpdateMessagePage(
+    userName: string,
+    limit: number,
+    before?: import('@/lib/message-cursor.server').MessageCursor | null,
+  ) {
+    const username = normalizeUsername(userName);
+    const sql = favoriteMessageQueries('sqlite', username, limit, before);
+    const rows = this.db.prepare(sql.page).all(...sql.params) as {
+      favorite_key: string;
+      favorite_json: string;
+    }[];
+    const count = this.db.prepare(sql.count).get(username) as { count: number };
+    return { items: favoriteMessagesFromRows(rows), total: count.count };
+  }
+
+  async readFavoriteUpdate(
+    userName: string,
+    key: string,
+    episodes: number,
+  ): Promise<void> {
+    this.db
+      .prepare(favoriteReadStatement('sqlite'))
+      .run(episodes, normalizeUsername(userName), key, episodes, episodes);
+  }
+
   async getFavorite(userName: string, key: string): Promise<Favorite | null> {
     const username = normalizeUsername(userName);
     const row = this.stmts.getFavorite.get(username, key) as
@@ -2326,35 +2410,67 @@ export class LocalSqliteStorage implements IStorage {
     return this.social.getFollowReviewMessages(...args);
   }
 
+  private runNoticeMutation(mutation: NoticeMutation): number {
+    return this.db
+      .transaction(() => {
+        let step = mutation.next();
+        while (!step.done) {
+          const statement = step.value;
+          const rows = statement.read
+            ? (this.db
+                .prepare(statement.sql)
+                .all(...statement.params) as Record<string, unknown>[])
+            : (this.db.prepare(statement.sql).run(...statement.params), []);
+          step = mutation.next(rows);
+        }
+        return step.value;
+      })
+      .immediate();
+  }
+
+  private get notices() {
+    return new UserNoticeStorage({
+      dialect: 'sqlite' as const,
+      rows: async <T>(sql: string, params: unknown[] = []) =>
+        this.db.prepare(sql).all(...params) as T[],
+      run: async (sql: string, params: unknown[] = []) =>
+        this.db.prepare(sql).run(...params).changes,
+    });
+  }
+  async getUserNoticeMessages(
+    ...args: Parameters<IStorage['getUserNoticeMessages']>
+  ) {
+    return this.notices.messages(...args);
+  }
+  async getUserNoticeCount(
+    ...args: Parameters<IStorage['getUserNoticeCount']>
+  ) {
+    return this.notices.count(...args);
+  }
+  async purgeUserNotices(before: number): Promise<number> {
+    return this.db
+      .prepare('DELETE FROM user_notice_events WHERE created_at <= ?')
+      .run(before).changes;
+  }
+
   async deleteReviewReply(
     id: string,
     username: string,
     admin = false,
   ): Promise<boolean> {
-    return this.db.transaction(() => {
-      const result = this.db
-        .prepare(
-          'DELETE FROM video_review_replies WHERE id = ? AND (? = 1 OR username = ?)',
-        )
-        .run(id, admin ? 1 : 0, normalizeUsername(username));
-      if (result.changes)
-        this.db
-          .prepare('DELETE FROM video_review_reply_reports WHERE reply_id = ?')
-          .run(id);
-      return result.changes > 0;
-    })();
+    return (
+      (await this.runNoticeMutation(
+        new NoticeModeration('sqlite').reply(id, username, admin),
+      )) > 0
+    );
   }
   async moderateReplyReports(
     id: string,
     action: 'dismiss' | 'delete-reply',
   ): Promise<void> {
-    if (action === 'delete-reply') {
-      await this.deleteReviewReply(id, '', true);
-      return;
-    }
-    this.db
-      .prepare('DELETE FROM video_review_reply_reports WHERE reply_id = ?')
-      .run(id);
+    await this.runNoticeMutation(
+      new NoticeModeration('sqlite').reply(id, '', true, action),
+    );
   }
 
   async getReviewReplies(
@@ -2457,12 +2573,7 @@ export class LocalSqliteStorage implements IStorage {
     );
   }
   async deleteUserDanmakuBatch(ids: string[]): Promise<number> {
-    if (!ids.length) return 0;
-    return this.db
-      .prepare(
-        `DELETE FROM user_danmaku WHERE id IN (${ids.map(() => '?').join(',')})`,
-      )
-      .run(...ids).changes;
+    return this.runNoticeMutation(new NoticeModeration('sqlite').danmaku(ids));
   }
 
   async getVideoReview(
@@ -2487,6 +2598,7 @@ export class LocalSqliteStorage implements IStorage {
       JSON.stringify(review),
       review.is_public ? 1 : 0,
       review.updated_at,
+      review.is_public ? review.updated_at : null,
     );
   }
 
@@ -2496,79 +2608,25 @@ export class LocalSqliteStorage implements IStorage {
     year: string,
     publicOnly = false,
   ): Promise<void> {
-    this.db.transaction(() => {
-      const result = this.stmts.deleteVideoReview.run(
-        normalizeUsername(userName),
+    await this.runNoticeMutation(
+      new NoticeModeration('sqlite').review(
+        userName,
         titleNorm,
         year,
-        publicOnly ? 1 : 0,
-      );
-      if (result.changes)
-        this.deleteReviewSocialRows(
-          normalizeUsername(userName),
-          titleNorm,
-          year,
-        );
-    })();
+        'delete-review',
+        publicOnly,
+      ),
+    );
   }
-
-  private deleteReviewSocialRows(
-    author: string,
-    title: string,
-    year: string,
-  ): void {
-    this.db
-      .prepare(
-        'DELETE FROM video_review_reply_reports WHERE reply_id IN (SELECT id FROM video_review_replies WHERE author = ? AND title_norm = ? AND year = ?)',
-      )
-      .run(author, title, year);
-    this.db
-      .prepare(
-        'DELETE FROM video_review_replies WHERE author = ? AND title_norm = ? AND year = ?',
-      )
-      .run(author, title, year);
-    for (const table of ['video_review_likes', 'video_review_reports'])
-      this.db
-        .prepare(
-          `DELETE FROM ${table} WHERE author = ? AND title_norm = ? AND year = ?`,
-        )
-        .run(author, title, year);
-  }
-
   async moderateReviewReports(
     author: string,
     title: string,
     year: string,
     action: 'dismiss' | 'mark-spoiler' | 'delete-review',
   ): Promise<void> {
-    author = normalizeUsername(author);
-    this.db.transaction(() => {
-      const target = [author, title, year];
-      if (
-        !this.db
-          .prepare(
-            'SELECT username FROM video_reviews WHERE username = ? AND title_norm = ? AND year = ? AND is_public = 1',
-          )
-          .get(...target)
-      )
-        return;
-      if (action === 'delete-review') {
-        this.stmts.deleteVideoReview.run(...target, 1);
-        this.deleteReviewSocialRows(author, title, year);
-      } else {
-        if (action === 'mark-spoiler')
-          this.db
-            .prepare(
-              "UPDATE video_reviews SET review_json = json_set(review_json, '$.spoiler', json('true')) WHERE username = ? AND title_norm = ? AND year = ? AND is_public = 1",
-            )
-            .run(...target);
-        this.db
-          .prepare(
-            'DELETE FROM video_review_reports WHERE author = ? AND title_norm = ? AND year = ?',
-          )
-          .run(...target);
-      }
-    })();
+    await this.runNoticeMutation(
+      new NoticeModeration('sqlite').review(author, title, year, action, true),
+    );
   }
 
   async getMyVideoReviewPage(
@@ -2793,10 +2851,42 @@ export class LocalSqliteStorage implements IStorage {
     return Boolean(this.stmts.checkUserExist.get(username));
   }
 
-  async changePassword(userName: string, newPassword: string): Promise<void> {
+  async changePassword(
+    userName: string,
+    newPassword: string,
+    admin = false,
+  ): Promise<void> {
     const username = normalizeUsername(userName);
     const hashed = await hashPassword(newPassword);
-    this.stmts.updatePassword.run(hashed, username);
+    const old = this.db
+      .prepare('SELECT password FROM users WHERE username = ?')
+      .get(username) as { password: string } | undefined;
+    if (
+      !old ||
+      (admin && (await verifyPassword(newPassword, old.password)).match)
+    )
+      return;
+    this.db
+      .transaction(() => {
+        const result = this.db
+          .prepare(
+            'UPDATE users SET password = ? WHERE username = ? AND password = ?',
+          )
+          .run(hashed, username, old.password);
+        if (!result.changes) throw new Error('密码已变化，请重试');
+        if (admin) {
+          const event = noticeInsert(
+            'sqlite',
+            username,
+            `password:${old.password}`,
+            'account-change',
+            'password-changed',
+            {},
+          );
+          this.db.prepare(event.sql).run(...event.params);
+        }
+      })
+      .immediate();
   }
 
   async deleteUser(
@@ -2914,6 +3004,9 @@ export class LocalSqliteStorage implements IStorage {
         .prepare('DELETE FROM watch_history WHERE username = ?')
         .run(targetUser);
       this.stmts.deletePlaybackSessionsByUser.run(targetUser);
+      this.db
+        .prepare('DELETE FROM user_notice_events WHERE recipient_username = ?')
+        .run(targetUser);
       this.stmts.deleteUserMessageStateByUser.run(targetUser);
       this.db
         .prepare('DELETE FROM user_annual_recaps WHERE username = ?')
@@ -3156,10 +3249,37 @@ export class LocalSqliteStorage implements IStorage {
           )
         )
           return false;
+        const noticeAccess = new SqliteUserAccessStore(this.db);
+        const noticeUsers = configPermissionsChanged(current, config)
+          ? (
+              this.db
+                .prepare('SELECT username FROM user_access ORDER BY username')
+                .all() as { username: string }[]
+            ).flatMap((row) => {
+              const user = noticeAccess.get(row.username);
+              return user
+                ? [{ user, key: accessPermissionsKey(user, current) }]
+                : [];
+            })
+          : [];
         const removed = removedAccessReferences(current, config);
         const access = new SqliteUserAccessStore(this.db);
         for (const group of removed.groups) access.removeGroup(group);
         for (const source of removed.sources) access.removeSource(source);
+        for (const { user, key } of noticeUsers) {
+          const next = noticeAccess.get(user.username);
+          if (next && key !== accessPermissionsKey(next, config)) {
+            const event = noticeInsert(
+              'sqlite',
+              user.username,
+              `config:${Date.now()}:${JSON.stringify(current)}:${JSON.stringify(config)}`,
+              'account-change',
+              'permissions-changed',
+              {},
+            );
+            this.db.prepare(event.sql).run(...event.params);
+          }
+        }
         stateStore.prune(current, config);
         for (const [key, count] of Object.entries(state?.liveCounts || {})) {
           if (config.LiveConfig?.some((live) => live.key === key))

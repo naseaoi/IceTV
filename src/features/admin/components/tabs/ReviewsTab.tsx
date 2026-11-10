@@ -5,7 +5,6 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 
 import CoverImage from '@/components/CoverImage';
 import ExpandableText from '@/components/ExpandableText';
-import AlertModal from '@/components/modals/AlertModal';
 import ConfirmModal from '@/components/modals/ConfirmModal';
 import RatingStars from '@/components/RatingStars';
 import Spinner from '@/components/Spinner';
@@ -19,10 +18,10 @@ import {
 } from '@/features/admin/lib/api';
 import { buttonStyles } from '@/features/admin/lib/buttonStyles';
 import { showError } from '@/features/admin/lib/notifications';
-import { useAlertModal } from '@/hooks/useAlertModal';
 import { formatRating } from '@/lib/rating';
 import { formatRelativeTime } from '@/lib/relative-time';
 import { type AdminVideoReview, type AdminVideoReviewPage } from '@/lib/types';
+import { getErrorMessage } from '@/lib/user-facing-error';
 
 function reviewKey(review: AdminVideoReview): string {
   return JSON.stringify([review.username, review.title_norm, review.year]);
@@ -48,6 +47,7 @@ function AllReviews({ search }: { search: string }) {
   const [nextCursor, setNextCursor] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [failed, setFailed] = useState(false);
+  const [error, setError] = useState('');
   const [pendingDelete, setPendingDelete] = useState<AdminVideoReview | null>(
     null,
   );
@@ -55,48 +55,42 @@ function AllReviews({ search }: { search: string }) {
   const requestId = useRef(0);
   const deleteInFlight = useRef(false);
   const deletedKeys = useRef(new Set<string>());
-  const { alertModal, showAlert, hideAlert } = useAlertModal();
   const query = search.trim();
 
-  const loadPage = useCallback(
-    async (q: string, cursor: string | null) => {
-      const id = ++requestId.current;
-      setLoading(true);
-      setFailed(false);
-      const params = new URLSearchParams();
-      if (q) params.set('q', q);
-      if (cursor) params.set('cursor', cursor);
+  const loadPage = useCallback(async (q: string, cursor: string | null) => {
+    const id = ++requestId.current;
+    setLoading(true);
+    setFailed(false);
+    setError('');
+    const params = new URLSearchParams();
+    if (q) params.set('q', q);
+    if (cursor) params.set('cursor', cursor);
 
-      try {
-        const page = await adminGet<AdminVideoReviewPage>(
-          `/api/admin/reviews${params.toString() ? `?${params}` : ''}`,
-          '加载评价失败',
+    try {
+      const page = await adminGet<AdminVideoReviewPage>(
+        `/api/admin/reviews${params.toString() ? `?${params}` : ''}`,
+        '加载评价失败',
+      );
+      if (id !== requestId.current) return;
+      setItems((previous) => {
+        const rows = cursor ? [...previous, ...page.items] : page.items;
+        return Array.from(
+          new Map(
+            rows
+              .filter((row) => !deletedKeys.current.has(reviewKey(row)))
+              .map((row) => [reviewKey(row), row]),
+          ).values(),
         );
-        if (id !== requestId.current) return;
-        setItems((previous) => {
-          const rows = cursor ? [...previous, ...page.items] : page.items;
-          return Array.from(
-            new Map(
-              rows
-                .filter((row) => !deletedKeys.current.has(reviewKey(row)))
-                .map((row) => [reviewKey(row), row]),
-            ).values(),
-          );
-        });
-        setNextCursor(page.nextCursor);
-      } catch (error) {
-        if (id !== requestId.current) return;
-        setFailed(true);
-        showError(
-          error instanceof Error ? error.message : '加载评价失败',
-          showAlert,
-        );
-      } finally {
-        if (id === requestId.current) setLoading(false);
-      }
-    },
-    [showAlert],
-  );
+      });
+      setNextCursor(page.nextCursor);
+    } catch (error) {
+      if (id !== requestId.current) return;
+      setFailed(true);
+      setError(getErrorMessage(error, '加载评价失败'));
+    } finally {
+      if (id === requestId.current) setLoading(false);
+    }
+  }, []);
 
   useEffect(() => {
     setItems([]);
@@ -137,10 +131,7 @@ function AllReviews({ search }: { search: string }) {
         previous.filter((item) => reviewKey(item) !== key),
       );
     } catch (error) {
-      showError(
-        error instanceof Error ? error.message : '删除评价失败',
-        showAlert,
-      );
+      showError(error, '删除评价失败');
     } finally {
       deleteInFlight.current = false;
       setDeleting(false);
@@ -149,6 +140,11 @@ function AllReviews({ search }: { search: string }) {
 
   return (
     <div className='space-y-6'>
+      {error && (
+        <p role='alert' className='text-sm text-red-600'>
+          {error}
+        </p>
+      )}
       <div
         aria-busy={loading}
         className='overflow-hidden rounded-lg border border-gray-200 dark:border-gray-700'
@@ -259,7 +255,6 @@ function AllReviews({ search }: { search: string }) {
         onClose={() => setPendingDelete(null)}
         onConfirm={() => void deleteReview()}
       />
-      <AlertModal {...alertModal} onClose={hideAlert} />
     </div>
   );
 }

@@ -2,7 +2,13 @@ import { act, fireEvent, render, screen, within } from '@testing-library/react';
 
 import ReviewsTab from '@/features/admin/components/tabs/ReviewsTab';
 import { getAdminReviewReports } from '@/features/admin/lib/api';
+import { showToast } from '@/lib/toast';
 import { type AdminVideoReview } from '@/lib/types';
+
+jest.mock('@/lib/toast', () => ({
+  showToast: jest.fn(),
+  dismissToast: jest.fn(),
+}));
 
 jest.mock('@/features/admin/lib/api', () => ({
   ...jest.requireActual('@/features/admin/lib/api'),
@@ -196,7 +202,7 @@ describe('ReviewsTab', () => {
     fetchMock.mockResolvedValueOnce(response({ error: '权限不足' }, false));
     fireEvent.click(screen.getByRole('button', { name: '确认删除' }));
     await tick();
-    expect(screen.getByText('权限不足')).toBeInTheDocument();
+    expect(showToast).toHaveBeenCalledWith('权限不足', 'error');
     expect(screen.getByText('值得一看')).toBeInTheDocument();
   });
 
@@ -244,7 +250,6 @@ describe('ReviewsTab', () => {
     fireEvent.click(screen.getByRole('button', { name: '加载更多' }));
     await tick();
     expect(screen.getByText('值得一看')).toBeInTheDocument();
-    fireEvent.click(screen.getByRole('button', { name: '确定' }));
     fetchMock.mockResolvedValueOnce(
       response({ items: [{ ...review, username: 'bob' }], nextCursor: null }),
     );
@@ -258,11 +263,12 @@ describe('ReviewsTab', () => {
   });
 
   it('supports retry after loading errors and shows empty results', async () => {
-    fetchMock.mockRejectedValueOnce(new Error('网络连接失败'));
+    fetchMock.mockRejectedValueOnce(new TypeError('Failed to fetch'));
     render(<ReviewsTab />);
     await tick();
-    expect(screen.getByText('网络连接失败')).toBeInTheDocument();
-    fireEvent.click(screen.getByRole('button', { name: '确定' }));
+    expect(
+      screen.getByText('网络连接失败，请检查网络后重试'),
+    ).toBeInTheDocument();
     fetchMock.mockResolvedValueOnce(response({ items: [], nextCursor: null }));
     fireEvent.click(screen.getByRole('button', { name: '重新加载' }));
     await tick();

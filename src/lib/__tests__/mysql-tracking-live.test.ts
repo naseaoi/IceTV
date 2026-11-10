@@ -13,6 +13,7 @@ import { assertPlaybackPeriodRange } from '@/lib/__tests__/__fixtures__/playback
 import { assertReviewReplies } from '@/lib/__tests__/__fixtures__/review-reply-contract';
 import { assertSocialNotifications } from '@/lib/__tests__/__fixtures__/social-notification-contract';
 import { assertStatsReuse } from '@/lib/__tests__/__fixtures__/stats-reuse-contract';
+import { userNoticeContract } from '@/lib/__tests__/__fixtures__/user-notice-contract';
 import { assertWatchHistoryContract } from '@/lib/__tests__/__fixtures__/watch-history-contract';
 
 import { MySqlStorage } from '../mysql.db';
@@ -68,8 +69,138 @@ describeLive('MySQL 追更查询（真实实例）', () => {
     ).pool.end();
   });
 
+  describe('管理通知契约', () => {
+    userNoticeContract(() => storage);
+  });
+
+  it('管理通知失败回滚删除，并发重试只生成一次通知', async () => {
+    await storage.registerUser('notice-rollback', 'password');
+    await storage.setVideoReview('notice-rollback', videoReview);
+    const pool = (storage as unknown as { pool: import('mysql2/promise').Pool })
+      .pool;
+    await pool.query(
+      "CREATE TRIGGER fail_notice BEFORE INSERT ON user_notice_events FOR EACH ROW SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'notice failed'",
+    );
+    try {
+      await expect(
+        storage.deleteVideoReview(
+          'notice-rollback',
+          videoReview.title_norm,
+          videoReview.year,
+          true,
+        ),
+      ).rejects.toThrow('notice failed');
+      expect(
+        await storage.getVideoReview(
+          'notice-rollback',
+          videoReview.title_norm,
+          videoReview.year,
+        ),
+      ).not.toBeNull();
+    } finally {
+      await pool.query('DROP TRIGGER fail_notice');
+    }
+    await Promise.all(
+      [1, 2].map(() =>
+        storage.deleteVideoReview(
+          'notice-rollback',
+          videoReview.title_norm,
+          videoReview.year,
+          true,
+        ),
+      ),
+    );
+    expect(
+      await storage.getUserNoticeCount('notice-rollback', 0, [], Date.now()),
+    ).toBe(1);
+    await Promise.all(
+      [1, 2].map(() =>
+        storage.updateUserAccess(['notice-rollback'], { role: 'admin' }),
+      ),
+    );
+    expect(
+      await storage.getUserNoticeCount('notice-rollback', 0, [], Date.now()),
+    ).toBe(2);
+  });
+
   describe('announcements', () => {
     announcementContract(() => storage);
+  });
+
+  it('评价首次公开迁移回滚、并发重试与一次性回填保留旧消息身份', async () => {
+    const impl = storage as unknown as {
+      pool: import('mysql2/promise').Pool;
+      migrateReviewFirstPublished(): Promise<void>;
+    };
+    for (const username of ['author', 'reader'])
+      await storage.ensureUserProfile(username);
+    const clock = jest.spyOn(Date, 'now').mockReturnValue(1000);
+    try {
+      await storage.setUserFollow('reader', 'author', true);
+      await storage.setVideoReview('author', videoReview);
+      const [before] = await storage.getFollowReviewMessages(
+        'reader',
+        0,
+        [],
+        3000,
+      );
+      await storage.setVideoReview('author', {
+        ...videoReview,
+        title_norm: 'old-private',
+        is_public: false,
+      });
+      await impl.pool.execute(
+        'UPDATE video_reviews SET first_published_at = NULL',
+      );
+      await impl.pool.execute('DELETE FROM storage_migrations WHERE name = ?', [
+        'review_first_published_v1',
+      ]);
+      await impl.pool.query(
+        "CREATE TRIGGER interrupt_review_migration BEFORE UPDATE ON storage_migrations FOR EACH ROW SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'interrupt'",
+      );
+      try {
+        await expect(impl.migrateReviewFirstPublished()).rejects.toThrow(
+          'interrupt',
+        );
+        const [rows] = await impl.pool.query(
+          'SELECT first_published_at FROM video_reviews',
+        );
+        expect(rows).toEqual([
+          { first_published_at: null },
+          { first_published_at: null },
+        ]);
+      } finally {
+        await impl.pool.query('DROP TRIGGER interrupt_review_migration');
+      }
+      await Promise.all([
+        impl.migrateReviewFirstPublished(),
+        impl.migrateReviewFirstPublished(),
+      ]);
+      expect(
+        await storage.getFollowReviewMessages('reader', 0, [before.id], 3000),
+      ).toEqual([]);
+      await storage.setVideoReview('author', {
+        ...videoReview,
+        title_norm: 'old-private',
+        updated_at: 8000,
+      });
+      expect(
+        await storage.getFollowReviewMessageCount('reader', 2000, [], 9000),
+      ).toBe(0);
+      await storage.setVideoReview('author', {
+        ...videoReview,
+        title_norm: 'new-draft',
+        is_public: false,
+        updated_at: 9000,
+      });
+      await impl.migrateReviewFirstPublished();
+      const [rows] = await impl.pool.query(
+        "SELECT first_published_at FROM video_reviews WHERE title_norm = 'new-draft'",
+      );
+      expect(rows).toEqual([{ first_published_at: null }]);
+    } finally {
+      clock.mockRestore();
+    }
   });
 
   it('历史与桶统计双后端契约', async () => {

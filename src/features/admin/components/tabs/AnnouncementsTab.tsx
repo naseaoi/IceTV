@@ -3,7 +3,6 @@
 import { Send } from 'lucide-react';
 import { useCallback, useEffect, useRef, useState } from 'react';
 
-import AlertModal from '@/components/modals/AlertModal';
 import ConfirmModal from '@/components/modals/ConfirmModal';
 import MoreMenu, { type MoreMenuItem } from '@/components/MoreMenu';
 import Spinner from '@/components/Spinner';
@@ -25,11 +24,10 @@ import {
   adminPost,
 } from '@/features/admin/lib/api';
 import { buttonStyles } from '@/features/admin/lib/buttonStyles';
-import { showError } from '@/features/admin/lib/notifications';
-import { useAlertModal } from '@/hooks/useAlertModal';
 import { ANNOUNCEMENT_MAX_LENGTH } from '@/lib/announcement-identity';
 import { formatRelativeTime } from '@/lib/relative-time';
 import type { SiteAnnouncement } from '@/lib/types';
+import { getErrorMessage } from '@/lib/user-facing-error';
 import type { AdminConfig } from '@/types/admin';
 
 const ENDPOINT = '/api/admin/announcements';
@@ -64,12 +62,12 @@ export default function AnnouncementsTab({
   const [items, setItems] = useState<SiteAnnouncement[]>([]);
   const [loading, setLoading] = useState(true);
   const [failed, setFailed] = useState(false);
+  const [error, setError] = useState('');
   const [draft, setDraft] = useState('');
   const [editingId, setEditingId] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [pending, setPending] = useState<PendingConfirm | null>(null);
   const composerRef = useRef<HTMLTextAreaElement>(null);
-  const { alertModal, showAlert, hideAlert } = useAlertModal();
   const content = draft.trim();
 
   const load = useCallback(async () => {
@@ -83,14 +81,11 @@ export default function AnnouncementsTab({
       setItems(data.items ?? []);
     } catch (error) {
       setFailed(true);
-      showError(
-        error instanceof Error ? error.message : '加载公告失败',
-        showAlert,
-      );
+      setError(getErrorMessage(error, '加载公告失败'));
     } finally {
       setLoading(false);
     }
-  }, [showAlert]);
+  }, []);
 
   useEffect(() => {
     void load();
@@ -106,11 +101,12 @@ export default function AnnouncementsTab({
 
   const run = async (action: () => Promise<void>, fallback: string) => {
     if (busy) return;
+    setError('');
     setBusy(true);
     try {
       await action();
     } catch (error) {
-      showError(error instanceof Error ? error.message : fallback, showAlert);
+      setError(getErrorMessage(error, fallback));
     } finally {
       setBusy(false);
     }
@@ -203,6 +199,11 @@ export default function AnnouncementsTab({
 
   return (
     <div className='space-y-8'>
+      {error && (
+        <p role='alert' className='text-sm text-red-600'>
+          {error}
+        </p>
+      )}
       <AdminSettingsGroup
         title={editingId ? '编辑公告' : '发布公告'}
         actions={
@@ -382,7 +383,6 @@ export default function AnnouncementsTab({
         onClose={() => setPending(null)}
         onConfirm={() => void confirmPending()}
       />
-      <AlertModal {...alertModal} onClose={hideAlert} />
     </div>
   );
 }

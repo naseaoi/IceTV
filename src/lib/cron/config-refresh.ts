@@ -40,6 +40,7 @@ export async function refreshSubscribedConfig(): Promise<void> {
       ConfigSubscribtion: {
         ...subscription.ConfigSubscribtion,
         LastCheck: new Date().toISOString(),
+        FailureSince: '',
       },
     };
     invalidateConfigCache();
@@ -62,5 +63,28 @@ export async function refreshSubscribedConfig(): Promise<void> {
     }
   } catch (error) {
     console.error('刷新配置失败:', error);
+    // 配置冲突由下一轮重试，不把用户同时编辑订阅判成回源失败。
+    if (error instanceof ConfigConflictError) return;
+    try {
+      const current = await db.getAdminConfig();
+      if (current) {
+        await db.compareAndSetAdminConfig(current, current, {
+          subscription: {
+            expected: subscription,
+            next: {
+              ...subscription,
+              ConfigSubscribtion: {
+                ...subscription.ConfigSubscribtion,
+                FailureSince:
+                  subscription.ConfigSubscribtion.FailureSince ||
+                  new Date().toISOString(),
+              },
+            },
+          },
+        });
+      }
+    } catch (stateError) {
+      console.error('记录订阅更新状态失败:', stateError);
+    }
   }
 }

@@ -125,7 +125,7 @@ it('两套方言共享公开与收件人谓词且 MySQL 文本逐字匹配', asy
   }
   expect(sqls[0]).toBe(sqls[1]);
   expect(sqls[0]).toContain(
-    '(r.author = ? OR r.reply_to = ?) AND r.username <> ?',
+    '((r.reply_to IS NULL AND r.author = ?) OR r.reply_to = ?) AND r.username <> ?',
   );
   expect(sqls[0]).toContain('v.is_public = 1');
   expect(replySchema('mysql').every((sql) => sql.includes('utf8mb4_bin'))).toBe(

@@ -1,5 +1,7 @@
 'use client';
 
+import AnimatedCount from '@/components/AnimatedCount';
+import { AdminAlertBadge } from '@/features/admin/components/AdminAlertBadge';
 import {
   type AdminTabId,
   type AdminTabMeta,
@@ -62,6 +64,7 @@ export default function AdminNav({
                       <span className='md:min-w-0 md:flex-1 md:truncate md:text-left'>
                         {tab.label}
                       </span>
+                      <AdminAlertBadge tab={tab.id} />
                       {dirtyTab === tab.id && (
                         <span
                           title='有未保存的改动'
@@ -77,7 +80,7 @@ export default function AdminNav({
                               : 'text-gray-400 dark:text-gray-500'
                           }`}
                         >
-                          {count}
+                          <AnimatedCount value={count} />
                         </span>
                       )}
                     </button>

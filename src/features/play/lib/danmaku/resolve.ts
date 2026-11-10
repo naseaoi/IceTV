@@ -27,6 +27,8 @@ import { type UserDanmakuItem, buildUserDanmakuKey } from '@/lib/user-danmaku';
 export type DanmakuEnabledReader = () => boolean;
 
 export interface UserDanmakuTarget {
+  title?: string;
+  year?: string;
   key: string;
   offset: number;
 }
@@ -230,7 +232,12 @@ export async function loadDanmakuForEpisode(
   if (!isUserDanmakuEnabled()) return applyOffset(items, offset);
 
   const key = buildUserDanmakuKey(episodeId, scopeKey);
-  options.onUserTarget?.({ key, offset });
+  options.onUserTarget?.({
+    key,
+    offset,
+    title: context.searchTitle,
+    year: context.searchYear,
+  });
   try {
     const user = await fetchUserDanmaku(key);
     return applyOffset(mergeUserDanmaku(items, user.items, user.limit), offset);

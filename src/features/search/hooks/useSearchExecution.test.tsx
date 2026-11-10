@@ -11,6 +11,7 @@ import {
   getSearchSnapshot,
   setSearchSnapshot,
 } from '@/features/search/lib/searchSnapshotCache';
+import { readFluidSearch } from '@/lib/local-preferences';
 
 jest.mock('@/lib/db.client', () => ({ addSearchHistory: jest.fn() }));
 jest.mock('@/lib/local-preferences', () => ({
@@ -193,5 +194,63 @@ describe('useSearchExecution cached navigation', () => {
     } finally {
       await act(async () => root.unmount());
     }
+  });
+});
+
+describe('搜索失败反馈', () => {
+  const originalFetch = global.fetch;
+  const originalEventSource = global.EventSource;
+  afterEach(() => {
+    global.fetch = originalFetch;
+    global.EventSource = originalEventSource;
+    jest.mocked(readFluidSearch).mockReturnValue(true);
+    clearSearchSnapshotCache();
+  });
+  it('普通请求失败不会写为空结果快照，重试可恢复', async () => {
+    jest.mocked(readFluidSearch).mockReturnValue(false);
+    global.fetch = jest
+      .fn()
+      .mockResolvedValueOnce({
+        ok: false,
+        json: async () => ({ error: '搜索失败' }),
+      })
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ results: [] }) });
+    const { result } = renderHook(() => useExecution('failure'));
+    await act(async () => {});
+    expect(result.current.error).toBe('搜索失败');
+    expect(getSearchSnapshot('failure')).toBeNull();
+    await act(async () => result.current.retry());
+    expect(result.current.error).toBeNull();
+    expect(result.current.isLoading).toBe(false);
+  });
+  it('流式中断保留结果并标搜索未完成，取消旧查询不污染新查询', async () => {
+    const streams: EventSource[] = [];
+    global.EventSource = jest.fn(() => {
+      const stream = { close: jest.fn() } as unknown as EventSource;
+      streams.push(stream);
+      return stream;
+    }) as unknown as typeof EventSource;
+    const { result, rerender } = renderHook(
+      ({ query }) => useExecution(query),
+      { initialProps: { query: 'partial' } },
+    );
+    await act(async () => {
+      streams[0].onmessage?.(
+        new MessageEvent('message', {
+          data: JSON.stringify({
+            type: 'source_result',
+            results: createSnapshot('item').results,
+          }),
+        }),
+      );
+      streams[0].onerror?.(new Event('error'));
+    });
+    expect(result.current.searchResults).toHaveLength(1);
+    expect(result.current.error).toBe('搜索未完成');
+    expect(getSearchSnapshot('partial')).toBeNull();
+    rerender({ query: 'next' });
+    act(() => streams[0].onerror?.(new Event('error')));
+    expect(result.current.error).toBeNull();
+    expect(result.current.isLoading).toBe(true);
   });
 });

@@ -11,11 +11,12 @@ import {
   fetchMessageSettings,
   saveMessageSettings,
 } from '@/lib/messages.client';
+import { getErrorMessage } from '@/lib/user-facing-error';
 
 const KIND_LABELS: Record<MessageNotificationKind, string> = {
-  'tracking-update': '追更更新',
+  'tracking-update': '追更与收藏更新',
   'follow-review': '关注的人发布评价或年度报告',
-  'review-reply': '回复和 @ 我',
+  'review-reply': '评价回复',
   'new-follower': '新粉丝',
   'review-like': '评价被点赞',
 };
@@ -29,6 +30,8 @@ export default function MessageSettings({ onSaved }: { onSaved: () => void }) {
   const [error, setError] = useState('');
   const saving = useRef<Promise<unknown>>(Promise.resolve());
   const latestSave = useRef(0);
+  const confirmed = useRef<MessageNotificationKind[]>([]);
+  const mounted = useRef(true);
 
   function setMuted(value: MessageNotificationKind[]) {
     mutedRef.current = value;
@@ -37,15 +40,20 @@ export default function MessageSettings({ onSaved }: { onSaved: () => void }) {
 
   useEffect(() => {
     let cancelled = false;
+    mounted.current = true;
     fetchMessageSettings()
       .then((settings) => {
-        if (!cancelled) setMuted(settings.mutedKinds);
+        if (!cancelled) {
+          confirmed.current = settings.mutedKinds;
+          setMuted(settings.mutedKinds);
+        }
       })
       .catch(() => {
         if (!cancelled) setError('通知设置加载失败');
       });
     return () => {
       cancelled = true;
+      mounted.current = false;
     };
   }, []);
 
@@ -62,15 +70,22 @@ export default function MessageSettings({ onSaved }: { onSaved: () => void }) {
     saving.current = saving.current
       .then(() => saveMessageSettings(next))
       .then((saved) => {
-        if (saveId !== latestSave.current) return;
+        confirmed.current = saved.mutedKinds;
+        if (!mounted.current || saveId !== latestSave.current) return;
         setMuted(saved.mutedKinds);
         onSaved();
       })
-      .catch(() => {
-        if (saveId !== latestSave.current) return;
-        setError('保存失败，请重试');
-        return fetchMessageSettings()
-          .then((settings) => setMuted(settings.mutedKinds))
+      .catch((error) => {
+        if (!mounted.current || saveId !== latestSave.current) return;
+        setMuted(confirmed.current);
+        setError(getErrorMessage(error, '保存失败，请重试'));
+        void fetchMessageSettings()
+          .then((settings) => {
+            if (!mounted.current || saveId !== latestSave.current) return;
+            confirmed.current = settings.mutedKinds;
+            setMuted(settings.mutedKinds);
+            onSaved();
+          })
           .catch(() => undefined);
       });
   }

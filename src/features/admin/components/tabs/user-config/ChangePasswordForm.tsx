@@ -15,6 +15,7 @@ interface ChangePasswordFormProps {
   username: string;
   password: string;
   isOpen: boolean;
+  error?: string;
   onPasswordChange: (next: string) => void;
   onSubmit: () => void;
   onCancel: () => void;
@@ -25,6 +26,7 @@ export function ChangePasswordForm({
   username,
   password,
   isOpen,
+  error,
   onPasswordChange,
   onSubmit,
   onCancel,
@@ -38,6 +40,11 @@ export function ChangePasswordForm({
       onClose={onCancel}
       panelClassName='max-w-md max-h-[80vh] overflow-y-auto'
     >
+      {error && (
+        <p role='alert' className='px-4 pt-3 text-sm text-red-600'>
+          {error}
+        </p>
+      )}
       <div className='space-y-4 p-4 sm:p-6'>
         <div className='flex items-start justify-between gap-3'>
           <h5 className={MODAL_TITLE_CLASS}>修改用户密码</h5>

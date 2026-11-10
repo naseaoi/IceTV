@@ -1,6 +1,7 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 
 import { getAuthInfoFromBrowserCookie } from '@/lib/auth.client';
+import { writeStorage } from '@/lib/browser-storage';
 import { testCustomProxy } from '@/lib/custom-proxy-test';
 import { showToast } from '@/lib/toast';
 
@@ -16,7 +17,7 @@ jest.mock('@/lib/auth.client', () => ({
 jest.mock('@/lib/browser-storage', () => ({
   readStorage: jest.fn().mockReturnValue(null),
   writeStorage: jest.fn().mockReturnValue(true),
-  removeStorage: jest.fn(),
+  removeStorage: jest.fn().mockReturnValue(true),
   listStorageKeys: jest.fn().mockReturnValue([]),
 }));
 jest.mock('@/lib/custom-proxy-test', () => ({
@@ -39,7 +40,7 @@ it('更换代理使用轻提示并保留设置面板', () => {
   render(<SettingsPanel onClose={jest.fn()} />);
   fireEvent.click(screen.getAllByRole('button', { name: '自动' })[0]);
   fireEvent.click(screen.getByRole('option', { name: 'Cors Proxy By Zwei' }));
-  expect(showToast).toHaveBeenCalledWith('更换成功，刷新页面后生效', 'success');
+  expect(showToast).toHaveBeenCalledWith('刷新页面后生效', 'info');
   expect(screen.getAllByRole('dialog')).toHaveLength(1);
   expect(screen.getByRole('dialog', { name: '本地设置' })).toBeInTheDocument();
 });
@@ -65,7 +66,7 @@ it('测试空代理地址时通过错误轻提示反馈', () => {
 
 it.each([
   [false, '测试通过，豆瓣代理可用', 'success'],
-  [true, '测试失败，代理返回 502', 'error'],
+  [true, '代理测试失败，请稍后重试', 'error'],
 ])('代理测试失败=%s 时反馈对应文案和语气', async (fails, message, tone) => {
   if (fails) {
     jest
@@ -79,7 +80,12 @@ it.each([
   });
   jest.mocked(showToast).mockClear();
   fireEvent.click(screen.getByRole('button', { name: '测试' }));
-  await waitFor(() => expect(showToast).toHaveBeenCalledWith(message, tone));
+  if (fails) {
+    await waitFor(() => expect(screen.getByText(message)).toBeInTheDocument());
+    expect(showToast).not.toHaveBeenCalled();
+  } else {
+    await waitFor(() => expect(showToast).toHaveBeenCalledWith(message, tone));
+  }
   expect(testCustomProxy).toHaveBeenCalledWith(
     'douban-data',
     'https://proxy.example/?url=',
@@ -92,4 +98,17 @@ it('恢复默认仍需确认', () => {
   fireEvent.click(screen.getByRole('button', { name: '恢复默认' }));
   expect(screen.getByRole('button', { name: '确认恢复' })).toBeInTheDocument();
   expect(showToast).not.toHaveBeenCalled();
+});
+
+it('本地设置写入失败只提示错误并保留面板', () => {
+  jest.mocked(writeStorage).mockReturnValueOnce(false);
+  render(<SettingsPanel onClose={jest.fn()} />);
+  fireEvent.click(screen.getAllByRole('button', { name: '自动' })[0]);
+  fireEvent.click(screen.getByRole('option', { name: 'Cors Proxy By Zwei' }));
+  expect(showToast).toHaveBeenCalledWith(
+    '设置未能保存，刷新后会恢复',
+    'error',
+    { key: 'local-preference-save' },
+  );
+  expect(showToast).not.toHaveBeenCalledWith('刷新页面后生效', 'info');
 });

@@ -165,6 +165,12 @@ export function mergeFavorite(
     incomingCatalog && target && target.key !== key
       ? { ...target.favorite }
       : { ...favorite };
+  // 通知基线由服务端保留，资料/状态重存不能确认更新；目录换为真实源时重新起算。
+  merged.update_baseline_episodes =
+    target?.favorite.update_baseline_episodes ??
+    target?.favorite.total_episodes ??
+    merged.total_episodes;
+  merged.update_detected_at = target?.favorite.update_detected_at;
   const statusOwner = favorite.watch_status
     ? favorite
     : target?.favorite.watch_status

@@ -70,12 +70,12 @@ export function readDoubanProxyType(): DoubanProxyType {
   return doubanProxySourceHelper.readSource();
 }
 
-export function writeDoubanProxyType(value: unknown): DoubanProxyType {
+export function writeDoubanProxyType(value: unknown): boolean {
   return doubanProxySourceHelper.writeSource(value);
 }
 
-export function resetDoubanProxyType(): void {
-  doubanProxySourceHelper.resetSource();
+export function resetDoubanProxyType(): boolean {
+  return doubanProxySourceHelper.resetSource();
 }
 
 export function readDefaultDoubanProxyUrl(): string {
@@ -86,12 +86,12 @@ export function readDoubanProxyUrl(): string {
   return doubanProxySourceHelper.readProxyUrl();
 }
 
-export function writeDoubanProxyUrl(value: string): void {
-  doubanProxySourceHelper.writeProxyUrl(value);
+export function writeDoubanProxyUrl(value: string): boolean {
+  return doubanProxySourceHelper.writeProxyUrl(value);
 }
 
-export function resetDoubanProxyUrl(): void {
-  doubanProxySourceHelper.resetProxyUrl();
+export function resetDoubanProxyUrl(): boolean {
+  return doubanProxySourceHelper.resetProxyUrl();
 }
 
 export function readDefaultDoubanImageProxyType(): DoubanImageProxyType {
@@ -102,14 +102,12 @@ export function readDoubanImageProxyType(): DoubanImageProxyType {
   return doubanImageProxySourceHelper.readSource();
 }
 
-export function writeDoubanImageProxyType(
-  value: unknown,
-): DoubanImageProxyType {
+export function writeDoubanImageProxyType(value: unknown): boolean {
   return doubanImageProxySourceHelper.writeSource(value);
 }
 
-export function resetDoubanImageProxyType(): void {
-  doubanImageProxySourceHelper.resetSource();
+export function resetDoubanImageProxyType(): boolean {
+  return doubanImageProxySourceHelper.resetSource();
 }
 
 export function readDefaultDoubanImageProxyUrl(): string {
@@ -120,10 +118,10 @@ export function readDoubanImageProxyUrl(): string {
   return doubanImageProxySourceHelper.readProxyUrl();
 }
 
-export function writeDoubanImageProxyUrl(value: string): void {
-  doubanImageProxySourceHelper.writeProxyUrl(value);
+export function writeDoubanImageProxyUrl(value: string): boolean {
+  return doubanImageProxySourceHelper.writeProxyUrl(value);
 }
 
-export function resetDoubanImageProxyUrl(): void {
-  doubanImageProxySourceHelper.resetProxyUrl();
+export function resetDoubanImageProxyUrl(): boolean {
+  return doubanImageProxySourceHelper.resetProxyUrl();
 }

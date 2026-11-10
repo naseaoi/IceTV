@@ -19,6 +19,7 @@ import {
   writeDanmakuOffset,
 } from '@/lib/local-preferences';
 import { getRuntimeConfig } from '@/lib/runtime-config';
+import { showToast } from '@/lib/toast';
 
 const OFFSET_STEP_SECONDS = 1;
 
@@ -77,7 +78,12 @@ export const DanmakuTab: React.FC<DanmakuTabProps> = ({
       if (next < DANMAKU_OFFSET_RANGE.min || next > DANMAKU_OFFSET_RANGE.max) {
         return;
       }
-      writeDanmakuOffset(scopeKey, next);
+      if (!writeDanmakuOffset(scopeKey, next)) {
+        showToast('设置未能保存，刷新后会恢复', 'error', {
+          key: 'local-preference-save',
+        });
+        return;
+      }
       setOffset(next);
       void onReload?.({ refreshData: false });
     },
@@ -86,7 +92,10 @@ export const DanmakuTab: React.FC<DanmakuTabProps> = ({
 
   const toggleHeatmap = useCallback(() => {
     const next = !heatmapEnabled;
-    writeDanmakuHeatmapEnabled(next);
+    if (!writeDanmakuHeatmapEnabled(next))
+      showToast('设置未能保存，刷新后会恢复', 'error', {
+        key: 'local-preference-save',
+      });
     setHeatmapEnabled(next);
     onHeatmapChange?.(next);
   }, [heatmapEnabled, onHeatmapChange]);

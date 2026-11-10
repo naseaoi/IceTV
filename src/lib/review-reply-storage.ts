@@ -236,7 +236,7 @@ export class ReviewReplyStorage {
     const ids = readIds.map(parseReplyMessageId).filter((id) => id !== null);
     username = normalizeUsername(username);
     return {
-      from: `${REPLY_FROM} WHERE v.is_public = 1 AND (r.author = ? OR r.reply_to = ?) AND r.username <> ? AND r.created_at > ? ${ids.length ? `AND r.id NOT IN (${ids.map(() => '?').join(',')})` : ''}`,
+      from: `${REPLY_FROM} WHERE v.is_public = 1 AND ((r.reply_to IS NULL AND r.author = ?) OR r.reply_to = ?) AND r.username <> ? AND r.created_at > ? ${ids.length ? `AND r.id NOT IN (${ids.map(() => '?').join(',')})` : ''}`,
       params: [
         username,
         username,

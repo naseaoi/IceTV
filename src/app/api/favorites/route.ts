@@ -128,6 +128,11 @@ export async function POST(request: NextRequest) {
 
     // 验证必要字段
     if (
+      (favorite.total_episodes !== undefined &&
+        (!Number.isSafeInteger(favorite.total_episodes) ||
+          favorite.total_episodes < 0)) ||
+      (favorite.origin !== undefined &&
+        !['vod', 'live'].includes(favorite.origin)) ||
       typeof favorite.title !== 'string' ||
       !favorite.title.trim() ||
       favorite.title.length > 500 ||
@@ -166,6 +171,9 @@ export async function POST(request: NextRequest) {
     const now = Date.now();
     const finalFavorite = {
       ...favorite,
+      total_episodes: favorite.total_episodes ?? 0,
+      update_baseline_episodes: undefined,
+      update_detected_at: undefined,
       ...(isCatalogFavoriteSource(parsed.source)
         ? {
             source_name: parsed.source === 'douban' ? '豆瓣' : 'Bangumi',

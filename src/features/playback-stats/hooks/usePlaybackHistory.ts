@@ -1,7 +1,13 @@
 'use client';
 
 import { useRouter } from 'next/navigation';
-import { useCallback, useEffect, useLayoutEffect, useState } from 'react';
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+} from 'react';
 
 import { useRuntimeConfig } from '@/components/RuntimeConfigProvider';
 import {
@@ -20,6 +26,7 @@ import { savePlayIntent } from '@/lib/play-intent';
 import { isGroupedPlayRecordScale } from '@/lib/play-records';
 import { showToast } from '@/lib/toast';
 import type { WatchHistoryEntry } from '@/lib/types';
+import { getErrorMessage, isAbortError } from '@/lib/user-facing-error';
 import { canUseNetworkPrefetch, warmupForPlayback } from '@/lib/video-prefetch';
 
 const useIsomorphicLayoutEffect =
@@ -58,6 +65,11 @@ export function usePlaybackHistory() {
     1,
     Math.floor(runtimeConfig.PLAYBACK_HISTORY_PAGE_SIZE || 10),
   );
+  const [error, setError] = useState<string | null>(null);
+  const [retryCount, setRetryCount] = useState(0);
+  const generation = useRef(0);
+  const morePending = useRef(false);
+  const failedMore = useRef(false);
   const [items, setItems] = useState<WatchHistoryEntry[]>([]);
   const [nextCursor, setNextCursor] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
@@ -85,6 +97,11 @@ export function usePlaybackHistory() {
 
   useEffect(() => {
     let cancelled = false;
+    generation.current += 1;
+    morePending.current = false;
+    failedMore.current = false;
+    setLoadingMore(false);
+    setError(null);
 
     const loadInitial = async () => {
       try {
@@ -130,7 +147,8 @@ export function usePlaybackHistory() {
         setItems(nextHistory.items);
         setNextCursor(nextHistory.nextCursor);
       } catch (error) {
-        console.error('获取播放历史失败:', error);
+        if (!cancelled && !isAbortError(error))
+          setError(getErrorMessage(error, '加载失败'));
       } finally {
         if (!cancelled) {
           setLoading(false);
@@ -143,11 +161,15 @@ export function usePlaybackHistory() {
 
     return () => {
       cancelled = true;
+      generation.current += 1;
     };
-  }, [pageSize, searchKeyword]);
+  }, [pageSize, searchKeyword, retryCount]);
 
   const loadMore = async () => {
-    if (!nextCursor || loadingMore) return;
+    if (!nextCursor || morePending.current || refreshing) return;
+    morePending.current = true;
+    const requestGeneration = generation.current;
+    setError(null);
     setLoadingMore(true);
     try {
       const response = await getPlaybackHistory(
@@ -155,6 +177,7 @@ export function usePlaybackHistory() {
         searchKeyword || undefined,
         pageSize,
       );
+      if (requestGeneration !== generation.current) return;
       setItems((prev) => {
         const loadedIds = new Set(prev.map((item) => item.id));
         const nextItems = [
@@ -171,9 +194,15 @@ export function usePlaybackHistory() {
       });
       setNextCursor(response.nextCursor);
     } catch (error) {
-      console.error('加载更多播放历史失败:', error);
+      if (requestGeneration === generation.current && !isAbortError(error)) {
+        failedMore.current = true;
+        setError(getErrorMessage(error, '加载失败'));
+      }
     } finally {
-      setLoadingMore(false);
+      if (requestGeneration === generation.current) {
+        morePending.current = false;
+        setLoadingMore(false);
+      }
     }
   };
 
@@ -207,6 +236,11 @@ export function usePlaybackHistory() {
   }, []);
 
   return {
+    error,
+    retry: () =>
+      failedMore.current
+        ? void loadMore()
+        : setRetryCount((count) => count + 1),
     items,
     loading,
     loadingMore,

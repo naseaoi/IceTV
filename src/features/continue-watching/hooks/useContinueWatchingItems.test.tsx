@@ -103,3 +103,32 @@ describe('useContinueWatchingItems loading geometry', () => {
     expect(result.current.items).toHaveLength(0);
   });
 });
+
+it('读取失败可重试，续页失败保留记录与游标', async () => {
+  jest.mocked(getCachedPlayRecordsSnapshot).mockReturnValue(null);
+  jest.mocked(getPlayRecordPage).mockRejectedValueOnce(new Error('failed'));
+  const { result } = renderHook(() => useContinueWatchingItems());
+  await waitFor(() => expect(result.current.error).toBeTruthy());
+  const record = { title: '作品', save_time: 1 } as PlayRecord;
+  jest.mocked(getPlayRecordPage).mockResolvedValueOnce({
+    items: { 'src+1': record },
+    total: 2,
+    nextCursor: 'next',
+  });
+  await act(async () => result.current.retry());
+  await waitFor(() => expect(result.current.items).toHaveLength(1));
+  jest.mocked(getPlayRecordPage).mockRejectedValueOnce(new Error('failed'));
+  await act(async () => result.current.loadMore());
+  expect(result.current.items).toHaveLength(1);
+  expect(result.current.hasMore).toBe(true);
+  jest
+    .mocked(getPlayRecordPage)
+    .mockResolvedValueOnce({ items: {}, total: 2, nextCursor: null });
+  await act(async () => result.current.retry());
+  expect(getPlayRecordPage).toHaveBeenLastCalledWith(
+    CONTINUE_WATCHING_PAGE_SIZE,
+    'next',
+    undefined,
+  );
+  expect(result.current.error).toBeNull();
+});

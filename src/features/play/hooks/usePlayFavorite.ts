@@ -1,4 +1,4 @@
-import { MutableRefObject } from 'react';
+import { MutableRefObject, useRef } from 'react';
 
 import { useFavoriteSync } from '@/hooks/useFavoriteSync';
 import { deleteFavorite, saveFavorite } from '@/lib/db.client';
@@ -30,8 +30,11 @@ export function usePlayFavorite({
   // 复用通用的"检查+订阅"逻辑
   useFavoriteSync(currentSource, currentId, setFavorited);
 
+  const pendingRef = useRef(false);
+
   // 切换收藏
   const handleToggleFavorite = async () => {
+    if (pendingRef.current) return;
     if (
       !videoTitleRef.current ||
       !detailRef.current ||
@@ -40,10 +43,14 @@ export function usePlayFavorite({
     )
       return;
 
+    const source = currentSourceRef.current;
+    const id = currentIdRef.current;
+    pendingRef.current = true;
     try {
       if (favorited) {
         await deleteFavorite(currentSourceRef.current, currentIdRef.current);
-        setFavorited(false);
+        if (currentSourceRef.current === source && currentIdRef.current === id)
+          setFavorited(false);
       } else {
         await saveFavorite(currentSourceRef.current, currentIdRef.current, {
           title: videoTitleRef.current,
@@ -54,10 +61,13 @@ export function usePlayFavorite({
           save_time: Date.now(),
           search_title: searchTitle,
         });
-        setFavorited(true);
+        if (currentSourceRef.current === source && currentIdRef.current === id)
+          setFavorited(true);
       }
     } catch (err) {
       console.error('切换收藏失败:', err);
+    } finally {
+      pendingRef.current = false;
     }
   };
 

@@ -12,7 +12,9 @@ import {
 } from '@/lib/player-runtime';
 import { OPEN_PLAYER_SHORTCUTS_EVENT } from '@/lib/player-shortcuts';
 import { destroyArtPlayer, formatTime } from '@/lib/player-utils';
+import { showToast } from '@/lib/toast';
 import type { SkipConfig } from '@/lib/types';
+import { getErrorMessage } from '@/lib/user-facing-error';
 
 type ArtPlayerSettingsOptions = {
   artPlayerRef: MutableRefObject<Artplayer | null>;
@@ -65,7 +67,10 @@ export function createArtPlayerSettings({
       onSwitch: function (item: { switch?: boolean }) {
         const newVal = !item.switch;
         try {
-          writeBlockAdEnabled(newVal);
+          if (!writeBlockAdEnabled(newVal))
+            showToast('设置未能保存，刷新后会恢复', 'error', {
+              key: 'local-preference-save',
+            });
           if (artPlayerRef.current) {
             resumeTimeRef.current = artPlayerRef.current.currentTime;
             resumeModeRef.current = 'forced';
@@ -76,7 +81,13 @@ export function createArtPlayerSettings({
             artPlayerRef.current = null;
           }
           setBlockAdEnabled(newVal);
-        } catch {
+        } catch (error) {
+          writeBlockAdEnabled(Boolean(item.switch));
+          setBlockAdEnabled(Boolean(item.switch));
+          showToast(
+            getErrorMessage(error, '去广告设置未能生效，请重试'),
+            'error',
+          );
           return Boolean(item.switch);
         }
         return newVal;
@@ -89,7 +100,10 @@ export function createArtPlayerSettings({
       switch: autoPlayNextEnabled,
       onSwitch: function (item: { switch?: boolean }) {
         const newVal = !item.switch;
-        writeAutoPlayNextEnabled(newVal);
+        if (!writeAutoPlayNextEnabled(newVal))
+          showToast('设置未能保存，刷新后会恢复', 'error', {
+            key: 'local-preference-save',
+          });
         autoPlayNextEnabledRef.current = newVal;
         setAutoPlayNextEnabled(newVal);
         return newVal;

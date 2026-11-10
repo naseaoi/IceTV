@@ -32,6 +32,7 @@ import {
 import type { FavoriteBatchInput } from '@/features/favorites/lib/library-query';
 import { batchFavorites } from '@/lib/db.client';
 import { FAVORITE_RENDER_CHUNK as RENDER_CHUNK } from '@/lib/favorites-count';
+import { getErrorMessage, isAbortError } from '@/lib/user-facing-error';
 
 // all 为真时按当前搜索与筛选全选，keys 记录排除项；否则 keys 为选中项
 interface FavoriteSelection {
@@ -208,7 +209,7 @@ export function FavoritesPageClient({
     return () => window.removeEventListener('keydown', onKeyDown);
   }, [selecting, confirmBatchRemove, exitSelecting]);
 
-  const runBatch = async (command: FavoriteBatchCommand) => {
+  const runBatch = async (command: FavoriteBatchCommand, propagate = false) => {
     const target: FavoriteBatchInput['target'] = selection.all
       ? { match: { q: query, filter }, exclude: [...selection.keys] }
       : { keys: [...selection.keys] };
@@ -225,8 +226,10 @@ export function FavoritesPageClient({
             },
       );
       clearSelection();
-    } catch {
-      setBatchError('操作失败，请重试');
+    } catch (error) {
+      if (!isAbortError(error))
+        setBatchError(getErrorMessage(error, '操作失败，请重试'));
+      if (propagate) throw error;
     } finally {
       setBatchBusy(null);
     }
@@ -415,8 +418,7 @@ export function FavoritesPageClient({
         confirmText='移出'
         onCancel={() => setConfirmBatchRemove(false)}
         onConfirm={async () => {
-          setConfirmBatchRemove(false);
-          await runBatch('remove');
+          await runBatch('remove', true);
         }}
       />
       <ConfirmModal

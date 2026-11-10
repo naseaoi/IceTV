@@ -1,4 +1,10 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import {
+  act,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+} from '@testing-library/react';
 import type { ReactNode } from 'react';
 
 import AdminPage from '@/app/admin/page';
@@ -36,10 +42,18 @@ jest.mock('@/components/modals/ConfirmModal', () => ({
   default: ({
     isOpen,
     onConfirm,
+    message,
   }: {
+    message?: string;
     isOpen: boolean;
     onConfirm: () => void;
-  }) => (isOpen ? <button onClick={onConfirm}>ConfirmModal</button> : null),
+  }) =>
+    isOpen ? (
+      <div>
+        <p>{message}</p>
+        <button onClick={onConfirm}>ConfirmModal</button>
+      </div>
+    ) : null,
 }));
 
 const mockReplace = jest.fn();
@@ -84,13 +98,6 @@ jest.mock('@/hooks/useAlertModal', () => ({
     alertModal: { isOpen: false, type: 'success', title: '' },
     showAlert: jest.fn(),
     hideAlert: jest.fn(),
-  }),
-}));
-
-jest.mock('@/features/admin/hooks/useLoadingState', () => ({
-  useLoadingState: () => ({
-    isLoading: () => false,
-    withLoading: async (_key: string, fn: () => Promise<unknown>) => fn(),
   }),
 }));
 
@@ -212,7 +219,13 @@ describe('AdminPage role visibility', () => {
   });
 
   it('opens reset confirm modal and triggers reset action', async () => {
-    const resetConfig = jest.fn().mockResolvedValue(undefined);
+    let resolve!: () => void;
+    const resetConfig = jest.fn(
+      () =>
+        new Promise<void>((done) => {
+          resolve = done;
+        }),
+    );
     mockSearch = 'tab=config-file';
     setupOwnerWithResetSpy(resetConfig);
 
@@ -230,10 +243,17 @@ describe('AdminPage role visibility', () => {
       expect(screen.getByText('ConfirmModal')).toBeInTheDocument();
     });
 
+    expect(screen.getByText(/用户权限与封禁不受影响/)).toBeInTheDocument();
     fireEvent.click(screen.getByText('ConfirmModal'));
-
+    expect(screen.getByRole('button', { name: '重置配置' })).toBeDisabled();
+    await act(async () => {
+      resolve();
+    });
     await waitFor(() => {
       expect(resetConfig).toHaveBeenCalledTimes(1);
+      expect(
+        screen.getByRole('button', { name: '重置配置' }),
+      ).not.toBeDisabled();
     });
   });
 

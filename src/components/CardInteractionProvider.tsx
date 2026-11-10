@@ -25,6 +25,8 @@ import {
 type ActionSheetPayload = CardActionContent;
 
 type ConfirmPayload = {
+  objectKey?: string;
+  operation?: string;
   title: string;
   message: string;
   confirmText?: string;
@@ -96,6 +98,20 @@ export function CardInteractionProvider({
     useState<ActionSheetState>(null);
   const actionSheetStateRef = useRef<ActionSheetState>(null);
   const [confirmState, setConfirmState] = useState<ConfirmState>(null);
+
+  const inFlight = useRef(new Set<string>());
+  const [pendingActions, setPendingActions] = useState(new Set<string>());
+  const actionKey =
+    actionSheetState?.payload.objectKey ?? actionSheetState?.ownerId ?? '';
+  const runAction = (key: string, run: () => void | Promise<void>) => {
+    if (inFlight.current.has(key)) return;
+    inFlight.current.add(key);
+    setPendingActions(new Set(inFlight.current));
+    return (async () => run())().finally(() => {
+      inFlight.current.delete(key);
+      setPendingActions(new Set(inFlight.current));
+    });
+  };
 
   const favoritesRef = useRef<Record<string, Favorite>>({});
   const favoritesLoadedRef = useRef(false);
@@ -262,7 +278,20 @@ export function CardInteractionProvider({
         isOpen={!!actionSheetState}
         onClose={() => hideActionSheet()}
         title={actionSheetState?.payload.title || ''}
-        actions={actionSheetState?.payload.actions || []}
+        actions={(actionSheetState?.payload.actions || []).map((action) => {
+          if (
+            !['favorite', 'tracking', 'mark-update-read', 'delete'].includes(
+              action.id,
+            )
+          )
+            return action;
+          const key = `${actionKey}:${action.id}`;
+          return {
+            ...action,
+            disabled: action.disabled || pendingActions.has(key),
+            onClick: () => runAction(key, action.onClick),
+          };
+        })}
         poster={actionSheetState?.payload.poster}
         sources={actionSheetState?.payload.sources}
         sourceName={actionSheetState?.payload.sourceName}
@@ -277,13 +306,13 @@ export function CardInteractionProvider({
         cancelText={confirmState?.payload.cancelText}
         danger={confirmState?.payload.danger}
         onCancel={() => hideConfirm()}
-        onConfirm={async () => {
-          if (!confirmState) {
-            return;
-          }
-
-          await confirmState.payload.onConfirm();
-          hideConfirm(confirmState.ownerId);
+        onConfirm={() => {
+          if (!confirmState) return;
+          const { payload, ownerId } = confirmState;
+          return runAction(
+            `${payload.objectKey ?? ownerId}:${payload.operation ?? 'delete'}`,
+            payload.onConfirm,
+          );
         }}
       />
     </CardInteractionContext.Provider>

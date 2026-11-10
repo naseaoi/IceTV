@@ -4,7 +4,12 @@ export const CONFIG_SUBSCRIPTION_MAX_BYTES = 2 * 1024 * 1024;
 
 export type ConfigSubscription = {
   ConfigFile: string;
-  ConfigSubscribtion: { URL: string; AutoUpdate: boolean; LastCheck: string };
+  ConfigSubscribtion: {
+    URL: string;
+    AutoUpdate: boolean;
+    LastCheck: string;
+    FailureSince?: string;
+  };
 };
 export type ConfigStateUpdate = {
   subscription?: { expected: ConfigSubscription; next: ConfigSubscription };
@@ -15,9 +20,10 @@ export type SubscriptionRow = {
   auto_update: number;
   last_check: string;
   config_file: string;
+  failure_since?: string;
 };
 export const SUBSCRIPTION_INSERT =
-  'INSERT INTO config_subscription (id, url, auto_update, last_check, config_file) VALUES (1, ?, ?, ?, ?)';
+  'INSERT INTO config_subscription (id, url, auto_update, last_check, config_file, failure_since) VALUES (1, ?, ?, ?, ?, ?)';
 
 export function subscriptionFromConfig(
   config?: Partial<ConfigSubscription> | null,
@@ -28,6 +34,9 @@ export function subscriptionFromConfig(
       URL: config?.ConfigSubscribtion?.URL || '',
       AutoUpdate: config?.ConfigSubscribtion?.AutoUpdate === true,
       LastCheck: config?.ConfigSubscribtion?.LastCheck || '',
+      ...(config?.ConfigSubscribtion?.FailureSince
+        ? { FailureSince: config.ConfigSubscribtion.FailureSince }
+        : {}),
     },
   };
 }
@@ -40,6 +49,7 @@ export function subscriptionFromRow(row?: SubscriptionRow): ConfigSubscription {
             URL: row.url,
             AutoUpdate: !!row.auto_update,
             LastCheck: row.last_check,
+            FailureSince: row.failure_since,
           },
         }
       : undefined,
@@ -49,7 +59,13 @@ export function subscriptionValues(
   value: ConfigSubscription,
 ): (string | number)[] {
   const sub = value.ConfigSubscribtion;
-  return [sub.URL, Number(sub.AutoUpdate), sub.LastCheck, value.ConfigFile];
+  return [
+    sub.URL,
+    Number(sub.AutoUpdate),
+    sub.LastCheck,
+    value.ConfigFile,
+    sub.FailureSince || '',
+  ];
 }
 export function stripConfigState(config: AdminConfig): AdminConfig {
   delete (config as Partial<ConfigSubscription>).ConfigFile;

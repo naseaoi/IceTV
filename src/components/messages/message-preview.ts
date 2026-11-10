@@ -1,3 +1,4 @@
+import { toMessageToastPreview } from '@/lib/message-types';
 import {
   UserMessage,
   UserMessagePage,
@@ -106,6 +107,8 @@ export function getMessagePreviewSummary(
     (message) => message.type === 'tracking-update',
   );
   return {
+    latestUnreadAt: page.items[0]?.createdAt ?? 0,
+    latestUnread: page.items[0] ? toMessageToastPreview(page.items[0]) : null,
     unreadCount: page.total,
     trackingUnreadCount: tracking.length,
     reviewReplyUnreadCount: 0,

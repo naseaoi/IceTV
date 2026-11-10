@@ -5,7 +5,7 @@ import SearchBox from './SearchBox';
 
 const push = jest.fn();
 const getSearchHistory = jest.fn();
-const deleteSearchHistory = jest.fn();
+const deleteSearchHistory = jest.fn().mockResolvedValue(undefined);
 
 jest.mock('next/navigation', () => ({
   useRouter: () => ({ push }),

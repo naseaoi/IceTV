@@ -158,6 +158,7 @@ export default function ContinueCard({
 
   const handleDelete = useCallback(() => {
     showConfirm(interactionId, {
+      objectKey: `${source}+${id}`,
       title: '确认删除播放记录？',
       message: `将删除《${title}》的播放记录`,
       cancelText: '取消',
@@ -198,6 +199,7 @@ export default function ContinueCard({
       }
 
       showActionSheet(interactionId, {
+        objectKey: `${source}+${id}`,
         title,
         poster,
         actions: buildCardActions({

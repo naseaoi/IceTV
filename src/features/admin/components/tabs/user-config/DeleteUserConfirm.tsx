@@ -5,6 +5,8 @@ import { buttonStyles } from '@/features/admin/lib/buttonStyles';
 
 interface DeleteUserConfirmProps {
   isOpen: boolean;
+  isDeleting: boolean;
+  error?: string;
   username: string;
   onCancel: () => void;
   onConfirm: () => void;
@@ -12,6 +14,8 @@ interface DeleteUserConfirmProps {
 
 export function DeleteUserConfirm({
   isOpen,
+  isDeleting,
+  error,
   username,
   onCancel,
   onConfirm,
@@ -20,12 +24,20 @@ export function DeleteUserConfirm({
     <ConfirmModal
       isOpen={isOpen}
       title='确认删除用户'
-      onClose={onCancel}
+      onClose={() => {
+        if (!isDeleting) onCancel();
+      }}
       onConfirm={onConfirm}
-      confirmText='确认删除'
+      confirmDisabled={isDeleting}
+      confirmText={isDeleting ? '删除中...' : '确认删除'}
       confirmClassName={`px-6 py-2.5 text-sm font-medium ${buttonStyles.danger}`}
       cancelClassName={`px-6 py-2.5 text-sm font-medium ${buttonStyles.secondary}`}
     >
+      {error && (
+        <p role='alert' className='mb-3 text-sm text-red-600'>
+          {error}
+        </p>
+      )}
       <div className='mb-4 rounded-lg border border-red-200 bg-red-50 p-4 dark:border-red-800 dark:bg-red-900/20'>
         <div className='mb-2 flex items-center space-x-2'>
           <svg

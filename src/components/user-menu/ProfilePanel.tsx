@@ -20,6 +20,7 @@ import { useNicknameAvailability } from '@/hooks/useNicknameAvailability';
 import { getMyProfile, updateProfile } from '@/lib/profile.client';
 import { showToast } from '@/lib/toast';
 import type { LibraryVisibility } from '@/lib/types';
+import { getErrorMessage, isAbortError } from '@/lib/user-facing-error';
 import {
   createAvatarSeed,
   NICKNAME_MAX_LENGTH,
@@ -45,11 +46,13 @@ export function ProfileForm({
   onSaved,
   onClose,
   onChangePassword,
+  showSuccessToast = true,
 }: {
   required?: boolean;
   onSaved?: () => void;
   onClose?: () => void;
   onChangePassword?: () => void;
+  showSuccessToast?: boolean;
 }) {
   const { session, refreshSession } = useAuthSession();
   const profileId = session.status === 'authenticated' ? session.profileId : '';
@@ -140,10 +143,11 @@ export function ProfileForm({
           : {}),
       });
       await refreshSession();
-      showToast('个人资料已保存', 'success');
+      if (showSuccessToast) showToast('个人资料已保存', 'success');
       onSaved?.();
     } catch (error) {
-      setError((error as Error).message);
+      if (!isAbortError(error))
+        setError(getErrorMessage(error, '保存失败，请稍后重试'));
     } finally {
       setSaving(false);
     }
@@ -338,9 +342,11 @@ export function ProfileForm({
 export function ProfilePanel({
   onClose,
   onChangePassword,
+  showSuccessToast = true,
 }: {
   onClose: () => void;
   onChangePassword?: () => void;
+  showSuccessToast?: boolean;
 }) {
   const [open, requestClose] = useDeferredClose(onClose);
   return (
@@ -351,6 +357,7 @@ export function ProfilePanel({
     >
       <div role='dialog' aria-label='个人资料' aria-modal='true'>
         <ProfileForm
+          showSuccessToast={showSuccessToast}
           onSaved={requestClose}
           onClose={requestClose}
           onChangePassword={onChangePassword}

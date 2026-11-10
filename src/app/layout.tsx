@@ -16,6 +16,7 @@ import { SiteProvider } from '@/components/SiteProvider';
 import { SWRegister } from '@/components/SWRegister';
 import { ThemeProvider } from '@/components/ThemeProvider';
 import ToastViewport from '@/components/ToastViewport';
+import { AdminAlertsProvider } from '@/features/admin/components/AdminAlertsProvider';
 import { WatchRecordProvider } from '@/features/watch-record/WatchRecordProvider';
 import { getServerAuthSession } from '@/lib/auth-session.server';
 import { getConfigForRead, getPublicConfig } from '@/lib/config';
@@ -147,17 +148,19 @@ export default async function RootLayout({
               footerText={initialFooterText}
             >
               <AuthProvider initialSession={initialAuthSession}>
-                <MessageCenterProvider>
-                  <CardInteractionProvider>
-                    <WatchRecordProvider>{children}</WatchRecordProvider>
-                    <PageScrollRestorer />
-                    <ClientErrorReporter />
-                    <ToastViewport />
-                    <LinuxDoBindNotifier />
-                    <ReleaseNotifier />
-                    <SWRegister />
-                  </CardInteractionProvider>
-                </MessageCenterProvider>
+                <AdminAlertsProvider>
+                  <MessageCenterProvider>
+                    <CardInteractionProvider>
+                      <WatchRecordProvider>{children}</WatchRecordProvider>
+                      <PageScrollRestorer />
+                      <ClientErrorReporter />
+                      <ToastViewport />
+                      <LinuxDoBindNotifier />
+                      <ReleaseNotifier />
+                      <SWRegister />
+                    </CardInteractionProvider>
+                  </MessageCenterProvider>
+                </AdminAlertsProvider>
               </AuthProvider>
             </SiteProvider>
           </RuntimeConfigProvider>

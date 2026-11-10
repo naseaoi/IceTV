@@ -3,7 +3,6 @@
 import { Trash2 } from 'lucide-react';
 import { useCallback, useEffect, useRef, useState } from 'react';
 
-import AlertModal from '@/components/modals/AlertModal';
 import ConfirmModal from '@/components/modals/ConfirmModal';
 import Spinner from '@/components/Spinner';
 import { AdminUserDanmakuRowsSkeleton } from '@/features/admin/components/AdminContentSkeleton';
@@ -24,13 +23,13 @@ import {
   USER_DANMAKU_TEXT_CLASS,
   USER_DANMAKU_TOOLBAR_CLASS,
 } from '@/features/admin/lib/user-danmaku-layout';
-import { useAlertModal } from '@/hooks/useAlertModal';
 import { formatRelativeTime } from '@/lib/relative-time';
 import {
   type AdminUserDanmakuItem,
   type AdminUserDanmakuPage,
   ADMIN_USER_DANMAKU_DELETE_LIMIT,
 } from '@/lib/user-danmaku';
+import { DisplayableError, getErrorMessage } from '@/lib/user-facing-error';
 
 const ENDPOINT = '/api/admin/danmaku/user';
 
@@ -40,50 +39,45 @@ export default function UserDanmakuTab() {
   const [nextCursor, setNextCursor] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [failed, setFailed] = useState(false);
+  const [loadError, setLoadError] = useState('');
   const [selected, setSelected] = useState<Set<string>>(() => new Set());
   const [pendingDelete, setPendingDelete] = useState<string[] | null>(null);
   const [deleting, setDeleting] = useState(false);
   const requestId = useRef(0);
   const deletedIds = useRef(new Set<string>());
-  const { alertModal, showAlert, hideAlert } = useAlertModal();
   const query = search.trim();
 
-  const loadPage = useCallback(
-    async (q: string, cursor: string | null) => {
-      const id = ++requestId.current;
-      setLoading(true);
-      setFailed(false);
-      const params = new URLSearchParams();
-      if (q) params.set('q', q);
-      if (cursor) params.set('cursor', cursor);
-      try {
-        const page = await adminGet<AdminUserDanmakuPage>(
-          `${ENDPOINT}${params.toString() ? `?${params}` : ''}`,
-          '加载弹幕失败',
-        );
-        if (id !== requestId.current) return;
-        setItems((previous) => {
-          const rows = cursor ? [...previous, ...page.items] : page.items;
-          const unique = new Map<string, AdminUserDanmakuItem>();
-          for (const row of rows) {
-            if (!deletedIds.current.has(row.id)) unique.set(row.id, row);
-          }
-          return [...unique.values()];
-        });
-        setNextCursor(page.nextCursor);
-      } catch (error) {
-        if (id !== requestId.current) return;
-        setFailed(true);
-        showError(
-          error instanceof Error ? error.message : '加载弹幕失败',
-          showAlert,
-        );
-      } finally {
-        if (id === requestId.current) setLoading(false);
-      }
-    },
-    [showAlert],
-  );
+  const loadPage = useCallback(async (q: string, cursor: string | null) => {
+    const id = ++requestId.current;
+    setLoading(true);
+    setFailed(false);
+    setLoadError('');
+    const params = new URLSearchParams();
+    if (q) params.set('q', q);
+    if (cursor) params.set('cursor', cursor);
+    try {
+      const page = await adminGet<AdminUserDanmakuPage>(
+        `${ENDPOINT}${params.toString() ? `?${params}` : ''}`,
+        '加载弹幕失败',
+      );
+      if (id !== requestId.current) return;
+      setItems((previous) => {
+        const rows = cursor ? [...previous, ...page.items] : page.items;
+        const unique = new Map<string, AdminUserDanmakuItem>();
+        for (const row of rows) {
+          if (!deletedIds.current.has(row.id)) unique.set(row.id, row);
+        }
+        return [...unique.values()];
+      });
+      setNextCursor(page.nextCursor);
+    } catch (error) {
+      if (id !== requestId.current) return;
+      setFailed(true);
+      setLoadError(getErrorMessage(error, '加载弹幕失败'));
+    } finally {
+      if (id === requestId.current) setLoading(false);
+    }
+  }, []);
 
   useEffect(() => {
     setItems([]);
@@ -91,6 +85,7 @@ export default function UserDanmakuTab() {
     setSelected(new Set());
     setLoading(true);
     setFailed(false);
+    setLoadError('');
     const timer = window.setTimeout(
       () => void loadPage(query, null),
       query ? 300 : 0,
@@ -121,26 +116,29 @@ export default function UserDanmakuTab() {
     if (!pendingDelete || deleting) return;
     const ids = pendingDelete;
     setDeleting(true);
+    let deleted = 0;
     try {
       for (let i = 0; i < ids.length; i += ADMIN_USER_DANMAKU_DELETE_LIMIT) {
-        await adminDelete(
-          ENDPOINT,
-          { ids: ids.slice(i, i + ADMIN_USER_DANMAKU_DELETE_LIMIT) },
-          '删除弹幕失败',
+        const batch = ids.slice(i, i + ADMIN_USER_DANMAKU_DELETE_LIMIT);
+        await adminDelete(ENDPOINT, { ids: batch }, '删除弹幕失败');
+        deleted += batch.length;
+        for (const id of batch) deletedIds.current.add(id);
+        setItems((previous) =>
+          previous.filter((item) => !batch.includes(item.id)),
         );
+        setSelected((previous) => {
+          const next = new Set(previous);
+          for (const id of batch) next.delete(id);
+          return next;
+        });
+        setPendingDelete(ids.slice(deleted));
       }
-      for (const id of ids) deletedIds.current.add(id);
-      setItems((previous) => previous.filter((item) => !ids.includes(item.id)));
-      setSelected((previous) => {
-        const next = new Set(previous);
-        for (const id of ids) next.delete(id);
-        return next;
-      });
       setPendingDelete(null);
-    } catch (error) {
+    } catch {
       showError(
-        error instanceof Error ? error.message : '删除弹幕失败',
-        showAlert,
+        new DisplayableError(
+          `已删除 ${deleted} 条，${ids.length - deleted} 条未删除`,
+        ),
       );
     } finally {
       setDeleting(false);
@@ -149,6 +147,11 @@ export default function UserDanmakuTab() {
 
   return (
     <div className='space-y-5'>
+      {loadError && (
+        <p role='alert' className='text-sm text-red-600'>
+          {loadError}
+        </p>
+      )}
       <div className={USER_DANMAKU_TOOLBAR_CLASS}>
         <div className='flex h-9 items-center gap-3'>
           <label className='flex items-center gap-2 text-sm text-gray-600 dark:text-gray-300'>
@@ -265,10 +268,13 @@ export default function UserDanmakuTab() {
         confirmText='确认删除'
         danger
         confirmDisabled={deleting}
-        onClose={() => setPendingDelete(null)}
+        onClose={() => {
+          if (!deleting) setPendingDelete(null);
+        }}
         onConfirm={() => void confirmDelete()}
-      />
-      <AlertModal {...alertModal} onClose={hideAlert} />
+      >
+        <p>确定删除选中的 {pendingDelete?.length || 0} 条弹幕吗？</p>
+      </ConfirmModal>
     </div>
   );
 }

@@ -1,6 +1,7 @@
 'use client';
 
 import HomePosterCardSkeleton from '@/components/HomePosterCardSkeleton';
+import LoadErrorState from '@/components/LoadErrorState';
 import { HOME_POSTER_CARD_CLASS } from '@/components/poster-card-layout';
 import ScrollableRow from '@/components/ScrollableRow';
 import SkeletonText from '@/components/SkeletonText';
@@ -41,7 +42,8 @@ export function PlaybackHistoryPreview({
 }: {
   initialSkeletonCount?: number;
 }) {
-  const { items, loading, pageSize, removeEntries } = usePlaybackHistory();
+  const { items, loading, pageSize, removeEntries, error, retry } =
+    usePlaybackHistory();
   const { playHistoryItem, prefetchPlayPage } = usePlayHistorySession();
 
   if (loading) {
@@ -49,6 +51,9 @@ export function PlaybackHistoryPreview({
       <PlaybackHistoryPreviewSkeleton initialCount={initialSkeletonCount} />
     );
   }
+
+  if (error && items.length === 0)
+    return <LoadErrorState message={error} onRetry={retry} />;
 
   if (items.length === 0) {
     return (
@@ -69,7 +74,8 @@ export function PlaybackHistoryPreview({
             onActivate={playHistoryItem}
             onPrefetch={prefetchPlayPage}
             onDelete={async (item) => {
-              await removeEntries([item.id]);
+              if ((await removeEntries([item.id])) === 0)
+                throw new Error('删除未完成');
             }}
           />
         </div>

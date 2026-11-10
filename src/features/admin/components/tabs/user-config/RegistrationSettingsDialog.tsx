@@ -27,6 +27,7 @@ import { AdminStatusSwitch } from '@/features/admin/components/AdminStatusSwitch
 import type { InviteCodeDraft } from '@/features/admin/hooks/useAdminUserActions';
 import { buttonStyles, inputStyles } from '@/features/admin/lib/buttonStyles';
 import { formatDateTime } from '@/features/admin/lib/formatDateTime';
+import { showError } from '@/features/admin/lib/notifications';
 import {
   type InviteCode,
   CUSTOM_INVITE_CODE_MAX_LENGTH,
@@ -47,6 +48,7 @@ import {
 } from '@/features/admin/services/inviteCodes';
 import { copyTextToClipboard } from '@/lib/clipboard';
 import type { InviteCodeFilter } from '@/lib/invite-code-storage';
+import { DisplayableError } from '@/lib/user-facing-error';
 import type { LinuxDoLoginSettings, LinuxDoTrustLevel } from '@/types/admin';
 
 export interface InviteCodeListState {
@@ -65,6 +67,7 @@ export interface InviteCodeListState {
 
 interface RegistrationSettingsDialogProps {
   isOpen: boolean;
+  error?: string;
   openRegister: boolean;
   requireInviteCode: boolean;
   userGroupNames: string[];
@@ -129,7 +132,13 @@ function useCopyFeedback() {
   useEffect(() => () => window.clearTimeout(timer.current), []);
 
   const copy = async (key: string, text: string) => {
-    if (!(await copyTextToClipboard(text))) return;
+    try {
+      if (!(await copyTextToClipboard(text)))
+        throw new DisplayableError('复制失败，请重试');
+    } catch (error) {
+      showError(error, '复制失败，请重试');
+      return;
+    }
     window.clearTimeout(timer.current);
     setCopiedKey(key);
     timer.current = window.setTimeout(
@@ -642,6 +651,7 @@ function Section({
 
 export function RegistrationSettingsDialog({
   isOpen,
+  error: mutationError,
   openRegister,
   requireInviteCode,
   userGroupNames,
@@ -688,6 +698,11 @@ export function RegistrationSettingsDialog({
       onClose={onClose}
       panelClassName='max-w-2xl max-h-[85vh] overflow-y-auto'
     >
+      {mutationError && (
+        <p role='alert' className='px-4 pt-3 text-sm text-red-600'>
+          {mutationError}
+        </p>
+      )}
       <div className='space-y-6'>
         <div
           className={`${ADMIN_PANEL_CLASS} divide-y divide-gray-200 dark:divide-white/[0.06]`}

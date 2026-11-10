@@ -1,8 +1,15 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 
 import { useAuthSession } from '@/components/AuthProvider';
+import { showToast } from '@/lib/toast';
+import {
+  DisplayableError,
+  getErrorMessage,
+  getHttpErrorMessage,
+  isAbortError,
+} from '@/lib/user-facing-error';
 import { checkForUpdates, UpdateStatus } from '@/lib/version-check';
 
 export const ROLE_TEXT: Record<string, string> = {
@@ -13,14 +20,40 @@ export const ROLE_TEXT: Record<string, string> = {
 
 export async function logout() {
   try {
-    await fetch('/api/logout', {
+    const response = await fetch('/api/logout', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
     });
+    if (!response.ok) {
+      const data = await response.json().catch(() => null);
+      throw new DisplayableError(
+        typeof data?.error === 'string'
+          ? data.error
+          : getHttpErrorMessage(response.status, '退出失败，请重试'),
+      );
+    }
+    window.location.href = '/';
   } catch (error) {
-    console.error('注销请求失败:', error);
+    if (!isAbortError(error))
+      showToast(getErrorMessage(error, '退出失败，请重试'), 'error');
   }
-  window.location.href = '/';
+}
+
+export function useLogout() {
+  const [loggingOut, setLoggingOut] = useState(false);
+  const pending = useRef(false);
+  const handleLogout = async () => {
+    if (pending.current) return;
+    pending.current = true;
+    setLoggingOut(true);
+    try {
+      await logout();
+    } finally {
+      pending.current = false;
+      setLoggingOut(false);
+    }
+  };
+  return { loggingOut, handleLogout };
 }
 
 export function buildLoginHref(): string {

@@ -278,3 +278,16 @@ describe('local preferences', () => {
     expect(localStorage.length).toBe(0);
   });
 });
+
+it('本地偏好写入受限时返回失败', () => {
+  const spy = jest
+    .spyOn(Storage.prototype, 'setItem')
+    .mockImplementation(() => {
+      throw new DOMException('quota', 'QuotaExceededError');
+    });
+  try {
+    expect(writeAggregateSearch(false)).toBe(false);
+  } finally {
+    spy.mockRestore();
+  }
+});

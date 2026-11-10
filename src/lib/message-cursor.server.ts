@@ -5,6 +5,7 @@ import { followReviewSortKey } from '@/lib/follow-review-identity';
 import type { UserMessage } from '@/lib/message-types';
 import { parseReplyMessageId } from '@/lib/review-reply-storage';
 import { socialNotificationSortKey } from '@/lib/social-notification-identity';
+import { isUserNotice, parseUserNoticeId } from '@/lib/user-notice';
 import { ReviewValidationError } from '@/lib/video-reviews';
 
 const MAX_CURSOR_LENGTH = 4000;
@@ -15,11 +16,13 @@ export interface MessageCursor {
 }
 
 export function messageSortKey(message: UserMessage): string {
+  if (isUserNotice(message))
+    return `user-notice:${parseUserNoticeId(message.id)?.rowId ?? ''}`;
   if (message.type === 'follow-recap') return followRecapSortKey(message.id);
   if (message.type === 'new-follower' || message.type === 'review-like')
     return socialNotificationSortKey(message.type, message.id);
   return message.type === 'tracking-update'
-    ? `tracking:${message.recordKey}`
+    ? `${message.id.startsWith('favorite-tracking:') ? 'favorite-tracking' : 'tracking'}:${message.recordKey}`
     : message.type === 'follow-review'
       ? followReviewSortKey(message.id)
       : message.type === 'review-reply'

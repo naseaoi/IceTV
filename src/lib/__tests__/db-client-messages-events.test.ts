@@ -6,6 +6,7 @@ jest.mock('@/lib/toast', () => ({
 }));
 
 jest.mock('@/lib/auth.client', () => ({
+  AUTH_SESSION_LOST_EVENT: 'auth:session-lost',
   getAuthInfoFromBrowserCookie: () => ({ username: 'tester' }),
 }));
 
@@ -67,7 +68,7 @@ describe('messagesUpdated 派发点', () => {
     );
   });
 
-  it('批量删除一次乐观广播并按 200 条分批请求', async () => {
+  it('批量删除按 200 条分批请求和广播', async () => {
     const { deletePlayRecords, getCachedPlayRecordsSnapshot } =
       await import('@/lib/db.client');
     const updated = jest.fn();
@@ -83,7 +84,7 @@ describe('messagesUpdated 派发点', () => {
           ([, init]) => JSON.parse(init.body).keys.length,
         ),
       ).toEqual([200, 200, 1]);
-      expect(updated).toHaveBeenCalledTimes(1);
+      expect(updated).toHaveBeenCalledTimes(3);
       expect(getCachedPlayRecordsSnapshot()).toEqual({});
       expect(listener).toHaveBeenCalledTimes(1);
     } finally {

@@ -23,6 +23,7 @@ export async function executeCronTask(task: CronTask): Promise<void> {
     await refreshRecordAndFavorites();
     await cleanupPlaybackSessions();
     await cleanupInviteCodes();
+    await db.purgeUserNotices(Date.now() - 30 * 86400000);
     await cleanupSourceHealth();
     const cutoff = new Date();
     cutoff.setUTCDate(cutoff.getUTCDate() - SOURCE_ROUTE_STATS_RETENTION_DAYS);

@@ -1,10 +1,8 @@
-﻿'use client';
+'use client';
 
 import { useCallback } from 'react';
 
 import { adminPost } from '@/features/admin/lib/api';
-import { showError } from '@/features/admin/lib/notifications';
-import { type ShowAlertFn } from '@/hooks/useAlertModal';
 import type { LinuxDoLoginSettings } from '@/types/admin';
 
 type UserAction =
@@ -26,34 +24,25 @@ export interface InviteCodeDraft {
 
 interface UseAdminUserActionsOptions {
   refreshConfig: () => Promise<void>;
-  showAlert: ShowAlertFn;
 }
 
 export function useAdminUserActions(options: UseAdminUserActionsOptions) {
-  const { refreshConfig, showAlert } = options;
+  const { refreshConfig } = options;
 
   const runUserMutation = useCallback(
     async <T = Record<string, unknown>>(
       payload: Record<string, unknown>,
       fallbackPrefix = '操作失败',
     ): Promise<T> => {
-      try {
-        const data = await adminPost<T>(
-          '/api/admin/user',
-          payload,
-          fallbackPrefix,
-        );
-        await refreshConfig();
-        return data;
-      } catch (err) {
-        showError(
-          err instanceof Error ? err.message : fallbackPrefix,
-          showAlert,
-        );
-        throw err;
-      }
+      const data = await adminPost<T>(
+        '/api/admin/user',
+        payload,
+        fallbackPrefix,
+      );
+      await refreshConfig();
+      return data;
     },
-    [refreshConfig, showAlert],
+    [refreshConfig],
   );
 
   const userGroupAction = useCallback(
@@ -95,48 +84,29 @@ export function useAdminUserActions(options: UseAdminUserActionsOptions) {
     [runUserMutation],
   );
 
-  const previewInactiveUsers = useCallback(
-    async (inactiveDays: number) => {
-      try {
-        const data = await adminPost<{ count: number; confirmation: string }>(
-          '/api/admin/user',
-          { action: 'previewInactiveUsers', inactiveDays, countOnly: true },
-          '筛选不活跃用户失败',
-        );
-        return data;
-      } catch (err) {
-        showError(
-          err instanceof Error ? err.message : '筛选不活跃用户失败',
-          showAlert,
-        );
-        throw err;
-      }
-    },
-    [showAlert],
-  );
+  const previewInactiveUsers = useCallback(async (inactiveDays: number) => {
+    const data = await adminPost<{ count: number; confirmation: string }>(
+      '/api/admin/user',
+      { action: 'previewInactiveUsers', inactiveDays, countOnly: true },
+      '筛选不活跃用户失败',
+    );
+    return data;
+  }, []);
 
   const deleteInactiveUsers = useCallback(
     async (inactiveDays: number, confirmation: string) => {
-      try {
-        const data = await adminPost<{
-          deletedCount: number;
-          skippedCount: number;
-        }>(
-          '/api/admin/user',
-          { action: 'deleteInactiveUsers', inactiveDays, confirmation },
-          '清理不活跃用户失败',
-        );
-        await refreshConfig();
-        return data;
-      } catch (err) {
-        showError(
-          err instanceof Error ? err.message : '清理不活跃用户失败',
-          showAlert,
-        );
-        throw err;
-      }
+      const data = await adminPost<{
+        deletedCount: number;
+        skippedCount: number;
+      }>(
+        '/api/admin/user',
+        { action: 'deleteInactiveUsers', inactiveDays, confirmation },
+        '清理不活跃用户失败',
+      );
+      await refreshConfig();
+      return data;
     },
-    [refreshConfig, showAlert],
+    [refreshConfig],
   );
 
   const createInviteCodes = useCallback(

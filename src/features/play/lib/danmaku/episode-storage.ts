@@ -85,26 +85,28 @@ export async function persistEpisodeId(
   episodeIndex: number,
   episodeId: number,
   searchTitle?: string,
-): Promise<void> {
+): Promise<boolean> {
   const scopeKey = buildDanmakuScopeKey(source, videoId, episodeIndex);
-  if (!scopeKey) return;
+  if (!scopeKey) return false;
 
-  writeDanmakuEpisodeId(scopeKey, episodeId);
-  if (searchTitle !== undefined)
+  if (!(await saveEpisodeIdToServer(scopeKey, episodeId))) return false;
+  const saved = writeDanmakuEpisodeId(scopeKey, episodeId);
+  const titleSaved =
+    searchTitle === undefined ||
     writeDanmakuEpisodeSearchTitle(scopeKey, searchTitle);
-  await saveEpisodeIdToServer(scopeKey, episodeId);
+  return saved && titleSaved;
 }
 
 export async function clearPersistedEpisodeId(
   source: string,
   videoId: string,
   episodeIndex: number,
-): Promise<void> {
+): Promise<boolean> {
   const scopeKey = buildDanmakuScopeKey(source, videoId, episodeIndex);
-  if (!scopeKey) return;
+  if (!scopeKey) return false;
 
-  writeDanmakuEpisodeId(scopeKey, null);
-  await deleteEpisodeIdFromServer(scopeKey);
+  if (!(await deleteEpisodeIdFromServer(scopeKey))) return false;
+  return writeDanmakuEpisodeId(scopeKey, null);
 }
 
 // 映射按源隔离，换到其他源的同一集时沿用换源前匹配到的弹幕剧集；不沿用的话按新源标题重搜，标题格式不同就匹配不到

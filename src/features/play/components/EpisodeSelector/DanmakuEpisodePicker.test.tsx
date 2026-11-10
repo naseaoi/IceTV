@@ -69,6 +69,8 @@ beforeEach(() => {
   jest.clearAllMocks();
   listHeight = 120;
   (getPersistedEpisodeId as jest.Mock).mockResolvedValue(606);
+  (persistEpisodeId as jest.Mock).mockResolvedValue(true);
+  (clearPersistedEpisodeId as jest.Mock).mockResolvedValue(true);
   global.fetch = jest.fn().mockResolvedValue({
     ok: true,
     json: async () => ({ candidates: [...candidates], hasMore: true }),
@@ -258,4 +260,46 @@ it('优先用该集上次手动匹配的关键词搜索', async () => {
   );
   expect(screen.getByPlaceholderText('搜索番剧名称')).toHaveValue('手动关键词');
   window.localStorage.clear();
+});
+
+it('清除失败保持绑定且不通知成功', async () => {
+  (clearPersistedEpisodeId as jest.Mock).mockResolvedValue(false);
+  const onBindingChange = jest.fn();
+  render(
+    <DanmakuEpisodePicker
+      source='a'
+      videoId='1'
+      episodeIndex={0}
+      searchTitle='番剧'
+      onBindingChange={onBindingChange}
+    />,
+  );
+  const clear = await screen.findByRole('button', { name: '清除绑定' });
+  await act(async () => {
+    fireEvent.click(clear);
+  });
+  expect(screen.getByRole('button', { name: '清除绑定' })).toBeInTheDocument();
+  expect(onBindingChange).not.toHaveBeenCalled();
+});
+
+it('搜索失败展示重试，Enter 在途不重复提交', async () => {
+  let reject!: (error: Error) => void;
+  jest.mocked(global.fetch).mockImplementationOnce(
+    () =>
+      new Promise((_resolve, fail) => {
+        reject = fail;
+      }),
+  );
+  render(<DanmakuEpisodePicker {...props} />);
+  fireEvent.keyDown(screen.getByPlaceholderText('搜索番剧名称'), {
+    key: 'Enter',
+  });
+  fireEvent.keyDown(screen.getByPlaceholderText('搜索番剧名称'), {
+    key: 'Enter',
+  });
+  expect(global.fetch).toHaveBeenCalledTimes(1);
+  await act(async () => reject(new Error('failed')));
+  expect(screen.queryByText('未找到匹配结果')).not.toBeInTheDocument();
+  fireEvent.click(screen.getByRole('button', { name: '重试' }));
+  await waitFor(() => expect(global.fetch).toHaveBeenCalledTimes(2));
 });

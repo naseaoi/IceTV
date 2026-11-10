@@ -5,7 +5,10 @@ export type SocialFakeState = {
   social: Record<string, Row[]>;
   users: Map<string, string>;
   userAccess: Map<string, Row>;
-  videoReviews: Map<string, { username: string; review: VideoReview }>;
+  videoReviews: Map<
+    string,
+    { username: string; review: VideoReview; first_published_at: number | null }
+  >;
 };
 
 export function executeSocial(
@@ -416,8 +419,8 @@ export function querySocial(
             (row) =>
               row.username === f.followee &&
               row.review.is_public &&
-              row.review.updated_at > f.created_at &&
-              row.review.updated_at > Number(params[1]),
+              (row.first_published_at ?? 0) > f.created_at &&
+              (row.first_published_at ?? 0) > Number(params[1]),
           )
           .flatMap((row) => {
             const p = profiles.find((p) => p.username === row.username);
@@ -425,6 +428,7 @@ export function querySocial(
               ? [
                   {
                     ...row.review,
+                    first_published_at: row.first_published_at ?? 0,
                     username: row.username,
                     review_json: JSON.stringify(row.review),
                     profile_id: p.profile_id,
@@ -440,40 +444,50 @@ export function querySocial(
       const target = params.slice(offset, offset + 4);
       rows = rows.filter(
         (row) =>
-          ![row.profile_id, row.title_norm, row.year, row.updated_at].every(
-            (part, index) => part === target[index],
-          ),
+          ![
+            row.profile_id,
+            row.title_norm,
+            row.year,
+            row.first_published_at,
+          ].every((part, index) => part === target[index]),
       );
       offset += 4;
     }
     if (sql.includes(' AND p.profile_id = ?')) {
       const target = params.slice(offset, offset + 4);
       rows = rows.filter((row) =>
-        [row.profile_id, row.title_norm, row.year, row.updated_at].every(
-          (part, index) => part === target[index],
-        ),
+        [
+          row.profile_id,
+          row.title_norm,
+          row.year,
+          row.first_published_at,
+        ].every((part, index) => part === target[index]),
       );
       offset += 4;
     }
-    if (sql.includes('AND (v.updated_at < ?')) {
+    if (sql.includes('AND (v.first_published_at < ?')) {
       const time = Number(params[offset]);
       const target = params.slice(offset + 2, offset + 5).map(String);
       rows = rows.filter(
         (row) =>
-          row.updated_at < time ||
-          (row.updated_at === time &&
+          row.first_published_at < time ||
+          (row.first_published_at === time &&
             compareTuple([row.profile_id, row.title_norm, row.year], target) <
               0),
       );
-    } else if (sql.includes(' AND v.updated_at <= ?'))
-      rows = rows.filter((row) => row.updated_at <= Number(params[offset]));
-    else if (sql.includes(' AND v.updated_at < ?'))
-      rows = rows.filter((row) => row.updated_at < Number(params[offset]));
+    } else if (sql.includes(' AND v.first_published_at <= ?'))
+      rows = rows.filter(
+        (row) => row.first_published_at <= Number(params[offset]),
+      );
+    else if (sql.includes(' AND v.first_published_at < ?'))
+      rows = rows.filter(
+        (row) => row.first_published_at < Number(params[offset]),
+      );
     if (sql.startsWith('SELECT COUNT(*)')) return [{ count: rows.length }];
     return rows
       .sort(
         (a, b) =>
-          b.updated_at - a.updated_at ||
+          b.first_published_at - a.first_published_at ||
           -compareTuple(
             [a.profile_id, a.title_norm, a.year],
             [b.profile_id, b.title_norm, b.year],

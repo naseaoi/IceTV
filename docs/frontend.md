@@ -53,13 +53,19 @@
   - 同一 `key` 的提示原地更新文案并重新计时，同时播放一次回弹，不叠加；默认 `key` 为语气加文案，所以连续重复同一操作只会回弹不会刷屏。轮询类提醒传固定 `key`，需要主动收起时调 `dismissToast(key)`。
   - `notice` 用于需要用户留意的提醒，可带一个 `action`；点击后执行回调并收起提示。
   - 离场动画时长由 CSS 的 `.toast-*` 动画决定，`TOAST_LEAVE_MS` 必须与之一致，否则节点会在动画结束前被移除或残留。
-  - 只在用户主动触发、且界面上没有其他可见变化的操作后提示成功；列表行消失、按钮状态切换等已有直接反馈的操作不再叠加提示。
+  - 只在用户主动触发、且界面上没有其他可见变化的操作后提示成功；列表行消失、按钮状态切换等已有直接反馈的操作不再叠加提示。同一操作可能从多个入口触发时（如标记评分面板、卡片菜单），按入口是否已有可见结果决定是否提示。
+  - 一次失败只由最靠近操作的一层提示：请求封装与通用写入 hook 只抛错，表单与弹窗内的失败就地显示并保留草稿，其他失败用 error 提示。部分成功写明成功与失败数量，界面只移除确认成功的部分。
+- 界面展示的错误文案一律经 `getErrorMessage(err, fallback)`（`src/lib/user-facing-error.ts`），不直接显示任意 `Error.message`：浏览器网络异常、JSON 解析错误会把英文原文透给用户。请求封装（`socialRequest`、后台 `adminGet` / `adminPost` 等）把 API 的 `error` 包成 `DisplayableError`，只有它的文案被原样展示；`isAbortError()` 为真的取消不提示。
+- 读取失败不能表现为空结果：首次加载失败用 `LoadErrorState`（基于 `LoadingStatePanel`，带重试）；加载更多失败保留已加载内容与游标，`usePagedQuery` 的 `retry` 重试失败的那一页；流式搜索中断保留已收到的结果并标为未完成，不写入成功快照。
+- 写操作的进行中状态：
+  - `ConfirmModal` 简单模式下 `onConfirm` 返回 Promise 时，等待期间确认按钮忙碌、取消与 Esc 失效，成功后关闭，失败保持打开；需要保留确认框的调用方提示错误后要继续 reject。返回非 Promise 仍立即关闭。
+  - 卡片菜单的写操作（收藏、追更、标记已读、删除）由 `CardInteractionProvider` 按“对象键 + 操作”持有在途锁。菜单关闭、卡片卸载后锁仍然有效，所以锁不能放在菜单或卡片组件里。
 - 长文本折叠用 `src/components/ExpandableText.tsx`；弹窗外壳 `ModalShell` 支持 `backdropClassName`（遮罩底色）与 `initialFocusRef`（打开后聚焦的元素）。
 - 卡片菜单与标记评分入口见 [评价与收藏](reviews-favorites.md#入口复用)。
 
 ## 后台
 
 - 新增 tab：在 `src/features/admin/lib/admin-tabs.ts` 注册，在 `AdminTabContent.tsx` 挂载；`useAdminTab.ts` 经注册表解析，无需改动。
-- 弹窗复用 `ConfirmModal` / `AlertModal`；表单样式复用 `src/features/admin/lib/buttonStyles.ts`（`buttonStyles` / `inputStyles` / `checkboxStyles`）。
+- 弹窗复用 `ConfirmModal` / `AlertModal`，普通失败不用 `AlertModal`，统一走 `showError(err, fallback)`（`src/features/admin/lib/notifications.ts`，内部为 error 轻提示）。`withLoading()` 只设置状态、不防重，防重复提交靠按钮禁用或调用方的 ref。表单样式复用 `src/features/admin/lib/buttonStyles.ts`（`buttonStyles` / `inputStyles` / `checkboxStyles`）。
 - 设置类内容用 `AdminSettings.tsx` 的 `AdminSettingsGroup` / `AdminSettingRow`，开关用 `AdminStatusSwitch`，列表行操作收进 `MoreMenu`。`AdminSettingRow` 的 `description` 放标题下方的说明，测试结果、致谢链接等短状态用 `labelAddon` 与标题同行。
 - `ADMIN_PANEL_CLASS` 外框不裁切溢出，行内下拉才能伸出；贴边底色的子元素自行加圆角，不要给外框补 `overflow-hidden`。

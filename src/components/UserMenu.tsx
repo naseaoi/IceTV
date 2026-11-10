@@ -21,6 +21,7 @@ import {
 } from 'react';
 import { createPortal } from 'react-dom';
 
+import { AdminAlertBadge } from '@/features/admin/components/AdminAlertBadge';
 import { usePresence } from '@/hooks/usePresence';
 import { snapToDevicePixel } from '@/lib/pixel-snap';
 import { getClientAuthRuntimeConfig } from '@/lib/runtime-config';
@@ -30,9 +31,9 @@ import { useAuthSession } from './AuthProvider';
 import ProfileAvatar from './ProfileAvatar';
 import {
   buildLoginHref,
-  logout,
   ROLE_TEXT,
   useHasUpdate,
+  useLogout,
 } from './user-menu/account';
 import {
   ChangePasswordPanel,
@@ -143,7 +144,7 @@ export const UserMenu: React.FC = () => {
     router.push(buildLoginHref());
   };
 
-  const handleLogout = logout;
+  const { loggingOut, handleLogout } = useLogout();
 
   const navigateTo = (href: string) => {
     setIsOpen(false);
@@ -245,7 +246,14 @@ export const UserMenu: React.FC = () => {
                   style={{ '--stagger-index': index } as CSSProperties}
                   className='flex w-1/3 flex-col items-center gap-1.5 rounded-xl py-2.5 text-xs text-gray-600 transition-colors hover:bg-gray-900/[0.05] hover:text-gray-900 dark:text-gray-400 dark:hover:bg-white/[0.06] dark:hover:text-white'
                 >
-                  <Icon className='h-[18px] w-[18px]' strokeWidth={1.75} />
+                  <span className='relative'>
+                    <Icon className='h-[18px] w-[18px]' strokeWidth={1.75} />
+                    {label === '后台' && (
+                      <span className='absolute -right-3 -top-2'>
+                        <AdminAlertBadge />
+                      </span>
+                    )}
+                  </span>
                   {label}
                 </button>
               ))}
@@ -307,11 +315,12 @@ export const UserMenu: React.FC = () => {
             <button
               type='button'
               role='menuitem'
+              disabled={loggingOut}
               onClick={handleLogout}
               className='inline-flex shrink-0 items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs text-gray-500 transition-colors hover:bg-gray-900/[0.05] hover:text-gray-900 dark:text-gray-400 dark:hover:bg-white/[0.06] dark:hover:text-white'
             >
               <LogOut className='h-3.5 w-3.5' />
-              退出
+              {loggingOut ? '退出中…' : '退出'}
             </button>
           )}
         </div>

@@ -28,12 +28,14 @@ import {
   writeDanmakuOpacity,
 } from '@/lib/local-preferences';
 import { getRuntimeConfig } from '@/lib/runtime-config';
+import { showToast } from '@/lib/toast';
 import {
   normalizeUserDanmakuColor,
   normalizeUserDanmakuMode,
   normalizeUserDanmakuText,
   USER_DANMAKU_MAX_LENGTH,
 } from '@/lib/user-danmaku';
+import { getErrorMessage } from '@/lib/user-facing-error';
 
 const PLUGIN_NAME = 'artplayerPluginDanmuku';
 
@@ -145,16 +147,15 @@ function buildUserDanmakuEmitter(
     try {
       await sendUserDanmaku({
         key: target.key,
+        title: target.title,
+        year: target.year,
         time: Math.max(0, (danmu.time ?? 0) - target.offset),
         text,
         mode: normalizeUserDanmakuMode(danmu.mode),
         color: normalizeUserDanmakuColor(danmu.color),
       });
     } catch (error) {
-      showPlayerNotice(
-        player,
-        error instanceof Error && error.message ? error.message : '发送失败',
-      );
+      showPlayerNotice(player, getErrorMessage(error, '发送失败，请重试'));
       return false;
     }
     // 请求期间已切到别的集时只保存不回显
@@ -373,9 +374,15 @@ export function bindDanmakuSettingPersistence(
 
   on('artplayerPluginDanmuku:config', (option) => {
     if (typeof option?.opacity === 'number')
-      writeDanmakuOpacity(option.opacity);
+      if (!writeDanmakuOpacity(option.opacity))
+        showToast('设置未能保存，刷新后会恢复', 'error', {
+          key: 'local-preference-save',
+        });
     if (typeof option?.fontSize === 'number') {
-      writeDanmakuFontSize(option.fontSize);
+      if (!writeDanmakuFontSize(option.fontSize))
+        showToast('设置未能保存，刷新后会恢复', 'error', {
+          key: 'local-preference-save',
+        });
     }
   });
 

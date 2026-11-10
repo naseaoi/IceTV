@@ -19,17 +19,15 @@ export async function POST(request: NextRequest) {
 
     if (!isLiveEntryEnabledInConfig(config)) {
       return NextResponse.json({
-        success: true,
-        message: '直播未开启，已跳过刷新',
+        refreshed: 0,
+        failed: [],
+        liveDisabled: true,
       });
     }
 
-    await refreshLiveChannelSources(config.LiveConfig || []);
+    const result = await refreshLiveChannelSources(config.LiveConfig || []);
 
-    return NextResponse.json({
-      success: true,
-      message: '直播源刷新成功',
-    });
+    return NextResponse.json(result);
   } catch (error) {
     const conflict = configConflictResponse(error);
     if (conflict) return conflict;

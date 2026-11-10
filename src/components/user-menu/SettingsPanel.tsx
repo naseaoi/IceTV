@@ -55,6 +55,7 @@ import {
   resetAllLocalPreferenceToggles,
 } from '@/lib/local-preference-toggles';
 import { showToast } from '@/lib/toast';
+import { getErrorMessage } from '@/lib/user-facing-error';
 
 interface SettingsPanelProps {
   onClose: () => void;
@@ -157,8 +158,16 @@ function SettingsPanelContent({ onClose }: SettingsPanelProps) {
     [isAuthenticated],
   );
 
+  const checkSaved = (saved: boolean) => {
+    if (!saved)
+      showToast('设置未能保存，刷新后会恢复', 'error', {
+        key: 'local-preference-save',
+      });
+    return saved;
+  };
+
   const showProxyToast = () => {
-    showToast('更换成功，刷新页面后生效', 'success');
+    showToast('刷新页面后生效', 'info');
   };
 
   const showLoginRequiredToast = () => {
@@ -168,9 +177,9 @@ function SettingsPanelContent({ onClose }: SettingsPanelProps) {
   const handleDoubanProxyUrlChange = (value: string) => {
     setDoubanProxyUrl(value);
     if (normalizeCustomProxyUrl(value)) {
-      writeDoubanProxyUrl(value);
+      checkSaved(writeDoubanProxyUrl(value));
       if (doubanDataSource === 'custom') {
-        writeDoubanProxyType('custom');
+        checkSaved(writeDoubanProxyType('custom'));
       }
     } else {
       resetDoubanProxyUrl();
@@ -196,7 +205,7 @@ function SettingsPanelContent({ onClose }: SettingsPanelProps) {
     const definition = localPreferenceToggleDefinitions.find(
       (item) => item.id === id,
     );
-    definition?.writeValue(value);
+    if (definition) checkSaved(definition.writeValue(value));
   };
 
   const handleDoubanDataSourceChange = (value: string) => {
@@ -217,7 +226,7 @@ function SettingsPanelContent({ onClose }: SettingsPanelProps) {
         return;
       }
     }
-    writeDoubanProxyType(nextSource);
+    if (!checkSaved(writeDoubanProxyType(nextSource))) return;
     showProxyToast();
   };
 
@@ -239,7 +248,7 @@ function SettingsPanelContent({ onClose }: SettingsPanelProps) {
         return;
       }
     }
-    writeDoubanImageProxyType(nextSource);
+    if (!checkSaved(writeDoubanImageProxyType(nextSource))) return;
     writeDoubanImageProxyTypeCookie(nextSource);
     showProxyToast();
   };
@@ -247,9 +256,9 @@ function SettingsPanelContent({ onClose }: SettingsPanelProps) {
   const handleDoubanImageProxyUrlChange = (value: string) => {
     setDoubanImageProxyUrl(value);
     if (normalizeCustomProxyUrl(value)) {
-      writeDoubanImageProxyUrl(value);
+      checkSaved(writeDoubanImageProxyUrl(value));
       if (doubanImageProxyType === 'custom') {
-        writeDoubanImageProxyType('custom');
+        checkSaved(writeDoubanImageProxyType('custom'));
         clearDoubanImageProxyTypeCookie();
       }
     } else {
@@ -282,9 +291,8 @@ function SettingsPanelContent({ onClose }: SettingsPanelProps) {
       setCustomProxyErrors((prev) => ({ ...prev, [kind]: '' }));
       showToast(`测试通过，${CUSTOM_PROXY_LABELS[kind]}可用`, 'success');
     } catch (error) {
-      const message = error instanceof Error ? error.message : '代理测试失败';
+      const message = getErrorMessage(error, '代理测试失败，请稍后重试');
       setCustomProxyErrors((prev) => ({ ...prev, [kind]: message }));
-      showToast(`测试失败，${message}`, 'error');
     } finally {
       setTestingProxy(null);
     }

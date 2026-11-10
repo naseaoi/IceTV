@@ -214,7 +214,16 @@ export async function handleUserDanmaku(request: NextRequest) {
       10,
       429,
     );
+    if (
+      (input.title !== undefined &&
+        (typeof input.title !== 'string' || input.title.length > 191)) ||
+      (input.year !== undefined &&
+        (typeof input.year !== 'string' || input.year.length > 16))
+    )
+      throw new InputError('作品信息无效');
     const row: StoredUserDanmaku = {
+      title: typeof input.title === 'string' ? input.title.trim() : '',
+      year: typeof input.year === 'string' ? input.year.trim() : '',
       id: randomUUID(),
       episodeKey: input.key,
       username,

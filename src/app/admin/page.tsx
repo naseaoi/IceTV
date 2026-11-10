@@ -6,7 +6,6 @@ import { Suspense, useEffect, useState } from 'react';
 import AuthenticatedRoute from '@/components/AuthenticatedRoute';
 import { useAuthSession } from '@/components/AuthProvider';
 import LoadingStatePanel from '@/components/LoadingStatePanel';
-import AlertModal from '@/components/modals/AlertModal';
 import ConfirmModal from '@/components/modals/ConfirmModal';
 import { PAGE_CONTAINER_CLASS } from '@/components/page-container';
 import PageLayout from '@/components/PageLayout';
@@ -32,7 +31,6 @@ import {
 } from '@/features/admin/lib/admin-tabs';
 import { showError } from '@/features/admin/lib/notifications';
 import { isOwner } from '@/features/admin/lib/permissions';
-import { useAlertModal } from '@/hooks/useAlertModal';
 import { scrollPageTo } from '@/hooks/usePageScroll';
 import { AdminConfig } from '@/types/admin';
 
@@ -122,7 +120,6 @@ function getAdminErrorView(error: string) {
 
 function AdminPageClient() {
   const { session } = useAuthSession();
-  const { alertModal, showAlert, hideAlert } = useAlertModal();
   const { isLoading, withLoading } = useLoadingState();
   const [config, setConfig] = useState<AdminConfig | null>(null);
   const [loading, setLoading] = useState(true);
@@ -225,7 +222,6 @@ function AdminPageClient() {
   }, [hasUnsavedChanges]);
 
   const { fetchConfig, resetConfig } = useAdminPageActions({
-    showAlert,
     setConfig,
     setRole,
     setError,
@@ -295,8 +291,7 @@ function AdminPageClient() {
         await fetchConfig();
         setShowResetConfigModal(false);
       } catch (err) {
-        showError(err instanceof Error ? err.message : '重置失败', showAlert);
-        throw err;
+        showError(err, '重置失败');
       }
     });
   };
@@ -360,6 +355,7 @@ function AdminPageClient() {
               type='button'
               onClick={() => setShowResetConfigModal(true)}
               aria-label='重置配置'
+              disabled={isLoading('resetConfig')}
               className='flex h-9 items-center gap-1.5 rounded-lg px-3 text-sm font-medium text-red-600 ring-1 ring-inset ring-red-200 transition-colors hover:bg-red-50 dark:text-red-400 dark:ring-red-500/30 dark:hover:bg-red-500/10'
             >
               <RotateCcw aria-hidden='true' className='h-4 w-4' />
@@ -377,16 +373,6 @@ function AdminPageClient() {
         />
       )}
 
-      <AlertModal
-        isOpen={alertModal.isOpen}
-        onClose={hideAlert}
-        type={alertModal.type}
-        title={alertModal.title}
-        message={alertModal.message}
-        timer={alertModal.timer}
-        showConfirm={alertModal.showConfirm}
-      />
-
       <ConfirmModal
         isOpen={pendingTab !== null}
         title='放弃未保存的改动？'
@@ -401,7 +387,7 @@ function AdminPageClient() {
       <ConfirmModal
         isOpen={showResetConfigModal}
         title='确认重置配置'
-        message='用户封禁与管理员设置、自定义视频源将被清除，站点配置恢复默认值。'
+        message='将从配置文件重建站点配置，用户权限与封禁不受影响。'
         onClose={() => setShowResetConfigModal(false)}
         onConfirm={handleConfirmResetConfig}
         confirmDisabled={isLoading('resetConfig')}

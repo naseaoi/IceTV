@@ -4,6 +4,7 @@ import { parseFollowReviewMessageId } from '@/lib/follow-review-identity';
 import { parseReplyMessageId } from '@/lib/review-reply-storage';
 import { parseSocialNotificationId } from '@/lib/social-notification-identity';
 import type { UserMessageState, UserMessageStateUpdate } from '@/lib/types';
+import { parseUserNoticeId } from '@/lib/user-notice';
 
 export function mergeUserMessageState(
   current: UserMessageState,
@@ -98,6 +99,7 @@ export function mergeUserMessageState(
     next.reviewReplyReadIds = replyIds;
   }
   for (const [field, timestamp] of [
+    ['userNotice', (id: string) => parseUserNoticeId(id)?.createdAt ?? 0],
     [
       'newFollower',
       (id: string) => parseSocialNotificationId('new-follower', id)?.[3] ?? 0,

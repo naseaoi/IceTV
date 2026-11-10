@@ -377,7 +377,7 @@ async function runAdminUserAction(
           );
         }
 
-        await db.changePassword(targetUsername!, targetPassword);
+        await db.changePassword(targetUsername!, targetPassword, true);
         return actionResponse({ ok: true });
       }
       case 'deleteUser': {

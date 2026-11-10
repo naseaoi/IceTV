@@ -29,6 +29,43 @@ function legacyConfig(): AdminConfig {
   };
 }
 
+async function assertSubscriptionFailureState(
+  storage: Pick<
+    LocalSqliteStorage,
+    'setAdminConfig' | 'getConfigSubscription' | 'compareAndSetAdminConfig'
+  >,
+) {
+  const config = stripConfigState(legacyConfig());
+  await storage.setAdminConfig(config);
+  const expected = await storage.getConfigSubscription();
+  const failed = {
+    ...expected,
+    ConfigSubscribtion: {
+      ...expected.ConfigSubscribtion,
+      FailureSince: '2026-11-10T00:00:00Z',
+    },
+  };
+  expect(
+    await storage.compareAndSetAdminConfig(config, config, {
+      subscription: { expected, next: failed },
+    }),
+  ).toBe(true);
+  expect(await storage.getConfigSubscription()).toEqual(failed);
+  expect(
+    await storage.compareAndSetAdminConfig(config, config, {
+      subscription: { expected, next: expected },
+    }),
+  ).toBe(false);
+  expect(
+    await storage.compareAndSetAdminConfig(config, config, {
+      subscription: { expected: failed, next: expected },
+    }),
+  ).toBe(true);
+  expect(
+    (await storage.getConfigSubscription()).ConfigSubscribtion.FailureSince,
+  ).toBeUndefined();
+}
+
 describe('config state storage', () => {
   let storage: LocalSqliteStorage;
   let raw: Database.Database;
@@ -119,6 +156,10 @@ describe('config state storage', () => {
     expect(await storage.getConfigSubscription()).toEqual(next);
   });
 
+  it('round trips failure state and fences stale successful refreshes', async () => {
+    await assertSubscriptionFailureState(storage);
+  });
+
   it('runtime self-check strips compatibility fields', () => {
     const config = configSelfCheck(legacyConfig());
     expect(config.ConfigFile).toBeUndefined();
@@ -138,6 +179,11 @@ mysqlSuite('MySQL config state storage (real SQL)', () => {
     await storage.getAdminConfig();
   });
   afterAll(async () => pool.end());
+
+  it('round trips failure state and fences stale successful refreshes', async () => {
+    await resetMysqlTestData(storage);
+    await assertSubscriptionFailureState(storage);
+  });
 
   it('migrates idempotently and fences concurrent subscription/config writes', async () => {
     const { MysqlConfigStateStore } =

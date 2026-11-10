@@ -1,4 +1,7 @@
-import { buildRefreshedPlayRecord } from '@/lib/cron/metadata-refresh';
+import {
+  buildRefreshedFavorite,
+  buildRefreshedPlayRecord,
+} from '@/lib/cron/metadata-refresh';
 import { hasPlayRecordUpdate } from '@/lib/play-records';
 import type { PlayRecord, SearchResult } from '@/lib/types';
 
@@ -43,6 +46,43 @@ function createDetail(overrides: Partial<SearchResult> = {}): SearchResult {
     ...overrides,
   };
 }
+
+describe('buildRefreshedFavorite', () => {
+  it('缺基线旧收藏从刷新前集数起算，刷新失败或不变不制造事件', () => {
+    const old = {
+      title: '旧收藏',
+      source_name: '源',
+      year: '2026',
+      cover: '',
+      total_episodes: 22,
+      save_time: 1,
+    };
+    expect(buildRefreshedFavorite(old, null, 100)).toMatchObject({
+      update_baseline_episodes: 22,
+      total_episodes: 22,
+    });
+    expect(
+      buildRefreshedFavorite(old, null, 100).update_detected_at,
+    ).toBeUndefined();
+    const fresh = buildRefreshedFavorite(old, createDetail(), 200);
+    expect(fresh).toMatchObject({
+      update_baseline_episodes: 22,
+      total_episodes: 26,
+      update_detected_at: 200,
+    });
+    expect(buildRefreshedFavorite(fresh, createDetail(), 300)).toMatchObject({
+      update_baseline_episodes: 22,
+      update_detected_at: 200,
+    });
+    expect(
+      buildRefreshedFavorite(fresh, createDetail({ episodes: ['one'] }), 400),
+    ).toMatchObject({
+      update_baseline_episodes: 22,
+      total_episodes: 1,
+      update_detected_at: 200,
+    });
+  });
+});
 
 describe('buildRefreshedPlayRecord', () => {
   it('状态刷新独立于集数变化且保留手动追更', () => {

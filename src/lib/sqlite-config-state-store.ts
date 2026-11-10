@@ -29,7 +29,7 @@ export class SqliteConfigStateStore {
       .prepare(
         ignore
           ? SUBSCRIPTION_INSERT.replace('INSERT INTO', 'INSERT OR IGNORE INTO')
-          : `${SUBSCRIPTION_INSERT} ON CONFLICT(id) DO UPDATE SET url = excluded.url, auto_update = excluded.auto_update, last_check = excluded.last_check, config_file = excluded.config_file`,
+          : `${SUBSCRIPTION_INSERT} ON CONFLICT(id) DO UPDATE SET url = excluded.url, auto_update = excluded.auto_update, last_check = excluded.last_check, config_file = excluded.config_file, failure_since = excluded.failure_since`,
       )
       .run(...subscriptionValues(value));
   }
@@ -66,6 +66,14 @@ export class SqliteConfigStateStore {
   }
 
   migrate() {
+    const columns = this.db
+      .prepare('PRAGMA table_info(config_subscription)')
+      .all() as { name: string }[];
+    if (!columns.some((column) => column.name === 'failure_since')) {
+      this.db.exec(
+        "ALTER TABLE config_subscription ADD COLUMN failure_since TEXT NOT NULL DEFAULT ''",
+      );
+    }
     this.db
       .transaction(() => {
         const row = this.db

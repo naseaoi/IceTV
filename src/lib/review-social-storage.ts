@@ -850,8 +850,8 @@ export class ReviewSocialStorage extends ReviewReplyStorage {
       .filter((id) => id !== null);
     return {
       from: `FROM user_follows f JOIN video_reviews v ON v.username = f.followee JOIN user_profiles p ON p.username = v.username
-        WHERE f.follower = ? AND v.is_public = 1 AND v.updated_at > f.created_at AND v.updated_at > ?
-        ${ids.map(() => 'AND NOT (p.profile_id = ? AND v.title_norm = ? AND v.year = ? AND v.updated_at = ?)').join(' ')}`,
+        WHERE f.follower = ? AND v.is_public = 1 AND v.first_published_at > f.created_at AND v.first_published_at > ?
+        ${ids.map(() => 'AND NOT (p.profile_id = ? AND v.title_norm = ? AND v.year = ? AND v.first_published_at = ?)').join(' ')}`,
       params: [
         normalizeUsername(username),
         Math.max(readAt, now - 30 * 86400000),
@@ -897,7 +897,7 @@ export class ReviewSocialStorage extends ReviewReplyStorage {
       const identity = parseFollowReviewMessageId(query.id);
       if (!identity) return [];
       filter +=
-        ' AND p.profile_id = ? AND v.title_norm = ? AND v.year = ? AND v.updated_at = ?';
+        ' AND p.profile_id = ? AND v.title_norm = ? AND v.year = ? AND v.first_published_at = ?';
       params.push(...identity);
     }
     if (query.before) {
@@ -905,22 +905,26 @@ export class ReviewSocialStorage extends ReviewReplyStorage {
       const identity = parseFollowReviewSortKey(key);
       if (identity) {
         filter +=
-          ' AND (v.updated_at < ? OR (v.updated_at = ? AND (p.profile_id, v.title_norm, v.year) < (?, ?, ?)))';
+          ' AND (v.first_published_at < ? OR (v.first_published_at = ? AND (p.profile_id, v.title_norm, v.year) < (?, ?, ?)))';
         params.push(createdAt, createdAt, ...identity);
       } else {
         filter +=
           key > 'follow-review:'
-            ? ' AND v.updated_at <= ?'
-            : ' AND v.updated_at < ?';
+            ? ' AND v.first_published_at <= ?'
+            : ' AND v.first_published_at < ?';
         params.push(createdAt);
       }
     }
     const limit = Math.max(1, Math.min(201, Math.floor(query.limit ?? 30)));
     const rows = await this.sql.rows<
-      VideoReviewRow & { profile_id: string; nickname: string | null }
+      VideoReviewRow & {
+        profile_id: string;
+        nickname: string | null;
+        first_published_at: number;
+      }
     >(
-      `SELECT v.username, v.review_json, p.profile_id, p.nickname, p.avatar_seed ${from}${filter}
-       ORDER BY v.updated_at DESC, p.profile_id DESC, v.title_norm DESC, v.year DESC LIMIT ?`,
+      `SELECT v.username, v.review_json, v.first_published_at, p.profile_id, p.nickname, p.avatar_seed ${from}${filter}
+       ORDER BY v.first_published_at DESC, p.profile_id DESC, v.title_norm DESC, v.year DESC LIMIT ?`,
       [...params, limit],
     );
     return rows.map((row) => {
@@ -930,7 +934,7 @@ export class ReviewSocialStorage extends ReviewReplyStorage {
           row.profile_id,
           r.title_norm,
           r.year,
-          r.updated_at,
+          Number(row.first_published_at),
         ),
         type: 'follow-review' as const,
         review: {
@@ -947,7 +951,7 @@ export class ReviewSocialStorage extends ReviewReplyStorage {
         year: r.year,
         cover: r.cover,
         rating: r.rating,
-        createdAt: r.updated_at,
+        createdAt: Number(row.first_published_at),
       };
     });
   }

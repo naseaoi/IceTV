@@ -7,6 +7,7 @@ import {
   clearStoredDanmakuEnabled,
   readStoredDanmakuEnabled,
 } from '@/lib/local-preferences';
+import { showToast } from '@/lib/toast';
 
 export type InitialDanmakuEnabled = boolean | null;
 
@@ -56,7 +57,9 @@ export function useDanmakuPreference(
           clearStoredDanmakuEnabled();
         }
         if (!saved) {
-          console.warn('弹幕开关同步失败');
+          showToast('弹幕开关未能同步到账号', 'error', {
+            key: 'danmaku-preference-sync',
+          });
         }
       });
   }, []);

@@ -62,6 +62,7 @@ export function useFavoriteLibrary(
     loadingMore,
     error,
     refresh,
+    retry,
     loadMore,
   } = usePagedQuery({
     scopeKey: profileId,
@@ -135,7 +136,7 @@ export function useFavoriteLibrary(
     refreshing: refreshing || (page !== null && queryPending),
     loadingMore,
     error: error ? '收藏加载失败，请重试' : null,
-    retry: refresh,
+    retry,
     skeletonCount,
     clearFavorites,
     counts: page?.counts ?? EMPTY_FAVORITE_COUNTS,

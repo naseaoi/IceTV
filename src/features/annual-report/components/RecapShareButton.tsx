@@ -105,6 +105,7 @@ function ShareSheet({ year, onClose }: { year: number; onClose: () => void }) {
           label='公开到个人主页'
           checked={published}
           pending={state === null}
+          disabled={saving}
           onChange={(next) => {
             if (!saving) void save(next, hideRhythm);
           }}
@@ -113,6 +114,7 @@ function ShareSheet({ year, onClose }: { year: number; onClose: () => void }) {
           label='隐藏作息时间'
           checked={hideRhythm}
           pending={state === null}
+          disabled={saving}
           onChange={(next) => {
             if (saving) return;
             if (published) void save(true, next);

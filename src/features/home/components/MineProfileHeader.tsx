@@ -201,7 +201,12 @@ export function MineProfileHeader({ actions }: { actions?: ReactNode }) {
         type={list}
         onClose={() => setList(null)}
       />
-      {editing && <ProfilePanel onClose={() => setEditing(false)} />}
+      {editing && (
+        <ProfilePanel
+          showSuccessToast={false}
+          onClose={() => setEditing(false)}
+        />
+      )}
     </section>
   );
 }

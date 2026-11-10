@@ -46,6 +46,38 @@ describe('favorites route', () => {
     mockSaveFavorite.mockResolvedValue(undefined);
   });
 
+  it.each([-1, 1.5, '12', null])('拒绝非法总集数 %j', async (total) => {
+    const response = await POST(
+      createJsonRequest({
+        key: 'source+1',
+        favorite: { title: '剧集', source_name: '源', total_episodes: total },
+      }),
+    );
+    expect(response.status).toBe(400);
+    expect(mockSaveFavorite).not.toHaveBeenCalled();
+  });
+
+  it('客户端通知基线与事件时间交由服务端决定', async () => {
+    const response = await POST(
+      createJsonRequest({
+        key: 'source+1',
+        favorite: {
+          title: '剧集',
+          source_name: '源',
+          total_episodes: 12,
+          update_baseline_episodes: 0,
+          update_detected_at: 999,
+        },
+      }),
+    );
+    expect(response.status).toBe(200);
+    expect(mockSaveFavorite.mock.calls[0][3]).toMatchObject({
+      total_episodes: 12,
+      update_baseline_episodes: undefined,
+      update_detected_at: undefined,
+    });
+  });
+
   it('保存收藏时由服务端记录元数据检查时间', async () => {
     const nowSpy = jest.spyOn(Date, 'now').mockReturnValue(1234);
 

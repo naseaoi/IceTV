@@ -20,6 +20,7 @@ import {
   selectPlayRecordPage,
 } from '@/lib/play-records';
 import type { PlayRecord, PlayRecordPage } from '@/lib/types';
+import { getErrorMessage, isAbortError } from '@/lib/user-facing-error';
 
 export type ContinueWatchingItem = PlayRecord & { key: string };
 
@@ -68,6 +69,10 @@ export function useContinueWatchingItems({
   const [skeletonCount, setSkeletonCount] = useState(
     Math.min(initialSkeletonCount, CONTINUE_WATCHING_PAGE_SIZE),
   );
+  const [error, setError] = useState<string | null>(null);
+  const [retryCount, setRetryCount] = useState(0);
+  const failedMore = useRef(false);
+  const morePending = useRef(false);
   const itemsRef = useRef(items);
   const generationRef = useRef(0);
   const hasLoadedRef = useRef(false);
@@ -117,6 +122,11 @@ export function useContinueWatchingItems({
 
   useEffect(() => {
     const generation = ++generationRef.current;
+    setError(null);
+    setLoading(!hasLoadedRef.current);
+    setLoadingMore(false);
+    morePending.current = false;
+    failedMore.current = false;
     const cachedRecords = getCachedPlayRecordsSnapshot();
     if (cachedRecords) {
       applySnapshot(cachedRecords, filter, CONTINUE_WATCHING_PAGE_SIZE);
@@ -130,7 +140,8 @@ export function useContinueWatchingItems({
         if (generation !== generationRef.current) return;
         applyPage(page, filter);
       } catch (error) {
-        console.error('获取继续观看记录失败:', error);
+        if (generation === generationRef.current && !isAbortError(error))
+          setError(getErrorMessage(error, '加载失败'));
       } finally {
         if (generation === generationRef.current) {
           setLoading(false);
@@ -169,11 +180,12 @@ export function useContinueWatchingItems({
     );
 
     return () => {
+      generationRef.current += 1;
       unsubscribe();
       unsubscribeRecent();
       unsubscribeStates();
     };
-  }, [filter, applyPage, applySnapshot]);
+  }, [filter, applyPage, applySnapshot, retryCount]);
 
   // 计数 cookie 记的是全部记录的首屏条数，筛选结果不写入
   useEffect(() => {
@@ -184,7 +196,9 @@ export function useContinueWatchingItems({
   }, [filter, hasLoaded, items.length, loading, refreshing]);
 
   const loadMore = useCallback(async () => {
-    if (!nextCursor || loadingMore) return;
+    if (!nextCursor || morePending.current || refreshing) return;
+    morePending.current = true;
+    setError(null);
 
     const generation = generationRef.current;
     setLoadingMore(true);
@@ -206,11 +220,17 @@ export function useContinueWatchingItems({
       setNextCursor(page.nextCursor);
       setCounts((current) => ({ ...current, [filter]: page.total }));
     } catch (error) {
-      console.error('加载更多继续观看记录失败:', error);
+      if (generation === generationRef.current && !isAbortError(error)) {
+        failedMore.current = true;
+        setError(getErrorMessage(error, '加载失败'));
+      }
     } finally {
-      setLoadingMore(false);
+      if (generation === generationRef.current) {
+        morePending.current = false;
+        setLoadingMore(false);
+      }
     }
-  }, [filter, loadingMore, nextCursor]);
+  }, [filter, refreshing, nextCursor]);
 
   // 有本地快照时删除事件已经同步过列表与计数，这里只处理剩下的条目
   const forgetItems = useCallback((keys: Set<string>) => {
@@ -262,6 +282,11 @@ export function useContinueWatchingItems({
   );
 
   return {
+    error,
+    retry: () =>
+      failedMore.current
+        ? void loadMore()
+        : setRetryCount((count) => count + 1),
     items,
     counts,
     loading,

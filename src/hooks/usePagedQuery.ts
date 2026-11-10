@@ -2,6 +2,8 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 
+import { isAbortError } from '@/lib/user-facing-error';
+
 type PagedData = { items: unknown[]; nextCursor: string | null };
 
 interface PagedQueryOptions<TPage extends PagedData> {
@@ -28,6 +30,7 @@ export function usePagedQuery<TPage extends PagedData>({
   const [pending, setPending] = useState(enabled);
   const [loadingMore, setLoadingMore] = useState(false);
   const [error, setError] = useState<Error | null>(null);
+  const failedCursor = useRef<string | undefined>(undefined);
   const dataRef = useRef<TPage | null>(null);
   const scope = useRef(scopeKey);
   const mounted = useRef(false);
@@ -96,7 +99,13 @@ export function usePagedQuery<TPage extends PagedData>({
           });
         }
       } catch (error) {
-        if (generation.current !== current || controller.signal.aborted) return;
+        if (
+          generation.current !== current ||
+          controller.signal.aborted ||
+          isAbortError(error)
+        )
+          return;
+        failedCursor.current = cursor;
         if (firstPage) snapshots.current.delete(queryKey);
         setError(
           error instanceof Error ? error : new Error('Page request failed'),
@@ -159,6 +168,7 @@ export function usePagedQuery<TPage extends PagedData>({
     error,
     loadMore,
     refresh,
+    retry: () => void requestPage(failedCursor.current),
     updateData,
   };
 }

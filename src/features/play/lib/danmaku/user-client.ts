@@ -3,6 +3,7 @@ import type {
   UserDanmakuListResponse,
   UserDanmakuSendInput,
 } from '@/lib/user-danmaku';
+import { DisplayableError, getHttpErrorMessage } from '@/lib/user-facing-error';
 
 const ENDPOINT = '/api/danmaku/user';
 // 发送成功后派发，detail 为归属键，供选集面板刷新“我发送的弹幕”
@@ -12,7 +13,7 @@ async function readError(response: Response, fallback: string) {
   const payload = await response.json().catch(() => null);
   return typeof payload?.error === 'string' && payload.error
     ? payload.error
-    : fallback;
+    : getHttpErrorMessage(response.status, fallback);
 }
 
 export async function fetchUserDanmaku(
@@ -21,7 +22,10 @@ export async function fetchUserDanmaku(
   const response = await fetch(`${ENDPOINT}?key=${encodeURIComponent(key)}`, {
     cache: 'no-store',
   });
-  if (!response.ok) throw new Error(`用户弹幕请求失败: ${response.status}`);
+  if (!response.ok)
+    throw new DisplayableError(
+      await readError(response, '弹幕加载失败，请重试'),
+    );
   const payload = (await response.json()) as Partial<UserDanmakuListResponse>;
   return {
     items: Array.isArray(payload.items) ? payload.items : [],
@@ -37,7 +41,8 @@ export async function sendUserDanmaku(
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(input),
   });
-  if (!response.ok) throw new Error(await readError(response, '发送失败'));
+  if (!response.ok)
+    throw new DisplayableError(await readError(response, '发送失败'));
   const payload = (await response.json()) as { item: UserDanmakuItem };
   window.dispatchEvent(
     new CustomEvent(USER_DANMAKU_SENT_EVENT, { detail: input.key }),
@@ -49,5 +54,6 @@ export async function deleteUserDanmaku(id: string): Promise<void> {
   const response = await fetch(`${ENDPOINT}?id=${encodeURIComponent(id)}`, {
     method: 'DELETE',
   });
-  if (!response.ok) throw new Error(await readError(response, '删除失败'));
+  if (!response.ok)
+    throw new DisplayableError(await readError(response, '删除失败'));
 }

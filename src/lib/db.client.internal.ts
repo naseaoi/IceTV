@@ -11,9 +11,9 @@ import {
   AUTH_SESSION_LOST_EVENT,
   getAuthInfoFromBrowserCookie,
 } from './auth.client';
-import type { CacheUpdateEvent, Favorite, PlayRecord } from './db.client';
-import { cacheManager } from './db.client.cache';
+import type { CacheUpdateEvent } from './db.client';
 import { showToast } from './toast';
+import { getErrorMessage, isAbortError } from './user-facing-error';
 
 export { cacheManager } from './db.client.cache';
 
@@ -355,44 +355,6 @@ export async function handleDatabaseOperationFailure(
   if (message) {
     triggerGlobalError(message);
   }
-
-  if (!shouldRefreshDatabaseCache(dataType, error)) {
-    return;
-  }
-
-  try {
-    let freshData: unknown;
-    let eventName: string;
-
-    switch (dataType) {
-      case 'playRecords':
-        freshData =
-          await fetchFromApi<Record<string, PlayRecord>>(`/api/playrecords`);
-        cacheManager.cachePlayRecords(freshData as Record<string, PlayRecord>);
-        eventName = 'playRecordsUpdated';
-        break;
-      case 'favorites':
-        freshData =
-          await fetchFromApi<Record<string, Favorite>>(`/api/favorites`);
-        cacheManager.cacheFavorites(freshData as Record<string, Favorite>);
-        eventName = 'favoritesUpdated';
-        break;
-      case 'searchHistory':
-        freshData = await fetchFromApi<string[]>(`/api/searchhistory`);
-        cacheManager.cacheSearchHistory(freshData as string[]);
-        eventName = 'searchHistoryUpdated';
-        break;
-    }
-
-    window.dispatchEvent(
-      new CustomEvent(eventName, {
-        detail: freshData,
-      }),
-    );
-  } catch (refreshErr) {
-    console.error(`刷新${dataType}缓存失败:`, refreshErr);
-    triggerGlobalError(`刷新${dataType}缓存失败`);
-  }
 }
 
 function getDatabaseOperationFailureMessage(
@@ -406,6 +368,7 @@ function getDatabaseOperationFailureMessage(
   ) {
     return null;
   }
+  if (isAbortError(error)) return null;
   if (failureMessage) return failureMessage;
 
   if (isClientRequestError(error)) {
@@ -436,36 +399,7 @@ function getDatabaseOperationFailureMessage(
     }
   }
 
-  return '数据库操作失败';
-}
-
-function shouldRefreshDatabaseCache(
-  dataType: 'playRecords' | 'favorites' | 'searchHistory',
-  error: unknown,
-): boolean {
-  if (isClientRequestError(error)) {
-    if (
-      error.kind === 'session_lost' ||
-      error.kind === 'auth_rejected' ||
-      error.kind === 'network' ||
-      error.kind === 'request_aborted'
-    ) {
-      return false;
-    }
-
-    if (error.kind === 'http' && error.status) {
-      if (isTransientHttpStatus(error.status)) {
-        return false;
-      }
-
-      // 播放进度保存时保留乐观缓存，避免被旧服务端数据回滚。
-      if (dataType === 'playRecords') {
-        return false;
-      }
-    }
-  }
-
-  return true;
+  return getErrorMessage(error, '操作未能完成，请稍后重试');
 }
 
 // ================================================================
@@ -488,17 +422,8 @@ export function createCacheFirstReader<T>(options: {
   fetchApi: () => Promise<T>;
   eventName: CacheUpdateEvent;
   fallback: T;
-  /** 可选：自定义后台同步失败时是否调用 triggerGlobalError，默认 true */
-  bgSyncErrorNotify?: boolean;
 }): () => Promise<T> {
-  const {
-    getCached,
-    setCached,
-    fetchApi,
-    eventName,
-    fallback,
-    bgSyncErrorNotify = true,
-  } = options;
+  const { getCached, setCached, fetchApi, eventName, fallback } = options;
 
   return async (): Promise<T> => {
     if (typeof window === 'undefined') {
@@ -517,7 +442,10 @@ export function createCacheFirstReader<T>(options: {
       // 后台异步同步
       fetchApi()
         .then((freshData) => {
-          if (JSON.stringify(cachedData) !== JSON.stringify(freshData)) {
+          if (
+            JSON.stringify(getCached()) === JSON.stringify(cachedData) &&
+            JSON.stringify(cachedData) !== JSON.stringify(freshData)
+          ) {
             setCached(freshData);
             window.dispatchEvent(
               new CustomEvent(eventName, { detail: freshData }),
@@ -526,9 +454,6 @@ export function createCacheFirstReader<T>(options: {
         })
         .catch((err) => {
           console.warn(`后台同步${eventName}失败:`, err);
-          if (bgSyncErrorNotify) {
-            triggerGlobalError(`后台同步${eventName}失败`);
-          }
         });
 
       return cachedData;
@@ -540,7 +465,15 @@ export function createCacheFirstReader<T>(options: {
       return freshData;
     } catch (err) {
       console.error(`获取${eventName}失败:`, err);
-      triggerGlobalError(`获取${eventName}失败`);
+      if (
+        !isAbortError(err) &&
+        !(
+          isClientRequestError(err) &&
+          ['session_lost', 'auth_rejected'].includes(err.kind)
+        )
+      ) {
+        triggerGlobalError(getErrorMessage(err, '加载失败，请稍后重试'));
+      }
       return fallback;
     }
   };
@@ -553,7 +486,7 @@ export function createCacheFirstReader<T>(options: {
  * 1. 未认证 → 抛出错误，阻止写操作
  * 2. 已认证 localdb 模式：
  *    a. 读缓存 → mutateCached → 写回缓存 → dispatch → syncToServer
- *    b. 失败时由调用方决定是否 handleDatabaseOperationFailure
+ *    b. 主动操作失败按条目恢复；自动播放进度上报可保留最新值
  */
 export function createOptimisticWriter<TCache>(options: {
   getCached: () => TCache | null;
@@ -566,8 +499,12 @@ export function createOptimisticWriter<TCache>(options: {
   eventDetail?: unknown;
   onServerError?: (err: unknown) => Promise<void>;
   requireExistingCacheForOptimisticUpdate?: boolean;
+  affectedKeys?: string[] | 'all';
+  rollbackOnError?: boolean;
 }) => Promise<void> {
   const { getCached, setCached, eventName, emptyCacheFactory } = options;
+
+  const owners = new Map<string, symbol>();
 
   return async (mutation): Promise<void> => {
     const {
@@ -576,28 +513,84 @@ export function createOptimisticWriter<TCache>(options: {
       eventDetail,
       onServerError,
       requireExistingCacheForOptimisticUpdate = false,
+      rollbackOnError = true,
     } = mutation;
 
     const cached = getCached();
+    const token = Symbol();
+    let rollback: (() => void) | undefined;
     if (cached !== null || !requireExistingCacheForOptimisticUpdate) {
-      const updated = mutateCached(cached ?? emptyCacheFactory());
+      const before = cached ?? emptyCacheFactory();
+      const updated = mutateCached(
+        JSON.parse(JSON.stringify(before)) as TCache,
+      );
+      const entries = (value: TCache): Map<string, unknown> =>
+        Array.isArray(value)
+          ? new Map(value.map((key: string) => [key, key]))
+          : new Map(Object.entries(value as Record<string, unknown>));
+      const oldEntries = entries(before);
+      const nextEntries = entries(updated);
+      const keys =
+        mutation.affectedKeys === 'all'
+          ? [...new Set([...oldEntries.keys(), ...owners.keys()])]
+          : (mutation.affectedKeys ??
+            [...new Set([...oldEntries.keys(), ...nextEntries.keys()])].filter(
+              (key) =>
+                JSON.stringify(oldEntries.get(key)) !==
+                JSON.stringify(nextEntries.get(key)),
+            ));
+      keys.forEach((key) => owners.set(key, token));
       setCached(updated);
-
       window.dispatchEvent(
         new CustomEvent(eventName, {
           detail: eventDetail !== undefined ? eventDetail : updated,
         }),
       );
+      rollback = () => {
+        const current = getCached();
+        if (current === null) return;
+        const currentEntries = entries(current);
+        const restored = JSON.parse(JSON.stringify(current)) as TCache;
+        for (const key of keys) {
+          // 同键后续写入拥有自己的令牌；回读或其他缓存写入还需按值检查。
+          if (
+            owners.get(key) !== token ||
+            JSON.stringify(currentEntries.get(key)) !==
+              JSON.stringify(nextEntries.get(key))
+          )
+            continue;
+          if (Array.isArray(restored)) {
+            const index = restored.indexOf(key);
+            if (index !== -1) restored.splice(index, 1);
+            if (oldEntries.has(key))
+              restored.splice(
+                Math.min((before as string[]).indexOf(key), restored.length),
+                0,
+                key,
+              );
+          } else {
+            const record = restored as Record<string, unknown>;
+            if (oldEntries.has(key)) record[key] = oldEntries.get(key);
+            else delete record[key];
+          }
+        }
+        setCached(restored);
+        window.dispatchEvent(new CustomEvent(eventName, { detail: restored }));
+      };
     }
 
     try {
       await syncToServer();
     } catch (err) {
+      if (rollbackOnError) rollback?.();
       if (onServerError) {
         await onServerError(err);
       }
       throw err;
     } finally {
+      for (const [key, owner] of owners) {
+        if (owner === token) owners.delete(key);
+      }
       if (
         eventName === 'favoritesUpdated' ||
         eventName === 'playRecordsUpdated'

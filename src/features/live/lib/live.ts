@@ -173,21 +173,34 @@ function loadLiveChannels(
 
 export async function refreshLiveChannelSources(
   liveInfos: LiveConfigEntry[],
-): Promise<void> {
+): Promise<{
+  refreshed: number;
+  failed: { key: string; name: string }[];
+}> {
+  const result = {
+    refreshed: 0,
+    failed: [] as { key: string; name: string }[],
+  };
   const tasks = liveInfos
     .filter((liveInfo) => !liveInfo.disabled)
     .map((liveInfo) => async () => {
       try {
         await refreshLiveChannels(liveInfo);
+        result.refreshed += 1;
       } catch (error) {
         console.error(
           `刷新直播源失败 [${liveInfo.name || liveInfo.key}]:`,
           error,
         );
+        result.failed.push({
+          key: liveInfo.key,
+          name: liveInfo.name || liveInfo.key,
+        });
       }
     });
 
   await runWithConcurrency(tasks, getLiveRefreshConcurrency());
+  return result;
 }
 
 function getLiveRefreshConcurrency() {

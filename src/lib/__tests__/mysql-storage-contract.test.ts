@@ -63,13 +63,17 @@ type FakeState = {
   users: Map<string, string>;
   playRecords: Map<string, Map<string, string>>;
   favorites: Map<string, Map<string, string>>;
-  videoReviews: Map<string, { username: string; review: VideoReview }>;
+  videoReviews: Map<
+    string,
+    { username: string; review: VideoReview; first_published_at: number | null }
+  >;
   userDanmaku: Map<string, StoredUserDanmaku>;
   skipConfigs: Map<string, Map<string, string>>;
   playbackSessions: Map<string, Record<string, unknown>>;
   watchHistory: Record<string, any>[];
   watchBuckets: Record<string, any>[];
   historyMigrated: boolean;
+  reviewPublishedMigrated: boolean;
   searchHistory: SearchHistoryRow[];
   sourceRouteStats: SourceRouteStatsRow[];
   adminConfig: string | null;
@@ -120,6 +124,7 @@ function cloneState(state: FakeState): FakeState {
     watchHistory: state.watchHistory.map((row) => ({ ...row })),
     watchBuckets: state.watchBuckets.map((row) => ({ ...row })),
     historyMigrated: state.historyMigrated,
+    reviewPublishedMigrated: state.reviewPublishedMigrated,
     searchHistory: state.searchHistory.map((row) => ({ ...row })),
     sourceRouteStats: state.sourceRouteStats.map((row) => ({ ...row })),
     adminConfig: state.adminConfig,
@@ -166,6 +171,7 @@ function createState(): FakeState {
     watchHistory: [],
     watchBuckets: [],
     historyMigrated: false,
+    reviewPublishedMigrated: false,
     searchHistory: [],
     sourceRouteStats: [],
     adminConfig: null,
@@ -358,10 +364,61 @@ function createFakePool() {
     currentState: FakeState,
   ) => {
     const normalized = normalizeSql(sql);
+    if (normalized.startsWith('INSERT IGNORE INTO user_notice_events')) {
+      const rows = (currentState.social.user_notice_events ??= []);
+      if (
+        rows.some(
+          (row) =>
+            row.recipient_username === params[1] && row.event_key === params[2],
+        )
+      )
+        return [{ affectedRows: 0 }, []];
+      rows.push(
+        Object.fromEntries(
+          [
+            'id',
+            'recipient_username',
+            'event_key',
+            'kind',
+            'action',
+            'payload_json',
+            'created_at',
+          ].map((key, index) => [key, params[index]]),
+        ),
+      );
+      return [{ affectedRows: 1 }, []];
+    }
+    if (normalized.startsWith('DELETE FROM user_notice_events')) {
+      const rows = currentState.social.user_notice_events ?? [];
+      currentState.social.user_notice_events = rows.filter(
+        (row) => row.recipient_username !== params[0],
+      );
+      return [
+        {
+          affectedRows:
+            rows.length - currentState.social.user_notice_events.length,
+        },
+        [],
+      ];
+    }
+    if (normalized.startsWith('UPDATE video_reviews SET review_json = ?')) {
+      const row = currentState.videoReviews.get(
+        JSON.stringify(params.slice(1)),
+      );
+      if (row) row.review = JSON.parse(String(params[0]));
+      return [{ affectedRows: row ? 1 : 0 }, []];
+    }
     if (normalized.startsWith('INSERT IGNORE INTO storage_migrations'))
       return [{ affectedRows: 0 }, []];
+    if (normalized.startsWith('UPDATE video_reviews SET first_published_at')) {
+      for (const row of currentState.videoReviews.values())
+        row.first_published_at ??= row.review.updated_at;
+      return [{ affectedRows: 1 }, []];
+    }
     if (normalized.startsWith('UPDATE storage_migrations')) {
-      currentState.historyMigrated = true;
+      if (params[1] === 'review_first_published_v1')
+        currentState.reviewPublishedMigrated = true;
+      else currentState.historyMigrated = true;
       return [{ affectedRows: 1 }, []];
     }
     if (normalized.startsWith('DELETE FROM watch_history WHERE username = ?')) {
@@ -730,7 +787,12 @@ function createFakePool() {
       const review = JSON.parse(raw) as VideoReview;
       const existing = currentState.videoReviews.get(key);
       if (existing) review.created_at = existing.review.created_at;
-      currentState.videoReviews.set(key, { username, review });
+      currentState.videoReviews.set(key, {
+        username,
+        review,
+        first_published_at:
+          existing?.first_published_at ?? (params[6] as number | null),
+      });
       return [[], []];
     }
     if (normalized.startsWith('DELETE FROM video_reviews')) {
@@ -855,13 +917,15 @@ function createFakePool() {
     }
 
     if (/^INSERT(?: IGNORE)? INTO config_subscription /.test(normalized)) {
-      const [url, auto_update, last_check, config_file] = params;
+      const [url, auto_update, last_check, config_file, failure_since = ''] =
+        params;
       if (!normalized.startsWith('INSERT IGNORE') || !currentState.subscription)
         currentState.subscription = {
           url,
           auto_update,
           last_check,
           config_file,
+          failure_since,
         };
       return [{ affectedRows: 1 }, []];
     }
@@ -1411,6 +1475,71 @@ function createFakePool() {
     currentState: FakeState,
   ) => {
     const normalized = normalizeSql(sql);
+    if (
+      normalized ===
+      "SHOW COLUMNS FROM config_subscription LIKE 'failure_since'"
+    ) {
+      return [[{ Field: 'failure_since' }], []];
+    }
+    if (normalized.startsWith('SHOW COLUMNS FROM user_danmaku'))
+      return [[{ Field: normalized.includes('title') ? 'title' : 'year' }], []];
+    if (
+      normalized === 'SELECT password FROM users WHERE username = ? FOR UPDATE'
+    ) {
+      const password = currentState.users.get(String(params[0]));
+      return [password ? [{ password }] : [], []];
+    }
+    if (
+      normalized ===
+      'SELECT username FROM user_access ORDER BY username FOR UPDATE'
+    )
+      return [
+        [...currentState.userAccess.keys()].map((username) => ({ username })),
+        [],
+      ];
+    if (
+      normalized.startsWith(
+        'SELECT review_json FROM video_reviews WHERE username = ? AND title_norm = ? AND year = ?',
+      )
+    ) {
+      const row = currentState.videoReviews.get(JSON.stringify(params));
+      return [
+        row && (!normalized.includes('is_public = 1') || row.review.is_public)
+          ? [{ review_json: JSON.stringify(row.review) }]
+          : [],
+        [],
+      ];
+    }
+    if (
+      normalized.startsWith(
+        'SELECT reporter, created_at FROM video_review_reports',
+      )
+    )
+      return [
+        (currentState.social.video_review_reports ?? []).filter(
+          (row) =>
+            row.author === params[0] &&
+            row.title_norm === params[1] &&
+            row.year === params[2],
+        ),
+        [],
+      ];
+    if (
+      normalized.startsWith(
+        'SELECT id, username, title, year, episode_key FROM user_danmaku',
+      )
+    )
+      return [
+        [...currentState.userDanmaku.values()]
+          .filter((row) => params.includes(row.id))
+          .map((row) => ({
+            ...row,
+            episode_key: row.episodeKey,
+            title: row.title ?? '',
+            year: row.year ?? '',
+          })),
+        [],
+      ];
     if (normalized === 'SELECT COUNT(*) AS total FROM announcements')
       return [[{ total: currentState.announcements.size }], []];
     if (normalized.startsWith('SELECT * FROM announcements')) {
@@ -1508,10 +1637,25 @@ function createFakePool() {
       normalized === 'SELECT source_key, channel_number FROM live_source_state'
     )
       return [[...currentState.liveCounts.values()], []];
+    if (normalized === 'SHOW COLUMNS FROM video_reviews')
+      return [[{ Field: 'first_published_at' }], []];
     if (normalized === 'SHOW COLUMNS FROM playback_sessions')
       return [[{ Field: 'measurement_version' }], []];
     if (normalized.startsWith('SELECT completed_at FROM storage_migrations'))
-      return [[{ completed_at: currentState.historyMigrated ? 1 : 0 }], []];
+      return [
+        [
+          {
+            completed_at: (
+              params[0] === 'review_first_published_v1'
+                ? currentState.reviewPublishedMigrated
+                : currentState.historyMigrated
+            )
+              ? 1
+              : 0,
+          },
+        ],
+        [],
+      ];
     if (normalized.startsWith('SELECT ranked.*, p.record_json'))
       return [[], []];
     if (
@@ -1899,6 +2043,7 @@ function createFakePool() {
           rows.sort(sortRows);
           if (params[3]) {
             const after = {
+              first_published_at: null,
               username: String(params[6]),
               review: {
                 updated_at: Number(params[4]),
@@ -2288,7 +2433,9 @@ function createFakePool() {
     }
 
     if (
-      normalized === 'SELECT config_json FROM admin_config WHERE id = 1 LIMIT 1'
+      normalized ===
+        'SELECT config_json FROM admin_config WHERE id = 1 LIMIT 1' ||
+      normalized === 'SELECT config_json FROM admin_config WHERE id = 1'
     ) {
       return [[{ config_json: currentState.adminConfig }], []];
     }

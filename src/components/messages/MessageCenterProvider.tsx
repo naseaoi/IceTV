@@ -45,6 +45,8 @@ const MESSAGE_TOAST_KEY = 'messages';
 const MESSAGE_TOAST_DURATION_MS = 7_000;
 
 const EMPTY_SUMMARY: UserMessageSummary = {
+  latestUnreadAt: 0,
+  latestUnread: null,
   unreadCount: 0,
   trackingUnreadCount: 0,
   reviewReplyUnreadCount: 0,
@@ -74,6 +76,8 @@ export function MessageCenterProvider({ children }: { children: ReactNode }) {
     setIsOpen(open);
   }, []);
 
+  const isPanelOpen = useCallback(() => panelOpenRef.current, []);
+
   const reloadOpenPanel = useCallback(() => {
     if (!panelOpenRef.current) return;
     loadFirstPageRef.current();
@@ -91,6 +95,7 @@ export function MessageCenterProvider({ children }: { children: ReactNode }) {
   const { summary, setSummary, refreshSummary } = useMessageSummaryPolling({
     authenticated,
     username,
+    isPanelOpen,
     onRevisionChanged: reloadOpenPanel,
     onNotify: notify,
   });

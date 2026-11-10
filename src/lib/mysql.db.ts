@@ -17,6 +17,11 @@ import {
   adminUserStatements,
 } from '@/features/admin/services/userQueryStorage';
 import {
+  favoriteMessageQueries,
+  favoriteMessagesFromRows,
+  favoriteReadStatement,
+} from '@/features/favorites/lib/favorite-tracking';
+import {
   applyFavoriteStatus,
   batchSelection,
   mergeFavorite,
@@ -90,6 +95,17 @@ import {
   userDanmakuValues,
 } from '@/lib/user-danmaku-storage';
 import { mergeUserMessageState } from '@/lib/user-message-state';
+import {
+  accessPermissionsKey,
+  configPermissionsChanged,
+} from '@/lib/user-notice';
+import {
+  type NoticeMutation,
+  noticeInsert,
+  NoticeModeration,
+  userNoticeSchema,
+  UserNoticeStorage,
+} from '@/lib/user-notice-storage';
 import {
   publicReview,
   reviewPage,
@@ -424,6 +440,7 @@ export class MySqlStorage implements IStorage {
   private async initializeSchema(): Promise<void> {
     const statements = [
       OAUTH_SCHEMA + ' CHARACTER SET utf8mb4 COLLATE utf8mb4_bin',
+      ...userNoticeSchema('mysql'),
       ...socialSchema('mysql'),
       ...userDanmakuSchema('mysql'),
       ...userAccessSchema('mysql'),
@@ -602,7 +619,26 @@ export class MySqlStorage implements IStorage {
     for (const statement of statements) {
       await this.pool.execute(statement);
     }
+    await new MysqlConfigStateStore(this.pool).migrateSchema();
 
+    for (const [name, size] of [
+      ['title', 191],
+      ['year', 16],
+    ] as const) {
+      const [columns] = await this.pool.query<RowDataPacket[]>(
+        `SHOW COLUMNS FROM user_danmaku LIKE '${name}'`,
+      );
+      if (!columns.length) {
+        try {
+          await this.pool.execute(
+            `ALTER TABLE user_danmaku ADD COLUMN ${name} VARCHAR(${size}) NOT NULL DEFAULT ''`,
+          );
+        } catch (error) {
+          if ((error as { code?: string }).code !== 'ER_DUP_FIELDNAME')
+            throw error;
+        }
+      }
+    }
     const [columns] = await this.pool.query<RowDataPacket[]>(
       "SHOW COLUMNS FROM user_profiles LIKE 'avatar_seed'",
     );
@@ -642,6 +678,7 @@ export class MySqlStorage implements IStorage {
       }
     }
     await this.migratePlaybackSchema();
+    await this.migrateReviewFirstPublished();
     await this.migrateWatchHistory();
     await this.migrateFavoriteProjection();
     await this.backfillMissingLoginActivity();
@@ -659,6 +696,49 @@ export class MySqlStorage implements IStorage {
       accessConnection.release();
     }
     await this.invites.migrate();
+  }
+
+  private async migrateReviewFirstPublished(): Promise<void> {
+    const [columns] = await this.pool.query<RowDataPacket[]>(
+      'SHOW COLUMNS FROM video_reviews',
+    );
+    if (!columns.some((column) => column.Field === 'first_published_at')) {
+      try {
+        await this.pool.execute(
+          'ALTER TABLE video_reviews ADD COLUMN first_published_at BIGINT NULL',
+        );
+      } catch (error) {
+        if ((error as { code?: string }).code !== 'ER_DUP_FIELDNAME')
+          throw error;
+      }
+    }
+    const connection = await this.pool.getConnection();
+    try {
+      await connection.beginTransaction();
+      await connection.execute(
+        'INSERT IGNORE INTO storage_migrations (name, completed_at) VALUES (?, 0)',
+        ['review_first_published_v1'],
+      );
+      const [marker] = await connection.query<RowDataPacket[]>(
+        'SELECT completed_at FROM storage_migrations WHERE name = ? FOR UPDATE',
+        ['review_first_published_v1'],
+      );
+      if (!Number(marker[0]?.completed_at)) {
+        await connection.execute(
+          'UPDATE video_reviews SET first_published_at = updated_at WHERE first_published_at IS NULL',
+        );
+        await connection.execute(
+          'UPDATE storage_migrations SET completed_at = ? WHERE name = ?',
+          [Date.now(), 'review_first_published_v1'],
+        );
+      }
+      await connection.commit();
+    } catch (error) {
+      await connection.rollback();
+      throw error;
+    } finally {
+      connection.release();
+    }
   }
 
   private async migratePlaybackSchema(): Promise<void> {
@@ -1126,6 +1206,43 @@ export class MySqlStorage implements IStorage {
     ]);
   }
 
+  async getFavoriteUpdateMessagePage(
+    userName: string,
+    limit: number,
+    before?: import('@/lib/message-cursor.server').MessageCursor | null,
+  ) {
+    await this.ensureInitialized();
+    const username = normalizeUsername(userName);
+    const sql = favoriteMessageQueries('mysql', username, limit, before);
+    const [[rows], [counts]] = await Promise.all([
+      this.pool.query<
+        (RowDataPacket & { favorite_key: string; favorite_json: string })[]
+      >(sql.page, sql.params),
+      this.pool.query<(RowDataPacket & { count: number })[]>(sql.count, [
+        username,
+      ]),
+    ]);
+    return {
+      items: favoriteMessagesFromRows(rows),
+      total: Number(counts[0]?.count ?? 0),
+    };
+  }
+
+  async readFavoriteUpdate(
+    userName: string,
+    key: string,
+    episodes: number,
+  ): Promise<void> {
+    await this.ensureInitialized();
+    await this.pool.execute(favoriteReadStatement('mysql'), [
+      episodes,
+      normalizeUsername(userName),
+      key,
+      episodes,
+      episodes,
+    ]);
+  }
+
   async getFavorite(userName: string, key: string): Promise<Favorite | null> {
     await this.ensureInitialized();
     const username = normalizeUsername(userName);
@@ -1555,38 +1672,83 @@ export class MySqlStorage implements IStorage {
     return this.socialFor().getFollowReviewMessages(...args);
   }
 
+  private async runNoticeMutation(mutation: NoticeMutation): Promise<number> {
+    return this.withTransaction(async (connection) => {
+      let step = mutation.next();
+      while (!step.done) {
+        const statement = step.value;
+        const rows = statement.read
+          ? ((
+              await connection.query(
+                statement.sql,
+                statement.params as ExecuteValues,
+              )
+            )[0] as Record<string, unknown>[])
+          : (await connection.execute(
+              statement.sql,
+              statement.params as ExecuteValues,
+            ),
+            []);
+        step = mutation.next(rows);
+      }
+      return step.value;
+    });
+  }
+
+  private get notices() {
+    return new UserNoticeStorage({
+      dialect: 'mysql' as const,
+      rows: async <T>(sql: string, params: unknown[] = []) =>
+        (await this.pool.query(sql, params as ExecuteValues))[0] as T[],
+      run: async (sql: string, params: unknown[] = []) =>
+        (
+          (
+            await this.pool.execute(sql, params as ExecuteValues)
+          )[0] as import('mysql2/promise').ResultSetHeader
+        ).affectedRows,
+    });
+  }
+  async getUserNoticeMessages(
+    ...args: Parameters<IStorage['getUserNoticeMessages']>
+  ) {
+    await this.ensureInitialized();
+    return this.notices.messages(...args);
+  }
+  async getUserNoticeCount(
+    ...args: Parameters<IStorage['getUserNoticeCount']>
+  ) {
+    await this.ensureInitialized();
+    return this.notices.count(...args);
+  }
+  async purgeUserNotices(before: number): Promise<number> {
+    await this.ensureInitialized();
+    return (
+      (
+        await this.pool.execute(
+          'DELETE FROM user_notice_events WHERE created_at <= ?',
+          [before],
+        )
+      )[0] as import('mysql2/promise').ResultSetHeader
+    ).affectedRows;
+  }
+
   async deleteReviewReply(
     id: string,
     username: string,
     admin = false,
   ): Promise<boolean> {
-    return this.withTransaction(async (connection) => {
-      const [result] = await connection.execute<
-        import('mysql2/promise').ResultSetHeader
-      >(
-        'DELETE FROM video_review_replies WHERE id = ? AND (? = 1 OR username = ?)',
-        [id, admin ? 1 : 0, normalizeUsername(username)],
-      );
-      if (result.affectedRows)
-        await connection.execute(
-          'DELETE FROM video_review_reply_reports WHERE reply_id = ?',
-          [id],
-        );
-      return result.affectedRows > 0;
-    });
+    return (
+      (await this.runNoticeMutation(
+        new NoticeModeration('mysql').reply(id, username, admin),
+      )) > 0
+    );
   }
   async moderateReplyReports(
     id: string,
     action: 'dismiss' | 'delete-reply',
   ): Promise<void> {
-    if (action === 'delete-reply') {
-      await this.deleteReviewReply(id, '', true);
-      return;
-    }
-    await this.ensureInitialized();
-    await this.pool.execute(
-      'DELETE FROM video_review_reply_reports WHERE reply_id = ?',
-      [id],
+    await this.runNoticeMutation(
+      new NoticeModeration('mysql').reply(id, '', true, action),
     );
   }
 
@@ -1710,15 +1872,7 @@ export class MySqlStorage implements IStorage {
     return rows.map(storedUserDanmaku);
   }
   async deleteUserDanmakuBatch(ids: string[]): Promise<number> {
-    if (!ids.length) return 0;
-    await this.ensureInitialized();
-    const [result] = await this.pool.execute<
-      import('mysql2/promise').ResultSetHeader
-    >(
-      `DELETE FROM user_danmaku WHERE id IN (${ids.map(() => '?').join(',')})`,
-      ids,
-    );
-    return result.affectedRows;
+    return this.runNoticeMutation(new NoticeModeration('mysql').danmaku(ids));
   }
 
   async getVideoReview(
@@ -1739,8 +1893,9 @@ export class MySqlStorage implements IStorage {
     await this.ensureInitialized();
     await this.pool.execute(
       `INSERT INTO video_reviews
-      (username, title_norm, year, review_json, is_public, updated_at) VALUES (?, ?, ?, ?, ?, ?)
+      (username, title_norm, year, review_json, is_public, updated_at, first_published_at) VALUES (?, ?, ?, ?, ?, ?, ?)
       ON DUPLICATE KEY UPDATE review_json = JSON_SET(VALUES(review_json), '$.created_at', JSON_EXTRACT(review_json, '$.created_at')),
+      first_published_at = COALESCE(first_published_at, VALUES(first_published_at)),
       is_public = VALUES(is_public), updated_at = VALUES(updated_at)`,
       [
         normalizeUsername(userName),
@@ -1749,6 +1904,7 @@ export class MySqlStorage implements IStorage {
         JSON.stringify(review),
         review.is_public ? 1 : 0,
         review.updated_at,
+        review.is_public ? review.updated_at : null,
       ],
     );
   }
@@ -1759,67 +1915,25 @@ export class MySqlStorage implements IStorage {
     year: string,
     publicOnly = false,
   ): Promise<void> {
-    await this.withTransaction(async (connection) => {
-      const target = [normalizeUsername(userName), titleNorm, year];
-      const [result] = await connection.execute<
-        import('mysql2/promise').ResultSetHeader
-      >(REVIEW_SQL.delete, [...target, publicOnly ? 1 : 0]);
-      if (result.affectedRows) {
-        await connection.execute(
-          'DELETE FROM video_review_reply_reports WHERE reply_id IN (SELECT id FROM video_review_replies WHERE author = ? AND title_norm = ? AND year = ?)',
-          target,
-        );
-        await connection.execute(
-          'DELETE FROM video_review_replies WHERE author = ? AND title_norm = ? AND year = ?',
-          target,
-        );
-      }
-      if (result.affectedRows)
-        for (const table of ['video_review_likes', 'video_review_reports'])
-          await connection.execute(
-            `DELETE FROM ${table} WHERE author = ? AND title_norm = ? AND year = ?`,
-            target,
-          );
-    });
+    await this.runNoticeMutation(
+      new NoticeModeration('mysql').review(
+        userName,
+        titleNorm,
+        year,
+        'delete-review',
+        publicOnly,
+      ),
+    );
   }
-
   async moderateReviewReports(
     author: string,
     title: string,
     year: string,
     action: 'dismiss' | 'mark-spoiler' | 'delete-review',
   ): Promise<void> {
-    await this.withTransaction(async (connection) => {
-      const target = [normalizeUsername(author), title, year];
-      const [rows] = await connection.query<RowDataPacket[]>(
-        'SELECT username FROM video_reviews WHERE username = ? AND title_norm = ? AND year = ? AND is_public = 1 FOR UPDATE',
-        target,
-      );
-      if (!rows.length) return;
-      if (action === 'delete-review') {
-        await connection.execute(REVIEW_SQL.delete, [...target, 1]);
-        await connection.execute(
-          'DELETE FROM video_review_reply_reports WHERE reply_id IN (SELECT id FROM video_review_replies WHERE author = ? AND title_norm = ? AND year = ?)',
-          target,
-        );
-        await connection.execute(
-          'DELETE FROM video_review_replies WHERE author = ? AND title_norm = ? AND year = ?',
-          target,
-        );
-        await connection.execute(
-          'DELETE FROM video_review_likes WHERE author = ? AND title_norm = ? AND year = ?',
-          target,
-        );
-      } else if (action === 'mark-spoiler')
-        await connection.execute(
-          "UPDATE video_reviews SET review_json = JSON_SET(review_json, '$.spoiler', CAST('true' AS JSON)) WHERE username = ? AND title_norm = ? AND year = ? AND is_public = 1",
-          target,
-        );
-      await connection.execute(
-        'DELETE FROM video_review_reports WHERE author = ? AND title_norm = ? AND year = ?',
-        target,
-      );
-    });
+    await this.runNoticeMutation(
+      new NoticeModeration('mysql').review(author, title, year, action, true),
+    );
   }
 
   async getMyVideoReviewPage(
@@ -2033,14 +2147,41 @@ export class MySqlStorage implements IStorage {
     return rows.length > 0;
   }
 
-  async changePassword(userName: string, newPassword: string): Promise<void> {
+  async changePassword(
+    userName: string,
+    newPassword: string,
+    admin = false,
+  ): Promise<void> {
     await this.ensureInitialized();
     const username = normalizeUsername(userName);
     const hashed = await hashPassword(newPassword);
-    await this.pool.execute(
-      'UPDATE users SET password = ? WHERE username = ?',
-      [hashed, username],
-    );
+    await this.withTransaction(async (connection) => {
+      const [rows] = await connection.query<RowDataPacket[]>(
+        'SELECT password FROM users WHERE username = ? FOR UPDATE',
+        [username],
+      );
+      if (
+        !rows.length ||
+        (admin &&
+          (await verifyPassword(newPassword, String(rows[0].password))).match)
+      )
+        return;
+      await connection.execute(
+        'UPDATE users SET password = ? WHERE username = ?',
+        [hashed, username],
+      );
+      if (admin) {
+        const event = noticeInsert(
+          'mysql',
+          username,
+          `password:${rows[0].password}`,
+          'account-change',
+          'password-changed',
+          {},
+        );
+        await connection.execute(event.sql, event.params);
+      }
+    });
   }
 
   async deleteUser(
@@ -2193,6 +2334,10 @@ export class MySqlStorage implements IStorage {
       );
       await connection.execute(
         'DELETE FROM user_annual_recaps WHERE username = ?',
+        [username],
+      );
+      await connection.execute(
+        'DELETE FROM user_notice_events WHERE recipient_username = ?',
         [username],
       );
       await connection.execute(
@@ -2501,10 +2646,36 @@ export class MySqlStorage implements IStorage {
         )
       )
         return false;
+      const noticeAccess = new MysqlUserAccessStore(connection, true);
+      const [noticeRows] = configPermissionsChanged(current, config)
+        ? await connection.query<RowDataPacket[]>(
+            'SELECT username FROM user_access ORDER BY username FOR UPDATE',
+          )
+        : [[]];
+      const noticeUsers = [];
+      for (const row of noticeRows) {
+        const user = await noticeAccess.get(String(row.username));
+        if (user && current)
+          noticeUsers.push({ user, key: accessPermissionsKey(user, current) });
+      }
       const removed = removedAccessReferences(current, config);
       const access = new MysqlUserAccessStore(connection, true);
       for (const group of removed.groups) await access.removeGroup(group);
       for (const source of removed.sources) await access.removeSource(source);
+      for (const { user, key } of noticeUsers) {
+        const next = await noticeAccess.get(user.username);
+        if (next && key !== accessPermissionsKey(next, config)) {
+          const event = noticeInsert(
+            'mysql',
+            user.username,
+            `config:${Date.now()}:${JSON.stringify(current)}:${JSON.stringify(config)}`,
+            'account-change',
+            'permissions-changed',
+            {},
+          );
+          await connection.execute(event.sql, event.params);
+        }
+      }
       await stateStore.prune(current, config);
       for (const [key, count] of Object.entries(state?.liveCounts || {})) {
         if (config.LiveConfig?.some((live) => live.key === key))

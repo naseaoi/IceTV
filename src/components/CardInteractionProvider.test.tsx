@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from '@testing-library/react';
+import { act, fireEvent, render, screen } from '@testing-library/react';
 import { useState } from 'react';
 
 import {
@@ -12,15 +12,31 @@ jest.mock('@/components/card-actions/CardActionOverlay', () => ({
     isOpen,
     onClose,
     title,
+    actions,
   }: {
     isOpen: boolean;
     onClose: () => void;
     title: string;
+    actions: import('@/components/card-actions/actions').CardAction[];
   }) =>
     isOpen ? (
-      <button type='button' onClick={onClose}>
-        关闭 {title}
-      </button>
+      <div>
+        {actions.map((action) => (
+          <button
+            key={action.id}
+            disabled={action.disabled}
+            onClick={() => {
+              void action.onClick();
+              onClose();
+            }}
+          >
+            {action.label}
+          </button>
+        ))}
+        <button type='button' onClick={onClose}>
+          关闭 {title}
+        </button>
+      </div>
     ) : null,
 }));
 
@@ -85,3 +101,52 @@ describe('CardInteractionProvider', () => {
     }
   });
 });
+
+it.each(['favorite', 'tracking', 'mark-update-read', 'delete'])(
+  '菜单关闭和更换卡片实例后 %s 锁保持，导航可用',
+  async (operation) => {
+    let finish!: () => void;
+    const mutate = jest.fn(
+      () =>
+        new Promise<void>((resolve) => {
+          finish = resolve;
+        }),
+    );
+    const navigate = jest.fn();
+    function Harness() {
+      const { showActionSheet } = useCardInteractionManager();
+      return (
+        <button
+          onClick={() =>
+            showActionSheet(String(Math.random()), {
+              objectKey: 'src+1',
+              title: '作品',
+              actions: [
+                { id: operation, label: '操作', icon: null, onClick: mutate },
+                { id: 'play', label: '播放', icon: null, onClick: navigate },
+              ],
+            })
+          }
+        >
+          打开
+        </button>
+      );
+    }
+    render(
+      <CardInteractionProvider>
+        <Harness />
+      </CardInteractionProvider>,
+    );
+    fireEvent.click(screen.getByText('打开'));
+    fireEvent.click(screen.getByText('操作'));
+    fireEvent.click(screen.getByText('打开'));
+    expect(screen.getByText('操作')).toBeDisabled();
+    fireEvent.click(screen.getByText('操作'));
+    fireEvent.click(screen.getByText('播放'));
+    expect(navigate).toHaveBeenCalledTimes(1);
+    expect(mutate).toHaveBeenCalledTimes(1);
+    await act(async () => finish());
+    fireEvent.click(screen.getByText('打开'));
+    expect(screen.getByText('操作')).toBeEnabled();
+  },
+);

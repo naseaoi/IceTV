@@ -1,4 +1,4 @@
-﻿'use client';
+'use client';
 
 import {
   type DragEndEvent,
@@ -20,7 +20,6 @@ import {
 } from '@dnd-kit/sortable';
 import { useEffect, useMemo, useState } from 'react';
 
-import AlertModal from '@/components/modals/AlertModal';
 import ConfirmModal from '@/components/modals/ConfirmModal';
 import AdminSearchField from '@/features/admin/components/AdminSearchField';
 import { CategoryAddForm } from '@/features/admin/components/tabs/category/CategoryAddForm';
@@ -29,13 +28,12 @@ import { SortableCategoryRow } from '@/features/admin/components/tabs/category/S
 import { useAdminSourceActions } from '@/features/admin/hooks/useAdminSourceActions';
 import { useLoadingState } from '@/features/admin/hooks/useLoadingState';
 import { buttonStyles } from '@/features/admin/lib/buttonStyles';
-import { showError } from '@/features/admin/lib/notifications';
 import { CustomCategory } from '@/features/admin/types/internal';
-import { useAlertModal } from '@/hooks/useAlertModal';
 import {
   applyClientServerConfig,
   fetchClientServerConfig,
 } from '@/lib/runtime-config';
+import { getErrorMessage } from '@/lib/user-facing-error';
 import { AdminConfig } from '@/types/admin';
 
 const CategoryConfig = ({
@@ -45,7 +43,8 @@ const CategoryConfig = ({
   config: AdminConfig | null;
   refreshConfig: () => Promise<void>;
 }) => {
-  const { alertModal, showAlert, hideAlert } = useAlertModal();
+  const [formError, setFormError] = useState('');
+  const [actionError, setActionError] = useState('');
   const { isLoading, withLoading } = useLoadingState();
   const { runAction } = useAdminSourceActions({
     endpoint: '/api/admin/category',
@@ -53,7 +52,6 @@ const CategoryConfig = ({
     afterRefresh: async () => {
       applyClientServerConfig(await fetchClientServerConfig());
     },
-    showAlert,
   });
   const [categories, setCategories] = useState<CustomCategory[]>([]);
   const [filterQuery, setFilterQuery] = useState('');
@@ -117,12 +115,8 @@ const CategoryConfig = ({
 
   // 通用 API 请求
   const callCategoryApi = async (body: Record<string, unknown>) => {
-    try {
-      await runAction({ ...body });
-    } catch (err) {
-      showError(err instanceof Error ? err.message : '操作失败', showAlert);
-      throw err; // 向上抛出方便调用处判断
-    }
+    setActionError('');
+    await runAction({ ...body });
   };
 
   const handleToggleEnable = (category: CustomCategory) => {
@@ -133,7 +127,7 @@ const CategoryConfig = ({
         query: category.query,
         type: category.type,
       }),
-    ).catch(() => void 0);
+    ).catch((error) => setActionError(getErrorMessage(error, '操作失败')));
   };
 
   const handleConfirmDelete = () => {
@@ -146,7 +140,7 @@ const CategoryConfig = ({
         query: target.query,
         type: target.type,
       }),
-    ).catch(() => void 0);
+    ).catch((error) => setActionError(getErrorMessage(error, '操作失败')));
   };
 
   const handleOpenEdit = (category: CustomCategory) => {
@@ -164,6 +158,7 @@ const CategoryConfig = ({
     if (!editingCategory?.name || !editingCategory.query || !editingIdentity) {
       return;
     }
+    setFormError('');
     withLoading('editCategory', async () => {
       await callCategoryApi({
         action: 'edit',
@@ -174,11 +169,12 @@ const CategoryConfig = ({
         query: editingCategory.query,
       });
       handleCancelEdit();
-    }).catch(() => void 0);
+    }).catch((error) => setFormError(getErrorMessage(error, '操作失败')));
   };
 
   const handleAddCategory = () => {
     if (!newCategory.name || !newCategory.query) return;
+    setFormError('');
     withLoading('addCategory', async () => {
       await callCategoryApi({
         action: 'add',
@@ -194,12 +190,18 @@ const CategoryConfig = ({
         from: 'custom',
       });
       setShowAddForm(false);
-    }).catch(() => void 0);
+    }).catch((error) => setFormError(getErrorMessage(error, '操作失败')));
   };
 
   const handleDragEnd = (event: DragEndEvent) => {
     const { active, over } = event;
-    if (isFiltering || !over || active.id === over.id) return;
+    if (
+      isLoading('saveCategoryOrder') ||
+      isFiltering ||
+      !over ||
+      active.id === over.id
+    )
+      return;
     const oldIndex = categories.findIndex(
       (c) => `${c.query}:${c.type}` === active.id,
     );
@@ -218,7 +220,7 @@ const CategoryConfig = ({
       .then(() => {
         setOrderChanged(false);
       })
-      .catch(() => void 0);
+      .catch((error) => setActionError(getErrorMessage(error, '操作失败')));
   };
 
   if (!config) {
@@ -231,6 +233,11 @@ const CategoryConfig = ({
 
   return (
     <div className='space-y-6'>
+      {actionError && (
+        <p role='alert' className='text-sm text-red-600'>
+          {actionError}
+        </p>
+      )}
       <div className='flex items-center justify-between gap-3'>
         <AdminSearchField
           value={filterQuery}
@@ -241,6 +248,7 @@ const CategoryConfig = ({
         <div className='flex shrink-0 items-center'>
           <button
             onClick={() => {
+              setFormError('');
               setShowAddForm(true);
               handleCancelEdit();
             }}
@@ -252,6 +260,7 @@ const CategoryConfig = ({
       </div>
 
       <CategoryAddForm
+        error={formError}
         newCategory={newCategory}
         isOpen={showAddForm}
         typeOptions={categoryTypeOptions}
@@ -262,6 +271,7 @@ const CategoryConfig = ({
       />
 
       <CategoryEditForm
+        error={formError}
         category={editingCategory}
         isOpen={!!editingCategory}
         typeOptions={categoryTypeOptions}
@@ -300,7 +310,9 @@ const CategoryConfig = ({
               )}
               {visibleRows.map((category) => (
                 <SortableCategoryRow
-                  isSortingDisabled={isFiltering}
+                  isSortingDisabled={
+                    isFiltering || isLoading('saveCategoryOrder')
+                  }
                   key={`${category.query}:${category.type}`}
                   category={category}
                   isToggleLoading={isLoading(
@@ -337,15 +349,6 @@ const CategoryConfig = ({
       )}
 
       {/* 通用弹窗组件 */}
-      <AlertModal
-        isOpen={alertModal.isOpen}
-        onClose={hideAlert}
-        type={alertModal.type}
-        title={alertModal.title}
-        message={alertModal.message}
-        timer={alertModal.timer}
-        showConfirm={alertModal.showConfirm}
-      />
 
       <ConfirmModal
         isOpen={!!deleteTarget}

@@ -1,10 +1,8 @@
-﻿'use client';
-
+'use client';
 import { useCallback, useRef } from 'react';
 
 import { adminGet } from '@/features/admin/lib/api';
-import { showError, showSuccess } from '@/features/admin/lib/notifications';
-import { type ShowAlertFn } from '@/hooks/useAlertModal';
+import { DisplayableError, getErrorMessage } from '@/lib/user-facing-error';
 import { type AdminConfigResult } from '@/types/admin';
 
 type AdminAuthStatus = {
@@ -13,7 +11,6 @@ type AdminAuthStatus = {
 };
 
 interface UseAdminPageActionsOptions {
-  showAlert: ShowAlertFn;
   setConfig: (config: AdminConfigResult['Config']) => void;
   setRole: (role: AdminConfigResult['Role']) => void;
   setError: (error: string | null) => void;
@@ -21,7 +18,7 @@ interface UseAdminPageActionsOptions {
 }
 
 export function useAdminPageActions(options: UseAdminPageActionsOptions) {
-  const { showAlert, setConfig, setRole, setError, setLoading } = options;
+  const { setConfig, setRole, setError, setLoading } = options;
   const requestIdRef = useRef(0);
 
   const fetchConfig = useCallback(
@@ -37,10 +34,10 @@ export function useAdminPageActions(options: UseAdminPageActionsOptions) {
           '获取登录状态失败',
         );
         if (!authStatus.authenticated) {
-          throw new Error('Unauthorized');
+          throw new DisplayableError('未登录');
         }
         if (authStatus.role !== 'owner' && authStatus.role !== 'admin') {
-          throw new Error('权限不足');
+          throw new DisplayableError('权限不足');
         }
 
         const data = await adminGet<AdminConfigResult>(
@@ -57,8 +54,7 @@ export function useAdminPageActions(options: UseAdminPageActionsOptions) {
         if (requestId !== requestIdRef.current) {
           return;
         }
-        const msg = err instanceof Error ? err.message : '获取配置失败';
-        showError(msg, showAlert);
+        const msg = getErrorMessage(err, '获取配置失败');
         setError(msg);
       } finally {
         if (showLoading && requestId === requestIdRef.current) {
@@ -66,12 +62,11 @@ export function useAdminPageActions(options: UseAdminPageActionsOptions) {
         }
       }
     },
-    [setConfig, setError, setLoading, setRole, showAlert],
+    [setConfig, setError, setLoading, setRole],
   );
 
   const resetConfig = useCallback(async () => {
     await adminGet('/api/admin/reset', '重置失败');
-    showSuccess('重置成功，请刷新页面！');
   }, []);
 
   return { fetchConfig, resetConfig };

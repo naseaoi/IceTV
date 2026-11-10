@@ -16,6 +16,7 @@ export interface WatchRecordTarget {
   searchTitle?: string;
   doubanId?: number;
   origin?: 'vod' | 'live';
+  feedback?: { watchStateVisible?: boolean; favoriteVisible?: boolean };
 }
 
 export const WATCH_STATUS_OPTIONS: {

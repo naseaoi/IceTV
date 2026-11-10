@@ -37,11 +37,17 @@ function DoubanFeedProbe() {
 }
 
 function AnimeFeedProbe({ targetWeekday }: { targetWeekday: string }) {
-  const { doubanData, loading, selectedWeekday, handleWeekdayChange } =
-    useDoubanFeed('anime');
+  const {
+    doubanData,
+    loading,
+    selectedWeekday,
+    handleWeekdayChange,
+    retryLoad,
+  } = useDoubanFeed('anime');
 
   return (
     <div>
+      <button onClick={retryLoad}>重试日历</button>
       <span data-testid='anime-loading'>{String(loading)}</span>
       <span data-testid='selected-weekday'>{selectedWeekday}</span>
       <span data-testid='anime-title'>{doubanData[0]?.title || ''}</span>
@@ -151,5 +157,9 @@ describe('useDoubanFeed', () => {
     );
     expect(screen.getByTestId('anime-loading')).toHaveTextContent('false');
     expect(GetBangumiCalendarDataWithMeta).toHaveBeenCalledTimes(1);
+    fireEvent.click(screen.getByRole('button', { name: '重试日历' }));
+    await waitFor(() =>
+      expect(GetBangumiCalendarDataWithMeta).toHaveBeenCalledTimes(2),
+    );
   });
 });

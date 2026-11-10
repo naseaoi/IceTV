@@ -14,6 +14,7 @@ import ReviewReplies, { useReviewReplies } from '@/components/ReviewReplies';
 import UserRoleBadge from '@/components/UserRoleBadge';
 import { formatRelativeTime } from '@/lib/relative-time';
 import type { PublicVideoReview } from '@/lib/types';
+import { getErrorMessage, isAbortError } from '@/lib/user-facing-error';
 import { reportVideoReview, setReviewLiked } from '@/lib/video-reviews.client';
 
 export const PUBLIC_REVIEW_META_CLASS = 'flex min-h-7 items-center gap-2';
@@ -122,7 +123,8 @@ export default function PublicReviewContent({
       setLike(await setReviewLiked(target, !previous.liked));
     } catch (error) {
       setLike(previous);
-      setError((error as Error).message);
+      if (!isAbortError(error))
+        setError(getErrorMessage(error, '操作失败，请稍后重试'));
     } finally {
       inFlight.current = false;
       setBusy(false);

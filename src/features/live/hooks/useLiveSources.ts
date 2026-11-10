@@ -17,6 +17,11 @@ import type {
   LivePanelTab,
   LiveSource,
 } from '@/features/live/types';
+import {
+  DisplayableError,
+  getErrorMessage,
+  isAbortError,
+} from '@/lib/user-facing-error';
 
 // ----- EPG 数据清洗 -----
 
@@ -142,6 +147,8 @@ interface UseLiveSourcesReturn {
   filteredChannels: LiveChannel[];
   epgData: EpgData | null;
   isEpgLoading: boolean;
+  epgError: string | null;
+  retryEpg: () => void;
   handleSourceChange: (source: LiveSource) => Promise<void>;
   handleChannelChange: (channel: LiveChannel) => Promise<void>;
   handleGroupChange: (group: string) => void;
@@ -188,6 +195,7 @@ export function useLiveSources({
   const [videoUrl, setVideoUrl] = useState('');
   const [isVideoLoading, setIsVideoLoading] = useState(false);
   const [unsupportedType, setUnsupportedType] = useState<string | null>(null);
+  const switchingRef = useRef(false);
   const [isSwitchingSource, setIsSwitchingSource] = useState(false);
 
   const [groupedChannels, setGroupedChannels] = useState<
@@ -198,9 +206,11 @@ export function useLiveSources({
   const [isChannelListCollapsed, setIsChannelListCollapsed] = useState(false);
   const [filteredChannels, setFilteredChannels] = useState<LiveChannel[]>([]);
 
+  const [epgError, setEpgError] = useState<string | null>(null);
   const [epgData, setEpgData] = useState<EpgData | null>(null);
   const [isEpgLoading, setIsEpgLoading] = useState(false);
   const epgRequestIdRef = useRef(0);
+  const epgTargetRef = useRef('');
 
   // ----- 滚动到频道 -----
   const scrollToChannel = (channel: LiveChannel) => {
@@ -246,13 +256,14 @@ export function useLiveSources({
       const response = await fetch(`/api/live/channels?source=${source.key}`);
       if (!response.ok) {
         if (response.status === 401) {
-          throw new Error('请先登录后再观看直播');
+          throw new DisplayableError('请先登录后再观看直播');
         }
-        throw new Error('获取频道列表失败');
+        throw new DisplayableError('获取频道列表失败');
       }
 
       const result = await response.json();
-      if (!result.success) throw new Error(result.error || '获取频道列表失败');
+      if (!result.success)
+        throw new DisplayableError(result.error || '获取频道列表失败');
 
       const channelsData = result.data;
       if (!channelsData || channelsData.length === 0) {
@@ -340,16 +351,7 @@ export function useLiveSources({
 
       setIsVideoLoading(false);
     } catch (err) {
-      console.error('获取频道列表失败:', err);
-      setError(err instanceof Error ? err.message : '获取频道列表失败');
-      setCurrentChannels([]);
-      setGroupedChannels({});
-      setFilteredChannels([]);
-      setLiveSources((prev) =>
-        prev.map((s) =>
-          s.key === source.key ? { ...s, channelNumber: 0 } : s,
-        ),
-      );
+      if (!isAbortError(err)) setError(getErrorMessage(err, '加载失败'));
       setIsVideoLoading(false);
     }
   };
@@ -364,10 +366,11 @@ export function useLiveSources({
       setLoadingMessage('获取直播源');
 
       const response = await fetch('/api/live/sources');
-      if (!response.ok) throw new Error('获取直播源失败');
+      if (!response.ok) throw new DisplayableError('获取直播源失败');
 
       const result = await response.json();
-      if (!result.success) throw new Error(result.error || '获取直播源失败');
+      if (!result.success)
+        throw new DisplayableError(result.error || '获取直播源失败');
 
       const sources: LiveSource[] = result.data;
       setLiveSources(sources);
@@ -393,8 +396,7 @@ export function useLiveSources({
       setLoadingMessage('准备就绪');
       setTimeout(() => setLoading(false), 1000);
     } catch (err) {
-      console.error('获取直播源失败:', err);
-      setLiveSources([]);
+      if (!isAbortError(err)) setError(getErrorMessage(err, '加载失败'));
       setLoading(false);
     } finally {
       const newSearchParams = new URLSearchParams(initialSearchParamsString);
@@ -409,6 +411,10 @@ export function useLiveSources({
 
   // ----- 切换直播源 -----
   const handleSourceChange = async (source: LiveSource) => {
+    if (switchingRef.current) return;
+    switchingRef.current = true;
+    epgRequestIdRef.current += 1;
+    setError(null);
     try {
       setIsSwitchingSource(true);
       cleanupPlayer();
@@ -419,6 +425,7 @@ export function useLiveSources({
     } catch (err) {
       console.error('切换直播源失败:', err);
     } finally {
+      switchingRef.current = false;
       setIsSwitchingSource(false);
       setActiveTab('channels');
     }
@@ -431,6 +438,10 @@ export function useLiveSources({
   ) => {
     const requestId = epgRequestIdRef.current + 1;
     epgRequestIdRef.current = requestId;
+    setEpgError(null);
+    const target = `${source?.key}:${channel.id}`;
+    if (epgTargetRef.current !== target) setEpgData(null);
+    epgTargetRef.current = target;
 
     if (!channel.tvgId || !source) {
       setEpgData(null);
@@ -443,10 +454,12 @@ export function useLiveSources({
       const response = await fetch(
         `/api/live/epg?source=${source.key}&tvgId=${channel.tvgId}`,
       );
-      if (!response.ok || epgRequestIdRef.current !== requestId) return;
+      if (epgRequestIdRef.current !== requestId) return;
+      if (!response.ok) throw new DisplayableError('节目单加载失败');
 
       const result = await response.json();
       if (epgRequestIdRef.current !== requestId) return;
+      if (!result.success) throw new DisplayableError('节目单加载失败');
       if (result.success) {
         setEpgData({
           ...result.data,
@@ -455,7 +468,8 @@ export function useLiveSources({
       }
     } catch (error) {
       if (epgRequestIdRef.current === requestId) {
-        console.error('获取节目单信息失败:', error);
+        if (!isAbortError(error))
+          setEpgError(getErrorMessage(error, '加载失败'));
       }
     } finally {
       if (epgRequestIdRef.current === requestId) {
@@ -466,7 +480,7 @@ export function useLiveSources({
 
   const handleChannelChange = async (channel: LiveChannel) => {
     // 点当前频道直接忽略：频道与地址不变时加载 effect 不会重跑，清理掉的播放器不会重建
-    if (isSwitchingSource || channel.id === currentChannel?.id) return;
+    if (switchingRef.current || channel.id === currentChannel?.id) return;
 
     cleanupPlayer();
     setUnsupportedType(null);
@@ -526,6 +540,10 @@ export function useLiveSources({
     setIsChannelListCollapsed,
     filteredChannels,
     epgData,
+    epgError,
+    retryEpg: () => {
+      if (currentChannel) void loadChannelEpg(currentChannel, currentSource);
+    },
     isEpgLoading,
     handleSourceChange,
     handleChannelChange,

@@ -37,7 +37,7 @@ function HistoryChip({
   onEnterEditing: () => void;
 }) {
   const activate = () =>
-    editing ? void deleteSearchHistory(item) : onSearch(item);
+    editing ? void deleteSearchHistory(item).catch(() => {}) : onSearch(item);
   // 触屏长按进入删除模式；轻触由 hook 的 onClick 接管，鼠标点击走按钮自身 onClick
   const longPressProps = useLongPress({
     onLongPress: onEnterEditing,
@@ -67,7 +67,7 @@ function HistoryChip({
         <button
           type='button'
           aria-label={`删除搜索历史 ${item}`}
-          onClick={() => void deleteSearchHistory(item)}
+          onClick={() => void deleteSearchHistory(item).catch(() => {})}
           className='absolute -right-1 -top-1 hidden h-[18px] w-[18px] items-center justify-center rounded-full bg-gray-500 text-white opacity-0 transition-opacity hover:bg-red-500 focus-visible:opacity-100 group-hover:opacity-100 dark:bg-gray-600 md:flex'
         >
           <X className='h-3 w-3' />
@@ -151,7 +151,7 @@ export default function SearchHistory({
         confirmText='清空'
         onCancel={() => setShowClearConfirm(false)}
         onConfirm={() => {
-          clearSearchHistory();
+          void clearSearchHistory().catch(() => {});
           setShowClearConfirm(false);
         }}
       />

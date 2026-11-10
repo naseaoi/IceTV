@@ -42,6 +42,7 @@ import type {
   LibraryVisibility,
   UserProfileView,
 } from '@/lib/types';
+import { getErrorMessage, isAbortError } from '@/lib/user-facing-error';
 import { parseStorageKey } from '@/lib/utils';
 
 const REVIEW_TITLE_TEXT_CLASS = 'mb-1.5';
@@ -356,7 +357,9 @@ export default function ProfilePageClient({
         if (active) setProfile(value);
       })
       .catch((error) => {
-        if (active) setError((error as Error).message);
+        if (active)
+          if (!isAbortError(error))
+            setError(getErrorMessage(error, '操作失败，请稍后重试'));
       });
     return () => {
       active = false;
@@ -388,7 +391,8 @@ export default function ProfilePageClient({
       );
     } catch (error) {
       setProfile(previous);
-      setError((error as Error).message);
+      if (!isAbortError(error))
+        setError(getErrorMessage(error, '操作失败，请稍后重试'));
     } finally {
       following.current = false;
       setBusy(false);
@@ -549,6 +553,7 @@ export default function ProfilePageClient({
               />
               {editing && (
                 <ProfilePanel
+                  showSuccessToast={false}
                   onClose={() => {
                     setEditing(false);
                     setVersion((value) => value + 1);

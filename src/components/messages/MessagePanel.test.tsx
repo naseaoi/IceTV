@@ -378,13 +378,12 @@ it('保存失败时提示并恢复为服务端设置', async () => {
     fireEvent.click(screen.getByRole('button', { name: '通知设置' }));
   });
   await act(async () => {
-    fireEvent.click(screen.getByRole('switch', { name: '追更更新' }));
+    fireEvent.click(screen.getByRole('switch', { name: '追更与收藏更新' }));
   });
   expect(screen.getByRole('alert')).toHaveTextContent('保存失败，请重试');
-  expect(screen.getByRole('switch', { name: '追更更新' })).toHaveAttribute(
-    'aria-checked',
-    'true',
-  );
+  expect(
+    screen.getByRole('switch', { name: '追更与收藏更新' }),
+  ).toHaveAttribute('aria-checked', 'true');
 });
 
 it('子视图中 Escape 先返回列表，再次 Escape 才关闭面板', async () => {
@@ -510,4 +509,21 @@ it('opens a followed annual recap through its opaque profile link and marks it r
   expect(link).toHaveAttribute('href', '/u/AbCdEf012345/recap/2025');
   fireEvent.click(link);
   expect(onRead).toHaveBeenCalledWith(message);
+});
+
+it('管理通知使用普通消息项展示并仅提供已读，不跳转已删除内容', () => {
+  const message: UserMessage = {
+    id: 'user-notice:1000:00000000-0000-4000-8000-000000000001',
+    type: 'content-moderated',
+    action: 'delete-reply',
+    payload: { title: '作品', contentType: 'reply', count: 2 },
+    createdAt: 1000,
+  };
+  const props = renderPanel({
+    page: { items: [message], total: 1, nextCursor: null },
+  });
+  const text = screen.getByText('你在《作品》的2 条回复已被管理员删除');
+  expect(text.closest('a')).toBeNull();
+  fireEvent.click(screen.getByRole('button', { name: '标记为已读' }));
+  expect(props.onRead).toHaveBeenCalledWith(message);
 });

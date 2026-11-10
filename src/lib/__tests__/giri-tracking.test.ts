@@ -7,6 +7,7 @@ import { db } from '@/lib/db';
 import {
   getUserMessagePage,
   getUserMessageSummary,
+  readAllUserMessages,
   readUserMessage,
 } from '@/lib/messages.server';
 import {
@@ -52,8 +53,78 @@ describe('Giri tracking from upstream metadata to stored messages', () => {
   });
 
   afterEach(async () => {
+    await db.deleteFavorite(username, 'giri', '27100');
     await db.deletePlayRecord(username, 'giri', '27100');
     global.fetch = originalFetch;
+  });
+
+  it('收藏在已有回源结果上生成更新，已读、静音与播放接管保持一致', async () => {
+    await db.deletePlayRecord(username, 'giri', '27100');
+    await db.saveFavorite(username, 'giri', '27100', {
+      title: giriTrackingRecord.title,
+      source_name: 'Giri资源',
+      cover: '',
+      year: '2026',
+      total_episodes: 16,
+      save_time: 1,
+      origin: 'vod',
+      metadata_checked_at: 0,
+    });
+    expect((await getUserMessageSummary(username)).trackingUnreadCount).toBe(0);
+    await refreshRecordAndFavorites();
+    expect(global.fetch).toHaveBeenCalledTimes(1);
+    const summary = await getUserMessageSummary(username);
+    expect(summary).toMatchObject({
+      trackingUnreadCount: 1,
+      latestUnreadAt: expect.any(Number),
+      latestUnread: { type: 'tracking-update', toEpisodes: 18 },
+    });
+    expect(summary.latestTracking).toMatchObject({
+      fromEpisodes: 16,
+      toEpisodes: 18,
+    });
+    expect(summary.latestTracking!.id).toMatch(/^favorite-tracking:/);
+    expect((await getUserMessagePage(username, 20)).items).toContainEqual(
+      summary.latestTracking,
+    );
+    await readUserMessage(username, summary.latestTracking!.id);
+    expect((await getUserMessageSummary(username)).trackingUnreadCount).toBe(0);
+    const read = await db.getFavorite(username, 'giri', '27100');
+    await db.saveFavorite(username, 'giri', '27100', {
+      ...read!,
+      metadata_checked_at: 0,
+    });
+    upstreamHtml = createGiriTrackingHtml(10, 10);
+    await refreshRecordAndFavorites();
+    expect(
+      (await getUserMessageSummary(username)).latestTracking,
+    ).toMatchObject({ fromEpisodes: 18, toEpisodes: 20 });
+    await db.updateUserMessageState(username, {
+      notificationSettings: {
+        mutedKinds: ['tracking-update'],
+        now: Date.now(),
+      },
+    });
+    expect((await getUserMessageSummary(username)).trackingUnreadCount).toBe(0);
+    await db.updateUserMessageState(username, {
+      notificationSettings: { mutedKinds: [], now: Date.now() },
+    });
+    expect((await getUserMessageSummary(username)).trackingUnreadCount).toBe(1);
+    await readAllUserMessages(username);
+    expect((await getUserMessageSummary(username)).trackingUnreadCount).toBe(0);
+    const acknowledged = await db.getFavorite(username, 'giri', '27100');
+    await db.saveFavorite(username, 'giri', '27100', {
+      ...acknowledged!,
+      metadata_checked_at: 0,
+    });
+    upstreamHtml = createGiriTrackingHtml(11, 11);
+    await refreshRecordAndFavorites();
+    expect((await getUserMessageSummary(username)).trackingUnreadCount).toBe(1);
+    await db.savePlayRecord(username, 'giri', '27100', {
+      ...giriTrackingRecord,
+      tracking_enabled: false,
+    });
+    expect((await getUserMessageSummary(username)).trackingUnreadCount).toBe(0);
   });
 
   it.each(['简中 8', '简中8', '简中'])(

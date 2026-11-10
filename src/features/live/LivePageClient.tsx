@@ -279,6 +279,8 @@ function AuthenticatedLivePageClient() {
           liveSources={sources.liveSources}
           epgData={sources.epgData}
           isEpgLoading={sources.isEpgLoading}
+          epgError={sources.epgError}
+          retryEpg={sources.retryEpg}
           favorited={favorited}
           handleToggleFavorite={handleToggleFavorite}
           groupContainerRef={groupContainerRef}

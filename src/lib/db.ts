@@ -472,6 +472,18 @@ class DbManager {
     await storage.deleteAllPlayRecords(userName);
   }
 
+  async getFavoriteUpdateMessagePage(
+    ...args: Parameters<IStorage['getFavoriteUpdateMessagePage']>
+  ) {
+    return (await this.getStorage()).getFavoriteUpdateMessagePage(...args);
+  }
+
+  async readFavoriteUpdate(
+    ...args: Parameters<IStorage['readFavoriteUpdate']>
+  ) {
+    return (await this.getStorage()).readFavoriteUpdate(...args);
+  }
+
   async getFavorite(
     userName: string,
     source: string,
@@ -617,9 +629,13 @@ class DbManager {
     return storage.checkUserExist(userName);
   }
 
-  async changePassword(userName: string, newPassword: string): Promise<void> {
+  async changePassword(
+    userName: string,
+    newPassword: string,
+    admin = false,
+  ): Promise<void> {
     const storage = await this.getStorage();
-    await storage.changePassword(userName, newPassword);
+    await storage.changePassword(userName, newPassword, admin);
   }
 
   async getUserAccess(...args: Parameters<IStorage['getUserAccess']>) {
@@ -812,6 +828,19 @@ class DbManager {
     await storage.deleteInviteCodeUsage(code);
   }
 
+  async getUserNoticeMessages(
+    ...args: Parameters<IStorage['getUserNoticeMessages']>
+  ) {
+    return (await this.getStorage()).getUserNoticeMessages(...args);
+  }
+  async getUserNoticeCount(
+    ...args: Parameters<IStorage['getUserNoticeCount']>
+  ) {
+    return (await this.getStorage()).getUserNoticeCount(...args);
+  }
+  async purgeUserNotices(before: number) {
+    return (await this.getStorage()).purgeUserNotices(before);
+  }
   async getUserMessageState(userName: string): Promise<UserMessageState> {
     const storage = await this.getStorage();
     return storage.getUserMessageState(userName);

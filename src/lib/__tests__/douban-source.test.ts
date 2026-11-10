@@ -111,8 +111,10 @@ describe('readDoubanProxyType', () => {
       DOUBAN_IMAGE_PROXY_TYPE: 'cmliussss-cdn-ali',
     } as typeof window.RUNTIME_CONFIG;
 
-    expect(writeDoubanProxyType('unsupported')).toBe('auto');
-    expect(writeDoubanImageProxyType('unsupported')).toBe('auto');
+    expect(writeDoubanProxyType('unsupported')).toBe(true);
+    expect(readDoubanProxyType()).toBe('auto');
+    expect(writeDoubanImageProxyType('unsupported')).toBe(true);
+    expect(readDoubanImageProxyType()).toBe('auto');
     writeDoubanProxyUrl('https://local.example/data?url=');
     writeDoubanImageProxyUrl('https://local.example/image?url=');
 

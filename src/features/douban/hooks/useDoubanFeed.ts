@@ -21,6 +21,7 @@ import {
   getDoubanRecommends,
 } from '@/lib/douban.client';
 import { DoubanItem, DoubanResult } from '@/lib/types';
+import { isAbortError } from '@/lib/user-facing-error';
 
 export interface CustomCategory {
   name: string;
@@ -418,141 +419,148 @@ export function useDoubanFeed(type: string) {
     [type, primarySelection, secondarySelection],
   );
 
-  const loadInitialData = useCallback(async () => {
-    const requestSnapshot: FeedSnapshot = {
+  const loadInitialData = useCallback(
+    async (force = false) => {
+      const requestSnapshot: FeedSnapshot = {
+        type,
+        primarySelection,
+        secondarySelection,
+        multiLevelSelection: multiLevelValues,
+        selectedWeekday,
+        currentPage: 0,
+      };
+      setLoadFailed(false);
+
+      try {
+        const cached = force ? null : readFeedViewCache(requestSnapshot);
+        if (cached) {
+          setDoubanData(cached.data);
+          restoredCurrentPageRef.current =
+            cached.currentPage > 0 ? cached.currentPage : null;
+          setCurrentPage(cached.currentPage);
+          setHasMore(cached.hasMore);
+          setIsLoadingMore(false);
+          setLoading(false);
+          return;
+        }
+
+        setLoading(true);
+        if (!force) setDoubanData([]);
+        setCurrentPage(0);
+        setHasMore(true);
+        setIsLoadingMore(false);
+
+        let data: DoubanResult;
+
+        if (type === 'custom') {
+          const selectedCategory = customCategories.find(
+            (cat) =>
+              cat.type === primarySelection && cat.query === secondarySelection,
+          );
+          if (selectedCategory) {
+            data = await getDoubanList({
+              tag: selectedCategory.query,
+              type: selectedCategory.type,
+              pageLimit: DOUBAN_PAGE_SIZE,
+              pageStart: 0,
+            });
+          } else {
+            throw new Error('没有找到对应的分类');
+          }
+        } else if (type === 'anime' && primarySelection === '每日放送') {
+          const calendarResult = await GetBangumiCalendarDataWithMeta();
+          const calendarData = calendarResult.data;
+          bangumiCalendarDataRef.current = calendarData;
+          const weekdayItems = getBangumiWeekdayItems(
+            calendarData,
+            selectedWeekday,
+          );
+          if (weekdayItems) {
+            data = {
+              code: 200,
+              message: 'success',
+              list: weekdayItems,
+            };
+            if (calendarResult.usedStaleFallback) {
+              setBangumiCalendarError(
+                'Bangumi 番剧数据获取失败，当前显示的是本地缓存。',
+              );
+            } else {
+              setBangumiCalendarError(null);
+            }
+          } else {
+            throw new Error('没有找到对应的日期');
+          }
+        } else if (type === 'anime') {
+          data = await getDoubanRecommends({
+            kind: primarySelection === '番剧' ? 'tv' : 'movie',
+            pageLimit: DOUBAN_PAGE_SIZE,
+            pageStart: 0,
+            category: '动画',
+            format: primarySelection === '番剧' ? '电视剧' : '',
+            region: multiLevelValues.region || '',
+            year: multiLevelValues.year || '',
+            platform: multiLevelValues.platform || '',
+            sort: multiLevelValues.sort || '',
+            label: multiLevelValues.label || '',
+          });
+        } else if (primarySelection === '全部') {
+          data = await getDoubanRecommends({
+            kind: type === 'show' ? 'tv' : (type as 'tv' | 'movie'),
+            pageLimit: DOUBAN_PAGE_SIZE,
+            pageStart: 0,
+            category: multiLevelValues.type || '',
+            format: type === 'show' ? '综艺' : type === 'tv' ? '电视剧' : '',
+            region: multiLevelValues.region || '',
+            year: multiLevelValues.year || '',
+            platform: multiLevelValues.platform || '',
+            sort: multiLevelValues.sort || '',
+            label: multiLevelValues.label || '',
+          });
+        } else {
+          data = await getDoubanCategories(getRequestParams(0));
+        }
+
+        if (data.code === 200) {
+          const currentSnapshot = { ...currentParamsRef.current };
+          if (isSnapshotEqual(requestSnapshot, currentSnapshot)) {
+            const nextHasMore = getInitialHasMore(requestSnapshot, data.list);
+            setDoubanData(data.list);
+            restoredCurrentPageRef.current = null;
+            setCurrentPage(0);
+            setHasMore(nextHasMore);
+            setLoading(false);
+            writeFeedViewCache(requestSnapshot, data.list, nextHasMore);
+          }
+        } else {
+          throw new Error(data.message || '获取数据失败');
+        }
+      } catch (err) {
+        if (isAbortError(err)) {
+          setLoading(false);
+          return;
+        }
+        console.error(err);
+        const currentSnapshot = { ...currentParamsRef.current };
+        if (isSnapshotEqual(requestSnapshot, currentSnapshot)) {
+          setLoadFailed(true);
+          setCurrentPage(0);
+          setHasMore(false);
+          setIsLoadingMore(false);
+          setLoading(false);
+        }
+      }
+    },
+    [
       type,
       primarySelection,
       secondarySelection,
-      multiLevelSelection: multiLevelValues,
+      multiLevelValues,
       selectedWeekday,
-      currentPage: 0,
-    };
-    setLoadFailed(false);
-
-    try {
-      const cached = readFeedViewCache(requestSnapshot);
-      if (cached) {
-        setDoubanData(cached.data);
-        restoredCurrentPageRef.current =
-          cached.currentPage > 0 ? cached.currentPage : null;
-        setCurrentPage(cached.currentPage);
-        setHasMore(cached.hasMore);
-        setIsLoadingMore(false);
-        setLoading(false);
-        return;
-      }
-
-      setLoading(true);
-      setDoubanData([]);
-      setCurrentPage(0);
-      setHasMore(true);
-      setIsLoadingMore(false);
-
-      let data: DoubanResult;
-
-      if (type === 'custom') {
-        const selectedCategory = customCategories.find(
-          (cat) =>
-            cat.type === primarySelection && cat.query === secondarySelection,
-        );
-        if (selectedCategory) {
-          data = await getDoubanList({
-            tag: selectedCategory.query,
-            type: selectedCategory.type,
-            pageLimit: DOUBAN_PAGE_SIZE,
-            pageStart: 0,
-          });
-        } else {
-          throw new Error('没有找到对应的分类');
-        }
-      } else if (type === 'anime' && primarySelection === '每日放送') {
-        const calendarResult = await GetBangumiCalendarDataWithMeta();
-        const calendarData = calendarResult.data;
-        bangumiCalendarDataRef.current = calendarData;
-        const weekdayItems = getBangumiWeekdayItems(
-          calendarData,
-          selectedWeekday,
-        );
-        if (weekdayItems) {
-          data = {
-            code: 200,
-            message: 'success',
-            list: weekdayItems,
-          };
-          if (calendarResult.usedStaleFallback) {
-            setBangumiCalendarError(
-              'Bangumi 番剧数据获取失败，当前显示的是本地缓存。',
-            );
-          } else {
-            setBangumiCalendarError(null);
-          }
-        } else {
-          throw new Error('没有找到对应的日期');
-        }
-      } else if (type === 'anime') {
-        data = await getDoubanRecommends({
-          kind: primarySelection === '番剧' ? 'tv' : 'movie',
-          pageLimit: DOUBAN_PAGE_SIZE,
-          pageStart: 0,
-          category: '动画',
-          format: primarySelection === '番剧' ? '电视剧' : '',
-          region: multiLevelValues.region || '',
-          year: multiLevelValues.year || '',
-          platform: multiLevelValues.platform || '',
-          sort: multiLevelValues.sort || '',
-          label: multiLevelValues.label || '',
-        });
-      } else if (primarySelection === '全部') {
-        data = await getDoubanRecommends({
-          kind: type === 'show' ? 'tv' : (type as 'tv' | 'movie'),
-          pageLimit: DOUBAN_PAGE_SIZE,
-          pageStart: 0,
-          category: multiLevelValues.type || '',
-          format: type === 'show' ? '综艺' : type === 'tv' ? '电视剧' : '',
-          region: multiLevelValues.region || '',
-          year: multiLevelValues.year || '',
-          platform: multiLevelValues.platform || '',
-          sort: multiLevelValues.sort || '',
-          label: multiLevelValues.label || '',
-        });
-      } else {
-        data = await getDoubanCategories(getRequestParams(0));
-      }
-
-      if (data.code === 200) {
-        const currentSnapshot = { ...currentParamsRef.current };
-        if (isSnapshotEqual(requestSnapshot, currentSnapshot)) {
-          const nextHasMore = getInitialHasMore(requestSnapshot, data.list);
-          setDoubanData(data.list);
-          restoredCurrentPageRef.current = null;
-          setCurrentPage(0);
-          setHasMore(nextHasMore);
-          setLoading(false);
-          writeFeedViewCache(requestSnapshot, data.list, nextHasMore);
-        }
-      } else {
-        throw new Error(data.message || '获取数据失败');
-      }
-    } catch (err) {
-      console.error(err);
-      const currentSnapshot = { ...currentParamsRef.current };
-      if (isSnapshotEqual(requestSnapshot, currentSnapshot)) {
-        setLoadFailed(true);
-        setCurrentPage(0);
-        setHasMore(false);
-        setIsLoadingMore(false);
-        setLoading(false);
-      }
-    }
-  }, [
-    type,
-    primarySelection,
-    secondarySelection,
-    multiLevelValues,
-    selectedWeekday,
-    getRequestParams,
-    customCategories,
-  ]);
+      getRequestParams,
+      customCategories,
+    ],
+  );
 
   useEffect(() => {
     if (!selectorsReady) {
@@ -834,7 +842,7 @@ export function useDoubanFeed(type: string) {
       setLoadFailed(false);
       setRetryCount((count) => count + 1);
     } else {
-      void loadInitialData();
+      void loadInitialData(true);
     }
   }, [currentPage, loadInitialData]);
 

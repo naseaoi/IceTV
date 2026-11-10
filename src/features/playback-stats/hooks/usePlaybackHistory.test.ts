@@ -99,3 +99,19 @@ it('全部成功或空选择保持静默', async () => {
   expect(result.current.items).toEqual([]);
   expect(showToast).not.toHaveBeenCalled();
 });
+
+it('续页失败保留结果和游标，重试加载同一页', async () => {
+  jest
+    .mocked(getPlaybackHistory)
+    .mockResolvedValueOnce({ items, nextCursor: 'next' });
+  const { result } = renderHook(() => usePlaybackHistory());
+  await waitFor(() => expect(result.current.loading).toBe(false));
+  jest.mocked(getPlaybackHistory).mockRejectedValueOnce(new Error('failed'));
+  await act(async () => result.current.loadMore());
+  expect(result.current.error).toBeTruthy();
+  expect(result.current.items).toEqual(items);
+  expect(result.current.hasMore).toBe(true);
+  await act(async () => result.current.retry());
+  expect(getPlaybackHistory).toHaveBeenLastCalledWith('next', undefined, 10);
+  expect(result.current.error).toBeNull();
+});

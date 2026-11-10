@@ -3,14 +3,14 @@ import { act, fireEvent, render, screen } from '@testing-library/react';
 import SearchHistory from './SearchHistory';
 
 const push = jest.fn();
-const deleteSearchHistory = jest.fn();
+const deleteSearchHistory = jest.fn().mockResolvedValue(undefined);
 
 jest.mock('next/navigation', () => ({
   useRouter: () => ({ push }),
 }));
 
 jest.mock('@/lib/db.client', () => ({
-  clearSearchHistory: jest.fn(),
+  clearSearchHistory: jest.fn().mockResolvedValue(undefined),
   deleteSearchHistory: (item: string) => deleteSearchHistory(item),
 }));
 

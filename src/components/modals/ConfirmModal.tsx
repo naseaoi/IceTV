@@ -1,7 +1,7 @@
 'use client';
 
 import { X } from 'lucide-react';
-import { type ReactNode } from 'react';
+import { type ReactNode, useRef, useState } from 'react';
 
 import {
   MODAL_CLOSE_BUTTON_CLASS,
@@ -11,6 +11,7 @@ import {
   MODAL_TITLE_CLASS,
 } from '@/components/modals/modal-styles';
 import ModalShell from '@/components/modals/ModalShell';
+import Spinner from '@/components/Spinner';
 
 interface ConfirmModalProps {
   isOpen: boolean;
@@ -23,7 +24,7 @@ interface ConfirmModalProps {
   onClose?: () => void;
   /** onClose 的别名，向后兼容 */
   onCancel?: () => void;
-  onConfirm: () => void;
+  onConfirm: () => void | Promise<void>;
   confirmText?: string;
   cancelText?: string;
   /** 危险操作（简单模式下确认按钮变红） */
@@ -54,7 +55,12 @@ export default function ConfirmModal({
   cancelClassName,
   containerClassName,
 }: ConfirmModalProps) {
-  const handleClose = onClose ?? onCancel ?? (() => {});
+  const [pending, setPending] = useState(false);
+  const pendingRef = useRef(false);
+  const close = onClose ?? onCancel ?? (() => {});
+  const handleClose = () => {
+    if (!pendingRef.current) close();
+  };
 
   // 高级模式：有 children 时使用标题栏 + 关闭按钮布局
   if (children) {
@@ -104,10 +110,26 @@ export default function ConfirmModal({
     );
   }
 
-  // 简单模式：点击确认后立即关闭弹窗，操作在后台执行
   const handleSimpleConfirm = () => {
-    handleClose();
-    onConfirm();
+    if (pendingRef.current || confirmDisabled) return;
+    const result = onConfirm();
+    if (!result || typeof result.then !== 'function') {
+      handleClose();
+      return;
+    }
+    pendingRef.current = true;
+    setPending(true);
+    void Promise.resolve(result).then(
+      () => {
+        pendingRef.current = false;
+        setPending(false);
+        close();
+      },
+      () => {
+        pendingRef.current = false;
+        setPending(false);
+      },
+    );
   };
 
   return (
@@ -128,6 +150,7 @@ export default function ConfirmModal({
           <button
             type='button'
             onClick={handleClose}
+            disabled={pending}
             className={cancelClassName ?? MODAL_SECONDARY_BUTTON_CLASS}
           >
             {cancelText}
@@ -135,12 +158,14 @@ export default function ConfirmModal({
           <button
             type='button'
             onClick={handleSimpleConfirm}
-            disabled={confirmDisabled}
+            disabled={confirmDisabled || pending}
+            aria-busy={pending}
             className={
               confirmClassName ??
               (danger ? MODAL_DANGER_BUTTON_CLASS : MODAL_PRIMARY_BUTTON_CLASS)
             }
           >
+            {pending && <Spinner className='mr-2 inline-block h-4 w-4' />}
             {confirmText}
           </button>
         </div>

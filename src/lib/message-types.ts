@@ -1,3 +1,8 @@
+import {
+  type UserNoticeMessage,
+  isUserNotice,
+  userNoticeText,
+} from '@/lib/user-notice';
 export type MessageNotificationKind =
   | 'tracking-update'
   | 'follow-review'
@@ -94,6 +99,7 @@ export interface ReviewLikeUserMessage {
   createdAt: number;
 }
 export type UserMessage =
+  | UserNoticeMessage
   | AnnualReportUserMessage
   | AnnouncementUserMessage
   | TrackingUpdateUserMessage
@@ -114,7 +120,43 @@ export interface AnnouncementHistoryPage {
   nextCursor: string | null;
 }
 
+export interface MessageToastPreview {
+  noticeText?: string;
+  type: UserMessage['type'];
+  createdAt: number;
+  nickname?: string | null;
+  title?: string;
+  year?: number;
+  toEpisodes?: number;
+}
+
+export function toMessageToastPreview(
+  message: UserMessage,
+): MessageToastPreview {
+  return {
+    type: message.type,
+    ...(isUserNotice(message) ? { noticeText: userNoticeText(message) } : {}),
+    createdAt: message.createdAt,
+    ...('author' in message ? { nickname: message.author.nickname } : {}),
+    ...(message.type === 'new-follower'
+      ? { nickname: message.follower.nickname }
+      : {}),
+    ...(message.type === 'review-like'
+      ? { nickname: message.latestLiker.nickname }
+      : {}),
+    ...('title' in message ? { title: message.title } : {}),
+    ...(message.type === 'annual-report' || message.type === 'follow-recap'
+      ? { year: message.year }
+      : {}),
+    ...(message.type === 'tracking-update'
+      ? { toEpisodes: message.toEpisodes }
+      : {}),
+  };
+}
+
 export interface UserMessageSummary {
+  latestUnreadAt: number;
+  latestUnread: MessageToastPreview | null;
   unreadCount: number;
   trackingUnreadCount: number;
   followReviewUnreadCount: number;

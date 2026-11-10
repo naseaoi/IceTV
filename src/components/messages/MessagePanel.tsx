@@ -5,12 +5,15 @@ import {
   CheckCheck,
   ChevronLeft,
   Film,
+  Flag,
   Inbox,
   Megaphone,
   Play,
   RefreshCw,
   Rss,
   Settings,
+  ShieldCheck,
+  UserCog,
   X,
 } from 'lucide-react';
 import Link from 'next/link';
@@ -38,6 +41,7 @@ import { useListLayoutMotion } from '@/hooks/useListLayoutMotion';
 import { usePresence } from '@/hooks/usePresence';
 import { UserMessage, UserMessagePage } from '@/lib/message-types';
 import { formatRelativeTime } from '@/lib/relative-time';
+import { isUserNotice, userNoticeText } from '@/lib/user-notice';
 
 interface MessagePanelProps {
   open: boolean;
@@ -104,6 +108,32 @@ function SocialLine({ name, action }: { name: string; action: string }) {
 }
 
 function MessageBody({ message }: { message: UserMessage }) {
+  if (isUserNotice(message)) {
+    const Icon =
+      message.type === 'account-change'
+        ? UserCog
+        : message.type === 'report-result'
+          ? Flag
+          : ShieldCheck;
+    return (
+      <>
+        <div
+          className={`${MESSAGE_LEAD_CLASS} flex items-center justify-center rounded-full bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-300`}
+        >
+          <Icon className='h-[18px] w-[18px]' />
+        </div>
+        <div className='min-w-0 flex-1 pt-0.5'>
+          <p className={`${MESSAGE_BODY_CLASS} break-words`}>
+            {userNoticeText(message)}
+          </p>
+          <p className={MESSAGE_META_CLASS}>
+            {formatRelativeTime(message.createdAt)}
+          </p>
+        </div>
+      </>
+    );
+  }
+
   if (message.type === 'announcement' || message.type === 'annual-report')
     return (
       <>

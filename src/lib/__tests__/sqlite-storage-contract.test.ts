@@ -11,6 +11,7 @@ import {
 import { assertPlaybackAnnualData } from '@/lib/__tests__/__fixtures__/playback-annual-contract';
 import { assertPlaybackPeriodRange } from '@/lib/__tests__/__fixtures__/playback-period-contract';
 import { assertStatsReuse } from '@/lib/__tests__/__fixtures__/stats-reuse-contract';
+import { userNoticeContract } from '@/lib/__tests__/__fixtures__/user-notice-contract';
 import { assertWatchHistoryContract } from '@/lib/__tests__/__fixtures__/watch-history-contract';
 import { DEFAULT_RUNTIME_PARAMS } from '@/lib/runtime-params';
 import type { AdminConfig } from '@/types/admin';
@@ -1142,7 +1143,9 @@ test('normalizes legacy danmaku usernames even without a users row', async () =>
     migrateLegacyUsernameCasing(): void;
   };
   internal.db
-    .prepare('INSERT INTO user_danmaku VALUES (?, ?, ?, ?, ?, ?, ?, ?)')
+    .prepare(
+      'INSERT INTO user_danmaku (id, episode_key, username, time_ms, text, mode, color, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+    )
     .run('legacy-id', 'dandan:1', 'Alice', 0, 'text', 0, '#ffffff', 1);
   internal.migrateLegacyUsernameCasing();
   expect((await storage.getAllUserDanmaku('alice'))[0].username).toBe('alice');
@@ -1185,4 +1188,53 @@ it('merges annual recap username casing and retains the latest snapshot', async 
   } finally {
     internal.db.close();
   }
+});
+
+describe('SQLite 管理通知契约', () => {
+  userNoticeContract(() => new LocalSqliteStorage(':memory:'));
+});
+
+it('通知写入失败回滚评价删除，用户名合并迁移通知并解决幂等冲突', async () => {
+  const storage = new LocalSqliteStorage(':memory:');
+  const raw = (storage as unknown as { db: import('better-sqlite3').Database })
+    .db;
+  const { videoReview } =
+    await import('@/lib/__tests__/__fixtures__/video-review-contract');
+  await storage.setVideoReview('alice', videoReview);
+  raw.exec(
+    "CREATE TRIGGER fail_notice BEFORE INSERT ON user_notice_events BEGIN SELECT RAISE(ABORT, 'notice failed'); END",
+  );
+  await expect(
+    storage.deleteVideoReview(
+      'alice',
+      videoReview.title_norm,
+      videoReview.year,
+      true,
+    ),
+  ).rejects.toThrow('notice failed');
+  expect(
+    await storage.getVideoReview(
+      'alice',
+      videoReview.title_norm,
+      videoReview.year,
+    ),
+  ).not.toBeNull();
+  raw.exec('DROP TRIGGER fail_notice');
+  await storage.deleteVideoReview(
+    'alice',
+    videoReview.title_norm,
+    videoReview.year,
+    true,
+  );
+  raw
+    .prepare('UPDATE user_notice_events SET recipient_username = ?')
+    .run('Alice');
+  (
+    storage as unknown as { migrateLegacyUsernameCasing(): void }
+  ).migrateLegacyUsernameCasing();
+  expect(await storage.getUserNoticeCount('alice', 0, [], Date.now())).toBe(1);
+  expect(
+    raw.prepare('SELECT recipient_username FROM user_notice_events').get(),
+  ).toEqual({ recipient_username: 'alice' });
+  raw.close();
 });

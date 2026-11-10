@@ -1,4 +1,16 @@
-import { act, render, screen } from '@testing-library/react';
+import { writeStorage } from '@/lib/browser-storage';
+import { showToast } from '@/lib/toast';
+jest.mock('@/lib/browser-storage', () => ({
+  readStorage: jest.fn().mockReturnValue(null),
+  writeStorage: jest.fn().mockReturnValue(true),
+  removeStorage: jest.fn().mockReturnValue(true),
+  listStorageKeys: jest.fn().mockReturnValue([]),
+}));
+jest.mock('@/lib/toast', () => ({
+  showToast: jest.fn(),
+  dismissToast: jest.fn(),
+}));
+import { act, fireEvent, render, screen } from '@testing-library/react';
 import type { ReactNode } from 'react';
 
 import PlayerShortcutsModal from '@/components/PlayerShortcutsModal';
@@ -48,5 +60,18 @@ describe('PlayerShortcutsModal', () => {
     expect(
       screen.queryByRole('button', { name: '取消' }),
     ).not.toBeInTheDocument();
+  });
+});
+
+it('快捷键写入失败保留草稿面板', () => {
+  jest.mocked(writeStorage).mockReturnValueOnce(false);
+  render(<PlayerShortcutsModal />);
+  act(() => {
+    window.dispatchEvent(new CustomEvent(OPEN_PLAYER_SHORTCUTS_EVENT));
+  });
+  fireEvent.click(screen.getByRole('button', { name: '保存' }));
+  expect(screen.getByRole('button', { name: '保存' })).toBeInTheDocument();
+  expect(showToast).toHaveBeenCalledWith('快捷键未能保存，请重试', 'error', {
+    key: 'local-preference-save',
   });
 });

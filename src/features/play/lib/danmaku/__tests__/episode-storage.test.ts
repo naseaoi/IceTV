@@ -3,7 +3,11 @@ import {
   rankCandidatesByEpisode,
   searchDanmakuCandidates,
 } from '@/features/play/lib/danmaku/client';
-import { carryOverDanmakuEpisodeMapping } from '@/features/play/lib/danmaku/episode-storage';
+import {
+  carryOverDanmakuEpisodeMapping,
+  clearPersistedEpisodeId,
+  persistEpisodeId,
+} from '@/features/play/lib/danmaku/episode-storage';
 import { loadDanmakuForEpisode } from '@/features/play/lib/danmaku/resolve';
 import {
   readDanmakuEpisodeId,
@@ -88,3 +92,20 @@ describe('carryOverDanmakuEpisodeMapping', () => {
     expect(readDanmakuEpisodeId('b:b-id:2')).toBe(99);
   });
 });
+
+it.each([false, true])(
+  '绑定和清除成功=%s 时只在服务端确认后修改本地值',
+  async (ok) => {
+    const previousFetch = global.fetch;
+    global.fetch = jest.fn().mockResolvedValue({ ok });
+    try {
+      writeDanmakuEpisodeId('a:a-id:2', 42);
+      expect(await persistEpisodeId('a', 'a-id', 2, 99)).toBe(ok);
+      expect(readDanmakuEpisodeId('a:a-id:2')).toBe(ok ? 99 : 42);
+      expect(await clearPersistedEpisodeId('a', 'a-id', 2)).toBe(ok);
+      expect(readDanmakuEpisodeId('a:a-id:2')).toBe(ok ? null : 42);
+    } finally {
+      global.fetch = previousFetch;
+    }
+  },
+);

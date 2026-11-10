@@ -13,6 +13,7 @@ import {
   LibraryEmptySkeleton,
   LibraryEmptyState,
 } from '@/components/LibraryPage';
+import LoadErrorState from '@/components/LoadErrorState';
 import ConfirmModal from '@/components/modals/ConfirmModal';
 import { POSTER_GRID_CLASS } from '@/components/poster-grid-layout';
 import SkeletonText from '@/components/SkeletonText';
@@ -117,6 +118,8 @@ export function PlaybackHistoryLibrary({
     items,
     loading,
     loadingMore,
+    error,
+    retry,
     refreshing,
     searchText,
     setSearchText,
@@ -155,7 +158,8 @@ export function PlaybackHistoryLibrary({
   };
 
   const deleteSelected = async () => {
-    await removeEntries(Array.from(selectedIds));
+    const removed = await removeEntries(Array.from(selectedIds));
+    if (removed < selectedIds.size) throw new Error('删除未完成');
     setConfirmOpen(false);
     exitEditing();
   };
@@ -165,6 +169,8 @@ export function PlaybackHistoryLibrary({
     content = (
       <PlaybackHistoryGridSkeleton initialCount={initialSkeletonCount} />
     );
+  } else if (error && items.length === 0) {
+    content = <LoadErrorState message={error} onRetry={retry} />;
   } else if (items.length === 0) {
     content = searchKeyword ? (
       <LibraryEmptyState
@@ -212,7 +218,8 @@ export function PlaybackHistoryLibrary({
               onActivate={editing ? toggleSelected : playHistoryItem}
               onPrefetch={prefetchPlayPage}
               onDelete={async (item) => {
-                await removeEntries([item.id]);
+                if ((await removeEntries([item.id])) === 0)
+                  throw new Error('删除未完成');
               }}
             />
           </section>
@@ -318,6 +325,9 @@ export function PlaybackHistoryLibrary({
 
       {content}
 
+      {error && items.length > 0 && (
+        <LoadErrorState message={error} onRetry={retry} />
+      )}
       <ConfirmModal
         isOpen={confirmOpen}
         title={`删除 ${selectedIds.size} 条观看记录？`}

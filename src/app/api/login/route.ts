@@ -1,4 +1,4 @@
-﻿import crypto from 'crypto';
+import crypto from 'crypto';
 import { NextRequest, NextResponse } from 'next/server';
 
 import { db } from '@/lib/db';
@@ -273,7 +273,14 @@ export async function POST(req: NextRequest) {
 
       const user = await db.getUserAccess(username);
       if (user && user.banned) {
-        return NextResponse.json({ error: '用户被封禁' }, { status: 401 });
+        return NextResponse.json(
+          {
+            error: '账号已被封禁，请联系管理员',
+            code: 'USER_BANNED',
+            accountStatus: 'banned',
+          },
+          { status: 403 },
+        );
       }
 
       const response = NextResponse.json({ ok: true });
@@ -291,7 +298,10 @@ export async function POST(req: NextRequest) {
       return response;
     } catch (err) {
       console.error('数据库验证失败', err);
-      return NextResponse.json({ error: '数据库错误' }, { status: 500 });
+      return NextResponse.json(
+        { error: '登录暂时不可用，请稍后重试' },
+        { status: 500 },
+      );
     }
   } catch (error) {
     console.error('登录接口异常', error);

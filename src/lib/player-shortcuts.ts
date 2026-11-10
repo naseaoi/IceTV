@@ -131,10 +131,12 @@ export function readPlayerShortcuts(): PlayerShortcutMap {
   }
 }
 
-export function writePlayerShortcuts(map: PlayerShortcutMap): void {
-  if (typeof window === 'undefined') return;
-  writeStorage(PLAYER_SHORTCUTS_STORAGE_KEY, JSON.stringify(map));
+export function writePlayerShortcuts(map: PlayerShortcutMap): boolean {
+  if (typeof window === 'undefined') return false;
+  if (!writeStorage(PLAYER_SHORTCUTS_STORAGE_KEY, JSON.stringify(map)))
+    return false;
   window.dispatchEvent(new CustomEvent(PLAYER_SHORTCUTS_CHANGED_EVENT));
+  return true;
 }
 
 function normalizeKey(key: string): string {

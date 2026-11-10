@@ -1,4 +1,5 @@
 import type Database from 'better-sqlite3';
+import { randomUUID } from 'crypto';
 
 import { getOwnerUsername } from '@/lib/env.server';
 import {
@@ -11,6 +12,8 @@ import {
   UserAccessPatch,
   userAccessValues,
 } from '@/lib/user-access';
+import { accessNoticeAction, accessPermissionsKey } from '@/lib/user-notice';
+import { noticeInsert } from '@/lib/user-notice-storage';
 import { normalizeUsername } from '@/lib/username';
 import type { AdminConfig } from '@/types/admin';
 
@@ -62,13 +65,39 @@ export class SqliteUserAccessStore {
   ): number {
     return this.db
       .transaction(() => {
+        const configRow = this.db
+          .prepare('SELECT config_json FROM admin_config WHERE id = 1')
+          .get() as { config_json: string } | undefined;
+        const config = configRow
+          ? (JSON.parse(configRow.config_json) as AdminConfig)
+          : null;
         let count = 0;
         for (const username of [
           ...new Set(usernames.map(normalizeUsername)),
         ].sort()) {
           const user = this.get(username);
           if (!user || !canManageUserAccess(user, guard)) continue;
-          this.put({ ...user, ...patch });
+          const next = effectiveUserAccess({ ...user, ...patch });
+          this.put(next);
+          const change = accessNoticeAction(user, next);
+          const action =
+            change === 'permissions-changed' &&
+            config &&
+            accessPermissionsKey(user, config) ===
+              accessPermissionsKey(next, config)
+              ? null
+              : change;
+          if (action) {
+            const event = noticeInsert(
+              'sqlite',
+              username,
+              randomUUID(),
+              'account-change',
+              action,
+              {},
+            );
+            this.db.prepare(event.sql).run(...event.params);
+          }
           count++;
         }
         return count;

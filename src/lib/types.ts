@@ -60,6 +60,8 @@ export interface Favorite {
   metadata_checked_at?: number;
   search_title?: string; // 搜索时使用的标题
   origin?: 'vod' | 'live';
+  update_baseline_episodes?: number;
+  update_detected_at?: number;
   watch_status?: FavoriteWatchStatus;
   watched_at?: number;
 }
@@ -440,6 +442,8 @@ export interface UserSocialData {
 }
 
 export interface UserMessageStateUpdate {
+  userNotice?: { id: string; createdAt: number };
+  userNoticeReadAt?: number;
   annualReportReadYear?: number;
   notificationSettings?: {
     mutedKinds: import('@/lib/message-types').MessageNotificationKind[];
@@ -458,6 +462,8 @@ export interface UserMessageStateUpdate {
 }
 
 export interface UserMessageState {
+  userNoticeReadAt?: number;
+  userNoticeReadIds?: string[];
   annualReportReadYear?: number;
   mutedKinds?: import('@/lib/message-types').MessageNotificationKind[];
   newFollowerReadAt?: number;
@@ -563,6 +569,18 @@ export interface IStorage {
   deleteAllPlayRecords(userName: string): Promise<void>;
 
   // 收藏相关
+  getFavoriteUpdateMessagePage(
+    userName: string,
+    limit: number,
+    before?: import('@/lib/message-cursor.server').MessageCursor | null,
+  ): Promise<
+    import('@/features/favorites/lib/favorite-tracking').FavoriteMessagePage
+  >;
+  readFavoriteUpdate(
+    userName: string,
+    key: string,
+    episodes: number,
+  ): Promise<void>;
   getFavorite(userName: string, key: string): Promise<Favorite | null>;
   setFavorite(userName: string, key: string, favorite: Favorite): Promise<void>;
   saveMergedFavorite(
@@ -802,7 +820,11 @@ export interface IStorage {
   // 检查用户是否存在（无需密码）
   checkUserExist(userName: string): Promise<boolean>;
   // 修改用户密码
-  changePassword(userName: string, newPassword: string): Promise<void>;
+  changePassword(
+    userName: string,
+    newPassword: string,
+    admin?: boolean,
+  ): Promise<void>;
   // 删除用户（包括密码、搜索历史、播放记录、收藏夹）
   deleteUser(
     userName: string,
@@ -850,6 +872,17 @@ export interface IStorage {
   ): Promise<boolean>;
   getAllUsers(): Promise<string[]>;
 
+  getUserNoticeMessages(
+    ...args: Parameters<
+      import('@/lib/user-notice-storage').UserNoticeStorage['messages']
+    >
+  ): Promise<import('@/lib/user-notice').UserNoticeMessage[]>;
+  getUserNoticeCount(
+    ...args: Parameters<
+      import('@/lib/user-notice-storage').UserNoticeStorage['count']
+    >
+  ): Promise<number>;
+  purgeUserNotices(before: number): Promise<number>;
   getUserMessageState(userName: string): Promise<UserMessageState>;
   setUserMessageState(userName: string, state: UserMessageState): Promise<void>;
   updateUserMessageState(

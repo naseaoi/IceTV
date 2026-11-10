@@ -2,6 +2,11 @@
 
 import type { SiteAnnouncement } from '@/lib/types';
 
+const mockGetFavoriteUpdateMessagePage = jest.fn();
+const mockGetFavorite = jest.fn();
+const mockReadFavoriteUpdate = jest.fn();
+const mockGetUserNoticeMessages = jest.fn();
+const mockGetUserNoticeCount = jest.fn();
 const mockHasPlaybackAnnualActivity = jest.fn();
 const mockGetSocialNotifications = jest.fn();
 const mockGetSocialNotificationCount = jest.fn();
@@ -23,6 +28,13 @@ const mockSavePlayRecordsByKey = jest.fn();
 
 jest.mock('@/lib/db', () => ({
   db: {
+    getFavoriteUpdateMessagePage: (...args: unknown[]) =>
+      mockGetFavoriteUpdateMessagePage(...args),
+    getFavorite: (...args: unknown[]) => mockGetFavorite(...args),
+    readFavoriteUpdate: (...args: unknown[]) => mockReadFavoriteUpdate(...args),
+    getUserNoticeMessages: (...args: unknown[]) =>
+      mockGetUserNoticeMessages(...args),
+    getUserNoticeCount: (...args: unknown[]) => mockGetUserNoticeCount(...args),
     getFollowRecapMessages: (...args: unknown[]) =>
       mockGetFollowRecapMessages(...args),
     getFollowRecapMessageCount: (...args: unknown[]) =>
@@ -177,11 +189,16 @@ describe('messages server', () => {
 
   beforeEach(() => {
     jest.clearAllMocks();
+    mockGetFavoriteUpdateMessagePage.mockResolvedValue({ items: [], total: 0 });
+    mockGetFavorite.mockResolvedValue(null);
+    mockReadFavoriteUpdate.mockResolvedValue(undefined);
     mockHasPlaybackAnnualActivity.mockResolvedValue(false);
     mockGetSocialNotifications.mockResolvedValue([]);
     mockGetSocialNotificationCount.mockResolvedValue(0);
     mockGetReviewReplyMessages.mockResolvedValue([]);
     mockGetReviewReplyMessageCount.mockResolvedValue(0);
+    mockGetUserNoticeMessages.mockResolvedValue([]);
+    mockGetUserNoticeCount.mockResolvedValue(0);
     mockGetFollowRecapMessages.mockResolvedValue([]);
     mockGetFollowRecapMessageCount.mockResolvedValue(0);
     mockGetFollowReviewMessages.mockResolvedValue([]);
@@ -208,6 +225,115 @@ describe('messages server', () => {
     mockSavePlayRecordsByKey.mockResolvedValue(undefined);
   });
 
+  it('收藏与播放同毫秒分页不重漏，摘要和已读使用收藏基线', async () => {
+    const { buildFavoriteUpdateMessage } =
+      await import('@/features/favorites/lib/favorite-tracking');
+    const favorite = { ...updatedRecord, update_detected_at: 4000 };
+    const message = buildFavoriteUpdateMessage('source+favorite', favorite)!;
+    mockGetPublishedAnnouncements.mockResolvedValue([]);
+    mockGetFavoriteUpdateMessagePage.mockResolvedValue({
+      items: [message],
+      total: 1,
+    });
+    const first = await getUserMessagePage('reader', 1);
+    expect(first.items[0].id).toMatch(/^tracking:/);
+    const second = await getUserMessagePage('reader', 1, first.nextCursor);
+    expect(second.items).toEqual([message]);
+    expect(second.nextCursor).toBeNull();
+    expect(mockGetFavoriteUpdateMessagePage).toHaveBeenLastCalledWith(
+      'reader',
+      2,
+      { createdAt: 4000, key: 'tracking:source-a+video-1' },
+    );
+    mockGetUnreadTrackingPlayRecordPage.mockResolvedValue({
+      items: {},
+      total: 0,
+      nextCursor: null,
+    });
+    const summary = await getUserMessageSummary('reader');
+    expect(summary).toMatchObject({
+      trackingUnreadCount: 1,
+      unreadCount: 1,
+      latestUnreadAt: 4000,
+      latestUnread: { title: favorite.title, toEpisodes: 12 },
+    });
+    mockGetFavorite.mockResolvedValue(favorite);
+    mockGetPlayRecord.mockResolvedValue(null);
+    expect(await readUserMessage('reader', message.id)).toEqual({ message });
+    expect(mockReadFavoriteUpdate).toHaveBeenCalledWith(
+      'reader',
+      'source+favorite',
+      12,
+    );
+    await readAllUserMessages('reader');
+    expect(mockReadFavoriteUpdate).toHaveBeenCalledTimes(2);
+    mockGetPlayRecord.mockResolvedValue(updatedRecord);
+    expect(await readUserMessage('reader', message.id)).toBeNull();
+    mockGetUserMessageState.mockResolvedValue({
+      mutedKinds: ['tracking-update'],
+    });
+    expect((await getUserMessageSummary('reader')).trackingUnreadCount).toBe(0);
+    expect(await readUserMessage('reader', message.id)).toBeNull();
+  });
+
+  it('管理通知必收并参与未读摘要、联合分页、单条与全部已读', async () => {
+    const notice = {
+      id: 'user-notice:9000:00000000-0000-4000-8000-000000000001',
+      type: 'account-change',
+      action: 'set-admin',
+      payload: {},
+      createdAt: 9000,
+    };
+    mockGetPublishedAnnouncements.mockResolvedValue([]);
+    mockGetUserMessageState.mockResolvedValue({
+      mutedKinds: [
+        'tracking-update',
+        'follow-review',
+        'review-reply',
+        'new-follower',
+        'review-like',
+      ],
+    });
+    mockGetUserNoticeMessages.mockResolvedValue([notice]);
+    mockGetUserNoticeCount.mockResolvedValue(1);
+    expect(await getUserMessageSummary('reader')).toMatchObject({
+      unreadCount: 1,
+      latestUnreadAt: 9000,
+      latestUnread: { type: 'account-change', noticeText: '你已被设为管理员' },
+    });
+    expect(await getUserMessagePage('reader', 10)).toMatchObject({
+      items: [notice],
+      total: 1,
+    });
+    expect(await readUserMessage('reader', notice.id)).toEqual({
+      message: notice,
+    });
+    expect(mockUpdateUserMessageState).toHaveBeenLastCalledWith('reader', {
+      userNotice: { id: notice.id, createdAt: 9000 },
+    });
+    await readAllUserMessages('reader');
+    expect(mockUpdateUserMessageState).toHaveBeenLastCalledWith(
+      'reader',
+      expect.objectContaining({ userNoticeReadAt: expect.any(Number) }),
+    );
+  });
+
+  it('管理消息游标之后保留同毫秒的追更消息', async () => {
+    const { encodeCursorPosition } =
+      await import('@/lib/message-cursor.server');
+    const before = encodeCursorPosition(
+      9000,
+      'user-notice:00000000-0000-4000-8000-000000000001',
+    );
+    await getUserMessagePage('reader', 10, before);
+    expect(mockGetUnreadTrackingPlayRecordPage).toHaveBeenLastCalledWith(
+      'reader',
+      11,
+      9000,
+      '￿',
+    );
+  });
+
   it('静音类型跳过查询并排除列表、计数与摘要 revision', async () => {
     mockGetUserMessageState.mockResolvedValue({
       mutedKinds: [
@@ -220,6 +346,8 @@ describe('messages server', () => {
     });
     const summary = await getUserMessageSummary('reader');
     expect(summary).toMatchObject({
+      latestUnreadAt: 5000,
+      latestUnread: { type: 'announcement', createdAt: 5000 },
       unreadCount: 1,
       trackingUnreadCount: 0,
       followReviewUnreadCount: 0,
@@ -240,6 +368,56 @@ describe('messages server', () => {
       summary.revision,
     );
     expect(await readUserMessage('reader', 'new-follower:any')).toBeNull();
+  });
+
+  it('摘要取最新点赞事件的时间与轻量信息，取消点赞仅改变 revision', async () => {
+    const like = {
+      id: 'review-like:latest',
+      type: 'review-like',
+      latestLiker: {
+        profileId: 'Reader000001',
+        nickname: '读者',
+        avatarSeed: null,
+      },
+      likeCount: 2,
+      review: { profileId: 'Author000001', title_norm: 'work', year: '' },
+      title: '作品',
+      year: '',
+      cover: '',
+      createdAt: 9000,
+    };
+    mockGetSocialNotifications.mockImplementation(async (kind) =>
+      kind === 'review-like' ? [like] : [],
+    );
+    mockGetSocialNotificationCount.mockImplementation(async (kind) =>
+      kind === 'review-like' ? 1 : 0,
+    );
+    const before = await getUserMessageSummary('author');
+    expect(before.latestUnreadAt).toBe(9000);
+    expect(before.latestUnread).toEqual({
+      type: 'review-like',
+      createdAt: 9000,
+      nickname: '读者',
+      title: '作品',
+    });
+    like.likeCount = 1;
+    const after = await getUserMessageSummary('author');
+    expect(after.revision).not.toBe(before.revision);
+    expect(after.latestUnreadAt).toBe(before.latestUnreadAt);
+    mockGetUserMessageState.mockResolvedValue({ mutedKinds: ['review-like'] });
+    const muted = await getUserMessageSummary('author');
+    expect(muted.latestUnreadAt).toBe(5000);
+    expect(muted.latestUnread?.type).toBe('announcement');
+    mockGetPublishedAnnouncements.mockResolvedValue([]);
+    mockGetUnreadTrackingPlayRecordPage.mockResolvedValue({
+      items: {},
+      total: 0,
+      nextCursor: null,
+    });
+    expect(await getUserMessageSummary('author')).toMatchObject({
+      latestUnreadAt: 0,
+      latestUnread: null,
+    });
   });
 
   it('新粉丝与点赞参与摘要、混排、单条及全部已读', async () => {
@@ -737,10 +915,15 @@ describe('messages server', () => {
 describe('annual report messages', () => {
   beforeEach(() => {
     jest.clearAllMocks();
+    mockGetFavoriteUpdateMessagePage.mockResolvedValue({ items: [], total: 0 });
+    mockGetFavorite.mockResolvedValue(null);
+    mockReadFavoriteUpdate.mockResolvedValue(undefined);
     jest.spyOn(Date, 'now').mockReturnValue(Date.parse('2026-12-19T16:00:00Z'));
     usePersistedUserMessageState();
     mockHasPlaybackAnnualActivity.mockResolvedValue(true);
     mockGetPublishedAnnouncements.mockResolvedValue([]);
+    mockGetUserNoticeMessages.mockResolvedValue([]);
+    mockGetUserNoticeCount.mockResolvedValue(0);
     mockGetFollowRecapMessages.mockResolvedValue([]);
     mockGetFollowRecapMessageCount.mockResolvedValue(0);
     mockGetFollowReviewMessages.mockResolvedValue([]);

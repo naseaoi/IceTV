@@ -4,7 +4,7 @@ import { useSearchParams } from 'next/navigation';
 
 import DoubanCustomSelector from '@/components/DoubanCustomSelector';
 import DoubanSelector from '@/components/DoubanSelector';
-import AlertModal from '@/components/modals/AlertModal';
+import LoadErrorState from '@/components/LoadErrorState';
 import { PAGE_CONTAINER_CLASS } from '@/components/page-container';
 import PageLayout from '@/components/PageLayout';
 import PosterCard from '@/components/PosterCard';
@@ -47,11 +47,15 @@ export function DoubanPageClient() {
     loadFailed,
     retryLoad,
     bangumiCalendarError,
-    clearBangumiCalendarError,
   } = useDoubanFeed(type);
 
   const canLoadMore =
-    hasMore && !loadFailed && !isLoadingMore && !loading && selectorsReady;
+    hasMore &&
+    !loadFailed &&
+    !bangumiCalendarError &&
+    !isLoadingMore &&
+    !loading &&
+    selectorsReady;
   const showContent = !loading && selectorsReady;
 
   const selectorNode =
@@ -113,24 +117,11 @@ export function DoubanPageClient() {
           )}
         </div>
 
-        {showContent && loadFailed && (
-          <div
-            className={`flex flex-col items-center justify-center gap-3 text-sm text-gray-500 dark:text-gray-400 ${
-              doubanData.length > 0 ? 'h-24' : 'py-24'
-            }`}
-          >
-            加载失败
-            <button
-              type='button'
-              onClick={retryLoad}
-              className='rounded-full border border-gray-200 px-4 py-1.5 text-xs text-gray-700 transition-colors hover:bg-gray-100 dark:border-white/10 dark:text-gray-200 dark:hover:bg-white/[0.06]'
-            >
-              重试
-            </button>
-          </div>
+        {showContent && (loadFailed || bangumiCalendarError) && (
+          <LoadErrorState onRetry={retryLoad} />
         )}
 
-        {hasMore && !loading && !loadFailed && (
+        {hasMore && !loading && !loadFailed && !bangumiCalendarError && (
           <div
             ref={loadingRef}
             className='flex h-24 items-center justify-center'
@@ -145,30 +136,26 @@ export function DoubanPageClient() {
           </div>
         )}
 
-        {!hasMore && !loadFailed && doubanData.length > 0 && (
-          <div className='mt-6 flex items-center gap-4 py-10 text-xs text-gray-400 dark:text-gray-500'>
-            <span className='h-px flex-1 bg-gray-200 dark:bg-white/[0.06]' />
-            已加载全部
-            <span className='h-px flex-1 bg-gray-200 dark:bg-white/[0.06]' />
-          </div>
-        )}
+        {!hasMore &&
+          !loadFailed &&
+          !bangumiCalendarError &&
+          doubanData.length > 0 && (
+            <div className='mt-6 flex items-center gap-4 py-10 text-xs text-gray-400 dark:text-gray-500'>
+              <span className='h-px flex-1 bg-gray-200 dark:bg-white/[0.06]' />
+              已加载全部
+              <span className='h-px flex-1 bg-gray-200 dark:bg-white/[0.06]' />
+            </div>
+          )}
 
-        {showContent && !loadFailed && doubanData.length === 0 && (
-          <div className='py-24 text-center text-sm text-gray-500 dark:text-gray-400'>
-            暂无相关内容
-          </div>
-        )}
+        {showContent &&
+          !loadFailed &&
+          !bangumiCalendarError &&
+          doubanData.length === 0 && (
+            <div className='py-24 text-center text-sm text-gray-500 dark:text-gray-400'>
+              暂无相关内容
+            </div>
+          )}
       </div>
-
-      <AlertModal
-        isOpen={Boolean(bangumiCalendarError)}
-        onClose={clearBangumiCalendarError}
-        type='error'
-        title='番剧数据获取失败'
-        message={bangumiCalendarError || undefined}
-        showConfirm
-        confirmText='知道了'
-      />
     </PageLayout>
   );
 }

@@ -9,6 +9,7 @@ import {
 import { UserGroupTable } from '@/features/admin/components/tabs/user-config/UserGroupTable';
 import UserConfigTab from '@/features/admin/components/tabs/UserConfigTab';
 import { showToast } from '@/lib/toast';
+import { DisplayableError } from '@/lib/user-facing-error';
 
 const mockBatchPost = jest.fn();
 jest.mock('@/lib/toast', () => ({
@@ -21,6 +22,7 @@ jest.mock('@/features/admin/lib/api', () => ({
   adminGet: jest.fn(),
 }));
 const mockUserAction = jest.fn();
+const mockUserGroupAction = jest.fn();
 let mockRows: Array<{
   username: string;
   role: string;
@@ -73,9 +75,6 @@ jest.mock('@/features/admin/hooks/useUserActivity', () => ({
   }),
 }));
 
-jest.mock('@/features/admin/components/tabs/user-config/AddUserForm', () => ({
-  AddUserForm: () => null,
-}));
 jest.mock(
   '@/features/admin/components/tabs/user-config/BatchUserGroupDialog',
   () => ({
@@ -89,10 +88,6 @@ jest.mock(
   }),
 );
 jest.mock(
-  '@/features/admin/components/tabs/user-config/ChangePasswordForm',
-  () => ({ ChangePasswordForm: () => null }),
-);
-jest.mock(
   '@/features/admin/components/tabs/user-config/DeleteUserConfirm',
   () => ({ DeleteUserConfirm: () => null }),
 );
@@ -103,7 +98,7 @@ jest.mock(
 
 jest.mock('@/features/admin/hooks/useAdminUserActions', () => ({
   useAdminUserActions: () => ({
-    userGroupAction: jest.fn(),
+    userGroupAction: mockUserGroupAction,
     assignUserGroups: jest.fn(),
     batchUpdateUserGroups: jest.fn(),
     updateUserApis: jest.fn(),
@@ -145,7 +140,66 @@ describe('UserConfigTab sensitive actions', () => {
     jest.clearAllMocks();
     mockNextCursor = null;
     mockUserAction.mockResolvedValue(undefined);
+    mockUserGroupAction.mockResolvedValue(undefined);
     mockRows = [{ username: 'demo', role: 'user' }];
+  });
+
+  it('新增用户组失败保留名称且使用统一 loading key', async () => {
+    mockUserGroupAction.mockRejectedValueOnce(
+      new DisplayableError('用户组已存在'),
+    );
+    render(
+      <UserConfigTab config={config} role='owner' refreshConfig={jest.fn()} />,
+    );
+    fireEvent.click(screen.getByRole('button', { name: '添加用户组' }));
+    fireEvent.change(screen.getByPlaceholderText('请输入用户组名称'), {
+      target: { value: 'VIP' },
+    });
+    const dialog = screen
+      .getByRole('heading', { name: '添加新用户组' })
+      .closest('.motion-dialog')!;
+    fireEvent.click(
+      within(dialog as HTMLElement).getByRole('button', { name: '添加用户组' }),
+    );
+    expect(await screen.findByRole('alert')).toHaveTextContent('用户组已存在');
+    expect(screen.getByPlaceholderText('请输入用户组名称')).toHaveValue('VIP');
+    expect(mockIsLoading).toHaveBeenCalledWith('userGroup_add_new');
+    expect(showToast).not.toHaveBeenCalled();
+  });
+
+  it('添加用户失败保留输入并就地反馈一次', async () => {
+    mockUserAction.mockRejectedValueOnce(new DisplayableError('用户名已存在'));
+    render(
+      <UserConfigTab config={config} role='owner' refreshConfig={jest.fn()} />,
+    );
+    fireEvent.click(screen.getByRole('button', { name: '添加用户' }));
+    fireEvent.change(screen.getByPlaceholderText('用户名'), {
+      target: { value: 'new-user' },
+    });
+    fireEvent.change(screen.getByPlaceholderText('密码'), {
+      target: { value: 'draft-password' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: '添加' }));
+    expect(await screen.findByRole('alert')).toHaveTextContent('用户名已存在');
+    expect(screen.getByPlaceholderText('用户名')).toHaveValue('new-user');
+    expect(screen.getByPlaceholderText('密码')).toHaveValue('draft-password');
+    expect(showToast).not.toHaveBeenCalled();
+  });
+
+  it('改密失败保留密码输入和对话框', async () => {
+    mockUserAction.mockRejectedValueOnce(new DisplayableError('修改密码失败'));
+    render(
+      <UserConfigTab config={config} role='owner' refreshConfig={jest.fn()} />,
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'demo 的操作' }));
+    fireEvent.click(screen.getByRole('menuitem', { name: '修改密码' }));
+    fireEvent.change(screen.getByPlaceholderText('新密码'), {
+      target: { value: 'new-password' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: '修改密码' }));
+    expect(await screen.findByRole('alert')).toHaveTextContent('修改密码失败');
+    expect(screen.getByPlaceholderText('新密码')).toHaveValue('new-password');
+    expect(showToast).not.toHaveBeenCalled();
   });
 
   it.each([
@@ -290,7 +344,7 @@ describe('UserConfigTab sensitive actions', () => {
         undefined,
         true,
       );
-      expect(showToast).toHaveBeenCalledWith('开放注册设置已更新', 'success');
+      expect(showToast).not.toHaveBeenCalled();
     });
   });
 });

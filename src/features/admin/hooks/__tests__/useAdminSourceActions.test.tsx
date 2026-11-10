@@ -28,7 +28,6 @@ describe('useAdminSourceActions', () => {
       useAdminSourceActions({
         endpoint: '/api/admin/source',
         refreshConfig,
-        showAlert: jest.fn(),
       }),
     );
 
@@ -45,7 +44,6 @@ describe('useAdminSourceActions', () => {
   });
 
   it('reports error when source action fails', async () => {
-    const showAlert = jest.fn();
     const refreshConfig = jest.fn().mockResolvedValue(undefined);
     mockedAdminPost.mockRejectedValueOnce(new Error('save failed'));
 
@@ -53,7 +51,6 @@ describe('useAdminSourceActions', () => {
       useAdminSourceActions({
         endpoint: '/api/admin/source',
         refreshConfig,
-        showAlert,
       }),
     );
 
@@ -68,7 +65,7 @@ describe('useAdminSourceActions', () => {
 
     expect(error?.message).toBe('save failed');
 
-    expect(mockedShowError).toHaveBeenCalledWith('save failed', showAlert);
+    expect(mockedShowError).not.toHaveBeenCalled();
   });
 
   it('serializes mutations and runs the post-refresh callback', async () => {
@@ -89,7 +86,6 @@ describe('useAdminSourceActions', () => {
         endpoint: '/api/admin/category',
         refreshConfig,
         afterRefresh,
-        showAlert: jest.fn(),
       }),
     );
 

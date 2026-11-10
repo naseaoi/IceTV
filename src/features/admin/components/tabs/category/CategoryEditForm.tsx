@@ -14,6 +14,7 @@ import { CustomCategory } from '@/features/admin/types/internal';
 interface CategoryEditFormProps {
   category: CustomCategory | null;
   isOpen: boolean;
+  error?: string;
   typeOptions: { value: string; label: string }[];
   onChange: (value: CustomCategory) => void;
   onSubmit: () => void;
@@ -24,6 +25,7 @@ interface CategoryEditFormProps {
 export function CategoryEditForm({
   category,
   isOpen,
+  error,
   typeOptions,
   onChange,
   onSubmit,
@@ -38,6 +40,11 @@ export function CategoryEditForm({
       onClose={onCancel}
       panelClassName='max-w-2xl max-h-[80vh] overflow-y-auto'
     >
+      {error && (
+        <p role='alert' className='px-4 pt-3 text-sm text-red-600'>
+          {error}
+        </p>
+      )}
       {category && (
         <div className='space-y-4 p-4 sm:p-6'>
           <div className='flex items-start justify-between gap-3'>

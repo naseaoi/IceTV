@@ -12,6 +12,7 @@ import {
   LibraryEmptyState,
 } from '@/components/LibraryPage';
 import { LibraryFilterChip } from '@/components/LibraryToolbar';
+import LoadErrorState from '@/components/LoadErrorState';
 import ConfirmModal from '@/components/modals/ConfirmModal';
 import {
   type ContinueWatchingCounts,
@@ -56,6 +57,8 @@ export function ContinueWatchingPageClient({
     loading,
     refreshing,
     loadingMore,
+    error,
+    retry,
     skeletonCount,
     hasMore,
     loadMore,
@@ -82,7 +85,7 @@ export function ContinueWatchingPageClient({
   );
 
   const sentinelRef = useInfiniteScroll<HTMLDivElement>({
-    enabled: hasMore && !loading && !refreshing && !loadingMore,
+    enabled: hasMore && !error && !loading && !refreshing && !loadingMore,
     onLoadMore: () => void loadMore(),
   });
 
@@ -116,14 +119,9 @@ export function ContinueWatchingPageClient({
   };
 
   const deleteSelected = async () => {
-    try {
-      await removeItems(Array.from(selectedKeys));
-      setConfirmOpen(false);
-      exitEditing();
-    } catch {
-      // 失败提示与缓存回滚由数据层处理，保留选中以便重试
-      setConfirmOpen(false);
-    }
+    await removeItems(Array.from(selectedKeys));
+    setConfirmOpen(false);
+    exitEditing();
   };
 
   const toolbar = editing ? (
@@ -214,6 +212,8 @@ export function ContinueWatchingPageClient({
   let content: React.ReactNode;
   if (loading && items.length === 0) {
     content = <ContinueWatchingGridSkeleton count={skeletonCount} />;
+  } else if (error && items.length === 0) {
+    content = <LoadErrorState message={error} onRetry={retry} />;
   } else if (items.length === 0) {
     content =
       filter === 'updated' ? (
@@ -299,6 +299,9 @@ export function ContinueWatchingPageClient({
         {content}
       </div>
 
+      {error && items.length > 0 && (
+        <LoadErrorState message={error} onRetry={retry} />
+      )}
       <ConfirmModal
         isOpen={confirmOpen}
         title={`删除 ${confirmCount ?? 0} 条播放记录？`}

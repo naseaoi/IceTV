@@ -5,6 +5,7 @@ import { useRouter, useSearchParams } from 'next/navigation';
 import { useEffect, useMemo, useState } from 'react';
 
 import AuthenticatedRoute from '@/components/AuthenticatedRoute';
+import LoadErrorState from '@/components/LoadErrorState';
 import PageLayout from '@/components/PageLayout';
 import SearchBox from '@/components/SearchBox';
 import SearchResultFilter from '@/components/SearchResultFilter';
@@ -105,6 +106,8 @@ function AuthenticatedSearchPageClient() {
   const [viewMode, setViewMode] = useSearchViewMode(activeSearchQuery);
 
   const {
+    error,
+    retry,
     isLoading,
     setIsLoading,
     showResults,
@@ -216,6 +219,9 @@ function AuthenticatedSearchPageClient() {
         )}
       </div>
 
+      {showResults && error && (
+        <LoadErrorState message={error} onRetry={retry} />
+      )}
       {showResults ? (
         <>
           <div data-nav-subbar className={SEARCH_DESKTOP_BAR_CLASS}>
@@ -253,7 +259,7 @@ function AuthenticatedSearchPageClient() {
             {searchResults.length === 0 ? (
               isLoading ? (
                 <SearchResultsLoading />
-              ) : (
+              ) : error ? null : (
                 <SearchEmptyState text='未找到相关结果' />
               )
             ) : resultCount === 0 ? (

@@ -27,7 +27,6 @@ describe('useAdminUserActions', () => {
     const { result } = renderHook(() =>
       useAdminUserActions({
         refreshConfig,
-        showAlert: jest.fn(),
       }),
     );
 
@@ -50,7 +49,6 @@ describe('useAdminUserActions', () => {
     const { result } = renderHook(() =>
       useAdminUserActions({
         refreshConfig,
-        showAlert: jest.fn(),
       }),
     );
 
@@ -70,14 +68,12 @@ describe('useAdminUserActions', () => {
   });
 
   it('reports error when request fails', async () => {
-    const showAlert = jest.fn();
     const refreshConfig = jest.fn().mockResolvedValue(undefined);
     mockedAdminPost.mockRejectedValueOnce(new Error('boom'));
 
     const { result } = renderHook(() =>
       useAdminUserActions({
         refreshConfig,
-        showAlert,
       }),
     );
 
@@ -92,6 +88,6 @@ describe('useAdminUserActions', () => {
 
     expect(error?.message).toBe('boom');
 
-    expect(mockedShowError).toHaveBeenCalledWith('boom', showAlert);
+    expect(mockedShowError).not.toHaveBeenCalled();
   });
 });

@@ -40,6 +40,7 @@ import {
 } from '@/lib/my-review-count';
 import { formatRelativeTime } from '@/lib/relative-time';
 import type { MyVideoReviewPage, VideoReview } from '@/lib/types';
+import { getErrorMessage, isAbortError } from '@/lib/user-facing-error';
 import { parseStorageKey } from '@/lib/utils';
 import {
   MY_REVIEWS_PAGE_SIZE,
@@ -357,6 +358,7 @@ export default function MyReviewsPageClient({
     error: queryError,
     loadMore,
     refresh: refreshPage,
+    retry: retryPage,
     updateData,
   } = usePagedQuery({
     scopeKey: profileId,
@@ -484,8 +486,10 @@ export default function MyReviewsPageClient({
       );
       refresh();
       setPending(null);
-    } catch {
-      setMutationError('删除失败，请重试');
+    } catch (error) {
+      if (!isAbortError(error))
+        setMutationError(getErrorMessage(error, '删除失败，请重试'));
+      throw error;
     } finally {
       inFlight.current = false;
       setDeleting(false);
@@ -575,7 +579,11 @@ export default function MyReviewsPageClient({
       {error && (
         <p role='alert' className='mb-4 text-sm text-red-500'>
           {error}
-          <button type='button' onClick={refresh} className='ml-3 underline'>
+          <button
+            type='button'
+            onClick={queryError ? retryPage : refresh}
+            className='ml-3 underline'
+          >
             重新加载
           </button>
         </p>
@@ -617,7 +625,7 @@ export default function MyReviewsPageClient({
         danger
         confirmText='确认删除'
         confirmDisabled={deleting}
-        onConfirm={() => void remove()}
+        onConfirm={remove}
         onClose={() => {
           if (!deleting) setPending(null);
         }}

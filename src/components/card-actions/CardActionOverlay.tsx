@@ -11,6 +11,7 @@ import CardActionSheet from '@/components/card-actions/CardActionSheet';
 const CLOSE_ANIMATION_MS = 200;
 
 export interface CardActionContent {
+  objectKey?: string;
   title: string;
   actions: CardAction[];
   poster?: string;
@@ -64,7 +65,9 @@ export default function CardActionOverlay({
 
   const handleAction = useCallback(
     (action: CardAction) => {
-      void action.onClick();
+      if (action.disabled) return;
+      // 数据写入边界负责错误提示；浮层只收尾异步生命周期。
+      void Promise.resolve(action.onClick()).catch(() => {});
       onClose();
     },
     [onClose],

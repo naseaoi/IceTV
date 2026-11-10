@@ -2,6 +2,7 @@ import 'server-only';
 
 import { createHash } from 'crypto';
 
+import { buildFavoriteUpdateMessage } from '@/features/favorites/lib/favorite-tracking';
 import {
   buildAnnouncementMessageId,
   parseAnnouncementMessageId,
@@ -19,6 +20,7 @@ import {
   AnnouncementUserMessage,
   ReadAllUserMessagesResult,
   ReadUserMessageResult,
+  toMessageToastPreview,
   TrackingUpdateUserMessage,
   UserMessage,
   UserMessagePage,
@@ -177,6 +179,7 @@ async function getVisibleMessageSources(
   ] as const;
   const [
     tracking,
+    favorites,
     followed,
     followCount,
     recaps,
@@ -187,6 +190,8 @@ async function getVisibleMessageSources(
     followerCount,
     likes,
     likeCount,
+    notices,
+    noticeCount,
   ] = await Promise.all([
     muted.has('tracking-update')
       ? { items: {}, total: 0, nextCursor: null }
@@ -197,9 +202,14 @@ async function getVisibleMessageSources(
           before
             ? before.key.startsWith('tracking:')
               ? before.key.slice(9)
-              : '\u0001'
+              : before.key > 'tracking:'
+                ? '￿'
+                : '\u0001'
             : undefined,
         ),
+    muted.has('tracking-update')
+      ? { items: [], total: 0 }
+      : db.getFavoriteUpdateMessagePage(userName, limit, before),
     muted.has('follow-review')
       ? []
       : db.getFollowReviewMessages(...followArgs, query),
@@ -224,9 +234,23 @@ async function getVisibleMessageSources(
       ? []
       : db.getSocialNotifications(...likeArgs, query),
     muted.has('review-like') ? 0 : db.getSocialNotificationCount(...likeArgs),
+    db.getUserNoticeMessages(
+      userName,
+      state.userNoticeReadAt ?? 0,
+      state.userNoticeReadIds ?? [],
+      now,
+      query,
+    ),
+    db.getUserNoticeCount(
+      userName,
+      state.userNoticeReadAt ?? 0,
+      state.userNoticeReadIds ?? [],
+      now,
+    ),
   ]);
   return {
     tracking,
+    favorites,
     followed: [...followed, ...recaps],
     followCount: followCount + recapCount,
     replies,
@@ -235,6 +259,8 @@ async function getVisibleMessageSources(
     followerCount,
     likes,
     likeCount,
+    notices,
+    noticeCount,
   };
 }
 
@@ -261,10 +287,12 @@ export async function getUserMessagePage(
   const pageLimit = Math.max(0, limit - pinned.length);
   const merged: UserMessage[] = [
     ...buildTrackingMessages(sources.tracking.items),
+    ...sources.favorites.items,
     ...sources.followed,
     ...sources.replies,
     ...sources.followers,
     ...sources.likes,
+    ...sources.notices,
   ];
   const remaining = merged.filter(
     (message) =>
@@ -285,10 +313,12 @@ export async function getUserMessagePage(
     items: [...pinned, ...page],
     total:
       sources.tracking.total +
+      sources.favorites.total +
       sources.followCount +
       sources.replyCount +
       sources.followerCount +
       sources.likeCount +
+      sources.noticeCount +
       announcements.length +
       (annualReport ? 1 : 0),
     nextCursor: hasMore
@@ -309,13 +339,22 @@ export async function getUserMessageSummary(
     getAnnualReportMessage(userName, state, timeZone),
   ]);
   const latestTracking =
-    buildTrackingMessages(sources.tracking.items)[0] ?? null;
+    [
+      ...buildTrackingMessages(sources.tracking.items),
+      ...sources.favorites.items,
+    ].sort(
+      (a, b) =>
+        b.createdAt - a.createdAt ||
+        (messageSortKey(a) < messageSortKey(b) ? 1 : -1),
+    )[0] ?? null;
   const unreadCount =
     sources.tracking.total +
+    sources.favorites.total +
     sources.followCount +
     sources.replyCount +
     sources.followerCount +
     sources.likeCount +
+    sources.noticeCount +
     announcements.length +
     (annualReport ? 1 : 0);
   const latest = [
@@ -323,10 +362,19 @@ export async function getUserMessageSummary(
     ...sources.replies,
     ...sources.followers,
     ...sources.likes,
+    ...sources.notices,
   ];
+  const latestUnread = [
+    ...latest,
+    ...announcements,
+    ...(annualReport ? [annualReport] : []),
+    ...(latestTracking ? [latestTracking] : []),
+  ].sort((a, b) => b.createdAt - a.createdAt || b.id.localeCompare(a.id))[0];
   return {
+    latestUnreadAt: latestUnread?.createdAt ?? 0,
+    latestUnread: latestUnread ? toMessageToastPreview(latestUnread) : null,
     unreadCount,
-    trackingUnreadCount: sources.tracking.total,
+    trackingUnreadCount: sources.tracking.total + sources.favorites.total,
     followReviewUnreadCount: sources.followCount,
     reviewReplyUnreadCount: sources.replyCount,
     newFollowerUnreadCount: sources.followerCount,
@@ -335,10 +383,13 @@ export async function getUserMessageSummary(
       [
         unreadCount,
         sources.tracking.total,
+        sources.favorites.total,
+        ...sources.favorites.items.map((message) => message.id),
         sources.followCount,
         sources.replyCount,
         sources.followerCount,
         sources.likeCount,
+        sources.noticeCount,
         ...announcements.map((message) => message.id),
         annualReport?.id ?? '',
         latestTracking?.id ?? '',
@@ -381,11 +432,28 @@ export async function readUserMessage(
 
   const state = await db.getUserMessageState(userName);
 
-  const messageKind = messageId.startsWith('tracking:')
-    ? 'tracking-update'
-    : messageId.startsWith('follow-recap:')
-      ? 'follow-review'
-      : messageId.split(':')[0];
+  if (messageId.startsWith('user-notice:')) {
+    const [message] = await db.getUserNoticeMessages(
+      userName,
+      state.userNoticeReadAt ?? 0,
+      state.userNoticeReadIds ?? [],
+      Date.now(),
+      { id: messageId, limit: 1 },
+    );
+    if (!message) return null;
+    await db.updateUserMessageState(userName, {
+      userNotice: { id: message.id, createdAt: message.createdAt },
+    });
+    return { message };
+  }
+
+  const messageKind =
+    messageId.startsWith('tracking:') ||
+    messageId.startsWith('favorite-tracking:')
+      ? 'tracking-update'
+      : messageId.startsWith('follow-recap:')
+        ? 'follow-review'
+        : messageId.split(':')[0];
   if (state.mutedKinds?.some((kind) => kind === messageKind)) return null;
   for (const [kind, field] of [
     ['new-follower', 'newFollower'],
@@ -446,6 +514,32 @@ export async function readUserMessage(
     return { message };
   }
 
+  if (messageId.startsWith('favorite-tracking:')) {
+    const parsed = parseTrackingMessageId(
+      messageId.replace('favorite-tracking:', 'tracking:'),
+    );
+    const key = parsed && parseStorageKey(parsed.recordKey);
+    if (!parsed || !key) return null;
+    const [favorite, record] = await Promise.all([
+      db.getFavorite(userName, key.source, key.id),
+      db.getPlayRecord(userName, key.source, key.id),
+    ]);
+    const message =
+      favorite && !record
+        ? buildFavoriteUpdateMessage(parsed.recordKey, favorite)
+        : null;
+    if (!message || parsed.toEpisodes > message.toEpisodes) return null;
+    await db.readFavoriteUpdate(userName, parsed.recordKey, parsed.toEpisodes);
+    return {
+      message: {
+        ...message,
+        id: messageId,
+        fromEpisodes: parsed.fromEpisodes,
+        toEpisodes: parsed.toEpisodes,
+      },
+    };
+  }
+
   const parsedMessage = parseTrackingMessageId(messageId);
   if (!parsedMessage) return null;
   const parsedRecordKey = parseStorageKey(parsedMessage.recordKey);
@@ -493,6 +587,7 @@ export async function readAllUserMessages(
   const annualReport = await getAnnualReportMessage(userName, state, timeZone);
   await db.updateUserMessageState(userName, {
     ...(annualReport ? { annualReportReadYear: annualReport.year } : {}),
+    userNoticeReadAt: Date.now(),
     announcementReadAt: Date.now(),
     followReviewReadAt: Date.now(),
     reviewReplyReadAt: Date.now(),
@@ -517,6 +612,24 @@ export async function readAllUserMessages(
     Object.assign(updatedRecords, batch);
   }
 
+  let before: import('@/lib/message-cursor.server').MessageCursor | undefined;
+  while (!state.mutedKinds?.includes('tracking-update')) {
+    const page = await db.getFavoriteUpdateMessagePage(
+      userName,
+      READ_ALL_BATCH_SIZE,
+      before,
+    );
+    for (const message of page.items) {
+      await db.readFavoriteUpdate(
+        userName,
+        message.recordKey,
+        message.toEpisodes,
+      );
+    }
+    const last = page.items[page.items.length - 1];
+    if (!last || page.items.length < READ_ALL_BATCH_SIZE) break;
+    before = { createdAt: last.createdAt, key: messageSortKey(last) };
+  }
   return { updatedRecords };
 }
 

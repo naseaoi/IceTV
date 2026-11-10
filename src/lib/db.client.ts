@@ -79,7 +79,6 @@ const _getAllSkipConfigs = createCacheFirstReader<Record<string, SkipConfig>>({
   fetchApi: () => fetchFromApi<Record<string, SkipConfig>>(`/api/skipconfigs`),
   eventName: 'skipConfigsUpdated',
   fallback: {},
-  bgSyncErrorNotify: false,
 });
 
 // ================================================================
@@ -212,6 +211,8 @@ export async function savePlayRecord(
   const cached = cacheManager.getCachedPlayRecords();
   const normalizedRecord = mergePlayRecordUpdateBaseline(cached?.[key], record);
   return _writePlayRecords({
+    rollbackOnError: false,
+    affectedKeys: [key],
     mutateCached: (cached) => {
       cached[key] = normalizedRecord;
       return cached;
@@ -242,6 +243,7 @@ export async function deletePlayRecord(
 ): Promise<void> {
   const key = generateStorageKey(source, id);
   await _writePlayRecords({
+    affectedKeys: [key],
     mutateCached: (cached) => {
       delete cached[key];
       return cached;
@@ -265,38 +267,38 @@ export async function deletePlayRecord(
 export async function deletePlayRecords(keys: string[]): Promise<void> {
   if (keys.length === 0) return;
   const uniqueKeys = [...new Set(keys)];
-  await _writePlayRecords({
-    mutateCached: (cached) => {
-      for (const key of uniqueKeys) delete cached[key];
-      return cached;
-    },
-    syncToServer: async () => {
-      for (
-        let offset = 0;
-        offset < uniqueKeys.length;
-        offset += MAX_DELETE_PLAY_RECORD_KEYS
-      ) {
-        await fetchWithAuth('/api/playrecords', {
+  for (
+    let offset = 0;
+    offset < uniqueKeys.length;
+    offset += MAX_DELETE_PLAY_RECORD_KEYS
+  ) {
+    const batch = uniqueKeys.slice(
+      offset,
+      offset + MAX_DELETE_PLAY_RECORD_KEYS,
+    );
+    await _writePlayRecords({
+      affectedKeys: batch,
+      mutateCached: (cached) => {
+        for (const key of batch) delete cached[key];
+        return cached;
+      },
+      syncToServer: () =>
+        fetchWithAuth('/api/playrecords', {
           method: 'DELETE',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            keys: uniqueKeys.slice(
-              offset,
-              offset + MAX_DELETE_PLAY_RECORD_KEYS,
-            ),
-          }),
-        });
-      }
-    },
-    onServerError: async (err) => {
-      await handleDatabaseOperationFailure(
-        'playRecords',
-        err,
-        '删除播放记录失败，请重试',
-      );
-    },
-    requireExistingCacheForOptimisticUpdate: true,
-  });
+          body: JSON.stringify({ keys: batch }),
+        }).then(() => {}),
+      onServerError: (err) =>
+        handleDatabaseOperationFailure(
+          'playRecords',
+          err,
+          offset
+            ? `已删除 ${offset} 条，${uniqueKeys.length - offset} 条未删除，请重试`
+            : '删除播放记录失败，请重试',
+        ),
+      requireExistingCacheForOptimisticUpdate: true,
+    });
+  }
   notifyMessagesUpdated();
 }
 
@@ -372,24 +374,19 @@ export async function setPlayRecordTracking(
 }
 
 export async function clearAllPlayRecords(): Promise<void> {
-  cacheManager.cachePlayRecords({});
-  window.dispatchEvent(new CustomEvent('playRecordsUpdated', { detail: {} }));
-  try {
-    await fetchWithAuth(`/api/playrecords`, {
-      method: 'DELETE',
-      headers: { 'Content-Type': 'application/json' },
-    });
-    notifyMessagesUpdated();
-  } catch (err) {
-    await handleDatabaseOperationFailure(
-      'playRecords',
-      err,
-      '删除播放记录失败，请重试',
-    );
-    throw err;
-  } finally {
-    window.dispatchEvent(new Event('userLibraryUpdated'));
-  }
+  await _writePlayRecords({
+    affectedKeys: 'all',
+    mutateCached: () => ({}),
+    syncToServer: () =>
+      fetchWithAuth('/api/playrecords', { method: 'DELETE' }).then(() => {}),
+    onServerError: (err) =>
+      handleDatabaseOperationFailure(
+        'playRecords',
+        err,
+        '删除播放记录失败，请重试',
+      ),
+  });
+  notifyMessagesUpdated();
 }
 
 export function applyPlayRecordStateUpdates(
@@ -423,38 +420,38 @@ export async function addSearchHistory(keyword: string): Promise<void> {
     return newHistory;
   };
 
-  const cachedHistory = cacheManager.getCachedSearchHistory() || [];
-  const newHistory = buildNewHistory(cachedHistory);
-  cacheManager.cacheSearchHistory(newHistory);
-  window.dispatchEvent(
-    new CustomEvent('searchHistoryUpdated', { detail: newHistory }),
-  );
   try {
-    const res = await fetchWithAuth('/api/searchhistory', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ keyword: trimmed }),
+    await _writeSearchHistory({
+      affectedKeys: [trimmed],
+      rollbackOnError: false,
+      mutateCached: buildNewHistory,
+      syncToServer: () =>
+        fetchWithAuth('/api/searchhistory', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ keyword: trimmed }),
+        }).then(() => {}),
+      onServerError: (err) =>
+        handleDatabaseOperationFailure('searchHistory', err),
     });
-    if (res.ok) {
-      const serverHistory = (await res.json()) as string[];
-      cacheManager.cacheSearchHistory(serverHistory);
-      window.dispatchEvent(
-        new CustomEvent('searchHistoryUpdated', { detail: serverHistory }),
-      );
-    }
-  } catch (err) {
-    await handleDatabaseOperationFailure('searchHistory', err);
+  } catch {
+    // 自动记录搜索历史的失败由数据层反馈。
   }
 }
 
 export async function clearSearchHistory(): Promise<void> {
-  cacheManager.cacheSearchHistory([]);
-  window.dispatchEvent(new CustomEvent('searchHistoryUpdated', { detail: [] }));
-  try {
-    await fetchWithAuth(`/api/searchhistory`, { method: 'DELETE' });
-  } catch (err) {
-    await handleDatabaseOperationFailure('searchHistory', err);
-  }
+  await _writeSearchHistory({
+    affectedKeys: 'all',
+    mutateCached: () => [],
+    syncToServer: () =>
+      fetchWithAuth('/api/searchhistory', { method: 'DELETE' }).then(() => {}),
+    onServerError: (err) =>
+      handleDatabaseOperationFailure(
+        'searchHistory',
+        err,
+        '清空搜索历史失败，请重试',
+      ),
+  });
 }
 
 export async function deleteSearchHistory(keyword: string): Promise<void> {
@@ -462,6 +459,7 @@ export async function deleteSearchHistory(keyword: string): Promise<void> {
   if (!trimmed) return;
 
   return _writeSearchHistory({
+    affectedKeys: [trimmed],
     mutateCached: (cached) => cached.filter((k) => k !== trimmed),
     syncToServer: () =>
       fetchWithAuth(
@@ -553,6 +551,7 @@ export async function deleteFavorite(
 ): Promise<void> {
   const key = generateStorageKey(source, id);
   return _writeFavorites({
+    affectedKeys: [key],
     mutateCached: (cached) => {
       delete cached[key];
       return cached;
@@ -584,7 +583,11 @@ export async function isFavorited(
   if (cachedFavorites) {
     fetchFromApi<Record<string, Favorite>>(`/api/favorites`)
       .then((freshData) => {
-        if (JSON.stringify(cachedFavorites) !== JSON.stringify(freshData)) {
+        if (
+          JSON.stringify(cacheManager.getCachedFavorites()) ===
+            JSON.stringify(cachedFavorites) &&
+          JSON.stringify(cachedFavorites) !== JSON.stringify(freshData)
+        ) {
           cacheManager.cacheFavorites(freshData);
           window.dispatchEvent(
             new CustomEvent('favoritesUpdated', { detail: freshData }),
@@ -593,7 +596,6 @@ export async function isFavorited(
       })
       .catch((err) => {
         console.warn('后台同步收藏失败:', err);
-        triggerGlobalError('后台同步收藏失败');
       });
 
     return !!cachedFavorites[key];
@@ -612,19 +614,14 @@ export async function isFavorited(
 }
 
 export async function clearAllFavorites(): Promise<void> {
-  cacheManager.cacheFavorites({});
-  window.dispatchEvent(new CustomEvent('favoritesUpdated', { detail: {} }));
-  try {
-    await fetchWithAuth(`/api/favorites`, {
-      method: 'DELETE',
-      headers: { 'Content-Type': 'application/json' },
-    });
-  } catch (err) {
-    await handleDatabaseOperationFailure('favorites', err);
-    throw err;
-  } finally {
-    window.dispatchEvent(new Event('userLibraryUpdated'));
-  }
+  await _writeFavorites({
+    affectedKeys: 'all',
+    mutateCached: () => ({}),
+    syncToServer: () =>
+      fetchWithAuth('/api/favorites', { method: 'DELETE' }).then(() => {}),
+    onServerError: (err) =>
+      handleDatabaseOperationFailure('favorites', err, '清空收藏失败，请重试'),
+  });
 }
 
 // ---- 跳过片头片尾配置 ----
@@ -646,6 +643,7 @@ export async function saveSkipConfig(
 ): Promise<void> {
   const key = generateStorageKey(source, id);
   return _writeSkipConfigs({
+    affectedKeys: [key],
     mutateCached: (cached) => {
       cached[key] = config;
       return cached;
@@ -658,7 +656,6 @@ export async function saveSkipConfig(
       }).then(() => {}),
     onServerError: async (err) => {
       console.error('保存跳过片头片尾配置失败:', err);
-      triggerGlobalError('保存跳过片头片尾配置失败');
     },
   });
 }
@@ -669,6 +666,7 @@ export async function deleteSkipConfig(
 ): Promise<void> {
   const key = generateStorageKey(source, id);
   return _writeSkipConfigs({
+    affectedKeys: [key],
     mutateCached: (cached) => {
       delete cached[key];
       return cached;
@@ -679,7 +677,6 @@ export async function deleteSkipConfig(
       }).then(() => {}),
     onServerError: async (err) => {
       console.error('删除跳过片头片尾配置失败:', err);
-      triggerGlobalError('删除跳过片头片尾配置失败');
     },
   });
 }

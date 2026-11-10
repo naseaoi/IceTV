@@ -26,6 +26,7 @@ interface NewUserDraft {
 interface AddUserFormProps {
   value: NewUserDraft;
   isOpen: boolean;
+  error?: string;
   onChange: (next: NewUserDraft) => void;
   userGroups: UserGroupOption[];
   onSubmit: () => void;
@@ -36,6 +37,7 @@ interface AddUserFormProps {
 export function AddUserForm({
   value,
   isOpen,
+  error,
   onChange,
   userGroups,
   onSubmit,
@@ -50,6 +52,11 @@ export function AddUserForm({
       onClose={onCancel}
       panelClassName='max-w-md max-h-[80vh] overflow-y-auto'
     >
+      {error && (
+        <p role='alert' className='px-4 pt-3 text-sm text-red-600'>
+          {error}
+        </p>
+      )}
       <div className='space-y-4 p-4 sm:p-6'>
         <div className='flex items-start justify-between gap-3'>
           <h5 className={MODAL_TITLE_CLASS}>添加用户</h5>

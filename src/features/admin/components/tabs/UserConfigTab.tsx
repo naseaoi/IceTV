@@ -1,8 +1,7 @@
-﻿'use client';
+'use client';
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
 
-import AlertModal from '@/components/modals/AlertModal';
 import ConfirmModal from '@/components/modals/ConfirmModal';
 import Select from '@/components/Select';
 import { AdminUserRowsSkeleton } from '@/features/admin/components/AdminContentSkeleton';
@@ -41,11 +40,11 @@ import {
   type AdminUserQuery,
   type AdminUserSelection,
 } from '@/features/admin/lib/user-query';
-import { useAlertModal } from '@/hooks/useAlertModal';
 import { useModalState } from '@/hooks/useModalState';
 import { useRetainedValue } from '@/hooks/useRetainedValue';
 import { getAuthInfoFromBrowserCookie } from '@/lib/auth.client';
 import type { InviteCodeFilter } from '@/lib/invite-code-storage';
+import { getErrorMessage } from '@/lib/user-facing-error';
 import {
   type LinuxDoLoginSettings,
   type LinuxDoTrustLevel,
@@ -74,7 +73,7 @@ const SELECTION_LINK_CLASS =
   'font-medium text-brand-600 hover:text-brand-700 dark:text-brand-400 dark:hover:text-brand-300';
 
 const UserConfig = ({ config, role, refreshConfig }: UserConfigProps) => {
-  const { alertModal, showAlert, hideAlert } = useAlertModal();
+  const [formError, setFormError] = useState('');
   const { isLoading, withLoading } = useLoadingState();
   const [userSearch, setUserSearch] = useState('');
   const [userFilter, setUserFilter] =
@@ -120,7 +119,6 @@ const UserConfig = ({ config, role, refreshConfig }: UserConfigProps) => {
     userAction,
   } = useAdminUserActions({
     refreshConfig: refreshUsersAndConfig,
-    showAlert,
   });
   const [showAddUserForm, setShowAddUserForm] = useState(false);
   const [showChangePasswordForm, setShowChangePasswordForm] = useState(false);
@@ -242,40 +240,42 @@ const UserConfig = ({ config, role, refreshConfig }: UserConfigProps) => {
     groupName: string,
     draft?: UserGroupDraft,
   ) => {
-    return withLoading(`userGroup_${action}_${groupName}`, async () => {
-      try {
-        await userGroupAction(action, groupName, draft);
+    setFormError('');
+    return withLoading(
+      `userGroup_${action}_${action === 'add' ? 'new' : groupName}`,
+      async () => {
+        try {
+          await userGroupAction(action, groupName, draft);
 
-        if (action === 'add') {
-          setNewUserGroup(EMPTY_USER_GROUP_DRAFT);
-          setShowAddUserGroupForm(false);
-        } else if (action === 'edit') {
-          setEditingUserGroup(null);
-          setShowEditUserGroupForm(false);
+          if (action === 'add') {
+            setNewUserGroup(EMPTY_USER_GROUP_DRAFT);
+            setShowAddUserGroupForm(false);
+          } else if (action === 'edit') {
+            setEditingUserGroup(null);
+            setShowEditUserGroupForm(false);
+          }
+        } catch (err) {
+          setFormError(getErrorMessage(err, '操作失败'));
+          throw err;
         }
-
-        showSuccess(
-          action === 'add'
-            ? '用户组添加成功'
-            : action === 'edit'
-              ? '用户组更新成功'
-              : '用户组删除成功',
-        );
-      } catch (err) {
-        showError(err instanceof Error ? err.message : '操作失败', showAlert);
-        throw err;
-      }
-    });
+      },
+    );
   };
 
   const handleAddUserGroup = () => {
     if (!newUserGroup.name.trim()) return;
-    handleUserGroupAction('add', newUserGroup.name, newUserGroup);
+    void handleUserGroupAction('add', newUserGroup.name, newUserGroup).catch(
+      () => undefined,
+    );
   };
 
   const handleEditUserGroup = () => {
     if (!editingUserGroup?.name.trim()) return;
-    handleUserGroupAction('edit', editingUserGroup.name, editingUserGroup);
+    void handleUserGroupAction(
+      'edit',
+      editingUserGroup.name,
+      editingUserGroup,
+    ).catch(() => undefined);
   };
 
   const handleDeleteUserGroup = async (groupName: string) => {
@@ -284,12 +284,10 @@ const UserConfig = ({ config, role, refreshConfig }: UserConfigProps) => {
         `/api/admin/user?${new URLSearchParams({ group: groupName, limit: '1' })}`,
       );
       setDeletingUserGroup({ name: groupName, affectedCount: page.total });
+      setFormError('');
       setShowDeleteUserGroupModal(true);
     } catch (error) {
-      showError(
-        error instanceof Error ? error.message : '获取用户组人数失败',
-        showAlert,
-      );
+      showError(error, '获取用户组人数失败');
     }
   };
 
@@ -300,8 +298,8 @@ const UserConfig = ({ config, role, refreshConfig }: UserConfigProps) => {
       await handleUserGroupAction('delete', deletingUserGroup.name);
       setShowDeleteUserGroupModal(false);
       setDeletingUserGroup(null);
-    } catch {
-      // handled in handleUserGroupAction
+    } catch (error) {
+      setFormError(getErrorMessage(error, '操作失败'));
     }
   };
 
@@ -315,6 +313,7 @@ const UserConfig = ({ config, role, refreshConfig }: UserConfigProps) => {
       enabledApis: group.enabledApis || [],
       allowLive: group.allowLive === true,
     });
+    setFormError('');
     setShowEditUserGroupForm(true);
     setShowAddUserGroupForm(false);
   };
@@ -322,17 +321,10 @@ const UserConfig = ({ config, role, refreshConfig }: UserConfigProps) => {
   const handleAssignUserGroup = async (
     username: string,
     nextUserGroups: string[],
-  ) => {
-    return withLoading(`assignUserGroup_${username}`, async () => {
-      try {
-        await assignUserGroups(username, nextUserGroups);
-        showSuccess('用户组分配成功');
-      } catch (err) {
-        showError(err instanceof Error ? err.message : '操作失败', showAlert);
-        throw err;
-      }
-    });
-  };
+  ) =>
+    withLoading(`assignUserGroup_${username}`, () =>
+      assignUserGroups(username, nextUserGroups),
+    );
 
   const handleUserAction = async (
     action:
@@ -349,17 +341,13 @@ const UserConfig = ({ config, role, refreshConfig }: UserConfigProps) => {
     userGroup?: string,
     openRegister?: boolean,
   ) => {
-    try {
-      await userAction(
-        action,
-        targetUsername,
-        targetPassword,
-        userGroup,
-        openRegister,
-      );
-    } catch {
-      // handled in useAdminUserActions
-    }
+    await userAction(
+      action,
+      targetUsername,
+      targetPassword,
+      userGroup,
+      openRegister,
+    );
   };
 
   const handleBanUser = (username: string) => {
@@ -373,12 +361,14 @@ const UserConfig = ({ config, role, refreshConfig }: UserConfigProps) => {
   };
 
   const handleUnbanUser = async (uname: string) => {
+    setFormError('');
     await withLoading(`unbanUser_${uname}`, () =>
       handleUserAction('unban', uname),
-    );
+    ).catch((error) => showError(error, '解封失败'));
   };
 
   const updateOpenRegister = async (openRegister: boolean) => {
+    setFormError('');
     await withLoading('setOpenRegister', async () => {
       try {
         await userAction(
@@ -388,10 +378,8 @@ const UserConfig = ({ config, role, refreshConfig }: UserConfigProps) => {
           undefined,
           openRegister,
         );
-        showSuccess('开放注册设置已更新');
       } catch (err) {
-        showError(err instanceof Error ? err.message : '更新失败', showAlert);
-        throw err;
+        setFormError(getErrorMessage(err, '更新失败'));
       }
     });
   };
@@ -401,17 +389,18 @@ const UserConfig = ({ config, role, refreshConfig }: UserConfigProps) => {
       void updateOpenRegister(false);
       return;
     }
+    setFormError('');
     setShowOpenRegisterConfirm(true);
   };
 
   const handleToggleRequireInviteCode = async () => {
     const next = !config?.UserConfig?.RequireInviteCode;
+    setFormError('');
     await withLoading('setRequireInviteCode', async () => {
       try {
         await setRequireInviteCode(next);
-        showSuccess(next ? '注册已要求邀请码' : '注册已不要求邀请码');
-      } catch {
-        // handled in setRequireInviteCode
+      } catch (error) {
+        setFormError(getErrorMessage(error, '操作失败'));
       }
     });
   };
@@ -421,55 +410,52 @@ const UserConfig = ({ config, role, refreshConfig }: UserConfigProps) => {
     MinTrustLevel: 1,
   };
 
-  const updateLinuxDo = (next: LinuxDoLoginSettings, message: string) =>
+  const updateLinuxDo = (next: LinuxDoLoginSettings) =>
     withLoading('setLinuxDo', async () => {
+      setFormError('');
       try {
         await setLinuxDo(next);
-        showSuccess(message);
-      } catch {
-        // handled in setLinuxDo
+      } catch (error) {
+        setFormError(getErrorMessage(error, '操作失败'));
       }
     });
 
   const handleToggleLinuxDo = () =>
-    updateLinuxDo(
-      { ...linuxDo, Enabled: !linuxDo.Enabled },
-      linuxDo.Enabled ? 'LinuxDo 登录已关闭' : 'LinuxDo 登录已开启',
-    );
+    updateLinuxDo({ ...linuxDo, Enabled: !linuxDo.Enabled });
 
   const handleLinuxDoTrustLevelChange = (level: LinuxDoTrustLevel) =>
-    updateLinuxDo(
-      { ...linuxDo, MinTrustLevel: level },
-      `最低信任等级已设为 ${level} 级`,
-    );
+    updateLinuxDo({ ...linuxDo, MinTrustLevel: level });
 
   const handleDefaultUserGroupChange = (next: string) =>
     withLoading('setDefaultUserGroup', async () => {
+      setFormError('');
       try {
         await setDefaultUserGroup(next);
-        showSuccess(next ? `新用户将加入「${next}」` : '新用户不再自动分组');
-      } catch {
-        // handled in setDefaultUserGroup
+      } catch (error) {
+        setFormError(getErrorMessage(error, '操作失败'));
       }
     });
 
   const handleCreateInviteCodes = (draft: InviteCodeDraft) =>
     withLoading('createInviteCode', async () => {
+      setFormError('');
       try {
         const codes = await createInviteCodes(draft);
         void inviteList.refresh();
         return codes;
-      } catch {
-        // handled in createInviteCodes
+      } catch (error) {
+        setFormError(getErrorMessage(error, '操作失败'));
         return null;
       }
     });
 
   const handleDeleteInviteCode = async (code: string) => {
+    setFormError('');
     await withLoading(`deleteInviteCode_${code}`, async () => {
       try {
         await deleteInviteCode(code);
-      } catch {
+      } catch (error) {
+        setFormError(getErrorMessage(error, '删除邀请码失败'));
         // 邀请码可能已被其他管理员删除，拉一次最新摘要
         await refreshConfig().catch(() => undefined);
       }
@@ -480,11 +466,12 @@ const UserConfig = ({ config, role, refreshConfig }: UserConfigProps) => {
   const handlePurgeInactiveInviteCodes = () => {
     setShowPurgeInviteConfirm(false);
     void withLoading('purgeInactiveInviteCodes', async () => {
+      setFormError('');
       try {
         const deleted = await purgeInactiveInviteCodes();
-        showSuccess(`已清理 ${deleted} 个失效邀请码`);
-      } catch {
-        // handled in purgeInactiveInviteCodes
+        if (deleted === 0) showSuccess('已清理 0 个失效邀请码');
+      } catch (error) {
+        setFormError(getErrorMessage(error, '操作失败'));
       }
       void inviteList.refresh();
     });
@@ -518,13 +505,15 @@ const UserConfig = ({ config, role, refreshConfig }: UserConfigProps) => {
         ? `removeAdmin_${pending.username}`
         : `${pending.action}_${pending.username}`;
     setPendingSensitiveUserAction(null);
+    setFormError('');
     await withLoading(loadingKey, () =>
       handleUserAction(pending.action, pending.username),
-    );
+    ).catch((error) => showError(error));
   };
 
   const handleAddUser = async () => {
     if (!newUser.username || !newUser.password) return;
+    setFormError('');
     await withLoading('addUser', async () => {
       await handleUserAction(
         'add',
@@ -534,11 +523,12 @@ const UserConfig = ({ config, role, refreshConfig }: UserConfigProps) => {
       );
       setNewUser({ username: '', password: '', userGroup: '' });
       setShowAddUserForm(false);
-    });
+    }).catch((error) => setFormError(getErrorMessage(error, '添加用户失败')));
   };
 
   const handleChangePassword = async () => {
     if (!changePasswordUser.username || !changePasswordUser.password) return;
+    setFormError('');
     await withLoading(
       `changePassword_${changePasswordUser.username}`,
       async () => {
@@ -550,17 +540,19 @@ const UserConfig = ({ config, role, refreshConfig }: UserConfigProps) => {
         setChangePasswordUser({ username: '', password: '' });
         setShowChangePasswordForm(false);
       },
-    );
+    ).catch((error) => setFormError(getErrorMessage(error, '修改密码失败')));
   };
 
   const handleShowChangePasswordForm = (username: string) => {
     setChangePasswordUser({ username, password: '' });
+    setFormError('');
     setShowChangePasswordForm(true);
     setShowAddUserForm(false);
   };
 
   const handleDeleteUser = (username: string) => {
     setDeletingUser(username);
+    setFormError('');
     setShowDeleteUserModal(true);
   };
 
@@ -571,6 +563,7 @@ const UserConfig = ({ config, role, refreshConfig }: UserConfigProps) => {
   }) => {
     setSelectedUser(user);
     setSelectedApis(user.enabledApis || []);
+    setFormError('');
     setShowConfigureApisModal(true);
   };
 
@@ -581,12 +574,14 @@ const UserConfig = ({ config, role, refreshConfig }: UserConfigProps) => {
   }) => {
     setSelectedUserForGroup(user);
     setSelectedUserGroups(user.tags || []);
+    setFormError('');
     setShowConfigureUserGroupModal(true);
   };
 
   const handleSaveUserGroups = async () => {
     if (!selectedUserForGroup) return;
 
+    setFormError('');
     await withLoading(
       `saveUserGroups_${selectedUserForGroup.username}`,
       async () => {
@@ -598,8 +593,8 @@ const UserConfig = ({ config, role, refreshConfig }: UserConfigProps) => {
           setShowConfigureUserGroupModal(false);
           setSelectedUserForGroup(null);
           setSelectedUserGroups([]);
-        } catch {
-          // handled in handleAssignUserGroup
+        } catch (error) {
+          setFormError(getErrorMessage(error, '操作失败'));
         }
       },
     );
@@ -686,6 +681,7 @@ const UserConfig = ({ config, role, refreshConfig }: UserConfigProps) => {
           excluded: [...excludedUsers],
         }
       : { mode: 'explicit', usernames: [...selectedUsers] };
+    setFormError('');
     await withLoading('batchSetUserGroup', async () => {
       try {
         const result = await adminPost<{
@@ -700,16 +696,14 @@ const UserConfig = ({ config, role, refreshConfig }: UserConfigProps) => {
         setBatchPreview({ ...result, selection, group: userGroup });
         closeBatchUserGroupModal();
       } catch (error) {
-        showError(
-          error instanceof Error ? error.message : '预估操作人数失败',
-          showAlert,
-        );
+        setFormError(getErrorMessage(error, '预估操作人数失败'));
       }
     });
   };
 
   const confirmBatch = async () => {
     if (!batchPreview) return;
+    setFormError('');
     await withLoading('batchSetUserGroup', async () => {
       try {
         const result = await adminPost<{
@@ -729,10 +723,7 @@ const UserConfig = ({ config, role, refreshConfig }: UserConfigProps) => {
           `已处理 ${result.processedCount} 个用户，跳过 ${result.skippedCount} 个`,
         );
       } catch (error) {
-        showError(
-          error instanceof Error ? error.message : '批量设置用户组失败',
-          showAlert,
-        );
+        setFormError(getErrorMessage(error, '批量设置用户组失败'));
       }
     });
   };
@@ -740,28 +731,31 @@ const UserConfig = ({ config, role, refreshConfig }: UserConfigProps) => {
   const handleSaveUserApis = async () => {
     if (!selectedUser) return;
 
+    setFormError('');
     await withLoading(`saveUserApis_${selectedUser.username}`, async () => {
       try {
         await updateUserApis(selectedUser.username, selectedApis);
         await refreshConfig();
         closeConfigureApisModal();
       } catch (err) {
-        showError(err instanceof Error ? err.message : '操作失败', showAlert);
-        throw err;
+        setFormError(getErrorMessage(err, '操作失败'));
       }
     });
   };
 
   const handleOpenCleanupInactive = () => {
     setInactiveCandidates(null);
+    setFormError('');
     setShowCleanupInactiveModal(true);
   };
 
   const handleScanInactiveUsers = async () => {
+    setFormError('');
     await withLoading('scanInactiveUsers', async () => {
       try {
         setInactiveCandidates(await previewInactiveUsers(inactiveDays));
-      } catch {
+      } catch (error) {
+        setFormError(getErrorMessage(error, '筛选不活跃用户失败'));
         setInactiveCandidates(null);
       }
     });
@@ -770,6 +764,7 @@ const UserConfig = ({ config, role, refreshConfig }: UserConfigProps) => {
   const handleConfirmCleanupInactive = async () => {
     if (!inactiveCandidates || inactiveCandidates.count === 0) return;
 
+    setFormError('');
     await withLoading('cleanupInactiveUsers', async () => {
       try {
         const result = await deleteInactiveUsers(
@@ -779,28 +774,28 @@ const UserConfig = ({ config, role, refreshConfig }: UserConfigProps) => {
         await userList.refresh();
         setShowCleanupInactiveModal(false);
         setInactiveCandidates(null);
-        showSuccess(
-          result.skippedCount > 0
-            ? `已删除 ${result.deletedCount} 个用户，${result.skippedCount} 个因期间有活跃被跳过`
-            : `已删除 ${result.deletedCount} 个用户`,
-        );
-      } catch {
-        // handled in deleteInactiveUsers
+        if (result.skippedCount > 0)
+          showSuccess(
+            `已删除 ${result.deletedCount} 个用户，${result.skippedCount} 个因期间有活跃被跳过`,
+          );
+      } catch (error) {
+        setFormError(getErrorMessage(error, '操作失败'));
       }
     });
   };
 
   const handleConfirmDeleteUser = async () => {
-    if (!deletingUser) return;
+    if (!deletingUser || isLoading(`deleteUser_${deletingUser}`)) return;
 
+    setFormError('');
     await withLoading(`deleteUser_${deletingUser}`, async () => {
       try {
         await handleUserAction('deleteUser', deletingUser);
         await userList.refresh();
         setShowDeleteUserModal(false);
         setDeletingUser(null);
-      } catch {
-        // handled in handleUserAction
+      } catch (error) {
+        setFormError(getErrorMessage(error, '操作失败'));
       }
     });
   };
@@ -894,6 +889,7 @@ const UserConfig = ({ config, role, refreshConfig }: UserConfigProps) => {
                   password: '',
                   userGroup: config?.UserConfig?.DefaultUserGroup || '',
                 });
+                setFormError('');
                 setShowAddUserForm(true);
                 if (showChangePasswordForm) {
                   setShowChangePasswordForm(false);
@@ -908,6 +904,7 @@ const UserConfig = ({ config, role, refreshConfig }: UserConfigProps) => {
         </div>
 
         <AddUserForm
+          error={formError}
           value={newUser}
           isOpen={showAddUserForm}
           onChange={setNewUser}
@@ -921,6 +918,7 @@ const UserConfig = ({ config, role, refreshConfig }: UserConfigProps) => {
         />
 
         <ChangePasswordForm
+          error={formError}
           username={changePasswordUser.username}
           password={changePasswordUser.password}
           isOpen={showChangePasswordForm}
@@ -1031,6 +1029,7 @@ const UserConfig = ({ config, role, refreshConfig }: UserConfigProps) => {
           </h2>
           <button
             onClick={() => {
+              setFormError('');
               setShowAddUserGroupForm(true);
               if (showEditUserGroupForm) {
                 setShowEditUserGroupForm(false);
@@ -1055,6 +1054,7 @@ const UserConfig = ({ config, role, refreshConfig }: UserConfigProps) => {
       </div>
 
       <ConfigureUserApisDialog
+        error={formError}
         isOpen={showConfigureApisModal && Boolean(selectedUser)}
         username={retainedUser?.username ?? ''}
         sources={config.SourceConfig || []}
@@ -1066,6 +1066,7 @@ const UserConfig = ({ config, role, refreshConfig }: UserConfigProps) => {
       />
 
       <UserGroupFormDialog
+        error={formError}
         mode='add'
         isOpen={showAddUserGroupForm}
         value={newUserGroup}
@@ -1078,6 +1079,7 @@ const UserConfig = ({ config, role, refreshConfig }: UserConfigProps) => {
       />
 
       <UserGroupFormDialog
+        error={formError}
         mode='edit'
         isOpen={showEditUserGroupForm && Boolean(editingUserGroup)}
         value={retainedEditingGroup ?? EMPTY_USER_GROUP_DRAFT}
@@ -1100,6 +1102,7 @@ const UserConfig = ({ config, role, refreshConfig }: UserConfigProps) => {
       />
 
       <ConfigureUserGroupDialog
+        error={formError}
         isOpen={showConfigureUserGroupModal && Boolean(selectedUserForGroup)}
         username={retainedUserForGroup?.username ?? ''}
         selectedGroup={
@@ -1115,6 +1118,7 @@ const UserConfig = ({ config, role, refreshConfig }: UserConfigProps) => {
       />
 
       <DeleteUserGroupConfirm
+        error={formError}
         isOpen={showDeleteUserGroupModal && !!deletingUserGroup}
         groupName={deletingUserGroup?.name || ''}
         affectedCount={deletingUserGroup?.affectedCount || 0}
@@ -1127,6 +1131,8 @@ const UserConfig = ({ config, role, refreshConfig }: UserConfigProps) => {
       />
 
       <DeleteUserConfirm
+        error={formError}
+        isDeleting={isLoading(`deleteUser_${deletingUser}`)}
         isOpen={showDeleteUserModal && !!deletingUser}
         username={deletingUser || ''}
         onCancel={() => {
@@ -1137,6 +1143,7 @@ const UserConfig = ({ config, role, refreshConfig }: UserConfigProps) => {
       />
 
       <BatchUserGroupDialog
+        error={formError}
         isOpen={showBatchUserGroupModal}
         selectedGroup={selectedUserGroup}
         userGroups={userGroups}
@@ -1150,13 +1157,26 @@ const UserConfig = ({ config, role, refreshConfig }: UserConfigProps) => {
         isOpen={!!batchPreview}
         title='确认批量设置用户组'
         message={`预计处理 ${batchPreview?.affectedCount || 0} 个用户，跳过 ${batchPreview?.skippedCount || 0} 个。`}
-        onClose={() => setBatchPreview(null)}
+        onClose={() => {
+          if (!isLoading('batchSetUserGroup')) setBatchPreview(null);
+        }}
         onConfirm={() => void confirmBatch()}
         confirmDisabled={
           isLoading('batchSetUserGroup') || !batchPreview?.affectedCount
         }
-      />
+      >
+        <p>
+          预计处理 {batchPreview?.affectedCount || 0} 个用户，跳过{' '}
+          {batchPreview?.skippedCount || 0} 个。
+        </p>
+        {formError && (
+          <p role='alert' className='mt-3 text-sm text-red-600'>
+            {formError}
+          </p>
+        )}
+      </ConfirmModal>
       <CleanupInactiveUsersDialog
+        error={formError}
         isOpen={showCleanupInactiveModal}
         inactiveDays={inactiveDays}
         candidates={inactiveCandidates}
@@ -1172,6 +1192,7 @@ const UserConfig = ({ config, role, refreshConfig }: UserConfigProps) => {
       />
 
       <RegistrationSettingsDialog
+        error={formError}
         isOpen={showRegistrationModal}
         openRegister={!!config.UserConfig.OpenRegister}
         requireInviteCode={!!config.UserConfig.RequireInviteCode}
@@ -1242,16 +1263,6 @@ const UserConfig = ({ config, role, refreshConfig }: UserConfigProps) => {
           void updateOpenRegister(true);
         }}
         confirmText='确认开启'
-      />
-
-      <AlertModal
-        isOpen={alertModal.isOpen}
-        onClose={hideAlert}
-        type={alertModal.type}
-        title={alertModal.title}
-        message={alertModal.message}
-        timer={alertModal.timer}
-        showConfirm={alertModal.showConfirm}
       />
     </div>
   );

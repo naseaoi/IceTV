@@ -11,6 +11,11 @@ import { useClientHydrated } from '@/hooks/useClientHydrated';
 import { addSearchHistory } from '@/lib/db.client';
 import { readFluidSearch } from '@/lib/local-preferences';
 import { SearchResult } from '@/lib/types';
+import {
+  DisplayableError,
+  getErrorMessage,
+  isAbortError,
+} from '@/lib/user-facing-error';
 
 export { clearSearchSnapshotCache } from '@/features/search/lib/searchSnapshotCache';
 
@@ -52,6 +57,8 @@ export function useSearchExecution({
     initialSnapshot ? query : '',
   );
 
+  const [error, setError] = useState<string | null>(null);
+  const [retryCount, setRetryCount] = useState(0);
   const currentQueryRef = useRef<string>('');
   const eventSourceRef = useRef<EventSource | null>(null);
   const pendingResultsRef = useRef<SearchResult[]>([]);
@@ -73,13 +80,16 @@ export function useSearchExecution({
 
   // 连接随 effect 清理关闭；StrictMode 重跑时会重新建立，不能按 query 去重跳过
   useEffect(() => {
+    let active = true;
+    const controller = new AbortController();
+    setError(null);
     currentQueryRef.current = query;
     setResultsQuery(query);
     pendingResultsRef.current = [];
     hasFirstBatchRef.current = false;
 
     if (query) {
-      const cachedSnapshot = getSearchSnapshot(query);
+      const cachedSnapshot = retryCount === 0 ? getSearchSnapshot(query) : null;
       if (cachedSnapshot) {
         setSearchResults(cachedSnapshot.results);
         setTotalSources(cachedSnapshot.totalSources);
@@ -114,10 +124,10 @@ export function useSearchExecution({
         eventSourceRef.current = es;
 
         es.onmessage = (event) => {
-          if (!event.data) return;
+          if (!active || !event.data) return;
           try {
             const payload = JSON.parse(event.data);
-            if (currentQueryRef.current !== trimmed) return;
+            if (!active || currentQueryRef.current !== trimmed) return;
             switch (payload.type) {
               case 'start':
                 setTotalSources(payload.totalSources || 0);
@@ -193,10 +203,14 @@ export function useSearchExecution({
                 }
                 break;
             }
-          } catch {}
+          } catch {
+            es.onerror?.(new Event('error'));
+          }
         };
 
         es.onerror = () => {
+          if (!active) return;
+          setError('搜索未完成');
           setIsLoading(false);
           if (pendingResultsRef.current.length > 0) {
             const toAppend = pendingResultsRef.current;
@@ -218,10 +232,20 @@ export function useSearchExecution({
         };
       } else {
         // 传统搜索
-        fetch(`/api/search?q=${encodeURIComponent(trimmed)}`)
-          .then((response) => response.json())
+        fetch(`/api/search?q=${encodeURIComponent(trimmed)}`, {
+          signal: controller.signal,
+        })
+          .then(async (response) => {
+            if (!response.ok) {
+              const data = await response.json().catch(() => ({}));
+              throw new DisplayableError(
+                typeof data.error === 'string' ? data.error : '搜索失败',
+              );
+            }
+            return response.json();
+          })
           .then((data) => {
-            if (currentQueryRef.current !== trimmed) return;
+            if (!active || currentQueryRef.current !== trimmed) return;
 
             if (data.results && Array.isArray(data.results)) {
               const {
@@ -247,7 +271,9 @@ export function useSearchExecution({
             }
             setIsLoading(false);
           })
-          .catch(() => {
+          .catch((error) => {
+            if (!active || isAbortError(error)) return;
+            setError(getErrorMessage(error, '搜索失败'));
             setIsLoading(false);
           });
       }
@@ -262,6 +288,8 @@ export function useSearchExecution({
     }
 
     return () => {
+      active = false;
+      controller.abort();
       if (eventSourceRef.current) {
         try {
           eventSourceRef.current.close();
@@ -274,11 +302,17 @@ export function useSearchExecution({
       }
       pendingResultsRef.current = [];
     };
-  }, [query]);
+  }, [query, retryCount]);
 
   useEffect(() => {
     const query = currentQueryRef.current;
-    if (!query || query !== resultsQuery || !showResults || isLoading) {
+    if (
+      !query ||
+      query !== resultsQuery ||
+      !showResults ||
+      isLoading ||
+      error
+    ) {
       return;
     }
 
@@ -289,6 +323,7 @@ export function useSearchExecution({
       useFluidSearch,
     });
   }, [
+    error,
     resultsQuery,
     searchResults,
     totalSources,
@@ -299,6 +334,8 @@ export function useSearchExecution({
   ]);
 
   return {
+    error,
+    retry: () => setRetryCount((count) => count + 1),
     isLoading,
     setIsLoading,
     showResults,
