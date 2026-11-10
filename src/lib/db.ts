@@ -932,6 +932,18 @@ class DbManager {
     return storage.getPlaybackPeriodSessions(userName, start, end);
   }
 
+  async hasPlaybackAnnualActivity(
+    ...args: Parameters<IStorage['hasPlaybackAnnualActivity']>
+  ): Promise<boolean> {
+    return (await this.getStorage()).hasPlaybackAnnualActivity(...args);
+  }
+
+  async getPlaybackAnnualData(
+    ...args: Parameters<IStorage['getPlaybackAnnualData']>
+  ): ReturnType<IStorage['getPlaybackAnnualData']> {
+    return (await this.getStorage()).getPlaybackAnnualData(...args);
+  }
+
   async recordSourceHealthSearchBatch(
     rows: SourceHealthSearchDelta[],
   ): Promise<void> {

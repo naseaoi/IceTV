@@ -94,6 +94,12 @@ import { AdminConfig } from '@/types/admin';
 
 import { hashPassword, verifyPassword } from './password';
 import {
+  ANNUAL_BUCKETS_SQL,
+  ANNUAL_EARLIEST_SQL,
+  ANNUAL_MESSAGE_EXISTS_SQL,
+  ANNUAL_SESSIONS_SQL,
+} from './playback-annual-storage';
+import {
   buildPlaybackSearchLikePattern,
   normalizePlaybackSearchKeyword,
 } from './playback-query';
@@ -103,6 +109,7 @@ import {
   Favorite,
   IStorage,
   MetadataRecordPage,
+  PlaybackAnnualData,
   PlaybackPeriodSession,
   PlaybackSession,
   PlaybackWatchBucket,
@@ -3603,6 +3610,46 @@ export class LocalSqliteStorage implements IStorage {
         WHERE username = ? AND started_at >= ? AND started_at < ? AND watch_seconds > 0`,
       )
       .all(username, start, end) as PlaybackPeriodSession[];
+  }
+
+  async hasPlaybackAnnualActivity(
+    userName: string,
+    start: number,
+    end: number,
+  ): Promise<boolean> {
+    const row = this.db
+      .prepare(ANNUAL_MESSAGE_EXISTS_SQL)
+      .get(normalizeUsername(userName), start, end);
+    return !!row;
+  }
+
+  async getPlaybackAnnualData(
+    userName: string,
+    start: number,
+    end: number,
+  ): Promise<PlaybackAnnualData> {
+    const username = normalizeUsername(userName);
+    const earliest = this.db.prepare(ANNUAL_EARLIEST_SQL).get(username) as
+      | { started_at: number }
+      | undefined;
+    const earliestStartedAt = earliest?.started_at ?? null;
+    if (!Number.isFinite(start) || !Number.isFinite(end) || end <= start)
+      return { sessions: [], buckets: [], earliestStartedAt };
+    const sessions = this.db
+      .prepare(ANNUAL_SESSIONS_SQL)
+      .all(
+        username,
+        end,
+        start,
+        username,
+        start,
+        end,
+        username,
+      ) as PlaybackAnnualData['sessions'];
+    const buckets = this.db
+      .prepare(ANNUAL_BUCKETS_SQL)
+      .all(username, start, end) as PlaybackAnnualData['buckets'];
+    return { sessions, buckets, earliestStartedAt };
   }
 
   async recordSourceHealthSearchBatch(

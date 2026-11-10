@@ -19,7 +19,7 @@ export async function cleanupPlaybackSessions(): Promise<void> {
   }
 }
 
-function readPlaybackStatsRetentionDays(): number {
+export function readPlaybackStatsRetentionDays(): number {
   const parsed = Number.parseInt(
     process.env.CRON_PLAYBACK_STATS_RETENTION_DAYS || '',
     10,

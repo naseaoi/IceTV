@@ -21,6 +21,7 @@
 - 账号相关能力（退出、登录跳转、版本更新标记、设置 / 改密 / 版本面板）在 `src/components/user-menu/`，桌面 `UserMenu` 与移动端 `/settings` 共用。
 - 消息面板是固定高度的居中浮层，列表、通知设置与评价详情在同一框内滚动，空、加载与错误状态在框内居中。改回随内容伸缩会让面板在切换视图、加载完成或标记已读时整体上下跳动。
 - `/me` 下各标签页的外壳（`PageLayout`、个人横幅、标签栏）由 `app/me/layout.tsx` 的 `MeShell` 提供，子页面与其 `loading.tsx` 只渲染内容区，**再套 `PageLayout` 会出现双层导航**。概览页及其骨架放在路由组 `app/me/(overview)/`，`app/me/` 根目录不放 `loading.tsx`，否则冷加载其他标签会先闪出概览骨架。海报网格统一用 `POSTER_GRID_CLASS`（`src/components/poster-grid-layout.ts`）。
+- 年度报告 `/recap/[year]` 是不套 `PageLayout` 的全屏层，跟随站点主题。专用动效与细字重映射在 `src/features/annual-report/recap.css`（由该路由的 `layout.tsx` 引入，减弱动效在同文件降级）；全站 Inter 只加载 400–800，`font-extralight` / `font-light` 依赖该 layout 单独加载的 200/300 字重，挪出 `.recap-root` 会静默回退成常规字重。翻页手势只在卡片滚动区已到边缘时生效，内容超高的卡片先滚动再翻页。桌面 9:16 舞台的启用条件是宽 ≥ 768px 且高 ≥ 600px，不用 `md:`，否则手机横屏会被挤成窄条。卡片内容垂直居中用 `SlideBody` 的 `center`（`safe center`），直接写 `justify-center` 会在矮视口裁掉顶部且无法滚回。
 
 ## 加载反馈与骨架
 

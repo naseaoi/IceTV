@@ -65,3 +65,90 @@ export type PlaybackPeriodStats = {
   buckets: PlaybackPeriodBucket[];
   topWorks: PlaybackTopWork[];
 };
+
+// 年度报告中的作品：按作品身份（归一化标题 + 年份）合并多个源，source / videoId / cover 取最近一次观看
+export type AnnualReportWork = {
+  title: string;
+  year: string;
+  cover: string;
+  source: string;
+  videoId: string;
+  watchSeconds: number;
+  // 年内看过的不同集数
+  episodeCount: number;
+  firstWatchedAt: number;
+  lastWatchedAt: number;
+};
+
+export type AnnualReportWorkMoment = {
+  title: string;
+  year: string;
+  cover: string;
+  source: string;
+  videoId: string;
+  at: number;
+};
+
+// GET /api/playback-stats/annual?year=YYYY&tz=IANA
+// 所有日期、月份、小时、星期均按请求时区计算；时长单位为秒
+export type AnnualReport = {
+  year: number;
+  timeZone: string;
+  generatedAt: number;
+  // 当年在请求时区尚未结束，数据截至 generatedAt
+  inProgress: boolean;
+  // 有观看统计的年份，降序，至少包含当前请求年
+  availableYears: number[];
+  // 开启了统计数据保留期限且该年有部分时间早于保留起点，统计可能不完整
+  possiblyIncomplete: boolean;
+  totals: {
+    watchSeconds: number;
+    // 其中来自旧版客户端估算的部分（无时间桶，按起播时刻连续摊开）
+    estimatedWatchSeconds: number;
+    activeDays: number;
+    workCount: number;
+    episodeCount: number;
+    sourceCount: number;
+  };
+  // 12 项，下标 0 为 1 月
+  months: number[];
+  // 24 项，下标为本地小时
+  hours: number[];
+  // 7 项，下标 0 为周一
+  weekdays: number[];
+  // 本地 0:00–5:00 的观看时长
+  lateNightWatchSeconds: number;
+  // 按“一天从 5:00 开始”比较本地时刻，取会话结束时刻最晚的一次
+  latestNight: (AnnualReportWorkMoment & { localTime: string }) | null;
+  peakDay: {
+    date: string;
+    watchSeconds: number;
+    // 当天观看时长最多的作品，最多 3 部
+    works: AnnualReportWork[];
+  } | null;
+  longestStreak: { days: number; startDate: string; endDate: string } | null;
+  // 最多 10 部，按时长降序
+  topWorks: AnnualReportWork[];
+  // 最多 5 个，按时长降序；sourceName 取最近一次会话记录的名称
+  topSources: {
+    source: string;
+    sourceName: string;
+    watchSeconds: number;
+    workCount: number;
+  }[];
+  firstWork: AnnualReportWorkMoment | null;
+  lastWork: AnnualReportWorkMoment | null;
+  // 按评价 created_at 归属年份
+  reviews: {
+    count: number;
+    ratedCount: number;
+    // 一位小数；无评分为 null
+    averageRating: number | null;
+    topRated: {
+      title: string;
+      year: string;
+      cover: string;
+      rating: number;
+    } | null;
+  };
+};

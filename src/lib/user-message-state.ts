@@ -37,6 +37,11 @@ export function mergeUserMessageState(
       );
   }
   const next = { ...current };
+  if (update.annualReportReadYear !== undefined)
+    next.annualReportReadYear = Math.max(
+      current.annualReportReadYear ?? 0,
+      update.annualReportReadYear,
+    );
   if (update.notificationSettings)
     next.mutedKinds = [...update.notificationSettings.mutedKinds];
   const previousWatermark = current.followReviewReadAt ?? 0;

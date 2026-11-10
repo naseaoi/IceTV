@@ -2,6 +2,7 @@
 
 import type { SiteAnnouncement } from '@/lib/types';
 
+const mockHasPlaybackAnnualActivity = jest.fn();
 const mockGetSocialNotifications = jest.fn();
 const mockGetSocialNotificationCount = jest.fn();
 const mockGetReviewReplyMessages = jest.fn();
@@ -20,6 +21,8 @@ const mockSavePlayRecordsByKey = jest.fn();
 
 jest.mock('@/lib/db', () => ({
   db: {
+    hasPlaybackAnnualActivity: (...args: unknown[]) =>
+      mockHasPlaybackAnnualActivity(...args),
     getPublishedAnnouncements: (...args: unknown[]) =>
       mockGetPublishedAnnouncements(...args),
     getAnnouncement: (...args: unknown[]) => mockGetAnnouncement(...args),
@@ -102,6 +105,7 @@ function usePersistedUserMessageState(): void {
 describe('messages server', () => {
   beforeEach(() => {
     jest.clearAllMocks();
+    mockHasPlaybackAnnualActivity.mockResolvedValue(false);
     mockGetSocialNotifications.mockResolvedValue([]);
     mockGetSocialNotificationCount.mockResolvedValue(0);
     mockGetReviewReplyMessages.mockResolvedValue([]);
@@ -653,5 +657,125 @@ describe('messages server', () => {
       }),
     });
     expect(mockGetPlayRecord).not.toHaveBeenCalled();
+  });
+});
+
+describe('annual report messages', () => {
+  beforeEach(() => {
+    jest.clearAllMocks();
+    jest.spyOn(Date, 'now').mockReturnValue(Date.parse('2026-12-19T16:00:00Z'));
+    usePersistedUserMessageState();
+    mockHasPlaybackAnnualActivity.mockResolvedValue(true);
+    mockGetPublishedAnnouncements.mockResolvedValue([]);
+    mockGetFollowReviewMessages.mockResolvedValue([]);
+    mockGetFollowReviewMessageCount.mockResolvedValue(0);
+    mockGetReviewReplyMessages.mockResolvedValue([]);
+    mockGetReviewReplyMessageCount.mockResolvedValue(0);
+    mockGetSocialNotifications.mockResolvedValue([]);
+    mockGetSocialNotificationCount.mockResolvedValue(0);
+    mockGetUnreadTrackingPlayRecordPage.mockResolvedValue({
+      items: {},
+      total: 0,
+      nextCursor: null,
+    });
+  });
+  afterEach(() => jest.restoreAllMocks());
+
+  it('opens at local midnight, affects revision and queries only during the window', async () => {
+    const closed = await getUserMessageSummary('reader', 'UTC');
+    expect(closed.unreadCount).toBe(0);
+    expect(mockHasPlaybackAnnualActivity).not.toHaveBeenCalled();
+    const open = await getUserMessageSummary('reader', 'Asia/Shanghai');
+    expect(open.unreadCount).toBe(1);
+    expect(open.annualReport).toEqual({
+      id: 'annual-report:2026',
+      type: 'annual-report',
+      year: 2026,
+      createdAt: Date.parse('2026-12-19T16:00:00Z'),
+    });
+    expect(open.revision).not.toBe(closed.revision);
+    expect(mockHasPlaybackAnnualActivity).toHaveBeenCalledWith(
+      'reader',
+      Date.parse('2025-12-31T16:00:00Z'),
+      Date.parse('2026-12-31T16:00:00Z'),
+    );
+    mockHasPlaybackAnnualActivity.mockClear();
+    jest.spyOn(Date, 'now').mockReturnValue(Date.parse('2027-03-01T00:00:00Z'));
+    expect((await getUserMessageSummary('reader')).unreadCount).toBe(0);
+    expect(mockHasPlaybackAnnualActivity).not.toHaveBeenCalled();
+  });
+
+  it('requires viewing activity and rejects unavailable annual identifiers', async () => {
+    expect(
+      await readUserMessage('reader', 'annual-report:2025', 'Asia/Shanghai'),
+    ).toBeNull();
+    mockHasPlaybackAnnualActivity.mockResolvedValue(false);
+    expect(
+      (await getUserMessagePage('reader', 20, null, 'Asia/Shanghai')).items,
+    ).toEqual([]);
+    expect(
+      await readUserMessage('reader', 'annual-report:2026', 'Asia/Shanghai'),
+    ).toBeNull();
+    expect(mockUpdateUserMessageState).not.toHaveBeenCalled();
+  });
+
+  it('persists annual read across timezones and skips later eligibility queries', async () => {
+    await readUserMessage('reader', 'annual-report:2026', 'Asia/Shanghai');
+    mockHasPlaybackAnnualActivity.mockClear();
+    jest.spyOn(Date, 'now').mockReturnValue(Date.parse('2027-02-28T10:00:00Z'));
+    expect(
+      (await getUserMessageSummary('reader', 'America/New_York')).unreadCount,
+    ).toBe(0);
+    expect(mockHasPlaybackAnnualActivity).not.toHaveBeenCalled();
+    expect(await mockGetUserMessageState()).toMatchObject({
+      annualReportReadYear: 2026,
+    });
+  });
+
+  it('read-all confirms annual messages even when optional kinds are muted', async () => {
+    await mockUpdateUserMessageState('reader', {
+      notificationSettings: {
+        mutedKinds: [
+          'tracking-update',
+          'follow-review',
+          'review-reply',
+          'new-follower',
+          'review-like',
+        ],
+        now: Date.now(),
+      },
+    });
+    expect(
+      (await getUserMessageSummary('reader', 'Asia/Shanghai')).unreadCount,
+    ).toBe(1);
+    await readAllUserMessages('reader', 'Asia/Shanghai');
+    expect(
+      (await getUserMessageSummary('reader', 'Asia/Shanghai')).unreadCount,
+    ).toBe(0);
+    expect(mockGetUnreadTrackingPlayRecordPage).not.toHaveBeenCalled();
+  });
+
+  it('pins annual messages on the first page without consuming the feed cursor', async () => {
+    mockGetUnreadTrackingPlayRecordPage.mockResolvedValue({
+      items: { 'source-a+video-1': updatedRecord },
+      total: 1,
+      nextCursor: null,
+    });
+    const first = await getUserMessagePage('reader', 1, null, 'Asia/Shanghai');
+    expect(first.items.map((message) => message.id)).toEqual([
+      'annual-report:2026',
+    ]);
+    expect(first.total).toBe(2);
+    expect(first.nextCursor).not.toBeNull();
+    const next = await getUserMessagePage(
+      'reader',
+      1,
+      first.nextCursor,
+      'Asia/Shanghai',
+    );
+    expect(next.items.map((message) => message.type)).toEqual([
+      'tracking-update',
+    ]);
+    expect(next.nextCursor).toBeNull();
   });
 });

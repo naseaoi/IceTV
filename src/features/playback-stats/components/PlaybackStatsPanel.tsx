@@ -1,5 +1,7 @@
 'use client';
 
+import { Sparkles } from 'lucide-react';
+import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import {
   type CSSProperties,
@@ -38,6 +40,7 @@ import {
   INDICATOR_TARGET_ATTR,
   useSlidingIndicator,
 } from '@/hooks/useSlidingIndicator';
+import { openAnnualReportYear } from '@/lib/annual-report-window';
 import {
   getCurrentNavigationPath,
   withReturnTo,
@@ -388,11 +391,22 @@ export function PlaybackStatsPanel() {
   }
 
   const selected = stats.buckets.find((bucket) => bucket.key === selectedKey);
+  const reportYear = openAnnualReportYear(stats.date);
 
   return (
     <div className={STATS_LAYOUT_CLASS}>
       <section className={STATS_COLUMN_CLASS}>
-        <StatsHeading title='观看统计' />
+        <StatsHeading title='观看统计'>
+          {reportYear !== null && (
+            <Link
+              href={`/recap/${reportYear}`}
+              className='inline-flex h-7 items-center gap-1 rounded-full bg-gray-900/[0.05] px-3 text-xs font-medium text-gray-700 transition-colors hover:bg-gray-900/[0.08] hover:text-gray-900 dark:bg-white/[0.06] dark:text-gray-200 dark:hover:bg-white/[0.1] dark:hover:text-white'
+            >
+              <Sparkles className='h-3.5 w-3.5 text-brand-500 dark:text-brand-300' />
+              {reportYear} 年度报告
+            </Link>
+          )}
+        </StatsHeading>
         <div className={STATS_CARD_CLASS}>
           <div className='flex flex-wrap gap-x-8 gap-y-3'>
             <Metric

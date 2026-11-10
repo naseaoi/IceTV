@@ -4,6 +4,7 @@ import {
   assertBatchDeletePlayRecords,
   assertUpdatedPlayRecordPage,
 } from '@/lib/__tests__/__fixtures__/play-record-page-contract';
+import { assertPlaybackAnnualData } from '@/lib/__tests__/__fixtures__/playback-annual-contract';
 import { assertPlaybackPeriodRange } from '@/lib/__tests__/__fixtures__/playback-period-contract';
 import { assertReviewReplies } from '@/lib/__tests__/__fixtures__/review-reply-contract';
 import { assertSocialNotifications } from '@/lib/__tests__/__fixtures__/social-notification-contract';
@@ -698,6 +699,7 @@ describeLive('MySQL 追更查询（真实实例）', () => {
 
   it('reads period sessions with real SQL range and user predicates', async () => {
     await assertPlaybackPeriodRange(storage);
+    await assertPlaybackAnnualData(storage);
   });
 
   it('serializes concurrent message-state updates on a missing row', async () => {

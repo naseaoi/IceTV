@@ -3,6 +3,7 @@ import {
   assertBatchDeletePlayRecords,
   assertUpdatedPlayRecordPage,
 } from '@/lib/__tests__/__fixtures__/play-record-page-contract';
+import { assertPlaybackAnnualData } from '@/lib/__tests__/__fixtures__/playback-annual-contract';
 import { assertPlaybackPeriodRange } from '@/lib/__tests__/__fixtures__/playback-period-contract';
 import { assertWatchHistoryContract } from '@/lib/__tests__/__fixtures__/watch-history-contract';
 import type { AnnouncementRow } from '@/lib/announcement-storage';
@@ -1203,6 +1204,7 @@ function createFakePool() {
         total_time: totalTime,
         created_at: createdAt,
         updated_at: updatedAt,
+        measurement_version: 1,
       });
       return [[], []];
     }
@@ -2187,7 +2189,9 @@ function createFakePool() {
 
     if (
       normalized ===
-      'SELECT source, video_id, title, cover, year, started_at, ended_at, watch_seconds FROM playback_sessions WHERE username = ? AND started_at >= ? AND started_at < ? AND watch_seconds > 0'
+        'SELECT source, video_id, title, cover, year, started_at, ended_at, watch_seconds FROM playback_sessions WHERE username = ? AND started_at >= ? AND started_at < ? AND watch_seconds > 0' ||
+      normalized ===
+        'SELECT 1 FROM playback_sessions WHERE username = ? AND started_at >= ? AND started_at < ? AND watch_seconds > 0 LIMIT 1'
     ) {
       const [username, start, end] = params as [string, number, number];
       return [
@@ -2198,6 +2202,63 @@ function createFakePool() {
             Number(row.started_at) < end &&
             Number(row.watch_seconds) > 0,
         ),
+        [],
+      ];
+    }
+
+    if (
+      normalized ===
+      'SELECT started_at FROM playback_sessions WHERE username = ? AND watch_seconds > 0 ORDER BY started_at ASC LIMIT 1'
+    ) {
+      return [
+        [...currentState.playbackSessions.values()]
+          .filter(
+            (row) =>
+              row.username === params[0] && Number(row.watch_seconds) > 0,
+          )
+          .sort((a, b) => Number(a.started_at) - Number(b.started_at))
+          .slice(0, 1),
+        [],
+      ];
+    }
+    if (
+      normalized.startsWith(
+        'SELECT session_id, bucket_start, watch_ms FROM playback_watch_buckets',
+      )
+    ) {
+      return [
+        currentState.watchBuckets.filter(
+          (row) =>
+            row.username === params[0] &&
+            row.bucket_start >= Number(params[1]) &&
+            row.bucket_start < Number(params[2]),
+        ),
+        [],
+      ];
+    }
+    if (
+      normalized.startsWith(
+        'SELECT id, source, video_id, episode_index, title, source_name, cover, year, started_at, ended_at, watch_seconds, measurement_version FROM playback_sessions',
+      )
+    ) {
+      const [username, end, start] = params as [string, number, number];
+      return [
+        [...currentState.playbackSessions.values()].filter((row) => {
+          if (row.username !== username || Number(row.watch_seconds) <= 0)
+            return false;
+          if (Number(row.measurement_version) === 1)
+            return (
+              Number(row.started_at) < end &&
+              Number(row.started_at) + Number(row.watch_seconds) * 1000 > start
+            );
+          return currentState.watchBuckets.some(
+            (bucket) =>
+              bucket.username === username &&
+              bucket.session_id === row.id &&
+              bucket.bucket_start >= start &&
+              bucket.bucket_start < end,
+          );
+        }),
         [],
       ];
     }
@@ -3408,6 +3469,7 @@ describe('mysql storage contract', () => {
   it('reads positive playback sessions in a half-open user-scoped range', async () => {
     const storage = new MySqlStorage('mysql://demo:demo@localhost:3306/icetv');
     await assertPlaybackPeriodRange(storage);
+    await assertPlaybackAnnualData(storage);
   });
 
   it('normalizes usernames before storing and looking them up', async () => {

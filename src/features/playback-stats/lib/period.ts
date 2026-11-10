@@ -10,7 +10,12 @@ const DAY_MS = 86_400_000;
 
 export class PlaybackPeriodValidationError extends Error {}
 
-function dateFormatter(timeZone: string): Intl.DateTimeFormat {
+export function dateFormatter(timeZone: string): Intl.DateTimeFormat {
+  try {
+    new Intl.DateTimeFormat(undefined, { timeZone });
+  } catch {
+    throw new PlaybackPeriodValidationError('时区无效');
+  }
   return new Intl.DateTimeFormat('en-US', {
     timeZone,
     year: 'numeric',
@@ -19,7 +24,10 @@ function dateFormatter(timeZone: string): Intl.DateTimeFormat {
   });
 }
 
-function localDate(formatter: Intl.DateTimeFormat, instant: number): string {
+export function localDate(
+  formatter: Intl.DateTimeFormat,
+  instant: number,
+): string {
   const parts = formatter.formatToParts(instant);
   const part = (type: string) =>
     parts.find((item) => item.type === type)!.value;
@@ -31,7 +39,10 @@ function calendarDate(value: string): Date {
 }
 
 // 在目标日期附近定位本地日历日的起点；午夜跳时也以该日首个有效时刻为界。
-function localMidnight(date: Date, formatter: Intl.DateTimeFormat): number {
+export function localMidnight(
+  date: Date,
+  formatter: Intl.DateTimeFormat,
+): number {
   const target = date.getTime();
   let low = target - 2 * DAY_MS;
   let high = target + 2 * DAY_MS;
@@ -59,11 +70,6 @@ export function buildPlaybackPeriod(
     throw new PlaybackPeriodValidationError('统计周期无效');
   }
   const timeZone = input.timeZone ?? 'UTC';
-  try {
-    new Intl.DateTimeFormat(undefined, { timeZone });
-  } catch {
-    throw new PlaybackPeriodValidationError('时区无效');
-  }
   const formatter = dateFormatter(timeZone);
   const date = input.date ?? localDate(formatter, now);
   const anchor = calendarDate(date);

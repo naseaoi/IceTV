@@ -12,6 +12,13 @@ export const MESSAGE_NOTIFICATION_KINDS: readonly MessageNotificationKind[] = [
   'review-like',
 ];
 
+export interface AnnualReportUserMessage {
+  id: string;
+  type: 'annual-report';
+  year: number;
+  createdAt: number;
+}
+
 export interface AnnouncementUserMessage {
   id: string;
   type: 'announcement';
@@ -78,6 +85,7 @@ export interface ReviewLikeUserMessage {
   createdAt: number;
 }
 export type UserMessage =
+  | AnnualReportUserMessage
   | AnnouncementUserMessage
   | TrackingUpdateUserMessage
   | FollowReviewUserMessage
@@ -105,6 +113,7 @@ export interface UserMessageSummary {
   reviewLikeUnreadCount: number;
   revision: string;
   announcement: AnnouncementUserMessage | null;
+  annualReport?: AnnualReportUserMessage | null;
   latestTracking: TrackingUpdateUserMessage | null;
 }
 

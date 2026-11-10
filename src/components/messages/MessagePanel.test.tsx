@@ -462,3 +462,26 @@ it('公告视图显示站点须知与历史公告，可加载更多', async () =
     screen.queryByRole('button', { name: '加载更多' }),
   ).not.toBeInTheDocument();
 });
+
+it('opens an annual report link and marks its system message read', () => {
+  const message: UserMessage = {
+    id: 'annual-report:2026',
+    type: 'annual-report',
+    year: 2026,
+    createdAt: Date.now(),
+  };
+  const onRead = jest.fn().mockResolvedValue(undefined);
+  const onClose = jest.fn();
+  renderPanel({
+    page: { items: [message], total: 1, nextCursor: null },
+    onRead,
+    onClose,
+  });
+  const link = screen.getByRole('link', {
+    name: /你的 2026 年度观影报告已生成/,
+  });
+  expect(link).toHaveAttribute('href', '/recap/2026');
+  fireEvent.click(link);
+  expect(onRead).toHaveBeenCalledWith(message);
+  expect(onClose).toHaveBeenCalled();
+});

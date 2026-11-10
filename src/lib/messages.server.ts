@@ -6,6 +6,7 @@ import {
   buildAnnouncementMessageId,
   parseAnnouncementMessageId,
 } from '@/lib/announcement-identity';
+import { getAnnualReportMessage } from '@/lib/annual-report-message.server';
 import { db } from '@/lib/db';
 import {
   decodeCursor,
@@ -233,6 +234,7 @@ export async function getUserMessagePage(
   userName: string,
   limit: number,
   cursor?: string | null,
+  timeZone = 'UTC',
 ): Promise<UserMessagePage> {
   const before = decodeCursor(cursor);
   const { announcements, state } = await getAnnouncementContext(userName);
@@ -242,7 +244,12 @@ export async function getUserMessagePage(
     limit + 1,
     before,
   );
-  const pinned = before ? [] : announcements;
+  const annualReport = await getAnnualReportMessage(userName, state, timeZone);
+  const pinned = before
+    ? []
+    : [...announcements, ...(annualReport ? [annualReport] : [])].sort(
+        (a, b) => b.createdAt - a.createdAt || b.id.localeCompare(a.id),
+      );
   const pageLimit = Math.max(0, limit - pinned.length);
   const merged: UserMessage[] = [
     ...buildTrackingMessages(sources.tracking.items),
@@ -274,7 +281,8 @@ export async function getUserMessagePage(
       sources.replyCount +
       sources.followerCount +
       sources.likeCount +
-      announcements.length,
+      announcements.length +
+      (annualReport ? 1 : 0),
     nextCursor: hasMore
       ? page.length
         ? encodeCursor(page[page.length - 1])
@@ -285,9 +293,13 @@ export async function getUserMessagePage(
 
 export async function getUserMessageSummary(
   userName: string,
+  timeZone = 'UTC',
 ): Promise<UserMessageSummary> {
   const { announcements, state } = await getAnnouncementContext(userName);
-  const sources = await getVisibleMessageSources(userName, state, 1);
+  const [sources, annualReport] = await Promise.all([
+    getVisibleMessageSources(userName, state, 1),
+    getAnnualReportMessage(userName, state, timeZone),
+  ]);
   const latestTracking =
     buildTrackingMessages(sources.tracking.items)[0] ?? null;
   const unreadCount =
@@ -296,7 +308,8 @@ export async function getUserMessageSummary(
     sources.replyCount +
     sources.followerCount +
     sources.likeCount +
-    announcements.length;
+    announcements.length +
+    (annualReport ? 1 : 0);
   const latest = [
     ...sources.followed,
     ...sources.replies,
@@ -319,6 +332,7 @@ export async function getUserMessageSummary(
         sources.followerCount,
         sources.likeCount,
         ...announcements.map((message) => message.id),
+        annualReport?.id ?? '',
         latestTracking?.id ?? '',
         ...latest.map(
           (message) =>
@@ -327,6 +341,7 @@ export async function getUserMessageSummary(
       ].join('|'),
     ),
     announcement: announcements[0] ?? null,
+    annualReport,
     latestTracking,
   };
 }
@@ -334,7 +349,17 @@ export async function getUserMessageSummary(
 export async function readUserMessage(
   userName: string,
   messageId: string,
+  timeZone = 'UTC',
 ): Promise<ReadUserMessageResult | null> {
+  if (messageId.startsWith('annual-report:')) {
+    // 重复已读仍可成功；资格重新按当前用户与开放期检查。
+    const message = await getAnnualReportMessage(userName, {}, timeZone);
+    if (!message || message.id !== messageId) return null;
+    await db.updateUserMessageState(userName, {
+      annualReportReadYear: message.year,
+    });
+    return { message };
+  }
   if (messageId.startsWith('announcement:')) {
     const parsed = parseAnnouncementMessageId(messageId);
     const row = parsed ? await db.getAnnouncement(parsed.rowId) : null;
@@ -446,9 +471,12 @@ export async function readUserMessage(
 
 export async function readAllUserMessages(
   userName: string,
+  timeZone = 'UTC',
 ): Promise<ReadAllUserMessagesResult> {
   const state = await db.getUserMessageState(userName);
+  const annualReport = await getAnnualReportMessage(userName, state, timeZone);
   await db.updateUserMessageState(userName, {
+    ...(annualReport ? { annualReportReadYear: annualReport.year } : {}),
     announcementReadAt: Date.now(),
     followReviewReadAt: Date.now(),
     reviewReplyReadAt: Date.now(),

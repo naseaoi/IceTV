@@ -4,6 +4,7 @@ import {
   assertBatchDeletePlayRecords,
   assertUpdatedPlayRecordPage,
 } from '@/lib/__tests__/__fixtures__/play-record-page-contract';
+import { assertPlaybackAnnualData } from '@/lib/__tests__/__fixtures__/playback-annual-contract';
 import { assertPlaybackPeriodRange } from '@/lib/__tests__/__fixtures__/playback-period-contract';
 import { assertWatchHistoryContract } from '@/lib/__tests__/__fixtures__/watch-history-contract';
 import { DEFAULT_RUNTIME_PARAMS } from '@/lib/runtime-params';
@@ -884,6 +885,7 @@ describe('sqlite storage contract', () => {
   it('reads positive playback sessions in a half-open user-scoped range', async () => {
     const storage = new LocalSqliteStorage(':memory:');
     await assertPlaybackPeriodRange(storage);
+    await assertPlaybackAnnualData(storage);
   });
 
   it('returns null when admin config is absent', async () => {

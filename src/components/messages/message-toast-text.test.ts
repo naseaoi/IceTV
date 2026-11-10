@@ -127,3 +127,21 @@ it('关注评价新增时提示关注动态而非旧追更', () => {
     '关注的人发布了新评价',
   );
 });
+
+it('describes the annual report on mount and when it first appears', () => {
+  const summary = makeSummary({
+    unreadCount: 1,
+    annualReport: {
+      id: 'annual-report:2026',
+      type: 'annual-report',
+      year: 2026,
+      createdAt: 1,
+    },
+  });
+  expect(buildToastText(summary, null, 'mount')).toBe(
+    '你的 2026 年度观影报告已生成',
+  );
+  expect(buildToastText(summary, makeSummary(), 'poll')).toBe(
+    '你的 2026 年度观影报告已生成',
+  );
+});

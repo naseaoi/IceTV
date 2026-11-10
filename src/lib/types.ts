@@ -338,6 +338,17 @@ export type PlaybackPeriodSession = Pick<
   | 'watch_seconds'
 >;
 
+export type PlaybackAnnualSession = PlaybackPeriodSession &
+  Pick<PlaybackSession, 'id' | 'source_name' | 'episode_index'> & {
+    measurement_version: 1 | 2;
+  };
+
+export interface PlaybackAnnualData {
+  sessions: PlaybackAnnualSession[];
+  buckets: { session_id: string; bucket_start: number; watch_ms: number }[];
+  earliestStartedAt: number | null;
+}
+
 export interface SourceHealthSearchDelta {
   source: string;
   bucketDate: string;
@@ -427,6 +438,7 @@ export interface UserSocialData {
 }
 
 export interface UserMessageStateUpdate {
+  annualReportReadYear?: number;
   notificationSettings?: {
     mutedKinds: import('@/lib/message-types').MessageNotificationKind[];
     now: number;
@@ -444,6 +456,7 @@ export interface UserMessageStateUpdate {
 }
 
 export interface UserMessageState {
+  annualReportReadYear?: number;
   mutedKinds?: import('@/lib/message-types').MessageNotificationKind[];
   newFollowerReadAt?: number;
   newFollowerReadIds?: string[];
@@ -906,6 +919,16 @@ export interface IStorage {
     start: number,
     end: number,
   ): Promise<PlaybackPeriodSession[]>;
+  hasPlaybackAnnualActivity(
+    userName: string,
+    start: number,
+    end: number,
+  ): Promise<boolean>;
+  getPlaybackAnnualData(
+    userName: string,
+    start: number,
+    end: number,
+  ): Promise<PlaybackAnnualData>;
   recordSourceHealthSearchBatch(rows: SourceHealthSearchDelta[]): Promise<void>;
   recordSourcePlayReport(input: SourcePlayReportInput): Promise<void>;
   getSourceHealthSearchDaily(

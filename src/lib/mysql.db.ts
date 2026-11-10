@@ -94,6 +94,12 @@ import { AdminConfig } from '@/types/admin';
 
 import { hashPassword, verifyPassword } from './password';
 import {
+  ANNUAL_BUCKETS_SQL,
+  ANNUAL_EARLIEST_SQL,
+  ANNUAL_MESSAGE_EXISTS_SQL,
+  ANNUAL_SESSIONS_SQL,
+} from './playback-annual-storage';
+import {
   buildPlaybackSearchLikePattern,
   normalizePlaybackSearchKeyword,
 } from './playback-query';
@@ -104,6 +110,7 @@ import {
   Favorite,
   IStorage,
   MetadataRecordPage,
+  PlaybackAnnualData,
   PlaybackPeriodSession,
   PlaybackSession,
   PlaybackWatchBucket,
@@ -3104,6 +3111,73 @@ export class MySqlStorage implements IStorage {
       ended_at: Number(row.ended_at),
       watch_seconds: Number(row.watch_seconds),
     }));
+  }
+
+  async hasPlaybackAnnualActivity(
+    userName: string,
+    start: number,
+    end: number,
+  ): Promise<boolean> {
+    await this.ensureInitialized();
+    const [rows] = await this.pool.query<JsonRow[]>(ANNUAL_MESSAGE_EXISTS_SQL, [
+      normalizeUsername(userName),
+      start,
+      end,
+    ]);
+    return rows.length > 0;
+  }
+
+  async getPlaybackAnnualData(
+    userName: string,
+    start: number,
+    end: number,
+  ): Promise<PlaybackAnnualData> {
+    await this.ensureInitialized();
+    const username = normalizeUsername(userName);
+    const [earliest] = await this.pool.query<JsonRow[]>(ANNUAL_EARLIEST_SQL, [
+      username,
+    ]);
+    const earliestStartedAt = earliest.length
+      ? Number(earliest[0].started_at)
+      : null;
+    if (!Number.isFinite(start) || !Number.isFinite(end) || end <= start)
+      return { sessions: [], buckets: [], earliestStartedAt };
+    const [rows] = await this.pool.query<JsonRow[]>(ANNUAL_SESSIONS_SQL, [
+      username,
+      end,
+      start,
+      username,
+      start,
+      end,
+      username,
+    ]);
+    const [bucketRows] = await this.pool.query<JsonRow[]>(ANNUAL_BUCKETS_SQL, [
+      username,
+      start,
+      end,
+    ]);
+    return {
+      sessions: rows.map((row) => ({
+        id: row.id || '',
+        source: row.source || '',
+        video_id: row.video_id || '',
+        title: row.title || '',
+        source_name: row.source_name || '',
+        cover: row.cover || '',
+        year: row.year || '',
+        episode_index: Number(row.episode_index),
+        started_at: Number(row.started_at),
+        ended_at: Number(row.ended_at),
+        watch_seconds: Number(row.watch_seconds),
+        measurement_version: Number(row.measurement_version) as 1 | 2,
+      })),
+      buckets: bucketRows.map((row) => ({
+        session_id: row.session_id,
+        bucket_start: Number(row.bucket_start),
+        watch_ms: Number(row.watch_ms),
+      })),
+      earliestStartedAt,
+    };
   }
 
   async recordSourceHealthSearchBatch(

@@ -4,6 +4,7 @@ import {
   Check,
   CheckCheck,
   ChevronLeft,
+  Film,
   Inbox,
   Megaphone,
   Play,
@@ -103,17 +104,23 @@ function SocialLine({ name, action }: { name: string; action: string }) {
 }
 
 function MessageBody({ message }: { message: UserMessage }) {
-  if (message.type === 'announcement')
+  if (message.type === 'announcement' || message.type === 'annual-report')
     return (
       <>
         <div
           className={`${MESSAGE_LEAD_CLASS} flex items-center justify-center rounded-full bg-brand-100 text-brand-700 dark:bg-brand-900/40 dark:text-brand-300`}
         >
-          <Megaphone className='h-[18px] w-[18px]' />
+          {message.type === 'annual-report' ? (
+            <Film className='h-[18px] w-[18px]' />
+          ) : (
+            <Megaphone className='h-[18px] w-[18px]' />
+          )}
         </div>
         <div className='min-w-0 flex-1 pt-0.5'>
           <p className='whitespace-pre-line break-words text-sm leading-5 text-gray-800 dark:text-gray-100'>
-            {message.content}
+            {message.type === 'annual-report'
+              ? `你的 ${message.year} 年度观影报告已生成`
+              : message.content}
           </p>
           <p className={MESSAGE_META_CLASS}>
             {formatRelativeTime(message.createdAt)}
@@ -221,7 +228,7 @@ function MessageRow({
     <div
       data-list-motion-key={String(message.id)}
       className={`-mx-2 mb-1 flex items-start gap-2 rounded-xl px-2 py-3 sm:-mx-3 sm:px-3 ${
-        message.type === 'announcement'
+        message.type === 'announcement' || message.type === 'annual-report'
           ? 'bg-brand-50 dark:bg-brand-950/30'
           : clickable
             ? 'transition-colors hover:bg-gray-100/80 dark:hover:bg-white/[0.04]'
@@ -236,6 +243,17 @@ function MessageRow({
         >
           <MessageBody message={message} />
         </button>
+      ) : message.type === 'annual-report' ? (
+        <Link
+          href={`/recap/${message.year}`}
+          onClick={() => {
+            void onRead(message);
+            onNavigate();
+          }}
+          className={bodyClass}
+        >
+          <MessageBody message={message} />
+        </Link>
       ) : message.type === 'new-follower' ? (
         <Link
           href={`/u/${message.follower.profileId}`}
@@ -319,9 +337,13 @@ function MessageList({
 }) {
   const readingAll = workingIds.has('all');
   const announcements = items.filter(
-    (message) => message.type === 'announcement',
+    (message) =>
+      message.type === 'announcement' || message.type === 'annual-report',
   );
-  const feed = items.filter((message) => message.type !== 'announcement');
+  const feed = items.filter(
+    (message) =>
+      message.type !== 'announcement' && message.type !== 'annual-report',
+  );
   const motionKeys = [
     ...(announcements.length > 0 ? [ANNOUNCEMENT_TITLE_KEY] : []),
     ...announcements.map((message) => message.id),
@@ -346,7 +368,11 @@ function MessageList({
   return (
     <div ref={containerRef} className='relative flex min-h-full flex-col'>
       {announcements.length > 0 && (
-        <SectionTitle motionKey={ANNOUNCEMENT_TITLE_KEY}>公告</SectionTitle>
+        <SectionTitle motionKey={ANNOUNCEMENT_TITLE_KEY}>
+          {announcements.some((message) => message.type === 'annual-report')
+            ? '系统消息'
+            : '公告'}
+        </SectionTitle>
       )}
       {announcements.map(renderRow)}
       {feed.length > 0 && (

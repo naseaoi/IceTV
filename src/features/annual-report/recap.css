@@ -1,0 +1,169 @@
+/* 年度报告：元素入场按 --d（序号）错开，翻页由 --dir（1 向后、-1 向前）决定方向 */
+
+.recap-rise {
+  animation: recap-rise 900ms var(--motion-ease-out) both;
+  animation-delay: calc(140ms + var(--d, 0) * 120ms);
+}
+
+@keyframes recap-rise {
+  from {
+    opacity: 0;
+    transform: translateY(14px);
+  }
+}
+
+.recap-grow-y {
+  transform-origin: bottom;
+  animation: recap-grow-y 1000ms var(--motion-ease-out) both;
+  animation-delay: calc(420ms + var(--d, 0) * 50ms);
+}
+
+@keyframes recap-grow-y {
+  from {
+    transform: scaleY(0);
+  }
+}
+
+.recap-grow-x {
+  transform-origin: left;
+  animation: recap-grow-x 1000ms var(--motion-ease-out) both;
+  animation-delay: calc(420ms + var(--d, 0) * 100ms);
+}
+
+@keyframes recap-grow-x {
+  from {
+    transform: scaleX(0);
+  }
+}
+
+.recap-dial-bar {
+  stroke-dasharray: 1;
+  stroke-dashoffset: 1;
+  animation: recap-dial 900ms var(--motion-ease-out) forwards;
+  animation-delay: calc(360ms + var(--d, 0) * 30ms);
+}
+
+@keyframes recap-dial {
+  to {
+    stroke-dashoffset: 0;
+  }
+}
+
+.recap-fade {
+  animation: recap-fade 900ms var(--motion-ease-out) both;
+  animation-delay: calc(140ms + var(--d, 0) * 120ms);
+}
+
+@keyframes recap-fade {
+  from {
+    opacity: 0;
+  }
+}
+
+.recap-slide-enter {
+  animation: recap-slide-enter 640ms var(--motion-ease-out) both;
+}
+
+@keyframes recap-slide-enter {
+  from {
+    opacity: 0;
+    transform: translateY(calc(var(--dir, 1) * 7%));
+  }
+}
+
+.recap-slide-exit {
+  pointer-events: none;
+  animation: recap-slide-exit 380ms var(--motion-ease-in) both;
+}
+
+@keyframes recap-slide-exit {
+  to {
+    opacity: 0;
+    transform: translateY(calc(var(--dir, 1) * -4%));
+  }
+}
+
+/* 底部翻页提示的箭头轻轻上浮 */
+.recap-hint-float {
+  animation: recap-hint-float 2.4s var(--motion-ease-out) infinite;
+}
+
+@keyframes recap-hint-float {
+  0%,
+  100% {
+    opacity: 0.55;
+    transform: translateY(2px);
+  }
+  45% {
+    opacity: 1;
+    transform: translateY(-3px);
+  }
+}
+
+/* 细字重由路由 layout 单独加载的 Inter 提供，中文回退到系统字体 */
+.recap-root .font-extralight,
+.recap-root .font-light {
+  font-family:
+    var(--font-recap-light),
+    system-ui,
+    -apple-system,
+    'PingFang SC',
+    'Microsoft YaHei',
+    sans-serif;
+}
+
+/* 背景：一团低饱和的色调晕染加两道细环，--tint 为 RGB 三元组 */
+.recap-backdrop {
+  --tint-alpha: 0.16;
+  background:
+    radial-gradient(
+      110% 65% at var(--tint-x, 88%) var(--tint-y, 0%),
+      rgb(var(--tint) / var(--tint-alpha)),
+      transparent 68%
+    ),
+    radial-gradient(
+      90% 55% at calc(100% - var(--tint-x, 88%)) calc(100% - var(--tint-y, 0%)),
+      rgb(var(--tint) / calc(var(--tint-alpha) * 0.45)),
+      transparent 70%
+    );
+}
+
+.dark .recap-backdrop {
+  --tint-alpha: 0.2;
+}
+
+.recap-scroll {
+  scrollbar-width: none;
+  /* 内容在矮视口滚动时，顶部标题栏与底部提示处淡出 */
+  mask-image: linear-gradient(
+    to bottom,
+    transparent,
+    #000 4.25rem,
+    #000 calc(100% - 4.5rem),
+    transparent
+  );
+}
+
+.recap-scroll::-webkit-scrollbar {
+  display: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .recap-rise,
+  .recap-grow-y,
+  .recap-grow-x,
+  .recap-fade,
+  .recap-slide-enter,
+  .recap-hint-float {
+    animation: none;
+  }
+
+  .recap-slide-exit {
+    display: none;
+  }
+
+  .recap-dial-bar {
+    animation: none;
+    stroke-dashoffset: 0;
+  }
+}
