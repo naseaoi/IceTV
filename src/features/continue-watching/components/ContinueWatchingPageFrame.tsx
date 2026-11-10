@@ -25,12 +25,15 @@ export function ContinueWatchingPageFrame({
       activePath='/continue-watching'
       mobileHeader={{ title: '继续观看', showBack: true }}
     >
-      <div className='pb-10 pt-1 md:pt-8'>
+      <div className='pb-10 pt-1 md:pt-5'>
         <div className={PAGE_CONTAINER_CLASS}>
-          <h1 className='hidden text-2xl font-semibold tracking-tight text-gray-900 dark:text-gray-50 md:block'>
-            继续观看
-          </h1>
-          <div className={LIBRARY_STICKY_TOOLBAR_CLASS}>{toolbar}</div>
+          {/* 标题与筛选同一行并一起吸顶；窄屏标题在顶栏，这一行只剩筛选 */}
+          <div className={LIBRARY_STICKY_TOOLBAR_CLASS}>
+            <h1 className='hidden shrink-0 text-2xl font-semibold tracking-tight text-gray-900 dark:text-gray-50 md:mr-4 md:block'>
+              继续观看
+            </h1>
+            {toolbar}
+          </div>
           {children}
         </div>
       </div>
