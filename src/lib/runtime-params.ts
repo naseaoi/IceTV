@@ -7,7 +7,6 @@ export type RuntimeParamSettings = Pick<
   | 'VodPageTimeoutSeconds'
   | 'VodFragmentTimeoutSeconds'
   | 'PlaybackHistoryPageSize'
-  | 'PlaybackHistoryLimit'
   | 'SearchHistoryLimit'
   | 'SearchRequestTimeoutSeconds'
   | 'SourceFailureCooldownSeconds'
@@ -30,7 +29,6 @@ export const DEFAULT_RUNTIME_PARAMS: RuntimeParamSettings = {
   VodPageTimeoutSeconds: 15,
   VodFragmentTimeoutSeconds: 10,
   PlaybackHistoryPageSize: 10,
-  PlaybackHistoryLimit: 500,
   SearchHistoryLimit: 20,
   SearchRequestTimeoutSeconds: 8,
   SourceFailureCooldownSeconds: 300,
@@ -53,7 +51,6 @@ export const RUNTIME_PARAM_RANGES: Record<
   VodPageTimeoutSeconds: { min: 5, max: 120 },
   VodFragmentTimeoutSeconds: { min: 3, max: 60 },
   PlaybackHistoryPageSize: { min: 1, max: 100 },
-  PlaybackHistoryLimit: { min: 1, max: 10000 },
   SearchHistoryLimit: { min: 1, max: 200 },
   SearchRequestTimeoutSeconds: { min: 1, max: 60 },
   SourceFailureCooldownSeconds: { min: 0, max: 3600 },

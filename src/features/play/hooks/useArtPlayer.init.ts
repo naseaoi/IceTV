@@ -128,8 +128,8 @@ export async function initializeArtPlayer(
     handleNextEpisode,
     handleSkipConfigChange,
     saveCurrentPlayProgress,
-    reportPlaybackStats,
     startPlaybackStatsSession,
+    handlePlaybackStatsEvent,
     requestWakeLock,
     releaseWakeLock,
     cleanupPlayer,
@@ -906,6 +906,7 @@ export async function initializeArtPlayer(
     player.on('video:playing', () => {
       ensureInitialPlaybackPosition();
       finishInitialLoading(true);
+      if (!isStalePlayerSession()) handlePlaybackStatsEvent?.('playing');
       if (loadingSessionRef.current.pendingInitialResumeTarget !== null) {
         retryPendingResumePosition();
       }
@@ -914,13 +915,13 @@ export async function initializeArtPlayer(
     player.on('pause', () => {
       void releaseWakeLock();
       saveCurrentPlayProgress();
-      reportPlaybackStats?.(true);
+      if (!isStalePlayerSession()) handlePlaybackStatsEvent?.('pause');
       setIsPlaying(false);
     });
 
     player.on('video:ended', () => {
       void releaseWakeLock();
-      reportPlaybackStats?.(true);
+      if (!isStalePlayerSession()) handlePlaybackStatsEvent?.('ended');
       setIsPlaying(false);
       restorePlayerPlaybackRate(player, lastPlaybackRateRef.current);
       if (
@@ -984,6 +985,7 @@ export async function initializeArtPlayer(
     player.on('video:progress', finishInitialLoadingIfMediaReady);
 
     player.on('video:timeupdate', () => {
+      if (!isStalePlayerSession()) handlePlaybackStatsEvent?.('timeupdate');
       updateStableCurrentTime(player.currentTime || 0);
 
       if (loadingSessionRef.current.pendingInitialResumeTarget !== null) {
@@ -1051,6 +1053,7 @@ export async function initializeArtPlayer(
     });
 
     player.on('error', (error: Error) => {
+      if (!isStalePlayerSession()) handlePlaybackStatsEvent?.('error');
       console.error('播放器错误:', error);
       const activeVideo = player.video as HTMLVideoElement | undefined;
       // 运行时已释放时出错的是被放弃的旧地址，Artplayer 重连会把它重新挂上：保持暂停，不上报也不切线路
@@ -1085,14 +1088,22 @@ export async function initializeArtPlayer(
       if (now - lastSaveTimeRef.current > 5000) {
         saveCurrentPlayProgress();
       }
-      reportPlaybackStats?.();
     });
 
+    // 媒体键、画中画等直接暂停元素时不一定经过 Artplayer 的 pause 事件
+    for (const event of ['pause', 'waiting', 'stalled', 'error'] as const) {
+      player.on(`video:${event}`, () => {
+        if (!isStalePlayerSession()) handlePlaybackStatsEvent?.(event);
+      });
+    }
+
     player.on('video:seeking', () => {
+      if (!isStalePlayerSession()) handlePlaybackStatsEvent?.('seeking');
       updateStableCurrentTime(player.currentTime || 0);
     });
 
     player.on('video:seeked', () => {
+      if (!isStalePlayerSession()) handlePlaybackStatsEvent?.('seeked');
       updateStableCurrentTime(player.currentTime || 0);
       if (loadingSessionRef.current.pendingInitialResumeTarget !== null) {
         completePendingResumeIfReady();

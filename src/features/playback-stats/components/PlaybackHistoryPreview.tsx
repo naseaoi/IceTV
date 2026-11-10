@@ -41,7 +41,7 @@ export function PlaybackHistoryPreview({
 }: {
   initialSkeletonCount?: number;
 }) {
-  const { items, loading, pageSize, removeSessions } = usePlaybackHistory();
+  const { items, loading, pageSize, removeEntries } = usePlaybackHistory();
   const { playHistoryItem, prefetchPlayPage } = usePlayHistorySession();
 
   if (loading) {
@@ -62,14 +62,14 @@ export function PlaybackHistoryPreview({
 
   return (
     <ScrollableRow>
-      {items.slice(0, pageSize).map((session) => (
-        <div key={session.id} className={HOME_POSTER_CARD_CLASS}>
+      {items.slice(0, pageSize).map((entry) => (
+        <div key={entry.id} className={HOME_POSTER_CARD_CLASS}>
           <HistoryPosterCard
-            session={session}
+            entry={entry}
             onActivate={playHistoryItem}
             onPrefetch={prefetchPlayPage}
             onDelete={async (item) => {
-              await removeSessions([item.id]);
+              await removeEntries([item.id]);
             }}
           />
         </div>

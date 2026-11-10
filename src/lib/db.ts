@@ -10,7 +10,6 @@ import {
   MetadataRecordPage,
   PlaybackPeriodSession,
   PlaybackSession,
-  PlaybackSessionQuery,
   PlaybackWatchTotals,
   PlayRecord,
   PlayRecordPage,
@@ -893,22 +892,22 @@ class DbManager {
     await storage.setPlaybackSession(userName, session);
   }
 
-  async getPlaybackSessions(
-    userName: string,
-    query?: PlaybackSessionQuery,
-  ): Promise<PlaybackSession[]> {
-    const storage = await this.getStorage();
-    return storage.getPlaybackSessions(userName, query);
+  async saveWatchSessionReport(
+    ...args: Parameters<IStorage['saveWatchSessionReport']>
+  ): ReturnType<IStorage['saveWatchSessionReport']> {
+    return (await this.getStorage()).saveWatchSessionReport(...args);
   }
 
-  async getAllPlaybackSessions(userName: string): Promise<PlaybackSession[]> {
-    const storage = await this.getStorage();
-    return storage.getAllPlaybackSessions(userName);
+  async getWatchHistoryPage(
+    ...args: Parameters<IStorage['getWatchHistoryPage']>
+  ): ReturnType<IStorage['getWatchHistoryPage']> {
+    return (await this.getStorage()).getWatchHistoryPage(...args);
   }
 
-  async deletePlaybackSession(userName: string, id: string): Promise<void> {
-    const storage = await this.getStorage();
-    await storage.deletePlaybackSession(userName, id);
+  async deleteWatchHistoryEntry(
+    ...args: Parameters<IStorage['deleteWatchHistoryEntry']>
+  ): ReturnType<IStorage['deleteWatchHistoryEntry']> {
+    return (await this.getStorage()).deleteWatchHistoryEntry(...args);
   }
 
   async deletePlaybackSessionsBefore(updatedBefore: number): Promise<number> {

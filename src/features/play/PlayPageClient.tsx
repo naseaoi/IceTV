@@ -337,16 +337,19 @@ function AuthenticatedPlayPageClient({
     cleanupPlayer,
   });
 
-  const { startPlaybackStatsSession, reportPlaybackStats } =
-    usePlaybackStatsReporter({
-      artPlayerRef,
-      currentSourceRef,
-      currentIdRef,
-      videoTitleRef,
-      detailRef,
-      currentEpisodeIndexRef,
-      stableCurrentTimeRef,
-    });
+  const {
+    startPlaybackStatsSession,
+    reportPlaybackStats,
+    handlePlaybackStatsEvent,
+  } = usePlaybackStatsReporter({
+    artPlayerRef,
+    currentSourceRef,
+    currentIdRef,
+    videoTitleRef,
+    detailRef,
+    currentEpisodeIndexRef,
+    stableCurrentTimeRef,
+  });
 
   const { handleEpisodeChange, handlePreviousEpisode, handleNextEpisode } =
     useEpisodeSwitch({
@@ -695,6 +698,7 @@ function AuthenticatedPlayPageClient({
     saveCurrentPlayProgress: doSaveCurrentProgress,
     reportPlaybackStats,
     startPlaybackStatsSession,
+    handlePlaybackStatsEvent,
     requestWakeLock,
     releaseWakeLock,
     cleanupPlayer,

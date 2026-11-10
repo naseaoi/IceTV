@@ -68,8 +68,7 @@ export async function assertPlaybackPeriodRange(
       storage.getPlaybackPeriodSessions('period-missing', 100, 200),
     ).resolves.toEqual([]);
   } finally {
-    for (const row of rows)
-      await storage.deletePlaybackSession(username, row.id);
-    await storage.deletePlaybackSession(otherUser, 'period-other');
+    await storage.deleteUser(username);
+    await storage.deleteUser(otherUser);
   }
 }

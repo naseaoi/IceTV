@@ -66,6 +66,13 @@
 - 需要逐字节匹配的列在 MySQL 用 `utf8mb4_bin`，换成 `_ci` 排序规则会让两种存储的匹配结果不一致。
 - 存储变更须跑 `pnpm test:mysql`，原因见 [AGENTS.md](../AGENTS.md#测试)。
 
+## 观看历史与观看统计
+
+- 三份数据各自独立：`play_records` 管继续观看与追更；`watch_history` 是「我的 - 历史」，每个用户在一个源的一部作品（`source + video_id`）一条，用户可物理删除；`playback_sessions` 与 `playback_watch_buckets` 是观看统计，用户不可删，删除历史或继续观看都不影响统计。删除账户时三者一并清除。
+- 历史只在播放上报不带历史 id 时按 `(username, source, video_id)` 新建或取回；带 id 的上报只更新，命中 0 行即返回 `historyId: null`，**不得改成 upsert**，否则用户删除后仍在播放的页面会把记录写回。旧数据迁移同理只跑一次：完成标记是 `storage_migrations` 中的 `watch_history_v1`，与迁移写入同一事务提交；不能在启动时按缺失补建。
+- `playback_watch_buckets.watch_ms` 是会话在一个 15 分钟 UTC 对齐桶内的**累计值**，写入取 `MAX`，重试与乱序不会重复累计；改成增量相加会在重发时翻倍。`measurement_version = 2` 的会话 `watch_seconds` 由服务端按桶汇总，`1` 为旧口径（客户端估算、无桶，只能按起播时间归属）。
+- `CRON_PLAYBACK_STATS_RETENTION_DAYS` 只清统计（会话及其桶）。历史没有保留期限，只随用户删除或删除账户消失。
+
 ## 源站线路统计
 
 - `source_route_stats.route_mode` 用 `browser-v2` / `server-v2` 保存全程直连 / 全程代理的新口径，接口仍收发 `browser` / `server`。管理端聚合只读 v2，旧 `browser` / `server` 行保留且不混入成功率；原始桶读取保留存储键以区分口径。

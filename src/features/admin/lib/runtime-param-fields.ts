@@ -98,11 +98,6 @@ export const COMMON_RUNTIME_PARAM_GROUPS: RuntimeParamGroup[] = [
         unit: '条',
         hint: '同时决定“我的”页最近观看的数量。',
       },
-      {
-        key: 'PlaybackHistoryLimit',
-        label: '观看历史可浏览条数',
-        unit: '条',
-      },
       { key: 'SearchHistoryLimit', label: '搜索历史保留条数', unit: '条' },
     ],
   },

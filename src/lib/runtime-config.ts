@@ -28,7 +28,6 @@ export interface RuntimeConfig {
   VOD_PAGE_TIMEOUT_SECONDS: number;
   VOD_FRAGMENT_TIMEOUT_SECONDS: number;
   PLAYBACK_HISTORY_PAGE_SIZE: number;
-  PLAYBACK_HISTORY_LIMIT: number;
   SEARCH_HISTORY_LIMIT: number;
   CONTINUE_WATCHING_LIMIT: number;
   COVER_IMAGE_CACHE_SIZE: number;
@@ -60,7 +59,6 @@ export const DEFAULT_RUNTIME_CONFIG: RuntimeConfig = {
   VOD_PAGE_TIMEOUT_SECONDS: 15,
   VOD_FRAGMENT_TIMEOUT_SECONDS: 10,
   PLAYBACK_HISTORY_PAGE_SIZE: 10,
-  PLAYBACK_HISTORY_LIMIT: 500,
   SEARCH_HISTORY_LIMIT: 20,
   CONTINUE_WATCHING_LIMIT: 10,
   COVER_IMAGE_CACHE_SIZE: 500,
@@ -103,7 +101,6 @@ export type ServerConfigPayload = {
   VodPageTimeoutSeconds?: number;
   VodFragmentTimeoutSeconds?: number;
   PlaybackHistoryPageSize?: number;
-  PlaybackHistoryLimit?: number;
   SearchHistoryLimit?: number;
   ContinueWatchingLimit?: number;
   CoverImageCacheSize?: number;
@@ -192,9 +189,6 @@ function runtimeConfigFromServerConfig(
     PLAYBACK_HISTORY_PAGE_SIZE:
       data.PlaybackHistoryPageSize ??
       DEFAULT_RUNTIME_CONFIG.PLAYBACK_HISTORY_PAGE_SIZE,
-    PLAYBACK_HISTORY_LIMIT:
-      data.PlaybackHistoryLimit ??
-      DEFAULT_RUNTIME_CONFIG.PLAYBACK_HISTORY_LIMIT,
     SEARCH_HISTORY_LIMIT:
       data.SearchHistoryLimit ?? DEFAULT_RUNTIME_CONFIG.SEARCH_HISTORY_LIMIT,
     CONTINUE_WATCHING_LIMIT:

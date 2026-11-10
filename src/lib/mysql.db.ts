@@ -1,5 +1,6 @@
 import 'server-only';
 
+import { randomUUID } from 'crypto';
 import type {
   ExecuteValues,
   PoolConnection,
@@ -105,7 +106,7 @@ import {
   MetadataRecordPage,
   PlaybackPeriodSession,
   PlaybackSession,
-  PlaybackSessionQuery,
+  PlaybackWatchBucket,
   PlaybackWatchTotals,
   PlayRecord,
   PlayRecordPage,
@@ -123,6 +124,9 @@ import {
   UserMessageState,
   UserMessageStateUpdate,
   VideoReview,
+  WatchHistoryEntry,
+  WatchHistoryQuery,
+  WatchHistoryWrite,
   WorkReviewSummary,
 } from './types';
 import { assertValidUsernameFormat, normalizeUsername } from './username';
@@ -446,7 +450,7 @@ export class MySqlStorage implements IStorage {
         PRIMARY KEY (username, config_key)
       ) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci`,
       `CREATE TABLE IF NOT EXISTS playback_sessions (
-        id VARCHAR(64) NOT NULL PRIMARY KEY,
+        id VARCHAR(80) COLLATE utf8mb4_bin NOT NULL PRIMARY KEY,
         username VARCHAR(191) NOT NULL,
         source VARCHAR(191) NOT NULL,
         video_id VARCHAR(255) NOT NULL,
@@ -619,6 +623,8 @@ export class MySqlStorage implements IStorage {
         if ((error as { code?: string }).code !== 'ER_DUP_KEYNAME') throw error;
       }
     }
+    await this.migratePlaybackSchema();
+    await this.migrateWatchHistory();
     await this.migrateFavoriteProjection();
     await this.backfillMissingLoginActivity();
     await this.backfillUserProfiles();
@@ -635,6 +641,118 @@ export class MySqlStorage implements IStorage {
       accessConnection.release();
     }
     await this.invites.migrate();
+  }
+
+  private async migratePlaybackSchema(): Promise<void> {
+    const [columns] = await this.pool.query<RowDataPacket[]>(
+      'SHOW COLUMNS FROM playback_sessions',
+    );
+    if (!columns.some((column) => column.Field === 'measurement_version')) {
+      try {
+        await this.pool.execute(
+          'ALTER TABLE playback_sessions ADD COLUMN measurement_version INT NOT NULL DEFAULT 1',
+        );
+      } catch (error) {
+        if ((error as { code?: string }).code !== 'ER_DUP_FIELDNAME')
+          throw error;
+      }
+    }
+    // 旧表 id 只有 64 字符；接口接受 80，身份键统一逐字匹配。
+    if (
+      columns.some(
+        (column) => column.Field === 'id' && column.Type === 'varchar(64)',
+      )
+    )
+      await this.pool.execute(
+        'ALTER TABLE playback_sessions MODIFY id VARCHAR(80) COLLATE utf8mb4_bin NOT NULL',
+      );
+    await this.pool.execute(`CREATE TABLE IF NOT EXISTS storage_migrations (
+      name VARCHAR(191) PRIMARY KEY, completed_at BIGINT NOT NULL
+    ) ENGINE=InnoDB CHARACTER SET utf8mb4 COLLATE utf8mb4_bin`);
+    await this.pool.execute(`CREATE TABLE IF NOT EXISTS playback_watch_buckets (
+      username VARCHAR(191) NOT NULL, session_id VARCHAR(80) NOT NULL, bucket_start BIGINT NOT NULL,
+      watch_ms BIGINT NOT NULL, PRIMARY KEY(username, session_id, bucket_start),
+      KEY idx_watch_buckets_user_time(username, bucket_start)
+    ) ENGINE=InnoDB CHARACTER SET utf8mb4 COLLATE utf8mb4_bin`);
+    await this.pool.execute(`CREATE TABLE IF NOT EXISTS watch_history (
+      username VARCHAR(191) NOT NULL, id VARCHAR(80) NOT NULL, source VARCHAR(191) NOT NULL, video_id VARCHAR(255) NOT NULL,
+      title VARCHAR(255) NOT NULL, source_name VARCHAR(255) NOT NULL, cover TEXT NOT NULL, year VARCHAR(32) NOT NULL,
+      episode_index INT NOT NULL, total_episodes INT NOT NULL,
+      group_label VARCHAR(255), group_index INT, group_total INT,
+      position DOUBLE NOT NULL, duration DOUBLE NOT NULL,
+      first_watched_at BIGINT NOT NULL, last_watched_at BIGINT NOT NULL,
+      PRIMARY KEY(username, id), UNIQUE KEY idx_watch_history_work(username, source, video_id),
+      KEY idx_watch_history_page(username, last_watched_at, id)
+    ) ENGINE=InnoDB CHARACTER SET utf8mb4 COLLATE utf8mb4_bin`);
+  }
+
+  private async migrateWatchHistory(): Promise<void> {
+    const connection = await this.pool.getConnection();
+    try {
+      await connection.beginTransaction();
+      // 标记行同时作为多实例迁移锁；回填和完成状态原子提交。
+      await connection.execute(
+        'INSERT IGNORE INTO storage_migrations (name, completed_at) VALUES (?, 0)',
+        ['watch_history_v1'],
+      );
+      const [marker] = await connection.query<RowDataPacket[]>(
+        'SELECT completed_at FROM storage_migrations WHERE name = ? FOR UPDATE',
+        ['watch_history_v1'],
+      );
+      if (!Number(marker[0]?.completed_at)) {
+        const [rows] = await connection.query<
+          RowDataPacket[]
+        >(`SELECT ranked.*, p.record_json FROM (
+          SELECT s.*, MIN(started_at) OVER (PARTITION BY username, BINARY source, BINARY video_id) AS first_watched_at,
+            ROW_NUMBER() OVER (PARTITION BY username, BINARY source, BINARY video_id ORDER BY updated_at DESC, BINARY id DESC) AS row_num
+          FROM playback_sessions s WHERE watch_seconds > 0
+        ) ranked LEFT JOIN play_records p ON p.username = ranked.username AND BINARY p.record_key = BINARY CONCAT(ranked.source, '+', ranked.video_id)
+        WHERE ranked.row_num = 1`);
+        for (const row of rows) {
+          let record: Partial<PlayRecord> = {};
+          try {
+            record = JSON.parse(row.record_json || '{}') ?? {};
+          } catch {
+            // 无效旧记录不阻塞迁移。
+          }
+          await connection.execute(
+            `INSERT INTO watch_history (
+            username, id, source, video_id, title, source_name, cover, year, episode_index,
+            total_episodes, group_label, group_index, group_total, position, duration, first_watched_at, last_watched_at
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON DUPLICATE KEY UPDATE id = id`,
+            [
+              row.username,
+              randomUUID(),
+              row.source,
+              row.video_id,
+              row.title,
+              row.source_name,
+              row.cover,
+              row.year,
+              row.episode_index,
+              record.total_episodes || Math.max(1, Number(row.episode_index)),
+              record.group_label ?? null,
+              record.group_index ?? null,
+              record.group_total ?? null,
+              row.last_position,
+              row.total_time,
+              row.first_watched_at,
+              row.updated_at,
+            ],
+          );
+        }
+        await connection.execute(
+          'UPDATE storage_migrations SET completed_at = ? WHERE name = ?',
+          [Date.now(), 'watch_history_v1'],
+        );
+      }
+      await connection.commit();
+    } catch (error) {
+      await connection.rollback();
+      throw error;
+    } finally {
+      connection.release();
+    }
   }
 
   private async migrateFavoriteProjection(): Promise<void> {
@@ -2000,6 +2118,13 @@ export class MySqlStorage implements IStorage {
       await connection.execute('DELETE FROM skip_configs WHERE username = ?', [
         username,
       ]);
+      await connection.execute('DELETE FROM watch_history WHERE username = ?', [
+        username,
+      ]);
+      await connection.execute(
+        'DELETE FROM playback_watch_buckets WHERE username = ?',
+        [username],
+      );
       await connection.execute(
         'DELETE FROM playback_sessions WHERE username = ?',
         [username],
@@ -2676,21 +2801,20 @@ export class MySqlStorage implements IStorage {
         total_time, created_at, updated_at
       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       ON DUPLICATE KEY UPDATE
-        username = VALUES(username),
-        source = VALUES(source),
-        video_id = VALUES(video_id),
-        episode_index = VALUES(episode_index),
-        title = VALUES(title),
-        source_name = VALUES(source_name),
-        cover = VALUES(cover),
-        year = VALUES(year),
-        started_at = VALUES(started_at),
-        ended_at = VALUES(ended_at),
-        watch_seconds = VALUES(watch_seconds),
-        last_position = VALUES(last_position),
-        total_time = VALUES(total_time),
-        created_at = VALUES(created_at),
-        updated_at = VALUES(updated_at)`,
+        source = IF(BINARY username = BINARY VALUES(username) AND measurement_version = 1, VALUES(source), source),
+        video_id = IF(BINARY username = BINARY VALUES(username) AND measurement_version = 1, VALUES(video_id), video_id),
+        episode_index = IF(BINARY username = BINARY VALUES(username) AND measurement_version = 1, VALUES(episode_index), episode_index),
+        title = IF(BINARY username = BINARY VALUES(username) AND measurement_version = 1, VALUES(title), title),
+        source_name = IF(BINARY username = BINARY VALUES(username) AND measurement_version = 1, VALUES(source_name), source_name),
+        cover = IF(BINARY username = BINARY VALUES(username) AND measurement_version = 1, VALUES(cover), cover),
+        year = IF(BINARY username = BINARY VALUES(username) AND measurement_version = 1, VALUES(year), year),
+        started_at = IF(BINARY username = BINARY VALUES(username) AND measurement_version = 1, VALUES(started_at), started_at),
+        ended_at = IF(BINARY username = BINARY VALUES(username) AND measurement_version = 1, VALUES(ended_at), ended_at),
+        watch_seconds = IF(BINARY username = BINARY VALUES(username) AND measurement_version = 1, VALUES(watch_seconds), watch_seconds),
+        last_position = IF(BINARY username = BINARY VALUES(username) AND measurement_version = 1, VALUES(last_position), last_position),
+        total_time = IF(BINARY username = BINARY VALUES(username) AND measurement_version = 1, VALUES(total_time), total_time),
+        created_at = IF(BINARY username = BINARY VALUES(username) AND measurement_version = 1, VALUES(created_at), created_at),
+        updated_at = IF(BINARY username = BINARY VALUES(username) AND measurement_version = 1, VALUES(updated_at), updated_at)`,
       [
         session.id,
         username,
@@ -2712,124 +2836,222 @@ export class MySqlStorage implements IStorage {
     );
   }
 
-  async getPlaybackSessions(
+  async saveWatchSessionReport(
     userName: string,
-    query: PlaybackSessionQuery = {},
-  ): Promise<PlaybackSession[]> {
-    await this.ensureInitialized();
+    session: PlaybackSession,
+    buckets: PlaybackWatchBucket[],
+    history?: WatchHistoryWrite,
+  ): Promise<string | null> {
     const username = normalizeUsername(userName);
-    const conditions = ['username = ?'];
-    const params: Array<string | number> = [username];
-
-    if (Number.isFinite(query.since)) {
-      conditions.push('started_at >= ?');
-      params.push(query.since as number);
-    }
-
-    if (Number.isFinite(query.cursor)) {
-      conditions.push('started_at < ?');
-      params.push(query.cursor as number);
-    }
-
-    const keyword = normalizePlaybackSearchKeyword(query.keyword);
-    if (keyword) {
-      const likePattern = buildPlaybackSearchLikePattern(keyword);
-      conditions.push(
-        "(title LIKE ? ESCAPE '!' OR source_name LIKE ? ESCAPE '!' OR year LIKE ? ESCAPE '!' OR video_id LIKE ? ESCAPE '!')",
+    return this.withTransaction(async (connection) => {
+      if (!buckets.some((bucket) => bucket.watch_ms > 0)) {
+        const [existing] = await connection.query<RowDataPacket[]>(
+          'SELECT username FROM playback_sessions WHERE id = ? FOR UPDATE',
+          [session.id],
+        );
+        if (existing[0]?.username !== username) return null;
+        const [totals] = await connection.query<RowDataPacket[]>(
+          'SELECT COALESCE(SUM(watch_ms), 0) AS total FROM playback_watch_buckets WHERE username = ? AND session_id = ?',
+          [username, session.id],
+        );
+        if (!Number(totals[0]?.total)) return null;
+      }
+      await connection.execute(
+        `INSERT INTO playback_sessions (
+        id, username, source, video_id, episode_index, title, source_name, cover, year,
+        started_at, ended_at, watch_seconds, last_position, total_time, created_at, updated_at, measurement_version
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, 2)
+      ON DUPLICATE KEY UPDATE id = id`,
+        [
+          session.id,
+          username,
+          session.source,
+          session.video_id,
+          session.episode_index,
+          session.title,
+          session.source_name,
+          session.cover,
+          session.year,
+          session.started_at,
+          session.ended_at,
+          session.last_position,
+          session.total_time,
+          session.created_at,
+          session.updated_at,
+        ],
       );
-      params.push(likePattern, likePattern, likePattern, likePattern);
-    }
-
-    const limit = Math.min(Math.max(Math.floor(query.limit ?? 100), 1), 500);
-    params.push(limit);
-
-    const [rows] = await this.pool.query<JsonRow[]>(
-      `SELECT
-        id, source, video_id, episode_index, title, source_name, cover, year,
-        started_at, ended_at, watch_seconds, last_position, total_time,
-        created_at, updated_at
-      FROM playback_sessions
-      WHERE ${conditions.join(' AND ')}
-      ORDER BY started_at DESC
-      LIMIT ?`,
-      params,
-    );
-
-    return rows
-      .filter((row) => row.id)
-      .map((row) => ({
-        id: row.id || '',
-        source: row.source || '',
-        video_id: row.video_id || '',
-        episode_index: Number(row.episode_index || 0),
-        title: row.title || '',
-        source_name: row.source_name || '',
-        cover: row.cover || '',
-        year: row.year || '',
-        started_at: Number(row.started_at || 0),
-        ended_at: Number(row.ended_at || 0),
-        watch_seconds: Number(row.watch_seconds || 0),
-        last_position: Number(row.last_position || 0),
-        total_time: Number(row.total_time || 0),
-        created_at: Number(row.created_at || 0),
-        updated_at: Number(row.updated_at || 0),
-      }));
+      const [owners] = await connection.query<RowDataPacket[]>(
+        'SELECT username FROM playback_sessions WHERE id = ? FOR UPDATE',
+        [session.id],
+      );
+      if (owners[0]?.username !== username) return null;
+      await connection.execute(
+        `UPDATE playback_sessions SET ended_at = GREATEST(ended_at, ?), last_position = ?, total_time = ?,
+        title = ?, source_name = ?, cover = ?, year = ?, updated_at = GREATEST(updated_at, ?), measurement_version = 2
+        WHERE id = ? AND username = ?`,
+        [
+          session.ended_at,
+          session.last_position,
+          session.total_time,
+          session.title,
+          session.source_name,
+          session.cover,
+          session.year,
+          session.updated_at,
+          session.id,
+          username,
+        ],
+      );
+      for (const bucket of buckets)
+        await connection.execute(
+          `INSERT INTO playback_watch_buckets (username, session_id, bucket_start, watch_ms)
+        VALUES (?, ?, ?, ?) ON DUPLICATE KEY UPDATE watch_ms = GREATEST(watch_ms, VALUES(watch_ms))`,
+          [username, session.id, bucket.start, bucket.watch_ms],
+        );
+      const [totals] = await connection.query<RowDataPacket[]>(
+        'SELECT COALESCE(SUM(watch_ms), 0) AS total FROM playback_watch_buckets WHERE username = ? AND session_id = ?',
+        [username, session.id],
+      );
+      const total = Number(totals[0]?.total || 0);
+      await connection.execute(
+        'UPDATE playback_sessions SET watch_seconds = ?, measurement_version = 2 WHERE id = ? AND username = ?',
+        [Math.floor(total / 1000), session.id, username],
+      );
+      if (!history || total <= 0) return null;
+      const values = [
+        session.title,
+        session.source_name,
+        session.cover,
+        session.year,
+        session.episode_index,
+        history.total_episodes,
+        history.group_label ?? null,
+        history.group_index ?? null,
+        history.group_total ?? null,
+        session.last_position,
+        session.total_time,
+        session.updated_at,
+      ];
+      if (history.id) {
+        const [rows] = await connection.query<RowDataPacket[]>(
+          'SELECT id FROM watch_history WHERE username = ? AND id = ? AND source = ? AND video_id = ? FOR UPDATE',
+          [username, history.id, session.source, session.video_id],
+        );
+        if (!rows.length) return null;
+        await connection.execute(
+          `UPDATE watch_history SET title = ?, source_name = ?, cover = ?, year = ?,
+          episode_index = ?, total_episodes = ?, group_label = ?, group_index = ?, group_total = ?,
+          position = ?, duration = ?, last_watched_at = ? WHERE username = ? AND id = ? AND source = ? AND video_id = ?`,
+          [...values, username, history.id, session.source, session.video_id],
+        );
+        return history.id;
+      }
+      await connection.execute(
+        `INSERT INTO watch_history (
+        title, source_name, cover, year, episode_index, total_episodes, group_label, group_index, group_total,
+        position, duration, last_watched_at, username, id, source, video_id, first_watched_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ON DUPLICATE KEY UPDATE title = VALUES(title), source_name = VALUES(source_name), cover = VALUES(cover), year = VALUES(year),
+        episode_index = VALUES(episode_index), total_episodes = VALUES(total_episodes), group_label = VALUES(group_label),
+        group_index = VALUES(group_index), group_total = VALUES(group_total), position = VALUES(position),
+        duration = VALUES(duration), last_watched_at = VALUES(last_watched_at)`,
+        [
+          ...values,
+          username,
+          randomUUID(),
+          session.source,
+          session.video_id,
+          session.started_at,
+        ],
+      );
+      const [rows] = await connection.query<RowDataPacket[]>(
+        'SELECT id FROM watch_history WHERE username = ? AND source = ? AND video_id = ?',
+        [username, session.source, session.video_id],
+      );
+      return String(rows[0].id);
+    });
   }
 
-  async deletePlaybackSession(userName: string, id: string): Promise<void> {
+  async getWatchHistoryPage(
+    userName: string,
+    query: WatchHistoryQuery,
+  ): Promise<WatchHistoryEntry[]> {
     await this.ensureInitialized();
-    const username = normalizeUsername(userName);
+    const conditions = ['username = ?'];
+    const params: (string | number)[] = [normalizeUsername(userName)];
+    if (query.cursor) {
+      conditions.push(
+        '(last_watched_at < ? OR (last_watched_at = ? AND id < ?))',
+      );
+      params.push(
+        query.cursor.lastWatchedAt,
+        query.cursor.lastWatchedAt,
+        query.cursor.id,
+      );
+    }
+    const keyword = normalizePlaybackSearchKeyword(query.keyword);
+    if (keyword) {
+      conditions.push("LOWER(title) LIKE LOWER(?) ESCAPE '!'");
+      params.push(buildPlaybackSearchLikePattern(keyword));
+    }
+    params.push(query.limit);
+    const [rows] = await this.pool.query<RowDataPacket[]>(
+      `SELECT id, source, video_id, title, source_name, cover, year, episode_index,
+      total_episodes, group_label, group_index, group_total, position, duration, first_watched_at, last_watched_at
+      FROM watch_history WHERE ${conditions.join(' AND ')} ORDER BY last_watched_at DESC, id DESC LIMIT ?`,
+      params,
+    );
+    return rows.map((row) => ({
+      id: String(row.id),
+      source: String(row.source),
+      video_id: String(row.video_id),
+      title: String(row.title),
+      source_name: String(row.source_name),
+      cover: String(row.cover),
+      year: String(row.year),
+      episode_index: Number(row.episode_index),
+      total_episodes: Number(row.total_episodes),
+      group_label: row.group_label ?? undefined,
+      group_index:
+        row.group_index == null ? undefined : Number(row.group_index),
+      group_total:
+        row.group_total == null ? undefined : Number(row.group_total),
+      position: Number(row.position),
+      duration: Number(row.duration),
+      first_watched_at: Number(row.first_watched_at),
+      last_watched_at: Number(row.last_watched_at),
+    }));
+  }
+
+  async deleteWatchHistoryEntry(userName: string, id: string): Promise<void> {
+    await this.ensureInitialized();
     await this.pool.execute(
-      'DELETE FROM playback_sessions WHERE username = ? AND id = ?',
-      [username, id],
+      'DELETE FROM watch_history WHERE username = ? AND id = ?',
+      [normalizeUsername(userName), id],
     );
   }
 
   async deletePlaybackSessionsBefore(updatedBefore: number): Promise<number> {
-    await this.ensureInitialized();
     const cutoff = Number.isFinite(updatedBefore)
       ? Math.max(0, Math.floor(updatedBefore))
       : 0;
-    const [result] = await this.pool.execute(
-      'DELETE FROM playback_sessions WHERE updated_at < ?',
-      [cutoff],
-    );
-    return Number((result as { affectedRows?: number }).affectedRows || 0);
-  }
-
-  async getAllPlaybackSessions(userName: string): Promise<PlaybackSession[]> {
-    await this.ensureInitialized();
-    const username = normalizeUsername(userName);
-    const [rows] = await this.pool.query<JsonRow[]>(
-      `SELECT
-        id, source, video_id, episode_index, title, source_name, cover, year,
-        started_at, ended_at, watch_seconds, last_position, total_time,
-        created_at, updated_at
-      FROM playback_sessions
-      WHERE username = ?
-      ORDER BY started_at DESC`,
-      [username],
-    );
-
-    return rows
-      .filter((row) => row.id)
-      .map((row) => ({
-        id: row.id || '',
-        source: row.source || '',
-        video_id: row.video_id || '',
-        episode_index: Number(row.episode_index || 0),
-        title: row.title || '',
-        source_name: row.source_name || '',
-        cover: row.cover || '',
-        year: row.year || '',
-        started_at: Number(row.started_at || 0),
-        ended_at: Number(row.ended_at || 0),
-        watch_seconds: Number(row.watch_seconds || 0),
-        last_position: Number(row.last_position || 0),
-        total_time: Number(row.total_time || 0),
-        created_at: Number(row.created_at || 0),
-        updated_at: Number(row.updated_at || 0),
-      }));
+    return this.withTransaction(async (connection) => {
+      // 锁定待删会话，阻止并发心跳在删桶和删会话之间续写。
+      const [rows] = await connection.query<RowDataPacket[]>(
+        'SELECT id FROM playback_sessions WHERE updated_at < ? FOR UPDATE',
+        [cutoff],
+      );
+      for (const row of rows) {
+        await connection.execute(
+          'DELETE FROM playback_watch_buckets WHERE session_id = ?',
+          [row.id],
+        );
+        await connection.execute('DELETE FROM playback_sessions WHERE id = ?', [
+          row.id,
+        ]);
+      }
+      return rows.length;
+    });
   }
 
   async getPlaybackWatchTotals(

@@ -139,6 +139,7 @@ jest.mock('@/features/playback-stats/hooks/usePlaybackStatsReporter', () => ({
   usePlaybackStatsReporter: () => ({
     startPlaybackStatsSession: jest.fn(),
     reportPlaybackStats: jest.fn(),
+    handlePlaybackStatsEvent: jest.fn(),
   }),
 }));
 

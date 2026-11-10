@@ -88,6 +88,8 @@ export function useArtPlayer(params: UseArtPlayerParams) {
           paramsRef.current.reportPlaybackStats?.(force),
         startPlaybackStatsSession: () =>
           paramsRef.current.startPlaybackStatsSession?.(),
+        handlePlaybackStatsEvent: (event) =>
+          paramsRef.current.handlePlaybackStatsEvent?.(event),
         onPlaybackStarted: () => paramsRef.current.onPlaybackStarted?.(),
         onSourceProxyFallbackStarted: () =>
           paramsRef.current.onSourceProxyFallbackStarted?.(),
@@ -119,6 +121,7 @@ export function useArtPlayer(params: UseArtPlayerParams) {
 
     return () => {
       cancelled = true;
+      paramsRef.current.handlePlaybackStatsEvent?.('stop');
     };
   }, [
     videoUrl,

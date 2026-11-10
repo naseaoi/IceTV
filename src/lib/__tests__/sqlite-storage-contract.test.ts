@@ -5,6 +5,7 @@ import {
   assertUpdatedPlayRecordPage,
 } from '@/lib/__tests__/__fixtures__/play-record-page-contract';
 import { assertPlaybackPeriodRange } from '@/lib/__tests__/__fixtures__/playback-period-contract';
+import { assertWatchHistoryContract } from '@/lib/__tests__/__fixtures__/watch-history-contract';
 import { DEFAULT_RUNTIME_PARAMS } from '@/lib/runtime-params';
 import type { AdminConfig } from '@/types/admin';
 
@@ -283,8 +284,17 @@ describe('sqlite storage contract', () => {
     await expect(
       storage.getSkipConfig('demo-user', 'source', '1'),
     ).resolves.toEqual(skipConfig);
-    await expect(storage.getPlaybackSessions('demo-user')).resolves.toEqual([
-      playbackSession,
+    await expect(
+      storage.getPlaybackPeriodSessions(
+        'demo-user',
+        0,
+        Number.MAX_SAFE_INTEGER,
+      ),
+    ).resolves.toEqual([
+      expect.objectContaining({
+        source: playbackSession.source,
+        watch_seconds: playbackSession.watch_seconds,
+      }),
     ]);
     await expect(storage.getSearchHistory('demo-user')).resolves.toEqual([
       'first',
@@ -319,7 +329,13 @@ describe('sqlite storage contract', () => {
     await expect(storage.getAllPlayRecords('demo-user')).resolves.toEqual({});
     await expect(storage.getAllFavorites('demo-user')).resolves.toEqual({});
     await expect(storage.getAllSkipConfigs('demo-user')).resolves.toEqual({});
-    await expect(storage.getPlaybackSessions('demo-user')).resolves.toEqual([]);
+    await expect(
+      storage.getPlaybackPeriodSessions(
+        'demo-user',
+        0,
+        Number.MAX_SAFE_INTEGER,
+      ),
+    ).resolves.toEqual([]);
     await expect(storage.getSearchHistory('demo-user')).resolves.toEqual([]);
     await expect(storage.getUserMessageState('demo-user')).resolves.toEqual({});
     await expect(
@@ -483,36 +499,6 @@ describe('sqlite storage contract', () => {
       maxUses: 1,
     });
     await expect(storage.reserveInviteCodeUse('CODE')).resolves.toBe(true);
-  });
-
-  it('searches playback sessions before applying the page limit', async () => {
-    const storage = new LocalSqliteStorage(':memory:');
-    const recentSession: PlaybackSession = {
-      ...playbackSession,
-      id: 'session_recent',
-      title: 'Recent Show',
-      started_at: 3000,
-    };
-    const matchedSession: PlaybackSession = {
-      ...playbackSession,
-      id: 'session_matched',
-      video_id: 'hidden-video',
-      title: 'Hidden Gem',
-      started_at: 2000,
-    };
-    const otherUserSession: PlaybackSession = {
-      ...matchedSession,
-      id: 'session_other_user',
-      started_at: 4000,
-    };
-
-    await storage.setPlaybackSession('demo-user', recentSession);
-    await storage.setPlaybackSession('demo-user', matchedSession);
-    await storage.setPlaybackSession('other-user', otherUserSession);
-
-    await expect(
-      storage.getPlaybackSessions('demo-user', { limit: 1, keyword: 'hidden' }),
-    ).resolves.toEqual([matchedSession]);
   });
 
   it('筛选分页与追更计数及客户端判定保持一致', async () => {
@@ -865,29 +851,6 @@ describe('sqlite storage contract', () => {
     expect(page.nextCursor).toBeNull();
   });
 
-  it('returns all playback sessions without page limit', async () => {
-    const storage = new LocalSqliteStorage(':memory:');
-    const total = 510;
-
-    for (let index = 0; index < total; index += 1) {
-      await storage.setPlaybackSession('demo-user', {
-        ...playbackSession,
-        id: `session_bulk_${index}`,
-        started_at: 1000 + index,
-      });
-    }
-
-    const limited = await storage.getPlaybackSessions('demo-user', {
-      limit: 10000,
-    });
-    const all = await storage.getAllPlaybackSessions('demo-user');
-
-    expect(limited).toHaveLength(500);
-    expect(all).toHaveLength(total);
-    expect(all[0].id).toBe(`session_bulk_${total - 1}`);
-    expect(all[total - 1].id).toBe('session_bulk_0');
-  });
-
   it('按最后更新时间清理过期播放统计会话', async () => {
     const storage = new LocalSqliteStorage(':memory:');
 
@@ -903,9 +866,19 @@ describe('sqlite storage contract', () => {
     });
 
     await expect(storage.deletePlaybackSessionsBefore(1500)).resolves.toBe(1);
-    await expect(storage.getAllPlaybackSessions('demo-user')).resolves.toEqual([
-      expect.objectContaining({ id: 'session_recent' }),
+    await expect(
+      storage.getPlaybackPeriodSessions(
+        'demo-user',
+        0,
+        Number.MAX_SAFE_INTEGER,
+      ),
+    ).resolves.toEqual([
+      expect.objectContaining({ watch_seconds: playbackSession.watch_seconds }),
     ]);
+  });
+
+  it('历史与桶统计双后端契约', async () => {
+    await assertWatchHistoryContract(new LocalSqliteStorage(':memory:'));
   });
 
   it('reads positive playback sessions in a half-open user-scoped range', async () => {

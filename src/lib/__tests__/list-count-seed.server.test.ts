@@ -3,7 +3,7 @@
 const mockDb = {
   getFavoriteLibraryPage: jest.fn(),
   getMyVideoReviewCount: jest.fn(),
-  getPlaybackSessions: jest.fn(),
+  getWatchHistoryPage: jest.fn(),
   getPlayRecordPage: jest.fn(),
 };
 
@@ -13,7 +13,6 @@ jest.mock('@/lib/config', () => ({
   getConfigForRead: async () => ({
     SiteConfig: {
       PlaybackHistoryPageSize: 10,
-      PlaybackHistoryLimit: 500,
       ContinueWatchingLimit: 8,
     },
   }),
@@ -36,8 +35,8 @@ beforeEach(() => {
   mockDb.getFavoriteLibraryPage.mockResolvedValue({ libraryTotal: 5 });
   mockDb.getMyVideoReviewCount.mockResolvedValue(1);
   mockDb.getPlayRecordPage.mockResolvedValue({ total: 30 });
-  // 同一作品的多次观看按标题合并，首页条数按去重后计算
-  mockDb.getPlaybackSessions.mockResolvedValue([
+  // 同名不同源的历史独立计数
+  mockDb.getWatchHistoryPage.mockResolvedValue([
     { id: 'a', title: '甲', source: 's1', started_at: 3, watch_seconds: 60 },
     { id: 'b', title: '甲', source: 's1', started_at: 2, watch_seconds: 60 },
     { id: 'c', title: '乙', source: 's1', started_at: 1, watch_seconds: 60 },
@@ -56,15 +55,15 @@ it('按各列表接口口径写入计数', async () => {
   expect(values()).toEqual({
     fav_count: '5',
     review_count: '1',
-    history_count: '2',
+    history_count: '3',
     cw_count: '8',
     cw_page_count: '24',
   });
 });
 
-it('历史计数只扫一批会话并按首页条数截断', async () => {
-  mockDb.getPlaybackSessions.mockResolvedValue(
-    Array.from({ length: 30 }, (_, index) => ({
+it('历史计数只查询首页', async () => {
+  mockDb.getWatchHistoryPage.mockResolvedValue(
+    Array.from({ length: 10 }, (_, index) => ({
       id: `s${index}`,
       title: `作品${index}`,
       source: 's1',
@@ -74,7 +73,9 @@ it('历史计数只扫一批会话并按首页条数截断', async () => {
   );
   const { response, values } = createResponse();
   await seedListCountCookies(response, 'alice');
-  expect(mockDb.getPlaybackSessions).toHaveBeenCalledTimes(1);
+  expect(mockDb.getWatchHistoryPage).toHaveBeenCalledWith('alice', {
+    limit: 10,
+  });
   expect(values().history_count).toBe('10');
 });
 

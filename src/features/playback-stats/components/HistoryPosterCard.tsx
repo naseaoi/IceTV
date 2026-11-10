@@ -1,32 +1,23 @@
 'use client';
 
 import { PlaybackPosterCard } from '@/features/playback-stats/components/PlaybackPosterCard';
-import type { PlaybackSession } from '@/lib/types';
-
-function formatWatchedMinutes(seconds: number): string {
-  const minutes = Math.max(1, Math.round((seconds || 0) / 60));
-  if (minutes < 60) return `${minutes} 分钟`;
-  const hours = Math.floor(minutes / 60);
-  const rest = minutes % 60;
-  return rest > 0 ? `${hours} 小时 ${rest} 分` : `${hours} 小时`;
-}
-
-function getProgressPercent(session: PlaybackSession): number {
-  if (!session.total_time || session.total_time <= 0) return 0;
-  return Math.min(100, (session.last_position / session.total_time) * 100);
-}
+import {
+  formatWatchHistoryProgress,
+  getWatchHistoryProgressPercent,
+} from '@/features/playback-stats/lib/history';
+import type { WatchHistoryEntry } from '@/lib/types';
 
 interface HistoryPosterCardProps {
-  session: PlaybackSession;
-  onActivate: (session: PlaybackSession) => void;
+  entry: WatchHistoryEntry;
+  onActivate: (entry: WatchHistoryEntry) => void;
   onPrefetch?: () => void;
-  onDelete?: (session: PlaybackSession) => void | Promise<void>;
+  onDelete?: (entry: WatchHistoryEntry) => void | Promise<void>;
   selectable?: boolean;
   selected?: boolean;
 }
 
 export function HistoryPosterCard({
-  session,
+  entry,
   onActivate,
   onPrefetch,
   onDelete,
@@ -35,23 +26,19 @@ export function HistoryPosterCard({
 }: HistoryPosterCardProps) {
   return (
     <PlaybackPosterCard
-      title={session.title}
-      cover={session.cover || ''}
+      title={entry.title}
+      cover={entry.cover || ''}
       coverSizes='(min-width: 640px) 200px, 33vw'
-      source={session.source}
-      videoId={session.video_id}
-      year={session.year}
-      sourceName={session.source_name}
-      progress={getProgressPercent(session)}
-      subtitle={`第 ${session.episode_index} 集 · 看了 ${formatWatchedMinutes(
-        session.watch_seconds,
-      )}`}
-      ariaLabel={
-        selectable ? `选择 ${session.title}` : `继续播放 ${session.title}`
-      }
-      onPlay={() => onActivate(session)}
+      source={entry.source}
+      videoId={entry.video_id}
+      year={entry.year}
+      sourceName={entry.source_name}
+      progress={getWatchHistoryProgressPercent(entry)}
+      subtitle={formatWatchHistoryProgress(entry)}
+      ariaLabel={selectable ? `选择 ${entry.title}` : `继续播放 ${entry.title}`}
+      onPlay={() => onActivate(entry)}
       onPrefetch={onPrefetch}
-      onDelete={onDelete ? () => onDelete(session) : undefined}
+      onDelete={onDelete ? () => onDelete(entry) : undefined}
       selectable={selectable}
       selected={selected}
     />

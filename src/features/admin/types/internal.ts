@@ -20,7 +20,6 @@ export interface SiteConfig {
   VodPageTimeoutSeconds: number;
   VodFragmentTimeoutSeconds: number;
   PlaybackHistoryPageSize: number;
-  PlaybackHistoryLimit: number;
   SearchHistoryLimit: number;
   SearchRequestTimeoutSeconds: number;
   SourceFailureCooldownSeconds: number;

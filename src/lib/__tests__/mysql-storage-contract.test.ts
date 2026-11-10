@@ -4,6 +4,7 @@ import {
   assertUpdatedPlayRecordPage,
 } from '@/lib/__tests__/__fixtures__/play-record-page-contract';
 import { assertPlaybackPeriodRange } from '@/lib/__tests__/__fixtures__/playback-period-contract';
+import { assertWatchHistoryContract } from '@/lib/__tests__/__fixtures__/watch-history-contract';
 import type { AnnouncementRow } from '@/lib/announcement-storage';
 import { hasPlayRecordUpdate } from '@/lib/play-records';
 import type { StoredUserDanmaku } from '@/lib/user-danmaku-storage';
@@ -64,6 +65,9 @@ type FakeState = {
   userDanmaku: Map<string, StoredUserDanmaku>;
   skipConfigs: Map<string, Map<string, string>>;
   playbackSessions: Map<string, Record<string, unknown>>;
+  watchHistory: Record<string, any>[];
+  watchBuckets: Record<string, any>[];
+  historyMigrated: boolean;
   searchHistory: SearchHistoryRow[];
   sourceRouteStats: SourceRouteStatsRow[];
   adminConfig: string | null;
@@ -108,7 +112,12 @@ function cloneState(state: FakeState): FakeState {
     videoReviews: new Map(state.videoReviews),
     userDanmaku: new Map(state.userDanmaku),
     skipConfigs: cloneNestedMap(state.skipConfigs),
-    playbackSessions: new Map(state.playbackSessions),
+    playbackSessions: new Map(
+      [...state.playbackSessions].map(([id, row]) => [id, { ...row }]),
+    ),
+    watchHistory: state.watchHistory.map((row) => ({ ...row })),
+    watchBuckets: state.watchBuckets.map((row) => ({ ...row })),
+    historyMigrated: state.historyMigrated,
     searchHistory: state.searchHistory.map((row) => ({ ...row })),
     sourceRouteStats: state.sourceRouteStats.map((row) => ({ ...row })),
     adminConfig: state.adminConfig,
@@ -152,6 +161,9 @@ function createState(): FakeState {
     userDanmaku: new Map(),
     skipConfigs: new Map(),
     playbackSessions: new Map(),
+    watchHistory: [],
+    watchBuckets: [],
+    historyMigrated: false,
     searchHistory: [],
     sourceRouteStats: [],
     adminConfig: null,
@@ -344,6 +356,175 @@ function createFakePool() {
     currentState: FakeState,
   ) => {
     const normalized = normalizeSql(sql);
+    if (normalized.startsWith('INSERT IGNORE INTO storage_migrations'))
+      return [{ affectedRows: 0 }, []];
+    if (normalized.startsWith('UPDATE storage_migrations')) {
+      currentState.historyMigrated = true;
+      return [{ affectedRows: 1 }, []];
+    }
+    if (normalized.startsWith('DELETE FROM watch_history WHERE username = ?')) {
+      currentState.watchHistory = currentState.watchHistory.filter(
+        (row) =>
+          row.username !== params[0] ||
+          (params.length > 1 && row.id !== params[1]),
+      );
+      return [{ affectedRows: 1 }, []];
+    }
+    if (
+      normalized === 'DELETE FROM playback_watch_buckets WHERE username = ?'
+    ) {
+      currentState.watchBuckets = currentState.watchBuckets.filter(
+        (row) => row.username !== params[0],
+      );
+      return [{ affectedRows: 1 }, []];
+    }
+    if (
+      normalized === 'DELETE FROM playback_watch_buckets WHERE session_id = ?'
+    ) {
+      currentState.watchBuckets = currentState.watchBuckets.filter(
+        (row) => row.session_id !== params[0],
+      );
+      return [{ affectedRows: 1 }, []];
+    }
+    if (normalized === 'DELETE FROM playback_sessions WHERE id = ?') {
+      currentState.playbackSessions.delete(String(params[0]));
+      return [{ affectedRows: 1 }, []];
+    }
+    if (
+      normalized.startsWith('INSERT INTO playback_sessions (') &&
+      normalized.includes('updated_at, measurement_version)')
+    ) {
+      const columns = [
+        'id',
+        'username',
+        'source',
+        'video_id',
+        'episode_index',
+        'title',
+        'source_name',
+        'cover',
+        'year',
+        'started_at',
+        'ended_at',
+        'last_position',
+        'total_time',
+        'created_at',
+        'updated_at',
+      ];
+      const row = Object.fromEntries(
+        columns.map((column, i) => [column, params[i]]),
+      );
+      if (!currentState.playbackSessions.has(String(row.id)))
+        currentState.playbackSessions.set(String(row.id), {
+          ...row,
+          watch_seconds: 0,
+          measurement_version: 2,
+        });
+      return [{ affectedRows: 1 }, []];
+    }
+    if (normalized.startsWith('UPDATE playback_sessions SET ended_at')) {
+      const row = currentState.playbackSessions.get(String(params[8]));
+      if (row && row.username === params[9])
+        Object.assign(row, {
+          ended_at: Math.max(Number(row.ended_at), Number(params[0])),
+          last_position: params[1],
+          total_time: params[2],
+          title: params[3],
+          source_name: params[4],
+          cover: params[5],
+          year: params[6],
+          updated_at: Math.max(Number(row.updated_at), Number(params[7])),
+          measurement_version: 2,
+        });
+      return [{ affectedRows: 1 }, []];
+    }
+    if (normalized.startsWith('INSERT INTO playback_watch_buckets')) {
+      const [username, session_id, bucket_start, watch_ms] = params;
+      const row = currentState.watchBuckets.find(
+        (row) =>
+          row.username === username &&
+          row.session_id === session_id &&
+          row.bucket_start === bucket_start,
+      );
+      if (row) row.watch_ms = Math.max(row.watch_ms, Number(watch_ms));
+      else
+        currentState.watchBuckets.push({
+          username,
+          session_id,
+          bucket_start,
+          watch_ms,
+        });
+      return [{ affectedRows: 1 }, []];
+    }
+    if (normalized.startsWith('UPDATE playback_sessions SET watch_seconds')) {
+      const row = currentState.playbackSessions.get(String(params[1]));
+      if (row && row.username === params[2])
+        Object.assign(row, {
+          watch_seconds: params[0],
+          measurement_version: 2,
+        });
+      return [{ affectedRows: 1 }, []];
+    }
+    if (normalized.startsWith('INSERT INTO watch_history (')) {
+      const columns = [
+        'title',
+        'source_name',
+        'cover',
+        'year',
+        'episode_index',
+        'total_episodes',
+        'group_label',
+        'group_index',
+        'group_total',
+        'position',
+        'duration',
+        'last_watched_at',
+        'username',
+        'id',
+        'source',
+        'video_id',
+        'first_watched_at',
+      ];
+      const next = Object.fromEntries(
+        columns.map((column, i) => [column, params[i]]),
+      );
+      const row = currentState.watchHistory.find(
+        (row) =>
+          row.username === next.username &&
+          row.source === next.source &&
+          row.video_id === next.video_id,
+      );
+      if (row) {
+        const { id, first_watched_at } = row;
+        Object.assign(row, next, { id, first_watched_at });
+      } else currentState.watchHistory.push(next);
+      return [{ affectedRows: 1 }, []];
+    }
+    if (normalized.startsWith('UPDATE watch_history SET title')) {
+      const row = currentState.watchHistory.find(
+        (row) =>
+          row.username === params[12] &&
+          row.id === params[13] &&
+          row.source === params[14] &&
+          row.video_id === params[15],
+      );
+      if (row)
+        [
+          'title',
+          'source_name',
+          'cover',
+          'year',
+          'episode_index',
+          'total_episodes',
+          'group_label',
+          'group_index',
+          'group_total',
+          'position',
+          'duration',
+          'last_watched_at',
+        ].forEach((key, i) => (row[key] = params[i]));
+      return [{ affectedRows: row ? 1 : 0 }, []];
+    }
     if (normalized.startsWith('INSERT INTO announcements ')) {
       const [id, content, created_at, updated_at, published_at] = params as [
         string,
@@ -961,8 +1142,8 @@ function createFakePool() {
     }
 
     if (
-      normalized ===
-      'INSERT INTO playback_sessions (id, username, source, video_id, episode_index, title, source_name, cover, year, started_at, ended_at, watch_seconds, last_position, total_time, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON DUPLICATE KEY UPDATE username = VALUES(username), source = VALUES(source), video_id = VALUES(video_id), episode_index = VALUES(episode_index), title = VALUES(title), source_name = VALUES(source_name), cover = VALUES(cover), year = VALUES(year), started_at = VALUES(started_at), ended_at = VALUES(ended_at), watch_seconds = VALUES(watch_seconds), last_position = VALUES(last_position), total_time = VALUES(total_time), created_at = VALUES(created_at), updated_at = VALUES(updated_at)'
+      normalized.startsWith('INSERT INTO playback_sessions (') &&
+      !normalized.includes('updated_at, measurement_version)')
     ) {
       const [
         id,
@@ -999,6 +1180,12 @@ function createFakePool() {
         number,
         number,
       ];
+      const existing = currentState.playbackSessions.get(id);
+      if (
+        existing &&
+        (existing.username !== username || existing.measurement_version === 2)
+      )
+        return [{ affectedRows: 0 }, []];
       currentState.playbackSessions.set(id, {
         id,
         username,
@@ -1318,6 +1505,89 @@ function createFakePool() {
       normalized === 'SELECT source_key, channel_number FROM live_source_state'
     )
       return [[...currentState.liveCounts.values()], []];
+    if (normalized === 'SHOW COLUMNS FROM playback_sessions')
+      return [[{ Field: 'measurement_version' }], []];
+    if (normalized.startsWith('SELECT completed_at FROM storage_migrations'))
+      return [[{ completed_at: currentState.historyMigrated ? 1 : 0 }], []];
+    if (normalized.startsWith('SELECT ranked.*, p.record_json'))
+      return [[], []];
+    if (
+      normalized ===
+      'SELECT id FROM playback_sessions WHERE updated_at < ? FOR UPDATE'
+    )
+      return [
+        [...currentState.playbackSessions.values()].filter(
+          (row) => Number(row.updated_at) < Number(params[0]),
+        ),
+        [],
+      ];
+    if (
+      normalized.startsWith('SELECT username') &&
+      normalized.includes('FROM playback_sessions WHERE id = ?')
+    ) {
+      const row = currentState.playbackSessions.get(String(params[0]));
+      return [row ? [row] : [], []];
+    }
+    if (normalized.startsWith('SELECT COALESCE(SUM(watch_ms)'))
+      return [
+        [
+          {
+            total: currentState.watchBuckets
+              .filter(
+                (row) =>
+                  row.username === params[0] && row.session_id === params[1],
+              )
+              .reduce((sum, row) => sum + Number(row.watch_ms), 0),
+          },
+        ],
+        [],
+      ];
+    if (
+      normalized.startsWith('SELECT id FROM watch_history WHERE username = ?')
+    ) {
+      return [
+        currentState.watchHistory.filter(
+          (row) =>
+            row.username === params[0] &&
+            (params.length === 4
+              ? row.id === params[1] &&
+                row.source === params[2] &&
+                row.video_id === params[3]
+              : row.source === params[1] && row.video_id === params[2]),
+        ),
+        [],
+      ];
+    }
+    if (
+      normalized.includes('FROM watch_history WHERE username = ? ORDER BY') ||
+      normalized.includes('FROM watch_history WHERE username = ? AND')
+    ) {
+      let rows = currentState.watchHistory.filter(
+        (row) => row.username === params[0],
+      );
+      let offset = 1;
+      if (normalized.includes('last_watched_at < ?')) {
+        rows = rows.filter(
+          (row) =>
+            row.last_watched_at < Number(params[1]) ||
+            (row.last_watched_at === Number(params[1]) &&
+              row.id < String(params[3])),
+        );
+        offset = 4;
+      }
+      if (normalized.includes('LIKE LOWER(?)')) {
+        const keyword = String(params[offset])
+          .slice(1, -1)
+          .replace(/!([!%_])/g, '$1')
+          .toLowerCase();
+        rows = rows.filter((row) => row.title.toLowerCase().includes(keyword));
+      }
+      rows.sort(
+        (a, b) =>
+          b.last_watched_at - a.last_watched_at || (a.id < b.id ? 1 : -1),
+      );
+      return [rows.slice(0, Number(params.at(-1))), []];
+    }
     if (normalized === 'SHOW COLUMNS FROM favorites')
       return [
         [
@@ -2654,8 +2924,17 @@ describe('mysql storage contract', () => {
     await expect(
       storage.getSkipConfig('demo-user', 'source', '1'),
     ).resolves.toEqual(skipConfig);
-    await expect(storage.getPlaybackSessions('demo-user')).resolves.toEqual([
-      playbackSession,
+    await expect(
+      storage.getPlaybackPeriodSessions(
+        'demo-user',
+        0,
+        Number.MAX_SAFE_INTEGER,
+      ),
+    ).resolves.toEqual([
+      expect.objectContaining({
+        source: playbackSession.source,
+        watch_seconds: playbackSession.watch_seconds,
+      }),
     ]);
     await expect(storage.getSearchHistory('demo-user')).resolves.toEqual([
       'first',
@@ -2690,7 +2969,13 @@ describe('mysql storage contract', () => {
     await expect(storage.getAllPlayRecords('demo-user')).resolves.toEqual({});
     await expect(storage.getAllFavorites('demo-user')).resolves.toEqual({});
     await expect(storage.getAllSkipConfigs('demo-user')).resolves.toEqual({});
-    await expect(storage.getPlaybackSessions('demo-user')).resolves.toEqual([]);
+    await expect(
+      storage.getPlaybackPeriodSessions(
+        'demo-user',
+        0,
+        Number.MAX_SAFE_INTEGER,
+      ),
+    ).resolves.toEqual([]);
     await expect(storage.getSearchHistory('demo-user')).resolves.toEqual([]);
     await expect(storage.getUserMessageState('demo-user')).resolves.toEqual({});
     await expect(
@@ -3103,9 +3388,21 @@ describe('mysql storage contract', () => {
     });
 
     await expect(storage.deletePlaybackSessionsBefore(1500)).resolves.toBe(1);
-    await expect(storage.getAllPlaybackSessions('demo-user')).resolves.toEqual([
-      expect.objectContaining({ id: 'session_recent' }),
+    await expect(
+      storage.getPlaybackPeriodSessions(
+        'demo-user',
+        0,
+        Number.MAX_SAFE_INTEGER,
+      ),
+    ).resolves.toEqual([
+      expect.objectContaining({ watch_seconds: playbackSession.watch_seconds }),
     ]);
+  });
+
+  it('历史与桶统计双后端契约', async () => {
+    await assertWatchHistoryContract(
+      new MySqlStorage('mysql://demo:demo@localhost:3306/icetv'),
+    );
   });
 
   it('reads positive playback sessions in a half-open user-scoped range', async () => {

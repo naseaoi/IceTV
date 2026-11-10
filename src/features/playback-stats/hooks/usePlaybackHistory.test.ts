@@ -6,7 +6,7 @@ import {
   getPlaybackHistory,
 } from '@/features/playback-stats/lib/client';
 import { showToast } from '@/lib/toast';
-import type { PlaybackSession } from '@/lib/types';
+import type { WatchHistoryEntry } from '@/lib/types';
 
 jest.mock('@/lib/toast', () => ({
   showToast: jest.fn(),
@@ -23,22 +23,20 @@ jest.mock('@/features/playback-stats/lib/client', () => ({
   getPlaybackHistory: jest.fn(),
 }));
 
-const items: PlaybackSession[] = ['history1', 'history2'].map((id) => ({
+const items: WatchHistoryEntry[] = ['history1', 'history2'].map((id) => ({
   id,
   source: 'src',
   video_id: id,
-  episode_index: 1,
   title: id,
   source_name: '源站',
   cover: '',
   year: '2026',
-  started_at: 1,
-  ended_at: 2,
-  watch_seconds: 1,
-  last_position: 1,
-  total_time: 60,
-  created_at: 1,
-  updated_at: 2,
+  episode_index: 1,
+  total_episodes: 12,
+  position: 1,
+  duration: 60,
+  first_watched_at: 1,
+  last_watched_at: 2,
 }));
 
 beforeEach(() => {
@@ -60,7 +58,7 @@ it.each([1, 2])('删除 %s 条全部失败时仅提示一次并保留记录', as
   await waitFor(() => expect(result.current.loading).toBe(false));
   await act(async () => {
     expect(
-      await result.current.removeSessions(
+      await result.current.removeEntries(
         items.slice(0, count).map(({ id }) => id),
       ),
     ).toBe(0);
@@ -77,7 +75,7 @@ it('部分失败时仅移除成功项并报告成功与失败数量', async () =
   const { result } = renderHook(() => usePlaybackHistory());
   await waitFor(() => expect(result.current.loading).toBe(false));
   await act(async () => {
-    expect(await result.current.removeSessions(items.map(({ id }) => id))).toBe(
+    expect(await result.current.removeEntries(items.map(({ id }) => id))).toBe(
       1,
     );
   });
@@ -93,8 +91,8 @@ it('全部成功或空选择保持静默', async () => {
   const { result } = renderHook(() => usePlaybackHistory());
   await waitFor(() => expect(result.current.loading).toBe(false));
   await act(async () => {
-    expect(await result.current.removeSessions([])).toBe(0);
-    expect(await result.current.removeSessions(items.map(({ id }) => id))).toBe(
+    expect(await result.current.removeEntries([])).toBe(0);
+    expect(await result.current.removeEntries(items.map(({ id }) => id))).toBe(
       2,
     );
   });

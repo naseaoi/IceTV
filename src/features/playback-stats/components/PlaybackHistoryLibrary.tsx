@@ -22,9 +22,9 @@ import {
   usePlaybackHistoryPlaceholder,
   usePlayHistorySession,
 } from '@/features/playback-stats/hooks/usePlaybackHistory';
-import { groupPlaybackSessionsByDay } from '@/features/playback-stats/lib/history';
+import { groupWatchHistoryByDay } from '@/features/playback-stats/lib/history';
 import { useListLayoutMotion } from '@/hooks/useListLayoutMotion';
-import type { PlaybackSession } from '@/lib/types';
+import type { WatchHistoryEntry } from '@/lib/types';
 
 const GROUP_TITLE_TEXT_CLASS = 'mb-3 text-sm font-medium';
 
@@ -35,8 +35,8 @@ export function PlaybackHistoryGridSkeleton({
 }) {
   const placeholder = usePlaybackHistoryPlaceholder(initialCount);
   const groups = placeholder.snapshot
-    ? groupPlaybackSessionsByDay(placeholder.snapshot.items).map(
-        (group) => group.sessions.length,
+    ? groupWatchHistoryByDay(placeholder.snapshot.items).map(
+        (group) => group.entries.length,
       )
     : [placeholder.count];
   if (groups.length === 0 || groups.every((size) => size === 0))
@@ -80,31 +80,27 @@ export function PlaybackHistoryPageSkeleton({
 }
 
 function PlaybackHistoryGroupGrid({
-  sessions,
+  entries,
   selectedIds,
   ...cardProps
 }: {
-  sessions: PlaybackSession[];
+  entries: WatchHistoryEntry[];
   selectedIds: Set<string>;
 } & Omit<
   React.ComponentProps<typeof HistoryPosterCard>,
-  'session' | 'selected'
+  'entry' | 'selected'
 >) {
   const containerRef = useListLayoutMotion<HTMLDivElement>(
-    sessions.map((session) => String(session.id)),
+    entries.map((entry) => entry.id),
   );
   return (
     <div ref={containerRef} className={`relative ${POSTER_GRID_CLASS}`}>
-      {sessions.map((session) => (
-        <div
-          key={session.id}
-          data-list-motion-key={String(session.id)}
-          className='w-full'
-        >
+      {entries.map((entry) => (
+        <div key={entry.id} data-list-motion-key={entry.id} className='w-full'>
           <HistoryPosterCard
             {...cardProps}
-            session={session}
-            selected={selectedIds.has(session.id)}
+            entry={entry}
+            selected={selectedIds.has(entry.id)}
           />
         </div>
       ))}
@@ -127,7 +123,7 @@ export function PlaybackHistoryLibrary({
     searchKeyword,
     hasMore,
     loadMore,
-    removeSessions,
+    removeEntries,
   } = usePlaybackHistory();
   const placeholder = usePlaybackHistoryPlaceholder(initialSkeletonCount);
   const { playHistoryItem, prefetchPlayPage } = usePlayHistorySession();
@@ -135,7 +131,7 @@ export function PlaybackHistoryLibrary({
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [confirmOpen, setConfirmOpen] = useState(false);
 
-  const groups = useMemo(() => groupPlaybackSessionsByDay(items), [items]);
+  const groups = useMemo(() => groupWatchHistoryByDay(items), [items]);
   const allSelected = items.length > 0 && selectedIds.size === items.length;
 
   const exitEditing = () => {
@@ -143,11 +139,11 @@ export function PlaybackHistoryLibrary({
     setSelectedIds(new Set());
   };
 
-  const toggleSelected = (session: PlaybackSession) => {
+  const toggleSelected = (entry: WatchHistoryEntry) => {
     setSelectedIds((current) => {
       const next = new Set(current);
-      if (next.has(session.id)) next.delete(session.id);
-      else next.add(session.id);
+      if (next.has(entry.id)) next.delete(entry.id);
+      else next.add(entry.id);
       return next;
     });
   };
@@ -159,7 +155,7 @@ export function PlaybackHistoryLibrary({
   };
 
   const deleteSelected = async () => {
-    await removeSessions(Array.from(selectedIds));
+    await removeEntries(Array.from(selectedIds));
     setConfirmOpen(false);
     exitEditing();
   };
@@ -210,13 +206,13 @@ export function PlaybackHistoryLibrary({
               {group.label}
             </h3>
             <PlaybackHistoryGroupGrid
-              sessions={group.sessions}
+              entries={group.entries}
               selectable={editing}
               selectedIds={selectedIds}
               onActivate={editing ? toggleSelected : playHistoryItem}
               onPrefetch={prefetchPlayPage}
               onDelete={async (item) => {
-                await removeSessions([item.id]);
+                await removeEntries([item.id]);
               }}
             />
           </section>

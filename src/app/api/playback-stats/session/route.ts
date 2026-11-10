@@ -1,9 +1,14 @@
 import { NextRequest, NextResponse } from 'next/server';
 
+import { PLAYBACK_BUCKET_MS } from '@/features/playback-stats/types';
 import { isGuardFailure, requireActiveUser } from '@/lib/api-auth';
 import { db } from '@/lib/db';
 import { NO_STORE_HEADERS } from '@/lib/http-cache';
-import type { PlaybackSession } from '@/lib/types';
+import type {
+  PlaybackSession,
+  PlaybackWatchBucket,
+  WatchHistoryWrite,
+} from '@/lib/types';
 
 export const runtime = 'nodejs';
 
@@ -69,13 +74,75 @@ function normalizeSession(input: unknown): PlaybackSession | null {
   };
 }
 
+function normalizeBuckets(
+  input: unknown,
+  startedAt: number,
+  now: number,
+): PlaybackWatchBucket[] | null {
+  if (!Array.isArray(input) || input.length > 100) return null;
+  const buckets: PlaybackWatchBucket[] = [];
+  for (const value of input) {
+    if (!value || typeof value !== 'object') return null;
+    const { start, watch_ms: watchMs } = value;
+    if (
+      !Number.isSafeInteger(start) ||
+      start % PLAYBACK_BUCKET_MS !== 0 ||
+      start < startedAt - PLAYBACK_BUCKET_MS ||
+      start > now + 60_000 ||
+      !Number.isSafeInteger(watchMs) ||
+      watchMs <= 0 ||
+      watchMs > PLAYBACK_BUCKET_MS
+    )
+      return null;
+    buckets.push({ start, watch_ms: watchMs });
+  }
+  return buckets;
+}
+
+function normalizeHistory(input: unknown): WatchHistoryWrite | null {
+  if (!input || typeof input !== 'object' || Array.isArray(input)) return null;
+  const raw = input as Record<string, unknown>;
+  const id = typeof raw.id === 'string' ? raw.id.trim() : undefined;
+  if (raw.id !== undefined && (!id || !/^[a-zA-Z0-9_-]{8,80}$/.test(id)))
+    return null;
+  if (
+    !Number.isSafeInteger(raw.total_episodes) ||
+    Number(raw.total_episodes) < 1 ||
+    Number(raw.total_episodes) > 10_000
+  )
+    return null;
+  for (const key of ['group_index', 'group_total']) {
+    if (
+      raw[key] !== undefined &&
+      (!Number.isSafeInteger(raw[key]) ||
+        Number(raw[key]) < 1 ||
+        Number(raw[key]) > 10_000)
+    )
+      return null;
+  }
+  return {
+    id,
+    total_episodes: Number(raw.total_episodes),
+    group_label:
+      raw.group_label === undefined
+        ? undefined
+        : readString(raw.group_label, MAX_TEXT_LENGTH),
+    group_index: raw.group_index as number | undefined,
+    group_total: raw.group_total as number | undefined,
+  };
+}
+
 export async function POST(request: NextRequest) {
   try {
     const guardResult = await requireActiveUser(request);
     if (isGuardFailure(guardResult)) return guardResult.response;
 
-    const body = (await request.json()) as { session?: unknown };
-    const session = normalizeSession(body.session);
+    const body = (await request.json().catch(() => null)) as {
+      session?: unknown;
+      buckets?: unknown;
+      history?: unknown;
+    } | null;
+    const session = normalizeSession(body?.session);
     if (!session) {
       return NextResponse.json(
         { error: 'Invalid playback session' },
@@ -83,17 +150,33 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    if (session.watch_seconds <= 0) {
-      return NextResponse.json(
-        { success: true },
-        { status: 200, headers: NO_STORE_HEADERS },
+    let historyId: string | null = null;
+    if (body && Object.prototype.hasOwnProperty.call(body, 'buckets')) {
+      const buckets = normalizeBuckets(
+        body.buckets,
+        session.started_at,
+        session.updated_at,
       );
+      const history =
+        body.history === undefined ? undefined : normalizeHistory(body.history);
+      if (!buckets || history === null || session.episode_index < 1) {
+        return NextResponse.json(
+          { error: 'Invalid playback report' },
+          { status: 400 },
+        );
+      }
+      historyId = await db.saveWatchSessionReport(
+        guardResult.username,
+        session,
+        buckets,
+        history,
+      );
+    } else if (session.watch_seconds > 0) {
+      await db.savePlaybackSession(guardResult.username, session);
     }
 
-    await db.savePlaybackSession(guardResult.username, session);
-
     return NextResponse.json(
-      { success: true },
+      { success: true, historyId },
       { status: 200, headers: NO_STORE_HEADERS },
     );
   } catch (err) {

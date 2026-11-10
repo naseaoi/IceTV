@@ -52,7 +52,6 @@ export async function GET(request: NextRequest) {
     VodPageTimeoutSeconds: publicConfig.VodPageTimeoutSeconds,
     VodFragmentTimeoutSeconds: publicConfig.VodFragmentTimeoutSeconds,
     PlaybackHistoryPageSize: publicConfig.PlaybackHistoryPageSize,
-    PlaybackHistoryLimit: publicConfig.PlaybackHistoryLimit,
     SearchHistoryLimit: publicConfig.SearchHistoryLimit,
     ContinueWatchingLimit: publicConfig.ContinueWatchingLimit,
     CoverImageCacheSize: publicConfig.CoverImageCacheSize,

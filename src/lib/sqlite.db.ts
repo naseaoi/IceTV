@@ -1,6 +1,7 @@
 import 'server-only';
 
 import Database from 'better-sqlite3';
+import { randomUUID } from 'crypto';
 import { existsSync, mkdirSync, readFileSync } from 'fs';
 import path from 'path';
 
@@ -104,7 +105,7 @@ import {
   MetadataRecordPage,
   PlaybackPeriodSession,
   PlaybackSession,
-  PlaybackSessionQuery,
+  PlaybackWatchBucket,
   PlaybackWatchTotals,
   PlayRecord,
   PlayRecordPage,
@@ -122,6 +123,9 @@ import {
   UserMessageState,
   UserMessageStateUpdate,
   VideoReview,
+  WatchHistoryEntry,
+  WatchHistoryQuery,
+  WatchHistoryWrite,
   WorkReviewSummary,
 } from './types';
 import { assertValidUsernameFormat, normalizeUsername } from './username';
@@ -454,7 +458,6 @@ export class LocalSqliteStorage implements IStorage {
     deleteSkipConfig: Database.Statement;
     getAllSkipConfigs: Database.Statement;
     setPlaybackSession: Database.Statement;
-    deletePlaybackSession: Database.Statement;
     deletePlaybackSessionsBefore: Database.Statement;
     // admin_config
     getAdminConfig: Database.Statement;
@@ -554,6 +557,7 @@ export class LocalSqliteStorage implements IStorage {
       this.migrateUserProfileAvatarSeed();
     });
     this.migrateFavoriteProjection();
+    this.migratePlaybackSchema();
     this.stmts = this.prepareStatements();
     if (!isMemoryDb) {
       runWithBusyRetry('迁移 SQLite 历史数据', () => {
@@ -567,11 +571,112 @@ export class LocalSqliteStorage implements IStorage {
       });
       this.checkpointWal();
     }
+    this.migrateWatchHistory();
     this.backfillFavoriteProjection();
     this.backfillUserProfiles();
     new SqliteUserAccessStore(this.db).migrate();
     this.invites.migrate();
     new SqliteConfigStateStore(this.db).migrate();
+  }
+
+  private migratePlaybackSchema(): void {
+    this.db
+      .transaction(() => {
+        const columns = this.db.pragma('table_info(playback_sessions)') as {
+          name: string;
+        }[];
+        if (!columns.some((column) => column.name === 'measurement_version'))
+          this.db.exec(
+            'ALTER TABLE playback_sessions ADD COLUMN measurement_version INTEGER NOT NULL DEFAULT 1',
+          );
+        this.db.exec(`
+        CREATE TABLE IF NOT EXISTS storage_migrations (name TEXT PRIMARY KEY, completed_at INTEGER NOT NULL);
+        CREATE TABLE IF NOT EXISTS playback_watch_buckets (
+          username TEXT NOT NULL, session_id TEXT NOT NULL, bucket_start INTEGER NOT NULL,
+          watch_ms INTEGER NOT NULL, PRIMARY KEY (username, session_id, bucket_start)
+        );
+        CREATE INDEX IF NOT EXISTS idx_watch_buckets_user_time ON playback_watch_buckets(username, bucket_start);
+        CREATE TABLE IF NOT EXISTS watch_history (
+          username TEXT NOT NULL, id TEXT NOT NULL, source TEXT NOT NULL, video_id TEXT NOT NULL,
+          title TEXT NOT NULL, source_name TEXT NOT NULL, cover TEXT NOT NULL, year TEXT NOT NULL,
+          episode_index INTEGER NOT NULL, total_episodes INTEGER NOT NULL,
+          group_label TEXT, group_index INTEGER, group_total INTEGER,
+          position REAL NOT NULL, duration REAL NOT NULL,
+          first_watched_at INTEGER NOT NULL, last_watched_at INTEGER NOT NULL,
+          PRIMARY KEY (username, id), UNIQUE (username, source, video_id)
+        );
+        CREATE INDEX IF NOT EXISTS idx_watch_history_page ON watch_history(username, last_watched_at, id);
+      `);
+      })
+      .immediate();
+  }
+
+  private migrateWatchHistory(): void {
+    // 完成标记与回填同事务提交，重启不会复活已删除的历史。
+    this.db
+      .transaction(() => {
+        if (
+          this.db
+            .prepare('SELECT 1 FROM storage_migrations WHERE name = ?')
+            .get('watch_history_v1')
+        )
+          return;
+        const rows = this.db
+          .prepare(
+            `SELECT ranked.*, p.record_json FROM (
+        SELECT s.*, MIN(started_at) OVER (PARTITION BY username, source, video_id) AS first_watched_at,
+          ROW_NUMBER() OVER (PARTITION BY username, source, video_id ORDER BY updated_at DESC, id DESC) AS row_num
+        FROM playback_sessions s WHERE watch_seconds > 0
+      ) ranked LEFT JOIN play_records p ON p.username = ranked.username AND p.record_key = ranked.source || '+' || ranked.video_id
+      WHERE ranked.row_num = 1`,
+          )
+          .all() as (PlaybackSession & {
+          username: string;
+          first_watched_at: number;
+          record_json: string | null;
+        })[];
+        for (const row of rows) {
+          let record: Partial<PlayRecord> = {};
+          try {
+            record = JSON.parse(row.record_json || '{}') ?? {};
+          } catch {
+            // 无效旧记录不阻塞迁移。
+          }
+          this.db
+            .prepare(
+              `INSERT INTO watch_history (
+          username, id, source, video_id, title, source_name, cover, year, episode_index,
+          total_episodes, group_label, group_index, group_total, position, duration, first_watched_at, last_watched_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT DO NOTHING`,
+            )
+            .run(
+              row.username,
+              randomUUID(),
+              row.source,
+              row.video_id,
+              row.title,
+              row.source_name,
+              row.cover,
+              row.year,
+              row.episode_index,
+              record.total_episodes || Math.max(1, row.episode_index),
+              record.group_label ?? null,
+              record.group_index ?? null,
+              record.group_total ?? null,
+              row.last_position,
+              row.total_time,
+              row.first_watched_at,
+              row.updated_at,
+            );
+        }
+        this.db
+          .prepare(
+            'INSERT INTO storage_migrations (name, completed_at) VALUES (?, ?)',
+          )
+          .run('watch_history_v1', Date.now());
+      })
+      .immediate();
   }
 
   private migrateFavoriteProjection(): void {
@@ -1129,7 +1234,6 @@ export class LocalSqliteStorage implements IStorage {
           total_time, created_at, updated_at
         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(id) DO UPDATE SET
-          username = excluded.username,
           source = excluded.source,
           video_id = excluded.video_id,
           episode_index = excluded.episode_index,
@@ -1143,10 +1247,8 @@ export class LocalSqliteStorage implements IStorage {
           last_position = excluded.last_position,
           total_time = excluded.total_time,
           created_at = excluded.created_at,
-          updated_at = excluded.updated_at`,
-      ),
-      deletePlaybackSession: this.db.prepare(
-        'DELETE FROM playback_sessions WHERE username = ? AND id = ?',
+          updated_at = excluded.updated_at
+        WHERE playback_sessions.username = excluded.username AND playback_sessions.measurement_version = 1`,
       ),
       deletePlaybackSessionsBefore: this.db.prepare(
         'DELETE FROM playback_sessions WHERE updated_at < ?',
@@ -1261,6 +1363,8 @@ export class LocalSqliteStorage implements IStorage {
       'SELECT 1 AS v FROM search_history LIMIT 1',
       'SELECT 1 AS v FROM skip_configs LIMIT 1',
       'SELECT 1 AS v FROM playback_sessions LIMIT 1',
+      'SELECT 1 AS v FROM watch_history LIMIT 1',
+      'SELECT 1 AS v FROM playback_watch_buckets LIMIT 1',
       'SELECT 1 AS v FROM admin_config LIMIT 1',
       'SELECT 1 AS v FROM user_danmaku_settings LIMIT 1',
     ];
@@ -1457,6 +1561,33 @@ export class LocalSqliteStorage implements IStorage {
         );
         this.db
           .prepare(
+            `INSERT INTO playback_watch_buckets (username, session_id, bucket_start, watch_ms)
+          SELECT ?, session_id, bucket_start, watch_ms FROM playback_watch_buckets WHERE username = ?
+          ON CONFLICT(username, session_id, bucket_start) DO UPDATE SET watch_ms = MAX(watch_ms, excluded.watch_ms)`,
+          )
+          .run(canonical, legacy);
+        this.db
+          .prepare('DELETE FROM playback_watch_buckets WHERE username = ?')
+          .run(legacy);
+        this.db
+          .prepare(
+            `DELETE FROM watch_history AS canonical WHERE username = ? AND EXISTS (
+          SELECT 1 FROM watch_history AS legacy WHERE legacy.username = ?
+          AND (legacy.id = canonical.id OR (legacy.source = canonical.source AND legacy.video_id = canonical.video_id))
+          AND legacy.last_watched_at > canonical.last_watched_at
+        )`,
+          )
+          .run(canonical, legacy);
+        this.db
+          .prepare(
+            'UPDATE OR IGNORE watch_history SET username = ? WHERE username = ?',
+          )
+          .run(canonical, legacy);
+        this.db
+          .prepare('DELETE FROM watch_history WHERE username = ?')
+          .run(legacy);
+        this.db
+          .prepare(
             'UPDATE playback_sessions SET username = ? WHERE username = ?',
           )
           .run(canonical, legacy);
@@ -1517,6 +1648,8 @@ export class LocalSqliteStorage implements IStorage {
       'search_history',
       'skip_configs',
       'playback_sessions',
+      'watch_history',
+      'playback_watch_buckets',
       'user_message_state',
       'user_danmaku_settings',
     ];
@@ -2691,6 +2824,12 @@ export class LocalSqliteStorage implements IStorage {
         .run(targetUser);
       this.stmts.deleteSearchHistoryByUser.run(targetUser);
       this.stmts.deleteSkipConfigsByUser.run(targetUser);
+      this.db
+        .prepare('DELETE FROM playback_watch_buckets WHERE username = ?')
+        .run(targetUser);
+      this.db
+        .prepare('DELETE FROM watch_history WHERE username = ?')
+        .run(targetUser);
       this.stmts.deletePlaybackSessionsByUser.run(targetUser);
       this.stmts.deleteUserMessageStateByUser.run(targetUser);
       this.stmts.deleteLoginActivityByUser.run(targetUser);
@@ -3231,80 +3370,198 @@ export class LocalSqliteStorage implements IStorage {
     );
   }
 
-  async getPlaybackSessions(
+  async saveWatchSessionReport(
     userName: string,
-    query: PlaybackSessionQuery = {},
-  ): Promise<PlaybackSession[]> {
+    session: PlaybackSession,
+    buckets: PlaybackWatchBucket[],
+    history?: WatchHistoryWrite,
+  ): Promise<string | null> {
     const username = normalizeUsername(userName);
+    return this.db
+      .transaction(() => {
+        const existing = this.db
+          .prepare(
+            'SELECT username, watch_seconds FROM playback_sessions WHERE id = ?',
+          )
+          .get(session.id) as
+          | { username: string; watch_seconds: number }
+          | undefined;
+        if (existing && existing.username !== username) return null;
+        if (
+          !buckets.some((bucket) => bucket.watch_ms > 0) &&
+          !this.db
+            .prepare(
+              'SELECT 1 FROM playback_watch_buckets WHERE username = ? AND session_id = ? AND watch_ms > 0 LIMIT 1',
+            )
+            .get(username, session.id)
+        )
+          return null;
+        this.db
+          .prepare(
+            `INSERT INTO playback_sessions (
+        id, username, source, video_id, episode_index, title, source_name, cover, year,
+        started_at, ended_at, watch_seconds, last_position, total_time, created_at, updated_at, measurement_version
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, 2)
+      ON CONFLICT(id) DO UPDATE SET ended_at = MAX(ended_at, excluded.ended_at),
+        last_position = excluded.last_position, total_time = excluded.total_time,
+        title = excluded.title, source_name = excluded.source_name, cover = excluded.cover, year = excluded.year,
+        updated_at = MAX(updated_at, excluded.updated_at), measurement_version = 2
+      WHERE playback_sessions.username = excluded.username`,
+          )
+          .run(
+            session.id,
+            username,
+            session.source,
+            session.video_id,
+            session.episode_index,
+            session.title,
+            session.source_name,
+            session.cover,
+            session.year,
+            session.started_at,
+            session.ended_at,
+            session.last_position,
+            session.total_time,
+            session.created_at,
+            session.updated_at,
+          );
+        const putBucket = this.db
+          .prepare(`INSERT INTO playback_watch_buckets (username, session_id, bucket_start, watch_ms)
+        VALUES (?, ?, ?, ?) ON CONFLICT(username, session_id, bucket_start) DO UPDATE SET watch_ms = MAX(watch_ms, excluded.watch_ms)`);
+        for (const bucket of buckets)
+          putBucket.run(username, session.id, bucket.start, bucket.watch_ms);
+        const total = this.db
+          .prepare(
+            'SELECT COALESCE(SUM(watch_ms), 0) AS total FROM playback_watch_buckets WHERE username = ? AND session_id = ?',
+          )
+          .get(username, session.id) as { total: number };
+        this.db
+          .prepare(
+            'UPDATE playback_sessions SET watch_seconds = ?, measurement_version = 2 WHERE id = ? AND username = ?',
+          )
+          .run(Math.floor(total.total / 1000), session.id, username);
+        if (!history || total.total <= 0) return null;
+        const values = [
+          session.title,
+          session.source_name,
+          session.cover,
+          session.year,
+          session.episode_index,
+          history.total_episodes,
+          history.group_label ?? null,
+          history.group_index ?? null,
+          history.group_total ?? null,
+          session.last_position,
+          session.total_time,
+          session.updated_at,
+        ];
+        if (history.id) {
+          const result = this.db
+            .prepare(
+              `UPDATE watch_history SET title = ?, source_name = ?, cover = ?, year = ?,
+          episode_index = ?, total_episodes = ?, group_label = ?, group_index = ?, group_total = ?,
+          position = ?, duration = ?, last_watched_at = ? WHERE username = ? AND id = ? AND source = ? AND video_id = ?`,
+            )
+            .run(
+              ...values,
+              username,
+              history.id,
+              session.source,
+              session.video_id,
+            );
+          return result.changes ? history.id : null;
+        }
+        this.db
+          .prepare(
+            `INSERT INTO watch_history (
+        title, source_name, cover, year, episode_index, total_episodes, group_label, group_index, group_total,
+        position, duration, last_watched_at, username, id, source, video_id, first_watched_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT(username, source, video_id) DO UPDATE SET
+        title = excluded.title, source_name = excluded.source_name, cover = excluded.cover, year = excluded.year,
+        episode_index = excluded.episode_index, total_episodes = excluded.total_episodes, group_label = excluded.group_label,
+        group_index = excluded.group_index, group_total = excluded.group_total, position = excluded.position,
+        duration = excluded.duration, last_watched_at = excluded.last_watched_at`,
+          )
+          .run(
+            ...values,
+            username,
+            randomUUID(),
+            session.source,
+            session.video_id,
+            session.started_at,
+          );
+        return (
+          this.db
+            .prepare(
+              'SELECT id FROM watch_history WHERE username = ? AND source = ? AND video_id = ?',
+            )
+            .get(username, session.source, session.video_id) as { id: string }
+        ).id;
+      })
+      .immediate();
+  }
+
+  async getWatchHistoryPage(
+    userName: string,
+    query: WatchHistoryQuery,
+  ): Promise<WatchHistoryEntry[]> {
     const conditions = ['username = ?'];
-    const params: Array<string | number> = [username];
-
-    if (Number.isFinite(query.since)) {
-      conditions.push('started_at >= ?');
-      params.push(query.since as number);
+    const params: (string | number)[] = [normalizeUsername(userName)];
+    if (query.cursor) {
+      conditions.push(
+        '(last_watched_at < ? OR (last_watched_at = ? AND id < ?))',
+      );
+      params.push(
+        query.cursor.lastWatchedAt,
+        query.cursor.lastWatchedAt,
+        query.cursor.id,
+      );
     }
-
-    if (Number.isFinite(query.cursor)) {
-      conditions.push('started_at < ?');
-      params.push(query.cursor as number);
-    }
-
     const keyword = normalizePlaybackSearchKeyword(query.keyword);
     if (keyword) {
-      const likePattern = buildPlaybackSearchLikePattern(keyword);
-      conditions.push(
-        "(title LIKE ? ESCAPE '!' OR source_name LIKE ? ESCAPE '!' OR year LIKE ? ESCAPE '!' OR video_id LIKE ? ESCAPE '!')",
-      );
-      params.push(likePattern, likePattern, likePattern, likePattern);
+      conditions.push("title LIKE ? ESCAPE '!'");
+      params.push(buildPlaybackSearchLikePattern(keyword));
     }
-
-    const limit = Math.min(Math.max(Math.floor(query.limit ?? 100), 1), 500);
-    params.push(limit);
-
+    params.push(query.limit);
     const rows = this.db
       .prepare(
-        `SELECT
-          id, source, video_id, episode_index, title, source_name, cover, year,
-          started_at, ended_at, watch_seconds, last_position, total_time,
-          created_at, updated_at
-        FROM playback_sessions
-        WHERE ${conditions.join(' AND ')}
-        ORDER BY started_at DESC
-        LIMIT ?`,
+        `SELECT id, source, video_id, title, source_name, cover, year, episode_index,
+      total_episodes, group_label, group_index, group_total, position, duration, first_watched_at, last_watched_at
+      FROM watch_history WHERE ${conditions.join(' AND ')} ORDER BY last_watched_at DESC, id DESC LIMIT ?`,
       )
-      .all(...params) as PlaybackSession[];
-
-    return rows;
+      .all(...params) as WatchHistoryEntry[];
+    return rows.map((row) => ({
+      ...row,
+      group_label: row.group_label ?? undefined,
+      group_index: row.group_index ?? undefined,
+      group_total: row.group_total ?? undefined,
+    }));
   }
 
-  async getAllPlaybackSessions(userName: string): Promise<PlaybackSession[]> {
-    const username = normalizeUsername(userName);
-    const rows = this.db
-      .prepare(
-        `SELECT
-          id, source, video_id, episode_index, title, source_name, cover, year,
-          started_at, ended_at, watch_seconds, last_position, total_time,
-          created_at, updated_at
-        FROM playback_sessions
-        WHERE username = ?
-        ORDER BY started_at DESC`,
-      )
-      .all(username) as PlaybackSession[];
-
-    return rows;
-  }
-
-  async deletePlaybackSession(userName: string, id: string): Promise<void> {
-    const username = normalizeUsername(userName);
-    this.stmts.deletePlaybackSession.run(username, id);
+  async deleteWatchHistoryEntry(userName: string, id: string): Promise<void> {
+    this.db
+      .prepare('DELETE FROM watch_history WHERE username = ? AND id = ?')
+      .run(normalizeUsername(userName), id);
   }
 
   async deletePlaybackSessionsBefore(updatedBefore: number): Promise<number> {
     const cutoff = Number.isFinite(updatedBefore)
       ? Math.max(0, Math.floor(updatedBefore))
       : 0;
-    const result = this.stmts.deletePlaybackSessionsBefore.run(cutoff);
-    return Number(result.changes || 0);
+    return this.db
+      .transaction(() => {
+        this.db
+          .prepare(
+            `DELETE FROM playback_watch_buckets WHERE session_id IN
+        (SELECT id FROM playback_sessions WHERE updated_at < ?)`,
+          )
+          .run(cutoff);
+        return Number(
+          this.stmts.deletePlaybackSessionsBefore.run(cutoff).changes,
+        );
+      })
+      .immediate();
   }
 
   async getPlaybackWatchTotals(

@@ -7,6 +7,7 @@ import {
 import { assertPlaybackPeriodRange } from '@/lib/__tests__/__fixtures__/playback-period-contract';
 import { assertReviewReplies } from '@/lib/__tests__/__fixtures__/review-reply-contract';
 import { assertSocialNotifications } from '@/lib/__tests__/__fixtures__/social-notification-contract';
+import { assertWatchHistoryContract } from '@/lib/__tests__/__fixtures__/watch-history-contract';
 
 import { MySqlStorage } from '../mysql.db';
 import type { Favorite, PlayRecord } from '../types';
@@ -63,6 +64,126 @@ describeLive('MySQL 追更查询（真实实例）', () => {
 
   describe('announcements', () => {
     announcementContract(() => storage);
+  });
+
+  it('历史与桶统计双后端契约', async () => {
+    await assertWatchHistoryContract(storage);
+  });
+
+  it('历史迁移中断回滚，重试按大小写身份与最新行回填，完成标记阻止复活', async () => {
+    const impl = storage as unknown as {
+      pool: import('mysql2/promise').Pool;
+      migrateWatchHistory(): Promise<void>;
+    };
+    const base = {
+      id: 'migrate-session-a',
+      source: 'Source',
+      video_id: 'video',
+      title: '旧作品',
+      source_name: '源',
+      cover: '',
+      year: '2026',
+      episode_index: 1,
+      started_at: 100,
+      ended_at: 200,
+      watch_seconds: 10,
+      last_position: 10,
+      total_time: 100,
+      created_at: 100,
+      updated_at: 200,
+    };
+    await storage.setPlaybackSession('migration-user', base);
+    await storage.setPlaybackSession('migration-user', {
+      ...base,
+      id: 'migrate-session-z',
+      started_at: 150,
+      last_position: 70,
+    });
+    await storage.setPlaybackSession('migration-user', {
+      ...base,
+      id: 'migrate-session-other',
+      source: 'source',
+    });
+    await storage.setPlayRecord('migration-user', 'Source+video', {
+      ...basePlayRecord,
+      total_episodes: 24,
+      group_label: '第二季',
+      group_index: 3,
+      group_total: 12,
+    });
+    await impl.pool.execute('DELETE FROM storage_migrations WHERE name = ?', [
+      'watch_history_v1',
+    ]);
+    await impl.pool.query(
+      "CREATE TRIGGER interrupt_history_migration BEFORE UPDATE ON storage_migrations FOR EACH ROW SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'interrupt'",
+    );
+    try {
+      await expect(impl.migrateWatchHistory()).rejects.toMatchObject({
+        message: 'interrupt',
+      });
+      expect(
+        await storage.getWatchHistoryPage('migration-user', { limit: 10 }),
+      ).toEqual([]);
+    } finally {
+      await impl.pool.query('DROP TRIGGER interrupt_history_migration');
+    }
+    await Promise.all([impl.migrateWatchHistory(), impl.migrateWatchHistory()]);
+    const rows = await storage.getWatchHistoryPage('migration-user', {
+      limit: 10,
+    });
+    expect(rows).toHaveLength(2);
+    const row = rows.find((row) => row.source === 'Source')!;
+    expect(row).toMatchObject({
+      position: 70,
+      first_watched_at: 100,
+      total_episodes: 24,
+      group_label: '第二季',
+    });
+    for (const item of rows)
+      await storage.deleteWatchHistoryEntry('migration-user', item.id);
+    await impl.migrateWatchHistory();
+    expect(
+      await storage.getWatchHistoryPage('migration-user', { limit: 10 }),
+    ).toEqual([]);
+  });
+
+  it('并发重复桶写入以最大值统计并返回同一个历史身份', async () => {
+    const session = {
+      id: 'concurrent-session',
+      source: 'source',
+      video_id: 'video',
+      title: '作品',
+      source_name: '源',
+      cover: '',
+      year: '2026',
+      episode_index: 1,
+      started_at: 900000,
+      ended_at: 960000,
+      watch_seconds: 0,
+      last_position: 30,
+      total_time: 100,
+      created_at: 900000,
+      updated_at: 960000,
+    };
+    const ids = await Promise.all(
+      [3000, 1000, 4000, 2000].map((watch_ms) =>
+        storage.saveWatchSessionReport(
+          'concurrent-user',
+          session,
+          [{ start: 900000, watch_ms }],
+          { total_episodes: 1 },
+        ),
+      ),
+    );
+    expect(new Set(ids).size).toBe(1);
+    expect(
+      (
+        await storage.getPlaybackPeriodSessions('concurrent-user', 0, 1000000)
+      )[0].watch_seconds,
+    ).toBe(4);
+    expect(
+      await storage.getWatchHistoryPage('concurrent-user', { limit: 10 }),
+    ).toHaveLength(1);
   });
 
   it('筛选分页与追更计数及客户端判定保持一致', async () => {

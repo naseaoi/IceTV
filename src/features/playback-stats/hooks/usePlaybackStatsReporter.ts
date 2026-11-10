@@ -3,18 +3,35 @@
 import type Artplayer from 'artplayer';
 import { MutableRefObject, useCallback, useEffect, useRef } from 'react';
 
-import type { PlaybackSession, SearchResult } from '@/lib/types';
+import {
+  type PlaybackSessionReport,
+  type PlaybackSessionReportResponse,
+  PLAYBACK_BUCKET_MS,
+} from '@/features/playback-stats/types';
+import { resolveEpisodeGroupPosition } from '@/lib/episode-groups';
+import type { SearchResult, WatchHistoryWrite } from '@/lib/types';
 
-type PlaybackStatsSessionState = {
-  id: string;
-  source: string;
-  videoId: string;
-  episodeIndex: number;
-  startedAt: number;
-  createdAt: number;
-  lastReportedAt: number;
-  lastPosition: number;
-  watchSeconds: number;
+export type PlaybackStatsEvent =
+  | 'playing'
+  | 'timeupdate'
+  | 'pause'
+  | 'waiting'
+  | 'stalled'
+  | 'seeking'
+  | 'seeked'
+  | 'ended'
+  | 'error'
+  | 'stop';
+
+type Sample = { monotonic: number; wall: number; position: number };
+type SessionState = {
+  session: PlaybackSessionReport['session'];
+  history: WatchHistoryWrite;
+  buckets: Map<number, { total: number; acknowledged: number }>;
+  sample: Sample | null;
+  playing: boolean;
+  inFlight: boolean;
+  queued: boolean;
 };
 
 type UsePlaybackStatsReporterParams = {
@@ -28,7 +45,7 @@ type UsePlaybackStatsReporterParams = {
 };
 
 const REPORT_INTERVAL_MS = 30_000;
-const MAX_DELTA_SECONDS = 10 * 60;
+const MAX_TICK_MS = 5_000;
 
 function createSessionId(): string {
   if (typeof crypto !== 'undefined' && 'randomUUID' in crypto) {
@@ -40,31 +57,8 @@ function createSessionId(): string {
   );
 }
 
-function getCurrentPosition(
-  artPlayerRef: MutableRefObject<Artplayer | null>,
-  stableCurrentTimeRef: MutableRefObject<number>,
-): number {
-  const current = artPlayerRef.current?.currentTime || 0;
-  const stable = stableCurrentTimeRef.current || 0;
-  return Math.max(0, Math.floor(Math.max(current, stable)));
-}
-
-function getDuration(artPlayerRef: MutableRefObject<Artplayer | null>): number {
-  const duration = artPlayerRef.current?.duration || 0;
-  return Number.isFinite(duration) && duration > 0 ? Math.floor(duration) : 0;
-}
-
-async function sendPlaybackSession(session: PlaybackSession): Promise<void> {
-  const response = await fetch('/api/playback-stats/session', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ session }),
-    keepalive: true,
-  });
-
-  if (!response.ok) {
-    throw new Error(`Playback stats request failed: ${response.status}`);
-  }
+function workKey(session: PlaybackSessionReport['session']): string {
+  return JSON.stringify([session.source, session.video_id]);
 }
 
 export function usePlaybackStatsReporter({
@@ -76,178 +70,353 @@ export function usePlaybackStatsReporter({
   currentEpisodeIndexRef,
   stableCurrentTimeRef,
 }: UsePlaybackStatsReporterParams) {
-  const sessionRef = useRef<PlaybackStatsSessionState | null>(null);
-  const inFlightRef = useRef(false);
-  const pendingSessionRef = useRef<PlaybackSession | null>(null);
+  const activeRef = useRef<SessionState | null>(null);
+  const sessionsRef = useRef(new Map<string, SessionState>());
+  const lastReportAtRef = useRef(0);
+  // null 是本页删除墓碑，迟到的成功响应不能覆盖它。
+  const historyIdsRef = useRef(new Map<string, string | null>());
 
   const getActiveSession = useCallback(() => {
-    const current = sessionRef.current;
-    if (!current) return null;
-
-    const source = currentSourceRef.current;
-    const videoId = currentIdRef.current;
-    const episodeIndex = currentEpisodeIndexRef.current + 1;
-
-    if (
-      current.source !== source ||
-      current.videoId !== videoId ||
-      current.episodeIndex !== episodeIndex
-    ) {
-      return null;
-    }
-
-    return current;
+    const state = activeRef.current;
+    return state &&
+      state.session.source === currentSourceRef.current &&
+      state.session.video_id === currentIdRef.current &&
+      state.session.episode_index === currentEpisodeIndexRef.current + 1
+      ? state
+      : null;
   }, [currentSourceRef, currentIdRef, currentEpisodeIndexRef]);
 
-  const ensureSession = useCallback(() => {
-    const source = currentSourceRef.current;
-    const videoId = currentIdRef.current;
-    const episodeIndex = currentEpisodeIndexRef.current + 1;
-    const title = videoTitleRef.current;
-
-    if (!source || !videoId || !title) return null;
-
-    const current = sessionRef.current;
-    if (
-      current &&
-      current.source === source &&
-      current.videoId === videoId &&
-      current.episodeIndex === episodeIndex
-    ) {
-      return current;
-    }
-
-    const now = Date.now();
-    const position = getCurrentPosition(artPlayerRef, stableCurrentTimeRef);
-    const next: PlaybackStatsSessionState = {
-      id: createSessionId(),
-      source,
-      videoId,
-      episodeIndex,
-      startedAt: now,
-      createdAt: now,
-      lastReportedAt: now,
-      lastPosition: position,
-      watchSeconds: 0,
+  const readSample = useCallback((): Sample => {
+    const position =
+      artPlayerRef.current?.currentTime ?? stableCurrentTimeRef.current;
+    return {
+      monotonic: Math.floor(performance.now()),
+      wall: Date.now(),
+      position: Number.isFinite(position) ? Math.max(0, position) : 0,
     };
-    sessionRef.current = next;
-    return next;
-  }, [
-    artPlayerRef,
-    currentSourceRef,
-    currentIdRef,
-    videoTitleRef,
-    currentEpisodeIndexRef,
-    stableCurrentTimeRef,
-  ]);
+  }, [artPlayerRef, stableCurrentTimeRef]);
 
-  const flushNetworkQueue = useCallback(async (session: PlaybackSession) => {
-    if (inFlightRef.current) {
-      pendingSessionRef.current = session;
+  const refreshMetadata = useCallback(
+    (state: SessionState) => {
+      const detail = detailRef.current;
+      const group = resolveEpisodeGroupPosition(
+        detail?.episode_groups,
+        currentEpisodeIndexRef.current,
+        detail?.episodes.length || 0,
+      );
+      const label = group
+        ? detail?.episode_groups?.[group.groupIndex]?.label
+        : undefined;
+      state.history = {
+        total_episodes: detail?.episodes.length || 1,
+        ...(group
+          ? {
+              group_index: group.episodeOffset + 1,
+              group_total: group.groupCount,
+              ...(label ? { group_label: label } : {}),
+            }
+          : {}),
+      };
+      const duration = artPlayerRef.current?.duration || 0;
+      Object.assign(state.session, {
+        title: videoTitleRef.current,
+        source_name: detail?.source_name || '',
+        cover: detail?.poster || '',
+        year: detail?.year || '',
+        last_position: Math.floor(readSample().position),
+        total_time:
+          Number.isFinite(duration) && duration > 0 ? Math.floor(duration) : 0,
+        ended_at: Date.now(),
+      });
+    },
+    [
+      detailRef,
+      currentEpisodeIndexRef,
+      artPlayerRef,
+      videoTitleRef,
+      readSample,
+    ],
+  );
+
+  const flushSession = useCallback(async function flush(state: SessionState) {
+    if (state.inFlight) {
+      state.queued = true;
+      return;
+    }
+    const buckets = Array.from(state.buckets, ([start, value]) => ({
+      start,
+      watch_ms: value.total,
+      acknowledged: value.acknowledged,
+    }))
+      .filter((bucket) => bucket.watch_ms > bucket.acknowledged)
+      .map(({ start, watch_ms }) => ({ start, watch_ms }));
+    if (!buckets.length) {
+      if (activeRef.current !== state)
+        sessionsRef.current.delete(state.session.id);
       return;
     }
 
-    pendingSessionRef.current = session;
-    inFlightRef.current = true;
+    state.inFlight = true;
+    state.queued = false;
+    let succeeded = false;
     try {
-      while (pendingSessionRef.current) {
-        const nextSession = pendingSessionRef.current;
-        pendingSessionRef.current = null;
-        try {
-          await sendPlaybackSession(nextSession);
-        } catch (error) {
-          console.warn('播放统计上报失败:', error);
+      // 长时间离线后的积压按接口上限拆批，每批仍发送累计值。
+      for (let offset = 0; offset < buckets.length; offset += 100) {
+        const key = workKey(state.session);
+        const historyId = historyIdsRef.current.get(key);
+        const report: PlaybackSessionReport = {
+          session: { ...state.session },
+          buckets: buckets.slice(offset, offset + 100),
+          ...(historyId === null
+            ? {}
+            : {
+                history: {
+                  ...state.history,
+                  ...(historyId ? { id: historyId } : {}),
+                },
+              }),
+        };
+        const response = await fetch('/api/playback-stats/session', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(report),
+          keepalive: true,
+        });
+        if (!response.ok) {
+          throw new Error(`Playback stats request failed: ${response.status}`);
+        }
+        const result: PlaybackSessionReportResponse = await response.json();
+        if (report.history?.id && result.historyId === null) {
+          historyIdsRef.current.set(key, null);
+        } else if (
+          report.history &&
+          typeof result.historyId === 'string' &&
+          historyIdsRef.current.get(key) !== null
+        ) {
+          historyIdsRef.current.set(key, result.historyId);
+        }
+        for (const bucket of report.buckets) {
+          const value = state.buckets.get(bucket.start);
+          if (value) value.acknowledged = bucket.watch_ms;
         }
       }
+      succeeded = true;
     } catch (error) {
       console.warn('播放统计上报失败:', error);
     } finally {
-      inFlightRef.current = false;
+      state.inFlight = false;
+      // 失败等待下一次定时或强制上报，避免离线时立即重试形成循环。
+      if (succeeded && state.queued) {
+        void flush(state);
+      } else if (
+        succeeded &&
+        activeRef.current !== state &&
+        Array.from(state.buckets.values()).every(
+          (bucket) => bucket.total === bucket.acknowledged,
+        )
+      ) {
+        sessionsRef.current.delete(state.session.id);
+      }
     }
   }, []);
 
   const reportPlaybackStats = useCallback(
     (force = false) => {
+      const active = getActiveSession();
+      if (active) refreshMetadata(active);
+      const now = performance.now();
+      if (force || now - lastReportAtRef.current >= REPORT_INTERVAL_MS) {
+        lastReportAtRef.current = now;
+        for (const state of sessionsRef.current.values())
+          void flushSession(state);
+      }
+    },
+    [getActiveSession, refreshMetadata, flushSession],
+  );
+
+  const startPlaybackStatsSession = useCallback(() => {
+    const existing = getActiveSession();
+    if (existing) return;
+    const previous = activeRef.current;
+    if (previous) {
+      previous.playing = false;
+      previous.sample = null;
+      void flushSession(previous);
+      if (!previous.buckets.size)
+        sessionsRef.current.delete(previous.session.id);
+    }
+    activeRef.current = null;
+    if (
+      !currentSourceRef.current ||
+      !currentIdRef.current ||
+      !videoTitleRef.current
+    )
+      return;
+    const now = Date.now();
+    const state: SessionState = {
+      session: {
+        id: createSessionId(),
+        source: currentSourceRef.current,
+        video_id: currentIdRef.current,
+        episode_index: currentEpisodeIndexRef.current + 1,
+        title: videoTitleRef.current,
+        source_name: '',
+        cover: '',
+        year: '',
+        started_at: now,
+        ended_at: now,
+        created_at: now,
+        last_position: 0,
+        total_time: 0,
+      },
+      history: { total_episodes: 1 },
+      buckets: new Map(),
+      sample: null,
+      playing: false,
+      inFlight: false,
+      queued: false,
+    };
+    refreshMetadata(state);
+    activeRef.current = state;
+    sessionsRef.current.set(state.session.id, state);
+  }, [
+    getActiveSession,
+    flushSession,
+    currentSourceRef,
+    currentIdRef,
+    videoTitleRef,
+    currentEpisodeIndexRef,
+    refreshMetadata,
+  ]);
+
+  const handlePlaybackStatsEvent = useCallback(
+    (event: PlaybackStatsEvent) => {
+      if (event === 'stop') {
+        if (activeRef.current) {
+          activeRef.current.playing = false;
+          activeRef.current.sample = null;
+        }
+        reportPlaybackStats(true);
+        return;
+      }
+      if (event === 'playing') startPlaybackStatsSession();
       const state = getActiveSession();
       if (!state) return;
-
-      const now = Date.now();
-      const currentPosition = getCurrentPosition(
-        artPlayerRef,
-        stableCurrentTimeRef,
-      );
-      const elapsedSeconds = Math.max(
-        0,
-        Math.floor((now - state.lastReportedAt) / 1000),
-      );
-      const positionDelta = Math.max(0, currentPosition - state.lastPosition);
-      const delta = Math.min(positionDelta, elapsedSeconds, MAX_DELTA_SECONDS);
-
-      if (!force && now - state.lastReportedAt < REPORT_INTERVAL_MS) {
+      const video = artPlayerRef.current?.video;
+      if (event === 'playing' || event === 'seeked') {
+        state.playing =
+          !!video &&
+          !video.paused &&
+          !video.seeking &&
+          !video.ended &&
+          !video.error &&
+          video.readyState >= 3;
+        state.sample = state.playing ? readSample() : null;
         return;
       }
-
-      state.watchSeconds += delta;
-      state.lastReportedAt = now;
-      state.lastPosition = currentPosition;
-
-      if (state.watchSeconds <= 0 && !force) {
+      if (event !== 'timeupdate') {
+        state.playing = false;
+        state.sample = null;
+        if (event === 'pause' || event === 'ended' || event === 'error') {
+          reportPlaybackStats(true);
+        }
         return;
       }
-
-      const detail = detailRef.current;
-      const payload: PlaybackSession = {
-        id: state.id,
-        source: state.source,
-        video_id: state.videoId,
-        episode_index: state.episodeIndex,
-        title: videoTitleRef.current,
-        source_name: detail?.source_name || '',
-        cover: detail?.poster || '',
-        year: detail?.year || '',
-        started_at: state.startedAt,
-        ended_at: now,
-        watch_seconds: state.watchSeconds,
-        last_position: currentPosition,
-        total_time: getDuration(artPlayerRef),
-        created_at: state.createdAt,
-        updated_at: now,
-      };
-
-      void flushNetworkQueue(payload);
+      if (
+        !video ||
+        video.paused ||
+        video.seeking ||
+        video.ended ||
+        video.error ||
+        video.readyState < 3
+      ) {
+        state.playing = false;
+        state.sample = null;
+        return;
+      }
+      // playing 事件触发时数据可能尚未就绪，由后续 timeupdate 补上计时起点
+      if (!state.playing) {
+        state.playing = true;
+        state.sample = readSample();
+        return;
+      }
+      const next = readSample();
+      const previous = state.sample;
+      state.sample = next;
+      refreshMetadata(state);
+      if (!previous || next.position <= previous.position) return;
+      const elapsed = next.monotonic - previous.monotonic;
+      const wallElapsed = next.wall - previous.wall;
+      // 休眠、后台节流与系统时钟跳变的间隔直接丢弃，不把拖欠时间补进统计。
+      if (
+        elapsed <= 0 ||
+        elapsed > MAX_TICK_MS ||
+        wallElapsed <= 0 ||
+        wallElapsed > MAX_TICK_MS
+      )
+        return;
+      let remaining = elapsed;
+      let cursor = previous.wall;
+      while (cursor < next.wall) {
+        const start =
+          Math.floor(cursor / PLAYBACK_BUCKET_MS) * PLAYBACK_BUCKET_MS;
+        const end = Math.min(start + PLAYBACK_BUCKET_MS, next.wall);
+        const milliseconds =
+          end === next.wall
+            ? remaining
+            : Math.floor((elapsed * (end - cursor)) / wallElapsed);
+        remaining -= milliseconds;
+        if (milliseconds > 0) {
+          const bucket = state.buckets.get(start) || {
+            total: 0,
+            acknowledged: 0,
+          };
+          bucket.total = Math.min(
+            PLAYBACK_BUCKET_MS,
+            bucket.total + milliseconds,
+          );
+          state.buckets.set(start, bucket);
+        }
+        cursor = end;
+      }
     },
     [
+      startPlaybackStatsSession,
       getActiveSession,
       artPlayerRef,
-      stableCurrentTimeRef,
-      detailRef,
-      videoTitleRef,
-      flushNetworkQueue,
+      readSample,
+      refreshMetadata,
+      reportPlaybackStats,
     ],
   );
 
   useEffect(() => {
-    const handleBeforeUnload = () => {
-      reportPlaybackStats(true);
-    };
+    const flush = () => reportPlaybackStats(true);
     const handleVisibilityChange = () => {
-      if (document.visibilityState === 'hidden') {
-        reportPlaybackStats(true);
-      }
+      if (document.visibilityState === 'hidden') flush();
+      // 恢复可见性后从新采样点计时，避免跨页面冻结周期补算。
+      if (activeRef.current) activeRef.current.sample = null;
     };
-
-    window.addEventListener('beforeunload', handleBeforeUnload);
+    const timer = window.setInterval(flush, REPORT_INTERVAL_MS);
+    window.addEventListener('beforeunload', flush);
+    window.addEventListener('pagehide', flush);
     document.addEventListener('visibilitychange', handleVisibilityChange);
-
     return () => {
-      window.removeEventListener('beforeunload', handleBeforeUnload);
+      window.clearInterval(timer);
+      window.removeEventListener('beforeunload', flush);
+      window.removeEventListener('pagehide', flush);
       document.removeEventListener('visibilitychange', handleVisibilityChange);
-      reportPlaybackStats(true);
+      flush();
+      if (activeRef.current) {
+        activeRef.current.playing = false;
+        activeRef.current.sample = null;
+      }
     };
   }, [reportPlaybackStats]);
 
   return {
-    startPlaybackStatsSession: ensureSession,
+    startPlaybackStatsSession,
     reportPlaybackStats,
+    handlePlaybackStatsEvent,
   };
 }

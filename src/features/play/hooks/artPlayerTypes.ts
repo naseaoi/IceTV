@@ -5,6 +5,7 @@ import type { PlaybackRequestMode } from '@/features/play/hooks/usePlayPageState
 import type { WakeLockSentinel } from '@/features/play/lib/playTypes';
 import type { ResumeMode } from '@/features/play/lib/resumePlayback';
 import type { VodPlaybackIntent } from '@/features/play/lib/vodPlaybackIntent';
+import type { PlaybackStatsEvent } from '@/features/playback-stats/hooks/usePlaybackStatsReporter';
 import type { SearchResult, SkipConfig } from '@/lib/types';
 
 export type CurrentSourceVideoInfo = {
@@ -60,6 +61,7 @@ export interface UseArtPlayerParams {
   saveCurrentPlayProgress: () => void;
   reportPlaybackStats?: (force?: boolean) => void;
   startPlaybackStatsSession?: () => void;
+  handlePlaybackStatsEvent?: (event: PlaybackStatsEvent) => void;
   requestWakeLock: () => Promise<void>;
   releaseWakeLock: () => Promise<void>;
   cleanupPlayer: () => void;

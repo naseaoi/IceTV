@@ -301,6 +301,34 @@ describe('initializeArtPlayer 拉流控制', () => {
     jest.useRealTimers();
   });
 
+  it('统计事件独立于跳片头设置，并屏蔽已释放运行时的迟到采样', async () => {
+    const params = createParams();
+    params.handlePlaybackStatsEvent = jest.fn();
+    const { player, video } = await setupPlayer(params);
+    for (const event of [
+      'playing',
+      'timeupdate',
+      'pause',
+      'waiting',
+      'stalled',
+      'seeking',
+      'seeked',
+      'ended',
+      'error',
+    ]) {
+      player.emit(`video:${event}`);
+      expect(params.handlePlaybackStatsEvent).toHaveBeenLastCalledWith(event);
+    }
+    player.emit('pause');
+    expect(params.handlePlaybackStatsEvent).toHaveBeenLastCalledWith('pause');
+    jest.mocked(params.handlePlaybackStatsEvent).mockClear();
+    runManagedVideoCleanup(video);
+    player.emit('video:playing');
+    player.emit('video:timeupdate');
+    player.emit('video:waiting');
+    expect(params.handlePlaybackStatsEvent).not.toHaveBeenCalled();
+  });
+
   it.each(['hls', 'native'])(
     '%s 播放中回落开启加载，恢复只结束等待而不重复通知起播',
     async (kind) => {

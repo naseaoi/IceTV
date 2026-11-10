@@ -10,11 +10,6 @@ import {
   getCachedPlaybackHistorySnapshot,
   getPlaybackHistory,
 } from '@/features/playback-stats/lib/client';
-import {
-  dedupePlaybackSessionsByTitle,
-  filterPlaybackHistorySessions,
-  getPlaybackSessionMergeKey,
-} from '@/features/playback-stats/lib/history';
 import type { PlaybackHistoryResponse } from '@/features/playback-stats/types';
 import { readListCountCookie } from '@/lib/list-count-cookies';
 import {
@@ -22,8 +17,9 @@ import {
   withReturnTo,
 } from '@/lib/navigation-return';
 import { savePlayIntent } from '@/lib/play-intent';
+import { isGroupedPlayRecordScale } from '@/lib/play-records';
 import { showToast } from '@/lib/toast';
-import type { PlaybackSession } from '@/lib/types';
+import type { WatchHistoryEntry } from '@/lib/types';
 import { canUseNetworkPrefetch, warmupForPlayback } from '@/lib/video-prefetch';
 
 const useIsomorphicLayoutEffect =
@@ -58,16 +54,12 @@ export function usePlaybackHistoryPlaceholder(initialCount = 0) {
 
 export function usePlaybackHistory() {
   const runtimeConfig = useRuntimeConfig();
-  const historyPageSize = Math.max(
+  const pageSize = Math.max(
     1,
     Math.floor(runtimeConfig.PLAYBACK_HISTORY_PAGE_SIZE || 10),
   );
-  const historyLimit = Math.max(
-    historyPageSize,
-    Math.floor(runtimeConfig.PLAYBACK_HISTORY_LIMIT || 500),
-  );
-  const [items, setItems] = useState<PlaybackSession[]>([]);
-  const [nextCursor, setNextCursor] = useState<number | null>(null);
+  const [items, setItems] = useState<WatchHistoryEntry[]>([]);
+  const [nextCursor, setNextCursor] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   useIsomorphicLayoutEffect(() => {
     const cachedHistory = getCachedPlaybackHistorySnapshot();
@@ -80,7 +72,6 @@ export function usePlaybackHistory() {
   const [refreshing, setRefreshing] = useState(false);
   const [searchText, setSearchText] = useState('');
   const [searchKeyword, setSearchKeyword] = useState('');
-  const pageSize = Math.min(historyPageSize, historyLimit);
 
   useEffect(() => {
     const timeoutId = window.setTimeout(() => {
@@ -98,70 +89,46 @@ export function usePlaybackHistory() {
     const loadInitial = async () => {
       try {
         const hasKeyword = searchKeyword.length > 0;
-        const shouldShowSkeleton =
-          !hasKeyword && !getCachedPlaybackHistorySnapshot();
-        if (shouldShowSkeleton) {
+        const snapshotBeforeFetch = hasKeyword
+          ? null
+          : getCachedPlaybackHistorySnapshot();
+        if (!hasKeyword && !snapshotBeforeFetch) {
           setLoading(true);
         } else {
           setRefreshing(true);
         }
-        const snapshotBeforeFetch = hasKeyword
-          ? null
-          : getCachedPlaybackHistorySnapshot();
         const response = await getPlaybackHistory(
           undefined,
           hasKeyword ? searchKeyword : undefined,
-          Math.min(historyPageSize, historyLimit),
+          pageSize,
         );
-        if (!cancelled) {
-          if (hasKeyword) {
-            setItems(
-              dedupePlaybackSessionsByTitle(
-                filterPlaybackHistorySessions(response.items),
-                {
-                  mergeWatchSeconds: true,
-                },
-              ),
-            );
-            setNextCursor(response.nextCursor);
-            return;
-          }
-
-          const responseIds = new Set(response.items.map((item) => item.id));
-          const responseKeys = new Set(
-            dedupePlaybackSessionsByTitle(
-              filterPlaybackHistorySessions(response.items),
-              {
-                mergeWatchSeconds: true,
-              },
-            ).map(getPlaybackSessionMergeKey),
-          );
-          const cachedTail =
-            snapshotBeforeFetch &&
-            snapshotBeforeFetch.items.length > response.items.length
-              ? snapshotBeforeFetch.items.filter(
-                  (item) =>
-                    !responseIds.has(item.id) &&
-                    !responseKeys.has(getPlaybackSessionMergeKey(item)),
-                )
-              : [];
-          const nextItems = dedupePlaybackSessionsByTitle(
-            filterPlaybackHistorySessions([...response.items, ...cachedTail]),
-            {
-              mergeWatchSeconds: true,
-            },
-          );
-          const nextHistory = {
-            items: nextItems,
-            nextCursor:
-              cachedTail.length > 0
-                ? snapshotBeforeFetch?.nextCursor || response.nextCursor
-                : response.nextCursor,
-          };
-          cachePlaybackHistorySnapshot(nextHistory);
-          setItems(nextHistory.items);
-          setNextCursor(nextHistory.nextCursor);
+        if (cancelled) return;
+        if (hasKeyword) {
+          setItems(response.items);
+          setNextCursor(response.nextCursor);
+          return;
         }
+
+        // 已加载过更多页时保留快照尾部，返回本页时不丢掉已翻到的位置
+        const responseIds = new Set(response.items.map((item) => item.id));
+        const cachedTail =
+          snapshotBeforeFetch &&
+          snapshotBeforeFetch.items.length > response.items.length &&
+          response.nextCursor
+            ? snapshotBeforeFetch.items
+                .slice(response.items.length)
+                .filter((item) => !responseIds.has(item.id))
+            : [];
+        const nextHistory = {
+          items: [...response.items, ...cachedTail],
+          nextCursor:
+            cachedTail.length > 0
+              ? (snapshotBeforeFetch?.nextCursor ?? null)
+              : response.nextCursor,
+        };
+        cachePlaybackHistorySnapshot(nextHistory);
+        setItems(nextHistory.items);
+        setNextCursor(nextHistory.nextCursor);
       } catch (error) {
         console.error('获取播放历史失败:', error);
       } finally {
@@ -177,27 +144,23 @@ export function usePlaybackHistory() {
     return () => {
       cancelled = true;
     };
-  }, [historyLimit, historyPageSize, searchKeyword]);
+  }, [pageSize, searchKeyword]);
 
   const loadMore = async () => {
     if (!nextCursor || loadingMore) return;
-    const remaining = historyLimit - items.length;
-    if (remaining <= 0) return;
     setLoadingMore(true);
     try {
-      const response: PlaybackHistoryResponse = await getPlaybackHistory(
+      const response = await getPlaybackHistory(
         nextCursor,
         searchKeyword || undefined,
-        Math.min(historyPageSize, remaining),
+        pageSize,
       );
       setItems((prev) => {
-        const nextItems = dedupePlaybackSessionsByTitle(
-          filterPlaybackHistorySessions([...prev, ...response.items]),
-          {
-            limit: historyLimit,
-            mergeWatchSeconds: true,
-          },
-        );
+        const loadedIds = new Set(prev.map((item) => item.id));
+        const nextItems = [
+          ...prev,
+          ...response.items.filter((item) => !loadedIds.has(item.id)),
+        ];
         if (!searchKeyword) {
           cachePlaybackHistorySnapshot({
             items: nextItems,
@@ -206,11 +169,7 @@ export function usePlaybackHistory() {
         }
         return nextItems;
       });
-      setNextCursor(
-        items.length + response.items.length >= historyLimit
-          ? null
-          : response.nextCursor,
-      );
+      setNextCursor(response.nextCursor);
     } catch (error) {
       console.error('加载更多播放历史失败:', error);
     } finally {
@@ -218,7 +177,7 @@ export function usePlaybackHistory() {
     }
   };
 
-  const removeSessions = useCallback(async (ids: string[]) => {
+  const removeEntries = useCallback(async (ids: string[]) => {
     const results = await Promise.allSettled(
       ids.map((id) => deletePlaybackHistoryItem(id)),
     );
@@ -256,9 +215,9 @@ export function usePlaybackHistory() {
     searchText,
     setSearchText,
     searchKeyword,
-    hasMore: Boolean(nextCursor) && items.length < historyLimit,
+    hasMore: Boolean(nextCursor),
     loadMore,
-    removeSessions,
+    removeEntries,
   };
 }
 
@@ -269,7 +228,7 @@ export function usePlayHistorySession() {
     router.prefetch('/play');
   }, [router]);
 
-  const warmupPlayback = useCallback((item: PlaybackSession) => {
+  const warmupPlayback = useCallback((item: WatchHistoryEntry) => {
     if (!item.source || !item.video_id) return;
     if (canUseNetworkPrefetch()) {
       warmupForPlayback(item.source, item.video_id);
@@ -277,7 +236,7 @@ export function usePlayHistorySession() {
   }, []);
 
   const playHistoryItem = useCallback(
-    (item: PlaybackSession) => {
+    (item: WatchHistoryEntry) => {
       if (!item.source || !item.video_id) return;
 
       router.prefetch('/play');
@@ -287,7 +246,14 @@ export function usePlayHistorySession() {
         source: item.source,
         id: item.video_id,
         episodeIndex: Math.max(0, item.episode_index - 1),
-        resumeTime: Math.max(0, item.last_position || 0),
+        resumeTime: Math.max(0, item.position || 0),
+        ...(isGroupedPlayRecordScale(item)
+          ? {
+              groupLabel: item.group_label,
+              groupIndex: item.group_index,
+              groupTotal: item.group_total,
+            }
+          : {}),
       });
 
       const params = new URLSearchParams({

@@ -6,7 +6,7 @@ import {
   PlaybackHistoryPreviewSkeleton,
 } from '@/features/playback-stats/components/PlaybackHistoryPreview';
 import { usePlaybackHistoryPlaceholder } from '@/features/playback-stats/hooks/usePlaybackHistory';
-import type { PlaybackSession } from '@/lib/types';
+import type { WatchHistoryEntry } from '@/lib/types';
 
 jest.mock('@/features/playback-stats/hooks/usePlaybackHistory', () => ({
   usePlaybackHistoryPlaceholder: jest.fn(),
@@ -22,8 +22,8 @@ jest.mock('@/components/ScrollableRow', () => ({
 
 const sessions = Array.from({ length: 6 }, (_, index) => ({
   id: String(index),
-  started_at: Date.now() - (index < 2 ? 0 : 86400000),
-})) as PlaybackSession[];
+  last_watched_at: Date.now() - (index < 2 ? 0 : 86400000),
+})) as WatchHistoryEntry[];
 
 it('历史列表按已有缓存的日期分区和六条数量占位', () => {
   jest.mocked(usePlaybackHistoryPlaceholder).mockReturnValue({

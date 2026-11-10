@@ -277,6 +277,55 @@ export interface PlaybackWatchTotals {
   periodWatchSeconds: number;
 }
 
+// 一个用户在一个源的一部作品只有一条，记录最后观看的集与位置；删除后不影响观看统计
+export interface WatchHistoryEntry {
+  id: string;
+  source: string;
+  video_id: string;
+  title: string;
+  source_name: string;
+  cover: string;
+  year: string;
+  // 从 1 开始
+  episode_index: number;
+  total_episodes: number;
+  group_label?: string;
+  // 组内集数，从 1 开始
+  group_index?: number;
+  group_total?: number;
+  // 秒
+  position: number;
+  duration: number;
+  first_watched_at: number;
+  last_watched_at: number;
+}
+
+export interface WatchHistoryCursor {
+  lastWatchedAt: number;
+  id: string;
+}
+
+export interface WatchHistoryQuery {
+  limit: number;
+  cursor?: WatchHistoryCursor;
+  keyword?: string;
+}
+
+// 写入历史时随会话上报的附加信息；id 缺省表示按 (source, video_id) 新建或取回
+export interface WatchHistoryWrite {
+  id?: string;
+  total_episodes: number;
+  group_label?: string;
+  group_index?: number;
+  group_total?: number;
+}
+
+// 会话在一个 15 分钟 UTC 对齐时间桶内的累计有效观看毫秒数
+export interface PlaybackWatchBucket {
+  start: number;
+  watch_ms: number;
+}
+
 export type PlaybackPeriodSession = Pick<
   PlaybackSession,
   | 'source'
@@ -836,12 +885,17 @@ export interface IStorage {
   getAllSkipConfigs(userName: string): Promise<{ [key: string]: SkipConfig }>;
 
   setPlaybackSession(userName: string, session: PlaybackSession): Promise<void>;
-  getPlaybackSessions(
+  saveWatchSessionReport(
     userName: string,
-    query?: PlaybackSessionQuery,
-  ): Promise<PlaybackSession[]>;
-  getAllPlaybackSessions(userName: string): Promise<PlaybackSession[]>;
-  deletePlaybackSession(userName: string, id: string): Promise<void>;
+    session: PlaybackSession,
+    buckets: PlaybackWatchBucket[],
+    history?: WatchHistoryWrite,
+  ): Promise<string | null>;
+  getWatchHistoryPage(
+    userName: string,
+    query: WatchHistoryQuery,
+  ): Promise<WatchHistoryEntry[]>;
+  deleteWatchHistoryEntry(userName: string, id: string): Promise<void>;
   deletePlaybackSessionsBefore(updatedBefore: number): Promise<number>;
   getPlaybackWatchTotals(
     userName: string,

@@ -108,7 +108,6 @@ describe('buildConfigFileFromAdminConfig', () => {
         VodPageTimeoutSeconds: 15,
         VodFragmentTimeoutSeconds: 10,
         PlaybackHistoryPageSize: 10,
-        PlaybackHistoryLimit: 500,
         SearchHistoryLimit: 20,
         SearchRequestTimeoutSeconds: 8,
         SourceFailureCooldownSeconds: 300,

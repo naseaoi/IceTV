@@ -3,10 +3,6 @@ import 'server-only';
 import type { NextResponse } from 'next/server';
 
 import { CONTINUE_WATCHING_PAGE_SIZE } from '@/features/continue-watching/lib/layout';
-import {
-  dedupePlaybackSessionsByTitle,
-  filterPlaybackHistorySessions,
-} from '@/features/playback-stats/lib/history';
 import { getConfigForRead } from '@/lib/config';
 import { db } from '@/lib/db';
 import type { ListCountCookieName } from '@/lib/list-count-cookies';
@@ -14,25 +10,15 @@ import { normalizePlayRecordLimit } from '@/lib/play-records';
 import { runtimeParamsFromConfig } from '@/lib/runtime-params';
 
 const MAX_AGE_SECONDS = 365 * 24 * 60 * 60;
-// 登录路径只扫一批会话，重复观看极多时首页去重条数可能偏少，客户端拿到列表后会纠正
-const HISTORY_SEED_SCAN_LIMIT = 200;
-
 async function countHistoryFirstPage(
   username: string,
   pageSize: number,
 ): Promise<number> {
-  const sessions = await db.getPlaybackSessions(username, {
-    limit: HISTORY_SEED_SCAN_LIMIT,
-  });
-  const deduped = dedupePlaybackSessionsByTitle(
-    filterPlaybackHistorySessions(sessions),
-    { mergeWatchSeconds: true },
-  );
-  return Math.min(deduped.length, pageSize);
+  return (await db.getWatchHistoryPage(username, { limit: pageSize })).length;
 }
 
 // 登录时按与各列表接口相同的口径写入计数，新设备首次进入也能按真实条数渲染骨架；
-// 口径与客户端写入处保持一致：有效收藏库总数 libraryTotal、本人评价总数、历史首页去重条数、继续观看上限截断后的条数
+// 口径与客户端写入处保持一致：有效收藏库总数 libraryTotal、本人评价总数、历史首页条数、继续观看上限截断后的条数
 async function computeListCounts(
   username: string,
 ): Promise<Record<ListCountCookieName, number>> {

@@ -56,6 +56,7 @@ const mockUsePlayProgress = jest.fn<
 const mockPlaybackStatsReporter = {
   startPlaybackStatsSession: jest.fn(),
   reportPlaybackStats: jest.fn(),
+  handlePlaybackStatsEvent: jest.fn(),
 };
 const mockPlaybackStatsRecorder = {
   recordPlaybackStarted: jest.fn(),
