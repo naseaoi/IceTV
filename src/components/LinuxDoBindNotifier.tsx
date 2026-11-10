@@ -13,7 +13,7 @@ export function LinuxDoBindNotifier() {
     const result = url.searchParams.get(PARAM);
     if (!result) return;
     url.searchParams.delete(PARAM);
-    window.history.replaceState(window.history.state, '', url);
+    window.history.replaceState(null, '', url);
     if (result === 'ok') {
       showToast('已绑定 LinuxDo 账号', 'success');
     } else {

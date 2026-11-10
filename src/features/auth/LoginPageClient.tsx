@@ -116,7 +116,7 @@ export function LoginPageClient() {
     // 一次性结果参数读取后移除，刷新页面不重复提示
     url.searchParams.delete('error');
     url.searchParams.delete('linuxdo');
-    window.history.replaceState(window.history.state, '', url);
+    window.history.replaceState(null, '', url);
 
     if (errorCode) {
       setError(

@@ -1,6 +1,7 @@
 import type { SearchResult } from '@/lib/types';
 
-// 地址栏只记录当前播放的源；页面状态只在首次渲染读取地址参数，替换地址不会重新初始化
+// 地址栏只记录当前播放的源；页面状态只在首次渲染读取地址参数，替换地址不会重新初始化。
+// state 传 null 让路由同步新地址，否则之后任一路由更新都会把地址栏改回换源前的源
 export function replacePlayPageUrl(
   detail: Pick<SearchResult, 'source' | 'id' | 'title'>,
   year: string,
@@ -17,6 +18,6 @@ export function replacePlayPageUrl(
   nextUrl.searchParams.delete('prefer');
   nextUrl.searchParams.delete('singleSource');
   nextUrl.searchParams.delete('directStart');
-  window.history.replaceState(window.history.state, '', nextUrl.toString());
+  window.history.replaceState(null, '', nextUrl.toString());
   return true;
 }

@@ -41,7 +41,7 @@
 - `hls.startLoad()` 会中止在途分片并重新请求，不是幂等的「确保在加载」。起播和 play 只在 `hls.loadingEnabled` 为 false 时补拉，卡顿恢复在有分片在途或缓冲仍在增长时不介入，**否则首片会被中止后整段重下**。
 - 自动换源是用户本地开关，站点默认值 `SiteConfig.AutoSwitchSource`（默认关）。触发集中在 `useSourceSwitch.ts`：页面超时、恢复次数耗尽、懒解析失败，共用离线和意图身份守卫；网络加载失败先尝试当前源尚未使用的另一线路。换集、重试等新播放意图先调 `resetAutoSourceSwitch()`，同步递增请求代次并中止候选详情请求，详情正文解析后再次核对身份再提交；这样旧候选即使忽略中止信号也无法覆盖新集。
 - 旧源的迟到回调（超时、错误、起播、统计）先确认运行时仍属于当前加载（`getVodRuntimeSourceUrl()` / `pauseIfVodRuntimeReleased()`），换源流程内再看 `sourceSwitchInFlightRef`。漏判时旧源失败会触发回退或换源、覆盖用户刚选的源，旧集进度也会带进新集。
-- 换源提交后经 `replacePlayPageUrl()`（`window.history.replaceState`）把地址改成新源。Next 会把它同步进 `useSearchParams()`，所以页面状态和 `usePlayInit` 只在挂载时读一次地址参数，**不要让它们随 searchParams 变化重跑**，否则每次换源都重新搜索起播；也不要用 `router.replace`，同路由软导航会重新请求服务端组件。
+- 换源提交后经 `replacePlayPageUrl()` 以 `window.history.replaceState(null, …)` 把地址改成新源，Next 据此同步路由地址与 `useSearchParams()`。state 必须传 `null`：沿用 `window.history.state` 时路由不同步，之后任一路由更新（刷新、开发热更新）会把地址栏改回换源前的源。页面状态和 `usePlayInit` 只在挂载时读一次地址参数，**不要让它们随 searchParams 变化重跑**，否则每次换源都重新搜索起播；`tab=reviews` 这类一次性入口参数由消费方打开对应面板后立即从地址移除，否则换源同步地址时参数串变化会再次触发；不要在 `replacePlayPageUrl()` 里删，起播时它可能早于消费方挂载。也不要用 `router.replace`，同路由软导航会重新请求服务端组件。
 
 ## 起播与起播等待
 

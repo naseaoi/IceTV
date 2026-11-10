@@ -896,7 +896,7 @@ describe('useSourceSwitch 提交新源后的页面同步', () => {
     jest.restoreAllMocks();
   });
 
-  it('地址栏改为新源，保留搜索参数和路由状态，去掉起播专用参数', async () => {
+  it('地址栏改为新源，保留搜索参数，去掉起播专用参数，不沿用旧路由状态', async () => {
     const { result } = setupHook({
       availableSources: [
         createSource('a', THREE_EPISODES),
@@ -914,7 +914,8 @@ describe('useSourceSwitch 提交新源后的页面同步', () => {
     expect(params.get('year')).toBe('2024');
     expect(params.get('stitle')).toBe('测试');
     expect(params.has('prefer')).toBe(false);
-    expect(window.history.state).toEqual({ marker: 'next-router-state' });
+    // 带着旧路由状态时 Next 不同步新地址，之后的路由更新会把地址改回旧源
+    expect(window.history.state).toBeNull();
   });
 
   it('自动换源同样同步地址，拒绝换源时地址保持当前源', async () => {
