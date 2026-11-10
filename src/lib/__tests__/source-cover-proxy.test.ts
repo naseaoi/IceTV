@@ -1,9 +1,9 @@
 import {
   buildSourceCoverProxyUrl,
-  markSourceCoverProxyHostFailed,
   normalizeSourceCoverProxyMode,
+  rememberSourceCoverDirectHost,
   shouldProxySourceCover,
-  SOURCE_COVER_PROXY_FAILURE_COOLDOWN_MS,
+  SOURCE_COVER_DIRECT_HOST_TTL_MS,
 } from '@/lib/source-cover-proxy';
 
 describe('source cover proxy', () => {
@@ -21,34 +21,35 @@ describe('source cover proxy', () => {
     );
   });
 
-  it('remembers failed hosts for auto mode in the current session', () => {
+  it('auto 模式在本标签页记住改用直连的域名', () => {
     const firstUrl = 'https://covers.example.com/a.jpg';
     const secondUrl = 'https://covers.example.com/b.jpg';
 
     expect(shouldProxySourceCover(firstUrl, 'auto')).toBe(true);
-    markSourceCoverProxyHostFailed(firstUrl);
+    rememberSourceCoverDirectHost(firstUrl);
     expect(shouldProxySourceCover(secondUrl, 'auto')).toBe(false);
     expect(shouldProxySourceCover(secondUrl, 'server')).toBe(true);
+    expect(
+      shouldProxySourceCover('https://other.example.com/a.jpg', 'auto'),
+    ).toBe(true);
   });
 
-  it('retries the proxy for a failed host after the cooldown', () => {
+  it('到期后重新尝试服务端代理', () => {
     const url = 'https://covers.example.com/a.jpg';
-    const failedAt = Date.now();
-    markSourceCoverProxyHostFailed(url, failedAt);
+    const rememberedAt = Date.now();
+    rememberSourceCoverDirectHost(url, rememberedAt);
 
     const nowSpy = jest.spyOn(Date, 'now');
-    nowSpy.mockReturnValue(
-      failedAt + SOURCE_COVER_PROXY_FAILURE_COOLDOWN_MS - 1,
-    );
+    nowSpy.mockReturnValue(rememberedAt + SOURCE_COVER_DIRECT_HOST_TTL_MS - 1);
     expect(shouldProxySourceCover(url, 'auto')).toBe(false);
-    nowSpy.mockReturnValue(failedAt + SOURCE_COVER_PROXY_FAILURE_COOLDOWN_MS);
+    nowSpy.mockReturnValue(rememberedAt + SOURCE_COVER_DIRECT_HOST_TTL_MS);
     expect(shouldProxySourceCover(url, 'auto')).toBe(true);
     nowSpy.mockRestore();
   });
 
-  it('ignores the legacy host-only storage format', () => {
+  it('忽略格式不符的存储内容', () => {
     sessionStorage.setItem(
-      'icetv:source-cover-proxy-failed-hosts',
+      'icetv:source-cover-direct-hosts',
       JSON.stringify(['covers.example.com']),
     );
     expect(

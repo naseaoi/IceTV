@@ -4,19 +4,17 @@ import {
   CacheableResponsePlugin,
   CacheFirst,
   ExpirationPlugin,
+  NetworkOnly,
   Serwist,
-  StaleWhileRevalidate,
 } from 'serwist';
 
 import { createCacheBudgetLedger } from './lib/cache-budget';
 import { normalizeSegmentCacheKey } from './lib/segment-cache-key';
 import {
-  excludeDefaultApiRuntimeCache,
+  composeRuntimeCaching,
+  shouldBypassCrossOriginImageCache,
   shouldHandleBangumiCoverCache,
-  shouldHandleExternalCoverCache,
   shouldHandleImageProxyCache,
-  shouldHandleJsonApiCache,
-  shouldHandleNextImageCache,
   shouldHandleVodSegmentCache,
 } from './lib/sw-cache-rules';
 
@@ -28,7 +26,6 @@ declare global {
 
 declare const self: ServiceWorkerGlobalScope;
 
-const defaultRuntimeCache = excludeDefaultApiRuntimeCache(defaultCache);
 const VOD_SEGMENT_CACHE_NAME = 'vod-segment-cache';
 const VOD_SEGMENT_MAX_ENTRIES = 128;
 const VOD_SEGMENT_MAX_AGE_SECONDS = 3 * 24 * 60 * 60;
@@ -152,125 +149,82 @@ const serwist = new Serwist({
   skipWaiting: true,
   clientsClaim: true,
   navigationPreload: true,
-  runtimeCaching: [
-    // Serwist 提供的 Next.js 默认缓存策略（静态资源、页面路由等）
-    ...defaultRuntimeCache,
-    // next/image 缓存（视频墙一次可铺满，放宽条目上限）
-    {
-      matcher: ({ url }) =>
-        shouldHandleNextImageCache({
-          pathname: url.pathname,
-          search: url.search,
+  runtimeCaching: composeRuntimeCaching(
+    [
+      // 先于默认的跨域 NetworkFirst 规则拦下跨域图片，不写入 Cache Storage
+      {
+        matcher: ({ request, sameOrigin }) =>
+          shouldBypassCrossOriginImageCache({
+            sameOrigin,
+            destination: request.destination,
+          }),
+        handler: new NetworkOnly(),
+      },
+      // VOD 分片缓存：跨会话复用点播片段
+      // - 仅 GET；直播分片（icetv-live=1）与 Range 请求不缓存
+      // - 缓存键剔除签名与切换标记，同一分片换清单后仍能命中
+      // - 条目数、总字节、单片大小与过期时间见 VOD_SEGMENT_* 常量，超额时按写入先后淘汰
+      {
+        matcher: ({ url, request, sameOrigin }) =>
+          shouldHandleVodSegmentCache({
+            sameOrigin,
+            method: request.method,
+            pathname: url.pathname,
+            liveFlag: url.searchParams.get('icetv-live'),
+            hasRangeHeader: request.headers.has('range'),
+          }),
+        handler: new CacheFirst({
+          cacheName: VOD_SEGMENT_CACHE_NAME,
+          plugins: [
+            vodSegmentStoragePlugin,
+            new CacheableResponsePlugin({ statuses: [200] }),
+            new ExpirationPlugin({
+              maxEntries: VOD_SEGMENT_MAX_ENTRIES,
+              maxAgeSeconds: VOD_SEGMENT_MAX_AGE_SECONDS,
+            }),
+          ],
         }),
-      handler: new CacheFirst({
-        cacheName: 'next-image-cache',
-        plugins: [
-          new CacheableResponsePlugin({ statuses: [0, 200] }),
-          new ExpirationPlugin({
-            maxEntries: 1024,
-            maxAgeSeconds: 30 * 24 * 60 * 60,
+      },
+      // 封面代理缓存
+      {
+        matcher: ({ url }) =>
+          shouldHandleImageProxyCache({
+            pathname: url.pathname,
+            search: url.search,
           }),
-        ],
-      }),
-    },
-    // 封面代理缓存
-    {
-      matcher: ({ url }) =>
-        shouldHandleImageProxyCache({
-          pathname: url.pathname,
-          search: url.search,
+        handler: new CacheFirst({
+          cacheName: 'cover-proxy-cache',
+          plugins: [
+            new CacheableResponsePlugin({ statuses: [200] }),
+            new ExpirationPlugin({
+              maxEntries: 1024,
+              maxAgeSeconds: 30 * 24 * 60 * 60,
+              purgeOnQuotaError: true,
+            }),
+          ],
         }),
-      handler: new CacheFirst({
-        cacheName: 'cover-proxy-cache',
-        plugins: [
-          new CacheableResponsePlugin({ statuses: [0, 200] }),
-          new ExpirationPlugin({
-            maxEntries: 1024,
-            maxAgeSeconds: 30 * 24 * 60 * 60,
+      },
+      // Bangumi 封面代理缓存
+      {
+        matcher: ({ url }) =>
+          shouldHandleBangumiCoverCache({
+            pathname: url.pathname,
           }),
-        ],
-      }),
-    },
-    // Bangumi 封面代理缓存
-    {
-      matcher: ({ url }) =>
-        shouldHandleBangumiCoverCache({
-          pathname: url.pathname,
+        handler: new CacheFirst({
+          cacheName: 'bangumi-cover-cache',
+          plugins: [
+            new CacheableResponsePlugin({ statuses: [200] }),
+            new ExpirationPlugin({
+              maxEntries: 600,
+              maxAgeSeconds: 30 * 24 * 60 * 60,
+              purgeOnQuotaError: true,
+            }),
+          ],
         }),
-      handler: new CacheFirst({
-        cacheName: 'bangumi-cover-cache',
-        plugins: [
-          new CacheableResponsePlugin({ statuses: [0, 200] }),
-          new ExpirationPlugin({
-            maxEntries: 600,
-            maxAgeSeconds: 30 * 24 * 60 * 60,
-            purgeOnQuotaError: true,
-          }),
-        ],
-      }),
-    },
-    // 豆瓣外部图片缓存
-    {
-      matcher: ({ url }) =>
-        shouldHandleExternalCoverCache({ hostname: url.hostname }),
-      handler: new CacheFirst({
-        cacheName: 'external-cover-cache',
-        plugins: [
-          new CacheableResponsePlugin({ statuses: [0, 200] }),
-          new ExpirationPlugin({
-            maxEntries: 1024,
-            maxAgeSeconds: 14 * 24 * 60 * 60,
-          }),
-        ],
-      }),
-    },
-    // 只读 JSON API SWR 缓存（弱网/离线体验 & 二次访问秒开）
-    // 仅缓存 GET，且排除带鉴权语义的管理接口
-    {
-      matcher: ({ url, request, sameOrigin }) =>
-        shouldHandleJsonApiCache({
-          sameOrigin,
-          method: request.method,
-          pathname: url.pathname,
-        }),
-      handler: new StaleWhileRevalidate({
-        cacheName: 'json-api-cache',
-        plugins: [
-          new CacheableResponsePlugin({ statuses: [200] }),
-          new ExpirationPlugin({
-            maxEntries: 512,
-            // Cache Storage 使用独立 TTL，SWR 后台刷新，不依赖 HTTP 的 public 指令
-            maxAgeSeconds: 60 * 60,
-          }),
-        ],
-      }),
-    },
-    // VOD 分片缓存：跨会话复用点播片段
-    // - 仅 GET；直播分片（icetv-live=1）与 Range 请求不缓存
-    // - 缓存键剔除签名与切换标记，同一分片换清单后仍能命中
-    // - 条目数、总字节、单片大小与过期时间见 VOD_SEGMENT_* 常量，超额时按写入先后淘汰
-    {
-      matcher: ({ url, request, sameOrigin }) =>
-        shouldHandleVodSegmentCache({
-          sameOrigin,
-          method: request.method,
-          pathname: url.pathname,
-          liveFlag: url.searchParams.get('icetv-live'),
-          hasRangeHeader: request.headers.has('range'),
-        }),
-      handler: new CacheFirst({
-        cacheName: VOD_SEGMENT_CACHE_NAME,
-        plugins: [
-          vodSegmentStoragePlugin,
-          new CacheableResponsePlugin({ statuses: [200] }),
-          new ExpirationPlugin({
-            maxEntries: VOD_SEGMENT_MAX_ENTRIES,
-            maxAgeSeconds: VOD_SEGMENT_MAX_AGE_SECONDS,
-          }),
-        ],
-      }),
-    },
-  ],
+      },
+    ],
+    defaultCache,
+  ),
 });
 
 serwist.addEventListeners();

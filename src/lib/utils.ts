@@ -21,8 +21,8 @@ export interface ImageCandidate {
   url: string;
   // 豆瓣「自动」通道名，用于记住回退成功的通道
   doubanRoute?: string;
-  // 源站封面的服务端代理地址，失败后按原 host 冷却
-  sourceProxy?: boolean;
+  // 源站封面代理失败后的直连地址，加载成功则该 host 暂时改为直连
+  sourceDirectFallback?: boolean;
 }
 
 // 按尝试顺序给出封面地址：首项即默认地址，后续项为加载失败后的回退
@@ -55,7 +55,7 @@ export function getImageCandidates(
     if (!shouldProxySourceCover(url.href, mode)) return [{ url: url.href }];
     const proxyUrl = buildSourceCoverProxyUrl(url.href);
     return mode === 'auto'
-      ? [{ url: proxyUrl, sourceProxy: true }, { url: url.href }]
+      ? [{ url: proxyUrl }, { url: url.href, sourceDirectFallback: true }]
       : [{ url: proxyUrl }];
   } catch {
     return [{ url: originalUrl }];

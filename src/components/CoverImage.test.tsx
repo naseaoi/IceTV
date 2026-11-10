@@ -18,6 +18,36 @@ import { DOUBAN_IMAGE_PROXY_TYPE_STORAGE_KEY } from '@/lib/douban-source';
 
 const mockImageRender = jest.fn();
 
+const imageStateDescriptors = (['complete', 'naturalWidth'] as const).map(
+  (name) =>
+    [
+      name,
+      Object.getOwnPropertyDescriptor(HTMLImageElement.prototype, name),
+    ] as const,
+);
+
+// jsdom 中带 src 的图片始终未完成，用它模拟浏览器缓存命中
+function mockImagesComplete() {
+  Object.defineProperty(HTMLImageElement.prototype, 'complete', {
+    configurable: true,
+    get: () => true,
+  });
+  Object.defineProperty(HTMLImageElement.prototype, 'naturalWidth', {
+    configurable: true,
+    get: () => 270,
+  });
+}
+
+function restoreImageState() {
+  for (const [name, descriptor] of imageStateDescriptors) {
+    if (descriptor) {
+      Object.defineProperty(HTMLImageElement.prototype, name, descriptor);
+    } else {
+      Reflect.deleteProperty(HTMLImageElement.prototype, name);
+    }
+  }
+}
+
 jest.mock('next/image', () => {
   const React = jest.requireActual('react') as typeof import('react');
   return {
@@ -100,6 +130,7 @@ describe('CoverImage', () => {
 
   afterEach(() => {
     jest.useRealTimers();
+    restoreImageState();
     global.IntersectionObserver = originalIntersectionObserver;
     intersectionOptions = undefined;
 
@@ -182,7 +213,7 @@ describe('CoverImage', () => {
     );
     expect(
       document.querySelector('[data-cover-loading-backdrop] .skeleton-sweep'),
-    ).toBeInTheDocument();
+    ).not.toBeInTheDocument();
 
     Object.defineProperty(image, 'complete', {
       configurable: true,
@@ -206,6 +237,78 @@ describe('CoverImage', () => {
     expect(
       document.querySelector('[data-cover-loading-backdrop]'),
     ).toHaveAttribute('data-cover-state', 'revealed');
+  });
+
+  it('加载很快时不显示扫光也不播放淡入', () => {
+    jest.useFakeTimers();
+    const animate = jest.fn(() => ({ cancel: jest.fn() }));
+    Object.defineProperty(HTMLElement.prototype, 'animate', {
+      configurable: true,
+      value: animate,
+    });
+
+    try {
+      render(
+        <CoverImage
+          src='https://covers.example.com/fast.jpg'
+          alt='快速封面'
+          priority
+        />,
+      );
+
+      act(() => {
+        jest.advanceTimersByTime(150);
+      });
+      fireEvent.load(screen.getByTestId('cover-image'));
+      act(() => {
+        jest.advanceTimersByTime(1000);
+      });
+
+      expect(
+        document.querySelector('[data-cover-loading-backdrop]'),
+      ).toHaveAttribute('data-cover-state', 'revealed');
+      expect(
+        document.querySelector('[data-cover-loading-backdrop] .skeleton-sweep'),
+      ).not.toBeInTheDocument();
+      expect(animate).not.toHaveBeenCalled();
+    } finally {
+      Reflect.deleteProperty(HTMLElement.prototype, 'animate');
+    }
+  });
+
+  it('加载较慢时显示扫光并在完成后淡入', () => {
+    jest.useFakeTimers();
+    const animate = jest.fn(() => ({ cancel: jest.fn() }));
+    Object.defineProperty(HTMLElement.prototype, 'animate', {
+      configurable: true,
+      value: animate,
+    });
+    const originalMatchMedia = window.matchMedia;
+    window.matchMedia = jest.fn(() => ({ matches: false })) as never;
+
+    try {
+      render(
+        <CoverImage
+          src='https://covers.example.com/slow.jpg'
+          alt='慢速封面'
+          priority
+        />,
+      );
+
+      act(() => {
+        jest.advanceTimersByTime(200);
+      });
+      expect(
+        document.querySelector('[data-cover-loading-backdrop] .skeleton-sweep'),
+      ).toBeInTheDocument();
+
+      fireEvent.load(screen.getByTestId('cover-image'));
+
+      expect(animate).toHaveBeenCalled();
+    } finally {
+      Reflect.deleteProperty(HTMLElement.prototype, 'animate');
+      window.matchMedia = originalMatchMedia;
+    }
   });
 
   it('在总超时后结束封面等待', () => {
@@ -254,6 +357,7 @@ describe('CoverImage', () => {
     const src =
       'https://img1.doubanio.com/view/photo/s_ratio_poster/public/p2931173550.jpg';
     markCoverImagesLoaded([src]);
+    mockImagesComplete();
 
     render(<CoverImage src={src} alt='已缓存封面' priority />);
 
@@ -290,6 +394,26 @@ describe('CoverImage', () => {
     ).not.toBeInTheDocument();
   });
 
+  it('有显示记录但图片仍需下载时回到普通加载流程', () => {
+    jest.useFakeTimers();
+    const src = 'https://covers.example.com/other-width.jpg';
+    markCoverImagesLoaded([src]);
+
+    render(<CoverImage src={src} alt='换规格封面' priority />);
+
+    const backdrop = document.querySelector('[data-cover-loading-backdrop]');
+    expect(backdrop).toHaveAttribute('data-cover-state', 'loading');
+    act(() => {
+      jest.advanceTimersByTime(200);
+    });
+    expect(
+      document.querySelector('[data-cover-loading-backdrop] .skeleton-sweep'),
+    ).toBeInTheDocument();
+
+    fireEvent.load(screen.getByTestId('cover-image'));
+    expect(backdrop).toHaveAttribute('data-cover-state', 'revealed');
+  });
+
   it('恢复浏览器缓存时保持服务端水合一致', async () => {
     const src =
       'https://img1.doubanio.com/view/photo/s_ratio_poster/public/p2931173550.jpg';
@@ -299,6 +423,7 @@ describe('CoverImage', () => {
     expect(serverHtml).toContain('data-cover-state="loading"');
 
     markCoverImagesLoaded([src]);
+    mockImagesComplete();
 
     const container = document.createElement('div');
     container.innerHTML = serverHtml;
@@ -377,6 +502,44 @@ describe('CoverImage', () => {
       'https://covers.example.com/poster.jpg',
     );
     expect(screen.queryByText('无封面')).not.toBeInTheDocument();
+  });
+
+  it('代理失败且直连成功后，同域名其他封面直接直连', () => {
+    const { unmount } = render(
+      <CoverImage src='https://covers.example.com/a.jpg' alt='封面' priority />,
+    );
+    fireEvent.error(screen.getByTestId('cover-image'));
+    fireEvent.load(screen.getByTestId('cover-image'));
+    unmount();
+
+    render(
+      <CoverImage src='https://covers.example.com/b.jpg' alt='封面' priority />,
+    );
+    expect(screen.getByTestId('cover-image')).toHaveAttribute(
+      'src',
+      'https://covers.example.com/b.jpg',
+    );
+  });
+
+  it('代理与直连都失败时，同域名其他封面仍先走代理', () => {
+    const { unmount } = render(
+      <CoverImage
+        src='https://covers.example.com/broken.jpg'
+        alt='封面'
+        priority
+      />,
+    );
+    fireEvent.error(screen.getByTestId('cover-image'));
+    fireEvent.error(screen.getByTestId('cover-image'));
+    expect(screen.getByText('无封面')).toBeInTheDocument();
+    unmount();
+
+    render(
+      <CoverImage src='https://covers.example.com/b.jpg' alt='封面' priority />,
+    );
+    expect(screen.getByTestId('cover-image').getAttribute('src')).toMatch(
+      /^\/api\/image-proxy\?/,
+    );
   });
 
   it('Bangumi 封面代理失败后回退原图直连一次', () => {

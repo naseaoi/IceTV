@@ -14,6 +14,7 @@ import {
 export type ServerProxyKind =
   | 'douban-data'
   | 'douban-image'
+  | 'source-cover'
   | 'bangumi-data'
   | 'danmaku'
   | 'vod-segment'
@@ -34,6 +35,7 @@ type FailureStats = {
 const RATE_LIMITS: Record<ServerProxyKind, RateLimitConfig> = {
   'douban-data': { maxRequests: 120, windowMs: 60_000 },
   'douban-image': { maxRequests: 480, windowMs: 60_000 },
+  'source-cover': { maxRequests: 480, windowMs: 60_000 },
   'bangumi-data': { maxRequests: 60, windowMs: 60_000 },
   // 上游 comment 接口限流严格，本站缓存兜底后按换集频率留量
   danmaku: { maxRequests: 30, windowMs: 60_000 },
