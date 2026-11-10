@@ -7,6 +7,7 @@ import type { PlayRecord, PlayRecordPage } from '@/lib/types';
 
 export const DEFAULT_RECENT_PLAY_RECORD_LIMIT = 10;
 export const MAX_RECENT_PLAY_RECORD_LIMIT = 100;
+export const MAX_DELETE_PLAY_RECORD_KEYS = 200;
 
 export type { PlayRecordPage } from '@/lib/types';
 
@@ -61,9 +62,13 @@ export function selectPlayRecordPage(
   records: Record<string, PlayRecord>,
   limit = DEFAULT_RECENT_PLAY_RECORD_LIMIT,
   cursor?: string | null,
+  options?: { filter?: 'updated' },
 ): PlayRecordPage {
   const normalizedLimit = normalizePlayRecordLimit(limit);
-  const entries = sortPlayRecordEntries(records);
+  const entries = sortPlayRecordEntries(records).filter(
+    ([, record]) =>
+      options?.filter !== 'updated' || hasPlayRecordUpdate(record),
+  );
   let startIndex = 0;
 
   if (cursor) {

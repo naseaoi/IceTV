@@ -878,24 +878,27 @@ export class MySqlStorage implements IStorage {
     limit: number,
     cursorTime?: number,
     cursorKey?: string,
+    filter?: 'updated',
   ): Promise<PlayRecordPage> {
     await this.ensureInitialized();
     const username = normalizeUsername(userName);
     const saveTimeExpression =
       "CAST(JSON_UNQUOTE(JSON_EXTRACT(record_json, '$.save_time')) AS UNSIGNED)";
     const hasCursor = cursorTime !== undefined && !!cursorKey;
+    const updatedWhere =
+      filter === 'updated' ? ` AND ${MYSQL_UNREAD_TRACKING_WHERE}` : '';
     const rowsQuery = this.pool.query<JsonRow[]>(
       hasCursor
         ? `SELECT record_key, record_json
            FROM play_records
-           WHERE username = ?
+           WHERE username = ?${updatedWhere}
              AND (${saveTimeExpression} < ?
                OR (${saveTimeExpression} = ? AND record_key < ?))
            ORDER BY ${saveTimeExpression} DESC, record_key DESC
            LIMIT ?`
         : `SELECT record_key, record_json
            FROM play_records
-           WHERE username = ?
+           WHERE username = ?${updatedWhere}
            ORDER BY ${saveTimeExpression} DESC, record_key DESC
            LIMIT ?`,
       hasCursor
@@ -904,9 +907,10 @@ export class MySqlStorage implements IStorage {
     );
     const countQuery = this.pool.query<
       Array<RowDataPacket & { count: number }>
-    >('SELECT COUNT(*) AS count FROM play_records WHERE username = ?', [
-      username,
-    ]);
+    >(
+      `SELECT COUNT(*) AS count FROM play_records WHERE username = ?${updatedWhere}`,
+      [username],
+    );
     const [[rows], [countRows]] = await Promise.all([rowsQuery, countQuery]);
     return buildPlayRecordPage(rows, countRows[0]?.count || 0, limit);
   }
@@ -957,6 +961,16 @@ export class MySqlStorage implements IStorage {
     await this.pool.execute(
       'DELETE FROM play_records WHERE username = ? AND record_key = ?',
       [username, key],
+    );
+  }
+
+  async deletePlayRecords(userName: string, keys: string[]): Promise<void> {
+    if (keys.length === 0) return;
+    await this.ensureInitialized();
+    const uniqueKeys = [...new Set(keys)];
+    await this.pool.execute(
+      `DELETE FROM play_records WHERE username = ? AND record_key IN (${uniqueKeys.map(() => '?').join(', ')})`,
+      [normalizeUsername(userName), ...uniqueKeys],
     );
   }
 

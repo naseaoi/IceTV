@@ -67,6 +67,73 @@ describe('messagesUpdated 派发点', () => {
     );
   });
 
+  it('批量删除一次乐观广播并按 200 条分批请求', async () => {
+    const { deletePlayRecords, getCachedPlayRecordsSnapshot } =
+      await import('@/lib/db.client');
+    const updated = jest.fn();
+    window.addEventListener('playRecordsUpdated', updated);
+    try {
+      await deletePlayRecords([
+        ...Array.from({ length: 401 }, (_, i) => `src+${i}`),
+        'src+1',
+      ]);
+      expect(fetchMock).toHaveBeenCalledTimes(3);
+      expect(
+        fetchMock.mock.calls.map(
+          ([, init]) => JSON.parse(init.body).keys.length,
+        ),
+      ).toEqual([200, 200, 1]);
+      expect(updated).toHaveBeenCalledTimes(1);
+      expect(getCachedPlayRecordsSnapshot()).toEqual({});
+      expect(listener).toHaveBeenCalledTimes(1);
+    } finally {
+      window.removeEventListener('playRecordsUpdated', updated);
+    }
+  });
+
+  it('空批量不发送请求或消息事件', async () => {
+    const { deletePlayRecords } = await import('@/lib/db.client');
+    await deletePlayRecords([]);
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(listener).not.toHaveBeenCalled();
+  });
+
+  it('后续批次失败时抛错并停止派发消息事件', async () => {
+    jest.spyOn(console, 'error').mockImplementation(() => undefined);
+    const { deletePlayRecords } = await import('@/lib/db.client');
+    fetchMock
+      .mockResolvedValueOnce(okResponse())
+      .mockResolvedValueOnce(errorResponse());
+    await expect(
+      deletePlayRecords(Array.from({ length: 401 }, (_, i) => `src+${i}`)),
+    ).rejects.toThrow();
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(listener).not.toHaveBeenCalled();
+  });
+
+  it('筛选分页仅合并缓存并携带筛选与游标', async () => {
+    const { getPlayRecordPage, getCachedPlayRecordsSnapshot } =
+      await import('@/lib/db.client');
+    const record = getCachedPlayRecordsSnapshot()?.['src+1'];
+    fetchMock.mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        items: { 'src+2': record },
+        total: 1,
+        nextCursor: null,
+      }),
+    });
+    await getPlayRecordPage(2, '100|src+3', { filter: 'updated' });
+    const url = new URL(fetchMock.mock.calls[0][0], 'http://localhost');
+    expect(url.searchParams.get('filter')).toBe('updated');
+    expect(url.searchParams.get('cursor')).toBe('100|src+3');
+    expect(Object.keys(getCachedPlayRecordsSnapshot() ?? {})).toEqual([
+      'src+1',
+      'src+2',
+    ]);
+  });
+
   it('标记追更已读后派发', async () => {
     const { markPlayRecordUpdateRead } = await import('@/lib/db.client');
 
@@ -138,6 +205,7 @@ describe('播放记录操作失败文案', () => {
           : jest.fn().mockResolvedValue(errorResponse());
       const {
         deletePlayRecord,
+        deletePlayRecords,
         clearAllPlayRecords,
         setPlayRecordTracking,
         markPlayRecordUpdateRead,
@@ -146,6 +214,10 @@ describe('播放记录操作失败文案', () => {
       const operations = [
         {
           run: () => deletePlayRecord('src', '1'),
+          message: '删除播放记录失败，请重试',
+        },
+        {
+          run: () => deletePlayRecords(['src+1', 'src+2']),
           message: '删除播放记录失败，请重试',
         },
         {

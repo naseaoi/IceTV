@@ -387,9 +387,16 @@ class DbManager {
     limit: number,
     cursorTime?: number,
     cursorKey?: string,
+    filter?: 'updated',
   ): Promise<PlayRecordPage> {
     const storage = await this.getStorage();
-    return storage.getPlayRecordPage(userName, limit, cursorTime, cursorKey);
+    return storage.getPlayRecordPage(
+      userName,
+      limit,
+      cursorTime,
+      cursorKey,
+      filter,
+    );
   }
 
   async getUnreadTrackingPlayRecordPage(
@@ -423,6 +430,12 @@ class DbManager {
     const key = generateStorageKey(source, id);
     const storage = await this.getStorage();
     await storage.deletePlayRecord(userName, key);
+  }
+
+  async deletePlayRecords(userName: string, keys: string[]): Promise<void> {
+    if (keys.length === 0) return;
+    const storage = await this.getStorage();
+    await storage.deletePlayRecords(userName, keys);
   }
 
   async deleteAllPlayRecords(userName: string): Promise<void> {

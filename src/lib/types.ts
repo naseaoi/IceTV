@@ -476,6 +476,7 @@ export interface IStorage {
     limit: number,
     cursorTime?: number,
     cursorKey?: string,
+    filter?: 'updated',
   ): Promise<PlayRecordPage>;
   getUnreadTrackingPlayRecordPage(
     userName: string,
@@ -488,6 +489,7 @@ export interface IStorage {
     records: Record<string, PlayRecord>,
   ): Promise<void>;
   deletePlayRecord(userName: string, key: string): Promise<void>;
+  deletePlayRecords(userName: string, keys: string[]): Promise<void>;
   deleteAllPlayRecords(userName: string): Promise<void>;
 
   // 收藏相关

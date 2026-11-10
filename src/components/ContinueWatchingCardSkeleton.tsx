@@ -2,6 +2,7 @@ import {
   CONTINUE_CARD_BODY_CLASS,
   CONTINUE_CARD_CLASS,
   CONTINUE_CARD_COVER_CLASS,
+  CONTINUE_CARD_FLUID_CLASS,
   CONTINUE_CARD_FOOTER_CLASS,
   CONTINUE_CARD_META_CLASS,
   CONTINUE_CARD_PROGRESS_BAR_CLASS,
@@ -10,12 +11,16 @@ import {
 } from '@/components/continue-card/layout';
 import SkeletonText from '@/components/SkeletonText';
 
-export default function ContinueWatchingCardSkeleton() {
+export default function ContinueWatchingCardSkeleton({
+  fluid = false,
+}: {
+  fluid?: boolean;
+}) {
   return (
     <div
       aria-hidden='true'
       data-continue-skeleton
-      className={CONTINUE_CARD_CLASS}
+      className={fluid ? CONTINUE_CARD_FLUID_CLASS : CONTINUE_CARD_CLASS}
     >
       <div className={`skeleton ${CONTINUE_CARD_COVER_CLASS}`} />
       <div className={CONTINUE_CARD_BODY_CLASS}>

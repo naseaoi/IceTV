@@ -21,6 +21,7 @@ import {
 import type { PlayRecordPage } from './play-records';
 import {
   DEFAULT_RECENT_PLAY_RECORD_LIMIT,
+  MAX_DELETE_PLAY_RECORD_KEYS,
   mergePlayRecordUpdateBaseline,
   normalizePlayRecordLimit,
   selectRecentPlayRecords,
@@ -160,6 +161,7 @@ export async function getRecentPlayRecords(
 export async function getPlayRecordPage(
   limit = DEFAULT_RECENT_PLAY_RECORD_LIMIT,
   cursor?: string | null,
+  options?: { filter?: 'updated' },
 ): Promise<PlayRecordPage> {
   const normalizedLimit = normalizePlayRecordLimit(limit);
   const params = new URLSearchParams({
@@ -168,6 +170,10 @@ export async function getPlayRecordPage(
   });
   if (cursor) {
     params.set('cursor', cursor);
+  }
+
+  if (options?.filter === 'updated') {
+    params.set('filter', 'updated');
   }
 
   const page = await fetchFromApi<PlayRecordPage>(
@@ -244,6 +250,44 @@ export async function deletePlayRecord(
       fetchWithAuth(`/api/playrecords?key=${encodeURIComponent(key)}`, {
         method: 'DELETE',
       }).then(() => {}),
+    onServerError: async (err) => {
+      await handleDatabaseOperationFailure(
+        'playRecords',
+        err,
+        '删除播放记录失败，请重试',
+      );
+    },
+    requireExistingCacheForOptimisticUpdate: true,
+  });
+  notifyMessagesUpdated();
+}
+
+export async function deletePlayRecords(keys: string[]): Promise<void> {
+  if (keys.length === 0) return;
+  const uniqueKeys = [...new Set(keys)];
+  await _writePlayRecords({
+    mutateCached: (cached) => {
+      for (const key of uniqueKeys) delete cached[key];
+      return cached;
+    },
+    syncToServer: async () => {
+      for (
+        let offset = 0;
+        offset < uniqueKeys.length;
+        offset += MAX_DELETE_PLAY_RECORD_KEYS
+      ) {
+        await fetchWithAuth('/api/playrecords', {
+          method: 'DELETE',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            keys: uniqueKeys.slice(
+              offset,
+              offset + MAX_DELETE_PLAY_RECORD_KEYS,
+            ),
+          }),
+        });
+      }
+    },
     onServerError: async (err) => {
       await handleDatabaseOperationFailure(
         'playRecords',

@@ -6,7 +6,10 @@ import { useMemo, useState } from 'react';
 
 import HomePosterCardSkeleton from '@/components/HomePosterCardSkeleton';
 import {
+  LIBRARY_DANGER_BUTTON_CLASS,
   LIBRARY_PILL_BUTTON_CLASS,
+  LIBRARY_STICKY_TOOLBAR_CLASS,
+  LIBRARY_TOOLBAR_BUTTON_CLASS as TOOLBAR_BUTTON_CLASS,
   LibraryEmptySkeleton,
   LibraryEmptyState,
 } from '@/components/LibraryPage';
@@ -24,9 +27,6 @@ import { useListLayoutMotion } from '@/hooks/useListLayoutMotion';
 import type { PlaybackSession } from '@/lib/types';
 
 const GROUP_TITLE_TEXT_CLASS = 'mb-3 text-sm font-medium';
-
-const TOOLBAR_BUTTON_CLASS =
-  'inline-flex h-9 shrink-0 items-center rounded-full px-4 text-sm text-gray-600 transition hover:bg-gray-900/[0.05] hover:text-gray-900 disabled:pointer-events-none disabled:opacity-40 dark:text-gray-300 dark:hover:bg-white/[0.06] dark:hover:text-white';
 
 export function PlaybackHistoryGridSkeleton({
   initialCount,
@@ -240,7 +240,7 @@ export function PlaybackHistoryLibrary({
 
   return (
     <>
-      <div className='z-20 -mx-4 mb-4 flex items-center gap-2 bg-gray-50 px-4 py-3 dark:bg-gray-950 sm:-mx-8 sm:px-8 md:sticky md:top-16 xl:-mx-12 xl:px-12'>
+      <div className={LIBRARY_STICKY_TOOLBAR_CLASS}>
         {editing ? (
           <>
             <span className='text-sm text-gray-500 dark:text-gray-400'>
@@ -262,7 +262,7 @@ export function PlaybackHistoryLibrary({
                 type='button'
                 disabled={selectedIds.size === 0}
                 onClick={() => setConfirmOpen(true)}
-                className='inline-flex h-9 items-center rounded-full bg-red-500 px-4 text-sm font-medium text-white transition hover:bg-red-600 disabled:pointer-events-none disabled:opacity-40'
+                className={LIBRARY_DANGER_BUTTON_CLASS}
               >
                 删除
               </button>

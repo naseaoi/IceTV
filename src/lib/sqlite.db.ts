@@ -409,6 +409,8 @@ export class LocalSqliteStorage implements IStorage {
     getStalePlayRecordPageAfter: Database.Statement;
     getPlayRecordPage: Database.Statement;
     getPlayRecordPageAfter: Database.Statement;
+    getUpdatedPlayRecordPage: Database.Statement;
+    getUpdatedPlayRecordPageAfter: Database.Statement;
     countPlayRecords: Database.Statement;
     getUnreadTrackingPlayRecordPage: Database.Statement;
     getUnreadTrackingPlayRecordPageAfter: Database.Statement;
@@ -947,6 +949,29 @@ export class LocalSqliteStorage implements IStorage {
         `SELECT record_key, record_json
          FROM play_records
          WHERE username = ?
+           AND (
+             CAST(json_extract(record_json, '$.save_time') AS INTEGER) < ?
+             OR (
+               CAST(json_extract(record_json, '$.save_time') AS INTEGER) = ?
+               AND record_key < ?
+             )
+           )
+         ORDER BY CAST(json_extract(record_json, '$.save_time') AS INTEGER) DESC,
+                  record_key DESC
+         LIMIT ?`,
+      ),
+      getUpdatedPlayRecordPage: this.db.prepare(
+        `SELECT record_key, record_json
+         FROM play_records
+         WHERE username = ? AND ${SQLITE_UNREAD_TRACKING_WHERE}
+         ORDER BY CAST(json_extract(record_json, '$.save_time') AS INTEGER) DESC,
+                  record_key DESC
+         LIMIT ?`,
+      ),
+      getUpdatedPlayRecordPageAfter: this.db.prepare(
+        `SELECT record_key, record_json
+         FROM play_records
+         WHERE username = ? AND ${SQLITE_UNREAD_TRACKING_WHERE}
            AND (
              CAST(json_extract(record_json, '$.save_time') AS INTEGER) < ?
              OR (
@@ -1735,20 +1760,33 @@ export class LocalSqliteStorage implements IStorage {
     limit: number,
     cursorTime?: number,
     cursorKey?: string,
+    filter?: 'updated',
   ): Promise<PlayRecordPage> {
     const username = normalizeUsername(userName);
+    const pageStatement =
+      filter === 'updated'
+        ? this.stmts.getUpdatedPlayRecordPage
+        : this.stmts.getPlayRecordPage;
+    const afterStatement =
+      filter === 'updated'
+        ? this.stmts.getUpdatedPlayRecordPageAfter
+        : this.stmts.getPlayRecordPageAfter;
+    const countStatement =
+      filter === 'updated'
+        ? this.stmts.countUnreadTrackingPlayRecords
+        : this.stmts.countPlayRecords;
     const rows = (
       cursorTime !== undefined && cursorKey
-        ? this.stmts.getPlayRecordPageAfter.all(
+        ? afterStatement.all(
             username,
             cursorTime,
             cursorTime,
             cursorKey,
             limit + 1,
           )
-        : this.stmts.getPlayRecordPage.all(username, limit + 1)
+        : pageStatement.all(username, limit + 1)
     ) as { record_key: string; record_json: string }[];
-    const countRow = this.stmts.countPlayRecords.get(username) as {
+    const countRow = countStatement.get(username) as {
       count: number;
     };
     return buildPlayRecordPage(rows, countRow.count, limit);
@@ -1781,6 +1819,16 @@ export class LocalSqliteStorage implements IStorage {
   async deletePlayRecord(userName: string, key: string): Promise<void> {
     const username = normalizeUsername(userName);
     this.stmts.deletePlayRecord.run(username, key);
+  }
+
+  async deletePlayRecords(userName: string, keys: string[]): Promise<void> {
+    if (keys.length === 0) return;
+    const uniqueKeys = [...new Set(keys)];
+    this.db
+      .prepare(
+        `DELETE FROM play_records WHERE username = ? AND record_key IN (${uniqueKeys.map(() => '?').join(', ')})`,
+      )
+      .run(normalizeUsername(userName), ...uniqueKeys);
   }
 
   async deleteAllPlayRecords(userName: string): Promise<void> {

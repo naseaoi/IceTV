@@ -3,6 +3,8 @@ import { act, renderHook, waitFor } from '@testing-library/react';
 import { useContinueWatchingItems } from '@/features/continue-watching/hooks/useContinueWatchingItems';
 import { CONTINUE_WATCHING_PAGE_SIZE } from '@/features/continue-watching/lib/layout';
 import {
+  clearAllPlayRecords,
+  deletePlayRecords,
   getCachedPlayRecordsSnapshot,
   getPlayRecordPage,
 } from '@/lib/db.client';
@@ -11,6 +13,7 @@ import type { PlayRecord } from '@/lib/types';
 
 jest.mock('@/lib/db.client', () => ({
   clearAllPlayRecords: jest.fn(),
+  deletePlayRecords: jest.fn(),
   getCachedPlayRecordsSnapshot: jest.fn(),
   getPlayRecordPage: jest.fn(),
   subscribeToDataUpdates: jest.fn(() => jest.fn()),
@@ -47,9 +50,55 @@ describe('useContinueWatchingItems loading geometry', () => {
   it('preserves the last successful count when the request fails', async () => {
     const log = jest.spyOn(console, 'error').mockImplementation();
     (getPlayRecordPage as jest.Mock).mockRejectedValue(new Error('offline'));
-    const { result } = renderHook(() => useContinueWatchingItems(24));
+    const { result } = renderHook(() =>
+      useContinueWatchingItems({ initialSkeletonCount: 24 }),
+    );
     await waitFor(() => expect(result.current.loading).toBe(false));
     expect(writeContinueWatchingPageCount).not.toHaveBeenCalled();
     log.mockRestore();
+  });
+
+  it('requests only updated records and keeps the page count cookie untouched', async () => {
+    const record = { title: 'show', save_time: 1 } as PlayRecord;
+    (getPlayRecordPage as jest.Mock).mockResolvedValue({
+      items: { 'source+id': record },
+      total: 1,
+      nextCursor: null,
+    });
+    const { result } = renderHook(() =>
+      useContinueWatchingItems({ filter: 'updated' }),
+    );
+    await waitFor(() => expect(result.current.loading).toBe(false));
+    expect(getPlayRecordPage).toHaveBeenCalledWith(
+      CONTINUE_WATCHING_PAGE_SIZE,
+      null,
+      { filter: 'updated' },
+    );
+    expect(result.current.counts.updated).toBe(1);
+    expect(writeContinueWatchingPageCount).not.toHaveBeenCalled();
+  });
+
+  it('clears everything in one request only when every record is selected', async () => {
+    const records = {
+      'a+1': { title: 'a', save_time: 2 } as PlayRecord,
+      'b+2': { title: 'b', save_time: 1 } as PlayRecord,
+    };
+    (getPlayRecordPage as jest.Mock).mockResolvedValue({
+      items: records,
+      total: 2,
+      nextCursor: null,
+    });
+    const { result } = renderHook(() => useContinueWatchingItems());
+    await waitFor(() => expect(result.current.items).toHaveLength(2));
+
+    await act(() => result.current.removeItems(['a+1']));
+    expect(deletePlayRecords).toHaveBeenCalledWith(['a+1']);
+    expect(clearAllPlayRecords).not.toHaveBeenCalled();
+    expect(result.current.items.map((item) => item.key)).toEqual(['b+2']);
+    expect(result.current.counts.all).toBe(1);
+
+    await act(() => result.current.removeItems(['b+2']));
+    expect(clearAllPlayRecords).toHaveBeenCalledTimes(1);
+    expect(result.current.items).toHaveLength(0);
   });
 });

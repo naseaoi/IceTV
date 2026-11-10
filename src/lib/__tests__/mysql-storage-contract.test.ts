@@ -1,4 +1,8 @@
 /** @jest-environment node */
+import {
+  assertBatchDeletePlayRecords,
+  assertUpdatedPlayRecordPage,
+} from '@/lib/__tests__/__fixtures__/play-record-page-contract';
 import { assertPlaybackPeriodRange } from '@/lib/__tests__/__fixtures__/playback-period-contract';
 import type { AnnouncementRow } from '@/lib/announcement-storage';
 import { hasPlayRecordUpdate } from '@/lib/play-records';
@@ -894,6 +898,17 @@ function createFakePool() {
       return [[], []];
     }
 
+    if (
+      normalized.startsWith(
+        'DELETE FROM play_records WHERE username = ? AND record_key IN (',
+      )
+    ) {
+      const [username, ...keys] = params as string[];
+      for (const key of keys)
+        currentState.playRecords.get(username)?.delete(key);
+      return [[], []];
+    }
+
     if (normalized === 'DELETE FROM play_records WHERE username = ?') {
       const [username] = params as [string];
       currentState.playRecords.delete(username);
@@ -1688,12 +1703,32 @@ function createFakePool() {
       normalized.includes(TRACKING_SQL_MARKER)
     ) {
       const hasCursor = params.length === 5;
-      const rows = selectUnreadTrackingRows(
+      const saveTimeOrder = normalized.includes(
+        "ORDER BY CAST(JSON_UNQUOTE(JSON_EXTRACT(record_json, '$.save_time')) AS UNSIGNED)",
+      );
+      let rows = selectUnreadTrackingRows(
         currentState,
         params[0] as string,
-        hasCursor ? (params[1] as number) : undefined,
-        hasCursor ? (params[3] as string) : undefined,
+        hasCursor && !saveTimeOrder ? (params[1] as number) : undefined,
+        hasCursor && !saveTimeOrder ? (params[3] as string) : undefined,
       );
+      if (saveTimeOrder) {
+        rows = rows
+          .filter((row) => {
+            const time = JSON.parse(row.record_json).save_time;
+            return (
+              !hasCursor ||
+              time < Number(params[1]) ||
+              (time === params[1] && row.record_key < String(params[3]))
+            );
+          })
+          .sort(
+            (left, right) =>
+              JSON.parse(right.record_json).save_time -
+                JSON.parse(left.record_json).save_time ||
+              right.record_key.localeCompare(left.record_key),
+          );
+      }
       const limit = params.at(-1) as number;
       return [rows.slice(0, limit), []];
     }
@@ -2663,6 +2698,18 @@ describe('mysql storage contract', () => {
     ).resolves.toBeNull();
     await expect(storage.getUserLastLogin('demo-user')).resolves.toBeNull();
     await expect(storage.getAllUserLastLogins()).resolves.toEqual({});
+  });
+
+  it('筛选分页与追更计数及客户端判定保持一致', async () => {
+    await assertUpdatedPlayRecordPage(
+      new MySqlStorage('mysql://demo:demo@localhost:3306/icetv'),
+    );
+  });
+
+  it('批量删除隔离用户并同步影响追更计数', async () => {
+    await assertBatchDeletePlayRecords(
+      new MySqlStorage('mysql://demo:demo@localhost:3306/icetv'),
+    );
   });
 
   it('paginates play records by save time', async () => {

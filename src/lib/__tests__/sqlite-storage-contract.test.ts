@@ -1,5 +1,9 @@
 /** @jest-environment node */
 
+import {
+  assertBatchDeletePlayRecords,
+  assertUpdatedPlayRecordPage,
+} from '@/lib/__tests__/__fixtures__/play-record-page-contract';
 import { assertPlaybackPeriodRange } from '@/lib/__tests__/__fixtures__/playback-period-contract';
 import { DEFAULT_RUNTIME_PARAMS } from '@/lib/runtime-params';
 import type { AdminConfig } from '@/types/admin';
@@ -509,6 +513,14 @@ describe('sqlite storage contract', () => {
     await expect(
       storage.getPlaybackSessions('demo-user', { limit: 1, keyword: 'hidden' }),
     ).resolves.toEqual([matchedSession]);
+  });
+
+  it('筛选分页与追更计数及客户端判定保持一致', async () => {
+    await assertUpdatedPlayRecordPage(new LocalSqliteStorage(':memory:'));
+  });
+
+  it('批量删除隔离用户并同步影响追更计数', async () => {
+    await assertBatchDeletePlayRecords(new LocalSqliteStorage(':memory:'));
   });
 
   it('paginates play records by save time', async () => {

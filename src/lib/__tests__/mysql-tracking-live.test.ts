@@ -1,5 +1,9 @@
 /** @jest-environment node */
 
+import {
+  assertBatchDeletePlayRecords,
+  assertUpdatedPlayRecordPage,
+} from '@/lib/__tests__/__fixtures__/play-record-page-contract';
 import { assertPlaybackPeriodRange } from '@/lib/__tests__/__fixtures__/playback-period-contract';
 import { assertReviewReplies } from '@/lib/__tests__/__fixtures__/review-reply-contract';
 import { assertSocialNotifications } from '@/lib/__tests__/__fixtures__/social-notification-contract';
@@ -59,6 +63,14 @@ describeLive('MySQL 追更查询（真实实例）', () => {
 
   describe('announcements', () => {
     announcementContract(() => storage);
+  });
+
+  it('筛选分页与追更计数及客户端判定保持一致', async () => {
+    await assertUpdatedPlayRecordPage(storage);
+  });
+
+  it('批量删除隔离用户并同步影响追更计数', async () => {
+    await assertBatchDeletePlayRecords(storage);
   });
 
   it('新粉丝与点赞通知双后端契约', async () => {

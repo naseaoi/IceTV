@@ -27,6 +27,42 @@ export async function getContinueWatchingSkeletonCount({
   return getListSkeletonCount(cookieName, limit);
 }
 
+export interface ContinueWatchingPageData {
+  skeletonCount: number;
+  counts: { all: number | null; updated: number | null };
+}
+
+// 继续观看页首屏：骨架条数取计数 cookie，筛选胶囊的两个计数查库
+export async function getContinueWatchingPageData(
+  skeletonLimit: number,
+): Promise<ContinueWatchingPageData> {
+  const empty = { skeletonCount: 0, counts: { all: null, updated: null } };
+  const cookieStore = await cookies();
+  const authCookie = cookieStore.get('auth')?.value;
+  if (!authCookie) return empty;
+
+  const session = await getServerAuthSession(authCookie);
+  if (session.status !== 'authenticated') return empty;
+
+  const skeletonCount = await getListSkeletonCount(
+    'cw_page_count',
+    skeletonLimit,
+  );
+  try {
+    const [page, trackingPage] = await Promise.all([
+      db.getPlayRecordPage(session.username, 1),
+      db.getUnreadTrackingPlayRecordPage(session.username, 1),
+    ]);
+    return {
+      skeletonCount,
+      counts: { all: page.total, updated: trackingPage.total },
+    };
+  } catch (error) {
+    console.error('获取继续观看计数失败:', error);
+    return { skeletonCount, counts: { all: null, updated: null } };
+  }
+}
+
 export interface ContinueWatchingInitialData {
   records: Record<string, PlayRecord> | null;
   updateCount: number;
