@@ -35,11 +35,9 @@ import {
   useHasUpdate,
   useLogout,
 } from './user-menu/account';
-import {
-  ChangePasswordPanel,
-  SettingsPanel,
-  VersionPanel,
-} from './user-menu/lazy-panels';
+// 改密由资料弹窗直接切入，按需加载会在资料弹窗卸载后留下一段无遮罩的空档
+import { ChangePasswordPanel } from './user-menu/ChangePasswordPanel';
+import { SettingsPanel, VersionPanel } from './user-menu/lazy-panels';
 import { ProfilePanel } from './user-menu/ProfilePanel';
 import { UserAvatar } from './user-menu/UserAvatar';
 

@@ -37,6 +37,58 @@ interface TimelineEntry {
 
 const VISIBLE_COUNT = 5;
 
+type ChangeKind = 'added' | 'changed' | 'fixed' | 'admin';
+
+const CHANGE_KINDS: Record<
+  ChangeKind,
+  { label: string; Icon: typeof Plus; labelClass: string; dotClass: string }
+> = {
+  added: {
+    label: '新增',
+    Icon: Plus,
+    labelClass:
+      'bg-emerald-500/10 text-emerald-700 dark:bg-emerald-400/10 dark:text-emerald-300',
+    dotClass: 'bg-emerald-500 dark:bg-emerald-400',
+  },
+  changed: {
+    label: '改进',
+    Icon: RefreshCw,
+    labelClass:
+      'bg-sky-500/10 text-sky-700 dark:bg-sky-400/10 dark:text-sky-300',
+    dotClass: 'bg-sky-500 dark:bg-sky-400',
+  },
+  fixed: {
+    label: '修复',
+    Icon: Bug,
+    labelClass:
+      'bg-amber-500/10 text-amber-700 dark:bg-amber-400/10 dark:text-amber-300',
+    dotClass: 'bg-amber-500 dark:bg-amber-400',
+  },
+  admin: {
+    label: '后台',
+    Icon: ShieldCheck,
+    labelClass:
+      'bg-violet-500/10 text-violet-700 dark:bg-violet-400/10 dark:text-violet-300',
+    dotClass: 'bg-violet-500 dark:bg-violet-400',
+  },
+};
+
+// 「主题：细节」写法的条目把主题加粗便于扫读；过长的前缀多半是正文里的冒号，不拆
+const LEAD_PHRASE_RE = /^([^：:，。,]{2,12})[：:]\s*(.+)$/s;
+
+function ChangeText({ text }: { text: string }) {
+  const match = LEAD_PHRASE_RE.exec(text);
+  if (!match) return <>{text}</>;
+  return (
+    <>
+      <span className='font-medium text-gray-900 dark:text-gray-100'>
+        {match[1]}：
+      </span>
+      {match[2]}
+    </>
+  );
+}
+
 function hasPublicChanges(entry: ChangelogEntry) {
   return (
     entry.added.length > 0 || entry.changed.length > 0 || entry.fixed.length > 0
@@ -155,25 +207,30 @@ export const VersionPanel: React.FC<VersionPanelProps> = ({
     : timeline.slice(0, VISIBLE_COUNT);
   const hasMore = timeline.length > VISIBLE_COUNT;
 
-  const renderChanges = (
-    items: string[],
-    icon: React.ReactNode,
-    label: string,
-  ) => {
+  const renderChanges = (items: string[], kind: ChangeKind) => {
     if (!items || items.length === 0) return null;
+    const { label, Icon, labelClass, dotClass } = CHANGE_KINDS[kind];
     return (
       <div>
-        <div className='mb-1 flex items-center gap-1.5 text-xs text-gray-400 dark:text-gray-500'>
-          {icon}
+        <div
+          className={`mb-2 inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-medium ${labelClass}`}
+        >
+          <Icon className='h-3 w-3' />
           {label}
         </div>
-        <ul className='space-y-1'>
+        <ul className='space-y-2'>
           {items.map((item, i) => (
             <li
               key={i}
-              className='text-sm leading-6 text-gray-700 dark:text-gray-300'
+              className='flex gap-2.5 text-sm leading-6 text-gray-600 dark:text-gray-300'
             >
-              {item}
+              <span
+                aria-hidden='true'
+                className={`mt-[9px] h-1.5 w-1.5 shrink-0 rounded-full ${dotClass}`}
+              />
+              <span className='min-w-0'>
+                <ChangeText text={item} />
+              </span>
             </li>
           ))}
         </ul>
@@ -296,28 +353,11 @@ export const VersionPanel: React.FC<VersionPanelProps> = ({
                     </span>
                   </div>
 
-                  <div className='space-y-2.5'>
-                    {renderChanges(
-                      entry.added,
-                      <Plus className='h-3 w-3' />,
-                      '新增',
-                    )}
-                    {renderChanges(
-                      entry.changed,
-                      <RefreshCw className='h-3 w-3' />,
-                      '改进',
-                    )}
-                    {renderChanges(
-                      entry.fixed,
-                      <Bug className='h-3 w-3' />,
-                      '修复',
-                    )}
-                    {showAdminChanges &&
-                      renderChanges(
-                        entry.admin,
-                        <ShieldCheck className='h-3 w-3' />,
-                        '后台',
-                      )}
+                  <div className='space-y-4'>
+                    {renderChanges(entry.added, 'added')}
+                    {renderChanges(entry.changed, 'changed')}
+                    {renderChanges(entry.fixed, 'fixed')}
+                    {showAdminChanges && renderChanges(entry.admin, 'admin')}
                   </div>
                 </li>
               );

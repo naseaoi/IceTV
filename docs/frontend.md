@@ -8,6 +8,7 @@
 - 弹窗、下拉、菜单等浮层用实底（`bg-white` / `dark:bg-gray-900` + 细 ring），遮罩只压暗不模糊。吸顶导航与筛选栏同样用实底，底色与页面背景一致（`bg-gray-50` / `dark:bg-gray-950`），靠底部分隔线与内容区分；全站不用毛玻璃。叠在海报上的徽标与按钮用不低于 `bg-black/70` 的深色实底保证可读。弹窗标题、关闭与按钮复用 `src/components/modals/modal-styles.ts`。
 - 吸附在桌面顶栏下方的子栏（分区筛选栏、搜索结果栏）根元素加 `data-nav-subbar`，顶栏据此去掉自己的底线，两者连成一块吸顶区，只在子栏底部留一条分隔线。只在部分断点吸附的子栏，只给在顶栏可见断点上吸附的那个元素加。
 - 图标用 `lucide-react` 或 SVG，不用 emoji。
+- 版本面板的四类改动（新增、改进、修复、后台）各用一种固定语义色（`VersionPanel.tsx` 的 `CHANGE_KINDS`），是全站中性配色的特例，其他界面不借用。
 - 提醒小圆点（版本更新等）用纯色实心点，不加描边。版本更新提醒只对站长显示，入口统一走 `useHasUpdate()`。
 - 悬浮在内容之上的圆形图标按钮（横排滚动箭头、回顶、列表定位）复用 `FLOATING_CONTROL_CLASS`（`src/components/floating-control.ts`），中性实底不用主色，尺寸与定位由调用方追加。
 - 海报卡片的徽标、悬停与按压样式取自 `poster-card-layout.ts`（`POSTER_BADGE_*`、`POSTER_CARD_INTERACTION_CLASS`、`POSTER_HOVER_SHADE_CLASS`），悬停收藏按钮用 `PosterFavoriteButton`。海报四角只放状态：左上来源、右上集数或评分、左下更新或我的评分（同一位置只显示一个）、右下悬停收藏；年份、来源数等次要信息放标题下的副标题行，播放、外链、删除等操作走卡片菜单。
@@ -38,9 +39,9 @@
 
 - 缓动统一用 `globals.css` 的 `--motion-spring`（明显回弹）、`--motion-spring-soft`（轻微回弹）、`--motion-ease-out` 与 `--motion-ease-in`，不在组件里另写贝塞尔曲线。弹簧曲线由 `linear()` 采样，不支持时退回近似的 `cubic-bezier`。
 - 浮层进出场：下拉与菜单加 `motion-popover`，弹窗面板加 `motion-dialog`，遮罩加 `motion-backdrop`，统一用 `data-open` 切换。挂载与卸载交给 `usePresence`，**卸载延时要比 CSS 离场过渡长约 40ms**，否则开发模式或主线程繁忙时离场动画会被截断。下拉与菜单用 `--popover-origin` 指定展开原点、`--popover-shift` 指定位移方向。
-- 居中弹窗一律用 `ModalShell`，它负责进出场、遮罩、滚动锁定与 Esc（叠放时只关最上层），不再手写遮罩与 `fixed` 面板。父组件条件渲染会让弹窗瞬间卸载、退场动画丢失：常驻的弹窗由父组件传 `isOpen` 控制，关闭时会被清空的目标数据用 `useRetainedValue` 保留最后一份，撑住退场期间的内容；按需加载、打开时才挂载的面板在内部用同文件的 `useDeferredClose(onClose)` 拿到 `open` 与 `requestClose`，所有关闭入口都走 `requestClose`，退场结束后才通知父组件卸载。弹窗内容放在 `ModalShell` 的子组件里，每次打开重新挂载，初始状态在首帧直接从本地存储读出，不在副作用里补读，避免内容跳动。消息面板等不经 `ModalShell` 的自绘浮层自行监听 Esc 时，先用 `hasOpenModalShell()` 判断，有弹窗叠在上面就不处理，否则会和上层弹窗一起被关闭。
+- 居中弹窗一律用 `ModalShell`，它负责进出场、遮罩、滚动锁定与 Esc（叠放时只关最上层），不再手写遮罩与 `fixed` 面板。从一个弹窗直接切到另一个（同一次提交里卸载旧弹窗、挂载新弹窗，如资料切到修改密码）时，新弹窗沿用遮罩只播面板入场；被切入的弹窗须静态导入，按需加载会在代码块到达前留下无遮罩的空档。父组件条件渲染会让弹窗瞬间卸载、退场动画丢失：常驻的弹窗由父组件传 `isOpen` 控制，关闭时会被清空的目标数据用 `useRetainedValue` 保留最后一份，撑住退场期间的内容；按需加载、打开时才挂载的面板在内部用同文件的 `useDeferredClose(onClose)` 拿到 `open` 与 `requestClose`，所有关闭入口都走 `requestClose`，退场结束后才通知父组件卸载。弹窗内容放在 `ModalShell` 的子组件里，每次打开重新挂载，初始状态在首帧直接从本地存储读出，不在副作用里补读，避免内容跳动。消息面板等不经 `ModalShell` 的自绘浮层自行监听 Esc 时，先用 `hasOpenModalShell()` 判断，有弹窗叠在上面就不处理，否则会和上层弹窗一起被关闭。
 - 同一区域整组内容切换（如“常看”切换周/月/年）时，内容容器以当前范围为 `key` 重新挂载，条目加 `motion-swap-in` 并给出 `--stagger-index`，容器的 `--swap-shift` 用正负表示切换方向；首次展示不加。
-- 导航与标签栏的选中条用 `useSlidingIndicator`：目标项加 `data-indicator-target`，容器设为定位元素。指示条由 Web Animations 驱动 `transform`，在合成层运行，换页时主线程繁忙也不掉帧，不要改回 `left`/`width` 过渡。随页面重新挂载的导航（顶栏、移动端频道条）传 `memoryKey`，新页面才能从上一页的位置滑过来；链接式导航配合同文件的 `usePendingTarget`，点击后立即切换选中态，不等路由完成。
+- 导航与标签栏的选中条用 `useSlidingIndicator`：目标项加 `data-indicator-target`，容器设为定位元素。指示条由 Web Animations 驱动 `transform`，在合成层运行，换页时主线程繁忙也不掉帧，不要改回 `left`/`width` 过渡。随页面重新挂载的导航（顶栏、移动端频道条）传 `memoryKey`，新页面才能从上一页的位置滑过来；路由完成时旧导航的滑动若未播完，新导航按已播时长接着播，不在目标处直接定格；链接式导航配合同文件的 `usePendingTarget`，点击后立即切换选中态，不等路由完成。
 - 收藏爱心的回弹与粒子只在用户点击后、收藏状态真正翻转时播放，异步加载或其他页面同步的状态变化不播放。评分星的弹起同理，由 `RatingInput` 在用户改分时传 `pop` 给 `RatingStars`，外部传入的新分值不播放。
 - 计数（点赞、粉丝、未读）用 `AnimatedCount`，数值变化时按增减方向滚动；首次渲染不播放，跨实体复用同一组件时（如切换个人主页）用 `key` 重置。
 - 列表增删与重排用 `useListLayoutMotion(keys)`：容器设为定位元素并挂返回的 ref，列表项根元素加 `data-list-motion-key`，值与 React key 一致。被删项由 React 移出后，原节点放回容器原位置作为残影淡出，其余项按布局偏移（`offsetLeft`/`offsetTop`，不受进行中的变换影响）做 FLIP 滑动。增或删超过 8 项、只在末尾追加（加载更多）、首批数据到达时直接切换。子项是无法加属性的组件时传 `matchChildOrder`，按直接子元素顺序对应 keys，`ScrollableRow` 已内置。虚拟网格按序号绝对定位，不接这个 hook。分组列表（如消息面板）整表共用一个容器，分组标题与空状态也带 key；每组各用一个容器时，组被删空会随容器卸载丢掉离场动画，下一组也不会滑动补位。

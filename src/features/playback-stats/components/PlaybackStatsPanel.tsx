@@ -23,6 +23,12 @@ import {
   HOUR_STRIP_AXIS_CLASS,
   HOUR_STRIP_CELLS_CLASS,
   HOUR_STRIP_CLASS,
+  METRIC_CLASS,
+  METRIC_LABEL_CLASS,
+  METRIC_NUMBER_CLASS,
+  METRIC_ROW_CLASS,
+  METRIC_UNIT_CLASS,
+  METRIC_VALUE_CLASS,
   PlaybackStatsSkeleton,
   STATS_CARD_CLASS,
   STATS_COLUMN_CLASS,
@@ -98,22 +104,47 @@ function formatDayLabel(key: string): string {
   return `${Number(month)}月${Number(day)}日`;
 }
 
-function Metric({ label, seconds }: { label: string; seconds: number }) {
+const METRIC_TONE = {
+  primary: {
+    label:
+      'bg-brand-500/10 text-brand-600 dark:bg-brand-400/15 dark:text-brand-300',
+    number: 'text-gray-900 dark:text-gray-50',
+  },
+  secondary: {
+    label: 'bg-gray-100 text-gray-500 dark:bg-white/[0.06] dark:text-gray-400',
+    number: 'text-gray-700 dark:text-gray-300',
+  },
+} as const;
+
+function Metric({
+  label,
+  seconds,
+  variant,
+}: {
+  label: string;
+  seconds: number;
+  variant: keyof typeof METRIC_TONE;
+}) {
+  const tone = METRIC_TONE[variant];
   return (
-    <div className='min-w-0'>
-      <p className='text-[13px] text-gray-500 dark:text-gray-400'>{label}</p>
-      <p className='mt-1 flex items-baseline gap-0.5 whitespace-nowrap text-gray-900 dark:text-gray-50'>
+    <div className={METRIC_CLASS}>
+      <span className={`${METRIC_LABEL_CLASS} ${tone.label}`}>{label}</span>
+      <span className={METRIC_VALUE_CLASS}>
         {durationParts(seconds).map(([value, unit]) => (
           <span key={unit} className='flex items-baseline gap-0.5'>
-            <span className='text-[28px] font-semibold tabular-nums leading-none tracking-tight'>
+            <span
+              className={`${METRIC_NUMBER_CLASS[variant]} tabular-nums ${tone.number}`}
+            >
               {value}
             </span>
-            <span className='mr-1 text-[13px] text-gray-500 dark:text-gray-400'>
+            <span
+              className={`${METRIC_UNIT_CLASS} text-gray-500 dark:text-gray-400`}
+            >
               {unit}
             </span>
           </span>
         ))}
-      </p>
+      </span>
     </div>
   );
 }
@@ -494,12 +525,17 @@ export function PlaybackStatsPanel() {
           </div>
         </StatsHeading>
         <div className={STATS_CARD_CLASS}>
-          <div className='flex flex-wrap gap-x-8 gap-y-3'>
+          <div className={METRIC_ROW_CLASS}>
             <Metric
+              variant='primary'
               label={selected ? formatDayLabel(selected.key) : '本周'}
               seconds={selected ? selected.watchSeconds : stats.watchSeconds}
             />
-            <Metric label='累计' seconds={stats.lifetimeWatchSeconds} />
+            <Metric
+              variant='secondary'
+              label='累计'
+              seconds={stats.lifetimeWatchSeconds}
+            />
           </div>
           <WeekChart
             buckets={stats.buckets}

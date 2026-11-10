@@ -6,6 +6,7 @@ import { usePathname } from 'next/navigation';
 
 import { useIntentPrefetch } from '@/hooks/useIntentPrefetch';
 import { scrollPageToTop } from '@/hooks/usePageScroll';
+import { usePendingTarget } from '@/hooks/useSlidingIndicator';
 
 import { useHasUpdate } from './user-menu/account';
 
@@ -46,6 +47,8 @@ const MobileBottomNav = () => {
   const pathname = usePathname() ?? '/';
   const prefetchRoute = useIntentPrefetch();
   const hasUpdate = useHasUpdate();
+  const activeHref = NAV_ITEMS.find((item) => item.match(pathname))?.href;
+  const { targetHref, markPending } = usePendingTarget(activeHref);
 
   return (
     <nav
@@ -55,7 +58,7 @@ const MobileBottomNav = () => {
     >
       <ul className='flex h-14 items-stretch'>
         {NAV_ITEMS.map((item) => {
-          const active = item.match(pathname);
+          const active = item.href === targetHref;
           const showDot = item.href === '/me' && hasUpdate;
           return (
             <li key={item.href} className='min-w-0 flex-1'>
@@ -67,12 +70,15 @@ const MobileBottomNav = () => {
                   if (pathname === item.href) {
                     event.preventDefault();
                     scrollPageToTop();
+                    return;
                   }
+                  markPending(event, item.href);
                 }}
                 onFocus={() => prefetchRoute(item.href)}
                 onTouchStart={() => prefetchRoute(item.href)}
-                aria-current={active ? 'page' : undefined}
+                aria-current={item.href === activeHref ? 'page' : undefined}
                 aria-label={item.label}
+                data-active={active}
                 className={`flex h-full w-full select-none flex-col items-center justify-center gap-0.5 transition-[color,transform] duration-150 active:scale-90 ${
                   active
                     ? 'text-brand-600 dark:text-brand-400'
